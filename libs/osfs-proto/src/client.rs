@@ -278,12 +278,15 @@ impl Client {
         }
     }
 
-    /// Vsechny snapshoty (vsechny stranky).
-    pub fn snapshots(&mut self) -> io::Result<Vec<SnapshotInfo>> {
+    /// Vsechny snapshoty datasetu, ve kterem lezi `path` (vsechny stranky).
+    pub fn snapshots(&mut self, path: &PathArg) -> io::Result<Vec<SnapshotInfo>> {
         let mut out = Vec::new();
         let mut after = 0;
         loop {
-            match self.call(&Request::Snapshots { after })? {
+            match self.call(&Request::Snapshots {
+                path: path.clone(),
+                after,
+            })? {
                 Response::Snapshots { list, next } => {
                     out.extend(list);
                     if next == 0 || next <= after {
@@ -296,9 +299,12 @@ impl Client {
         }
     }
 
-    /// Vytvori snapshot; vrati jeho id.
-    pub fn snapshot_create(&mut self, name: &str) -> io::Result<u64> {
-        match self.call(&Request::SnapshotCreate { name: name.into() })? {
+    /// Vytvori snapshot datasetu, ve kterem lezi `path`; vrati jeho id.
+    pub fn snapshot_create(&mut self, path: &PathArg, name: &str) -> io::Result<u64> {
+        match self.call(&Request::SnapshotCreate {
+            path: path.clone(),
+            name: name.into(),
+        })? {
             Response::Created(id) => Ok(id),
             _ => Err(Self::unexpected()),
         }

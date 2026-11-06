@@ -69,6 +69,7 @@ mod imp {
                 Kind::Dir => ("dir ", e.tree_bytes),
                 Kind::File => ("file", e.size),
                 Kind::Symlink => ("link", e.size),
+                Kind::Dataset => ("dset", e.tree_bytes),
             };
             let mut line = format!("{kind} {size:>12}  {}", e.name);
             if !e.link_target.is_empty() {
@@ -98,18 +99,19 @@ mod imp {
         out.flush().map_err(|e| e.to_string())
     }
 
-    pub fn snapshots(drive: &str) -> Result<(), String> {
+    pub fn snapshots(drive: &str, dataset: &str) -> Result<(), String> {
         let mut c = connect(drive)?;
-        for s in c.snapshots().map_err(|e| e.to_string())? {
+        let p = PathArg::Fs(dataset.into());
+        for s in c.snapshots(&p).map_err(|e| e.to_string())? {
             println!("{:>4}  {}  (generace {})", s.id, s.name, s.generation);
         }
         Ok(())
     }
 
-    pub fn snapshot(drive: &str, name: &str) -> Result<(), String> {
+    pub fn snapshot(drive: &str, dataset: &str, name: &str) -> Result<(), String> {
         let mut c = connect(drive)?;
         let id = c
-            .snapshot_create(name)
+            .snapshot_create(&PathArg::Fs(dataset.into()), name)
             .map_err(|e| format!("snapshot {name}: {e}"))?;
         println!("snapshot '{name}' vytvoren (id {id})");
         Ok(())
@@ -133,10 +135,10 @@ mod imp {
     pub fn cat(_: &str, _: &str, _: &str) -> Result<(), String> {
         no()
     }
-    pub fn snapshots(_: &str) -> Result<(), String> {
+    pub fn snapshots(_: &str, _: &str) -> Result<(), String> {
         no()
     }
-    pub fn snapshot(_: &str, _: &str) -> Result<(), String> {
+    pub fn snapshot(_: &str, _: &str, _: &str) -> Result<(), String> {
         no()
     }
 }

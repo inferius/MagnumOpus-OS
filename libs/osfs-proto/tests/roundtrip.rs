@@ -19,6 +19,7 @@ fn entry(name: &str) -> EntryInfo {
         tree_bytes: 0,
         tree_files: 0,
         tree_dirs: 0,
+        dataset: 1,
         link_target: String::new(),
     }
 }
@@ -47,8 +48,12 @@ fn requests_roundtrip() {
             from: PathArg::Fs("/CON.txt".into()),
             to: PathArg::Windows("\\con_.txt".into()),
         },
-        Request::Snapshots { after: 7 },
+        Request::Snapshots {
+            path: PathArg::Fs("/projekt".into()),
+            after: 7,
+        },
         Request::SnapshotCreate {
+            path: PathArg::Fs("/".into()),
             name: "pred upravou".into(),
         },
         Request::Commit,

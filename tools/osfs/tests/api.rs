@@ -243,6 +243,7 @@ fn snapshots_and_reading_old_versions() {
     s.fs.write("/a.txt", 0, b"stara").unwrap();
     let Response::Created(id) = s
         .call(&Request::SnapshotCreate {
+            path: fs_path("/"),
             name: "vcera".into(),
         })
         .unwrap()
@@ -250,7 +251,12 @@ fn snapshots_and_reading_old_versions() {
         panic!()
     };
     s.fs.write("/a.txt", 0, b"NOVA!").unwrap();
-    let Response::Snapshots { list: v, .. } = s.call(&Request::Snapshots { after: 0 }).unwrap()
+    let Response::Snapshots { list: v, .. } = s
+        .call(&Request::Snapshots {
+            path: fs_path("/"),
+            after: 0,
+        })
+        .unwrap()
     else {
         panic!()
     };
@@ -382,7 +388,12 @@ fn snapshot_list_pages() {
     let mut after = 0;
     let mut pages = 0;
     loop {
-        let Response::Snapshots { list, next } = s.call(&Request::Snapshots { after }).unwrap()
+        let Response::Snapshots { list, next } = s
+            .call(&Request::Snapshots {
+                path: fs_path("/"),
+                after,
+            })
+            .unwrap()
         else {
             panic!()
         };

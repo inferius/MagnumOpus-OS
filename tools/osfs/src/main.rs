@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use fs::{Algo, Kind};
 use osfs::image::{self, DEFAULT_SIZE};
 
+mod cmd_versions;
 mod remote;
 
 const HELP: &str = "\
@@ -26,12 +27,28 @@ osfs - souborovy system MagnumOpus na hostiteli (zatim jen soubory s obrazem)
                                    bezi, dokud se neodpoji (Ctrl+C)
   osfs unmount <X:>                odpoji jednotku z jineho okna
 
+Datasety a verze (slozka s vlastni historii; obraz nesmi byt pripojeny):
+  osfs dataset create <obraz> <cesta>       novy dataset (slozka)
+  osfs dataset list <obraz>                 seznam datasetu
+  osfs dataset delete <obraz> <cesta>       smaze dataset i se snapshoty
+  osfs snapshot <obraz> <dataset> <jmeno>   snapshot datasetu
+  osfs snapshots <obraz> [dataset]          seznam snapshotu
+  osfs clone <obraz> <dataset> <snapshot> <cesta>
+                                            zapisovatelny klon snapshotu
+  osfs diff <obraz> <dataset> <od> [do]     zmeny mezi snapshoty (bez [do]
+                                            proti zive verzi)
+  osfs diff <obraz> --clone <cesta>         co zmenil klon
+  osfs restore <obraz> <dataset> <snapshot> <cesta> <cil>
+                                            obnova jako kopie vedle originalu
+  Cesty <cesta> u snapshotu a obnovy jsou uvnitr datasetu (/cfg.toml),
+  dataset a <cil> jsou cesty ve svazku (/projekt).
+
 Nad pripojenou jednotkou (rozsirene API, cesty v nasem FS, i skryta jmena):
   osfs info <X:>                   server a svazek
   osfs ls <X:> [cesta] [--at S]    vypis (--at = ze snapshotu S)
   osfs cat <X:> <cesta> [--at S]   obsah souboru
-  osfs snapshots <X:>              seznam snapshotu
-  osfs snapshot <X:> <jmeno>       vytvori snapshot
+  osfs snapshots <X:> [dataset]    seznam snapshotu datasetu (vychozi /)
+  osfs snapshot <X:> <dataset> <jmeno>  vytvori snapshot
 
 Cesty v obrazu pisou se s '/', napr. /dokumenty/a.txt.
 Skutecne disky osfs zatim odmita: formatovani disku je nevratne.
@@ -122,8 +139,12 @@ fn run(raw: &[String]) -> Result<(), String> {
         "put" => cmd_put(rest),
         "mount" => cmd_mount(rest),
         "info" => cmd_info(rest),
-        "snapshots" => cmd_snapshots(rest),
-        "snapshot" => cmd_snapshot(rest),
+        "snapshots" => cmd_versions::cmd_snapshots(rest),
+        "snapshot" => cmd_versions::cmd_snapshot(rest),
+        "dataset" => cmd_versions::cmd_dataset(rest),
+        "clone" => cmd_versions::cmd_clone(rest),
+        "diff" => cmd_versions::cmd_diff(rest),
+        "restore" => cmd_versions::cmd_restore(rest),
         "unmount" => cmd_unmount(rest),
         other => Err(format!("neznamy prikaz {other} (osfs help)")),
     }
@@ -333,20 +354,6 @@ fn cmd_info(raw: &[String]) -> Result<(), String> {
     a.only(&[])?;
     a.need(1, 1, "osfs info <X:>")?;
     remote::info(&a.pos[0])
-}
-
-fn cmd_snapshots(raw: &[String]) -> Result<(), String> {
-    let a = Args::parse(raw, &[])?;
-    a.only(&[])?;
-    a.need(1, 1, "osfs snapshots <X:>")?;
-    remote::snapshots(&a.pos[0])
-}
-
-fn cmd_snapshot(raw: &[String]) -> Result<(), String> {
-    let a = Args::parse(raw, &[])?;
-    a.only(&[])?;
-    a.need(2, 2, "osfs snapshot <X:> <jmeno>")?;
-    remote::snapshot(&a.pos[0], &a.pos[1])
 }
 
 #[cfg(windows)]

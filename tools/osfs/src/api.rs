@@ -14,6 +14,7 @@ use osfs_proto::{
 
 use crate::image::join;
 use crate::names::{self, Hidden as WinHidden};
+use crate::versions::{self, DatasetPath};
 
 /// Okoli serveru (ovladac).
 pub trait Host {
@@ -94,17 +95,20 @@ fn proto_kind(k: Kind) -> osfs_proto::Kind {
         Kind::File => osfs_proto::Kind::File,
         Kind::Dir => osfs_proto::Kind::Dir,
         Kind::Symlink => osfs_proto::Kind::Symlink,
+        Kind::Dataset => osfs_proto::Kind::Dataset,
     }
 }
 
-fn entry(name: &str, s: &Stat, link_target: String) -> EntryInfo {
-    let (windows_name, hidden) = hidden_of(name, s.kind);
+/// Polozka odpovedi. `kind` = druh polozky v adresari (u datasetu
+/// `Dataset`; `stat` datasetu vraci jeho korenovy adresar).
+fn entry(name: &str, s: &Stat, kind: Kind, link_target: String) -> EntryInfo {
+    let (windows_name, hidden) = hidden_of(name, kind);
     EntryInfo {
         name: name.into(),
         windows_name,
         hidden,
         truncated: false,
-        kind: proto_kind(s.kind),
+        kind: proto_kind(kind),
         oid: s.oid,
         generation: s.generation,
         size: s.size,
@@ -114,6 +118,7 @@ fn entry(name: &str, s: &Stat, link_target: String) -> EntryInfo {
         tree_bytes: s.tree_bytes,
         tree_files: s.tree_files,
         tree_dirs: s.tree_dirs,
+        dataset: s.dataset,
         link_target,
     }
 }
@@ -125,30 +130,65 @@ struct Ctx<'a, D: BlockDevice> {
 }
 
 impl<D: BlockDevice> Ctx<'_, D> {
+    /// Dataset, ve kterem lezi `path` (snapshot `at` patri jemu).
+    fn dataset(&mut self, path: &str) -> Result<DatasetPath, i32> {
+        versions::dataset_of(self.fs, path).map_err(code_of)
+    }
+
     fn stat_at(&mut self, at: &str, path: &str) -> Result<Stat, i32> {
         if at.is_empty() {
-            self.fs.stat(path)
-        } else {
-            self.fs.snapshot_stat(at, path)
+            return self.fs.stat(path).map_err(code_of);
         }
-        .map_err(code_of)
+        let d = self.dataset(path)?;
+        self.fs
+            .snapshot_stat_of(&d.root, at, &d.inner)
+            .map_err(code_of)
     }
 
     fn list_at(&mut self, at: &str, path: &str) -> Result<Vec<fs::DirEntry>, i32> {
         if at.is_empty() {
-            self.fs.list(path)
-        } else {
-            self.fs.snapshot_list(at, path)
+            return self.fs.list(path).map_err(code_of);
         }
-        .map_err(code_of)
+        let d = self.dataset(path)?;
+        self.fs
+            .snapshot_list_of(&d.root, at, &d.inner)
+            .map_err(code_of)
     }
 
-    /// Cil odkazu (jen zivy stav - pro snapshoty API `fs` cteni odkazu nema).
+    fn read_at(&mut self, at: &str, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, i32> {
+        if at.is_empty() {
+            return self.fs.read(path, offset, len).map_err(code_of);
+        }
+        let d = self.dataset(path)?;
+        self.fs
+            .snapshot_read_of(&d.root, at, &d.inner, offset, len)
+            .map_err(code_of)
+    }
+
+    /// Cil odkazu (zivy stav i snapshot).
     fn link_target(&mut self, at: &str, path: &str, kind: Kind) -> String {
-        if kind == Kind::Symlink && at.is_empty() {
-            self.fs.readlink(path).unwrap_or_default()
+        if kind != Kind::Symlink {
+            return String::new();
+        }
+        if at.is_empty() {
+            return self.fs.readlink(path).unwrap_or_default();
+        }
+        match self.dataset(path) {
+            Ok(d) => self
+                .fs
+                .snapshot_readlink_of(&d.root, at, &d.inner)
+                .unwrap_or_default(),
+            Err(_) => String::new(),
+        }
+    }
+
+    /// Druh objektu na `path` tak, jak ho ukazuje adresar: koren
+    /// vnoreneho datasetu = `Dataset` (jeho `stat` vraci adresar).
+    fn kind_of(&mut self, path: &str, stat_kind: Kind) -> Kind {
+        if stat_kind == Kind::Dir && versions::is_dataset_root(self.fs, path) {
+            Kind::Dataset
         } else {
-            String::new()
+            stat_kind
         }
     }
 
@@ -160,6 +200,13 @@ impl<D: BlockDevice> Ctx<'_, D> {
             return Ok(String::new());
         }
         let want = fold_name(name);
+        // Koren datasetu: rodic lezi v jinem datasetu, jehoz snapshoty
+        // jsou jine - jmeno z zive verze rodice.
+        let at = if !at.is_empty() && self.dataset(path)?.inner == "/" {
+            ""
+        } else {
+            at
+        };
         let list = self.list_at(at, parent_of(path))?;
         list.into_iter()
             .find(|e| fold_name(&e.name) == want)
@@ -177,7 +224,7 @@ impl<D: BlockDevice> Ctx<'_, D> {
         match req {
             Request::Hello => Ok(Response::Hello(HelloInfo {
                 version: osfs_proto::VERSION,
-                features: feature::SNAPSHOTS | feature::RENAME | feature::READ,
+                features: feature::SNAPSHOTS | feature::RENAME | feature::READ | feature::DATASETS,
                 server: format!("osfs {} (WinFsp)", env!("CARGO_PKG_VERSION")),
                 max_message: MAX_MESSAGE as u32,
             })),
@@ -201,7 +248,8 @@ impl<D: BlockDevice> Ctx<'_, D> {
                 let s = self.stat_at(at, &path)?;
                 let name = self.stored_name(at, &path)?;
                 let target = self.link_target(at, &path, s.kind);
-                let mut e = entry(&name, &s, target);
+                let kind = self.kind_of(&path, s.kind);
+                let mut e = entry(&name, &s, kind, target);
                 e.fit(MAX_MESSAGE - RESPONSE_HEADER);
                 Ok(Response::Entry(e))
             }
@@ -217,12 +265,7 @@ impl<D: BlockDevice> Ctx<'_, D> {
             } => {
                 let path = resolve(path)?;
                 let len = (*len).min(MAX_READ) as usize;
-                let data = if at.is_empty() {
-                    self.fs.read(&path, *offset, len)
-                } else {
-                    self.fs.snapshot_read(at, &path, *offset, len)
-                }
-                .map_err(code_of)?;
+                let data = self.read_at(at, &path, *offset, len)?;
                 Ok(Response::Data(data))
             }
             Request::Rename { from, to } => {
@@ -240,8 +283,9 @@ impl<D: BlockDevice> Ctx<'_, D> {
                 *cache = None;
                 Ok(Response::Done(self.fs.info().generation))
             }
-            Request::Snapshots { after } => {
-                let all = self.fs.snapshots().map_err(code_of)?;
+            Request::Snapshots { path, after } => {
+                let d = self.dataset(&resolve(path)?)?;
+                let all = self.fs.snapshots_of(&d.root).map_err(code_of)?;
                 // Pocet + `next` na konci.
                 let mut used = RESPONSE_HEADER + 4 + 8;
                 let mut list = Vec::new();
@@ -261,9 +305,10 @@ impl<D: BlockDevice> Ctx<'_, D> {
                 }
                 Ok(Response::Snapshots { list, next })
             }
-            Request::SnapshotCreate { name } => {
+            Request::SnapshotCreate { path, name } => {
+                let d = self.dataset(&resolve(path)?)?;
                 self.mutate()?;
-                let id = self.fs.snapshot(name).map_err(code_of)?;
+                let id = self.fs.snapshot_of(&d.root, name).map_err(code_of)?;
                 self.host.committed();
                 Ok(Response::Created(id))
             }
@@ -315,21 +360,24 @@ impl<D: BlockDevice> Ctx<'_, D> {
         let reserve = 2 + MAX_CURSOR;
         let mut next = String::new();
         let mut page_full = false;
-        let rest: Vec<(usize, String)> = entries[start..]
+        let rest: Vec<(usize, String, Kind)> = entries[start..]
             .iter()
             .enumerate()
-            .map(|(i, e)| (start + i, e.name.clone()))
+            .map(|(i, e)| (start + i, e.name.clone(), e.kind))
             .collect();
-        for (idx, name) in &rest {
+        for (idx, name, kind) in &rest {
             let full = join(path, name);
-            let s = match self.stat_at(at, &full) {
+            // Vnoreny dataset ma vlastni snapshoty: pohled snapshotu rodice
+            // do nej neprechazi, udaje se berou ze zive verze.
+            let at_here = if *kind == Kind::Dataset { "" } else { at };
+            let s = match self.stat_at(at_here, &full) {
                 Ok(s) => s,
                 // Smazano od porizeni snimku.
                 Err(error::NOT_FOUND) => continue,
                 Err(e) => return Err(e),
             };
-            let target = self.link_target(at, &full, s.kind);
-            let mut e = entry(name, &s, target);
+            let target = self.link_target(at, &full, *kind);
+            let mut e = entry(name, &s, *kind, target);
             if used + e.encoded_len() + reserve > MAX_MESSAGE {
                 if out.is_empty() {
                     // Jedina polozka se nevejde ani sama: zkratit.

@@ -11,6 +11,7 @@ what Win32 cannot do and what our FS knows:
 | **names hidden on Windows** (`CON.txt`, `a.`, names with U+F0xx, links) | show them, read them, rename them to a valid name |
 | **symbolic link targets** | show a link and where it points |
 | **snapshots** | list, create, browse and read old versions |
+| **datasets** (folders with their own history) | `Kind::Dataset`, the dataset number of every entry, snapshots per dataset |
 | **volume state** | generation, free space, read-only, log recovery |
 
 Source: protocol and client `libs/osfs-proto`, server `tools/osfs/src/api.rs`
@@ -57,19 +58,26 @@ Source: protocol and client `libs/osfs-proto`, server `tools/osfs/src/api.rs`
 | `Stat` | read | `at`, path | `EntryInfo` (stored name, including case) |
 | `List` | read | `at`, path, cursor | a page of `EntryInfo` + next page cursor |
 | `Read` | read | `at`, path, offset, length | data (at most `MAX_READ`) |
-| `Snapshots` | read | `after` (id) | a page of snapshots + `next` |
+| `Snapshots` | read | path, `after` (id) | a page of snapshots of the dataset the path lies in + `next` |
 | `Rename` | write | from, to | generation |
-| `SnapshotCreate` | write | name | snapshot id (saves = commit) |
+| `SnapshotCreate` | write | path, name | snapshot id of the dataset the path lies in (saves = commit) |
 | `Commit` | write | - | generation of the saved state |
 
-- **`at`** = snapshot name, empty = live state.
+- **`at`** = snapshot name, empty = live state. The snapshot belongs to
+  **the dataset the path lies in** (the server finds it); the path stays a
+  path in the volume: `at = "v1"`, path `/projekt/cfg.toml` = the file
+  `/cfg.toml` in snapshot `v1` of dataset `/projekt`. A nested dataset in a
+  listing of the parent's snapshot has data from the live version (it has
+  its own snapshots).
 - **Path** is either `PathArg::Fs("/a/CON.txt")` - names as they are in our
   FS (hidden ones too), or `PathArg::Windows("\a\b")` - as Windows sees it
   (translated the same way as when opening a file;
   `PathArg::from_windows_full("Q:\a\b")`).
 - **`EntryInfo`:** `name` (our FS), `windows_name` (empty = hidden),
   `hidden` (why), `kind`, `oid`, `generation`, `size`, times `mtime`,
-  `ctime`, `btime` (ns since 1970), `tree_*`, `link_target`, `truncated`.
+  `ctime`, `btime` (ns since 1970), `tree_*`, `dataset` (dataset
+  number, 1 = root), `link_target`, `truncated`. The root of a nested
+  dataset has `kind = Dataset` (a folder for the user).
   `windows_name` describes only the name itself: an entry inside a hidden
   directory is unreachable from Windows even if its own name is valid.
 - **Deleting a snapshot** is deliberately not offered: snapshots protect
@@ -124,7 +132,7 @@ file           11  CON.txt   [ve Windows skryte: rezervovane jmeno]
 dir      10846218  slozka2
 file           11  x:y?.txt
 
-> osfs snapshot Q: before-edit
+> osfs snapshot Q: / before-edit
 snapshot 'before-edit' vytvoren (id 1)
 
 > osfs cat Q: /version.txt --at before-edit
@@ -159,6 +167,4 @@ faster; `Read` through the API is mainly for hidden names and snapshots.
   link target) arrives truncated with `truncated = true`.
 - A rename through the API happens behind the Windows cache's back:
   Explorer may show the old name for up to 1 s (`FileInfoTimeout`).
-- The `fs` API cannot read a link target inside a snapshot yet
-  (`link_target` empty).
 - `Client` is not `Sync`: each thread opens its own (opening is cheap).

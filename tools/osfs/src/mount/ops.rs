@@ -646,6 +646,11 @@ unsafe extern "system" fn can_delete(
         }
         let path = tri!(handle_path(st, ctx));
         let s = tri!(stat_visible(st, &path));
+        // Dataset (slozka s vlastni historii) se z Windows nemaze: smazal
+        // by i vsechny snapshoty. Jen `osfs dataset delete`.
+        if crate::versions::is_dataset_root(&mut st.fs, &path) {
+            return STATUS_ACCESS_DENIED;
+        }
         if s.kind == Kind::Dir {
             match st.fs.list(&path) {
                 Ok(v) if !v.is_empty() => return STATUS_DIRECTORY_NOT_EMPTY,
@@ -722,6 +727,9 @@ unsafe extern "system" fn rename(
             }
             return match e {
                 Error::NotFound | Error::NotADirectory => STATUS_OBJECT_PATH_NOT_FOUND,
+                // Presun mezi datasety (jine stromy): Windows pak presun
+                // udela kopii a smazanim jako mezi jednotkami.
+                Error::NotSupported => STATUS_NOT_SAME_DEVICE,
                 e => status(e),
             };
         }

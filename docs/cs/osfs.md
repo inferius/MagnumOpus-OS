@@ -252,13 +252,103 @@ z Windows nedá zadat.
 - Panika v `osfs` = okamžité ukončení (profil `panic = "abort"`); data
   zůstanou ve stavu po posledním commitu.
 
+## Datasety a verze
+
+**Dataset** je složka s vlastní historií: vlastní snapshoty, klony,
+rozdíly verzí a obnova (podrobně v [souborovy-system.md](souborovy-system.md#datasety-a-klony)).
+Pro programy a průzkumník je to obyčejná složka.
+
+| Příkaz | Co dělá |
+|---|---|
+| `osfs dataset create <obraz> <cesta>` | nový prázdný dataset (složka) |
+| `osfs dataset list <obraz>` | datasety svazku: číslo, cesta, počet snapshotů, u klonu původ |
+| `osfs dataset delete <obraz> <cesta>` | smaže dataset **i se snapshoty**; odmítne dataset s vnořeným datasetem a dataset, z jehož snapshotu je klon |
+| `osfs snapshot <obraz> <dataset> <jméno>` | snapshot datasetu (stav jen pro čtení) |
+| `osfs snapshots <obraz> [dataset]` | snapshoty jednoho nebo všech datasetů |
+| `osfs clone <obraz> <dataset> <snapshot> <cesta>` | zapisovatelný klon snapshotu jako nový dataset (okamžitý, sdílí bloky) |
+| `osfs diff <obraz> <dataset> <od> [do]` | změny mezi snapshoty, bez `[do]` proti živé verzi |
+| `osfs diff <obraz> --clone <cesta>` | co změnil klon proti snapshotu, ze kterého vznikl |
+| `osfs restore <obraz> <dataset> <snapshot> <cesta> <cíl>` | obnova souboru nebo složky **jako kopie** vedle originálu (`<cíl>` nesmí existovat) |
+
+**Cesty:** dataset a `<cíl>` obnovy jsou cesty ve svazku (`/projekt`,
+`/projekt/cfg (puvodni).toml`). Cesta ve snapshotu, zdroj obnovy a výpis
+rozdílu jsou **uvnitř datasetu** (`/cfg.toml` = `/projekt/cfg.toml`).
+Výpis rozdílu: `A` přidáno, `D` smazáno, `M` změněn obsah, `R` přesun
+nebo přejmenování (`stará -> nová`), `RM` přesun i změna; složky končí `/`.
+
+> ⚠️ **Obraz nesmí být připojený.** Tyto příkazy obraz otevírají
+> výhradně: když ho má otevřený `osfs mount` (nebo jiný `osfs`), skončí
+> hláškou `obraz je pripojeny nebo otevreny jinym procesem osfs` a nic
+> nezmění. Dva zapisovatelé by svazek poškodili a čtení by vidělo starý
+> stav. Řízení přes běžící `mount` přijde později; snapshot připojené
+> jednotky už teď jde přes [rozšířené API](osfs-api.md): `osfs snapshot Q:
+> /projekt jméno`.
+>
+> ⚠️ `osfs dataset delete` smaže i všechny snapshoty datasetu - **nevratné**.
+
+### První ukázka: snapshot, klon, změny, diff, obnova
+
+```text
+> osfs format demo.img --size 64M
+demo.img: naformatovano, 64 MiB, kontrolni soucty Xxh3
+> osfs dataset create demo.img /projekt
+/projekt: dataset vytvoren (cislo 2)
+> osfs put demo.img cfg.toml /projekt/cfg.toml          (a = 1)
+> osfs put demo.img main.rs /projekt/main.rs
+> osfs snapshot demo.img /projekt pred-upravou
+/projekt@pred-upravou: snapshot vytvoren (id 1)
+
+  ... práce: změna cfg.toml (a = 2), nový soubor pomocnik.rs ...
+
+> osfs diff demo.img /projekt pred-upravou
+M  /cfg.toml
+A  /pomocnik.rs
+
+> osfs clone demo.img /projekt pred-upravou /zkouska
+/zkouska: klon /projekt@pred-upravou (dataset 3), zapisovatelny, sdili bloky
+> osfs put demo.img cfg2.toml /zkouska/main.rs           (zkouška bokem)
+> osfs diff demo.img --clone /zkouska
+M  /main.rs
+
+> osfs dataset list demo.img
+   1  /  (snapshotu: 0)
+   2  /projekt  (snapshotu: 1)
+   3  /zkouska  (snapshotu: 0)  klon z /projekt@pred-upravou
+
+> osfs restore demo.img /projekt pred-upravou /cfg.toml "/projekt/cfg (puvodni).toml"
+/projekt@pred-upravou:/cfg.toml -> /projekt/cfg (puvodni).toml: obnoveno 6 B (kopie, original beze zmeny)
+> osfs cat demo.img "/projekt/cfg (puvodni).toml"
+a = 1
+
+> osfs dataset delete demo.img /projekt
+osfs: /projekt: z jeho snapshotu existuje klon - nejdriv smaz klon (osfs dataset list ukaze, ktery)
+> osfs dataset delete demo.img /zkouska
+/zkouska: dataset smazan i se snapshoty
+```
+
+### Datasety po připojení (`osfs mount`)
+
+- Dataset se ve Windows ukáže jako **obyčejná složka**; cesta do ní projde
+  (otevírání, zápis, přejmenování uvnitř jako jinde). `osfs ls` ho
+  označí `dset`.
+- **Přesun mezi datasety** (např. z `Q:\` do `Q:\projekt`) jsou dva různé
+  stromy: ovladač vrátí „jiné zařízení“ a Windows přesun udělá kopií
+  a smazáním, stejně jako mezi dvěma disky (trvá podle velikosti dat).
+- **Smazat dataset z Windows nejde** (složka vrátí „přístup odepřen“):
+  smazala by se celá historie. Pozor: rekurzivní mazání (Shift+Delete
+  složky, `rmdir /s`) přesto smaže **soubory uvnitř** - složka datasetu
+  zůstane a obsah jde vrátit ze snapshotu (`osfs restore`).
+- Snapshoty, klony, rozdíly a obnova zatím přes příkazy výše (s odpojeným
+  obrazem) nebo snapshot přes rozšířené API.
+
 ## Rozšířené API pro aplikace
 
 Aplikace (např. MagnumOpus Explorer) může z připojené jednotky číst i to,
 co Win32 neumí: okamžité velikosti složek, skrytá jména, snapshoty, stav
 svazku. Popis: [osfs-api.md](osfs-api.md). Z příkazové řádky:
 `osfs info Q:`, `osfs ls Q: /`, `osfs cat Q: /CON.txt`,
-`osfs snapshots Q:`, `osfs snapshot Q: <jméno>`, `--at <snapshot>`.
+`osfs snapshots Q: [dataset]`, `osfs snapshot Q: <dataset> <jméno>`,
+`--at <snapshot>` (snapshot datasetu, ve kterém cesta leží).
 
 ## Ladění
 

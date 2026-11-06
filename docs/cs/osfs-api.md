@@ -11,6 +11,7 @@ Tohle API dodává navíc to, co Win32 neumí a co náš FS ví:
 | **jména skrytá ve Windows** (`CON.txt`, `a.`, jména s U+F0xx, odkazy) | zobrazit je, přečíst, přejmenovat na platné jméno |
 | **cíle symbolických odkazů** | zobrazit odkaz a kam míří |
 | **snapshoty** | seznam, vytvoření, procházení a čtení starých verzí |
+| **datasety** (složky s vlastní historií) | `Kind::Dataset`, číslo datasetu u každé položky, snapshoty po datasetech |
 | **stav svazku** | generace, volné místo, jen pro čtení, obnova z logu |
 
 Zdroj: protokol a klient `libs/osfs-proto`, server `tools/osfs/src/api.rs`
@@ -56,19 +57,25 @@ Zdroj: protokol a klient `libs/osfs-proto`, server `tools/osfs/src/api.rs`
 | `Stat` | čtení | `at`, cesta | `EntryInfo` (uložené jméno, i velikost písmen) |
 | `List` | čtení | `at`, cesta, kurzor | stránka `EntryInfo` + kurzor další stránky |
 | `Read` | čtení | `at`, cesta, offset, délka | data (nejvýš `MAX_READ`) |
-| `Snapshots` | čtení | `after` (id) | stránka snapshotů + `next` |
+| `Snapshots` | čtení | cesta, `after` (id) | stránka snapshotů datasetu, ve kterém cesta leží, + `next` |
 | `Rename` | zápis | z, na | generace |
-| `SnapshotCreate` | zápis | jméno | id snapshotu (uloží = commit) |
+| `SnapshotCreate` | zápis | cesta, jméno | id snapshotu datasetu, ve kterém cesta leží (uloží = commit) |
 | `Commit` | zápis | - | generace uloženého stavu |
 
-- **`at`** = jméno snapshotu, prázdné = živý stav.
+- **`at`** = jméno snapshotu, prázdné = živý stav. Snapshot patří
+  **datasetu, ve kterém cesta leží** (server ho najde sám); cesta zůstává
+  cesta ve svazku: `at = "v1"`, cesta `/projekt/cfg.toml` = soubor
+  `/cfg.toml` ve snapshotu `v1` datasetu `/projekt`. Vnořený dataset ve
+  výpisu snapshotu rodiče má údaje ze živé verze (má vlastní snapshoty).
 - **Cesta** je buď `PathArg::Fs("/a/CON.txt")` - jména tak, jak jsou
   v našem FS (i skrytá), nebo `PathArg::Windows("\a\b")` - tak, jak ji
   vidí Windows (přeloží se stejně jako při otevření souboru;
   `PathArg::from_windows_full("Q:\a\b")`).
 - **`EntryInfo`:** `name` (náš FS), `windows_name` (prázdné = skryté),
   `hidden` (proč), `kind`, `oid`, `generation`, `size`, časy `mtime`,
-  `ctime`, `btime` (ns od 1970), `tree_*`, `link_target`, `truncated`.
+  `ctime`, `btime` (ns od 1970), `tree_*`, `dataset` (číslo datasetu,
+  1 = kořenový), `link_target`, `truncated`. Kořen vnořeného datasetu má
+  `kind = Dataset` (pro uživatele složka).
   `windows_name` popisuje jen samotné jméno: položka ve skrytém adresáři
   je z Windows nedosažitelná, i když její vlastní jméno je platné.
 - **Smazání snapshotu** API záměrně nenabízí: snapshoty chrání proti
@@ -121,7 +128,7 @@ file           11  CON.txt   [ve Windows skryte: rezervovane jmeno]
 dir      10846218  slozka2
 file           11  x:y?.txt
 
-> osfs snapshot Q: pred-upravou
+> osfs snapshot Q: / pred-upravou
 snapshot 'pred-upravou' vytvoren (id 1)
 
 > osfs cat Q: /verze.txt --at pred-upravou
@@ -155,6 +162,4 @@ Pro běžné čtení a zápis souborů je rychlejší obyčejné Win32 přes jed
   přijde zkrácená s `truncated = true`.
 - Přejmenování přes API proběhne za zády mezipaměti Windows: Průzkumník
   může do 1 s ukazovat staré jméno (`FileInfoTimeout`).
-- Cíl odkazu ve snapshotu API `fs` zatím neumí přečíst (`link_target`
-  prázdný).
 - `Client` není `Sync`: každé vlákno si otevře vlastní (otevření je levné).

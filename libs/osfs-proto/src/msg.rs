@@ -67,7 +67,9 @@ impl PathArg {
     }
 }
 
-/// Pozadavek. `at` = jmeno snapshotu, prazdne = zivy stav.
+/// Pozadavek. `at` = jmeno snapshotu, prazdne = zivy stav. Snapshot patri
+/// datasetu, ve kterem cesta lezi (dataset = slozka s vlastni historii);
+/// server ho najde sam, cesta zustava cesta ve svazku.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// Verze a schopnosti serveru.
@@ -92,10 +94,11 @@ pub enum Request {
     },
     /// Prejmenovani nebo presun (cil nesmi existovat).
     Rename { from: PathArg, to: PathArg },
-    /// Stranka seznamu snapshotu s id vetsim nez `after` (0 = od zacatku).
-    Snapshots { after: u64 },
-    /// Vytvori snapshot aktualniho stavu (uklada = commit).
-    SnapshotCreate { name: String },
+    /// Stranka seznamu snapshotu datasetu, ve kterem lezi `path`, s id
+    /// vetsim nez `after` (0 = od zacatku).
+    Snapshots { path: PathArg, after: u64 },
+    /// Vytvori snapshot datasetu, ve kterem lezi `path` (uklada = commit).
+    SnapshotCreate { path: PathArg, name: String },
     /// Ulozi vsechny zmeny hned (commit).
     Commit,
 }
@@ -137,7 +140,8 @@ impl Request {
         w.u32(MAGIC).u16(VERSION).u16(self.op());
         match self {
             Request::Hello | Request::VolumeInfo | Request::Commit => {}
-            Request::Snapshots { after } => {
+            Request::Snapshots { path, after } => {
+                path.put(&mut w);
                 w.u64(*after);
             }
             Request::Stat { at, path } => {
@@ -163,7 +167,8 @@ impl Request {
                 from.put(&mut w);
                 to.put(&mut w);
             }
-            Request::SnapshotCreate { name } => {
+            Request::SnapshotCreate { path, name } => {
+                path.put(&mut w);
                 w.str(name);
             }
         }
@@ -189,6 +194,7 @@ impl Request {
             op::HELLO => Request::Hello,
             op::VOLUME_INFO => Request::VolumeInfo,
             op::SNAPSHOTS => Request::Snapshots {
+                path: PathArg::get(&mut r).ok_or(bad)?,
                 after: r.u64().ok_or(bad)?,
             },
             op::COMMIT => Request::Commit,
@@ -212,6 +218,7 @@ impl Request {
                 to: PathArg::get(&mut r).ok_or(bad)?,
             },
             op::SNAPSHOT_CREATE => Request::SnapshotCreate {
+                path: PathArg::get(&mut r).ok_or(bad)?,
                 name: r.str().ok_or(bad)?,
             },
             _ => return Err(error::NOT_SUPPORTED),
@@ -260,6 +267,9 @@ pub enum Kind {
     File,
     Dir,
     Symlink,
+    /// Dataset: pro aplikaci slozka (cesta do nej projde), ale s vlastni
+    /// historii (snapshoty, klony).
+    Dataset,
 }
 
 impl Kind {
@@ -268,6 +278,7 @@ impl Kind {
             Kind::File => 1,
             Kind::Dir => 2,
             Kind::Symlink => 3,
+            Kind::Dataset => 4,
         }
     }
 
@@ -276,6 +287,7 @@ impl Kind {
             1 => Some(Kind::File),
             2 => Some(Kind::Dir),
             3 => Some(Kind::Symlink),
+            4 => Some(Kind::Dataset),
             _ => None,
         }
     }
@@ -351,6 +363,9 @@ pub struct EntryInfo {
     pub tree_files: u64,
     /// U adresare: pocet adresaru v podstromu (bez sebe).
     pub tree_dirs: u64,
+    /// Cislo datasetu, ve kterem objekt lezi (1 = korenovy). U polozky
+    /// druhu `Dataset` je to on sam.
+    pub dataset: u64,
     /// U symbolickeho odkazu jeho cil, jinak prazdne.
     pub link_target: String,
 }
@@ -371,6 +386,7 @@ impl EntryInfo {
             .u64(self.tree_bytes)
             .u64(self.tree_files)
             .u64(self.tree_dirs)
+            .u64(self.dataset)
             .str(&self.link_target);
     }
 
@@ -390,13 +406,14 @@ impl EntryInfo {
             tree_bytes: r.u64()?,
             tree_files: r.u64()?,
             tree_dirs: r.u64()?,
+            dataset: r.u64()?,
             link_target: r.str()?,
         })
     }
 
     /// Kolik bajtu polozka zabere ve zprave.
     pub fn encoded_len(&self) -> usize {
-        2 + self.name.len() + 2 + self.windows_name.len() + 3 + 8 * 9 + 2 + self.link_target.len()
+        2 + self.name.len() + 2 + self.windows_name.len() + 3 + 8 * 10 + 2 + self.link_target.len()
     }
 
     /// Zkrati polozku, aby se vesla do `budget` bajtu: nejdriv cil odkazu,
@@ -560,9 +577,9 @@ impl Response {
                 op::STAT => Response::Entry(EntryInfo::get(&mut r)?),
                 op::LIST => {
                     let n = r.u32()? as usize;
-                    // Kazda polozka ma aspon 81 bajtu: horni mez z delky
+                    // Kazda polozka ma aspon 89 bajtu: horni mez z delky
                     // zpravy, at poskozeny pocet nealokuje gigabajty.
-                    if n > b.len() / 81 {
+                    if n > b.len() / 89 {
                         return None;
                     }
                     let mut entries = Vec::with_capacity(n);

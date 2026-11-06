@@ -82,6 +82,9 @@ pub mod feature {
     pub const RENAME: u64 = 1 << 1;
     /// Cteni souboru podle jmena v nasem FS (i skrytych ve Windows).
     pub const READ: u64 = 1 << 2;
+    /// Datasety: `Kind::Dataset`, `EntryInfo::dataset`, snapshoty po
+    /// datasetech.
+    pub const DATASETS: u64 = 1 << 3;
 }
 
 /// Kody chyb v odpovedi. Hodnoty jsou stejne jako `abi::Error` v
