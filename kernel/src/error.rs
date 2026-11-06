@@ -1,67 +1,14 @@
-//! Spolecny typ chyb jadra.
+//! Chyby jadra.
 //!
-//! `Error` je maly kopirovatelny kod se stabilni ciselnou hodnotou - stane se
-//! z nej navratovy kod syscallu, takze se nemeni cisla existujicich variant.
+//! `Error` je spolecny typ jadra i userspace (crate `abi`): maly kod se
+//! stabilni ciselnou hodnotou, ktera je zaroven navratovym kodem syscallu.
+//! Vyznam kazdeho kodu popisuje `docs/cs/chyby.md` / `docs/en/errors.md`.
 //! Kontext (co se delalo a kde) se k chybe nepridava do typu, ale zaloguje
 //! se v miste vzniku pres [`ResultExt::context`], kde je nejvic informaci.
 
 use core::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(i32)]
-pub enum Error {
-    /// Handle neexistuje (nebo uz byl zavren).
-    BadHandle = -1,
-    /// Handle nema potrebna prava.
-    AccessDenied = -2,
-    /// Objekt je jineho typu, nez operace ocekava.
-    WrongType = -3,
-    /// Vyprsel cas cekani.
-    TimedOut = -4,
-    /// Nedostatek pameti.
-    NoMemory = -5,
-    /// Vycerpany limit (napr. pocet handlu).
-    NoResources = -6,
-    /// Neplatne argumenty.
-    #[allow(dead_code, reason = "kod ABI syscallu (milnik 4)")]
-    InvalidArgs = -7,
-    /// Pozadovana vec neexistuje.
-    NotFound = -8,
-    /// Operace neni podporovana.
-    #[allow(dead_code, reason = "kod ABI syscallu (milnik 4)")]
-    NotSupported = -9,
-    /// Data jsou poskozena nebo neplatna (napr. tabulka firmwaru).
-    Corrupted = -10,
-}
-
-impl Error {
-    /// Stabilni ciselny kod (pro syscally a logy).
-    pub const fn code(self) -> i32 {
-        self as i32
-    }
-
-    /// Kratky nazev pro logy.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::BadHandle => "BAD_HANDLE",
-            Self::AccessDenied => "ACCESS_DENIED",
-            Self::WrongType => "WRONG_TYPE",
-            Self::TimedOut => "TIMED_OUT",
-            Self::NoMemory => "NO_MEMORY",
-            Self::NoResources => "NO_RESOURCES",
-            Self::InvalidArgs => "INVALID_ARGS",
-            Self::NotFound => "NOT_FOUND",
-            Self::NotSupported => "NOT_SUPPORTED",
-            Self::Corrupted => "CORRUPTED",
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({})", self.name(), self.code())
-    }
-}
+pub use abi::Error;
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 

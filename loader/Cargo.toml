@@ -6,5 +6,6 @@ license.workspace = true
 
 [dependencies]
 boot-info.workspace = true
+elf.workspace = true
 uefi = { version = "0.41", features = ["panic_handler", "logger", "global_allocator", "alloc"] }
 log = "0.4"

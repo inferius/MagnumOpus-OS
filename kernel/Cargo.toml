@@ -10,7 +10,10 @@ test = false
 bench = false
 
 [dependencies]
+abi.workspace = true
 boot-info.workspace = true
+elf.workspace = true
+initfs.workspace = true
 spin = "0.12"
 noto-sans-mono-bitmap = { version = "0.4", default-features = false, features = ["regular", "size_16", "size_24", "unicode-basic-latin", "unicode-latin-1-supplement", "unicode-latin-extended-a", "unicode-specials"] }
 

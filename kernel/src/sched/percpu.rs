@@ -65,6 +65,13 @@ impl Ord for TimerEntry {
 pub struct PerCpu {
     /// Ukazatel na sebe; musi byt prvni (cte se pres gs:[0]).
     self_ptr: u64,
+    /// Data pro prechody do a z userspace; asembler k nim pristupuje pres
+    /// GS na pevnem offsetu `arch::CPU_LOCAL_OFFSET`.
+    pub arch: arch::CpuLocal,
+    /// Pocitadla pozadavku na vyprazdneni TLB od jinych CPU a jejich
+    /// vyrizeni (viz `mm::tlb`).
+    pub tlb_requested: AtomicU64,
+    pub tlb_done: AtomicU64,
     pub index: usize,
     pub hw_id: u32,
     pub rq: SpinLock<RunQueue>,
@@ -83,6 +90,11 @@ pub struct PerCpu {
 // pristupove metody). Ostatni pole jsou atomicka nebo pod zamkem.
 unsafe impl Sync for PerCpu {}
 
+const _: () = assert!(
+    core::mem::offset_of!(PerCpu, arch) == arch::CPU_LOCAL_OFFSET,
+    "asembler syscallu ocekava arch data na pevnem offsetu"
+);
+
 static CPUS: [AtomicPtr<PerCpu>; MAX_CPUS] =
     [const { AtomicPtr::new(core::ptr::null_mut()) }; MAX_CPUS];
 static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -94,6 +106,9 @@ impl PerCpu {
         assert!(index < MAX_CPUS, "prilis mnoho CPU");
         let cpu = Box::leak(Box::new(PerCpu {
             self_ptr: 0,
+            arch: arch::CpuLocal::for_this_cpu(),
+            tlb_requested: AtomicU64::new(0),
+            tlb_done: AtomicU64::new(0),
             index,
             hw_id,
             rq: SpinLock::new(RunQueue::default()),

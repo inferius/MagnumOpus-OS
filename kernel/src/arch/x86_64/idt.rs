@@ -8,8 +8,11 @@
 use core::arch::{asm, global_asm, naked_asm};
 use core::mem::size_of;
 
-use super::apic::{self, VECTOR_HALT, VECTOR_RESCHEDULE, VECTOR_SPURIOUS, VECTOR_TIMER};
+use super::apic::{
+    self, VECTOR_HALT, VECTOR_RESCHEDULE, VECTOR_SPURIOUS, VECTOR_TIMER, VECTOR_TLB_FLUSH,
+};
 use super::gdt::{IST_DOUBLE_FAULT, IST_MACHINE_CHECK, IST_NMI, KERNEL_CODE};
+use super::user::from_user;
 use super::{cpu, halt_forever};
 use crate::fatal::{fatal_stop, report, report_stack_trace};
 use crate::{log, sched};
@@ -94,6 +97,12 @@ static mut IDT: [IdtEntry; 256] = [IdtEntry::MISSING; 256];
 #[unsafe(naked)]
 extern "sysv64" fn isr_common() {
     naked_asm!(
+        // Preruseni z userspace (CPL 3 v ulozenem CS na [rsp + 24]):
+        // prepnout GS na per-CPU data jadra.
+        "test byte ptr [rsp + 24], 3",
+        "jz 2f",
+        "swapgs",
+        "2:",
         "push rax", "push rbx", "push rcx", "push rdx", "push rsi", "push rdi", "push rbp",
         "push r8", "push r9", "push r10", "push r11", "push r12", "push r13", "push r14", "push r15",
         "mov rdi, rsp",
@@ -101,6 +110,11 @@ extern "sysv64" fn isr_common() {
         "call {dispatch}",
         "pop r15", "pop r14", "pop r13", "pop r12", "pop r11", "pop r10", "pop r9", "pop r8",
         "pop rbp", "pop rdi", "pop rsi", "pop rdx", "pop rcx", "pop rbx", "pop rax",
+        // Navrat do userspace: vratit GS userspace.
+        "test byte ptr [rsp + 24], 3",
+        "jz 3f",
+        "swapgs",
+        "3:",
         "add rsp, 16", // vektor + chybovy kod
         "iretq",
         dispatch = sym trap_dispatch,
@@ -212,7 +226,17 @@ pub unsafe fn load() {
 
 extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
     let vector = frame.vector;
+    let user = from_user(frame);
     match vector {
+        // Vyjimka v userspace (vcetne int3): ukonci proces, ne jadro.
+        v if v < 32 && user => {
+            let addr = if v == VEC_PAGE_FAULT {
+                cpu::read_cr2()
+            } else {
+                0
+            };
+            sched::user_fault(v as u8, frame.error_code, frame.rip, addr)
+        }
         VEC_BREAKPOINT => {
             log::info!("breakpoint na {:#x}", frame.rip);
         }
@@ -225,6 +249,10 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
             apic::eoi();
             sched::on_reschedule_ipi();
         }
+        v if v == VECTOR_TLB_FLUSH as u64 => {
+            apic::eoi();
+            crate::mm::tlb::on_flush_ipi();
+        }
         v if v == VECTOR_HALT as u64 => halt_forever(),
         v if v == VECTOR_SPURIOUS as u64 => {} // spurious se nepotvrzuje
         _ => {
@@ -234,6 +262,9 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
     }
     if vector >= 32 {
         sched::preempt_if_needed();
+    }
+    if user {
+        sched::on_return_to_user();
     }
 }
 

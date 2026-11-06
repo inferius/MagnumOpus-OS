@@ -200,6 +200,69 @@ existující nástroje adaptér na úložiště objektů (např. backend libgit2
 **Pořadí:** nejdřív samotný CoW FS (milník 6), pak hashe a DAG snapshotů,
 pak služba pro git. Zbytek návrhu se upřesní při implementaci.
 
+### Metadata a vyhledávání (návrh)
+
+Cíl: velikost, typ a časy čehokoli okamžitě, výpis velké složky bez
+čekání a hledání bez procházení disku.
+
+- **Tabulka objektů (obdoba MFT v NTFS, ale jako B-strom):** každý soubor
+  a adresář je záznam s pevným ID: velikost, časy, typ, hash obsahu, seznam
+  extentů. Malé soubory (do ~3 KiB) leží přímo v záznamu, takže jejich
+  čtení je jedna operace. B-strom místo pevného pole jako u MFT: roste
+  i zmenšuje se, nefragmentuje se a snapshoty sdílí nezměněné uzly (CoW).
+- **Adresáře** jsou B-stromy klíčované normalizovaným jménem (NFC +
+  case folding) - vyhledání v O(log n). Položka adresáře nese i kopii
+  nejčastějších metadat (velikost, typ, čas změny), takže výpis složky
+  nemusí skákat do tabulky objektů (jako indexové položky NTFS).
+- **Souhrny podstromu v každém adresáři:** celková velikost, počet souborů,
+  poslední změna. Velikost složky je tak k dispozici okamžitě (žádné `du`).
+  Aktualizují se při CoW zápisu, který cestu ke kořeni přepisuje stejně.
+- **Indexy pro hledání**, udržované v téže transakci jako změna: jméno
+  (n-gramy, hledání části jména), typ/přípona, velikost, čas změny, štítky
+  a typované uživatelské atributy (klíč = hodnota). Dotaz přes API, např.
+  "jméno obsahuje `faktura`, velikost > 1 MiB, změněno po 1. 1." bez
+  procházení disku. Indexy jsou volitelné pro subvolume (stojí zápis).
+- **Fulltext** (hledání v obsahu) je služba v userspace nad žurnálem změn,
+  aby nezpomalovala zápis.
+
+Další vylepšení, se kterými se počítá:
+
+- průhledná komprese po extentech (zstd, lz4) podle typu dat,
+- šifrování subvolume (klíč jako capability, ne heslo v FS),
+- samoopravné ukládání: checksumy + druhá kopie metadat (a volitelně dat),
+  při chybě čtení oprava z kopie,
+- víc disků v jednom poolu (zrcadlení, rozšiřování za běhu),
+- kvóty a rezervace pro subvolume,
+- historie souboru zadarmo z DAG snapshotů (časová osa verzí, "undo"),
+- start bez kontroly disku (CoW + transakce = disk je vždy konzistentní).
+
+## Aplikace: instalace, aktualizace, odinstalace (návrh)
+
+Cíl: jednoduché jako přenosná aplikace ve Windows, bezpečné jako sandbox na
+mobilu, bez závislostního pekla linuxových balíčkovačů.
+
+- **Jedna aplikace = jeden adresář** `/apps/<id>/` (vlastní subvolume):
+  program, jeho knihovny a data, která k němu patří. Žádné sdílené
+  knihovny mezi aplikacemi, žádné zápisy jinam. Uživatelská data aplikace
+  leží v `/home/<uživatel>/apps/<id>/`.
+- **Odinstalace = smazání těchto dvou adresářů.** Nic jiného v systému
+  nezůstane, protože aplikace nikam jinam zapisovat nemůže (dostává jen
+  capabilities ke svým adresářům).
+- **Balíček** je jeden soubor (archiv + manifest): jméno, verze, vydavatel,
+  podpis, požadované capabilities (síť, kamera, soubory uživatele, ...).
+  Instalace = ověřit podpis, ukázat požadovaná oprávnění, rozbalit. Funguje
+  dvojklikem na stažený soubor stejně jako z katalogu.
+- **Oficiální katalog** je jen jeden ze zdrojů: služba, která umí hledat,
+  stahovat a hlídat aktualizace. Aplikace mimo katalog jdou instalovat
+  taky, systém jen jasně řekne, kdo je podepsal.
+- **Aktualizace jsou atomické:** nová verze se rozbalí do nového snapshotu
+  subvolume a přepne se najednou; když nová verze nenaběhne, vrátí se
+  předchozí. Uživatel volí: automaticky, upozornit, nebo nikdy. Žádné
+  aktualizace během práce, žádné restarty kvůli aplikacím.
+- **Systém se aktualizuje stejně** (A/B subvolume), jen má vlastní zdroj.
+- Windows aplikace dostanou totéž: instalace do vlastního adresáře s
+  virtuálním `C:`, odinstalace = smazání.
+
 ## Grafika
 
 - Kompozitor v userspace (koncept Waylandu), klienti renderují do bufferů
@@ -251,29 +314,21 @@ První cíl (milník 5): .exe se statickým CRT (`/MT`), které potřebuje jen
 
 Cíl: každou chybu jde dohledat - co se stalo, kde, na kterém CPU a kdy.
 
-- **Chyby:** společný typ `Error` (`kernel/src/error.rs`) - malý kód se
-  stabilní číselnou hodnotou, stane se z něj návratový kód syscallu. Kontext
-  se nepřidává do typu, ale zaloguje se v místě vzniku
-  (`result.context("co se dělalo")`, s místem volání).
-- **Log jádra** (`kernel/src/log/`): úrovně Error/Warn/Info/Debug/Trace,
-  každý záznam má čas od startu, CPU, modul a u chyb a varování soubor
-  a řádek. Výstupy: sériová linka (vše povolené), framebuffer (do Info),
-  kruhový buffer 64 KiB v paměti (pro pozdější čtení službou logu).
-- **Vypínání:** úroveň globálně i pro jednotlivé moduly za běhu; úrovně nad
-  `STATIC_MAX_LEVEL` se vůbec nepřeloží. Zakázaný záznam stojí jedno
-  atomické čtení. Logování nealokuje, funguje i v přerušení.
-- **Fatální chyby:** panika i neošetřená výjimka vypíšou zprávu, registry
-  a zásobník; opakovaná chyba během zastavování se nezacyklí.
-- **Dohledání po běhu:** xtask ukládá výstup sériové linky do
-  `target/serial.log` a adresy ze zásobníku překládá na jména funkcí.
-- Později: služba logu v userspace, strukturované záznamy (klíč=hodnota),
+- **Chyby:** jeden typ pro jádro i userspace (`libs/abi`), stabilní
+  číselné kódy, které jsou zároveň návratovými kódy syscallů. Kontext se
+  loguje v místě vzniku. Všechny kódy: [chyby.md](chyby.md).
+- **Log jádra:** úrovně, čas, CPU, modul, místo ve zdrojáku; filtr globálně
+  i pro moduly; kruhový buffer; bez alokace. Podrobnosti:
+  [jadro.md](jadro.md#logování), hlášky: [hlasky.md](hlasky.md).
+- **Fatální chyby:** panika i výjimka vypíšou zprávu, registry a zásobník;
+  xtask adresy přeloží na jména funkcí.
+- Později: služba logu v userspace, strukturované záznamy (klíč = hodnota),
   persistentní log na disku, úrovně z příkazové řádky jádra.
 
 ## Konvence kódu
 
-- Soubor max ~1500 řádků; do podmodulů dělit hned, když to dává smysl.
-- Testy v oddělených souborech (`kernel/src/tests/<oblast>.rs`).
-- `unsafe` jen kde je nutné, vždy s komentářem `// SAFETY:`.
+Viz [sestaveni.md](sestaveni.md#konvence-kódu). Komentáře v kódu česky,
+dokumentace česky i anglicky (`docs/cs`, `docs/en`).
 
 ## Cizí kód a licence
 
@@ -303,8 +358,23 @@ důsledně dělí do `arch/`, aby port nebolel.
 1. Boot: UEFI loader, kernel vypíše text (hotovo)
 2. Základ jádra: GDT/IDT, výjimky, alokátor fyzické paměti, stránkování, heap (hotovo)
 3. Procesy: plánovač, SMP, vlákna, objekty, handly, capabilities (hotovo)
-4. Userspace: syscally, první proces, IPC, libos, initfs
+4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio), FS, grafika, kompozitor
 7. Windows vrstva v2: user32/gdi32, GUI, DirectX přes Vulkan
 8. Port na aarch64 a první ARM zařízení
+
+## Aktuální odchylky od návrhu
+
+Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
+
+- **Syscally jsou synchronní**; fronty požadavků (styl io_uring) přijdou
+  s ovladači a souborovým systémem, kde mají smysl.
+- **Objekty paměti alokují stránky hned** (žádné lazy alokace ani CoW klony).
+- **Odmapování jen celých mapování.**
+- **Návrat ze syscallu přes `iretq`** místo rychlejšího `sysret`.
+- **Programy se překládají bez SSE/FPU** (soft-float), proto jádro zatím
+  neukládá stav FPU při přepnutí vláken.
+- **Mezi třídami QoS přísná priorita** (nižší třídy mohou hladovět).
+- **Paměť po ukončených vláknech** (zásobníky jádra) se používá znovu, ale
+  nevrací se.

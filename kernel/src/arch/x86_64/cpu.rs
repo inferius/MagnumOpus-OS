@@ -5,6 +5,8 @@ use core::arch::x86_64::{__cpuid_count, CpuidResult};
 
 pub const CR0_WP: u64 = 1 << 16;
 pub const CR4_PGE: u64 = 1 << 7;
+pub const CR4_SMEP: u64 = 1 << 20;
+pub const CR4_SMAP: u64 = 1 << 21;
 
 pub const MSR_EFER: u32 = 0xC000_0080;
 pub const EFER_NXE: u64 = 1 << 11;
@@ -18,13 +20,18 @@ pub fn cpuid(leaf: u32, subleaf: u32) -> CpuidResult {
 pub struct Features {
     pub nx: bool,
     pub huge_1g: bool,
+    pub smep: bool,
+    pub smap: bool,
 }
 
 pub fn features() -> Features {
     let ext = cpuid(0x8000_0001, 0);
+    let leaf7 = cpuid(7, 0);
     Features {
         nx: ext.edx & (1 << 20) != 0,
         huge_1g: ext.edx & (1 << 26) != 0,
+        smep: leaf7.ebx & (1 << 7) != 0,
+        smap: leaf7.ebx & (1 << 20) != 0,
     }
 }
 

@@ -16,13 +16,17 @@
 
 mod percpu;
 mod thread;
+mod user;
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
-pub use percpu::{all_cpus, cpu_count, this_cpu};
+pub use percpu::{all_cpus, cpu_count, this_cpu, try_this_cpu};
 pub use thread::{Qos, Thread};
+pub use user::{
+    create_user_thread, on_return_to_user, request_kill, start_user_thread, user_fault,
+};
 
 use crate::arch::context::{self, Context};
 use crate::arch::{self, interrupts};
@@ -44,6 +48,7 @@ pub fn init_cpu(index: usize, hw_id: u32) -> &'static PerCpu {
         Context::default(),
         None,
         index,
+        None,
     ));
     idle.set_state(state::RUNNING);
     idle.on_cpu.store(true, Ordering::Relaxed);
@@ -76,7 +81,9 @@ pub fn spawn(name: &str, qos: Qos, f: impl FnOnce() + Send + 'static) -> Arc<Thr
         ctx,
         Some(Box::new(f)),
         this_cpu().index,
+        None,
     ));
+    t.started.store(true, Ordering::Relaxed);
     enqueue(t.clone(), true);
     t
 }
@@ -97,6 +104,9 @@ extern "sysv64" fn thread_start() -> ! {
 /// Ukonci aktualni vlakno.
 pub fn exit() -> ! {
     let me = current();
+    if let Some(process) = &me.process {
+        process.thread_exited();
+    }
     me.set_state(state::DEAD);
     me.mark_terminated();
     drop(me);
@@ -104,7 +114,6 @@ pub fn exit() -> ! {
     unreachable!("mrtve vlakno bylo znovu naplanovano");
 }
 
-#[allow(dead_code, reason = "API pro syscally (milnik 4)")]
 /// Dobrovolne prenecha CPU dalsimu vlaknu stejne nebo vyssi tridy.
 pub fn yield_now() {
     schedule();
@@ -298,6 +307,24 @@ fn switch_away(reason: Reason) {
     }
     next.on_cpu.store(true, Ordering::Relaxed);
     next.last_cpu.store(cpu.index, Ordering::Relaxed);
+
+    // Adresni prostor a zasobnik jadra pro vstup z userspace noveho vlakna.
+    // Vlakna jadra bezi v adresnim prostoru jadra, aby zadne CPU nedrzelo
+    // aktivni tabulky procesu, ktery uz mozna zanikl.
+    let root = next
+        .process
+        .as_ref()
+        .map_or(crate::mm::kernel_root().as_u64(), |p| {
+            p.address_space().root()
+        });
+    // SAFETY: vlastni CPU, preruseni zakazana; root je platna PML4 se
+    // sdilenou polovinou jadra (bezici kod a zasobnik jsou v ni).
+    unsafe {
+        arch::switch_page_table(root);
+        if let Some(top) = next.kernel_stack_top() {
+            arch::set_kernel_stack(&cpu.arch, top);
+        }
+    }
 
     let from = prev.context.get();
     let to = next.context.get() as *const Context;

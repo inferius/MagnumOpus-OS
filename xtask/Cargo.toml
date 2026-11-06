@@ -6,5 +6,6 @@ license.workspace = true
 publish = false
 
 [dependencies]
+initfs = { workspace = true, features = ["std"] }
 fatfs = "0.3"
 crc32fast = "1.5"

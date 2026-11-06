@@ -5,106 +5,24 @@
 //! ktery nese prava ([`Rights`]). Kazdy objekt ma signaly ([`Signals`]),
 //! na ktere lze cekat ([`wait`]).
 
+pub mod channel;
 pub mod event;
 pub mod handle;
 pub mod process;
+pub mod vmo;
 pub mod wait;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
-use core::ops::{BitAnd, BitOr, Not};
 
 pub use handle::{Handle, HandleTable};
 
 pub use crate::error::Error;
+pub use abi::{ObjectType, Rights, Signals};
 
 use crate::sched::{self, Thread};
 use crate::sync::SpinLock;
-
-/// Bitova maska stavu objektu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Signals(pub u32);
-
-impl Signals {
-    pub const NONE: Self = Self(0);
-    /// Event je signalizovany.
-    pub const SIGNALED: Self = Self(1 << 0);
-    /// Vlakno nebo proces skoncil.
-    pub const TERMINATED: Self = Self(1 << 1);
-
-    pub const fn intersects(self, other: Self) -> bool {
-        self.0 & other.0 != 0
-    }
-}
-
-impl BitOr for Signals {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self {
-        Self(self.0 | rhs.0)
-    }
-}
-
-impl BitAnd for Signals {
-    type Output = Self;
-    fn bitand(self, rhs: Self) -> Self {
-        Self(self.0 & rhs.0)
-    }
-}
-
-impl Not for Signals {
-    type Output = Self;
-    fn not(self) -> Self {
-        Self(!self.0)
-    }
-}
-
-/// Prava handlu. Pri duplikaci lze prava jen ubirat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rights(u32);
-
-#[allow(
-    dead_code,
-    reason = "cast prav pouziji az syscally a objekty pameti (milnik 4)"
-)]
-impl Rights {
-    pub const NONE: Self = Self(0);
-    pub const READ: Self = Self(1 << 0);
-    pub const WRITE: Self = Self(1 << 1);
-    pub const EXECUTE: Self = Self(1 << 2);
-    pub const MAP: Self = Self(1 << 3);
-    /// Smi se vytvorit dalsi handle na stejny objekt.
-    pub const DUPLICATE: Self = Self(1 << 4);
-    /// Handle smi byt predan jinemu procesu.
-    pub const TRANSFER: Self = Self(1 << 5);
-    /// Smi se cekat na signaly objektu.
-    pub const WAIT: Self = Self(1 << 6);
-    /// Smi se menit uzivatelske signaly objektu.
-    pub const SIGNAL: Self = Self(1 << 7);
-    /// Smi se ridit objekt (napr. ukoncit proces).
-    pub const MANAGE: Self = Self(1 << 8);
-
-    pub const BASIC: Self = Self(Self::DUPLICATE.0 | Self::TRANSFER.0 | Self::WAIT.0);
-
-    pub const fn contains(self, other: Self) -> bool {
-        self.0 & other.0 == other.0
-    }
-}
-
-impl BitOr for Rights {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self {
-        Self(self.0 | rhs.0)
-    }
-}
-
-#[allow(dead_code, reason = "API pro syscally (milnik 4)")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObjectType {
-    Event,
-    Thread,
-    Process,
-}
 
 pub trait KernelObject: Any + Send + Sync {
     fn core(&self) -> &ObjectCore;

@@ -1,0 +1,77 @@
+//! Cisla a konvence syscallu (x86_64).
+//!
+//! Volani: instrukce `syscall`, cislo v `rax`, argumenty v `rdi`, `rsi`,
+//! `rdx`, `r10`, `r8`, `r9` (`rcx` a `r11` instrukce prepise). Vysledek
+//! v `rax`: nezaporne cislo = uspech, zaporne = kod [`crate::Error`].
+//!
+//! Cisla nejsou stabilni rozhrani pro aplikace - to je knihovna libos.
+//! Popis kazdeho volani: `docs/cs/syscally.md`, `docs/en/syscalls.md`.
+
+/// Zapise text (UTF-8) do logu jadra. `(ptr, len)`
+pub const DEBUG_LOG: u64 = 0;
+/// Monotonicky cas v ns od startu. `()`
+pub const CLOCK_MONOTONIC: u64 = 1;
+/// Zavre handle. `(handle)`
+pub const HANDLE_CLOSE: u64 = 2;
+/// Novy handle na stejny objekt s podmnozinou prav. `(handle, rights) -> handle`
+pub const HANDLE_DUPLICATE: u64 = 3;
+/// Ceka na signaly jednoho objektu. `(handle, mask, deadline_ns, out_signals_ptr)`
+pub const OBJECT_WAIT_ONE: u64 = 4;
+/// Ceka na vice objektu. `(items_ptr, count, deadline_ns) -> index`
+pub const OBJECT_WAIT_MANY: u64 = 5;
+/// Zmeni signaly eventu. `(handle, clear, set)`
+pub const OBJECT_SIGNAL: u64 = 6;
+/// Vytvori event. `() -> handle`
+pub const EVENT_CREATE: u64 = 7;
+/// Vytvori par koncu kanalu. `(out_handles_ptr)` (dva u32)
+pub const CHANNEL_CREATE: u64 = 8;
+/// Posle zpravu. `(handle, data_ptr, data_len, handles_ptr, handles_count)`
+pub const CHANNEL_WRITE: u64 = 9;
+/// Precte zpravu. `(handle, data_ptr, data_cap, handles_ptr, handles_cap, out_actual_ptr)`
+pub const CHANNEL_READ: u64 = 10;
+/// Vytvori objekt pameti. `(size) -> handle`
+pub const VMO_CREATE: u64 = 11;
+/// Cte z objektu pameti. `(handle, offset, buf_ptr, len)`
+pub const VMO_READ: u64 = 12;
+/// Zapisuje do objektu pameti. `(handle, offset, buf_ptr, len)`
+pub const VMO_WRITE: u64 = 13;
+/// Namapuje objekt pameti. `(process, vmo, vmo_offset, len, flags, addr) -> addr`
+pub const VM_MAP: u64 = 14;
+/// Zrusi mapovani. `(process, addr, len)`
+pub const VM_UNMAP: u64 = 15;
+/// Vytvori prazdny proces. `(name_ptr, name_len) -> handle`
+pub const PROCESS_CREATE: u64 = 16;
+/// Spusti proces prvnim vlaknem. `(process, thread, entry, stack, bootstrap_handle)`
+pub const PROCESS_START: u64 = 17;
+/// Ukonci aktualni proces. `(exit_code)` - nevraci se
+pub const PROCESS_EXIT: u64 = 18;
+/// Ukonci jiny proces. `(process)`
+pub const PROCESS_KILL: u64 = 19;
+/// Navratovy kod skonceneho procesu. `(process, out_code_ptr)`
+pub const PROCESS_EXIT_CODE: u64 = 20;
+/// Vytvori vlakno v procesu. `(process, name_ptr, name_len) -> handle`
+pub const THREAD_CREATE: u64 = 21;
+/// Spusti vlakno v jiz bezicim procesu. `(thread, entry, stack, arg0, arg1)`
+pub const THREAD_START: u64 = 22;
+/// Ukonci aktualni vlakno. `()` - nevraci se
+pub const THREAD_EXIT: u64 = 23;
+/// Prenecha CPU. `()`
+pub const THREAD_YIELD: u64 = 24;
+
+/// Pocet definovanych syscallu (pro tabulky a testy).
+pub const COUNT: u64 = 25;
+
+/// Deadline "cekat neomezene".
+pub const DEADLINE_INFINITE: u64 = u64::MAX;
+
+/// Limity zprav kanalu.
+pub const CHANNEL_MAX_DATA: usize = 64 * 1024;
+pub const CHANNEL_MAX_HANDLES: usize = 64;
+/// Maximalni pocet zprav cekajicich ve fronte jednoho konce kanalu.
+pub const CHANNEL_MAX_QUEUED: usize = 1024;
+/// Maximalni pocet objektu v jednom `OBJECT_WAIT_MANY`.
+pub const WAIT_MANY_MAX: usize = 64;
+/// Maximalni delka jmena procesu nebo vlakna (bajty UTF-8).
+pub const NAME_MAX: usize = 64;
+/// Maximalni delka zpravy DEBUG_LOG.
+pub const DEBUG_LOG_MAX: usize = 1024;

@@ -12,10 +12,15 @@
 //! Spodni polovina patri userspace; identicke mapovani od loaderu se po
 //! prepnuti na tabulky jadra zahodi.
 
+mod address_space;
 pub mod heap;
 pub mod phys;
+pub mod tlb;
+
+pub use address_space::AddressSpace;
 
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 use boot_info::{BootInfo, MemoryKind, PHYS_MAP_BASE};
@@ -74,6 +79,8 @@ impl VirtAddr {
 
 /// Adresni prostor jadra. Pozdeji z nej budou procesy kopirovat horni polovinu.
 static KERNEL_SPACE: SpinLock<Option<PageTable>> = SpinLock::new(None);
+/// Fyzicka adresa PML4 jadra (rychly pristup pri prepinani vlaken).
+static KERNEL_ROOT: AtomicU64 = AtomicU64::new(0);
 
 /// Hranice sekci obrazu jadra z linker.ld.
 mod sections {
@@ -115,6 +122,7 @@ pub unsafe fn init(boot_info: &BootInfo) {
     // SAFETY: nove tabulky mapuji obraz jadra (bezici kod a statiky), primou
     // mapu (aktualni zasobnik, BootInfo, framebuffer a tabulky samotne).
     unsafe { space.activate() };
+    KERNEL_ROOT.store(space.root(), Ordering::Release);
     *KERNEL_SPACE.lock() = Some(space);
 }
 
@@ -350,38 +358,10 @@ pub fn unmap_identity_page(phys: PhysAddr) {
 
 /// Fyzicka adresa PML4 jadra.
 pub fn kernel_root() -> PhysAddr {
-    with_kernel_space(|space| PhysAddr(space.root()))
+    PhysAddr(KERNEL_ROOT.load(Ordering::Acquire))
 }
 
 /// Prelozi adresu v adresnim prostoru jadra (pro testy a ladeni).
 pub fn translate(virt: VirtAddr) -> Option<PhysAddr> {
     KERNEL_SPACE.lock().as_ref()?.translate(virt)
-}
-
-/// Adresni prostor procesu: vlastni spodni polovina, sdilene jadro.
-pub struct AddressSpace {
-    table: Option<PageTable>,
-}
-
-impl AddressSpace {
-    pub fn new() -> Option<Self> {
-        Some(Self {
-            table: Some(new_address_space()?),
-        })
-    }
-
-    pub fn translate(&self, virt: VirtAddr) -> Option<PhysAddr> {
-        self.table.as_ref()?.translate(virt)
-    }
-}
-
-impl Drop for AddressSpace {
-    fn drop(&mut self) {
-        if let Some(table) = self.table.take() {
-            // SAFETY: procesy zatim nemaji vlakna, takze adresni prostor
-            // neni aktivni na zadnem CPU. TODO: az budou userspace vlakna,
-            // ruseni musi pockat, az proces nebezi nikde.
-            unsafe { table.destroy() };
-        }
-    }
 }

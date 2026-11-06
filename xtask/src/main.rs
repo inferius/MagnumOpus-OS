@@ -29,7 +29,7 @@ prikazy:
   build    prelozi kernel a loader
   image    build + vytvori target/os-x86_64.img (GPT, ESP FAT32)
   run      image + spusti QEMU (x86_64, OVMF)
-  test     kernel se self-testy, QEMU bez okna, vysledek jako navratovy kod
+  test     testy knihoven na hostiteli, pak jadro a userspace v QEMU bez okna
 
 prepinace:
   --release        release profil
@@ -115,6 +115,7 @@ fn run_cli() -> Result<()> {
         Some("test") => {
             opts.test = true;
             opts.headless = true;
+            host_tests()?;
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             run_qemu(&image, &opts)
@@ -125,6 +126,30 @@ fn run_cli() -> Result<()> {
         }
         _ => Err(format!("neznamy prikaz {command:?}\n\n{USAGE}").into()),
     }
+}
+
+/// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
+/// chyb a syscallu).
+fn host_tests() -> Result<()> {
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let status = Command::new(cargo)
+        .current_dir(workspace_root())
+        .args([
+            "test",
+            "--quiet",
+            "--package",
+            "abi",
+            "--package",
+            "initfs",
+            "--features",
+            "initfs/std",
+        ])
+        .status()?;
+    if !status.success() {
+        return Err("testy knihoven na hostiteli selhaly".into());
+    }
+    println!("xtask: testy knihoven na hostiteli prosly");
+    Ok(())
 }
 
 fn workspace_root() -> PathBuf {
@@ -147,34 +172,74 @@ fn profile_dir(opts: &Options) -> &'static str {
 struct Artifacts {
     kernel: PathBuf,
     loader: PathBuf,
+    initfs: PathBuf,
 }
 
-fn cargo_build(package: &str, target: &str, opts: &Options) -> Result<()> {
+/// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
+/// souboru v initfs).
+const USER_PROGRAMS: &[&str] = &["init", "echo"];
+
+fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut cmd = Command::new(cargo);
     cmd.current_dir(workspace_root())
-        .args(["build", "--package", package, "--target", target]);
+        .args(["build", "--target", target]);
+    for p in packages {
+        cmd.args(["--package", p]);
+    }
     if opts.release {
         cmd.arg("--release");
     }
-    if opts.test && package == "kernel" {
+    if opts.test && packages.contains(&"kernel") {
         cmd.args(["--features", "qemu-test"]);
+    }
+    if user {
+        // Userspace ma stejny target jako jadro, ale jine priznaky (bez
+        // code-model=kernel z .cargo/config.toml). Vlastni adresar, aby se
+        // buildy jadra a userspace navzajem neprekladaly znovu.
+        // CARGO_ENCODED_RUSTFLAGS oddeluje priznaky znakem 0x1F.
+        let separator = char::from(0x1F).to_string();
+        let flags = ["-Crelocation-model=static", "-Cforce-frame-pointers=yes"].join(&separator);
+        cmd.env("CARGO_ENCODED_RUSTFLAGS", flags)
+            .arg("--target-dir")
+            .arg(user_target_dir());
     }
     let status = cmd.status()?;
     if !status.success() {
-        return Err(format!("build {package} ({target}) selhal").into());
+        return Err(format!("build {} ({target}) selhal", packages.join(", ")).into());
     }
     Ok(())
 }
 
+fn user_target_dir() -> PathBuf {
+    target_dir().join("user")
+}
+
 fn build(opts: &Options) -> Result<Artifacts> {
-    cargo_build("kernel", KERNEL_TARGET, opts)?;
-    cargo_build("loader", LOADER_TARGET, opts)?;
+    cargo_build(&["kernel"], KERNEL_TARGET, opts, false)?;
+    cargo_build(&["loader"], LOADER_TARGET, opts, false)?;
+    cargo_build(USER_PROGRAMS, KERNEL_TARGET, opts, true)?;
     let target = target_dir();
     let profile = profile_dir(opts);
+
+    let user_bin = user_target_dir().join(KERNEL_TARGET).join(profile);
+    let mut files = Vec::new();
+    for name in USER_PROGRAMS {
+        let data = std::fs::read(user_bin.join(name))
+            .map_err(|e| format!("nelze cist program {name}: {e}"))?;
+        files.push((name.to_string(), data));
+    }
+    let refs: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(n, d)| (n.as_str(), d.as_slice()))
+        .collect();
+    let initfs = target.join(format!("initfs-{profile}.img"));
+    std::fs::write(&initfs, initfs::build(&refs))?;
+
     Ok(Artifacts {
         kernel: target.join(KERNEL_TARGET).join(profile).join("kernel"),
         loader: target.join(LOADER_TARGET).join(profile).join("loader.efi"),
+        initfs,
     })
 }
 
@@ -184,6 +249,7 @@ fn image_for(artifacts: &Artifacts, opts: &Options) -> Result<PathBuf> {
     let files = [
         ("EFI/BOOT/BOOTX64.EFI", artifacts.loader.as_path()),
         ("os/kernel.elf", artifacts.kernel.as_path()),
+        ("os/initfs.img", artifacts.initfs.as_path()),
     ];
     image::create_disk_image(&path, &files)?;
     println!("xtask: obraz disku {}", path.display());

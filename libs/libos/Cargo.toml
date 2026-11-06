@@ -1,0 +1,12 @@
+[package]
+name = "libos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Knihovna pro programy v userspace: syscally, objekty, start procesu"
+
+[dependencies]
+abi.workspace = true
+elf.workspace = true
+initfs.workspace = true
+linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"] }

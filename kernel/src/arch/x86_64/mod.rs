@@ -9,10 +9,12 @@ pub mod paging;
 mod serial;
 mod smp;
 mod time;
+mod user;
 
 pub use serial::SerialPort;
 pub use smp::Trampoline;
 pub use time::now_ns;
+pub use user::{CPU_LOCAL_OFFSET, CpuLocal};
 
 use core::arch::asm;
 
@@ -48,6 +50,7 @@ pub unsafe fn init_boot_cpu() {
         idt::init();
         idt::load();
         paging::init_cpu();
+        user::init_cpu();
         // 8259 PIC: zamaskovat vsechny linky na master i slave.
         cpu::outb(0x21, 0xFF);
         cpu::outb(0xA1, 0xFF);
@@ -100,6 +103,7 @@ pub unsafe fn init_ap_cpu() {
         clear_cpu_local();
         idt::load();
         paging::init_cpu();
+        user::init_cpu();
         apic::init_cpu(false, 0);
     }
 }
@@ -155,6 +159,56 @@ pub fn cpu_local() -> u64 {
 /// Naplanuje preruseni casovace na tomto CPU za `ns`; `None` ho zastavi.
 pub fn set_timer(ns: Option<u64>) {
     apic::set_oneshot(ns);
+}
+
+/// Nastavi zasobnik jadra pro vstup z userspace na tomto CPU.
+///
+/// # Safety
+///
+/// Volat na vlastnim CPU se zakazanymi prerusenimi, `local` jsou data
+/// tohoto CPU.
+pub unsafe fn set_kernel_stack(local: &CpuLocal, top: u64) {
+    // SAFETY: predano volajicim.
+    unsafe { user::set_kernel_stack(local, top) }
+}
+
+/// Prvni vstup aktualniho vlakna do userspace.
+///
+/// # Safety
+///
+/// Viz `user::enter_user`.
+pub unsafe fn enter_user(entry: u64, stack: u64, arg0: u64, arg1: u64) -> ! {
+    // SAFETY: predano volajicim.
+    unsafe { user::enter_user(entry, stack, arg0, arg1) }
+}
+
+/// Fyzicka adresa aktivni korenove tabulky stranek.
+pub fn current_page_table() -> u64 {
+    cpu::read_cr3() & 0x000F_FFFF_FFFF_F000
+}
+
+/// Prepne adresni prostor, pokud uz neni aktivni.
+///
+/// # Safety
+///
+/// `root` musi byt platna PML4 se sdilenou polovinou jadra.
+pub unsafe fn switch_page_table(root: u64) {
+    if current_page_table() != root {
+        // SAFETY: predano volajicim; jadro je ve vsech adresnich
+        // prostorech namapovane stejne.
+        unsafe { cpu::write_cr3(root) };
+    }
+}
+
+/// Zahodi TLB zaznamy userspace na tomto CPU (globalni stranky jadra zustanou).
+pub fn flush_tlb_local() {
+    // SAFETY: zapis stejne hodnoty do CR3 jen vyprazdni TLB.
+    unsafe { cpu::write_cr3(cpu::read_cr3()) };
+}
+
+/// Pozada CPU o vyprazdneni TLB (po zmene mapovani userspace).
+pub fn send_tlb_flush(cpu_hw_id: u32) {
+    apic::send_ipi(cpu_hw_id, apic::VECTOR_TLB_FLUSH);
 }
 
 /// Pozada CPU s danym hardwarovym ID o preplanovani.

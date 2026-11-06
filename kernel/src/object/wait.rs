@@ -17,6 +17,10 @@ pub fn wait_many(
 ) -> Result<(usize, Signals), Error> {
     let me = sched::current();
     loop {
+        // Ukoncovane vlakno nesmi dal cekat (napr. kill procesu).
+        if me.kill_requested() {
+            return Err(Error::Canceled);
+        }
         let seq = me.prepare_wait();
         let mut registered = 0;
         let mut result = None;

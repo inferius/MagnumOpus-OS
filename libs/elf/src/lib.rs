@@ -1,4 +1,8 @@
-//! Minimalni parser ELF64 - jen to, co loader potrebuje k nahrani kernelu.
+//! Minimalni parser ELF64 pro x86_64: staticke spustitelne soubory
+//! (ET_EXEC). Pouziva ho UEFI loader (jadro), jadro (proces init) a libos
+//! (dalsi procesy). Overuje, ze vsechna data lezi uvnitr souboru.
+
+#![no_std]
 
 const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 const ELFCLASS64: u8 = 2;
@@ -9,6 +13,7 @@ const PT_LOAD: u32 = 1;
 
 pub const PF_X: u32 = 1;
 pub const PF_W: u32 = 2;
+pub const PF_R: u32 = 4;
 
 /// Nahratelny segment (PT_LOAD).
 #[derive(Debug, Clone, Copy)]
@@ -29,13 +34,22 @@ pub struct ElfFile<'a> {
 }
 
 #[derive(Debug)]
-// Polozky se ctou jen pres Debug ve zprave paniky.
-#[allow(dead_code)]
 pub enum ElfError {
     TooShort,
     BadMagic,
     Unsupported(&'static str),
     BadSegment,
+}
+
+impl core::fmt::Display for ElfError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::TooShort => f.write_str("soubor je kratsi nez hlavicky ELF"),
+            Self::BadMagic => f.write_str("neni to ELF (chybi magicke cislo)"),
+            Self::Unsupported(what) => write!(f, "nepodporovany ELF: {what}"),
+            Self::BadSegment => f.write_str("segment ELF lezi mimo soubor nebo pretece"),
+        }
+    }
 }
 
 fn bytes<const N: usize>(d: &[u8], off: usize) -> Result<[u8; N], ElfError> {

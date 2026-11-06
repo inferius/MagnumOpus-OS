@@ -16,34 +16,20 @@ const GENERATION_BITS: u32 = 32 - INDEX_BITS;
 const MAX_GENERATION: u16 = (1 << GENERATION_BITS) - 1;
 const MAX_HANDLES: usize = (1 << INDEX_BITS) - 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Handle(u32);
+pub use abi::Handle;
 
-#[allow(dead_code, reason = "prevod z/do hodnot syscallu (milnik 4)")]
-impl Handle {
-    pub const INVALID: Self = Self(0);
+fn make_handle(index: usize, generation: u16) -> Handle {
+    Handle(((generation as u32) << INDEX_BITS) | (index as u32 + 1))
+}
 
-    pub const fn from_raw(raw: u32) -> Self {
-        Self(raw)
-    }
+fn index_of(h: Handle) -> Option<usize> {
+    (h.0 & ((1 << INDEX_BITS) - 1))
+        .checked_sub(1)
+        .map(|i| i as usize)
+}
 
-    pub const fn raw(self) -> u32 {
-        self.0
-    }
-
-    fn new(index: usize, generation: u16) -> Self {
-        Self(((generation as u32) << INDEX_BITS) | (index as u32 + 1))
-    }
-
-    fn index(self) -> Option<usize> {
-        (self.0 & ((1 << INDEX_BITS) - 1))
-            .checked_sub(1)
-            .map(|i| i as usize)
-    }
-
-    fn generation(self) -> u16 {
-        (self.0 >> INDEX_BITS) as u16
-    }
+fn generation_of(h: Handle) -> u16 {
+    (h.0 >> INDEX_BITS) as u16
 }
 
 struct Entry {
@@ -85,15 +71,14 @@ impl HandleTable {
         };
         let slot = &mut self.slots[index];
         slot.entry = Some(Entry { object, rights });
-        Ok(Handle::new(index, slot.generation))
+        Ok(make_handle(index, slot.generation))
     }
 
     fn entry(&self, handle: Handle) -> Result<&Entry, Error> {
-        let slot = handle
-            .index()
+        let slot = index_of(handle)
             .and_then(|i| self.slots.get(i))
             .ok_or(Error::BadHandle)?;
-        if slot.generation != handle.generation() {
+        if slot.generation != generation_of(handle) {
             return Err(Error::BadHandle);
         }
         slot.entry.as_ref().ok_or(Error::BadHandle)
@@ -135,15 +120,26 @@ impl HandleTable {
     }
 
     pub fn close(&mut self, handle: Handle) -> Result<(), Error> {
+        self.take(handle).map(|_| ())
+    }
+
+    /// Odebere handle z tabulky a vrati objekt s pravy (presun handlu
+    /// jinam, napr. do zpravy kanalu).
+    pub fn take(&mut self, handle: Handle) -> Result<(Arc<dyn KernelObject>, Rights), Error> {
         self.entry(handle)?;
-        let index = handle.index().unwrap();
+        let index = index_of(handle).unwrap();
         let slot = &mut self.slots[index];
-        slot.entry = None;
+        let entry = slot.entry.take().unwrap();
         if slot.generation < MAX_GENERATION {
             slot.generation += 1;
             self.free.push(index);
         }
         // Jinak slot vyradime: zustane prazdny a uz se nepouzije.
-        Ok(())
+        Ok((entry.object, entry.rights))
+    }
+
+    /// Overi handle a jeho prava bez odebrani.
+    pub fn check(&self, handle: Handle, required: Rights) -> Result<(), Error> {
+        self.get(handle, required).map(|_| ())
     }
 }

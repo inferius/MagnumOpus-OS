@@ -13,7 +13,6 @@
 extern crate alloc;
 
 mod arch;
-mod elf;
 
 use alloc::vec::Vec;
 use core::mem::size_of;
@@ -39,6 +38,10 @@ const KERNEL_PATH: &CStr16 = cstr16!("\\os\\kernel.elf");
 /// diky nim kernel v mape pameti pozna, co mu loader pripravil.
 const MEM_KERNEL: MemoryType = MemoryType::custom(0x8000_0001);
 const MEM_BOOT_DATA: MemoryType = MemoryType::custom(0x8000_0002);
+/// Cesta k obrazu initfs (nepovinny; bez nej jadro nespusti zadny proces).
+const INITFS_PATH: &CStr16 = cstr16!("\\os\\initfs.img");
+
+const MEM_INITFS: MemoryType = MemoryType::custom(0x8000_0003);
 
 /// Rezerva polozek mapy pameti navic: mezi zjistenim velikosti a ukoncenim
 /// boot services se mapa jeste muze rozdelit (alokace firmwaru i nase).
@@ -72,6 +75,7 @@ fn main() -> Status {
             .expect("mapovani framebufferu selhalo");
     }
     let acpi_rsdp = find_acpi_rsdp();
+    let (initfs_phys, initfs_len) = load_initfs();
 
     let (kernel_phys_start, kernel_phys_len) = load_kernel(&elf, &mut tables);
     let entry = elf.entry;
@@ -118,6 +122,8 @@ fn main() -> Status {
         acpi_rsdp,
         kernel_phys_start,
         kernel_phys_len,
+        initfs_phys,
+        initfs_len,
     };
     // SAFETY: `boot_info_phys` je cela stranka alokovana pro BootInfo,
     // zarovnana na 4 KiB (vic nez zarovnani BootInfo).
@@ -136,11 +142,35 @@ fn main() -> Status {
     }
 }
 
-fn read_kernel() -> Vec<u8> {
+fn boot_fs() -> uefi::fs::FileSystem {
     let fs = boot::get_image_file_system(boot::image_handle())
         .expect("nelze otevrit souborovy system, ze ktereho byl loader spusten");
-    let mut fs = uefi::fs::FileSystem::new(fs);
-    fs.read(KERNEL_PATH).expect("nelze nacist \\os\\kernel.elf")
+    uefi::fs::FileSystem::new(fs)
+}
+
+/// Nahraje initfs do stranek typu MEM_INITFS (jadro je po prevzeti uvolni).
+/// Vraci (fyzicka adresa, delka), (0, 0) pokud soubor chybi.
+fn load_initfs() -> (u64, u64) {
+    let data = match boot_fs().read(INITFS_PATH) {
+        Ok(d) => d,
+        Err(e) => {
+            log::warn!("initfs nenalezen ({e:?}), jadro nespusti zadny proces");
+            return (0, 0);
+        }
+    };
+    let len = data.len() as u64;
+    let phys = alloc_pages(len.div_ceil(SIZE_4K).max(1), MEM_INITFS);
+    // SAFETY: cil je prave alokovany blok o velikosti alespon `len`,
+    // zdroj je samostatny Vec.
+    unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), phys as *mut u8, data.len()) };
+    log::info!("initfs {len} B na {phys:#x}");
+    (phys, len)
+}
+
+fn read_kernel() -> Vec<u8> {
+    boot_fs()
+        .read(KERNEL_PATH)
+        .expect("nelze nacist \\os\\kernel.elf")
 }
 
 fn alloc_pages(count: u64, ty: MemoryType) -> u64 {
@@ -286,6 +316,7 @@ fn memory_kind(ty: MemoryType) -> MemoryKind {
         | MemoryType::BOOT_SERVICES_DATA => MemoryKind::Reclaimable,
         MEM_KERNEL => MemoryKind::Kernel,
         MEM_BOOT_DATA => MemoryKind::BootData,
+        MEM_INITFS => MemoryKind::Initfs,
         MemoryType::ACPI_RECLAIM => MemoryKind::AcpiReclaimable,
         MemoryType::ACPI_NON_VOLATILE => MemoryKind::AcpiNvs,
         MemoryType::RUNTIME_SERVICES_CODE | MemoryType::RUNTIME_SERVICES_DATA => {

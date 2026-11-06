@@ -1,0 +1,8 @@
+[package]
+name = "elf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Minimalni parser ELF64 (loader, jadro, libos)"
+
+[dependencies]

@@ -22,7 +22,9 @@ mod object;
 mod sched;
 mod smp;
 mod sync;
+mod syscall;
 mod tests;
+mod userboot;
 
 use boot_info::{BOOT_INFO_MAGIC, BOOT_INFO_VERSION, BootInfo};
 use core::fmt::Write;
@@ -112,20 +114,42 @@ extern "sysv64" fn kernel_main(boot_info: u64) -> ! {
     let cpus = smp::start_secondary_cpus(platform, boot_info);
     log::info!("bezi {cpus} z {} CPU", platform.cpus.len());
 
-    sched::spawn("init", sched::Qos::Normal, init_main);
+    sched::spawn("boot", sched::Qos::Normal, move || boot_main(boot_info));
     sched::idle_loop()
 }
 
-/// Prvni vlakno jadra. Pozdeji spusti prvni proces v userspace.
-fn init_main() {
-    let ok = tests::run_all();
-    if ok {
-        log::info!("self-testy prosly, jadro bezi");
+/// Prvni vlakno jadra: self-testy jadra a spusteni procesu `init`.
+fn boot_main(boot_info: &'static BootInfo) {
+    let kernel_ok = tests::run_all();
+    if kernel_ok {
+        log::info!("self-testy jadra prosly");
     } else {
-        log::error!("self-testy selhaly");
+        log::error!("self-testy jadra selhaly");
+    }
+
+    let init_code = match userboot::start_init(boot_info) {
+        Ok(Some(init)) => {
+            // Init bezi dal sam; tady jen cekame na jeho konec (v testech je
+            // jeho navratovy kod vysledkem userspace testu).
+            let _ = object::wait::wait_one(&*init, object::Signals::TERMINATED, None);
+            init.exit_code()
+        }
+        Ok(None) => None,
+        Err(e) => {
+            log::error!("init se nepodarilo spustit: {e}");
+            None
+        }
+    };
+    match init_code {
+        Some(0) => log::info!("init skoncil uspesne"),
+        Some(code) => log::error!(
+            "init skoncil s kodem {code} ({})",
+            abi::process::describe_exit(code)
+        ),
+        None => log::error!("init nebezi"),
     }
     if cfg!(feature = "qemu-test") {
-        arch::qemu_exit(ok);
+        arch::qemu_exit(kernel_ok && init_code == Some(0));
     }
 }
 

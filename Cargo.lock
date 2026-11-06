@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "abi"
+version = "0.1.0"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -96,6 +100,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "echo"
+version = "0.1.0"
+dependencies = [
+ "libos",
+]
+
+[[package]]
+name = "elf"
+version = "0.1.0"
+
+[[package]]
 name = "fatfs"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -162,6 +177,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "init"
+version = "0.1.0"
+dependencies = [
+ "libos",
+]
+
+[[package]]
+name = "initfs"
+version = "0.1.0"
+
+[[package]]
 name = "js-sys"
 version = "0.3.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -176,7 +202,10 @@ dependencies = [
 name = "kernel"
 version = "0.1.0"
 dependencies = [
+ "abi",
  "boot-info",
+ "elf",
+ "initfs",
  "noto-sans-mono-bitmap",
  "spin",
 ]
@@ -188,10 +217,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
+name = "libos"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "elf",
+ "initfs",
+ "linked_list_allocator",
+]
+
+[[package]]
+name = "linked_list_allocator"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b23ac50abb8261cb38c6e2a7192d3302e0836dac1628f6a93b82b4fad185897"
+dependencies = [
+ "spinning_top",
+]
+
+[[package]]
 name = "loader"
 version = "0.1.0"
 dependencies = [
  "boot-info",
+ "elf",
  "log",
  "uefi",
 ]
@@ -299,6 +348,15 @@ name = "spin"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
+dependencies = [
+ "lock_api",
+]
+
+[[package]]
+name = "spinning_top"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b9eb1a2f4c41445a3a0ff9abc5221c5fcd28e1f13cd7c0397706f9ac938ddb0"
 dependencies = [
  "lock_api",
 ]
@@ -492,4 +550,5 @@ version = "0.1.0"
 dependencies = [
  "crc32fast",
  "fatfs",
+ "initfs",
 ]

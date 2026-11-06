@@ -102,6 +102,18 @@ pub unsafe fn init_cpu() {
         if features.nx {
             cpu::wrmsr(cpu::MSR_EFER, cpu::rdmsr(cpu::MSR_EFER) | cpu::EFER_NXE);
         }
+        // SMEP: jadro nikdy nespusti kod ze stranek userspace. SMAP: jadro
+        // nikdy necte ani nezapisuje pres adresy userspace (data procesu
+        // kopiruje pres primou mapu fyzicke pameti), takze stac/clac neni
+        // potreba a kazdy omylem vznikly pristup skonci vyjimkou.
+        let mut cr4 = cpu::read_cr4();
+        if features.smep {
+            cr4 |= cpu::CR4_SMEP;
+        }
+        if features.smap {
+            cr4 |= cpu::CR4_SMAP;
+        }
+        cpu::write_cr4(cr4);
     }
     NX_ENABLED.store(features.nx, Ordering::Relaxed);
     HUGE_1G.store(features.huge_1g, Ordering::Relaxed);

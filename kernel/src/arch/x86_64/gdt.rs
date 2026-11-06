@@ -161,3 +161,20 @@ unsafe fn load(tables: *mut CpuTables) {
         );
     }
 }
+
+/// Adresa TSS aktualniho CPU (z GDT a registru TR).
+pub fn current_tss() -> u64 {
+    let mut ptr = DescriptorTablePointer { limit: 0, base: 0 };
+    let selector: u16;
+    // SAFETY: sgdt a str jen ctou registry procesoru do pameti/registru.
+    unsafe {
+        asm!("sgdt [{}]", in(reg) &mut ptr, options(nostack, preserves_flags));
+        asm!("str {:x}", out(reg) selector, options(nomem, nostack, preserves_flags));
+    }
+    let base = ptr.base as *const u64;
+    let index = (selector >> 3) as usize;
+    // SAFETY: TR ukazuje na platny 16bajtovy deskriptor TSS v GDT
+    // nahrane funkci `load` (GDT tohoto CPU zije navzdy).
+    let (low, high) = unsafe { (*base.add(index), *base.add(index + 1)) };
+    ((low >> 16) & 0xFF_FFFF) | (((low >> 56) & 0xFF) << 24) | (high << 32)
+}

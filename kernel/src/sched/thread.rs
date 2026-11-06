@@ -2,11 +2,13 @@
 
 use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::sync::Arc;
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 use crate::arch::context::Context;
 use crate::mm::KernelStack;
+use crate::object::process::Process;
 use crate::object::{KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::sync::SpinLock;
 
@@ -57,8 +59,15 @@ pub struct Thread {
     wait_seq: AtomicU64,
     pub(super) last_cpu: AtomicUsize,
     pub(super) context: UnsafeCell<Context>,
-    _stack: Option<KernelStack>,
+    stack: Option<KernelStack>,
     pub(super) entry: SpinLock<Option<Box<dyn FnOnce() + Send>>>,
+    /// Proces, do ktereho vlakno patri (`None` = vlakno jadra).
+    pub process: Option<Arc<Process>>,
+    /// Pozadavek na ukonceni (kill procesu): vlakno skonci pri navratu do
+    /// userspace nebo z cekani v jadre.
+    kill: AtomicBool,
+    /// Vlakno uz bylo spusteno (vlakna procesu se vytvari a spousti zvlast).
+    pub(super) started: AtomicBool,
 }
 
 // SAFETY: `context` cte a zapisuje jen planovac na CPU, ktere vlakno prave
@@ -76,6 +85,7 @@ impl Thread {
         context: Context,
         entry: Option<Box<dyn FnOnce() + Send>>,
         cpu: usize,
+        process: Option<Arc<Process>>,
     ) -> Self {
         Self {
             core: ObjectCore::new(Signals::NONE),
@@ -87,9 +97,25 @@ impl Thread {
             wait_seq: AtomicU64::new(0),
             last_cpu: AtomicUsize::new(cpu),
             context: UnsafeCell::new(context),
-            _stack: stack,
+            stack,
             entry: SpinLock::new(entry),
+            process,
+            kill: AtomicBool::new(false),
+            started: AtomicBool::new(false),
         }
+    }
+
+    /// Vrchol zasobniku jadra (`None` u idle vlaken na zasobniku od startu).
+    pub fn kernel_stack_top(&self) -> Option<u64> {
+        self.stack.as_ref().map(KernelStack::top)
+    }
+
+    pub fn kill_requested(&self) -> bool {
+        self.kill.load(Ordering::Acquire)
+    }
+
+    pub(super) fn set_kill(&self) {
+        self.kill.store(true, Ordering::Release);
     }
 
     pub(super) fn state(&self) -> u8 {

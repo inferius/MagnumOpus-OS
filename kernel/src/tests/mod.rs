@@ -9,6 +9,7 @@ mod mm;
 mod object;
 mod platform;
 mod sched;
+mod userspace;
 
 use alloc::sync::Arc;
 use core::time::Duration;
@@ -27,6 +28,7 @@ const SUITES: &[(&str, Suite)] = &[
     ("log", log::TESTS),
     ("planovac", sched::TESTS),
     ("objekty", object::TESTS),
+    ("userspace", userspace::TESTS),
 ];
 
 /// Spusti vsechny testy. Vraci true, kdyz prosly (pri selhani se panikuje,

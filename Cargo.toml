@@ -1,8 +1,19 @@
 [workspace]
 resolver = "3"
-members = ["loader", "kernel", "libs/boot-info", "xtask"]
-# Na hostiteli se standardne buildi jen xtask. Loader a kernel maji vlastni
-# targety a builduje je `cargo xtask build`.
+members = [
+    "loader",
+    "kernel",
+    "libs/abi",
+    "libs/boot-info",
+    "libs/elf",
+    "libs/initfs",
+    "libs/libos",
+    "user/echo",
+    "user/init",
+    "xtask",
+]
+# Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace
+# maji vlastni targety a builduje je `cargo xtask build`.
 default-members = ["xtask"]
 
 [workspace.package]
@@ -11,7 +22,10 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+abi = { path = "libs/abi" }
 boot-info = { path = "libs/boot-info" }
+elf = { path = "libs/elf" }
+initfs = { path = "libs/initfs" }
 
 [profile.dev]
 panic = "abort"

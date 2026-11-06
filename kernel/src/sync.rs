@@ -54,6 +54,11 @@ impl<T: ?Sized> SpinLock<T> {
         }
     }
 
+    /// Pristup bez zamku, kdyz mame vyhradni referenci (napr. v Drop).
+    pub fn get_mut(&mut self) -> &mut T {
+        self.value.get_mut()
+    }
+
     pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
         let irq_was_enabled = interrupts::disable();
         if self

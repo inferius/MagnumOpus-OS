@@ -18,7 +18,7 @@
 pub const BOOT_INFO_MAGIC: u64 = u64::from_le_bytes(*b"OSBOOTIF");
 
 /// Verze rozhrani. Zvysit pri kazde nekompatibilni zmene struktur.
-pub const BOOT_INFO_VERSION: u32 = 1;
+pub const BOOT_INFO_VERSION: u32 = 2;
 
 /// Zacatek prime mapy fyzicke pameti (zacatek horni poloviny adresniho prostoru).
 pub const PHYS_MAP_BASE: u64 = 0xFFFF_8000_0000_0000;
@@ -52,6 +52,9 @@ pub struct BootInfo {
     /// Fyzicky rozsah, kam loader nahral segmenty kernelu.
     pub kernel_phys_start: u64,
     pub kernel_phys_len: u64,
+    /// Obraz initfs v pameti (fyzicka adresa a delka), 0 pokud chybi.
+    pub initfs_phys: u64,
+    pub initfs_len: u64,
 }
 
 impl BootInfo {
@@ -119,6 +122,8 @@ pub enum MemoryKind {
     Unusable = 8,
     /// Vse ostatni, nesahat.
     Reserved = 9,
+    /// Obraz initfs od loaderu; po prevzeti jadrem lze uvolnit.
+    Initfs = 10,
 }
 
 /// Format jednoho pixelu (vzdy 32 bitu na pixel).
