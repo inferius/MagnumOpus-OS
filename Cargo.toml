@@ -13,6 +13,7 @@ members = [
     "libs/libos",
     "libs/pci",
     "libs/virtio",
+    "tools/osfs",
     "user/devmgr",
     "user/echo",
     "user/fsd",

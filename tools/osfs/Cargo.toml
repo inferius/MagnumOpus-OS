@@ -1,0 +1,13 @@
+[package]
+name = "osfs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Hostitelsky nastroj pro souborovy system MagnumOpus: format, check, ls/cat/put a pripojeni ve Windows pres WinFsp"
+
+[dependencies]
+fs = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+proptest = "1"
