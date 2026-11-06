@@ -278,6 +278,40 @@ pub fn invalid_syscall() -> Result<u64> {
     call(nr::COUNT + 1000, [0; 6])
 }
 
+pub fn vmo_create_contiguous(resource: u32, size: u64) -> Result<u32> {
+    call(
+        nr::VMO_CREATE_CONTIGUOUS,
+        [resource as u64, size, 0, 0, 0, 0],
+    )
+    .map(|v| v as u32)
+}
+
+pub fn vmo_create_physical(resource: u32, phys: u64, size: u64) -> Result<u32> {
+    call(
+        nr::VMO_CREATE_PHYSICAL,
+        [resource as u64, phys, size, 0, 0, 0],
+    )
+    .map(|v| v as u32)
+}
+
+pub fn vmo_phys_addr(resource: u32, vmo: u32, offset: u64) -> Result<u64> {
+    call(
+        nr::VMO_PHYS_ADDR,
+        [resource as u64, vmo as u64, offset, 0, 0, 0],
+    )
+}
+
+pub fn interrupt_create(resource: u32) -> Result<(u32, abi::object::MsiMessage)> {
+    let mut msi = abi::object::MsiMessage::default();
+    let out = &mut msi as *mut abi::object::MsiMessage as u64;
+    let h = call(nr::INTERRUPT_CREATE, [resource as u64, out, 0, 0, 0, 0])?;
+    Ok((h as u32, msi))
+}
+
+pub fn interrupt_ack(h: u32) -> Result<()> {
+    call(nr::INTERRUPT_ACK, [h as u64, 0, 0, 0, 0, 0]).map(|_| ())
+}
+
 #[allow(dead_code)]
 fn _assert_error_is_copy(e: Error) -> Error {
     e

@@ -1,0 +1,16 @@
+[package]
+name = "devmgr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "devmgr"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+pci = { path = "../../libs/pci" }
+virtio = { path = "../../libs/virtio" }

@@ -124,6 +124,17 @@ pub enum ObjectType {
     Process = 3,
     Channel = 4,
     MemoryObject = 5,
+    Resource = 6,
+    Interrupt = 7,
+}
+
+/// Zprava MSI, kterou ovladac zapise do zarizeni (vystup `INTERRUPT_CREATE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct MsiMessage {
+    pub address: u64,
+    pub data: u32,
+    pub _reserved: u32,
 }
 
 /// Polozka pro `OBJECT_WAIT_MANY`: vstupem handle a maska, vystupem

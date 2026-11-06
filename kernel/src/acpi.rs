@@ -46,6 +46,17 @@ pub struct Platform {
     pub ioapics: Vec<IoApic>,
     pub overrides: Vec<InterruptOverride>,
     pub hpet_phys: Option<u64>,
+    /// Okna konfiguracniho prostoru PCI Express (ECAM) z tabulky MCFG.
+    pub pci_ecam: Vec<PciEcam>,
+}
+
+/// Jedno okno ECAM: konfigurace sbernic `bus_start..=bus_end` segmentu.
+#[derive(Debug, Clone, Copy)]
+pub struct PciEcam {
+    pub phys: u64,
+    pub segment: u16,
+    pub bus_start: u8,
+    pub bus_end: u8,
 }
 
 /// Cteni z fyzicke pameti pres primou mapu. ACPI tabulky lezi v oblastech
@@ -150,6 +161,7 @@ pub fn parse(rsdp_phys: u64) -> Result<Platform> {
                 parse_madt(t, &mut platform);
                 found_madt = true;
             }
+            b"MCFG" => parse_mcfg(t, &mut platform),
             b"HPET" => match u64_at(t, 44) {
                 Some(addr) => platform.hpet_phys = Some(addr),
                 None => log::warn!("tabulka HPET je prilis kratka, vynechana"),
@@ -206,4 +218,23 @@ pub(crate) fn parse_madt_entry(kind: u8, e: &[u8], p: &mut Platform) -> Option<(
         _ => {}
     }
     Some(())
+}
+
+fn parse_mcfg(t: &[u8], p: &mut Platform) {
+    // Hlavicka 36 B + 8 B rezerva, pak polozky po 16 B.
+    let mut off = 44;
+    while off + 16 <= t.len() {
+        let entry = (|| {
+            Some(PciEcam {
+                phys: u64_at(t, off)?,
+                segment: u16_at(t, off + 8)?,
+                bus_start: u8_at(t, off + 10)?,
+                bus_end: u8_at(t, off + 11)?,
+            })
+        })();
+        if let Some(e) = entry {
+            p.pci_ecam.push(e);
+        }
+        off += 16;
+    }
 }

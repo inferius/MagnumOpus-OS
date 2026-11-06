@@ -26,7 +26,8 @@ pub struct Header {
 #[repr(C)]
 pub struct Entry {
     pub kind: u32,
-    pub _reserved: u32,
+    /// Doplnujici hodnota podle druhu (napr. rozsah sbernic u PCI_ECAM).
+    pub arg: u32,
 }
 
 /// Co znamena predany handle.
@@ -37,6 +38,11 @@ pub mod kind {
     pub const INITFS: u32 = 2;
     /// Volny handle predany rodicem podle dohody s programem.
     pub const USER: u32 = 3;
+    /// Korenovy Resource (pristup k hardwaru).
+    pub const ROOT_RESOURCE: u32 = 4;
+    /// Fyzicky objekt pameti s oknem ECAM (konfigurace PCI Express);
+    /// `arg` = prvni sbernice | posledni sbernice << 8 | segment << 16.
+    pub const PCI_ECAM: u32 = 5;
 }
 
 pub const HEADER_SIZE: usize = core::mem::size_of::<Header>();
@@ -67,11 +73,13 @@ impl Entry {
     pub fn to_bytes(self) -> [u8; ENTRY_SIZE] {
         let mut b = [0; ENTRY_SIZE];
         b[0..4].copy_from_slice(&self.kind.to_le_bytes());
+        b[4..8].copy_from_slice(&self.arg.to_le_bytes());
         b
     }
 
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
         let kind = u32::from_le_bytes(b.get(0..4)?.try_into().ok()?);
-        Some(Self { kind, _reserved: 0 })
+        let arg = u32::from_le_bytes(b.get(4..8)?.try_into().ok()?);
+        Some(Self { kind, arg })
     }
 }

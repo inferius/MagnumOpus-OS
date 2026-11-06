@@ -211,6 +211,14 @@ pub fn send_tlb_flush(cpu_hw_id: u32) {
     apic::send_ipi(cpu_hw_id, apic::VECTOR_TLB_FLUSH);
 }
 
+/// Zprava MSI (adresa, data), ktera doruci preruseni s vektorem `vector`
+/// na bootovaci CPU (pevny rezim, hrana).
+/// TODO: rozkladani preruseni mezi CPU.
+pub fn msi_message(vector: u8) -> (u64, u32) {
+    let dest = crate::sched::all_cpus().next().map_or(0, |c| c.hw_id);
+    (0xFEE0_0000 | ((dest as u64 & 0xFF) << 12), vector as u32)
+}
+
 /// Pozada CPU s danym hardwarovym ID o preplanovani.
 pub fn send_reschedule(cpu_hw_id: u32) {
     apic::send_ipi(cpu_hw_id, apic::VECTOR_RESCHEDULE);

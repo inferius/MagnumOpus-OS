@@ -1,0 +1,187 @@
+//! Protokol blokoveho zarizeni (verze 1): zpravy po kanalu mezi klientem
+//! (napr. souborovy system) a ovladacem disku.
+//!
+//! Pozadavek: hlavicka 16 B (`op` u32, `count` u32, `lba` u64) a u zapisu
+//! data. Odpoved: hlavicka 16 B (`status` i32 = 0 nebo kod chyby, rezerva,
+//! `value` u64) a u cteni data. Sektor ma 512 B, jeden pozadavek prenese
+//! nejvyse `MAX_SECTORS` sektoru (data se vejdou do zpravy kanalu).
+//!
+//! Verze 1 je synchronni a kopiruje data zpravou. TODO: sdilena pamet
+//! a fronty pozadavku (asynchronni I/O podle navrhu).
+
+#![no_std]
+
+extern crate alloc;
+
+use alloc::vec;
+use alloc::vec::Vec;
+
+use libos::{Channel, Error, Result};
+
+pub const SECTOR: usize = 512;
+pub const MAX_SECTORS: u32 = 64;
+pub const HEADER: usize = 16;
+
+/// Kody operaci.
+pub mod op {
+    /// Informace o zarizeni: `value` = pocet sektoru.
+    pub const INFO: u32 = 0;
+    pub const READ: u32 = 1;
+    pub const WRITE: u32 = 2;
+    /// Zapsat vse z mezipameti zarizeni na medium.
+    pub const FLUSH: u32 = 3;
+}
+
+/// Rozebrany pozadavek.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Request {
+    pub op: u32,
+    pub count: u32,
+    pub lba: u64,
+}
+
+impl Request {
+    pub fn encode(&self, data: &[u8]) -> Vec<u8> {
+        let mut m = Vec::with_capacity(HEADER + data.len());
+        m.extend_from_slice(&self.op.to_le_bytes());
+        m.extend_from_slice(&self.count.to_le_bytes());
+        m.extend_from_slice(&self.lba.to_le_bytes());
+        m.extend_from_slice(data);
+        m
+    }
+
+    pub fn decode(m: &[u8]) -> Option<(Self, &[u8])> {
+        let h = m.get(..HEADER)?;
+        let r = Self {
+            op: u32::from_le_bytes(h[0..4].try_into().ok()?),
+            count: u32::from_le_bytes(h[4..8].try_into().ok()?),
+            lba: u64::from_le_bytes(h[8..16].try_into().ok()?),
+        };
+        Some((r, &m[HEADER..]))
+    }
+}
+
+/// Odpoved ovladace.
+pub fn encode_reply(result: Result<u64>, data: &[u8]) -> Vec<u8> {
+    let (status, value) = match result {
+        Ok(v) => (0i32, v),
+        Err(e) => (e.code(), 0),
+    };
+    let mut m = Vec::with_capacity(HEADER + data.len());
+    m.extend_from_slice(&status.to_le_bytes());
+    m.extend_from_slice(&0u32.to_le_bytes());
+    m.extend_from_slice(&value.to_le_bytes());
+    m.extend_from_slice(data);
+    m
+}
+
+fn decode_reply(m: &[u8]) -> Result<(u64, &[u8])> {
+    let h = m.get(..HEADER).ok_or(Error::Corrupted)?;
+    let status = i32::from_le_bytes(h[0..4].try_into().unwrap());
+    if status != 0 {
+        return Err(Error::from_code(status as i64).unwrap_or(Error::Corrupted));
+    }
+    Ok((
+        u64::from_le_bytes(h[8..16].try_into().unwrap()),
+        &m[HEADER..],
+    ))
+}
+
+/// Klient blokoveho zarizeni.
+pub struct BlockClient {
+    channel: Channel,
+    sectors: u64,
+}
+
+impl BlockClient {
+    pub fn new(channel: Channel) -> Result<Self> {
+        let mut c = Self {
+            channel,
+            sectors: 0,
+        };
+        c.sectors = c
+            .call(
+                Request {
+                    op: op::INFO,
+                    count: 0,
+                    lba: 0,
+                },
+                &[],
+            )?
+            .0;
+        Ok(c)
+    }
+
+    /// Velikost zarizeni v sektorech po 512 B.
+    pub fn sectors(&self) -> u64 {
+        self.sectors
+    }
+
+    fn call(&self, req: Request, data: &[u8]) -> Result<(u64, Vec<u8>)> {
+        self.channel.write(&req.encode(data), Vec::new())?;
+        let reply = self.channel.read(None)?;
+        let (value, payload) = decode_reply(&reply.data)?;
+        Ok((value, payload.to_vec()))
+    }
+
+    /// Precte sektory od `lba` do `buf` (delka = nasobek 512).
+    pub fn read(&self, lba: u64, buf: &mut [u8]) -> Result<()> {
+        if !buf.len().is_multiple_of(SECTOR) {
+            return Err(Error::InvalidArgs);
+        }
+        for (i, chunk) in buf.chunks_mut(MAX_SECTORS as usize * SECTOR).enumerate() {
+            let count = (chunk.len() / SECTOR) as u32;
+            let lba = lba + (i * MAX_SECTORS as usize) as u64;
+            let (_, data) = self.call(
+                Request {
+                    op: op::READ,
+                    count,
+                    lba,
+                },
+                &[],
+            )?;
+            if data.len() != chunk.len() {
+                return Err(Error::Corrupted);
+            }
+            chunk.copy_from_slice(&data);
+        }
+        Ok(())
+    }
+
+    /// Zapise sektory od `lba` (delka = nasobek 512).
+    pub fn write(&self, lba: u64, data: &[u8]) -> Result<()> {
+        if !data.len().is_multiple_of(SECTOR) {
+            return Err(Error::InvalidArgs);
+        }
+        for (i, chunk) in data.chunks(MAX_SECTORS as usize * SECTOR).enumerate() {
+            let count = (chunk.len() / SECTOR) as u32;
+            let lba = lba + (i * MAX_SECTORS as usize) as u64;
+            self.call(
+                Request {
+                    op: op::WRITE,
+                    count,
+                    lba,
+                },
+                chunk,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        self.call(
+            Request {
+                op: op::FLUSH,
+                count: 0,
+                lba: 0,
+            },
+            &[],
+        )
+        .map(|_| ())
+    }
+}
+
+/// Buffer pro odpoved na cteni (pomocna funkce pro ovladace).
+pub fn zeroed_sectors(count: u32) -> Vec<u8> {
+    vec![0; count as usize * SECTOR]
+}

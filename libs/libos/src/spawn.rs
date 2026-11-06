@@ -15,10 +15,32 @@ use crate::{Channel, Handle, Process, Thread, Vmo};
 /// Velikost zasobniku hlavniho vlakna noveho procesu.
 pub const STACK_SIZE: u64 = 256 * 1024;
 
-/// Spusti program `image` (ELF) jako proces `name`. Handly v `handles`
-/// dostane ve startovni zprave jako `kind::USER`. Vraci proces a konec
-/// bootstrap kanalu rodice (pro dalsi komunikaci s potomkem).
-pub fn spawn(name: &str, image: &[u8], handles: Vec<Handle>) -> Result<(Process, Channel)> {
+/// Handle predavany novemu procesu ve startovni zprave.
+pub struct StartHandle {
+    pub kind: u32,
+    pub arg: u32,
+    pub handle: Handle,
+}
+
+impl StartHandle {
+    /// Handle podle dohody s programem (`kind::USER`).
+    pub fn user(handle: Handle) -> Self {
+        Self {
+            kind: bootstrap::kind::USER,
+            arg: 0,
+            handle,
+        }
+    }
+
+    pub fn new(kind: u32, arg: u32, handle: Handle) -> Self {
+        Self { kind, arg, handle }
+    }
+}
+
+/// Spusti program `image` (ELF) jako proces `name` a preda mu handly
+/// `handles` ve startovni zprave (vlastni proces doplni sam). Vraci proces
+/// a konec bootstrap kanalu rodice (pro dalsi komunikaci s potomkem).
+pub fn spawn(name: &str, image: &[u8], handles: Vec<StartHandle>) -> Result<(Process, Channel)> {
     let elf = elf::ElfFile::parse(image).map_err(|_| Error::Corrupted)?;
     let process = Process::create(name)?;
 
@@ -43,35 +65,32 @@ pub fn spawn(name: &str, image: &[u8], handles: Vec<Handle>) -> Result<(Process,
 
     let (parent_end, child_end) = Channel::create()?;
     let mut data = Vec::new();
-    let count = 1 + handles.len() as u32;
-    data.extend_from_slice(
-        &Header {
-            magic: bootstrap::MAGIC,
-            version: bootstrap::VERSION,
-            count,
-            _reserved: 0,
-        }
-        .to_bytes(),
-    );
+    let header = Header {
+        magic: bootstrap::MAGIC,
+        version: bootstrap::VERSION,
+        count: 1 + handles.len() as u32,
+        _reserved: 0,
+    };
+    data.extend_from_slice(&header.to_bytes());
     data.extend_from_slice(
         &Entry {
             kind: bootstrap::kind::SELF_PROCESS,
-            _reserved: 0,
+            arg: 0,
         }
         .to_bytes(),
     );
-    for _ in &handles {
+    let mut all = Vec::with_capacity(1 + handles.len());
+    all.push(process.handle().duplicate(None)?);
+    for h in handles {
         data.extend_from_slice(
             &Entry {
-                kind: bootstrap::kind::USER,
-                _reserved: 0,
+                kind: h.kind,
+                arg: h.arg,
             }
             .to_bytes(),
         );
+        all.push(h.handle);
     }
-    let mut all = Vec::with_capacity(1 + handles.len());
-    all.push(process.handle().duplicate(None)?);
-    all.extend(handles);
     parent_end.write(&data, all)?;
 
     let thread = Thread::create(&process, name)?;

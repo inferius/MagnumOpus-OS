@@ -13,11 +13,13 @@ use abi::bootstrap::{self, Entry, Header};
 use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, PAGE_SIZE};
 use boot_info::{BootInfo, MemoryKind};
 
+use crate::acpi::Platform;
 use crate::error::{Error, Result};
 use crate::log;
 use crate::mm::{PhysAddr, phys};
 use crate::object::channel::{Channel, Message};
 use crate::object::process::Process;
+use crate::object::resource::Resource;
 use crate::object::vmo::MemoryObject;
 use crate::object::{KernelObject, Rights};
 use crate::sched;
@@ -28,7 +30,7 @@ const STACK_SIZE: u64 = 256 * 1024;
 /// Nahraje a spusti `init` z initfs predaneho loaderem. Obraz zkopiruje do
 /// objektu pameti (ten dostane init) a pamet loaderu vrati alokatoru.
 /// `Ok(None)`, pokud loader zadny initfs nepredal.
-pub fn start_init(boot_info: &BootInfo) -> Result<Option<Arc<Process>>> {
+pub fn start_init(boot_info: &BootInfo, platform: &Platform) -> Result<Option<Arc<Process>>> {
     if boot_info.initfs_len == 0 {
         log::warn!("loader nepredal initfs: zadny proces se nespusti");
         return Ok(None);
@@ -46,7 +48,7 @@ pub fn start_init(boot_info: &BootInfo) -> Result<Option<Arc<Process>>> {
     };
     let initfs_vmo = MemoryObject::new(boot_info.initfs_len)?;
     initfs_vmo.write(0, image)?;
-    let result = load_init(image, &initfs_vmo);
+    let result = load_init(image, &initfs_vmo, platform);
     // Obraz uz je v objektu pameti a init nahrany: pamet loaderu je volna.
     // SAFETY: BootInfo overeny pri startu.
     let regions = unsafe { boot_info.memory_map() };
@@ -55,7 +57,11 @@ pub fn start_init(boot_info: &BootInfo) -> Result<Option<Arc<Process>>> {
     result.map(Some)
 }
 
-fn load_init(image: &[u8], initfs_vmo: &Arc<MemoryObject>) -> Result<Arc<Process>> {
+fn load_init(
+    image: &[u8],
+    initfs_vmo: &Arc<MemoryObject>,
+    platform: &Platform,
+) -> Result<Arc<Process>> {
     let fs = initfs::Initfs::parse(image).map_err(|e| {
         log::error!("initfs je poskozeny: {e}");
         Error::Corrupted
@@ -78,7 +84,7 @@ fn load_init(image: &[u8], initfs_vmo: &Arc<MemoryObject>) -> Result<Arc<Process
         .handles()
         .insert(init_end.clone(), init_end.default_rights())?;
     drop(init_end);
-    send_bootstrap(&kernel_end, &process, initfs_vmo)?;
+    send_bootstrap(&kernel_end, &process, initfs_vmo, platform)?;
     drop(kernel_end);
 
     let thread = sched::create_user_thread(&process, "init")?;
@@ -127,25 +133,52 @@ fn send_bootstrap(
     channel: &Channel,
     process: &Arc<Process>,
     initfs: &Arc<MemoryObject>,
+    platform: &Platform,
 ) -> Result<()> {
-    let kinds = [bootstrap::kind::SELF_PROCESS, bootstrap::kind::INITFS];
-    let mut data = vec::Vec::new();
-    data.extend_from_slice(
-        &Header {
-            magic: bootstrap::MAGIC,
-            version: bootstrap::VERSION,
-            count: 2,
-            _reserved: 0,
-        }
-        .to_bytes(),
-    );
-    for kind in kinds {
-        data.extend_from_slice(&Entry { kind, _reserved: 0 }.to_bytes());
-    }
-    let initfs_rights = Rights::BASIC | Rights::READ | Rights::MAP | Rights::EXECUTE;
-    let handles: vec::Vec<(Arc<dyn KernelObject>, Rights)> = vec![
-        (process.clone(), process.default_rights()),
-        (initfs.clone(), initfs_rights),
+    let mut entries: vec::Vec<(u32, u32, Arc<dyn KernelObject>, Rights)> = vec![
+        (
+            bootstrap::kind::SELF_PROCESS,
+            0,
+            process.clone(),
+            process.default_rights(),
+        ),
+        (
+            bootstrap::kind::INITFS,
+            0,
+            initfs.clone(),
+            Rights::BASIC | Rights::READ | Rights::MAP | Rights::EXECUTE,
+        ),
     ];
+    // Pristup k hardwaru: init ho preda spravci zarizeni.
+    let root = Resource::new_root();
+    let root_rights = root.default_rights();
+    entries.push((bootstrap::kind::ROOT_RESOURCE, 0, root, root_rights));
+    for ecam in &platform.pci_ecam {
+        let buses = ecam.bus_end as u64 - ecam.bus_start as u64 + 1;
+        // Okno pocina na sbernici bus_start; 1 MiB konfigurace na sbernici.
+        let phys = ecam.phys + ecam.bus_start as u64 * (1 << 20);
+        let vmo = MemoryObject::new_physical(phys, buses << 20)?;
+        let arg = ecam.bus_start as u32 | (ecam.bus_end as u32) << 8 | (ecam.segment as u32) << 16;
+        entries.push((
+            bootstrap::kind::PCI_ECAM,
+            arg,
+            vmo,
+            Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP,
+        ));
+    }
+
+    let mut data = vec::Vec::new();
+    let header = Header {
+        magic: bootstrap::MAGIC,
+        version: bootstrap::VERSION,
+        count: entries.len() as u32,
+        _reserved: 0,
+    };
+    data.extend_from_slice(&header.to_bytes());
+    let mut handles = vec::Vec::new();
+    for (kind, arg, object, rights) in entries {
+        data.extend_from_slice(&Entry { kind, arg }.to_bytes());
+        handles.push((object, rights));
+    }
     channel.write(Message { data, handles })
 }

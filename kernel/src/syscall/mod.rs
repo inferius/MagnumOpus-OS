@@ -7,6 +7,7 @@
 
 mod channel;
 mod handle;
+mod hw;
 mod misc;
 mod object;
 mod process;
@@ -71,6 +72,11 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::THREAD_CREATE => process::thread_create(a),
         nr::THREAD_START => process::thread_start(a),
         nr::THREAD_EXIT => process::thread_exit(),
+        nr::VMO_CREATE_CONTIGUOUS => hw::vmo_create_contiguous(a),
+        nr::VMO_CREATE_PHYSICAL => hw::vmo_create_physical(a),
+        nr::VMO_PHYS_ADDR => hw::vmo_phys_addr(a),
+        nr::INTERRUPT_CREATE => hw::interrupt_create(a),
+        nr::INTERRUPT_ACK => hw::interrupt_ack(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -107,6 +113,11 @@ pub fn name(number: u64) -> &'static str {
         "THREAD_START",
         "THREAD_EXIT",
         "THREAD_YIELD",
+        "VMO_CREATE_CONTIGUOUS",
+        "VMO_CREATE_PHYSICAL",
+        "VMO_PHYS_ADDR",
+        "INTERRUPT_CREATE",
+        "INTERRUPT_ACK",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

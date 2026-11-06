@@ -88,6 +88,11 @@ fn every_syscall_is_documented() {
         "THREAD_START",
         "THREAD_EXIT",
         "THREAD_YIELD",
+        "VMO_CREATE_CONTIGUOUS",
+        "VMO_CREATE_PHYSICAL",
+        "VMO_PHYS_ADDR",
+        "INTERRUPT_CREATE",
+        "INTERRUPT_ACK",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

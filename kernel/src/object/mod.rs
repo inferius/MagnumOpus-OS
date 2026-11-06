@@ -8,7 +8,9 @@
 pub mod channel;
 pub mod event;
 pub mod handle;
+pub mod interrupt;
 pub mod process;
+pub mod resource;
 pub mod vmo;
 pub mod wait;
 

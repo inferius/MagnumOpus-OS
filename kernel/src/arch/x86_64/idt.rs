@@ -255,6 +255,10 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
         }
         v if v == VECTOR_HALT as u64 => halt_forever(),
         v if v == VECTOR_SPURIOUS as u64 => {} // spurious se nepotvrzuje
+        v if crate::object::interrupt::is_device_vector(v) => {
+            apic::eoi();
+            crate::object::interrupt::dispatch(v as u8);
+        }
         _ => {
             apic::eoi();
             log::warn!("necekane preruseni, vektor {vector}");

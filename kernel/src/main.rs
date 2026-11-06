@@ -127,7 +127,7 @@ fn boot_main(boot_info: &'static BootInfo) {
         log::error!("self-testy jadra selhaly");
     }
 
-    let init_code = match userboot::start_init(boot_info) {
+    let init_code = match userboot::start_init(boot_info, PLATFORM.get().unwrap()) {
         Ok(Some(init)) => {
             // Init bezi dal sam; tady jen cekame na jeho konec (v testech je
             // jeho navratovy kod vysledkem userspace testu).

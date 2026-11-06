@@ -109,6 +109,11 @@ pub unsafe fn init(boot_info: &BootInfo) {
     let regions = unsafe { boot_info.memory_map() };
 
     phys::init(regions);
+    *RAM_RANGES.lock() = regions
+        .iter()
+        .filter(|r| r.kind != MemoryKind::Mmio && r.kind != MemoryKind::Reserved)
+        .map(|r| (r.start, r.end()))
+        .collect();
 
     let mut space = PageTable::new().expect("nedostatek pameti pro PML4");
     space
@@ -124,6 +129,20 @@ pub unsafe fn init(boot_info: &BootInfo) {
     unsafe { space.activate() };
     KERNEL_ROOT.store(space.root(), Ordering::Release);
     *KERNEL_SPACE.lock() = Some(space);
+}
+
+/// Rozsahy fyzicke pameti, ktere jsou RAM (nebo je pouziva firmware),
+/// pro kontrolu fyzickych objektu pameti ovladacu.
+static RAM_RANGES: SpinLock<Vec<(u64, u64)>> = SpinLock::new(Vec::new());
+
+/// Je rozsah `start..start+len` mimo RAM a pamet firmwaru (tj. registry
+/// zarizeni)? Fyzicke objekty pameti smi ukazovat jen sem - jinak by
+/// ovladac mohl namapovat pamet jadra nebo jinych procesu.
+pub fn is_device_memory(start: u64, len: u64) -> bool {
+    let Some(end) = start.checked_add(len) else {
+        return false;
+    };
+    !RAM_RANGES.lock().iter().any(|&(s, e)| start < e && s < end)
 }
 
 /// Vrati alokatoru pamet loaderu a boot services. Volat az kdyz z ni jadro

@@ -58,8 +58,19 @@ pub const THREAD_EXIT: u64 = 23;
 /// Prenecha CPU. `()`
 pub const THREAD_YIELD: u64 = 24;
 
+/// Fyzicky souvisla pamet pro DMA. `(resource, size) -> handle`
+pub const VMO_CREATE_CONTIGUOUS: u64 = 25;
+/// Okno na registry zarizeni. `(resource, phys, size) -> handle`
+pub const VMO_CREATE_PHYSICAL: u64 = 26;
+/// Fyzicka adresa stranky objektu pameti. `(resource, vmo, offset) -> phys`
+pub const VMO_PHYS_ADDR: u64 = 27;
+/// Objekt preruseni s MSI zpravou. `(resource, out_msi_ptr) -> handle`
+pub const INTERRUPT_CREATE: u64 = 28;
+/// Potvrzeni preruseni (smaze SIGNALED). `(interrupt)`
+pub const INTERRUPT_ACK: u64 = 29;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 25;
+pub const COUNT: u64 = 30;
 
 /// Deadline "cekat neomezene".
 pub const DEADLINE_INFINITE: u64 = u64::MAX;

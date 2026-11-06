@@ -222,3 +222,48 @@ the process ends (code -1,000,002 unless `PROCESS_EXIT` was called before).
 
 `() -> 0`. Gives the CPU to the next ready thread of the same or higher
 class.
+
+## Hardware (drivers)
+
+These require a handle to a **Resource** with the `MANAGE` right (hardware
+access). The kernel creates a single root Resource and gives it to `init`
+(startup message, kind `ROOT_RESOURCE`); init passes it to the device
+manager, which passes it to drivers. Without an IOMMU a driver with DMA can
+write anywhere in memory, so a Resource is effectively full access to the
+system.
+
+### `VMO_CREATE_CONTIGUOUS`
+
+`(resource, size) -> handle`. A physically contiguous memory object for DMA
+(max 4 MiB), zero-filled. Errors: `INVALID_ARGS` (0 or over 4 MiB),
+`NO_MEMORY` (no contiguous block), `ACCESS_DENIED`, `WRONG_TYPE`.
+
+### `VMO_CREATE_PHYSICAL`
+
+`(resource, phys, size) -> handle`. A window onto device registers (MMIO).
+The range must not lie in RAM or firmware memory (otherwise
+`ACCESS_DENIED`). It is mapped uncached; it cannot be read through
+`VMO_READ`/`VMO_WRITE` (`NOT_SUPPORTED`, reading registers has side
+effects) and cannot be used as a syscall buffer (`BAD_ADDRESS`). Errors:
+`INVALID_ARGS` (unaligned address), `ACCESS_DENIED`.
+
+### `VMO_PHYS_ADDR`
+
+`(resource, vmo, offset) -> phys`. Physical address of byte `offset` of the
+memory object (for programming DMA). For a contiguous object it holds for the
+whole range, for a regular one only within one page. Errors:
+`OUT_OF_RANGE`, `ACCESS_DENIED`.
+
+### `INTERRUPT_CREATE`
+
+`(resource, out_msi_ptr) -> handle`. An interrupt object with a free CPU
+vector. Writes the MSI message `{ address: u64, data: u32, reserved: u32 }`
+to `out_msi_ptr`; the driver writes it into the device (MSI-X table). When
+the device raises the interrupt, the object gets `SIGNALED`. Errors:
+`NO_RESOURCES` (out of vectors), `ACCESS_DENIED`, `BAD_ADDRESS`.
+
+### `INTERRUPT_ACK`
+
+`(interrupt) -> 0`. Acknowledges the interrupt (clears `SIGNALED`). A
+driver should acknowledge **before** servicing the device so an interrupt
+arriving during servicing is not lost. Requires `WRITE`.

@@ -7,9 +7,14 @@ members = [
     "libs/boot-info",
     "libs/elf",
     "libs/initfs",
+    "libs/blockproto",
     "libs/libos",
+    "libs/pci",
+    "libs/virtio",
+    "user/devmgr",
     "user/echo",
     "user/init",
+    "user/virtio-blk",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace

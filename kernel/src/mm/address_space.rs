@@ -137,6 +137,9 @@ impl AddressSpace {
         };
 
         let mut map_flags = MapFlags::USER;
+        if vmo.is_uncached() {
+            map_flags = map_flags | MapFlags::UNCACHED;
+        }
         if flags & MAP_WRITE != 0 {
             map_flags = map_flags | MapFlags::WRITE;
         }
@@ -234,7 +237,9 @@ impl AddressSpace {
         let mut pos = addr;
         while pos < end {
             let (start, m) = inner.mapping_at(pos).ok_or(Error::BadAddress)?;
-            if write && m.flags & MAP_WRITE == 0 {
+            // Registry zarizeni nejsou v prime mape: jako buffer syscallu
+            // je nelze pouzit.
+            if (write && m.flags & MAP_WRITE == 0) || m.vmo.is_uncached() {
                 return Err(Error::BadAddress);
             }
             pos = start + m.len;

@@ -217,3 +217,46 @@ proces (kód -1 000 002, pokud předtím nevolal `PROCESS_EXIT`).
 ### `THREAD_YIELD`
 
 `() -> 0`. Přenechá CPU dalšímu připravenému vláknu stejné nebo vyšší třídy.
+
+## Hardware (ovladače)
+
+Vyžadují handle na **Resource** s právem `MANAGE` (oprávnění k hardwaru).
+Jádro vytvoří jediný kořenový Resource a dá ho procesu `init` (startovní
+zpráva, druh `ROOT_RESOURCE`); init ho předá správci zařízení a ten
+ovladačům. Bez IOMMU může ovladač s DMA zapsat kamkoli do paměti, takže
+Resource je fakticky plné oprávnění k systému.
+
+### `VMO_CREATE_CONTIGUOUS`
+
+`(resource, size) -> handle`. Fyzicky souvislý objekt paměti pro DMA
+(max. 4 MiB), vyplněný nulami. Chyby: `INVALID_ARGS` (0 nebo nad 4 MiB),
+`NO_MEMORY` (není souvislý blok), `ACCESS_DENIED`, `WRONG_TYPE`.
+
+### `VMO_CREATE_PHYSICAL`
+
+`(resource, phys, size) -> handle`. Okno na registry zařízení (MMIO).
+Rozsah nesmí ležet v RAM ani paměti firmwaru (jinak `ACCESS_DENIED`).
+Mapuje se bez cache; přes `VMO_READ`/`VMO_WRITE` ho číst nejde
+(`NOT_SUPPORTED`, čtení registrů má vedlejší efekty) a jako buffer
+syscallu ho použít nejde (`BAD_ADDRESS`). Chyby: `INVALID_ARGS`
+(nezarovnaná adresa), `ACCESS_DENIED`.
+
+### `VMO_PHYS_ADDR`
+
+`(resource, vmo, offset) -> phys`. Fyzická adresa bajtu `offset` objektu
+paměti (pro programování DMA). U souvislého objektu platí pro celý rozsah,
+u běžného jen v rámci jedné stránky. Chyby: `OUT_OF_RANGE`, `ACCESS_DENIED`.
+
+### `INTERRUPT_CREATE`
+
+`(resource, out_msi_ptr) -> handle`. Objekt přerušení s volným vektorem
+CPU. Do `out_msi_ptr` zapíše zprávu MSI `{ address: u64, data: u32,
+reserved: u32 }`, kterou ovladač zapíše do zařízení (tabulka MSI-X).
+Když zařízení přerušení vyvolá, objekt dostane signál `SIGNALED`. Chyby:
+`NO_RESOURCES` (došly vektory), `ACCESS_DENIED`, `BAD_ADDRESS`.
+
+### `INTERRUPT_ACK`
+
+`(interrupt) -> 0`. Potvrdí přerušení (smaže `SIGNALED`). Ovladač má
+potvrdit **před** obsluhou zařízení, aby se přerušení, které přijde během
+obsluhy, neztratilo. Vyžaduje `WRITE`.

@@ -1,0 +1,9 @@
+[package]
+name = "virtio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+libos = { path = "../libos" }
+pci = { path = "../pci" }

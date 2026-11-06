@@ -188,7 +188,7 @@ struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
-const USER_PROGRAMS: &[&str] = &["init", "echo"];
+const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk"];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -380,6 +380,13 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             image.display()
         ))
         .args(["-device", "virtio-blk-pci,drive=osdisk"])
+        // Maly prazdny disk jen pro test ovladace (testy do nej zapisuji).
+        .arg("-drive")
+        .arg(format!(
+            "if=none,id=scratch,format=raw,file={}",
+            scratch_disk()?.display()
+        ))
+        .args(["-device", "virtio-blk-pci,drive=scratch"])
         // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.
         .args(["-nic", "none"])
         // Seriova linka do terminalu a zaroven do souboru (target/serial.log),
@@ -455,6 +462,13 @@ fn run_qemu_test(mut cmd: Command) -> Result<()> {
         }
         code => Err(format!("testy selhaly (navratovy kod QEMU {code:?})").into()),
     }
+}
+
+/// Prazdny disk 1 MiB pro testy ovladace (pri kazdem behu znovu vynulovany).
+fn scratch_disk() -> Result<PathBuf> {
+    let path = target_dir().join("scratch.img");
+    std::fs::write(&path, vec![0u8; 1024 * 1024])?;
+    Ok(path)
 }
 
 fn pflash_arg(path: &Path, readonly: bool) -> String {

@@ -4,6 +4,7 @@
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
 mod basic;
+mod drivers;
 mod ipc;
 mod memory;
 mod process;
@@ -20,7 +21,19 @@ const SUITES: &[(&str, &[Test])] = &[
     ("pamet", memory::TESTS),
     ("ipc", ipc::TESTS),
     ("procesy", process::TESTS),
+    ("ovladace", drivers::TESTS),
 ];
+
+/// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).
+static DEVICES: spin::Once<crate::system::Devices> = spin::Once::new();
+
+pub fn set_devices(d: crate::system::Devices) {
+    DEVICES.call_once(|| d);
+}
+
+fn devices() -> Option<&'static crate::system::Devices> {
+    DEVICES.get()
+}
 
 /// Spusti vsechny testy, vraci pocet selhanych.
 pub fn run_all(startup: &Startup) -> usize {

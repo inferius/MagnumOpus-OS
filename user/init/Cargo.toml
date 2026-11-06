@@ -12,3 +12,5 @@ bench = false
 
 [dependencies]
 libos = { path = "../../libs/libos" }
+blockproto = { path = "../../libs/blockproto" }
+spin = "0.12"
