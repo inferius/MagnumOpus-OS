@@ -52,7 +52,13 @@ pub struct Service {
     pub fs: Option<Fs<BlkDev>>,
     /// Povolene testovaci operace (`SIMULATE_POWER_LOSS`).
     pub debug: bool,
+    /// Rozpracovany strankovany vypis: ((snapshot, cesta), polozky podle
+    /// slozeneho jmena). Zahodi ho kazda jina operace.
+    pub list_cache: Option<ListCache>,
 }
+
+/// Klic a obsah rozpracovaneho vypisu.
+pub type ListCache = ((Option<alloc::string::String>, alloc::string::String), Vec<(alloc::string::String, fs::DirEntry)>);
 
 impl Service {
     fn fs(&mut self) -> Result<&mut Fs<BlkDev>> {
@@ -63,6 +69,9 @@ impl Service {
     pub fn handle(&mut self, msg: &[u8]) -> Result<Writer> {
         let mut r = Reader::new(msg);
         let opcode = r.u32()?;
+        if opcode != op::LIST_PAGE && opcode != op::SNAP_LIST_PAGE {
+            self.list_cache = None;
+        }
         let mut w = Writer::new();
         if opcode == op::SIMULATE_POWER_LOSS {
             if !self.debug {
@@ -106,18 +115,40 @@ impl Service {
                     return Err(Error::BufferTooSmall);
                 }
             }
-            op::LIST_PAGE => {
+            op::LIST_PAGE | op::SNAP_LIST_PAGE => {
+                let snap = if opcode == op::SNAP_LIST_PAGE { Some(r.str()?) } else { None };
                 let path = r.str()?;
-                let (from, max) = (r.u32()? as usize, r.u32()? as usize);
-                let list = entries(fs.list(&path)?);
-                fsproto::encode_list_page(&mut w, &list, from, max, fsproto::MAX_REPLY);
-            }
-            op::SNAP_LIST_PAGE => {
-                let snap = r.str()?;
-                let path = r.str()?;
-                let (from, max) = (r.u32()? as usize, r.u32()? as usize);
-                let list = entries(fs.snapshot_list(&snap, &path)?);
-                fsproto::encode_list_page(&mut w, &list, from, max, fsproto::MAX_REPLY);
+                let after = r.str()?;
+                let max = r.u32()? as usize;
+                let key = (snap.clone(), path.clone());
+                // Vypis pro dalsi stranky drzet v pameti (jinak by se pro
+                // kazdou stranku sestavoval znovu); zahodi ho kazda jina
+                // operace, takze nikdy neni zastaraly.
+                let cached = self.list_cache.take().filter(|(k, _)| *k == key && !after.is_empty());
+                let list = match cached {
+                    Some((_, list)) => list,
+                    None => {
+                        let fs = self.fs.as_mut().ok_or(Error::IoError)?;
+                        let raw = match &snap {
+                            Some(s) => fs.snapshot_list(s, &path)?,
+                            None => fs.list(&path)?,
+                        };
+                        // Klic kurzoru = slozene jmeno (stejne poradi jako vypis).
+                        raw.into_iter().map(|e| (fs::fold_name(&e.name), e)).collect()
+                    }
+                };
+                let start = if after.is_empty() {
+                    0
+                } else {
+                    let a = fs::fold_name(&after);
+                    list.partition_point(|(k, _)| *k <= a)
+                };
+                let page: Vec<DirEntry> = entries(list[start..].iter().map(|(_, e)| e.clone()).collect());
+                let n = fsproto::encode_list_page(&mut w, &page, max, fsproto::MAX_REPLY);
+                if start + n < list.len() {
+                    self.list_cache = Some((key, list));
+                }
+                return Ok(w);
             }
             op::READ => {
                 let path = r.str()?;

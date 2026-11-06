@@ -102,6 +102,9 @@ pub struct Store<D: BlockDevice> {
     /// Kolik slotu superbloku neslo precist (chyba I/O). Kdyz aspon jeden,
     /// nejde bezpecne urcit nejnovejsi generaci: jen pro cteni.
     pub unreadable_slots: u32,
+    /// Necitelny je slot, kde by lezela novejsi generace: nejnovejsi stav
+    /// nejde bezpecne urcit, proto jen pro cteni.
+    pub newest_uncertain: bool,
     /// Intent log nesel precist cely (chyba I/O): prehrana je jen cast,
     /// log zustava na disku pro dalsi pokus, jen pro cteni.
     pub log_unreadable: bool,
@@ -209,6 +212,7 @@ impl<D: BlockDevice> Store<D> {
             poisoned: false,
             read_only: false,
             unreadable_slots: 0,
+            newest_uncertain: false,
             log_unreadable: false,
             stale_slots: Vec::new(),
             fallback: 0,
@@ -247,12 +251,12 @@ impl<D: BlockDevice> Store<D> {
         let mut found: Vec<(u64, u64, Vec<u8>)> = Vec::new();
         let mut buf = vec![0u8; BLOCK_SIZE];
         let mut last_err = Error::NotFound;
-        let mut unreadable = 0u32;
+        let mut unreadable: Vec<u64> = Vec::new();
         for i in 0..SB_COUNT {
             let slot = SB_FIRST + i;
             if let Err(e) = dev.read_block(slot, &mut buf) {
                 last_err = e;
-                unreadable += 1;
+                unreadable.push(slot);
                 continue;
             }
             match Superblock::decode_header(&buf) {
@@ -265,6 +269,12 @@ impl<D: BlockDevice> Store<D> {
         let Some(newest) = found.first().map(|&(_, g, _)| g) else {
             return Err(last_err);
         };
+        // Commity jdou postupne: generace newest + 1 by lezela jen ve slotu
+        // 1 + (newest + 1) mod 8 (a vyssi az po ni). Jen kdyz je necitelny
+        // prave ten, nejnovejsi stav nejde bezpecne urcit; vadny sektor
+        // v jinem slotu nic nezpochybnuje (jinak by byl svazek navzdy jen pro
+        // cteni).
+        let uncertain = unreadable.contains(&(SB_FIRST + (newest + 1) % SB_COUNT));
         for (k, (_, generation, raw)) in found.iter().enumerate() {
             if generation + REUSE_DELAY <= newest {
                 break;
@@ -285,8 +295,9 @@ impl<D: BlockDevice> Store<D> {
                     s.fallback = newest - generation;
                     // Necitelny slot mohl drzet novejsi generaci: zapis by
                     // ji po dalsim commitu prepsal. Jen pro cteni + hlaseni.
-                    s.unreadable_slots = unreadable;
-                    s.read_only = read_only || unreadable > 0;
+                    s.unreadable_slots = unreadable.len() as u32;
+                    s.newest_uncertain = uncertain;
+                    s.read_only = read_only || uncertain;
                     s.stale_slots = found[..k]
                         .iter()
                         .filter(|&&(_, g, _)| g > *generation)

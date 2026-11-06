@@ -189,11 +189,7 @@ impl Space {
                 .collect();
             for (ps, pl) in pieces {
                 s.ags[ag].take(ps, pl)?;
-                s.deferred
-                    .entry(r.txg + REUSE_DELAY)
-                    .or_default()
-                    .push((ps, pl));
-                s.deferred_blocks += pl;
+                s.defer(r.txg + REUSE_DELAY, ps, pl);
             }
         }
         Ok(s)

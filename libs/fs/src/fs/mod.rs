@@ -35,6 +35,7 @@ use crate::node::Child;
 use crate::store::{FormatOptions, Store};
 
 pub use check::CheckReport;
+
 pub use defrag::DefragReport;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,9 +109,14 @@ pub struct FsInfo {
     /// Pripojeno jen pro cteni (zarizeni bez zaruky trvanlivosti, neznamy
     /// ro_compat, nejista obnova - viz dalsi pole).
     pub read_only: bool,
-    /// Slotu superbloku, ktere nesly precist: nejnovejsi generaci nejde
-    /// bezpecne urcit, proto jen pro cteni.
+    /// Slotu superbloku, ktere nesly precist (vadne sektory).
     pub unreadable_superblocks: u32,
+    /// Necitelny je prave slot, kde by lezela novejsi generace: nejnovejsi
+    /// stav nejde bezpecne urcit, proto jen pro cteni.
+    pub newest_uncertain: bool,
+    /// Necitelny zbytek intent logu se pri pripojeni vedome zahodil
+    /// (`MountOptions::discard_unreadable_log`).
+    pub log_discarded: bool,
     /// Intent log nesel precist cely: prehrana jen cast, log zachovany.
     pub log_unreadable: bool,
     /// Kolik operaci se pri pripojeni prehralo z intent logu.
@@ -144,6 +150,21 @@ pub struct Fs<D: BlockDevice> {
     /// Pocet zmen stavu v pameti (strom, buffer dat) - `guarded` podle nej
     /// pozna, ze operace selhala az po zmene.
     mutations: u64,
+    /// Volba pripojeni: necitelny zbytek logu zahodit (viz `MountOptions`).
+    discard_unreadable_log: bool,
+    log_discarded: bool,
+}
+
+/// Volby pripojeni.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MountOptions {
+    /// Vynutit jen pro cteni (kontrola nebo zachrana dat bez zapisu).
+    pub read_only: bool,
+    /// Kdyz intent log nejde precist cely (vadny sektor), **vedome zahodit**
+    /// necitelny zbytek a pripojit zapisovatelne. Zmeny po posledni citelne
+    /// davce (i potvrzene `fsync`) se ztrati - jen pro obnovu, kdyz chyba
+    /// cteni nezmizi; bez volby je svazek jen pro cteni a log zustane.
+    pub discard_unreadable_log: bool,
 }
 
 /// Nejvetsi hloubka adresaru pri prochazeni rodicu. Vic = cyklus rodicu
@@ -183,14 +204,20 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Pripoji souborovy system: stav po poslednim commitu a prehrani
     /// intent logu (zmeny potvrzene `fsync`).
-    /// Pripoji svazek. Zarizeni bez zaruky trvanlivosti
-    /// (`Durability::None`) se pripoji jen pro cteni (`FsInfo::read_only`;
-    /// zmeny vraci `READ_ONLY`).
+    /// Pripoji svazek s vychozimi volbami. Zarizeni bez zaruky
+    /// trvanlivosti (`Durability::None`) se pripoji jen pro cteni
+    /// (`FsInfo::read_only`; zmeny vraci `READ_ONLY`).
     pub fn mount(dev: D) -> Result<Self> {
+        Self::mount_with(dev, MountOptions::default())
+    }
+
+    /// Pripoji svazek s volbami (obnova, kontrola bez zapisu).
+    pub fn mount_with(dev: D, opts: MountOptions) -> Result<Self> {
         let no_durability = dev.durability() == crate::device::Durability::None;
         let mut s = Store::open(dev)?;
-        // Jen pro cteni i kvuli neznamemu bitu ro_compat (nastavi `open`).
-        s.read_only |= no_durability;
+        // Jen pro cteni i kvuli neznamemu bitu ro_compat a nejiste obnove
+        // (nastavi `open`).
+        s.read_only |= no_durability || opts.read_only;
         let mut fs = Self {
             s,
             now: 0,
@@ -200,6 +227,8 @@ impl<D: BlockDevice> Fs<D> {
             replayed: 0,
             defrag_cursor: 0,
             mutations: 0,
+            discard_unreadable_log: opts.discard_unreadable_log,
+            log_discarded: false,
         };
         fs.replay_log()?;
         Ok(fs)
@@ -245,6 +274,8 @@ impl<D: BlockDevice> Fs<D> {
             fallback: self.s.fallback,
             read_only: self.s.read_only,
             unreadable_superblocks: self.s.unreadable_slots,
+            newest_uncertain: self.s.newest_uncertain,
+            log_discarded: self.log_discarded,
             log_unreadable: self.s.log_unreadable,
             replayed: self.replayed,
         }
@@ -428,6 +459,13 @@ impl<D: BlockDevice> Fs<D> {
     #[cfg(test)]
     pub(crate) fn test_put(&mut self, key: Key, value: Vec<u8>) -> Result<()> {
         self.put(key, value)
+    }
+
+    /// Testy: primo precte polozku stromu.
+    #[cfg(test)]
+    pub(crate) fn test_get(&mut self, key: Key) -> Result<Vec<u8>> {
+        let root = self.s.root;
+        btree::get(&mut self.s, &root, &key)?.ok_or(Error::NotFound)
     }
 
     /// Testy: blok, do ktereho pujde dalsi davka intent logu.

@@ -70,3 +70,57 @@ fn parent_cycle_is_corrupted_and_operation_rolled_back() {
     assert!(fs.stat("/a/b").is_ok());
     assert_eq!(fs.stat("/a/b/c").err(), Some(Error::NotFound));
 }
+
+#[test]
+fn double_free_of_deferred_blocks_is_detected() {
+    let mut fs = new_fs(1024);
+    fs.create("/f", Kind::File).unwrap();
+    fs.write("/f", 0, &[1u8; 3 * 4096]).unwrap();
+    fs.commit().unwrap();
+    let (oid, _) = fs.test_inode("/f").unwrap();
+    let raw = fs.test_get(Key::new(oid, item::EXTENT, 0)).unwrap();
+    // Zkraceni bloky uvolni odlozene (cekaji na ochrannou lhutu).
+    fs.truncate("/f", 0).unwrap();
+    // Poskozeny extent ukazuje na tytez (odlozene) bloky: druhe uvolneni
+    // se musi odhalit, ne zaradit podruhe.
+    fs.truncate("/f", 3 * 4096).unwrap();
+    fs.test_put(Key::new(oid, item::EXTENT, 0), raw).unwrap();
+    assert_eq!(fs.truncate("/f", 0).err(), Some(Error::Corrupted));
+    assert!(fs.commit().is_err());
+}
+
+#[test]
+fn fsync_refuses_after_invalid_free() {
+    let mut fs = new_fs(1024);
+    fs.create("/f", Kind::File).unwrap();
+    fs.truncate("/f", 3 * 4096).unwrap();
+    fs.commit().unwrap();
+    let (oid, _) = fs.test_inode("/f").unwrap();
+    let bad = Extent { phys: 1000, birth: 1, csums: alloc::vec![Csum::default(); 3] };
+    fs.test_put(Key::new(oid, item::EXTENT, 0), bad.encode()).unwrap();
+    // Prepis dat v bufferu: fsync je zapise a pri prepojeni narazi na
+    // "uvolneni" volnych bloku - nesmi nic potvrdit.
+    let _ = fs.write("/f", 0, &[2u8; 4096]);
+    assert!(fs.fsync().is_err());
+}
+
+#[test]
+fn check_reports_damaged_directory_entry() {
+    // Scenar z review: vadny zaznam adresare ve strome, stat vraci
+    // CORRUPTED - check nesmi hlasit cisty svazek.
+    let mut fs = new_fs(1024);
+    fs.create("/a", Kind::File).unwrap();
+    fs.commit().unwrap();
+    let key = Key::new(crate::layout::ROOT_OID, item::DIRENT, crate::names::name_hash(&crate::fold_name("a")));
+    fs.test_put(key, alloc::vec![1, 2, 3]).unwrap();
+    assert_eq!(fs.stat("/a").err(), Some(Error::Corrupted));
+    let r = fs.check(true).unwrap();
+    assert!(r.problems_total > 0, "kontrola hlasi cisty svazek");
+    // Totez s poskozenym zaznamem objektu.
+    let mut fs = new_fs(1024);
+    fs.create("/b", Kind::File).unwrap();
+    let (oid, _) = fs.test_inode("/b").unwrap();
+    fs.test_put(Key::new(oid, item::INODE, 0), alloc::vec![9; 128]).unwrap();
+    let r = fs.check(false).unwrap();
+    assert!(r.problems_total > 0);
+}

@@ -19,6 +19,23 @@ zápisy, levný `fsync`) a **nezabírat místo zbytečně** (režie metadat ~0,4
 > formátu v2 se nepřipojí (`NOT_SUPPORTED`); data se zatím nepřevádějí,
 > disky z nástroje `xtask` se vytvářejí znovu.
 
+## Co formát obsahuje a co ovladač používá
+
+Formát v3 má místo i pro věci, které ovladač zatím neumí. Aby nebylo
+sporné, co funguje:
+
+| Položka | Ve formátu | Ovladač dnes |
+|---|---|---|
+| UUID svazku, příznaky vlastností | ano | **používá** (žádný bit vlastnosti zatím není definovaný) |
+| číslo zařízení v `BlockPtr`, `device_index/count` v superbloku | ano | **jen jedno zařízení**: zařízení musí být 0 a počet 1, jinak `CORRUPTED`; víc disků (zrcadlo, RAID) až po fázi 5 |
+| příznaky `BlockPtr` (komprese, šifrování, sdílení, cloud) | vyhrazené | **nepoužívá**; uzel s příznakem = `NOT_SUPPORTED` |
+| příznaky extentu (předalokace) | vyhrazené | **nepoužívá**; extent s příznakem = `NOT_SUPPORTED` |
+| příznak objektu `INODE_REMOTE` | vyhrazený | **nepoužívá** (fáze 6) |
+| oprávnění (`acl`), vlastník, čas přístupu, počet rozšířených atributů v záznamu objektu | ano | **zapisuje 0**, nečte (fáze 1d a později) |
+| generace objektu, čas vytvoření | ano | **používá** (`Stat`, přehrání logu) |
+| symbolické odkazy, jména do 1024 znaků, limit velikosti | ano | **používá** |
+| datasety, klony, handly, protokol v2 | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
+
 ## Co nabízí
 
 | Vlastnost | Stav | Kde v dokumentu |
@@ -210,7 +227,7 @@ implementací.
 
 ### Ukazatel (`BlockPtr`, 40 B)
 
-> **Změna proti v2:** z 32 B na 40 B: číslo zařízení (16 bitů), délka v blocích a příznaky. **Proč:** uzel má 4 bloky, svazek může mít víc disků a komprese, šifrování a sdílené bloky se poznají přímo na ukazateli. ([všechny změny](fs-verze.md#přechod-v2---v3))
+> **Změna proti v2:** z 32 B na 40 B: číslo zařízení (16 bitů), délka v blocích a příznaky. **Proč:** uzel má 4 bloky a formát je připravený na víc disků a na kompresi, šifrování a sdílené bloky (poznají se přímo na ukazateli). **Ovladač zatím** umí jen jedno zařízení (číslo 0) a žádný příznak - viz [Co formát obsahuje](#co-formát-obsahuje-a-co-ovladač-používá). ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 | Offset | Velikost | Pole |
 |---|---|---|
@@ -221,8 +238,9 @@ implementací.
 | 36 | 2 | příznaky: 1 = komprimováno, 2 = šifrováno, 4 = sdílené bloky, 8 = jen v cloudu (rezervované; uzel s příznakem se odmítne `NOT_SUPPORTED`) |
 | 38 | 2 | rezerva (nuly) |
 
-48 bitů čísla bloku = až 1 EiB na zařízení; číslo zařízení je připravené pro
-svazky přes víc disků. Ukazatel na uzel musí mít délku přesně 4, zařízení 0
+48 bitů čísla bloku = až 1 EiB na zařízení; číslo zařízení je ve formátu
+připravené pro svazky přes víc disků, **ovladač zatím přijme jen zařízení 0**.
+Ukazatel na uzel musí mít délku přesně 4, zařízení 0
 a celý rozsah uvnitř svazku, jinak je uzel `CORRUPTED` (načte se dřív, než se ověří
 součet).
 
@@ -552,12 +570,23 @@ Připojení (`Store::open`) má tři oddělené kroky:
    (I/O, nedostatek paměti) se vrátí hned - přechodná chyba disku nesmí
    vést k návratu na starší stav.
 
-**Nejistá obnova = jen pro čtení.** Když některý slot superbloku nejde
-přečíst (chyba I/O, ne špatný součet), mohl držet novější generaci a tu
-nejde bezpečně určit. Svazek se pak připojí **jen pro čtení**
-s `info().unreadable_superblocks` > 0 (fsd vypíše varování) - zápis nad
-starší generací by po dalším commitu tu novější přepsal. Po odeznění chyby
-se při dalším připojení vybere správně.
+**Nejistá obnova = jen pro čtení.** Commity jdou postupně a generace `g`
+leží ve slotu `1 + g mod 8`, takže generace novější než nejnovější
+přečtená (`newest`) by mohla ležet **jen ve slotu pro `newest + 1`**. Když
+je nečitelný (chyba I/O, ne špatný součet) právě ten, nejnovější stav nejde
+bezpečně určit: svazek je **jen pro čtení** s `info().newest_uncertain`
+(fsd vypíše varování) - zápis nad starší generací by po dalším commitu tu
+novější přepsal. Nečitelný jiný slot (vadný sektor se starou generací)
+nejnovější stav nezpochybňuje: svazek je zapisovatelný, jen
+`info().unreadable_superblocks` > 0 a fsd vypíše varování (jinak by vadný
+sektor udělal svazek navždy jen pro čtení).
+
+**Volby připojení** (`Fs::mount_with`, `MountOptions`):
+
+| Volba | Význam |
+|---|---|
+| `read_only` | vynutit jen pro čtení (kontrola nebo záchrana dat bez zápisu) |
+| `discard_unreadable_log` | když intent log nejde přečíst celý, **vědomě zahodit** nečitelný zbytek a připojit zapisovatelně (`info().log_discarded`); změny po poslední čitelné dávce (i potvrzené `fsync`) se ztratí - jen když chyba čtení nezmizí |
 
 Po návratu se sloty s novější (poškozenou) generací **před prvním commitem
 vynulují** - jinak by po dalším připojení vyhrály a ukazovaly na bloky, které
@@ -639,7 +668,9 @@ commit a začne nová epocha. `info().replayed` = počet přehraných operací.
 potvrzený `fsync`. Při chybě I/O (čtení bloku logu nebo dat dávky) se
 přehraje jen to, co jde přečíst, svazek je **jen pro čtení**
 (`info().log_unreadable`) a log zůstane na disku nedotčený pro další pokus.
-Konec řetězu je jen blok se špatným magic, pořadím nebo součtem.
+Konec řetězu je jen blok se špatným magic, pořadím nebo součtem. Když
+nečitelný blok trvá (vadný sektor), jde log vědomě zahodit volbou
+`discard_unreadable_log` (viz [Připojení](#připojení-a-návrat-o-generaci)).
 
 Bloky dat, na které odkazuje dávka logu, se do commitu znovu nepoužijí,
 ani když vznikly ve stejné transakci (jinak by je pozdější `fsync`
@@ -823,7 +854,7 @@ hodnoty z disku kontrolují i při použití:
 | Hodnota | Kontrola | Při chybě |
 |---|---|---|
 | extent | celý rozsah uvnitř svazku, offset nepřeteče | `CORRUPTED` (žádné čtení ani uvolnění mimo) |
-| uvolňovaný úsek (extent, deadlist, uzel) | uvnitř svazku a celý obsazený (`Space::free`) | neuvolní se, `CORRUPTED` a stav chyby - dvojí uvolnění by poškodilo alokátor |
+| uvolňovaný úsek (extent, deadlist, uzel) | uvnitř svazku, celý obsazený a nečekající na odložené uvolnění (`Space::free`, index odložených úseků) | neuvolní se, `CORRUPTED` a stav chyby (i `fsync` nic nepotvrdí) - dvojí uvolnění by poškodilo alokátor |
 | obsah malého souboru | délka přesně rovná velikosti v záznamu | `CORRUPTED` |
 | řetěz rodičů (souhrny, přesun) | nejvýš 65 536 kroků (`MAX_DEPTH`) | `CORRUPTED` místo zacyklení |
 | záznam ve space logu | rozsah bez přetečení | připojení selže (`CORRUPTED`) |
@@ -871,10 +902,20 @@ problémů (prázdný = v pořádku; nejvýš 1000 popisů, celkový počet je
 v `problems_total`), zkontrolovanou generací a `live_not_checked`. Testy ho
 volají po každém scénáři.
 
-**Paměť kontroly je pevná:** 3 bitové mapy po jednom bitu na blok svazku
-(použité, data, viděné uzly) - 1 TiB svazek = 96 MiB, nezávisle na počtu
-souborů a verzí. Poškozený svazek se miliony chyb tak kontrolu nezahltí.
-Uzel nebo extent mimo svazek je problém v hlášení, ne pád.
+**Paměť kontroly:**
+
+| Část | Velikost | Závisí na |
+|---|---|---|
+| 3 bitové mapy (použité, data, viděné uzly) | 3 bity na blok: 1 TiB svazek = 96 MiB | velikosti svazku |
+| mapa objektů (druh, velikost) a seznam položek adresářů | ~40 B na objekt + ~16 B na položku: milion souborů ~ 56 MiB | **počtu souborů** živé verze |
+| popisy problémů | nejvýš 1000 | - |
+
+Poškozený svazek s miliony chyb kontrolu nezahltí; velký počet souborů ale
+paměť zvětší (plán: kontrola objektů po částech podle rozsahu oid). Uzel
+nebo extent mimo svazek je problém v hlášení, ne pád. **Poškozený záznam
+objektu nebo položka adresáře** je problém v hlášení - dřív se chyba
+dekódování přeskočila a kontrola hlásila čistý svazek, přestože `stat`
+vracel `CORRUPTED`.
 
 Podobně se **extenty zpracovávají po dávkách** (256): zkrácení nebo smazání
 obřího souboru (1 TiB = ~540 000 extentů se součty, ~4 GiB) nikdy nenačte
@@ -969,13 +1010,23 @@ větší požadavky rozdělí.
 | 18 | `DEFRAG` | cesta | přepsané bloky u64 |
 | 19 | `FRAGMENTS` | cesta | počet úseků u64 |
 | 20 | `CHECK` | scrub u8 | generace u64, celkem problémů u64, nezkontrolované změny v paměti u8, počet u32 + popisy (kolik se vejde); jen s `debug` |
-| 21 | `LIST_PAGE` | cesta, od u32, nejvýš u32 | celkem u32 + stránka jako `LIST` (kolik se vejde do 60 KiB) |
-| 22 | `SNAP_LIST_PAGE` | snapshot, cesta, od u32, nejvýš u32 | jako `LIST_PAGE` |
+| 21 | `LIST_PAGE` | cesta, kurzor (jméno poslední položky předchozí stránky, prázdný = od začátku), nejvýš u32 | další u8 (1 = něco zbylo) + stránka jako `LIST` (kolik se vejde do 60 KiB) |
+| 22 | `SNAP_LIST_PAGE` | snapshot, cesta, kurzor, nejvýš u32 | jako `LIST_PAGE` |
 | 100 | `SIMULATE_POWER_LOSS` | - | přehrané operace u64; jen s `debug`, jinak `ACCESS_DENIED` |
 
-`FsClient::list` a `snapshot_list` čtou vždy po stránkách, takže zvládnou
-libovolně velký adresář. ⚠️ Omezení v1: každá stránka sestaví výpis znovu
-(velký adresář = čtvercová cena); protokol v2 přinese kurzor.
+`FsClient::list` a `snapshot_list` čtou po stránkách - tím je vyřešený
+**limit jedné zprávy** (64 KiB), ne paměť:
+
+- **Kurzor je jméno** poslední položky (porovnání bez ohledu na velikost
+  písmen, stejné pořadí jako výpis). Změna adresáře během výpisu: položka,
+  která existuje celou dobu, přijde právě jednou; nová za kurzorem se
+  objeví, před ním ne; smazaná zmizí. Nikdy zdvojení ani vynechání
+  existující položky (stránkování podle pořadového čísla by je mělo).
+- ⚠️ **Paměť:** služba sestaví celý výpis jednou a drží ho pro další
+  stránky (zahodí ho každá jiná operace); klient výsledek drží celý. Obojí
+  roste s velikostí adresáře (~100 B na položku: 1 milion položek ~
+  100 MiB na každé straně). Výpis bez držení celého seznamu přinese
+  protokol v2 (kurzor ve stromu, klient zpracovává stránky postupně).
 
 Příklad zprávy `READ "/a.txt", offset 0, 100 B`:
 

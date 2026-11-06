@@ -21,6 +21,23 @@ cheap `fsync`) and **not waste space** (metadata overhead ~0.4 %).
 > (`NOT_SUPPORTED`); data is not converted yet, disks from the `xtask` tool
 > are simply recreated.
 
+## What the format contains and what the driver uses
+
+Format v3 has room for things the driver cannot do yet. To make it clear
+what works:
+
+| Item | In the format | Driver today |
+|---|---|---|
+| volume UUID, feature flags | yes | **uses** (no feature bit is defined yet) |
+| device number in `BlockPtr`, `device_index/count` in the superblock | yes | **one device only**: the device must be 0 and the count 1, otherwise `CORRUPTED`; several disks (mirror, RAID) after phase 5 |
+| `BlockPtr` flags (compression, encryption, sharing, cloud) | reserved | **unused**; a node with a flag = `NOT_SUPPORTED` |
+| extent flags (preallocation) | reserved | **unused**; an extent with a flag = `NOT_SUPPORTED` |
+| object flag `INODE_REMOTE` | reserved | **unused** (phase 6) |
+| permissions (`acl`), owner, access time, extended attribute count in the object record | yes | **writes 0**, does not read (phase 1d and later) |
+| object generation, creation time | yes | **uses** (`Stat`, log replay) |
+| symbolic links, names up to 1024 characters, size limit | yes | **uses** |
+| datasets, clones, handles, protocol v2 | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
+
 ## What it offers
 
 | Feature | Status | Where in this document |
@@ -214,7 +231,7 @@ implementation.
 
 ### Pointer (`BlockPtr`, 40 B)
 
-> **Change from v2:** from 32 B to 40 B: device number (16 bits), length in blocks and flags. **Why:** a node has 4 blocks, a volume may span several disks and compression, encryption and shared blocks are visible right on the pointer. ([all changes](fs-versions.md#transition-v2---v3))
+> **Change from v2:** from 32 B to 40 B: device number (16 bits), length in blocks and flags. **Why:** a node has 4 blocks and the format is ready for several disks and for compression, encryption and shared blocks (visible right on the pointer). **The driver so far** supports only one device (number 0) and no flag - see [What the format contains](#what-the-format-contains-and-what-the-driver-uses). ([all changes](fs-versions.md#transition-v2---v3))
 
 | Offset | Size | Field |
 |---|---|---|
@@ -226,7 +243,8 @@ implementation.
 | 38 | 2 | reserved (zeros) |
 
 48 bits of block number = up to 1 EiB per device; the device number is
-prepared for volumes spanning several disks. A pointer to a node must have
+prepared in the format for volumes spanning several disks, **the driver so
+far accepts only device 0**. A pointer to a node must have
 length exactly 4, device 0 and the whole range inside the volume, otherwise the node
 is `CORRUPTED` (checked before it is read and its checksum verified).
 
@@ -561,12 +579,24 @@ Mounting (`Store::open`) has three separate steps:
    out of memory) is returned immediately - a transient disk error must not
    lead to falling back to an older state.
 
-**Uncertain recovery = read-only.** When a superblock slot cannot be read
-(an I/O error, not a bad checksum), it may have held a newer generation
-that cannot be determined safely. The volume is then mounted **read-only**
-with `info().unreadable_superblocks` > 0 (fsd prints a warning) - writing on
-top of an older generation would overwrite the newer one with the next
-commit. Once the error is gone, the next mount selects correctly.
+**Uncertain recovery = read-only.** Commits are sequential and generation
+`g` lives in slot `1 + g mod 8`, so a generation newer than the newest one
+read (`newest`) could only be **in the slot for `newest + 1`**. When exactly
+that slot is unreadable (an I/O error, not a bad checksum), the newest state
+cannot be determined safely: the volume is **read-only** with
+`info().newest_uncertain` (fsd prints a warning) - writing on top of an
+older generation would overwrite the newer one with the next commit. Another
+unreadable slot (a bad sector holding an old generation) does not put the
+newest state in doubt: the volume is writable, only
+`info().unreadable_superblocks` > 0 and fsd prints a warning (otherwise a
+bad sector would make the volume read-only forever).
+
+**Mount options** (`Fs::mount_with`, `MountOptions`):
+
+| Option | Meaning |
+|---|---|
+| `read_only` | force read-only (checking or rescuing data without writes) |
+| `discard_unreadable_log` | when the intent log cannot be read completely, **knowingly discard** the unreadable rest and mount writable (`info().log_discarded`); changes after the last readable batch (even confirmed by `fsync`) are lost - only when the read error does not go away |
 
 After a fallback, the slots with a newer (damaged) generation are **zeroed
 before the first commit** - otherwise they would win at the next mount and
@@ -652,7 +682,9 @@ discarded). A commit follows immediately and a new epoch starts.
 block or a batch's data) only what can be read is replayed, the volume is
 **read-only** (`info().log_unreadable`) and the log stays untouched on
 disk for another attempt. The end of the chain is only a block with a bad
-magic, sequence or checksum.
+magic, sequence or checksum. When an unreadable block persists (a bad sector), the log can be
+discarded knowingly with `discard_unreadable_log` (see
+[Mount](#mount-and-generation-fallback)).
 
 Data blocks referenced by a log batch are not reused until the commit, even
 when they were created in the same transaction (otherwise a later `fsync`
@@ -846,7 +878,7 @@ values from disk are checked when used as well:
 | Value | Check | On error |
 |---|---|---|
 | extent | the whole range inside the volume, the offset does not overflow | `CORRUPTED` (no read or free outside) |
-| a range being freed (extent, deadlist, node) | inside the volume and fully allocated (`Space::free`) | not freed, `CORRUPTED` and the error state - a double free would damage the allocator |
+| a range being freed (extent, deadlist, node) | inside the volume, fully allocated and not waiting for a delayed free (`Space::free`, an index of delayed ranges) | not freed, `CORRUPTED` and the error state (`fsync` confirms nothing either) - a double free would damage the allocator |
 | content of a small file | length exactly equal to the size in the record | `CORRUPTED` |
 | the parent chain (summaries, move) | at most 65,536 steps (`MAX_DEPTH`) | `CORRUPTED` instead of a loop |
 | a space log record | range without overflow | mount fails (`CORRUPTED`) |
@@ -893,12 +925,20 @@ stored tree, all snapshots, the free-space metadata and the intent log:
   symbolic link must have a target whose length equals its size (and
   nothing else may have a target).
 
-**Check memory is fixed:** 3 bitmaps of one bit per volume block (used,
-data, seen nodes) - a 1 TiB volume = 96 MiB, independent of the number of
-files and versions. A damaged volume with millions of errors cannot
-overwhelm the check (at most 1,000 descriptions, the total is in
-`problems_total`). A node or extent outside the volume is a reported
-problem, not a crash. Likewise **extents are processed in batches** (256):
+**Check memory:**
+
+| Part | Size | Depends on |
+|---|---|---|
+| 3 bitmaps (used, data, seen nodes) | 3 bits per block: a 1 TiB volume = 96 MiB | volume size |
+| object map (kind, size) and the list of directory entries | ~40 B per object + ~16 B per entry: a million files ~ 56 MiB | **number of files** in the live version |
+| problem descriptions | at most 1,000 (the total is in `problems_total`) | - |
+
+A damaged volume with millions of errors cannot overwhelm the check; a
+large number of files does increase memory though (planned: checking
+objects in parts by oid range). A node or extent outside the volume is a
+reported problem, not a crash. **A damaged object record or directory
+entry** is a reported problem - before, the decoding error was skipped and
+the check reported a clean volume although `stat` returned `CORRUPTED`. Likewise **extents are processed in batches** (256):
 truncating or deleting a huge file (1 TiB = ~540,000 extents with
 checksums, ~4 GiB) never loads all extents into memory at once.
 
@@ -995,14 +1035,24 @@ data = rest of the message. One read/write moves at most 32 KiB
 | 18 | `DEFRAG` | path | rewritten blocks u64 |
 | 19 | `FRAGMENTS` | path | number of ranges u64 |
 | 20 | `CHECK` | scrub u8 | generation u64, total problems u64, unchecked changes in memory u8, count u32 + descriptions (as many as fit); only with `debug` |
-| 21 | `LIST_PAGE` | path, from u32, at most u32 | total u32 + a page like `LIST` (as much as fits into 60 KiB) |
-| 22 | `SNAP_LIST_PAGE` | snapshot, path, from u32, at most u32 | like `LIST_PAGE` |
+| 21 | `LIST_PAGE` | path, cursor (name of the last entry of the previous page, empty = from the start), at most u32 | more u8 (1 = something is left) + a page like `LIST` (as much as fits into 60 KiB) |
+| 22 | `SNAP_LIST_PAGE` | snapshot, path, cursor, at most u32 | like `LIST_PAGE` |
 | 100 | `SIMULATE_POWER_LOSS` | - | replayed operations u64; only with `debug`, otherwise `ACCESS_DENIED` |
 
-`FsClient::list` and `snapshot_list` always read page by page, so they
-handle a directory of any size. ⚠️ v1 limitation: every page builds the
-listing again (a large directory = quadratic cost); protocol v2 brings a
-cursor.
+`FsClient::list` and `snapshot_list` read page by page - this solves the
+**single message limit** (64 KiB), not memory:
+
+- **The cursor is a name** - the last entry (case-insensitive comparison,
+  the same order as the listing). A directory change during the listing: an
+  entry that exists the whole time comes exactly once; a new one after the
+  cursor appears, before it does not; a removed one disappears. Never a
+  duplicate or a skipped existing entry (paging by index would have both).
+- ⚠️ **Memory:** the service builds the whole listing once and keeps it for
+  further pages (any other operation drops it); the client keeps the whole
+  result. Both grow with the directory (~100 B per entry: 1 million
+  entries ~ 100 MiB on each side). Listing without keeping the whole list
+  comes with protocol v2 (a cursor in the tree, the client processes pages
+  one by one).
 
 Example message `READ "/a.txt", offset 0, 100 B`:
 

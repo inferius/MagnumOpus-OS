@@ -174,7 +174,7 @@ Windows or vDSO + libc on Linux).
 
 ## File system
 
-Our own copy-on-write FS is done (format v2); the detailed description
+Our own copy-on-write FS is done (format v3 is being introduced in phases - see [format versions](fs-versions.md)); the detailed description
 including the on-disk format, algorithms and examples is in
 [file-system.md](file-system.md). In short:
 

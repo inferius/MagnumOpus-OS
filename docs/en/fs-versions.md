@@ -58,7 +58,7 @@ Done changes:
 | Area | v2 | v3 | Why |
 |---|---|---|---|
 | Mount | unknown feature/version silently skipped | **select the generation by header, then decide**: other version/incompat = refuse, ro_compat = read-only | an older driver must not write into an old state and overwrite newer data |
-| Unreadable slot / log | slot = skipped, log = end of chain | **read-only**, log kept | an uncertain recovery must not overwrite a confirmed commit or `fsync` |
+| Unreadable slot / log | slot = skipped, log = end of chain | unreadable slot for `newest + 1` = **read-only**, another slot = a warning only; unreadable log = read-only with the log kept, or knowingly discarded (`discard_unreadable_log`) | an uncertain recovery must not overwrite a confirmed commit or `fsync`; a bad sector must not make the volume read-only forever |
 | Generation fallback | on any error | only on `CORRUPTED`, newer slots zeroed | a transient disk error must not lose newer data |
 | Device without flush | writable | **read-only** (`Durability`) | `fsync` would lie |
 | `fsync` | pending changes cleared before writing | cleared only after flush, a log write error = error state | nothing may be confirmed as durable that is not |

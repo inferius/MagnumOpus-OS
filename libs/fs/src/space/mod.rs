@@ -132,6 +132,9 @@ pub struct Space {
     ags: Vec<Ag>,
     /// Odlozene uvolneni: transakce, od ktere smi byt bloky pouzity -> useky.
     deferred: BTreeMap<u64, Vec<(u64, u64)>>,
+    /// Tytez odlozene useky podle zacatku (nikdy se neprekryvaji) - rychla
+    /// kontrola, ze uvolnovany usek uz neceka na odlozene uvolneni.
+    deferred_index: BTreeMap<u64, u64>,
     deferred_blocks: u64,
     /// Definitivne uvolnene useky pro TRIM.
     discards: Vec<(u64, u64)>,
@@ -153,6 +156,7 @@ impl Space {
             ag_blocks,
             ags: (0..n).map(|_| Ag::default()).collect(),
             deferred: BTreeMap::new(),
+            deferred_index: BTreeMap::new(),
             deferred_blocks: 0,
             discards: Vec::new(),
             meta_cursor: DATA_START,
@@ -205,12 +209,32 @@ impl Space {
             .collect()
     }
 
-    /// Je usek uvnitr svazku a cely obsazeny?
+    /// Zaradi usek do odlozeneho uvolneni (pouzitelny od transakce `ready`).
+    pub(super) fn defer(&mut self, ready: u64, start: u64, len: u64) {
+        self.deferred.entry(ready).or_default().push((start, len));
+        self.deferred_index.insert(start, len);
+        self.deferred_blocks += len;
+    }
+
+    /// Prekryva usek nejaky odlozeny usek?
+    fn overlaps_deferred(&self, start: u64, end: u64) -> bool {
+        // Useky se neprekryvaji, takze staci posledni zacinajici pred `end`.
+        self.deferred_index
+            .range(..end)
+            .next_back()
+            .is_some_and(|(&s, &l)| s + l > start)
+    }
+
+    /// Je usek uvnitr svazku a cely obsazeny (ani volny, ani uz cekajici na
+    /// odlozene uvolneni)?
     fn can_free(&self, start: u64, len: u64) -> bool {
         let Some(end) = start.checked_add(len) else {
             return false;
         };
         if len == 0 || start < DATA_START || end > self.block_count {
+            return false;
+        }
+        if self.overlaps_deferred(start, end) {
             return false;
         }
         let mut s = start;
@@ -349,11 +373,7 @@ impl Space {
         if immediate {
             self.give_range(start, len);
         } else {
-            self.deferred
-                .entry(txg + REUSE_DELAY)
-                .or_default()
-                .push((start, len));
-            self.deferred_blocks += len;
+            self.defer(txg + REUSE_DELAY, start, len);
         }
     }
 
@@ -371,7 +391,8 @@ impl Space {
     /// Zabere usek, ktery je podle logu volny, ale pouziva ho intent log
     /// (prehravani po vypadku).
     pub fn claim(&mut self, start: u64, len: u64, txg: u64) -> Result<()> {
-        if start < DATA_START || start + len > self.block_count {
+        let inside = start.checked_add(len).is_some_and(|e| e <= self.block_count);
+        if len == 0 || start < DATA_START || !inside {
             return Err(Error::Corrupted);
         }
         let ag = self.ag_of(start);
@@ -408,12 +429,15 @@ impl Space {
         let (ready, i) = hit.ok_or(Error::Corrupted)?;
         let list = self.deferred.get_mut(&ready).unwrap();
         let (s, l) = list.swap_remove(i);
+        self.deferred_index.remove(&s);
         let stop = (s + l).min(end);
         if s < pos {
             list.push((s, pos - s));
+            self.deferred_index.insert(s, pos - s);
         }
         if stop < s + l {
             list.push((stop, s + l - stop));
+            self.deferred_index.insert(stop, s + l - stop);
         }
         self.deferred_blocks -= stop - pos;
         Ok(stop - pos)
@@ -425,6 +449,7 @@ impl Space {
         let ready: Vec<u64> = self.deferred.range(..=txg).map(|(&t, _)| t).collect();
         for t in ready {
             for (s, l) in self.deferred.remove(&t).unwrap() {
+                self.deferred_index.remove(&s);
                 self.deferred_blocks -= l;
                 self.give_range(s, l);
                 self.discards.push((s, l));

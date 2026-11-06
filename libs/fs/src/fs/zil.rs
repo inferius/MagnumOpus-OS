@@ -397,6 +397,12 @@ impl<D: BlockDevice> Fs<D> {
             return self.commit();
         }
         let records = self.log_records()?;
+        // Zapis dat narazil na neplatne uvolneni (poskozena hodnota): nic
+        // nepotvrdit - stejne jako commit.
+        if self.s.space.corrupt {
+            self.s.poisoned = true;
+            return Err(Error::Corrupted);
+        }
         let payload = encode(&records);
         // Bloky retezu predem: nedostatek mista se ohlasi drive, nez se na
         // disk cokoli zapise (bez prechodu do stavu chyby).
@@ -555,8 +561,14 @@ impl<D: BlockDevice> Fs<D> {
             }
         }
         if unreadable {
-            self.s.log_unreadable = true;
-            self.s.read_only = true;
+            if self.discard_unreadable_log && !self.s.read_only {
+                // Vedoma volba: zbytek logu se zahodi novou epochou nize.
+                self.log_discarded = true;
+                found = true;
+            } else {
+                self.s.log_unreadable = true;
+                self.s.read_only = true;
+            }
         }
         // Jen pro cteni: prehrane zmeny zustanou v pameti (vidi je cteni),
         // na disk se nezapisuje nic.

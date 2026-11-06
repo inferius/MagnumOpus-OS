@@ -163,7 +163,7 @@ impl<D: BlockDevice> Fs<D> {
                     Body::Leaf(items) => {
                         for (k, v) in items {
                             if live {
-                                objects.note(&k, &v);
+                                objects.note(&k, &v, &mut r);
                             }
                             if k.kind != item::EXTENT {
                                 continue;
@@ -254,18 +254,28 @@ struct Objects {
 }
 
 impl Objects {
-    fn note(&mut self, k: &Key, v: &[u8]) {
+    /// Zaznamena polozku; poskozeny zaznam objektu nebo polozku adresare
+    /// nahlasi (drive se tise preskocily - kontrola pak hlasila cisty svazek,
+    /// prestoze `stat` vracel CORRUPTED).
+    fn note(&mut self, k: &Key, v: &[u8], r: &mut CheckReport) {
         match k.kind {
-            item::INODE => {
-                if let Ok(i) = Inode::decode(v) {
+            item::INODE => match Inode::decode(v) {
+                Ok(i) => {
                     self.inodes.insert(k.oid, (i.kind, i.size));
                 }
-            }
-            item::DIRENT => {
-                if let Ok(list) = decode_dirents(v) {
+                Err(e) => r.problem(format!("zaznam objektu {} je poskozeny: {e:?}", k.oid)),
+            },
+            item::DIRENT => match decode_dirents(v) {
+                Ok(list) => {
+                    for d in &list {
+                        if crate::names::validate_name(&d.name).is_err() {
+                            r.problem(format!("adresar {}: neplatne jmeno polozky", k.oid));
+                        }
+                    }
                     self.dirents.extend(list.into_iter().map(|d| (d.oid, d.kind)));
                 }
-            }
+                Err(e) => r.problem(format!("polozka adresare {} je poskozena: {e:?}", k.oid)),
+            },
             item::SYMLINK => {
                 self.links.insert(k.oid, v.len() as u64);
             }

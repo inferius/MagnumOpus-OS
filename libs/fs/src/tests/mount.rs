@@ -306,3 +306,61 @@ fn check_works_read_only_without_writes() {
     assert!(r.data_blocks > 0);
     assert!(fs.into_device().inner.data == before);
 }
+
+#[test]
+fn bad_old_slot_keeps_volume_writable() {
+    // Vadny sektor ve slotu se starou generaci nezpochybnuje nejnovejsi
+    // stav: svazek musi zustat zapisovatelny (jinak navzdy jen pro cteni).
+    let mut fs = new_fs(1024);
+    for name in ["/g1", "/g2", "/g3"] {
+        fs.create(name, Kind::File).unwrap();
+        fs.commit().unwrap();
+    }
+    let g = fs.info().generation;
+    let mut dev = TestDevice::new(fs.into_device());
+    dev.bad_read = Some(SB_FIRST + (g - 2) % SB_COUNT);
+    let mut fs = Fs::mount(dev).unwrap();
+    let info = fs.info();
+    assert!(!info.read_only && !info.newest_uncertain);
+    assert_eq!(info.unreadable_superblocks, 1);
+    fs.create("/dalsi", Kind::File).unwrap();
+    fs.commit().unwrap();
+}
+
+#[test]
+fn discard_unreadable_log_on_request() {
+    let mut fs = new_fs(1024);
+    fs.commit().unwrap();
+    fs.create("/prvni", Kind::File).unwrap();
+    fs.fsync().unwrap();
+    let second = fs.test_zil_next();
+    fs.create("/druhy", Kind::File).unwrap();
+    fs.fsync().unwrap();
+    let mut dev = TestDevice::new(fs.into_device());
+    dev.bad_read = Some(second);
+    // Vedoma volba: zbytek logu zahodit a pokracovat zapisovatelne.
+    let opts = crate::MountOptions { discard_unreadable_log: true, ..Default::default() };
+    let mut fs = Fs::mount_with(dev, opts).unwrap();
+    let info = fs.info();
+    assert!(!info.read_only && info.log_discarded);
+    assert!(fs.stat("/prvni").is_ok());
+    assert_eq!(fs.stat("/druhy").err(), Some(Error::NotFound));
+    fs.create("/pokracuji", Kind::File).unwrap();
+    fs.commit().unwrap();
+    let mut dev = fs.into_device();
+    dev.bad_read = None;
+    let mut fs = Fs::mount(dev).unwrap();
+    assert!(fs.stat("/pokracuji").is_ok());
+    assert_clean(&mut fs);
+}
+
+#[test]
+fn forced_read_only_mount_writes_nothing() {
+    let (dev, _) = two_generations();
+    let before = dev.data.clone();
+    let opts = crate::MountOptions { read_only: true, ..Default::default() };
+    let mut fs = Fs::mount_with(dev, opts).unwrap();
+    assert!(fs.info().read_only);
+    assert!(fs.check(true).unwrap().problems.is_empty());
+    assert!(fs.into_device().data == before);
+}

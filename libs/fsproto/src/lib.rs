@@ -51,12 +51,20 @@ pub mod op {
     /// Kontrola konzistence (jen v rezimu `debug`: dlouha operace nad celym
     /// svazkem, nesmi ji spoustet kazdy klient).
     pub const CHECK: u32 = 20;
-    /// Stranka vypisu adresare: (cesta, od u32, nejvic u32) -> celkem u32,
-    /// pocet u32, polozky. Sluzba vrati tolik polozek, kolik se vejde do
-    /// jedne zpravy. `LIST` vraci `BUFFER_TOO_SMALL`, kdyz se cely vypis do
+    /// Stranka vypisu adresare: (cesta, kurzor str, nejvic u32) -> dalsi u8,
+    /// pocet u32, polozky. Kurzor = jmeno posledni polozky predchozi stranky
+    /// (prazdny = od zacatku); stranka zacina prvni polozkou za nim
+    /// v poradi vypisu (jmena bez ohledu na velikost pismen). Sluzba vrati
+    /// tolik polozek, kolik se vejde do jedne zpravy; `dalsi` = 1, kdyz
+    /// nejaka zbyla. `LIST` vraci `BUFFER_TOO_SMALL`, kdyz se cely vypis do
     /// zpravy nevejde.
+    ///
+    /// Zmena adresare behem vypisu: polozka, ktera existuje po celou dobu,
+    /// se vypise prave jednou; nova polozka za kurzorem se objevi, pred nim
+    /// ne; smazana zmizi. Nikdy zdvojeni ani vynechani existujici polozky
+    /// (na rozdil od strankovani podle indexu).
     pub const LIST_PAGE: u32 = 21;
-    /// Totez pro snapshot: (snapshot, cesta, od u32, nejvic u32).
+    /// Totez pro snapshot: (snapshot, cesta, kurzor str, nejvic u32).
     pub const SNAP_LIST_PAGE: u32 = 22;
     /// Jen pro testy (sluzba spustena v rezimu `debug`): zahodi neulozeny
     /// stav a pripoji system znovu, jako po vypadku proudu.
@@ -226,7 +234,8 @@ impl FsClient {
         Stat::get(&mut Reader::new(&self.path_op(op::STAT, path)?))
     }
 
-    /// Cely vypis adresare (po strankach, libovolne velky adresar).
+    /// Cely vypis adresare po strankach (adresar, jehoz vypis se nevejde do
+    /// jedne zpravy). Vysledek drzi klient cely v pameti.
     pub fn list(&self, path: &str) -> Result<Vec<DirEntry>> {
         self.list_pages(None, path)
     }
@@ -242,15 +251,15 @@ impl FsClient {
                 }
                 None => Self::req(op::LIST_PAGE),
             };
-            w.str(path).u32(out.len() as u32).u32(u32::MAX);
+            let after = out.last().map_or("", |e: &DirEntry| e.name.as_str());
+            w.str(path).str(after).u32(u32::MAX);
             let body = self.call(w)?;
             let mut r = Reader::new(&body);
-            let total = r.u32()? as usize;
+            let more = r.u8()? != 0;
             let page = decode_list(r.rest())?;
-            // Prazdna stranka pred koncem = adresar se mezitim zmensil.
             let empty = page.is_empty();
             out.extend(page);
-            if out.len() >= total || empty {
+            if !more || empty {
                 return Ok(out);
             }
         }
@@ -440,12 +449,13 @@ pub struct CheckResult {
     pub problems: Vec<String>,
 }
 
-/// Zakoduje stranku vypisu: polozky od `from`, nejvic `max`, dokud se vejdou
-/// do `budget` bajtu (aspon jedna). Vraci pocet zakodovanych.
-pub fn encode_list_page(w: &mut Writer, entries: &[DirEntry], from: usize, max: usize, budget: usize) -> usize {
-    let mut size = 8;
+/// Zakoduje stranku vypisu ze zacatku `entries` (polozky za kurzorem):
+/// nejvic `max`, dokud se vejdou do `budget` bajtu (aspon jedna). Vraci
+/// pocet zakodovanych.
+pub fn encode_list_page(w: &mut Writer, entries: &[DirEntry], max: usize, budget: usize) -> usize {
+    let mut size = 5;
     let mut n = 0;
-    for e in entries.iter().skip(from).take(max) {
+    for e in entries.iter().take(max) {
         let item = 1 + 8 + 2 + e.name.len();
         if n > 0 && size + item > budget {
             break;
@@ -453,8 +463,8 @@ pub fn encode_list_page(w: &mut Writer, entries: &[DirEntry], from: usize, max: 
         size += item;
         n += 1;
     }
-    w.u32(entries.len() as u32);
-    encode_list(w, &entries[from.min(entries.len())..from.min(entries.len()) + n]);
+    w.u8((n < entries.len()) as u8);
+    encode_list(w, &entries[..n]);
     n
 }
 

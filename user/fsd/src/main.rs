@@ -88,10 +88,15 @@ fn main(startup: Startup) -> i64 {
     if i.replayed > 0 {
         println!("fsd: z intent logu prehrano {} operaci", i.replayed);
     }
-    if i.unreadable_superblocks > 0 {
+    if i.unreadable_superblocks > 0 && !i.newest_uncertain {
         println!(
-            "fsd: VAROVANI: {} slotu superbloku nejde precist - nejnovejsi stav nejde bezpecne urcit, svazek je jen pro cteni",
+            "fsd: VAROVANI: {} slotu superbloku nejde precist (vadny sektor?) - nejnovejsi stav je jisty, pokracuji",
             i.unreadable_superblocks
+        );
+    }
+    if i.newest_uncertain {
+        println!(
+            "fsd: VAROVANI: nejde precist slot, kde by lezel novejsi stav - nejnovejsi stav nejde bezpecne urcit, svazek je jen pro cteni"
         );
     } else if i.log_unreadable {
         println!("fsd: VAROVANI: intent log nejde precist cely - log zachovan pro dalsi pokus, svazek je jen pro cteni");
@@ -103,6 +108,7 @@ fn main(startup: Startup) -> i64 {
     let mut svc = Service {
         fs: Some(fs),
         debug,
+        list_cache: None,
     };
     serve(&mut svc, &client);
     if let Some(fs) = svc.fs.as_mut()

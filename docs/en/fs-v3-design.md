@@ -1,9 +1,10 @@
 # Design: file system v3
 
 **Status: agreed, introduced in phases** (done changes: [Format versions](fs-versions.md#transition-v2---v3)). Describes what is added and changed
-compared to the current format v2 ([file-system.md](file-system.md)). After
-approval it is implemented in phases (see [Implementation order](#implementation-order))
-and finished parts move into the main FS chapter.
+compared to format v2 ([v2 archive](fs-v2.md)). It is implemented in phases
+(see [Implementation order](#implementation-order)); the finished parts are
+described in the current reference [file-system.md](file-system.md) (which
+distinguishes what the format contains and what the driver already uses).
 
 Principles (agreed):
 
@@ -329,6 +330,26 @@ Principles (agreed):
   backups and synchronization between one's own devices without walking files.
 - **Verified system:** the root of the system dataset is signed; the boot
   loader verifies it at startup (like dm-verity) - ties in with A/B updates.
+- **Trial boot after an update including service data** (ties in with A/B
+  and the verified system): the candidate system version is bound to a
+  snapshot of the configuration and the data of those services that change
+  their data format on first start (the service declares the list). It is
+  marked good only after the required services have started; a boot attempt
+  counter (like `boot-complete` in systemd). On failure the old system
+  **and the compatible state of the affected services** come back. **User
+  documents are not part of the group** - a failed update must not roll
+  back their work. The FS provides the mechanism (an atomic snapshot of a
+  group of datasets, rolling back the group), the decisions are in the
+  update service.
+- **Pinning a version for the duration of work:** whoever opens an old
+  version, exports a snapshot (backup, send) or needs stable sources (a
+  build) gets a **handle to a specific root**. Automatic history cleanup may
+  hide it, but its blocks are freed only after the last handle is closed
+  (the same rule as a clone's `origin`: a reference keeps the root alive).
+  For an export that must survive a restart, a **persistent pin with a
+  reason** (a record in the dataset: who, why, until when); the space
+  overview then shows "this version is held by a backup in progress".
+  Immutable snapshots (holds) are a special case of a persistent pin.
 - **Online volume resize** (grow and shrink).
 - **Access audit** - see [Security and audit](#security-and-audit).
 - **Space overview** including how much deleting each snapshot frees.
@@ -522,8 +543,12 @@ and costs little.
 - **Restore as a copy** (part of the first demo): in the file properties
   you pick a version and choose *Open read-only*, *Restore as a copy* (next
   to the current one, e.g. "Report (version 3 Nov 14:02).docx") or *Replace
-  current*. The copy is instant (shared blocks). One paragraph or a config
-  can be pulled from history without rolling back the whole folder.
+  current*. One paragraph or a config can be pulled from history without
+  rolling back the whole folder. **In the first demo the file is simply
+  copied from the snapshot** (verifying version selection and restoring
+  next to the original); an instant copy via shared blocks comes later as an
+  optimization together with instant file copies (phase 3), so that the
+  first milestone does not depend on block sharing.
 - **Try changes on the side** for a whole project folder: the file manager
   creates a temporary writable clone and opens it in an editor, an
   installer or hands it to an agent. **The application gets a capability to
@@ -702,6 +727,17 @@ an HTTP client. Applications get network access only through a capability
   handle never escapes the granted subtree (like `RESOLVE_BENEATH` in
   Linux): an absolute target or `..` above the capability root =
   `ACCESS_DENIED`.
+- **Conditional save** (first in v2): `OPEN` also returns the file's
+  **revision** (oid + generation + sequence number of the last content
+  change). `REPLACE(file, new data, expected revision)` checks in one
+  operation that the revision still matches and atomically replaces the
+  content; otherwise it returns a **conflict** (`CONFLICT`) and changes
+  nothing - the new data stays with the client (the editor offers to save
+  alongside or compare). It prevents silently overwriting someone else's
+  change when the user, an editor, an agent and sync take turns on one
+  project. First version: one operation on one file (like a git reference
+  update with an expected old value); taking over changes from a clone then
+  uses the same mechanism.
 - **Write: accepted vs. durable.** A write reply says **how many bytes
   were accepted** (they are in the buffer, reads see them at once, the next
   commit stores them), not whether they are durable - only `FSYNC`

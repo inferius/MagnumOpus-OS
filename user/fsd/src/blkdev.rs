@@ -22,9 +22,24 @@ pub struct BlkDev {
 impl BlkDev {
     pub fn new(client: BlockClient) -> Self {
         let blocks = client.sectors() / SECTORS_PER_BLOCK;
-        // Neznam-li vlastnosti (chyba dotazu), plati nejhorsi pripad: bez
-        // zaruky trvanlivosti = svazek jen pro cteni.
-        let f = client.features().unwrap_or(0);
+        // Prechodna chyba dotazu (napr. TIMED_OUT) se zkusi znovu; kdyz
+        // trva, plati nejhorsi pripad (bez zaruky = jen pro cteni) a hlasi
+        // se zvlast, aby se nepletla s diskem, ktery opravdu neumi flush.
+        let mut f = 0;
+        for attempt in 1..=3 {
+            match client.features() {
+                Ok(v) => {
+                    f = v;
+                    break;
+                }
+                Err(e) if attempt == 3 => {
+                    libos::println!(
+                        "fsd: VAROVANI: vlastnosti disku nejde zjistit ({e}) - beru disk jako bez zaruky trvanlivosti"
+                    );
+                }
+                Err(_) => {}
+            }
+        }
         let durability = if f & feature::READ_ONLY != 0 {
             Durability::None
         } else if f & feature::FLUSH != 0 {

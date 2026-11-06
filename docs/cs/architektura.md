@@ -163,7 +163,7 @@ ve Windows nebo vDSO + libc v Linuxu).
 
 ## Souborový systém
 
-Vlastní copy-on-write FS je hotový (formát v2); podrobný popis včetně
+Vlastní copy-on-write FS je hotový (formát v3 se zavádí po fázích - viz [verze formátu](fs-verze.md)); podrobný popis včetně
 formátu na disku, algoritmů a příkladů je v [souborovy-system.md](souborovy-system.md).
 Ve zkratce:
 

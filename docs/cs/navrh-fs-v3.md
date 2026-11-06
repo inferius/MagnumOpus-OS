@@ -1,9 +1,10 @@
 # Návrh: souborový systém v3
 
 **Stav: odsouhlaseno, zavádí se po fázích** (hotové změny: [Verze formátu](fs-verze.md#přechod-v2---v3)). Popisuje, co přibude a změní se proti
-současnému formátu v2 ([souborovy-system.md](souborovy-system.md)). Po
-schválení se implementuje po fázích (viz [Pořadí implementace](#pořadí-implementace))
-a hotové části se přesunou do hlavní kapitoly o FS.
+formátu v2 ([archiv v2](fs-v2.md)). Implementuje se po fázích (viz
+[Pořadí implementace](#pořadí-implementace)); hotové části popisuje
+aktuální reference [souborovy-system.md](souborovy-system.md) (rozlišuje,
+co formát obsahuje a co ovladač už používá).
 
 Zásady (odsouhlasené):
 
@@ -316,6 +317,24 @@ Zásady (odsouhlasené):
   synchronizace mezi vlastními zařízeními bez procházení souborů.
 - **Ověřený systém:** kořen systémového datasetu podepsaný; zavaděč ho při
   startu ověří (jako dm-verity) - navazuje na A/B aktualizace.
+- **Zkušební start po aktualizaci včetně dat služeb** (navazuje na A/B a
+  ověřený systém): kandidátní verze systému se sváže se snapshotem
+  konfigurace a dat těch služeb, které při prvním startu mění formát dat
+  (seznam deklaruje služba). Za funkční se označí až po startu potřebných
+  služeb; počítadlo pokusů o start (jako `boot-complete` v systemd). Když
+  selže, vrátí se starý systém **i kompatibilní stav dotčených služeb**.
+  **Dokumenty uživatele do skupiny nepatří** - neúspěšná aktualizace nesmí
+  vrátit jeho práci. FS dodá mechanismus (atomický snapshot skupiny
+  datasetů, vrácení skupiny), rozhodování je ve službě aktualizací.
+- **Připnutí verze po dobu práce:** kdo otevře starou verzi, exportuje
+  snapshot (záloha, send) nebo potřebuje stabilní zdrojáky (build), dostane
+  **handle na konkrétní kořen**. Automatický úklid historie ho smí skrýt,
+  ale jeho bloky uvolní až po zavření posledního handlu (stejné pravidlo
+  jako `origin` klonu: kořen drží naživu reference). Pro export, který má
+  přežít restart, **trvalé připnutí s důvodem** (záznam v datasetu: kdo,
+  proč, do kdy); přehled místa pak ukáže „tuto verzi drží rozpracovaná
+  záloha“. Neměnné snapshoty (zámek) jsou zvláštní případ trvalého
+  připnutí.
 - **Změna velikosti svazku za běhu** (zvětšení i zmenšení).
 - **Audit přístupů** - viz [Bezpečnost a audit](#bezpečnost-a-audit).
 - **Přehled místa** včetně toho, kolik uvolní smazání každého snapshotu.
@@ -499,8 +518,11 @@ chrání proti poškození, ne proti útočníkovi, a stojí málo.
 - **Obnovit jako kopii** (součást první ukázky): ve vlastnostech souboru
   vybereš verzi a dáš *Otevřít jen pro čtení*, *Obnovit jako kopii* (vedle
   aktuálního, např. „Zpráva (verze 3. 11. 14:02).docx“) nebo *Nahradit
-  aktuální*. Kopie je okamžitá (sdílené bloky). Z historie tak jde vytáhnout
-  jeden odstavec nebo konfiguraci bez vracení celé složky.
+  aktuální*. Z historie tak jde vytáhnout jeden odstavec nebo konfiguraci
+  bez vracení celé složky. **V první ukázce se soubor ze snapshotu normálně
+  zkopíruje** (ověří se výběr verze a obnova vedle originálu); okamžitá
+  kopie přes sdílené bloky přijde jako pozdější optimalizace s okamžitými
+  kopiemi souborů (fáze 3), aby první milník na sdílení bloků nezávisel.
 - **Zkusit změny bokem** pro celou projektovou složku: z průzkumníku vznikne
   dočasný zapisovatelný klon a otevře se v editoru, instalátoru nebo se
   předá agentovi. **Aplikace dostane capability jen ke klonu**, originál
@@ -668,6 +690,16 @@ firewall je přirozeně per aplikace.
 - **Symlinky a capability adresáře:** procházení uvnitř handlu adresáře
   nikdy neuteče z uděleného podstromu (jako `RESOLVE_BENEATH` v Linuxu):
   absolutní cíl nebo `..` nad kořen capability = `ACCESS_DENIED`.
+- **Podmíněné uložení** (první na řadě ve v2): `OPEN` vrátí i **revizi**
+  souboru (oid + generace + pořadové číslo poslední změny obsahu).
+  `REPLACE(soubor, nová data, očekávaná revize)` v jedné operaci ověří, že
+  revize pořád sedí, a obsah atomicky nahradí; jinak vrátí **konflikt**
+  (`CONFLICT`) a nic nezmění - nová data zůstanou klientovi (editor nabídne
+  uložit vedle nebo porovnat). Brání tichému přepsání cizí změny, když se
+  na jednom projektu střídá uživatel, editor, agent a synchronizace. První
+  verze: jedna operace nad jedním souborem (jako aktualizace reference
+  v gitu s očekávanou starou hodnotou); stejný mechanismus pak použije
+  převzetí změn z klonu.
 - **Zápis: přijato vs. trvalé.** Odpověď na zápis říká, **kolik bajtů bylo
   přijato** (jsou v bufferu, hned je vidí čtení, uloží je příští commit),
   ne zda jsou trvalá - to potvrzuje až `FSYNC`. Po chybě klient smí

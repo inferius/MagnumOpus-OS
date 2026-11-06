@@ -56,7 +56,7 @@ Návrh a důvody celé v3: [navrh-fs-v3.md](navrh-fs-v3.md). Hotové změny:
 | Oblast | v2 | v3 | Proč |
 |---|---|---|---|
 | Připojení | neznámá vlastnost/verze tiše přeskočena | **výběr generace podle hlavičky, pak rozhodnutí**: jiná verze/incompat = odmítnout, ro_compat = jen pro čtení | starší ovladač nesmí zapisovat do starého stavu a přepsat novější data |
-| Nečitelný slot / log | slot = konec, log = konec řetězu | **jen pro čtení**, log zachovaný | nejistá obnova nesmí přepsat potvrzený commit ani `fsync` |
+| Nečitelný slot / log | slot = konec, log = konec řetězu | nečitelný slot pro `newest + 1` = **jen pro čtení**, jiný slot = jen varování; nečitelný log = jen pro čtení a log zachovaný, nebo vědomě zahodit (`discard_unreadable_log`) | nejistá obnova nesmí přepsat potvrzený commit ani `fsync`; vadný sektor nesmí udělat svazek navždy jen pro čtení |
 | Návrat o generaci | při jakékoli chybě | jen při `CORRUPTED`, novější sloty se vynulují | přechodná chyba disku nesmí vést ke ztrátě novějších dat |
 | Zařízení bez flush | zapisovatelné | **jen pro čtení** (`Durability`) | `fsync` by lhal |
 | `fsync` | čekající změny smazané před zápisem | smazané až po flush, chyba při zápisu logu = stav chyby | nic se nesmí potvrdit jako trvalé, co trvalé není |
