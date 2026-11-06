@@ -14,6 +14,18 @@ Principles (agreed):
   behaviour can be chosen in the system settings (profiles).
 - **The format may change for free now**, so it immediately reserves room
   for everything below, including things implemented later (feature flags).
+- **What belongs to the FS and what to services** (three layers):
+
+| Layer | Criterion | Examples |
+|---|---|---|
+| **invariant** - FS code | must hold for every write, survive a crash or be stored atomically with the file | block release, snapshots and clones, stable identity, snapshot holds, quotas, permissions, encryption, the journal with sequence numbers, decoys and freezing an application's writes |
+| **settings and state** - stored in the FS, but as generic data | must survive a crash or travel with the file/dataset; the FS stores it atomically but does not interpret it | "keep history 30 days" as a dataset property, "always offline" as a file attribute, sync state, file origin |
+| **decisions** - services on top of the FS | when and how to act according to the settings | when to run history cleanup, when to empty the trash, content-based ransomware detection, sync, indexes, audit (storing and display) |
+
+  The benefit: tight integration stays (settings are stored atomically with
+  the file), yet service behaviour can change with experience without a
+  format change. So there are no bits on disk tied to one policy - only
+  generic properties and attributes (namespaces `sys.*`, `sync.*`, ...).
 
 ## Summary of changes
 
@@ -256,13 +268,20 @@ Principles (agreed):
 - **Visibility:** an entry shows up in a listing only when the user has at
   least some right to it; other users' files are not visible even by name
   and do not count into the user's size summaries.
-- **Applications:** their own directory + files the user picks in a
-  dialog (powerbox) - without permission prompts.
+- **An application** gets by default only its own directory and what the
+  user just opened or picked for it (Open/Save dialog, drag and drop, "Open
+  with" - the powerbox). Picking a folder can be remembered ("this
+  application may always use Projects"). **The user** has convenient access
+  to all their files through the file manager and the system dialog - user
+  convenience does not require broad application access.
+- ⚠️ Old programs (mainly through the Windows layer) expect access to the
+  whole Documents folder: a one-time prompt "The application wants access to
+  Documents", or the Relaxed profile for that application only.
 - **Profiles in the system settings:**
 
 | Profile | For whom | Behaviour |
 |---|---|---|
-| **Standard** (default) | everyday use | own files without restrictions or prompts; applications see the user's documents, not system or other users' files |
+| **Standard** (default) | everyday use | the user accesses their files without restrictions or prompts; applications only their own directory + what the user picked (can be remembered); not system or other users' files |
 | **Strict** | sensitive data, companies | applications sandboxed (picker dialog only), vaults lock on sleep, audit of changes and reads, ransomware detection by entropy (see [Defaults and profiles](#defaults-and-profiles)) |
 | **Relaxed** | developers | applications see the whole user home, fewer confirmations |
 
@@ -377,6 +396,20 @@ Principles (agreed):
 - Only the FS and system services may set the attribute, not applications.
 
 ### Ransomware protection (behaviour detection)
+
+- **Split (only cheap and deterministic things in the FS):**
+
+| Where | What |
+|---|---|
+| **FS** | per-application counters of rewrites and renames of existing files (O(1) per write), **decoys** (touching a marked object = an immediate event), **freezing an application's writes**, a hard safeguard "more than N existing files rewritten per minute = freeze and ask" |
+| **service** | entropy over a sample of blocks, thresholds and exemptions, the dialog with the user, selective rollback; reads the journal asynchronously, so it does not slow writes |
+
+  Why: heuristics (entropy) in the path of every write cost performance,
+  mislead (JPG, ZIP, DOCX have high entropy by themselves) and a false alarm
+  is a user interface decision - it does not belong in the most critical
+  component. **The strongest defence is not detection but mechanisms:**
+  capabilities (an application can encrypt at most what the user let it
+  touch), frequent snapshots with holds and rollback via the journal.
 
 - A service watches the change journal: when one application rewrites or
   renames many files within a short time and the new content has high
@@ -567,10 +600,10 @@ Principles:
 | What | Where | Meaning |
 |---|---|---|
 | object flag `INODE_REMOTE` (1) | object record, `flags` | data only in the cloud |
-| object flag `INODE_PINNED` (2) | object record, `flags` | always keep local |
-| object flag `INODE_NOSYNC` (4) | object record, `flags` | do not sync (inherited) |
+| attribute `sync.pinned` | extended attribute of a file | always keep local (a sync service setting, not a format bit) |
+| attribute `sync.exclude` | extended attribute of a directory | do not sync (inherited) |
 | pointer flag `PTR_REMOTE` (8) | `BlockPtr.flags` | the block is not on disk, only in the cloud |
-| entry kind `SYNC` (8) | tree | sync state of an object: remote version, tag, time |
+| attribute `sync.state` | extended attribute | sync state of an object: remote version, tag, time |
 | feature `INCOMPAT_REMOTE` (bit 0) | superblock | the volume has placeholders; an older driver must not mount it |
 | dataset binding to a storage | dataset record (phase 1c) | storage ID, key ID, rules |
 
@@ -642,6 +675,24 @@ an HTTP client. Applications get network access only through a capability
 
 ## Implementation order
 
+**A vertical slice as the first goal:** instead of finishing all of phase
+1 in breadth, the first demo is a **versioned project folder** in Windows
+Explorer: take a snapshot, open a writable clone, make changes, show the
+diff, restore one file - and the same with a crash in the middle of a
+write. Order:
+
+1. **F1b** - review fixes (in progress),
+2. **datasets and a minimum of versioning** - the dataset tree, dataset
+   snapshots, writable clones with blocks held by their origin snapshot,
+   diff, restoring a file; tests with power loss and space accounting
+   checks,
+3. **a handle layer** on top of `libs/fs` - open files, orphans, replace by
+   rename, share modes, delete on close; used by the driver and by fsd
+   (protocol v2),
+4. **the Windows driver and the `osfs` tool** - see
+   [Windows driver](#windows-driver),
+5. permissions (F1d) and protocol v2 in fsd (F1e), then phases 2-6 below.
+
 | Phase | Contents |
 |---|---|
 | 1 - format | 16 KiB nodes, superblock/pointer/record v3, feature flags, datasets and the dataset tree (with case sensitivity), names and symlinks, review fixes, protocol v2 with handles and locks, permissions (capabilities, grants, visibility, profiles, no execution on data) |
@@ -653,6 +704,60 @@ an HTTP client. Applications get network access only through a capability
 
 Each phase ends with tests (unit, model, power loss, in the system),
 documentation in cs and en, and a review.
+
+## Windows driver
+
+Goal: a disk (flash drive, test partition, image file) formatted with our
+FS mounts in Windows as an ordinary drive (e.g. `F:`) and can be used in
+Explorer. **For trying out only, not for real data.**
+
+- **WinFsp** (a Windows kernel driver for user-mode file systems,
+  winfsp.dev) - the user installs it themselves (it needs administrator
+  rights). The binding to its DLL is our own and small (no binding
+  generator, no clang).
+- **The `osfs` tool** (command line; later a simple window on top of it with
+  a list of disks and Format / Mount / Unmount buttons):
+
+```text
+osfs disks                         list disks and partitions (model, size, removable?)
+osfs format <disk|image> [--label X] [--blake3]
+osfs mount <disk|image> F:         mount as drive F:
+osfs unmount F:
+osfs check <disk|image> [--scrub]
+osfs snapshot F: <name>  /  osfs diff ...  /  osfs restore ...
+```
+
+- **Translation for Windows:** the forbidden characters `: \ * ? " < > |`
+  are mapped into the Unicode private use area (back without loss), reserved
+  names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`...), trailing dots and spaces,
+  times in 100 ns units, the file ID from oid + generation; case is not
+  distinguished, just as in Windows.
+- **Concurrency:** WinFsp calls from several threads, `Fs` is
+  single-threaded - one lock around the whole `Fs` to start with.
+
+**Risks (stated up front):**
+
+- ⚠️ **Formatting a real disk is irreversible** and needs administrator
+  rights. `osfs format` refuses the system disk and disks with mounted
+  Windows partitions, prints the model and size and erases only after the
+  disk number is typed by hand as confirmation. An image file is the safest
+  start.
+- ⚠️ **Windows does not recognise our format:** after inserting the flash
+  drive it offers "You need to format the disk" - **do not click it**, mount
+  it with `osfs mount`.
+- The FS is young: for trying out only, with your own backup elsewhere.
+
+**A native Windows kernel driver (later, maybe):** WinFsp adds a kernel ->
+our process -> kernel round trip to every operation. Our own kernel driver
+would be faster, would integrate fully with the Windows cache manager
+(mapped files), Windows would recognise the format by itself when a disk is
+inserted (a file system recognizer) and it could even boot from it. The
+cost: a huge scope (correct IRPs, oplocks, caching - WinBtrfs has over
+100,000 lines), a bug = a blue screen and data corruption across the whole
+system, and a driver signature from Microsoft (without it only the test
+signing mode, which lowers system security). So WinFsp first; a native
+driver only when performance or booting from the disk is really needed.
+The FS core (`libs/fs`, Rust, `no_std`) can be used in both.
 
 ## Open questions
 

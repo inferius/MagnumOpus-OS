@@ -13,6 +13,18 @@ Zásady (odsouhlasené):
   volnější chování jde nastavit v nastavení systému (profily).
 - **Formát se teď smí měnit zadarmo**, proto v něm hned je místo pro vše
   níže, i pro věci implementované později (příznaky vlastností).
+- **Co patří do FS a co do služeb** (tři vrstvy):
+
+| Vrstva | Kritérium | Příklady |
+|---|---|---|
+| **invariant** - kód FS | musí platit pro každý zápis, přežít pád nebo se uložit atomicky se souborem | uvolnění bloků, snapshoty a klony, stabilní identita, zámek snapshotu, kvóty, oprávnění, šifrování, žurnál s pořadovými čísly, návnady a zmrazení zápisů aplikace |
+| **nastavení a stav** - uložené ve FS, ale jako obecná data | musí přežít pád nebo cestovat se souborem/datasetem; FS je uloží atomicky, ale nevykládá | „uchovávat historii 30 dní“ jako vlastnost datasetu, „vždy offline“ jako atribut souboru, stav synchronizace, původ souboru |
+| **rozhodnutí** - služby nad FS | kdy a jak jednat podle nastavení | kdy spustit úklid historie, kdy vysypat koš, detekce ransomwaru podle obsahu, sync, indexy, audit (ukládání a zobrazení) |
+
+  Výhoda: těsná integrace zůstane (nastavení se ukládá se souborem
+  atomicky), ale chování služeb jde měnit podle zkušeností bez změny
+  formátu. Na disku proto nejsou bity pevně svázané s jednou politikou -
+  jen obecné vlastnosti a atributy (jmenné prostory `sys.*`, `sync.*`, ...).
 
 ## Přehled změn
 
@@ -246,13 +258,20 @@ Zásady (odsouhlasené):
 - **Viditelnost:** položka se ve výpisu objeví, jen když k ní uživatel má
   aspoň nějaké právo; cizí soubory nevidí ani jménem a nepočítají se mu do
   souhrnů velikosti.
-- **Aplikace:** vlastní adresář + soubory, které uživatel vybere v dialogu
-  (powerbox) - bez dotazů na práva.
+- **Aplikace** dostane ve výchozím stavu jen svůj adresář a to, co jí
+  uživatel právě otevřel nebo vybral (dialog Otevřít/Uložit, přetažení,
+  „Otevřít v“ - powerbox). Výběr složky jde zapamatovat („tahle aplikace
+  smí do Projekty vždycky“). **Uživatel sám** má přes průzkumník a systémový
+  dialog pohodlný přístup ke všem svým souborům - pohodlí uživatele
+  nevyžaduje široký přístup aplikací.
+- ⚠️ Staré programy (hlavně přes vrstvu Windows) čekají přístup k celým
+  Dokumentům: jednorázový dotaz „Aplikace chce přístup k Dokumentům“, nebo
+  profil Volný jen pro tu aplikaci.
 - **Profily v nastavení systému:**
 
 | Profil | Pro koho | Chování |
 |---|---|---|
-| **Standardní** (výchozí) | běžné používání | vlastní soubory bez omezení a dotazů; aplikace vidí dokumenty uživatele, systémové a cizí soubory ne |
+| **Standardní** (výchozí) | běžné používání | uživatel má ke svým souborům přístup bez omezení a dotazů; aplikace jen svůj adresář + to, co jí uživatel vybral (zapamatovatelné); systémové a cizí soubory ne |
 | **Přísný** | citlivá data, firmy | aplikace v sandboxu (jen dialog výběru), trezory se zamykají při uspání, audit změn a čtení, detekce ransomwaru podle entropie (viz [Výchozí stav a profily](#výchozí-stav-a-profily)) |
 | **Volný** | vývojáři | aplikace vidí celý domov uživatele, méně potvrzování |
 
@@ -363,6 +382,20 @@ spoléhají.
 - Atribut smí nastavit jen FS a systémové služby, ne aplikace.
 
 ### Ochrana proti ransomwaru (detekce chování)
+
+- **Rozdělení (ve FS jen levné a deterministické):**
+
+| Kde | Co |
+|---|---|
+| **FS** | čítače přepisů a přejmenování existujících souborů pro každou aplikaci (O(1) na zápis), **návnady** (sáhnutí na označený objekt = okamžitá událost), **zmrazení zápisů aplikace**, pevná pojistka „víc než N přepsaných existujících souborů za minutu = zmrazit a zeptat se“ |
+| **služba** | entropie nad vzorkem bloků, prahy a výjimky, dialog s uživatelem, výběrové vracení; čte žurnál asynchronně, takže zápis nebrzdí |
+
+  Proč: heuristiky (entropie) v cestě každého zápisu stojí výkon, klamou
+  (JPG, ZIP, DOCX mají vysokou entropii samy) a falešný poplach je
+  rozhodnutí o uživatelském rozhraní - nepatří do nejkritičtější
+  komponenty. **Nejsilnější obranou nejsou detekce, ale mechanismy:**
+  capabilities (aplikace zašifruje nanejvýš to, k čemu ji uživatel pustil),
+  časté snapshoty se zámkem a vracení podle žurnálu.
 
 - Služba sleduje žurnál změn: když jedna aplikace během krátké doby
   přepíše nebo přejmenuje mnoho souborů a nový obsah má vysokou entropii
@@ -537,10 +570,10 @@ Zásady:
 | Co | Kde | Význam |
 |---|---|---|
 | příznak objektu `INODE_REMOTE` (1) | záznam objektu, `flags` | data jen v cloudu |
-| příznak objektu `INODE_PINNED` (2) | záznam objektu, `flags` | držet vždy lokálně |
-| příznak objektu `INODE_NOSYNC` (4) | záznam objektu, `flags` | nesynchronizovat (dědí se) |
+| atribut `sync.pinned` | rozšířený atribut souboru | držet vždy lokálně (nastavení služby sync, ne bit formátu) |
+| atribut `sync.exclude` | rozšířený atribut adresáře | nesynchronizovat (dědí se) |
 | příznak ukazatele `PTR_REMOTE` (8) | `BlockPtr.flags` | blok není na disku, jen v cloudu |
-| druh položky `SYNC` (8) | strom | stav synchronizace objektu: vzdálená verze, značka, čas |
+| atribut `sync.state` | rozšířený atribut | stav synchronizace objektu: vzdálená verze, značka, čas |
 | vlastnost `INCOMPAT_REMOTE` (bit 0) | superblok | svazek obsahuje placeholdery; starší ovladač ho nesmí připojit |
 | vazba datasetu na úložiště | záznam datasetu (fáze 1c) | ID úložiště, ID klíče, pravidla |
 
@@ -609,6 +642,22 @@ firewall je přirozeně per aplikace.
 
 ## Pořadí implementace
 
+**Svislý řez jako první cíl:** místo dokončení celé fáze 1 do šířky je
+první ukázkou **verzovaná projektová složka** ve Windows průzkumníku:
+vytvořit snapshot, otevřít zapisovatelný klon, udělat změny, zobrazit
+rozdíl, obnovit jeden soubor - a totéž s pádem uprostřed zápisu. Pořadí:
+
+1. **F1b** - opravy z review (rozpracované),
+2. **datasety a minimum z verzování** - strom datasetů, snapshot datasetu,
+   zapisovatelný klon s držením bloků podle původního snapshotu, diff,
+   obnova souboru; testy s výpadkem a kontrolou účtování místa,
+3. **vrstva handlů** nad `libs/fs` - otevřené soubory, sirotci, nahrazení
+   přejmenováním, sdílecí režimy, smazání při zavření; použije ji ovladač
+   i fsd (protokol v2),
+4. **ovladač pro Windows a nástroj `osfs`** - viz
+   [Ovladač pro Windows](#ovladač-pro-windows),
+5. oprávnění (F1d) a protokol v2 ve fsd (F1e), pak fáze 2-6 níže.
+
 | Fáze | Obsah |
 |---|---|
 | 1 - formát | uzly 16 KiB, superblok/ukazatel/záznam v3, příznaky vlastností, datasety a strom datasetů (i rozlišení velikosti písmen), jména a symlinky, opravy z review, protokol v2 s handly a zámky, oprávnění (capabilities, granty, viditelnost, profily, zákaz spouštění na datech) |
@@ -620,6 +669,58 @@ firewall je přirozeně per aplikace.
 
 Každá fáze končí testy (jednotkové, model, výpadky proudu, v systému),
 dokumentací v cs i en a review.
+
+## Ovladač pro Windows
+
+Cíl: disk (flash disk, testovací oddíl, soubor s obrazem) naformátovaný
+naším FS se ve Windows připojí jako normální jednotka (např. `F:`) a jde
+s ním pracovat v průzkumníku. **Jen na zkoušení, ne na ostrá data.**
+
+- **WinFsp** (ovladač jádra Windows pro souborové systémy v uživatelském
+  režimu, winfsp.dev) - instaluje ho uživatel sám (potřebuje práva
+  správce). Napojení na jeho DLL je vlastní a malé (bez generátoru vazeb
+  a bez clang).
+- **Nástroj `osfs`** (příkazová řádka; nad ní později jednoduché okno se
+  seznamem disků a tlačítky Naformátovat / Připojit / Odpojit):
+
+```text
+osfs disks                         seznam disků a oddílů (model, velikost, vyměnitelný?)
+osfs format <disk|obraz> [--label X] [--blake3]
+osfs mount <disk|obraz> F:         připojit jako jednotku F:
+osfs unmount F:
+osfs check <disk|obraz> [--scrub]
+osfs snapshot F: <jméno>  /  osfs diff ...  /  osfs restore ...
+```
+
+- **Překlad pro Windows:** zakázané znaky `: \ * ? " < > |` se mapují do
+  oblasti Unicode pro soukromé použití (zpět beze ztráty), rezervovaná jména
+  (`CON`, `PRN`, `AUX`, `NUL`, `COM1`...), koncové tečky a mezery, časy po
+  100 ns, ID souboru z oid + generace; velikost písmen se nerozlišuje
+  stejně jako ve Windows.
+- **Souběh:** WinFsp volá z více vláken, `Fs` je jednovláknový - na
+  začátek jeden zámek kolem celého `Fs`.
+
+**Rizika (řečená předem):**
+
+- ⚠️ **Formátování skutečného disku je nevratné** a potřebuje práva
+  správce. `osfs format` odmítne systémový disk a disk s připojenými
+  oddíly Windows, vypíše model a velikost a smaže jen po ručním opsání
+  čísla disku jako potvrzení. Na začátek je nejbezpečnější soubor s obrazem.
+- ⚠️ **Windows náš formát nepoznají:** po zasunutí flashky nabídnou
+  „Disk je potřeba naformátovat“ - **neklikat**, připojit přes `osfs mount`.
+- FS je mladý: jen na zkoušení s vlastní zálohou mimo něj.
+
+**Nativní ovladač jádra Windows (později, možná):** WinFsp přidává na
+každou operaci přechod jádro -> náš proces -> jádro. Vlastní ovladač
+jádra by byl rychlejší, plně by se napojil na správce mezipaměti Windows
+(mapované soubory), Windows by formát poznaly samy po zasunutí disku
+(rozpoznávač FS) a dal by se z něj i startovat. Cena: obrovský rozsah
+(správné IRP, oplocky, mezipaměť - WinBtrfs má přes 100 000 řádků), chyba
+= modrá obrazovka a poškození dat v celém systému, a podpis ovladače od
+Microsoftu (bez něj jen testovací režim podpisů, který snižuje
+bezpečnost systému). Proto nejdřív WinFsp; nativní ovladač jen když bude
+výkon nebo start z disku opravdu potřeba. Jádro FS (`libs/fs`, Rust,
+`no_std`) se dá použít v obou.
 
 ## Otevřené otázky
 
