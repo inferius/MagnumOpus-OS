@@ -125,11 +125,37 @@ impl<D: BlockDevice> Fs<D> {
         let mut is_data = Bitmap::new(n);
         let mut seen_nodes = Bitmap::new(n);
         // Druhy objektu zive verze (shoda polozek adresaru se zaznamy).
-        let mut objects = Objects::default();
+        // Kazdy dataset ma vlastni cisla objektu: kontrola objektu zvlast.
+        let mut objects: Vec<Objects> = alloc::vec![Objects::default()];
         let stored = Child::Disk(sb.root);
-        let mut roots = alloc::vec![(String::from("ulozeny stav"), stored)];
-        roots.extend(self.snapshot_roots_of(&stored)?);
-        for (index, (name, root)) in roots.into_iter().enumerate() {
+        // (popis, koren, index skupiny objektu u zive verze datasetu)
+        let mut roots: Vec<(String, Child, Option<usize>)> =
+            alloc::vec![(String::from("ulozeny stav"), stored, Some(0))];
+        roots.extend(self.snapshot_roots_of(&stored)?.into_iter().map(|(n, c)| (n, c, None)));
+        // Ostatni datasety (zaznamy v ulozenem korenovem stromu) a jejich
+        // snapshoty. Klon sdili bloky s puvodnim snapshotem: data se
+        // opakuji legitimne, prisna kontrola dvojiho pouziti jen u korene.
+        let records = crate::btree::collect(
+            &mut self.s,
+            &stored,
+            &Key::new(crate::layout::META_OID, item::DATASET, 0),
+            &Key::new(crate::layout::META_OID, item::DATASET + 1, 0),
+        )?;
+        for (k, v) in records {
+            let rec = match crate::layout::DatasetRecord::decode(&v) {
+                Ok(rec) => rec,
+                Err(e) => {
+                    r.problem(format!("zaznam datasetu {} je poskozeny: {e:?}", k.offset));
+                    continue;
+                }
+            };
+            let ds_root = Child::Disk(rec.root);
+            objects.push(Objects::default());
+            roots.push((format!("dataset {}", k.offset), ds_root, Some(objects.len() - 1)));
+            let snaps = self.snapshot_roots_of(&ds_root)?;
+            roots.extend(snaps.into_iter().map(|(n, c)| (format!("dataset {}: {n}", k.offset), c, None)));
+        }
+        for (index, (name, root, group)) in roots.into_iter().enumerate() {
             let live = index == 0;
             let mut stack = alloc::vec![root];
             while let Some(c) = stack.pop() {
@@ -162,8 +188,8 @@ impl<D: BlockDevice> Fs<D> {
                     Body::Internal(children) => stack.extend(children.iter().map(|(_, c)| *c)),
                     Body::Leaf(items) => {
                         for (k, v) in items {
-                            if live {
-                                objects.note(&k, &v, &mut r);
+                            if let Some(g) = group {
+                                objects[g].note(&k, &v, &mut r);
                             }
                             if k.kind != item::EXTENT {
                                 continue;
@@ -204,7 +230,9 @@ impl<D: BlockDevice> Fs<D> {
                 }
             }
         }
-        objects.verify(&mut r);
+        for o in &objects {
+            o.verify(&mut r);
+        }
         meta.extend(log_blocks);
         for b in meta {
             if b >= n {
@@ -272,7 +300,12 @@ impl Objects {
                             r.problem(format!("adresar {}: neplatne jmeno polozky", k.oid));
                         }
                     }
-                    self.dirents.extend(list.into_iter().map(|d| (d.oid, d.kind)));
+                    // Polozka datasetu ukazuje na jiny strom (cislo datasetu).
+                    self.dirents.extend(
+                        list.into_iter()
+                            .filter(|d| d.kind != crate::layout::KIND_DATASET)
+                            .map(|d| (d.oid, d.kind)),
+                    );
                 }
                 Err(e) => r.problem(format!("polozka adresare {} je poskozena: {e:?}", k.oid)),
             },

@@ -5,6 +5,7 @@
 
 mod basic;
 mod crash;
+mod datasets;
 mod errors;
 mod features;
 mod model;

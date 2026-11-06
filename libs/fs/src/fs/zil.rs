@@ -78,6 +78,8 @@ pub enum Op {
 
 /// Zaznam davky.
 enum Record {
+    /// Nasledujici zaznamy patri datasetu s timto cislem (az do dalsiho).
+    Dataset(u64),
     Op(Op),
     Inline {
         oid: u64,
@@ -129,7 +131,7 @@ impl Pending {
         self.touched.clear();
     }
 
-    fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.ops.is_empty() && self.touched.is_empty()
     }
 }
@@ -219,6 +221,10 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 put_u64(&mut b, *mtime);
                 b.extend_from_slice(&(data.len() as u32).to_le_bytes());
                 b.extend_from_slice(data);
+            }
+            Record::Dataset(id) => {
+                b.push(8);
+                put_u64(&mut b, *id);
             }
             Record::Extents {
                 oid,
@@ -365,6 +371,7 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
                     list,
                 }
             }
+            8 => Record::Dataset(r.u64()?),
             _ => return Err(Error::Corrupted),
         };
         out.push(rec);
@@ -388,15 +395,26 @@ impl<D: BlockDevice> Fs<D> {
     /// davky muze byt na disku): svazek prejde do stavu chyby (`IO_ERROR` pro
     /// vsechny dalsi zmeny), aby zadny pozdejsi `fsync` nepotvrdil neco, co
     /// trvale neni. Obnova = znovu pripojit (prehraji se jen cele davky).
+    ///
+    /// Davka obsahuje zmeny vsech datasetu; zaznamy kazdeho zacinaji
+    /// `Record::Dataset(cislo)`.
     pub fn fsync(&mut self) -> Result<()> {
         self.s.check_writable()?;
-        if self.zil.is_empty() {
+        let back = self.cur_ds;
+        let pending: Vec<u64> = self.loaded_datasets().into_iter().filter(|&id| !self.pending_empty(id)).collect();
+        if pending.is_empty() {
             return Ok(());
         }
         if self.s.zil_blocks.len() > MAX_LOG_BLOCKS {
             return self.commit();
         }
-        let records = self.log_records()?;
+        let mut records = Vec::new();
+        for id in pending {
+            self.activate(id)?;
+            records.push(Record::Dataset(id));
+            records.extend(self.log_records()?);
+        }
+        self.activate(back)?;
         // Zapis dat narazil na neplatne uvolneni (poskozena hodnota): nic
         // nepotvrdit - stejne jako commit.
         if self.s.space.corrupt {
@@ -424,7 +442,7 @@ impl<D: BlockDevice> Fs<D> {
             self.s.poisoned = true;
             return Err(e);
         }
-        self.zil.clear();
+        self.clear_all_pending();
         Ok(())
     }
 
@@ -556,8 +574,9 @@ impl<D: BlockDevice> Fs<D> {
                 }
             }
             for r in records {
+                let op = !matches!(r, Record::Dataset(_));
                 self.apply(r)?;
-                self.replayed += 1;
+                self.replayed += op as u64;
             }
         }
         if unreadable {
@@ -570,6 +589,7 @@ impl<D: BlockDevice> Fs<D> {
                 self.s.read_only = true;
             }
         }
+        self.activate(crate::layout::ROOT_DATASET)?;
         // Jen pro cteni: prehrane zmeny zustanou v pameti (vidi je cteni),
         // na disk se nezapisuje nic.
         if found && !self.s.read_only {
@@ -599,6 +619,7 @@ impl<D: BlockDevice> Fs<D> {
     fn apply(&mut self, r: Record) -> Result<()> {
         let bad = |_| Error::Corrupted;
         match r {
+            Record::Dataset(id) => self.activate(id).map_err(bad),
             Record::Op(Op::Create {
                 parent,
                 oid,

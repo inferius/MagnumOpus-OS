@@ -49,7 +49,8 @@ Návrh a důvody celé v3: [navrh-fs-v3.md](navrh-fs-v3.md). Hotové změny:
 | Typy objektů | soubor, adresář | + **symbolický odkaz** | git repozitáře a zdrojáky z Linuxu je potřebují |
 | Velikost souboru | bez limitu (přetečení) | **2^63-1 B**, kontrolovaná aritmetika, saturující souhrny | velikosti a rozdíly vždy v `i64`; obří řídké soubory nepřetečou souhrny |
 | Extent | nejvýš 120 bloků, rezerva u32 | **496 bloků**, příznaky u32 (vyhrazeno: předalokace) | větší uzel; méně položek na velký soubor |
-| Intent log | záznamy 1-6 | + 7 symlink, generace u vytvoření | symlink přežije `fsync`; generace po přehrání zůstane původní |
+| Intent log | záznamy 1-6 | + 7 symlink, generace u vytvoření, 8 značka datasetu | symlink přežije `fsync`; generace po přehrání zůstane původní; jedna dávka pro víc datasetů |
+| Datasety | jeden strom pro svazek | **datasety** (vlastní stromy, záznam `DATASET` v kořenovém datasetu, položka adresáře druhu 4), snapshot s počtem klonů a příznakem „skrytý“ | historie po složkách (projekt, domov), zapisovatelné klony bez kopírování |
 
 ### Chování (bez změny formátu)
 
