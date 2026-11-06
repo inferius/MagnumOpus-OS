@@ -29,12 +29,13 @@ pub unsafe fn init(fb: &Framebuffer) {
     *CONSOLE.lock() = Some(Console { serial, fb });
 }
 
-#[doc(hidden)]
-pub fn _print(args: fmt::Arguments) {
+/// Zapise text na seriovou linku a pripadne i do framebufferu.
+/// Pred `init` se text tise zahodi (zustane jen v bufferu logu).
+pub fn write(text: &str, to_framebuffer: bool) {
     if let Some(console) = CONSOLE.lock().as_mut() {
-        let _ = console.serial.write_fmt(args);
-        if let Some(fb) = console.fb.as_mut() {
-            let _ = fb.write_fmt(args);
+        let _ = console.serial.write_str(text);
+        if to_framebuffer && let Some(fb) = console.fb.as_mut() {
+            let _ = fb.write_str(text);
         }
     }
 }
@@ -54,15 +55,4 @@ pub fn panic_print(args: fmt::Arguments) {
             let _ = arch::debug_serial().write_fmt(args);
         }
     }
-}
-
-#[macro_export]
-macro_rules! kprint {
-    ($($arg:tt)*) => ($crate::console::_print(format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! kprintln {
-    () => ($crate::kprint!("\n"));
-    ($($arg:tt)*) => ($crate::console::_print(format_args!("{}\n", format_args!($($arg)*))));
 }

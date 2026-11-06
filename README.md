@@ -84,6 +84,12 @@ cargo xtask run -- -smp 8      # cokoli za -- jde přímo do QEMU
 cargo xtask test               # self-testy jádra v QEMU bez okna, výsledek = návratový kód
 ```
 
+Výstup sériové linky se ukládá do `target/serial.log` (u testů
+`target/serial-test.log`). Při panice nebo fatální výjimce xtask po skončení
+QEMU vypíše zásobník s přeloženými jmény funkcí. Logování a chyby popisuje
+[docs/architektura.md](docs/architektura.md#chyby-a-logování), testy jádra
+jsou v `kernel/src/tests/`.
+
 Výsledný obraz `target/os-x86_64-<profil>.img` je GPT disk s jedním EFI
 System oddílem (FAT32), lze ho zapsat i na USB a bootovat na reálném PC
 (zatím neotestováno).

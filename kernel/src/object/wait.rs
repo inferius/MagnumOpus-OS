@@ -27,10 +27,11 @@ pub fn wait_many(
             }
             registered = i + 1;
         }
+        let mut timer = None;
         if result.is_none() {
             match deadline {
                 Some(d) if arch::now_ns() >= d => result = Some(Err(Error::TimedOut)),
-                Some(d) => sched::add_timer(d, &me, seq),
+                Some(d) => timer = Some(sched::add_timer(d, &me, seq)),
                 None => {}
             }
         }
@@ -39,8 +40,13 @@ pub fn wait_many(
         } else {
             sched::block();
         }
+        // Uklid registraci: pozorovatele u objektu i casovac (kdyz cekani
+        // skoncilo driv, zaznam by jinak drzel vlakno do terminu).
         for (object, _) in &items[..registered] {
             object.core().remove_observer(&me, seq);
+        }
+        if let Some(timer) = timer {
+            sched::cancel_timer(timer);
         }
         if let Some(result) = result {
             return result;

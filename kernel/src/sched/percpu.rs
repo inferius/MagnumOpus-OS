@@ -153,6 +153,14 @@ impl PerCpu {
     }
 }
 
+/// Data aktualniho CPU, pokud uz je zaregistrovane (pred `install` vraci
+/// `None`; vyzaduje `arch::clear_cpu_local` na zacatku startu CPU).
+pub fn try_this_cpu() -> Option<&'static PerCpu> {
+    let p = arch::cpu_local() as *const PerCpu;
+    // SAFETY: nenulova hodnota je vzdy leaknuta PerCpu z `install`.
+    (!p.is_null()).then(|| unsafe { &*p })
+}
+
 /// Data aktualniho CPU.
 pub fn this_cpu() -> &'static PerCpu {
     // SAFETY: GS baze ukazuje na leaknutou PerCpu (nastaveno v `install`).

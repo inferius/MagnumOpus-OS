@@ -50,6 +50,11 @@ pub fn init_cpu(index: usize, hw_id: u32) -> &'static PerCpu {
     PerCpu::install(index, hw_id, idle)
 }
 
+/// Index aktualniho CPU, pokud uz je CPU zaregistrovane v planovaci.
+pub fn try_current_cpu_index() -> Option<usize> {
+    percpu::try_this_cpu().map(|c| c.index)
+}
+
 /// Aktualni vlakno.
 pub fn current() -> Arc<Thread> {
     let irq = interrupts::disable();
@@ -134,8 +139,17 @@ pub fn wake(t: &Arc<Thread>, seq: u64) {
     }
 }
 
+/// Identifikace naplanovaneho probuzeni (pro zruseni).
+pub struct TimerId {
+    cpu: usize,
+    thread: *const Thread,
+    seq: u64,
+}
+
 /// Naplanuje probuzeni vlakna `t` (cekani `seq`) v case `deadline`.
-pub fn add_timer(deadline: u64, t: &Arc<Thread>, seq: u64) {
+/// Kdyz cekani skonci driv, je treba probuzeni zrusit (`cancel_timer`),
+/// jinak by zaznam drzel vlakno a zbytecne budil CPU az do terminu.
+pub fn add_timer(deadline: u64, t: &Arc<Thread>, seq: u64) -> TimerId {
     // Bez preruseni, aby vlakno mezi vyberem CPU a naprogramovanim casovace
     // nemohlo byt preempcne presunuto jinam (casovac by se nastavil na
     // jinem CPU, nez ve kterem je zaznam, a probuzeni by se ztratilo).
@@ -148,6 +162,26 @@ pub fn add_timer(deadline: u64, t: &Arc<Thread>, seq: u64) {
     });
     program_timer(cpu);
     interrupts::restore(irq);
+    TimerId {
+        cpu: cpu.index,
+        thread: Arc::as_ptr(t),
+        seq,
+    }
+}
+
+/// Zrusi probuzeni z `add_timer` (pokud jeste nenastalo). Casovac CPU se
+/// neprenastavuje - pripadne preruseni na prazdnou frontu je neskodne.
+pub fn cancel_timer(id: TimerId) {
+    if let Some(cpu) = percpu::cpu(id.cpu) {
+        cpu.timers
+            .lock()
+            .retain(|e| !(Arc::as_ptr(&e.thread) == id.thread && e.seq == id.seq));
+    }
+}
+
+/// Pocet naplanovanych probuzeni na vsech CPU (pro testy a ladeni).
+pub fn pending_timers() -> usize {
+    all_cpus().map(|c| c.timers.lock().len()).sum()
 }
 
 /// Vybere CPU pro vlakno pripravene k behu: jeho posledni CPU, pokud je
@@ -286,12 +320,16 @@ fn switch_away(reason: Reason) {
 /// Vrati preempcne vystridane vlakno do fronty. Pokud ma toto CPU dalsi
 /// praci a nektere jine je necinne, presune ho tam.
 fn requeue(cpu: &'static PerCpu, t: Arc<Thread>) {
-    let local_busy = !cpu.rq.lock().is_empty();
-    let idle_cpu = all_cpus().find(|c| c.index != cpu.index && c.is_idle.load(Ordering::Relaxed));
-    match idle_cpu {
-        Some(target) if local_busy => enqueue_on(target, t),
-        _ => cpu.rq.lock().push(t),
+    let mut rq = cpu.rq.lock();
+    if !rq.is_empty() {
+        let idle = all_cpus().find(|c| c.index != cpu.index && c.is_idle.load(Ordering::Relaxed));
+        if let Some(target) = idle {
+            drop(rq);
+            enqueue_on(target, t);
+            return;
+        }
     }
+    rq.push(t);
 }
 
 /// Dokonceni prepnuti na novem vlakne: predchozi vlakno uz smi bezet jinde.
@@ -377,9 +415,15 @@ pub fn idle_loop() -> ! {
 }
 
 /// Zastavi vsechna ostatni CPU (pri panice).
+///
+/// Nesaha na APIC, dokud aktualni CPU neni zaregistrovane: panika muze
+/// nastat jeste pred inicializaci APIC a dalsi vyjimka by prekryla puvodni
+/// chybu. Pred registraci BSP zadna jina CPU nebezi.
 pub fn halt_other_cpus() {
-    let me = arch::cpu_hw_id();
-    for cpu in all_cpus().filter(|c| c.hw_id != me) {
+    let Some(me) = percpu::try_this_cpu() else {
+        return;
+    };
+    for cpu in all_cpus().filter(|c| c.index != me.index) {
         arch::send_halt(cpu.hw_id);
     }
 }

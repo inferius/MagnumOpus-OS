@@ -166,6 +166,40 @@ Dvě jména, která člověk čte jako stejná, jsou stejné jméno.
   git repozitáře) nejde uložit. Případná volba case-sensitive pro jeden
   subvolume se přidá, až bude opravdu potřeba.
 
+### Obsahově adresovaný FS a nativní verzování (návrh)
+
+Git je v jádru jednoduchý: soubory a adresáře identifikované hashem obsahu
+(Merkleho strom), commit = neměnný strom + metadata + rodiče, větev =
+pojmenovaný ukazatel na commit. CoW FS s checksumy už má většinu
+z toho - při každé změně stejně přepisuje cestu ke kořeni. Návrh: dotáhnout
+to tak, aby verzování bylo vlastnost FS, ne programu nad ním.
+
+- **Hash obsahu u každého souboru a adresáře**, udržovaný FS při zápisu
+  (Merkleho strom, BLAKE3 - rychlý a umí hashovat po částech). Zapnutelné
+  pro subvolume, protože něco stojí.
+- **Snapshot = commit:** neměnný kořen + autor, zpráva, rodiče. Historie je
+  DAG, větve jsou pojmenované reference, nová větev nebo klon je CoW
+  (okamžitý, bez kopírování dat).
+- **Rozdíl dvou snapshotů v čase úměrném změně:** stejný hash podstromu =
+  není třeba do něj lézt.
+- **Žurnál změn:** uspořádaný proud změn v subvolume (jako USN žurnál NTFS
+  nebo FSEvents). Pro build systémy, synchronizaci, indexování, `git status`
+  bez procházení disku.
+- **Transakce:** atomický zápis více souborů najednou (commit nebo nic).
+- **Deduplikace** zadarmo díky hashům obsahu.
+- **Programové API:** vedle cest i typované IPC rozhraní: transakce, dotazy
+  na metadata, hashe, reflink kopie, rozdíly snapshotů, odběr změn.
+
+**Interoperabilita s gitem:** git počítá ID objektů vlastním formátem (SHA-1
+nebo SHA-256 přes `blob <velikost>\0obsah`), ty z BLAKE3 odvodit nejde.
+Služba `git` proto ID počítá líně a cachuje je v metadatech souborů. Pracovní
+strom je přímo FS (žádný oddělený index - stav zná FS ze žurnálu),
+objekty repozitáře jsou snapshoty, packfily jen pro síťovou výměnu. Pro
+existující nástroje adaptér na úložiště objektů (např. backend libgit2).
+
+**Pořadí:** nejdřív samotný CoW FS (milník 6), pak hashe a DAG snapshotů,
+pak služba pro git. Zbytek návrhu se upřesní při implementaci.
+
 ## Grafika
 
 - Kompozitor v userspace (koncept Waylandu), klienti renderují do bufferů
@@ -212,6 +246,34 @@ Odinstalace = smazání adresáře.
 
 První cíl (milník 5): .exe se statickým CRT (`/MT`), které potřebuje jen
 `kernel32` a `ntdll`. Hned potom vlastní UCRT.
+
+## Chyby a logování
+
+Cíl: každou chybu jde dohledat - co se stalo, kde, na kterém CPU a kdy.
+
+- **Chyby:** společný typ `Error` (`kernel/src/error.rs`) - malý kód se
+  stabilní číselnou hodnotou, stane se z něj návratový kód syscallu. Kontext
+  se nepřidává do typu, ale zaloguje se v místě vzniku
+  (`result.context("co se dělalo")`, s místem volání).
+- **Log jádra** (`kernel/src/log/`): úrovně Error/Warn/Info/Debug/Trace,
+  každý záznam má čas od startu, CPU, modul a u chyb a varování soubor
+  a řádek. Výstupy: sériová linka (vše povolené), framebuffer (do Info),
+  kruhový buffer 64 KiB v paměti (pro pozdější čtení službou logu).
+- **Vypínání:** úroveň globálně i pro jednotlivé moduly za běhu; úrovně nad
+  `STATIC_MAX_LEVEL` se vůbec nepřeloží. Zakázaný záznam stojí jedno
+  atomické čtení. Logování nealokuje, funguje i v přerušení.
+- **Fatální chyby:** panika i neošetřená výjimka vypíšou zprávu, registry
+  a zásobník; opakovaná chyba během zastavování se nezacyklí.
+- **Dohledání po běhu:** xtask ukládá výstup sériové linky do
+  `target/serial.log` a adresy ze zásobníku překládá na jména funkcí.
+- Později: služba logu v userspace, strukturované záznamy (klíč=hodnota),
+  persistentní log na disku, úrovně z příkazové řádky jádra.
+
+## Konvence kódu
+
+- Soubor max ~1500 řádků; do podmodulů dělit hned, když to dává smysl.
+- Testy v oddělených souborech (`kernel/src/tests/<oblast>.rs`).
+- `unsafe` jen kde je nutné, vždy s komentářem `// SAFETY:`.
 
 ## Cizí kód a licence
 

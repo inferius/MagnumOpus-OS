@@ -17,6 +17,8 @@ use core::ops::{BitAnd, BitOr, Not};
 
 pub use handle::{Handle, HandleTable};
 
+pub use crate::error::Error;
+
 use crate::sched::{self, Thread};
 use crate::sync::SpinLock;
 
@@ -102,24 +104,6 @@ pub enum ObjectType {
     Event,
     Thread,
     Process,
-}
-
-/// Chyby operaci s objekty a handly. Pozdeji se z nich stanou navratove
-/// kody syscallu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    /// Handle neexistuje (nebo uz byl zavren).
-    BadHandle,
-    /// Handle nema potrebna prava.
-    AccessDenied,
-    /// Objekt je jineho typu, nez operace ocekava.
-    WrongType,
-    /// Vyprsel cas cekani.
-    TimedOut,
-    /// Nedostatek pameti.
-    NoMemory,
-    /// Vycerpany limit (napr. pocet handlu).
-    NoResources,
 }
 
 pub trait KernelObject: Any + Send + Sync {

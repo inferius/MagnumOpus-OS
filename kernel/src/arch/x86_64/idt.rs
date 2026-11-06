@@ -10,8 +10,9 @@ use core::mem::size_of;
 
 use super::apic::{self, VECTOR_HALT, VECTOR_RESCHEDULE, VECTOR_SPURIOUS, VECTOR_TIMER};
 use super::gdt::{IST_DOUBLE_FAULT, IST_MACHINE_CHECK, IST_NMI, KERNEL_CODE};
-use super::{cpu, halt_forever, stack_trace};
-use crate::{console, sched};
+use super::{cpu, halt_forever};
+use crate::fatal::{fatal_stop, report, report_stack_trace};
+use crate::{log, sched};
 
 /// Ulozeny stav CPU v okamziku vyjimky. Poradi odpovida `isr_common`.
 #[repr(C)]
@@ -213,7 +214,7 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
     let vector = frame.vector;
     match vector {
         VEC_BREAKPOINT => {
-            crate::kprintln!("breakpoint na {:#x}", frame.rip);
+            log::info!("breakpoint na {:#x}", frame.rip);
         }
         v if v < 32 => fatal_exception(frame),
         v if v == VECTOR_TIMER as u64 => {
@@ -228,7 +229,7 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
         v if v == VECTOR_SPURIOUS as u64 => {} // spurious se nepotvrzuje
         _ => {
             apic::eoi();
-            crate::kprintln!("necekane preruseni, vektor {vector}");
+            log::warn!("necekane preruseni, vektor {vector}");
         }
     }
     if vector >= 32 {
@@ -238,14 +239,16 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
 
 fn fatal_exception(f: &TrapFrame) -> ! {
     let name = EXCEPTION_NAMES[f.vector as usize];
-    console::panic_print(format_args!(
-        "\nKERNEL: neosetrena vyjimka {name}, vektor {}, chybovy kod {:#x}\n",
-        f.vector, f.error_code
+    report(format_args!(
+        "KERNEL: neosetrena vyjimka {name} na cpu{}, vektor {}, chybovy kod {:#x}",
+        sched::try_current_cpu_index().unwrap_or(0),
+        f.vector,
+        f.error_code
     ));
     if f.vector == VEC_PAGE_FAULT {
         let e = f.error_code;
-        console::panic_print(format_args!(
-            "  adresa {:#x}: {}, {}, {}{}\n",
+        report(format_args!(
+            "  adresa {:#x}: {}, {}, {}{}",
             cpu::read_cr2(),
             if e & 1 != 0 {
                 "poruseni prav"
@@ -261,36 +264,31 @@ fn fatal_exception(f: &TrapFrame) -> ! {
             },
         ));
     }
-    console::panic_print(format_args!(
-        "  rip {:#018x}  cs {:#x}  rflags {:#x}\n  rsp {:#018x}  ss {:#x}\n\
-         \x20 rax {:#018x}  rbx {:#018x}  rcx {:#018x}\n\
-         \x20 rdx {:#018x}  rsi {:#018x}  rdi {:#018x}\n\
-         \x20 rbp {:#018x}  r8  {:#018x}  r9  {:#018x}\n\
-         \x20 r10 {:#018x}  r11 {:#018x}  r12 {:#018x}\n\
-         \x20 r13 {:#018x}  r14 {:#018x}  r15 {:#018x}\n",
-        f.rip,
-        f.cs,
-        f.rflags,
-        f.rsp,
-        f.ss,
-        f.rax,
-        f.rbx,
-        f.rcx,
-        f.rdx,
-        f.rsi,
-        f.rdi,
-        f.rbp,
-        f.r8,
-        f.r9,
-        f.r10,
-        f.r11,
-        f.r12,
-        f.r13,
-        f.r14,
-        f.r15
+    report(format_args!(
+        "  rip {:#018x}  cs {:#x}  rflags {:#x}",
+        f.rip, f.cs, f.rflags
     ));
-    stack_trace(f.rbp, |addr| {
-        console::panic_print(format_args!("    {addr:#018x}\n"))
-    });
-    crate::fatal_stop()
+    report(format_args!("  rsp {:#018x}  ss {:#x}", f.rsp, f.ss));
+    report(format_args!(
+        "  rax {:#018x}  rbx {:#018x}  rcx {:#018x}",
+        f.rax, f.rbx, f.rcx
+    ));
+    report(format_args!(
+        "  rdx {:#018x}  rsi {:#018x}  rdi {:#018x}",
+        f.rdx, f.rsi, f.rdi
+    ));
+    report(format_args!(
+        "  rbp {:#018x}  r8  {:#018x}  r9  {:#018x}",
+        f.rbp, f.r8, f.r9
+    ));
+    report(format_args!(
+        "  r10 {:#018x}  r11 {:#018x}  r12 {:#018x}",
+        f.r10, f.r11, f.r12
+    ));
+    report(format_args!(
+        "  r13 {:#018x}  r14 {:#018x}  r15 {:#018x}",
+        f.r13, f.r14, f.r15
+    ));
+    report_stack_trace(Some(f.rbp));
+    fatal_stop()
 }

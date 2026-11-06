@@ -32,7 +32,9 @@ pub fn init(tsc_hz: u64) {
 
 /// Nanosekundy od startu jadra.
 pub fn now_ns() -> u64 {
-    let delta = rdtsc().wrapping_sub(TSC_BASE.load(Ordering::Relaxed));
+    // saturating: kdyby TSC tohoto CPU byl o kousek za BSP, cas nesmi
+    // pretect do obrovske hodnoty (posun se opravuje pri startu CPU).
+    let delta = rdtsc().saturating_sub(TSC_BASE.load(Ordering::Relaxed));
     ((delta as u128 * NS_MULT.load(Ordering::Relaxed) as u128) >> 32) as u64
 }
 
@@ -41,4 +43,20 @@ pub fn busy_wait_ns(ns: u64) {
     while now_ns() < end {
         core::hint::spin_loop();
     }
+}
+
+const MSR_TSC_ADJUST: u32 = 0x3B;
+
+/// Posune TSC tohoto CPU o `delta` tiku pres MSR IA32_TSC_ADJUST.
+/// Vraci false, pokud to CPU nepodporuje.
+pub fn adjust(delta: i64) -> bool {
+    if cpu::cpuid(7, 0).ebx & (1 << 1) == 0 {
+        return false;
+    }
+    // SAFETY: MSR existuje (overeno CPUID); zmena posune jen TSC tohoto CPU.
+    unsafe {
+        let v = cpu::rdmsr(MSR_TSC_ADJUST) as i64;
+        cpu::wrmsr(MSR_TSC_ADJUST, v.wrapping_add(delta) as u64);
+    }
+    true
 }

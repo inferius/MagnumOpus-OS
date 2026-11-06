@@ -13,20 +13,23 @@ extern crate alloc;
 mod acpi;
 mod arch;
 mod console;
+mod error;
+mod fatal;
 mod framebuffer;
+mod log;
 mod mm;
 mod object;
 mod sched;
-mod selftest;
 mod smp;
 mod sync;
+mod tests;
 
 use boot_info::{BOOT_INFO_MAGIC, BOOT_INFO_VERSION, BootInfo};
 use core::fmt::Write;
-use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicBool, Ordering};
 
 use acpi::Platform;
+
+pub use fatal::fatal_stop;
 
 /// Informace o platforme, zjistene jednou pri startu.
 static PLATFORM: spin::Once<Platform> = spin::Once::new();
@@ -37,6 +40,7 @@ static PLATFORM: spin::Once<Platform> = spin::Once::new();
 /// pameti, preruseni jsou zakazana.
 #[unsafe(no_mangle)]
 extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
+    arch::clear_cpu_local();
     if boot_info.magic != BOOT_INFO_MAGIC || boot_info.version != BOOT_INFO_VERSION {
         let _ = writeln!(arch::debug_serial(), "kernel: neplatny BootInfo od loaderu");
         arch::halt_forever();
@@ -45,7 +49,7 @@ extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
     // SAFETY: framebuffer popsal loader a namapoval ho do prime mapy;
     // kernel ho nepouziva nijak jinak nez pres konzoli.
     unsafe { console::init(&boot_info.framebuffer) };
-    kprintln!("os kernel {} ({})", env!("CARGO_PKG_VERSION"), arch_name());
+    log::info!("os kernel {} ({})", env!("CARGO_PKG_VERSION"), arch_name());
 
     // SAFETY: jednou, na bootovacim CPU, preruseni jsou zakazana.
     unsafe { arch::init_boot_cpu() };
@@ -53,11 +57,23 @@ extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
     // SAFETY: jednou, po init_boot_cpu; BootInfo je overeny.
     unsafe { mm::init(boot_info) };
 
-    let platform =
-        PLATFORM.call_once(|| acpi::parse(boot_info.acpi_rsdp).expect("cteni ACPI selhalo"));
+    let platform = PLATFORM.call_once(|| match acpi::parse(boot_info.acpi_rsdp) {
+        Ok(p) => p,
+        Err(e) => panic!("cteni ACPI selhalo: {e}"),
+    });
+    log::info!(
+        "ACPI: {} CPU, {} IOAPIC, HPET {}",
+        platform.cpus.len(),
+        platform.ioapics.len(),
+        if platform.hpet_phys.is_some() {
+            "ano"
+        } else {
+            "ne"
+        }
+    );
     // SAFETY: jednou, po inicializaci pameti, preruseni zakazana.
     let timers = unsafe { arch::init_platform(platform) };
-    kprintln!(
+    log::info!(
         "casovace: TSC {} MHz{}, APIC timer {} kHz, {}",
         timers.tsc_hz / 1_000_000,
         if timers.tsc_invariant {
@@ -72,7 +88,7 @@ extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
     // ACPI tabulky jsou prectene, GDT a IDT vlastni: pamet firmwaru je volna.
     mm::reclaim_boot_memory(boot_info);
     let (free, total) = mm::phys::stats();
-    kprintln!(
+    log::info!(
         "pamet: volno {} / {} MiB",
         free * 4096 / (1024 * 1024),
         total * 4096 / (1024 * 1024)
@@ -94,7 +110,7 @@ extern "sysv64" fn kernel_main(boot_info: u64) -> ! {
 
     sched::init_cpu(0, arch::cpu_hw_id());
     let cpus = smp::start_secondary_cpus(platform, boot_info);
-    kprintln!("smp: bezi {cpus} z {} CPU", platform.cpus.len());
+    log::info!("bezi {cpus} z {} CPU", platform.cpus.len());
 
     sched::spawn("init", sched::Qos::Normal, init_main);
     sched::idle_loop()
@@ -102,11 +118,14 @@ extern "sysv64" fn kernel_main(boot_info: u64) -> ! {
 
 /// Prvni vlakno jadra. Pozdeji spusti prvni proces v userspace.
 fn init_main() {
-    kprintln!("self-testy:");
-    selftest::run();
-    kprintln!("Milnik 3 hotov.");
+    let ok = tests::run_all();
+    if ok {
+        log::info!("self-testy prosly, jadro bezi");
+    } else {
+        log::error!("self-testy selhaly");
+    }
     if cfg!(feature = "qemu-test") {
-        arch::qemu_exit(true);
+        arch::qemu_exit(ok);
     }
 }
 
@@ -116,28 +135,4 @@ const fn arch_name() -> &'static str {
     } else {
         "neznama architektura"
     }
-}
-
-static PANICKING: AtomicBool = AtomicBool::new(false);
-
-/// Konec pri neopravitelne chybe: zastavi ostatni CPU, v testech ukonci
-/// QEMU s neuspechem, jinak zastavi i aktualni CPU.
-pub fn fatal_stop() -> ! {
-    sched::halt_other_cpus();
-    if cfg!(feature = "qemu-test") {
-        arch::qemu_exit(false);
-    }
-    arch::halt_forever()
-}
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    arch::interrupts::disable();
-    if PANICKING.swap(true, Ordering::SeqCst) {
-        // Panika behem paniky (nebo na jinem CPU soucasne): jen zastavit.
-        arch::halt_forever();
-    }
-    console::panic_print(format_args!("\nKERNEL PANIC: {info}\n"));
-    arch::current_stack_trace(|addr| console::panic_print(format_args!("    {addr:#018x}\n")));
-    fatal_stop()
 }

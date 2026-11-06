@@ -42,6 +42,9 @@ pub unsafe fn init_boot_cpu() {
     // SAFETY: predano volajicim (jednou, BSP, bez preruseni).
     unsafe {
         gdt::init_bsp();
+        // Nacteni selektoru GS v gdt vynuluje jeho bazi: znovu nastavit
+        // prazdna per-CPU data, jinak by je cetlo logovani z adresy 0.
+        clear_cpu_local();
         idt::init();
         idt::load();
         paging::init_cpu();
@@ -94,10 +97,21 @@ pub unsafe fn init_ap_cpu() {
     // SAFETY: predano volajicim.
     unsafe {
         gdt::init_ap();
+        clear_cpu_local();
         idt::load();
         paging::init_cpu();
         apic::init_cpu(false, 0);
     }
+}
+
+/// Hodnota citace cyklu (TSC) aktualniho CPU.
+pub fn cycle_counter() -> u64 {
+    time::rdtsc()
+}
+
+/// Posune citac cyklu tohoto CPU; false, pokud to CPU neumi.
+pub fn adjust_cycle_counter(delta: i64) -> bool {
+    time::adjust(delta)
 }
 
 /// Identifikator aktualniho CPU v hardware (ID lokalniho APIC).
@@ -106,6 +120,17 @@ pub fn cpu_hw_id() -> u32 {
 }
 
 const MSR_GS_BASE: u32 = 0xC000_0101;
+
+/// Prazdna per-CPU data: gs:[0] = 0, tedy "CPU jeste neni zaregistrovane".
+static EMPTY_CPU_LOCAL: u64 = 0;
+
+/// Nastavi GS bazi na prazdna per-CPU data. Volat jako uplne prvni vec pri
+/// startu kazdeho CPU, aby cteni per-CPU dat (napr. z logovani) bylo
+/// bezpecne jeste pred registraci CPU.
+pub fn clear_cpu_local() {
+    // SAFETY: staticka promenna zije navzdy a jeji prvni slovo je 0.
+    unsafe { cpu::wrmsr(MSR_GS_BASE, &raw const EMPTY_CPU_LOCAL as u64) };
+}
 
 /// Nastavi ukazatel na per-CPU data jadra (GS baze).
 ///

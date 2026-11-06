@@ -17,3 +17,5 @@ noto-sans-mono-bitmap = { version = "0.4", default-features = false, features = 
 [features]
 # Po self-testech ukonci QEMU pres isa-debug-exit (cargo xtask test).
 qemu-test = []
+# Prelozi i zaznamy urovne Trace v release buildu.
+log-trace = []

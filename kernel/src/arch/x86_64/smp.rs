@@ -137,7 +137,6 @@ mod labels {
 /// Pripravena trampolina ve dvou strankach pod 1 MiB.
 pub struct Trampoline {
     code: u64,
-    pml4: u64,
 }
 
 impl Trampoline {
@@ -198,7 +197,7 @@ impl Trampoline {
         // SAFETY: obe stranky jsou cele PML4 (512 polozek) v prime mape.
         unsafe { core::ptr::copy_nonoverlapping(src, dst_pml4, 512) };
 
-        Self { code, pml4 }
+        Self { code }
     }
 
     /// Nastartuje jedno AP: skoci do `entry(arg)` na zasobniku `stack_top`.
@@ -237,7 +236,6 @@ impl Trampoline {
 
     /// Zrusi docasne identicke mapovani.
     pub fn finish(self) {
-        let _ = self.pml4;
         mm::unmap_identity_page(PhysAddr::new(self.code));
     }
 }

@@ -1,15 +1,19 @@
 //! Tabulka handlu procesu.
 //!
-//! Handle je 32bitova hodnota: dolnich 24 bitu = index + 1, hornich 8 bitu
+//! Handle je 32bitova hodnota: dolnich 20 bitu = index + 1, hornich 12 bitu
 //! = generace slotu. Generace se pri zavreni zvysi, takze stary handle po
-//! znovupouziti slotu neukazuje na cizi objekt. Hodnota 0 neni nikdy platna.
+//! znovupouziti slotu neukazuje na cizi objekt. Slot, ktery vycerpal vsechny
+//! generace, se uz nikdy nepouzije (generace by pretekla a stary handle by
+//! zacal znovu platit). Hodnota 0 neni nikdy platna.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::{Error, KernelObject, Rights};
 
-const INDEX_BITS: u32 = 24;
+const INDEX_BITS: u32 = 20;
+const GENERATION_BITS: u32 = 32 - INDEX_BITS;
+const MAX_GENERATION: u16 = (1 << GENERATION_BITS) - 1;
 const MAX_HANDLES: usize = (1 << INDEX_BITS) - 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +31,7 @@ impl Handle {
         self.0
     }
 
-    fn new(index: usize, generation: u8) -> Self {
+    fn new(index: usize, generation: u16) -> Self {
         Self(((generation as u32) << INDEX_BITS) | (index as u32 + 1))
     }
 
@@ -37,8 +41,8 @@ impl Handle {
             .map(|i| i as usize)
     }
 
-    fn generation(self) -> u8 {
-        (self.0 >> INDEX_BITS) as u8
+    fn generation(self) -> u16 {
+        (self.0 >> INDEX_BITS) as u16
     }
 }
 
@@ -48,7 +52,7 @@ struct Entry {
 }
 
 struct Slot {
-    generation: u8,
+    generation: u16,
     entry: Option<Entry>,
 }
 
@@ -135,8 +139,11 @@ impl HandleTable {
         let index = handle.index().unwrap();
         let slot = &mut self.slots[index];
         slot.entry = None;
-        slot.generation = slot.generation.wrapping_add(1);
-        self.free.push(index);
+        if slot.generation < MAX_GENERATION {
+            slot.generation += 1;
+            self.free.push(index);
+        }
+        // Jinak slot vyradime: zustane prazdny a uz se nepouzije.
         Ok(())
     }
 }

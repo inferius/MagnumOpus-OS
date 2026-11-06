@@ -9,6 +9,7 @@
 //! `--accel <tcg|kvm|whpx|hvf>` a cokoli za `--` se preda primo QEMU.
 
 mod image;
+mod symbolize;
 
 use std::env;
 use std::ffi::OsString;
@@ -282,6 +283,11 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
         std::fs::copy(&ovmf_vars_template, &ovmf_vars)?;
     }
 
+    let serial_log = target_dir().join(if opts.test {
+        "serial-test.log"
+    } else {
+        "serial.log"
+    });
     let accel = opts.accel.as_deref().unwrap_or(default_accel());
     let mut cmd = Command::new(&qemu);
     cmd.arg("-machine")
@@ -299,7 +305,11 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
         .args(["-device", "virtio-blk-pci,drive=osdisk"])
         // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.
         .args(["-nic", "none"])
-        .args(["-serial", "stdio"])
+        // Seriova linka do terminalu a zaroven do souboru (target/serial.log),
+        // aby se dal vystup dohledat i po skonceni behu.
+        .arg("-chardev")
+        .arg(format!("stdio,id=serial0,logfile={}", serial_log.display()))
+        .args(["-serial", "chardev:serial0"])
         .arg("-no-reboot");
     if opts.headless {
         cmd.args(["-display", "none"]);
@@ -322,9 +332,24 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
     cmd.args(&opts.qemu_args);
 
     println!("xtask: spoustim {}", qemu.display());
-    if opts.test {
-        return run_qemu_test(cmd);
+    let kernel = target_dir()
+        .join(KERNEL_TARGET)
+        .join(profile_dir(opts))
+        .join("kernel");
+    let result = if opts.test {
+        run_qemu_test(cmd)
+    } else {
+        run_qemu_interactive(cmd)
+    };
+    // Pri panice nebo fatalni vyjimce prelozit adresy na jmena funkci.
+    if let Err(e) = symbolize::report(&serial_log, &kernel) {
+        eprintln!("xtask: preklad adres selhal: {e}");
     }
+    println!("xtask: vystup seriove linky je v {}", serial_log.display());
+    result
+}
+
+fn run_qemu_interactive(mut cmd: Command) -> Result<()> {
     let status = cmd.status()?;
     if !status.success() {
         return Err(format!("QEMU skoncilo s {status}").into());
