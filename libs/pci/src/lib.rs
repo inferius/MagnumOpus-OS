@@ -13,7 +13,7 @@ pub mod msix;
 use alloc::vec::Vec;
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
-use libos::{Mapping, Result, Vmo};
+use libos::{Error, Mapping, Result, Vmo};
 
 pub const VENDOR_ID: u16 = 0x00;
 pub const COMMAND: u16 = 0x04;
@@ -45,12 +45,18 @@ impl core::fmt::Display for Address {
     }
 }
 
-/// Namapovane okno ECAM pro rozsah sbernic.
+/// Namapovane okno ECAM: rozsah sbernic (spravce zarizeni), nebo
+/// konfigurace jedine funkce (ovladac dostane jen svou 4KiB stranku).
 pub struct Ecam {
     map: Mapping,
     bus_start: u8,
     bus_end: u8,
+    /// `Some` = okno jen na konfiguraci teto funkce.
+    single: Option<Address>,
 }
+
+/// Velikost konfiguracniho prostoru jedne funkce.
+pub const CONFIG_SIZE: u64 = 4096;
 
 /// Zakladni informace o funkci.
 #[derive(Debug, Clone, Copy)]
@@ -76,40 +82,78 @@ impl Ecam {
     pub fn new(vmo: &Vmo, arg: u32) -> Result<Self> {
         let bus_start = arg as u8;
         let bus_end = (arg >> 8) as u8;
+        if bus_end < bus_start {
+            return Err(Error::InvalidArgs);
+        }
         let len = (bus_end as u64 - bus_start as u64 + 1) << 20;
         let map = Mapping::new(vmo, 0, len, MAP_READ | MAP_WRITE)?;
         Ok(Self {
             map,
             bus_start,
             bus_end,
+            single: None,
         })
     }
 
-    fn offset(&self, a: Address, reg: u16) -> u64 {
-        ((a.bus - self.bus_start) as u64) << 20
-            | (a.device as u64) << 15
-            | (a.function as u64) << 12
-            | reg as u64
+    /// Okno na konfiguraci jedine funkce `a` (`vmo` = jeji 4KiB stranka).
+    /// Pristup k jine funkci cte same jednicky (jako neexistujici funkce)
+    /// a zapis se ignoruje.
+    pub fn single(vmo: &Vmo, a: Address) -> Result<Self> {
+        let map = Mapping::new(vmo, 0, CONFIG_SIZE, MAP_READ | MAP_WRITE)?;
+        Ok(Self {
+            map,
+            bus_start: a.bus,
+            bus_end: a.bus,
+            single: Some(a),
+        })
+    }
+
+    /// Offset konfigurace funkce `a` v okne (pro spravce zarizeni: fyzicka
+    /// adresa stranky = zacatek okna + offset).
+    pub fn config_offset(&self, a: Address) -> Option<u64> {
+        self.offset(a, 0)
+    }
+
+    fn offset(&self, a: Address, reg: u16) -> Option<u64> {
+        if reg as u64 >= CONFIG_SIZE {
+            return None;
+        }
+        if let Some(s) = self.single {
+            return (s == a).then_some(reg as u64);
+        }
+        if a.bus < self.bus_start || a.bus > self.bus_end || a.device >= 32 || a.function >= 8 {
+            return None;
+        }
+        Some(
+            ((a.bus - self.bus_start) as u64) << 20
+                | (a.device as u64) << 15
+                | (a.function as u64) << 12
+                | reg as u64,
+        )
     }
 
     pub fn read32(&self, a: Address, reg: u16) -> u32 {
-        self.map.read(self.offset(a, reg))
+        self.offset(a, reg).map_or(u32::MAX, |o| self.map.read(o))
     }
 
     pub fn read16(&self, a: Address, reg: u16) -> u16 {
-        self.map.read(self.offset(a, reg))
+        self.offset(a, reg).map_or(u16::MAX, |o| self.map.read(o))
     }
 
     pub fn read8(&self, a: Address, reg: u16) -> u8 {
-        self.map.read(self.offset(a, reg))
+        self.offset(a, reg).map_or(u8::MAX, |o| self.map.read(o))
     }
 
     pub fn write32(&self, a: Address, reg: u16, v: u32) {
-        self.map.write(self.offset(a, reg), v)
+        if let Some(o) = self.offset(a, reg) {
+            self.map.write(o, v)
+        }
     }
 
     pub fn write16(&self, a: Address, reg: u16, v: u16) {
-        self.map.write(self.offset(a, reg), v)
+        if let Some(o) = self.offset(a, reg) {
+            self.map.write(o, v)
+        }
     }
 
     /// Projde vsechny sbernice a vrati existujici funkce.
@@ -162,6 +206,38 @@ impl Ecam {
             phys |= (self.read32(a, reg + 4) as u64) << 32;
         }
         Some(MemoryBar { phys, is_64bit })
+    }
+
+    /// Velikost pametoveho BARu `index` (standardni zjisteni: zapis jednicek
+    /// a zpetne cteni masky). Behem mereni je dekodovani pameti vypnute.
+    /// Volat jen pred spustenim ovladace (spravce zarizeni).
+    pub fn memory_bar_size(&self, a: Address, index: u8) -> Option<u64> {
+        let reg = BAR0 + index as u16 * 4;
+        let low = self.read32(a, reg);
+        if low & 1 != 0 {
+            return None;
+        }
+        let is_64bit = (low >> 1) & 3 == 2;
+        let cmd = self.read16(a, COMMAND);
+        self.write16(a, COMMAND, cmd & !COMMAND_MEMORY);
+        self.write32(a, reg, u32::MAX);
+        let mask_lo = self.read32(a, reg) & !0xF;
+        self.write32(a, reg, low);
+        let mask_hi = if is_64bit {
+            let high = self.read32(a, reg + 4);
+            self.write32(a, reg + 4, u32::MAX);
+            let m = self.read32(a, reg + 4);
+            self.write32(a, reg + 4, high);
+            m
+        } else {
+            u32::MAX
+        };
+        self.write16(a, COMMAND, cmd);
+        let mask = (mask_hi as u64) << 32 | mask_lo as u64;
+        if mask_lo == 0 && (!is_64bit || mask_hi == 0) {
+            return None; // BAR neni implementovany
+        }
+        Some((!mask).wrapping_add(1))
     }
 
     /// Seznam capability funkce: (offset, id).

@@ -12,10 +12,9 @@ use crate::object::resource::Resource;
 use crate::object::vmo::MemoryObject;
 use crate::object::{KernelObject, Rights};
 
-fn check_resource(p: &Process, v: u64) -> Result<()> {
+fn check_resource(p: &Process, v: u64) -> Result<Arc<Resource>> {
     p.handles()
         .get_as::<Resource>(arg_handle(v)?, Rights::MANAGE)
-        .map(|_| ())
 }
 
 fn insert(p: &Process, object: Arc<dyn KernelObject>) -> Result<u64> {
@@ -26,15 +25,17 @@ fn insert(p: &Process, object: Arc<dyn KernelObject>) -> Result<u64> {
 /// `VMO_CREATE_CONTIGUOUS(resource, size) -> handle`.
 pub fn vmo_create_contiguous(a: Args) -> Result<u64> {
     let p = current_process();
-    check_resource(&p, a[0])?;
+    let res = check_resource(&p, a[0])?;
+    let size = a[1].next_multiple_of(abi::vm::PAGE_SIZE);
+    res.charge_dma(size)?;
     insert(&p, MemoryObject::new_contiguous(a[1])?)
 }
 
 /// `VMO_CREATE_PHYSICAL(resource, phys, size) -> handle`: jen mimo RAM.
 pub fn vmo_create_physical(a: Args) -> Result<u64> {
     let p = current_process();
-    check_resource(&p, a[0])?;
-    if !mm::is_device_memory(a[1], a[2]) {
+    let res = check_resource(&p, a[0])?;
+    if !mm::is_device_memory(a[1], a[2]) || !res.allows_range(a[1], a[2]) {
         return Err(Error::AccessDenied);
     }
     insert(&p, MemoryObject::new_physical(a[1], a[2])?)
@@ -56,7 +57,7 @@ pub fn vmo_phys_addr(a: Args) -> Result<u64> {
 /// `INTERRUPT_CREATE(resource, out_msi_ptr) -> handle`.
 pub fn interrupt_create(a: Args) -> Result<u64> {
     let p = current_process();
-    check_resource(&p, a[0])?;
+    check_resource(&p, a[0])?.charge_irq()?;
     let irq = Interrupt::new()?;
     let (address, data) = irq.msi_message();
     let mut out = [0u8; 16];
@@ -74,4 +75,27 @@ pub fn interrupt_ack(a: Args) -> Result<u64> {
         .get_as::<Interrupt>(arg_handle(a[0])?, Rights::WRITE)?;
     irq.ack();
     Ok(0)
+}
+
+/// `RESOURCE_CREATE(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`.
+/// Rozsahy jsou dvojice u64 (fyzicky zacatek, delka).
+pub fn resource_create(a: Args) -> Result<u64> {
+    use crate::object::resource::MAX_RANGES;
+    let p = current_process();
+    let parent = check_resource(&p, a[0])?;
+    let count = user::check_len(a[2], MAX_RANGES)?;
+    let raw = user::read_bytes(&p, a[1], count * 16)?;
+    let ranges = raw
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .map(|c| {
+            (
+                u64::from_le_bytes(c[0..8].try_into().unwrap()),
+                u64::from_le_bytes(c[8..16].try_into().unwrap()),
+            )
+        })
+        .collect();
+    let irq_max = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
+    insert(&p, parent.restrict(ranges, irq_max, a[4])?)
 }

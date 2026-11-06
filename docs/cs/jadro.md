@@ -91,6 +91,17 @@ horní polovinu sdílí s jádrem):
   zanikne s poslední referencí na proces.
 - **Výjimka v programu** (page fault, neplatná instrukce, ...) ukončí jen
   proces, ne jádro: kód -1 000 100 - vektor, v logu adresa a typ chyby.
+- **Vstup do userspace:** vstupní bod a zásobník vlákna musí ležet v paměti
+  procesu (`USER_MIN`..`USER_MAX`); poslední stránka spodní poloviny
+  adresního prostoru je vždy nenamapovaná, takže návrat ze syscallu nikdy
+  nemíří na nekanonickou adresu (ta by vyvolala výjimku ještě v jádře).
+- **Stav FPU/SSE:** každé vlákno má vlastní 512B oblast FXSAVE; přepnutí
+  kontextu ji vždy uloží a obnoví. Nové vlákno začíná s výchozím stavem
+  (FCW 0x037F, MXCSR 0x1F80), takže data jiného vlákna nemohou uniknout.
+  Jádro samo FPU/SSE nepoužívá (soft-float). AVX není zapnuté (instrukce
+  skončí výjimkou #UD).
+- **Limity:** handly, vlákna, mapování, fronty kanálů a rezerva paměti
+  jádra - viz [syscally.md](syscally.md#limity-prostředků).
 
 ## Syscally
 

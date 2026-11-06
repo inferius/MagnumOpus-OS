@@ -115,6 +115,11 @@ fn serve(svc: &mut Service, client: &Channel) {
                 idle = false;
                 changed = true;
                 let reply = fsproto::reply(svc.handle(&msg.data));
+                // Klient prave ulozil vse sam: dalsi automaticky commit az
+                // za cely interval.
+                if msg.data.get(..4) == Some(&fsproto::op::COMMIT.to_le_bytes()[..]) {
+                    next_commit = time::deadline_after(COMMIT_INTERVAL);
+                }
                 if client.write(&reply, Vec::new()).is_err() {
                     return;
                 }

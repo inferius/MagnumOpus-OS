@@ -144,11 +144,15 @@ fn send_icr(apic_id: u32, low: u32) {
         // SAFETY: x2APIC ICR je jeden 64bitovy MSR 0x830.
         unsafe { cpu::wrmsr(0x830, ((apic_id as u64) << 32) | low as u64) };
     } else {
+        // Dva zapisy MMIO: preruseni mezi nimi by mohlo poslat vlastni IPI
+        // a prepsat cil v ICR_HIGH - IPI by dostal jiny procesor.
+        let was = super::interrupts::disable();
         write(REG_ICR_HIGH, apic_id << 24);
         write(REG_ICR_LOW, low);
         while read(REG_ICR_LOW) & ICR_DELIVERY_PENDING != 0 {
             core::hint::spin_loop();
         }
+        super::interrupts::restore(was);
     }
 }
 

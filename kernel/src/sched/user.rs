@@ -1,5 +1,6 @@
 //! Vlakna procesu v userspace: vytvoreni, spusteni, ukonceni, chyby.
 
+use abi::vm::{USER_MAX, USER_MIN};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
@@ -15,6 +16,11 @@ use crate::object::process::Process;
 
 /// Vytvori (nespustene) vlakno procesu.
 pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thread>, Error> {
+    // Zasobnik jadra vlakna je pamet jadra, ale vlakna vytvari program:
+    // nesmi sahnout do rezervy.
+    if !crate::mm::phys::user_room(crate::mm::KERNEL_STACK_SIZE / abi::vm::PAGE_SIZE) {
+        return Err(Error::NoMemory);
+    }
     let stack = KernelStack::new().ok_or(Error::NoMemory)?;
     // SAFETY: zasobnik je novy a patri jen tomuto vlaknu.
     let ctx = unsafe { Context::new(stack.top(), thread_start) };
@@ -44,6 +50,11 @@ pub fn start_user_thread(
     arg1: u64,
 ) -> Result<(), Error> {
     let process = t.process.as_ref().ok_or(Error::WrongType)?;
+    // Navrat do userspace (`iretq`) na adresu mimo pamet procesu by vyvolal
+    // vyjimku jeste v jadre: vstupni bod i zasobnik musi lezet v ni.
+    if !(USER_MIN..USER_MAX).contains(&entry) || !(USER_MIN..=USER_MAX).contains(&stack) {
+        return Err(Error::InvalidArgs);
+    }
     if t.started
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()

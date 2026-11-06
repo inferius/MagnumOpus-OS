@@ -56,10 +56,12 @@ const QUEUE_DEVICE: u64 = 0x30;
 /// Hodnota "zadny vektor MSI-X".
 pub const NO_VECTOR: u16 = 0xFFFF;
 
-/// Okno do registru zarizeni (cast BARu).
+/// Okno do registru zarizeni (cast BARu podle capability).
 struct Window {
     map: Mapping,
     base: u64,
+    /// Delka struktury podle capability: pristup za ni je chyba zarizeni.
+    len: u64,
 }
 
 impl Window {
@@ -72,7 +74,10 @@ impl Window {
         len: u32,
     ) -> Result<Self> {
         let bar = ecam.memory_bar(a, bar).ok_or(Error::NotSupported)?;
-        let phys = bar.phys + offset as u64;
+        let phys = bar
+            .phys
+            .checked_add(offset as u64)
+            .ok_or(Error::Corrupted)?;
         let page = phys & !(PAGE_SIZE - 1);
         let size = (phys - page + len as u64).next_multiple_of(PAGE_SIZE);
         let vmo = resource.device_memory(page, size)?;
@@ -80,15 +85,29 @@ impl Window {
         Ok(Self {
             map,
             base: phys - page,
+            len: len as u64,
         })
     }
 
-    fn read<T: Copy>(&self, off: u64) -> T {
-        self.map.read(self.base + off)
+    fn fits<T>(&self, off: u64) -> bool {
+        off.checked_add(core::mem::size_of::<T>() as u64)
+            .is_some_and(|e| e <= self.len)
     }
 
-    fn write<T: Copy>(&self, off: u64, v: T) {
-        self.map.write(self.base + off, v)
+    /// Cteni registru; mimo strukturu (vadne zarizeni) vraci 0.
+    fn read<T: libos::Pod + Default>(&self, off: u64) -> T {
+        if self.fits::<T>(off) {
+            self.map.read(self.base + off)
+        } else {
+            T::default()
+        }
+    }
+
+    /// Zapis registru; mimo strukturu se ignoruje.
+    fn write<T: libos::Pod>(&self, off: u64, v: T) {
+        if self.fits::<T>(off) {
+            self.map.write(self.base + off, v)
+        }
     }
 }
 
@@ -141,14 +160,26 @@ impl Device {
         self.common.write(DEVICE_STATUS, s)
     }
 
-    /// Reset a zahajeni inicializace (ACKNOWLEDGE | DRIVER).
-    pub fn begin_init(&self) {
+    /// Reset zarizeni: zastavi ho (prestane pouzivat fronty a DMA buffery).
+    pub fn reset(&self) -> Result<()> {
         self.set_status(0);
+        let deadline = libos::time::deadline_after(core::time::Duration::from_secs(1));
         while self.status() != 0 {
+            if libos::time::now() > deadline {
+                return Err(Error::TimedOut);
+            }
             core::hint::spin_loop();
         }
+        Ok(())
+    }
+
+    /// Reset a zahajeni inicializace (ACKNOWLEDGE | DRIVER). Zarizeni, ktere
+    /// reset nedokonci do sekundy, je vadne (`TIMED_OUT`).
+    pub fn begin_init(&self) -> Result<()> {
+        self.reset()?;
         self.set_status(STATUS_ACKNOWLEDGE);
         self.set_status(STATUS_ACKNOWLEDGE | STATUS_DRIVER);
+        Ok(())
     }
 
     pub fn device_features(&self) -> u64 {
@@ -224,9 +255,15 @@ impl Device {
             .write::<u16>(queue.notify_offset(), queue.index());
     }
 
-    /// Cteni konfigurace zarizeni (vyznam podle typu zarizeni).
-    pub fn config<T: Copy>(&self, off: u64) -> T {
+    /// Cteni konfigurace zarizeni (vyznam podle typu zarizeni); za koncem
+    /// konfigurace, kterou zarizeni hlasi, vraci 0.
+    pub fn config<T: libos::Pod + Default>(&self, off: u64) -> T {
         self.device_cfg.read(off)
+    }
+
+    /// Delka konfigurace zarizeni (volitelna pole za ni zarizeni nema).
+    pub fn config_len(&self) -> u64 {
+        self.device_cfg.len
     }
 }
 

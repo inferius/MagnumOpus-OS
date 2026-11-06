@@ -123,6 +123,9 @@ impl AddressSpace {
         }
 
         let mut inner = self.inner.lock();
+        if inner.mappings.len() >= abi::limits::PROCESS_MAX_MAPPINGS {
+            return Err(Error::NoResources);
+        }
         let start = if flags & MAP_FIXED != 0 {
             let end = addr.checked_add(len).ok_or(Error::InvalidArgs)?;
             if !page_aligned(addr) || addr < USER_MIN || end > USER_MAX {

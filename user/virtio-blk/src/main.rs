@@ -1,12 +1,13 @@
 //! virtio-blk: ovladac virtualniho disku (virtio 1.x pres PCI).
 //!
 //! Spousti ho spravce zarizeni. Startovni zprava (kind USER, v tomto poradi):
-//! 1. Resource (pristup k hardwaru),
-//! 2. okno ECAM (konfigurace PCI),
+//! 1. omezeny Resource (jen BARy a konfigurace tohoto zarizeni, kvoty
+//!    preruseni a DMA),
+//! 2. stranka konfiguracniho prostoru PCI teto funkce,
 //! 3. kanal pro klienta (protokol `blockproto`).
 //!
-//! Prvni zprava na bootstrap kanalu od spravce: `pci <arg_ecam> <sbernice>
-//! <zarizeni> <funkce>` (desitkove). Ovladac pak obsluhuje pozadavky
+//! Prvni zprava na bootstrap kanalu od spravce: `pci <sbernice> <zarizeni>
+//! <funkce>` (desitkove). Ovladac pak obsluhuje pozadavky
 //! klienta, dokud klient kanal nezavre.
 
 #![no_std]
@@ -57,7 +58,13 @@ struct Disk {
     flush: bool,
     /// Nejvic sektoru jednoho DISCARD (0 = DISCARD neumi).
     max_discard: u32,
+    /// Zarizeni neodpovedelo nebo vratilo nesmysl: dalsi pozadavky vraci
+    /// `IO_ERROR` (DMA buffer muze zarizeni jeste prepisovat).
+    failed: bool,
 }
+
+/// Jak dlouho cekat na dokonceni jednoho pozadavku.
+const REQUEST_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(10);
 
 fn main(startup: Startup) -> i64 {
     let mut handles = startup.handles.into_iter();
@@ -71,11 +78,12 @@ fn main(startup: Startup) -> i64 {
     let ecam_vmo = Vmo::from_handle(ecam_vmo);
     let client = Channel::from_handle(client);
 
-    let Some((arg, address)) = read_config(&startup.bootstrap) else {
+    let Some(address) = read_config(&startup.bootstrap) else {
         println!("virtio-blk: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
-    let disk = Ecam::new(&ecam_vmo, arg).and_then(|ecam| Disk::open(&ecam, address, &resource));
+    let disk =
+        Ecam::single(&ecam_vmo, address).and_then(|ecam| Disk::open(&ecam, address, &resource));
     let mut disk = match disk {
         Ok(d) => d,
         Err(e) => {
@@ -93,27 +101,25 @@ fn main(startup: Startup) -> i64 {
     0
 }
 
-fn read_config(bootstrap: &Channel) -> Option<(u32, Address)> {
+fn read_config(bootstrap: &Channel) -> Option<Address> {
     let msg = bootstrap.read(None).ok()?;
     let text = core::str::from_utf8(&msg.data).ok()?;
     let mut parts = text.split_whitespace();
     if parts.next()? != "pci" {
         return None;
     }
-    let mut num = || parts.next()?.parse::<u32>().ok();
-    let arg = num()?;
-    let address = Address {
-        bus: num()? as u8,
-        device: num()? as u8,
-        function: num()? as u8,
-    };
-    Some((arg, address))
+    let mut num = || parts.next()?.parse::<u8>().ok();
+    Some(Address {
+        bus: num()?,
+        device: num()?,
+        function: num()?,
+    })
 }
 
 impl Disk {
     fn open(ecam: &Ecam, a: Address, resource: &Resource) -> Result<Self> {
         let device = Device::open(ecam, a, resource)?;
-        device.begin_init();
+        device.begin_init()?;
         let features = device.negotiate(F_VERSION_1 | F_FLUSH | F_DISCARD)?;
 
         let irq = resource.interrupt()?;
@@ -128,11 +134,13 @@ impl Disk {
         let buf = Mapping::new(&dma, 0, DMA_SIZE, MAP_READ | MAP_WRITE)?;
         // Kapacita v sektorech po 512 B je na zacatku konfigurace zarizeni.
         let capacity: u64 = device.config(0);
-        let max_discard: u32 = if features & F_DISCARD != 0 {
-            device.config::<u32>(CFG_MAX_DISCARD_SECTORS).max(1)
-        } else {
-            0
-        };
+        // Pole max_discard_sectors (u32 na offsetu 36) musi zarizeni hlasit.
+        let max_discard: u32 =
+            if features & F_DISCARD != 0 && device.config_len() >= CFG_MAX_DISCARD_SECTORS + 4 {
+                device.config::<u32>(CFG_MAX_DISCARD_SECTORS).max(1)
+            } else {
+                0
+            };
         Ok(Self {
             device,
             queue,
@@ -144,12 +152,31 @@ impl Disk {
             capacity,
             flush: features & F_FLUSH != 0,
             max_discard,
+            failed: false,
         })
     }
 
     /// Provede jeden pozadavek virtio-blk a pocka na dokonceni. `data_len` =
     /// delka dat v bufferu (sektory, nebo popis useku u DISCARD).
     fn request(&mut self, kind: u32, lba: u64, data_len: u32) -> Result<()> {
+        if self.failed {
+            return Err(Error::IoError);
+        }
+        let r = self.request_inner(kind, lba, data_len);
+        if matches!(r, Err(Error::TimedOut | Error::Corrupted)) {
+            // Zarizeni zastavit, aby uz nepouzivalo DMA buffer.
+            self.failed = true;
+            let _ = self.device.reset();
+            println!(
+                "virtio-blk: zarizeni neodpovida spravne ({:?}), dalsi pozadavky odmitnuty",
+                r
+            );
+            return Err(Error::IoError);
+        }
+        r
+    }
+
+    fn request_inner(&mut self, kind: u32, lba: u64, data_len: u32) -> Result<()> {
         self.buf.write::<u32>(HDR_OFF, kind);
         self.buf.write::<u32>(HDR_OFF + 4, 0);
         self.buf.write::<u64>(HDR_OFF + 8, lba);
@@ -174,8 +201,9 @@ impl Disk {
         });
         self.queue.submit(&chain)?;
         self.device.notify(&self.queue);
-        while self.queue.take_used().is_none() {
-            self.irq.wait(None)?;
+        let deadline = libos::time::deadline_after(REQUEST_TIMEOUT);
+        while self.queue.take_used()?.is_none() {
+            self.irq.wait(Some(deadline))?;
         }
         match self.buf.read::<u8>(STATUS_OFF) {
             0 => Ok(()),

@@ -15,6 +15,14 @@ pub const TESTS: &[Test] = &[
     ("predani handlu presune handle", handle_transfer),
     ("zavrena druha strana -> PEER_CLOSED", peer_closed),
     ("poslani vlastniho konce -> INVALID_ARGS", send_self),
+    (
+        "poslani druheho konce do nej samotneho -> INVALID_ARGS",
+        send_peer,
+    ),
+    (
+        "fronta kanalu nejvys 4 MiB -> SHOULD_WAIT",
+        queue_bytes_limit,
+    ),
 ];
 
 fn roundtrip(_: &Startup) -> TestResult {
@@ -101,6 +109,32 @@ fn send_self(_: &Startup) -> TestResult {
         sys::channel_write(raw, b"x", &[raw]),
         Err(Error::InvalidArgs),
         "poslani sebe sama"
+    );
+    Ok(())
+}
+
+fn send_peer(_: &Startup) -> TestResult {
+    // Druhy konec ve vlastni fronte by drzel sam sebe a nikdy se neuvolnil.
+    let (a, b) = Channel::create().map_err(|e| fail("vytvoreni", e))?;
+    check_eq!(
+        sys::channel_write(a.handle().raw(), b"x", &[b.handle().raw()]),
+        Err(Error::InvalidArgs),
+        "poslani druheho konce"
+    );
+    Ok(())
+}
+
+fn queue_bytes_limit(_: &Startup) -> TestResult {
+    let (a, _b) = Channel::create().map_err(|e| fail("vytvoreni", e))?;
+    let msg = vec![0u8; 64 * 1024];
+    for i in 0..64 {
+        a.write(&msg, Vec::new())
+            .map_err(|e| fail(&alloc::format!("zapis {i}"), e))?;
+    }
+    check_eq!(
+        a.write(&msg, Vec::new()),
+        Err(Error::ShouldWait),
+        "zapis nad 4 MiB"
     );
     Ok(())
 }

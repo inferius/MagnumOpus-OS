@@ -54,7 +54,8 @@ pub fn write(a: Args) -> Result<u64> {
         // Nejdriv vse overit, pak odebrat (vse nebo nic).
         for (i, &h) in raw_handles.iter().enumerate() {
             let object = table.get(Handle(h), Rights::TRANSFER)?;
-            if channel.is_same(&object) || raw_handles[..i].contains(&h) {
+            if channel.is_same(&object) || channel.is_peer(&object) || raw_handles[..i].contains(&h)
+            {
                 return Err(Error::InvalidArgs);
             }
         }

@@ -461,7 +461,11 @@ fine for now):
 - **Memory objects allocate pages up front** (no lazy allocation, no CoW clones).
 - **Only whole mappings can be unmapped.**
 - **Syscalls return via `iretq`** instead of the faster `sysret`.
-- **Programs are compiled without SSE/FPU** (soft-float), so the kernel does
-  not save FPU state on thread switches yet.
+- **Programs are still compiled without SSE/FPU** (soft-float). The kernel
+  already saves each thread's FPU/SSE state (FXSAVE, x87 + XMM0-15); AVX
+  (XSAVE) comes with the languages milestone.
+- **No IOMMU:** a driver has a restricted Resource (only its registers), but
+  a device can write anywhere through DMA.
+- **Quotas only per process**, not for groups of processes (job).
 - **Strict priority between QoS classes** (lower classes can starve).
 - **Memory of finished threads** (kernel stacks) is reused but not returned.

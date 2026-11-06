@@ -99,7 +99,8 @@ handly (u32) do `out_handles_ptr`. Práva: `DUPLICATE`, `TRANSFER`, `WAIT`,
 
 `(handle, data_ptr, data_len, handles_ptr, handles_count) -> 0`. Pošle
 zprávu druhému konci. Předávané handly musí mít právo `TRANSFER`, nesmí se
-opakovat a nesmí jít o zapisovaný konec sám. Předávané handly se z tabulky
+opakovat a nesmí jít o zapisovaný konec ani o jeho protějšek (zpráva by
+skončila ve frontě protějšku, který by tak držel sám sebe). Předávané handly se z tabulky
 odesílatele **odeberou vždy, i když zápis selže** - handle tak nikdy nemá
 odesílatel i příjemce zároveň. Vyžaduje `WRITE`. Chyby: `BAD_HANDLE`,
 `ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `PEER_CLOSED`,
@@ -144,7 +145,8 @@ bajtů objektu od `vmo_offset` do adresního prostoru procesu `process`
 `MAP_READ` (povinné), `MAP_WRITE`, `MAP_EXECUTE` (nesmí být s `MAP_WRITE` -
 W^X), `MAP_FIXED` (přesně na `addr`; jinak je `addr` nápověda a 0 = vybere
 jádro). Adresa, délka a offset musí být zarovnané na 4 KiB, rozsah v
-`0x10000..0x8000_0000_0000`. Práva: proces `WRITE`; objekt `MAP` + `READ`,
+`0x10000..0x7FFF_FFFF_F000` (`USER_MIN`..`USER_MAX`; poslední stránka
+spodní poloviny zůstává vždy nenamapovaná). Práva: proces `WRITE`; objekt `MAP` + `READ`,
 případně `WRITE`/`EXECUTE` podle příznaků. Mapování drží objekt naživu i po
 zavření handlu. Chyby: `INVALID_ARGS`, `OUT_OF_RANGE`, `BAD_STATE`
 (`MAP_FIXED` přes existující mapování), `NO_RESOURCES` (není volné místo),
@@ -176,8 +178,10 @@ vlákno procesu na adrese `entry` se zásobníkem `stack`. Handle
 `bootstrap_handle` (typicky konec kanálu se startovní zprávou) se přesune do
 tabulky nového procesu a vlákno dostane jeho hodnotu v `rdi`. Vlákno musí
 patřit procesu a proces nesmí být spuštěný. Vyžaduje `MANAGE` na procesu
-i vláknu, `TRANSFER` na bootstrap handlu. Chyby: `BAD_STATE`,
-`INVALID_ARGS`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+i vláknu, `TRANSFER` na bootstrap handlu. `entry` musí ležet v paměti
+procesu (`USER_MIN` až `USER_MAX`), `stack` nejvýš na `USER_MAX`, jinak
+`INVALID_ARGS`. Chyby: `BAD_STATE`, `INVALID_ARGS`, `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`.
 
 ### `PROCESS_EXIT`
 
@@ -207,7 +211,8 @@ Vyžaduje `MANAGE` na procesu. Chyby: `BAD_STATE` (proces končí),
 `(thread, entry, stack, arg0, arg1) -> 0`. Spustí další vlákno již běžícího
 procesu; `arg0`, `arg1` dostane v `rdi`, `rsi`. Zásobník musí být zarovnaný
 jako po instrukci `call` (adresa = 8 mod 16), pokud vstupní funkce dodržuje
-System V ABI. Vyžaduje `MANAGE`. Chyby: `BAD_STATE`.
+System V ABI. Pro `entry` a `stack` platí totéž co u `PROCESS_START`.
+Vyžaduje `MANAGE`. Chyby: `BAD_STATE`, `INVALID_ARGS`.
 
 ### `THREAD_EXIT`
 
@@ -218,13 +223,33 @@ proces (kód -1 000 002, pokud předtím nevolal `PROCESS_EXIT`).
 
 `() -> 0`. Přenechá CPU dalšímu připravenému vláknu stejné nebo vyšší třídy.
 
+## Limity prostředků
+
+Program nesmí spotřebovat paměť jádra bez omezení (`abi::limits`):
+
+| Limit | Hodnota | Po překročení |
+|---|---|---|
+| rezerva jádra: paměť objektů paměti (`VMO_CREATE*`) a zásobníky vláken se nealokují, kdyby volné paměti zbylo méně | 1/32 RAM, nejméně 16 MiB | `NO_MEMORY` |
+| handly v tabulce procesu | 65 536 | `NO_RESOURCES` |
+| vlákna procesu (včetně ukončených, na která někdo drží handle) | 1024 | `NO_RESOURCES` |
+| mapování v adresním prostoru procesu | 65 536 | `NO_RESOURCES` |
+| zprávy ve frontě jednoho konce kanálu | 1024 | `SHOULD_WAIT` |
+| bajty dat ve frontě jednoho konce kanálu | 4 MiB | `SHOULD_WAIT` |
+
+Vyčerpání paměti programem tak jádro neshodí: tabulky stránek, heap a
+zásobníky jádra smí čerpat i z rezervy. Plán: kvóty pro skupiny procesů
+(job) nastavitelné rodičem.
+
 ## Hardware (ovladače)
 
 Vyžadují handle na **Resource** s právem `MANAGE` (oprávnění k hardwaru).
-Jádro vytvoří jediný kořenový Resource a dá ho procesu `init` (startovní
-zpráva, druh `ROOT_RESOURCE`); init ho předá správci zařízení a ten
-ovladačům. Bez IOMMU může ovladač s DMA zapsat kamkoli do paměti, takže
-Resource je fakticky plné oprávnění k systému.
+Jádro vytvoří jediný kořenový Resource bez omezení a dá ho procesu `init`
+(startovní zpráva, druh `ROOT_RESOURCE`); init ho předá správci zařízení.
+Ten každému ovladači vytvoří **omezený** Resource (`RESOURCE_CREATE`): jen
+pamětové BARy jeho zařízení a stránku jeho konfiguračního prostoru PCI,
+nejvýš 8 přerušení a 4 MiB paměti pro DMA. Chyba v ovladači tak nemůže
+přepsat registry jiného zařízení. Bez IOMMU ale zařízení přes DMA pořád
+může zapsat kamkoli do paměti.
 
 ### `VMO_CREATE_CONTIGUOUS`
 
@@ -238,7 +263,8 @@ Resource je fakticky plné oprávnění k systému.
 Rozsah nesmí ležet v RAM ani paměti firmwaru (jinak `ACCESS_DENIED`).
 Mapuje se bez cache; přes `VMO_READ`/`VMO_WRITE` ho číst nejde
 (`NOT_SUPPORTED`, čtení registrů má vedlejší efekty) a jako buffer
-syscallu ho použít nejde (`BAD_ADDRESS`). Chyby: `INVALID_ARGS`
+syscallu ho použít nejde (`BAD_ADDRESS`). Omezený prostředek
+(`RESOURCE_CREATE`) smí jen své rozsahy. Chyby: `INVALID_ARGS`
 (nezarovnaná adresa), `ACCESS_DENIED`.
 
 ### `VMO_PHYS_ADDR`
@@ -254,6 +280,23 @@ CPU. Do `out_msi_ptr` zapíše zprávu MSI `{ address: u64, data: u32,
 reserved: u32 }`, kterou ovladač zapíše do zařízení (tabulka MSI-X).
 Když zařízení přerušení vyvolá, objekt dostane signál `SIGNALED`. Chyby:
 `NO_RESOURCES` (došly vektory), `ACCESS_DENIED`, `BAD_ADDRESS`.
+
+### `RESOURCE_CREATE`
+
+`(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`. Užší
+prostředek pro ovladač. `ranges_ptr` ukazuje na `ranges_count` (max. 16)
+dvojic u64 (fyzický začátek, délka). Nový prostředek smí vytvářet okna
+(`VMO_CREATE_PHYSICAL`) jen uvnitř těchto rozsahů, nejvýš `irq_max` objektů
+přerušení a nejvýš `dma_max` bajtů paměti pro DMA (`VMO_CREATE_CONTIGUOUS`,
+zaokrouhleno na stránky; limity platí po celou dobu života prostředku, po
+vyčerpání `NO_RESOURCES`). Je-li rodič sám omezený, musí rozsahy ležet v
+jeho rozsazích a limity nesmí být vyšší (jinak `ACCESS_DENIED`). Vyžaduje
+`MANAGE`. Chyby: `INVALID_ARGS` (víc než 16 rozsahů, nulová délka,
+přetečení), `ACCESS_DENIED`, `BAD_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`.
+
+Bez IOMMU může zařízení přes DMA zapsat kamkoli do paměti; omezený
+prostředek chrání před chybou ovladače při přístupu k registrům, ne před
+špatně naprogramovaným DMA.
 
 ### `INTERRUPT_ACK`
 

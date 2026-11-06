@@ -20,6 +20,8 @@ use alloc::vec::Vec;
 use libos::{Channel, Error, Result};
 
 pub const SECTOR: usize = 512;
+/// Jak dlouho klient ceka na odpoved ovladace (pak `TIMED_OUT`).
+pub const REPLY_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(30);
 pub const MAX_SECTORS: u32 = 64;
 pub const HEADER: usize = 16;
 
@@ -123,7 +125,9 @@ impl BlockClient {
 
     fn call(&self, req: Request, data: &[u8]) -> Result<(u64, Vec<u8>)> {
         self.channel.write(&req.encode(data), Vec::new())?;
-        let reply = self.channel.read(None)?;
+        // Ovladac, ktery neodpovi, nesmi zaseknout klienta navzdy.
+        let deadline = libos::time::deadline_after(REPLY_TIMEOUT);
+        let reply = self.channel.read(Some(deadline))?;
         let (value, payload) = decode_reply(&reply.data)?;
         Ok((value, payload.to_vec()))
     }

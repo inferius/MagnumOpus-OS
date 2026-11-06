@@ -100,7 +100,8 @@ handles (u32) to `out_handles_ptr`. Rights: `DUPLICATE`, `TRANSFER`, `WAIT`,
 
 `(handle, data_ptr, data_len, handles_ptr, handles_count) -> 0`. Sends a
 message to the other end. Transferred handles need `TRANSFER`, must not
-repeat and must not be the end being written to. Transferred handles are
+repeat and must not be the end being written to nor its peer (the message
+would end up in the peer's own queue, which would then hold itself). Transferred handles are
 **always removed from the sender's table, even if the write fails** - a
 handle is never held by both sender and receiver. Requires `WRITE`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `PEER_CLOSED`,
@@ -145,7 +146,8 @@ the object starting at `vmo_offset` into the address space of `process`
 (required), `MAP_WRITE`, `MAP_EXECUTE` (not together with `MAP_WRITE` -
 W^X), `MAP_FIXED` (exactly at `addr`; otherwise `addr` is a hint and 0 lets
 the kernel choose). Address, length and offset must be 4 KiB aligned, range
-within `0x10000..0x8000_0000_0000`. Rights: process `WRITE`; object `MAP` +
+within `0x10000..0x7FFF_FFFF_F000` (`USER_MIN`..`USER_MAX`; the last page
+of the lower half always stays unmapped). Rights: process `WRITE`; object `MAP` +
 `READ`, plus `WRITE`/`EXECUTE` per flags. A mapping keeps the object alive
 after its handle is closed. Errors: `INVALID_ARGS`, `OUT_OF_RANGE`,
 `BAD_STATE` (`MAP_FIXED` over an existing mapping), `NO_RESOURCES` (no free
@@ -179,8 +181,9 @@ process's first thread at `entry` with stack `stack`. `bootstrap_handle`
 process's table and the thread receives its value in `rdi`. The thread must
 belong to the process and the process must not be started yet. Requires
 `MANAGE` on the process and the thread, `TRANSFER` on the bootstrap handle.
-Errors: `BAD_STATE`, `INVALID_ARGS`, `BAD_HANDLE`, `ACCESS_DENIED`,
-`WRONG_TYPE`.
+`entry` must lie in the process memory (`USER_MIN` to `USER_MAX`), `stack`
+at most at `USER_MAX`, otherwise `INVALID_ARGS`. Errors: `BAD_STATE`,
+`INVALID_ARGS`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
 
 ### `PROCESS_EXIT`
 
@@ -210,8 +213,9 @@ terminating), `NO_MEMORY`, `INVALID_ARGS`.
 `(thread, entry, stack, arg0, arg1) -> 0`. Starts another thread of an
 already running process; it receives `arg0`, `arg1` in `rdi`, `rsi`. The
 stack must be aligned as after a `call` instruction (address = 8 mod 16) if
-the entry function follows the System V ABI. Requires `MANAGE`. Errors:
-`BAD_STATE`.
+the entry function follows the System V ABI. `entry` and `stack` follow the
+same rules as for `PROCESS_START`. Requires `MANAGE`. Errors: `BAD_STATE`,
+`INVALID_ARGS`.
 
 ### `THREAD_EXIT`
 
@@ -223,14 +227,34 @@ the process ends (code -1,000,002 unless `PROCESS_EXIT` was called before).
 `() -> 0`. Gives the CPU to the next ready thread of the same or higher
 class.
 
+## Resource limits
+
+A program must not consume kernel memory without bounds (`abi::limits`):
+
+| Limit | Value | When exceeded |
+|---|---|---|
+| kernel reserve: memory of memory objects (`VMO_CREATE*`) and thread stacks is not allocated if less free memory would remain | 1/32 of RAM, at least 16 MiB | `NO_MEMORY` |
+| handles in a process table | 65,536 | `NO_RESOURCES` |
+| threads of a process (including finished ones somebody holds a handle to) | 1024 | `NO_RESOURCES` |
+| mappings in a process address space | 65,536 | `NO_RESOURCES` |
+| messages queued at one channel end | 1024 | `SHOULD_WAIT` |
+| data bytes queued at one channel end | 4 MiB | `SHOULD_WAIT` |
+
+Memory exhaustion by a program therefore cannot bring the kernel down: page
+tables, the heap and kernel stacks may also use the reserve. Planned:
+quotas for groups of processes (job) set by the parent.
+
 ## Hardware (drivers)
 
 These require a handle to a **Resource** with the `MANAGE` right (hardware
-access). The kernel creates a single root Resource and gives it to `init`
-(startup message, kind `ROOT_RESOURCE`); init passes it to the device
-manager, which passes it to drivers. Without an IOMMU a driver with DMA can
-write anywhere in memory, so a Resource is effectively full access to the
-system.
+access). The kernel creates a single unrestricted root Resource and gives it
+to `init` (startup message, kind `ROOT_RESOURCE`); init passes it to the
+device manager. The device manager creates a **restricted** Resource for
+each driver (`RESOURCE_CREATE`): only the memory BARs of its device and the
+page of its PCI configuration space, at most 8 interrupts and 4 MiB of DMA
+memory. A driver bug therefore cannot overwrite another device's registers.
+Without an IOMMU, however, a device can still write anywhere in memory
+through DMA.
 
 ### `VMO_CREATE_CONTIGUOUS`
 
@@ -244,7 +268,8 @@ system.
 The range must not lie in RAM or firmware memory (otherwise
 `ACCESS_DENIED`). It is mapped uncached; it cannot be read through
 `VMO_READ`/`VMO_WRITE` (`NOT_SUPPORTED`, reading registers has side
-effects) and cannot be used as a syscall buffer (`BAD_ADDRESS`). Errors:
+effects) and cannot be used as a syscall buffer (`BAD_ADDRESS`). A
+restricted resource (`RESOURCE_CREATE`) may use only its ranges. Errors:
 `INVALID_ARGS` (unaligned address), `ACCESS_DENIED`.
 
 ### `VMO_PHYS_ADDR`
@@ -261,6 +286,24 @@ vector. Writes the MSI message `{ address: u64, data: u32, reserved: u32 }`
 to `out_msi_ptr`; the driver writes it into the device (MSI-X table). When
 the device raises the interrupt, the object gets `SIGNALED`. Errors:
 `NO_RESOURCES` (out of vectors), `ACCESS_DENIED`, `BAD_ADDRESS`.
+
+### `RESOURCE_CREATE`
+
+`(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`. A
+narrower resource for a driver. `ranges_ptr` points to `ranges_count`
+(max. 16) u64 pairs (physical start, length). The new resource may create
+windows (`VMO_CREATE_PHYSICAL`) only inside these ranges, at most `irq_max`
+interrupt objects and at most `dma_max` bytes of DMA memory
+(`VMO_CREATE_CONTIGUOUS`, rounded to pages; the limits apply for the
+resource's whole lifetime, `NO_RESOURCES` once exhausted). If the parent is
+itself restricted, the ranges must lie within its ranges and the limits must
+not be higher (otherwise `ACCESS_DENIED`). Requires `MANAGE`. Errors:
+`INVALID_ARGS` (more than 16 ranges, zero length, overflow),
+`ACCESS_DENIED`, `BAD_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`.
+
+Without an IOMMU a device can write anywhere in memory through DMA; a
+restricted resource protects against driver mistakes when accessing
+registers, not against wrongly programmed DMA.
 
 ### `INTERRUPT_ACK`
 

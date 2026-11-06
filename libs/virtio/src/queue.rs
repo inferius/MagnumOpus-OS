@@ -109,17 +109,28 @@ impl Virtqueue {
     }
 
     /// Vyjme dokonceny pozadavek, pokud nejaky je: (id hlavy, zapsana delka).
-    pub fn take_used(&mut self) -> Option<(u32, u32)> {
+    /// Vyzvedne dokonceny pozadavek: `Ok(None)` = zatim nic. Zarizeni, ktere
+    /// posune index o vic nez velikost fronty nebo vrati neznamy retezec,
+    /// je vadne (`CORRUPTED`) - driver ho pak nesmi dal pouzivat (DMA
+    /// buffery by mohly byt jeste prepisovany).
+    pub fn take_used(&mut self) -> Result<Option<(u32, u32)>> {
         fence(Ordering::SeqCst);
         let used_idx: u16 = self.map.read(self.used_off + 2);
         if used_idx == self.last_used {
-            return None;
+            return Ok(None);
+        }
+        if used_idx.wrapping_sub(self.last_used) > self.size {
+            return Err(Error::Corrupted);
         }
         fence(Ordering::SeqCst);
         let e = self.used_off + 4 + 8 * (self.last_used % self.size) as u64;
         let id: u32 = self.map.read(e);
         let len: u32 = self.map.read(e + 4);
         self.last_used = self.last_used.wrapping_add(1);
-        Some((id, len))
+        // Fronta ma jediny retezec s hlavou v deskriptoru 0.
+        if id != 0 {
+            return Err(Error::Corrupted);
+        }
+        Ok(Some((id, len)))
     }
 }

@@ -312,6 +312,31 @@ pub fn interrupt_ack(h: u32) -> Result<()> {
     call(nr::INTERRUPT_ACK, [h as u64, 0, 0, 0, 0, 0]).map(|_| ())
 }
 
+pub fn resource_create(
+    resource: u32,
+    ranges: &[(u64, u64)],
+    irq_max: u32,
+    dma_max: u64,
+) -> Result<u32> {
+    let mut raw = alloc::vec::Vec::with_capacity(ranges.len() * 16);
+    for &(s, l) in ranges {
+        raw.extend_from_slice(&s.to_le_bytes());
+        raw.extend_from_slice(&l.to_le_bytes());
+    }
+    call(
+        nr::RESOURCE_CREATE,
+        [
+            resource as u64,
+            raw.as_ptr() as u64,
+            ranges.len() as u64,
+            irq_max as u64,
+            dma_max,
+            0,
+        ],
+    )
+    .map(|h| h as u32)
+}
+
 #[allow(dead_code)]
 fn _assert_error_is_copy(e: Error) -> Error {
     e

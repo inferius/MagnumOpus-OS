@@ -14,7 +14,7 @@ use abi::vm::{MAP_FIXED, MAP_READ, MAP_WRITE};
 use linked_list_allocator::LockedHeap;
 
 use crate::hw::Resource;
-use crate::{Channel, Handle, Process, Vmo, println, sys};
+use crate::{Channel, Handle, Process, Vmo, sys};
 
 /// Heap procesu zacina na pevne adrese a roste smerem nahoru: kdyz alokace
 /// selze, namapuje se dalsi objekt pameti hned za konec (`MAP_FIXED`).
@@ -218,8 +218,39 @@ fn init_heap(process: u32) {
     };
 }
 
+/// Buffer na zasobniku pro text paniky (panika nesmi alokovat: muze vzniknout
+/// prave kvuli nedostatku pameti nebo pri drzenem zamku heapu).
+struct StackText {
+    buf: [u8; 512],
+    len: usize,
+}
+
+impl core::fmt::Write for StackText {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        // Zkratit na hranici znaku, zbytek zahodit.
+        let mut n = s.len().min(self.buf.len() - self.len);
+        while !s.is_char_boundary(n) {
+            n -= 1;
+        }
+        self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
+        self.len += n;
+        Ok(())
+    }
+}
+
+static PANICKING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    println!("PANIC: {info}");
+    // Panika behem paniky (napr. pri formatovani): jen ukoncit proces.
+    if PANICKING.swap(true, Ordering::AcqRel) {
+        sys::process_exit(abi::process::EXIT_PANIC)
+    }
+    let mut text = StackText {
+        buf: [0; 512],
+        len: 0,
+    };
+    let _ = core::fmt::write(&mut text, format_args!("PANIC: {info}"));
+    sys::debug_log(core::str::from_utf8(&text.buf[..text.len]).unwrap_or("PANIC"));
     sys::process_exit(abi::process::EXIT_PANIC)
 }

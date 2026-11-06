@@ -15,6 +15,7 @@
 
 pub mod bootstrap;
 pub mod error;
+pub mod limits;
 pub mod object;
 pub mod process;
 pub mod syscall;

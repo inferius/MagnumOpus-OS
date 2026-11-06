@@ -60,7 +60,7 @@ impl HandleTable {
     ) -> Result<Handle, Error> {
         let index = match self.free.pop() {
             Some(i) => i,
-            None if self.slots.len() < MAX_HANDLES => {
+            None if self.slots.len() < MAX_HANDLES.min(abi::limits::PROCESS_MAX_HANDLES) => {
                 self.slots.push(Slot {
                     generation: 0,
                     entry: None,

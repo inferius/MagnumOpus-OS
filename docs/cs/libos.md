@@ -54,6 +54,22 @@ Každý typ vlastní handle a zavře ho při zrušení (`Drop`).
 | `Vmo` | objekt paměti | `create`, `read`, `write` (libovolně dlouhé; jádro přenese 1 MiB na volání, libos dělí) |
 | `Process` | proces | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |
 | `Thread` | vlákno | `create`, `start`, `wait_exit` |
+| `Mapping` | namapovaný objekt paměti ve vlastním adresním prostoru (odmapuje se při zrušení) | `new`, `read::<T>`, `write::<T>`, `read_bytes`, `write_bytes` |
+| `hw::Resource` | oprávnění k hardwaru (ovladače) | `restrict`, `device_memory`, `dma_memory`, `phys_addr`, `interrupt` |
+| `hw::Interrupt` | přerušení zařízení (MSI) | `msi`, `wait(deadline)` |
+
+`Mapping::read`/`write` jsou volatile (vhodné i pro registry zařízení) a
+přijímají jen celá čísla (`libos::Pod`: `u8`..`u64`, `i8`..`i64`) - z
+libovolných bajtů zařízení tak nikdy nevznikne neplatná hodnota (`bool`,
+odkaz, výčet). Offset musí být zarovnaný na velikost typu a ležet
+v mapování (kontrola i proti přetečení); jinak panika.
+
+```rust
+let regs = resource.device_memory(bar_phys, 4096)?;          // jen v rozsahu Resource
+let map = Mapping::new(&regs, 0, 4096, MAP_READ | MAP_WRITE)?;
+let status: u32 = map.read(0x14);
+map.write::<u32>(0x14, status | 1);
+```
 
 Funkce: `wait_one`, `wait_many` (čekání na signály), `time::now`,
 `time::deadline_after`, `time::sleep`, `exit(kód)`, `println!` (log jádra).

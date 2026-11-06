@@ -18,6 +18,10 @@ pub const TESTS: &[Test] = &[
     ("neplatny ukazatel -> BAD_ADDRESS", bad_pointer),
     ("odmapovani a nesouvisly rozsah", unmap),
     ("heap roste podle potreby (24 MiB)", heap_grows),
+    (
+        "vycerpani pameti -> NO_MEMORY, jadro prezije",
+        exhaust_memory,
+    ),
 ];
 
 fn vmo_roundtrip(_: &Startup) -> TestResult {
@@ -150,5 +154,31 @@ fn heap_grows(_: &Startup) -> TestResult {
     // Po uvolneni jde pamet znovu pouzit.
     let big = alloc::vec![7u8; 20 * 1024 * 1024];
     check_eq!(big[20 * 1024 * 1024 - 1], 7, "posledni bajt");
+    Ok(())
+}
+
+fn exhaust_memory(_: &Startup) -> TestResult {
+    // Objekty po 32 MiB, dokud jde: posledni musi selhat s NO_MEMORY (ne
+    // panika jadra) a po uvolneni musi jit pamet znovu pouzit.
+    let mut held = alloc::vec::Vec::new();
+    let err = loop {
+        match Vmo::create(32 * 1024 * 1024) {
+            Ok(v) => held.push(v),
+            Err(e) => break e,
+        }
+        if held.len() > 64 {
+            return Err("pamet se nevycerpala ani po 2 GiB".into());
+        }
+    };
+    check_eq!(err, Error::NoMemory, "chyba pri vycerpani");
+    check!(
+        held.len() >= 4,
+        "pred vycerpanim melo jit alokovat aspon 128 MiB"
+    );
+    let count = held.len();
+    drop(held);
+    let again: Result<alloc::vec::Vec<Vmo>, Error> =
+        (0..count).map(|_| Vmo::create(32 * 1024 * 1024)).collect();
+    check!(again.is_ok(), "po uvolneni nejde pamet znovu alokovat");
     Ok(())
 }

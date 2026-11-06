@@ -6,8 +6,9 @@ use abi::{Result, Signals};
 use crate::handle::object_type;
 use crate::{Handle, Vmo, sys, wait_one};
 
-/// Opravneni k hardwaru (viz dokumentace: Resource). Bez IOMMU je to
-/// fakticky plne opravneni k systemu.
+/// Opravneni k hardwaru (viz dokumentace: Resource). Korenovy prostredek je
+/// bez omezeni; ovladace dostavaji omezene (`restrict`). Bez IOMMU muze
+/// zarizeni pres DMA porad zapsat kamkoli.
 #[derive(Debug)]
 pub struct Resource(Handle);
 object_type!(Resource);
@@ -32,6 +33,14 @@ impl Resource {
     /// Fyzicka adresa bajtu `offset` objektu pameti (pro DMA).
     pub fn phys_addr(&self, vmo: &Vmo, offset: u64) -> Result<u64> {
         sys::vmo_phys_addr(self.0.raw(), vmo.handle().raw(), offset)
+    }
+
+    /// Uzsi prostredek pro ovladac: jen fyzicke rozsahy `ranges` (zacatek,
+    /// delka), nejvys `irq_max` preruseni a `dma_max` bajtu DMA pameti za
+    /// dobu zivota. Rozsahy i limity musi lezet v mezich tohoto prostredku.
+    pub fn restrict(&self, ranges: &[(u64, u64)], irq_max: u32, dma_max: u64) -> Result<Resource> {
+        sys::resource_create(self.0.raw(), ranges, irq_max, dma_max)
+            .map(|h| Resource::from_handle(Handle::from_raw(h)))
     }
 
     /// Novy objekt preruseni s volnym vektorem.

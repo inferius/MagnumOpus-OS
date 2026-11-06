@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use core::time::Duration;
 
 use libos::initfs::Initfs;
-use libos::{Channel, Event, Signals, Startup, Thread, Vmo, spawn, time, wait_one};
+use libos::{Channel, Error, Event, Signals, Startup, Thread, Vmo, spawn, time, wait_one};
 
 use super::{Test, TestResult, fail};
 use crate::{check, check_eq};
@@ -19,6 +19,11 @@ pub const TESTS: &[Test] = &[
     ("PROCESS_KILL ukonci spici proces", kill),
     ("pad procesu -> kod vyjimky", crash),
     ("druhe vlakno v procesu", second_thread),
+    (
+        "vlakno mimo pamet procesu -> INVALID_ARGS",
+        thread_bad_entry,
+    ),
+    ("stav SSE je oddeleny mezi vlakny", sse_isolated),
 ];
 
 fn deadline() -> Option<u64> {
@@ -146,6 +151,80 @@ fn second_thread(s: &Startup) -> TestResult {
         COUNTER.load(Ordering::SeqCst),
         1000,
         "pocitadlo z druheho vlakna"
+    );
+    Ok(())
+}
+
+fn thread_bad_entry(s: &Startup) -> TestResult {
+    use libos::abi::vm::USER_MAX;
+    let t = Thread::create(&s.process, "spatne").map_err(|e| fail("vlakno", e))?;
+    // Nekanonicka adresa, adresa v jadre a posledni (vyhrazena) stranka.
+    for entry in [0x8000_0000_0000u64, 0xFFFF_FFFF_8000_0000, USER_MAX, 0] {
+        check_eq!(
+            t.start(entry, 0x10_0000, 0, 0),
+            Err(Error::InvalidArgs),
+            alloc::format!("start na {entry:#x}").as_str()
+        );
+    }
+    check_eq!(
+        t.start(0x40_0000, USER_MAX + 4096, 0, 0),
+        Err(Error::InvalidArgs),
+        "zasobnik za koncem pameti procesu"
+    );
+    Ok(())
+}
+
+/// XMM0 nove spusteneho vlakna (musi byt 0) a hodnota, kterou si zapsalo.
+static SSE_SEEN: AtomicU64 = AtomicU64::new(u64::MAX);
+
+fn xmm0_read() -> u64 {
+    let v: u64;
+    // SAFETY: jen presun z XMM0 do obecneho registru; jadro SSE zapnulo.
+    unsafe { core::arch::asm!("movq {}, xmm0", out(reg) v, options(nomem, nostack)) };
+    v
+}
+
+fn xmm0_write(v: u64) {
+    // SAFETY: XMM0 program (soft-float) jinak nepouziva.
+    unsafe { core::arch::asm!("movq xmm0, {}", in(reg) v, options(nomem, nostack)) };
+}
+
+extern "C" fn sse_worker(event: u64, _: u64) -> ! {
+    SSE_SEEN.store(xmm0_read(), Ordering::SeqCst);
+    xmm0_write(0xBAD0_BAD0_BAD0_BAD0);
+    let _ = libos::sys::object_signal(event as u32, 0, Signals::SIGNALED.0);
+    libos::sys::thread_exit()
+}
+
+fn sse_isolated(s: &Startup) -> TestResult {
+    let e = Event::create().map_err(|e| fail("event", e))?;
+    let stack = Vmo::create(64 * 1024).map_err(|e| fail("zasobnik", e))?;
+    let flags = libos::abi::vm::MAP_READ | libos::abi::vm::MAP_WRITE;
+    let base = s
+        .process
+        .map(&stack, 0, 64 * 1024, flags, 0)
+        .map_err(|e| fail("mapovani", e))?;
+    let t = Thread::create(&s.process, "sse").map_err(|e| fail("vlakno", e))?;
+    xmm0_write(0x1234_5678_9ABC_DEF0);
+    t.start(
+        sse_worker as *const () as u64,
+        base + 64 * 1024 - 8,
+        e.handle().raw() as u64,
+        0,
+    )
+    .map_err(|e| fail("spusteni", e))?;
+    wait_one(e.handle(), Signals::SIGNALED, deadline()).map_err(|e| fail("cekani", e))?;
+    t.wait_exit(deadline())
+        .map_err(|e| fail("konec vlakna", e))?;
+    check_eq!(
+        SSE_SEEN.load(Ordering::SeqCst),
+        0,
+        "XMM0 noveho vlakna (unik z jineho vlakna)"
+    );
+    check_eq!(
+        xmm0_read(),
+        0x1234_5678_9ABC_DEF0,
+        "XMM0 po prepnuti vlaken"
     );
     Ok(())
 }

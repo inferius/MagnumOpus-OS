@@ -53,7 +53,12 @@ impl Channel {
         }
         let peer = self.peer.lock().upgrade().ok_or(Error::PeerClosed)?;
         let mut queue = peer.queue.lock();
-        if queue.len() >= CHANNEL_MAX_QUEUED {
+        // Limit poctu zprav i bajtu: fronta jinak muze drzet az
+        // 1024 x 64 KiB pameti jadra.
+        let queued: usize = queue.iter().map(|m| m.data.len()).sum();
+        if queue.len() >= CHANNEL_MAX_QUEUED
+            || queued + msg.data.len() > abi::limits::CHANNEL_MAX_QUEUED_BYTES
+        {
             return Err(Error::ShouldWait);
         }
         queue.push_back(msg);
@@ -93,6 +98,15 @@ impl Channel {
     /// Je `other` tento konec? (Konec kanalu nelze poslat sam sebou.)
     pub fn is_same(&self, other: &Arc<dyn KernelObject>) -> bool {
         core::ptr::addr_eq(self as *const Self, Arc::as_ptr(other))
+    }
+
+    /// Je `other` druhy konec tohoto kanalu? Zprava by skoncila v jeho
+    /// vlastni fronte: konec by drzel sam sebe a nikdy by se neuvolnil.
+    pub fn is_peer(&self, other: &Arc<dyn KernelObject>) -> bool {
+        self.peer
+            .lock()
+            .upgrade()
+            .is_some_and(|p| core::ptr::addr_eq(Arc::as_ptr(&p), Arc::as_ptr(other)))
     }
 }
 

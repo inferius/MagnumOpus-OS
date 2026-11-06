@@ -50,6 +50,7 @@ pub unsafe fn init_boot_cpu() {
         idt::init();
         idt::load();
         paging::init_cpu();
+        context::init_cpu();
         user::init_cpu();
         // 8259 PIC: zamaskovat vsechny linky na master i slave.
         cpu::outb(0x21, 0xFF);
@@ -103,6 +104,7 @@ pub unsafe fn init_ap_cpu() {
         clear_cpu_local();
         idt::load();
         paging::init_cpu();
+        context::init_cpu();
         user::init_cpu();
         apic::init_cpu(false, 0);
     }

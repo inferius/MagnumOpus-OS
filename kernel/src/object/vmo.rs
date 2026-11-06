@@ -56,7 +56,7 @@ impl MemoryObject {
         for _ in 0..count {
             // Pri neuspechu se uz alokovane stranky uvolni v Drop.
             vmo.pages
-                .push(phys::alloc_frame_zeroed().ok_or(Error::NoMemory)?);
+                .push(phys::alloc_user_frame_zeroed().ok_or(Error::NoMemory)?);
         }
         Ok(Arc::new(vmo))
     }
@@ -68,7 +68,7 @@ impl MemoryObject {
         }
         let count = size.div_ceil(PAGE);
         let order = count.next_power_of_two().trailing_zeros() as usize;
-        let base = phys::alloc_pages(order).ok_or(Error::NoMemory)?;
+        let base = phys::alloc_user_pages(order).ok_or(Error::NoMemory)?;
         // SAFETY: prave alokovany blok 2^order stranek v prime mape.
         unsafe {
             base.to_virt()

@@ -438,8 +438,12 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
 - **Objekty paměti alokují stránky hned** (žádné lazy alokace ani CoW klony).
 - **Odmapování jen celých mapování.**
 - **Návrat ze syscallu přes `iretq`** místo rychlejšího `sysret`.
-- **Programy se překládají bez SSE/FPU** (soft-float), proto jádro zatím
-  neukládá stav FPU při přepnutí vláken.
+- **Programy se zatím překládají bez SSE/FPU** (soft-float). Jádro už stav
+  FPU/SSE každého vlákna ukládá (FXSAVE, x87 + XMM0-15); AVX (XSAVE) zapne
+  milník jazyků.
+- **Bez IOMMU:** ovladač má omezený Resource (jen své registry), ale
+  zařízení přes DMA může zapsat kamkoli.
+- **Kvóty jen na proces**, ne pro skupiny procesů (job).
 - **Mezi třídami QoS přísná priorita** (nižší třídy mohou hladovět).
 - **Paměť po ukončených vláknech** (zásobníky jádra) se používá znovu, ale
   nevrací se.

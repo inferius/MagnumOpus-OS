@@ -45,7 +45,7 @@ pub use abi::{Error, Result, Rights, Signals};
 pub use channel::{Channel, Message};
 pub use event::Event;
 pub use handle::Handle;
-pub use mapping::Mapping;
+pub use mapping::{Mapping, Pod};
 pub use process::{Process, Thread};
 pub use rt::Startup;
 pub use spawn::spawn;

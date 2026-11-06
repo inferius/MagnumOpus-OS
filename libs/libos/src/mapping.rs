@@ -4,6 +4,24 @@ use abi::Result;
 
 use crate::{Vmo, rt, sys};
 
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// Typy, ktere lze bezpecne cist a zapisovat jako surove bajty pameti
+/// (registry zarizeni, sdilena pamet): kazdy bitovy vzor je platna hodnota.
+/// Jen cela cisla - `bool`, odkazy nebo vyctove typy by z libovolnych bajtu
+/// vytvorily neplatnou hodnotu (nedefinovane chovani).
+pub trait Pod: Copy + sealed::Sealed {}
+
+macro_rules! pod {
+    ($($t:ty),*) => {$(
+        impl sealed::Sealed for $t {}
+        impl Pod for $t {}
+    )*};
+}
+pod!(u8, u16, u32, u64, i8, i16, i32, i64);
+
 /// Rozsah vlastni pameti namapovany z objektu pameti; pri zruseni se
 /// odmapuje (mapovani drzi objekt v jadre, handle uz neni potreba).
 #[derive(Debug)]
@@ -50,33 +68,40 @@ impl Mapping {
         unsafe { core::slice::from_raw_parts(self.addr as *const u8, self.len as usize) }
     }
 
+    /// Overi, ze `len` bajtu od `offset` lezi v mapovani (bez preteceni).
+    fn check(&self, offset: u64, len: u64, what: &str) {
+        let end = offset.checked_add(len);
+        assert!(end.is_some_and(|e| e <= self.len), "{what} mimo mapovani");
+    }
+
     /// Precte hodnotu na offsetu (volatile - vhodne i pro registry).
-    pub fn read<T: Copy>(&self, offset: u64) -> T {
+    /// Offset musi byt zarovnany na velikost typu.
+    pub fn read<T: Pod>(&self, offset: u64) -> T {
+        self.check(offset, core::mem::size_of::<T>() as u64, "cteni");
         assert!(
-            offset + core::mem::size_of::<T>() as u64 <= self.len,
-            "cteni mimo mapovani"
+            offset.is_multiple_of(core::mem::align_of::<T>() as u64),
+            "nezarovnane cteni"
         );
-        // SAFETY: rozsah overen vyse a je namapovany.
+        // SAFETY: rozsah a zarovnani overeny vyse (mapovani zacina na
+        // strance); `T: Pod` = kazdy bitovy vzor je platna hodnota.
         unsafe { ((self.addr + offset) as *const T).read_volatile() }
     }
 
-    /// Zapise hodnotu na offset (volatile).
-    pub fn write<T: Copy>(&self, offset: u64, value: T) {
+    /// Zapise hodnotu na offset (volatile). Offset musi byt zarovnany.
+    pub fn write<T: Pod>(&self, offset: u64, value: T) {
+        self.check(offset, core::mem::size_of::<T>() as u64, "zapis");
         assert!(
-            offset + core::mem::size_of::<T>() as u64 <= self.len,
-            "zapis mimo mapovani"
+            offset.is_multiple_of(core::mem::align_of::<T>() as u64),
+            "nezarovnany zapis"
         );
-        // SAFETY: rozsah overen vyse; zapis do mapovani jen pro cteni by
-        // vyvolal vyjimku procesoru, ne nedefinovane chovani.
+        // SAFETY: rozsah a zarovnani overeny vyse; zapis do mapovani jen pro
+        // cteni by vyvolal vyjimku procesoru, ne nedefinovane chovani.
         unsafe { ((self.addr + offset) as *mut T).write_volatile(value) }
     }
 
     /// Zkopiruje bajty do mapovani.
     pub fn write_bytes(&self, offset: u64, data: &[u8]) {
-        assert!(
-            offset + data.len() as u64 <= self.len,
-            "zapis mimo mapovani"
-        );
+        self.check(offset, data.len() as u64, "zapis");
         // SAFETY: rozsah overen vyse, zdroj je mimo mapovani.
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -89,7 +114,7 @@ impl Mapping {
 
     /// Zkopiruje bajty z mapovani.
     pub fn read_bytes(&self, offset: u64, buf: &mut [u8]) {
-        assert!(offset + buf.len() as u64 <= self.len, "cteni mimo mapovani");
+        self.check(offset, buf.len() as u64, "cteni");
         // SAFETY: rozsah overen vyse, cil je mimo mapovani.
         unsafe {
             core::ptr::copy_nonoverlapping(

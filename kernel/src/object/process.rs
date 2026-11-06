@@ -77,6 +77,9 @@ impl Process {
             return Err(Error::BadState);
         }
         st.threads.retain(|w| w.strong_count() > 0);
+        if st.threads.len() >= abi::limits::PROCESS_MAX_THREADS {
+            return Err(Error::NoResources);
+        }
         st.threads.push(Arc::downgrade(t));
         Ok(())
     }

@@ -12,6 +12,7 @@ pub const TESTS: &[Test] = &[
     ("systemovy disk: sektor 0 je ochranny MBR", boot_disk_mbr),
     ("testovaci disk: zapis a cteni", scratch_roundtrip),
     ("cteni za koncem disku -> OUT_OF_RANGE", read_past_end),
+    ("omezeny Resource: rozsahy a kvoty", restricted_resource),
 ];
 
 /// Testovaci disk ma presne 1 MiB (viz xtask).
@@ -69,6 +70,52 @@ fn read_past_end(_: &Startup) -> TestResult {
         b.read(SCRATCH_SECTORS - 1, &mut buf),
         Err(Error::OutOfRange),
         "cteni pres konec"
+    );
+    Ok(())
+}
+
+fn restricted_resource(s: &Startup) -> TestResult {
+    const PAGE: u64 = 4096;
+    let root = s.root_resource.as_ref().ok_or("chybi korenovy Resource")?;
+    let (ecam, _) = s.pci_ecam.first().ok_or("chybi okno ECAM")?;
+    // Dve stranky konfiguracniho prostoru PCI (registry zarizeni, ne RAM).
+    let base = root
+        .phys_addr(ecam, 0)
+        .map_err(|e| fail("fyzicka adresa ECAM", e))?;
+    let child = root
+        .restrict(&[(base, PAGE)], 1, PAGE)
+        .map_err(|e| fail("vytvoreni omezeneho", e))?;
+    child
+        .device_memory(base, PAGE)
+        .map_err(|e| fail("povoleny rozsah", e))?;
+    check_eq!(
+        child.device_memory(base + PAGE, PAGE).err(),
+        Some(Error::AccessDenied),
+        "rozsah mimo povolene"
+    );
+    check_eq!(
+        child.restrict(&[(base, 2 * PAGE)], 1, PAGE).err(),
+        Some(Error::AccessDenied),
+        "rozsireni rozsahu potomkem"
+    );
+    check_eq!(
+        child.restrict(&[(base, PAGE)], 2, PAGE).err(),
+        Some(Error::AccessDenied),
+        "zvyseni limitu preruseni potomkem"
+    );
+    let _irq = child.interrupt().map_err(|e| fail("prvni preruseni", e))?;
+    check_eq!(
+        child.interrupt().err(),
+        Some(Error::NoResources),
+        "druhe preruseni nad limit"
+    );
+    child
+        .dma_memory(PAGE)
+        .map_err(|e| fail("DMA v limitu", e))?;
+    check_eq!(
+        child.dma_memory(PAGE).err(),
+        Some(Error::NoResources),
+        "DMA nad limit"
     );
     Ok(())
 }

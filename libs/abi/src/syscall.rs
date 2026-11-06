@@ -68,9 +68,12 @@ pub const VMO_PHYS_ADDR: u64 = 27;
 pub const INTERRUPT_CREATE: u64 = 28;
 /// Potvrzeni preruseni (smaze SIGNALED). `(interrupt)`
 pub const INTERRUPT_ACK: u64 = 29;
+/// Omezeny prostredek pro ovladac.
+/// `(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`
+pub const RESOURCE_CREATE: u64 = 30;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 30;
+pub const COUNT: u64 = 31;
 
 /// Deadline "cekat neomezene".
 pub const DEADLINE_INFINITE: u64 = u64::MAX;

@@ -246,6 +246,48 @@ pub fn free_pages(addr: PhysAddr, order: usize) {
         .free(addr.as_u64(), order);
 }
 
+/// Kolik stranek si jadro drzi pro sebe: pamet pro programy (objekty
+/// pameti, zasobniky vlaken) se nealokuje, kdyby volnych stranek zbylo
+/// mene. Tabulky stranek, heap a zasobniky jadra z rezervy cerpat smi, takze
+/// vycerpani pameti programem jadro neshodi. 1/32 RAM, nejmene 16 MiB.
+pub fn reserve_pages() -> u64 {
+    let total = ALLOCATOR.lock().as_ref().map_or(0, |b| b.total_pages);
+    (total / 32).max(4096)
+}
+
+/// Alokace pro programy: jako `alloc_pages`, ale respektuje rezervu jadra.
+pub fn alloc_user_pages(order: usize) -> Option<PhysAddr> {
+    if order > MAX_ORDER {
+        return None;
+    }
+    let reserve = reserve_pages();
+    let mut guard = ALLOCATOR.lock();
+    let buddy = guard.as_mut()?;
+    if buddy.free_pages < reserve + (1u64 << order) {
+        return None;
+    }
+    buddy.alloc(order).map(PhysAddr::new)
+}
+
+/// Jedna vynulovana stranka pro program (respektuje rezervu jadra).
+pub fn alloc_user_frame_zeroed() -> Option<PhysAddr> {
+    let frame = alloc_user_pages(0)?;
+    // SAFETY: prave alokovana stranka, dostupna pres primou mapu.
+    unsafe {
+        frame
+            .to_virt()
+            .as_mut_ptr::<u8>()
+            .write_bytes(0, PAGE_SIZE as usize)
+    };
+    Some(frame)
+}
+
+/// Je nad rezervou jadra jeste `pages` volnych stranek?
+pub fn user_room(pages: u64) -> bool {
+    let reserve = reserve_pages();
+    stats().0 >= reserve + pages
+}
+
 /// Alokuje jednu vynulovanou stranku.
 pub fn alloc_frame_zeroed() -> Option<PhysAddr> {
     let frame = alloc_pages(0)?;

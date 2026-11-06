@@ -55,6 +55,22 @@ Each type owns a handle and closes it when dropped.
 | `Vmo` | memory object | `create`, `read`, `write` (any length; the kernel moves 1 MiB per call, libos splits) |
 | `Process` | process | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |
 | `Thread` | thread | `create`, `start`, `wait_exit` |
+| `Mapping` | a memory object mapped into the own address space (unmapped when dropped) | `new`, `read::<T>`, `write::<T>`, `read_bytes`, `write_bytes` |
+| `hw::Resource` | hardware access (drivers) | `restrict`, `device_memory`, `dma_memory`, `phys_addr`, `interrupt` |
+| `hw::Interrupt` | device interrupt (MSI) | `msi`, `wait(deadline)` |
+
+`Mapping::read`/`write` are volatile (suitable for device registers too)
+and accept only integers (`libos::Pod`: `u8`..`u64`, `i8`..`i64`) - arbitrary
+device bytes can therefore never form an invalid value (`bool`, reference,
+enum). The offset must be aligned to the type size and lie inside the
+mapping (checked against overflow as well); otherwise a panic.
+
+```rust
+let regs = resource.device_memory(bar_phys, 4096)?;          // only within the Resource's ranges
+let map = Mapping::new(&regs, 0, 4096, MAP_READ | MAP_WRITE)?;
+let status: u32 = map.read(0x14);
+map.write::<u32>(0x14, status | 1);
+```
 
 Functions: `wait_one`, `wait_many` (waiting for signals), `time::now`,
 `time::deadline_after`, `time::sleep`, `exit(code)`, `println!` (kernel log).

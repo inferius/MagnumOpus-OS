@@ -82,6 +82,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | `libos: chybi nebo je prilis velka startovni zprava` | Proces nedostal startovní zprávu (`abi::bootstrap`). Proces končí s kódem -1 000 001. |
 | `libos: neplatna startovni zprava` | Zpráva nemá správné magické číslo nebo verzi. |
 | `libos: startovni zprava neobsahuje handle procesu` | Chybí `SELF_PROCESS`. |
+| `PANIC: ...` při nedostatku paměti | Panika se formátuje do bufferu na zásobníku (max. 512 B), takže ji jde vypsat i bez volné paměti. Panika během paniky proces jen ukončí. |
 | `libos: nedostatek pameti pro heap` | Program nemůže začít: nejde vytvořit nebo namapovat počáteční heap (4 MiB). Heap pak roste podle potřeby; když už růst nejde (dojde paměť nebo rezervovaný rozsah 64 GiB), alokace selže a program zpanikuje (`PANIC: ... alloc.rs ...`). |
 | `PANIC: ...` | Panika v programu; proces končí s kódem -1 000 001. |
 
@@ -92,7 +93,8 @@ porušený vnitřní předpoklad (chyba jádra).
 | `devmgr: pci BB:ZZ.F vvvv:dddd trida cc.ss.pp` | Nalezené zařízení PCI (informace). |
 | `devmgr: ovladac pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
 | `virtio-blk BB:ZZ.F: N MiB, flush ano/ne, discard ano/ne` | Disk je připravený. `discard ne` = zařízení neumí TRIM (v QEMU chybí `discard=unmap` u disku); FS pak TRIM přeskakuje. |
-| `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x nebo chybí prostředky (MSI-X, DMA paměť). |
+| `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x, nedokončilo reset do sekundy (`TIMED_OUT`) nebo chybí prostředky (MSI-X, DMA paměť, `NO_RESOURCES` = vyčerpaná kvóta omezeného Resource). |
+| `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
 
 ## Služba fsd a souborový systém

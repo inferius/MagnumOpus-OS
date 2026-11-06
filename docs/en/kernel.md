@@ -97,6 +97,18 @@ the upper half with the kernel):
 - **An exception in a program** (page fault, invalid opcode, ...) ends only
   that process, not the kernel: code -1,000,100 - vector, address and fault
   type in the log.
+- **Entering userspace:** a thread's entry point and stack must lie in the
+  process memory (`USER_MIN`..`USER_MAX`); the last page of the lower half
+  of the address space is always unmapped, so a return from a syscall never
+  targets a non-canonical address (which would fault while still in the
+  kernel).
+- **FPU/SSE state:** each thread has its own 512 B FXSAVE area; a context
+  switch always saves and restores it. A new thread starts with the default
+  state (FCW 0x037F, MXCSR 0x1F80), so data of another thread cannot leak.
+  The kernel itself does not use FPU/SSE (soft-float). AVX is not enabled
+  (its instructions fault with #UD).
+- **Limits:** handles, threads, mappings, channel queues and the kernel
+  memory reserve - see [syscalls.md](syscalls.md#resource-limits).
 
 ## Syscalls
 
