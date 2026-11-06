@@ -27,10 +27,12 @@ pub const NAME_MAX_CHARS: usize = 1024;
 /// Nejdelsi jmeno v bajtech UTF-8 (po NFC).
 pub const NAME_MAX: usize = 4096;
 
-/// Ridici znaky smeru textu (U+202A-202E, U+2066-2069). Umi zmenit poradi
-/// zobrazeni: `faktura[U+202E]fdp.exe` se ukaze jako `fakturaexe.pdf`.
+/// Ridici znaky smeru textu: vlozeni a prepsani smeru (U+202A-202E),
+/// izolace (U+2066-2069) a znacky smeru LRM, RLM, ALM (U+200E, U+200F,
+/// U+061C). Umi zmenit poradi zobrazeni: `faktura[U+202E]fdp.exe` se ukaze
+/// jako `fakturaexe.pdf`.
 pub fn is_bidi_control(c: char) -> bool {
-    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}')
 }
 
 /// Overi jmeno polozky adresare. Delka se meri na NFC tvaru, ktery se
@@ -98,6 +100,8 @@ mod tests {
         assert!(validate_name(&"\u{1F600}".repeat(1024)).is_ok());
         assert!(validate_name("faktura\u{202E}fdp.exe").is_err());
         assert!(validate_name("a\u{2067}b").is_err());
+        assert!(validate_name("a\u{200F}.exe").is_err());
+        assert!(validate_name("a\u{061C}b").is_err());
         assert!(validate_name("a\u{0}b").is_err());
     }
 }

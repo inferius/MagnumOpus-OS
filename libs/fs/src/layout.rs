@@ -36,6 +36,14 @@ pub const VERSION: u32 = 3;
 pub const FEATURES_RO_COMPAT: u64 = 0;
 pub const FEATURES_INCOMPAT: u64 = 0;
 
+/// Rezervovane bity vlastnosti (zatim je ovladac neumi, takze svazek s nimi
+/// odmitne). Vyznam je pevny uz ted, aby se formaty nerozesly.
+pub mod feature {
+    /// incompat: svazek obsahuje placeholdery (data jen v cloudu, faze 6).
+    #[allow(dead_code, reason = "pouzije faze 6 (cloud)")]
+    pub const INCOMPAT_REMOTE: u64 = 1 << 0;
+}
+
 /// Bloky uvolnene commitem `g` se znovu pouziji az v transakci `g + REUSE_DELAY`.
 /// Poslednich `REUSE_DELAY` ulozenych stavu tak zustava nedotcenych a pripojeni
 /// se k nim umi vratit, kdyz je nejnovejsi stav poskozeny (disk, ktery lze
@@ -73,6 +81,10 @@ pub mod item {
     pub const DEADLIST: u8 = 6;
     /// Cil symbolickeho odkazu (text UTF-8), offset 0.
     pub const SYMLINK: u8 = 7;
+    /// Stav synchronizace objektu (vzdalena verze, znacka, cas), offset 0.
+    /// Rezervovano pro fazi 6.
+    #[allow(dead_code, reason = "pouzije faze 6 (cloud)")]
+    pub const SYNC: u8 = 8;
 }
 
 /// Klic polozky stromu; razeni podle (oid, kind, offset).
@@ -111,7 +123,7 @@ pub fn csum_at(b: &[u8], o: usize) -> Csum {
 /// 8   generace vzniku u64
 /// 16  kontrolni soucet (16 B)
 /// 32  delka v blocich u32 (uzel stromu = NODE_BLOCKS)
-/// 36  priznaky u16 (PTR_COMPRESSED, PTR_ENCRYPTED, PTR_SHARED)
+/// 36  priznaky u16 (PTR_COMPRESSED, PTR_ENCRYPTED, PTR_SHARED, PTR_REMOTE)
 /// 38  rezerva u16
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -135,7 +147,11 @@ pub const PTR_COMPRESSED: u16 = 1 << 0;
 pub const PTR_ENCRYPTED: u16 = 1 << 1;
 #[allow(dead_code, reason = "pouzije faze 3 (okamzite kopie, deduplikace)")]
 pub const PTR_SHARED: u16 = 1 << 2;
+#[allow(dead_code, reason = "pouzije faze 6 (soubory na vyzadani)")]
+pub const PTR_REMOTE: u16 = 1 << 3;
 const BLOCK_BITS: u64 = (1 << 48) - 1;
+/// Nejvetsi velikost zarizeni v blocich (48 bitu adresy = 1 EiB).
+pub const MAX_BLOCKS: u64 = 1 << 48;
 
 impl BlockPtr {
     /// Ukazatel na jeden blok zarizeni 0.
@@ -150,6 +166,7 @@ impl BlockPtr {
     }
 
     pub fn put(&self, b: &mut [u8]) {
+        debug_assert!(self.block <= BLOCK_BITS, "cislo bloku nad 48 bitu");
         let addr = (self.block & BLOCK_BITS) | (self.dev as u64) << 48;
         b[0..8].copy_from_slice(&addr.to_le_bytes());
         b[8..16].copy_from_slice(&self.birth.to_le_bytes());
@@ -294,7 +311,12 @@ impl Superblock {
         }
         // Velikost AG: rozumny rozsah (jinak by pamet pro skupiny vybuchla).
         let ags = sb.block_count.checked_div(sb.ag_blocks).unwrap_or(u64::MAX);
-        if sb.ag_blocks < 64 || ags > 1 << 20 || sb.block_count <= DATA_START || sb.device_count == 0 {
+        let bad = sb.ag_blocks < 64
+            || ags > 1 << 20
+            || sb.block_count <= DATA_START
+            || sb.block_count > MAX_BLOCKS
+            || sb.device_index >= sb.device_count;
+        if bad {
             return Err(Error::Corrupted);
         }
         Ok(sb)
@@ -304,7 +326,7 @@ impl Superblock {
 /// Zaznam objektu v3 (128 B): soubor, adresar nebo symbolicky odkaz.
 ///
 /// ```text
-/// 0   druh u8 (KIND_*)          1   priznaky u8 (zatim 0)
+/// 0   druh u8 (KIND_*)          1   priznaky u8 (INODE_*, zatim 0)
 /// 4   popis opravneni u32 (0 = zdedeny; faze 1d)
 /// 8   velikost u64 (soubor: bajty, symlink: delka cile)
 /// 16  zmena obsahu (mtime)      24  zmena metadat (ctime)
@@ -320,6 +342,7 @@ impl Superblock {
 pub struct Inode {
     /// `KIND_FILE`, `KIND_DIR` nebo `KIND_SYMLINK`.
     pub kind: u8,
+    /// `INODE_*` (cloud: REMOTE, PINNED, NOSYNC).
     pub flags: u8,
     /// Cislo popisu opravneni (0 = zdedit od rodice).
     pub acl: u32,
@@ -346,6 +369,13 @@ pub struct Inode {
 pub const KIND_FILE: u8 = 1;
 pub const KIND_DIR: u8 = 2;
 pub const KIND_SYMLINK: u8 = 3;
+/// Priznaky objektu rezervovane pro cloud (faze 6).
+#[allow(dead_code, reason = "pouzije faze 6 (soubory na vyzadani)")]
+pub const INODE_REMOTE: u8 = 1 << 0;
+#[allow(dead_code, reason = "pouzije faze 6 (vzdy offline)")]
+pub const INODE_PINNED: u8 = 1 << 1;
+#[allow(dead_code, reason = "pouzije faze 6 (vyber synchronizovanych slozek)")]
+pub const INODE_NOSYNC: u8 = 1 << 2;
 pub const INODE_SIZE: usize = 128;
 /// Nejvetsi velikost souboru (2^63 - 1 B): velikosti a rozdily se tak vzdy
 /// vejdou do `i64`.

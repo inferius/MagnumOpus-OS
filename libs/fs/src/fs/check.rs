@@ -16,7 +16,9 @@ use abi::Result;
 
 use super::Fs;
 use crate::device::BlockDevice;
-use crate::layout::{BLOCK_SIZE, DATA_START, Extent, item};
+use crate::layout::{
+    BLOCK_SIZE, DATA_START, Extent, Inode, KIND_SYMLINK, Key, decode_dirents, item,
+};
 use crate::node::{Body, Child};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -40,6 +42,8 @@ impl<D: BlockDevice> Fs<D> {
         // blok -> kdo ho pouziva (pro hlaseni)
         let mut used: BTreeMap<u64, &'static str> = BTreeMap::new();
         let mut seen_nodes: BTreeSet<u64> = BTreeSet::new();
+        // Druhy objektu zive verze (shoda polozek adresaru se zaznamy).
+        let mut objects = Objects::default();
         let mut roots = alloc::vec![(String::from("zivy stav"), self.s.root)];
         roots.extend(self.snapshot_roots()?);
         for (index, (name, root)) in roots.into_iter().enumerate() {
@@ -72,6 +76,9 @@ impl<D: BlockDevice> Fs<D> {
                     Body::Internal(children) => stack.extend(children.iter().map(|(_, c)| *c)),
                     Body::Leaf(items) => {
                         for (k, v) in items {
+                            if live {
+                                objects.note(&k, &v);
+                            }
                             if k.kind != item::EXTENT {
                                 continue;
                             }
@@ -99,6 +106,7 @@ impl<D: BlockDevice> Fs<D> {
                 }
             }
         }
+        objects.verify(&mut r.problems);
         let mut meta = self.s.space.meta.blocks();
         meta.extend(self.s.zil_blocks.iter().copied());
         for b in meta {
@@ -137,5 +145,59 @@ impl<D: BlockDevice> Fs<D> {
             ));
         }
         Ok(r)
+    }
+}
+
+/// Sber druhu objektu ze zive verze pro kontrolu, ze polozky adresaru,
+/// zaznamy objektu a cile odkazu k sobe sedi.
+#[derive(Default)]
+struct Objects {
+    /// oid -> (druh, velikost) ze zaznamu objektu.
+    inodes: BTreeMap<u64, (u8, u64)>,
+    /// (oid, druh) z polozek adresaru.
+    dirents: Vec<(u64, u8)>,
+    /// oid -> delka cile odkazu.
+    links: BTreeMap<u64, u64>,
+}
+
+impl Objects {
+    fn note(&mut self, k: &Key, v: &[u8]) {
+        match k.kind {
+            item::INODE => {
+                if let Ok(i) = Inode::decode(v) {
+                    self.inodes.insert(k.oid, (i.kind, i.size));
+                }
+            }
+            item::DIRENT => {
+                if let Ok(list) = decode_dirents(v) {
+                    self.dirents.extend(list.into_iter().map(|d| (d.oid, d.kind)));
+                }
+            }
+            item::SYMLINK => {
+                self.links.insert(k.oid, v.len() as u64);
+            }
+            _ => {}
+        }
+    }
+
+    fn verify(&self, problems: &mut Vec<String>) {
+        for &(oid, kind) in &self.dirents {
+            match self.inodes.get(&oid) {
+                None => problems.push(format!("polozka adresare ukazuje na neexistujici objekt {oid}")),
+                Some(&(k, _)) if k != kind => {
+                    problems.push(format!("objekt {oid}: druh v adresari {kind}, v zaznamu {k}"))
+                }
+                _ => {}
+            }
+        }
+        for (&oid, &(kind, size)) in &self.inodes {
+            let link = self.links.get(&oid);
+            if kind == KIND_SYMLINK && link != Some(&size) {
+                problems.push(format!("odkaz {oid}: cil chybi nebo nesedi delka"));
+            }
+            if kind != KIND_SYMLINK && link.is_some() {
+                problems.push(format!("objekt {oid} neni odkaz, ale ma cil"));
+            }
+        }
     }
 }

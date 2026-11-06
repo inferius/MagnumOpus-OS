@@ -35,8 +35,10 @@ pub const MIN_BLOCKS: u64 = 64;
 pub const DEFAULT_AG_BLOCKS: u64 = 262_144;
 
 /// UUID svazku: zadane, jinak odvozene z jmena, velikosti a adresy
-/// promenne na zasobniku (bez zdroje nahody v `no_std`; nastroje na
-/// hostiteli predavaji nahodne).
+/// promenne na zasobniku. POZOR: v `no_std` neni zdroj nahody, takze
+/// odvozene UUID neni zarucene jedinecne (dva stejne svazky formatovane
+/// stejnym programem muzou mit stejne). Kdo formatuje, ma predat nahodne
+/// UUID (xtask: `RandomState`; v systemu az bude sluzba nahody).
 fn volume_uuid(label: &str, blocks: u64, given: Option<[u8; 16]>) -> [u8; 16] {
     if let Some(u) = given {
         return u;
@@ -122,6 +124,10 @@ impl<D: BlockDevice> Store<D> {
     /// Vytvori prazdny souborovy system (jen korenovy adresar).
     pub fn format(mut dev: D, opts: &FormatOptions) -> Result<D> {
         let blocks = dev.block_count();
+        // Ukazatel ma na cislo bloku 48 bitu.
+        if blocks > crate::layout::MAX_BLOCKS {
+            return Err(Error::NotSupported);
+        }
         if blocks < MIN_BLOCKS {
             return Err(Error::InvalidArgs);
         }
@@ -275,8 +281,15 @@ impl<D: BlockDevice> Store<D> {
     }
 
     /// Je misto pro `extra` dalsich bloku (krome rozpracovanych uzlu a rezervy)?
+    ///
+    /// Pocita se jen misto, kam se vejdou cele uzly (4 souvisle bloky): data
+    /// zapsana pri commitu muzou zabrat i takove useky, a commit by pak nemel
+    /// kam ulozit strom (selhal by a svazek by presel do rezimu jen pro
+    /// cteni). Cena: na silne rozdrobenem disku hlasi `NO_SPACE` o par bloku
+    /// driv, nez je opravdu plny.
     pub fn has_room(&self, extra: u64) -> bool {
-        self.dirty.len() as u64 + extra + self.reserve() <= self.space.free_blocks()
+        let nodes = self.dirty.len() as u64 * NODE_BLOCKS;
+        nodes + extra + self.reserve() <= self.space.node_room()
     }
 
     pub fn check_writable(&self) -> Result<()> {
@@ -327,8 +340,13 @@ impl<D: BlockDevice> Store<D> {
                     .block
                     .checked_add(NODE_BLOCKS)
                     .is_some_and(|e| e <= self.sb.block_count);
-            if !inside || ptr.len as u64 != NODE_BLOCKS {
+            if !inside || ptr.len as u64 != NODE_BLOCKS || ptr.dev != 0 {
                 return Err(Error::Corrupted);
+            }
+            // Komprimovany/sifrovany uzel tento ovladac neumi (svazek s
+            // takovymi uzly ma incompat bit, sem se dostane jen po chybe).
+            if ptr.flags != 0 {
+                return Err(Error::NotSupported);
             }
             let mut buf = vec![0u8; NODE_SIZE];
             self.dev.read_blocks(ptr.block, &mut buf)?;
@@ -462,7 +480,9 @@ impl<D: BlockDevice> Store<D> {
         let mut starts = Vec::with_capacity(order.len());
         while starts.len() < order.len() {
             let want = (order.len() - starts.len()) as u64 * NODE_BLOCKS;
-            let (s, l) = self.space.alloc(want, None, Class::Meta, self.txg)?;
+            // Jen useky aspon na jeden cely uzel (jinak by se smycka
+            // na rozdrobenem disku tocila donekonecna).
+            let (s, l) = self.space.alloc_min(want, NODE_BLOCKS, Class::Meta, self.txg)?;
             let usable = l - l % NODE_BLOCKS;
             if usable < l {
                 self.space.free(s + usable, l - usable, self.txg, true);
@@ -584,10 +604,7 @@ pub fn write_runs<D: BlockDevice>(dev: &mut D, out: &mut [(u64, Vec<u8>)]) -> Re
         if j - i == 1 {
             dev.write_block(out[i].0, &out[i].1)?;
         } else {
-            let buf: Vec<u8> = out[i..j]
-                .iter()
-                .flat_map(|(_, d)| d.iter().copied())
-                .collect();
+            let buf = out[i..j].iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>().concat();
             dev.write_blocks(out[i].0, &buf)?;
         }
         i = j;

@@ -213,12 +213,12 @@ implementation.
 | 8 | 8 | birth (generation of creation) |
 | 16 | 16 | checksum of the content (all blocks it points to) |
 | 32 | 4 | length in blocks (tree node = 4) |
-| 36 | 2 | flags: 1 = compressed, 2 = encrypted, 4 = shared blocks (not used yet) |
+| 36 | 2 | flags: 1 = compressed, 2 = encrypted, 4 = shared blocks, 8 = cloud only (reserved; a node with a flag is refused with `NOT_SUPPORTED`) |
 | 38 | 2 | reserved (zeros) |
 
 48 bits of block number = up to 1 EiB per device; the device number is
 prepared for volumes spanning several disks. A pointer to a node must have
-length exactly 4 and the whole range inside the volume, otherwise the node
+length exactly 4, device 0 and the whole range inside the volume, otherwise the node
 is `CORRUPTED` (checked before it is read and its checksum verified).
 
 ## Metadata B+tree
@@ -237,13 +237,14 @@ content).
 | `SNAPSHOT` | 5 | snapshot number (object 0) | root `BlockPtr`, generation u64, name |
 | `DEADLIST` | 6 | list << 32 \| sequence (object 0) | up to 80 dead ranges (start u64, length u64, birth u64) |
 | `SYMLINK` | 7 | 0 | target of a symbolic link (UTF-8, 1-4096 B) |
+| `SYNC` | 8 | 0 | reserved: cloud sync state (phase 6) |
 
 ### Object record (inode, 128 B)
 
 | Offset | Field | Meaning |
 |---|---|---|
 | 0 | kind u8 | 1 = file, 2 = directory, 3 = symbolic link |
-| 1 | flags u8 | object flags (0 for now) |
+| 1 | flags u8 | object flags, reserved for the cloud: 1 = data only in the cloud, 2 = always offline, 4 = do not sync (0 for now) |
 | 4 | acl u32 | permission descriptor number (0 = inherit; comes in phase 1d) |
 | 8 | size | file: size in bytes (at most 2^63-1); link: target length |
 | 16 | mtime | time of the last content change |
@@ -310,8 +311,9 @@ the commit.
 - A valid name: **1-1024 Unicode characters and at most 4096 bytes of
   UTF-8** (`NAME_MAX_CHARS`, `NAME_MAX`), measured on the NFC form that is
   actually stored. Forbidden are `.` and `..`, the `/` character, control
-  characters (including NUL) and **text direction controls** U+202A-202E and
-  U+2066-2069 (`is_bidi_control`). Otherwise `INVALID_ARGS`.
+  characters (including NUL) and **text direction controls** U+202A-202E,
+  U+2066-2069 and the direction marks U+200E, U+200F, U+061C
+  (`is_bidi_control`). Otherwise `INVALID_ARGS`.
 - Renaming to a different case only (`/fotky` -> `/FOTKY`) is allowed.
 - The Unicode table version is in the superblock (`unicode_version`).
 
@@ -622,6 +624,14 @@ it returns `NO_SPACE` **immediately** - not at commit time. If blocks are
 waiting for a delayed free, the system first tries commits (up to 5) to
 release them.
 
+The check counts only space **where a whole tree node fits** (runs of at
+least 4 contiguous blocks, `Space::node_room`), and every dirty node as 4
+blocks. If data written during a commit took the last such runs, the commit
+would have nowhere to store the tree and the volume would go read-only. The
+cost: on a heavily fragmented disk `NO_SPACE` comes a few blocks before the
+disk is really full. Node allocation (`alloc_min`) skips runs shorter than 4
+blocks.
+
 ## TRIM
 
 An SSD needs to know which blocks are free (otherwise performance drops and
@@ -715,7 +725,10 @@ tree, all snapshots, the free-space metadata and the intent log:
   blocks - reads the whole content),
 - every used block must be allocated according to the allocator,
 - no allocated block may be "lost" (nothing points to it),
-- the live tree must not use one block twice.
+- the live tree must not use one block twice,
+- the kind in a directory entry must match the object record, and a
+  symbolic link must have a target whose length equals its size (and
+  nothing else may have a target).
 
 It returns a `CheckReport` with block counts (tree, data, metadata) and a
 list of problems (empty = OK). The tests call it after every scenario.
@@ -727,13 +740,29 @@ without a disk, release, one thread):
 
 | Measurement | Result |
 |---|---|
-| sequential write of 512 MiB in 1 MiB pieces + commit | ~620-720 MiB/s, **1 contiguous range** |
-| sequential read | ~2.5-3.2 GiB/s |
+| sequential write of 512 MiB in 1 MiB pieces + commit | ~1.4 GiB/s, **1 contiguous range** |
+| sequential read | ~2.7-3.0 GiB/s |
 | metadata overhead for data (tree, extents, checksums) | **0.42 %** of capacity |
-| 20,000 files of 4 KiB (create + write + commit) | ~72,000-74,000 files/s |
+| 20,000 files of 4 KiB (create + write + commit) | ~100,000 files/s |
 | `stat` of a directory with 20,000 files (subtree size) | 10-13 µs |
 
 Run: `cargo test -p fs --features std --release -- --ignored --nocapture perf`.
+
+**Where the write limit is** (breakdown by step on 512 MiB, release):
+
+| Step | Speed |
+|---|---|
+| memory copy (memcpy) | ~10 GiB/s |
+| XXH3-128 checksum per 4 KiB | ~19 GiB/s |
+| delayed allocation buffer (4 KiB `Vec` in a `BTreeMap`) | ~4.3 GiB/s |
+| assembling blocks into a contiguous buffer | ~5.7 GiB/s (byte by byte before: 1.7 GiB/s) |
+
+So the limit is in the implementation, not in the format: the 4 KiB block
+buffer costs the most. Planned: a buffer of large runs (one allocation per
+contiguous write) and writing straight from the client's buffer. **In the
+running system** the limit is elsewhere today: protocols fsproto v1 and
+blockproto copy data in channel messages and are synchronous (one request
+at a time). Protocol v2 with shared memory and request queues solves that.
 
 ## The fsd service
 

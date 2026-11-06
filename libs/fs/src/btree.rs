@@ -32,9 +32,8 @@ fn child_index(children: &[(Key, Child)], key: &Key) -> usize {
         .saturating_sub(1)
 }
 
-/// Uroven uzlu `c` s kontrolou, ze odpovida ocekavane (`None` = koren).
-fn level_of<D: BlockDevice>(s: &mut Store<D>, c: &Child, expect: Option<u8>) -> Result<u8> {
-    let n = s.node(c)?;
+/// Overi uroven uz nacteneho uzlu proti ocekavane (`None` = koren).
+fn check_level(n: &Node, expect: Option<u8>) -> Result<u8> {
     let ok = match &n.body {
         Body::Leaf(_) => n.level == 0,
         Body::Internal(ch) => n.level > 0 && !ch.is_empty(),
@@ -45,13 +44,20 @@ fn level_of<D: BlockDevice>(s: &mut Store<D>, c: &Child, expect: Option<u8>) -> 
     Ok(n.level)
 }
 
+/// Uroven uzlu `c` s kontrolou. Zapisove operace ji volaji *pred* `cow`,
+/// aby poskozeny potomek neskoncil chybou az po zkopirovani rodice.
+fn level_of<D: BlockDevice>(s: &mut Store<D>, c: &Child, expect: Option<u8>) -> Result<u8> {
+    check_level(s.node(c)?, expect)
+}
+
 /// Hodnota pro `key` ve stromu s korenem `root`.
 pub fn get<D: BlockDevice>(s: &mut Store<D>, root: &Child, key: &Key) -> Result<Option<Vec<u8>>> {
     let mut c = *root;
     let mut expect = None;
     loop {
-        let level = level_of(s, &c, expect)?;
-        match &s.node(&c)?.body {
+        let n = s.node(&c)?;
+        let level = check_level(n, expect)?;
+        match &n.body {
             Body::Leaf(items) => {
                 return Ok(items
                     .binary_search_by(|(k, _)| k.cmp(key))
@@ -299,20 +305,22 @@ pub fn range<D: BlockDevice>(
     end: &Key,
     f: &mut dyn FnMut(&Key, &[u8]) -> Result<bool>,
 ) -> Result<bool> {
-    let level = level_of(s, root, None)?;
-    range_rec(s, root, level, start, end, f)
+    range_rec(s, root, None, start, end, f)
 }
 
+/// Projde uzel `c`; list primo z cache (bez kopie), u vnitrniho uzlu se
+/// zkopiruje jen seznam potomku (rekurze potrebuje `s` znovu).
 fn range_rec<D: BlockDevice>(
     s: &mut Store<D>,
     c: &Child,
-    level: u8,
+    expect: Option<u8>,
     start: &Key,
     end: &Key,
     f: &mut dyn FnMut(&Key, &[u8]) -> Result<bool>,
 ) -> Result<bool> {
-    let node = s.node(c)?.clone();
-    match node.body {
+    let n = s.node(c)?;
+    let level = check_level(n, expect)?;
+    let children = match &n.body {
         Body::Leaf(items) => {
             let from = items.partition_point(|(k, _)| k < start);
             for (k, v) in &items[from..] {
@@ -323,22 +331,24 @@ fn range_rec<D: BlockDevice>(
                     return Ok(false);
                 }
             }
-            Ok(true)
+            return Ok(true);
         }
         Body::Internal(children) => {
-            let first = child_index(&children, start);
-            for (i, (k, child)) in children.iter().enumerate().skip(first) {
-                if i > first && k >= end {
-                    break;
-                }
-                level_of(s, child, Some(level - 1))?;
-                if !range_rec(s, child, level - 1, start, end, f)? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
+            let first = child_index(children, start);
+            children[first..]
+                .iter()
+                .enumerate()
+                .take_while(|(i, (k, _))| *i == 0 || k < end)
+                .map(|(_, &(_, ch))| ch)
+                .collect::<Vec<_>>()
+        }
+    };
+    for child in children {
+        if !range_rec(s, &child, Some(level - 1), start, end, f)? {
+            return Ok(false);
         }
     }
+    Ok(true)
 }
 
 /// Vsechny polozky v rozsahu (pro male rozsahy: adresar, extenty souboru).

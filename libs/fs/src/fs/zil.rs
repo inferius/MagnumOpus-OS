@@ -43,6 +43,8 @@ pub enum Op {
     Create {
         parent: u64,
         oid: u64,
+        /// Generace vzniku (po prehrani musi objekt mit tu puvodni).
+        generation: u64,
         kind: u8,
         name: String,
         time: u64,
@@ -67,6 +69,7 @@ pub enum Op {
     Symlink {
         parent: u64,
         oid: u64,
+        generation: u64,
         name: String,
         target: String,
         time: u64,
@@ -149,6 +152,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
             Record::Op(Op::Create {
                 parent,
                 oid,
+                generation,
                 kind,
                 name,
                 time,
@@ -156,6 +160,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 b.push(1);
                 put_u64(&mut b, *parent);
                 put_u64(&mut b, *oid);
+                put_u64(&mut b, *generation);
                 b.push(*kind);
                 put_u64(&mut b, *time);
                 put_str(&mut b, name);
@@ -189,6 +194,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
             Record::Op(Op::Symlink {
                 parent,
                 oid,
+                generation,
                 name,
                 target,
                 time,
@@ -196,6 +202,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 b.push(7);
                 put_u64(&mut b, *parent);
                 put_u64(&mut b, *oid);
+                put_u64(&mut b, *generation);
                 put_u64(&mut b, *time);
                 put_str(&mut b, name);
                 put_str(&mut b, target);
@@ -272,10 +279,12 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
     while r.pos < b.len() {
         let rec = match r.u8()? {
             1 => {
-                let (parent, oid, kind, time) = (r.u64()?, r.u64()?, r.u8()?, r.u64()?);
+                let (parent, oid, generation) = (r.u64()?, r.u64()?, r.u64()?);
+                let (kind, time) = (r.u8()?, r.u64()?);
                 Record::Op(Op::Create {
                     parent,
                     oid,
+                    generation,
                     kind,
                     time,
                     name: r.str()?,
@@ -301,11 +310,12 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
                 })
             }
             7 => {
-                let (parent, oid, time) = (r.u64()?, r.u64()?, r.u64()?);
+                let (parent, oid, generation, time) = (r.u64()?, r.u64()?, r.u64()?, r.u64()?);
                 let (name, target) = (r.str()?, r.str()?);
                 Record::Op(Op::Symlink {
                     parent,
                     oid,
+                    generation,
                     name,
                     target,
                     time,
@@ -520,6 +530,7 @@ impl<D: BlockDevice> Fs<D> {
             Record::Op(Op::Create {
                 parent,
                 oid,
+                generation,
                 kind,
                 name,
                 time,
@@ -530,17 +541,18 @@ impl<D: BlockDevice> Fs<D> {
                     crate::layout::KIND_FILE => Kind::File,
                     _ => return Err(Error::Corrupted),
                 };
-                self.create_at(parent, &name, kind, oid).map_err(bad)
+                self.create_at(parent, &name, kind, oid, generation).map_err(bad)
             }
             Record::Op(Op::Symlink {
                 parent,
                 oid,
+                generation,
                 name,
                 target,
                 time,
             }) => {
                 self.now = time;
-                self.symlink_at(parent, &name, &target, oid).map_err(bad)
+                self.symlink_at(parent, &name, &target, oid, generation).map_err(bad)
             }
             Record::Op(Op::Remove { parent, name, time }) => {
                 self.now = time;

@@ -28,17 +28,7 @@ pub fn create(target: &Path) -> Result<PathBuf> {
         label: "data".into(),
         algo: Algo::Xxh3,
         ag_blocks: None,
-        // Nahodne UUID: cas formatovani + adresa na zasobniku.
-        uuid: Some({
-            let t = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
-            let marker = 0u8;
-            let mut u = (t ^ (&marker as *const u8 as u128)).to_le_bytes();
-            u[6] = (u[6] & 0x0F) | 0x40; // verze 4
-            u
-        }),
+        uuid: Some(random_uuid()),
     };
     let dev = Fs::format(dev, &opts).map_err(|e| fs_err("formatovani", e))?;
     let mut fs = Fs::mount(dev).map_err(|e| fs_err("pripojeni", e))?;
@@ -66,4 +56,20 @@ pub fn create(target: &Path) -> Result<PathBuf> {
         return Err(format!("datovy disk: kontrola konzistence: {:?}", report.problems).into());
     }
     Ok(path)
+}
+
+/// Nahodne UUID verze 4. Nahodu dava `RandomState` ze std (klice SipHash
+/// seedovane z generatoru nahody operacniho systemu), takze neni potreba
+/// dalsi zavislost.
+fn random_uuid() -> [u8; 16] {
+    use std::hash::{BuildHasher, Hasher};
+    let mut u = [0u8; 16];
+    for half in u.chunks_mut(8) {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(0);
+        half.copy_from_slice(&h.finish().to_le_bytes());
+    }
+    u[6] = (u[6] & 0x0F) | 0x40; // verze 4
+    u[8] = (u[8] & 0x3F) | 0x80; // varianta RFC 4122
+    u
 }

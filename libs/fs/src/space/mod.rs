@@ -23,7 +23,7 @@ use alloc::vec::Vec;
 
 use abi::{Error, Result};
 
-use crate::layout::{DATA_START, REUSE_DELAY};
+use crate::layout::{DATA_START, NODE_BLOCKS, REUSE_DELAY};
 
 pub use log::{INDEX_PER_BLOCK, SpaceMeta, TABLE_PER_BLOCK};
 
@@ -55,28 +55,45 @@ struct Ag {
     /// Tytez useky podle (delka, zacatek).
     by_size: BTreeSet<(u64, u64)>,
     free_blocks: u64,
+    /// Volne bloky pouzitelne pro uzly stromu: soucet celych nasobku
+    /// NODE_BLOCKS v kazdem volnem useku (useky 1-3 bloky se nepocitaji).
+    node_room: u64,
     /// Zaznamy rozpracovane transakce.
     delta: Vec<Rec>,
 }
 
+/// Cast useku delky `len`, do ktere se vejdou cele uzly.
+fn node_part(len: u64) -> u64 {
+    len - len % NODE_BLOCKS
+}
+
 impl Ag {
+    fn add_run(&mut self, start: u64, len: u64) {
+        self.free.insert(start, len);
+        self.by_size.insert((len, start));
+        self.node_room += node_part(len);
+    }
+
+    fn remove_run(&mut self, start: u64, len: u64) {
+        self.free.remove(&start);
+        self.by_size.remove(&(len, start));
+        self.node_room -= node_part(len);
+    }
+
     fn insert(&mut self, mut start: u64, mut len: u64) {
         // Slouceni s levym a pravym sousedem.
         if let Some((&ls, &ll)) = self.free.range(..start).next_back()
             && ls + ll == start
         {
-            self.free.remove(&ls);
-            self.by_size.remove(&(ll, ls));
+            self.remove_run(ls, ll);
             start = ls;
             len += ll;
         }
         if let Some(&rl) = self.free.get(&(start + len)) {
-            self.free.remove(&(start + len));
-            self.by_size.remove(&(rl, start + len));
+            self.remove_run(start + len, rl);
             len += rl;
         }
-        self.free.insert(start, len);
-        self.by_size.insert((len, start));
+        self.add_run(start, len);
     }
 
     /// Volny usek, ktery obsahuje blok `b`.
@@ -91,16 +108,13 @@ impl Ag {
         if start + len > s + l {
             return Err(Error::Corrupted);
         }
-        self.free.remove(&s);
-        self.by_size.remove(&(l, s));
+        self.remove_run(s, l);
         if start > s {
-            self.free.insert(s, start - s);
-            self.by_size.insert((start - s, s));
+            self.add_run(s, start - s);
         }
         let end = start + len;
         if end < s + l {
-            self.free.insert(end, s + l - end);
-            self.by_size.insert((s + l - end, end));
+            self.add_run(end, s + l - end);
         }
         self.free_blocks -= len;
         Ok(())
@@ -164,6 +178,11 @@ impl Space {
         self.ags.iter().map(|a| a.free_blocks).sum()
     }
 
+    /// Volne bloky v usecich, kam se vejdou cele uzly stromu.
+    pub fn node_room(&self) -> u64 {
+        self.ags.iter().map(|a| a.node_room).sum()
+    }
+
     /// Bloky cekajici na odlozene uvolneni.
     pub fn deferred_blocks(&self) -> u64 {
         self.deferred_blocks
@@ -211,18 +230,31 @@ impl Space {
     ) -> Result<(u64, u64)> {
         debug_assert!(want > 0);
         let (start, len) = match class {
-            Class::Meta => self.pick_meta(want),
+            Class::Meta => self.pick_meta(want, 1),
             Class::Data => self.pick_data(want, goal),
         }
         .ok_or(Error::NoSpace)?;
+        self.take_range(start, len, txg)
+    }
+
+    /// Alokace metadat aspon `min` bloku v jednom useku (uzly stromu).
+    /// `NoSpace`, kdyz takovy usek neni, i kdyz je volnych bloku dost.
+    pub fn alloc_min(&mut self, want: u64, min: u64, class: Class, txg: u64) -> Result<(u64, u64)> {
+        debug_assert!(want >= min && min > 0 && matches!(class, Class::Meta));
+        let (start, len) = self.pick_meta(want, min).ok_or(Error::NoSpace)?;
+        self.take_range(start, len, txg)
+    }
+
+    fn take_range(&mut self, start: u64, len: u64, txg: u64) -> Result<(u64, u64)> {
         let ag = self.ag_of(start);
         self.ags[ag].take(start, len)?;
         self.record(true, start, len, txg);
         Ok((start, len))
     }
 
-    /// Metadata: first-fit od kurzoru (pak od zacatku), drzi se u zacatku disku.
-    fn pick_meta(&mut self, want: u64) -> Option<(u64, u64)> {
+    /// Metadata: first-fit od kurzoru (pak od zacatku), drzi se u zacatku
+    /// disku. Useky kratsi nez `min` preskakuje.
+    fn pick_meta(&mut self, want: u64, min: u64) -> Option<(u64, u64)> {
         for from in [self.meta_cursor, 0] {
             let first = self.ag_of(from.min(self.block_count - 1));
             for ag in first..self.ags.len() {
@@ -231,7 +263,8 @@ impl Space {
                 let hit = a
                     .containing(lo)
                     .map(|(s, l)| (lo, s + l - lo))
-                    .or_else(|| a.free.range(lo..).next().map(|(&s, &l)| (s, l)));
+                    .filter(|&(_, l)| l >= min)
+                    .or_else(|| a.free.range(lo..).find(|(_, l)| **l >= min).map(|(&s, &l)| (s, l)));
                 if let Some((s, l)) = hit {
                     let len = l.min(want);
                     self.meta_cursor = s + len;

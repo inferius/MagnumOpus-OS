@@ -377,7 +377,7 @@ dokumentace česky i anglicky (`docs/cs`, `docs/en`).
 3. QEMU aarch64 `virt`
 4. Raspberry Pi, PinePhone (Pro)
 
-aarch64 se portuje podle plánu milníků (milník 8). Do té doby se kód
+aarch64 se portuje podle plánu milníků (milník 9). Do té doby se kód
 důsledně dělí do `arch/`, aby port nebolel.
 
 ## Jazyky a překladače (plán)
@@ -421,7 +421,9 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 3. Procesy: plánovač, SMP, vlákna, objekty, handly, capabilities (hotovo)
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
-6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), grafika, kompozitor
+6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
+   TCP/IP, DNS, TLS 1.3, HTTP klient - služby, přístup přes capability), grafika,
+   kompozitor
 7. Jazyky a překladač (viz [Jazyky a překladače](#jazyky-a-překladače-plán)):
    Rust (`std` pro náš OS), C (vlastní libc nad libos), C++ (libc++/libunwind
    nad libc), překlad clangem z hostitele, pak TinyCC v systému

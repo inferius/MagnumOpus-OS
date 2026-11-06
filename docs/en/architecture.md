@@ -397,7 +397,7 @@ documentation is in Czech and English (`docs/cs`, `docs/en`).
 3. QEMU aarch64 `virt`
 4. Raspberry Pi, PinePhone (Pro)
 
-aarch64 is ported per the milestone plan (milestone 8). Until then code is
+aarch64 is ported per the milestone plan (milestone 9). Until then code is
 strictly separated into `arch/` so the port does not hurt.
 
 ## Languages and compilers (plan)
@@ -442,7 +442,9 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 3. Processes: scheduler, SMP, threads, objects, handles, capabilities (done)
 4. Userspace: syscalls, first process, IPC, libos, initfs (done)
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
-6. System: userspace drivers (virtio - done), FS (done), graphics, compositor
+6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
+   TCP/IP, DNS, TLS 1.3, HTTP client - services, access through a capability),
+   graphics, compositor
 7. Languages and compilers (see [Languages and compilers](#languages-and-compilers-plan)):
    Rust (`std` for our OS), C (own libc on top of libos), C++
    (libc++/libunwind on top of libc), cross-compiled with clang from the

@@ -210,12 +210,12 @@ implementací.
 | 8 | 8 | birth (generace vzniku) |
 | 16 | 16 | kontrolní součet obsahu (všech bloků, na které ukazuje) |
 | 32 | 4 | délka v blocích (uzel stromu = 4) |
-| 36 | 2 | příznaky: 1 = komprimováno, 2 = šifrováno, 4 = sdílené bloky (zatím se nepoužívají) |
+| 36 | 2 | příznaky: 1 = komprimováno, 2 = šifrováno, 4 = sdílené bloky, 8 = jen v cloudu (rezervované; uzel s příznakem se odmítne `NOT_SUPPORTED`) |
 | 38 | 2 | rezerva (nuly) |
 
 48 bitů čísla bloku = až 1 EiB na zařízení; číslo zařízení je připravené pro
-svazky přes víc disků. Ukazatel na uzel musí mít délku přesně 4 a celý rozsah
-uvnitř svazku, jinak je uzel `CORRUPTED` (načte se dřív, než se ověří
+svazky přes víc disků. Ukazatel na uzel musí mít délku přesně 4, zařízení 0
+a celý rozsah uvnitř svazku, jinak je uzel `CORRUPTED` (načte se dřív, než se ověří
 součet).
 
 ## B+strom metadat
@@ -235,13 +235,14 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 | `SNAPSHOT` | 5 | číslo snapshotu (objekt 0) | `BlockPtr` kořene, generace u64, jméno |
 | `DEADLIST` | 6 | seznam << 32 \| pořadí (objekt 0) | až 80 mrtvých úseků (start u64, délka u64, birth u64) |
 | `SYMLINK` | 7 | 0 | cíl symbolického odkazu (UTF-8, 1-4096 B) |
+| `SYNC` | 8 | 0 | rezervované: stav synchronizace s cloudem (fáze 6) |
 
 ### Záznam objektu (inode, 128 B)
 
 | Offset | Pole | Význam |
 |---|---|---|
 | 0 | kind u8 | 1 = soubor, 2 = adresář, 3 = symbolický odkaz |
-| 1 | flags u8 | příznaky objektu (zatím 0) |
+| 1 | flags u8 | příznaky objektu, rezervované pro cloud: 1 = data jen v cloudu, 2 = vždy offline, 4 = nesynchronizovat (zatím 0) |
 | 4 | acl u32 | číslo popisu oprávnění (0 = zdědit; přijde ve fázi 1d) |
 | 8 | size | soubor: velikost v bajtech (nejvýš 2^63-1); odkaz: délka cíle |
 | 16 | mtime | čas poslední změny obsahu |
@@ -306,7 +307,8 @@ rozloží do souvislých zápisů na konci commitu.
 - Platné jméno: **1-1024 znaků Unicode a nejvýš 4096 bajtů UTF-8**
   (`NAME_MAX_CHARS`, `NAME_MAX`), měřeno na tvaru NFC, který se opravdu
   uloží. Zakázané je `.` a `..`, znak `/`, řídicí znaky (včetně NUL) a
-  **řídicí znaky směru textu** U+202A-202E a U+2066-2069 (`is_bidi_control`).
+  **řídicí znaky směru textu** U+202A-202E, U+2066-2069 a značky směru
+  U+200E, U+200F, U+061C (`is_bidi_control`).
   Jinak `INVALID_ARGS`.
 - Přejmenování jen na jinou velikost písmen (`/fotky` -> `/FOTKY`) je
   povolené.
@@ -610,6 +612,13 @@ obřích disků větší, aby skupin bylo nejvýš ~10 800). Pro každou skupinu
 **hned** - ne až při commitu. Pokud čekají bloky na odložené uvolnění,
 systém nejdřív zkusí commity (až 5), aby se uvolnily.
 
+Do kontroly se počítá jen místo, **kam se vejde celý uzel stromu** (úseky
+aspoň 4 souvislých bloků, `Space::node_room`), a každý rozpracovaný uzel jako
+4 bloky. Kdyby data zapsaná při commitu zabrala poslední takové úseky, commit
+by neměl kam uložit strom a svazek by přešel do režimu jen pro čtení. Cena:
+na silně rozdrobeném disku přijde `NO_SPACE` o pár bloků dřív, než je disk
+opravdu plný. Alokace uzlů (`alloc_min`) úseky kratší než 4 bloky přeskakuje.
+
 ## TRIM
 
 SSD potřebuje vědět, které bloky jsou volné (jinak klesá výkon a roste
@@ -700,7 +709,9 @@ všechny snapshoty, metadata volného místa a intent log:
   obsah),
 - každý použitý blok musí být podle alokátoru obsazený,
 - žádný obsazený blok nesmí být „ztracený“ (nikdo na něj neukazuje),
-- živý strom nesmí použít jeden blok dvakrát.
+- živý strom nesmí použít jeden blok dvakrát,
+- druh v položce adresáře musí sedět se záznamem objektu a symbolický odkaz
+  musí mít cíl s délkou rovnou velikosti (a nic jiného cíl mít nesmí).
 
 Vrací `CheckReport` s počty bloků (stromu, dat, metadat) a seznamem
 problémů (prázdný = v pořádku). Testy ho volají po každém scénáři.
@@ -712,13 +723,29 @@ disku, release, jedno vlákno):
 
 | Měření | Výsledek |
 |---|---|
-| sekvenční zápis 512 MiB po 1 MiB + commit | ~620-720 MiB/s, **1 souvislý úsek** |
-| sekvenční čtení | ~2,5-3,2 GiB/s |
+| sekvenční zápis 512 MiB po 1 MiB + commit | ~1,4 GiB/s, **1 souvislý úsek** |
+| sekvenční čtení | ~2,7-3,0 GiB/s |
 | režie metadat dat (stromu, extentů, součtů) | **0,42 %** kapacity |
-| 20 000 souborů po 4 KiB (vytvoření + zápis + commit) | ~72 000-74 000 souborů/s |
+| 20 000 souborů po 4 KiB (vytvoření + zápis + commit) | ~100 000 souborů/s |
 | `stat` adresáře s 20 000 soubory (velikost podstromu) | 10-13 µs |
 
 Spuštění: `cargo test -p fs --features std --release -- --ignored --nocapture perf`.
+
+**Kde je limit zápisu** (rozbor po krocích na 512 MiB, release):
+
+| Krok | Rychlost |
+|---|---|
+| kopírování paměti (memcpy) | ~10 GiB/s |
+| součet XXH3-128 po 4 KiB | ~19 GiB/s |
+| buffer odložené alokace (4 KiB `Vec` v `BTreeMap`) | ~4,3 GiB/s |
+| skládání bloků do souvislého bufferu | ~5,7 GiB/s (dřív po bajtech 1,7 GiB/s) |
+
+Limit je tedy v implementaci, ne ve formátu: největší cenu má buffer po 4 KiB
+blocích. Plán: buffer po velkých úsecích (jedna alokace na souvislý zápis)
+a zápis rovnou z bufferu klienta. **V běžícím systému** je dnes limit jinde:
+protokol fsproto v1 a blockproto kopírují data zprávou kanálu a jsou
+synchronní (jeden požadavek najednou). To řeší protokol v2 se sdílenou
+pamětí a frontami požadavků.
 
 ## Služba fsd
 

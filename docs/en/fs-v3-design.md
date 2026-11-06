@@ -32,6 +32,7 @@ Principles (agreed):
 | Snapshots | manual | + **automatic**, **trash**, **immutable** with a configurable lock |
 | Search | - | **indexes**: names, tags, metadata, content hash; full text as a service |
 | Other | - | quotas, transactions for applications, send/receive, verified system, online resize |
+| Cloud | - | **encrypted backup, files on demand, sync between devices, sharing** (format reserved, see [Cloud and network](#cloud-and-network)) |
 | Protocol | v1: paths, one client | **v2: handles with rights, multiple clients, paging** |
 
 ## On-disk format
@@ -255,6 +256,128 @@ Principles (agreed):
 - **Optional audit** of access to sensitive datasets.
 - **Space overview** including how much deleting each snapshot frees.
 
+## Cloud and network
+
+**Status: agreed, the format is reserved in phase 1, implementation in
+phase 6 (after the network stack).**
+
+Principles:
+
+- **The truth is local.** The cloud is another storage, not a replacement of
+  the FS: without network everything local keeps working and sync catches
+  up later.
+- **Client-side (end-to-end) encryption.** The provider only sees encrypted
+  packs of equal size; names, structure and content never reach it.
+- **Provider independence.** Storage is attached through an adapter: S3
+  compatible (AWS, Backblaze, MinIO, own server), WebDAV, another of our
+  devices on the network. An adapter only does `put/get/list/delete` of a
+  pack.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cloud and network">
+<defs><marker id="cl1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="30" width="150" height="60" rx="6"/><text class="t b" x="85" y="56" text-anchor="middle">application</text><text class="m" x="85" y="75" text-anchor="middle">reads a file</text>
+<rect class="acc" x="200" y="30" width="150" height="60" rx="6"/><text class="t b" x="275" y="56" text-anchor="middle">fsd + libs/fs</text><text class="m" x="275" y="75" text-anchor="middle">datasets, versions</text>
+<rect class="ok" x="390" y="30" width="170" height="60" rx="6"/><text class="t b" x="475" y="56" text-anchor="middle">sync service</text><text class="m" x="475" y="75" text-anchor="middle">packs, encryption</text>
+<rect class="warn" x="600" y="30" width="150" height="60" rx="6"/><text class="t b" x="675" y="56" text-anchor="middle">adapter</text><text class="m" x="675" y="75" text-anchor="middle">S3 / WebDAV / device</text>
+<path class="ln" d="M160 60 L198 60" marker-end="url(#cl1)"/>
+<path class="ln" d="M350 60 L388 60" marker-end="url(#cl1)"/>
+<path class="ln" d="M560 60 L598 60" marker-end="url(#cl1)"/>
+<rect class="box" x="200" y="130" width="360" height="70" rx="6"/><text class="t b" x="380" y="155" text-anchor="middle">network stack (service, milestone 6)</text><text class="m" x="380" y="175" text-anchor="middle">virtio-net, TCP/IP, DNS, TLS 1.3, HTTP</text>
+<path class="ln" d="M475 90 L475 128" marker-end="url(#cl1)"/>
+<path class="ln" d="M675 90 L560 150" marker-end="url(#cl1)"/>
+<text class="m" x="10" y="220">File on demand: fsd sees the REMOTE flag, asks the sync service, which downloads, verifies and decrypts the pack.</text>
+</svg>
+<figcaption>The path of data to the cloud: the FS knows nothing about the network, the sync service and the adapter do everything.</figcaption>
+</figure>
+
+### 1. Encrypted backup
+
+- Built on **send/receive**: the difference of two snapshots is split into
+  packs of ~4 MiB, each encrypted (XChaCha20-Poly1305) and named by a
+  **keyed BLAKE3 hash** of its content. Same content = same name =
+  **deduplication across backups and devices**, without the provider
+  learning what is inside.
+- The backup index (also encrypted) can **restore a single file** without
+  downloading the whole backup.
+- **Retention rules** (e.g. 7 daily, 4 weekly, 12 monthly) and **backup
+  verification**: a random sample is downloaded regularly and its checksums
+  verified (a backup that cannot be restored is not a backup).
+- **Immutable backups:** on storage with object lock (S3) the packs are
+  locked for the retention time - neither ransomware nor a stolen account
+  password can delete them.
+
+### 2. Files on demand (placeholders)
+
+- An object with the **REMOTE** flag: the record, name, size and thumbnail
+  are local, the data only in the cloud (extents with the pointer flag
+  `PTR_REMOTE`).
+- On read, fsd asks the sync service to download it; the application just
+  waits. The **"always keep offline"** option (PINNED flag) keeps the data
+  local.
+- **Automatic space freeing:** when space runs low, unshared, long unused
+  files with a copy in the cloud become placeholders.
+- The file manager shows the state (local / cloud only / syncing).
+
+### 3. Sync between devices
+
+- A **dataset** bound to a storage is synchronized. Every device makes
+  local commits (phase 2) and sync exchanges them like git: non-overlapping
+  changes merge by themselves.
+- A **conflict** (the same file changed in two places) never loses data:
+  both versions remain ("Report (conflict - laptop).docx") and a
+  notification appears. Deletion goes through the trash, so it can be
+  undone on the other device too.
+- **Selective folders** (NOSYNC flag), bandwidth limits and a pause on
+  metered (mobile) networks.
+
+### 4. Sharing
+
+- Every dataset has its own key. Sharing a folder = handing over the key
+  encrypted with the recipient's public key; revoking = a new key (rotation)
+  for further changes.
+- A read link (with expiry and password) through an own server or device.
+
+### 5. Third-party clouds
+
+- OneDrive, Google Drive, Dropbox through their APIs as **separate
+  adapters** in file mode (without client-side encryption, because the files
+  are meant to be visible on the provider's web too). The settings label
+  this clearly.
+
+### What is reserved now (phase 1)
+
+| What | Where | Meaning |
+|---|---|---|
+| object flag `INODE_REMOTE` (1) | object record, `flags` | data only in the cloud |
+| object flag `INODE_PINNED` (2) | object record, `flags` | always keep local |
+| object flag `INODE_NOSYNC` (4) | object record, `flags` | do not sync (inherited) |
+| pointer flag `PTR_REMOTE` (8) | `BlockPtr.flags` | the block is not on disk, only in the cloud |
+| entry kind `SYNC` (8) | tree | sync state of an object: remote version, tag, time |
+| feature `INCOMPAT_REMOTE` (bit 0) | superblock | the volume has placeholders; an older driver must not mount it |
+| dataset binding to a storage | dataset record (phase 1c) | storage ID, key ID, rules |
+
+### Network
+
+The network was not in the milestones yet; it was added to **milestone 6**
+as userspace services: a virtio-net driver, a TCP/IP stack, DNS, TLS 1.3,
+an HTTP client. Applications get network access only through a capability
+(no capability, no socket), so the firewall is naturally per application.
+
+### Risks (knowingly accepted, handled by the design)
+
+- **Losing the key = losing the backup.** Client-side encryption means the
+  provider cannot restore the data. So enabling backup creates a **recovery
+  key** (print it / store it elsewhere) and backup does not start until it
+  is confirmed.
+- **A placeholder cannot be read without network.** The read returns a new
+  error `UNAVAILABLE` (added to the ABI in phase 6); the UI shows in advance
+  what is cloud only, and important folders can be pinned.
+- **Traffic metadata:** even an encrypted cloud sees when and how much is
+  uploaded. Packs have equal size (padding), but timing cannot be hidden.
+- **Third-party clouds** (point 5) are not encrypted - the provider sees
+  the content.
+
 ## Performance
 
 - **Adaptive cache (ARC)** for nodes and data instead of "clear everything
@@ -287,11 +410,11 @@ Principles (agreed):
 | 3 - data | compression, instant copies, deduplication, automatic holes, metadata twice and self-healing, background scrub |
 | 4 - protection | encrypted vaults, immutable snapshots, quotas, audit, verified system |
 | 5 - other | indexes and tags, send/receive, transactions, ARC and prefetching, resize, git layer |
+| 6 - cloud (after network) | sync service, adapters (S3, WebDAV, device), encrypted backup, files on demand, sync between devices, sharing, third-party clouds |
 
 Each phase ends with tests (unit, model, power loss, in the system),
 documentation in cs and en, and a review.
 
 ## Open questions
 
-- Cloud backups (encrypted, via send/receive) - once there is a network.
 - Multiple disks (mirror, RAID): the format is ready, implementation after phase 5.

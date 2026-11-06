@@ -138,7 +138,9 @@ fn file_size_limit() {
     fs.commit().unwrap();
     let mut fs = remount(fs);
     assert_eq!(fs.read("/ridky", MAX_FILE_SIZE - 1, 1).unwrap(), b"z");
+    // Saturace je trvala: zmenseni nesmi dat mensi soucet, nez je pravda.
     fs.truncate("/ridky", 10).unwrap();
+    assert_eq!(fs.stat("/").unwrap().tree_bytes, u64::MAX);
     assert_clean(&mut fs);
 }
 
@@ -153,4 +155,41 @@ fn created_objects_record_generation() {
     let st = fs.stat("/a").unwrap();
     assert!(st.generation > g1);
     assert_eq!(st.btime, st.mtime);
+}
+
+#[test]
+fn generation_survives_replay() {
+    let mut fs = new_fs(2048);
+    fs.commit().unwrap();
+    fs.create("/f", Kind::File).unwrap();
+    fs.symlink("/l", "f").unwrap();
+    let (gf, gl) = (fs.stat("/f").unwrap().generation, fs.stat("/l").unwrap().generation);
+    fs.fsync().unwrap();
+    let mut fs = remount(fs);
+    assert_eq!(fs.stat("/f").unwrap().generation, gf);
+    assert_eq!(fs.stat("/l").unwrap().generation, gl);
+}
+
+#[test]
+fn fragmented_free_space_does_not_hang() {
+    // Disk zaplneny soubory po jednom bloku, pak smazany kazdy druhy: volne
+    // misto jsou useky po 1 bloku, do kterych se uzel (4 bloky) nevejde.
+    let mut fs = new_fs(1024);
+    let block = alloc::vec![7u8; crate::BLOCK_SIZE];
+    let mut n = 0;
+    loop {
+        let p = alloc::format!("/f{n}");
+        if fs.create(&p, Kind::File).is_err() || fs.write(&p, 0, &block).is_err() {
+            break;
+        }
+        // Rezerva commitu musi stacit vzdy (`ensure_room`).
+        fs.commit().unwrap();
+        n += 1;
+    }
+    for i in (0..n).step_by(2) {
+        let _ = fs.remove(&alloc::format!("/f{i}"));
+    }
+    // Musi skoncit (uspech nebo NO_SPACE), ne se zacyklit.
+    let r = fs.commit();
+    assert!(matches!(r, Ok(()) | Err(Error::NoSpace)), "{r:?}");
 }

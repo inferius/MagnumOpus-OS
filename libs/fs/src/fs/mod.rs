@@ -387,12 +387,18 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Promitne zmenu do souhrnu adresare `dir` a vsech jeho predku.
-    /// Souhrny saturuji (ridke soubory muzou mit dohromady logickou
-    /// velikost nad 2^64); saturovany souhrn je jen informativni.
-    fn adjust_tree(&mut self, mut dir: u64, bytes: i64, files: i64, dirs: i64) -> Result<()> {
+    ///
+    /// `tree_bytes` saturuje a saturace je *trvala*: ridke soubory muzou mit
+    /// dohromady logickou velikost nad 2^64 - 1 a pak je soucet neznamy.
+    /// Hodnota `u64::MAX` = "prilis mnoho" a zadne odecteni ji nezmeni (jinak
+    /// by vysla mensi, nez je skutecnost). Rozdil je `i128`, aby sel prenest
+    /// cely souhrn podstromu (az 2^64 - 1).
+    fn adjust_tree(&mut self, mut dir: u64, bytes: i128, files: i64, dirs: i64) -> Result<()> {
         loop {
             let mut i = self.live_inode(dir)?;
-            i.tree_bytes = i.tree_bytes.saturating_add_signed(bytes);
+            if i.tree_bytes != u64::MAX {
+                i.tree_bytes = (i.tree_bytes as i128 + bytes).clamp(0, u64::MAX as i128) as u64;
+            }
             i.tree_files = i.tree_files.saturating_add_signed(files);
             i.tree_dirs = i.tree_dirs.saturating_add_signed(dirs);
             self.put_inode(dir, &i)?;
@@ -457,7 +463,8 @@ impl<D: BlockDevice> Fs<D> {
         let parent = self.dir_of(parent_path)?;
         self.ensure_room(4)?;
         let oid = self.s.next_oid;
-        self.create_at(parent, name, kind, oid)
+        let generation = self.s.txg;
+        self.create_at(parent, name, kind, oid, generation)
     }
 
     /// Vytvori symbolicky odkaz `path` s cilem `target` (libovolny text do
@@ -469,10 +476,12 @@ impl<D: BlockDevice> Fs<D> {
         let parent = self.dir_of(parent_path)?;
         self.ensure_room(4)?;
         let oid = self.s.next_oid;
-        self.symlink_at(parent, name, target, oid)?;
+        let generation = self.s.txg;
+        self.symlink_at(parent, name, target, oid, generation)?;
         self.zil.op(zil::Op::Symlink {
             parent,
             oid,
+            generation,
             name: stored_name(name),
             target: target.into(),
             time: self.now,
@@ -480,16 +489,18 @@ impl<D: BlockDevice> Fs<D> {
         Ok(())
     }
 
-    fn symlink_at(&mut self, parent: u64, name: &str, target: &str, oid: u64) -> Result<()> {
-        self.new_object(parent, name, Kind::Symlink, oid, target.len() as u64)?;
+    /// `generation` = generace vzniku (pri prehrani logu ta puvodni).
+    fn symlink_at(&mut self, parent: u64, name: &str, target: &str, oid: u64, generation: u64) -> Result<()> {
+        self.new_object(parent, name, Kind::Symlink, oid, target.len() as u64, generation)?;
         self.put(Key::new(oid, item::SYMLINK, 0), target.as_bytes().to_vec())
     }
 
-    fn create_at(&mut self, parent: u64, name: &str, kind: Kind, oid: u64) -> Result<()> {
-        let name = self.new_object(parent, name, kind, oid, 0)?;
+    fn create_at(&mut self, parent: u64, name: &str, kind: Kind, oid: u64, generation: u64) -> Result<()> {
+        let name = self.new_object(parent, name, kind, oid, 0, generation)?;
         self.zil.op(zil::Op::Create {
             parent,
             oid,
+            generation,
             kind: kind.raw(),
             name,
             time: self.now,
@@ -498,14 +509,22 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Zalozi zaznam objektu a polozku v rodici; vraci ulozene jmeno.
-    fn new_object(&mut self, parent: u64, name: &str, kind: Kind, oid: u64, size: u64) -> Result<String> {
+    fn new_object(
+        &mut self,
+        parent: u64,
+        name: &str,
+        kind: Kind,
+        oid: u64,
+        size: u64,
+        generation: u64,
+    ) -> Result<String> {
         let root = self.s.root;
         if self.lookup_child(&root, parent, name)?.is_some() {
             return Err(Error::AlreadyExists);
         }
         let next = oid.checked_add(1).ok_or(Error::NoResources)?;
         self.s.next_oid = self.s.next_oid.max(next);
-        let mut inode = Inode::new(kind.raw(), parent, self.now, self.s.txg);
+        let mut inode = Inode::new(kind.raw(), parent, self.now, generation);
         inode.size = size;
         self.put_inode(oid, &inode)?;
         let name = stored_name(name);
@@ -561,7 +580,7 @@ impl<D: BlockDevice> Fs<D> {
             KIND_DIR => self.adjust_tree(parent, 0, 0, -1)?,
             KIND_SYMLINK => self.adjust_tree(parent, 0, -1, 0)?,
             // Velikost <= MAX_FILE_SIZE (overeno pri cteni zaznamu).
-            _ => self.adjust_tree(parent, -(inode.size as i64), -1, 0)?,
+            _ => self.adjust_tree(parent, -(inode.size as i128), -1, 0)?,
         }
         self.zil.op(zil::Op::Remove {
             parent,
@@ -606,12 +625,16 @@ impl<D: BlockDevice> Fs<D> {
             a = self.inode(&root, a)?.parent;
         }
         let mut inode = self.inode(&root, d.oid)?;
-        // Souhrny saturuji na i64::MAX (presun obriho podstromu).
+        // Pocty objektu se do i64 vejdou vzdy (omezuje je misto na disku).
         let sat = |v: u64| v.min(i64::MAX as u64) as i64;
         let (bytes, files, dirs) = match inode.kind {
-            KIND_DIR => (sat(inode.tree_bytes), sat(inode.tree_files), sat(inode.tree_dirs).saturating_add(1)),
+            KIND_DIR => (
+                inode.tree_bytes as i128,
+                sat(inode.tree_files),
+                sat(inode.tree_dirs).saturating_add(1),
+            ),
             KIND_SYMLINK => (0, 1, 0),
-            _ => (sat(inode.size), 1, 0),
+            _ => (inode.size as i128, 1, 0),
         };
         let new_name = stored_name(tname);
         self.remove_dirent(src, &d.name)?;

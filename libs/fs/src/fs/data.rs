@@ -320,8 +320,7 @@ impl<D: BlockDevice> Fs<D> {
         self.put_inode(oid, &inode)?;
         self.zil.touch(oid);
         let parent = inode.parent;
-        // Obe velikosti <= MAX_FILE_SIZE = i64::MAX, rozdil se vejde do i64.
-        self.adjust_tree(parent, new_size as i64 - old_size as i64, 0, 0)
+        self.adjust_tree(parent, new_size as i128 - old_size as i128, 0, 0)
     }
 
     /// Odstrani mapovani logickych bloku `a..b` (rozdeli castecne prekryte
@@ -417,7 +416,12 @@ impl<D: BlockDevice> Fs<D> {
         while done < n {
             let (start, got) = self.s.alloc_data(n - done, goal)?;
             let piece = &run[done as usize..(done + got) as usize];
-            let buf: Vec<u8> = piece.iter().flat_map(|(_, b)| b.iter().copied()).collect();
+            // Slozeni bloku do souvisleho bufferu po celych blocich (iterator
+            // po bajtech byl 3x pomalejsi nez memcpy).
+            let mut buf = Vec::with_capacity(piece.len() * BLOCK_SIZE);
+            for (_, b) in piece {
+                buf.extend_from_slice(b);
+            }
             self.s.dev.write_blocks(start, &buf)?;
             let algo = self.s.algo;
             let csums: Vec<_> = piece.iter().map(|(_, b)| algo.sum(b)).collect();

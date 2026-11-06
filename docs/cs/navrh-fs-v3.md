@@ -31,6 +31,7 @@ Zásady (odsouhlasené):
 | Snapshoty | ruční | + **automatické**, **koš**, **neměnné** s nastavitelným zámkem |
 | Vyhledávání | - | **indexy**: jména, štítky, metadata, hash obsahu; fulltext jako služba |
 | Ostatní | - | kvóty, transakce pro aplikace, send/receive, ověřený systém, změna velikosti za běhu |
+| Cloud | - | **šifrovaná záloha, soubory na vyžádání, sync mezi zařízeními, sdílení** (formát rezervovaný, viz [Cloud a síť](#cloud-a-síť)) |
 | Protokol | v1: cesty, jeden klient | **v2: handly s právy, víc klientů, stránkování** |
 
 ## Formát na disku
@@ -246,6 +247,120 @@ Zásady (odsouhlasené):
 - **Volitelný audit** přístupů k citlivým datasetům.
 - **Přehled místa** včetně toho, kolik uvolní smazání každého snapshotu.
 
+## Cloud a síť
+
+**Stav: odsouhlaseno, formát rezervovaný ve fázi 1, implementace ve fázi 6
+(po síťovém stacku).**
+
+Zásady:
+
+- **Pravda je lokálně.** Cloud je další úložiště, ne náhrada FS: bez sítě
+  všechno lokální funguje dál, sync dožene změny později.
+- **Šifrování u klienta (end-to-end).** Poskytovatel vidí jen zašifrované
+  balíky stejné velikosti; jména, struktura ani obsah se k němu nedostanou.
+- **Nezávislost na poskytovateli.** Úložiště se připojuje přes adaptér:
+  S3 kompatibilní (AWS, Backblaze, MinIO, vlastní server), WebDAV, jiné
+  naše zařízení v síti. Adaptér umí jen `put/get/list/delete` balíku.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cloud a sit">
+<defs><marker id="cl1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="30" width="150" height="60" rx="6"/><text class="t b" x="85" y="56" text-anchor="middle">aplikace</text><text class="m" x="85" y="75" text-anchor="middle">čte soubor</text>
+<rect class="acc" x="200" y="30" width="150" height="60" rx="6"/><text class="t b" x="275" y="56" text-anchor="middle">fsd + libs/fs</text><text class="m" x="275" y="75" text-anchor="middle">datasety, verze</text>
+<rect class="ok" x="390" y="30" width="170" height="60" rx="6"/><text class="t b" x="475" y="56" text-anchor="middle">služba sync</text><text class="m" x="475" y="75" text-anchor="middle">balíky, šifrování</text>
+<rect class="warn" x="600" y="30" width="150" height="60" rx="6"/><text class="t b" x="675" y="56" text-anchor="middle">adaptér</text><text class="m" x="675" y="75" text-anchor="middle">S3 / WebDAV / zařízení</text>
+<path class="ln" d="M160 60 L198 60" marker-end="url(#cl1)"/>
+<path class="ln" d="M350 60 L388 60" marker-end="url(#cl1)"/>
+<path class="ln" d="M560 60 L598 60" marker-end="url(#cl1)"/>
+<rect class="box" x="200" y="130" width="360" height="70" rx="6"/><text class="t b" x="380" y="155" text-anchor="middle">síťový stack (služba, milník 6)</text><text class="m" x="380" y="175" text-anchor="middle">virtio-net, TCP/IP, DNS, TLS 1.3, HTTP</text>
+<path class="ln" d="M475 90 L475 128" marker-end="url(#cl1)"/>
+<path class="ln" d="M675 90 L560 150" marker-end="url(#cl1)"/>
+<text class="m" x="10" y="220">Soubor na vyžádání: fsd pozná příznak REMOTE, požádá službu sync, ta balík stáhne, ověří a rozšifruje.</text>
+</svg>
+<figcaption>Cesta dat do cloudu: FS nic o síti neví, vše řeší služba sync a adaptér.</figcaption>
+</figure>
+
+### 1. Šifrovaná záloha
+
+- Základ je **send/receive**: rozdíl dvou snapshotů se rozdělí do balíků
+  po ~4 MiB, každý se zašifruje (XChaCha20-Poly1305) a pojmenuje **klíčovaným
+  hashem BLAKE3** obsahu. Stejný obsah = stejné jméno = **deduplikace mezi
+  zálohami i zařízeními**, aniž by poskytovatel poznal, co je uvnitř.
+- Index záloh (také šifrovaný) umí **obnovit jeden soubor** bez stažení
+  celé zálohy.
+- **Pravidla uchování** (např. 7 denních, 4 týdenní, 12 měsíčních) a
+  **ověření zálohy**: pravidelné stažení náhodného vzorku a kontrola součtů
+  (záloha, která nejde obnovit, není záloha).
+- **Neměnné zálohy:** u úložišť s object lock (S3) se balíky zamknou na dobu
+  uchování - ransomware ani ukradené heslo k účtu je nesmaže.
+
+### 2. Soubory na vyžádání (placeholdery)
+
+- Objekt s příznakem **REMOTE**: záznam, jméno, velikost i náhled leží
+  lokálně, data jen v cloudu (extenty s příznakem ukazatele `PTR_REMOTE`).
+- Při čtení fsd požádá službu sync o stažení; aplikace jen čeká. Volba
+  **„vždy offline“** (příznak PINNED) drží data lokálně.
+- **Automatické uvolnění místa:** při nedostatku místa se z nesdílených,
+  dlouho nepoužitých souborů s kopií v cloudu stanou placeholdery.
+- Průzkumník ukazuje stav (lokálně / jen v cloudu / synchronizuje se).
+
+### 3. Synchronizace mezi zařízeními
+
+- Synchronizuje se **dataset** navázaný na úložiště. Každé zařízení dělá
+  lokální commity (fáze 2) a sync si je vyměňuje jako git: změny, které se
+  nepřekrývají, se sloučí samy.
+- **Konflikt** (stejný soubor změněný na dvou místech) nikdy neztratí data:
+  zůstanou obě verze („Zpráva (konflikt - notebook).docx“) a přijde
+  upozornění. Smazání jde přes koš, takže se dá vrátit i na druhém zařízení.
+- **Výběr složek** (příznak NOSYNC), omezení rychlosti a pauza na měřené
+  (mobilní) síti.
+
+### 4. Sdílení
+
+- Každý dataset má vlastní klíč. Sdílení složky = předání klíče
+  zašifrovaného veřejným klíčem příjemce; odebrání = nový klíč (rotace) pro
+  další změny.
+- Odkaz pro čtení (s platností a heslem) přes vlastní server nebo zařízení.
+
+### 5. Cizí cloudy
+
+- OneDrive, Google Drive, Dropbox přes jejich API jako **samostatné
+  adaptéry** v režimu souborů (bez šifrování u klienta, protože soubory mají
+  být vidět i na webu poskytovatele). Uživatel to v nastavení uvidí jasně
+  označené.
+
+### Co se rezervuje už teď (fáze 1)
+
+| Co | Kde | Význam |
+|---|---|---|
+| příznak objektu `INODE_REMOTE` (1) | záznam objektu, `flags` | data jen v cloudu |
+| příznak objektu `INODE_PINNED` (2) | záznam objektu, `flags` | držet vždy lokálně |
+| příznak objektu `INODE_NOSYNC` (4) | záznam objektu, `flags` | nesynchronizovat (dědí se) |
+| příznak ukazatele `PTR_REMOTE` (8) | `BlockPtr.flags` | blok není na disku, jen v cloudu |
+| druh položky `SYNC` (8) | strom | stav synchronizace objektu: vzdálená verze, značka, čas |
+| vlastnost `INCOMPAT_REMOTE` (bit 0) | superblok | svazek obsahuje placeholdery; starší ovladač ho nesmí připojit |
+| vazba datasetu na úložiště | záznam datasetu (fáze 1c) | ID úložiště, ID klíče, pravidla |
+
+### Síť
+
+Síť zatím v milnících nebyla; přibyla do **milníku 6** jako služby
+v userspace: ovladač virtio-net, TCP/IP stack, DNS, TLS 1.3, HTTP klient.
+Aplikace dostanou síť jen přes capability (bez ní žádný socket), takže
+firewall je přirozeně per aplikace.
+
+### Rizika (vědomě přijatá, řešená návrhem)
+
+- **Ztráta klíče = ztráta zálohy.** Šifrování u klienta znamená, že
+  poskytovatel data neobnoví. Proto se při zapnutí vytvoří **obnovovací
+  klíč** (vytisknout / uložit jinam) a bez jeho potvrzení se záloha
+  nespustí.
+- **Placeholder bez sítě nejde přečíst.** Čtení vrátí novou chybu
+  `UNAVAILABLE` (doplní se do ABI ve fázi 6); UI předem ukazuje, co je jen
+  v cloudu, a důležité složky jdou připnout.
+- **Metadata o provozu:** i šifrovaný cloud vidí, kdy a kolik se nahrává.
+  Balíky mají stejnou velikost (doplnění), ale časování skrýt nejde.
+- **Cizí cloudy** (bod 5) šifrované nejsou - poskytovatel obsah vidí.
+
 ## Výkon
 
 - **Adaptivní cache (ARC)** pro uzly a data místo „při zaplnění vše zahodit“.
@@ -277,11 +392,11 @@ Zásady (odsouhlasené):
 | 3 - data | komprese, okamžité kopie, deduplikace, automatické díry, metadata 2x a samoléčení, scrub na pozadí |
 | 4 - ochrana | šifrované trezory, neměnné snapshoty, kvóty, audit, ověřený systém |
 | 5 - ostatní | indexy a štítky, send/receive, transakce, ARC a přednačítání, změna velikosti, vrstva pro git |
+| 6 - cloud (po síti) | služba sync, adaptéry (S3, WebDAV, zařízení), šifrovaná záloha, soubory na vyžádání, sync mezi zařízeními, sdílení, cizí cloudy |
 
 Každá fáze končí testy (jednotkové, model, výpadky proudu, v systému),
 dokumentací v cs i en a review.
 
 ## Otevřené otázky
 
-- Zálohy do cloudu (šifrované, přes send/receive) - až bude síť.
 - Víc disků (zrcadlo, RAID): formát připravený, implementace až po fázi 5.
