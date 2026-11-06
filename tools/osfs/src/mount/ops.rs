@@ -9,7 +9,10 @@ use std::ffi::c_void;
 use fs::{Error, Kind, Stat, fold_name};
 
 use super::ffi::*;
-use super::{Handle, NAME_CACHE_DIRS, SD, State, debug, with_state};
+use std::collections::HashMap;
+
+use super::{Handle, NAME_CACHE_DIRS, NameCache, SD, State, debug, with_state};
+use crate::api;
 use crate::image::{join, now_ns};
 use crate::names::{self, to_windows};
 
@@ -48,7 +51,7 @@ pub fn interface() -> Interface {
         DeleteReparsePoint: None,
         GetStreamInfo: None,
         GetDirInfoByName: None,
-        Control: None,
+        Control: Some(control),
         SetDelete: None,
         CreateEx: None,
         OverwriteEx: None,
@@ -195,6 +198,7 @@ fn new_handle(st: &mut State, path: String, ctx: *mut *mut c_void) {
             path,
             gone: false,
             listing: None,
+            api_list: None,
         },
     );
     // SAFETY: WinFsp predava platny vystupni ukazatel.
@@ -256,8 +260,8 @@ fn put_normalized(st: &mut State, path: &str, out: *mut FileInfo) {
 
 /// Mezipamet jmen: v adresari `parent` pribylo jmeno `name` (tak, jak ho
 /// prelozila cesta z Windows; ulozi se jeho NFC tvar jako ve FS).
-fn cache_insert(st: &mut State, parent: &str, name: &str) {
-    if let Some(m) = st.dir_cache.get_mut(&fold_name(parent)) {
+fn cache_insert(cache: &mut NameCache, parent: &str, name: &str) {
+    if let Some(m) = cache.get_mut(&fold_name(parent)) {
         let stored = names::stored_form(name);
         m.insert(fold_name(&stored), stored);
     }
@@ -265,16 +269,32 @@ fn cache_insert(st: &mut State, parent: &str, name: &str) {
 
 /// Mezipamet jmen: polozka `path` zmizela (i s podstromem, kdyz je to
 /// adresar).
-fn cache_remove(st: &mut State, path: &str) {
+fn cache_remove(cache: &mut NameCache, path: &str) {
     if let Some(name) = comps(path).last()
-        && let Some(m) = st.dir_cache.get_mut(&fold_name(parent_of(path)))
+        && let Some(m) = cache.get_mut(&fold_name(parent_of(path)))
     {
         m.remove(&fold_name(name));
     }
     let key = fold_name(path);
     let sub = format!("{key}/");
-    st.dir_cache
-        .retain(|k, _| *k != key && !k.starts_with(&sub));
+    cache.retain(|k, _| *k != key && !k.starts_with(&sub));
+}
+
+/// Otevrene handly pod jmenem `from` (i v podstromu) presmeruje na `to`.
+fn retarget_handles(handles: &mut HashMap<usize, Handle>, from: &str, to: &str) {
+    for h in handles.values_mut() {
+        if h.gone {
+            continue;
+        }
+        if let Some(rest) = strip_prefix_folded(&h.path, from) {
+            let mut p = to.to_string();
+            for c in rest {
+                p.push('/');
+                p.push_str(c);
+            }
+            h.path = p;
+        }
+    }
 }
 
 /// Posledni slozka cesty.
@@ -385,7 +405,7 @@ unsafe extern "system" fn create(
                 e => status(e),
             };
         }
-        cache_insert(st, parent_of(&path), last_comp(&path));
+        cache_insert(&mut st.dir_cache, parent_of(&path), last_comp(&path));
         let r = put_info(st, &path, out);
         if r == STATUS_SUCCESS {
             put_normalized(st, &path, out);
@@ -450,7 +470,7 @@ unsafe extern "system" fn cleanup(_f: *mut FileSystem, ctx: *mut c_void, _name: 
         // Smazani uz WinFsp odsouhlasil pres CanDelete; chyba tu nejde
         // vratit (Cleanup je void), jen vypsat.
         match st.fs.remove(&path) {
-            Ok(()) => cache_remove(st, &path),
+            Ok(()) => cache_remove(&mut st.dir_cache, &path),
             Err(e) => eprintln!("osfs: smazani {path} selhalo: {e}"),
         }
         STATUS_SUCCESS
@@ -626,6 +646,11 @@ unsafe extern "system" fn can_delete(
         }
         let path = tri!(handle_path(st, ctx));
         let s = tri!(stat_visible(st, &path));
+        // Dataset (slozka s vlastni historii) se z Windows nemaze: smazal
+        // by i vsechny snapshoty. Jen `osfs dataset delete`.
+        if crate::versions::is_dataset_root(&mut st.fs, &path) {
+            return STATUS_ACCESS_DENIED;
+        }
         if s.kind == Kind::Dir {
             match st.fs.list(&path) {
                 Ok(v) if !v.is_empty() => return STATUS_DIRECTORY_NOT_EMPTY,
@@ -702,6 +727,9 @@ unsafe extern "system" fn rename(
             }
             return match e {
                 Error::NotFound | Error::NotADirectory => STATUS_OBJECT_PATH_NOT_FOUND,
+                // Presun mezi datasety (jine stromy): Windows pak presun
+                // udela kopii a smazanim jako mezi jednotkami.
+                Error::NotSupported => STATUS_NOT_SAME_DEVICE,
                 e => status(e),
             };
         }
@@ -718,26 +746,13 @@ unsafe extern "system" fn rename(
             }
         }
         // Mezipamet jmen.
-        cache_remove(st, &from);
+        cache_remove(&mut st.dir_cache, &from);
         if moved_aside.is_some() {
             st.dir_cache.remove(&fold_name(parent_of(&to)));
         } else {
-            cache_insert(st, parent_of(&to), last_comp(&to));
+            cache_insert(&mut st.dir_cache, parent_of(&to), last_comp(&to));
         }
-        // Otevrene handly pod starym jmenem.
-        for h in st.handles.values_mut() {
-            if h.gone {
-                continue;
-            }
-            if let Some(rest) = strip_prefix_folded(&h.path, &from) {
-                let mut p = to.clone();
-                for c in rest {
-                    p.push('/');
-                    p.push_str(c);
-                }
-                h.path = p;
-            }
-        }
+        retarget_handles(&mut st.handles, &from, &to);
         STATUS_SUCCESS
     })
 }
@@ -894,4 +909,88 @@ fn fill_directory(
         (api.add_dir_info)(std::ptr::null_mut(), buf, len, done);
     }
     STATUS_SUCCESS
+}
+
+/// Okoli API serveru v ovladaci: mezipamet jmen, handly, priznak zmeny.
+struct MountHost<'a> {
+    handles: &'a mut HashMap<usize, Handle>,
+    dir_cache: &'a mut NameCache,
+    dirty: &'a mut bool,
+    read_only: bool,
+}
+
+impl api::Host for MountHost<'_> {
+    fn mutating(&mut self) -> Result<(), i32> {
+        if self.read_only {
+            return Err(osfs_proto::error::READ_ONLY);
+        }
+        *self.dirty = true;
+        Ok(())
+    }
+
+    fn renamed(&mut self, from: &str, to: &str) {
+        cache_remove(self.dir_cache, from);
+        cache_insert(self.dir_cache, parent_of(to), last_comp(to));
+        retarget_handles(self.handles, from, to);
+    }
+
+    fn committed(&mut self) {
+        *self.dirty = false;
+    }
+}
+
+/// `DeviceIoControl` na souboru nebo adresari jednotky: rozsirene API
+/// (`osfs-proto`, `crate::api`). Jine kody nez nase = neplatny pozadavek.
+unsafe extern "system" fn control(
+    _f: *mut FileSystem,
+    ctx: *mut c_void,
+    code: u32,
+    input: *mut c_void,
+    input_len: u32,
+    output: *mut c_void,
+    output_len: u32,
+    done: *mut u32,
+) -> NTSTATUS {
+    let Some(kind) = api::code_from_ioctl(code) else {
+        return STATUS_INVALID_DEVICE_REQUEST;
+    };
+    let input: &[u8] = if input.is_null() || input_len == 0 {
+        &[]
+    } else {
+        // SAFETY: WinFsp predava `input_len` platnych bajtu.
+        unsafe { std::slice::from_raw_parts(input as *const u8, input_len as usize) }
+    };
+    with_state(|st| {
+        let id = ctx as usize;
+        let mut cache = st.handles.get_mut(&id).and_then(|h| h.api_list.take());
+        let resp = {
+            let State {
+                fs,
+                handles,
+                dir_cache,
+                dirty,
+                read_only,
+                ..
+            } = st;
+            let mut host = MountHost {
+                handles,
+                dir_cache,
+                dirty,
+                read_only: *read_only,
+            };
+            api::handle(fs, &mut host, kind, input, &mut cache, now_ns())
+        };
+        if let Some(h) = st.handles.get_mut(&id) {
+            h.api_list = cache;
+        }
+        if resp.len() > output_len as usize || output.is_null() {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        // SAFETY: vystupni buffer ma `output_len` >= resp.len() bajtu.
+        unsafe {
+            std::ptr::copy_nonoverlapping(resp.as_ptr(), output.cast(), resp.len());
+            *done = resp.len() as u32;
+        }
+        STATUS_SUCCESS
+    })
 }

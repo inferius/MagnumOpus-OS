@@ -143,6 +143,11 @@ pub fn open(path: &Path, read_only: bool) -> Result<(Volume, Option<ImageLock>),
              o par sekund stary (stav po poslednim commitu)"
         );
     }
+    Ok((mount_image(path, read_only)?, lock))
+}
+
+/// Pripoji svazek z obrazu (zamek resi volajici).
+fn mount_image(path: &Path, read_only: bool) -> Result<Volume, String> {
     let dev = FileDevice::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut fs = Fs::mount_with(
         dev,
@@ -153,7 +158,33 @@ pub fn open(path: &Path, read_only: bool) -> Result<(Volume, Option<ImageLock>),
     )
     .map_err(|e| format!("pripojeni {}: {e}", path.display()))?;
     fs.set_time(now_ns());
-    Ok((fs, lock))
+    Ok(fs)
+}
+
+/// Otevre obraz jen tehdy, kdyz ho nema otevreny zadny jiny proces osfs
+/// (ani pro cteni). Pro prikazy s datasety a verzemi: dokud nejde rizeni
+/// pres bezici `osfs mount`, nad pripojenym obrazem bezpecne odmitnou
+/// (zapis by svazek poskodil, cteni by videlo stary stav).
+pub fn open_exclusive(path: &Path, read_only: bool) -> Result<(Volume, ImageLock), String> {
+    if looks_like_device(&path.to_string_lossy()) {
+        return Err(format!(
+            "{}: skutecne disky osfs zatim nepodporuje, jen soubory s obrazem",
+            path.display()
+        ));
+    }
+    let mode = if read_only {
+        LockMode::Shared
+    } else {
+        LockMode::Exclusive
+    };
+    match try_lock(path, mode).map_err(|e| format!("{}: {e}", path.display()))? {
+        Some(l) => Ok((mount_image(path, read_only)?, l)),
+        None => Err(format!(
+            "{}: obraz je pripojeny nebo otevreny jinym procesem osfs - nejdriv \
+             ho odpoj (osfs unmount X:)",
+            path.display()
+        )),
+    }
 }
 
 /// Polozka, kterou Windows neuvidi.

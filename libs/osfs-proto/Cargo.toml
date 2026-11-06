@@ -1,0 +1,19 @@
+[package]
+name = "osfs-proto"
+# Zamerne bez dedeni z workspace: crate pouzivaji i jine projekty (napr.
+# MagnumOpusExplorer) jako path/git zavislost se svym stabilnim Rustem.
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Protokol rozsireneho API souboroveho systemu MagnumOpus pres DeviceIoControl (no_std; klient pro Windows)"
+
+[features]
+# Klient pro Windows (DeviceIoControl na pripojene jednotce). Bez nej je
+# crate no_std + alloc (kodovani zprav pro server i budouci ovladac jadra).
+client = []
+
+[dependencies]
+
+[dev-dependencies]
+proptest = "1"

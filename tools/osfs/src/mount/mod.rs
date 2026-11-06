@@ -39,6 +39,8 @@ struct Handle {
     /// Snimek vypisu adresare pro `ReadDirectory` po castech: porizuje se
     /// pri prvnim dotazu (bez markeru), dalsi casti z nej jen pokracuji.
     listing: Option<Vec<ops::ListItem>>,
+    /// Snimek vypisu pro strankovani rozsireneho API (`crate::api`).
+    api_list: Option<crate::api::ListCache>,
 }
 
 /// Mezipamet jmen pro `ops::true_path`: slozena cesta adresare ->
@@ -236,7 +238,9 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     vp.Flags = VP_CASE_PRESERVED_NAMES
         | VP_UNICODE_ON_DISK
         | VP_POST_CLEANUP_WHEN_MODIFIED_ONLY
-        | VP_UM_FILE_CONTEXT_IS_USER_CONTEXT2;
+        | VP_UM_FILE_CONTEXT_IS_USER_CONTEXT2
+        // Rozsirene API pres DeviceIoControl (`osfs-proto`).
+        | VP_DEVICE_CONTROL;
     // Nas FS nerozlisuje velikost pismen stejne jako Windows; opravneni
     // zatim nema.
     debug_assert_eq!(

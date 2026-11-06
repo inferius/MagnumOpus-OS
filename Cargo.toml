@@ -8,6 +8,7 @@ members = [
     "libs/elf",
     "libs/fs",
     "libs/fsproto",
+    "libs/osfs-proto",
     "libs/initfs",
     "libs/blockproto",
     "libs/libos",

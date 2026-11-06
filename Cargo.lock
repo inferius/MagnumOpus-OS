@@ -506,9 +506,18 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 name = "osfs"
 version = "0.1.0"
 dependencies = [
+ "abi",
  "fs",
+ "osfs-proto",
  "proptest",
  "unicode-normalization",
+]
+
+[[package]]
+name = "osfs-proto"
+version = "0.1.0"
+dependencies = [
+ "proptest",
 ]
 
 [[package]]

@@ -258,6 +258,108 @@ be entered from Windows.
 - A panic in `osfs` = immediate exit (`panic = "abort"` profile); data stay
   in the state after the last commit.
 
+## Datasets and versions
+
+A **dataset** is a folder with its own history: its own snapshots,
+clones, version diffs and restore (details in [file-system.md](file-system.md#datasets-and-clones)).
+For programs and Explorer it is an ordinary folder.
+
+| Command | What it does |
+|---|---|
+| `osfs dataset create <image> <path>` | a new empty dataset (folder) |
+| `osfs dataset list <image>` | datasets of the volume: number, path, snapshot count, origin of a clone |
+| `osfs dataset delete <image> <path>` | deletes the dataset **including its snapshots**; refuses a dataset with a nested dataset and a dataset whose snapshot has a clone |
+| `osfs snapshot <image> <dataset> <name>` | snapshot of a dataset (read-only state) |
+| `osfs snapshots <image> [dataset]` | snapshots of one or all datasets |
+| `osfs clone <image> <dataset> <snapshot> <path>` | writable clone of a snapshot as a new dataset (instant, shares blocks) |
+| `osfs diff <image> <dataset> <from> [to]` | changes between snapshots, without `[to]` against the live version |
+| `osfs diff <image> --clone <path>` | what a clone changed against the snapshot it came from |
+| `osfs restore <image> <dataset> <snapshot> <path> <dest>` | restore of a file or folder **as a copy** next to the original (`<dest>` must not exist) |
+
+**Paths:** the dataset and the restore `<dest>` are paths in the volume
+(`/projekt`, `/projekt/cfg (puvodni).toml`). The path inside a snapshot,
+the restore source and diff output are **inside the dataset**
+(`/cfg.toml` = `/projekt/cfg.toml`). Diff output: `A` added, `D` deleted,
+`M` content changed, `R` moved or renamed (`old -> new`), `RM` moved and
+changed; folders end with `/`.
+
+> ⚠️ **The image must not be mounted.** These commands open the image
+> exclusively: when `osfs mount` (or another `osfs`) has it open, they stop
+> with `obraz je pripojeny nebo otevreny jinym procesem osfs` and change
+> nothing. Two writers would corrupt the volume and reading would see an
+> old state. Control through a running `mount` comes later; a snapshot of a
+> mounted drive already works through the [extended API](osfs-api.md):
+> `osfs snapshot Q: /projekt name`.
+>
+> ⚠️ `osfs dataset delete` also deletes all snapshots of the dataset -
+> **irreversible**.
+
+### First demo: snapshot, clone, changes, diff, restore
+
+```text
+> osfs format demo.img --size 64M
+demo.img: naformatovano, 64 MiB, kontrolni soucty Xxh3
+> osfs dataset create demo.img /projekt
+/projekt: dataset vytvoren (cislo 2)
+> osfs put demo.img cfg.toml /projekt/cfg.toml          (a = 1)
+> osfs put demo.img main.rs /projekt/main.rs
+> osfs snapshot demo.img /projekt pred-upravou
+/projekt@pred-upravou: snapshot vytvoren (id 1)
+
+  ... work: cfg.toml changed (a = 2), new file pomocnik.rs ...
+
+> osfs diff demo.img /projekt pred-upravou
+M  /cfg.toml
+A  /pomocnik.rs
+
+> osfs clone demo.img /projekt pred-upravou /zkouska
+/zkouska: klon /projekt@pred-upravou (dataset 3), zapisovatelny, sdili bloky
+> osfs put demo.img cfg2.toml /zkouska/main.rs           (trying things on the side)
+> osfs diff demo.img --clone /zkouska
+M  /main.rs
+
+> osfs dataset list demo.img
+   1  /  (snapshotu: 0)
+   2  /projekt  (snapshotu: 1)
+   3  /zkouska  (snapshotu: 0)  klon z /projekt@pred-upravou
+
+> osfs restore demo.img /projekt pred-upravou /cfg.toml "/projekt/cfg (puvodni).toml"
+/projekt@pred-upravou:/cfg.toml -> /projekt/cfg (puvodni).toml: obnoveno 6 B (kopie, original beze zmeny)
+> osfs cat demo.img "/projekt/cfg (puvodni).toml"
+a = 1
+
+> osfs dataset delete demo.img /projekt
+osfs: /projekt: z jeho snapshotu existuje klon - nejdriv smaz klon (osfs dataset list ukaze, ktery)
+> osfs dataset delete demo.img /zkouska
+/zkouska: dataset smazan i se snapshoty
+```
+
+### Datasets when mounted (`osfs mount`)
+
+- A dataset shows up on Windows as an **ordinary folder**; the path goes
+  into it (opening, writing, renaming inside as anywhere else). `osfs ls`
+  marks it `dset`.
+- **A move between datasets** (e.g. from `Q:\` to `Q:\projekt`) is between
+  two different trees: the driver returns "not the same device" and
+  Windows does the move as a copy and delete, just like between two disks
+  (takes time according to the data size).
+- **A dataset cannot be deleted from Windows** (the folder returns "access
+  denied"): the whole history would be deleted. Careful: a recursive delete
+  (Shift+Delete of the folder, `rmdir /s`) still deletes **the files
+  inside** - the dataset folder stays and the content can be restored from
+  a snapshot (`osfs restore`).
+- Snapshots, clones, diffs and restore so far through the commands above
+  (with the image unmounted), or a snapshot through the extended API.
+
+## Extended API for applications
+
+An application (e.g. MagnumOpus Explorer) can read from a mounted drive
+what Win32 cannot: instant folder sizes, hidden names, snapshots, volume
+state. Description: [osfs-api.md](osfs-api.md). From the command line:
+`osfs info Q:`, `osfs ls Q: /`, `osfs cat Q: /CON.txt`,
+`osfs snapshots Q: [dataset]`, `osfs snapshot Q: <dataset> <name>`,
+`--at <snapshot>` (a snapshot of the dataset the path lies in).
+
 ## Debugging
 
 `OSFS_DEBUG=1` prints the operations that change names (create, delete,

@@ -36,6 +36,9 @@ pub const STATUS_DIRECTORY_NOT_EMPTY: NTSTATUS = 0xC000_0101u32 as i32;
 pub const STATUS_FILE_CORRUPT_ERROR: NTSTATUS = 0xC000_0102u32 as i32;
 pub const STATUS_NOT_A_DIRECTORY: NTSTATUS = 0xC000_0103u32 as i32;
 pub const STATUS_FILE_DELETED: NTSTATUS = 0xC000_0123u32 as i32;
+pub const STATUS_INVALID_DEVICE_REQUEST: NTSTATUS = 0xC000_0010u32 as i32;
+pub const STATUS_BUFFER_TOO_SMALL: NTSTATUS = 0xC000_0023u32 as i32;
+pub const STATUS_NOT_SAME_DEVICE: NTSTATUS = 0xC000_00D4u32 as i32;
 pub const STATUS_IO_DEVICE_ERROR: NTSTATUS = 0xC000_0185u32 as i32;
 
 // --- atributy a volby (winnt.h) ---
@@ -89,6 +92,8 @@ pub const VP_UNICODE_ON_DISK: u32 = 1 << 2;
 pub const VP_PERSISTENT_ACLS: u32 = 1 << 3;
 pub const VP_READ_ONLY_VOLUME: u32 = 1 << 9;
 pub const VP_POST_CLEANUP_WHEN_MODIFIED_ONLY: u32 = 1 << 10;
+/// `DeviceControl`: WinFsp preda `DeviceIoControl` do callbacku `Control`.
+pub const VP_DEVICE_CONTROL: u32 = 1 << 15;
 pub const VP_UM_FILE_CONTEXT_IS_USER_CONTEXT2: u32 = 1 << 16;
 
 /// `FSP_FSCTL_VOLUME_INFO`.
@@ -217,7 +222,18 @@ pub struct Interface {
     pub DeleteReparsePoint: Option<unsafe extern "system" fn()>,
     pub GetStreamInfo: Option<unsafe extern "system" fn()>,
     pub GetDirInfoByName: Option<unsafe extern "system" fn()>,
-    pub Control: Option<unsafe extern "system" fn()>,
+    pub Control: Option<
+        unsafe extern "system" fn(
+            Fsp,
+            Ctx,
+            u32,
+            *mut c_void,
+            u32,
+            *mut c_void,
+            u32,
+            *mut u32,
+        ) -> NTSTATUS,
+    >,
     pub SetDelete: Option<unsafe extern "system" fn()>,
     pub CreateEx: Option<unsafe extern "system" fn()>,
     pub OverwriteEx: Option<unsafe extern "system" fn()>,
