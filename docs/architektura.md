@@ -227,7 +227,7 @@ důsledně dělí do `arch/`, aby port nebolel.
 ## Milníky
 
 1. Boot: UEFI loader, kernel vypíše text (hotovo)
-2. Základ jádra: GDT/IDT, výjimky, alokátor fyzické paměti, stránkování, heap
+2. Základ jádra: GDT/IDT, výjimky, alokátor fyzické paměti, stránkování, heap (hotovo)
 3. Procesy: plánovač, SMP, vlákna, objekty, handly, capabilities
 4. Userspace: syscally, první proces, IPC, libos, initfs
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe

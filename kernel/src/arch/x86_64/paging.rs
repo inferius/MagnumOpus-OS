@@ -1,0 +1,270 @@
+//! 4urovnove strankovani x86_64.
+//!
+//! Tabulky se alokuji z alokatoru fyzicke pameti a zapisuji pres primou
+//! mapu fyzicke pameti, takze kod nepotrebuje zadne docasne mapovani.
+
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use super::cpu;
+use crate::mm::{self, PhysAddr, VirtAddr};
+
+pub const PAGE_SIZE: u64 = 4096;
+
+const PRESENT: u64 = 1 << 0;
+const WRITABLE: u64 = 1 << 1;
+const USER: u64 = 1 << 2;
+const HUGE: u64 = 1 << 7;
+const GLOBAL: u64 = 1 << 8;
+const NO_EXECUTE: u64 = 1 << 63;
+const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
+
+static NX_ENABLED: AtomicBool = AtomicBool::new(false);
+static HUGE_1G: AtomicBool = AtomicBool::new(false);
+
+/// Prava a vlastnosti mapovani, nezavisle na architekture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapFlags(u8);
+
+impl MapFlags {
+    pub const READ: Self = Self(0);
+    pub const WRITE: Self = Self(1 << 0);
+    pub const EXEC: Self = Self(1 << 1);
+    #[allow(dead_code)]
+    pub const USER: Self = Self(1 << 2);
+    /// Mapovani je stejne ve vsech adresnich prostorech (cast jadra),
+    /// TLB ho pri prepnuti CR3 nezahodi.
+    pub const GLOBAL: Self = Self(1 << 3);
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+
+impl core::ops::BitOr for MapFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageSize {
+    Size4K,
+    Size2M,
+    Size1G,
+}
+
+impl PageSize {
+    pub const fn bytes(self) -> u64 {
+        match self {
+            Self::Size4K => 0x1000,
+            Self::Size2M => 0x20_0000,
+            Self::Size1G => 0x4000_0000,
+        }
+    }
+
+    /// Uroven tabulky, ve ktere lezi list (1 = PT, 2 = PD, 3 = PDPT).
+    const fn level(self) -> u32 {
+        match self {
+            Self::Size4K => 1,
+            Self::Size2M => 2,
+            Self::Size1G => 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapError {
+    OutOfMemory,
+    AlreadyMapped,
+    HugePageConflict,
+    Misaligned,
+}
+
+/// Zapne funkce CPU, na kterych strankovani jadra stavi: ochranu zapisu
+/// i pro ring 0 (CR0.WP), globalni stranky (CR4.PGE) a NX (EFER.NXE).
+///
+/// # Safety
+///
+/// Volat jednou pri startu kazdeho CPU, pred `PageTable::activate`.
+pub unsafe fn init_cpu() {
+    let features = cpu::features();
+    // SAFETY: WP a PGE podporuje kazde x86_64 CPU; NXE se zapina jen
+    // pokud ho CPU podle CPUID podporuje. Aktualni tabulky (od loaderu)
+    // jsou platne i se zapnutymi funkcemi.
+    unsafe {
+        cpu::write_cr0(cpu::read_cr0() | cpu::CR0_WP);
+        cpu::write_cr4(cpu::read_cr4() | cpu::CR4_PGE);
+        if features.nx {
+            cpu::wrmsr(cpu::MSR_EFER, cpu::rdmsr(cpu::MSR_EFER) | cpu::EFER_NXE);
+        }
+    }
+    NX_ENABLED.store(features.nx, Ordering::Relaxed);
+    HUGE_1G.store(features.huge_1g, Ordering::Relaxed);
+}
+
+/// Podporuje CPU 1 GiB stranky?
+pub fn supports_1g_pages() -> bool {
+    HUGE_1G.load(Ordering::Relaxed)
+}
+
+fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
+    let mut bits = PRESENT;
+    if flags.contains(MapFlags::WRITE) {
+        bits |= WRITABLE;
+    }
+    if flags.contains(MapFlags::USER) {
+        bits |= USER;
+    }
+    if flags.contains(MapFlags::GLOBAL) {
+        bits |= GLOBAL;
+    }
+    if !flags.contains(MapFlags::EXEC) && NX_ENABLED.load(Ordering::Relaxed) {
+        bits |= NO_EXECUTE;
+    }
+    if size != PageSize::Size4K {
+        bits |= HUGE;
+    }
+    bits
+}
+
+fn index(virt: u64, level: u32) -> usize {
+    ((virt >> (12 + 9 * (level - 1))) & 0x1FF) as usize
+}
+
+fn entry_ptr(table: u64, idx: usize) -> *mut u64 {
+    PhysAddr::new(table)
+        .to_virt()
+        .as_mut_ptr::<u64>()
+        .wrapping_add(idx)
+}
+
+/// Hierarchie tabulek stranek (jeden adresni prostor).
+pub struct PageTable {
+    root: u64,
+}
+
+impl PageTable {
+    /// Vytvori prazdny adresni prostor.
+    pub fn new() -> Result<Self, MapError> {
+        let root = mm::phys::alloc_frame_zeroed().ok_or(MapError::OutOfMemory)?;
+        Ok(Self {
+            root: root.as_u64(),
+        })
+    }
+
+    /// Adresni prostor, ktery je prave aktivni na tomto CPU.
+    pub fn current() -> Self {
+        Self {
+            root: cpu::read_cr3() & ADDR_MASK,
+        }
+    }
+
+    /// Prepne CPU na tento adresni prostor.
+    ///
+    /// # Safety
+    ///
+    /// Tabulky musi mapovat prave bezici kod, zasobnik a vsechna data,
+    /// ktera se po prepnuti pouzivaji.
+    pub unsafe fn activate(&self) {
+        // SAFETY: predano volajicim.
+        unsafe { cpu::write_cr3(self.root) };
+    }
+
+    /// Projde tabulky k urovni `level` a vrati ukazatel na polozku.
+    /// S `create` chybejici mezilehle tabulky alokuje.
+    fn walk(&mut self, virt: u64, level: u32, create: bool) -> Result<Option<*mut u64>, MapError> {
+        let mut table = self.root;
+        for l in (level + 1..=4).rev() {
+            let e = entry_ptr(table, index(virt, l));
+            // SAFETY: `e` ukazuje do tabulky tohoto adresniho prostoru,
+            // dostupne pres primou mapu; tabulky vlastni tato struktura.
+            let val = unsafe { *e };
+            if val & PRESENT == 0 {
+                if !create {
+                    return Ok(None);
+                }
+                let new = mm::phys::alloc_frame_zeroed().ok_or(MapError::OutOfMemory)?;
+                // Mezilehle urovne jsou povolne, prava urcuje list. USER
+                // tu nevadi, dokud ho list nema.
+                // SAFETY: viz vyse.
+                unsafe { *e = new.as_u64() | PRESENT | WRITABLE | USER };
+                table = new.as_u64();
+            } else if val & HUGE != 0 {
+                return Err(MapError::HugePageConflict);
+            } else {
+                table = val & ADDR_MASK;
+            }
+        }
+        Ok(Some(entry_ptr(table, index(virt, level))))
+    }
+
+    /// Namapuje jednu stranku.
+    pub fn map(
+        &mut self,
+        virt: VirtAddr,
+        phys: PhysAddr,
+        size: PageSize,
+        flags: MapFlags,
+    ) -> Result<(), MapError> {
+        let (v, p) = (virt.as_u64(), phys.as_u64());
+        if v % size.bytes() != 0 || p % size.bytes() != 0 {
+            return Err(MapError::Misaligned);
+        }
+        let e = self
+            .walk(v, size.level(), true)?
+            .expect("walk s create vzdy vraci polozku");
+        // SAFETY: `e` je platna polozka vracena `walk`.
+        unsafe {
+            if *e & PRESENT != 0 {
+                return Err(MapError::AlreadyMapped);
+            }
+            *e = p | leaf_bits(flags, size);
+        }
+        Ok(())
+    }
+
+    /// Prelozi virtualni adresu na fyzickou, `None` pokud neni namapovana.
+    pub fn translate(&self, virt: VirtAddr) -> Option<PhysAddr> {
+        let v = virt.as_u64();
+        let mut table = self.root;
+        for level in (1..=4).rev() {
+            // SAFETY: cteme jen polozky tabulek dostupnych pres primou mapu.
+            let val = unsafe { *entry_ptr(table, index(v, level)) };
+            if val & PRESENT == 0 {
+                return None;
+            }
+            if level == 1 || val & HUGE != 0 {
+                let page_size = 1u64 << (12 + 9 * (level - 1));
+                return Some(PhysAddr::new(
+                    (val & ADDR_MASK & !(page_size - 1)) | (v & (page_size - 1)),
+                ));
+            }
+            table = val & ADDR_MASK;
+        }
+        unreachable!()
+    }
+
+    /// Predalokuje tabulky druhe urovne pro celou horni polovinu adresniho
+    /// prostoru. Kazdy novy adresni prostor pak jadro sdili prostym
+    /// zkopirovanim 256 polozek PML4 a zmena mapovani jadra je videt vsude.
+    pub fn preallocate_kernel_half(&mut self) -> Result<(), MapError> {
+        for idx in 256..512 {
+            let e = entry_ptr(self.root, idx);
+            // SAFETY: polozka PML4 tohoto adresniho prostoru.
+            if unsafe { *e } & PRESENT == 0 {
+                let new = mm::phys::alloc_frame_zeroed().ok_or(MapError::OutOfMemory)?;
+                // SAFETY: viz vyse.
+                unsafe { *e = new.as_u64() | PRESENT | WRITABLE };
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Je adresa namapovana v aktualnim adresnim prostoru?
+pub fn is_mapped(virt: u64) -> bool {
+    PageTable::current()
+        .translate(VirtAddr::new(virt))
+        .is_some()
+}

@@ -22,21 +22,28 @@ SECTIONS
 {
     . = KERNEL_BASE;
 
+    /* Symboly __*_start / __*_end pouziva mm::map_kernel_image. */
+
     .text : ALIGN(4K)
     {
+        __text_start = .;
         *(.text .text.*)
+        __text_end = .;
     } :text
 
     .rodata : ALIGN(4K)
     {
+        __rodata_start = .;
         *(.rodata .rodata.*)
     } :rodata
 
     .eh_frame_hdr : { *(.eh_frame_hdr) } :rodata
     .eh_frame : { KEEP(*(.eh_frame)) } :rodata
+    __rodata_end = .;
 
     .data : ALIGN(4K)
     {
+        __data_start = .;
         *(.data .data.*)
         *(.got .got.*)
     } :data
@@ -45,6 +52,7 @@ SECTIONS
     {
         *(.bss .bss.*)
         *(COMMON)
+        __data_end = .;
     } :data
 
     /DISCARD/ :

@@ -3,9 +3,11 @@
 Nový operační systém psaný od nuly v Rustu. Pracovní název zatím není, v kódu
 se používá `os` / `kernel`.
 
-Aktuální stav: **milník 1 (boot)**. Vlastní UEFI loader nahraje kernel, předá
-mu mapu paměti, framebuffer a ACPI RSDP, a kernel vypíše text na sériovou
-linku i do framebufferu.
+Aktuální stav: **milník 2 (základ jádra)**. Vlastní UEFI loader nahraje
+kernel, předá mu mapu paměti, framebuffer a ACPI RSDP. Kernel nastaví
+GDT/TSS/IDT s obsluhou výjimek, spustí buddy alokátor fyzické paměti,
+přepne na vlastní tabulky stránek, má heap a zásobník s ochrannou stránkou.
+Návrh celého systému je v [docs/architektura.md](docs/architektura.md).
 
 ## Struktura
 
@@ -76,6 +78,7 @@ cargo xtask run --release      # release profil
 cargo xtask run --headless     # bez okna, jen sériová linka
 cargo xtask run --accel whpx   # akcelerace (Linux: kvm se volí sám, je-li /dev/kvm)
 cargo xtask run -- -smp 8      # cokoli za -- jde přímo do QEMU
+cargo xtask test               # self-testy jádra v QEMU bez okna, výsledek = návratový kód
 ```
 
 Výsledný obraz `target/os-x86_64-<profil>.img` je GPT disk s jedním EFI

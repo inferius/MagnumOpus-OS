@@ -14,6 +14,7 @@ use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::time::{Duration, Instant};
 
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
@@ -27,6 +28,7 @@ prikazy:
   build    prelozi kernel a loader
   image    build + vytvori target/os-x86_64.img (GPT, ESP FAT32)
   run      image + spusti QEMU (x86_64, OVMF)
+  test     kernel se self-testy, QEMU bez okna, vysledek jako navratovy kod
 
 prepinace:
   --release        release profil
@@ -47,7 +49,14 @@ struct Options {
     headless: bool,
     accel: Option<String>,
     qemu_args: Vec<OsString>,
+    /// Testovaci beh: kernel s feature `qemu-test`, QEMU s isa-debug-exit.
+    test: bool,
 }
+
+/// Navratovy kod QEMU pri uspechu testu: isa-debug-exit vraci (v << 1) | 1
+/// a kernel zapisuje v = 0x10 (viz arch::qemu_exit).
+const QEMU_TEST_SUCCESS: i32 = 33;
+const QEMU_TEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn main() -> ExitCode {
     match run_cli() {
@@ -72,6 +81,7 @@ fn run_cli() -> Result<()> {
         headless: false,
         accel: None,
         qemu_args: Vec::new(),
+        test: false,
     };
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -97,6 +107,13 @@ fn run_cli() -> Result<()> {
         Some("build") => build(&opts).map(|_| ()),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
+            let artifacts = build(&opts)?;
+            let image = image_for(&artifacts, &opts)?;
+            run_qemu(&image, &opts)
+        }
+        Some("test") => {
+            opts.test = true;
+            opts.headless = true;
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             run_qemu(&image, &opts)
@@ -139,6 +156,9 @@ fn cargo_build(package: &str, target: &str, opts: &Options) -> Result<()> {
     if opts.release {
         cmd.arg("--release");
     }
+    if opts.test && package == "kernel" {
+        cmd.args(["--features", "qemu-test"]);
+    }
     let status = cmd.status()?;
     if !status.success() {
         return Err(format!("build {package} ({target}) selhal").into());
@@ -158,7 +178,8 @@ fn build(opts: &Options) -> Result<Artifacts> {
 }
 
 fn image_for(artifacts: &Artifacts, opts: &Options) -> Result<PathBuf> {
-    let path = target_dir().join(format!("os-x86_64-{}.img", profile_dir(opts)));
+    let suffix = if opts.test { "-test" } else { "" };
+    let path = target_dir().join(format!("os-x86_64-{}{suffix}.img", profile_dir(opts)));
     let files = [
         ("EFI/BOOT/BOOTX64.EFI", artifacts.loader.as_path()),
         ("os/kernel.elf", artifacts.kernel.as_path()),
@@ -295,14 +316,43 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             kernel.display()
         );
     }
+    if opts.test {
+        cmd.args(["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]);
+    }
     cmd.args(&opts.qemu_args);
 
     println!("xtask: spoustim {}", qemu.display());
+    if opts.test {
+        return run_qemu_test(cmd);
+    }
     let status = cmd.status()?;
     if !status.success() {
         return Err(format!("QEMU skoncilo s {status}").into());
     }
     Ok(())
+}
+
+fn run_qemu_test(mut cmd: Command) -> Result<()> {
+    let mut child = cmd.spawn()?;
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if start.elapsed() > QEMU_TEST_TIMEOUT {
+            child.kill()?;
+            child.wait()?;
+            return Err(format!("testy nedobehly do {} s", QEMU_TEST_TIMEOUT.as_secs()).into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    match status.code() {
+        Some(QEMU_TEST_SUCCESS) => {
+            println!("xtask: testy prosly");
+            Ok(())
+        }
+        code => Err(format!("testy selhaly (navratovy kod QEMU {code:?})").into()),
+    }
 }
 
 fn pflash_arg(path: &Path, readonly: bool) -> String {
