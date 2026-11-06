@@ -14,6 +14,8 @@ const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
 const HUGE: u64 = 1 << 7;
+const WRITE_THROUGH: u64 = 1 << 3;
+const CACHE_DISABLE: u64 = 1 << 4;
 const GLOBAL: u64 = 1 << 8;
 const NO_EXECUTE: u64 = 1 << 63;
 const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
@@ -34,6 +36,8 @@ impl MapFlags {
     /// Mapovani je stejne ve vsech adresnich prostorech (cast jadra),
     /// TLB ho pri prepnuti CR3 nezahodi.
     pub const GLOBAL: Self = Self(1 << 3);
+    /// Bez cache (registry zarizeni).
+    pub const UNCACHED: Self = Self(1 << 4);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
@@ -118,6 +122,9 @@ fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
     }
     if flags.contains(MapFlags::GLOBAL) {
         bits |= GLOBAL;
+    }
+    if flags.contains(MapFlags::UNCACHED) {
+        bits |= CACHE_DISABLE | WRITE_THROUGH;
     }
     if !flags.contains(MapFlags::EXEC) && NX_ENABLED.load(Ordering::Relaxed) {
         bits |= NO_EXECUTE;
@@ -243,6 +250,61 @@ impl PageTable {
             table = val & ADDR_MASK;
         }
         unreachable!()
+    }
+
+    /// Novy adresni prostor se sdilenou horni polovinou (jadrem) z `kernel`.
+    pub fn new_sharing_kernel_half(kernel: &PageTable) -> Result<Self, MapError> {
+        let new = Self::new()?;
+        for idx in 256..512 {
+            // SAFETY: obe PML4 jsou platne tabulky dostupne pres primou mapu.
+            unsafe { *entry_ptr(new.root, idx) = *entry_ptr(kernel.root, idx) };
+        }
+        Ok(new)
+    }
+
+    /// Fyzicka adresa korenove tabulky.
+    pub fn root(&self) -> u64 {
+        self.root
+    }
+
+    /// Uvolni tabulky spodni poloviny (userspace) a korenovou tabulku.
+    /// Namapovane stranky samotne neuvolnuje - patri objektum pameti.
+    ///
+    /// # Safety
+    ///
+    /// Adresni prostor nesmi byt aktivni na zadnem CPU.
+    pub unsafe fn destroy(self) {
+        fn free_table(table: u64, level: u32) {
+            if level > 1 {
+                for idx in 0..512 {
+                    // SAFETY: polozka tabulky tohoto adresniho prostoru.
+                    let e = unsafe { *entry_ptr(table, idx) };
+                    if e & PRESENT != 0 && e & HUGE == 0 {
+                        free_table(e & ADDR_MASK, level - 1);
+                    }
+                }
+            }
+            mm::phys::free_pages(PhysAddr::new(table), 0);
+        }
+        for idx in 0..256 {
+            // SAFETY: polozka PML4 tohoto adresniho prostoru.
+            let e = unsafe { *entry_ptr(self.root, idx) };
+            if e & PRESENT != 0 {
+                free_table(e & ADDR_MASK, 3);
+            }
+        }
+        mm::phys::free_pages(PhysAddr::new(self.root), 0);
+    }
+
+    /// Zrusi mapovani jedne 4 KiB stranky na tomto CPU (TLB ostatnich CPU
+    /// se nezneplatni - volajici ruci, ze tam stranka neni pouzivana).
+    /// Tabulky nizsich urovni zustavaji.
+    pub fn unmap_4k(&mut self, virt: VirtAddr) {
+        if let Ok(Some(e)) = self.walk(virt.as_u64(), 1, false) {
+            // SAFETY: platna polozka PT vracena `walk`.
+            unsafe { *e = 0 };
+            cpu::invlpg(virt.as_u64());
+        }
     }
 
     /// Predalokuje tabulky druhe urovne pro celou horni polovinu adresniho

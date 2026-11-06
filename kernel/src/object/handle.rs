@@ -1,0 +1,142 @@
+//! Tabulka handlu procesu.
+//!
+//! Handle je 32bitova hodnota: dolnich 24 bitu = index + 1, hornich 8 bitu
+//! = generace slotu. Generace se pri zavreni zvysi, takze stary handle po
+//! znovupouziti slotu neukazuje na cizi objekt. Hodnota 0 neni nikdy platna.
+
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+
+use super::{Error, KernelObject, Rights};
+
+const INDEX_BITS: u32 = 24;
+const MAX_HANDLES: usize = (1 << INDEX_BITS) - 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Handle(u32);
+
+#[allow(dead_code, reason = "prevod z/do hodnot syscallu (milnik 4)")]
+impl Handle {
+    pub const INVALID: Self = Self(0);
+
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+
+    fn new(index: usize, generation: u8) -> Self {
+        Self(((generation as u32) << INDEX_BITS) | (index as u32 + 1))
+    }
+
+    fn index(self) -> Option<usize> {
+        (self.0 & ((1 << INDEX_BITS) - 1))
+            .checked_sub(1)
+            .map(|i| i as usize)
+    }
+
+    fn generation(self) -> u8 {
+        (self.0 >> INDEX_BITS) as u8
+    }
+}
+
+struct Entry {
+    object: Arc<dyn KernelObject>,
+    rights: Rights,
+}
+
+struct Slot {
+    generation: u8,
+    entry: Option<Entry>,
+}
+
+#[derive(Default)]
+pub struct HandleTable {
+    slots: Vec<Slot>,
+    free: Vec<usize>,
+}
+
+impl HandleTable {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(
+        &mut self,
+        object: Arc<dyn KernelObject>,
+        rights: Rights,
+    ) -> Result<Handle, Error> {
+        let index = match self.free.pop() {
+            Some(i) => i,
+            None if self.slots.len() < MAX_HANDLES => {
+                self.slots.push(Slot {
+                    generation: 0,
+                    entry: None,
+                });
+                self.slots.len() - 1
+            }
+            None => return Err(Error::NoResources),
+        };
+        let slot = &mut self.slots[index];
+        slot.entry = Some(Entry { object, rights });
+        Ok(Handle::new(index, slot.generation))
+    }
+
+    fn entry(&self, handle: Handle) -> Result<&Entry, Error> {
+        let slot = handle
+            .index()
+            .and_then(|i| self.slots.get(i))
+            .ok_or(Error::BadHandle)?;
+        if slot.generation != handle.generation() {
+            return Err(Error::BadHandle);
+        }
+        slot.entry.as_ref().ok_or(Error::BadHandle)
+    }
+
+    #[allow(dead_code, reason = "API pro syscally (milnik 4)")]
+    pub fn rights(&self, handle: Handle) -> Result<Rights, Error> {
+        self.entry(handle).map(|e| e.rights)
+    }
+
+    /// Objekt za handlem, pokud handle ma vsechna prava `required`.
+    pub fn get(&self, handle: Handle, required: Rights) -> Result<Arc<dyn KernelObject>, Error> {
+        let entry = self.entry(handle)?;
+        if !entry.rights.contains(required) {
+            return Err(Error::AccessDenied);
+        }
+        Ok(entry.object.clone())
+    }
+
+    /// Jako `get`, ale navic overi typ objektu.
+    pub fn get_as<T: KernelObject>(
+        &self,
+        handle: Handle,
+        required: Rights,
+    ) -> Result<Arc<T>, Error> {
+        let object: Arc<dyn core::any::Any + Send + Sync> = self.get(handle, required)?;
+        object.downcast::<T>().map_err(|_| Error::WrongType)
+    }
+
+    /// Novy handle na stejny objekt s pravy `rights`, ktera musi byt
+    /// podmnozinou prav puvodniho handlu. Vyzaduje pravo DUPLICATE.
+    pub fn duplicate(&mut self, handle: Handle, rights: Rights) -> Result<Handle, Error> {
+        let entry = self.entry(handle)?;
+        if !entry.rights.contains(Rights::DUPLICATE) || !entry.rights.contains(rights) {
+            return Err(Error::AccessDenied);
+        }
+        let object = entry.object.clone();
+        self.insert(object, rights)
+    }
+
+    pub fn close(&mut self, handle: Handle) -> Result<(), Error> {
+        self.entry(handle)?;
+        let index = handle.index().unwrap();
+        let slot = &mut self.slots[index];
+        slot.entry = None;
+        slot.generation = slot.generation.wrapping_add(1);
+        self.free.push(index);
+        Ok(())
+    }
+}

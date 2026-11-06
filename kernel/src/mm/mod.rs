@@ -5,6 +5,7 @@
 //! | od                      | co                                      |
 //! |-------------------------|-----------------------------------------|
 //! | `0xFFFF_8000_0000_0000` | prima mapa fyzicke pameti (RW, NX)      |
+//! | `0xFFFF_FD00_0000_0000` | registry zarizeni (MMIO, bez cache)     |
 //! | `0xFFFF_FE00_0000_0000` | zasobniky jadra (s ochrannymi strankami)|
 //! | `0xFFFF_FFFF_8000_0000` | obraz jadra (podle sekci R-X, R--, RW-) |
 //!
@@ -16,8 +17,8 @@ pub mod phys;
 
 use alloc::vec::Vec;
 
+use crate::sync::SpinLock;
 use boot_info::{BootInfo, MemoryKind, PHYS_MAP_BASE};
-use spin::Mutex;
 
 use crate::arch::paging::{MapFlags, PAGE_SIZE, PageSize, PageTable, supports_1g_pages};
 
@@ -72,7 +73,7 @@ impl VirtAddr {
 }
 
 /// Adresni prostor jadra. Pozdeji z nej budou procesy kopirovat horni polovinu.
-static KERNEL_SPACE: Mutex<Option<PageTable>> = Mutex::new(None);
+static KERNEL_SPACE: SpinLock<Option<PageTable>> = SpinLock::new(None);
 
 /// Hranice sekci obrazu jadra z linker.ld.
 mod sections {
@@ -87,13 +88,12 @@ mod sections {
 }
 
 /// Inicializuje spravu pameti: alokator fyzicke pameti, vlastni tabulky
-/// stranek jadra a heap. Vraci vrchol noveho zasobniku jadra (s ochrannou
-/// strankou), na ktery se ma volajici prepnout.
+/// stranek jadra a heap.
 ///
 /// # Safety
 ///
 /// Volat jednou, po `arch::init_boot_cpu`. `boot_info` musi byt platny.
-pub unsafe fn init(boot_info: &BootInfo) -> u64 {
+pub unsafe fn init(boot_info: &BootInfo) {
     assert_eq!(
         boot_info.phys_offset, PHYS_MAP_BASE,
         "loader pouziva jinou primou mapu"
@@ -115,14 +115,29 @@ pub unsafe fn init(boot_info: &BootInfo) -> u64 {
     // SAFETY: nove tabulky mapuji obraz jadra (bezici kod a statiky), primou
     // mapu (aktualni zasobnik, BootInfo, framebuffer a tabulky samotne).
     unsafe { space.activate() };
-
-    // Identicke mapovani ani kod loaderu uz nikdo nepotrebuje. GDT a IDT
-    // firmwaru jsou nahrazene vlastnimi, takze i pamet boot services je volna.
-    phys::add_regions(regions, MemoryKind::Reclaimable);
-
-    let stack_top = alloc_kernel_stack(&mut space, 0).expect("nedostatek pameti pro zasobnik");
     *KERNEL_SPACE.lock() = Some(space);
-    stack_top
+}
+
+/// Vrati alokatoru pamet loaderu a boot services. Volat az kdyz z ni jadro
+/// nic necte: po precteni ACPI tabulek (nektere firmwary maji RSDP v pameti
+/// boot services) a po nahrani vlastnich GDT a IDT.
+pub fn reclaim_boot_memory(boot_info: &BootInfo) {
+    // SAFETY: BootInfo overeny v `init`.
+    let regions = unsafe { boot_info.memory_map() };
+    phys::add_regions(regions, MemoryKind::Reclaimable);
+}
+
+fn with_kernel_space<R>(f: impl FnOnce(&mut PageTable) -> R) -> R {
+    f(KERNEL_SPACE
+        .lock()
+        .as_mut()
+        .expect("mm neni inicializovana"))
+}
+
+/// Novy adresni prostor (pro proces): prazdna spodni polovina, horni
+/// polovina sdilena s jadrem.
+pub fn new_address_space() -> Option<PageTable> {
+    with_kernel_space(|kernel| PageTable::new_sharing_kernel_half(kernel).ok())
 }
 
 /// Namapuje primou mapu: vsechny oblasti z mapy pameti a framebuffer.
@@ -218,27 +233,155 @@ unsafe fn map_kernel_image(space: &mut PageTable, phys_start: u64) {
     }
 }
 
-/// Alokuje zasobnik jadra cislo `index` v oblasti zasobniku. Pod kazdym
-/// zasobnikem zustava nenamapovana ochranna stranka, takze preteceni
-/// skonci page faultem (a double faultem na IST), ne tichym prepsanim pameti.
-fn alloc_kernel_stack(space: &mut PageTable, index: u64) -> Option<u64> {
-    let slot = KERNEL_STACK_SIZE + PAGE_SIZE;
-    let bottom = KERNEL_STACKS_BASE + index * slot + PAGE_SIZE;
-    for virt in (bottom..bottom + KERNEL_STACK_SIZE).step_by(PAGE_SIZE as usize) {
-        let frame = phys::alloc_frame_zeroed()?;
+/// Sprava slotu v oblasti zasobniku: kazdy slot = ochranna stranka + zasobnik.
+struct StackSlots {
+    /// Pocet slotu, ktere uz byly nekdy namapovane.
+    used: u64,
+    /// Uvolnene sloty. Zustavaji namapovane a znovu se pouziji, takze se
+    /// nemusi resit zneplatneni TLB na ostatnich CPU.
+    /// TODO: vracet pamet (az bude TLB shootdown).
+    free: Vec<u64>,
+}
+
+static STACK_SLOTS: SpinLock<StackSlots> = SpinLock::new(StackSlots {
+    used: 0,
+    free: Vec::new(),
+});
+
+/// Zasobnik jadra s ochrannou strankou pod sebou: preteceni skonci page
+/// faultem (a double faultem na IST), ne tichym prepsanim pameti.
+pub struct KernelStack {
+    slot: u64,
+}
+
+impl KernelStack {
+    pub fn new() -> Option<Self> {
+        if let Some(slot) = STACK_SLOTS.lock().free.pop() {
+            return Some(Self { slot });
+        }
+        let slot = {
+            let mut slots = STACK_SLOTS.lock();
+            slots.used += 1;
+            slots.used - 1
+        };
+        let bottom = Self::bottom_of(slot);
+        with_kernel_space(|space| {
+            for virt in (bottom..bottom + KERNEL_STACK_SIZE).step_by(PAGE_SIZE as usize) {
+                let frame = phys::alloc_frame_zeroed()?;
+                space
+                    .map(
+                        VirtAddr(virt),
+                        frame,
+                        PageSize::Size4K,
+                        MapFlags::WRITE | MapFlags::GLOBAL,
+                    )
+                    .ok()?;
+            }
+            Some(())
+        })?;
+        Some(Self { slot })
+    }
+
+    fn bottom_of(slot: u64) -> u64 {
+        KERNEL_STACKS_BASE + slot * (KERNEL_STACK_SIZE + PAGE_SIZE) + PAGE_SIZE
+    }
+
+    /// Vrchol zasobniku (zarovnany na 16 B).
+    pub fn top(&self) -> u64 {
+        Self::bottom_of(self.slot) + KERNEL_STACK_SIZE
+    }
+}
+
+impl Drop for KernelStack {
+    fn drop(&mut self) {
+        STACK_SLOTS.lock().free.push(self.slot);
+    }
+}
+
+/// Oblast pro mapovani MMIO registru zarizeni (bez cache).
+const MMIO_BASE: u64 = 0xFFFF_FD00_0000_0000;
+static MMIO_NEXT: SpinLock<u64> = SpinLock::new(MMIO_BASE);
+
+/// Namapuje fyzicky rozsah registru zarizeni bez cache a vrati jeho
+/// virtualni adresu (se zachovanym posunem uvnitr stranky).
+pub fn map_mmio(phys: PhysAddr, len: u64) -> VirtAddr {
+    let start = phys.0 & !(PAGE_SIZE - 1);
+    let end = (phys.0 + len).next_multiple_of(PAGE_SIZE);
+    let virt_start = {
+        let mut next = MMIO_NEXT.lock();
+        let v = *next;
+        *next += end - start;
+        v
+    };
+    with_kernel_space(|space| {
+        for offset in (0..end - start).step_by(PAGE_SIZE as usize) {
+            space
+                .map(
+                    VirtAddr(virt_start + offset),
+                    PhysAddr(start + offset),
+                    PageSize::Size4K,
+                    MapFlags::WRITE | MapFlags::GLOBAL | MapFlags::UNCACHED,
+                )
+                .expect("mapovani MMIO selhalo");
+        }
+    });
+    VirtAddr(virt_start + (phys.0 - start))
+}
+
+/// Docasne identicky namapuje jednu stranku ve spodni polovine adresniho
+/// prostoru jadra (start aplikacnich procesoru, ktere zacinaji bez strankovani).
+pub fn map_identity_page(phys: PhysAddr) {
+    with_kernel_space(|space| {
         space
             .map(
-                VirtAddr(virt),
-                frame,
+                VirtAddr(phys.0),
+                phys,
                 PageSize::Size4K,
-                MapFlags::WRITE | MapFlags::GLOBAL,
+                MapFlags::WRITE | MapFlags::EXEC,
             )
-            .ok()?;
-    }
-    Some(bottom + KERNEL_STACK_SIZE)
+            .expect("identicke mapovani selhalo");
+    });
+}
+
+/// Zrusi mapovani z `map_identity_page`.
+pub fn unmap_identity_page(phys: PhysAddr) {
+    with_kernel_space(|space| space.unmap_4k(VirtAddr(phys.0)));
+}
+
+/// Fyzicka adresa PML4 jadra.
+pub fn kernel_root() -> PhysAddr {
+    with_kernel_space(|space| PhysAddr(space.root()))
 }
 
 /// Prelozi adresu v adresnim prostoru jadra (pro testy a ladeni).
 pub fn translate(virt: VirtAddr) -> Option<PhysAddr> {
     KERNEL_SPACE.lock().as_ref()?.translate(virt)
+}
+
+/// Adresni prostor procesu: vlastni spodni polovina, sdilene jadro.
+pub struct AddressSpace {
+    table: Option<PageTable>,
+}
+
+impl AddressSpace {
+    pub fn new() -> Option<Self> {
+        Some(Self {
+            table: Some(new_address_space()?),
+        })
+    }
+
+    pub fn translate(&self, virt: VirtAddr) -> Option<PhysAddr> {
+        self.table.as_ref()?.translate(virt)
+    }
+}
+
+impl Drop for AddressSpace {
+    fn drop(&mut self) {
+        if let Some(table) = self.table.take() {
+            // SAFETY: procesy zatim nemaji vlakna, takze adresni prostor
+            // neni aktivni na zadnem CPU. TODO: az budou userspace vlakna,
+            // ruseni musi pockat, az proces nebezi nikde.
+            unsafe { table.destroy() };
+        }
+    }
 }

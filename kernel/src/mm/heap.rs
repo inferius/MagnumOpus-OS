@@ -8,13 +8,13 @@
 //!
 //! `dealloc` dostane stejny `Layout`, takze zadne hlavicky nejsou potreba.
 //!
+//! Zamek zakazuje preruseni, takze alokovat smi i obsluha preruseni.
+//!
 //! TODO: vracet prazdne stranky trid zpet buddy alokatoru, per-CPU cache.
-//! Pozor: zamek neni bezpecny vuci prerusenim - obsluha preruseni nesmi
-//! alokovat, dokud se to nevyresi.
 
 use core::alloc::{GlobalAlloc, Layout};
 
-use spin::Mutex;
+use crate::sync::SpinLock;
 
 use super::{PhysAddr, VirtAddr, phys};
 use crate::arch::paging::PAGE_SIZE;
@@ -26,7 +26,7 @@ const CLASSES: usize = (MAX_CLASS_SHIFT - MIN_CLASS_SHIFT + 1) as usize;
 /// Hlavicky seznamu volnych objektu (virtualni adresy, 0 = prazdny).
 struct Classes([usize; CLASSES]);
 
-static CLASSES_FREE: Mutex<Classes> = Mutex::new(Classes([0; CLASSES]));
+static CLASSES_FREE: SpinLock<Classes> = SpinLock::new(Classes([0; CLASSES]));
 
 pub struct KernelHeap;
 

@@ -123,3 +123,9 @@ pub fn read_rbp() -> u64 {
     unsafe { asm!("mov {}, rbp", out(reg) v, options(nomem, nostack, preserves_flags)) };
     v
 }
+
+/// Zneplatni zaznam TLB pro jednu stranku na tomto CPU.
+pub fn invlpg(addr: u64) {
+    // SAFETY: invlpg jen zahodi zaznam z TLB, nemeni pamet.
+    unsafe { asm!("invlpg [{}]", in(reg) addr, options(nostack, preserves_flags)) };
+}

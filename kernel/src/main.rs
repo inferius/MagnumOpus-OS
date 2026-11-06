@@ -1,23 +1,35 @@
 //! Kernel.
 //!
-//! Start: overeni dat od loaderu, konzole, zakladni struktury CPU (GDT,
-//! IDT), sprava pameti (fyzicky alokator, vlastni tabulky stranek, heap),
-//! prepnuti na zasobnik s ochrannou strankou, self-testy.
+//! Start na bootovacim CPU: overeni dat od loaderu, konzole, zakladni
+//! struktury CPU (GDT, IDT), sprava pameti, ACPI, casovace, prepnuti na
+//! zasobnik s ochrannou strankou, planovac, start ostatnich CPU a vlakno
+//! `init` se self-testy.
 
 #![no_std]
 #![no_main]
 
 extern crate alloc;
 
+mod acpi;
 mod arch;
 mod console;
 mod framebuffer;
 mod mm;
+mod object;
+mod sched;
 mod selftest;
+mod smp;
+mod sync;
 
 use boot_info::{BOOT_INFO_MAGIC, BOOT_INFO_VERSION, BootInfo};
 use core::fmt::Write;
 use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use acpi::Platform;
+
+/// Informace o platforme, zjistene jednou pri startu.
+static PLATFORM: spin::Once<Platform> = spin::Once::new();
 
 /// Vstupni bod, na ktery skace loader (viz `ENTRY` v linker.ld).
 ///
@@ -37,31 +49,65 @@ extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
 
     // SAFETY: jednou, na bootovacim CPU, preruseni jsou zakazana.
     unsafe { arch::init_boot_cpu() };
-    kprintln!("cpu: GDT, TSS a IDT nahrane");
 
     // SAFETY: jednou, po init_boot_cpu; BootInfo je overeny.
-    let stack_top = unsafe { mm::init(boot_info) };
+    unsafe { mm::init(boot_info) };
+
+    let platform =
+        PLATFORM.call_once(|| acpi::parse(boot_info.acpi_rsdp).expect("cteni ACPI selhalo"));
+    // SAFETY: jednou, po inicializaci pameti, preruseni zakazana.
+    let timers = unsafe { arch::init_platform(platform) };
+    kprintln!(
+        "casovace: TSC {} MHz{}, APIC timer {} kHz, {}",
+        timers.tsc_hz / 1_000_000,
+        if timers.tsc_invariant {
+            " (invariantni)"
+        } else {
+            " (CPU nehlasi invariantni TSC)"
+        },
+        timers.apic_timer_hz / 1000,
+        if timers.x2apic { "x2APIC" } else { "xAPIC" },
+    );
+
+    // ACPI tabulky jsou prectene, GDT a IDT vlastni: pamet firmwaru je volna.
+    mm::reclaim_boot_memory(boot_info);
     let (free, total) = mm::phys::stats();
     kprintln!(
-        "pamet: vlastni tabulky stranek aktivni, volno {} / {} MiB",
+        "pamet: volno {} / {} MiB",
         free * 4096 / (1024 * 1024),
         total * 4096 / (1024 * 1024)
     );
 
-    // SAFETY: zasobnik prave alokovany v mm::init, namapovany, nepouzivany.
-    unsafe { arch::switch_stack(stack_top, kernel_main, boot_info as *const _ as u64) }
+    let stack = mm::KernelStack::new().expect("nedostatek pameti pro zasobnik");
+    let top = stack.top();
+    // Zasobnik bude navzdy patrit idle vlaknu bootovaciho CPU.
+    core::mem::forget(stack);
+    // SAFETY: zasobnik je prave alokovany, namapovany a nepouzivany.
+    unsafe { arch::switch_stack(top, kernel_main, boot_info as *const _ as u64) }
 }
 
 /// Pokracovani startu na zasobniku jadra s ochrannou strankou.
-extern "sysv64" fn kernel_main(_boot_info: u64) -> ! {
+extern "sysv64" fn kernel_main(boot_info: u64) -> ! {
+    // SAFETY: ukazatel predany z `_start`, BootInfo zije navzdy.
+    let boot_info = unsafe { &*(boot_info as *const BootInfo) };
+    let platform = PLATFORM.get().unwrap();
+
+    sched::init_cpu(0, arch::cpu_hw_id());
+    let cpus = smp::start_secondary_cpus(platform, boot_info);
+    kprintln!("smp: bezi {cpus} z {} CPU", platform.cpus.len());
+
+    sched::spawn("init", sched::Qos::Normal, init_main);
+    sched::idle_loop()
+}
+
+/// Prvni vlakno jadra. Pozdeji spusti prvni proces v userspace.
+fn init_main() {
     kprintln!("self-testy:");
     selftest::run();
-    kprintln!("Milnik 2 hotov, zastavuji CPU.");
-
+    kprintln!("Milnik 3 hotov.");
     if cfg!(feature = "qemu-test") {
         arch::qemu_exit(true);
     }
-    arch::halt_forever()
 }
 
 const fn arch_name() -> &'static str {
@@ -72,9 +118,12 @@ const fn arch_name() -> &'static str {
     }
 }
 
-/// Konec pri neopravitelne chybe: v testech ukonci QEMU s neuspechem,
-/// jinak zastavi CPU.
+static PANICKING: AtomicBool = AtomicBool::new(false);
+
+/// Konec pri neopravitelne chybe: zastavi ostatni CPU, v testech ukonci
+/// QEMU s neuspechem, jinak zastavi i aktualni CPU.
 pub fn fatal_stop() -> ! {
+    sched::halt_other_cpus();
     if cfg!(feature = "qemu-test") {
         arch::qemu_exit(false);
     }
@@ -83,6 +132,11 @@ pub fn fatal_stop() -> ! {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    arch::interrupts::disable();
+    if PANICKING.swap(true, Ordering::SeqCst) {
+        // Panika behem paniky (nebo na jinem CPU soucasne): jen zastavit.
+        arch::halt_forever();
+    }
     console::panic_print(format_args!("\nKERNEL PANIC: {info}\n"));
     arch::current_stack_trace(|addr| console::panic_print(format_args!("    {addr:#018x}\n")));
     fatal_stop()

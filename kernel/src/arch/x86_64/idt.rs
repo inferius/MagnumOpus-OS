@@ -1,17 +1,17 @@
-//! IDT a obsluha vyjimek CPU.
+//! IDT, obsluha vyjimek CPU a preruseni.
 //!
-//! Kazdy vektor ma maly vstupni stub (naked funkce), ktery sjednoti zasobnik
+//! Kazdy z 256 vektoru ma maly vstupni stub, ktery sjednoti zasobnik
 //! (doplni nulovy chybovy kod tam, kde ho CPU nevklada, a cislo vektoru)
 //! a skoci do spolecne casti. Ta ulozi vsechny registry do [`TrapFrame`]
-//! a zavola Rust funkci. Stejny ramec pozdeji poslouzi pro preruseni,
-//! prepinani kontextu a syscally.
+//! a zavola Rust funkci. Stejny ramec pozdeji poslouzi i pro syscally.
 
-use core::arch::{asm, naked_asm};
+use core::arch::{asm, global_asm, naked_asm};
 use core::mem::size_of;
 
+use super::apic::{self, VECTOR_HALT, VECTOR_RESCHEDULE, VECTOR_SPURIOUS, VECTOR_TIMER};
 use super::gdt::{IST_DOUBLE_FAULT, IST_MACHINE_CHECK, IST_NMI, KERNEL_CODE};
-use super::{cpu, stack_trace};
-use crate::console;
+use super::{cpu, halt_forever, stack_trace};
+use crate::{console, sched};
 
 /// Ulozeny stav CPU v okamziku vyjimky. Poradi odpovida `isr_common`.
 #[repr(C)]
@@ -106,35 +106,30 @@ extern "sysv64" fn isr_common() {
     )
 }
 
-macro_rules! stubs {
-    ($( $name:ident = $vec:literal $kind:ident ),* $(,)?) => {
-        $( stubs!(@one $name, $vec, $kind); )*
-        const STUBS: [extern "sysv64" fn(); 32] = [$($name),*];
-    };
-    (@one $name:ident, $vec:literal, noerr) => {
-        #[unsafe(naked)]
-        extern "sysv64" fn $name() {
-            naked_asm!("push 0", "push {v}", "jmp {c}", v = const $vec, c = sym isr_common)
-        }
-    };
-    (@one $name:ident, $vec:literal, err) => {
-        #[unsafe(naked)]
-        extern "sysv64" fn $name() {
-            naked_asm!("push {v}", "jmp {c}", v = const $vec, c = sym isr_common)
-        }
-    };
-}
+/// Tabulka 256 stubu po 16 bajtech. CPU vklada chybovy kod jen u vektoru
+/// 8, 10-14, 17, 21, 29 a 30; ostatnim stub doplni nulu.
+const STUB_SIZE: u64 = 16;
+global_asm!(
+    ".pushsection .text.isr_stubs, \"ax\"",
+    ".balign 16",
+    ".global __isr_stubs",
+    "__isr_stubs:",
+    ".set vec, 0",
+    ".rept 256",
+    ".balign 16",
+    ".if !(vec == 8 || (vec >= 10 && vec <= 14) || vec == 17 || vec == 21 || vec == 29 || vec == 30)",
+    "push 0",
+    ".endif",
+    "push vec",
+    "jmp {common}",
+    ".set vec, vec + 1",
+    ".endr",
+    ".popsection",
+    common = sym isr_common,
+);
 
-// Vektory, pro ktere CPU vklada chybovy kod: 8, 10-14, 17, 21, 29, 30.
-stubs! {
-    isr0 = 0 noerr, isr1 = 1 noerr, isr2 = 2 noerr, isr3 = 3 noerr,
-    isr4 = 4 noerr, isr5 = 5 noerr, isr6 = 6 noerr, isr7 = 7 noerr,
-    isr8 = 8 err, isr9 = 9 noerr, isr10 = 10 err, isr11 = 11 err,
-    isr12 = 12 err, isr13 = 13 err, isr14 = 14 err, isr15 = 15 noerr,
-    isr16 = 16 noerr, isr17 = 17 err, isr18 = 18 noerr, isr19 = 19 noerr,
-    isr20 = 20 noerr, isr21 = 21 err, isr22 = 22 noerr, isr23 = 23 noerr,
-    isr24 = 24 noerr, isr25 = 25 noerr, isr26 = 26 noerr, isr27 = 27 noerr,
-    isr28 = 28 noerr, isr29 = 29 err, isr30 = 30 err, isr31 = 31 noerr,
+unsafe extern "C" {
+    static __isr_stubs: u8;
 }
 
 const EXCEPTION_NAMES: [&str; 32] = [
@@ -178,40 +173,66 @@ const VEC_DOUBLE_FAULT: u64 = 8;
 const VEC_PAGE_FAULT: u64 = 14;
 const VEC_MACHINE_CHECK: u64 = 18;
 
-/// Nahraje IDT s obsluhou vyjimek na aktualnim CPU.
+/// Naplni IDT (jedna tabulka pro vsechna CPU). Volat jednou na BSP.
 ///
 /// # Safety
 ///
-/// Volat po `gdt::init` (pouziva IST z TSS), na bootovacim CPU, se
-/// zakazanymi prerusenimi a pred spustenim dalsich CPU.
+/// Volat jednou, pred `load` na jakemkoli CPU.
 pub unsafe fn init() {
+    let stubs = &raw const __isr_stubs as u64;
     // SAFETY: podle kontraktu k IDT nikdo jiny soucasne nepristupuje.
     unsafe {
         let idt = &raw mut IDT;
-        for (vector, stub) in STUBS.iter().enumerate() {
-            let ist = match vector as u64 {
+        for vector in 0..256u64 {
+            let ist = match vector {
                 VEC_DOUBLE_FAULT => IST_DOUBLE_FAULT,
                 VEC_NMI => IST_NMI,
                 VEC_MACHINE_CHECK => IST_MACHINE_CHECK,
                 _ => 0,
             };
-            (*idt)[vector] = IdtEntry::interrupt_gate(*stub as usize as u64, ist);
+            (*idt)[vector as usize] = IdtEntry::interrupt_gate(stubs + vector * STUB_SIZE, ist);
         }
-        let ptr = DescriptorTablePointer {
-            limit: (size_of::<[IdtEntry; 256]>() - 1) as u16,
-            base: idt as u64,
-        };
-        asm!("lidt [{}]", in(reg) &ptr, options(readonly, nostack, preserves_flags));
     }
 }
 
+/// Nahraje IDT na aktualnim CPU.
+///
+/// # Safety
+///
+/// Volat po `init` a po nahrani GDT/TSS tohoto CPU (IST).
+pub unsafe fn load() {
+    let ptr = DescriptorTablePointer {
+        limit: (size_of::<[IdtEntry; 256]>() - 1) as u16,
+        base: &raw const IDT as u64,
+    };
+    // SAFETY: IDT je staticka a naplnena v `init`.
+    unsafe { asm!("lidt [{}]", in(reg) &ptr, options(readonly, nostack, preserves_flags)) };
+}
+
 extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
-    match frame.vector {
+    let vector = frame.vector;
+    match vector {
         VEC_BREAKPOINT => {
             crate::kprintln!("breakpoint na {:#x}", frame.rip);
         }
         v if v < 32 => fatal_exception(frame),
-        _ => {}
+        v if v == VECTOR_TIMER as u64 => {
+            apic::eoi();
+            sched::on_timer_interrupt();
+        }
+        v if v == VECTOR_RESCHEDULE as u64 => {
+            apic::eoi();
+            sched::on_reschedule_ipi();
+        }
+        v if v == VECTOR_HALT as u64 => halt_forever(),
+        v if v == VECTOR_SPURIOUS as u64 => {} // spurious se nepotvrzuje
+        _ => {
+            apic::eoi();
+            crate::kprintln!("necekane preruseni, vektor {vector}");
+        }
+    }
+    if vector >= 32 {
+        sched::preempt_if_needed();
     }
 }
 

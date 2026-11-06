@@ -11,8 +11,8 @@
 //! Diry v pameti v bitmapach nikdy nejsou oznacene jako volne, takze se pres
 //! ne bloky nespoji.
 
+use crate::sync::SpinLock;
 use boot_info::{MemoryKind, MemoryRegion};
-use spin::Mutex;
 
 use super::PhysAddr;
 use crate::arch::paging::PAGE_SIZE;
@@ -44,7 +44,7 @@ struct Buddy {
 // pristup k nemu serializuje mutex.
 unsafe impl Send for Buddy {}
 
-static ALLOCATOR: Mutex<Option<Buddy>> = Mutex::new(None);
+static ALLOCATOR: SpinLock<Option<Buddy>> = SpinLock::new(None);
 
 const fn block_bytes(order: usize) -> u64 {
     PAGE_SIZE << order

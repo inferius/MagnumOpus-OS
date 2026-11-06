@@ -3,10 +3,13 @@
 Nový operační systém psaný od nuly v Rustu. Pracovní název zatím není, v kódu
 se používá `os` / `kernel`.
 
-Aktuální stav: **milník 2 (základ jádra)**. Vlastní UEFI loader nahraje
-kernel, předá mu mapu paměti, framebuffer a ACPI RSDP. Kernel nastaví
-GDT/TSS/IDT s obsluhou výjimek, spustí buddy alokátor fyzické paměti,
-přepne na vlastní tabulky stránek, má heap a zásobník s ochrannou stránkou.
+Aktuální stav: **milník 3 (procesy, plánovač, SMP)**. Vlastní UEFI loader
+nahraje kernel. Kernel má obsluhu výjimek, buddy alokátor fyzické paměti,
+vlastní tabulky stránek a heap; čte ACPI (MADT, HPET), kalibruje hodiny
+(TSC) a APIC timer, startuje všechna CPU a plánuje vlákna jádra
+(per-CPU fronty, třídy QoS, preempce, tickless časovač). Objektový model:
+objekty se signály, čekání na více objektů s timeoutem, tabulky handlů
+s právy, procesy s vlastním adresním prostorem.
 Návrh celého systému je v [docs/architektura.md](docs/architektura.md).
 
 ## Struktura

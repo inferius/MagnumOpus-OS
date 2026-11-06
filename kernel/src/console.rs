@@ -2,8 +2,8 @@
 
 use core::fmt::{self, Write};
 
+use crate::sync::SpinLock;
 use boot_info::Framebuffer;
-use spin::Mutex;
 
 use crate::arch::{self, SerialPort};
 use crate::framebuffer::FbConsole;
@@ -13,7 +13,7 @@ struct Console {
     fb: Option<FbConsole>,
 }
 
-static CONSOLE: Mutex<Option<Console>> = Mutex::new(None);
+static CONSOLE: SpinLock<Option<Console>> = SpinLock::new(None);
 
 /// Inicializuje konzoli. Volat jednou, co nejdrive po startu.
 ///

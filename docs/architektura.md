@@ -97,9 +97,21 @@ funkce v libos = vložit požadavek a počkat na dokončení.
 ### Plánovač
 
 - Per-CPU fronty, work stealing, SMP od milníku 3.
-- Tickless (TSC deadline / APIC one-shot) kvůli spotřebě.
+- Tickless (APIC one-shot, později TSC deadline) kvůli spotřebě: časovač se
+  nastavuje jen na konec kvanta nebo nejbližší probuzení, nečinné CPU spí
+  bez přerušení.
 - QoS třídy místo surových priorit: `realtime`, `interactive`, `normal`,
-  `background`. Na big.LITTLE se mapují na typ jader.
+  `background`. Na big.LITTLE se mapují na typ jader. Zatím přísná priorita
+  mezi třídami a round-robin uvnitř (kvantum 10 ms); později férovější
+  algoritmus (EEVDF), aby nižší třídy nehladověly.
+- Rozkládání zátěže: nová a probuzená vlákna jdou na nečinné CPU,
+  vystřídané vlákno se přesune na nečinné CPU, nečinné CPU si práci bere.
+- Probuzení: každé čekání má pořadové číslo, probuzení se starým číslem se
+  ignoruje; plané probuzení je dovolené a čekající kód podmínku ověří znovu.
+- Preempce vlákno nikdy neuspí ani neukončí, jen ho vrátí do fronty. Vlákno
+  může být přerušeno kdekoli, třeba uprostřed přípravy na čekání.
+- Hodiny: TSC kalibrovaný proti HPET (předpoklad: invariantní TSC
+  synchronizovaný mezi CPU).
 
 ### Syscall ABI a libos
 
@@ -228,7 +240,7 @@ důsledně dělí do `arch/`, aby port nebolel.
 
 1. Boot: UEFI loader, kernel vypíše text (hotovo)
 2. Základ jádra: GDT/IDT, výjimky, alokátor fyzické paměti, stránkování, heap (hotovo)
-3. Procesy: plánovač, SMP, vlákna, objekty, handly, capabilities
+3. Procesy: plánovač, SMP, vlákna, objekty, handly, capabilities (hotovo)
 4. Userspace: syscally, první proces, IPC, libos, initfs
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio), FS, grafika, kompozitor
