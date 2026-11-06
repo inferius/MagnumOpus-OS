@@ -34,7 +34,9 @@ sporné, co funguje:
 | oprávnění (`acl`), vlastník, čas přístupu, počet rozšířených atributů v záznamu objektu | ano | **zapisuje 0**, nečte (fáze 1d a později) |
 | generace objektu, čas vytvoření | ano | **používá** (`Stat`, přehrání logu) |
 | symbolické odkazy, jména do 1024 znaků, limit velikosti | ano | **používá** |
-| datasety, klony, handly, protokol v2 | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
+| datasety, klony s vazbou na původní snapshot | ano | **používá** ([Datasety](#datasety-a-klony)) |
+| diff verzí, obnova jako kopie | ano | **používá** ([Rozdíl verzí](#rozdíl-verzí-a-obnova-jako-kopie)) |
+| handly, protokol v2 | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
 
 ## Co nabízí
 
@@ -57,6 +59,7 @@ sporné, co funguje:
 | Soubory až 2^63-1 B, kontrolovaná aritmetika | hotovo | [Limity](#limity-formátu) |
 | UUID svazku a příznaky vlastností (compat/ro/incompat) | hotovo | [Superblok](#superblok) |
 | Snapshoty jen pro čtení a jejich mazání (deadlisty) | hotovo | [Snapshoty](#snapshoty) |
+| Datasety (složky s vlastní historií), zapisovatelné klony | hotovo | [Datasety](#datasety-a-klony) |
 | Kontrola konzistence (fsck) a ověření dat (scrub) | hotovo | [Kontrola](#kontrola-konzistence-a-scrub) |
 | Zapisovatelné klony, nativní git, indexy, vyhledávání | plán | [Verzování a git](#verzování-a-git) |
 
@@ -258,9 +261,10 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 | `DIRENT` | 2 | FNV-1a hash složeného jména | seznam položek se stejným hashem: (oid u64, druh u8, délka jména u16, jméno) |
 | `INLINE` | 3 | 0 | celý obsah souboru do 1984 B (`INLINE_MAX`) |
 | `EXTENT` | 4 | první logický blok | phys u64, počet u32 (1-496), příznaky u32 (1 = předalokovaný, rezervované; zatím musí být 0), birth u64, součty 16 B × počet |
-| `SNAPSHOT` | 5 | číslo snapshotu (objekt 0) | `BlockPtr` kořene, generace u64, jméno |
+| `SNAPSHOT` | 5 | číslo snapshotu (objekt 0) | `BlockPtr` kořene, generace u64, počet klonů u32, příznaky u32 (1 = skrytý), jméno |
 | `DEADLIST` | 6 | seznam << 32 \| pořadí (objekt 0) | až 80 mrtvých úseků (start u64, délka u64, birth u64) |
 | `SYMLINK` | 7 | 0 | cíl symbolického odkazu (UTF-8, 1-4096 B) |
+| `DATASET` | 8 | číslo datasetu (objekt 0, jen v kořenovém datasetu) | `DatasetRecord` 100 B: kořen, další oid, další snapshot, generace posl. snapshotu, pořadí deadlistu, původ klonu (dataset, snapshot, generace), příznaky |
 
 ### Záznam objektu (inode, 128 B)
 
@@ -794,6 +798,132 @@ další okno navazuje fyzicky za předchozím.
   v nečinnosti po commitu, ale jen když od posledního průchodu přišly
   změny.
 
+## Datasety a klony
+
+> **Změna proti v2:** nové. v2 měla jeden strom pro celý svazek. **Proč:**
+> jednotkou historie (snapshoty, klony, později commity a trezory) je
+> složka - projekt, domov, systém - ne celý disk.
+> ([všechny změny](fs-verze.md#přechod-v2---v3))
+
+**Dataset** je složka s vlastním stromem: vlastní čísla objektů, vlastní
+snapshoty a deadlisty. Pro uživatele je to obyčejná složka; v adresáři je
+to položka druhu `KIND_DATASET` (`Kind::Dataset`) a cesta do ní prostě
+přejde. Kořen svazku je **kořenový dataset** (číslo 1, stav v superbloku);
+ostatní mají záznam `DatasetRecord` ve stromu kořenového datasetu.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Datasety a klony">
+<defs><marker id="dk1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="200" height="60" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">kořenový dataset (1)</text><text class="m" x="110" y="64" text-anchor="middle">záznamy datasetů</text>
+<rect class="box" x="280" y="20" width="200" height="60" rx="6"/><text class="t b" x="380" y="45" text-anchor="middle">/projekt (2)</text><text class="m" x="380" y="64" text-anchor="middle">vlastní strom</text>
+<rect class="ok" x="280" y="120" width="200" height="50" rx="6"/><text class="t b" x="380" y="141" text-anchor="middle">snapshot S</text><text class="m" x="380" y="158" text-anchor="middle">clones = 1</text>
+<rect class="warn" x="550" y="120" width="200" height="60" rx="6"/><text class="t b" x="650" y="145" text-anchor="middle">/zkouska (3, klon)</text><text class="m" x="650" y="164" text-anchor="middle">origin = (2, S, gen S)</text>
+<path class="ln" d="M210 50 L278 50" marker-end="url(#dk1)"/>
+<path class="ln" d="M380 80 L380 118" marker-end="url(#dk1)"/>
+<path class="ln" d="M548 150 L482 145" marker-end="url(#dk1)"/>
+<text class="m" x="10" y="215">Klon sdílí bloky dosažitelné z kořene S (narozené do generace S); přepsání je dá do deadlistu klonu,</text>
+<text class="m" x="10" y="233">uvolnit je smí až S. Smazání S s klonem S jen skryje; skutečně se smaže se zánikem posledního klonu.</text>
+</svg>
+<figcaption>Dataset, jeho snapshot a klon s vazbou na původní snapshot.</figcaption>
+</figure>
+
+```rust
+let id = fs.create_dataset("/projekt")?;          // nová složka s vlastní historií
+fs.write("/projekt/cfg.toml", 0, b"a = 1")?;      // běžné operace beze změny
+fs.snapshot_of("/projekt", "pred-refaktorem")?;   // snapshot jen tohoto datasetu
+fs.clone_snapshot("/projekt", "pred-refaktorem", "/zkouska")?; // zapisovatelný klon
+fs.write("/zkouska/cfg.toml", 0, b"a = 2")?;      // originál se nezmění
+fs.delete_dataset("/zkouska")?;                   // uvolní jen bloky klonu
+```
+
+| Operace | Chování |
+|---|---|
+| `create_dataset(cesta)` | nový prázdný dataset; hned commit |
+| `snapshot_of(dataset, jméno)`, `snapshots_of`, `delete_snapshot_of`, `snapshot_read_of/stat_of/list_of` | jako u kořene, pro dataset s kořenem `dataset` (`"/"` = kořenový; staré funkce bez `_of` = kořenový) |
+| `clone_snapshot(dataset, snapshot, cesta)` | zapisovatelný klon (okamžitý, sdílí bloky); hned commit |
+| `delete_dataset(cesta)` | smaže dataset i jeho snapshoty a uvolní bloky, které držel jen on; `NOT_EMPTY` s vnořeným datasetem, `BAD_STATE`, když z jeho snapshotu existuje klon |
+| `datasets()` | seznam (číslo, původ klonu) |
+| `stat` | pole `dataset` = číslo datasetu, ve kterém objekt leží |
+
+**Pravidla:**
+
+- **Přesun mezi datasety** (`rename`) = `NOT_SUPPORTED` - jsou to jiné stromy,
+  šlo by o kopii dat. Přejmenovat nebo přesunout dataset uvnitř rodiče jde.
+- `remove` datasetu = `WRONG_TYPE` (maže se `delete_dataset`);
+  `create(…, Kind::Dataset)` = `INVALID_ARGS`.
+- **Pohled snapshotu** do jiného datasetu nepřechází (`NOT_SUPPORTED`):
+  snapshot kořene neví, co se v datasetu mezitím uvolnilo.
+- Souhrny velikostí adresáře se na hranici datasetu zastaví (dataset se do
+  rodiče nezapočítá).
+- Operace s datasety (vytvoření, klon, smazání) hned commitují, proto
+  nejsou v intent logu. Běžné změny ve více datasetech zapíše `fsync`
+  do jedné dávky; záznamy každého datasetu začínají značkou datasetu
+  (záznam logu 8).
+
+**Kdo drží bloky naživu (klon).** Klon vzniká ze snapshotu S: kořen =
+kořen S, hranice vlastnictví (`snapshot_generation`) = generace S, záznam
+`origin` = (dataset, S, generace S). Strom klonu vychází z kořene S, takže
+blok narozený do generace S je v klonu právě blok dosažitelný z S - klon ho
+jen sdílí. Jeho přepsání v klonu jde do deadlistu klonu, ale uvolnit ho smí
+až S. Blok narozený po vzniku klonu vlastní klon. Snapshot S drží počet
+klonů; jeho smazání při klonech S jen **skryje** (`SNAP_HIDDEN`, dál drží
+bloky) a skutečné smazání proběhne se zánikem posledního klonu. Mazání
+vlastních snapshotů klonu bere jako spodní hranici generaci S.
+
+**Smazání datasetu** projde jeho uložený strom a uvolní uzly a data
+narozené po hranici (u klonu generace S); podstromy narozené dřív přeskočí
+(sdílené s S). Vše v jednom commitu - výpadek během mazání nechá stav před,
+nebo po (test `power_loss_during_dataset_deletion`).
+
+**Implementace:** kód operací pracuje vždy s aktivním datasetem
+(`Store::root`, `next_oid`, buffer dat, čekající změny logu); ostatní
+načtené datasety leží v paměti zvlášť a `activate` je prohodí. `enter`
+projde cestu a nechá aktivní dataset cíle. Commit zapíše strom a záznam
+každého změněného datasetu a nakonec kořenový dataset - vše v jedné
+transakci.
+
+⚠️ **Omezení první verze:** přísná kontrola dvojího použití datového bloku ve fsck platí jen pro kořenový
+dataset (klony sdílejí data legitimně); defragmentace na pozadí prochází jen
+aktivní dataset; služba fsd a protokol v1 datasety zatím jen zobrazí (druh 4
+ve výpisu), vytvářet je půjde s protokolem v2 nebo nástrojem `osfs`.
+
+### Rozdíl verzí a obnova jako kopie
+
+```rust
+// Co se v projektu změnilo od snapshotu v1 (proti živé verzi):
+for c in fs.diff("/projekt", "v1", None)? {
+    println!("{:?} {} {:?}", c.kind, c.path, c.old_path); // Modified /cfg.toml None
+}
+// Co změnil klon proti snapshotu, ze kterého vznikl („zkusit bokem“):
+let zmeny = fs.diff_clone("/projekt-bokem")?;
+// Jeden soubor ze snapshotu vedle aktuálního:
+fs.restore_copy("/projekt", "v1", "/cfg.toml", "/projekt/cfg (v1).toml")?;
+```
+
+| Funkce | Co dělá |
+|---|---|
+| `diff(dataset, from, to)` | rozdíl snapshotu `from` a snapshotu `to` (nebo živé verze, `to = None`); seřazený podle cesty |
+| `diff_clone(klon)` | rozdíl klonu proti jeho původnímu snapshotu |
+| `restore_copy(dataset, snapshot, cesta, cíl)` | obnoví soubor, odkaz nebo celou složku ze snapshotu jako kopii `cíl` (nesmí existovat); vnořené datasety přeskočí |
+| `snapshot_readlink_of` | cíl odkazu ve snapshotu |
+
+Druhy změn (`ChangeKind`): `Added`, `Removed`, `Modified` (obsah souboru
+nebo cíl odkazu; u adresáře se nehlásí - jeho změny jsou změny položek),
+`Moved` (jiná cesta, tentýž objekt - `old_path`), `MovedModified`.
+Protože oid je v datasetu stabilní, **přesun se pozná přesně**, ne
+heuristikou podle obsahu jako v gitu.
+
+**Jak to funguje:** pro každou verzi se načte souhrn: objekt -> (druh,
+velikost, otisk obsahu) a objekt -> (rodič, jméno). Otisk obsahu je součet
+XXH3 přes položky dat (extenty se součty bloků, malý soubor, cíl odkazu),
+takže se data nečtou. Při diffu proti živé verzi se nejdřív zapíše buffer
+dat (bez commitu), aby diff viděl i neuložené změny.
+
+⚠️ **Omezení první verze:** diff prochází oba stromy celé (cena podle
+velikosti datasetu, ne změny) - plán: přeskočit podstromy se stejným
+ukazatelem. Obnova jako kopie data opravdu kopíruje; okamžitá kopie přes
+sdílené bloky přijde s okamžitými kopiemi souborů (fáze 3).
+
 ## Snapshoty
 
 Snapshot je uložený kořen stromu v okamžiku vytvoření - jen pro čtení,
@@ -1067,6 +1197,8 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `tests/basic.rs` | soubory, adresáře, jména, souhrny, chyby, štěpení stromu, opakované použití místa, plný disk, snapshoty, odhalení poškození |
 | `tests/features.rs` | souvislý zápis, fsync + přehrání, návrat o generaci, mazání snapshotů, defragmentace, TRIM, víc AG + BLAKE3, zhušťování logů |
 | `tests/model.rs` | property test: náhodné sekvence (vytvoření, zápis, zkrácení, mazání, přesun, commit, fsync, „pád“, snapshoty) proti modelu v paměti; na konci fsck |
+| `tests/versions.rs` | první ukázka: snapshot, klon, změny, diff (i přesun), obnova souboru a složky jako kopie, totéž s pádem uprostřed zápisu |
+| `tests/datasets.rs` | datasety: vlastní stromy, pravidla, snapshoty, dva klony z jednoho snapshotu po jeho smazání, snapshoty klonu, fsync přes víc datasetů, výpadek během mazání, účtování místa |
 | `tests/crash.rs` | výpadek během commitu i fsync s náhodnou podmnožinou nezapsaných bloků |
 | `tests/mount.rs` (doplněno) | nečitelný nejnovější slot = jen pro čtení a nejnovější generace přežije; nečitelná dávka logu neztratí potvrzený fsync; `check` jen pro čtení bez zápisu |
 | `tests/ondisk.rs` | poškozené hodnoty se správným součtem: extent mimo svazek, uvolnění volných bloků, délka malého souboru, cyklus rodičů a vrácení operace |

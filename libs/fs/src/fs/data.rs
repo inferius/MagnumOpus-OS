@@ -148,8 +148,8 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     pub(super) fn file_oid(&mut self, path: &str) -> Result<(u64, Inode)> {
+        let oid = self.enter(path)?;
         let root = self.s.root;
-        let oid = self.resolve(&root, path)?;
         let i = self.inode(&root, oid)?;
         if i.kind != KIND_FILE {
             return Err(not_file(i.kind));
@@ -183,7 +183,7 @@ impl<D: BlockDevice> Fs<D> {
         self.ensure_room(blocks + 8)?;
         if self.dirty_blocks + blocks > DIRTY_HARD_LIMIT {
             // Pred prijetim: kdyz se buffer neda vyprazdnit, nic neprijmout.
-            self.flush_all_data()?;
+            self.for_each_dataset(|fs| fs.flush_all_data())?;
         }
         let new_size = inode.size.max(end);
         self.guarded(|fs| fs.set_content(oid, inode, new_size, Some((offset, data))))?;
@@ -191,7 +191,7 @@ impl<D: BlockDevice> Fs<D> {
         // bufferu) a nahlasi se az pri fsync/commit; jen kdyz po nem svazek
         // presel do stavu chyby (nic uz se neulozi), vrati se chyba.
         if self.dirty_blocks > DIRTY_LIMIT
-            && let Err(e) = self.flush_all_data()
+            && let Err(e) = self.for_each_dataset(|fs| fs.flush_all_data())
             && self.s.poisoned
         {
             return Err(e);

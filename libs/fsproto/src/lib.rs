@@ -78,6 +78,8 @@ pub mod kind {
     /// Symbolicky odkaz (zatim jen ve vypisu a STAT; vytvareni prijde s
     /// protokolem v2).
     pub const SYMLINK: u8 = 3;
+    /// Vstup do jineho datasetu (slozka s vlastni historii).
+    pub const DATASET: u8 = 4;
 }
 
 /// Metadata objektu.

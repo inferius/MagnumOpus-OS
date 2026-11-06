@@ -36,7 +36,9 @@ what works:
 | permissions (`acl`), owner, access time, extended attribute count in the object record | yes | **writes 0**, does not read (phase 1d and later) |
 | object generation, creation time | yes | **uses** (`Stat`, log replay) |
 | symbolic links, names up to 1024 characters, size limit | yes | **uses** |
-| datasets, clones, handles, protocol v2 | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
+| datasets, clones linked to the origin snapshot | yes | **uses** ([Datasets](#datasets-and-clones)) |
+| diff of versions, restore as a copy | yes | **uses** ([Diff of versions](#diff-of-versions-and-restore-as-a-copy)) |
+| handles, protocol v2 | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
 
 ## What it offers
 
@@ -59,6 +61,7 @@ what works:
 | Files up to 2^63-1 B, checked arithmetic | done | [Limits](#format-limits) |
 | Volume UUID and feature flags (compat/ro/incompat) | done | [Superblock](#superblock) |
 | Read-only snapshots and their deletion (deadlists) | done | [Snapshots](#snapshots) |
+| Datasets (folders with their own history), writable clones | done | [Datasets](#datasets-and-clones) |
 | Consistency check (fsck) and data verification (scrub) | done | [Check](#consistency-check-and-scrub) |
 | Writable clones, native git, indexes, search | planned | [Versioning and git](#versioning-and-git) |
 
@@ -261,9 +264,10 @@ content).
 | `DIRENT` | 2 | FNV-1a hash of the folded name | list of entries with the same hash: (oid u64, kind u8, name length u16, name) |
 | `INLINE` | 3 | 0 | the whole content of a file up to 1984 B (`INLINE_MAX`) |
 | `EXTENT` | 4 | first logical block | phys u64, count u32 (1-496), flags u32 (1 = preallocated, reserved; must be 0 for now), birth u64, checksums 16 B × count |
-| `SNAPSHOT` | 5 | snapshot number (object 0) | root `BlockPtr`, generation u64, name |
+| `SNAPSHOT` | 5 | snapshot number (object 0) | root `BlockPtr`, generation u64, clone count u32, flags u32 (1 = hidden), name |
 | `DEADLIST` | 6 | list << 32 \| sequence (object 0) | up to 80 dead ranges (start u64, length u64, birth u64) |
 | `SYMLINK` | 7 | 0 | target of a symbolic link (UTF-8, 1-4096 B) |
+| `DATASET` | 8 | dataset number (object 0, only in the root dataset) | `DatasetRecord` 100 B: root, next oid, next snapshot, generation of the last snapshot, deadlist sequence, clone origin (dataset, snapshot, generation), flags |
 
 ### Object record (inode, 128 B)
 
@@ -817,6 +821,138 @@ continues physically right after the previous one.
   when idle after a commit, but only when changes arrived since the last
   pass.
 
+## Datasets and clones
+
+> **Change from v2:** new. v2 had one tree for the whole volume. **Why:**
+> the unit of history (snapshots, clones, later commits and vaults) is a
+> folder - a project, a home, the system - not the whole disk.
+> ([all changes](fs-versions.md#transition-v2---v3))
+
+A **dataset** is a folder with its own tree: its own object numbers, its own
+snapshots and deadlists. For the user it is an ordinary folder; in the
+directory it is an entry of kind `KIND_DATASET` (`Kind::Dataset`) and a path
+simply crosses into it. The volume root is the **root dataset** (number 1,
+state in the superblock); the others have a `DatasetRecord` in the root
+dataset's tree.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Datasets and clones">
+<defs><marker id="dk1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="200" height="60" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">root dataset (1)</text><text class="m" x="110" y="64" text-anchor="middle">dataset records</text>
+<rect class="box" x="280" y="20" width="200" height="60" rx="6"/><text class="t b" x="380" y="45" text-anchor="middle">/project (2)</text><text class="m" x="380" y="64" text-anchor="middle">own tree</text>
+<rect class="ok" x="280" y="120" width="200" height="50" rx="6"/><text class="t b" x="380" y="141" text-anchor="middle">snapshot S</text><text class="m" x="380" y="158" text-anchor="middle">clones = 1</text>
+<rect class="warn" x="550" y="120" width="200" height="60" rx="6"/><text class="t b" x="650" y="145" text-anchor="middle">/trial (3, clone)</text><text class="m" x="650" y="164" text-anchor="middle">origin = (2, S, gen S)</text>
+<path class="ln" d="M210 50 L278 50" marker-end="url(#dk1)"/>
+<path class="ln" d="M380 80 L380 118" marker-end="url(#dk1)"/>
+<path class="ln" d="M548 150 L482 145" marker-end="url(#dk1)"/>
+<text class="m" x="10" y="215">A clone shares blocks reachable from S's root (born up to S's generation); overwriting puts them on the clone's</text>
+<text class="m" x="10" y="233">deadlist, only S may free them. Deleting S while it has a clone only hides it; it is really deleted with the last clone.</text>
+</svg>
+<figcaption>A dataset, its snapshot and a clone linked to its origin snapshot.</figcaption>
+</figure>
+
+```rust
+let id = fs.create_dataset("/project")?;          // a new folder with its own history
+fs.write("/project/cfg.toml", 0, b"a = 1")?;      // ordinary operations unchanged
+fs.snapshot_of("/project", "before-refactor")?;   // a snapshot of this dataset only
+fs.clone_snapshot("/project", "before-refactor", "/trial")?; // a writable clone
+fs.write("/trial/cfg.toml", 0, b"a = 2")?;        // the original does not change
+fs.delete_dataset("/trial")?;                     // frees only the clone's blocks
+```
+
+| Operation | Behaviour |
+|---|---|
+| `create_dataset(path)` | a new empty dataset; commits at once |
+| `snapshot_of(dataset, name)`, `snapshots_of`, `delete_snapshot_of`, `snapshot_read_of/stat_of/list_of` | as for the root, for the dataset rooted at `dataset` (`"/"` = root; the old functions without `_of` = root) |
+| `clone_snapshot(dataset, snapshot, path)` | a writable clone (instant, shares blocks); commits at once |
+| `delete_dataset(path)` | deletes the dataset with its snapshots and frees the blocks only it held; `NOT_EMPTY` with a nested dataset, `BAD_STATE` when a clone of its snapshot exists |
+| `datasets()` | a list (number, clone origin) |
+| `stat` | the `dataset` field = number of the dataset the object lives in |
+
+**Rules:**
+
+- **Moving between datasets** (`rename`) = `NOT_SUPPORTED` - they are
+  different trees, it would be a data copy. Renaming or moving a dataset
+  within its parent works.
+- `remove` of a dataset = `WRONG_TYPE` (it is deleted with
+  `delete_dataset`); `create(..., Kind::Dataset)` = `INVALID_ARGS`.
+- A **snapshot view** does not cross into another dataset
+  (`NOT_SUPPORTED`): a root snapshot does not know what the dataset freed
+  in the meantime.
+- Directory size summaries stop at a dataset boundary (a dataset does not
+  count into its parent).
+- Dataset operations (create, clone, delete) commit at once, so they are
+  not in the intent log. Ordinary changes in several datasets are written
+  by `fsync` in one batch; the records of each dataset start with a dataset
+  marker (log record 8).
+
+**Who keeps blocks alive (clone).** A clone comes from snapshot S: root =
+S's root, ownership boundary (`snapshot_generation`) = S's generation, the
+`origin` record = (dataset, S, S's generation). The clone's tree derives
+from S's root, so a block born up to S's generation is in the clone exactly
+a block reachable from S - the clone only shares it. Overwriting it in the
+clone puts it on the clone's deadlist, but only S may free it. A block born
+after the clone was created is owned by the clone. Snapshot S keeps a clone
+count; deleting it while it has clones only **hides** it (`SNAP_HIDDEN`, it
+keeps holding blocks) and the real deletion happens with the last clone.
+Deleting the clone's own snapshots uses S's generation as the lower bound.
+
+**Deleting a dataset** walks its stored tree and frees nodes and data born
+after the boundary (for a clone S's generation); subtrees born earlier are
+skipped (shared with S). All in one commit - power loss during deletion
+leaves the state before or after (test `power_loss_during_dataset_deletion`).
+
+**Implementation:** operation code always works with the active dataset
+(`Store::root`, `next_oid`, the data buffer, pending log changes); the other
+loaded datasets are kept in memory separately and `activate` swaps them.
+`enter` walks a path and leaves the target's dataset active. A commit
+writes the tree and record of every changed dataset and finally the root
+dataset - all in one transaction.
+
+⚠️ **Limitations of the first version:** the strict check for a data block used twice in fsck applies
+only to the root dataset (clones share data legitimately); background
+defragmentation walks only the active dataset; the fsd service and protocol
+v1 only show datasets (kind 4 in listings), creating them will come with
+protocol v2 or the `osfs` tool.
+
+### Diff of versions and restore as a copy
+
+```rust
+// What changed in the project since snapshot v1 (against the live version):
+for c in fs.diff("/project", "v1", None)? {
+    println!("{:?} {} {:?}", c.kind, c.path, c.old_path); // Modified /cfg.toml None
+}
+// What a clone changed against the snapshot it came from ("try on the side"):
+let changes = fs.diff_clone("/project-trial")?;
+// One file from a snapshot next to the current one:
+fs.restore_copy("/project", "v1", "/cfg.toml", "/project/cfg (v1).toml")?;
+```
+
+| Function | What it does |
+|---|---|
+| `diff(dataset, from, to)` | the difference between snapshot `from` and snapshot `to` (or the live version, `to = None`); sorted by path |
+| `diff_clone(clone)` | the difference of a clone against its origin snapshot |
+| `restore_copy(dataset, snapshot, path, dest)` | restores a file, link or whole folder from a snapshot as a copy `dest` (must not exist); nested datasets are skipped |
+| `snapshot_readlink_of` | a link target in a snapshot |
+
+Kinds of change (`ChangeKind`): `Added`, `Removed`, `Modified` (file content
+or link target; not reported for a directory - its changes are changes of
+its entries), `Moved` (a different path, the same object - `old_path`),
+`MovedModified`. Because the oid is stable within a dataset, **a move is
+detected exactly**, not heuristically by content as in git.
+
+**How it works:** for each version a summary is loaded: object -> (kind,
+size, content fingerprint) and object -> (parent, name). The content
+fingerprint is an XXH3 checksum over the data entries (extents with block
+checksums, a small file, a link target), so no data is read. A diff against
+the live version first writes the data buffer (without a commit) so that it
+also sees unsaved changes.
+
+⚠️ **Limitations of the first version:** the diff walks both trees fully
+(cost by dataset size, not by change) - planned: skipping subtrees with the
+same pointer. Restore as a copy really copies the data; an instant copy via
+shared blocks comes with instant file copies (phase 3).
+
 ## Snapshots
 
 A snapshot is the tree root saved at creation time - read-only, created
@@ -1094,6 +1230,8 @@ system returns them:
 | `tests/basic.rs` | files, directories, names, summaries, errors, tree splits, space reuse, full disk, snapshots, corruption detection |
 | `tests/features.rs` | contiguous writes, fsync + replay, generation fallback, snapshot deletion, defragmentation, TRIM, many AGs + BLAKE3, log condensing |
 | `tests/model.rs` | property test: random sequences (create, write, truncate, remove, move, commit, fsync, "crash", snapshots) against an in-memory model; fsck at the end |
+| `tests/versions.rs` | the first demo: snapshot, clone, changes, diff (including a move), restoring a file and a folder as a copy, the same with a crash in the middle of a write |
+| `tests/datasets.rs` | datasets: own trees, rules, snapshots, two clones of one snapshot after its deletion, clone snapshots, fsync across several datasets, power loss during deletion, space accounting |
 | `tests/crash.rs` | power loss during commit and fsync with a random subset of unwritten blocks |
 | `tests/mount.rs` (extended) | an unreadable newest slot = read-only and the newest generation survives; an unreadable log batch does not lose a confirmed fsync; read-only `check` without writes |
 | `tests/ondisk.rs` | damaged values with a correct checksum: extent outside the volume, freeing free blocks, small file length, parent cycle and operation rollback |

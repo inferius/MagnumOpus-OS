@@ -21,7 +21,8 @@ use super::{DirEntry, Fs, SnapshotInfo, Stat};
 use crate::btree;
 use crate::device::BlockDevice;
 use crate::layout::{
-    DEAD_PER_ITEM, DeadExtent, Key, META_OID, SnapshotRecord, decode_dead, encode_dead, item,
+    DEAD_PER_ITEM, DeadExtent, Key, META_OID, SNAP_HIDDEN, SnapshotRecord, decode_dead, encode_dead,
+    item,
 };
 use crate::names::{fold_name, stored_name, validate_name};
 use crate::node::Child;
@@ -77,11 +78,18 @@ impl<D: BlockDevice> Fs<D> {
             .collect()
     }
 
-    /// Ulozi aktualni stav a zachyti ho jako snapshot `name` (jen pro cteni).
+    /// Ulozi aktualni stav a zachyti korenovy dataset jako snapshot `name`
+    /// (jen pro cteni). Jiny dataset: `snapshot_of`.
     pub fn snapshot(&mut self, name: &str) -> Result<u64> {
+        self.snapshot_of("/", name)
+    }
+
+    /// Snapshot datasetu, jehoz korenem je `dataset` (napr. "/projekt").
+    pub fn snapshot_of(&mut self, dataset: &str, name: &str) -> Result<u64> {
         validate_name(name)?;
+        self.enter_dataset(dataset)?;
         if self
-            .snapshots()?
+            .snapshots_active()?
             .iter()
             .any(|s| fold_name(&s.name) == fold_name(name))
         {
@@ -89,9 +97,14 @@ impl<D: BlockDevice> Fs<D> {
         }
         self.ensure_room(8)?;
         self.commit()?;
+        let Child::Disk(root) = self.s.root else {
+            return Err(Error::BadState);
+        };
         let record = SnapshotRecord {
-            root: self.s.sb.root,
+            root,
             generation: self.s.sb.generation,
+            clones: 0,
+            flags: 0,
             name: stored_name(name),
         };
         let id = self.s.next_snapshot;
@@ -103,108 +116,165 @@ impl<D: BlockDevice> Fs<D> {
         Ok(id)
     }
 
+    /// Snapshoty korenoveho datasetu.
     pub fn snapshots(&mut self) -> Result<Vec<SnapshotInfo>> {
-        let root = self.s.root;
+        self.snapshots_of("/")
+    }
+
+    /// Snapshoty datasetu `dataset` (skryte - drzene jen kvuli klonum - ne).
+    pub fn snapshots_of(&mut self, dataset: &str) -> Result<Vec<SnapshotInfo>> {
+        self.enter_dataset(dataset)?;
+        self.snapshots_active()
+    }
+
+    pub(super) fn snapshots_active(&mut self) -> Result<Vec<SnapshotInfo>> {
         Ok(self
-            .records(&root)?
+            .records_active()?
             .into_iter()
+            .filter(|(_, r)| !r.hidden())
             .map(|(id, r)| SnapshotInfo {
                 id,
                 name: r.name,
                 generation: r.generation,
+                clones: r.clones,
             })
             .collect())
     }
 
-    fn find_snapshot(&mut self, name: &str) -> Result<(u64, SnapshotRecord)> {
-        let folded = fold_name(name);
+    pub(super) fn records_active(&mut self) -> Result<Vec<(u64, SnapshotRecord)>> {
         let root = self.s.root;
-        self.records(&root)?
+        self.records(&root)
+    }
+
+    /// Snapshot podle jmena v aktivnim datasetu (skryte se nehledaji).
+    pub(super) fn find_snapshot(&mut self, name: &str) -> Result<(u64, SnapshotRecord)> {
+        let folded = fold_name(name);
+        self.records_active()?
             .into_iter()
-            .find(|(_, r)| fold_name(&r.name) == folded)
+            .find(|(_, r)| !r.hidden() && fold_name(&r.name) == folded)
             .ok_or(Error::NotFound)
     }
 
-    /// Smaze snapshot a uvolni bloky, ktere drzel jen on.
+    /// Smaze snapshot korenoveho datasetu a uvolni bloky, ktere drzel jen on.
     pub fn delete_snapshot(&mut self, name: &str) -> Result<()> {
+        self.delete_snapshot_of("/", name)
+    }
+
+    /// Smaze snapshot datasetu `dataset`. Snapshot, ze ktereho vznikl klon,
+    /// se jen skryje (bloky drzi dal pro klon) a smaze se se zanikem
+    /// posledniho klonu.
+    pub fn delete_snapshot_of(&mut self, dataset: &str, name: &str) -> Result<()> {
         self.guarded(|fs| {
-            let (id, _) = fs.find_snapshot(name)?;
+            fs.enter_dataset(dataset)?;
             fs.ensure_room_freeing(16)?;
-            // Mrtve bloky cekajici v pameti musi byt v deadlistu, jinak by je
-            // zpracovani seznamu minulo.
-            fs.flush_dead()?;
-            let root = fs.s.root;
-            let all = fs.records(&root)?;
-            let prev_gen = all
-                .iter()
-                .filter(|(i, _)| *i < id)
-                .map(|(_, r)| r.generation)
-                .max()
-                .unwrap_or(0);
-            let next = all.iter().map(|(i, _)| *i).filter(|&i| i > id).min();
-            let next_list = next.unwrap_or(fs.s.next_snapshot);
-            // Seznam N: bloky narozene po P drzel jen mazany snapshot.
-            let (a, b) = list_range(next_list);
-            let root = fs.s.root;
-            for (k, v) in btree::collect(&mut fs.s, &root, &a, &b)? {
-                let (free, keep): (Vec<DeadExtent>, Vec<DeadExtent>) = decode_dead(&v)?
-                    .into_iter()
-                    .partition(|d| d.birth > prev_gen);
-                if free.is_empty() {
-                    continue;
-                }
-                for d in &free {
-                    let txg = fs.s.txg;
-                    fs.s.space.free(d.start, d.len, txg, false);
-                }
-                if keep.is_empty() {
-                    fs.del(&k)?;
-                } else {
-                    fs.put(k, encode_dead(&keep))?;
-                }
-            }
-            // Seznam S se presune do N.
-            let (a, b) = list_range(id);
-            let root = fs.s.root;
-            for (k, v) in btree::collect(&mut fs.s, &root, &a, &b)? {
-                fs.del(&k)?;
-                let entries = decode_dead(&v)?;
-                fs.put_dead_item(next_list, &entries)?;
-            }
-            fs.del(&Key::new(META_OID, item::SNAPSHOT, id))?;
-            if next.is_none() {
-                // Mazal se posledni snapshot: hranici vlastnictvi posunout zpet.
-                fs.s.snapshot_generation = prev_gen;
-            }
-            fs.s.mark_changed();
-            Ok(())
+            fs.delete_snapshot_active(name)
         })
     }
 
-    fn snapshot_root(&mut self, name: &str) -> Result<Child> {
+    pub(super) fn delete_snapshot_active(&mut self, name: &str) -> Result<()> {
+        let (id, mut rec) = self.find_snapshot(name)?;
+        if rec.clones > 0 {
+            rec.flags |= SNAP_HIDDEN;
+            return self.put(Key::new(META_OID, item::SNAPSHOT, id), rec.encode());
+        }
+        self.destroy_snapshot(id)
+    }
+
+    /// Doopravdy smaze snapshot `id` aktivniho datasetu (deadlisty).
+    pub(super) fn destroy_snapshot(&mut self, id: u64) -> Result<()> {
+        // Mrtve bloky cekajici v pameti musi byt v deadlistu, jinak by je
+        // zpracovani seznamu minulo.
+        self.flush_dead()?;
+        let root = self.s.root;
+        let all = self.records(&root)?;
+        // Spodni hranice: u klonu generace puvodu (bloky do ni patri
+        // puvodnimu snapshotu, ne klonu).
+        let floor = self.cur_origin.2;
+        let prev_gen = all
+            .iter()
+            .filter(|(i, _)| *i < id)
+            .map(|(_, r)| r.generation)
+            .max()
+            .unwrap_or(0)
+            .max(floor);
+        let next = all.iter().map(|(i, _)| *i).filter(|&i| i > id).min();
+        let next_list = next.unwrap_or(self.s.next_snapshot);
+        // Seznam N: bloky narozene po P drzel jen mazany snapshot.
+        let (a, b) = list_range(next_list);
+        let root = self.s.root;
+        for (k, v) in btree::collect(&mut self.s, &root, &a, &b)? {
+            let (free, keep): (Vec<DeadExtent>, Vec<DeadExtent>) = decode_dead(&v)?
+                .into_iter()
+                .partition(|d| d.birth > prev_gen);
+            if free.is_empty() {
+                continue;
+            }
+            for d in &free {
+                let txg = self.s.txg;
+                self.s.space.free(d.start, d.len, txg, false);
+            }
+            if keep.is_empty() {
+                self.del(&k)?;
+            } else {
+                self.put(k, encode_dead(&keep))?;
+            }
+        }
+        // Seznam S se presune do N.
+        let (a, b) = list_range(id);
+        let root = self.s.root;
+        for (k, v) in btree::collect(&mut self.s, &root, &a, &b)? {
+            self.del(&k)?;
+            let entries = decode_dead(&v)?;
+            self.put_dead_item(next_list, &entries)?;
+        }
+        self.del(&Key::new(META_OID, item::SNAPSHOT, id))?;
+        if next.is_none() {
+            // Mazal se posledni snapshot: hranici vlastnictvi posunout zpet.
+            self.s.snapshot_generation = prev_gen;
+        }
+        self.s.mark_changed();
+        Ok(())
+    }
+
+    fn snapshot_root(&mut self, dataset: &str, name: &str) -> Result<Child> {
+        self.enter_dataset(dataset)?;
         Ok(Child::Disk(self.find_snapshot(name)?.1.root))
     }
 
     pub fn snapshot_stat(&mut self, snapshot: &str, path: &str) -> Result<Stat> {
-        let root = self.snapshot_root(snapshot)?;
+        self.snapshot_stat_of("/", snapshot, path)
+    }
+
+    pub fn snapshot_list(&mut self, snapshot: &str, path: &str) -> Result<Vec<DirEntry>> {
+        self.snapshot_list_of("/", snapshot, path)
+    }
+
+    pub fn snapshot_read(&mut self, snapshot: &str, path: &str, offset: u64, len: usize) -> Result<Vec<u8>> {
+        self.snapshot_read_of("/", snapshot, path, offset, len)
+    }
+
+    /// `stat` ve snapshotu datasetu `dataset` (cesta uvnitr datasetu).
+    pub fn snapshot_stat_of(&mut self, dataset: &str, snapshot: &str, path: &str) -> Result<Stat> {
+        let root = self.snapshot_root(dataset, snapshot)?;
         let oid = self.resolve(&root, path)?;
         self.stat_oid(&root, oid)
     }
 
-    pub fn snapshot_list(&mut self, snapshot: &str, path: &str) -> Result<Vec<DirEntry>> {
-        let root = self.snapshot_root(snapshot)?;
+    pub fn snapshot_list_of(&mut self, dataset: &str, snapshot: &str, path: &str) -> Result<Vec<DirEntry>> {
+        let root = self.snapshot_root(dataset, snapshot)?;
         let oid = self.resolve(&root, path)?;
         self.list_oid(&root, oid)
     }
 
-    pub fn snapshot_read(
+    pub fn snapshot_read_of(
         &mut self,
+        dataset: &str,
         snapshot: &str,
         path: &str,
         offset: u64,
         len: usize,
     ) -> Result<Vec<u8>> {
-        let root = self.snapshot_root(snapshot)?;
+        let root = self.snapshot_root(dataset, snapshot)?;
         let oid = self.resolve(&root, path)?;
         self.read_oid(&root, oid, offset, len, false)
     }

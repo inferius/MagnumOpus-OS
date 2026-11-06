@@ -15,6 +15,7 @@ fn stat(s: fs::Stat) -> Stat {
             Kind::File => kind::FILE,
             Kind::Dir => kind::DIR,
             Kind::Symlink => kind::SYMLINK,
+            Kind::Dataset => kind::DATASET,
         },
         size: s.size,
         mtime: s.mtime,
@@ -33,6 +34,7 @@ fn entries(list: Vec<fs::DirEntry>) -> Vec<DirEntry> {
                 Kind::File => kind::FILE,
                 Kind::Dir => kind::DIR,
                 Kind::Symlink => kind::SYMLINK,
+            Kind::Dataset => kind::DATASET,
             },
             oid: e.oid,
         })

@@ -310,6 +310,165 @@ mobilu, bez závislostního pekla linuxových balíčkovačů.
     jako vlastní userspace ovladač psaný podle linuxového kódu.
 - Postup: virtio-gpu (Venus) v QEMU, pak jedna rodina reálných GPU
   (nejspíš Intel).
+- **Cesta podobná Waylandu, ne X11:** kompozitor jen skládá buffery
+  klientů; aplikace nevidí cizí okna ani vstup; snímání obrazovky
+  a nahrávání jen přes capability (systém ukáže, kdo právě snímá).
+- **Jedna nativní knihovna UI** (deklarativní, Rust) místo dvou
+  konkurenčních jako GTK a Qt: jednotný vzhled, přístupnost a lokalizace
+  pro všechny; vrstva Windows (`user32`/`gdi32`) se na ni mapuje.
+- **Návrhy k odsouhlasení:**
+  - **Okno ukazuje oprávnění:** ikona v titulku řekne, ke kterým složkám,
+    síti nebo kameře má aplikace právě přístup; jedním klikem odebrat.
+  - **Systémové dialogy nepodvrhnutelné:** dialog oprávnění nebo hesla
+    kreslí kompozitor v oddělené vrstvě (aplikace ho nepřekreslí ani
+    nenapodobí).
+  - **Rozpracovaný stav aplikací přežije restart:** aplikace ukládá stav
+    UI do vlastního datasetu; po aktualizaci nebo pádu se okna vrátí.
+  - **Plynulost jako požadavek:** viz [Plynulost uživatelského
+    rozhraní](#plynulost-uživatelského-rozhraní-plán) - termíny snímků,
+    QoS a dědění priority přes IPC.
+
+## Rozhodnutí k milníkům 6a-6d (odsouhlaseno)
+
+| # | Otázka | Rozhodnutí |
+|---|---|---|
+| 1 | protokol terminálu | **vlastní nativní protokol** (typované záznamy, tabulky, odkazy, obrázky, průběh, výzvy); VT100/pty jen jako adaptér pro převzaté programy |
+| 2 | jazyk shellu | **nový jazyk s typy**: bez implicitního dělení slov, chyba jako hodnota (kód + popis), `?` jako v Rustu; **skript nese manifest oprávnění**; POSIX `sh` zvlášť pro převzaté skripty |
+| 3 | co posílá aplikace kompozitoru | **strom vrstev + strom přístupnosti** (obsah kreslí aplikace do bufferů, posun, průhlednost, animace a scroll dělá kompozitor; struktura okna - role, texty, stav - je součást protokolu) |
+| 4 | dekorace oken | **kreslí systém**; vlastní vzhled jde, ale s pravidly níže |
+| 5 | API akcí aplikací | **v základu GUI** (6c): aplikace v manifestu deklaruje akce s typovanými parametry a potřebnými oprávněními; volá je shell, průzkumník, asistent i agent |
+| 6 | pořadí | **6a vstup -> 6b terminál -> 6c GUI -> 6d AI**; primitiva pro AI přicházejí průběžně s FS v3 a terminálem |
+
+### Vstup: dva proudy a umělý vstup
+
+- Aplikace dostává **fyzické klávesy** (kód nezávislý na rozložení - hry,
+  zkratky) a zvlášť **vložený text** (z rozložení a metody zadávání: mrtvé
+  klávesy, čínština, emoji, diktování). Rozložení a metody zadávání jsou
+  jedna systémová služba, ne kód v každé aplikaci.
+- `inputd` předává události jednomu vlastníkovi stanice (konzole, později
+  kompozitor), ten je rozdělí oknům; bezpečnou zkratku zachytí `inputd`
+  ještě před ním.
+- **Umělý vstup** (automatizace, vzdálená plocha, AI agent) jen přes
+  capability „vkládat vstup“; systém viditelně ukáže, že klávesnici ovládá
+  někdo jiný.
+
+### Terminál: líné undo a relace
+
+- **Líný snapshot:** shell si u FS vyžádá snapshot až při první změně, kterou
+  proces příkazu udělá - čtecí příkazy nestojí nic, každá změna jde vrátit.
+- **Relace patří službě:** běžící příkaz přežije zavření i pád okna
+  terminálu a jde se k němu připojit (i vzdáleně stejným strukturovaným
+  protokolem, ne SSH s escape sekvencemi).
+- Roura mezi procesy nese **binární proud záznamů se schématem**; program
+  v manifestu deklaruje vstup a výstup, shell zná typy předem (doplňování,
+  kontrola, převod na text až na konci).
+
+### Vlastní vzhled okna (vlastní titulek)
+
+Aplikace někdy chce okno po svém - karty v titulku (prohlížeč), vlastní
+lišta (editor, přehrávač), okno bez rámu (hra, widget). Jde to, ale
+důvěryhodné prvky zůstávají systému:
+
+| Režim | Kdo kreslí | Co si systém nechá |
+|---|---|---|
+| **standardní** (výchozí) | rám a titulek systém | vše |
+| **vlastní titulek** | aplikace kreslí i plochu titulku (karty, tlačítka, vyhledávání) | **odznak důvěry** (identita aplikace + co právě smí: složky, síť, kamera) na pevném místě, který aplikace nepřekreslí; **tlačítka okna** (zavřít, minimalizovat) kreslí systém, aplikace jen zvolí stranu a barvu; přesun a změna velikosti přes **deklarované oblasti** (aplikace řekne „tady se okno táhne“, „tady je tlačítko“) - kompozitor tak funguje i při zaseknuté aplikaci |
+| **bez rámu / celá obrazovka** | vše aplikace | odznak se ukáže při najetí k okraji a vždy při změně oprávnění; bezpečná zkratka a systémové dialogy fungují vždy |
+
+- **Systémové dialogy** (oprávnění, heslo, platba) kreslí kompozitor ve
+  zvláštní vrstvě nad všemi okny, se ztlumením zbytku obrazovky a odznakem,
+  který aplikace nemůže vykreslit (vrstvu nad ztlumením smí kreslit jen
+  systém). Napodobenina v okně aplikace tak vždy vypadá jinak.
+- Plocha titulku nese strom přístupnosti jako zbytek okna, takže vlastní
+  titulek je přístupný stejně jako standardní.
+- Podobně to dělá macOS (obsah až do titulku, tlačítka kreslí systém)
+  a Windows (rozšíření obsahu do rámu); navíc je u nás odznak oprávnění
+  a deklarované oblasti místo testování kliknutí v aplikaci.
+
+## Vstup: klávesnice a myš (plán)
+
+- **Služba vstupu** (`inputd`) v userspace: ovladače zařízení posílají
+  události (klávesa, pohyb, tlačítko, kolečko, dotyk) jednotným protokolem
+  přes kanál; služba je převádí podle rozložení klávesnice a předává
+  **jen tomu, kdo má fokus** (terminál, kompozitor). Žádná aplikace
+  nečte vstup globálně (ochrana proti keyloggerům).
+- **Ovladače, postup:** virtio-input (klávesnice, myš, tablet) v QEMU -
+  PS/2 jako záloha na starším hardwaru - USB HID přes vlastní ovladač
+  xHCI (USB stack je velká samostatná práce).
+- **Rozložení:** česká a anglická v první verzi, skládání diakritiky
+  (mrtvé klávesy), Unicode vstup.
+- **Bezpečná klávesová zkratka** (jako Ctrl+Alt+Del ve Windows): zachytí ji
+  jen systém, aplikace ji nepodvrhne - pro odemčení, potvrzení v dialogu
+  oprávnění a správce úloh.
+
+## Shell a chytrý terminál (návrh)
+
+> Odsouhlasená rozhodnutí: [Rozhodnutí k milníkům 6a-6d](#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno).
+
+Cíl: terminál, který je pohodlnější než dnešní a využívá, co umí náš FS
+a capabilities.
+
+| Funkce | Co dělá | Na čem stojí |
+|---|---|---|
+| **strukturovaný výstup** | příkazy vracejí tabulky a objekty (soubor, proces, síťové spojení), ne text; filtrování, řazení a sloupce bez `grep`/`awk`; převod na text jen pro výpis | protokol mezi shellem a programy (typovaný proud) |
+| **undo každého příkazu** | před příkazem, který mění soubory, levný snapshot dotčeného datasetu; „vrať poslední příkaz“ | snapshoty, žurnál změn |
+| **„ukaž, co se stane“** | nebezpečný příkaz (hromadné mazání, skript, instalace) běží v klonu složky, terminál ukáže diff, převezme se po potvrzení | klony, diff, převzetí změn (funkce „zkusit bokem“) |
+| **oprávnění při spuštění** | shell ví z manifestu, co příkaz potřebuje (složka, síť), a předá jen to; nový nárok = dotaz | capabilities |
+| **doplňování podle typů** | ví, že argument je cesta k souboru `.toml`, PID nebo jméno snapshotu, a doplňuje jen platné hodnoty | popis argumentů v manifestu programu |
+| **vysvětlení chyb** | u chyby ukáže kód, význam a co dělat (z dokumentace chyb a hlášek) | `docs/chyby.md`, `hlasky.md` |
+| **historie s kontextem** | historie příkazů i s pracovní složkou, výsledkem a dobou; hledání v ní i podle obsahu | žurnál, index |
+| **bloky výstupu** | každý příkaz je samostatný blok (sbalit, kopírovat, znovu spustit, porovnat dva běhy) | terminál, ne shell |
+| **asistent** (volitelný) | „najdi velké soubory starší než rok“ -> navržený příkaz, spustí se až po potvrzení a v náhledu | služba AI (níže) |
+
+Návrhy navíc k odsouhlasení:
+
+- **Zámek nebezpečných operací:** příkaz, který by smazal nebo přepsal
+  víc než N souborů mimo dočasné složky, se vždy spustí přes „ukaž, co se
+  stane“ - i v ostrém režimu stačí jedno potvrzení, ale nikdy naslepo.
+- **Relace přežijí restart terminálu:** běžící příkaz patří službě relací,
+  ne oknu; po pádu nebo zavření okna se jde vrátit (jako tmux, ale
+  vestavěně).
+- **Kompatibilita:** klasický textový režim pro skripty a POSIX nástroje
+  (C/C++ z milníku jazyků) - strukturovaný výstup je nadstavba, ne náhrada.
+
+## AI v systému (návrh)
+
+> Odsouhlasené pořadí a API akcí: [Rozhodnutí k milníkům 6a-6d](#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno).
+
+Jádro o AI nic neví. Systém ale dává **primitiva, díky kterým je AI agent
+bezpečný**, a nad nimi volitelné služby.
+
+| Primitivum | Proč pro agenta |
+|---|---|
+| capability jen ke konkrétní složce | agent nevidí nic, co mu uživatel nedal |
+| práce v klonu, výsledek jako diff | změny agenta se převezmou až po kontrole, nebo zahodí jedním krokem |
+| podmíněné uložení (očekávaná revize) | agent tiše nepřepíše změnu uživatele nebo jiného nástroje |
+| audit a žurnál s identitou aplikace | je vidět, co agent četl a změnil; jeho změny jdou vybraně vrátit |
+| kvóty a priority (QoS, I/O) | agent nezahltí disk ani CPU, UI zůstane plynulé |
+| síť jen přes capability | agent nepošle data ven bez povolení |
+
+Služby nad tím (pořadí podle užitku):
+
+1. **Služba modelů** (`aid`): lokální inference (CPU, později GPU/NPU),
+   plánování výpočetních zdrojů mezi aplikacemi, jednotné API; cloudové
+   modely jen jako volba uživatele a jen přes capability sítě.
+2. **Sémantické vyhledávání:** index obsahu souborů (vektory) jako služba
+   nad žurnálem změn, respektuje oprávnění (agent najde jen to, co smí
+   číst).
+3. **Asistent** v terminálu a průzkumníku: navrhuje příkazy a akce,
+   provádí je přes „ukaž, co se stane“.
+4. **Agentní relace:** spuštění agenta nad projektem = automaticky klon,
+   capability jen k němu, audit zapnutý, na konci diff k převzetí.
+
+⚠️ **Rizika (řečená předem):**
+
+- **Podvržené pokyny** ve zpracovávaných datech (dokument nebo web, který
+  agentovi „přikáže“ něco udělat): proto agent nikdy nedostane víc
+  oprávnění, než si uživatel výslovně vybral, a nevratné akce potvrzuje
+  člověk.
+- **Soukromí:** výchozí jsou lokální modely; poslání dat do cloudu je
+  viditelná volba.
+- **Výkon:** modely jsou velké; běží v `background` QoS a s kvótou paměti.
 
 ## Konfigurace
 
@@ -422,8 +581,15 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
-   TCP/IP, DNS, TLS 1.3, HTTP klient - služby, přístup přes capability), grafika,
-   kompozitor
+   TCP/IP, DNS, TLS 1.3, HTTP klient - služby, přístup přes capability)
+   - **6a Vstup:** služba vstupu, klávesnice a myš (virtio-input, PS/2,
+     později USB HID), rozložení, bezpečná zkratka - viz [Vstup](#vstup-klávesnice-a-myš-plán)
+   - **6b Shell a chytrý terminál:** konzole, strukturovaný výstup, undo
+     příkazů, „ukaž, co se stane“, oprávnění při spuštění - viz [Shell](#shell-a-chytrý-terminál-návrh)
+   - **6c GUI:** virtio-gpu, kompozitor, nativní knihovna UI, systémové
+     dialogy - viz [Grafika](#grafika)
+   - **6d AI-ready:** primitiva pro bezpečné agenty (většina z FS v3),
+     služba modelů, sémantické vyhledávání, asistent - viz [AI v systému](#ai-v-systému-návrh)
 7. Jazyky a překladač (viz [Jazyky a překladače](#jazyky-a-překladače-plán)):
    Rust (`std` pro náš OS), C (vlastní libc nad libos), C++ (libc++/libunwind
    nad libc), překlad clangem z hostitele, pak TinyCC v systému

@@ -81,6 +81,9 @@ pub mod item {
     pub const DEADLIST: u8 = 6;
     /// Cil symbolickeho odkazu (text UTF-8), offset 0.
     pub const SYMLINK: u8 = 7;
+    /// Zaznam datasetu (`DatasetRecord`) - jen ve strome korenoveho
+    /// datasetu, objekt META_OID, offset = cislo datasetu.
+    pub const DATASET: u8 = 8;
 }
 
 /// Klic polozky stromu; razeni podle (oid, kind, offset).
@@ -383,6 +386,11 @@ pub struct Inode {
 pub const KIND_FILE: u8 = 1;
 pub const KIND_DIR: u8 = 2;
 pub const KIND_SYMLINK: u8 = 3;
+/// Druh polozky adresare: vstup do jineho datasetu (`Dirent::oid` = cislo
+/// datasetu). Nema zaznam objektu v rodicovskem strome.
+pub const KIND_DATASET: u8 = 4;
+/// Cislo korenoveho datasetu (jeho stav je v superbloku).
+pub const ROOT_DATASET: u64 = 1;
 /// Priznak objektu: data nejsou lokalne, jen v cloudu (faze 6). FS ho musi
 /// znat (cteni si data vyzada). Nastaveni sluzby sync ("vzdy offline",
 /// "nesynchronizovat") nejsou bity formatu, ale atributy `sync.*`.
@@ -560,30 +568,123 @@ impl Extent {
 
 /// Snapshot: koren stromu v okamziku vytvoreni.
 #[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// ```text
+/// 0   koren (BlockPtr 40 B)   40  generace u64
+/// 48  pocet klonu u32         52  priznaky u32 (SNAP_HIDDEN)
+/// 56  jmeno (UTF-8 do konce)
+/// ```
 pub struct SnapshotRecord {
     pub root: BlockPtr,
     pub generation: u64,
+    /// Kolik klonu z tohoto snapshotu vzniklo a jeste existuje. Dokud > 0,
+    /// snapshot nejde smazat doopravdy (jen skryt, `SNAP_HIDDEN`).
+    pub clones: u32,
+    pub flags: u32,
     pub name: String,
 }
 
+/// Snapshot je smazany z pohledu uzivatele, ale drzi bloky pro sve klony;
+/// smaze se doopravdy se zanikem posledniho klonu.
+pub const SNAP_HIDDEN: u32 = 1;
+const SNAP_HEADER: usize = PTR_SIZE + 16;
+
 impl SnapshotRecord {
     pub fn encode(&self) -> Vec<u8> {
-        let mut b = alloc::vec![0u8; PTR_SIZE + 8];
+        let mut b = alloc::vec![0u8; SNAP_HEADER];
         self.root.put(&mut b[..PTR_SIZE]);
-        b[PTR_SIZE..].copy_from_slice(&self.generation.to_le_bytes());
+        b[PTR_SIZE..PTR_SIZE + 8].copy_from_slice(&self.generation.to_le_bytes());
+        b[PTR_SIZE + 8..PTR_SIZE + 12].copy_from_slice(&self.clones.to_le_bytes());
+        b[PTR_SIZE + 12..SNAP_HEADER].copy_from_slice(&self.flags.to_le_bytes());
         b.extend_from_slice(self.name.as_bytes());
         b
     }
 
     pub fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() < PTR_SIZE + 8 {
+        if b.len() < SNAP_HEADER {
             return Err(Error::Corrupted);
         }
-        let name = core::str::from_utf8(&b[PTR_SIZE + 8..]).map_err(|_| Error::Corrupted)?;
+        let name = core::str::from_utf8(&b[SNAP_HEADER..]).map_err(|_| Error::Corrupted)?;
         Ok(Self {
             root: BlockPtr::get(b),
             generation: u64_at(b, PTR_SIZE),
+            clones: u32_at(b, PTR_SIZE + 8),
+            flags: u32_at(b, PTR_SIZE + 12),
             name: name.into(),
+        })
+    }
+
+    pub fn hidden(&self) -> bool {
+        self.flags & SNAP_HIDDEN != 0
+    }
+}
+
+/// Zaznam datasetu (krome korenoveho, ten ma stav v superbloku):
+///
+/// ```text
+/// 0   koren stromu (BlockPtr 40 B)
+/// 40  dalsi oid u64             48  dalsi snapshot u64
+/// 56  generace posl. snapshotu  64  poradi deadlistu u64
+/// 72  puvod: dataset u64        80  puvod: snapshot u64
+/// 88  puvod: generace u64       96  priznaky u32
+/// ```
+///
+/// Puvod (`origin`) ma jen klon: dataset a snapshot, ze ktereho vznikl,
+/// a jeho generace. Bloky do teto generace drzi puvodni snapshot (klon je
+/// sdili), klon vlastni jen bloky narozene pozdeji.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DatasetRecord {
+    pub root: BlockPtr,
+    pub next_oid: u64,
+    pub next_snapshot: u64,
+    pub snapshot_generation: u64,
+    pub dead_seq: u64,
+    /// (dataset, snapshot, generace) puvodu; dataset 0 = neni klon.
+    pub origin_ds: u64,
+    pub origin_snap: u64,
+    pub origin_gen: u64,
+    pub flags: u32,
+}
+
+pub const DATASET_RECORD_SIZE: usize = PTR_SIZE + 60;
+
+impl DatasetRecord {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut b = alloc::vec![0u8; DATASET_RECORD_SIZE];
+        self.root.put(&mut b[..PTR_SIZE]);
+        for (k, v) in [
+            self.next_oid,
+            self.next_snapshot,
+            self.snapshot_generation,
+            self.dead_seq,
+            self.origin_ds,
+            self.origin_snap,
+            self.origin_gen,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let o = PTR_SIZE + k * 8;
+            b[o..o + 8].copy_from_slice(&v.to_le_bytes());
+        }
+        b[PTR_SIZE + 56..PTR_SIZE + 60].copy_from_slice(&self.flags.to_le_bytes());
+        b
+    }
+
+    pub fn decode(b: &[u8]) -> Result<Self> {
+        if b.len() != DATASET_RECORD_SIZE {
+            return Err(Error::Corrupted);
+        }
+        Ok(Self {
+            root: BlockPtr::get(b),
+            next_oid: u64_at(b, PTR_SIZE),
+            next_snapshot: u64_at(b, PTR_SIZE + 8),
+            snapshot_generation: u64_at(b, PTR_SIZE + 16),
+            dead_seq: u64_at(b, PTR_SIZE + 24),
+            origin_ds: u64_at(b, PTR_SIZE + 32),
+            origin_snap: u64_at(b, PTR_SIZE + 40),
+            origin_gen: u64_at(b, PTR_SIZE + 48),
+            flags: u32_at(b, PTR_SIZE + 56),
         })
     }
 }

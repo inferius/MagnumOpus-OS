@@ -51,7 +51,8 @@ Done changes:
 | Object kinds | file, directory | + **symbolic link** | git repositories and Linux sources need them |
 | File size | no limit (overflow) | **2^63-1 B**, checked arithmetic, saturating summaries | sizes and differences always fit `i64`; huge sparse files do not overflow summaries |
 | Extent | at most 120 blocks, reserved u32 | **496 blocks**, flags u32 (reserved: preallocation) | larger node; fewer entries per large file |
-| Intent log | records 1-6 | + 7 symlink, generation on create | a symlink survives `fsync`; the generation stays the original after replay |
+| Intent log | records 1-6 | + 7 symlink, generation on create, 8 dataset marker | a symlink survives `fsync`; the generation stays the original after replay; one batch for several datasets |
+| Datasets | one tree per volume | **datasets** (own trees, a `DATASET` record in the root dataset, a directory entry of kind 4), snapshots with a clone count and a "hidden" flag | history per folder (project, home), writable clones without copying |
 
 ### Behaviour (no format change)
 

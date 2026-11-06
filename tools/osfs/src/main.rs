@@ -239,6 +239,8 @@ fn cmd_ls(raw: &[String]) -> Result<(), String> {
             Kind::Dir => ("dir ", st.tree_bytes),
             Kind::File => ("file", st.size),
             Kind::Symlink => ("link", st.size),
+            // Slozka s vlastni historii (stat vraci jeji korenovy adresar).
+            Kind::Dataset => ("dset", st.tree_bytes),
         };
         let mut line = format!("{kind} {size:>12}  {}", e.name);
         if e.kind == Kind::Symlink
