@@ -10,12 +10,10 @@ use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use abi::vm::{
-    MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, PAGE_SIZE, USER_ALLOC_BASE, USER_MAX, USER_MIN,
-};
+use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, USER_ALLOC_BASE, USER_MAX, USER_MIN};
 
 use super::{PhysAddr, VirtAddr, new_address_space, tlb};
-use crate::arch::paging::{MapFlags, PageSize, PageTable, PageTableOps};
+use crate::arch::paging::{MapFlags, PAGE_SIZE, PageSize, PageTable, PageTableOps};
 use crate::error::Error;
 use crate::object::vmo::MemoryObject;
 use crate::sync::SpinLock;
@@ -94,6 +92,15 @@ impl AddressSpace {
     /// Fyzicka adresa korenove tabulky (pro `arch::switch_user_space`).
     pub fn root(&self) -> u64 {
         self.root
+    }
+
+    /// Velikost stranky tohoto adresniho prostoru (syscall `VM_PAGE_SIZE`):
+    /// na tuto hodnotu musi byt zarovnane adresy a delky mapovani. Zatim
+    /// vsude ramec jadra (4 KiB); az bude mit adresni prostor vlastni
+    /// granuli (aarch64: 16 KiB pro nativni procesy), vrati ji tady
+    /// a `page_aligned` a mapovani ji pouziji misto `PAGE_SIZE`.
+    pub fn page_size(&self) -> u64 {
+        PAGE_SIZE
     }
 
     /// Namapuje `len` bajtu objektu `vmo` od `vmo_offset`. S `MAP_FIXED` presne

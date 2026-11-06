@@ -14,7 +14,7 @@ pub use queue::{Buffer, Virtqueue};
 
 use alloc::vec::Vec;
 
-use libos::abi::vm::{MAP_READ, MAP_WRITE, PAGE_SIZE};
+use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
 use libos::{Error, Mapping, Result};
 use pci::{Address, CAP_VENDOR, Ecam};
@@ -78,8 +78,9 @@ impl Window {
             .phys
             .checked_add(offset as u64)
             .ok_or(Error::Corrupted)?;
-        let page = phys & !(PAGE_SIZE - 1);
-        let size = (phys - page + len as u64).next_multiple_of(PAGE_SIZE);
+        let page_size = libos::vm::page_size();
+        let page = phys & !(page_size - 1);
+        let size = (phys - page + len as u64).next_multiple_of(page_size);
         let vmo = resource.device_memory(page, size)?;
         let map = Mapping::new(&vmo, 0, size, MAP_READ | MAP_WRITE)?;
         Ok(Self {

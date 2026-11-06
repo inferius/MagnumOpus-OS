@@ -312,6 +312,11 @@ pub fn interrupt_ack(h: u32) -> Result<()> {
     call(nr::INTERRUPT_ACK, [h as u64, 0, 0, 0, 0, 0]).map(|_| ())
 }
 
+/// Velikost stranky adresniho prostoru procesu (`VM_PAGE_SIZE`).
+pub fn vm_page_size(process: u32) -> Result<u64> {
+    call(nr::VM_PAGE_SIZE, [process as u64, 0, 0, 0, 0, 0])
+}
+
 pub fn resource_create(
     resource: u32,
     ranges: &[(u64, u64)],

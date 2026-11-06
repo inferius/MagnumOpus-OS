@@ -1,6 +1,6 @@
 //! Pristup k initfs (obraz predany procesu init pri startu).
 
-use abi::vm::{MAP_READ, PAGE_SIZE};
+use abi::vm::MAP_READ;
 use abi::{Error, Result};
 
 use crate::rt::Startup;
@@ -19,7 +19,7 @@ impl Initfs {
     }
 
     fn map(vmo: &Vmo, startup: &Startup) -> Result<Self> {
-        // Velikost zjistime z hlavicky (prvni stranka), pak namapujeme cele.
+        // Velikost zjistime z hlavicky (prvni 4 KiB), pak namapujeme cele.
         let mut header = [0u8; 4096];
         vmo.read(0, &mut header)?;
         let count = u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize;
@@ -32,7 +32,8 @@ impl Initfs {
             let len = u64::from_le_bytes(entry[16..24].try_into().unwrap());
             end = end.max(off + len);
         }
-        let len = end.max(PAGE_SIZE).next_multiple_of(PAGE_SIZE);
+        let page = crate::vm::page_size();
+        let len = end.max(page).next_multiple_of(page);
         let addr = sys::vm_map(
             startup.process.handle().raw(),
             vmo.handle().raw(),

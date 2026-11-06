@@ -92,6 +92,19 @@ let code = process.wait_exit(None)?;
 segmentů, W^X) a zásobník 256 KiB, pošle startovní zprávu a spustí první
 vlákno. Vrátí proces a konec kanálu k potomkovi.
 
+## Velikost stránky
+
+`libos::vm::page_size()` vrátí velikost stránky vlastního procesu (zeptá
+se jádra jednou, `VM_PAGE_SIZE`), `libos::vm::page_size_of(&proces)` jiného
+procesu. Není to konstanta: v ABI je jen mez `MIN_PAGE_SIZE` (4 KiB)
+a `MAX_PAGE_SIZE` (64 KiB). Zarovnání pro mapování a rozsahy prostředků se
+řídí touto hodnotou:
+
+```rust
+let page = libos::vm::page_size();
+let len = data_len.next_multiple_of(page);
+```
+
 ## Bariéry pro ovladače
 
 `libos::barrier` řadí přístupy do paměti sdílené se zařízením (DMA) a do

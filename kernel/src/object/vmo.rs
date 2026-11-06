@@ -18,7 +18,7 @@ use crate::arch;
 use crate::arch::iommu::IommuDomain;
 use crate::mm::{PhysAddr, phys};
 
-const PAGE: u64 = abi::vm::PAGE_SIZE;
+const PAGE: u64 = crate::arch::paging::PAGE_SIZE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {

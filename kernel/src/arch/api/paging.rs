@@ -1,16 +1,18 @@
 //! Cast smlouvy pro strankovani: typy spolecne vsem architekturam
 //! a operace nad tabulkami stranek jednoho adresniho prostoru.
 //!
-//! Velikost stranky je pevne 4 KiB na vsech architekturach (je soucasti
-//! ABI, viz `abi::vm::PAGE_SIZE`). Na aarch64 to znamena granuli 4 KiB:
-//! velke stranky jsou pak stejne jako na x86_64 (2 MiB a 1 GiB bloky).
+//! Jadro pracuje se strankou (ramcem) 4 KiB na vsech architekturach; na
+//! aarch64 to znamena granuli 4 KiB pro tabulky jadra, takze velke stranky
+//! jsou stejne jako na x86_64 (2 MiB a 1 GiB bloky). Velikost stranky
+//! procesu je vlastnost jeho adresniho prostoru (`AddressSpace::page_size`,
+//! syscall `VM_PAGE_SIZE`) a muze byt vetsi (napr. 16 KiB na aarch64).
 
 use crate::mm::{PhysAddr, VirtAddr};
 
 /// Velikost zakladni stranky (4 KiB na vsech architekturach).
 pub const PAGE_SIZE: u64 = 4096;
 
-const _: () = assert!(PAGE_SIZE == abi::vm::PAGE_SIZE);
+const _: () = assert!(PAGE_SIZE == abi::vm::MIN_PAGE_SIZE);
 
 /// Prava a vlastnosti mapovani, nezavisle na architekture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

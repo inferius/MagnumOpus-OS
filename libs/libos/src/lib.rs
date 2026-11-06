@@ -10,7 +10,8 @@
 //! - start procesu: vstupni bod, heap, panic handler, startovni zprava
 //!   ([`Startup`], makro [`entry!`]),
 //! - spousteni programu z initfs ([`spawn`]),
-//! - bariery pameti pro ovladace ([`barrier`]).
+//! - bariery pameti pro ovladace ([`barrier`]),
+//! - velikost stranky procesu ([`vm::page_size`]).
 //!
 //! Pouziti v programu:
 //!
@@ -38,6 +39,7 @@ mod rt;
 pub mod spawn;
 pub mod sys;
 pub mod time;
+pub mod vm;
 mod vmo;
 mod wait;
 

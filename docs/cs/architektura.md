@@ -487,7 +487,7 @@ smlouvu. Stav: x86_64 je za rozhraním celé, **aarch64 je zatím jen kostra**
 - Společné typy (`MapFlags`, `PageSize`, `MapError`, `PAGE_SIZE`) jsou
   v `arch::api::paging` jednou pro všechny architektury.
 - Platí pro všechny architektury (část ABI nebo rozložení jádra):
-  stránka 4 KiB, stejné rozložení adresního prostoru (přímá mapa od
+  rámec jádra 4 KiB, stejné rozložení adresního prostoru (přímá mapa od
   `0xFFFF_8000_0000_0000`, jádro v posledních 2 GiB, společný
   `kernel/linker.ld`), per-CPU struktura s ukazatelem na sebe na offsetu 0
   a daty architektury na offsetu `CPU_LOCAL_OFFSET`, čísla chyb CPU pro
@@ -614,9 +614,19 @@ Co vyřešit nejde nebo je to vědomé rozhodnutí:
 - **Raspberry Pi 4 nemá IOMMU (SMMU).** DMA ovladačů tam nebude omezené -
   stejné riziko jako x86 bez IOMMU (chybný ovladač může přes DMA přepsat
   jádro); jádro to při startu zaloguje jako varování. Je to vlastnost
-  hardwaru. RPi 5 má vlastní IOMMU (ne SMMUv3): další backend `Iommu`.
-- **Stránka 4 KiB je pevná** (ABI). Hardware jen s 16K/64K granulí
-  podporovat nebudeme.
+  hardwaru. RPi 5 sice IOMMU má (BCM2712), ale překládá jen displej
+  a multimédia v jednom okně 4 GB a vše mimo okno projde bez kontroly -
+  ochranu DMA ovladačů nedává, takže backend `Iommu` pro ni nedává smysl.
+- **Velikost stránky procesu není konstanta ABI.** Jádro samo pracuje
+  s rámcem 4 KiB, ale stránka procesu je vlastnost jeho adresního prostoru
+  (`VM_PAGE_SIZE`, `libos::vm::page_size()`, mez 4 KiB až 64 KiB
+  v `abi::vm`). Dnes je všude 4 KiB. Na aarch64 jde granuli nastavit pro
+  každý adresní prostor zvlášť (TTBR0), takže nativní procesy mohou dostat
+  16 KiB (o jednotky procent méně výpadků TLB) a procesy Windows vrstvy
+  4 KiB (PE sekce s různými právy po 4 KiB). Programy jsou linkované se
+  segmenty zarovnanými na 64 KiB (`user/user.ld`), takže fungují s každou
+  velikostí. Apple M1/M2: procesor 4 KiB umí, jejich IOMMU (DART) ale jen
+  16 KiB - backend by zarovnával paměť pro DMA na 16 KiB.
 
 
 ## Jazyky a překladače (plán)

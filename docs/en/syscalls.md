@@ -166,7 +166,8 @@ the object starting at `vmo_offset` into the address space of `process`
 (own or another one, e.g. when starting a program). `flags`: `MAP_READ`
 (required), `MAP_WRITE`, `MAP_EXECUTE` (not together with `MAP_WRITE` -
 W^X), `MAP_FIXED` (exactly at `addr`; otherwise `addr` is a hint and 0 lets
-the kernel choose). Address, length and offset must be 4 KiB aligned, range
+the kernel choose). Address, length and offset must be aligned to the
+process page size (`VM_PAGE_SIZE`, 4 KiB today), range
 within `0x10000..0x7FFF_FFFF_F000` (`USER_MIN`..`USER_MAX`; the last page
 of the lower half always stays unmapped). Rights: process `WRITE`; object `MAP` +
 `READ`, plus `WRITE`/`EXECUTE` per flags. A mapping keeps the object alive
@@ -180,6 +181,19 @@ range), `NO_MEMORY`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
 mappings exactly (no partial unmap yet). On return no CPU holds a stale TLB
 entry. Requires `WRITE` on the process. Errors: `NOT_FOUND`,
 `INVALID_ARGS`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `VM_PAGE_SIZE`
+
+`(process) -> bytes`. The page size of the process's address space: a power
+of two from `MIN_PAGE_SIZE` (4 KiB) to `MAX_PAGE_SIZE` (64 KiB) in
+`abi::vm`. Addresses, lengths and offsets for `VM_MAP` and `VM_UNMAP` must
+be aligned to it. It is not an ABI constant: it is 4 KiB everywhere today,
+but on aarch64 the kernel may give native processes 16 KiB and Windows
+layer processes 4 KiB (each address space has its own granule). A parent
+asks about its child when loading a program (`libos::vm::page_size_of`), a
+program about itself (`libos::vm::page_size`, queried once and cached).
+Any process handle is enough (no rights). Errors: `BAD_HANDLE`,
+`WRONG_TYPE`.
 
 ## Processes and threads
 

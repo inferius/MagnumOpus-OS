@@ -509,7 +509,7 @@ it stops at the first `todo!`).
 - Shared types (`MapFlags`, `PageSize`, `MapError`, `PAGE_SIZE`) live once
   for all architectures in `arch::api::paging`.
 - Fixed for all architectures (part of the ABI or the kernel layout):
-  4 KiB pages, the same address space layout (direct map from
+  4 KiB kernel frames, the same address space layout (direct map from
   `0xFFFF_8000_0000_0000`, kernel in the last 2 GiB, shared
   `kernel/linker.ld`), a per-CPU structure with a self pointer at offset 0
   and architecture data at `CPU_LOCAL_OFFSET`, CPU fault numbers for a
@@ -643,10 +643,20 @@ What cannot be solved, or is a deliberate decision:
 - **Raspberry Pi 4 has no IOMMU (SMMU).** Driver DMA will not be restricted
   there - the same risk as x86 without an IOMMU (a buggy driver can
   overwrite the kernel via DMA); the kernel logs a warning at boot. It is a
-  hardware property. RPi 5 has its own IOMMU (not SMMUv3): another `Iommu`
-  backend.
-- **The 4 KiB page is fixed** (ABI). Hardware with only 16K/64K granules
-  will not be supported.
+  hardware property. RPi 5 does have an IOMMU (BCM2712), but it only
+  translates display and multimedia in a single 4 GB window and everything
+  outside the window passes unchecked - it gives no DMA protection for
+  drivers, so an `Iommu` backend for it makes no sense.
+- **The process page size is not an ABI constant.** The kernel itself works
+  with 4 KiB frames, but a process's page size is a property of its address
+  space (`VM_PAGE_SIZE`, `libos::vm::page_size()`, bounds 4 KiB to 64 KiB in
+  `abi::vm`). It is 4 KiB everywhere today. On aarch64 the granule can be set
+  per address space (TTBR0), so native processes can get 16 KiB (a few
+  percent fewer TLB misses) and Windows layer processes 4 KiB (PE sections
+  with different rights at 4 KiB). Programs are linked with segments aligned
+  to 64 KiB (`user/user.ld`), so they work with any size. Apple M1/M2: the
+  CPU supports 4 KiB, but their IOMMU (DART) only 16 KiB - the backend would
+  align DMA memory to 16 KiB.
 
 
 ## Languages and compilers (plan)

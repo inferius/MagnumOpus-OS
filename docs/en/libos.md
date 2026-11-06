@@ -94,6 +94,19 @@ per-segment rights, W^X) plus a 256 KiB stack, sends the startup message and
 starts the first thread. It returns the process and the channel end to the
 child.
 
+## Page size
+
+`libos::vm::page_size()` returns the page size of the own process (asks the
+kernel once, `VM_PAGE_SIZE`), `libos::vm::page_size_of(&process)` that of
+another process. It is not a constant: the ABI only has the bounds
+`MIN_PAGE_SIZE` (4 KiB) and `MAX_PAGE_SIZE` (64 KiB). Alignment for
+mappings and resource ranges follows this value:
+
+```rust
+let page = libos::vm::page_size();
+let len = data_len.next_multiple_of(page);
+```
+
 ## Barriers for drivers
 
 `libos::barrier` orders accesses to memory shared with a device (DMA) and

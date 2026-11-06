@@ -80,3 +80,14 @@ pub fn unmap(a: Args) -> Result<u64> {
     target.address_space().unmap(a[1], a[2])?;
     Ok(0)
 }
+
+/// `VM_PAGE_SIZE(process) -> bajty`: velikost stranky adresniho prostoru
+/// procesu. Staci libovolny handle procesu (bez prav), velikost stranky
+/// neni tajemstvi; rodic ji potrebuje pri nahravani programu do potomka.
+pub fn page_size(a: Args) -> Result<u64> {
+    let p = current_process();
+    let target = p
+        .handles()
+        .get_as::<Process>(arg_handle(a[0])?, Rights::NONE)?;
+    Ok(target.address_space().page_size())
+}

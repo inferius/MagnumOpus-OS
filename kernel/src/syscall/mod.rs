@@ -78,6 +78,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::INTERRUPT_CREATE => hw::interrupt_create(a),
         nr::INTERRUPT_ACK => hw::interrupt_ack(a),
         nr::RESOURCE_CREATE => hw::resource_create(a),
+        nr::VM_PAGE_SIZE => vm::page_size(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -120,6 +121,7 @@ pub fn name(number: u64) -> &'static str {
         "INTERRUPT_CREATE",
         "INTERRUPT_ACK",
         "RESOURCE_CREATE",
+        "VM_PAGE_SIZE",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

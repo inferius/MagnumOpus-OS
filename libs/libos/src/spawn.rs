@@ -7,7 +7,7 @@
 use alloc::vec::Vec;
 
 use abi::bootstrap::{self, Entry, Header};
-use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, PAGE_SIZE};
+use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE};
 use abi::{Error, Result};
 
 use crate::{Channel, Handle, Process, Thread, Vmo};
@@ -43,11 +43,15 @@ impl StartHandle {
 pub fn spawn(name: &str, image: &[u8], handles: Vec<StartHandle>) -> Result<(Process, Channel)> {
     let elf = elf::ElfFile::parse(image).map_err(|_| Error::Corrupted)?;
     let process = Process::create(name)?;
+    // Segmenty se zarovnavaji na stranku potomka (muze mit jinou nez my).
+    // Segmenty s ruznymi pravy ve stejne strance (program linkovany na
+    // mensi stranku) skonci chybou mapovani, ne smichanymi pravy.
+    let page = crate::vm::page_size_of(&process)?;
 
     for seg in elf.load_segments() {
         let seg = seg.map_err(|_| Error::Corrupted)?;
-        let start = seg.vaddr & !(PAGE_SIZE - 1);
-        let end = (seg.vaddr + seg.mem_size).next_multiple_of(PAGE_SIZE);
+        let start = seg.vaddr & !(page - 1);
+        let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
         let vmo = Vmo::create(end - start)?;
         vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
         let mut flags = MAP_READ | MAP_FIXED;

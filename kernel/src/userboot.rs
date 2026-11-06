@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 
 use abi::bootstrap::{self, Entry, Header};
-use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, PAGE_SIZE};
+use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE};
 use boot_info::{BootInfo, MemoryKind};
 
 use crate::acpi::Platform;
@@ -98,13 +98,15 @@ fn load_init(
 }
 
 fn load_segments(process: &Process, elf: &elf::ElfFile) -> Result<()> {
+    // Segmenty se zarovnavaji na velikost stranky procesu (ne jadra).
+    let page = process.address_space().page_size();
     for seg in elf.load_segments() {
         let seg = seg.map_err(|e| {
             log::error!("init: poskozeny segment: {e}");
             Error::Corrupted
         })?;
-        let start = seg.vaddr & !(PAGE_SIZE - 1);
-        let end = (seg.vaddr + seg.mem_size).next_multiple_of(PAGE_SIZE);
+        let start = seg.vaddr & !(page - 1);
+        let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
         let vmo = MemoryObject::new(end - start)?;
         vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
         let mut flags = MAP_READ | MAP_FIXED;

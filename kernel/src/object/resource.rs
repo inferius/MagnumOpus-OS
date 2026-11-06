@@ -47,7 +47,7 @@ pub struct Resource {
 /// Nejvic rozsahu jednoho omezeneho prostredku.
 pub const MAX_RANGES: usize = 16;
 
-const PAGE: u64 = abi::vm::PAGE_SIZE;
+const PAGE: u64 = crate::arch::paging::PAGE_SIZE;
 
 fn contains(ranges: &[(u64, u64)], start: u64, len: u64) -> bool {
     let Some(end) = start.checked_add(len) else {

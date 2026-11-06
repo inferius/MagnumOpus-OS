@@ -4,6 +4,7 @@ use alloc::sync::Arc;
 
 use super::handle::arg_handle;
 use super::{Args, current_process, user};
+use crate::arch::paging::PAGE_SIZE;
 use crate::error::{Error, Result};
 use crate::mm;
 use crate::object::interrupt::Interrupt;
@@ -50,10 +51,8 @@ pub fn vmo_phys_addr(a: Args) -> Result<u64> {
     let vmo = p
         .handles()
         .get_as::<MemoryObject>(arg_handle(a[1])?, Rights::NONE)?;
-    let page = vmo
-        .page(a[2] & !(abi::vm::PAGE_SIZE - 1))
-        .ok_or(Error::OutOfRange)?;
-    Ok(page.as_u64() + (a[2] % abi::vm::PAGE_SIZE))
+    let page = vmo.page(a[2] & !(PAGE_SIZE - 1)).ok_or(Error::OutOfRange)?;
+    Ok(page.as_u64() + (a[2] % PAGE_SIZE))
 }
 
 /// `INTERRUPT_CREATE(resource, out_msi_ptr) -> handle`.

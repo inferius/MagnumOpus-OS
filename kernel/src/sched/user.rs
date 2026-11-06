@@ -18,7 +18,7 @@ use crate::object::process::Process;
 pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thread>, Error> {
     // Zasobnik jadra vlakna je pamet jadra, ale vlakna vytvari program:
     // nesmi sahnout do rezervy.
-    if !crate::mm::phys::user_room(crate::mm::KERNEL_STACK_SIZE / abi::vm::PAGE_SIZE) {
+    if !crate::mm::phys::user_room(crate::mm::KERNEL_STACK_SIZE / crate::arch::paging::PAGE_SIZE) {
         return Err(Error::NoMemory);
     }
     let stack = KernelStack::new().ok_or(Error::NoMemory)?;
