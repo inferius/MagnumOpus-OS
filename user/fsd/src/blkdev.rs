@@ -32,10 +32,13 @@ impl BlkDev {
                     f = v;
                     break;
                 }
-                Err(e) if attempt == 3 => {
+                // Vyprseny cas uz trval REPLY_TIMEOUT: dalsi pokus by start
+                // jen zdrzel.
+                Err(e) if attempt == 3 || e == Error::TimedOut => {
                     libos::println!(
                         "fsd: VAROVANI: vlastnosti disku nejde zjistit ({e}) - beru disk jako bez zaruky trvanlivosti"
                     );
+                    break;
                 }
                 Err(_) => {}
             }

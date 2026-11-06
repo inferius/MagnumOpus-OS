@@ -57,8 +57,9 @@ pub struct Service {
     pub list_cache: Option<ListCache>,
 }
 
-/// Klic a obsah rozpracovaneho vypisu.
-pub type ListCache = ((Option<alloc::string::String>, alloc::string::String), Vec<(alloc::string::String, fs::DirEntry)>);
+/// Klic a obsah rozpracovaneho vypisu (polozky serazene podle slozeneho
+/// jmena - kurzor se hleda pulenim, slozeny tvar se neuklada).
+pub type ListCache = ((Option<alloc::string::String>, alloc::string::String), Vec<fs::DirEntry>);
 
 impl Service {
     fn fs(&mut self) -> Result<&mut Fs<BlkDev>> {
@@ -129,21 +130,20 @@ impl Service {
                     Some((_, list)) => list,
                     None => {
                         let fs = self.fs.as_mut().ok_or(Error::IoError)?;
-                        let raw = match &snap {
+                        match &snap {
                             Some(s) => fs.snapshot_list(s, &path)?,
                             None => fs.list(&path)?,
-                        };
-                        // Klic kurzoru = slozene jmeno (stejne poradi jako vypis).
-                        raw.into_iter().map(|e| (fs::fold_name(&e.name), e)).collect()
+                        }
                     }
                 };
                 let start = if after.is_empty() {
                     0
                 } else {
                     let a = fs::fold_name(&after);
-                    list.partition_point(|(k, _)| *k <= a)
+                    // Vypis je serazeny podle slozeneho jmena (fs::list).
+                    list.partition_point(|e| fs::fold_name(&e.name) <= a)
                 };
-                let page: Vec<DirEntry> = entries(list[start..].iter().map(|(_, e)| e.clone()).collect());
+                let page: Vec<DirEntry> = entries(list[start..].to_vec());
                 let n = fsproto::encode_list_page(&mut w, &page, max, fsproto::MAX_REPLY);
                 if start + n < list.len() {
                     self.list_cache = Some((key, list));

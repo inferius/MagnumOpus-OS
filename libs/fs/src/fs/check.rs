@@ -268,7 +268,7 @@ impl Objects {
             item::DIRENT => match decode_dirents(v) {
                 Ok(list) => {
                     for d in &list {
-                        if crate::names::validate_name(&d.name).is_err() {
+                        if !crate::names::valid_stored(&d.name) {
                             r.problem(format!("adresar {}: neplatne jmeno polozky", k.oid));
                         }
                     }

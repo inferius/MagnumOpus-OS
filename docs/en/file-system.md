@@ -581,9 +581,12 @@ Mounting (`Store::open`) has three separate steps:
 
 **Uncertain recovery = read-only.** Commits are sequential and generation
 `g` lives in slot `1 + g mod 8`, so a generation newer than the newest one
-read (`newest`) could only be **in the slot for `newest + 1`**. When exactly
-that slot is unreadable (an I/O error, not a bad checksum), the newest state
-cannot be determined safely: the volume is **read-only** with
+read (`newest`) could only be **in the slot for `newest + 1`** (and
+`newest + 2` only after it). So the slots after the newest are walked: a
+slot with an older generation or an empty one = no newer state exists; a
+slot with a bad checksum may have been a completed commit whose superblock
+was damaged later, so the walk continues. When a slot on this path is
+unreadable (an I/O error), the newest state cannot be determined safely: the volume is **read-only** with
 `info().newest_uncertain` (fsd prints a warning) - writing on top of an
 older generation would overwrite the newer one with the next commit. Another
 unreadable slot (a bad sector holding an old generation) does not put the

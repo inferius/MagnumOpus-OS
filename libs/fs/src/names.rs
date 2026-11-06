@@ -52,6 +52,16 @@ pub fn validate_name(name: &str) -> Result<()> {
     if ok { Ok(()) } else { Err(Error::InvalidArgs) }
 }
 
+/// Levna kontrola jmena, ktere uz je ulozene (NFC uz bylo pri ulozeni):
+/// delka a zakazane znaky, bez normalizace. Pro kontrolu konzistence.
+pub fn valid_stored(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= NAME_MAX
+        && name != "."
+        && name != ".."
+        && !name.chars().any(|c| c == '/' || c.is_control() || is_bidi_control(c))
+}
+
 /// Ulozeny tvar jmena (NFC, velikost pismen zachovana).
 pub fn stored_name(name: &str) -> String {
     name.nfc().collect()

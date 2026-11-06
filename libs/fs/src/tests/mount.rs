@@ -364,3 +364,24 @@ fn forced_read_only_mount_writes_nothing() {
     assert!(fs.check(true).unwrap().problems.is_empty());
     assert!(fs.into_device().data == before);
 }
+
+#[test]
+fn damaged_next_slot_and_unreadable_after_is_uncertain() {
+    // Slot pro newest + 1 ma spatny soucet (mohl to byt dokonceny commit
+    // s pozdeji poskozenym superblokem) a slot pro newest + 2 je necitelny:
+    // novejsi stav nejde vyloucit, jen pro cteni.
+    let mut fs = new_fs(1024);
+    for name in ["/g1", "/g2", "/g3", "/g4"] {
+        fs.create(name, Kind::File).unwrap();
+        fs.commit().unwrap();
+    }
+    let g = fs.info().generation;
+    let mut inner = fs.into_device();
+    // "Nejnovejsi citelna" bude g - 2: slot g - 1 poskozeny, slot g necitelny.
+    let o = (SB_FIRST + (g - 1) % SB_COUNT) as usize * BLOCK_SIZE;
+    inner.data[o + 100] ^= 0xFF;
+    let mut dev = TestDevice::new(inner);
+    dev.bad_read = Some(SB_FIRST + g % SB_COUNT);
+    let fs = Fs::mount(dev).unwrap();
+    assert!(fs.info().newest_uncertain && fs.info().read_only);
+}

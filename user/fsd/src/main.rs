@@ -94,13 +94,16 @@ fn main(startup: Startup) -> i64 {
             i.unreadable_superblocks
         );
     }
+    // Kazdy duvod zvlast (muze jich platit vic najednou).
     if i.newest_uncertain {
         println!(
             "fsd: VAROVANI: nejde precist slot, kde by lezel novejsi stav - nejnovejsi stav nejde bezpecne urcit, svazek je jen pro cteni"
         );
-    } else if i.log_unreadable {
+    }
+    if i.log_unreadable {
         println!("fsd: VAROVANI: intent log nejde precist cely - log zachovan pro dalsi pokus, svazek je jen pro cteni");
-    } else if i.read_only {
+    }
+    if i.read_only && !i.newest_uncertain && !i.log_unreadable {
         println!(
             "fsd: VAROVANI: svazek je jen pro cteni (disk nezarucuje trvanlivost zapisu nebo neznama vlastnost formatu)"
         );

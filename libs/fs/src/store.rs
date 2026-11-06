@@ -99,8 +99,8 @@ pub struct Store<D: BlockDevice> {
     /// Pripojeno jen pro cteni (zarizeni bez zaruky trvanlivosti, neznamy
     /// ro_compat, nejista obnova).
     pub read_only: bool,
-    /// Kolik slotu superbloku neslo precist (chyba I/O). Kdyz aspon jeden,
-    /// nejde bezpecne urcit nejnovejsi generaci: jen pro cteni.
+    /// Kolik slotu superbloku neslo precist (chyba I/O) - jen pro hlaseni;
+    /// o rezimu jen pro cteni rozhoduje `newest_uncertain`.
     pub unreadable_slots: u32,
     /// Necitelny je slot, kde by lezela novejsi generace: nejnovejsi stav
     /// nejde bezpecne urcit, proto jen pro cteni.
@@ -252,6 +252,9 @@ impl<D: BlockDevice> Store<D> {
         let mut buf = vec![0u8; BLOCK_SIZE];
         let mut last_err = Error::NotFound;
         let mut unreadable: Vec<u64> = Vec::new();
+        // Sloty s hlavickou, ktera nesedi (spatny soucet): roztrzeny zapis,
+        // nebo pozdeji poskozeny superblok dokonceneho commitu.
+        let mut damaged: Vec<u64> = Vec::new();
         for i in 0..SB_COUNT {
             let slot = SB_FIRST + i;
             if let Err(e) = dev.read_block(slot, &mut buf) {
@@ -262,19 +265,35 @@ impl<D: BlockDevice> Store<D> {
             match Superblock::decode_header(&buf) {
                 Ok((generation, _)) => found.push((slot, generation, buf.clone())),
                 Err(Error::NotFound) => {}
-                Err(e) => last_err = e,
+                Err(e) => {
+                    damaged.push(slot);
+                    last_err = e;
+                }
             }
         }
         found.sort_by_key(|&(_, g, _)| core::cmp::Reverse(g));
         let Some(newest) = found.first().map(|&(_, g, _)| g) else {
             return Err(last_err);
         };
-        // Commity jdou postupne: generace newest + 1 by lezela jen ve slotu
-        // 1 + (newest + 1) mod 8 (a vyssi az po ni). Jen kdyz je necitelny
-        // prave ten, nejnovejsi stav nejde bezpecne urcit; vadny sektor
-        // v jinem slotu nic nezpochybnuje (jinak by byl svazek navzdy jen pro
+        // Commity jdou postupne: generace newest + k lezi ve slotu
+        // 1 + (newest + k) mod 8 a existuje jen, kdyz existuje i newest + k - 1.
+        // Projdou se sloty za nejnovejsim: slot s citelnou starsi generaci
+        // (nebo prazdny) = novejsi generace neexistuje, jistota. Poskozeny
+        // slot (spatny soucet) mohl byt dokonceny commit, jde se dal.
+        // Necitelny slot na teto ceste = nejnovejsi stav nejde urcit. Vadny
+        // sektor jinde nic nezpochybnuje (jinak by byl svazek navzdy jen pro
         // cteni).
-        let uncertain = unreadable.contains(&(SB_FIRST + (newest + 1) % SB_COUNT));
+        let mut uncertain = false;
+        for k in 1..SB_COUNT {
+            let slot = SB_FIRST + (newest + k) % SB_COUNT;
+            if unreadable.contains(&slot) {
+                uncertain = true;
+                break;
+            }
+            if !damaged.contains(&slot) {
+                break;
+            }
+        }
         for (k, (_, generation, raw)) in found.iter().enumerate() {
             if generation + REUSE_DELAY <= newest {
                 break;

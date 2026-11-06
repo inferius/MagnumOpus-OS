@@ -572,8 +572,11 @@ Připojení (`Store::open`) má tři oddělené kroky:
 
 **Nejistá obnova = jen pro čtení.** Commity jdou postupně a generace `g`
 leží ve slotu `1 + g mod 8`, takže generace novější než nejnovější
-přečtená (`newest`) by mohla ležet **jen ve slotu pro `newest + 1`**. Když
-je nečitelný (chyba I/O, ne špatný součet) právě ten, nejnovější stav nejde
+přečtená (`newest`) by mohla ležet **jen ve slotu pro `newest + 1`** (a
+`newest + 2` jen za ní). Projdou se proto sloty za nejnovějším: slot se
+starší generací nebo prázdný = novější stav neexistuje; slot se špatným
+součtem mohl být dokončený commit s později poškozeným superblokem, jde se
+dál. Když je na této cestě slot nečitelný (chyba I/O), nejnovější stav nejde
 bezpečně určit: svazek je **jen pro čtení** s `info().newest_uncertain`
 (fsd vypíše varování) - zápis nad starší generací by po dalším commitu tu
 novější přepsal. Nečitelný jiný slot (vadný sektor se starou generací)
