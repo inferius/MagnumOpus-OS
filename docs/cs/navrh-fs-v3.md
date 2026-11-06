@@ -212,7 +212,7 @@ Zásady (odsouhlasené):
 | Profil | Pro koho | Chování |
 |---|---|---|
 | **Standardní** (výchozí) | běžné používání | vlastní soubory bez omezení a dotazů; aplikace vidí dokumenty uživatele, systémové a cizí soubory ne |
-| **Přísný** | citlivá data, firmy | aplikace v sandboxu (jen dialog výběru), trezory se zamykají při uspání, audit přístupů |
+| **Přísný** | citlivá data, firmy | aplikace v sandboxu (jen dialog výběru), trezory se zamykají při uspání, audit změn a čtení, detekce ransomwaru podle entropie (viz [Výchozí stav a profily](#výchozí-stav-a-profily)) |
 | **Volný** | vývojáři | aplikace vidí celý domov uživatele, méně potvrzování |
 
 ## Šifrované trezory
@@ -300,7 +300,7 @@ spoléhají.
 |---|---|
 | Události | otevření, čtení, zápis, vytvoření, smazání, přesun, změna oprávnění, **odepřený pokus** |
 | Kdo | aplikace (identita z podpisu), uživatel, proces, handle |
-| Úrovně | vypnuto / **jen změny** (výchozí) / i čtení - nastavitelné na dataset; profil Přísný zapne čtení pro citlivé datasety |
+| Úrovně | bezpečnostní události (výchozí, vždy) / + změny / + čtení - nastavitelné na dataset, viz [profily](#výchozí-stav-a-profily) |
 | Objem | opakované čtení téhož souboru stejnou aplikací v jedné relaci = jeden záznam |
 | Úložiště | zvláštní dataset jen pro připisování, uchování podle dnů nebo místa |
 | Odolnost proti úpravám | záznamy tvoří **hashový řetěz** (každý obsahuje hash předchozího) a konec řetězu je v záznamu datasetu, tedy v Merkleově stromu commitu. Smazat log jde jen celý a to je vidět; tiše upravit nejde. |
@@ -357,10 +357,36 @@ spoléhají.
   - Přidání nebo odebrání ochránce nepřešifrovává data, mění jen malý
     záznam s obalenými klíči.
 
+### Výchozí stav a profily
+
+Co zpomaluje nebo obtěžuje, je ve výchozím (Standardním) profilu vypnuté
+nebo v levné variantě; Přísný profil to zapne a každá věc jde zapnout
+i samostatně v nastavení (pro jeden dataset nebo celý systém).
+
+| Funkce | Cena | Standardní (výchozí) | Přísný | Volný |
+|---|---|---|---|---|
+| audit bezpečnostních událostí (změna oprávnění, odepřený pokus, smazání trezoru) | zanedbatelná | zapnuto | zapnuto | zapnuto |
+| audit změn souborů | malá (záznam na zápis) | volba | zapnuto | volba |
+| audit čtení | střední (záznam na otevření) | volba | citlivé datasety | volba |
+| „kdo četl můj soubor“ | podle auditu čtení | jen když je audit čtení | zapnuto | volba |
+| původ souboru | zanedbatelná (atribut při vytvoření) | zapnuto | zapnuto | zapnuto |
+| dotaz před spuštěním souboru z internetu | žádná | zapnuto | zapnuto | volba |
+| návnady proti ransomwaru | žádná | zapnuto | zapnuto | volba |
+| detekce ransomwaru podle počtu přepisů | malá (čítače) | zapnuto | zapnuto | volba |
+| detekce ransomwaru podle entropie obsahu | střední (výpočet nad vzorkem bloků) | volba | zapnuto | volba |
+| zákaz spouštění na datasetech s daty | žádná | zapnuto | zapnuto | vypnuto |
+| kvóty aplikací | zanedbatelná | zapnuto (velkorysé) | zapnuto (těsné) | vypnuto |
+| zamčení trezorů při uspání | pohodlí | volba | zapnuto | volba |
+| okamžitá deduplikace při zápisu | střední až velká | vypnuto (jen na pozadí) | vypnuto | volba |
+| ověření součtu při každém čtení | malá | zapnuto (nejde vypnout) | zapnuto | zapnuto |
+
+Integrita dat (součty, Merkleův strom, metadata 2x) se profily nemění -
+chrání proti poškození, ne proti útočníkovi, a stojí málo.
+
 ### Rizika (vědomě přijatá)
 
 - **Audit čtení stojí výkon a je citlivý.** Log sám prozrazuje, co kdo
-  četl - proto je výchozí „jen změny“, log je chráněný právem *Spravovat*
+  četl - proto se ve výchozím stavu zaznamenávají jen bezpečnostní události, log je chráněný právem *Spravovat*
   a čtení logu se zaznamenává.
 - **Detekce ransomwaru má falešné poplachy** (komprese, šifrování, export
   videa). Proto pozastavení a dotaz, nikdy tiché zablokování; výjimky po

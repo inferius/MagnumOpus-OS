@@ -217,7 +217,7 @@ Principles (agreed):
 | Profile | For whom | Behaviour |
 |---|---|---|
 | **Standard** (default) | everyday use | own files without restrictions or prompts; applications see the user's documents, not system or other users' files |
-| **Strict** | sensitive data, companies | applications sandboxed (picker dialog only), vaults lock on sleep, access audit |
+| **Strict** | sensitive data, companies | applications sandboxed (picker dialog only), vaults lock on sleep, audit of changes and reads, ransomware detection by entropy (see [Defaults and profiles](#defaults-and-profiles)) |
 | **Relaxed** | developers | applications see the whole user home, fewer confirmations |
 
 ## Encrypted vaults
@@ -308,7 +308,7 @@ Principles (agreed):
 |---|---|
 | Events | open, read, write, create, remove, move, permission change, **denied attempt** |
 | Who | application (identity from its signature), user, process, handle |
-| Levels | off / **changes only** (default) / reads too - configurable per dataset; the Strict profile enables reads for sensitive datasets |
+| Levels | security events (default, always) / + changes / + reads - configurable per dataset, see [profiles](#defaults-and-profiles) |
 | Volume | repeated reads of the same file by the same application in one session = one record |
 | Storage | a special append-only dataset, retention by days or space |
 | Tamper resistance | records form a **hash chain** (each contains the hash of the previous one) and the head of the chain is in the dataset record, i.e. in the commit's Merkle tree. The log can only be deleted as a whole, which is visible; it cannot be edited silently. |
@@ -371,10 +371,38 @@ Principles (agreed):
   - Adding or removing a protector does not re-encrypt the data, it only
     changes a small record of wrapped keys.
 
+### Defaults and profiles
+
+Whatever slows things down or gets in the way is off or in a cheap variant
+in the default (Standard) profile; the Strict profile turns it on, and each
+item can also be enabled on its own in the settings (for one dataset or the
+whole system).
+
+| Feature | Cost | Standard (default) | Strict | Relaxed |
+|---|---|---|---|---|
+| audit of security events (permission change, denied attempt, vault deletion) | negligible | on | on | on |
+| audit of file changes | small (a record per write) | option | on | option |
+| audit of reads | medium (a record per open) | option | sensitive datasets | option |
+| "who read my file" | depends on the read audit | only with the read audit | on | option |
+| file origin | negligible (an attribute at creation) | on | on | on |
+| prompt before running a file from the internet | none | on | on | option |
+| ransomware decoys | none | on | on | option |
+| ransomware detection by rewrite count | small (counters) | on | on | option |
+| ransomware detection by content entropy | medium (computed over a sample of blocks) | option | on | option |
+| no execution on data datasets | none | on | on | off |
+| per-application quotas | negligible | on (generous) | on (tight) | off |
+| vaults lock on sleep | convenience | option | on | option |
+| inline deduplication on write | medium to large | off (background only) | off | option |
+| checksum verification on every read | small | on (cannot be disabled) | on | on |
+
+Data integrity (checksums, the Merkle tree, metadata twice) does not change
+with profiles - it protects against corruption, not against an attacker,
+and costs little.
+
 ### Risks (knowingly accepted)
 
 - **Auditing reads costs performance and is sensitive.** The log itself
-  reveals who read what - so the default is "changes only", the log is
+  reveals who read what - so by default only security events are logged, the log is
   protected by the *Manage* right and reading it is logged.
 - **Ransomware detection has false alarms** (compression, encryption, video
   export). Hence pause and ask, never a silent block; exemptions after
