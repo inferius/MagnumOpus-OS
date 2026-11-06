@@ -116,6 +116,11 @@ fn devices_rejected() {
         "//./PhysicalDrive2",
         "\\\\?\\Volume{x}",
         "/dev/sdb",
+        "\\??\\C:",
+        "\\\\.\\GLOBALROOT\\Device\\Harddisk1\\Partition1",
+        "x\\Harddisk2\\y",
+        "x\\HarddiskVolume3",
+        "x\\Volume{1234-abcd}",
     ] {
         assert!(looks_like_device(p), "{p}");
     }
@@ -124,6 +129,11 @@ fn devices_rejected() {
         "C:\\x\\obraz.img",
         "./a.img",
         "E:\\obrazy\\x.img",
+        // Slovo zarizeni jen jako cast jmena obycejneho souboru.
+        "D:\\HardDisk-zalohy\\test.img",
+        "C:\\obrazy\\harddisk1.img",
+        "C:\\volume{x}.img",
+        "C:\\PhysicalDrive\\a.img",
     ] {
         assert!(!looks_like_device(p), "{p}");
     }

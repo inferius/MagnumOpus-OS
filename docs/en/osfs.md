@@ -59,6 +59,16 @@ cargo test -p osfs
 | `osfs mount <image> <X:>` | mounts the image as drive `X:`; runs until unmounted |
 | `osfs unmount <X:>` | unmounts the drive from another window (same as Ctrl+C in the `mount` window) |
 
+**One writer:** only one `osfs` process (`mount`, `put`) may have the image
+open for writing; a second one stops with `obraz ma otevreny jiny proces
+osfs`. Two writers would overwrite each other's blocks and corrupt the
+volume. Reading (`check`, `ls`, `cat`) next to a running `mount` works, it
+just warns that it sees the state after the last commit (up to a few
+seconds old). The lock is a byte far beyond the end of the file locked
+with `LockFileEx`, so it does not block reading and writing the image, it
+applies across all processes and logon sessions and is released even if
+`osfs` crashes.
+
 Paths inside the image are written with `/` from the root
 (`/documents/a.txt`). Case is not distinguished (just like on Windows);
 names are stored as you typed them. The tool's own messages are in Czech.
@@ -130,6 +140,26 @@ in the state after the last commit plus changes confirmed by `fsync` - see
   open, WinFsp gets the real name back (normalized, looked up in the parent
   listing); without it WinFsp would use the upper-cased path as the file
   name and would treat a rename `a.txt` -> `A.TXT` as "no change".
+- **Rename with replace** (`MoveFileEx` with `REPLACE_EXISTING`): the
+  target is first only moved aside to a temporary name `.osfs-nahrazeni-N`
+  in the same directory, then the source is renamed and only then the
+  moved-aside target is deleted. If the rename fails, the target is moved
+  back - nothing is lost. Everything happens under one lock, so neither a
+  commit nor `fsync` captures the intermediate state. Handles that were
+  open on the replaced file return "file deleted" from then on (their path
+  would now lead to a different object); usually WinFsp refuses this
+  already (an open target cannot be replaced).
+- **Directory listing** in parts: the first request takes a snapshot of
+  the name list, further parts (WinFsp asks repeatedly while the buffer
+  fills up) continue in the same snapshot, and metadata (`stat`) is read
+  only for entries that actually fit into the buffer.
+- **The cache of real names** (for the normalized name) is updated entry
+  by entry: a create adds one name, delete and rename remove it. Bulk file
+  creation in one directory is therefore linear (3000 files in about 1 s).
+  At most 256 directories, then the whole cache is dropped.
+- **The volume serial number** is stable (derived from the image file's
+  creation time, size and label): Windows uses it to recognize the volume
+  (shortcuts, thumbnail cache).
 - **Times:** our ns since 1970 -> FILETIME (100 ns since 1601). Creation
   time = `btime`, last write and last access = `mtime`, change = `ctime`.
 - **File ID** (`IndexNumber`) = the object's `oid`.
@@ -248,6 +278,7 @@ Common problems:
 | `nejde nacist ...winfsp-x64.dll` | WinFsp is not installed |
 | `pripojeni na Q: selhalo: 0x...` | the drive letter is already taken |
 | `Q: uz ho pripojuje jiny proces osfs mount` | another window is already mounting `Q:` |
+| `obraz ma otevreny jiny proces osfs` | the image is already mounted (`mount`) or being written (`put`) - unmount first |
 | `svazek je jen pro cteni` | uncertain recovery or unreadable log - run `osfs check` |
 | Windows offers to "format" a disk after inserting it | **do not click** - Windows does not know our format (once disks are supported) |
 
@@ -255,11 +286,15 @@ Common problems:
 
 - **Entry name by path** (`stat` does not return the stored name): the
   driver looks it up in the parent listing for the normalized name (with a
-  cache cleared on every name change). Slow for large directories.
+  name cache). The first open in a huge directory reads its whole listing.
 - **Setting times and attributes** (`set_times`, read-only flag).
 - **"Is there anything to save"** - commits are currently tracked by our
   own flag.
-- **Atomic replace on rename** (`rename` overwriting the target) - now
-  `remove` + `rename` under one lock (commit and `fsync` capture both steps
-  or neither).
+- **Volume UUID** in `FsInfo` - the serial number for Windows is now
+  derived from the image file's creation time (will not work for a real
+  disk).
+- **Device lock** in the library (or at least in `FileDevice`) - `osfs`
+  holds it itself now.
+- **Atomic replace on rename** - now move-aside of the target, rename and
+  deletion of the moved-aside file under one lock.
 - **Operations by handle/oid** instead of paths (handle layer).

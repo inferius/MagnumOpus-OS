@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use fs::{Algo, FileDevice, FormatOptions, Fs, Kind, MountOptions};
 
+use crate::lock::{ImageLock, LockMode, try_lock};
 use crate::names::{Hidden, to_windows_checked};
 
 /// Vychozi velikost noveho obrazu (256 MiB).
@@ -26,22 +27,27 @@ pub fn now_ns() -> u64 {
 
 /// Vypada cesta jako skutecny disk nebo oddil (ne soubor)? Takove cesty
 /// zatim odmitame: `\\.\PhysicalDrive1`, `\\?\Volume{...}`, `E:`, `E:\`,
-/// `/dev/sdb`.
+/// `/dev/sdb`. Obycejny soubor, ktery jen ma v ceste slovo `harddisk`,
+/// projde.
 pub fn looks_like_device(path: &str) -> bool {
     let p = path.replace('/', "\\");
     let lower = p.to_ascii_lowercase();
-    if lower.starts_with("\\\\.\\") || lower.starts_with("\\\\?\\") {
-        return true;
-    }
-    if lower.starts_with("\\dev\\") || lower.starts_with("\\.\\") || lower.starts_with("\\??\\") {
-        return true;
-    }
-    // Jmena zarizeni kdekoli v ceste (i zkomolena shellem, napr. git bash
-    // udela z `\\.\PhysicalDrive1` jen `\.\PhysicalDrive1`).
-    if ["physicaldrive", "harddisk", "volume{", "globalroot"]
+    // Jmenne prostory zarizeni. `\.\` je i to, co z `\\.\` udela git bash.
+    if ["\\\\.\\", "\\\\?\\", "\\??\\", "\\.\\", "\\dev\\"]
         .iter()
-        .any(|d| lower.contains(d))
+        .any(|pre| lower.starts_with(pre))
     {
+        return true;
+    }
+    // Slozka cesty, ktera je presne jmenem zarizeni.
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if lower.split('\\').any(|c| {
+        c == "globalroot"
+            || c.strip_prefix("physicaldrive").is_some_and(digits)
+            || c.strip_prefix("harddiskvolume").is_some_and(digits)
+            || c.strip_prefix("harddisk").is_some_and(digits)
+            || (c.starts_with("volume{") && c.ends_with('}'))
+    }) {
         return true;
     }
     let b = lower.as_bytes();
@@ -108,13 +114,34 @@ pub fn create_image(path: &Path, size: u64, label: &str, algo: Algo) -> Result<(
     result
 }
 
-/// Otevre obraz a pripoji svazek.
-pub fn open(path: &Path, read_only: bool) -> Result<Volume, String> {
+/// Otevre obraz a pripoji svazek. Vrati i zamek obrazu, ktery je potreba
+/// drzet po celou dobu prace se svazkem (viz `lock`): zapis vylucne,
+/// cteni sdilene (kdyz obraz prave nekdo zapisuje, cteni jen upozorni).
+pub fn open(path: &Path, read_only: bool) -> Result<(Volume, Option<ImageLock>), String> {
     if looks_like_device(&path.to_string_lossy()) {
         return Err(format!(
             "{}: skutecne disky osfs zatim nepodporuje, jen soubory s obrazem",
             path.display()
         ));
+    }
+    let mode = if read_only {
+        LockMode::Shared
+    } else {
+        LockMode::Exclusive
+    };
+    let lock = try_lock(path, mode).map_err(|e| format!("{}: {e}", path.display()))?;
+    if lock.is_none() {
+        if !read_only {
+            return Err(format!(
+                "{}: obraz ma otevreny jiny proces osfs (mount, put, ...) - dva \
+                 zapisovatele by svazek poskodili",
+                path.display()
+            ));
+        }
+        eprintln!(
+            "osfs: POZOR - obraz prave zapisuje jiny proces osfs; vysledek muze byt \
+             o par sekund stary (stav po poslednim commitu)"
+        );
     }
     let dev = FileDevice::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut fs = Fs::mount_with(
@@ -126,7 +153,7 @@ pub fn open(path: &Path, read_only: bool) -> Result<Volume, String> {
     )
     .map_err(|e| format!("pripojeni {}: {e}", path.display()))?;
     fs.set_time(now_ns());
-    Ok(fs)
+    Ok((fs, lock))
 }
 
 /// Polozka, kterou Windows neuvidi.
@@ -152,12 +179,10 @@ impl std::fmt::Display for HiddenWhy {
     }
 }
 
-fn join(dir: &str, name: &str) -> String {
-    if dir == "/" {
-        format!("/{name}")
-    } else {
-        format!("{dir}/{name}")
-    }
+/// Cesta polozky `name` v adresari `dir` (`/` + `a` = `/a`).
+pub fn join(dir: &str, name: &str) -> String {
+    let dir = dir.trim_end_matches('/');
+    format!("{dir}/{name}")
 }
 
 /// Projde cely strom a vrati polozky, ktere se ve Windows nezobrazi.

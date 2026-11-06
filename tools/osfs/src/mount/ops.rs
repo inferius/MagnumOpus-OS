@@ -9,8 +9,8 @@ use std::ffi::c_void;
 use fs::{Error, Kind, Stat, fold_name};
 
 use super::ffi::*;
-use super::{Handle, SD, State, debug, with_state};
-use crate::image::now_ns;
+use super::{Handle, NAME_CACHE_DIRS, SD, State, debug, with_state};
+use crate::image::{join, now_ns};
 use crate::names::{self, to_windows};
 
 /// Rozdil mezi 1. 1. 1601 (FILETIME) a 1. 1. 1970 v 100 ns.
@@ -165,10 +165,11 @@ fn file_info(s: &Stat) -> FileInfo {
 }
 
 fn handle_path(st: &State, ctx: *mut c_void) -> Result<String, NTSTATUS> {
-    st.handles
-        .get(&(ctx as usize))
-        .map(|h| h.path.clone())
-        .ok_or(STATUS_INVALID_PARAMETER)
+    match st.handles.get(&(ctx as usize)) {
+        Some(h) if h.gone => Err(STATUS_FILE_DELETED),
+        Some(h) => Ok(h.path.clone()),
+        None => Err(STATUS_INVALID_PARAMETER),
+    }
 }
 
 /// Vyplni `FileInfo` podle cesty.
@@ -188,7 +189,14 @@ fn put_info(st: &mut State, path: &str, out: *mut FileInfo) -> NTSTATUS {
 fn new_handle(st: &mut State, path: String, ctx: *mut *mut c_void) {
     let id = st.next_handle;
     st.next_handle += 1;
-    st.handles.insert(id, Handle { path });
+    st.handles.insert(
+        id,
+        Handle {
+            path,
+            gone: false,
+            listing: None,
+        },
+    );
     // SAFETY: WinFsp predava platny vystupni ukazatel.
     unsafe { *ctx = id as *mut c_void };
 }
@@ -207,14 +215,17 @@ fn true_path(st: &mut State, path: &str) -> Option<String> {
     for comp in comps(path) {
         let key = fold_name(&dir);
         if !st.dir_cache.contains_key(&key) {
+            if st.dir_cache.len() >= NAME_CACHE_DIRS {
+                st.dir_cache.clear();
+            }
             let list = st.fs.list(&dir).ok()?;
-            st.dir_cache.insert(key.clone(), list);
+            let map = list
+                .into_iter()
+                .map(|e| (fold_name(&e.name), e.name))
+                .collect();
+            st.dir_cache.insert(key.clone(), map);
         }
-        let want = fold_name(comp);
-        let e = st.dir_cache[&key]
-            .iter()
-            .find(|e| fold_name(&e.name) == want)?;
-        let name = e.name.clone();
+        let name = st.dir_cache[&key].get(&fold_name(comp))?.clone();
         win.push('\\');
         win.push_str(&to_windows(&name)?);
         if dir != "/" {
@@ -243,9 +254,32 @@ fn put_normalized(st: &mut State, path: &str, out: *mut FileInfo) {
     }
 }
 
-/// Po zmene jmen v adresarich: zahodit mezipamet vypisu.
-fn names_changed(st: &mut State) {
-    st.dir_cache.clear();
+/// Mezipamet jmen: v adresari `parent` pribylo jmeno `name` (tak, jak ho
+/// prelozila cesta z Windows; ulozi se jeho NFC tvar jako ve FS).
+fn cache_insert(st: &mut State, parent: &str, name: &str) {
+    if let Some(m) = st.dir_cache.get_mut(&fold_name(parent)) {
+        let stored = names::stored_form(name);
+        m.insert(fold_name(&stored), stored);
+    }
+}
+
+/// Mezipamet jmen: polozka `path` zmizela (i s podstromem, kdyz je to
+/// adresar).
+fn cache_remove(st: &mut State, path: &str) {
+    if let Some(name) = comps(path).last()
+        && let Some(m) = st.dir_cache.get_mut(&fold_name(parent_of(path)))
+    {
+        m.remove(&fold_name(name));
+    }
+    let key = fold_name(path);
+    let sub = format!("{key}/");
+    st.dir_cache
+        .retain(|k, _| *k != key && !k.starts_with(&sub));
+}
+
+/// Posledni slozka cesty.
+fn last_comp(path: &str) -> &str {
+    comps(path).last().copied().unwrap_or("")
 }
 
 /// Pred zmenou: cas a priznak zmeny.
@@ -351,7 +385,7 @@ unsafe extern "system" fn create(
                 e => status(e),
             };
         }
-        names_changed(st);
+        cache_insert(st, parent_of(&path), last_comp(&path));
         let r = put_info(st, &path, out);
         if r == STATUS_SUCCESS {
             put_normalized(st, &path, out);
@@ -415,9 +449,9 @@ unsafe extern "system" fn cleanup(_f: *mut FileSystem, ctx: *mut c_void, _name: 
         debug!("delete {path}");
         // Smazani uz WinFsp odsouhlasil pres CanDelete; chyba tu nejde
         // vratit (Cleanup je void), jen vypsat.
-        names_changed(st);
-        if let Err(e) = st.fs.remove(&path) {
-            eprintln!("osfs: smazani {path} selhalo: {e}");
+        match st.fs.remove(&path) {
+            Ok(()) => cache_remove(st, &path),
+            Err(e) => eprintln!("osfs: smazani {path} selhalo: {e}"),
         }
         STATUS_SUCCESS
     });
@@ -473,12 +507,12 @@ unsafe extern "system" fn write(
     with_state(|st| {
         let path = tri!(handle_path(st, ctx));
         let s = tri!(stat_visible(st, &path));
-        tri!(mutating(st));
         let mut offset = offset;
         let mut len = len as u64;
         if constrained != 0 {
             // Strankovy vstup/vystup: soubor se nezvetsuje.
             if offset >= s.size {
+                // Nic se nezapise, svazek se neoznaci jako zmeneny.
                 // SAFETY: platny vystupni ukazatel.
                 unsafe { *done = 0 };
                 return put_info(st, &path, out);
@@ -487,6 +521,7 @@ unsafe extern "system" fn write(
         } else if to_end != 0 {
             offset = s.size;
         }
+        tri!(mutating(st));
         // SAFETY: buffer od WinFsp ma `len` bajtu.
         let data = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
         if let Err(e) = st.fs.write(&path, offset, data) {
@@ -565,19 +600,14 @@ unsafe extern "system" fn set_file_size(
     with_state(|st| {
         let path = tri!(handle_path(st, ctx));
         let s = tri!(stat_visible(st, &path));
-        // Velikost alokace nas FS nedrzi: zmensi soubor jen kdyz je mensi
-        // nez soucasna velikost.
-        let target = if alloc_only != 0 {
-            if size >= s.size {
-                return put_info(st, &path, out);
-            }
-            size
-        } else {
-            size
-        };
-        if target != s.size {
+        // Velikost alokace nas FS nedrzi: ta soubor jen zkrati, kdyz je
+        // mensi nez soucasna velikost.
+        if alloc_only != 0 && size >= s.size {
+            return put_info(st, &path, out);
+        }
+        if size != s.size {
             tri!(mutating(st));
-            if let Err(e) = st.fs.truncate(&path, target) {
+            if let Err(e) = st.fs.truncate(&path, size) {
                 return status(e);
             }
         }
@@ -642,38 +672,63 @@ unsafe extern "system" fn rename(
     with_state(|st| {
         tri!(stat_visible(st, &from));
         tri!(mutating(st));
-        let same = strip_prefix_folded(&from, &to).is_some_and(|r| r.is_empty())
-            && comps(&from).len() == comps(&to).len();
+        let same = comps(&from).len() == comps(&to).len()
+            && strip_prefix_folded(&from, &to).is_some_and(|r| r.is_empty());
+        // Nahrazeni existujiciho cile: cil se nejdriv jen odsune stranou
+        // (docasne jmeno ve stejnem adresari) a smaze az po uspesnem
+        // prejmenovani; kdyz prejmenovani selze, vrati se zpet. Vse pod
+        // jednim zamkem, takze commit ani fsync nezachyti mezistav.
+        let mut moved_aside: Option<String> = None;
         if !same {
             match st.fs.stat(&to) {
-                Ok(t) => {
-                    if replace == 0 || t.kind != Kind::File {
-                        return if replace == 0 {
-                            STATUS_OBJECT_NAME_COLLISION
-                        } else {
-                            STATUS_ACCESS_DENIED
-                        };
-                    }
-                    // Nahrazeni: oba kroky pod jednim zamkem, commit
-                    // i fsync zachyti bud oba, nebo zadny.
-                    names_changed(st);
-                    if let Err(e) = st.fs.remove(&to) {
+                Ok(_) if replace == 0 => return STATUS_OBJECT_NAME_COLLISION,
+                Ok(t) if t.kind != Kind::File => return STATUS_ACCESS_DENIED,
+                Ok(_) => {
+                    let tmp = tri!(aside_name(st, parent_of(&to)));
+                    if let Err(e) = st.fs.rename(&to, &tmp) {
                         return status(e);
                     }
+                    moved_aside = Some(tmp);
                 }
                 Err(Error::NotFound) => {}
                 Err(e) => return status(e),
             }
         }
-        names_changed(st);
         if let Err(e) = st.fs.rename(&from, &to) {
+            if let Some(tmp) = &moved_aside
+                && let Err(e2) = st.fs.rename(tmp, &to)
+            {
+                eprintln!("osfs: vraceni {tmp} -> {to} selhalo: {e2}");
+            }
             return match e {
                 Error::NotFound | Error::NotADirectory => STATUS_OBJECT_PATH_NOT_FOUND,
                 e => status(e),
             };
         }
+        if let Some(tmp) = &moved_aside {
+            if let Err(e) = st.fs.remove(tmp) {
+                eprintln!("osfs: nahrazeny soubor {tmp} nejde smazat: {e}");
+            }
+            // Handly na nahrazeny soubor: jejich cesta ted vede na
+            // presunuty objekt - nesmi do nej psat.
+            for h in st.handles.values_mut() {
+                if same_path(&h.path, &to) {
+                    h.gone = true;
+                }
+            }
+        }
+        // Mezipamet jmen.
+        cache_remove(st, &from);
+        if moved_aside.is_some() {
+            st.dir_cache.remove(&fold_name(parent_of(&to)));
+        } else {
+            cache_insert(st, parent_of(&to), last_comp(&to));
+        }
         // Otevrene handly pod starym jmenem.
         for h in st.handles.values_mut() {
+            if h.gone {
+                continue;
+            }
             if let Some(rest) = strip_prefix_folded(&h.path, &from) {
                 let mut p = to.clone();
                 for c in rest {
@@ -685,6 +740,24 @@ unsafe extern "system" fn rename(
         }
         STATUS_SUCCESS
     })
+}
+
+/// Jsou to tataz cesta (bez ohledu na velikost pismen)?
+fn same_path(a: &str, b: &str) -> bool {
+    comps(a).len() == comps(b).len() && strip_prefix_folded(a, b).is_some()
+}
+
+/// Volne docasne jmeno v adresari `dir` pro odsunuti nahrazovaneho cile.
+fn aside_name(st: &mut State, dir: &str) -> Result<String, NTSTATUS> {
+    for i in 0..1000 {
+        let p = join(dir, &format!(".osfs-nahrazeni-{i}"));
+        match st.fs.stat(&p) {
+            Err(Error::NotFound) => return Ok(p),
+            Ok(_) => continue,
+            Err(e) => return Err(status(e)),
+        }
+    }
+    Err(STATUS_OBJECT_NAME_COLLISION)
 }
 
 unsafe extern "system" fn get_security(
@@ -733,68 +806,92 @@ unsafe extern "system" fn read_directory(
     let marker = unsafe { win_string(marker) };
     with_state(|st| {
         let path = tri!(handle_path(st, ctx));
-        let entries = match st.fs.list(&path) {
-            Ok(v) => v,
+        let id = ctx as usize;
+        // Snimek vypisu: novy pri prvnim dotazu (bez markeru), dalsi casti
+        // pokracuji ve stejnem (jinak by se cely adresar cetl znovu pro
+        // kazdou cast).
+        let cached = st.handles.get_mut(&id).and_then(|h| h.listing.take());
+        let listing = match cached {
+            Some(l) if marker.is_some() => l,
+            _ => match st.fs.list(&path) {
+                // Poradi podle slozeneho jmena (tak je vraci `list`).
+                Ok(entries) => entries
+                    .into_iter()
+                    .filter(|e| e.kind != Kind::Symlink)
+                    .filter_map(|e| {
+                        let win = to_windows(&e.name)?;
+                        Some((win, fold_name(&e.name), e.name))
+                    })
+                    .collect(),
+                Err(e) => return status(e),
+            },
+        };
+        let r = fill_directory(st, &path, &listing, marker.as_deref(), buf, len, done);
+        if let Some(h) = st.handles.get_mut(&id) {
+            h.listing = Some(listing);
+        }
+        r
+    })
+}
+
+/// Polozka snimku vypisu: (jmeno ve Windows, slozene jmeno, ulozene jmeno).
+pub(crate) type ListItem = (String, String, String);
+
+/// Naplni buffer vypisu od markeru dal. `listing` je serazeny podle
+/// slozeneho jmena.
+fn fill_directory(
+    st: &mut State,
+    path: &str,
+    listing: &[ListItem],
+    marker: Option<&str>,
+    buf: *mut c_void,
+    len: u32,
+    done: *mut u32,
+) -> NTSTATUS {
+    let dots = if path == "/" { 0 } else { 2 };
+    // "." a ".." jsou prvni, ostatni podle slozeneho jmena (marker uz
+    // nemusi existovat).
+    let (first_dot, start) = match marker {
+        None => (0, 0),
+        Some(".") => (1.min(dots), 0),
+        Some("..") => (dots, 0),
+        Some(m) => {
+            let after = fold_name(&names::from_windows(m).unwrap_or_else(|_| m.to_string()));
+            (dots, listing.partition_point(|(_, f, _)| *f <= after))
+        }
+    };
+    for i in first_dot..dots {
+        let (name, target) = if i == 0 {
+            (".", path)
+        } else {
+            ("..", parent_of(path))
+        };
+        let s = tri!(stat_visible(st, target));
+        // SAFETY: buffer od WinFsp.
+        if !unsafe { add_entry(name, file_info(&s), buf, len, done) } {
+            return STATUS_SUCCESS;
+        }
+    }
+    for (win, _, stored) in &listing[start..] {
+        // Stat az tady: jen pro polozky, ktere se do bufferu opravdu
+        // vejdou.
+        let s = match st.fs.stat(&join(path, stored)) {
+            Ok(s) => s,
+            // Smazano od porizeni snimku.
+            Err(Error::NotFound) => continue,
             Err(e) => return status(e),
         };
-        // Polozky v poradi podle slozeneho jmena (tak je vraci `list`).
-        let mut items: Vec<(String, FileInfo)> = Vec::new();
-        if path != "/" {
-            let me = tri!(stat_visible(st, &path));
-            let up = tri!(stat_visible(st, parent_of(&path)));
-            items.push((".".into(), file_info(&me)));
-            items.push(("..".into(), file_info(&up)));
+        // SAFETY: buffer od WinFsp.
+        if !unsafe { add_entry(win, file_info(&s), buf, len, done) } {
+            // Buffer je plny: WinFsp si rekne o dalsi cast s markerem.
+            return STATUS_SUCCESS;
         }
-        let dots = items.len();
-        // Pokracovani za markerem: "." a ".." jsou prvni, ostatni podle
-        // slozeneho jmena (marker nemusi uz existovat).
-        let after: Option<String> = match marker.as_deref() {
-            None => None,
-            Some(".") | Some("..") => None,
-            Some(m) => Some(fold_name(
-                &names::from_windows(m).unwrap_or_else(|_| m.to_string()),
-            )),
-        };
-        let skip_dots = match marker.as_deref() {
-            None => 0,
-            Some(".") => 1.min(dots),
-            Some(_) => dots,
-        };
-        for e in entries {
-            if e.kind == Kind::Symlink {
-                continue;
-            }
-            let Some(win) = to_windows(&e.name) else {
-                continue;
-            };
-            if let Some(a) = &after
-                && fold_name(&e.name) <= *a
-            {
-                continue;
-            }
-            let full = if path == "/" {
-                format!("/{}", e.name)
-            } else {
-                format!("{path}/{}", e.name)
-            };
-            match st.fs.stat(&full) {
-                Ok(s) => items.push((win, file_info(&s))),
-                Err(e) => return status(e),
-            }
-        }
-        for (name, info) in items.into_iter().skip(skip_dots) {
-            // SAFETY: buffer od WinFsp.
-            if !unsafe { add_entry(&name, info, buf, len, done) } {
-                // Buffer je plny: WinFsp si rekne o dalsi cast s markerem.
-                return STATUS_SUCCESS;
-            }
-        }
-        // Konec vypisu.
-        // SAFETY: null = znacka konce, viz FspFileSystemAddDirInfo.
-        unsafe {
-            let api = super::API.get().expect("API nactene pred pripojenim");
-            (api.add_dir_info)(std::ptr::null_mut(), buf, len, done);
-        }
-        STATUS_SUCCESS
-    })
+    }
+    // Konec vypisu.
+    // SAFETY: null = znacka konce, viz FspFileSystemAddDirInfo.
+    unsafe {
+        let api = super::API.get().expect("API nactene pred pripojenim");
+        (api.add_dir_info)(std::ptr::null_mut(), buf, len, done);
+    }
+    STATUS_SUCCESS
 }

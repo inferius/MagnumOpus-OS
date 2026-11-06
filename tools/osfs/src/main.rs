@@ -150,7 +150,7 @@ fn cmd_check(raw: &[String]) -> Result<(), String> {
     let a = Args::parse(raw, &[])?;
     a.only(&["scrub"])?;
     a.need(1, 1, "osfs check <obraz> [--scrub]")?;
-    let mut fs = image::open(Path::new(&a.pos[0]), true)?;
+    let (mut fs, _lock) = image::open(Path::new(&a.pos[0]), true)?;
     let info = fs.info();
     println!(
         "svazek '{}': {} bloku po {} B, volnych {}, generace {}, soucty {:?}",
@@ -213,13 +213,9 @@ fn cmd_ls(raw: &[String]) -> Result<(), String> {
     a.only(&[])?;
     a.need(1, 2, "osfs ls <obraz> [cesta]")?;
     let path = a.pos.get(1).map(String::as_str).unwrap_or("/");
-    let mut fs = image::open(Path::new(&a.pos[0]), true)?;
+    let (mut fs, _lock) = image::open(Path::new(&a.pos[0]), true)?;
     for e in fs.list(path).map_err(|e| format!("{path}: {e}"))? {
-        let full = if path.ends_with('/') {
-            format!("{path}{}", e.name)
-        } else {
-            format!("{path}/{}", e.name)
-        };
+        let full = image::join(path, &e.name);
         let st = fs.stat(&full).map_err(|e| format!("{full}: {e}"))?;
         let (kind, size) = match e.kind {
             Kind::Dir => ("dir ", st.tree_bytes),
@@ -245,7 +241,7 @@ fn cmd_cat(raw: &[String]) -> Result<(), String> {
     a.only(&[])?;
     a.need(2, 2, "osfs cat <obraz> <cesta>")?;
     let path = &a.pos[1];
-    let mut fs = image::open(Path::new(&a.pos[0]), true)?;
+    let (mut fs, _lock) = image::open(Path::new(&a.pos[0]), true)?;
     let size = fs.stat(path).map_err(|e| format!("{path}: {e}"))?.size;
     let mut out = std::io::stdout().lock();
     let mut off = 0u64;
@@ -268,7 +264,7 @@ fn cmd_put(raw: &[String]) -> Result<(), String> {
     a.need(3, 3, "osfs put <obraz> <soubor> <cesta>")?;
     let (img, local, path) = (&a.pos[0], &a.pos[1], &a.pos[2]);
     let mut src = std::fs::File::open(local).map_err(|e| format!("{local}: {e}"))?;
-    let mut fs = image::open(Path::new(img), false)?;
+    let (mut fs, _lock) = image::open(Path::new(img), false)?;
     if fs.info().read_only {
         return Err("svazek je pripojeny jen pro cteni (viz osfs check)".into());
     }

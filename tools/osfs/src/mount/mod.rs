@@ -33,18 +33,33 @@ const SDDL: &str = "O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)";
 struct Handle {
     /// Cesta v nasem FS (`/a/b`).
     path: String,
+    /// Objekt pod handlem uz neexistuje (byl nahrazen pri prejmenovani):
+    /// cesta by ted vedla na jiny objekt, operace vraci `STATUS_FILE_DELETED`.
+    gone: bool,
+    /// Snimek vypisu adresare pro `ReadDirectory` po castech: porizuje se
+    /// pri prvnim dotazu (bez markeru), dalsi casti z nej jen pokracuji.
+    listing: Option<Vec<ops::ListItem>>,
 }
+
+/// Mezipamet jmen pro `ops::true_path`: slozena cesta adresare ->
+/// (slozene jmeno -> ulozene jmeno). Zmeny jmen ji upravuji po polozkach
+/// (`ops::cache_*`), takze hromadne vytvareni souboru neni kvadraticke.
+pub(crate) type NameCache = HashMap<String, HashMap<String, String>>;
+
+/// Nejvic adresaru v mezipameti jmen; pak se zahodi cela (jednoduche
+/// omezeni pameti).
+pub(crate) const NAME_CACHE_DIRS: usize = 256;
 
 struct State {
     fs: Volume,
+    /// Vylucny zamek obrazu (zadny jiny zapisovatel), drzi se do odpojeni.
+    _image_lock: Option<crate::lock::ImageLock>,
     handles: HashMap<usize, Handle>,
     next_handle: usize,
     /// Od posledniho commitu se neco zmenilo.
     dirty: bool,
-    /// Vypisy adresaru pro dohledani skutecne velikosti pismen jmen
-    /// (`ops::true_path`); klic = slozena cesta adresare. Maze se pri
-    /// kazde zmene jmen (create, remove, rename).
-    dir_cache: HashMap<String, Vec<fs::DirEntry>>,
+    /// Skutecna jmena (velikost pismen) pro `ops::true_path`.
+    dir_cache: NameCache,
     read_only: bool,
 }
 
@@ -113,6 +128,32 @@ fn commit_now(st: &mut State) {
     }
 }
 
+/// Stale seriove cislo a cas vytvoreni svazku. Windows podle serioveho
+/// cisla poznavaji svazek (zastupci, mezipamet nahledu), proto se nesmi
+/// menit s kazdym pripojenim. UUID svazku API `fs` nevraci, pouzije se tedy
+/// cas vytvoreni souboru s obrazem (prezije prejmenovani i presun na
+/// stejnem disku) spolu s velikosti a jmenovkou.
+fn volume_identity(image_path: &Path, info: &fs::FsInfo) -> (u32, u64) {
+    let created = std::fs::metadata(image_path)
+        .and_then(|m| m.created())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    // FNV-1a 64 pres cas vytvoreni, pocet bloku a jmenovku.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in created
+        .to_le_bytes()
+        .iter()
+        .chain(&info.block_count.to_le_bytes())
+        .chain(info.label.as_bytes())
+    {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    ((h ^ (h >> 32)) as u32, created)
+}
+
 /// Jmeno udalosti, kterou `osfs unmount X:` pozada o odpojeni (jen v ramci
 /// prihlaseni uzivatele).
 fn unmount_event_name(drive: &str) -> String {
@@ -165,7 +206,8 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
         return Err(format!("{drive}: uz ho pripojuje jiny proces osfs mount"));
     }
 
-    let fs = image::open(image_path, false)?;
+    let (fs, image_lock) = image::open(image_path, false)?;
+    let (serial, created) = volume_identity(image_path, &fs.info());
     let info = fs.info();
     if info.read_only {
         eprintln!(
@@ -174,6 +216,7 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     }
     *lock() = Some(State {
         fs,
+        _image_lock: image_lock,
         handles: HashMap::new(),
         next_handle: 1,
         dirty: false,
@@ -187,8 +230,8 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     vp.SectorSize = fs::BLOCK_SIZE as u16;
     vp.SectorsPerAllocationUnit = 1;
     vp.MaxComponentLength = crate::names::WIN_NAME_MAX as u16;
-    vp.VolumeCreationTime = ops::filetime(image::now_ns());
-    vp.VolumeSerialNumber = (image::now_ns() / 1_000_000) as u32;
+    vp.VolumeCreationTime = ops::filetime(created);
+    vp.VolumeSerialNumber = serial;
     vp.FileInfoTimeout = 1000;
     vp.Flags = VP_CASE_PRESERVED_NAMES
         | VP_UNICODE_ON_DISK

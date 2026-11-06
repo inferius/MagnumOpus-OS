@@ -173,6 +173,13 @@ pub fn path_from_windows(win: &str) -> Result<String, BadName> {
     Ok(out)
 }
 
+/// Tvar, v jakem nas FS jmeno ulozi: NFC, velikost pismen zachovana
+/// (stejne jako `stored_name` v `libs/fs/src/names.rs`, ktere neni verejne).
+pub fn stored_form(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.nfc().collect()
+}
+
 /// Retezec UTF-16 (z Windows) -> String. Nesparovane surogaty nejsou
 /// platne Unicode a nas FS je neumi ulozit -> `None`.
 pub fn utf16_to_string(w: &[u16]) -> Option<String> {

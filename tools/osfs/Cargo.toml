@@ -8,6 +8,8 @@ description = "Hostitelsky nastroj pro souborovy system MagnumOpus: format, chec
 
 [dependencies]
 fs = { workspace = true, features = ["std"] }
+# Stejna knihovna a verze jako v `libs/fs` (NFC tvar ulozenych jmen).
+unicode-normalization = { version = "0.1", default-features = false }
 
 [dev-dependencies]
 proptest = "1"

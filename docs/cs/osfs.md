@@ -57,6 +57,15 @@ cargo test -p osfs
 | `osfs mount <obraz> <X:>` | připojí obraz jako jednotku `X:`; běží, dokud se neodpojí |
 | `osfs unmount <X:>` | odpojí jednotku z jiného okna (stejné jako Ctrl+C v okně s `mount`) |
 
+**Jeden zapisovatel:** obraz může mít otevřený pro zápis jen jeden proces
+`osfs` (`mount`, `put`); druhý skončí hláškou `obraz ma otevreny jiny proces
+osfs`. Dva zapisovatelé by si navzájem přepisovali bloky a svazek by se
+poškodil. Čtení (`check`, `ls`, `cat`) vedle běžícího `mount` projde, jen
+upozorní, že vidí stav po posledním commitu (až o pár sekund starý). Zámek
+je bajt daleko za koncem souboru zamčený přes `LockFileEx`, takže neblokuje
+čtení a zápis obrazu, platí mezi všemi procesy a přihlášeními a uvolní se
+i při pádu `osfs`.
+
 Cesty v obrazu se píšou s `/` od kořene (`/dokumenty/a.txt`). Velikost
 písmen se nerozlišuje (stejně jako ve Windows), jména se ukládají tak, jak
 je zadáš.
@@ -129,6 +138,25 @@ zůstane ve stavu po posledním commitu plus změny potvrzené `fsync` - viz
   dohledané ve výpisu rodiče); bez toho by WinFsp bral jako jméno souboru
   zadanou cestu velkými písmeny a přejmenování `a.txt` -> `A.TXT` by
   považoval za „beze změny“.
+- **Přejmenování s nahrazením** (`MoveFileEx` s `REPLACE_EXISTING`): cíl
+  se nejdřív jen odsune na dočasné jméno `.osfs-nahrazeni-N` ve stejném
+  adresáři, pak se přejmenuje zdroj a teprve potom se odsunutý cíl smaže.
+  Když přejmenování selže, cíl se vrátí zpět - nic se neztratí. Vše probíhá
+  pod jedním zámkem, takže commit ani `fsync` mezistav nezachytí. Handly,
+  které byly otevřené na nahrazeném souboru, už vrací „soubor smazán“
+  (jejich cesta by teď vedla na jiný objekt); obvykle to ale odmítne už
+  WinFsp (otevřený cíl nejde nahradit).
+- **Výpis adresáře** po částech: při prvním dotazu se pořídí snímek seznamu
+  jmen, další části (WinFsp se ptá opakovaně, dokud se buffer plní)
+  pokračují ve stejném snímku a metadata (`stat`) se čtou jen pro položky,
+  které se do bufferu opravdu vejdou.
+- **Mezipaměť skutečných jmen** (kvůli normalizovanému jménu) se mění po
+  položkách: vytvoření přidá jedno jméno, smazání a přejmenování ho odeberou.
+  Hromadné vytváření souborů v jednom adresáři je proto lineární (3000
+  souborů asi za 1 s). Nejvýš 256 adresářů, pak se mezipaměť zahodí celá.
+- **Sériové číslo svazku** je stálé (z času vytvoření souboru s obrazem,
+  velikosti a jmenovky): Windows podle něj poznávají svazek (zástupci,
+  mezipaměť náhledů).
 - **Časy:** naše ns od 1970 -> FILETIME (100 ns od 1601). Čas vytvoření =
   `btime`, poslední zápis i přístup = `mtime`, změna = `ctime`.
 - **ID souboru** (`IndexNumber`) = `oid` objektu.
@@ -244,17 +272,21 @@ osfs: delete /Slozka/A.TXT
 | `nejde nacist ...winfsp-x64.dll` | WinFsp není nainstalovaný |
 | `pripojeni na Q: selhalo: 0x...` | písmeno už je obsazené |
 | `Q: uz ho pripojuje jiny proces osfs mount` | jiné okno už `Q:` připojuje |
+| `obraz ma otevreny jiny proces osfs` | obraz už je připojený (`mount`) nebo se do něj právě zapisuje (`put`) - nejdřív odpojit |
 | `svazek je jen pro cteni` | nejistá obnova nebo nečitelný log - pusť `osfs check` |
 | Windows po zasunutí disku nabízí „naformátovat“ | **neklikat** - Windows náš formát neznají (až budou podporované disky) |
 
 ## Co v API `fs` chybí (pro další verze)
 
 - **Jméno položky podle cesty** (`stat` nevrací uložené jméno): ovladač
-  ho kvůli normalizovanému jménu hledá ve výpisu rodiče (s mezipamětí,
-  maže se při každé změně jmen). U velkých adresářů je to pomalé.
+  ho kvůli normalizovanému jménu hledá ve výpisu rodiče (s mezipamětí
+  jmen). První otevření v obřím adresáři načte celý jeho výpis.
 - **Nastavení časů a atributů** (`set_times`, příznak jen pro čtení).
 - **Informace „je co ukládat“** - commit se teď hlídá vlastním příznakem.
-- **Atomické nahrazení při přejmenování** (`rename` s přepsáním cíle) -
-  teď `remove` + `rename` pod jedním zámkem (commit i `fsync` zachytí oba
-  kroky, nebo žádný).
+- **UUID svazku** ve `FsInfo` - sériové číslo pro Windows se teď počítá
+  z času vytvoření souboru s obrazem (u skutečného disku nepůjde).
+- **Zámek zařízení** v knihovně (nebo aspoň v `FileDevice`) - teď ho drží
+  `osfs` sám.
+- **Atomické nahrazení při přejmenování** - teď odsunutí cíle, přejmenování
+  a smazání odsunutého pod jedním zámkem.
 - **Operace přes handle/oid** místo cest (vrstva handlů).
