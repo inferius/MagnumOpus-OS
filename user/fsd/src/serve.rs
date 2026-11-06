@@ -74,6 +74,11 @@ impl Service {
             self.fs = Some(fs);
             return Ok(w);
         }
+        // Dlouha operace nad celym svazkem: jen v rezimu `debug` (v1 nema
+        // overeni klienta; s protokolem v2 pujde podle opravneni).
+        if opcode == op::CHECK && !self.debug {
+            return Err(Error::AccessDenied);
+        }
         let now = libos::time::now();
         let fs = self.fs()?;
         fs.set_time(now);
@@ -94,7 +99,26 @@ impl Service {
                 .put(&mut w);
             }
             op::STAT => stat(fs.stat(&r.str()?)?).put(&mut w),
-            op::LIST => fsproto::encode_list(&mut w, &entries(fs.list(&r.str()?)?)),
+            op::LIST => {
+                let list = entries(fs.list(&r.str()?)?);
+                fsproto::encode_list(&mut w, &list);
+                if w.len() > fsproto::MAX_REPLY {
+                    return Err(Error::BufferTooSmall);
+                }
+            }
+            op::LIST_PAGE => {
+                let path = r.str()?;
+                let (from, max) = (r.u32()? as usize, r.u32()? as usize);
+                let list = entries(fs.list(&path)?);
+                fsproto::encode_list_page(&mut w, &list, from, max, fsproto::MAX_REPLY);
+            }
+            op::SNAP_LIST_PAGE => {
+                let snap = r.str()?;
+                let path = r.str()?;
+                let (from, max) = (r.u32()? as usize, r.u32()? as usize);
+                let list = entries(fs.snapshot_list(&snap, &path)?);
+                fsproto::encode_list_page(&mut w, &list, from, max, fsproto::MAX_REPLY);
+            }
             op::READ => {
                 let path = r.str()?;
                 let off = r.u64()?;
@@ -144,6 +168,9 @@ impl Service {
             op::SNAP_LIST => {
                 let snap = r.str()?;
                 fsproto::encode_list(&mut w, &entries(fs.snapshot_list(&snap, &r.str()?)?));
+                if w.len() > fsproto::MAX_REPLY {
+                    return Err(Error::BufferTooSmall);
+                }
             }
             op::SNAP_READ => {
                 let snap = r.str()?;
@@ -160,8 +187,21 @@ impl Service {
             }
             op::CHECK => {
                 let report = fs.check(r.u8()? != 0)?;
-                w.u32(report.problems.len() as u32);
+                w.u64(report.generation)
+                    .u64(report.problems_total)
+                    .u8(report.live_not_checked as u8);
+                // Jen tolik popisu, kolik se vejde do odpovedi.
+                let mut fit = Vec::new();
+                let mut size = 0;
                 for p in &report.problems {
+                    size += 2 + p.len();
+                    if size > fsproto::MAX_REPLY - 64 {
+                        break;
+                    }
+                    fit.push(p);
+                }
+                w.u32(fit.len() as u32);
+                for p in fit {
                     w.str(p);
                 }
             }

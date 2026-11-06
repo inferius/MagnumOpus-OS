@@ -836,8 +836,19 @@ strom, všechny snapshoty, metadata volného místa a intent log:
 - druh v položce adresáře musí sedět se záznamem objektu a symbolický odkaz
   musí mít cíl s délkou rovnou velikosti (a nic jiného cíl mít nesmí).
 
-Vrací `CheckReport` s počty bloků (stromu, dat, metadat) a seznamem
-problémů (prázdný = v pořádku). Testy ho volají po každém scénáři.
+Vrací `CheckReport` s počty bloků (stromu, dat, metadat), seznamem
+problémů (prázdný = v pořádku; nejvýš 1000 popisů, celkový počet je
+v `problems_total`), zkontrolovanou generací a `live_not_checked`. Testy ho
+volají po každém scénáři.
+
+**Paměť kontroly je pevná:** 3 bitové mapy po jednom bitu na blok svazku
+(použité, data, viděné uzly) - 1 TiB svazek = 96 MiB, nezávisle na počtu
+souborů a verzí. Poškozený svazek se miliony chyb tak kontrolu nezahltí.
+Uzel nebo extent mimo svazek je problém v hlášení, ne pád.
+
+Podobně se **extenty zpracovávají po dávkách** (256): zkrácení nebo smazání
+obřího souboru (1 TiB = ~540 000 extentů se součty, ~4 GiB) nikdy nenačte
+všechny extenty do paměti najednou.
 
 ## Výkon a režie
 
@@ -886,6 +897,11 @@ pamětí a frontami požadavků.
 - **V nečinnosti** po commitu defragmentuje po krocích 256 bloků.
 - **TRIM** zapnutý.
 - **Konec:** když klient zavře kanál, služba udělá commit a skončí.
+- **Chyba odeslání odpovědi** (např. odpověď se nevejde do zprávy) službu
+  neukončí: místo odpovědi pošle `BUFFER_TOO_SMALL`. Končí jen při
+  zavřeném kanálu - jinak by svazek zůstal bez závěrečného commitu.
+- **`CHECK` jen v režimu `debug`** (dlouhá operace nad celým svazkem; v1
+  nemá ověření klienta, s protokolem v2 půjde podle oprávnění).
 
 Hlášky služby popisuje [hlasky.md](hlasky.md#služba-fsd-a-souborový-systém).
 
@@ -901,7 +917,7 @@ větší požadavky rozdělí.
 |---|---|---|---|
 | 1 | `INFO` | - | jméno svazku, velikost bloku, bloky, volné, odložené, generace, algoritmus, návrat, přehráno |
 | 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, souhrny podstromu) |
-| 3 | `LIST` | cesta | počet u32 + (druh u8, oid u64, jméno) - seřazené podle jména; druh 1 soubor, 2 adresář, 3 symbolický odkaz |
+| 3 | `LIST` | cesta | počet u32 + (druh u8, oid u64, jméno) - seřazené podle jména; druh 1 soubor, 2 adresář, 3 symbolický odkaz; `BUFFER_TOO_SMALL`, když se výpis do zprávy nevejde |
 | 4 | `READ` | cesta, offset u64, délka u32 | data (kratší na konci souboru) |
 | 5 | `WRITE` | cesta, offset u64, data | - |
 | 6 | `CREATE` | cesta, druh u8 (1 soubor, 2 adresář; jiný = `INVALID_ARGS`) | - |
@@ -918,8 +934,14 @@ větší požadavky rozdělí.
 | 17 | `SNAP_READ` | snapshot, cesta, offset, délka | data |
 | 18 | `DEFRAG` | cesta | přepsané bloky u64 |
 | 19 | `FRAGMENTS` | cesta | počet úseků u64 |
-| 20 | `CHECK` | scrub u8 | počet u32 + popisy problémů |
+| 20 | `CHECK` | scrub u8 | generace u64, celkem problémů u64, nezkontrolované změny v paměti u8, počet u32 + popisy (kolik se vejde); jen s `debug` |
+| 21 | `LIST_PAGE` | cesta, od u32, nejvýš u32 | celkem u32 + stránka jako `LIST` (kolik se vejde do 60 KiB) |
+| 22 | `SNAP_LIST_PAGE` | snapshot, cesta, od u32, nejvýš u32 | jako `LIST_PAGE` |
 | 100 | `SIMULATE_POWER_LOSS` | - | přehrané operace u64; jen s `debug`, jinak `ACCESS_DENIED` |
+
+`FsClient::list` a `snapshot_list` čtou vždy po stránkách, takže zvládnou
+libovolně velký adresář. ⚠️ Omezení v1: každá stránka sestaví výpis znovu
+(velký adresář = čtvercová cena); protokol v2 přinese kurzor.
 
 Příklad zprávy `READ "/a.txt", offset 0, 100 B`:
 

@@ -52,6 +52,15 @@ impl Writer {
         self
     }
 
+    /// Dosavadni delka zpravy v bajtech.
+    pub fn len(&self) -> usize {
+        self.b.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.b.is_empty()
+    }
+
     pub fn finish(self) -> Vec<u8> {
         self.b
     }

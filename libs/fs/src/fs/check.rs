@@ -7,7 +7,7 @@
 //! - ze zadny obsazeny blok neni "ztraceny" (nikdo na nej neukazuje),
 //! - ze zivy strom nepouziva jeden blok dvakrat.
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -29,13 +29,49 @@ pub struct CheckReport {
     pub data_blocks: u64,
     /// Bloky metadat volneho mista a intent logu.
     pub meta_blocks: u64,
-    /// Nalezene problemy (prazdne = v poradku).
+    /// Nalezene problemy (prazdne = v poradku); nejvys `MAX_PROBLEMS`
+    /// popisu, celkovy pocet je v `problems_total`.
     pub problems: Vec<String>,
+    /// Pocet vsech nalezenych problemu (i tech, ktere se uz nevypsaly).
+    pub problems_total: u64,
     /// Ktera generace (ulozeny stav na disku) se kontrolovala.
     pub generation: u64,
     /// V pameti jsou zmeny, ktere kontrola nezahrnula (svazek jen pro cteni
     /// s prehranym intent logem): kontrolovan je jen ulozeny stav.
     pub live_not_checked: bool,
+}
+
+/// Nejvic vypsanych problemu (pamet kontroly nesmi rust s poskozenim).
+pub const MAX_PROBLEMS: usize = 1000;
+
+impl CheckReport {
+    fn problem(&mut self, msg: String) {
+        self.problems_total += 1;
+        if self.problems.len() < MAX_PROBLEMS {
+            self.problems.push(msg);
+        }
+    }
+}
+
+/// Bitova mapa bloku svazku.
+struct Bitmap(Vec<u64>);
+
+impl Bitmap {
+    fn new(blocks: u64) -> Self {
+        Self(alloc::vec![0; blocks.div_ceil(64) as usize])
+    }
+
+    fn get(&self, b: u64) -> bool {
+        self.0[(b / 64) as usize] & (1 << (b % 64)) != 0
+    }
+
+    /// Nastavi bit; vraci, zda uz byl nastaveny.
+    fn set(&mut self, b: u64) -> bool {
+        let w = &mut self.0[(b / 64) as usize];
+        let was = *w & (1 << (b % 64)) != 0;
+        *w |= 1 << (b % 64);
+        was
+    }
 }
 
 impl<D: BlockDevice> Fs<D> {
@@ -82,9 +118,12 @@ impl<D: BlockDevice> Fs<D> {
             live_not_checked: read_only && (self.replayed > 0 || self.s.has_changes()),
             ..CheckReport::default()
         };
-        // blok -> kdo ho pouziva (pro hlaseni)
-        let mut used: BTreeMap<u64, &'static str> = BTreeMap::new();
-        let mut seen_nodes: BTreeSet<u64> = BTreeSet::new();
+        // Pamet kontroly je pevna: 3 bity na blok svazku (1 TiB = 96 MiB),
+        // nezavisle na poctu souboru a verzi.
+        let n = sb.block_count;
+        let mut used = Bitmap::new(n);
+        let mut is_data = Bitmap::new(n);
+        let mut seen_nodes = Bitmap::new(n);
         // Druhy objektu zive verze (shoda polozek adresaru se zaznamy).
         let mut objects = Objects::default();
         let stored = Child::Disk(sb.root);
@@ -95,24 +134,27 @@ impl<D: BlockDevice> Fs<D> {
             let mut stack = alloc::vec![root];
             while let Some(c) = stack.pop() {
                 let Child::Disk(p) = c else { continue };
-                if !seen_nodes.insert(p.block) {
+                let end = p.block.checked_add(crate::layout::NODE_BLOCKS);
+                if p.block < DATA_START || end.is_none_or(|e| e > n) {
+                    r.problem(format!("{name}: uzel {} lezi mimo svazek", p.block));
+                    continue;
+                }
+                if seen_nodes.set(p.block) {
                     if live {
-                        r.problems
-                            .push(format!("uzel {} je ve zivem strome vickrat", p.block));
+                        r.problem(format!("uzel {} je ve zivem strome vickrat", p.block));
                     }
                     continue;
                 }
                 for b in p.block..p.block + crate::layout::NODE_BLOCKS {
-                    if used.insert(b, "uzel").is_some() {
-                        r.problems.push(format!("blok {b} pouziva uzel i neco jineho"));
+                    if used.set(b) {
+                        r.problem(format!("blok {b} pouziva uzel i neco jineho"));
                     }
                 }
                 r.tree_blocks += crate::layout::NODE_BLOCKS;
                 let node = match self.s.load(&p) {
                     Ok(n) => n.clone(),
                     Err(e) => {
-                        r.problems
-                            .push(format!("{name}: uzel {} nejde nacist: {e:?}", p.block));
+                        r.problem(format!("{name}: uzel {} nejde nacist: {e:?}", p.block));
                         continue;
                     }
                 };
@@ -126,20 +168,32 @@ impl<D: BlockDevice> Fs<D> {
                             if k.kind != item::EXTENT {
                                 continue;
                             }
-                            let e = Extent::decode(&v)?;
+                            let e = match Extent::decode(&v) {
+                                Ok(e) => e,
+                                Err(err) => {
+                                    r.problem(format!("{name}: extent objektu {}: {err:?}", k.oid));
+                                    continue;
+                                }
+                            };
+                            let end = e.phys.checked_add(e.len());
+                            if e.phys < DATA_START || end.is_none_or(|x| x > n) {
+                                r.problem(format!("{name}: extent objektu {} lezi mimo svazek", k.oid));
+                                continue;
+                            }
                             for b in e.phys..e.phys + e.len() {
-                                match used.insert(b, "data") {
-                                    None => r.data_blocks += 1,
-                                    Some("data") if !live => {}
-                                    Some(_) => r
-                                        .problems
-                                        .push(format!("datovy blok {b} je pouzity vickrat")),
+                                if !used.set(b) {
+                                    is_data.set(b);
+                                    r.data_blocks += 1;
+                                } else if !(is_data.get(b) && !live) {
+                                    // Sdilena data snapshotu jsou v poradku;
+                                    // jinak je blok pouzity dvakrat.
+                                    r.problem(format!("datovy blok {b} je pouzity vickrat"));
                                 }
                             }
                             if scrub {
                                 let mut buf = alloc::vec![0u8; e.len() as usize * BLOCK_SIZE];
                                 if let Err(err) = self.s.read_data(e.phys, &e.csums, &mut buf) {
-                                    r.problems.push(format!(
+                                    r.problem(format!(
                                         "{name}: data objektu {} od bloku {}: {err:?}",
                                         k.oid, e.phys
                                     ));
@@ -150,40 +204,38 @@ impl<D: BlockDevice> Fs<D> {
                 }
             }
         }
-        objects.verify(&mut r.problems);
+        objects.verify(&mut r);
         meta.extend(log_blocks);
         for b in meta {
-            if used.insert(b, "metadata mista").is_some() {
-                r.problems
-                    .push(format!("blok metadat {b} je pouzity i jinde"));
+            if b >= n {
+                r.problem(format!("blok metadat {b} lezi mimo svazek"));
+            } else if used.set(b) {
+                r.problem(format!("blok metadat {b} je pouzity i jinde"));
             }
             r.meta_blocks += 1;
         }
-        // Vse pouzite musi byt obsazene, vse obsazene pouzite.
+        // Vse pouzite musi byt obsazene, vse obsazene pouzite. Jeden pruchod
+        // bloky soubezne se serazenym seznamem volnych useku.
         free.sort_unstable();
-        let is_free = |b: u64| {
-            let i = free.partition_point(|&(s, _)| s <= b);
-            i > 0 && b < free[i - 1].0 + free[i - 1].1
-        };
-        for (&b, what) in &used {
-            if is_free(b) {
-                r.problems
-                    .push(format!("blok {b} ({what}) je oznaceny jako volny"));
-            }
-        }
         let mut leaked = 0u64;
         let mut first_leak = None;
-        for b in DATA_START..self.s.sb.block_count {
-            if !used.contains_key(&b) && !is_free(b) {
-                leaked += 1;
-                first_leak.get_or_insert(b);
+        let mut fi = 0;
+        for b in DATA_START..n {
+            while fi < free.len() && free[fi].0 + free[fi].1 <= b {
+                fi += 1;
+            }
+            let is_free = fi < free.len() && free[fi].0 <= b;
+            match (used.get(b), is_free) {
+                (true, true) => r.problem(format!("blok {b} je pouzity, ale oznaceny jako volny")),
+                (false, false) => {
+                    leaked += 1;
+                    first_leak.get_or_insert(b);
+                }
+                _ => {}
             }
         }
         if leaked > 0 {
-            r.problems.push(format!(
-                "{leaked} ztracenych bloku (prvni {})",
-                first_leak.unwrap()
-            ));
+            r.problem(format!("{leaked} ztracenych bloku (prvni {})", first_leak.unwrap()));
         }
         Ok(r)
     }
@@ -221,12 +273,12 @@ impl Objects {
         }
     }
 
-    fn verify(&self, problems: &mut Vec<String>) {
+    fn verify(&self, r: &mut CheckReport) {
         for &(oid, kind) in &self.dirents {
             match self.inodes.get(&oid) {
-                None => problems.push(format!("polozka adresare ukazuje na neexistujici objekt {oid}")),
+                None => r.problem(format!("polozka adresare ukazuje na neexistujici objekt {oid}")),
                 Some(&(k, _)) if k != kind => {
-                    problems.push(format!("objekt {oid}: druh v adresari {kind}, v zaznamu {k}"))
+                    r.problem(format!("objekt {oid}: druh v adresari {kind}, v zaznamu {k}"))
                 }
                 _ => {}
             }
@@ -234,10 +286,10 @@ impl Objects {
         for (&oid, &(kind, size)) in &self.inodes {
             let link = self.links.get(&oid);
             if kind == KIND_SYMLINK && link != Some(&size) {
-                problems.push(format!("odkaz {oid}: cil chybi nebo nesedi delka"));
+                r.problem(format!("odkaz {oid}: cil chybi nebo nesedi delka"));
             }
             if kind != KIND_SYMLINK && link.is_some() {
-                problems.push(format!("objekt {oid} neni odkaz, ale ma cil"));
+                r.problem(format!("objekt {oid} neni odkaz, ale ma cil"));
             }
         }
     }

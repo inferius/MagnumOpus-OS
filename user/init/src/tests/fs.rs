@@ -19,6 +19,7 @@ pub const TESTS: &[Test] = &[
     ("snapshot: stara verze a smazani", snapshots),
     ("fsync prezije vypadek proudu", fsync_power_loss),
     ("sekvencni zapis = jeden souvisly usek", contiguous),
+    ("velky adresar: vypis po strankach", big_directory),
     ("kontrola konzistence a scrub", check_clean),
 ];
 
@@ -258,5 +259,26 @@ fn check_clean(_: &Startup) -> TestResult {
         problems.is_empty(),
         alloc::format!("problemy: {problems:?}").as_str()
     );
+    Ok(())
+}
+
+/// Adresar, jehoz vypis se do jedne zpravy kanalu nevejde (2000 jmen po
+/// ~100 znacich = ~220 KiB): klient ho nacte po strankach a sluzba nespadne.
+fn big_directory(_: &Startup) -> TestResult {
+    let f = fs()?;
+    f.create("/velky-adresar", kind::DIR).map_err(|e| fail("create dir", e))?;
+    let long = "x".repeat(90);
+    for i in 0..2000 {
+        let p = alloc::format!("/velky-adresar/{long}-{i:05}");
+        f.create(&p, kind::FILE).map_err(|e| fail("create", e))?;
+    }
+    let list = f.list("/velky-adresar").map_err(|e| fail("list", e))?;
+    check_eq!(list.len(), 2000, "pocet polozek");
+    check!(
+        list.windows(2).all(|w| w[0].name < w[1].name),
+        "polozky serazene a bez opakovani"
+    );
+    // Sluzba po velkem vypisu dal odpovida.
+    f.info().map_err(|e| fail("info po vypisu", e))?;
     Ok(())
 }

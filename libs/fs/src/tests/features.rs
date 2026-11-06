@@ -339,3 +339,66 @@ fn full_volume_can_free_space_by_deleting_snapshot() {
     assert!(fs.stat("/plnic").unwrap().size > full_at);
     assert_clean(&mut fs);
 }
+
+#[test]
+fn snapshot_deletion_orders_leak_nothing() {
+    // Tri snapshoty, mezi nimi prepisy a mazani; smazat je ve vsech
+    // poradich a overit, ze se po ochranne lhute vrati vse (zadny unik).
+    let orders: [[usize; 3]; 6] = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    for order in orders {
+        let mut fs = new_fs(4096);
+        fs.commit().unwrap();
+        let base = fs.info().free_blocks;
+        for (round, name) in ["s0", "s1", "s2"].iter().enumerate() {
+            let p = alloc::format!("/f{round}");
+            fs.create(&p, Kind::File).unwrap();
+            fs.write(&p, 0, &alloc::vec![round as u8; 300_000]).unwrap();
+            fs.write("/spolecny", 0, &[round as u8; 8]).ok();
+            if round == 0 {
+                fs.create("/spolecny", Kind::File).unwrap();
+                fs.write("/spolecny", 0, &alloc::vec![9u8; 200_000]).unwrap();
+            } else {
+                fs.write("/spolecny", 4096 * round as u64, &alloc::vec![round as u8; 50_000]).unwrap();
+                fs.remove(&alloc::format!("/f{}", round - 1)).unwrap();
+            }
+            fs.snapshot(name).unwrap();
+        }
+        for &i in &order {
+            fs.delete_snapshot(["s0", "s1", "s2"][i]).unwrap();
+            assert_clean(&mut fs);
+        }
+        for p in ["/f2", "/spolecny"] {
+            fs.remove(p).unwrap();
+        }
+        for _ in 0..crate::REUSE_DELAY + 2 {
+            fs.commit().unwrap();
+        }
+        let free = fs.info().free_blocks;
+        assert!(free + 16 >= base, "poradi {order:?}: unik {} bloku", base - free);
+        assert_clean(&mut fs);
+    }
+}
+
+#[test]
+fn many_extents_are_processed_in_batches() {
+    // Vic extentu nez jedna davka (256): ridky soubor s blokem na kazde
+    // druhe pozici = jeden extent na blok.
+    let mut fs = new_fs(8192);
+    fs.create("/ridky", Kind::File).unwrap();
+    fs.commit().unwrap();
+    let base = fs.info().free_blocks;
+    for i in 0..700u64 {
+        fs.write("/ridky", i * 2 * BLOCK_SIZE as u64, &[i as u8; BLOCK_SIZE]).unwrap();
+    }
+    fs.commit().unwrap();
+    assert_eq!(fs.fragments("/ridky").unwrap(), 1, "souvisle na disku");
+    // Zkraceni uprostred a pak na nulu: vse projde pres vic davek.
+    fs.truncate("/ridky", 300 * 2 * BLOCK_SIZE as u64).unwrap();
+    assert_eq!(fs.read("/ridky", 299 * 2 * BLOCK_SIZE as u64, 1).unwrap(), [43u8]);
+    fs.truncate("/ridky", 0).unwrap();
+    for _ in 0..crate::REUSE_DELAY + 2 {
+        fs.commit().unwrap();
+    }
+    assert!(fs.info().free_blocks + 8 >= base);
+    assert_clean(&mut fs);
+}

@@ -24,6 +24,8 @@ pub use codec::{Reader, Writer};
 
 /// Nejvic bajtu dat v jedne zprave (rezerva pro hlavicku v limitu kanalu).
 pub const MAX_IO: usize = 32 * 1024;
+/// Nejvetsi telo odpovedi (stranka vypisu se do nej musi vejit).
+pub const MAX_REPLY: usize = 60 * 1024;
 
 /// Kody operaci.
 pub mod op {
@@ -46,7 +48,16 @@ pub mod op {
     pub const SNAP_READ: u32 = 17;
     pub const DEFRAG: u32 = 18;
     pub const FRAGMENTS: u32 = 19;
+    /// Kontrola konzistence (jen v rezimu `debug`: dlouha operace nad celym
+    /// svazkem, nesmi ji spoustet kazdy klient).
     pub const CHECK: u32 = 20;
+    /// Stranka vypisu adresare: (cesta, od u32, nejvic u32) -> celkem u32,
+    /// pocet u32, polozky. Sluzba vrati tolik polozek, kolik se vejde do
+    /// jedne zpravy. `LIST` vraci `BUFFER_TOO_SMALL`, kdyz se cely vypis do
+    /// zpravy nevejde.
+    pub const LIST_PAGE: u32 = 21;
+    /// Totez pro snapshot: (snapshot, cesta, od u32, nejvic u32).
+    pub const SNAP_LIST_PAGE: u32 = 22;
     /// Jen pro testy (sluzba spustena v rezimu `debug`): zahodi neulozeny
     /// stav a pripoji system znovu, jako po vypadku proudu.
     pub const SIMULATE_POWER_LOSS: u32 = 100;
@@ -215,8 +226,34 @@ impl FsClient {
         Stat::get(&mut Reader::new(&self.path_op(op::STAT, path)?))
     }
 
+    /// Cely vypis adresare (po strankach, libovolne velky adresar).
     pub fn list(&self, path: &str) -> Result<Vec<DirEntry>> {
-        decode_list(&self.path_op(op::LIST, path)?)
+        self.list_pages(None, path)
+    }
+
+    fn list_pages(&self, snap: Option<&str>, path: &str) -> Result<Vec<DirEntry>> {
+        let mut out = Vec::new();
+        loop {
+            let mut w = match snap {
+                Some(s) => {
+                    let mut w = Self::req(op::SNAP_LIST_PAGE);
+                    w.str(s);
+                    w
+                }
+                None => Self::req(op::LIST_PAGE),
+            };
+            w.str(path).u32(out.len() as u32).u32(u32::MAX);
+            let body = self.call(w)?;
+            let mut r = Reader::new(&body);
+            let total = r.u32()? as usize;
+            let page = decode_list(r.rest())?;
+            // Prazdna stranka pred koncem = adresar se mezitim zmensil.
+            let empty = page.is_empty();
+            out.extend(page);
+            if out.len() >= total || empty {
+                return Ok(out);
+            }
+        }
     }
 
     /// Precte az `len` bajtu od `offset` (mene na konci souboru).
@@ -322,9 +359,7 @@ impl FsClient {
     }
 
     pub fn snapshot_list(&self, snap: &str, path: &str) -> Result<Vec<DirEntry>> {
-        let mut w = Self::req(op::SNAP_LIST);
-        w.str(snap).str(path);
-        decode_list(&self.call(w)?)
+        self.list_pages(Some(snap), path)
     }
 
     pub fn snapshot_read(
@@ -347,14 +382,29 @@ impl FsClient {
         Reader::new(&self.path_op(op::FRAGMENTS, path)?).u64()
     }
 
-    /// Kontrola konzistence; vraci popisy nalezenych problemu.
+    /// Kontrola konzistence; vraci popisy nalezenych problemu (nejvys tolik,
+    /// kolik se vejde do odpovedi; celkovy pocet v `CheckResult`).
     pub fn check(&self, scrub: bool) -> Result<Vec<String>> {
+        Ok(self.check_full(scrub)?.problems)
+    }
+
+    /// Kontrola konzistence se vsemi udaji.
+    pub fn check_full(&self, scrub: bool) -> Result<CheckResult> {
         let mut w = Self::req(op::CHECK);
         w.u8(scrub as u8);
         let body = self.call(w)?;
         let mut r = Reader::new(&body);
+        let generation = r.u64()?;
+        let total = r.u64()?;
+        let live_not_checked = r.u8()? != 0;
         let n = r.u32()?;
-        (0..n).map(|_| r.str()).collect()
+        let problems = (0..n).map(|_| r.str()).collect::<Result<_>>()?;
+        Ok(CheckResult {
+            generation,
+            total,
+            live_not_checked,
+            problems,
+        })
     }
 
     /// Jen pro testy: zahodi neulozeny stav a pripoji znovu. Vraci pocet
@@ -376,6 +426,36 @@ fn decode_list(body: &[u8]) -> Result<Vec<DirEntry>> {
             })
         })
         .collect()
+}
+
+/// Vysledek kontroly konzistence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckResult {
+    /// Zkontrolovana (ulozena) generace.
+    pub generation: u64,
+    /// Celkovy pocet problemu (i nevypsanych).
+    pub total: u64,
+    /// V pameti sluzby jsou nezkontrolovane zmeny (svazek jen pro cteni).
+    pub live_not_checked: bool,
+    pub problems: Vec<String>,
+}
+
+/// Zakoduje stranku vypisu: polozky od `from`, nejvic `max`, dokud se vejdou
+/// do `budget` bajtu (aspon jedna). Vraci pocet zakodovanych.
+pub fn encode_list_page(w: &mut Writer, entries: &[DirEntry], from: usize, max: usize, budget: usize) -> usize {
+    let mut size = 8;
+    let mut n = 0;
+    for e in entries.iter().skip(from).take(max) {
+        let item = 1 + 8 + 2 + e.name.len();
+        if n > 0 && size + item > budget {
+            break;
+        }
+        size += item;
+        n += 1;
+    }
+    w.u32(entries.len() as u32);
+    encode_list(w, &entries[from.min(entries.len())..from.min(entries.len()) + n]);
+    n
 }
 
 /// Zakoduje seznam polozek adresare (pro sluzbu).

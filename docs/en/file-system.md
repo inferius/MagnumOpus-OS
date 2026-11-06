@@ -862,6 +862,15 @@ stored tree, all snapshots, the free-space metadata and the intent log:
   symbolic link must have a target whose length equals its size (and
   nothing else may have a target).
 
+**Check memory is fixed:** 3 bitmaps of one bit per volume block (used,
+data, seen nodes) - a 1 TiB volume = 96 MiB, independent of the number of
+files and versions. A damaged volume with millions of errors cannot
+overwhelm the check (at most 1,000 descriptions, the total is in
+`problems_total`). A node or extent outside the volume is a reported
+problem, not a crash. Likewise **extents are processed in batches** (256):
+truncating or deleting a huge file (1 TiB = ~540,000 extents with
+checksums, ~4 GiB) never loads all extents into memory at once.
+
 It returns a `CheckReport` with block counts (tree, data, metadata) and a
 list of problems (empty = OK). The tests call it after every scenario.
 
@@ -911,6 +920,13 @@ at a time). Protocol v2 with shared memory and request queues solves that.
 - **When idle** after a commit it defragments in steps of 256 blocks.
 - **TRIM** enabled.
 - **End:** when the client closes the channel, the service commits and exits.
+- **An error sending a reply** (e.g. the reply does not fit into a message)
+  does not end the service: it sends `BUFFER_TOO_SMALL` instead. It ends
+  only when the channel is closed - otherwise the volume would be left
+  without a final commit.
+- **`CHECK` only in `debug` mode** (a long operation over the whole volume;
+  v1 has no client authentication, with protocol v2 it will follow
+  permissions).
 
 The service's messages are described in [messages.md](messages.md#fsd-service-and-file-system).
 
@@ -926,7 +942,7 @@ data = rest of the message. One read/write moves at most 32 KiB
 |---|---|---|---|
 | 1 | `INFO` | - | volume label, block size, blocks, free, delayed, generation, algorithm, fallback, replayed |
 | 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, subtree summaries) |
-| 3 | `LIST` | path | count u32 + (kind u8, oid u64, name) - sorted by name; kind 1 file, 2 directory, 3 symbolic link |
+| 3 | `LIST` | path | count u32 + (kind u8, oid u64, name) - sorted by name; kind 1 file, 2 directory, 3 symbolic link; `BUFFER_TOO_SMALL` when the listing does not fit into a message |
 | 4 | `READ` | path, offset u64, length u32 | data (shorter at the end of the file) |
 | 5 | `WRITE` | path, offset u64, data | - |
 | 6 | `CREATE` | path, kind u8 (1 file, 2 directory; other = `INVALID_ARGS`) | - |
@@ -943,8 +959,15 @@ data = rest of the message. One read/write moves at most 32 KiB
 | 17 | `SNAP_READ` | snapshot, path, offset, length | data |
 | 18 | `DEFRAG` | path | rewritten blocks u64 |
 | 19 | `FRAGMENTS` | path | number of ranges u64 |
-| 20 | `CHECK` | scrub u8 | count u32 + problem descriptions |
+| 20 | `CHECK` | scrub u8 | generation u64, total problems u64, unchecked changes in memory u8, count u32 + descriptions (as many as fit); only with `debug` |
+| 21 | `LIST_PAGE` | path, from u32, at most u32 | total u32 + a page like `LIST` (as much as fits into 60 KiB) |
+| 22 | `SNAP_LIST_PAGE` | snapshot, path, from u32, at most u32 | like `LIST_PAGE` |
 | 100 | `SIMULATE_POWER_LOSS` | - | replayed operations u64; only with `debug`, otherwise `ACCESS_DENIED` |
+
+`FsClient::list` and `snapshot_list` always read page by page, so they
+handle a directory of any size. ⚠️ v1 limitation: every page builds the
+listing again (a large directory = quadratic cost); protocol v2 brings a
+cursor.
 
 Example message `READ "/a.txt", offset 0, 100 B`:
 

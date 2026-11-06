@@ -132,8 +132,19 @@ fn serve(svc: &mut Service, client: &Channel) {
                 if msg.data.get(..4) == Some(&fsproto::op::COMMIT.to_le_bytes()[..]) {
                     next_commit = time::deadline_after(COMMIT_INTERVAL);
                 }
-                if client.write(&reply, Vec::new()).is_err() {
-                    return;
+                // Chyba odeslani odpovedi nesmi ukoncit sluzbu (a s ni
+                // svazek bez zaverecneho commitu): kdyz se odpoved nevejde,
+                // posle se misto ni chyba. Konci se jen pri zavrenem kanalu.
+                match client.write(&reply, Vec::new()) {
+                    Ok(()) => {}
+                    Err(Error::PeerClosed) => return,
+                    Err(e) => {
+                        println!("fsd: odpoved nejde odeslat ({e}), posilam chybu");
+                        let fallback = fsproto::reply(Err(Error::BufferTooSmall));
+                        if let Err(Error::PeerClosed) = client.write(&fallback, Vec::new()) {
+                            return;
+                        }
+                    }
                 }
             }
             Err(Error::TimedOut) => {}

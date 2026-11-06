@@ -54,6 +54,20 @@ impl<D: BlockDevice> Fs<D> {
         a: u64,
         b: u64,
     ) -> Result<Vec<(u64, Extent)>> {
+        self.extents_batch(root, oid, a, b, usize::MAX)
+    }
+
+    /// Nejvys `limit` extentu z rozsahu `a..b` (od zacatku). Pro zpracovani
+    /// po davkach: obri soubor (1 TiB = ~540 000 extentu se soucty, ~4 GiB)
+    /// se nikdy nenacita do pameti cely.
+    pub(super) fn extents_batch(
+        &mut self,
+        root: &Child,
+        oid: u64,
+        a: u64,
+        b: u64,
+        limit: usize,
+    ) -> Result<Vec<(u64, Extent)>> {
         let start = Key::new(oid, item::EXTENT, a.saturating_sub(MAX_EXTENT - 1));
         let end = if b == u64::MAX {
             Key::new(oid, item::EXTENT + 1, 0)
@@ -62,19 +76,25 @@ impl<D: BlockDevice> Fs<D> {
         };
         let mut out = Vec::new();
         let blocks = self.s.sb.block_count;
-        for (k, raw) in btree::collect(&mut self.s, root, &start, &end)? {
-            let e = Extent::decode(&raw)?;
+        let mut bad = false;
+        btree::range(&mut self.s, root, &start, &end, &mut |k, raw| {
+            let e = Extent::decode(raw)?;
             // Extent musi lezet ve svazku (jinak by cteni i uvolneni slo
             // mimo; uvolneni by navic poskodilo alokator).
             let inside = e.phys >= crate::layout::DATA_START
                 && e.phys.checked_add(e.len()).is_some_and(|x| x <= blocks)
                 && k.offset.checked_add(e.len()).is_some();
             if !inside {
-                return Err(Error::Corrupted);
+                bad = true;
+                return Ok(false);
             }
             if k.offset + e.len() > a {
                 out.push((k.offset, e));
             }
+            Ok(out.len() < limit)
+        })?;
+        if bad {
+            return Err(Error::Corrupted);
         }
         Ok(out)
     }
@@ -372,8 +392,28 @@ impl<D: BlockDevice> Fs<D> {
     /// Odstrani mapovani logickych bloku `a..b` (rozdeli castecne prekryte
     /// extenty) a uvolni jejich fyzicke bloky.
     pub(super) fn punch_range(&mut self, oid: u64, a: u64, b: u64) -> Result<()> {
-        let root = self.s.root;
-        for (ks, e) in self.extents_in(&root, oid, a, b)? {
+        // Po davkach (pamet nezavisi na velikosti souboru); kazda davka
+        // zacina za koncem posledniho zpracovaneho extentu.
+        const BATCH: usize = 256;
+        let mut from = a;
+        while from < b {
+            let root = self.s.root;
+            let batch = self.extents_batch(&root, oid, from, b, BATCH)?;
+            let full = batch.len() == BATCH;
+            let Some(last_end) = batch.last().map(|(ks, e)| ks + e.len()) else {
+                break;
+            };
+            self.punch_batch(oid, a, b, batch)?;
+            if !full {
+                break;
+            }
+            from = last_end.max(from + 1);
+        }
+        Ok(())
+    }
+
+    fn punch_batch(&mut self, oid: u64, a: u64, b: u64, batch: Vec<(u64, Extent)>) -> Result<()> {
+        for (ks, e) in batch {
             let ke = ks + e.len();
             let lo = ks.max(a);
             let hi = ke.min(b);
@@ -549,15 +589,21 @@ impl<D: BlockDevice> Fs<D> {
     pub fn fragments(&mut self, path: &str) -> Result<u64> {
         let (oid, _) = self.file_oid(path)?;
         let root = self.s.root;
-        let ext = self.extents_in(&root, oid, 0, u64::MAX)?;
         let mut runs = 0;
         let mut next = None;
-        for (_, e) in &ext {
-            if next != Some(e.phys) {
-                runs += 1;
+        let mut from = 0;
+        loop {
+            let batch = self.extents_batch(&root, oid, from, u64::MAX, 256)?;
+            for (_, e) in &batch {
+                if next != Some(e.phys) {
+                    runs += 1;
+                }
+                next = Some(e.phys + e.len());
             }
-            next = Some(e.phys + e.len());
+            match batch.last() {
+                Some((ks, e)) if batch.len() == 256 => from = ks + e.len(),
+                _ => return Ok(runs),
+            }
         }
-        Ok(runs)
     }
 }
