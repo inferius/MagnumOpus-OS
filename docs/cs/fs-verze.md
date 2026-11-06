@@ -50,6 +50,7 @@ Návrh a důvody celé v3: [navrh-fs-v3.md](navrh-fs-v3.md). Hotové změny:
 | Velikost souboru | bez limitu (přetečení) | **2^63-1 B**, kontrolovaná aritmetika, saturující souhrny | velikosti a rozdíly vždy v `i64`; obří řídké soubory nepřetečou souhrny |
 | Extent | nejvýš 120 bloků, rezerva u32 | **496 bloků**, příznaky u32 (vyhrazeno: předalokace) | větší uzel; méně položek na velký soubor |
 | Intent log | záznamy 1-6 | + 7 symlink, generace u vytvoření, 8 značka datasetu | symlink přežije `fsync`; generace po přehrání zůstane původní; jedna dávka pro víc datasetů |
+| Sirotci | - | položka `ORPHAN` (druh 9) pro otevřený objekt bez jména | otevřený soubor přežije smazání i atomické nahrazení; po pádu úklid při připojení |
 | Datasety | jeden strom pro svazek | **datasety** (vlastní stromy, záznam `DATASET` v kořenovém datasetu, položka adresáře druhu 4), snapshot s počtem klonů a příznakem „skrytý“ | historie po složkách (projekt, domov), zapisovatelné klony bez kopírování |
 
 ### Chování (bez změny formátu)

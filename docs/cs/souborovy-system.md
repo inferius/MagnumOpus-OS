@@ -36,7 +36,8 @@ sporné, co funguje:
 | symbolické odkazy, jména do 1024 znaků, limit velikosti | ano | **používá** |
 | datasety, klony s vazbou na původní snapshot | ano | **používá** ([Datasety](#datasety-a-klony)) |
 | diff verzí, obnova jako kopie | ano | **používá** ([Rozdíl verzí](#rozdíl-verzí-a-obnova-jako-kopie)) |
-| handly, protokol v2 | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
+| handly, sirotci, sdílecí režimy, zámky rozsahu | ano | **používá** ([Handly](#otevřené-soubory-handly)) |
+| protokol v2 ve fsd | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
 
 ## Co nabízí
 
@@ -264,6 +265,7 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 | `SNAPSHOT` | 5 | číslo snapshotu (objekt 0) | `BlockPtr` kořene, generace u64, počet klonů u32, příznaky u32 (1 = skrytý), jméno |
 | `DEADLIST` | 6 | seznam << 32 \| pořadí (objekt 0) | až 80 mrtvých úseků (start u64, délka u64, birth u64) |
 | `SYMLINK` | 7 | 0 | cíl symbolického odkazu (UTF-8, 1-4096 B) |
+| `ORPHAN` | 9 | oid sirotka (objekt 0) | prázdná - objekt bez jména, který je otevřený; smaže ho poslední `close` nebo připojení |
 | `DATASET` | 8 | číslo datasetu (objekt 0, jen v kořenovém datasetu) | `DatasetRecord` 100 B: kořen, další oid, další snapshot, generace posl. snapshotu, pořadí deadlistu, původ klonu (dataset, snapshot, generace), příznaky |
 
 ### Záznam objektu (inode, 128 B)
@@ -924,6 +926,62 @@ velikosti datasetu, ne změny) - plán: přeskočit podstromy se stejným
 ukazatelem. Obnova jako kopie data opravdu kopíruje; okamžitá kopie přes
 sdílené bloky přijde s okamžitými kopiemi souborů (fáze 3).
 
+## Otevřené soubory (handly)
+
+> **Změna proti v2:** nové. v2 pracovala jen s cestami. **Proč:** otevřený
+> soubor musí přežít přejmenování, smazání i atomické nahrazení a vrstva
+> Windows potřebuje sdílecí režimy a zámky rozsahu.
+> ([všechny změny](fs-verze.md#přechod-v2---v3))
+
+Handle drží **objekt** (dataset, oid, generace), ne cestu.
+
+```rust
+use fs::{access, share};
+
+let a = fs.open("/report", access::READ, share::ALL)?;   // A čte report
+fs.create("/report.tmp", Kind::File)?;
+fs.write("/report.tmp", 0, b"nova verze")?;
+fs.rename_replace("/report.tmp", "/report")?;            // B atomicky nahradí
+let stare = fs.read_h(a, 0, 100)?;                        // A čte dál původní obsah
+let b = fs.open("/report", access::READ, share::ALL)?;   // nové open = nový objekt
+fs.close(a)?;                                             // původní objekt zmizí
+```
+
+| Funkce | Co dělá |
+|---|---|
+| `open(cesta, přístup, sdílení)` | otevře soubor nebo adresář (odkaz se nenásleduje: `WRONG_TYPE`); přístup `access::READ/WRITE/DELETE`, sdílení `share::READ/WRITE/DELETE/ALL` |
+| `read_h`, `write_h`, `set_len_h`, `stat_h`, `list_h` | operace přes handle (kontroluje přístup, generaci a povinné zámky) |
+| `close(h)` | zavře; s posledním handlem zmizí sirotek a provede se smazání při zavření |
+| `rename_replace(z, do)` | atomické nahrazení: existující cíl (soubor za soubor, prázdný adresář za adresář) zmizí v téže operaci |
+| `set_delete_on_close(h, ano)` | jméno zmizí se zavřením posledního handlu (vyžaduje `access::DELETE`) |
+| `lock_range(h, od, délka, výhradní, povinný)`, `unlock_range` | zámek rozsahu (délka 0 = do konce souboru) |
+
+**Životnost:**
+
+- **Sirotek:** smazání posledního jména otevřeného objektu nesmaže data -
+  záznam dostane rodiče 0 a položku `ORPHAN` (`META_OID`, druh 9). Kdo ho má
+  otevřený, čte a zapisuje dál; s posledním `close` zmizí. Do souhrnů
+  velikostí adresářů se nepočítá.
+- **Po pádu nebo restartu** handly neplatí (jsou jen v paměti) a připojení
+  sirotky smaže. Zápisy do sirotka v intent logu se při přehrání přeskočí
+  (objekt už nemá záznam).
+- **Generace:** handle ověřuje generaci objektu; objekt, který mezitím
+  zanikl, = `BAD_HANDLE`.
+
+**Sdílecí režimy** (jako Windows `FILE_SHARE_*`): nové otevření musí mít
+požadovaný přístup sdílený všemi otevřenými handly a samo musí sdílet
+jejich přístupy, jinak `LOCKED`. **Smazání a přejmenování** otevřeného
+objektu vyžaduje, aby všechny handly sdílely mazání. Operace přes cestu
+(`write`, `truncate`) se chovají jako otevření s daným přístupem.
+
+**Zámky rozsahu** (jako `LockFileEx`): sdílený nebo výhradní; **poradní**
+hlídá jen jiné zámky, **povinný** navíc brání zápisu (výhradní i čtení)
+jiných handlů a cest. Patří handlu a mizí s jeho zavřením.
+
+⚠️ **Omezení:** handly jsou v paměti jedné instance knihovny (služba,
+ovladač) a po restartu neplatí; trvalé handly zatím nejsou. Čekání na zámek
+(blokující zámek) zatím není - konflikt hned vrátí `LOCKED`.
+
 ## Snapshoty
 
 Snapshot je uložený kořen stromu v okamžiku vytvoření - jen pro čtení,
@@ -1197,6 +1255,7 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `tests/basic.rs` | soubory, adresáře, jména, souhrny, chyby, štěpení stromu, opakované použití místa, plný disk, snapshoty, odhalení poškození |
 | `tests/features.rs` | souvislý zápis, fsync + přehrání, návrat o generaci, mazání snapshotů, defragmentace, TRIM, víc AG + BLAKE3, zhušťování logů |
 | `tests/model.rs` | property test: náhodné sekvence (vytvoření, zápis, zkrácení, mazání, přesun, commit, fsync, „pád“, snapshoty) proti modelu v paměti; na konci fsck |
+| `tests/handles.rs` | handly: čtenář po atomickém nahrazení čte původní objekt, smazaný otevřený soubor do zavření (i úklid po pádu a přehrání logu), sdílecí režimy, smazání při zavření, zámky rozsahu, handly přes datasety a přejmenování |
 | `tests/versions.rs` | první ukázka: snapshot, klon, změny, diff (i přesun), obnova souboru a složky jako kopie, totéž s pádem uprostřed zápisu |
 | `tests/datasets.rs` | datasety: vlastní stromy, pravidla, snapshoty, dva klony z jednoho snapshotu po jeho smazání, snapshoty klonu, fsync přes víc datasetů, výpadek během mazání, účtování místa |
 | `tests/crash.rs` | výpadek během commitu i fsync s náhodnou podmnožinou nezapsaných bloků |

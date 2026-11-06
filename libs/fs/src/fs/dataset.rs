@@ -170,6 +170,14 @@ impl<D: BlockDevice> Fs<D> {
         Ok(self.cur_ds)
     }
 
+    /// Vsechny datasety: korenovy, ulozene i nove v pameti.
+    pub(super) fn all_dataset_ids(&mut self) -> Result<Vec<u64>> {
+        let mut ids: Vec<u64> = self.datasets()?.into_iter().map(|d| d.id).collect();
+        ids.push(ROOT_DATASET);
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
     pub(super) fn loaded_datasets(&self) -> Vec<u64> {
         self.loaded()
     }

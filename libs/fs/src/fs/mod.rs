@@ -15,6 +15,7 @@ mod data;
 mod dataset;
 mod defrag;
 mod diff;
+mod handles;
 mod snap;
 mod zil;
 
@@ -41,6 +42,7 @@ pub use check::CheckReport;
 pub use dataset::DatasetInfo;
 pub use defrag::DefragReport;
 pub use diff::{Change, ChangeKind};
+pub use handles::{Handle, access, share};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -174,6 +176,8 @@ pub struct Fs<D: BlockDevice> {
     cur_rec_dirty: bool,
     /// Ostatni nactene datasety.
     others: BTreeMap<u64, dataset::DsCtx>,
+    /// Otevrene soubory, zamky rozsahu.
+    handles: handles::Handles,
 }
 
 /// Volby pripojeni.
@@ -254,8 +258,13 @@ impl<D: BlockDevice> Fs<D> {
             cur_origin: (0, 0, 0),
             cur_rec_dirty: false,
             others: BTreeMap::new(),
+            handles: handles::Handles::default(),
         };
         fs.replay_log()?;
+        // Sirotci z minula: po restartu je nikdo nema otevrene.
+        if !fs.s.read_only {
+            fs.cleanup_orphans()?;
+        }
         Ok(fs)
     }
 
@@ -540,6 +549,10 @@ impl<D: BlockDevice> Fs<D> {
     /// by vysla mensi, nez je skutecnost). Rozdil je `i128`, aby sel prenest
     /// cely souhrn podstromu (az 2^64 - 1).
     fn adjust_tree(&mut self, mut dir: u64, bytes: i128, files: i64, dirs: i64) -> Result<()> {
+        // Sirotek (rodic 0) do zadneho souhrnu nepatri.
+        if dir == 0 {
+            return Ok(());
+        }
         for _ in 0..MAX_DEPTH {
             let mut i = self.live_inode(dir)?;
             if i.tree_bytes != u64::MAX {
@@ -729,6 +742,11 @@ impl<D: BlockDevice> Fs<D> {
             return Err(Error::WrongType);
         }
         let inode = self.inode(&root, d.oid)?;
+        // Otevreny objekt: smazani musi dovolit sdileni vsech handlu.
+        let open = self.is_open(d.oid);
+        if open {
+            self.check_delete_allowed(d.oid)?;
+        }
         if inode.kind == KIND_DIR {
             let first = btree::collect(
                 &mut self.s,
@@ -739,12 +757,18 @@ impl<D: BlockDevice> Fs<D> {
             if !first.is_empty() {
                 return Err(Error::NotEmpty);
             }
-        } else if inode.kind == KIND_SYMLINK {
-            self.del(&Key::new(d.oid, item::SYMLINK, 0))?;
-        } else {
-            self.drop_content(d.oid)?;
         }
-        self.del(&Key::new(d.oid, item::INODE, 0))?;
+        if open {
+            // Sirotek: data zustanou pro otevrene handly, zmizi s poslednim.
+            self.make_orphan(d.oid, inode)?;
+        } else {
+            if inode.kind == KIND_SYMLINK {
+                self.del(&Key::new(d.oid, item::SYMLINK, 0))?;
+            } else if inode.kind != KIND_DIR {
+                self.drop_content(d.oid)?;
+            }
+            self.del(&Key::new(d.oid, item::INODE, 0))?;
+        }
         self.remove_dirent(parent, &d.name)?;
         self.touch_dir(parent)?;
         match inode.kind {
@@ -790,6 +814,11 @@ impl<D: BlockDevice> Fs<D> {
             && existing.oid != d.oid
         {
             return Err(Error::AlreadyExists);
+        }
+        // Prejmenovani otevreneho objektu: handly musi sdilet mazani
+        // (pravidlo Windows FILE_SHARE_DELETE).
+        if d.kind != KIND_DATASET && self.is_open(d.oid) {
+            self.check_delete_allowed(d.oid)?;
         }
         if d.kind == KIND_DATASET {
             // Polozka datasetu nema zaznam objektu: jen presun polozky.

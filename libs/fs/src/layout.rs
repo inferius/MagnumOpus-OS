@@ -84,6 +84,9 @@ pub mod item {
     /// Zaznam datasetu (`DatasetRecord`) - jen ve strome korenoveho
     /// datasetu, objekt META_OID, offset = cislo datasetu.
     pub const DATASET: u8 = 8;
+    /// Sirotek: objekt bez jmena, ktery nekdo ma otevreny (objekt META_OID,
+    /// offset = oid, hodnota prazdna). Po padu se pri pripojeni smaze.
+    pub const ORPHAN: u8 = 9;
 }
 
 /// Klic polozky stromu; razeni podle (oid, kind, offset).

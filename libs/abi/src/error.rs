@@ -63,6 +63,9 @@ pub enum Error {
     IoError = -24,
     /// Zapis do objektu jen pro cteni (napr. snapshot).
     ReadOnly = -25,
+    /// Objekt je otevreny v nekompatibilnim sdilecim rezimu nebo je
+    /// rozsah zamceny jinym handlem.
+    Locked = -26,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -92,6 +95,7 @@ pub const ALL: &[Error] = &[
     Error::NoSpace,
     Error::IoError,
     Error::ReadOnly,
+    Error::Locked,
 ];
 
 impl Error {
@@ -133,6 +137,7 @@ impl Error {
             Self::NoSpace => "NO_SPACE",
             Self::IoError => "IO_ERROR",
             Self::ReadOnly => "READ_ONLY",
+            Self::Locked => "LOCKED",
         }
     }
 
@@ -164,6 +169,7 @@ impl Error {
             Self::NoSpace => "na zarizeni neni misto",
             Self::IoError => "chyba cteni nebo zapisu zarizeni",
             Self::ReadOnly => "jen pro cteni",
+            Self::Locked => "objekt je otevreny nebo zamceny jinym handlem",
         }
     }
 }

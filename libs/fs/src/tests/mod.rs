@@ -8,6 +8,7 @@ mod crash;
 mod datasets;
 mod errors;
 mod features;
+mod handles;
 mod model;
 mod versions;
 mod mount;

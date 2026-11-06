@@ -600,6 +600,11 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Jsou vsechna data davky na disku (souhlasi soucty)?
+    fn object_exists(&mut self, oid: u64) -> Result<bool> {
+        let root = self.s.root;
+        Ok(btree::get(&mut self.s, &root, &Key::new(oid, item::INODE, 0))?.is_some())
+    }
+
     fn batch_durable(&mut self, records: &[Record]) -> Result<bool> {
         for r in records {
             if let Record::Extents { list, .. } = r {
@@ -665,6 +670,9 @@ impl<D: BlockDevice> Fs<D> {
                 self.now = time;
                 self.truncate_oid(oid, size).map_err(bad)
             }
+            // Data objektu, ktery v okamziku prehrani uz nema zaznam (zapis do
+            // sirotka po smazani jmena; sirotek po restartu zanika): nic.
+            Record::Inline { oid, .. } | Record::Extents { oid, .. } if !self.object_exists(oid)? => Ok(()),
             Record::Inline {
                 oid,
                 size,

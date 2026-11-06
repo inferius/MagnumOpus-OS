@@ -38,7 +38,8 @@ what works:
 | symbolic links, names up to 1024 characters, size limit | yes | **uses** |
 | datasets, clones linked to the origin snapshot | yes | **uses** ([Datasets](#datasets-and-clones)) |
 | diff of versions, restore as a copy | yes | **uses** ([Diff of versions](#diff-of-versions-and-restore-as-a-copy)) |
-| handles, protocol v2 | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
+| handles, orphans, share modes, range locks | yes | **uses** ([Handles](#open-files-handles)) |
+| protocol v2 in fsd | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
 
 ## What it offers
 
@@ -267,6 +268,7 @@ content).
 | `SNAPSHOT` | 5 | snapshot number (object 0) | root `BlockPtr`, generation u64, clone count u32, flags u32 (1 = hidden), name |
 | `DEADLIST` | 6 | list << 32 \| sequence (object 0) | up to 80 dead ranges (start u64, length u64, birth u64) |
 | `SYMLINK` | 7 | 0 | target of a symbolic link (UTF-8, 1-4096 B) |
+| `ORPHAN` | 9 | orphan oid (object 0) | empty - an open object without a name; deleted by the last `close` or at mount |
 | `DATASET` | 8 | dataset number (object 0, only in the root dataset) | `DatasetRecord` 100 B: root, next oid, next snapshot, generation of the last snapshot, deadlist sequence, clone origin (dataset, snapshot, generation), flags |
 
 ### Object record (inode, 128 B)
@@ -953,6 +955,64 @@ also sees unsaved changes.
 same pointer. Restore as a copy really copies the data; an instant copy via
 shared blocks comes with instant file copies (phase 3).
 
+## Open files (handles)
+
+> **Change from v2:** new. v2 worked only with paths. **Why:** an open file
+> must survive a rename, deletion and an atomic replace, and the Windows
+> layer needs share modes and range locks.
+> ([all changes](fs-versions.md#transition-v2---v3))
+
+A handle holds an **object** (dataset, oid, generation), not a path.
+
+```rust
+use fs::{access, share};
+
+let a = fs.open("/report", access::READ, share::ALL)?;   // A reads the report
+fs.create("/report.tmp", Kind::File)?;
+fs.write("/report.tmp", 0, b"new version")?;
+fs.rename_replace("/report.tmp", "/report")?;            // B atomically replaces it
+let old = fs.read_h(a, 0, 100)?;                          // A still reads the original
+let b = fs.open("/report", access::READ, share::ALL)?;   // a new open = the new object
+fs.close(a)?;                                             // the original object goes away
+```
+
+| Function | What it does |
+|---|---|
+| `open(path, access, share)` | opens a file or directory (a link is not followed: `WRONG_TYPE`); access `access::READ/WRITE/DELETE`, sharing `share::READ/WRITE/DELETE/ALL` |
+| `read_h`, `write_h`, `set_len_h`, `stat_h`, `list_h` | operations through a handle (checks access, generation and mandatory locks) |
+| `close(h)` | closes; with the last handle an orphan disappears and delete on close happens |
+| `rename_replace(from, to)` | atomic replace: an existing target (file for file, empty directory for directory) goes away in the same operation |
+| `set_delete_on_close(h, yes)` | the name disappears when the last handle closes (needs `access::DELETE`) |
+| `lock_range(h, from, length, exclusive, mandatory)`, `unlock_range` | a range lock (length 0 = to the end of the file) |
+
+**Lifetime:**
+
+- **Orphan:** removing the last name of an open object does not delete the
+  data - the record gets parent 0 and an `ORPHAN` entry (`META_OID`, kind 9).
+  Whoever has it open keeps reading and writing; it disappears with the
+  last `close`. It does not count into directory size summaries.
+- **After a crash or restart** handles are gone (they live only in memory)
+  and mounting deletes orphans. Writes to an orphan in the intent log are
+  skipped on replay (the object no longer has a record).
+- **Generation:** a handle checks the object's generation; an object that
+  has gone away in the meantime = `BAD_HANDLE`.
+
+**Share modes** (like Windows `FILE_SHARE_*`): a new open must have the
+requested access shared by all open handles and must itself share their
+access, otherwise `LOCKED`. **Deleting and renaming** an open object
+requires all handles to share deletion. Path operations (`write`,
+`truncate`) behave like an open with that access.
+
+**Range locks** (like `LockFileEx`): shared or exclusive; an **advisory**
+lock only guards against other locks, a **mandatory** one also blocks
+writes (exclusive: reads too) by other handles and paths. They belong to a
+handle and go away when it is closed.
+
+⚠️ **Limitations:** handles live in the memory of one library instance (a
+service, a driver) and are gone after a restart; there are no durable
+handles yet. Waiting for a lock (a blocking lock) does not exist yet - a
+conflict returns `LOCKED` at once.
+
 ## Snapshots
 
 A snapshot is the tree root saved at creation time - read-only, created
@@ -1230,6 +1290,7 @@ system returns them:
 | `tests/basic.rs` | files, directories, names, summaries, errors, tree splits, space reuse, full disk, snapshots, corruption detection |
 | `tests/features.rs` | contiguous writes, fsync + replay, generation fallback, snapshot deletion, defragmentation, TRIM, many AGs + BLAKE3, log condensing |
 | `tests/model.rs` | property test: random sequences (create, write, truncate, remove, move, commit, fsync, "crash", snapshots) against an in-memory model; fsck at the end |
+| `tests/handles.rs` | handles: a reader keeps the original object after an atomic replace, a removed open file until close (also cleanup after a crash and log replay), share modes, delete on close, range locks, handles across datasets and renames |
 | `tests/versions.rs` | the first demo: snapshot, clone, changes, diff (including a move), restoring a file and a folder as a copy, the same with a crash in the middle of a write |
 | `tests/datasets.rs` | datasets: own trees, rules, snapshots, two clones of one snapshot after its deletion, clone snapshots, fsync across several datasets, power loss during deletion, space accounting |
 | `tests/crash.rs` | power loss during commit and fsync with a random subset of unwritten blocks |

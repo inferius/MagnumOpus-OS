@@ -41,6 +41,7 @@ is documented in this file and in the Czech version.
 | -23 | `NO_SPACE` | no space left on the device |
 | -24 | `IO_ERROR` | device read or write error |
 | -25 | `READ_ONLY` | read-only |
+| -26 | `LOCKED` | the object is open or locked by another handle |
 
 ## Details
 
@@ -309,6 +310,19 @@ stored state stays consistent.
 **When:** writing to a snapshot.
 
 **What to do:** write to the live file system.
+
+### `LOCKED` (-26)
+
+**Meaning:** the object is open in an incompatible share mode, or a file
+range is locked by another handle.
+
+**When:** opening a file that another handle opened without sharing the
+requested access (`FILE_SHARE_*` in the Windows layer); deleting or
+renaming an open file without delete sharing; writing into a range with a
+mandatory lock; a range lock overlapping someone else's.
+
+**What to do:** wait until the other handle closes the file or releases the
+lock, or open with a compatible mode.
 
 ## Process exit codes
 

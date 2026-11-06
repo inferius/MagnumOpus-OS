@@ -41,6 +41,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -23 | `NO_SPACE` | na zařízení není místo |
 | -24 | `IO_ERROR` | chyba čtení nebo zápisu zařízení |
 | -25 | `READ_ONLY` | jen pro čtení |
+| -26 | `LOCKED` | objekt je otevřený nebo zamčený jiným handlem |
 
 ## Podrobně
 
@@ -312,6 +313,19 @@ mohla ztratit, uložený stav zůstává konzistentní.
 **Kdy vzniká:** zápis do snapshotu.
 
 **Co s tím:** zapisovat do živého souborového systému.
+
+### `LOCKED` (-26)
+
+**Význam:** objekt je otevřený v nekompatibilním sdílecím režimu, nebo je
+rozsah souboru zamčený jiným handlem.
+
+**Kdy vzniká:** otevření souboru, který jiný handle otevřel bez sdílení
+požadovaného přístupu (`FILE_SHARE_*` ve vrstvě Windows); smazání nebo
+přejmenování otevřeného souboru bez sdílení mazání; zápis do rozsahu
+s povinným zámkem; zámek rozsahu, který se překrývá s cizím.
+
+**Co s tím:** počkat, až druhý handle soubor zavře nebo zámek uvolní,
+případně otevřít se slučitelným režimem.
 
 ## Návratové kódy procesů
 

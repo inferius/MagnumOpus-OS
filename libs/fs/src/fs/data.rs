@@ -172,6 +172,13 @@ impl<D: BlockDevice> Fs<D> {
     /// `DIRTY_HARD_LIMIT`, dalsi data se neprijmou.
     pub fn write(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
         let (oid, inode) = self.file_oid(path)?;
+        let end = offset.saturating_add(data.len() as u64);
+        self.check_path_access(oid, super::handles::access::WRITE, offset, end)?;
+        self.write_oid(oid, inode, offset, data)
+    }
+
+    /// Zapis do souboru `oid` aktivniho datasetu (cesta i handle).
+    pub(super) fn write_oid(&mut self, oid: u64, inode: Inode, offset: u64, data: &[u8]) -> Result<()> {
         if data.is_empty() {
             return Ok(());
         }
@@ -203,6 +210,14 @@ impl<D: BlockDevice> Fs<D> {
     pub fn truncate(&mut self, path: &str, size: u64) -> Result<()> {
         self.guarded(|fs| {
             let (oid, inode) = fs.file_oid(path)?;
+            fs.check_path_access(oid, super::handles::access::WRITE, size.min(inode.size), u64::MAX)?;
+            fs.truncate_checked(oid, inode, size)
+        })
+    }
+
+    /// Zmena velikosti souboru `oid` aktivniho datasetu (cesta i handle).
+    pub(super) fn truncate_checked(&mut self, oid: u64, inode: Inode, size: u64) -> Result<()> {
+        self.guarded(|fs| {
             if size > MAX_FILE_SIZE {
                 return Err(Error::OutOfRange);
             }
