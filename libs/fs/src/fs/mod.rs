@@ -42,7 +42,7 @@ pub use check::CheckReport;
 pub use dataset::DatasetInfo;
 pub use defrag::DefragReport;
 pub use diff::{Change, ChangeKind};
-pub use handles::{Handle, access, share};
+pub use handles::{Handle, Revision, access, share};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {

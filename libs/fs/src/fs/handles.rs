@@ -40,6 +40,20 @@ use crate::names::validate_name;
 /// Cislo otevreneho souboru.
 pub type Handle = u64;
 
+/// Revize objektu: kterym objektem (dataset, oid, generace) a v jake verzi
+/// obsahu je. Dve stejne revize = tentyz obsah.
+///
+/// Verze obsahu se nepise do intent logu: po padu a prehrani logu muze
+/// byt jina nez pred padem - klient pak dostane `CONFLICT` (bezpecny smer,
+/// nic se tise neprepise).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Revision {
+    pub dataset: u64,
+    pub oid: u64,
+    pub generation: u64,
+    pub version: u64,
+}
+
 /// Pozadovany pristup (bity).
 pub mod access {
     pub const READ: u8 = 1;
@@ -391,6 +405,41 @@ impl<D: BlockDevice> Fs<D> {
             }
             fs.rename_at(src, fname, dst, tname)
         })
+    }
+
+    /// Revize objektu na ceste (pro podminene ulozeni).
+    pub fn revision(&mut self, path: &str) -> Result<Revision> {
+        let oid = self.enter(path)?;
+        let root = self.s.root;
+        let i = self.inode(&root, oid)?;
+        Ok(Revision { dataset: self.cur_ds, oid, generation: i.generation, version: i.version })
+    }
+
+    /// Revize objektu za handlem.
+    pub fn revision_h(&mut self, h: Handle) -> Result<Revision> {
+        let (o, i) = self.handle_object(h, 0)?;
+        Ok(Revision { dataset: o.ds, oid: o.oid, generation: i.generation, version: i.version })
+    }
+
+    /// **Podminene ulozeni:** jako `rename_replace`, ale jen kdyz cil `to`
+    /// ma porad revizi `expected` (`None` = cil nesmi existovat). Jinak
+    /// `CONFLICT` a nic se nezmeni. Vraci revizi noveho obsahu v `to`.
+    ///
+    /// Typicke pouziti: editor si pri otevreni zapamatuje revizi, novy
+    /// obsah zapise do docasneho souboru a pak ho podminene prejmenuje na
+    /// misto originalu - zmenu, kterou mezitim udelal nekdo jiny, tak tise
+    /// neprepise.
+    pub fn rename_replace_if(&mut self, from: &str, to: &str, expected: Option<Revision>) -> Result<Revision> {
+        let current = match self.revision(to) {
+            Ok(r) => Some(r),
+            Err(Error::NotFound) => None,
+            Err(e) => return Err(e),
+        };
+        if current != expected {
+            return Err(Error::Conflict);
+        }
+        self.rename_replace(from, to)?;
+        self.revision(to)
     }
 
     /// Jmena objektu pro hlaseni (testy, ladeni).

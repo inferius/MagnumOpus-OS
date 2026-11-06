@@ -42,6 +42,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -24 | `IO_ERROR` | chyba čtení nebo zápisu zařízení |
 | -25 | `READ_ONLY` | jen pro čtení |
 | -26 | `LOCKED` | objekt je otevřený nebo zamčený jiným handlem |
+| -27 | `CONFLICT` | objekt se mezitím změnil |
 
 ## Podrobně
 
@@ -326,6 +327,19 @@ s povinným zámkem; zámek rozsahu, který se překrývá s cizím.
 
 **Co s tím:** počkat, až druhý handle soubor zavře nebo zámek uvolní,
 případně otevřít se slučitelným režimem.
+
+### `CONFLICT` (-27)
+
+**Význam:** podmíněná operace se neprovedla, protože se objekt od zadané
+revize změnil (nebo cíl, který neměl existovat, existuje).
+
+**Kdy vzniká:** podmíněné uložení (`rename_replace_if`, `REPLACE_COMMIT`
+v protokolu v2), když soubor mezitím změnil někdo jiný - jiný editor,
+agent, synchronizace.
+
+**Co s tím:** nic se nezměnilo a nová data zůstala klientovi; nabídnout
+uložení vedle, porovnání verzí, nebo vědomé přepsání (operace s novou
+revizí).
 
 ## Návratové kódy procesů
 

@@ -398,6 +398,7 @@ impl<D: BlockDevice> Fs<D> {
         }
         inode.size = new_size;
         inode.mtime = self.now;
+        inode.version = inode.version.wrapping_add(1);
         self.put_inode(oid, &inode)?;
         self.zil.touch(oid);
         let parent = inode.parent;

@@ -24,6 +24,7 @@ fn inode_roundtrip() {
         tree_dirs: 10,
         owner: 11,
         xattrs: 13,
+        version: 14,
     };
     let b = i.encode();
     assert_eq!(b.len(), INODE_SIZE);

@@ -154,3 +154,29 @@ fn handles_across_datasets_and_renames() {
     });
     assert_clean(&mut fs);
 }
+
+#[test]
+fn conditional_save_refuses_silent_overwrite() {
+    // Editor si pamatuje revizi; mezitim soubor zmeni agent - podminene
+    // ulozeni editoru vrati CONFLICT a nic nezmeni.
+    let mut fs = new_fs(2048);
+    fs.create("/config.toml", Kind::File).unwrap();
+    fs.write("/config.toml", 0, b"a = 1").unwrap();
+    let rev = fs.revision("/config.toml").unwrap();
+    fs.write("/config.toml", 0, b"a = 2").unwrap(); // agent
+    fs.create("/config.toml.tmp", Kind::File).unwrap();
+    fs.write("/config.toml.tmp", 0, b"a = 3").unwrap(); // editor
+    assert_eq!(fs.rename_replace_if("/config.toml.tmp", "/config.toml", Some(rev)).err(), Some(Error::Conflict));
+    assert_eq!(fs.read("/config.toml", 0, 10).unwrap(), b"a = 2");
+    assert!(fs.stat("/config.toml.tmp").is_ok());
+    // S aktualni revizi projde.
+    let now = fs.revision("/config.toml").unwrap();
+    let new = fs.rename_replace_if("/config.toml.tmp", "/config.toml", Some(now)).unwrap();
+    assert_eq!(fs.read("/config.toml", 0, 10).unwrap(), b"a = 3");
+    assert_ne!(new, now);
+    // None = cil nesmi existovat.
+    fs.create("/x.tmp", Kind::File).unwrap();
+    assert_eq!(fs.rename_replace_if("/x.tmp", "/config.toml", None).err(), Some(Error::Conflict));
+    fs.rename_replace_if("/x.tmp", "/novy", None).unwrap();
+    assert_clean(&mut fs);
+}

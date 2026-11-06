@@ -66,6 +66,8 @@ pub enum Error {
     /// Objekt je otevreny v nekompatibilnim sdilecim rezimu nebo je
     /// rozsah zamceny jinym handlem.
     Locked = -26,
+    /// Objekt se mezitim zmenil (podminena operace s ocekavanou revizi).
+    Conflict = -27,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -96,6 +98,7 @@ pub const ALL: &[Error] = &[
     Error::IoError,
     Error::ReadOnly,
     Error::Locked,
+    Error::Conflict,
 ];
 
 impl Error {
@@ -138,6 +141,7 @@ impl Error {
             Self::IoError => "IO_ERROR",
             Self::ReadOnly => "READ_ONLY",
             Self::Locked => "LOCKED",
+            Self::Conflict => "CONFLICT",
         }
     }
 
@@ -170,6 +174,7 @@ impl Error {
             Self::IoError => "chyba cteni nebo zapisu zarizeni",
             Self::ReadOnly => "jen pro cteni",
             Self::Locked => "objekt je otevreny nebo zamceny jinym handlem",
+            Self::Conflict => "objekt se mezitim zmenil",
         }
     }
 }

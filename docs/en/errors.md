@@ -42,6 +42,7 @@ is documented in this file and in the Czech version.
 | -24 | `IO_ERROR` | device read or write error |
 | -25 | `READ_ONLY` | read-only |
 | -26 | `LOCKED` | the object is open or locked by another handle |
+| -27 | `CONFLICT` | the object has changed in the meantime |
 
 ## Details
 
@@ -323,6 +324,20 @@ mandatory lock; a range lock overlapping someone else's.
 
 **What to do:** wait until the other handle closes the file or releases the
 lock, or open with a compatible mode.
+
+### `CONFLICT` (-27)
+
+**Meaning:** a conditional operation was not performed because the object
+has changed since the given revision (or a target that was not supposed to
+exist exists).
+
+**When:** a conditional save (`rename_replace_if`, `REPLACE_COMMIT` in
+protocol v2) when someone else changed the file in the meantime - another
+editor, an agent, sync.
+
+**What to do:** nothing changed and the new data stayed with the client;
+offer saving alongside, comparing versions, or a deliberate overwrite (the
+operation with the new revision).
 
 ## Process exit codes
 

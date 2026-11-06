@@ -354,7 +354,8 @@ impl Superblock {
 /// 48  rodic u64 (0 u korene)    56  generace vzniku u64 (overeni handlu)
 /// 64  souhrn podstromu: bajty   72  soubory   80  adresare (bez sebe)
 /// 88  vlastnik u64 (0 = system) 96  pocet rozsirenych atributu u32
-/// 100 rezerva (28 B, nuly)
+/// 100 rezerva u32              104 verze obsahu u64 (revize)
+/// 112 rezerva (16 B, nuly)
 /// ```
 ///
 /// Casy jsou v nanosekundach z `Fs::set_time` (fsd: od startu systemu).
@@ -384,6 +385,9 @@ pub struct Inode {
     pub tree_dirs: u64,
     pub owner: u64,
     pub xattrs: u32,
+    /// Pocitadlo zmen obsahu (kazdy zapis, zmena velikosti): spolu s oid
+    /// a generaci tvori revizi pro podminene ulozeni.
+    pub version: u64,
 }
 
 pub const KIND_FILE: u8 = 1;
@@ -437,6 +441,7 @@ impl Inode {
             b[8 + k * 8..16 + k * 8].copy_from_slice(&v.to_le_bytes());
         }
         b[96..100].copy_from_slice(&self.xattrs.to_le_bytes());
+        b[104..112].copy_from_slice(&self.version.to_le_bytes());
         b
     }
 
@@ -461,6 +466,7 @@ impl Inode {
             tree_dirs: u64_at(b, 80),
             owner: u64_at(b, 88),
             xattrs: u32_at(b, 96),
+            version: u64_at(b, 104),
         };
         let too_big = i.size > MAX_FILE_SIZE || (i.kind == KIND_SYMLINK && i.size as usize > SYMLINK_MAX);
         if too_big {
