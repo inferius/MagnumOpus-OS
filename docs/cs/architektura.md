@@ -328,6 +328,63 @@ mobilu, bez závislostního pekla linuxových balíčkovačů.
     rozhraní](#plynulost-uživatelského-rozhraní-plán) - termíny snímků,
     QoS a dědění priority přes IPC.
 
+## Rozhodnutí k milníkům 6a-6d (odsouhlaseno)
+
+| # | Otázka | Rozhodnutí |
+|---|---|---|
+| 1 | protokol terminálu | **vlastní nativní protokol** (typované záznamy, tabulky, odkazy, obrázky, průběh, výzvy); VT100/pty jen jako adaptér pro převzaté programy |
+| 2 | jazyk shellu | **nový jazyk s typy**: bez implicitního dělení slov, chyba jako hodnota (kód + popis), `?` jako v Rustu; **skript nese manifest oprávnění**; POSIX `sh` zvlášť pro převzaté skripty |
+| 3 | co posílá aplikace kompozitoru | **strom vrstev + strom přístupnosti** (obsah kreslí aplikace do bufferů, posun, průhlednost, animace a scroll dělá kompozitor; struktura okna - role, texty, stav - je součást protokolu) |
+| 4 | dekorace oken | **kreslí systém**; vlastní vzhled jde, ale s pravidly níže |
+| 5 | API akcí aplikací | **v základu GUI** (6c): aplikace v manifestu deklaruje akce s typovanými parametry a potřebnými oprávněními; volá je shell, průzkumník, asistent i agent |
+| 6 | pořadí | **6a vstup -> 6b terminál -> 6c GUI -> 6d AI**; primitiva pro AI přicházejí průběžně s FS v3 a terminálem |
+
+### Vstup: dva proudy a umělý vstup
+
+- Aplikace dostává **fyzické klávesy** (kód nezávislý na rozložení - hry,
+  zkratky) a zvlášť **vložený text** (z rozložení a metody zadávání: mrtvé
+  klávesy, čínština, emoji, diktování). Rozložení a metody zadávání jsou
+  jedna systémová služba, ne kód v každé aplikaci.
+- `inputd` předává události jednomu vlastníkovi stanice (konzole, později
+  kompozitor), ten je rozdělí oknům; bezpečnou zkratku zachytí `inputd`
+  ještě před ním.
+- **Umělý vstup** (automatizace, vzdálená plocha, AI agent) jen přes
+  capability „vkládat vstup“; systém viditelně ukáže, že klávesnici ovládá
+  někdo jiný.
+
+### Terminál: líné undo a relace
+
+- **Líný snapshot:** shell si u FS vyžádá snapshot až při první změně, kterou
+  proces příkazu udělá - čtecí příkazy nestojí nic, každá změna jde vrátit.
+- **Relace patří službě:** běžící příkaz přežije zavření i pád okna
+  terminálu a jde se k němu připojit (i vzdáleně stejným strukturovaným
+  protokolem, ne SSH s escape sekvencemi).
+- Roura mezi procesy nese **binární proud záznamů se schématem**; program
+  v manifestu deklaruje vstup a výstup, shell zná typy předem (doplňování,
+  kontrola, převod na text až na konci).
+
+### Vlastní vzhled okna (vlastní titulek)
+
+Aplikace někdy chce okno po svém - karty v titulku (prohlížeč), vlastní
+lišta (editor, přehrávač), okno bez rámu (hra, widget). Jde to, ale
+důvěryhodné prvky zůstávají systému:
+
+| Režim | Kdo kreslí | Co si systém nechá |
+|---|---|---|
+| **standardní** (výchozí) | rám a titulek systém | vše |
+| **vlastní titulek** | aplikace kreslí i plochu titulku (karty, tlačítka, vyhledávání) | **odznak důvěry** (identita aplikace + co právě smí: složky, síť, kamera) na pevném místě, který aplikace nepřekreslí; **tlačítka okna** (zavřít, minimalizovat) kreslí systém, aplikace jen zvolí stranu a barvu; přesun a změna velikosti přes **deklarované oblasti** (aplikace řekne „tady se okno táhne“, „tady je tlačítko“) - kompozitor tak funguje i při zaseknuté aplikaci |
+| **bez rámu / celá obrazovka** | vše aplikace | odznak se ukáže při najetí k okraji a vždy při změně oprávnění; bezpečná zkratka a systémové dialogy fungují vždy |
+
+- **Systémové dialogy** (oprávnění, heslo, platba) kreslí kompozitor ve
+  zvláštní vrstvě nad všemi okny, se ztlumením zbytku obrazovky a odznakem,
+  který aplikace nemůže vykreslit (vrstvu nad ztlumením smí kreslit jen
+  systém). Napodobenina v okně aplikace tak vždy vypadá jinak.
+- Plocha titulku nese strom přístupnosti jako zbytek okna, takže vlastní
+  titulek je přístupný stejně jako standardní.
+- Podobně to dělá macOS (obsah až do titulku, tlačítka kreslí systém)
+  a Windows (rozšíření obsahu do rámu); navíc je u nás odznak oprávnění
+  a deklarované oblasti místo testování kliknutí v aplikaci.
+
 ## Vstup: klávesnice a myš (plán)
 
 - **Služba vstupu** (`inputd`) v userspace: ovladače zařízení posílají
@@ -345,6 +402,8 @@ mobilu, bez závislostního pekla linuxových balíčkovačů.
   oprávnění a správce úloh.
 
 ## Shell a chytrý terminál (návrh)
+
+> Odsouhlasená rozhodnutí: [Rozhodnutí k milníkům 6a-6d](#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno).
 
 Cíl: terminál, který je pohodlnější než dnešní a využívá, co umí náš FS
 a capabilities.
@@ -373,6 +432,8 @@ Návrhy navíc k odsouhlasení:
   (C/C++ z milníku jazyků) - strukturovaný výstup je nadstavba, ne náhrada.
 
 ## AI v systému (návrh)
+
+> Odsouhlasené pořadí a API akcí: [Rozhodnutí k milníkům 6a-6d](#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno).
 
 Jádro o AI nic neví. Systém ale dává **primitiva, díky kterým je AI agent
 bezpečný**, a nad nimi volitelné služby.

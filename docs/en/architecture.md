@@ -349,6 +349,67 @@ sandbox, without the dependency hell of Linux package managers.
   - **Smoothness as a requirement:** see [User interface responsiveness](#user-interface-responsiveness-plan) -
     frame deadlines, QoS and priority inheritance over IPC.
 
+## Decisions for milestones 6a-6d (agreed)
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | terminal protocol | **our own native protocol** (typed records, tables, links, images, progress, prompts); VT100/pty only as an adapter for ported programs |
+| 2 | shell language | **a new typed language**: no implicit word splitting, errors as values (code + description), `?` as in Rust; **a script carries a permission manifest**; POSIX `sh` separately for ported scripts |
+| 3 | what an application sends to the compositor | **a layer tree + an accessibility tree** (the application draws content into buffers, the compositor does scrolling, transparency, animations; the window structure - roles, texts, state - is part of the protocol) |
+| 4 | window decorations | **drawn by the system**; a custom look is possible, with the rules below |
+| 5 | application action API | **in the GUI foundation** (6c): an application declares actions with typed parameters and required permissions in its manifest; the shell, file manager, assistant and agents call them |
+| 6 | order | **6a input -> 6b terminal -> 6c GUI -> 6d AI**; AI primitives arrive along the way with FS v3 and the terminal |
+
+### Input: two streams and synthetic input
+
+- An application receives **physical keys** (a layout-independent code -
+  games, shortcuts) and separately **inserted text** (from the layout and
+  input method: dead keys, Chinese, emoji, dictation). Layouts and input
+  methods are one system service, not code in every application.
+- `inputd` delivers events to one seat owner (console, later the
+  compositor), which distributes them to windows; `inputd` catches the
+  secure key combination before it.
+- **Synthetic input** (automation, remote desktop, an AI agent) only through
+  an "inject input" capability; the system visibly shows that someone else
+  controls the keyboard.
+
+### Terminal: lazy undo and sessions
+
+- **Lazy snapshot:** the shell asks the FS for a snapshot only at the first
+  change the command's process makes - read-only commands cost nothing,
+  every change can be undone.
+- **Sessions belong to a service:** a running command survives closing or a
+  crash of the terminal window and can be reattached (also remotely with
+  the same structured protocol, not SSH with escape sequences).
+- A pipe between processes carries **a binary record stream with a
+  schema**; a program declares input and output in its manifest, the shell
+  knows the types in advance (completion, checking, conversion to text only
+  at the end).
+
+### Custom window look (custom title bar)
+
+An application sometimes wants its own window - tabs in the title bar (a
+browser), its own bar (an editor, a player), a frameless window (a game, a
+widget). It is possible, but the trusted elements stay with the system:
+
+| Mode | Who draws | What the system keeps |
+|---|---|---|
+| **standard** (default) | the frame and title bar: the system | everything |
+| **custom title bar** | the application also draws the title area (tabs, buttons, search) | a **trust badge** (application identity + what it may access right now: folders, network, camera) at a fixed place the application cannot paint over; the **window buttons** (close, minimize) are drawn by the system, the application only chooses side and colour; moving and resizing through **declared regions** (the application says "drag here", "a button here") - so the compositor works even when the application hangs |
+| **frameless / full screen** | everything: the application | the badge appears when hovering at the edge and always on a permission change; the secure key combination and system dialogs always work |
+
+- **System dialogs** (permission, password, payment) are drawn by the
+  compositor in a separate layer above all windows, with the rest of the
+  screen dimmed and a badge the application cannot render (only the system
+  may draw above the dimming). An imitation inside an application window
+  therefore always looks different.
+- The title area carries the accessibility tree like the rest of the
+  window, so a custom title bar is as accessible as the standard one.
+- macOS (content up into the title bar, buttons drawn by the system) and
+  Windows (extending content into the frame) do something similar; in
+  addition we have the permission badge and declared regions instead of
+  hit testing in the application.
+
 ## Input: keyboard and mouse (plan)
 
 - An **input service** (`inputd`) in userspace: device drivers send events
@@ -366,6 +427,8 @@ sandbox, without the dependency hell of Linux package managers.
   confirming permission dialogs and the task manager.
 
 ## Shell and smart terminal (proposal)
+
+> Agreed decisions: [Decisions for milestones 6a-6d](#decisions-for-milestones-6a-6d-agreed).
 
 Goal: a terminal more comfortable than today's ones that uses what our FS
 and capabilities can do.
@@ -396,6 +459,8 @@ Additional proposals for approval:
   replacement.
 
 ## AI in the system (proposal)
+
+> Agreed order and action API: [Decisions for milestones 6a-6d](#decisions-for-milestones-6a-6d-agreed).
 
 The kernel knows nothing about AI. The system does provide **primitives
 that make an AI agent safe**, and optional services on top of them.
