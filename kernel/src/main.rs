@@ -1,7 +1,7 @@
 //! Kernel.
 //!
 //! Start na bootovacim CPU: overeni dat od loaderu, konzole, zakladni
-//! struktury CPU (GDT, IDT), sprava pameti, ACPI, casovace, prepnuti na
+//! struktury CPU (`arch::init_boot_cpu`), sprava pameti, ACPI, casovace, prepnuti na
 //! zasobnik s ochrannou strankou, planovac, start ostatnich CPU a vlakno
 //! `init` se self-testy.
 
@@ -24,6 +24,7 @@ mod smp;
 mod sync;
 mod syscall;
 mod tests;
+mod trap;
 mod userboot;
 
 use boot_info::{BOOT_INFO_MAGIC, BOOT_INFO_VERSION, BootInfo};
@@ -38,10 +39,11 @@ static PLATFORM: spin::Once<Platform> = spin::Once::new();
 
 /// Vstupni bod, na ktery skace loader (viz `ENTRY` v linker.ld).
 ///
-/// Loader predava v `rdi` virtualni adresu `BootInfo` v prime mape fyzicke
-/// pameti, preruseni jsou zakazana.
+/// Loader predava virtualni adresu `BootInfo` v prime mape fyzicke pameti
+/// jako prvni argument podle C ABI cile (x86_64: `rdi`, aarch64: `x0`),
+/// preruseni jsou zakazana.
 #[unsafe(no_mangle)]
-extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
+extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
     arch::clear_cpu_local();
     if boot_info.magic != BOOT_INFO_MAGIC || boot_info.version != BOOT_INFO_VERSION {
         let _ = writeln!(arch::debug_serial(), "kernel: neplatny BootInfo od loaderu");
@@ -51,7 +53,7 @@ extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
     // SAFETY: framebuffer popsal loader a namapoval ho do prime mapy;
     // kernel ho nepouziva nijak jinak nez pres konzoli.
     unsafe { console::init(&boot_info.framebuffer) };
-    log::info!("os kernel {} ({})", env!("CARGO_PKG_VERSION"), arch_name());
+    log::info!("os kernel {} ({})", env!("CARGO_PKG_VERSION"), arch::NAME);
 
     // SAFETY: jednou, na bootovacim CPU, preruseni jsou zakazana.
     unsafe { arch::init_boot_cpu() };
@@ -63,31 +65,12 @@ extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
         Ok(p) => p,
         Err(e) => panic!("cteni ACPI selhalo: {e}"),
     });
-    log::info!(
-        "ACPI: {} CPU, {} IOAPIC, HPET {}",
-        platform.cpus.len(),
-        platform.ioapics.len(),
-        if platform.hpet_phys.is_some() {
-            "ano"
-        } else {
-            "ne"
-        }
-    );
+    log::info!("ACPI: {} CPU, {}", platform.cpus.len(), platform.arch);
     // SAFETY: jednou, po inicializaci pameti, preruseni zakazana.
     let timers = unsafe { arch::init_platform(platform) };
-    log::info!(
-        "casovace: TSC {} MHz{}, APIC timer {} kHz, {}",
-        timers.tsc_hz / 1_000_000,
-        if timers.tsc_invariant {
-            " (invariantni)"
-        } else {
-            " (CPU nehlasi invariantni TSC)"
-        },
-        timers.apic_timer_hz / 1000,
-        if timers.x2apic { "x2APIC" } else { "xAPIC" },
-    );
+    log::info!("casovace: {timers}");
 
-    // ACPI tabulky jsou prectene, GDT a IDT vlastni: pamet firmwaru je volna.
+    // ACPI tabulky jsou prectene, tabulky CPU vlastni: pamet firmwaru je volna.
     mm::reclaim_boot_memory(boot_info);
     let (free, total) = mm::phys::stats();
     log::info!(
@@ -105,7 +88,7 @@ extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
 }
 
 /// Pokracovani startu na zasobniku jadra s ochrannou strankou.
-extern "sysv64" fn kernel_main(boot_info: u64) -> ! {
+extern "C" fn kernel_main(boot_info: u64) -> ! {
     // SAFETY: ukazatel predany z `_start`, BootInfo zije navzdy.
     let boot_info = unsafe { &*(boot_info as *const BootInfo) };
     let platform = PLATFORM.get().unwrap();
@@ -125,7 +108,7 @@ fn boot_main(boot_info: &'static BootInfo) {
     {
         let p = PLATFORM.get().unwrap();
         // SAFETY: jednou, pred spustenim procesu.
-        unsafe { arch::iommu::init(&p.iommus, &p.amd_iommus, &p.pci_ecam) };
+        unsafe { arch::iommu::init(p) };
     }
     let kernel_ok = tests::run_all();
     if kernel_ok {
@@ -157,13 +140,5 @@ fn boot_main(boot_info: &'static BootInfo) {
     }
     if cfg!(feature = "qemu-test") {
         arch::qemu_exit(kernel_ok && init_code == Some(0));
-    }
-}
-
-const fn arch_name() -> &'static str {
-    if cfg!(target_arch = "x86_64") {
-        "x86_64"
-    } else {
-        "neznama architektura"
     }
 }

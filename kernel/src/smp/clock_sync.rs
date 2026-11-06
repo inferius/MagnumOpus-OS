@@ -1,4 +1,6 @@
-//! Kontrola a korekce posunu citace cyklu (TSC) noveho CPU proti BSP.
+//! Kontrola a korekce posunu citace cyklu (x86: TSC) noveho CPU proti BSP.
+//! Na architekturach se zarucene synchronnim citacem
+//! (`arch::CYCLE_COUNTER_SYNCED`, napr. aarch64) se nepouziva.
 //!
 //! Hodiny jadra predpokladaji stejny citac na vsech CPU. Firmware ho
 //! obvykle synchronizuje, ale neni to zaruceno. Mereni: BSP si poznamena
@@ -29,7 +31,7 @@ pub fn reset() {
 }
 
 /// Strana BSP: zmeri posun prave nastartovaneho AP a preda mu korekci.
-pub fn measure_and_fix(apic_id: u32) {
+pub fn measure_and_fix(hw_id: u32) {
     let mut best_window = u64::MAX;
     let mut best_offset = 0i64;
     for round in 1..=ROUNDS {
@@ -48,12 +50,14 @@ pub fn measure_and_fix(apic_id: u32) {
     }
     let fix = if best_offset.unsigned_abs() > best_window {
         log::warn!(
-            "citac cyklu CPU (APIC ID {apic_id}) je posunuty o {best_offset} tiku proti BSP (nejistota {best_window}), opravuji"
+            "citac cyklu CPU ({} {hw_id}) je posunuty o {best_offset} tiku proti BSP (nejistota {best_window}), opravuji",
+            arch::HW_ID_NAME
         );
         -best_offset
     } else {
         log::debug!(
-            "citac cyklu CPU (APIC ID {apic_id}): posun {best_offset} tiku, v ramci nejistoty {best_window}"
+            "citac cyklu CPU ({} {hw_id}): posun {best_offset} tiku, v ramci nejistoty {best_window}",
+            arch::HW_ID_NAME
         );
         0
     };

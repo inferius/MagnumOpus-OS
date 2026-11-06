@@ -25,7 +25,9 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use crate::sync::SpinLock;
 use boot_info::{BootInfo, MemoryKind, PHYS_MAP_BASE};
 
-use crate::arch::paging::{MapFlags, PAGE_SIZE, PageSize, PageTable, supports_1g_pages};
+use crate::arch::paging::{
+    MapFlags, PAGE_SIZE, PageSize, PageTable, PageTableOps, supports_1g_pages,
+};
 
 /// Zacatek oblasti zasobniku jadra.
 const KERNEL_STACKS_BASE: u64 = 0xFFFF_FE00_0000_0000;
@@ -79,7 +81,7 @@ impl VirtAddr {
 
 /// Adresni prostor jadra. Pozdeji z nej budou procesy kopirovat horni polovinu.
 static KERNEL_SPACE: SpinLock<Option<PageTable>> = SpinLock::new(None);
-/// Fyzicka adresa PML4 jadra (rychly pristup pri prepinani vlaken).
+/// Fyzicka adresa korenove tabulky jadra (rychly pristup pri prepinani vlaken).
 static KERNEL_ROOT: AtomicU64 = AtomicU64::new(0);
 
 /// Hranice sekci obrazu jadra z linker.ld.
@@ -115,7 +117,7 @@ pub unsafe fn init(boot_info: &BootInfo) {
         .map(|r| (r.start, r.end()))
         .collect();
 
-    let mut space = PageTable::new().expect("nedostatek pameti pro PML4");
+    let mut space = PageTable::new().expect("nedostatek pameti pro tabulky stranek jadra");
     space
         .preallocate_kernel_half()
         .expect("nedostatek pameti pro tabulky jadra");
@@ -147,7 +149,7 @@ pub fn is_device_memory(start: u64, len: u64) -> bool {
 
 /// Vrati alokatoru pamet loaderu a boot services. Volat az kdyz z ni jadro
 /// nic necte: po precteni ACPI tabulek (nektere firmwary maji RSDP v pameti
-/// boot services) a po nahrani vlastnich GDT a IDT.
+/// boot services) a po nahrani vlastnich tabulek CPU (`arch::init_boot_cpu`).
 pub fn reclaim_boot_memory(boot_info: &BootInfo) {
     // SAFETY: BootInfo overeny v `init`.
     let regions = unsafe { boot_info.memory_map() };
@@ -375,7 +377,7 @@ pub fn unmap_identity_page(phys: PhysAddr) {
     with_kernel_space(|space| space.unmap_4k(VirtAddr(phys.0)));
 }
 
-/// Fyzicka adresa PML4 jadra.
+/// Fyzicka adresa korenove tabulky jadra.
 pub fn kernel_root() -> PhysAddr {
     PhysAddr(KERNEL_ROOT.load(Ordering::Acquire))
 }

@@ -13,6 +13,8 @@
 use alloc::boxed::Box;
 use core::arch::{asm, naked_asm};
 
+use crate::arch::api::ThreadContext;
+
 /// Oblast pro FXSAVE64 (musi byt zarovnana na 16 B).
 #[repr(C, align(16))]
 pub struct FpuArea([u8; 512]);
@@ -53,7 +55,7 @@ impl core::fmt::Debug for Context {
     }
 }
 
-impl Context {
+impl ThreadContext for Context {
     /// Kontext noveho vlakna: prvni `switch` na nej skonci skokem do `start`
     /// se zarovnanym zasobnikem.
     ///
@@ -61,7 +63,7 @@ impl Context {
     ///
     /// `stack_top` musi byt vrchol namapovaneho zasobniku zarovnany na 16 B,
     /// ktery nic jineho nepouziva.
-    pub unsafe fn new(stack_top: u64, start: extern "sysv64" fn() -> !) -> Self {
+    unsafe fn new(stack_top: u64, start: extern "C" fn() -> !) -> Self {
         let frame = [
             0u64,                  // r15
             0,                     // r14

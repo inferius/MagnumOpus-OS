@@ -15,7 +15,7 @@ use abi::vm::{
 };
 
 use super::{PhysAddr, VirtAddr, new_address_space, tlb};
-use crate::arch::paging::{MapFlags, PageSize, PageTable};
+use crate::arch::paging::{MapFlags, PageSize, PageTable, PageTableOps};
 use crate::error::Error;
 use crate::object::vmo::MemoryObject;
 use crate::sync::SpinLock;
@@ -91,7 +91,7 @@ impl AddressSpace {
         })
     }
 
-    /// Fyzicka adresa korenove tabulky (pro prepnuti CR3).
+    /// Fyzicka adresa korenove tabulky (pro `arch::switch_page_table`).
     pub fn root(&self) -> u64 {
         self.root
     }
@@ -309,8 +309,8 @@ impl Drop for AddressSpace {
         if let Some(table) = inner.table.take() {
             // SAFETY: AddressSpace se rusi az s posledni referenci na proces;
             // jeho vlakna uz nebezi a planovac pri prepnuti na jine vlakno
-            // vzdy prepne CR3, takze tento adresni prostor neni aktivni na
-            // zadnem CPU. TLB zaznamy byly zahozeny prepnutim CR3.
+            // vzdy prepne adresni prostor, takze tento neni aktivni na
+            // zadnem CPU. TLB zaznamy byly zahozeny prepnutim.
             unsafe { table.destroy() };
         }
         // Mapovani (Arc na objekty pameti) se uvolni s `inner`.

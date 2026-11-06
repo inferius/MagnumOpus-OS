@@ -28,7 +28,7 @@ pub use user::{
     create_user_thread, on_return_to_user, request_kill, start_user_thread, user_fault,
 };
 
-use crate::arch::context::{self, Context};
+use crate::arch::context::{self, Context, ThreadContext};
 use crate::arch::{self, interrupts};
 use crate::mm::KernelStack;
 use percpu::{PerCpu, TimerEntry};
@@ -89,7 +89,7 @@ pub fn spawn(name: &str, qos: Qos, f: impl FnOnce() + Send + 'static) -> Arc<Thr
 }
 
 /// Vstupni bod kazdeho noveho vlakna (prvni `switch` sem skoci).
-extern "sysv64" fn thread_start() -> ! {
+extern "C" fn thread_start() -> ! {
     finish_switch();
     interrupts::enable();
     let f = current()
@@ -317,7 +317,7 @@ fn switch_away(reason: Reason) {
         .map_or(crate::mm::kernel_root().as_u64(), |p| {
             p.address_space().root()
         });
-    // SAFETY: vlastni CPU, preruseni zakazana; root je platna PML4 se
+    // SAFETY: vlastni CPU, preruseni zakazana; root je platna korenova tabulka se
     // sdilenou polovinou jadra (bezici kod a zasobnik jsou v ni).
     unsafe {
         arch::switch_page_table(root);
@@ -443,8 +443,8 @@ pub fn idle_loop() -> ! {
 
 /// Zastavi vsechna ostatni CPU (pri panice).
 ///
-/// Nesaha na APIC, dokud aktualni CPU neni zaregistrovane: panika muze
-/// nastat jeste pred inicializaci APIC a dalsi vyjimka by prekryla puvodni
+/// Nesaha na radic preruseni, dokud aktualni CPU neni zaregistrovane: panika muze
+/// nastat jeste pred inicializaci radice preruseni a dalsi vyjimka by prekryla puvodni
 /// chybu. Pred registraci BSP zadna jina CPU nebezi.
 pub fn halt_other_cpus() {
     let Some(me) = percpu::try_this_cpu() else {

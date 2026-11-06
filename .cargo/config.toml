@@ -9,3 +9,12 @@ rustflags = [
     "-C", "code-model=kernel",
     "-C", "force-frame-pointers=yes",
 ]
+
+# Kostra jadra pro aarch64 (zatim jen kontrola prekladu, `cargo xtask check
+# --arch aarch64`). Kod jadra je pozicne zavisly jako na x86_64; model kodu
+# "small" (vychozi) staci, protoze adresy jsou relativni k PC (+/- 4 GiB).
+[target.aarch64-unknown-none]
+rustflags = [
+    "-C", "relocation-model=static",
+    "-C", "force-frame-pointers=yes",
+]

@@ -153,6 +153,12 @@ impl Resource {
             .is_none_or(|l| contains(&l.ranges, first, end - first))
     }
 
+    /// Zarizeni, ke kteremu prostredek patri (segment, sbernice,
+    /// zarizeni << 3 | funkce), pokud je omezeny na jedno zarizeni.
+    pub fn device(&self) -> Option<(u16, u8, u8)> {
+        self.device
+    }
+
     /// Domena IOMMU zarizeni (DMA pamet z tohoto prostredku se mapuje do ni).
     pub fn domain(&self) -> Option<&crate::arch::iommu::Domain> {
         self.domain.as_ref()

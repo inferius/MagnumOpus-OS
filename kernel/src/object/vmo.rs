@@ -14,6 +14,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::{Error, KernelObject, ObjectCore, ObjectType, Rights, Signals};
+use crate::arch::iommu::IommuDomain;
 use crate::mm::{PhysAddr, phys};
 
 const PAGE: u64 = abi::vm::PAGE_SIZE;

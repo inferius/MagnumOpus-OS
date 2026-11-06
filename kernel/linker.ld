@@ -1,7 +1,8 @@
 /*
- * Linker skript kernelu (x86_64).
+ * Linker skript kernelu (spolecny pro x86_64 i aarch64).
  *
- * Kernel lezi v poslednich 2 GiB adresniho prostoru (code-model=kernel).
+ * Kernel lezi v poslednich 2 GiB adresniho prostoru (x86_64:
+ * code-model=kernel; aarch64: vychozi model "small", adresy relativni k PC).
  * KERNEL_BASE musi odpovidat boot_info::KERNEL_BASE. Kazda skupina sekci
  * s jinymi pravy zacina na nove 4 KiB strance, aby je loader mohl
  * namapovat s presnymi pravy (R-X, R--, RW-).

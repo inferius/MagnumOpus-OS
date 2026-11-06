@@ -15,7 +15,8 @@ a cenu. Když se rozhodnutí změní, upraví se tady spolu s kódem.
 5. **Ovladače v userspace.** Pád ovladače neshodí systém.
 6. **Jen moderní platformy:** 64 bit, UEFI / device tree, ACPI, SMP.
 7. **UTF-8 všude.**
-8. **Přenositelnost:** architektura v `arch/<arch>/`, primárně x86_64.
+8. **Přenositelnost:** architektura v `arch/<arch>/` za pevným
+   [rozhraním](#rozhraní-architektury), primárně x86_64.
 
 ## Vrstvy
 
@@ -377,8 +378,227 @@ dokumentace česky i anglicky (`docs/cs`, `docs/en`).
 3. QEMU aarch64 `virt`
 4. Raspberry Pi, PinePhone (Pro)
 
-aarch64 se portuje podle plánu milníků (milník 9). Do té doby se kód
-důsledně dělí do `arch/`, aby port nebolel.
+aarch64 se portuje podle plánu milníků (milník 9): nejdřív QEMU `virt`,
+pak Raspberry Pi. Jádro už má explicitní [rozhraní
+architektury](#rozhraní-architektury), takže port znamená napsat jeho
+implementaci v `kernel/src/arch/aarch64/` (kostra už existuje).
+
+## Rozhraní architektury
+
+Cíl: **port na jinou architekturu = napsat novou implementaci jednoho
+rozhraní**, ne přepisovat půlku jádra. Všechno, co závisí na procesoru nebo
+na jeho okolí (přerušení, časovače, stránkování, start CPU, IOMMU), je
+v `kernel/src/arch/<arch>/` a zbytek jádra s tím mluví jen přes pevnou
+smlouvu. Stav: x86_64 je za rozhraním celé, **aarch64 je zatím jen kostra**
+(přeloží se, za běhu skončí na prvním `todo!`).
+
+> **Změna (2026-11-06):** dřív jádro volalo funkce `arch::*`, které
+> existovaly jen pro x86_64, a několik míst mimo `arch/` znalo x86 přímo
+> (ACPI tabulky MADT/HPET/DMAR/IVRS v obecném `Platform`, start CPU přes
+> stránky pod 1 MiB, vektory přerušení 48..239, srovnání TSC, obsluha
+> přerušení volala přímo plánovač). **Proč:** bez explicitní smlouvy by
+> port na aarch64 znamenal hledat skryté závislosti po celém jádře. Teď je
+> smlouva v traitech, překladač hlídá úplnost a `cargo xtask test`
+> ověřuje, že se jádro přeloží i pro aarch64.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Rozhrani architektury">
+<defs>
+<marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<rect class="box" x="10" y="10" width="560" height="56" rx="6"/>
+<text class="t b" x="290" y="33" text-anchor="middle">obecné jádro</text>
+<text class="m" x="290" y="53" text-anchor="middle">sched, mm, object, syscall, smp, acpi (RSDP, XSDT, MCFG), log</text>
+<path class="ln" d="M290 66 L290 96" marker-end="url(#ar1)"/>
+<rect class="acc" x="10" y="98" width="560" height="50" rx="6"/>
+<text class="t b" x="290" y="119" text-anchor="middle">fasáda crate::arch</text>
+<text class="m mono" x="290" y="138" text-anchor="middle">arch::now_ns(), arch::context::switch, arch::paging::PageTable, ...</text>
+<path class="ln" d="M290 148 L290 176" marker-end="url(#ar1)"/>
+<text class="m" x="300" y="167">statický dispatch na arch::Current</text>
+<rect class="box" x="10" y="178" width="560" height="62" rx="6"/>
+<text class="t b" x="290" y="198" text-anchor="middle">smlouva arch::api (traity, impl Architecture)</text>
+<text class="m mono" x="290" y="216" text-anchor="middle">Cpu, Interrupts, Threads, Time, Ipi, Memory,</text>
+<text class="m mono" x="290" y="232" text-anchor="middle">DeviceIrq, Iommu, Smp, PlatformInfo, Diagnostics</text>
+<rect class="ok" x="10" y="276" width="270" height="62" rx="6"/>
+<text class="t b" x="145" y="298" text-anchor="middle">arch/x86_64 (hotové)</text>
+<text class="m" x="145" y="318" text-anchor="middle">GDT/IDT, APIC, TSC+HPET, VT-d, AMD-Vi, SIPI</text>
+<rect class="warn" x="300" y="276" width="270" height="62" rx="6"/>
+<text class="t b" x="435" y="298" text-anchor="middle">arch/aarch64 (kostra)</text>
+<text class="m" x="435" y="318" text-anchor="middle">GICv3, generic timer, SMMUv3, PSCI: todo!</text>
+<path class="ln dash" d="M145 276 L145 242" marker-end="url(#ar1)"/>
+<path class="ln dash" d="M435 276 L435 242" marker-end="url(#ar1)"/>
+<text class="m" x="152" y="262">implementuje</text>
+<text class="m" x="442" y="262">implementuje</text>
+<rect class="acc" x="600" y="98" width="150" height="142" rx="6"/>
+<text class="t b" x="675" y="122" text-anchor="middle">crate::trap</text>
+<text class="m" x="675" y="145" text-anchor="middle">přerušení, IPI,</text>
+<text class="m" x="675" y="162" text-anchor="middle">syscall, výjimka</text>
+<text class="m" x="675" y="179" text-anchor="middle">v userspace</text>
+<text class="m" x="675" y="205" text-anchor="middle">jediná cesta</text>
+<text class="m" x="675" y="222" text-anchor="middle">arch -&gt; jádro</text>
+<path class="ln-acc" d="M145 338 L145 350 L675 350 L675 242" marker-end="url(#ar2)"/>
+<path class="ln-acc" d="M435 338 L435 350"/>
+<path class="ln-acc" d="M675 98 L675 38 L572 38" marker-end="url(#ar2)"/>
+</svg>
+<figcaption>Jádro volá architekturu jen přes fasádu (dolů), architektura jádro jen přes <code>crate::trap</code> (nahoru).</figcaption>
+</figure>
+
+### Tři části
+
+1. **Smlouva** `kernel/src/arch/api/` - traity, které každá architektura
+   implementuje na prázdném typu (`X86_64`, `Aarch64`). Souhrnný trait
+   `Architecture` vyžaduje všechny skupiny, takže chybějící funkce nebo jiná
+   signatura je chyba překladu, ne chyba za běhu.
+2. **Fasáda** `kernel/src/arch/mod.rs` - volné funkce a typové aliasy
+   (`arch::now_ns()`, `arch::context::Context`, `arch::paging::PageTable`,
+   `arch::iommu::Domain`), které volání staticky přepošlou na
+   `arch::Current` (vybírá `cfg(target_arch)`). Žádná dynamika, žádná režie.
+3. **Zpětný směr** `kernel/src/trap.rs` - jediné místo, kam kód
+   architektury volá do jádra: časovač, IPI, přerušení zařízení, syscall,
+   výjimka v userspace, návrat do userspace.
+
+| trait | co dodává architektura | x86_64 | aarch64 (plán) |
+|---|---|---|---|
+| `Cpu` | start CPU, HW ID, per-CPU ukazatel, zastavení, breakpoint | GDT/TSS/IDT, ID lokálního APIC, GS báze | VBAR_EL1, MPIDR_EL1, TPIDR_EL1 |
+| `Interrupts` | zapnout/vypnout přerušení, uspat do přerušení | `sti`/`cli`/`hlt` | DAIF, `wfi` |
+| `Threads` | kontext vlákna, přepnutí, zásobník jádra, vstup do userspace | callee-saved + FXSAVE, `iretq` | x19-x30 + v0-v31, `eret` |
+| `Time` | hodiny v ns, čítač cyklů, jednorázový časovač | TSC (kalibrace HPET), APIC timer | CNTVCT_EL0, CNTP |
+| `Ipi` | přeplánuj, zastav, vyprázdni TLB | APIC IPI | GICv3 SGI |
+| `Memory` | tabulky stránek (`PageTableOps`), TLB, cache pro DMA | 4 úrovně, CR3, IPI shootdown | TTBR0/TTBR1, `TLBI ... IS` bez IPI |
+| `DeviceIrq` | rozsah čísel přerušení zařízení, zpráva MSI | vektory 48..239, 0xFEE.. | LPI od 8192 přes ITS |
+| `Iommu` | domény překladu DMA (`IommuDomain`) | VT-d, AMD-Vi | SMMUv3 |
+| `Smp` | start dalších CPU (`CpuStarter`) | INIT-SIPI, trampolína pod 1 MiB | PSCI CPU_ON |
+| `PlatformInfo` | ACPI tabulky, které obecná část nezná | MADT, HPET, DMAR, IVRS | MADT (GICC/GICD/ITS), GTDT, IORT, SPCR |
+| `Diagnostics` | ladicí sériová linka, výpis zásobníku, konec QEMU, vlastní testy | COM1, `rbp`, isa-debug-exit | PL011, `x29`, semihosting |
+
+### Pravidla
+
+- **Zbytek jádra** používá jen fasádu `crate::arch` (a typy z
+  `arch::api`). Nikdy `arch::x86_64::...` - ten modul je soukromý, takže to
+  ani nejde.
+- **Kód architektury** volá do jádra jen `crate::trap` a obecné služby:
+  `log`, `sync`, `error`, `fatal`, `mm` (alokátor fyzické paměti, přímá
+  mapa, mapování MMIO) a čtení ACPI (`crate::acpi::read`). Plánovač,
+  objekty ani syscally přímo ne.
+- Vše v `trap` se volá se zakázanými přerušeními a s už potvrzeným
+  přerušením v řadiči; výjimkou je `trap::syscall`, který běží
+  s povolenými přerušeními na zásobníku jádra.
+- Společné typy (`MapFlags`, `PageSize`, `MapError`, `PAGE_SIZE`) jsou
+  v `arch::api::paging` jednou pro všechny architektury.
+- Platí pro všechny architektury (část ABI nebo rozložení jádra):
+  stránka 4 KiB, stejné rozložení adresního prostoru (přímá mapa od
+  `0xFFFF_8000_0000_0000`, jádro v posledních 2 GiB, společný
+  `kernel/linker.ld`), per-CPU struktura s ukazatelem na sebe na offsetu 0
+  a daty architektury na offsetu `CPU_LOCAL_OFFSET`, čísla chyb CPU pro
+  ukončený proces = čísla vektorů x86 (aarch64 na ně mapuje své výjimky:
+  abort 14, nedefinovaná instrukce 6, ...), vstupní body s `extern "C"`.
+- Pozor na typové aliasy: `arch::paging::PageTable` je na x86_64 přímo
+  typ z `arch/x86_64`, takže by šly volat i jeho vlastní metody mimo
+  smlouvu. Na x86 to projde, ale `cargo xtask check --arch aarch64` (součást
+  `cargo xtask test`) to odhalí.
+
+### Příklady
+
+Obecný kód (plánovač) - jen fasáda, žádná znalost x86:
+
+```rust
+use crate::arch::{self, interrupts};
+use crate::arch::context::{self, Context, ThreadContext};
+
+// nové vlákno: kontext připraví architektura
+let ctx = unsafe { Context::new(stack.top(), thread_start) };
+
+// přepnutí: adresní prostor, zásobník pro vstup z userspace, registry
+unsafe {
+    arch::switch_page_table(root);
+    arch::set_kernel_stack(&cpu.arch, top);
+    context::switch(from, to);
+}
+arch::set_timer(Some(1_000_000)); // přerušení za 1 ms
+```
+
+Implementace jedné skupiny v architektuře (x86_64):
+
+```rust
+impl api::Ipi for X86_64 {
+    fn send_reschedule(cpu_hw_id: u32) {
+        apic::send_ipi(cpu_hw_id, apic::VECTOR_RESCHEDULE);
+    }
+    fn send_halt(cpu_hw_id: u32) {
+        apic::send_ipi(cpu_hw_id, apic::VECTOR_HALT);
+    }
+    fn send_tlb_flush(cpu_hw_id: u32) {
+        apic::send_ipi(cpu_hw_id, apic::VECTOR_TLB_FLUSH);
+    }
+}
+```
+
+Cesta přerušení časovače (zpětný směr):
+
+```text
+APIC timer -> vektor 32 -> idt::trap_dispatch (x86)
+           -> apic::eoi()                    (potvrzení v řadiči)
+           -> trap::timer_interrupt()        (smlouva)
+           -> sched::on_timer_interrupt()    (obecné jádro)
+           -> trap::after_interrupt()        (případné přeplánování)
+```
+
+Kontrola, že se jádro přeloží pro jinou architekturu (je i součástí
+`cargo xtask test`):
+
+```bash
+cargo xtask check --arch aarch64
+```
+
+### Kostra aarch64 a co do ní patří
+
+`kernel/src/arch/aarch64/mod.rs` implementuje celou smlouvu; každá funkce,
+která má něco dělat, končí `todo!` s popisem, co v ní bude. Cíl je nejdřív
+**QEMU `virt`** (GICv3, PL011, PSCI, SMMUv3, UEFI z edk2 s ACPI), potom
+Raspberry Pi. Plánované moduly:
+
+| modul | obsah |
+|---|---|
+| `exceptions` | tabulka vektorů (VBAR_EL1), uložení registrů, ESR -> číslo chyby ABI |
+| `gic` | GICv3: distributor, redistributor každého CPU, ITS pro MSI (LPI) |
+| `timer` | generic timer: CNTVCT_EL0 jako hodiny, CNTP_TVAL_EL0 jednorázově |
+| `mmu` | 4 úrovně s granulí 4 KiB, TTBR0 (proces) a TTBR1 (jádro), MAIR, TCR |
+| `context` | x19-x30, sp, FPU/SIMD v0-v31, FPCR/FPSR; přepínání |
+| `user` | EL0 <-> EL1: SVC, ERET, SP_EL0 |
+| `psci` | start CPU přes CPU_ON (HVC/SMC podle ACPI FADT) |
+| `smmu` | SMMUv3: stream table, domény |
+| `acpi` | MADT (GICC, GICD, GIC ITS), GTDT, IORT (RID -> StreamID/DeviceID), SPCR |
+| `pl011` | ladicí sériová linka |
+
+Mimo jádro bude port potřebovat ještě: loader pro `aarch64-unknown-uefi`
+(dnes x86_64: stránkování a skok do jádra), xtask (QEMU `virt`, firmware
+edk2 pro aarch64, ukončení testu přes semihosting), `libs/elf` (dnes
+přijímá jen `EM_X86_64`), `libs/libos` a `libs/abi` (instrukce syscallu,
+`svc` místo `syscall`) a `user/user.ld`.
+
+### Závazná omezení
+
+- **Raspberry Pi 4 nemá koherentní DMA.** Ovladače v userspace pak musí
+  před a po DMA udržovat cache (`Memory::dma_sync_*`), nebo jádro musí DMA
+  paměť mapovat bez cache. Dnes to nikdo nevolá (x86 i QEMU virt jsou
+  koherentní); bez řešení by na RPi 4 ovladače četly a zapisovaly
+  zastaralá data. Rozhodnout s portem na RPi.
+- **Bariéry pro MMIO v ovladačích.** Ovladače v userspace (`libs/virtio`)
+  dnes spoléhají na silné řazení paměti x86. Na ARM je před zápisem do
+  registru "doorbell" nutná bariéra (`dsb`/`dmb`), jinak zařízení může
+  vidět zastaralé deskriptory. Potřebuje funkci bariér v libos.
+- **Raspberry Pi 4 nemá IOMMU (SMMU).** DMA ovladačů tam nebude omezené -
+  stejné riziko jako x86 bez IOMMU (chybný ovladač může přes DMA přepsat
+  jádro). RPi 5 má vlastní IOMMU, ne SMMUv3: další backend.
+- **MSI na GICv3 potřebuje identitu zařízení** (DeviceID pro ITS), proto
+  `INTERRUPT_CREATE` předává architektuře zařízení z omezeného Resource.
+  Přerušení přes Resource bez zařízení na aarch64 nepůjde.
+- **Stránka 4 KiB je pevná** (ABI). Hardware jen s 16K/64K granulí
+  podporovat nebudeme.
+- **Symbolizace v xtask** hledá v logu text `rip 0x...`; jádro ho proto
+  píše na všech architekturách (u aarch64 jde o PC).
+
 
 ## Jazyky a překladače (plán)
 
@@ -428,7 +648,8 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
    Rust (`std` pro náš OS), C (vlastní libc nad libos), C++ (libc++/libunwind
    nad libc), překlad clangem z hostitele, pak TinyCC v systému
 8. Windows vrstva v2: user32/gdi32, GUI, DirectX přes Vulkan
-9. Port na aarch64 a první ARM zařízení
+9. Port na aarch64 a první ARM zařízení (rozhraní architektury a kostra
+   aarch64 hotové, implementace zbývá)
 
 ## Aktuální odchylky od návrhu
 

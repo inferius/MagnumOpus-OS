@@ -63,10 +63,11 @@ impl Ord for TimerEntry {
 
 #[repr(C)]
 pub struct PerCpu {
-    /// Ukazatel na sebe; musi byt prvni (cte se pres gs:[0]).
+    /// Ukazatel na sebe; musi byt prvni (`arch::cpu_local` ho cte primo,
+    /// napr. x86 pres gs:[0]).
     self_ptr: u64,
     /// Data pro prechody do a z userspace; asembler k nim pristupuje pres
-    /// GS na pevnem offsetu `arch::CPU_LOCAL_OFFSET`.
+    /// per-CPU ukazatel na pevnem offsetu `arch::CPU_LOCAL_OFFSET`.
     pub arch: arch::CpuLocal,
     /// Pocitadla pozadavku na vyprazdneni TLB od jinych CPU a jejich
     /// vyrizeni (viz `mm::tlb`).
@@ -106,7 +107,7 @@ impl PerCpu {
         assert!(index < MAX_CPUS, "prilis mnoho CPU");
         let cpu = Box::leak(Box::new(PerCpu {
             self_ptr: 0,
-            arch: arch::CpuLocal::for_this_cpu(),
+            arch: <arch::CpuLocal as arch::CpuLocalData>::for_this_cpu(),
             tlb_requested: AtomicU64::new(0),
             tlb_done: AtomicU64::new(0),
             index,

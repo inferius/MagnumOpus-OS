@@ -15,7 +15,7 @@ use super::gdt::{IST_DOUBLE_FAULT, IST_MACHINE_CHECK, IST_NMI, KERNEL_CODE};
 use super::user::from_user;
 use super::{cpu, halt_forever};
 use crate::fatal::{fatal_stop, report, report_stack_trace};
-use crate::{log, sched};
+use crate::{log, trap};
 
 /// Ulozeny stav CPU v okamziku vyjimky. Poradi odpovida `isr_common`.
 #[repr(C)]
@@ -182,6 +182,11 @@ const EXCEPTION_NAMES: [&str; 32] = [
     "Reserved 31",
 ];
 
+/// Rozsah vektoru pro preruseni zarizeni (nize jsou vyjimky a vektory
+/// jadra `apic::VECTOR_*`, nahore spurious).
+pub const DEVICE_VECTOR_FIRST: u8 = 48;
+pub const DEVICE_VECTOR_LAST: u8 = 239;
+
 const VEC_NMI: u64 = 2;
 const VEC_BREAKPOINT: u64 = 3;
 const VEC_DOUBLE_FAULT: u64 = 8;
@@ -235,7 +240,7 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
             } else {
                 0
             };
-            sched::user_fault(v as u8, frame.error_code, frame.rip, addr)
+            trap::user_fault(v as u8, frame.error_code, frame.rip, addr)
         }
         VEC_BREAKPOINT => {
             log::info!("breakpoint na {:#x}", frame.rip);
@@ -243,15 +248,15 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
         v if v < 32 => fatal_exception(frame),
         v if v == VECTOR_TIMER as u64 => {
             apic::eoi();
-            sched::on_timer_interrupt();
+            trap::timer_interrupt();
         }
         v if v == VECTOR_RESCHEDULE as u64 => {
             apic::eoi();
-            sched::on_reschedule_ipi();
+            trap::reschedule_ipi();
         }
         v if v == VECTOR_TLB_FLUSH as u64 => {
             apic::eoi();
-            crate::mm::tlb::on_flush_ipi();
+            trap::tlb_flush_ipi();
         }
         v if v == VECTOR_HALT as u64 => halt_forever(),
         v if v == super::apic::VECTOR_IOMMU_FAULT as u64 => {
@@ -259,9 +264,9 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
             super::iommu::on_fault_interrupt();
         }
         v if v == VECTOR_SPURIOUS as u64 => {} // spurious se nepotvrzuje
-        v if crate::object::interrupt::is_device_vector(v) => {
+        v if (DEVICE_VECTOR_FIRST as u64..=DEVICE_VECTOR_LAST as u64).contains(&v) => {
             apic::eoi();
-            crate::object::interrupt::dispatch(v as u8);
+            trap::device_irq(v as u32);
         }
         _ => {
             apic::eoi();
@@ -269,10 +274,10 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
         }
     }
     if vector >= 32 {
-        sched::preempt_if_needed();
+        trap::after_interrupt();
     }
     if user {
-        sched::on_return_to_user();
+        trap::return_to_user();
     }
 }
 
@@ -280,7 +285,7 @@ fn fatal_exception(f: &TrapFrame) -> ! {
     let name = EXCEPTION_NAMES[f.vector as usize];
     report(format_args!(
         "KERNEL: neosetrena vyjimka {name} na cpu{}, vektor {}, chybovy kod {:#x}",
-        sched::try_current_cpu_index().unwrap_or(0),
+        trap::current_cpu_index(),
         f.vector,
         f.error_code
     ));

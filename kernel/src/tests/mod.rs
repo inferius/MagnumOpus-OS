@@ -24,6 +24,7 @@ type Suite = &'static [(&'static str, fn())];
 
 const SUITES: &[(&str, Suite)] = &[
     ("pamet", mm::TESTS),
+    ("platforma", crate::arch::TESTS),
     ("platforma", platform::TESTS),
     ("log", log::TESTS),
     ("planovac", sched::TESTS),

@@ -14,11 +14,11 @@ pub fn report(args: fmt::Arguments) {
     log::emergency(args);
 }
 
-/// Vypis zasobniku od ramce `rbp` (0 = od mista volani).
-pub fn report_stack_trace(rbp: Option<u64>) {
+/// Vypis zasobniku od ukazatele ramce `fp` (`None` = od mista volani).
+pub fn report_stack_trace(fp: Option<u64>) {
     let mut print = |addr: u64| report(format_args!("    {addr:#018x}"));
-    match rbp {
-        Some(rbp) => arch::stack_trace(rbp, &mut print),
+    match fp {
+        Some(fp) => arch::stack_trace(fp, &mut print),
         None => arch::current_stack_trace(&mut print),
     }
 }

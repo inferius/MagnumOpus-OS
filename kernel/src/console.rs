@@ -23,7 +23,7 @@ static CONSOLE: SpinLock<Option<Console>> = SpinLock::new(None);
 /// do ktereho nikdo jiny nezapisuje.
 pub unsafe fn init(fb: &Framebuffer) {
     let mut serial = arch::debug_serial();
-    serial.init();
+    arch::init_debug_serial(&mut serial);
     // SAFETY: predano od volajiciho.
     let fb = fb.is_present().then(|| unsafe { FbConsole::new(fb) });
     *CONSOLE.lock() = Some(Console { serial, fb });
