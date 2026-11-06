@@ -36,9 +36,25 @@ pub mod op {
     /// Sektory `lba..lba+count` uz nejsou pouzite (TRIM/UNMAP). Jen
     /// napoveda: obsah je pak nedefinovany. Bez podpory `NOT_SUPPORTED`.
     pub const DISCARD: u32 = 4;
+    /// Vlastnosti zarizeni: `value` = bity z `feature`. Starsi ovladac
+    /// vraci `NOT_SUPPORTED` (= zadne vlastnosti, tedy bez zaruky
+    /// trvanlivosti).
+    pub const FEATURES: u32 = 5;
     /// Test ochrany DMA (IOMMU): ovladac necha zarizeni zapsat do sve
     /// stranky, ktera neni DMA pamet. `value` = 1 zapis zablokovan, 0 ne.
     pub const TEST_DMA_PROTECTION: u32 = 100;
+}
+
+/// Bity odpovedi na `op::FEATURES`.
+pub mod feature {
+    /// `FLUSH` opravdu ulozi data z mezipameti zarizeni na medium.
+    pub const FLUSH: u64 = 1 << 0;
+    /// Zarizeni nema mezipamet zapisu: dokonceny zapis je trvaly.
+    pub const WRITE_THROUGH: u64 = 1 << 1;
+    /// Zarizeni umi `DISCARD`.
+    pub const DISCARD: u64 = 1 << 2;
+    /// Zarizeni je jen pro cteni.
+    pub const READ_ONLY: u64 = 1 << 3;
 }
 
 /// Rozebrany pozadavek.
@@ -221,6 +237,20 @@ impl BlockClient {
             lba: 0,
         };
         self.call(req, &[]).map(|(v, _)| v == 1)
+    }
+
+    /// Vlastnosti zarizeni (bity `feature`); starsi ovladac = 0.
+    pub fn features(&self) -> Result<u64> {
+        let req = Request {
+            op: op::FEATURES,
+            count: 0,
+            lba: 0,
+        };
+        match self.call(req, &[]) {
+            Ok((v, _)) => Ok(v),
+            Err(Error::NotSupported) => Ok(0),
+            Err(e) => Err(e),
+        }
     }
 
     /// Kanal k ovladaci (predani klienta jinemu procesu).

@@ -96,8 +96,14 @@ pub struct Store<D: BlockDevice> {
     /// Commit selhal uprostred: stav v pameti neodpovida disku, dalsi zmeny
     /// jsou zakazane (nutne znovu pripojit).
     pub poisoned: bool,
+    /// Pripojeno jen pro cteni (zarizeni bez zaruky trvanlivosti).
+    pub read_only: bool,
     /// O kolik generaci se pripojeni vratilo kvuli poskozenemu stavu.
     pub fallback: u64,
+    /// Sloty superbloku s novejsi (poskozenou) generaci, nez se pripojila.
+    /// Pred prvnim commitem se vynuluji - jinak by po dalsim pripojeni
+    /// vyhraly a ukazovaly na bloky, ktere mezitim dostal nekdo jiny.
+    stale_slots: Vec<u64>,
     /// Posilat zarizeni TRIM pro uvolnene bloky.
     pub discard: bool,
     // --- intent log aktualni epochy ---
@@ -194,6 +200,8 @@ impl<D: BlockDevice> Store<D> {
             next_mem: 1,
             changed: false,
             poisoned: false,
+            read_only: false,
+            stale_slots: Vec::new(),
             fallback: 0,
             discard: false,
             zil_blocks: Vec::new(),
@@ -208,43 +216,78 @@ impl<D: BlockDevice> Store<D> {
     /// Pripoji system: nejnovejsi platny superblok, jehoz stav jde nacist.
     /// Kdyz je poskozeny (disk ztratil zapisy, prestoze potvrdil flush),
     /// zkusi az `REUSE_DELAY - 1` starsich - ty zarucene nikdo neprepsal.
+    /// Pripoji svazek.
+    ///
+    /// 1. **Vyber:** ze slotu s platnou hlavickou (podpis rodiny formatu
+    ///    a vlastni soucet) se vezme nejvyssi generace. Necitelny slot nebo
+    ///    slot se spatnym souctem je neplatny slot, ostatni se zkusi.
+    /// 2. **Umim ji otevrit?** Jina verze formatu nebo neznamy bit incompat =
+    ///    `NOT_SUPPORTED` (nikdy tichy prechod na starsi generaci). Neznamy
+    ///    bit ro_compat = pripojeni jen pro cteni (replay intent logu jen
+    ///    v pameti, zadny zapis).
+    /// 3. **Obnova po poskozeni:** kdyz stav vybrane generace nejde nacist
+    ///    kvuli poskozeni (`CORRUPTED`, vcetne nesmyslnych hodnot
+    ///    v superbloku), zkusi se starsi (nejvys o `REUSE_DELAY - 1`)
+    ///    a `fallback` rekne o kolik. Jina chyba (I/O, pamet) se vrati hned:
+    ///    prechodna chyba nesmi vest k navratu na starsi stav. Novejsi sloty
+    ///    se pred prvnim commitem vynuluji.
     pub fn open(mut dev: D) -> Result<Self> {
-        let mut found: Vec<Superblock> = Vec::new();
+        // (slot, generace, obsah)
+        let mut found: Vec<(u64, u64, Vec<u8>)> = Vec::new();
         let mut buf = vec![0u8; BLOCK_SIZE];
         let mut last_err = Error::NotFound;
         for i in 0..SB_COUNT {
-            dev.read_block(SB_FIRST + i, &mut buf)?;
-            match Superblock::decode(&buf) {
-                Ok(sb) if sb.block_count <= dev.block_count() => found.push(sb),
-                Ok(_) => last_err = Error::Corrupted,
+            let slot = SB_FIRST + i;
+            if let Err(e) = dev.read_block(slot, &mut buf) {
+                last_err = e;
+                continue;
+            }
+            match Superblock::decode_header(&buf) {
+                Ok((generation, _)) => found.push((slot, generation, buf.clone())),
                 Err(Error::NotFound) => {}
                 Err(e) => last_err = e,
             }
         }
-        found.sort_by_key(|s| core::cmp::Reverse(s.generation));
-        let Some(newest) = found.first().map(|s| s.generation) else {
+        found.sort_by_key(|&(_, g, _)| core::cmp::Reverse(g));
+        let Some(newest) = found.first().map(|&(_, g, _)| g) else {
             return Err(last_err);
         };
-        for sb in found {
-            if sb.generation + REUSE_DELAY <= newest {
+        for (k, (_, generation, raw)) in found.iter().enumerate() {
+            if generation + REUSE_DELAY <= newest {
                 break;
             }
-            let fallback = newest - sb.generation;
+            let sb = match Superblock::decode(raw) {
+                Ok(sb) if sb.block_count <= dev.block_count() => sb,
+                // Hlavicka sedi, obsah ne (nebo vetsi nez zarizeni): poskozeni.
+                Ok(_) | Err(Error::Corrupted) => {
+                    last_err = Error::Corrupted;
+                    continue;
+                }
+                // Jina verze, neznamy incompat: tento ovladac nesmi dal.
+                Err(e) => return Err(e),
+            };
+            let read_only = sb.ro_compat_unknown();
             match Self::try_open(dev, sb) {
                 Ok(mut s) => {
-                    s.fallback = fallback;
+                    s.fallback = newest - generation;
+                    s.read_only = read_only;
+                    s.stale_slots = found[..k]
+                        .iter()
+                        .filter(|&&(_, g, _)| g > *generation)
+                        .map(|&(slot, _, _)| slot)
+                        .collect();
                     return Ok(s);
                 }
-                Err((d, e)) => {
+                Err((d, Error::Corrupted)) => {
                     dev = d;
-                    last_err = e;
+                    last_err = Error::Corrupted;
                 }
+                Err((_, e)) => return Err(e),
             }
         }
         Err(last_err)
     }
 
-    #[allow(clippy::result_large_err)]
     fn try_open(mut dev: D, sb: Superblock) -> core::result::Result<Self, (D, Error)> {
         let txg = sb.generation + 1;
         let space = match Space::load(
@@ -293,7 +336,9 @@ impl<D: BlockDevice> Store<D> {
     }
 
     pub fn check_writable(&self) -> Result<()> {
-        if self.poisoned {
+        if self.read_only {
+            Err(Error::ReadOnly)
+        } else if self.poisoned {
             Err(Error::IoError)
         } else {
             Ok(())
@@ -534,6 +579,14 @@ impl<D: BlockDevice> Store<D> {
 
     fn commit_inner(&mut self) -> Result<()> {
         let txg = self.txg;
+        if !self.stale_slots.is_empty() {
+            let zero = vec![0u8; BLOCK_SIZE];
+            for &slot in &self.stale_slots {
+                self.dev.write_block(slot, &zero)?;
+            }
+            self.dev.flush()?;
+            self.stale_slots.clear();
+        }
         let root = self.write_tree(self.root)?;
         self.root = Child::Disk(root);
         debug_assert!(self.dirty.is_empty(), "rozpracovany uzel mimo strom");

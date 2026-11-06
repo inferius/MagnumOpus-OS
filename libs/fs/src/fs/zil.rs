@@ -381,6 +381,13 @@ fn block_sum(b: &[u8], seed: u64, seq: u64) -> Csum {
 impl<D: BlockDevice> Fs<D> {
     /// Ucini vsechny dosavadni zmeny trvalymi (prezijou vypadek proudu).
     /// Rychle: zapise jen zmenena data a davku logu, jeden flush.
+    ///
+    /// Atomicita: seznam cekajicich zmen se smaze az po uspesnem flush. Chyba
+    /// pred zapisem prvniho bloku logu nic nerozbije (dalsi `fsync` to
+    /// zkusi znovu). Chyba pri zapisu logu nebo flush = nejisty stav (cast
+    /// davky muze byt na disku): svazek prejde do stavu chyby (`IO_ERROR` pro
+    /// vsechny dalsi zmeny), aby zadny pozdejsi `fsync` nepotvrdil neco, co
+    /// trvale neni. Obnova = znovu pripojit (prehraji se jen cele davky).
     pub fn fsync(&mut self) -> Result<()> {
         self.s.check_writable()?;
         if self.zil.is_empty() {
@@ -389,8 +396,37 @@ impl<D: BlockDevice> Fs<D> {
         if self.s.zil_blocks.len() > MAX_LOG_BLOCKS {
             return self.commit();
         }
-        let mut records: Vec<Record> = self.zil.ops.drain(..).map(Record::Op).collect();
-        let touched = core::mem::take(&mut self.zil.touched);
+        let records = self.log_records()?;
+        let payload = encode(&records);
+        // Bloky retezu predem: nedostatek mista se ohlasi drive, nez se na
+        // disk cokoli zapise (bez prechodu do stavu chyby).
+        let count = payload.len().div_ceil(PAYLOAD);
+        let mut nexts = Vec::with_capacity(count);
+        for _ in 0..count {
+            match self.s.alloc_meta() {
+                Ok(b) => nexts.push(b),
+                Err(e) => {
+                    let txg = self.s.txg;
+                    for &b in &nexts {
+                        self.s.space.free(b, 1, txg, true);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        if let Err(e) = self.write_batch(&payload, &nexts) {
+            self.s.poisoned = true;
+            return Err(e);
+        }
+        self.zil.clear();
+        Ok(())
+    }
+
+    /// Zaznamy davky pro `fsync` (cekajici seznam zustava nedotceny).
+    /// Zmenena data souboru zapise do novych bloku.
+    fn log_records(&mut self) -> Result<Vec<Record>> {
+        let mut records: Vec<Record> = self.zil.ops.iter().cloned().map(Record::Op).collect();
+        let touched = self.zil.touched.clone();
         for (oid, blocks) in touched {
             let root = self.s.root;
             let Some(raw) = btree::get(&mut self.s, &root, &Key::new(oid, item::INODE, 0))? else {
@@ -427,11 +463,17 @@ impl<D: BlockDevice> Fs<D> {
                 list,
             });
         }
-        let payload = encode(&records);
+        Ok(records)
+    }
+
+    /// Zapise davku do retezu bloku logu a udela flush.
+    /// `nexts[i]` = predem alokovany dalsi blok retezu za blokem `i`.
+    fn write_batch(&mut self, payload: &[u8], nexts: &[u64]) -> Result<()> {
         let chunks: Vec<&[u8]> = payload.chunks(PAYLOAD).collect();
+        debug_assert_eq!(chunks.len(), nexts.len());
         let seed = self.s.sb.zil_seed;
         for (i, chunk) in chunks.iter().enumerate() {
-            let next = self.s.alloc_meta()?;
+            let next = nexts[i];
             let mut b = vec![0u8; BLOCK_SIZE];
             b[0..2].copy_from_slice(&MAGIC.to_le_bytes());
             b[2] = (i + 1 == chunks.len()) as u8;
@@ -453,6 +495,9 @@ impl<D: BlockDevice> Fs<D> {
     pub(super) fn replay_log(&mut self) -> Result<()> {
         if self.s.fallback > 0 {
             // Log patri novejsimu (poskozenemu) stavu: zahodit, nova epocha.
+            if self.s.read_only {
+                return Ok(());
+            }
             self.s.mark_changed();
             return self.commit();
         }
@@ -500,7 +545,9 @@ impl<D: BlockDevice> Fs<D> {
                 self.replayed += 1;
             }
         }
-        if found {
+        // Jen pro cteni: prehrane zmeny zustanou v pameti (vidi je cteni),
+        // na disk se nezapisuje nic.
+        if found && !self.s.read_only {
             self.s.mark_changed();
             self.commit()?;
         }

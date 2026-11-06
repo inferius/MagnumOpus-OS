@@ -88,6 +88,11 @@ fn main(startup: Startup) -> i64 {
     if i.replayed > 0 {
         println!("fsd: z intent logu prehrano {} operaci", i.replayed);
     }
+    if i.read_only {
+        println!(
+            "fsd: VAROVANI: disk nezarucuje trvanlivost zapisu (neumi flush), svazek je jen pro cteni"
+        );
+    }
     let mut svc = Service {
         fs: Some(fs),
         debug,

@@ -239,6 +239,11 @@ pub struct Superblock {
 }
 
 impl Superblock {
+    /// Ma svazek vlastnost, kterou tento ovladac umi jen cist?
+    pub fn ro_compat_unknown(&self) -> bool {
+        self.features_ro_compat & !FEATURES_RO_COMPAT != 0
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut b = alloc::vec![0u8; BLOCK_SIZE];
         b[0..8].copy_from_slice(&MAGIC);
@@ -270,14 +275,27 @@ impl Superblock {
 
     /// `NotFound` = v bloku neni superblok; `Corrupted` = poskozeny;
     /// `NotSupported` = jina verze nebo neznama vlastnost.
-    pub fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() != BLOCK_SIZE || b[0..8] != MAGIC {
+    /// Overi jen hlavicku: podpis rodiny formatu a vlastni soucet. Vraci
+    /// (generace, verze). Slouzi k vyberu nejnovejsiho stavu *pred*
+    /// rozhodnutim, zda ho tento ovladac umi otevrit - jinak by superblok
+    /// novejsi verze nebo s neznamou vlastnosti byl tise preskocen a starsi
+    /// ovladac by zapisoval do stareho stavu.
+    pub fn decode_header(b: &[u8]) -> Result<(u64, u32)> {
+        if b.len() != BLOCK_SIZE || b[0..6] != MAGIC[0..6] {
             return Err(Error::NotFound);
         }
         if xxh3(&b[..BLOCK_SIZE - 16]) != csum_at(b, BLOCK_SIZE - 16) {
             return Err(Error::Corrupted);
         }
-        if u32_at(b, 8) != VERSION {
+        Ok((u64_at(b, 16), u32_at(b, 8)))
+    }
+
+    /// Cely superblok. `NotSupported` = jina verze nebo neznamy bit
+    /// incompat; neznamy bit ro_compat projde (volajici pripoji jen pro
+    /// cteni, viz `ro_compat_unknown`).
+    pub fn decode(b: &[u8]) -> Result<Self> {
+        let (_, version) = Self::decode_header(b)?;
+        if version != VERSION || b[0..8] != MAGIC {
             return Err(Error::NotSupported);
         }
         let mut uuid = [0u8; 16];
@@ -306,7 +324,7 @@ impl Superblock {
             device_count: u16::from_le_bytes([b[214], b[215]]),
             label,
         };
-        if sb.features_ro_compat & !FEATURES_RO_COMPAT != 0 || sb.features_incompat & !FEATURES_INCOMPAT != 0 {
+        if sb.features_incompat & !FEATURES_INCOMPAT != 0 {
             return Err(Error::NotSupported);
         }
         // Velikost AG: rozumny rozsah (jinak by pamet pro skupiny vybuchla).

@@ -42,7 +42,7 @@ mod store;
 mod tests;
 
 pub use abi::{Error, Result};
-pub use device::{BlockDevice, MemDevice};
+pub use device::{BlockDevice, Durability, MemDevice};
 pub use fs::{CheckReport, DefragReport, DirEntry, Fs, FsInfo, Kind, SnapshotInfo, Stat};
 pub use hash::Algo;
 pub use layout::{BLOCK_SIZE, INLINE_MAX, MAX_EXTENT, MAX_FILE_SIZE, REUSE_DELAY, SYMLINK_MAX};

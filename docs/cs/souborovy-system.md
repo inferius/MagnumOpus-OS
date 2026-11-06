@@ -23,7 +23,7 @@ zápisy, levný `fsync`) a **nezabírat místo zbytečně** (režie metadat ~0,4
 | Atomický commit, konzistence po výpadku kdykoli | hotovo | [Výpadek proudu](#co-se-stane-při-výpadku-proudu) |
 | Merkleův strom: 128bitový součet v každém ukazateli | hotovo | [Kontrolní součty](#kontrolní-součty-a-merkleův-strom) |
 | Volba součtu XXH3-128 / BLAKE3 | hotovo | [Kontrolní součty](#kontrolní-součty-a-merkleův-strom) |
-| Návrat o 1-3 generace, když je nejnovější stav poškozený | hotovo | [Návrat o generaci](#návrat-o-generaci) |
+| Návrat o 1-3 generace, když je nejnovější stav poškozený | hotovo | [Návrat o generaci](#připojení-a-návrat-o-generaci) |
 | Rychlý `fsync` přes intent log (jeden zápis + flush) | hotovo | [fsync a intent log](#fsync-a-intent-log) |
 | Extenty, odložená alokace, souvislé zápisy | hotovo | [Zápis dat](#zápis-dat-odložená-alokace-a-extenty) |
 | Alokační skupiny se space logy (bez bitmapy) | hotovo | [Správa místa](#správa-volného-místa) |
@@ -489,20 +489,64 @@ nezapsaných bloků nechá přežít náhodnou podmnožinu v náhodném pořadí
 (`tests/crash.rs`, desítky tisíc kombinací).
 
 Předpoklad: zařízení po potvrzeném `flush` data opravdu má. Disky, které
-o flush lžou, pokrývá [návrat o generaci](#návrat-o-generaci).
+o flush lžou, pokrývá [návrat o generaci](#připojení-a-návrat-o-generaci).
 
-## Návrat o generaci
+## Připojení a návrat o generaci
 
 Bloky uvolněné commitem `g` se znovu použijí až v transakci
 `g + REUSE_DELAY` (4). Posledních 4 uložených stavů tak zůstává na disku
 nedotčených. Kruh má 8 slotů superbloku.
 
-Při připojení se zkusí nejnovější platný superblok; když jeho stav nejde
-načíst (poškozený kořen stromu nebo metadata místa), zkusí se starší - nejvýš
-o 3 generace zpět (starší už mohou být přepsané). `info().fallback` řekne,
-o kolik generací se systém vrátil, služba fsd to hlásí varováním.
-Po návratu se intent log nepřehrává (patří k novějšímu stavu) a hned
-proběhne commit s novou epochou logu.
+Připojení (`Store::open`) má tři oddělené kroky:
+
+1. **Výběr generace.** Ze všech slotů s platnou *hlavičkou* (podpis rodiny
+   formátu `OSFS\0\0` a vlastní součet) se vezme nejvyšší generace.
+   Nečitelný slot (chyba I/O) nebo slot se špatným součtem je jen neplatný
+   slot, ostatní se zkusí dál.
+2. **Umí ji tento ovladač otevřít?**
+
+| Situace v nejnovější generaci | Výsledek |
+|---|---|
+| jiná verze formátu (i novější `v4`) | `NOT_SUPPORTED` |
+| neznámý bit `incompat` | `NOT_SUPPORTED` |
+| neznámý bit `ro_compat` | připojení **jen pro čtení**, intent log se přehraje jen v paměti, na disk se nezapíše nic |
+| vše známé | normální připojení |
+
+   Nikdy se tiše nepřipojí starší generace: jinak by starší ovladač dostal
+   zapisovatelný přístup ke starému stavu a další commit by novější data
+   zahodil.
+3. **Obnova po poškození.** Když stav vybrané generace nejde načíst kvůli
+   **poškození** (`CORRUPTED`: špatný součet kořene nebo metadat místa,
+   nesmyslné hodnoty v superbloku), zkusí se starší - nejvýš o 3 generace
+   zpět (starší už mohou být přepsané). `info().fallback` řekne, o kolik
+   generací se systém vrátil, služba fsd to hlásí varováním. Jiná chyba
+   (I/O, nedostatek paměti) se vrátí hned - přechodná chyba disku nesmí
+   vést k návratu na starší stav.
+
+Po návratu se sloty s novější (poškozenou) generací **před prvním commitem
+vynulují** - jinak by po dalším připojení vyhrály a ukazovaly na bloky, které
+mezitím dostal někdo jiný. Intent log se po návratu nepřehrává (patří
+k novějšímu stavu) a hned proběhne commit s novou epochou logu.
+
+### Zařízení bez záruky trvanlivosti
+
+`BlockDevice::durability()` říká, jestli zařízení data opravdu uloží:
+
+| Hodnota | Význam | Připojení |
+|---|---|---|
+| `Flush` | `flush` uloží vše z mezipaměti na médium | zapisovatelné |
+| `WriteThrough` | zařízení nemá mezipaměť zápisu | zapisovatelné |
+| `None` | žádná nebo neznámá záruka | **jen pro čtení** (`info().read_only`, změny vrací `READ_ONLY`) |
+
+Ve fsd ji dává ovladač disku operací `FEATURES` blokového protokolu (bity
+`FLUSH`, `WRITE_THROUGH`, `DISCARD`, `READ_ONLY`). virtio-blk bez vlastnosti
+`VIRTIO_BLK_F_FLUSH` nehlásí žádnou záruku a `FLUSH` vrátí `NOT_SUPPORTED`
+(dřív vracel úspěch, aniž by cokoli udělal - `fsync` by pak lhal). Starší
+ovladač bez `FEATURES` = žádná záruka.
+
+⚠️ **Omezení:** disk, který o flush lže (potvrdí ho, ale data drží
+v mezipaměti), FS nepozná. Proti tomu je jen návrat o generaci a kontrolní
+součty - poslední potvrzené změny se pak mohou ztratit.
 
 ## fsync a intent log
 
@@ -556,6 +600,21 @@ commit a začne nová epocha. `info().replayed` = počet přehraných operací.
 Bloky dat, na které odkazuje dávka logu, se do commitu znovu nepoužijí,
 ani když vznikly ve stejné transakci (jinak by je pozdější `fsync`
 přepsal). Když log naroste nad 2048 bloků, `fsync` místo něj udělá commit.
+
+**Atomicita `fsync`:** seznam čekajících změn se smaže až po úspěšném flush.
+
+- Chyba **před** zápisem prvního bloku logu (zápis dat, nedostatek místa
+  pro bloky logu - ty se alokují předem) nic nerozbije: data zůstanou
+  v bufferu a další `fsync` to zkusí znovu.
+- Chyba **při** zápisu logu nebo flush = nejistý stav (část dávky může být
+  na disku). Svazek přejde do stavu chyby: všechny další změny i `fsync`
+  vrací `IO_ERROR`, takže nic pozdějšího nepotvrdí jako trvalé něco, co
+  trvalé není. Obnova = znovu připojit (přehrají se jen celé dávky).
+
+**Zápis dat do nových bloků** (`write_run`) nejdřív alokuje a zapíše nové
+bloky a teprve potom přepojí extenty. Když alokace nebo zápis selže, stará
+data zůstanou namapovaná (žádná díra po přepsání), nové bloky se hned vrátí
+a nezapsaná data se vrátí do bufferu.
 
 ## Správa volného místa
 
@@ -822,9 +881,10 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `NO_RESOURCES` | položka adresáře by s kolidujícími jmény přerostla `MAX_VALUE` |
 | `NO_SPACE` | zápis nebo vytvoření by spotřebovalo rezervu commitu |
 | `CORRUPTED` | nesouhlasí kontrolní součet bloku nebo struktura nedává smysl; u čtení dat = poškozený blok (ostatní soubory jdou číst dál) |
-| `IO_ERROR` | chyba zařízení; po selhání commitu všechny další změny (nutné znovu připojit) |
-| `NOT_SUPPORTED` | neznámá verze formátu nebo algoritmu; neznámá operace protokolu |
+| `IO_ERROR` | chyba zařízení; po selhání commitu nebo zápisu logu ve `fsync` všechny další změny (nutné znovu připojit) |
+| `NOT_SUPPORTED` | neznámá verze formátu nebo algoritmu, neznámý bit `incompat` v nejnovější generaci, uzel nebo extent s neznámým příznakem; neznámá operace protokolu |
 | `ACCESS_DENIED` | `SIMULATE_POWER_LOSS` bez režimu `debug` |
+| `READ_ONLY` | změna na svazku připojeném jen pro čtení (zařízení bez záruky trvanlivosti, neznámý bit `ro_compat`) |
 
 ## Testy
 
@@ -834,6 +894,8 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `tests/features.rs` | souvislý zápis, fsync + přehrání, návrat o generaci, mazání snapshotů, defragmentace, TRIM, víc AG + BLAKE3, zhušťování logů |
 | `tests/model.rs` | property test: náhodné sekvence (vytvoření, zápis, zkrácení, mazání, přesun, commit, fsync, „pád“, snapshoty) proti modelu v paměti; na konci fsck |
 | `tests/crash.rs` | výpadek během commitu i fsync s náhodnou podmnožinou nezapsaných bloků |
+| `tests/errors.rs` | chyby zařízení: selhaný zápis dat neztratí data a jde zopakovat, přepsání nenechá díru, po selhaném flush nic dalšího nepotvrdí |
+| `tests/mount.rs` | výběr superbloku: nečitelný slot, přechodná chyba bez návratu, neznámý `incompat` a novější verze = odmítnutí, neznámý `ro_compat` = jen pro čtení bez zápisu, nesmyslné hodnoty = návrat se hlášením, vynulování novějších slotů, zařízení bez záruky trvanlivosti |
 | `tests/objects.rs` | formát v3: záznam objektu, jména do 1024 znaků, zákaz znaků směru textu, symbolické odkazy (i přes intent log), limit velikosti souboru a saturace souhrnů, generace objektu |
 | `tests/perf.rs` | výkon a režie (spouští se ručně) |
 | init `tests/fs.rs` | 11 testů v systému přes fsd a skutečný ovladač virtio-blk, včetně souboru zapsaného na hostiteli a simulace výpadku |

@@ -25,6 +25,8 @@ use pci::msix::MsixTable;
 use pci::{Address, Ecam};
 use virtio::{Buffer, Device, F_VERSION_1, Virtqueue};
 
+/// Vlastnost: zarizeni je jen pro cteni.
+const F_RO: u64 = 1 << 5;
 /// Vlastnost: zarizeni podporuje FLUSH.
 const F_FLUSH: u64 = 1 << 9;
 /// Vlastnost: zarizeni podporuje DISCARD (TRIM).
@@ -59,6 +61,8 @@ struct Disk {
     buf_phys: u64,
     capacity: u64,
     flush: bool,
+    /// Zarizeni je jen pro cteni (F_RO).
+    read_only: bool,
     /// Nejvic sektoru jednoho DISCARD (0 = DISCARD neumi).
     max_discard: u32,
     /// Zarizeni neodpovedelo nebo vratilo nesmysl: dalsi pozadavky vraci
@@ -123,7 +127,7 @@ impl Disk {
     fn open(ecam: &Ecam, a: Address, resource: &Resource) -> Result<Self> {
         let device = Device::open(ecam, a, resource)?;
         device.begin_init()?;
-        let features = device.negotiate(F_VERSION_1 | F_FLUSH | F_DISCARD | F_ACCESS_PLATFORM)?;
+        let features = device.negotiate(F_VERSION_1 | F_RO | F_FLUSH | F_DISCARD | F_ACCESS_PLATFORM)?;
 
         let irq = resource.interrupt()?;
         let msix = MsixTable::open(ecam, a, resource)?;
@@ -154,9 +158,25 @@ impl Disk {
             buf_phys,
             capacity,
             flush: features & F_FLUSH != 0,
+            read_only: features & F_RO != 0,
             max_discard,
             failed: false,
         })
+    }
+
+    /// Vlastnosti pro `op::FEATURES`. Bez F_FLUSH zarizeni nehlasi zadnou
+    /// zaruku trvanlivosti: nevime jiste, ze nema mezipamet zapisu, a FS se
+    /// pak radeji pripoji jen pro cteni, nez aby `fsync` lhal.
+    fn features(&self) -> u64 {
+        use blockproto::feature;
+        let mut f = if self.flush { feature::FLUSH } else { 0 };
+        if self.max_discard > 0 {
+            f |= feature::DISCARD;
+        }
+        if self.read_only {
+            f |= feature::READ_ONLY;
+        }
+        f
     }
 
     /// Provede jeden pozadavek virtio-blk a pocka na dokonceni. `data_len` =
@@ -245,8 +265,10 @@ impl Disk {
                     Vec::new(),
                 )
             }
+            op::FEATURES => (Ok(self.features()), Vec::new()),
             op::FLUSH if self.flush => (self.request(REQ_FLUSH, 0, 0).map(|_| 0), Vec::new()),
-            op::FLUSH => (Ok(0), Vec::new()),
+            // Flush, ktery nic neudela, nesmi hlasit uspech.
+            op::FLUSH => (Err(Error::NotSupported), Vec::new()),
             op::DISCARD if self.max_discard == 0 => (Err(Error::NotSupported), Vec::new()),
             op::DISCARD
                 if req

@@ -105,6 +105,8 @@ pub struct FsInfo {
     pub ag_blocks: u64,
     /// O kolik generaci se pripojeni vratilo kvuli poskozenemu stavu (0 = ne).
     pub fallback: u64,
+    /// Pripojeno jen pro cteni (zarizeni bez zaruky trvanlivosti).
+    pub read_only: bool,
     /// Kolik operaci se pri pripojeni prehralo z intent logu.
     pub replayed: u64,
 }
@@ -165,8 +167,14 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Pripoji souborovy system: stav po poslednim commitu a prehrani
     /// intent logu (zmeny potvrzene `fsync`).
+    /// Pripoji svazek. Zarizeni bez zaruky trvanlivosti
+    /// (`Durability::None`) se pripoji jen pro cteni (`FsInfo::read_only`;
+    /// zmeny vraci `READ_ONLY`).
     pub fn mount(dev: D) -> Result<Self> {
-        let s = Store::open(dev)?;
+        let no_durability = dev.durability() == crate::device::Durability::None;
+        let mut s = Store::open(dev)?;
+        // Jen pro cteni i kvuli neznamemu bitu ro_compat (nastavi `open`).
+        s.read_only |= no_durability;
         let mut fs = Self {
             s,
             now: 0,
@@ -218,6 +226,7 @@ impl<D: BlockDevice> Fs<D> {
             algo: self.s.algo,
             ag_blocks: self.s.sb.ag_blocks,
             fallback: self.s.fallback,
+            read_only: self.s.read_only,
             replayed: self.replayed,
         }
     }

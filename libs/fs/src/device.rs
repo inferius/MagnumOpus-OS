@@ -7,6 +7,17 @@ use abi::{Error, Result};
 
 use crate::layout::BLOCK_SIZE;
 
+/// Zaruka trvanlivosti zapisu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Durability {
+    /// `flush` opravdu ulozi vse drive zapsane na medium.
+    Flush,
+    /// Zarizeni nema mezipamet zapisu: dokonceny zapis je trvaly.
+    WriteThrough,
+    /// Zadna zaruka (nebo neznama): jen pro cteni.
+    None,
+}
+
 /// Zarizeni s bloky po `BLOCK_SIZE` bajtech.
 pub trait BlockDevice {
     /// Pocet bloku.
@@ -15,6 +26,14 @@ pub trait BlockDevice {
     fn write_block(&mut self, block: u64, data: &[u8]) -> Result<()>;
     /// Vse zapsane drive je trvale ulozene (pred zapisem superbloku).
     fn flush(&mut self) -> Result<()>;
+
+    /// Jakou zaruku trvanlivosti zarizeni dava. Zarizeni bez zaruky (ma
+    /// mezipamet zapisu a neumi flush) se pripoji jen pro cteni: commit by
+    /// jinak mohl po vypadku proudu nechat superblok ukazovat na nezapsane
+    /// bloky a `fsync` by lhal.
+    fn durability(&self) -> Durability {
+        Durability::Flush
+    }
 
     /// Precte souvisly usek bloku (`buf.len()` = nasobek `BLOCK_SIZE`).
     /// Zarizeni s podporou vetsich pozadavku si metodu prepise.

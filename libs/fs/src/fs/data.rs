@@ -397,35 +397,68 @@ impl<D: BlockDevice> Fs<D> {
             while j < picked.len() && picked[j].0 == picked[j - 1].0 + 1 {
                 j += 1;
             }
-            self.write_run(oid, &picked[i..j])?;
+            if let Err(e) = self.write_run(oid, &picked[i..j]) {
+                // Nezapsane bloky vratit do bufferu: chyba zapisu nesmi
+                // ztratit data, ktera klient uz predal (zkusi se znovu).
+                let rest = &picked[i..];
+                let fd = self.data.entry(oid).or_default();
+                for (lb, b) in rest {
+                    fd.blocks.insert(*lb, b.clone());
+                }
+                self.dirty_blocks += rest.len() as u64;
+                return Err(e);
+            }
             i = j;
         }
         Ok(())
     }
 
+    /// Zapise souvisly beh bloku `run` do novych bloku a teprve pak
+    /// prepoji extenty. Poradi je dulezite: kdyz alokace nebo zapis selze,
+    /// stara data zustanou namapovana (zadna dira) a nove alokovane bloky
+    /// se hned vrati.
     fn write_run(&mut self, oid: u64, run: &[(u64, Vec<u8>)]) -> Result<()> {
         let a = run[0].0;
         let n = run.len() as u64;
-        self.punch_range(oid, a, a + n)?;
         let mut goal = if a > 0 {
             self.goal_after(oid, a - 1)?
         } else {
             None
         };
+        let txg = self.s.txg;
+        // (logicky offset v behu, fyzicky zacatek, pocet)
+        let mut pieces: Vec<(u64, u64, u64)> = Vec::new();
         let mut done = 0u64;
         while done < n {
-            let (start, got) = self.s.alloc_data(n - done, goal)?;
-            let piece = &run[done as usize..(done + got) as usize];
-            // Slozeni bloku do souvisleho bufferu po celych blocich (iterator
-            // po bajtech byl 3x pomalejsi nez memcpy).
-            let mut buf = Vec::with_capacity(piece.len() * BLOCK_SIZE);
-            for (_, b) in piece {
-                buf.extend_from_slice(b);
+            let r = self.s.alloc_data(n - done, goal).and_then(|(start, got)| {
+                pieces.push((done, start, got));
+                // Slozeni bloku do souvisleho bufferu po celych blocich
+                // (iterator po bajtech byl 3x pomalejsi nez memcpy).
+                let piece = &run[done as usize..(done + got) as usize];
+                let mut buf = Vec::with_capacity(piece.len() * BLOCK_SIZE);
+                for (_, b) in piece {
+                    buf.extend_from_slice(b);
+                }
+                self.s.dev.write_blocks(start, &buf).map(|()| (start, got))
+            });
+            match r {
+                Ok((start, got)) => {
+                    done += got;
+                    goal = Some(start + got);
+                }
+                Err(e) => {
+                    for &(_, start, got) in &pieces {
+                        self.s.space.free(start, got, txg, true);
+                    }
+                    return Err(e);
+                }
             }
-            self.s.dev.write_blocks(start, &buf)?;
-            let algo = self.s.algo;
+        }
+        self.punch_range(oid, a, a + n)?;
+        let algo = self.s.algo;
+        for (off0, start, got) in pieces {
+            let piece = &run[off0 as usize..(off0 + got) as usize];
             let csums: Vec<_> = piece.iter().map(|(_, b)| algo.sum(b)).collect();
-            let txg = self.s.txg;
             for (k, chunk) in csums.chunks(MAX_EXTENT as usize).enumerate() {
                 let off = k as u64 * MAX_EXTENT;
                 let e = Extent {
@@ -433,10 +466,8 @@ impl<D: BlockDevice> Fs<D> {
                     birth: txg,
                     csums: chunk.to_vec(),
                 };
-                self.put(Key::new(oid, item::EXTENT, a + done + off), e.encode())?;
+                self.put(Key::new(oid, item::EXTENT, a + off0 + off), e.encode())?;
             }
-            done += got;
-            goal = Some(start + got);
         }
         Ok(())
     }

@@ -24,7 +24,7 @@ cheap `fsync`) and **not waste space** (metadata overhead ~0.4 %).
 | Atomic commit, consistency after power loss at any moment | done | [Power loss](#what-happens-on-power-loss) |
 | Merkle tree: a 128-bit checksum in every pointer | done | [Checksums](#checksums-and-the-merkle-tree) |
 | Checksum choice XXH3-128 / BLAKE3 | done | [Checksums](#checksums-and-the-merkle-tree) |
-| Fallback by 1-3 generations when the newest state is damaged | done | [Generation fallback](#generation-fallback) |
+| Fallback by 1-3 generations when the newest state is damaged | done | [Generation fallback](#mount-and-generation-fallback) |
 | Fast `fsync` via an intent log (one write + flush) | done | [fsync and the intent log](#fsync-and-the-intent-log) |
 | Extents, delayed allocation, contiguous writes | done | [Writing data](#writing-data-delayed-allocation-and-extents) |
 | Allocation groups with space logs (no bitmap) | done | [Free space](#free-space-management) |
@@ -496,21 +496,67 @@ order (`tests/crash.rs`, tens of thousands of combinations).
 
 Assumption: after an acknowledged `flush` the device really has the data.
 Disks that lie about flush are covered by the
-[generation fallback](#generation-fallback).
+[generation fallback](#mount-and-generation-fallback).
 
-## Generation fallback
+## Mount and generation fallback
 
 Blocks freed by commit `g` are reused only in transaction
 `g + REUSE_DELAY` (4). The last 4 saved states therefore stay untouched on
 disk. The ring has 8 superblock slots.
 
-At mount the newest valid superblock is tried; when its state cannot be
-loaded (damaged tree root or space metadata), older ones are tried - at
-most 3 generations back (older ones may already be overwritten).
-`info().fallback` tells how many generations the system went back; the fsd
-service reports it as a warning. After a fallback the intent log is not
-replayed (it belongs to the newer state) and a commit with a new log epoch
-follows immediately.
+Mounting (`Store::open`) has three separate steps:
+
+1. **Selecting the generation.** Among all slots with a valid *header* (the
+   format family signature `OSFS\0\0` and its own checksum) the highest
+   generation is taken. An unreadable slot (I/O error) or a slot with a bad
+   checksum is just an invalid slot; the others are still tried.
+2. **Can this driver open it?**
+
+| Situation in the newest generation | Result |
+|---|---|
+| a different format version (also a newer `v4`) | `NOT_SUPPORTED` |
+| an unknown `incompat` bit | `NOT_SUPPORTED` |
+| an unknown `ro_compat` bit | **read-only** mount, the intent log is replayed only in memory, nothing is written to disk |
+| everything known | normal mount |
+
+   An older generation is never mounted silently: otherwise an older driver
+   would get write access to an old state and the next commit would throw
+   the newer data away.
+3. **Recovery after damage.** When the state of the selected generation
+   cannot be loaded because of **damage** (`CORRUPTED`: a bad checksum of the
+   root or space metadata, nonsensical values in the superblock), older ones
+   are tried - at most 3 generations back (older ones may already be
+   overwritten). `info().fallback` tells how many generations the system
+   went back; the fsd service reports it as a warning. Any other error (I/O,
+   out of memory) is returned immediately - a transient disk error must not
+   lead to falling back to an older state.
+
+After a fallback, the slots with a newer (damaged) generation are **zeroed
+before the first commit** - otherwise they would win at the next mount and
+point to blocks that were given to someone else in the meantime. After a
+fallback the intent log is not replayed (it belongs to the newer state) and
+a commit with a new log epoch follows immediately.
+
+### Devices without a durability guarantee
+
+`BlockDevice::durability()` says whether the device really stores data:
+
+| Value | Meaning | Mount |
+|---|---|---|
+| `Flush` | `flush` stores everything from the cache on the medium | writable |
+| `WriteThrough` | the device has no write cache | writable |
+| `None` | no or unknown guarantee | **read-only** (`info().read_only`, changes return `READ_ONLY`) |
+
+In fsd it comes from the disk driver through the block protocol operation
+`FEATURES` (bits `FLUSH`, `WRITE_THROUGH`, `DISCARD`, `READ_ONLY`).
+virtio-blk without the `VIRTIO_BLK_F_FLUSH` feature reports no guarantee and
+`FLUSH` returns `NOT_SUPPORTED` (it used to return success without doing
+anything - `fsync` would then lie). An older driver without `FEATURES` = no
+guarantee.
+
+⚠️ **Limitation:** a disk that lies about flush (confirms it but keeps the
+data in its cache) cannot be detected by the FS. Only the generation
+fallback and checksums help then - the last confirmed changes may be lost.
 
 ## fsync and the intent log
 
@@ -566,6 +612,24 @@ Data blocks referenced by a log batch are not reused until the commit, even
 when they were created in the same transaction (otherwise a later `fsync`
 would overwrite them). When the log grows over 2048 blocks, `fsync` does a
 commit instead.
+
+**Atomicity of `fsync`:** the list of pending changes is cleared only
+after a successful flush.
+
+- An error **before** the first log block is written (writing data, no space
+  for log blocks - they are allocated in advance) breaks nothing: the data
+  stays in the buffer and the next `fsync` tries again.
+- An error **while** writing the log or flushing = an uncertain state (part
+  of the batch may be on disk). The volume enters the error state: all
+  further changes and `fsync` return `IO_ERROR`, so nothing later confirms
+  as durable something that is not. Recovery = mount again (only complete
+  batches are replayed).
+
+**Writing data into new blocks** (`write_run`) first allocates and writes
+the new blocks and only then relinks the extents. When allocation or the
+write fails, the old data stays mapped (no hole after an overwrite), the new
+blocks are returned immediately and the unwritten data goes back to the
+buffer.
 
 ## Free space management
 
@@ -839,8 +903,9 @@ system returns them:
 | `NO_RESOURCES` | a directory entry with colliding names would outgrow `MAX_VALUE` |
 | `NO_SPACE` | a write or create would consume the commit reserve |
 | `CORRUPTED` | a block checksum does not match or a structure makes no sense; for data reads = a damaged block (other files remain readable) |
-| `IO_ERROR` | a device error; after a failed commit all further changes (mount again) |
-| `NOT_SUPPORTED` | unknown format version or algorithm; unknown protocol operation |
+| `IO_ERROR` | a device error; after a failed commit or a failed log write in `fsync` all further changes (mount again) |
+| `NOT_SUPPORTED` | unknown format version or algorithm, an unknown `incompat` bit in the newest generation, a node or extent with an unknown flag; unknown protocol operation |
+| `READ_ONLY` | a change on a volume mounted read-only (device without a durability guarantee, unknown `ro_compat` bit) |
 | `ACCESS_DENIED` | `SIMULATE_POWER_LOSS` without `debug` mode |
 
 ## Tests
@@ -851,6 +916,8 @@ system returns them:
 | `tests/features.rs` | contiguous writes, fsync + replay, generation fallback, snapshot deletion, defragmentation, TRIM, many AGs + BLAKE3, log condensing |
 | `tests/model.rs` | property test: random sequences (create, write, truncate, remove, move, commit, fsync, "crash", snapshots) against an in-memory model; fsck at the end |
 | `tests/crash.rs` | power loss during commit and fsync with a random subset of unwritten blocks |
+| `tests/errors.rs` | device errors: a failed data write loses no data and can be retried, an overwrite leaves no hole, nothing is confirmed after a failed flush |
+| `tests/mount.rs` | superblock selection: unreadable slot, transient error without fallback, unknown `incompat` and newer version = refusal, unknown `ro_compat` = read-only without writes, nonsensical values = reported fallback, zeroing newer slots, device without a durability guarantee |
 | `tests/objects.rs` | format v3: object record, names up to 1024 characters, text direction controls rejected, symbolic links (also through the intent log), file size limit and summary saturation, object generation |
 | `tests/perf.rs` | performance and overhead (run manually) |
 | init `tests/fs.rs` | 11 tests in the system through fsd and the real virtio-blk driver, including a file written on the host and a power-loss simulation |

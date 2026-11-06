@@ -5,8 +5,10 @@
 
 mod basic;
 mod crash;
+mod errors;
 mod features;
 mod model;
+mod mount;
 mod objects;
 mod perf;
 
