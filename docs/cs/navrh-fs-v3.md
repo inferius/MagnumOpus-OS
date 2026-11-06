@@ -80,6 +80,25 @@ Zásady (odsouhlasené):
   okamžitě, bez kopírování. Každý dataset má vlastní hranici vlastnictví
   bloků a vlastní deadlisty (model datasetů ZFS), takže zapisovatelné klony
   i nezávislé historie fungují.
+- **Kdo drží bloky naživu (klony).** Deadlist datasetu sám neurčí, kdy
+  je blok bezpečné vrátit alokátoru: ze snapshotu S mohou vzniknout dva
+  zapisovatelné klony, v prvním se přepíše soubor, S se smaže - a druhý klon
+  musí původní data číst dál. Pravidla (první verze, model ZFS):
+  - klon má **explicitní vazbu na původní snapshot** (`origin`); bloky
+    narozené do generace S patří S, klon vlastní jen bloky narozené po
+    vzniku klonu,
+  - přepsání bloku staršího než S v klonu jde do deadlistu klonu, ale
+    uvolnit ho smí až zpracování deadlistu S,
+  - **smazání S, na kterém závisí klon, se odloží:** S zmizí z pohledu
+    uživatele (je „skrytý“), ale drží bloky, dokud existuje poslední klon;
+    pak se smaže běžně (deadlisty po commitech, takže atomicky i při
+    výpadku),
+  - účtování místa: klon = jeho vlastní bloky, sdílené se počítají S;
+    přehled místa ukáže, kolik uvolní smazání klonu i S.
+  - Testy: výše uvedený scénář, totéž s výpadkem během mazání a fsck, který
+    kontroluje i účtování místa (součet vlastních + sdílených = obsazené).
+  - Obecnější počítadla pro každý blok (tabulka sdílení) jen pro okamžité
+    kopie souborů - pro celé stromy by byla zbytečně drahá.
 - **Převod adresáře na dataset** („udělat z této složky repozitář/trezor“):
   přesunou se položky stromu, data zůstanou na místě. U trezoru se data při
   převodu přešifrují (na pozadí, s průběhem).
@@ -103,9 +122,24 @@ Zásady (odsouhlasené):
 <figcaption>Historie je DAG commitů jako v gitu; pracovní stav je zapisovatelný klon.</figcaption>
 </figure>
 
-- **Commit** = snapshot datasetu + autor, zpráva, čas, rodiče. ID commitu
-  = hash (BLAKE3 nebo XXH3 podle svazku) ze součtu kořene, rodičů a
-  metadat - obsahově adresovaný DAG.
+- **Commit** = snapshot datasetu + autor, zpráva, čas, rodiče.
+- **Dvě identity, oddělené:**
+  - **fyzický součet kořene** (součet v ukazateli): lokální kontrola
+    integrity a rychlé přeskočení sdílených uzlů při diff. Není přenositelný
+    - uzly obsahují čísla bloků, takže stejný logický strom má na jiném
+    svazku jiný součet;
+  - **logické ID commitu**: BLAKE3 z verzované jednoznačné reprezentace
+    logického stromu (jména, druhy, obsah, metadata) + rodičů a metadat
+    commitu - obsahově adresovaný DAG nezávislý na rozmístění bloků. Slouží
+    pro send/receive (navázání, deduplikace), sync (společný předek) a git
+    vrstvu.
+  - **Cena:** běžné commity (každých pár sekund) logické ID nepočítají; jen
+    verzované commity. Počítá se přírůstkově: každý adresář drží svůj
+    logický hash, změna přepočte jen cestu ke kořeni a obsah změněných
+    souborů (BLAKE3 ~1-2 GB/s na jádro; s deduplikací přes BLAKE3 zadarmo -
+    součet XXH3 na identitu nestačí, kolizi jde vyrobit).
+  - **Akceptační test:** export a import na svazek s jiným rozmístěním
+    bloků zachová ID commitu.
 - **Větve a tagy** = pojmenované reference na commit. **Pracovní stav** =
   zapisovatelný klon posledního commitu; `checkout` je okamžitý.
 - **Diff dvou verzí:** souběžný průchod oběma stromy; fyzicky stejný uzel
@@ -114,9 +148,16 @@ Zásady (odsouhlasené):
   je stabilní, takže přesun se pozná přesně, ne heuristikou jako v gitu).
 - **Merge:** třícestný na úrovni souborů a adresářů (společný předek z DAG);
   textové soubory po řádcích, konflikty jako soubory s označením.
-- **Žurnál změn** datasetu: uspořádaný proud (objekt, operace, čas, commit),
-  s volitelnou retencí - pro sledování změn, indexování, synchronizaci a
-  `status` bez procházení disku.
+- **Žurnál změn** datasetu: uspořádaný proud (pořadové číslo, objekt,
+  operace, aplikace, čas, commit) - pro sledování změn, indexování,
+  synchronizaci a `status` bez procházení disku.
+  - **Trvalé pořadové číslo** v rámci datasetu (u64, nikdy se neopakuje).
+  - Záznam se **zveřejní až po potvrzení změny** (commit nebo fsync) -
+    odběratel nikdy neuvidí změnu, která po výpadku zmizí.
+  - **Retence** (počet dní nebo místo): starší záznamy se zahodí. Odběr je
+    „bez ztrát“ jen v rámci retence: kdo žádá číslo starší než nejstarší
+    uložené, dostane **`JOURNAL_GAP`** a obnoví si stav z rozdílu snapshotů
+    (levné díky diff podle generací) - nikdy tiché vynechání.
 - **Vrstva pro git** (služba nad FS): (1) ID objektů gitu (SHA-1 a SHA-256)
   se počítají líně a ukládají jako rozšířený atribut; import a export
   repozitáře; (2) push/pull přes síť, až bude TCP/IP. Pro nástroje adaptér
@@ -272,8 +313,9 @@ spoléhají.
 - **Sledování změn** (fáze 2): aplikace se přihlásí k odběru adresáře nebo
   datasetu a dostává události (vytvořeno, změněno, smazáno, přesunuto)
   přes kanál. Zdrojem je žurnál změn, takže události **se neztratí** ani
-  při přetečení fronty: aplikace se doptá „od verze N“ (na rozdíl od
-  inotify, kde přetečení = ztráta událostí).
+  při přetečení fronty: aplikace se doptá „od čísla N“ (na rozdíl od
+  inotify, kde přetečení = ztráta událostí). Po vypršení retence dostane
+  `JOURNAL_GAP` a přečte si stav znovu (viz žurnál změn).
 - **Mapování souborů do paměti** (fáze 5 + jádro): objekt paměti (VMO)
   napojený na soubor, stránky se načítají při přístupu a sdílí se jedna
   cache stránek pro FS i mapování. Potřebují ho spouštění programů (PE/ELF)
@@ -332,6 +374,14 @@ spoléhají.
   nesahá. Zápis do nich spustí totéž okamžitě.
 - Aplikace, které to dělají legitimně (archivátory, šifrování, export
   videa), jde po potvrzení vyjmout.
+- **Bod před útokem je důležitější než snapshot při detekci** (ten
+  zachytí už stav incidentu). Proto krátkodobé automatické snapshoty domova
+  (např. každých 5 minut, drží se 1 hodinu - copy-on-write je levný)
+  a obnova z posledního snapshotu před prvním podezřelým zápisem.
+- **Výběrové vracení:** vrátí se jen změny podezřelé aplikace (žurnál ví,
+  kdo co změnil); změny jiných aplikací ve stejném datasetu zůstanou. Když
+  do stejného souboru mezitím legitimně zapisovala jiná aplikace, zůstanou
+  obě verze a uživatel vybere.
 
 ### Další pojistky
 
@@ -530,6 +580,27 @@ firewall je přirozeně per aplikace.
   nese oid + generaci a práva, takže otevřený soubor přežije přejmenování
   a operace nevyhodnocuje cestu znovu. Adresář je capability: kdo má jeho
   handle, smí jen pod něj.
+- **Životnost otevřeného souboru:**
+  - handle drží objekt naživu: po **smazání posledního jména** nebo
+    **atomickém nahrazení** se objekt stane sirotkem (zapsaný v trvalém
+    seznamu sirotků, jako orphan list v ext4), kdo ho má otevřený, čte
+    a zapisuje dál; s posledním handlem zmizí. Po pádu se sirotci uklidí
+    při připojení;
+  - **restart služby** handly zneplatní (kanály zaniknou), klient otevře
+    znovu podle cesty; trvalé handly přes restart možná později;
+  - test se dvěma klienty: A otevře `report`, B ho atomicky nahradí, A ze
+    svého handlu dál čte původní obsah, nové `OPEN` dostane nový objekt.
+- **Vrstva NT - dvě oddělené věci:**
+  - **sdílecí režim** se kontroluje při otevření (požadovaný přístup proti
+    `FILE_SHARE_READ/WRITE/DELETE` všech otevřených handlů);
+    `FILE_SHARE_DELETE` rozhoduje i o přejmenování a smazání otevřeného
+    souboru;
+  - **zámky rozsahu** (`LockFileEx`) mají vlastní pravidla překryvů; zápis
+    přes mapovaný pohled je nekontroluje a mapovaný pohled blokuje zkrácení
+    souboru (`STATUS_USER_MAPPED_FILE`).
+- **Symlinky a capability adresáře:** procházení uvnitř handlu adresáře
+  nikdy neuteče z uděleného podstromu (jako `RESOLVE_BENEATH` v Linuxu):
+  absolutní cíl nebo `..` nad kořen capability = `ACCESS_DENIED`.
 - **Nahrazení přejmenováním** (atomické uložení), `O_EXCL` vytvoření.
 - **Víc klientů:** každý klient vlastní kanál (`OPEN_SESSION`), čísla
   požadavků, stránkovaný výpis adresáře (kurzor), časové limity; služba

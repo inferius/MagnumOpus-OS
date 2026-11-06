@@ -81,6 +81,26 @@ Principles (agreed):
   instant, without copying. Each dataset has its own block ownership
   boundary and its own deadlists (the ZFS dataset model), so writable
   clones and independent histories work.
+- **Who keeps blocks alive (clones).** A dataset's own deadlist alone does
+  not decide when a block may be returned to the allocator: two writable
+  clones can come from snapshot S, a file is overwritten in the first one,
+  S is deleted - and the second clone must still read the original data.
+  Rules (first version, the ZFS model):
+  - a clone has an **explicit link to its origin snapshot** (`origin`);
+    blocks born up to the generation of S belong to S, the clone owns only
+    blocks born after it was created,
+  - overwriting a block older than S in a clone puts it on the clone's
+    deadlist, but only processing S's deadlist may free it,
+  - **deleting S while a clone depends on it is deferred:** S disappears
+    from the user's view ("hidden") but keeps its blocks until the last
+    clone is gone; then it is deleted normally (deadlists in commits, so
+    atomically even on power loss),
+  - space accounting: a clone = its own blocks, shared ones count to S; the
+    space overview shows how much deleting the clone and S frees.
+  - Tests: the scenario above, the same with power loss during deletion,
+    and fsck checking space accounting too (own + shared = used).
+  - More general per-block counters (the sharing table) only for instant
+    file copies - for whole trees they would be needlessly expensive.
 - **Converting a directory into a dataset** ("make this folder a
   repository/vault"): tree items move, data stays in place. For a vault the
   data is re-encrypted during conversion (in the background, with progress).
@@ -104,9 +124,25 @@ Principles (agreed):
 <figcaption>History is a DAG of commits like in git; the working state is a writable clone.</figcaption>
 </figure>
 
-- **Commit** = a dataset snapshot + author, message, time, parents. The
-  commit ID = hash (BLAKE3 or XXH3 depending on the volume) of the root
-  checksum, parents and metadata - a content-addressed DAG.
+- **Commit** = a dataset snapshot + author, message, time, parents.
+- **Two separate identities:**
+  - the **physical root checksum** (the checksum in the pointer): local
+    integrity checks and quickly skipping shared nodes in diff. Not
+    portable - nodes contain block numbers, so the same logical tree has a
+    different checksum on another volume;
+  - the **logical commit ID**: BLAKE3 of a versioned unambiguous
+    representation of the logical tree (names, kinds, content, metadata) +
+    parents and commit metadata - a content-addressed DAG independent of
+    block placement. Used for send/receive (resuming, deduplication), sync
+    (common ancestor) and the git layer.
+  - **Cost:** ordinary commits (every few seconds) do not compute the
+    logical ID; only versioned commits do. It is incremental: every
+    directory keeps its logical hash, a change recomputes only the path to
+    the root and the content of changed files (BLAKE3 ~1-2 GB/s per core;
+    free with BLAKE3 deduplication - an XXH3 checksum is not enough for
+    identity, a collision can be crafted).
+  - **Acceptance test:** export and import onto a volume with a different
+    block placement keeps the commit ID.
 - **Branches and tags** = named references to a commit. **Working state** =
   a writable clone of the last commit; `checkout` is instant.
 - **Diff of two versions:** a parallel walk of both trees; a physically
@@ -116,9 +152,19 @@ Principles (agreed):
   heuristically as in git).
 - **Merge:** three-way at the file and directory level (common ancestor
   from the DAG); text files line by line, conflicts as marked files.
-- **Change journal** of a dataset: an ordered stream (object, operation,
-  time, commit) with optional retention - for watching changes, indexing,
-  synchronization and `status` without walking the disk.
+- **Change journal** of a dataset: an ordered stream (sequence number,
+  object, operation, application, time, commit) - for watching changes,
+  indexing, synchronization and `status` without walking the disk.
+  - A **persistent sequence number** within the dataset (u64, never
+    repeats).
+  - A record is **published only after the change is confirmed** (commit or
+    fsync) - a subscriber never sees a change that disappears after power
+    loss.
+  - **Retention** (days or space): older records are dropped. A
+    subscription is "lossless" only within retention: whoever asks for a
+    number older than the oldest stored gets **`JOURNAL_GAP`** and rebuilds
+    its state from a snapshot diff (cheap thanks to generation-based diff) -
+    never a silent skip.
 - **Git layer** (a service on top of the FS): (1) git object IDs (SHA-1 and
   SHA-256) are computed lazily and stored as an extended attribute;
   repository import and export; (2) push/pull over the network once there
@@ -280,8 +326,9 @@ Principles (agreed):
 - **Change watching** (phase 2): an application subscribes to a directory
   or dataset and receives events (created, changed, removed, moved) over a
   channel. The source is the change journal, so events are **never lost**,
-  not even on queue overflow: the application asks "since version N"
-  (unlike inotify, where overflow = lost events).
+  not even on queue overflow: the application asks "since number N"
+  (unlike inotify, where overflow = lost events). After retention expires
+  it gets `JOURNAL_GAP` and reads the state again (see the change journal).
 - **Memory-mapped files** (phase 5 + kernel): a memory object (VMO) backed
   by a file, pages are loaded on access and one page cache is shared by the
   FS and mappings. Program loading (PE/ELF) and databases need it. It is
@@ -342,6 +389,16 @@ Principles (agreed):
   touches. A write to them triggers the same immediately.
 - Applications that do this legitimately (archivers, encryption, video
   export) can be exempted after confirmation.
+- **The point before the attack matters more than the snapshot at
+  detection** (that one already captures the incident). Hence short-term
+  automatic snapshots of the home (e.g. every 5 minutes, kept for 1 hour -
+  copy-on-write is cheap) and restoring from the last snapshot before the
+  first suspicious write.
+- **Selective rollback:** only the suspect application's changes are
+  rolled back (the journal knows who changed what); changes of other
+  applications in the same dataset stay. When another application
+  legitimately wrote to the same file in the meantime, both versions stay
+  and the user chooses.
 
 ### More safeguards
 
@@ -555,6 +612,28 @@ an HTTP client. Applications get network access only through a capability
   the handle carries the oid + generation and rights, so an open file
   survives a rename and operations do not re-evaluate the path. A directory
   is a capability: whoever holds its handle may only go below it.
+- **Lifetime of an open file:**
+  - a handle keeps the object alive: after **removing its last name** or an
+    **atomic replace** the object becomes an orphan (recorded in a
+    persistent orphan list, like the ext4 orphan list); whoever has it open
+    keeps reading and writing; it disappears with the last handle. After a
+    crash orphans are cleaned up at mount;
+  - a **service restart** invalidates handles (the channels die), the
+    client reopens by path; durable handles across restarts maybe later;
+  - a test with two clients: A opens `report`, B atomically replaces it, A
+    keeps reading the original content from its handle, a new `OPEN` gets
+    the new object.
+- **NT layer - two separate things:**
+  - the **share mode** is checked at open (the requested access against
+    `FILE_SHARE_READ/WRITE/DELETE` of all open handles);
+    `FILE_SHARE_DELETE` also decides renaming and deleting an open file;
+  - **range locks** (`LockFileEx`) have their own overlap rules; writes
+    through a mapped view do not check them and a mapped view blocks
+    truncation (`STATUS_USER_MAPPED_FILE`).
+- **Symlinks and directory capabilities:** walking inside a directory
+  handle never escapes the granted subtree (like `RESOLVE_BENEATH` in
+  Linux): an absolute target or `..` above the capability root =
+  `ACCESS_DENIED`.
 - **Replace by rename** (atomic save), `O_EXCL` creation.
 - **Multiple clients:** each client has its own channel (`OPEN_SESSION`),
   request IDs, paged directory listing (cursor), timeouts; the service never
