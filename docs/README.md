@@ -10,7 +10,9 @@
 | [hlasky.md](cs/hlasky.md) | [messages.md](en/messages.md) | hlášky v logu a co znamenají / log messages and their meaning |
 | [libos.md](cs/libos.md) | [libos.md](en/libos.md) | knihovna pro programy / program library |
 | [souborovy-system.md](cs/souborovy-system.md) | [file-system.md](en/file-system.md) | souborový systém: formát, algoritmy, služba fsd, protokol / file system: format, algorithms, fsd service, protocol |
-| [navrh-fs-v3.md](cs/navrh-fs-v3.md) | [fs-v3-design.md](en/fs-v3-design.md) | návrh FS v3 k odsouhlasení / FS v3 design for approval |
+| [fs-verze.md](cs/fs-verze.md) | [fs-versions.md](en/fs-versions.md) | verze formátu FS: co se změnilo a proč / FS format versions: what changed and why |
+| [navrh-fs-v3.md](cs/navrh-fs-v3.md) | [fs-v3-design.md](en/fs-v3-design.md) | návrh FS v3 (odsouhlasený, zavádí se po fázích) / FS v3 design (agreed, introduced in phases) |
+| [fs-v2.md](cs/fs-v2.md) | [fs-v2.md](en/fs-v2.md) | archiv: formát FS v2 / archive: FS format v2 |
 
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).

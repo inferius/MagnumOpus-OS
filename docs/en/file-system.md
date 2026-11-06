@@ -9,6 +9,11 @@ Design goals: **never lose consistency** (not even on power loss or a lying
 disk), **detect every data corruption**, **be fast** (contiguous writes,
 cheap `fsync`) and **not waste space** (metadata overhead ~0.4 %).
 
+> This description is for format v3. What changed from v2 and why is
+> summarised in [Format versions](fs-versions.md) and in the "Change from
+> v2" boxes of individual chapters; the old description is in the
+> [v2 archive](fs-v2.md).
+>
 > Format v3 is being introduced in phases according to the [FS v3
 > design](fs-v3-design.md). The first part of phase 1 is done: 16 KiB nodes,
 > v3 pointer, superblock and object record, names up to 1024 characters,
@@ -113,6 +118,8 @@ assert!(report.problems.is_empty());
 
 ### Superblock
 
+> **Change from v2:** added the volume UUID, feature flags (compat/ro_compat/incompat) and volume devices; pointers are 40 B. **Why:** the format can be extended without a new version and an older driver safely recognises what it cannot handle. ([all changes](fs-versions.md#transition-v2---v3))
+
 The superblock has its **own** XXH3-128 checksum in the last 16 bytes of the
 block (it must be verifiable before the chosen algorithm is known). The
 valid one is the one with the highest generation whose state can be loaded.
@@ -207,6 +214,8 @@ implementation.
 
 ### Pointer (`BlockPtr`, 40 B)
 
+> **Change from v2:** from 32 B to 40 B: device number (16 bits), length in blocks and flags. **Why:** a node has 4 blocks, a volume may span several disks and compression, encryption and shared blocks are visible right on the pointer. ([all changes](fs-versions.md#transition-v2---v3))
+
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 8 | address: block number (bits 0-47) \| volume device (bits 48-63) |
@@ -240,6 +249,8 @@ content).
 
 ### Object record (inode, 128 B)
 
+> **Change from v2:** from 64 B to 128 B: creation and access time, generation, permissions, owner, extended attributes, flags. **Why:** oid + generation is a stable identity for handles; permissions and attributes will not need another format change. ([all changes](fs-versions.md#transition-v2---v3))
+
 | Offset | Field | Meaning |
 |---|---|---|
 | 0 | kind u8 | 1 = file, 2 = directory, 3 = symbolic link |
@@ -267,6 +278,8 @@ against the generation. A record with an unknown kind or a size above
 2^63-1 is `CORRUPTED`.
 
 ### Tree node (16 KiB)
+
+> **Change from v2:** from 4 KiB to 16 KiB and the level is stored and checked. **Why:** a name of up to 4 KiB and an extent with 496 checksums fit into an entry, the tree is shallower and a damaged pointer cannot create a loop. ([all changes](fs-versions.md#transition-v2---v3))
 
 A node takes 4 contiguous blocks (`NODE_BLOCKS`) and is allocated and
 written as a whole.
@@ -301,6 +314,8 @@ the commit.
   are merged.
 
 ## File names
+
+> **Change from v2:** from 255 B to 1024 characters (4 KiB UTF-8), text direction controls forbidden too. **Why:** long names from other systems and protection against a spoofed extension. ([all changes](fs-versions.md#transition-v2---v3))
 
 - Stored as the user entered them (in Unicode NFC) - letter case is kept.
 - Compared **case-insensitively** across the whole system: the key =
@@ -338,6 +353,8 @@ collision), `create` returns `NO_RESOURCES`.
 
 ## Symbolic links
 
+> **Change from v2:** a new object kind. **Why:** git repositories and Linux sources need them. ([all changes](fs-versions.md#transition-v2---v3))
+
 A symbolic link is an object of kind 3 whose content is **the target as
 text** (1-4096 bytes of UTF-8, no NUL; `SYMLINK_MAX`). The target does not
 have to exist and may be relative or absolute. It is stored in a `SYMLINK`
@@ -362,6 +379,8 @@ fs.remove("/project/READ")?;
   `LIST`); creating one through the service comes with protocol v2.
 
 ## Format limits
+
+> **Change from v2:** a new chapter: a file is at most 2^63-1 B, checked arithmetic, saturating summaries, an extent of 496 blocks. **Why:** sizes could overflow before. ([all changes](fs-versions.md#transition-v2---v3))
 
 | What | Limit | Constant |
 |---|---|---|
@@ -395,6 +414,8 @@ println!("{} B, {} files, {} subdirectories", st.tree_bytes, st.tree_files, st.t
 ```
 
 ## Writing data: delayed allocation and extents
+
+> **Change from v2:** the result of `write` means "accepted", not "durable"; an overwrite writes new blocks first and then relinks the extents; blocks are assembled in whole pieces. **Why:** a write error must not lose data or leave a hole, and the client must know what was accepted; writing is 2x faster. ([all changes](fs-versions.md#transition-v2---v3))
 
 1. `write` puts data into a **buffer in memory** (at most 16 MiB, then it
    is written earlier). A partially overwritten block is read first.
@@ -507,6 +528,8 @@ Disks that lie about flush are covered by the
 
 ## Mount and generation fallback
 
+> **Change from v2:** first selecting the generation by header, then the compatibility decision; uncertain recovery (unreadable slot) read-only; fallback only on damage; devices without flush read-only. **Why:** before, an older driver or a transient error could lead to writing on top of an older generation and losing newer data. ([all changes](fs-versions.md#transition-v2---v3))
+
 Blocks freed by commit `g` are reused only in transaction
 `g + REUSE_DELAY` (4). The last 4 saved states therefore stay untouched on
 disk. The ring has 8 superblock slots.
@@ -573,6 +596,8 @@ data in its cache) cannot be detected by the FS. Only the generation
 fallback and checksums help then - the last confirmed changes may be lost.
 
 ## fsync and the intent log
+
+> **Change from v2:** pending changes are cleared only after flush, log blocks are allocated in advance, a log read error is not the end of the chain, a new record 7 (symlink) and the generation on create. **Why:** a confirmed `fsync` must not be lost and nothing may be confirmed falsely. ([all changes](fs-versions.md#transition-v2---v3))
 
 A commit rewrites many blocks and does two flushes - expensive for every
 editor save or database transaction. The intent log (like the ZIL in ZFS
@@ -703,6 +728,8 @@ For each group:
 
 ### Reserve and running out of space
 
+> **Change from v2:** a dirty node counts as 4 blocks, only space for whole nodes counts, space-freeing operations may use half of the reserve. **Why:** a commit looped or failed on a fragmented disk and a snapshot could not be deleted on a full disk. ([all changes](fs-versions.md#transition-v2---v3))
+
 Part of the space (1/128 of the volume, 24 blocks up to 256 MiB) is
 reserved for commits (metadata, logs). An ordinary write that would consume
 it returns `NO_SPACE` **immediately** - not at commit time. If blocks are
@@ -810,6 +837,8 @@ the same principle git is built on.
 
 ## Values from disk and all-or-nothing operations
 
+> **Change from v2:** a new chapter. **Why:** a software bug with a correct checksum could damage the allocator (double free) or make a walk loop. ([all changes](fs-versions.md#transition-v2---v3))
+
 The checksum in a pointer protects against media damage, but not against a
 software bug that writes a nonsensical value with a correct checksum. So
 values from disk are checked when used as well:
@@ -840,6 +869,8 @@ the dirty tree before every operation; it comes with application
 transactions (phase 5).
 
 ## Consistency check and scrub
+
+> **Change from v2:** checks the stored state also on a read-only mount, fixed memory (bitmaps), a limited number of reports, checks of object kinds and link targets. **Why:** during uncertain recovery the state must be checked without writing, and a large or badly damaged volume must not overwhelm the check. ([all changes](fs-versions.md#transition-v2---v3))
 
 `check(scrub)` checks the **stored state** (the last commit on disk):
 
@@ -907,6 +938,8 @@ at a time). Protocol v2 with shared memory and request queues solves that.
 
 ## The fsd service
 
+> **Change from v2:** an error sending a reply does not end the service, `CHECK` only in `debug` mode, the reason for read-only mode is reported, signature `v3`. **Why:** a crash of the service would leave the volume without a final commit. ([all changes](fs-versions.md#transition-v2---v3))
+
 `user/fsd` keeps one mounted volume and serves a client over a channel.
 
 - **Start:** at boot, init reads blocks 1-8 of all disks and starts the
@@ -931,6 +964,8 @@ at a time). Protocol v2 with shared memory and request queues solves that.
 The service's messages are described in [messages.md](messages.md#fsd-service-and-file-system).
 
 ## The fsproto protocol
+
+> **Change from v2:** new operations `LIST_PAGE` and `SNAP_LIST_PAGE` (paged listing), `CHECK` returns the generation and the total count, kind 3 = symbolic link. **Why:** a large directory did not fit into one message and the service ended because of it. ([all changes](fs-versions.md#transition-v2---v3))
 
 Messages over a channel (version 1, synchronous, path-based). Request: `op`
 u32 and parameters in order; reply: `status` i32 (0 or error code),

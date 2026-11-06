@@ -9,6 +9,10 @@ Cíle návrhu: **nikdy neztratit konzistenci** (ani při výpadku proudu nebo
 lhajícím disku), **odhalit každé poškození dat**, **být rychlý** (souvislé
 zápisy, levný `fsync`) a **nezabírat místo zbytečně** (režie metadat ~0,4 %).
 
+> Popis platí pro formát v3. Co se změnilo proti v2 a proč, shrnují
+> [Verze formátu](fs-verze.md) a rámečky „Změna proti v2“ u jednotlivých
+> kapitol; starý popis je v [archivu v2](fs-v2.md).
+>
 > Formát v3 se zavádí po fázích podle [návrhu FS v3](navrh-fs-v3.md). Hotová
 > je první část fáze 1: uzly 16 KiB, ukazatel, superblok a záznam objektu v3,
 > jména do 1024 znaků, symbolické odkazy a limit velikosti souboru. Svazek
@@ -112,6 +116,8 @@ assert!(report.problems.is_empty());
 
 ### Superblok
 
+> **Změna proti v2:** přibylo UUID svazku, příznaky vlastností (compat/ro_compat/incompat) a zařízení svazku; ukazatele mají 40 B. **Proč:** formát jde rozšiřovat bez nové verze a starší ovladač bezpečně pozná, co neumí. ([všechny změny](fs-verze.md#přechod-v2---v3))
+
 Superblok má **vlastní** kontrolní součet XXH3-128 v posledních 16 bajtech
 bloku (musí jít ověřit dřív, než je známý zvolený algoritmus). Platný je ten
 s nejvyšší generací, jehož stav jde načíst.
@@ -204,6 +210,8 @@ implementací.
 
 ### Ukazatel (`BlockPtr`, 40 B)
 
+> **Změna proti v2:** z 32 B na 40 B: číslo zařízení (16 bitů), délka v blocích a příznaky. **Proč:** uzel má 4 bloky, svazek může mít víc disků a komprese, šifrování a sdílené bloky se poznají přímo na ukazateli. ([všechny změny](fs-verze.md#přechod-v2---v3))
+
 | Offset | Velikost | Pole |
 |---|---|---|
 | 0 | 8 | adresa: číslo bloku (bity 0-47) \| zařízení svazku (bity 48-63) |
@@ -238,6 +246,8 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 
 ### Záznam objektu (inode, 128 B)
 
+> **Změna proti v2:** z 64 B na 128 B: čas vytvoření a přístupu, generace, oprávnění, vlastník, rozšířené atributy, příznaky. **Proč:** oid + generace je stabilní identita pro handly; pro oprávnění a atributy už nebude potřeba měnit formát. ([všechny změny](fs-verze.md#přechod-v2---v3))
+
 | Offset | Pole | Význam |
 |---|---|---|
 | 0 | kind u8 | 1 = soubor, 2 = adresář, 3 = symbolický odkaz |
@@ -264,6 +274,8 @@ znovu, ale handly protokolu v2 se podle generace přesto ověří. Záznam
 s neznámým druhem nebo velikostí nad 2^63-1 je `CORRUPTED`.
 
 ### Uzel stromu (16 KiB)
+
+> **Změna proti v2:** z 4 KiB na 16 KiB a úroveň se ukládá a kontroluje. **Proč:** jméno do 4 KiB i extent s 496 součty se vejdou do položky, strom je mělčí a poškozený ukazatel nevytvoří smyčku. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 Uzel zabírá 4 souvislé bloky (`NODE_BLOCKS`), alokuje se a zapisuje vcelku.
 
@@ -296,6 +308,8 @@ rozloží do souvislých zápisů na konci commitu.
   sloučí.
 
 ## Jména souborů
+
+> **Změna proti v2:** z 255 B na 1024 znaků (4 KiB UTF-8), zakázané i řídicí znaky směru textu. **Proč:** dlouhá jména z jiných systémů a ochrana proti podvržené příponě. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 - Uloží se tak, jak je uživatel zadal (v Unicode NFC) - velikost písmen
   zůstává.
@@ -335,6 +349,8 @@ FNV hashe), `create` vrátí `NO_RESOURCES`.
 
 ## Symbolické odkazy
 
+> **Změna proti v2:** nový druh objektu. **Proč:** potřebují je git repozitáře a zdrojáky z Linuxu. ([všechny změny](fs-verze.md#přechod-v2---v3))
+
 Symbolický odkaz je objekt druhu 3, jehož obsah je **cíl jako text**
 (1-4096 bajtů UTF-8, bez NUL; `SYMLINK_MAX`). Cíl nemusí existovat a může
 být relativní i absolutní. Leží v položce `SYMLINK`, velikost objektu =
@@ -358,6 +374,8 @@ fs.remove("/projekt/CTIME")?;
   `LIST`); vytváření přes službu přijde s protokolem v2.
 
 ## Limity formátu
+
+> **Změna proti v2:** nová kapitola: soubor nejvýš 2^63-1 B, kontrolovaná aritmetika, saturující souhrny, extent 496 bloků. **Proč:** dřív mohly velikosti přetéct. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 | Co | Limit | Konstanta |
 |---|---|---|
@@ -390,6 +408,8 @@ println!("{} B, {} souborů, {} podadresářů", st.tree_bytes, st.tree_files, s
 ```
 
 ## Zápis dat: odložená alokace a extenty
+
+> **Změna proti v2:** výsledek `write` znamená „přijato“, ne „trvalé“; přepsání nejdřív zapíše nové bloky a pak přepojí extenty; skládání bloků po celých kusech. **Proč:** chyba zápisu nesmí ztratit data ani nechat díru a klient musí vědět, co bylo přijato; zápis je 2× rychlejší. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 1. `write` zapíše data do **bufferu v paměti** (nejvýš 16 MiB, pak se
    zapíší dřív). Částečně přepsaný blok se nejdřív načte.
@@ -500,6 +520,8 @@ o flush lžou, pokrývá [návrat o generaci](#připojení-a-návrat-o-generaci)
 
 ## Připojení a návrat o generaci
 
+> **Změna proti v2:** nejdřív výběr generace podle hlavičky, pak rozhodnutí o kompatibilitě; nejistá obnova (nečitelný slot) jen pro čtení; návrat jen při poškození; zařízení bez flush jen pro čtení. **Proč:** dřív mohl starší ovladač nebo přechodná chyba vést k zápisu nad starší generací a ztrátě novějších dat. ([všechny změny](fs-verze.md#přechod-v2---v3))
+
 Bloky uvolněné commitem `g` se znovu použijí až v transakci
 `g + REUSE_DELAY` (4). Posledních 4 uložených stavů tak zůstává na disku
 nedotčených. Kruh má 8 slotů superbloku.
@@ -563,6 +585,8 @@ v mezipaměti), FS nepozná. Proti tomu je jen návrat o generaci a kontrolní
 součty - poslední potvrzené změny se pak mohou ztratit.
 
 ## fsync a intent log
+
+> **Změna proti v2:** čekající změny se mažou až po flush, bloky logu se alokují předem, chyba čtení logu není konec řetězu, nový záznam 7 (symlink) a generace u vytvoření. **Proč:** potvrzený `fsync` se nesmí ztratit ani nic nepotvrdit falešně. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 Commit přepisuje mnoho bloků a dělá dva flush - pro každé uložení editoru
 nebo transakci databáze je to drahé. Intent log (jako ZIL v ZFS nebo log
@@ -686,6 +710,8 @@ obřích disků větší, aby skupin bylo nejvýš ~10 800). Pro každou skupinu
 
 ### Rezerva a nedostatek místa
 
+> **Změna proti v2:** rozpracovaný uzel se počítá jako 4 bloky, počítá se jen místo pro celé uzly, operace uvolňující místo smí do poloviny rezervy. **Proč:** commit se na rozdrobeném disku zacyklil nebo selhal a na plném disku nešel smazat snapshot. ([všechny změny](fs-verze.md#přechod-v2---v3))
+
 Část místa (1/128 svazku, 24 bloků až 256 MiB) je rezervovaná pro commit
 (metadata, logy). Běžný zápis, který by ji spotřeboval, vrátí `NO_SPACE`
 **hned** - ne až při commitu. Pokud čekají bloky na odložené uvolnění,
@@ -788,6 +814,8 @@ Merkleův strom - stejný princip, na kterém stojí git.
 
 ## Hodnoty z disku a operace „vše, nebo nic“
 
+> **Změna proti v2:** nová kapitola. **Proč:** chyba softwaru se správným součtem mohla poškodit alokátor (dvojí uvolnění) nebo zacyklit procházení. ([všechny změny](fs-verze.md#přechod-v2---v3))
+
 Součet v ukazateli chrání před poškozením média, ale ne před chybou
 softwaru, která zapíše nesmyslnou hodnotu se správným součtem. Proto se
 hodnoty z disku kontrolují i při použití:
@@ -816,6 +844,8 @@ rozpracovaného stromu před každou operací; přijde s transakcemi pro
 aplikace (fáze 5).
 
 ## Kontrola konzistence a scrub
+
+> **Změna proti v2:** kontroluje uložený stav i při připojení jen pro čtení, pevná paměť (bitové mapy), omezený počet hlášení, kontrola druhů objektů a cílů odkazů. **Proč:** při nejisté obnově je potřeba zjistit stav bez zápisu a velký nebo hodně poškozený svazek nesmí kontrolu zahltit. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 `check(scrub)` kontroluje **uložený stav** (poslední commit na disku):
 
@@ -883,6 +913,8 @@ pamětí a frontami požadavků.
 
 ## Služba fsd
 
+> **Změna proti v2:** chyba odeslání odpovědi službu neukončí, `CHECK` jen v režimu `debug`, hlášení důvodu režimu jen pro čtení, podpis `v3`. **Proč:** pád služby by nechal svazek bez závěrečného commitu. ([všechny změny](fs-verze.md#přechod-v2---v3))
+
 `user/fsd` drží jeden připojený svazek a obsluhuje klienta přes kanál.
 
 - **Start:** init při startu přečte bloky 1-8 všech disků a službu spustí
@@ -906,6 +938,8 @@ pamětí a frontami požadavků.
 Hlášky služby popisuje [hlasky.md](hlasky.md#služba-fsd-a-souborový-systém).
 
 ## Protokol fsproto
+
+> **Změna proti v2:** nové operace `LIST_PAGE` a `SNAP_LIST_PAGE` (výpis po stránkách), `CHECK` vrací generaci a celkový počet, druh 3 = symbolický odkaz. **Proč:** velký adresář se nevešel do jedné zprávy a služba kvůli tomu končila. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 Zprávy po kanálu (verze 1, synchronní, cestami). Požadavek: `op` u32 a
 parametry v pořadí; odpověď: `status` i32 (0 nebo kód chyby), rezerva u32,

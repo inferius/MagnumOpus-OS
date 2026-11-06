@@ -1,6 +1,6 @@
 # Design: file system v3
 
-**Status: proposal for approval.** Describes what is added and changed
+**Status: agreed, introduced in phases** (done changes: [Format versions](fs-versions.md#transition-v2---v3)). Describes what is added and changed
 compared to the current format v2 ([file-system.md](file-system.md)). After
 approval it is implemented in phases (see [Implementation order](#implementation-order))
 and finished parts move into the main FS chapter.

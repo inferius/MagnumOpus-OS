@@ -1,6 +1,6 @@
 # Návrh: souborový systém v3
 
-**Stav: návrh k odsouhlasení.** Popisuje, co přibude a změní se proti
+**Stav: odsouhlaseno, zavádí se po fázích** (hotové změny: [Verze formátu](fs-verze.md#přechod-v2---v3)). Popisuje, co přibude a změní se proti
 současnému formátu v2 ([souborovy-system.md](souborovy-system.md)). Po
 schválení se implementuje po fázích (viz [Pořadí implementace](#pořadí-implementace))
 a hotové části se přesunou do hlavní kapitoly o FS.
