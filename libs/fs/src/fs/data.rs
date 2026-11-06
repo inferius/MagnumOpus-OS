@@ -19,10 +19,17 @@ use abi::{Error, Result};
 use super::{DIRTY_LIMIT, Fs, zil};
 use crate::btree;
 use crate::device::BlockDevice;
-use crate::layout::{BLOCK_SIZE, Extent, INLINE_MAX, Inode, KIND_FILE, Key, MAX_EXTENT, item};
+use crate::layout::{
+    BLOCK_SIZE, Extent, INLINE_MAX, Inode, KIND_DIR, KIND_FILE, Key, MAX_EXTENT, MAX_FILE_SIZE, item,
+};
 use crate::node::Child;
 
 const BS: u64 = BLOCK_SIZE as u64;
+
+/// Chyba pro operaci s obsahem nad objektem, ktery neni soubor.
+fn not_file(kind: u8) -> Error {
+    if kind == KIND_DIR { Error::IsADirectory } else { Error::WrongType }
+}
 
 /// Zkopiruje cast bloku `lb` (obsah `block`) do vystupu cteni `out`, ktere
 /// zacina na bajtu `offset`.
@@ -73,7 +80,7 @@ impl<D: BlockDevice> Fs<D> {
     ) -> Result<Vec<u8>> {
         let i = self.inode(root, oid)?;
         if i.kind != KIND_FILE {
-            return Err(Error::IsADirectory);
+            return Err(not_file(i.kind));
         }
         if offset >= i.size || len == 0 {
             return Ok(Vec::new());
@@ -117,7 +124,7 @@ impl<D: BlockDevice> Fs<D> {
         let oid = self.resolve(&root, path)?;
         let i = self.inode(&root, oid)?;
         if i.kind != KIND_FILE {
-            return Err(Error::IsADirectory);
+            return Err(not_file(i.kind));
         }
         Ok((oid, i))
     }
@@ -130,7 +137,8 @@ impl<D: BlockDevice> Fs<D> {
         }
         let end = offset
             .checked_add(data.len() as u64)
-            .ok_or(Error::InvalidArgs)?;
+            .filter(|&e| e <= MAX_FILE_SIZE)
+            .ok_or(Error::OutOfRange)?;
         let blocks = end.div_ceil(BS) - offset / BS;
         self.ensure_room(blocks + 8)?;
         let new_size = inode.size.max(end);
@@ -144,6 +152,9 @@ impl<D: BlockDevice> Fs<D> {
     /// Zmeni velikost souboru (zvetseni doplni nuly).
     pub fn truncate(&mut self, path: &str, size: u64) -> Result<()> {
         let (oid, inode) = self.file_oid(path)?;
+        if size > MAX_FILE_SIZE {
+            return Err(Error::OutOfRange);
+        }
         if size == inode.size {
             return Ok(());
         }
@@ -165,10 +176,10 @@ impl<D: BlockDevice> Fs<D> {
     fn store_inline(&mut self, oid: u64, data: Vec<u8>) -> Result<()> {
         let key = Key::new(oid, item::INLINE, 0);
         if data.is_empty() {
-            btree::remove(&mut self.s, &key)?;
+            self.del(&key)?;
             Ok(())
         } else {
-            btree::insert(&mut self.s, key, data)
+            self.put(key, data)
         }
     }
 
@@ -309,6 +320,7 @@ impl<D: BlockDevice> Fs<D> {
         self.put_inode(oid, &inode)?;
         self.zil.touch(oid);
         let parent = inode.parent;
+        // Obe velikosti <= MAX_FILE_SIZE = i64::MAX, rozdil se vejde do i64.
         self.adjust_tree(parent, new_size as i64 - old_size as i64, 0, 0)
     }
 
@@ -330,9 +342,9 @@ impl<D: BlockDevice> Fs<D> {
                     birth: e.birth,
                     csums: e.csums[..(lo - ks) as usize].to_vec(),
                 };
-                btree::insert(&mut self.s, Key::new(oid, item::EXTENT, ks), left.encode())?;
+                self.put(Key::new(oid, item::EXTENT, ks), left.encode())?;
             } else {
-                btree::remove(&mut self.s, &Key::new(oid, item::EXTENT, ks))?;
+                self.del(&Key::new(oid, item::EXTENT, ks))?;
             }
             if hi < ke {
                 let r = (hi - ks) as usize;
@@ -341,7 +353,7 @@ impl<D: BlockDevice> Fs<D> {
                     birth: e.birth,
                     csums: e.csums[r..].to_vec(),
                 };
-                btree::insert(&mut self.s, Key::new(oid, item::EXTENT, hi), right.encode())?;
+                self.put(Key::new(oid, item::EXTENT, hi), right.encode())?;
             }
         }
         Ok(())
@@ -417,11 +429,7 @@ impl<D: BlockDevice> Fs<D> {
                     birth: txg,
                     csums: chunk.to_vec(),
                 };
-                btree::insert(
-                    &mut self.s,
-                    Key::new(oid, item::EXTENT, a + done + off),
-                    e.encode(),
-                )?;
+                self.put(Key::new(oid, item::EXTENT, a + done + off), e.encode())?;
             }
             done += got;
             goal = Some(start + got);

@@ -56,6 +56,9 @@ pub mod op {
 pub mod kind {
     pub const FILE: u8 = 1;
     pub const DIR: u8 = 2;
+    /// Symbolicky odkaz (zatim jen ve vypisu a STAT; vytvareni prijde s
+    /// protokolem v2).
+    pub const SYMLINK: u8 = 3;
 }
 
 /// Metadata objektu.

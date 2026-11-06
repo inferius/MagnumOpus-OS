@@ -54,11 +54,12 @@ impl<D: BlockDevice> Fs<D> {
                     }
                     continue;
                 }
-                if used.insert(p.block, "uzel").is_some() {
-                    r.problems
-                        .push(format!("blok {} pouziva uzel i neco jineho", p.block));
+                for b in p.block..p.block + crate::layout::NODE_BLOCKS {
+                    if used.insert(b, "uzel").is_some() {
+                        r.problems.push(format!("blok {b} pouziva uzel i neco jineho"));
+                    }
                 }
-                r.tree_blocks += 1;
+                r.tree_blocks += crate::layout::NODE_BLOCKS;
                 let node = match self.s.load(&p) {
                     Ok(n) => n.clone(),
                     Err(e) => {

@@ -22,16 +22,31 @@ pub const UNICODE_VERSION: u32 = {
     (a as u32) << 16 | (b as u32) << 8 | c as u32
 };
 
-/// Nejdelsi jmeno v bajtech UTF-8.
-pub const NAME_MAX: usize = 255;
+/// Nejdelsi jmeno ve znacich Unicode (po NFC).
+pub const NAME_MAX_CHARS: usize = 1024;
+/// Nejdelsi jmeno v bajtech UTF-8 (po NFC).
+pub const NAME_MAX: usize = 4096;
 
-/// Overi jmeno polozky adresare.
+/// Ridici znaky smeru textu (U+202A-202E, U+2066-2069). Umi zmenit poradi
+/// zobrazeni: `faktura[U+202E]fdp.exe` se ukaze jako `fakturaexe.pdf`.
+pub fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Overi jmeno polozky adresare. Delka se meri na NFC tvaru, ktery se
+/// opravdu ulozi (NFC muze jmeno i prodlouzit).
+///
+/// Zakazane: prazdne, `.`, `..`, `/`, ridici znaky (vcetne NUL), ridici
+/// znaky smeru textu. Zbytek (napr. `:` nebo `\\` pro Windows) resi
+/// ovladace jinych systemu prekladem.
 pub fn validate_name(name: &str) -> Result<()> {
-    let ok = !name.is_empty()
-        && name.len() <= NAME_MAX
-        && name != "."
-        && name != ".."
-        && !name.chars().any(|c| c == '/' || c.is_control());
+    let nfc = stored_name(name);
+    let ok = !nfc.is_empty()
+        && nfc.len() <= NAME_MAX
+        && nfc.chars().count() <= NAME_MAX_CHARS
+        && nfc != "."
+        && nfc != ".."
+        && !nfc.chars().any(|c| c == '/' || c.is_control() || is_bidi_control(c));
     if ok { Ok(()) } else { Err(Error::InvalidArgs) }
 }
 
@@ -77,6 +92,12 @@ mod tests {
         assert!(validate_name("a/b").is_err());
         assert!(validate_name("..").is_err());
         assert!(validate_name("a\nb").is_err());
-        assert!(validate_name(&"x".repeat(256)).is_err());
+        assert!(validate_name(&"x".repeat(1024)).is_ok());
+        assert!(validate_name(&"x".repeat(1025)).is_err());
+        // 1024 ctyrbajtovych znaku = 4096 B: jeste projde.
+        assert!(validate_name(&"\u{1F600}".repeat(1024)).is_ok());
+        assert!(validate_name("faktura\u{202E}fdp.exe").is_err());
+        assert!(validate_name("a\u{2067}b").is_err());
+        assert!(validate_name("a\u{0}b").is_err());
     }
 }

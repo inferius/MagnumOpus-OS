@@ -45,8 +45,8 @@ pub use abi::{Error, Result};
 pub use device::{BlockDevice, MemDevice};
 pub use fs::{CheckReport, DefragReport, DirEntry, Fs, FsInfo, Kind, SnapshotInfo, Stat};
 pub use hash::Algo;
-pub use layout::{BLOCK_SIZE, INLINE_MAX, MAX_EXTENT, REUSE_DELAY};
-pub use names::{fold_name, validate_name};
+pub use layout::{BLOCK_SIZE, INLINE_MAX, MAX_EXTENT, MAX_FILE_SIZE, REUSE_DELAY, SYMLINK_MAX};
+pub use names::{NAME_MAX, NAME_MAX_CHARS, fold_name, is_bidi_control, validate_name};
 pub use store::FormatOptions;
 
 #[cfg(feature = "std")]

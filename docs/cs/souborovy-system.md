@@ -1,6 +1,6 @@
 # Souborový systém
 
-Vlastní souborový systém (pracovně „OSFS“, formát v2). Kód je v knihovně
+Vlastní souborový systém (pracovně „OSFS“, formát v3). Kód je v knihovně
 `libs/fs` (`no_std`, stejná na hostiteli i v systému), službu nad diskem
 poskytuje `user/fsd`, protokol mezi klientem a službou definuje
 `libs/fsproto`.
@@ -8,6 +8,12 @@ poskytuje `user/fsd`, protokol mezi klientem a službou definuje
 Cíle návrhu: **nikdy neztratit konzistenci** (ani při výpadku proudu nebo
 lhajícím disku), **odhalit každé poškození dat**, **být rychlý** (souvislé
 zápisy, levný `fsync`) a **nezabírat místo zbytečně** (režie metadat ~0,4 %).
+
+> Formát v3 se zavádí po fázích podle [návrhu FS v3](navrh-fs-v3.md). Hotová
+> je první část fáze 1: uzly 16 KiB, ukazatel, superblok a záznam objektu v3,
+> jména do 1024 znaků, symbolické odkazy a limit velikosti souboru. Svazek
+> formátu v2 se nepřipojí (`NOT_SUPPORTED`); data se zatím nepřevádějí,
+> disky z nástroje `xtask` se vytvářejí znovu.
 
 ## Co nabízí
 
@@ -25,6 +31,10 @@ zápisy, levný `fsync`) a **nezabírat místo zbytečně** (režie metadat ~0,4
 | Defragmentace na pozadí | hotovo | [Fragmentace](#fragmentace-a-defragmentace) |
 | Okamžitá velikost adresáře (souhrny podstromu) | hotovo | [Souhrny](#okamžité-velikosti-adresářů) |
 | Jména bez ohledu na velikost písmen (Unicode NFC) | hotovo | [Jména](#jména-souborů) |
+| Jména až 1024 znaků, zákaz řídicích znaků směru textu | hotovo | [Jména](#jména-souborů) |
+| Symbolické odkazy | hotovo (knihovna; v protokolu jen výpis) | [Symbolické odkazy](#symbolické-odkazy) |
+| Soubory až 2^63-1 B, kontrolovaná aritmetika | hotovo | [Limity](#limity-formátu) |
+| UUID svazku a příznaky vlastností (compat/ro/incompat) | hotovo | [Superblok](#superblok) |
 | Snapshoty jen pro čtení a jejich mazání (deadlisty) | hotovo | [Snapshoty](#snapshoty) |
 | Kontrola konzistence (fsck) a ověření dat (scrub) | hotovo | [Kontrola](#kontrola-konzistence-a-scrub) |
 | Zapisovatelné klony, nativní git, indexy, vyhledávání | plán | [Verzování a git](#verzování-a-git) |
@@ -60,11 +70,13 @@ Přímo nad zařízením (nástroje na hostiteli, testy):
 use fs::{Algo, FileDevice, FormatOptions, Fs, Kind};
 
 let dev = FileDevice::open("data.img".as_ref())?;
-let opts = FormatOptions { label: "data".into(), algo: Algo::Xxh3, ag_blocks: None };
+let opts = FormatOptions { label: "data".into(), algo: Algo::Xxh3, ag_blocks: None, uuid: None };
 let dev = Fs::format(dev, &opts)?;          // nový prázdný systém
 let mut fs = Fs::mount(dev)?;               // připojení (+ přehrání intent logu)
 fs.create("/vitejte.txt", Kind::File)?;
 fs.write("/vitejte.txt", 0, b"Ahoj!\n")?;
+fs.symlink("/uvod", "/vitejte.txt")?;      // symbolický odkaz (cíl je text)
+assert_eq!(fs.readlink("/uvod")?, "/vitejte.txt");
 fs.commit()?;                               // atomicky uloží vše
 let report = fs.check(true)?;               // fsck + scrub
 assert!(report.problems.is_empty());
@@ -78,9 +90,10 @@ assert!(report.problems.is_empty());
 | **transakce (txg)** | Všechny změny od posledního commitu. Mají číslo `txg = generace posledního commitu + 1`. |
 | **generace** | Číslo uloženého stavu (commitu). Roste o 1. |
 | **birth** | Generace, ve které blok vznikl. Rozhoduje, kdy smí být blok uvolněn. |
-| **ukazatel (`BlockPtr`)** | (číslo bloku, birth, 128bitový kontrolní součet obsahu). |
-| **objekt (oid)** | Soubor nebo adresář; číslo `oid`. Kořen má `oid` 1, metadata systému 0. |
-| **extent** | Souvislý úsek dat souboru: fyzický začátek, délka (nejvýš 120 bloků), součet každého bloku. |
+| **uzel** | Uzel B+stromu metadat: 16 KiB = 4 souvislé bloky (`NODE_BLOCKS`). |
+| **ukazatel (`BlockPtr`)** | (zařízení, číslo bloku, délka, birth, 128bitový kontrolní součet obsahu, příznaky). |
+| **objekt (oid)** | Soubor, adresář nebo symbolický odkaz; číslo `oid`. Kořen má `oid` 1, metadata systému 0. |
+| **extent** | Souvislý úsek dat souboru: fyzický začátek, délka (nejvýš 496 bloků ~ 2 MiB), součet každého bloku. |
 | **alokační skupina (AG)** | Úsek disku (výchozí 1 GiB) s vlastním záznamem volného místa. |
 
 ## Rozložení na disku
@@ -105,23 +118,40 @@ s nejvyšší generací, jehož stav jde načíst.
 
 | Offset | Velikost | Pole | Význam |
 |---|---|---|---|
-| 0 | 8 | magic | `OSFS\0\0v2` |
-| 8 | 4 | version | 2 |
+| 0 | 8 | magic | `OSFS\0\0v3` |
+| 8 | 4 | version | 3 |
 | 12 | 1 | algo | 1 = XXH3-128, 2 = BLAKE3 |
 | 16 | 8 | generation | číslo commitu |
 | 24 | 8 | block_count | velikost svazku v blocích |
-| 32 | 8 | ag_blocks | velikost alokační skupiny |
-| 40 | 32 | root | `BlockPtr` kořene B+stromu |
-| 72 | 32 | space | `BlockPtr` indexu tabulky AG |
-| 104 | 8 | zil_block | první blok intent logu této epochy |
-| 112 | 8 | zil_seed | semínko součtů intent logu |
-| 120 | 8 | next_oid | další volné číslo objektu |
-| 128 | 8 | snapshot_generation | generace posledního snapshotu |
-| 136 | 8 | next_snapshot | číslo dalšího snapshotu (= seznam mrtvých bloků živé verze) |
-| 144 | 8 | dead_seq | pořadí další položky deadlistu |
-| 152 | 4 | unicode_version | verze tabulek Unicode pro jména |
-| 160 | 32 | label | jméno svazku (UTF-8, doplněné nulami) |
+| 32 | 8 | ag_blocks | velikost alokační skupiny (64 bloků až 2^20 skupin) |
+| 40 | 16 | uuid | jednoznačné ID svazku |
+| 56 | 8 | features_compat | vlastnosti, se kterými starší ovladač smí normálně pracovat |
+| 64 | 8 | features_ro_compat | vlastnosti, se kterými starší ovladač smí jen číst |
+| 72 | 8 | features_incompat | vlastnosti, bez jejichž znalosti se svazek nesmí připojit |
+| 80 | 40 | root | `BlockPtr` kořene B+stromu |
+| 120 | 40 | space | `BlockPtr` indexu tabulky AG |
+| 160 | 8 | zil_block | první blok intent logu této epochy |
+| 168 | 8 | zil_seed | semínko součtů intent logu |
+| 176 | 8 | next_oid | další volné číslo objektu |
+| 184 | 8 | snapshot_generation | generace posledního snapshotu |
+| 192 | 8 | next_snapshot | číslo dalšího snapshotu (= seznam mrtvých bloků živé verze) |
+| 200 | 8 | dead_seq | pořadí další položky deadlistu |
+| 208 | 4 | unicode_version | verze tabulek Unicode pro jména |
+| 212 | 2 | device_index | toto zařízení ve svazku (zatím 0) |
+| 214 | 2 | device_count | počet zařízení svazku (zatím 1) |
+| 216 | 32 | label | jméno svazku (UTF-8, doplněné nulami) |
 | 4080 | 16 | csum | XXH3-128 bajtů 0..4080 |
+
+**Příznaky vlastností** fungují jako v ext4: každý bit = jedna vlastnost
+formátu (komprese, šifrování, ...). Ovladač, který bit z `ro_compat` nebo
+`incompat` nezná, svazek odmítne s `NOT_SUPPORTED` - nikdy ho tak nepoškodí
+tím, že by nerozuměl novým strukturám. Zatím je definovaných nula bitů.
+
+**UUID** se při formátování bere z `FormatOptions::uuid`; nástroje na
+hostiteli (`xtask`) předávají náhodné. Bez něj se odvodí ze jména, velikosti
+a adresy na zásobníku (v `no_std` není zdroj náhody) - jednoznačnost pak není
+zaručená. Superblok s `ag_blocks < 64`, více než 2^20 skupinami nebo nulovým
+počtem zařízení je `CORRUPTED`.
 
 ## Kontrolní součty a Merkleův strom
 
@@ -172,62 +202,97 @@ Rust, `no_std`). Poznámka: `blake3` 1.8 hlásí varování o budoucí
 nekompatibilitě s novějším Rustem - řešit aktualizací nebo vlastní
 implementací.
 
-### Ukazatel (`BlockPtr`, 32 B)
+### Ukazatel (`BlockPtr`, 40 B)
 
 | Offset | Velikost | Pole |
 |---|---|---|
-| 0 | 8 | číslo bloku |
+| 0 | 8 | adresa: číslo bloku (bity 0-47) \| zařízení svazku (bity 48-63) |
 | 8 | 8 | birth (generace vzniku) |
-| 16 | 16 | kontrolní součet obsahu bloku |
+| 16 | 16 | kontrolní součet obsahu (všech bloků, na které ukazuje) |
+| 32 | 4 | délka v blocích (uzel stromu = 4) |
+| 36 | 2 | příznaky: 1 = komprimováno, 2 = šifrováno, 4 = sdílené bloky (zatím se nepoužívají) |
+| 38 | 2 | rezerva (nuly) |
+
+48 bitů čísla bloku = až 1 EiB na zařízení; číslo zařízení je připravené pro
+svazky přes víc disků. Ukazatel na uzel musí mít délku přesně 4 a celý rozsah
+uvnitř svazku, jinak je uzel `CORRUPTED` (načte se dřív, než se ověří
+součet).
 
 ## B+strom metadat
 
 Všechna metadata leží v **jednom** copy-on-write B+stromu. Klíč je
 `(oid u64, druh u8, offset u64)`, řadí se v tomto pořadí - vše o jednom
 objektu tak leží u sebe (jedno čtení listu dá inode i malý obsah).
+Uzel má 16 KiB: list pojme kolem 120 záznamů objektů a vnitřní uzel 255
+potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 
 | Druh | Hodnota | Offset klíče | Hodnota položky |
 |---|---|---|---|
-| `INODE` | 1 | 0 | záznam objektu, 64 B (viz níže) |
+| `INODE` | 1 | 0 | záznam objektu, 128 B (viz níže) |
 | `DIRENT` | 2 | FNV-1a hash složeného jména | seznam položek se stejným hashem: (oid u64, druh u8, délka jména u16, jméno) |
 | `INLINE` | 3 | 0 | celý obsah souboru do 1984 B (`INLINE_MAX`) |
-| `EXTENT` | 4 | první logický blok | phys u64, počet u32, rezerva u32, birth u64, součty 16 B × počet |
+| `EXTENT` | 4 | první logický blok | phys u64, počet u32 (1-496), rezerva u32, birth u64, součty 16 B × počet |
 | `SNAPSHOT` | 5 | číslo snapshotu (objekt 0) | `BlockPtr` kořene, generace u64, jméno |
 | `DEADLIST` | 6 | seznam << 32 \| pořadí (objekt 0) | až 80 mrtvých úseků (start u64, délka u64, birth u64) |
+| `SYMLINK` | 7 | 0 | cíl symbolického odkazu (UTF-8, 1-4096 B) |
 
-### Záznam objektu (inode, 64 B)
+### Záznam objektu (inode, 128 B)
 
 | Offset | Pole | Význam |
 |---|---|---|
-| 0 | kind u8 | 1 = soubor, 2 = adresář |
-| 8 | size | velikost souboru v bajtech |
-| 16 | mtime | čas poslední změny obsahu (ns) |
-| 24 | ctime | čas změny metadat (ns) |
-| 32 | parent | oid rodičovského adresáře (každý objekt má právě jednoho rodiče) |
-| 40 | tree_bytes | adresář: součet velikostí souborů v celém podstromu |
-| 48 | tree_files | adresář: počet souborů v podstromu |
-| 56 | tree_dirs | adresář: počet adresářů v podstromu (bez sebe) |
+| 0 | kind u8 | 1 = soubor, 2 = adresář, 3 = symbolický odkaz |
+| 1 | flags u8 | příznaky objektu (zatím 0) |
+| 4 | acl u32 | číslo popisu oprávnění (0 = zdědit; přijde ve fázi 1d) |
+| 8 | size | soubor: velikost v bajtech (nejvýš 2^63-1); odkaz: délka cíle |
+| 16 | mtime | čas poslední změny obsahu |
+| 24 | ctime | čas změny metadat |
+| 32 | btime | čas vytvoření |
+| 40 | atime | čas posledního přístupu (0 = nesleduje se) |
+| 48 | parent | oid rodičovského adresáře (každý objekt má právě jednoho rodiče) |
+| 56 | generation | generace (txg), ve které objekt vznikl |
+| 64 | tree_bytes | adresář: součet velikostí souborů v celém podstromu (saturuje) |
+| 72 | tree_files | adresář: počet souborů a odkazů v podstromu |
+| 80 | tree_dirs | adresář: počet adresářů v podstromu (bez sebe) |
+| 88 | owner | vlastník (0 = systém; přijde se správou uživatelů) |
+| 96 | xattrs u32 | počet rozšířených atributů |
+| 100 | - | rezerva 28 B (nuly) |
 
-### Uzel stromu (4 KiB)
+Časy jsou v nanosekundách z `Fs::set_time` (služba fsd: od startu systému,
+nástroj `xtask`: od roku 1970). **Generace**
+spolu s `oid` určuje objekt jednoznačně: oid smazaného objektu se nepoužije
+znovu, ale handly protokolu v2 se podle generace přesto ověří. Záznam
+s neznámým druhem nebo velikostí nad 2^63-1 je `CORRUPTED`.
+
+### Uzel stromu (16 KiB)
+
+Uzel zabírá 4 souvislé bloky (`NODE_BLOCKS`), alokuje se a zapisuje vcelku.
 
 ```text
-0   magic "BT", úroveň u8 (0 = list), rezerva, počet položek u16
+0   magic "BT", úroveň u8 (0 = list, nejvýš 16), rezerva, počet položek u16
 8   generace vzniku u64
 32  položky:
       list (32 B):     klíč 24 B, offset hodnoty u16, délka u16, rezerva
-      vnitřní (56 B):  klíč 24 B, BlockPtr potomka 32 B
-    hodnoty listu leží od konce bloku směrem dolů
+      vnitřní (64 B):  klíč 24 B, BlockPtr potomka 40 B
+    hodnoty listu leží od konce uzlu směrem dolů
 ```
 
-Limity: hodnota nejvýš 2000 B (`MAX_VALUE`, zaručuje, že přeplněný list
-jde vždy rozdělit), vnitřní uzel nejvýš 72 potomků.
+Limity: hodnota nejvýš 8144 B (`MAX_VALUE`, zaručuje, že přeplněný list
+jde vždy rozdělit), vnitřní uzel nejvýš 255 potomků. Úroveň je uložená
+v každém uzlu a při každém sestupu se kontroluje (potomek musí mít úroveň
+o 1 nižší) - poškozený ukazatel tak nemůže udělat ze stromu smyčku ani
+podstrčit list místo vnitřního uzlu.
+
+Proč 16 KiB: jméno do 4 KiB i extent s 496 součty se vejdou do jedné
+položky, strom je o úroveň mělčí (méně čtení při hledání) a režie hlaviček
+klesne. Cena: změna jedné položky přepíše 16 KiB místo 4 KiB, což copy-on-write
+rozloží do souvislých zápisů na konci commitu.
 
 - **Dělení listu:** při přidávání na konec (sekvenční zápis) jde nová
   položka sama doprava a levý list zůstane plný. Jinak se dělí na co
   nejvyrovnanější poloviny. Bez toho by postupné plnění nechávalo listy
   z poloviny prázdné (naměřeno: režie 0,85 % místo 0,43 %).
 - **Mazání:** prázdné uzly se odstraní, kořen s jedním potomkem se nahradí
-  potomkem, sousední podplněné listy (levý ≤ 1/4 bloku, oba ≤ 1/2) se
+  potomkem, sousední podplněné listy (levý <= 1/4 uzlu, oba <= 1/2) se
   sloučí.
 
 ## Jména souborů
@@ -238,11 +303,77 @@ jde vždy rozdělit), vnitřní uzel nejvýš 72 potomků.
   = NFC(malá písmena(NFC(jméno))). `Foto.JPG`, `foto.jpg` i `fóto`
   zapsané rozloženě (`o` + čárka) jsou stejné jméno. Převod nezávisí na
   jazyku (žádná turecká pravidla pro `i`).
-- Platné jméno: 1-255 bajtů UTF-8, ne `.` ani `..`, bez `/` a řídicích
-  znaků. Jinak `INVALID_ARGS`.
-- Přejmenování jen na jinou velikost písmen (`/fotky` → `/FOTKY`) je
+- Platné jméno: **1-1024 znaků Unicode a nejvýš 4096 bajtů UTF-8**
+  (`NAME_MAX_CHARS`, `NAME_MAX`), měřeno na tvaru NFC, který se opravdu
+  uloží. Zakázané je `.` a `..`, znak `/`, řídicí znaky (včetně NUL) a
+  **řídicí znaky směru textu** U+202A-202E a U+2066-2069 (`is_bidi_control`).
+  Jinak `INVALID_ARGS`.
+- Přejmenování jen na jinou velikost písmen (`/fotky` -> `/FOTKY`) je
   povolené.
 - Verze tabulek Unicode je v superbloku (`unicode_version`).
+
+Proč zákaz znaků směru textu: znak U+202E obrátí směr zobrazení zbytku
+jména, takže soubor `faktura[U+202E]fdp.exe` se v průzkumníku ukáže jako
+`fakturaexe.pdf` - klasický trik, jak podstrčit spustitelný soubor. Ostatní
+znaky, které jiné systémy nesnesou (`:` `\` `*` `?` na Windows, délka nad
+255 bajtů na Linuxu), FS povolí; ovladače pro Windows (WinFsp) a Linux
+(FUSE) je při zobrazení přeloží.
+
+```rust
+use fs::{validate_name, is_bidi_control, NAME_MAX_CHARS};
+
+assert!(validate_name("Dovolená 2026 - Itálie.jpg").is_ok());
+assert!(validate_name(&"x".repeat(NAME_MAX_CHARS)).is_ok());
+assert!(validate_name("faktura\u{202E}fdp.exe").is_err());
+assert!(is_bidi_control('\u{2067}'));
+```
+
+Jména se stejným hashem sdílejí jednu položku `DIRENT`. Kdyby se do ní
+dlouhá jména nevešla (nad 8144 B - prakticky jen při úmyslně vyrobené kolizi
+FNV hashe), `create` vrátí `NO_RESOURCES`.
+
+## Symbolické odkazy
+
+Symbolický odkaz je objekt druhu 3, jehož obsah je **cíl jako text**
+(1-4096 bajtů UTF-8, bez NUL; `SYMLINK_MAX`). Cíl nemusí existovat a může
+být relativní i absolutní. Leží v položce `SYMLINK`, velikost objektu =
+délka cíle.
+
+```rust
+fs.symlink("/projekt/README", "docs/README.md")?;
+assert_eq!(fs.readlink("/projekt/README")?, "docs/README.md");
+assert_eq!(fs.stat("/projekt/README")?.kind, Kind::Symlink);
+fs.rename("/projekt/README", "/projekt/CTIME")?; // přesun/mazání jako u souboru
+fs.remove("/projekt/CTIME")?;
+```
+
+- Knihovna při procházení cesty odkazy **nenásleduje**: odkaz uprostřed
+  cesty dá `NOT_A_DIRECTORY`, `read`/`write` odkazu `WRONG_TYPE`. Následování
+  (s limitem hloubky proti smyčkám) bude dělat vrstva nad ním (VFS/fsd).
+- Odkaz se v souhrnech adresáře počítá jako soubor s velikostí 0.
+- `symlink` se zapisuje do intent logu (záznam 7), takže přežije `fsync`
+  i bez commitu.
+- Protokol fsproto v1 odkaz jen ukáže (`kind::SYMLINK` ve `STAT` a
+  `LIST`); vytváření přes službu přijde s protokolem v2.
+
+## Limity formátu
+
+| Co | Limit | Konstanta |
+|---|---|---|
+| velikost souboru | 2^63-1 B (8 EiB) | `MAX_FILE_SIZE` |
+| jméno | 1024 znaků / 4096 B UTF-8 | `NAME_MAX_CHARS`, `NAME_MAX` |
+| cíl symbolického odkazu | 4096 B | `SYMLINK_MAX` |
+| soubor uložený přímo ve stromu | 1984 B | `INLINE_MAX` |
+| extent | 496 bloků (~2 MiB) | `MAX_EXTENT` |
+| hodnota položky stromu | 8144 B | `node::MAX_VALUE` |
+| hloubka stromu | 17 úrovní | `node::MAX_LEVEL` |
+| zařízení svazku | 2^48 bloků (1 EiB) | 48 bitů adresy v `BlockPtr` |
+
+Zápis nebo `truncate` za `MAX_FILE_SIZE` vrátí `OUT_OF_RANGE`. Díky limitu
+se velikost i rozdíl dvou velikostí vždy vejdou do `i64`. Souhrny adresářů
+**saturují** na 2^64-1: řídké soubory mohou mít dohromady logickou velikost
+větší, než jde sečíst - saturovaný souhrn je jen informativní (data jsou
+v pořádku).
 
 ## Okamžité velikosti adresářů
 
@@ -581,11 +712,11 @@ disku, release, jedno vlákno):
 
 | Měření | Výsledek |
 |---|---|
-| sekvenční zápis 512 MiB po 1 MiB + commit | ~650-720 MiB/s, **1 souvislý úsek** |
-| sekvenční čtení | ~2,8-3,5 GiB/s |
-| režie metadat dat (stromu, extentů, součtů) | **0,43 %** kapacity |
-| 20 000 souborů po 4 KiB (vytvoření + zápis + commit) | ~83 000 souborů/s |
-| `stat` adresáře s 20 000 soubory (velikost podstromu) | 13,5 µs |
+| sekvenční zápis 512 MiB po 1 MiB + commit | ~620-720 MiB/s, **1 souvislý úsek** |
+| sekvenční čtení | ~2,5-3,2 GiB/s |
+| režie metadat dat (stromu, extentů, součtů) | **0,42 %** kapacity |
+| 20 000 souborů po 4 KiB (vytvoření + zápis + commit) | ~72 000-74 000 souborů/s |
+| `stat` adresáře s 20 000 soubory (velikost podstromu) | 10-13 µs |
 
 Spuštění: `cargo test -p fs --features std --release -- --ignored --nocapture perf`.
 
@@ -594,7 +725,7 @@ Spuštění: `cargo test -p fs --features std --release -- --ignored --nocapture
 `user/fsd` drží jeden připojený svazek a obsluhuje klienta přes kanál.
 
 - **Start:** init při startu přečte bloky 1-8 všech disků a službu spustí
-  nad prvním, který má podpis `OSFS\0\0v2`. Startovní zpráva: kanál
+  nad prvním, který má podpis `OSFS\0\0v3`. Startovní zpráva: kanál
   k ovladači disku a kanál pro klienta (oba `kind USER`). První zpráva na
   bootstrap kanálu je konfigurace: slova oddělená mezerou, `debug` povolí
   testovací operace.
@@ -620,10 +751,10 @@ větší požadavky rozdělí.
 |---|---|---|---|
 | 1 | `INFO` | - | jméno svazku, velikost bloku, bloky, volné, odložené, generace, algoritmus, návrat, přehráno |
 | 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, souhrny podstromu) |
-| 3 | `LIST` | cesta | počet u32 + (druh u8, oid u64, jméno) - seřazené podle jména |
+| 3 | `LIST` | cesta | počet u32 + (druh u8, oid u64, jméno) - seřazené podle jména; druh 1 soubor, 2 adresář, 3 symbolický odkaz |
 | 4 | `READ` | cesta, offset u64, délka u32 | data (kratší na konci souboru) |
 | 5 | `WRITE` | cesta, offset u64, data | - |
-| 6 | `CREATE` | cesta, druh u8 (1 soubor, 2 adresář) | - |
+| 6 | `CREATE` | cesta, druh u8 (1 soubor, 2 adresář; jiný = `INVALID_ARGS`) | - |
 | 7 | `REMOVE` | cesta | - |
 | 8 | `RENAME` | odkud, kam | - |
 | 9 | `TRUNCATE` | cesta, velikost u64 | - |
@@ -658,7 +789,10 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `NOT_A_DIRECTORY` | součást cesty nebo cíl `list` je soubor |
 | `IS_A_DIRECTORY` | `read`/`write`/`truncate` adresáře |
 | `NOT_EMPTY` | `remove` neprázdného adresáře |
-| `INVALID_ARGS` | relativní cesta, neplatné jméno, přesun adresáře do vlastního podstromu, offset + délka přeteče, formátování zařízení menšího než 64 bloků |
+| `INVALID_ARGS` | relativní cesta, neplatné jméno nebo cíl odkazu, přesun adresáře do vlastního podstromu, formátování zařízení menšího než 64 bloků |
+| `OUT_OF_RANGE` | zápis nebo `truncate` za `MAX_FILE_SIZE` (2^63-1 B), offset + délka přeteče |
+| `WRONG_TYPE` | `read`/`write`/`truncate` symbolického odkazu, `readlink` něčeho, co není odkaz |
+| `NO_RESOURCES` | položka adresáře by s kolidujícími jmény přerostla `MAX_VALUE` |
 | `NO_SPACE` | zápis nebo vytvoření by spotřebovalo rezervu commitu |
 | `CORRUPTED` | nesouhlasí kontrolní součet bloku nebo struktura nedává smysl; u čtení dat = poškozený blok (ostatní soubory jdou číst dál) |
 | `IO_ERROR` | chyba zařízení; po selhání commitu všechny další změny (nutné znovu připojit) |
@@ -673,6 +807,7 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `tests/features.rs` | souvislý zápis, fsync + přehrání, návrat o generaci, mazání snapshotů, defragmentace, TRIM, víc AG + BLAKE3, zhušťování logů |
 | `tests/model.rs` | property test: náhodné sekvence (vytvoření, zápis, zkrácení, mazání, přesun, commit, fsync, „pád“, snapshoty) proti modelu v paměti; na konci fsck |
 | `tests/crash.rs` | výpadek během commitu i fsync s náhodnou podmnožinou nezapsaných bloků |
+| `tests/objects.rs` | formát v3: záznam objektu, jména do 1024 znaků, zákaz znaků směru textu, symbolické odkazy (i přes intent log), limit velikosti souboru a saturace souhrnů, generace objektu |
 | `tests/perf.rs` | výkon a režie (spouští se ručně) |
 | init `tests/fs.rs` | 11 testů v systému přes fsd a skutečný ovladač virtio-blk, včetně souboru zapsaného na hostiteli a simulace výpadku |
 

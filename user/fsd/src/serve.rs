@@ -14,6 +14,7 @@ fn stat(s: fs::Stat) -> Stat {
         kind: match s.kind {
             Kind::File => kind::FILE,
             Kind::Dir => kind::DIR,
+            Kind::Symlink => kind::SYMLINK,
         },
         size: s.size,
         mtime: s.mtime,
@@ -28,10 +29,10 @@ fn entries(list: Vec<fs::DirEntry>) -> Vec<DirEntry> {
     list.into_iter()
         .map(|e| DirEntry {
             name: e.name,
-            kind: if e.kind == Kind::Dir {
-                kind::DIR
-            } else {
-                kind::FILE
+            kind: match e.kind {
+                Kind::File => kind::FILE,
+                Kind::Dir => kind::DIR,
+                Kind::Symlink => kind::SYMLINK,
             },
             oid: e.oid,
         })

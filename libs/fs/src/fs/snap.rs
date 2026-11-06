@@ -61,7 +61,7 @@ impl<D: BlockDevice> Fs<D> {
         let seq = self.s.dead_seq;
         self.s.dead_seq = self.s.dead_seq.wrapping_add(1);
         let key = Key::new(META_OID, item::DEADLIST, (list << 32) | (seq & 0xFFFF_FFFF));
-        btree::insert(&mut self.s, key, encode_dead(entries))
+        self.put(key, encode_dead(entries))
     }
 
     fn records(&mut self, root: &Child) -> Result<Vec<(u64, SnapshotRecord)>> {
@@ -98,11 +98,7 @@ impl<D: BlockDevice> Fs<D> {
         self.s.next_snapshot += 1;
         // Bloky narozene do teto generace odted drzi snapshot.
         self.s.snapshot_generation = self.s.sb.generation;
-        btree::insert(
-            &mut self.s,
-            Key::new(META_OID, item::SNAPSHOT, id),
-            record.encode(),
-        )?;
+        self.put(Key::new(META_OID, item::SNAPSHOT, id), record.encode())?;
         self.commit()?;
         Ok(id)
     }
@@ -161,20 +157,20 @@ impl<D: BlockDevice> Fs<D> {
                 self.s.space.free(d.start, d.len, txg, false);
             }
             if keep.is_empty() {
-                btree::remove(&mut self.s, &k)?;
+                self.del(&k)?;
             } else {
-                btree::insert(&mut self.s, k, encode_dead(&keep))?;
+                self.put(k, encode_dead(&keep))?;
             }
         }
         // Seznam S se presune do N.
         let (a, b) = list_range(id);
         let root = self.s.root;
         for (k, v) in btree::collect(&mut self.s, &root, &a, &b)? {
-            btree::remove(&mut self.s, &k)?;
+            self.del(&k)?;
             let entries = decode_dead(&v)?;
             self.put_dead_item(next_list, &entries)?;
         }
-        btree::remove(&mut self.s, &Key::new(META_OID, item::SNAPSHOT, id))?;
+        self.del(&Key::new(META_OID, item::SNAPSHOT, id))?;
         if next.is_none() {
             // Mazal se posledni snapshot: hranici vlastnictvi posunout zpet.
             self.s.snapshot_generation = prev_gen;

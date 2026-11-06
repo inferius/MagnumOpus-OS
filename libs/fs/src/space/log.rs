@@ -35,7 +35,7 @@ const REC_SIZE: usize = 24;
 /// Zaznamu v jednom bloku logu.
 pub const LOG_PER_BLOCK: usize = (BLOCK_SIZE - LOG_HEADER) / REC_SIZE;
 const TABLE_HEADER: usize = 16;
-const TABLE_ENTRY: usize = 48;
+const TABLE_ENTRY: usize = PTR_SIZE + 16;
 pub const TABLE_PER_BLOCK: usize = (BLOCK_SIZE - TABLE_HEADER) / TABLE_ENTRY;
 pub const INDEX_PER_BLOCK: usize = (BLOCK_SIZE - TABLE_HEADER) / PTR_SIZE;
 
@@ -136,11 +136,7 @@ fn write_block<D: BlockDevice>(
     b: &[u8],
 ) -> Result<BlockPtr> {
     dev.write_block(block, b)?;
-    Ok(BlockPtr {
-        block,
-        birth: txg,
-        csum: algo.sum(b),
-    })
+    Ok(BlockPtr::single(block, txg, algo.sum(b)))
 }
 
 impl Space {
@@ -175,7 +171,7 @@ impl Space {
                 let ag = first + j;
                 let e = TABLE_HEADER + j * TABLE_ENTRY;
                 let head = BlockPtr::get(&tb[e..]);
-                let blocks = u32_at(&tb, e + 32) as usize;
+                let blocks = u32_at(&tb, e + PTR_SIZE) as usize;
                 s.load_ag(dev, algo, ag, head, blocks, txg, &mut recent)?;
             }
         }
@@ -475,7 +471,8 @@ impl Space {
                 let log = &self.meta.logs[first + j];
                 let e = TABLE_HEADER + j * TABLE_ENTRY;
                 log.head.put(&mut b[e..e + PTR_SIZE]);
-                b[e + 32..e + 36].copy_from_slice(&(log.chain.len() as u32).to_le_bytes());
+                b[e + PTR_SIZE..e + PTR_SIZE + 4]
+                    .copy_from_slice(&(log.chain.len() as u32).to_le_bytes());
             }
             self.meta.tables[t] = write_block(dev, algo, blk, txg, &b)?;
         }

@@ -26,9 +26,10 @@ use crate::btree;
 use crate::device::BlockDevice;
 use crate::hash::Algo;
 use crate::layout::{
-    BLOCK_SIZE, Dirent, Inode, KIND_DIR, KIND_FILE, Key, ROOT_OID, decode_dirents, encode_dirents,
-    item,
+    BLOCK_SIZE, Dirent, Inode, KIND_DIR, KIND_FILE, KIND_SYMLINK, Key, ROOT_OID, SYMLINK_MAX,
+    decode_dirents, encode_dirents, item,
 };
+use crate::node::MAX_VALUE;
 use crate::names::{fold_name, name_hash, stored_name, validate_name};
 use crate::node::Child;
 use crate::store::{FormatOptions, Store};
@@ -40,17 +41,25 @@ pub use defrag::DefragReport;
 pub enum Kind {
     File,
     Dir,
+    /// Symbolicky odkaz: cil je text (cesta), knihovna ho pri prochazeni
+    /// cesty nenasleduje - to dela klient (VFS), aby slo hlidat smycky.
+    Symlink,
 }
 
 impl Kind {
     fn from_raw(k: u8) -> Self {
-        if k == KIND_DIR { Kind::Dir } else { Kind::File }
+        match k {
+            KIND_DIR => Kind::Dir,
+            KIND_SYMLINK => Kind::Symlink,
+            _ => Kind::File,
+        }
     }
 
-    fn raw(self) -> u8 {
+    pub(crate) fn raw(self) -> u8 {
         match self {
             Kind::File => KIND_FILE,
             Kind::Dir => KIND_DIR,
+            Kind::Symlink => KIND_SYMLINK,
         }
     }
 }
@@ -63,6 +72,10 @@ pub struct Stat {
     pub size: u64,
     pub mtime: u64,
     pub ctime: u64,
+    /// Cas vytvoreni.
+    pub btime: u64,
+    /// Generace vzniku objektu (spolu s `oid` jednoznacne urcuje objekt).
+    pub generation: u64,
     /// U adresare: soucet velikosti vsech souboru v podstromu.
     pub tree_bytes: u64,
     /// U adresare: pocet souboru v podstromu.
@@ -281,6 +294,8 @@ impl<D: BlockDevice> Fs<D> {
             size: i.size,
             mtime: i.mtime,
             ctime: i.ctime,
+            btime: i.btime,
+            generation: i.generation,
             tree_bytes: i.tree_bytes,
             tree_files: i.tree_files,
             tree_dirs: i.tree_dirs,
@@ -331,19 +346,55 @@ impl<D: BlockDevice> Fs<D> {
         self.read_oid(&root, oid, offset, len, true)
     }
 
+    /// Cil symbolickeho odkazu (`WrongType`, kdyz `path` neni odkaz).
+    pub fn readlink(&mut self, path: &str) -> Result<String> {
+        let root = self.s.root;
+        let oid = self.resolve(&root, path)?;
+        self.readlink_oid(&root, oid)
+    }
+
+    fn readlink_oid(&mut self, root: &Child, oid: u64) -> Result<String> {
+        if self.inode(root, oid)?.kind != KIND_SYMLINK {
+            return Err(Error::WrongType);
+        }
+        let raw = btree::get(&mut self.s, root, &Key::new(oid, item::SYMLINK, 0))?
+            .ok_or(Error::Corrupted)?;
+        String::from_utf8(raw).map_err(|_| Error::Corrupted)
+    }
+
+    // --- zapis do stromu ---
+
+    /// Vlozi nebo nahradi polozku v zivem stromu.
+    fn put(&mut self, key: Key, value: Vec<u8>) -> Result<()> {
+        let mut root = self.s.root;
+        let r = btree::insert(&mut self.s, &mut root, key, value);
+        self.s.root = root;
+        r
+    }
+
+    /// Odstrani polozku ze ziveho stromu; vraci, zda existovala.
+    fn del(&mut self, key: &Key) -> Result<bool> {
+        let mut root = self.s.root;
+        let r = btree::remove(&mut self.s, &mut root, key);
+        self.s.root = root;
+        r
+    }
+
     // --- zmeny adresaru (na urovni oid, aby je slo prehrat z logu) ---
 
     fn put_inode(&mut self, oid: u64, i: &Inode) -> Result<()> {
-        btree::insert(&mut self.s, Key::new(oid, item::INODE, 0), i.encode())
+        self.put(Key::new(oid, item::INODE, 0), i.encode())
     }
 
     /// Promitne zmenu do souhrnu adresare `dir` a vsech jeho predku.
+    /// Souhrny saturuji (ridke soubory muzou mit dohromady logickou
+    /// velikost nad 2^64); saturovany souhrn je jen informativni.
     fn adjust_tree(&mut self, mut dir: u64, bytes: i64, files: i64, dirs: i64) -> Result<()> {
         loop {
             let mut i = self.live_inode(dir)?;
-            i.tree_bytes = i.tree_bytes.wrapping_add_signed(bytes);
-            i.tree_files = i.tree_files.wrapping_add_signed(files);
-            i.tree_dirs = i.tree_dirs.wrapping_add_signed(dirs);
+            i.tree_bytes = i.tree_bytes.saturating_add_signed(bytes);
+            i.tree_files = i.tree_files.saturating_add_signed(files);
+            i.tree_dirs = i.tree_dirs.saturating_add_signed(dirs);
             self.put_inode(dir, &i)?;
             if dir == ROOT_OID {
                 return Ok(());
@@ -360,7 +411,13 @@ impl<D: BlockDevice> Fs<D> {
             None => Vec::new(),
         };
         list.push(d);
-        btree::insert(&mut self.s, key, encode_dirents(&list))
+        let value = encode_dirents(&list);
+        // Jmena se stejnym hashem sdili jednu hodnotu; s dlouhymi jmeny by
+        // mohla prerust uzel (prakticky jen pri umyslne vyrobene kolizi).
+        if value.len() > MAX_VALUE {
+            return Err(Error::NoResources);
+        }
+        self.put(key, value)
     }
 
     fn remove_dirent(&mut self, dir: u64, name: &str) -> Result<()> {
@@ -371,10 +428,10 @@ impl<D: BlockDevice> Fs<D> {
             decode_dirents(&btree::get(&mut self.s, &root, &key)?.ok_or(Error::NotFound)?)?;
         list.retain(|d| fold_name(&d.name) != folded);
         if list.is_empty() {
-            btree::remove(&mut self.s, &key)?;
+            self.del(&key)?;
             Ok(())
         } else {
-            btree::insert(&mut self.s, key, encode_dirents(&list))
+            self.put(key, encode_dirents(&list))
         }
     }
 
@@ -403,22 +460,53 @@ impl<D: BlockDevice> Fs<D> {
         self.create_at(parent, name, kind, oid)
     }
 
+    /// Vytvori symbolicky odkaz `path` s cilem `target` (libovolny text do
+    /// `SYMLINK_MAX` bajtu bez NUL; cil nemusi existovat).
+    pub fn symlink(&mut self, path: &str, target: &str) -> Result<()> {
+        let (parent_path, name) = split_parent(path)?;
+        validate_name(name)?;
+        validate_target(target)?;
+        let parent = self.dir_of(parent_path)?;
+        self.ensure_room(4)?;
+        let oid = self.s.next_oid;
+        self.symlink_at(parent, name, target, oid)?;
+        self.zil.op(zil::Op::Symlink {
+            parent,
+            oid,
+            name: stored_name(name),
+            target: target.into(),
+            time: self.now,
+        });
+        Ok(())
+    }
+
+    fn symlink_at(&mut self, parent: u64, name: &str, target: &str, oid: u64) -> Result<()> {
+        self.new_object(parent, name, Kind::Symlink, oid, target.len() as u64)?;
+        self.put(Key::new(oid, item::SYMLINK, 0), target.as_bytes().to_vec())
+    }
+
     fn create_at(&mut self, parent: u64, name: &str, kind: Kind, oid: u64) -> Result<()> {
+        let name = self.new_object(parent, name, kind, oid, 0)?;
+        self.zil.op(zil::Op::Create {
+            parent,
+            oid,
+            kind: kind.raw(),
+            name,
+            time: self.now,
+        });
+        Ok(())
+    }
+
+    /// Zalozi zaznam objektu a polozku v rodici; vraci ulozene jmeno.
+    fn new_object(&mut self, parent: u64, name: &str, kind: Kind, oid: u64, size: u64) -> Result<String> {
         let root = self.s.root;
         if self.lookup_child(&root, parent, name)?.is_some() {
             return Err(Error::AlreadyExists);
         }
-        self.s.next_oid = self.s.next_oid.max(oid + 1);
-        let inode = Inode {
-            kind: kind.raw(),
-            size: 0,
-            mtime: self.now,
-            ctime: self.now,
-            parent,
-            tree_bytes: 0,
-            tree_files: 0,
-            tree_dirs: 0,
-        };
+        let next = oid.checked_add(1).ok_or(Error::NoResources)?;
+        self.s.next_oid = self.s.next_oid.max(next);
+        let mut inode = Inode::new(kind.raw(), parent, self.now, self.s.txg);
+        inode.size = size;
         self.put_inode(oid, &inode)?;
         let name = stored_name(name);
         self.add_dirent(
@@ -431,17 +519,10 @@ impl<D: BlockDevice> Fs<D> {
         )?;
         self.touch_dir(parent)?;
         match kind {
-            Kind::File => self.adjust_tree(parent, 0, 1, 0)?,
+            Kind::File | Kind::Symlink => self.adjust_tree(parent, 0, 1, 0)?,
             Kind::Dir => self.adjust_tree(parent, 0, 0, 1)?,
         }
-        self.zil.op(zil::Op::Create {
-            parent,
-            oid,
-            kind: kind.raw(),
-            name,
-            time: self.now,
-        });
-        Ok(())
+        Ok(name)
     }
 
     /// Odstrani soubor nebo prazdny adresar.
@@ -468,16 +549,19 @@ impl<D: BlockDevice> Fs<D> {
             if !first.is_empty() {
                 return Err(Error::NotEmpty);
             }
+        } else if inode.kind == KIND_SYMLINK {
+            self.del(&Key::new(d.oid, item::SYMLINK, 0))?;
         } else {
             self.drop_content(d.oid)?;
         }
-        btree::remove(&mut self.s, &Key::new(d.oid, item::INODE, 0))?;
+        self.del(&Key::new(d.oid, item::INODE, 0))?;
         self.remove_dirent(parent, &d.name)?;
         self.touch_dir(parent)?;
-        if inode.kind == KIND_DIR {
-            self.adjust_tree(parent, 0, 0, -1)?;
-        } else {
-            self.adjust_tree(parent, -(inode.size as i64), -1, 0)?;
+        match inode.kind {
+            KIND_DIR => self.adjust_tree(parent, 0, 0, -1)?,
+            KIND_SYMLINK => self.adjust_tree(parent, 0, -1, 0)?,
+            // Velikost <= MAX_FILE_SIZE (overeno pri cteni zaznamu).
+            _ => self.adjust_tree(parent, -(inode.size as i64), -1, 0)?,
         }
         self.zil.op(zil::Op::Remove {
             parent,
@@ -522,14 +606,12 @@ impl<D: BlockDevice> Fs<D> {
             a = self.inode(&root, a)?.parent;
         }
         let mut inode = self.inode(&root, d.oid)?;
-        let (bytes, files, dirs) = if inode.kind == KIND_DIR {
-            (
-                inode.tree_bytes as i64,
-                inode.tree_files as i64,
-                inode.tree_dirs as i64 + 1,
-            )
-        } else {
-            (inode.size as i64, 1, 0)
+        // Souhrny saturuji na i64::MAX (presun obriho podstromu).
+        let sat = |v: u64| v.min(i64::MAX as u64) as i64;
+        let (bytes, files, dirs) = match inode.kind {
+            KIND_DIR => (sat(inode.tree_bytes), sat(inode.tree_files), sat(inode.tree_dirs).saturating_add(1)),
+            KIND_SYMLINK => (0, 1, 0),
+            _ => (sat(inode.size), 1, 0),
         };
         let new_name = stored_name(tname);
         self.remove_dirent(src, &d.name)?;
@@ -559,4 +641,13 @@ impl<D: BlockDevice> Fs<D> {
         });
         Ok(())
     }
+}
+
+/// Cil symbolickeho odkazu: neprazdny, do `SYMLINK_MAX` bajtu, bez NUL
+/// (zbytek se nekontroluje - odkaz muze mirit kamkoli, i neexistujici).
+fn validate_target(target: &str) -> Result<()> {
+    if target.is_empty() || target.len() > SYMLINK_MAX || target.contains('\0') {
+        return Err(Error::InvalidArgs);
+    }
+    Ok(())
 }

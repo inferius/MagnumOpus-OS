@@ -1,6 +1,6 @@
 # File system
 
-Our own file system (working name "OSFS", format v2). The code lives in the
+Our own file system (working name "OSFS", format v3). The code lives in the
 `libs/fs` library (`no_std`, the same on the host and in the system), the
 service on top of a disk is `user/fsd`, and `libs/fsproto` defines the
 protocol between a client and the service.
@@ -8,6 +8,13 @@ protocol between a client and the service.
 Design goals: **never lose consistency** (not even on power loss or a lying
 disk), **detect every data corruption**, **be fast** (contiguous writes,
 cheap `fsync`) and **not waste space** (metadata overhead ~0.4 %).
+
+> Format v3 is being introduced in phases according to the [FS v3
+> design](fs-v3-design.md). The first part of phase 1 is done: 16 KiB nodes,
+> v3 pointer, superblock and object record, names up to 1024 characters,
+> symbolic links and the file size limit. A v2 volume is not mounted
+> (`NOT_SUPPORTED`); data is not converted yet, disks from the `xtask` tool
+> are simply recreated.
 
 ## What it offers
 
@@ -25,6 +32,10 @@ cheap `fsync`) and **not waste space** (metadata overhead ~0.4 %).
 | Background defragmentation | done | [Fragmentation](#fragmentation-and-defragmentation) |
 | Instant directory size (subtree summaries) | done | [Summaries](#instant-directory-sizes) |
 | Case-insensitive names (Unicode NFC) | done | [Names](#file-names) |
+| Names up to 1024 characters, text direction controls forbidden | done | [Names](#file-names) |
+| Symbolic links | done (library; listing only in the protocol) | [Symbolic links](#symbolic-links) |
+| Files up to 2^63-1 B, checked arithmetic | done | [Limits](#format-limits) |
+| Volume UUID and feature flags (compat/ro/incompat) | done | [Superblock](#superblock) |
 | Read-only snapshots and their deletion (deadlists) | done | [Snapshots](#snapshots) |
 | Consistency check (fsck) and data verification (scrub) | done | [Check](#consistency-check-and-scrub) |
 | Writable clones, native git, indexes, search | planned | [Versioning and git](#versioning-and-git) |
@@ -60,11 +71,13 @@ Directly on a device (host tools, tests):
 use fs::{Algo, FileDevice, FormatOptions, Fs, Kind};
 
 let dev = FileDevice::open("data.img".as_ref())?;
-let opts = FormatOptions { label: "data".into(), algo: Algo::Xxh3, ag_blocks: None };
+let opts = FormatOptions { label: "data".into(), algo: Algo::Xxh3, ag_blocks: None, uuid: None };
 let dev = Fs::format(dev, &opts)?;          // a new empty file system
 let mut fs = Fs::mount(dev)?;               // mount (+ intent log replay)
 fs.create("/welcome.txt", Kind::File)?;
 fs.write("/welcome.txt", 0, b"Hello!\n")?;
+fs.symlink("/intro", "/welcome.txt")?;     // a symbolic link (the target is text)
+assert_eq!(fs.readlink("/intro")?, "/welcome.txt");
 fs.commit()?;                               // atomically saves everything
 let report = fs.check(true)?;               // fsck + scrub
 assert!(report.problems.is_empty());
@@ -78,9 +91,10 @@ assert!(report.problems.is_empty());
 | **transaction (txg)** | All changes since the last commit. Numbered `txg = generation of the last commit + 1`. |
 | **generation** | The number of a saved state (commit). Increases by 1. |
 | **birth** | The generation in which a block was created. Decides when the block may be freed. |
-| **pointer (`BlockPtr`)** | (block number, birth, 128-bit checksum of the content). |
-| **object (oid)** | A file or a directory; number `oid`. The root has `oid` 1, system metadata 0. |
-| **extent** | A contiguous range of file data: physical start, length (at most 120 blocks), checksum of every block. |
+| **node** | A node of the metadata B+tree: 16 KiB = 4 contiguous blocks (`NODE_BLOCKS`). |
+| **pointer (`BlockPtr`)** | (device, block number, length, birth, 128-bit checksum of the content, flags). |
+| **object (oid)** | A file, a directory or a symbolic link; number `oid`. The root has `oid` 1, system metadata 0. |
+| **extent** | A contiguous range of file data: physical start, length (at most 496 blocks ~ 2 MiB), checksum of every block. |
 | **allocation group (AG)** | A range of the disk (1 GiB by default) with its own free-space record. |
 
 ## On-disk layout
@@ -99,30 +113,47 @@ assert!(report.problems.is_empty());
 
 ### Superblock
 
-The superblock carries **its own** XXH3-128 checksum in the last 16 bytes
-of the block (it must be verifiable before the chosen algorithm is known).
-The valid one is the one with the highest generation whose state can be
-loaded.
+The superblock has its **own** XXH3-128 checksum in the last 16 bytes of the
+block (it must be verifiable before the chosen algorithm is known). The
+valid one is the one with the highest generation whose state can be loaded.
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
-| 0 | 8 | magic | `OSFS\0\0v2` |
-| 8 | 4 | version | 2 |
+| 0 | 8 | magic | `OSFS\0\0v3` |
+| 8 | 4 | version | 3 |
 | 12 | 1 | algo | 1 = XXH3-128, 2 = BLAKE3 |
 | 16 | 8 | generation | commit number |
 | 24 | 8 | block_count | volume size in blocks |
-| 32 | 8 | ag_blocks | allocation group size |
-| 40 | 32 | root | `BlockPtr` of the B+tree root |
-| 72 | 32 | space | `BlockPtr` of the AG table index |
-| 104 | 8 | zil_block | first block of this epoch's intent log |
-| 112 | 8 | zil_seed | seed of the intent log checksums |
-| 120 | 8 | next_oid | next free object number |
-| 128 | 8 | snapshot_generation | generation of the last snapshot |
-| 136 | 8 | next_snapshot | number of the next snapshot (= the live version's dead list) |
-| 144 | 8 | dead_seq | sequence of the next deadlist item |
-| 152 | 4 | unicode_version | Unicode tables version for names |
-| 160 | 32 | label | volume label (UTF-8, zero-padded) |
+| 32 | 8 | ag_blocks | allocation group size (64 blocks up to 2^20 groups) |
+| 40 | 16 | uuid | unique volume ID |
+| 56 | 8 | features_compat | features an older driver may use normally |
+| 64 | 8 | features_ro_compat | features an older driver may only read |
+| 72 | 8 | features_incompat | features without which the volume must not be mounted |
+| 80 | 40 | root | `BlockPtr` of the B+tree root |
+| 120 | 40 | space | `BlockPtr` of the AG table index |
+| 160 | 8 | zil_block | first intent log block of this epoch |
+| 168 | 8 | zil_seed | seed of the intent log checksums |
+| 176 | 8 | next_oid | next free object number |
+| 184 | 8 | snapshot_generation | generation of the last snapshot |
+| 192 | 8 | next_snapshot | number of the next snapshot (= dead list of the live version) |
+| 200 | 8 | dead_seq | sequence of the next dead list entry |
+| 208 | 4 | unicode_version | Unicode table version for names |
+| 212 | 2 | device_index | this device in the volume (0 for now) |
+| 214 | 2 | device_count | number of devices of the volume (1 for now) |
+| 216 | 32 | label | volume name (UTF-8, zero padded) |
 | 4080 | 16 | csum | XXH3-128 of bytes 0..4080 |
+
+**Feature flags** work as in ext4: every bit = one format feature
+(compression, encryption, ...). A driver that does not know a bit from
+`ro_compat` or `incompat` refuses the volume with `NOT_SUPPORTED` - so it
+never damages it by not understanding new structures. No bits are defined
+yet.
+
+The **UUID** comes from `FormatOptions::uuid` at format time; host tools
+(`xtask`) pass a random one. Without it, it is derived from the label, size
+and a stack address (there is no randomness source in `no_std`) - then
+uniqueness is not guaranteed. A superblock with `ag_blocks < 64`, more than
+2^20 groups or zero devices is `CORRUPTED`.
 
 ## Checksums and the Merkle tree
 
@@ -174,13 +205,21 @@ The hashes currently come from the `xxhash-rust` and `blake3` libraries
 warning with newer Rust - to be solved by an update or our own
 implementation.
 
-### Pointer (`BlockPtr`, 32 B)
+### Pointer (`BlockPtr`, 40 B)
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 8 | block number |
+| 0 | 8 | address: block number (bits 0-47) \| volume device (bits 48-63) |
 | 8 | 8 | birth (generation of creation) |
-| 16 | 16 | checksum of the block content |
+| 16 | 16 | checksum of the content (all blocks it points to) |
+| 32 | 4 | length in blocks (tree node = 4) |
+| 36 | 2 | flags: 1 = compressed, 2 = encrypted, 4 = shared blocks (not used yet) |
+| 38 | 2 | reserved (zeros) |
+
+48 bits of block number = up to 1 EiB per device; the device number is
+prepared for volumes spanning several disks. A pointer to a node must have
+length exactly 4 and the whole range inside the volume, otherwise the node
+is `CORRUPTED` (checked before it is read and its checksum verified).
 
 ## Metadata B+tree
 
@@ -191,59 +230,154 @@ content).
 
 | Kind | Value | Key offset | Item value |
 |---|---|---|---|
-| `INODE` | 1 | 0 | object record, 64 B (see below) |
+| `INODE` | 1 | 0 | object record, 128 B (see below) |
 | `DIRENT` | 2 | FNV-1a hash of the folded name | list of entries with the same hash: (oid u64, kind u8, name length u16, name) |
 | `INLINE` | 3 | 0 | the whole content of a file up to 1984 B (`INLINE_MAX`) |
 | `EXTENT` | 4 | first logical block | phys u64, count u32, reserved u32, birth u64, checksums 16 B × count |
 | `SNAPSHOT` | 5 | snapshot number (object 0) | root `BlockPtr`, generation u64, name |
 | `DEADLIST` | 6 | list << 32 \| sequence (object 0) | up to 80 dead ranges (start u64, length u64, birth u64) |
+| `SYMLINK` | 7 | 0 | target of a symbolic link (UTF-8, 1-4096 B) |
 
-### Object record (inode, 64 B)
+### Object record (inode, 128 B)
 
 | Offset | Field | Meaning |
 |---|---|---|
-| 0 | kind u8 | 1 = file, 2 = directory |
-| 8 | size | file size in bytes |
-| 16 | mtime | time of the last content change (ns) |
-| 24 | ctime | time of the metadata change (ns) |
-| 32 | parent | oid of the parent directory (each object has exactly one parent) |
-| 40 | tree_bytes | directory: total size of files in the whole subtree |
-| 48 | tree_files | directory: number of files in the subtree |
-| 56 | tree_dirs | directory: number of directories in the subtree (excluding itself) |
+| 0 | kind u8 | 1 = file, 2 = directory, 3 = symbolic link |
+| 1 | flags u8 | object flags (0 for now) |
+| 4 | acl u32 | permission descriptor number (0 = inherit; comes in phase 1d) |
+| 8 | size | file: size in bytes (at most 2^63-1); link: target length |
+| 16 | mtime | time of the last content change |
+| 24 | ctime | time of the metadata change |
+| 32 | btime | creation time |
+| 40 | atime | time of the last access (0 = not tracked) |
+| 48 | parent | oid of the parent directory (every object has exactly one parent) |
+| 56 | generation | generation (txg) in which the object was created |
+| 64 | tree_bytes | directory: total size of files in the whole subtree (saturating) |
+| 72 | tree_files | directory: number of files and links in the subtree |
+| 80 | tree_dirs | directory: number of directories in the subtree (excluding itself) |
+| 88 | owner | owner (0 = system; comes with user management) |
+| 96 | xattrs u32 | number of extended attributes |
+| 100 | - | 28 B reserved (zeros) |
 
-### Tree node (4 KiB)
+Times are in nanoseconds from `Fs::set_time` (the fsd service: since boot,
+the `xtask` tool: since 1970). The
+**generation** together with `oid` identifies an object uniquely: the oid of
+a removed object is not reused, but protocol v2 handles are still verified
+against the generation. A record with an unknown kind or a size above
+2^63-1 is `CORRUPTED`.
+
+### Tree node (16 KiB)
+
+A node takes 4 contiguous blocks (`NODE_BLOCKS`) and is allocated and
+written as a whole.
 
 ```text
-0   magic "BT", level u8 (0 = leaf), reserved, item count u16
+0   magic "BT", level u8 (0 = leaf, at most 16), reserved, entry count u16
 8   generation of creation u64
-32  items:
+32  entries:
       leaf (32 B):      key 24 B, value offset u16, length u16, reserved
-      internal (56 B):  key 24 B, child BlockPtr 32 B
-    leaf values are stored from the end of the block downwards
+      internal (64 B):  key 24 B, child BlockPtr 40 B
+    leaf values are stored from the end of the node downwards
 ```
 
-Limits: a value is at most 2000 B (`MAX_VALUE`, guarantees an overfull leaf
-can always be split), an internal node has at most 72 children.
+Limits: a value is at most 8144 B (`MAX_VALUE`, guarantees that an
+overfull leaf can always be split), an internal node has at most 255
+children. The level is stored in every node and checked on every descent
+(a child must be exactly one level lower) - so a damaged pointer cannot turn
+the tree into a loop or slip in a leaf in place of an internal node.
 
-- **Leaf split:** when appending at the end (sequential writes) the new item
-  alone goes right and the left leaf stays full. Otherwise it splits into
-  the most balanced halves. Without this, gradual filling would leave leaves
-  half empty (measured: overhead 0.85 % instead of 0.43 %).
+Why 16 KiB: a name of up to 4 KiB and an extent with 496 checksums fit into
+one entry, the tree is one level shallower (fewer reads per lookup) and the
+header overhead drops. The cost: changing one entry rewrites 16 KiB instead
+of 4 KiB, which copy-on-write turns into contiguous writes at the end of
+the commit.
+
+- **Leaf split:** when appending at the end (sequential write) the new
+  entry goes right alone and the left leaf stays full. Otherwise it splits
+  into the most balanced halves. Without this, gradual filling would leave
+  leaves half empty (measured: overhead 0.85 % instead of 0.43 %).
 - **Removal:** empty nodes are removed, a root with one child is replaced by
-  the child, adjacent underfull leaves (left ≤ 1/4 block, both ≤ 1/2) are
-  merged.
+  that child, adjacent underfull leaves (left <= 1/4 of a node, both <= 1/2)
+  are merged.
 
 ## File names
 
-- Stored as the user typed them (in Unicode NFC) - case is preserved.
-- Compared **case-insensitively** system-wide: key = NFC(lowercase(NFC(name))).
-  `Foto.JPG`, `foto.jpg` and `fóto` written decomposed (`o` + acute) are
-  the same name. The conversion does not depend on language (no Turkish
-  rules for `i`).
-- A valid name: 1-255 bytes of UTF-8, not `.` or `..`, no `/` and no
-  control characters. Otherwise `INVALID_ARGS`.
-- Renaming only to a different case (`/photos` → `/PHOTOS`) is allowed.
-- The Unicode tables version is in the superblock (`unicode_version`).
+- Stored as the user entered them (in Unicode NFC) - letter case is kept.
+- Compared **case-insensitively** across the whole system: the key =
+  NFC(lowercase(NFC(name))). `Foto.JPG`, `foto.jpg` and `fóto` written
+  decomposed (`o` + acute) are the same name. The conversion does not depend
+  on the language (no Turkish rules for `i`).
+- A valid name: **1-1024 Unicode characters and at most 4096 bytes of
+  UTF-8** (`NAME_MAX_CHARS`, `NAME_MAX`), measured on the NFC form that is
+  actually stored. Forbidden are `.` and `..`, the `/` character, control
+  characters (including NUL) and **text direction controls** U+202A-202E and
+  U+2066-2069 (`is_bidi_control`). Otherwise `INVALID_ARGS`.
+- Renaming to a different case only (`/fotky` -> `/FOTKY`) is allowed.
+- The Unicode table version is in the superblock (`unicode_version`).
+
+Why text direction controls are forbidden: U+202E reverses the display
+direction of the rest of the name, so a file `invoice[U+202E]fdp.exe` shows
+in a file manager as `invoiceexe.pdf` - the classic trick for slipping in an
+executable. Other characters that some systems cannot handle (`:` `\` `*`
+`?` on Windows, more than 255 bytes on Linux) are allowed by the FS; the
+Windows (WinFsp) and Linux (FUSE) drivers translate them for display.
+
+```rust
+use fs::{validate_name, is_bidi_control, NAME_MAX_CHARS};
+
+assert!(validate_name("Holiday 2026 - Italy.jpg").is_ok());
+assert!(validate_name(&"x".repeat(NAME_MAX_CHARS)).is_ok());
+assert!(validate_name("invoice\u{202E}fdp.exe").is_err());
+assert!(is_bidi_control('\u{2067}'));
+```
+
+Names with the same hash share one `DIRENT` entry. If long names did not fit
+into it (over 8144 B - in practice only with a deliberately crafted FNV hash
+collision), `create` returns `NO_RESOURCES`.
+
+## Symbolic links
+
+A symbolic link is an object of kind 3 whose content is **the target as
+text** (1-4096 bytes of UTF-8, no NUL; `SYMLINK_MAX`). The target does not
+have to exist and may be relative or absolute. It is stored in a `SYMLINK`
+entry; the object size = the target length.
+
+```rust
+fs.symlink("/project/README", "docs/README.md")?;
+assert_eq!(fs.readlink("/project/README")?, "docs/README.md");
+assert_eq!(fs.stat("/project/README")?.kind, Kind::Symlink);
+fs.rename("/project/README", "/project/READ")?; // move/remove like a file
+fs.remove("/project/READ")?;
+```
+
+- The library does **not follow** links while walking a path: a link in the
+  middle of a path gives `NOT_A_DIRECTORY`, `read`/`write` of a link
+  `WRONG_TYPE`. Following (with a depth limit against loops) will be done by
+  the layer above (VFS/fsd).
+- In directory summaries a link counts as a file of size 0.
+- `symlink` is written to the intent log (record 7), so it survives `fsync`
+  even without a commit.
+- Protocol fsproto v1 only shows a link (`kind::SYMLINK` in `STAT` and
+  `LIST`); creating one through the service comes with protocol v2.
+
+## Format limits
+
+| What | Limit | Constant |
+|---|---|---|
+| file size | 2^63-1 B (8 EiB) | `MAX_FILE_SIZE` |
+| name | 1024 characters / 4096 B UTF-8 | `NAME_MAX_CHARS`, `NAME_MAX` |
+| symbolic link target | 4096 B | `SYMLINK_MAX` |
+| file stored directly in the tree | 1984 B | `INLINE_MAX` |
+| extent | 496 blocks (~2 MiB) | `MAX_EXTENT` |
+| tree entry value | 8144 B | `node::MAX_VALUE` |
+| tree depth | 17 levels | `node::MAX_LEVEL` |
+| volume device | 2^48 blocks (1 EiB) | 48 address bits in `BlockPtr` |
+
+A write or `truncate` beyond `MAX_FILE_SIZE` returns `OUT_OF_RANGE`. Thanks
+to the limit, a size and the difference of two sizes always fit into
+`i64`. Directory summaries **saturate** at 2^64-1: sparse files may together
+have a logical size larger than can be summed - a saturated summary is only
+informative (the data is fine).
 
 ## Instant directory sizes
 
@@ -593,11 +727,11 @@ without a disk, release, one thread):
 
 | Measurement | Result |
 |---|---|
-| sequential write of 512 MiB in 1 MiB pieces + commit | ~650-720 MiB/s, **1 contiguous range** |
-| sequential read | ~2.8-3.5 GiB/s |
-| metadata overhead for data (tree, extents, checksums) | **0.43 %** of capacity |
-| 20,000 files of 4 KiB (create + write + commit) | ~83,000 files/s |
-| `stat` of a directory with 20,000 files (subtree size) | 13.5 µs |
+| sequential write of 512 MiB in 1 MiB pieces + commit | ~620-720 MiB/s, **1 contiguous range** |
+| sequential read | ~2.5-3.2 GiB/s |
+| metadata overhead for data (tree, extents, checksums) | **0.42 %** of capacity |
+| 20,000 files of 4 KiB (create + write + commit) | ~72,000-74,000 files/s |
+| `stat` of a directory with 20,000 files (subtree size) | 10-13 µs |
 
 Run: `cargo test -p fs --features std --release -- --ignored --nocapture perf`.
 
@@ -606,7 +740,7 @@ Run: `cargo test -p fs --features std --release -- --ignored --nocapture perf`.
 `user/fsd` keeps one mounted volume and serves a client over a channel.
 
 - **Start:** at boot, init reads blocks 1-8 of all disks and starts the
-  service on the first one with the signature `OSFS\0\0v2`. Startup message:
+  service on the first one with the signature `OSFS\0\0v3`. Startup message:
   a channel to the disk driver and a channel for the client (both
   `kind USER`). The first message on the bootstrap channel is the
   configuration: space-separated words, `debug` enables test operations.
@@ -631,10 +765,10 @@ data = rest of the message. One read/write moves at most 32 KiB
 |---|---|---|---|
 | 1 | `INFO` | - | volume label, block size, blocks, free, delayed, generation, algorithm, fallback, replayed |
 | 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, subtree summaries) |
-| 3 | `LIST` | path | count u32 + (kind u8, oid u64, name) - sorted by name |
+| 3 | `LIST` | path | count u32 + (kind u8, oid u64, name) - sorted by name; kind 1 file, 2 directory, 3 symbolic link |
 | 4 | `READ` | path, offset u64, length u32 | data (shorter at the end of the file) |
 | 5 | `WRITE` | path, offset u64, data | - |
-| 6 | `CREATE` | path, kind u8 (1 file, 2 directory) | - |
+| 6 | `CREATE` | path, kind u8 (1 file, 2 directory; other = `INVALID_ARGS`) | - |
 | 7 | `REMOVE` | path | - |
 | 8 | `RENAME` | from, to | - |
 | 9 | `TRUNCATE` | path, size u64 | - |
@@ -670,7 +804,10 @@ system returns them:
 | `NOT_A_DIRECTORY` | a path component or the target of `list` is a file |
 | `IS_A_DIRECTORY` | `read`/`write`/`truncate` of a directory |
 | `NOT_EMPTY` | `remove` of a non-empty directory |
-| `INVALID_ARGS` | relative path, invalid name, moving a directory into its own subtree, offset + length overflow, formatting a device smaller than 64 blocks |
+| `INVALID_ARGS` | relative path, invalid name or link target, moving a directory into its own subtree, formatting a device smaller than 64 blocks |
+| `OUT_OF_RANGE` | a write or `truncate` beyond `MAX_FILE_SIZE` (2^63-1 B), offset + length overflow |
+| `WRONG_TYPE` | `read`/`write`/`truncate` of a symbolic link, `readlink` of something that is not a link |
+| `NO_RESOURCES` | a directory entry with colliding names would outgrow `MAX_VALUE` |
 | `NO_SPACE` | a write or create would consume the commit reserve |
 | `CORRUPTED` | a block checksum does not match or a structure makes no sense; for data reads = a damaged block (other files remain readable) |
 | `IO_ERROR` | a device error; after a failed commit all further changes (mount again) |
@@ -685,6 +822,7 @@ system returns them:
 | `tests/features.rs` | contiguous writes, fsync + replay, generation fallback, snapshot deletion, defragmentation, TRIM, many AGs + BLAKE3, log condensing |
 | `tests/model.rs` | property test: random sequences (create, write, truncate, remove, move, commit, fsync, "crash", snapshots) against an in-memory model; fsck at the end |
 | `tests/crash.rs` | power loss during commit and fsync with a random subset of unwritten blocks |
+| `tests/objects.rs` | format v3: object record, names up to 1024 characters, text direction controls rejected, symbolic links (also through the intent log), file size limit and summary saturation, object generation |
 | `tests/perf.rs` | performance and overhead (run manually) |
 | init `tests/fs.rs` | 11 tests in the system through fsd and the real virtio-blk driver, including a file written on the host and a power-loss simulation |
 

@@ -7,6 +7,7 @@ mod basic;
 mod crash;
 mod features;
 mod model;
+mod objects;
 mod perf;
 
 use crate::{Algo, BlockDevice, FormatOptions, Fs, MemDevice};
@@ -24,6 +25,7 @@ fn opts(label: &str) -> FormatOptions {
         label: label.into(),
         algo: Algo::Xxh3,
         ag_blocks: None,
+        uuid: None,
     }
 }
 

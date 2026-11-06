@@ -64,6 +64,13 @@ pub enum Op {
         size: u64,
         time: u64,
     },
+    Symlink {
+        parent: u64,
+        oid: u64,
+        name: String,
+        target: String,
+        time: u64,
+    },
 }
 
 /// Zaznam davky.
@@ -179,6 +186,20 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 put_u64(&mut b, *size);
                 put_u64(&mut b, *time);
             }
+            Record::Op(Op::Symlink {
+                parent,
+                oid,
+                name,
+                target,
+                time,
+            }) => {
+                b.push(7);
+                put_u64(&mut b, *parent);
+                put_u64(&mut b, *oid);
+                put_u64(&mut b, *time);
+                put_str(&mut b, name);
+                put_str(&mut b, target);
+            }
             Record::Inline {
                 oid,
                 size,
@@ -276,6 +297,17 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
                     name,
                     dst,
                     new_name,
+                    time,
+                })
+            }
+            7 => {
+                let (parent, oid, time) = (r.u64()?, r.u64()?, r.u64()?);
+                let (name, target) = (r.str()?, r.str()?);
+                Record::Op(Op::Symlink {
+                    parent,
+                    oid,
+                    name,
+                    target,
                     time,
                 })
             }
@@ -493,12 +525,22 @@ impl<D: BlockDevice> Fs<D> {
                 time,
             }) => {
                 self.now = time;
-                let kind = if kind == crate::layout::KIND_DIR {
-                    Kind::Dir
-                } else {
-                    Kind::File
+                let kind = match kind {
+                    crate::layout::KIND_DIR => Kind::Dir,
+                    crate::layout::KIND_FILE => Kind::File,
+                    _ => return Err(Error::Corrupted),
                 };
                 self.create_at(parent, &name, kind, oid).map_err(bad)
+            }
+            Record::Op(Op::Symlink {
+                parent,
+                oid,
+                name,
+                target,
+                time,
+            }) => {
+                self.now = time;
+                self.symlink_at(parent, &name, &target, oid).map_err(bad)
             }
             Record::Op(Op::Remove { parent, name, time }) => {
                 self.now = time;
@@ -547,7 +589,7 @@ impl<D: BlockDevice> Fs<D> {
                     self.s.space.claim(e.phys, n, txg)?;
                     self.s.mark_changed();
                     e.birth = txg;
-                    btree::insert(&mut self.s, Key::new(oid, item::EXTENT, lb), e.encode())?;
+                    self.put(Key::new(oid, item::EXTENT, lb), e.encode())?;
                     // Mapovani z logu ma prednost pred prevedenym obsahem.
                     if let Some(fd) = self.data.get_mut(&oid) {
                         let before = fd.blocks.len();

@@ -22,7 +22,7 @@ use crate::device::BlockDevice;
 use crate::hash::{Algo, xxh3};
 use crate::layout::{
     BLOCK_SIZE, BlockPtr, DATA_START, DeadExtent, FIRST_FREE_OID, INODE_SIZE, Inode, KIND_DIR, Key,
-    REUSE_DELAY, ROOT_OID, SB_COUNT, SB_FIRST, Superblock, item,
+    NODE_BLOCKS, NODE_SIZE, REUSE_DELAY, ROOT_OID, SB_COUNT, SB_FIRST, Superblock, item,
 };
 use crate::node::{Body, Child, Node};
 use crate::space::{Class, INDEX_PER_BLOCK, Space, TABLE_PER_BLOCK};
@@ -34,6 +34,21 @@ pub const MIN_BLOCKS: u64 = 64;
 /// Vychozi velikost alokacni skupiny: 1 GiB.
 pub const DEFAULT_AG_BLOCKS: u64 = 262_144;
 
+/// UUID svazku: zadane, jinak odvozene z jmena, velikosti a adresy
+/// promenne na zasobniku (bez zdroje nahody v `no_std`; nastroje na
+/// hostiteli predavaji nahodne).
+fn volume_uuid(label: &str, blocks: u64, given: Option<[u8; 16]>) -> [u8; 16] {
+    if let Some(u) = given {
+        return u;
+    }
+    let marker = 0u8;
+    let mut seed = alloc::vec::Vec::new();
+    seed.extend_from_slice(label.as_bytes());
+    seed.extend_from_slice(&blocks.to_le_bytes());
+    seed.extend_from_slice(&(&marker as *const u8 as u64).to_le_bytes());
+    xxh3(&seed).0
+}
+
 /// Parametry formatovani.
 #[derive(Debug, Clone)]
 pub struct FormatOptions {
@@ -42,6 +57,8 @@ pub struct FormatOptions {
     /// Velikost alokacni skupiny v blocich (None = vychozi, pro velke disky
     /// se zvetsi, aby tabulka skupin zustala mala).
     pub ag_blocks: Option<u64>,
+    /// UUID svazku (None = odvodit).
+    pub uuid: Option<[u8; 16]>,
 }
 
 impl Default for FormatOptions {
@@ -50,6 +67,7 @@ impl Default for FormatOptions {
             label: alloc::string::String::new(),
             algo: Algo::Xxh3,
             ag_blocks: None,
+            uuid: None,
         }
     }
 }
@@ -122,6 +140,10 @@ impl<D: BlockDevice> Store<D> {
             block_count: blocks,
             algo: opts.algo,
             ag_blocks,
+            uuid: volume_uuid(&opts.label, blocks, opts.uuid),
+            features_compat: 0,
+            features_ro_compat: 0,
+            features_incompat: 0,
             root: BlockPtr::default(),
             space: BlockPtr::default(),
             zil_block: 0,
@@ -131,24 +153,20 @@ impl<D: BlockDevice> Store<D> {
             next_snapshot: 1,
             dead_seq: 0,
             unicode_version: crate::names::UNICODE_VERSION,
+            device_index: 0,
+            device_count: 1,
             label,
         };
         let mut s = Self::with_state(dev, sb, Space::new(blocks, ag_blocks), Child::Mem(0));
-        let root_dir = Inode {
-            kind: KIND_DIR,
-            size: 0,
-            mtime: 0,
-            ctime: 0,
-            parent: 0,
-            tree_bytes: 0,
-            tree_files: 0,
-            tree_dirs: 0,
-        };
+        let root_dir = Inode::new(KIND_DIR, 0, 0, 0);
         debug_assert_eq!(root_dir.encode().len(), INODE_SIZE);
-        let id = s.new_node(Body::Leaf(vec![(
-            Key::new(ROOT_OID, item::INODE, 0),
-            root_dir.encode(),
-        )]));
+        let id = s.new_node(
+            0,
+            Body::Leaf(vec![(
+                Key::new(ROOT_OID, item::INODE, 0),
+                root_dir.encode(),
+            )]),
+        );
         s.root = Child::Mem(id);
         s.commit()?;
         Ok(s.dev)
@@ -304,11 +322,16 @@ impl<D: BlockDevice> Store<D> {
     /// Nacte ulozeny uzel a overi jeho kontrolni soucet.
     pub fn load(&mut self, ptr: &BlockPtr) -> Result<&Node> {
         if !self.cache.contains_key(&ptr.block) {
-            if ptr.block < DATA_START || ptr.block >= self.sb.block_count {
+            let inside = ptr.block >= DATA_START
+                && ptr
+                    .block
+                    .checked_add(NODE_BLOCKS)
+                    .is_some_and(|e| e <= self.sb.block_count);
+            if !inside || ptr.len as u64 != NODE_BLOCKS {
                 return Err(Error::Corrupted);
             }
-            let mut buf = vec![0u8; BLOCK_SIZE];
-            self.dev.read_block(ptr.block, &mut buf)?;
+            let mut buf = vec![0u8; NODE_SIZE];
+            self.dev.read_blocks(ptr.block, &mut buf)?;
             if self.algo.sum(&buf) != ptr.csum {
                 return Err(Error::Corrupted);
             }
@@ -338,7 +361,7 @@ impl<D: BlockDevice> Store<D> {
                 let mut node = self.load(&p)?.clone();
                 node.generation = self.txg;
                 self.cache.remove(&p.block);
-                self.release(p.block, 1, p.birth);
+                self.release(p.block, NODE_BLOCKS, p.birth);
                 Ok(self.insert_dirty(node))
             }
         }
@@ -352,9 +375,14 @@ impl<D: BlockDevice> Store<D> {
         id
     }
 
-    pub fn new_node(&mut self, body: Body) -> u64 {
+    /// Novy rozpracovany uzel urovne `level` (0 = list).
+    pub fn new_node(&mut self, level: u8, body: Body) -> u64 {
         let generation = self.txg;
-        self.insert_dirty(Node { generation, body })
+        self.insert_dirty(Node {
+            generation,
+            level,
+            body,
+        })
     }
 
     pub fn dirty_mut(&mut self, id: u64) -> &mut Node {
@@ -371,7 +399,7 @@ impl<D: BlockDevice> Store<D> {
             }
             Child::Disk(p) => {
                 self.cache.remove(&p.block);
-                self.release(p.block, 1, p.birth);
+                self.release(p.block, NODE_BLOCKS, p.birth);
             }
         }
         self.changed = true;
@@ -405,10 +433,9 @@ impl<D: BlockDevice> Store<D> {
         self.changed || !self.dirty.is_empty()
     }
 
-    /// Zapise rozpracovane uzly (potomci pred rodici, do souvislych useku);
-    /// vraci ukazatel na novy koren.
-    fn write_tree(&mut self) -> Result<BlockPtr> {
-        let root = self.root;
+    /// Zapise rozpracovane uzly stromu s korenem `root` (potomci pred
+    /// rodici, do souvislych useku); vraci ukazatel na novy koren.
+    pub fn write_tree(&mut self, root: Child) -> Result<BlockPtr> {
         let Child::Mem(root_id) = root else {
             let Child::Disk(p) = root else { unreachable!() };
             return Ok(p);
@@ -430,19 +457,21 @@ impl<D: BlockDevice> Store<D> {
                 }
             }
         }
-        let mut blocks = Vec::with_capacity(order.len());
-        while blocks.len() < order.len() {
-            let (s, l) = self.space.alloc(
-                (order.len() - blocks.len()) as u64,
-                None,
-                Class::Meta,
-                self.txg,
-            )?;
-            blocks.extend(s..s + l);
+        // Kazdy uzel = NODE_BLOCKS souvislych bloku; useky od alokatoru se
+        // pouziji po celych uzlech, zbytek se hned vrati.
+        let mut starts = Vec::with_capacity(order.len());
+        while starts.len() < order.len() {
+            let want = (order.len() - starts.len()) as u64 * NODE_BLOCKS;
+            let (s, l) = self.space.alloc(want, None, Class::Meta, self.txg)?;
+            let usable = l - l % NODE_BLOCKS;
+            if usable < l {
+                self.space.free(s + usable, l - usable, self.txg, true);
+            }
+            starts.extend((0..usable / NODE_BLOCKS).map(|k| s + k * NODE_BLOCKS));
         }
         let mut ptrs: BTreeMap<u64, BlockPtr> = BTreeMap::new();
         let mut out: Vec<(u64, Vec<u8>)> = Vec::with_capacity(order.len());
-        for (&id, &block) in order.iter().zip(&blocks) {
+        for (&id, &block) in order.iter().zip(&starts) {
             let mut node = self.dirty.remove(&id).unwrap();
             if let Body::Internal(children) = &mut node.body {
                 for (_, c) in children.iter_mut() {
@@ -456,6 +485,8 @@ impl<D: BlockDevice> Store<D> {
                 block,
                 birth: self.txg,
                 csum: self.algo.sum(&data),
+                len: NODE_BLOCKS as u32,
+                ..BlockPtr::default()
             };
             ptrs.insert(id, ptr);
             if self.cache.len() < CACHE_LIMIT {
@@ -463,12 +494,8 @@ impl<D: BlockDevice> Store<D> {
             }
             out.push((block, data));
         }
-        debug_assert!(self.dirty.is_empty(), "rozpracovany uzel mimo strom");
-        self.dirty.clear();
         write_runs(&mut self.dev, &mut out)?;
-        let root_ptr = ptrs[&root_id];
-        self.root = Child::Disk(root_ptr);
-        Ok(root_ptr)
+        Ok(ptrs[&root_id])
     }
 
     /// Zapise stav (strom, misto, superblok). Data souboru a deadlisty uz
@@ -487,7 +514,10 @@ impl<D: BlockDevice> Store<D> {
 
     fn commit_inner(&mut self) -> Result<()> {
         let txg = self.txg;
-        let root = self.write_tree()?;
+        let root = self.write_tree(self.root)?;
+        self.root = Child::Disk(root);
+        debug_assert!(self.dirty.is_empty(), "rozpracovany uzel mimo strom");
+        self.dirty.clear();
         // Bloky dosavadni epochy logu: po tomto commitu je nic nepotrebuje.
         // Uvolnit odlozene a uz v tomto commitu (zaznam musi byt v nem, jinak
         // by po vypadku zustaly obsazene); hned je pouzit nejde - do zapisu
@@ -545,7 +575,10 @@ pub fn write_runs<D: BlockDevice>(dev: &mut D, out: &mut [(u64, Vec<u8>)]) -> Re
     let mut i = 0;
     while i < out.len() {
         let mut j = i + 1;
-        while j < out.len() && out[j].0 == out[j - 1].0 + 1 && j - i < 256 {
+        while j < out.len()
+            && out[j].0 == out[j - 1].0 + (out[j - 1].1.len() / BLOCK_SIZE) as u64
+            && j - i < 64
+        {
             j += 1;
         }
         if j - i == 1 {

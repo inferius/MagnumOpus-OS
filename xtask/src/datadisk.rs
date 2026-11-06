@@ -28,6 +28,17 @@ pub fn create(target: &Path) -> Result<PathBuf> {
         label: "data".into(),
         algo: Algo::Xxh3,
         ag_blocks: None,
+        // Nahodne UUID: cas formatovani + adresa na zasobniku.
+        uuid: Some({
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let marker = 0u8;
+            let mut u = (t ^ (&marker as *const u8 as u128)).to_le_bytes();
+            u[6] = (u[6] & 0x0F) | 0x40; // verze 4
+            u
+        }),
     };
     let dev = Fs::format(dev, &opts).map_err(|e| fs_err("formatovani", e))?;
     let mut fs = Fs::mount(dev).map_err(|e| fs_err("pripojeni", e))?;

@@ -72,8 +72,8 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     })
 }
 
-/// Podpis superbloku naseho souboroveho systemu (format v2).
-const FS_MAGIC: &[u8; 8] = b"OSFS\0\0v2";
+/// Podpis superbloku naseho souboroveho systemu (format v3).
+const FS_MAGIC: &[u8; 8] = b"OSFS\0\0v3";
 
 /// Ma disk nas souborovy system? Superbloky lezi v blocich 1..=8
 /// (bloky po 4 KiB = sektory 8..72).

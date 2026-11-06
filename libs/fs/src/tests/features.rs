@@ -243,6 +243,7 @@ fn many_allocation_groups_and_blake3() {
         label: "ag".into(),
         algo: Algo::Blake3,
         ag_blocks: Some(64),
+        uuid: None,
     };
     let mut fs = new_fs_with(4096, &o);
     assert_eq!(fs.info().algo, Algo::Blake3);
