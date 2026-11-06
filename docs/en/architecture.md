@@ -400,6 +400,34 @@ documentation is in Czech and English (`docs/cs`, `docs/en`).
 aarch64 is ported per the milestone plan (milestone 8). Until then code is
 strictly separated into `arch/` so the port does not hurt.
 
+## Languages and compilers (plan)
+
+Agreed approach (2026-11-06):
+
+1. **Rust:** our own target `x86_64-unknown-magnumopus` and a `std` port on
+   top of libos (threads, TLS, synchronization, files, processes, time).
+2. **C:** our own libc on top of libos (under our control, without POSIX
+   legacy where not needed); compiled with clang on the host.
+3. **C++:** libc++, libc++abi and libunwind on top of our libc, compiled
+   with clang.
+4. **A compiler running in the system:** first a TinyCC port (small, fast C
+   compilation), later clang/LLVM.
+
+### Our own compiler (long-term goal)
+
+In the future we want to produce **optimal code for our platform**, so our
+own compiler is planned as well. It is not needed to start (the above
+covers C, C++ and Rust), but it makes sense as a separate project:
+
+- knowledge of our ABI, syscalls and binary format - code without extra
+  layers (direct libos calls, IPC calls without wrappers),
+- optimizations for our patterns: channels and messages, capability
+  handles, async I/O,
+- independence from foreign toolchains (self-hosting),
+- a sensible order: first a backend (own IR + x86_64 and aarch64 code
+  generation) that can also serve an existing frontend (e.g. as a C backend
+  or a cranelift-like backend for Rust), only then our own language frontend.
+
 ## Temporary solutions
 
 | What | Why | Gone when |
@@ -415,10 +443,10 @@ strictly separated into `arch/` so the port does not hurt.
 4. Userspace: syscalls, first process, IPC, libos, initfs (done)
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
 6. System: userspace drivers (virtio - done), FS (done), graphics, compositor
-7. Languages and compiler: Rust (`std` for our OS), C (own libc on top of
-   libos), C++ (libc++/libunwind on top of libc), a basic compiler (scope to
-   be decided: cross-compiling from the host vs. a compiler running in the
-   system)
+7. Languages and compilers (see [Languages and compilers](#languages-and-compilers-plan)):
+   Rust (`std` for our OS), C (own libc on top of libos), C++
+   (libc++/libunwind on top of libc), cross-compiled with clang from the
+   host, then TinyCC in the system
 8. Windows layer v2: user32/gdi32, GUI, DirectX via Vulkan
 9. aarch64 port and the first ARM device
 

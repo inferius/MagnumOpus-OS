@@ -380,6 +380,33 @@ dokumentace česky i anglicky (`docs/cs`, `docs/en`).
 aarch64 se portuje podle plánu milníků (milník 8). Do té doby se kód
 důsledně dělí do `arch/`, aby port nebolel.
 
+## Jazyky a překladače (plán)
+
+Dohodnutý postup (2026-11-06):
+
+1. **Rust:** vlastní cíl `x86_64-unknown-magnumopus` a port `std` nad
+   libos (vlákna, TLS, synchronizace, soubory, procesy, čas).
+2. **C:** vlastní libc nad libos (pod naší kontrolou, bez POSIX dědictví,
+   kde není potřeba); překlad clangem na hostiteli.
+3. **C++:** libc++, libc++abi a libunwind nad naší libc, překlad clangem.
+4. **Překladač běžící v systému:** nejdřív port TinyCC (malý, rychlý
+   překlad C), později clang/LLVM.
+
+### Vlastní překladač (dlouhodobý cíl)
+
+Do budoucna chceme produkovat **optimální kód pro naši platformu**, proto
+je v plánu i vlastní překladač. Není potřeba pro start (výše uvedené pokryje
+C, C++ i Rust), ale dává smysl jako samostatný projekt:
+
+- znalost našeho ABI, syscallů a formátu binárek - kód bez vrstev navíc
+  (přímá volání libos, volání IPC bez obalů),
+- optimalizace pro naše vzory: kanály a zprávy, capability handly, async I/O,
+- nezávislost na cizím toolchainu (self-hosting),
+- rozumný postup: nejdřív backend (vlastní IR + generování x86_64 a
+  aarch64), který může používat i existující frontend (např. jako backend
+  pro C nebo jako cranelift-like backend pro Rust), teprve pak vlastní
+  frontend jazyka.
+
 ## Dočasná řešení
 
 | Co | Proč | Kdy pryč |
@@ -395,9 +422,9 @@ důsledně dělí do `arch/`, aby port nebolel.
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), grafika, kompozitor
-7. Jazyky a překladač: Rust (`std` pro náš OS), C (vlastní libc nad libos),
-   C++ (libc++/libunwind nad libc), základní překladač (rozsah upřesnit:
-   křížový překlad z hostitele vs. překladač běžící v systému)
+7. Jazyky a překladač (viz [Jazyky a překladače](#jazyky-a-překladače-plán)):
+   Rust (`std` pro náš OS), C (vlastní libc nad libos), C++ (libc++/libunwind
+   nad libc), překlad clangem z hostitele, pak TinyCC v systému
 8. Windows vrstva v2: user32/gdi32, GUI, DirectX přes Vulkan
 9. Port na aarch64 a první ARM zařízení
 

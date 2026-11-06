@@ -23,6 +23,7 @@ v `/usr/share/...`. Jinak proměnné prostředí `QEMU`, `OVMF_CODE`, `OVMF_VARS
 | `cargo xtask image` | build + obraz disku `target/os-x86_64-<profil>.img` (GPT, ESP FAT32) |
 | `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), dokumentace, pak jádro a userspace v QEMU bez okna |
+| `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 
 Přepínače: `--release`, `--headless` (bez okna), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
@@ -34,6 +35,22 @@ Souborový systém má vlastní testy na hostiteli (rychlé, bez QEMU):
 cargo test -p fs --features std                                   # vše, výchozí počet náhodných případů
 PROPTEST_CASES=150000 cargo test -p fs --features std --release   # důkladně
 cargo test -p fs --features std --release -- --ignored --nocapture perf   # výkon a režie
+```
+
+## Dokumentace jako web
+
+`cargo xtask docs` (a také `cargo xtask test`) převede `docs/cs` a `docs/en`
+na statický web v `target/docs`: navigace podle tabulky v `docs/README.md`,
+obsah stránky, fulltextové hledání, přepínání jazyka, světlý a tmavý motiv,
+diagramy (vložené SVG) a zvýraznění syntaxe bloků kódu s jazykem `rust`,
+`c`, `cpp`, `toml` a `bash` (generuje `xtask/src/highlight.rs`, bez
+skriptů v prohlížeči). Generátor kontroluje odkazy a kotvy mezi stránkami;
+chybný odkaz je chyba sestavení.
+
+Prohlížení (hledání potřebuje server, ne `file://`):
+
+```bash
+python -m http.server 8765 --directory target/docs
 ```
 
 ## Obsah disku

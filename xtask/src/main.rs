@@ -10,6 +10,7 @@
 
 mod datadisk;
 mod docs;
+mod highlight;
 mod image;
 mod symbolize;
 

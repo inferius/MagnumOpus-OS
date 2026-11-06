@@ -267,3 +267,50 @@ figure.diagram figcaption {
 .diagram .dash { stroke-dasharray: 5 4; }
 .diagram .arrow { fill: var(--muted); }
 .diagram .arrow-acc { fill: var(--accent); }
+
+/* Zvyrazneni syntaxe (tridy generuje xtask/src/highlight.rs). */
+:root {
+  --hl-kw: #cf222e;
+  --hl-fn: #6639ba;
+  --hl-ty: #953800;
+  --hl-str: #0a3069;
+  --hl-num: #0550ae;
+  --hl-com: #6e7781;
+  --hl-mac: #8250df;
+  --hl-attr: #116329;
+  --hl-const: #0550ae;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --hl-kw: #ff7b72;
+    --hl-fn: #d2a8ff;
+    --hl-ty: #ffa657;
+    --hl-str: #a5d6ff;
+    --hl-num: #79c0ff;
+    --hl-com: #8b949e;
+    --hl-mac: #d2a8ff;
+    --hl-attr: #7ee787;
+    --hl-const: #79c0ff;
+  }
+}
+:root[data-theme="dark"] {
+  --hl-kw: #ff7b72;
+  --hl-fn: #d2a8ff;
+  --hl-ty: #ffa657;
+  --hl-str: #a5d6ff;
+  --hl-num: #79c0ff;
+  --hl-com: #8b949e;
+  --hl-mac: #d2a8ff;
+  --hl-attr: #7ee787;
+  --hl-const: #79c0ff;
+}
+.hl-kw { color: var(--hl-kw); }
+.hl-fn { color: var(--hl-fn); }
+.hl-ty { color: var(--hl-ty); }
+.hl-str { color: var(--hl-str); }
+.hl-num { color: var(--hl-num); }
+.hl-com { color: var(--hl-com); font-style: italic; }
+.hl-mac { color: var(--hl-mac); }
+.hl-attr { color: var(--hl-attr); }
+.hl-const { color: var(--hl-const); }
+.hl-life { color: var(--hl-kw); font-style: italic; }

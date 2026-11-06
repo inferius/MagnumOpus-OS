@@ -14,7 +14,9 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pulldown_cmark::{CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd, html};
+use pulldown_cmark::{
+    CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd, html,
+};
 
 use crate::Result;
 
@@ -146,7 +148,39 @@ fn render(file: &str, md: &str) -> Rendered {
     let mut links = Vec::new();
     let mut sections: Vec<(String, String, String)> = Vec::new();
 
+    // Blok kodu: jazyk a dosud nasbirany text (zvyrazni se najednou na konci).
+    let mut code: Option<(String, String)> = None;
     for ev in Parser::new_ext(md, opts) {
+        match (&mut code, &ev) {
+            (None, Event::Start(Tag::CodeBlock(kind))) => {
+                let lang = match kind {
+                    CodeBlockKind::Fenced(l) => {
+                        l.split_whitespace().next().unwrap_or("").to_string()
+                    }
+                    CodeBlockKind::Indented => String::new(),
+                };
+                code = Some((lang, String::new()));
+                continue;
+            }
+            (Some((_, buf)), Event::Text(t)) => {
+                buf.push_str(t);
+                continue;
+            }
+            (Some(_), Event::End(TagEnd::CodeBlock)) => {
+                let (lang, buf) = code.take().unwrap();
+                let class = if lang.is_empty() {
+                    String::new()
+                } else {
+                    format!(" class=\"language-{lang}\"")
+                };
+                out_events.push(Event::Html(CowStr::from(format!(
+                    "<pre><code{class}>{}</code></pre>\n",
+                    crate::highlight::highlight(&lang, &buf)
+                ))));
+                continue;
+            }
+            _ => {}
+        }
         let ev = match ev {
             Event::Start(Tag::Link {
                 link_type,
