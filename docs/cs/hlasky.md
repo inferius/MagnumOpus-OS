@@ -50,9 +50,14 @@ Loader píše přes konzoli firmware (obrazovka i sériová linka) ve formátu
 | Hláška | Úroveň | Význam a řešení |
 |---|---|---|
 | `IOMMU VT-d na ADRESA: segment S, N urovne tabulek, ...` | I | Překlad DMA je zapnutý; zařízení smí jen do své domény. |
-| `IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do pameti ...` | W | Stroj nemá VT-d (tabulka DMAR chybí), nebo běh s `--no-iommu`. Systém funguje, ale chyba ovladače může přes DMA poškodit paměť. Na reálném PC zapnout VT-d v nastavení firmwaru. |
+| `IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do pameti ...` | W | Stroj nemá VT-d ani AMD-Vi (tabulky DMAR a IVRS chybí), nebo běh s `--iommu none`. Systém funguje, ale chyba ovladače může přes DMA poškodit paměť. Na reálném PC zapnout VT-d / AMD-Vi (IOMMU) v nastavení firmwaru. |
 | `IOMMU na ADRESA nejde zapnout: ...` | E | Jednotka nepodporuje 39/48bitové tabulky (`NOT_SUPPORTED`), chybí paměť, nebo nedokončila příkaz (`TIMED_OUT`). Zařízení pod ní nejsou chráněná. |
 | `IOMMU: ... nedobehlo` | E | Jednotka nedokončila příkaz nebo zneplatnění do 1 s (chyba hardwaru nebo emulace). |
+| `IOMMU AMD-Vi na ADRESA: segment S, 4 urovne tabulek` | I | Překlad DMA přes AMD-Vi je zapnutý. |
+| `IOMMU AMD-Vi: prikazy nedobehly` | E | Jednotka nedokončila frontu příkazů do 1 s (chyba hardwaru nebo emulace). |
+| `IOMMU AMD-Vi: preruseni MSI nejde nastavit, ...` | W | Konfigurace PCI jednotky nemá MSI nebo není v ECAM. Ochrana funguje, jen se zablokované přístupy nehlásí. |
+| `IOMMU: zablokovan pristup zarizeni BB:ZZ.F na adrese A (udalost AMD-Vi K)` | W | Jako u VT-d níže; K = kód události AMD-Vi (0x2 = chyba stránky). |
+| `IOMMU: dalsich N udalosti AMD-Vi vynechano` | W | Jeden zablokovaný přenos vyvolal víc událostí; podrobně se vypisují jen první 4. |
 | `IOMMU: zablokovan zapis/cteni zarizeni BB:ZZ.F na adrese A (duvod R)` | W | Zařízení sáhlo mimo svou doménu: chyba ovladače (špatná adresa v deskriptoru) nebo vadné zařízení. Paměť zůstala nedotčená. Kód důvodu podle specifikace VT-d (např. 0x5 = stránka v doméně chybí, 0x6 = zápis do stránky jen pro čtení). |
 
 ## Jádro: procesy
@@ -112,7 +117,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | Hláška | Význam a řešení |
 |---|---|
 | `init: souborovy system 'X' pripojen (generace N)` | Init našel disk se souborovým systémem a služba odpovídá. |
-| `init: zadny disk se souborovym systemem` | Žádný disk nemá v blocích 1-8 podpis `OSFS  v2`. Testy FS pak selžou (`sluzba fsd nebezi`). `cargo xtask run/test` datový disk vytváří vždy - zkontrolovat, že ho QEMU dostal. |
+| `init: zadny disk se souborovym systemem` | Žádný disk nemá v blocích 1-8 podpis `OSFS\0\0v2`. Testy FS pak selžou (`sluzba fsd nebezi`). `cargo xtask run/test` datový disk vytváří vždy - zkontrolovat, že ho QEMU dostal. |
 | `init: souborovy system nelze spustit: ...` | fsd chybí v initfs nebo neodpověděl na `INFO` (viz hlášky fsd před tím). |
 | `fsd: pripojeno 'X': N MiB, volno N MiB, generace N, soucty Xxh3/Blake3` | Svazek je připojený. |
 | `fsd: VAROVANI: nejnovejsi stav byl poskozeny, pouzit stav o N generaci starsi` | Nejnovější commit nešel načíst (disk ztratil zápisy, přestože potvrdil flush, nebo je poškozený). Změny z posledních N commitů jsou ztracené; zkontrolovat disk a spustit kontrolu (`CHECK` se scrubem). |

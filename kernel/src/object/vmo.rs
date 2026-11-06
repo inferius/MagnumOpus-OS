@@ -35,7 +35,7 @@ pub struct MemoryObject {
     kind: Kind,
     /// Domena IOMMU, ve ktere je pamet namapovana pro DMA zarizeni
     /// (odmapuje se pred vracenim stranek alokatoru).
-    dma: Option<Arc<crate::arch::iommu::Domain>>,
+    dma: Option<crate::arch::iommu::Domain>,
 }
 
 impl MemoryObject {
@@ -69,7 +69,7 @@ impl MemoryObject {
     /// domenou IOMMU ho zarizeni smi cist i zapisovat (identicky).
     pub fn new_contiguous_dma(
         size: u64,
-        domain: Option<Arc<crate::arch::iommu::Domain>>,
+        domain: Option<crate::arch::iommu::Domain>,
     ) -> Result<Arc<Self>, Error> {
         let vmo = Self::new_contiguous(size)?;
         let Some(domain) = domain else { return Ok(vmo) };

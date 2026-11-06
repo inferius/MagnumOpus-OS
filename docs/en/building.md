@@ -26,9 +26,10 @@ next to QEMU or in `/usr/share/...`. Otherwise set `QEMU`, `OVMF_CODE`,
 | `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), documentation, then kernel and userspace in QEMU without a window |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
-Options: `--release`, `--headless` (no window), `--no-iommu` (QEMU without
-an emulated IOMMU: checks running without DMA translation; the test
-"IOMMU: zarizeni nezapise mimo prideleny DMA" then fails as expected),
+Options: `--release`, `--headless` (no window), `--iommu <intel|amd|none>`
+(emulated IOMMU, default `intel`; `none` checks running without DMA
+translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" then
+fails as expected),
 `--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
 `-- -cpu max,-x2apic`).
 
@@ -65,8 +66,13 @@ os/kernel.elf          kernel (ELF with debug symbols)
 os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd
 ```
 
-QEMU gets an emulated IOMMU (`intel-iommu`, without interrupt remapping)
-and three disks (all virtio-blk in modern mode with `iommu_platform=on`):
+QEMU gets an emulated IOMMU (`intel-iommu`, with `--iommu amd`
+`amd-iommu,dma-remap=on`; without interrupt remapping) and three disks (all
+virtio-blk in modern mode with `iommu_platform=on`; under AMD-Vi the system
+disk without it, because the OVMF firmware cannot boot from it otherwise).
+Each IOMMU mode has its own copy of the firmware NVRAM
+(`target/ovmf-x86_64-vars-<mode>.fd`): the AMD IOMMU takes a PCI slot and
+stored boot entries would not match.
 
 | Disk | File | Contents |
 |---|---|---|

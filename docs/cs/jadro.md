@@ -107,15 +107,16 @@ horní polovinu sdílí s jádrem):
 
 Zařízení zapisuje do paměti samo (DMA), na adresy, které mu ovladač napíše
 do deskriptorů. Bez IOMMU tak chybný ovladač může nechat zařízení přepsat
-jádro. Jádro proto zapíná **Intel VT-d** (tabulka ACPI DMAR), pokud ho stroj
-má:
+jádro. Jádro proto zapíná IOMMU, pokud ji stroj má: **Intel VT-d** (tabulka
+ACPI DMAR) nebo **AMD-Vi** (tabulka ACPI IVRS). Obě fungují stejně a zbytek
+jádra je nerozlišuje (`arch::iommu::Domain`):
 
 <figure class="diagram">
 <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="IOMMU">
 <defs><marker id="io1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="30" width="150" height="60" rx="6"/><text class="t b" x="85" y="55" text-anchor="middle">zařízení 00:03.0</text><text class="m" x="85" y="74" text-anchor="middle">DMA na adresu X</text>
 <path class="ln" d="M160 60 L218 60" marker-end="url(#io1)"/>
-<rect class="acc" x="220" y="20" width="200" height="80" rx="6"/><text class="t b" x="320" y="45" text-anchor="middle">IOMMU (VT-d)</text><text class="m" x="320" y="64" text-anchor="middle">kořen → kontext 00:03.0</text><text class="m" x="320" y="81" text-anchor="middle">→ doména → tabulky stránek</text>
+<rect class="acc" x="220" y="20" width="200" height="80" rx="6"/><text class="t b" x="320" y="45" text-anchor="middle">IOMMU (VT-d / AMD-Vi)</text><text class="m" x="320" y="64" text-anchor="middle">kořen → kontext 00:03.0</text><text class="m" x="320" y="81" text-anchor="middle">→ doména → tabulky stránek</text>
 <path class="ln" d="M420 45 L498 45" marker-end="url(#io1)"/>
 <rect class="ok" x="500" y="20" width="250" height="50" rx="6"/><text class="t" x="625" y="42" text-anchor="middle">X je v doméně (DMA paměť ovladače)</text><text class="m" x="625" y="60" text-anchor="middle">→ přístup do RAM povolen</text>
 <path class="ln" d="M420 80 L498 120" marker-end="url(#io1)"/>
@@ -139,8 +140,9 @@ má:
 - **Zablokovaný přístup** IOMMU nahlásí přerušením (vektor 36) a jádro ho
   zaloguje jako varování se zařízením, adresou a kódem důvodu (viz
   [hlasky.md](hlasky.md#jádro-iommu)).
-- **Bez IOMMU** (stroj ho nemá, nebo `cargo xtask run --no-iommu`) jádro
-  zaloguje varování a DMA není omezené.
+- **Bez IOMMU** (stroj ji nemá, má ji vypnutou ve firmwaru, nebo
+  `cargo xtask run --iommu none`) jádro zaloguje varování a DMA není
+  omezené.
 - Ovladač virtio musí přijmout vlastnost `VIRTIO_F_ACCESS_PLATFORM`
   (zařízení pak používá překlad); virtio-blk to dělá.
 
@@ -154,12 +156,20 @@ let dma = res.dma_memory(64 * 1024)?;
 let phys = res.phys_addr(&dma, 0)?; // = adresa pro zařízení
 ```
 
-Implementace: `kernel/src/arch/x86_64/iommu.rs` (kořenová tabulka →
-tabulky kontextu sběrnic → stránkové tabulky domény se 3 nebo 4 úrovněmi
-podle schopností jednotky; po každé změně globální zneplatnění cache
-kontextu a IOTLB). Zatím chybí: fronta zneplatnění (QI), překlad přerušení,
-oblasti RMRR (zařízení, která firmware používá i po startu, např. starší
-USB), zařízení za mosty PCI vyjmenovaná v DMAR.
+Implementace v `kernel/src/arch/x86_64/iommu/`:
+
+| Soubor | Co dělá |
+|---|---|
+| `mod.rs` | společné rozhraní: `init`, `domain(segment, sběrnice, funkce)`, `Domain::map/unmap`, obsluha přerušení chyb |
+| `vtd.rs` | Intel VT-d: kořenová tabulka → tabulky kontextu sběrnic → stránkové tabulky domény (3 nebo 4 úrovně podle jednotky); po každé změně globální zneplatnění cache kontextu a IOTLB přes registry; chyby z registrů záznamů chyb |
+| `amdvi.rs` | AMD-Vi: tabulka zařízení (65 536 záznamů, výchozí „vše zablokováno“) → stránkové tabulky domény (4 úrovně); zneplatnění přes frontu příkazů s čekáním na dokončení; chyby ze záznamu událostí (přerušení MSI nastavené v konfiguraci PCI samotné IOMMU) |
+
+Výpis chyb je omezený: jeden zablokovaný přenos může vyvolat desítky
+událostí, podrobně se vypíšou první 4 a zbytek souhrnem.
+
+Zatím chybí: překlad přerušení, fronta zneplatnění VT-d (QI), oblasti RMRR
+a IVMD (paměť, kterou firmware používá i po startu, např. starší USB) a
+zařízení za mosty PCI vyjmenovaná v tabulkách.
 
 ## Syscally
 

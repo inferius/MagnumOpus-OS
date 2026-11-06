@@ -52,9 +52,14 @@ The loader writes through the firmware console (screen and serial) as
 | Message | Level | Meaning and fix |
 |---|---|---|
 | `IOMMU VT-d na ADDRESS: segment S, N urovne tabulek, ...` | I | DMA translation is on; a device may access only its domain. |
-| `IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do pameti ...` | W | The machine has no VT-d (no DMAR table), or the run uses `--no-iommu`. The system works, but a driver bug can corrupt memory through DMA. On a real PC enable VT-d in the firmware settings. |
+| `IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do pameti ...` | W | The machine has neither VT-d nor AMD-Vi (no DMAR or IVRS table), or the run uses `--iommu none`. The system works, but a driver bug can corrupt memory through DMA. On a real PC enable VT-d / AMD-Vi (IOMMU) in the firmware settings. |
 | `IOMMU na ADDRESS nejde zapnout: ...` | E | The unit does not support 39/48-bit tables (`NOT_SUPPORTED`), memory is missing, or it did not complete a command (`TIMED_OUT`). Devices under it are not protected. |
 | `IOMMU: ... nedobehlo` | E | The unit did not complete a command or invalidation within 1 s (hardware or emulation fault). |
+| `IOMMU AMD-Vi na ADDRESS: segment S, 4 urovne tabulek` | I | DMA translation through AMD-Vi is on. |
+| `IOMMU AMD-Vi: prikazy nedobehly` | E | The unit did not complete the command queue within 1 s (hardware or emulation fault). |
+| `IOMMU AMD-Vi: preruseni MSI nejde nastavit, ...` | W | The unit's PCI configuration has no MSI or is not in ECAM. Protection works, blocked accesses are just not reported. |
+| `IOMMU: zablokovan pristup zarizeni BB:DD.F na adrese A (udalost AMD-Vi K)` | W | As for VT-d below; K = AMD-Vi event code (0x2 = page fault). |
+| `IOMMU: dalsich N udalosti AMD-Vi vynechano` | W | One blocked transfer raised more events; only the first 4 are printed in detail. |
 | `IOMMU: zablokovan zapis/cteni zarizeni BB:DD.F na adrese A (duvod R)` | W | A device accessed memory outside its domain: a driver bug (wrong address in a descriptor) or a faulty device. Memory stayed intact. Reason code per the VT-d specification (e.g. 0x5 = page missing in the domain, 0x6 = write to a read-only page). |
 
 ## Kernel: processes
@@ -114,7 +119,7 @@ invariant was broken (a kernel bug).
 | Message | Meaning and fix |
 |---|---|
 | `init: souborovy system 'X' pripojen (generace N)` | Init found a disk with the file system and the service answers. |
-| `init: zadny disk se souborovym systemem` | No disk has the signature `OSFS  v2` in blocks 1-8. FS tests then fail (`sluzba fsd nebezi`). `cargo xtask run/test` always creates the data disk - check that QEMU got it. |
+| `init: zadny disk se souborovym systemem` | No disk has the signature `OSFS\0\0v2` in blocks 1-8. FS tests then fail (`sluzba fsd nebezi`). `cargo xtask run/test` always creates the data disk - check that QEMU got it. |
 | `init: souborovy system nelze spustit: ...` | fsd is missing from initfs or did not answer `INFO` (see fsd messages before it). |
 | `fsd: pripojeno 'X': N MiB, volno N MiB, generace N, soucty Xxh3/Blake3` | The volume is mounted. |
 | `fsd: VAROVANI: nejnovejsi stav byl poskozeny, pouzit stav o N generaci starsi` | The newest commit could not be loaded (the disk lost writes although it acknowledged a flush, or it is damaged). Changes from the last N commits are lost; check the disk and run a check (`CHECK` with scrub). |

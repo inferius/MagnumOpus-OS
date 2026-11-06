@@ -40,7 +40,7 @@ prepinace:
   --gdb            (run) QEMU ceka na GDB na localhost:1234
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
-  --no-iommu       (run, test) QEMU bez IOMMU (overeni behu bez prekladu DMA)
+  --iommu <typ>    (run, test) IOMMU v QEMU: intel (vychozi), amd, none
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
@@ -54,8 +54,8 @@ struct Options {
     gdb: bool,
     headless: bool,
     accel: Option<String>,
-    /// QEMU bez emulovane IOMMU (Intel VT-d).
-    no_iommu: bool,
+    /// Emulovana IOMMU: "intel" (VT-d, vychozi), "amd" (AMD-Vi), "none".
+    iommu: String,
     qemu_args: Vec<OsString>,
     /// Testovaci beh: kernel s feature `qemu-test`, QEMU s isa-debug-exit.
     test: bool,
@@ -88,14 +88,20 @@ fn run_cli() -> Result<()> {
         gdb: false,
         headless: false,
         accel: None,
-        no_iommu: false,
+        iommu: String::from("intel"),
         qemu_args: Vec::new(),
         test: false,
     };
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
-            Some("--no-iommu") => opts.no_iommu = true,
+            Some("--iommu") => {
+                let value = args.next().ok_or("--iommu ocekava intel, amd nebo none")?;
+                opts.iommu = value.to_string_lossy().into_owned();
+                if !matches!(opts.iommu.as_str(), "intel" | "amd" | "none") {
+                    return Err("--iommu ocekava intel, amd nebo none".into());
+                }
+            }
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
             Some("--accel") => {
@@ -364,7 +370,9 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
     let (ovmf_code, ovmf_vars_template) = find_ovmf(&qemu)?;
 
     // OVMF do vars zapisuje (boot polozky), proto pracujeme s kopii.
-    let ovmf_vars = target_dir().join("ovmf-x86_64-vars.fd");
+    // Vlastni kopie pro kazdy rezim IOMMU: IOMMU AMD zabere slot PCI a disky
+    // se posunou, ulozene bootovaci polozky by pak nesedely.
+    let ovmf_vars = target_dir().join(format!("ovmf-x86_64-vars-{}.fd", opts.iommu));
     if !ovmf_vars.exists() {
         std::fs::copy(&ovmf_vars_template, &ovmf_vars)?;
     }
@@ -379,14 +387,28 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
     cmd.arg("-machine")
         .arg(format!("q35,accel={accel}"))
         .args(["-cpu", "max", "-smp", "4", "-m", "512M"]);
-    // IOMMU (Intel VT-d) pred zarizenimi PCI, ktera preklada; preklad
+    // IOMMU (Intel VT-d nebo AMD-Vi) pred zarizenimi PCI, ktera preklada; preklad
     // preruseni zatim ne (intremap=off).
-    if !opts.no_iommu {
-        cmd.args(["-device", "intel-iommu,intremap=off"]);
+    match opts.iommu.as_str() {
+        "intel" => {
+            cmd.args(["-device", "intel-iommu,intremap=off"]);
+        }
+        "amd" => {
+            cmd.args(["-device", "amd-iommu,dma-remap=on,intremap=off"]);
+        }
+        _ => {}
     }
     // Disky jen v modernim rezimu virtio a s prekladem DMA pres IOMMU.
-    let blk =
-        |drive: &str| format!("virtio-blk-pci,drive={drive},disable-legacy=on,iommu_platform=on");
+    // Pod AMD-Vi firmware OVMF z disku s prekladem DMA nenabootuje, proto
+    // tam systemovy disk prekladem neprochazi (ostatni disky ano).
+    let amd = opts.iommu == "amd";
+    let blk = |drive: &str| {
+        let translate = !(amd && drive == "osdisk");
+        format!(
+            "virtio-blk-pci,drive={drive},disable-legacy=on,iommu_platform={}",
+            if translate { "on" } else { "off" }
+        )
+    };
     cmd.arg("-drive")
         .arg(pflash_arg(&ovmf_code, true))
         .arg("-drive")

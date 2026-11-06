@@ -114,15 +114,17 @@ the upper half with the kernel):
 
 A device writes into memory on its own (DMA), to the addresses its driver
 puts into descriptors. Without an IOMMU a buggy driver can therefore make
-the device overwrite the kernel. The kernel enables **Intel VT-d** (ACPI
-DMAR table) when the machine has it:
+the device overwrite the kernel. The kernel therefore enables the IOMMU when
+the machine has one: **Intel VT-d** (ACPI DMAR table) or **AMD-Vi** (ACPI
+IVRS table). Both work the same way and the rest of the kernel does not
+distinguish them (`arch::iommu::Domain`):
 
 <figure class="diagram">
 <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="IOMMU">
 <defs><marker id="io1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="30" width="150" height="60" rx="6"/><text class="t b" x="85" y="55" text-anchor="middle">device 00:03.0</text><text class="m" x="85" y="74" text-anchor="middle">DMA to address X</text>
 <path class="ln" d="M160 60 L218 60" marker-end="url(#io1)"/>
-<rect class="acc" x="220" y="20" width="200" height="80" rx="6"/><text class="t b" x="320" y="45" text-anchor="middle">IOMMU (VT-d)</text><text class="m" x="320" y="64" text-anchor="middle">root → context 00:03.0</text><text class="m" x="320" y="81" text-anchor="middle">→ domain → page tables</text>
+<rect class="acc" x="220" y="20" width="200" height="80" rx="6"/><text class="t b" x="320" y="45" text-anchor="middle">IOMMU (VT-d / AMD-Vi)</text><text class="m" x="320" y="64" text-anchor="middle">root → context 00:03.0</text><text class="m" x="320" y="81" text-anchor="middle">→ domain → page tables</text>
 <path class="ln" d="M420 45 L498 45" marker-end="url(#io1)"/>
 <rect class="ok" x="500" y="20" width="250" height="50" rx="6"/><text class="t" x="625" y="42" text-anchor="middle">X is in the domain (driver DMA memory)</text><text class="m" x="625" y="60" text-anchor="middle">→ access to RAM allowed</text>
 <path class="ln" d="M420 80 L498 120" marker-end="url(#io1)"/>
@@ -146,8 +148,9 @@ DMAR table) when the machine has it:
 - **A blocked access** is reported by the IOMMU with an interrupt (vector
   36) and the kernel logs it as a warning with the device, address and
   reason code (see [messages.md](messages.md#kernel-iommu)).
-- **Without an IOMMU** (the machine has none, or `cargo xtask run
-  --no-iommu`) the kernel logs a warning and DMA is not restricted.
+- **Without an IOMMU** (the machine has none, has it disabled in the
+  firmware, or `cargo xtask run --iommu none`) the kernel logs a warning and
+  DMA is not restricted.
 - A virtio driver must accept the `VIRTIO_F_ACCESS_PLATFORM` feature (the
   device then uses translation); virtio-blk does.
 
@@ -161,12 +164,20 @@ let dma = res.dma_memory(64 * 1024)?;
 let phys = res.phys_addr(&dma, 0)?; // = device address
 ```
 
-Implementation: `kernel/src/arch/x86_64/iommu.rs` (root table -> bus
-context tables -> domain page tables with 3 or 4 levels depending on the
-unit's capabilities; after every change a global invalidation of the
-context cache and the IOTLB). Missing for now: the invalidation queue
-(QI), interrupt remapping, RMRR regions (devices the firmware keeps using
-after boot, e.g. older USB), devices behind PCI bridges listed in DMAR.
+Implementation in `kernel/src/arch/x86_64/iommu/`:
+
+| File | What it does |
+|---|---|
+| `mod.rs` | the common interface: `init`, `domain(segment, bus, function)`, `Domain::map/unmap`, fault interrupt handling |
+| `vtd.rs` | Intel VT-d: root table -> bus context tables -> domain page tables (3 or 4 levels depending on the unit); after every change a global invalidation of the context cache and IOTLB through registers; faults from the fault recording registers |
+| `amdvi.rs` | AMD-Vi: device table (65,536 entries, default "everything blocked") -> domain page tables (4 levels); invalidation through the command queue with a completion wait; faults from the event log (MSI interrupt set up in the IOMMU's own PCI configuration) |
+
+Fault output is limited: one blocked transfer can raise dozens of events,
+the first 4 are logged in detail and the rest as a summary.
+
+Missing for now: interrupt remapping, the VT-d invalidation queue (QI), RMRR
+and IVMD regions (memory the firmware keeps using after boot, e.g. older
+USB) and devices behind PCI bridges listed in the tables.
 
 ## Syscalls
 

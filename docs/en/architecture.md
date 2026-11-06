@@ -464,9 +464,9 @@ fine for now):
 - **Programs are still compiled without SSE/FPU** (soft-float). The kernel
   already saves each thread's FPU/SSE state (FXSAVE, x87 + XMM0-15); AVX
   (XSAVE) comes with the languages milestone.
-- **IOMMU only Intel VT-d and only DMA translation:** AMD-Vi, interrupt
-  remapping, the invalidation queue and RMRR regions are missing; on a
-  machine without an IOMMU DMA is not restricted (the kernel logs it).
+- **IOMMU (Intel VT-d, AMD-Vi) only for DMA translation:** interrupt
+  remapping and RMRR/IVMD regions are missing; on a machine without an
+  IOMMU DMA is not restricted (the kernel logs it).
 - **Quotas only per process**, not for groups of processes (job).
 - **Strict priority between QoS classes** (lower classes can starve).
 - **Memory of finished threads** (kernel stacks) is reused but not returned.

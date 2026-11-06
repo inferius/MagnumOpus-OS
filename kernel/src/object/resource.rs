@@ -41,7 +41,7 @@ pub struct Resource {
     /// Zarizeni (segment, sbernice, zarizeni << 3 | funkce), kteremu
     /// prostredek patri, a jeho domena IOMMU (DMA pamet se mapuje do ni).
     device: Option<(u16, u8, u8)>,
-    domain: Option<Arc<crate::arch::iommu::Domain>>,
+    domain: Option<crate::arch::iommu::Domain>,
 }
 
 /// Nejvic rozsahu jednoho omezeneho prostredku.
@@ -154,7 +154,7 @@ impl Resource {
     }
 
     /// Domena IOMMU zarizeni (DMA pamet z tohoto prostredku se mapuje do ni).
-    pub fn domain(&self) -> Option<&Arc<crate::arch::iommu::Domain>> {
+    pub fn domain(&self) -> Option<&crate::arch::iommu::Domain> {
         self.domain.as_ref()
     }
 

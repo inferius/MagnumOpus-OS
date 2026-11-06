@@ -122,8 +122,11 @@ extern "sysv64" fn kernel_main(boot_info: u64) -> ! {
 fn boot_main(boot_info: &'static BootInfo) {
     // IOMMU pred spustenim ovladacu (od ted je DMA zarizeni bez domeny
     // zakazane). Bezi uz vsechna CPU, takze jde nasmerovat preruseni chyb.
-    // SAFETY: jednou, pred spustenim procesu.
-    unsafe { arch::iommu::init(&PLATFORM.get().unwrap().iommus) };
+    {
+        let p = PLATFORM.get().unwrap();
+        // SAFETY: jednou, pred spustenim procesu.
+        unsafe { arch::iommu::init(&p.iommus, &p.amd_iommus, &p.pci_ecam) };
+    }
     let kernel_ok = tests::run_all();
     if kernel_ok {
         log::info!("self-testy jadra prosly");

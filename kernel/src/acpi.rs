@@ -50,6 +50,19 @@ pub struct Platform {
     pub pci_ecam: Vec<PciEcam>,
     /// Jednotky IOMMU (Intel VT-d) z tabulky DMAR.
     pub iommus: Vec<IommuUnit>,
+    /// Jednotky IOMMU (AMD-Vi) z tabulky IVRS.
+    pub amd_iommus: Vec<AmdIommuUnit>,
+}
+
+/// Jednotka AMD-Vi (IVHD z tabulky IVRS). Pokryva zarizeni sveho segmentu.
+#[derive(Debug, Clone)]
+pub struct AmdIommuUnit {
+    pub segment: u16,
+    /// Fyzicka adresa registru.
+    pub registers: u64,
+    /// Adresa samotne IOMMU na sbernici PCI (sbernice << 8 | zarizeni << 3
+    /// | funkce) - pres jeji konfiguraci se nastavuje preruseni MSI.
+    pub device_id: u16,
 }
 
 /// Jednotka preklada DMA (DRHD z tabulky DMAR).
@@ -177,6 +190,7 @@ pub fn parse(rsdp_phys: u64) -> Result<Platform> {
             }
             b"MCFG" => parse_mcfg(t, &mut platform),
             b"DMAR" => parse_dmar(t, &mut platform),
+            b"IVRS" => parse_ivrs(t, &mut platform),
             b"HPET" => match u64_at(t, 44) {
                 Some(addr) => platform.hpet_phys = Some(addr),
                 None => log::warn!("tabulka HPET je prilis kratka, vynechana"),
@@ -300,6 +314,38 @@ fn parse_dmar(t: &[u8], p: &mut Platform) {
                 include_all: flags & 1 != 0,
                 devices,
             });
+        }
+        off += len;
+    }
+}
+
+/// IVRS: popis jednotek AMD-Vi. Za hlavickou (36 B) informace (4 B)
+/// a rezerva (8 B); od offsetu 48 bloky (typ u8, priznaky u8, delka u16).
+/// IVHD (typ 0x10, 0x11, 0x40): ID zarizeni IOMMU (offset 4), adresa
+/// registru (offset 8), segment (offset 16). Firmware muze tutez jednotku
+/// popsat vic typy IVHD - pouzije se jen prvni podle adresy registru.
+fn parse_ivrs(t: &[u8], p: &mut Platform) {
+    let mut off = 48;
+    while let (Some(kind), Some(len)) = (u8_at(t, off), u16_at(t, off + 2)) {
+        let len = len as usize;
+        if len < 4 || off + len > t.len() {
+            log::warn!("IVRS: poskozeny blok na offsetu {off}, zbytek vynechan");
+            return;
+        }
+        if matches!(kind, 0x10 | 0x11 | 0x40) {
+            let s = &t[off..off + len];
+            match (u16_at(s, 4), u64_at(s, 8), u16_at(s, 16)) {
+                (Some(device_id), Some(registers), Some(segment)) => {
+                    if !p.amd_iommus.iter().any(|u| u.registers == registers) {
+                        p.amd_iommus.push(AmdIommuUnit {
+                            segment,
+                            registers,
+                            device_id,
+                        });
+                    }
+                }
+                _ => log::warn!("IVRS: prilis kratky blok IVHD, vynechan"),
+            }
         }
         off += len;
     }

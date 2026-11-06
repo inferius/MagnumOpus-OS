@@ -1,21 +1,4 @@
-//! IOMMU: Intel VT-d (preklad DMA).
-//!
-//! Bez IOMMU muze zarizeni pres DMA zapsat kamkoli do fyzicke pameti - chyba
-//! ovladace (spatna adresa v deskriptoru) pak muze prepsat jadro. S IOMMU
-//! prochazi kazdy pristup zarizeni do pameti prekladem: zarizeni (podle
-//! adresy na sbernici PCI) ma vlastni **domenu** se strankovymi tabulkami
-//! a smi jen tam, kam ho jadro pusti. Pristup jinam IOMMU zablokuje a nahlasi
-//! (preruseni -> zaznam v logu jadra).
-//!
-//! Pravidla:
-//! - po zapnuti nema zadne zarizeni domenu: veskere DMA je zakazane,
-//! - domenu zarizeni dostane az omezeny Resource s identitou zarizeni
-//!   (`RESOURCE_CREATE` od spravce zarizeni),
-//! - do domeny se mapuje jen DMA pamet vytvorena pres tento Resource
-//!   (`VMO_CREATE_CONTIGUOUS`), identicky (adresa pro zarizeni = fyzicka
-//!   adresa) - ovladace se nemeni,
-//! - pri zruseni objektu pameti se stranky z domeny odmapuji drive, nez se
-//!   vrati alokatoru.
+//! IOMMU: backend Intel VT-d (spolecna pravidla viz `iommu/mod.rs`).
 //!
 //! Struktury (specifikace VT-d): korenova tabulka (256 sbernic x 16 B) ->
 //! tabulka kontextu sbernice (256 funkci x 16 B) -> strankove tabulky druhe
@@ -59,7 +42,7 @@ const PAGE: u64 = 4096;
 const SL_RW: u64 = 0b11;
 
 /// Vektor preruseni pro hlaseni chyb DMA (viz `apic::VECTOR_IOMMU_FAULT`).
-pub use super::apic::VECTOR_IOMMU_FAULT;
+use super::VECTOR_IOMMU_FAULT;
 
 /// Jedna jednotka VT-d.
 struct Unit {
@@ -109,9 +92,9 @@ fn w64(u: &Unit, off: u64, v: u64) {
 
 /// Ceka, az `cond` plati (nejvys ~1 s pres TSC); jinak chyba.
 fn wait(what: &str, mut cond: impl FnMut() -> bool) -> Result<(), Error> {
-    let deadline = super::time::now_ns() + 1_000_000_000;
+    let deadline = super::super::time::now_ns() + 1_000_000_000;
     while !cond() {
-        if super::time::now_ns() > deadline {
+        if super::super::time::now_ns() > deadline {
             log::error!("IOMMU: {what} nedobehlo");
             return Err(Error::TimedOut);
         }
@@ -162,19 +145,12 @@ impl Unit {
     }
 }
 
-/// Zapne IOMMU. Bez jednotek (stroj nema VT-d) zaloguje varovani: DMA
-/// ovladacu pak neni omezene.
+/// Zapne jednotky VT-d (vola `iommu::init`).
 ///
 /// # Safety
 ///
 /// Volat jednou pri startu, pred spustenim ovladacu.
 pub unsafe fn init(units: &[IommuUnit]) {
-    if units.is_empty() {
-        log::warn!(
-            "IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do pameti (chyba ovladace muze poskodit system)"
-        );
-        return;
-    }
     for info in units {
         match init_unit(info) {
             Ok(u) => {
@@ -241,7 +217,7 @@ fn init_unit(info: &IommuUnit) -> Result<&'static Unit, Error> {
     unit.command(GCMD_SRTP, false, |s| s & STS_RTPS != 0)?;
     unit.invalidate();
     // Hlaseni chyb preruseni na prvni CPU.
-    let (addr, data) = super::msi_message(VECTOR_IOMMU_FAULT);
+    let (addr, data) = super::super::msi_message(VECTOR_IOMMU_FAULT);
     w32(unit, FEDATA, data);
     w32(unit, FEADDR, addr as u32);
     w32(unit, FEUADDR, (addr >> 32) as u32);
