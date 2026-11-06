@@ -47,8 +47,9 @@ impl Interrupt {
         Ok(irq)
     }
 
-    /// Zprava MSI pro zarizeni: (adresa, data).
-    pub fn msi_message(&self) -> (u64, u32) {
+    /// Zprava MSI pro zarizeni: (adresa, data). Chyba = architektura
+    /// zpravu bez znalosti zarizeni vytvorit neumi (GICv3 ITS).
+    pub fn msi_message(&self) -> Result<(u64, u32), Error> {
         arch::msi_message(self.irq, self.device)
     }
 

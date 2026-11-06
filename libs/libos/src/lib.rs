@@ -9,7 +9,8 @@
 //! - log do jadra ([`println!`]),
 //! - start procesu: vstupni bod, heap, panic handler, startovni zprava
 //!   ([`Startup`], makro [`entry!`]),
-//! - spousteni programu z initfs ([`spawn`]).
+//! - spousteni programu z initfs ([`spawn`]),
+//! - bariery pameti pro ovladace ([`barrier`]).
 //!
 //! Pouziti v programu:
 //!
@@ -24,6 +25,7 @@
 
 extern crate alloc;
 
+pub mod barrier;
 mod channel;
 mod event;
 mod handle;

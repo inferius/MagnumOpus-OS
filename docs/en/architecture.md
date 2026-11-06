@@ -534,7 +534,7 @@ let ctx = unsafe { Context::new(stack.top(), thread_start) };
 
 // switch: address space, stack for entry from user space, registers
 unsafe {
-    arch::switch_page_table(root);
+    arch::switch_user_space(root); // Some(process tables) / None
     arch::set_kernel_stack(&cpu.arch, top);
     context::switch(from, to);
 }
@@ -601,29 +601,52 @@ semihosting), `libs/elf` (accepts only `EM_X86_64` today), `libs/libos` and
 `libs/abi` (syscall instruction, `svc` instead of `syscall`) and
 `user/user.ld`.
 
-### Serious limitations
+### Serious limitations and how they are solved
 
-- **Raspberry Pi 4 does not have coherent DMA.** User-space drivers then
-  have to maintain caches before and after DMA (`Memory::dma_sync_*`), or
-  the kernel has to map DMA memory uncached. Nothing calls this today (x86
-  and QEMU virt are coherent); without a solution, drivers on RPi 4 would
-  read and write stale data. To be decided with the RPi port.
-- **MMIO barriers in drivers.** User-space drivers (`libs/virtio`) rely on
-  x86's strong memory ordering today. On ARM a barrier (`dsb`/`dmb`) is
-  required before writing a "doorbell" register, otherwise the device may
-  see stale descriptors. Needs a barrier function in libos.
+An ARM port brings things that do not exist on x86. The interface and the
+kernel handle them up front, so the generic part does not change during
+the port:
+
+- **The kernel must not use FPU/SIMD.** A program's FPU state is saved only
+  on a thread switch, not on every kernel entry. The kernel is therefore
+  built without FPU: x86_64 without SSE, aarch64 for the
+  `aarch64-unknown-none-softfloat` target (with plain `aarch64-unknown-none`
+  the compiler would use NEON registers, e.g. for copying, and clobber the
+  program's).
+- **Non-coherent DMA (Raspberry Pi 4).** DMA memory
+  (`VMO_CREATE_CONTIGUOUS`) is mapped into the process with
+  `MapFlags::DMA`: the architecture picks normal caching (coherent
+  platform) or an uncached mapping (Normal Non-cacheable). Where the kernel
+  itself touches this memory through the direct map (zeroing,
+  `VMO_READ`/`VMO_WRITE`, returning pages), it calls
+  `arch::dma_sync_for_device` / `dma_sync_for_cpu`. Drivers need not do
+  anything; on x86 the functions are empty.
+- **Write ordering towards devices.** Drivers use the `libos::barrier`
+  barriers (`dma_wmb`, `dma_rmb`, `mmio_wmb`) instead of `fence`; on ARM
+  they are `dmb osh*` and `dsb st`, on x86 the same instruction as before.
+  See [libos](libos.md#barriers-for-drivers).
+- **MSI on GICv3 needs the device identity.** `INTERRUPT_CREATE` passes the
+  device from the restricted Resource to the architecture, and
+  `msi_message` can fail: without a device the program gets
+  `INVALID_ARGS` (instead of a kernel crash). Drivers started by `devmgr`
+  always have a device-restricted resource.
+- **Kernel and process tables live in different registers on ARM** (TTBR1
+  and TTBR0). Hence `PageTableOps::activate_kernel` (kernel tables only)
+  and `arch::switch_user_space(Option<root>)` for processes (`None` =
+  kernel thread, the lower half maps nothing).
+- **The instruction address in the log** is named per architecture
+  (`arch::PC_NAME`: `rip` / `pc`); symbolization in `cargo xtask` accepts
+  both.
+
+What cannot be solved, or is a deliberate decision:
+
 - **Raspberry Pi 4 has no IOMMU (SMMU).** Driver DMA will not be restricted
   there - the same risk as x86 without an IOMMU (a buggy driver can
-  overwrite the kernel via DMA). RPi 5 has its own IOMMU, not SMMUv3:
-  another backend.
-- **MSI on GICv3 needs the device identity** (DeviceID for the ITS), so
-  `INTERRUPT_CREATE` passes the device from the restricted Resource to the
-  architecture. Interrupts through a Resource without a device will not
-  work on aarch64.
+  overwrite the kernel via DMA); the kernel logs a warning at boot. It is a
+  hardware property. RPi 5 has its own IOMMU (not SMMUv3): another `Iommu`
+  backend.
 - **The 4 KiB page is fixed** (ABI). Hardware with only 16K/64K granules
   will not be supported.
-- **Symbolization in xtask** looks for `rip 0x...` in the log; the kernel
-  therefore prints it on all architectures (on aarch64 it is the PC).
 
 
 ## Languages and compilers (plan)

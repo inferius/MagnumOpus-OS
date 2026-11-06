@@ -128,7 +128,7 @@ pub unsafe fn init(boot_info: &BootInfo) {
 
     // SAFETY: nove tabulky mapuji obraz jadra (bezici kod a statiky), primou
     // mapu (aktualni zasobnik, BootInfo, framebuffer a tabulky samotne).
-    unsafe { space.activate() };
+    unsafe { space.activate_kernel() };
     KERNEL_ROOT.store(space.root(), Ordering::Release);
     *KERNEL_SPACE.lock() = Some(space);
 }

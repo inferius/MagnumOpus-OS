@@ -8,7 +8,7 @@ use core::cmp::Ordering as CmpOrdering;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 use super::thread::{QOS_CLASSES, Qos, Thread};
-use crate::arch;
+use crate::arch::{self, CpuLocalData as _};
 use crate::sync::SpinLock;
 
 pub const MAX_CPUS: usize = 256;
@@ -107,7 +107,7 @@ impl PerCpu {
         assert!(index < MAX_CPUS, "prilis mnoho CPU");
         let cpu = Box::leak(Box::new(PerCpu {
             self_ptr: 0,
-            arch: <arch::CpuLocal as arch::CpuLocalData>::for_this_cpu(),
+            arch: arch::CpuLocal::for_this_cpu(),
             tlb_requested: AtomicU64::new(0),
             tlb_done: AtomicU64::new(0),
             index,

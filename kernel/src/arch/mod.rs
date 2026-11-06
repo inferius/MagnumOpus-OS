@@ -36,6 +36,8 @@ const _: () = {
 pub const NAME: &str = <Current as Cpu>::NAME;
 /// Jak se jmenuje hardwarove ID CPU (pro log).
 pub const HW_ID_NAME: &str = <Current as Cpu>::HW_ID_NAME;
+/// Jak se jmenuje registr s adresou instrukce (pro log).
+pub const PC_NAME: &str = <Current as Cpu>::PC_NAME;
 
 /// Per-CPU data architektury (soucast `sched::percpu::PerCpu`).
 pub type CpuLocal = <Current as Cpu>::CpuLocal;
@@ -304,11 +306,23 @@ pub fn send_tlb_flush(cpu_hw_id: u32) {
 ///
 /// # Safety
 ///
-/// Viz `api::Memory::switch_page_table`.
+/// Viz `api::Memory::switch_user_space`.
 #[inline]
-pub unsafe fn switch_page_table(root: u64) {
+pub unsafe fn switch_user_space(root: Option<u64>) {
     // SAFETY: predano volajicim.
-    unsafe { <Current as Memory>::switch_page_table(root) }
+    unsafe { <Current as Memory>::switch_user_space(root) }
+}
+
+/// Zapise cache do pameti pred DMA do zarizeni (viz `api::Memory`).
+#[inline]
+pub fn dma_sync_for_device(phys: u64, len: u64) {
+    <Current as Memory>::dma_sync_for_device(phys, len)
+}
+
+/// Zahodi cache po DMA ze zarizeni (viz `api::Memory`).
+#[inline]
+pub fn dma_sync_for_cpu(phys: u64, len: u64) {
+    <Current as Memory>::dma_sync_for_cpu(phys, len)
 }
 
 /// Zahodi TLB zaznamy userspace na tomto CPU.
@@ -328,7 +342,7 @@ pub const DEVICE_IRQ_FIRST: u32 = <Current as DeviceIrq>::DEVICE_IRQ_FIRST;
 pub const DEVICE_IRQ_LAST: u32 = <Current as DeviceIrq>::DEVICE_IRQ_LAST;
 
 /// Zprava MSI (adresa, data) pro preruseni `irq`.
-pub fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> (u64, u32) {
+pub fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> crate::error::Result<(u64, u32)> {
     <Current as DeviceIrq>::msi_message(irq, device)
 }
 

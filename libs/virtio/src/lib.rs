@@ -251,6 +251,9 @@ impl Device {
 
     /// Upozorni zarizeni na nove pozadavky ve fronte.
     pub fn notify(&self, queue: &Virtqueue) {
+        // Fronta (deskriptory, index) musi byt v pameti driv, nez zarizeni
+        // dostane upozorneni a zacne ji cist.
+        libos::barrier::mmio_wmb();
         self.notify
             .write::<u16>(queue.notify_offset(), queue.index());
     }

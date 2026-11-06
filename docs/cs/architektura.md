@@ -511,7 +511,7 @@ let ctx = unsafe { Context::new(stack.top(), thread_start) };
 
 // přepnutí: adresní prostor, zásobník pro vstup z userspace, registry
 unsafe {
-    arch::switch_page_table(root);
+    arch::switch_user_space(root); // Some(tabulky procesu) / None
     arch::set_kernel_stack(&cpu.arch, top);
     context::switch(from, to);
 }
@@ -577,27 +577,46 @@ edk2 pro aarch64, ukončení testu přes semihosting), `libs/elf` (dnes
 přijímá jen `EM_X86_64`), `libs/libos` a `libs/abi` (instrukce syscallu,
 `svc` místo `syscall`) a `user/user.ld`.
 
-### Závazná omezení
+### Závazná omezení a jak jsou vyřešená
 
-- **Raspberry Pi 4 nemá koherentní DMA.** Ovladače v userspace pak musí
-  před a po DMA udržovat cache (`Memory::dma_sync_*`), nebo jádro musí DMA
-  paměť mapovat bez cache. Dnes to nikdo nevolá (x86 i QEMU virt jsou
-  koherentní); bez řešení by na RPi 4 ovladače četly a zapisovaly
-  zastaralá data. Rozhodnout s portem na RPi.
-- **Bariéry pro MMIO v ovladačích.** Ovladače v userspace (`libs/virtio`)
-  dnes spoléhají na silné řazení paměti x86. Na ARM je před zápisem do
-  registru "doorbell" nutná bariéra (`dsb`/`dmb`), jinak zařízení může
-  vidět zastaralé deskriptory. Potřebuje funkci bariér v libos.
+Port na ARM přináší věci, které na x86 neexistují. Rozhraní a jádro je řeší
+předem, aby se při portu neměnila obecná část:
+
+- **Jádro nesmí používat FPU/SIMD.** Stav FPU programu se ukládá jen při
+  přepnutí vlákna, ne při každém vstupu do jádra. Jádro se proto překládá
+  bez FPU: x86_64 bez SSE, aarch64 pro cíl `aarch64-unknown-none-softfloat`
+  (s obyčejným `aarch64-unknown-none` by překladač použil registry NEON
+  např. pro kopírování a přepsal je programu).
+- **Nekoherentní DMA (Raspberry Pi 4).** Paměť pro DMA
+  (`VMO_CREATE_CONTIGUOUS`) se do procesu mapuje s `MapFlags::DMA`:
+  architektura podle platformy zvolí normální cache (koherentní platforma)
+  nebo mapování bez cache (Normal Non-cacheable). Kde jádro samo sahá na
+  tuto paměť přes přímou mapu (vynulování, `VMO_READ`/`VMO_WRITE`, vrácení
+  stránek), volá `arch::dma_sync_for_device` / `dma_sync_for_cpu`.
+  Ovladače nic řešit nemusí; na x86 jsou funkce prázdné.
+- **Pořadí zápisů vůči zařízení.** Ovladače používají bariéry
+  `libos::barrier` (`dma_wmb`, `dma_rmb`, `mmio_wmb`) místo `fence`; na ARM
+  jsou to `dmb osh*` a `dsb st`, na x86 stejná instrukce jako dřív. Viz
+  [libos](libos.md#bariéry-pro-ovladače).
+- **MSI na GICv3 potřebuje identitu zařízení.** `INTERRUPT_CREATE` předá
+  architektuře zařízení z omezeného Resource a `msi_message` může vrátit
+  chybu: bez zařízení dostane program `INVALID_ARGS` (místo pádu jádra).
+  Ovladače od `devmgr` mají prostředek omezený na zařízení vždy.
+- **Tabulky jádra a procesu jsou na ARM v různých registrech** (TTBR1
+  a TTBR0). Proto `PageTableOps::activate_kernel` (jen tabulky jádra)
+  a `arch::switch_user_space(Option<root>)` pro proces (`None` = vlákno
+  jádra, spodní polovina nic nemapuje).
+- **Adresa instrukce v logu** se jmenuje podle architektury
+  (`arch::PC_NAME`: `rip` / `pc`); symbolizace v `cargo xtask` přijímá obě.
+
+Co vyřešit nejde nebo je to vědomé rozhodnutí:
+
 - **Raspberry Pi 4 nemá IOMMU (SMMU).** DMA ovladačů tam nebude omezené -
   stejné riziko jako x86 bez IOMMU (chybný ovladač může přes DMA přepsat
-  jádro). RPi 5 má vlastní IOMMU, ne SMMUv3: další backend.
-- **MSI na GICv3 potřebuje identitu zařízení** (DeviceID pro ITS), proto
-  `INTERRUPT_CREATE` předává architektuře zařízení z omezeného Resource.
-  Přerušení přes Resource bez zařízení na aarch64 nepůjde.
+  jádro); jádro to při startu zaloguje jako varování. Je to vlastnost
+  hardwaru. RPi 5 má vlastní IOMMU (ne SMMUv3): další backend `Iommu`.
 - **Stránka 4 KiB je pevná** (ABI). Hardware jen s 16K/64K granulí
   podporovat nebudeme.
-- **Symbolizace v xtask** hledá v logu text `rip 0x...`; jádro ho proto
-  píše na všech architekturách (u aarch64 jde o PC).
 
 
 ## Jazyky a překladače (plán)

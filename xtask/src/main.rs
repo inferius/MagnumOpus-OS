@@ -28,7 +28,7 @@ const KERNEL_TARGET: &str = "x86_64-unknown-none";
 /// (aarch64 zatim jen kostra, ktera se prelozi), a jejich Rust cil.
 const KERNEL_ARCHES: &[(&str, &str)] = &[
     ("x86_64", "x86_64-unknown-none"),
-    ("aarch64", "aarch64-unknown-none"),
+    ("aarch64", "aarch64-unknown-none-softfloat"),
 ];
 const LOADER_TARGET: &str = "x86_64-unknown-uefi";
 

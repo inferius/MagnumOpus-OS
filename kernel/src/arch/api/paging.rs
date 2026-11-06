@@ -27,6 +27,10 @@ impl MapFlags {
     pub const GLOBAL: Self = Self(1 << 3);
     /// Bez cache (registry zarizeni).
     pub const UNCACHED: Self = Self(1 << 4);
+    /// Pamet sdilena se zarizenim (DMA). Na koherentni platforme beznou
+    /// cache, na nekoherentni bez cache (aarch64: Normal Non-cacheable,
+    /// ne Device - jde cist i zapisovat nezarovnane).
+    pub const DMA: Self = Self(1 << 5);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
@@ -85,13 +89,15 @@ pub trait PageTableOps: Sized + Send {
     /// videt ve vsech adresnich prostorech (volat jednou na tabulkach jadra).
     fn preallocate_kernel_half(&mut self) -> Result<(), MapError>;
 
-    /// Prepne aktualni CPU na tento adresni prostor.
+    /// Nahraje tyto tabulky jako tabulky jadra na aktualnim CPU (x86_64:
+    /// CR3, aarch64: TTBR1_EL1). Volat jen na tabulkach jadra; adresni
+    /// prostor procesu se prepina `Memory::switch_user_space`.
     ///
     /// # Safety
     ///
     /// Tabulky musi mapovat prave bezici kod, zasobnik a vsechna data,
     /// ktera se po prepnuti pouzivaji.
-    unsafe fn activate(&self);
+    unsafe fn activate_kernel(&self);
 
     /// Namapuje jednu stranku.
     fn map(
@@ -109,7 +115,7 @@ pub trait PageTableOps: Sized + Send {
     /// Prelozi virtualni adresu na fyzickou, `None` pokud neni namapovana.
     fn translate(&self, virt: VirtAddr) -> Option<PhysAddr>;
 
-    /// Fyzicka adresa korenove tabulky (hodnota pro `switch_page_table`).
+    /// Fyzicka adresa korenove tabulky (hodnota pro `switch_user_space`).
     fn root(&self) -> u64;
 
     /// Uvolni tabulky spodni poloviny (userspace) a korenovou tabulku.

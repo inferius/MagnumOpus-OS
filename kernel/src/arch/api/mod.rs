@@ -64,6 +64,10 @@ pub trait Cpu {
     const NAME: &'static str;
     /// Jak se jmenuje hardwarove ID CPU (pro log: "APIC ID", "MPIDR").
     const HW_ID_NAME: &'static str;
+    /// Jak se jmenuje registr s adresou instrukce (pro log: "rip", "pc").
+    /// Vypis fatalni vyjimky ho pise na zacatek radku ("rip 0x..."), podle
+    /// toho `cargo xtask` adresu najde a prelozi na jmeno funkce.
+    const PC_NAME: &'static str;
 
     /// Data pro prechody do a z userspace; jadro je drzi v `PerCpu` na
     /// offsetu [`Cpu::CPU_LOCAL_OFFSET`] (asembler k nim pristupuje primo).
@@ -136,6 +140,10 @@ pub trait Interrupts {
 /// Vlakna: kontext, prepinani, prechod do userspace.
 pub trait Threads: Cpu {
     /// Ulozeny stav vlakna jadra (registry zachovavane volanym, FPU/SIMD).
+    ///
+    /// Stav FPU/SIMD programu se uklada jen v `switch`, ne pri kazdem vstupu
+    /// do jadra. Jadro proto nesmi registry FPU/SIMD samo pouzivat: preklada
+    /// se bez nich (x86_64: soft-float bez SSE, aarch64: cil `-softfloat`).
     type Context: ThreadContext;
 
     /// Ulozi aktualni kontext do `from` a prepne na `to`.
@@ -230,15 +238,17 @@ pub trait Memory {
 
     /// Umi CPU 1 GiB stranky?
     fn supports_1g_pages() -> bool;
-    /// Fyzicka adresa aktivni korenove tabulky (spodni poloviny).
-    fn current_page_table() -> u64;
-    /// Prepne adresni prostor procesu, pokud uz neni aktivni.
+    /// Prepne spodni polovinu adresniho prostoru (userspace), pokud uz neni
+    /// aktivni: `Some(root)` = tabulky procesu (`PageTableOps::root`),
+    /// `None` = zadny proces (vlakno jadra; spodni polovina nic nemapuje).
+    /// x86_64 pro `None` nahraje tabulky jadra (CR3), aarch64 vypne
+    /// prekladani pres TTBR0 (TCR_EL1.EPD0) - jadro samo v TTBR1 se nemeni.
     ///
     /// # Safety
     ///
-    /// `root` musi byt platna korenova tabulka od `PageTableOps::root`
-    /// se sdilenou polovinou jadra.
-    unsafe fn switch_page_table(root: u64);
+    /// `root` musi byt platna korenova tabulka procesu se sdilenou polovinou
+    /// jadra, ktera zustane platna, dokud je aktivni.
+    unsafe fn switch_user_space(root: Option<u64>);
     /// Zahodi TLB zaznamy userspace na tomto CPU (globalni stranky jadra
     /// zustanou).
     fn flush_tlb_local();
@@ -247,32 +257,18 @@ pub trait Memory {
     /// `false` = architektura to neumi, jadro posle IPI ([`Ipi`]).
     fn flush_tlb_broadcast() -> bool;
 
-    // Cache pro DMA: na x86_64 a QEMU virt neni potreba nic, proto to
-    // jadro zatim nevola. Pouzije se s prvni nekoherentni platformou.
+    // Cache a DMA. Na koherentni platforme (x86_64, QEMU virt) DMA vidi
+    // obsah cache CPU a obe funkce nic nedelaji. Na nekoherentni (napr.
+    // Raspberry Pi 4, zjisti se pri startu z ACPI _CCA / DT `dma-coherent`)
+    // se pamet pro DMA mapuje do procesu bez cache (`MapFlags::DMA`)
+    // a jadro udrzuje cache tam, kde k ni samo pristupuje pres primou mapu
+    // (vynulovani pri vytvoreni, VMO_READ/VMO_WRITE) - viz `object::vmo`.
 
-    /// DMA zarizeni vidi obsah cache CPU (x86_64, QEMU virt). Na
-    /// nekoherentnich platformach (napr. Raspberry Pi 4) je `false`
-    /// a pred/po DMA je nutne volat `dma_sync_*`. Je to vlastnost
-    /// platformy, ne architektury (zjisti se pri startu, napr. z ACPI/DT),
-    /// proto funkce, ne konstanta.
-    #[allow(
-        dead_code,
-        reason = "pouzije se s nekoherentni platformou (Raspberry Pi 4)"
-    )]
-    fn dma_coherent() -> bool;
-    /// Zapise obsah cache do pameti, aby ho zarizeni videlo (pred DMA do
-    /// zarizeni). Na koherentni platforme nic nedela.
-    #[allow(
-        dead_code,
-        reason = "pouzije se s nekoherentni platformou (Raspberry Pi 4)"
-    )]
+    /// Zapise obsah cache do pameti a zneplatni ho, aby zarizeni (a mapovani
+    /// bez cache) videlo, co CPU zapsalo pres primou mapu.
     fn dma_sync_for_device(phys: u64, len: u64);
-    /// Zahodi obsah cache, aby CPU videlo data zapsana zarizenim (po DMA
-    /// ze zarizeni). Na koherentni platforme nic nedela.
-    #[allow(
-        dead_code,
-        reason = "pouzije se s nekoherentni platformou (Raspberry Pi 4)"
-    )]
+    /// Zahodi obsah cache, aby CPU pres primou mapu videlo data zapsana
+    /// zarizenim (nebo pres mapovani bez cache).
     fn dma_sync_for_cpu(phys: u64, len: u64);
 }
 
@@ -287,8 +283,10 @@ pub trait DeviceIrq {
     /// Zprava MSI (adresa, data), kterou zarizeni zapise pro preruseni
     /// `irq`. `device` = adresa zarizeni na PCI (segment, sbernice,
     /// zarizeni << 3 | funkce), pokud je znama: GICv3 ITS ji potrebuje
-    /// k prirazeni DeviceID, x86 ji ignoruje.
-    fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> (u64, u32);
+    /// k prirazeni DeviceID, x86 ji ignoruje. Chyba (napr. `InvalidArgs`
+    /// bez zarizeni na GICv3, `NoResources` pri plne tabulce ITS) se vrati
+    /// programu ze syscallu `INTERRUPT_CREATE`.
+    fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error>;
 }
 
 /// IOMMU: preklad DMA zarizeni (x86: VT-d, AMD-Vi; aarch64: SMMUv3).

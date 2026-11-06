@@ -13,7 +13,9 @@ rustflags = [
 # Kostra jadra pro aarch64 (zatim jen kontrola prekladu, `cargo xtask check
 # --arch aarch64`). Kod jadra je pozicne zavisly jako na x86_64; model kodu
 # "small" (vychozi) staci, protoze adresy jsou relativni k PC (+/- 4 GiB).
-[target.aarch64-unknown-none]
+# Cil "softfloat": jadro nesmi pouzivat registry FPU/SIMD (jako x86_64 bez
+# SSE), protoze stav FPU programu se uklada jen pri prepnuti vlakna.
+[target.aarch64-unknown-none-softfloat]
 rustflags = [
     "-C", "relocation-model=static",
     "-C", "force-frame-pointers=yes",

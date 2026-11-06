@@ -14,6 +14,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::{Error, KernelObject, ObjectCore, ObjectType, Rights, Signals};
+use crate::arch;
 use crate::arch::iommu::IommuDomain;
 use crate::mm::{PhysAddr, phys};
 
@@ -37,6 +38,10 @@ pub struct MemoryObject {
     /// Domena IOMMU, ve ktere je pamet namapovana pro DMA zarizeni
     /// (odmapuje se pred vracenim stranek alokatoru).
     dma: Option<crate::arch::iommu::Domain>,
+    /// Pamet pro DMA zarizeni: do procesu se mapuje s `MapFlags::DMA`
+    /// a jadro pri pristupu pres primou mapu udrzuje cache (na nekoherentni
+    /// platforme; na koherentni jsou `arch::dma_sync_*` prazdne).
+    for_dma: bool,
 }
 
 impl MemoryObject {
@@ -57,6 +62,7 @@ impl MemoryObject {
             pages,
             kind: Kind::Pages,
             dma: None,
+            for_dma: false,
         };
         for _ in 0..count {
             // Pri neuspechu se uz alokovane stranky uvolni v Drop.
@@ -73,10 +79,15 @@ impl MemoryObject {
         domain: Option<crate::arch::iommu::Domain>,
     ) -> Result<Arc<Self>, Error> {
         let vmo = Self::new_contiguous(size)?;
-        let Some(domain) = domain else { return Ok(vmo) };
         let mut vmo = Arc::try_unwrap(vmo).map_err(|_| Error::BadState)?;
-        domain.map(vmo.pages[0].as_u64(), vmo.allocated_bytes() / PAGE)?;
-        vmo.dma = Some(domain);
+        vmo.for_dma = true;
+        // Nuly zapsane pres primou mapu musi byt v pameti driv, nez je uvidi
+        // zarizeni nebo mapovani bez cache v procesu.
+        arch::dma_sync_for_device(vmo.pages[0].as_u64(), vmo.allocated_bytes());
+        if let Some(domain) = domain {
+            domain.map(vmo.pages[0].as_u64(), vmo.allocated_bytes() / PAGE)?;
+            vmo.dma = Some(domain);
+        }
         Ok(Arc::new(vmo))
     }
 
@@ -103,6 +114,7 @@ impl MemoryObject {
             pages,
             kind: Kind::Contiguous { order },
             dma: None,
+            for_dma: false,
         }))
     }
 
@@ -122,6 +134,7 @@ impl MemoryObject {
             pages,
             kind: Kind::Physical,
             dma: None,
+            for_dma: false,
         }))
     }
 
@@ -141,6 +154,11 @@ impl MemoryObject {
     /// Mapovat bez cache (registry zarizeni)?
     pub fn is_uncached(&self) -> bool {
         self.kind == Kind::Physical
+    }
+
+    /// Pamet pro DMA (mapuje se s `MapFlags::DMA`)?
+    pub fn is_dma(&self) -> bool {
+        self.for_dma
     }
 
     /// Fyzicka stranka na offsetu `offset` (zarovnanem na stranku).
@@ -183,6 +201,8 @@ impl MemoryObject {
     pub fn read(&self, offset: u64, buf: &mut [u8]) -> Result<(), Error> {
         self.check_access()?;
         self.check_range(offset, buf.len() as u64)?;
+        // Data mohlo zapsat zarizeni nebo proces pres mapovani bez cache.
+        self.dma_sync(offset, buf.len(), arch::dma_sync_for_cpu);
         self.for_each_chunk(offset, buf.len(), |ptr, at, n| {
             // SAFETY: `ptr..ptr+n` lezi v jedne strance tohoto objektu (prima
             // mapa); buffer je mimo pamet objektu. Soubezny zapis jineho
@@ -200,7 +220,16 @@ impl MemoryObject {
             // SAFETY: viz `read`.
             unsafe { core::ptr::copy_nonoverlapping(data.as_ptr().add(at), ptr, n) }
         });
+        // Zarizeni a mapovani bez cache musi zapsana data videt.
+        self.dma_sync(offset, data.len(), arch::dma_sync_for_device);
         Ok(())
+    }
+
+    /// U pameti pro DMA zavola `sync` na fyzicky rozsah (objekt je souvisly).
+    fn dma_sync(&self, offset: u64, len: usize, sync: fn(u64, u64)) {
+        if self.for_dma && len > 0 {
+            sync(self.pages[0].as_u64() + offset, len as u64);
+        }
     }
 }
 
@@ -209,6 +238,12 @@ impl Drop for MemoryObject {
         // Zarizeni nejdriv ztrati pristup (IOMMU), az pak se pamet vrati.
         if let Some(d) = self.dma.take() {
             d.unmap(self.pages[0].as_u64(), self.allocated_bytes() / PAGE);
+        }
+        // Pres mapovani bez cache se psalo mimo cache: jeji pripadne stare
+        // radky (spekulativni cteni pres primou mapu) zahodit, aby dalsi
+        // vlastnik stranek nevidel stara data.
+        if self.for_dma {
+            arch::dma_sync_for_cpu(self.pages[0].as_u64(), self.allocated_bytes());
         }
         // Objekt uz nikdo nema namapovany (mapovani drzi Arc), takze stranky
         // smi zpet do alokatoru. Fyzicke okno alokatoru nepatri.

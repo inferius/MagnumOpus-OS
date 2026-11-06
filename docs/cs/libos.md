@@ -92,6 +92,30 @@ let code = process.wait_exit(None)?;
 segmentů, W^X) a zásobník 256 KiB, pošle startovní zprávu a spustí první
 vlákno. Vrátí proces a konec kanálu k potomkovi.
 
+## Bariéry pro ovladače
+
+`libos::barrier` řadí přístupy do paměti sdílené se zařízením (DMA) a do
+registrů zařízení. `core::sync::atomic::fence` na to nestačí: řadí jen
+přístupy mezi procesory a na ARM zápis do registru zařízení může předběhnout
+dřívější zápisy do paměti.
+
+| funkce | kdy | x86_64 | aarch64 |
+|---|---|---|---|
+| `dma_wmb()` | data a deskriptory v DMA paměti před zápisem indexu | `fence(SeqCst)` | `dmb oshst` |
+| `dma_rmb()` | přečtený index od zařízení před čtením jeho dat | `fence(SeqCst)` | `dmb oshld` |
+| `mmio_wmb()` | všechny zápisy do paměti před zápisem do registru („doorbell“) | `fence(SeqCst)` | `dsb st` |
+
+```rust
+write_descriptors();
+libos::barrier::dma_wmb();  // deskriptory dřív než index
+write_avail_index();
+libos::barrier::mmio_wmb(); // index dřív než upozornění zařízení
+notify.write::<u16>(offset, queue_index);
+```
+
+Takhle to dělá `libs/virtio` (`Virtqueue::submit`, `take_used`,
+`Device::notify`).
+
 ## Nízká úroveň
 
 `libos::sys` obsahuje přímá volání syscallů (jedna funkce na syscall, viz

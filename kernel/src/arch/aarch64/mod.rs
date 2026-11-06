@@ -76,6 +76,7 @@ impl api::CpuLocalData for CpuLocal {
 impl api::Cpu for Aarch64 {
     const NAME: &'static str = "aarch64";
     const HW_ID_NAME: &'static str = "MPIDR";
+    const PC_NAME: &'static str = "pc";
 
     type CpuLocal = CpuLocal;
     const CPU_LOCAL_OFFSET: usize = 8;
@@ -254,8 +255,8 @@ impl api::PageTableOps for PageTable {
         todo!("aarch64: nic - horni polovinu sdili registr TTBR1_EL1")
     }
 
-    unsafe fn activate(&self) {
-        todo!("aarch64: jadro -> TTBR1_EL1, proces -> TTBR0_EL1; dsb ish, isb")
+    unsafe fn activate_kernel(&self) {
+        todo!("aarch64: TTBR1_EL1 = root; dsb ish, isb (TTBR0 nastavuje switch_user_space)")
     }
 
     fn map(
@@ -267,7 +268,7 @@ impl api::PageTableOps for PageTable {
     ) -> Result<(), MapError> {
         todo!(
             "aarch64: deskriptor stranky/bloku: AF, SH = inner, AP (EL0/RO), UXN/PXN, nG pro \
-             proces, AttrIndx (MAIR: normalni / Device-nGnRE pro UNCACHED)"
+             proces, AttrIndx (MAIR: normalni / Device-nGnRE pro UNCACHED, Normal-NC pro DMA na nekoherentni platforme)"
         )
     }
 
@@ -296,14 +297,11 @@ impl api::Memory for Aarch64 {
         true
     }
 
-    fn current_page_table() -> u64 {
-        todo!("aarch64: TTBR0_EL1 bez ASID")
-    }
-
-    unsafe fn switch_page_table(_root: u64) {
+    unsafe fn switch_user_space(_root: Option<u64>) {
         todo!(
-            "aarch64: TTBR0_EL1 = root (+ ASID az pozdeji; bez ASID tlbi vmalle1 po \
-             prepnuti), isb"
+            "aarch64: Some(root) -> TTBR0_EL1 = root a TCR_EL1.EPD0 = 0 (+ ASID az pozdeji; \
+             bez ASID tlbi vmalle1 po prepnuti); None -> TCR_EL1.EPD0 = 1 (spodni \
+             polovina neni mapovana); isb"
         )
     }
 
@@ -315,16 +313,23 @@ impl api::Memory for Aarch64 {
         todo!("aarch64: dsb ishst; tlbi vmalle1is; dsb ish; isb; vratit true")
     }
 
-    fn dma_coherent() -> bool {
-        todo!("aarch64: QEMU virt koherentni; Raspberry Pi 4 ne (z ACPI _CCA / DT dma-coherent)")
-    }
+    // Koherence DMA je vlastnost platformy: QEMU virt koherentni, Raspberry
+    // Pi 4 ne (ACPI _CCA / DT `dma-coherent`). Zjisti se pri startu a ulozi
+    // (napr. AtomicBool); `PageTable::map` podle ni pro `MapFlags::DMA`
+    // zvoli Normal WB nebo Normal Non-cacheable (MAIR).
 
     fn dma_sync_for_device(_phys: u64, _len: u64) {
-        todo!("aarch64: na nekoherentni platforme dc cvac po radcich cache, dsb sy")
+        todo!(
+            "aarch64: na koherentni platforme nic; jinak dc civac pres primou mapu po \
+             radcich cache (CTR_EL0.DminLine), dsb sy"
+        )
     }
 
     fn dma_sync_for_cpu(_phys: u64, _len: u64) {
-        todo!("aarch64: na nekoherentni platforme dc ivac po radcich cache, dsb sy")
+        todo!(
+            "aarch64: na koherentni platforme nic; jinak dc civac (ne ivac - nezahodit \
+             cizi data v okrajovych radcich) po radcich cache, dsb sy"
+        )
     }
 }
 
@@ -333,7 +338,11 @@ impl api::DeviceIrq for Aarch64 {
     const DEVICE_IRQ_FIRST: u32 = 8192;
     const DEVICE_IRQ_LAST: u32 = 8192 + 1023;
 
-    fn msi_message(_irq: u32, _device: Option<(u16, u8, u8)>) -> (u64, u32) {
+    fn msi_message(_irq: u32, device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
+        // Bez identity zarizeni ITS nevi, komu preruseni patri.
+        if device.is_none() {
+            return Err(Error::InvalidArgs);
+        }
         todo!(
             "aarch64: ITS - DeviceID z IORT (RID -> DeviceID), MAPD/MAPTI prikazy, \
              adresa = GITS_TRANSLATER, data = EventID"

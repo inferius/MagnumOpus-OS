@@ -309,18 +309,14 @@ fn switch_away(reason: Reason) {
     next.last_cpu.store(cpu.index, Ordering::Relaxed);
 
     // Adresni prostor a zasobnik jadra pro vstup z userspace noveho vlakna.
-    // Vlakna jadra bezi v adresnim prostoru jadra, aby zadne CPU nedrzelo
+    // Vlakna jadra nemaji spodni polovinu (`None`), aby zadne CPU nedrzelo
     // aktivni tabulky procesu, ktery uz mozna zanikl.
-    let root = next
-        .process
-        .as_ref()
-        .map_or(crate::mm::kernel_root().as_u64(), |p| {
-            p.address_space().root()
-        });
-    // SAFETY: vlastni CPU, preruseni zakazana; root je platna korenova tabulka se
-    // sdilenou polovinou jadra (bezici kod a zasobnik jsou v ni).
+    let root = next.process.as_ref().map(|p| p.address_space().root());
+    // SAFETY: vlastni CPU, preruseni zakazana; root je platna korenova
+    // tabulka se sdilenou polovinou jadra (bezici kod a zasobnik jsou v ni)
+    // a proces ji drzi, dokud ma vlakna.
     unsafe {
-        arch::switch_page_table(root);
+        arch::switch_user_space(root);
         if let Some(top) = next.kernel_stack_top() {
             arch::set_kernel_stack(&cpu.arch, top);
         }

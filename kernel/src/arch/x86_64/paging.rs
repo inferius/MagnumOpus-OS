@@ -36,7 +36,7 @@ const fn level(size: PageSize) -> u32 {
 ///
 /// # Safety
 ///
-/// Volat jednou pri startu kazdeho CPU, pred `PageTable::activate`.
+/// Volat jednou pri startu kazdeho CPU, pred `PageTable::activate_kernel`.
 pub unsafe fn init_cpu() {
     let features = cpu::features();
     // SAFETY: WP a PGE podporuje kazde x86_64 CPU; NXE se zapina jen
@@ -70,6 +70,7 @@ pub fn supports_1g_pages() -> bool {
     HUGE_1G.load(Ordering::Relaxed)
 }
 
+/// `MapFlags::DMA` nema na x86 vliv: DMA je koherentni s cache.
 fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
     let mut bits = PRESENT;
     if flags.contains(MapFlags::WRITE) {
@@ -161,7 +162,7 @@ impl PageTableOps for PageTable {
     ///
     /// Tabulky musi mapovat prave bezici kod, zasobnik a vsechna data,
     /// ktera se po prepnuti pouzivaji.
-    unsafe fn activate(&self) {
+    unsafe fn activate_kernel(&self) {
         // SAFETY: predano volajicim.
         unsafe { cpu::write_cr3(self.root) };
     }

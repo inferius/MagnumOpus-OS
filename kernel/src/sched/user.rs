@@ -98,8 +98,7 @@ pub fn on_return_to_user() {
 
 /// Vyjimka CPU v userspace: zaloguje ji a ukonci proces.
 /// `code` = cislo chyby podle ABI (viz `trap::user_fault`), `pc` = adresa
-/// instrukce. Text "rip 0x..." v logu cte `cargo xtask` pri symbolizaci,
-/// proto zustava stejny na vsech architekturach.
+/// instrukce (v logu pod jmenem registru architektury, `arch::PC_NAME`).
 pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64) -> ! {
     let me = super::current();
     let process = me
@@ -107,10 +106,11 @@ pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64) -> ! {
         .clone()
         .expect("vyjimka z userspace ve vlakne jadra");
     log::error!(
-        "proces {} ({}), vlakno {}: vyjimka CPU {code}, kod {error_code:#x}, rip {pc:#x}, adresa {addr:#x}",
+        "proces {} ({}), vlakno {}: vyjimka CPU {code}, kod {error_code:#x}, {} {pc:#x}, adresa {addr:#x}",
         process.id,
         process.name,
-        me.name
+        me.name,
+        arch::PC_NAME
     );
     drop(me);
     process.terminate(abi::process::EXIT_FAULT_BASE - code as i64);

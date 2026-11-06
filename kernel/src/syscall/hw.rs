@@ -62,7 +62,7 @@ pub fn interrupt_create(a: Args) -> Result<u64> {
     let res = check_resource(&p, a[0])?;
     res.charge_irq()?;
     let irq = Interrupt::new(res.device()).inspect_err(|_| res.refund_irq())?;
-    let (address, data) = irq.msi_message();
+    let (address, data) = irq.msi_message().inspect_err(|_| res.refund_irq())?;
     let mut out = [0u8; 16];
     out[0..8].copy_from_slice(&address.to_le_bytes());
     out[8..12].copy_from_slice(&data.to_le_bytes());

@@ -91,7 +91,7 @@ impl AddressSpace {
         })
     }
 
-    /// Fyzicka adresa korenove tabulky (pro `arch::switch_page_table`).
+    /// Fyzicka adresa korenove tabulky (pro `arch::switch_user_space`).
     pub fn root(&self) -> u64 {
         self.root
     }
@@ -147,6 +147,9 @@ impl AddressSpace {
         let mut map_flags = MapFlags::USER;
         if vmo.is_uncached() {
             map_flags = map_flags | MapFlags::UNCACHED;
+        }
+        if vmo.is_dma() {
+            map_flags = map_flags | MapFlags::DMA;
         }
         if flags & MAP_WRITE != 0 {
             map_flags = map_flags | MapFlags::WRITE;

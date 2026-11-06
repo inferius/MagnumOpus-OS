@@ -94,6 +94,30 @@ per-segment rights, W^X) plus a 256 KiB stack, sends the startup message and
 starts the first thread. It returns the process and the channel end to the
 child.
 
+## Barriers for drivers
+
+`libos::barrier` orders accesses to memory shared with a device (DMA) and
+to device registers. `core::sync::atomic::fence` is not enough: it only
+orders accesses between processors, and on ARM a write to a device
+register can overtake earlier writes to memory.
+
+| function | when | x86_64 | aarch64 |
+|---|---|---|---|
+| `dma_wmb()` | data and descriptors in DMA memory before writing the index | `fence(SeqCst)` | `dmb oshst` |
+| `dma_rmb()` | index read from the device before reading its data | `fence(SeqCst)` | `dmb oshld` |
+| `mmio_wmb()` | all memory writes before writing a register ("doorbell") | `fence(SeqCst)` | `dsb st` |
+
+```rust
+write_descriptors();
+libos::barrier::dma_wmb();  // descriptors before the index
+write_avail_index();
+libos::barrier::mmio_wmb(); // index before notifying the device
+notify.write::<u16>(offset, queue_index);
+```
+
+This is what `libs/virtio` does (`Virtqueue::submit`, `take_used`,
+`Device::notify`).
+
 ## Low level
 
 `libos::sys` has the raw syscall wrappers (one function per syscall, see

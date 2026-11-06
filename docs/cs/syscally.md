@@ -274,8 +274,13 @@ bez IOMMU může zapsat kamkoli.
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. Fyzicky souvislý objekt paměti pro DMA
-(max. 4 MiB), vyplněný nulami. Chyby: `INVALID_ARGS` (0 nebo nad 4 MiB),
-`NO_MEMORY` (není souvislý blok), `ACCESS_DENIED`, `WRONG_TYPE`.
+(max. 4 MiB), vyplněný nulami. Do procesu se mapuje jako paměť pro DMA:
+na koherentní platformě (x86_64, QEMU virt) normálně s cache, na
+nekoherentní (např. Raspberry Pi 4) bez cache, aby zařízení i ovladač
+viděli stejná data bez ruční údržby cache. Pořadí zápisů vůči zařízení
+musí ovladač zajistit bariérami (`libos::barrier`). Chyby: `INVALID_ARGS`
+(0 nebo nad 4 MiB), `NO_MEMORY` (není souvislý blok), `ACCESS_DENIED`,
+`WRONG_TYPE`.
 
 ### `VMO_CREATE_PHYSICAL`
 
@@ -298,8 +303,11 @@ u běžného jen v rámci jedné stránky. Chyby: `OUT_OF_RANGE`, `ACCESS_DENIED
 `(resource, out_msi_ptr) -> handle`. Objekt přerušení s volným vektorem
 CPU. Do `out_msi_ptr` zapíše zprávu MSI `{ address: u64, data: u32,
 reserved: u32 }`, kterou ovladač zapíše do zařízení (tabulka MSI-X).
-Když zařízení přerušení vyvolá, objekt dostane signál `SIGNALED`. Chyby:
-`NO_RESOURCES` (došly vektory), `ACCESS_DENIED`, `BAD_ADDRESS`.
+Když zařízení přerušení vyvolá, objekt dostane signál `SIGNALED`. Na
+aarch64 (GICv3 ITS) musí být prostředek omezený na zařízení
+(`RESOURCE_CREATE` s `device`), jinak `INVALID_ARGS`; na x86_64 to není
+potřeba. Chyby: `NO_RESOURCES` (došly vektory), `INVALID_ARGS`,
+`ACCESS_DENIED`, `BAD_ADDRESS`.
 
 ### `RESOURCE_CREATE`
 

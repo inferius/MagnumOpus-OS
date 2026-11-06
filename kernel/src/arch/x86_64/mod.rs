@@ -54,6 +54,7 @@ static EMPTY_CPU_LOCAL: u64 = 0;
 impl api::Cpu for X86_64 {
     const NAME: &'static str = "x86_64";
     const HW_ID_NAME: &'static str = "APIC ID";
+    const PC_NAME: &'static str = "rip";
 
     type CpuLocal = user::CpuLocal;
     const CPU_LOCAL_OFFSET: usize = user::CPU_LOCAL_OFFSET;
@@ -293,14 +294,12 @@ impl api::Memory for X86_64 {
         paging::supports_1g_pages()
     }
 
+    /// Vlakno jadra (`None`) bezi v tabulkach jadra: zadne CPU pak nedrzi
+    /// aktivni tabulky procesu, ktery uz mozna zanikl.
     #[inline]
-    fn current_page_table() -> u64 {
-        cpu::read_cr3() & 0x000F_FFFF_FFFF_F000
-    }
-
-    #[inline]
-    unsafe fn switch_page_table(root: u64) {
-        if Self::current_page_table() != root {
+    unsafe fn switch_user_space(root: Option<u64>) {
+        let root = root.unwrap_or_else(|| crate::mm::kernel_root().as_u64());
+        if cpu::read_cr3() & 0x000F_FFFF_FFFF_F000 != root {
             // SAFETY: predano volajicim; jadro je ve vsech adresnich
             // prostorech namapovane stejne.
             unsafe { cpu::write_cr3(root) };
@@ -318,11 +317,7 @@ impl api::Memory for X86_64 {
         false
     }
 
-    /// DMA na x86 je koherentni s cache CPU.
-    fn dma_coherent() -> bool {
-        true
-    }
-
+    // DMA na x86 je koherentni s cache CPU: neni co delat.
     fn dma_sync_for_device(_phys: u64, _len: u64) {}
 
     fn dma_sync_for_cpu(_phys: u64, _len: u64) {}
@@ -335,8 +330,8 @@ impl api::DeviceIrq for X86_64 {
 
     /// Pevny rezim, hrana, cil = bootovaci CPU.
     /// TODO: rozkladani preruseni mezi CPU.
-    fn msi_message(irq: u32, _device: Option<(u16, u8, u8)>) -> (u64, u32) {
-        msi_message(irq as u8)
+    fn msi_message(irq: u32, _device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
+        Ok(msi_message(irq as u8))
     }
 }
 

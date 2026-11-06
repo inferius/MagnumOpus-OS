@@ -281,8 +281,13 @@ IOMMU it can write anywhere.
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. A physically contiguous memory object for DMA
-(max 4 MiB), zero-filled. Errors: `INVALID_ARGS` (0 or over 4 MiB),
-`NO_MEMORY` (no contiguous block), `ACCESS_DENIED`, `WRONG_TYPE`.
+(max 4 MiB), zero-filled. It is mapped into the process as DMA memory: on
+a coherent platform (x86_64, QEMU virt) normally cached, on a non-coherent
+one (e.g. Raspberry Pi 4) uncached, so the device and the driver see the
+same data without manual cache maintenance. The driver must order writes
+towards the device with barriers (`libos::barrier`). Errors: `INVALID_ARGS`
+(0 or over 4 MiB), `NO_MEMORY` (no contiguous block), `ACCESS_DENIED`,
+`WRONG_TYPE`.
 
 ### `VMO_CREATE_PHYSICAL`
 
@@ -306,8 +311,11 @@ whole range, for a regular one only within one page. Errors:
 `(resource, out_msi_ptr) -> handle`. An interrupt object with a free CPU
 vector. Writes the MSI message `{ address: u64, data: u32, reserved: u32 }`
 to `out_msi_ptr`; the driver writes it into the device (MSI-X table). When
-the device raises the interrupt, the object gets `SIGNALED`. Errors:
-`NO_RESOURCES` (out of vectors), `ACCESS_DENIED`, `BAD_ADDRESS`.
+the device raises the interrupt, the object gets `SIGNALED`. On aarch64
+(GICv3 ITS) the resource must be restricted to a device (`RESOURCE_CREATE`
+with `device`), otherwise `INVALID_ARGS`; x86_64 does not need it. Errors:
+`NO_RESOURCES` (out of vectors), `INVALID_ARGS`, `ACCESS_DENIED`,
+`BAD_ADDRESS`.
 
 ### `RESOURCE_CREATE`
 
