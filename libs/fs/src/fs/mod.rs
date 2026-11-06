@@ -109,6 +109,8 @@ pub struct DirEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FsInfo {
     pub label: String,
+    /// Jednoznacne ID svazku (ze superbloku).
+    pub uuid: [u8; 16],
     pub block_size: u32,
     pub block_count: u64,
     /// Volne bloky (vcetne tech, ktere cekaji na odlozene uvolneni).
@@ -294,6 +296,7 @@ impl<D: BlockDevice> Fs<D> {
         let end = label.iter().position(|&b| b == 0).unwrap_or(label.len());
         FsInfo {
             label: String::from_utf8_lossy(&label[..end]).into(),
+            uuid: self.s.sb.uuid,
             block_size: BLOCK_SIZE as u32,
             block_count: self.s.sb.block_count,
             free_blocks: self.s.free_blocks(),

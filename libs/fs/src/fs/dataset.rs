@@ -76,6 +76,9 @@ impl DsCtx {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DatasetInfo {
     pub id: u64,
+    /// Cesta v zive verzi (prazdna, kdyz polozka datasetu nikde neni -
+    /// nemelo by nastat).
+    pub path: alloc::string::String,
     /// Klon: (dataset, snapshot, generace) puvodu.
     pub origin: Option<(u64, u64, u64)>,
 }
@@ -502,6 +505,7 @@ impl<D: BlockDevice> Fs<D> {
             let r = DatasetRecord::decode(&v)?;
             out.push(DatasetInfo {
                 id: k.offset,
+                path: alloc::string::String::new(),
                 origin: (r.origin_ds != 0).then_some((r.origin_ds, r.origin_snap, r.origin_gen)),
             });
         }
@@ -511,11 +515,45 @@ impl<D: BlockDevice> Fs<D> {
                 let origin = if id == self.cur_ds { self.cur_origin } else { self.others[&id].origin };
                 out.push(DatasetInfo {
                     id,
+                    path: alloc::string::String::new(),
                     origin: (origin.0 != 0).then_some(origin),
                 });
             }
         }
         out.sort_by_key(|d| d.id);
+        if !out.is_empty() {
+            let paths = self.dataset_paths()?;
+            for d in &mut out {
+                if let Some(p) = paths.get(&d.id) {
+                    d.path = p.clone();
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Cesty datasetu: pruchod adresari zive verze od korene (pres hranice
+    /// datasetu). Cena podle poctu adresaru - jen pro vypis datasetu.
+    fn dataset_paths(&mut self) -> Result<BTreeMap<u64, alloc::string::String>> {
+        let back = self.cur_ds;
+        let mut out = BTreeMap::new();
+        let mut stack: Vec<(u64, u64, alloc::string::String)> = alloc::vec![(ROOT_DATASET, ROOT_OID, alloc::string::String::new())];
+        while let Some((ds, oid, path)) = stack.pop() {
+            self.activate(ds)?;
+            let root = self.s.root;
+            for e in self.list_oid(&root, oid)? {
+                let p = alloc::format!("{path}/{}", e.name);
+                match e.kind {
+                    super::Kind::Dir => stack.push((ds, e.oid, p)),
+                    super::Kind::Dataset => {
+                        out.insert(e.oid, p.clone());
+                        stack.push((e.oid, ROOT_OID, p));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.activate(back)?;
         Ok(out)
     }
 }

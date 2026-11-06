@@ -28,7 +28,9 @@ fn dataset_is_folder_with_own_tree() {
     fs.commit().unwrap();
     let mut fs = remount(fs);
     assert_eq!(fs.read("/projekt/src/main.rs", 0, 100).unwrap(), b"fn main() {}");
-    assert_eq!(fs.datasets().unwrap().len(), 1);
+    let ds = fs.datasets().unwrap();
+    assert_eq!(ds.len(), 1);
+    assert_eq!(ds[0].path, "/projekt");
     assert_clean(&mut fs);
 }
 

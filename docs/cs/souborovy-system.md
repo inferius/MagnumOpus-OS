@@ -845,7 +845,7 @@ fs.delete_dataset("/zkouska")?;                   // uvolní jen bloky klonu
 | `snapshot_of(dataset, jméno)`, `snapshots_of`, `delete_snapshot_of`, `snapshot_read_of/stat_of/list_of` | jako u kořene, pro dataset s kořenem `dataset` (`"/"` = kořenový; staré funkce bez `_of` = kořenový) |
 | `clone_snapshot(dataset, snapshot, cesta)` | zapisovatelný klon (okamžitý, sdílí bloky); hned commit |
 | `delete_dataset(cesta)` | smaže dataset i jeho snapshoty a uvolní bloky, které držel jen on; `NOT_EMPTY` s vnořeným datasetem, `BAD_STATE`, když z jeho snapshotu existuje klon |
-| `datasets()` | seznam (číslo, původ klonu) |
+| `datasets()` | seznam (číslo, cesta v živé verzi, původ klonu) |
 | `stat` | pole `dataset` = číslo datasetu, ve kterém objekt leží |
 
 **Pravidla:**

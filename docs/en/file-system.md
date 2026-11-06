@@ -869,7 +869,7 @@ fs.delete_dataset("/trial")?;                     // frees only the clone's bloc
 | `snapshot_of(dataset, name)`, `snapshots_of`, `delete_snapshot_of`, `snapshot_read_of/stat_of/list_of` | as for the root, for the dataset rooted at `dataset` (`"/"` = root; the old functions without `_of` = root) |
 | `clone_snapshot(dataset, snapshot, path)` | a writable clone (instant, shares blocks); commits at once |
 | `delete_dataset(path)` | deletes the dataset with its snapshots and frees the blocks only it held; `NOT_EMPTY` with a nested dataset, `BAD_STATE` when a clone of its snapshot exists |
-| `datasets()` | a list (number, clone origin) |
+| `datasets()` | a list (number, path in the live version, clone origin) |
 | `stat` | the `dataset` field = number of the dataset the object lives in |
 
 **Rules:**
