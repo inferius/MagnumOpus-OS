@@ -36,8 +36,10 @@ fn worth(blocks: u64, runs: u64) -> bool {
 impl<D: BlockDevice> Fs<D> {
     /// Defragmentuje soubor; vraci pocet prepsanych bloku.
     pub fn defrag_file(&mut self, path: &str) -> Result<u64> {
-        let (oid, inode) = self.file_oid(path)?;
-        self.defrag_oid(oid, &inode)
+        self.guarded(|fs| {
+            let (oid, inode) = fs.file_oid(path)?;
+            fs.defrag_oid(oid, &inode)
+        })
     }
 
     fn defrag_oid(&mut self, oid: u64, inode: &Inode) -> Result<u64> {
@@ -95,39 +97,41 @@ impl<D: BlockDevice> Fs<D> {
     /// `budget` bloku. Volat opakovane (napr. kdyz je disk necinny); po
     /// dokonceni pruchodu zacne znovu od zacatku.
     pub fn defrag_step(&mut self, budget: u64) -> Result<DefragReport> {
-        let mut report = DefragReport::default();
-        let root = self.s.root;
-        let mut todo: Vec<(u64, Inode)> = Vec::new();
-        let start = Key::new(self.defrag_cursor, item::INODE, 0);
-        btree::range(
-            &mut self.s,
-            &root,
-            &start,
-            &Key::new(u64::MAX, 0, 0),
-            &mut |k, v| {
-                if k.kind == item::INODE {
-                    todo.push((k.oid, Inode::decode(v)?));
-                }
-                Ok(todo.len() < 256)
-            },
-        )?;
-        if todo.is_empty() {
-            self.defrag_cursor = 0;
-            report.done = true;
-            return Ok(report);
-        }
-        for (oid, inode) in todo {
-            self.defrag_cursor = oid + 1;
-            let n = self.defrag_oid(oid, &inode)?;
-            if n > 0 {
-                report.files += 1;
-                report.blocks += n;
-            }
-            if report.blocks >= budget {
+        self.guarded(|fs| {
+            let mut report = DefragReport::default();
+            let root = fs.s.root;
+            let mut todo: Vec<(u64, Inode)> = Vec::new();
+            let start = Key::new(fs.defrag_cursor, item::INODE, 0);
+            btree::range(
+                &mut fs.s,
+                &root,
+                &start,
+                &Key::new(u64::MAX, 0, 0),
+                &mut |k, v| {
+                    if k.kind == item::INODE {
+                        todo.push((k.oid, Inode::decode(v)?));
+                    }
+                    Ok(todo.len() < 256)
+                },
+            )?;
+            if todo.is_empty() {
+                fs.defrag_cursor = 0;
+                report.done = true;
                 return Ok(report);
             }
-        }
-        Ok(report)
+            for (oid, inode) in todo {
+                fs.defrag_cursor = oid + 1;
+                let n = fs.defrag_oid(oid, &inode)?;
+                if n > 0 {
+                    report.files += 1;
+                    report.blocks += n;
+                }
+                if report.blocks >= budget {
+                    return Ok(report);
+                }
+            }
+            Ok(report)
+        })
     }
 
     /// Posle zarizeni TRIM pro vsechny volne bloky (jako `fstrim`); vraci

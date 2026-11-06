@@ -434,8 +434,7 @@ impl<D: BlockDevice> Fs<D> {
             };
             let inode = crate::layout::Inode::decode(&raw)?;
             if inode.size as usize <= INLINE_MAX {
-                let data = btree::get(&mut self.s, &root, &Key::new(oid, item::INLINE, 0))?
-                    .unwrap_or_default();
+                let data = self.inline_data(&root, oid, inode.size)?;
                 records.push(Record::Inline {
                     oid,
                     size: inode.size,

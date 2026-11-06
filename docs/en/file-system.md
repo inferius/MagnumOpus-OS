@@ -779,6 +779,37 @@ the same principle git is built on.
 - programmatic access to file history and extended attributes,
 - indexes for search (name, type, time, size).
 
+## Values from disk and all-or-nothing operations
+
+The checksum in a pointer protects against media damage, but not against a
+software bug that writes a nonsensical value with a correct checksum. So
+values from disk are checked when used as well:
+
+| Value | Check | On error |
+|---|---|---|
+| extent | the whole range inside the volume, the offset does not overflow | `CORRUPTED` (no read or free outside) |
+| a range being freed (extent, deadlist, node) | inside the volume and fully allocated (`Space::free`) | not freed, `CORRUPTED` and the error state - a double free would damage the allocator |
+| content of a small file | length exactly equal to the size in the record | `CORRUPTED` |
+| the parent chain (summaries, move) | at most 65,536 steps (`MAX_DEPTH`) | `CORRUPTED` instead of a loop |
+| a space log record | range without overflow | mount fails (`CORRUPTED`) |
+
+**All-or-nothing operations** (`Fs::guarded`): public modifying operations
+(`create`, `symlink`, `remove`, `rename`, writing into the buffer,
+`truncate`, snapshot deletion, defragmentation) count changes of the
+in-memory state.
+
+- A failure **before** the first change (bad name, does not exist, not
+  enough space, a directory entry would not fit - it is prepared in
+  advance) endangers nothing.
+- A failure **after** a change (e.g. a node read error in the middle) would
+  leave the operation half done. The volume enters the error state: no
+  commit or `fsync` confirms it, all further changes return `IO_ERROR`.
+  Mount again = the state of the last commit + the intent log.
+
+A full in-memory rollback (without the error state) would need a copy of
+the dirty tree before every operation; it comes with application
+transactions (phase 5).
+
 ## Consistency check and scrub
 
 `check(scrub)` first saves changes with a commit, then walks the live
@@ -915,6 +946,7 @@ system returns them:
 | `tests/features.rs` | contiguous writes, fsync + replay, generation fallback, snapshot deletion, defragmentation, TRIM, many AGs + BLAKE3, log condensing |
 | `tests/model.rs` | property test: random sequences (create, write, truncate, remove, move, commit, fsync, "crash", snapshots) against an in-memory model; fsck at the end |
 | `tests/crash.rs` | power loss during commit and fsync with a random subset of unwritten blocks |
+| `tests/ondisk.rs` | damaged values with a correct checksum: extent outside the volume, freeing free blocks, small file length, parent cycle and operation rollback |
 | `tests/errors.rs` | device errors: a failed data write loses no data and can be retried, an overwrite leaves no hole, nothing is confirmed after a failed flush |
 | `tests/mount.rs` | superblock selection: unreadable slot, transient error without fallback, unknown `incompat` and newer version = refusal, unknown `ro_compat` = read-only without writes, nonsensical values = reported fallback, zeroing newer slots, device without a durability guarantee |
 | `tests/objects.rs` | format v3: object record, names up to 1024 characters, text direction controls rejected, symbolic links (also through the intent log), file size limit and summary saturation, object generation |

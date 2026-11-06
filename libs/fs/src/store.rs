@@ -570,6 +570,12 @@ impl<D: BlockDevice> Store<D> {
         if !self.has_changes() && self.sb.generation > 0 {
             return Ok(());
         }
+        // Poskozena hodnota z disku vedla k neplatnemu uvolneni: neukladat
+        // nic, co by poskozeni zapsalo natrvalo.
+        if self.space.corrupt {
+            self.poisoned = true;
+            return Err(Error::Corrupted);
+        }
         let r = self.commit_inner();
         if r.is_err() {
             self.poisoned = true;

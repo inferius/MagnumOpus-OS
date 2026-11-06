@@ -61,8 +61,17 @@ impl<D: BlockDevice> Fs<D> {
             Key::new(oid, item::EXTENT, b)
         };
         let mut out = Vec::new();
+        let blocks = self.s.sb.block_count;
         for (k, raw) in btree::collect(&mut self.s, root, &start, &end)? {
             let e = Extent::decode(&raw)?;
+            // Extent musi lezet ve svazku (jinak by cteni i uvolneni slo
+            // mimo; uvolneni by navic poskodilo alokator).
+            let inside = e.phys >= crate::layout::DATA_START
+                && e.phys.checked_add(e.len()).is_some_and(|x| x <= blocks)
+                && k.offset.checked_add(e.len()).is_some();
+            if !inside {
+                return Err(Error::Corrupted);
+            }
             if k.offset + e.len() > a {
                 out.push((k.offset, e));
             }
@@ -88,8 +97,7 @@ impl<D: BlockDevice> Fs<D> {
         let len = (len as u64).min(i.size - offset) as usize;
         let mut out = vec![0u8; len];
         if i.size as usize <= INLINE_MAX {
-            let data =
-                btree::get(&mut self.s, root, &Key::new(oid, item::INLINE, 0))?.unwrap_or_default();
+            let data = self.inline_data(root, oid, i.size)?;
             let avail = data.len().saturating_sub(offset as usize).min(len);
             out[..avail].copy_from_slice(&data[offset as usize..offset as usize + avail]);
             return Ok(out);
@@ -142,7 +150,9 @@ impl<D: BlockDevice> Fs<D> {
         let blocks = end.div_ceil(BS) - offset / BS;
         self.ensure_room(blocks + 8)?;
         let new_size = inode.size.max(end);
-        self.set_content(oid, inode, new_size, Some((offset, data)))?;
+        self.guarded(|fs| fs.set_content(oid, inode, new_size, Some((offset, data))))?;
+        // Mimo `guarded`: selhany zapis bufferu je cisty (data se vrati do
+        // bufferu), nekonzistenci po prepojeni hlasi primo `write_run`.
         if self.dirty_blocks > DIRTY_LIMIT {
             self.flush_all_data()?;
         }
@@ -151,15 +161,17 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Zmeni velikost souboru (zvetseni doplni nuly).
     pub fn truncate(&mut self, path: &str, size: u64) -> Result<()> {
-        let (oid, inode) = self.file_oid(path)?;
-        if size > MAX_FILE_SIZE {
-            return Err(Error::OutOfRange);
-        }
-        if size == inode.size {
-            return Ok(());
-        }
-        self.ensure_room(8)?;
-        self.truncate_oid(oid, size)
+        self.guarded(|fs| {
+            let (oid, inode) = fs.file_oid(path)?;
+            if size > MAX_FILE_SIZE {
+                return Err(Error::OutOfRange);
+            }
+            if size == inode.size {
+                return Ok(());
+            }
+            fs.ensure_room(8)?;
+            fs.truncate_oid(oid, size)
+        })
     }
 
     pub(super) fn truncate_oid(&mut self, oid: u64, size: u64) -> Result<()> {
@@ -171,6 +183,16 @@ impl<D: BlockDevice> Fs<D> {
             time: self.now,
         });
         Ok(())
+    }
+
+    /// Obsah maleho souboru; delka musi presne odpovidat velikosti
+    /// v zaznamu (jinak `CORRUPTED`, ne cteni mimo nebo tiche zkraceni).
+    pub(super) fn inline_data(&mut self, root: &Child, oid: u64, size: u64) -> Result<Vec<u8>> {
+        let data = btree::get(&mut self.s, root, &Key::new(oid, item::INLINE, 0))?.unwrap_or_default();
+        if data.len() as u64 != size {
+            return Err(Error::Corrupted);
+        }
+        Ok(data)
     }
 
     fn store_inline(&mut self, oid: u64, data: Vec<u8>) -> Result<()> {
@@ -220,6 +242,7 @@ impl<D: BlockDevice> Fs<D> {
             let in_block = (pos % BS) as usize;
             let n = (BLOCK_SIZE - in_block).min((end - pos) as usize);
             let at = (pos - offset) as usize;
+            self.mutations += 1;
             let block = self.dirty_block(oid, lb, n < BLOCK_SIZE)?;
             block[in_block..in_block + n].copy_from_slice(&bytes[at..at + n]);
             self.zil.touch_block(oid, lb);
@@ -263,8 +286,7 @@ impl<D: BlockDevice> Fs<D> {
         let root = self.s.root;
         match (was_inline, now_inline) {
             (true, true) => {
-                let mut data = btree::get(&mut self.s, &root, &Key::new(oid, item::INLINE, 0))?
-                    .unwrap_or_default();
+                let mut data = self.inline_data(&root, oid, old_size)?;
                 data.resize(new_size as usize, 0);
                 if let Some((off, bytes)) = write {
                     data[off as usize..off as usize + bytes.len()].copy_from_slice(bytes);
@@ -272,8 +294,7 @@ impl<D: BlockDevice> Fs<D> {
                 self.store_inline(oid, data)?;
             }
             (true, false) => {
-                let data = btree::get(&mut self.s, &root, &Key::new(oid, item::INLINE, 0))?
-                    .unwrap_or_default();
+                let data = self.inline_data(&root, oid, old_size)?;
                 self.store_inline(oid, Vec::new())?;
                 if !data.is_empty() {
                     self.write_dirty(oid, 0, &data)?;
@@ -454,9 +475,27 @@ impl<D: BlockDevice> Fs<D> {
                 }
             }
         }
+        // Od ted se meni strom: chyba (cteni uzlu) by nechala beh napul
+        // prepojeny - svazek do stavu chyby, nic se nepotvrdi.
+        let r = self.relink_run(oid, a, n, run, &pieces);
+        if r.is_err() {
+            self.s.poisoned = true;
+        }
+        r
+    }
+
+    fn relink_run(
+        &mut self,
+        oid: u64,
+        a: u64,
+        n: u64,
+        run: &[(u64, Vec<u8>)],
+        pieces: &[(u64, u64, u64)],
+    ) -> Result<()> {
+        let txg = self.s.txg;
         self.punch_range(oid, a, a + n)?;
         let algo = self.s.algo;
-        for (off0, start, got) in pieces {
+        for &(off0, start, got) in pieces {
             let piece = &run[off0 as usize..(off0 + got) as usize];
             let csums: Vec<_> = piece.iter().map(|(_, b)| algo.sum(b)).collect();
             for (k, chunk) in csums.chunks(MAX_EXTENT as usize).enumerate() {

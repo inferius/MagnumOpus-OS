@@ -137,6 +137,9 @@ pub struct Space {
     discards: Vec<(u64, u64)>,
     /// Kam pokracovat s first-fit alokaci metadat.
     meta_cursor: u64,
+    /// Nekdo chtel uvolnit usek mimo svazek nebo uz volny (poskozena
+    /// hodnota z disku: extent, deadlist). Commit se pak odmitne.
+    pub corrupt: bool,
     /// Perzistentni cast (space logy, tabulka AG).
     pub meta: SpaceMeta,
 }
@@ -153,6 +156,7 @@ impl Space {
             deferred_blocks: 0,
             discards: Vec::new(),
             meta_cursor: DATA_START,
+            corrupt: false,
             meta: SpaceMeta::new(n),
         };
         for i in 0..n {
@@ -199,6 +203,27 @@ impl Space {
             .iter()
             .flat_map(|a| a.free.iter().map(|(&s, &l)| (s, l)))
             .collect()
+    }
+
+    /// Je usek uvnitr svazku a cely obsazeny?
+    fn can_free(&self, start: u64, len: u64) -> bool {
+        let Some(end) = start.checked_add(len) else {
+            return false;
+        };
+        if len == 0 || start < DATA_START || end > self.block_count {
+            return false;
+        }
+        let mut s = start;
+        while s < end {
+            let ag = self.ag_of(s);
+            let e = end.min((ag as u64 + 1) * self.ag_blocks);
+            let a = &self.ags[ag];
+            if a.containing(s).is_some() || a.free.range(s..e).next().is_some() {
+                return false;
+            }
+            s = e;
+        }
+        true
     }
 
     fn record(&mut self, alloc: bool, start: u64, len: u64, txg: u64) {
@@ -311,7 +336,15 @@ impl Space {
 
     /// Uvolni usek. `immediate` = bloky vznikly v teto transakci a zadny
     /// ulozeny stav na ne neukazuje.
+    ///
+    /// Usek mimo svazek, prazdny nebo prekryvajici volne misto se neuvolni
+    /// (byl by to dvoji free z poskozene hodnoty na disku) a nastavi se
+    /// `corrupt`.
     pub fn free(&mut self, start: u64, len: u64, txg: u64, immediate: bool) {
+        if !self.can_free(start, len) {
+            self.corrupt = true;
+            return;
+        }
         self.record(false, start, len, txg);
         if immediate {
             self.give_range(start, len);

@@ -10,6 +10,7 @@ mod features;
 mod model;
 mod mount;
 mod objects;
+mod ondisk;
 mod perf;
 
 use crate::{Algo, BlockDevice, FormatOptions, Fs, MemDevice};

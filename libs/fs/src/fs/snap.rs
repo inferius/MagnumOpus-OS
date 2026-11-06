@@ -127,56 +127,58 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Smaze snapshot a uvolni bloky, ktere drzel jen on.
     pub fn delete_snapshot(&mut self, name: &str) -> Result<()> {
-        let (id, _) = self.find_snapshot(name)?;
-        self.ensure_room(16)?;
-        // Mrtve bloky cekajici v pameti musi byt v deadlistu, jinak by je
-        // zpracovani seznamu minulo.
-        self.flush_dead()?;
-        let root = self.s.root;
-        let all = self.records(&root)?;
-        let prev_gen = all
-            .iter()
-            .filter(|(i, _)| *i < id)
-            .map(|(_, r)| r.generation)
-            .max()
-            .unwrap_or(0);
-        let next = all.iter().map(|(i, _)| *i).filter(|&i| i > id).min();
-        let next_list = next.unwrap_or(self.s.next_snapshot);
-        // Seznam N: bloky narozene po P drzel jen mazany snapshot.
-        let (a, b) = list_range(next_list);
-        let root = self.s.root;
-        for (k, v) in btree::collect(&mut self.s, &root, &a, &b)? {
-            let (free, keep): (Vec<DeadExtent>, Vec<DeadExtent>) = decode_dead(&v)?
-                .into_iter()
-                .partition(|d| d.birth > prev_gen);
-            if free.is_empty() {
-                continue;
+        self.guarded(|fs| {
+            let (id, _) = fs.find_snapshot(name)?;
+            fs.ensure_room(16)?;
+            // Mrtve bloky cekajici v pameti musi byt v deadlistu, jinak by je
+            // zpracovani seznamu minulo.
+            fs.flush_dead()?;
+            let root = fs.s.root;
+            let all = fs.records(&root)?;
+            let prev_gen = all
+                .iter()
+                .filter(|(i, _)| *i < id)
+                .map(|(_, r)| r.generation)
+                .max()
+                .unwrap_or(0);
+            let next = all.iter().map(|(i, _)| *i).filter(|&i| i > id).min();
+            let next_list = next.unwrap_or(fs.s.next_snapshot);
+            // Seznam N: bloky narozene po P drzel jen mazany snapshot.
+            let (a, b) = list_range(next_list);
+            let root = fs.s.root;
+            for (k, v) in btree::collect(&mut fs.s, &root, &a, &b)? {
+                let (free, keep): (Vec<DeadExtent>, Vec<DeadExtent>) = decode_dead(&v)?
+                    .into_iter()
+                    .partition(|d| d.birth > prev_gen);
+                if free.is_empty() {
+                    continue;
+                }
+                for d in &free {
+                    let txg = fs.s.txg;
+                    fs.s.space.free(d.start, d.len, txg, false);
+                }
+                if keep.is_empty() {
+                    fs.del(&k)?;
+                } else {
+                    fs.put(k, encode_dead(&keep))?;
+                }
             }
-            for d in &free {
-                let txg = self.s.txg;
-                self.s.space.free(d.start, d.len, txg, false);
+            // Seznam S se presune do N.
+            let (a, b) = list_range(id);
+            let root = fs.s.root;
+            for (k, v) in btree::collect(&mut fs.s, &root, &a, &b)? {
+                fs.del(&k)?;
+                let entries = decode_dead(&v)?;
+                fs.put_dead_item(next_list, &entries)?;
             }
-            if keep.is_empty() {
-                self.del(&k)?;
-            } else {
-                self.put(k, encode_dead(&keep))?;
+            fs.del(&Key::new(META_OID, item::SNAPSHOT, id))?;
+            if next.is_none() {
+                // Mazal se posledni snapshot: hranici vlastnictvi posunout zpet.
+                fs.s.snapshot_generation = prev_gen;
             }
-        }
-        // Seznam S se presune do N.
-        let (a, b) = list_range(id);
-        let root = self.s.root;
-        for (k, v) in btree::collect(&mut self.s, &root, &a, &b)? {
-            self.del(&k)?;
-            let entries = decode_dead(&v)?;
-            self.put_dead_item(next_list, &entries)?;
-        }
-        self.del(&Key::new(META_OID, item::SNAPSHOT, id))?;
-        if next.is_none() {
-            // Mazal se posledni snapshot: hranici vlastnictvi posunout zpet.
-            self.s.snapshot_generation = prev_gen;
-        }
-        self.s.mark_changed();
-        Ok(())
+            fs.s.mark_changed();
+            Ok(())
+        })
     }
 
     fn snapshot_root(&mut self, name: &str) -> Result<Child> {

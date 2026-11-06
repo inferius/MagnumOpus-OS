@@ -135,7 +135,14 @@ pub struct Fs<D: BlockDevice> {
     replayed: u64,
     /// Kde pokracuje defragmentace na pozadi (oid).
     defrag_cursor: u64,
+    /// Pocet zmen stavu v pameti (strom, buffer dat) - `guarded` podle nej
+    /// pozna, ze operace selhala az po zmene.
+    mutations: u64,
 }
+
+/// Nejvetsi hloubka adresaru pri prochazeni rodicu. Vic = cyklus rodicu
+/// z poskozeneho zaznamu (`CORRUPTED`), ne zacykleni.
+const MAX_DEPTH: usize = 65_536;
 
 /// Kolik rozpracovanych bloku dat drzet v pameti, nez se zapisi (16 MiB).
 const DIRTY_LIMIT: u64 = 4096;
@@ -183,6 +190,7 @@ impl<D: BlockDevice> Fs<D> {
             zil: zil::Pending::default(),
             replayed: 0,
             defrag_cursor: 0,
+            mutations: 0,
         };
         fs.replay_log()?;
         Ok(fs)
@@ -373,8 +381,45 @@ impl<D: BlockDevice> Fs<D> {
 
     // --- zapis do stromu ---
 
+    /// Provede verejnou zmenovou operaci "vse, nebo nic" vuci disku: kdyz
+    /// selze az po zmene stavu v pameti (napr. chyba cteni uzlu uprostred),
+    /// stav by byl napul hotovy. Svazek pak prejde do stavu chyby (zadny
+    /// commit ani fsync nepotvrdi napul hotovou operaci); znovu pripojit =
+    /// stav posledniho commitu + intent log. Chyba pred prvni zmenou (spatne
+    /// jmeno, neexistuje, malo mista) nic neohrozi.
+    fn guarded<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let before = self.mutations;
+        let was_poisoned = self.s.poisoned;
+        let r = f(self);
+        // Neplatne uvolneni se ohlasi jednou jako CORRUPTED; dal uz plati
+        // stav chyby (IO_ERROR jako po kazdem selhani).
+        if self.s.space.corrupt && !was_poisoned {
+            self.s.poisoned = true;
+            return Err(Error::Corrupted);
+        }
+        if r.is_err() && self.mutations != before {
+            self.s.poisoned = true;
+        }
+        r
+    }
+
+    /// Testy: primy zapis polozky (simulace poskozene hodnoty na disku).
+    #[cfg(test)]
+    pub(crate) fn test_put(&mut self, key: Key, value: Vec<u8>) -> Result<()> {
+        self.put(key, value)
+    }
+
+    /// Testy: primy zapis zaznamu objektu.
+    #[cfg(test)]
+    pub(crate) fn test_inode(&mut self, path: &str) -> Result<(u64, Inode)> {
+        let root = self.s.root;
+        let oid = self.resolve(&root, path)?;
+        Ok((oid, self.inode(&root, oid)?))
+    }
+
     /// Vlozi nebo nahradi polozku v zivem stromu.
     fn put(&mut self, key: Key, value: Vec<u8>) -> Result<()> {
+        self.mutations += 1;
         let mut root = self.s.root;
         let r = btree::insert(&mut self.s, &mut root, key, value);
         self.s.root = root;
@@ -383,6 +428,7 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Odstrani polozku ze ziveho stromu; vraci, zda existovala.
     fn del(&mut self, key: &Key) -> Result<bool> {
+        self.mutations += 1;
         let mut root = self.s.root;
         let r = btree::remove(&mut self.s, &mut root, key);
         self.s.root = root;
@@ -403,7 +449,7 @@ impl<D: BlockDevice> Fs<D> {
     /// by vysla mensi, nez je skutecnost). Rozdil je `i128`, aby sel prenest
     /// cely souhrn podstromu (az 2^64 - 1).
     fn adjust_tree(&mut self, mut dir: u64, bytes: i128, files: i64, dirs: i64) -> Result<()> {
-        loop {
+        for _ in 0..MAX_DEPTH {
             let mut i = self.live_inode(dir)?;
             if i.tree_bytes != u64::MAX {
                 i.tree_bytes = (i.tree_bytes as i128 + bytes).clamp(0, u64::MAX as i128) as u64;
@@ -416,9 +462,17 @@ impl<D: BlockDevice> Fs<D> {
             }
             dir = i.parent;
         }
+        Err(Error::Corrupted)
     }
 
     fn add_dirent(&mut self, dir: u64, d: Dirent) -> Result<()> {
+        let (key, value) = self.prepare_dirent(dir, d)?;
+        self.put(key, value)
+    }
+
+    /// Klic a nova hodnota polozky adresare po pridani `d` - bez zmeny
+    /// stromu, aby operace mohla selhat drive, nez neco zmeni.
+    fn prepare_dirent(&mut self, dir: u64, d: Dirent) -> Result<(Key, Vec<u8>)> {
         let key = Key::new(dir, item::DIRENT, name_hash(&fold_name(&d.name)));
         let root = self.s.root;
         let mut list = match btree::get(&mut self.s, &root, &key)? {
@@ -432,7 +486,7 @@ impl<D: BlockDevice> Fs<D> {
         if value.len() > MAX_VALUE {
             return Err(Error::NoResources);
         }
-        self.put(key, value)
+        Ok((key, value))
     }
 
     fn remove_dirent(&mut self, dir: u64, name: &str) -> Result<()> {
@@ -467,35 +521,39 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Vytvori soubor nebo adresar.
     pub fn create(&mut self, path: &str, kind: Kind) -> Result<()> {
-        let (parent_path, name) = split_parent(path)?;
-        validate_name(name)?;
-        let parent = self.dir_of(parent_path)?;
-        self.ensure_room(4)?;
-        let oid = self.s.next_oid;
-        let generation = self.s.txg;
-        self.create_at(parent, name, kind, oid, generation)
+        self.guarded(|fs| {
+            let (parent_path, name) = split_parent(path)?;
+            validate_name(name)?;
+            let parent = fs.dir_of(parent_path)?;
+            fs.ensure_room(4)?;
+            let oid = fs.s.next_oid;
+            let generation = fs.s.txg;
+            fs.create_at(parent, name, kind, oid, generation)
+        })
     }
 
     /// Vytvori symbolicky odkaz `path` s cilem `target` (libovolny text do
     /// `SYMLINK_MAX` bajtu bez NUL; cil nemusi existovat).
     pub fn symlink(&mut self, path: &str, target: &str) -> Result<()> {
-        let (parent_path, name) = split_parent(path)?;
-        validate_name(name)?;
-        validate_target(target)?;
-        let parent = self.dir_of(parent_path)?;
-        self.ensure_room(4)?;
-        let oid = self.s.next_oid;
-        let generation = self.s.txg;
-        self.symlink_at(parent, name, target, oid, generation)?;
-        self.zil.op(zil::Op::Symlink {
-            parent,
-            oid,
-            generation,
-            name: stored_name(name),
-            target: target.into(),
-            time: self.now,
-        });
-        Ok(())
+        self.guarded(|fs| {
+            let (parent_path, name) = split_parent(path)?;
+            validate_name(name)?;
+            validate_target(target)?;
+            let parent = fs.dir_of(parent_path)?;
+            fs.ensure_room(4)?;
+            let oid = fs.s.next_oid;
+            let generation = fs.s.txg;
+            fs.symlink_at(parent, name, target, oid, generation)?;
+            fs.zil.op(zil::Op::Symlink {
+                parent,
+                oid,
+                generation,
+                name: stored_name(name),
+                target: target.into(),
+                time: fs.now,
+            });
+            Ok(())
+        })
     }
 
     /// `generation` = generace vzniku (pri prehrani logu ta puvodni).
@@ -532,12 +590,9 @@ impl<D: BlockDevice> Fs<D> {
             return Err(Error::AlreadyExists);
         }
         let next = oid.checked_add(1).ok_or(Error::NoResources)?;
-        self.s.next_oid = self.s.next_oid.max(next);
-        let mut inode = Inode::new(kind.raw(), parent, self.now, generation);
-        inode.size = size;
-        self.put_inode(oid, &inode)?;
         let name = stored_name(name);
-        self.add_dirent(
+        // Polozka adresare predem: kdyz se nevejde, nic se nezmenilo.
+        let (dkey, dvalue) = self.prepare_dirent(
             parent,
             Dirent {
                 oid,
@@ -545,6 +600,11 @@ impl<D: BlockDevice> Fs<D> {
                 name: name.clone(),
             },
         )?;
+        self.s.next_oid = self.s.next_oid.max(next);
+        let mut inode = Inode::new(kind.raw(), parent, self.now, generation);
+        inode.size = size;
+        self.put_inode(oid, &inode)?;
+        self.put(dkey, dvalue)?;
         self.touch_dir(parent)?;
         match kind {
             Kind::File | Kind::Symlink => self.adjust_tree(parent, 0, 1, 0)?,
@@ -555,10 +615,12 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Odstrani soubor nebo prazdny adresar.
     pub fn remove(&mut self, path: &str) -> Result<()> {
-        let (parent_path, name) = split_parent(path)?;
-        let parent = self.dir_of(parent_path)?;
-        self.ensure_room(4)?;
-        self.remove_at(parent, name)
+        self.guarded(|fs| {
+            let (parent_path, name) = split_parent(path)?;
+            let parent = fs.dir_of(parent_path)?;
+            fs.ensure_room(4)?;
+            fs.remove_at(parent, name)
+        })
     }
 
     fn remove_at(&mut self, parent: u64, name: &str) -> Result<()> {
@@ -603,13 +665,15 @@ impl<D: BlockDevice> Fs<D> {
     /// Presune nebo prejmenuje polozku. Cil nesmi existovat (krome zmeny
     /// velikosti pismen tehoz jmena).
     pub fn rename(&mut self, from: &str, to: &str) -> Result<()> {
-        let (fp, fname) = split_parent(from)?;
-        let (tp, tname) = split_parent(to)?;
-        validate_name(tname)?;
-        let src = self.dir_of(fp)?;
-        let dst = self.dir_of(tp)?;
-        self.ensure_room(8)?;
-        self.rename_at(src, fname, dst, tname)
+        self.guarded(|fs| {
+            let (fp, fname) = split_parent(from)?;
+            let (tp, tname) = split_parent(to)?;
+            validate_name(tname)?;
+            let src = fs.dir_of(fp)?;
+            let dst = fs.dir_of(tp)?;
+            fs.ensure_room(8)?;
+            fs.rename_at(src, fname, dst, tname)
+        })
     }
 
     fn rename_at(&mut self, src: u64, fname: &str, dst: u64, tname: &str) -> Result<()> {
@@ -622,17 +686,30 @@ impl<D: BlockDevice> Fs<D> {
         {
             return Err(Error::AlreadyExists);
         }
-        // Adresar nejde presunout do sveho podstromu.
+        // Adresar nejde presunout do sveho podstromu (s mezi pro cyklus
+        // rodicu z poskozeneho zaznamu).
         let mut a = dst;
-        loop {
+        let mut depth = 0;
+        while a != ROOT_OID {
             if a == d.oid {
                 return Err(Error::InvalidArgs);
             }
-            if a == ROOT_OID {
-                break;
+            depth += 1;
+            if depth > MAX_DEPTH {
+                return Err(Error::Corrupted);
             }
             a = self.inode(&root, a)?.parent;
         }
+        // Cil predem: kdyz se polozka nevejde, nic se nezmenilo (konzervativni
+        // pri stejnem hashi ve stejnem adresari - odebrani by misto uvolnilo).
+        self.prepare_dirent(
+            dst,
+            Dirent {
+                oid: d.oid,
+                kind: d.kind,
+                name: stored_name(tname),
+            },
+        )?;
         let mut inode = self.inode(&root, d.oid)?;
         // Pocty objektu se do i64 vejdou vzdy (omezuje je misto na disku).
         let sat = |v: u64| v.min(i64::MAX as u64) as i64;

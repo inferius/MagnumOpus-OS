@@ -758,6 +758,35 @@ Merkleův strom - stejný princip, na kterém stojí git.
 - programový přístup k historii souboru a rozšířené atributy,
 - indexy pro vyhledávání (jméno, typ, čas, velikost).
 
+## Hodnoty z disku a operace „vše, nebo nic“
+
+Součet v ukazateli chrání před poškozením média, ale ne před chybou
+softwaru, která zapíše nesmyslnou hodnotu se správným součtem. Proto se
+hodnoty z disku kontrolují i při použití:
+
+| Hodnota | Kontrola | Při chybě |
+|---|---|---|
+| extent | celý rozsah uvnitř svazku, offset nepřeteče | `CORRUPTED` (žádné čtení ani uvolnění mimo) |
+| uvolňovaný úsek (extent, deadlist, uzel) | uvnitř svazku a celý obsazený (`Space::free`) | neuvolní se, `CORRUPTED` a stav chyby - dvojí uvolnění by poškodilo alokátor |
+| obsah malého souboru | délka přesně rovná velikosti v záznamu | `CORRUPTED` |
+| řetěz rodičů (souhrny, přesun) | nejvýš 65 536 kroků (`MAX_DEPTH`) | `CORRUPTED` místo zacyklení |
+| záznam ve space logu | rozsah bez přetečení | připojení selže (`CORRUPTED`) |
+
+**Operace „vše, nebo nic“** (`Fs::guarded`): veřejné změnové operace
+(`create`, `symlink`, `remove`, `rename`, zápis do bufferu, `truncate`,
+mazání snapshotu, defragmentace) počítají změny stavu v paměti.
+
+- Selhání **před** první změnou (špatné jméno, neexistuje, málo místa,
+  položka adresáře by se nevešla - ta se připraví předem) nic neohrozí.
+- Selhání **po** změně (např. chyba čtení uzlu uprostřed) by nechalo
+  operaci napůl hotovou. Svazek přejde do stavu chyby: žádný commit ani
+  `fsync` ji nepotvrdí, všechny další změny vrací `IO_ERROR`. Znovu
+  připojit = stav posledního commitu + intent log.
+
+Plné vrácení v paměti (bez stavu chyby) by potřebovalo kopii
+rozpracovaného stromu před každou operací; přijde s transakcemi pro
+aplikace (fáze 5).
+
 ## Kontrola konzistence a scrub
 
 `check(scrub)` nejdřív uloží změny commitem a pak projde živý strom,
@@ -893,6 +922,7 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `tests/features.rs` | souvislý zápis, fsync + přehrání, návrat o generaci, mazání snapshotů, defragmentace, TRIM, víc AG + BLAKE3, zhušťování logů |
 | `tests/model.rs` | property test: náhodné sekvence (vytvoření, zápis, zkrácení, mazání, přesun, commit, fsync, „pád“, snapshoty) proti modelu v paměti; na konci fsck |
 | `tests/crash.rs` | výpadek během commitu i fsync s náhodnou podmnožinou nezapsaných bloků |
+| `tests/ondisk.rs` | poškozené hodnoty se správným součtem: extent mimo svazek, uvolnění volných bloků, délka malého souboru, cyklus rodičů a vrácení operace |
 | `tests/errors.rs` | chyby zařízení: selhaný zápis dat neztratí data a jde zopakovat, přepsání nenechá díru, po selhaném flush nic dalšího nepotvrdí |
 | `tests/mount.rs` | výběr superbloku: nečitelný slot, přechodná chyba bez návratu, neznámý `incompat` a novější verze = odmítnutí, neznámý `ro_compat` = jen pro čtení bez zápisu, nesmyslné hodnoty = návrat se hlášením, vynulování novějších slotů, zařízení bez záruky trvanlivosti |
 | `tests/objects.rs` | formát v3: záznam objektu, jména do 1024 znaků, zákaz znaků směru textu, symbolické odkazy (i přes intent log), limit velikosti souboru a saturace souhrnů, generace objektu |

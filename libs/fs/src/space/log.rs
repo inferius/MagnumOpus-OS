@@ -249,7 +249,7 @@ impl Space {
         let (lo, hi) = self.ag_range(ag);
         for recs in per_block.iter().rev() {
             for r in recs {
-                if r.len == 0 || r.start < lo || r.start + r.len > hi {
+                if r.len == 0 || r.start < lo || r.start.checked_add(r.len).is_none_or(|e| e > hi) {
                     return Err(Error::Corrupted);
                 }
                 if r.alloc {
