@@ -32,7 +32,7 @@ Jádro (u `init`) nebo rodič (u ostatních) spustí první vlákno na symbolu
 `_start` z libos s handlem bootstrap kanálu v `rdi`. libos pak:
 
 1. přečte startovní zprávu (`abi::bootstrap`): handly a jejich význam,
-2. namapuje heap (4 MiB) a zapne globální alokátor (`alloc::vec::Vec` atd.),
+2. namapuje heap (začíná na 4 MiB na pevné adrese a roste podle potřeby: když alokace selže, namapuje další paměť hned za konec, nejvýš 64 GiB) a zapne globální alokátor (`alloc::vec::Vec` atd.),
 3. zavolá funkci programu z `entry!` se strukturou [`Startup`]:
    - `process` - handle na vlastní proces (mapování paměti, vlákna),
    - `initfs` - obraz initfs (jen `init`),
@@ -51,7 +51,7 @@ Každý typ vlastní handle a zavře ho při zrušení (`Drop`).
 | `Handle` | obecný handle | `duplicate(práva)`, `into_raw`, `from_raw` |
 | `Event` | signál mezi vlákny a procesy | `create`, `signal`, `reset` |
 | `Channel` | zprávy s daty a handly | `create`, `write`, `try_read`, `read(deadline)` |
-| `Vmo` | objekt paměti | `create`, `read`, `write` |
+| `Vmo` | objekt paměti | `create`, `read`, `write` (libovolně dlouhé; jádro přenese 1 MiB na volání, libos dělí) |
 | `Process` | proces | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |
 | `Thread` | vlákno | `create`, `start`, `wait_exit` |
 

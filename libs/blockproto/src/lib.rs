@@ -4,7 +4,8 @@
 //! Pozadavek: hlavicka 16 B (`op` u32, `count` u32, `lba` u64) a u zapisu
 //! data. Odpoved: hlavicka 16 B (`status` i32 = 0 nebo kod chyby, rezerva,
 //! `value` u64) a u cteni data. Sektor ma 512 B, jeden pozadavek prenese
-//! nejvyse `MAX_SECTORS` sektoru (data se vejdou do zpravy kanalu).
+//! nejvyse `MAX_SECTORS` sektoru (data se vejdou do zpravy kanalu); vyjimkou
+//! je `DISCARD`, ktery nenese data a `count` muze byt libovolny.
 //!
 //! Verze 1 je synchronni a kopiruje data zpravou. TODO: sdilena pamet
 //! a fronty pozadavku (asynchronni I/O podle navrhu).
@@ -30,6 +31,9 @@ pub mod op {
     pub const WRITE: u32 = 2;
     /// Zapsat vse z mezipameti zarizeni na medium.
     pub const FLUSH: u32 = 3;
+    /// Sektory `lba..lba+count` uz nejsou pouzite (TRIM/UNMAP). Jen
+    /// napoveda: obsah je pak nedefinovany. Bez podpory `NOT_SUPPORTED`.
+    pub const DISCARD: u32 = 4;
 }
 
 /// Rozebrany pozadavek.
@@ -166,6 +170,30 @@ impl BlockClient {
             )?;
         }
         Ok(())
+    }
+
+    /// Oznaci sektory jako nepouzite (TRIM). `NOT_SUPPORTED`, kdyz to
+    /// zarizeni neumi.
+    pub fn discard(&self, lba: u64, sectors: u64) -> Result<()> {
+        let mut done = 0;
+        while done < sectors {
+            let count = (sectors - done).min(u32::MAX as u64) as u32;
+            self.call(
+                Request {
+                    op: op::DISCARD,
+                    count,
+                    lba: lba + done,
+                },
+                &[],
+            )?;
+            done += count as u64;
+        }
+        Ok(())
+    }
+
+    /// Kanal k ovladaci (predani klienta jinemu procesu).
+    pub fn into_channel(self) -> Channel {
+        self.channel
     }
 
     pub fn flush(&self) -> Result<()> {

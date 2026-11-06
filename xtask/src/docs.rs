@@ -208,11 +208,11 @@ fn render(file: &str, md: &str) -> Rendered {
             }
             (Some((_, inner)), ev) => inner.push(ev),
             (None, ev) => {
-                if let (Event::Text(t) | Event::Code(t), Some(last)) = (&ev, sections.last_mut()) {
-                    if last.2.len() < 600 {
-                        last.2.push_str(t);
-                        last.2.push(' ');
-                    }
+                if let (Event::Text(t) | Event::Code(t), Some(last)) = (&ev, sections.last_mut())
+                    && last.2.len() < 600
+                {
+                    last.2.push_str(t);
+                    last.2.push(' ');
                 }
                 out_events.push(ev);
             }

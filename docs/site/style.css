@@ -229,3 +229,41 @@ main { padding: 32px 48px 80px; min-width: 0; }
   .topbar { gap: 8px; padding: 0 12px; }
   .brand { display: none; }
 }
+
+/* Diagramy (vlozene SVG v markdownu): barvy z promennych motivu. */
+figure.diagram {
+  margin: 1.5em 0;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+figure.diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  font-family: var(--sans);
+  font-size: 13px;
+}
+figure.diagram figcaption {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+.diagram .box { fill: var(--surface-2); stroke: var(--border); stroke-width: 1.2; }
+.diagram .acc { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+.diagram .ok { fill: color-mix(in srgb, var(--ok) 16%, var(--surface)); stroke: var(--ok); stroke-width: 1.4; }
+.diagram .warn { fill: color-mix(in srgb, var(--warn) 16%, var(--surface)); stroke: var(--warn); stroke-width: 1.4; }
+.diagram .err { fill: color-mix(in srgb, var(--err) 14%, var(--surface)); stroke: var(--err); stroke-width: 1.4; }
+.diagram .t { fill: var(--text); }
+.diagram .m { fill: var(--muted); font-size: 12px; }
+.diagram .b { font-weight: 600; }
+.diagram .mono { font-family: var(--mono); font-size: 12px; }
+.diagram .ln { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+.diagram .ln-acc { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+.diagram .dash { stroke-dasharray: 5 4; }
+.diagram .arrow { fill: var(--muted); }
+.diagram .arrow-acc { fill: var(--accent); }

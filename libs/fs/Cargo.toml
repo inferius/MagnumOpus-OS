@@ -1,0 +1,19 @@
+[package]
+name = "fs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Souborovy system: CoW B+strom, Merkleovy checksumy, extenty, snapshoty, intent log (no_std; std pro nastroje)"
+
+[features]
+std = []
+
+[dependencies]
+abi.workspace = true
+unicode-normalization = { version = "0.1", default-features = false }
+# Prevzate hashe (no_std, ciste Rust): XXH3-128 vychozi, BLAKE3 volitelne.
+xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
+blake3 = { version = "1.8", default-features = false, features = ["pure"] }
+
+[dev-dependencies]
+proptest = "1"

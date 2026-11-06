@@ -4,7 +4,7 @@ use libos::abi::vm::{MAP_EXECUTE, MAP_READ, MAP_WRITE, PAGE_SIZE as PAGE};
 use libos::{Error, Rights, Startup, Vmo, sys};
 
 use super::{Test, TestResult, fail};
-use crate::check_eq;
+use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
     ("zapis a cteni objektu pameti", vmo_roundtrip),
@@ -17,6 +17,7 @@ pub const TESTS: &[Test] = &[
     ("mapovani bez prava MAP -> ACCESS_DENIED", map_without_right),
     ("neplatny ukazatel -> BAD_ADDRESS", bad_pointer),
     ("odmapovani a nesouvisly rozsah", unmap),
+    ("heap roste podle potreby (24 MiB)", heap_grows),
 ];
 
 fn vmo_roundtrip(_: &Startup) -> TestResult {
@@ -133,5 +134,21 @@ fn unmap(s: &Startup) -> TestResult {
         Err(Error::NotFound),
         "dvojite odmapovani"
     );
+    Ok(())
+}
+
+fn heap_grows(_: &Startup) -> TestResult {
+    // Vic nez pocatecni heap (4 MiB): libos musi pridat pamet.
+    let mut blocks: alloc::vec::Vec<alloc::vec::Vec<u8>> = alloc::vec::Vec::new();
+    for i in 0..6u8 {
+        blocks.push(alloc::vec![i; 4 * 1024 * 1024]);
+    }
+    for (i, b) in blocks.iter().enumerate() {
+        check!(b.iter().all(|&x| x == i as u8), "obsah alokace se zmenil");
+    }
+    drop(blocks);
+    // Po uvolneni jde pamet znovu pouzit.
+    let big = alloc::vec![7u8; 20 * 1024 * 1024];
+    check_eq!(big[20 * 1024 * 1024 - 1], 7, "posledni bajt");
     Ok(())
 }

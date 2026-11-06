@@ -7,17 +7,75 @@ use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use abi::bootstrap::{self, Entry, Header};
-use abi::vm::{MAP_READ, MAP_WRITE};
+use core::alloc::{GlobalAlloc, Layout};
+use core::ptr::NonNull;
+
+use abi::vm::{MAP_FIXED, MAP_READ, MAP_WRITE};
 use linked_list_allocator::LockedHeap;
 
 use crate::hw::Resource;
 use crate::{Channel, Handle, Process, Vmo, println, sys};
 
-/// Velikost heapu procesu. TODO: rust podle potreby (vice objektu pameti).
-const HEAP_SIZE: u64 = 4 * 1024 * 1024;
+/// Heap procesu zacina na pevne adrese a roste smerem nahoru: kdyz alokace
+/// selze, namapuje se dalsi objekt pameti hned za konec (`MAP_FIXED`).
+/// Jadro pro mapovani bez pevne adresy vybira adresy od `USER_ALLOC_BASE`,
+/// daleko pod timto rozsahem.
+const HEAP_BASE: u64 = 0x0000_6000_0000_0000;
+/// Pocatecni velikost.
+const HEAP_INITIAL: u64 = 4 * 1024 * 1024;
+/// Nejmensi prirustek.
+const HEAP_GROW_MIN: u64 = 4 * 1024 * 1024;
+/// Nejvetsi velikost heapu (rezervovany rozsah adres).
+const HEAP_MAX: u64 = 1 << 36;
+
+struct GrowingHeap(LockedHeap);
 
 #[global_allocator]
-static HEAP: LockedHeap = LockedHeap::empty();
+static HEAP: GrowingHeap = GrowingHeap(LockedHeap::empty());
+
+// SAFETY: alokace i uvolneni jdou pres zamceny `linked_list_allocator::Heap`;
+// pridana pamet je cerstve namapovana, navazuje na konec heapu a nikdo jiny
+// ji nepouziva.
+unsafe impl GlobalAlloc for GrowingHeap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let mut heap = self.0.lock();
+        if let Ok(p) = heap.allocate_first_fit(layout) {
+            return p.as_ptr();
+        }
+        let need = (layout.size() + layout.align() + 64) as u64;
+        // Rust o polovinu (mene volani pri postupnem rustu), zarovnane na stranky.
+        let grow = need
+            .max(HEAP_GROW_MIN)
+            .max(heap.size() as u64 / 2)
+            .next_multiple_of(4096);
+        let top = heap.top() as u64;
+        if top + grow > HEAP_BASE + HEAP_MAX || !map_heap(self_process(), top, grow) {
+            return core::ptr::null_mut();
+        }
+        // SAFETY: `top..top + grow` je prave namapovany a navazuje na heap.
+        unsafe { heap.extend(grow as usize) };
+        heap.allocate_first_fit(layout)
+            .map_or(core::ptr::null_mut(), |p| p.as_ptr())
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if let Some(p) = NonNull::new(ptr) {
+            // SAFETY: `ptr` vratila `alloc` s timtez `layout` (smlouva GlobalAlloc).
+            unsafe { self.0.lock().deallocate(p, layout) };
+        }
+    }
+}
+
+/// Namapuje novou pamet heapu na `addr`.
+fn map_heap(process: u32, addr: u64, len: u64) -> bool {
+    let Ok(vmo) = sys::vmo_create(len) else {
+        return false;
+    };
+    let ok = sys::vm_map(process, vmo, 0, len, MAP_READ | MAP_WRITE | MAP_FIXED, addr).is_ok();
+    // Mapovani drzi objekt pameti, handle uz neni potreba.
+    let _ = sys::handle_close(vmo);
+    ok
+}
 
 /// Handle vlastniho procesu pro knihovnu (mapovani pameti).
 static SELF_PROCESS: AtomicU32 = AtomicU32::new(0);
@@ -148,17 +206,16 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
 }
 
 fn init_heap(process: u32) {
-    let Ok(vmo) = sys::vmo_create(HEAP_SIZE) else {
+    if !map_heap(process, HEAP_BASE, HEAP_INITIAL) {
         fail("libos: nedostatek pameti pro heap");
-    };
-    let Ok(addr) = sys::vm_map(process, vmo, 0, HEAP_SIZE, MAP_READ | MAP_WRITE, 0) else {
-        fail("libos: heap nelze namapovat");
-    };
-    // Mapovani drzi objekt pameti, handle uz neni potreba.
-    let _ = sys::handle_close(vmo);
+    }
     // SAFETY: rozsah je prave namapovany pro cteni i zapis, nikdo jiny ho
     // nepouziva a zustane namapovany do konce procesu.
-    unsafe { HEAP.lock().init(addr as *mut u8, HEAP_SIZE as usize) };
+    unsafe {
+        HEAP.0
+            .lock()
+            .init(HEAP_BASE as *mut u8, HEAP_INITIAL as usize)
+    };
 }
 
 #[panic_handler]

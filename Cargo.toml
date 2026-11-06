@@ -6,6 +6,8 @@ members = [
     "libs/abi",
     "libs/boot-info",
     "libs/elf",
+    "libs/fs",
+    "libs/fsproto",
     "libs/initfs",
     "libs/blockproto",
     "libs/libos",
@@ -13,6 +15,7 @@ members = [
     "libs/virtio",
     "user/devmgr",
     "user/echo",
+    "user/fsd",
     "user/init",
     "user/virtio-blk",
     "xtask",
@@ -31,6 +34,7 @@ abi = { path = "libs/abi" }
 boot-info = { path = "libs/boot-info" }
 elf = { path = "libs/elf" }
 initfs = { path = "libs/initfs" }
+fs = { path = "libs/fs" }
 
 [profile.dev]
 panic = "abort"

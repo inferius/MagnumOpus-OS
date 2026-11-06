@@ -22,19 +22,37 @@ v `/usr/share/...`. Jinak proměnné prostředí `QEMU`, `OVMF_CODE`, `OVMF_VARS
 | `cargo xtask build` | přeloží jádro, loader a programy userspace, sestaví initfs |
 | `cargo xtask image` | build + obraz disku `target/os-x86_64-<profil>.img` (GPT, ESP FAT32) |
 | `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu |
-| `cargo xtask test` | testy knihoven na hostiteli, pak jádro a userspace v QEMU bez okna |
+| `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), dokumentace, pak jádro a userspace v QEMU bez okna |
 
 Přepínače: `--release`, `--headless` (bez okna), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
+
+Souborový systém má vlastní testy na hostiteli (rychlé, bez QEMU):
+
+```text
+cargo test -p fs --features std                                   # vše, výchozí počet náhodných případů
+PROPTEST_CASES=150000 cargo test -p fs --features std --release   # důkladně
+cargo test -p fs --features std --release -- --ignored --nocapture perf   # výkon a režie
+```
 
 ## Obsah disku
 
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: programy init a echo
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd
 ```
+
+QEMU dostane tři disky (všechny virtio-blk):
+
+| Disk | Soubor | Obsah |
+|---|---|---|
+| systémový | `target/os-x86_64-<profil>.img` | GPT + ESP výše |
+| testovací | `target/scratch.img` | 1 MiB nul; testy ovladače do něj zapisují |
+| datový | `target/data.img` | 64 MiB, náš souborový systém (jméno `data`); vytvoří ho xtask knihovnou `fs` se soubory `/vitejte.txt` a `/dokumenty/navod.md`; TRIM povolen (`discard=unmap`) |
+
+Testovací a datový disk se vytvoří znovu při každém `run`/`test`.
 
 ## Výstup a dohledání chyb
 
@@ -70,8 +88,19 @@ libs/boot-info/  rozhraní loader <-> jádro
 libs/elf/        parser ELF
 libs/initfs/     formát initfs
 libs/libos/      knihovna pro programy
-user/init/       první proces (zatím testy userspace)
+libs/pci/        PCI Express (ECAM, BAR, MSI-X)
+libs/virtio/     virtio 1.x přes PCI (virtqueue)
+libs/blockproto/ protokol blokového zařízení (klient <-> ovladač)
+libs/fs/         souborový systém (no_std; std pro nástroje)
+  src/space/        volné místo: alokační skupiny, space logy
+  src/fs/           soubory, adresáře, snapshoty, intent log, defrag, fsck
+  src/tests/        testy FS (model, výpadky, výkon)
+libs/fsproto/    protokol souborového systému (klient <-> fsd)
+user/init/       první proces: start služeb a testy userspace
 user/echo/       testovací server pro IPC
+user/devmgr/     správce zařízení (PCI, spouští ovladače)
+user/virtio-blk/ ovladač disku
+user/fsd/        služba souborového systému
 xtask/           build, obraz disku, QEMU, testy
 docs/            dokumentace (cs, en)
 ```

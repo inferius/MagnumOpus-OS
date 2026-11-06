@@ -82,5 +82,33 @@ porušený vnitřní předpoklad (chyba jádra).
 | `libos: chybi nebo je prilis velka startovni zprava` | Proces nedostal startovní zprávu (`abi::bootstrap`). Proces končí s kódem -1 000 001. |
 | `libos: neplatna startovni zprava` | Zpráva nemá správné magické číslo nebo verzi. |
 | `libos: startovni zprava neobsahuje handle procesu` | Chybí `SELF_PROCESS`. |
-| `libos: nedostatek pameti pro heap` / `heap nelze namapovat` | Program nemůže začít (heap 4 MiB). |
+| `libos: nedostatek pameti pro heap` | Program nemůže začít: nejde vytvořit nebo namapovat počáteční heap (4 MiB). Heap pak roste podle potřeby; když už růst nejde (dojde paměť nebo rezervovaný rozsah 64 GiB), alokace selže a program zpanikuje (`PANIC: ... alloc.rs ...`). |
 | `PANIC: ...` | Panika v programu; proces končí s kódem -1 000 001. |
+
+## Ovladače a správce zařízení
+
+| Hláška | Význam a řešení |
+|---|---|
+| `devmgr: pci BB:ZZ.F vvvv:dddd trida cc.ss.pp` | Nalezené zařízení PCI (informace). |
+| `devmgr: ovladac pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
+| `virtio-blk BB:ZZ.F: N MiB, flush ano/ne, discard ano/ne` | Disk je připravený. `discard ne` = zařízení neumí TRIM (v QEMU chybí `discard=unmap` u disku); FS pak TRIM přeskakuje. |
+| `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x nebo chybí prostředky (MSI-X, DMA paměť). |
+| `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
+
+## Služba fsd a souborový systém
+
+| Hláška | Význam a řešení |
+|---|---|
+| `init: souborovy system 'X' pripojen (generace N)` | Init našel disk se souborovým systémem a služba odpovídá. |
+| `init: zadny disk se souborovym systemem` | Žádný disk nemá v blocích 1-8 podpis `OSFS  v2`. Testy FS pak selžou (`sluzba fsd nebezi`). `cargo xtask run/test` datový disk vytváří vždy - zkontrolovat, že ho QEMU dostal. |
+| `init: souborovy system nelze spustit: ...` | fsd chybí v initfs nebo neodpověděl na `INFO` (viz hlášky fsd před tím). |
+| `fsd: pripojeno 'X': N MiB, volno N MiB, generace N, soucty Xxh3/Blake3` | Svazek je připojený. |
+| `fsd: VAROVANI: nejnovejsi stav byl poskozeny, pouzit stav o N generaci starsi` | Nejnovější commit nešel načíst (disk ztratil zápisy, přestože potvrdil flush, nebo je poškozený). Změny z posledních N commitů jsou ztracené; zkontrolovat disk a spustit kontrolu (`CHECK` se scrubem). |
+| `fsd: z intent logu prehrano N operaci` | Předchozí běh skončil bez commitu (výpadek); změny potvrzené `fsync` se obnovily. Normální po pádu. |
+| `fsd: souborovy system nejde pripojit: ...` | `NOT_FOUND` = disk nemá superblok; `CORRUPTED` = žádný z posledních stavů nejde načíst; `NOT_SUPPORTED` = jiná verze formátu. Služba končí s kódem 3. |
+| `fsd: disk neodpovida: ...` | Ovladač disku neodpověděl (kód 2). |
+| `fsd: commit selhal: ...` | Chyba zápisu na disk. Instance je pak jen pro čtení (změny vrací `IO_ERROR`); na disku platí poslední dokončený commit. Restartovat službu. |
+| `fsd: zaverecny commit selhal: ...` | Jako výše při ukončení (kód 4); změny od posledního commitu nebo `fsync` jsou ztracené. |
+| `fsd: defragmentace: ...` | Krok defragmentace selhal (typicky `CORRUPTED` při čtení poškozeného bloku). Defragmentace se do dalších změn pozastaví; data se nemění. |
+| `fsd: chyba kanalu: ...` | Neočekávaná chyba kanálu ke klientovi; služba udělá commit a skončí. |
+| `fsd: chybi handly ve startovni zprave` | Chybný start služby (kód 1). |

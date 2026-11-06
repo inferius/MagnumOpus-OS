@@ -33,7 +33,7 @@ thread at libos's `_start` symbol with the bootstrap channel handle in
 `rdi`. libos then:
 
 1. reads the startup message (`abi::bootstrap`): handles and their meaning,
-2. maps a heap (4 MiB) and enables the global allocator (`alloc::vec::Vec` etc.),
+2. maps a heap (starts at 4 MiB at a fixed address and grows on demand: when an allocation fails it maps more memory right after the end, up to 64 GiB) and enables the global allocator (`alloc::vec::Vec` etc.),
 3. calls the program function from `entry!` with a [`Startup`]:
    - `process` - handle to its own process (memory mapping, threads),
    - `initfs` - the initfs image (`init` only),
@@ -52,7 +52,7 @@ Each type owns a handle and closes it when dropped.
 | `Handle` | generic handle | `duplicate(rights)`, `into_raw`, `from_raw` |
 | `Event` | signal between threads and processes | `create`, `signal`, `reset` |
 | `Channel` | messages with data and handles | `create`, `write`, `try_read`, `read(deadline)` |
-| `Vmo` | memory object | `create`, `read`, `write` |
+| `Vmo` | memory object | `create`, `read`, `write` (any length; the kernel moves 1 MiB per call, libos splits) |
 | `Process` | process | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |
 | `Thread` | thread | `create`, `start`, `wait_exit` |
 

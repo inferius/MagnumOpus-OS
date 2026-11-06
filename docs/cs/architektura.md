@@ -113,6 +113,24 @@ funkce v libos = vložit požadavek a počkat na dokončení.
 - Hodiny: TSC kalibrovaný proti HPET (předpoklad: invariantní TSC
   synchronizovaný mezi CPU).
 
+### Plynulost uživatelského rozhraní (plán)
+
+Aby se UI nesekalo, nestačí jedno „UI vlákno“ - plynulost musí zajistit
+celý řetěz od vstupu po displej:
+
+- **QoS `interactive`** pro kompozitor a vlákna okna s fokusem: krátká
+  kvanta, přednostní probuzení; práce na pozadí (commit FS, defragmentace,
+  indexování, scrub) v `background`.
+- **Dědění priority přes IPC:** když UI vlákno čeká na odpověď služby
+  (fsd, ovladač), služba zprávu zpracuje s jeho QoS. Bez toho priorita
+  končí u první služby a mikrojádro se seká právě tam.
+- **Priority I/O:** požadavky na disk nesou třídu; čtení pro UI předběhne
+  zápis defragmentace. fsd nikdy neblokuje čtení kvůli commitu.
+- **Termíny snímků:** kompozitor plánuje podle vsync (deadline), ne podle
+  pořadí ve frontě.
+- **Aplikace:** UI vlákno jen kreslí a reaguje; práci dělá asynchronně
+  (libos má asynchronní I/O jako základní model).
+
 ### Syscall ABI a libos
 
 **libos** je knihovna v userspace, kterou má každý proces (obdoba `ntdll`
@@ -138,18 +156,34 @@ ve Windows nebo vDSO + libc v Linuxu).
 | device manager | enumerace PCI, ACPI, device tree; spouští ovladače s jejich prostředky |
 | ovladače | nejdřív virtio, pak NVMe, xHCI, HDA, ... |
 | ACPI | interpret AML; jádro samo parsuje jen statické tabulky (MADT, HPET, MCFG) |
-| storage + FS | blokové zařízení, oddíly, souborový systém |
+| storage + FS | blokové zařízení, oddíly, souborový systém (`fsd` hotovo) |
 | namespace | skládá pohled procesu na strom |
 | kompozitor | displej, vstup, okna |
 | konfigurace | čtení, validace a verzování nastavení |
 
 ## Souborový systém
 
-- Vlastní copy-on-write FS: B-stromy, checksumy, snapshoty, subvolumy.
+Vlastní copy-on-write FS je hotový (formát v2); podrobný popis včetně
+formátu na disku, algoritmů a příkladů je v [souborovy-system.md](souborovy-system.md).
+Ve zkratce:
+
+- jeden CoW B+strom pro metadata, Merkleův strom s 128bitovými součty
+  (XXH3-128 nebo BLAKE3) v každém ukazateli, kruh 8 superbloků a návrat až
+  o 3 generace při poškozeném nejnovějším stavu,
+- extenty s odloženou alokací (souvislé zápisy), alokační skupiny se space
+  logy, odložené znovupoužití bloků, TRIM, defragmentace na pozadí,
+- intent log pro rychlý `fsync`, snapshoty s mazáním přes deadlisty,
+  okamžité velikosti adresářů, fsck a scrub,
+- služba `fsd` v userspace nad ovladačem disku, protokol `fsproto`.
+
+Dál podle návrhu:
+
 - Atomické A/B aktualizace: systém je read-only subvolume, aktualizace
-  vytvoří novou verzi, při selhání bootu návrat ke staré.
-- Cesty: oddělovač `/`, UTF-8, bez limitu délky, bez písmen disků.
-- Do vlastního FS: **initfs** (read-only archiv nahraný loaderem do paměti).
+  vytvoří novou verzi, při selhání bootu návrat ke staré (potřebuje
+  zapisovatelné klony - plán).
+- Cesty: oddělovač `/`, UTF-8, bez písmen disků.
+- Programy při startu systému zatím nahrává loader z **initfs** (read-only
+  archiv v paměti); datový disk má vlastní FS.
 
 ### Jména souborů: case-insensitive globálně
 
@@ -360,16 +394,20 @@ důsledně dělí do `arch/`, aby port nebolel.
 3. Procesy: plánovač, SMP, vlákna, objekty, handly, capabilities (hotovo)
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
-6. Systém: userspace ovladače (virtio), FS, grafika, kompozitor
-7. Windows vrstva v2: user32/gdi32, GUI, DirectX přes Vulkan
-8. Port na aarch64 a první ARM zařízení
+6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), grafika, kompozitor
+7. Jazyky a překladač: Rust (`std` pro náš OS), C (vlastní libc nad libos),
+   C++ (libc++/libunwind nad libc), základní překladač (rozsah upřesnit:
+   křížový překlad z hostitele vs. překladač běžící v systému)
+8. Windows vrstva v2: user32/gdi32, GUI, DirectX přes Vulkan
+9. Port na aarch64 a první ARM zařízení
 
 ## Aktuální odchylky od návrhu
 
 Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
 
-- **Syscally jsou synchronní**; fronty požadavků (styl io_uring) přijdou
-  s ovladači a souborovým systémem, kde mají smysl.
+- **Syscally jsou synchronní** a protokoly ovladačů a FS (`blockproto`,
+  `fsproto` v1) kopírují data zprávou kanálu; fronty požadavků ve sdílené
+  paměti (styl io_uring) přijdou, až je bude potřebovat výkon.
 - **Objekty paměti alokují stránky hned** (žádné lazy alokace ani CoW klony).
 - **Odmapování jen celých mapování.**
 - **Návrat ze syscallu přes `iretq`** místo rychlejšího `sysret`.

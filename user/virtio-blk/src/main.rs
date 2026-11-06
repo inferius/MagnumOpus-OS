@@ -26,10 +26,16 @@ use virtio::{Buffer, Device, F_VERSION_1, Virtqueue};
 
 /// Vlastnost: zarizeni podporuje FLUSH.
 const F_FLUSH: u64 = 1 << 9;
+/// Vlastnost: zarizeni podporuje DISCARD (TRIM).
+const F_DISCARD: u64 = 1 << 13;
 
 const REQ_IN: u32 = 0;
 const REQ_OUT: u32 = 1;
 const REQ_FLUSH: u32 = 4;
+const REQ_DISCARD: u32 = 11;
+
+/// Offset `max_discard_sectors` v konfiguraci virtio-blk.
+const CFG_MAX_DISCARD_SECTORS: u64 = 36;
 
 /// Rozlozeni DMA bufferu pozadavku: hlavicka 16 B, stav 1 B, data.
 const HDR_OFF: u64 = 0;
@@ -49,6 +55,8 @@ struct Disk {
     buf_phys: u64,
     capacity: u64,
     flush: bool,
+    /// Nejvic sektoru jednoho DISCARD (0 = DISCARD neumi).
+    max_discard: u32,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -76,9 +84,10 @@ fn main(startup: Startup) -> i64 {
         }
     };
     println!(
-        "virtio-blk {address}: {} MiB, flush {}",
+        "virtio-blk {address}: {} MiB, flush {}, discard {}",
         disk.capacity * SECTOR as u64 / (1024 * 1024),
-        if disk.flush { "ano" } else { "ne" }
+        if disk.flush { "ano" } else { "ne" },
+        if disk.max_discard > 0 { "ano" } else { "ne" }
     );
     serve(&mut disk, &client);
     0
@@ -105,7 +114,7 @@ impl Disk {
     fn open(ecam: &Ecam, a: Address, resource: &Resource) -> Result<Self> {
         let device = Device::open(ecam, a, resource)?;
         device.begin_init();
-        let features = device.negotiate(F_VERSION_1 | F_FLUSH)?;
+        let features = device.negotiate(F_VERSION_1 | F_FLUSH | F_DISCARD)?;
 
         let irq = resource.interrupt()?;
         let msix = MsixTable::open(ecam, a, resource)?;
@@ -119,6 +128,11 @@ impl Disk {
         let buf = Mapping::new(&dma, 0, DMA_SIZE, MAP_READ | MAP_WRITE)?;
         // Kapacita v sektorech po 512 B je na zacatku konfigurace zarizeni.
         let capacity: u64 = device.config(0);
+        let max_discard: u32 = if features & F_DISCARD != 0 {
+            device.config::<u32>(CFG_MAX_DISCARD_SECTORS).max(1)
+        } else {
+            0
+        };
         Ok(Self {
             device,
             queue,
@@ -129,11 +143,13 @@ impl Disk {
             buf_phys,
             capacity,
             flush: features & F_FLUSH != 0,
+            max_discard,
         })
     }
 
-    /// Provede jeden pozadavek virtio-blk a pocka na dokonceni.
-    fn request(&mut self, kind: u32, lba: u64, sectors: u32) -> Result<()> {
+    /// Provede jeden pozadavek virtio-blk a pocka na dokonceni. `data_len` =
+    /// delka dat v bufferu (sektory, nebo popis useku u DISCARD).
+    fn request(&mut self, kind: u32, lba: u64, data_len: u32) -> Result<()> {
         self.buf.write::<u32>(HDR_OFF, kind);
         self.buf.write::<u32>(HDR_OFF + 4, 0);
         self.buf.write::<u64>(HDR_OFF + 8, lba);
@@ -144,10 +160,10 @@ impl Disk {
             len: 16,
             device_writes: false,
         });
-        if sectors > 0 {
+        if data_len > 0 {
             chain.push(Buffer {
                 phys: self.buf_phys + DATA_OFF,
-                len: sectors * SECTOR as u32,
+                len: data_len,
                 device_writes: kind == REQ_IN,
             });
         }
@@ -177,7 +193,7 @@ impl Disk {
         match req.op {
             op::INFO => (Ok(self.capacity), Vec::new()),
             op::READ if range_ok => {
-                let r = self.request(REQ_IN, req.lba, req.count);
+                let r = self.request(REQ_IN, req.lba, req.count * SECTOR as u32);
                 let mut out = blockproto::zeroed_sectors(req.count);
                 if r.is_ok() {
                     self.buf.read_bytes(DATA_OFF, &mut out);
@@ -187,15 +203,43 @@ impl Disk {
             op::WRITE if range_ok && data.len() == req.count as usize * SECTOR => {
                 self.buf.write_bytes(DATA_OFF, data);
                 (
-                    self.request(REQ_OUT, req.lba, req.count).map(|_| 0),
+                    self.request(REQ_OUT, req.lba, req.count * SECTOR as u32)
+                        .map(|_| 0),
                     Vec::new(),
                 )
             }
             op::FLUSH if self.flush => (self.request(REQ_FLUSH, 0, 0).map(|_| 0), Vec::new()),
             op::FLUSH => (Ok(0), Vec::new()),
+            op::DISCARD if self.max_discard == 0 => (Err(Error::NotSupported), Vec::new()),
+            op::DISCARD
+                if req
+                    .lba
+                    .checked_add(req.count as u64)
+                    .is_some_and(|end| end <= self.capacity) =>
+            {
+                (self.discard(req.lba, req.count).map(|_| 0), Vec::new())
+            }
+            op::DISCARD => (Err(Error::OutOfRange), Vec::new()),
             op::READ | op::WRITE => (Err(Error::OutOfRange), Vec::new()),
             _ => (Err(Error::NotSupported), Vec::new()),
         }
+    }
+}
+
+impl Disk {
+    /// DISCARD po usecich podle limitu zarizeni. Popis useku (16 B):
+    /// sektor u64, pocet u32, priznaky u32.
+    fn discard(&mut self, lba: u64, count: u32) -> Result<()> {
+        let mut done = 0u32;
+        while done < count {
+            let n = (count - done).min(self.max_discard);
+            self.buf.write::<u64>(DATA_OFF, lba + done as u64);
+            self.buf.write::<u32>(DATA_OFF + 8, n);
+            self.buf.write::<u32>(DATA_OFF + 12, 0);
+            self.request(REQ_DISCARD, 0, 16)?;
+            done += n;
+        }
+        Ok(())
     }
 }
 

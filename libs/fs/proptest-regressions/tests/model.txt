@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 27fc24381a0399a677766f3b8328e4fbdfdcd51c81e4f07f5e4f0051abe1136f # shrinks to ops = [Snapshot, Crash], small_ags = false
+cc 7c076a014699522f170a7e9f7e2e1991cffaadf7780cea9c68db531cdbe2656f # shrinks to ops = [Create { dir: 0, name: 0, kind_dir: false }, Write { file: 0, offset: 40847, len: 114, byte: 0 }, Snapshot, Truncate { file: 0, size: 0 }, DeleteSnapshot { which: 0 }, Create { dir: 0, name: 0, kind_dir: false }], small_ags = false
+cc 40f6ef1fa63ffab6b75f0083ed1e7053b985bf4c360f8a7b6e81ca59c054815c # shrinks to ops = [Create { dir: 0, name: 0, kind_dir: false }, Rename { from: 0, dir: 0, name: 0 }, Write { file: 0, offset: 11431, len: 5777, byte: 0 }, Fsync, Truncate { file: 0, size: 0 }, Fsync, Crash, Write { file: 0, offset: 1628, len: 357, byte: 0 }, Fsync, Crash], small_ags = true
+cc c5846eb39866c70c77bf34a6133f7dd2f7abeaef903ffd0850d8514ac1af6915 # shrinks to ops = [Create { dir: 0, name: 0, kind_dir: false }, Create { dir: 0, name: 1, kind_dir: false }, Snapshot, Write { file: 0, offset: 132, len: 8061, byte: 0 }, Fsync, Remove { path: 2 }, Fsync, Crash, Write { file: 0, offset: 4096, len: 4097, byte: 0 }, Write { file: 0, offset: 11552, len: 4833, byte: 0 }, Fsync, Crash], small_ags = true

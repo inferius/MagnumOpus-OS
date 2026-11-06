@@ -8,6 +8,7 @@
 //! Prepinace: `--release`, a pro `run` navic `--gdb`, `--headless`,
 //! `--accel <tcg|kvm|whpx|hvf>` a cokoli za `--` se preda primo QEMU.
 
+mod datadisk;
 mod docs;
 mod image;
 mod symbolize;
@@ -145,8 +146,10 @@ fn host_tests() -> Result<()> {
             "abi",
             "--package",
             "initfs",
+            "--package",
+            "fs",
             "--features",
-            "initfs/std",
+            "initfs/std,fs/std",
         ])
         .status()?;
     if !status.success() {
@@ -188,7 +191,7 @@ struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
-const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk"];
+const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk", "fsd"];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -387,6 +390,13 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             scratch_disk()?.display()
         ))
         .args(["-device", "virtio-blk-pci,drive=scratch"])
+        // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
+        .arg("-drive")
+        .arg(format!(
+            "if=none,id=data,format=raw,discard=unmap,file={}",
+            datadisk::create(&target_dir())?.display()
+        ))
+        .args(["-device", "virtio-blk-pci,drive=data"])
         // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.
         .args(["-nic", "none"])
         // Seriova linka do terminalu a zaroven do souboru (target/serial.log),

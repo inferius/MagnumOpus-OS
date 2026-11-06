@@ -49,6 +49,20 @@ pub enum Error {
     BadSyscall = -17,
     /// Operace byla prerusena ukoncovanim vlakna nebo procesu.
     Canceled = -18,
+    /// Polozka se zadanym jmenem uz existuje.
+    AlreadyExists = -19,
+    /// Cast cesty neni adresar.
+    NotADirectory = -20,
+    /// Operace pro soubor dostala adresar.
+    IsADirectory = -21,
+    /// Adresar neni prazdny.
+    NotEmpty = -22,
+    /// Na zarizeni neni misto.
+    NoSpace = -23,
+    /// Chyba cteni nebo zapisu zarizeni.
+    IoError = -24,
+    /// Zapis do objektu jen pro cteni (napr. snapshot).
+    ReadOnly = -25,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -71,6 +85,13 @@ pub const ALL: &[Error] = &[
     Error::BadState,
     Error::BadSyscall,
     Error::Canceled,
+    Error::AlreadyExists,
+    Error::NotADirectory,
+    Error::IsADirectory,
+    Error::NotEmpty,
+    Error::NoSpace,
+    Error::IoError,
+    Error::ReadOnly,
 ];
 
 impl Error {
@@ -105,6 +126,13 @@ impl Error {
             Self::BadState => "BAD_STATE",
             Self::BadSyscall => "BAD_SYSCALL",
             Self::Canceled => "CANCELED",
+            Self::AlreadyExists => "ALREADY_EXISTS",
+            Self::NotADirectory => "NOT_A_DIRECTORY",
+            Self::IsADirectory => "IS_A_DIRECTORY",
+            Self::NotEmpty => "NOT_EMPTY",
+            Self::NoSpace => "NO_SPACE",
+            Self::IoError => "IO_ERROR",
+            Self::ReadOnly => "READ_ONLY",
         }
     }
 
@@ -129,6 +157,13 @@ impl Error {
             Self::BadState => "objekt je ve stavu, kdy operace nedava smysl",
             Self::BadSyscall => "neznamy syscall",
             Self::Canceled => "operace prerusena ukoncovanim vlakna nebo procesu",
+            Self::AlreadyExists => "polozka uz existuje",
+            Self::NotADirectory => "cast cesty neni adresar",
+            Self::IsADirectory => "je to adresar",
+            Self::NotEmpty => "adresar neni prazdny",
+            Self::NoSpace => "na zarizeni neni misto",
+            Self::IoError => "chyba cteni nebo zapisu zarizeni",
+            Self::ReadOnly => "jen pro cteni",
         }
     }
 }

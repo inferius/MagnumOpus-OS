@@ -5,6 +5,7 @@
 
 mod basic;
 mod drivers;
+mod fs;
 mod ipc;
 mod memory;
 mod process;
@@ -22,6 +23,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ipc", ipc::TESTS),
     ("procesy", process::TESTS),
     ("ovladace", drivers::TESTS),
+    ("souborovy system", fs::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).

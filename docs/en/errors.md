@@ -34,6 +34,13 @@ is documented in this file and in the Czech version.
 | -16 | `BAD_STATE` | object is in a state where the operation makes no sense |
 | -17 | `BAD_SYSCALL` | unknown syscall |
 | -18 | `CANCELED` | operation interrupted by termination |
+| -19 | `ALREADY_EXISTS` | the entry already exists |
+| -20 | `NOT_A_DIRECTORY` | a path component is not a directory |
+| -21 | `IS_A_DIRECTORY` | it is a directory |
+| -22 | `NOT_EMPTY` | the directory is not empty |
+| -23 | `NO_SPACE` | no space left on the device |
+| -24 | `IO_ERROR` | device read or write error |
+| -25 | `READ_ONLY` | read-only |
 
 ## Details
 
@@ -238,6 +245,70 @@ thread crashing). The wait ends with this error and the thread exits on
 return to userspace, so the program usually never sees it.
 
 **What to do:** nothing, the process is ending.
+
+### `ALREADY_EXISTS` (-19)
+
+**Meaning:** an entry with the given name already exists.
+
+**When:** creating a file or directory, renaming to a name that already
+exists in the target directory, creating a snapshot with an existing name.
+Names are compared case-insensitively after Unicode normalization, so
+`Foto.JPG` collides with `foto.jpg`.
+
+**What to do:** choose another name or remove the existing entry first.
+
+### `NOT_A_DIRECTORY` (-20)
+
+**Meaning:** a component of the path is not a directory.
+
+**When:** path `/a/b/c` where `a` or `b` is a file; listing a file as a
+directory.
+
+**What to do:** fix the path.
+
+### `IS_A_DIRECTORY` (-21)
+
+**Meaning:** a file operation got a directory.
+
+**When:** reading or writing data of a directory.
+
+**What to do:** fix the path (a directory is read by listing it).
+
+### `NOT_EMPTY` (-22)
+
+**Meaning:** the directory is not empty.
+
+**When:** removing a directory that has entries (removal is deliberately
+not recursive).
+
+**What to do:** remove the contents first.
+
+### `NO_SPACE` (-23)
+
+**Meaning:** the device ran out of space.
+
+**When:** writing data or changing metadata with no free blocks. Because of
+copy-on-write even overwriting existing data needs free blocks; blocks owned
+by snapshots are never freed.
+
+**What to do:** remove unneeded data, or snapshots (once supported).
+
+### `IO_ERROR` (-24)
+
+**Meaning:** the device reported a read or write error.
+
+**When:** a driver or media error; in tools, an error on the image file.
+
+**What to do:** check the device; data not yet committed may be lost, the
+stored state stays consistent.
+
+### `READ_ONLY` (-25)
+
+**Meaning:** an attempt to write to a read-only object.
+
+**When:** writing to a snapshot.
+
+**What to do:** write to the live file system.
 
 ## Process exit codes
 

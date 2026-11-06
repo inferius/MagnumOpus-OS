@@ -34,6 +34,13 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -16 | `BAD_STATE` | objekt je ve stavu, kdy operace nedává smysl |
 | -17 | `BAD_SYSCALL` | neznámý syscall |
 | -18 | `CANCELED` | operace přerušena ukončováním |
+| -19 | `ALREADY_EXISTS` | položka už existuje |
+| -20 | `NOT_A_DIRECTORY` | část cesty není adresář |
+| -21 | `IS_A_DIRECTORY` | je to adresář |
+| -22 | `NOT_EMPTY` | adresář není prázdný |
+| -23 | `NO_SPACE` | na zařízení není místo |
+| -24 | `IO_ERROR` | chyba čtení nebo zápisu zařízení |
+| -25 | `READ_ONLY` | jen pro čtení |
 
 ## Podrobně
 
@@ -239,6 +246,72 @@ vlákna). Čekání skončí touto chybou a vlákno skončí při návratu do
 userspace - program ji tedy obvykle ani neuvidí.
 
 **Co s tím:** nic, proces končí.
+
+### `ALREADY_EXISTS` (-19)
+
+**Význam:** položka se zadaným jménem už existuje.
+
+**Kdy vzniká:** vytvoření souboru nebo adresáře, přejmenování na jméno,
+které už v cílovém adresáři je, vytvoření snapshotu se stejným jménem.
+Jména se porovnávají bez ohledu na velikost písmen a po normalizaci
+Unicode, takže `Foto.JPG` koliduje s `foto.jpg`.
+
+**Co s tím:** zvolit jiné jméno, nebo existující položku nejdřív odstranit.
+
+### `NOT_A_DIRECTORY` (-20)
+
+**Význam:** část cesty není adresář.
+
+**Kdy vzniká:** cesta `/a/b/c`, kde `a` nebo `b` je soubor; výpis
+adresáře u souboru.
+
+**Co s tím:** opravit cestu.
+
+### `IS_A_DIRECTORY` (-21)
+
+**Význam:** operace pro soubor dostala adresář.
+
+**Kdy vzniká:** čtení nebo zápis dat adresáře.
+
+**Co s tím:** opravit cestu (adresář se čte výpisem).
+
+### `NOT_EMPTY` (-22)
+
+**Význam:** adresář není prázdný.
+
+**Kdy vzniká:** odstranění adresáře, který obsahuje položky (mazání je
+záměrně nerekurzivní).
+
+**Co s tím:** nejdřív odstranit obsah.
+
+### `NO_SPACE` (-23)
+
+**Význam:** na zařízení došlo místo.
+
+**Kdy vzniká:** zápis dat nebo změna metadat, když nejsou volné bloky.
+Kvůli copy-on-write potřebuje i přepsání existujících dat volné bloky;
+bloky patřící snapshotům se neuvolňují.
+
+**Co s tím:** odstranit nepotřebná data, případně snapshoty (až to bude
+podporované).
+
+### `IO_ERROR` (-24)
+
+**Význam:** zařízení nahlásilo chybu čtení nebo zápisu.
+
+**Kdy vzniká:** chyba ovladače nebo média; v nástrojích chyba souboru
+s obrazem.
+
+**Co s tím:** zkontrolovat zařízení; data, která neprošla commitem, se
+mohla ztratit, uložený stav zůstává konzistentní.
+
+### `READ_ONLY` (-25)
+
+**Význam:** pokus o zápis do objektu jen pro čtení.
+
+**Kdy vzniká:** zápis do snapshotu.
+
+**Co s tím:** zapisovat do živého souborového systému.
 
 ## Návratové kódy procesů
 

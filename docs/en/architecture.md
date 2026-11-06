@@ -120,6 +120,25 @@ libos = submit a request and wait for completion.
 - Clock: TSC calibrated against the HPET (assumption: invariant TSC in sync
   across CPUs; checked and corrected at CPU startup).
 
+### User interface responsiveness (plan)
+
+A single "UI thread" is not enough to keep the UI smooth - the whole chain
+from input to display has to be responsive:
+
+- **QoS `interactive`** for the compositor and the threads of the focused
+  window: short quanta, preferred wake-up; background work (FS commit,
+  defragmentation, indexing, scrub) runs as `background`.
+- **Priority inheritance over IPC:** when a UI thread waits for a service
+  reply (fsd, a driver), the service handles the message with the caller's
+  QoS. Without it, priority stops at the first service and a microkernel
+  stutters exactly there.
+- **I/O priorities:** disk requests carry a class; reads for the UI
+  overtake defragmentation writes. fsd never blocks reads because of a commit.
+- **Frame deadlines:** the compositor schedules by vsync (deadline), not by
+  queue order.
+- **Applications:** the UI thread only draws and reacts; work is done
+  asynchronously (libos has asynchronous I/O as its base model).
+
 ### Syscall ABI and libos
 
 **libos** is the userspace library every process has (like `ntdll` on
@@ -148,19 +167,34 @@ Windows or vDSO + libc on Linux).
 | device manager | enumerates PCI, ACPI, device tree; starts drivers with their resources |
 | drivers | virtio first, then NVMe, xHCI, HDA, ... |
 | ACPI | AML interpreter; the kernel itself parses only static tables (MADT, HPET, MCFG) |
-| storage + FS | block devices, partitions, file system |
+| storage + FS | block devices, partitions, file system (`fsd` done) |
 | namespace | composes each process's view of the tree |
 | compositor | display, input, windows |
 | configuration | reading, validating and versioning settings |
 
 ## File system
 
-- Own copy-on-write FS: B-trees, checksums, snapshots, subvolumes.
+Our own copy-on-write FS is done (format v2); the detailed description
+including the on-disk format, algorithms and examples is in
+[file-system.md](file-system.md). In short:
+
+- one CoW B+tree for metadata, a Merkle tree with 128-bit checksums
+  (XXH3-128 or BLAKE3) in every pointer, a ring of 8 superblocks and a
+  fallback of up to 3 generations when the newest state is damaged,
+- extents with delayed allocation (contiguous writes), allocation groups
+  with space logs, delayed block reuse, TRIM, background defragmentation,
+- an intent log for fast `fsync`, snapshots with deletion via deadlists,
+  instant directory sizes, fsck and scrub,
+- the `fsd` userspace service on top of the disk driver, protocol `fsproto`.
+
+Further according to the design:
+
 - Atomic A/B updates: the system is a read-only subvolume, an update creates
-  a new version, a failed boot falls back to the old one.
-- Paths: `/` separator, UTF-8, no length limit, no drive letters.
-- Until the FS exists: **initfs** (read-only archive loaded into memory by
-  the loader).
+  a new version, a failed boot falls back to the old one (needs writable
+  clones - planned).
+- Paths: `/` separator, UTF-8, no drive letters.
+- Programs at boot are still loaded by the loader from **initfs** (a
+  read-only archive in memory); the data disk has our own FS.
 
 ### File names: case-insensitive everywhere
 
@@ -380,17 +414,22 @@ strictly separated into `arch/` so the port does not hurt.
 3. Processes: scheduler, SMP, threads, objects, handles, capabilities (done)
 4. Userspace: syscalls, first process, IPC, libos, initfs (done)
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
-6. System: userspace drivers (virtio), FS, graphics, compositor
-7. Windows layer v2: user32/gdi32, GUI, DirectX via Vulkan
-8. aarch64 port and the first ARM device
+6. System: userspace drivers (virtio - done), FS (done), graphics, compositor
+7. Languages and compiler: Rust (`std` for our OS), C (own libc on top of
+   libos), C++ (libc++/libunwind on top of libc), a basic compiler (scope to
+   be decided: cross-compiling from the host vs. a compiler running in the
+   system)
+8. Windows layer v2: user32/gdi32, GUI, DirectX via Vulkan
+9. aarch64 port and the first ARM device
 
 ## Current deviations from the design
 
 What currently works more simply than the design describes (and why it is
 fine for now):
 
-- **Syscalls are synchronous**; request queues (io_uring style) come with
-  drivers and the file system, where they matter.
+- **Syscalls are synchronous** and the driver and FS protocols
+  (`blockproto`, `fsproto` v1) copy data in channel messages; request
+  queues in shared memory (io_uring style) come when performance needs them.
 - **Memory objects allocate pages up front** (no lazy allocation, no CoW clones).
 - **Only whole mappings can be unmapped.**
 - **Syscalls return via `iretq`** instead of the faster `sysret`.

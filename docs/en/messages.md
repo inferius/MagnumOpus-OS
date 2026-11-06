@@ -84,5 +84,33 @@ invariant was broken (a kernel bug).
 | `libos: chybi nebo je prilis velka startovni zprava` | The process got no startup message (`abi::bootstrap`). It exits with code -1,000,001. |
 | `libos: neplatna startovni zprava` | The message has the wrong magic number or version. |
 | `libos: startovni zprava neobsahuje handle procesu` | `SELF_PROCESS` is missing. |
-| `libos: nedostatek pameti pro heap` / `heap nelze namapovat` | The program cannot start (4 MiB heap). |
+| `libos: nedostatek pameti pro heap` | The program cannot start: the initial heap (4 MiB) cannot be created or mapped. The heap then grows on demand; when it can no longer grow (out of memory or the reserved 64 GiB range), the allocation fails and the program panics (`PANIC: ... alloc.rs ...`). |
 | `PANIC: ...` | The program panicked; the process exits with code -1,000,001. |
+
+## Drivers and device manager
+
+| Message | Meaning and fix |
+|---|---|
+| `devmgr: pci BB:DD.F vvvv:dddd trida cc.ss.pp` | A PCI device was found (information). |
+| `devmgr: ovladac pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
+| `virtio-blk BB:DD.F: N MiB, flush ano/ne, discard ano/ne` | The disk is ready. `discard ne` = the device has no TRIM (in QEMU the drive lacks `discard=unmap`); the FS then skips TRIM. |
+| `virtio-blk ...: inicializace selhala: ...` | The device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
+| `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
+
+## fsd service and file system
+
+| Message | Meaning and fix |
+|---|---|
+| `init: souborovy system 'X' pripojen (generace N)` | Init found a disk with the file system and the service answers. |
+| `init: zadny disk se souborovym systemem` | No disk has the signature `OSFS  v2` in blocks 1-8. FS tests then fail (`sluzba fsd nebezi`). `cargo xtask run/test` always creates the data disk - check that QEMU got it. |
+| `init: souborovy system nelze spustit: ...` | fsd is missing from initfs or did not answer `INFO` (see fsd messages before it). |
+| `fsd: pripojeno 'X': N MiB, volno N MiB, generace N, soucty Xxh3/Blake3` | The volume is mounted. |
+| `fsd: VAROVANI: nejnovejsi stav byl poskozeny, pouzit stav o N generaci starsi` | The newest commit could not be loaded (the disk lost writes although it acknowledged a flush, or it is damaged). Changes from the last N commits are lost; check the disk and run a check (`CHECK` with scrub). |
+| `fsd: z intent logu prehrano N operaci` | The previous run ended without a commit (power loss); changes confirmed by `fsync` were restored. Normal after a crash. |
+| `fsd: souborovy system nejde pripojit: ...` | `NOT_FOUND` = no superblock; `CORRUPTED` = none of the recent states can be loaded; `NOT_SUPPORTED` = different format version. The service exits with code 3. |
+| `fsd: disk neodpovida: ...` | The disk driver did not answer (code 2). |
+| `fsd: commit selhal: ...` | A disk write failed. The instance is then read-only (changes return `IO_ERROR`); the last completed commit is valid on disk. Restart the service. |
+| `fsd: zaverecny commit selhal: ...` | As above, at shutdown (code 4); changes since the last commit or `fsync` are lost. |
+| `fsd: defragmentace: ...` | A defragmentation step failed (typically `CORRUPTED` when reading a damaged block). Defragmentation pauses until further changes; data is not modified. |
+| `fsd: chyba kanalu: ...` | Unexpected error on the client channel; the service commits and exits. |
+| `fsd: chybi handly ve startovni zprave` | Wrong service start (code 1). |

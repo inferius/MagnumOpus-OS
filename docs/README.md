@@ -9,6 +9,7 @@
 | [chyby.md](cs/chyby.md) | [errors.md](en/errors.md) | kódy chyb a návratové kódy procesů / error and exit codes |
 | [hlasky.md](cs/hlasky.md) | [messages.md](en/messages.md) | hlášky v logu a co znamenají / log messages and their meaning |
 | [libos.md](cs/libos.md) | [libos.md](en/libos.md) | knihovna pro programy / program library |
+| [souborovy-system.md](cs/souborovy-system.md) | [file-system.md](en/file-system.md) | souborový systém: formát, algoritmy, služba fsd, protokol / file system: format, algorithms, fsd service, protocol |
 
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).

@@ -1,20 +1,24 @@
-//! Start systemovych sluzeb: spravce zarizeni a (pozdeji) dalsich.
+//! Start systemovych sluzeb: spravce zarizeni a souborovy system.
 
 use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
 use blockproto::BlockClient;
+use fsproto::FsClient;
 use libos::abi::bootstrap::kind;
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
 use libos::{Channel, Error, Process, Result, Startup, println, time};
 
-/// Bezici spravce zarizeni a blokova zarizeni, ktera nasel.
+/// Bezici spravce zarizeni, blokova zarizeni, ktera nasel, a souborovy
+/// system (pokud je na nekterem disku).
 pub struct Devices {
     pub _devmgr: Process,
     pub _control: Channel,
     pub blocks: Vec<BlockClient>,
+    pub fs: Option<FsClient>,
+    pub _fsd: Option<(Process, Channel)>,
 }
 
 /// Spusti spravce zarizeni a pocka, az nahlasi vsechna zarizeni.
@@ -63,5 +67,48 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         _devmgr: devmgr,
         _control: control,
         blocks,
+        fs: None,
+        _fsd: None,
     })
+}
+
+/// Podpis superbloku naseho souboroveho systemu (format v2).
+const FS_MAGIC: &[u8; 8] = b"OSFS\0\0v2";
+
+/// Ma disk nas souborovy system? Superbloky lezi v blocich 1..=8
+/// (bloky po 4 KiB = sektory 8..72).
+fn has_fs(b: &BlockClient) -> bool {
+    let mut buf = vec![0u8; 8 * 4096];
+    if b.sectors() < 72 || b.read(8, &mut buf).is_err() {
+        return false;
+    }
+    buf.chunks(4096).any(|blk| &blk[..8] == FS_MAGIC)
+}
+
+/// Spusti sluzbu souboroveho systemu nad prvnim diskem, ktery ho obsahuje.
+pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
+    let Some(i) = devices.blocks.iter().position(has_fs) else {
+        println!("init: zadny disk se souborovym systemem");
+        return Ok(());
+    };
+    let disk = devices.blocks.remove(i);
+    let fs = Initfs::open(startup)?;
+    let image = fs.find("fsd").ok_or(Error::NotFound)?;
+    let (client, server) = Channel::create()?;
+    let handles = vec![
+        StartHandle::user(disk.into_channel().into_handle()),
+        StartHandle::user(server.into_handle()),
+    ];
+    let (process, control) = libos::spawn("fsd", image, handles)?;
+    // Testy potrebuji simulaci vypadku proudu.
+    control.write(b"debug", Vec::new())?;
+    let client = FsClient::new(client);
+    let info = client.info()?;
+    println!(
+        "init: souborovy system '{}' pripojen (generace {})",
+        info.label, info.generation
+    );
+    devices.fs = Some(client);
+    devices._fsd = Some((process, control));
+    Ok(())
 }

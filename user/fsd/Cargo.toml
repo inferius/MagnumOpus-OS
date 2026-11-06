@@ -1,0 +1,17 @@
+[package]
+name = "fsd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "fsd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+blockproto = { path = "../../libs/blockproto" }
+fsproto = { path = "../../libs/fsproto" }
+fs.workspace = true

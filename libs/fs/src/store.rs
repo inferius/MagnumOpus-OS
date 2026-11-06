@@ -1,0 +1,563 @@
+//! Uloziste: cache uzlu, copy-on-write, uvolnovani bloku a commit.
+//!
+//! Pravidla uvolneni bloku s generaci vzniku `birth` (zaklad konzistence):
+//! - `birth == txg`: blok vznikl v rozpracovane transakci, zadny ulozeny stav
+//!   na nej neukazuje - volny hned,
+//! - `birth > snapshot_generation`: volny po odlozeni (`REUSE_DELAY`),
+//! - jinak ho drzi snapshot: jde do seznamu mrtvych bloku (deadlist) a
+//!   uvolni se az se smazanim snapshotu.
+//!
+//! Commit: (data a deadlisty zapise `Fs`), uzly stromu od listu ke koreni do
+//! jednoho souvisleho useku, space logy, flush, superblok do dalsiho slotu
+//! kruhu, flush. Vypadek kdykoli pred zapisem superbloku = plati predchozi
+//! stav, ktery nebyl nicim prepsan.
+
+use alloc::collections::BTreeMap;
+use alloc::vec;
+use alloc::vec::Vec;
+
+use abi::{Error, Result};
+
+use crate::device::BlockDevice;
+use crate::hash::{Algo, xxh3};
+use crate::layout::{
+    BLOCK_SIZE, BlockPtr, DATA_START, DeadExtent, FIRST_FREE_OID, INODE_SIZE, Inode, KIND_DIR, Key,
+    REUSE_DELAY, ROOT_OID, SB_COUNT, SB_FIRST, Superblock, item,
+};
+use crate::node::{Body, Child, Node};
+use crate::space::{Class, INDEX_PER_BLOCK, Space, TABLE_PER_BLOCK};
+
+/// Kolik cistych uzlu drzet v pameti, nez se cache vyprazdni.
+const CACHE_LIMIT: usize = 8192;
+/// Nejmensi podporovane zarizeni (bloky).
+pub const MIN_BLOCKS: u64 = 64;
+/// Vychozi velikost alokacni skupiny: 1 GiB.
+pub const DEFAULT_AG_BLOCKS: u64 = 262_144;
+
+/// Parametry formatovani.
+#[derive(Debug, Clone)]
+pub struct FormatOptions {
+    pub label: alloc::string::String,
+    pub algo: Algo,
+    /// Velikost alokacni skupiny v blocich (None = vychozi, pro velke disky
+    /// se zvetsi, aby tabulka skupin zustala mala).
+    pub ag_blocks: Option<u64>,
+}
+
+impl Default for FormatOptions {
+    fn default() -> Self {
+        Self {
+            label: alloc::string::String::new(),
+            algo: Algo::Xxh3,
+            ag_blocks: None,
+        }
+    }
+}
+
+pub struct Store<D: BlockDevice> {
+    pub dev: D,
+    pub algo: Algo,
+    /// Posledni ulozeny stav.
+    pub sb: Superblock,
+    /// Rozpracovana transakce (= sb.generation + 1).
+    pub txg: u64,
+    pub root: Child,
+    pub next_oid: u64,
+    pub next_snapshot: u64,
+    pub snapshot_generation: u64,
+    pub dead_seq: u64,
+    pub space: Space,
+    /// Mrtve bloky drzene snapshoty, cekajici na zapis do deadlistu.
+    pub dead: Vec<DeadExtent>,
+    cache: BTreeMap<u64, Node>,
+    dirty: BTreeMap<u64, Node>,
+    next_mem: u64,
+    changed: bool,
+    /// Commit selhal uprostred: stav v pameti neodpovida disku, dalsi zmeny
+    /// jsou zakazane (nutne znovu pripojit).
+    pub poisoned: bool,
+    /// O kolik generaci se pripojeni vratilo kvuli poskozenemu stavu.
+    pub fallback: u64,
+    /// Posilat zarizeni TRIM pro uvolnene bloky.
+    pub discard: bool,
+    // --- intent log aktualni epochy ---
+    pub zil_blocks: Vec<u64>,
+    pub zil_next: u64,
+    pub zil_seq: u64,
+    /// Bloky dat, na ktere odkazuje intent log teto epochy (zacatek -> delka):
+    /// do commitu se nesmi znovu pouzit, i kdyz vznikly v teto transakci.
+    pub zil_logged: BTreeMap<u64, u64>,
+}
+
+/// Velikost AG pro disk: vychozi, ale tolik, aby tabulka mela nejvys
+/// ~10 tisic zaznamu (index ma 127 bloku tabulky).
+fn ag_size(blocks: u64, wish: Option<u64>) -> u64 {
+    let max_ags = (TABLE_PER_BLOCK * INDEX_PER_BLOCK) as u64;
+    let mut ag = wish.unwrap_or(DEFAULT_AG_BLOCKS).max(MIN_BLOCKS);
+    while blocks.div_ceil(ag) > max_ags {
+        ag *= 2;
+    }
+    ag
+}
+
+impl<D: BlockDevice> Store<D> {
+    /// Vytvori prazdny souborovy system (jen korenovy adresar).
+    pub fn format(mut dev: D, opts: &FormatOptions) -> Result<D> {
+        let blocks = dev.block_count();
+        if blocks < MIN_BLOCKS {
+            return Err(Error::InvalidArgs);
+        }
+        // Stare superbloky zrusit, aby pripojeni nenaslo predchozi system.
+        let zero = vec![0u8; BLOCK_SIZE];
+        for i in 0..SB_COUNT {
+            dev.write_block(SB_FIRST + i, &zero)?;
+        }
+        dev.flush()?;
+        let mut label = [0u8; 32];
+        let n = opts.label.len().min(32);
+        label[..n].copy_from_slice(&opts.label.as_bytes()[..n]);
+        let ag_blocks = ag_size(blocks, opts.ag_blocks);
+        let sb = Superblock {
+            generation: 0,
+            block_count: blocks,
+            algo: opts.algo,
+            ag_blocks,
+            root: BlockPtr::default(),
+            space: BlockPtr::default(),
+            zil_block: 0,
+            zil_seed: 0,
+            next_oid: FIRST_FREE_OID,
+            snapshot_generation: 0,
+            next_snapshot: 1,
+            dead_seq: 0,
+            unicode_version: crate::names::UNICODE_VERSION,
+            label,
+        };
+        let mut s = Self::with_state(dev, sb, Space::new(blocks, ag_blocks), Child::Mem(0));
+        let root_dir = Inode {
+            kind: KIND_DIR,
+            size: 0,
+            mtime: 0,
+            ctime: 0,
+            parent: 0,
+            tree_bytes: 0,
+            tree_files: 0,
+            tree_dirs: 0,
+        };
+        debug_assert_eq!(root_dir.encode().len(), INODE_SIZE);
+        let id = s.new_node(Body::Leaf(vec![(
+            Key::new(ROOT_OID, item::INODE, 0),
+            root_dir.encode(),
+        )]));
+        s.root = Child::Mem(id);
+        s.commit()?;
+        Ok(s.dev)
+    }
+
+    fn with_state(dev: D, sb: Superblock, space: Space, root: Child) -> Self {
+        Self {
+            algo: sb.algo,
+            txg: sb.generation + 1,
+            root,
+            next_oid: sb.next_oid,
+            next_snapshot: sb.next_snapshot,
+            snapshot_generation: sb.snapshot_generation,
+            dead_seq: sb.dead_seq,
+            space,
+            dead: Vec::new(),
+            cache: BTreeMap::new(),
+            dirty: BTreeMap::new(),
+            next_mem: 1,
+            changed: false,
+            poisoned: false,
+            fallback: 0,
+            discard: false,
+            zil_blocks: Vec::new(),
+            zil_next: sb.zil_block,
+            zil_seq: 0,
+            zil_logged: BTreeMap::new(),
+            dev,
+            sb,
+        }
+    }
+
+    /// Pripoji system: nejnovejsi platny superblok, jehoz stav jde nacist.
+    /// Kdyz je poskozeny (disk ztratil zapisy, prestoze potvrdil flush),
+    /// zkusi az `REUSE_DELAY - 1` starsich - ty zarucene nikdo neprepsal.
+    pub fn open(mut dev: D) -> Result<Self> {
+        let mut found: Vec<Superblock> = Vec::new();
+        let mut buf = vec![0u8; BLOCK_SIZE];
+        let mut last_err = Error::NotFound;
+        for i in 0..SB_COUNT {
+            dev.read_block(SB_FIRST + i, &mut buf)?;
+            match Superblock::decode(&buf) {
+                Ok(sb) if sb.block_count <= dev.block_count() => found.push(sb),
+                Ok(_) => last_err = Error::Corrupted,
+                Err(Error::NotFound) => {}
+                Err(e) => last_err = e,
+            }
+        }
+        found.sort_by_key(|s| core::cmp::Reverse(s.generation));
+        let Some(newest) = found.first().map(|s| s.generation) else {
+            return Err(last_err);
+        };
+        for sb in found {
+            if sb.generation + REUSE_DELAY <= newest {
+                break;
+            }
+            let fallback = newest - sb.generation;
+            match Self::try_open(dev, sb) {
+                Ok(mut s) => {
+                    s.fallback = fallback;
+                    return Ok(s);
+                }
+                Err((d, e)) => {
+                    dev = d;
+                    last_err = e;
+                }
+            }
+        }
+        Err(last_err)
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn try_open(mut dev: D, sb: Superblock) -> core::result::Result<Self, (D, Error)> {
+        let txg = sb.generation + 1;
+        let space = match Space::load(
+            &mut dev,
+            sb.algo,
+            sb.block_count,
+            sb.ag_blocks,
+            &sb.space,
+            txg,
+        ) {
+            Ok(s) => s,
+            Err(e) => return Err((dev, e)),
+        };
+        let mut s = Self::with_state(dev, sb.clone(), space, Child::Disk(sb.root));
+        if sb.zil_block != 0 {
+            s.zil_blocks.push(sb.zil_block);
+        }
+        s.space.begin_txg(txg);
+        let _ = s.space.take_discards();
+        if let Err(e) = s.load(&sb.root) {
+            return Err((s.dev, e));
+        }
+        Ok(s)
+    }
+
+    /// Volne bloky vcetne tech, ktere cekaji na odlozene uvolneni.
+    pub fn free_blocks(&self) -> u64 {
+        self.space.free_blocks() + self.space.deferred_blocks()
+    }
+
+    /// Rezerva pro commit (metadata, logy), kterou bezne zapisy nesmi pouzit.
+    pub fn reserve(&self) -> u64 {
+        (self.sb.block_count / 128).clamp(24, 65_536)
+    }
+
+    /// Je misto pro `extra` dalsich bloku (krome rozpracovanych uzlu a rezervy)?
+    pub fn has_room(&self, extra: u64) -> bool {
+        self.dirty.len() as u64 + extra + self.reserve() <= self.space.free_blocks()
+    }
+
+    pub fn check_writable(&self) -> Result<()> {
+        if self.poisoned {
+            Err(Error::IoError)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Uvolni usek podle pravidel v hlavicce modulu.
+    pub fn release(&mut self, start: u64, len: u64, birth: u64) {
+        self.changed = true;
+        if birth == self.txg && !self.logged(start, len) {
+            self.space.free(start, len, self.txg, true);
+        } else if birth > self.snapshot_generation {
+            self.space.free(start, len, self.txg, false);
+        } else {
+            self.dead.push(DeadExtent { start, len, birth });
+        }
+    }
+
+    /// Prekryva usek bloky, na ktere odkazuje intent log?
+    fn logged(&self, start: u64, len: u64) -> bool {
+        self.zil_logged
+            .range(..start + len)
+            .next_back()
+            .is_some_and(|(&s, &l)| s + l > start)
+    }
+
+    /// Alokace pro data.
+    pub fn alloc_data(&mut self, want: u64, goal: Option<u64>) -> Result<(u64, u64)> {
+        self.changed = true;
+        self.space.alloc(want, goal, Class::Data, self.txg)
+    }
+
+    /// Alokace jednoho bloku metadat (intent log).
+    pub fn alloc_meta(&mut self) -> Result<u64> {
+        self.changed = true;
+        Ok(self.space.alloc(1, None, Class::Meta, self.txg)?.0)
+    }
+
+    /// Nacte ulozeny uzel a overi jeho kontrolni soucet.
+    pub fn load(&mut self, ptr: &BlockPtr) -> Result<&Node> {
+        if !self.cache.contains_key(&ptr.block) {
+            if ptr.block < DATA_START || ptr.block >= self.sb.block_count {
+                return Err(Error::Corrupted);
+            }
+            let mut buf = vec![0u8; BLOCK_SIZE];
+            self.dev.read_block(ptr.block, &mut buf)?;
+            if self.algo.sum(&buf) != ptr.csum {
+                return Err(Error::Corrupted);
+            }
+            let node = Node::decode(&buf)?;
+            if self.cache.len() >= CACHE_LIMIT {
+                self.cache.clear();
+            }
+            self.cache.insert(ptr.block, node);
+        }
+        Ok(&self.cache[&ptr.block])
+    }
+
+    /// Uzel podle odkazu (rozpracovany nebo ulozeny).
+    pub fn node(&mut self, c: &Child) -> Result<&Node> {
+        match c {
+            Child::Mem(id) => self.dirty.get(id).ok_or(Error::Corrupted),
+            Child::Disk(p) => self.load(p),
+        }
+    }
+
+    /// Copy-on-write: vrati rozpracovany uzel (pri prvni zmene v transakci
+    /// zkopiruje ulozeny a stary blok uvolni).
+    pub fn cow(&mut self, c: &Child) -> Result<u64> {
+        match *c {
+            Child::Mem(id) => Ok(id),
+            Child::Disk(p) => {
+                let mut node = self.load(&p)?.clone();
+                node.generation = self.txg;
+                self.cache.remove(&p.block);
+                self.release(p.block, 1, p.birth);
+                Ok(self.insert_dirty(node))
+            }
+        }
+    }
+
+    fn insert_dirty(&mut self, node: Node) -> u64 {
+        let id = self.next_mem;
+        self.next_mem += 1;
+        self.dirty.insert(id, node);
+        self.changed = true;
+        id
+    }
+
+    pub fn new_node(&mut self, body: Body) -> u64 {
+        let generation = self.txg;
+        self.insert_dirty(Node { generation, body })
+    }
+
+    pub fn dirty_mut(&mut self, id: u64) -> &mut Node {
+        self.dirty
+            .get_mut(&id)
+            .expect("uzel neni rozpracovany (chybi cow)")
+    }
+
+    /// Uvolni uzel stromu.
+    pub fn free_node(&mut self, c: &Child) {
+        match *c {
+            Child::Mem(id) => {
+                self.dirty.remove(&id);
+            }
+            Child::Disk(p) => {
+                self.cache.remove(&p.block);
+                self.release(p.block, 1, p.birth);
+            }
+        }
+        self.changed = true;
+    }
+
+    /// Precte souvisly usek dat a overi kontrolni soucet kazdeho bloku.
+    pub fn read_data(
+        &mut self,
+        phys: u64,
+        csums: &[crate::hash::Csum],
+        buf: &mut [u8],
+    ) -> Result<()> {
+        debug_assert_eq!(buf.len(), csums.len() * BLOCK_SIZE);
+        if phys < DATA_START || phys + csums.len() as u64 > self.sb.block_count {
+            return Err(Error::Corrupted);
+        }
+        self.dev.read_blocks(phys, buf)?;
+        for (c, b) in csums.iter().zip(buf.chunks(BLOCK_SIZE)) {
+            if self.algo.sum(b) != *c {
+                return Err(Error::Corrupted);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn mark_changed(&mut self) {
+        self.changed = true;
+    }
+
+    pub fn has_changes(&self) -> bool {
+        self.changed || !self.dirty.is_empty()
+    }
+
+    /// Zapise rozpracovane uzly (potomci pred rodici, do souvislych useku);
+    /// vraci ukazatel na novy koren.
+    fn write_tree(&mut self) -> Result<BlockPtr> {
+        let root = self.root;
+        let Child::Mem(root_id) = root else {
+            let Child::Disk(p) = root else { unreachable!() };
+            return Ok(p);
+        };
+        // Poradi zapisu: post-order (potomci drive), jen dosazitelne uzly.
+        let mut order = Vec::new();
+        let mut stack = vec![(root_id, false)];
+        while let Some((id, expanded)) = stack.pop() {
+            if expanded {
+                order.push(id);
+                continue;
+            }
+            stack.push((id, true));
+            if let Body::Internal(children) = &self.dirty[&id].body {
+                for (_, c) in children.iter().rev() {
+                    if let Child::Mem(cid) = c {
+                        stack.push((*cid, false));
+                    }
+                }
+            }
+        }
+        let mut blocks = Vec::with_capacity(order.len());
+        while blocks.len() < order.len() {
+            let (s, l) = self.space.alloc(
+                (order.len() - blocks.len()) as u64,
+                None,
+                Class::Meta,
+                self.txg,
+            )?;
+            blocks.extend(s..s + l);
+        }
+        let mut ptrs: BTreeMap<u64, BlockPtr> = BTreeMap::new();
+        let mut out: Vec<(u64, Vec<u8>)> = Vec::with_capacity(order.len());
+        for (&id, &block) in order.iter().zip(&blocks) {
+            let mut node = self.dirty.remove(&id).unwrap();
+            if let Body::Internal(children) = &mut node.body {
+                for (_, c) in children.iter_mut() {
+                    if let Child::Mem(cid) = c {
+                        *c = Child::Disk(ptrs[cid]);
+                    }
+                }
+            }
+            let data = node.encode();
+            let ptr = BlockPtr {
+                block,
+                birth: self.txg,
+                csum: self.algo.sum(&data),
+            };
+            ptrs.insert(id, ptr);
+            if self.cache.len() < CACHE_LIMIT {
+                self.cache.insert(block, node);
+            }
+            out.push((block, data));
+        }
+        debug_assert!(self.dirty.is_empty(), "rozpracovany uzel mimo strom");
+        self.dirty.clear();
+        write_runs(&mut self.dev, &mut out)?;
+        let root_ptr = ptrs[&root_id];
+        self.root = Child::Disk(root_ptr);
+        Ok(root_ptr)
+    }
+
+    /// Zapise stav (strom, misto, superblok). Data souboru a deadlisty uz
+    /// musi byt ve strome (zarizuje `Fs::commit`).
+    pub fn commit(&mut self) -> Result<()> {
+        self.check_writable()?;
+        if !self.has_changes() && self.sb.generation > 0 {
+            return Ok(());
+        }
+        let r = self.commit_inner();
+        if r.is_err() {
+            self.poisoned = true;
+        }
+        r
+    }
+
+    fn commit_inner(&mut self) -> Result<()> {
+        let txg = self.txg;
+        let root = self.write_tree()?;
+        // Bloky dosavadni epochy logu: po tomto commitu je nic nepotrebuje.
+        // Uvolnit odlozene a uz v tomto commitu (zaznam musi byt v nem, jinak
+        // by po vypadku zustaly obsazene); hned je pouzit nejde - do zapisu
+        // superbloku je jeste muze cist prehravani.
+        for b in core::mem::take(&mut self.zil_blocks) {
+            self.space.free(b, 1, txg, false);
+        }
+        // Nova epocha intent logu: prvni blok predem (zapise se do space logu).
+        let zil_block = self.space.alloc(1, None, Class::Meta, txg)?.0;
+        let zil_seed = u64::from_le_bytes(
+            xxh3(&[&txg.to_le_bytes()[..], &root.csum.0[..]].concat()).0[..8]
+                .try_into()
+                .unwrap(),
+        );
+        let space = self.space.commit(&mut self.dev, self.algo, txg)?;
+        self.dev.flush()?;
+        let sb = Superblock {
+            generation: txg,
+            root,
+            space,
+            zil_block,
+            zil_seed,
+            next_oid: self.next_oid,
+            next_snapshot: self.next_snapshot,
+            snapshot_generation: self.snapshot_generation,
+            dead_seq: self.dead_seq,
+            ..self.sb.clone()
+        };
+        self.dev
+            .write_block(SB_FIRST + txg % SB_COUNT, &sb.encode())?;
+        self.dev.flush()?;
+        // Ulozeno.
+        self.sb = sb;
+        self.txg += 1;
+        self.changed = false;
+        self.zil_blocks.push(zil_block);
+        self.zil_logged.clear();
+        self.zil_next = zil_block;
+        self.zil_seq = 0;
+        self.space.begin_txg(self.txg);
+        let discards = self.space.take_discards();
+        if self.discard {
+            for (s, l) in discards {
+                // TRIM je jen napoveda; chyba neni fatalni.
+                let _ = self.dev.discard(s, l);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Zapise bloky, souvisle useky jednim pozadavkem.
+pub fn write_runs<D: BlockDevice>(dev: &mut D, out: &mut [(u64, Vec<u8>)]) -> Result<()> {
+    out.sort_unstable_by_key(|(b, _)| *b);
+    let mut i = 0;
+    while i < out.len() {
+        let mut j = i + 1;
+        while j < out.len() && out[j].0 == out[j - 1].0 + 1 && j - i < 256 {
+            j += 1;
+        }
+        if j - i == 1 {
+            dev.write_block(out[i].0, &out[i].1)?;
+        } else {
+            let buf: Vec<u8> = out[i..j]
+                .iter()
+                .flat_map(|(_, d)| d.iter().copied())
+                .collect();
+            dev.write_blocks(out[i].0, &buf)?;
+        }
+        i = j;
+    }
+    Ok(())
+}
