@@ -76,3 +76,16 @@ Done changes:
 Datasets, versioning (clones, diff, restore), the handle layer and the
 Windows driver, permissions, protocol v2 - order in the
 [design](fs-v3-design.md#implementation-order).
+
+## Protocol fsproto v1 -> v2
+
+| Area | v1 | v2 | Why |
+|---|---|---|---|
+| addressing | paths | **handles** (dataset, oid, generation) | a file survives a rename and deletion; an operation does not re-evaluate the path |
+| clients | one | **sessions** via `CONNECT`, own handles | an editor, an agent and sync work at the same time and isolated |
+| write | a result without a count | **number of accepted bytes** | the client knows what the service accepted, also for a write in several messages |
+| save | overwrite | **conditional save** with a revision (`CONFLICT`) | no silent overwrite of someone else's change |
+| locks and sharing | - | range locks, share modes, delete on close | the Windows layer and databases |
+| listing | pages by cursor | also on a handle (`LIST_H`) | the same guarantees when the directory changes |
+
+v1 operations remain (compatibility); a new client asks with `HELLO`.

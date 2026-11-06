@@ -73,3 +73,16 @@ Návrh a důvody celé v3: [navrh-fs-v3.md](navrh-fs-v3.md). Hotové změny:
 
 Datasety, verzování (klony, diff, obnova), vrstva handlů a ovladač pro
 Windows, oprávnění, protokol v2 - pořadí v [návrhu](navrh-fs-v3.md#pořadí-implementace).
+
+## Protokol fsproto v1 -> v2
+
+| Oblast | v1 | v2 | Proč |
+|---|---|---|---|
+| adresování | cesty | **handly** (dataset, oid, generace) | soubor přežije přejmenování i smazání; operace nevyhodnocuje cestu znovu |
+| klienti | jeden | **relace** přes `CONNECT`, vlastní handly | editor, agent i synchronizace pracují zároveň a izolovaně |
+| zápis | výsledek bez počtu | **počet přijatých bajtů** | klient ví, co služba přijala, i u zápisu ve více zprávách |
+| uložení | přepis | **podmíněné uložení** s revizí (`CONFLICT`) | žádné tiché přepsání cizí změny |
+| zámky a sdílení | - | zámky rozsahu, sdílecí režimy, smazání při zavření | vrstva Windows a databáze |
+| výpis | stránky podle kurzoru | i nad handlem (`LIST_H`) | stejné záruky při změně adresáře |
+
+Operace v1 zůstávají (kompatibilita); nový klient se ptá `HELLO`.

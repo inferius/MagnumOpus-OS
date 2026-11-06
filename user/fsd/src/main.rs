@@ -21,16 +21,18 @@ extern crate alloc;
 
 mod blkdev;
 mod serve;
+mod serve_v2;
 
 use alloc::vec::Vec;
 use core::time::Duration;
 
 use blockproto::BlockClient;
 use fs::Fs;
-use libos::{Channel, Error, Startup, println, time};
+use libos::{Channel, Error, Signals, Startup, println, time};
 
 use crate::blkdev::BlkDev;
 use crate::serve::Service;
+use crate::serve_v2::{MAX_SESSIONS, Session};
 
 /// Jak casto ukladat zmeny commitem.
 const COMMIT_INTERVAL: Duration = Duration::from_secs(5);
@@ -111,9 +113,10 @@ fn main(startup: Startup) -> i64 {
     let mut svc = Service {
         fs: Some(fs),
         debug,
-        list_cache: None,
+        temp_counter: 0,
+        commit_requested: false,
     };
-    serve(&mut svc, &client);
+    serve(&mut svc, client);
     if let Some(fs) = svc.fs.as_mut()
         && let Err(e) = fs.commit()
     {
@@ -123,64 +126,123 @@ fn main(startup: Startup) -> i64 {
     0
 }
 
-fn serve(svc: &mut Service, client: &Channel) {
+/// Obsluha relaci: prvni (ze startovni zpravy) je hlavni - jeji zavreni
+/// sluzbu ukonci; dalsi vznikaji pres `CONNECT`.
+fn serve(svc: &mut Service, client: Channel) {
+    let mut sessions: Vec<Session> = alloc::vec![Session::new(client)];
     let mut next_commit = time::deadline_after(COMMIT_INTERVAL);
     // Defragmentovat jen po zmenach (jinak by se system prochazel stale dokola).
     let mut idle = false;
     let mut changed = false;
-    loop {
+    let mut running = true;
+    while running {
         // V necinnosti (po commitu bez novych pozadavku) defragmentovat.
         let deadline = if idle { time::now() } else { next_commit };
-        match client.read(Some(deadline)) {
-            Ok(msg) => {
-                idle = false;
-                changed = true;
-                let reply = fsproto::reply(svc.handle(&msg.data));
-                // Klient prave ulozil vse sam: dalsi automaticky commit az
-                // za cely interval.
-                if msg.data.get(..4) == Some(&fsproto::op::COMMIT.to_le_bytes()[..]) {
-                    next_commit = time::deadline_after(COMMIT_INTERVAL);
-                }
-                // Chyba odeslani odpovedi nesmi ukoncit sluzbu (a s ni
-                // svazek bez zaverecneho commitu): kdyz se odpoved nevejde,
-                // posle se misto ni chyba. Konci se jen pri zavrenem kanalu.
-                match client.write(&reply, Vec::new()) {
-                    Ok(()) => {}
-                    Err(Error::PeerClosed) => return,
-                    Err(e) => {
-                        println!("fsd: odpoved nejde odeslat ({e}), posilam chybu");
-                        let fallback = fsproto::reply(Err(Error::BufferTooSmall));
-                        if let Err(Error::PeerClosed) = client.write(&fallback, Vec::new()) {
-                            return;
+        let mask = Signals::READABLE | Signals::PEER_CLOSED;
+        let items: Vec<(&libos::Handle, Signals)> =
+            sessions.iter().map(|s| (s.channel.handle(), mask)).collect();
+        match libos::wait_many(&items, Some(deadline)) {
+            Ok(_) => {
+                let mut i = 0;
+                while i < sessions.len() {
+                    match serve_session(svc, &mut sessions, i) {
+                        Some(true) => {
+                            idle = false;
+                            changed = true;
+                            i += 1;
+                        }
+                        Some(false) => i += 1,
+                        None => {
+                            // Relace skoncila: zavrit jeji handly.
+                            let mut s = sessions.remove(i);
+                            svc.close_session(&mut s);
+                            if i == 0 {
+                                running = false;
+                                break;
+                            }
                         }
                     }
                 }
             }
             Err(Error::TimedOut) => {}
-            Err(Error::PeerClosed) => return,
             Err(e) => {
-                println!("fsd: chyba kanalu: {e}");
-                return;
+                println!("fsd: chyba cekani: {e}");
+                break;
             }
         }
-        let Some(fs) = svc.fs.as_mut() else { continue };
-        if time::now() >= next_commit {
-            if let Err(e) = fs.commit() {
-                println!("fsd: commit selhal: {e}");
+        if running {
+            background(svc, &mut next_commit, &mut idle, &mut changed);
+        }
+    }
+    for mut s in sessions {
+        svc.close_session(&mut s);
+    }
+}
+
+/// Zpracuje vsechny cekajici pozadavky relace `i`. `Some(true)` = neco
+/// zpracovala, `None` = relace skoncila (kanal zavreny).
+fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Option<bool> {
+    let mut did = false;
+    loop {
+        let msg = match sessions[i].channel.try_read() {
+            Ok(m) => m,
+            Err(Error::ShouldWait) => return Some(did),
+            Err(_) => return None,
+        };
+        did = true;
+        let (reply, handles, new_session) = match svc.handle(&mut sessions[i], &msg.data) {
+            Ok(r) => (fsproto::reply(Ok(r.body)), r.handles, r.new_session),
+            Err(e) => (fsproto::reply(Err(e)), Vec::new(), None),
+        };
+        let (reply, handles) = match new_session {
+            // Prilis mnoho relaci: novy kanal zahodit, klientovi chyba.
+            Some(_) if sessions.len() >= MAX_SESSIONS => (fsproto::reply(Err(Error::NoResources)), Vec::new()),
+            Some(ch) => {
+                sessions.push(Session::new(ch));
+                (reply, handles)
             }
-            next_commit = time::deadline_after(COMMIT_INTERVAL);
-            idle = changed;
-        } else if idle {
-            match fs.defrag_step(DEFRAG_BUDGET) {
-                Ok(r) if r.done => {
-                    idle = false;
-                    changed = false;
+            None => (reply, handles),
+        };
+        // Chyba odeslani odpovedi nesmi ukoncit sluzbu (a s ni svazek bez
+        // zaverecneho commitu): kdyz se odpoved nevejde, posle se misto ni
+        // chyba. Konci se jen pri zavrenem kanalu.
+        match sessions[i].channel.write(&reply, handles) {
+            Ok(()) => {}
+            Err(Error::PeerClosed) => return None,
+            Err(e) => {
+                println!("fsd: odpoved nejde odeslat ({e}), posilam chybu");
+                let fallback = fsproto::reply(Err(Error::BufferTooSmall));
+                if let Err(Error::PeerClosed) = sessions[i].channel.write(&fallback, Vec::new()) {
+                    return None;
                 }
-                Ok(_) => {}
-                Err(e) => {
-                    println!("fsd: defragmentace: {e}");
-                    idle = false;
-                }
+            }
+        }
+    }
+}
+
+/// Automaticky commit a defragmentace v necinnosti.
+fn background(svc: &mut Service, next_commit: &mut u64, idle: &mut bool, changed: &mut bool) {
+    // Klient prave ulozil vse sam: dalsi automaticky commit az za interval.
+    if core::mem::take(&mut svc.commit_requested) {
+        *next_commit = time::deadline_after(COMMIT_INTERVAL);
+    }
+    let Some(fs) = svc.fs.as_mut() else { return };
+    if time::now() >= *next_commit {
+        if let Err(e) = fs.commit() {
+            println!("fsd: commit selhal: {e}");
+        }
+        *next_commit = time::deadline_after(COMMIT_INTERVAL);
+        *idle = *changed;
+    } else if *idle {
+        match fs.defrag_step(DEFRAG_BUDGET) {
+            Ok(r) if r.done => {
+                *idle = false;
+                *changed = false;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                println!("fsd: defragmentace: {e}");
+                *idle = false;
             }
         }
     }

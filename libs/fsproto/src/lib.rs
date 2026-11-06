@@ -14,6 +14,7 @@
 extern crate alloc;
 
 mod codec;
+pub mod v2;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -205,6 +206,11 @@ impl FsClient {
 
     /// Posle pozadavek, vrati telo odpovedi.
     fn call(&self, req: Writer) -> Result<Vec<u8>> {
+        self.call_with_handles(req).map(|(b, _)| b)
+    }
+
+    /// Posle pozadavek, vrati telo odpovedi i predane handly.
+    fn call_with_handles(&self, req: Writer) -> Result<(Vec<u8>, Vec<libos::Handle>)> {
         self.channel.write(&req.finish(), Vec::new())?;
         let msg = self.channel.read(None)?;
         let mut r = Reader::new(&msg.data);
@@ -213,7 +219,7 @@ impl FsClient {
         if status != 0 {
             return Err(Error::from_code(status as i64).unwrap_or(Error::Corrupted));
         }
-        Ok(r.rest().to_vec())
+        Ok((r.rest().to_vec(), msg.handles))
     }
 
     fn req(op: u32) -> Writer {
@@ -425,7 +431,7 @@ impl FsClient {
     }
 }
 
-fn decode_list(body: &[u8]) -> Result<Vec<DirEntry>> {
+pub(crate) fn decode_list(body: &[u8]) -> Result<Vec<DirEntry>> {
     let mut r = Reader::new(body);
     let n = r.u32()?;
     (0..n)

@@ -7,8 +7,9 @@ use fsproto::{DirEntry, Info, Reader, Stat, Writer, kind, op};
 use libos::{Error, Result};
 
 use crate::blkdev::BlkDev;
+use crate::serve_v2::{Reply, Session};
 
-fn stat(s: fs::Stat) -> Stat {
+pub(crate) fn stat(s: fs::Stat) -> Stat {
     Stat {
         oid: s.oid,
         kind: match s.kind {
@@ -26,7 +27,7 @@ fn stat(s: fs::Stat) -> Stat {
     }
 }
 
-fn entries(list: Vec<fs::DirEntry>) -> Vec<DirEntry> {
+pub(crate) fn entries(list: Vec<fs::DirEntry>) -> Vec<DirEntry> {
     list.into_iter()
         .map(|e| DirEntry {
             name: e.name,
@@ -54,9 +55,10 @@ pub struct Service {
     pub fs: Option<Fs<BlkDev>>,
     /// Povolene testovaci operace (`SIMULATE_POWER_LOSS`).
     pub debug: bool,
-    /// Rozpracovany strankovany vypis: ((snapshot, cesta), polozky podle
-    /// slozeneho jmena). Zahodi ho kazda jina operace.
-    pub list_cache: Option<ListCache>,
+    /// Pocitadlo jmen docasnych souboru podmineneho ulozeni.
+    pub temp_counter: u64,
+    /// Klient prave udelal COMMIT (posunout automaticky commit).
+    pub commit_requested: bool,
 }
 
 /// Klic a obsah rozpracovaneho vypisu (polozky serazene podle slozeneho
@@ -68,12 +70,19 @@ impl Service {
         self.fs.as_mut().ok_or(Error::IoError)
     }
 
-    /// Zpracuje jeden pozadavek; vraci telo odpovedi.
-    pub fn handle(&mut self, msg: &[u8]) -> Result<Writer> {
+    /// Zpracuje jeden pozadavek relace `sess`; vraci odpoved.
+    pub fn handle(&mut self, sess: &mut Session, msg: &[u8]) -> Result<Reply> {
         let mut r = Reader::new(msg);
         let opcode = r.u32()?;
+        // Rozpracovany vypis zahodi kazda jina operace (nikdy neni zastaraly).
         if opcode != op::LIST_PAGE && opcode != op::SNAP_LIST_PAGE {
-            self.list_cache = None;
+            sess.list_cache = None;
+        }
+        if opcode == op::COMMIT {
+            self.commit_requested = true;
+        }
+        if let Some(res) = self.handle_v2(sess, opcode, &mut r) {
+            return res;
         }
         let mut w = Writer::new();
         if opcode == op::SIMULATE_POWER_LOSS {
@@ -84,7 +93,7 @@ impl Service {
             let fs = Fs::mount(dev)?;
             w.u64(fs.info().replayed);
             self.fs = Some(fs);
-            return Ok(w);
+            return Ok(Reply::body(w));
         }
         // Dlouha operace nad celym svazkem: jen v rezimu `debug` (v1 nema
         // overeni klienta; s protokolem v2 pujde podle opravneni).
@@ -127,7 +136,7 @@ impl Service {
                 // Vypis pro dalsi stranky drzet v pameti (jinak by se pro
                 // kazdou stranku sestavoval znovu); zahodi ho kazda jina
                 // operace, takze nikdy neni zastaraly.
-                let cached = self.list_cache.take().filter(|(k, _)| *k == key && !after.is_empty());
+                let cached = sess.list_cache.take().filter(|(k, _)| *k == key && !after.is_empty());
                 let list = match cached {
                     Some((_, list)) => list,
                     None => {
@@ -148,9 +157,9 @@ impl Service {
                 let page: Vec<DirEntry> = entries(list[start..].to_vec());
                 let n = fsproto::encode_list_page(&mut w, &page, max, fsproto::MAX_REPLY);
                 if start + n < list.len() {
-                    self.list_cache = Some((key, list));
+                    sess.list_cache = Some((key, list));
                 }
-                return Ok(w);
+                return Ok(Reply::body(w));
             }
             op::READ => {
                 let path = r.str()?;
@@ -240,6 +249,6 @@ impl Service {
             }
             _ => return Err(Error::NotSupported),
         }
-        Ok(w)
+        Ok(Reply::body(w))
     }
 }

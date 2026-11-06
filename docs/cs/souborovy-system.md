@@ -37,7 +37,8 @@ sporné, co funguje:
 | datasety, klony s vazbou na původní snapshot | ano | **používá** ([Datasety](#datasety-a-klony)) |
 | diff verzí, obnova jako kopie | ano | **používá** ([Rozdíl verzí](#rozdíl-verzí-a-obnova-jako-kopie)) |
 | handly, sirotci, sdílecí režimy, zámky rozsahu | ano | **používá** ([Handly](#otevřené-soubory-handly)) |
-| protokol v2 ve fsd | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
+| protokol v2 ve fsd (relace, handly, podmíněné uložení) | ano | **používá** ([Protokol v2](#protokol-v2-relace-handly-podmíněné-uložení)) |
+| oprávnění, vlastník | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
 
 ## Co nabízí
 
@@ -1225,6 +1226,72 @@ Příklad zprávy `READ "/a.txt", offset 0, 100 B`:
 04 00 00 00   06 00 2f 61 2e 74 78 74   00 00 00 00 00 00 00 00   64 00 00 00
 op = 4        cesta (délka 6, "/a.txt")  offset = 0                délka = 100
 ```
+
+### Protokol v2: relace, handly, podmíněné uložení
+
+> **Změna proti v1:** v1 pracuje jen s cestami a má jednoho klienta.
+> **Proč:** soubor musí přežít přejmenování a smazání, víc programů
+> (editor, agent, synchronizace) potřebuje vlastní relace a zápis nesmí
+> tiše přepsat cizí změnu. Operace v1 dál platí.
+> ([verze formátu a protokolu](fs-verze.md#protokol-fsproto-v1---v2))
+
+```rust
+use fsproto::v2::{access, share, open_flags};
+
+let editor = fs.connect()?;                                  // vlastní relace
+let f = editor.open("/config.toml", access::READ, share::ALL, 0)?;
+let text = editor.read_h(f.handle, 0, 4096)?;
+editor.close(f.handle)?;
+// ... uživatel upravuje ...
+match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
+    Ok(rev) => {}                         // uloženo, nová revize
+    Err(Error::Conflict) => {}            // mezitím změnil někdo jiný: nic se nezměnilo
+    Err(e) => return Err(e),
+}
+```
+
+| op | Název | Parametry | Výsledek |
+|---|---|---|---|
+| 30 | `HELLO` | - | verze u32 (2), max_io u32 |
+| 31 | `CONNECT` | - | nový kanál relace (handle ve zprávě) |
+| 32 | `OPEN` | cesta, přístup u8, sdílení u8, příznaky u8 (`CREATE` 1, `EXCL` 2, `TRUNCATE` 4, `DIR` 8) | handle u64, `Stat`, `Revision` |
+| 33 | `CLOSE` | handle | - |
+| 34 | `READ_H` | handle, offset u64, délka u32 | data |
+| 35 | `WRITE_H` | handle, offset u64, data | **přijato u32** |
+| 36 | `SET_LEN` | handle, velikost u64 | - |
+| 37 | `STAT_H` | handle | `Stat`, `Revision` |
+| 38 | `LIST_H` | handle, kurzor, nejvýš u32 | další u8 + položky |
+| 39 | `LOCK` | handle, od u64, délka u64 (0 = do konce), příznaky u8 (`EXCLUSIVE` 1, `MANDATORY` 2) | - |
+| 40 | `UNLOCK` | handle, od, délka | - |
+| 41 | `DELETE_ON_CLOSE` | handle, zapnout u8 | - |
+| 42 | `RENAME_REPLACE` | z, do | - |
+| 43 | `REPLACE_BEGIN` | cesta, má revizi u8, `Revision` | handle dočasného souboru |
+| 44 | `REPLACE_COMMIT` | handle, vynutit u8 | `Revision` nového obsahu, nebo `CONFLICT` |
+| 45 | `REPLACE_ABORT` | handle | - |
+
+`Revision` = dataset u64, oid u64, generace u64, verze obsahu u64.
+
+- **Relace:** `CONNECT` vrátí nový kanál; každá relace má vlastní handly
+  (handle cizí relace = `BAD_HANDLE`). Zavření kanálu zavře všechny
+  handly relace: sirotci zmizí, zámky se uvolní, dočasné soubory
+  podmíněného uložení se smažou. Nejvýš 64 relací (`NO_RESOURCES`). Zavření
+  hlavního kanálu (ze startovní zprávy) službu ukončí.
+- **Zápis = přijato:** odpověď `WRITE_H` říká, kolik bajtů služba přijala
+  (jsou v bufferu, trvalé až po `FSYNC`). Zápis rozdělený do více zpráv je
+  víc samostatných zápisů; `FsClient::write_h` po první chybě nepokračuje
+  a vrátí počet přijatých bajtů před ní.
+- **Podmíněné uložení:** `REPLACE_BEGIN` založí dočasný soubor
+  `.~jméno.N.tmp` ve stejném adresáři (se smazáním při zavření);
+  `WRITE_H` do něj zapíše nová data; `REPLACE_COMMIT` cíl atomicky nahradí
+  jen při očekávané revizi (`má revizi = 0` = cíl nesmí existovat), jinak
+  `CONFLICT` a nic se nezmění - dočasný soubor zůstává (uložit vedle,
+  potvrdit s `vynutit`, nebo `REPLACE_ABORT`). `FsClient::save_if` to
+  udělá najednou. Kdo měl původní soubor otevřený, čte dál původní obsah.
+
+⚠️ **Omezení:** handly platí do restartu služby; po pádu a přehrání intent
+logu může mít soubor jinou revizi (verze obsahu se do logu nepíše) - klient
+pak dostane `CONFLICT` (bezpečný směr). Data se zatím kopírují zprávou (32
+KiB na zprávu); sdílená paměť a fronty požadavků přijdou později.
 
 ## Chybové kódy
 

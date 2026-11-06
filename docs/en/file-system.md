@@ -39,7 +39,8 @@ what works:
 | datasets, clones linked to the origin snapshot | yes | **uses** ([Datasets](#datasets-and-clones)) |
 | diff of versions, restore as a copy | yes | **uses** ([Diff of versions](#diff-of-versions-and-restore-as-a-copy)) |
 | handles, orphans, share modes, range locks | yes | **uses** ([Handles](#open-files-handles)) |
-| protocol v2 in fsd | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
+| protocol v2 in fsd (sessions, handles, conditional save) | yes | **uses** ([Protocol v2](#protocol-v2-sessions-handles-conditional-save)) |
+| permissions, owner | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
 
 ## What it offers
 
@@ -1259,6 +1260,76 @@ Example message `READ "/a.txt", offset 0, 100 B`:
 04 00 00 00   06 00 2f 61 2e 74 78 74   00 00 00 00 00 00 00 00   64 00 00 00
 op = 4        path (length 6, "/a.txt")  offset = 0                length = 100
 ```
+
+### Protocol v2: sessions, handles, conditional save
+
+> **Change from v1:** v1 works only with paths and has one client.
+> **Why:** a file must survive a rename and deletion, several programs
+> (an editor, an agent, sync) need their own sessions and a write must not
+> silently overwrite someone else's change. v1 operations remain valid.
+> ([format and protocol versions](fs-versions.md#protocol-fsproto-v1---v2))
+
+```rust
+use fsproto::v2::{access, share, open_flags};
+
+let editor = fs.connect()?;                                  // its own session
+let f = editor.open("/config.toml", access::READ, share::ALL, 0)?;
+let text = editor.read_h(f.handle, 0, 4096)?;
+editor.close(f.handle)?;
+// ... the user edits ...
+match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
+    Ok(rev) => {}                         // saved, a new revision
+    Err(Error::Conflict) => {}            // someone else changed it: nothing changed
+    Err(e) => return Err(e),
+}
+```
+
+| op | Name | Parameters | Result |
+|---|---|---|---|
+| 30 | `HELLO` | - | version u32 (2), max_io u32 |
+| 31 | `CONNECT` | - | a new session channel (a handle in the message) |
+| 32 | `OPEN` | path, access u8, share u8, flags u8 (`CREATE` 1, `EXCL` 2, `TRUNCATE` 4, `DIR` 8) | handle u64, `Stat`, `Revision` |
+| 33 | `CLOSE` | handle | - |
+| 34 | `READ_H` | handle, offset u64, length u32 | data |
+| 35 | `WRITE_H` | handle, offset u64, data | **accepted u32** |
+| 36 | `SET_LEN` | handle, size u64 | - |
+| 37 | `STAT_H` | handle | `Stat`, `Revision` |
+| 38 | `LIST_H` | handle, cursor, at most u32 | more u8 + entries |
+| 39 | `LOCK` | handle, from u64, length u64 (0 = to the end), flags u8 (`EXCLUSIVE` 1, `MANDATORY` 2) | - |
+| 40 | `UNLOCK` | handle, from, length | - |
+| 41 | `DELETE_ON_CLOSE` | handle, enable u8 | - |
+| 42 | `RENAME_REPLACE` | from, to | - |
+| 43 | `REPLACE_BEGIN` | path, has revision u8, `Revision` | handle of a temporary file |
+| 44 | `REPLACE_COMMIT` | handle, force u8 | `Revision` of the new content, or `CONFLICT` |
+| 45 | `REPLACE_ABORT` | handle | - |
+
+`Revision` = dataset u64, oid u64, generation u64, content version u64.
+
+- **Sessions:** `CONNECT` returns a new channel; every session has its own
+  handles (a handle of another session = `BAD_HANDLE`). Closing the channel
+  closes all handles of the session: orphans disappear, locks are released,
+  temporary files of a conditional save are deleted. At most 64 sessions
+  (`NO_RESOURCES`). Closing the main channel (from the startup message)
+  ends the service.
+- **Write = accepted:** the `WRITE_H` reply says how many bytes the service
+  accepted (they are in the buffer, durable only after `FSYNC`). A write
+  split into several messages is several separate writes;
+  `FsClient::write_h` stops after the first error and returns the number of
+  bytes accepted before it.
+- **Conditional save:** `REPLACE_BEGIN` creates a temporary file
+  `.~name.N.tmp` in the same directory (with delete on close); `WRITE_H`
+  writes the new data into it; `REPLACE_COMMIT` atomically replaces the
+  target only at the expected revision (`has revision = 0` = the target must
+  not exist), otherwise `CONFLICT` and nothing changes - the temporary file
+  stays (save alongside, confirm with `force`, or `REPLACE_ABORT`).
+  `FsClient::save_if` does it all at once. Whoever had the original file
+  open keeps reading the original content.
+
+⚠️ **Limitations:** handles are valid until the service restarts; after a
+crash and intent log replay a file may have a different revision (the
+content version is not logged) - the client then gets `CONFLICT` (the safe
+direction). Data is still copied in messages (32 KiB per message); shared
+memory and request queues come later.
 
 ## Error codes
 

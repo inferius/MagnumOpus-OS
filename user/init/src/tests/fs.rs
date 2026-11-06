@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use fsproto::v2::{access, lock, open_flags, share};
 use fsproto::{FsClient, kind};
 use libos::{Error, Startup};
 
@@ -20,6 +21,9 @@ pub const TESTS: &[Test] = &[
     ("fsync prezije vypadek proudu", fsync_power_loss),
     ("sekvencni zapis = jeden souvisly usek", contiguous),
     ("velky adresar: vypis po strankach", big_directory),
+    ("v2: dve relace, ctenar po atomickem nahrazeni", v2_two_sessions),
+    ("v2: podminene ulozeni a konflikt", v2_conditional_save),
+    ("v2: konec relace uklidi handly, zamky mezi relacemi", v2_session_cleanup_and_locks),
     ("kontrola konzistence a scrub", check_clean),
 ];
 
@@ -280,5 +284,86 @@ fn big_directory(_: &Startup) -> TestResult {
     );
     // Sluzba po velkem vypisu dal odpovida.
     f.info().map_err(|e| fail("info po vypisu", e))?;
+    Ok(())
+}
+
+/// A otevre report, B ho v jine relaci atomicky nahradi; A cte dal puvodni
+/// obsah, nove otevreni dostane novy.
+fn v2_two_sessions(_: &Startup) -> TestResult {
+    let f = fs()?;
+    check_eq!(f.hello().map_err(|e| fail("hello", e))?, 2, "verze protokolu");
+    let a = f.connect().map_err(|e| fail("connect A", e))?;
+    let b = f.connect().map_err(|e| fail("connect B", e))?;
+    a.save_if("/v2-report.txt", None, b"puvodni").map_err(|e| fail("prvni ulozeni", e))?;
+    let ha = a.open("/v2-report.txt", access::READ, share::ALL, 0).map_err(|e| fail("open A", e))?;
+    let rev = ha.revision;
+    b.save_if("/v2-report.txt", Some(rev), b"nova verze").map_err(|e| fail("nahrazeni B", e))?;
+    let old = a.read_h(ha.handle, 0, 100).map_err(|e| fail("cteni A", e))?;
+    check_eq!(&old[..], b"puvodni", "A cte puvodni objekt");
+    let hb = b.open("/v2-report.txt", access::READ, share::ALL, 0).map_err(|e| fail("open B", e))?;
+    let new = b.read_h(hb.handle, 0, 100).map_err(|e| fail("cteni B", e))?;
+    check_eq!(&new[..], b"nova verze", "nove otevreni = novy objekt");
+    // Handle z cizi relace neplati.
+    check_eq!(a.read_h(hb.handle, 0, 1).err(), Some(Error::BadHandle), "cizi handle");
+    a.close(ha.handle).map_err(|e| fail("close A", e))?;
+    b.close(hb.handle).map_err(|e| fail("close B", e))?;
+    Ok(())
+}
+
+/// Editor si pamatuje revizi; mezitim soubor zmeni nekdo jiny - ulozeni
+/// editoru vrati CONFLICT a nic se nezmeni.
+fn v2_conditional_save(_: &Startup) -> TestResult {
+    let f = fs()?;
+    let ed = f.connect().map_err(|e| fail("connect", e))?;
+    ed.save_if("/v2-config.toml", None, b"a = 1").map_err(|e| fail("vytvoreni", e))?;
+    let h = ed.open("/v2-config.toml", access::READ, share::ALL, 0).map_err(|e| fail("open", e))?;
+    ed.close(h.handle).map_err(|e| fail("close", e))?;
+    // Agent zapise pres cestu (v1).
+    f.write("/v2-config.toml", 0, b"a = 2").map_err(|e| fail("zapis agenta", e))?;
+    check_eq!(ed.save_if("/v2-config.toml", Some(h.revision), b"a = 3").err(), Some(Error::Conflict), "konflikt");
+    let data = f.read("/v2-config.toml", 0, 10).map_err(|e| fail("cteni", e))?;
+    check_eq!(&data[..], b"a = 2", "obsah po konfliktu");
+    // Zadny docasny soubor nezustal.
+    let list = f.list("/").map_err(|e| fail("vypis", e))?;
+    check!(!list.iter().any(|e| e.name.starts_with(".~")), "docasny soubor zustal");
+    // Zapis po kusech: pocet prijatych bajtu.
+    let w = ed.open("/v2-velky", access::READ | access::WRITE, share::ALL, open_flags::CREATE).map_err(|e| fail("open velky", e))?;
+    let data = pattern(100 * 1024, 9);
+    check_eq!(ed.write_h(w.handle, 0, &data).map_err(|(_, e)| fail("write_h", e))?, data.len(), "prijato vse");
+    let back = ed.read_h(w.handle, 0, data.len()).map_err(|e| fail("read_h", e))?;
+    check!(back == data, "obsah po zapisu po kusech");
+    ed.close(w.handle).map_err(|e| fail("close velky", e))?;
+    Ok(())
+}
+
+/// Konec relace zavre jeji handly (sirotek zmizi); zamek jedne relace
+/// brani druhe.
+fn v2_session_cleanup_and_locks(_: &Startup) -> TestResult {
+    let f = fs()?;
+    {
+        let c = f.connect().map_err(|e| fail("connect C", e))?;
+        let h = c
+            .open("/v2-sirotek", access::READ | access::WRITE, share::ALL, open_flags::CREATE)
+            .map_err(|e| fail("open", e))?;
+        c.write_h(h.handle, 0, &[1u8; 50_000]).map_err(|(_, e)| fail("zapis", e))?;
+        f.remove("/v2-sirotek").map_err(|e| fail("smazani otevreneho", e))?;
+        let still = c.read_h(h.handle, 0, 4).map_err(|e| fail("cteni sirotka", e))?;
+        check_eq!(&still[..], &[1u8; 4][..], "sirotek citelny");
+        // Konec bloku: relace C zavre kanal.
+    }
+    let a = f.connect().map_err(|e| fail("connect A", e))?;
+    let b = f.connect().map_err(|e| fail("connect B", e))?;
+    let rw = access::READ | access::WRITE;
+    let ha = a.open("/v2-db", rw, share::ALL, open_flags::CREATE).map_err(|e| fail("open A", e))?;
+    let hb = b.open("/v2-db", rw, share::ALL, 0).map_err(|e| fail("open B", e))?;
+    a.lock(ha.handle, 0, 100, lock::EXCLUSIVE | lock::MANDATORY).map_err(|e| fail("lock", e))?;
+    check_eq!(b.write_h(hb.handle, 10, b"x").err().map(|(_, e)| e), Some(Error::Locked), "povinny zamek");
+    a.unlock(ha.handle, 0, 100).map_err(|e| fail("unlock", e))?;
+    b.write_h(hb.handle, 10, b"x").map_err(|(_, e)| fail("zapis po odemceni", e))?;
+    drop(a);
+    drop(b);
+    // Kontrola: sirotek po konci relace zmizel, svazek je cisty.
+    let problems = f.check(false).map_err(|e| fail("kontrola", e))?;
+    check!(problems.is_empty(), alloc::format!("problemy: {problems:?}").as_str());
     Ok(())
 }
