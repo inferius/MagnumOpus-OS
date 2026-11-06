@@ -104,6 +104,15 @@ impl MemoryObject {
         }))
     }
 
+    /// Kolik fyzicke pameti objekt skutecne drzi (souvisly objekt zabira
+    /// cely blok 2^order stranek).
+    pub fn allocated_bytes(&self) -> u64 {
+        match self.kind {
+            Kind::Contiguous { order } => PAGE << order,
+            _ => self.size,
+        }
+    }
+
     pub fn size(&self) -> u64 {
         self.size
     }

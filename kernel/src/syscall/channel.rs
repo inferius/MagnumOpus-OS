@@ -9,7 +9,11 @@ use super::handle::arg_handle;
 use super::{Args, current_process, user};
 use crate::error::{Error, Result};
 use crate::object::channel::{Channel, Message};
-use crate::object::{Handle, KernelObject, Rights};
+use crate::object::{Handle, KernelObject, ObjectType, Rights};
+use crate::sync::SpinLock;
+
+/// Serializuje zpravy, ktere prenaseji handly (kontrola cyklu kanalu).
+static TRANSFER_LOCK: SpinLock<()> = SpinLock::new(());
 
 /// `CHANNEL_CREATE(out_handles_ptr)`: zapise dva handly (u32).
 pub fn create(a: Args) -> Result<u64> {
@@ -45,9 +49,17 @@ pub fn write(a: Args) -> Result<u64> {
     let p = current_process();
     let data_len = user::check_len(a[2], CHANNEL_MAX_DATA)?;
     let count = user::check_len(a[4], CHANNEL_MAX_HANDLES)?;
+    // Data zpravy lezi ve fronte v pameti jadra: ne z rezervy.
+    if !crate::mm::phys::user_room(data_len.div_ceil(4096) as u64 + 1) {
+        return Err(Error::NoMemory);
+    }
     let data = user::read_bytes(&p, a[1], data_len)?;
     let raw_handles = user::read_u32s(&p, a[3], count)?;
 
+    // Zpravy s handly se zapisuji jedna po druhe: kontrola cyklu nize (co
+    // lezi ve fronte predavaneho kanalu) a vlozeni zpravy musi byt atomicke
+    // vuci jinym prenosum kanalu.
+    let _transfer = (count > 0).then(|| TRANSFER_LOCK.lock());
     let (channel, handles) = {
         let mut table = p.handles();
         let channel = table.get_as::<Channel>(arg_handle(a[0])?, Rights::WRITE)?;
@@ -57,6 +69,16 @@ pub fn write(a: Args) -> Result<u64> {
             if channel.is_same(&object) || channel.is_peer(&object) || raw_handles[..i].contains(&h)
             {
                 return Err(Error::InvalidArgs);
+            }
+            // Konec, v jehoz fronte uz lezi jiny konec kanalu, nejde poslat:
+            // tak nikdy nevznikne cyklus (konce, ktere drzi jeden druheho ve
+            // frontach a nikdy se neuvolni). Cyklus se vzdy uzavira poslanim
+            // konce, ktery uz v retezci neco drzi.
+            if object.object_type() == ObjectType::Channel {
+                let any: Arc<dyn core::any::Any + Send + Sync> = object.clone();
+                if any.downcast::<Channel>().is_ok_and(|c| c.holds_channels()) {
+                    return Err(Error::BadState);
+                }
             }
         }
         let handles: Vec<(Arc<dyn KernelObject>, Rights)> = raw_handles

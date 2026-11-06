@@ -242,8 +242,11 @@ static PANICKING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBoo
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    // Panika behem paniky (napr. pri formatovani): jen ukoncit proces.
+    // Panika behem paniky (napr. pri formatovani) nebo soubezna panika
+    // jineho vlakna: chvili pockat, at prvni vlakno stihne vypsat zpravu,
+    // pak ukoncit proces.
     if PANICKING.swap(true, Ordering::AcqRel) {
+        crate::time::sleep(core::time::Duration::from_millis(100));
         sys::process_exit(abi::process::EXIT_PANIC)
     }
     let mut text = StackText {

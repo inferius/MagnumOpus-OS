@@ -122,6 +122,11 @@ impl AddressSpace {
             _ => return Err(Error::OutOfRange),
         }
 
+        // Tabulky stranek pro mapovani: nejvys 1 stranka na 2 MiB + 3 vyssi
+        // urovne; vznikaji na pozadani programu, takze ne z rezervy jadra.
+        if !super::phys::user_room(len.div_ceil(2 << 20) + 3) {
+            return Err(Error::NoMemory);
+        }
         let mut inner = self.inner.lock();
         if inner.mappings.len() >= abi::limits::PROCESS_MAX_MAPPINGS {
             return Err(Error::NoResources);

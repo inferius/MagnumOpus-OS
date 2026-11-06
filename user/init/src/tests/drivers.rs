@@ -117,5 +117,29 @@ fn restricted_resource(s: &Startup) -> TestResult {
         Some(Error::NoResources),
         "DMA nad limit"
     );
+    // Vnoreny prostredek nesmi obejit kvoty rodice (pocitaji se v retezci).
+    let grandchild = child
+        .restrict(&[], 1, PAGE)
+        .map_err(|e| fail("vnoreny prostredek", e))?;
+    check_eq!(
+        grandchild.interrupt().err(),
+        Some(Error::NoResources),
+        "preruseni pres vnoreny prostredek"
+    );
+    check_eq!(
+        grandchild.dma_memory(PAGE).err(),
+        Some(Error::NoResources),
+        "DMA pres vnoreny prostredek"
+    );
+    check_eq!(
+        root.restrict(&[(base + 16, PAGE)], 1, PAGE).err(),
+        Some(Error::InvalidArgs),
+        "nezarovnany rozsah"
+    );
+    check_eq!(
+        libos::sys::vmo_create_contiguous(root.handle().raw(), u64::MAX).err(),
+        Some(Error::InvalidArgs),
+        "obri velikost DMA (nesmi shodit jadro)"
+    );
     Ok(())
 }

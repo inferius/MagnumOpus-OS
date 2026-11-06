@@ -35,10 +35,15 @@ pub struct Resource {
     core: ObjectCore,
     /// `None` = korenovy prostredek bez omezeni.
     limits: Option<Limits>,
+    /// Rodic omezeneho prostredku: kvoty se pocitaji v celem retezci, takze
+    /// potomci dohromady nikdy neprekroci limit rodice.
+    parent: Option<Arc<Resource>>,
 }
 
 /// Nejvic rozsahu jednoho omezeneho prostredku.
 pub const MAX_RANGES: usize = 16;
+
+const PAGE: u64 = abi::vm::PAGE_SIZE;
 
 fn contains(ranges: &[(u64, u64)], start: u64, len: u64) -> bool {
     let Some(end) = start.checked_add(len) else {
@@ -49,27 +54,49 @@ fn contains(ranges: &[(u64, u64)], start: u64, len: u64) -> bool {
         .any(|&(s, l)| start >= s && end <= s.saturating_add(l))
 }
 
+impl Limits {
+    fn take_irq(&self) -> bool {
+        self.irqs
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < self.irq_max).then_some(n + 1)
+            })
+            .is_ok()
+    }
+
+    fn take_dma(&self, bytes: u64) -> bool {
+        self.dma_used
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |u| {
+                u.checked_add(bytes).filter(|&n| n <= self.dma_max)
+            })
+            .is_ok()
+    }
+}
+
 impl Resource {
     pub fn new_root() -> Arc<Self> {
         Arc::new(Self {
             core: ObjectCore::new(Signals::NONE),
             limits: None,
+            parent: None,
         })
     }
 
-    /// Uzsi prostredek: rozsahy musi lezet v rozsazich rodice, limity
-    /// nesmi prekrocit limity rodice.
+    /// Uzsi prostredek: rozsahy (zarovnane na stranky) musi lezet
+    /// v rozsazich rodice, limity nesmi prekrocit limity rodice. Kvoty
+    /// potomka se odecitaji i od rodice.
     pub fn restrict(
-        &self,
+        self: &Arc<Self>,
         ranges: Vec<(u64, u64)>,
         irq_max: u32,
         dma_max: u64,
     ) -> Result<Arc<Self>, Error> {
-        if ranges.len() > MAX_RANGES
-            || ranges
-                .iter()
-                .any(|&(s, l)| l == 0 || s.checked_add(l).is_none())
-        {
+        let bad = |&(s, l): &(u64, u64)| {
+            l == 0
+                || !s.is_multiple_of(PAGE)
+                || !l.is_multiple_of(PAGE)
+                || s.checked_add(l).is_none()
+        };
+        if ranges.len() > MAX_RANGES || ranges.iter().any(bad) {
             return Err(Error::InvalidArgs);
         }
         if let Some(p) = &self.limits {
@@ -87,36 +114,67 @@ impl Resource {
                 dma_max,
                 dma_used: AtomicU64::new(0),
             }),
+            parent: Some(self.clone()),
         }))
     }
 
-    /// Smi prostredek mapovat fyzicky rozsah?
+    /// Smi prostredek mapovat fyzicky rozsah? Kontroluje cele stranky
+    /// (mapuje se po strankach, nesmi se pridat cast sousedniho zarizeni).
     pub fn allows_range(&self, start: u64, len: u64) -> bool {
+        let Some(end) = start
+            .checked_add(len)
+            .and_then(|e| e.checked_next_multiple_of(PAGE))
+        else {
+            return false;
+        };
+        let first = start - start % PAGE;
         self.limits
             .as_ref()
-            .is_none_or(|l| contains(&l.ranges, start, len))
+            .is_none_or(|l| contains(&l.ranges, first, end - first))
     }
 
-    /// Zapocita jedno preruseni (limit plati po celou dobu zivota prostredku).
+    /// Retezec omezenych prostredku od tohoto ke koreni.
+    fn chain(&self) -> impl Iterator<Item = &Limits> {
+        core::iter::successors(Some(self), |r| r.parent.as_deref())
+            .filter_map(|r| r.limits.as_ref())
+    }
+
+    /// Zapocita jedno preruseni v celem retezci (limit plati po celou dobu
+    /// zivota prostredku; neuspesny pokus nic nespotrebuje).
     pub fn charge_irq(&self) -> Result<(), Error> {
-        let Some(l) = &self.limits else { return Ok(()) };
-        l.irqs
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < l.irq_max).then_some(n + 1)
-            })
-            .map(|_| ())
-            .map_err(|_| Error::NoResources)
+        let mut taken = 0;
+        for l in self.chain() {
+            if !l.take_irq() {
+                for l in self.chain().take(taken) {
+                    l.irqs.fetch_sub(1, Ordering::AcqRel);
+                }
+                return Err(Error::NoResources);
+            }
+            taken += 1;
+        }
+        Ok(())
     }
 
-    /// Zapocita DMA pamet (limit plati po celou dobu zivota prostredku).
+    /// Vrati zapocitane preruseni (vytvoreni objektu selhalo).
+    pub fn refund_irq(&self) {
+        for l in self.chain() {
+            l.irqs.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
+    /// Zapocita DMA pamet v celem retezci.
     pub fn charge_dma(&self, bytes: u64) -> Result<(), Error> {
-        let Some(l) = &self.limits else { return Ok(()) };
-        l.dma_used
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |u| {
-                u.checked_add(bytes).filter(|&n| n <= l.dma_max)
-            })
-            .map(|_| ())
-            .map_err(|_| Error::NoResources)
+        let mut taken = 0;
+        for l in self.chain() {
+            if !l.take_dma(bytes) {
+                for l in self.chain().take(taken) {
+                    l.dma_used.fetch_sub(bytes, Ordering::AcqRel);
+                }
+                return Err(Error::NoResources);
+            }
+            taken += 1;
+        }
+        Ok(())
     }
 }
 

@@ -5,6 +5,24 @@ libos** ([libos.md](libos.md)) - syscall numbers and exact arguments are not
 a stable interface and change together with libos. This document describes
 what the kernel does so behavior can be traced.
 
+## ABI stability
+
+Until version 1.0 the kernel interface may change (programs are built
+together with the system). From 1.0 on:
+
+- **Programs call the kernel through the system library** (libos, later
+  libc and the Windows layer's ntdll), not directly with the `syscall`
+  instruction. The library interface is stable; syscall numbers are an
+  internal matter of the library and the kernel (as in Windows, macOS or
+  Fuchsia).
+- Syscall numbers are **never removed or reused**; a behaviour change = a
+  new syscall (e.g. `..._V2`), the old one stays.
+- Structures passed to the kernel carry a length or version; new fields are
+  only appended.
+- New error codes and signals must not change the meaning of existing ones.
+- The process startup message carries a version; the kernel and the library
+  support older ones too.
+
 ## Conventions (x86_64)
 
 - `syscall` instruction, number in `rax`, arguments in `rdi`, `rsi`, `rdx`,
@@ -101,7 +119,10 @@ handles (u32) to `out_handles_ptr`. Rights: `DUPLICATE`, `TRANSFER`, `WAIT`,
 `(handle, data_ptr, data_len, handles_ptr, handles_count) -> 0`. Sends a
 message to the other end. Transferred handles need `TRANSFER`, must not
 repeat and must not be the end being written to nor its peer (the message
-would end up in the peer's own queue, which would then hold itself). Transferred handles are
+would end up in the peer's own queue, which would then hold itself). A
+channel end whose queue already holds another channel end cannot be sent
+(`BAD_STATE`): this way no cycle of ends holding each other in their queues
+(and never being freed) can ever form. Transferred handles are
 **always removed from the sender's table, even if the write fails** - a
 handle is never held by both sender and receiver. Requires `WRITE`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `PEER_CLOSED`,
@@ -233,7 +254,7 @@ A program must not consume kernel memory without bounds (`abi::limits`):
 
 | Limit | Value | When exceeded |
 |---|---|---|
-| kernel reserve: memory of memory objects (`VMO_CREATE*`) and thread stacks is not allocated if less free memory would remain | 1/32 of RAM, at least 16 MiB | `NO_MEMORY` |
+| kernel reserve: memory of memory objects (`VMO_CREATE*`), thread stacks, message data in queues, page tables of mappings, new processes and objects (every new handle) is not allocated if less free memory would remain | 1/32 of RAM, at least 16 MiB | `NO_MEMORY` |
 | handles in a process table | 65,536 | `NO_RESOURCES` |
 | threads of a process (including finished ones somebody holds a handle to) | 1024 | `NO_RESOURCES` |
 | mappings in a process address space | 65,536 | `NO_RESOURCES` |
@@ -291,11 +312,14 @@ the device raises the interrupt, the object gets `SIGNALED`. Errors:
 
 `(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`. A
 narrower resource for a driver. `ranges_ptr` points to `ranges_count`
-(max. 16) u64 pairs (physical start, length). The new resource may create
+(max. 16) u64 pairs (physical start, length; both page-aligned, otherwise
+`INVALID_ARGS`). The new resource may create
 windows (`VMO_CREATE_PHYSICAL`) only inside these ranges, at most `irq_max`
 interrupt objects and at most `dma_max` bytes of DMA memory
-(`VMO_CREATE_CONTIGUOUS`, rounded to pages; the limits apply for the
-resource's whole lifetime, `NO_RESOURCES` once exhausted). If the parent is
+(`VMO_CREATE_CONTIGUOUS`, the really allocated block of 2^n pages counts;
+the limits apply for the resource's whole lifetime, `NO_RESOURCES` once
+exhausted, a failed attempt consumes nothing). Quotas are charged along the
+whole parent chain: children together never exceed the parent's limit. If the parent is
 itself restricted, the ranges must lie within its ranges and the limits must
 not be higher (otherwise `ACCESS_DENIED`). Requires `MANAGE`. Errors:
 `INVALID_ARGS` (more than 16 ranges, zero length, overflow),

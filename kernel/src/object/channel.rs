@@ -100,6 +100,16 @@ impl Channel {
         core::ptr::addr_eq(self as *const Self, Arc::as_ptr(other))
     }
 
+    /// Lezi ve fronte tohoto konce nejaky konec kanalu? Takovy konec se
+    /// nesmi poslat dal (viz `syscall::channel::write` - zabrana cyklum).
+    pub fn holds_channels(&self) -> bool {
+        self.queue.lock().iter().any(|m| {
+            m.handles
+                .iter()
+                .any(|(o, _)| o.object_type() == ObjectType::Channel)
+        })
+    }
+
     /// Je `other` druhy konec tohoto kanalu? Zprava by skoncila v jeho
     /// vlastni fronte: konec by drzel sam sebe a nikdy by se neuvolnil.
     pub fn is_peer(&self, other: &Arc<dyn KernelObject>) -> bool {

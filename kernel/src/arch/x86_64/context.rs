@@ -82,7 +82,7 @@ impl Context {
     }
 }
 
-/// Zapne FPU a SSE na aktualnim CPU: CR0.MP=1, EM=0, TS=0, CR4.OSFXSR
+/// Zapne FPU a SSE na aktualnim CPU: CR0.MP=1, NE=1, EM=0, TS=0, CR4.OSFXSR
 /// (FXSAVE/SSE) a OSXMMEXCPT (vyjimky SSE jako #XM), pak FNINIT.
 ///
 /// # Safety
@@ -93,12 +93,15 @@ pub unsafe fn init_cpu() {
     const CR0_MP: u64 = 1 << 1;
     const CR0_EM: u64 = 1 << 2;
     const CR0_TS: u64 = 1 << 3;
+    // NE: vyjimky x87 jako #MF (bez nej starsi zpusob pres FERR#, ktery
+    // na realnem hardwaru muze zastavit CPU).
+    const CR0_NE: u64 = 1 << 5;
     const CR4_OSFXSR: u64 = 1 << 9;
     const CR4_OSXMMEXCPT: u64 = 1 << 10;
     // SAFETY: FPU a SSE2 ma kazde x86_64 CPU; zapnuti meni jen to, zda
     // instrukce FPU/SSE vyvolaji vyjimku.
     unsafe {
-        cpu::write_cr0((cpu::read_cr0() | CR0_MP) & !(CR0_EM | CR0_TS));
+        cpu::write_cr0((cpu::read_cr0() | CR0_MP | CR0_NE) & !(CR0_EM | CR0_TS));
         cpu::write_cr4(cpu::read_cr4() | CR4_OSFXSR | CR4_OSXMMEXCPT);
         asm!("fninit", options(nomem, nostack));
     }

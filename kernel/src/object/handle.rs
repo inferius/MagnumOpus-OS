@@ -58,6 +58,11 @@ impl HandleTable {
         object: Arc<dyn KernelObject>,
         rights: Rights,
     ) -> Result<Handle, Error> {
+        // Objekty jadra (a jejich data) vznikaji na pozadani programu: kdyz
+        // by volne pameti zbyla jen rezerva jadra, dalsi uz ne.
+        if !crate::mm::phys::user_room(1) {
+            return Err(Error::NoMemory);
+        }
         let index = match self.free.pop() {
             Some(i) => i,
             None if self.slots.len() < MAX_HANDLES.min(abi::limits::PROCESS_MAX_HANDLES) => {

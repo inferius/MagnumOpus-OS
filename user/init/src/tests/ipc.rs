@@ -23,6 +23,7 @@ pub const TESTS: &[Test] = &[
         "fronta kanalu nejvys 4 MiB -> SHOULD_WAIT",
         queue_bytes_limit,
     ),
+    ("cyklus pres dva kanaly -> BAD_STATE", channel_cycle),
 ];
 
 fn roundtrip(_: &Startup) -> TestResult {
@@ -135,6 +136,22 @@ fn queue_bytes_limit(_: &Startup) -> TestResult {
         a.write(&msg, Vec::new()),
         Err(Error::ShouldWait),
         "zapis nad 4 MiB"
+    );
+    Ok(())
+}
+
+fn channel_cycle(_: &Startup) -> TestResult {
+    // A<->B a C<->D: D do fronty B, pak B (v jehoz fronte uz je D) do
+    // fronty D by vytvorilo cyklus, ktery by se nikdy neuvolnil.
+    let (a, b) = Channel::create().map_err(|e| fail("vytvoreni A-B", e))?;
+    let (c, d) = Channel::create().map_err(|e| fail("vytvoreni C-D", e))?;
+    sys::channel_write(a.handle().raw(), b"d", &[d.handle().raw()])
+        .map_err(|e| fail("D do fronty B", e))?;
+    core::mem::forget(d); // handle uz patri fronte
+    check_eq!(
+        sys::channel_write(c.handle().raw(), b"b", &[b.handle().raw()]),
+        Err(Error::BadState),
+        "B do fronty D"
     );
     Ok(())
 }

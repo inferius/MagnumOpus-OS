@@ -11,6 +11,9 @@ use crate::sched::{self, Thread};
 pub fn create(a: Args) -> Result<u64> {
     let p = current_process();
     let name = user::read_name(&p, a[0], a[1])?;
+    if !crate::mm::phys::user_room(8) {
+        return Err(Error::NoMemory);
+    }
     let child = Process::new(&name)?;
     let rights = child.default_rights();
     Ok(p.handles().insert(child, rights)?.0 as u64)

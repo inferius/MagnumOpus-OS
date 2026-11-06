@@ -5,6 +5,22 @@ Rozhraní mezi procesem a jádrem. **Programy mají používat libos**
 rozhraní a mění se spolu s libos. Tento dokument popisuje, co jádro dělá,
 aby šlo chování dohledat.
 
+## Stabilita ABI
+
+Do verze 1.0 se rozhraní jádra může měnit (programy se překládají spolu se
+systémem). Od 1.0 platí:
+
+- **Programy volají jádro přes systémovou knihovnu** (libos, později libc a
+  ntdll Windows vrstvy), ne přímo instrukcí `syscall`. Stabilní je rozhraní
+  knihovny; čísla syscallů jsou interní věc knihovny a jádra (stejně jako
+  ve Windows, macOS nebo Fuchsii).
+- Čísla syscallů se **nikdy nemažou ani znovu nepoužijí**; změna chování =
+  nový syscall (např. `..._V2`), starý zůstává.
+- Struktury předávané jádru nesou délku nebo verzi, nová pole se přidávají
+  jen na konec.
+- Nové kódy chyb a signály nesmí změnit význam existujících.
+- Startovní zpráva procesu nese verzi; jádro a knihovna podporují i starší.
+
 ## Konvence (x86_64)
 
 - Instrukce `syscall`, číslo v `rax`, argumenty v `rdi`, `rsi`, `rdx`,
@@ -100,7 +116,10 @@ handly (u32) do `out_handles_ptr`. Práva: `DUPLICATE`, `TRANSFER`, `WAIT`,
 `(handle, data_ptr, data_len, handles_ptr, handles_count) -> 0`. Pošle
 zprávu druhému konci. Předávané handly musí mít právo `TRANSFER`, nesmí se
 opakovat a nesmí jít o zapisovaný konec ani o jeho protějšek (zpráva by
-skončila ve frontě protějšku, který by tak držel sám sebe). Předávané handly se z tabulky
+skončila ve frontě protějšku, který by tak držel sám sebe). Konec kanálu,
+v jehož frontě už leží jiný konec kanálu, poslat nejde (`BAD_STATE`): jen
+tak nikdy nevznikne cyklus konců, které drží jeden druhého ve frontách a
+nikdy se neuvolní. Předávané handly se z tabulky
 odesílatele **odeberou vždy, i když zápis selže** - handle tak nikdy nemá
 odesílatel i příjemce zároveň. Vyžaduje `WRITE`. Chyby: `BAD_HANDLE`,
 `ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `PEER_CLOSED`,
@@ -229,7 +248,7 @@ Program nesmí spotřebovat paměť jádra bez omezení (`abi::limits`):
 
 | Limit | Hodnota | Po překročení |
 |---|---|---|
-| rezerva jádra: paměť objektů paměti (`VMO_CREATE*`) a zásobníky vláken se nealokují, kdyby volné paměti zbylo méně | 1/32 RAM, nejméně 16 MiB | `NO_MEMORY` |
+| rezerva jádra: paměť objektů paměti (`VMO_CREATE*`), zásobníky vláken, data zpráv ve frontách, tabulky stránek mapování, nové procesy a objekty (každý nový handle) se nealokují, kdyby volné paměti zbylo méně | 1/32 RAM, nejméně 16 MiB | `NO_MEMORY` |
 | handly v tabulce procesu | 65 536 | `NO_RESOURCES` |
 | vlákna procesu (včetně ukončených, na která někdo drží handle) | 1024 | `NO_RESOURCES` |
 | mapování v adresním prostoru procesu | 65 536 | `NO_RESOURCES` |
@@ -285,11 +304,14 @@ Když zařízení přerušení vyvolá, objekt dostane signál `SIGNALED`. Chyby
 
 `(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`. Užší
 prostředek pro ovladač. `ranges_ptr` ukazuje na `ranges_count` (max. 16)
-dvojic u64 (fyzický začátek, délka). Nový prostředek smí vytvářet okna
+dvojic u64 (fyzický začátek, délka; obojí zarovnané na stránky, jinak
+`INVALID_ARGS`). Nový prostředek smí vytvářet okna
 (`VMO_CREATE_PHYSICAL`) jen uvnitř těchto rozsahů, nejvýš `irq_max` objektů
 přerušení a nejvýš `dma_max` bajtů paměti pro DMA (`VMO_CREATE_CONTIGUOUS`,
-zaokrouhleno na stránky; limity platí po celou dobu života prostředku, po
-vyčerpání `NO_RESOURCES`). Je-li rodič sám omezený, musí rozsahy ležet v
+počítá se skutečně alokovaný blok 2^n stránek; limity platí po celou dobu
+života prostředku, po vyčerpání `NO_RESOURCES`, neúspěšný pokus nic
+nespotřebuje). Kvóty se odečítají v celém řetězci rodičů: potomci dohromady
+nikdy nepřekročí limit rodiče. Je-li rodič sám omezený, musí rozsahy ležet v
 jeho rozsazích a limity nesmí být vyšší (jinak `ACCESS_DENIED`). Vyžaduje
 `MANAGE`. Chyby: `INVALID_ARGS` (víc než 16 rozsahů, nulová délka,
 přetečení), `ACCESS_DENIED`, `BAD_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`.

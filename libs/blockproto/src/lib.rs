@@ -97,6 +97,9 @@ fn decode_reply(m: &[u8]) -> Result<(u64, &[u8])> {
 pub struct BlockClient {
     channel: Channel,
     sectors: u64,
+    /// Odpoved neprisla vcas: pozdni odpoved by se mohla priradit dalsimu
+    /// pozadavku (zpravy nemaji cislo), proto uz zadny dalsi pozadavek.
+    failed: core::sync::atomic::AtomicBool,
 }
 
 impl BlockClient {
@@ -104,6 +107,7 @@ impl BlockClient {
         let mut c = Self {
             channel,
             sectors: 0,
+            failed: core::sync::atomic::AtomicBool::new(false),
         };
         c.sectors = c
             .call(
@@ -124,10 +128,20 @@ impl BlockClient {
     }
 
     fn call(&self, req: Request, data: &[u8]) -> Result<(u64, Vec<u8>)> {
+        use core::sync::atomic::Ordering;
+        if self.failed.load(Ordering::Acquire) {
+            return Err(Error::IoError);
+        }
         self.channel.write(&req.encode(data), Vec::new())?;
         // Ovladac, ktery neodpovi, nesmi zaseknout klienta navzdy.
         let deadline = libos::time::deadline_after(REPLY_TIMEOUT);
-        let reply = self.channel.read(Some(deadline))?;
+        let reply = match self.channel.read(Some(deadline)) {
+            Ok(r) => r,
+            Err(e) => {
+                self.failed.store(true, Ordering::Release);
+                return Err(e);
+            }
+        };
         let (value, payload) = decode_reply(&reply.data)?;
         Ok((value, payload.to_vec()))
     }

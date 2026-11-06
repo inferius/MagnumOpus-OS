@@ -26,9 +26,11 @@ fn insert(p: &Process, object: Arc<dyn KernelObject>) -> Result<u64> {
 pub fn vmo_create_contiguous(a: Args) -> Result<u64> {
     let p = current_process();
     let res = check_resource(&p, a[0])?;
-    let size = a[1].next_multiple_of(abi::vm::PAGE_SIZE);
-    res.charge_dma(size)?;
-    insert(&p, MemoryObject::new_contiguous(a[1])?)
+    // Velikost overi `new_contiguous`; kvota se odecte az po uspechu a ve
+    // skutecne velikosti (alokator pridava bloky 2^n stranek).
+    let vmo = MemoryObject::new_contiguous(a[1])?;
+    res.charge_dma(vmo.allocated_bytes())?;
+    insert(&p, vmo)
 }
 
 /// `VMO_CREATE_PHYSICAL(resource, phys, size) -> handle`: jen mimo RAM.
@@ -57,8 +59,9 @@ pub fn vmo_phys_addr(a: Args) -> Result<u64> {
 /// `INTERRUPT_CREATE(resource, out_msi_ptr) -> handle`.
 pub fn interrupt_create(a: Args) -> Result<u64> {
     let p = current_process();
-    check_resource(&p, a[0])?.charge_irq()?;
-    let irq = Interrupt::new()?;
+    let res = check_resource(&p, a[0])?;
+    res.charge_irq()?;
+    let irq = Interrupt::new().inspect_err(|_| res.refund_irq())?;
     let (address, data) = irq.msi_message();
     let mut out = [0u8; 16];
     out[0..8].copy_from_slice(&address.to_le_bytes());

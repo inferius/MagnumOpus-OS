@@ -27,7 +27,8 @@ __ap_tr_start:
     shll $4, %ebx                       # ebx = fyzicka baze trampoliny
     lgdtl (__ap_tr_gdt_ptr - __ap_tr_start)
     movl %cr0, %eax
-    orl $1, %eax                        # PE
+    andl $0x9FFFFFFF, %eax              # CD = NW = 0 (po INIT je cache vypnuta)
+    orl $0x21, %eax                     # PE | NE (vyjimky x87 jako #MF)
     movl %eax, %cr0
     ljmpl *(__ap_tr_far32 - __ap_tr_start)
 
