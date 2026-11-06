@@ -96,11 +96,15 @@ Zásady (odsouhlasené):
   je blok bezpečné vrátit alokátoru: ze snapshotu S mohou vzniknout dva
   zapisovatelné klony, v prvním se přepíše soubor, S se smaže - a druhý klon
   musí původní data číst dál. Pravidla (první verze, model ZFS):
-  - klon má **explicitní vazbu na původní snapshot** (`origin`); bloky
-    narozené do generace S patří S, klon vlastní jen bloky narozené po
-    vzniku klonu,
-  - přepsání bloku staršího než S v klonu jde do deadlistu klonu, ale
-    uvolnit ho smí až zpracování deadlistu S,
+  - pravidlo je přes **dosažitelnost**: klon přebírá bloky **dosažitelné
+    z kořene S** a vazba `origin` (explicitní, v záznamu klonu) drží tento
+    kořen naživu. Starší blok nemusí patřit S (může patřit jinému datasetu
+    nebo už v kořeni S vůbec nebýt) - „narozené do generace S“ by bylo
+    příliš široké,
+  - generace vzniku pak jen **pomáhá uvnitř této vazby**: blok narozený po
+    vzniku klonu vlastní klon (uvolní ho jeho vlastní přepsání); blok
+    dosažitelný z S, který klon přepíše, jde do deadlistu klonu, ale uvolnit
+    ho smí až zpracování deadlistu S,
   - **smazání S, na kterém závisí klon, se odloží:** S zmizí z pohledu
     uživatele (je „skrytý“), ale drží bloky, dokud existuje poslední klon;
     pak se smaže běžně (deadlisty po commitech, takže atomicky i při
@@ -168,8 +172,13 @@ Zásady (odsouhlasené):
     odběratel nikdy neuvidí změnu, která po výpadku zmizí.
   - **Retence** (počet dní nebo místo): starší záznamy se zahodí. Odběr je
     „bez ztrát“ jen v rámci retence: kdo žádá číslo starší než nejstarší
-    uložené, dostane **`JOURNAL_GAP`** a obnoví si stav z rozdílu snapshotů
-    (levné díky diff podle generací) - nikdy tiché vynechání.
+    uložené, dostane **`JOURNAL_GAP`** - nikdy tiché vynechání.
+  - **Nový výchozí stav i s pozicí najednou:** `VIEW(dataset)` vrátí
+    konzistentní pohled jen pro čtení (dočasný snapshot) **a pořadové číslo
+    posledního záznamu, který obsahuje**. Klient (např. indexer) projde
+    pohled celý a pak naváže odběrem od čísla + 1. Kdyby si číslo vyžádal až
+    po dokončení výpisu, mohl by přeskočit změnu (třeba přejmenování
+    adresáře), která proběhla během výpisu.
 - **Vrstva pro git** (služba nad FS): (1) ID objektů gitu (SHA-1 a SHA-256)
   se počítají líně a ukládají jako rozšířený atribut; import a export
   repozitáře; (2) push/pull přes síť, až bude TCP/IP. Pro nástroje adaptér
@@ -483,6 +492,31 @@ chrání proti poškození, ne proti útočníkovi, a stojí málo.
 - **Povinné zámky** umí zablokovat jiné aplikace (DoS). Proto jen pro vrstvu
   Windows, vázané na handle a s časovým limitem čekání.
 
+## Práce s verzemi v průzkumníku
+
+**Stav: odsouhlaseno.** Funkce, které stojí na klonech, diff a capabilities.
+
+- **Obnovit jako kopii** (součást první ukázky): ve vlastnostech souboru
+  vybereš verzi a dáš *Otevřít jen pro čtení*, *Obnovit jako kopii* (vedle
+  aktuálního, např. „Zpráva (verze 3. 11. 14:02).docx“) nebo *Nahradit
+  aktuální*. Kopie je okamžitá (sdílené bloky). Z historie tak jde vytáhnout
+  jeden odstavec nebo konfiguraci bez vracení celé složky.
+- **Zkusit změny bokem** pro celou projektovou složku: z průzkumníku vznikne
+  dočasný zapisovatelný klon a otevře se v editoru, instalátoru nebo se
+  předá agentovi. **Aplikace dostane capability jen ke klonu**, originál
+  nevidí. Po dokončení: přehled co přibylo, zmizelo a změnilo se (diff
+  klonu proti jeho původnímu snapshotu) a převzetí vybraných změn do
+  originálu. Když se mezitím stejný soubor změnil i v originálu, převzetí
+  ukáže konflikt (třícestné porovnání: původní snapshot, originál, klon).
+  Nepřevzatý klon se zahodí jedním krokem. Ukáže nejlíp, co dohromady umí
+  klony, diff a capabilities (např. zkouška většího refaktoru).
+- **Dočasný poddataset pro buildy a cache:** `target/` nebo výstup renderu
+  vypadá v projektu jako běžná složka, ale je to vlastní dataset s vlastním
+  limitem místa a vlastními pravidly uchování (výchozí: bez historie).
+  Snapshot projektu ho nezahrnuje (zachytí zdrojáky a konfiguraci) a jde
+  vyčistit samostatně. Výpis snapshotu jasně ukáže, které podsložky mají
+  vlastní historii (jsou to datasety).
+
 ## Cloud a síť
 
 **Stav: odsouhlaseno, formát rezervovaný ve fázi 1, implementace ve fázi 6
@@ -634,6 +668,13 @@ firewall je přirozeně per aplikace.
 - **Symlinky a capability adresáře:** procházení uvnitř handlu adresáře
   nikdy neuteče z uděleného podstromu (jako `RESOLVE_BENEATH` v Linuxu):
   absolutní cíl nebo `..` nad kořen capability = `ACCESS_DENIED`.
+- **Zápis: přijato vs. trvalé.** Odpověď na zápis říká, **kolik bajtů bylo
+  přijato** (jsou v bufferu, hned je vidí čtení, uloží je příští commit),
+  ne zda jsou trvalá - to potvrzuje až `FSYNC`. Po chybě klient smí
+  považovat za přijaté přesně ohlášený počet (ve verzi 1 knihovny: celé
+  volání, nebo nic). **Zápis rozdělený do více zpráv** = každá zpráva je
+  samostatný zápis s vlastním výsledkem; klient po první chybě nepokračuje
+  a ví přesně, kolik předchozích zpráv bylo přijato.
 - **Nahrazení přejmenováním** (atomické uložení), `O_EXCL` vytvoření.
 - **Víc klientů:** každý klient vlastní kanál (`OPEN_SESSION`), čísla
   požadavků, stránkovaný výpis adresáře (kurzor), časové limity; služba
@@ -645,7 +686,9 @@ firewall je přirozeně per aplikace.
 **Svislý řez jako první cíl:** místo dokončení celé fáze 1 do šířky je
 první ukázkou **verzovaná projektová složka** ve Windows průzkumníku:
 vytvořit snapshot, otevřít zapisovatelný klon, udělat změny, zobrazit
-rozdíl, obnovit jeden soubor - a totéž s pádem uprostřed zápisu. Pořadí:
+rozdíl, **obnovit jeden soubor jako kopii** - a totéž s pádem uprostřed
+zápisu. „Zkusit změny bokem“ (viz [Práce s verzemi v
+průzkumníku](#práce-s-verzemi-v-průzkumníku)) přijde hned po ní. Pořadí:
 
 1. **F1b** - opravy z review (rozpracované),
 2. **datasety a minimum z verzování** - strom datasetů, snapshot datasetu,
@@ -692,11 +735,27 @@ osfs check <disk|obraz> [--scrub]
 osfs snapshot F: <jméno>  /  osfs diff ...  /  osfs restore ...
 ```
 
-- **Překlad pro Windows:** zakázané znaky `: \ * ? " < > |` se mapují do
-  oblasti Unicode pro soukromé použití (zpět beze ztráty), rezervovaná jména
-  (`CON`, `PRN`, `AUX`, `NUL`, `COM1`...), koncové tečky a mezery, časy po
-  100 ns, ID souboru z oid + generace; velikost písmen se nerozlišuje
-  stejně jako ve Windows.
+- **Začátek: soubor s obrazem** (`osfs format obraz.img`, `osfs mount
+  obraz.img F:`), skutečný disk až potom.
+- **Jména, která první verze zpřístupní** (výslovně, aby každé zobrazené
+  jméno otevřelo právě ten objekt, který průzkumník vypsal):
+
+| Jméno v našem FS | Ve Windows |
+|---|---|
+| platné i ve Windows | beze změny |
+| obsahuje zakázaný znak `: \ * ? " < > \|` | znak se zobrazí jako jeho protějšek z oblasti Unicode pro soukromé použití (U+F000 + kód, jako WSL a Cygwin) |
+| už samo obsahuje znak z rozsahu U+F000-F0FF | **skryté** (zobrazení by kolidovalo s přeloženým jménem); `osfs check` ho vypíše |
+| rezervované jméno (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, i s příponou), koncová tečka nebo mezera | **skryté**, vypíše ho `osfs check` |
+| delší než 255 znaků UTF-16 | **skryté** (Windows API ho většinou neotevře) |
+| dvojice lišící se jen velikostí písmen (dataset s rozlišením) | datasety s rozlišením velikosti písmen první verze **nepřipojí** (pozdější verze: druhé jméno skryté s hlášením) |
+
+  Zápis z Windows: jméno se znakem z U+F000-F0FF se uloží jako původní
+  zakázaný znak; jméno, které náš FS zakazuje (znaky směru textu), se
+  odmítne. **Akceptační test:** pro náhodná jména (vlastnostní test) platí,
+  že každé jméno ve výpisu otevře právě objekt, ze kterého vzniklo, a žádné
+  dvě položky nemají stejné zobrazené jméno.
+- Ostatní překlad: časy po 100 ns, ID souboru z oid + generace; velikost
+  písmen se nerozlišuje stejně jako ve Windows.
 - **Souběh:** WinFsp volá z více vláken, `Fs` je jednovláknový - na
   začátek jeden zámek kolem celého `Fs`.
 

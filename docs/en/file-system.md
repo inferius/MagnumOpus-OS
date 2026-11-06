@@ -398,6 +398,14 @@ println!("{} B, {} files, {} subdirectories", st.tree_bytes, st.tree_files, st.t
 
 1. `write` puts data into a **buffer in memory** (at most 16 MiB, then it
    is written earlier). A partially overwritten block is read first.
+
+   **The result of `write` = accepted, not durable.** `Ok` = the data is
+   fully in the buffer (reads see it, the next commit or `fsync` stores it);
+   an error = nothing from this call was accepted. Durability is confirmed
+   only by `fsync`/`commit`. When writing the buffer to disk fails, the data
+   stays in the buffer and the error is reported at `fsync`/`commit`; only
+   when the buffer reaches 32 MiB (`DIRTY_HARD_LIMIT`) and cannot be
+   emptied is the next `write` refused.
 2. Only when written to disk (commit, `fsync`, full buffer) do consecutive
    blocks get **one contiguous range** - aiming right after the file's
    previous extent (the file grows contiguously), otherwise the smallest
@@ -530,6 +538,13 @@ Mounting (`Store::open`) has three separate steps:
    out of memory) is returned immediately - a transient disk error must not
    lead to falling back to an older state.
 
+**Uncertain recovery = read-only.** When a superblock slot cannot be read
+(an I/O error, not a bad checksum), it may have held a newer generation
+that cannot be determined safely. The volume is then mounted **read-only**
+with `info().unreadable_superblocks` > 0 (fsd prints a warning) - writing on
+top of an older generation would overwrite the newer one with the next
+commit. Once the error is gone, the next mount selects correctly.
+
 After a fallback, the slots with a newer (damaged) generation are **zeroed
 before the first commit** - otherwise they would win at the next mount and
 point to blocks that were given to someone else in the meantime. After a
@@ -606,6 +621,13 @@ state - but only those whose data is fully on disk (data block checksums
 match; otherwise the power loss came before the flush and the batch is
 discarded). A commit follows immediately and a new epoch starts.
 `info().replayed` = number of replayed operations.
+
+**A log read error is not the end of the chain.** An already confirmed
+`fsync` may follow an unreadable block. On an I/O error (reading a log
+block or a batch's data) only what can be read is replayed, the volume is
+**read-only** (`info().log_unreadable`) and the log stays untouched on
+disk for another attempt. The end of the chain is only a block with a bad
+magic, sequence or checksum.
 
 Data blocks referenced by a log batch are not reused until the commit, even
 when they were created in the same transaction (otherwise a later `fsync`
@@ -694,6 +716,13 @@ would have nowhere to store the tree and the volume would go read-only. The
 cost: on a heavily fragmented disk `NO_SPACE` comes a few blocks before the
 disk is really full. Node allocation (`alloc_min`) skips runs shorter than 4
 blocks.
+
+**Space can be freed even on a full volume.** Operations that free space
+(`remove`, `delete_snapshot`, truncating a file) may use half of the commit
+reserve (`has_room_freeing`); the other half stays for the commit.
+Otherwise not even a snapshot holding most of the space could be deleted
+on a full volume. Freed blocks become usable after the grace period
+(`REUSE_DELAY` commits).
 
 ## TRIM
 
@@ -812,8 +841,17 @@ transactions (phase 5).
 
 ## Consistency check and scrub
 
-`check(scrub)` first saves changes with a commit, then walks the live
-tree, all snapshots, the free-space metadata and the intent log:
+`check(scrub)` checks the **stored state** (the last commit on disk):
+
+- a writable volume: a commit first, so the stored state = the live one,
+- **read-only** (uncertain recovery, a device without flush): nothing is
+  written; the stored generation and the space metadata loaded again from
+  disk are checked. Changes replayed from the log only in memory are not
+  checked.
+
+The result says what it checked: `generation` (the generation number) and
+`live_not_checked` (there are unchecked changes in memory). It walks the
+stored tree, all snapshots, the free-space metadata and the intent log:
 
 - verifies the checksums of all nodes (and with `scrub = true` of all data
   blocks - reads the whole content),
@@ -946,6 +984,7 @@ system returns them:
 | `tests/features.rs` | contiguous writes, fsync + replay, generation fallback, snapshot deletion, defragmentation, TRIM, many AGs + BLAKE3, log condensing |
 | `tests/model.rs` | property test: random sequences (create, write, truncate, remove, move, commit, fsync, "crash", snapshots) against an in-memory model; fsck at the end |
 | `tests/crash.rs` | power loss during commit and fsync with a random subset of unwritten blocks |
+| `tests/mount.rs` (extended) | an unreadable newest slot = read-only and the newest generation survives; an unreadable log batch does not lose a confirmed fsync; read-only `check` without writes |
 | `tests/ondisk.rs` | damaged values with a correct checksum: extent outside the volume, freeing free blocks, small file length, parent cycle and operation rollback |
 | `tests/errors.rs` | device errors: a failed data write loses no data and can be retried, an overwrite leaves no hole, nothing is confirmed after a failed flush |
 | `tests/mount.rs` | superblock selection: unreadable slot, transient error without fallback, unknown `incompat` and newer version = refusal, unknown `ro_compat` = read-only without writes, nonsensical values = reported fallback, zeroing newer slots, device without a durability guarantee |

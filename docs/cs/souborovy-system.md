@@ -393,6 +393,14 @@ println!("{} B, {} souborů, {} podadresářů", st.tree_bytes, st.tree_files, s
 
 1. `write` zapíše data do **bufferu v paměti** (nejvýš 16 MiB, pak se
    zapíší dřív). Částečně přepsaný blok se nejdřív načte.
+
+   **Výsledek `write` = přijato, ne trvalé.** `Ok` = data jsou celá
+   v bufferu (vidí je čtení, uloží je příští commit nebo `fsync`); chyba =
+   z tohoto volání se nepřijalo nic. Trvanlivost potvrzuje až
+   `fsync`/`commit`. Když odpis bufferu na disk selže, data zůstanou
+   v bufferu a chyba se ohlásí při `fsync`/`commit`; teprve když buffer
+   dosáhne 32 MiB (`DIRTY_HARD_LIMIT`) a nejde vyprázdnit, další `write`
+   se odmítne.
 2. Až při zápisu na disk (commit, `fsync`, plný buffer) dostanou po sobě
    jdoucí bloky **jeden souvislý úsek** - s cílem hned za předchozím
    extentem souboru (soubor se prodlužuje souvisle), jinak nejmenší dost
@@ -522,6 +530,13 @@ Připojení (`Store::open`) má tři oddělené kroky:
    (I/O, nedostatek paměti) se vrátí hned - přechodná chyba disku nesmí
    vést k návratu na starší stav.
 
+**Nejistá obnova = jen pro čtení.** Když některý slot superbloku nejde
+přečíst (chyba I/O, ne špatný součet), mohl držet novější generaci a tu
+nejde bezpečně určit. Svazek se pak připojí **jen pro čtení**
+s `info().unreadable_superblocks` > 0 (fsd vypíše varování) - zápis nad
+starší generací by po dalším commitu tu novější přepsal. Po odeznění chyby
+se při dalším připojení vybere správně.
+
 Po návratu se sloty s novější (poškozenou) generací **před prvním commitem
 vynulují** - jinak by po dalším připojení vyhrály a ukazovaly na bloky, které
 mezitím dostal někdo jiný. Intent log se po návratu nepřehrává (patří
@@ -595,6 +610,12 @@ pořadí a součet. Úplné dávky se přehrají nad stavem posledního commitu 
 ale jen ty, jejichž data jsou celá na disku (součty bloků dat souhlasí;
 jinak výpadek přišel před flush a dávka se zahodí). Hned potom proběhne
 commit a začne nová epocha. `info().replayed` = počet přehraných operací.
+
+**Chyba čtení logu není konec řetězu.** Za nečitelným blokem může být už
+potvrzený `fsync`. Při chybě I/O (čtení bloku logu nebo dat dávky) se
+přehraje jen to, co jde přečíst, svazek je **jen pro čtení**
+(`info().log_unreadable`) a log zůstane na disku nedotčený pro další pokus.
+Konec řetězu je jen blok se špatným magic, pořadím nebo součtem.
 
 Bloky dat, na které odkazuje dávka logu, se do commitu znovu nepoužijí,
 ani když vznikly ve stejné transakci (jinak by je pozdější `fsync`
@@ -676,6 +697,13 @@ aspoň 4 souvislých bloků, `Space::node_room`), a každý rozpracovaný uzel j
 by neměl kam uložit strom a svazek by přešel do režimu jen pro čtení. Cena:
 na silně rozdrobeném disku přijde `NO_SPACE` o pár bloků dřív, než je disk
 opravdu plný. Alokace uzlů (`alloc_min`) úseky kratší než 4 bloky přeskakuje.
+
+**Uvolnit místo jde i na plném svazku.** Operace, které místo uvolňují
+(`remove`, `delete_snapshot`, zkrácení souboru), smí sáhnout do poloviny
+rezervy commitu (`has_room_freeing`); druhá polovina zůstává pro commit.
+Jinak by na plném svazku nešel smazat ani snapshot, který drží většinu
+místa. Uvolněné bloky jsou použitelné po ochranné lhůtě (`REUSE_DELAY`
+commitů).
 
 ## TRIM
 
@@ -789,8 +817,16 @@ aplikace (fáze 5).
 
 ## Kontrola konzistence a scrub
 
-`check(scrub)` nejdřív uloží změny commitem a pak projde živý strom,
-všechny snapshoty, metadata volného místa a intent log:
+`check(scrub)` kontroluje **uložený stav** (poslední commit na disku):
+
+- zapisovatelný svazek: nejdřív commit, takže uložený stav = živý,
+- **jen pro čtení** (nejistá obnova, zařízení bez flush): nic se nezapíše;
+  kontroluje se uložená generace a metadata místa načtená znovu z disku.
+  Změny přehrané z logu jen v paměti zkontrolované nejsou.
+
+Výsledek říká, co kontroloval: `generation` (číslo generace) a
+`live_not_checked` (v paměti jsou nezkontrolované změny). Projde uložený
+strom, všechny snapshoty, metadata volného místa a intent log:
 
 - ověří součty všech uzlů (a se `scrub = true` i všech bloků dat - čte celý
   obsah),
@@ -922,6 +958,7 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `tests/features.rs` | souvislý zápis, fsync + přehrání, návrat o generaci, mazání snapshotů, defragmentace, TRIM, víc AG + BLAKE3, zhušťování logů |
 | `tests/model.rs` | property test: náhodné sekvence (vytvoření, zápis, zkrácení, mazání, přesun, commit, fsync, „pád“, snapshoty) proti modelu v paměti; na konci fsck |
 | `tests/crash.rs` | výpadek během commitu i fsync s náhodnou podmnožinou nezapsaných bloků |
+| `tests/mount.rs` (doplněno) | nečitelný nejnovější slot = jen pro čtení a nejnovější generace přežije; nečitelná dávka logu neztratí potvrzený fsync; `check` jen pro čtení bez zápisu |
 | `tests/ondisk.rs` | poškozené hodnoty se správným součtem: extent mimo svazek, uvolnění volných bloků, délka malého souboru, cyklus rodičů a vrácení operace |
 | `tests/errors.rs` | chyby zařízení: selhaný zápis dat neztratí data a jde zopakovat, přepsání nenechá díru, po selhaném flush nic dalšího nepotvrdí |
 | `tests/mount.rs` | výběr superbloku: nečitelný slot, přechodná chyba bez návratu, neznámý `incompat` a novější verze = odmítnutí, neznámý `ro_compat` = jen pro čtení bez zápisu, nesmyslné hodnoty = návrat se hlášením, vynulování novějších slotů, zařízení bez záruky trvanlivosti |

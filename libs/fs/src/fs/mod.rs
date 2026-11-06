@@ -105,8 +105,14 @@ pub struct FsInfo {
     pub ag_blocks: u64,
     /// O kolik generaci se pripojeni vratilo kvuli poskozenemu stavu (0 = ne).
     pub fallback: u64,
-    /// Pripojeno jen pro cteni (zarizeni bez zaruky trvanlivosti).
+    /// Pripojeno jen pro cteni (zarizeni bez zaruky trvanlivosti, neznamy
+    /// ro_compat, nejista obnova - viz dalsi pole).
     pub read_only: bool,
+    /// Slotu superbloku, ktere nesly precist: nejnovejsi generaci nejde
+    /// bezpecne urcit, proto jen pro cteni.
+    pub unreadable_superblocks: u32,
+    /// Intent log nesel precist cely: prehrana jen cast, log zachovany.
+    pub log_unreadable: bool,
     /// Kolik operaci se pri pripojeni prehralo z intent logu.
     pub replayed: u64,
 }
@@ -146,6 +152,9 @@ const MAX_DEPTH: usize = 65_536;
 
 /// Kolik rozpracovanych bloku dat drzet v pameti, nez se zapisi (16 MiB).
 const DIRTY_LIMIT: u64 = 4096;
+/// Nad tolik bloku v bufferu (32 MiB) se dalsi zapis neprijme, dokud nejde
+/// buffer zapsat na disk (opakovane selhavajici zarizeni).
+const DIRTY_HARD_LIMIT: u64 = 2 * DIRTY_LIMIT;
 
 fn split_path(path: &str) -> impl Iterator<Item = &str> {
     path.split('/').filter(|c| !c.is_empty())
@@ -235,6 +244,8 @@ impl<D: BlockDevice> Fs<D> {
             ag_blocks: self.s.sb.ag_blocks,
             fallback: self.s.fallback,
             read_only: self.s.read_only,
+            unreadable_superblocks: self.s.unreadable_slots,
+            log_unreadable: self.s.log_unreadable,
             replayed: self.replayed,
         }
     }
@@ -248,9 +259,19 @@ impl<D: BlockDevice> Fs<D> {
     /// Zajisti misto pro `blocks` novych bloku; kdyz chybi a jsou bloky
     /// cekajici na odlozene uvolneni, uvolni je commity.
     fn ensure_room(&mut self, blocks: u64) -> Result<()> {
+        self.ensure_room_with(blocks, false)
+    }
+
+    /// Misto pro operaci, ktera misto uvolnuje (smi do poloviny rezervy).
+    fn ensure_room_freeing(&mut self, blocks: u64) -> Result<()> {
+        self.ensure_room_with(blocks, true)
+    }
+
+    fn ensure_room_with(&mut self, blocks: u64, freeing: bool) -> Result<()> {
         self.s.check_writable()?;
         let mut tries = 0;
-        while !self.s.has_room(self.dirty_blocks + blocks) {
+        let room = |s: &Store<D>, n: u64| if freeing { s.has_room_freeing(n) } else { s.has_room(n) };
+        while !room(&self.s, self.dirty_blocks + blocks) {
             if self.s.space.deferred_blocks() == 0 || tries > crate::layout::REUSE_DELAY + 1 {
                 return Err(Error::NoSpace);
             }
@@ -407,6 +428,12 @@ impl<D: BlockDevice> Fs<D> {
     #[cfg(test)]
     pub(crate) fn test_put(&mut self, key: Key, value: Vec<u8>) -> Result<()> {
         self.put(key, value)
+    }
+
+    /// Testy: blok, do ktereho pujde dalsi davka intent logu.
+    #[cfg(test)]
+    pub(crate) fn test_zil_next(&self) -> u64 {
+        self.s.zil_next
     }
 
     /// Testy: primy zapis zaznamu objektu.
@@ -618,7 +645,7 @@ impl<D: BlockDevice> Fs<D> {
         self.guarded(|fs| {
             let (parent_path, name) = split_parent(path)?;
             let parent = fs.dir_of(parent_path)?;
-            fs.ensure_room(4)?;
+            fs.ensure_room_freeing(4)?;
             fs.remove_at(parent, name)
         })
     }

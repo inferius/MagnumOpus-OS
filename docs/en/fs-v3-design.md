@@ -98,11 +98,15 @@ Principles (agreed):
   clones can come from snapshot S, a file is overwritten in the first one,
   S is deleted - and the second clone must still read the original data.
   Rules (first version, the ZFS model):
-  - a clone has an **explicit link to its origin snapshot** (`origin`);
-    blocks born up to the generation of S belong to S, the clone owns only
-    blocks born after it was created,
-  - overwriting a block older than S in a clone puts it on the clone's
-    deadlist, but only processing S's deadlist may free it,
+  - the rule is about **reachability**: a clone takes over the blocks
+    **reachable from the root of S** and the `origin` link (explicit, in the
+    clone's record) keeps that root alive. An older block need not belong
+    to S (it may belong to another dataset or no longer be in S's root at
+    all) - "born up to the generation of S" would be too broad,
+  - the birth generation then only **helps within this link**: a block born
+    after the clone was created is owned by the clone (its own overwrite
+    frees it); a block reachable from S that the clone overwrites goes onto
+    the clone's deadlist, but only processing S's deadlist may free it,
   - **deleting S while a clone depends on it is deferred:** S disappears
     from the user's view ("hidden") but keeps its blocks until the last
     clone is gone; then it is deleted normally (deadlists in commits, so
@@ -174,9 +178,14 @@ Principles (agreed):
     loss.
   - **Retention** (days or space): older records are dropped. A
     subscription is "lossless" only within retention: whoever asks for a
-    number older than the oldest stored gets **`JOURNAL_GAP`** and rebuilds
-    its state from a snapshot diff (cheap thanks to generation-based diff) -
-    never a silent skip.
+    number older than the oldest stored gets **`JOURNAL_GAP`** - never a
+    silent skip.
+  - **A new baseline together with its position:** `VIEW(dataset)` returns
+    a consistent read-only view (a temporary snapshot) **and the sequence
+    number of the last record it contains**. The client (e.g. an indexer)
+    walks the whole view and then continues subscribing from number + 1. If
+    it asked for the number only after finishing the listing, it could miss
+    a change (say a directory rename) made during the listing.
 - **Git layer** (a service on top of the FS): (1) git object IDs (SHA-1 and
   SHA-256) are computed lazily and stored as an extended attribute;
   repository import and export; (2) push/pull over the network once there
@@ -506,6 +515,32 @@ and costs little.
 - **Mandatory locks** can block other applications (DoS). Hence only for the
   Windows layer, bound to a handle and with a wait timeout.
 
+## Working with versions in the file manager
+
+**Status: agreed.** Features built on clones, diff and capabilities.
+
+- **Restore as a copy** (part of the first demo): in the file properties
+  you pick a version and choose *Open read-only*, *Restore as a copy* (next
+  to the current one, e.g. "Report (version 3 Nov 14:02).docx") or *Replace
+  current*. The copy is instant (shared blocks). One paragraph or a config
+  can be pulled from history without rolling back the whole folder.
+- **Try changes on the side** for a whole project folder: the file manager
+  creates a temporary writable clone and opens it in an editor, an
+  installer or hands it to an agent. **The application gets a capability to
+  the clone only**, it does not see the original. When done: an overview of
+  what was added, removed and changed (a diff of the clone against its
+  origin snapshot) and taking selected changes over into the original. If
+  the same file changed in the original in the meantime, taking it over
+  shows a conflict (three-way comparison: origin snapshot, original,
+  clone). An untaken clone is discarded in one step. It shows best what
+  clones, diff and capabilities do together (e.g. trying a bigger refactor).
+- **A temporary sub-dataset for builds and caches:** `target/` or render
+  output looks like an ordinary folder in the project, but it is its own
+  dataset with its own space limit and retention rules (default: no
+  history). A project snapshot does not include it (it captures sources and
+  configuration) and it can be cleaned separately. A snapshot listing shows
+  clearly which subfolders have their own history (they are datasets).
+
 ## Cloud and network
 
 **Status: agreed, the format is reserved in phase 1, implementation in
@@ -667,6 +702,14 @@ an HTTP client. Applications get network access only through a capability
   handle never escapes the granted subtree (like `RESOLVE_BENEATH` in
   Linux): an absolute target or `..` above the capability root =
   `ACCESS_DENIED`.
+- **Write: accepted vs. durable.** A write reply says **how many bytes
+  were accepted** (they are in the buffer, reads see them at once, the next
+  commit stores them), not whether they are durable - only `FSYNC`
+  confirms that. After an error the client may consider exactly the
+  reported count accepted (in version 1 of the library: the whole call or
+  nothing). **A write split into several messages** = each message is a
+  separate write with its own result; the client does not continue after
+  the first error and knows exactly how many earlier messages were accepted.
 - **Replace by rename** (atomic save), `O_EXCL` creation.
 - **Multiple clients:** each client has its own channel (`OPEN_SESSION`),
   request IDs, paged directory listing (cursor), timeouts; the service never
@@ -678,8 +721,10 @@ an HTTP client. Applications get network access only through a capability
 **A vertical slice as the first goal:** instead of finishing all of phase
 1 in breadth, the first demo is a **versioned project folder** in Windows
 Explorer: take a snapshot, open a writable clone, make changes, show the
-diff, restore one file - and the same with a crash in the middle of a
-write. Order:
+diff, **restore one file as a copy** - and the same with a crash in the middle of a
+write. "Try changes on the side" (see [Working with versions in the file
+manager](#working-with-versions-in-the-file-manager)) comes right after it.
+Order:
 
 1. **F1b** - review fixes (in progress),
 2. **datasets and a minimum of versioning** - the dataset tree, dataset
@@ -727,11 +772,27 @@ osfs check <disk|image> [--scrub]
 osfs snapshot F: <name>  /  osfs diff ...  /  osfs restore ...
 ```
 
-- **Translation for Windows:** the forbidden characters `: \ * ? " < > |`
-  are mapped into the Unicode private use area (back without loss), reserved
-  names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`...), trailing dots and spaces,
-  times in 100 ns units, the file ID from oid + generation; case is not
-  distinguished, just as in Windows.
+- **Start: an image file** (`osfs format image.img`, `osfs mount image.img
+  F:`), a real disk only after that.
+- **Names the first version exposes** (explicitly, so that every displayed
+  name opens exactly the object that Explorer listed):
+
+| Name in our FS | In Windows |
+|---|---|
+| valid in Windows too | unchanged |
+| contains a forbidden character `: \ * ? " < > \|` | the character is shown as its counterpart in the Unicode private use area (U+F000 + code, like WSL and Cygwin) |
+| already contains a character from U+F000-F0FF itself | **hidden** (displaying it would collide with a translated name); `osfs check` lists it |
+| a reserved name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, also with an extension), a trailing dot or space | **hidden**, `osfs check` lists it |
+| longer than 255 UTF-16 characters | **hidden** (the Windows API mostly cannot open it) |
+| a pair differing only in case (a case-sensitive dataset) | the first version **does not mount** case-sensitive datasets (later: the second name hidden with a report) |
+
+  Writing from Windows: a name with a character from U+F000-F0FF is stored
+  with the original forbidden character; a name our FS forbids (text
+  direction controls) is refused. **Acceptance test:** for random names (a
+  property test) every name in the listing opens exactly the object it
+  came from, and no two entries have the same displayed name.
+- Other translation: times in 100 ns units, the file ID from oid +
+  generation; case is not distinguished, just as in Windows.
 - **Concurrency:** WinFsp calls from several threads, `Fs` is
   single-threaded - one lock around the whole `Fs` to start with.
 

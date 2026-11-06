@@ -31,21 +31,65 @@ pub struct CheckReport {
     pub meta_blocks: u64,
     /// Nalezene problemy (prazdne = v poradku).
     pub problems: Vec<String>,
+    /// Ktera generace (ulozeny stav na disku) se kontrolovala.
+    pub generation: u64,
+    /// V pameti jsou zmeny, ktere kontrola nezahrnula (svazek jen pro cteni
+    /// s prehranym intent logem): kontrolovan je jen ulozeny stav.
+    pub live_not_checked: bool,
 }
 
 impl<D: BlockDevice> Fs<D> {
-    /// Ulozi rozpracovane zmeny a zkontroluje konzistenci. `scrub` = overit
-    /// i kontrolni soucty vsech datovych bloku (cte cely obsah).
+    /// Zkontroluje konzistenci **ulozeneho stavu** (posledni commit na
+    /// disku). `scrub` = overit i kontrolni soucty vsech datovych bloku
+    /// (cte cely obsah).
+    ///
+    /// - Zapisovatelny svazek: nejdriv commit, takze ulozeny stav = zivy.
+    /// - Jen pro cteni (nejista obnova, zarizeni bez flush): nic se
+    ///   nezapisuje; kontroluje se ulozena generace a misto nactene znovu
+    ///   z disku. Zmeny prehrane z logu jen v pameti zkontrolovane nejsou -
+    ///   rika to `live_not_checked`.
     pub fn check(&mut self, scrub: bool) -> Result<CheckReport> {
-        self.commit()?;
-        let mut r = CheckReport::default();
+        let read_only = self.s.read_only;
+        if !read_only {
+            self.commit()?;
+        }
+        let sb = self.s.sb.clone();
+        // Misto podle disku (u zapisovatelneho po commitu totez co v pameti).
+        let (mut meta, mut free) = if read_only {
+            let space = crate::space::Space::load(
+                &mut self.s.dev,
+                sb.algo,
+                sb.block_count,
+                sb.ag_blocks,
+                &sb.space,
+                sb.generation + 1,
+            )?;
+            let mut free = space.free_extents();
+            free.extend(space.deferred_list());
+            (space.meta.blocks(), free)
+        } else {
+            let mut free = self.s.space.free_extents();
+            free.extend(self.s.space.deferred_list());
+            (self.s.space.meta.blocks(), free)
+        };
+        let log_blocks: Vec<u64> = if read_only {
+            (sb.zil_block != 0).then_some(sb.zil_block).into_iter().collect()
+        } else {
+            self.s.zil_blocks.clone()
+        };
+        let mut r = CheckReport {
+            generation: sb.generation,
+            live_not_checked: read_only && (self.replayed > 0 || self.s.has_changes()),
+            ..CheckReport::default()
+        };
         // blok -> kdo ho pouziva (pro hlaseni)
         let mut used: BTreeMap<u64, &'static str> = BTreeMap::new();
         let mut seen_nodes: BTreeSet<u64> = BTreeSet::new();
         // Druhy objektu zive verze (shoda polozek adresaru se zaznamy).
         let mut objects = Objects::default();
-        let mut roots = alloc::vec![(String::from("zivy stav"), self.s.root)];
-        roots.extend(self.snapshot_roots()?);
+        let stored = Child::Disk(sb.root);
+        let mut roots = alloc::vec![(String::from("ulozeny stav"), stored)];
+        roots.extend(self.snapshot_roots_of(&stored)?);
         for (index, (name, root)) in roots.into_iter().enumerate() {
             let live = index == 0;
             let mut stack = alloc::vec![root];
@@ -107,8 +151,7 @@ impl<D: BlockDevice> Fs<D> {
             }
         }
         objects.verify(&mut r.problems);
-        let mut meta = self.s.space.meta.blocks();
-        meta.extend(self.s.zil_blocks.iter().copied());
+        meta.extend(log_blocks);
         for b in meta {
             if used.insert(b, "metadata mista").is_some() {
                 r.problems
@@ -117,8 +160,6 @@ impl<D: BlockDevice> Fs<D> {
             r.meta_blocks += 1;
         }
         // Vse pouzite musi byt obsazene, vse obsazene pouzite.
-        let mut free = self.s.space.free_extents();
-        free.extend(self.s.space.deferred_list());
         free.sort_unstable();
         let is_free = |b: u64| {
             let i = free.partition_point(|&(s, _)| s <= b);

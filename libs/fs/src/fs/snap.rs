@@ -129,7 +129,7 @@ impl<D: BlockDevice> Fs<D> {
     pub fn delete_snapshot(&mut self, name: &str) -> Result<()> {
         self.guarded(|fs| {
             let (id, _) = fs.find_snapshot(name)?;
-            fs.ensure_room(16)?;
+            fs.ensure_room_freeing(16)?;
             // Mrtve bloky cekajici v pameti musi byt v deadlistu, jinak by je
             // zpracovani seznamu minulo.
             fs.flush_dead()?;
@@ -210,8 +210,9 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Koreny vsech snapshotu (kontrola konzistence).
-    pub(super) fn snapshot_roots(&mut self) -> Result<Vec<(String, Child)>> {
-        let root = self.s.root;
+    /// Koreny snapshotu zaznamenanych ve strome `root`.
+    pub(super) fn snapshot_roots_of(&mut self, root: &Child) -> Result<Vec<(String, Child)>> {
+        let root = *root;
         Ok(self
             .records(&root)?
             .into_iter()

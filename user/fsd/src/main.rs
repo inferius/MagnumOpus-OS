@@ -88,9 +88,16 @@ fn main(startup: Startup) -> i64 {
     if i.replayed > 0 {
         println!("fsd: z intent logu prehrano {} operaci", i.replayed);
     }
-    if i.read_only {
+    if i.unreadable_superblocks > 0 {
         println!(
-            "fsd: VAROVANI: disk nezarucuje trvanlivost zapisu (neumi flush), svazek je jen pro cteni"
+            "fsd: VAROVANI: {} slotu superbloku nejde precist - nejnovejsi stav nejde bezpecne urcit, svazek je jen pro cteni",
+            i.unreadable_superblocks
+        );
+    } else if i.log_unreadable {
+        println!("fsd: VAROVANI: intent log nejde precist cely - log zachovan pro dalsi pokus, svazek je jen pro cteni");
+    } else if i.read_only {
+        println!(
+            "fsd: VAROVANI: svazek je jen pro cteni (disk nezarucuje trvanlivost zapisu nebo neznama vlastnost formatu)"
         );
     }
     let mut svc = Service {

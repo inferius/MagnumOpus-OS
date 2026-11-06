@@ -96,8 +96,15 @@ pub struct Store<D: BlockDevice> {
     /// Commit selhal uprostred: stav v pameti neodpovida disku, dalsi zmeny
     /// jsou zakazane (nutne znovu pripojit).
     pub poisoned: bool,
-    /// Pripojeno jen pro cteni (zarizeni bez zaruky trvanlivosti).
+    /// Pripojeno jen pro cteni (zarizeni bez zaruky trvanlivosti, neznamy
+    /// ro_compat, nejista obnova).
     pub read_only: bool,
+    /// Kolik slotu superbloku neslo precist (chyba I/O). Kdyz aspon jeden,
+    /// nejde bezpecne urcit nejnovejsi generaci: jen pro cteni.
+    pub unreadable_slots: u32,
+    /// Intent log nesel precist cely (chyba I/O): prehrana je jen cast,
+    /// log zustava na disku pro dalsi pokus, jen pro cteni.
+    pub log_unreadable: bool,
     /// O kolik generaci se pripojeni vratilo kvuli poskozenemu stavu.
     pub fallback: u64,
     /// Sloty superbloku s novejsi (poskozenou) generaci, nez se pripojila.
@@ -201,6 +208,8 @@ impl<D: BlockDevice> Store<D> {
             changed: false,
             poisoned: false,
             read_only: false,
+            unreadable_slots: 0,
+            log_unreadable: false,
             stale_slots: Vec::new(),
             fallback: 0,
             discard: false,
@@ -221,6 +230,8 @@ impl<D: BlockDevice> Store<D> {
     /// 1. **Vyber:** ze slotu s platnou hlavickou (podpis rodiny formatu
     ///    a vlastni soucet) se vezme nejvyssi generace. Necitelny slot nebo
     ///    slot se spatnym souctem je neplatny slot, ostatni se zkusi.
+    ///    Necitelny slot (chyba I/O) ale mohl drzet novejsi generaci, takze
+    ///    ji nejde bezpecne urcit: pripojeni je pak jen pro cteni.
     /// 2. **Umim ji otevrit?** Jina verze formatu nebo neznamy bit incompat =
     ///    `NOT_SUPPORTED` (nikdy tichy prechod na starsi generaci). Neznamy
     ///    bit ro_compat = pripojeni jen pro cteni (replay intent logu jen
@@ -236,10 +247,12 @@ impl<D: BlockDevice> Store<D> {
         let mut found: Vec<(u64, u64, Vec<u8>)> = Vec::new();
         let mut buf = vec![0u8; BLOCK_SIZE];
         let mut last_err = Error::NotFound;
+        let mut unreadable = 0u32;
         for i in 0..SB_COUNT {
             let slot = SB_FIRST + i;
             if let Err(e) = dev.read_block(slot, &mut buf) {
                 last_err = e;
+                unreadable += 1;
                 continue;
             }
             match Superblock::decode_header(&buf) {
@@ -270,7 +283,10 @@ impl<D: BlockDevice> Store<D> {
             match Self::try_open(dev, sb) {
                 Ok(mut s) => {
                     s.fallback = newest - generation;
-                    s.read_only = read_only;
+                    // Necitelny slot mohl drzet novejsi generaci: zapis by
+                    // ji po dalsim commitu prepsal. Jen pro cteni + hlaseni.
+                    s.unreadable_slots = unreadable;
+                    s.read_only = read_only || unreadable > 0;
                     s.stale_slots = found[..k]
                         .iter()
                         .filter(|&&(_, g, _)| g > *generation)
@@ -331,8 +347,19 @@ impl<D: BlockDevice> Store<D> {
     /// cteni). Cena: na silne rozdrobenem disku hlasi `NO_SPACE` o par bloku
     /// driv, nez je opravdu plny.
     pub fn has_room(&self, extra: u64) -> bool {
+        self.has_room_keeping(extra, self.reserve())
+    }
+
+    /// Jako `has_room`, ale operace uvolnujici misto (smazani souboru nebo
+    /// snapshotu, zkraceni) smi sahnout do poloviny rezervy - jinak by na
+    /// plnem svazku neslo misto uvolnit. Druha polovina zustava pro commit.
+    pub fn has_room_freeing(&self, extra: u64) -> bool {
+        self.has_room_keeping(extra, self.reserve() / 2)
+    }
+
+    fn has_room_keeping(&self, extra: u64, keep: u64) -> bool {
         let nodes = self.dirty.len() as u64 * NODE_BLOCKS;
-        nodes + extra + self.reserve() <= self.space.node_room()
+        nodes + extra + keep <= self.space.node_room()
     }
 
     pub fn check_writable(&self) -> Result<()> {

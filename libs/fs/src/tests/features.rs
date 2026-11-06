@@ -308,3 +308,34 @@ fn format_rejects_tiny_device_and_mount_empty() {
     );
     assert_eq!(Fs::mount(MemDevice::new(256)).err(), Some(Error::NotFound));
 }
+
+#[test]
+fn full_volume_can_free_space_by_deleting_snapshot() {
+    // Scenar z review: data drzi uz jen snapshot, svazek je plny bezny
+    // zapisem - smazani snapshotu musi projit a misto se musi vratit.
+    let mut fs = new_fs(2048);
+    fs.create("/stare", Kind::File).unwrap();
+    fs.write("/stare", 0, &alloc::vec![1u8; 2 << 20]).unwrap();
+    fs.snapshot("historie").unwrap();
+    fs.remove("/stare").unwrap();
+    fs.commit().unwrap();
+    fs.create("/plnic", Kind::File).unwrap();
+    let mut off = 0u64;
+    loop {
+        match fs.write("/plnic", off, &[2u8; 65536]) {
+            Ok(()) => off += 65536,
+            Err(Error::NoSpace) => break,
+            Err(e) => panic!("{e:?}"),
+        }
+    }
+    let full_at = off;
+    fs.delete_snapshot("historie").unwrap();
+    // Uvolnene bloky jsou pouzitelne po ochranne lhute (REUSE_DELAY commitu).
+    for _ in 0..crate::REUSE_DELAY + 1 {
+        fs.commit().unwrap();
+    }
+    fs.write("/plnic", off, &alloc::vec![3u8; 1 << 20]).unwrap();
+    fs.commit().unwrap();
+    assert!(fs.stat("/plnic").unwrap().size > full_at);
+    assert_clean(&mut fs);
+}

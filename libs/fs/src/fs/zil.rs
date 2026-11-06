@@ -507,8 +507,13 @@ impl<D: BlockDevice> Fs<D> {
         let mut batches: Vec<Vec<u8>> = Vec::new();
         let mut buf = vec![0u8; BLOCK_SIZE];
         let mut found = false;
+        // Chyba I/O neni konec retezu: za necitelnym blokem muze byt
+        // potvrzeny fsync. Pak se prehraje jen to, co jde precist, svazek je
+        // jen pro cteni a log zustane na disku pro dalsi pokus.
+        let mut unreadable = false;
         while block != 0 && block < self.s.sb.block_count {
             if self.s.dev.read_block(block, &mut buf).is_err() {
+                unreadable = true;
                 break;
             }
             let valid = u16::from_le_bytes([buf[0], buf[1]]) == MAGIC
@@ -536,13 +541,22 @@ impl<D: BlockDevice> Fs<D> {
         }
         for batch in batches {
             let Ok(records) = decode(&batch) else { break };
-            if !self.batch_durable(&records)? {
-                break;
+            match self.batch_durable(&records) {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(_) => {
+                    unreadable = true;
+                    break;
+                }
             }
             for r in records {
                 self.apply(r)?;
                 self.replayed += 1;
             }
+        }
+        if unreadable {
+            self.s.log_unreadable = true;
+            self.s.read_only = true;
         }
         // Jen pro cteni: prehrane zmeny zustanou v pameti (vidi je cteni),
         // na disk se nezapisuje nic.

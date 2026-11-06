@@ -70,8 +70,9 @@ fn unreadable_slot_is_skipped() {
     let (dev, newest) = two_generations();
     let mut dev = TestDevice::new(dev);
     dev.bad_read = Some(newest);
-    // Nejnovejsi slot nejde precist: pripoji se predchozi generace.
+    // Nejnovejsi slot nejde precist: predchozi generace jen pro cteni.
     let mut fs = Fs::mount(dev).unwrap();
+    assert!(fs.info().read_only);
     assert!(fs.stat("/stary").is_ok());
     assert_eq!(fs.stat("/novy").err(), Some(Error::NotFound));
 }
@@ -225,4 +226,83 @@ fn bad_values_in_newest_superblock_count_as_fallback() {
     let mut fs = Fs::mount(dev).unwrap();
     assert_eq!(fs.info().fallback, 1);
     assert!(fs.stat("/stary").is_ok());
+}
+
+#[test]
+fn unreadable_newest_slot_is_read_only_and_keeps_newest() {
+    // Scenar z review: necitelny slot generace 3 nesmi vest k zapisu nad
+    // generaci 2, ktery by generaci 3 prepsal.
+    let mut fs = new_fs(1024);
+    for name in ["/g1", "/g2", "/g3"] {
+        fs.create(name, Kind::File).unwrap();
+        fs.commit().unwrap();
+    }
+    let g = fs.info().generation;
+    let mut dev = TestDevice::new(fs.into_device());
+    dev.bad_read = Some(SB_FIRST + g % SB_COUNT);
+    let mut fs = Fs::mount(dev).unwrap();
+    let info = fs.info();
+    assert!(info.read_only);
+    assert_eq!(info.unreadable_superblocks, 1);
+    assert_eq!(fs.create("/x", Kind::File).err(), Some(Error::ReadOnly));
+    assert_eq!(fs.commit().err(), Some(Error::ReadOnly));
+    // Chyba odezni: nejnovejsi generace je porad cela.
+    let mut dev = fs.into_device();
+    dev.bad_read = None;
+    let mut fs = Fs::mount(dev).unwrap();
+    assert!(!fs.info().read_only);
+    assert!(fs.stat("/g3").is_ok());
+}
+
+#[test]
+fn unreadable_log_keeps_confirmed_fsync() {
+    // Scenar z review: chyba cteni druhe davky logu nesmi zahodit potvrzeny
+    // fsync (dalsi commit by log zahodil natrvalo).
+    let mut fs = new_fs(1024);
+    fs.commit().unwrap();
+    fs.create("/prvni", Kind::File).unwrap();
+    fs.fsync().unwrap();
+    let second = fs.test_zil_next();
+    fs.create("/druhy", Kind::File).unwrap();
+    fs.fsync().unwrap();
+    let mut dev = TestDevice::new(fs.into_device());
+    dev.bad_read = Some(second);
+    let mut fs = Fs::mount(dev).unwrap();
+    let info = fs.info();
+    assert!(info.read_only && info.log_unreadable);
+    assert!(fs.stat("/prvni").is_ok());
+    assert_eq!(fs.create("/x", Kind::File).err(), Some(Error::ReadOnly));
+    // Po odezneni chyby se prehraji obe davky.
+    let mut dev = fs.into_device();
+    dev.bad_read = None;
+    let mut fs = Fs::mount(dev).unwrap();
+    assert!(!fs.info().read_only);
+    assert!(fs.stat("/prvni").is_ok());
+    assert!(fs.stat("/druhy").is_ok());
+    assert_eq!(fs.info().replayed, 2);
+    assert_clean(&mut fs);
+}
+
+#[test]
+fn check_works_read_only_without_writes() {
+    // Scenar z review: pri nejiste obnove zjistit, co je citelne, bez
+    // zapisu na medium. Kontroluje se ulozena generace.
+    let mut fs = new_fs(1024);
+    fs.create("/f", Kind::File).unwrap();
+    fs.write("/f", 0, &[5u8; 30_000]).unwrap();
+    fs.commit().unwrap();
+    let committed = fs.info().generation;
+    fs.write("/f", 0, b"po commitu").unwrap();
+    fs.fsync().unwrap();
+    let mut dev = TestDevice::new(fs.into_device());
+    dev.durability = Durability::None;
+    let before = dev.inner.data.clone();
+    let mut fs = Fs::mount(dev).unwrap();
+    assert!(fs.info().read_only);
+    let r = fs.check(true).unwrap();
+    assert!(r.problems.is_empty(), "{:#?}", r.problems);
+    assert_eq!(r.generation, committed);
+    assert!(r.live_not_checked);
+    assert!(r.data_blocks > 0);
+    assert!(fs.into_device().inner.data == before);
 }

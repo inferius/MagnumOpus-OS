@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 
 use abi::{Error, Result};
 
-use super::{DIRTY_LIMIT, Fs, zil};
+use super::{DIRTY_HARD_LIMIT, DIRTY_LIMIT, Fs, zil};
 use crate::btree;
 use crate::device::BlockDevice;
 use crate::layout::{
@@ -138,6 +138,18 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Zapise `data` od `offset` (soubor se pripadne zvetsi, diru vyplni nuly).
+    ///
+    /// Vysledek rika, zda byla data **prijata** (do bufferu; hned je vidi
+    /// cteni a ulozi je pristi commit nebo fsync), ne zda jsou **trvala** -
+    /// to potvrzuje az `fsync`/`commit`.
+    ///
+    /// - `Ok` = prijata cela.
+    /// - Chyba = neprijato nic z tohoto volani (stav souboru jako pred nim).
+    ///
+    /// Kdyz buffer preroste `DIRTY_LIMIT`, zkusi se zapsat na disk; jeho
+    /// chyba zapis neodmitne (data zustanou v bufferu a zkusi se znovu).
+    /// Az kdyz zapis na disk selhava opakovane a buffer dosahne
+    /// `DIRTY_HARD_LIMIT`, dalsi data se neprijmou.
     pub fn write(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
         let (oid, inode) = self.file_oid(path)?;
         if data.is_empty() {
@@ -149,12 +161,20 @@ impl<D: BlockDevice> Fs<D> {
             .ok_or(Error::OutOfRange)?;
         let blocks = end.div_ceil(BS) - offset / BS;
         self.ensure_room(blocks + 8)?;
+        if self.dirty_blocks + blocks > DIRTY_HARD_LIMIT {
+            // Pred prijetim: kdyz se buffer neda vyprazdnit, nic neprijmout.
+            self.flush_all_data()?;
+        }
         let new_size = inode.size.max(end);
         self.guarded(|fs| fs.set_content(oid, inode, new_size, Some((offset, data))))?;
-        // Mimo `guarded`: selhany zapis bufferu je cisty (data se vrati do
-        // bufferu), nekonzistenci po prepojeni hlasi primo `write_run`.
-        if self.dirty_blocks > DIRTY_LIMIT {
-            self.flush_all_data()?;
+        // Data jsou prijata. Selhany odpis bufferu je cisty (data se vrati do
+        // bufferu) a nahlasi se az pri fsync/commit; jen kdyz po nem svazek
+        // presel do stavu chyby (nic uz se neulozi), vrati se chyba.
+        if self.dirty_blocks > DIRTY_LIMIT
+            && let Err(e) = self.flush_all_data()
+            && self.s.poisoned
+        {
+            return Err(e);
         }
         Ok(())
     }
@@ -169,7 +189,12 @@ impl<D: BlockDevice> Fs<D> {
             if size == inode.size {
                 return Ok(());
             }
-            fs.ensure_room(8)?;
+            // Zkraceni misto uvolnuje: smi do poloviny rezervy.
+            if size < inode.size {
+                fs.ensure_room_freeing(8)?;
+            } else {
+                fs.ensure_room(8)?;
+            }
             fs.truncate_oid(oid, size)
         })
     }

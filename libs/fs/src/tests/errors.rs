@@ -110,3 +110,52 @@ fn failed_flush_never_confirms_later() {
     let mut fs = Fs::mount(fs.into_device()).unwrap();
     assert_clean(&mut fs);
 }
+
+#[test]
+fn write_result_means_accepted_not_durable() {
+    // Scenar z review: write pres 16 MiB pri selhavajicim zapisu vratil
+    // chybu, a presto se data ulozila. Ted: Ok = prijato, chyba = nic.
+    let Setup { mut fs, writes, .. } = setup_big();
+    fs.create("/v", Kind::File).unwrap();
+    writes.set(true);
+    let chunk = [7u8; 1 << 20];
+    let mut accepted = 0u64;
+    let mut refused = false;
+    for i in 0..48u64 {
+        match fs.write("/v", i << 20, &chunk) {
+            Ok(()) => accepted += 1,
+            Err(e) => {
+                assert_eq!(e, Error::IoError);
+                refused = true;
+                break;
+            }
+        }
+    }
+    // Buffer se zastavil na tvrdem limitu (32 MiB), nic za nim neprijato.
+    assert!(refused);
+    assert_eq!(fs.stat("/v").unwrap().size, accepted << 20);
+    assert_eq!(fs.fsync(), Err(Error::IoError));
+    // Zarizeni se vzpamatuje: ulozi se presne prijata data.
+    writes.set(false);
+    fs.commit().unwrap();
+    let mut fs = Fs::mount(fs.into_device()).unwrap();
+    assert_eq!(fs.stat("/v").unwrap().size, accepted << 20);
+    assert_eq!(fs.read("/v", (accepted - 1) << 20, 4).unwrap(), [7u8; 4]);
+    assert_clean(&mut fs);
+}
+
+fn setup_big() -> Setup {
+    let inner = Fs::format(MemDevice::new(32_768), &opts("velky")).unwrap();
+    let writes = Rc::new(Cell::new(false));
+    let flush = Rc::new(Cell::new(false));
+    let dev = FlakyDevice {
+        inner,
+        fail_writes: writes.clone(),
+        fail_flush: flush.clone(),
+    };
+    Setup {
+        fs: Fs::mount(dev).unwrap(),
+        writes,
+        flush,
+    }
+}
