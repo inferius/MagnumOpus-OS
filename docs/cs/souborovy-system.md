@@ -235,14 +235,13 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 | `SNAPSHOT` | 5 | číslo snapshotu (objekt 0) | `BlockPtr` kořene, generace u64, jméno |
 | `DEADLIST` | 6 | seznam << 32 \| pořadí (objekt 0) | až 80 mrtvých úseků (start u64, délka u64, birth u64) |
 | `SYMLINK` | 7 | 0 | cíl symbolického odkazu (UTF-8, 1-4096 B) |
-| `SYNC` | 8 | 0 | rezervované: stav synchronizace s cloudem (fáze 6) |
 
 ### Záznam objektu (inode, 128 B)
 
 | Offset | Pole | Význam |
 |---|---|---|
 | 0 | kind u8 | 1 = soubor, 2 = adresář, 3 = symbolický odkaz |
-| 1 | flags u8 | příznaky objektu, rezervované pro cloud: 1 = data jen v cloudu, 2 = vždy offline, 4 = nesynchronizovat (zatím 0) |
+| 1 | flags u8 | příznaky objektu, rezervované: 1 = data jen v cloudu (zatím 0; nastavení synchronizace jsou atributy `sync.*`, ne bity) |
 | 4 | acl u32 | číslo popisu oprávnění (0 = zdědit; přijde ve fázi 1d) |
 | 8 | size | soubor: velikost v bajtech (nejvýš 2^63-1); odkaz: délka cíle |
 | 16 | mtime | čas poslední změny obsahu |

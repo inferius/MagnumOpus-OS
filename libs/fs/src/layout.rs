@@ -81,10 +81,6 @@ pub mod item {
     pub const DEADLIST: u8 = 6;
     /// Cil symbolickeho odkazu (text UTF-8), offset 0.
     pub const SYMLINK: u8 = 7;
-    /// Stav synchronizace objektu (vzdalena verze, znacka, cas), offset 0.
-    /// Rezervovano pro fazi 6.
-    #[allow(dead_code, reason = "pouzije faze 6 (cloud)")]
-    pub const SYNC: u8 = 8;
 }
 
 /// Klic polozky stromu; razeni podle (oid, kind, offset).
@@ -360,7 +356,7 @@ impl Superblock {
 pub struct Inode {
     /// `KIND_FILE`, `KIND_DIR` nebo `KIND_SYMLINK`.
     pub kind: u8,
-    /// `INODE_*` (cloud: REMOTE, PINNED, NOSYNC).
+    /// `INODE_*` (zatim jen REMOTE).
     pub flags: u8,
     /// Cislo popisu opravneni (0 = zdedit od rodice).
     pub acl: u32,
@@ -387,13 +383,12 @@ pub struct Inode {
 pub const KIND_FILE: u8 = 1;
 pub const KIND_DIR: u8 = 2;
 pub const KIND_SYMLINK: u8 = 3;
-/// Priznaky objektu rezervovane pro cloud (faze 6).
+/// Priznak objektu: data nejsou lokalne, jen v cloudu (faze 6). FS ho musi
+/// znat (cteni si data vyzada). Nastaveni sluzby sync ("vzdy offline",
+/// "nesynchronizovat") nejsou bity formatu, ale atributy `sync.*`.
 #[allow(dead_code, reason = "pouzije faze 6 (soubory na vyzadani)")]
 pub const INODE_REMOTE: u8 = 1 << 0;
-#[allow(dead_code, reason = "pouzije faze 6 (vzdy offline)")]
-pub const INODE_PINNED: u8 = 1 << 1;
-#[allow(dead_code, reason = "pouzije faze 6 (vyber synchronizovanych slozek)")]
-pub const INODE_NOSYNC: u8 = 1 << 2;
+
 pub const INODE_SIZE: usize = 128;
 /// Nejvetsi velikost souboru (2^63 - 1 B): velikosti a rozdily se tak vzdy
 /// vejdou do `i64`.

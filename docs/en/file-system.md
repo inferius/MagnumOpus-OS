@@ -237,14 +237,13 @@ content).
 | `SNAPSHOT` | 5 | snapshot number (object 0) | root `BlockPtr`, generation u64, name |
 | `DEADLIST` | 6 | list << 32 \| sequence (object 0) | up to 80 dead ranges (start u64, length u64, birth u64) |
 | `SYMLINK` | 7 | 0 | target of a symbolic link (UTF-8, 1-4096 B) |
-| `SYNC` | 8 | 0 | reserved: cloud sync state (phase 6) |
 
 ### Object record (inode, 128 B)
 
 | Offset | Field | Meaning |
 |---|---|---|
 | 0 | kind u8 | 1 = file, 2 = directory, 3 = symbolic link |
-| 1 | flags u8 | object flags, reserved for the cloud: 1 = data only in the cloud, 2 = always offline, 4 = do not sync (0 for now) |
+| 1 | flags u8 | object flags, reserved: 1 = data only in the cloud (0 for now; sync settings are `sync.*` attributes, not bits) |
 | 4 | acl u32 | permission descriptor number (0 = inherit; comes in phase 1d) |
 | 8 | size | file: size in bytes (at most 2^63-1); link: target length |
 | 16 | mtime | time of the last content change |
