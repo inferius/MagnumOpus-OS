@@ -31,6 +31,8 @@ Zásady (odsouhlasené):
 | Snapshoty | ruční | + **automatické**, **koš**, **neměnné** s nastavitelným zámkem |
 | Vyhledávání | - | **indexy**: jména, štítky, metadata, hash obsahu; fulltext jako služba |
 | Ostatní | - | kvóty, transakce pro aplikace, send/receive, ověřený systém, změna velikosti za běhu |
+| Aplikace | - | **zámky souborů a rozsahů, předalokace, sledování změn bez ztrát, mapování do paměti**, rozlišení velikosti písmen pro dataset, zdraví disku |
+| Bezpečnost | - | **audit s hashovým řetězem, původ souboru, detekce ransomwaru, návnady**, expirace souborů, skutečné časy, zákaz spouštění na datech, kvóty aplikací |
 | Cloud | - | **šifrovaná záloha, soubory na vyžádání, sync mezi zařízeními, sdílení** (formát rezervovaný, viz [Cloud a síť](#cloud-a-síť)) |
 | Protokol | v1: cesty, jeden klient | **v2: handly s právy, víc klientů, stránkování** |
 
@@ -216,8 +218,10 @@ Zásady (odsouhlasené):
 ## Šifrované trezory
 
 - Trezor = **dataset se šifrováním**: data, jména, metadata i jeho
-  snapshoty (XChaCha20-Poly1305 nebo AES-256-GCM podle CPU; klíč z hesla
-  přes Argon2id, nebo z biometrie/klíče přes systémovou službu).
+  snapshoty (XChaCha20-Poly1305 nebo AES-256-GCM podle CPU). Hlavní klíč
+  je náhodný a odemykají ho „ochránci“: heslo (Argon2id), povinný
+  obnovovací klíč, volitelně FIDO2 nebo TPM (viz
+  [Další pojistky](#další-pojistky); TPM nikdy jako jediný).
 - Součty v ukazatelích jsou nad zašifrovanými daty + autentizační značka
   šifry, takže scrub a samoléčení fungují bez klíče.
 - **Zamčený trezor** je vidět jako složka se zámkem; obsah ani počet
@@ -244,8 +248,131 @@ Zásady (odsouhlasené):
 - **Ověřený systém:** kořen systémového datasetu podepsaný; zavaděč ho při
   startu ověří (jako dm-verity) - navazuje na A/B aktualizace.
 - **Změna velikosti svazku za běhu** (zvětšení i zmenšení).
-- **Volitelný audit** přístupů k citlivým datasetům.
+- **Audit přístupů** - viz [Bezpečnost a audit](#bezpečnost-a-audit).
 - **Přehled místa** včetně toho, kolik uvolní smazání každého snapshotu.
+
+## Aplikace a kompatibilita
+
+**Stav: odsouhlaseno.** Věci, které jiné systémy mají a aplikace na ně
+spoléhají.
+
+- **Zamykání souborů a rozsahů** (fáze 1e, protokol v2): sdílený zámek
+  (čtení) a výhradní zámek (zápis) na celý soubor nebo rozsah bajtů. Zámek
+  patří handlu; zavřením handlu nebo pádem procesu zmizí sám.
+  - Výchozí **poradní** zámky (jako POSIX `fcntl`): kdo je nekontroluje,
+    smí zapisovat.
+  - **Povinné** zámky jen pro vrstvu Windows (`LockFileEx`, sdílecí režimy
+    `CreateFile`), protože na nich Windows aplikace závisí.
+  - Čekání na zámek má časový limit a služba hlídá smyčky čekání (deadlock
+    se ohlásí chybou, nezasekne se).
+- **Předalokace místa** (fáze 3): `allocate(soubor, od, délka)` rezervuje
+  souvislé bloky předem (databáze, stahování, video). Extent má příznak
+  **nezapsaný** - čte se jako nuly, dokud se do něj nezapíše; první zápis
+  příznak jen shodí. Formát je rezervovaný už teď (příznaky extentu).
+- **Sledování změn** (fáze 2): aplikace se přihlásí k odběru adresáře nebo
+  datasetu a dostává události (vytvořeno, změněno, smazáno, přesunuto)
+  přes kanál. Zdrojem je žurnál změn, takže události **se neztratí** ani
+  při přetečení fronty: aplikace se doptá „od verze N“ (na rozdíl od
+  inotify, kde přetečení = ztráta událostí).
+- **Mapování souborů do paměti** (fáze 5 + jádro): objekt paměti (VMO)
+  napojený na soubor, stránky se načítají při přístupu a sdílí se jedna
+  cache stránek pro FS i mapování. Potřebují ho spouštění programů (PE/ELF)
+  a databáze. Je to hlavně práce v jádře (stránkování na vyžádání).
+- **Rozlišování velikosti písmen pro dataset** (fáze 1c): volba datasetu,
+  pro git repozitáře a zdrojáky z Linuxu, kde vedle sebe existují `Foo`
+  i `foo`. Výchozí zůstává bez rozlišení; změnit jde jen u prázdného
+  datasetu.
+- **Zdraví disku** (fáze 4): služba čte SMART (SATA) a health log (NVMe),
+  sleduje opotřebení SSD, přemapované sektory a chyby z scrubu a varuje
+  dřív, než disk selže. Výsledek je v přehledu stavu disku.
+- **Pevné hardlinky nebudou:** každý objekt má jednoho rodiče (díky tomu
+  fungují souhrny podstromu a viditelnost). Místo nich jsou okamžité kopie
+  (sdílené bloky); ovladače pro Linux a Windows hlásí hardlinky jako
+  nepodporované.
+
+## Bezpečnost a audit
+
+**Stav: odsouhlaseno, fáze 4** (kromě uvedených výjimek).
+
+### Záznam přístupů (audit)
+
+| Co | Jak |
+|---|---|
+| Události | otevření, čtení, zápis, vytvoření, smazání, přesun, změna oprávnění, **odepřený pokus** |
+| Kdo | aplikace (identita z podpisu), uživatel, proces, handle |
+| Úrovně | vypnuto / **jen změny** (výchozí) / i čtení - nastavitelné na dataset; profil Přísný zapne čtení pro citlivé datasety |
+| Objem | opakované čtení téhož souboru stejnou aplikací v jedné relaci = jeden záznam |
+| Úložiště | zvláštní dataset jen pro připisování, uchování podle dnů nebo místa |
+| Odolnost proti úpravám | záznamy tvoří **hashový řetěz** (každý obsahuje hash předchozího) a konec řetězu je v záznamu datasetu, tedy v Merkleově stromu commitu. Smazat log jde jen celý a to je vidět; tiše upravit nejde. |
+
+- **„Kdo četl můj soubor“** přímo ve vlastnostech souboru: posledních
+  N přístupů z auditu, srozumitelně („Fotky - čteno aplikací Prohlížeč,
+  včera 18:02“).
+- Čtení auditu je samo právo *Spravovat* datasetu a samo se zaznamená.
+
+### Původ souboru
+
+- Každý nový soubor dostane rozšířený atribut **`sys.origin`**: odkud přišel
+  (URL stažení, aplikace, která ho vytvořila, zdroj kopie, přenosný disk).
+  Kopie a přesun ho přenesou; přejmenování ho nezmění.
+- **Spustitelný soubor s původem „internet“ nebo „přenosný disk“** se před
+  prvním spuštěním zeptá (jako Mark of the Web, ale nejde obejít
+  přejmenováním ani kopií uvnitř systému).
+- Atribut smí nastavit jen FS a systémové služby, ne aplikace.
+
+### Ochrana proti ransomwaru (detekce chování)
+
+- Služba sleduje žurnál změn: když jedna aplikace během krátké doby
+  přepíše nebo přejmenuje mnoho souborů a nový obsah má vysokou entropii
+  (vypadá zašifrovaně), FS:
+  1. hned udělá **snapshot** dotčených datasetů,
+  2. aplikaci **pozastaví** (zápisy čekají),
+  3. zeptá se uživatele: pokračovat / zastavit a vrátit změny ze snapshotu.
+- **Návnady:** skryté soubory v domově uživatele, na které nic legitimního
+  nesahá. Zápis do nich spustí totéž okamžitě.
+- Aplikace, které to dělají legitimně (archivátory, šifrování, export
+  videa), jde po potvrzení vyjmout.
+
+### Další pojistky
+
+- **Datum expirace souboru** (fáze 2): atribut `sys.expires` - po datu se
+  soubor přesune do koše (nebo archivuje). Pro soukromí a dočasné soubory.
+- **Skutečné časy:** čas vzniku a generaci nastavuje jen FS. Aplikace smí
+  změnit zobrazovaný čas změny (kvůli kompatibilitě), ale skutečné časy
+  zůstanou v auditu a v záznamu objektu - podvržení časů je vidět.
+- **Zákaz spouštění na datasetu** (fáze 1d, oprávnění): datasety s daty
+  (stažené soubory, dokumenty, přenosné disky) mají ve výchozím stavu
+  právo *Spustit* vypnuté; spouštět jde jen z datasetů aplikací.
+- **Kvóty pro aplikace** (s kvótami): aplikace nezaplní disk (ani omylem
+  logy); po limitu dostává `NO_SPACE`, uživatel a systém mají místo dál.
+- **Odemykání trezorů - víc „ochránců“ téhož klíče:** data trezoru šifruje
+  náhodný hlavní klíč a ten je uložený několikrát, pokaždé zašifrovaný jinak:
+  heslem (Argon2id), **obnovovacím klíčem** (vždy, povinně), volitelně
+  klíčem FIDO2 a **volitelně TPM** (pohodlné odemčení bez hesla na tomto
+  stroji s neporušeným zavaděčem, případně s PINem).
+  - TPM je **jen doplněk, nikdy jediný ochránce** - ve výchozím stavu
+    vypnutý. Disk přenesený do jiného stroje (nebo nový procesor s jiným
+    integrovaným TPM) se odemkne heslem nebo obnovovacím klíčem a systém
+    nabídne přidat TPM nového stroje; starý záznam se smaže.
+  - Přidání nebo odebrání ochránce nepřešifrovává data, mění jen malý
+    záznam s obalenými klíči.
+
+### Rizika (vědomě přijatá)
+
+- **Audit čtení stojí výkon a je citlivý.** Log sám prozrazuje, co kdo
+  četl - proto je výchozí „jen změny“, log je chráněný právem *Spravovat*
+  a čtení logu se zaznamenává.
+- **Detekce ransomwaru má falešné poplachy** (komprese, šifrování, export
+  videa). Proto pozastavení a dotaz, nikdy tiché zablokování; výjimky po
+  potvrzení. Chytrý útočník může šifrovat pomalu - proti tomu jsou hlavní
+  obranou neměnné snapshoty, detekce je jen včasné varování.
+- **Původ se ztratí** při kopii přes cizí FS (FAT na flashce). Ovladač pro
+  Windows ho přenese jako `Zone.Identifier`, kde to jde.
+- **TPM:** aktualizace firmwaru nebo výměna hardwaru změní měření a TPM
+  trezor neodemkne. Proto je TPM jen volitelný doplněk a vždy funguje heslo
+  a **obnovovací klíč**.
+- **Povinné zámky** umí zablokovat jiné aplikace (DoS). Proto jen pro vrstvu
+  Windows, vázané na handle a s časovým limitem čekání.
 
 ## Cloud a síť
 
@@ -387,11 +514,11 @@ firewall je přirozeně per aplikace.
 
 | Fáze | Obsah |
 |---|---|
-| 1 - formát | uzly 16 KiB, superblok/ukazatel/záznam v3, příznaky vlastností, datasety a strom datasetů, jména a symlinky, opravy z review, protokol v2 s handly, oprávnění (capabilities, granty, viditelnost, profily) |
-| 2 - verze | commity, větve, klony, diff, merge, žurnál změn, automatické snapshoty, koš, historie verzí, vrácení operací |
-| 3 - data | komprese, okamžité kopie, deduplikace, automatické díry, metadata 2x a samoléčení, scrub na pozadí |
-| 4 - ochrana | šifrované trezory, neměnné snapshoty, kvóty, audit, ověřený systém |
-| 5 - ostatní | indexy a štítky, send/receive, transakce, ARC a přednačítání, změna velikosti, vrstva pro git |
+| 1 - formát | uzly 16 KiB, superblok/ukazatel/záznam v3, příznaky vlastností, datasety a strom datasetů (i rozlišení velikosti písmen), jména a symlinky, opravy z review, protokol v2 s handly a zámky, oprávnění (capabilities, granty, viditelnost, profily, zákaz spouštění na datech) |
+| 2 - verze | commity, větve, klony, diff, merge, žurnál změn, automatické snapshoty, koš, historie verzí, vrácení operací, sledování změn, expirace souborů |
+| 3 - data | komprese, okamžité kopie, deduplikace, automatické díry, metadata 2x a samoléčení, scrub na pozadí, předalokace |
+| 4 - ochrana | šifrované trezory (ochránci klíče, volitelně TPM), neměnné snapshoty, kvóty i pro aplikace, audit s hashovým řetězem, původ souboru, detekce ransomwaru a návnady, zdraví disku, ověřený systém |
+| 5 - ostatní | indexy a štítky, send/receive, transakce, ARC a přednačítání, změna velikosti, vrstva pro git, mapování souborů do paměti (s jádrem) |
 | 6 - cloud (po síti) | služba sync, adaptéry (S3, WebDAV, zařízení), šifrovaná záloha, soubory na vyžádání, sync mezi zařízeními, sdílení, cizí cloudy |
 
 Každá fáze končí testy (jednotkové, model, výpadky proudu, v systému),

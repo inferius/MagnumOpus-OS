@@ -233,7 +233,7 @@ content).
 | `INODE` | 1 | 0 | object record, 128 B (see below) |
 | `DIRENT` | 2 | FNV-1a hash of the folded name | list of entries with the same hash: (oid u64, kind u8, name length u16, name) |
 | `INLINE` | 3 | 0 | the whole content of a file up to 1984 B (`INLINE_MAX`) |
-| `EXTENT` | 4 | first logical block | phys u64, count u32, reserved u32, birth u64, checksums 16 B × count |
+| `EXTENT` | 4 | first logical block | phys u64, count u32 (1-496), flags u32 (1 = preallocated, reserved; must be 0 for now), birth u64, checksums 16 B × count |
 | `SNAPSHOT` | 5 | snapshot number (object 0) | root `BlockPtr`, generation u64, name |
 | `DEADLIST` | 6 | list << 32 \| sequence (object 0) | up to 80 dead ranges (start u64, length u64, birth u64) |
 | `SYMLINK` | 7 | 0 | target of a symbolic link (UTF-8, 1-4096 B) |

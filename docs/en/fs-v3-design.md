@@ -32,6 +32,8 @@ Principles (agreed):
 | Snapshots | manual | + **automatic**, **trash**, **immutable** with a configurable lock |
 | Search | - | **indexes**: names, tags, metadata, content hash; full text as a service |
 | Other | - | quotas, transactions for applications, send/receive, verified system, online resize |
+| Applications | - | **file and range locks, preallocation, lossless change watching, memory mapping**, per-dataset case sensitivity, disk health |
+| Security | - | **audit with a hash chain, file origin, ransomware detection, decoys**, file expiry, true times, no execution on data, per-application quotas |
 | Cloud | - | **encrypted backup, files on demand, sync between devices, sharing** (format reserved, see [Cloud and network](#cloud-and-network)) |
 | Protocol | v1: paths, one client | **v2: handles with rights, multiple clients, paging** |
 
@@ -222,8 +224,9 @@ Principles (agreed):
 
 - A vault = **a dataset with encryption**: data, names, metadata and its
   snapshots (XChaCha20-Poly1305 or AES-256-GCM depending on the CPU; the
-  key from a password via Argon2id, or from biometrics/a key through a
-  system service).
+  master key is random and unlocked by "protectors": a password
+  (Argon2id), a mandatory recovery key, optionally FIDO2 or the TPM (see
+  [More safeguards](#more-safeguards); never the TPM alone)).
 - Checksums in pointers cover the encrypted data + the cipher's
   authentication tag, so scrub and self-healing work without the key.
 - **A locked vault** shows up as a folder with a lock; neither the content
@@ -253,8 +256,137 @@ Principles (agreed):
 - **Verified system:** the root of the system dataset is signed; the boot
   loader verifies it at startup (like dm-verity) - ties in with A/B updates.
 - **Online volume resize** (grow and shrink).
-- **Optional audit** of access to sensitive datasets.
+- **Access audit** - see [Security and audit](#security-and-audit).
 - **Space overview** including how much deleting each snapshot frees.
+
+## Applications and compatibility
+
+**Status: agreed.** Things other systems have and applications rely on.
+
+- **File and range locking** (phase 1e, protocol v2): a shared lock
+  (read) and an exclusive lock (write) on a whole file or a byte range. A
+  lock belongs to a handle; closing the handle or a process crash releases
+  it automatically.
+  - **Advisory** locks by default (like POSIX `fcntl`): whoever does not
+    check them may still write.
+  - **Mandatory** locks only for the Windows layer (`LockFileEx`, the
+    `CreateFile` share modes), because Windows applications depend on them.
+  - Waiting for a lock has a timeout and the service detects wait cycles (a
+    deadlock is reported as an error, nothing hangs).
+- **Space preallocation** (phase 3): `allocate(file, from, length)` reserves
+  contiguous blocks in advance (databases, downloads, video). The extent has
+  an **unwritten** flag - it reads as zeros until written; the first write
+  only clears the flag. The format is reserved already (extent flags).
+- **Change watching** (phase 2): an application subscribes to a directory
+  or dataset and receives events (created, changed, removed, moved) over a
+  channel. The source is the change journal, so events are **never lost**,
+  not even on queue overflow: the application asks "since version N"
+  (unlike inotify, where overflow = lost events).
+- **Memory-mapped files** (phase 5 + kernel): a memory object (VMO) backed
+  by a file, pages are loaded on access and one page cache is shared by the
+  FS and mappings. Program loading (PE/ELF) and databases need it. It is
+  mostly kernel work (demand paging).
+- **Case sensitivity per dataset** (phase 1c): a dataset option for git
+  repositories and Linux sources where `Foo` and `foo` exist side by side.
+  The default stays case-insensitive; it can be changed only on an empty
+  dataset.
+- **Disk health** (phase 4): a service reads SMART (SATA) and the health log
+  (NVMe), tracks SSD wear, remapped sectors and scrub errors and warns
+  before the disk fails. The result is in the disk status overview.
+- **No hard links:** every object has one parent (that is what makes
+  subtree summaries and visibility work). Instant copies (shared blocks)
+  replace them; the Linux and Windows drivers report hard links as
+  unsupported.
+
+## Security and audit
+
+**Status: agreed, phase 4** (except where noted).
+
+### Access log (audit)
+
+| What | How |
+|---|---|
+| Events | open, read, write, create, remove, move, permission change, **denied attempt** |
+| Who | application (identity from its signature), user, process, handle |
+| Levels | off / **changes only** (default) / reads too - configurable per dataset; the Strict profile enables reads for sensitive datasets |
+| Volume | repeated reads of the same file by the same application in one session = one record |
+| Storage | a special append-only dataset, retention by days or space |
+| Tamper resistance | records form a **hash chain** (each contains the hash of the previous one) and the head of the chain is in the dataset record, i.e. in the commit's Merkle tree. The log can only be deleted as a whole, which is visible; it cannot be edited silently. |
+
+- **"Who read my file"** right in the file properties: the last N accesses
+  from the audit, in plain words ("Photos - read by Viewer, yesterday
+  18:02").
+- Reading the audit itself requires the *Manage* right on the dataset and
+  is logged too.
+
+### File origin
+
+- Every new file gets the extended attribute **`sys.origin`**: where it came
+  from (download URL, the application that created it, copy source,
+  removable disk). Copy and move carry it over; rename does not change it.
+- **An executable with origin "internet" or "removable disk"** asks before
+  its first run (like Mark of the Web, but it cannot be bypassed by renaming
+  or copying inside the system).
+- Only the FS and system services may set the attribute, not applications.
+
+### Ransomware protection (behaviour detection)
+
+- A service watches the change journal: when one application rewrites or
+  renames many files within a short time and the new content has high
+  entropy (looks encrypted), the FS:
+  1. immediately takes a **snapshot** of the affected datasets,
+  2. **pauses** the application (its writes wait),
+  3. asks the user: continue / stop and roll the changes back from the
+     snapshot.
+- **Decoys:** hidden files in the user's home that nothing legitimate
+  touches. A write to them triggers the same immediately.
+- Applications that do this legitimately (archivers, encryption, video
+  export) can be exempted after confirmation.
+
+### More safeguards
+
+- **File expiry date** (phase 2): the `sys.expires` attribute - after the
+  date the file moves to the trash (or is archived). For privacy and
+  temporary files.
+- **True times:** the creation time and generation are set only by the FS.
+  An application may change the displayed modification time (for
+  compatibility), but the true times stay in the audit and the object
+  record - forged times are visible.
+- **No execution on a dataset** (phase 1d, permissions): data datasets
+  (downloads, documents, removable disks) have the *Execute* right off by
+  default; programs run only from application datasets.
+- **Per-application quotas** (with quotas): an application cannot fill the
+  disk (not even with logs by mistake); past the limit it gets `NO_SPACE`,
+  the user and the system still have space.
+- **Unlocking vaults - several "protectors" of the same key:** vault data
+  is encrypted by a random master key, and that key is stored several
+  times, each time wrapped differently: by a password (Argon2id), by a
+  **recovery key** (always, mandatory), optionally by a FIDO2 key and
+  **optionally by the TPM** (convenient unlocking without a password on
+  this machine with an intact boot loader, possibly with a PIN).
+  - The TPM is **only an add-on, never the sole protector** - off by
+    default. A disk moved to another machine (or a new CPU with a different
+    integrated TPM) is unlocked with the password or recovery key and the
+    system offers to add the new machine's TPM; the old entry is removed.
+  - Adding or removing a protector does not re-encrypt the data, it only
+    changes a small record of wrapped keys.
+
+### Risks (knowingly accepted)
+
+- **Auditing reads costs performance and is sensitive.** The log itself
+  reveals who read what - so the default is "changes only", the log is
+  protected by the *Manage* right and reading it is logged.
+- **Ransomware detection has false alarms** (compression, encryption, video
+  export). Hence pause and ask, never a silent block; exemptions after
+  confirmation. A clever attacker may encrypt slowly - immutable snapshots
+  are the main defence against that, detection is only an early warning.
+- **The origin is lost** when copying through a foreign FS (FAT on a flash
+  drive). The Windows driver carries it as `Zone.Identifier` where possible.
+- **TPM:** a firmware update or a hardware change alters the measurements
+  and the TPM will not unlock the vault. That is why the TPM is only an
+  optional add-on and the password and **recovery key** always work.
+- **Mandatory locks** can block other applications (DoS). Hence only for the
+  Windows layer, bound to a handle and with a wait timeout.
 
 ## Cloud and network
 
@@ -405,11 +537,11 @@ an HTTP client. Applications get network access only through a capability
 
 | Phase | Contents |
 |---|---|
-| 1 - format | 16 KiB nodes, superblock/pointer/record v3, feature flags, datasets and the dataset tree, names and symlinks, review fixes, protocol v2 with handles, permissions (capabilities, grants, visibility, profiles) |
-| 2 - versions | commits, branches, clones, diff, merge, change journal, automatic snapshots, trash, version history, undo |
-| 3 - data | compression, instant copies, deduplication, automatic holes, metadata twice and self-healing, background scrub |
-| 4 - protection | encrypted vaults, immutable snapshots, quotas, audit, verified system |
-| 5 - other | indexes and tags, send/receive, transactions, ARC and prefetching, resize, git layer |
+| 1 - format | 16 KiB nodes, superblock/pointer/record v3, feature flags, datasets and the dataset tree (with case sensitivity), names and symlinks, review fixes, protocol v2 with handles and locks, permissions (capabilities, grants, visibility, profiles, no execution on data) |
+| 2 - versions | commits, branches, clones, diff, merge, change journal, automatic snapshots, trash, version history, undo, change watching, file expiry |
+| 3 - data | compression, instant copies, deduplication, automatic holes, metadata twice and self-healing, background scrub, preallocation |
+| 4 - protection | encrypted vaults (key protectors, optional TPM), immutable snapshots, quotas also for applications, audit with a hash chain, file origin, ransomware detection and decoys, disk health, verified system |
+| 5 - other | indexes and tags, send/receive, transactions, ARC and prefetching, resize, git layer, memory-mapped files (with the kernel) |
 | 6 - cloud (after network) | sync service, adapters (S3, WebDAV, device), encrypted backup, files on demand, sync between devices, sharing, third-party clouds |
 
 Each phase ends with tests (unit, model, power loss, in the system),

@@ -498,7 +498,12 @@ pub struct Extent {
     pub csums: Vec<Csum>,
 }
 
+/// Hlavicka extentu: phys u64, pocet u32, priznaky u32, birth u64.
 const EXTENT_HEADER: usize = 24;
+/// Priznak extentu: predalokovany, jeste nezapsany (cte se jako nuly).
+/// Rezervovano pro fazi 3; zatim ovladac extent s priznakem odmitne.
+#[allow(dead_code, reason = "pouzije faze 3 (predalokace)")]
+pub const EXTENT_UNWRITTEN: u32 = 1 << 0;
 
 impl Extent {
     pub fn len(&self) -> u64 {
@@ -524,6 +529,10 @@ impl Extent {
         let len = u32_at(b, 8) as usize;
         if len == 0 || len as u64 > MAX_EXTENT || b.len() != EXTENT_HEADER + len * 16 {
             return Err(Error::Corrupted);
+        }
+        // Priznaky extentu tento ovladac zatim nezna (viz EXTENT_UNWRITTEN).
+        if u32_at(b, 12) != 0 {
+            return Err(Error::NotSupported);
         }
         let csums = (0..len)
             .map(|i| csum_at(b, EXTENT_HEADER + i * 16))

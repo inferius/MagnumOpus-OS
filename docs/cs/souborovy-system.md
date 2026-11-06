@@ -231,7 +231,7 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 | `INODE` | 1 | 0 | záznam objektu, 128 B (viz níže) |
 | `DIRENT` | 2 | FNV-1a hash složeného jména | seznam položek se stejným hashem: (oid u64, druh u8, délka jména u16, jméno) |
 | `INLINE` | 3 | 0 | celý obsah souboru do 1984 B (`INLINE_MAX`) |
-| `EXTENT` | 4 | první logický blok | phys u64, počet u32 (1-496), rezerva u32, birth u64, součty 16 B × počet |
+| `EXTENT` | 4 | první logický blok | phys u64, počet u32 (1-496), příznaky u32 (1 = předalokovaný, rezervované; zatím musí být 0), birth u64, součty 16 B × počet |
 | `SNAPSHOT` | 5 | číslo snapshotu (objekt 0) | `BlockPtr` kořene, generace u64, jméno |
 | `DEADLIST` | 6 | seznam << 32 \| pořadí (objekt 0) | až 80 mrtvých úseků (start u64, délka u64, birth u64) |
 | `SYMLINK` | 7 | 0 | cíl symbolického odkazu (UTF-8, 1-4096 B) |
