@@ -130,6 +130,7 @@ user/echo/       IPC test server
 user/devmgr/     device manager (PCI, starts drivers)
 user/virtio-blk/ disk driver
 user/fsd/        file system service
+tools/osfs/      host tool for the FS: format, check, mount on Windows (WinFsp)
 xtask/           build, disk image, QEMU, tests
 docs/            documentation (cs, en)
 ```

@@ -125,6 +125,7 @@ user/echo/       testovací server pro IPC
 user/devmgr/     správce zařízení (PCI, spouští ovladače)
 user/virtio-blk/ ovladač disku
 user/fsd/        služba souborového systému
+tools/osfs/      nástroj pro FS na hostiteli: format, check, mount ve Windows (WinFsp)
 xtask/           build, obraz disku, QEMU, testy
 docs/            dokumentace (cs, en)
 ```
