@@ -35,7 +35,8 @@ sporné, co funguje:
 | generace objektu, čas vytvoření | ano | **používá** (`Stat`, přehrání logu) |
 | symbolické odkazy, jména do 1024 znaků, limit velikosti | ano | **používá** |
 | datasety, klony s vazbou na původní snapshot | ano | **používá** ([Datasety](#datasety-a-klony)) |
-| diff, obnova jako kopie, handly, protokol v2 | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
+| diff verzí, obnova jako kopie | ano | **používá** ([Rozdíl verzí](#rozdíl-verzí-a-obnova-jako-kopie)) |
+| handly, protokol v2 | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
 
 ## Co nabízí
 
@@ -881,11 +882,47 @@ projde cestu a nechá aktivní dataset cíle. Commit zapíše strom a záznam
 každého změněného datasetu a nakonec kořenový dataset - vše v jedné
 transakci.
 
-⚠️ **Omezení první verze:** diff a obnova jako kopie přijdou v dalším kroku;
-přísná kontrola dvojího použití datového bloku ve fsck platí jen pro kořenový
+⚠️ **Omezení první verze:** přísná kontrola dvojího použití datového bloku ve fsck platí jen pro kořenový
 dataset (klony sdílejí data legitimně); defragmentace na pozadí prochází jen
 aktivní dataset; služba fsd a protokol v1 datasety zatím jen zobrazí (druh 4
 ve výpisu), vytvářet je půjde s protokolem v2 nebo nástrojem `osfs`.
+
+### Rozdíl verzí a obnova jako kopie
+
+```rust
+// Co se v projektu změnilo od snapshotu v1 (proti živé verzi):
+for c in fs.diff("/projekt", "v1", None)? {
+    println!("{:?} {} {:?}", c.kind, c.path, c.old_path); // Modified /cfg.toml None
+}
+// Co změnil klon proti snapshotu, ze kterého vznikl („zkusit bokem“):
+let zmeny = fs.diff_clone("/projekt-bokem")?;
+// Jeden soubor ze snapshotu vedle aktuálního:
+fs.restore_copy("/projekt", "v1", "/cfg.toml", "/projekt/cfg (v1).toml")?;
+```
+
+| Funkce | Co dělá |
+|---|---|
+| `diff(dataset, from, to)` | rozdíl snapshotu `from` a snapshotu `to` (nebo živé verze, `to = None`); seřazený podle cesty |
+| `diff_clone(klon)` | rozdíl klonu proti jeho původnímu snapshotu |
+| `restore_copy(dataset, snapshot, cesta, cíl)` | obnoví soubor, odkaz nebo celou složku ze snapshotu jako kopii `cíl` (nesmí existovat); vnořené datasety přeskočí |
+| `snapshot_readlink_of` | cíl odkazu ve snapshotu |
+
+Druhy změn (`ChangeKind`): `Added`, `Removed`, `Modified` (obsah souboru
+nebo cíl odkazu; u adresáře se nehlásí - jeho změny jsou změny položek),
+`Moved` (jiná cesta, tentýž objekt - `old_path`), `MovedModified`.
+Protože oid je v datasetu stabilní, **přesun se pozná přesně**, ne
+heuristikou podle obsahu jako v gitu.
+
+**Jak to funguje:** pro každou verzi se načte souhrn: objekt -> (druh,
+velikost, otisk obsahu) a objekt -> (rodič, jméno). Otisk obsahu je součet
+XXH3 přes položky dat (extenty se součty bloků, malý soubor, cíl odkazu),
+takže se data nečtou. Při diffu proti živé verzi se nejdřív zapíše buffer
+dat (bez commitu), aby diff viděl i neuložené změny.
+
+⚠️ **Omezení první verze:** diff prochází oba stromy celé (cena podle
+velikosti datasetu, ne změny) - plán: přeskočit podstromy se stejným
+ukazatelem. Obnova jako kopie data opravdu kopíruje; okamžitá kopie přes
+sdílené bloky přijde s okamžitými kopiemi souborů (fáze 3).
 
 ## Snapshoty
 
@@ -1160,6 +1197,7 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `tests/basic.rs` | soubory, adresáře, jména, souhrny, chyby, štěpení stromu, opakované použití místa, plný disk, snapshoty, odhalení poškození |
 | `tests/features.rs` | souvislý zápis, fsync + přehrání, návrat o generaci, mazání snapshotů, defragmentace, TRIM, víc AG + BLAKE3, zhušťování logů |
 | `tests/model.rs` | property test: náhodné sekvence (vytvoření, zápis, zkrácení, mazání, přesun, commit, fsync, „pád“, snapshoty) proti modelu v paměti; na konci fsck |
+| `tests/versions.rs` | první ukázka: snapshot, klon, změny, diff (i přesun), obnova souboru a složky jako kopie, totéž s pádem uprostřed zápisu |
 | `tests/datasets.rs` | datasety: vlastní stromy, pravidla, snapshoty, dva klony z jednoho snapshotu po jeho smazání, snapshoty klonu, fsync přes víc datasetů, výpadek během mazání, účtování místa |
 | `tests/crash.rs` | výpadek během commitu i fsync s náhodnou podmnožinou nezapsaných bloků |
 | `tests/mount.rs` (doplněno) | nečitelný nejnovější slot = jen pro čtení a nejnovější generace přežije; nečitelná dávka logu neztratí potvrzený fsync; `check` jen pro čtení bez zápisu |

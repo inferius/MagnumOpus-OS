@@ -14,6 +14,7 @@ mod check;
 mod data;
 mod dataset;
 mod defrag;
+mod diff;
 mod snap;
 mod zil;
 
@@ -39,6 +40,7 @@ use crate::store::{FormatOptions, Store};
 pub use check::CheckReport;
 pub use dataset::DatasetInfo;
 pub use defrag::DefragReport;
+pub use diff::{Change, ChangeKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {

@@ -37,7 +37,8 @@ what works:
 | object generation, creation time | yes | **uses** (`Stat`, log replay) |
 | symbolic links, names up to 1024 characters, size limit | yes | **uses** |
 | datasets, clones linked to the origin snapshot | yes | **uses** ([Datasets](#datasets-and-clones)) |
-| diff, restore as a copy, handles, protocol v2 | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
+| diff of versions, restore as a copy | yes | **uses** ([Diff of versions](#diff-of-versions-and-restore-as-a-copy)) |
+| handles, protocol v2 | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
 
 ## What it offers
 
@@ -908,12 +909,49 @@ loaded datasets are kept in memory separately and `activate` swaps them.
 writes the tree and record of every changed dataset and finally the root
 dataset - all in one transaction.
 
-⚠️ **Limitations of the first version:** diff and restore as a copy come in
-the next step; the strict check for a data block used twice in fsck applies
+⚠️ **Limitations of the first version:** the strict check for a data block used twice in fsck applies
 only to the root dataset (clones share data legitimately); background
 defragmentation walks only the active dataset; the fsd service and protocol
 v1 only show datasets (kind 4 in listings), creating them will come with
 protocol v2 or the `osfs` tool.
+
+### Diff of versions and restore as a copy
+
+```rust
+// What changed in the project since snapshot v1 (against the live version):
+for c in fs.diff("/project", "v1", None)? {
+    println!("{:?} {} {:?}", c.kind, c.path, c.old_path); // Modified /cfg.toml None
+}
+// What a clone changed against the snapshot it came from ("try on the side"):
+let changes = fs.diff_clone("/project-trial")?;
+// One file from a snapshot next to the current one:
+fs.restore_copy("/project", "v1", "/cfg.toml", "/project/cfg (v1).toml")?;
+```
+
+| Function | What it does |
+|---|---|
+| `diff(dataset, from, to)` | the difference between snapshot `from` and snapshot `to` (or the live version, `to = None`); sorted by path |
+| `diff_clone(clone)` | the difference of a clone against its origin snapshot |
+| `restore_copy(dataset, snapshot, path, dest)` | restores a file, link or whole folder from a snapshot as a copy `dest` (must not exist); nested datasets are skipped |
+| `snapshot_readlink_of` | a link target in a snapshot |
+
+Kinds of change (`ChangeKind`): `Added`, `Removed`, `Modified` (file content
+or link target; not reported for a directory - its changes are changes of
+its entries), `Moved` (a different path, the same object - `old_path`),
+`MovedModified`. Because the oid is stable within a dataset, **a move is
+detected exactly**, not heuristically by content as in git.
+
+**How it works:** for each version a summary is loaded: object -> (kind,
+size, content fingerprint) and object -> (parent, name). The content
+fingerprint is an XXH3 checksum over the data entries (extents with block
+checksums, a small file, a link target), so no data is read. A diff against
+the live version first writes the data buffer (without a commit) so that it
+also sees unsaved changes.
+
+⚠️ **Limitations of the first version:** the diff walks both trees fully
+(cost by dataset size, not by change) - planned: skipping subtrees with the
+same pointer. Restore as a copy really copies the data; an instant copy via
+shared blocks comes with instant file copies (phase 3).
 
 ## Snapshots
 
@@ -1192,6 +1230,7 @@ system returns them:
 | `tests/basic.rs` | files, directories, names, summaries, errors, tree splits, space reuse, full disk, snapshots, corruption detection |
 | `tests/features.rs` | contiguous writes, fsync + replay, generation fallback, snapshot deletion, defragmentation, TRIM, many AGs + BLAKE3, log condensing |
 | `tests/model.rs` | property test: random sequences (create, write, truncate, remove, move, commit, fsync, "crash", snapshots) against an in-memory model; fsck at the end |
+| `tests/versions.rs` | the first demo: snapshot, clone, changes, diff (including a move), restoring a file and a folder as a copy, the same with a crash in the middle of a write |
 | `tests/datasets.rs` | datasets: own trees, rules, snapshots, two clones of one snapshot after its deletion, clone snapshots, fsync across several datasets, power loss during deletion, space accounting |
 | `tests/crash.rs` | power loss during commit and fsync with a random subset of unwritten blocks |
 | `tests/mount.rs` (extended) | an unreadable newest slot = read-only and the newest generation survives; an unreadable log batch does not lose a confirmed fsync; read-only `check` without writes |
