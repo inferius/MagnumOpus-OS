@@ -29,6 +29,9 @@ use virtio::{Buffer, Device, F_VERSION_1, Virtqueue};
 const F_FLUSH: u64 = 1 << 9;
 /// Vlastnost: zarizeni podporuje DISCARD (TRIM).
 const F_DISCARD: u64 = 1 << 13;
+/// Vlastnost: zarizeni pouziva pri DMA preklad platformy (IOMMU). Kdyz ji
+/// zarizeni nabidne, ovladac ji musi prijmout, jinak zarizeni odmitne start.
+const F_ACCESS_PLATFORM: u64 = 1 << 33;
 
 const REQ_IN: u32 = 0;
 const REQ_OUT: u32 = 1;
@@ -97,7 +100,7 @@ fn main(startup: Startup) -> i64 {
         if disk.flush { "ano" } else { "ne" },
         if disk.max_discard > 0 { "ano" } else { "ne" }
     );
-    serve(&mut disk, &client);
+    serve(&mut disk, &client, &resource);
     0
 }
 
@@ -120,7 +123,7 @@ impl Disk {
     fn open(ecam: &Ecam, a: Address, resource: &Resource) -> Result<Self> {
         let device = Device::open(ecam, a, resource)?;
         device.begin_init()?;
-        let features = device.negotiate(F_VERSION_1 | F_FLUSH | F_DISCARD)?;
+        let features = device.negotiate(F_VERSION_1 | F_FLUSH | F_DISCARD | F_ACCESS_PLATFORM)?;
 
         let irq = resource.interrupt()?;
         let msix = MsixTable::open(ecam, a, resource)?;
@@ -177,6 +180,12 @@ impl Disk {
     }
 
     fn request_inner(&mut self, kind: u32, lba: u64, data_len: u32) -> Result<()> {
+        self.request_at(kind, lba, data_len, self.buf_phys + DATA_OFF)
+    }
+
+    /// Pozadavek s daty na fyzicke adrese `data_phys` (normalne DMA buffer
+    /// ovladace; test ochrany DMA pouziva jinou stranku).
+    fn request_at(&mut self, kind: u32, lba: u64, data_len: u32, data_phys: u64) -> Result<()> {
         self.buf.write::<u32>(HDR_OFF, kind);
         self.buf.write::<u32>(HDR_OFF + 4, 0);
         self.buf.write::<u64>(HDR_OFF + 8, lba);
@@ -189,7 +198,7 @@ impl Disk {
         });
         if data_len > 0 {
             chain.push(Buffer {
-                phys: self.buf_phys + DATA_OFF,
+                phys: data_phys,
                 len: data_len,
                 device_writes: kind == REQ_IN,
             });
@@ -212,7 +221,7 @@ impl Disk {
         }
     }
 
-    fn handle(&mut self, req: Request, data: &[u8]) -> (Result<u64>, Vec<u8>) {
+    fn handle(&mut self, req: Request, data: &[u8], resource: &Resource) -> (Result<u64>, Vec<u8>) {
         let range_ok = req.count <= MAX_SECTORS
             && req
                 .lba
@@ -248,6 +257,7 @@ impl Disk {
                 (self.discard(req.lba, req.count).map(|_| 0), Vec::new())
             }
             op::DISCARD => (Err(Error::OutOfRange), Vec::new()),
+            op::TEST_DMA_PROTECTION => (self.test_dma_protection(resource), Vec::new()),
             op::READ | op::WRITE => (Err(Error::OutOfRange), Vec::new()),
             _ => (Err(Error::NotSupported), Vec::new()),
         }
@@ -255,6 +265,24 @@ impl Disk {
 }
 
 impl Disk {
+    /// Test ochrany DMA: necha zarizeni precist sektor 0 do bezne stranky
+    /// ovladace, ktera neni DMA pamet (s IOMMU neni v domene zarizeni).
+    /// Vraci 1, kdyz stranka zustala nezmenena (zapis zablokovan), 0 kdyz ji
+    /// zarizeni prepsalo (bez IOMMU). Zapis jde jen do vlastni pameti
+    /// ovladace, takze test nic neohrozi.
+    fn test_dma_protection(&mut self, resource: &Resource) -> Result<u64> {
+        const PATTERN: u8 = 0xAA;
+        let page = Vmo::create(4096)?;
+        let map = Mapping::new(&page, 0, 4096, MAP_READ | MAP_WRITE)?;
+        map.write_bytes(0, &[PATTERN; 512]);
+        let phys = resource.phys_addr(&page, 0)?;
+        // Vysledek pozadavku je vedlejsi (zarizeni muze chybu hlasit i ne).
+        let _ = self.request_at(REQ_IN, 0, SECTOR as u32, phys);
+        let mut back = [0u8; 512];
+        map.read_bytes(0, &mut back);
+        Ok(back.iter().all(|&b| b == PATTERN) as u64)
+    }
+
     /// DISCARD po usecich podle limitu zarizeni. Popis useku (16 B):
     /// sektor u64, pocet u32, priznaky u32.
     fn discard(&mut self, lba: u64, count: u32) -> Result<()> {
@@ -271,7 +299,7 @@ impl Disk {
     }
 }
 
-fn serve(disk: &mut Disk, client: &Channel) {
+fn serve(disk: &mut Disk, client: &Channel, resource: &Resource) {
     loop {
         let msg = match client.read(None) {
             Ok(m) => m,
@@ -282,7 +310,7 @@ fn serve(disk: &mut Disk, client: &Channel) {
             }
         };
         let (result, data) = match Request::decode(&msg.data) {
-            Some((req, payload)) => disk.handle(req, payload),
+            Some((req, payload)) => disk.handle(req, payload, resource),
             None => (Err(Error::InvalidArgs), Vec::new()),
         };
         if client

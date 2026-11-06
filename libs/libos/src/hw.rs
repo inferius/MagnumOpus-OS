@@ -39,7 +39,22 @@ impl Resource {
     /// delka), nejvys `irq_max` preruseni a `dma_max` bajtu DMA pameti za
     /// dobu zivota. Rozsahy i limity musi lezet v mezich tohoto prostredku.
     pub fn restrict(&self, ranges: &[(u64, u64)], irq_max: u32, dma_max: u64) -> Result<Resource> {
-        sys::resource_create(self.0.raw(), ranges, irq_max, dma_max)
+        sys::resource_create(self.0.raw(), ranges, irq_max, dma_max, 0)
+            .map(|h| Resource::from_handle(Handle::from_raw(h)))
+    }
+
+    /// Jako `restrict`, navic pro konkretni zarizeni PCI: s IOMMU dostane
+    /// zarizeni vlastni domenu a smi pres DMA jen do pameti vytvorene
+    /// pres tento prostredek (`dma_memory`). Bez IOMMU stejne jako `restrict`.
+    pub fn restrict_device(
+        &self,
+        ranges: &[(u64, u64)],
+        irq_max: u32,
+        dma_max: u64,
+        (segment, bus, device, function): (u16, u8, u8, u8),
+    ) -> Result<Resource> {
+        let id = abi::syscall::pci_device(segment, bus, device, function);
+        sys::resource_create(self.0.raw(), ranges, irq_max, dma_max, id)
             .map(|h| Resource::from_handle(Handle::from_raw(h)))
     }
 

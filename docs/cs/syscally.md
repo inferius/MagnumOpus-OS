@@ -267,8 +267,9 @@ Jádro vytvoří jediný kořenový Resource bez omezení a dá ho procesu `init
 Ten každému ovladači vytvoří **omezený** Resource (`RESOURCE_CREATE`): jen
 pamětové BARy jeho zařízení a stránku jeho konfiguračního prostoru PCI,
 nejvýš 8 přerušení a 4 MiB paměti pro DMA. Chyba v ovladači tak nemůže
-přepsat registry jiného zařízení. Bez IOMMU ale zařízení přes DMA pořád
-může zapsat kamkoli do paměti.
+přepsat registry jiného zařízení. S IOMMU navíc zařízení smí přes DMA jen
+do paměti vytvořené přes svůj prostředek (viz [jadro.md](jadro.md#iommu-ochrana-dma));
+bez IOMMU může zapsat kamkoli.
 
 ### `VMO_CREATE_CONTIGUOUS`
 
@@ -302,7 +303,7 @@ Když zařízení přerušení vyvolá, objekt dostane signál `SIGNALED`. Chyby
 
 ### `RESOURCE_CREATE`
 
-`(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`. Užší
+`(resource, ranges_ptr, ranges_count, irq_max, dma_max, device) -> handle`. Užší
 prostředek pro ovladač. `ranges_ptr` ukazuje na `ranges_count` (max. 16)
 dvojic u64 (fyzický začátek, délka; obojí zarovnané na stránky, jinak
 `INVALID_ARGS`). Nový prostředek smí vytvářet okna
@@ -316,9 +317,12 @@ jeho rozsazích a limity nesmí být vyšší (jinak `ACCESS_DENIED`). Vyžaduje
 `MANAGE`. Chyby: `INVALID_ARGS` (víc než 16 rozsahů, nulová délka,
 přetečení), `ACCESS_DENIED`, `BAD_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`.
 
-Bez IOMMU může zařízení přes DMA zapsat kamkoli do paměti; omezený
-prostředek chrání před chybou ovladače při přístupu k registrům, ne před
-špatně naprogramovaným DMA.
+`device` = zařízení, kterému prostředek patří: 0 = žádné, jinak
+`1 << 32 | segment << 16 | sběrnice << 8 | zařízení << 3 | funkce`
+(`abi::syscall::pci_device`). S IOMMU dostane zařízení doménu a paměť z
+`VMO_CREATE_CONTIGUOUS` přes tento prostředek (a jeho potomky) se do ní
+namapuje. Potomek zdědí zařízení rodiče a jiné zvolit nesmí
+(`ACCESS_DENIED`). Bez IOMMU se `device` jen zaznamená.
 
 ### `INTERRUPT_ACK`
 

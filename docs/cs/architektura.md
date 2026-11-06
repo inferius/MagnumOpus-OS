@@ -441,8 +441,9 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
 - **Programy se zatím překládají bez SSE/FPU** (soft-float). Jádro už stav
   FPU/SSE každého vlákna ukládá (FXSAVE, x87 + XMM0-15); AVX (XSAVE) zapne
   milník jazyků.
-- **Bez IOMMU:** ovladač má omezený Resource (jen své registry), ale
-  zařízení přes DMA může zapsat kamkoli.
+- **IOMMU jen Intel VT-d a jen překlad DMA:** chybí AMD-Vi, překlad
+  přerušení, fronta zneplatnění a oblasti RMRR; na stroji bez IOMMU DMA
+  omezené není (jádro to zaloguje).
 - **Kvóty jen na proces**, ne pro skupiny procesů (job).
 - **Mezi třídami QoS přísná priorita** (nižší třídy mohou hladovět).
 - **Paměť po ukončených vláknech** (zásobníky jádra) se používá znovu, ale

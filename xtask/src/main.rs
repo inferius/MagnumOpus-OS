@@ -40,6 +40,7 @@ prepinace:
   --gdb            (run) QEMU ceka na GDB na localhost:1234
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
+  --no-iommu       (run, test) QEMU bez IOMMU (overeni behu bez prekladu DMA)
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
@@ -53,6 +54,8 @@ struct Options {
     gdb: bool,
     headless: bool,
     accel: Option<String>,
+    /// QEMU bez emulovane IOMMU (Intel VT-d).
+    no_iommu: bool,
     qemu_args: Vec<OsString>,
     /// Testovaci beh: kernel s feature `qemu-test`, QEMU s isa-debug-exit.
     test: bool,
@@ -85,12 +88,14 @@ fn run_cli() -> Result<()> {
         gdb: false,
         headless: false,
         accel: None,
+        no_iommu: false,
         qemu_args: Vec::new(),
         test: false,
     };
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
+            Some("--no-iommu") => opts.no_iommu = true,
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
             Some("--accel") => {
@@ -373,8 +378,16 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
     let mut cmd = Command::new(&qemu);
     cmd.arg("-machine")
         .arg(format!("q35,accel={accel}"))
-        .args(["-cpu", "max", "-smp", "4", "-m", "512M"])
-        .arg("-drive")
+        .args(["-cpu", "max", "-smp", "4", "-m", "512M"]);
+    // IOMMU (Intel VT-d) pred zarizenimi PCI, ktera preklada; preklad
+    // preruseni zatim ne (intremap=off).
+    if !opts.no_iommu {
+        cmd.args(["-device", "intel-iommu,intremap=off"]);
+    }
+    // Disky jen v modernim rezimu virtio a s prekladem DMA pres IOMMU.
+    let blk =
+        |drive: &str| format!("virtio-blk-pci,drive={drive},disable-legacy=on,iommu_platform=on");
+    cmd.arg("-drive")
         .arg(pflash_arg(&ovmf_code, true))
         .arg("-drive")
         .arg(pflash_arg(&ovmf_vars, false))
@@ -383,21 +396,21 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             "if=none,id=osdisk,format=raw,file={}",
             image.display()
         ))
-        .args(["-device", "virtio-blk-pci,drive=osdisk"])
+        .args(["-device", &blk("osdisk")])
         // Maly prazdny disk jen pro test ovladace (testy do nej zapisuji).
         .arg("-drive")
         .arg(format!(
             "if=none,id=scratch,format=raw,file={}",
             scratch_disk()?.display()
         ))
-        .args(["-device", "virtio-blk-pci,drive=scratch"])
+        .args(["-device", &blk("scratch")])
         // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
         .arg("-drive")
         .arg(format!(
             "if=none,id=data,format=raw,discard=unmap,file={}",
             datadisk::create(&target_dir())?.display()
         ))
-        .args(["-device", "virtio-blk-pci,drive=data"])
+        .args(["-device", &blk("data")])
         // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.
         .args(["-nic", "none"])
         // Seriova linka do terminalu a zaroven do souboru (target/serial.log),

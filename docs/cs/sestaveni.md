@@ -25,7 +25,9 @@ v `/usr/share/...`. Jinak proměnné prostředí `QEMU`, `OVMF_CODE`, `OVMF_VARS
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), dokumentace, pak jádro a userspace v QEMU bez okna |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 
-Přepínače: `--release`, `--headless` (bez okna), `--gdb` (QEMU čeká na
+Přepínače: `--release`, `--headless` (bez okna), `--no-iommu` (QEMU bez
+emulované IOMMU: ověření běhu bez překladu DMA; test „IOMMU: zarizeni
+nezapise mimo prideleny DMA“ pak podle očekávání selže), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
 
@@ -61,7 +63,8 @@ os/kernel.elf          jádro (ELF s ladicími symboly)
 os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd
 ```
 
-QEMU dostane tři disky (všechny virtio-blk):
+QEMU dostane emulovanou IOMMU (`intel-iommu`, bez překladu přerušení) a tři
+disky (všechny virtio-blk v moderním režimu s `iommu_platform=on`):
 
 | Disk | Soubor | Obsah |
 |---|---|---|

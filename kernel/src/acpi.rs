@@ -48,6 +48,20 @@ pub struct Platform {
     pub hpet_phys: Option<u64>,
     /// Okna konfiguracniho prostoru PCI Express (ECAM) z tabulky MCFG.
     pub pci_ecam: Vec<PciEcam>,
+    /// Jednotky IOMMU (Intel VT-d) z tabulky DMAR.
+    pub iommus: Vec<IommuUnit>,
+}
+
+/// Jednotka preklada DMA (DRHD z tabulky DMAR).
+#[derive(Debug, Clone)]
+pub struct IommuUnit {
+    pub segment: u16,
+    /// Fyzicka adresa registru.
+    pub registers: u64,
+    /// Pokryva vsechna zarizeni segmentu, ktera nepokryva jina jednotka.
+    pub include_all: bool,
+    /// Zarizeni vyjmenovana v tabulce: (sbernice, zarizeni << 3 | funkce).
+    pub devices: Vec<(u8, u8)>,
 }
 
 /// Jedno okno ECAM: konfigurace sbernic `bus_start..=bus_end` segmentu.
@@ -162,6 +176,7 @@ pub fn parse(rsdp_phys: u64) -> Result<Platform> {
                 found_madt = true;
             }
             b"MCFG" => parse_mcfg(t, &mut platform),
+            b"DMAR" => parse_dmar(t, &mut platform),
             b"HPET" => match u64_at(t, 44) {
                 Some(addr) => platform.hpet_phys = Some(addr),
                 None => log::warn!("tabulka HPET je prilis kratka, vynechana"),
@@ -236,5 +251,56 @@ fn parse_mcfg(t: &[u8], p: &mut Platform) {
             p.pci_ecam.push(e);
         }
         off += 16;
+    }
+}
+
+/// DMAR: popis jednotek IOMMU. Za hlavickou (36 B) sirka adresy (1 B),
+/// priznaky (1 B), rezerva (10 B); od offsetu 48 struktury (typ u16, delka
+/// u16). Typ 0 = DRHD: priznaky (bit 0 = vsechna zarizeni segmentu),
+/// segment (offset 6), adresa registru (offset 8), od offsetu 16 rozsahy
+/// zarizeni (typ u8, delka u8, ..., sbernice na offsetu 5, cesta
+/// (zarizeni, funkce) od offsetu 6). Ostatni typy (RMRR, ATSR) se zatim
+/// nepouzivaji.
+fn parse_dmar(t: &[u8], p: &mut Platform) {
+    let mut off = 48;
+    while let (Some(kind), Some(len)) = (u16_at(t, off), u16_at(t, off + 2)) {
+        let len = len as usize;
+        if len < 4 || off + len > t.len() {
+            log::warn!("DMAR: poskozena struktura na offsetu {off}, zbytek vynechan");
+            return;
+        }
+        let s = &t[off..off + len];
+        if kind == 0 {
+            let (Some(flags), Some(segment), Some(registers)) =
+                (u8_at(s, 4), u16_at(s, 6), u64_at(s, 8))
+            else {
+                log::warn!("DMAR: prilis kratka DRHD, vynechana");
+                off += len;
+                continue;
+            };
+            let mut devices = Vec::new();
+            let mut so = 16;
+            while let (Some(_stype), Some(slen)) = (u8_at(s, so), u8_at(s, so + 1)) {
+                let slen = slen as usize;
+                if slen < 6 || so + slen > s.len() {
+                    break;
+                }
+                // Jen primo pripojena zarizeni (cesta delky 1); mosty
+                // s podrizenymi sbernicemi zatim ne.
+                if let (Some(bus), Some(dev), Some(func)) =
+                    (u8_at(s, so + 5), u8_at(s, so + 6), u8_at(s, so + 7))
+                {
+                    devices.push((bus, dev << 3 | (func & 7)));
+                }
+                so += slen;
+            }
+            p.iommus.push(IommuUnit {
+                segment,
+                registers,
+                include_all: flags & 1 != 0,
+                devices,
+            });
+        }
+        off += len;
     }
 }

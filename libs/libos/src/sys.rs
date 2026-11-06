@@ -317,6 +317,7 @@ pub fn resource_create(
     ranges: &[(u64, u64)],
     irq_max: u32,
     dma_max: u64,
+    device: u64,
 ) -> Result<u32> {
     let mut raw = alloc::vec::Vec::with_capacity(ranges.len() * 16);
     for &(s, l) in ranges {
@@ -331,7 +332,7 @@ pub fn resource_create(
             ranges.len() as u64,
             irq_max as u64,
             dma_max,
-            0,
+            device,
         ],
     )
     .map(|h| h as u32)

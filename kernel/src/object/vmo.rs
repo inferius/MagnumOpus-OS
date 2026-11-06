@@ -33,6 +33,9 @@ pub struct MemoryObject {
     size: u64,
     pages: Vec<PhysAddr>,
     kind: Kind,
+    /// Domena IOMMU, ve ktere je pamet namapovana pro DMA zarizeni
+    /// (odmapuje se pred vracenim stranek alokatoru).
+    dma: Option<Arc<crate::arch::iommu::Domain>>,
 }
 
 impl MemoryObject {
@@ -52,12 +55,27 @@ impl MemoryObject {
             size: count as u64 * PAGE,
             pages,
             kind: Kind::Pages,
+            dma: None,
         };
         for _ in 0..count {
             // Pri neuspechu se uz alokovane stranky uvolni v Drop.
             vmo.pages
                 .push(phys::alloc_user_frame_zeroed().ok_or(Error::NoMemory)?);
         }
+        Ok(Arc::new(vmo))
+    }
+
+    /// Fyzicky souvisly objekt pro DMA (max. 4 MiB), vyplneny nulami; s
+    /// domenou IOMMU ho zarizeni smi cist i zapisovat (identicky).
+    pub fn new_contiguous_dma(
+        size: u64,
+        domain: Option<Arc<crate::arch::iommu::Domain>>,
+    ) -> Result<Arc<Self>, Error> {
+        let vmo = Self::new_contiguous(size)?;
+        let Some(domain) = domain else { return Ok(vmo) };
+        let mut vmo = Arc::try_unwrap(vmo).map_err(|_| Error::BadState)?;
+        domain.map(vmo.pages[0].as_u64(), vmo.allocated_bytes() / PAGE)?;
+        vmo.dma = Some(domain);
         Ok(Arc::new(vmo))
     }
 
@@ -83,6 +101,7 @@ impl MemoryObject {
             size: count * PAGE,
             pages,
             kind: Kind::Contiguous { order },
+            dma: None,
         }))
     }
 
@@ -101,6 +120,7 @@ impl MemoryObject {
             size: count * PAGE,
             pages,
             kind: Kind::Physical,
+            dma: None,
         }))
     }
 
@@ -185,6 +205,10 @@ impl MemoryObject {
 
 impl Drop for MemoryObject {
     fn drop(&mut self) {
+        // Zarizeni nejdriv ztrati pristup (IOMMU), az pak se pamet vrati.
+        if let Some(d) = self.dma.take() {
+            d.unmap(self.pages[0].as_u64(), self.allocated_bytes() / PAGE);
+        }
         // Objekt uz nikdo nema namapovany (mapovani drzi Arc), takze stranky
         // smi zpet do alokatoru. Fyzicke okno alokatoru nepatri.
         match self.kind {

@@ -110,6 +110,64 @@ the upper half with the kernel):
 - **Limits:** handles, threads, mappings, channel queues and the kernel
   memory reserve - see [syscalls.md](syscalls.md#resource-limits).
 
+## IOMMU (DMA protection)
+
+A device writes into memory on its own (DMA), to the addresses its driver
+puts into descriptors. Without an IOMMU a buggy driver can therefore make
+the device overwrite the kernel. The kernel enables **Intel VT-d** (ACPI
+DMAR table) when the machine has it:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="IOMMU">
+<defs><marker id="io1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="30" width="150" height="60" rx="6"/><text class="t b" x="85" y="55" text-anchor="middle">device 00:03.0</text><text class="m" x="85" y="74" text-anchor="middle">DMA to address X</text>
+<path class="ln" d="M160 60 L218 60" marker-end="url(#io1)"/>
+<rect class="acc" x="220" y="20" width="200" height="80" rx="6"/><text class="t b" x="320" y="45" text-anchor="middle">IOMMU (VT-d)</text><text class="m" x="320" y="64" text-anchor="middle">root → context 00:03.0</text><text class="m" x="320" y="81" text-anchor="middle">→ domain → page tables</text>
+<path class="ln" d="M420 45 L498 45" marker-end="url(#io1)"/>
+<rect class="ok" x="500" y="20" width="250" height="50" rx="6"/><text class="t" x="625" y="42" text-anchor="middle">X is in the domain (driver DMA memory)</text><text class="m" x="625" y="60" text-anchor="middle">→ access to RAM allowed</text>
+<path class="ln" d="M420 80 L498 120" marker-end="url(#io1)"/>
+<rect class="err" x="500" y="95" width="250" height="60" rx="6"/><text class="t" x="625" y="118" text-anchor="middle">X outside the domain</text><text class="m" x="625" y="136" text-anchor="middle">→ blocked + interrupt → kernel log</text>
+<text class="m" x="10" y="190">A device without a domain (no driver) may not DMA at all. The domain comes from a restricted Resource</text>
+<text class="m" x="10" y="208">with the device identity; only memory from `dma_memory` of that Resource is mapped (device address = physical).</text>
+</svg>
+<figcaption>DMA translation: each device may access only its own domain.</figcaption>
+</figure>
+
+- **Default: denied.** After enabling, no device has a domain, so DMA does
+  not pass (a device without a driver writes nothing).
+- **A device domain** is created when the device manager creates a
+  restricted Resource with the device identity (`RESOURCE_CREATE` with the
+  `device` argument, `Resource::restrict_device` in libos). Several
+  resources of the same device share one domain.
+- **Only DMA memory** from that resource is mapped (`VMO_CREATE_CONTIGUOUS`),
+  identically: the device address is the physical address, the driver does
+  not change. When the memory object is destroyed, its pages are unmapped
+  from the domain before they return to the allocator.
+- **A blocked access** is reported by the IOMMU with an interrupt (vector
+  36) and the kernel logs it as a warning with the device, address and
+  reason code (see [messages.md](messages.md#kernel-iommu)).
+- **Without an IOMMU** (the machine has none, or `cargo xtask run
+  --no-iommu`) the kernel logs a warning and DMA is not restricted.
+- A virtio driver must accept the `VIRTIO_F_ACCESS_PLATFORM` feature (the
+  device then uses translation); virtio-blk does.
+
+A driver's steps (nothing extra compared to a system without an IOMMU):
+
+```rust
+// devmgr: a resource only for device 00:03.0 (BARs, configuration, quotas)
+let res = root.restrict_device(&ranges, 8, 4 << 20, (0, 0x00, 0x03, 0))?;
+// driver: DMA memory is mapped into the device's domain
+let dma = res.dma_memory(64 * 1024)?;
+let phys = res.phys_addr(&dma, 0)?; // = device address
+```
+
+Implementation: `kernel/src/arch/x86_64/iommu.rs` (root table -> bus
+context tables -> domain page tables with 3 or 4 levels depending on the
+unit's capabilities; after every change a global invalidation of the
+context cache and the IOTLB). Missing for now: the invalidation queue
+(QI), interrupt remapping, RMRR regions (devices the firmware keeps using
+after boot, e.g. older USB), devices behind PCI bridges listed in DMAR.
+
 ## Syscalls
 
 Entered with `syscall`, returned through `iretq` (avoiding `sysret` pitfalls;

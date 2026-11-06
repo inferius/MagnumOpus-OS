@@ -56,7 +56,7 @@ Each type owns a handle and closes it when dropped.
 | `Process` | process | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |
 | `Thread` | thread | `create`, `start`, `wait_exit` |
 | `Mapping` | a memory object mapped into the own address space (unmapped when dropped) | `new`, `read::<T>`, `write::<T>`, `read_bytes`, `write_bytes` |
-| `hw::Resource` | hardware access (drivers) | `restrict`, `device_memory`, `dma_memory`, `phys_addr`, `interrupt` |
+| `hw::Resource` | hardware access (drivers) | `restrict`, `restrict_device` (with an IOMMU domain), `device_memory`, `dma_memory`, `phys_addr`, `interrupt` |
 | `hw::Interrupt` | device interrupt (MSI) | `msi`, `wait(deadline)` |
 
 `Mapping::read`/`write` are volatile (suitable for device registers too)

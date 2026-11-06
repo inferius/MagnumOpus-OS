@@ -45,6 +45,16 @@ Loader píše přes konzoli firmware (obrazovka i sériová linka) ve formátu
 | `necekane preruseni, vektor N` | W | Přišlo přerušení, které nikdo neobsluhuje (zatím se nepoužívají přerušení zařízení). Jednotlivý výskyt je neškodný. |
 | `prilis mnoho prepsani urovne logu, X ignorovan` | W | Maximálně 16 modulů může mít vlastní úroveň logu. |
 
+## Jádro: IOMMU
+
+| Hláška | Úroveň | Význam a řešení |
+|---|---|---|
+| `IOMMU VT-d na ADRESA: segment S, N urovne tabulek, ...` | I | Překlad DMA je zapnutý; zařízení smí jen do své domény. |
+| `IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do pameti ...` | W | Stroj nemá VT-d (tabulka DMAR chybí), nebo běh s `--no-iommu`. Systém funguje, ale chyba ovladače může přes DMA poškodit paměť. Na reálném PC zapnout VT-d v nastavení firmwaru. |
+| `IOMMU na ADRESA nejde zapnout: ...` | E | Jednotka nepodporuje 39/48bitové tabulky (`NOT_SUPPORTED`), chybí paměť, nebo nedokončila příkaz (`TIMED_OUT`). Zařízení pod ní nejsou chráněná. |
+| `IOMMU: ... nedobehlo` | E | Jednotka nedokončila příkaz nebo zneplatnění do 1 s (chyba hardwaru nebo emulace). |
+| `IOMMU: zablokovan zapis/cteni zarizeni BB:ZZ.F na adrese A (duvod R)` | W | Zařízení sáhlo mimo svou doménu: chyba ovladače (špatná adresa v deskriptoru) nebo vadné zařízení. Paměť zůstala nedotčená. Kód důvodu podle specifikace VT-d (např. 0x5 = stránka v doméně chybí, 0x6 = zápis do stránky jen pro čtení). |
+
 ## Jádro: procesy
 
 | Hláška | Úroveň | Význam a řešení |

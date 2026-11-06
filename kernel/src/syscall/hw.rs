@@ -28,7 +28,7 @@ pub fn vmo_create_contiguous(a: Args) -> Result<u64> {
     let res = check_resource(&p, a[0])?;
     // Velikost overi `new_contiguous`; kvota se odecte az po uspechu a ve
     // skutecne velikosti (alokator pridava bloky 2^n stranek).
-    let vmo = MemoryObject::new_contiguous(a[1])?;
+    let vmo = MemoryObject::new_contiguous_dma(a[1], res.domain().cloned())?;
     res.charge_dma(vmo.allocated_bytes())?;
     insert(&p, vmo)
 }
@@ -80,7 +80,7 @@ pub fn interrupt_ack(a: Args) -> Result<u64> {
     Ok(0)
 }
 
-/// `RESOURCE_CREATE(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`.
+/// `RESOURCE_CREATE(resource, ranges_ptr, ranges_count, irq_max, dma_max, device) -> handle`.
 /// Rozsahy jsou dvojice u64 (fyzicky zacatek, delka).
 pub fn resource_create(a: Args) -> Result<u64> {
     use crate::object::resource::MAX_RANGES;
@@ -100,5 +100,12 @@ pub fn resource_create(a: Args) -> Result<u64> {
         })
         .collect();
     let irq_max = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
-    insert(&p, parent.restrict(ranges, irq_max, a[4])?)
+    // Zarizeni: 0 = zadne, jinak 1 << 32 | segment << 16 | sbernice << 8 |
+    // zarizeni << 3 | funkce.
+    let device = match a[5] {
+        0 => None,
+        v if v >> 32 == 1 => Some(((v >> 16) as u16, (v >> 8) as u8, v as u8)),
+        _ => return Err(Error::InvalidArgs),
+    };
+    insert(&p, parent.restrict(ranges, irq_max, a[4], device)?)
 }

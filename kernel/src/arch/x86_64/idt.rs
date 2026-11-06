@@ -254,6 +254,10 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
             crate::mm::tlb::on_flush_ipi();
         }
         v if v == VECTOR_HALT as u64 => halt_forever(),
+        v if v == super::apic::VECTOR_IOMMU_FAULT as u64 => {
+            apic::eoi();
+            super::iommu::on_fault_interrupt();
+        }
         v if v == VECTOR_SPURIOUS as u64 => {} // spurious se nepotvrzuje
         v if crate::object::interrupt::is_device_vector(v) => {
             apic::eoi();

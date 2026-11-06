@@ -274,8 +274,9 @@ device manager. The device manager creates a **restricted** Resource for
 each driver (`RESOURCE_CREATE`): only the memory BARs of its device and the
 page of its PCI configuration space, at most 8 interrupts and 4 MiB of DMA
 memory. A driver bug therefore cannot overwrite another device's registers.
-Without an IOMMU, however, a device can still write anywhere in memory
-through DMA.
+With an IOMMU the device may moreover DMA only into memory created through
+its resource (see [kernel.md](kernel.md#iommu-dma-protection)); without an
+IOMMU it can write anywhere.
 
 ### `VMO_CREATE_CONTIGUOUS`
 
@@ -310,7 +311,7 @@ the device raises the interrupt, the object gets `SIGNALED`. Errors:
 
 ### `RESOURCE_CREATE`
 
-`(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`. A
+`(resource, ranges_ptr, ranges_count, irq_max, dma_max, device) -> handle`. A
 narrower resource for a driver. `ranges_ptr` points to `ranges_count`
 (max. 16) u64 pairs (physical start, length; both page-aligned, otherwise
 `INVALID_ARGS`). The new resource may create
@@ -325,9 +326,13 @@ not be higher (otherwise `ACCESS_DENIED`). Requires `MANAGE`. Errors:
 `INVALID_ARGS` (more than 16 ranges, zero length, overflow),
 `ACCESS_DENIED`, `BAD_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`.
 
-Without an IOMMU a device can write anywhere in memory through DMA; a
-restricted resource protects against driver mistakes when accessing
-registers, not against wrongly programmed DMA.
+`device` = the device the resource belongs to: 0 = none, otherwise
+`1 << 32 | segment << 16 | bus << 8 | device << 3 | function`
+(`abi::syscall::pci_device`). With an IOMMU the device gets a domain and
+memory from `VMO_CREATE_CONTIGUOUS` through this resource (and its
+children) is mapped into it. A child inherits the parent's device and may
+not choose another (`ACCESS_DENIED`). Without an IOMMU `device` is only
+recorded.
 
 ### `INTERRUPT_ACK`
 

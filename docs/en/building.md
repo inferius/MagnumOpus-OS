@@ -26,8 +26,10 @@ next to QEMU or in `/usr/share/...`. Otherwise set `QEMU`, `OVMF_CODE`,
 | `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), documentation, then kernel and userspace in QEMU without a window |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
-Options: `--release`, `--headless` (no window), `--gdb` (QEMU waits for
-GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
+Options: `--release`, `--headless` (no window), `--no-iommu` (QEMU without
+an emulated IOMMU: checks running without DMA translation; the test
+"IOMMU: zarizeni nezapise mimo prideleny DMA" then fails as expected),
+`--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
 `-- -cpu max,-x2apic`).
 
 The file system has its own host tests (fast, no QEMU):
@@ -63,7 +65,8 @@ os/kernel.elf          kernel (ELF with debug symbols)
 os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd
 ```
 
-QEMU gets three disks (all virtio-blk):
+QEMU gets an emulated IOMMU (`intel-iommu`, without interrupt remapping)
+and three disks (all virtio-blk in modern mode with `iommu_platform=on`):
 
 | Disk | File | Contents |
 |---|---|---|

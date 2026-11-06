@@ -13,6 +13,10 @@ pub const TESTS: &[Test] = &[
     ("testovaci disk: zapis a cteni", scratch_roundtrip),
     ("cteni za koncem disku -> OUT_OF_RANGE", read_past_end),
     ("omezeny Resource: rozsahy a kvoty", restricted_resource),
+    (
+        "IOMMU: zarizeni nezapise mimo prideleny DMA",
+        dma_protection,
+    ),
 ];
 
 /// Testovaci disk ma presne 1 MiB (viz xtask).
@@ -140,6 +144,19 @@ fn restricted_resource(s: &Startup) -> TestResult {
         libos::sys::vmo_create_contiguous(root.handle().raw(), u64::MAX).err(),
         Some(Error::InvalidArgs),
         "obri velikost DMA (nesmi shodit jadro)"
+    );
+    Ok(())
+}
+
+fn dma_protection(_: &Startup) -> TestResult {
+    // Bez IOMMU (`cargo xtask test --no-iommu`) zarizeni stranku prepise a
+    // test ohlasi, ze ochrana chybi.
+    let protected = scratch()?
+        .test_dma_protection()
+        .map_err(|e| fail("test DMA", e))?;
+    check!(
+        protected,
+        "zarizeni zapsalo mimo svou DMA pamet (IOMMU nechrani)"
     );
     Ok(())
 }

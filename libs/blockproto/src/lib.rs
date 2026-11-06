@@ -36,6 +36,9 @@ pub mod op {
     /// Sektory `lba..lba+count` uz nejsou pouzite (TRIM/UNMAP). Jen
     /// napoveda: obsah je pak nedefinovany. Bez podpory `NOT_SUPPORTED`.
     pub const DISCARD: u32 = 4;
+    /// Test ochrany DMA (IOMMU): ovladac necha zarizeni zapsat do sve
+    /// stranky, ktera neni DMA pamet. `value` = 1 zapis zablokovan, 0 ne.
+    pub const TEST_DMA_PROTECTION: u32 = 100;
 }
 
 /// Rozebrany pozadavek.
@@ -207,6 +210,17 @@ impl BlockClient {
             done += count as u64;
         }
         Ok(())
+    }
+
+    /// Test ochrany DMA: `true` = zarizeni nemohlo zapsat mimo pridelenou
+    /// pamet (IOMMU), `false` = mohlo.
+    pub fn test_dma_protection(&self) -> Result<bool> {
+        let req = Request {
+            op: op::TEST_DMA_PROTECTION,
+            count: 0,
+            lba: 0,
+        };
+        self.call(req, &[]).map(|(v, _)| v == 1)
     }
 
     /// Kanal k ovladaci (predani klienta jinemu procesu).

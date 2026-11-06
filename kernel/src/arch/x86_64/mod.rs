@@ -5,6 +5,7 @@ mod gdt;
 mod hpet;
 mod idt;
 pub mod interrupts;
+pub mod iommu;
 pub mod paging;
 mod serial;
 mod smp;

@@ -56,7 +56,15 @@ fn main(startup: Startup) -> i64 {
         }
         for a in virtio::find(&functions, VIRTIO_BLK.0, VIRTIO_BLK.1) {
             let f = functions.iter().find(|f| f.address == a).unwrap();
-            match start_block_driver(&fs, resource, vmo, &ecam, f, &startup.bootstrap) {
+            match start_block_driver(
+                &fs,
+                resource,
+                vmo,
+                &ecam,
+                (*arg >> 16) as u16,
+                f,
+                &startup.bootstrap,
+            ) {
                 Ok(p) => drivers.push(p),
                 Err(e) => println!("devmgr: ovladac pro {} nelze spustit: {e}", f.address),
             }
@@ -112,13 +120,16 @@ fn start_block_driver(
     resource: &libos::hw::Resource,
     ecam_vmo: &libos::Vmo,
     ecam: &Ecam,
+    segment: u16,
     f: &Function,
     parent: &Channel,
 ) -> libos::Result<Process> {
     let image = fs.find("virtio-blk").ok_or(libos::Error::NotFound)?;
     // Ovladac dostane jen sve zarizeni: BARy, svou konfiguraci, kvoty.
     let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
-    let device = resource.restrict(&ranges, DRIVER_IRQ_MAX, DRIVER_DMA_MAX)?;
+    let a = f.address;
+    let id = (segment, a.bus, a.device, a.function);
+    let device = resource.restrict_device(&ranges, DRIVER_IRQ_MAX, DRIVER_DMA_MAX, id)?;
     let config = device.device_memory(config_phys, pci::CONFIG_SIZE)?;
     let (client_end, driver_end) = Channel::create()?;
     let handles = vec![
@@ -127,7 +138,6 @@ fn start_block_driver(
         StartHandle::user(driver_end.into_handle()),
     ];
     let (process, control) = libos::spawn("virtio-blk", image, handles)?;
-    let a = f.address;
     let config = format!("pci {} {} {}", a.bus, a.device, a.function);
     control.write(config.as_bytes(), Vec::new())?;
     // Konec kanalu ke klientovi patri initu (ten ho preda souborovemu systemu).

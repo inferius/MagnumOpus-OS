@@ -55,7 +55,7 @@ Každý typ vlastní handle a zavře ho při zrušení (`Drop`).
 | `Process` | proces | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |
 | `Thread` | vlákno | `create`, `start`, `wait_exit` |
 | `Mapping` | namapovaný objekt paměti ve vlastním adresním prostoru (odmapuje se při zrušení) | `new`, `read::<T>`, `write::<T>`, `read_bytes`, `write_bytes` |
-| `hw::Resource` | oprávnění k hardwaru (ovladače) | `restrict`, `device_memory`, `dma_memory`, `phys_addr`, `interrupt` |
+| `hw::Resource` | oprávnění k hardwaru (ovladače) | `restrict`, `restrict_device` (s doménou IOMMU), `device_memory`, `dma_memory`, `phys_addr`, `interrupt` |
 | `hw::Interrupt` | přerušení zařízení (MSI) | `msi`, `wait(deadline)` |
 
 `Mapping::read`/`write` jsou volatile (vhodné i pro registry zařízení) a

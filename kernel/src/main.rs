@@ -120,6 +120,10 @@ extern "sysv64" fn kernel_main(boot_info: u64) -> ! {
 
 /// Prvni vlakno jadra: self-testy jadra a spusteni procesu `init`.
 fn boot_main(boot_info: &'static BootInfo) {
+    // IOMMU pred spustenim ovladacu (od ted je DMA zarizeni bez domeny
+    // zakazane). Bezi uz vsechna CPU, takze jde nasmerovat preruseni chyb.
+    // SAFETY: jednou, pred spustenim procesu.
+    unsafe { arch::iommu::init(&PLATFORM.get().unwrap().iommus) };
     let kernel_ok = tests::run_all();
     if kernel_ok {
         log::info!("self-testy jadra prosly");

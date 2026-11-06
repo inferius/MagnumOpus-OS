@@ -38,6 +38,10 @@ pub struct Resource {
     /// Rodic omezeneho prostredku: kvoty se pocitaji v celem retezci, takze
     /// potomci dohromady nikdy neprekroci limit rodice.
     parent: Option<Arc<Resource>>,
+    /// Zarizeni (segment, sbernice, zarizeni << 3 | funkce), kteremu
+    /// prostredek patri, a jeho domena IOMMU (DMA pamet se mapuje do ni).
+    device: Option<(u16, u8, u8)>,
+    domain: Option<Arc<crate::arch::iommu::Domain>>,
 }
 
 /// Nejvic rozsahu jednoho omezeneho prostredku.
@@ -78,6 +82,8 @@ impl Resource {
             core: ObjectCore::new(Signals::NONE),
             limits: None,
             parent: None,
+            device: None,
+            domain: None,
         })
     }
 
@@ -89,6 +95,7 @@ impl Resource {
         ranges: Vec<(u64, u64)>,
         irq_max: u32,
         dma_max: u64,
+        device: Option<(u16, u8, u8)>,
     ) -> Result<Arc<Self>, Error> {
         let bad = |&(s, l): &(u64, u64)| {
             l == 0
@@ -105,6 +112,17 @@ impl Resource {
                 return Err(Error::AccessDenied);
             }
         }
+        // Zarizeni: potomek zdedi zarizeni rodice; jine nesmi zvolit.
+        let device = match (self.device, device) {
+            (Some(p), Some(d)) if p != d => return Err(Error::AccessDenied),
+            (Some(p), _) => Some(p),
+            (None, d) => d,
+        };
+        let domain = match (&self.domain, device) {
+            (Some(d), _) => Some(d.clone()),
+            (None, Some((seg, bus, devfn))) => crate::arch::iommu::domain(seg, bus, devfn)?,
+            (None, None) => None,
+        };
         Ok(Arc::new(Self {
             core: ObjectCore::new(Signals::NONE),
             limits: Some(Limits {
@@ -115,6 +133,8 @@ impl Resource {
                 dma_used: AtomicU64::new(0),
             }),
             parent: Some(self.clone()),
+            device,
+            domain,
         }))
     }
 
@@ -133,6 +153,11 @@ impl Resource {
             .is_none_or(|l| contains(&l.ranges, first, end - first))
     }
 
+    /// Domena IOMMU zarizeni (DMA pamet z tohoto prostredku se mapuje do ni).
+    pub fn domain(&self) -> Option<&Arc<crate::arch::iommu::Domain>> {
+        self.domain.as_ref()
+    }
+
     /// Retezec omezenych prostredku od tohoto ke koreni.
     fn chain(&self) -> impl Iterator<Item = &Limits> {
         core::iter::successors(Some(self), |r| r.parent.as_deref())
@@ -142,15 +167,13 @@ impl Resource {
     /// Zapocita jedno preruseni v celem retezci (limit plati po celou dobu
     /// zivota prostredku; neuspesny pokus nic nespotrebuje).
     pub fn charge_irq(&self) -> Result<(), Error> {
-        let mut taken = 0;
-        for l in self.chain() {
+        for (taken, l) in self.chain().enumerate() {
             if !l.take_irq() {
                 for l in self.chain().take(taken) {
                     l.irqs.fetch_sub(1, Ordering::AcqRel);
                 }
                 return Err(Error::NoResources);
             }
-            taken += 1;
         }
         Ok(())
     }
@@ -164,15 +187,13 @@ impl Resource {
 
     /// Zapocita DMA pamet v celem retezci.
     pub fn charge_dma(&self, bytes: u64) -> Result<(), Error> {
-        let mut taken = 0;
-        for l in self.chain() {
+        for (taken, l) in self.chain().enumerate() {
             if !l.take_dma(bytes) {
                 for l in self.chain().take(taken) {
                     l.dma_used.fetch_sub(bytes, Ordering::AcqRel);
                 }
                 return Err(Error::NoResources);
             }
-            taken += 1;
         }
         Ok(())
     }

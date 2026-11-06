@@ -69,7 +69,7 @@ pub const INTERRUPT_CREATE: u64 = 28;
 /// Potvrzeni preruseni (smaze SIGNALED). `(interrupt)`
 pub const INTERRUPT_ACK: u64 = 29;
 /// Omezeny prostredek pro ovladac.
-/// `(resource, ranges_ptr, ranges_count, irq_max, dma_max) -> handle`
+/// `(resource, ranges_ptr, ranges_count, irq_max, dma_max, device) -> handle`
 pub const RESOURCE_CREATE: u64 = 30;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
@@ -89,3 +89,12 @@ pub const WAIT_MANY_MAX: usize = 64;
 pub const NAME_MAX: usize = 64;
 /// Maximalni delka zpravy DEBUG_LOG.
 pub const DEBUG_LOG_MAX: usize = 1024;
+
+/// Hodnota argumentu `device` syscallu `RESOURCE_CREATE` pro zarizeni PCI.
+pub const fn pci_device(segment: u16, bus: u8, device: u8, function: u8) -> u64 {
+    1 << 32
+        | (segment as u64) << 16
+        | (bus as u64) << 8
+        | ((device as u64 & 0x1F) << 3)
+        | (function as u64 & 7)
+}

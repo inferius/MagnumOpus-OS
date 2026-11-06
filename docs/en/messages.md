@@ -47,6 +47,16 @@ The loader writes through the firmware console (screen and serial) as
 | `necekane preruseni, vektor N` | W | An interrupt arrived that nobody handles (device interrupts are not used yet). A single occurrence is harmless. |
 | `prilis mnoho prepsani urovne logu, X ignorovan` | W | At most 16 modules can have their own log level. |
 
+## Kernel: IOMMU
+
+| Message | Level | Meaning and fix |
+|---|---|---|
+| `IOMMU VT-d na ADDRESS: segment S, N urovne tabulek, ...` | I | DMA translation is on; a device may access only its domain. |
+| `IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do pameti ...` | W | The machine has no VT-d (no DMAR table), or the run uses `--no-iommu`. The system works, but a driver bug can corrupt memory through DMA. On a real PC enable VT-d in the firmware settings. |
+| `IOMMU na ADDRESS nejde zapnout: ...` | E | The unit does not support 39/48-bit tables (`NOT_SUPPORTED`), memory is missing, or it did not complete a command (`TIMED_OUT`). Devices under it are not protected. |
+| `IOMMU: ... nedobehlo` | E | The unit did not complete a command or invalidation within 1 s (hardware or emulation fault). |
+| `IOMMU: zablokovan zapis/cteni zarizeni BB:DD.F na adrese A (duvod R)` | W | A device accessed memory outside its domain: a driver bug (wrong address in a descriptor) or a faulty device. Memory stayed intact. Reason code per the VT-d specification (e.g. 0x5 = page missing in the domain, 0x6 = write to a read-only page). |
+
 ## Kernel: processes
 
 | Message | Level | Meaning and fix |

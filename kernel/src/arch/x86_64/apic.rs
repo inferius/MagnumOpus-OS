@@ -35,6 +35,8 @@ pub const VECTOR_TIMER: u8 = 32;
 pub const VECTOR_RESCHEDULE: u8 = 33;
 pub const VECTOR_HALT: u8 = 34;
 pub const VECTOR_TLB_FLUSH: u8 = 35;
+/// Hlaseni zablokovanych pristupu DMA (IOMMU).
+pub const VECTOR_IOMMU_FAULT: u8 = 36;
 pub const VECTOR_SPURIOUS: u8 = 0xFF;
 
 static X2APIC: AtomicBool = AtomicBool::new(false);
