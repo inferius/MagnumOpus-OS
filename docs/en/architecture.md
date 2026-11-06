@@ -329,6 +329,110 @@ sandbox, without the dependency hell of Linux package managers.
     Linux; here it becomes our own userspace driver written using the Linux
     code as reference.
 - Plan: virtio-gpu (Venus) in QEMU, then one family of real GPUs (probably Intel).
+- **A Wayland-like path, not X11:** the compositor only composes client
+  buffers; applications see neither other windows nor input; screen capture
+  and recording only through a capability (the system shows who is
+  capturing).
+- **One native UI library** (declarative, Rust) instead of two competing
+  ones like GTK and Qt: a consistent look, accessibility and localization
+  for everyone; the Windows layer (`user32`/`gdi32`) maps onto it.
+- **Proposals for approval:**
+  - **The window shows permissions:** an icon in the title bar tells which
+    folders, network or camera the application can access right now;
+    revoke with one click.
+  - **Unforgeable system dialogs:** a permission or password dialog is
+    drawn by the compositor in a separate layer (an application cannot
+    paint over it or imitate it).
+  - **Application work-in-progress survives a restart:** an application
+    stores its UI state in its own dataset; after an update or a crash the
+    windows come back.
+  - **Smoothness as a requirement:** see [User interface responsiveness](#user-interface-responsiveness-plan) -
+    frame deadlines, QoS and priority inheritance over IPC.
+
+## Input: keyboard and mouse (plan)
+
+- An **input service** (`inputd`) in userspace: device drivers send events
+  (key, motion, button, wheel, touch) through one protocol over a channel;
+  the service translates them by keyboard layout and delivers them **only
+  to whoever has focus** (terminal, compositor). No application reads input
+  globally (protection against keyloggers).
+- **Drivers, in order:** virtio-input (keyboard, mouse, tablet) in QEMU -
+  PS/2 as a fallback on older hardware - USB HID through our own xHCI
+  driver (the USB stack is a big separate piece of work).
+- **Layouts:** Czech and English in the first version, diacritics
+  composition (dead keys), Unicode input.
+- **A secure key combination** (like Ctrl+Alt+Del on Windows): only the
+  system captures it, an application cannot fake it - for unlocking,
+  confirming permission dialogs and the task manager.
+
+## Shell and smart terminal (proposal)
+
+Goal: a terminal more comfortable than today's ones that uses what our FS
+and capabilities can do.
+
+| Feature | What it does | Built on |
+|---|---|---|
+| **structured output** | commands return tables and objects (file, process, network connection), not text; filtering, sorting and columns without `grep`/`awk`; conversion to text only for display | a protocol between the shell and programs (a typed stream) |
+| **undo of every command** | before a command that changes files, a cheap snapshot of the affected dataset; "undo the last command" | snapshots, change journal |
+| **"show what will happen"** | a dangerous command (mass deletion, a script, an installation) runs in a clone of the folder, the terminal shows the diff, it is taken over after confirmation | clones, diff, taking over changes ("try on the side") |
+| **permissions at launch** | the shell knows from the manifest what a command needs (a folder, network) and passes only that; a new demand = a prompt | capabilities |
+| **type-aware completion** | knows an argument is a path to a `.toml` file, a PID or a snapshot name and completes only valid values | argument description in the program manifest |
+| **explained errors** | on an error it shows the code, its meaning and what to do (from the error and message docs) | `docs/errors.md`, `messages.md` |
+| **history with context** | command history with working folder, result and duration; searchable also by content | journal, index |
+| **output blocks** | every command is a separate block (collapse, copy, rerun, compare two runs) | the terminal, not the shell |
+| **assistant** (optional) | "find large files older than a year" -> a suggested command, run only after confirmation and in preview | the AI service (below) |
+
+Additional proposals for approval:
+
+- **A lock on dangerous operations:** a command that would delete or
+  overwrite more than N files outside temporary folders always runs through
+  "show what will happen" - even in real mode one confirmation is enough,
+  but never blindly.
+- **Sessions survive a terminal restart:** a running command belongs to the
+  session service, not the window; after a crash or closing the window you
+  can come back (like tmux, but built in).
+- **Compatibility:** a classic text mode for scripts and POSIX tools (C/C++
+  from the languages milestone) - structured output is an extension, not a
+  replacement.
+
+## AI in the system (proposal)
+
+The kernel knows nothing about AI. The system does provide **primitives
+that make an AI agent safe**, and optional services on top of them.
+
+| Primitive | Why for an agent |
+|---|---|
+| a capability to one specific folder only | the agent sees nothing the user did not give it |
+| working in a clone, the result as a diff | the agent's changes are taken over only after review, or discarded in one step |
+| conditional save (expected revision) | the agent does not silently overwrite a change by the user or another tool |
+| audit and journal with the application identity | it is visible what the agent read and changed; its changes can be rolled back selectively |
+| quotas and priorities (QoS, I/O) | the agent does not flood the disk or CPU, the UI stays smooth |
+| network only through a capability | the agent cannot send data out without permission |
+
+Services on top (ordered by usefulness):
+
+1. **Model service** (`aid`): local inference (CPU, later GPU/NPU),
+   scheduling compute between applications, one API; cloud models only as
+   the user's choice and only through a network capability.
+2. **Semantic search:** an index of file content (vectors) as a service on
+   top of the change journal, respecting permissions (an agent finds only
+   what it may read).
+3. **Assistant** in the terminal and file manager: suggests commands and
+   actions, performs them through "show what will happen".
+4. **Agent sessions:** running an agent on a project = automatically a
+   clone, a capability to it only, audit on, a diff to take over at the
+   end.
+
+⚠️ **Risks (stated up front):**
+
+- **Injected instructions** in processed data (a document or web page that
+  "orders" the agent to do something): so an agent never gets more
+  permissions than the user explicitly chose, and irreversible actions are
+  confirmed by a human.
+- **Privacy:** local models are the default; sending data to the cloud is a
+  visible choice.
+- **Performance:** models are large; they run in `background` QoS with a
+  memory quota.
 
 ## Configuration
 
@@ -443,8 +547,15 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 4. Userspace: syscalls, first process, IPC, libos, initfs (done)
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
 6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
-   TCP/IP, DNS, TLS 1.3, HTTP client - services, access through a capability),
-   graphics, compositor
+   TCP/IP, DNS, TLS 1.3, HTTP client - services, access through a capability)
+   - **6a Input:** input service, keyboard and mouse (virtio-input, PS/2,
+     later USB HID), layouts, secure key combination - see [Input](#input-keyboard-and-mouse-plan)
+   - **6b Shell and smart terminal:** console, structured output, command
+     undo, "show what will happen", permissions at launch - see [Shell](#shell-and-smart-terminal-proposal)
+   - **6c GUI:** virtio-gpu, compositor, native UI library, system dialogs -
+     see [Graphics](#graphics)
+   - **6d AI-ready:** primitives for safe agents (mostly from FS v3), model
+     service, semantic search, assistant - see [AI in the system](#ai-in-the-system-proposal)
 7. Languages and compilers (see [Languages and compilers](#languages-and-compilers-plan)):
    Rust (`std` for our OS), C (own libc on top of libos), C++
    (libc++/libunwind on top of libc), cross-compiled with clang from the
