@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["loader", "kernel", "libs/boot-info", "xtask"]
+# Na hostiteli se standardne buildi jen xtask. Loader a kernel maji vlastni
+# targety a builduje je `cargo xtask build`.
+default-members = ["xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+boot-info = { path = "libs/boot-info" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+debug = true
