@@ -6,6 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 initfs = { workspace = true, features = ["std"] }
 fatfs = "0.3"
 crc32fast = "1.5"

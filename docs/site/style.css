@@ -1,0 +1,231 @@
+/* Styl HTML dokumentace (generuje `cargo xtask docs`). */
+
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #eef1f5;
+  --text: #1c2330;
+  --muted: #5d6878;
+  --border: #dde2ea;
+  --accent: #3b5bdb;
+  --accent-soft: #e5ebff;
+  --code-bg: #f1f3f7;
+  --ok: #2b8a3e;
+  --warn: #b7791f;
+  --err: #c92a2a;
+  --shadow: 0 1px 3px rgba(20, 30, 50, 0.08);
+  --radius: 10px;
+  --sidebar: 280px;
+  --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c;
+    --surface: #171c25;
+    --surface-2: #1f2632;
+    --text: #e3e8ef;
+    --muted: #97a2b3;
+    --border: #2a3342;
+    --accent: #7d97ff;
+    --accent-soft: #232c45;
+    --code-bg: #1c222d;
+    --shadow: none;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #11151c;
+  --surface: #171c25;
+  --surface-2: #1f2632;
+  --text: #e3e8ef;
+  --muted: #97a2b3;
+  --border: #2a3342;
+  --accent: #7d97ff;
+  --accent-soft: #232c45;
+  --code-bg: #1c222d;
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.65 var(--sans);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Rozlozeni: horni lista, levy panel, obsah, pravy obsah stranky. */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 56px;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand { font-weight: 700; font-size: 17px; color: var(--text); white-space: nowrap; }
+.brand span { color: var(--accent); }
+
+.search { flex: 1; max-width: 420px; position: relative; }
+.search input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.search-results {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  right: 0;
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: none;
+}
+.search-results a { display: block; padding: 8px 12px; color: var(--text); font-size: 14px; }
+.search-results a small { display: block; color: var(--muted); }
+.search-results a:hover, .search-results a.active { background: var(--accent-soft); text-decoration: none; }
+
+.top-actions { margin-left: auto; display: flex; gap: 8px; }
+.top-actions a, .top-actions button {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.layout { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr) 220px; }
+
+.sidebar {
+  position: sticky;
+  top: 56px;
+  height: calc(100vh - 56px);
+  overflow: auto;
+  padding: 20px 12px;
+  border-right: 1px solid var(--border);
+}
+.sidebar h4 {
+  margin: 0 8px 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sidebar a {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 15px;
+}
+.sidebar a small { display: block; color: var(--muted); font-size: 12px; line-height: 1.3; }
+.sidebar a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar a.current { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+main { padding: 32px 48px 80px; min-width: 0; }
+.content { max-width: 860px; }
+
+.toc {
+  position: sticky;
+  top: 56px;
+  height: calc(100vh - 56px);
+  overflow: auto;
+  padding: 28px 16px;
+  font-size: 13px;
+}
+.toc h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.06em; }
+.toc a { display: block; padding: 3px 0; color: var(--muted); }
+.toc a.h3 { padding-left: 12px; }
+.toc a:hover { color: var(--accent); text-decoration: none; }
+
+/* Typografie obsahu. */
+.content h1 { font-size: 34px; line-height: 1.2; margin: 0 0 24px; letter-spacing: -0.01em; }
+.content h2 {
+  font-size: 24px;
+  margin: 44px 0 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.content h3 { font-size: 19px; margin: 30px 0 10px; }
+.content h2 a.anchor, .content h3 a.anchor { visibility: hidden; margin-left: 6px; color: var(--muted); }
+.content h2:hover a.anchor, .content h3:hover a.anchor { visibility: visible; }
+
+.content code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--code-bg);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+.content pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  overflow: auto;
+  line-height: 1.45;
+}
+.content pre code { background: none; padding: 0; font-size: 13.5px; }
+
+.content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 18px 0;
+  font-size: 14.5px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.content th, .content td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.content th { background: var(--surface-2); font-weight: 600; }
+.content tr:last-child td { border-bottom: none; }
+
+.content blockquote {
+  margin: 18px 0;
+  padding: 10px 16px;
+  border-left: 4px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* Karty chyb a syscallu: h3 s kodem dostane "odznak". */
+.content h3 code { font-size: 0.95em; background: var(--accent-soft); color: var(--accent); }
+
+.page-footer { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+
+/* Uzke obrazovky: bez praveho obsahu, levy panel nad obsahem. */
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+  .toc { display: none; }
+}
+@media (max-width: 760px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  main { padding: 20px 16px 60px; }
+  .topbar { gap: 8px; padding: 0 12px; }
+  .brand { display: none; }
+}

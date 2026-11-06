@@ -8,6 +8,7 @@
 //! Prepinace: `--release`, a pro `run` navic `--gdb`, `--headless`,
 //! `--accel <tcg|kvm|whpx|hvf>` a cokoli za `--` se preda primo QEMU.
 
+mod docs;
 mod image;
 mod symbolize;
 
@@ -30,6 +31,7 @@ prikazy:
   image    build + vytvori target/os-x86_64.img (GPT, ESP FAT32)
   run      image + spusti QEMU (x86_64, OVMF)
   test     testy knihoven na hostiteli, pak jadro a userspace v QEMU bez okna
+  docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
 
 prepinace:
   --release        release profil
@@ -116,10 +118,12 @@ fn run_cli() -> Result<()> {
             opts.test = true;
             opts.headless = true;
             host_tests()?;
+            build_docs()?;
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             run_qemu(&image, &opts)
         }
+        Some("docs") => build_docs().map(|_| ()),
         Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
             Ok(())
@@ -150,6 +154,13 @@ fn host_tests() -> Result<()> {
     }
     println!("xtask: testy knihoven na hostiteli prosly");
     Ok(())
+}
+
+/// Vygeneruje HTML dokumentaci a overi odkazy.
+fn build_docs() -> Result<PathBuf> {
+    let index = docs::build(&workspace_root(), &target_dir().join("docs"))?;
+    println!("xtask: dokumentace {}", index.display());
+    Ok(index)
 }
 
 fn workspace_root() -> PathBuf {
