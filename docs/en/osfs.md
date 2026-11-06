@@ -258,6 +258,14 @@ be entered from Windows.
 - A panic in `osfs` = immediate exit (`panic = "abort"` profile); data stay
   in the state after the last commit.
 
+## Extended API for applications
+
+An application (e.g. MagnumOpus Explorer) can read from a mounted drive
+what Win32 cannot: instant folder sizes, hidden names, snapshots, volume
+state. Description: [osfs-api.md](osfs-api.md). From the command line:
+`osfs info Q:`, `osfs ls Q: /`, `osfs cat Q: /CON.txt`,
+`osfs snapshots Q:`, `osfs snapshot Q: <name>`, `--at <snapshot>`.
+
 ## Debugging
 
 `OSFS_DEBUG=1` prints the operations that change names (create, delete,

@@ -252,6 +252,14 @@ z Windows nedá zadat.
 - Panika v `osfs` = okamžité ukončení (profil `panic = "abort"`); data
   zůstanou ve stavu po posledním commitu.
 
+## Rozšířené API pro aplikace
+
+Aplikace (např. MagnumOpus Explorer) může z připojené jednotky číst i to,
+co Win32 neumí: okamžité velikosti složek, skrytá jména, snapshoty, stav
+svazku. Popis: [osfs-api.md](osfs-api.md). Z příkazové řádky:
+`osfs info Q:`, `osfs ls Q: /`, `osfs cat Q: /CON.txt`,
+`osfs snapshots Q:`, `osfs snapshot Q: <jméno>`, `--at <snapshot>`.
+
 ## Ladění
 
 `OSFS_DEBUG=1` vypisuje na chybový výstup operace, které mění jména

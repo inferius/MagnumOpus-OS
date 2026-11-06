@@ -1,5 +1,6 @@
 //! `osfs` - hostitelsky nastroj pro souborovy system MagnumOpus.
 //!
+//! - `api`: serverova cast rozsireneho API (`osfs-proto`) nad `fs::Fs`,
 //! - `image`: vytvoreni a otevreni souboru s obrazem, pomocne funkce CLI,
 //! - `lock`: zamek obrazu (nejvys jeden zapisovatel),
 //! - `names`: preklad jmen mezi nasim FS a Windows,
@@ -8,6 +9,7 @@
 //! Pouziva jen verejne API knihovny `fs` (`fs::Fs`); knihovnu nemeni.
 //! Popis: `docs/cs/osfs.md`.
 
+pub mod api;
 pub mod image;
 pub mod lock;
 pub mod names;

@@ -8,6 +8,8 @@ use std::process::ExitCode;
 use fs::{Algo, Kind};
 use osfs::image::{self, DEFAULT_SIZE};
 
+mod remote;
+
 const HELP: &str = "\
 osfs - souborovy system MagnumOpus na hostiteli (zatim jen soubory s obrazem)
 
@@ -23,6 +25,13 @@ osfs - souborovy system MagnumOpus na hostiteli (zatim jen soubory s obrazem)
   osfs mount <obraz> <X:>          pripoji obraz jako jednotku (WinFsp);
                                    bezi, dokud se neodpoji (Ctrl+C)
   osfs unmount <X:>                odpoji jednotku z jineho okna
+
+Nad pripojenou jednotkou (rozsirene API, cesty v nasem FS, i skryta jmena):
+  osfs info <X:>                   server a svazek
+  osfs ls <X:> [cesta] [--at S]    vypis (--at = ze snapshotu S)
+  osfs cat <X:> <cesta> [--at S]   obsah souboru
+  osfs snapshots <X:>              seznam snapshotu
+  osfs snapshot <X:> <jmeno>       vytvori snapshot
 
 Cesty v obrazu pisou se s '/', napr. /dokumenty/a.txt.
 Skutecne disky osfs zatim odmita: formatovani disku je nevratne.
@@ -112,6 +121,9 @@ fn run(raw: &[String]) -> Result<(), String> {
         "cat" => cmd_cat(rest),
         "put" => cmd_put(rest),
         "mount" => cmd_mount(rest),
+        "info" => cmd_info(rest),
+        "snapshots" => cmd_snapshots(rest),
+        "snapshot" => cmd_snapshot(rest),
         "unmount" => cmd_unmount(rest),
         other => Err(format!("neznamy prikaz {other} (osfs help)")),
     }
@@ -209,10 +221,16 @@ fn cmd_check(raw: &[String]) -> Result<(), String> {
 }
 
 fn cmd_ls(raw: &[String]) -> Result<(), String> {
-    let a = Args::parse(raw, &[])?;
-    a.only(&[])?;
-    a.need(1, 2, "osfs ls <obraz> [cesta]")?;
+    let a = Args::parse(raw, &["at"])?;
+    a.only(&["at"])?;
+    a.need(1, 2, "osfs ls <obraz|X:> [cesta]")?;
     let path = a.pos.get(1).map(String::as_str).unwrap_or("/");
+    if remote::is_drive(&a.pos[0]) {
+        return remote::ls(&a.pos[0], path, a.value("at").unwrap_or(""));
+    }
+    if a.value("at").is_some() {
+        return Err("--at zatim jen nad pripojenou jednotkou".into());
+    }
     let (mut fs, _lock) = image::open(Path::new(&a.pos[0]), true)?;
     for e in fs.list(path).map_err(|e| format!("{path}: {e}"))? {
         let full = image::join(path, &e.name);
@@ -237,10 +255,16 @@ fn cmd_ls(raw: &[String]) -> Result<(), String> {
 }
 
 fn cmd_cat(raw: &[String]) -> Result<(), String> {
-    let a = Args::parse(raw, &[])?;
-    a.only(&[])?;
-    a.need(2, 2, "osfs cat <obraz> <cesta>")?;
+    let a = Args::parse(raw, &["at"])?;
+    a.only(&["at"])?;
+    a.need(2, 2, "osfs cat <obraz|X:> <cesta>")?;
     let path = &a.pos[1];
+    if remote::is_drive(&a.pos[0]) {
+        return remote::cat(&a.pos[0], path, a.value("at").unwrap_or(""));
+    }
+    if a.value("at").is_some() {
+        return Err("--at zatim jen nad pripojenou jednotkou".into());
+    }
     let (mut fs, _lock) = image::open(Path::new(&a.pos[0]), true)?;
     let size = fs.stat(path).map_err(|e| format!("{path}: {e}"))?.size;
     let mut out = std::io::stdout().lock();
@@ -300,6 +324,27 @@ fn cmd_mount(raw: &[String]) -> Result<(), String> {
     a.only(&[])?;
     a.need(2, 2, "osfs mount <obraz> <X:>")?;
     osfs::mount::run(Path::new(&a.pos[0]), &a.pos[1])
+}
+
+fn cmd_info(raw: &[String]) -> Result<(), String> {
+    let a = Args::parse(raw, &[])?;
+    a.only(&[])?;
+    a.need(1, 1, "osfs info <X:>")?;
+    remote::info(&a.pos[0])
+}
+
+fn cmd_snapshots(raw: &[String]) -> Result<(), String> {
+    let a = Args::parse(raw, &[])?;
+    a.only(&[])?;
+    a.need(1, 1, "osfs snapshots <X:>")?;
+    remote::snapshots(&a.pos[0])
+}
+
+fn cmd_snapshot(raw: &[String]) -> Result<(), String> {
+    let a = Args::parse(raw, &[])?;
+    a.only(&[])?;
+    a.need(2, 2, "osfs snapshot <X:> <jmeno>")?;
+    remote::snapshot(&a.pos[0], &a.pos[1])
 }
 
 #[cfg(windows)]
