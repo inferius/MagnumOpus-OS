@@ -50,6 +50,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
     match number {
         nr::DEBUG_LOG => misc::debug_log(a),
         nr::CLOCK_MONOTONIC => misc::clock_monotonic(),
+        nr::CLOCK_REALTIME => misc::clock_realtime(a),
         nr::HANDLE_CLOSE => handle::close(a),
         nr::HANDLE_DUPLICATE => handle::duplicate(a),
         nr::OBJECT_WAIT_ONE => object::wait_one(a),
@@ -120,6 +121,7 @@ pub fn name(number: u64) -> &'static str {
         "INTERRUPT_CREATE",
         "INTERRUPT_ACK",
         "RESOURCE_CREATE",
+        "CLOCK_REALTIME",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

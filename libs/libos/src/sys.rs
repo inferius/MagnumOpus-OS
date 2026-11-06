@@ -52,6 +52,13 @@ pub fn clock_monotonic() -> u64 {
     call(nr::CLOCK_MONOTONIC, [0; 6]).unwrap_or(0)
 }
 
+/// Realny cas; `NOT_SUPPORTED`, kdyz ho jadro nezna.
+pub fn clock_realtime() -> Result<abi::time::Reading> {
+    let mut buf = [0u8; abi::time::Reading::SIZE];
+    call(nr::CLOCK_REALTIME, [buf.as_mut_ptr() as u64, 0, 0, 0, 0, 0])?;
+    Ok(abi::time::Reading::decode(&buf))
+}
+
 pub fn handle_close(h: u32) -> Result<()> {
     call(nr::HANDLE_CLOSE, [h as u64, 0, 0, 0, 0, 0]).map(|_| ())
 }

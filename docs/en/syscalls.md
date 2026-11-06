@@ -55,6 +55,27 @@ exists this is the only program output. Errors: `BAD_ADDRESS`,
 `() -> ns`. Monotonic time in nanoseconds since kernel start (TSC
 calibrated against the HPET). Cannot fail.
 
+### `CLOCK_REALTIME`
+
+`(out_ptr) -> 0`. Real ("wall clock") time for file times and display.
+Writes 16 B (little endian) to `out_ptr`:
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | i64 | seconds since 1970-01-01 00:00:00 UTC (negative = earlier) |
+| 8 | u32 | nanoseconds within the second (0..10⁹) |
+| 12 | u16 | source: 1 UEFI, 2 CMOS RTC, 3 set at run time |
+| 14 | u16 | flags: bit 0 = time zone not given, time taken as UTC |
+
+At boot the kernel stores the real time at moment 0 of the monotonic clock;
+the result is that origin + `CLOCK_MONOTONIC`. The origin is accurate to
+1 s (the resolution of firmware and the RTC). Unlike `CLOCK_MONOTONIC` it
+is **not monotonic**: it will jump once the clock can be set (network
+sync). For measuring and deadlines always use `CLOCK_MONOTONIC`. Wrapper:
+`libos::time::wall()`, `wall_reading()`. Errors: `NOT_SUPPORTED` (the
+kernel does not know the real time), `BAD_ADDRESS`.
+Details: [Real time](time.md).
+
 ## Handles
 
 ### `HANDLE_CLOSE`

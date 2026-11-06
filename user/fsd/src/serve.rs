@@ -9,6 +9,16 @@ use libos::{Error, Result};
 use crate::blkdev::BlkDev;
 use crate::serve_v2::{Reply, Session};
 
+/// Cas pro zmeny ve FS: realny cas v ns od 1970 (dnesni format casu ve FS
+/// je u64 ns, takze cas pred 1970 se orizne na 0). Bez realnych hodin cas od
+/// startu systemu (data pak vypadaji jako z roku 1970).
+pub(crate) fn fs_now() -> u64 {
+    match libos::time::wall() {
+        Some(t) => t.as_nanos().clamp(0, u64::MAX as i128) as u64,
+        None => libos::time::now(),
+    }
+}
+
 pub(crate) fn stat(s: fs::Stat) -> Stat {
     Stat {
         oid: s.oid,
@@ -100,7 +110,7 @@ impl Service {
         if opcode == op::CHECK && !self.debug {
             return Err(Error::AccessDenied);
         }
-        let now = libos::time::now();
+        let now = fs_now();
         let fs = self.fs()?;
         fs.set_time(now);
         match opcode {

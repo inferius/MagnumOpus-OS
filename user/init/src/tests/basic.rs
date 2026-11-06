@@ -9,6 +9,7 @@ use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
     ("cas roste", clock),
+    ("realny cas: zdroj a beh", wall_clock),
     ("neplatny handle -> BAD_HANDLE", bad_handle),
     ("neznamy syscall -> BAD_SYSCALL", bad_syscall),
     ("event: signal a cekani", event_signal),
@@ -26,6 +27,25 @@ fn clock(_: &Startup) -> TestResult {
     time::sleep(Duration::from_millis(5));
     let b = time::now();
     check!(b >= a + 5_000_000, "sleep 5 ms trval mene nez 5 ms");
+    Ok(())
+}
+
+fn wall_clock(_: &Startup) -> TestResult {
+    // QEMU s OVMF ma vzdy hodiny (UEFI i CMOS) nastavene podle hostitele.
+    let r = time::wall_reading().map_err(|e| fail("CLOCK_REALTIME", e))?;
+    check!(
+        r.source == time::source::UEFI || r.source == time::source::RTC,
+        alloc::format!("neocekavany zdroj casu {}", r.source)
+    );
+    let c = r.time.to_civil();
+    check!(c.year >= 2024 && c.year < 2200, alloc::format!("nesmyslny rok {}", c.year));
+    time::sleep(Duration::from_millis(20));
+    let b = time::wall().ok_or_else(|| alloc::string::String::from("realny cas zmizel"))?;
+    let d = b.as_nanos() - r.time.as_nanos();
+    check!(
+        (20_000_000..2_000_000_000).contains(&d),
+        alloc::format!("realny cas se za 20 ms posunul o {d} ns")
+    );
     Ok(())
 }
 

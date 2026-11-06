@@ -7,6 +7,7 @@ mod idt;
 pub mod interrupts;
 pub mod iommu;
 pub mod paging;
+pub mod rtc;
 mod serial;
 mod smp;
 mod time;
@@ -14,7 +15,7 @@ mod user;
 
 pub use serial::SerialPort;
 pub use smp::Trampoline;
-pub use time::now_ns;
+pub use time::{now_ns, ns_from_tsc_to_start};
 pub use user::{CPU_LOCAL_OFFSET, CpuLocal};
 
 use core::arch::asm;

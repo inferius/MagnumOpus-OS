@@ -16,6 +16,8 @@ Loader píše přes konzoli firmware (obrazovka i sériová linka) ve formátu
 | `GOP nelze otevrit, framebuffer nebude` | Grafický výstup existuje, ale nejde použít. Jako výše. |
 | `nepodporovany format pixelu ..., framebuffer nebude` | Režim obrazovky není 32bitový RGB/BGR. Jako výše. |
 | `ACPI 2.0 RSDP nenalezen` | Firmware nepředal ACPI 2.0. Jádro pak nenastartuje (`loader nepredal ACPI RSDP`). |
+| `cas firmwaru: RRRR-MM-DD hh:mm:ss (pasmo neuvedeno, beru jako UTC)` | Čas z UEFI `GetTime`. Pásmo firmware téměř nikdy neuvádí; když má počítač v hodinách místní čas (Windows), bude reálný čas posunutý o pásmo. Viz [Reálný čas](cas.md). |
+| `UEFI GetTime selhal: ...` / `UEFI vratil neplatny cas` / `UEFI cas mimo kalendar` | Firmware čas nedal. Jádro zkusí CMOS RTC. |
 | panika `nelze nacist \os\kernel.elf` | Na ESP chybí jádro. Znovu sestavit obraz. |
 | panika `kernel neni platny ELF` | Soubor jádra je poškozený nebo jiného formátu. |
 | panika `kernel musi byt linkovany od KERNEL_BASE` | Jádro bylo slinkováno bez `kernel/linker.ld`. |
@@ -36,6 +38,8 @@ Loader píše přes konzoli firmware (obrazovka i sériová linka) ve formátu
 | panika `cteni ACPI selhalo: ...` | panika | Viz předchozí řádky. |
 | panika `platforma nema HPET` | panika | Jádro zatím vyžaduje HPET pro kalibraci TSC a APIC timeru (QEMU q35 a moderní PC ho mají). |
 | `casovace: ... (CPU nehlasi invariantni TSC)` | I | CPU nehlásí stálou frekvenci TSC. V QEMU s emulací (TCG) je to normální; na reálném HW by se čas mohl při úsporných režimech zkreslit. |
+| `realny cas: ... UTC (zdroj UEFI\|CMOS RTC...)` | I | Reálný čas při startu a jeho zdroj. „pasmo neuvedeno - bran jako UTC“ = viz hláška loaderu o pásmu. |
+| `realny cas neni znamy (firmware ani RTC ho nedaly)` | W | `CLOCK_REALTIME` vrací `NOT_SUPPORTED`; `fsd` použije čas od startu (soubory budou mít datum 1970). Na PC to znamená vadné hodiny nebo vybitou baterii CMOS. |
 | `chybi volna pamet pod 1 MiB, bezim jen na jednom CPU` | W | Pro start dalších CPU jsou potřeba dvě volné stránky pod 1 MiB. Systém běží dál na jednom CPU. |
 | `nedostatek pameti pro zasobnik CPU N` | E | Další CPU se nespustí. |
 | `CPU s APIC ID N se neohlasilo, dalsi CPU nestartuji` | E | CPU nereagovalo na INIT-SIPI-SIPI do ~400 ms. Jeho zásobník a startovací kód zůstávají vyhrazené (kdyby naběhlo později); další CPU se už nespouštějí. |

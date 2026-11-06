@@ -18,6 +18,7 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 
 use boot_info::{
+    FirmwareTime,
     BOOT_INFO_MAGIC, BOOT_INFO_VERSION, BootInfo, Framebuffer, KERNEL_BASE, KERNEL_STACK_SIZE,
     MemoryKind, MemoryRegion, PHYS_MAP_BASE, PixelFormat,
 };
@@ -98,6 +99,8 @@ fn main() -> Status {
     log::info!(
         "kernel {kernel_phys_len:#x} B na {kernel_phys_start:#x}, vstup {entry:#x}, NX: {nx}"
     );
+    // Cas az tesne pred koncem boot services (co nejmensi posun do jadra).
+    let firmware_time = read_firmware_time();
     log::info!("ukoncuji boot services a startuji kernel");
 
     // SAFETY: zadne protokoly ani pool alokace uz nedrzime (kernel_file je
@@ -124,6 +127,7 @@ fn main() -> Status {
         kernel_phys_len,
         initfs_phys,
         initfs_len,
+        firmware_time,
     };
     // SAFETY: `boot_info_phys` je cela stranka alokovana pro BootInfo,
     // zarovnana na 4 KiB (vic nez zarovnani BootInfo).
@@ -291,6 +295,61 @@ fn find_framebuffer() -> Framebuffer {
         height: height as u32,
         stride: info.stride() as u32,
         format,
+    }
+}
+
+/// Precte realny cas z UEFI (`GetTime`) a prevede ho na sekundy od 1970.
+/// Kdyz firmware pasmo nezna, cas se bere jako UTC (jadro o tom vi
+/// z `zone_minutes`).
+fn read_firmware_time() -> FirmwareTime {
+    let tsc = arch::rdtsc();
+    let t = match uefi::runtime::get_time() {
+        Ok(t) if t.is_valid().is_ok() => t,
+        Ok(_) => {
+            log::warn!("UEFI vratil neplatny cas");
+            return FirmwareTime::none();
+        }
+        Err(e) => {
+            log::warn!("UEFI GetTime selhal: {:?}", e.status());
+            return FirmwareTime::none();
+        }
+    };
+    let civil = abi::time::Civil {
+        year: t.year() as i64,
+        month: t.month(),
+        day: t.day(),
+        hour: t.hour(),
+        minute: t.minute(),
+        second: t.second(),
+        nanos: t.nanosecond(),
+    };
+    let Some(local) = abi::time::WallTime::from_civil(&civil) else {
+        log::warn!("UEFI cas mimo kalendar: {t:?}");
+        return FirmwareTime::none();
+    };
+    // UEFI: mistni cas = UTC + pasmo, tedy UTC = mistni - pasmo.
+    let (zone, utc) = match t.time_zone() {
+        Some(z) => (z, local.add_ns(-(z as i128) * 60_000_000_000)),
+        None => (FirmwareTime::ZONE_UNSPECIFIED, local),
+    };
+    log::info!(
+        "cas firmwaru: {:04}-{:02}-{:02} {:02}:{:02}:{:02} ({})",
+        civil.year,
+        civil.month,
+        civil.day,
+        civil.hour,
+        civil.minute,
+        civil.second,
+        if zone == FirmwareTime::ZONE_UNSPECIFIED { "pasmo neuvedeno, beru jako UTC" } else { "s pasmem" }
+    );
+    FirmwareTime {
+        valid: 1,
+        zone_minutes: zone,
+        _reserved: 0,
+        secs: utc.secs,
+        nanos: utc.nanos,
+        _reserved2: 0,
+        tsc,
     }
 }
 

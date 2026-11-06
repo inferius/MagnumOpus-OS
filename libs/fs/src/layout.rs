@@ -358,7 +358,7 @@ impl Superblock {
 /// 112 rezerva (16 B, nuly)
 /// ```
 ///
-/// Casy jsou v nanosekundach z `Fs::set_time` (fsd: od startu systemu).
+/// Casy jsou v nanosekundach z `Fs::set_time` (fsd: realny cas od 1970 UTC).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Inode {
     /// `KIND_FILE`, `KIND_DIR` nebo `KIND_SYMLINK`.

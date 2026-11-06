@@ -18,6 +18,8 @@ The loader writes through the firmware console (screen and serial) as
 | `GOP nelze otevrit, framebuffer nebude` | Graphics output exists but cannot be used. As above. |
 | `nepodporovany format pixelu ..., framebuffer nebude` | The video mode is not 32-bit RGB/BGR. As above. |
 | `ACPI 2.0 RSDP nenalezen` | The firmware did not provide ACPI 2.0. The kernel then fails to boot (`loader nepredal ACPI RSDP`). |
+| `cas firmwaru: RRRR-MM-DD hh:mm:ss (pasmo neuvedeno, beru jako UTC)` | The time from UEFI `GetTime`. Firmware almost never gives the zone; when the machine keeps local time in its clock (Windows), the real time will be off by the zone. See [Real time](time.md). |
+| `UEFI GetTime selhal: ...` / `UEFI vratil neplatny cas` / `UEFI cas mimo kalendar` | The firmware gave no time. The kernel tries the CMOS RTC. |
 | panic `nelze nacist \os\kernel.elf` | The kernel is missing on the ESP. Rebuild the image. |
 | panic `kernel neni platny ELF` | The kernel file is corrupted or in another format. |
 | panic `kernel musi byt linkovany od KERNEL_BASE` | The kernel was linked without `kernel/linker.ld`. |
@@ -38,6 +40,8 @@ The loader writes through the firmware console (screen and serial) as
 | panic `cteni ACPI selhalo: ...` | panic | See the rows above. |
 | panic `platforma nema HPET` | panic | The kernel currently requires an HPET to calibrate the TSC and APIC timer (QEMU q35 and modern PCs have one). |
 | `casovace: ... (CPU nehlasi invariantni TSC)` | I | The CPU does not report a constant-rate TSC. Normal in QEMU with emulation (TCG); on real hardware time could drift in power-saving states. |
+| `realny cas: ... UTC (zdroj UEFI\|CMOS RTC...)` | I | The real time at boot and its source. "pasmo neuvedeno - bran jako UTC" = see the loader message about the zone. |
+| `realny cas neni znamy (firmware ani RTC ho nedaly)` | W | `CLOCK_REALTIME` returns `NOT_SUPPORTED`; `fsd` uses the time since boot (files will be dated 1970). On a PC this means a broken clock or a dead CMOS battery. |
 | `chybi volna pamet pod 1 MiB, bezim jen na jednom CPU` | W | Starting other CPUs needs two free pages below 1 MiB. The system continues on one CPU. |
 | `nedostatek pameti pro zasobnik CPU N` | E | The next CPU is not started. |
 | `CPU s APIC ID N se neohlasilo, dalsi CPU nestartuji` | E | The CPU did not respond to INIT-SIPI-SIPI within ~400 ms. Its stack and startup code stay reserved (in case it comes up later); no further CPUs are started. |

@@ -18,7 +18,7 @@
 pub const BOOT_INFO_MAGIC: u64 = u64::from_le_bytes(*b"OSBOOTIF");
 
 /// Verze rozhrani. Zvysit pri kazde nekompatibilni zmene struktur.
-pub const BOOT_INFO_VERSION: u32 = 2;
+pub const BOOT_INFO_VERSION: u32 = 3;
 
 /// Zacatek prime mapy fyzicke pameti (zacatek horni poloviny adresniho prostoru).
 pub const PHYS_MAP_BASE: u64 = 0xFFFF_8000_0000_0000;
@@ -55,6 +55,45 @@ pub struct BootInfo {
     /// Obraz initfs v pameti (fyzicka adresa a delka), 0 pokud chybi.
     pub initfs_phys: u64,
     pub initfs_len: u64,
+    /// Realny cas z firmwaru (UEFI `GetTime`) tesne pred ukoncenim boot services.
+    pub firmware_time: FirmwareTime,
+}
+
+/// Cas z hodin firmwaru prevedeny loaderem na sekundy od 1970.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct FirmwareTime {
+    /// 1 = platne; 0 = firmware cas neposkytl nebo byl neplatny.
+    pub valid: u32,
+    /// Posun pasma v minutach (mistni = UTC + pasmo), nebo
+    /// [`FirmwareTime::ZONE_UNSPECIFIED`] (firmware pasmo nezna, cas je
+    /// "mistni" - loader ho bere jako UTC).
+    pub zone_minutes: i16,
+    pub _reserved: u16,
+    /// Sekundy od 1970-01-01 UTC (se znamenkem).
+    pub secs: i64,
+    /// Nanosekundy uvnitr sekundy (vetsina firmwaru hlasi 0).
+    pub nanos: u32,
+    pub _reserved2: u32,
+    /// Hodnota TSC v okamziku cteni (jadro z ni dopocita posun do sveho startu).
+    pub tsc: u64,
+}
+
+impl FirmwareTime {
+    /// Hodnota UEFI `EFI_UNSPECIFIED_TIMEZONE`.
+    pub const ZONE_UNSPECIFIED: i16 = 0x07FF;
+
+    pub const fn none() -> Self {
+        Self {
+            valid: 0,
+            zone_minutes: Self::ZONE_UNSPECIFIED,
+            _reserved: 0,
+            secs: 0,
+            nanos: 0,
+            _reserved2: 0,
+            tsc: 0,
+        }
+    }
 }
 
 impl BootInfo {

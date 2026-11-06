@@ -12,6 +12,7 @@ extern crate alloc;
 
 mod acpi;
 mod arch;
+mod clock;
 mod console;
 mod error;
 mod fatal;
@@ -86,6 +87,8 @@ extern "sysv64" fn _start(boot_info: &'static BootInfo) -> ! {
         timers.apic_timer_hz / 1000,
         if timers.x2apic { "x2APIC" } else { "xAPIC" },
     );
+
+    clock::init(boot_info, platform);
 
     // ACPI tabulky jsou prectene, GDT a IDT vlastni: pamet firmwaru je volna.
     mm::reclaim_boot_memory(boot_info);

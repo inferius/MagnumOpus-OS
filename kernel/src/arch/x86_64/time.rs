@@ -38,6 +38,14 @@ pub fn now_ns() -> u64 {
     ((delta as u128 * NS_MULT.load(Ordering::Relaxed) as u128) >> 32) as u64
 }
 
+/// Nanosekundy od hodnoty TSC `tsc` (napr. zmerene loaderem) do startu
+/// hodin jadra; zaporne, kdyz `tsc` je az po startu.
+pub fn ns_from_tsc_to_start(tsc: u64) -> i128 {
+    let base = TSC_BASE.load(Ordering::Relaxed) as i128;
+    let delta = base - tsc as i128;
+    (delta * NS_MULT.load(Ordering::Relaxed) as i128) >> 32
+}
+
 pub fn busy_wait_ns(ns: u64) {
     let end = now_ns() + ns;
     while now_ns() < end {

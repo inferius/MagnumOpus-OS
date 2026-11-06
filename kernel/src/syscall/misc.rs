@@ -19,3 +19,11 @@ pub fn debug_log(a: Args) -> Result<u64> {
 pub fn clock_monotonic() -> Result<u64> {
     Ok(arch::now_ns())
 }
+
+/// `CLOCK_REALTIME(out_ptr)`: realny cas (16 B, viz `abi::time::Reading`).
+/// `NOT_SUPPORTED`, kdyz jadro realny cas nezna.
+pub fn clock_realtime(a: Args) -> Result<u64> {
+    let r = crate::clock::now().ok_or(crate::error::Error::NotSupported)?;
+    user::write_bytes(&current_process(), a[0], &r.encode())?;
+    Ok(0)
+}

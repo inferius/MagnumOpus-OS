@@ -53,6 +53,26 @@ logu je to jediný výstup programů. Chyby: `BAD_ADDRESS`, `INVALID_ARGS`
 `() -> ns`. Monotónní čas v nanosekundách od startu jádra (TSC
 kalibrovaný proti HPET). Nemůže selhat.
 
+### `CLOCK_REALTIME`
+
+`(out_ptr) -> 0`. Reálný čas („hodiny na zdi“) pro časy souborů
+a zobrazení. Na `out_ptr` zapíše 16 B (little endian):
+
+| Offset | Typ | Význam |
+|---|---|---|
+| 0 | i64 | sekundy od 1970-01-01 00:00:00 UTC (záporné = dřív) |
+| 8 | u32 | nanosekundy uvnitř sekundy (0..10⁹) |
+| 12 | u16 | zdroj: 1 UEFI, 2 CMOS RTC, 3 nastaveno za běhu |
+| 14 | u16 | příznaky: bit 0 = pásmo neuvedeno, čas brán jako UTC |
+
+Jádro si při startu uloží reálný čas v okamžiku 0 monotónních hodin; výsledek
+je ten počátek + `CLOCK_MONOTONIC`. Přesnost počátku je 1 s (rozlišení
+firmwaru i RTC). Na rozdíl od `CLOCK_MONOTONIC` **není monotónní**: skočí,
+až půjde hodiny nastavit (synchronizace podle sítě). Pro měření a termíny
+vždy `CLOCK_MONOTONIC`. Obal: `libos::time::wall()`, `wall_reading()`.
+Chyby: `NOT_SUPPORTED` (jádro reálný čas nezná), `BAD_ADDRESS`.
+Podrobnosti: [Reálný čas](cas.md).
+
 ## Handly
 
 ### `HANDLE_CLOSE`

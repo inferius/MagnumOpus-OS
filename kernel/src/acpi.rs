@@ -46,6 +46,10 @@ pub struct Platform {
     pub ioapics: Vec<IoApic>,
     pub overrides: Vec<InterruptOverride>,
     pub hpet_phys: Option<u64>,
+    /// Registr stoleti v CMOS RTC (ACPI FADT), 0 = neni.
+    pub rtc_century: u8,
+    /// FADT hlasi, ze CMOS RTC chybi (IAPC_BOOT_ARCH bit 5).
+    pub rtc_absent: bool,
     /// Okna konfiguracniho prostoru PCI Express (ECAM) z tabulky MCFG.
     pub pci_ecam: Vec<PciEcam>,
     /// Jednotky IOMMU (Intel VT-d) z tabulky DMAR.
@@ -191,6 +195,10 @@ pub fn parse(rsdp_phys: u64) -> Result<Platform> {
             b"MCFG" => parse_mcfg(t, &mut platform),
             b"DMAR" => parse_dmar(t, &mut platform),
             b"IVRS" => parse_ivrs(t, &mut platform),
+            b"FACP" => {
+                platform.rtc_century = u8_at(t, 108).unwrap_or(0);
+                platform.rtc_absent = u16_at(t, 109).is_some_and(|f| f & (1 << 5) != 0);
+            }
             b"HPET" => match u64_at(t, 44) {
                 Some(addr) => platform.hpet_phys = Some(addr),
                 None => log::warn!("tabulka HPET je prilis kratka, vynechana"),

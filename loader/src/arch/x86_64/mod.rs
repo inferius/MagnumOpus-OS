@@ -2,6 +2,12 @@ pub mod paging;
 
 use core::arch::asm;
 
+/// Citac TSC (pro navazani casu firmwaru na hodiny jadra).
+pub fn rdtsc() -> u64 {
+    // SAFETY: RDTSC je dostupna na kazdem x86_64 CPU.
+    unsafe { core::arch::x86_64::_rdtsc() }
+}
+
 /// Zapne bit NXE v EFER, pokud ho CPU podporuje. Vraci, zda je NX k dispozici.
 pub fn enable_nx() -> bool {
     // CPUID 0x8000_0001, EDX bit 20 = NX.

@@ -123,7 +123,7 @@ impl Service {
                 new_session: Some(ours),
             });
         }
-        let now = libos::time::now();
+        let now = crate::serve::fs_now();
         let fs = self.fs.as_mut().ok_or(Error::IoError)?;
         fs.set_time(now);
         match opcode {
