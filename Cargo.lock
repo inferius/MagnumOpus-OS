@@ -505,6 +505,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "p256",
+ "p384",
+ "rsa",
+ "sha1",
+ "sha2",
+ "signature",
+]
+
+[[package]]
 name = "ecdsa"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

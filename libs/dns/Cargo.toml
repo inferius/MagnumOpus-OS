@@ -1,0 +1,19 @@
+[package]
+name = "dns"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Zpravy DNS (RFC 1035) a overeni DNSSEC (RFC 4033-4035, 5155) bez std"
+
+[features]
+# Podepsane testovaci zony a odpovidac (testy, pomocny server v xtask).
+testzone = []
+
+[dependencies]
+sha1 = { version = "0.10", default-features = false, features = ["force-soft"] }
+sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+p384 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+ed25519-dalek = { version = "2", default-features = false }
+rsa = { version = "0.9", default-features = false, features = ["sha2"] }
+signature = { version = "2", default-features = false }

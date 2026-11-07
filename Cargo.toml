@@ -6,6 +6,7 @@ members = [
     "libs/abi",
     "libs/boot-info",
     "libs/conf",
+    "libs/dns",
     "libs/elf",
     "libs/fs",
     "libs/fsproto",

@@ -238,6 +238,8 @@ fn host_tests() -> Result<()> {
             "tls",
             "--package",
             "httpc",
+            "--package",
+            "dns",
             "--features",
             "initfs/std,fs/std,netproto/std,netproto/nts",
         ])
