@@ -249,6 +249,10 @@ pub struct MountOptions {
     /// davce (i potvrzene `fsync`) se ztrati - jen pro obnovu, kdyz chyba
     /// cteni nezmizi; bez volby je svazek jen pro cteni a log zustane.
     pub discard_unreadable_log: bool,
+    /// Neuklizet sirotky pri pripojeni (restart sluzby po padu, ne start
+    /// systemu): klienti je mohou znovu otevrit (`reopen`). Uklidi je
+    /// pozdeji `cleanup_unopened_orphans`.
+    pub keep_orphans: bool,
 }
 
 /// Nejvetsi hloubka adresaru pri prochazeni rodicu. Vic = cyklus rodicu
@@ -378,7 +382,9 @@ impl<D: BlockDevice> Fs<D> {
             }
             // Sirotci a pohledy z minula: po restartu je nikdo nema otevrene;
             // zbytky "bokem" po padu mezi commity.
-            fs.cleanup_orphans()?;
+            if !opts.keep_orphans {
+                fs.cleanup_orphans()?;
+            }
             fs.cleanup_views()?;
             fs.cleanup_asides()?;
         }

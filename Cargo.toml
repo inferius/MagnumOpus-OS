@@ -46,6 +46,7 @@ members = [
     "user/devmgr",
     "user/echo",
     "user/svctest",
+    "user/fsrtest",
     "user/fsd",
     "user/fwd",
     "user/netd",

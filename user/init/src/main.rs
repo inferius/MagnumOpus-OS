@@ -17,6 +17,7 @@ extern crate alloc;
 mod apps;
 mod certs;
 mod dns;
+mod fsd;
 mod gui;
 mod input;
 mod ntp;
@@ -41,25 +42,42 @@ fn main(startup: Startup) -> i64 {
     }
     match system::start_devices(&startup) {
         Ok(mut devices) => {
-            if let Err(e) = system::start_fs(&startup, &mut devices) {
-                println!("init: souborovy system nelze spustit: {e}");
-            } else if let Err(e) = certs::seed(&startup, &devices) {
-                // Bez uloziste se spojeni TLS nenavazou (zadna duveryhodna CA).
-                println!("init: uloziste certifikatu nelze pripravit: {e}");
+            match system::start_fs(&startup, &mut devices) {
+                Ok(Some((process, adapter))) => {
+                    // Po padu ho supervisor spusti znovu nad stejnym diskem;
+                    // relace initu se obnovi pres listek.
+                    sup.register(
+                        supervisor::Spec {
+                            name: "fsd",
+                            deps: &[],
+                            service: Some(alloc::boxed::Box::new(adapter)),
+                        },
+                        Some(&process),
+                    );
+                    match sup.session("fsd", fsd::Recipe::System.encode()) {
+                        Ok((ch, lease)) => devices.fs = Some(fsproto::FsClient::with_lease(ch, lease)),
+                        Err(e) => println!("init: relace FS nelze vytvorit: {e}"),
+                    }
+                    if devices.fs.is_some()
+                        && let Err(e) = certs::seed(&startup, &devices)
+                    {
+                        // Bez uloziste se spojeni TLS nenavazou (zadna duveryhodna CA).
+                        println!("init: uloziste certifikatu nelze pripravit: {e}");
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => println!("init: souborovy system nelze spustit: {e}"),
             }
             match input::start(&startup, core::mem::take(&mut devices.inputs)) {
                 Ok(i) => devices.input = Some(i),
                 Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
             sup.watch("devmgr", &devices.devmgr, None);
-            if let Some((p, _)) = &devices.fsd {
-                sup.watch("fsd", p, None);
-            }
             if let Some(i) = &devices.input {
                 sup.watch("inputd", &i.process, None);
             }
             // Sit az po FS: firewall uklada konfiguraci na FS.
-            match system::start_net(&startup, &mut devices) {
+            match system::start_net(&startup, &mut devices, &mut sup) {
                 Ok(mut n) => {
                     let dnsd_end = n.dnsd_end.take();
                     // Restart zatim neni (jako u fsd): netd drzi kanaly

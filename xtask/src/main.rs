@@ -371,6 +371,7 @@ const USER_PROGRAMS: &[&str] = &[
     "init",
     "echo",
     "svctest",
+    "fsrtest",
     "devmgr",
     "virtio-blk",
     "virtio-input",

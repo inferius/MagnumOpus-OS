@@ -1617,6 +1617,75 @@ fs.set_acl("/home/alice/shared/private", Some(Acl {
 `Stat` additionally has the owner u64 and the caller's effective rights u8.
 `OPEN` knows the `EXECUTE` access (8).
 
+### Recovery after an fsd crash
+
+> **Change from v3 (phase 3):** a new chapter. `fsd` runs under the init
+> supervisor and is started again after a crash; clients with a lease carry
+> on (the shared protocol [Service recovery](service-recovery.md)). New: the
+> `REOPEN` operation (118), the `CONNECT` flag "control session", the disk
+> operation `SYNC` (`blockproto`, 6), the mount option `keep_orphans`. No
+> on-disk format change. **Why:** a service crash must not mean restarting
+> the whole system or losing open files.
+
+**Adapter** (`user/init/src/fsd.rs`): the supervisor keeps the end of the
+channel to the disk driver (`Kept`), every instance gets a duplicate.
+Configuration on the bootstrap: `start`, `debug` in a test run, after a
+crash `restart <generation>`. The instance confirms the start with `ok`. A
+new instance after a crash:
+
+1. sends the disk a `SYNC` with a unique number and drops everything before
+   its echo (late replies for the old instance - the block protocol has no
+   request numbers),
+2. mounts the volume with `keep_orphans`: orphans (deleted but open files)
+   are kept for 30 s so clients can reopen them; then only those nobody
+   reopened are cleaned up,
+3. numbers handles from `generation << 40`, so a handle number of the old
+   instance never points to someone else's file in the new one.
+
+**Recipe** of a session (`libs/wire` encoding):
+
+| Kind | Fields | Session |
+|---|---|---|
+| 0 system | - | another control session (`CONNECT` with the `CONTROL` flag) - held by init |
+| 1 user | `u64` user, `u32` count + `u64` groups, `u32` count + mounts (name, target, flags) | `CONNECT_AS` from the adapter's control session |
+
+**Narrowing** (for a child, lease `NARROW`): a list of mounts (`u32` count +
+mounts). Each must lie inside one of the original ones (same target or
+below it) and an original read-only mount must stay read-only; the user and
+groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
+
+**Library** (`FsClient` over `svcclient::Conn`, `FsClient::with_lease`):
+
+- every operation has a kind: reads, `stat`, listings, `info`, status and
+  history reads are repeated automatically after a crash; the rest returns
+  `SERVICE_RESTARTED` (`OPEN` without `CREATE`/`TRUNCATE` is repeated),
+- **persistent handles**: the application gets a library handle number
+  (unique within the process); the library keeps the object identity
+  (dataset, oid, generation from `Revision`), access and sharing. After a
+  crash it reopens the handle before the next operation (`REOPEN`): rights
+  are checked again by the session identity, the path must lie in the
+  session's mounts; an object with a different generation = `NOT_FOUND`. An
+  orphan (no path) may be reopened only by its owner,
+- reads through a handle (`READ_H`, `STAT_H`, `LIST_H`) are then repeated;
+  writes and other handle operations return `SERVICE_RESTARTED` (the old
+  instance might have performed them),
+- a handle with a **lock**: locks died with the old instance - the first
+  operation returns `SERVICE_RESTARTED` (the application takes the lock
+  again), the next ones pass; "delete on close" is set again automatically,
+- a **conditional save** handle (temporary file) is invalid after a crash:
+  `SERVICE_RESTARTED`, then `BAD_HANDLE`; the application saves again.
+
+| Op | Name | Fields | Result |
+|---|---|---|---|
+| 31 | `CONNECT` | flags u32 (1 = control, only from a control session) | new session (handle) |
+| 118 | `REOPEN` | dataset u64, oid u64, generation u64, access u8, share u8 | handle u64, `Stat`, `Revision` (like `OPEN`) |
+
+Sessions with a lease today: init (control), `fwd` (`/config`). The sessions
+for `dnsd`, `ntpd` (certificate store) and `revocd` have no lease yet -
+after an `fsd` crash they get `SERVICE_UNAVAILABLE` (wiring them belongs to
+the network thread). Test: suite `obnova fsd`
+(`user/init/src/tests/fs_recovery.rs`, client `user/fsrtest`).
+
 ### Profiles
 
 A profile is a **system setting, not a format** (the boundary from the

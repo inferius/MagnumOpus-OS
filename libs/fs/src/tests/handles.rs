@@ -180,3 +180,57 @@ fn conditional_save_refuses_silent_overwrite() {
     fs.rename_replace_if("/x.tmp", "/novy", None).unwrap();
     assert_clean(&mut fs);
 }
+
+#[test]
+fn reopen_after_service_restart_keeps_orphans() {
+    // Pad sluzby: klient drzi (dataset, oid, generace). Nova instance se
+    // pripoji s keep_orphans a otevre soubor i smazany sirotek znovu.
+    let mut fs = new_fs(4096);
+    fs.create("/d", Kind::Dir).unwrap();
+    fs.create("/d/zivy", Kind::File).unwrap();
+    fs.write("/d/zivy", 0, b"zivy obsah").unwrap();
+    fs.create("/smazany", Kind::File).unwrap();
+    fs.write("/smazany", 0, b"obsah sirotka").unwrap();
+    let a = fs.open("/d/zivy", RW, share::ALL).unwrap();
+    let b = fs.open("/smazany", access::READ, share::ALL).unwrap();
+    let ra = fs.revision_h(a).unwrap();
+    let rb = fs.revision_h(b).unwrap();
+    fs.remove("/smazany").unwrap();
+    fs.commit().unwrap();
+    // Pad: nova instance se sirotky.
+    let dev = fs.into_device();
+    let opts = crate::MountOptions { keep_orphans: true, ..Default::default() };
+    let mut fs = crate::Fs::mount_with(dev, opts).unwrap();
+    let (a2, path) = fs.reopen(ra.dataset, ra.oid, ra.generation, RW, share::ALL).unwrap();
+    assert_eq!(path.as_deref(), Some("/d/zivy"));
+    assert_eq!(fs.read_h(a2, 0, 100).unwrap(), b"zivy obsah");
+    let (b2, path) = fs.reopen(rb.dataset, rb.oid, rb.generation, access::READ, share::ALL).unwrap();
+    assert_eq!(path, None);
+    assert_eq!(fs.read_h(b2, 0, 100).unwrap(), b"obsah sirotka");
+    // Spatna generace = objekt zanikl.
+    assert_eq!(fs.reopen(ra.dataset, ra.oid, ra.generation + 7, RW, share::ALL).err(), Some(Error::NotFound));
+    // Uklid po lhute: otevreny sirotek zustane, po zavreni zmizi.
+    fs.cleanup_unopened_orphans().unwrap();
+    assert_eq!(fs.read_h(b2, 0, 5).unwrap(), b"obsah");
+    fs.close(b2).unwrap();
+    fs.close(a2).unwrap();
+    fs.commit().unwrap();
+    assert_clean(&mut fs);
+    // Bez keep_orphans (start systemu) sirotek pri pripojeni zmizi.
+    let mut fs = remount(fs);
+    assert_eq!(fs.reopen(rb.dataset, rb.oid, rb.generation, access::READ, share::ALL).err(), Some(Error::NotFound));
+}
+
+#[test]
+fn reopen_checks_rights_again() {
+    let mut fs = new_fs(4096);
+    fs.create("/tajne", Kind::File).unwrap();
+    let h = fs.open("/tajne", access::READ, share::ALL).unwrap();
+    let r = fs.revision_h(h).unwrap();
+    fs.close(h).unwrap();
+    // Uzivatel bez prav: znovuotevreni neprojde ani po restartu (objekt,
+    // ktery nevidi, je pro nej NOT_FOUND).
+    fs.set_principal(Some(crate::Principal { user: 1000, groups: alloc::vec::Vec::new() }));
+    let r2 = fs.reopen(r.dataset, r.oid, r.generation, access::READ, share::ALL);
+    assert!(matches!(r2, Err(Error::NotFound | Error::AccessDenied)), "{r2:?}");
+}
