@@ -23,6 +23,12 @@ site menu.
 | [Init a supervisor](cs/init.md) | [Init and supervisor](en/init.md) | start služeb, zařízení za běhu, restart spadlých služeb, testovací běh / service start-up, run-time devices, restarting crashed services, test run |
 | [Hlášky v logu](cs/hlasky.md) | [Log messages](en/messages.md) | co znamenají a co dělat / what they mean and what to do |
 
+### Spolehlivost / Reliability
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Obnova služeb](cs/obnova-sluzeb.md) | [Service recovery](en/service-recovery.md) | restart po pádu, registr služeb se závislostmi, lístky, knihovna svcclient, pravidla pro klienty, testy „zabij službu“ / restart after a crash, service registry with dependencies, leases, the svcclient library, rules for clients, "kill the service" tests |
+
 ### Vstup a zařízení / Input and devices
 
 | Česky | English | Obsah / Contents |

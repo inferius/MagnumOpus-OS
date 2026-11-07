@@ -75,6 +75,12 @@ pub enum Error {
     ConnectionReset = -30,
     Unreachable = -31,
     AddressInUse = -32,
+    /// Sluzba spadla behem pozadavku s ucinkem; nevime, jestli ho provedla
+    /// (viz `docs/cs/obnova-sluzeb.md`).
+    ServiceRestarted = -33,
+    /// Sluzba nebezi: neobnovila se do lhuty klienta, nebo ji supervisor
+    /// vzdal.
+    ServiceUnavailable = -34,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -111,6 +117,8 @@ pub const ALL: &[Error] = &[
     Error::ConnectionReset,
     Error::Unreachable,
     Error::AddressInUse,
+    Error::ServiceRestarted,
+    Error::ServiceUnavailable,
 ];
 
 impl Error {
@@ -159,6 +167,8 @@ impl Error {
             Self::ConnectionReset => "CONNECTION_RESET",
             Self::Unreachable => "UNREACHABLE",
             Self::AddressInUse => "ADDRESS_IN_USE",
+            Self::ServiceRestarted => "SERVICE_RESTARTED",
+            Self::ServiceUnavailable => "SERVICE_UNAVAILABLE",
         }
     }
 
@@ -197,6 +207,8 @@ impl Error {
             Self::ConnectionReset => "spojeni bylo preruseno druhou stranou",
             Self::Unreachable => "cil neni dosazitelny (sit nenastavena, chybi cesta)",
             Self::AddressInUse => "adresa nebo port uz se pouziva",
+            Self::ServiceRestarted => "sluzba se behem pozadavku restartovala, nevime, jestli ho provedla",
+            Self::ServiceUnavailable => "sluzba nebezi (restart se nepovedl do lhuty nebo ho supervisor vzdal)",
         }
     }
 }
