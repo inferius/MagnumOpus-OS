@@ -97,13 +97,13 @@ fn records_roundtrip_all_kinds() {
         Event::Injection { active: 2 },
         Event::Layout(1),
         Event::Dropped { messages: 7 },
-        Event::NewKeyboard {
+        Event::NewDevice {
             source: 5,
-            state: crate::KeyboardTrust::Pending,
+            state: crate::DeviceTrust::Pending,
         },
-        Event::NewKeyboard {
+        Event::NewDevice {
             source: 6,
-            state: crate::KeyboardTrust::Rejected,
+            state: crate::DeviceTrust::Rejected,
         },
     ];
     let records: Vec<Record> = events
@@ -215,21 +215,21 @@ fn source_list_roundtrip() {
             id: 1,
             caps: crate::device::caps::KEYBOARD,
             synthetic: false,
-            trust: crate::KeyboardTrust::Trusted,
+            trust: crate::DeviceTrust::Trusted,
             name: "QEMU Virtio Keyboard",
         },
         SourceInfo {
             id: 7,
             caps: 0,
             synthetic: true,
-            trust: crate::KeyboardTrust::Trusted,
+            trust: crate::DeviceTrust::Trusted,
             name: "",
         },
         SourceInfo {
             id: 9,
             caps: 1,
             synthetic: false,
-            trust: crate::KeyboardTrust::Pending,
+            trust: crate::DeviceTrust::Pending,
             name: "USB klavesnice 0627:0001",
         },
     ];

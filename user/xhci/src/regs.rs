@@ -43,9 +43,6 @@ pub const PORT_OCC: u32 = 1 << 20;
 pub const PORT_PRC: u32 = 1 << 21;
 pub const PORT_PLC: u32 = 1 << 22;
 pub const PORT_CEC: u32 = 1 << 23;
-/// Vsechny bity "zmena" (zapis jednicky je smaze).
-pub const PORT_CHANGES: u32 =
-    PORT_CSC | PORT_PEC | PORT_WRC | PORT_OCC | PORT_PRC | PORT_PLC | PORT_CEC;
 /// Bity, ktere se pri zapisu musi zachovat (ostatni jsou RW1C, strobe nebo
 /// PED, jehoz zapis port vypne): napajeni, indikator, probuzeni.
 pub const PORT_PRESERVE: u32 = PORT_PP | (3 << 14) | (7 << 25);

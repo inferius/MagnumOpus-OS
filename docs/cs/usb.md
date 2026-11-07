@@ -141,11 +141,11 @@ protokol už používá.
 Převod usage na kódy evdev a rozdíly reportů jsou v knihovně
 `usbproto::hid`, testované na hostiteli.
 
-## Ověření nové klávesnice (proti BadUSB)
+## Ověření nového vstupního zařízení (proti BadUSB)
 
 Zařízení USB se může vydávat za klávesnici a samo psát příkazy (BadUSB,
-„Rubber Ducky“). **Volba zabezpečení** „ověřovat nové klávesnice“ to
-zastaví:
+„Rubber Ducky“), nebo za myš a klikat do dialogů. **Volba zabezpečení**
+„ověřovat nová vstupní zařízení“ to zastaví:
 
 <figure class="diagram">
 <svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Overeni nove klavesnice">
@@ -165,22 +165,28 @@ zastaví:
 1. Init po startu pošle `inputd` příkaz `settled`. Klávesnice připojené do
    té chvíle jsou důvěryhodné, protože je uživatel měl připojené už při
    zapnutí.
-2. Se zapnutou volbou (`policy verify-new-keyboards on`) dostane každá
-   další **fyzická** klávesnice stav `pending`. Vlastník fokusu i kanál
-   `secure` dostanou `NewKeyboard { source, Pending }`. Klient může ukázat
-   třeba „Připojena nová klávesnice“.
-3. Všechny události té klávesnice jdou **jen na kanál `secure`**, ne
-   vlastníkovi fokusu. Bezpečná zkratka z ní nefunguje a opakování kláves
-   také ne.
+2. Se zapnutou volbou (`policy verify-new-devices on`) dostane každá
+   další **fyzická** klávesnice nebo myš stav `pending`. Vlastník fokusu
+   i kanál `secure` dostanou `NewDevice { source, Pending }`. Klient může
+   ukázat třeba „Připojena nová klávesnice“.
+3. Všechny události toho zařízení jdou **jen na kanál `secure`**, ne
+   vlastníkovi fokusu. Bezpečná zkratka z něj nefunguje, opakování kláves
+   také ne, a jeho modifikátory (Ctrl, Shift) se nepřidávají k událostem
+   myši.
 4. Systém ukáže svůj dialog (kreslí ho kompozitor ve vrstvě, kterou
-   aplikace nepřekreslí) s náhodným kódem. Uživatel kód napíše na nové
-   klávesnici. Dialog to vidí, protože vstup jde na `secure`, a pošle
-   `trust <id>`. Při nesouhlasu pošle `reject <id>` a vstup klávesnice se
-   pak zahazuje.
-5. Po rozhodnutí přijde `NewKeyboard { source, Trusted / Rejected }`.
+   aplikace nepřekreslí):
+   - **u klávesnice** s náhodným kódem, který uživatel napíše na nové
+     klávesnici. Dialog to vidí, protože vstup jde na `secure`;
+   - **u myši** s dotazem, který uživatel potvrdí **na už ověřené
+     klávesnici**, protože kliknutí nové myši by mohlo být podvržené.
+
+   Pak dialog pošle `trust <id>`. Při nesouhlasu pošle `reject <id>`
+   a vstup zařízení se pak zahazuje.
+5. Po rozhodnutí přijde `NewDevice { source, Trusted / Rejected }`.
 
 Zařízení, které jen předstírá klávesnici, kód nezná. Než by ho uhodlo,
-nic nenapíše. Volba patří do [profilů zabezpečení](navrh-fs-v3.md#výchozí-stav-a-profily):
+nic nenapíše. Podvržená myš nic neodklikne, dokud uživatel neodpoví na
+své klávesnici. Volba patří do [profilů zabezpečení](navrh-fs-v3.md#výchozí-stav-a-profily):
 
 | Profil | Výchozí stav |
 |---|---|
@@ -197,7 +203,7 @@ přímo zprávou `trust`.
 | Kde | Co |
 |---|---|
 | `cargo test -p usbproto` | deskriptory (konfigurace, alternativní nastavení, poškozené délky), setup pakety, zprávy, hub (deskriptor, stav portu, rychlost), HID boot (rozdíl reportů, rollover, tabulka usage, myš) |
-| `cargo xtask test`, sada `usb` | klávesnice USB ze startu je důvěryhodná; klávesy z QEMU až do služby (zdroj, scan kód HID); hotplug myši (připojení, pohyb, kolečko, odpojení); nová klávesnice čeká na ověření (vstup jen na `secure`, po `trust` vlastníkovi fokusu) |
+| `cargo xtask test`, sada `usb` | klávesnice USB ze startu je důvěryhodná; klávesy z QEMU až do služby (zdroj, scan kód HID); hotplug myši (připojení, pohyb, kolečko, odpojení); nová klávesnice a nová myš čekají na ověření (vstup jen na `secure`, po `trust` vlastníkovi fokusu) |
 
 V QEMU je `qemu-xhci` s klávesnicí `usb-kbd` navázanou na konzoli druhé
 grafiky (`secondary-vga,id=video1`). Xtask jí přes QMP posílá události
@@ -210,7 +216,7 @@ a brala by si události, které má dostat PS/2.
 | Fáze | Stav | Co |
 |---|---|---|
 | 1 | hotovo | řadič xHCI: převzetí od firmwaru, reset, kontexty, fronty, MSI-X, kořenové porty, kontrolní a interrupt přenosy |
-| 2 | hotovo | HID boot protokol (klávesnice, myš), hotplug, ověření nové klávesnice |
+| 2 | hotovo | HID boot protokol (klávesnice, myš), hotplug, ověření nového vstupního zařízení |
 | 3 | plán | externí huby: v kontextu slotu route string, hub bit, počet portů a TT pro low/full speed za high-speed hubem. Ovladač hubu je hotový a řadič teď na externím hubu `ATTACH` odmítne |
 | 4 | plán | plný parser deskriptoru reportu HID (multimediální klávesy, myši s vysokým rozlišením kolečka, tablety: rozšíření `inputproto` o `EV_ABS`) |
 | 5 | plán | I2C-HID (touchpady notebooků: potřebuje AML a ovladač I2C) |

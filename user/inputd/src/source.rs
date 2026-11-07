@@ -33,7 +33,7 @@ pub struct Source {
     swallowed: Vec<u16>,
     /// Overeni klavesnice pripojene za behu (volba zabezpeceni); ostatni
     /// zdroje jsou `Trusted`.
-    pub trust: inputproto::KeyboardTrust,
+    pub trust: inputproto::DeviceTrust,
 }
 
 /// Co ma sluzba udelat s udalosti klavesy (rozhoduje o bezpecne zkratce
@@ -60,7 +60,7 @@ impl Source {
             wheel_x: 0,
             wheel_y: 0,
             swallowed: Vec::new(),
-            trust: inputproto::KeyboardTrust::Trusted,
+            trust: inputproto::DeviceTrust::Trusted,
         }
     }
 

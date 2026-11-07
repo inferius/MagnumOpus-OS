@@ -205,6 +205,9 @@ impl Server {
 
     /// Doruci hotove prenosy a zmeny portu.
     fn deliver(&mut self) {
+        // Endpointy zastavene chybou obnovit driv, nez klient posle dalsi
+        // pozadavek.
+        self.hc.recover_halted();
         let done: Vec<Done> = core::mem::take(&mut self.hc.done);
         for d in done {
             let Owner::Client(idx, id) = d.owner else {
@@ -213,10 +216,6 @@ impl Server {
             let data = if d.code == msg::completion::SUCCESS {
                 ok_reply(id, d.actual, &d.data)
             } else {
-                // Zastaveny endpoint uvolnit pro dalsi pozadavky.
-                if d.code == msg::completion::STALL {
-                    self.hc.recover(d.slot, d.dci);
-                }
                 Reply {
                     id,
                     status: Error::IoError.code(),
@@ -231,7 +230,6 @@ impl Server {
         if let Some((idx, id, max)) = self.root_wait {
             let map = self.hc.port_changes();
             if map.iter().any(|&b| b != 0) {
-                self.hc.port_event = false;
                 self.root_wait = None;
                 let n = map.len().min(max as usize);
                 self.reply(idx, &ok_reply(id, n as u32, &map[..n]));
@@ -370,11 +368,7 @@ impl Server {
             op::CONTROL => {
                 let setup = Setup::from_bytes(r.data).ok_or(Error::InvalidArgs)?;
                 let out = &r.data[Setup::SIZE..];
-                // Adresu a konfiguraci zarizeni ridi radic, ne tridni ovladac.
-                let standard_device = setup.request_type & 0x7F == rt::STANDARD | rt::TO_DEVICE;
-                if standard_device
-                    && matches!(setup.request, request::SET_ADDRESS | request::SET_CONFIGURATION)
-                {
+                if !control_allowed(&setup, iface, dcis) {
                     return Err(Error::AccessDenied);
                 }
                 if setup.length as usize > msg::MAX_DATA
@@ -382,11 +376,8 @@ impl Server {
                 {
                     return Err(Error::InvalidArgs);
                 }
-                let dev = self.hc.devices[slot as usize].as_ref().ok_or(Error::PeerClosed)?;
-                if !out.is_empty() {
-                    dev.ep0_buf.map.write_bytes(0, out);
-                }
-                self.hc.submit_control(slot, setup, Owner::Client(idx, r.id))?;
+                self.hc
+                    .submit_control(slot, setup, out, Owner::Client(idx, r.id))?;
                 Ok(None)
             }
             op::INTERRUPT_IN | op::INTERRUPT_OUT => {
@@ -413,5 +404,28 @@ impl Server {
             }
             _ => Err(Error::NotSupported),
         }
+    }
+}
+
+/// Smi tridni ovladac rozhrani `iface` poslat kontrolni pozadavek? Ovladac
+/// nesmi sahat na ostatni rozhrani zarizeni ani menit zarizeni jako celek:
+/// - prijemce rozhrani: jen vlastni (`wIndex` dolni bajt),
+/// - prijemce endpoint: jen endpointy vlastniho rozhrani,
+/// - prijemce zarizeni, standardni pozadavek: jen cteni (IN: deskriptory,
+///   stav); zapisy (adresa, konfigurace, vlastnosti) ridi radic,
+/// - pozadavky tridy a vyrobce na zarizeni a "other" (porty hubu) projdou.
+fn control_allowed(s: &Setup, iface: u8, dcis: &[u8]) -> bool {
+    let kind = s.request_type & 0x60;
+    match s.request_type & 0x1F {
+        rt::TO_INTERFACE => s.index as u8 == iface,
+        rt::TO_ENDPOINT => {
+            let addr = s.index as u8;
+            addr & 0x0F != 0 && dcis.contains(&device::dci(addr))
+        }
+        rt::TO_DEVICE if kind == rt::STANDARD => {
+            s.is_in() && !matches!(s.request, request::SET_ADDRESS | request::SET_CONFIGURATION)
+        }
+        rt::TO_DEVICE | rt::TO_OTHER => true,
+        _ => false,
     }
 }

@@ -26,7 +26,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use inputproto::control::{self, Status};
-use inputproto::KeyboardTrust;
+use inputproto::DeviceTrust;
 use keymap::LayoutId;
 use libos::{Channel, Error, Handle, Signals, Startup, println};
 
@@ -132,8 +132,8 @@ fn secure_input(svc: &mut Service, sig: Signals) {
         let mut w = text.split_whitespace();
         match (w.next(), w.next().and_then(|s| s.parse::<u16>().ok())) {
             (Some(control::RELEASE), None) => release = true,
-            (Some(control::TRUST), Some(id)) => decisions.push((id, KeyboardTrust::Trusted)),
-            (Some(control::REJECT), Some(id)) => decisions.push((id, KeyboardTrust::Rejected)),
+            (Some(control::TRUST), Some(id)) => decisions.push((id, DeviceTrust::Trusted)),
+            (Some(control::REJECT), Some(id)) => decisions.push((id, DeviceTrust::Rejected)),
             _ => {}
         }
     }
@@ -237,7 +237,7 @@ fn command(svc: &mut Service, data: &[u8], mut handles: Vec<Handle>) -> (String,
             (text, Vec::new())
         }
         control::POLICY => match (words.next(), words.next()) {
-            (Some(control::VERIFY_NEW_KEYBOARDS), Some(v @ ("on" | "off"))) => {
+            (Some(control::VERIFY_NEW_DEVICES), Some(v @ ("on" | "off"))) => {
                 svc.verify_new = v == "on";
                 ok()
             }

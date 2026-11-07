@@ -187,6 +187,14 @@ fn script() -> Vec<Step> {
     s.push(Step::SendPs2(vec![key("y", false)]));
     s.push(Step::WaitFor(usb::KBD_UNPLUG));
     s.push(Step::Qmp(device_del("usbkbd2")));
+    s.push(Step::WaitFor(usb::MOUSE2_PLUG));
+    s.push(Step::Qmp(device_add("usb-mouse", "usbmouse2")));
+    s.push(Step::WaitFor(usb::MOUSE2_PENDING));
+    s.push(Step::SendPs2(vec![rel("x", 2), rel("y", 3)]));
+    s.push(Step::WaitFor(usb::MOUSE2_TRUSTED));
+    s.push(Step::SendPs2(vec![rel("x", 5), rel("y", 1)]));
+    s.push(Step::WaitFor(usb::MOUSE2_UNPLUG));
+    s.push(Step::Qmp(device_del("usbmouse2")));
     s
 }
 
@@ -200,6 +208,10 @@ mod usb {
     pub const KBD_READY: &str = "init: test usb: klavesy nove klavesnice";
     pub const KBD_TRUSTED: &str = "init: test usb: klavesy overene klavesnice";
     pub const KBD_UNPLUG: &str = "init: test usb: odpoj klavesnici";
+    pub const MOUSE2_PLUG: &str = "init: test usb: pripoj druhou mys";
+    pub const MOUSE2_PENDING: &str = "init: test usb: pohyb neoverene mysi";
+    pub const MOUSE2_TRUSTED: &str = "init: test usb: pohyb overene mysi";
+    pub const MOUSE2_UNPLUG: &str = "init: test usb: odpoj druhou mys";
 }
 
 /// Pripojeni zarizeni USB za behu na radic `xhci`.

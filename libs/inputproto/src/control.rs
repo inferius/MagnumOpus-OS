@@ -13,11 +13,11 @@
 //! | `layout <jmeno>` | - | `ok` / `err NOT_FOUND` |
 //! | `status` | - | `ok` + [`Status`] v textu |
 //! | `sources` | - | `ok` + radky [`SourceInfo`] (id zdroju v zaznamech) |
-//! | `policy verify-new-keyboards on\|off` | - | `ok` (volba zabezpeceni) |
+//! | `policy verify-new-devices on\|off` | - | `ok` (volba zabezpeceni) |
 //! | `settled` | - | `ok`; zarizeni nalezena pri startu jsou duveryhodna |
 //!
 //! Na kanalu `secure` posila jeho vlastnik `release` (konec bezpecneho
-//! rezimu, fokus se vrati), `trust <id>` (nova klavesnice overena)
+//! rezimu, fokus se vrati), `trust <id>` (nove zarizeni overeno)
 //! a `reject <id>` (odmitnuta; jeji udalosti se zahazuji). Na kanalu
 //! fokusu klient zatim nic neposila.
 
@@ -38,13 +38,14 @@ pub const LAYOUT: &str = "layout";
 pub const STATUS: &str = "status";
 /// Seznam zdroju vstupu (id, druh, jmeno).
 pub const SOURCES: &str = "sources";
-/// Volby zabezpeceni: `policy verify-new-keyboards on|off`.
+/// Volby zabezpeceni: `policy verify-new-devices on|off`.
 pub const POLICY: &str = "policy";
-/// Volba: klavesnice pripojena za behu ceka na overeni (proti BadUSB).
-pub const VERIFY_NEW_KEYBOARDS: &str = "verify-new-keyboards";
+/// Volba: klavesnice nebo mys pripojena za behu ceka na overeni (proti
+/// BadUSB).
+pub const VERIFY_NEW_DEVICES: &str = "verify-new-devices";
 /// Start dokoncen: co je pripojene ted, je duveryhodne.
 pub const SETTLED: &str = "settled";
-/// Kanal `secure`: nova klavesnice `trust <id>` / `reject <id>`.
+/// Kanal `secure`: nove zarizeni `trust <id>` / `reject <id>`.
 pub const TRUST: &str = "trust";
 pub const REJECT: &str = "reject";
 /// Kanal `secure`: konec bezpecneho rezimu.
@@ -131,14 +132,14 @@ pub struct SourceInfo<'a> {
     pub caps: u16,
     pub synthetic: bool,
     /// Stav overeni (u umeleho vstupu vzdy `Trusted`).
-    pub trust: crate::KeyboardTrust,
+    pub trust: crate::DeviceTrust,
     pub name: &'a str,
 }
 
 impl<'a> SourceInfo<'a> {
     /// Jeden radek vcetne `\n`.
     pub fn format(&self, out: &mut impl core::fmt::Write) -> core::fmt::Result {
-        use crate::KeyboardTrust::*;
+        use crate::DeviceTrust::*;
         let kind = match (self.synthetic, self.trust) {
             (true, _) => "inject",
             (false, Trusted) => "real",
@@ -154,7 +155,7 @@ impl<'a> SourceInfo<'a> {
             let mut it = line.splitn(4, ' ');
             let id = it.next()?.parse().ok()?;
             let caps = it.next()?.parse().ok()?;
-            use crate::KeyboardTrust::*;
+            use crate::DeviceTrust::*;
             let (synthetic, trust) = match it.next()? {
                 "inject" => (true, Trusted),
                 "real" => (false, Trusted),

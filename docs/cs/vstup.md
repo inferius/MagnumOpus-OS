@@ -251,7 +251,7 @@ Jedna zpráva je jeden snímek a skládá se ze záznamů po 32 B:
 | 8 `INJECTION` | `Injection { active }` | počet zdrojů umělého vstupu | | | |
 | 9 `LAYOUT` | `Layout(id)` | 0 `us`, 1 `cz` | | | |
 | 10 `DROPPED` | `Dropped { messages }` | počet zpráv, které klientovi neprošly | | | |
-| 11 `NEW_KEYBOARD` | `NewKeyboard { source, state }` | id zdroje | 0 čeká, 1 ověřena, 2 odmítnuta | | |
+| 11 `NEW_DEVICE` | `NewDevice { source, state }` | id zdroje | 0 čeká, 1 ověřena, 2 odmítnuta | | |
 
 - `flags`: `SYNTHETIC` (1) = událost pochází z umělého vstupu.
 - `mods`: modifikátory po události. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -318,7 +318,7 @@ je jméno z [chyb](chyby.md), např. `err NOT_FOUND`.
 | `layout us` / `layout cz` | - | `ok`; neznámé `err NOT_FOUND` |
 | `status` | - | `ok devices=2 keyboards=1 pointers=1 layout=us injecting=0 dropped=0 secure=0` |
 | `sources` | - | `ok` a řádky `<id> <schopnosti> <real\|inject\|pending\|rejected> <jméno>`, např. `3 1 real PS/2 klavesnice` |
-| `policy verify-new-keyboards on\|off` | - | `ok`; volba zabezpečení [ověření nové klávesnice](usb.md#ověření-nové-klávesnice-proti-badusb) |
+| `policy verify-new-devices on\|off` | - | `ok`; volba zabezpečení [ověření nového vstupního zařízení](usb.md#ověření-nového-vstupního-zařízení-proti-badusb) |
 | `settled` | - | `ok`; zařízení připojená do teď jsou důvěryhodná (init po startu) |
 
 Neznámý příkaz vrátí `err NOT_SUPPORTED`, chybějící handle

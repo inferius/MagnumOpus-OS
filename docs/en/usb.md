@@ -146,11 +146,11 @@ no harm, because the device already uses the boot protocol.
 The usage-to-evdev mapping and the report differencing live in the
 `usbproto::hid` library, tested on the host.
 
-## Verifying a new keyboard (against BadUSB)
+## Verifying a new input device (against BadUSB)
 
 A USB device can pretend to be a keyboard and type commands by itself
-(BadUSB, "Rubber Ducky"). The **security option** "verify new keyboards"
-stops this:
+(BadUSB, "Rubber Ducky"), or pretend to be a mouse and click through
+dialogs. The **security option** "verify new input devices" stops this:
 
 <figure class="diagram">
 <svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="New keyboard verification">
@@ -170,22 +170,28 @@ stops this:
 1. After boot, init sends `inputd` the `settled` command. Keyboards
    attached up to that moment are trusted, because the user had them
    plugged in at power-on.
-2. With the option on (`policy verify-new-keyboards on`), every further
-   **physical** keyboard gets the `pending` state. The focus owner and the
-   secure channel get `NewKeyboard { source, Pending }`. A client may show,
-   for example, "a new keyboard was connected".
-3. All events of that keyboard go **only to the secure channel**, not to
-   the focus owner. The secure attention shortcut does not work from it,
-   and neither does key repeat.
+2. With the option on (`policy verify-new-devices on`), every further
+   **physical** keyboard or mouse gets the `pending` state. The focus owner
+   and the secure channel get `NewDevice { source, Pending }`. A client may
+   show, for example, "a new keyboard was connected".
+3. All events of that device go **only to the secure channel**, not to the
+   focus owner. The secure attention shortcut does not work from it,
+   neither does key repeat, and its modifiers (Ctrl, Shift) are not added
+   to mouse events.
 4. The system shows its own dialog (drawn by the compositor in a layer
-   applications cannot paint over) with a random code. The user types the
-   code on the new keyboard. The dialog sees it, because the input goes to
-   `secure`, and sends `trust <id>`. If they do not match, it sends
-   `reject <id>`, and the keyboard's input is dropped from then on.
-5. After the decision comes `NewKeyboard { source, Trusted / Rejected }`.
+   applications cannot paint over):
+   - **for a keyboard** with a random code the user types on the new
+     keyboard. The dialog sees it, because the input goes to `secure`;
+   - **for a mouse** with a question the user confirms **on an already
+     trusted keyboard**, because a click of the new mouse could be forged.
+
+   Then the dialog sends `trust <id>`. If the user declines, it sends
+   `reject <id>`, and the device's input is dropped from then on.
+5. After the decision comes `NewDevice { source, Trusted / Rejected }`.
 
 A device that merely pretends to be a keyboard does not know the code. It
-types nothing until it guesses it. The option belongs to the
+types nothing until it guesses it. A forged mouse clicks nothing until the
+user answers on their own keyboard. The option belongs to the
 [security profiles](fs-v3-design.md#defaults-and-profiles):
 
 | Profile | Default |
@@ -203,7 +209,7 @@ mechanism is done in `inputd`. The dialog with the code comes with the GUI
 | Where | What |
 |---|---|
 | `cargo test -p usbproto` | descriptors (configuration, alternate settings, broken lengths), setup packets, messages, hub (descriptor, port status, speed), HID boot (report differencing, rollover, usage table, mouse) |
-| `cargo xtask test`, suite `usb` | the USB keyboard from boot is trusted; keys from QEMU all the way to the service (source, HID scan code); mouse hotplug (attach, motion, wheel, detach); a new keyboard waits for verification (input only on `secure`, after `trust` to the focus owner) |
+| `cargo xtask test`, suite `usb` | the USB keyboard from boot is trusted; keys from QEMU all the way to the service (source, HID scan code); mouse hotplug (attach, motion, wheel, detach); a new keyboard and a new mouse wait for verification (input only on `secure`, after `trust` to the focus owner) |
 
 QEMU has `qemu-xhci` with a `usb-kbd` keyboard bound to the console of a
 second graphics card (`secondary-vga,id=video1`). Xtask sends it events
@@ -217,7 +223,7 @@ PS/2.
 | Phase | State | What |
 |---|---|---|
 | 1 | done | xHCI controller: takeover from the firmware, reset, contexts, rings, MSI-X, root ports, control and interrupt transfers |
-| 2 | done | HID boot protocol (keyboard, mouse), hotplug, new keyboard verification |
+| 2 | done | HID boot protocol (keyboard, mouse), hotplug, new input device verification |
 | 3 | plan | external hubs: route string, hub bit, port count and the TT for low/full speed behind a high-speed hub in the slot context. The hub driver is ready and the controller now refuses `ATTACH` from an external hub |
 | 4 | plan | a full HID report descriptor parser (multimedia keys, mice with high-resolution wheels, tablets: extending `inputproto` with `EV_ABS`) |
 | 5 | plan | I2C-HID (laptop touchpads: needs AML and an I2C driver) |

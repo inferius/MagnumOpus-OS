@@ -27,6 +27,10 @@ pub struct Devices {
     pub _fsd: Option<(Process, Channel)>,
 }
 
+/// Nejdelsi ticho od spravce zarizeni pri startu (vic nez jeho vlastni
+/// cekani na PS/2 a USB dohromady).
+const DEVMGR_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Spusti spravce zarizeni a pocka, az nahlasi vsechna zarizeni.
 pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let fs = Initfs::open(startup)?;
@@ -56,7 +60,8 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let mut blocks = Vec::new();
     let mut inputs = Vec::new();
     loop {
-        let msg = control.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        // Spravce muze mlcet dlouho: PS/2 (az 5 s) a pruchod USB (az 10 s).
+        let msg = control.read(Some(time::deadline_after(DEVMGR_TIMEOUT)))?;
         match &msg.data[..] {
             b"done" => break,
             b"block" => {

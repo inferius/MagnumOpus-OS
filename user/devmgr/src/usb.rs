@@ -23,6 +23,8 @@ pub struct Controller {
     pub _process: Process,
     pub channel: Channel,
     pub ready: bool,
+    /// Radic skoncil (kanal zavreny): uz na nej necekat.
+    pub closed: bool,
 }
 
 /// Zpracuje zpravu od radice. Vraci `true` pro `usb-ready`.

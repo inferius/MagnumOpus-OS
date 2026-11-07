@@ -78,7 +78,7 @@ pub(super) fn failr(what: &str, (e, got): (Error, Vec<Record>)) -> String {
             Event::Injection { active } => alloc::format!("I{active}"),
             Event::Layout(l) => alloc::format!("L{l}"),
             Event::Dropped { messages } => alloc::format!("D{messages}"),
-            Event::NewKeyboard { source, state } => alloc::format!("N{source}:{}", state.to_u32()),
+            Event::NewDevice { source, state } => alloc::format!("N{source}:{}", state.to_u32()),
             Event::Unknown { kind } => alloc::format!("?{kind}"),
         };
         s.push(' ');

@@ -132,7 +132,7 @@ invariant was broken (a kernel bug).
 | `usb-hid: rozhrani ... bez boot protokolu zatim nepodporovane` | HID without the boot protocol (multimedia, tablet) waits for phase 4. |
 | `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | No driver for the interface class (e.g. a USB disk). |
 | `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` did not arrive within 10 s; init gets `done` anyway. |
-| `inputd: nova klavesnice '...' ceka na overeni` / `overena` / `odmitnuta` | The new keyboard verification option (BadUSB): pending / trusted / rejected, see [USB](usb.md). |
+| `inputd: nove zarizeni '...' ceka na overeni`, `inputd: zarizeni '...' overeno` / `odmitnuto` | The new keyboard verification option (BadUSB): pending / trusted / rejected, see [USB](usb.md). |
 | `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
 | `virtio-input BB:DD.F: 'name' (klavesnice/mys)` | An input device is ready; the kind (keyboard/mouse) comes from the supported events. `nezname zarizeni` (unknown device) = it has neither keys nor relative axes (a tablet, not supported yet). |
 | `virtio-input ...: inicializace selhala: ...` | As for virtio-blk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA). |

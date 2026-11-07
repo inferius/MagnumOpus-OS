@@ -27,7 +27,7 @@ pub mod control;
 pub mod device;
 pub mod event;
 
-pub use event::{Action, Button, Event, KeyboardTrust, Record};
+pub use event::{Action, Button, Event, DeviceTrust, Record};
 
 /// Bity modifikatoru v [`Record::mods`] (stav po zpracovani udalosti).
 pub mod mods {

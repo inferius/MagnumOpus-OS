@@ -130,7 +130,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | `usb-hid: rozhrani ... bez boot protokolu zatim nepodporovane` | HID bez boot protokolu (multimédia, tablet) čeká na fázi 4. |
 | `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | Pro třídu rozhraní není ovladač (např. disk USB). |
 | `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` nepřišlo do 10 s; init dostane `done` i tak. |
-| `inputd: nova klavesnice '...' ceka na overeni` / `overena` / `odmitnuta` | Volba ověření nové klávesnice (BadUSB), viz [USB](usb.md). |
+| `inputd: nove zarizeni '...' ceka na overeni`, `inputd: zarizeni '...' overeno` / `odmitnuto` | Volba ověření nové klávesnice (BadUSB), viz [USB](usb.md). |
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
 | `virtio-input BB:ZZ.F: 'jméno' (klavesnice/mys)` | Vstupní zařízení je připravené; druh podle podporovaných událostí. `nezname zarizeni` = nemá klávesy ani relativní osy (tablet, zatím nepodporovaný). |
 | `virtio-input ...: inicializace selhala: ...` | Jako u virtio-blk: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA). |

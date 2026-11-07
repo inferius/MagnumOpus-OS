@@ -71,8 +71,9 @@ pub struct Hc {
     pub done: Vec<Done>,
     /// Vysledek prikazu: (adresa TRB prikazu, udalost dokonceni).
     cmd_result: Option<(u64, Trb)>,
-    /// Zmena na portech od posledniho dotazu root hubu.
-    pub port_event: bool,
+    /// Endpointy zastavene chybou prenosu (obnovi je `recover_halted`;
+    /// prikaz nejde poslat primo ze zpracovani udalosti).
+    halted: Vec<(u8, u8)>,
 }
 
 impl Hc {
@@ -115,7 +116,7 @@ impl Hc {
             pending: Vec::new(),
             done: Vec::new(),
             cmd_result: None,
-            port_event: false,
+            halted: Vec::new(),
             res,
         };
         hc.take_ownership();
@@ -261,7 +262,8 @@ impl Hc {
     fn event(&mut self, ev: Trb) {
         match ev.kind() {
             trb::CMD_COMPLETION => self.cmd_result = Some((ev.param, ev)),
-            trb::PORT_STATUS => self.port_event = true,
+            // Zmeny portu cte root hub primo z PORTSC (`port_changes`).
+            trb::PORT_STATUS => {}
             trb::TRANSFER_EVENT => self.transfer_event(ev),
             _ => {}
         }
@@ -296,6 +298,9 @@ impl Hc {
         };
         let ok = code == completion::SUCCESS || code == completion::SHORT_PACKET;
         let actual = if ok { actual.min(p.requested) } else { 0 };
+        if !ok {
+            self.halted.push((slot, dci));
+        }
         let data = if ok && p.is_in && actual > 0 {
             self.read_buffer(slot, dci, actual)
         } else {
@@ -357,13 +362,20 @@ impl Hc {
         }
     }
 
-    /// Vlozi kontrolni prenos na endpoint 0 zarizeni `slot` (data jsou
-    /// uz v bufferu endpointu 0).
-    pub fn submit_control(&mut self, slot: u8, setup: Setup, owner: Owner) -> Result<()> {
+    /// Vlozi kontrolni prenos na endpoint 0 zarizeni `slot`; data OUT
+    /// zapise do bufferu az po kontrole, ze endpoint nema rozpracovany
+    /// prenos (jinak by prepsala jeho data).
+    pub fn submit_control(&mut self, slot: u8, setup: Setup, out: &[u8], owner: Owner) -> Result<()> {
         if self.pending.iter().any(|p| p.slot == slot && p.dci == 1) {
             return Err(Error::AlreadyExists);
         }
         let dev = self.devices[slot as usize].as_mut().ok_or(Error::NotFound)?;
+        if out.len() as u64 > dev.ep0_buf.len {
+            return Err(Error::InvalidArgs);
+        }
+        if !out.is_empty() {
+            dev.ep0_buf.map.write_bytes(0, out);
+        }
         let len = setup.length as u32;
         let is_in = setup.is_in();
         let trt = match (len, is_in) {
@@ -435,11 +447,7 @@ impl Hc {
 
     /// Synchronni kontrolni prenos (enumerace): vraci prectena data.
     pub fn control_sync(&mut self, slot: u8, setup: Setup, out: &[u8]) -> Result<Vec<u8>> {
-        if !out.is_empty() {
-            let dev = self.devices[slot as usize].as_ref().ok_or(Error::NotFound)?;
-            dev.ep0_buf.map.write_bytes(0, out);
-        }
-        self.submit_control(slot, setup, Owner::Internal)?;
+        self.submit_control(slot, setup, out, Owner::Internal)?;
         let deadline = time::deadline_after(SYNC_TIMEOUT);
         loop {
             if let Some(i) = self
@@ -448,8 +456,8 @@ impl Hc {
                 .position(|d| d.owner == Owner::Internal && d.slot == slot && d.dci == 1)
             {
                 let d = self.done.swap_remove(i);
+                self.recover_halted();
                 if d.code != completion::SUCCESS {
-                    self.recover(slot, 1);
                     return Err(Error::IoError);
                 }
                 return Ok(d.data);
@@ -462,9 +470,13 @@ impl Hc {
         }
     }
 
-    /// Endpoint po chybe (STALL) je zastaveny: reset a posun fronty za
-    /// nedokonceny prenos.
+    /// Endpoint po chybe prenosu (STALL, chyba transakce, babble ...) je
+    /// zastaveny: reset a posun fronty za nedokonceny prenos. Zarizeni,
+    /// ktere uz neexistuje (odpojene), nic nepotrebuje.
     pub fn recover(&mut self, slot: u8, dci: u8) {
+        if !matches!(self.devices.get(slot as usize), Some(Some(_))) {
+            return;
+        }
         let reset = Trb {
             param: 0,
             status: 0,
@@ -486,6 +498,13 @@ impl Hc {
             status: 0,
             control: trb::SET_TR_DEQUEUE << 10 | (dci as u32) << 16 | (slot as u32) << 24,
         });
+    }
+
+    /// Obnovi endpointy zastavene chybou prenosu.
+    pub fn recover_halted(&mut self) {
+        while let Some((slot, dci)) = self.halted.pop() {
+            self.recover(slot, dci);
+        }
     }
 
     /// Zapise adresu vystupniho kontextu zarizeni do DCBAA.

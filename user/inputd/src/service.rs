@@ -8,7 +8,7 @@ use core::time::Duration;
 use inputproto::code::KEY_DELETE;
 use inputproto::device::{self, DeviceMessage};
 use inputproto::device::caps;
-use inputproto::{Action, Event, KeyboardTrust, Record, event};
+use inputproto::{Action, Event, DeviceTrust, Record, event};
 use keymap::{Layout, LayoutId, layout};
 use libos::{Channel, Error, println, time};
 
@@ -112,7 +112,7 @@ pub struct Service {
     next_id: u16,
     /// Start dokoncen (`settled`): zarizeni pripojena potom jsou "nova".
     pub settled: bool,
-    /// Volba zabezpeceni: nova klavesnice ceka na overeni.
+    /// Volba zabezpeceni: nova klavesnice nebo mys ceka na overeni.
     pub verify_new: bool,
 }
 
@@ -297,13 +297,15 @@ impl Service {
             if !s.synthetic {
                 println!("inputd: zarizeni '{}' pripojeno", s.name);
             }
-            // Klavesnice pripojena za behu muze byt podvrzena (BadUSB):
-            // s volbou overeni jde jeji vstup jen systemu, dokud ji neoveri.
-            if !s.synthetic && s.caps & caps::KEYBOARD != 0 && self.settled && self.verify_new {
-                s.trust = KeyboardTrust::Pending;
+            // Klavesnice nebo mys pripojena za behu muze byt podvrzena
+            // (BadUSB: pise prikazy, klika do dialogu): s volbou overeni jde
+            // jeji vstup jen systemu, dokud ji neoveri.
+            let input = s.caps & (caps::KEYBOARD | caps::POINTER) != 0;
+            if !s.synthetic && input && self.settled && self.verify_new {
+                s.trust = DeviceTrust::Pending;
                 let id = s.id;
-                println!("inputd: nova klavesnice '{}' ceka na overeni", s.name);
-                self.trust_changed(id, KeyboardTrust::Pending);
+                println!("inputd: nove zarizeni '{}' ceka na overeni", s.name);
+                self.trust_changed(id, DeviceTrust::Pending);
             }
             return;
         }
@@ -317,7 +319,7 @@ impl Service {
             let mut sak = false;
             let mut repeat = None::<Option<Repeat>>;
             let current = self.repeat.as_ref().map(|r| (r.source, r.code));
-            let trusted = self.sources[index].trust == KeyboardTrust::Trusted;
+            let trusted = self.sources[index].trust == DeviceTrust::Trusted;
             self.sources[index].raw(e, layout, now, &mut out, |s, code, scancode, action| {
                 // Bezpecnou zkratku umi jen fyzicka klavesnice, ktera neni
                 // ve stavu overovani.
@@ -361,22 +363,22 @@ impl Service {
         self.sources[index].flush(layout, now, &mut out);
         self.tag(index, &mut out);
         match self.sources[index].trust {
-            KeyboardTrust::Trusted => self.deliver_frame(&mut out, layout),
+            DeviceTrust::Trusted => self.deliver_frame(&mut out, layout),
             // Ceka na overeni: vstup vidi jen system (dialog overeni).
-            KeyboardTrust::Pending => {
+            DeviceTrust::Pending => {
                 if let Some(s) = &mut self.secure
                     && s.send(&out, &mut self.dropped) == Sent::Closed
                 {
                     self.secure = None;
                 }
             }
-            KeyboardTrust::Rejected => {}
+            DeviceTrust::Rejected => {}
         }
     }
 
     /// Oznameni o overeni klavesnice vlastnikovi fokusu i kanalu `secure`.
-    fn trust_changed(&mut self, source: u16, state: KeyboardTrust) {
-        let e = Event::NewKeyboard { source, state };
+    fn trust_changed(&mut self, source: u16, state: DeviceTrust) {
+        let e = Event::NewDevice { source, state };
         self.notify_focus(e);
         if self.secure.is_some() {
             self.notify_secure(e);
@@ -385,19 +387,19 @@ impl Service {
 
     /// Rozhodnuti systemu o nove klavesnici (`trust` / `reject` na kanalu
     /// `secure`). Neznamy zdroj nebo zdroj, ktery neceka = nic.
-    pub fn decide(&mut self, source: u16, state: KeyboardTrust) {
+    pub fn decide(&mut self, source: u16, state: DeviceTrust) {
         let Some(s) = self
             .sources
             .iter_mut()
-            .find(|s| s.id == source && s.trust == KeyboardTrust::Pending)
+            .find(|s| s.id == source && s.trust == DeviceTrust::Pending)
         else {
             return;
         };
         s.trust = state;
         println!(
-            "inputd: klavesnice '{}' {}",
+            "inputd: zarizeni '{}' {}",
             s.name,
-            if state == KeyboardTrust::Trusted { "overena" } else { "odmitnuta" }
+            if state == DeviceTrust::Trusted { "overeno" } else { "odmitnuto" }
         );
         self.trust_changed(source, state);
     }
@@ -412,10 +414,12 @@ impl Service {
 
     /// Doplni modifikatory udalostem mysi, doruci zaznamy a vyprazdni `out`.
     fn deliver_frame(&mut self, out: &mut Vec<Record>, layout: &Layout) {
-        // Udalosti mysi nesou modifikatory vsech klavesnic (Ctrl+klik).
+        // Udalosti mysi nesou modifikatory vsech duveryhodnych klavesnic
+        // (Ctrl+klik); zarizeni cekajici na overeni je ovlivnit nesmi.
         let all = self
             .sources
             .iter()
+            .filter(|s| s.trust == DeviceTrust::Trusted)
             .fold(0, |m, s| m | s.keyboard.mods(layout));
         for r in out.iter_mut() {
             if matches!(

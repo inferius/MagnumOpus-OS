@@ -39,9 +39,9 @@ pub mod kind {
     pub const LAYOUT: u16 = 9;
     /// Prijemci neprosly zpravy (plna fronta): a = pocet zprav.
     pub const DROPPED: u16 = 10;
-    /// Nova klavesnice ceka na overeni: a = id zdroje, b = 1 overena
-    /// (duveryhodna), 2 odmitnuta, 0 ceka.
-    pub const NEW_KEYBOARD: u16 = 11;
+    /// Nove vstupni zarizeni (klavesnice, mys) ceka na overeni: a = id
+    /// zdroje, b = 0 ceka, 1 overeno (duveryhodne), 2 odmitnuto.
+    pub const NEW_DEVICE: u16 = 11;
 }
 
 /// Priznaky zaznamu.
@@ -51,28 +51,28 @@ pub mod flags {
     pub const SYNTHETIC: u16 = 1 << 0;
 }
 
-/// Stav overeni klavesnice.
+/// Stav overeni noveho vstupniho zarizeni.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyboardTrust {
+pub enum DeviceTrust {
     Pending,
     Trusted,
     Rejected,
 }
 
-impl KeyboardTrust {
+impl DeviceTrust {
     pub const fn to_u32(self) -> u32 {
         match self {
-            KeyboardTrust::Pending => 0,
-            KeyboardTrust::Trusted => 1,
-            KeyboardTrust::Rejected => 2,
+            DeviceTrust::Pending => 0,
+            DeviceTrust::Trusted => 1,
+            DeviceTrust::Rejected => 2,
         }
     }
 
     pub const fn from_u32(v: u32) -> Option<Self> {
         match v {
-            0 => Some(KeyboardTrust::Pending),
-            1 => Some(KeyboardTrust::Trusted),
-            2 => Some(KeyboardTrust::Rejected),
+            0 => Some(DeviceTrust::Pending),
+            1 => Some(DeviceTrust::Trusted),
+            2 => Some(DeviceTrust::Rejected),
             _ => None,
         }
     }
@@ -185,12 +185,12 @@ pub enum Event {
     /// povazovat vsechny klavesy a tlacitka za uvolnene - ztracena mohla byt
     /// i uvolneni.
     Dropped { messages: u32 },
-    /// Klavesnice pripojena za behu ceka na overeni (volba zabezpeceni
-    /// "overovat nove klavesnice"): jeji udalosti jdou jen na kanal
-    /// `secure`, dokud ji system neoveri (`trust`) nebo neodmitne
-    /// (`reject`). Prijde vlastnikovi fokusu i kanalu `secure`; po
-    /// rozhodnuti znovu se stavem.
-    NewKeyboard { source: u16, state: KeyboardTrust },
+    /// Klavesnice nebo mys pripojena za behu ceka na overeni (volba
+    /// zabezpeceni "overovat nova vstupni zarizeni", proti BadUSB): jeji
+    /// udalosti jdou jen na kanal `secure`, dokud ji system neoveri
+    /// (`trust`) nebo neodmitne (`reject`). Prijde vlastnikovi fokusu
+    /// i kanalu `secure`; po rozhodnuti znovu se stavem.
+    NewDevice { source: u16, state: DeviceTrust },
     /// Druh, ktery tato verze knihovny nezna.
     Unknown { kind: u16 },
 }
@@ -253,8 +253,8 @@ impl Record {
             Event::Injection { active } => (kind::INJECTION, active, 0, 0, 0),
             Event::Layout(id) => (kind::LAYOUT, id, 0, 0, 0),
             Event::Dropped { messages } => (kind::DROPPED, messages, 0, 0, 0),
-            Event::NewKeyboard { source, state } => {
-                (kind::NEW_KEYBOARD, source as u32, state.to_u32(), 0, 0)
+            Event::NewDevice { source, state } => {
+                (kind::NEW_DEVICE, source as u32, state.to_u32(), 0, 0)
             }
             Event::Unknown { kind } => (kind, 0, 0, 0, 0),
         };
@@ -311,9 +311,9 @@ impl Record {
             kind::INJECTION => Event::Injection { active: a },
             kind::LAYOUT => Event::Layout(a),
             kind::DROPPED => Event::Dropped { messages: a },
-            kind::NEW_KEYBOARD => Event::NewKeyboard {
+            kind::NEW_DEVICE => Event::NewDevice {
                 source: u16::try_from(a).ok()?,
-                state: KeyboardTrust::from_u32(bb)?,
+                state: DeviceTrust::from_u32(bb)?,
             },
             other => Event::Unknown { kind: other },
         };

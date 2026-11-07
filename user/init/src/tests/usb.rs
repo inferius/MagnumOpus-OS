@@ -11,7 +11,7 @@ use core::time::Duration;
 
 use inputproto::code::*;
 use inputproto::control::{self, SourceInfo};
-use inputproto::{Action, Button, Event, KeyboardTrust, Record};
+use inputproto::{Action, Button, Event, DeviceTrust, Record};
 use libos::{Startup, println, time};
 
 use super::input::{deadline, failr, has, input, text};
@@ -24,6 +24,7 @@ pub const TESTS: &[Test] = &[
     ("QEMU: klavesnice USB az do sluzby", qemu_keyboard),
     ("hotplug: mys USB pripojena a odpojena", hotplug_mouse),
     ("nova klavesnice ceka na overeni (BadUSB)", verify_new_keyboard),
+    ("nova mys ceka na overeni (BadUSB)", verify_new_mouse),
 ];
 
 // Znacky (musi sedet s `xtask/src/qmp.rs`).
@@ -35,6 +36,10 @@ pub const MARKER_KBD_PLUG: &str = "init: test usb: pripoj klavesnici";
 pub const MARKER_KBD_READY: &str = "init: test usb: klavesy nove klavesnice";
 pub const MARKER_KBD_TRUSTED: &str = "init: test usb: klavesy overene klavesnice";
 pub const MARKER_KBD_UNPLUG: &str = "init: test usb: odpoj klavesnici";
+pub const MARKER_MOUSE2_PLUG: &str = "init: test usb: pripoj druhou mys";
+pub const MARKER_MOUSE2_PENDING: &str = "init: test usb: pohyb neoverene mysi";
+pub const MARKER_MOUSE2_TRUSTED: &str = "init: test usb: pohyb overene mysi";
+pub const MARKER_MOUSE2_UNPLUG: &str = "init: test usb: odpoj druhou mys";
 
 /// Jmeno klavesnice QEMU usb-kbd (vyrobce 0627, vyrobek 0001).
 const USB_KBD: &str = "USB klavesnice 0627:0001";
@@ -42,7 +47,7 @@ const USB_MOUSE: &str = "USB mys 0627:0001";
 /// Na udalosti a zmeny zarizeni z QEMU (TCG muze byt pomaly).
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-fn sources(inp: &Input) -> Result<Vec<(u16, KeyboardTrust, String)>, String> {
+fn sources(inp: &Input) -> Result<Vec<(u16, DeviceTrust, String)>, String> {
     let (text, _) = inp
         .command(control::SOURCES, Vec::new())
         .map_err(|e| fail("sources", e))?;
@@ -54,7 +59,7 @@ fn sources(inp: &Input) -> Result<Vec<(u16, KeyboardTrust, String)>, String> {
 
 /// Pocka, az se objevi zdroj se jmenem `name`, ktery nema id z `old`
 /// (mezitim predava sluzbe vstupu zarizeni pripojena za behu).
-fn wait_new_source(inp: &Input, name: &str, old: &[u16]) -> Result<(u16, KeyboardTrust), String> {
+fn wait_new_source(inp: &Input, name: &str, old: &[u16]) -> Result<(u16, DeviceTrust), String> {
     let d = devices().ok_or("spravce zarizeni nebezi")?;
     let until = deadline(TIMEOUT);
     loop {
@@ -95,7 +100,7 @@ fn boot_keyboard(_: &Startup) -> TestResult {
     check!(found.is_some(), "klavesnice USB ve zdrojich chybi");
     check_eq!(
         found.map(|(_, t, _)| *t),
-        Some(KeyboardTrust::Trusted),
+        Some(DeviceTrust::Trusted),
         "klavesnice pripojena pri startu je duveryhodna"
     );
     Ok(())
@@ -168,10 +173,10 @@ fn hotplug_mouse(_: &Startup) -> TestResult {
 
 fn verify_new_keyboard(_: &Startup) -> TestResult {
     let inp = input()?;
-    inp.command("policy verify-new-keyboards on", Vec::new())
+    inp.command("policy verify-new-devices on", Vec::new())
         .map_err(|e| fail("zapnuti overeni", e))?;
     let r = verify_inner(inp);
-    let _ = inp.command("policy verify-new-keyboards off", Vec::new());
+    let _ = inp.command("policy verify-new-devices off", Vec::new());
     r
 }
 
@@ -181,10 +186,10 @@ fn verify_inner(inp: &Input) -> TestResult {
     drain(&inp.secure);
     println!("{MARKER_KBD_PLUG}");
     let (id, trust) = wait_new_source(inp, USB_KBD, &old)?;
-    check_eq!(trust, KeyboardTrust::Pending, "nova klavesnice ceka na overeni");
-    let pending = Event::NewKeyboard {
+    check_eq!(trust, DeviceTrust::Pending, "nova klavesnice ceka na overeni");
+    let pending = Event::NewDevice {
         source: id,
-        state: KeyboardTrust::Pending,
+        state: DeviceTrust::Pending,
     };
     read_until(&inp.focus, deadline(TIMEOUT), |r| has(r, pending))
         .map_err(|e| failr("oznameni nove klavesnice (fokus)", e))?;
@@ -212,9 +217,9 @@ fn verify_inner(inp: &Input) -> TestResult {
     inp.secure
         .write(alloc::format!("trust {id}").as_bytes(), Vec::new())
         .map_err(|e| fail("trust", e))?;
-    let trusted = Event::NewKeyboard {
+    let trusted = Event::NewDevice {
         source: id,
-        state: KeyboardTrust::Trusted,
+        state: DeviceTrust::Trusted,
     };
     read_until(&inp.focus, deadline(TIMEOUT), |r| has(r, trusted))
         .map_err(|e| failr("overeni klavesnice", e))?;
@@ -224,5 +229,62 @@ fn verify_inner(inp: &Input) -> TestResult {
     })
     .map_err(|e| failr("klavesa overene klavesnice", e))?;
     println!("{MARKER_KBD_UNPLUG}");
+    wait_gone(inp, id)
+}
+
+fn verify_new_mouse(_: &Startup) -> TestResult {
+    let inp = input()?;
+    inp.command("policy verify-new-devices on", Vec::new())
+        .map_err(|e| fail("zapnuti overeni", e))?;
+    let r = verify_mouse_inner(inp);
+    let _ = inp.command("policy verify-new-devices off", Vec::new());
+    r
+}
+
+/// Soucet pohybu zdroje `id` v zaznamech.
+fn motion_of(records: &[Record], id: u16) -> (i32, i32) {
+    records
+        .iter()
+        .filter(|r| r.source == id)
+        .fold((0, 0), |(x, y), r| match r.event {
+            Event::Motion { dx, dy } => (x + dx, y + dy),
+            _ => (x, y),
+        })
+}
+
+fn verify_mouse_inner(inp: &Input) -> TestResult {
+    let old = ids(inp)?;
+    drain(&inp.focus);
+    drain(&inp.secure);
+    println!("{MARKER_MOUSE2_PLUG}");
+    let (id, trust) = wait_new_source(inp, USB_MOUSE, &old)?;
+    check_eq!(trust, DeviceTrust::Pending, "nova mys ceka na overeni");
+    drain(&inp.focus);
+    println!("{MARKER_MOUSE2_PENDING}");
+    // xtask: pohyb (2, 3) - vidi ho jen system.
+    let got = read_until(&inp.secure, deadline(TIMEOUT), |r| motion_of(r, id) == (2, 3))
+        .map_err(|e| failr("pohyb neoverene mysi na secure", e))?;
+    check_eq!(motion_of(&got, id), (2, 3), "pohyb na secure");
+    libos::time::sleep(Duration::from_millis(300));
+    while let Ok(m) = inp.focus.try_read() {
+        let recs = inputproto::event::decode(&m.data).ok_or("neplatna zprava")?;
+        check!(
+            !recs.iter().any(|r| r.source == id),
+            "neoverena mys hybe ukazatelem vlastnika fokusu"
+        );
+    }
+    inp.secure
+        .write(alloc::format!("trust {id}").as_bytes(), Vec::new())
+        .map_err(|e| fail("trust", e))?;
+    let trusted = Event::NewDevice {
+        source: id,
+        state: DeviceTrust::Trusted,
+    };
+    read_until(&inp.focus, deadline(TIMEOUT), |r| has(r, trusted))
+        .map_err(|e| failr("overeni mysi", e))?;
+    println!("{MARKER_MOUSE2_TRUSTED}");
+    read_until(&inp.focus, deadline(TIMEOUT), |r| motion_of(r, id) == (5, 1))
+        .map_err(|e| failr("pohyb overene mysi", e))?;
+    println!("{MARKER_MOUSE2_UNPLUG}");
     wait_gone(inp, id)
 }

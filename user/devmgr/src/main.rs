@@ -151,8 +151,11 @@ fn serve_usb(
     deadline: Option<u64>,
 ) -> bool {
     let mut items = vec![(parent.handle(), Signals::PEER_CLOSED)];
-    for c in controllers.iter() {
-        items.push((c.channel.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+    // Zavreny kanal by mel PEER_CLOSED porad nastaveny a cekani by se
+    // vracelo okamzite: skoncene radice vynechat.
+    let open: Vec<usize> = (0..controllers.len()).filter(|&i| !controllers[i].closed).collect();
+    for &i in &open {
+        items.push((controllers[i].channel.handle(), Signals::READABLE | Signals::PEER_CLOSED));
     }
     let observed = match libos::wait_many(&items, deadline) {
         Ok((_, o)) => o,
@@ -162,8 +165,9 @@ fn serve_usb(
     if observed[0].intersects(Signals::PEER_CLOSED) {
         return false;
     }
-    for (i, c) in controllers.iter_mut().enumerate() {
-        let s = observed[i + 1];
+    for (k, &i) in open.iter().enumerate() {
+        let c = &mut controllers[i];
+        let s = observed[k + 1];
         if s.intersects(Signals::READABLE) {
             while let Ok(m) = c.channel.try_read() {
                 if usb::handle(fs, m, parent, procs) {
@@ -172,7 +176,9 @@ fn serve_usb(
             }
         } else if s.intersects(Signals::PEER_CLOSED) {
             // Radic skoncil: nic dalsiho nehlasi.
+            println!("devmgr: ovladac radice USB skoncil");
             c.ready = true;
+            c.closed = true;
         }
     }
     true
@@ -209,6 +215,7 @@ fn start_xhci(
         _process: process,
         channel: mine,
         ready: false,
+        closed: false,
     })
 }
 

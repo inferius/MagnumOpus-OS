@@ -75,11 +75,20 @@ impl Hc {
         PortStatus { status, change }
     }
 
-    /// Bitmapa zmen (bit N = port N) jako na endpointu stavu hubu.
+    /// Bitmapa zmen (bit N = port N) jako na endpointu stavu hubu. Hlasi
+    /// jen zmeny, ktere hub USB 2.0 zna (`wPortChange`) a ovladac hubu umi
+    /// smazat; zmenu stavu linky (PLC) a chybu konfigurace (CEC) USB 3
+    /// rovnou smaze - jinak by bitmapa nikdy nebyla prazdna a ovladac hubu
+    /// by se tocil dokola.
     pub fn port_changes(&self) -> Vec<u8> {
+        const REPORTED: u32 = PORT_CSC | PORT_PEC | PORT_OCC | PORT_PRC | PORT_WRC;
         let mut map = alloc::vec![0u8; (self.ports as usize + 1).div_ceil(8)];
         for p in 1..=self.ports {
-            if self.regs.portsc(p) & PORT_CHANGES != 0 {
+            let sc = self.regs.portsc(p);
+            if sc & (PORT_PLC | PORT_CEC) != 0 {
+                self.port_write(p, sc & (PORT_PLC | PORT_CEC));
+            }
+            if sc & REPORTED != 0 {
                 map[p as usize / 8] |= 1 << (p % 8);
             }
         }
