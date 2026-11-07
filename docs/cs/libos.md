@@ -92,9 +92,23 @@ let reply = channel.read(None)?;
 let code = process.wait_exit(None)?;
 ```
 
-`spawn` vytvoří prázdný proces, namapuje do něj segmenty ELF (s právy podle
-segmentů, W^X) a zásobník 256 KiB, pošle startovní zprávu a spustí první
-vlákno. Vrátí proces a konec kanálu k potomkovi.
+`spawn` vytvoří prázdný proces ve stejném jobu jako volající, namapuje do
+něj segmenty ELF (s právy podle segmentů, W^X) a zásobník 256 KiB, pošle
+startovní zprávu a spustí první vlákno. Vrátí proces a konec kanálu
+k potomkovi. Paměť programu (segmenty, zásobník) jde na účet jobu potomka.
+
+`spawn_in(&job, ...)` spustí program v jiném jobu, například v podřízeném
+s limity:
+
+```rust
+use libos::job::{Job, pool};
+let job = Job::create(&libos::job::current()?)?;
+job.set_limit(pool::USER, 64 << 20)?;
+let (process, channel) = libos::spawn_in(&job, "echo", image, Vec::new())?;
+```
+
+Potomek dostane svůj job ve startovní zprávě bez práva `WRITE`, takže si
+limity nezmění (viz [Joby](syscally.md#joby-rozpočty-prostředků)).
 
 ## Velikost stránky
 

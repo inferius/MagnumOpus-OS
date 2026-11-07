@@ -11,7 +11,9 @@ use super::thread::{QOS_CLASSES, Qos, Thread};
 use crate::arch::{self, CpuLocalData as _};
 use crate::sync::SpinLock;
 
-pub const MAX_CPUS: usize = 256;
+/// Nejvic CPU (staticke pole ukazatelu, 8 B na CPU). Dnesni servery maji
+/// pres 500 logickych CPU; dalsi CPU nad mez se nespusti (zaloguje se).
+pub const MAX_CPUS: usize = 4096;
 
 /// Fronty vlaken pripravenych k behu, jedna na tridu QoS.
 #[derive(Default)]

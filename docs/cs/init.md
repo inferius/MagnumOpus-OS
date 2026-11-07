@@ -31,7 +31,10 @@ výpadku proudu pro testy FS).
 3. `fsd` nad diskem se souborovým systémem,
 4. `inputd`: init mu předá vstupní zařízení, svůj kanál fokusu a kanál
    `secure` a pošle `settled` (zařízení připojená teď jsou důvěryhodná),
-5. všechny tyto procesy předá supervisoru k hlídání.
+5. `netd` nad první síťovou kartou a `fwd` (firewall, konfigurace na FS),
+   oba v jobech podle svých manifestů (viz [Síť](sit.md),
+   [Firewall](firewall.md)),
+6. všechny tyto procesy předá supervisoru k hlídání.
 
 ## Supervisor
 
@@ -43,7 +46,7 @@ Smyčka čeká na kanál správce zařízení a na konec hlídaných procesů:
 | `devmgr` pošle `block` | zatím jen zaloguje (disky za běhu přijdou s více disky v `fsd`) |
 | `devmgr` zavře kanál | zaloguje, hotplug přestane fungovat |
 | skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na potvrzení nové služby nečeká blokující: její kanál je další položka smyčky. Když do 5 s neodpoví (nebo odpoví chybou), ukončí ji a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
-| skončila jiná služba (`devmgr`, `fsd`, `inputd`) | zaloguje kód. Obnova zatím není (viz níže) |
+| skončila jiná služba (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`) | zaloguje kód. Obnova zatím není (viz níže) |
 
 Log při pádu služby:
 
@@ -71,7 +74,7 @@ sup.watch("fsd", &fsd_process, None);
 sup.run(&startup); // nikdy se nevrátí
 ```
 
-## Proč se zatím neobnovuje `inputd`, `fsd` a `devmgr`
+## Proč se zatím neobnovuje `inputd`, `fsd`, `netd` a `devmgr`
 
 Spadlá služba zavře kanály ke svým ovladačům a klientům a ti pak skončí.
 Ovladač vstupu při zavření kanálu ke službě skončí. Nová `inputd` by tak
@@ -82,7 +85,9 @@ navíc musel řadič znovu projít porty. Obnova tedy potřebuje:
   (přes `devmgr`),
 - restart se závislostmi (pád `devmgr` = znovu spustit i služby nad
   ovladači),
-- u `fsd` připojení stejného disku a obnovu relací klientů.
+- u `fsd` připojení stejného disku a obnovu relací klientů,
+- u `netd` nové relace pro programy (každý socket je kanál, s pádem služby
+  zaniknou) a znovu spustit `fwd` s novým kanálem k `netd`.
 
 To je další krok supervisoru. Mechanismus v `watch` / `restart` je na něj
 připravený.

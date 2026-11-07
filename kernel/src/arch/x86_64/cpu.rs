@@ -35,6 +35,32 @@ pub fn features() -> Features {
     }
 }
 
+/// 64 bitu z RDSEED (primo ze zdroje entropie), jinak z RDRAND (vystup
+/// DRBG v procesoru). Instrukce muze docasne selhat (CF = 0), proto par
+/// pokusu. `None` = CPU instrukce nema nebo opakovane selhaly.
+pub fn hw_random() -> Option<u64> {
+    let rdseed = cpuid(7, 0).ebx & (1 << 18) != 0;
+    let rdrand = cpuid(1, 0).ecx & (1 << 30) != 0;
+    for _ in 0..16 {
+        let mut v: u64;
+        let ok: u8;
+        if rdseed {
+            // SAFETY: instrukci CPU podporuje (CPUID), nema vedlejsi ucinky.
+            unsafe { asm!("rdseed {}", "setc {}", out(reg) v, out(reg_byte) ok, options(nomem, nostack)) };
+        } else if rdrand {
+            // SAFETY: jako vyse.
+            unsafe { asm!("rdrand {}", "setc {}", out(reg) v, out(reg_byte) ok, options(nomem, nostack)) };
+        } else {
+            return None;
+        }
+        if ok == 1 {
+            return Some(v);
+        }
+        core::hint::spin_loop();
+    }
+    None
+}
+
 /// # Safety
 ///
 /// Cteni I/O portu muze mit vedlejsi efekt (napr. potvrzeni stavu);

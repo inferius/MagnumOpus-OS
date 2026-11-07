@@ -146,8 +146,18 @@ ve Windows nebo vDSO + libc v Linuxu).
 
 - Init dostane kořenové capabilities a rozdává je službám, každé jen jejich část.
 - Uživatel je pojem userspace: session = sada capabilities.
-- Aplikace jsou vždy v sandboxu; manifest říká, jaké capabilities potřebují.
+- Aplikace jsou vždy v sandboxu; manifest říká, jaké capabilities potřebují
+  (zatím síť a rozpočet, viz [Manifest aplikace](firewall.md#manifest-aplikace)).
 - Přístup k souboru = handle na adresář, ve kterém leží. Žádná ACL.
+- **Prostředky:** každý proces běží v jobu s rozpočtem paměti jádra
+  a uživatelské paměti v bajtech. Rodič rozdělí svůj rozpočet potomkům,
+  potomek si limit nezvýší. Pevné počty (handly, vlákna, ...) nejsou, jen
+  meze dané formátem (viz [Joby](syscally.md#joby-rozpočty-prostředků)).
+- **Firewall** je součást služby sítě, takže ho nejde obejít. Tvoří ho
+  manifest aplikace, dotazy uživateli, paketový filtr podle profilu sítě,
+  audit a filtr DNS (viz [firewall.md](firewall.md)).
+- **Plán:** brána spuštění (ověření podpisu programu, volnější režim podle
+  nastavení) a antivir se skenováním v izolovaných procesech bez sítě.
 
 ## Systémové služby
 
@@ -896,7 +906,9 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
-   TCP/IP, DNS, TLS 1.3, HTTP klient - služby, přístup přes capability)
+   TCP/IP, DHCP, DNS, NTP, přístup přes capability a firewall hotové - viz
+   [sit.md](sit.md) a [firewall.md](firewall.md); zbývá TLS 1.3, HTTP
+   klient, IPv6, vlastní stack), joby s rozpočty prostředků (hotovo)
    - **6a Vstup (hotovo):** služba vstupu, klávesnice a myš (virtio-input;
      PS/2, USB HID), rozložení US a CZ, bezpečná zkratka - viz
      [Vstup](vstup.md)
@@ -930,7 +942,8 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
 - **IOMMU (Intel VT-d, AMD-Vi) jen pro překlad DMA:** chybí překlad
   přerušení a oblasti RMRR/IVMD; na stroji bez IOMMU DMA omezené není
   (jádro to zaloguje).
-- **Kvóty jen na proces**, ne pro skupiny procesů (job).
+- **Stack TCP/IP je smoltcp** (za modulem `stack` služby `netd`), vlastní
+  stack ho nahradí později - viz [sit.md](sit.md#plán).
 - **Náhled změn shellu je překryv v paměti shellu**, ne klon datasetu:
   `fsproto` zatím klony a diff neumí. Programy proto v `preview` neběží
   a undo jejich změn stojí na snapshotu celého svazku.

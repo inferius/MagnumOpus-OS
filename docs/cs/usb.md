@@ -50,7 +50,11 @@ jedné třídy tak neohrozí ostatní.
    - Enable Slot a Address Device,
    - prvních 8 B deskriptoru zařízení (velikost paketu EP0, případně
      Evaluate Context), celý deskriptor a celou konfiguraci,
-   - SET_CONFIGURATION a Configure Endpoint pro interrupt endpointy.
+   - Configure Endpoint pro interrupt endpointy a teprve pak
+     SET_CONFIGURATION (xHCI 4.3.5: řadič má prostředky pro endpointy dřív,
+     než je zařízení začne používat). U hubu pak deskriptor hubu a další
+     Configure Endpoint s údaji hubu v kontextu slotu (počet portů, TT,
+     MTT).
 
    Každé rozhraní pak ohlásí: `usb-interface <třída> <podtřída>
    <protokol> <vid> <pid>`.
@@ -252,10 +256,6 @@ s `device=video1`. Myš a druhou klávesnici test připojí za běhu
 a brala by si události, které má dostat PS/2.
 
 ## Omezení a další fáze
-
-⚠️ **aarch64 (QEMU virt):** kořenový hub klávesnici USB najde, ale klávesy
-z QEMU (QMP) a zařízení připojená za běhu zatím nedorazí. Testy událostí
-a hotplugu USB proto běží jen na x86_64; oprava je samostatný úkol.
 
 | Fáze | Stav | Co |
 |---|---|---|

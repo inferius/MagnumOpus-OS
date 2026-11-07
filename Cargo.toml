@@ -5,27 +5,36 @@ members = [
     "kernel",
     "libs/abi",
     "libs/boot-info",
+    "libs/conf",
     "libs/elf",
     "libs/fs",
     "libs/fsproto",
+    "libs/netfilter",
+    "libs/netproto",
     "libs/osfs-proto",
     "libs/initfs",
+    "libs/manifest",
     "libs/blockproto",
     "libs/inputproto",
     "libs/keymap",
     "libs/i8042",
     "libs/usbproto",
     "libs/usbclient",
+    "libs/csprng",
     "libs/libos",
     "libs/pci",
     "libs/tz",
     "libs/shlang",
     "libs/term",
     "libs/virtio",
+    "libs/wire",
     "tools/osfs",
     "user/devmgr",
     "user/echo",
     "user/fsd",
+    "user/fwd",
+    "user/netd",
+    "user/netprobe",
     "user/init",
     "user/ps2",
     "user/shsess",
@@ -37,6 +46,8 @@ members = [
     "user/xhci",
     "user/usb-hub",
     "user/usb-hid",
+    "user/virtio-net",
+    "user/virtio-rng",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace
@@ -51,6 +62,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 abi = { path = "libs/abi" }
 boot-info = { path = "libs/boot-info" }
+conf = { path = "libs/conf" }
 elf = { path = "libs/elf" }
 initfs = { path = "libs/initfs" }
 tz = { path = "libs/tz" }

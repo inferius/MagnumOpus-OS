@@ -69,7 +69,9 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd, shsess
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd, shsess,
+                       virtio-net, virtio-rng, netd, fwd, netprobe, manifests, firewall.toml
+                       (+ net-test with `cargo xtask test`: helper server ports)
 ```
 
 QEMU gets an emulated IOMMU (`intel-iommu`, with `--iommu amd`
@@ -95,6 +97,15 @@ card `secondary-vga,id=video1`, a `qemu-xhci` controller with a `usb-kbd`
 keyboard (bound to `video1`) and a QMP server on a random
 localhost port (`-qmp tcp:127.0.0.1:<port>`). Xtask injects events for the
 input test over QMP, see [Input](input.md#tests).
+
+The `virtio-rng-pci` randomness source (data from the host) adds entropy to
+the kernel. The network card is `virtio-net-pci` (modern mode, `iommu_platform=on`, no
+option ROM) in QEMU user-mode networking (slirp): the guest has 10.0.2.15,
+sees the gateway and the host as 10.0.2.2, and the slirp DNS is 10.0.2.3.
+`cargo xtask test` also starts helper servers on the host for the network
+tests (echo, DNS, NTP, on `127.0.0.1` and free ports) and forwards one
+port from the host into the guest (`hostfwd`). Details:
+[network.md](network.md#tests).
 
 ## Output and tracking down errors
 
@@ -149,6 +160,12 @@ libs/fs/         file system (no_std; std for tools)
 libs/fsproto/    file system protocol (client <-> fsd)
 libs/shlang/     shell language: lexer, B and C parsers, tree, formatter, interpreter
 libs/term/       smart terminal: protocol, session service, VT100, screen
+libs/csprng/     kernel random number generator (ChaCha20, BLAKE2s)
+libs/wire/       shared message encoding of protocols (fsproto, netproto)
+libs/netproto/   network protocol (programs <-> netd <-> driver), DNS, NTP, permissions
+libs/netfilter/  network packet filter (profiles, UDP flows, rate limits)
+libs/conf/       reading and writing TOML configuration
+libs/manifest/   application manifest (identity, budget, network)
 user/init/       first process: starts services, userspace tests
 user/echo/       IPC test server
 user/devmgr/     device manager (PCI, starts drivers)
@@ -163,6 +180,11 @@ user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
 user/termd/      terminal broker (routes messages, session registry)
 user/shsess/     process of one shell session (interpreter, draft, undo)
+user/virtio-net/ network card driver
+user/virtio-rng/ randomness source driver (entropy for the kernel)
+user/netd/       network service (TCP/IP, DHCP, DNS, firewall)
+user/fwd/        firewall service (configuration, asking the user)
+user/netprobe/   network test application with a manifest
 libs/osfs-proto/ protocol of the extended FS API for Windows (DeviceIoControl) + client
 tools/osfs/      host tool for the FS: format, check, mount on Windows (WinFsp)
 xtask/           build, disk image, QEMU, tests

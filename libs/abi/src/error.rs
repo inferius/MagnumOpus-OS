@@ -23,7 +23,7 @@ pub enum Error {
     TimedOut = -4,
     /// Nedostatek pameti.
     NoMemory = -5,
-    /// Vycerpany limit (pocet handlu, delka fronty, ...).
+    /// Vycerpany rozpocet jobu nebo strukturalni mez (pocet handlu, ...).
     NoResources = -6,
     /// Neplatny argument (hodnota mimo povoleny rozsah, nepovolena kombinace).
     InvalidArgs = -7,
@@ -71,6 +71,10 @@ pub enum Error {
     /// Pozadovane zaznamy zurnalu zmen uz nejsou ulozene (retence):
     /// odberatel musi nacist novy vychozi stav (`VIEW`).
     JournalGap = -28,
+    ConnectionRefused = -29,
+    ConnectionReset = -30,
+    Unreachable = -31,
+    AddressInUse = -32,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -103,6 +107,10 @@ pub const ALL: &[Error] = &[
     Error::Locked,
     Error::Conflict,
     Error::JournalGap,
+    Error::ConnectionRefused,
+    Error::ConnectionReset,
+    Error::Unreachable,
+    Error::AddressInUse,
 ];
 
 impl Error {
@@ -147,6 +155,10 @@ impl Error {
             Self::Locked => "LOCKED",
             Self::Conflict => "CONFLICT",
             Self::JournalGap => "JOURNAL_GAP",
+            Self::ConnectionRefused => "CONNECTION_REFUSED",
+            Self::ConnectionReset => "CONNECTION_RESET",
+            Self::Unreachable => "UNREACHABLE",
+            Self::AddressInUse => "ADDRESS_IN_USE",
         }
     }
 
@@ -158,7 +170,7 @@ impl Error {
             Self::WrongType => "objekt je jineho typu, nez operace ocekava",
             Self::TimedOut => "vyprsel cas cekani",
             Self::NoMemory => "nedostatek pameti",
-            Self::NoResources => "vycerpany limit (handly, fronta, ...)",
+            Self::NoResources => "vycerpany rozpocet jobu nebo mez (handly, ...)",
             Self::InvalidArgs => "neplatny argument",
             Self::NotFound => "pozadovana vec neexistuje",
             Self::NotSupported => "operace neni podporovana",
@@ -181,6 +193,10 @@ impl Error {
             Self::Locked => "objekt je otevreny nebo zamceny jinym handlem",
             Self::Conflict => "objekt se mezitim zmenil",
             Self::JournalGap => "pozadovane zaznamy zurnalu uz nejsou ulozene",
+            Self::ConnectionRefused => "druha strana spojeni odmitla",
+            Self::ConnectionReset => "spojeni bylo preruseno druhou stranou",
+            Self::Unreachable => "cil neni dosazitelny (sit nenastavena, chybi cesta)",
+            Self::AddressInUse => "adresa nebo port uz se pouziva",
         }
     }
 }

@@ -191,8 +191,9 @@ pub fn channel_read(h: u32, data: &mut [u8], handles: &mut [u32]) -> (Result<()>
     (r.map(|_| ()), (actual[0] as usize, actual[1] as usize))
 }
 
-pub fn vmo_create(size: u64) -> Result<u32> {
-    call(nr::VMO_CREATE, [size, 0, 0, 0, 0, 0]).map(|v| v as u32)
+/// Objekt pameti na ucet jobu procesu `process` (0 = vlastni).
+pub fn vmo_create(size: u64, process: u32) -> Result<u32> {
+    call(nr::VMO_CREATE, [size, process as u64, 0, 0, 0, 0]).map(|v| v as u32)
 }
 
 pub fn vmo_read(h: u32, offset: u64, buf: &mut [u8]) -> Result<()> {
@@ -236,10 +237,10 @@ pub fn vm_unmap(process: u32, addr: u64, len: u64) -> Result<()> {
     call(nr::VM_UNMAP, [process as u64, addr, len, 0, 0, 0]).map(|_| ())
 }
 
-pub fn process_create(name: &str) -> Result<u32> {
+pub fn process_create(job: u32, name: &str) -> Result<u32> {
     call(
         nr::PROCESS_CREATE,
-        [name.as_ptr() as u64, name.len() as u64, 0, 0, 0, 0],
+        [job as u64, name.as_ptr() as u64, name.len() as u64, 0, 0, 0],
     )
     .map(|v| v as u32)
 }
@@ -417,4 +418,60 @@ pub fn resource_create(
 #[allow(dead_code)]
 fn _assert_error_is_copy(e: Error) -> Error {
     e
+}
+
+/// Nahodne bajty (nejvys `RANDOM_MAX`); `Ok(true)` = generator nasazeny.
+pub fn random_get(buf: &mut [u8], flags: u64) -> Result<bool> {
+    call(
+        nr::RANDOM_GET,
+        [buf.as_mut_ptr() as u64, buf.len() as u64, flags, 0, 0, 0],
+    )
+    .map(|v| v == 1)
+}
+
+pub fn random_add(resource: u32, data: &[u8], credit_bits: u32) -> Result<()> {
+    call(
+        nr::RANDOM_ADD,
+        [
+            resource as u64,
+            data.as_ptr() as u64,
+            data.len() as u64,
+            credit_bits as u64,
+            0,
+            0,
+        ],
+    )
+    .map(|_| ())
+}
+
+pub fn port_create() -> Result<u32> {
+    call(nr::PORT_CREATE, [0; 6]).map(|v| v as u32)
+}
+
+pub fn object_wait_async(h: u32, port: u32, key: u64, mask: u32) -> Result<()> {
+    call(
+        nr::OBJECT_WAIT_ASYNC,
+        [h as u64, port as u64, key, mask as u64, 0, 0],
+    )
+    .map(|_| ())
+}
+
+pub fn port_wait(port: u32, deadline: u64) -> Result<abi::object::PortPacket> {
+    let mut buf = [0u8; abi::object::PortPacket::SIZE];
+    call(nr::PORT_WAIT, [port as u64, deadline, buf.as_mut_ptr() as u64, 0, 0, 0])?;
+    Ok(abi::object::PortPacket::decode(&buf))
+}
+
+pub fn job_create(parent: u32) -> Result<u32> {
+    call(nr::JOB_CREATE, [parent as u64, 0, 0, 0, 0, 0]).map(|v| v as u32)
+}
+
+pub fn job_set_limit(job: u32, pool: u32, bytes: u64) -> Result<()> {
+    call(nr::JOB_SET_LIMIT, [job as u64, pool as u64, bytes, 0, 0, 0]).map(|_| ())
+}
+
+pub fn job_info(job: u32) -> Result<abi::job::JobInfo> {
+    let mut buf = [0u8; abi::job::JobInfo::SIZE];
+    call(nr::JOB_INFO, [job as u64, buf.as_mut_ptr() as u64, 0, 0, 0, 0])?;
+    Ok(abi::job::JobInfo::decode(&buf))
 }

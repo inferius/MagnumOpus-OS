@@ -13,6 +13,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use super::job::{Job, Pool, object_cost};
 use super::{Error, HandleTable, KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::log;
 use crate::mm::AddressSpace;
@@ -39,16 +40,26 @@ pub struct Process {
     handles: SpinLock<HandleTable>,
     space: AddressSpace,
     state: SpinLock<State>,
+    /// Job, do ktereho proces patri: z jeho rozpoctu se strhava vse, co
+    /// proces stoji (objekty, handly, mapovani, vlakna, pamet).
+    job: Arc<Job>,
 }
 
+/// Pamet jadra za proces mimo jeho objekty: struktura a korenova tabulka
+/// stranek.
+const PROCESS_COST: u64 = object_cost::<Process>() + crate::arch::paging::PAGE_SIZE;
+
 impl Process {
-    pub fn new(name: &str) -> Result<Arc<Self>, Error> {
-        let space = AddressSpace::new().ok_or(Error::NoMemory)?;
+    /// Novy proces v jobu `job` (strhne se z jeho rozpoctu jadra).
+    pub fn new(name: &str, job: Arc<Job>) -> Result<Arc<Self>, Error> {
+        let charge = job.charge(Pool::Kernel, PROCESS_COST)?;
+        let space = AddressSpace::new(Some(job.clone())).ok_or(Error::NoMemory)?;
+        let table = HandleTable::new(job.charge(Pool::Kernel, 0)?);
         let p = Arc::new(Self {
             core: ObjectCore::new(Signals::NONE),
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             name: String::from(name),
-            handles: SpinLock::new(HandleTable::new()),
+            handles: SpinLock::new(table),
             space,
             state: SpinLock::new(State {
                 started: false,
@@ -57,13 +68,20 @@ impl Process {
                 exit_code: None,
                 finished: false,
             }),
+            job,
         });
+        p.core.set_charge(charge);
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
     }
 
     pub fn handles(&self) -> SpinLockGuard<'_, HandleTable> {
         self.handles.lock()
+    }
+
+    /// Job procesu (rozpocet pro vse, co proces vytvori).
+    pub fn job(&self) -> &Arc<Job> {
+        &self.job
     }
 
     pub fn address_space(&self) -> &AddressSpace {
@@ -76,10 +94,12 @@ impl Process {
         if st.exit_code.is_some() {
             return Err(Error::BadState);
         }
-        st.threads.retain(|w| w.strong_count() > 0);
-        if st.threads.len() >= abi::limits::PROCESS_MAX_THREADS {
-            return Err(Error::NoResources);
+        // Mrtve odkazy uklidit jen pred rustem pole (amortizovane O(1)).
+        if st.threads.len() == st.threads.capacity() {
+            st.threads.retain(|w| w.strong_count() > 0);
         }
+        // Pocet vlaken omezuje rozpocet jobu (zasobnik jadra kazdeho vlakna).
+        st.threads.try_reserve(1).map_err(|_| Error::NoMemory)?;
         st.threads.push(Arc::downgrade(t));
         Ok(())
     }

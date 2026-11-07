@@ -5,11 +5,15 @@
 
 mod basic;
 mod drivers;
+mod events;
+mod firewall;
 mod fs;
 mod fs_hist;
 mod input;
 mod ipc;
+mod jobs;
 mod memory;
+mod net;
 mod process;
 mod shell;
 mod supervisor;
@@ -27,13 +31,17 @@ const SUITES: &[(&str, &[Test])] = &[
     ("zaklad", basic::TESTS),
     ("pamet", memory::TESTS),
     ("ipc", ipc::TESTS),
+    ("udalosti a nahoda", events::TESTS),
     ("procesy", process::TESTS),
+    ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("souborovy system", fs::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
     ("historie FS", fs_hist::TESTS),
     ("cas", time::TESTS),
+    ("firewall", firewall::TESTS),
+    ("sit", net::TESTS),
     ("supervisor", supervisor::TESTS),
     ("shell", shell::TESTS),
 ];
@@ -41,6 +49,11 @@ const SUITES: &[(&str, &[Test])] = &[
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).
 fn devices() -> Option<&'static crate::system::Devices> {
     crate::system::devices()
+}
+
+/// Sluzba site spustena pri startu (pro testy site).
+fn net_service() -> Option<&'static crate::system::NetService> {
+    crate::system::NET.get()
 }
 
 /// Spusti vsechny testy, vraci pocet selhanych.

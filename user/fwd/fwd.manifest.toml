@@ -1,0 +1,8 @@
+# Sluzba firewallu.
+[app]
+id = "org.magnumopus.fwd"
+name = "Firewall"
+
+[limits]
+memory = "16M"
+kernel_memory = "4M"

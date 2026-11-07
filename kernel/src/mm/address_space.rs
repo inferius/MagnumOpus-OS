@@ -5,6 +5,9 @@
 //! kopirovani dat (argumenty syscallu) prelozi adresu podle seznamu
 //! mapovani na fyzickou stranku objektu a kopiruje pres primou mapu. Diky
 //! tomu nemuze vzniknout page fault v jadre a SMAP muze byt trvale zapnuty.
+//!
+//! Kazde mapovani se strhne z rozpoctu jadra jobu procesu: zaznam mapovani
+//! a horni odhad tabulek stranek, ktere pro nej mohou vzniknout.
 
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -15,6 +18,7 @@ use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, USER_ALLOC_BASE, USER
 use super::{PhysAddr, VirtAddr, new_address_space, tlb};
 use crate::arch::paging::{MapFlags, PAGE_SIZE, PageSize, PageTable, PageTableOps};
 use crate::error::Error;
+use crate::object::job::{Charge, Job, Pool};
 use crate::object::vmo::MemoryObject;
 use crate::sync::SpinLock;
 
@@ -23,6 +27,16 @@ struct Mapping {
     vmo: Arc<MemoryObject>,
     vmo_offset: u64,
     flags: u32,
+    _charge: Charge,
+}
+
+/// Pamet jadra za zaznam mapovani (uzel stromu + data).
+const MAPPING_COST: u64 = 128;
+
+/// Horni odhad tabulek stranek pro mapovani delky `len`: jedna tabulka na
+/// kazdych zacatych 2 MiB (+1 za nezarovnany zacatek) a tri vyssi urovne.
+fn page_table_cost(len: u64) -> u64 {
+    (len.div_ceil(2 << 20) + 1 + 3) * PAGE_SIZE
 }
 
 struct Inner {
@@ -34,6 +48,8 @@ struct Inner {
 pub struct AddressSpace {
     root: u64,
     inner: SpinLock<Inner>,
+    /// Job procesu (rozpocet mapovani); `None` = adresni prostor jadra/testu.
+    job: Option<Arc<Job>>,
 }
 
 fn page_aligned(v: u64) -> bool {
@@ -78,7 +94,7 @@ impl Inner {
 }
 
 impl AddressSpace {
-    pub fn new() -> Option<Self> {
+    pub fn new(job: Option<Arc<Job>>) -> Option<Self> {
         let table = new_address_space()?;
         Some(Self {
             root: table.root(),
@@ -86,6 +102,7 @@ impl AddressSpace {
                 table: Some(table),
                 mappings: BTreeMap::new(),
             }),
+            job,
         })
     }
 
@@ -134,10 +151,11 @@ impl AddressSpace {
         if !super::phys::user_room(len.div_ceil(2 << 20) + 3) {
             return Err(Error::NoMemory);
         }
+        let charge = match &self.job {
+            Some(j) => j.charge(Pool::Kernel, MAPPING_COST + page_table_cost(len))?,
+            None => Charge::none(),
+        };
         let mut inner = self.inner.lock();
-        if inner.mappings.len() >= abi::limits::PROCESS_MAX_MAPPINGS {
-            return Err(Error::NoResources);
-        }
         let start = if flags & MAP_FIXED != 0 {
             let end = addr.checked_add(len).ok_or(Error::InvalidArgs)?;
             if !page_aligned(addr) || addr < USER_MIN || end > USER_MAX {
@@ -192,6 +210,7 @@ impl AddressSpace {
                 vmo,
                 vmo_offset,
                 flags,
+                _charge: charge,
             },
         );
         Ok(start)

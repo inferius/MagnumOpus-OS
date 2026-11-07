@@ -25,8 +25,9 @@ const HEAP_BASE: u64 = 0x0000_6000_0000_0000;
 const HEAP_INITIAL: u64 = 4 * 1024 * 1024;
 /// Nejmensi prirustek.
 const HEAP_GROW_MIN: u64 = 4 * 1024 * 1024;
-/// Nejvetsi velikost heapu (rezervovany rozsah adres).
-const HEAP_MAX: u64 = 1 << 36;
+/// Heap smi rust az ke konci pameti procesu (~32 TiB adres); kolik
+/// skutecne dostane, urcuje rozpocet uzivatelske pameti jobu.
+const HEAP_MAX: u64 = abi::vm::USER_MAX - HEAP_BASE;
 
 struct GrowingHeap(LockedHeap);
 
@@ -69,7 +70,7 @@ unsafe impl GlobalAlloc for GrowingHeap {
 
 /// Namapuje novou pamet heapu na `addr`.
 fn map_heap(process: u32, addr: u64, len: u64) -> bool {
-    let Ok(vmo) = sys::vmo_create(len) else {
+    let Ok(vmo) = sys::vmo_create(len, 0) else {
         return false;
     };
     let ok = sys::vm_map(process, vmo, 0, len, MAP_READ | MAP_WRITE | MAP_FIXED, addr).is_ok();
@@ -143,15 +144,21 @@ fn fail(msg: &str) -> ! {
     sys::process_exit(abi::process::EXIT_PANIC)
 }
 
+/// Nejvic handlu ve startovni zprave (= nejvic handlu jedne zpravy kanalu).
+const MAX_START_HANDLES: usize = abi::syscall::CHANNEL_MAX_HANDLES;
+/// Startovni zprava: hlavicka a polozka na kazdy handle.
+const START_DATA_MAX: usize = bootstrap::HEADER_SIZE + MAX_START_HANDLES * bootstrap::ENTRY_SIZE;
+
 /// Handly ze startovni zpravy roztridene podle druhu (bez heapu).
 struct Received {
     process: Option<u32>,
+    job: Option<u32>,
     flags: u32,
     initfs: Option<u32>,
     resource: Option<u32>,
     ecam: [(u32, u32); 4],
     ecam_count: usize,
-    user: [u32; 16],
+    user: [u32; MAX_START_HANDLES],
     user_count: usize,
 }
 
@@ -159,8 +166,8 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
     let bootstrap = Channel::from_handle(Handle::from_raw(bootstrap as u32));
     // Startovni zprava ceka ve fronte uz pri startu; heap jeste neni, takze
     // ji cteme do bufferu na zasobniku.
-    let mut data = [0u8; 512];
-    let mut raw = [0u32; 16];
+    let mut data = [0u8; START_DATA_MAX];
+    let mut raw = [0u32; MAX_START_HANDLES];
     let (r, (dlen, hlen)) = sys::channel_read(bootstrap.handle().raw(), &mut data, &mut raw);
     if r.is_err() {
         fail("libos: chybi nebo je prilis velka startovni zprava");
@@ -171,12 +178,13 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
 
     let mut got = Received {
         process: None,
+        job: None,
         flags: 0,
         initfs: None,
         resource: None,
         ecam: [(0, 0); 4],
         ecam_count: 0,
-        user: [0; 16],
+        user: [0; MAX_START_HANDLES],
         user_count: 0,
     };
     let count = (header.count as usize).min(hlen);
@@ -192,6 +200,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
                 got.process = Some(handle);
                 got.flags = arg;
             }
+            bootstrap::kind::JOB => got.job = Some(handle),
             bootstrap::kind::INITFS => got.initfs = Some(handle),
             bootstrap::kind::ROOT_RESOURCE => got.resource = Some(handle),
             bootstrap::kind::PCI_ECAM if got.ecam_count < got.ecam.len() => {
@@ -210,6 +219,9 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
     };
 
     SELF_PROCESS.store(process, Ordering::Relaxed);
+    if let Some(job) = got.job {
+        crate::job::set_current(job);
+    }
     init_heap(process);
     let startup = Startup {
         process: Process::from_handle(Handle::from_raw(process)),

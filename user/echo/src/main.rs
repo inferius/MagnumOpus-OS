@@ -6,6 +6,8 @@
 //! - `exit:<cislo>` -> ukonci proces s timto kodem
 //! - `crash` -> zapis na adresu 0 (test ukonceni procesu pri vyjimce)
 //! - `sleep` -> ceka navzdy (test PROCESS_KILL)
+//! - `alloc:<bajty>` -> vytvori objekt pameti, odpovi `ok` nebo
+//!   `err:<JMENO_CHYBY>` (test rozpoctu jobu)
 //!
 //! Konec kanalu u rodice = konec procesu s kodem 0.
 
@@ -51,6 +53,14 @@ fn main(startup: Startup) -> i64 {
         } else if text == "crash" {
             // SAFETY: zamerne neplatny zapis - test, ze jadro proces ukonci.
             unsafe { core::ptr::write_volatile(core::ptr::null_mut::<u64>(), 1) };
+        } else if let Some(size) = text.strip_prefix("alloc:") {
+            let reply = match libos::Vmo::create(size.parse().unwrap_or(0)) {
+                Ok(_) => alloc::string::String::from("ok"),
+                Err(e) => alloc::format!("err:{}", e.name()),
+            };
+            if channel.write(reply.as_bytes(), Vec::new()).is_err() {
+                return 4;
+            }
         } else if text == "sleep" {
             libos::time::sleep(core::time::Duration::from_secs(3600));
         } else {

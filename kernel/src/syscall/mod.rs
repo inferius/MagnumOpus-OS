@@ -8,6 +8,7 @@
 mod channel;
 mod handle;
 mod hw;
+mod job;
 mod misc;
 mod object;
 mod process;
@@ -84,6 +85,14 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::IOPORT_READ => hw::ioport_read(a),
         nr::IOPORT_WRITE => hw::ioport_write(a),
         nr::INTERRUPT_CREATE_LINE => hw::interrupt_create_line(a),
+        nr::RANDOM_GET => misc::random_get(a),
+        nr::RANDOM_ADD => hw::random_add(a),
+        nr::PORT_CREATE => object::port_create(),
+        nr::OBJECT_WAIT_ASYNC => object::wait_async(a),
+        nr::PORT_WAIT => object::port_wait(a),
+        nr::JOB_CREATE => job::create(a),
+        nr::JOB_SET_LIMIT => job::set_limit(a),
+        nr::JOB_INFO => job::info(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -132,6 +141,14 @@ pub fn name(number: u64) -> &'static str {
         "IOPORT_READ",
         "IOPORT_WRITE",
         "INTERRUPT_CREATE_LINE",
+        "RANDOM_GET",
+        "RANDOM_ADD",
+        "PORT_CREATE",
+        "OBJECT_WAIT_ASYNC",
+        "PORT_WAIT",
+        "JOB_CREATE",
+        "JOB_SET_LIMIT",
+        "JOB_INFO",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

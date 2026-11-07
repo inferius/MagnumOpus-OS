@@ -157,8 +157,20 @@ Windows or vDSO + libc on Linux).
   its own part.
 - A user is a userspace concept: a session = a set of capabilities.
 - Applications always run sandboxed; the manifest says which capabilities
-  they need.
+  they need (network and budget so far, see [Application manifest](firewall.md#application-manifest)).
 - File access = a handle to the directory it is in. No ACLs.
+- **Resources:** every process runs in a job with a byte budget of kernel
+  memory and user memory. A parent divides its budget among children, a
+  child cannot raise its limit. There are no fixed counts (handles,
+  threads, ...), only limits given by formats (see
+  [Jobs](syscalls.md#jobs-resource-budgets)).
+- **The firewall** is part of the network service, so it cannot be
+  bypassed. It consists of the application manifest, asking the user, a
+  packet filter by network profile, audit and a DNS filter (see
+  [firewall.md](firewall.md)).
+- **Plan:** a launch gate (verifying a program signature, a more lenient
+  mode by setting) and an antivirus scanning in isolated processes without
+  network access.
 
 ## System services
 
@@ -942,7 +954,10 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 4. Userspace: syscalls, first process, IPC, libos, initfs (done)
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
 6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
-   TCP/IP, DNS, TLS 1.3, HTTP client - services, access through a capability)
+   TCP/IP, DHCP, DNS, NTP, access through a capability and the firewall
+   done - see [network.md](network.md) and [firewall.md](firewall.md);
+   TLS 1.3, HTTP client, IPv6, own stack remain), jobs with resource
+   budgets (done)
    - **6a Input (done):** input service, keyboard and mouse (virtio-input;
      PS/2, USB HID), US and CZ layouts, secure attention shortcut -
      see [Input](input.md)
@@ -978,7 +993,8 @@ fine for now):
 - **IOMMU (Intel VT-d, AMD-Vi) only for DMA translation:** interrupt
   remapping and RMRR/IVMD regions are missing; on a machine without an
   IOMMU DMA is not restricted (the kernel logs it).
-- **Quotas only per process**, not for groups of processes (job).
+- **The TCP/IP stack is smoltcp** (behind the `stack` module of the `netd`
+  service), our own stack replaces it later - see [network.md](network.md#plan).
 - **The shell's change preview is an overlay in shell memory**, not a
   dataset clone: `fsproto` cannot do clones and diffs yet. Programs
   therefore do not run inside `preview`, and undoing their changes relies on

@@ -1,17 +1,18 @@
 //! init: prvni proces v userspace.
 //!
 //! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
-//! souboroveho systemu a sluzbu vstupu. Pak bezi jako supervisor
-//! (`supervisor.rs`: zarizeni pripojena za behu, restart spadlych sluzeb).
-//! V testovacim behu (priznak `TEST_RUN` od jadra) misto toho spusti testy
-//! userspace (`tests/`) a skonci s jejich vysledkem. Pozdeji bude spoustet
-//! systemove sluzby podle konfigurace.
+//! souboroveho systemu, sluzbu vstupu a sluzbu site s firewallem. Pak bezi
+//! jako supervisor (`supervisor.rs`: zarizeni pripojena za behu, restart
+//! spadlych sluzeb). V testovacim behu (priznak `TEST_RUN` od jadra) misto
+//! toho spusti testy userspace (`tests/`) a skonci s jejich vysledkem.
+//! Pozdeji bude spoustet systemove sluzby podle konfigurace.
 
 #![no_std]
 #![no_main]
 
 extern crate alloc;
 
+mod apps;
 mod input;
 mod supervisor;
 mod system;
@@ -46,6 +47,19 @@ fn main(startup: Startup) -> i64 {
             }
             if let Some(i) = &devices.input {
                 sup.watch("inputd", &i.process, None);
+            }
+            // Sit az po FS: firewall uklada konfiguraci na FS.
+            match system::start_net(&startup, &mut devices) {
+                Ok(n) => {
+                    // Restart zatim neni (jako u fsd): netd drzi kanaly
+                    // vsech socketu, fwd stav dotazu.
+                    sup.watch("netd", &n.process, None);
+                    if let Some((p, _)) = &n.fwd {
+                        sup.watch("fwd", p, None);
+                    }
+                    system::NET.call_once(|| n);
+                }
+                Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
             }
             system::DEVICES.call_once(|| devices);
         }

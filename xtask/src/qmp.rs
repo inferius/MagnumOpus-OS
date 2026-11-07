@@ -51,14 +51,16 @@ fn wait_marker(log: &Path, marker: &str, start: Instant) -> bool {
     }
 }
 
-/// Spusti vlakno, ktere po objeveni znacky v `log` posle udalosti.
-pub fn spawn_injector(log: PathBuf, port: u16) {
+/// Spusti vlakno, ktere po objeveni znacky v `log` posle udalosti. `ps2`
+/// = stroj ma radic PS/2; bez nej test PS/2 svou znacku nevypise a kroky
+/// PS/2 se preskoci (jinak by vlakno na znacku cekalo a k USB se nedostalo).
+pub fn spawn_injector(log: PathBuf, port: u16, ps2: bool) {
     std::thread::spawn(move || {
         let start = Instant::now();
         if !wait_marker(&log, MARKER, start) {
             return;
         }
-        match inject(port, &log, start) {
+        match inject(port, &log, start, ps2) {
             Ok(()) => println!("xtask: QMP: udalosti vstupu poslany"),
             Err(e) => eprintln!("xtask: QMP: vkladani vstupu selhalo: {e}"),
         }
@@ -105,7 +107,7 @@ enum Step {
 /// ruzna zarizeni a jejich udalosti si navzajem nedrzi poradi, mys musi
 /// dorazit driv, nez zkratka prepne vstup na kanal `secure`. Test znacku
 /// vypise, az udalosti mysi dostane (zadne pevne cekani).
-fn script() -> Vec<Step> {
+fn script(ps2: bool) -> Vec<Step> {
     let mut s: Vec<Step> = Vec::new();
     for (k, d) in [
         ("a", true),
@@ -135,6 +137,14 @@ fn script() -> Vec<Step> {
     }
     // PS/2: b, Shift+2 (US: @), Delete (rozsirena klavesa E0), pohyb,
     // prave tlacitko, kolecko nahoru.
+    if ps2 {
+        ps2_steps(&mut s);
+    }
+    usb_steps(&mut s);
+    s
+}
+
+fn ps2_steps(s: &mut Vec<Step>) {
     s.push(Step::WaitFor(MARKER_PS2));
     for (k, d) in [
         ("b", true),
@@ -153,7 +163,9 @@ fn script() -> Vec<Step> {
     s.push(Step::SendPs2(vec![btn("right", false)]));
     s.push(Step::SendPs2(vec![btn("wheel-up", true)]));
     s.push(Step::SendPs2(vec![btn("wheel-up", false)]));
+}
 
+fn usb_steps(s: &mut Vec<Step>) {
     // USB (`user/init/src/tests/usb.rs`): klavesnice ze startu, hotplug mysi
     // a overeni nove klavesnice.
     s.push(Step::WaitFor(usb::KEYS));
@@ -219,7 +231,6 @@ fn script() -> Vec<Step> {
     s.push(Step::SendUsb(vec![btn("left", false)]));
     s.push(Step::WaitFor(usb::TABLET_UNPLUG));
     s.push(Step::Qmp(device_del("usbtablet1")));
-    s
 }
 
 /// Znacky testu USB (musi sedet s `user/init/src/tests/usb.rs`).
@@ -275,7 +286,7 @@ fn reply(reader: &mut impl BufRead) -> Result<(), String> {
     }
 }
 
-fn inject(port: u16, log: &Path, start: Instant) -> Result<(), String> {
+fn inject(port: u16, log: &Path, start: Instant, ps2: bool) -> Result<(), String> {
     let stream = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -295,7 +306,7 @@ fn inject(port: u16, log: &Path, start: Instant) -> Result<(), String> {
         reply(reader)
     };
     send(r#"{"execute":"qmp_capabilities"}"#.into(), &mut reader)?;
-    for step in script() {
+    for step in script(ps2) {
         let (events, device) = match step {
             Step::Send(e) => (e, r#""device":"video0","#),
             Step::SendPs2(e) => (e, ""),

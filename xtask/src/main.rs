@@ -17,6 +17,7 @@ mod docs;
 mod highlight;
 mod image;
 mod qemu;
+mod nethelper;
 mod qmp;
 mod symbolize;
 
@@ -71,6 +72,13 @@ pub struct Options {
     /// Testovaci beh: kernel s feature `qemu-test`, QEMU s testovacim
     /// koncem (x86_64 isa-debug-exit, aarch64 semihosting).
     test: bool,
+    /// Dalsi soubory do initfs (konfigurace testu site).
+    extra_initfs: Vec<(String, Vec<u8>)>,
+    /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
+    hostfwd: Option<String>,
+    /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
+    /// startem QEMU).
+    net_helper: std::cell::RefCell<Option<nethelper::Helper>>,
 }
 
 fn main() -> ExitCode {
@@ -99,6 +107,9 @@ fn run_cli() -> Result<()> {
         qemu_args: Vec::new(),
         arch: &arch::X86_64,
         test: false,
+        extra_initfs: Vec::new(),
+        hostfwd: None,
+        net_helper: std::cell::RefCell::new(None),
     };
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -156,6 +167,12 @@ fn run_cli() -> Result<()> {
                 check_kernel(other, &opts)?;
             }
             build_docs()?;
+            // Pomocne servery pro testy site bezi, dokud bezi xtask.
+            let helper = nethelper::start()?;
+            opts.extra_initfs
+                .push((String::from("net-test"), helper.config.clone().into_bytes()));
+            opts.hostfwd = Some(helper.hostfwd.clone());
+            *opts.net_helper.borrow_mut() = Some(helper);
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             qemu::run(&image, &artifacts, &opts)
@@ -199,8 +216,20 @@ fn host_tests() -> Result<()> {
             "shlang",
             "--package",
             "term",
+            "--package",
+            "netproto",
+            "--package",
+            "csprng",
+            "--package",
+            "wire",
+            "--package",
+            "conf",
+            "--package",
+            "manifest",
+            "--package",
+            "netfilter",
             "--features",
-            "initfs/std,fs/std",
+            "initfs/std,fs/std,netproto/std",
         ])
         .status()?;
     if !status.success() {
@@ -283,6 +312,20 @@ const USER_PROGRAMS: &[&str] = &[
     "timed",
     "termd",
     "shsess",
+    "virtio-net",
+    "virtio-rng",
+    "netd",
+    "fwd",
+    "netprobe",
+];
+
+/// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
+/// Manifesty aplikaci lezi vedle programu (`<program>.manifest.toml`).
+const INITFS_FILES: &[(&str, &str)] = &[
+    ("firewall.toml", "user/fwd/firewall.toml"),
+    ("fwd.manifest.toml", "user/fwd/fwd.manifest.toml"),
+    ("netd.manifest.toml", "user/netd/netd.manifest.toml"),
+    ("netprobe.manifest.toml", "user/netprobe/netprobe.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
@@ -329,6 +372,39 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
     Ok(())
 }
 
+/// Program pro initfs: jen to, co zavadec potrebuje (hlavicka ELF, tabulka
+/// segmentu a obsah segmentu PT_LOAD). Sekce a ladici informace (u ladiciho
+/// buildu desitky MiB) se vynechaji - zavadec je nepouziva a initfs by se
+/// nevesel na systemovy disk. Plne binarky zustavaji na hostiteli (GDB).
+/// Soubor, ktery neni ELF64 little endian, zustane beze zmeny.
+fn loadable_only(data: &[u8]) -> Vec<u8> {
+    let u16_at = |o: usize| data.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as u64);
+    let u64_at = |o: usize| {
+        data.get(o..o + 8)
+            .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+    };
+    if data.len() < 64 || &data[..4] != b"\x7fELF" || data[4] != 2 || data[5] != 1 {
+        return data.to_vec();
+    }
+    let (Some(phoff), Some(phentsize), Some(phnum)) = (u64_at(32), u16_at(54), u16_at(56)) else {
+        return data.to_vec();
+    };
+    let mut end = phoff + phentsize * phnum;
+    for i in 0..phnum {
+        let ph = (phoff + i * phentsize) as usize;
+        let (Some(off), Some(filesz)) = (u64_at(ph + 8), u64_at(ph + 32)) else {
+            return data.to_vec();
+        };
+        end = end.max(off + filesz);
+    }
+    let end = (end as usize).min(data.len());
+    let mut out = data[..end].to_vec();
+    // Bez tabulky sekci: e_shoff = 0, e_shnum = 0, e_shstrndx = 0.
+    out[40..48].fill(0);
+    out[60..64].fill(0);
+    out
+}
+
 fn user_target_dir() -> PathBuf {
     target_dir().join("user")
 }
@@ -346,8 +422,14 @@ fn build(opts: &Options) -> Result<Artifacts> {
     for name in USER_PROGRAMS {
         let data = std::fs::read(user_bin.join(name))
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
+        files.push((name.to_string(), loadable_only(&data)));
+    }
+    for (name, path) in INITFS_FILES {
+        let data = std::fs::read(workspace_root().join(path))
+            .map_err(|e| format!("nelze cist {path}: {e}"))?;
         files.push((name.to_string(), data));
     }
+    files.extend(opts.extra_initfs.iter().cloned());
     let refs: Vec<(&str, &[u8])> = files
         .iter()
         .map(|(n, d)| (n.as_str(), d.as_slice()))

@@ -1,0 +1,15 @@
+[package]
+name = "netprobe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "netprobe"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+netproto = { path = "../../libs/netproto", features = ["client"] }

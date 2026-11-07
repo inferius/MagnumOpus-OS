@@ -12,7 +12,7 @@ use crate::object::interrupt::Interrupt;
 use crate::object::process::Process;
 use crate::object::resource::Resource;
 use crate::object::vmo::MemoryObject;
-use crate::object::{KernelObject, Rights};
+use crate::object::{KernelObject, Rights, charged};
 
 fn check_resource(p: &Process, v: u64) -> Result<Arc<Resource>> {
     p.handles()
@@ -52,7 +52,7 @@ pub fn vmo_create_contiguous(a: Args) -> Result<u64> {
     let res = check_resource(&p, a[0])?;
     // Velikost overi `new_contiguous`; kvota se odecte az po uspechu a ve
     // skutecne velikosti (alokator pridava bloky 2^n stranek).
-    let vmo = MemoryObject::new_contiguous_dma(a[1], res.domain().cloned())?;
+    let vmo = MemoryObject::new_contiguous_dma(a[1], res.domain().cloned(), Some(p.job()))?;
     res.charge_dma(vmo.allocated_bytes())?;
     insert(&p, vmo)
 }
@@ -64,7 +64,7 @@ pub fn vmo_create_physical(a: Args) -> Result<u64> {
     if !mm::is_device_memory(a[1], a[2]) || !res.allows_range(a[1], a[2]) {
         return Err(Error::AccessDenied);
     }
-    insert(&p, MemoryObject::new_physical(a[1], a[2])?)
+    insert(&p, MemoryObject::new_physical(a[1], a[2], Some(p.job()))?)
 }
 
 /// `VMO_PHYS_ADDR(resource, vmo, offset) -> phys`.
@@ -83,7 +83,9 @@ pub fn interrupt_create(a: Args) -> Result<u64> {
     let p = current_process();
     let res = check_resource(&p, a[0])?;
     res.charge_irq()?;
-    let irq = Interrupt::new(res.device()).inspect_err(|_| res.refund_irq())?;
+    let irq = Interrupt::new(res.device())
+        .and_then(|irq| charged(irq, p.job()))
+        .inspect_err(|_| res.refund_irq())?;
     let (address, data) = irq.msi_message().inspect_err(|_| res.refund_irq())?;
     let mut out = [0u8; 16];
     out[0..8].copy_from_slice(&address.to_le_bytes());
@@ -177,5 +179,18 @@ pub fn resource_create(a: Args) -> Result<u64> {
         v if v >> 32 == 1 => Some(((v >> 16) as u16, (v >> 8) as u8, v as u8)),
         _ => return Err(Error::InvalidArgs),
     };
-    insert(&p, parent.restrict(ranges, irq_max, a[4], device)?)
+    insert(&p, charged(parent.restrict(ranges, irq_max, a[4], device)?, p.job())?)
+}
+
+/// `RANDOM_ADD(resource, ptr, len, credit_bits)`: entropie od ovladace
+/// (virtio-rng). Vyzaduje Resource s pravem `MANAGE`; kredit nejvys 8 bitu
+/// na bajt.
+pub fn random_add(a: Args) -> Result<u64> {
+    let p = current_process();
+    check_resource(&p, a[0])?;
+    let len = user::check_len(a[2], abi::syscall::RANDOM_MAX)?;
+    let credit = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
+    let data = user::read_bytes(&p, a[1], len)?;
+    crate::random::add(&data, credit);
+    Ok(0)
 }
