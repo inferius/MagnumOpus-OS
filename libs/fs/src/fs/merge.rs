@@ -703,7 +703,7 @@ impl<D: BlockDevice> Fs<D> {
     /// Presun slozky pod jejiho potomka: presun zrusit (nase misto zustane).
     fn check_cycles(p: &mut Planner<'_>) {
         let moved = p.moved.clone();
-        for (&x, _) in &moved {
+        for &x in moved.keys() {
             if p.o.objs.get(&x).is_none_or(|o| o.kind != KIND_DIR) {
                 continue;
             }
@@ -855,21 +855,7 @@ impl<D: BlockDevice> Fs<D> {
             }
             _ => {
                 self.create_at(parent, name, Kind::File, oid, generation)?;
-                let mut off = 0u64;
-                while off < i.size {
-                    let n = ((i.size - off) as usize).min(256 * BLOCK_SIZE);
-                    let d = self.read_oid(theirs, t_oid, off, n, false)?;
-                    if d.is_empty() {
-                        return Err(Error::Corrupted);
-                    }
-                    let inode = self.live_inode(oid)?;
-                    self.write_oid(oid, inode, off, &d)?;
-                    off += d.len() as u64;
-                }
-                if off < i.size {
-                    self.truncate_oid(oid, i.size)?;
-                }
-                self.set_times_oid(oid, super::SetTimes { mtime: Some(i.mtime), btime: None, atime: None })?;
+                self.copy_content(theirs, t_oid, oid)?;
             }
         }
         Ok(oid)
@@ -974,6 +960,12 @@ impl<D: BlockDevice> Fs<D> {
         let path = self.dataset_path(ods)?;
         self.require(&path, rights::MANAGE)?;
         Ok((ods, osnap, path))
+    }
+
+    /// Cesta originalu klonu "bokem" (pro kontrolu capability volajiciho:
+    /// sluzba overi, ze relace smi menit i original, nejen klon).
+    pub fn aside_original(&mut self, clone: &str) -> Result<String> {
+        Ok(self.aside_origin(clone)?.2)
     }
 
     /// Prevezme zmeny klonu "bokem" do originalu: vse (`select = None`)

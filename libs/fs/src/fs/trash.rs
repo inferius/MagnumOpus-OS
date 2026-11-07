@@ -22,6 +22,7 @@ use super::{Fs, Kind, split_parent, zil};
 use crate::btree;
 use crate::device::BlockDevice;
 use crate::layout::{Inode, KIND_DATASET, KIND_DIR, Key, META_OID, ROOT_OID, TRASH_OID, Timestamp, item, u64_at};
+use crate::node::Child;
 use crate::perm::rights;
 use crate::records::{TrashRecord, jop};
 
@@ -372,7 +373,14 @@ impl<D: BlockDevice> Fs<D> {
     /// Cesta objektu `oid` v zive verzi aktivniho datasetu (uvnitr datasetu,
     /// "/" = koren). `None`, kdyz objekt neexistuje nebo nelezi pod
     /// korenem (v kosi, sirotek).
-    pub(super) fn path_of(&mut self, mut oid: u64) -> Result<Option<String>> {
+    pub(super) fn path_of(&mut self, oid: u64) -> Result<Option<String>> {
+        let root = self.s.root;
+        self.path_in(&root, oid)
+    }
+
+    /// Cesta objektu `oid` ve strome `root` aktivniho datasetu (zivy stav
+    /// nebo snapshot); `None` jako u `path_of`.
+    pub(super) fn path_in(&mut self, root: &Child, mut oid: u64) -> Result<Option<String>> {
         let mut parts: Vec<String> = Vec::new();
         for _ in 0..super::MAX_DEPTH {
             if oid == ROOT_OID {
@@ -386,15 +394,14 @@ impl<D: BlockDevice> Fs<D> {
                 }
                 return Ok(Some(p));
             }
-            let root = self.s.root;
-            let Some(raw) = btree::get(&mut self.s, &root, &Key::new(oid, item::INODE, 0))? else {
+            let Some(raw) = btree::get(&mut self.s, root, &Key::new(oid, item::INODE, 0))? else {
                 return Ok(None);
             };
             let parent = Inode::decode(&raw, self.s.time_format())?.parent;
             if parent == 0 || parent == TRASH_OID {
                 return Ok(None);
             }
-            parts.push(self.name_of(parent, oid)?);
+            parts.push(self.name_in(root, parent, oid)?);
             oid = parent;
         }
         Err(Error::Corrupted)

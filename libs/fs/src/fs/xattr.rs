@@ -286,12 +286,18 @@ impl<D: BlockDevice> Fs<D> {
         Ok(moved)
     }
 
-    /// Jmeno objektu `oid` v adresari `parent` (pruchod polozek adresare).
+    /// Jmeno objektu `oid` v adresari `parent` zive verze.
     pub(super) fn name_of(&mut self, parent: u64, oid: u64) -> Result<String> {
         let root = self.s.root;
+        self.name_in(&root, parent, oid)
+    }
+
+    /// Jmeno objektu `oid` v adresari `parent` stromu `root` (pruchod
+    /// polozek adresare).
+    pub(super) fn name_in(&mut self, root: &Child, parent: u64, oid: u64) -> Result<String> {
         for (_, v) in btree::collect(
             &mut self.s,
-            &root,
+            root,
             &Key::new(parent, item::DIRENT, 0),
             &Key::new(parent, item::DIRENT + 1, 0),
         )? {

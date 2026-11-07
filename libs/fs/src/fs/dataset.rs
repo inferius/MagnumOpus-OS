@@ -499,6 +499,8 @@ impl<D: BlockDevice> Fs<D> {
             fs.del(&Key::new(META_OID, item::DATASET, id))?;
             if origin.0 != 0 {
                 fs.release_origin(origin.0, origin.1)?;
+                // Byl-li to klon vetve: zaznam vetve ve zdrojovem datasetu pryc.
+                fs.forget_branch(id)?;
             }
             fs.commit()
         })

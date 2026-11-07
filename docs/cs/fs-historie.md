@@ -130,7 +130,8 @@ Pravidla:
   za sekundu tak žurnál nezahltí; čtenář stejně čte aktuální obsah.
 - **Retence** (nastavení datasetu): výchozí 1 milion záznamů nebo 30 dní,
   co nastane dřív. Při commitu se zahodí nejvýš 4096 nejstarších (commit
-  nesmí trvat neomezeně). Číslo starší než nejstarší uložené =
+  nesmí trvat neomezeně); v datasetu, který se přestal měnit, uplatní
+  stáří krok služby `journal_tick` (každou minutu). Číslo starší než nejstarší uložené =
   **`JOURNAL_GAP`**, nikdy tiché vynechání.
 - **Nový výchozí stav i s pozicí:** `view(dataset)` udělá dočasný snapshot
   (druh `VIEW`, ve výpisu snapshotů není) a vrátí číslo posledního
@@ -455,7 +456,13 @@ smazáno, 3 naše smazáno / jejich změněno, 4 přidáno na obou stranách,
 Seznamy mají nejvýš 4096 položek.
 
 **Služba fsd** každou minutu (jako systém) volá `auto_snapshot_tick`,
-`expire_tick` a `trash_tick` - na svazku jen pro čtení ne.
+`expire_tick`, `trash_tick` a `journal_tick` - na svazku jen pro čtení ne.
+
+**Capability u „bokem“:** `ASIDE_APPLY` a `ASIDE_DISCARD` mění originál,
+proto je služba dovolí jen relaci, která má originál připojený se zápisem.
+Aplikace s capability jen ke klonu originál nezmění, ani když má identitu
+jeho vlastníka. `ASIDE_BEGIN` vyžaduje zápis do datasetu (vytvoří v něm
+snapshot).
 
 ## Rizika a omezení
 

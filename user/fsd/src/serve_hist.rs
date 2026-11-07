@@ -314,7 +314,8 @@ impl Service {
                 fs.merge_abort(&target)?;
             }
             op::ASIDE_BEGIN => {
-                let ds = sess.map(&r.str()?, false)?;
+                // Vytvori snapshot v datasetu: pripojeni jen pro cteni nestaci.
+                let ds = sess.map(&r.str()?, true)?;
                 let path = sess.map(&r.str()?, true)?;
                 w.u64(fs.aside_begin(&ds, &path)?);
             }
@@ -326,10 +327,12 @@ impl Service {
                     return Err(Error::InvalidArgs);
                 }
                 let sel = (0..n).map(|_| r.str()).collect::<Result<Vec<String>>>()?;
+                Self::writable_original(fs, sess, &clone)?;
                 report(fs.aside_apply(&clone, if all { None } else { Some(&sel) })?).put(&mut w);
             }
             op::ASIDE_DISCARD => {
                 let clone = sess.map(&r.str()?, true)?;
+                Self::writable_original(fs, sess, &clone)?;
                 fs.aside_discard(&clone)?;
             }
             op::ASIDE_CHANGES => {
@@ -394,6 +397,18 @@ impl Service {
             _ => return Err(Error::NotSupported),
         }
         Ok(Reply::body(w))
+    }
+
+    /// Prevzeti a zahozeni klonu "bokem" meni original: relace ho musi mit
+    /// pripojeny se zapisem. Aplikace, ktera dostala capability jen ke klonu,
+    /// tak original nezmeni ani s identitou jeho vlastnika.
+    fn writable_original(fs: &mut fs::Fs<crate::blkdev::BlkDev>, sess: &Session, clone: &str) -> Result<()> {
+        let original = fs.aside_original(clone)?;
+        let mapped = sess.unmap(&original);
+        if mapped.is_empty() {
+            return Err(Error::AccessDenied);
+        }
+        sess.map(&mapped, true).map(|_| ())
     }
 
     /// Zkusi dokoncit odlozene `JOURNAL_WATCH`: odpoved (stranka), kdyz

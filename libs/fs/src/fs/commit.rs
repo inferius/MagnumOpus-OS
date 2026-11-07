@@ -356,47 +356,50 @@ impl<D: BlockDevice> Fs<D> {
     pub fn log(&mut self, dataset: &str, max: usize) -> Result<Vec<CommitInfo>> {
         self.require(dataset, rights::READ)?;
         self.enter_dataset(dataset)?;
-        let mut queue: Vec<Parent> = self.head_active()?.head.into_iter().collect();
-        let mut seen: Vec<CommitId> = Vec::new();
+        // Halda podle casu: kazdy commit se precte jednou, nejnovejsi prvni,
+        // konec po `max` commitech.
+        let mut heap: alloc::collections::BinaryHeap<(Timestamp, CommitId, u64, u64)> = alloc::collections::BinaryHeap::new();
+        let mut seen: alloc::collections::BTreeSet<CommitId> = alloc::collections::BTreeSet::new();
         let mut out = Vec::new();
-        while let Some(p) = queue.pop() {
-            if seen.contains(&p.id) {
-                continue;
+        let push = |fs: &mut Self, p: Parent, heap: &mut alloc::collections::BinaryHeap<_>, seen: &mut alloc::collections::BTreeSet<CommitId>| {
+            if seen.insert(p.id)
+                && let Ok(c) = fs.commit_at(&p)
+            {
+                heap.push((c.time, p.id, p.dataset, p.snapshot));
             }
-            seen.push(p.id);
-            let Ok(c) = self.commit_at(&p) else { continue };
-            out.push(c);
-            queue.extend(self.parents_of(&p)?);
-            // Nejnovejsi na konec fronty (zpracuje se prvni).
-            queue.sort_by_key(|q| self.commit_at(q).map(|c| c.time).unwrap_or_default());
+        };
+        if let Some(h) = self.head_active()?.head {
+            push(self, h, &mut heap, &mut seen);
         }
-        out.sort_by(|a, b| b.time.cmp(&a.time));
-        out.truncate(max);
+        while out.len() < max {
+            let Some((_, id, dataset, snapshot)) = heap.pop() else { break };
+            let p = Parent { id, dataset, snapshot };
+            out.push(self.commit_at(&p)?);
+            for q in self.parents_of(&p)? {
+                push(self, q, &mut heap, &mut seen);
+            }
+        }
         Ok(out)
     }
 
     /// Spolecny predek dvou commitu v DAG (nejblizsi k `theirs`).
     pub(super) fn merge_base(&mut self, ours: &Parent, theirs: &Parent) -> Result<Option<Parent>> {
-        let mut anc: Vec<CommitId> = Vec::new();
+        let mut anc: alloc::collections::BTreeSet<CommitId> = alloc::collections::BTreeSet::new();
         let mut queue = alloc::vec![*ours];
         while let Some(p) = queue.pop() {
-            if anc.contains(&p.id) {
-                continue;
+            if anc.insert(p.id) {
+                queue.extend(self.parents_of(&p)?);
             }
-            anc.push(p.id);
-            queue.extend(self.parents_of(&p)?);
         }
-        let mut seen: Vec<CommitId> = Vec::new();
+        let mut seen: alloc::collections::BTreeSet<CommitId> = alloc::collections::BTreeSet::new();
         let mut queue = alloc::collections::VecDeque::from([*theirs]);
         while let Some(p) = queue.pop_front() {
             if anc.contains(&p.id) {
                 return Ok(Some(p));
             }
-            if seen.contains(&p.id) {
-                continue;
+            if seen.insert(p.id) {
+                queue.extend(self.parents_of(&p)?);
             }
-            seen.push(p.id);
-            queue.extend(self.parents_of(&p)?);
         }
         Ok(None)
     }
@@ -479,7 +482,11 @@ impl<D: BlockDevice> Fs<D> {
             fs.activate(src)?;
             let key = Key::new(META_OID, item::BRANCH, name_hash(&fold_name(name)));
             let root = fs.s.root;
-            let mut list = decode_branches(&btree::get(&mut fs.s, &root, &key)?.ok_or(Error::Corrupted)?)?;
+            // Smazani datasetu vetve zaznam uz odstranilo (`forget_branch`).
+            let Some(raw) = btree::get(&mut fs.s, &root, &key)? else {
+                return Ok(());
+            };
+            let mut list = decode_branches(&raw)?;
             list.retain(|(_, n)| fold_name(n) != fold_name(name));
             if list.is_empty() {
                 fs.del(&key)?;
@@ -488,6 +495,34 @@ impl<D: BlockDevice> Fs<D> {
             }
             fs.commit()
         })
+    }
+
+    /// Odstrani zaznamy vetvi, ktere ukazuji na dataset `id` (dataset
+    /// zanikl), ve vsech datasetech.
+    pub(super) fn forget_branch(&mut self, id: u64) -> Result<()> {
+        let back = self.cur_ds;
+        for ds in self.all_dataset_ids()? {
+            if ds == id {
+                continue;
+            }
+            self.activate(ds)?;
+            let root = self.s.root;
+            let items = btree::collect(&mut self.s, &root, &Key::new(META_OID, item::BRANCH, 0), &Key::new(META_OID, item::BRANCH + 1, 0))?;
+            for (k, v) in items {
+                let mut list = decode_branches(&v)?;
+                let n = list.len();
+                list.retain(|(d, _)| *d != id);
+                if list.len() == n {
+                    continue;
+                }
+                if list.is_empty() {
+                    self.del(&k)?;
+                } else {
+                    self.put(k, encode_branches(&list))?;
+                }
+            }
+        }
+        self.activate(back)
     }
 
     /// Logicke ID zive verze datasetu (bez commitu; pro porovnani stromu

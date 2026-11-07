@@ -199,3 +199,36 @@ fn datasets_and_snapshots_in_journal() {
     assert_eq!(s[0].journal_seq, 0);
     assert_clean(&mut fs);
 }
+
+/// Cas zaznamu CONTENT = posledni zmena obsahu: po prehrani logu stejny,
+/// i kdyz fsync prisel pozdeji nez zapis.
+#[test]
+fn content_time_survives_replay() {
+    let mut fs = new_fs(4096);
+    fs.commit().unwrap();
+    fs.set_time(Timestamp { secs: 100, nanos: 0 });
+    fs.create("/f", Kind::File).unwrap();
+    fs.write("/f", 0, &[3u8; 9000]).unwrap();
+    fs.set_time(Timestamp { secs: 105, nanos: 0 });
+    fs.create("/g", Kind::File).unwrap();
+    fs.fsync().unwrap();
+    let before = entries(&mut fs, "/");
+    let content = before.iter().find(|(_, e)| e.op == jop::CONTENT).unwrap();
+    assert_eq!(content.1.time.secs, 100);
+    let mut fs = remount(fs);
+    assert_eq!(entries(&mut fs, "/"), before);
+}
+
+/// Retence podle stari i v datasetu, ktery se prestal menit.
+#[test]
+fn journal_tick_prunes_quiet_dataset() {
+    let mut fs = new_fs(4096);
+    fs.set_settings("/", &Settings { journal_max_age: 100, ..Settings::default() }).unwrap();
+    fs.set_time(Timestamp { secs: 10, nanos: 0 });
+    fs.create("/a", Kind::File).unwrap();
+    fs.commit().unwrap();
+    assert!(!fs.journal_tick(Timestamp { secs: 50, nanos: 0 }).unwrap());
+    assert!(fs.journal_tick(Timestamp { secs: 1000, nanos: 0 }).unwrap());
+    assert_eq!(fs.journal_read("/", 1, 10).unwrap_err(), Error::JournalGap);
+    assert_clean(&mut fs);
+}

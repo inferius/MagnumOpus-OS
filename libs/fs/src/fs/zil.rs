@@ -642,14 +642,11 @@ impl<D: BlockDevice> Fs<D> {
             return self.commit();
         }
         let mut records = Vec::new();
-        for id in pending {
+        for &id in &pending {
             self.activate(id)?;
             records.push(Record::Dataset(id));
             // Zaznamy logu potrebuji, kdo menil obsah (`content_actor`).
             records.extend(self.log_records()?);
-            // Sloucene zaznamy CONTENT dostanou cisla ted (po prehrani
-            // davky znovu stejna - viz `replay_log`).
-            self.jflush()?;
         }
         self.activate(back)?;
         // Zapis dat narazil na neplatne uvolneni (poskozena hodnota): nic
@@ -680,6 +677,14 @@ impl<D: BlockDevice> Fs<D> {
             return Err(e);
         }
         self.clear_all_pending();
+        // Sloucene zaznamy CONTENT dostanou cisla az po uspesnem zapisu
+        // davky (po prehrani na konci davky znovu stejna - `replay_log`).
+        // Pri chybe pred zapisem zustane, kdo menil obsah, pro dalsi fsync.
+        for &id in &pending {
+            self.activate(id)?;
+            self.jflush()?;
+        }
+        self.activate(back)?;
         self.jpublish_all();
         Ok(())
     }

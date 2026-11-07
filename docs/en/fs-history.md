@@ -133,7 +133,9 @@ Rules:
   reader reads the current content anyway.
 - **Retention** (dataset setting): by default 1 million records or 30 days,
   whichever comes first. A commit discards at most the 4096 oldest (a commit
-  must not take unbounded time). A number older than the oldest stored one =
+  must not take unbounded time); in a dataset that has stopped changing,
+  the age limit is applied by the service step `journal_tick` (every
+  minute). A number older than the oldest stored one =
   **`JOURNAL_GAP`**, never a silent skip.
 - **A new baseline together with a position:** `view(dataset)` takes a
   temporary snapshot (kind `VIEW`, not shown in the snapshot listing) and
@@ -475,8 +477,16 @@ both sides, 6 folder missing, 7 folder not empty, 8 cycle; where their
 version was saved) and optionally the merge commit. Lists have at most 4096
 items.
 
-**The fsd service** calls `auto_snapshot_tick`, `expire_tick` and
-`trash_tick` every minute (as the system) - not on a read-only volume.
+**The fsd service** calls `auto_snapshot_tick`, `expire_tick`,
+`trash_tick` and `journal_tick` every minute (as the system) - not on a
+read-only volume.
+
+**Capability for "aside":** `ASIDE_APPLY` and `ASIDE_DISCARD` change the
+original, so the service allows them only to a session that has the
+original mounted for writing. An application with a capability for the
+clone only cannot change the original, even with its owner's identity.
+`ASIDE_BEGIN` requires write access to the dataset (it creates a snapshot
+in it).
 
 ## Risks and limitations
 

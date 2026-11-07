@@ -119,9 +119,15 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Prida zaznam do zurnalu aktivniho datasetu (cas, uzivatel doplni).
-    pub(super) fn jappend(&mut self, mut e: JournalEntry) -> Result<()> {
+    pub(super) fn jappend(&mut self, e: JournalEntry) -> Result<()> {
+        let now = self.now;
+        self.jappend_at(e, now)
+    }
+
+    /// Jako `jappend`, s danym casem zaznamu.
+    fn jappend_at(&mut self, mut e: JournalEntry, time: Timestamp) -> Result<()> {
         self.jload()?;
-        e.time = self.now;
+        e.time = time;
         e.actor = self.actor();
         let seq = self.jr.state.next;
         self.jr.state.next = seq.checked_add(1).ok_or(Error::NoResources)?;
@@ -203,7 +209,9 @@ impl<D: BlockDevice> Fs<D> {
                 continue;
             }
             self.actor_override = Some(actor);
-            let r = self.jappend(JournalEntry {
+            // Cas = posledni zmena obsahu (mtime): po prehrani logu stejny
+            // (cas commitu nebo fsync by se lisil).
+            let r = self.jappend_at(JournalEntry {
                 op: jop::CONTENT,
                 kind: i.kind,
                 oid,
@@ -211,7 +219,7 @@ impl<D: BlockDevice> Fs<D> {
                 parent: i.parent,
                 size: i.size,
                 ..JournalEntry::default()
-            });
+            }, i.mtime);
             self.actor_override = back;
             r?;
         }
@@ -237,6 +245,14 @@ impl<D: BlockDevice> Fs<D> {
         if !self.jr.loaded || !self.jr.dirty {
             return Ok(());
         }
+        self.jprune_now().map(|_| ())
+    }
+
+    /// Retence aktivniho datasetu bez ohledu na to, zda zurnal rostl.
+    /// Vraci, zda neco zahodila.
+    fn jprune_now(&mut self) -> Result<bool> {
+        self.jload()?;
+        let before = self.jr.state.first;
         let set = self.settings_active()?;
         let max = set.journal_entries();
         let oldest = self.now.secs.saturating_sub(set.journal_age().min(i64::MAX as u64) as i64);
@@ -259,7 +275,37 @@ impl<D: BlockDevice> Fs<D> {
             self.jr.state.first = first + 1;
             budget -= 1;
         }
-        Ok(())
+        if self.jr.state.first != before {
+            self.jr.dirty = true;
+        }
+        Ok(self.jr.state.first != before)
+    }
+
+    /// Krok retence zurnalu (sluzba ho vola periodicky): zahodi zastarale
+    /// zaznamy i v datasetech, ktere se prestaly menit (pri commitu se
+    /// retence uplatni jen tam, kde zurnal rostl). Jen system.
+    pub fn journal_tick(&mut self, now: Timestamp) -> Result<bool> {
+        self.require_system()?;
+        let saved = self.now;
+        self.now = now;
+        let r = (|| {
+            let mut any = false;
+            for ds in self.all_dataset_ids()? {
+                self.activate(ds)?;
+                if self.guarded(|fs| fs.jprune_now())? {
+                    // Stav zurnalu do stromu (commit ho ulozi).
+                    self.guarded(|fs| fs.jflush())?;
+                    any = true;
+                }
+            }
+            self.activate(crate::layout::ROOT_DATASET)?;
+            if any {
+                self.commit()?;
+            }
+            Ok(any)
+        })();
+        self.now = saved;
+        r
     }
 
     /// Nastaveni aktivniho datasetu (chybi = vychozi).
@@ -393,8 +439,4 @@ impl<D: BlockDevice> Fs<D> {
         Ok(())
     }
 
-    /// Cas jako `Timestamp` (pro testy a sluzby).
-    pub fn now(&self) -> Timestamp {
-        self.now
-    }
 }

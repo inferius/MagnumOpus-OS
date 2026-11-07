@@ -20,10 +20,10 @@ use alloc::vec::Vec;
 
 use abi::{Error, Result};
 
-use super::{Fs, Kind, split_parent};
+use super::{Fs, split_parent};
 use crate::btree;
 use crate::device::BlockDevice;
-use crate::layout::{BLOCK_SIZE, Inode, KIND_DIR, KIND_SYMLINK, Key, META_OID, SnapshotRecord, Timestamp, item};
+use crate::layout::{Inode, Key, META_OID, SnapshotRecord, Timestamp, item};
 use crate::node::Child;
 use crate::perm::rights;
 use crate::records::{JournalEntry, jop, snapkind};
@@ -135,45 +135,14 @@ impl<D: BlockDevice> Fs<D> {
         Ok(out)
     }
 
-    /// Kopie objektu `oid` ze stromu `root` (snapshot aktivniho datasetu)
-    /// na cestu `dest` v zive verzi. Slozka i s obsahem (vnorene datasety
-    /// ne - maji vlastni historii). Vraci zkopirovane bajty.
-    fn copy_from(&mut self, root: &Child, oid: u64, dest: &str) -> Result<u64> {
-        let i = self.inode(root, oid)?;
-        match i.kind {
-            KIND_DIR => {
-                self.create(dest, Kind::Dir)?;
-                let mut total = 0;
-                for e in self.list_oid(root, oid)? {
-                    if e.kind != Kind::Dataset {
-                        total += self.copy_from(root, e.oid, &join(dest, &e.name))?;
-                    }
-                }
-                Ok(total)
-            }
-            KIND_SYMLINK => {
-                let target = self.readlink_oid(root, oid)?;
-                self.symlink(dest, &target)?;
-                Ok(0)
-            }
-            _ => {
-                self.create(dest, Kind::File)?;
-                let mut off = 0u64;
-                while off < i.size {
-                    let n = ((i.size - off) as usize).min(256 * BLOCK_SIZE);
-                    let data = self.read_oid(root, oid, off, n, false)?;
-                    if data.is_empty() {
-                        break;
-                    }
-                    self.write(dest, off, &data)?;
-                    off += data.len() as u64;
-                }
-                if off < i.size {
-                    self.truncate(dest, i.size)?;
-                }
-                Ok(i.size)
-            }
-        }
+    /// Kopie objektu `oid` ze snapshotu `snapshot` aktivniho datasetu na
+    /// cestu `dest` v zive verzi - pres `restore_copy`, ktere kontroluje
+    /// prava u kazde polozky (kopie slozky nevezme, co volajici nevidi).
+    /// Vraci zkopirovane bajty.
+    fn copy_from(&mut self, snapshot: &str, root: &Child, oid: u64, dest: &str) -> Result<u64> {
+        let ds = self.dataset_path(self.cur_ds)?;
+        let src = self.path_in(root, oid)?.ok_or(Error::NotFound)?;
+        self.restore_copy(&ds, snapshot, &src, dest)
     }
 
     /// Najde snapshot `snapshot` aktivniho datasetu (bez pohledu).
@@ -195,11 +164,11 @@ impl<D: BlockDevice> Fs<D> {
         }
         match mode {
             RestoreMode::Copy(dest) => {
-                self.copy_from(&snap, oid, dest)?;
+                self.copy_from(snapshot, &snap, oid, dest)?;
                 Ok(dest.into())
             }
             RestoreMode::Replace => {
-                self.replace_from(&snap, oid, path)?;
+                self.replace_from(snapshot, &snap, oid, path)?;
                 Ok(path.into())
             }
         }
@@ -207,10 +176,10 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Nahradi objekt na `path` kopii objektu `oid` ze stromu `snap`:
     /// kopie vedle (docasne jmeno), aktualni do kose, kopie na jeho misto.
-    fn replace_from(&mut self, snap: &Child, oid: u64, path: &str) -> Result<u64> {
+    fn replace_from(&mut self, snapshot: &str, snap: &Child, oid: u64, path: &str) -> Result<u64> {
         let (dir, name) = split_parent(path)?;
         let temp = join(dir, &alloc::format!(".obnova-{}-{}", oid, self.s.next_oid));
-        self.copy_from(snap, oid, &temp)?;
+        self.copy_from(snapshot, snap, oid, &temp)?;
         let id = self.trash(path)?;
         self.rename(&temp, &join(dir, name))?;
         Ok(id)
@@ -269,7 +238,7 @@ impl<D: BlockDevice> Fs<D> {
                 let (snapshot, root) = self.snapshot_before(seq, e.oid, e.generation)?;
                 let dir = self.path_of(e.parent)?.ok_or(Error::NotFound)?;
                 let path = join(&Self::full_path(dataset, &dir), &e.name);
-                self.copy_from(&root, e.oid, &path)?;
+                self.copy_from(&snapshot, &root, e.oid, &path)?;
                 Ok(Undone::FromSnapshot { path, snapshot, trashed: None })
             }
             jop::CONTENT => {
@@ -282,7 +251,7 @@ impl<D: BlockDevice> Fs<D> {
                 self.require(&path, rights::WRITE)?;
                 self.enter_dataset(dataset)?;
                 let (snapshot, snap) = self.snapshot_before(seq, e.oid, e.generation)?;
-                let id = self.replace_from(&snap, e.oid, &path)?;
+                let id = self.replace_from(&snapshot, &snap, e.oid, &path)?;
                 Ok(Undone::FromSnapshot { path, snapshot, trashed: Some(id) })
             }
             _ => Err(Error::NotSupported),

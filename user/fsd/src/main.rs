@@ -302,6 +302,9 @@ fn history(svc: &mut Service, next: &mut u64) {
     if let Err(e) = fs.trash_tick(now) {
         println!("fsd: uklid kose: {e}");
     }
+    if let Err(e) = fs.journal_tick(now) {
+        println!("fsd: retence zurnalu: {e}");
+    }
 }
 
 /// Automaticky commit a defragmentace v necinnosti.

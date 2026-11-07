@@ -592,7 +592,7 @@ pub fn decode_pairs(b: &[u8]) -> Result<Vec<(u64, u64)>> {
     if !b.len().is_multiple_of(16) {
         return Err(Error::Corrupted);
     }
-    Ok(b.chunks_exact(16).map(|c| (u64_at(c, 0), u64_at(c, 8))).collect())
+    Ok(b.as_chunks::<16>().0.iter().map(|c| (u64_at(c, 0), u64_at(c, 8))).collect())
 }
 
 // --- pripojeni datasetu ---

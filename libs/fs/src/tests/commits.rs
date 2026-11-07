@@ -294,3 +294,18 @@ fn branch_path_follows_moves() {
     assert_eq!(fs.branches("/c/repo").unwrap()[0].path, "/w/s/b2");
     assert_clean(&mut fs);
 }
+
+/// Smazani datasetu vetve primo (ne pres `delete_branch`) zrusi i zaznam.
+#[test]
+fn deleting_branch_dataset_forgets_branch() {
+    let mut fs = new_fs(16384);
+    project(&mut fs);
+    fs.commit_version("/repo", "a").unwrap();
+    fs.branch("/repo", "x", "/x").unwrap();
+    fs.delete_dataset("/x").unwrap();
+    assert!(fs.branches("/repo").unwrap().is_empty());
+    fs.branch("/repo", "x", "/x2").unwrap();
+    fs.delete_branch("/repo", "x").unwrap();
+    assert!(fs.branches("/repo").unwrap().is_empty());
+    assert_clean(&mut fs);
+}
