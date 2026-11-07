@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plocha</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+.page { max-width: 1400px; }
+#desk { height: 700px; margin-top: var(--s4); }
+.panel { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; }
+.panel .grp { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; padding: var(--s2) var(--s3); border-radius: var(--r-card);
+  background: var(--c-surface); border: 1px solid var(--c-border); }
+.panel .grp > span { font-size: var(--t-caption-size); font-weight: 600; color: var(--c-ink-muted); margin-right: var(--s1); }
+.win .win-title { cursor: grab; }
+.win.dragging .win-title { cursor: grabbing; }
+.win.dragging { transition: none; }
+.win.is-min { opacity: 0; transform: translateY(40px) scale(.92); pointer-events: none; }
+/* Spoustec */
+#launcher { width: 360px; padding: var(--s4); }
+#launcher .apps { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s2); margin-top: var(--s4); }
+#launcher .apps button { display: flex; flex-direction: column; align-items: center; gap: var(--s2); padding: var(--s3) var(--s1); border: 0; border-radius: var(--r-control);
+  background: transparent; cursor: pointer; font-size: var(--t-caption-size); }
+#launcher .apps button:hover, #launcher .apps button:focus-visible { background: var(--c-surface-3); }
+#launcher .apps .tile { width: 44px; height: 44px; border-radius: var(--r-card); display: grid; place-items: center; background: var(--c-accent-soft); color: var(--c-accent-ink); }
+#launcher .foot { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--c-border); }
+/* Prepinani oken */
+#switcher { position: absolute; inset: 0; z-index: 800; display: grid; place-items: center; background: color-mix(in srgb, var(--c-bg) 40%, transparent); backdrop-filter: blur(6px); }
+#switcher .row { display: flex; gap: var(--s4); padding: var(--s5); border-radius: var(--r-window); background: var(--c-surface); box-shadow: var(--sh-popover); border: 1px solid var(--c-border);
+  max-width: calc(100% - 32px); overflow-x: auto; animation: pop-in var(--m-base) var(--ease-enter); }
+#switcher .thumb { width: 170px; border: 2px solid transparent; border-radius: var(--r-card); padding: var(--s2); background: transparent; cursor: pointer; text-align: left; flex: none; }
+#switcher .thumb[aria-selected="true"] { border-color: var(--c-accent); background: var(--c-accent-soft); }
+#switcher .mini { height: 96px; border-radius: var(--r-control); background: var(--c-surface-2); border: 1px solid var(--c-border); display: grid; place-items: center; color: var(--c-accent-ink); }
+#switcher .lbl { display: flex; gap: var(--s2); align-items: center; margin-top: var(--s2); font-size: var(--t-small-size); font-weight: 600; }
+/* Oznameni */
+#toasts { position: absolute; right: 16px; top: 16px; z-index: 400; display: flex; flex-direction: column; gap: var(--s3); align-items: flex-end; }
+#center { width: 360px; max-height: 480px; overflow: auto; padding: var(--s3); }
+#center h3 { font-size: var(--t-body-size); display: flex; align-items: center; margin: var(--s2) var(--s2) var(--s3); }
+#center .notif { width: 100%; box-shadow: none; animation: none; margin-bottom: var(--s2); }
+/* Agent v liste */
+.agent-pill { display: inline-flex; align-items: center; gap: var(--s2); height: 34px; padding: 0 var(--s2) 0 var(--s3); border-radius: var(--r-pill);
+  background: var(--c-ai-soft); color: var(--c-ai-ink); font-weight: 600; font-size: var(--t-small-size); border: 1px solid var(--c-ai); white-space: nowrap; }
+.agent-pill button { height: 26px; border-radius: var(--r-pill); border: 0; background: var(--c-ai); color: var(--c-on-ai); font-weight: 600; padding: 0 var(--s3); cursor: pointer; }
+.agent-dot { width: 8px; height: 8px; border-radius: 4px; background: var(--c-ai); animation: breathe 1.6s var(--ease-standard) infinite; }
+@keyframes breathe { 50% { opacity: .35; } }
+.win.agent-acting { outline: 3px solid var(--c-ai); outline-offset: 0; }
+.agent-tag { position: absolute; left: 50%; top: -1px; transform: translateX(-50%); z-index: 5; }
+/* Spravce uloh */
+.tm-body { display: flex; flex-direction: column; height: 100%; }
+.tm-tools { display: flex; gap: var(--s3); align-items: center; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--c-border); flex-wrap: wrap; }
+.tm-body .tbl td:first-child { border-left: 4px solid transparent; }
+.tm-body .tbl tr.agent td:first-child { border-left-color: var(--c-ai); }
+.tm-body .tbl tr.agent { background: color-mix(in srgb, var(--c-ai-soft) 45%, transparent); }
+.tm-body .tbl .who { display: inline-flex; align-items: center; gap: var(--s1); }
+.tm-detail { padding: var(--s3) var(--s4); border-top: 1px solid var(--c-border); font-size: var(--t-small-size); background: var(--c-surface-2); }
+/* Vyber souboru (powerbox) */
+.pb { display: grid; grid-template-columns: 150px 1fr; min-height: 220px; border: 1px solid var(--c-border); border-radius: var(--r-card); overflow: hidden; margin: var(--s4) 0; }
+.pb nav { background: var(--c-surface-2); padding: var(--s2); font-size: var(--t-small-size); }
+.pb .files { padding: var(--s2); font-size: var(--t-small-size); }
+.pb .li { min-height: 32px; }
+.sysdlg.wide { width: min(600px, calc(100% - 24px)); }
+/* Bezpecna obrazovka */
+#secure { position: absolute; inset: 0; z-index: 2000; display: grid; place-items: center; background: var(--c-bg);
+  background: radial-gradient(circle at 50% 30%, var(--c-accent-soft), var(--c-bg) 60%); animation: fade-in var(--m-slow) var(--ease-standard); }
+#secure .opts { display: grid; gap: var(--s2); width: 300px; }
+#secure .opts button { justify-content: flex-start; min-height: 48px; }
+.sys-flag { position: absolute; z-index: 1001; left: 12px; top: 12px; }
+</style>
+</head>
+<body>
+<a class="skip" href="#desk">Přeskočit na plochu</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header style="margin-bottom:var(--s4)">
+    <h1>Plocha</h1>
+    <p class="lead">Lišta, přepínání oken, oznámení, systémové dialogy, bezpečná obrazovka a správce úloh. Okna jdou táhnout za titulek a kliknutím aktivovat.</p>
+  </header>
+  <div class="panel" aria-label="Ovládání ukázky">
+    <div class="grp"><span>Lišta</span>
+      <select id="barpos" aria-label="Poloha lišty" class="input" style="min-height:32px;width:auto">
+        <option value="bottom-inset">dole, odsazená (výchozí)</option><option value="dock">dole, plovoucí dok</option><option value="bottom-full">dole, přes šířku</option>
+        <option value="left">vlevo</option><option value="right">vpravo</option><option value="top">nahoře</option></select></div>
+    <div class="grp"><span>Systémové dialogy</span>
+      <button class="btn small" data-dlg="perm">Oprávnění (kamera)</button>
+      <button class="btn small" data-dlg="pass">Heslo</button>
+      <button class="btn small" data-dlg="pick">Výběr souboru</button>
+      <button class="btn small" data-dlg="usb">Nová klávesnice</button></div>
+    <div class="grp"><span>Další</span>
+      <button class="btn small" id="b-switch">Přepnout okna <span class="kbd">Alt</span><span class="kbd">Q</span></button>
+      <button class="btn small" id="b-notif">Oznámení</button>
+      <button class="btn small" id="b-agent">Agent jedná</button>
+      <button class="btn small" id="b-secure"><span class="kbd">Ctrl</span><span class="kbd">Alt</span><span class="kbd">Del</span></button></div>
+  </div>
+  <p class="note" style="margin-top:var(--s3)">V systému se okna přepínají <span class="kbd">Alt</span> <span class="kbd">Tab</span>; v prohlížeči ji zachytí prohlížeč, proto tu je <span class="kbd">Alt</span> <span class="kbd">Q</span>. Pravým tlačítkem na liště se mění její poloha.</p>
+
+  <div class="desk" id="desk" tabindex="-1" aria-label="Plocha">
+    <div id="wins"></div>
+    <nav class="bar" id="bar" data-pos="bottom-inset" aria-label="Lišta">
+      <button class="bar-btn" id="b-launch" aria-label="Aplikace" aria-haspopup="dialog" aria-expanded="false"><svg class="ic l"><use href="#ic-apps"/></svg></button>
+      <span class="bar-sep" aria-hidden="true"></span>
+      <div id="bar-apps" class="hstack" style="gap:var(--s1);flex-wrap:nowrap" role="toolbar" aria-label="Otevřená okna"></div>
+      <span class="spacer"></span>
+      <span id="agent-slot"></span>
+      <button class="bar-btn" id="b-tasks" aria-label="Úlohy: 4 běží, z toho 1 agent. Otevřít správce úloh."><svg class="ic"><use href="#ic-tasks"/></svg><span class="bar-label num">4</span><span class="chip agent bar-label" style="height:22px"><svg class="ic s"><use href="#ic-agent"/></svg>1</span></button>
+      <button class="bar-btn" aria-label="Síť: Domov, připojeno"><svg class="ic"><use href="#ic-wifi"/></svg></button>
+      <button class="bar-btn" aria-label="Hlasitost 60 %"><svg class="ic"><use href="#ic-volume"/></svg></button>
+      <button class="bar-btn" id="b-bell" aria-label="Oznámení: 2 nová" aria-haspopup="dialog" aria-expanded="false"><svg class="ic"><use href="#ic-bell"/></svg><span class="count bar-label" id="bell-count">2</span></button>
+      <span class="bar-sep" aria-hidden="true"></span>
+      <div class="bar-clock" id="clock" role="timer" aria-live="off">14:05<small>so 7. 11.</small></div>
+    </nav>
+    <div id="toasts" aria-live="polite"></div>
+    <div id="overlay"></div>
+  </div>
+</main>
+
+<script>
+document.addEventListener('mo-ready', function () {
+  var desk = document.getElementById('desk'), winsEl = document.getElementById('wins'), bar = document.getElementById('bar');
+  var overlay = document.getElementById('overlay');
+  var PHRASE = 'modrá konvice';
+
+  // ---- Okna --------------------------------------------------------------
+  var WINS = [
+    { id: 'term', app: 'Terminál', title: '~/projekt - Terminál', icon: 'terminal', perms: ['folder'], x: 40, y: 40, w: 520, h: 300, body: termBody },
+    { id: 'files', app: 'Soubory', title: 'Dokumenty - Soubory', icon: 'folder', perms: ['folder'], x: 330, y: 150, w: 480, h: 320, body: filesBody },
+    { id: 'tasks', app: 'Správce úloh', title: 'Správce úloh', icon: 'tasks', perms: [], x: 520, y: 60, w: 640, h: 420, body: tasksBody, hidden: true, system: true }
+  ];
+  var order = ['files', 'term'];  // posledni = nahore (aktivni)
+  function termBody() {
+    return '<div class="mono" style="padding:var(--s4);font-size:var(--t-mono-size);line-height:var(--t-mono-line);background:var(--c-term-bg);color:var(--c-term-ink);height:100%">' +
+      '<div style="border-left:3px solid var(--c-accent);padding-left:var(--s3);margin-bottom:var(--s3)"><b>cargo xtask test</b><br><span style="color:var(--c-term-green)">&#10003; 140/140 v pořádku</span> <span style="color:var(--c-term-dim)">&middot; 3 min 12 s</span></div>' +
+      '<div style="border-left:3px solid var(--c-ai);padding-left:var(--s3);margin-bottom:var(--s3)"><span class="chip agent" style="height:20px">' + ic('agent', 's') + 'agent</span> <b>uklid ~/Stažené</b><br><span style="color:var(--c-term-dim)">běží v klonu &middot; 14 změn zatím</span></div>' +
+      '<div><span style="color:var(--c-term-dim)">~/projekt &rsaquo;</span> &#9612;</div></div>';
+  }
+  function filesBody() {
+    return '<div style="display:grid;grid-template-columns:140px 1fr;height:100%"><ul class="list" style="background:var(--c-surface-2)" aria-label="Místa">' +
+      '<li class="li">' + ic('home') + 'Domů</li><li class="li is-sel">' + ic('folder') + 'Dokumenty</li><li class="li">' + ic('download') + 'Stažené</li></ul>' +
+      '<ul class="list" aria-label="Soubory"><li class="li">' + ic('folder') + 'Faktury</li><li class="li">' + ic('folder') + 'Projekty</li><li class="li">' + ic('file') + 'smlouva.pdf</li><li class="li">' + ic('image') + 'dovolena.jpg</li></ul></div>';
+  }
+  var TASKS = [
+    { n: 'Úklid ~/Stažené', who: 'agent', whoL: 'Asistent (agent)', st: 'běží v klonu', p: 46, mem: '210 MB', agent: true },
+    { n: 'cargo xtask test', who: 'user', whoL: 'ty, terminál 1', st: 'běží', p: 72, mem: '1,1 GB' },
+    { n: 'Kopírování Fotky do záloh', who: 'app', whoL: 'Soubory', st: 'běží', p: 31, mem: '38 MB' },
+    { n: 'Kontrola integrity (scrub)', who: 'service', whoL: 'fsd', st: 'na pozadí', p: 88, mem: '12 MB' },
+    { n: 'Synchronizace času', who: 'service', whoL: 'netd', st: 'hotovo před 2 min', p: 100, mem: '-' },
+    { n: 'neznámý proces v jobu 41', who: 'unknown', whoL: 'neregistrováno', st: 'běží', p: null, mem: '4 MB' }
+  ];
+  var WHO_IC = { agent: 'agent', user: 'user', app: 'window', service: 'settings', unknown: 'alert' };
+  function tasksBody() {
+    return '<div class="tm-body"><div class="tm-tools">' +
+      '<div class="seg" role="radiogroup" aria-label="Filtr úloh" id="tm-filter"><button role="radio" aria-checked="true" data-value="all">Vše</button><button role="radio" aria-checked="false" data-value="mine">Moje</button>' +
+      '<button role="radio" aria-checked="false" data-value="agent">' + ic('agent', 's') + ' Agent</button><button role="radio" aria-checked="false" data-value="system">Systém</button></div>' +
+      '<span class="spacer"></span><span class="note" style="margin:0">Paměť z rozpočtu jobu</span></div>' +
+      '<div style="flex:1;overflow:auto"><table class="tbl" aria-label="Běžící úlohy"><thead><tr><th>Úloha</th><th>Kdo spustil</th><th>Stav</th><th>Průběh</th><th class="r">Paměť</th><th><span class="sr-only">Akce</span></th></tr></thead><tbody id="tm-rows"></tbody></table></div>' +
+      '<div class="tm-detail" id="tm-detail">Vyber úlohu: šipkami nahoru a dolů, Enter otevře log.</div></div>';
+  }
+  function renderTasks(filter) {
+    var rows = TASKS.filter(function (t) {
+      return filter === 'all' || (filter === 'mine' && (t.who === 'user' || t.who === 'app')) || (filter === 'agent' && t.agent) || (filter === 'system' && (t.who === 'service' || t.who === 'unknown'));
+    });
+    var tb = document.getElementById('tm-rows'); if (!tb) return;
+    tb.innerHTML = rows.map(function (t, i) {
+      var who = t.agent ? '<span class="chip agent">' + ic('agent', 's') + 'agent</span> ' + t.whoL.replace(' (agent)', '') : '<span class="who">' + ic(WHO_IC[t.who], 's') + t.whoL + '</span>';
+      var prog = t.p == null ? '<span class="muted">-</span>' : '<div class="progress' + (t.agent ? ' agent' : '') + '" style="width:90px" role="progressbar" aria-valuenow="' + t.p + '" aria-valuemin="0" aria-valuemax="100" aria-label="Průběh"><i style="width:' + t.p + '%"></i></div>';
+      return '<tr class="' + (t.agent ? 'agent' : '') + '" tabindex="' + (i ? -1 : 0) + '" aria-selected="false"><td><b>' + t.n + '</b></td><td>' + who + '</td><td>' + t.st + '</td><td>' + prog + '</td><td class="r">' + t.mem + '</td>' +
+        '<td><div class="hstack" style="gap:2px;flex-wrap:nowrap"><button class="btn ghost small icon" aria-label="Pozastavit ' + t.n + '">' + ic('pause', 's') + '</button><button class="btn ghost small icon" aria-label="Zrušit ' + t.n + '">' + ic('stop', 's') + '</button></div></td></tr>';
+    }).join('');
+    var trs = Array.prototype.slice.call(tb.querySelectorAll('tr'));
+    trs.forEach(function (tr, i) {
+      function sel() {
+        trs.forEach(function (x) { x.setAttribute('aria-selected', x === tr); x.tabIndex = x === tr ? 0 : -1; });
+        var t = rows[i];
+        document.getElementById('tm-detail').innerHTML = '<b>' + t.n + '</b> &middot; ' + (t.agent ? 'agent pracuje jen v klonu ~/Stažené, síť nemá, na konci ukáže rozdíl k převzetí. ' : '') +
+          'Spuštěno ' + t.whoL + '. <a href="#" onclick="return false">Připojit</a> &middot; <a href="#" onclick="return false">Log</a>';
+      }
+      tr.addEventListener('click', sel); tr.addEventListener('focus', sel);
+      tr.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown' && trs[i + 1]) { e.preventDefault(); trs[i + 1].focus(); }
+        if (e.key === 'ArrowUp' && trs[i - 1]) { e.preventDefault(); trs[i - 1].focus(); }
+      });
+    });
+  }
+
+  function winHtml(w) {
+    var perms = w.perms.map(function (p) { return ic(p); }).join('');
+    var trust = w.system
+      ? '<span class="trust" tabindex="0" role="button" aria-label="Systém, ' + w.app + '">' + ic('shieldcheck', 's') + 'Systém</span>'
+      : '<span class="trust" tabindex="0" role="button" aria-label="' + w.app + ', ověřená aplikace">' + ic('shield', 's') + w.app + (perms ? '<span class="perm">' + perms + '</span>' : '') + '</span>';
+    return '<section class="win" id="w-' + w.id + '" role="dialog" aria-label="' + w.title + '" style="left:' + w.x + 'px;top:' + w.y + 'px;width:' + w.w + 'px;height:' + w.h + 'px">' +
+      '<div class="win-title">' + trust + '<span class="name">' + w.title + '</span><div class="wbtns">' +
+      '<button class="wbtn" data-act="min" aria-label="Minimalizovat">' + ic('min') + '</button><button class="wbtn" data-act="max" aria-label="Maximalizovat">' + ic('max') + '</button>' +
+      '<button class="wbtn close" data-act="close" aria-label="Zavřít">' + ic('close') + '</button></div></div><div class="win-body">' + w.body() + '</div></section>';
+  }
+  function find(id) { return WINS.filter(function (w) { return w.id === id; })[0]; }
+  function renderWins() {
+    winsEl.innerHTML = WINS.filter(function (w) { return !w.hidden; }).map(winHtml).join('');
+    WINS.forEach(function (w) { if (!w.hidden) wire(w); });
+    stack();
+    if (!find('tasks').hidden) { window.MO_SEG(document.getElementById('tm-filter'), renderTasks); renderTasks('all'); }
+    renderBarApps();
+  }
+  function stack() {
+    order.forEach(function (id, i) {
+      var el = document.getElementById('w-' + id); if (!el) return;
+      el.style.zIndex = 10 + i;
+      el.classList.toggle('is-inactive', i !== order.length - 1);
+    });
+    renderBarApps();
+  }
+  function activate(id) {
+    var w = find(id); w.hidden = false; w.min = false;
+    if (!document.getElementById('w-' + id)) { order = order.filter(function (x) { return x !== id; }); order.push(id); renderWins(); }
+    order = order.filter(function (x) { return x !== id; }); order.push(id);
+    var el = document.getElementById('w-' + id); el.classList.remove('is-min');
+    stack();
+  }
+  function wire(w) {
+    var el = document.getElementById('w-' + w.id), title = el.querySelector('.win-title');
+    el.addEventListener('pointerdown', function () { if (order[order.length - 1] !== w.id) activate(w.id); });
+    el.querySelectorAll('[data-act]').forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var a = b.dataset.act;
+        if (a === 'close') { w.hidden = true; order = order.filter(function (x) { return x !== w.id; }); el.remove(); stack(); }
+        if (a === 'min') { w.min = true; el.classList.add('is-min'); order = order.filter(function (x) { return x !== w.id; }); order.unshift(w.id); stack(); }
+        if (a === 'max') {
+          w.max = !w.max;
+          if (w.max) { w.prev = [el.style.left, el.style.top, el.style.width, el.style.height]; Object.assign(el.style, { left: '8px', top: '8px', width: 'calc(100% - 16px)', height: 'calc(100% - 84px)' }); }
+          else { Object.assign(el.style, { left: w.prev[0], top: w.prev[1], width: w.prev[2], height: w.prev[3] }); }
+        }
+      });
+    });
+    title.addEventListener('dblclick', function (e) { if (!e.target.closest('button,.trust')) el.querySelector('[data-act=max]').click(); });
+    // Tazeni za titulek: sleduje ukazatel primo, bez zpozdeni (pravidlo pohybu).
+    title.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('button, .trust') || e.button !== 0) return;
+      var sx = e.clientX, sy = e.clientY, ox = el.offsetLeft, oy = el.offsetTop;
+      el.classList.add('dragging'); title.setPointerCapture(e.pointerId);
+      function mv(ev) { el.style.left = Math.max(-el.offsetWidth + 80, ox + ev.clientX - sx) + 'px'; el.style.top = Math.max(0, oy + ev.clientY - sy) + 'px'; }
+      function up() { el.classList.remove('dragging'); title.removeEventListener('pointermove', mv); title.removeEventListener('pointerup', up); }
+      title.addEventListener('pointermove', mv); title.addEventListener('pointerup', up);
+    });
+  }
+
+  // ---- Lista -------------------------------------------------------------
+  function renderBarApps() {
+    var pinned = ['term', 'files'];
+    var ids = pinned.concat(WINS.filter(function (w) { return !w.hidden && pinned.indexOf(w.id) < 0; }).map(function (w) { return w.id; }));
+    var top = order[order.length - 1];
+    document.getElementById('bar-apps').innerHTML = ids.map(function (id) {
+      var w = find(id), running = !w.hidden, active = running && !w.min && top === id;
+      return '<button class="bar-btn bar-app' + (running ? ' is-running' : '') + (active ? ' is-active' : '') + '" data-app="' + id + '" aria-label="' + w.app + (running ? ', otevřeno' : '') + (active ? ', aktivní' : '') + '" title="' + w.app + '">' + ic(w.icon, 'l') + '</button>';
+    }).join('');
+    document.querySelectorAll('[data-app]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.dataset.app, w = find(id);
+        if (!w.hidden && !w.min && order[order.length - 1] === id) { document.querySelector('#w-' + id + ' [data-act=min]').click(); }
+        else activate(id);
+      });
+    });
+  }
+  // Poloha listy z Nastaveni (nastaveni.html uklada mo.barpos).
+  try { var savedPos = localStorage.getItem('mo.barpos'); if (savedPos) { bar.dataset.pos = savedPos; document.getElementById('barpos').value = savedPos; } } catch (e) {}
+  document.getElementById('barpos').addEventListener('change', function (e) { bar.dataset.pos = e.target.value; });
+  bar.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    var r = desk.getBoundingClientRect();
+    var opts = [['bottom-inset', 'Dole, odsazená'], ['dock', 'Dole, plovoucí dok'], ['bottom-full', 'Dole, přes šířku'], ['left', 'Vlevo'], ['right', 'Vpravo'], ['top', 'Nahoře']];
+    openPop('<ul class="menu" role="menu" aria-label="Poloha lišty">' + opts.map(function (o) {
+      return '<li><button role="menuitem" data-pos="' + o[0] + '">' + (bar.dataset.pos === o[0] ? ic('check', 's') : '<span style="width:16px"></span>') + o[1] + '</button></li>';
+    }).join('') + '</ul>', { left: Math.min(e.clientX - r.left, r.width - 220) + 'px', top: Math.max(8, e.clientY - r.top - 230) + 'px', padding: 0 });
+    overlay.querySelectorAll('[data-pos]').forEach(function (b) { b.addEventListener('click', function () { bar.dataset.pos = b.dataset.pos; document.getElementById('barpos').value = b.dataset.pos; closePop(); }); });
+  });
+  function tick() { var d = new Date(); document.getElementById('clock').firstChild.nodeValue = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  tick(); setInterval(tick, 20000);
+
+  // ---- Plovouci panely ---------------------------------------------------
+  var popOwner = null;
+  function openPop(html, pos, owner) {
+    closePop();
+    var p = document.createElement('div'); p.className = 'popover'; p.innerHTML = html; Object.assign(p.style, pos);
+    overlay.appendChild(p); popOwner = owner || null;
+    if (owner) owner.setAttribute('aria-expanded', 'true');
+    var f = p.querySelector('input, button'); if (f) f.focus();
+    p.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closePop(); if (owner) owner.focus(); } });
+    return p;
+  }
+  function closePop() {
+    overlay.querySelectorAll('.popover').forEach(function (p) { p.remove(); });
+    if (popOwner) popOwner.setAttribute('aria-expanded', 'false'); popOwner = null;
+  }
+  function barAnchor() {
+    var pos = bar.dataset.pos;
+    if (pos === 'left') return { left: '72px', bottom: '8px' };
+    if (pos === 'right') return { right: '72px', bottom: '8px' };
+    if (pos === 'top') return { left: '8px', top: '48px' };
+    return { left: '8px', bottom: '68px' };
+  }
+  desk.addEventListener('pointerdown', function (e) { if (!e.target.closest('.popover, .bar')) closePop(); });
+
+  document.getElementById('b-launch').addEventListener('click', function () {
+    if (popOwner === this) { closePop(); return; }
+    var apps = [['terminal', 'Terminál', 'term'], ['folder', 'Soubory', 'files'], ['settings', 'Nastavení', ''], ['tasks', 'Úlohy', 'tasks'], ['image', 'Obrázky', ''], ['code', 'Editor', ''], ['globe', 'Prohlížeč', ''], ['camera', 'Hovory', '']];
+    var p = openPop('<div id="launcher" role="dialog" aria-label="Aplikace"><label class="sr-only" for="l-q">Hledat aplikace, soubory a akce</label>' +
+      '<div class="hstack" style="position:relative"><input id="l-q" class="input" placeholder="Hledat aplikace, soubory, akce..." style="border-radius:var(--r-pill);padding-left:36px">' +
+      '<span style="position:absolute;left:12px;top:8px;color:var(--c-ink-muted)">' + ic('search', 's') + '</span></div>' +
+      '<div class="apps" role="list">' + apps.map(function (a) { return '<button role="listitem" data-open="' + a[2] + '"><span class="tile">' + ic(a[0], 'l') + '</span>' + a[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="foot"><span class="tile" style="width:32px;height:32px;border-radius:16px;background:var(--c-accent-soft);display:grid;place-items:center;color:var(--c-accent-ink)">' + ic('user', 's') + '</span><b>Uživatel</b><span class="spacer"></span>' +
+      '<button class="btn ghost small icon" aria-label="Zamknout">' + ic('lock', 's') + '</button><button class="btn ghost small icon" aria-label="Vypnout">' + ic('power', 's') + '</button></div></div>', Object.assign(barAnchor(), { padding: 0 }), this);
+    p.querySelectorAll('[data-open]').forEach(function (b) { b.addEventListener('click', function () { if (b.dataset.open) activate(b.dataset.open); closePop(); }); });
+  });
+  document.getElementById('b-tasks').addEventListener('click', function () { activate('tasks'); });
+
+  // ---- Oznameni ----------------------------------------------------------
+  var NOTIFS = [
+    { ic: 'download', h: 'Stahování dokončeno', p: 'obraz-disku.img &middot; 1,2 GB', a: 'Otevřít' },
+    { ic: 'agent', h: 'Agent dokončil úlohu', p: 'Úklid ~/Stažené: 14 změn v klonu čeká na kontrolu', a: 'Zkontrolovat rozdíl', agent: true }
+  ];
+  function notifHtml(n) {
+    return '<div class="notif' + (n.agent ? ' agent' : '') + '" role="status"><div class="ico">' + ic(n.ic) + '</div><div style="flex:1;min-width:0"><h4>' + (n.agent ? '<span class="sr-only">Agent: </span>' : '') + n.h + '</h4><p>' + n.p + '</p>' +
+      '<div class="hstack"><button class="btn small primary">' + n.a + '</button><button class="btn small ghost" data-dismiss>Zavřít</button></div></div></div>';
+  }
+  var ni = 0;
+  document.getElementById('b-notif').addEventListener('click', function () {
+    var t = document.getElementById('toasts');
+    t.insertAdjacentHTML('afterbegin', notifHtml(NOTIFS[ni++ % NOTIFS.length]));
+    var el = t.firstElementChild;
+    el.querySelector('[data-dismiss]').addEventListener('click', function () { el.remove(); });
+    setTimeout(function () { if (el.isConnected) el.remove(); }, 6000);
+  });
+  document.getElementById('b-bell').addEventListener('click', function () {
+    if (popOwner === this) { closePop(); return; }
+    var pos = barAnchor(); if (pos.left === '8px') { delete pos.left; pos.right = '8px'; }
+    openPop('<div id="center" role="dialog" aria-label="Oznámení"><h3>Oznámení<span class="spacer"></span><button class="btn ghost small">Vymazat vše</button></h3>' + NOTIFS.map(notifHtml).join('') +
+      '<p class="note" style="margin:var(--s3) var(--s2) 0">Ztišit do 18:00 &middot; Nastavení oznámení</p></div>', Object.assign(pos, { padding: 0 }), this);
+    document.getElementById('bell-count').hidden = true;
+  });
+
+  // ---- Agent jedna -------------------------------------------------------
+  var agentOn = false;
+  document.getElementById('b-agent').addEventListener('click', function () { setAgent(!agentOn); });
+  function setAgent(on) {
+    agentOn = on;
+    var slot = document.getElementById('agent-slot');
+    slot.innerHTML = on ? '<span class="agent-pill" role="status">' + ic('agent', 's') + '<span class="bar-label">Agent ovládá Soubory</span><span class="agent-dot" aria-hidden="true"></span><button id="agent-stop">Zastavit</button></span>' : '';
+    var w = document.getElementById('w-files');
+    if (w) {
+      w.classList.toggle('agent-acting', on);
+      var tag = w.querySelector('.agent-tag'); if (tag) tag.remove();
+      if (on) w.insertAdjacentHTML('afterbegin', '<span class="chip agent agent-tag">' + ic('agent', 's') + 'agent jedná v tomto okně</span>');
+    }
+    if (on) document.getElementById('agent-stop').addEventListener('click', function () { setAgent(false); });
+  }
+
+  // ---- Prepinani oken (Alt+Q v ukazce, Alt+Tab v systemu) ----------------
+  var swIdx = 0;
+  function openSwitcher() {
+    var list = order.slice().reverse().filter(function (id) { return !find(id).hidden; });
+    if (!list.length) return;
+    swIdx = list.length > 1 ? 1 : 0;
+    var html = '<div id="switcher" role="dialog" aria-label="Přepnout okno"><div class="row" role="listbox" aria-label="Okna">' + list.map(function (id, i) {
+      var w = find(id);
+      return '<button class="thumb" role="option" data-id="' + id + '" aria-selected="' + (i === swIdx) + '"><div class="mini">' + ic(w.icon, 'xl') + '</div><div class="lbl">' + ic(w.icon, 's') + '<span>' + w.title + '</span></div></button>';
+    }).join('') + '</div></div>';
+    overlay.insertAdjacentHTML('beforeend', html);
+    var sw = document.getElementById('switcher'), th = sw.querySelectorAll('.thumb');
+    function sel(i) { swIdx = (i + th.length) % th.length; th.forEach(function (t, j) { t.setAttribute('aria-selected', j === swIdx); }); th[swIdx].focus(); }
+    sel(swIdx);
+    th.forEach(function (t, i) { t.addEventListener('click', function () { done(list[i]); }); });
+    sw.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowRight' || (e.key === 'q' && e.altKey) || e.key === 'Tab') { e.preventDefault(); sel(swIdx + (e.shiftKey ? -1 : 1)); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); sel(swIdx - 1); }
+      if (e.key === 'Enter') { e.preventDefault(); done(list[swIdx]); }
+      if (e.key === 'Escape') { sw.remove(); }
+    });
+    sw.addEventListener('keyup', function (e) { if (e.key === 'Alt') done(list[swIdx]); });
+    sw.addEventListener('click', function (e) { if (e.target === sw) sw.remove(); });
+    function done(id) { sw.remove(); activate(id); }
+  }
+  document.getElementById('b-switch').addEventListener('click', openSwitcher);
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && (e.key === 'q' || e.key === 'Q') && !document.getElementById('switcher')) { e.preventDefault(); openSwitcher(); }
+  });
+
+  // ---- Systemove dialogy -------------------------------------------------
+  // Kresli kompozitor ve vrstve nad ztlumenim (vcetne listy). Prvnich 300 ms ignoruje vstup.
+  function band() {
+    return '<div class="sys-band">' + ic('shieldcheck', 's') + 'Systém<span class="phrase" title="Bezpečnostní fráze: zná ji jen systém a ty">' + ic('key', 's') + 'tvá fráze: <b>' + PHRASE + '</b></span></div>';
+  }
+  function sysDialog(inner, actions, opts) {
+    opts = opts || {};
+    var opener = document.activeElement;
+    overlay.insertAdjacentHTML('beforeend', '<div class="scrim" id="scrim"></div><div class="sysdlg' + (opts.wide ? ' wide' : '') + '" id="sysdlg" role="alertdialog" aria-modal="true" aria-labelledby="dlg-h" aria-describedby="dlg-d">' +
+      band() + '<div class="content">' + inner + '</div><div class="guard">' + ic('info', 's') + 'Systémový dialog přijímá jen fyzický vstup. Bezpečná zkratka Ctrl+Alt+Del ukáže vždy pravý.</div>' +
+      '<div class="actions">' + actions.map(function (a, i) { return '<button class="btn' + (a.primary ? ' primary' : '') + (a.danger ? ' danger' : '') + '" data-i="' + i + '" disabled>' + a.label + '</button>'; }).join('') + '</div></div>');
+    var dlg = document.getElementById('sysdlg');
+    var btns = dlg.querySelectorAll('.actions button');
+    setTimeout(function () { btns.forEach(function (b) { b.disabled = false; }); var f = dlg.querySelector('input') || btns[btns.length - 1]; f.focus(); }, 300);
+    function close(i) {
+      dlg.remove(); document.getElementById('scrim').remove();
+      if (opener && opener.focus) opener.focus();
+      if (opts.onAnswer) opts.onAnswer(i);
+    }
+    btns.forEach(function (b, i) { b.addEventListener('click', function () { close(i); }); });
+    window.MO_TRAP(dlg, function () { close(actions.length - 1); });
+    if (opts.wire) opts.wire(dlg);
+  }
+  function who(icon, name, sub) {
+    return '<div class="who"><div class="appico">' + ic(icon, 'l') + '</div><div><b>' + name + '</b><br><span class="note" style="margin:0">' + sub + '</span></div></div>';
+  }
+  var DLG = {
+    perm: function () {
+      sysDialog('<h2 id="dlg-h">Povolit kameru?</h2>' + who('camera', 'Hovory', 'org.priklad.hovory &middot; podpis ověřen') +
+        '<p id="dlg-d">Aplikace chce používat kameru. Dokud běží, uvidíš v odznaku okna červenou tečku a kdykoli ji tam odebereš.</p>',
+        [{ label: 'Jen teď' }, { label: 'Vždy pro Hovory', primary: true }, { label: 'Nepovolit' }],
+        { onAnswer: function (i) { toast(i < 2 ? 'Kamera povolena pro Hovory' : 'Kamera nepovolena'); } });
+    },
+    pass: function () {
+      sysDialog('<h2 id="dlg-h">Potvrď heslem</h2>' + who('settings', 'Nastavení', 'systémová aplikace') +
+        '<p id="dlg-d">Změna profilu zabezpečení na <b>Volný</b> vyžaduje heslo.</p>' +
+        '<label class="field"><span>Heslo uživatele</span><input class="input" type="password" autocomplete="current-password"></label>',
+        [{ label: 'Potvrdit', primary: true }, { label: 'Zrušit' }]);
+    },
+    pick: function () {
+      var files = [['file', 'smlouva.pdf', '2. 11.'], ['file', 'faktura-0412.pdf', '30. 10.'], ['image', 'sken.jpg', '28. 10.'], ['folder', 'Projekty', '-']];
+      sysDialog('<h2 id="dlg-h">Vyber soubor pro aplikaci Pošta</h2>' +
+        '<p id="dlg-d" class="note" style="margin:0">Pošta uvidí jen to, co tady vybereš (powerbox). Ostatní soubory zůstanou skryté.</p>' +
+        '<div class="pb"><nav aria-label="Místa"><ul class="list" style="padding:0"><li class="li">' + ic('home', 's') + 'Domů</li><li class="li is-sel">' + ic('folder', 's') + 'Dokumenty</li><li class="li">' + ic('download', 's') + 'Stažené</li></ul></nav>' +
+        '<div class="files"><ul class="list" role="listbox" aria-label="Soubory v Dokumenty" aria-multiselectable="true" id="pb-list" style="padding:0">' + files.map(function (f, i) {
+          return '<li class="li" role="option" aria-selected="false" tabindex="' + (i ? -1 : 0) + '">' + ic(f[0], 's') + '<span style="flex:1">' + f[1] + '</span><span class="muted num">' + f[2] + '</span></li>';
+        }).join('') + '</ul></div></div>' +
+        '<div class="hstack"><span class="chip accent" id="pb-sum">nic nevybráno</span><span class="note" style="margin:0">Přístup: jen čtení &middot; jen tyto soubory</span></div>',
+        [{ label: 'Předat aplikaci', primary: true }, { label: 'Zrušit' }],
+        { wide: true, wire: function (dlg) {
+          var lis = Array.prototype.slice.call(dlg.querySelectorAll('#pb-list .li'));
+          function upd() { var n = lis.filter(function (l) { return l.getAttribute('aria-selected') === 'true'; }).length; dlg.querySelector('#pb-sum').textContent = n ? 'vybráno: ' + n : 'nic nevybráno'; }
+          lis.forEach(function (l, i) {
+            l.addEventListener('click', function () { l.setAttribute('aria-selected', l.getAttribute('aria-selected') !== 'true'); upd(); });
+            l.addEventListener('keydown', function (e) {
+              if (e.key === ' ') { e.preventDefault(); l.click(); }
+              if (e.key === 'ArrowDown' && lis[i + 1]) { e.preventDefault(); lis[i + 1].focus(); }
+              if (e.key === 'ArrowUp' && lis[i - 1]) { e.preventDefault(); lis[i - 1].focus(); }
+            });
+          });
+        } });
+    },
+    usb: function () {
+      var code = '4 7 1';
+      sysDialog('<h2 id="dlg-h">Připojena nová klávesnice</h2>' + who('keyboard', 'USB klávesnice', 'výrobce 1a2c, model 0e24 &middot; port 2') +
+        '<p id="dlg-d">Dokud zařízení nepovolíš, jeho stisky se zahazují (ochrana proti BadUSB). Pro povolení napiš <b>na nové klávesnici</b> tato čísla:</p>' +
+        '<div style="font:700 32px/1 var(--font-mono);letter-spacing:.3em;text-align:center;padding:var(--s4);border-radius:var(--r-card);background:var(--c-surface-2)">' + code + '</div>' +
+        '<label class="field" style="margin-top:var(--s4)"><span>Kód z nové klávesnice</span><input class="input mono" inputmode="numeric" placeholder="_ _ _"></label>',
+        [{ label: 'Povolit', primary: true }, { label: 'Zablokovat zařízení' }],
+        { onAnswer: function (i) { toast(i === 0 ? 'Klávesnice povolena' : 'Zařízení zablokováno'); } });
+    }
+  };
+  document.querySelectorAll('[data-dlg]').forEach(function (b) { b.addEventListener('click', function () { DLG[b.dataset.dlg](); }); });
+  function toast(text) {
+    var t = document.getElementById('toasts');
+    t.insertAdjacentHTML('afterbegin', '<div class="notif" role="status"><div class="ico">' + ic('check') + '</div><div><h4>' + text + '</h4></div></div>');
+    var el = t.firstElementChild; setTimeout(function () { el.remove(); }, 3500);
+  }
+
+  // ---- Bezpecna obrazovka (Ctrl+Alt+Del) ---------------------------------
+  document.getElementById('b-secure').addEventListener('click', function () {
+    var opener = this;
+    overlay.insertAdjacentHTML('beforeend', '<div id="secure" role="dialog" aria-modal="true" aria-label="Bezpečná obrazovka"><div class="stack" style="align-items:center;gap:var(--s5)">' +
+      '<span class="chip" style="background:var(--c-trust-bg);color:var(--c-trust-ink)">' + ic('shieldcheck', 's') + 'Systém &middot; tvá fráze: <b>' + PHRASE + '</b></span>' +
+      '<div class="opts"><button class="btn">' + ic('lock', 's') + 'Zamknout</button><button class="btn" data-tm>' + ic('tasks', 's') + 'Správce úloh</button>' +
+      '<button class="btn">' + ic('user', 's') + 'Přepnout uživatele</button><button class="btn">' + ic('power', 's') + 'Odhlásit</button><button class="btn primary" data-x>Zpět</button></div>' +
+      '<p class="note" style="max-width:340px;text-align:center">Tuto obrazovku nenapodobí žádná aplikace: zkratku zachytí služba vstupu dřív, než ji dostane kompozitor.</p></div></div>');
+    var s = document.getElementById('secure');
+    function close() { s.remove(); opener.focus(); }
+    s.querySelector('[data-x]').addEventListener('click', close);
+    s.querySelector('[data-tm]').addEventListener('click', function () { close(); activate('tasks'); });
+    window.MO_TRAP(s, close);
+    s.querySelector('[data-x]').focus();
+  });
+
+  renderWins();
+});
+</script>
+</body>
+</html>

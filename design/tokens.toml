@@ -1,0 +1,367 @@
+# Tokeny design systemu MagnumOpus-OS (charakter "Vrely").
+#
+# Jediny zdroj pravdy pro barvy, pisma, rozestupy, zaobleni, stiny a pohyb.
+# - Prototypy v design/ z nich berou CSS: `node design/tools/build-tokens.mjs`
+#   vygeneruje design/assets/tokens.css a zkontroluje kontrast podle WCAG 2.2.
+# - Knihovna UI (libs/ui) je ma prevzit jako data (TOML), ne prepisovat cisla
+#   do kodu. Jednotky: px jsou logicke pixely (pred skalovanim HiDPI),
+#   cas v ms.
+# - Pouziva se jen podmnozina TOML: sekce [a.b], klic = "retezec" | cislo.
+#
+# Popis a duvody: docs/cs/vzhled.md, docs/en/appearance.md.
+
+[meta]
+name = "MagnumOpus-OS"
+character = "vrely"
+version = 1
+
+# ---------------------------------------------------------------------------
+# Pisma. Obe pod licenci SIL OFL 1.1, lze je pribalit do systemu.
+# ---------------------------------------------------------------------------
+[font]
+ui = "Inter"
+ui_fallback = "Tuffy"
+mono = "JetBrains Mono"
+mono_fallback = "Noto Sans Mono"
+# Inter: tabulkove cislice (tnum) v tabulkach, hodinach a casech.
+ui_features = "tnum cv11"
+# JetBrains Mono: bez ligatur v terminalu (kazdy znak je jedna bunka).
+mono_features = "calt=0 liga=0"
+
+# Typograficka skala: size / line (px), weight.
+[type.caption]
+size = 12
+line = 16
+weight = 500
+[type.small]
+size = 13
+line = 18
+weight = 400
+[type.body]
+size = 14
+line = 20
+weight = 400
+[type.body_strong]
+size = 14
+line = 20
+weight = 600
+[type.body_lg]
+size = 16
+line = 24
+weight = 400
+[type.title]
+size = 18
+line = 24
+weight = 600
+[type.heading]
+size = 22
+line = 28
+weight = 650
+[type.display]
+size = 32
+line = 40
+weight = 700
+[type.mono]
+size = 13
+line = 20
+weight = 400
+[type.clock]
+size = 64
+line = 72
+weight = 300
+
+# Uzivatelske zvetseni pisma (nastaveni Pristupnost). Skaluje se cele UI,
+# rozvrzeni se prepocita, nic se neorizne.
+[type.scale]
+normal = 1.0
+large = 1.25
+larger = 1.5
+largest = 2.0
+
+# ---------------------------------------------------------------------------
+# Rozestupy na mrizce 4 px.
+# ---------------------------------------------------------------------------
+[space]
+s0 = 0
+s1 = 2
+s2 = 4
+s3 = 8
+s4 = 12
+s5 = 16
+s6 = 20
+s7 = 24
+s8 = 32
+s9 = 40
+s10 = 48
+s11 = 64
+
+# Rozmery prvku.
+[size]
+grid = 4
+# Minimalni cil kliknuti / dotyku (dotyk je vychozi vstup).
+hit_min = 40
+control_h = 36
+control_h_compact = 28
+title_h = 40
+title_btn = 28
+badge_h = 26
+bar_h = 52
+bar_inset = 8
+bar_icon = 40
+icon_s = 16
+icon_m = 20
+icon_l = 24
+icon_xl = 32
+icon_stroke = 1.75
+focus_ring = 2
+focus_offset = 2
+resize_edge = 6
+scrollbar = 8
+
+[radius]
+xs = 6
+badge = 8
+control = 10
+card = 14
+window = 18
+pill = 999
+
+# ---------------------------------------------------------------------------
+# Barvy. Svetly a tmavy motiv a vysoky kontrast. Kazdy motiv ma stejne klice.
+# Pravidla:
+# - ai a ai_* jsou vyhrazene jen pro agenta AI (nikde jinde), vzdy s ikonou
+#   a slovem "agent" - barva sama nestaci.
+# - trust_* jsou vyhrazene pro odznak duvery a systemove dialogy; aplikace
+#   je nesmi pouzit (knihovna UI je nenabizi).
+# ---------------------------------------------------------------------------
+[color.light]
+bg = "#fbf1ea"
+wall_a = "#ffd9c7"
+wall_b = "#ddd2ff"
+surface = "#fffdfb"
+surface_2 = "#fff4ee"
+surface_3 = "#f6e9e2"
+border = "#eedad0"
+border_strong = "#8f7a87"
+ink = "#2a1f2d"
+ink_muted = "#665569"
+ink_faint = "#a493a8"
+accent = "#6b3fd6"
+on_accent = "#ffffff"
+accent_soft = "#efe7ff"
+accent_ink = "#5027bd"
+focus = "#6b3fd6"
+trust_bg = "#ffe4d6"
+trust_ink = "#7a2806"
+trust_border = "#e9a586"
+ai = "#c3264d"
+on_ai = "#ffffff"
+ai_soft = "#ffe4ea"
+ai_ink = "#9c1b3d"
+ok = "#1b7543"
+ok_soft = "#ddf3e5"
+warn = "#8a5000"
+warn_soft = "#fff0d6"
+danger = "#bf283f"
+on_danger = "#ffffff"
+danger_soft = "#ffe3e6"
+scrim = "rgba(42, 18, 52, 0.42)"
+term_bg = "#fffdfb"
+term_ink = "#2a1f2d"
+term_dim = "#665569"
+term_red = "#b3243b"
+term_green = "#1b7543"
+term_yellow = "#8a5000"
+term_blue = "#2350c4"
+term_magenta = "#8435b5"
+term_cyan = "#0b6878"
+
+[color.dark]
+bg = "#17111c"
+wall_a = "#4a2a22"
+wall_b = "#2f2560"
+surface = "#221a28"
+surface_2 = "#2b2232"
+surface_3 = "#362b3e"
+border = "#3d3146"
+border_strong = "#8a7894"
+ink = "#f6edf3"
+ink_muted = "#bba9c4"
+ink_faint = "#76667f"
+accent = "#b79bff"
+on_accent = "#1d0f40"
+accent_soft = "#382b5c"
+accent_ink = "#d8c9ff"
+focus = "#c9b4ff"
+trust_bg = "#4d2414"
+trust_ink = "#ffd2bf"
+trust_border = "#9a5130"
+ai = "#ff8fa8"
+on_ai = "#3a0614"
+ai_soft = "#4a1d2a"
+ai_ink = "#ffc2cf"
+ok = "#6fd39a"
+ok_soft = "#173826"
+warn = "#f2b54f"
+warn_soft = "#3d2c0e"
+danger = "#ff7d92"
+on_danger = "#3a0612"
+danger_soft = "#4a1820"
+scrim = "rgba(5, 2, 8, 0.62)"
+term_bg = "#1c1521"
+term_ink = "#f6edf3"
+term_dim = "#b3a1bc"
+term_red = "#ff8a9b"
+term_green = "#7fdca5"
+term_yellow = "#f2c46b"
+term_blue = "#9bbcff"
+term_magenta = "#d9a8ff"
+term_cyan = "#6fd6e3"
+
+# Vysoky kontrast (zapina se v Pristupnosti, prebiji svetly i tmavy).
+# Cil: text 7:1 (WCAG AAA), hranice prvku 4.5:1.
+[color.contrast]
+bg = "#000000"
+wall_a = "#000000"
+wall_b = "#000000"
+surface = "#000000"
+surface_2 = "#000000"
+surface_3 = "#1f1f1f"
+border = "#ffffff"
+border_strong = "#ffffff"
+ink = "#ffffff"
+ink_muted = "#ffffff"
+ink_faint = "#c8c8c8"
+accent = "#ffe14d"
+on_accent = "#000000"
+accent_soft = "#000000"
+accent_ink = "#ffe14d"
+focus = "#33e0ff"
+trust_bg = "#000000"
+trust_ink = "#ffb38a"
+trust_border = "#ffb38a"
+ai = "#ff8fb0"
+on_ai = "#000000"
+ai_soft = "#000000"
+ai_ink = "#ff8fb0"
+ok = "#7dff9e"
+ok_soft = "#000000"
+warn = "#ffd166"
+warn_soft = "#000000"
+danger = "#ff8c9a"
+on_danger = "#000000"
+danger_soft = "#000000"
+scrim = "rgba(0, 0, 0, 0.8)"
+term_bg = "#000000"
+term_ink = "#ffffff"
+term_dim = "#e0e0e0"
+term_red = "#ff8c9a"
+term_green = "#7dff9e"
+term_yellow = "#ffe14d"
+term_blue = "#9fc2ff"
+term_magenta = "#e6b0ff"
+term_cyan = "#66f0ff"
+
+# Povinne dvojice kontrastu: "popredi pozadi minimum". Kontroluje se pro
+# svetly a tmavy motiv; pro vysoky kontrast se minimum 4.5 zvysuje na 7.
+# 4.5 = text (WCAG 1.4.3), 3 = hranice prvku, ikony, fokus (WCAG 1.4.11).
+[contrast]
+ink_surface = "ink surface 4.5"
+ink_surface_2 = "ink surface_2 4.5"
+ink_surface_3 = "ink surface_3 4.5"
+ink_bg = "ink bg 4.5"
+muted_surface = "ink_muted surface 4.5"
+muted_surface_2 = "ink_muted surface_2 4.5"
+muted_surface_3 = "ink_muted surface_3 4.5"
+ink_accent_soft = "ink accent_soft 4.5"
+accent_ink_soft = "accent_ink accent_soft 4.5"
+on_accent = "on_accent accent 4.5"
+accent_ui = "accent surface 3"
+accent_text = "accent_ink surface 4.5"
+border_strong = "border_strong surface 3"
+focus_bg = "focus bg 3"
+focus_surface = "focus surface 3"
+trust = "trust_ink trust_bg 4.5"
+on_ai = "on_ai ai 4.5"
+ai_ink_soft = "ai_ink ai_soft 4.5"
+ai_ui = "ai surface 3"
+ok_text = "ok surface 4.5"
+ok_soft = "ok ok_soft 4.5"
+warn_text = "warn surface 4.5"
+warn_soft = "warn warn_soft 4.5"
+danger_text = "danger surface 4.5"
+danger_soft = "danger danger_soft 4.5"
+on_danger = "on_danger danger 4.5"
+term_ink = "term_ink term_bg 4.5"
+term_dim = "term_dim term_bg 4.5"
+term_red = "term_red term_bg 4.5"
+term_green = "term_green term_bg 4.5"
+term_yellow = "term_yellow term_bg 4.5"
+term_blue = "term_blue term_bg 4.5"
+term_magenta = "term_magenta term_bg 4.5"
+term_cyan = "term_cyan term_bg 4.5"
+
+# ---------------------------------------------------------------------------
+# Stiny. Na GPU je kompozitor kresli shaderem a pamatuje si je podle velikosti
+# okna; zalozni 2D cesta pouzije predpocitane textury (9 dilu). Stin tak
+# nestoji nic navic pri pohybu okna.
+# Zapis: "x y blur spread barva", vrstvy oddelene " | ".
+# ---------------------------------------------------------------------------
+[shadow.light]
+window = "0 12 32 0 rgba(107,63,214,0.16) | 0 2 6 0 rgba(42,31,45,0.10)"
+window_inactive = "0 4 14 0 rgba(42,31,45,0.08)"
+popover = "0 8 24 0 rgba(42,31,45,0.16)"
+bar = "0 6 20 0 rgba(107,63,214,0.12)"
+dialog = "0 24 64 0 rgba(20,8,30,0.35)"
+
+[shadow.dark]
+window = "0 12 32 0 rgba(0,0,0,0.50) | 0 2 6 0 rgba(0,0,0,0.30)"
+window_inactive = "0 4 14 0 rgba(0,0,0,0.35)"
+popover = "0 8 24 0 rgba(0,0,0,0.50)"
+bar = "0 6 20 0 rgba(0,0,0,0.40)"
+dialog = "0 24 64 0 rgba(0,0,0,0.65)"
+
+# Vysoky kontrast: zadne stiny, misto nich ramecek 2 px.
+[shadow.contrast]
+window = "none"
+window_inactive = "none"
+popover = "none"
+bar = "none"
+dialog = "none"
+
+# ---------------------------------------------------------------------------
+# Pohyb. Animace dela kompozitor (pruhlednost, posun, meritko vrstev), takze
+# bezi plynule i kdyz aplikace zrovna pocita. Pravidla v docs (Pohyb).
+# ---------------------------------------------------------------------------
+[motion]
+frame_ms = 16.7
+instant = 0
+fast = 90
+base = 160
+slow = 240
+max = 320
+# cubic-bezier(x1, y1, x2, y2)
+ease_standard = "0.2 0 0 1"
+ease_enter = "0.05 0.7 0.1 1"
+ease_exit = "0.3 0 1 1"
+# Kdyz je zapnute "Omezit pohyb": posuny a meritka se nahradi prolnutim
+# s touto delkou, nic se neposouva.
+reduced = 90
+# Nereagujici aplikace: ztlumeni po teto dobe bez PONG (viz gui.md).
+unresponsive_ms = 3000
+# Odznak u okna bez ramu po zmene opravneni.
+badge_flash_ms = 3000
+# Systemovy dialog ignoruje vstup tak dlouho po zobrazeni (viz gui.md).
+dialog_guard_ms = 300
+
+# Vrstvy kompozitoru (poradi skladani). Do "system_dialog" a "secure" smi
+# kreslit jen kompozitor.
+[layer]
+desktop = 0
+window = 100
+bar = 200
+popover = 300
+notification = 400
+scrim = 900
+system_dialog = 1000
+secure = 2000
