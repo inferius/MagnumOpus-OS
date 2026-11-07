@@ -28,12 +28,13 @@ what works:
 
 | Item | In the format | Driver today |
 |---|---|---|
-| volume UUID, feature flags | yes | **uses** (no feature bit is defined yet) |
+| volume UUID, feature flags | yes | **uses**; the bit `INCOMPAT_TIME_SECS` is defined ([times](#object-times)) |
 | device number in `BlockPtr`, `device_index/count` in the superblock | yes | **one device only**: the device must be 0 and the count 1, otherwise `CORRUPTED`; several disks (mirror, RAID) after phase 5 |
 | `BlockPtr` flags (compression, encryption, sharing, cloud) | reserved | **unused**; a node with a flag = `NOT_SUPPORTED` |
 | extent flags (preallocation) | reserved | **unused**; an extent with a flag = `NOT_SUPPORTED` |
 | object flag `INODE_REMOTE` | reserved | **unused** (phase 6) |
-| permissions (`acl`), owner, access time, extended attribute count in the object record | yes | **writes 0**, does not read (phase 1d and later) |
+| permissions (`acl`), owner, extended attribute count in the object record | yes | **writes 0**, does not read (phase 1d and later) |
+| access time (`atime`) | yes | **only by setting it** (`set_times`); reading does not change it |
 | object generation, creation time | yes | **uses** (`Stat`, log replay) |
 | symbolic links, names up to 1024 characters, size limit | yes | **uses** |
 | datasets, clones linked to the origin snapshot | yes | **uses** ([Datasets](#datasets-and-clones)) |
@@ -175,8 +176,12 @@ valid one is the one with the highest generation whose state can be loaded.
 **Feature flags** work as in ext4: every bit = one format feature
 (compression, encryption, ...). A driver that does not know a bit from
 `ro_compat` or `incompat` refuses the volume with `NOT_SUPPORTED` - so it
-never damages it by not understanding new structures. No bits are defined
-yet.
+never damages it by not understanding new structures.
+
+| Bit | Group | Name | Meaning |
+|---|---|---|---|
+| 0 | incompat | `INCOMPAT_REMOTE` | reserved: data only in the cloud (phase 6); the driver still refuses it |
+| 1 | incompat | `INCOMPAT_TIME_SECS` | times are seconds i64 + nanoseconds u32 ([times](#object-times)); new volumes always have it |
 
 The **UUID** comes from `FormatOptions::uuid` at format time; host tools
 (`xtask`) pass a random one. Without it, it is derived from the label, size
@@ -282,10 +287,10 @@ content).
 | 1 | flags u8 | object flags, reserved: 1 = data only in the cloud (0 for now; sync settings are `sync.*` attributes, not bits) |
 | 4 | acl u32 | permission descriptor number (0 = inherit; comes in phase 1d) |
 | 8 | size | file: size in bytes (at most 2^63-1); link: target length |
-| 16 | mtime | time of the last content change |
-| 24 | ctime | time of the metadata change |
-| 32 | btime | creation time |
-| 40 | atime | time of the last access (0 = not tracked) |
+| 16 | mtime | time of the last content change: seconds i64 since 1970 UTC |
+| 24 | ctime | time of the metadata change: seconds i64 |
+| 32 | btime | creation time: seconds i64 |
+| 40 | atime | time of the last access: seconds i64 (0 and 0 ns = not tracked) |
 | 48 | parent | oid of the parent directory (every object has exactly one parent) |
 | 56 | generation | generation (txg) in which the object was created |
 | 64 | tree_bytes | directory: total size of files in the whole subtree (saturating) |
@@ -293,11 +298,54 @@ content).
 | 80 | tree_dirs | directory: number of directories in the subtree (excluding itself) |
 | 88 | owner | owner (0 = system; comes with user management) |
 | 96 | xattrs u32 | number of extended attributes |
-| 100 | - | 28 B reserved (zeros) |
+| 100 | - | reserved u32 (zero) |
+| 104 | version | content version (change counter; the revision for a conditional save) |
+| 112 | mtime_ns u32 | nanoseconds of `mtime` (0..10⁹) |
+| 116 | ctime_ns u32 | nanoseconds of `ctime` |
+| 120 | btime_ns u32 | nanoseconds of `btime` |
+| 124 | atime_ns u32 | nanoseconds of `atime` |
 
-Times are in nanoseconds from `Fs::set_time` (the fsd service: since boot,
-the `xtask` tool: since 1970). The
-**generation** together with `oid` identifies an object uniquely: the oid of
+#### Object times
+
+> **Time format change (flag `INCOMPAT_TIME_SECS`):** each time used to be
+> u64 nanoseconds since 1970 at offsets 16-40; now those hold signed i64
+> seconds and the nanoseconds are in the former reserve 112-128. **Why:**
+> u64 nanoseconds could not store dates before 1970 (old archives; NTFS
+> counts from 1601) and ended in 2262. The new form has a range of ±292
+> billion years, the same as POSIX `timespec` and Rust `SystemTime`, and it
+> fits into the 128 B record without changing its size.
+> ([versions](fs-versions.md#object-times-u64-ns---i64-s--u32-ns))
+
+- **New volumes** have the `INCOMPAT_TIME_SECS` bit. An older driver that
+  does not know it refuses them (`NOT_SUPPORTED`), so it never reads seconds
+  as nanoseconds.
+- **Volumes from an older version** (without the bit) are mounted normally
+  by this driver, which keeps reading and writing their times in the old
+  u64 ns form (a time before 1970 is clamped to 1970 there). There is no
+  conversion to the new form yet (it would mean rewriting every object
+  record).
+- **Nanoseconds ≥ 10⁹** = a damaged record (`CORRUPTED`); the same in the
+  intent log.
+- **The time source** is `Fs::set_time(Timestamp)`. The fsd service uses
+  real time ([Real time](time.md)); host tools use the host time.
+- **Setting times:** `Fs::set_times(path, SetTimes)` and
+  `set_times_h(handle, ...)` (a handle with write access) change `mtime`,
+  `btime`, `atime` (`None` = keep). `ctime` cannot be set: it is set to the
+  current time because it records that the object changed. The change is
+  written to the intent log (record 9), so it survives `fsync` and a crash.
+
+```rust
+use fs::{SetTimes, Timestamp};
+
+// A copy from an old archive keeping its time (1 Jan 1601 and before 1970).
+fs.set_times("/archive/letter.txt", SetTimes {
+    mtime: Some(Timestamp { secs: -11_644_473_600, nanos: 0 }),
+    btime: Some(Timestamp { secs: -86_400, nanos: 500 }),
+    atime: None,
+})?;
+```
+
+The **generation** together with `oid` identifies an object uniquely: the oid of
 a removed object is not reused, but protocol v2 handles are still verified
 against the generation. A record with an unknown kind or a size above
 2^63-1 is `CORRUPTED`.
@@ -678,7 +726,10 @@ Batch records (first byte = kind): 1 create (parent, oid, kind, time,
 name), 2 remove (parent, time, name), 3 rename (source, target, time, name,
 new name), 4 size change (oid, size, time), 5 small file content (oid,
 size, mtime, data), 6 data mapping (oid, size, mtime, list of extents with
-checksums).
+checksums), 7 symbolic link, 8 dataset marker, 9 set times (oid, mask u8:
+bit 0 mtime, 1 btime, 2 atime, change time, the present times). A time in a
+record takes 12 B (seconds i64 + nanoseconds u32); on a volume without
+`INCOMPAT_TIME_SECS` 8 B (u64 ns).
 
 **At mount:** the log is read from `zil_block` while magic, sequence and
 checksum match. Complete batches are replayed on top of the last commit's
@@ -1216,7 +1267,7 @@ data = rest of the message. One read/write moves at most 32 KiB
 | op | Name | Parameters | Result |
 |---|---|---|---|
 | 1 | `INFO` | - | volume label, block size, blocks, free, delayed, generation, algorithm, fallback, replayed |
-| 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, subtree summaries) |
+| 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, btime, subtree summaries); a time = seconds i64 + nanoseconds u32 |
 | 3 | `LIST` | path | count u32 + (kind u8, oid u64, name) - sorted by name; kind 1 file, 2 directory, 3 symbolic link; `BUFFER_TOO_SMALL` when the listing does not fit into a message |
 | 4 | `READ` | path, offset u64, length u32 | data (shorter at the end of the file) |
 | 5 | `WRITE` | path, offset u64, data | - |

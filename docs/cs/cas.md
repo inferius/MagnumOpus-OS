@@ -94,10 +94,7 @@ if r.flags & time::flags::ZONE_ASSUMED_UTC != 0 { /* pásmo jen odhadnuté */ }
 
 ## Časy v souborovém systému
 
-`fsd` nastavuje čas změn ve FS z reálných hodin. Dnešní formát inode
-ukládá časy jako u64 nanosekund od 1970. Čas před rokem 1970 se proto
-ořízne na 1970 a formát končí v roce 2262.
-
-Změna formátu časů ve FS je samostatný krok. Má umožnit data před rokem
-1970 a odstranit hranici 2262, například pro kopii ze starého archivu nebo
-z NTFS. Viz [Souborový systém](souborovy-system.md).
+`fsd` nastavuje čas změn ve FS z reálných hodin. FS ukládá časy ve stejném
+tvaru (sekundy i64 + nanosekundy u32), takže uloží i data před rokem 1970
+a bez hranice 2262. Svazky ze starší verze FS mají časy u64 ns od 1970
+a čas před 1970 se v nich ořízne. Viz [Časy objektů](souborovy-system.md#časy-objektů).

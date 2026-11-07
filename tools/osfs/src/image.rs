@@ -17,12 +17,37 @@ pub const DEFAULT_SIZE: u64 = 256 << 20;
 
 pub type Volume = Fs<FileDevice>;
 
-/// Cas pro `Fs::set_time`: ns od 1. 1. 1970 (UTC).
-pub fn now_ns() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
+/// Cas pro `Fs::set_time`: realny cas hostitele (i pred rokem 1970, kdyby
+/// mel hostitel spatne nastavene hodiny).
+pub fn now() -> fs::Timestamp {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => fs::Timestamp::new(d.as_secs() as i64, d.subsec_nanos() as i64),
+        Err(e) => {
+            let d = e.duration();
+            fs::Timestamp::new(-(d.as_secs() as i64), -(d.subsec_nanos() as i64))
+        }
+    }
+}
+
+/// Cas jako u64 ns od 1970 (rozhrani osfs-proto): pred 1970 -> 0.
+pub fn nanos_u64(t: fs::Timestamp) -> u64 {
+    t.as_nanos().clamp(0, u64::MAX as i128) as u64
+}
+
+/// Rozdil mezi 1. 1. 1601 (FILETIME) a 1. 1. 1970 v sekundach.
+const EPOCH_DIFF_SECS: i64 = 11_644_473_600;
+
+/// Cas FS -> FILETIME (100 ns od 1601). Cas pred rokem 1601 -> 0, za
+/// rokem ~30828 (konec FILETIME) -> nejvetsi hodnota.
+pub fn filetime(t: fs::Timestamp) -> u64 {
+    let ticks = (t.secs as i128 + EPOCH_DIFF_SECS as i128) * 10_000_000 + (t.nanos / 100) as i128;
+    ticks.clamp(0, i64::MAX as i128) as u64
+}
+
+/// FILETIME -> cas FS (presne, FILETIME ma rozliseni 100 ns).
+pub fn from_filetime(ft: u64) -> fs::Timestamp {
+    let secs = (ft / 10_000_000) as i64 - EPOCH_DIFF_SECS;
+    fs::Timestamp { secs, nanos: (ft % 10_000_000) as u32 * 100 }
 }
 
 /// Vypada cesta jako skutecny disk nebo oddil (ne soubor)? Takove cesty
@@ -101,6 +126,7 @@ pub fn create_image(path: &Path, size: u64, label: &str, algo: Algo) -> Result<(
         let opts = FormatOptions {
             label: label.into(),
             algo,
+            time: now(),
             ..FormatOptions::default()
         };
         let mut dev = Fs::format(dev, &opts).map_err(|e| format!("formatovani: {e}"))?;
@@ -157,7 +183,7 @@ fn mount_image(path: &Path, read_only: bool) -> Result<Volume, String> {
         },
     )
     .map_err(|e| format!("pripojeni {}: {e}", path.display()))?;
-    fs.set_time(now_ns());
+    fs.set_time(now());
     Ok(fs)
 }
 

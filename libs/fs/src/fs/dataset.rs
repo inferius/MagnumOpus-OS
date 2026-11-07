@@ -315,7 +315,7 @@ impl<D: BlockDevice> Fs<D> {
             let root_dir = Inode::new(KIND_DIR, 0, fs.now, fs.s.txg);
             let node = fs.s.new_node(
                 0,
-                Body::Leaf(alloc::vec![(Key::new(ROOT_OID, item::INODE, 0), root_dir.encode())]),
+                Body::Leaf(alloc::vec![(Key::new(ROOT_OID, item::INODE, 0), root_dir.encode(fs.s.time_format()))]),
             );
             fs.mutations += 1;
             fs.others.insert(

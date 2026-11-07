@@ -3,7 +3,7 @@
 use abi::Error;
 
 use super::{assert_clean, new_fs, remount};
-use crate::layout::{INODE_SIZE, Inode, KIND_SYMLINK, MAX_FILE_SIZE, SYMLINK_MAX};
+use crate::layout::{INODE_SIZE, Inode, KIND_SYMLINK, MAX_FILE_SIZE, SYMLINK_MAX, TimeFormat, Timestamp};
 use crate::{Kind, NAME_MAX};
 
 #[test]
@@ -13,10 +13,10 @@ fn inode_roundtrip() {
         flags: 3,
         acl: 7,
         size: 12,
-        mtime: 1,
-        ctime: 2,
-        btime: 3,
-        atime: 4,
+        mtime: Timestamp { secs: 1, nanos: 10 },
+        ctime: Timestamp { secs: 2, nanos: 20 },
+        btime: Timestamp { secs: 3, nanos: 30 },
+        atime: Timestamp { secs: 4, nanos: 40 },
         parent: 5,
         generation: 6,
         tree_bytes: 8,
@@ -26,17 +26,17 @@ fn inode_roundtrip() {
         xattrs: 13,
         version: 14,
     };
-    let b = i.encode();
+    let b = i.encode(TimeFormat::Secs);
     assert_eq!(b.len(), INODE_SIZE);
-    assert_eq!(Inode::decode(&b).unwrap(), i);
+    assert_eq!(Inode::decode(&b, TimeFormat::Secs).unwrap(), i);
     // Neznamy druh a prilis velky soubor = poskozeny zaznam.
     let mut bad = b.clone();
     bad[0] = 9;
-    assert_eq!(Inode::decode(&bad), Err(Error::Corrupted));
-    let mut big = Inode { kind: 1, size: MAX_FILE_SIZE + 1, ..i }.encode();
-    assert_eq!(Inode::decode(&big), Err(Error::Corrupted));
+    assert_eq!(Inode::decode(&bad, TimeFormat::Secs), Err(Error::Corrupted));
+    let mut big = Inode { kind: 1, size: MAX_FILE_SIZE + 1, ..i }.encode(TimeFormat::Secs);
+    assert_eq!(Inode::decode(&big, TimeFormat::Secs), Err(Error::Corrupted));
     big[8..16].copy_from_slice(&MAX_FILE_SIZE.to_le_bytes());
-    assert!(Inode::decode(&big).is_ok());
+    assert!(Inode::decode(&big, TimeFormat::Secs).is_ok());
 }
 
 #[test]

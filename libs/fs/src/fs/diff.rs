@@ -98,6 +98,7 @@ impl<D: BlockDevice> Fs<D> {
         let mut v = Version::default();
         let mut content: BTreeMap<u64, Csum> = BTreeMap::new();
         let mut err = None;
+        let tf = self.s.time_format();
         btree::range(
             &mut self.s,
             root,
@@ -108,7 +109,7 @@ impl<D: BlockDevice> Fs<D> {
                     return Ok(true);
                 }
                 match k.kind {
-                    item::INODE => match Inode::decode(val) {
+                    item::INODE => match Inode::decode(val, tf) {
                         Ok(i) => {
                             v.objects.insert(k.oid, (i.kind, i.size, Csum::default()));
                         }

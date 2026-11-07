@@ -60,7 +60,7 @@ fn parent_cycle_is_corrupted_and_operation_rolled_back() {
     let (a, mut ia) = fs.test_inode("/a").unwrap();
     let (b, _) = fs.test_inode("/a/b").unwrap();
     ia.parent = b;
-    fs.test_put(Key::new(a, item::INODE, 0), ia.encode()).unwrap();
+    fs.test_put(Key::new(a, item::INODE, 0), ia.encode(crate::layout::TimeFormat::Secs)).unwrap();
     // Vytvoreni projde cast zmen a pak narazi na cyklus pri souhrnech:
     // CORRUPTED a stav chyby (napul hotova operace se nepotvrdi).
     assert_eq!(fs.create("/a/b/c", Kind::File).err(), Some(Error::Corrupted));

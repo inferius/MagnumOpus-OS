@@ -389,7 +389,9 @@ Common problems:
 - **Entry name by path** (`stat` does not return the stored name): the
   driver looks it up in the parent listing for the normalized name (with a
   name cache). The first open in a huge directory reads its whole listing.
-- **Setting times and attributes** (`set_times`, read-only flag).
+- **Setting attributes** (read-only, hidden). Times work now: the driver
+  stores the creation, write and access time from `SetBasicInfo` via
+  `Fs::set_times`.
 - **"Is there anything to save"** - commits are currently tracked by our
   own flag.
 - **Volume UUID** in `FsInfo` - the serial number for Windows is now

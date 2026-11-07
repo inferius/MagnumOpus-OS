@@ -244,6 +244,7 @@ fn many_allocation_groups_and_blake3() {
         algo: Algo::Blake3,
         ag_blocks: Some(64),
         uuid: None,
+        time: crate::layout::Timestamp::UNIX_EPOCH,
     };
     let mut fs = new_fs_with(4096, &o);
     assert_eq!(fs.info().algo, Algo::Blake3);

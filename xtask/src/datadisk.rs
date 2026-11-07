@@ -29,13 +29,14 @@ pub fn create(target: &Path) -> Result<PathBuf> {
         algo: Algo::Xxh3,
         ag_blocks: None,
         uuid: Some(random_uuid()),
+        time: fs::Timestamp::UNIX_EPOCH,
     };
     let dev = Fs::format(dev, &opts).map_err(|e| fs_err("formatovani", e))?;
     let mut fs = Fs::mount(dev).map_err(|e| fs_err("pripojeni", e))?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
+        .map(|d| fs::Timestamp::new(d.as_secs() as i64, d.subsec_nanos() as i64))
+        .unwrap_or(fs::Timestamp::UNIX_EPOCH);
     fs.set_time(now);
     let files: [(&str, &[u8]); 2] = [
         ("/vitejte.txt", b"Ahoj z hostitele!\n"),

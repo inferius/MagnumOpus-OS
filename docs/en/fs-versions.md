@@ -51,7 +51,8 @@ Done changes:
 | Object kinds | file, directory | + **symbolic link** | git repositories and Linux sources need them |
 | File size | no limit (overflow) | **2^63-1 B**, checked arithmetic, saturating summaries | sizes and differences always fit `i64`; huge sparse files do not overflow summaries |
 | Extent | at most 120 blocks, reserved u32 | **496 blocks**, flags u32 (reserved: preallocation) | larger node; fewer entries per large file |
-| Intent log | records 1-6 | + 7 symlink, generation on create, 8 dataset marker | a symlink survives `fsync`; the generation stays the original after replay; one batch for several datasets |
+| Intent log | records 1-6 | + 7 symlink, generation on create, 8 dataset marker, 9 set times | a symlink survives `fsync`; the generation stays the original after replay; one batch for several datasets; set times survive a crash |
+| Times | u64 ns since 1970 | **seconds i64 + nanoseconds u32** (flag `INCOMPAT_TIME_SECS`) | dates before 1970 and no 2262 limit - see below |
 | Orphans | - | an `ORPHAN` entry (kind 9) for an open object without a name | an open file survives deletion and an atomic replace; cleanup at mount after a crash |
 | Datasets | one tree per volume | **datasets** (own trees, a `DATASET` record in the root dataset, a directory entry of kind 4), snapshots with a clone count and a "hidden" flag | history per folder (project, home), writable clones without copying |
 
@@ -76,6 +77,30 @@ Done changes:
 Datasets, versioning (clones, diff, restore), the handle layer and the
 Windows driver, permissions, protocol v2 - order in the
 [design](fs-v3-design.md#implementation-order).
+
+## Object times: u64 ns -> i64 s + u32 ns
+
+A change within v3, recognised by the flag `INCOMPAT_TIME_SECS` (incompat
+bit 1).
+
+| | Before | Now |
+|---|---|---|
+| storage | u64 nanoseconds since 1970 (offsets 16-40) | seconds i64 (16-40) + nanoseconds u32 (112-128, formerly reserved) |
+| range | 1970 to 2262 | ±292 billion years (also 1601 from NTFS, dates before 1970) |
+| intent log | a time is 8 B | a time is 12 B, new record 9 (set times) |
+| protocol `Stat` | mtime, ctime u64 ns | mtime, ctime, **btime**, each seconds i64 + nanoseconds u32 |
+| API | `set_time(u64)` | `set_time(Timestamp)`, new `set_times` and `set_times_h` |
+
+**Why:** copying from old archives and from NTFS lost times before 1970, and
+the 2262 limit is unnecessary. Alternatives: i128 nanoseconds (one number,
+but 16 B per time - it would not fit into the 128 B record, MSVC has no
+`__int128`, conversions need 128-bit division) and 100 ns since 1601 like
+NTFS (range until 30828, coarser resolution). The chosen form matches
+`timespec` and `SystemTime` and fits into today's record.
+
+**Older volumes** (without the flag) are still read and written by the
+driver in the old form; an older driver refuses new volumes. There is no
+conversion of an old volume to the new form yet.
 
 ## Protocol fsproto v1 -> v2
 

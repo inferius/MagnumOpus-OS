@@ -13,16 +13,9 @@ use std::collections::HashMap;
 
 use super::{Handle, NAME_CACHE_DIRS, NameCache, SD, State, debug, with_state};
 use crate::api;
-use crate::image::{join, now_ns};
+use crate::image::{from_filetime, join, now};
+pub use crate::image::filetime;
 use crate::names::{self, to_windows};
-
-/// Rozdil mezi 1. 1. 1601 (FILETIME) a 1. 1. 1970 v 100 ns.
-const EPOCH_DIFF: u64 = 116_444_736_000_000_000;
-
-/// ns od 1970 -> FILETIME (100 ns od 1601).
-pub fn filetime(ns: u64) -> u64 {
-    ns / 100 + EPOCH_DIFF
-}
 
 pub fn interface() -> Interface {
     Interface {
@@ -307,7 +300,7 @@ fn mutating(st: &mut State) -> Result<(), NTSTATUS> {
     if st.read_only {
         return Err(STATUS_MEDIA_WRITE_PROTECTED);
     }
-    st.fs.set_time(now_ns());
+    st.fs.set_time(now());
     st.dirty = true;
     Ok(())
 }
@@ -564,7 +557,7 @@ unsafe extern "system" fn flush(
         }
         if ctx.is_null() {
             // Flush cele jednotky: commit.
-            st.fs.set_time(now_ns());
+            st.fs.set_time(now());
             return match st.fs.commit() {
                 Ok(()) => {
                     st.dirty = false;
@@ -592,20 +585,31 @@ unsafe extern "system" fn get_file_info(
     })
 }
 
-/// Atributy a casy nastavit nejde (API `fs` na to nema funkci) - prijmeme
-/// a vratime skutecny stav.
+/// Casy: vytvoreni, posledni zapis a pristup se ulozi (0 = nemenit).
+/// Cas zmeny (`ChangeTime`) FS nastavi sam na aktualni cas. Atributy
+/// (skryty, jen pro cteni) zatim FS neuklada - prijmeme je a vratime
+/// skutecny stav.
 unsafe extern "system" fn set_basic_info(
     _f: *mut FileSystem,
     ctx: *mut c_void,
     _attrs: u32,
-    _ctime: u64,
-    _atime: u64,
-    _mtime: u64,
-    _chtime: u64,
+    creation: u64,
+    access: u64,
+    write: u64,
+    _change: u64,
     out: *mut FileInfo,
 ) -> NTSTATUS {
     with_state(|st| {
         let path = tri!(handle_path(st, ctx));
+        let pick = |ft: u64| (ft != 0).then(|| from_filetime(ft));
+        let t = fs::SetTimes { mtime: pick(write), btime: pick(creation), atime: pick(access) };
+        if !t.is_empty() {
+            st.fs.set_time(now());
+            if let Err(e) = st.fs.set_times(&path, t) {
+                return status(e);
+            }
+            st.dirty = true;
+        }
         put_info(st, &path, out)
     })
 }
@@ -978,7 +982,7 @@ unsafe extern "system" fn control(
                 dirty,
                 read_only: *read_only,
             };
-            api::handle(fs, &mut host, kind, input, &mut cache, now_ns())
+            api::handle(fs, &mut host, kind, input, &mut cache, now())
         };
         if let Some(h) = st.handles.get_mut(&id) {
             h.api_list = cache;

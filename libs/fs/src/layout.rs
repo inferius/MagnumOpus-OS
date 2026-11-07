@@ -17,6 +17,9 @@ use abi::{Error, Result};
 
 use crate::hash::{Algo, Csum, xxh3};
 
+/// Cas ve FS: sekundy od 1970 UTC (i64, se znamenkem) a nanosekundy (u32).
+pub use abi::time::WallTime as Timestamp;
+
 pub const BLOCK_SIZE: usize = 4096;
 /// Uzel B+stromu zabira 4 souvisle bloky (16 KiB): delsi jmena, melci strom,
 /// vic extentu v listu.
@@ -32,9 +35,9 @@ pub const VERSION: u32 = 3;
 /// Vlastnosti svazku, ktere tento ovladac umi (bit = vlastnost).
 /// *compat*: starsi ovladac smi svazek normalne pouzivat; *ro_compat*:
 /// jen cist; *incompat*: nesmi vubec. Neznamy bit ro_compat nebo
-/// incompat = pripojeni odmitnuto (`NOT_SUPPORTED`). Zatim zadne.
+/// incompat = pripojeni odmitnuto (`NOT_SUPPORTED`).
 pub const FEATURES_RO_COMPAT: u64 = 0;
-pub const FEATURES_INCOMPAT: u64 = 0;
+pub const FEATURES_INCOMPAT: u64 = feature::INCOMPAT_TIME_SECS;
 
 /// Rezervovane bity vlastnosti (zatim je ovladac neumi, takze svazek s nimi
 /// odmitne). Vyznam je pevny uz ted, aby se formaty nerozesly.
@@ -42,6 +45,34 @@ pub mod feature {
     /// incompat: svazek obsahuje placeholdery (data jen v cloudu, faze 6).
     #[allow(dead_code, reason = "pouzije faze 6 (cloud)")]
     pub const INCOMPAT_REMOTE: u64 = 1 << 0;
+    /// incompat: casy jsou sekundy i64 + nanosekundy u32 (rozsah +/- 292
+    /// miliard let). Bez nej (svazky z doby pred zmenou) jsou casy u64 ns
+    /// od 1970 - ovladac je umi cist i zapisovat dal ve starem tvaru.
+    pub const INCOMPAT_TIME_SECS: u64 = 1 << 1;
+}
+
+/// Tvar casu na svazku (podle `feature::INCOMPAT_TIME_SECS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeFormat {
+    /// u64 nanosekund od 1970 (jen 1970 az 2262).
+    LegacyNanos,
+    /// i64 sekund + u32 nanosekund.
+    Secs,
+}
+
+impl TimeFormat {
+    pub fn of(features_incompat: u64) -> Self {
+        if features_incompat & feature::INCOMPAT_TIME_SECS != 0 { Self::Secs } else { Self::LegacyNanos }
+    }
+}
+
+/// Cas jako u64 ns od 1970 (stary tvar): pred 1970 -> 0, po 2262 -> max.
+pub fn legacy_nanos(t: Timestamp) -> u64 {
+    t.as_nanos().clamp(0, u64::MAX as i128) as u64
+}
+
+pub fn from_legacy_nanos(ns: u64) -> Timestamp {
+    Timestamp { secs: (ns / 1_000_000_000) as i64, nanos: (ns % 1_000_000_000) as u32 }
 }
 
 /// Bloky uvolnene commitem `g` se znovu pouziji az v transakci `g + REUSE_DELAY`.
@@ -351,14 +382,17 @@ impl Superblock {
 /// 8   velikost u64 (soubor: bajty, symlink: delka cile)
 /// 16  zmena obsahu (mtime)      24  zmena metadat (ctime)
 /// 32  vytvoreni (btime)         40  posledni pristup (atime, 0 = nesleduje se)
+///     ^ sekundy i64 od 1970 UTC (stary tvar: u64 ns)
 /// 48  rodic u64 (0 u korene)    56  generace vzniku u64 (overeni handlu)
 /// 64  souhrn podstromu: bajty   72  soubory   80  adresare (bez sebe)
 /// 88  vlastnik u64 (0 = system) 96  pocet rozsirenych atributu u32
 /// 100 rezerva u32              104 verze obsahu u64 (revize)
-/// 112 rezerva (16 B, nuly)
+/// 112 ns mtime u32  116 ns ctime u32  120 ns btime u32  124 ns atime u32
+///     (stary tvar: nuly)
 /// ```
 ///
-/// Casy jsou v nanosekundach z `Fs::set_time` (fsd: realny cas od 1970 UTC).
+/// Casy nastavuje `Fs::set_time` (fsd: realny cas). Nanosekundy >= 10^9
+/// = poskozeny zaznam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Inode {
     /// `KIND_FILE`, `KIND_DIR` nebo `KIND_SYMLINK`.
@@ -368,10 +402,11 @@ pub struct Inode {
     /// Cislo popisu opravneni (0 = zdedit od rodice).
     pub acl: u32,
     pub size: u64,
-    pub mtime: u64,
-    pub ctime: u64,
-    pub btime: u64,
-    pub atime: u64,
+    pub mtime: Timestamp,
+    pub ctime: Timestamp,
+    pub btime: Timestamp,
+    /// `Timestamp::UNIX_EPOCH` = nesleduje se.
+    pub atime: Timestamp,
     /// Rodicovsky adresar (0 u korene); kazdy objekt ma prave jednoho rodice.
     pub parent: u64,
     /// Generace (txg), ve ktere objekt vznikl; handle s jinou generaci
@@ -413,21 +448,26 @@ pub const SYMLINK_MAX: usize = 4096;
 
 impl Inode {
     /// Novy prazdny objekt druhu `kind` v adresari `parent`.
-    pub fn new(kind: u8, parent: u64, now: u64, generation: u64) -> Self {
+    pub fn new(kind: u8, parent: u64, now: Timestamp, generation: u64) -> Self {
         Self { kind, parent, mtime: now, ctime: now, btime: now, generation, ..Self::default() }
     }
 
-    pub fn encode(&self) -> Vec<u8> {
+    pub fn encode(&self, tf: TimeFormat) -> Vec<u8> {
         let mut b = alloc::vec![0u8; INODE_SIZE];
         b[0] = self.kind;
         b[1] = self.flags;
         b[4..8].copy_from_slice(&self.acl.to_le_bytes());
+        let times = [self.mtime, self.ctime, self.btime, self.atime];
+        let secs = times.map(|t| match tf {
+            TimeFormat::Secs => t.secs as u64,
+            TimeFormat::LegacyNanos => legacy_nanos(t),
+        });
         for (k, v) in [
             self.size,
-            self.mtime,
-            self.ctime,
-            self.btime,
-            self.atime,
+            secs[0],
+            secs[1],
+            secs[2],
+            secs[3],
             self.parent,
             self.generation,
             self.tree_bytes,
@@ -442,23 +482,42 @@ impl Inode {
         }
         b[96..100].copy_from_slice(&self.xattrs.to_le_bytes());
         b[104..112].copy_from_slice(&self.version.to_le_bytes());
+        if tf == TimeFormat::Secs {
+            for (k, t) in times.iter().enumerate() {
+                b[112 + k * 4..116 + k * 4].copy_from_slice(&t.nanos.to_le_bytes());
+            }
+        }
         b
     }
 
-    /// Odmitne neznamy druh a velikost nad `MAX_FILE_SIZE`.
-    pub fn decode(b: &[u8]) -> Result<Self> {
+    /// Odmitne neznamy druh, velikost nad `MAX_FILE_SIZE` a nanosekundy
+    /// mimo rozsah.
+    pub fn decode(b: &[u8], tf: TimeFormat) -> Result<Self> {
         if b.len() != INODE_SIZE || !matches!(b[0], KIND_FILE | KIND_DIR | KIND_SYMLINK) {
             return Err(Error::Corrupted);
         }
+        let time = |k: usize| -> Result<Timestamp> {
+            let raw = u64_at(b, 16 + k * 8);
+            match tf {
+                TimeFormat::LegacyNanos => Ok(from_legacy_nanos(raw)),
+                TimeFormat::Secs => {
+                    let nanos = u32_at(b, 112 + k * 4);
+                    if nanos >= 1_000_000_000 {
+                        return Err(Error::Corrupted);
+                    }
+                    Ok(Timestamp { secs: raw as i64, nanos })
+                }
+            }
+        };
         let i = Self {
             kind: b[0],
             flags: b[1],
             acl: u32_at(b, 4),
             size: u64_at(b, 8),
-            mtime: u64_at(b, 16),
-            ctime: u64_at(b, 24),
-            btime: u64_at(b, 32),
-            atime: u64_at(b, 40),
+            mtime: time(0)?,
+            ctime: time(1)?,
+            btime: time(2)?,
+            atime: time(3)?,
             parent: u64_at(b, 48),
             generation: u64_at(b, 56),
             tree_bytes: u64_at(b, 64),

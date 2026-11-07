@@ -148,7 +148,7 @@ fn call(fs: &mut Fs<MemDevice>, req: &Request) -> Result<Response, i32> {
     };
     Response::decode(
         req.op(),
-        &handle(fs, &mut H, code, &req.encode(), &mut cache, 1),
+        &handle(fs, &mut H, code, &req.encode(), &mut cache, fs::Timestamp::new(1, 0)),
     )
 }
 

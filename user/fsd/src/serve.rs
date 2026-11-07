@@ -9,14 +9,10 @@ use libos::{Error, Result};
 use crate::blkdev::BlkDev;
 use crate::serve_v2::{Reply, Session};
 
-/// Cas pro zmeny ve FS: realny cas v ns od 1970 (dnesni format casu ve FS
-/// je u64 ns, takze cas pred 1970 se orizne na 0). Bez realnych hodin cas od
-/// startu systemu (data pak vypadaji jako z roku 1970).
-pub(crate) fn fs_now() -> u64 {
-    match libos::time::wall() {
-        Some(t) => t.as_nanos().clamp(0, u64::MAX as i128) as u64,
-        None => libos::time::now(),
-    }
+/// Cas pro zmeny ve FS: realny cas. Bez realnych hodin cas od startu
+/// systemu (data pak vypadaji jako z roku 1970).
+pub(crate) fn fs_now() -> fs::Timestamp {
+    libos::time::wall().unwrap_or_else(|| fs::Timestamp::new(0, libos::time::now() as i64))
 }
 
 pub(crate) fn stat(s: fs::Stat) -> Stat {
@@ -31,6 +27,7 @@ pub(crate) fn stat(s: fs::Stat) -> Stat {
         size: s.size,
         mtime: s.mtime,
         ctime: s.ctime,
+        btime: s.btime,
         tree_bytes: s.tree_bytes,
         tree_files: s.tree_files,
         tree_dirs: s.tree_dirs,

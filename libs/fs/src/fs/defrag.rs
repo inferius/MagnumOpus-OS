@@ -102,6 +102,7 @@ impl<D: BlockDevice> Fs<D> {
             let root = fs.s.root;
             let mut todo: Vec<(u64, Inode)> = Vec::new();
             let start = Key::new(fs.defrag_cursor, item::INODE, 0);
+            let tf = fs.s.time_format();
             btree::range(
                 &mut fs.s,
                 &root,
@@ -109,7 +110,7 @@ impl<D: BlockDevice> Fs<D> {
                 &Key::new(u64::MAX, 0, 0),
                 &mut |k, v| {
                     if k.kind == item::INODE {
-                        todo.push((k.oid, Inode::decode(v)?));
+                        todo.push((k.oid, Inode::decode(v, tf)?));
                     }
                     Ok(todo.len() < 256)
                 },

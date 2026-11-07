@@ -379,7 +379,8 @@ osfs: delete /Slozka/A.TXT
 - **Jméno položky podle cesty** (`stat` nevrací uložené jméno): ovladač
   ho kvůli normalizovanému jménu hledá ve výpisu rodiče (s mezipamětí
   jmen). První otevření v obřím adresáři načte celý jeho výpis.
-- **Nastavení časů a atributů** (`set_times`, příznak jen pro čtení).
+- **Nastavení atributů** (příznak jen pro čtení, skrytý). Časy už jdou: ovladač
+  ukládá čas vytvoření, zápisu a přístupu z `SetBasicInfo` přes `Fs::set_times`.
 - **Informace „je co ukládat“** - commit se teď hlídá vlastním příznakem.
 - **UUID svazku** ve `FsInfo` - sériové číslo pro Windows se teď počítá
   z času vytvoření souboru s obrazem (u skutečného disku nepůjde).

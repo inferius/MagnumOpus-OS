@@ -26,12 +26,13 @@ sporné, co funguje:
 
 | Položka | Ve formátu | Ovladač dnes |
 |---|---|---|
-| UUID svazku, příznaky vlastností | ano | **používá** (žádný bit vlastnosti zatím není definovaný) |
+| UUID svazku, příznaky vlastností | ano | **používá**; definovaný je bit `INCOMPAT_TIME_SECS` ([časy](#časy-objektů)) |
 | číslo zařízení v `BlockPtr`, `device_index/count` v superbloku | ano | **jen jedno zařízení**: zařízení musí být 0 a počet 1, jinak `CORRUPTED`; víc disků (zrcadlo, RAID) až po fázi 5 |
 | příznaky `BlockPtr` (komprese, šifrování, sdílení, cloud) | vyhrazené | **nepoužívá**; uzel s příznakem = `NOT_SUPPORTED` |
 | příznaky extentu (předalokace) | vyhrazené | **nepoužívá**; extent s příznakem = `NOT_SUPPORTED` |
 | příznak objektu `INODE_REMOTE` | vyhrazený | **nepoužívá** (fáze 6) |
-| oprávnění (`acl`), vlastník, čas přístupu, počet rozšířených atributů v záznamu objektu | ano | **zapisuje 0**, nečte (fáze 1d a později) |
+| oprávnění (`acl`), vlastník, počet rozšířených atributů v záznamu objektu | ano | **zapisuje 0**, nečte (fáze 1d a později) |
+| čas přístupu (`atime`) | ano | **jen nastavením** (`set_times`); čtení ho nemění |
 | generace objektu, čas vytvoření | ano | **používá** (`Stat`, přehrání logu) |
 | symbolické odkazy, jména do 1024 znaků, limit velikosti | ano | **používá** |
 | datasety, klony s vazbou na původní snapshot | ano | **používá** ([Datasety](#datasety-a-klony)) |
@@ -173,7 +174,12 @@ s nejvyšší generací, jehož stav jde načíst.
 **Příznaky vlastností** fungují jako v ext4: každý bit = jedna vlastnost
 formátu (komprese, šifrování, ...). Ovladač, který bit z `ro_compat` nebo
 `incompat` nezná, svazek odmítne s `NOT_SUPPORTED` - nikdy ho tak nepoškodí
-tím, že by nerozuměl novým strukturám. Zatím je definovaných nula bitů.
+tím, že by nerozuměl novým strukturám.
+
+| Bit | Skupina | Jméno | Význam |
+|---|---|---|---|
+| 0 | incompat | `INCOMPAT_REMOTE` | vyhrazený: data jen v cloudu (fáze 6), ovladač ho zatím odmítne |
+| 1 | incompat | `INCOMPAT_TIME_SECS` | časy jsou sekundy i64 + nanosekundy u32 ([časy](#časy-objektů)); nové svazky ho mají vždy |
 
 **UUID** se při formátování bere z `FormatOptions::uuid`; nástroje na
 hostiteli (`xtask`) předávají náhodné. Bez něj se odvodí ze jména, velikosti
@@ -279,10 +285,10 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 | 1 | flags u8 | příznaky objektu, rezervované: 1 = data jen v cloudu (zatím 0; nastavení synchronizace jsou atributy `sync.*`, ne bity) |
 | 4 | acl u32 | číslo popisu oprávnění (0 = zdědit; přijde ve fázi 1d) |
 | 8 | size | soubor: velikost v bajtech (nejvýš 2^63-1); odkaz: délka cíle |
-| 16 | mtime | čas poslední změny obsahu |
-| 24 | ctime | čas změny metadat |
-| 32 | btime | čas vytvoření |
-| 40 | atime | čas posledního přístupu (0 = nesleduje se) |
+| 16 | mtime | čas poslední změny obsahu: sekundy i64 od 1970 UTC |
+| 24 | ctime | čas změny metadat: sekundy i64 |
+| 32 | btime | čas vytvoření: sekundy i64 |
+| 40 | atime | čas posledního přístupu: sekundy i64 (0 a 0 ns = nesleduje se) |
 | 48 | parent | oid rodičovského adresáře (každý objekt má právě jednoho rodiče) |
 | 56 | generation | generace (txg), ve které objekt vznikl |
 | 64 | tree_bytes | adresář: součet velikostí souborů v celém podstromu (saturuje) |
@@ -290,10 +296,52 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 | 80 | tree_dirs | adresář: počet adresářů v podstromu (bez sebe) |
 | 88 | owner | vlastník (0 = systém; přijde se správou uživatelů) |
 | 96 | xattrs u32 | počet rozšířených atributů |
-| 100 | - | rezerva 28 B (nuly) |
+| 100 | - | rezerva u32 (nula) |
+| 104 | version | verze obsahu (počítadlo změn; revize pro podmíněné uložení) |
+| 112 | mtime_ns u32 | nanosekundy k `mtime` (0..10⁹) |
+| 116 | ctime_ns u32 | nanosekundy k `ctime` |
+| 120 | btime_ns u32 | nanosekundy k `btime` |
+| 124 | atime_ns u32 | nanosekundy k `atime` |
 
-Časy jsou v nanosekundách z `Fs::set_time` (služba fsd: od startu systému,
-nástroj `xtask`: od roku 1970). **Generace**
+#### Časy objektů
+
+> **Změna formátu času (příznak `INCOMPAT_TIME_SECS`):** dřív byl každý čas
+> u64 nanosekund od 1970 na offsetech 16-40, teď jsou tam sekundy i64 se
+> znaménkem a nanosekundy jsou v dřívější rezervě 112-128. **Proč:** u64
+> nanosekund neuměl data před rokem 1970 (staré archivy, NTFS počítá od
+> roku 1601) a končil v roce 2262. Nový tvar má rozsah ±292 miliard let,
+> stejný jako `timespec` v POSIX a `SystemTime` v Rustu, a vejde se do
+> 128 B záznamu bez změny jeho velikosti. ([verze](fs-verze.md#časy-objektů-u64-ns---i64-s--u32-ns))
+
+- **Nové svazky** mají bit `INCOMPAT_TIME_SECS`. Starší ovladač, který ho
+  nezná, je odmítne (`NOT_SUPPORTED`), takže nikdy nepřečte sekundy jako
+  nanosekundy.
+- **Svazky ze starší verze** (bez bitu) tento ovladač připojí normálně
+  a časy v nich čte i zapisuje dál ve starém tvaru u64 ns (čas před 1970
+  se tam ořízne na 1970). Převod na nový tvar zatím není (bylo by nutné
+  přepsat všechny záznamy objektů).
+- **Nanosekundy ≥ 10⁹** = poškozený záznam (`CORRUPTED`); stejně tak v intent
+  logu.
+- **Zdroj času** je `Fs::set_time(Timestamp)`. Služba fsd bere reálný čas
+  ([Reálný čas](cas.md)), nástroje na hostiteli čas hostitele.
+- **Nastavení časů** `Fs::set_times(cesta, SetTimes)` a `set_times_h(handle, ...)`
+  (handle s právem zápisu) mění `mtime`, `btime`, `atime` (`None` = nechat).
+  `ctime` nastavit nejde: nastaví se na aktuální čas, protože zaznamenává, že
+  se objekt měnil. Změna se zapíše do intent logu (záznam 9), takže přežije
+  `fsync` a pád.
+
+```rust
+use fs::{SetTimes, Timestamp};
+
+// Kopie ze starého archivu se zachovaným časem (1. 1. 1601 i před 1970).
+fs.set_times("/archiv/dopis.txt", SetTimes {
+    mtime: Some(Timestamp { secs: -11_644_473_600, nanos: 0 }),
+    btime: Some(Timestamp { secs: -86_400, nanos: 500 }),
+    atime: None,
+})?;
+```
+
+**Generace**
 spolu s `oid` určuje objekt jednoznačně: oid smazaného objektu se nepoužije
 znovu, ale handly protokolu v2 se podle generace přesto ověří. Záznam
 s neznámým druhem nebo velikostí nad 2^63-1 je `CORRUPTED`.
@@ -666,7 +714,10 @@ Záznamy dávky (první bajt = druh): 1 vytvoření (rodič, oid, druh, čas,
 jméno), 2 smazání (rodič, čas, jméno), 3 přejmenování (zdroj, cíl, čas,
 jméno, nové jméno), 4 změna velikosti (oid, velikost, čas), 5 obsah malého
 souboru (oid, velikost, mtime, data), 6 mapování dat (oid, velikost, mtime,
-seznam extentů se součty).
+seznam extentů se součty), 7 symbolický odkaz, 8 značka datasetu,
+9 nastavení časů (oid, maska u8: bit 0 mtime, 1 btime, 2 atime, čas změny,
+přítomné časy). Čas v záznamu má 12 B (sekundy i64 + nanosekundy u32), na
+svazku bez `INCOMPAT_TIME_SECS` 8 B (u64 ns).
 
 **Při připojení:** log se čte od `zil_block`, dokud souhlasí magic,
 pořadí a součet. Úplné dávky se přehrají nad stavem posledního commitu -
@@ -1183,7 +1234,7 @@ větší požadavky rozdělí.
 | op | Název | Parametry | Výsledek |
 |---|---|---|---|
 | 1 | `INFO` | - | jméno svazku, velikost bloku, bloky, volné, odložené, generace, algoritmus, návrat, přehráno |
-| 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, souhrny podstromu) |
+| 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, btime, souhrny podstromu); čas = sekundy i64 + nanosekundy u32 |
 | 3 | `LIST` | cesta | počet u32 + (druh u8, oid u64, jméno) - seřazené podle jména; druh 1 soubor, 2 adresář, 3 symbolický odkaz; `BUFFER_TOO_SMALL`, když se výpis do zprávy nevejde |
 | 4 | `READ` | cesta, offset u64, délka u32 | data (kratší na konci souboru) |
 | 5 | `WRITE` | cesta, offset u64, data | - |

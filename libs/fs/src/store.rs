@@ -61,6 +61,8 @@ pub struct FormatOptions {
     pub ag_blocks: Option<u64>,
     /// UUID svazku (None = odvodit).
     pub uuid: Option<[u8; 16]>,
+    /// Cas vytvoreni korenoveho adresare.
+    pub time: crate::layout::Timestamp,
 }
 
 impl Default for FormatOptions {
@@ -70,6 +72,7 @@ impl Default for FormatOptions {
             algo: Algo::Xxh3,
             ag_blocks: None,
             uuid: None,
+            time: crate::layout::Timestamp::UNIX_EPOCH,
         }
     }
 }
@@ -137,6 +140,11 @@ fn ag_size(blocks: u64, wish: Option<u64>) -> u64 {
 }
 
 impl<D: BlockDevice> Store<D> {
+    /// Tvar casu na tomto svazku.
+    pub fn time_format(&self) -> crate::layout::TimeFormat {
+        crate::layout::TimeFormat::of(self.sb.features_incompat)
+    }
+
     /// Vytvori prazdny souborovy system (jen korenovy adresar).
     pub fn format(mut dev: D, opts: &FormatOptions) -> Result<D> {
         let blocks = dev.block_count();
@@ -165,7 +173,7 @@ impl<D: BlockDevice> Store<D> {
             uuid: volume_uuid(&opts.label, blocks, opts.uuid),
             features_compat: 0,
             features_ro_compat: 0,
-            features_incompat: 0,
+            features_incompat: crate::layout::feature::INCOMPAT_TIME_SECS,
             root: BlockPtr::default(),
             space: BlockPtr::default(),
             zil_block: 0,
@@ -180,13 +188,14 @@ impl<D: BlockDevice> Store<D> {
             label,
         };
         let mut s = Self::with_state(dev, sb, Space::new(blocks, ag_blocks), Child::Mem(0));
-        let root_dir = Inode::new(KIND_DIR, 0, 0, 0);
-        debug_assert_eq!(root_dir.encode().len(), INODE_SIZE);
+        let root_dir = Inode::new(KIND_DIR, 0, opts.time, 0);
+        let tf = s.time_format();
+        debug_assert_eq!(root_dir.encode(tf).len(), INODE_SIZE);
         let id = s.new_node(
             0,
             Body::Leaf(vec![(
                 Key::new(ROOT_OID, item::INODE, 0),
-                root_dir.encode(),
+                root_dir.encode(tf),
             )]),
         );
         s.root = Child::Mem(id);

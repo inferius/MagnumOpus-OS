@@ -112,9 +112,9 @@ fn entry(name: &str, s: &Stat, kind: Kind, link_target: String) -> EntryInfo {
         oid: s.oid,
         generation: s.generation,
         size: s.size,
-        mtime: s.mtime,
-        ctime: s.ctime,
-        btime: s.btime,
+        mtime: crate::image::nanos_u64(s.mtime),
+        ctime: crate::image::nanos_u64(s.ctime),
+        btime: crate::image::nanos_u64(s.btime),
         tree_bytes: s.tree_bytes,
         tree_files: s.tree_files,
         tree_dirs: s.tree_dirs,
@@ -126,7 +126,7 @@ fn entry(name: &str, s: &Stat, kind: Kind, link_target: String) -> EntryInfo {
 struct Ctx<'a, D: BlockDevice> {
     fs: &'a mut Fs<D>,
     host: &'a mut dyn Host,
-    now: u64,
+    now: fs::Timestamp,
 }
 
 impl<D: BlockDevice> Ctx<'_, D> {
@@ -414,7 +414,7 @@ pub fn handle<D: BlockDevice>(
     code: Code,
     input: &[u8],
     cache: &mut Option<ListCache>,
-    now: u64,
+    now: fs::Timestamp,
 ) -> Vec<u8> {
     let req = match Request::decode(input) {
         Ok(r) => r,

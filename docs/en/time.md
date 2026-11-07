@@ -96,10 +96,8 @@ if r.flags & time::flags::ZONE_ASSUMED_UTC != 0 { /* zone only assumed */ }
 
 ## Times in the file system
 
-`fsd` sets the change time in the FS from the real clock. Today's inode
-format stores times as u64 nanoseconds since 1970. A time before 1970 is
-therefore clamped to 1970, and the format ends in 2262.
-
-Changing the FS time format is a separate step. It should allow dates
-before 1970 and remove the 2262 limit, for example when copying from an old
-archive or from NTFS. See [File system](file-system.md).
+`fsd` sets the change time in the FS from the real clock. The FS stores
+times in the same form (seconds i64 + nanoseconds u32), so it keeps dates
+before 1970 and has no 2262 limit. Volumes from an older FS version store
+u64 ns since 1970, and a time before 1970 is clamped there. See
+[Object times](file-system.md#object-times).

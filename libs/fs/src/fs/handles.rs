@@ -74,7 +74,7 @@ pub mod share {
 #[derive(Debug, Clone)]
 pub(super) struct Open {
     ds: u64,
-    oid: u64,
+    pub(super) oid: u64,
     generation: u64,
     access: u8,
     share: u8,
@@ -171,7 +171,7 @@ impl<D: BlockDevice> Fs<D> {
         let Some(raw) = btree::get(&mut self.s, &root, &Key::new(o.oid, item::INODE, 0))? else {
             return Ok(());
         };
-        let inode = Inode::decode(&raw)?;
+        let inode = Inode::decode(&raw, self.s.time_format())?;
         if inode.generation != o.generation || self.s.read_only {
             return Ok(());
         }
@@ -191,7 +191,7 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Aktivuje dataset handlu a vrati jeho objekt (s kontrolou generace).
-    fn handle_object(&mut self, h: Handle, need: u8) -> Result<(Open, Inode)> {
+    pub(super) fn handle_object(&mut self, h: Handle, need: u8) -> Result<(Open, Inode)> {
         let o = self.handles.opens.get(&h).ok_or(Error::BadHandle)?.clone();
         if o.access & need != need {
             return Err(Error::AccessDenied);
@@ -199,7 +199,7 @@ impl<D: BlockDevice> Fs<D> {
         self.activate(o.ds)?;
         let root = self.s.root;
         let raw = btree::get(&mut self.s, &root, &Key::new(o.oid, item::INODE, 0))?.ok_or(Error::BadHandle)?;
-        let inode = Inode::decode(&raw)?;
+        let inode = Inode::decode(&raw, self.s.time_format())?;
         if inode.generation != o.generation {
             return Err(Error::BadHandle);
         }

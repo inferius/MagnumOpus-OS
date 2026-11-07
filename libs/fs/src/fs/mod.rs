@@ -17,6 +17,7 @@ mod defrag;
 mod diff;
 mod handles;
 mod snap;
+mod times;
 mod zil;
 
 use alloc::collections::BTreeMap;
@@ -29,6 +30,7 @@ use crate::btree;
 use crate::device::BlockDevice;
 use crate::hash::Algo;
 use crate::layout::{
+    Timestamp,
     BLOCK_SIZE, Dirent, Inode, KIND_DATASET, KIND_DIR, KIND_FILE, KIND_SYMLINK, Key, ROOT_DATASET,
     ROOT_OID, SYMLINK_MAX,
     decode_dirents, encode_dirents, item,
@@ -43,6 +45,7 @@ pub use dataset::DatasetInfo;
 pub use defrag::DefragReport;
 pub use diff::{Change, ChangeKind};
 pub use handles::{Handle, Revision, access, share};
+pub use times::SetTimes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -83,10 +86,10 @@ pub struct Stat {
     pub oid: u64,
     pub kind: Kind,
     pub size: u64,
-    pub mtime: u64,
-    pub ctime: u64,
+    pub mtime: Timestamp,
+    pub ctime: Timestamp,
     /// Cas vytvoreni.
-    pub btime: u64,
+    pub btime: Timestamp,
     /// Generace vzniku objektu (spolu s `oid` jednoznacne urcuje objekt).
     pub generation: u64,
     /// U adresare: soucet velikosti vsech souboru v podstromu.
@@ -157,7 +160,7 @@ struct FileDirty {
 
 pub struct Fs<D: BlockDevice> {
     s: Store<D>,
-    now: u64,
+    now: Timestamp,
     /// Rozpracovana data souboru podle oid.
     data: BTreeMap<u64, FileDirty>,
     dirty_blocks: u64,
@@ -247,7 +250,7 @@ impl<D: BlockDevice> Fs<D> {
         s.read_only |= no_durability || opts.read_only;
         let mut fs = Self {
             s,
-            now: 0,
+            now: Timestamp::UNIX_EPOCH,
             data: BTreeMap::new(),
             dirty_blocks: 0,
             zil: zil::Pending::default(),
@@ -275,8 +278,8 @@ impl<D: BlockDevice> Fs<D> {
         self.s.dev
     }
 
-    /// Cas pro nasledujici zmeny (ns; zdroj voli volajici).
-    pub fn set_time(&mut self, now: u64) {
+    /// Cas pro nasledujici zmeny (zdroj voli volajici, napr. realne hodiny).
+    pub fn set_time(&mut self, now: Timestamp) {
         self.now = now;
     }
 
@@ -352,7 +355,7 @@ impl<D: BlockDevice> Fs<D> {
     fn inode(&mut self, root: &Child, oid: u64) -> Result<Inode> {
         let raw = btree::get(&mut self.s, root, &Key::new(oid, item::INODE, 0))?
             .ok_or(Error::Corrupted)?;
-        Inode::decode(&raw)
+        Inode::decode(&raw, self.s.time_format())
     }
 
     fn live_inode(&mut self, oid: u64) -> Result<Inode> {
@@ -493,6 +496,12 @@ impl<D: BlockDevice> Fs<D> {
         r
     }
 
+    /// Testy: primy pristup k ulozisti (superblok, priznaky formatu).
+    #[cfg(test)]
+    pub(crate) fn test_store(&mut self) -> &mut crate::store::Store<D> {
+        &mut self.s
+    }
+
     /// Testy: primy zapis polozky (simulace poskozene hodnoty na disku).
     #[cfg(test)]
     pub(crate) fn test_put(&mut self, key: Key, value: Vec<u8>) -> Result<()> {
@@ -541,7 +550,7 @@ impl<D: BlockDevice> Fs<D> {
     // --- zmeny adresaru (na urovni oid, aby je slo prehrat z logu) ---
 
     fn put_inode(&mut self, oid: u64, i: &Inode) -> Result<()> {
-        self.put(Key::new(oid, item::INODE, 0), i.encode())
+        self.put(Key::new(oid, item::INODE, 0), i.encode(self.s.time_format()))
     }
 
     /// Promitne zmenu do souhrnu adresare `dir` a vsech jeho predku.

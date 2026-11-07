@@ -15,6 +15,7 @@ mod mount;
 mod objects;
 mod ondisk;
 mod perf;
+mod times;
 
 use crate::{Algo, BlockDevice, FormatOptions, Fs, MemDevice};
 
@@ -32,6 +33,7 @@ fn opts(label: &str) -> FormatOptions {
         algo: Algo::Xxh3,
         ag_blocks: None,
         uuid: None,
+        time: crate::layout::Timestamp::UNIX_EPOCH,
     }
 }
 

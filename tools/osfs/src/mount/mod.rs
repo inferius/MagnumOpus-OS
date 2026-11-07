@@ -122,7 +122,7 @@ unsafe extern "system" fn on_console(_event: u32) -> i32 {
 
 fn commit_now(st: &mut State) {
     if st.dirty && !st.read_only {
-        st.fs.set_time(image::now_ns());
+        st.fs.set_time(image::now());
         match st.fs.commit() {
             Ok(()) => st.dirty = false,
             Err(e) => eprintln!("osfs: commit selhal: {e}"),
@@ -232,7 +232,7 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     vp.SectorSize = fs::BLOCK_SIZE as u16;
     vp.SectorsPerAllocationUnit = 1;
     vp.MaxComponentLength = crate::names::WIN_NAME_MAX as u16;
-    vp.VolumeCreationTime = ops::filetime(created);
+    vp.VolumeCreationTime = ops::filetime(fs::Timestamp::new(0, created.min(i64::MAX as u64) as i64));
     vp.VolumeSerialNumber = serial;
     vp.FileInfoTimeout = 1000;
     vp.Flags = VP_CASE_PRESERVED_NAMES

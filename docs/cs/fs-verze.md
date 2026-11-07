@@ -49,7 +49,8 @@ Návrh a důvody celé v3: [navrh-fs-v3.md](navrh-fs-v3.md). Hotové změny:
 | Typy objektů | soubor, adresář | + **symbolický odkaz** | git repozitáře a zdrojáky z Linuxu je potřebují |
 | Velikost souboru | bez limitu (přetečení) | **2^63-1 B**, kontrolovaná aritmetika, saturující souhrny | velikosti a rozdíly vždy v `i64`; obří řídké soubory nepřetečou souhrny |
 | Extent | nejvýš 120 bloků, rezerva u32 | **496 bloků**, příznaky u32 (vyhrazeno: předalokace) | větší uzel; méně položek na velký soubor |
-| Intent log | záznamy 1-6 | + 7 symlink, generace u vytvoření, 8 značka datasetu | symlink přežije `fsync`; generace po přehrání zůstane původní; jedna dávka pro víc datasetů |
+| Intent log | záznamy 1-6 | + 7 symlink, generace u vytvoření, 8 značka datasetu, 9 nastavení časů | symlink přežije `fsync`; generace po přehrání zůstane původní; jedna dávka pro víc datasetů; nastavené časy přežijí pád |
+| Časy | u64 ns od 1970 | **sekundy i64 + nanosekundy u32** (příznak `INCOMPAT_TIME_SECS`) | data před rokem 1970 a bez hranice 2262 - viz níže |
 | Sirotci | - | položka `ORPHAN` (druh 9) pro otevřený objekt bez jména | otevřený soubor přežije smazání i atomické nahrazení; po pádu úklid při připojení |
 | Datasety | jeden strom pro svazek | **datasety** (vlastní stromy, záznam `DATASET` v kořenovém datasetu, položka adresáře druhu 4), snapshot s počtem klonů a příznakem „skrytý“ | historie po složkách (projekt, domov), zapisovatelné klony bez kopírování |
 
@@ -73,6 +74,29 @@ Návrh a důvody celé v3: [navrh-fs-v3.md](navrh-fs-v3.md). Hotové změny:
 
 Datasety, verzování (klony, diff, obnova), vrstva handlů a ovladač pro
 Windows, oprávnění, protokol v2 - pořadí v [návrhu](navrh-fs-v3.md#pořadí-implementace).
+
+## Časy objektů: u64 ns -> i64 s + u32 ns
+
+Změna uvnitř v3, poznaná příznakem `INCOMPAT_TIME_SECS` (bit 1 incompat).
+
+| | Dřív | Teď |
+|---|---|---|
+| uložení | u64 nanosekund od 1970 (offsety 16-40) | sekundy i64 (16-40) + nanosekundy u32 (112-128, dřív rezerva) |
+| rozsah | 1970 až 2262 | ±292 miliard let (i 1601 z NTFS, data před 1970) |
+| intent log | čas 8 B | čas 12 B, nový záznam 9 (nastavení časů) |
+| protokol `Stat` | mtime, ctime u64 ns | mtime, ctime, **btime**, každý sekundy i64 + nanosekundy u32 |
+| API | `set_time(u64)` | `set_time(Timestamp)`, nové `set_times` a `set_times_h` |
+
+**Proč:** při kopii ze starých archivů a z NTFS se časy před rokem 1970
+ztrácely a hranice roku 2262 je zbytečná. Varianty: i128 nanosekund (jedno
+číslo, ale 16 B na čas - nevešlo by se do 128 B záznamu, MSVC nemá
+`__int128`, převody potřebují 128bitové dělení) a 100 ns od 1601 jako NTFS
+(rozsah do roku 30828, horší rozlišení). Zvolená varianta je stejná jako
+`timespec` a `SystemTime` a vejde se do dnešního záznamu.
+
+**Starší svazky** (bez příznaku) ovladač čte i zapisuje dál ve starém tvaru;
+starší ovladač nové svazky odmítne. Převod starého svazku na nový tvar zatím
+není.
 
 ## Protokol fsproto v1 -> v2
 

@@ -127,6 +127,7 @@ impl<D: BlockDevice> Fs<D> {
         // Druhy objektu zive verze (shoda polozek adresaru se zaznamy).
         // Kazdy dataset ma vlastni cisla objektu: kontrola objektu zvlast.
         let mut objects: Vec<Objects> = alloc::vec![Objects::default()];
+        let tf = self.s.time_format();
         let stored = Child::Disk(sb.root);
         // (popis, koren, index skupiny objektu u zive verze datasetu)
         let mut roots: Vec<(String, Child, Option<usize>)> =
@@ -189,7 +190,7 @@ impl<D: BlockDevice> Fs<D> {
                     Body::Leaf(items) => {
                         for (k, v) in items {
                             if let Some(g) = group {
-                                objects[g].note(&k, &v, &mut r);
+                                objects[g].note(&k, &v, tf, &mut r);
                             }
                             if k.kind != item::EXTENT {
                                 continue;
@@ -285,9 +286,9 @@ impl Objects {
     /// Zaznamena polozku; poskozeny zaznam objektu nebo polozku adresare
     /// nahlasi (drive se tise preskocily - kontrola pak hlasila cisty svazek,
     /// prestoze `stat` vracel CORRUPTED).
-    fn note(&mut self, k: &Key, v: &[u8], r: &mut CheckReport) {
+    fn note(&mut self, k: &Key, v: &[u8], tf: crate::layout::TimeFormat, r: &mut CheckReport) {
         match k.kind {
-            item::INODE => match Inode::decode(v) {
+            item::INODE => match Inode::decode(v, tf) {
                 Ok(i) => {
                     self.inodes.insert(k.oid, (i.kind, i.size));
                 }

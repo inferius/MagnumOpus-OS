@@ -29,7 +29,9 @@ use super::{Fs, Kind};
 use crate::btree;
 use crate::device::BlockDevice;
 use crate::hash::{Csum, xxh3_seeded};
-use crate::layout::{BLOCK_SIZE, Extent, INLINE_MAX, Key, csum_at, item, u32_at, u64_at};
+use crate::layout::{
+    BLOCK_SIZE, Extent, INLINE_MAX, Key, TimeFormat, Timestamp, csum_at, from_legacy_nanos, item, legacy_nanos, u32_at, u64_at,
+};
 
 const MAGIC: u16 = u16::from_le_bytes(*b"ZL");
 const HEADER: usize = 64;
@@ -47,24 +49,24 @@ pub enum Op {
         generation: u64,
         kind: u8,
         name: String,
-        time: u64,
+        time: Timestamp,
     },
     Remove {
         parent: u64,
         name: String,
-        time: u64,
+        time: Timestamp,
     },
     Rename {
         src: u64,
         name: String,
         dst: u64,
         new_name: String,
-        time: u64,
+        time: Timestamp,
     },
     Truncate {
         oid: u64,
         size: u64,
-        time: u64,
+        time: Timestamp,
     },
     Symlink {
         parent: u64,
@@ -72,7 +74,13 @@ pub enum Op {
         generation: u64,
         name: String,
         target: String,
-        time: u64,
+        time: Timestamp,
+    },
+    /// Nastaveni casu objektu (`Fs::set_times`); `time` = nova hodnota ctime.
+    SetTimes {
+        oid: u64,
+        times: super::SetTimes,
+        time: Timestamp,
     },
 }
 
@@ -84,13 +92,13 @@ enum Record {
     Inline {
         oid: u64,
         size: u64,
-        mtime: u64,
+        mtime: Timestamp,
         data: Vec<u8>,
     },
     Extents {
         oid: u64,
         size: u64,
-        mtime: u64,
+        mtime: Timestamp,
         list: Vec<(u64, Extent)>,
     },
 }
@@ -142,12 +150,23 @@ fn put_u64(b: &mut Vec<u8>, v: u64) {
     b.extend_from_slice(&v.to_le_bytes());
 }
 
+/// Cas v zaznamu: stary tvar u64 ns, novy i64 sekund + u32 ns (12 B).
+fn put_time(b: &mut Vec<u8>, t: Timestamp, tf: TimeFormat) {
+    match tf {
+        TimeFormat::LegacyNanos => put_u64(b, legacy_nanos(t)),
+        TimeFormat::Secs => {
+            put_u64(b, t.secs as u64);
+            b.extend_from_slice(&t.nanos.to_le_bytes());
+        }
+    }
+}
+
 fn put_str(b: &mut Vec<u8>, s: &str) {
     b.extend_from_slice(&(s.len() as u16).to_le_bytes());
     b.extend_from_slice(s.as_bytes());
 }
 
-fn encode(records: &[Record]) -> Vec<u8> {
+fn encode(records: &[Record], tf: TimeFormat) -> Vec<u8> {
     let mut b = Vec::new();
     for r in records {
         match r {
@@ -164,13 +183,13 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 put_u64(&mut b, *oid);
                 put_u64(&mut b, *generation);
                 b.push(*kind);
-                put_u64(&mut b, *time);
+                put_time(&mut b, *time, tf);
                 put_str(&mut b, name);
             }
             Record::Op(Op::Remove { parent, name, time }) => {
                 b.push(2);
                 put_u64(&mut b, *parent);
-                put_u64(&mut b, *time);
+                put_time(&mut b, *time, tf);
                 put_str(&mut b, name);
             }
             Record::Op(Op::Rename {
@@ -183,7 +202,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 b.push(3);
                 put_u64(&mut b, *src);
                 put_u64(&mut b, *dst);
-                put_u64(&mut b, *time);
+                put_time(&mut b, *time, tf);
                 put_str(&mut b, name);
                 put_str(&mut b, new_name);
             }
@@ -191,7 +210,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 b.push(4);
                 put_u64(&mut b, *oid);
                 put_u64(&mut b, *size);
-                put_u64(&mut b, *time);
+                put_time(&mut b, *time, tf);
             }
             Record::Op(Op::Symlink {
                 parent,
@@ -205,9 +224,22 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 put_u64(&mut b, *parent);
                 put_u64(&mut b, *oid);
                 put_u64(&mut b, *generation);
-                put_u64(&mut b, *time);
+                put_time(&mut b, *time, tf);
                 put_str(&mut b, name);
                 put_str(&mut b, target);
+            }
+            Record::Op(Op::SetTimes { oid, times, time }) => {
+                // 9: oid, ktere casy u8 (bit 0 mtime, 1 btime, 2 atime),
+                // cas zmeny, pak jen pritomne casy v tomto poradi.
+                b.push(9);
+                put_u64(&mut b, *oid);
+                let present = [times.mtime, times.btime, times.atime];
+                let mask = present.iter().enumerate().fold(0u8, |m, (i, t)| m | ((t.is_some() as u8) << i));
+                b.push(mask);
+                put_time(&mut b, *time, tf);
+                for t in present.into_iter().flatten() {
+                    put_time(&mut b, t, tf);
+                }
             }
             Record::Inline {
                 oid,
@@ -218,7 +250,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 b.push(5);
                 put_u64(&mut b, *oid);
                 put_u64(&mut b, *size);
-                put_u64(&mut b, *mtime);
+                put_time(&mut b, *mtime, tf);
                 b.extend_from_slice(&(data.len() as u32).to_le_bytes());
                 b.extend_from_slice(data);
             }
@@ -235,7 +267,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
                 b.push(6);
                 put_u64(&mut b, *oid);
                 put_u64(&mut b, *size);
-                put_u64(&mut b, *mtime);
+                put_time(&mut b, *mtime, tf);
                 b.extend_from_slice(&(list.len() as u32).to_le_bytes());
                 for (lb, e) in list {
                     put_u64(&mut b, *lb);
@@ -254,6 +286,7 @@ fn encode(records: &[Record]) -> Vec<u8> {
 struct Reader<'a> {
     b: &'a [u8],
     pos: usize,
+    tf: TimeFormat,
 }
 
 impl Reader<'_> {
@@ -271,6 +304,19 @@ impl Reader<'_> {
     fn u64(&mut self) -> Result<u64> {
         Ok(u64_at(self.take(8)?, 0))
     }
+    fn time(&mut self) -> Result<Timestamp> {
+        let raw = self.u64()?;
+        match self.tf {
+            TimeFormat::LegacyNanos => Ok(from_legacy_nanos(raw)),
+            TimeFormat::Secs => {
+                let nanos = self.u32()?;
+                if nanos >= 1_000_000_000 {
+                    return Err(Error::Corrupted);
+                }
+                Ok(Timestamp { secs: raw as i64, nanos })
+            }
+        }
+    }
     fn str(&mut self) -> Result<String> {
         let n = u16::from_le_bytes(self.take(2)?.try_into().unwrap()) as usize;
         Ok(core::str::from_utf8(self.take(n)?)
@@ -279,14 +325,14 @@ impl Reader<'_> {
     }
 }
 
-fn decode(b: &[u8]) -> Result<Vec<Record>> {
-    let mut r = Reader { b, pos: 0 };
+fn decode(b: &[u8], tf: TimeFormat) -> Result<Vec<Record>> {
+    let mut r = Reader { b, pos: 0, tf };
     let mut out = Vec::new();
     while r.pos < b.len() {
         let rec = match r.u8()? {
             1 => {
                 let (parent, oid, generation) = (r.u64()?, r.u64()?, r.u64()?);
-                let (kind, time) = (r.u8()?, r.u64()?);
+                let (kind, time) = (r.u8()?, r.time()?);
                 Record::Op(Op::Create {
                     parent,
                     oid,
@@ -297,7 +343,7 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
                 })
             }
             2 => {
-                let (parent, time) = (r.u64()?, r.u64()?);
+                let (parent, time) = (r.u64()?, r.time()?);
                 Record::Op(Op::Remove {
                     parent,
                     time,
@@ -305,7 +351,7 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
                 })
             }
             3 => {
-                let (src, dst, time) = (r.u64()?, r.u64()?, r.u64()?);
+                let (src, dst, time) = (r.u64()?, r.u64()?, r.time()?);
                 let (name, new_name) = (r.str()?, r.str()?);
                 Record::Op(Op::Rename {
                     src,
@@ -316,7 +362,7 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
                 })
             }
             7 => {
-                let (parent, oid, generation, time) = (r.u64()?, r.u64()?, r.u64()?, r.u64()?);
+                let (parent, oid, generation, time) = (r.u64()?, r.u64()?, r.u64()?, r.time()?);
                 let (name, target) = (r.str()?, r.str()?);
                 Record::Op(Op::Symlink {
                     parent,
@@ -330,10 +376,10 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
             4 => Record::Op(Op::Truncate {
                 oid: r.u64()?,
                 size: r.u64()?,
-                time: r.u64()?,
+                time: r.time()?,
             }),
             5 => {
-                let (oid, size, mtime) = (r.u64()?, r.u64()?, r.u64()?);
+                let (oid, size, mtime) = (r.u64()?, r.u64()?, r.time()?);
                 let n = r.u32()? as usize;
                 Record::Inline {
                     oid,
@@ -343,7 +389,7 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
                 }
             }
             6 => {
-                let (oid, size, mtime) = (r.u64()?, r.u64()?, r.u64()?);
+                let (oid, size, mtime) = (r.u64()?, r.u64()?, r.time()?);
                 let count = r.u32()? as usize;
                 let mut list = Vec::with_capacity(count.min(1024));
                 for _ in 0..count {
@@ -372,6 +418,24 @@ fn decode(b: &[u8]) -> Result<Vec<Record>> {
                 }
             }
             8 => Record::Dataset(r.u64()?),
+            9 => {
+                let (oid, mask) = (r.u64()?, r.u8()?);
+                if mask & !0b111 != 0 {
+                    return Err(Error::Corrupted);
+                }
+                let time = r.time()?;
+                let mut t = [None; 3];
+                for (i, slot) in t.iter_mut().enumerate() {
+                    if mask & (1 << i) != 0 {
+                        *slot = Some(r.time()?);
+                    }
+                }
+                Record::Op(Op::SetTimes {
+                    oid,
+                    times: super::SetTimes { mtime: t[0], btime: t[1], atime: t[2] },
+                    time,
+                })
+            }
             _ => return Err(Error::Corrupted),
         };
         out.push(rec);
@@ -421,7 +485,7 @@ impl<D: BlockDevice> Fs<D> {
             self.s.poisoned = true;
             return Err(Error::Corrupted);
         }
-        let payload = encode(&records);
+        let payload = encode(&records, self.s.time_format());
         // Bloky retezu predem: nedostatek mista se ohlasi drive, nez se na
         // disk cokoli zapise (bez prechodu do stavu chyby).
         let count = payload.len().div_ceil(PAYLOAD);
@@ -456,7 +520,7 @@ impl<D: BlockDevice> Fs<D> {
             let Some(raw) = btree::get(&mut self.s, &root, &Key::new(oid, item::INODE, 0))? else {
                 continue;
             };
-            let inode = crate::layout::Inode::decode(&raw)?;
+            let inode = crate::layout::Inode::decode(&raw, self.s.time_format())?;
             if inode.size as usize <= INLINE_MAX {
                 let data = self.inline_data(&root, oid, inode.size)?;
                 records.push(Record::Inline {
@@ -564,7 +628,7 @@ impl<D: BlockDevice> Fs<D> {
             seq += 1;
         }
         for batch in batches {
-            let Ok(records) = decode(&batch) else { break };
+            let Ok(records) = decode(&batch, self.s.time_format()) else { break };
             match self.batch_durable(&records) {
                 Ok(true) => {}
                 Ok(false) => break,
@@ -669,6 +733,14 @@ impl<D: BlockDevice> Fs<D> {
             Record::Op(Op::Truncate { oid, size, time }) => {
                 self.now = time;
                 self.truncate_oid(oid, size).map_err(bad)
+            }
+            Record::Op(Op::SetTimes { oid, times, time }) => {
+                self.now = time;
+                // Objekt mohl mezitim zaniknout (sirotek uklizeny pri pripojeni).
+                if !self.object_exists(oid).map_err(bad)? {
+                    return Ok(());
+                }
+                self.set_times_oid(oid, times).map_err(bad)
             }
             // Data objektu, ktery v okamziku prehrani uz nema zaznam (zapis do
             // sirotka po smazani jmena; sirotek po restartu zanika): nic.

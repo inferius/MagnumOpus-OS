@@ -19,6 +19,7 @@ pub mod v2;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use libos::time::WallTime;
 use libos::{Channel, Error, Result};
 
 pub use codec::{Reader, Writer};
@@ -89,8 +90,11 @@ pub struct Stat {
     pub oid: u64,
     pub kind: u8,
     pub size: u64,
-    pub mtime: u64,
-    pub ctime: u64,
+    /// Casy: sekundy od 1970 UTC (i64) + nanosekundy (u32), na drate 12 B.
+    pub mtime: WallTime,
+    pub ctime: WallTime,
+    /// Cas vytvoreni.
+    pub btime: WallTime,
     /// U adresare: soucet velikosti souboru v podstromu (okamzite).
     pub tree_bytes: u64,
     pub tree_files: u64,
@@ -125,13 +129,29 @@ pub struct Snapshot {
     pub name: String,
 }
 
+/// Cas na drate: i64 sekund + u32 nanosekund.
+pub fn put_time(w: &mut Writer, t: WallTime) {
+    w.u64(t.secs as u64).u32(t.nanos);
+}
+
+/// Cas z dratu; nanosekundy >= 10^9 = `INVALID_ARGS`.
+pub fn get_time(r: &mut Reader) -> Result<WallTime> {
+    let secs = r.u64()? as i64;
+    let nanos = r.u32()?;
+    if nanos >= 1_000_000_000 {
+        return Err(Error::InvalidArgs);
+    }
+    Ok(WallTime { secs, nanos })
+}
+
 impl Stat {
     pub fn put(&self, w: &mut Writer) {
         w.u64(self.oid)
             .u8(self.kind)
-            .u64(self.size)
-            .u64(self.mtime)
-            .u64(self.ctime);
+            .u64(self.size);
+        for t in [self.mtime, self.ctime, self.btime] {
+            put_time(w, t);
+        }
         w.u64(self.tree_bytes)
             .u64(self.tree_files)
             .u64(self.tree_dirs);
@@ -142,8 +162,9 @@ impl Stat {
             oid: r.u64()?,
             kind: r.u8()?,
             size: r.u64()?,
-            mtime: r.u64()?,
-            ctime: r.u64()?,
+            mtime: get_time(r)?,
+            ctime: get_time(r)?,
+            btime: get_time(r)?,
             tree_bytes: r.u64()?,
             tree_files: r.u64()?,
             tree_dirs: r.u64()?,
