@@ -658,7 +658,9 @@ used. The same screen will serve as the rescue text console.
 > and parallel `each --parallel N`. The same in both notations.
 > Implementation comes after the terminal colours and interactivity.
 
-```shell-b
+The examples are plain text for now (the parser does not know `async` yet and the documentation check would reject them):
+
+```text
 let a = async { fetch https://example.com/data.json | from json }
 let b = async { ls ~/Photos -r | where ext == "jpg" | count }
 let (data, count) = await all [a, b]          # waits for both, errors propagate
@@ -666,7 +668,7 @@ let first = await any [a, b] timeout 5s       # the first one done, else TIMED_O
 ls ~/Photos | each --parallel 8 f => image resize $f.path --width 800
 ```
 
-```shell-c
+```text
 let a = async { fetch("https://example.com/data.json").from_json() }
 let data = a.await
 ```

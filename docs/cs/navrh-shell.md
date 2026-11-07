@@ -631,7 +631,9 @@ záchranná textová konzole.
 > `cancel` a paralelní `each --parallel N`. Stejně v obou zápisech.
 > Implementace přijde po barvách a interaktivitě terminálu.
 
-```shell-b
+Příklady jsou zatím jako text (parser `async` ještě nezná, dokumentace by je odmítla):
+
+```text
 let a = async { fetch https://example.com/data.json | from json }
 let b = async { ls ~/Fotky -r | where ext == "jpg" | count }
 let (data, pocet) = await all [a, b]          # počká na obě, chyba se šíří
@@ -639,7 +641,7 @@ let prvni = await any [a, b] timeout 5s       # první hotová, jinak TIMED_OUT
 ls ~/Fotky | each --parallel 8 f => image resize $f.path --width 800
 ```
 
-```shell-c
+```text
 let a = async { fetch("https://example.com/data.json").from_json() }
 let data = a.await
 ```
