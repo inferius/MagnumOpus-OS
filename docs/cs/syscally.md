@@ -62,7 +62,7 @@ a zobrazení. Na `out_ptr` zapíše 16 B (little endian):
 |---|---|---|
 | 0 | i64 | sekundy od 1970-01-01 00:00:00 UTC (záporné = dřív) |
 | 8 | u32 | nanosekundy uvnitř sekundy (0..10⁹) |
-| 12 | u16 | zdroj: 1 UEFI, 2 CMOS RTC, 3 nastaveno za běhu |
+| 12 | u16 | zdroj: 1 UEFI, 2 CMOS RTC, 3 nastaveno za běhu, 4 synchronizováno podle sítě (`CLOCK_SET` s `NETWORK` nebo `CLOCK_ADJUST` s posunem) |
 | 14 | u16 | příznaky: bit 0 = pásmo neuvedeno, čas brán jako UTC |
 
 Jádro si při startu uloží reálný čas v okamžiku 0 monotónních hodin; výsledek
@@ -87,17 +87,40 @@ endian, `abi::time::SetRequest`):
 | 12 | i32 | `rtc_offset`: sekundy přičtené k UTC při zápisu do hardwarových hodin (RTC v místním čase = posun pásma, jinak 0); nejvýš ±18 h, jinak `INVALID_ARGS` |
 
 `flags`: bit 0 `WRITE_HARDWARE` = zapsat čas i do hardwarových hodin (x86:
-CMOS RTC). Ostatní bity = `INVALID_ARGS`. Vrací 1, když se hardwarové
+CMOS RTC), bit 1 `NETWORK` = čas je ze synchronizace podle sítě (zdroj 4).
+Ostatní bity = `INVALID_ARGS`. Vrací 1, když se hardwarové
 hodiny zapsaly. Vrací 0 bez `WRITE_HARDWARE`, když hodiny chybí (aarch64,
 ACPI hlásí, že RTC není) nebo když se rok nevejde do jejich rozsahu. S
 `WRITE_HARDWARE` může volání spát až 1 s: jádro zapisuje do RTC v polovině
 sekundy, aby hodiny tikaly na hranici sekund. Čas
 systému se nastaví v každém případě. Poté `CLOCK_REALTIME` hlásí zdroj 3
-(nastaveno za běhu) a žádné příznaky. Termíny čekání se nemění, počítají se
+(nastaveno za běhu; s `NETWORK` zdroj 4) a žádné příznaky. Termíny čekání se nemění, počítají se
 z `CLOCK_MONOTONIC`. Obal: `libos::time::set`, `Resource::set_clock`.
 Chyby: `ACCESS_DENIED` (chybí `SET_CLOCK`), `WRONG_TYPE`, `BAD_HANDLE`,
 `INVALID_ARGS`, `BAD_ADDRESS`. Podrobnosti:
 [Nastavení hodin](cas.md#nastavení-hodin-clock_set).
+
+### `CLOCK_ADJUST`
+
+`(resource, offset_ns i64, freq_ppb i64, flags, out_ptr) -> 0`. Plynulá
+korekce reálného času bez skoku. Vyžaduje Resource s právem `SET_CLOCK`.
+Příznaky (`abi::time::adjust`):
+
+- `OFFSET` (1): začít dorovnávat posun `offset_ns`, nahradí zbytek
+  předchozího. Dorovnává se rychlostí 500 ppm (`MAX_SLEW_PPB`), takže
+  posun 1 s trvá 2000 s. Nejvýš 1 hodina (`MAX_OFFSET_NS`).
+- `FREQUENCY` (2): trvalá oprava frekvence `freq_ppb`, nejvýš ±500 ppm
+  (`MAX_FREQ_PPB`).
+- bez příznaků: jen stav.
+
+Na `out_ptr` (0 = nic) zapíše `abi::time::AdjustStatus` (24 B): zbývá
+dorovnat (ns), frekvence (ppb), aktuální rychlost dorovnávání (ppb).
+Reálný čas nikdy nejde pozpátku. S `OFFSET` hlásí `CLOCK_REALTIME`
+zdroj 4 (synchronizováno podle sítě). `CLOCK_SET` dorovnávání zruší
+a frekvenci nechá. Obal: `libos::time::adjust`. Chyby: `ACCESS_DENIED`
+(chybí `SET_CLOCK`), `INVALID_ARGS` (meze, neznámé příznaky), `BAD_STATE`
+(reálný čas není znám), `WRONG_TYPE`, `BAD_HANDLE`, `BAD_ADDRESS`.
+Podrobnosti: [Plynulá korekce](cas.md#plynulá-korekce-clock_adjust).
 
 ## Handly
 

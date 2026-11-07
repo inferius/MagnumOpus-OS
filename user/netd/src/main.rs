@@ -28,6 +28,7 @@
 
 extern crate alloc;
 
+mod forward;
 mod fw;
 mod link;
 mod obj;
@@ -53,6 +54,8 @@ use crate::stack::{Stack, now_ns};
 
 /// Slot klice pro kanal sluzby firewallu.
 const FW_SLOT: u64 = 0xFFFF_FFFF;
+/// Slot klice pro kanal k dnsd.
+const RESOLVER_SLOT: u64 = 0xFFFF_FFFE;
 
 /// Rozpocet korenove relace: 3/4 uzivatelske pameti, kterou job sluzby
 /// jeste muze dostat (zbytek na relace, fronty a smoltcp); bez limitu jobu
@@ -111,7 +114,14 @@ fn main(startup: Startup) -> i64 {
     if fw_ch.is_none() {
         println!("netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)");
     }
-    let mut stack = Stack::new(link::Link::new(link_ch, info), fw::Firewall::new(fw_ch));
+    // 4. handle: kanal k dnsd (sifrovane DNS a DNSSEC); bez nej jen
+    // neovereny resolver.
+    let resolver_ch = handles.next().map(Channel::from_handle);
+    let mut stack = Stack::new(
+        link::Link::new(link_ch, info),
+        fw::Firewall::new(fw_ch),
+        forward::Forwarder::new(resolver_ch),
+    );
     let _ = bootstrap.write(b"ok", Vec::new());
     println!("netd: bezim, cekam na DHCP");
 
@@ -145,6 +155,7 @@ struct Service {
     to_arm: Vec<(usize, u32)>,
     link_armed: bool,
     fw_armed: bool,
+    resolver_armed: bool,
 }
 
 impl Service {
@@ -159,6 +170,7 @@ impl Service {
             to_arm: Vec::new(),
             link_armed: false,
             fw_armed: false,
+            resolver_armed: false,
         };
         svc.add_objects(vec![root]);
         svc
@@ -257,6 +269,13 @@ impl Service {
                 .wait_async(ch.handle(), FW_SLOT, Signals::READABLE | Signals::PEER_CLOSED)?;
             self.fw_armed = true;
         }
+        if !self.resolver_armed
+            && let Some(ch) = stack.resolver.channel()
+        {
+            self.port
+                .wait_async(ch.handle(), RESOLVER_SLOT, Signals::READABLE | Signals::PEER_CLOSED)?;
+            self.resolver_armed = true;
+        }
         for (i, g) in core::mem::take(&mut self.to_arm) {
             if self.gens.get(i) != Some(&g) {
                 continue;
@@ -289,6 +308,12 @@ impl Service {
             }
             self.link_armed = false;
             return !matches!(stack.pump(), Err(Error::PeerClosed));
+        }
+        if slot as u64 == RESOLVER_SLOT {
+            // Odpovedi vyzvedne progress_pending v tomto kole.
+            stack.resolver.pump();
+            self.resolver_armed = false;
+            return true;
         }
         if slot as u64 == FW_SLOT {
             // Zavreny kanal = dal bez fwd (registrace se uz neobnovi,

@@ -28,12 +28,18 @@ výpadku proudu pro testy FS).
 2. `devmgr`: najde zařízení a spustí ovladače. Hlásí disky (`block`)
    a vstupní zařízení (`input`) a pak `done`, až jsou hotová i zařízení
    USB při startu,
-3. `fsd` nad diskem se souborovým systémem,
+3. `fsd` nad diskem se souborovým systémem; init připraví úložiště
+   kořenových certifikátů `/system/config/certs` (viz
+   [TLS a HTTP](tls-http.md#úložiště-kořenových-certifikátů)),
 4. `inputd`: init mu předá vstupní zařízení, svůj kanál fokusu a kanál
    `secure` a pošle `settled` (zařízení připojená teď jsou důvěryhodná),
-5. `netd` nad první síťovou kartou a `fwd` (firewall, konfigurace na FS),
+5. `netd` nad první síťovou kartou (s kanálem pro `dnsd`), `fwd` (firewall,
+   konfigurace na FS) a `dnsd` (šifrované DNS a DNSSEC, viz
+   [Síť](sit.md#šifrované-dns-a-dnssec-dnsd)),
    oba v jobech podle svých manifestů (viz [Síť](sit.md),
-   [Firewall](firewall.md)),
+   [Firewall](firewall.md)), potom `ntpd` (synchronizace času, viz
+   [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd)) a `revocd`
+   (odvolání certifikátů, viz [TLS a HTTP](tls-http.md#odvolání-certifikátů)),
 6. všechny tyto procesy předá supervisoru k hlídání.
 
 ## Supervisor

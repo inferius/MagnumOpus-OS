@@ -6,12 +6,12 @@ První část milníku 6 („síť“). Hotové jsou tyto části:
 - služba sítě **`netd`** se stackem TCP/IP (ARP, IPv4, ICMP, UDP, TCP),
   klientem DHCP a resolverem DNS,
 - protokol **`netproto`** s přístupem přes capability a omezením cílů,
-- klient **NTP**, který přes službu času seřídí hodiny,
+- synchronizace času službou **`ntpd`** (plynulá korekce přes službu času),
 - **firewall**: manifest aplikace, dotazy uživateli, paketový filtr,
   profily sítí, audit a filtr DNS (viz [firewall.md](firewall.md)).
 
-TLS a HTTP přijdou později. Rozhraní na ně je připravené (viz
-[Příprava na TLS a HTTP](#příprava-na-tls-a-http)).
+- **TLS 1.3 a HTTP/1.1, HTTP/2** jako knihovny v programech, úložiště
+  kořenových certifikátů a program `fetch` (viz [TLS a HTTP](tls-http.md)).
 
 | Část | Kde | Co dělá |
 |---|---|---|
@@ -20,7 +20,7 @@ TLS a HTTP přijdou později. Rozhraní na ně je připravené (viz
 | protokol | `libs/netproto` | zprávy, oprávnění, formáty DNS a NTP, klientská knihovna |
 | správce zařízení | `user/devmgr` | najde kartu na PCI, spustí ovladač |
 | firewall | `user/fwd`, `libs/netfilter`, `libs/manifest` | konfigurace, dotazy uživateli, filtr paketů, manifesty |
-| init | `user/init/src/system.rs`, `apps.rs` | spustí `netd` a `fwd` v jobech podle manifestů, drží kořenovou relaci, NTP |
+| init | `user/init/src/system.rs`, `apps.rs` | spustí `netd` a `fwd` v jobech podle manifestů, drží kořenovou relaci, spustí `ntpd` |
 | testy | `user/init/src/tests/net.rs`, `xtask/src/nethelper.rs` | testy v QEMU přes slirp proti serverům hostitele |
 
 ## Architektura
@@ -287,6 +287,14 @@ let app_net = root.restrict(rights::INFO | rights::TCP_CONNECT | rights::RESOLVE
 Klientská knihovna je v `netproto` (feature `client`). Všechny metody
 blokují. Timeout `None` znamená bez limitu.
 
+**Pojistka v klientovi:** limity operací hlídá `netd`, klient má navíc
+vlastní: limit operace + 10 s, operace bez limitu (stav, relace, socket)
+30 s, operace s možným dotazem firewallu (spojení, datagram na nový cíl,
+ping, překlad vlastním serverem) navíc 300 s. Když `netd` neodpoví,
+program dostane `TIMED_OUT` a v logu je `netproto: sluzba site
+neodpovedela na pozadavek <op> do N s`. Kanál pak už nejde použít
+(`BAD_STATE`): pozdní odpověď by patřila jinému požadavku.
+
 ```rust
 use core::time::Duration;
 use netproto::io::{Read, Write};
@@ -396,8 +404,9 @@ delší než adresa, neplatné jméno a víc než 256 pravidel nebo 16 vrstev.
 
 ## DNS
 
-Resolver je ve službě (`user/netd/src/resolve.rs`), formát zpráv
-v `netproto::dns`, kde ho používá i testovací server.
+Systémový překlad jde přes `dnsd` (viz níže). Neověřený resolver ve
+službě (`user/netd/src/resolve.rs`, formát `netproto::dns`) slouží
+dotazům na vlastní server a jako záloha podle profilu sítě:
 
 - Pro rodinu 0 se posílají dotazy A i AAAA. Stačí, když odpoví jeden.
   Prázdná odpověď na AAAA nevadí.
@@ -413,7 +422,75 @@ v `netproto::dns`, kde ho používá i testovací server.
 - **Blokované domény** firewallu vrátí `ACCESS_DENIED` bez dotazu (viz
   [Filtr DNS](firewall.md#filtr-dns)).
 
-TODO: mezipaměť podle TTL, DoT/DoH (až s TLS).
+### Šifrované DNS a DNSSEC (`dnsd`)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sifrovane DNS">
+<defs><marker id="sd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="130" height="60" rx="6"/><text class="t b" x="75" y="45" text-anchor="middle">program</text><text class="m" x="75" y="64" text-anchor="middle">resolve()</text>
+<path class="ln" d="M140 50 L198 50" marker-end="url(#sd1)"/>
+<rect class="acc" x="200" y="20" width="160" height="110" rx="6"/><text class="t b" x="280" y="45" text-anchor="middle">netd</text><text class="m" x="280" y="64" text-anchor="middle">blokované domény</text><text class="m" x="280" y="82" text-anchor="middle">→ dnsd (kanál)</text><text class="m" x="280" y="100" text-anchor="middle">učí se pravidla</text><text class="m" x="280" y="118" text-anchor="middle">se jmény</text>
+<path class="ln-acc" d="M360 50 L418 50" marker-end="url(#sd1)"/>
+<rect class="ok" x="420" y="20" width="170" height="110" rx="6"/><text class="t b" x="505" y="45" text-anchor="middle">dnsd</text><text class="m" x="505" y="64" text-anchor="middle">DO + CD, DNSSEC</text><text class="m" x="505" y="82" text-anchor="middle">řetěz od kotvy IANA</text><text class="m" x="505" y="100" text-anchor="middle">mezipaměť (TTL)</text><text class="m" x="505" y="118" text-anchor="middle">OK/NX/BOGUS/…</text>
+<path class="ln" d="M590 50 L638 50" marker-end="url(#sd1)"/>
+<rect class="box" x="640" y="20" width="110" height="60" rx="6"/><text class="t b" x="695" y="45" text-anchor="middle">resolver</text><text class="m" x="695" y="64" text-anchor="middle">DoH / DoT</text>
+<path class="ln" d="M280 130 L280 168" marker-end="url(#sd1)"/>
+<rect class="warn" x="200" y="170" width="160" height="60" rx="6"/><text class="t b" x="280" y="195" text-anchor="middle">záloha UDP/TCP</text><text class="m" x="280" y="214" text-anchor="middle">servery z DHCP</text>
+<text class="m" x="380" y="190">jen když dnsd odpoví UNAVAILABLE</text>
+<text class="m" x="380" y="208">a profil sítě má</text>
+<text class="m" x="380" y="226">unauthenticated = "fallback"</text>
+</svg>
+<figcaption>Systémový překlad: šifrovaně a ověřeně; neověřená záloha jen podle profilu sítě.</figcaption>
+</figure>
+
+Systémový překlad (relace bez vlastního serveru) jde ze `netd` do služby
+**`dnsd`**. Ta se ptá **šifrovaně** (DoH, RFC 8484, nebo DoT, RFC 7858)
+a odpovědi **ověřuje sama** (DNSSEC): řetěz DS od kořenové kotvy IANA, podpisy
+RRSIG, důkazy neexistence NSEC a NSEC3. Resolveru se nevěří – lhát může
+jen tak, že zónu prohlásí za nepodepsanou, a to důkaz z nadřazené zóny
+nepustí.
+
+| Výsledek `dnsd` | Pro program |
+|---|---|
+| adresy (ověřené, nebo zóna nepodepsaná) | adresy; `netd` se z nich učí pravidla se jménem |
+| NXDOMAIN, NODATA (ověřené) | `NOT_FOUND` |
+| **BOGUS** (podpis nebo důkaz neprošel) | `CORRUPTED` – útok, záloha se nespustí |
+| UNAVAILABLE (žádný resolver neodpověděl) | podle profilu sítě: neověřený resolver (UDP/TCP na servery z DHCP nebo `SET_DNS`), nebo `UNREACHABLE` |
+
+- **Kanál** `netd` ↔ `dnsd` vzniká před startem `netd` (4. handle); dotazy
+  čekají v kanálu, než `dnsd` naběhne. Když `dnsd` skončí, `netd` překládá
+  jen podle pravidla profilu.
+- **Resolvery** v `dnsd.toml` mají adresu (`doh:https://jméno/cesta@adresa`,
+  `dot:jméno@adresa[:port]`): `dnsd` jména resolverů nepřekládá. Relace
+  sítě `dnsd` smí jen TCP na tyto adresy. Po chybě zkusí další a drží se
+  posledního funkčního.
+- **Kotvy:** DS kořene podle IANA `root-anchors.xml`: KSK-2017 (20326)
+  a KSK-2024 (38696, podepisuje kořen od 11. 10. 2026). Při další výměně
+  klíče kořene je potřeba `trust_anchors` aktualizovat (RFC 5011 zatím
+  ne).
+- **Algoritmy:** RSASHA256, RSASHA512, ECDSA P-256/P-384, Ed25519; otisky
+  SHA-256 a SHA-384. Zóna s jiným algoritmem nebo s NSEC3 nad 100 iterací
+  (RFC 9276) se bere jako nepodepsaná.
+- **Mezipaměť** podle TTL (záporné odpovědi podle SOA), 1 024 záznamů,
+  nejvýš 1 den; stavy zón (klíče) zvlášť, nejvýš 1 h. Podvržené odpovědi se
+  neukládají.
+- **Bez kontroly odvolání** certifikátu resolveru (jen OCSP stapling):
+  `revocd` překládá jména přes `dnsd`, kontrola by se zacyklila.
+- Bootstrap příkazy: `status` (`queries upstream cache_hits secure
+  insecure bogus unavailable dnssec server error`), `flush`, `prefer <n>`.
+
+```toml
+# dnsd.toml
+servers = ["doh:https://cloudflare-dns.com/dns-query@1.1.1.1", "dot:one.one.one.one@1.0.0.1"]
+dnssec = true
+trust_anchors = ["20326 8 2 E06D44B8...", "38696 8 2 683D2D0A..."]
+```
+
+> **Změna proti první verzi:** `netd` se ptal serverů z DHCP nešifrovaně
+> a bez ověření. **Proč:** síť (Wi-Fi, poskytovatel) viděla, kam se
+> připojujete, a mohla odpovědi podvrhnout. TLS sice podvržený server
+> odhalí, ale DNSSEC a šifrování chrání i jména bez TLS a soukromí.
+
 
 ## NTP a hodiny
 
@@ -422,49 +499,31 @@ TODO: mezipaměť podle TTL, DoT/DoH (až s TLS).
 (pole „originate“). Server bez synchronizace (stratum 0, leap 3) vrátí
 `BAD_STATE`.
 
-Hodiny smí nastavit **jen služba času** `timed` (právo `SET_CLOCK`, viz
-[cas.md](cas.md)). Proto `init` čas jen zjistí a pošle ho službě času
-zprávou `set`:
+Hodiny podle sítě seřizuje služba **`ntpd`**: měří posun proti
+serverům, filtruje měření a navrhuje korekce službě času `timed`, která
+jako jediná smí hodiny měnit (právo `SET_CLOCK`). Po první synchronizaci se
+čas jen plynule dorovnává (`CLOCK_ADJUST`), nikdy neskočí zpět. Podrobně
+v [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd).
 
-<figure class="diagram">
-<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Serizeni hodin podle NTP">
-<defs><marker id="sa3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="50" width="150" height="60" rx="6"/><text class="t b" x="85" y="75" text-anchor="middle">server NTP</text><text class="m" x="85" y="93" text-anchor="middle">UDP 123</text>
-<path class="ln" d="M238 80 L162 80" marker-end="url(#sa3)"/>
-<text class="m" x="170" y="70">t1 → t2, t3 → t4</text>
-<rect class="box" x="240" y="50" width="120" height="60" rx="6"/><text class="t b" x="300" y="75" text-anchor="middle">netd</text><text class="m" x="300" y="93" text-anchor="middle">socket UDP</text>
-<path class="ln" d="M438 80 L362 80" marker-end="url(#sa3)"/>
-<rect class="acc" x="440" y="50" width="130" height="60" rx="6"/><text class="t b" x="505" y="75" text-anchor="middle">init</text><text class="m" x="505" y="93" text-anchor="middle">ntp_query</text>
-<path class="ln-acc" d="M570 80 L618 80" marker-end="url(#sa3)"/>
-<rect class="ok" x="620" y="50" width="130" height="60" rx="6"/><text class="t b" x="685" y="75" text-anchor="middle">timed</text><text class="m" x="685" y="93" text-anchor="middle">CLOCK_SET</text>
-<text class="m" x="10" y="150">posun = ((t2 - t1) + (t3 - t4)) / 2; nový čas = t4 + posun. Do RTC se zatím nezapisuje.</text>
-</svg>
-<figcaption>Síť čas jen zjistí; nastavit ho smí jen služba času.</figcaption>
-</figure>
+> **Změna proti první verzi:** init se jednou zeptal serveru NTP a čas
+> nastavil skokem (`sync_time_ntp`, jen v testech). **Proč:** skok zpět
+> rozbije programy, které čas porovnávají (certifikáty, soubory, logy),
+> a jedno měření bez filtru je snadno podvrhnutelné. `ntpd` běží trvale,
+> s relací sítě jen na nakonfigurované servery.
 
-```rust
-// init (user/init/src/system.rs)
-let offset_ns = system::sync_time_ntp(&net_root, &time_service, server)?;
-```
+## TLS a HTTP
 
-Zatím se hodiny seřídí jednou a jen v testech proti serveru hostitele.
-TODO: server z konfigurace nebo z DHCP (volba 42), periodické seřizování
-a plynulé dorovnání místo skoku.
+TLS 1.3 a klient HTTP/1.1 a HTTP/2 jsou knihovny v procesu programu
+(`libs/tls`, `libs/httpc`) nad obecným proudem `netproto::io::{Read,
+Write}`, takže fungují nad holým TCP i nad TLS stejně. Kořenové
+certifikáty jsou v systémovém úložišti `/system/config/certs`, které
+program dostane jako relaci FS jen pro čtení. Vše popisuje kapitola
+[TLS a HTTP](tls-http.md).
 
-## Příprava na TLS a HTTP
-
-- **Proudy:** `netproto::io::{Read, Write}` jsou obecné rozhraní pro proud
-  bajtů a `TcpStream` je implementuje. TLS bude obal
-  `TlsStream<S: Read + Write>`, který implementuje totéž. Klient HTTP bude
-  pracovat s jakýmkoli `Read + Write`, nad holým TCP i nad TLS stejně.
-- **TLS poběží v procesu programu** (knihovna), ne ve službě sítě. Klíče
-  relací tak zůstanou v programu, který je potřebuje. Úložiště důvěryhodných
-  certifikátů bude systémová služba nebo soubor s právem jen pro čtení.
-- **Oprávnění podle jmen:** pravidla `Target::Host` už teď počítají
-  s aplikacemi, které smí jen na své API (`*.example.com:443`). TLS
-  k tomu přidá ověření, že server jméno opravdu vlastní.
-- **Náhodnost:** klíče TLS vezme z jádra přes
-  `libos::random::fill_seeded` (`REQUIRE_SEEDED`).
+> **Změna proti první verzi:** úložiště certifikátů mělo být služba nebo
+> soubor; je to adresář na FS (sada Mozilla + vlastní CA + `distrust.txt`).
+> **Proč:** správce přidá firemní CA souborem, aktualizace systému jeho
+> soubory nepřepíše a práva hlídá FS jako u ostatních dat.
 
 ## Testy
 
@@ -502,7 +561,8 @@ překládá adresu 10.0.2.2 na 127.0.0.1 hostitele.
 | UDP velký datagram | 60 000 B tam a zpět (fragmentace a skládání IPv4) |
 | oprávnění | chybějící práva, cíle mimo omezení, předání spojení jinému kanálu |
 | jméno hostitele | pravidlo `*.magnumopus` platí po systémovém překladu, ne po překladu vlastním serverem |
-| NTP | dotaz na server hostitele, nastavení přes `timed`, zdroj času `SET` |
+| šifrované DNS | sada „sifrovane DNS“: ověřené A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC i NSEC3), NODATA; nepodepsaná a podvržená zóna; přechod z nefunkčního resolveru, DoT, mezipaměť; pravidlo profilu |
+| NTP | `ntpd` proti serveru hostitele (sada „synchronizace casu“, viz [cas.md](cas.md#synchronizace-podle-sítě-ntpd)) |
 
 DNS přes 10.0.2.3 (slirp předává dotazy DNS hostitele) se netestuje, protože
 by test potřeboval internet. Bez pomocných serverů (`cargo xtask run`)
@@ -522,5 +582,5 @@ Formáty a oprávnění testuje i hostitel: `cargo test -p netproto
 - **IPv6:** SLAAC, ICMPv6, AAAA už resolver umí. Protokol je připravený
   (adresy `IpAddr`).
 - **Sdílená paměť pro data** místo kopírování zprávami (jako u disku).
-- **Víc karet**, statická konfigurace, mezipaměť DNS, NTP periodicky.
-- **TLS 1.3 a klient HTTP** jako knihovny nad `Read + Write`.
+- **Víc karet**, statická konfigurace, mezipaměť DNS, servery NTP z DHCP
+  (volba 42).

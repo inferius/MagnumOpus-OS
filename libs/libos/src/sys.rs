@@ -99,6 +99,17 @@ pub fn clock_set(resource: u32, req: &abi::time::SetRequest, flags: u64) -> Resu
     .map(|r| r == 1)
 }
 
+/// Plynula korekce realneho casu (Resource s pravem `SET_CLOCK`), viz
+/// `abi::time::adjust`. Vraci stav po zmene.
+pub fn clock_adjust(resource: u32, offset_ns: i64, freq_ppb: i64, flags: u64) -> Result<abi::time::AdjustStatus> {
+    let mut buf = [0u8; abi::time::AdjustStatus::SIZE];
+    call(
+        nr::CLOCK_ADJUST,
+        [resource as u64, offset_ns as u64, freq_ppb as u64, flags, buf.as_mut_ptr() as u64, 0],
+    )?;
+    Ok(abi::time::AdjustStatus::decode(&buf))
+}
+
 pub fn handle_close(h: u32) -> Result<()> {
     call(nr::HANDLE_CLOSE, [h as u64, 0, 0, 0, 0, 0]).map(|_| ())
 }

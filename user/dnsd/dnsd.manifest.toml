@@ -1,0 +1,16 @@
+# Systemovy resolver: sifrovane DNS (DoH, DoT) a DNSSEC. Init relaci
+# omezi jen na TCP k adresam resolveru z dnsd.toml.
+[app]
+id = "org.magnumopus.dnsd"
+name = "Preklad jmen (sifrovane DNS)"
+
+[limits]
+memory = "32M"
+kernel_memory = "4M"
+stack = "512K"
+
+[network]
+rights = ["tcp"]
+ask = false
+sockets = 16
+buffers = "2M"

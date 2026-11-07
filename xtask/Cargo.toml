@@ -11,6 +11,21 @@ initfs = { workspace = true, features = ["std"] }
 fs = { workspace = true, features = ["std"] }
 shlang = { path = "../libs/shlang" }
 abi = { workspace = true }
-netproto = { path = "../libs/netproto", features = ["std"] }
+netproto = { path = "../libs/netproto", features = ["std", "nts"] }
 fatfs = "0.3"
 crc32fast = "1.5"
+# Korenove certifikaty pro initfs (sada Mozilla pres CCADB).
+webpki-root-certs = "1"
+# Testovaci servery HTTPS (nezavisle na libs/tls a libs/httpc).
+rustls = { version = "0.23.40", default-features = false, features = ["ring", "std"] }
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+ring = "0.17"
+# Cteni poli certifikatu pro odpovedi OCSP a OneCRL.
+tls = { path = "../libs/tls" }
+dns = { path = "../libs/dns", features = ["testzone"] }

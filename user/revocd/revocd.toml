@@ -1,0 +1,8 @@
+# Seznam odvolanych mezilehlych CA od Mozilly (OneCRL, jako Firefox).
+onecrl = "https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/onecrl/changeset?_expected=0"
+# Obnova OneCRL (hodiny).
+onecrl_refresh_hours = 24
+# CRL bez nextUpdate plati tolik hodin od stazeni.
+crl_default_hours = 24
+# Po neuspesnem stazeni CRL se znovu nezkousi tolik minut.
+retry_minutes = 10

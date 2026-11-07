@@ -64,7 +64,7 @@ Writes 16 B (little endian) to `out_ptr`:
 |---|---|---|
 | 0 | i64 | seconds since 1970-01-01 00:00:00 UTC (negative = earlier) |
 | 8 | u32 | nanoseconds within the second (0..10⁹) |
-| 12 | u16 | source: 1 UEFI, 2 CMOS RTC, 3 set at run time |
+| 12 | u16 | source: 1 UEFI, 2 CMOS RTC, 3 set at run time, 4 synchronized over the network (`CLOCK_SET` with `NETWORK` or `CLOCK_ADJUST` with an offset) |
 | 14 | u16 | flags: bit 0 = time zone not given, time taken as UTC |
 
 At boot the kernel stores the real time at moment 0 of the monotonic clock;
@@ -89,17 +89,40 @@ and `init` gives it only to the time service `timed` (without `MANAGE`).
 | 12 | i32 | `rtc_offset`: seconds added to UTC when writing the hardware clock (RTC in local time = zone offset, else 0); at most ±18 h, else `INVALID_ARGS` |
 
 `flags`: bit 0 `WRITE_HARDWARE` = also write the time to the hardware clock
-(x86: CMOS RTC). Other bits = `INVALID_ARGS`. Returns 1 when the hardware
+(x86: CMOS RTC), bit 1 `NETWORK` = the time comes from network
+synchronization (source 4). Other bits = `INVALID_ARGS`. Returns 1 when the hardware
 clock was written. Returns 0 without `WRITE_HARDWARE`, when there is no
 clock (aarch64, ACPI reports no RTC) or when the year does not fit its
 range. With `WRITE_HARDWARE` the call can sleep up to 1 s: the kernel writes
 the RTC in the middle of a second so the clock ticks on second boundaries.
 The system time is set in every case. Afterwards `CLOCK_REALTIME`
-reports source 3 (set at run time) and no flags. Wait deadlines do not
+reports source 3 (set at run time; with `NETWORK` source 4) and no flags. Wait deadlines do not
 change; they come from `CLOCK_MONOTONIC`. Wrapper: `libos::time::set`,
 `Resource::set_clock`. Errors: `ACCESS_DENIED` (no `SET_CLOCK`),
 `WRONG_TYPE`, `BAD_HANDLE`, `INVALID_ARGS`, `BAD_ADDRESS`. Details:
 [Setting the clock](time.md#setting-the-clock-clock_set).
+
+### `CLOCK_ADJUST`
+
+`(resource, offset_ns i64, freq_ppb i64, flags, out_ptr) -> 0`. Smooth
+correction of real time without a step. Requires a Resource with the
+`SET_CLOCK` right. Flags (`abi::time::adjust`):
+
+- `OFFSET` (1): start slewing away the offset `offset_ns`, replacing the
+  rest of the previous one. The rate is 500 ppm (`MAX_SLEW_PPB`), so an
+  offset of 1 s takes 2000 s. At most 1 hour (`MAX_OFFSET_NS`).
+- `FREQUENCY` (2): a permanent frequency correction `freq_ppb`, at most
+  ±500 ppm (`MAX_FREQ_PPB`).
+- no flags: status only.
+
+At `out_ptr` (0 = nothing) it writes `abi::time::AdjustStatus` (24 B):
+remaining offset (ns), frequency (ppb), current slew rate (ppb). Real time
+never goes backwards. With `OFFSET`, `CLOCK_REALTIME` reports source 4
+(synchronized over the network). `CLOCK_SET` cancels the slew and keeps the
+frequency. Wrapper: `libos::time::adjust`. Errors: `ACCESS_DENIED` (no
+`SET_CLOCK`), `INVALID_ARGS` (limits, unknown flags), `BAD_STATE` (real
+time is not known), `WRONG_TYPE`, `BAD_HANDLE`, `BAD_ADDRESS`. Details:
+[Smooth correction](time.md#smooth-correction-clock_adjust).
 
 ## Handles
 
