@@ -78,6 +78,13 @@ impl Dialogs {
         self.queue.iter().any(|d| d.owner == Owner::Secure)
     }
 
+    /// Odebere dialogy vlastniku podle `f`; `true` = zmizel aktivni.
+    pub(crate) fn remove_where(&mut self, f: impl Fn(Owner) -> bool) -> bool {
+        let front = self.active().is_some_and(|d| f(d.owner));
+        self.queue.retain(|d| !f(d.owner));
+        front
+    }
+
     pub fn next_wakeup(&self) -> Option<u64> {
         None
     }

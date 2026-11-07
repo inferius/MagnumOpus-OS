@@ -188,7 +188,8 @@ fn run_cli() -> Result<()> {
 }
 
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
-/// chyb a syscallu, casova pasma, protokol vstupu a rozlozeni klavesnice).
+/// chyb a syscallu, casova pasma, protokol vstupu a rozlozeni klavesnice,
+/// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI).
 fn host_tests() -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = Command::new(cargo)
@@ -228,6 +229,18 @@ fn host_tests() -> Result<()> {
             "manifest",
             "--package",
             "netfilter",
+            "--package",
+            "guiproto",
+            "--package",
+            "gfx",
+            "--package",
+            "font",
+            "--package",
+            "vgpu",
+            "--package",
+            "comp",
+            "--package",
+            "ui",
             "--features",
             "initfs/std,fs/std,netproto/std",
         ])
@@ -315,6 +328,8 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-rng",
     "virtio-gpu",
     "compd",
+    "gui-demo",
+    "gui-term",
     "netd",
     "fwd",
     "netprobe",
@@ -327,6 +342,8 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("fwd.manifest.toml", "user/fwd/fwd.manifest.toml"),
     ("netd.manifest.toml", "user/netd/netd.manifest.toml"),
     ("netprobe.manifest.toml", "user/netprobe/netprobe.manifest.toml"),
+    ("gui-demo.manifest.toml", "user/gui-demo/gui-demo.manifest.toml"),
+    ("gui-term.manifest.toml", "user/gui-term/gui-term.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

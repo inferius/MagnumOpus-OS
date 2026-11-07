@@ -818,3 +818,37 @@ fn new_device_must_be_confirmed_by_existing_input() {
     assert!(t.out().contains(&Out::Device { source: 9, trust: true }));
     assert!(t.c.input.untrusted.is_empty());
 }
+
+#[test]
+fn buffer_released_when_layer_switches() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.msg(a, ClientMsg::WindowCreate { window: 1, mode: Mode::Standard, w: 10, h: 10, title: String::new() });
+    for b in 1..=2 {
+        t.c.client_msg(a, ClientMsg::BufferCreate { buffer: b, w: 10, h: 10, stride: 10 }, Some(Box::new(vec![RED; 100])), t.now);
+    }
+    t.msg(a, ClientMsg::LayerCreate { layer: 1, window: 1, parent: 0, kind: LayerKind::Buffer });
+    let set = |b| ClientMsg::LayerSet { layer: 1, props: LayerProps { mask: prop::BUFFER | prop::RECT, rect: Rect::new(0, 0, 10, 10), buffer: b, ..Default::default() } };
+    t.msg(a, set(1));
+    t.commit(a, 1, 0, 0, 0);
+    t.out();
+    t.msg(a, set(2));
+    t.commit(a, 2, 0, 0, 0);
+    assert!(client_msgs(&t.out(), a).contains(&ServerMsg::Released { buffer: 1 }));
+    t.msg(a, ClientMsg::LayerDestroy { layer: 1 });
+    t.commit(a, 3, 0, 0, 0);
+    assert!(client_msgs(&t.out(), a).contains(&ServerMsg::Released { buffer: 2 }));
+}
+
+#[test]
+fn closed_caller_removes_its_confirmation() {
+    let mut t = T::new();
+    let mut i = info("org.test.app", "Aplikace");
+    i.actions = action::parse_manifest(MANIFEST).unwrap();
+    let a = t.c.add_client(i, t.now);
+    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.c.caller_msg(5, "agent", CallerMsg::Call { call: 1, app: "org.test.app".into(), action: "file.delete".into(), args: vec![], synthetic: true });
+    assert!(t.c.dialogs.active().is_some());
+    t.c.caller_gone(5);
+    assert!(t.c.dialogs.active().is_none());
+}

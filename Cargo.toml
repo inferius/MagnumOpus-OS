@@ -55,6 +55,8 @@ members = [
     "user/virtio-rng",
     "user/virtio-gpu",
     "user/compd",
+    "user/gui-demo",
+    "user/gui-term",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace

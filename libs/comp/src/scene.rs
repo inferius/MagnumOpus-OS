@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use guiproto::a11y::Tree;
 use guiproto::control::ConnectInfo;
 use guiproto::window::{
-    AnimProp, ButtonSide, ClientMsg, Curve, LayerKind, LayerProps, Mode, RegionKind, ServerMsg, commit, wstate,
+    AnimProp, ButtonSide, ClientMsg, Curve, LayerKind, LayerProps, Mode, RegionKind, ServerMsg, commit, prop, wstate,
 };
 use guiproto::{Error, MAX_DIM, Rect};
 
@@ -479,8 +479,14 @@ impl Comp {
             }
             ClientMsg::LayerSet { layer, props } => {
                 let l = cl.layers.get_mut(&layer).ok_or(Error::NotFound)?;
+                let old = l.props.buffer;
                 l.props.apply(&props);
                 touched.push(l.window);
+                // Buffer, ktery uz zadna vrstva neukazuje, je volny:
+                // aplikace do nej smi zase kreslit.
+                if props.mask & prop::BUFFER != 0 && old != 0 && old != props.buffer && !cl.layers.values().any(|l| l.props.buffer == old) {
+                    self.out.push(crate::Out::Client(c, ServerMsg::Released { buffer: old }));
+                }
             }
             ClientMsg::LayerDestroy { layer } => {
                 let w = cl.layers.get(&layer).ok_or(Error::NotFound)?.window;
@@ -492,8 +498,18 @@ impl Comp {
                     gone.extend(cl.layers.iter().filter(|(_, l)| l.parent == p).map(|(&id, _)| id));
                     i += 1;
                 }
+                let mut freed = Vec::new();
                 for id in gone {
-                    cl.layers.remove(&id);
+                    if let Some(l) = cl.layers.remove(&id)
+                        && l.props.buffer != 0
+                    {
+                        freed.push(l.props.buffer);
+                    }
+                }
+                for b in freed {
+                    if !cl.layers.values().any(|l| l.props.buffer == b) {
+                        self.out.push(crate::Out::Client(c, ServerMsg::Released { buffer: b }));
+                    }
                 }
                 touched.push(w);
             }

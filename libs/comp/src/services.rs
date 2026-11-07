@@ -174,7 +174,12 @@ impl Comp {
 
     /// Kanal `actions` zavren.
     pub fn caller_gone(&mut self, peer: PeerId) {
+        let gone: Vec<u32> = self.services.calls.iter().filter(|(_, c)| c.caller == peer).map(|(&k, _)| k).collect();
         self.services.calls.retain(|_, c| c.caller != peer);
+        // Potvrzeni volani, ktere uz nikdo neceka, zmizi.
+        if self.dialogs.remove_where(|o| matches!(o, Owner::Action(id) if gone.contains(&id))) {
+            self.damage_all();
+        }
     }
 
     /// Zadost na kanalu `inspect`. `Pixel` vyrizuje sluzba (ma snimek).

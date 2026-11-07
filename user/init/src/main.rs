@@ -1,7 +1,8 @@
 //! init: prvni proces v userspace.
 //!
 //! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
-//! souboroveho systemu, sluzbu vstupu a sluzbu site s firewallem. Pak bezi
+//! souboroveho systemu, sluzbu vstupu, sluzbu site s firewallem a GUI
+//! (kompozitor a ukazkove aplikace, `gui.rs`). Pak bezi
 //! jako supervisor (`supervisor.rs`: zarizeni pripojena za behu, restart
 //! spadlych sluzeb). V testovacim behu (priznak `TEST_RUN` od jadra) misto
 //! toho spusti testy userspace (`tests/`) a skonci s jejich vysledkem.
@@ -13,6 +14,7 @@
 extern crate alloc;
 
 mod apps;
+mod gui;
 mod input;
 mod supervisor;
 mod system;
@@ -61,11 +63,19 @@ fn main(startup: Startup) -> i64 {
                 }
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
             }
+            *gui::DISPLAY.lock() = devices.displays.pop();
             system::DEVICES.call_once(|| devices);
         }
         Err(e) => println!("init: spravce zarizeni nelze spustit: {e}"),
     }
     if startup.flags & libos::abi::bootstrap::flags::TEST_RUN == 0 {
+        // GUI: kompozitor prevezme vstup a obrazovku (testy si ho spusti samy).
+        let input = system::devices().and_then(|d| d.input.as_ref());
+        gui::start_desktop(&startup, input);
+        if let Some(g) = gui::GUI.lock().as_ref() {
+            // Restart zatim neni: okna aplikaci patri kompozitoru.
+            sup.watch("compd", &g.process, None);
+        }
         // Bezny beh: init je supervisor a nekonci.
         sup.run(&startup);
     }

@@ -426,6 +426,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui-demo"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "ui",
+]
+
+[[package]]
+name = "gui-term"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "inputproto",
+ "libos",
+ "term",
+ "ui",
+]
+
+[[package]]
 name = "guiproto"
 version = "0.1.0"
 dependencies = [
@@ -507,6 +529,7 @@ dependencies = [
  "blockproto",
  "conf",
  "fsproto",
+ "guiproto",
  "inputproto",
  "libos",
  "manifest",

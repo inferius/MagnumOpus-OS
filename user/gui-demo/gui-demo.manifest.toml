@@ -1,0 +1,36 @@
+# Ukazkova aplikace GUI (milnik 6c): pocitadlo a poznamky. Akce volaji
+# shell, pruzkumnik, asistent i agent pres kompozitor.
+[app]
+id = "org.magnumopus.demo"
+name = "Ukázka"
+
+[limits]
+memory = "64M"
+
+[[action]]
+id = "counter.add"
+title = "Přičíst k počítadlu"
+
+[[action.param]]
+name = "by"
+type = "int"
+required = true
+
+[[action]]
+id = "note.add"
+title = "Přidat poznámku"
+needs = ["data:zapis"]
+
+[[action.param]]
+name = "text"
+type = "text"
+required = true
+
+[[action.param]]
+name = "important"
+type = "bool"
+
+[[action]]
+id = "notes.clear"
+title = "Smazat všechny poznámky"
+confirm = true
