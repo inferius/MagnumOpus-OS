@@ -141,3 +141,20 @@ fn damage_merges_and_limits() {
     assert_eq!(d.take().len() > 0, true);
     assert!(d.is_empty());
 }
+
+#[test]
+fn text_draws_and_measures() {
+    let mut t = crate::text::Text::system();
+    let mut px = vec![0xFF00_0000u32; 200 * 40];
+    let mut c = Canvas::new(&mut px, 200, 40, 200).unwrap();
+    let (lh, base) = t.line(16.0);
+    assert!(lh >= 16 && base > 8);
+    let end = t.draw(&mut c, 4, base, "Žluťoučký", 16.0, rgb(255, 255, 255));
+    let w = t.width("Žluťoučký", 16.0) as i32;
+    assert!((end - 4 - w).abs() <= 2, "{end} {w}");
+    let lit = (0..200 * 40).filter(|&i| c.get(i % 200, i / 200) != 0xFF00_0000).count();
+    assert!(lit > 50, "text neco nakreslil: {lit}");
+    let pos = t.positions("ab", 16.0);
+    assert_eq!(pos.len(), 3);
+    assert!(pos[0] == 0 && pos[1] > 0 && pos[2] > pos[1]);
+}

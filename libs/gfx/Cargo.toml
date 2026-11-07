@@ -7,3 +7,4 @@ description = "Softwarove kresleni: plochy B8G8R8A8 (premultiplied), vyplne, pro
 
 [dependencies]
 guiproto = { path = "../guiproto" }
+font = { path = "../font" }

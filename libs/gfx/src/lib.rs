@@ -13,6 +13,7 @@
 extern crate alloc;
 
 pub mod damage;
+pub mod text;
 
 #[cfg(test)]
 mod tests;

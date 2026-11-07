@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir};
 
 /// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
-const DEVICE_LAYOUT: u32 = 5;
+const DEVICE_LAYOUT: u32 = 6;
 
 fn default_accel() -> &'static str {
     if cfg!(target_os = "linux") && Path::new("/dev/kvm").exists() {
@@ -178,6 +178,7 @@ fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
         .args(["-device", "secondary-vga,id=video1"])
         .args(["-device", "qemu-xhci,id=xhci"])
         .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"]);
+    gpu_device(cmd, opts);
     // Pod AMD-Vi firmware OVMF z disku s prekladem DMA nenabootuje, proto
     // tam systemovy disk prekladem neprochazi (ostatni disky ano).
     opts.iommu != "amd"
@@ -211,10 +212,17 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
         .args(["-device", "virtio-mouse-pci,iommu_platform=on,display=video0"])
         .args(["-device", "qemu-xhci,id=xhci"])
         .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"]);
+    gpu_device(cmd, opts);
     if opts.test {
         cmd.args(["-semihosting-config", "enable=on,target=native"]);
     }
     true
+}
+
+/// Grafika virtio-gpu (ovladac `virtio-gpu`, kompozitor `compd`) s prekladem
+/// DMA pres IOMMU. Rezim 2D funguje s kazdym displejem QEMU (i bez okna).
+fn gpu_device(cmd: &mut Command, _opts: &Options) {
+    cmd.args(["-device", "virtio-gpu-pci,id=gpu0,disable-legacy=on,iommu_platform=on,xres=1280,yres=800"]);
 }
 
 fn run_interactive(mut cmd: Command) -> Result<()> {

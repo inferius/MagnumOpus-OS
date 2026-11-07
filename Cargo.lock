@@ -177,6 +177,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "comp"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "inputproto",
+]
+
+[[package]]
 name = "conf"
 version = "0.1.0"
 
@@ -401,6 +410,7 @@ dependencies = [
 name = "gfx"
 version = "0.1.0"
 dependencies = [
+ "font",
  "guiproto",
 ]
 
@@ -1204,6 +1214,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vgpu"
+version = "0.1.0"
+
+[[package]]
 name = "virtio"
 version = "0.1.0"
 dependencies = [
@@ -1218,6 +1232,17 @@ dependencies = [
  "blockproto",
  "libos",
  "pci",
+ "virtio",
+]
+
+[[package]]
+name = "virtio-gpu"
+version = "0.1.0"
+dependencies = [
+ "guiproto",
+ "libos",
+ "pci",
+ "vgpu",
  "virtio",
 ]
 

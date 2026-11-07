@@ -19,6 +19,8 @@ members = [
     "libs/guiproto",
     "libs/gfx",
     "libs/font",
+    "libs/vgpu",
+    "libs/comp",
     "libs/keymap",
     "libs/i8042",
     "libs/usbproto",
@@ -50,6 +52,7 @@ members = [
     "user/usb-hid",
     "user/virtio-net",
     "user/virtio-rng",
+    "user/virtio-gpu",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace
