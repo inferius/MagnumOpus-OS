@@ -101,6 +101,32 @@ opt-level = 2
 [profile.dev.package.term]
 opt-level = 2
 
+# Souborovy system: hashe bloku (XXH3, BLAKE3), komprese a strom CoW. Bez
+# optimalizace je kazdy pozadavek i krok scrubu, defragmentace
+# a deduplikace na pozadi v QEMU (TCG) mnohonasobne pomalejsi; radek
+# shellu se zapisem pak cekal sekundy (klon, diff, zahozeni, krok scrubu
+# mezi pozadavky).
+[profile.dev.package.fs]
+opt-level = 2
+
+[profile.dev.package.fsd]
+opt-level = 2
+
+[profile.dev.package.fsproto]
+opt-level = 2
+
+[profile.dev.package.xxhash-rust]
+opt-level = 3
+
+[profile.dev.package.blake3]
+opt-level = 3
+
+[profile.dev.package.lz4_flex]
+opt-level = 3
+
+[profile.dev.package.ruzstd]
+opt-level = 3
+
 # Skladani a rasterizace bez optimalizace by byly desetkrat pomalejsi
 # (pixelove smycky); kompozitor by nestihal takt snimku.
 [profile.dev.package.guiproto]

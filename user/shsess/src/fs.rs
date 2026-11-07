@@ -4,7 +4,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use fsproto::hist::Change;
-use fsproto::v2::{access, share};
 use fsproto::{FsClient, Stat, kind};
 use libos::time::WallTime;
 use libos::Error;
@@ -135,7 +134,7 @@ impl Fs for FsdFs {
     }
 
     /// Zapis je atomicky: data do docasneho souboru vedle, pak
-    /// `RENAME_REPLACE`. Pri chybe zustane puvodni soubor cely.
+    /// `REPLACE_COMMIT`. Pri chybe zustane puvodni soubor cely.
     fn write(&mut self, path: &str, data: &[u8]) -> FsResult<()> {
         match self.client.stat(path) {
             Ok(s) if node(s.kind) == NodeKind::Dir => return Err(Error::IsADirectory),
@@ -146,28 +145,24 @@ impl Fs for FsdFs {
             }
             Err(e) => return Err(e),
         }
-        // Podminene ulozeni (`REPLACE_BEGIN`/`COMMIT`): docasny soubor
-        // zalozi fsd vyhradne pro tento zapis (jedinecne jmeno, nikdy cizi
-        // soubor), smaze ho pri chybe i padu a cil nahradi atomicky,
-        // jen kdyz se mezitim nezmenil. Zmena mezi zjistenim revize
-        // a potvrzenim = zkusit znovu s novou revizi (shell prepisuje).
-        let mut last = Error::Conflict;
-        for _ in 0..3 {
-            let expected = match self.client.open(path, access::READ, share::ALL, 0) {
-                Ok(o) => {
-                    let _ = self.client.close(o.handle);
-                    Some(o.revision)
-                }
-                Err(Error::NotFound) => None,
-                Err(e) => return Err(e),
-            };
-            match self.client.save_if(path, expected, data) {
-                Ok(_) => return Ok(()),
-                Err(e @ (Error::Conflict | Error::AlreadyExists | Error::NotFound)) => last = e,
-                Err(e) => return Err(e),
+        // Nahrazeni pres `REPLACE_BEGIN`/`COMMIT`: docasny soubor zalozi
+        // fsd vyhradne pro tento zapis (jedinecne jmeno, nikdy cizi soubor),
+        // smaze ho pri chybe i padu a cil nahradi atomicky. Potvrzeni
+        // `force` = prepsat aktualni stav (shell prepisuje; soubeh s jinymi
+        // zapisy resi koncept radku - `SH_CONFLICT`). Neni treba zjistovat
+        // revizi, takze staci pravo zapisu (bez cteni).
+        let h = self.client.replace_begin(path, None)?;
+        if let Err((_, e)) = self.client.write_h(h, 0, data) {
+            let _ = self.client.replace_abort(h);
+            return Err(e);
+        }
+        match self.client.replace_commit(h, true) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let _ = self.client.replace_abort(h);
+                Err(e)
             }
         }
-        Err(last)
     }
 
     fn mkdir(&mut self, path: &str) -> FsResult<()> {

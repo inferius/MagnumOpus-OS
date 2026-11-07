@@ -17,6 +17,8 @@
 
 extern crate alloc;
 
+#[path = "../../console/src/connect.rs"]
+mod connect;
 mod keys;
 
 use alloc::string::String;
@@ -43,22 +45,15 @@ const TITLE_H: u32 = 32;
 const TAB: Rect = Rect::new(240, 4, 150, 28);
 /// Animace pruhu a tociciho znaku (jen kdyz neco bezi).
 const TICK: Duration = Duration::from_millis(150);
-/// Prodleva pred novym pripojenim po padu termd (pak dvojnasobna).
-const RETRY: Duration = Duration::from_millis(300);
-const RETRY_MAX: Duration = Duration::from_secs(5);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Term {
     win: Window,
     text: Text,
     screen: Screen,
     app: App,
-    /// Kanal pripojeni od initu (`None` = terminal bez sluzby).
-    conn: Option<Channel>,
+    /// Pripojeni k termd pres init (`conn: None` = terminal bez sluzby).
+    conn: connect::Connector,
     termd: Option<Channel>,
-    /// Kdy zkusit znovu pripojit (po padu termd) a soucasna prodleva.
-    retry_at: Option<u64>,
-    retry: Duration,
 }
 
 fn grid(w: u32, h: u32) -> (usize, usize) {
@@ -69,26 +64,6 @@ fn now() -> Option<i64> {
     time::wall().map(|t| t.secs.saturating_mul(1_000_000_000).saturating_add(t.nanos as i64))
 }
 
-/// Pozada init o termd; vrati kanal k nemu. Odpoved `err CANCELED` patri
-/// drivejsimu pokusu (init ho nahradil novejsim) - cist dal.
-fn connect(conn: &Channel) -> Result<Channel, Error> {
-    // Zastarale odpovedi (pokus, ktery vyprsel) zahodit: jejich termd init
-    // pri dalsim `connect` ukonci.
-    while conn.try_read().is_ok() {}
-    conn.write(b"connect", Vec::new())?;
-    let end = time::deadline_after(CONNECT_TIMEOUT);
-    loop {
-        let m = conn.read(Some(end))?;
-        if m.data.starts_with(b"ok") {
-            return m.handles.into_iter().next().map(Channel::from_handle).ok_or(Error::Corrupted);
-        }
-        if m.data.starts_with(b"err CANCELED") {
-            continue;
-        }
-        println!("gui-term: termd nejde spustit: {}", String::from_utf8_lossy(&m.data));
-        return Err(Error::Unreachable);
-    }
-}
 
 impl Term {
     fn new(win: Window, conn: Option<Channel>) -> Self {
@@ -98,46 +73,29 @@ impl Term {
             text: Text::system(),
             screen: Screen::new(c, r),
             app: App::new(Theme::dark(), c, r),
-            conn,
+            conn: connect::Connector::new(conn, "gui-term"),
             termd: None,
-            retry_at: None,
-            retry: RETRY,
         };
         t.app.welcome = true;
-        t.reconnect();
+        t.conn.start();
         t
     }
 
-    /// Pripoji se k termd (prvni start i po padu: stejna relace).
-    fn reconnect(&mut self) {
-        let Some(conn) = &self.conn else { return };
-        match connect(conn) {
-            Ok(ch) => {
-                self.termd = Some(ch);
-                self.retry_at = None;
-                self.retry = RETRY;
-                let session = self.app.session;
-                self.app.start(session);
-                self.send_out();
-            }
-            Err(Error::PeerClosed) => {
-                println!("gui-term: init zavrel kanal pripojeni");
-                self.conn = None;
-            }
-            Err(e) => {
-                println!("gui-term: pripojeni k termd: {e}");
-                self.retry_at = Some(time::deadline_after(self.retry));
-                self.retry = (self.retry * 2).min(RETRY_MAX);
-            }
-        }
+    /// Odpoved initu na `connect`: pripojit se (prvni start i po padu
+    /// termd: stejna relace). `true` = pripojeno.
+    fn poll_connect(&mut self) -> bool {
+        let Some(ch) = self.conn.poll() else { return false };
+        self.termd = Some(ch);
+        let session = self.app.session;
+        self.app.start(session);
+        self.send_out();
+        true
     }
 
     fn lost(&mut self) {
         self.termd = None;
         self.app.disconnected();
-        if self.conn.is_some() {
-            self.retry_at = Some(time::deadline_after(self.retry));
-        }
+        self.conn.lost();
     }
 
     fn send_out(&mut self) {
@@ -180,7 +138,7 @@ impl Term {
     }
 
     fn status(&self) -> String {
-        if self.conn.is_none() {
+        if self.conn.conn.is_none() {
             String::from("Bez služby")
         } else if self.termd.is_none() {
             String::from("Připojuji...")
@@ -220,7 +178,7 @@ impl Term {
 
     fn render(&mut self) -> Result<(), Error> {
         self.screen.write(&self.app.frame());
-        if self.conn.is_none() {
+        if self.conn.conn.is_none() {
             self.screen.write("\r\n\x1b[31mTerminál nemá službu termd (spusťte ho přes init).\x1b[39m");
         } else if self.termd.is_none() {
             self.screen.write("\r\n\x1b[33mSlužba termd není připojená, připojuji znovu...\x1b[39m");
@@ -337,11 +295,14 @@ fn main(startup: Startup) -> i64 {
         // Cekat na okno, termd nebo termin (animace, nove pripojeni).
         if !t.win.has_queued() {
             let animate = t.app.busy() || t.app.prompt.is_some();
-            let deadline = [animate.then_some(next_tick), t.retry_at].into_iter().flatten().min();
+            let deadline = [animate.then_some(next_tick), t.conn.deadline()].into_iter().flatten().min();
             let rd = Signals::READABLE | Signals::PEER_CLOSED;
             let mut items: Vec<(&Handle, Signals)> = vec![(t.win.channel().handle(), rd)];
             if let Some(d) = &t.termd {
                 items.push((d.handle(), rd));
+            }
+            if let Some(h) = t.conn.handle() {
+                items.push((h, rd));
             }
             let _ = libos::wait_many(&items, deadline);
         }
@@ -357,8 +318,7 @@ fn main(startup: Startup) -> i64 {
                 Err(_) => break,
             }
         }
-        if t.retry_at.is_some_and(|at| time::now() >= at) {
-            t.reconnect();
+        if t.conn.waiting() && t.poll_connect() {
             redraw = true;
         }
         t.send_out();

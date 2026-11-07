@@ -652,6 +652,11 @@ posílá `Hello`, `Attach` (0 = nová relace), `Detach`, `Run`, `Interrupt`,
 `BlockStart`, `Item`, `BlockEnd`, `Prompt`, `Completions`, `Formatted`,
 `Highlighted` a `Fail`.
 
+- **Párování odpovědí (verze 2):** `Complete` a `Format` nesou číslo
+  požadavku `seq`, `Completions` a `Formatted` ho vrací. Mezi požadavkem
+  a odpovědí můžou přijít události jiných bloků (úlohy `async`, `bg`,
+  pozdní konec zrušené úlohy). Okno je proto páruje podle `seq` a odpověď
+  na starší požadavek zahodí. Stejně funguje `seq` u `Highlight`.
 - **Položky bloku:** typovaná hodnota, poznámka, varování, chyba (kód,
   popis, hlášení s místem), diff, průběh, odkaz.
 - **Hodnoty se posílají typovaně.** Seznam záznamů se stejnými sloupci jde

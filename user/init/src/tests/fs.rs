@@ -24,6 +24,7 @@ pub const TESTS: &[Test] = &[
     ("velky adresar: vypis po strankach", big_directory),
     ("v2: dve relace, ctenar po atomickem nahrazeni", v2_two_sessions),
     ("v2: podminene ulozeni a konflikt", v2_conditional_save),
+    ("v2: docasne jmeno nikdy nesmaze cizi soubor", v2_temp_collision),
     ("v2: konec relace uklidi handly, zamky mezi relacemi", v2_session_cleanup_and_locks),
     ("opravneni: identita relace, pripojene cesty, GRANT", perm_sessions),
     ("opravneni: zakaz spousteni a sdileni mezi uzivateli", perm_noexec_and_sharing),
@@ -311,6 +312,40 @@ fn v2_two_sessions(_: &Startup) -> TestResult {
     check_eq!(a.read_h(hb.handle, 0, 1).err(), Some(Error::BadHandle), "cizi handle");
     a.close(ha.handle).map_err(|e| fail("close A", e))?;
     b.close(hb.handle).map_err(|e| fail("close B", e))?;
+    Ok(())
+}
+
+/// Podminene ulozeni zaklada docasny soubor `.~jmeno.N.tmp` vyhradne:
+/// existujici soubor se stejnym jmenem (cizi, zbytek po padu) zustane
+/// netknuty a fsd vezme dalsi cislo.
+fn v2_temp_collision(_: &Startup) -> TestResult {
+    let f = fs()?;
+    let ed = f.connect().map_err(|e| fail("connect", e))?;
+    f.create("/v2-kolize", kind::DIR).map_err(|e| fail("slozka", e))?;
+    // Cislo pristiho docasneho souboru: zacit nahrazeni a podivat se.
+    let h = ed.replace_begin("/v2-kolize/x.txt", None).map_err(|e| fail("replace_begin", e))?;
+    let list = f.list("/v2-kolize").map_err(|e| fail("vypis", e))?;
+    let n: u64 = list
+        .iter()
+        .find_map(|e| e.name.strip_prefix(".~x.txt.").and_then(|r| r.strip_suffix(".tmp")).and_then(|d| d.parse().ok()))
+        .ok_or("docasny soubor nahrazeni neni ve vypisu")?;
+    ed.replace_abort(h).map_err(|e| fail("replace_abort", e))?;
+    // Cizi soubory presne na dalsich cislech.
+    for k in n + 1..=n + 4 {
+        let p = alloc::format!("/v2-kolize/.~x.txt.{k}.tmp");
+        f.create(&p, kind::FILE).map_err(|e| fail("cizi soubor", e))?;
+        f.write(&p, 0, alloc::format!("cizi {k}").as_bytes()).map_err(|e| fail("zapis ciziho", e))?;
+    }
+    ed.save_if("/v2-kolize/x.txt", None, b"novy").map_err(|e| fail("ulozeni pres kolizi", e))?;
+    check_eq!(&f.read("/v2-kolize/x.txt", 0, 10).map_err(|e| fail("cteni", e))?[..], b"novy", "ulozeno");
+    for k in n + 1..=n + 4 {
+        let p = alloc::format!("/v2-kolize/.~x.txt.{k}.tmp");
+        let data = f.read(&p, 0, 20).map_err(|e| fail("cteni ciziho", e))?;
+        check_eq!(data, alloc::format!("cizi {k}").into_bytes(), "cizi soubor netknuty");
+        f.remove(&p).map_err(|e| fail("uklid", e))?;
+    }
+    f.remove("/v2-kolize/x.txt").map_err(|e| fail("uklid", e))?;
+    f.remove("/v2-kolize").map_err(|e| fail("uklid", e))?;
     Ok(())
 }
 

@@ -57,6 +57,10 @@ pub trait Env {
     fn notifier(&mut self) -> Option<Arc<dyn Notify>> {
         None
     }
+    /// Nove probouzeni pro jednu ulohu (odpoved na vyzvu, zruseni).
+    fn new_notifier(&mut self) -> Option<Arc<dyn Notify>> {
+        None
+    }
     fn clock(&self) -> Option<Clock> {
         None
     }
@@ -373,7 +377,7 @@ impl Host for SessionHost<'_> {
         let id = *self.next_block;
         let fs = self.env.task_fs(id)?;
         *self.next_block += 1;
-        let cancel = tasks::register(self.tasks, id);
+        let cancel = tasks::register(self.tasks, id, self.env.new_notifier());
         let (table, n, session, home, budget) =
             (self.tasks.clone(), notify.clone(), self.session, String::from(self.home), self.task_stack);
         let job = Box::new(move || tasks::run(table, n, clock, cancel, fs, session, id, id, home, wire, budget));
@@ -403,7 +407,21 @@ impl Host for SessionHost<'_> {
             let done: Vec<u64> = ids.iter().copied().filter(|i| tasks::is_done(self.tasks, *i)).collect();
             let failed = !any && done.iter().any(|i| tasks::failed(self.tasks, *i));
             if (any && !done.is_empty()) || done.len() == ids.len() || failed {
-                return Ok(done.into_iter().filter_map(|i| tasks::take(self.tasks, i)).collect());
+                let out = done.into_iter().filter_map(|i| tasks::take(self.tasks, i)).collect();
+                // Posledni zpravy vyzvednutych uloh (konec bloku) hned oknu.
+                self.pump_tasks();
+                return Ok(out);
+            }
+            // Termin nejdriv: vyzvednuti bez cekani (volna chvile, `reap`)
+            // nesmi cist zpravy okna - radek nebo Ctrl-C by se odlozil
+            // a zrusil ulohy na pozadi.
+            let now = self.env.now();
+            let mut step = WAIT_STEP;
+            if let Some(d) = deadline {
+                match now {
+                    Some(n) if n < d => step = step.min(d - n),
+                    _ => return Err(ShError::sys(abi::Error::TimedOut, "await: cas vyprsel (ulohy bezi dal)")),
+                }
             }
             // Okno kazde kolo (Ctrl-C, odpovedi na vyzvy uloh).
             if *self.attached {
@@ -417,14 +435,6 @@ impl Host for SessionHost<'_> {
                 }
                 return Err(ShError::new(code::INTERRUPTED, "await prerusen (Ctrl-C), ulohy zruseny"));
             }
-            let now = self.env.now();
-            let mut step = WAIT_STEP;
-            if let Some(d) = deadline {
-                match now {
-                    Some(n) if n < d => step = step.min(d - n),
-                    _ => return Err(ShError::sys(abi::Error::TimedOut, "await: cas vyprsel (ulohy bezi dal)")),
-                }
-            }
             match &notify {
                 Some(n) => n.wait(step),
                 None => self.env.sleep(step),
@@ -433,7 +443,9 @@ impl Host for SessionHost<'_> {
     }
 
     fn task_cancel(&mut self, id: u64) -> Option<TaskDone> {
-        tasks::cancel(self.tasks, id)
+        let d = tasks::cancel(self.tasks, id);
+        self.pump_tasks();
+        d
     }
 }
 
@@ -517,6 +529,9 @@ impl Service {
             pump(&s.tasks, next_prompt, s.attached, link, &mut log);
             for m in log {
                 apply(&mut s.blocks, keep, m);
+            }
+            for undo in tasks::take_late(&s.tasks) {
+                s.interp.undo.adopt(&mut *fs, undo);
             }
             if s.interp.tasks_running() == 0 {
                 continue;
@@ -610,7 +625,7 @@ impl Service {
                 }
             }
             ClientMsg::Interrupt { .. } | ClientMsg::Choose { .. } => {}
-            ClientMsg::Complete { session, line, cursor } => {
+            ClientMsg::Complete { session, line, cursor, seq } => {
                 let Some(i) = self.session_index(session) else {
                     link.send(&ServerMsg::Fail { message: alloc::format!("relace {session} neexistuje") });
                     return;
@@ -626,16 +641,16 @@ impl Service {
                 };
                 let (start, c) = shlang::complete::complete(&line, cursor as usize, &mut ctx);
                 let items = c.into_iter().map(|c| (c.text, c.kind as u8, c.help)).collect();
-                link.send(&ServerMsg::Completions { start: start as u32, items });
+                link.send(&ServerMsg::Completions { seq, start: start as u32, items });
             }
-            ClientMsg::Format { session, line, style } => {
+            ClientMsg::Format { session, line, style, seq } => {
                 let vars = self.session_index(session).map(|i| self.sessions[i].interp.var_names()).unwrap_or_default();
                 let to = if style == 1 { Style::C } else { Style::B };
                 let parsed = shlang::parse(&line, &shlang::Options { style: None, sigs: &Builtins, vars: vars.clone(), script: false });
                 match parsed {
                     Ok(p) => {
                         let text = shlang::fmt::format_line(&p.script, &shlang::fmt::FmtOptions { style: to, sigs: &Builtins, vars });
-                        link.send(&ServerMsg::Formatted { text });
+                        link.send(&ServerMsg::Formatted { seq, text });
                     }
                     Err(e) => link.send(&ServerMsg::Fail { message: e.report(&line) }),
                 }

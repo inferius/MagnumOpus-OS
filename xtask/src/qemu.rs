@@ -82,9 +82,15 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         ))
         .args(["-device", &blk("scratch")])
         // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
+        // `cache=unsafe`: flush disku (kazdy commit fsd) nedela fsync
+        // souboru na hostiteli. Disk vznika pri kazdem behu znovu, takze
+        // trvanlivost pri padu hostitele nema cenu; bez toho stal radek
+        // shellu se zapisem (nekolik commitu: klon, prevzeti, zahozeni)
+        // na vytizenem hostiteli sekundy. Vypadek proudu testuje fsd
+        // simulaci, ne flush hostitele.
         .arg("-drive")
         .arg(format!(
-            "if=none,id=data,format=raw,discard=unmap,file={}",
+            "if=none,id=data,format=raw,discard=unmap,cache=unsafe,file={}",
             datadisk::create(&target_dir())?.display()
         ))
         .args(["-device", &blk("data")])
