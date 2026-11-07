@@ -82,14 +82,16 @@ endian, `abi::time::SetRequest`):
 
 | Offset | Typ | Význam |
 |---|---|---|
-| 0 | i64 | nový čas: sekundy od 1970-01-01 00:00:00 UTC |
+| 0 | i64 | nový čas: sekundy od 1970-01-01 00:00:00 UTC (roky 1970–9999, jinak `INVALID_ARGS`) |
 | 8 | u32 | nanosekundy (0..10⁹, jinak `INVALID_ARGS`) |
-| 12 | i32 | `rtc_offset`: sekundy přičtené k UTC při zápisu do hardwarových hodin (RTC v místním čase = posun pásma, jinak 0) |
+| 12 | i32 | `rtc_offset`: sekundy přičtené k UTC při zápisu do hardwarových hodin (RTC v místním čase = posun pásma, jinak 0); nejvýš ±18 h, jinak `INVALID_ARGS` |
 
 `flags`: bit 0 `WRITE_HARDWARE` = zapsat čas i do hardwarových hodin (x86:
 CMOS RTC). Ostatní bity = `INVALID_ARGS`. Vrací 1, když se hardwarové
 hodiny zapsaly. Vrací 0 bez `WRITE_HARDWARE`, když hodiny chybí (aarch64,
-ACPI hlásí, že RTC není) nebo když se rok nevejde do jejich rozsahu. Čas
+ACPI hlásí, že RTC není) nebo když se rok nevejde do jejich rozsahu. S
+`WRITE_HARDWARE` může volání spát až 1 s: jádro zapisuje do RTC v polovině
+sekundy, aby hodiny tikaly na hranici sekund. Čas
 systému se nastaví v každém případě. Poté `CLOCK_REALTIME` hlásí zdroj 3
 (nastaveno za běhu) a žádné příznaky. Termíny čekání se nemění, počítají se
 z `CLOCK_MONOTONIC`. Obal: `libos::time::set`, `Resource::set_clock`.

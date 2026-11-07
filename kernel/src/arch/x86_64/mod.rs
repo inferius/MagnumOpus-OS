@@ -284,6 +284,8 @@ impl api::Time for X86_64 {
         rtc::read_time(platform.arch.rtc_century)
     }
 
+    const HARDWARE_CLOCK_PHASE_NS: u32 = rtc::WRITE_PHASE_NS;
+
     fn set_hardware_clock(platform: &Platform, t: abi::time::WallTime) -> bool {
         if platform.arch.rtc_absent {
             return false;
