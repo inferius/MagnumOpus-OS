@@ -66,7 +66,7 @@ impl<D: BlockDevice> Fs<D> {
         self.put(key, encode_dead(entries))
     }
 
-    fn records(&mut self, root: &Child) -> Result<Vec<(u64, SnapshotRecord)>> {
+    pub(super) fn records(&mut self, root: &Child) -> Result<Vec<(u64, SnapshotRecord)>> {
         let items = btree::collect(
             &mut self.s,
             root,
@@ -261,7 +261,8 @@ impl<D: BlockDevice> Fs<D> {
             }
             for d in &free {
                 let txg = self.s.txg;
-                self.s.space.free(d.start, d.len, txg, false);
+                let _ = txg;
+                self.s.free_final(d.start, d.len, d.copy, true);
             }
             if keep.is_empty() {
                 self.del(&k)?;

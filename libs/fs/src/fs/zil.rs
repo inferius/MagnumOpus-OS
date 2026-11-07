@@ -386,11 +386,9 @@ fn encode(records: &[Record], tf: TimeFormat) -> Vec<u8> {
                 b.extend_from_slice(&(list.len() as u32).to_le_bytes());
                 for (lb, e) in list {
                     put_u64(&mut b, *lb);
-                    put_u64(&mut b, e.phys);
-                    b.extend_from_slice(&(e.csums.len() as u32).to_le_bytes());
-                    for c in &e.csums {
-                        b.extend_from_slice(&c.0);
-                    }
+                    let raw = e.encode();
+                    b.extend_from_slice(&(raw.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&raw);
                 }
             }
         }
@@ -520,22 +518,15 @@ fn decode(b: &[u8], tf: TimeFormat) -> Result<Vec<Record>> {
                 let count = r.u32()? as usize;
                 let mut list = Vec::with_capacity(count.min(1024));
                 for _ in 0..count {
-                    let (lb, phys) = (r.u64()?, r.u64()?);
+                    let lb = r.u64()?;
                     let n = r.u32()? as usize;
-                    if n == 0 || n as u64 > crate::layout::MAX_EXTENT {
+                    let e = Extent::decode(r.take(n)?).map_err(|_| Error::Corrupted)?;
+                    // Sdilene a nezapsane extenty log nenese (fsync s nimi
+                    // dela commit).
+                    if e.is_shared() || e.is_unwritten() {
                         return Err(Error::Corrupted);
                     }
-                    let csums = (0..n)
-                        .map(|_| r.take(16).map(|c| Csum(c.try_into().unwrap())))
-                        .collect::<Result<_>>()?;
-                    list.push((
-                        lb,
-                        Extent {
-                            phys,
-                            birth: 0,
-                            csums,
-                        },
-                    ));
+                    list.push((lb, e));
                 }
                 Record::Extents {
                     oid,
@@ -649,6 +640,14 @@ impl<D: BlockDevice> Fs<D> {
             records.extend(self.log_records()?);
         }
         self.activate(back)?;
+        // Sdileny extent z teto transakce (deduplikace pri zapisu) log
+        // neumi prehrat (pocty odkazu): radeji commit.
+        let shared = records
+            .iter()
+            .any(|r| matches!(r, Record::Extents { list, .. } if list.iter().any(|(_, e)| e.is_shared())));
+        if shared {
+            return self.commit();
+        }
         // Zapis dat narazil na neplatne uvolneni (poskozena hodnota): nic
         // nepotvrdit - stejne jako commit.
         if self.s.space.corrupt {
@@ -730,8 +729,16 @@ impl<D: BlockDevice> Fs<D> {
             if let (Some(&lo), Some(&hi)) = (blocks.first(), blocks.last()) {
                 let root = self.s.root;
                 for (ks, e) in self.extents_in(&root, oid, lo, hi + 1)? {
-                    if e.birth == txg && blocks.range(ks..ks + e.len()).next().is_some() {
-                        self.s.zil_logged.insert(e.phys, e.len());
+                    // Nove bloky teto transakce, nebo zapis na misto do
+                    // predalokovanych (generace vzniku zustala stara).
+                    let written_here = e.birth == txg
+                        || (!e.is_unwritten()
+                            && self.inplace.range(..e.phys + e.plen()).next_back().is_some_and(|(&s, &l)| s + l > e.phys));
+                    if written_here && blocks.range(ks..ks + e.len()).next().is_some() {
+                        self.s.zil_logged.insert(e.phys, e.plen());
+                        if e.copy != 0 {
+                            self.s.zil_logged.insert(e.copy, e.plen());
+                        }
                         list.push((ks, e));
                     }
                 }
@@ -870,9 +877,8 @@ impl<D: BlockDevice> Fs<D> {
         for r in records {
             if let Record::Extents { list, .. } = r {
                 for (_, e) in list {
-                    let mut buf = vec![0u8; e.csums.len() * BLOCK_SIZE];
-                    match self.s.read_data(e.phys, &e.csums, &mut buf) {
-                        Ok(()) => {}
+                    match self.extent_data(e, 0, e.len()) {
+                        Ok(_) => {}
                         Err(Error::Corrupted) => return Ok(false),
                         Err(e) => return Err(e),
                     }
@@ -1016,11 +1022,27 @@ impl<D: BlockDevice> Fs<D> {
                 let txg = self.s.txg;
                 for (lb, mut e) in list {
                     let n = e.len();
-                    self.punch_range(oid, lb, lb + n)?;
-                    self.s.space.claim(e.phys, n, txg)?;
-                    self.s.mark_changed();
-                    e.birth = txg;
-                    self.put(Key::new(oid, item::EXTENT, lb), e.encode())?;
+                    // Zapis na misto do predalokovaneho extentu: bloky uz
+                    // patri souboru, jen se oznaci jako zapsane.
+                    let root = self.s.root;
+                    let under = self.extents_in(&root, oid, lb, lb + 1)?.into_iter().next();
+                    if let Some((ks, x)) = under
+                        && x.is_unwritten()
+                        && !e.is_compressed()
+                        && x.phys + (lb - ks) == e.phys
+                        && ks + x.len() >= lb + n
+                    {
+                        self.relink_in_place(oid, ks, &x, lb - ks, e.csums.clone())?;
+                    } else {
+                        self.punch_range(oid, lb, lb + n)?;
+                        self.s.space.claim(e.phys, e.plen(), txg)?;
+                        if e.copy != 0 {
+                            self.s.space.claim(e.copy, e.plen(), txg)?;
+                        }
+                        self.s.mark_changed();
+                        e.birth = txg;
+                        self.put(Key::new(oid, item::EXTENT, lb), e.encode())?;
+                    }
                     // Mapovani z logu ma prednost pred prevedenym obsahem.
                     if let Some(fd) = self.data.get_mut(&oid) {
                         let before = fd.blocks.len();

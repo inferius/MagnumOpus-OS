@@ -96,8 +96,10 @@ fn fallback_to_previous_generation() {
     let sb_block = crate::layout::SB_FIRST + (good_gen + 1) % crate::layout::SB_COUNT;
     let off = sb_block as usize * BLOCK_SIZE;
     let sb = crate::layout::Superblock::decode(&dev.data[off..off + BLOCK_SIZE]).unwrap();
+    // Obe kopie korene (jinak by se koren zahojil z druhe).
     let root = sb.root.block as usize * BLOCK_SIZE;
     dev.data[root + 100] ^= 0xFF;
+    dev.data[sb.root.copy as usize * BLOCK_SIZE + 100] ^= 0xFF;
     let mut fs = Fs::mount(dev).unwrap();
     assert_eq!(fs.info().fallback, 1);
     assert!(fs.stat("/stary").is_ok());
