@@ -526,3 +526,43 @@ fn key_update() {
     s.read_to_end(&mut rest).unwrap();
     h.join().unwrap().unwrap();
 }
+
+#[test]
+fn keying_material_export() {
+    // Export klicu (NTS) musi dat stejne bajty jako rustls+ring na serveru.
+    let pki = pki(KeyKind::P256, &["localhost"], false);
+    for suite in [rustls::CipherSuite::TLS13_AES_128_GCM_SHA256, rustls::CipherSuite::TLS13_AES_256_GCM_SHA384] {
+        let mut provider = rustls::crypto::ring::default_provider();
+        provider.cipher_suites.retain(|c| c.suite() == suite);
+        let config = Arc::new(
+            rustls::ServerConfig::builder_with_provider(Arc::new(provider))
+                .with_protocol_versions(&[&rustls::version::TLS13])
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(pki.chain.clone(), pki.key.clone_key())
+                .unwrap(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let h = thread::spawn(move || {
+            let (tcp, _) = listener.accept().unwrap();
+            let mut s = rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(), tcp);
+            while s.conn.is_handshaking() {
+                s.conn.complete_io(&mut s.sock).unwrap();
+            }
+            let key = s
+                .conn
+                .export_keying_material([0u8; 32], b"EXPORTER-network-time-security", Some(&[0, 0, 0, 15, 0]))
+                .unwrap();
+            let mut buf = [0u8; 1];
+            let _ = s.read(&mut buf);
+            key
+        });
+        let c = client(&PLATFORM, &pki.ca_pem, &[]);
+        let mut s = c.connect("localhost", connect(port)).unwrap();
+        let mut ours = [0u8; 32];
+        s.export_keying_material(b"EXPORTER-network-time-security", &[0, 0, 0, 15, 0], &mut ours).unwrap();
+        s.close().unwrap();
+        assert_eq!(ours, h.join().unwrap(), "{suite:?}");
+    }
+}

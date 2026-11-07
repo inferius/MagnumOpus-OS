@@ -11,7 +11,7 @@ initfs = { workspace = true, features = ["std"] }
 fs = { workspace = true, features = ["std"] }
 shlang = { path = "../libs/shlang" }
 abi = { workspace = true }
-netproto = { path = "../libs/netproto", features = ["std"] }
+netproto = { path = "../libs/netproto", features = ["std", "nts"] }
 fatfs = "0.3"
 crc32fast = "1.5"
 # Korenove certifikaty pro initfs (sada Mozilla pres CCADB).

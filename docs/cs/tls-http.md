@@ -40,10 +40,10 @@ se ověřuje podle reálného času, proto na ní TLS závisí.
 >   stáhnout, server bez OCSP staplingu), spojení projde – jako
 >   v prohlížečích. Útočník, který stažení CRL zablokuje, tak odvolaný
 >   certifikát protlačí. Viz [Odvolání certifikátů](#odvolání-certifikátů).
-> - **Platnost certifikátu závisí na hodinách.** Útočník, který podvrhne
->   NTP (zatím bez NTS), může posunout čas a nechat projít propadlý
->   certifikát. `timed` po první synchronizaci odmítá skoky nad 60 s,
->   což útok omezuje.
+> - **Platnost certifikátu závisí na hodinách.** Čas se ověřuje přes NTS
+>   (viz [Reálný čas](cas.md#nts-ověřený-čas)); neověřené NTP se podle
+>   profilu sítě použije jen jako záloha. V záloze může útočník čas
+>   posunout (`timed` to omezí na 500 ppm a odmítne skoky nad 60 s).
 > - **DNS není ověřené** (bez DNSSEC a DoH): podvržená adresa neprojde
 >   ověřením certifikátu, ale útočník zjistí, kam se program připojuje.
 

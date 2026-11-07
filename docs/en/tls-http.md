@@ -41,10 +41,11 @@ validity is checked against real time, so TLS depends on it.
 >   stapling), the connection passes - as in browsers. An attacker who
 >   blocks the CRL download can push a revoked certificate through. See
 >   [Certificate revocation](#certificate-revocation).
-> - **Certificate validity depends on the clock.** An attacker who spoofs
->   NTP (no NTS yet) can move the time and let an expired certificate
->   pass. After the first synchronization `timed` rejects jumps over 60 s,
->   which limits the attack.
+> - **Certificate validity depends on the clock.** Time is authenticated
+>   with NTS (see [Real time](time.md#nts-authenticated-time));
+>   unauthenticated NTP is used only as a fallback depending on the network
+>   profile. In fallback an attacker can shift the time (`timed` limits it
+>   to 500 ppm and rejects jumps over 60 s).
 > - **DNS is not authenticated** (no DNSSEC or DoH): a spoofed address
 >   fails certificate verification, but the attacker learns where the
 >   program connects.

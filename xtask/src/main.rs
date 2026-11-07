@@ -18,6 +18,7 @@ mod highlight;
 mod image;
 mod qemu;
 mod nethelper;
+mod ntshelper;
 mod revhelper;
 mod webhelper;
 mod qmp;
@@ -238,7 +239,7 @@ fn host_tests() -> Result<()> {
             "--package",
             "httpc",
             "--features",
-            "initfs/std,fs/std,netproto/std",
+            "initfs/std,fs/std,netproto/std,netproto/nts",
         ])
         .status()?;
     if !status.success() {

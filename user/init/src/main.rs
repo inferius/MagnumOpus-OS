@@ -65,19 +65,20 @@ fn main(startup: Startup) -> i64 {
                         sup.watch("fwd", p, None);
                     }
                     let n = system::NET.call_once(|| n);
-                    match ntp::start(&startup, n) {
-                        Ok(t) => {
-                            sup.watch("ntpd", &t.process, None);
-                            system::NTP.call_once(|| t);
-                        }
-                        Err(e) => println!("init: synchronizaci casu nelze spustit: {e}"),
-                    }
+                    // revocd pred ntpd: ntpd dostane kanal pro TLS NTS-KE.
                     match revocation::start(&startup, n, &devices) {
                         Ok(r) => {
                             sup.watch("revocd", &r.process, None);
                             system::REVOCD.call_once(|| r);
                         }
                         Err(e) => println!("init: kontrolu odvolani certifikatu nelze spustit: {e}"),
+                    }
+                    match ntp::start(&startup, n, &devices) {
+                        Ok(t) => {
+                            sup.watch("ntpd", &t.process, None);
+                            system::NTP.call_once(|| t);
+                        }
+                        Err(e) => println!("init: synchronizaci casu nelze spustit: {e}"),
                     }
                 }
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),

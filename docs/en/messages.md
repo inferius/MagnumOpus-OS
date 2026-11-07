@@ -199,8 +199,10 @@ invariant was broken (a kernel bug).
 | `netd: chybi handly ve startovni zprave` | The service was started incorrectly (code 1). |
 | `init: sluzbu site nelze spustit: ...` | No network card (`NOT_FOUND`) or the service did not answer. |
 | `ntpd: bezim, servery [...]` | Time synchronization runs; servers from `ntpd.toml` (the host server in tests). |
-| `ntpd: prvni mereni: posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | First successful measurement ("offset", "delay"); `step` = the time was set with a jump (offset over 128 ms), `slew` = smooth adjustment. |
-| `ntpd: zadny server neodpovedel (...)` | No reply in this round (network, firewall, server). Next attempt after the interval; the clock keeps running at the last frequency. |
+| `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | First successful measurement (authenticated NTS or unauthenticated NTP in fallback; "offset", "delay"); `step` = the time was set with a jump (offset over 128 ms), `slew` = smooth adjustment. |
+| `ntpd: NTS-KE <server>: ...` | The NTS key exchange failed (connection, certificate, reply); the server is skipped this round. With an invalid certificate check the clock (RTC). |
+| `ntpd: neoverene servery: Never\|Fallback` | Init changed the rule ("unauthenticated servers") by network profile. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | No reply in this round (network, firewall, server). Next attempt after the interval; the clock keeps running at the last frequency. |
 | `ntpd: konfigurace: ...` | The configuration from init is invalid; `ntpd` exits. Fix `ntpd.toml`. |
 | `timed: prvni synchronizace: skok o N ms` | The first correction from `ntpd` was large: the time was set with a jump (the only allowed jump). |
 | `timed: prvni synchronizace: dorovnani o N ms` | The first correction was small: it is applied smoothly. |

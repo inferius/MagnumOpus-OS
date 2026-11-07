@@ -12,5 +12,8 @@ bench = false
 
 [dependencies]
 libos = { path = "../../libs/libos" }
-netproto = { path = "../../libs/netproto", features = ["client"] }
+netproto = { path = "../../libs/netproto", features = ["client", "nts"] }
+fsproto = { path = "../../libs/fsproto" }
+tls = { path = "../../libs/tls", features = ["libos"] }
+web = { path = "../../libs/web" }
 conf = { workspace = true }

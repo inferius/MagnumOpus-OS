@@ -294,6 +294,9 @@ pub fn start() -> std::io::Result<WebHelper> {
     let (mut chain, key) = leaf_with(&inter, &[guest_host], Some(0x0999), None);
     chain.push(inter.cert.der().clone());
     let onecrl_revoked = tls_config(chain, key, &[b"http/1.1"]);
+    // NTS-KE (testy ntpd): certifikat testovaci CA pro 10.0.2.2.
+    let (chain, key) = leaf(&ca_ok, &[SanType::IpAddress(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2)))]);
+    let nts = crate::ntshelper::start(tls_config(chain, key, &[netproto::nts::ALPN]))?;
     let _ = CRL.set(crate::revhelper::crl(&ca_ok.cert, &ca_ok.key, &[REVOKED_SERIAL]));
     let _ = ONECRL.set(crate::revhelper::onecrl(inter.cert.der()));
 
@@ -307,7 +310,7 @@ pub fn start() -> std::io::Result<WebHelper> {
         ("https_ocsp_revoked", listen()?, Some(ocsp_revoked)),
         ("https_onecrl", listen()?, Some(onecrl_revoked)),
     ];
-    let mut config = String::new();
+    let mut config = nts.config;
     for (name, l, _) in &servers {
         config.push_str(&format!("{name} = {}
 ", l.local_addr()?.port()));

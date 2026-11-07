@@ -195,8 +195,9 @@ let st = time::adjust(&clock, Some(-20_000_000), Some(-35_000))?;
 **`ntpd`** se ptá serverů NTP a jen navrhuje korekce. Init ho spustí po
 službě sítě:
 
-- **Relace sítě** podle manifestu `ntpd.manifest.toml` (práva `udp`,
-  `dns`) a navíc jen UDP na servery z `ntpd.toml`. Nikam jinam nesmí.
+- **Relace sítě** podle manifestu `ntpd.manifest.toml` (práva `tcp`,
+  `udp`, `dns`) a navíc jen cíle serverů z `ntpd.toml` (viz
+  [NTS](#nts-ověřený-čas)). Nikam jinam nesmí.
 - **Kanál k `timed`** dostane jen pro zprávy `sync` (návrh korekce).
 - Každé kolo: z každého serveru dávka měření (`samples`), z ní vzorek
   s **nejmenším zpožděním** (nejméně ho zkreslí fronty a nesymetrická
@@ -209,7 +210,8 @@ službě sítě:
 
 ```toml
 # ntpd.toml (initfs)
-servers = ["pool.ntp.org"]   # jméno nebo adresa[:port]
+servers = ["nts://time.cloudflare.com", "nts://nts.netnod.se", "nts://ptbtime1.ptb.de", "pool.ntp.org"]
+unauthenticated = "never"   # neověřené servery: never / fallback
 min_poll = 64
 max_poll = 1024
 samples = 4
@@ -235,14 +237,72 @@ supervisorem podle něj pozná, že skok už proběhl, a další skok nepovolí.
 
 Stav: zpráva `status` na kanálu initu k `timed` (`synced=1 updates=…
 last_offset_ns=… remaining_ns=… freq_ppb=… slew_ppb=…`) a k `ntpd`
-(`rounds=… offset_ns=… delay_ns=… freq_ppb=… poll_s=…`).
+(`rounds=… offset_ns=… delay_ns=… freq_ppb=… poll_s=… error=… timed=…
+auth=nts|plain|- policy=… nts_error=…`).
 
-⚠️ **NTP není ověřené** (chybí NTS, RFC 8915). Kdo ovládá síť, může
-odpovědi podvrhnout a čas posunout. Tím může například prodloužit
-platnost odvolaného certifikátu. Omezení v `timed` útok zpomalí
-(nejvýš 500 ppm, tedy 43 s za den), ale nezastaví. NTS (nad hotovým TLS,
-viz [TLS a HTTP](tls-http.md)) zatím chybí. Do té doby používat servery
-v důvěryhodné síti.
+### NTS (ověřený čas)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NTS">
+<defs><marker id="tm9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="160" height="190" rx="6"/><text class="t b" x="90" y="45" text-anchor="middle">ntpd</text>
+<text class="m" x="20" y="70">klíče C2S, S2C</text><text class="m" x="20" y="88">z TLS exportu</text><text class="m" x="20" y="106">8 cookies</text>
+<rect class="ok" x="590" y="20" width="160" height="80" rx="6"/><text class="t b" x="670" y="45" text-anchor="middle">NTS-KE</text><text class="m" x="670" y="64" text-anchor="middle">TLS 1.3, TCP 4460</text><text class="m" x="670" y="82" text-anchor="middle">ALPN ntske/1</text>
+<rect class="ok" x="590" y="130" width="160" height="80" rx="6"/><text class="t b" x="670" y="155" text-anchor="middle">server NTP</text><text class="m" x="670" y="174" text-anchor="middle">UDP 123</text><text class="m" x="670" y="192" text-anchor="middle">AES-SIV-CMAC-256</text>
+<path class="ln" d="M170 50 L588 50" marker-end="url(#tm9)"/><text class="m" x="190" y="44">ClientHello, NTPv4 + AES-SIV, END</text>
+<path class="ln" d="M588 75 L172 75" marker-end="url(#tm9)"/><text class="m" x="190" y="69">certifikát; 8 cookies, port NTP, END</text>
+<path class="ln-acc" d="M170 150 L588 150" marker-end="url(#tm9)"/><text class="m" x="190" y="144">NTP + UID + cookie + zástupci + autentizátor (C2S)</text>
+<path class="ln-acc" d="M588 180 L172 180" marker-end="url(#tm9)"/><text class="m" x="190" y="174">NTP + UID + autentizátor (S2C) s novými cookies</text>
+</svg>
+<figcaption>Klíče se dohodnou přes TLS (ověřený server), každý dotaz NTP je podepsaný a jednorázový.</figcaption>
+</figure>
+
+**NTS** (Network Time Security, RFC 8915) brání podvržení času:
+
+1. **NTS-KE:** TLS 1.3 na port 4460 s ALPN `ntske/1`. Certifikát serveru
+   se ověří jako u HTTPS (kořeny z úložiště, odvolání přes `revocd`).
+   Klient pošle NTPv4 a AEAD 15 (AES-SIV-CMAC-256), server vrátí sadu
+   8 **cookies** a případně jiný server nebo port pro NTP. Klíče C2S a S2C
+   (32 B) se spočítají z TLS exportu (`EXPORTER-network-time-security`).
+2. **NTP s rozšířeními:** dotaz nese náhodný identifikátor (32 B), jednu
+   cookie, zástupce pro doplnění cookies a **autentizátor** AES-SIV přes
+   hlavičku a předchozí rozšíření (klíč C2S). Odpověď se ověří klíčem S2C
+   a v zašifrované části nese nové cookies.
+3. Každá cookie se použije **jednou** (dotazy nejdou spojit). Když dojdou
+   nebo server pošle NTSN („kiss of death“), proběhne nové NTS-KE.
+
+Podvržená odpověď (jiný identifikátor, změněný bajt, chybějící
+autentizátor) se zahodí a ntpd čeká dál na pravou; útočník tak může
+synchronizaci jen zablokovat, ne posunout.
+
+| `servers` | Význam |
+|---|---|
+| `nts://jméno[:port]` | NTS, NTS-KE na portu (výchozí 4460) |
+| `jméno`, `adresa[:port]` | neověřené NTP (výchozí port 123) |
+
+| `unauthenticated` | Kdy se použijí neověřené servery |
+|---|---|
+| `never` (výchozí) | nikdy; bez odpovědi serveru NTS se hodiny nekorigují |
+| `fallback` | jen když v kole neodpoví žádný server NTS |
+
+Pravidlo za běhu mění init zprávou `policy never|fallback` (podle profilu
+sítě). Relace sítě `ntpd` pro `nts://` server: TCP na NTS-KE, UDP na
+server NTS-KE (libovolný port) a UDP 123 kamkoli (server NTP určuje
+NTS-KE).
+
+> ⚠️ **Hodiny a certifikát se potřebují navzájem:** platnost certifikátu
+> serveru NTS-KE se kontroluje podle hodin. Když jsou hodiny z RTC mimo
+> platnost certifikátu (vybitá baterie, rok 1970), NTS-KE selže a čas se
+> nesynchronizuje, dokud ho nenastaví uživatel nebo neověřený server
+> (`fallback`).
+
+> **Změna proti první verzi:** jen neověřené NTP. **Proč:** kdo ovládá
+> síť, mohl čas posunout a tím třeba nechat projít propadlý nebo
+> odvolaný certifikát.
+
+⚠️ **Neověřené NTP** (servery bez `nts://`, pravidlo `fallback`) může
+podvrhnout kdo ovládá síť. Omezení v `timed` útok zpomalí (nejvýš 500 ppm,
+tedy 43 s za den), ale nezastaví; proto je výchozí `never`.
 
 ## Časová pásma
 

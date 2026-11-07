@@ -22,7 +22,7 @@ use crate::{check, check_eq};
 pub const TESTS: &[Test] = &[
     ("CLOCK_ADJUST: meze, prava, cas bez znameho stavu", adjust_args),
     ("CLOCK_ADJUST: dorovnani zpet bez kroku zpet", adjust_monotonic),
-    ("ntpd: hodiny serizene podle serveru hostitele", ntpd_synced),
+    ("ntpd: hodiny serizene pres NTS podle serveru hostitele", ntpd_synced),
     ("timed: korekce od klienta synchronizace", timed_policy),
 ];
 
@@ -161,6 +161,9 @@ fn ntpd_synced(_: &Startup) -> TestResult {
     let r = String::from_utf8(r.data).unwrap_or_default();
     check!(r.starts_with("ok:rounds="), format!("stav ntpd: {r}"));
     check!(r.contains("timed=ok:"), format!("timed korekci neprijal: {r}"));
+    // V testech je server NTS a neoverene NTP jen v zaloze ("never"):
+    // mereni muselo projit pres NTS-KE a overene NTP.
+    check!(r.contains("auth=nts"), format!("mereni neni pres NTS: {r}"));
     // Hodiny QEMU jdou z hodin hostitele: po synchronizaci je posun maly.
     let off: i128 = r
         .split_whitespace()

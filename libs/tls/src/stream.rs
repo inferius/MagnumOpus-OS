@@ -35,6 +35,10 @@ pub struct TlsStream<S> {
     /// Spojeni je nepouzitelne (chyba); dalsi volani ji vrati znovu.
     failed: Option<Error>,
     alpn: Option<Vec<u8>>,
+    /// Nahoda klienta z ClientHello (paruje tajemstvi exportu).
+    client_random: Option<[u8; 32]>,
+    /// `exporter_master_secret` po handshaku.
+    exporter: Option<Vec<u8>>,
 }
 
 /// Co dal udelat po jednom kroku automatu.
@@ -52,7 +56,11 @@ fn insufficient(e: InsufficientSizeError) -> usize {
 }
 
 impl<S: Read + Write> TlsStream<S> {
-    pub(crate) fn handshake(conn: UnbufferedClientConnection, sock: S) -> Result<Self, Error> {
+    pub(crate) fn handshake(
+        conn: UnbufferedClientConnection,
+        sock: S,
+        log: &crate::exporter::ExporterLog,
+    ) -> Result<Self, Error> {
         let mut s = Self {
             conn,
             sock,
@@ -63,6 +71,8 @@ impl<S: Read + Write> TlsStream<S> {
             peer_closed: false,
             failed: None,
             alpn: None,
+            client_random: None,
+            exporter: None,
         };
         loop {
             match s.pump()? {
@@ -72,7 +82,22 @@ impl<S: Read + Write> TlsStream<S> {
             }
         }
         s.alpn = s.conn.alpn_protocol().map(|p| p.to_vec());
+        s.exporter = s.client_random.and_then(|r| log.take(&r));
         Ok(s)
+    }
+
+    /// Export klicu (RFC 5705 / RFC 8446 7.5): `out.len()` bajtu pro
+    /// `label` a `context` (NTS: klice NTP z NTS-KE).
+    pub fn export_keying_material(&self, label: &[u8], context: &[u8], out: &mut [u8]) -> Result<(), Error> {
+        let secret = self
+            .exporter
+            .as_deref()
+            .ok_or_else(|| Error::Protocol(alloc::string::String::from("export klicu neni k dispozici")))?;
+        if crate::exporter::export(secret, label, context, out) {
+            Ok(())
+        } else {
+            Err(Error::Protocol(alloc::string::String::from("neplatny pozadavek na export klicu")))
+        }
     }
 
     /// Vyjednany protokol ALPN (napr. `b"h2"`), pokud server nejaky vybral.
@@ -160,6 +185,12 @@ impl<S: Read + Write> TlsStream<S> {
                         Err(e) => return Err(Error::Protocol(alloc::format!("{e:?}"))),
                     };
                     self.outgoing.truncate(start + n);
+                    // Prvni zprava = ClientHello: zaznam (5 B), hlavicka
+                    // zpravy (4 B), verze (2 B), pak 32 B nahody klienta.
+                    let rec = &self.outgoing[start..];
+                    if self.client_random.is_none() && rec.len() >= 43 && rec[0] == 0x16 && rec[5] == 0x01 {
+                        self.client_random = rec[11..43].try_into().ok();
+                    }
                     None
                 }
                 ConnectionState::TransmitTlsData(t) => {

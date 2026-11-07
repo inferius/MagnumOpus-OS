@@ -29,6 +29,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+mod exporter;
 pub mod ocsp;
 pub mod provider;
 pub mod revocation;
@@ -104,6 +105,8 @@ impl Error {
 #[derive(Clone)]
 pub struct Client {
     config: Arc<rustls::ClientConfig>,
+    /// Tajemstvi pro export klicu (NTS), podle nahody klienta.
+    exporter: Arc<exporter::ExporterLog>,
 }
 
 struct Time(&'static Platform);
@@ -143,8 +146,11 @@ impl Client {
             .with_custom_certificate_verifier(Arc::new(verifier))
             .with_no_client_auth();
         config.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect::<Vec<_>>();
+        let exporter = Arc::new(exporter::ExporterLog::default());
+        config.key_log = exporter.clone();
         Ok(Self {
             config: Arc::new(config),
+            exporter,
         })
     }
 
@@ -154,7 +160,7 @@ impl Client {
         let server = pki_types::ServerName::try_from(String::from(name))
             .map_err(|_| Error::Certificate(alloc::format!("neplatne jmeno serveru {name}")))?;
         let conn = rustls::client::UnbufferedClientConnection::new(self.config.clone(), server)?;
-        TlsStream::handshake(conn, sock)
+        TlsStream::handshake(conn, sock, &self.exporter)
     }
 }
 

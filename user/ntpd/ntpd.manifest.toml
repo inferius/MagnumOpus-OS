@@ -1,14 +1,16 @@
-# Klient NTP. Cile site urci init podle seznamu serveru v ntpd.toml
-# (jen UDP na ty servery); manifest dava jen prava.
+# Klient NTP a NTS. Cile site urci init podle seznamu serveru v ntpd.toml
+# (TCP na NTS-KE, UDP na NTP); manifest dava jen prava.
 [app]
 id = "org.magnumopus.ntpd"
 name = "Synchronizace casu"
 
 [limits]
-memory = "8M"
+# TLS pro NTS-KE (kryptografie, korenove CA).
+memory = "24M"
 kernel_memory = "2M"
+stack = "512K"
 
 [network]
-rights = ["udp", "dns"]
+rights = ["tcp", "udp", "dns"]
 sockets = 8
 buffers = "1M"

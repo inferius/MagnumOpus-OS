@@ -33,6 +33,8 @@ pub mod dns;
 pub mod fw;
 pub mod link;
 pub mod ntp;
+#[cfg(feature = "nts")]
+pub mod nts;
 pub mod policy;
 
 #[cfg(feature = "client")]
@@ -41,6 +43,8 @@ pub mod io;
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, feature = "nts"))]
+mod tests_nts;
 
 use alloc::vec::Vec;
 use core::net::IpAddr;

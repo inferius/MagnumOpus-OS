@@ -197,8 +197,10 @@ porušený vnitřní předpoklad (chyba jádra).
 | `netd: chybi handly ve startovni zprave` | Chybný start služby (kód 1). |
 | `init: sluzbu site nelze spustit: ...` | Chybí síťová karta (`NOT_FOUND`) nebo služba neodpověděla. |
 | `ntpd: bezim, servery [...]` | Synchronizace času běží; servery z `ntpd.toml` (v testech server hostitele). |
-| `ntpd: prvni mereni: posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | První úspěšné měření; `step` = čas se nastavil skokem (posun nad 128 ms), `slew` = plynulé dorovnání. |
-| `ntpd: zadny server neodpovedel (...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za interval; hodiny běží dál podle poslední frekvence. |
+| `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | První úspěšné měření (ověřené NTS, nebo neověřené NTP v záloze); `step` = čas se nastavil skokem (posun nad 128 ms), `slew` = plynulé dorovnání. |
+| `ntpd: NTS-KE <server>: ...` | Výměna klíčů NTS selhala (spojení, certifikát, odpověď); server se v kole přeskočí. Při neplatném certifikátu zkontrolovat hodiny (RTC). |
+| `ntpd: neoverene servery: Never\|Fallback` | Init změnil pravidlo podle profilu sítě. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za interval; hodiny běží dál podle poslední frekvence. |
 | `ntpd: konfigurace: ...` | Konfigurace od init je neplatná; `ntpd` skončí. Opravit `ntpd.toml`. |
 | `timed: prvni synchronizace: skok o N ms` | První korekce od `ntpd` byla velká: čas se nastavil skokem (jediný povolený skok). |
 | `timed: prvni synchronizace: dorovnani o N ms` | První korekce byla malá: dorovná se plynule. |

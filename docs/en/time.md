@@ -205,8 +205,8 @@ let st = time::adjust(&clock, Some(-20_000_000), Some(-35_000))?;
 it after the network service:
 
 - **A network session** by the manifest `ntpd.manifest.toml` (rights
-  `udp`, `dns`) plus only UDP to the servers from `ntpd.toml`. Nowhere
-  else.
+  `tcp`, `udp`, `dns`) plus only the targets of the servers from
+  `ntpd.toml` (see [NTS](#nts-authenticated-time)). Nowhere else.
 - **A channel to `timed`** only for `sync` messages (correction
   proposals).
 - Every round: a batch of measurements from each server (`samples`), the
@@ -222,7 +222,8 @@ it after the network service:
 
 ```toml
 # ntpd.toml (initfs)
-servers = ["pool.ntp.org"]   # name or address[:port]
+servers = ["nts://time.cloudflare.com", "nts://nts.netnod.se", "nts://ptbtime1.ptb.de", "pool.ntp.org"]
+unauthenticated = "never"   # unauthenticated servers: never / fallback
 min_poll = 64
 max_poll = 1024
 samples = 4
@@ -251,15 +252,73 @@ step.
 Status: the `status` message on init's channel to `timed`
 (`synced=1 updates=… last_offset_ns=… remaining_ns=… freq_ppb=…
 slew_ppb=…`) and to `ntpd` (`rounds=… offset_ns=… delay_ns=… freq_ppb=…
-poll_s=…`).
+poll_s=… error=… timed=… auth=nts|plain|- policy=… nts_error=…`).
 
-⚠️ **NTP is not authenticated** (NTS, RFC 8915, is missing). Whoever
-controls the network can spoof replies and move the time. That can, for
-example, extend the validity of a revoked certificate. The limits in
-`timed` slow the attack down (at most 500 ppm, i.e. 43 s per day) but do
-not stop it. NTS (on top of the finished TLS, see
-[TLS and HTTP](tls-http.md)) is still missing. Until then use servers on
-a trusted network.
+### NTS (authenticated time)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NTS">
+<defs><marker id="tm9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="160" height="190" rx="6"/><text class="t b" x="90" y="45" text-anchor="middle">ntpd</text>
+<text class="m" x="20" y="70">keys C2S, S2C</text><text class="m" x="20" y="88">from TLS export</text><text class="m" x="20" y="106">8 cookies</text>
+<rect class="ok" x="590" y="20" width="160" height="80" rx="6"/><text class="t b" x="670" y="45" text-anchor="middle">NTS-KE</text><text class="m" x="670" y="64" text-anchor="middle">TLS 1.3, TCP 4460</text><text class="m" x="670" y="82" text-anchor="middle">ALPN ntske/1</text>
+<rect class="ok" x="590" y="130" width="160" height="80" rx="6"/><text class="t b" x="670" y="155" text-anchor="middle">NTP server</text><text class="m" x="670" y="174" text-anchor="middle">UDP 123</text><text class="m" x="670" y="192" text-anchor="middle">AES-SIV-CMAC-256</text>
+<path class="ln" d="M170 50 L588 50" marker-end="url(#tm9)"/><text class="m" x="190" y="44">ClientHello, NTPv4 + AES-SIV, END</text>
+<path class="ln" d="M588 75 L172 75" marker-end="url(#tm9)"/><text class="m" x="190" y="69">certificate; 8 cookies, NTP port, END</text>
+<path class="ln-acc" d="M170 150 L588 150" marker-end="url(#tm9)"/><text class="m" x="190" y="144">NTP + UID + cookie + placeholders + authenticator (C2S)</text>
+<path class="ln-acc" d="M588 180 L172 180" marker-end="url(#tm9)"/><text class="m" x="190" y="174">NTP + UID + authenticator (S2C) with new cookies</text>
+</svg>
+<figcaption>Keys are agreed over TLS (authenticated server); every NTP query is authenticated and single-use.</figcaption>
+</figure>
+
+**NTS** (Network Time Security, RFC 8915) prevents time spoofing:
+
+1. **NTS-KE:** TLS 1.3 to port 4460 with ALPN `ntske/1`. The server
+   certificate is verified as for HTTPS (roots from the store, revocation
+   through `revocd`). The client sends NTPv4 and AEAD 15
+   (AES-SIV-CMAC-256), the server returns a set of 8 **cookies** and
+   possibly another server or port for NTP. The C2S and S2C keys (32 B)
+   come from the TLS exporter (`EXPORTER-network-time-security`).
+2. **NTP with extensions:** a query carries a random identifier (32 B), one
+   cookie, placeholders for new cookies and an AES-SIV **authenticator**
+   over the header and the previous extensions (C2S key). The reply is
+   verified with the S2C key and carries new cookies in its encrypted part.
+3. Every cookie is used **once** (queries cannot be linked). When they run
+   out or the server sends NTSN ("kiss of death"), NTS-KE runs again.
+
+A spoofed reply (another identifier, a changed byte, a missing
+authenticator) is dropped and ntpd keeps waiting for the real one; an
+attacker can only block synchronization, not shift the time.
+
+| `servers` | Meaning |
+|---|---|
+| `nts://name[:port]` | NTS, NTS-KE on the port (default 4460) |
+| `name`, `address[:port]` | unauthenticated NTP (default port 123) |
+
+| `unauthenticated` | When unauthenticated servers are used |
+|---|---|
+| `never` (default) | never; without a reply from an NTS server the clock is not corrected |
+| `fallback` | only when no NTS server replies in a round |
+
+Init changes the rule at run time with `policy never|fallback` (by network
+profile). The `ntpd` network session for an `nts://` server: TCP to NTS-KE,
+UDP to the NTS-KE server (any port) and UDP 123 anywhere (NTS-KE chooses
+the NTP server).
+
+> ⚠️ **The clock and the certificate need each other:** the NTS-KE server
+> certificate is checked against the clock. When the RTC clock is outside
+> the certificate validity (flat battery, year 1970), NTS-KE fails and the
+> time is not synchronized until the user sets it or an unauthenticated
+> server does (`fallback`).
+
+> **Change from the first version:** unauthenticated NTP only. **Why:**
+> whoever controls the network could shift the time and e.g. let an
+> expired or revoked certificate pass.
+
+⚠️ **Unauthenticated NTP** (servers without `nts://`, the `fallback` rule)
+can be spoofed by whoever controls the network. The limits in `timed`
+slow the attack down (at most 500 ppm, i.e. 43 s per day) but do not stop
+it; that is why the default is `never`.
 
 ## Time zones
 
