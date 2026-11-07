@@ -428,8 +428,9 @@ action name:
 | `text` | the value in quotes (recipient, network target, message), at most 300 characters |
 | `int`, `bool`, `choice` | the value (`ano`/`ne` for `bool`) |
 
-When the dialog is shown, the compositor stores a fingerprint of the
-arguments (FNV-1a over their encoding) and after confirmation hands the
+When the dialog is shown, the compositor stores the encoded arguments
+(whole, compared byte by byte - a fingerprint could be collided on
+purpose) and after confirmation hands the
 application **exactly the arguments the user saw**. If they changed
 between showing and confirming, the call is rejected ("arguments changed
 after display") and the application gets nothing. The caller has no

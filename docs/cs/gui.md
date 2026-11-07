@@ -408,8 +408,8 @@ předáním potvrdí systémovým dialogem. Volající vidí jen akce, ne okna.
 | `text` | hodnota v uvozovkách (příjemce, cíl v síti, zpráva), nejvýš 300 znaků |
 | `int`, `bool`, `choice` | hodnota (`ano`/`ne` u `bool`) |
 
-Kompozitor si při zobrazení dialogu uloží otisk argumentů (FNV-1a nad
-jejich zakódováním) a aplikaci po potvrzení předá **přesně ty argumenty,
+Kompozitor si při zobrazení dialogu uloží zakódované argumenty (celé,
+porovnávají se bajt po bajtu - otisk by šel úmyslně zkolidovat) a aplikaci po potvrzení předá **přesně ty argumenty,
 které uživatel viděl**. Když by se mezi zobrazením a potvrzením změnily,
 volání se odmítne („argumenty se po zobrazení změnily“) a aplikace nic
 nedostane. Volající nemá zprávu, kterou by argumenty po potvrzení změnil.

@@ -1022,3 +1022,20 @@ fn bulk_paths_show_count_and_preview() {
     assert!(!line.contains("/data/f9.txt"));
     assert!(line.contains("... a dalších 12"));
 }
+
+#[test]
+fn same_length_different_arguments_are_rejected() {
+    // Ruzne zakodovani se stejnou delkou: kontrola porovnava cele bajty.
+    let a1 = vec![("path".into(), action::Value::Path("/home/a/x".into())), ("recipient".into(), action::Value::Text("jana@example.com".into()))];
+    let a2 = vec![("path".into(), action::Value::Path("/home/a/y".into())), ("recipient".into(), action::Value::Text("jana@example.com".into()))];
+    assert_eq!(services::args_bytes(&a1).len(), services::args_bytes(&a2).len());
+    assert_ne!(services::args_bytes(&a1), services::args_bytes(&a2));
+    let mut t = T::new();
+    let a = export_call(&mut t, "/home/a/x");
+    t.c.services.tamper(a2);
+    t.key(inputproto::code::KEY_LEFT, false);
+    t.key(inputproto::code::KEY_ENTER, false);
+    let out = t.out();
+    assert!(client_msgs(&out, a).is_empty());
+    assert!(out.iter().any(|o| matches!(o, Out::Caller(5, CallerReply::Result { ok: false, .. }))));
+}

@@ -29,21 +29,17 @@ struct Call {
     synthetic: bool,
     /// Uz predano aplikaci (ceka se na `ACTION_RESULT`).
     invoked: bool,
-    /// Otisk argumentu, ktere uzivatel videl v dialogu potvrzeni (aplikace
-    /// dostane presne tyto; jine se odmitnou).
-    shown: Option<u64>,
+    /// Zakodovane argumenty, ktere uzivatel videl v dialogu potvrzeni
+    /// (aplikace dostane presne tyto; jine se odmitnou).
+    shown: Option<Vec<u8>>,
 }
 
-/// Otisk argumentu (FNV-1a nad jejich zakodovanim).
-pub(crate) fn args_hash(args: &[Arg]) -> u64 {
+/// Zakodovane argumenty: porovnava se cely obsah bajt po bajtu (otisk
+/// typu FNV by sel umyslne zkolidovat).
+pub(crate) fn args_bytes(args: &[Arg]) -> Vec<u8> {
     let mut w = guiproto::Writer::new();
     guiproto::action::encode_args(&mut w, args);
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in w.finish() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    h
+    w.finish()
 }
 
 /// Argument pro cloveka podle typu z manifestu: cesta cela (dialog ji
@@ -212,7 +208,7 @@ impl Comp {
                         }
                     }
                     if let Some(c) = self.services.calls.get_mut(&id) {
-                        c.shown = Some(args_hash(&args));
+                        c.shown = Some(args_bytes(&args));
                     }
                     self.open_dialog(Dialog {
                         owner: Owner::Action(id),
@@ -247,7 +243,7 @@ impl Comp {
 
     pub(crate) fn action_confirmed(&mut self, id: u32, ok: bool) {
         // Potvrzeni plati jen pro argumenty, ktere byly v dialogu.
-        let tampered = self.services.calls.get(&id).is_some_and(|c| c.shown != Some(args_hash(&c.args)));
+        let tampered = self.services.calls.get(&id).is_some_and(|c| c.shown.as_deref() != Some(args_bytes(&c.args).as_slice()));
         if ok && !tampered {
             return self.invoke(id);
         }
