@@ -430,7 +430,7 @@ fs.aside_discard("/project-try")?;                  // clone and snapshot in one
 | `ASIDE_BEGIN` | 264 ms | 60-90 ms |
 | `ASIDE_APPLY` | 248 ms | 70-130 ms |
 | `VIEW` | 2 commits | ~5 ms (only the state commit, often empty) |
-| whole line (median) | 666 ms (fresh disk), 2-4 s after the tests | 160-280 ms |
+| whole line (median) | 666 ms (fresh disk), 2-4 s after the tests | 160-280 ms (after the test suite with the size-class allocator: x86_64 174 ms, aarch64 313 ms) |
 
 ```
 ASIDE_BEGIN ──> snapshot aside-N (state before the line) ──> clone /tmp/.aside/...
@@ -459,7 +459,7 @@ undo reads from aside-N ── VIEW_RELEASE frees it (ASIDE_DISCARD keeps it)
 - Guarded by tests: `libs/fs/src/tests/perf_shell.rs` (the number of writes
   and `flush`es per line does not depend on the number of loaded datasets,
   2 vs 300) and the QEMU suite `vykon FS` (`user/init/src/tests/fs_perf.rs`,
-  after all FS tests: a commit under 80 ms, a line under 300 ms).
+  after all FS tests: a commit under 80 ms, a line under 500 ms).
 
 ## On disk
 

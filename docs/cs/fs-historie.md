@@ -410,7 +410,7 @@ fs.aside_discard("/projekt-zkouska")?;              // klon i snapshot jedním k
 | `ASIDE_BEGIN` | 264 ms | 60-90 ms |
 | `ASIDE_APPLY` | 248 ms | 70-130 ms |
 | `VIEW` | 2 commity | ~5 ms (jen commit stavu, často prázdný) |
-| celý řádek (medián) | 666 ms (čerstvý disk), 2-4 s po testech | 160-280 ms |
+| celý řádek (medián) | 666 ms (čerstvý disk), 2-4 s po testech | 160-280 ms (po sadě testů s alokátorem po velikostních třídách: x86_64 174 ms, aarch64 313 ms) |
 
 ```
 ASIDE_BEGIN ──> snapshot aside-N (stav před řádkem) ──> klon /tmp/.aside/...
@@ -438,7 +438,7 @@ undo čte z aside-N ── VIEW_RELEASE ho uvolní (ASIDE_DISCARD ho nesmaže)
 - Hlídají to testy: `libs/fs/src/tests/perf_shell.rs` (počet zápisů
   a `flush` na řádek nezávisí na počtu načtených datasetů, 2 proti 300)
   a QEMU sada `vykon FS` (`user/init/src/tests/fs_perf.rs`, po všech
-  testech FS: commit pod 80 ms, řádek pod 300 ms).
+  testech FS: commit pod 80 ms, řádek pod 500 ms).
 
 ## Na disku
 
