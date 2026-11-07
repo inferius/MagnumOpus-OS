@@ -264,7 +264,7 @@ impl<'a> Harness<'a> {
         }
     }
 
-    fn shared(&self, name: &str) -> core::result::Result<SharedRef, String> {
+    pub fn shared(&self, name: &str) -> core::result::Result<SharedRef, String> {
         self.services
             .iter()
             .find(|(n, _)| *n == name)

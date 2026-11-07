@@ -22,6 +22,8 @@ pub const TESTS: &[Test] = &[
     ("pomaly restart: SERVICE_UNAVAILABLE do lhuty klienta", slow_restart),
     ("umyslne zavreni relace: PEER_CLOSED", deliberate_close),
     ("zavislosti: poradi restartu a oznameni", dependencies),
+    ("restart kvuli zavislosti se nepocita do limitu", dep_restarts_not_counted),
+    ("revive obnovi i neprimo zavisle sluzby", revive_transitive),
 ];
 
 const SVC: &str = "svctest";
@@ -120,6 +122,10 @@ fn deliberate_close(s: &Startup) -> TestResult {
         !h.log.iter().any(|e| matches!(e, Happened::Reconnected { .. })),
         "supervisor vydal novou relaci po umyslnem zavreni"
     );
+    // Listek zanikl: odebrani prav nejde obejit dalsim pokusem ani NARROW.
+    check_eq!(h.sup.lease_count(), 0, "listky po umyslnem zavreni");
+    check_eq!(h.ask(c, "call idem who")?, String::from("err SERVICE_UNAVAILABLE"), "dalsi pokus");
+    check_eq!(h.ask(c, "narrow child")?, String::from("err SERVICE_UNAVAILABLE"), "zuzeni po odebrani");
     Ok(())
 }
 
@@ -151,5 +157,48 @@ fn dependencies(s: &Startup) -> TestResult {
     check_eq!(st.state, State::Running, "stav svcdep");
     // Klient svcdep se pripoji k nove instanci.
     check_eq!(h.ask(c, "call idem who")?, String::from("ok gen=2 who=bob"), "klient svcdep");
+    Ok(())
+}
+
+fn dep_restarts_not_counted(s: &Startup) -> TestResult {
+    let mut h = Harness::new(s);
+    h.add(SVC, &[], "normal")?;
+    h.add("svcdep", DEP_RESTART, "normal")?;
+    // Zavislost spadne RESTART_MAX-krat; svcdep se pokazde restartuje s ni.
+    for _ in 0..crate::supervisor::RESTART_MAX {
+        h.kill(SVC)?;
+        h.drive_until(|e| e.contains(&Happened::Restarted("svcdep")))?;
+    }
+    // Vlastni pad svcdep je teprve prvni: restart, ne vzdani.
+    let got = h.kill_and_restart("svcdep")?;
+    check!(!got.contains(&Happened::GaveUp("svcdep")), "svcdep vzdana po prvnim vlastnim padu");
+    let st = h.sup.status_of("svcdep").ok_or("svcdep neni v registru")?;
+    check_eq!(st.state, State::Running, "stav svcdep");
+    Ok(())
+}
+
+const DEP_ON_DEP: &[Dep] = &[Dep::restart("svcdep")];
+
+fn revive_transitive(s: &Startup) -> TestResult {
+    let mut h = Harness::new(s);
+    // Kazda dalsi instance svctest hned skonci: supervisor to vzda a s ni
+    // i svcdep a svcdep2 (C -> B -> A).
+    h.add(SVC, &[], "crash")?;
+    h.add("svcdep", DEP_RESTART, "normal")?;
+    h.add("svcdep2", DEP_ON_DEP, "normal")?;
+    h.kill(SVC)?;
+    h.drive_until(|e| e.contains(&Happened::GaveUp("svcdep2")))?;
+    for name in [SVC, "svcdep", "svcdep2"] {
+        let st = h.sup.status_of(name).ok_or("sluzba neni v registru")?;
+        check_eq!(st.state, State::GaveUp, &format!("stav {name} po vzdani"));
+    }
+    // Dalsi instance svctest uz bezi normalne.
+    h.shared(SVC)?.lock().mode_after = "normal";
+    check!(h.sup.revive(SVC), "revive");
+    h.drive_until(|e| e.contains(&Happened::Restarted("svcdep2")))?;
+    for name in [SVC, "svcdep", "svcdep2"] {
+        let st = h.sup.status_of(name).ok_or("sluzba neni v registru")?;
+        check_eq!(st.state, State::Running, &format!("stav {name} po revive"));
+    }
     Ok(())
 }

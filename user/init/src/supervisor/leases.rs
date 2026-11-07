@@ -57,7 +57,6 @@ impl Supervisor {
     }
 
     /// Pocet zivych listku (testy).
-    #[allow(dead_code)]
     pub fn lease_count(&self) -> usize {
         self.leases.len()
     }
@@ -106,9 +105,13 @@ impl Supervisor {
 
     /// Nejblizsi lhuta cekajiciho `RECONNECT`.
     pub(super) fn leases_due(&self) -> Option<u64> {
+        let now = time::now();
         self.leases
             .values()
-            .filter_map(|l| l.pending.map(|p| p.deadline.min(p.grace_until)))
+            .filter_map(|l| l.pending)
+            // Ubehla lhuta pro umyslne zavreni uz nebudi (jinak by smycka
+            // tocila naprazdno, dokud sluzba ceka na prodlevu).
+            .map(|p| if p.grace_until > now { p.deadline.min(p.grace_until) } else { p.deadline })
             .min()
     }
 
@@ -253,6 +256,13 @@ impl Supervisor {
             Ok(ch) => {
                 self.reply(key, op::RECONNECT, p.id, Ok(()), vec![ch.into_handle()]);
                 out.push(Happened::Reconnected { name, generation });
+            }
+            Err(Error::PeerClosed) => {
+                // Sluzba relaci zavrela umyslne (odebrani prav): listek
+                // zanikne, aby ho neslo obejit pres NARROW nebo pozdejsi
+                // restart.
+                self.reply(key, op::RECONNECT, p.id, Err(Error::PeerClosed), Vec::new());
+                self.leases.remove(&key);
             }
             Err(e) => self.reply(key, op::RECONNECT, p.id, Err(e), Vec::new()),
         }

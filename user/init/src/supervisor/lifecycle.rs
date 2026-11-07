@@ -63,6 +63,8 @@ impl Supervisor {
         let delay = (RESTART_DELAY.as_nanos() as u64)
             .saturating_mul(1 << e.history.len())
             .min(RESTART_DELAY_MAX.as_nanos() as u64);
+        // Do limitu se pocitaji jen vlastni pady (ne restart kvuli zavislosti).
+        e.history.push(now);
         e.phase = Phase::Backoff {
             at: now.saturating_add(delay),
         };
@@ -236,7 +238,6 @@ impl Supervisor {
         let now = time::now();
         let restart = e.generation > 0;
         if restart {
-            e.history.push(now);
             e.restarts += 1;
         }
         let generation = e.generation + 1;
@@ -263,7 +264,8 @@ impl Supervisor {
             Err(err) => {
                 // Start selhal: pocita se jako dalsi pad.
                 println!("init: sluzbu {} nelze spustit: {err}", e.name);
-                if e.history.len() >= RESTART_MAX {
+                e.history.push(now);
+                if e.history.len() > RESTART_MAX {
                     self.give_up(i, REASON_START, out);
                 } else {
                     e.phase = Phase::Backoff {
@@ -285,13 +287,18 @@ impl Supervisor {
         e.history.clear();
         e.reason = None;
         e.phase = Phase::Backoff { at: time::now() };
-        for d in self.entries.iter_mut() {
-            if d.phase == Phase::GaveUp
-                && d.reason == Some(REASON_DEP)
-                && d.deps.iter().any(|x| x.name == name)
-            {
-                d.reason = None;
-                d.phase = Phase::WaitingDeps;
+        // I neprimo zavisle (C -> B -> A): projit do hloubky.
+        let mut todo = alloc::vec![e.name];
+        while let Some(dep) = todo.pop() {
+            for d in self.entries.iter_mut() {
+                if d.phase == Phase::GaveUp
+                    && d.reason == Some(REASON_DEP)
+                    && d.deps.iter().any(|x| x.name == dep)
+                {
+                    d.reason = None;
+                    d.phase = Phase::WaitingDeps;
+                    todo.push(d.name);
+                }
             }
         }
         true

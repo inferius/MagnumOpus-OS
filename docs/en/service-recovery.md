@@ -163,9 +163,9 @@ code), `u64 generation`, `u8 service_state` (0 `Running`, 1 `Restarting`,
   `SERVICE_UNAVAILABLE` right away,
 - **deliberate close**: when the instance the session was issued on is
   still running after 200 ms, the service closed the session itself
-  (rights revoked, logged out). The reply is `PEER_CLOSED` and no new
-  session is issued: revoking rights cannot be bypassed by the library
-  reconnecting,
+  (rights revoked, logged out). The reply is `PEER_CLOSED`, no new session
+  is issued and **the lease ends**: revoking rights cannot be bypassed by
+  another attempt, `NARROW` or a later restart of the service,
 - a reply with a different `id` than the client expects is a late reply to
   a request that timed out. The client **takes over** a successful late
   `RECONNECT` reply (it is the session the supervisor issued last) and
@@ -201,6 +201,11 @@ A lease ends when the client closes its endpoint. The recipe goes with it.
   reply. The synchronisation is defined by the driver protocol
   (`blockproto`, `inputproto::device`, `netproto::link`,
   `guiproto::display`),
+- **leases in the start message** go at the end of the handles, after the
+  program's other handles (their order does not change), in the same order
+  as the sessions they belong to. An application window:
+  `[window, other handles..., window lease]`. A program that does not read
+  the lease keeps working without recovery,
 - **drivers do not exit when they lose their service**: a closed channel
   to the service (when the supervisor does not keep the endpoint) and a
   closed channel to `devmgr` are only logged; the driver waits until the
@@ -331,10 +336,15 @@ same commands `call`, `narrow`, `wait`, `gen` as `svctest client`).
   instance accepted but that was not confirmed by `FSYNC` is lost after a
   crash (just like after a power loss). The library does not report it;
   applications that care call `fsync`.
-- **Revoking rights by the service** (`PEER_CLOSED`) applies only to the
-  running instance. After another restart a client with the old lease
-  restores the session. A permanent revocation must be reported to the
-  supervisor by the service (cancelling the lease) - not there yet.
+- **Revoking rights by the service** cancels the lease once the client
+  tries to reconnect (`PEER_CLOSED`). If the service crashes before the
+  client tries, the lease survives; a permanent revocation must therefore
+  be reported to the supervisor by the service (cancelling the lease on the
+  control channel) - not there yet.
+- **The event hook** (`Conn::on_event`) is called with the connection
+  locked and must not call the same `Conn`. Calls to one `Conn` from
+  several threads are serialised (a spin lock holds the channel for the
+  whole call).
 - **A lease is one more channel** per recoverable session (kernel memory).
 - **The supervisor is single-threaded**: a long `start` or `connect` of an
   adapter delays everybody. Adapters must not block; waiting belongs in

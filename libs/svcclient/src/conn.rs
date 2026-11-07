@@ -19,7 +19,9 @@ use libos::{Channel, Handle, Message, time};
 use crate::policy::{self, After, Event, Kind};
 use crate::proto::{Reply, Request, State, op};
 
-/// Funkce, ktera dostava udalosti obnovy (jmeno sluzby, udalost).
+/// Funkce, ktera dostava udalosti obnovy (jmeno sluzby, udalost). Vola se
+/// se zamcenym spojenim: **nesmi volat zadnou metodu tehoz `Conn`**
+/// (zablokovala by se). Ma jen zaznamenat stav (napr. pro UI).
 pub type Hook = fn(&str, &Event);
 
 /// Stav spojeni, jak ho vidi aplikace.
@@ -113,10 +115,14 @@ impl Conn {
             match res {
                 Err(Error::PeerClosed) => {
                     g.channel = None;
-                    self.recover_locked(&mut g)?;
+                    let recovered = self.recover_locked(&mut g);
+                    // Pozadavek s ucinkem mohla stara instance provest: to je
+                    // dulezitejsi nez vysledek obnovy (aplikace nesmi
+                    // predpokladat, ze se nic nestalo).
                     if let After::Fail(e) = policy::after_loss(kind, delivered, had_handles) {
                         return Err(e);
                     }
+                    recovered?;
                 }
                 other => return other,
             }
@@ -211,6 +217,10 @@ impl Conn {
                 self.adopt(g, ch, r.generation);
                 Ok(())
             }
+            // Behem cekani prisla pozdni uspesna odpoved a relaci jsme
+            // prevzali: obnova se povedla (chyba se tyka uz neplatneho
+            // pozadavku).
+            Err(_) if g.channel.is_some() => Ok(()),
             Err(e) => {
                 g.state = ConnState::Unavailable(e);
                 self.emit(g, Event::Unavailable(e));

@@ -154,8 +154,8 @@ Pravidla `RECONNECT`:
 - když to supervisor vzdá (`GaveUp`), odpoví hned `SERVICE_UNAVAILABLE`,
 - **úmyslné zavření**: když instance, na které byla relace vydána, pořád
   běží i po 200 ms, služba relaci zavřela sama (odebrání práv, odhlášení). Odpověď je
-  `PEER_CLOSED` a nová relace se nevydá: odebrání práv nejde obejít
-  restartem knihovny,
+  `PEER_CLOSED`, nová relace se nevydá a **lístek zanikne**: odebrání práv
+  nejde obejít dalším pokusem, `NARROW` ani pozdějším restartem služby,
 - odpověď s jiným `id`, než klient čeká, je pozdní odpověď na požadavek,
   kterému vypršel čas. Úspěšnou pozdní odpověď `RECONNECT` klient
   **převezme** (je to relace, kterou supervisor vydal naposledy); ostatní
@@ -189,6 +189,10 @@ Lístek zanikne, když klient zavře svůj konec. Recept zmizí s ním.
   ovladači synchronizační požadavek a čte, dokud nedostane jeho odpověď.
   Synchronizaci si definuje protokol ovladače (`blockproto`,
   `inputproto::device`, `netproto::link`, `guiproto::display`),
+- **lístky ve startovní zprávě** jdou na konec handlů, za ostatní handly
+  programu (jejich pořadí se nemění), ve stejném pořadí jako relace, ke
+  kterým patří. Okno aplikace: `[okno, další handly..., lístek okna]`.
+  Program, který lístek nečte, funguje dál bez obnovy,
 - **ovladače při ztrátě služby nekončí**: zavřený kanál ke službě (když
   supervisor konec nedrží) i zavřený kanál k `devmgr` jen zalogují a čekají,
   až je supervisor ukončí, nebo až dostanou nový kanál.
@@ -311,9 +315,13 @@ Box::new(MůjAdaptér))`, klient je vlastní testovací program služby
   `fsd`, ale nepotvrzený `FSYNC`, se po pádu ztratí (stejně jako při výpadku
   proudu). Knihovna to nehlásí; aplikace, které na tom záleží, volají
   `fsync`.
-- **Odebrání práv službou** (`PEER_CLOSED`) platí jen pro běžící instanci.
-  Po dalším restartu si klient se starým lístkem relaci obnoví. Trvalé
-  odebrání musí služba ohlásit supervisoru (zrušení lístku) - zatím není.
+- **Odebrání práv službou** zruší lístek, až se klient pokusí znovu připojit
+  (`PEER_CLOSED`). Kdyby služba spadla dřív, než se o to klient pokusí,
+  lístek přežije; trvalé odebrání proto musí služba ohlásit supervisoru
+  (zrušení lístku na řídicím kanálu) - zatím není.
+- **Háček událostí** (`Conn::on_event`) se volá se zamčeným spojením a nesmí
+  volat stejný `Conn`. Volání jednoho `Conn` z více vláken se řadí za sebe
+  (spin zámek drží kanál po celé volání).
 - **Lístek je kanál navíc** na každou obnovitelnou relaci (paměť jádra).
 - **Supervisor je jednovláknový**: dlouhý `start` nebo `connect` adaptéru
   zdrží všechny. Adaptéry nesmějí blokovat; čekání patří do `ready`.
