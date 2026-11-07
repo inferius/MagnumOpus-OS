@@ -33,7 +33,7 @@ pub struct Mapping {
 impl Mapping {
     /// Namapuje `len` bajtu `vmo` od `offset` s pravy `flags` (`abi::vm::MAP_*`).
     pub fn new(vmo: &Vmo, offset: u64, len: u64, flags: u32) -> Result<Self> {
-        let len = len.next_multiple_of(abi::vm::PAGE_SIZE);
+        let len = len.next_multiple_of(crate::vm::page_size());
         let addr = sys::vm_map(
             rt::self_process(),
             vmo.handle().raw(),

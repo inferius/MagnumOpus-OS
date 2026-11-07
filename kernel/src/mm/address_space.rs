@@ -10,12 +10,10 @@ use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use abi::vm::{
-    MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, PAGE_SIZE, USER_ALLOC_BASE, USER_MAX, USER_MIN,
-};
+use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, USER_ALLOC_BASE, USER_MAX, USER_MIN};
 
 use super::{PhysAddr, VirtAddr, new_address_space, tlb};
-use crate::arch::paging::{MapFlags, PageSize, PageTable};
+use crate::arch::paging::{MapFlags, PAGE_SIZE, PageSize, PageTable, PageTableOps};
 use crate::error::Error;
 use crate::object::vmo::MemoryObject;
 use crate::sync::SpinLock;
@@ -91,9 +89,18 @@ impl AddressSpace {
         })
     }
 
-    /// Fyzicka adresa korenove tabulky (pro prepnuti CR3).
+    /// Fyzicka adresa korenove tabulky (pro `arch::switch_user_space`).
     pub fn root(&self) -> u64 {
         self.root
+    }
+
+    /// Velikost stranky tohoto adresniho prostoru (syscall `VM_PAGE_SIZE`):
+    /// na tuto hodnotu musi byt zarovnane adresy a delky mapovani. Zatim
+    /// vsude ramec jadra (4 KiB); az bude mit adresni prostor vlastni
+    /// granuli (aarch64: 16 KiB pro nativni procesy), vrati ji tady
+    /// a `page_aligned` a mapovani ji pouziji misto `PAGE_SIZE`.
+    pub fn page_size(&self) -> u64 {
+        PAGE_SIZE
     }
 
     /// Namapuje `len` bajtu objektu `vmo` od `vmo_offset`. S `MAP_FIXED` presne
@@ -147,6 +154,9 @@ impl AddressSpace {
         let mut map_flags = MapFlags::USER;
         if vmo.is_uncached() {
             map_flags = map_flags | MapFlags::UNCACHED;
+        }
+        if vmo.is_dma() {
+            map_flags = map_flags | MapFlags::DMA;
         }
         if flags & MAP_WRITE != 0 {
             map_flags = map_flags | MapFlags::WRITE;
@@ -309,8 +319,8 @@ impl Drop for AddressSpace {
         if let Some(table) = inner.table.take() {
             // SAFETY: AddressSpace se rusi az s posledni referenci na proces;
             // jeho vlakna uz nebezi a planovac pri prepnuti na jine vlakno
-            // vzdy prepne CR3, takze tento adresni prostor neni aktivni na
-            // zadnem CPU. TLB zaznamy byly zahozeny prepnutim CR3.
+            // vzdy prepne adresni prostor, takze tento neni aktivni na
+            // zadnem CPU. TLB zaznamy byly zahozeny prepnutim.
             unsafe { table.destroy() };
         }
         // Mapovani (Arc na objekty pameti) se uvolni s `inner`.

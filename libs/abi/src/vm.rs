@@ -1,7 +1,20 @@
 //! Priznaky mapovani pameti a rozlozeni adresniho prostoru procesu.
 
-/// Velikost stranky.
-pub const PAGE_SIZE: u64 = 4096;
+/// Nejmensi velikost stranky na vsech architekturach (4 KiB).
+///
+/// Skutecna velikost stranky je vlastnost adresniho prostoru procesu: je to
+/// mocnina dvou od `MIN_PAGE_SIZE` do `MAX_PAGE_SIZE` a program ji zjisti
+/// za behu (`VM_PAGE_SIZE`, v libos `libos::vm::page_size()`). Dnes je
+/// vsude 4 KiB; na aarch64 muze jadro dat nativnim procesum 16 KiB a
+/// procesum Windows vrstvy 4 KiB (granule se nastavuje pro kazdy adresni
+/// prostor zvlast). Proto zadna konstanta `PAGE_SIZE` v ABI neni: zarovnani
+/// pro `VM_MAP`, `VM_UNMAP` a rozsahy prostredku se ridi hodnotou za behu.
+pub const MIN_PAGE_SIZE: u64 = 4096;
+
+/// Nejvetsi velikost stranky, kterou muze proces dostat (64 KiB). Na tuto
+/// hodnotu se zarovnavaji segmenty programu (`user/user.ld`), aby slo
+/// stejny program nahrat s jakoukoli velikosti stranky.
+pub const MAX_PAGE_SIZE: u64 = 65536;
 
 /// Pristupova prava mapovani (`VM_MAP` flags).
 pub const MAP_READ: u32 = 1 << 0;

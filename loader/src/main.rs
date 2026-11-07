@@ -302,7 +302,7 @@ fn find_framebuffer() -> Framebuffer {
 /// Kdyz firmware pasmo nezna, cas se bere jako UTC (jadro o tom vi
 /// z `zone_minutes`).
 fn read_firmware_time() -> FirmwareTime {
-    let tsc = arch::rdtsc();
+    let counter = arch::cycle_counter();
     let t = match uefi::runtime::get_time() {
         Ok(t) if t.is_valid().is_ok() => t,
         Ok(_) => {
@@ -349,7 +349,7 @@ fn read_firmware_time() -> FirmwareTime {
         secs: utc.secs,
         nanos: utc.nanos,
         _reserved2: 0,
-        tsc,
+        counter,
     }
 }
 

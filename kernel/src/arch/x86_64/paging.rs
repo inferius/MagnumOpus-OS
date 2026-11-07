@@ -6,9 +6,8 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use super::cpu;
+use crate::arch::api::paging::{MapError, MapFlags, PageSize, PageTableOps};
 use crate::mm::{self, PhysAddr, VirtAddr};
-
-pub const PAGE_SIZE: u64 = 4096;
 
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
@@ -23,66 +22,13 @@ const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 static NX_ENABLED: AtomicBool = AtomicBool::new(false);
 static HUGE_1G: AtomicBool = AtomicBool::new(false);
 
-/// Prava a vlastnosti mapovani, nezavisle na architekture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MapFlags(u8);
-
-impl MapFlags {
-    pub const READ: Self = Self(0);
-    pub const WRITE: Self = Self(1 << 0);
-    pub const EXEC: Self = Self(1 << 1);
-    #[allow(dead_code)]
-    pub const USER: Self = Self(1 << 2);
-    /// Mapovani je stejne ve vsech adresnich prostorech (cast jadra),
-    /// TLB ho pri prepnuti CR3 nezahodi.
-    pub const GLOBAL: Self = Self(1 << 3);
-    /// Bez cache (registry zarizeni).
-    pub const UNCACHED: Self = Self(1 << 4);
-
-    pub const fn contains(self, other: Self) -> bool {
-        self.0 & other.0 == other.0
+/// Uroven tabulky, ve ktere lezi list (1 = PT, 2 = PD, 3 = PDPT).
+const fn level(size: PageSize) -> u32 {
+    match size {
+        PageSize::Size4K => 1,
+        PageSize::Size2M => 2,
+        PageSize::Size1G => 3,
     }
-}
-
-impl core::ops::BitOr for MapFlags {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self {
-        Self(self.0 | rhs.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageSize {
-    Size4K,
-    Size2M,
-    Size1G,
-}
-
-impl PageSize {
-    pub const fn bytes(self) -> u64 {
-        match self {
-            Self::Size4K => 0x1000,
-            Self::Size2M => 0x20_0000,
-            Self::Size1G => 0x4000_0000,
-        }
-    }
-
-    /// Uroven tabulky, ve ktere lezi list (1 = PT, 2 = PD, 3 = PDPT).
-    const fn level(self) -> u32 {
-        match self {
-            Self::Size4K => 1,
-            Self::Size2M => 2,
-            Self::Size1G => 3,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MapError {
-    OutOfMemory,
-    AlreadyMapped,
-    HugePageConflict,
-    Misaligned,
 }
 
 /// Zapne funkce CPU, na kterych strankovani jadra stavi: ochranu zapisu
@@ -90,7 +36,7 @@ pub enum MapError {
 ///
 /// # Safety
 ///
-/// Volat jednou pri startu kazdeho CPU, pred `PageTable::activate`.
+/// Volat jednou pri startu kazdeho CPU, pred `PageTable::activate_kernel`.
 pub unsafe fn init_cpu() {
     let features = cpu::features();
     // SAFETY: WP a PGE podporuje kazde x86_64 CPU; NXE se zapina jen
@@ -124,6 +70,7 @@ pub fn supports_1g_pages() -> bool {
     HUGE_1G.load(Ordering::Relaxed)
 }
 
+/// `MapFlags::DMA` nema na x86 vliv: DMA je koherentni s cache.
 fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
     let mut bits = PRESENT;
     if flags.contains(MapFlags::WRITE) {
@@ -164,30 +111,11 @@ pub struct PageTable {
 }
 
 impl PageTable {
-    /// Vytvori prazdny adresni prostor.
-    pub fn new() -> Result<Self, MapError> {
-        let root = mm::phys::alloc_frame_zeroed().ok_or(MapError::OutOfMemory)?;
-        Ok(Self {
-            root: root.as_u64(),
-        })
-    }
-
     /// Adresni prostor, ktery je prave aktivni na tomto CPU.
     pub fn current() -> Self {
         Self {
             root: cpu::read_cr3() & ADDR_MASK,
         }
-    }
-
-    /// Prepne CPU na tento adresni prostor.
-    ///
-    /// # Safety
-    ///
-    /// Tabulky musi mapovat prave bezici kod, zasobnik a vsechna data,
-    /// ktera se po prepnuti pouzivaji.
-    pub unsafe fn activate(&self) {
-        // SAFETY: predano volajicim.
-        unsafe { cpu::write_cr3(self.root) };
     }
 
     /// Projde tabulky k urovni `level` a vrati ukazatel na polozku.
@@ -217,9 +145,30 @@ impl PageTable {
         }
         Ok(Some(entry_ptr(table, index(virt, level))))
     }
+}
+
+impl PageTableOps for PageTable {
+    /// Vytvori prazdny adresni prostor.
+    fn new() -> Result<Self, MapError> {
+        let root = mm::phys::alloc_frame_zeroed().ok_or(MapError::OutOfMemory)?;
+        Ok(Self {
+            root: root.as_u64(),
+        })
+    }
+
+    /// Prepne CPU na tento adresni prostor.
+    ///
+    /// # Safety
+    ///
+    /// Tabulky musi mapovat prave bezici kod, zasobnik a vsechna data,
+    /// ktera se po prepnuti pouzivaji.
+    unsafe fn activate_kernel(&self) {
+        // SAFETY: predano volajicim.
+        unsafe { cpu::write_cr3(self.root) };
+    }
 
     /// Namapuje jednu stranku.
-    pub fn map(
+    fn map(
         &mut self,
         virt: VirtAddr,
         phys: PhysAddr,
@@ -231,7 +180,7 @@ impl PageTable {
             return Err(MapError::Misaligned);
         }
         let e = self
-            .walk(v, size.level(), true)?
+            .walk(v, level(size), true)?
             .expect("walk s create vzdy vraci polozku");
         // SAFETY: `e` je platna polozka vracena `walk`.
         unsafe {
@@ -244,7 +193,7 @@ impl PageTable {
     }
 
     /// Prelozi virtualni adresu na fyzickou, `None` pokud neni namapovana.
-    pub fn translate(&self, virt: VirtAddr) -> Option<PhysAddr> {
+    fn translate(&self, virt: VirtAddr) -> Option<PhysAddr> {
         let v = virt.as_u64();
         let mut table = self.root;
         for level in (1..=4).rev() {
@@ -265,7 +214,7 @@ impl PageTable {
     }
 
     /// Novy adresni prostor se sdilenou horni polovinou (jadrem) z `kernel`.
-    pub fn new_sharing_kernel_half(kernel: &PageTable) -> Result<Self, MapError> {
+    fn new_sharing_kernel_half(kernel: &Self) -> Result<Self, MapError> {
         let new = Self::new()?;
         for idx in 256..512 {
             // SAFETY: obe PML4 jsou platne tabulky dostupne pres primou mapu.
@@ -275,7 +224,7 @@ impl PageTable {
     }
 
     /// Fyzicka adresa korenove tabulky.
-    pub fn root(&self) -> u64 {
+    fn root(&self) -> u64 {
         self.root
     }
 
@@ -285,7 +234,7 @@ impl PageTable {
     /// # Safety
     ///
     /// Adresni prostor nesmi byt aktivni na zadnem CPU.
-    pub unsafe fn destroy(self) {
+    unsafe fn destroy(self) {
         fn free_table(table: u64, level: u32) {
             if level > 1 {
                 for idx in 0..512 {
@@ -311,7 +260,7 @@ impl PageTable {
     /// Zrusi mapovani jedne 4 KiB stranky na tomto CPU (TLB ostatnich CPU
     /// se nezneplatni - volajici ruci, ze tam stranka neni pouzivana).
     /// Tabulky nizsich urovni zustavaji.
-    pub fn unmap_4k(&mut self, virt: VirtAddr) {
+    fn unmap_4k(&mut self, virt: VirtAddr) {
         if let Ok(Some(e)) = self.walk(virt.as_u64(), 1, false) {
             // SAFETY: platna polozka PT vracena `walk`.
             unsafe { *e = 0 };
@@ -322,7 +271,7 @@ impl PageTable {
     /// Predalokuje tabulky druhe urovne pro celou horni polovinu adresniho
     /// prostoru. Kazdy novy adresni prostor pak jadro sdili prostym
     /// zkopirovanim 256 polozek PML4 a zmena mapovani jadra je videt vsude.
-    pub fn preallocate_kernel_half(&mut self) -> Result<(), MapError> {
+    fn preallocate_kernel_half(&mut self) -> Result<(), MapError> {
         for idx in 256..512 {
             let e = entry_ptr(self.root, idx);
             // SAFETY: polozka PML4 tohoto adresniho prostoru.

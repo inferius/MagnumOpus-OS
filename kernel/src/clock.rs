@@ -5,7 +5,8 @@
 //!
 //! 1. UEFI `GetTime` (precetl loader tesne pred ukoncenim boot services,
 //!    i s hodnotou TSC - posun do startu jadra se dopocita),
-//! 2. jinak CMOS RTC primo (kdyz ho ACPI nehlasi jako chybejici),
+//! 2. jinak hardwarove hodiny platformy (`arch::hardware_clock`, x86: CMOS
+//!    RTC, kdyz ho ACPI nehlasi jako chybejici),
 //! 3. jinak cas neni znamy (`CLOCK_REALTIME` vrati `NOT_SUPPORTED`).
 //!
 //! Presnost: firmware i RTC maji rozliseni 1 s, takze pocatek je presny jen
@@ -39,17 +40,15 @@ pub fn init(boot_info: &BootInfo, platform: &Platform) {
     let origin = if fw.valid == 1 {
         // Firmware cetl pred startem hodin jadra: cas 0 = cteni + uplynuly cas.
         let at_zero = WallTime::new(fw.secs, fw.nanos as i64)
-            .add_ns(arch::ns_from_tsc_to_start(fw.tsc));
+            .add_ns(arch::ns_from_counter_to_start(fw.counter));
         let f = if fw.zone_minutes == FirmwareTime::ZONE_UNSPECIFIED {
             flags::ZONE_ASSUMED_UTC
         } else {
             0
         };
         Some(Origin { at_zero, source: source::UEFI, flags: f })
-    } else if platform.rtc_absent {
-        None
     } else {
-        arch::rtc::read_time(platform.rtc_century).map(|t| Origin {
+        arch::hardware_clock(platform).map(|t| Origin {
             at_zero: t.add_ns(-(arch::now_ns() as i128)),
             source: source::RTC,
             flags: flags::ZONE_ASSUMED_UTC,

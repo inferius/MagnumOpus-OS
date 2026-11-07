@@ -75,8 +75,9 @@ pub struct FirmwareTime {
     /// Nanosekundy uvnitr sekundy (vetsina firmwaru hlasi 0).
     pub nanos: u32,
     pub _reserved2: u32,
-    /// Hodnota TSC v okamziku cteni (jadro z ni dopocita posun do sveho startu).
-    pub tsc: u64,
+    /// Citac cyklu CPU v okamziku cteni (x86: TSC, aarch64: CNTVCT_EL0);
+    /// jadro z nej dopocita posun do startu svych hodin.
+    pub counter: u64,
 }
 
 impl FirmwareTime {
@@ -91,7 +92,7 @@ impl FirmwareTime {
             secs: 0,
             nanos: 0,
             _reserved2: 0,
-            tsc: 0,
+            counter: 0,
         }
     }
 }

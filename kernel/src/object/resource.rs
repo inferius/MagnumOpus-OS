@@ -47,7 +47,7 @@ pub struct Resource {
 /// Nejvic rozsahu jednoho omezeneho prostredku.
 pub const MAX_RANGES: usize = 16;
 
-const PAGE: u64 = abi::vm::PAGE_SIZE;
+const PAGE: u64 = crate::arch::paging::PAGE_SIZE;
 
 fn contains(ranges: &[(u64, u64)], start: u64, len: u64) -> bool {
     let Some(end) = start.checked_add(len) else {
@@ -151,6 +151,12 @@ impl Resource {
         self.limits
             .as_ref()
             .is_none_or(|l| contains(&l.ranges, first, end - first))
+    }
+
+    /// Zarizeni, ke kteremu prostredek patri (segment, sbernice,
+    /// zarizeni << 3 | funkce), pokud je omezeny na jedno zarizeni.
+    pub fn device(&self) -> Option<(u16, u8, u8)> {
+        self.device
     }
 
     /// Domena IOMMU zarizeni (DMA pamet z tohoto prostredku se mapuje do ni).

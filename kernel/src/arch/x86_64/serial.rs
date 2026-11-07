@@ -68,6 +68,12 @@ impl SerialPort {
     }
 }
 
+impl crate::arch::api::DebugSerial for SerialPort {
+    fn init(&mut self) {
+        SerialPort::init(self);
+    }
+}
+
 impl fmt::Write for SerialPort {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for byte in s.bytes() {

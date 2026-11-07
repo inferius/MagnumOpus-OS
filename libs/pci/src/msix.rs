@@ -2,7 +2,7 @@
 //! tabulka zprav lezi v jednom z BARu zarizeni.
 
 use libos::abi::object::MsiMessage;
-use libos::abi::vm::{MAP_READ, MAP_WRITE, PAGE_SIZE};
+use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
 use libos::{Error, Mapping, Result};
 
@@ -38,8 +38,9 @@ impl MsixTable {
             .memory_bar(a, (table & 7) as u8)
             .ok_or(Error::NotSupported)?;
         let phys = bar.phys + (table & !7) as u64;
-        let page = phys & !(PAGE_SIZE - 1);
-        let len = (phys - page + entries as u64 * ENTRY_SIZE).next_multiple_of(PAGE_SIZE);
+        let page_size = libos::vm::page_size();
+        let page = phys & !(page_size - 1);
+        let len = (phys - page + entries as u64 * ENTRY_SIZE).next_multiple_of(page_size);
         let vmo = resource.device_memory(page, len)?;
         let map = Mapping::new(&vmo, 0, len, MAP_READ | MAP_WRITE)?;
         Ok(Self {

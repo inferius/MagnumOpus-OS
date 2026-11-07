@@ -94,6 +94,43 @@ per-segment rights, W^X) plus a 256 KiB stack, sends the startup message and
 starts the first thread. It returns the process and the channel end to the
 child.
 
+## Page size
+
+`libos::vm::page_size()` returns the page size of the own process (asks the
+kernel once, `VM_PAGE_SIZE`), `libos::vm::page_size_of(&process)` that of
+another process. It is not a constant: the ABI only has the bounds
+`MIN_PAGE_SIZE` (4 KiB) and `MAX_PAGE_SIZE` (64 KiB). Alignment for
+mappings and resource ranges follows this value:
+
+```rust
+let page = libos::vm::page_size();
+let len = data_len.next_multiple_of(page);
+```
+
+## Barriers for drivers
+
+`libos::barrier` orders accesses to memory shared with a device (DMA) and
+to device registers. `core::sync::atomic::fence` is not enough: it only
+orders accesses between processors, and on ARM a write to a device
+register can overtake earlier writes to memory.
+
+| function | when | x86_64 | aarch64 |
+|---|---|---|---|
+| `dma_wmb()` | data and descriptors in DMA memory before writing the index | `fence(SeqCst)` | `dmb oshst` |
+| `dma_rmb()` | index read from the device before reading its data | `fence(SeqCst)` | `dmb oshld` |
+| `mmio_wmb()` | all memory writes before writing a register ("doorbell") | `fence(SeqCst)` | `dsb st` |
+
+```rust
+write_descriptors();
+libos::barrier::dma_wmb();  // descriptors before the index
+write_avail_index();
+libos::barrier::mmio_wmb(); // index before notifying the device
+notify.write::<u16>(offset, queue_index);
+```
+
+This is what `libs/virtio` does (`Virtqueue::submit`, `take_used`,
+`Device::notify`).
+
 ## Low level
 
 `libos::sys` has the raw syscall wrappers (one function per syscall, see

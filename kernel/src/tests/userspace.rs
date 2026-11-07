@@ -4,7 +4,9 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, PAGE_SIZE};
+use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE};
+
+use crate::arch::paging::PAGE_SIZE;
 
 use crate::error::Error;
 use crate::mm::VirtAddr;

@@ -6,6 +6,10 @@
 //! Pocitadla misto priznaku: pozadavek, ktery prijde behem vyrizovani
 //! jineho, se tak neztrati.
 //!
+//! Architektura, ktera umi zneplatnit TLB vsech CPU jedinou instrukci
+//! (`arch::flush_tlb_broadcast`, napr. aarch64 `TLBI ... IS`), IPI vubec
+//! nepotrebuje.
+//!
 //! Zadatel behem cekani vyrizuje i pozadavky na sebe, takze dve CPU, ktera
 //! si posilaji shootdown soucasne, se nezablokuji. Volat bez drzeni zamku,
 //! na ktere muze cekat jine CPU se zakazanymi prerusenimi.
@@ -17,6 +21,9 @@ use crate::sched::{self, all_cpus};
 
 /// Vyprazdni TLB userspace na vsech CPU a pocka na dokonceni.
 pub fn shootdown() {
+    if arch::flush_tlb_broadcast() {
+        return;
+    }
     arch::flush_tlb_local();
     let Some(me) = sched::try_current_cpu_index() else {
         return; // pred startem planovace bezi jen jedno CPU

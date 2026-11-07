@@ -44,10 +44,11 @@ unsafe impl GlobalAlloc for GrowingHeap {
         }
         let need = (layout.size() + layout.align() + 64) as u64;
         // Rust o polovinu (mene volani pri postupnem rustu), zarovnane na stranky.
+        // `page_size` tady nesmi alokovat (jsme uvnitr alokatoru) - nealokuje.
         let grow = need
             .max(HEAP_GROW_MIN)
             .max(heap.size() as u64 / 2)
-            .next_multiple_of(4096);
+            .next_multiple_of(crate::vm::page_size());
         let top = heap.top() as u64;
         if top + grow > HEAP_BASE + HEAP_MAX || !map_heap(self_process(), top, grow) {
             return core::ptr::null_mut();

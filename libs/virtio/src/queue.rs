@@ -4,8 +4,6 @@
 //! Ovladac v tehle verzi posila pozadavky synchronne (jeden retezec a ceka
 //! na jeho dokonceni), coz na blokove zarizeni zatim staci.
 
-use core::sync::atomic::{Ordering, fence};
-
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
 use libos::{Error, Mapping, Result, Vmo};
@@ -101,10 +99,12 @@ impl Virtqueue {
         let slot = self.avail_off + 4 + 2 * (self.avail_idx % self.size) as u64;
         self.map.write::<u16>(slot, 0); // hlava retezce = deskriptor 0
         // Deskriptory a polozka fronty musi byt viditelne driv nez novy index.
-        fence(Ordering::SeqCst);
+        libos::barrier::dma_wmb();
         self.avail_idx = self.avail_idx.wrapping_add(1);
         self.map.write::<u16>(self.avail_off + 2, self.avail_idx);
-        fence(Ordering::SeqCst);
+        // Index driv nez cokoli dalsiho (upozorneni zarizeni dela `notify`
+        // s vlastni barierou).
+        libos::barrier::dma_wmb();
         Ok(())
     }
 
@@ -114,7 +114,7 @@ impl Virtqueue {
     /// je vadne (`CORRUPTED`) - driver ho pak nesmi dal pouzivat (DMA
     /// buffery by mohly byt jeste prepisovany).
     pub fn take_used(&mut self) -> Result<Option<(u32, u32)>> {
-        fence(Ordering::SeqCst);
+        libos::barrier::dma_rmb();
         let used_idx: u16 = self.map.read(self.used_off + 2);
         if used_idx == self.last_used {
             return Ok(None);
@@ -122,7 +122,8 @@ impl Virtqueue {
         if used_idx.wrapping_sub(self.last_used) > self.size {
             return Err(Error::Corrupted);
         }
-        fence(Ordering::SeqCst);
+        // Index od zarizeni driv nez data polozky, na kterou ukazuje.
+        libos::barrier::dma_rmb();
         let e = self.used_off + 4 + 8 * (self.last_used % self.size) as u64;
         let id: u32 = self.map.read(e);
         let len: u32 = self.map.read(e + 4);

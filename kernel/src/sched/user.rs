@@ -7,7 +7,7 @@ use core::sync::atomic::Ordering;
 
 use super::thread::Qos;
 use super::{Thread, enqueue, exit, percpu, thread_start, wake};
-use crate::arch::context::Context;
+use crate::arch::context::{Context, ThreadContext};
 use crate::arch::{self, interrupts};
 use crate::error::Error;
 use crate::log;
@@ -18,7 +18,7 @@ use crate::object::process::Process;
 pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thread>, Error> {
     // Zasobnik jadra vlakna je pamet jadra, ale vlakna vytvari program:
     // nesmi sahnout do rezervy.
-    if !crate::mm::phys::user_room(crate::mm::KERNEL_STACK_SIZE / abi::vm::PAGE_SIZE) {
+    if !crate::mm::phys::user_room(crate::mm::KERNEL_STACK_SIZE / crate::arch::paging::PAGE_SIZE) {
         return Err(Error::NoMemory);
     }
     let stack = KernelStack::new().ok_or(Error::NoMemory)?;
@@ -50,7 +50,7 @@ pub fn start_user_thread(
     arg1: u64,
 ) -> Result<(), Error> {
     let process = t.process.as_ref().ok_or(Error::WrongType)?;
-    // Navrat do userspace (`iretq`) na adresu mimo pamet procesu by vyvolal
+    // Navrat do userspace (`arch::enter_user`) na adresu mimo pamet procesu by vyvolal
     // vyjimku jeste v jadre: vstupni bod i zasobnik musi lezet v ni.
     if !(USER_MIN..USER_MAX).contains(&entry) || !(USER_MIN..=USER_MAX).contains(&stack) {
         return Err(Error::InvalidArgs);
@@ -97,20 +97,23 @@ pub fn on_return_to_user() {
 }
 
 /// Vyjimka CPU v userspace: zaloguje ji a ukonci proces.
-pub fn user_fault(vector: u8, error_code: u64, rip: u64, addr: u64) -> ! {
+/// `code` = cislo chyby podle ABI (viz `trap::user_fault`), `pc` = adresa
+/// instrukce (v logu pod jmenem registru architektury, `arch::PC_NAME`).
+pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64) -> ! {
     let me = super::current();
     let process = me
         .process
         .clone()
         .expect("vyjimka z userspace ve vlakne jadra");
     log::error!(
-        "proces {} ({}), vlakno {}: vyjimka CPU {vector}, kod {error_code:#x}, rip {rip:#x}, adresa {addr:#x}",
+        "proces {} ({}), vlakno {}: vyjimka CPU {code}, kod {error_code:#x}, {} {pc:#x}, adresa {addr:#x}",
         process.id,
         process.name,
-        me.name
+        me.name,
+        arch::PC_NAME
     );
     drop(me);
-    process.terminate(abi::process::EXIT_FAULT_BASE - vector as i64);
+    process.terminate(abi::process::EXIT_FAULT_BASE - code as i64);
     drop(process);
     interrupts::enable();
     exit()

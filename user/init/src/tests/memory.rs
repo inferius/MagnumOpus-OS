@@ -1,12 +1,18 @@
 //! Objekty pameti a mapovani.
 
-use libos::abi::vm::{MAP_EXECUTE, MAP_READ, MAP_WRITE, PAGE_SIZE as PAGE};
+use libos::abi::vm::{MAP_EXECUTE, MAP_READ, MAP_WRITE};
 use libos::{Error, Rights, Startup, Vmo, sys};
 
 use super::{Test, TestResult, fail};
 use crate::{check, check_eq};
 
+/// Velikost stranky vlastniho procesu (zjistena za behu, ne konstanta).
+fn page() -> u64 {
+    libos::vm::page_size()
+}
+
 pub const TESTS: &[Test] = &[
+    ("velikost stranky procesu", page_size),
     ("zapis a cteni objektu pameti", vmo_roundtrip),
     ("cteni mimo objekt -> OUT_OF_RANGE", vmo_out_of_range),
     (
@@ -24,22 +30,40 @@ pub const TESTS: &[Test] = &[
     ),
 ];
 
+fn page_size(s: &Startup) -> TestResult {
+    let p = page();
+    check!(
+        p.is_power_of_two()
+            && (libos::abi::vm::MIN_PAGE_SIZE..=libos::abi::vm::MAX_PAGE_SIZE).contains(&p),
+        "velikost stranky mimo MIN..=MAX nebo neni mocnina dvou"
+    );
+    let direct =
+        sys::vm_page_size(s.process.handle().raw()).map_err(|e| fail("VM_PAGE_SIZE", e))?;
+    check_eq!(direct, p, "VM_PAGE_SIZE a libos::vm::page_size");
+    check_eq!(
+        sys::vm_page_size(0).err(),
+        Some(Error::BadHandle),
+        "neplatny handle"
+    );
+    Ok(())
+}
+
 fn vmo_roundtrip(_: &Startup) -> TestResult {
-    let vmo = Vmo::create(3 * PAGE).map_err(|e| fail("vytvoreni", e))?;
+    let vmo = Vmo::create(3 * page()).map_err(|e| fail("vytvoreni", e))?;
     let data = b"Prilis zlutoucky kun pres hranici stranky";
-    vmo.write(PAGE - 10, data).map_err(|e| fail("zapis", e))?;
+    vmo.write(page() - 10, data).map_err(|e| fail("zapis", e))?;
     let mut back = [0u8; 41];
-    vmo.read(PAGE - 10, &mut back)
+    vmo.read(page() - 10, &mut back)
         .map_err(|e| fail("cteni", e))?;
     check_eq!(&back[..], &data[..], "data po zapisu pres hranici stranky");
     Ok(())
 }
 
 fn vmo_out_of_range(_: &Startup) -> TestResult {
-    let vmo = Vmo::create(PAGE).map_err(|e| fail("vytvoreni", e))?;
+    let vmo = Vmo::create(page()).map_err(|e| fail("vytvoreni", e))?;
     let mut buf = [0u8; 16];
     check_eq!(
-        vmo.read(PAGE - 8, &mut buf),
+        vmo.read(page() - 8, &mut buf),
         Err(Error::OutOfRange),
         "cteni pres konec"
     );
@@ -52,15 +76,15 @@ fn vmo_out_of_range(_: &Startup) -> TestResult {
 }
 
 fn map_and_access(s: &Startup) -> TestResult {
-    let vmo = Vmo::create(2 * PAGE).map_err(|e| fail("vytvoreni", e))?;
+    let vmo = Vmo::create(2 * page()).map_err(|e| fail("vytvoreni", e))?;
     let addr = s
         .process
-        .map(&vmo, 0, 2 * PAGE, MAP_READ | MAP_WRITE, 0)
+        .map(&vmo, 0, 2 * page(), MAP_READ | MAP_WRITE, 0)
         .map_err(|e| fail("mapovani", e))?;
     // SAFETY: rozsah je prave namapovany pro cteni a zapis.
-    unsafe { core::ptr::write_volatile((addr + PAGE + 8) as *mut u64, 0x1234_5678_9abc_def0) };
+    unsafe { core::ptr::write_volatile((addr + page() + 8) as *mut u64, 0x1234_5678_9abc_def0) };
     let mut back = [0u8; 8];
-    vmo.read(PAGE + 8, &mut back)
+    vmo.read(page() + 8, &mut back)
         .map_err(|e| fail("cteni", e))?;
     check_eq!(
         u64::from_le_bytes(back),
@@ -68,29 +92,29 @@ fn map_and_access(s: &Startup) -> TestResult {
         "hodnota zapsana pres mapovani"
     );
     s.process
-        .unmap(addr, 2 * PAGE)
+        .unmap(addr, 2 * page())
         .map_err(|e| fail("odmapovani", e))?;
     Ok(())
 }
 
 fn map_wx(s: &Startup) -> TestResult {
-    let vmo = Vmo::create(PAGE).map_err(|e| fail("vytvoreni", e))?;
+    let vmo = Vmo::create(page()).map_err(|e| fail("vytvoreni", e))?;
     let r = s
         .process
-        .map(&vmo, 0, PAGE, MAP_READ | MAP_WRITE | MAP_EXECUTE, 0);
+        .map(&vmo, 0, page(), MAP_READ | MAP_WRITE | MAP_EXECUTE, 0);
     check_eq!(r, Err(Error::InvalidArgs), "mapovani W+X");
     Ok(())
 }
 
 fn map_without_right(s: &Startup) -> TestResult {
-    let vmo = Vmo::create(PAGE).map_err(|e| fail("vytvoreni", e))?;
+    let vmo = Vmo::create(page()).map_err(|e| fail("vytvoreni", e))?;
     let no_map = vmo
         .handle()
         .duplicate(Some(Rights::READ | Rights::WRITE))
         .map_err(|e| fail("dup", e))?;
     let no_map = Vmo::from_handle(no_map);
     check_eq!(
-        s.process.map(&no_map, 0, PAGE, MAP_READ, 0),
+        s.process.map(&no_map, 0, page(), MAP_READ, 0),
         Err(Error::AccessDenied),
         "mapovani bez MAP"
     );
@@ -98,7 +122,7 @@ fn map_without_right(s: &Startup) -> TestResult {
 }
 
 fn bad_pointer(_: &Startup) -> TestResult {
-    let vmo = Vmo::create(PAGE).map_err(|e| fail("vytvoreni", e))?;
+    let vmo = Vmo::create(page()).map_err(|e| fail("vytvoreni", e))?;
     // Adresa 0x1000 neni namapovana (programy zacinaji na 4 MiB).
     // SAFETY: ukazatel predavame jadru, ktere ho overi; sami ho nepouzijeme.
     let buf = unsafe { core::slice::from_raw_parts_mut(0x1000 as *mut u8, 16) };
@@ -120,21 +144,21 @@ fn bad_pointer(_: &Startup) -> TestResult {
 }
 
 fn unmap(s: &Startup) -> TestResult {
-    let vmo = Vmo::create(PAGE).map_err(|e| fail("vytvoreni", e))?;
+    let vmo = Vmo::create(page()).map_err(|e| fail("vytvoreni", e))?;
     let addr = s
         .process
-        .map(&vmo, 0, PAGE, MAP_READ, 0)
+        .map(&vmo, 0, page(), MAP_READ, 0)
         .map_err(|e| fail("mapovani", e))?;
     check_eq!(
-        s.process.unmap(addr + PAGE, PAGE),
+        s.process.unmap(addr + page(), page()),
         Err(Error::NotFound),
         "odmapovani nenamapovaneho"
     );
     s.process
-        .unmap(addr, PAGE)
+        .unmap(addr, page())
         .map_err(|e| fail("odmapovani", e))?;
     check_eq!(
-        s.process.unmap(addr, PAGE),
+        s.process.unmap(addr, page()),
         Err(Error::NotFound),
         "dvojite odmapovani"
     );
