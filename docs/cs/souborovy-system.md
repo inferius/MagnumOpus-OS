@@ -31,7 +31,8 @@ sporné, co funguje:
 | příznaky `BlockPtr` (komprese, šifrování, sdílení, cloud) | vyhrazené | **nepoužívá**; uzel s příznakem = `NOT_SUPPORTED` |
 | příznaky extentu (předalokace) | vyhrazené | **nepoužívá**; extent s příznakem = `NOT_SUPPORTED` |
 | příznak objektu `INODE_REMOTE` | vyhrazený | **nepoužívá** (fáze 6) |
-| oprávnění (`acl`), vlastník, počet rozšířených atributů v záznamu objektu | ano | **zapisuje 0**, nečte (fáze 1d a později) |
+| oprávnění (`acl`), vlastník | ano | **používá** ([Oprávnění](#oprávnění-a-identita-relací)) |
+| počet rozšířených atributů v záznamu objektu | ano | **zapisuje 0**, nečte (později) |
 | čas přístupu (`atime`) | ano | **jen nastavením** (`set_times`); čtení ho nemění |
 | generace objektu, čas vytvoření | ano | **používá** (`Stat`, přehrání logu) |
 | symbolické odkazy, jména do 1024 znaků, limit velikosti | ano | **používá** |
@@ -180,6 +181,7 @@ tím, že by nerozuměl novým strukturám.
 |---|---|---|---|
 | 0 | incompat | `INCOMPAT_REMOTE` | vyhrazený: data jen v cloudu (fáze 6), ovladač ho zatím odmítne |
 | 1 | incompat | `INCOMPAT_TIME_SECS` | časy jsou sekundy i64 + nanosekundy u32 ([časy](#časy-objektů)); nové svazky ho mají vždy |
+| 0 | ro_compat | `RO_COMPAT_ACL` | svazek má popisy oprávnění s počty odkazů ([oprávnění](#oprávnění-a-identita-relací)); starší ovladač jen čte |
 
 **UUID** se při formátování bere z `FormatOptions::uuid`; nástroje na
 hostiteli (`xtask`) předávají náhodné. Bez něj se odvodí ze jména, velikosti
@@ -272,6 +274,9 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 | `SNAPSHOT` | 5 | číslo snapshotu (objekt 0) | `BlockPtr` kořene, generace u64, počet klonů u32, příznaky u32 (1 = skrytý), jméno |
 | `DEADLIST` | 6 | seznam << 32 \| pořadí (objekt 0) | až 80 mrtvých úseků (start u64, délka u64, birth u64) |
 | `SYMLINK` | 7 | 0 | cíl symbolického odkazu (UTF-8, 1-4096 B) |
+| `ACL` | 10 | číslo popisu (objekt 0) | popis oprávnění s počtem odkazů ([oprávnění](#na-disku)) |
+| `ACL_INDEX` | 11 | otisk popisu (objekt 0) | čísla popisů u64 se stejným otiskem |
+| `PROPS` | 12 | 0 (objekt 0) | vlastnosti datasetu: příznaky u32 (1 = zákaz spouštění) |
 | `ORPHAN` | 9 | oid sirotka (objekt 0) | prázdná - objekt bez jména, který je otevřený; smaže ho poslední `close` nebo připojení |
 | `DATASET` | 8 | číslo datasetu (objekt 0, jen v kořenovém datasetu) | `DatasetRecord` 100 B: kořen, další oid, další snapshot, generace posl. snapshotu, pořadí deadlistu, původ klonu (dataset, snapshot, generace), příznaky |
 
@@ -716,7 +721,8 @@ jméno, nové jméno), 4 změna velikosti (oid, velikost, čas), 5 obsah malého
 souboru (oid, velikost, mtime, data), 6 mapování dat (oid, velikost, mtime,
 seznam extentů se součty), 7 symbolický odkaz, 8 značka datasetu,
 9 nastavení časů (oid, maska u8: bit 0 mtime, 1 btime, 2 atime, čas změny,
-přítomné časy). Čas v záznamu má 12 B (sekundy i64 + nanosekundy u32), na
+přítomné časy), 10/11 vytvoření/odkaz s vlastníkem (vlastník u64, pak
+záznam 1/7), 12 nastavení popisu oprávnění, 13 změna vlastníka. Čas v záznamu má 12 B (sekundy i64 + nanosekundy u32), na
 svazku bez `INCOMPAT_TIME_SECS` 8 B (u64 ns).
 
 **Při připojení:** log se čte od `zil_block`, dokud souhlasí magic,
@@ -1343,6 +1349,179 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 logu může mít soubor jinou revizi (verze obsahu se do logu nepíše) - klient
 pak dostane `CONFLICT` (bezpečný směr). Data se zatím kopírují zprávou (32
 KiB na zprávu); sdílená paměť a fronty požadavků přijdou později.
+
+## Oprávnění a identita relací
+
+> **Změna proti v2:** v2 oprávnění neměla (kdo měl kanál, směl vše).
+> **Proč:** soubory uživatelů, sdílení mezi nimi a aplikace, které vidí
+> jen to, co jim uživatel dal. Formát je od v3 připravený (vlastník a číslo
+> popisu v záznamu objektu); teď se používá.
+> ([všechny změny](fs-verze.md#přechod-v2---v3))
+
+<figure class="diagram">
+<svg viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Identita relaci a opravneni">
+<defs><marker id="pm1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="180" height="70" rx="6"/><text class="t b" x="100" y="45" text-anchor="middle">init / správce sezení</text><text class="m" x="100" y="64" text-anchor="middle">řídicí kanál fsd</text><text class="m" x="100" y="80" text-anchor="middle">(systém)</text>
+<path class="ln" d="M190 55 L268 55" marker-end="url(#pm1)"/><text class="m" x="229" y="47" text-anchor="middle">CONNECT_AS</text>
+<rect class="box" x="270" y="15" width="220" height="80" rx="6"/><text class="t b" x="380" y="38" text-anchor="middle">relace aplikace</text><text class="m" x="380" y="56" text-anchor="middle">identita: Alice (1000)</text><text class="m" x="380" y="72" text-anchor="middle">/app -> /home/alice/apps/editor</text><text class="m" x="380" y="88" text-anchor="middle">/vybrane/foto.jpg (jen čtení)</text>
+<path class="ln" d="M490 55 L568 55" marker-end="url(#pm1)"/><text class="m" x="529" y="47" text-anchor="middle">cesta FS</text>
+<rect class="ok" x="570" y="20" width="180" height="70" rx="6"/><text class="t b" x="660" y="45" text-anchor="middle">libs/fs</text><text class="m" x="660" y="64" text-anchor="middle">vlastník, granty,</text><text class="m" x="660" y="80" text-anchor="middle">dědičnost, viditelnost</text>
+<path class="ln" d="M100 90 L100 150 L268 150" marker-end="url(#pm1)"/><text class="m" x="185" y="142" text-anchor="middle">GRANT / REVOKE</text>
+<rect class="box" x="270" y="125" width="220" height="50" rx="6"/><text class="t" x="380" y="147" text-anchor="middle">dialog Otevřít (powerbox)</text><text class="m" x="380" y="165" text-anchor="middle">přidá relaci připojenou cestu</text>
+<text class="m" x="10" y="215">Mimo připojené cesty = NOT_FOUND, „..“ = INVALID_ARGS. Uvnitř rozhodují oprávnění FS podle identity relace;</text>
+<text class="m" x="10" y="233">objekt bez jakéhokoli práva je neviditelný (NOT_FOUND), s právem, ale bez potřebného = ACCESS_DENIED.</text>
+<text class="m" x="10" y="251">Klient si identitu nevymyslí: dostane jen kanál od toho, kdo relaci založil.</text>
+</svg>
+<figcaption>Identita a jmenný prostor relace razí init; oprávnění vyhodnocuje FS.</figcaption>
+</figure>
+
+### Model
+
+- **Kdo se ptá** (`Principal`): uživatel a jeho skupiny. Uživatel 0 je
+  systém: kontroly se na něj nevztahují (nástroje na hostiteli, ovladač pro
+  Windows, interní operace). Identitu FS dostane od volajícího
+  (`Fs::set_principal`), služba fsd podle relace.
+- **Vlastník** objektu má všechna práva. Nový objekt patří tomu, kdo ho
+  vytvořil. Vlastníka mění jen systém (`set_owner`).
+- **Práva:** *Vypsat* `LIST`, *Projít* `TRAVERSE`, *Číst* `READ`, *Zapsat*
+  `WRITE`, *Vytvořit* `CREATE`, *Smazat* `DELETE`, *Spustit* `EXECUTE`,
+  *Spravovat* `MANAGE` (oprávnění, snapshoty, datasety). Úrovně:
+  **Zobrazit** `VIEW` = vypsat + projít + číst, **Upravovat** `EDIT` =
+  zobrazit + zapsat + vytvořit + smazat, **Spouštět** `RUN` = zobrazit +
+  spustit.
+- **Granty:** popis oprávnění (`Acl`) = seznam „kdo -> práva“, **jen
+  povolení**. Grant platí pro objekt sám (`THIS`), dědí se do potomků
+  (`INHERIT`), nebo obojí. Příjemce je uživatel, skupina nebo `EVERYONE`
+  (každý kromě systému).
+- **Dědičnost:** objekt má zděděné granty rodiče a k nim své vlastní.
+  Příznak `PROTECTED` dědičnost přeruší - soukromá složka uvnitř sdílené
+  bez potřeby zákazů.
+- **Viditelnost:** položka, ke které volající nemá žádné právo, se ve
+  výpisu neobjeví a `stat` na ni vrátí `NOT_FOUND` (ne `ACCESS_DENIED` -
+  neprozradí se ani jméno). Každý adresář po cestě potřebuje `TRAVERSE`.
+  Souhrny podstromu (`tree_*`) vidí jen vlastník a `MANAGE`.
+
+| Operace | Potřebné právo |
+|---|---|
+| `stat`, `revision` | jakékoli (viditelnost) |
+| `list` | `LIST` |
+| `read`, `readlink`, `fragments` | `READ` |
+| `write`, `truncate`, `set_times` | `WRITE` |
+| `create`, `symlink`, `create_dataset` | `CREATE` k rodiči |
+| `remove` | `DELETE` k objektu |
+| `rename`, `rename_replace` | `DELETE` ke zdroji (i k nahrazovanému cíli) + `CREATE` k cílovému rodiči |
+| `open` | podle přístupu: `READ`, `WRITE`, `DELETE`, `EXECUTE` |
+| `set_acl`, `set_noexec`, `snapshot_of`, `delete_snapshot_of`, `diff`, `clone_snapshot` (zdroj) | `MANAGE` |
+| `delete_dataset` | `MANAGE` + `DELETE` |
+| `snapshots_of`, čtení ve snapshotu | `READ` ke kořeni datasetu, uvnitř oprávnění **ze snapshotu** |
+| `set_owner`, `check`, defragmentace | jen systém |
+
+**Handly:** práva se ověří při `open`, další operace přes handle už se
+nekontrolují (capability). Výpis přes handle (`list_h`) skrývá stejně jako
+`list`.
+
+**Snapshoty** mají oprávnění z doby, kdy vznikly: soubor, který autor
+později skryl, je ve starém snapshotu vidět tomu, kdo ho tehdy viděl
+a má `READ` ke kořeni datasetu.
+
+### Na disku
+
+- **Popis oprávnění** je položka `ACL` (druh 10, objekt 0, offset = číslo
+  popisu) v datasetu: příznaky u32, počet grantů u16, rezerva u16, **počet
+  odkazů u64**, granty (komu u64, práva u8, příznaky u8). Objekty na něj
+  ukazují číslem (`Inode::acl`, 0 = jen zdědit), takže tisíce souborů se
+  stejnými právy stojí jeden záznam.
+- **Index** `ACL_INDEX` (druh 11, offset = otisk popisu) najde stejný popis
+  při nastavení: granty se před uložením seřadí a sloučí, takže stejná
+  práva = stejný popis. Poslední odkaz popis i položku indexu smaže.
+- Příznak **`RO_COMPAT_ACL`** (ro_compat bit 0) se nastaví s prvním popisem:
+  starší ovladač smí svazek jen číst (při mazání by nesnižoval počty odkazů).
+- **Vlastnosti datasetu** `PROPS` (druh 12, objekt 0): příznaky u32, bit 0
+  = **zákaz spouštění** (`NOEXEC`). `open` s `EXECUTE` pak selže pro
+  každého, i pro systém - datasety s daty (stažené soubory, dokumenty)
+  nemohou obsahovat spustitelné programy.
+- **Intent log:** 10/11 = vytvoření/odkaz s vlastníkem (jen když vlastník
+  není systém - svazky bez uživatelů zůstanou čitelné starším ovladačem),
+  12 nastavení popisu, 13 změna vlastníka. Přežijí `fsync` a pád.
+- **fsck** kontroluje, že popisy existují, počty odkazů sedí a index je
+  úplný.
+
+```rust
+use fs::{Acl, Grant, Principal, grant, rights, acl_flags};
+
+fs.set_owner("/home/alice", 1000)?;                    // systém
+fs.set_principal(Some(Principal::user(1000, &[])));     // dál jako Alice
+fs.set_acl("/home/alice/sdilene", Some(Acl {
+    flags: 0,
+    grants: vec![Grant { who: 5000, rights: rights::EDIT, flags: grant::BOTH }], // tým
+}))?;
+fs.set_acl("/home/alice/sdilene/soukrome", Some(Acl {
+    flags: acl_flags::PROTECTED, grants: vec![],        // soukromá složka uvnitř sdílené
+}))?;
+```
+
+### Relace ve fsd: identita a připojené cesty
+
+- **Řídicí relace** = hlavní kanál ze startovní zprávy (má ho init, později
+  správce sezení). Je systém a vidí celý FS.
+- **`CONNECT_AS`** (jen řídicí relace) založí relaci uživatele: identita
+  (uživatel, skupiny) a **připojené cesty** `jméno v relaci -> cesta ve FS`
+  (příznak jen pro čtení). Vrátí číslo relace a kanál, který jde předat
+  aplikaci. **Klient si identitu nevymyslí** - identita patří kanálu.
+- **Jmenný prostor relace:** cesta se přeloží podle nejdelšího připojení na
+  hranici složky; mimo připojení `NOT_FOUND`, `..` a `.` = `INVALID_ARGS`
+  (z připojení nejde utéct). Odkazy FS nenásleduje, takže ani jimi ne.
+- **`GRANT` / `REVOKE`** (jen řídicí) přidá nebo odebere relaci připojenou
+  cestu - dialog Otevřít/Uložit (powerbox): aplikace dostane jen to, co
+  uživatel vybral.
+- `CONNECT` z relace uživatele založí další relaci se stejnou identitou
+  a cestami (ne řídicí).
+- Operace nad celým kořenovým datasetem (snapshoty v1, kontrola,
+  defragmentace) smí jen relace s připojením `/ -> /`.
+
+| op | Název | Parametry | Výsledek |
+|---|---|---|---|
+| 46 | `CONNECT_AS` | uživatel u64, skupiny (u32 + u64…), připojení (u32 + jméno, cíl, příznaky u8) | číslo relace u64 + kanál |
+| 47 | `GRANT` | relace u64, jméno, cíl, příznaky u8 | - |
+| 48 | `REVOKE` | relace u64, jméno | - |
+| 49 | `PERMISSIONS` | cesta | vlastník u64, práva u8, má popis u8, [popis] |
+| 50 | `SET_ACL` | cesta, má popis u8, [popis: příznaky u32, počet u32, (komu u64, práva u8, příznaky u8)…] | - |
+| 51 | `SET_OWNER` | cesta, vlastník u64 (jen řídicí) | - |
+| 52 | `SET_NOEXEC` | kořen datasetu, zapnout u8 | - |
+| 53 | `NOEXEC` | kořen datasetu | zákaz u8 |
+
+`Stat` má navíc vlastníka u64 a účinná práva volajícího u8. `OPEN` zná
+přístup `EXECUTE` (8).
+
+### Profily
+
+Profil je **nastavení systému, ne formát** (hranice z návrhu: co musí platit
+pro každý zápis, je ve FS; nastavení a rozhodnutí mimo). Používá ho správce
+sezení přes `fsproto::perm::Profile`:
+
+| | Standardní (výchozí) | Přísný | Volný |
+|---|---|---|---|
+| relace aplikace (`app_mounts`) | `/app` + vybrané položky | `/app` + vybrané položky | celý domov + `/app` |
+| zapamatovat výběr (`remember_picks`) | ano | ne (vždy dialog) | ano |
+| zákaz spouštění na datech (`noexec_on_data`) | ano | ano | ne |
+| relace uživatele (`user_mounts`) | `/ -> /`, rozhodují oprávnění | stejně | stejně |
+
+```rust
+use fsproto::perm::{Mount, Profile, mount_flags};
+
+let p = Profile::Standard;
+let picked = [Mount::new("/vybrane/foto.jpg", "/home/alice/foto.jpg", mount_flags::READ_ONLY)];
+let (id, app) = fs.connect_as(1000, &[], &p.app_mounts("/home/alice", "editor", &picked))?;
+// ... uživatel později vybere složku:
+fs.grant(id, &Mount::new("/dokumenty", "/home/alice/Dokumenty", 0))?;
+```
+
+⚠️ **Omezení:** souhrny velikostí podstromu nejsou počítané pro každého
+uživatele zvlášť - kdo nemá `MANAGE`, uvidí 0. Položka datasetu ve výpisu
+se hodnotí podle oprávnění jeho kořene. Audit (záznam přístupů) a kvóty
+přijdou ve fázi 4. Ovladač pro Windows (`osfs mount`) běží jako systém:
+připojený obraz je pro uživatele Windows celý jeho, oprávnění se zachovají,
+ale nevynucují.
 
 ## Chybové kódy
 

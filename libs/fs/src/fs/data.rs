@@ -171,6 +171,9 @@ impl<D: BlockDevice> Fs<D> {
     /// Az kdyz zapis na disk selhava opakovane a buffer dosahne
     /// `DIRTY_HARD_LIMIT`, dalsi data se neprijmou.
     pub fn write(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
+        if self.checking() {
+            self.require(path, crate::perm::rights::WRITE)?;
+        }
         let (oid, inode) = self.file_oid(path)?;
         let end = offset.saturating_add(data.len() as u64);
         self.check_path_access(oid, super::handles::access::WRITE, offset, end)?;
@@ -208,6 +211,9 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Zmeni velikost souboru (zvetseni doplni nuly).
     pub fn truncate(&mut self, path: &str, size: u64) -> Result<()> {
+        if self.checking() {
+            self.require(path, crate::perm::rights::WRITE)?;
+        }
         self.guarded(|fs| {
             let (oid, inode) = fs.file_oid(path)?;
             fs.check_path_access(oid, super::handles::access::WRITE, size.min(inode.size), u64::MAX)?;
@@ -603,6 +609,7 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Pocet souvislych fyzickych useku souboru (1 = nefragmentovany).
     pub fn fragments(&mut self, path: &str) -> Result<u64> {
+        self.require(path, crate::perm::rights::READ)?;
         let (oid, _) = self.file_oid(path)?;
         let root = self.s.root;
         let mut runs = 0;

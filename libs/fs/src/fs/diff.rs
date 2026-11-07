@@ -160,7 +160,10 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Rozdil dvou verzi datasetu `dataset`: ze snapshotu `from` do
     /// snapshotu `to`, nebo do zive verze (`to = None`). Serazeno podle cesty.
+    /// S kontrolou opravneni vyzaduje `MANAGE` ke koreni datasetu (rozdil
+    /// ukazuje jmena vsech objektu).
     pub fn diff(&mut self, dataset: &str, from: &str, to: Option<&str>) -> Result<Vec<Change>> {
+        self.require(dataset, crate::perm::rights::MANAGE)?;
         self.enter_dataset(dataset)?;
         let old_root = Child::Disk(self.find_snapshot(from)?.1.root);
         let new_root = match to {
@@ -180,6 +183,7 @@ impl<D: BlockDevice> Fs<D> {
     /// Rozdil zapisovatelneho klonu `clone` proti snapshotu, ze ktereho
     /// vznikl (zakladni krok funkce "zkusit zmeny bokem": co klon zmenil).
     pub fn diff_clone(&mut self, clone: &str) -> Result<Vec<Change>> {
+        self.require(clone, crate::perm::rights::MANAGE)?;
         self.enter_dataset(clone)?;
         let (ods, osnap, _) = self.cur_origin;
         if ods == 0 {
@@ -289,7 +293,7 @@ impl<D: BlockDevice> Fs<D> {
     pub fn snapshot_readlink_of(&mut self, dataset: &str, snapshot: &str, path: &str) -> Result<String> {
         self.enter_dataset(dataset)?;
         let root = Child::Disk(self.find_snapshot(snapshot)?.1.root);
-        let oid = self.resolve(&root, path)?;
+        let oid = self.snapshot_object(dataset, &root, path, crate::perm::rights::READ)?;
         self.readlink_oid(&root, oid)
     }
 }

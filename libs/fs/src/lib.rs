@@ -35,6 +35,7 @@ mod hash;
 mod layout;
 mod names;
 mod node;
+pub mod perm;
 mod space;
 mod store;
 
@@ -43,7 +44,8 @@ mod tests;
 
 pub use abi::{Error, Result};
 pub use device::{BlockDevice, Durability, MemDevice};
-pub use fs::{Change, ChangeKind, CheckReport, DatasetInfo, Handle, Revision, access, share, DefragReport, DirEntry, Fs, FsInfo, Kind, MountOptions, SetTimes, SnapshotInfo, Stat};
+pub use fs::{Change, ChangeKind, CheckReport, DatasetInfo, Handle, Revision, access, share, DefragReport, DirEntry, Fs, FsInfo, Kind, MountOptions, Permissions, SetTimes, SnapshotInfo, Stat, ds_flags};
+pub use perm::{Acl, EVERYONE, Grant, Principal, SYSTEM, acl_flags, grant, rights};
 pub use hash::Algo;
 pub use layout::{BLOCK_SIZE, INLINE_MAX, MAX_EXTENT, MAX_FILE_SIZE, REUSE_DELAY, SYMLINK_MAX, TimeFormat, Timestamp};
 pub use names::{NAME_MAX, NAME_MAX_CHARS, fold_name, is_bidi_control, validate_name};

@@ -69,6 +69,8 @@ pub mod access {
     pub const READ: u8 = 1;
     pub const WRITE: u8 = 2;
     pub const DELETE: u8 = 4;
+    /// Spusteni (odmitne ho dataset se zakazem spousteni).
+    pub const EXECUTE: u8 = 8;
 }
 
 pub mod share {

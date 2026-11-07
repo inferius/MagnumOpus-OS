@@ -50,6 +50,8 @@ pub enum Op {
         kind: u8,
         name: String,
         time: Timestamp,
+        /// Vlastnik noveho objektu (0 = system).
+        owner: u64,
     },
     Remove {
         parent: u64,
@@ -75,11 +77,23 @@ pub enum Op {
         name: String,
         target: String,
         time: Timestamp,
+        owner: u64,
     },
     /// Nastaveni casu objektu (`Fs::set_times`); `time` = nova hodnota ctime.
     SetTimes {
         oid: u64,
         times: super::SetTimes,
+        time: Timestamp,
+    },
+    /// Novy vlastni popis opravneni objektu (`None` = jen dedit).
+    SetAcl {
+        oid: u64,
+        acl: Option<crate::perm::Acl>,
+        time: Timestamp,
+    },
+    SetOwner {
+        oid: u64,
+        owner: u64,
         time: Timestamp,
     },
 }
@@ -177,7 +191,14 @@ fn encode(records: &[Record], tf: TimeFormat) -> Vec<u8> {
                 kind,
                 name,
                 time,
+                owner,
             }) => {
+                // 10 = 1 s vlastnikem (jen kdyz neni system: svazky bez
+                // uzivatelu zustanou citelne i starsim ovladacem).
+                if *owner != 0 {
+                    b.push(10);
+                    put_u64(&mut b, *owner);
+                }
                 b.push(1);
                 put_u64(&mut b, *parent);
                 put_u64(&mut b, *oid);
@@ -219,7 +240,12 @@ fn encode(records: &[Record], tf: TimeFormat) -> Vec<u8> {
                 name,
                 target,
                 time,
+                owner,
             }) => {
+                if *owner != 0 {
+                    b.push(11);
+                    put_u64(&mut b, *owner);
+                }
                 b.push(7);
                 put_u64(&mut b, *parent);
                 put_u64(&mut b, *oid);
@@ -227,6 +253,27 @@ fn encode(records: &[Record], tf: TimeFormat) -> Vec<u8> {
                 put_time(&mut b, *time, tf);
                 put_str(&mut b, name);
                 put_str(&mut b, target);
+            }
+            Record::Op(Op::SetAcl { oid, acl, time }) => {
+                // 12: oid, cas, ma popis u8, delka u32, popis (bez odkazu).
+                b.push(12);
+                put_u64(&mut b, *oid);
+                put_time(&mut b, *time, tf);
+                match acl {
+                    Some(a) => {
+                        let e = crate::perm::encode_acl(a, 0);
+                        b.push(1);
+                        b.extend_from_slice(&(e.len() as u32).to_le_bytes());
+                        b.extend_from_slice(&e);
+                    }
+                    None => b.push(0),
+                }
+            }
+            Record::Op(Op::SetOwner { oid, owner, time }) => {
+                b.push(13);
+                put_u64(&mut b, *oid);
+                put_u64(&mut b, *owner);
+                put_time(&mut b, *time, tf);
             }
             Record::Op(Op::SetTimes { oid, times, time }) => {
                 // 9: oid, ktere casy u8 (bit 0 mtime, 1 btime, 2 atime),
@@ -329,7 +376,17 @@ fn decode(b: &[u8], tf: TimeFormat) -> Result<Vec<Record>> {
     let mut r = Reader { b, pos: 0, tf };
     let mut out = Vec::new();
     while r.pos < b.len() {
-        let rec = match r.u8()? {
+        let mut code = r.u8()?;
+        let mut owner = 0;
+        if code == 10 || code == 11 {
+            owner = r.u64()?;
+            let inner = r.u8()?;
+            if (code == 10 && inner != 1) || (code == 11 && inner != 7) || owner == 0 {
+                return Err(Error::Corrupted);
+            }
+            code = inner;
+        }
+        let rec = match code {
             1 => {
                 let (parent, oid, generation) = (r.u64()?, r.u64()?, r.u64()?);
                 let (kind, time) = (r.u8()?, r.time()?);
@@ -340,6 +397,7 @@ fn decode(b: &[u8], tf: TimeFormat) -> Result<Vec<Record>> {
                     kind,
                     time,
                     name: r.str()?,
+                    owner,
                 })
             }
             2 => {
@@ -371,6 +429,7 @@ fn decode(b: &[u8], tf: TimeFormat) -> Result<Vec<Record>> {
                     name,
                     target,
                     time,
+                    owner,
                 })
             }
             4 => Record::Op(Op::Truncate {
@@ -418,6 +477,23 @@ fn decode(b: &[u8], tf: TimeFormat) -> Result<Vec<Record>> {
                 }
             }
             8 => Record::Dataset(r.u64()?),
+            12 => {
+                let (oid, time) = (r.u64()?, r.time()?);
+                let acl = match r.u8()? {
+                    0 => None,
+                    1 => {
+                        let n = r.u32()? as usize;
+                        let (a, _) = crate::perm::decode_acl(r.take(n)?)?;
+                        Some(a)
+                    }
+                    _ => return Err(Error::Corrupted),
+                };
+                Record::Op(Op::SetAcl { oid, acl, time })
+            }
+            13 => {
+                let (oid, owner, time) = (r.u64()?, r.u64()?, r.time()?);
+                Record::Op(Op::SetOwner { oid, owner, time })
+            }
             9 => {
                 let (oid, mask) = (r.u64()?, r.u8()?);
                 if mask & !0b111 != 0 {
@@ -696,6 +772,7 @@ impl<D: BlockDevice> Fs<D> {
                 kind,
                 name,
                 time,
+                owner,
             }) => {
                 self.now = time;
                 let kind = match kind {
@@ -703,7 +780,10 @@ impl<D: BlockDevice> Fs<D> {
                     crate::layout::KIND_FILE => Kind::File,
                     _ => return Err(Error::Corrupted),
                 };
-                self.create_at(parent, &name, kind, oid, generation).map_err(bad)
+                self.owner_override = Some(owner);
+                let r = self.create_at(parent, &name, kind, oid, generation);
+                self.owner_override = None;
+                r.map_err(bad)
             }
             Record::Op(Op::Symlink {
                 parent,
@@ -712,9 +792,31 @@ impl<D: BlockDevice> Fs<D> {
                 name,
                 target,
                 time,
+                owner,
             }) => {
                 self.now = time;
-                self.symlink_at(parent, &name, &target, oid, generation).map_err(bad)
+                self.owner_override = Some(owner);
+                let r = self.symlink_at(parent, &name, &target, oid, generation);
+                self.owner_override = None;
+                r.map_err(bad)
+            }
+            Record::Op(Op::SetAcl { oid, acl, time }) => {
+                self.now = time;
+                if !self.object_exists(oid).map_err(bad)? {
+                    return Ok(());
+                }
+                let acl = match acl {
+                    Some(a) => Some(a.normalized().map_err(bad)?),
+                    None => None,
+                };
+                self.set_acl_oid(oid, acl.as_ref()).map_err(bad)
+            }
+            Record::Op(Op::SetOwner { oid, owner, time }) => {
+                self.now = time;
+                if !self.object_exists(oid).map_err(bad)? {
+                    return Ok(());
+                }
+                self.set_owner_oid(oid, owner).map_err(bad)
             }
             Record::Op(Op::Remove { parent, name, time }) => {
                 self.now = time;

@@ -9,7 +9,8 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use fsproto::v2::{Revision, lock, op, open_flags};
+use fsproto::perm::Mount;
+use fsproto::v2::{Revision, access as v2access, lock, op, open_flags};
 use fsproto::{Reader, Writer};
 use libos::{Channel, Error, Handle, Result};
 
@@ -31,24 +32,68 @@ pub struct Session {
     pub handles: BTreeSet<u64>,
     pub list_cache: Option<ListCache>,
     pub replaces: BTreeMap<u64, Replace>,
+    /// Cislo relace (pro `GRANT`/`REVOKE`); ridici relace 0.
+    pub id: u64,
+    /// Kdo relaci pouziva (`None` = system).
+    pub identity: Option<fs::Principal>,
+    /// Pripojene cesty (jmenny prostor relace).
+    pub mounts: Vec<Mount>,
+    /// Ridici relace (zaklada dalsi relace s identitou).
+    pub control: bool,
 }
 
 impl Session {
-    pub fn new(channel: Channel) -> Self {
+    pub fn new(channel: Channel, id: u64, identity: Option<fs::Principal>, mounts: Vec<Mount>) -> Self {
         Self {
             channel,
             handles: BTreeSet::new(),
             list_cache: None,
             replaces: BTreeMap::new(),
+            id,
+            identity,
+            mounts,
+            control: false,
         }
+    }
+
+    /// Ridici relace: system, cely FS.
+    pub fn control(channel: Channel) -> Self {
+        let mut s = Self::new(channel, 0, None, alloc::vec![Mount::new("/", "/", 0)]);
+        s.control = true;
+        s
+    }
+
+    /// Cesta relace -> cesta ve FS; `write` = operace meni FS (pripojeni
+    /// jen pro cteni ji odmitne).
+    pub fn map(&self, path: &str, write: bool) -> Result<String> {
+        let (p, ro) = fsproto::perm::map_path(&self.mounts, path)?;
+        if write && ro {
+            return Err(Error::AccessDenied);
+        }
+        Ok(p)
+    }
+
+    /// Vidi relace cely FS (`/ -> /`)? Operace nad celym korenovym
+    /// datasetem (jeho snapshoty, kontrola) jinak nejdou.
+    pub fn full_root(&self) -> Result<()> {
+        let full = self.mounts.iter().any(|m| m.name == "/" && m.target == "/" && !m.read_only());
+        if full { Ok(()) } else { Err(Error::AccessDenied) }
     }
 }
 
-/// Odpoved: telo, predavane handly a pripadne nova relace (`CONNECT`).
+/// Zmena jine relace, kterou provede hlavni smycka (ma vsechny relace).
+pub enum SessionOp {
+    Grant(u64, Mount),
+    Revoke(u64, String),
+}
+
+/// Odpoved: telo, predavane handly, pripadne nova relace (`CONNECT`,
+/// `CONNECT_AS`) a zmeny jinych relaci.
 pub struct Reply {
     pub body: Writer,
     pub handles: Vec<Handle>,
-    pub new_session: Option<Channel>,
+    pub new_session: Option<Session>,
+    pub session_ops: Vec<SessionOp>,
 }
 
 impl Reply {
@@ -57,6 +102,7 @@ impl Reply {
             body,
             handles: Vec::new(),
             new_session: None,
+            session_ops: Vec::new(),
         }
     }
 }
@@ -103,6 +149,9 @@ impl Service {
 
     /// Operace v2; `None` = neni v2 (obslouzi v1).
     pub fn handle_v2(&mut self, sess: &mut Session, opcode: u32, r: &mut Reader) -> Option<Result<Reply>> {
+        if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) {
+            return Some(self.perm_op(sess, opcode, r));
+        }
         if !(op::HELLO..=op::REPLACE_ABORT).contains(&opcode) {
             return None;
         }
@@ -116,11 +165,15 @@ impl Service {
             return Ok(Reply::body(w));
         }
         if opcode == op::CONNECT {
+            // Nova relace se stejnou identitou a cestami (ne ridici).
             let (ours, theirs) = Channel::create()?;
+            self.session_counter += 1;
+            let s = Session::new(ours, self.session_counter, sess.identity.clone(), sess.mounts.clone());
             return Ok(Reply {
                 body: w,
                 handles: alloc::vec![theirs.into_handle()],
-                new_session: Some(ours),
+                new_session: Some(s),
+                session_ops: Vec::new(),
             });
         }
         let now = crate::serve::fs_now();
@@ -128,8 +181,11 @@ impl Service {
         fs.set_time(now);
         match opcode {
             op::OPEN => {
-                let path = r.str()?;
+                let raw = r.str()?;
                 let (access, share, flags) = (r.u8()?, r.u8()?, r.u8()?);
+                let writes = access & (v2access::WRITE | v2access::DELETE) != 0
+                    || flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0;
+                let path = sess.map(&raw, writes)?;
                 if flags & open_flags::CREATE != 0 {
                     let kind = if flags & open_flags::DIR != 0 { fs::Kind::Dir } else { fs::Kind::File };
                     match fs.create(&path, kind) {
@@ -207,11 +263,12 @@ impl Service {
                 fs.set_delete_on_close(h, r.u8()? != 0)?;
             }
             op::RENAME_REPLACE => {
-                let from = r.str()?;
-                fs.rename_replace(&from, &r.str()?)?;
+                let from = sess.map(&r.str()?, true)?;
+                let to = sess.map(&r.str()?, true)?;
+                fs.rename_replace(&from, &to)?;
             }
             op::REPLACE_BEGIN => {
-                let target = r.str()?;
+                let target = sess.map(&r.str()?, true)?;
                 let has = r.u8()? != 0;
                 let rev = get_rev(r)?;
                 let expected = has.then_some(rev);

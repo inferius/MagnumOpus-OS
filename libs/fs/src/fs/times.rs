@@ -31,7 +31,7 @@ impl<D: BlockDevice> Fs<D> {
     /// Nastavi casy objektu na ceste (soubor, adresar i odkaz).
     pub fn set_times(&mut self, path: &str, t: SetTimes) -> Result<()> {
         self.guarded(|fs| {
-            let oid = fs.enter(path)?;
+            let oid = fs.require(path, crate::perm::rights::WRITE)?;
             fs.s.check_writable()?;
             if t.is_empty() {
                 return Ok(());

@@ -36,7 +36,7 @@ pub const VERSION: u32 = 3;
 /// *compat*: starsi ovladac smi svazek normalne pouzivat; *ro_compat*:
 /// jen cist; *incompat*: nesmi vubec. Neznamy bit ro_compat nebo
 /// incompat = pripojeni odmitnuto (`NOT_SUPPORTED`).
-pub const FEATURES_RO_COMPAT: u64 = 0;
+pub const FEATURES_RO_COMPAT: u64 = feature::RO_COMPAT_ACL;
 pub const FEATURES_INCOMPAT: u64 = feature::INCOMPAT_TIME_SECS;
 
 /// Rezervovane bity vlastnosti (zatim je ovladac neumi, takze svazek s nimi
@@ -49,6 +49,9 @@ pub mod feature {
     /// miliard let). Bez nej (svazky z doby pred zmenou) jsou casy u64 ns
     /// od 1970 - ovladac je umi cist i zapisovat dal ve starem tvaru.
     pub const INCOMPAT_TIME_SECS: u64 = 1 << 1;
+    /// ro_compat: svazek ma popisy opravneni s pocty odkazu. Starsi ovladac
+    /// smi jen cist (pri mazani by pocty nesnizoval).
+    pub const RO_COMPAT_ACL: u64 = 1 << 0;
 }
 
 /// Tvar casu na svazku (podle `feature::INCOMPAT_TIME_SECS`).
@@ -118,6 +121,15 @@ pub mod item {
     /// Sirotek: objekt bez jmena, ktery nekdo ma otevreny (objekt META_OID,
     /// offset = oid, hodnota prazdna). Po padu se pri pripojeni smaze.
     pub const ORPHAN: u8 = 9;
+    /// Popis opravneni (`perm::encode_acl`), objekt META_OID, offset =
+    /// cislo popisu (`Inode::acl`).
+    pub const ACL: u8 = 10;
+    /// Index popisu podle otisku (`perm::acl_hash`), objekt META_OID,
+    /// hodnota = cisla popisu u64 se stejnym otiskem.
+    pub const ACL_INDEX: u8 = 11;
+    /// Vlastnosti datasetu (objekt META_OID, offset 0): priznaky u32
+    /// (`fs::ds_flags`).
+    pub const PROPS: u8 = 12;
 }
 
 /// Klic polozky stromu; razeni podle (oid, kind, offset).

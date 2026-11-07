@@ -60,6 +60,9 @@ pub mod access {
     pub const WRITE: u8 = 2;
     /// Smi nastavit smazani pri zavreni.
     pub const DELETE: u8 = 4;
+    /// Spusteni (nacteni programu); odmitne ho dataset se zakazem
+    /// spousteni (`ds_flags::NOEXEC`).
+    pub const EXECUTE: u8 = 8;
 }
 
 /// Co handle dovoli ostatnim (bity, vrstva Windows `FILE_SHARE_*`).
@@ -78,6 +81,11 @@ pub(super) struct Open {
     generation: u64,
     access: u8,
     share: u8,
+    /// Granty pro potomky (vypis adresare pres handle skryje, k cemu
+    /// otevirajici nema pravo); `None` = bez kontrol.
+    view: Option<(crate::perm::Principal, crate::perm::Inherited)>,
+    /// Ucinna prava otevirajiciho v okamziku `open` (pro `stat_h`).
+    rights: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -120,13 +128,40 @@ impl<D: BlockDevice> Fs<D> {
     /// Otevre soubor nebo adresar `path` s pristupem `access` a sdilenim
     /// `share` (bity z `access` a `share`). Odkaz se nenasleduje.
     pub fn open(&mut self, path: &str, access_bits: u8, share_bits: u8) -> Result<Handle> {
-        let oid = self.enter(path)?;
+        if access_bits & !(access::READ | access::WRITE | access::DELETE | access::EXECUTE) != 0 {
+            return Err(Error::InvalidArgs);
+        }
+        let (oid, view) = if self.checking() {
+            let w = self.walk(path)?;
+            let mut need = 0;
+            for (a, r) in [
+                (access::READ, crate::perm::rights::READ),
+                (access::WRITE, crate::perm::rights::WRITE),
+                (access::DELETE, crate::perm::rights::DELETE),
+                (access::EXECUTE, crate::perm::rights::EXECUTE),
+            ] {
+                if access_bits & a != 0 {
+                    need |= r;
+                }
+            }
+            if w.rights & need != need {
+                return Err(Error::AccessDenied);
+            }
+            (w.oid, Some((self.principal.clone().unwrap_or_default(), w.below, w.rights)))
+        } else {
+            (self.enter(path)?, None)
+        };
+        let rights = view.as_ref().map_or(crate::perm::rights::ALL, |v| v.2);
+        let view = view.map(|(p, b, _)| (p, b));
+        if access_bits & access::EXECUTE != 0 && self.ds_flags()? & super::ds_flags::NOEXEC != 0 {
+            return Err(Error::AccessDenied);
+        }
         let root = self.s.root;
         let inode = self.inode(&root, oid)?;
         if inode.kind == KIND_SYMLINK {
             return Err(Error::WrongType);
         }
-        if access_bits & access::WRITE != 0 {
+        if access_bits & (access::WRITE | access::EXECUTE) != 0 {
             if inode.kind == KIND_DIR {
                 return Err(Error::IsADirectory);
             }
@@ -149,6 +184,8 @@ impl<D: BlockDevice> Fs<D> {
                 generation: inode.generation,
                 access: access_bits,
                 share: share_bits,
+                view,
+                rights,
             },
         );
         Ok(h)
@@ -236,13 +273,27 @@ impl<D: BlockDevice> Fs<D> {
     pub fn stat_h(&mut self, h: Handle) -> Result<Stat> {
         let (o, _) = self.handle_object(h, 0)?;
         let root = self.s.root;
-        self.stat_oid(&root, o.oid)
+        let mut st = self.stat_oid(&root, o.oid)?;
+        if o.view.is_some() {
+            st.rights = o.rights;
+            self.limit_stat(&mut st);
+        }
+        Ok(st)
     }
 
     pub fn list_h(&mut self, h: Handle) -> Result<Vec<DirEntry>> {
         let (o, _) = self.handle_object(h, 0)?;
         let root = self.s.root;
-        self.list_oid(&root, o.oid)
+        let list = self.list_oid(&root, o.oid)?;
+        match &o.view {
+            Some((p, below)) => {
+                let saved = self.principal.replace(p.clone());
+                let r = self.visible(&root, below, list);
+                self.principal = saved;
+                r
+            }
+            None => Ok(list),
+        }
     }
 
     /// Smazani pri zavreni posledniho handlu (vyzaduje pristup DELETE
@@ -325,6 +376,9 @@ impl<D: BlockDevice> Fs<D> {
         if inode.kind != KIND_DIR {
             self.drop_content(oid)?;
         }
+        if inode.acl != 0 {
+            self.acl_release(inode.acl)?;
+        }
         self.del(&Key::new(oid, item::INODE, 0))?;
         self.del(&Key::new(META_OID, item::ORPHAN, oid))?;
         self.zil.forget(oid);
@@ -377,6 +431,14 @@ impl<D: BlockDevice> Fs<D> {
     /// operaci nahradi (soubor soubor, prazdny adresar adresar). Kdo mel
     /// puvodni cil otevreny, cte dal jeho obsah (sirotek).
     pub fn rename_replace(&mut self, from: &str, to: &str) -> Result<()> {
+        if self.checking() {
+            self.require(from, crate::perm::rights::DELETE)?;
+            self.require_parent(to, crate::perm::rights::CREATE)?;
+            match self.require(to, crate::perm::rights::DELETE) {
+                Ok(_) | Err(Error::NotFound) => {}
+                Err(e) => return Err(e),
+            }
+        }
         self.guarded(|fs| {
             let (fp, fname) = split_parent(from)?;
             let (tp, tname) = split_parent(to)?;
@@ -409,7 +471,7 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Revize objektu na ceste (pro podminene ulozeni).
     pub fn revision(&mut self, path: &str) -> Result<Revision> {
-        let oid = self.enter(path)?;
+        let oid = self.require(path, 0)?;
         let root = self.s.root;
         let i = self.inode(&root, oid)?;
         Ok(Revision { dataset: self.cur_ds, oid, generation: i.generation, version: i.version })

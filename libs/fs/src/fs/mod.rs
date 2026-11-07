@@ -16,6 +16,7 @@ mod dataset;
 mod defrag;
 mod diff;
 mod handles;
+mod perm;
 mod snap;
 mod times;
 mod zil;
@@ -45,6 +46,7 @@ pub use dataset::DatasetInfo;
 pub use defrag::DefragReport;
 pub use diff::{Change, ChangeKind};
 pub use handles::{Handle, Revision, access, share};
+pub use perm::{Permissions, ds_flags};
 pub use times::SetTimes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +102,10 @@ pub struct Stat {
     pub tree_dirs: u64,
     /// Dataset, ve kterem objekt lezi (1 = korenovy).
     pub dataset: u64,
+    /// Vlastnik (0 = system).
+    pub owner: u64,
+    /// Ucinna prava volajiciho (`rights::*`; system = vsechna).
+    pub rights: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +189,10 @@ pub struct Fs<D: BlockDevice> {
     others: BTreeMap<u64, dataset::DsCtx>,
     /// Otevrene soubory, zamky rozsahu.
     handles: handles::Handles,
+    /// Kdo provadi operace (`None` = system, bez kontrol).
+    principal: Option<crate::perm::Principal>,
+    /// Vlastnik novych objektu pri prehrani logu (z zaznamu).
+    owner_override: Option<u64>,
 }
 
 /// Volby pripojeni.
@@ -264,6 +274,8 @@ impl<D: BlockDevice> Fs<D> {
             cur_rec_dirty: false,
             others: BTreeMap::new(),
             handles: handles::Handles::default(),
+            principal: None,
+            owner_override: None,
         };
         fs.replay_log()?;
         // Sirotci z minula: po restartu je nikdo nema otevrene.
@@ -409,6 +421,8 @@ impl<D: BlockDevice> Fs<D> {
             tree_files: i.tree_files,
             tree_dirs: i.tree_dirs,
             dataset: self.cur_ds,
+            owner: i.owner,
+            rights: crate::perm::rights::ALL,
         })
     }
 
@@ -438,27 +452,58 @@ impl<D: BlockDevice> Fs<D> {
 
     // --- verejne cteni zive verze ---
 
+    /// Metadata objektu. S kontrolou opravneni: `rights` = ucinna prava
+    /// volajiciho a souhrny podstromu jen pro vlastnika a `MANAGE` (jinak
+    /// by prozradily velikost cizich souboru).
     pub fn stat(&mut self, path: &str) -> Result<Stat> {
-        let oid = self.enter(path)?;
+        if !self.checking() {
+            let oid = self.enter(path)?;
+            let root = self.s.root;
+            return self.stat_oid(&root, oid);
+        }
+        let w = self.walk(path)?;
         let root = self.s.root;
-        self.stat_oid(&root, oid)
+        let mut st = self.stat_oid(&root, w.oid)?;
+        st.rights = w.rights;
+        self.limit_stat(&mut st);
+        Ok(st)
     }
 
+    /// Bez prava `MANAGE` (vlastnik ho ma) souhrny podstromu nevidi.
+    pub(super) fn limit_stat(&self, st: &mut Stat) {
+        if st.rights & crate::perm::rights::MANAGE == 0 {
+            st.tree_bytes = 0;
+            st.tree_files = 0;
+            st.tree_dirs = 0;
+        }
+    }
+
+    /// Vypis adresare; s kontrolou opravneni vyzaduje `LIST` a vypis
+    /// obsahuje jen polozky, ke kterym ma volajici nejake pravo.
     pub fn list(&mut self, path: &str) -> Result<Vec<DirEntry>> {
-        let oid = self.enter(path)?;
+        if !self.checking() {
+            let oid = self.enter(path)?;
+            let root = self.s.root;
+            return self.list_oid(&root, oid);
+        }
+        let w = self.walk(path)?;
+        if w.rights & crate::perm::rights::LIST == 0 {
+            return Err(Error::AccessDenied);
+        }
         let root = self.s.root;
-        self.list_oid(&root, oid)
+        let list = self.list_oid(&root, w.oid)?;
+        self.visible(&root, &w.below, list)
     }
 
     pub fn read(&mut self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>> {
-        let oid = self.enter(path)?;
+        let oid = self.require(path, crate::perm::rights::READ)?;
         let root = self.s.root;
         self.read_oid(&root, oid, offset, len, true)
     }
 
     /// Cil symbolickeho odkazu (`WrongType`, kdyz `path` neni odkaz).
     pub fn readlink(&mut self, path: &str) -> Result<String> {
-        let oid = self.enter(path)?;
+        let oid = self.require(path, crate::perm::rights::READ)?;
         let root = self.s.root;
         self.readlink_oid(&root, oid)
     }
@@ -642,6 +687,7 @@ impl<D: BlockDevice> Fs<D> {
             if kind == Kind::Dataset {
                 return Err(Error::InvalidArgs);
             }
+            fs.require_parent(path, crate::perm::rights::CREATE)?;
             let (parent_path, name) = split_parent(path)?;
             validate_name(name)?;
             let parent = fs.dir_of(parent_path)?;
@@ -656,6 +702,7 @@ impl<D: BlockDevice> Fs<D> {
     /// `SYMLINK_MAX` bajtu bez NUL; cil nemusi existovat).
     pub fn symlink(&mut self, path: &str, target: &str) -> Result<()> {
         self.guarded(|fs| {
+            fs.require_parent(path, crate::perm::rights::CREATE)?;
             let (parent_path, name) = split_parent(path)?;
             validate_name(name)?;
             validate_target(target)?;
@@ -671,6 +718,7 @@ impl<D: BlockDevice> Fs<D> {
                 name: stored_name(name),
                 target: target.into(),
                 time: fs.now,
+                owner: fs.new_owner(),
             });
             Ok(())
         })
@@ -691,6 +739,7 @@ impl<D: BlockDevice> Fs<D> {
             kind: kind.raw(),
             name,
             time: self.now,
+            owner: self.new_owner(),
         });
         Ok(())
     }
@@ -723,6 +772,7 @@ impl<D: BlockDevice> Fs<D> {
         self.s.next_oid = self.s.next_oid.max(next);
         let mut inode = Inode::new(kind.raw(), parent, self.now, generation);
         inode.size = size;
+        inode.owner = self.new_owner();
         self.put_inode(oid, &inode)?;
         self.put(dkey, dvalue)?;
         self.touch_dir(parent)?;
@@ -737,6 +787,9 @@ impl<D: BlockDevice> Fs<D> {
     /// Odstrani soubor nebo prazdny adresar.
     pub fn remove(&mut self, path: &str) -> Result<()> {
         self.guarded(|fs| {
+            if fs.checking() {
+                fs.require(path, crate::perm::rights::DELETE)?;
+            }
             let (parent_path, name) = split_parent(path)?;
             let parent = fs.dir_of(parent_path)?;
             fs.ensure_room_freeing(4)?;
@@ -779,6 +832,9 @@ impl<D: BlockDevice> Fs<D> {
             } else if inode.kind != KIND_DIR {
                 self.drop_content(d.oid)?;
             }
+            if inode.acl != 0 {
+                self.acl_release(inode.acl)?;
+            }
             self.del(&Key::new(d.oid, item::INODE, 0))?;
         }
         self.remove_dirent(parent, &d.name)?;
@@ -802,6 +858,10 @@ impl<D: BlockDevice> Fs<D> {
     /// velikosti pismen tehoz jmena).
     pub fn rename(&mut self, from: &str, to: &str) -> Result<()> {
         self.guarded(|fs| {
+            if fs.checking() {
+                fs.require(from, crate::perm::rights::DELETE)?;
+                fs.require_parent(to, crate::perm::rights::CREATE)?;
+            }
             let (fp, fname) = split_parent(from)?;
             let (tp, tname) = split_parent(to)?;
             validate_name(tname)?;
