@@ -17,6 +17,7 @@ mod apps;
 mod certs;
 mod input;
 mod ntp;
+mod revocation;
 mod supervisor;
 mod system;
 mod tests;
@@ -70,6 +71,13 @@ fn main(startup: Startup) -> i64 {
                             system::NTP.call_once(|| t);
                         }
                         Err(e) => println!("init: synchronizaci casu nelze spustit: {e}"),
+                    }
+                    match revocation::start(&startup, n, &devices) {
+                        Ok(r) => {
+                            sup.watch("revocd", &r.process, None);
+                            system::REVOCD.call_once(|| r);
+                        }
+                        Err(e) => println!("init: kontrolu odvolani certifikatu nelze spustit: {e}"),
                     }
                 }
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),

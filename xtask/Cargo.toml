@@ -25,3 +25,6 @@ hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
+ring = "0.17"
+# Cteni poli certifikatu pro odpovedi OCSP a OneCRL.
+tls = { path = "../libs/tls" }

@@ -31,6 +31,10 @@ pub static NET: spin::Once<NetService> = spin::Once::new();
 
 /// Synchronizace casu (ntpd) spustena po siti.
 pub static NTP: spin::Once<crate::ntp::NtpService> = spin::Once::new();
+/// Sluzba odvolani certifikatu (kanal pro `client`, viz `revocation`).
+pub static REVOCD: spin::Once<crate::revocation::Revocd> = spin::Once::new();
+/// Zamek kanalu k revocd (zprava `client` a odpoved patri k sobe).
+pub static REVOCD_LOCK: spin::Mutex<()> = spin::Mutex::new(());
 
 /// Bezici spravce zarizeni, blokova zarizeni, ktera nasel, a souborovy
 /// system (pokud je na nekterem disku).

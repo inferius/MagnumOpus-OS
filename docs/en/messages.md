@@ -211,6 +211,13 @@ invariant was broken (a kernel bug).
 | `init: uloziste certifikatu nelze pripravit: ...` | No FS or no permissions: programs have no CA and `https` fails (`UnknownIssuer`). |
 | `fetch: uloziste certifikatu: ...`, `fetch: /certs/F: ...` | `fetch` cannot read the store or a file (over 4 MiB, FS error); the other files are loaded. |
 | `fetch: TLS: ...` | The TLS configuration cannot be created; `fetch` exits with code 2. |
+| `revocd: bezim (OneCRL ano\|ne, N zaznamu, mezipamet na FS\|jen v pameti)` | The revocation service runs ("OneCRL yes/no, N entries, cache on the FS / in memory only"); N = OneCRL entries loaded from the FS. |
+| `revocd: OneCRL: N zaznamu` | A new list of revoked CAs was downloaded and stored. |
+| `revocd: OneCRL: neplatny dokument` | The downloaded JSON cannot be read ("invalid document"); the previous list stays, a new attempt after `retry_minutes`. |
+| `revocd: <url>: ...` | Downloading a CRL or OneCRL failed (HTTP status, connection error); the URL is not retried for `retry_minutes`, the revocation status is unknown meanwhile. |
+| `revocd: <url>: neni CRL` | The server returned something other than a CRL ("not a CRL"). |
+| `init: kontrolu odvolani certifikatu nelze spustit: ...` | `revocd` did not start; programs check OCSP stapling only. |
+| `init: revocd bez FS (...)` | No FS: the cache is in memory only and there are no root CAs for OneCRL over https. |
 | `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` did not pass the channel to `fwd` ("without the firewall service"). The public profile applies (nothing inbound), questions of applications with `ask` are denied right away. |
 | `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` exited. The last configuration applies, pending and further questions are denied. |
 | `netd: profil site P` | `fwd` sent a configuration with another network profile (`public`, `home`, ...). See [Network profiles](firewall.md#network-profiles). |

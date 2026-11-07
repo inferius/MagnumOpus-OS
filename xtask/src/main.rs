@@ -18,6 +18,7 @@ mod highlight;
 mod image;
 mod qemu;
 mod nethelper;
+mod revhelper;
 mod webhelper;
 mod qmp;
 mod symbolize;
@@ -326,6 +327,7 @@ const USER_PROGRAMS: &[&str] = &[
     "netprobe",
     "ntpd",
     "fetch",
+    "revocd",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
@@ -338,6 +340,8 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("ntpd.manifest.toml", "user/ntpd/ntpd.manifest.toml"),
     ("ntpd.toml", "user/ntpd/ntpd.toml"),
     ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
+    ("revocd.manifest.toml", "user/revocd/revocd.manifest.toml"),
+    ("revocd.toml", "user/revocd/revocd.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

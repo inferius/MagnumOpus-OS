@@ -5,6 +5,8 @@
 //! 2. relaci FS s jedinym pripojenim `/certs` jen pro cteni (systemove
 //!    uloziste korenovych certifikatu). Bez ni se nenavaze zadne spojeni
 //!    `https` (zadna duveryhodna CA).
+//! 3. kanal ke sluzbe `revocd` (kontrola odvolani: CRL, OneCRL); bez nej
+//!    se kontroluje jen OCSP stapling.
 //!
 //! Prikazy na bootstrap kanalu (odpoved `ok:...` nebo `err:<JMENO> <popis>`):
 //! - `get <url>`, `head <url>`, `post <url> <telo>` -
@@ -21,110 +23,19 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::net::{IpAddr, SocketAddr};
 use core::time::Duration;
 
 use fsproto::FsClient;
-use httpc::{Client, Connector, Method, Request, Url, Version};
+use httpc::{Client, Method, Request, Url};
 use libos::{Channel, Error, Startup, println};
-use netproto::io::{Read, Write};
-use netproto::{Net, TcpStream};
-use tls::TlsStream;
+use netproto::Net;
+use tls::revocation::{ChannelSource, RevocationSource};
 use tls::roots::Roots;
+use web::Web;
 
 libos::entry!(main);
-
-/// Nejvetsi soubor uloziste certifikatu (sada Mozilla ma ~250 kB).
-const MAX_CERT_FILE: u64 = 4 << 20;
-const TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Nacte vsechny soubory z `/certs`.
-fn load_roots(fs: Option<&FsClient>) -> Roots {
-    let Some(fs) = fs else {
-        return Roots::empty();
-    };
-    let entries = match fs.list("/certs") {
-        Ok(e) => e,
-        Err(e) => {
-            println!("fetch: uloziste certifikatu: {e}");
-            return Roots::empty();
-        }
-    };
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-    for e in entries.iter().filter(|e| e.kind == fsproto::kind::FILE) {
-        let path = format!("/certs/{}", e.name);
-        let data = fs
-            .stat(&path)
-            .and_then(|st| if st.size > MAX_CERT_FILE { Err(Error::OutOfRange) } else { fs.read(&path, 0, st.size as usize) });
-        match data {
-            Ok(d) => files.push((e.name.clone(), d)),
-            Err(err) => println!("fetch: {path}: {err}"),
-        }
-    }
-    Roots::from_files(files.iter().map(|(n, d)| (n.as_str(), d.as_slice())))
-}
-
-/// Spojeni k serveru: holy TCP nebo TLS nad nim.
-enum Conn {
-    Plain(TcpStream),
-    Tls(TlsStream<TcpStream>),
-}
-
-impl Read for Conn {
-    fn read(&mut self, buf: &mut [u8]) -> libos::Result<usize> {
-        match self {
-            Self::Plain(s) => s.read(buf),
-            Self::Tls(s) => s.read(buf),
-        }
-    }
-}
-
-impl Write for Conn {
-    fn write(&mut self, buf: &[u8]) -> libos::Result<usize> {
-        match self {
-            Self::Plain(s) => s.write(buf),
-            Self::Tls(s) => s.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> libos::Result<()> {
-        match self {
-            Self::Plain(s) => s.flush(),
-            Self::Tls(s) => s.flush(),
-        }
-    }
-}
-
-struct Web<'a> {
-    net: &'a Net,
-    tls: &'a tls::Client,
-}
-
-impl Connector for Web<'_> {
-    type Stream = Conn;
-
-    fn connect(&mut self, url: &Url) -> httpc::Result<(Conn, Version)> {
-        let transport = |e: Error| httpc::Error::Transport(e, format!("{}:{}", url.host, url.port));
-        let mut tcp = match url.host.parse::<IpAddr>() {
-            Ok(ip) => self.net.tcp_connect(SocketAddr::new(ip, url.port), Some(TIMEOUT)),
-            Err(_) => self.net.tcp_connect_host(&url.host, url.port, Some(TIMEOUT)),
-        }
-        .map_err(transport)?;
-        tcp.set_read_timeout(Some(TIMEOUT));
-        match url.scheme {
-            httpc::Scheme::Http => Ok((Conn::Plain(tcp), Version::Http11)),
-            httpc::Scheme::Https => {
-                let s = self
-                    .tls
-                    .connect(&url.host, tcp)
-                    .map_err(|e| httpc::Error::Transport(e.code(), format!("{e}")))?;
-                let version = Version::from_alpn(s.alpn_protocol());
-                Ok((Conn::Tls(s), version))
-            }
-        }
-    }
-}
 
 /// FNV-1a 64 (kontrolni soucet tela pro testy).
 fn fnv(data: &[u8]) -> u64 {
@@ -139,15 +50,19 @@ fn main(startup: Startup) -> i64 {
         return 1;
     };
     let fs = handles.next().map(|h| FsClient::new(Channel::from_handle(h)));
-    let roots = load_roots(fs.as_ref());
-    let tls = match tls::Client::new(&tls::LIBOS, &roots, httpc::ALPN) {
+    let roots = web::load_roots(fs.as_ref());
+    // Kontrola odvolani (CRL, OneCRL) pres revocd; bez nej jen OCSP stapling.
+    let revocation = handles
+        .next()
+        .map(|h| Arc::new(ChannelSource::new(Channel::from_handle(h), Duration::from_secs(20))) as Arc<dyn RevocationSource>);
+    let tls = match tls::Client::with_revocation(&tls::LIBOS, &roots, httpc::ALPN, revocation) {
         Ok(c) => c,
         Err(e) => {
             println!("fetch: TLS: {e}");
             return 2;
         }
     };
-    let mut client = Client::new(Web { net: &net, tls: &tls }, httpc::Limits::default());
+    let mut client = Client::new(Web::new(&net, &tls), httpc::Limits::default());
     loop {
         let msg = match ch.read(None) {
             Ok(m) => m,

@@ -36,7 +36,8 @@ výpadku proudu pro testy FS).
 5. `netd` nad první síťovou kartou a `fwd` (firewall, konfigurace na FS),
    oba v jobech podle svých manifestů (viz [Síť](sit.md),
    [Firewall](firewall.md)), potom `ntpd` (synchronizace času, viz
-   [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd)),
+   [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd)) a `revocd`
+   (odvolání certifikátů, viz [TLS a HTTP](tls-http.md#odvolání-certifikátů)),
 6. všechny tyto procesy předá supervisoru k hlídání.
 
 ## Supervisor

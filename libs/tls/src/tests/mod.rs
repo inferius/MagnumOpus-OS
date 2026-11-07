@@ -4,6 +4,9 @@
 //! Pokryva vsechny sady sifer, skupiny vymeny klicu a typy klicu serveru
 //! (ECDSA P-256/P-384, Ed25519, RSA), ALPN, chyby certifikatu (cizi CA,
 //! spatne jmeno, propadly), zkraceni bez `close_notify` a uloziste korenu.
+//! Kontrolu odvolani testuje [`revocation`].
+
+mod revocation;
 
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
@@ -64,7 +67,7 @@ impl Write for Sock {
     }
 }
 
-const RSA_KEY: &[u8] = include_bytes!("../testdata/rsa2048.pk8.der");
+const RSA_KEY: &[u8] = include_bytes!("../../testdata/rsa2048.pk8.der");
 
 #[derive(Clone, Copy)]
 enum KeyKind {
@@ -134,6 +137,8 @@ struct ServerOpts {
     group: Option<rustls::NamedGroup>,
     alpn: Vec<Vec<u8>>,
     mode: Mode,
+    /// Odpoved OCSP poslana v handshaku (prazdna = bez staplingu).
+    ocsp: Vec<u8>,
 }
 
 impl Default for ServerOpts {
@@ -143,6 +148,7 @@ impl Default for ServerOpts {
             group: None,
             alpn: Vec::new(),
             mode: Mode::Exchange { big: 0 },
+            ocsp: Vec::new(),
         }
     }
 }
@@ -164,7 +170,7 @@ fn server(pki: &Pki, opts: ServerOpts) -> (u16, thread::JoinHandle<Result<(), St
         .with_protocol_versions(&[&rustls::version::TLS13])
         .unwrap()
         .with_no_client_auth()
-        .with_single_cert(pki.chain.clone(), pki.key.clone_key())
+        .with_single_cert_with_ocsp(pki.chain.clone(), pki.key.clone_key(), opts.ocsp)
         .unwrap();
     config.alpn_protocols = opts.alpn;
     let config = Arc::new(config);

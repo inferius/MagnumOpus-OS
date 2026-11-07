@@ -574,6 +574,7 @@ dependencies = [
  "libos",
  "netproto",
  "tls",
+ "web",
 ]
 
 [[package]]
@@ -1536,6 +1537,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "revocd"
+version = "0.1.0"
+dependencies = [
+ "conf",
+ "fsproto",
+ "httpc",
+ "libos",
+ "netproto",
+ "sha2",
+ "tls",
+ "web",
+]
+
+[[package]]
 name = "rfc6979"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1707,6 +1722,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest",
 ]
 
 [[package]]
@@ -1951,8 +1977,10 @@ dependencies = [
  "rsa",
  "rustls",
  "rustls-pki-types",
+ "sha1",
  "sha2",
  "signature",
+ "spin 0.12.3",
  "x25519-dalek",
 ]
 
@@ -2311,6 +2339,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "web"
+version = "0.1.0"
+dependencies = [
+ "fsproto",
+ "httpc",
+ "libos",
+ "netproto",
+ "tls",
+]
+
+[[package]]
 name = "webpki-root-certs"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2513,8 +2552,10 @@ dependencies = [
  "netproto",
  "pulldown-cmark",
  "rcgen",
+ "ring",
  "rustls",
  "shlang",
+ "tls",
  "tokio",
  "tokio-rustls",
  "webpki-root-certs",

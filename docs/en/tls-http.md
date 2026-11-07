@@ -21,6 +21,8 @@ validity is checked against real time, so TLS depends on it.
 |---|---|---|
 | TLS | `libs/tls` | rustls without `std`, cryptography provider (`provider/`), `TlsStream`, roots (`roots.rs`) |
 | HTTP | `libs/httpc` | URL, HTTP/1.1 (`h1.rs`), HTTP/2 (`h2/`), client with redirects |
+| revocation | `user/revocd`, `libs/tls/src/{revocation,ocsp,x509}.rs` | CRLs on demand with a cache, OneCRL, OCSP stapling |
+| connections | `libs/web` | TCP and TLS over a network session, `httpc::Connector`, roots from the store |
 | program | `user/fetch` | connections via `netproto`, TLS, HTTP; commands on the bootstrap channel |
 | store | `user/init/src/certs.rs` | prepares `/system/config/certs`, updates the set, read-only sessions |
 | CA set | `xtask/src/webhelper.rs` | the Mozilla set from the `webpki-root-certs` crate into initfs (`certs.pem`) |
@@ -34,9 +36,11 @@ validity is checked against real time, so TLS depends on it.
 >   FPU do not have.
 > - **Software AES** (no AES-NI) is slower and constant-time only through
 >   bitslicing; on a shared CPU ChaCha20-Poly1305 is the more robust choice.
-> - **No revocation checking** (OCSP, CRL, CRLite): a revoked certificate
->   passes until it expires. A misused CA can be removed by hand
->   (`distrust.txt`).
+> - **Revocation is "soft-fail" only:** when the revocation status cannot
+>   be determined (the CRL cannot be downloaded, a server without OCSP
+>   stapling), the connection passes - as in browsers. An attacker who
+>   blocks the CRL download can push a revoked certificate through. See
+>   [Certificate revocation](#certificate-revocation).
 > - **Certificate validity depends on the clock.** An attacker who spoofs
 >   NTP (no NTS yet) can move the time and let an expired certificate
 >   pass. After the first synchronization `timed` rejects jumps over 60 s,
@@ -225,6 +229,91 @@ set in the store changed (first start or a new system version). Without
 an FS (`init: uloziste certifikatu nelze pripravit: ...`) programs have
 no CAs and every `https` connection fails with `UnknownIssuer`.
 
+## Certificate revocation
+
+A CA can invalidate a certificate before it expires (stolen key, wrongly
+issued). The client learns about it only from extra data; TLS checks
+three sources:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Revocation checking">
+<defs><marker id="th4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="250" height="210" rx="6"/><text class="t b" x="135" y="44" text-anchor="middle">program (tls)</text>
+<text class="m" x="25" y="70">1. webpki: chain, name, time</text>
+<text class="m" x="25" y="95">2. OCSP from the handshake</text>
+<text class="m" x="25" y="120">3. OneCRL: revoked CAs</text>
+<text class="m" x="25" y="145">4. CRL from the certificate</text>
+<text class="m" x="25" y="170">   (webpki checks its signature)</text>
+<text class="m" x="25" y="205">unknown status = passes</text>
+<path class="ln-acc" d="M260 120 L338 120" marker-end="url(#th4)"/><text class="m" x="268" y="112">channel</text>
+<rect class="ok" x="340" y="60" width="180" height="120" rx="6"/><text class="t b" x="430" y="85" text-anchor="middle">revocd</text><text class="m" x="430" y="108" text-anchor="middle">CRL cache</text><text class="m" x="430" y="126" text-anchor="middle">OneCRL (24 h)</text><text class="m" x="430" y="144" text-anchor="middle">failure: 10 min pause</text>
+<path class="ln" d="M520 100 L598 80" marker-end="url(#th4)"/>
+<path class="ln" d="M520 140 L598 160" marker-end="url(#th4)"/>
+<rect class="box" x="600" y="45" width="150" height="60" rx="6"/><text class="t b" x="675" y="70" text-anchor="middle">CA (http)</text><text class="m" x="675" y="88" text-anchor="middle">CRL</text>
+<rect class="box" x="600" y="135" width="150" height="60" rx="6"/><text class="t b" x="675" y="160" text-anchor="middle">Mozilla (https)</text><text class="m" x="675" y="178" text-anchor="middle">OneCRL</text>
+<path class="ln" d="M430 180 L430 213" marker-end="url(#th4)"/><text class="m" x="440" y="232">/system/config/certs/crl</text>
+</svg>
+<figcaption>The program asks revocd; it verifies CRL and OCSP signatures itself.</figcaption>
+</figure>
+
+| Source | What it covers | When it rejects |
+|---|---|---|
+| **OCSP stapling** (`tls::ocsp`) | the end-entity certificate, when the server sends an OCSP response in the handshake | status `revoked`; a bad signature = `InvalidOcspResponse` (spoofed response). An expired response = unknown status |
+| **OneCRL** (Mozilla) | revoked intermediate CAs (hundreds of entries, as in Firefox) | a chain certificate on the list (issuer + serial, or subject + SHA-256 of the key) |
+| **CRL** | certificates with an `http://...` distribution point (almost all public CAs) | the certificate serial in a CRL signed by its issuer; an expired CRL is not used |
+
+**Unknown status does not stop the connection** (revocd not running, the
+CRL cannot be downloaded, a server without stapling). Browsers behave the
+same way: a hard failure would let an attacker who blocks CRLs turn it
+into a broken network. A revoked certificate
+(`Error::Certificate("Revoked")`, code `ACCESS_DENIED`) is always rejected.
+
+### The `revocd` service
+
+Programs ask over a channel that init hands them
+(`revocation::client()`); revocd only sees the queries, not the
+connection data.
+
+| Message | Reply |
+|---|---|
+| `crl <url>` | `ok` + CRL (DER) or `none` |
+| `ca` + 4 fields with a u32 LE length (issuer, serial, subject, key SHA-256) | `revoked` or `ok` |
+| bootstrap: `client` + handle | `ok` (a new program) |
+| bootstrap: `status` | `ok:clients=… crls=… fetched=… onecrl=…` |
+| bootstrap: `refresh` | `ok:onecrl=…` (OneCRL again now) |
+
+- **CRL:** from memory (64 most recent), from the FS
+  (`/crl/<SHA-256 of the URL>.crl`, valid until `nextUpdate`, a CRL
+  without it 24 h after download), otherwise downloaded (HTTP/HTTPS, at
+  most 16 MiB, 15 s limit). After a failure the URL is not retried for
+  10 minutes. revocd does not verify the signature, webpki in the program
+  does: a spoofed CRL from revocd achieves nothing.
+- **OneCRL:** downloaded on the first query and then every 24 h from the
+  URL in `revocd.toml`; the last valid version is kept in
+  `/crl/onecrl.json`. Entries with `"enabled": false` are skipped.
+- **Permissions:** network session TCP 80/443 anywhere (CAs choose the CRL
+  URLs), FS session of the `REVOCD_USER` account (901): `/certs`
+  read-only, `/crl` writable. The cache inherits read access for everyone
+  (CRLs are public).
+
+```toml
+# revocd.toml
+onecrl = "https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/onecrl/changeset?_expected=0"
+onecrl_refresh_hours = 24
+crl_default_hours = 24
+retry_minutes = 10
+```
+
+```rust
+// program: revocation checking through revocd (channel from init)
+let source = Arc::new(tls::revocation::ChannelSource::new(channel, Duration::from_secs(20)));
+let client = tls::Client::with_revocation(&tls::LIBOS, &roots, httpc::ALPN, Some(source))?;
+```
+
+> **Change from the first version:** revocation was not checked at all.
+> **Why:** a certificate with a stolen key would otherwise stay valid
+> until it expires (months for public CAs).
+
 ## The `httpc` library
 
 ### HTTP/1.1
@@ -362,7 +451,8 @@ ports = "80"              # and another rule for 443
 ```
 
 Handles at start: 1. network session, 2. store FS session (optional;
-without it `fetch` trusts no CA). Commands on the bootstrap channel:
+without it `fetch` trusts no CA), 3. channel to `revocd` (optional;
+without it only OCSP stapling). Commands on the bootstrap channel:
 
 | Command | Reply |
 |---|---|
@@ -386,6 +476,7 @@ TCP connections and reads time out after 30 s.
 | `tls`: rejections | foreign CA, wrong name, expired certificate (time 2100), no randomness |
 | `tls`: truncation, resumption | TCP end without `close_notify` = `Truncated`; second connection over PSK |
 | `tls`: roots | PEM with comments, DER, damaged blocks, `distrust.txt`, base64 |
+| `tls`: revocation | CRL of the end-entity and intermediate certificate, expired and spoofed CRL, OneCRL, OCSP good / revoked / expired / spoofed, KeyUpdate |
 | `httpc`: HPACK | RFC 7541 examples C.1, C.4 (Huffman, dynamic table), C.5 (eviction), Huffman of all bytes, bad padding, "HPACK bomb" |
 | `httpc`: scripted HTTP/1.1 | chunked with extensions and trailers, TE vs. CL, 1xx, 304, byte-by-byte data, 15 bad responses, limits |
 | `httpc`: scripted HTTP/2 | PING, padding, CONTINUATION, 1xx, trailers, 17 bad responses, request body flow control, body limit |
@@ -403,11 +494,13 @@ CA generated on every run):
 | HTTPS | HTTP/2 via ALPN, HTTP/1.1 with a server without `h2`, a 1 MB body over both, POST |
 | rejections | foreign CA (`UnknownIssuer`), wrong name (`NotValidForName`), TLS to a non-TLS port |
 | redirects | within `https` yes, to `http` = `ACCESS_DENIED` |
+| revocation | certificate in a CRL (revocd downloads and stores it; a non-revoked one with the same CRL passes), OCSP "revoked" in stapling, intermediate CA in OneCRL (an entry with `enabled: false` does not count) |
 
 ## Plan
 
-- **Revocation checking** (CRLite or OCSP stapling) and CA set updates
-  outside system releases.
+- **CRLite** (a compact filter of all revocations) instead of downloading
+  CRLs, and CA set updates outside system releases; revocd serving several
+  programs concurrently (queries are sequential now).
 - **Connection reuse** (HTTP/1.1 keep-alive, several HTTP/2 streams) and
   compression (gzip, brotli).
 - **NTS** (RFC 8915) for authenticated time; DoH/DoT for authenticated DNS.

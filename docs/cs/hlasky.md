@@ -209,6 +209,13 @@ porušený vnitřní předpoklad (chyba jádra).
 | `init: uloziste certifikatu nelze pripravit: ...` | Bez FS nebo bez práv: programy nemají žádnou CA a `https` selže (`UnknownIssuer`). |
 | `fetch: uloziste certifikatu: ...`, `fetch: /certs/F: ...` | `fetch` nemůže číst úložiště nebo soubor (větší než 4 MiB, chyba FS); ostatní soubory načte. |
 | `fetch: TLS: ...` | Konfigurace TLS nejde vytvořit; `fetch` skončí s kódem 2. |
+| `revocd: bezim (OneCRL ano\|ne, N zaznamu, mezipamet na FS\|jen v pameti)` | Služba odvolání běží; N = záznamy OneCRL načtené z FS. |
+| `revocd: OneCRL: N zaznamu` | Nový seznam odvolaných CA stažen a uložen. |
+| `revocd: OneCRL: neplatny dokument` | Stažený JSON nejde přečíst; platí předchozí seznam, nový pokus za `retry_minutes`. |
+| `revocd: <url>: ...` | Stažení CRL nebo OneCRL selhalo (stav HTTP, chyba spojení); adresa se `retry_minutes` nezkouší, stav odvolání je zatím neznámý. |
+| `revocd: <url>: neni CRL` | Server vrátil něco jiného než CRL. |
+| `init: kontrolu odvolani certifikatu nelze spustit: ...` | `revocd` nenaběhl; programy kontrolují jen OCSP stapling. |
+| `init: revocd bez FS (...)` | Bez FS: mezipaměť jen v paměti a bez kořenových CA pro OneCRL přes https. |
 | `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` nepředal kanál k `fwd`. Platí veřejný profil (nic dovnitř), dotazy aplikací s `ask` se rovnou odmítnou. |
 | `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` skončil. Platí poslední konfigurace, rozpracované a další dotazy se odmítnou. |
 | `netd: profil site P` | `fwd` poslal konfiguraci s jiným profilem sítě (`public`, `home`, ...). Viz [Profily sítí](firewall.md#profily-sítí). |

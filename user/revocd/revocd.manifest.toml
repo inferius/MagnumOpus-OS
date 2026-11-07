@@ -1,0 +1,27 @@
+# Sluzba odvolani certifikatu: stahuje CRL z adres v certifikatech
+# (vetsinou http://, port 80) a seznam odvolanych CA (OneCRL, https).
+[app]
+id = "org.magnumopus.revocd"
+name = "Kontrola odvolani certifikatu"
+
+[limits]
+# CRL az 16 MiB a jeji zpracovani, TLS.
+memory = "64M"
+kernel_memory = "4M"
+stack = "512K"
+
+[network]
+rights = ["tcp", "dns"]
+ask = false
+sockets = 8
+buffers = "4M"
+
+[[network.connect]]
+proto = ["tcp"]
+to = "*"
+ports = "80"
+
+[[network.connect]]
+proto = ["tcp"]
+to = "*"
+ports = "443"

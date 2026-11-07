@@ -6,6 +6,8 @@
 //!   ([`provider`]), cisty Rust bez C a bez SIMD.
 //! - Overeni serveru: retez certifikatu do korenove CA ze systemoveho
 //!   uloziste ([`roots`]), jmeno serveru (SAN), platnost podle realneho casu.
+//! - Odvolani: OCSP stapling, odvolane CA (OneCRL) a CRL ze zdroje
+//!   [`revocation::RevocationSource`] (v systemu sluzba `revocd`).
 //! - ALPN (vyjednani protokolu, napr. `h2` a `http/1.1`).
 //!
 //! TLS bezi v procesu aplikace nad libovolnym proudem
@@ -27,9 +29,12 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod ocsp;
 pub mod provider;
+pub mod revocation;
 pub mod roots;
 mod stream;
+pub mod x509;
 
 #[cfg(test)]
 mod tests;
@@ -117,11 +122,25 @@ impl rustls::time_provider::TimeProvider for Time {
 
 impl Client {
     /// `alpn` = nabizene protokoly v poradi preference (prazdne = bez ALPN).
+    /// Bez zdroje odvolani se kontroluje jen OCSP stapling.
     pub fn new(platform: &'static Platform, roots: &roots::Roots, alpn: &[&[u8]]) -> Result<Self, Error> {
+        Self::with_revocation(platform, roots, alpn, None)
+    }
+
+    /// Jako [`Client::new`], s kontrolou odvolani ze zdroje `revocation`
+    /// (v systemu [`revocation::ChannelSource`] ke sluzbe `revocd`).
+    pub fn with_revocation(
+        platform: &'static Platform,
+        roots: &roots::Roots,
+        alpn: &[&[u8]],
+        revocation: Option<Arc<dyn revocation::RevocationSource>>,
+    ) -> Result<Self, Error> {
         let provider = Arc::new(provider::provider(platform));
+        let verifier = revocation::Verifier::new(Arc::new(roots.store()), provider.clone(), revocation)?;
         let mut config = rustls::ClientConfig::builder_with_details(provider, Arc::new(Time(platform)))
             .with_protocol_versions(&[&rustls::version::TLS13])?
-            .with_root_certificates(roots.store())
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
             .with_no_client_auth();
         config.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect::<Vec<_>>();
         Ok(Self {

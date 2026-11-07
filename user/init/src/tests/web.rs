@@ -31,6 +31,9 @@ pub const TESTS: &[Test] = &[
     ("HTTPS: POST s telem", https_post),
     ("HTTPS: cizi CA a spatne jmeno odmitnuty", https_rejects),
     ("presmerovani: v ramci https ano, na http ne", redirects),
+    ("odvolani: certifikat v CRL (revocd stahne a ulozi)", revoked_crl),
+    ("odvolani: OCSP stapling", revoked_ocsp),
+    ("odvolani: mezilehla CA v OneCRL", revoked_onecrl),
 ];
 
 struct Ports {
@@ -39,6 +42,9 @@ struct Ports {
     https_h1: u16,
     untrusted: u16,
     wrong_name: u16,
+    revoked: u16,
+    ocsp_revoked: u16,
+    onecrl: u16,
 }
 
 fn ports(s: &Startup) -> Result<Option<Ports>, String> {
@@ -61,6 +67,9 @@ fn ports(s: &Startup) -> Result<Option<Ports>, String> {
         https_h1: get("https_h1")?,
         untrusted: get("https_untrusted")?,
         wrong_name: get("https_wrongname")?,
+        revoked: get("https_revoked")?,
+        ocsp_revoked: get("https_ocsp_revoked")?,
+        onecrl: get("https_onecrl")?,
     }))
 }
 
@@ -84,7 +93,7 @@ fn start_fetch(s: &Startup, p: &Ports) -> Result<Fetch, String> {
     // Jen pomocne servery: TCP na 10.0.2.2 a jejich porty.
     let host = Target::Net { addr: HOST, prefix: 32 };
     r.policy.connect = Some(
-        [p.http, p.https, p.https_h1, p.untrusted, p.wrong_name]
+        [p.http, p.https, p.https_h1, p.untrusted, p.wrong_name, p.revoked, p.ocsp_revoked, p.onecrl]
             .iter()
             .map(|&port| Rule::port(proto::TCP, host.clone(), port))
             .collect(),
@@ -92,12 +101,14 @@ fn start_fetch(s: &Startup, p: &Ports) -> Result<Fetch, String> {
     let net = root.restrict_with(&r).map_err(|e| fail("relace site", e))?;
     let d = devices().ok_or("zarizeni nebezi")?;
     let certs = crate::certs::session(d).map_err(|e| fail("relace uloziste", e))?;
+    let revocation = crate::revocation::client().ok_or("revocd nebezi")?;
     let app = crate::apps::spawn(
         s,
         "fetch",
         vec![
             StartHandle::user(net.into_channel().into_handle()),
             StartHandle::user(certs.into_channel().into_handle()),
+            StartHandle::user(revocation.into_handle()),
         ],
     )
     .map_err(|e| fail("spusteni fetch", e))?;
@@ -283,5 +294,52 @@ fn redirects(s: &Startup) -> TestResult {
         p.https, p.http
     ))?;
     check!(r.starts_with("err:ACCESS_DENIED"), format!("https -> http: {r}"));
+    Ok(())
+}
+
+fn expect_revoked(f: &Fetch, port: u16, what: &str) -> TestResult {
+    let r = f.run(&format!("get https://10.0.2.2:{port}/hello"))?;
+    check!(r.starts_with("err:ACCESS_DENIED") && r.contains("Revoked"), format!("{what}: {r}"));
+    Ok(())
+}
+
+fn revoked_crl(s: &Startup) -> TestResult {
+    let Some((f, p)) = fetch(s)? else {
+        return Ok(());
+    };
+    expect_revoked(f, p.revoked, "certifikat v CRL")?;
+    // CRL je v mezipameti revocd na FS (sdilena vsemi programy).
+    let d = devices().ok_or("zarizeni nebezi")?;
+    let fs = d.fs.as_ref().ok_or("FS nebezi")?;
+    let files = fs.list(crate::revocation::CRL_DIR).map_err(|e| fail("vypis mezipameti CRL", e))?;
+    check!(files.iter().any(|e| e.name.ends_with(".crl")), "CRL ulozena v mezipameti");
+    // Neodvolany certifikat se stejnou CRL projde (jen z mezipameti).
+    let (status, _, _, _, _) = f.get(&format!("get https://10.0.2.2:{}/hello", p.https))?;
+    check_eq!(status, 200, "neodvolany certifikat");
+    Ok(())
+}
+
+fn revoked_ocsp(s: &Startup) -> TestResult {
+    let Some((f, p)) = fetch(s)? else {
+        return Ok(());
+    };
+    expect_revoked(f, p.ocsp_revoked, "OCSP stapling")
+}
+
+fn revoked_onecrl(s: &Startup) -> TestResult {
+    let Some((f, p)) = fetch(s)? else {
+        return Ok(());
+    };
+    expect_revoked(f, p.onecrl, "OneCRL")?;
+    let r = crate::system::REVOCD.get().ok_or("revocd nebezi")?;
+    let _g = crate::system::REVOCD_LOCK.lock();
+    r.control.write(b"status", Vec::new()).map_err(|e| fail("status", e))?;
+    let m = r
+        .control
+        .read(Some(time::deadline_after(core::time::Duration::from_secs(5))))
+        .map_err(|e| fail("status", e))?;
+    let text = String::from_utf8(m.data).unwrap_or_default();
+    // Zaznam s "enabled": false se nepocita.
+    check!(text.contains("onecrl=1"), format!("stav revocd: {text}"));
     Ok(())
 }

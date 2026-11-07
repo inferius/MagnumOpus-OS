@@ -21,6 +21,8 @@ se ověřuje podle reálného času, proto na ní TLS závisí.
 |---|---|---|
 | TLS | `libs/tls` | rustls bez `std`, poskytovatel kryptografie (`provider/`), proud `TlsStream`, kořeny (`roots.rs`) |
 | HTTP | `libs/httpc` | URL, HTTP/1.1 (`h1.rs`), HTTP/2 (`h2/`), klient s přesměrováním |
+| odvolání | `user/revocd`, `libs/tls/src/{revocation,ocsp,x509}.rs` | CRL na vyžádání s mezipamětí, OneCRL, OCSP stapling |
+| spojení | `libs/web` | TCP a TLS přes relaci sítě, `httpc::Connector`, kořeny z úložiště |
 | program | `user/fetch` | spojení přes `netproto`, TLS, HTTP; příkazy na bootstrap kanálu |
 | úložiště | `user/init/src/certs.rs` | připraví `/system/config/certs`, aktualizuje sadu, relace jen pro čtení |
 | sada CA | `xtask/src/webhelper.rs` | sada Mozilla z crate `webpki-root-certs` do initfs (`certs.pem`) |
@@ -34,9 +36,10 @@ se ověřuje podle reálného času, proto na ní TLS závisí.
 >   nemají.
 > - **Softwarové AES** (bez AES-NI) je pomalejší a jen „bitsliced“
 >   konstantní v čase; na sdíleném CPU je odolnější ChaCha20-Poly1305.
-> - **Bez kontroly odvolání** (OCSP, CRL, CRLite): odvolaný certifikát
->   projde, dokud nevyprší. Zneužitou CA lze vyřadit ručně
->   (`distrust.txt`).
+> - **Odvolání jen „měkce“:** když stav odvolání nejde zjistit (CRL nejde
+>   stáhnout, server bez OCSP staplingu), spojení projde – jako
+>   v prohlížečích. Útočník, který stažení CRL zablokuje, tak odvolaný
+>   certifikát protlačí. Viz [Odvolání certifikátů](#odvolání-certifikátů).
 > - **Platnost certifikátu závisí na hodinách.** Útočník, který podvrhne
 >   NTP (zatím bez NTS), může posunout čas a nechat projít propadlý
 >   certifikát. `timed` po první synchronizaci odmítá skoky nad 60 s,
@@ -220,6 +223,87 @@ sada v úložišti změnila (první start nebo nová verze systému). Bez FS
 (`init: uloziste certifikatu nelze pripravit: ...`) programy žádné CA
 nemají a každé spojení `https` skončí chybou `UnknownIssuer`.
 
+## Odvolání certifikátů
+
+CA může certifikát zneplatnit před koncem platnosti (ukradený klíč,
+chybně vydaný). Klient se to dozví jen z dalších dat; TLS kontroluje
+tři zdroje:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kontrola odvolani">
+<defs><marker id="th4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="250" height="210" rx="6"/><text class="t b" x="135" y="44" text-anchor="middle">program (tls)</text>
+<text class="m" x="25" y="70">1. webpki: řetěz, jméno, čas</text>
+<text class="m" x="25" y="95">2. OCSP z handshaku</text>
+<text class="m" x="25" y="120">3. OneCRL: odvolané CA</text>
+<text class="m" x="25" y="145">4. CRL z certifikátu</text>
+<text class="m" x="25" y="170">   (webpki ověří podpis CRL)</text>
+<text class="m" x="25" y="205">neznámý stav = projde</text>
+<path class="ln-acc" d="M260 120 L338 120" marker-end="url(#th4)"/><text class="m" x="268" y="112">kanál</text>
+<rect class="ok" x="340" y="60" width="180" height="120" rx="6"/><text class="t b" x="430" y="85" text-anchor="middle">revocd</text><text class="m" x="430" y="108" text-anchor="middle">mezipaměť CRL</text><text class="m" x="430" y="126" text-anchor="middle">OneCRL (24 h)</text><text class="m" x="430" y="144" text-anchor="middle">neúspěch: 10 min pauza</text>
+<path class="ln" d="M520 100 L598 80" marker-end="url(#th4)"/>
+<path class="ln" d="M520 140 L598 160" marker-end="url(#th4)"/>
+<rect class="box" x="600" y="45" width="150" height="60" rx="6"/><text class="t b" x="675" y="70" text-anchor="middle">CA (http)</text><text class="m" x="675" y="88" text-anchor="middle">CRL</text>
+<rect class="box" x="600" y="135" width="150" height="60" rx="6"/><text class="t b" x="675" y="160" text-anchor="middle">Mozilla (https)</text><text class="m" x="675" y="178" text-anchor="middle">OneCRL</text>
+<path class="ln" d="M430 180 L430 213" marker-end="url(#th4)"/><text class="m" x="440" y="232">/system/config/certs/crl</text>
+</svg>
+<figcaption>Program se ptá revocd; podpisy CRL a OCSP ověřuje sám.</figcaption>
+</figure>
+
+| Zdroj | Co pokryje | Kdy se odmítne |
+|---|---|---|
+| **OCSP stapling** (`tls::ocsp`) | koncový certifikát, když server odpověď OCSP pošle v handshaku | stav `revoked`; špatný podpis = `InvalidOcspResponse` (podvržená odpověď). Propadlá odpověď = stav neznámý |
+| **OneCRL** (Mozilla) | odvolané mezilehlé CA (stovky záznamů, jako Firefox) | certifikát řetězu na seznamu (vystavitel + číslo, nebo subjekt + SHA-256 klíče) |
+| **CRL** | certifikáty s distribučním bodem `http://...` (téměř všechny veřejné CA) | číslo certifikátu v CRL podepsané jeho vystavitelem; propadlá CRL se nepoužije |
+
+**Neznámý stav spojení nezastaví** (revocd neběží, CRL nejde stáhnout,
+server bez staplingu). Stejně se chovají prohlížeče: tvrdé odmítnutí by
+útočník, který blokuje CRL, změnil v nefunkční síť. Odvolaný certifikát
+(`Error::Certificate("Revoked")`, kód `ACCESS_DENIED`) se odmítne vždy.
+
+### Služba `revocd`
+
+Programy se ptají kanálem, který jim předá init
+(`revocation::client()`); revocd vidí jen dotazy, ne data spojení.
+
+| Zpráva | Odpověď |
+|---|---|
+| `crl <url>` | `ok` + CRL (DER) nebo `none` |
+| `ca` + 4 pole s délkou u32 LE (vystavitel, číslo, subjekt, SHA-256 klíče) | `revoked` nebo `ok` |
+| bootstrap: `client` + handle | `ok` (nový program) |
+| bootstrap: `status` | `ok:clients=… crls=… fetched=… onecrl=…` |
+| bootstrap: `refresh` | `ok:onecrl=…` (OneCRL hned znovu) |
+
+- **CRL:** z paměti (64 posledních), z FS (`/crl/<SHA-256 adresy>.crl`,
+  platí do `nextUpdate`, CRL bez něj 24 h od stažení), jinak stažení
+  (HTTP/HTTPS, nejvýš 16 MiB, limit 15 s). Po neúspěchu se adresa
+  10 minut nezkouší. Podpis neověřuje revocd, ale webpki v programu:
+  podvržená CRL od revocd nic nezpůsobí.
+- **OneCRL:** stahuje se při prvním dotazu a pak každých 24 h z adresy
+  v `revocd.toml`; poslední platná verze leží v `/crl/onecrl.json`.
+  Záznamy s `"enabled": false` se přeskočí.
+- **Práva:** relace sítě TCP 80/443 kamkoli (adresy CRL určují CA),
+  relace FS účtu `REVOCD_USER` (901): `/certs` jen pro čtení, `/crl`
+  pro zápis. Mezipaměť dědí čtení pro všechny (CRL jsou veřejné).
+
+```toml
+# revocd.toml
+onecrl = "https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/onecrl/changeset?_expected=0"
+onecrl_refresh_hours = 24
+crl_default_hours = 24
+retry_minutes = 10
+```
+
+```rust
+// program: kontrola odvolani pres revocd (kanal od init)
+let source = Arc::new(tls::revocation::ChannelSource::new(channel, Duration::from_secs(20)));
+let client = tls::Client::with_revocation(&tls::LIBOS, &roots, httpc::ALPN, Some(source))?;
+```
+
+> **Změna proti první verzi:** odvolání se nekontrolovalo vůbec.
+> **Proč:** certifikát s ukradeným klíčem by jinak platil až do konce
+> platnosti (u veřejných CA měsíce).
+
 ## Knihovna `httpc`
 
 ### HTTP/1.1
@@ -356,7 +440,8 @@ ports = "80"              # a dalsi pravidlo pro 443
 ```
 
 Handly při startu: 1. relace sítě, 2. relace FS úložiště (volitelná;
-bez ní `fetch` nevěří žádné CA). Příkazy na bootstrap kanálu:
+bez ní `fetch` nevěří žádné CA), 3. kanál k `revocd` (volitelný; bez něj
+jen OCSP stapling). Příkazy na bootstrap kanálu:
 
 | Příkaz | Odpověď |
 |---|---|
@@ -380,6 +465,7 @@ TCP spojení i čtení mají časový limit 30 s.
 | `tls`: odmítnutí | cizí CA, špatné jméno, propadlý certifikát (čas 2100), bez náhody |
 | `tls`: zkrácení, obnovení | konec TCP bez `close_notify` = `Truncated`; druhé spojení přes PSK |
 | `tls`: kořeny | PEM s komentáři, DER, poškozené bloky, `distrust.txt`, base64 |
+| `tls`: odvolání | CRL koncového a mezilehlého certifikátu, propadlá a podvržená CRL, OneCRL, OCSP dobrá / odvolaná / propadlá / podvržená, KeyUpdate |
 | `httpc`: HPACK | příklady RFC 7541 C.1, C.4 (Huffman, dynamická tabulka), C.5 (vyřazování), Huffman všech bajtů, chybná výplň, „HPACK bomb“ |
 | `httpc`: HTTP/1.1 skriptem | chunked s rozšířením a trailery, TE vs. CL, 1xx, 304, data po bajtu, 15 chybných odpovědí, limity |
 | `httpc`: HTTP/2 skriptem | PING, výplň, CONTINUATION, 1xx, trailery, 17 chybných odpovědí, řízení toku těla, limit těla |
@@ -397,11 +483,13 @@ testovací CA vygenerovaná při každém běhu):
 | HTTPS | HTTP/2 přes ALPN, HTTP/1.1 u serveru bez `h2`, 1 MB tělo oběma, POST |
 | odmítnutí | cizí CA (`UnknownIssuer`), špatné jméno (`NotValidForName`), TLS na port bez TLS |
 | přesměrování | v rámci `https` ano, na `http` = `ACCESS_DENIED` |
+| odvolání | certifikát v CRL (revocd ji stáhne a uloží; neodvolaný se stejnou CRL projde), OCSP „revoked“ ve staplingu, mezilehlá CA v OneCRL (záznam s `enabled: false` se nepočítá) |
 
 ## Plán
 
-- **Kontrola odvolání** (CRLite nebo OCSP stapling) a aktualizace sady CA
-  mimo vydání systému.
+- **CRLite** (kompaktní filtr všech odvolání) místo stahování CRL
+  a aktualizace sady CA mimo vydání systému; revocd souběžně pro víc
+  programů (teď dotazy postupně).
 - **Spojení znovu** (keep-alive HTTP/1.1, víc proudů HTTP/2) a komprese
   (gzip, brotli).
 - **NTS** (RFC 8915) pro ověřený čas; DoH/DoT pro ověřené DNS.

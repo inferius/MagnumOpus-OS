@@ -37,7 +37,8 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 5. `netd` on the first network card and `fwd` (firewall, configuration on
    the FS), both in jobs by their manifests (see [Network](network.md),
    [Firewall](firewall.md)), then `ntpd` (time synchronization, see
-   [Real time](time.md#synchronization-over-the-network-ntpd)),
+   [Real time](time.md#synchronization-over-the-network-ntpd)) and `revocd`
+   (certificate revocation, see [TLS and HTTP](tls-http.md#certificate-revocation)),
 6. all these processes are handed to the supervisor to watch.
 
 ## The supervisor

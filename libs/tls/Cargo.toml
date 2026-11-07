@@ -8,12 +8,15 @@ description = "Klient TLS 1.3: rustls s kryptografii RustCrypto (bez std)"
 [features]
 default = []
 # Platforma libos (nahoda a cas z jadra).
-libos = ["dep:libos"]
+libos = ["dep:libos", "dep:spin"]
 
 [dependencies]
 abi = { workspace = true }
 netproto = { path = "../netproto" }
 libos = { path = "../libos", optional = true }
+spin = { version = "0.12", optional = true }
+# SHA-1 jen pro identifikator certifikatu v OCSP (CertID), ne pro podpisy.
+sha1 = { version = "0.10", default-features = false, features = ["force-soft"] }
 rustls = { version = "0.23.40", default-features = false }
 pki-types = { package = "rustls-pki-types", version = "1.14", default-features = false, features = ["alloc"] }
 # force-soft: bez SIMD a bez detekce instrukci za behu (cile bez FPU/SSE).

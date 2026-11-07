@@ -16,3 +16,4 @@ netproto = { path = "../../libs/netproto", features = ["client"] }
 fsproto = { path = "../../libs/fsproto" }
 tls = { path = "../../libs/tls", features = ["libos"] }
 httpc = { path = "../../libs/httpc" }
+web = { path = "../../libs/web" }

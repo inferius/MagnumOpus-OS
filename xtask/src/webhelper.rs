@@ -11,9 +11,15 @@
 //! - `https`: TLS s ALPN `h2` a `http/1.1` (klient vybere HTTP/2),
 //! - `https_h1`: TLS jen s `http/1.1`,
 //! - `https_untrusted`: certifikat od jine CA (ktere host neveri),
-//! - `https_wrongname`: certifikat na jine jmeno nez 10.0.2.2.
+//! - `https_wrongname`: certifikat na jine jmeno nez 10.0.2.2,
+//! - `https_revoked`: certifikat odvolany v CRL testovaci CA (`/ca.crl`),
+//! - `https_ocsp_revoked`: odpoved OCSP "revoked" v handshaku,
+//! - `https_onecrl`: mezilehla CA na seznamu OneCRL (`/onecrl.json`).
 //!
-//! Cesty: `/hello` (text), `/stream?n=N` (N bajtu vzoru [`pattern`] po
+//! Certifikat serveru `https` a `https_h1` ma distribucni bod CRL
+//! (`http://10.0.2.2:<http>/ca.crl`), cislo v ni neni.
+//!
+//! Cesty: `/hello` (text), `/ca.crl`, `/onecrl.json`, `/stream?n=N` (N bajtu vzoru [`pattern`] po
 //! kusech bez delky), `/echo` (vrati telo, `x-method`), `/redirect?to=URL`.
 
 use std::convert::Infallible;
@@ -108,6 +114,8 @@ async fn handle(req: hyper::Request<Incoming>) -> Result<Resp, Infallible> {
     let uri = req.uri().clone();
     Ok(match uri.path() {
         "/hello" => full(200, "ahoj z hostitele"),
+        "/ca.crl" => full(200, CRL.get().cloned().unwrap_or_default()),
+        "/onecrl.json" => full(200, ONECRL.get().cloned().unwrap_or_default()),
         "/stream" => {
             let n = query(&uri, "n").and_then(|n| n.parse().ok()).unwrap_or(0);
             hyper::Response::new(Chunks { left: n, sent: 0 }.boxed())
@@ -129,6 +137,13 @@ async fn handle(req: hyper::Request<Incoming>) -> Result<Resp, Infallible> {
     })
 }
 
+/// CRL testovaci CA (`/ca.crl`) a dokument OneCRL (`/onecrl.json`).
+static CRL: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+static ONECRL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Cislo certifikatu serveru `https_revoked` (je v CRL).
+const REVOKED_SERIAL: u64 = 0x0666;
+
 struct Ca {
     cert: rcgen::Certificate,
     key: KeyPair,
@@ -144,11 +159,37 @@ fn ca(name: &str) -> Ca {
     Ca { cert: p.self_signed(&key).unwrap(), key }
 }
 
+/// Mezilehla CA od `parent` s cislem `serial`.
+fn intermediate(parent: &Ca, name: &str, serial: u64) -> Ca {
+    let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let mut p = CertificateParams::new(Vec::<String>::new()).unwrap();
+    p.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    p.distinguished_name.push(DnType::CommonName, name);
+    p.serial_number = Some(rcgen::SerialNumber::from(serial));
+    p.not_before = rcgen::date_time_ymd(2020, 1, 1);
+    p.not_after = rcgen::date_time_ymd(2099, 1, 1);
+    Ca { cert: p.signed_by(&key, &parent.cert, &parent.key).unwrap(), key }
+}
+
 /// Certifikat serveru od `ca` pro jmena/adresy `sans`.
 fn leaf(ca: &Ca, sans: &[SanType]) -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
+    leaf_with(ca, sans, None, None)
+}
+
+/// Certifikat serveru s cislem a distribucnim bodem CRL.
+fn leaf_with(
+    ca: &Ca,
+    sans: &[SanType],
+    serial: Option<u64>,
+    crl_url: Option<&str>,
+) -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
     let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
     let mut p = CertificateParams::new(Vec::<String>::new()).unwrap();
     p.subject_alt_names = sans.to_vec();
+    p.serial_number = serial.map(rcgen::SerialNumber::from);
+    if let Some(u) = crl_url {
+        p.crl_distribution_points = vec![rcgen::CrlDistributionPoint { uris: vec![u.to_string()] }];
+    }
     p.distinguished_name.push(DnType::CommonName, "MagnumOpus test server");
     p.not_before = rcgen::date_time_ymd(2020, 1, 1);
     p.not_after = rcgen::date_time_ymd(2098, 1, 1);
@@ -160,12 +201,22 @@ fn leaf(ca: &Ca, sans: &[SanType]) -> (Vec<CertificateDer<'static>>, PrivateKeyD
 }
 
 fn tls_config(chain: Vec<CertificateDer<'static>>, key: PrivateKeyDer<'static>, alpn: &[&[u8]]) -> Arc<rustls::ServerConfig> {
+    tls_config_ocsp(chain, key, alpn, Vec::new())
+}
+
+/// Konfigurace TLS s odpovedi OCSP v handshaku (prazdna = bez staplingu).
+fn tls_config_ocsp(
+    chain: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+    alpn: &[&[u8]],
+    ocsp: Vec<u8>,
+) -> Arc<rustls::ServerConfig> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut c = rustls::ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
         .unwrap()
         .with_no_client_auth()
-        .with_single_cert(chain, key)
+        .with_single_cert_with_ocsp(chain, key, ocsp)
         .unwrap();
     c.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
     Arc::new(c)
@@ -220,27 +271,46 @@ pub struct WebHelper {
 }
 
 pub fn start() -> std::io::Result<WebHelper> {
+    let http = listen()?;
+    let crl_url = format!("http://10.0.2.2:{}/ca.crl", http.local_addr()?.port());
     let ca_ok = ca("MagnumOpus test CA");
     let ca_other = ca("Cizi CA");
     let guest_host = SanType::IpAddress(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2)));
-    let (chain, key) = leaf(&ca_ok, &[guest_host.clone()]);
+    // Bezne servery: certifikat s CRL (revocd ji stahne, cislo v ni neni).
+    let (chain, key) = leaf_with(&ca_ok, &[guest_host.clone()], Some(0x100), Some(&crl_url));
     let both = tls_config(chain.clone(), key.clone_key(), &[b"h2", b"http/1.1"]);
     let h1_only = tls_config(chain, key, &[b"http/1.1"]);
-    let (chain, key) = leaf(&ca_other, &[guest_host]);
+    let (chain, key) = leaf(&ca_other, &[guest_host.clone()]);
     let untrusted = tls_config(chain, key, &[b"http/1.1"]);
     let (chain, key) = leaf(&ca_ok, &[SanType::DnsName("other.example".try_into().unwrap())]);
     let wrong_name = tls_config(chain, key, &[b"http/1.1"]);
+    // Odvolani: v CRL, v OCSP (stapling), mezilehla CA v OneCRL.
+    let (chain, key) = leaf_with(&ca_ok, &[guest_host.clone()], Some(REVOKED_SERIAL), Some(&crl_url));
+    let revoked = tls_config(chain, key, &[b"http/1.1"]);
+    let (chain, key) = leaf_with(&ca_ok, &[guest_host.clone()], Some(0x0777), None);
+    let ocsp = crate::revhelper::ocsp_revoked(ca_ok.cert.der(), &ca_ok.key, &chain[0]);
+    let ocsp_revoked = tls_config_ocsp(chain, key, &[b"http/1.1"], ocsp);
+    let inter = intermediate(&ca_ok, "Odvolana mezilehla CA", 0x0888);
+    let (mut chain, key) = leaf_with(&inter, &[guest_host], Some(0x0999), None);
+    chain.push(inter.cert.der().clone());
+    let onecrl_revoked = tls_config(chain, key, &[b"http/1.1"]);
+    let _ = CRL.set(crate::revhelper::crl(&ca_ok.cert, &ca_ok.key, &[REVOKED_SERIAL]));
+    let _ = ONECRL.set(crate::revhelper::onecrl(inter.cert.der()));
 
     let servers = [
-        ("http", listen()?, None),
+        ("http", http, None),
         ("https", listen()?, Some(both)),
         ("https_h1", listen()?, Some(h1_only)),
         ("https_untrusted", listen()?, Some(untrusted)),
         ("https_wrongname", listen()?, Some(wrong_name)),
+        ("https_revoked", listen()?, Some(revoked)),
+        ("https_ocsp_revoked", listen()?, Some(ocsp_revoked)),
+        ("https_onecrl", listen()?, Some(onecrl_revoked)),
     ];
     let mut config = String::new();
     for (name, l, _) in &servers {
-        config.push_str(&format!("{name} = {}\n", l.local_addr()?.port()));
+        config.push_str(&format!("{name} = {}
+", l.local_addr()?.port()));
     }
     thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_io().build().unwrap();
