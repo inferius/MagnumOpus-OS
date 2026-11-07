@@ -13,7 +13,7 @@ use core::arch::global_asm;
 use boot_info::{BootInfo, MemoryKind};
 
 use super::{apic, cpu, time};
-use crate::arch::api::CpuStarter;
+use crate::arch::api::{CpuStartResult, CpuStarter};
 use crate::log;
 use crate::mm::{self, PhysAddr};
 
@@ -238,7 +238,8 @@ impl Trampoline {
 
 impl CpuStarter for Trampoline {
     /// Nastartuje jedno AP: skoci do `entry(arg)` na zasobniku `stack_top`.
-    /// `started` vraci true, jakmile AP ohlasi start. Vraci, zda AP nabehl.
+    /// `started` vraci true, jakmile AP ohlasi start. INIT-SIPI nema jak
+    /// hlasit chybu, takze vysledek je jen `Started` nebo `TimedOut`.
     fn start(
         &self,
         apic_id: u32,
@@ -246,7 +247,7 @@ impl CpuStarter for Trampoline {
         entry: extern "C" fn(u64) -> !,
         arg: u64,
         started: impl Fn() -> bool,
-    ) -> bool {
+    ) -> CpuStartResult {
         let dst: *mut u8 = PhysAddr::new(self.code).to_virt().as_mut_ptr();
         let put64 = |sym: *const u8, value: u64| {
             // SAFETY: zapis do zkopirovane trampoliny.
@@ -263,12 +264,16 @@ impl CpuStarter for Trampoline {
             apic::send_startup(apic_id, page);
             for _ in 0..1000 {
                 if started() {
-                    return true;
+                    return CpuStartResult::Started;
                 }
                 time::busy_wait_ns(200_000);
             }
         }
-        started()
+        if started() {
+            CpuStartResult::Started
+        } else {
+            CpuStartResult::TimedOut
+        }
     }
 
     /// Zrusi docasne identicke mapovani.

@@ -65,7 +65,10 @@ fn entry_ptr(table: u64, idx: usize) -> *mut u64 {
         .wrapping_add(idx)
 }
 
-fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
+/// Konec spodni poloviny adresniho prostoru (TTBR0).
+const LOWER_HALF_END: u64 = 1 << 47;
+
+fn leaf_bits(flags: MapFlags, size: PageSize, virt: u64) -> u64 {
     let mut bits = VALID | AF;
     if size == PageSize::Size4K {
         bits |= TABLE_OR_PAGE;
@@ -98,6 +101,12 @@ fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
     }
     if user {
         bits |= AP_EL0 | NG;
+    }
+    // Ve spodni polovine je vse ne-globalni, i mapovani jadra (identita
+    // stubu startu CPU): prepnuti procesu (`tlbi aside1`) ho pak z TLB
+    // vzdy zahodi a proces nikdy nenarazi na zastaraly zaznam jadra.
+    if virt < LOWER_HALF_END {
+        bits |= NG;
     }
     if !flags.contains(MapFlags::WRITE) {
         bits |= AP_RO;
@@ -156,7 +165,9 @@ pub fn is_mapped(virt: u64) -> bool {
         }
         mrs!("ttbr0_el1")
     } & ADDR_MASK;
-    PageTable { root }.translate(VirtAddr::new(virt)).is_some()
+    PageTable { root, clean: false }
+        .translate(VirtAddr::new(virt))
+        .is_some()
 }
 
 /// Zahodi TLB zaznamy userspace (ne-globalni, ASID 0) na tomto CPU.
@@ -231,6 +242,14 @@ pub fn dma_coherent() -> bool {
 /// Hierarchie tabulek stranek (jeden adresni prostor).
 pub struct PageTable {
     root: u64,
+    /// Po kazdem zapisu polozky zapsat cache do pameti: tabulky cte
+    /// zarizeni bez koherence s cache CPU (nekoherentni SMMU).
+    clean: bool,
+}
+
+/// Zapise radky cache s rozsahem v prime mape do pameti (pro `clean`).
+fn clean_entry(ptr: *mut u64, len: u64) {
+    super::regs::dcache_clean_invalidate(ptr as u64, len);
 }
 
 impl PageTable {
@@ -248,11 +267,17 @@ impl PageTable {
                     return Ok(None);
                 }
                 let new = mm::phys::alloc_frame_zeroed().ok_or(MapError::OutOfMemory)?;
+                if self.clean {
+                    clean_entry(new.to_virt().as_mut_ptr(), 4096);
+                }
                 // Nova tabulka musi byt v pameti (nuly) driv, nez na ni
                 // ukaze polozka, kterou muze cist MMU jineho CPU.
                 dsb_ishst();
                 // SAFETY: viz vyse.
                 unsafe { e.write_volatile(new.as_u64() | VALID | TABLE_OR_PAGE) };
+                if self.clean {
+                    clean_entry(e, 8);
+                }
                 table = new.as_u64();
             } else if val & TABLE_OR_PAGE == 0 {
                 return Err(MapError::HugePageConflict);
@@ -283,7 +308,10 @@ impl PageTable {
             if e.read_volatile() & VALID != 0 {
                 return Err(MapError::AlreadyMapped);
             }
-            e.write_volatile(phys | leaf_bits(flags, size));
+            e.write_volatile(phys | leaf_bits(flags, size, virt));
+        }
+        if self.clean {
+            clean_entry(e, 8);
         }
         // Nova platna polozka: staci, aby ji MMU videla (neplatne polozky se
         // v TLB neuchovavaji).
@@ -293,11 +321,25 @@ impl PageTable {
     }
 }
 
+impl PageTable {
+    /// Tabulky pro zarizeni (stage 1 SMMU). `clean` = zarizeni neni
+    /// koherentni s cache CPU, kazdy zapis polozky se zapise do pameti.
+    pub fn new_for_device(clean: bool) -> Result<Self, MapError> {
+        let mut t = <Self as PageTableOps>::new()?;
+        t.clean = clean;
+        if clean {
+            clean_entry(PhysAddr::new(t.root).to_virt().as_mut_ptr(), 4096);
+        }
+        Ok(t)
+    }
+}
+
 impl PageTableOps for PageTable {
     fn new() -> Result<Self, MapError> {
         let root = mm::phys::alloc_frame_zeroed().ok_or(MapError::OutOfMemory)?;
         Ok(Self {
             root: root.as_u64(),
+            clean: false,
         })
     }
 
@@ -398,16 +440,22 @@ impl PageTableOps for PageTable {
         mm::phys::free_pages(PhysAddr::new(self.root), 0);
     }
 
+    /// Na rozdil od smlouvy (jen toto CPU) zneplatni TLB na vsech CPU
+    /// (`TLBI ... IS`): stoji to malo a globalni mapovani jadra (napr.
+    /// identita stubu startu CPU) pak nezustane v TLB jinych CPU.
     fn unmap_4k(&mut self, virt: VirtAddr) {
         if let Ok(Some(e)) = self.walk(virt.as_u64(), 3, false) {
             // SAFETY: platna polozka L3 vracena `walk`; po vynulovani se
-            // zneplatni zaznam TLB tohoto CPU pro vsechny ASID.
+            // zneplatni zaznam TLB vsech CPU pro vsechny ASID.
             unsafe {
                 e.write_volatile(0);
+                if self.clean {
+                    clean_entry(e, 8);
+                }
                 asm!(
                     "dsb ishst",
-                    "tlbi vaale1, {}",
-                    "dsb nsh",
+                    "tlbi vaale1is, {}",
+                    "dsb ish",
                     "isb",
                     in(reg) (virt.as_u64() >> 12) & ((1 << 44) - 1),
                     options(nostack)

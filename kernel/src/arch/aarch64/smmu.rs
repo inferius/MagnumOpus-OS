@@ -21,6 +21,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
+use super::mmio::{read32, write32, write64};
 use super::mmu::PageTable;
 use super::regs::{dcache_clean_invalidate, dsb_sy};
 use crate::arch::api::IommuDomain;
@@ -59,6 +60,8 @@ const STRTAB_SPLIT: u32 = 8;
 const STE_SIZE: u64 = 64;
 
 /// Atributy cache front a tabulek (Write-Back, inner shareable), CR1.
+/// Pro SMMU bez koherence s cache (IDR0.COHACC = 0) se pouzije 0: vse bez
+/// cache a jadro po kazdem zapisu struktur zapise cache do pameti.
 const CR1_WB_ISH: u32 = 1 | (1 << 2) | (3 << 4) | (1 << 6) | (1 << 8) | (3 << 10);
 
 struct Smmu {
@@ -77,30 +80,24 @@ struct Smmu {
 
 static SMMU: SpinLock<Option<Smmu>> = SpinLock::new(None);
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Pristupy SMMU k tabulkam jsou koherentni s cache CPU (IDR0.COHACC).
+static COHERENT: AtomicBool = AtomicBool::new(true);
+/// Nejvetsi ASID (IDR0.ASID16: 16, jinak 8 bitu).
+static MAX_ASID: AtomicU16 = AtomicU16::new(255);
 static NEXT_ASID: AtomicU16 = AtomicU16::new(1);
 /// Posun StreamID proti RID (z IORT: vystupni baze - vstupni baze).
 static SID_BASE: SpinLock<(u32, u32)> = SpinLock::new((0, 0));
 
-fn read32(addr: u64) -> u32 {
-    // SAFETY: registry SMMU namapovane jako zarizeni.
-    unsafe { (addr as *const u32).read_volatile() }
-}
-fn write32(addr: u64, v: u32) {
-    // SAFETY: viz `read32`.
-    unsafe { (addr as *mut u32).write_volatile(v) }
-}
-fn write64(addr: u64, v: u64) {
-    // SAFETY: viz `read32`.
-    unsafe { (addr as *mut u64).write_volatile(v) }
+/// Vynulovana pamet pro struktury SMMU (fyzicka adresa).
+fn alloc(bytes: u64) -> u64 {
+    super::mmio::alloc_zeroed_boot(bytes, "tabulky SMMU").as_u64()
 }
 
-fn alloc_zeroed(bytes: u64) -> u64 {
-    let order = bytes.div_ceil(4096).next_power_of_two().trailing_zeros() as usize;
-    let p = mm::phys::alloc_pages(order).expect("nedostatek pameti pro tabulky SMMU");
-    // SAFETY: prave alokovane stranky v prime mape.
-    unsafe { p.to_virt().as_mut_ptr::<u8>().write_bytes(0, 4096 << order) };
-    dcache_clean_invalidate(p.to_virt().as_u64(), 4096 << order);
-    p.as_u64()
+/// Vynulovana pamet pro struktury SMMU za behu (nova domena).
+fn try_alloc(bytes: u64) -> Result<u64, Error> {
+    super::mmio::alloc_zeroed(bytes)
+        .map(|p| p.as_u64())
+        .ok_or(Error::NoMemory)
 }
 
 /// Zapise slova do pameti struktury SMMU (pres primou mapu) a zapise cache.
@@ -147,6 +144,12 @@ pub fn init(phys: u64, rid_to_sid: (u32, u32)) {
     }
     let sid_bits = (idr1 & 0x3F).min(16);
     *SID_BASE.lock() = rid_to_sid;
+    let coherent = idr0 & (1 << 4) != 0;
+    COHERENT.store(coherent, Ordering::Relaxed);
+    MAX_ASID.store(
+        if idr0 & (1 << 12) != 0 { u16::MAX } else { 255 },
+        Ordering::Relaxed,
+    );
 
     // Vypnout a pockat (firmware mohl nechat zapnute).
     write32(regs + CR0, 0);
@@ -154,13 +157,13 @@ pub fn init(phys: u64, rid_to_sid: (u32, u32)) {
         log::error!("SMMUv3 se nevypnula, preklad DMA nezapnut");
         return;
     }
-    write32(regs + CR1, CR1_WB_ISH);
+    write32(regs + CR1, if coherent { CR1_WB_ISH } else { 0 });
     // RECINVSID: nezname StreamID hlasit; PTM: TLB jen prikazy fronty.
     write32(regs + CR2, (1 << 1) | (1 << 2));
 
     // Tabulka streamu: prvni uroven (neplatne polozky = DMA zakazane).
     let l1_entries = 1u64 << sid_bits.saturating_sub(STRTAB_SPLIT);
-    let l1 = alloc_zeroed(l1_entries * 8);
+    let l1 = alloc(l1_entries * 8);
     write64(regs + STRTAB_BASE, (1 << 62) | l1);
     // FMT = 2 urovne, SPLIT, LOG2SIZE = pocet bitu StreamID.
     write32(
@@ -168,11 +171,11 @@ pub fn init(phys: u64, rid_to_sid: (u32, u32)) {
         (1 << 16) | (STRTAB_SPLIT << 6) | sid_bits,
     );
 
-    let cmdq = alloc_zeroed(16 << CMDQ_LOG2);
+    let cmdq = alloc(16 << CMDQ_LOG2);
     write64(regs + CMDQ_BASE, (1 << 62) | cmdq | CMDQ_LOG2 as u64);
     write32(regs + CMDQ_PROD, 0);
     write32(regs + CMDQ_CONS, 0);
-    let eventq = alloc_zeroed(32 << EVENTQ_LOG2);
+    let eventq = alloc(32 << EVENTQ_LOG2);
     write64(regs + EVENTQ_BASE, (1 << 62) | eventq | EVENTQ_LOG2 as u64);
     write32(regs + EVENTQ_PROD, 0);
     write32(regs + EVENTQ_CONS, 0);
@@ -250,16 +253,16 @@ impl Smmu {
     }
 
     /// Fyzicka adresa STE pro `sid` (zalozi druhou uroven tabulky).
-    fn ste(&mut self, sid: u32) -> Option<u64> {
+    fn ste(&mut self, sid: u32) -> Result<u64, Error> {
         let l1_index = (sid >> STRTAB_SPLIT) as usize;
         if l1_index as u64 >= self.l1_entries {
-            return None;
+            return Err(Error::OutOfRange);
         }
         let l2 = match self.l2[l1_index] {
             Some(l2) => l2,
             None => {
                 // Vsechny STE nove druhe urovne: platne, Config = abort.
-                let l2 = alloc_zeroed(STE_SIZE << STRTAB_SPLIT);
+                let l2 = try_alloc(STE_SIZE << STRTAB_SPLIT)?;
                 for i in 0..(1u64 << STRTAB_SPLIT) {
                     write_words(l2 + i * STE_SIZE, &[1, 0]);
                 }
@@ -272,7 +275,7 @@ impl Smmu {
                 l2
             }
         };
-        Some(l2 + (sid as u64 & ((1 << STRTAB_SPLIT) - 1)) * STE_SIZE)
+        Ok(l2 + (sid as u64 & ((1 << STRTAB_SPLIT) - 1)) * STE_SIZE)
     }
 
     /// Vypise udalosti (chyby DMA) z fronty udalosti do logu.
@@ -330,18 +333,33 @@ pub fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Arc<SmmuDomain>
     if let Some((_, d)) = smmu.domains.iter().find(|(s, _)| *s == sid) {
         return Ok(Some(d.clone()));
     }
-    let ste = smmu.ste(sid).ok_or(Error::OutOfRange)?;
-    let table = PageTable::new().map_err(|_| Error::NoMemory)?;
-    let asid = NEXT_ASID.fetch_add(1, Ordering::Relaxed);
-    if asid == 0 {
+    let ste = smmu.ste(sid)?;
+    // ASID: kazda domena vlastni a domeny se neruseji (zarizeni drzi
+    // domenu po celou dobu behu), takze staci citac do maxima SMMU.
+    let asid = NEXT_ASID.load(Ordering::Relaxed);
+    if asid == 0 || asid > MAX_ASID.load(Ordering::Relaxed) {
+        log::error!(
+            "SMMU: dosla cisla ASID, zarizeni {bus:02x}:{:02x}.{} nedostane domenu",
+            devfn >> 3,
+            devfn & 7
+        );
         return Err(Error::NoResources);
     }
+    NEXT_ASID.store(asid.wrapping_add(1), Ordering::Relaxed);
+    let coherent = COHERENT.load(Ordering::Relaxed);
+    let table = PageTable::new_for_device(!coherent).map_err(|_| Error::NoMemory)?;
 
-    // Kontextovy deskriptor: stage 1, 48 bitu, granule 4 KiB, tabulky
-    // s cache (WB, inner shareable), ASID domeny, MAIR jako CPU.
-    let cd = alloc_zeroed(64);
+    // Kontextovy deskriptor: stage 1, 48 bitu, granule 4 KiB, ASID domeny,
+    // MAIR jako CPU. Pruchod tabulek s cache (WB, inner shareable), jen kdyz
+    // je SMMU koherentni; jinak bez cache (jadro zapisuje tabulky do pameti).
+    let walk_attrs = if coherent {
+        (1 << 8) | (1 << 10) | (3 << 12) // IR0, OR0 WB, SH0 inner
+    } else {
+        0
+    };
+    let cd = try_alloc(64)?;
     let cd0 = 16 // T0SZ
-        | (1 << 8) | (1 << 10) | (3 << 12) // IR0, OR0 WB, SH0 inner
+        | walk_attrs
         | (16 << 16) | (2 << 22) // T1SZ, TG1 4 KiB (platne, i kdyz nepouzite)
         | (1 << 30) // EPD1: horni polovina nepouzita
         | (1 << 31) // V
@@ -365,7 +383,11 @@ pub fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Arc<SmmuDomain>
         ],
     );
     // STE: platna, Config = stage 1, jeden CD; atributy pristupu k CD.
-    let ste1 = (1 << 2) | (1 << 4) | (3 << 6); // S1CIR, S1COR WB, S1CSH inner
+    let ste1 = if coherent {
+        (1 << 2) | (1 << 4) | (3 << 6) // S1CIR, S1COR WB, S1CSH inner
+    } else {
+        0
+    };
     write_words(ste + 8, &[ste1, 0, 0, 0, 0, 0, 0]);
     write_words(ste, &[1 | (0b101 << 1) | (cd & 0x000F_FFFF_FFFF_FFC0)]);
     // CFGI_STE bez Leaf: zneplatni i polozku prvni urovne (mohla vzniknout).

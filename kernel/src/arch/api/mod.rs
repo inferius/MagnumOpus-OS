@@ -301,6 +301,11 @@ pub trait DeviceIrq {
     /// bez zarizeni na GICv3, `NoResources` pri plne tabulce ITS) se vrati
     /// programu ze syscallu `INTERRUPT_CREATE`.
     fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error>;
+
+    /// Preruseni `irq` uz nikdo nepouziva (objekt zanikl): zrusit, co pro
+    /// nej architektura nastavila (aarch64: preklad v ITS a LPI), aby ho
+    /// zarizeni zanikleho ovladace nemohlo dal vyvolavat. Na x86 nic.
+    fn release(irq: u32);
 }
 
 /// IOMMU: preklad DMA zarizeni (x86: VT-d, AMD-Vi; aarch64: SMMUv3).
@@ -344,11 +349,23 @@ pub trait Smp {
     unsafe fn prepare_cpu_start(boot_info: &BootInfo) -> Option<Self::Starter>;
 }
 
+/// Vysledek pokusu o start CPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CpuStartResult {
+    /// CPU nabehlo a ohlasilo se.
+    Started,
+    /// CPU dostalo pokyn ke startu, ale vcas se neohlasilo - muze jeste
+    /// nabehnout (a pouzit zasobnik i pomocna data startu).
+    TimedOut,
+    /// CPU spustit nejde (firmware odmitl, CPU uz bezi mimo jadro, ...);
+    /// zasobnik ani data startu nepouzije, jadro pokracuje dalsim CPU.
+    Failed,
+}
+
 /// Pripraveny mechanismus startu CPU.
 pub trait CpuStarter {
     /// Nastartuje CPU `hw_id`: skoci do `entry(arg)` na zasobniku
-    /// `stack_top`. `started` vraci true, jakmile CPU ohlasi start. Vraci,
-    /// zda CPU vcas nabehlo.
+    /// `stack_top`. `started` vraci true, jakmile CPU ohlasi start.
     fn start(
         &self,
         hw_id: u32,
@@ -356,7 +373,7 @@ pub trait CpuStarter {
         entry: extern "C" fn(u64) -> !,
         arg: u64,
         started: impl Fn() -> bool,
-    ) -> bool;
+    ) -> CpuStartResult;
 
     /// Uklid po startu vsech CPU (nevola se, pokud nektere neodpovedelo -
     /// to muze nabehnout pozdeji a pomocna data jeste potrebovat).

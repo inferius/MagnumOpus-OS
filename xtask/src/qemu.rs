@@ -3,7 +3,7 @@
 //! - x86_64: stroj q35, firmware OVMF, IOMMU Intel VT-d nebo AMD-Vi, konec
 //!   testu pres zarizeni isa-debug-exit.
 //! - aarch64: stroj virt (GICv3 s ITS, volitelne SMMUv3), firmware edk2,
-//!   konec testu pres semihosting (SYS_EXIT s kodem od jadra).
+//!   konec testu pres semihosting (SYS_EXIT s kodem od jadra, 33 = uspech).
 //!
 //! Disky jsou na obou stejne: systemovy (ESP s loaderem, jadrem a initfs),
 //! maly prazdny pro testy ovladace a datovy s nasim souborovym systemem, vse

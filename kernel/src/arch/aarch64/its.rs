@@ -21,6 +21,7 @@ use alloc::collections::BTreeMap;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use super::gic::{self, LPI_FIRST};
+use super::mmio::{alloc_zeroed, alloc_zeroed_boot, read32, read64, write32, write64};
 use super::regs::{dcache_clean_invalidate, dsb_sy};
 use crate::error::Error;
 use crate::log;
@@ -68,32 +69,6 @@ static ITS: SpinLock<Option<Its>> = SpinLock::new(None);
 /// Fyzicka adresa ITS (pro zpravy MSI) - jen cteni, bez zamku.
 static ITS_PHYS: AtomicU64 = AtomicU64::new(0);
 
-fn read32(addr: u64) -> u32 {
-    // SAFETY: registry ITS namapovane jako zarizeni.
-    unsafe { (addr as *const u32).read_volatile() }
-}
-fn write32(addr: u64, v: u32) {
-    // SAFETY: viz `read32`.
-    unsafe { (addr as *mut u32).write_volatile(v) }
-}
-fn read64(addr: u64) -> u64 {
-    // SAFETY: viz `read32`.
-    unsafe { (addr as *const u64).read_volatile() }
-}
-fn write64(addr: u64, v: u64) {
-    // SAFETY: viz `read32`.
-    unsafe { (addr as *mut u64).write_volatile(v) }
-}
-
-fn alloc_zeroed(bytes: u64) -> PhysAddr {
-    let order = bytes.div_ceil(4096).next_power_of_two().trailing_zeros() as usize;
-    let p = mm::phys::alloc_pages(order).expect("nedostatek pameti pro tabulky ITS");
-    // SAFETY: prave alokovane stranky v prime mape.
-    unsafe { p.to_virt().as_mut_ptr::<u8>().write_bytes(0, 4096 << order) };
-    dcache_clean_invalidate(p.to_virt().as_u64(), 4096 << order);
-    p
-}
-
 /// Zapne ITS na `phys` (z MADT). Volat po `gic::init_distributor` a po
 /// inicializaci GIC na bootovacim CPU. Bez ITS nefunguji MSI zarizeni.
 pub fn init(phys: u64) {
@@ -122,7 +97,7 @@ pub fn init(phys: u64) {
             _ => continue,
         };
         let pages = (entries * entry).div_ceil(4096).clamp(1, 256);
-        let table = alloc_zeroed(pages * 4096);
+        let table = alloc_zeroed_boot(pages * 4096, "tabulky ITS");
         // Ploska tabulka, stranky 4 KiB, velikost v poctu stranek - 1.
         write64(
             reg,
@@ -135,7 +110,7 @@ pub fn init(phys: u64) {
         );
     }
 
-    let queue = alloc_zeroed(QUEUE_LEN);
+    let queue = alloc_zeroed_boot(QUEUE_LEN, "frontu prikazu ITS");
     write64(
         regs + GITS_CBASER,
         (1 << 63) | BASER_ATTRS | queue.as_u64() | (QUEUE_LEN / 4096 - 1),
@@ -205,11 +180,11 @@ impl Its {
     }
 
     /// Zalozi ITT zarizeni (MAPD), pokud jeste neni.
-    fn ensure_device(&mut self, device: u32) {
+    fn ensure_device(&mut self, device: u32) -> Result<(), Error> {
         if self.devices.contains_key(&device) {
-            return;
+            return Ok(());
         }
-        let itt = alloc_zeroed((EVENTS as u64 * self.itt_entry).max(256));
+        let itt = alloc_zeroed((EVENTS as u64 * self.itt_entry).max(256)).ok_or(Error::NoMemory)?;
         self.command([
             0x08 | ((device as u64) << 32),
             (EVENT_BITS - 1) as u64,
@@ -217,20 +192,22 @@ impl Its {
             0,
         ]);
         self.devices.insert(device, itt.as_u64());
+        Ok(())
     }
 
     /// Prelozi udalost `event` zarizeni `device` na LPI `intid` (MAPTI).
-    fn map(&mut self, device: u32, intid: u32) {
+    fn map(&mut self, device: u32, intid: u32) -> Result<(), Error> {
         let event = intid - LPI_FIRST;
         match self.owners[event as usize] {
-            Some(owner) if owner == device => return,
+            Some(owner) if owner == device => return Ok(()),
             Some(owner) => {
-                // Preruseni dostal jiny ovladac: stary preklad zrusit.
+                // Nemelo by nastat (`release` preklad rusi), ale pro jistotu
+                // stary preklad zrusit.
                 self.command([0x0F | ((owner as u64) << 32), event as u64, 0, 0]);
             }
             None => {}
         }
-        self.ensure_device(device);
+        self.ensure_device(device)?;
         gic::set_lpi_enabled(intid, true);
         self.command([
             0x0A | ((device as u64) << 32),
@@ -241,6 +218,23 @@ impl Its {
         self.command([0x0C | ((device as u64) << 32), event as u64, 0, 0]); // INV
         self.sync();
         self.owners[event as usize] = Some(device);
+        Ok(())
+    }
+}
+
+/// Zrusi preklad udalosti preruseni `intid` (DISCARD) a vypne LPI: objekt
+/// preruseni zanikl a zarizeni (napr. po padu ovladace) ho nesmi dal
+/// vyvolavat.
+pub fn release(intid: u32) {
+    let mut guard = ITS.lock();
+    let Some(its) = guard.as_mut() else {
+        return;
+    };
+    let event = intid - LPI_FIRST;
+    if let Some(owner) = its.owners[event as usize].take() {
+        its.command([0x0F | ((owner as u64) << 32), event as u64, 0, 0]);
+        gic::set_lpi_enabled(intid, false);
+        its.sync();
     }
 }
 
@@ -258,7 +252,7 @@ pub fn msi_message(intid: u32, device: Option<(u16, u8, u8)>) -> Result<(u64, u3
     let mut guard = ITS.lock();
     let its = guard.as_mut().ok_or(Error::NotSupported)?;
     let device_id = (bus as u32) << 8 | devfn as u32;
-    its.map(device_id, intid);
+    its.map(device_id, intid)?;
     drop(guard);
     let doorbell = ITS_PHYS.load(Ordering::Acquire) + GITS_TRANSLATER;
     // Zprava MSI prochazi SMMU: zarizeni musi smet zapsat do ITS.

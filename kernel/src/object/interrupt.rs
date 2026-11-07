@@ -62,6 +62,8 @@ impl Interrupt {
 impl Drop for Interrupt {
     fn drop(&mut self) {
         TABLE.lock()[(self.irq - FIRST) as usize] = None;
+        // Zarizeni zanikleho objektu uz nesmi preruseni vyvolavat.
+        arch::release_irq(self.irq);
     }
 }
 

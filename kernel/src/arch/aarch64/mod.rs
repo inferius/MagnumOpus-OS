@@ -32,6 +32,7 @@ mod context;
 mod exceptions;
 mod gic;
 mod its;
+mod mmio;
 mod mmu;
 mod pl011;
 mod regs;
@@ -372,6 +373,10 @@ impl api::DeviceIrq for Aarch64 {
     fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
         its::msi_message(irq, device)
     }
+
+    fn release(irq: u32) {
+        its::release(irq);
+    }
 }
 
 impl api::Iommu for Aarch64 {
@@ -447,11 +452,13 @@ impl api::Diagnostics for Aarch64 {
     }
 
     /// Semihosting SYS_EXIT (QEMU s `-semihosting-config enable=on`):
-    /// kod 0 = uspech. Mimo testovaci build se nevola (bez semihostingu by
-    /// instrukce vyvolala vyjimku).
+    /// kod 33 = uspech, 35 = selhani (stejne jako isa-debug-exit na x86).
+    /// Nula se nepouziva: tu vrati QEMU i pri obycejnem vypnuti, test by
+    /// pak "prosel" i bez vysledku od jadra. Mimo testovaci build se nevola
+    /// (bez semihostingu by instrukce vyvolala vyjimku).
     fn qemu_exit(success: bool) {
         if cfg!(feature = "qemu-test") {
-            semihosting::exit(if success { 0 } else { 1 });
+            semihosting::exit(if success { 33 } else { 35 });
         }
     }
 

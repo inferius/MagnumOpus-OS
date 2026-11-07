@@ -52,7 +52,7 @@ pub type PlatformArchInfo = <Current as api::PlatformInfo>::Info;
 /// Mechanismus startu dalsich CPU.
 pub type CpuStarter = <Current as Smp>::Starter;
 
-pub use api::{CpuLocalData, CpuStarter as CpuStarterOps};
+pub use api::{CpuLocalData, CpuStartResult, CpuStarter as CpuStarterOps};
 
 /// Citac cyklu je na vsech CPU stejny bez mereni (viz `api::Time`).
 pub const CYCLE_COUNTER_SYNCED: bool = <Current as Time>::CYCLE_COUNTER_SYNCED;
@@ -355,6 +355,11 @@ pub fn flush_tlb_broadcast() -> bool {
 /// Rozsah cisel preruseni pro zarizeni (vcetne).
 pub const DEVICE_IRQ_FIRST: u32 = <Current as DeviceIrq>::DEVICE_IRQ_FIRST;
 pub const DEVICE_IRQ_LAST: u32 = <Current as DeviceIrq>::DEVICE_IRQ_LAST;
+
+/// Uvolni preruseni `irq` (objekt zanikl).
+pub fn release_irq(irq: u32) {
+    <Current as DeviceIrq>::release(irq)
+}
 
 /// Zprava MSI (adresa, data) pro preruseni `irq`.
 pub fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> crate::error::Result<(u64, u32)> {

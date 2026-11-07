@@ -53,8 +53,9 @@ pub const AARCH64: Arch = Arch {
     qemu: "qemu-system-aarch64",
     firmware: ("edk2-aarch64-code.fd", "edk2-arm-vars.fd"),
     iommus: &["smmu", "none"],
-    // Semihosting SYS_EXIT: QEMU skonci s kodem, ktery jadro preda.
-    test_success: 0,
+    // Semihosting SYS_EXIT: QEMU skonci s kodem, ktery jadro preda (33 jako
+    // na x86 - nula by se pletla s obycejnym vypnutim QEMU).
+    test_success: 33,
     test_timeout: Duration::from_secs(600),
 };
 

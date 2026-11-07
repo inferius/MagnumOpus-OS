@@ -14,7 +14,7 @@ use core::arch::{asm, global_asm};
 
 use super::regs::{dcache_clean_invalidate, hw_id_to_mpidr, mrs};
 use super::timer;
-use crate::arch::api::CpuStarter;
+use crate::arch::api::{CpuStartResult, CpuStarter};
 use crate::log;
 use crate::mm::{self, PhysAddr, VirtAddr};
 
@@ -131,7 +131,7 @@ impl CpuStarter for Psci {
         entry: extern "C" fn(u64) -> !,
         arg: u64,
         started: impl Fn() -> bool,
-    ) -> bool {
+    ) -> CpuStartResult {
         // Stejne tabulky a TCR jako bootovaci CPU, ale se zapnutou spodni
         // polovinou (identita stubu); planovac ji pri prvnim prepnuti vypne.
         const TCR_EPD0: u64 = 1 << 7;
@@ -156,17 +156,28 @@ impl CpuStarter for Psci {
             self.stub,
             self.params.as_u64(),
         );
-        if ret != PSCI_SUCCESS && ret != PSCI_ALREADY_ON {
+        if ret == PSCI_ALREADY_ON {
+            // Bezi mimo jadro (firmware ho nechal zapnute): nelze prevzit.
+            log::error!(
+                "CPU s MPIDR {mpidr:#x} uz bezi (firmware ho nechal zapnute), jadro ho nepouzije"
+            );
+            return CpuStartResult::Failed;
+        }
+        if ret != PSCI_SUCCESS {
             log::error!("PSCI CPU_ON pro MPIDR {mpidr:#x} selhalo: {ret}");
-            return false;
+            return CpuStartResult::Failed;
         }
         for _ in 0..2000 {
             if started() {
-                return true;
+                return CpuStartResult::Started;
             }
             timer::busy_wait_ns(500_000);
         }
-        started()
+        if started() {
+            CpuStartResult::Started
+        } else {
+            CpuStartResult::TimedOut
+        }
     }
 
     fn finish(self) {

@@ -352,6 +352,9 @@ impl api::DeviceIrq for X86_64 {
     fn msi_message(irq: u32, _device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
         Ok(msi_message(irq as u8))
     }
+
+    /// Vektor nema v radici zadny stav: nic.
+    fn release(_irq: u32) {}
 }
 
 /// Zprava MSI pro vektor `vector` (i pro preruseni chyb IOMMU).

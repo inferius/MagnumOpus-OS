@@ -42,17 +42,16 @@ pub struct TrapFrame {
 const FRAME_SIZE: usize = size_of::<TrapFrame>();
 const _: () = assert!(FRAME_SIZE == 288 && FRAME_SIZE % 16 == 0);
 
-// Druh vyjimky (cislo vstupu tabulky).
+// Druh vyjimky (cislo predane vstupem tabulky). 3 = SError v EL1,
+// 8 = vyjimka v EL1 se SP_EL0 nebo z AArch32 (jadro ani programy to
+// nepouzivaji) - obe konci fatalni chybou.
 const KIND_EL1_SYNC: u64 = 0;
 const KIND_EL1_IRQ: u64 = 1;
 const KIND_EL1_FIQ: u64 = 2;
-const KIND_EL1_SERROR: u64 = 3;
 const KIND_EL0_SYNC: u64 = 4;
 const KIND_EL0_IRQ: u64 = 5;
 const KIND_EL0_FIQ: u64 = 6;
 const KIND_EL0_SERROR: u64 = 7;
-/// Vyjimka v EL1 se SP_EL0 nebo z AArch32 - jadro ani programy to nepouzivaji.
-const KIND_INVALID: u64 = 8;
 
 global_asm!(
     r#"
@@ -186,7 +185,8 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame, kind: u64) {
         // Vsechna preruseni jsou ve skupine 1 (IRQ); FIQ by byla chyba
         // nastaveni, SError chyba hardwaru.
         KIND_EL0_FIQ | KIND_EL1_FIQ => log::warn!("necekane FIQ"),
-        KIND_EL0_SERROR | KIND_EL1_SERROR | KIND_INVALID => fatal(frame, kind),
+        // SError, vyjimka v EL1 se SP_EL0 nebo z AArch32: chyba, ktera
+        // nema nastat.
         _ => fatal(frame, kind),
     }
     if (KIND_EL0_SYNC..=KIND_EL0_SERROR).contains(&kind) {

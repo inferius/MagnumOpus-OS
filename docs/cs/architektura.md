@@ -762,7 +762,7 @@ cargo xtask test --arch aarch64
 QEMU: stroj `virt` s GICv3 a ITS, `-cpu cortex-a76` (stejné jádro jako
 Raspberry Pi 5), bez EL2 (`virtualization=off`), SMMUv3 (`--iommu smmu`,
 výchozí; `--iommu none` bez překladu DMA). Testy končí přes semihosting
-(kód 0 = úspěch). V emulaci TCG běží zhruba 2x pomaleji než x86 s TCG.
+(kód 33 = úspěch jako na x86; nula se nepoužívá, tu vrací QEMU i při obyčejném vypnutí). V emulaci TCG běží zhruba 2x pomaleji než x86 s TCG.
 
 Rozdíly proti x86, o kterých je dobré vědět:
 

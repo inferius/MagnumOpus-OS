@@ -13,6 +13,7 @@
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use super::mmio::{alloc_zeroed_boot, read32, read64, write32, write64};
 use super::regs::{dsb_sy, isb, mpidr_to_hw_id, mrs, msr};
 use crate::log;
 use crate::mm::{self, PhysAddr};
@@ -60,26 +61,6 @@ static GICR_REGIONS: spin::Once<Vec<(u64, u64)>> = spin::Once::new();
 /// Tabulka konfigurace LPI (jedna pro vsechna CPU), fyzicka adresa.
 static PROP_TABLE: AtomicU64 = AtomicU64::new(0);
 
-fn read32(addr: u64) -> u32 {
-    // SAFETY: adresy jsou registry GIC namapovane jako zarizeni (`map_mmio`).
-    unsafe { (addr as *const u32).read_volatile() }
-}
-
-fn write32(addr: u64, v: u32) {
-    // SAFETY: viz `read32`.
-    unsafe { (addr as *mut u32).write_volatile(v) }
-}
-
-fn read64(addr: u64) -> u64 {
-    // SAFETY: viz `read32`.
-    unsafe { (addr as *const u64).read_volatile() }
-}
-
-fn write64(addr: u64, v: u64) {
-    // SAFETY: viz `read32`.
-    unsafe { (addr as *mut u64).write_volatile(v) }
-}
-
 /// Velikost tabulky konfigurace LPI v bajtech (bajt na LPI).
 fn prop_table_len() -> u64 {
     (1u64 << LPI_ID_BITS) - LPI_FIRST as u64
@@ -110,9 +91,8 @@ pub fn init_distributor(gicd_phys: u64, regions: &[(u64, u64)]) {
 
     // Konfigurace LPI: priorita, zatim vse vypnute (zapina `its`).
     let len = prop_table_len();
-    let order = len.div_ceil(4096).next_power_of_two().trailing_zeros() as usize;
-    let table = mm::phys::alloc_pages(order).expect("nedostatek pameti pro tabulku LPI");
-    // SAFETY: prave alokovane stranky v prime mape.
+    let table = alloc_zeroed_boot(len, "tabulku konfigurace LPI");
+    // SAFETY: prave alokovana tabulka v prime mape.
     unsafe {
         table
             .to_virt()
@@ -215,19 +195,7 @@ fn enable_lpis(rd: u64) {
     // Tabulka cekajicich LPI: bit na preruseni (vcetne 0..8192), zarovnani
     // 64 KiB, vynulovana.
     let pend_len = (1u64 << LPI_ID_BITS) / 8;
-    let order = pend_len
-        .div_ceil(4096)
-        .max(16)
-        .next_power_of_two()
-        .trailing_zeros() as usize;
-    let pend = mm::phys::alloc_pages(order).expect("nedostatek pameti pro tabulku LPI");
-    // SAFETY: prave alokovane stranky v prime mape.
-    unsafe {
-        pend.to_virt()
-            .as_mut_ptr::<u8>()
-            .write_bytes(0, 4096 << order)
-    };
-    super::regs::dcache_clean_invalidate(pend.to_virt().as_u64(), 4096 << order);
+    let pend = alloc_zeroed_boot(pend_len.max(0x1_0000), "tabulku cekajicich LPI");
     write64(rd + GICR_PENDBASER, pend.as_u64() | TABLE_ATTRS);
     dsb_sy();
     write32(
