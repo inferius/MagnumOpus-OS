@@ -322,3 +322,11 @@ figure.diagram figcaption {
 .hl-attr { color: var(--hl-attr); }
 .hl-const { color: var(--hl-const); }
 .hl-life { color: var(--hl-kw); font-style: italic; }
+
+/* Priklad shellu v obou zapisech (B napsany, C vygenerovany nebo naopak). */
+.content .two-styles { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 12px 0; }
+.content .two-styles pre { margin: 0; }
+.content .two-styles .style-label {
+  font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 2px 2px;
+}
+.content .two-styles .style-c pre { border-left: 3px solid var(--accent); }

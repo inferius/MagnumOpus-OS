@@ -9,6 +9,7 @@ mod fs;
 mod ipc;
 mod memory;
 mod process;
+mod shell;
 mod time;
 
 use alloc::string::String;
@@ -26,6 +27,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ovladace", drivers::TESTS),
     ("souborovy system", fs::TESTS),
     ("cas", time::TESTS),
+    ("shell", shell::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).

@@ -33,11 +33,11 @@ site menu.
 | [Návrh FS v3](cs/navrh-fs-v3.md) | [FS v3 design](en/fs-v3-design.md) | odsouhlasený návrh, zavádí se po fázích / agreed design, introduced in phases |
 | [Archiv: FS v2](cs/fs-v2.md) | [Archive: FS v2](en/fs-v2.md) | původní formát v2 / the original v2 format |
 
-### Návrhy k rozhodnutí / Proposals for decision
+### Shell a terminál / Shell and terminal
 
 | Česky | English | Obsah / Contents |
 |---|---|---|
-| [Jazyk shellu](cs/navrh-shell.md) | [Shell language](en/shell-design.md) | průzkum, varianty a doporučení / research, variants and recommendation |
+| [Shell a terminál](cs/navrh-shell.md) | [Shell and terminal](en/shell-design.md) | jazyk (zápisy B a C, gramatika, sémantika), undo a náhled, služba relací, protokol terminálu, kódy chyb shellu / language (notations B and C, grammar, semantics), undo and preview, session service, terminal protocol, shell error codes |
 
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).

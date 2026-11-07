@@ -64,7 +64,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd, timed
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd, timed, termd
 ```
 
 QEMU gets an emulated IOMMU (`intel-iommu`, with `--iommu amd`
@@ -129,12 +129,15 @@ libs/fs/         file system (no_std; std for tools)
   src/fs/           files, directories, snapshots, intent log, defrag, fsck
   src/tests/        FS tests (model, power loss, performance)
 libs/fsproto/    file system protocol (client <-> fsd)
+libs/shlang/     shell language: lexer, B and C parsers, tree, formatter, interpreter
+libs/term/       smart terminal: protocol, session service, VT100, screen
 user/init/       first process: starts services, userspace tests
 user/echo/       IPC test server
 user/devmgr/     device manager (PCI, starts drivers)
 user/virtio-blk/ disk driver
 user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
+user/termd/      shell and terminal session service
 libs/osfs-proto/ protocol of the extended FS API for Windows (DeviceIoControl) + client
 tools/osfs/      host tool for the FS: format, check, mount on Windows (WinFsp)
 xtask/           build, disk image, QEMU, tests

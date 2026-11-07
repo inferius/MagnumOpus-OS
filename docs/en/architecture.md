@@ -430,6 +430,13 @@ widget). It is possible, but the trusted elements stay with the system:
 ## Shell and smart terminal (proposal)
 
 > Agreed decisions: [Decisions for milestones 6a-6d](#decisions-for-milestones-6a-6d-agreed).
+>
+> **Status (6b):** the language, lazy undo, "show what will happen", the
+> dangerous operation lock, the `needs` manifest, completion, history, error
+> explanations, the native protocol and the session service are done. They
+> are described on the [Shell and terminal](shell-design.md#terminal-and-session-service)
+> page, together with the [integration status](shell-design.md#integration-status)
+> (init, `inputd`, framebuffer).
 
 Goal: a terminal more comfortable than today's ones that uses what our FS
 and capabilities can do.
@@ -876,6 +883,7 @@ covers C, C++ and Rust), but it makes sense as a separate project:
      later USB HID), layouts, secure key combination - see [Input](#input-keyboard-and-mouse-plan)
    - **6b Shell and smart terminal:** console, structured output, command
      undo, "show what will happen", permissions at launch - see [Shell](#shell-and-smart-terminal-proposal)
+     (language, session service and QEMU test done; input and framebuffer pending)
    - **6c GUI:** virtio-gpu, compositor, native UI library, system dialogs -
      see [Graphics](#graphics)
    - **6d AI-ready:** primitives for safe agents (mostly from FS v3), model
@@ -906,5 +914,11 @@ fine for now):
   remapping and RMRR/IVMD regions are missing; on a machine without an
   IOMMU DMA is not restricted (the kernel logs it).
 - **Quotas only per process**, not for groups of processes (job).
+- **The shell's change preview is an overlay in shell memory**, not a
+  dataset clone: `fsproto` cannot do clones and diffs yet. Programs
+  therefore do not run inside `preview`, and undoing their changes relies on
+  a snapshot of the whole volume.
+- **Shell background jobs run cooperatively** (when the shell is idle), not
+  in their own threads.
 - **Strict priority between QoS classes** (lower classes can starve).
 - **Memory of finished threads** (kernel stacks) is reused but not returned.

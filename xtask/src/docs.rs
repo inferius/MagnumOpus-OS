@@ -41,6 +41,8 @@ struct Rendered {
     anchors: HashSet<String>,
     links: Vec<String>,
     sections: Vec<(String, String, String)>,
+    /// Chyby nalezene pri vykresleni (napr. priklad shellu nejde prevest).
+    errors: Vec<String>,
 }
 
 /// Vytvori web do `out` a vrati cestu k uvodni strance.
@@ -60,6 +62,11 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
             let md = fs::read_to_string(docs.join(lang).join(&page.files[li]))
                 .map_err(|e| format!("docs/{lang}/{}: {e}", page.files[li]))?;
             rendered.push(render(&page.files[li], &md));
+        }
+        for r in &rendered {
+            for e in &r.errors {
+                errors.push(format!("{lang}/{}: {e}", r.file));
+            }
         }
         check_links(lang, &rendered, &mut errors);
         let titles: Vec<String> = rendered.iter().map(|r| r.title.clone()).collect();
@@ -166,6 +173,7 @@ fn render(file: &str, md: &str) -> Rendered {
     let mut used: HashMap<String, usize> = HashMap::new();
     let mut links = Vec::new();
     let mut sections: Vec<(String, String, String)> = Vec::new();
+    let mut doc_errors: Vec<String> = Vec::new();
 
     // Blok kodu: jazyk a dosud nasbirany text (zvyrazni se najednou na konci).
     let mut code: Option<(String, String)> = None;
@@ -183,6 +191,16 @@ fn render(file: &str, md: &str) -> Rendered {
             }
             (Some((_, buf)), Event::Text(t)) => {
                 buf.push_str(t);
+                continue;
+            }
+            (Some((lang, _)), Event::End(TagEnd::CodeBlock))
+                if lang == "shell-b" || lang == "shell-c" =>
+            {
+                let (lang, buf) = code.take().unwrap();
+                match shell_pair(&lang, &buf) {
+                    Ok(html) => out_events.push(Event::Html(CowStr::from(html))),
+                    Err(e) => doc_errors.push(e),
+                }
                 continue;
             }
             (Some(_), Event::End(TagEnd::CodeBlock)) => {
@@ -281,7 +299,47 @@ fn render(file: &str, md: &str) -> Rendered {
         anchors,
         links,
         sections,
+        errors: doc_errors,
     }
+}
+
+/// Priklad shellu v obou zapisech: napsany (`shell-b` nebo `shell-c`)
+/// a druhy vygenerovany formatovacem. Priklad, ktery nejde prevest tam
+/// a zpet na stejny strom, je chyba dokumentace.
+fn shell_pair(lang: &str, src: &str) -> std::result::Result<String, String> {
+    use shlang::{Style, fmt, parse, sig::Builtins};
+    let from = if lang == "shell-c" { Style::C } else { Style::B };
+    let opts = shlang::Options { style: Some(from), sigs: &Builtins, vars: Vec::new(), script: false };
+    let parsed = parse(src, &opts).map_err(|e| format!("priklad shellu nejde rozparsovat:
+{}", e.report(src)))?;
+    let fo = |style| fmt::FmtOptions { style, sigs: &Builtins, vars: Vec::new() };
+    let b = fmt::format(&parsed.script, &fo(Style::B));
+    let c = fmt::format(&parsed.script, &fo(Style::C));
+    for (text, style) in [(&b, Style::B), (&c, Style::C)] {
+        let again = parse(text, &shlang::Options { style: Some(style), sigs: &Builtins, vars: Vec::new(), script: false })
+            .map_err(|e| format!("prevod prikladu shellu selhal:
+{}", e.report(text)))?;
+        if again.script != parsed.script {
+            return Err(format!("priklad shellu dava po prevodu jiny strom:
+{src}
+---
+{text}"));
+        }
+    }
+    let block = |label: &str, cls: &str, text: &str| {
+        format!(
+            "<div class=\"style-{cls}\"><div class=\"style-label\">{label}</div><pre><code class=\"language-shell-{cls}\">{}</code></pre></div>",
+            crate::highlight::highlight("shell-b", text.trim_end())
+        )
+    };
+    // Napsany zapis prvni, vygenerovany druhy (oznaceny hvezdickou).
+    let (first, second) = if from == Style::B {
+        (block("B", "b", &b), block("C *", "c", &c))
+    } else {
+        (block("C", "c", &c), block("B *", "b", &b))
+    };
+    Ok(format!("<div class=\"two-styles\">{first}{second}</div>
+"))
 }
 
 /// `x.md` -> `x.html`, `x.md#a` -> `x.html#a`; ostatni beze zmeny.

@@ -184,6 +184,10 @@ fn host_tests() -> Result<()> {
             "tz",
             "--package",
             "fs",
+            "--package",
+            "shlang",
+            "--package",
+            "term",
             "--features",
             "initfs/std,fs/std",
         ])
@@ -257,7 +261,7 @@ struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
-const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk", "fsd", "timed"];
+const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk", "fsd", "timed", "termd"];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());

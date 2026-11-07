@@ -68,6 +68,10 @@ const BASH_KW: &[&str] = &[
     "cd", "do", "done", "echo", "elif", "else", "esac", "export", "fi", "for", "function", "if",
     "in", "then", "while",
 ];
+const MOS_KW: &[&str] = &[
+    "let", "fn", "if", "else", "for", "in", "while", "return", "break", "continue", "try", "bg", "true",
+    "false", "null", "lang", "needs",
+];
 /// Typy psane malymi pismeny (Rust primitivni typy, C typy maji klic. slova).
 const RUST_PRIM: &[&str] = &[
     "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "str", "u8", "u16",
@@ -80,6 +84,8 @@ enum Lang {
     C,
     Toml,
     Bash,
+    /// Jazyk shellu MagnumOpus (oba zapisy).
+    Mos,
 }
 
 fn lang_of(name: &str) -> Option<Lang> {
@@ -88,6 +94,7 @@ fn lang_of(name: &str) -> Option<Lang> {
         "c" | "cpp" | "c++" | "h" => Some(Lang::C),
         "toml" => Some(Lang::Toml),
         "bash" | "sh" | "shell" | "powershell" => Some(Lang::Bash),
+        "shell-b" | "shell-c" => Some(Lang::Mos),
         _ => None,
     }
 }
@@ -131,7 +138,7 @@ pub fn highlight(lang: &str, code: &str) -> String {
         // Komentare.
         let line_comment = match l {
             Lang::Rust | Lang::C => c == '/' && next == '/',
-            Lang::Toml | Lang::Bash => c == '#',
+            Lang::Toml | Lang::Bash | Lang::Mos => c == '#',
         };
         if line_comment {
             let end = chars[i..]
@@ -253,7 +260,7 @@ pub fn highlight(lang: &str, code: &str) -> String {
         // Slova.
         if c.is_alphabetic()
             || c == '_'
-            || (l == Lang::Bash
+            || ((l == Lang::Bash || l == Lang::Mos)
                 && c == '-'
                 && next.is_alphabetic()
                 && (i == 0 || chars[i - 1] == ' '))
@@ -262,7 +269,7 @@ pub fn highlight(lang: &str, code: &str) -> String {
             while j < n
                 && (chars[j].is_alphanumeric()
                     || chars[j] == '_'
-                    || (l == Lang::Bash && chars[j] == '-'))
+                    || ((l == Lang::Bash || l == Lang::Mos) && chars[j] == '-'))
             {
                 j += 1;
             }
@@ -272,6 +279,9 @@ pub fn highlight(lang: &str, code: &str) -> String {
                 Lang::Rust if RUST_KW.contains(&word.as_str()) => Some("kw"),
                 Lang::C if C_KW.contains(&word.as_str()) => Some("kw"),
                 Lang::Bash if BASH_KW.contains(&word.as_str()) => Some("kw"),
+                Lang::Mos if MOS_KW.contains(&word.as_str()) => Some("kw"),
+                Lang::Mos if word.starts_with('-') => Some("attr"),
+                Lang::Mos if after == '(' => Some("fn"),
                 Lang::Bash if word.starts_with('-') => Some("attr"),
                 Lang::Bash
                     if line_start

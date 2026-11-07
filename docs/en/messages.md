@@ -135,3 +135,12 @@ invariant was broken (a kernel bug).
 | `fsd: defragmentace: ...` | A defragmentation step failed (typically `CORRUPTED` when reading a damaged block). Defragmentation pauses until further changes; data is not modified. |
 | `fsd: chyba kanalu: ...` | Unexpected error on the client channel; the service commits and exits. |
 | `fsd: chybi handly ve startovni zprave` | Wrong service start (code 1). |
+
+## Session service termd
+
+| Message | Meaning and fix |
+|---|---|
+| `termd: bezim (protokol vN, FS fsd/zadny)` | The session service is running. `zadny` (none) = it got no fsd channel; the shell then sees only an empty root (writes return `READ_ONLY`). |
+| `termd\| ...` | Mirror of session output as text (VT100 adapter) so it can be read on the serial line. Blocks start with `> command`. |
+| `termd: okno zavreno, koncim` | The channel to the parent closed. Background jobs finish, then the service exits (sessions do not survive the process yet). |
+| `termd: chyba cteni: ...` | Unexpected channel error; the service exits with code 1. |

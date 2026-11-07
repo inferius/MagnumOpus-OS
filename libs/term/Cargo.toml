@@ -1,0 +1,11 @@
+[package]
+name = "term"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Chytry terminal: nativni protokol, sluzba relaci, adapter VT100, obrazovka s pismem"
+
+[dependencies]
+abi.workspace = true
+shlang = { path = "../shlang" }
+noto-sans-mono-bitmap = { version = "0.4", default-features = false, features = ["regular", "size_16", "size_24", "unicode-basic-latin", "unicode-latin-1-supplement", "unicode-latin-extended-a", "unicode-specials"] }

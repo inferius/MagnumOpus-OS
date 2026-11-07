@@ -389,7 +389,9 @@ dependencies = [
  "blockproto",
  "fsproto",
  "libos",
+ "shlang",
  "spin",
+ "term",
 ]
 
 [[package]]
@@ -731,6 +733,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "shlang"
+version = "0.1.0"
+dependencies = [
+ "abi",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -793,6 +802,25 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys",
+]
+
+[[package]]
+name = "term"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "noto-sans-mono-bitmap",
+ "shlang",
+]
+
+[[package]]
+name = "termd"
+version = "0.1.0"
+dependencies = [
+ "fsproto",
+ "libos",
+ "shlang",
+ "term",
 ]
 
 [[package]]
@@ -1081,6 +1109,7 @@ dependencies = [
  "fs",
  "initfs",
  "pulldown-cmark",
+ "shlang",
 ]
 
 [[package]]
