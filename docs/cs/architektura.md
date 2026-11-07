@@ -412,6 +412,12 @@ důvěryhodné prvky zůstávají systému:
 ## Shell a chytrý terminál (návrh)
 
 > Odsouhlasená rozhodnutí: [Rozhodnutí k milníkům 6a-6d](#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno).
+>
+> **Stav (6b):** jazyk, líné undo, „ukaž, co se stane“, zámek nebezpečných
+> operací, manifest `needs`, doplňování, historie, vysvětlení chyb, nativní
+> protokol a služba relací jsou hotové. Popis je na stránce
+> [Shell a terminál](navrh-shell.md#terminál-a-služba-relací), tam je i
+> [stav zapojení](navrh-shell.md#stav-zapojení) (init, `inputd`, framebuffer).
 
 Cíl: terminál, který je pohodlnější než dnešní a využívá, co umí náš FS
 a capabilities.
@@ -896,6 +902,7 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
      [Vstup](vstup.md)
    - **6b Shell a chytrý terminál:** konzole, strukturovaný výstup, undo
      příkazů, „ukaž, co se stane“, oprávnění při spuštění - viz [Shell](#shell-a-chytrý-terminál-návrh)
+     (jazyk, služba relací a test v QEMU hotové; vstup a framebuffer čekají)
    - **6c GUI:** virtio-gpu, kompozitor, nativní knihovna UI, systémové
      dialogy - viz [Grafika](#grafika)
    - **6d AI-ready:** primitiva pro bezpečné agenty (většina z FS v3),
@@ -924,6 +931,11 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
   přerušení a oblasti RMRR/IVMD; na stroji bez IOMMU DMA omezené není
   (jádro to zaloguje).
 - **Kvóty jen na proces**, ne pro skupiny procesů (job).
+- **Náhled změn shellu je překryv v paměti shellu**, ne klon datasetu:
+  `fsproto` zatím klony a diff neumí. Programy proto v `preview` neběží
+  a undo jejich změn stojí na snapshotu celého svazku.
+- **Úlohy na pozadí shellu běží kooperativně** (když je shell volný),
+  ne ve vlastních vláknech.
 - **Mezi třídami QoS přísná priorita** (nižší třídy mohou hladovět).
 - **Paměť po ukončených vláknech** (zásobníky jádra) se používá znovu, ale
   nevrací se.

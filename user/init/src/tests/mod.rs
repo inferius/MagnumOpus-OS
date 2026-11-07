@@ -11,6 +11,7 @@ mod input;
 mod ipc;
 mod memory;
 mod process;
+mod shell;
 mod supervisor;
 mod time;
 mod usb;
@@ -34,6 +35,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("historie FS", fs_hist::TESTS),
     ("cas", time::TESTS),
     ("supervisor", supervisor::TESTS),
+    ("shell", shell::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).

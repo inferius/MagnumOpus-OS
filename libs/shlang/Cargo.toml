@@ -1,0 +1,9 @@
+[package]
+name = "shlang"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Jazyk shellu: lexer, parsery zapisu B a C, spolecny strom, formatovac, interpret"
+
+[dependencies]
+abi.workspace = true

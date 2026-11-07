@@ -1,0 +1,17 @@
+[package]
+name = "termd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "termd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+fsproto = { path = "../../libs/fsproto" }
+shlang = { path = "../../libs/shlang" }
+term = { path = "../../libs/term" }

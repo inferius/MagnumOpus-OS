@@ -175,3 +175,12 @@ porušený vnitřní předpoklad (chyba jádra).
 | `fsd: defragmentace: ...` | Krok defragmentace selhal (typicky `CORRUPTED` při čtení poškozeného bloku). Defragmentace se do dalších změn pozastaví; data se nemění. |
 | `fsd: chyba kanalu: ...` | Neočekávaná chyba kanálu ke klientovi; služba udělá commit a skončí. |
 | `fsd: chybi handly ve startovni zprave` | Chybný start služby (kód 1). |
+
+## Služba relací termd
+
+| Hláška | Význam a řešení |
+|---|---|
+| `termd: bezim (protokol vN, FS fsd/zadny)` | Služba relací běží. `zadny` = nedostala kanál fsd; shell pak vidí jen prázdný kořen (zápis vrací `READ_ONLY`). |
+| `termd\| ...` | Zrcadlo výstupu relací jako text (adaptér VT100), aby šlo číst i na sériové lince. Bloky začínají `> příkaz`. |
+| `termd: okno zavreno, koncim` | Zavřel se kanál k rodiči. Úlohy na pozadí ještě doběhnou, pak služba skončí (relace zatím nepřežijí konec procesu). |
+| `termd: chyba cteni: ...` | Neočekávaná chyba kanálu; služba končí s kódem 1. |

@@ -16,3 +16,5 @@ blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }
 inputproto = { path = "../../libs/inputproto" }
 spin = "0.12"
+shlang = { path = "../../libs/shlang" }
+term = { path = "../../libs/term" }

@@ -195,6 +195,10 @@ fn host_tests() -> Result<()> {
             "i8042",
             "--package",
             "usbproto",
+            "--package",
+            "shlang",
+            "--package",
+            "term",
             "--features",
             "initfs/std,fs/std",
         ])
@@ -277,6 +281,7 @@ const USER_PROGRAMS: &[&str] = &[
     "usb-hid",
     "fsd",
     "timed",
+    "termd",
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
