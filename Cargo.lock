@@ -1194,6 +1194,7 @@ dependencies = [
  "elf",
  "initfs",
  "linked_list_allocator",
+ "sizeclass",
  "tz",
 ]
 
@@ -1945,6 +1946,10 @@ dependencies = [
  "digest",
  "rand_core 0.6.4",
 ]
+
+[[package]]
+name = "sizeclass"
+version = "0.1.0"
 
 [[package]]
 name = "slab"

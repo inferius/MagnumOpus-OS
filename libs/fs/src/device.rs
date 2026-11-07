@@ -63,6 +63,10 @@ pub struct MemDevice {
     pub data: Vec<u8>,
     /// Pocet bloku, ktere dostaly TRIM (statistika pro testy).
     pub discarded: u64,
+    /// Statistika pro testy a mereni: zapsane bloky, volani zapisu, flush.
+    pub written: u64,
+    pub write_calls: u64,
+    pub flushes: u64,
 }
 
 impl MemDevice {
@@ -70,6 +74,9 @@ impl MemDevice {
         Self {
             data: vec![0; (blocks * BLOCK_SIZE as u64) as usize],
             discarded: 0,
+            written: 0,
+            write_calls: 0,
+            flushes: 0,
         }
     }
 }
@@ -96,6 +103,8 @@ impl BlockDevice for MemDevice {
             .get_mut(start..start + data.len())
             .ok_or(Error::OutOfRange)?;
         dst.copy_from_slice(data);
+        self.written += (data.len() / BLOCK_SIZE) as u64;
+        self.write_calls += 1;
         Ok(())
     }
 
@@ -108,6 +117,7 @@ impl BlockDevice for MemDevice {
     }
 
     fn flush(&mut self) -> Result<()> {
+        self.flushes += 1;
         Ok(())
     }
 
