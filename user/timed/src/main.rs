@@ -10,16 +10,25 @@
 //! Sluzba nastaveni precte, pri `rtc = local` opravi cas ze startu (RTC bylo
 //! v mistnim case) a odpovi `ok` nebo `err:<popis>`.
 //!
-//! Dalsi zpravy:
+//! Dalsi zpravy od rodice:
 //! - `set` + 12 B (sekundy i64, nanosekundy u32, LE) + 1 B (1 = zapsat i do
-//!   RTC) -> nastavi cas, odpovi `ok:hw` / `ok` / `err:<kod>`.
+//!   RTC) -> nastavi cas, odpovi `ok:hw` / `ok` / `err:<kod>`,
+//! - `ntp` + handle kanalu -> pripoji klienta synchronizace (`ntpd`), odpovi
+//!   `ok`,
+//! - `status` -> `ok:` + stav ([`sync::Status`] jako text).
 //!
-//! Konec kanalu u rodice = konec procesu. Pozdeji: synchronizace podle site.
+//! Klient synchronizace smi jen navrhovat korekce (`sync`, viz [`sync`]);
+//! sluzba je overi a provede plynule (`CLOCK_ADJUST`). Proces, ktery
+//! zpracovava data ze site, tak hodiny primo menit nemuze.
+//!
+//! Konec kanalu u rodice = konec procesu.
 
 #![no_std]
 #![no_main]
 
 extern crate alloc;
+
+mod sync;
 
 use alloc::borrow::Cow;
 use alloc::format;
@@ -27,9 +36,12 @@ use alloc::vec::Vec;
 
 use libos::hw::Resource;
 use libos::time::{self, WallTime, zone::Settings};
-use libos::{Error, Startup, println};
+use libos::{Channel, Error, Signals, Startup, println};
 
 libos::entry!(main);
+
+/// Nejvic pripojenych klientu synchronizace.
+const MAX_SYNC_CLIENTS: usize = 4;
 
 fn main(mut startup: Startup) -> i64 {
     let channel = startup.bootstrap;
@@ -79,17 +91,49 @@ fn main(mut startup: Startup) -> i64 {
         return 1;
     }
 
+    let mut sync = sync::Sync::new();
+    let mut clients: Vec<Channel> = Vec::new();
     loop {
-        let msg = match channel.read(None) {
+        let mut items: Vec<(&libos::Handle, Signals)> = Vec::with_capacity(1 + clients.len());
+        items.push((channel.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+        for c in &clients {
+            items.push((c.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+        }
+        let observed = match libos::wait_many(&items, None) {
+            Ok((_, o)) => o,
+            Err(e) => {
+                println!("timed: cekani selhalo: {e}");
+                return 1;
+            }
+        };
+        drop(items);
+        // Klienti synchronizace (odzadu, aby slo odebirat).
+        for i in (0..clients.len()).rev() {
+            let s = observed[i + 1];
+            if s.contains(Signals::READABLE) {
+                while let Ok(msg) = clients[i].try_read() {
+                    let reply = sync.handle(&clock, &settings, &msg.data);
+                    let _ = clients[i].write(&reply, Vec::new());
+                }
+            } else if s.contains(Signals::PEER_CLOSED) {
+                println!("timed: klient synchronizace skoncil");
+                clients.swap_remove(i);
+            }
+        }
+        if !observed[0].intersects(Signals::READABLE | Signals::PEER_CLOSED) {
+            continue;
+        }
+        let msg = match channel.try_read() {
             Ok(m) => m,
+            Err(Error::ShouldWait) => continue,
             Err(Error::PeerClosed) => return 0,
             Err(e) => {
                 println!("timed: chyba cteni: {e}");
                 return 1;
             }
         };
-        let reply: Cow<str> = match msg.data.strip_prefix(b"set") {
-            Some(rest) if rest.len() == 13 => {
+        let reply: Cow<str> = if let Some(rest) = msg.data.strip_prefix(b"set") {
+            if rest.len() == 13 {
                 let secs = i64::from_le_bytes(rest[0..8].try_into().unwrap());
                 let nanos = u32::from_le_bytes(rest[8..12].try_into().unwrap());
                 let t = WallTime { secs, nanos };
@@ -98,8 +142,22 @@ fn main(mut startup: Startup) -> i64 {
                     Ok(false) => "ok".into(),
                     Err(e) => format!("err:{e}").into(),
                 }
+            } else {
+                "err:neznama zprava".into()
             }
-            _ => "err:neznama zprava".into(),
+        } else if msg.data == b"ntp" {
+            match msg.handles.into_iter().next() {
+                Some(h) if clients.len() < MAX_SYNC_CLIENTS => {
+                    clients.push(Channel::from_handle(h));
+                    "ok".into()
+                }
+                Some(_) => "err:prilis mnoho klientu".into(),
+                None => "err:chybi kanal".into(),
+            }
+        } else if msg.data == b"status" {
+            format!("ok:{}", sync.status(&clock)).into()
+        } else {
+            "err:neznama zprava".into()
         };
         if channel.write(reply.as_bytes(), Vec::new()).is_err() {
             return 1;

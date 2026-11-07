@@ -99,6 +99,27 @@ Chyby: `ACCESS_DENIED` (chybí `SET_CLOCK`), `WRONG_TYPE`, `BAD_HANDLE`,
 `INVALID_ARGS`, `BAD_ADDRESS`. Podrobnosti:
 [Nastavení hodin](cas.md#nastavení-hodin-clock_set).
 
+### `CLOCK_ADJUST`
+
+`(resource, offset_ns i64, freq_ppb i64, flags, out_ptr) -> 0`. Plynulá
+korekce reálného času bez skoku. Vyžaduje Resource s právem `SET_CLOCK`.
+Příznaky (`abi::time::adjust`):
+
+- `OFFSET` (1): začít dorovnávat posun `offset_ns`, nahradí zbytek
+  předchozího. Dorovnává se rychlostí 500 ppm (`MAX_SLEW_PPB`), takže
+  posun 1 s trvá 2000 s. Nejvýš 1 hodina (`MAX_OFFSET_NS`).
+- `FREQUENCY` (2): trvalá oprava frekvence `freq_ppb`, nejvýš ±500 ppm
+  (`MAX_FREQ_PPB`).
+- bez příznaků: jen stav.
+
+Na `out_ptr` (0 = nic) zapíše `abi::time::AdjustStatus` (24 B): zbývá
+dorovnat (ns), frekvence (ppb), aktuální rychlost dorovnávání (ppb).
+Reálný čas nikdy nejde pozpátku. `CLOCK_SET` dorovnávání zruší
+a frekvenci nechá. Obal: `libos::time::adjust`. Chyby: `ACCESS_DENIED`
+(chybí `SET_CLOCK`), `INVALID_ARGS` (meze, neznámé příznaky), `BAD_STATE`
+(reálný čas není znám), `WRONG_TYPE`, `BAD_HANDLE`, `BAD_ADDRESS`.
+Podrobnosti: [Plynulá korekce](cas.md#plynulá-korekce-clock_adjust).
+
 ## Handly
 
 ### `HANDLE_CLOSE`

@@ -7,12 +7,13 @@ The first part of milestone 6 ("network"). These parts are done:
   UDP, TCP), a DHCP client and a DNS resolver,
 - the **`netproto`** protocol with access through a capability and
   destination restrictions,
-- an **NTP** client that sets the clock through the time service,
+- time synchronization by the **`ntpd`** service (smooth correction
+  through the time service),
 - a **firewall**: application manifest, asking the user, packet filter,
   network profiles, audit and DNS filter (see [firewall.md](firewall.md)).
 
-TLS and HTTP come later. The interface for them is ready (see
-[Preparing for TLS and HTTP](#preparing-for-tls-and-http)).
+- **TLS 1.3 and HTTP/1.1, HTTP/2** as libraries in programs, a root
+  certificate store and the `fetch` program (see [TLS and HTTP](tls-http.md)).
 
 | Part | Where | What it does |
 |---|---|---|
@@ -21,7 +22,7 @@ TLS and HTTP come later. The interface for them is ready (see
 | protocol | `libs/netproto` | messages, permissions, DNS and NTP formats, client library |
 | device manager | `user/devmgr` | finds the card on PCI, starts the driver |
 | firewall | `user/fwd`, `libs/netfilter`, `libs/manifest` | configuration, asking the user, packet filter, manifests |
-| init | `user/init/src/system.rs`, `apps.rs` | starts `netd` and `fwd` in jobs by their manifests, holds the root session, NTP |
+| init | `user/init/src/system.rs`, `apps.rs` | starts `netd` and `fwd` in jobs by their manifests, holds the root session, starts `ntpd` |
 | tests | `user/init/src/tests/net.rs`, `xtask/src/nethelper.rs` | tests in QEMU through slirp against host servers |
 
 ## Architecture
@@ -440,50 +441,33 @@ corrected time, the clock offset and the round-trip delay. The reply is
 matched by the send time (the "originate" field). An unsynchronized server
 (stratum 0, leap 3) returns `BAD_STATE`.
 
-**Only the time service** `timed` may set the clock (the `SET_CLOCK`
-right, see [time.md](time.md)). So `init` only obtains the time and sends
-it to the time service with a `set` message:
+The clock is synchronized over the network by the **`ntpd`** service: it
+measures the offset against servers, filters the measurements and
+proposes corrections to the time service `timed`, the only one allowed to
+change the clock (the `SET_CLOCK` right). After the first synchronization
+the time is only adjusted smoothly (`CLOCK_ADJUST`) and never jumps back.
+Details in [Real time](time.md#synchronization-over-the-network-ntpd).
 
-<figure class="diagram">
-<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Setting the clock from NTP">
-<defs><marker id="na3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="50" width="150" height="60" rx="6"/><text class="t b" x="85" y="75" text-anchor="middle">NTP server</text><text class="m" x="85" y="93" text-anchor="middle">UDP 123</text>
-<path class="ln" d="M238 80 L162 80" marker-end="url(#na3)"/>
-<text class="m" x="170" y="70">t1 → t2, t3 → t4</text>
-<rect class="box" x="240" y="50" width="120" height="60" rx="6"/><text class="t b" x="300" y="75" text-anchor="middle">netd</text><text class="m" x="300" y="93" text-anchor="middle">UDP socket</text>
-<path class="ln" d="M438 80 L362 80" marker-end="url(#na3)"/>
-<rect class="acc" x="440" y="50" width="130" height="60" rx="6"/><text class="t b" x="505" y="75" text-anchor="middle">init</text><text class="m" x="505" y="93" text-anchor="middle">ntp_query</text>
-<path class="ln-acc" d="M570 80 L618 80" marker-end="url(#na3)"/>
-<rect class="ok" x="620" y="50" width="130" height="60" rx="6"/><text class="t b" x="685" y="75" text-anchor="middle">timed</text><text class="m" x="685" y="93" text-anchor="middle">CLOCK_SET</text>
-<text class="m" x="10" y="150">offset = ((t2 - t1) + (t3 - t4)) / 2; new time = t4 + offset. Not written to the RTC yet.</text>
-</svg>
-<figcaption>The network only obtains the time; only the time service may set it.</figcaption>
-</figure>
+> **Change from the first version:** init asked an NTP server once and
+> set the time with a jump (`sync_time_ntp`, tests only). **Why:** a jump
+> back breaks programs that compare times (certificates, files, logs) and
+> a single unfiltered measurement is easy to spoof. `ntpd` runs all the
+> time, with a network session limited to the configured servers.
 
-```rust
-// init (user/init/src/system.rs)
-let offset_ns = system::sync_time_ntp(&net_root, &time_service, server)?;
-```
+## TLS and HTTP
 
-For now the clock is set once and only in tests against the host's server.
-TODO: a server from the configuration or from DHCP (option 42), periodic
-synchronization and gradual adjustment instead of a jump.
+TLS 1.3 and the HTTP/1.1 and HTTP/2 client are libraries in the program's
+process (`libs/tls`, `libs/httpc`) over the generic stream
+`netproto::io::{Read, Write}`, so they work over plain TCP and over TLS
+alike. Root certificates live in the system store `/system/config/certs`,
+which a program gets as a read-only FS session. Everything is described
+in the [TLS and HTTP](tls-http.md) chapter.
 
-## Preparing for TLS and HTTP
-
-- **Streams:** `netproto::io::{Read, Write}` are a generic byte-stream
-  interface and `TcpStream` implements them. TLS will be a wrapper
-  `TlsStream<S: Read + Write>` that implements the same. The HTTP client
-  will work with any `Read + Write`, over plain TCP and over TLS alike.
-- **TLS will run in the program's process** (a library), not in the
-  network service. Session keys stay in the program that needs them. The
-  store of trusted certificates will be a system service or a read-only
-  file.
-- **Name-based permissions:** `Target::Host` rules already expect
-  applications that may only talk to their API (`*.example.com:443`). TLS
-  adds verification that the server really owns the name.
-- **Randomness:** TLS takes its keys from the kernel through
-  `libos::random::fill_seeded` (`REQUIRE_SEEDED`).
+> **Change from the first version:** the certificate store was meant to
+> be a service or a file; it is a directory on the FS (the Mozilla set +
+> custom CAs + `distrust.txt`). **Why:** an administrator adds a company
+> CA as a file, a system update does not overwrite their files, and the FS
+> checks permissions as for any other data.
 
 ## Tests
 
@@ -522,7 +506,7 @@ host's 127.0.0.1.
 | UDP large datagram | 60,000 B there and back (IPv4 fragmentation and reassembly) |
 | permissions | missing rights, destinations outside restrictions, handing a connection to another channel |
 | host name | the `*.magnumopus` rule applies after a system resolution, not after one by an own server |
-| NTP | a query to the host server, setting through `timed`, time source `SET` |
+| NTP | `ntpd` against the host server (the "synchronizace casu" suite, see [time.md](time.md#synchronization-over-the-network-ntpd)) |
 
 DNS through 10.0.2.3 (slirp forwards the queries to the host's DNS) is not
 tested because the test would need the internet. Without the helper
@@ -543,5 +527,5 @@ described in [firewall.md](firewall.md#tests).
   is ready (`IpAddr` addresses).
 - **Shared memory for data** instead of copying in messages (as for the
   disk).
-- **More cards**, static configuration, DNS cache, periodic NTP.
-- **TLS 1.3 and an HTTP client** as libraries over `Read + Write`.
+- **More cards**, static configuration, DNS cache, NTP servers from DHCP
+  (option 42).

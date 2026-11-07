@@ -148,6 +148,109 @@ in the CMOS RTC too, so it survives a reboot:
   write local time to the RTC (`rtc = local`). Writing UTC would shift
   Windows by the zone offset.
 
+## Smooth correction (`CLOCK_ADJUST`)
+
+Stepping the clock backwards breaks ordering: a file saved later has an
+older time, logs go out of order, TLS certificates may briefly look
+invalid. At run time the clock is therefore only **adjusted smoothly**.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Smooth time correction">
+<defs><marker id="tm7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<path class="ln" d="M60 190 L740 190" marker-end="url(#tm7)"/><text class="m" x="660" y="210">monotonic time</text>
+<path class="ln" d="M60 190 L60 20" marker-end="url(#tm7)"/><text class="m" x="66" y="30">real time</text>
+<path class="ln" d="M60 170 L720 40"/><text class="m" x="600" y="80">true time</text>
+<path class="ln-acc" d="M60 140 L300 92 L300 123 L720 40"/>
+<path class="ln-acc" d="M300 92 L560 72"/>
+<text class="m" x="310" y="145">step (CLOCK_SET): time goes back</text>
+<text class="m" x="250" y="60">smooth (CLOCK_ADJUST): only slower</text>
+</svg>
+<figcaption>A clock 30 ms ahead: a step moves time back, a smooth correction only slows it down for a while.</figcaption>
+</figure>
+
+The kernel computes real time from the point where it last changed. It
+adds the elapsed monotonic time and two corrections:
+
+- **frequency**: a permanent correction of the crystal rate (a computer
+  clock is permanently fast or slow, typically under 100 ppm),
+- **slew**: a temporary speed-up or slow-down (at most 500 ppm) until the
+  given offset is made up. Then it ends by itself.
+
+The rate of real time is thus always 1 ± 1000 ppm, never negative or
+zero. Syscall: [`CLOCK_ADJUST`](syscalls.md#clock_adjust), wrapper
+`libos::time::adjust(clock, offset, frequency)`.
+
+```rust
+use libos::time;
+// In timed: the clock is 20 ms ahead, the crystal is 35 ppm fast.
+let st = time::adjust(&clock, Some(-20_000_000), Some(-35_000))?;
+// st.remaining_ns = -20 ms, made up within 40 s.
+```
+
+## Synchronization over the network (`ntpd`)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ntpd and timed">
+<defs><marker id="tm8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="warn" x="10" y="50" width="150" height="70" rx="6"/><text class="t b" x="85" y="78" text-anchor="middle">NTP servers</text><text class="m" x="85" y="96" text-anchor="middle">UDP 123</text>
+<path class="ln" d="M160 85 L228 85" marker-end="url(#tm8)"/>
+<rect class="box" x="230" y="40" width="200" height="90" rx="6"/><text class="t b" x="330" y="65" text-anchor="middle">ntpd</text><text class="m" x="330" y="84" text-anchor="middle">session: these servers only</text><text class="m" x="330" y="100" text-anchor="middle">filter, median, frequency</text><text class="m" x="330" y="116" text-anchor="middle">no right to the clock</text>
+<path class="ln-acc" d="M430 85 L498 85" marker-end="url(#tm8)"/><text class="m" x="440" y="76">sync</text>
+<rect class="ok" x="500" y="40" width="250" height="90" rx="6"/><text class="t b" x="625" y="65" text-anchor="middle">timed</text><text class="m" x="625" y="84" text-anchor="middle">verifies and limits</text><text class="m" x="625" y="100" text-anchor="middle">CLOCK_ADJUST (SET_CLOCK)</text><text class="m" x="625" y="116" text-anchor="middle">step only on first sync</text>
+</svg>
+<figcaption>A process handling data from the network must not change the clock directly.</figcaption>
+</figure>
+
+**`ntpd`** asks NTP servers and only proposes corrections. Init starts
+it after the network service:
+
+- **A network session** by the manifest `ntpd.manifest.toml` (rights
+  `udp`, `dns`) plus only UDP to the servers from `ntpd.toml`. Nowhere
+  else.
+- **A channel to `timed`** only for `sync` messages (correction
+  proposals).
+- Every round: a batch of measurements from each server (`samples`), the
+  sample with the **smallest delay** (least distorted by queues and an
+  asymmetric path), and the **median** across servers (one bad server
+  does not pull the result).
+- **Frequency:** from the offset between rounds (minus the part of the
+  previous correction the kernel has not made up yet) it estimates the
+  crystal drift. It proposes half of the error so measurement noise does
+  not make the loop oscillate (`netproto::ntp::Discipline`).
+- **The interval** starts at `min_poll` and doubles up to `max_poll` while
+  the clock is in sync (offset under 2 ms).
+
+```toml
+# ntpd.toml (initfs)
+servers = ["pool.ntp.org"]   # name or address[:port]
+min_poll = 64
+max_poll = 1024
+samples = 4
+```
+
+**`timed`** verifies and applies the proposal, because only it has the
+right to the clock:
+
+| Situation | What `timed` does |
+|---|---|
+| first synchronization, offset over 128 ms | step (`CLOCK_SET`): an RTC clock may be minutes off and slewing would take days |
+| otherwise | smooth correction (`CLOCK_ADJUST`), never a step back |
+| after the first synchronization, offset over 60 s | rejects it (`OUT_OF_RANGE`): a clock does not drift that much by itself, it is more likely spoofed |
+| frequency | at most ±500 ppm and one change at most by 100 ppm |
+
+Status: the `status` message on init's channel to `timed`
+(`synced=1 updates=… last_offset_ns=… remaining_ns=… freq_ppb=…
+slew_ppb=…`) and to `ntpd` (`rounds=… offset_ns=… delay_ns=… freq_ppb=…
+poll_s=…`).
+
+⚠️ **NTP is not authenticated** (NTS, RFC 8915, is missing). Whoever
+controls the network can spoof replies and move the time. That can, for
+example, extend the validity of a revoked certificate. The limits in
+`timed` slow the attack down (at most 500 ppm, i.e. 43 s per day) but do
+not stop it. NTS (on top of the finished TLS, see
+[TLS and HTTP](tls-http.md)) is still missing. Until then use servers on
+a trusted network.
+
 ## Time zones
 
 The kernel keeps **UTC only**. The zone is a system setting read by the

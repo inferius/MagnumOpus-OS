@@ -112,9 +112,14 @@ pub const JOB_SET_LIMIT: u64 = 43;
 /// Stav rozpoctu jobu. `(job, out_ptr)`; job potrebuje `READ`, na `out_ptr`
 /// zapise [`crate::job::JobInfo`] (48 B)
 pub const JOB_INFO: u64 = 44;
+/// Plynula korekce realneho casu (Resource s pravem `SET_CLOCK`).
+/// `(resource, offset_ns i64, freq_ppb i64, flags, out_ptr)`; `flags`
+/// z [`crate::time::adjust`], na `out_ptr` (0 = nic) zapise
+/// [`crate::time::AdjustStatus`] po zmene
+pub const CLOCK_ADJUST: u64 = 45;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 45;
+pub const COUNT: u64 = 46;
 
 /// Nejvic bajtu v jednom `RANDOM_GET` / `RANDOM_ADD` (jedno volani = jedna
 /// kopie pres buffer jadra; vic dat = vic volani).

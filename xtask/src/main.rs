@@ -18,6 +18,7 @@ mod highlight;
 mod image;
 mod qemu;
 mod nethelper;
+mod webhelper;
 mod qmp;
 mod symbolize;
 
@@ -169,8 +170,11 @@ fn run_cli() -> Result<()> {
             build_docs()?;
             // Pomocne servery pro testy site bezi, dokud bezi xtask.
             let helper = nethelper::start()?;
+            let web = webhelper::start()?;
+            let config = format!("{}{}", helper.config, web.config);
+            opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
             opts.extra_initfs
-                .push((String::from("net-test"), helper.config.clone().into_bytes()));
+                .push((String::from("net-test-ca.pem"), web.ca_pem.into_bytes()));
             opts.hostfwd = Some(helper.hostfwd.clone());
             *opts.net_helper.borrow_mut() = Some(helper);
             let artifacts = build(&opts)?;
@@ -228,6 +232,10 @@ fn host_tests() -> Result<()> {
             "manifest",
             "--package",
             "netfilter",
+            "--package",
+            "tls",
+            "--package",
+            "httpc",
             "--features",
             "initfs/std,fs/std,netproto/std",
         ])
@@ -316,6 +324,8 @@ const USER_PROGRAMS: &[&str] = &[
     "netd",
     "fwd",
     "netprobe",
+    "ntpd",
+    "fetch",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
@@ -325,6 +335,9 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("fwd.manifest.toml", "user/fwd/fwd.manifest.toml"),
     ("netd.manifest.toml", "user/netd/netd.manifest.toml"),
     ("netprobe.manifest.toml", "user/netprobe/netprobe.manifest.toml"),
+    ("ntpd.manifest.toml", "user/ntpd/ntpd.manifest.toml"),
+    ("ntpd.toml", "user/ntpd/ntpd.toml"),
+    ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
@@ -354,10 +367,17 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
             "-Clink-arg=-T{}",
             workspace_root().join("user").join("user.ld").display()
         );
+        // Kryptografie RustCrypto (libs/tls) jen softwarove: programy bezi
+        // bez SSE/NEON a detekce AES-NI za behu by spustila instrukce SIMD.
         let flags = [
             "-Crelocation-model=static",
             "-Cforce-frame-pointers=yes",
             script.as_str(),
+            "--cfg=aes_force_soft",
+            "--cfg=polyval_force_soft",
+            "--cfg=poly1305_force_soft",
+            "--cfg=chacha20_force_soft",
+            "--cfg=curve25519_dalek_backend=\"serial\"",
         ]
         .join(&separator);
         cmd.env("CARGO_ENCODED_RUSTFLAGS", flags)
@@ -428,6 +448,7 @@ fn build(opts: &Options) -> Result<Artifacts> {
             .map_err(|e| format!("nelze cist {path}: {e}"))?;
         files.push((name.to_string(), data));
     }
+    files.push((String::from("certs.pem"), webhelper::bundle_pem()));
     files.extend(opts.extra_initfs.iter().cloned());
     let refs: Vec<(&str, &[u8])> = files
         .iter()

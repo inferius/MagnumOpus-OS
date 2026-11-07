@@ -6,12 +6,12 @@ První část milníku 6 („síť“). Hotové jsou tyto části:
 - služba sítě **`netd`** se stackem TCP/IP (ARP, IPv4, ICMP, UDP, TCP),
   klientem DHCP a resolverem DNS,
 - protokol **`netproto`** s přístupem přes capability a omezením cílů,
-- klient **NTP**, který přes službu času seřídí hodiny,
+- synchronizace času službou **`ntpd`** (plynulá korekce přes službu času),
 - **firewall**: manifest aplikace, dotazy uživateli, paketový filtr,
   profily sítí, audit a filtr DNS (viz [firewall.md](firewall.md)).
 
-TLS a HTTP přijdou později. Rozhraní na ně je připravené (viz
-[Příprava na TLS a HTTP](#příprava-na-tls-a-http)).
+- **TLS 1.3 a HTTP/1.1, HTTP/2** jako knihovny v programech, úložiště
+  kořenových certifikátů a program `fetch` (viz [TLS a HTTP](tls-http.md)).
 
 | Část | Kde | Co dělá |
 |---|---|---|
@@ -20,7 +20,7 @@ TLS a HTTP přijdou později. Rozhraní na ně je připravené (viz
 | protokol | `libs/netproto` | zprávy, oprávnění, formáty DNS a NTP, klientská knihovna |
 | správce zařízení | `user/devmgr` | najde kartu na PCI, spustí ovladač |
 | firewall | `user/fwd`, `libs/netfilter`, `libs/manifest` | konfigurace, dotazy uživateli, filtr paketů, manifesty |
-| init | `user/init/src/system.rs`, `apps.rs` | spustí `netd` a `fwd` v jobech podle manifestů, drží kořenovou relaci, NTP |
+| init | `user/init/src/system.rs`, `apps.rs` | spustí `netd` a `fwd` v jobech podle manifestů, drží kořenovou relaci, spustí `ntpd` |
 | testy | `user/init/src/tests/net.rs`, `xtask/src/nethelper.rs` | testy v QEMU přes slirp proti serverům hostitele |
 
 ## Architektura
@@ -422,49 +422,31 @@ TODO: mezipaměť podle TTL, DoT/DoH (až s TLS).
 (pole „originate“). Server bez synchronizace (stratum 0, leap 3) vrátí
 `BAD_STATE`.
 
-Hodiny smí nastavit **jen služba času** `timed` (právo `SET_CLOCK`, viz
-[cas.md](cas.md)). Proto `init` čas jen zjistí a pošle ho službě času
-zprávou `set`:
+Hodiny podle sítě seřizuje služba **`ntpd`**: měří posun proti
+serverům, filtruje měření a navrhuje korekce službě času `timed`, která
+jako jediná smí hodiny měnit (právo `SET_CLOCK`). Po první synchronizaci se
+čas jen plynule dorovnává (`CLOCK_ADJUST`), nikdy neskočí zpět. Podrobně
+v [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd).
 
-<figure class="diagram">
-<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Serizeni hodin podle NTP">
-<defs><marker id="sa3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="50" width="150" height="60" rx="6"/><text class="t b" x="85" y="75" text-anchor="middle">server NTP</text><text class="m" x="85" y="93" text-anchor="middle">UDP 123</text>
-<path class="ln" d="M238 80 L162 80" marker-end="url(#sa3)"/>
-<text class="m" x="170" y="70">t1 → t2, t3 → t4</text>
-<rect class="box" x="240" y="50" width="120" height="60" rx="6"/><text class="t b" x="300" y="75" text-anchor="middle">netd</text><text class="m" x="300" y="93" text-anchor="middle">socket UDP</text>
-<path class="ln" d="M438 80 L362 80" marker-end="url(#sa3)"/>
-<rect class="acc" x="440" y="50" width="130" height="60" rx="6"/><text class="t b" x="505" y="75" text-anchor="middle">init</text><text class="m" x="505" y="93" text-anchor="middle">ntp_query</text>
-<path class="ln-acc" d="M570 80 L618 80" marker-end="url(#sa3)"/>
-<rect class="ok" x="620" y="50" width="130" height="60" rx="6"/><text class="t b" x="685" y="75" text-anchor="middle">timed</text><text class="m" x="685" y="93" text-anchor="middle">CLOCK_SET</text>
-<text class="m" x="10" y="150">posun = ((t2 - t1) + (t3 - t4)) / 2; nový čas = t4 + posun. Do RTC se zatím nezapisuje.</text>
-</svg>
-<figcaption>Síť čas jen zjistí; nastavit ho smí jen služba času.</figcaption>
-</figure>
+> **Změna proti první verzi:** init se jednou zeptal serveru NTP a čas
+> nastavil skokem (`sync_time_ntp`, jen v testech). **Proč:** skok zpět
+> rozbije programy, které čas porovnávají (certifikáty, soubory, logy),
+> a jedno měření bez filtru je snadno podvrhnutelné. `ntpd` běží trvale,
+> s relací sítě jen na nakonfigurované servery.
 
-```rust
-// init (user/init/src/system.rs)
-let offset_ns = system::sync_time_ntp(&net_root, &time_service, server)?;
-```
+## TLS a HTTP
 
-Zatím se hodiny seřídí jednou a jen v testech proti serveru hostitele.
-TODO: server z konfigurace nebo z DHCP (volba 42), periodické seřizování
-a plynulé dorovnání místo skoku.
+TLS 1.3 a klient HTTP/1.1 a HTTP/2 jsou knihovny v procesu programu
+(`libs/tls`, `libs/httpc`) nad obecným proudem `netproto::io::{Read,
+Write}`, takže fungují nad holým TCP i nad TLS stejně. Kořenové
+certifikáty jsou v systémovém úložišti `/system/config/certs`, které
+program dostane jako relaci FS jen pro čtení. Vše popisuje kapitola
+[TLS a HTTP](tls-http.md).
 
-## Příprava na TLS a HTTP
-
-- **Proudy:** `netproto::io::{Read, Write}` jsou obecné rozhraní pro proud
-  bajtů a `TcpStream` je implementuje. TLS bude obal
-  `TlsStream<S: Read + Write>`, který implementuje totéž. Klient HTTP bude
-  pracovat s jakýmkoli `Read + Write`, nad holým TCP i nad TLS stejně.
-- **TLS poběží v procesu programu** (knihovna), ne ve službě sítě. Klíče
-  relací tak zůstanou v programu, který je potřebuje. Úložiště důvěryhodných
-  certifikátů bude systémová služba nebo soubor s právem jen pro čtení.
-- **Oprávnění podle jmen:** pravidla `Target::Host` už teď počítají
-  s aplikacemi, které smí jen na své API (`*.example.com:443`). TLS
-  k tomu přidá ověření, že server jméno opravdu vlastní.
-- **Náhodnost:** klíče TLS vezme z jádra přes
-  `libos::random::fill_seeded` (`REQUIRE_SEEDED`).
+> **Změna proti první verzi:** úložiště certifikátů mělo být služba nebo
+> soubor; je to adresář na FS (sada Mozilla + vlastní CA + `distrust.txt`).
+> **Proč:** správce přidá firemní CA souborem, aktualizace systému jeho
+> soubory nepřepíše a práva hlídá FS jako u ostatních dat.
 
 ## Testy
 
@@ -502,7 +484,7 @@ překládá adresu 10.0.2.2 na 127.0.0.1 hostitele.
 | UDP velký datagram | 60 000 B tam a zpět (fragmentace a skládání IPv4) |
 | oprávnění | chybějící práva, cíle mimo omezení, předání spojení jinému kanálu |
 | jméno hostitele | pravidlo `*.magnumopus` platí po systémovém překladu, ne po překladu vlastním serverem |
-| NTP | dotaz na server hostitele, nastavení přes `timed`, zdroj času `SET` |
+| NTP | `ntpd` proti serveru hostitele (sada „synchronizace casu“, viz [cas.md](cas.md#synchronizace-podle-sítě-ntpd)) |
 
 DNS přes 10.0.2.3 (slirp předává dotazy DNS hostitele) se netestuje, protože
 by test potřeboval internet. Bez pomocných serverů (`cargo xtask run`)
@@ -522,5 +504,5 @@ Formáty a oprávnění testuje i hostitel: `cargo test -p netproto
 - **IPv6:** SLAAC, ICMPv6, AAAA už resolver umí. Protokol je připravený
   (adresy `IpAddr`).
 - **Sdílená paměť pro data** místo kopírování zprávami (jako u disku).
-- **Víc karet**, statická konfigurace, mezipaměť DNS, NTP periodicky.
-- **TLS 1.3 a klient HTTP** jako knihovny nad `Read + Write`.
+- **Víc karet**, statická konfigurace, mezipaměť DNS, servery NTP z DHCP
+  (volba 42).

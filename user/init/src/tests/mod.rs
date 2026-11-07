@@ -4,6 +4,7 @@
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
 mod basic;
+mod clock_sync;
 mod drivers;
 mod events;
 mod firewall;
@@ -19,6 +20,7 @@ mod shell;
 mod supervisor;
 mod time;
 mod usb;
+mod web;
 
 use alloc::string::String;
 
@@ -40,8 +42,10 @@ const SUITES: &[(&str, &[Test])] = &[
     ("usb", usb::TESTS),
     ("historie FS", fs_hist::TESTS),
     ("cas", time::TESTS),
+    ("synchronizace casu", clock_sync::TESTS),
     ("firewall", firewall::TESTS),
     ("sit", net::TESTS),
+    ("TLS a HTTP", web::TESTS),
     ("supervisor", supervisor::TESTS),
     ("shell", shell::TESTS),
 ];

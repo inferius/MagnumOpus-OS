@@ -906,9 +906,10 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
-   TCP/IP, DHCP, DNS, NTP, přístup přes capability a firewall hotové - viz
-   [sit.md](sit.md) a [firewall.md](firewall.md); zbývá TLS 1.3, HTTP
-   klient, IPv6, vlastní stack), joby s rozpočty prostředků (hotovo)
+   TCP/IP, DHCP, DNS, synchronizace času `ntpd`, přístup přes capability,
+   firewall, TLS 1.3 a klient HTTP/1.1 a HTTP/2 hotové - viz
+   [sit.md](sit.md), [firewall.md](firewall.md) a [tls-http.md](tls-http.md);
+   zbývá IPv6, vlastní stack), joby s rozpočty prostředků (hotovo)
    - **6a Vstup (hotovo):** služba vstupu, klávesnice a myš (virtio-input;
      PS/2, USB HID), rozložení US a CZ, bezpečná zkratka - viz
      [Vstup](vstup.md)

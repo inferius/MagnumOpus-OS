@@ -41,6 +41,31 @@ pub fn clock_set(a: Args) -> Result<u64> {
     Ok(hw as u64)
 }
 
+/// `CLOCK_ADJUST(resource, offset_ns, freq_ppb, flags, out_ptr)`: plynula
+/// korekce realneho casu (pravo `SET_CLOCK`). Meze v `abi::time::adjust`.
+pub fn clock_adjust(a: Args) -> Result<u64> {
+    use abi::time::adjust;
+    let p = current_process();
+    p.handles()
+        .get_as::<Resource>(arg_handle(a[0])?, Rights::SET_CLOCK)?;
+    let (offset, freq, flags) = (a[1] as i64, a[2] as i64, a[3]);
+    if flags & !adjust::ALL != 0
+        || (flags & adjust::OFFSET != 0 && offset.unsigned_abs() > adjust::MAX_OFFSET_NS as u64)
+        || (flags & adjust::FREQUENCY != 0 && freq.unsigned_abs() > adjust::MAX_FREQ_PPB as u64)
+    {
+        return Err(Error::InvalidArgs);
+    }
+    let status = crate::clock::adjust(
+        (flags & adjust::OFFSET != 0).then_some(offset),
+        (flags & adjust::FREQUENCY != 0).then_some(freq),
+        format_args!("[{} {}]", p.name, p.id),
+    )?;
+    if a[4] != 0 {
+        user::write_bytes(&p, a[4], &status.encode())?;
+    }
+    Ok(0)
+}
+
 fn insert(p: &Process, object: Arc<dyn KernelObject>) -> Result<u64> {
     let rights = object.default_rights();
     Ok(p.handles().insert(object, rights)?.0 as u64)

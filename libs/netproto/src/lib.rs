@@ -37,7 +37,6 @@ pub mod policy;
 
 #[cfg(feature = "client")]
 mod client;
-#[cfg(feature = "client")]
 pub mod io;
 
 #[cfg(test)]

@@ -140,6 +140,63 @@ pub mod set_flags {
     pub const ALL: u64 = WRITE_HARDWARE;
 }
 
+/// Plynula korekce realneho casu (`CLOCK_ADJUST`).
+///
+/// Realny cas bezi rychlosti `1 + (frekvence + slew) / 10^9` vuci
+/// monotonnim hodinam:
+/// - **frekvence** = trvala oprava rychlosti krystalu (hodiny trvale
+///   predbihaji nebo se zpozduji),
+/// - **slew** = docasne zrychleni nebo zpomaleni, dokud se nedorovna
+///   zadany posun; pak skonci samo.
+///
+/// Obe slozky jsou omezene, takze realny cas nikdy nejde pozpatku ani se
+/// nezastavi (na rozdil od `CLOCK_SET`, ktery skoci).
+pub mod adjust {
+    /// Zacit dorovnavat posun `offset_ns` (nahradi zbytek predchoziho).
+    pub const OFFSET: u64 = 1;
+    /// Nastavit trvalou opravu frekvence `freq_ppb`.
+    pub const FREQUENCY: u64 = 2;
+    pub const ALL: u64 = OFFSET | FREQUENCY;
+    /// Nejvetsi rychlost dorovnavani: 500 ppm (0,5 ms za sekundu; jako
+    /// `adjtime` v Unixu). Posun 1 s se dorovna za 2000 s.
+    pub const MAX_SLEW_PPB: i64 = 500_000;
+    /// Nejvetsi trvala oprava frekvence: 500 ppm (bezny krystal je pod
+    /// 100 ppm; vic znamena vadne hodiny nebo chybne mereni).
+    pub const MAX_FREQ_PPB: i64 = 500_000;
+    /// Nejvetsi posun pro dorovnani: 1 hodina (vetsi = `CLOCK_SET`).
+    pub const MAX_OFFSET_NS: i64 = 3_600_000_000_000;
+}
+
+/// Stav plynule korekce (vystup `CLOCK_ADJUST`, 24 B LE: zbyva dorovnat
+/// ns i64, frekvence ppb i64, aktualni slew ppb i64).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AdjustStatus {
+    pub remaining_ns: i64,
+    pub freq_ppb: i64,
+    pub slew_ppb: i64,
+}
+
+impl AdjustStatus {
+    pub const SIZE: usize = 24;
+
+    pub fn encode(&self) -> [u8; Self::SIZE] {
+        let mut b = [0u8; Self::SIZE];
+        b[0..8].copy_from_slice(&self.remaining_ns.to_le_bytes());
+        b[8..16].copy_from_slice(&self.freq_ppb.to_le_bytes());
+        b[16..24].copy_from_slice(&self.slew_ppb.to_le_bytes());
+        b
+    }
+
+    pub fn decode(b: &[u8; Self::SIZE]) -> Self {
+        let v = |i: usize| i64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+        Self {
+            remaining_ns: v(0),
+            freq_ppb: v(8),
+            slew_ppb: v(16),
+        }
+    }
+}
+
 /// Nejvetsi posun casoveho pasma od UTC (absolutne): 18 hodin. Mez pro
 /// `SetRequest::rtc_offset` i pevne posuny v knihovne pasem.
 pub const MAX_ZONE_OFFSET: i32 = 18 * 3600;

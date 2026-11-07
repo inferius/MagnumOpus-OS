@@ -1,0 +1,9 @@
+# Servery NTP (jmeno nebo adresa[:port], vychozi port 123). Init podle nich
+# omezi relaci site ntpd: UDP jen na tyto servery.
+servers = ["pool.ntp.org"]
+# Interval dotazu v sekundach: zacina na min_poll, pri srovnanych hodinach
+# se zdvojnasobuje az na max_poll.
+min_poll = 64
+max_poll = 1024
+# Mereni v jedne davce (pouzije se to s nejmensim zpozdenim).
+samples = 4

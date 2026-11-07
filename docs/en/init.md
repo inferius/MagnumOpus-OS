@@ -28,13 +28,16 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 2. `devmgr`: finds devices and starts drivers. It reports disks (`block`)
    and input devices (`input`), and then `done` once the USB devices
    present at boot are ready too,
-3. `fsd` on the disk with the file system,
+3. `fsd` on the disk with the file system; init prepares the root
+   certificate store `/system/config/certs` (see
+   [TLS and HTTP](tls-http.md#root-certificate-store)),
 4. `inputd`: init hands it the input devices, its own focus channel and the
    `secure` channel, and sends `settled` (devices attached now are
    trusted),
 5. `netd` on the first network card and `fwd` (firewall, configuration on
    the FS), both in jobs by their manifests (see [Network](network.md),
-   [Firewall](firewall.md)),
+   [Firewall](firewall.md)), then `ntpd` (time synchronization, see
+   [Real time](time.md#synchronization-over-the-network-ntpd)),
 6. all these processes are handed to the supervisor to watch.
 
 ## The supervisor

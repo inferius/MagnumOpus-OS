@@ -1,0 +1,14 @@
+# Klient NTP. Cile site urci init podle seznamu serveru v ntpd.toml
+# (jen UDP na ty servery); manifest dava jen prava.
+[app]
+id = "org.magnumopus.ntpd"
+name = "Synchronizace casu"
+
+[limits]
+memory = "8M"
+kernel_memory = "2M"
+
+[network]
+rights = ["udp", "dns"]
+sockets = 8
+buffers = "1M"

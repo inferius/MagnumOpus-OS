@@ -1,0 +1,18 @@
+[package]
+name = "fetch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "fetch"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+netproto = { path = "../../libs/netproto", features = ["client"] }
+fsproto = { path = "../../libs/fsproto" }
+tls = { path = "../../libs/tls", features = ["libos"] }
+httpc = { path = "../../libs/httpc" }

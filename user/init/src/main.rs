@@ -1,7 +1,8 @@
 //! init: prvni proces v userspace.
 //!
 //! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
-//! souboroveho systemu, sluzbu vstupu a sluzbu site s firewallem. Pak bezi
+//! souboroveho systemu (s ulozistem korenovych certifikatu), sluzbu vstupu
+//! a sluzbu site s firewallem a synchronizaci casu. Pak bezi
 //! jako supervisor (`supervisor.rs`: zarizeni pripojena za behu, restart
 //! spadlych sluzeb). V testovacim behu (priznak `TEST_RUN` od jadra) misto
 //! toho spusti testy userspace (`tests/`) a skonci s jejich vysledkem.
@@ -13,7 +14,9 @@
 extern crate alloc;
 
 mod apps;
+mod certs;
 mod input;
+mod ntp;
 mod supervisor;
 mod system;
 mod tests;
@@ -36,6 +39,9 @@ fn main(startup: Startup) -> i64 {
         Ok(mut devices) => {
             if let Err(e) = system::start_fs(&startup, &mut devices) {
                 println!("init: souborovy system nelze spustit: {e}");
+            } else if let Err(e) = certs::seed(&startup, &devices) {
+                // Bez uloziste se spojeni TLS nenavazou (zadna duveryhodna CA).
+                println!("init: uloziste certifikatu nelze pripravit: {e}");
             }
             match input::start(&startup, core::mem::take(&mut devices.inputs)) {
                 Ok(i) => devices.input = Some(i),
@@ -57,7 +63,14 @@ fn main(startup: Startup) -> i64 {
                     if let Some((p, _)) = &n.fwd {
                         sup.watch("fwd", p, None);
                     }
-                    system::NET.call_once(|| n);
+                    let n = system::NET.call_once(|| n);
+                    match ntp::start(&startup, n) {
+                        Ok(t) => {
+                            sup.watch("ntpd", &t.process, None);
+                            system::NTP.call_once(|| t);
+                        }
+                        Err(e) => println!("init: synchronizaci casu nelze spustit: {e}"),
+                    }
                 }
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
             }

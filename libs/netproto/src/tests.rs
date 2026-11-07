@@ -597,3 +597,37 @@ fn timeout_conversion() {
     assert_eq!(crate::timeout_ms(Some(Duration::from_secs(2))), 2000);
     let _: Vec<u8> = Vec::new();
 }
+
+#[test]
+fn ntp_filter_and_discipline() {
+    use crate::ntp::{Discipline, Sample, best_sample, combine};
+    let s = [
+        Sample { offset_ns: 40, delay_ns: 900 },
+        Sample { offset_ns: 10, delay_ns: 200 },
+        Sample { offset_ns: 70, delay_ns: 500 },
+    ];
+    assert_eq!(best_sample(&s).unwrap().offset_ns, 10, "nejmensi zpozdeni");
+    assert_eq!(combine(&mut [5, -100, 7]), Some(5), "median");
+    assert_eq!(combine(&mut [1, 3]), Some(2));
+    assert_eq!(combine(&mut []), None);
+
+    // Krystal predbiha o 50 ppm: kazdych 64 s se posun zmeni o -3,2 ms.
+    const S: u64 = 1_000_000_000;
+    let mut d = Discipline::new(16, 1024);
+    assert_eq!(d.update(0, 0), None, "prvni mereni = zadny odhad");
+    let mut t = 0;
+    for _ in 0..12 {
+        t += 64 * S;
+        // Za 64 s (ppb * s = ns) se rozejdou o zbytek po dosavadni oprave
+        // frekvence; predchozi maly posun jadro stihlo dorovnat cely.
+        let offset = -(64 * (50_000 + d.freq_ppb as i128));
+        d.update(t, offset);
+    }
+    assert!((d.freq_ppb + 50_000).abs() < 100, "frekvence {} ppb", d.freq_ppb);
+    // Srovnane hodiny prodlouzi interval, velky posun ho vrati.
+    let mut p = Discipline::new(16, 1024);
+    p.update(0, 1_000);
+    assert_eq!(p.poll_secs, 32);
+    p.update(100 * S, 50_000_000);
+    assert_eq!(p.poll_secs, 16);
+}

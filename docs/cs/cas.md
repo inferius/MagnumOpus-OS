@@ -139,6 +139,102 @@ i do CMOS RTC, aby platil po restartu:
 - Když je RTC v místním čase a běží zároveň Windows, zapisujte do RTC jen
   místní čas (`rtc = local`). Zápis UTC by Windows posunul o pásmo.
 
+## Plynulá korekce (`CLOCK_ADJUST`)
+
+Skok hodin zpět rozbije pořadí: soubor uložený později má starší čas,
+logy jdou mimo pořadí, certifikáty TLS se můžou na chvíli jevit jako
+neplatné. Proto se za běhu hodiny jen **plynule dolaďují**.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plynula korekce casu">
+<defs><marker id="tm7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<path class="ln" d="M60 190 L740 190" marker-end="url(#tm7)"/><text class="m" x="680" y="210">monotonní čas</text>
+<path class="ln" d="M60 190 L60 20" marker-end="url(#tm7)"/><text class="m" x="66" y="30">reálný čas</text>
+<path class="ln" d="M60 170 L720 40"/><text class="m" x="600" y="80">skutečný čas</text>
+<path class="ln-acc" d="M60 140 L300 92 L300 123 L720 40"/>
+<path class="ln-acc" d="M300 92 L560 72"/>
+<text class="m" x="310" y="145">skok (CLOCK_SET): čas jde zpět</text>
+<text class="m" x="250" y="60">plynule (CLOCK_ADJUST): jen pomaleji</text>
+</svg>
+<figcaption>Hodiny o 30 ms napřed: skok vrátí čas zpět, plynulá korekce jen na chvíli zpomalí.</figcaption>
+</figure>
+
+Jádro počítá reálný čas od bodu, kde se naposledy změnil. Přičte k tomu
+uplynulý monotónní čas a dvě opravy:
+
+- **frekvence**: trvalá oprava rychlosti krystalu (hodiny počítače
+  trvale předbíhají nebo se zpožďují, typicky do 100 ppm),
+- **slew**: dočasné zrychlení nebo zpomalení (nejvýš 500 ppm), dokud se
+  nedorovná zadaný posun. Pak samo skončí.
+
+Rychlost reálného času je tak vždy 1 ± 1000 ppm, nikdy záporná ani nulová.
+Syscall: [`CLOCK_ADJUST`](syscally.md#clock_adjust), obal
+`libos::time::adjust(clock, posun, frekvence)`.
+
+```rust
+use libos::time;
+// V timed: hodiny jdou o 20 ms napřed, krystal předbíhá o 35 ppm.
+let st = time::adjust(&clock, Some(-20_000_000), Some(-35_000))?;
+// st.remaining_ns = -20 ms, za 40 s je dorovnáno.
+```
+
+## Synchronizace podle sítě (`ntpd`)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ntpd a timed">
+<defs><marker id="tm8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="warn" x="10" y="50" width="150" height="70" rx="6"/><text class="t b" x="85" y="78" text-anchor="middle">servery NTP</text><text class="m" x="85" y="96" text-anchor="middle">UDP 123</text>
+<path class="ln" d="M160 85 L228 85" marker-end="url(#tm8)"/>
+<rect class="box" x="230" y="40" width="200" height="90" rx="6"/><text class="t b" x="330" y="65" text-anchor="middle">ntpd</text><text class="m" x="330" y="84" text-anchor="middle">relace: jen tyto servery</text><text class="m" x="330" y="100" text-anchor="middle">filtr, median, frekvence</text><text class="m" x="330" y="116" text-anchor="middle">bez práva k hodinám</text>
+<path class="ln-acc" d="M430 85 L498 85" marker-end="url(#tm8)"/><text class="m" x="440" y="76">sync</text>
+<rect class="ok" x="500" y="40" width="250" height="90" rx="6"/><text class="t b" x="625" y="65" text-anchor="middle">timed</text><text class="m" x="625" y="84" text-anchor="middle">ověří a omezí návrh</text><text class="m" x="625" y="100" text-anchor="middle">CLOCK_ADJUST (SET_CLOCK)</text><text class="m" x="625" y="116" text-anchor="middle">skok jen při první synchronizaci</text>
+</svg>
+<figcaption>Proces, který zpracovává data ze sítě, hodiny přímo měnit nesmí.</figcaption>
+</figure>
+
+**`ntpd`** se ptá serverů NTP a jen navrhuje korekce. Init ho spustí po
+službě sítě:
+
+- **Relace sítě** podle manifestu `ntpd.manifest.toml` (práva `udp`,
+  `dns`) a navíc jen UDP na servery z `ntpd.toml`. Nikam jinam nesmí.
+- **Kanál k `timed`** dostane jen pro zprávy `sync` (návrh korekce).
+- Každé kolo: z každého serveru dávka měření (`samples`), z ní vzorek
+  s **nejmenším zpožděním** (nejméně ho zkreslí fronty a nesymetrická
+  cesta), ze serverů **medián** (jeden špatný server výsledek nestáhne).
+- **Frekvence:** z posunu mezi koly (minus část předchozí korekce, kterou
+  jádro ještě nestihlo dorovnat) odhadne drift krystalu. Navrhne polovinu
+  chyby, aby šum měření nerozkmital smyčku (`netproto::ntp::Discipline`).
+- **Interval** začíná na `min_poll` a při srovnaných hodinách (posun pod
+  2 ms) se zdvojnásobuje až na `max_poll`.
+
+```toml
+# ntpd.toml (initfs)
+servers = ["pool.ntp.org"]   # jméno nebo adresa[:port]
+min_poll = 64
+max_poll = 1024
+samples = 4
+```
+
+**`timed`** návrh ověří a provede, protože jen on má právo k hodinám:
+
+| Situace | Co `timed` udělá |
+|---|---|
+| první synchronizace, posun nad 128 ms | skok (`CLOCK_SET`): hodiny z RTC můžou být o minuty vedle a dorovnání by trvalo dny |
+| jinak | plynulé dorovnání (`CLOCK_ADJUST`), nikdy skok zpět |
+| po první synchronizaci posun nad 60 s | odmítne (`OUT_OF_RANGE`), hodiny se tolik samy nerozejdou, spíš jde o podvržení |
+| frekvence | nejvýš ±500 ppm a jedna změna nejvýš o 100 ppm |
+
+Stav: zpráva `status` na kanálu initu k `timed` (`synced=1 updates=…
+last_offset_ns=… remaining_ns=… freq_ppb=… slew_ppb=…`) a k `ntpd`
+(`rounds=… offset_ns=… delay_ns=… freq_ppb=… poll_s=…`).
+
+⚠️ **NTP není ověřené** (chybí NTS, RFC 8915). Kdo ovládá síť, může
+odpovědi podvrhnout a čas posunout. Tím může například prodloužit
+platnost odvolaného certifikátu. Omezení v `timed` útok zpomalí
+(nejvýš 500 ppm, tedy 43 s za den), ale nezastaví. NTS (nad hotovým TLS,
+viz [TLS a HTTP](tls-http.md)) zatím chybí. Do té doby používat servery
+v důvěryhodné síti.
+
 ## Časová pásma
 
 Jádro drží **jen UTC**. Pásmo je nastavení systému, které čte služba času

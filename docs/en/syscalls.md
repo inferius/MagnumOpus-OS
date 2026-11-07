@@ -101,6 +101,27 @@ change; they come from `CLOCK_MONOTONIC`. Wrapper: `libos::time::set`,
 `WRONG_TYPE`, `BAD_HANDLE`, `INVALID_ARGS`, `BAD_ADDRESS`. Details:
 [Setting the clock](time.md#setting-the-clock-clock_set).
 
+### `CLOCK_ADJUST`
+
+`(resource, offset_ns i64, freq_ppb i64, flags, out_ptr) -> 0`. Smooth
+correction of real time without a step. Requires a Resource with the
+`SET_CLOCK` right. Flags (`abi::time::adjust`):
+
+- `OFFSET` (1): start slewing away the offset `offset_ns`, replacing the
+  rest of the previous one. The rate is 500 ppm (`MAX_SLEW_PPB`), so an
+  offset of 1 s takes 2000 s. At most 1 hour (`MAX_OFFSET_NS`).
+- `FREQUENCY` (2): a permanent frequency correction `freq_ppb`, at most
+  ±500 ppm (`MAX_FREQ_PPB`).
+- no flags: status only.
+
+At `out_ptr` (0 = nothing) it writes `abi::time::AdjustStatus` (24 B):
+remaining offset (ns), frequency (ppb), current slew rate (ppb). Real time
+never goes backwards. `CLOCK_SET` cancels the slew and keeps the
+frequency. Wrapper: `libos::time::adjust`. Errors: `ACCESS_DENIED` (no
+`SET_CLOCK`), `INVALID_ARGS` (limits, unknown flags), `BAD_STATE` (real
+time is not known), `WRONG_TYPE`, `BAD_HANDLE`, `BAD_ADDRESS`. Details:
+[Smooth correction](time.md#smooth-correction-clock_adjust).
+
 ## Handles
 
 ### `HANDLE_CLOSE`
