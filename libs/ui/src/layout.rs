@@ -16,7 +16,7 @@ use crate::theme;
 
 /// Prvek po rozvrzeni.
 pub enum ElemKind<M> {
-    Label { text: String, heading: bool },
+    Label { text: String, heading: bool, warn: bool },
     Button { text: String, on_click: Option<M> },
     TextInput { value: String, placeholder: String, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
@@ -56,7 +56,10 @@ fn px(heading: bool) -> f32 {
 fn measure<M>(n: &Node<M>, t: &Text) -> (u32, u32) {
     let (lh, _) = t.line(theme::PX);
     let (w, h) = match &n.kind {
-        Kind::Label { text, heading } => (t.width(text, px(*heading)), t.line(px(*heading)).0),
+        Kind::Label { text, heading, warn } => {
+            let pad = if *warn { 16 } else { 0 };
+            (t.width(text, px(*heading)) + pad, t.line(px(*heading)).0 + pad / 2)
+        }
         Kind::Button { text, .. } => ((t.width(text, theme::PX) + 28).max(80), lh + 14),
         Kind::TextInput { .. } => (220, lh + 14),
         Kind::Checkbox { text, .. } => (18 + 8 + t.width(text, theme::PX), lh.max(18) + 4),
@@ -90,8 +93,8 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Text, out: &mu
         out.len()
     };
     match n.kind {
-        Kind::Label { text, heading } => {
-            push(out, ElemKind::Label { text, heading }, r);
+        Kind::Label { text, heading, warn } => {
+            push(out, ElemKind::Label { text, heading, warn }, r);
         }
         Kind::Button { text, on_click } => {
             push(out, ElemKind::Button { text, on_click }, r);

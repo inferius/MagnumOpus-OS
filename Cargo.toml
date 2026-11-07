@@ -19,6 +19,8 @@ members = [
     "libs/blockproto",
     "libs/inputproto",
     "libs/guiproto",
+    "libs/taskproto",
+    "libs/taskview",
     "libs/gfx",
     "libs/font",
     "libs/vgpu",
@@ -65,6 +67,7 @@ members = [
     "user/compd",
     "user/gui-demo",
     "user/gui-term",
+    "user/gui-tasks",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace

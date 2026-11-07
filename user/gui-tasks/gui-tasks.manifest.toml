@@ -1,0 +1,8 @@
+# Spravce uloh (milnik 6c): seznam uloh ze sluzby taskd, akce zrusit,
+# pozastavit, pokracovat. Dokud taskd neni v systemu, ukazuje testovaci data.
+[app]
+id = "org.magnumopus.tasks"
+name = "Správce úloh"
+
+[limits]
+memory = "64M"

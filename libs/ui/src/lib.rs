@@ -55,6 +55,9 @@ pub mod theme {
     pub const INPUT: u32 = rgb(0x14, 0x18, 0x1E);
     pub const BORDER: u32 = rgb(0x4A, 0x52, 0x60);
     pub const SELECTED: u32 = rgb(0x2F, 0x5E, 0x96);
+    /// Vyrazne oznaceni (uloha agenta AI, vystraha).
+    pub const WARN: u32 = rgb(0xE8, 0xA8, 0x3A);
+    pub const WARN_TEXT: u32 = rgb(0x20, 0x16, 0x00);
 }
 
 /// Id vrstev, ktere knihovna pouziva: koren okna a pro posouvany obsah
@@ -85,6 +88,13 @@ pub trait App {
     fn action(&mut self, id: &str, args: &[Arg]) -> Result<Option<Value>, String> {
         let _ = (id, args);
         Err(String::from("akce neni implementovana"))
+    }
+
+    /// Zprava z dalsiho kanalu aplikace (napr. sluzba uloh), viz
+    /// `client::run_with`. Vraci, zda se zmenil stav (prekreslit).
+    fn external(&mut self, data: &[u8]) -> bool {
+        let _ = data;
+        false
     }
 }
 

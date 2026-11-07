@@ -848,6 +848,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui-tasks"
+version = "0.1.0"
+dependencies = [
+ "guiproto",
+ "libos",
+ "taskproto",
+ "taskview",
+ "ui",
+]
+
+[[package]]
 name = "gui-term"
 version = "0.1.0"
 dependencies = [
@@ -2017,6 +2028,24 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "taskproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
+]
+
+[[package]]
+name = "taskview"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "taskproto",
+ "ui",
 ]
 
 [[package]]

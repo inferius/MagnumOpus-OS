@@ -376,6 +376,16 @@ impl Comp {
                 && let Some((g, _)) = self.panel_items().into_iter().find(|(_, r)| r.contains(px, py))
             {
                 self.panel_click(g);
+            } else if button == Button::Left && self.tasks_icon().is_some_and(|r| r.contains(px, py)) {
+                // Spravce uloh do popredi (obnovit, kdyz je minimalizovany).
+                let g = self.windows.iter().find(|(_, w)| self.clients.get(&w.client).is_some_and(|c| c.info.id == crate::render::TASKS_APP)).map(|(&g, _)| g);
+                if let Some(g) = g {
+                    if let Some(w) = self.windows.get_mut(&g) {
+                        w.minimized = false;
+                    }
+                    self.damage_window(g);
+                    self.set_focus(Some(g));
+                }
             }
             return;
         }

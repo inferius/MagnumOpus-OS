@@ -411,6 +411,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `actions <volající> [automat]` | - | `ok` + kanál volání akcí; `automat` = kanál agenta, každé volání se potvrzuje dialogem (příznak ve zprávě volající neobejde) |
 | `inspect` | - | `ok` + kanál inspekce |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
+| `tasks <běží> <agent>` | - | `ok` (ikona úloh v panelu) |
 
 **Inspekce** (`inspect`, pro testy, později čtečku obrazovky a lupu):
 seznam oken, strom přístupnosti okna v souřadnicích obrazovky, akce přes
@@ -597,6 +598,41 @@ přístupnosti `set-value` nebo akcí `terminal.run` (vyžaduje potvrzení).
 Napojení na službu relací (`termd`, protokol `term::proto`) dělá vlákno
 terminálu: místo místního řádkového editoru pošle `Run` a vykreslí bloky
 výstupu do stejné mřížky.
+
+## Správce úloh
+
+Okno se stejnými daty jako příkaz `tasks` v terminálu (viz [Přehled
+úloh](architektura.md#přehled-úloh-odsouhlaseno)) a ikona „běží N úloh“
+v panelu kompozitoru.
+
+| Část | Kde | Co dělá |
+|---|---|---|
+| protokol | `libs/taskproto` (návrh, odsouhlasuje vlákno shellu, které dělá `taskd`) | seznam úloh, odběr změn se snímkem a pořadovým číslem (navázání po výpadku), akce zrušit, pozastavit, pokračovat, výpis; registrace úloh producenty |
+| model a okno | `libs/taskview` (testy na hostiteli), program `gui-tasks` | seznam (úlohy agenta nahoře), filtr „jen agent“ a „dokončené“, detail s průběhem a spotřebou z jobu, tlačítka akcí |
+| ikona v panelu | `libs/comp` | „Úlohy: N“, oranžově „Úlohy: N (agent M)“, když běží úloha agenta AI; klik dá správce úloh do popředí |
+
+- **Úlohy agenta AI** jsou výrazně označené: štítek „[AGENT AI]“ v seznamu,
+  oranžový štítek „Spustil agent AI (kdo)“ v detailu, počet v záhlaví
+  a oranžová ikona v panelu.
+- **Oprávnění:** tlačítko je aktivní jen tehdy, když akci `taskd`
+  volajícímu povolil (bity `actions` úlohy) a dovoluje ji stav úlohy.
+  Rozhoduje vždy `taskd` (odpověď `ACCESS_DENIED`); systémová úloha bez
+  práva má všechna tlačítka neaktivní a okno to řekne.
+- **Teď:** dokud `taskd` není v systému, okno běží nad testovacími daty
+  (`TestBackend` se chová jako taskd: kontrola práv, změny stavu
+  událostmi) a počet pro ikonu posílá init řídicím příkazem
+  `tasks <běží> <agent>`. Až bude `taskd`, dostane init od něj kanál
+  (`connect`) pro okno a kompozitor (jen čtení).
+
+```text
+Úlohy: běží 4                         [Agent AI: 1 běžících úloh]
+[x] Jen úlohy agenta   [x] Zobrazit dokončené
+[AGENT AI] Refaktorace projektu (klon) - běží 15 %
+Kopírování 3 souborů do /zaloha - běží 40 %
+Scrub svazku data - běží 12 %
+build.sh - čeká: Přepsat výstup? [a/n]
+Stažení aktualizací - hotovo: 3 balíky
+```
 
 ## 3D: Venus a virgl (stav)
 
