@@ -68,6 +68,10 @@ pub enum Error {
     Locked = -26,
     /// Objekt se mezitim zmenil (podminena operace s ocekavanou revizi).
     Conflict = -27,
+    ConnectionRefused = -28,
+    ConnectionReset = -29,
+    Unreachable = -30,
+    AddressInUse = -31,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -99,6 +103,10 @@ pub const ALL: &[Error] = &[
     Error::ReadOnly,
     Error::Locked,
     Error::Conflict,
+    Error::ConnectionRefused,
+    Error::ConnectionReset,
+    Error::Unreachable,
+    Error::AddressInUse,
 ];
 
 impl Error {
@@ -142,6 +150,10 @@ impl Error {
             Self::ReadOnly => "READ_ONLY",
             Self::Locked => "LOCKED",
             Self::Conflict => "CONFLICT",
+            Self::ConnectionRefused => "CONNECTION_REFUSED",
+            Self::ConnectionReset => "CONNECTION_RESET",
+            Self::Unreachable => "UNREACHABLE",
+            Self::AddressInUse => "ADDRESS_IN_USE",
         }
     }
 
@@ -175,6 +187,10 @@ impl Error {
             Self::ReadOnly => "jen pro cteni",
             Self::Locked => "objekt je otevreny nebo zamceny jinym handlem",
             Self::Conflict => "objekt se mezitim zmenil",
+            Self::ConnectionRefused => "druha strana spojeni odmitla",
+            Self::ConnectionReset => "spojeni bylo preruseno druhou stranou",
+            Self::Unreachable => "cil neni dosazitelny (sit nenastavena, chybi cesta)",
+            Self::AddressInUse => "adresa nebo port uz se pouziva",
         }
     }
 }

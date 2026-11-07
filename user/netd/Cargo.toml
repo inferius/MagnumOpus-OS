@@ -1,0 +1,16 @@
+[package]
+name = "netd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "netd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+netproto = { path = "../../libs/netproto" }
+smoltcp = { version = "0.14", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp", "socket-icmp", "socket-dhcpv4"] }

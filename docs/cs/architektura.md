@@ -830,7 +830,8 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
-   TCP/IP, DNS, TLS 1.3, HTTP klient - služby, přístup přes capability)
+   TCP/IP, DHCP, DNS, NTP a přístup přes capability hotové - viz
+   [sit.md](sit.md); zbývá TLS 1.3, HTTP klient, IPv6, vlastní stack)
    - **6a Vstup:** služba vstupu, klávesnice a myš (virtio-input, PS/2,
      později USB HID), rozložení, bezpečná zkratka - viz [Vstup](#vstup-klávesnice-a-myš-plán)
    - **6b Shell a chytrý terminál:** konzole, strukturovaný výstup, undo
@@ -863,6 +864,10 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
   přerušení a oblasti RMRR/IVMD; na stroji bez IOMMU DMA omezené není
   (jádro to zaloguje).
 - **Kvóty jen na proces**, ne pro skupiny procesů (job).
+- **Stack TCP/IP je smoltcp** (za modulem `stack` služby `netd`), vlastní
+  stack ho nahradí později; služba sítě čeká na nejvýš 63 socketů
+  (limit `OBJECT_WAIT_MANY`) a nemá kryptografický zdroj náhodnosti - viz
+  [sit.md](sit.md#plán).
 - **Mezi třídami QoS přísná priorita** (nižší třídy mohou hladovět).
 - **Paměť po ukončených vláknech** (zásobníky jádra) se používá znovu, ale
   nevrací se.

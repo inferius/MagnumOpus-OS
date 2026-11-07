@@ -1,5 +1,5 @@
-//! Start systemovych sluzeb: sluzba casu, spravce zarizeni a souborovy
-//! system.
+//! Start systemovych sluzeb: sluzba casu, spravce zarizeni, souborovy
+//! system a sluzba site.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -7,6 +7,7 @@ use core::time::Duration;
 
 use blockproto::BlockClient;
 use fsproto::FsClient;
+use netproto::Net;
 use libos::abi::bootstrap::kind;
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
@@ -18,6 +19,8 @@ pub struct Devices {
     pub _devmgr: Process,
     pub _control: Channel,
     pub blocks: Vec<BlockClient>,
+    /// Kanaly k ovladacum sitovych karet (dokud je neprevezme sluzba site).
+    pub nets: Vec<Channel>,
     pub fs: Option<FsClient>,
     pub _fsd: Option<(Process, Channel)>,
 }
@@ -49,6 +52,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
 
     let (devmgr, control) = libos::spawn("devmgr", image, handles)?;
     let mut blocks = Vec::new();
+    let mut nets = Vec::new();
     loop {
         let msg = control.read(Some(time::deadline_after(Duration::from_secs(10))))?;
         match &msg.data[..] {
@@ -61,14 +65,20 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
                     }
                 }
             }
+            b"net" => nets.extend(msg.handles.into_iter().map(Channel::from_handle)),
             other => println!("init: neznama zprava od devmgr: {:?}", other),
         }
     }
-    println!("init: {} blokovych zarizeni", blocks.len());
+    println!(
+        "init: {} blokovych zarizeni, {} sitovych karet",
+        blocks.len(),
+        nets.len()
+    );
     Ok(Devices {
         _devmgr: devmgr,
         _control: control,
         blocks,
+        nets,
         fs: None,
         _fsd: None,
     })
@@ -148,4 +158,79 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
     devices.fs = Some(client);
     devices._fsd = Some((process, control));
     Ok(())
+}
+
+/// Bezici sluzba site a korenova relace (vsechna prava). Programy dostavaji
+/// jen uzsi relace (`Net::restrict`).
+pub struct NetService {
+    pub _process: Process,
+    pub _control: Channel,
+    pub root: Net,
+}
+
+/// Spusti sluzbu site nad prvni sitovou kartou.
+///
+/// TODO: vic karet (smerovani mezi rozhranimi), nastaveni site z konfigurace
+/// systemu (staticka adresa, servery DNS a NTP).
+pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService> {
+    if devices.nets.is_empty() {
+        return Err(Error::NotFound);
+    }
+    let link = devices.nets.remove(0);
+    let fs = Initfs::open(startup)?;
+    let image = fs.find("netd").ok_or(Error::NotFound)?;
+    let (root, server) = Channel::create()?;
+    let handles = vec![
+        StartHandle::user(link.into_handle()),
+        StartHandle::user(server.into_handle()),
+    ];
+    let (process, control) = libos::spawn("netd", image, handles)?;
+    let msg = control.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+    if msg.data != b"ok" {
+        println!(
+            "init: sluzba site hlasi: {}",
+            core::str::from_utf8(&msg.data).unwrap_or("?")
+        );
+        return Err(Error::IoError);
+    }
+    Ok(NetService {
+        _process: process,
+        _control: control,
+        root: Net::new(root),
+    })
+}
+
+/// Seridi hodiny podle serveru NTP: dotaz pres sit, nastaveni pres sluzbu
+/// casu (jen ta smi `CLOCK_SET`). Vraci posun hodin pred nastavenim v ns.
+pub fn sync_time_ntp(
+    net: &Net,
+    time_service: &TimeService,
+    server: core::net::SocketAddr,
+) -> Result<i128> {
+    let sync = net.ntp_query(server, Duration::from_secs(5))?;
+    let mut msg = Vec::with_capacity(16);
+    msg.extend_from_slice(b"set");
+    msg.extend_from_slice(&sync.time.secs.to_le_bytes());
+    msg.extend_from_slice(&sync.time.nanos.to_le_bytes());
+    // Do RTC nezapisovat: cas ze site plati jen do restartu, RTC opravi
+    // az nastaveni systemu (TODO: zapis do RTC podle konfigurace).
+    msg.push(0);
+    time_service.channel.write(&msg, Vec::new())?;
+    let reply = time_service
+        .channel
+        .read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    if !reply.data.starts_with(b"ok") {
+        println!(
+            "init: sluzba casu odmitla cas z NTP: {}",
+            core::str::from_utf8(&reply.data).unwrap_or("?")
+        );
+        return Err(Error::IoError);
+    }
+    println!(
+        "init: hodiny serizeny podle NTP {} (posun {} ms, zpozdeni {} ms)",
+        server,
+        sync.offset_ns / 1_000_000,
+        sync.delay_ns / 1_000_000
+    );
+    Ok(sync.offset_ns)
 }

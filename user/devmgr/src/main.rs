@@ -2,8 +2,9 @@
 //!
 //! Projde sbernice PCI Express, zaloguje nalezena zarizeni a pro znama
 //! zarizeni spusti ovladace z initfs. Rodici (init) posle po bootstrap
-//! kanalu pro kazde blokove zarizeni zpravu `block` s koncem kanalu ke
-//! klientovi ovladace a nakonec `done`.
+//! kanalu pro kazde blokove zarizeni zpravu `block` a pro kazdou sitovou
+//! kartu zpravu `net`, obe s koncem kanalu ke klientovi ovladace, a nakonec
+//! `done`.
 //!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
 
@@ -25,6 +26,31 @@ libos::entry!(main);
 
 /// Virtio blokove zarizeni: moderni ID 0x1042, prechodne 0x1001.
 const VIRTIO_BLK: (u16, u16) = (0x1042, 0x1001);
+/// Virtio sitova karta: moderni ID 0x1041, prechodne 0x1000.
+const VIRTIO_NET: (u16, u16) = (0x1041, 0x1000);
+
+/// Druh ovladace: jmeno programu v initfs a zprava pro init.
+struct DriverKind {
+    image: &'static str,
+    message: &'static [u8],
+}
+
+const DRIVERS: &[((u16, u16), DriverKind)] = &[
+    (
+        VIRTIO_BLK,
+        DriverKind {
+            image: "virtio-blk",
+            message: b"block",
+        },
+    ),
+    (
+        VIRTIO_NET,
+        DriverKind {
+            image: "virtio-net",
+            message: b"net",
+        },
+    ),
+];
 
 fn main(startup: Startup) -> i64 {
     let Some(resource) = startup.root_resource.as_ref() else {
@@ -54,19 +80,25 @@ fn main(startup: Startup) -> i64 {
                 f.address, f.vendor, f.device, f.class, f.subclass, f.prog_if
             );
         }
-        for a in virtio::find(&functions, VIRTIO_BLK.0, VIRTIO_BLK.1) {
-            let f = functions.iter().find(|f| f.address == a).unwrap();
-            match start_block_driver(
-                &fs,
-                resource,
-                vmo,
-                &ecam,
-                (*arg >> 16) as u16,
-                f,
-                &startup.bootstrap,
-            ) {
-                Ok(p) => drivers.push(p),
-                Err(e) => println!("devmgr: ovladac pro {} nelze spustit: {e}", f.address),
+        for ((modern, transitional), kind) in DRIVERS {
+            for a in virtio::find(&functions, *modern, *transitional) {
+                let f = functions.iter().find(|f| f.address == a).unwrap();
+                match start_driver(
+                    kind,
+                    &fs,
+                    resource,
+                    vmo,
+                    &ecam,
+                    (*arg >> 16) as u16,
+                    f,
+                    &startup.bootstrap,
+                ) {
+                    Ok(p) => drivers.push(p),
+                    Err(e) => println!(
+                        "devmgr: ovladac {} pro {} nelze spustit: {e}",
+                        kind.image, f.address
+                    ),
+                }
             }
         }
     }
@@ -115,7 +147,9 @@ fn device_ranges(
     Ok((ranges, config))
 }
 
-fn start_block_driver(
+#[allow(clippy::too_many_arguments)]
+fn start_driver(
+    kind: &DriverKind,
     fs: &Initfs,
     resource: &libos::hw::Resource,
     ecam_vmo: &libos::Vmo,
@@ -124,7 +158,7 @@ fn start_block_driver(
     f: &Function,
     parent: &Channel,
 ) -> libos::Result<Process> {
-    let image = fs.find("virtio-blk").ok_or(libos::Error::NotFound)?;
+    let image = fs.find(kind.image).ok_or(libos::Error::NotFound)?;
     // Ovladac dostane jen sve zarizeni: BARy, svou konfiguraci, kvoty.
     let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
     let a = f.address;
@@ -137,10 +171,11 @@ fn start_block_driver(
         StartHandle::user(config.handle().duplicate(None)?),
         StartHandle::user(driver_end.into_handle()),
     ];
-    let (process, control) = libos::spawn("virtio-blk", image, handles)?;
+    let (process, control) = libos::spawn(kind.image, image, handles)?;
     let config = format!("pci {} {} {}", a.bus, a.device, a.function);
     control.write(config.as_bytes(), Vec::new())?;
-    // Konec kanalu ke klientovi patri initu (ten ho preda souborovemu systemu).
-    parent.write(b"block", vec![client_end.into_handle()])?;
+    // Konec kanalu ke klientovi patri initu (ten ho preda souborovemu
+    // systemu nebo sluzbe site).
+    parent.write(kind.message, vec![client_end.into_handle()])?;
     Ok(process)
 }

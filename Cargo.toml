@@ -8,6 +8,7 @@ members = [
     "libs/elf",
     "libs/fs",
     "libs/fsproto",
+    "libs/netproto",
     "libs/osfs-proto",
     "libs/initfs",
     "libs/blockproto",
@@ -19,9 +20,11 @@ members = [
     "user/devmgr",
     "user/echo",
     "user/fsd",
+    "user/netd",
     "user/init",
     "user/timed",
     "user/virtio-blk",
+    "user/virtio-net",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace

@@ -115,6 +115,10 @@ invariant was broken (a kernel bug).
 | `devmgr: ovladac pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
 | `virtio-blk BB:DD.F: N MiB, flush ano/ne, discard ano/ne` | The disk is ready. `discard ne` = the device has no TRIM (in QEMU the drive lacks `discard=unmap`); the FS then skips TRIM. |
 | `virtio-blk ...: inicializace selhala: ...` | The device does not follow virtio 1.x, did not finish its reset within a second (`TIMED_OUT`) or resources are missing (MSI-X, DMA memory, `NO_RESOURCES` = the restricted Resource quota is exhausted). |
+| `virtio-net BB:DD.F: MAC xx:..., linka pripojena/odpojena` | The network card is ready ("link up/down"). The MAC comes from the device configuration, otherwise it is locally administered (`02:...`). |
+| `virtio-net ...: inicializace selhala: ...` | As for the disk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
+| `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | The device returned a nonsensical queue index or a buffer it did not own (`CORRUPTED`). The driver resets it (it stops using DMA) and exits; the network does not work until a restart. |
+| `virtio-net ...: zahozeno N prijatych ramcu` | At exit: frames the network service could not receive in time (full channel queue) or invalid ones ("N received frames dropped"). |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
 
@@ -135,3 +139,19 @@ invariant was broken (a kernel bug).
 | `fsd: defragmentace: ...` | A defragmentation step failed (typically `CORRUPTED` when reading a damaged block). Defragmentation pauses until further changes; data is not modified. |
 | `fsd: chyba kanalu: ...` | Unexpected error on the client channel; the service commits and exits. |
 | `fsd: chybi handly ve startovni zprave` | Wrong service start (code 1). |
+
+## Network service netd
+
+| Message | Meaning and fix |
+|---|---|
+| `netd: bezim, cekam na DHCP` | The service got `INFO` from the driver and started the DHCP client ("running, waiting for DHCP"). |
+| `netd: DHCP: adresa A/P, brana G, DNS [...]` | The interface is configured (address, gateway, DNS); programs waiting in `wait_configured` continue. |
+| `netd: DHCP: adresa ztracena` | The lease expired or the server removed the address ("address lost"). Connections get `UNREACHABLE` until DHCP renews it. |
+| `netd: VAROVANI: procesor nema RDRAND, ...` | The random generator has a weak seed: DNS query IDs and TCP numbers are predictable. See [network.md](network.md#the-netd-service). |
+| `netd: nova relace s pravy ...` | Someone with the `RESTRICT` right (init) created a narrower session ("new session with rights"). |
+| `netd: servery DNS nastaveny rucne: [...]` | `SET_DNS` (the `CONFIGURE` right); an empty list = back to the DHCP servers. |
+| `netd: ovladac sitove karty neposlal INFO: ...` | The driver did not answer within 5 s (code 2); `init` then does not start the network. |
+| `netd: ovladac skoncil (zahozeno ramcu: ...)` | The card driver exited (faulty device) and the service exits with it (code 3). |
+| `netd: chybi handly ve startovni zprave` | The service was started incorrectly (code 1). |
+| `init: sluzbu site nelze spustit: ...` | No network card (`NOT_FOUND`) or the service did not answer. |
+| `init: hodiny serizeny podle NTP ...` | The time service set the clock from the NTP server; the offset is how far off the clock was. |

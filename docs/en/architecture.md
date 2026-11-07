@@ -871,7 +871,8 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 4. Userspace: syscalls, first process, IPC, libos, initfs (done)
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
 6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
-   TCP/IP, DNS, TLS 1.3, HTTP client - services, access through a capability)
+   TCP/IP, DHCP, DNS, NTP and access through a capability done - see
+   [network.md](network.md); TLS 1.3, HTTP client, IPv6, own stack remain)
    - **6a Input:** input service, keyboard and mouse (virtio-input, PS/2,
      later USB HID), layouts, secure key combination - see [Input](#input-keyboard-and-mouse-plan)
    - **6b Shell and smart terminal:** console, structured output, command
@@ -906,5 +907,9 @@ fine for now):
   remapping and RMRR/IVMD regions are missing; on a machine without an
   IOMMU DMA is not restricted (the kernel logs it).
 - **Quotas only per process**, not for groups of processes (job).
+- **The TCP/IP stack is smoltcp** (behind the `stack` module of the `netd`
+  service), our own stack replaces it later; the network service waits on
+  at most 63 sockets (the `OBJECT_WAIT_MANY` limit) and has no
+  cryptographic randomness source - see [network.md](network.md#plan).
 - **Strict priority between QoS classes** (lower classes can starve).
 - **Memory of finished threads** (kernel stacks) is reused but not returned.

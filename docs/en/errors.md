@@ -43,6 +43,10 @@ is documented in this file and in the Czech version.
 | -25 | `READ_ONLY` | read-only |
 | -26 | `LOCKED` | the object is open or locked by another handle |
 | -27 | `CONFLICT` | the object has changed in the meantime |
+| -28 | `CONNECTION_REFUSED` | the other side refused the connection |
+| -29 | `CONNECTION_RESET` | the connection was reset by the other side |
+| -30 | `UNREACHABLE` | the destination is unreachable (network not configured, no route) |
+| -31 | `ADDRESS_IN_USE` | the address or port is already in use |
 
 ## Details
 
@@ -338,6 +342,48 @@ editor, an agent, sync.
 **What to do:** nothing changed and the new data stayed with the client;
 offer saving alongside, comparing versions, or a deliberate overwrite (the
 operation with the new revision).
+
+### `CONNECTION_REFUSED` (-28)
+
+**Meaning:** the TCP destination answered with a refusal (RST to SYN):
+nothing listens on the port.
+
+**When:** `TcpStream::connect` in the network service `netd`.
+
+**What to do:** check the address and port, or retry later (the service on
+the other side is not running yet).
+
+### `CONNECTION_RESET` (-29)
+
+**Meaning:** an established TCP connection was reset by the other side
+(RST), or the network service dropped it because the other side stopped
+responding.
+
+**When:** reading from and writing to a `TcpStream`, also accepting a
+connection that was reset before `accept`.
+
+**What to do:** close the connection and reconnect if needed. Data sent
+after the last confirmed write may not have arrived.
+
+### `UNREACHABLE` (-30)
+
+**Meaning:** the destination is unreachable: the interface has no address
+(DHCP has not finished yet), there is no route to the destination, or the
+address is not supported (e.g. IPv6 until the network service supports it).
+
+**When:** connecting, sending a UDP datagram, ping, DNS query.
+
+**What to do:** wait for the network configuration
+(`Net::wait_configured`), check the address.
+
+### `ADDRESS_IN_USE` (-31)
+
+**Meaning:** the local port is already used by another socket.
+
+**When:** `TcpListener::bind`, `UdpSocket::bind` with a specific port.
+
+**What to do:** choose another port or port 0 (the service assigns a free
+one).
 
 ## Process exit codes
 

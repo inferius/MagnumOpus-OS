@@ -8,6 +8,7 @@ mod drivers;
 mod fs;
 mod ipc;
 mod memory;
+mod net;
 mod process;
 mod time;
 
@@ -26,6 +27,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ovladace", drivers::TESTS),
     ("souborovy system", fs::TESTS),
     ("cas", time::TESTS),
+    ("sit", net::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).
@@ -48,6 +50,17 @@ pub fn set_time_service(t: crate::system::TimeService) {
 
 fn time_service() -> Option<&'static crate::system::TimeService> {
     TIME.get()
+}
+
+/// Sluzba site spustena pri startu (pro testy site).
+static NET: spin::Once<crate::system::NetService> = spin::Once::new();
+
+pub fn set_net_service(n: crate::system::NetService) {
+    NET.call_once(|| n);
+}
+
+fn net_service() -> Option<&'static crate::system::NetService> {
+    NET.get()
 }
 
 /// Spusti vsechny testy, vraci pocet selhanych.

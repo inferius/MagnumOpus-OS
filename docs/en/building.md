@@ -64,7 +64,8 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd, timed
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, fsd, timed, netd
+                       (+ net-test with `cargo xtask test`: helper server ports)
 ```
 
 QEMU gets an emulated IOMMU (`intel-iommu`, with `--iommu amd`
@@ -82,6 +83,14 @@ stored boot entries would not match.
 | data | `target/data.img` | 64 MiB, our file system (label `data`); created by xtask with the `fs` library, containing `/vitejte.txt` and `/dokumenty/navod.md`; TRIM enabled (`discard=unmap`) |
 
 The scratch and data disks are recreated on every `run`/`test`.
+
+The network card is `virtio-net-pci` (modern mode, `iommu_platform=on`, no
+option ROM) in QEMU user-mode networking (slirp): the guest has 10.0.2.15,
+sees the gateway and the host as 10.0.2.2, and the slirp DNS is 10.0.2.3.
+`cargo xtask test` also starts helper servers on the host for the network
+tests (echo, DNS, NTP, on `127.0.0.1` and free ports) and forwards one
+port from the host into the guest (`hostfwd`). Details:
+[network.md](network.md#tests).
 
 ## Output and tracking down errors
 
@@ -129,12 +138,15 @@ libs/fs/         file system (no_std; std for tools)
   src/fs/           files, directories, snapshots, intent log, defrag, fsck
   src/tests/        FS tests (model, power loss, performance)
 libs/fsproto/    file system protocol (client <-> fsd)
+libs/netproto/   network protocol (programs <-> netd <-> driver), DNS, NTP, permissions
 user/init/       first process: starts services, userspace tests
 user/echo/       IPC test server
 user/devmgr/     device manager (PCI, starts drivers)
 user/virtio-blk/ disk driver
 user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
+user/virtio-net/ network card driver
+user/netd/       network service (TCP/IP, DHCP, DNS)
 libs/osfs-proto/ protocol of the extended FS API for Windows (DeviceIoControl) + client
 tools/osfs/      host tool for the FS: format, check, mount on Windows (WinFsp)
 xtask/           build, disk image, QEMU, tests

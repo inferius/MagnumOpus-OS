@@ -1,8 +1,12 @@
 //! Split virtqueue: tabulka deskriptoru, fronta "available" (ovladac ->
 //! zarizeni) a fronta "used" (zarizeni -> ovladac), vse v DMA pameti.
 //!
-//! Ovladac v tehle verzi posila pozadavky synchronne (jeden retezec a ceka
-//! na jeho dokonceni), coz na blokove zarizeni zatim staci.
+//! Dva rezimy pouziti (na jedne fronte se nesmi michat):
+//! - **synchronni** (`submit` + `take_used`): jeden retezec s hlavou
+//!   v deskriptoru 0 a cekani na jeho dokonceni - blokove zarizeni;
+//! - **vice bufferu** (`post` + `take_used_any`): kazdy deskriptor je
+//!   samostatny buffer s vlastnim cislem, ve fronte jich muze byt az
+//!   `size` najednou - sitova karta (prijem a odesilani ramcu).
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
@@ -133,5 +137,56 @@ impl Virtqueue {
             return Err(Error::Corrupted);
         }
         Ok(Some((id, len)))
+    }
+
+    /// Pocet deskriptoru fronty.
+    pub fn size(&self) -> u16 {
+        self.size
+    }
+
+    /// Vlozi buffer `b` jako samostatny retezec s hlavou v deskriptoru `id`
+    /// (rezim vice bufferu). Deskriptor nesmi byt ve fronte - volajici si
+    /// drzi, ktere jsou volne (vrati je `take_used_any`).
+    pub fn post(&mut self, id: u16, b: Buffer) -> Result<()> {
+        if id >= self.size {
+            return Err(Error::InvalidArgs);
+        }
+        let d = id as u64 * DESC_SIZE;
+        self.map.write::<u64>(d, b.phys);
+        self.map.write::<u32>(d + 8, b.len);
+        self.map
+            .write::<u16>(d + 12, if b.device_writes { DESC_F_WRITE } else { 0 });
+        self.map.write::<u16>(d + 14, 0);
+        let slot = self.avail_off + 4 + 2 * (self.avail_idx % self.size) as u64;
+        self.map.write::<u16>(slot, id);
+        // Deskriptor a polozka fronty musi byt viditelne driv nez novy index.
+        libos::barrier::dma_wmb();
+        self.avail_idx = self.avail_idx.wrapping_add(1);
+        self.map.write::<u16>(self.avail_off + 2, self.avail_idx);
+        libos::barrier::dma_wmb();
+        Ok(())
+    }
+
+    /// Vyzvedne dokonceny buffer (rezim vice bufferu): (cislo deskriptoru,
+    /// zapsana delka); `Ok(None)` = zatim nic. Nesmyslny index nebo cislo
+    /// deskriptoru od zarizeni = `CORRUPTED` (zarizeni je vadne).
+    pub fn take_used_any(&mut self) -> Result<Option<(u16, u32)>> {
+        libos::barrier::dma_rmb();
+        let used_idx: u16 = self.map.read(self.used_off + 2);
+        if used_idx == self.last_used {
+            return Ok(None);
+        }
+        if used_idx.wrapping_sub(self.last_used) > self.size {
+            return Err(Error::Corrupted);
+        }
+        libos::barrier::dma_rmb();
+        let e = self.used_off + 4 + 8 * (self.last_used % self.size) as u64;
+        let id: u32 = self.map.read(e);
+        let len: u32 = self.map.read(e + 4);
+        self.last_used = self.last_used.wrapping_add(1);
+        if id >= self.size as u32 {
+            return Err(Error::Corrupted);
+        }
+        Ok(Some((id as u16, len)))
     }
 }

@@ -84,6 +84,13 @@ impl Interrupt {
         sys::interrupt_ack(self.0.raw())
     }
 
+    /// Potvrdi preruseni bez cekani (smaze SIGNALED). Pro ovladace, ktere
+    /// cekaji na vic objektu najednou (`wait_many` nad handlem preruseni):
+    /// potvrdit pred obsluhou, aby se dalsi preruseni neztratilo.
+    pub fn ack(&self) -> Result<()> {
+        sys::interrupt_ack(self.0.raw())
+    }
+
     pub fn handle(&self) -> &Handle {
         &self.0
     }

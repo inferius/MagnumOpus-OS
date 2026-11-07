@@ -62,7 +62,8 @@ Když firmware pásmo uvede, platí UTC = místní − pásmo. To je konvence
 UEFI 2.x; jiné verze specifikace ji uvádějí s opačným znaménkem.
 
 ⚠️ **Přesnost:** firmware i RTC mají rozlišení 1 s, počátek je tedy přesný
-na sekundu. Zpřesnění podle sítě přijde později. Nastavit hodiny už jde
+na sekundu. Seřízení podle sítě (NTP) umí `init` přes službu času, viz
+[sit.md](sit.md#ntp-a-hodiny). Nastavit hodiny už jde
 (`CLOCK_SET`, viz níže).
 
 ## Nastavení hodin (`CLOCK_SET`)

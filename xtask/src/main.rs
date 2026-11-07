@@ -13,6 +13,7 @@ mod datadisk;
 mod docs;
 mod highlight;
 mod image;
+mod nethelper;
 mod symbolize;
 
 use std::env;
@@ -71,6 +72,10 @@ struct Options {
     arch: String,
     /// Testovaci beh: kernel s feature `qemu-test`, QEMU s isa-debug-exit.
     test: bool,
+    /// Dalsi soubory do initfs (konfigurace testu site).
+    extra_initfs: Vec<(String, Vec<u8>)>,
+    /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
+    hostfwd: Option<String>,
 }
 
 /// Navratovy kod QEMU pri uspechu testu: isa-debug-exit vraci (v << 1) | 1
@@ -104,6 +109,8 @@ fn run_cli() -> Result<()> {
         qemu_args: Vec::new(),
         arch: String::from("x86_64"),
         test: false,
+        extra_initfs: Vec::new(),
+        hostfwd: None,
     };
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -153,6 +160,11 @@ fn run_cli() -> Result<()> {
             host_tests()?;
             check_kernel("aarch64", &opts)?;
             build_docs()?;
+            // Pomocne servery pro testy site bezi, dokud bezi xtask.
+            let helper = nethelper::start()?;
+            opts.extra_initfs
+                .push((String::from("net-test"), helper.config.clone().into_bytes()));
+            opts.hostfwd = Some(helper.hostfwd.clone());
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             run_qemu(&image, &opts)
@@ -184,8 +196,10 @@ fn host_tests() -> Result<()> {
             "tz",
             "--package",
             "fs",
+            "--package",
+            "netproto",
             "--features",
-            "initfs/std,fs/std",
+            "initfs/std,fs/std,netproto/std",
         ])
         .status()?;
     if !status.success() {
@@ -257,7 +271,16 @@ struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
-const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk", "fsd", "timed"];
+const USER_PROGRAMS: &[&str] = &[
+    "init",
+    "echo",
+    "devmgr",
+    "virtio-blk",
+    "virtio-net",
+    "fsd",
+    "timed",
+    "netd",
+];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -309,6 +332,7 @@ fn build(opts: &Options) -> Result<Artifacts> {
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
         files.push((name.to_string(), data));
     }
+    files.extend(opts.extra_initfs.iter().cloned());
     let refs: Vec<(&str, &[u8])> = files
         .iter()
         .map(|(n, d)| (n.as_str(), d.as_slice()))
@@ -487,8 +511,18 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             datadisk::create(&target_dir())?.display()
         ))
         .args(["-device", &blk("data")])
-        // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.
-        .args(["-nic", "none"])
+        // Sitova karta virtio-net v user-mode siti (slirp: host 10.0.2.15,
+        // brana a hostitel 10.0.2.2, DNS 10.0.2.3). Bez option ROM
+        // (`romfile=`), aby firmware nezkousel bootovat ze site.
+        .arg("-netdev")
+        .arg(match &opts.hostfwd {
+            Some(f) => format!("user,id=net0,hostfwd={f}"),
+            None => String::from("user,id=net0"),
+        })
+        .args([
+            "-device",
+            "virtio-net-pci,netdev=net0,disable-legacy=on,iommu_platform=on,romfile=",
+        ])
         // Seriova linka do terminalu a zaroven do souboru (target/serial.log),
         // aby se dal vystup dohledat i po skonceni behu.
         .arg("-chardev")

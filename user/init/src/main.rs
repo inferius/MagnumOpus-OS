@@ -1,8 +1,9 @@
 //! init: prvni proces v userspace.
 //!
-//! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace) a sluzbu
-//! souboroveho systemu, pak testy rozhrani jadra, libos, ovladacu a FS (`tests/`). Pozdeji bude spoustet systemove sluzby podle
-//! konfigurace.
+//! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
+//! souboroveho systemu a sluzbu site, pak testy rozhrani jadra, libos,
+//! ovladacu, FS a site (`tests/`). Pozdeji bude spoustet systemove sluzby
+//! podle konfigurace.
 
 #![no_std]
 #![no_main]
@@ -26,6 +27,10 @@ fn main(startup: Startup) -> i64 {
         Ok(mut devices) => {
             if let Err(e) = system::start_fs(&startup, &mut devices) {
                 println!("init: souborovy system nelze spustit: {e}");
+            }
+            match system::start_net(&startup, &mut devices) {
+                Ok(n) => tests::set_net_service(n),
+                Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
             }
             tests::set_devices(devices);
         }

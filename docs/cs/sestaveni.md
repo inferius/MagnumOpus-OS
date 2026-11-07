@@ -61,7 +61,8 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd, timed
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, fsd, timed, netd
+                       (+ net-test u `cargo xtask test`: porty pomocných serverů)
 ```
 
 QEMU dostane emulovanou IOMMU (`intel-iommu`, s `--iommu amd`
@@ -78,6 +79,13 @@ AMD IOMMU zabere slot PCI a uložené bootovací položky by neseděly.
 | datový | `target/data.img` | 64 MiB, náš souborový systém (jméno `data`); vytvoří ho xtask knihovnou `fs` se soubory `/vitejte.txt` a `/dokumenty/navod.md`; TRIM povolen (`discard=unmap`) |
 
 Testovací a datový disk se vytvoří znovu při každém `run`/`test`.
+
+Síťová karta je `virtio-net-pci` (moderní režim, `iommu_platform=on`, bez
+option ROM) v user-mode síti QEMU (slirp): host má 10.0.2.15, bránu
+a hostitele vidí jako 10.0.2.2, DNS slirp je 10.0.2.3. `cargo xtask test`
+navíc spustí na hostiteli pomocné servery pro testy sítě (echo, DNS, NTP,
+na `127.0.0.1` a volných portech) a přesměruje jeden port z hostitele do
+hosta (`hostfwd`). Podrobnosti: [sit.md](sit.md#testy).
 
 ## Výstup a dohledání chyb
 
@@ -124,12 +132,15 @@ libs/fs/         souborový systém (no_std; std pro nástroje)
   src/fs/           soubory, adresáře, snapshoty, intent log, defrag, fsck
   src/tests/        testy FS (model, výpadky, výkon)
 libs/fsproto/    protokol souborového systému (klient <-> fsd)
+libs/netproto/   protokol sítě (programy <-> netd <-> ovladač), DNS, NTP, oprávnění
 user/init/       první proces: start služeb a testy userspace
 user/echo/       testovací server pro IPC
 user/devmgr/     správce zařízení (PCI, spouští ovladače)
 user/virtio-blk/ ovladač disku
 user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
+user/virtio-net/ ovladač síťové karty
+user/netd/       služba sítě (TCP/IP, DHCP, DNS)
 libs/osfs-proto/ protokol rozšířeného API FS pro Windows (DeviceIoControl) + klient
 tools/osfs/      nástroj pro FS na hostiteli: format, check, mount ve Windows (WinFsp)
 xtask/           build, obraz disku, QEMU, testy

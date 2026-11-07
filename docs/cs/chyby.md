@@ -43,6 +43,10 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -25 | `READ_ONLY` | jen pro čtení |
 | -26 | `LOCKED` | objekt je otevřený nebo zamčený jiným handlem |
 | -27 | `CONFLICT` | objekt se mezitím změnil |
+| -28 | `CONNECTION_REFUSED` | druhá strana spojení odmítla |
+| -29 | `CONNECTION_RESET` | spojení bylo přerušeno druhou stranou |
+| -30 | `UNREACHABLE` | cíl není dosažitelný (síť nenastavená, chybí cesta) |
+| -31 | `ADDRESS_IN_USE` | adresa nebo port už se používá |
 
 ## Podrobně
 
@@ -340,6 +344,46 @@ agent, synchronizace.
 **Co s tím:** nic se nezměnilo a nová data zůstala klientovi; nabídnout
 uložení vedle, porovnání verzí, nebo vědomé přepsání (operace s novou
 revizí).
+
+### `CONNECTION_REFUSED` (-28)
+
+**Význam:** cíl spojení TCP odpověděl odmítnutím (RST na SYN): na portu nic
+nenaslouchá.
+
+**Kdy vzniká:** `TcpStream::connect` ve službě sítě `netd`.
+
+**Co dělat:** zkontrolovat adresu a port, případně zkusit později (služba na
+druhé straně ještě neběží).
+
+### `CONNECTION_RESET` (-29)
+
+**Význam:** navázané spojení TCP druhá strana přerušila (RST) nebo ho
+služba sítě zrušila, protože druhá strana dlouho neodpovídala.
+
+**Kdy vzniká:** čtení a zápis do `TcpStream`, také přijetí spojení, které
+se před `accept` stihlo zrušit.
+
+**Co dělat:** spojení zavřít a podle potřeby navázat znovu. Data odeslaná
+po posledním potvrzeném zápisu nemusela dojít.
+
+### `UNREACHABLE` (-30)
+
+**Význam:** cíl není dosažitelný: rozhraní nemá adresu (DHCP ještě
+neproběhlo), chybí cesta k cíli, nebo adresa není podporovaná (např. IPv6,
+dokud ho služba sítě neumí).
+
+**Kdy vzniká:** navázání spojení, odeslání datagramu UDP, ping, dotaz DNS.
+
+**Co dělat:** počkat na nastavení sítě (`Net::wait_configured`),
+zkontrolovat adresu.
+
+### `ADDRESS_IN_USE` (-31)
+
+**Význam:** místní port je už obsazený jiným socketem.
+
+**Kdy vzniká:** `TcpListener::bind`, `UdpSocket::bind` s konkrétním portem.
+
+**Co dělat:** zvolit jiný port nebo port 0 (služba přidělí volný).
 
 ## Návratové kódy procesů
 
