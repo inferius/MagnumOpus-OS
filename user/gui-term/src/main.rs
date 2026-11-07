@@ -155,7 +155,7 @@ impl Term {
             }
         })?;
         self.win.set_a11y(&self.a11y())?;
-        self.win.commit(false)
+        self.win.commit_redrawn(false)
     }
 
     /// Deklarovane oblasti: titulek tahne okno, karta ne.

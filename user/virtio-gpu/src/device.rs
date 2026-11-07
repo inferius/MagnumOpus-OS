@@ -184,6 +184,14 @@ impl Gpu {
         }
         // Mapovani overi, ze je VMO dost velka.
         let src = Mapping::new(&vmo, 0, size, MAP_READ)?;
+        // Stejna velikost: jen vymenit zdroj kompozitoru. Kusy DMA se znovu
+        // nealokuji (limit DMA pameti plati za dobu zivota ovladace).
+        if let Some(s) = self.scanouts.iter_mut().find(|s| s.output == output && s.w == w && s.h == h) {
+            s.src = src;
+            s._src_vmo = vmo;
+            s.stride = stride;
+            return self.present(output, &[Rect::new(0, 0, w, h)]);
+        }
         let row = w * 4;
         let rpc = vgpu::rows_per_chunk(row, CHUNK_MAX).max(1);
         let page = libos::vm::page_size();

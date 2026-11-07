@@ -10,7 +10,6 @@ use alloc::vec::Vec;
 use guiproto::Rect;
 use guiproto::window::{ClientMsg, ServerMsg};
 
-use crate::scene::anim_value;
 use crate::{COMPOSE_BUDGET, ClientId, Comp, PERIOD, SYNC_TIMEOUT};
 
 /// Interval pingu a doba bez odpovedi, po ktere je aplikace nereagujici.
@@ -318,7 +317,6 @@ impl Comp {
                 self.send(c, ServerMsg::AnimationDone { layer: lid });
             }
         }
-        let _ = anim_value;
     }
 }
 

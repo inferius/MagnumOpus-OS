@@ -76,7 +76,7 @@ pub struct Window {
     txn: u32,
     /// Commit s FRAME odeslan, FRAME jeste neprisel.
     pub frame_pending: bool,
-    a11y_ids: Vec<u32>,
+    a11y_ids: alloc::collections::BTreeSet<u32>,
     groups: BTreeMap<u32, Rect>,
 }
 
@@ -128,7 +128,7 @@ impl Window {
             ack: None,
             txn: 0,
             frame_pending: false,
-            a11y_ids: Vec::new(),
+            a11y_ids: Default::default(),
             groups: BTreeMap::new(),
         };
         loop {
@@ -328,7 +328,7 @@ impl Window {
 
     /// Strom pristupnosti (cely; zmizele uzly odebere).
     pub fn set_a11y(&mut self, nodes: &[Node]) -> Result<()> {
-        let ids: Vec<u32> = nodes.iter().map(|n| n.id).collect();
+        let ids: alloc::collections::BTreeSet<u32> = nodes.iter().map(|n| n.id).collect();
         let gone: Vec<u32> = self.a11y_ids.iter().copied().filter(|i| !ids.contains(i)).collect();
         if !gone.is_empty() {
             self.send(ClientMsg::A11yRemove { window: 1, ids: gone })?;
@@ -341,11 +341,22 @@ impl Window {
     }
 
     /// Uplatni vse od posledniho commitu. `frame` = chci vedet, kdy kreslit
-    /// dalsi snimek.
+    /// dalsi snimek. Cekajici `CONFIGURE` potvrdi jen commit po prekresleni
+    /// v nove velikosti (jinak by kompozitor ukazal novy ram se starym
+    /// obsahem) - viz [`Window::commit_redrawn`].
     pub fn commit(&mut self, frame: bool) -> Result<()> {
+        self.commit_inner(frame, false)
+    }
+
+    /// Commit po prekresleni celeho okna (potvrdi cekajici `CONFIGURE`).
+    pub fn commit_redrawn(&mut self, frame: bool) -> Result<()> {
+        self.commit_inner(frame, true)
+    }
+
+    fn commit_inner(&mut self, frame: bool, redrawn: bool) -> Result<()> {
         self.txn += 1;
         let mut flags = if frame { commit::FRAME } else { 0 };
-        let serial = match self.ack.take() {
+        let serial = match self.ack.take_if(|_| redrawn) {
             Some(s) => {
                 flags |= commit::ACK_CONFIGURE;
                 s
@@ -391,6 +402,11 @@ pub fn run<A: App>(ch: Channel, mut app: A, mode: Mode, w: u32, h: u32) -> Resul
                 for m in resp.msgs {
                     app.update(m);
                 }
+                // Dalsi udalost (rychle psani pred snimkem) musi videt novy
+                // stav: rozvrhnout hned, kreslit az na snimek.
+                if changed {
+                    ui.rebuild(app.title(), app.view());
+                }
                 for (i, off) in &resp.scrolls {
                     win.set_scroll(*i, *off)?;
                 }
@@ -409,11 +425,13 @@ pub fn run<A: App>(ch: Channel, mut app: A, mode: Mode, w: u32, h: u32) -> Resul
                 for m in resp.msgs {
                     app.update(m);
                 }
+                ui.rebuild(app.title(), app.view());
                 dirty = true;
             }
             Event::Action { call, id, args, .. } => {
                 let r = app.action(&id, &args);
                 win.action_result(call, r)?;
+                ui.rebuild(app.title(), app.view());
                 dirty = true;
             }
             Event::Frame => {}
@@ -433,5 +451,5 @@ fn render<M: Clone>(win: &mut Window, ui: &mut Ui<M>) -> Result<()> {
     }
     win.retain_scrolls(&areas.iter().map(|a| a.index).collect::<Vec<_>>())?;
     win.set_a11y(&ui.a11y())?;
-    win.commit(true)
+    win.commit_redrawn(true)
 }
