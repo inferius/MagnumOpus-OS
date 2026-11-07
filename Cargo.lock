@@ -2087,7 +2087,7 @@ dependencies = [
  "abi",
  "noto-sans-mono-bitmap",
  "shlang",
- "spin",
+ "spin 0.12.3",
 ]
 
 [[package]]

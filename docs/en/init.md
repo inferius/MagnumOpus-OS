@@ -41,7 +41,14 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
    [Firewall](firewall.md)), then `ntpd` (time synchronization, see
    [Real time](time.md#synchronization-over-the-network-ntpd)) and `revocd`
    (certificate revocation, see [TLS and HTTP](tls-http.md#certificate-revocation)),
-6. all these processes are handed to the supervisor to watch.
+6. all these processes are handed to the supervisor to watch,
+7. in the normal run the GUI (`compd`, the windows `gui-term` and
+   `gui-demo`), without a GUI the fallback console (see
+   [Terminal](#terminal)).
+
+init always sends the `fsd` configuration (the first message of the control
+channel): `debug` in the test run, `normal` otherwise. fsd waits for it
+before mounting the disk.
 
 ## The supervisor
 
@@ -54,6 +61,8 @@ watched processes:
 | `devmgr` sends `block` | only logs it for now (disks at run time come with multiple disks in `fsd`) |
 | `devmgr` closes its channel | logs it, hotplug stops working |
 | a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). It does not block waiting for the new service to confirm: its channel is one more item of the loop. If it does not answer within 5 s (or answers with an error), it kills it and the attempt counts as another crash. More than 5 restarts within 60 s = it gives up and the service stays stopped |
+| a terminal window sends `connect`, `termd` exits | starts `termd`, serves the session registry (see [Terminal](#terminal)) |
+| `compd` exits | logs it and starts the fallback console |
 | another service exits (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`) | logs the code. No recovery yet (see below) |
 
 Log when a service crashes:
@@ -82,6 +91,43 @@ sup.watch("timed", &t.process, Some(system::TIME_RESTART));
 sup.watch("fsd", &fsd_process, None);
 sup.run(&startup); // never returns
 ```
+
+## Terminal
+
+In the normal run the terminal is the `gui-term` window (GUI) and without
+a GUI the fallback console `console` on the firmware framebuffer. Both draw
+the interactive terminal `term::ui`; the shell runs in the session service
+`termd` and sessions in their own `shsess` processes (see
+[Shell](shell-design.md)). The code is in `user/init/src/terminal.rs`.
+
+```text
+gui-term ──connect──▶ init (supervisor) ──starts──▶ termd ──▶ shsess (session)
+    ▲                      │ the window's session registry │
+    └── channel to termd ──┘ (spare session ends) ◀────────┘
+```
+
+- The window gets a **connect channel** from init (the second handle of the
+  start message, after the window channel). On the message `connect` init
+  starts `termd` (its own fsd session, the initfs image, a registry
+  channel) and answers `ok` with a channel to it, or `err <CODE>`.
+- **termd crash:** the window sees the closed channel and asks again. The
+  new `termd` takes over the sessions from the registry (`shsess` keeps
+  running), so the window attaches to the same session including the block
+  history. Every window has its own registry, so a new termd of one window
+  does not take over the sessions of another. At most 10 termd starts within
+  60 s per window, then init refuses (`err NO_RESOURCES`) and the window
+  retries with a growing delay (at most 5 s).
+- **Fallback console:** when the GUI does not come up (no virtio-gpu) or the
+  compositor crashes (the supervisor sees `compd` exit), init starts
+  `console`, hands it the firmware framebuffer (`display`) and the focus
+  from `inputd` (`focus`), and it connects the same way as the window.
+- **Welcome text:** a new session starts with a block of help (`help`, a
+  few examples, keys).
+
+⚠️ **Limits:** after a compositor crash the application windows are gone
+(no `compd` restart yet). Whether the firmware framebuffer is still visible
+after the virtio-gpu driver took over the display depends on the device
+(QEMU q35 with VGA: yes).
 
 ## Why `inputd`, `fsd`, `netd` and `devmgr` are not recovered yet
 

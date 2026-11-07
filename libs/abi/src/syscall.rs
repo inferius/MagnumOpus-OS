@@ -133,8 +133,11 @@ pub mod fb_op {
     pub const INFO: u64 = 0;
     /// Vyslovne prevzeti: jadro prestane kreslit log do framebufferu (log
     /// dal jde na seriovou linku).
+    /// Kdyz obrazovku drzi jiny zivy proces, `BAD_STATE` (predani: stary
+    /// vlastnik `RELEASE` nebo konec procesu, pak novy `CLAIM`).
     pub const CLAIM: u64 = 1;
-    /// Vraceni: jadro obrazovku smaze a kresli log dal.
+    /// Vraceni: jadro obrazovku smaze a kresli log dal. Jen vlastnik
+    /// (proces, ktery naposledy zavolal `CLAIM`); jinak `BAD_STATE`.
     pub const RELEASE: u64 = 2;
 }
 

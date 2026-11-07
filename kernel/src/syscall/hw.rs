@@ -127,11 +127,20 @@ pub fn fb_control(a: Args) -> Result<u64> {
             user::write_bytes(&p, a[2], &info.encode())?;
         }
         fb_op::CLAIM => {
+            // Obrazovku drzi jiny zivy proces: nejdriv ji musi vratit (nebo
+            // skoncit - pak ji jadro vrati samo). Predani ridi vlastnik
+            // displeje (supervisor): stary vlastnik RELEASE, novy CLAIM.
+            if !crate::console::try_claim(p.id) {
+                return Err(Error::BadState);
+            }
             crate::log::info!("framebuffer prevzal proces {} {} (log jadra dal na seriove lince)", p.name, p.id);
-            crate::console::set_claimed(Some(p.id));
         }
         fb_op::RELEASE => {
-            crate::console::set_claimed(None);
+            // Vratit smi jen vlastnik: pozdni RELEASE predchoziho vlastnika
+            // nesmi smazat obraz noveho (napr. konzole po padu GUI).
+            if !crate::console::process_finished(p.id) {
+                return Err(Error::BadState);
+            }
             crate::log::info!("framebuffer vratil proces {} {}", p.name, p.id);
         }
         _ => return Err(Error::InvalidArgs),

@@ -18,6 +18,7 @@ use guiproto::action::Value;
 use guiproto::control::*;
 use inputproto::code::*;
 use inputproto::device::{self, RawEvent};
+use libos::spawn::StartHandle;
 use libos::{Channel, Startup, println, time};
 
 use super::{Test, TestResult, devices, fail};
@@ -301,15 +302,26 @@ fn secure_screen(_: &Startup) -> TestResult {
 
 fn terminal_window(startup: &Startup) -> TestResult {
     with(|s| {
-        s.gui.launch(startup, "gui-term").map_err(|e| fail("spusteni gui-term", e))?;
+        // Jako v beznem behu: kanal pripojeni, termd spusti init
+        // (`terminal.rs`); smycku supervisoru tu nahrazuje `poll`.
+        let conn = crate::terminal::TERMINALS.lock().client("gui-term (test)").map_err(|e| fail("kanal terminalu", e))?;
+        s.gui
+            .launch_with(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
+            .map_err(|e| fail("spusteni gui-term", e))?;
+        let pump = || crate::terminal::TERMINALS.lock().poll(startup);
         let w = wait_window(&s.inspect, "org.magnumopus.terminal")?;
-        let t = wait_tree(&s.inspect, w.id, "okno terminalu", |t| t.iter().any(|n| n.role == Role::Terminal))?;
+        let t = wait_tree(&s.inspect, w.id, "uvitani terminalu", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.contains("Napište help"))
+        })?;
         check!(has(&t, Role::Titlebar, "Terminál"), "vlastni titulek je v pristupnosti");
         let term = t.iter().find(|n| n.role == Role::Terminal).unwrap();
-        check!(term.value.contains("Napište help"), "uvitani terminalu");
-        // Radek pres pristupnost (SET_VALUE = napsat a odeslat).
+        // Radek pres pristupnost (SET_VALUE = napsat a odeslat) jde do shellu.
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "echo ahoj z GUI".into() })?;
-        wait_tree(&s.inspect, w.id, "vystup prikazu", |t| t.iter().any(|n| n.role == Role::Terminal && n.value.contains("\nahoj z GUI")))?;
+        wait_tree(&s.inspect, w.id, "vystup prikazu", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "ahoj z GUI"))
+        })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
         check_eq!(pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?, BADGE, "odznak nad vlastnim titulkem");

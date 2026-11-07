@@ -40,7 +40,9 @@ impl Window {
     fn recv(&self) -> Result<ServerMsg, String> {
         let msg = self
             .chan
-            .read(Some(time::deadline_after(Duration::from_secs(20))))
+            // V plnem behu je fsd po predchozich testech pomaly (radek se
+            // zapisem i nekolik sekund, uklid klonu po nem dalsi): rezerva.
+            .read(Some(time::deadline_after(Duration::from_secs(60))))
             .map_err(|e| fail("cteni z termd", e))?;
         ServerMsg::decode(&msg.data).map_err(|_| String::from("neplatna zprava od termd"))
     }
@@ -170,6 +172,22 @@ fn session(s: &Startup) -> TestResult {
     w.ok(id, "echo zmena > /shell-test/a.txt")?;
     w.ok(id, "undo")?;
     crate::check_eq!(w.value(id, "open /shell-test/a.txt | from text")?, Value::str("ahoj"), "obsah po undo");
+
+    // Prepsani souboru nesmi sahnout na cizi soubor se jmenem, ktere by
+    // mohlo byt docasne (drive pevne `a.~termd`; ted vyhradne jmeno fsd).
+    // (Kazdy radek se zapisem stoji v ladicim fsd ~5 s: dva soubory staci.)
+    w.ok(id, "echo cizi > /shell-test/a.txt.~termd; echo cizi1 > /shell-test/.~a.txt.1.tmp")?;
+    w.ok(id, "echo prepsano > /shell-test/a.txt")?;
+    crate::check_eq!(w.value(id, "open /shell-test/a.txt | from text")?, Value::str("prepsano"), "prepsani");
+    crate::check_eq!(w.value(id, "open /shell-test/a.txt.~termd | from text")?, Value::str("cizi"), "cizi soubor zustal");
+    crate::check_eq!(
+        w.value(id, "open /shell-test/.~a.txt.1.tmp | from text")?,
+        Value::str("cizi1"),
+        "soubor se jmenem docasneho zustal"
+    );
+    w.ok(id, "undo")?;
+    crate::check_eq!(w.value(id, "open /shell-test/a.txt | from text")?, Value::str("ahoj"), "undo prepsani");
+    crate::check_eq!(w.value(id, "open /shell-test/a.txt.~termd | from text")?, Value::str("cizi"), "cizi soubor po undo");
 
     // async: ulohy ve vlaknech shsess bezi soubezne, vysledky v poradi.
     let t0 = time::now();

@@ -609,9 +609,9 @@ Latin including Czech and is bundled in `libs/font/fonts/`.
 
 ## Terminal window
 
-The 6b terminal becomes a window in the GUI on top of its native
-protocol. The `gui-term` demo is the prepared window: a **custom title
-bar** (the app draws the tab "Session 1" and declares a `DRAG` region with
+The 6b terminal is the `gui-term` window in the GUI on top of its native
+protocol: a **custom title bar** (the app draws the session tab
+"Session N" and declares a `DRAG` region with
 a `NO_DRAG` exception for the tab; the badge and buttons are drawn by the
 system), the content is a `term::screen` character grid (Noto Sans Mono,
 the same as on the console), and the accessibility tree has a `terminal`
@@ -619,9 +619,12 @@ node with the visible text. A line can be entered from the keyboard, with
 the accessibility action `set-value` or with the action `terminal.run`
 (requires confirmation).
 
-Connecting to the session service (`termd`, protocol `term::proto`) is
-done by the terminal thread: instead of the local line editor it sends
-`Run` and draws the output blocks into the same grid.
+The content is the interactive terminal `term::ui` (an editor with
+highlighting, completion, output blocks, tables, progress, prompts) on top
+of the session service `termd`. The window does not get a channel to it
+directly: init gives it a connect channel and starts termd on `connect`;
+after a termd crash the window reconnects to the same session (see
+[Init: Terminal](init.md#terminal)).
 
 ## Task manager
 

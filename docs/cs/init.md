@@ -40,7 +40,13 @@ výpadku proudu pro testy FS).
    [Firewall](firewall.md)), potom `ntpd` (synchronizace času, viz
    [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd)) a `revocd`
    (odvolání certifikátů, viz [TLS a HTTP](tls-http.md#odvolání-certifikátů)),
-6. všechny tyto procesy předá supervisoru k hlídání.
+6. všechny tyto procesy předá supervisoru k hlídání,
+7. v běžném běhu GUI (`compd`, okna `gui-term` a `gui-demo`), bez GUI
+   záložní konzoli (viz [Terminál](#terminál)).
+
+Konfiguraci `fsd` (první zpráva řídicího kanálu) posílá init vždy:
+`debug` v testovacím běhu, jinak `normal`. fsd na ni před připojením
+disku čeká.
 
 ## Supervisor
 
@@ -52,6 +58,8 @@ Smyčka čeká na kanál správce zařízení a na konec hlídaných procesů:
 | `devmgr` pošle `block` | zatím jen zaloguje (disky za běhu přijdou s více disky v `fsd`) |
 | `devmgr` zavře kanál | zaloguje, hotplug přestane fungovat |
 | skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na potvrzení nové služby nečeká blokující: její kanál je další položka smyčky. Když do 5 s neodpoví (nebo odpoví chybou), ukončí ji a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
+| okno terminálu pošle `connect`, `termd` skončí | spustí `termd`, obslouží registr relací (viz [Terminál](#terminál)) |
+| skončil `compd` | zaloguje a spustí záložní konzoli |
 | skončila jiná služba (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`) | zaloguje kód. Obnova zatím není (viz níže) |
 
 Log při pádu služby:
@@ -79,6 +87,41 @@ sup.watch("timed", &t.process, Some(system::TIME_RESTART));
 sup.watch("fsd", &fsd_process, None);
 sup.run(&startup); // nikdy se nevrátí
 ```
+
+## Terminál
+
+V běžném běhu je terminál okno `gui-term` (GUI) a bez GUI záložní konzole
+`console` nad framebufferem z firmware. Obě kreslí interaktivní terminál
+`term::ui`; shell běží ve službě relací `termd` a relace ve vlastních
+procesech `shsess` (viz [Shell](navrh-shell.md)). Kód je
+v `user/init/src/terminal.rs`.
+
+```text
+gui-term ──connect──▶ init (supervisor) ──spustí──▶ termd ──▶ shsess (relace)
+    ▲                      │ registr relací okna          │
+    └──── kanál k termd ───┘ (náhradní konce relací) ◀────┘
+```
+
+- Okno dostane od initu **kanál připojení** (druhý handle startovní
+  zprávy, za kanálem okna). Na zprávu `connect` init spustí `termd`
+  (vlastní relace fsd, obraz initfs, kanál registru) a odpoví `ok`
+  s kanálem k němu, nebo `err <KÓD>`.
+- **Pád termd:** okno uvidí zavřený kanál a požádá znovu. Nový `termd` si
+  z registru převezme relace (`shsess` běží dál), takže se okno připojí ke
+  stejné relaci i s historií bloků. Každé okno má vlastní registr, nový
+  termd jednoho okna tak nepřevezme relace jiného. Nejvýš 10 startů termd
+  za 60 s na okno, pak init odmítne (`err NO_RESOURCES`) a okno to zkouší
+  s rostoucí prodlevou (nejvýš 5 s).
+- **Záložní konzole:** když GUI nenaběhne (bez virtio-gpu) nebo kompozitor
+  spadne (supervisor uvidí konec `compd`), init spustí `console`, předá jí
+  framebuffer z firmware (`display`) a fokus od `inputd` (`focus`) a ta se
+  připojí stejně jako okno.
+- **Úvodní nápověda:** nová relace začne blokem s nápovědou (`help`, pár
+  příkladů, klávesy).
+
+⚠️ **Omezení:** po pádu kompozitoru zůstanou okna aplikací pryč (restart
+`compd` zatím není). Jestli je framebuffer z firmware po převzetí obrazu
+ovladačem virtio-gpu ještě vidět, záleží na zařízení (QEMU q35 s VGA ano).
 
 ## Proč se zatím neobnovuje `inputd`, `fsd`, `netd` a `devmgr`
 

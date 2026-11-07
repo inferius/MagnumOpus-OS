@@ -152,6 +152,12 @@ impl Window {
         write(&self.ch, &m.encode(), Vec::new())
     }
 
+    /// Ceka udalost ve fronte (prisla behem kresleni)? Pak `next` vrati
+    /// hned a cekat na kanal nema smysl.
+    pub fn has_queued(&self) -> bool {
+        !self.queue.is_empty()
+    }
+
     pub fn channel(&self) -> &Channel {
         &self.ch
     }

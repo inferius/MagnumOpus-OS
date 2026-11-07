@@ -4,13 +4,16 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use fsproto::hist::Change;
+use fsproto::v2::{access, share};
 use fsproto::{FsClient, Stat, kind};
 use libos::time::WallTime;
 use libos::Error;
 use shlang::host::{Applied, Aside, DirEntry, Fs, FsChange, FsChangeKind, FsResult, Meta, NodeKind, ViewRef};
 use shlang::vfs::path::{join, rebase};
 
-/// Kde lezi klony bokem (skryta slozka; po padu je uklidi termd pri startu).
+/// Kde lezi klony bokem (skryta slozka). Zbytky po padu uklidi init pri
+/// startu systemu, nez vznikne prvni relace (`user/init/src/terminal.rs`);
+/// termd je nemaze - nevi, ktere patri zivym relacim jinych oken a uloh.
 pub const ASIDE_DIR: &str = "/tmp/.aside";
 
 pub struct FsdFs {
@@ -143,14 +146,28 @@ impl Fs for FsdFs {
             }
             Err(e) => return Err(e),
         }
-        let tmp = alloc::format!("{path}.~termd");
-        let _ = self.client.remove(&tmp);
-        self.client.create(&tmp, kind::FILE)?;
-        let r = self.client.write(&tmp, 0, data).and_then(|_| self.client.rename_replace(&tmp, path));
-        if r.is_err() {
-            let _ = self.client.remove(&tmp);
+        // Podminene ulozeni (`REPLACE_BEGIN`/`COMMIT`): docasny soubor
+        // zalozi fsd vyhradne pro tento zapis (jedinecne jmeno, nikdy cizi
+        // soubor), smaze ho pri chybe i padu a cil nahradi atomicky,
+        // jen kdyz se mezitim nezmenil. Zmena mezi zjistenim revize
+        // a potvrzenim = zkusit znovu s novou revizi (shell prepisuje).
+        let mut last = Error::Conflict;
+        for _ in 0..3 {
+            let expected = match self.client.open(path, access::READ, share::ALL, 0) {
+                Ok(o) => {
+                    let _ = self.client.close(o.handle);
+                    Some(o.revision)
+                }
+                Err(Error::NotFound) => None,
+                Err(e) => return Err(e),
+            };
+            match self.client.save_if(path, expected, data) {
+                Ok(_) => return Ok(()),
+                Err(e @ (Error::Conflict | Error::AlreadyExists | Error::NotFound)) => last = e,
+                Err(e) => return Err(e),
+            }
         }
-        r
+        Err(last)
     }
 
     fn mkdir(&mut self, path: &str) -> FsResult<()> {
