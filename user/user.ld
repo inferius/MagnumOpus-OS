@@ -1,5 +1,5 @@
 /*
- * Linker skript programu v userspace (x86_64).
+ * Linker skript programu v userspace (x86_64 i aarch64).
  *
  * Programy jsou staticke (ET_EXEC) od adresy 4 MiB; pod ni zustava pamet
  * nenamapovana, aby dereference nuloveho ukazatele skoncila chybou.

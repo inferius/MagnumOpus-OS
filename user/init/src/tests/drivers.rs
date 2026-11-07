@@ -86,6 +86,22 @@ fn restricted_resource(s: &Startup) -> TestResult {
     let base = root
         .phys_addr(ecam, 0)
         .map_err(|e| fail("fyzicka adresa ECAM", e))?;
+    // Na aarch64 potrebuje MSI identitu zarizeni (DeviceID pro ITS), bez
+    // ni INTERRUPT_CREATE vrati INVALID_ARGS - proto prostredek zarizeni
+    // 00:00.0 (jeho konfiguracni prostor je prave tato stranka).
+    #[cfg(target_arch = "aarch64")]
+    let child = {
+        check_eq!(
+            root.restrict(&[(base, page)], 1, page)
+                .and_then(|r| r.interrupt().map(|_| ()))
+                .err(),
+            Some(Error::InvalidArgs),
+            "preruseni bez identity zarizeni"
+        );
+        root.restrict_device(&[(base, page)], 1, page, (0, 0, 0, 0))
+            .map_err(|e| fail("vytvoreni omezeneho", e))?
+    };
+    #[cfg(not(target_arch = "aarch64"))]
     let child = root
         .restrict(&[(base, page)], 1, page)
         .map_err(|e| fail("vytvoreni omezeneho", e))?;

@@ -1,5 +1,16 @@
 pub mod paging;
 
+use boot_info::DebugSerial;
+
+/// Ladici linka: na x86 jadro pouziva COM1 primo (I/O porty), loader nic
+/// nezjistuje.
+pub fn debug_serial(_acpi_rsdp: u64, _tables: &mut paging::PageTables) -> DebugSerial {
+    DebugSerial::none()
+}
+
+/// Na x86 jsou instrukcni a datova cache koherentni: nic.
+pub fn sync_kernel_image(_phys: u64, _len: u64) {}
+
 use core::arch::asm;
 
 /// Citac cyklu (TSC) pro navazani casu firmwaru na hodiny jadra.

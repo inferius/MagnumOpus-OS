@@ -4,31 +4,36 @@
 
 - **Rust via rustup.** The nightly, components and targets are pinned in
   `rust-toolchain.toml`; rustup installs them on the first build.
-- **QEMU** (`qemu-system-x86_64`) with edk2/OVMF firmware:
-  - Windows: `winget install SoftwareFreedomConservancy.QEMU`
-  - Debian/Ubuntu: `apt install qemu-system-x86 ovmf`
-  - Fedora: `dnf install qemu-system-x86 edk2-ovmf`
-  - Arch: `pacman -S qemu-desktop edk2-ovmf`
+- **QEMU** (`qemu-system-x86_64`, for aarch64 `qemu-system-aarch64`) with
+  edk2 firmware (OVMF, for aarch64 AAVMF):
+  - Windows: `winget install SoftwareFreedomConservancy.QEMU` (both
+    architectures and firmware)
+  - Debian/Ubuntu: `apt install qemu-system-x86 ovmf qemu-system-arm qemu-efi-aarch64`
+  - Fedora: `dnf install qemu-system-x86 edk2-ovmf qemu-system-aarch64 edk2-aarch64`
+  - Arch: `pacman -S qemu-desktop edk2-ovmf edk2-aarch64`
   - macOS: `brew install qemu`
 - Optionally **GDB** for debugging.
 
-xtask looks for QEMU in `PATH` and common install locations, and for OVMF
-next to QEMU or in `/usr/share/...`. Otherwise set `QEMU`, `OVMF_CODE`,
-`OVMF_VARS`.
+xtask looks for QEMU in `PATH` and common install locations, and for the
+firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
+(or `QEMU`), `QEMU_AARCH64`, `X86_64_FW_CODE`/`X86_64_FW_VARS` (or
+`OVMF_CODE`/`OVMF_VARS`) and `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `cargo xtask build` | builds the kernel, loader and userspace programs, creates initfs |
-| `cargo xtask image` | build + disk image `target/os-x86_64-<profile>.img` (GPT, FAT32 ESP) |
+| `cargo xtask image` | build + disk image `target/os-<arch>-<profile>.img` (GPT, FAT32 ESP) |
 | `cargo xtask run` | image + QEMU with a window; serial output in the terminal |
-| `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for aarch64, documentation, then kernel and userspace in QEMU without a window |
-| `cargo xtask check [--arch aarch64]` | only checks that the kernel builds for the given architecture (default x86_64); see [architecture interface](architecture.md#architecture-interface) |
+| `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for the other architectures, documentation, then kernel and userspace in QEMU without a window |
+| `cargo xtask check` | only checks that the kernel builds for the given architecture; see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
-Options: `--release`, `--headless` (no window), `--iommu <intel|amd|none>`
-(emulated IOMMU, default `intel`; `none` checks running without DMA
+Options: `--arch <x86_64|aarch64>` (all commands, default `x86_64`; aarch64
+= QEMU `virt`, see [the aarch64 implementation](architecture.md#the-aarch64-implementation-qemu-virt)),
+`--release`, `--headless` (no window), `--iommu <type>` (emulated IOMMU:
+x86_64 `intel` (default), `amd`, `none`; aarch64 `smmu` (default), `none`; `none` checks running without DMA
 translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" then
 fails as expected),
 `--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
@@ -108,7 +113,7 @@ loader/          UEFI loader
 kernel/          kernel
   src/arch/api/     architecture contract (traits), see architecture.md
   src/arch/x86_64/  everything x86_64-specific
-  src/arch/aarch64/ aarch64 skeleton (todo!)
+  src/arch/aarch64/ everything aarch64-specific (QEMU virt)
   src/trap.rs       reverse direction: architecture -> kernel
   src/mm/           memory
   src/sched/        scheduler

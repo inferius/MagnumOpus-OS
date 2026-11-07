@@ -1,77 +1,89 @@
-//! Kostra implementace smlouvy architektury (`arch::api`) pro aarch64.
+//! Implementace smlouvy architektury (`arch::api`) pro aarch64.
 //!
-//! ZATIM NEFUNGUJE: vsechno, co by melo neco delat, konci `todo!` s popisem.
-//! Kostra existuje, aby se jadro pro aarch64 prekladalo (`cargo xtask check
-//! --arch aarch64`) a aby prekladac hlidal, ze smlouva jde implementovat
-//! i jinde nez na x86. Cil: QEMU `virt` (GICv3, PL011, PSCI, SMMUv3, UEFI
-//! z edk2 s ACPI), pozdeji Raspberry Pi.
+//! Cil: QEMU `virt` (GICv3 s ITS, PL011, PSCI, UEFI z edk2 s ACPI), pozdeji
+//! Raspberry Pi. Jadro bezi v EL1, programy v EL0.
 //!
-//! Planovane moduly (obdoba `arch/x86_64`):
-//!
-//! | modul        | obsah                                                      |
-//! |--------------|------------------------------------------------------------|
-//! | `exceptions` | tabulka vektoru (VBAR_EL1), ulozeni registru, ESR -> chyba ABI |
-//! | `gic`        | GICv3: distributor, redistributor na CPU, ITS pro MSI (LPI) |
-//! | `timer`      | generic timer: CNTVCT_EL0 hodiny, CNTP_TVAL_EL0 jednorazove |
-//! | `mmu`        | 4 urovne, granule 4 KiB, TTBR0 (proces) / TTBR1 (jadro), MAIR, TCR |
-//! | `context`    | x19-x30, sp, FPU/SIMD v0-v31, FPCR/FPSR; prepinani         |
-//! | `user`       | EL0 <-> EL1: SVC, ERET, SP_EL0, TPIDR_EL0 programu         |
-//! | `psci`       | start CPU (CPU_ON pres HVC/SMC podle ACPI FADT)            |
-//! | `smmu`       | SMMUv3: stream table, domeny (preklad DMA)                 |
-//! | `acpi`       | MADT (GICC, GICD, GIC ITS), GTDT, IORT (RID -> StreamID/DeviceID), SPCR |
-//! | `pl011`      | ladici seriova linka                                       |
+//! Prehled (podrobnosti v modulech):
+//! - CPU: tabulka vyjimek (`exceptions`), per-CPU data pres TPIDR_EL1,
+//!   FPU/SIMD jen pro programy (`context`),
+//! - preruseni: GICv3 (`gic`), MSI zarizeni pres ITS (`its`), IPI = SGI,
+//! - cas: generic timer (`timer`), citac je synchronni na vsech CPU,
+//! - pamet: 4 urovne, granule 4 KiB, TTBR1 jadro / TTBR0 proces (`mmu`),
+//! - start dalsich CPU: PSCI CPU_ON (`smp`),
+//! - platforma: ACPI MADT a FADT (`acpi`),
+//! - ladeni: PL011 (`pl011`), konec testu pres semihosting (`semihosting`).
 //!
 //! Dohodnuta pravidla pro port (dulezita, at se nemusi menit zbytek jadra):
 //! - per-CPU ukazatel v TPIDR_EL1, `CpuLocal` na offsetu 8 v `PerCpu`,
-//! - stranka 4 KiB (soucast ABI) a stejne rozlozeni adresniho prostoru jako
-//!   na x86_64 (prima mapa od `0xFFFF_8000_0000_0000`, 48bitove adresy),
-//! - cisla chyb pro `trap::user_fault` = cisla vektoru x86 (abi): napr.
+//! - stejne rozlozeni adresniho prostoru jako na x86_64 (prima mapa od
+//!   `0xFFFF_8000_0000_0000`, 48bitove adresy), ramec jadra 4 KiB,
+//! - cisla chyb pro `trap::user_fault` = cisla vektoru x86 (abi):
 //!   Data/Instruction Abort -> 14, nedefinovana instrukce -> 6, zarovnani
-//!   (SP/PC alignment) -> 17, breakpoint (BRK) -> 3,
+//!   (SP/PC) -> 17, BRK -> 3, ostatni -> 13,
 //! - hardwarove ID CPU = afinita z MPIDR_EL1 (Aff3..Aff0 slozene do u32),
-//! - citac cyklu (CNTVCT_EL0) je architekturou synchronni: zadne mereni.
+//! - syscall: `svc #0`, cislo v x8, argumenty x0-x5, vysledek v x0.
+//!
+//! - IOMMU: SMMUv3 (`smmu`, popis v IORT).
+//!
+//! Zatim chybi: RTC (cas jen z UEFI pri startu).
 
-#![allow(
-    dead_code,
-    reason = "kostra: pole a typy pouzije az skutecna implementace (milnik 9)"
-)]
+pub mod acpi;
+mod context;
+mod exceptions;
+mod gic;
+mod its;
+mod mmu;
+mod pl011;
+mod regs;
+mod semihosting;
+mod smmu;
+mod smp;
+mod tests;
+mod timer;
 
+use core::arch::asm;
 use core::fmt;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use boot_info::BootInfo;
+use boot_info::{BootInfo, SerialKind};
 
 use crate::acpi::Platform;
-use crate::arch::api::{
-    self,
-    paging::{MapError, MapFlags, PageSize},
-};
+use crate::arch::api;
 use crate::error::Error;
-use crate::mm::{PhysAddr, VirtAddr};
+use crate::log;
+use regs::{mpidr_to_hw_id, mrs, msr};
 
 /// Typ, na kterem je smlouva pro aarch64 implementovana.
 pub struct Aarch64;
 
 impl api::Architecture for Aarch64 {}
 
-/// Per-CPU data pro prechody EL0 <-> EL1 (cte je vstup vyjimky pres
-/// TPIDR_EL1 na offsetu `CPU_LOCAL_OFFSET`).
+/// Posledni cislo preruseni zarizeni (LPI 8192..=9215, 1024 preruseni).
+pub const DEVICE_IRQ_LAST: u32 = gic::LPI_FIRST + 1023;
+
+/// Per-CPU data pro prechody EL0 <-> EL1 (v `PerCpu` na offsetu
+/// `CPU_LOCAL_OFFSET`).
 #[repr(C)]
 #[derive(Debug)]
 pub struct CpuLocal {
-    /// Vrchol zasobniku jadra aktualniho vlakna (SP_EL1 pri vstupu z EL0).
-    kernel_sp: u64,
-    /// Odlozeny SP_EL0 programu.
-    user_sp: u64,
+    /// Vrchol zasobniku jadra aktualniho vlakna (pro prvni vstup do EL0).
+    kernel_sp: AtomicU64,
 }
 
 impl api::CpuLocalData for CpuLocal {
     fn for_this_cpu() -> Self {
         Self {
-            kernel_sp: 0,
-            user_sp: 0,
+            kernel_sp: AtomicU64::new(0),
         }
     }
 }
+
+/// Prazdna per-CPU data: prvni slovo 0 = "CPU jeste neni zaregistrovane".
+static EMPTY_CPU_LOCAL: u64 = 0;
+
+/// PSCI pres HVC (z FADT), pro start CPU.
+static PSCI_HVC: AtomicBool = AtomicBool::new(true);
+static PSCI_PRESENT: AtomicBool = AtomicBool::new(false);
 
 impl api::Cpu for Aarch64 {
     const NAME: &'static str = "aarch64";
@@ -81,106 +93,159 @@ impl api::Cpu for Aarch64 {
     type CpuLocal = CpuLocal;
     const CPU_LOCAL_OFFSET: usize = 8;
 
+    /// Tabulka vyjimek, funkce MMU (MAIR, WXN, PAN), FPU pro programy,
+    /// hodiny.
     unsafe fn init_boot_cpu() {
-        todo!(
-            "aarch64: overit EL1, nastavit VBAR_EL1 (tabulka vektoru), SCTLR_EL1 (WXN, SPAN), \
-             zapnout FPU/SIMD (CPACR_EL1.FPEN), PAN, MAIR_EL1 a TCR_EL1"
-        )
+        // SAFETY: predano volajicim (jednou, bootovaci CPU, bez preruseni).
+        unsafe {
+            exceptions::init_cpu();
+            mmu::init_cpu();
+        }
+        timer::init();
     }
 
     unsafe fn init_ap_cpu() {
-        todo!("aarch64: totez co init_boot_cpu pro dalsi CPU + redistributor GICv3 a casovac")
+        // SAFETY: predano volajicim.
+        unsafe {
+            exceptions::init_cpu();
+            mmu::init_cpu();
+        }
+        gic::init_cpu(timer::INTID);
     }
 
     fn hw_id() -> u32 {
-        todo!("aarch64: cist MPIDR_EL1 a slozit Aff3..Aff0 do u32")
+        mpidr_to_hw_id(mrs!("mpidr_el1"))
     }
 
     fn clear_cpu_local() {
-        todo!("aarch64: TPIDR_EL1 = adresa staticke nuly (jako EMPTY_CPU_LOCAL na x86)")
+        // SAFETY: staticka promenna zije navzdy a jeji prvni slovo je 0.
+        unsafe { msr!("tpidr_el1", &raw const EMPTY_CPU_LOCAL as u64) };
     }
 
-    unsafe fn set_cpu_local(_ptr: u64) {
-        todo!("aarch64: zapsat ptr do TPIDR_EL1")
+    unsafe fn set_cpu_local(ptr: u64) {
+        // SAFETY: predano volajicim.
+        unsafe { msr!("tpidr_el1", ptr) };
     }
 
+    #[inline]
     fn cpu_local() -> u64 {
-        todo!("aarch64: cist TPIDR_EL1 a z nej prvni slovo (ukazatel na PerCpu)")
+        let base = mrs!("tpidr_el1");
+        // SAFETY: TPIDR_EL1 ukazuje na per-CPU data, jejichz prvni slovo je
+        // ukazatel na ne same, nebo na nulove EMPTY_CPU_LOCAL.
+        unsafe { (base as *const u64).read() }
     }
 
     fn halt_forever() -> ! {
-        todo!("aarch64: msr daifset, #0xf a smycka wfi")
+        halt_forever()
     }
 
     fn breakpoint() {
-        todo!("aarch64: instrukce brk #0, obsluha posune ELR_EL1 o 4 a vrati se")
+        // SAFETY: brk vyvola vyjimku, obsluha ji zaloguje a vrati se za ni.
+        unsafe { asm!("brk #0", options(nomem, nostack)) };
+    }
+}
+
+/// Zakaze preruseni a navzdy zastavi aktualni CPU.
+fn halt_forever() -> ! {
+    loop {
+        // SAFETY: maskovani preruseni a cekani nemeni pamet.
+        unsafe { asm!("msr daifset, #0xf", "wfi", options(nomem, nostack)) };
+    }
+}
+
+/// Povoleni a zakazani preruseni (bit I v DAIF).
+mod interrupts {
+    use core::arch::asm;
+
+    const DAIF_I: u64 = 1 << 7;
+
+    pub fn are_enabled() -> bool {
+        super::regs::mrs!("daif") & DAIF_I == 0
+    }
+
+    pub fn disable() -> bool {
+        let was = are_enabled();
+        // SAFETY: zamaskuje IRQ na tomto CPU.
+        unsafe { asm!("msr daifset, #2", options(nomem, nostack)) };
+        was
+    }
+
+    pub fn enable() {
+        // SAFETY: povoli IRQ; tabulka vyjimek je nahrana pri startu CPU.
+        unsafe { asm!("msr daifclr, #2", options(nomem, nostack)) };
+    }
+
+    /// WFI probudi i zamaskovane cekajici preruseni, takze nejdriv uspat,
+    /// pak povolit: preruseni mezi tim neutece.
+    pub fn enable_and_halt() {
+        // SAFETY: viz `enable`; wfi jen ceka.
+        unsafe { asm!("wfi", "msr daifclr, #2", options(nomem, nostack)) };
     }
 }
 
 impl api::Interrupts for Aarch64 {
+    #[inline]
     fn are_enabled() -> bool {
-        todo!("aarch64: DAIF.I == 0")
+        interrupts::are_enabled()
     }
 
+    #[inline]
     fn disable() -> bool {
-        todo!("aarch64: precist DAIF, msr daifset, #2, vratit puvodni stav I")
+        interrupts::disable()
     }
 
-    fn restore(_was_enabled: bool) {
-        todo!("aarch64: pri true msr daifclr, #2")
+    #[inline]
+    fn restore(was_enabled: bool) {
+        if was_enabled {
+            interrupts::enable();
+        }
     }
 
+    #[inline]
     fn enable() {
-        todo!("aarch64: msr daifclr, #2")
+        interrupts::enable()
     }
 
+    #[inline]
     fn enable_and_halt() {
-        todo!(
-            "aarch64: wfi s maskovanym IRQ a pak daifclr (cekajici preruseni WFI probudi \
-             i kdyz je maskovane, takze nic neutece)"
-        )
-    }
-}
-
-/// Ulozeny kontext vlakna: SP, x19-x30 (na zasobniku nebo zde), FPU/SIMD
-/// v0-v31 + FPCR/FPSR (512 + 8 B).
-#[derive(Debug, Default)]
-pub struct Context {
-    sp: u64,
-}
-
-impl api::ThreadContext for Context {
-    unsafe fn new(_stack_top: u64, _start: extern "C" fn() -> !) -> Self {
-        todo!("aarch64: ramec pro switch: x30 (lr) = start, x29 = 0 (konec retezu ramcu)")
+        interrupts::enable_and_halt()
     }
 }
 
 impl api::Threads for Aarch64 {
-    type Context = Context;
+    type Context = context::Context;
 
-    unsafe fn switch(_from: *mut Context, _to: *const Context) {
-        todo!("aarch64: naked fn - ulozit x19-x30, sp, v8-v15 a FPU stav, nacist z `to`, ret")
+    #[inline(always)]
+    unsafe fn switch(from: *mut Self::Context, to: *const Self::Context) {
+        // SAFETY: predano volajicim.
+        unsafe { context::switch(from, to) }
     }
 
-    unsafe fn switch_stack(_top: u64, _f: extern "C" fn(u64) -> !, _arg: u64) -> ! {
-        todo!("aarch64: mov sp, top; mov x29, #0; mov x30, #0; x0 = arg; br f")
+    unsafe fn switch_stack(top: u64, f: extern "C" fn(u64) -> !, arg: u64) -> ! {
+        // SAFETY: predano volajicim.
+        unsafe { context::switch_stack(top, f, arg) }
     }
 
-    unsafe fn set_kernel_stack(_local: &CpuLocal, _top: u64) {
-        todo!("aarch64: local.kernel_sp = top (vstup z EL0 prepne SP_EL1 sem)")
+    #[inline]
+    unsafe fn set_kernel_stack(local: &CpuLocal, top: u64) {
+        local.kernel_sp.store(top, Ordering::Relaxed);
     }
 
-    unsafe fn enter_user(_entry: u64, _stack: u64, _arg0: u64, _arg1: u64) -> ! {
-        todo!(
-            "aarch64: SP_EL0 = stack, ELR_EL1 = entry, SPSR_EL1 = EL0t s povolenymi IRQ, \
-             x0/x1 = argumenty, ostatni registry vynulovat, eret"
-        )
+    unsafe fn enter_user(entry: u64, stack: u64, arg0: u64, arg1: u64) -> ! {
+        let local = <Self as api::Cpu>::cpu_local() + <Self as api::Cpu>::CPU_LOCAL_OFFSET as u64;
+        // SAFETY: per-CPU data aktualniho CPU (kontrakt `set_cpu_local`).
+        let top = unsafe {
+            (*(local as *const CpuLocal))
+                .kernel_sp
+                .load(Ordering::Relaxed)
+        };
+        // SAFETY: predano volajicim; `top` nastavil `set_kernel_stack`.
+        unsafe { context::enter_user(entry, stack, arg0, arg1, top) }
     }
 }
 
 /// Vlastnosti casovace (do logu).
 pub struct TimerInfo {
-    /// Frekvence generic timeru (CNTFRQ_EL0).
     pub hz: u64,
 }
 
@@ -196,19 +261,33 @@ impl api::Time for Aarch64 {
     /// CNTVCT_EL0 je podle architektury stejny na vsech CPU.
     const CYCLE_COUNTER_SYNCED: bool = true;
 
-    unsafe fn init_platform(_platform: &Platform) -> TimerInfo {
-        todo!(
-            "aarch64: CNTFRQ_EL0 (bez kalibrace), GICv3 distributor a redistributor BSP \
-             z MADT, PPI casovace (z GTDT) povolit"
-        )
+    /// GICv3 (distributor, ITS, redistributor bootovaciho CPU) a casovac.
+    unsafe fn init_platform(platform: &Platform) -> TimerInfo {
+        let a = &platform.arch;
+        let regions: alloc::vec::Vec<(u64, u64)> = if a.gicr.is_empty() {
+            a.gicc_gicr.iter().map(|&b| (b, 0x2_0000)).collect()
+        } else {
+            a.gicr.clone()
+        };
+        gic::init_distributor(a.gicd, &regions);
+        gic::init_cpu(timer::INTID);
+        match a.its.first() {
+            Some(&its) => its::init(its),
+            None => log::warn!("platforma nema ITS: zarizeni nebudou mit preruseni (MSI)"),
+        }
+        PSCI_HVC.store(a.psci_hvc, Ordering::Relaxed);
+        PSCI_PRESENT.store(a.psci, Ordering::Relaxed);
+        TimerInfo { hz: timer::hz() }
     }
 
+    #[inline]
     fn now_ns() -> u64 {
-        todo!("aarch64: CNTVCT_EL0 (po isb) prevest na ns podle CNTFRQ_EL0")
+        timer::now_ns()
     }
 
+    #[inline]
     fn cycle_counter() -> u64 {
-        todo!("aarch64: CNTVCT_EL0")
+        timer::counter()
     }
 
     fn adjust_cycle_counter(_delta: i64) -> bool {
@@ -216,278 +295,189 @@ impl api::Time for Aarch64 {
         false
     }
 
-    fn set_timer(_ns: Option<u64>) {
-        todo!("aarch64: CNTP_TVAL_EL0 + CNTP_CTL_EL0.ENABLE, pri None IMASK")
+    fn set_timer(ns: Option<u64>) {
+        timer::set_oneshot(ns);
     }
 
-    fn ns_from_counter_to_start(_counter: u64) -> i128 {
-        todo!("aarch64: (start - counter) * 1e9 / CNTFRQ_EL0 (loader musi cist CNTVCT_EL0)")
+    fn ns_from_counter_to_start(counter: u64) -> i128 {
+        timer::ns_from_counter_to_start(counter)
     }
 
     fn hardware_clock(_platform: &Platform) -> Option<abi::time::WallTime> {
-        // RTC na ARM (PL031, EFI RTC) zatim neni: jen cas z UEFI.
+        // RTC (PL031, EFI RTC za behu) zatim neni: jen cas z UEFI.
         None
     }
 
     fn set_hardware_clock(_platform: &Platform, _t: abi::time::WallTime) -> bool {
-        // Zatim zadne hodiny (PL031, EFI SetTime za behu): jen cas systemu.
         false
     }
 }
 
 impl api::Ipi for Aarch64 {
-    fn send_reschedule(_cpu_hw_id: u32) {
-        todo!("aarch64: SGI (ICC_SGI1R_EL1) s cislem pro preplanovani")
+    fn send_reschedule(cpu_hw_id: u32) {
+        gic::send_sgi(cpu_hw_id, gic::SGI_RESCHEDULE);
     }
 
-    fn send_halt(_cpu_hw_id: u32) {
-        todo!("aarch64: SGI pro zastaveni")
+    fn send_halt(cpu_hw_id: u32) {
+        gic::send_sgi(cpu_hw_id, gic::SGI_HALT);
     }
 
-    fn send_tlb_flush(_cpu_hw_id: u32) {
-        // Nevola se: `flush_tlb_broadcast` vraci true.
-        todo!("aarch64: neni potreba (TLBI ... IS)")
-    }
-}
-
-/// Tabulky stranek procesu (TTBR0_EL1). Jadro ma vlastni tabulky
-/// v TTBR1_EL1, ktere se pri prepinani procesu nemeni.
-pub struct PageTable {
-    root: u64,
-}
-
-impl api::PageTableOps for PageTable {
-    fn new() -> Result<Self, MapError> {
-        todo!("aarch64: alokovat korenovou tabulku (L0)")
-    }
-
-    fn new_sharing_kernel_half(_kernel: &Self) -> Result<Self, MapError> {
-        todo!("aarch64: jen nova prazdna tabulka - jadro je v TTBR1_EL1, nic se nekopiruje")
-    }
-
-    fn preallocate_kernel_half(&mut self) -> Result<(), MapError> {
-        todo!("aarch64: nic - horni polovinu sdili registr TTBR1_EL1")
-    }
-
-    unsafe fn activate_kernel(&self) {
-        todo!("aarch64: TTBR1_EL1 = root; dsb ish, isb (TTBR0 nastavuje switch_user_space)")
-    }
-
-    fn map(
-        &mut self,
-        _virt: VirtAddr,
-        _phys: PhysAddr,
-        _size: PageSize,
-        _flags: MapFlags,
-    ) -> Result<(), MapError> {
-        todo!(
-            "aarch64: deskriptor stranky/bloku: AF, SH = inner, AP (EL0/RO), UXN/PXN, nG pro \
-             proces, AttrIndx (MAIR: normalni / Device-nGnRE pro UNCACHED, Normal-NC pro DMA na nekoherentni platforme)"
-        )
-    }
-
-    fn unmap_4k(&mut self, _virt: VirtAddr) {
-        todo!("aarch64: vynulovat L3 deskriptor, dsb ishst, tlbi vaae1, dsb ish, isb")
-    }
-
-    fn translate(&self, _virt: VirtAddr) -> Option<PhysAddr> {
-        todo!("aarch64: prochazka L0-L3 (nebo instrukce AT S1E1R + PAR_EL1)")
-    }
-
-    fn root(&self) -> u64 {
-        self.root
-    }
-
-    unsafe fn destroy(self) {
-        todo!("aarch64: uvolnit tabulky spodni poloviny a korenovou tabulku")
+    fn send_tlb_flush(cpu_hw_id: u32) {
+        gic::send_sgi(cpu_hw_id, gic::SGI_TLB_FLUSH);
     }
 }
 
 impl api::Memory for Aarch64 {
-    type PageTable = PageTable;
+    type PageTable = mmu::PageTable;
 
     fn supports_1g_pages() -> bool {
         // Granule 4 KiB ma 1 GiB bloky na urovni 1 vzdy.
         true
     }
 
-    unsafe fn switch_user_space(_root: Option<u64>) {
-        todo!(
-            "aarch64: Some(root) -> TTBR0_EL1 = root a TCR_EL1.EPD0 = 0 (+ ASID az pozdeji; \
-             bez ASID tlbi vmalle1 po prepnuti); None -> TCR_EL1.EPD0 = 1 (spodni \
-             polovina neni mapovana); isb"
-        )
+    unsafe fn switch_user_space(root: Option<u64>) {
+        // SAFETY: predano volajicim.
+        unsafe { mmu::switch_user_space(root) }
     }
 
     fn flush_tlb_local() {
-        todo!("aarch64: dsb ishst; tlbi vmalle1; dsb nsh; isb")
+        mmu::flush_user_tlb_local();
     }
 
+    /// TLBI ... IS zneplatni TLB vsech CPU bez IPI.
     fn flush_tlb_broadcast() -> bool {
-        todo!("aarch64: dsb ishst; tlbi vmalle1is; dsb ish; isb; vratit true")
+        mmu::flush_user_tlb_all();
+        true
     }
 
-    // Koherence DMA je vlastnost platformy: QEMU virt koherentni, Raspberry
-    // Pi 4 ne (ACPI _CCA / DT `dma-coherent`). Zjisti se pri startu a ulozi
-    // (napr. AtomicBool); `PageTable::map` podle ni pro `MapFlags::DMA`
-    // zvoli Normal WB nebo Normal Non-cacheable (MAIR).
-
-    fn dma_sync_for_device(_phys: u64, _len: u64) {
-        todo!(
-            "aarch64: na koherentni platforme nic; jinak dc civac pres primou mapu po \
-             radcich cache (CTR_EL0.DminLine), dsb sy"
-        )
+    fn dma_sync_for_device(phys: u64, len: u64) {
+        if !mmu::dma_coherent() {
+            let virt = crate::mm::PhysAddr::new(phys).to_virt().as_u64();
+            regs::dcache_clean_invalidate(virt, len);
+        }
     }
 
-    fn dma_sync_for_cpu(_phys: u64, _len: u64) {
-        todo!(
-            "aarch64: na koherentni platforme nic; jinak dc civac (ne ivac - nezahodit \
-             cizi data v okrajovych radcich) po radcich cache, dsb sy"
-        )
+    fn dma_sync_for_cpu(phys: u64, len: u64) {
+        if !mmu::dma_coherent() {
+            let virt = crate::mm::PhysAddr::new(phys).to_virt().as_u64();
+            regs::dcache_clean_invalidate(virt, len);
+        }
     }
 }
 
 impl api::DeviceIrq for Aarch64 {
-    /// LPI v GICv3 zacinaji na INTID 8192.
-    const DEVICE_IRQ_FIRST: u32 = 8192;
-    const DEVICE_IRQ_LAST: u32 = 8192 + 1023;
+    const DEVICE_IRQ_FIRST: u32 = gic::LPI_FIRST;
+    const DEVICE_IRQ_LAST: u32 = DEVICE_IRQ_LAST;
 
-    fn msi_message(_irq: u32, device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
-        // Bez identity zarizeni ITS nevi, komu preruseni patri.
-        if device.is_none() {
-            return Err(Error::InvalidArgs);
-        }
-        todo!(
-            "aarch64: ITS - DeviceID z IORT (RID -> DeviceID), MAPD/MAPTI prikazy, \
-             adresa = GITS_TRANSLATER, data = EventID"
-        )
-    }
-}
-
-/// Domena SMMUv3 (kontextovy deskriptor + tabulky stranek pro jeden StreamID).
-#[derive(Clone)]
-pub struct Domain;
-
-impl api::IommuDomain for Domain {
-    fn map(&self, _phys: u64, _pages: u64) -> Result<(), Error> {
-        todo!("aarch64: SMMUv3 - identicke mapovani stranek, CMD_TLBI_NH_VA")
-    }
-
-    fn unmap(&self, _phys: u64, _pages: u64) {
-        todo!("aarch64: SMMUv3 - odmapovat a zneplatnit TLB SMMU, pockat na CMD_SYNC")
+    fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
+        its::msi_message(irq, device)
     }
 }
 
 impl api::Iommu for Aarch64 {
-    type Domain = Domain;
+    type Domain = alloc::sync::Arc<smmu::SmmuDomain>;
 
-    unsafe fn init(_platform: &Platform) {
-        todo!(
-            "aarch64: SMMUv3 z IORT; bez SMMU (napr. Raspberry Pi 4) zalogovat varovani \
-             jako na x86 bez IOMMU"
-        )
+    unsafe fn init(platform: &Platform) {
+        if let Some((base, rid, sid)) = platform.arch.smmu {
+            smmu::init(base, (rid, sid));
+        }
+        if !smmu::active() {
+            log::warn!(
+                "IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do pameti (chyba ovladace muze poskodit system)"
+            );
+        }
     }
 
-    fn domain(_segment: u16, _bus: u8, _devfn: u8) -> Result<Option<Domain>, Error> {
-        todo!("aarch64: StreamID z IORT, polozka stream table -> nova domena")
+    fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Self::Domain>, Error> {
+        smmu::domain(segment, bus, devfn)
     }
-}
-
-/// Start CPU pres PSCI CPU_ON.
-pub struct Psci;
-
-impl api::CpuStarter for Psci {
-    fn start(
-        &self,
-        _hw_id: u32,
-        _stack_top: u64,
-        _entry: extern "C" fn(u64) -> !,
-        _arg: u64,
-        _started: impl Fn() -> bool,
-    ) -> bool {
-        todo!(
-            "aarch64: CPU_ON(MPIDR, fyzicka adresa vstupniho stubu, kontext) - stub zapne \
-             MMU s tabulkami jadra, nastavi sp a skoci do entry(arg); pak cekat na started()"
-        )
-    }
-
-    fn finish(self) {}
 }
 
 impl api::Smp for Aarch64 {
-    type Starter = Psci;
+    type Starter = smp::Psci;
 
-    unsafe fn prepare_cpu_start(_boot_info: &BootInfo) -> Option<Psci> {
-        todo!("aarch64: PSCI pres HVC nebo SMC podle ACPI FADT (ARM boot flags)")
-    }
-}
-
-/// Udaje o platforme aarch64 z ACPI.
-#[derive(Debug, Default)]
-pub struct Aarch64Platform {
-    /// Fyzicka adresa distributoru GICv3 (MADT GICD).
-    pub gicd_phys: u64,
-    /// Fyzicke adresy ITS (MADT GIC ITS).
-    pub its_phys: alloc::vec::Vec<u64>,
-}
-
-impl fmt::Display for Aarch64Platform {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "GICD {:#x}, {} ITS", self.gicd_phys, self.its_phys.len())
+    unsafe fn prepare_cpu_start(_boot_info: &BootInfo) -> Option<smp::Psci> {
+        if !PSCI_PRESENT.load(Ordering::Relaxed) {
+            log::warn!("firmware nehlasi PSCI, bezim jen na jednom CPU");
+            return None;
+        }
+        smp::prepare(PSCI_HVC.load(Ordering::Relaxed))
     }
 }
 
 impl api::PlatformInfo for Aarch64 {
-    type Info = Aarch64Platform;
+    type Info = acpi::Aarch64Platform;
 
-    fn acpi_table(_signature: &[u8; 4], _table: &[u8], _platform: &mut Platform) {
-        todo!(
-            "aarch64: APIC (MADT: GICC -> cpus s MPIDR, GICD, GICR, GIC ITS), GTDT (PPI \
-             casovace), IORT (mapovani RID), SPCR (seriova linka), FACP (PSCI HVC/SMC)"
-        )
+    fn acpi_table(signature: &[u8; 4], table: &[u8], platform: &mut Platform) {
+        acpi::table(signature, table, platform);
     }
 
-    fn acpi_check(_platform: &Platform) -> Result<(), Error> {
-        todo!("aarch64: chybi MADT nebo GICD -> Error::NotFound")
-    }
-}
-
-/// Seriova linka PL011 (QEMU virt: 0x0900_0000, adresa z ACPI SPCR).
-pub struct Pl011;
-
-impl fmt::Write for Pl011 {
-    fn write_str(&mut self, _s: &str) -> fmt::Result {
-        todo!("aarch64: cekat na UARTFR.TXFF == 0 a zapsat do UARTDR (MMIO pres primou mapu)")
-    }
-}
-
-impl api::DebugSerial for Pl011 {
-    fn init(&mut self) {
-        todo!("aarch64: PL011 - rychlost (UARTIBRD/FBRD), 8N1 (UARTLCR_H), zapnout (UARTCR)")
+    fn acpi_check(platform: &Platform) -> Result<(), Error> {
+        acpi::check(platform)
     }
 }
 
 impl api::Diagnostics for Aarch64 {
-    type Serial = Pl011;
+    type Serial = pl011::Pl011;
 
-    fn debug_serial() -> Pl011 {
-        Pl011
+    /// Adresa PL011 od loaderu (z ACPI SPCR), identicky namapovana.
+    fn init_early(boot_info: &BootInfo) {
+        if boot_info.magic == boot_info::BOOT_INFO_MAGIC
+            && boot_info.version == boot_info::BOOT_INFO_VERSION
+            && boot_info.debug_serial.kind == SerialKind::Pl011
+        {
+            pl011::set_phys(boot_info.debug_serial.base);
+        }
     }
 
-    fn stack_trace(_fp: u64, _f: impl FnMut(u64)) {
-        todo!("aarch64: retez ramcu pres x29: [fp] = predchozi fp, [fp + 8] = navratova adresa")
+    fn debug_serial() -> pl011::Pl011 {
+        pl011::Pl011
     }
 
-    fn current_stack_trace(_f: impl FnMut(u64)) {
-        todo!("aarch64: stack_trace od aktualniho x29")
+    fn stack_trace(fp: u64, f: impl FnMut(u64)) {
+        stack_trace(fp, f);
     }
 
-    fn qemu_exit(_success: bool) {
-        todo!(
-            "aarch64: semihosting SYS_EXIT_EXTENDED (QEMU -semihosting) nebo PSCI SYSTEM_OFF; \
-             xtask musi znat vysledek"
-        )
+    #[inline(always)]
+    fn current_stack_trace(f: impl FnMut(u64)) {
+        let fp: u64;
+        // SAFETY: cteni x29 (ukazatel ramce).
+        unsafe { asm!("mov {}, x29", out(reg) fp, options(nomem, nostack, preserves_flags)) };
+        stack_trace(fp, f);
     }
 
-    const TESTS: &'static [(&'static str, fn())] = &[];
+    /// Semihosting SYS_EXIT (QEMU s `-semihosting-config enable=on`):
+    /// kod 0 = uspech. Mimo testovaci build se nevola (bez semihostingu by
+    /// instrukce vyvolala vyjimku).
+    fn qemu_exit(success: bool) {
+        if cfg!(feature = "qemu-test") {
+            semihosting::exit(if success { 0 } else { 1 });
+        }
+    }
+
+    const TESTS: &'static [(&'static str, fn())] = tests::TESTS;
+}
+
+/// Projde retez ramcu (x29: [fp] = predchozi fp, [fp + 8] = navratova
+/// adresa) a pro kazdou navratovou adresu zavola `f`. Cte jen namapovanou
+/// pamet jadra.
+fn stack_trace(mut fp: u64, mut f: impl FnMut(u64)) {
+    const MAX_DEPTH: usize = 32;
+    for _ in 0..MAX_DEPTH {
+        if fp == 0
+            || fp % 8 != 0
+            || fp < 0xFFFF_8000_0000_0000
+            || !mmu::is_mapped(fp)
+            || !mmu::is_mapped(fp + 8)
+        {
+            return;
+        }
+        // SAFETY: obe slova ramce jsou zarovnana a namapovana (overeno vyse).
+        let (next, ret) = unsafe { (*(fp as *const u64), *((fp + 8) as *const u64)) };
+        if ret == 0 {
+            return;
+        }
+        f(ret);
+        fp = next;
+    }
 }

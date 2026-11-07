@@ -18,7 +18,7 @@
 pub const BOOT_INFO_MAGIC: u64 = u64::from_le_bytes(*b"OSBOOTIF");
 
 /// Verze rozhrani. Zvysit pri kazde nekompatibilni zmene struktur.
-pub const BOOT_INFO_VERSION: u32 = 3;
+pub const BOOT_INFO_VERSION: u32 = 4;
 
 /// Zacatek prime mapy fyzicke pameti (zacatek horni poloviny adresniho prostoru).
 pub const PHYS_MAP_BASE: u64 = 0xFFFF_8000_0000_0000;
@@ -57,6 +57,86 @@ pub struct BootInfo {
     pub initfs_len: u64,
     /// Realny cas z firmwaru (UEFI `GetTime`) tesne pred ukoncenim boot services.
     pub firmware_time: FirmwareTime,
+    /// Fyzicka adresa device tree (FDT) od firmwaru, 0 pokud ho nedal.
+    /// Jadro ho zatim necte (popis platformy bere z ACPI); pripraveno pro
+    /// platformy bez ACPI (Raspberry Pi).
+    pub device_tree: u64,
+    /// Ladici seriova linka, kterou jadro smi pouzit od prvni instrukce.
+    pub debug_serial: DebugSerial,
+}
+
+/// Ladici seriova linka zjistena loaderem (aarch64: z ACPI SPCR).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct DebugSerial {
+    pub kind: SerialKind,
+    pub _reserved: u32,
+    /// Fyzicka adresa registru (MMIO) nebo cislo portu (I/O porty x86).
+    /// Na aarch64 ji loader identicky namapuje jako zarizeni, takze jadro
+    /// muze psat i pred zavedenim vlastnich tabulek stranek.
+    pub base: u64,
+}
+
+impl DebugSerial {
+    pub const fn none() -> Self {
+        Self {
+            kind: SerialKind::None,
+            _reserved: 0,
+            base: 0,
+        }
+    }
+}
+
+/// Typ ladici seriove linky.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SerialKind {
+    /// Zadna (jadro pouzije vychozi linku architektury, x86: COM1).
+    None = 0,
+    /// ARM PL011 (MMIO).
+    Pl011 = 1,
+}
+
+/// Konstanty MMU pro aarch64 sdilene loaderem a jadrem: loader nastavi
+/// MAIR a TCR pred skokem do jadra, jadro je pouziva v tabulkach stranek.
+pub mod aarch64 {
+    /// Index atributu pameti (MAIR_EL1) pro beznou pamet s cache (Normal
+    /// Write-Back, read/write allocate).
+    pub const ATTR_NORMAL: u64 = 0;
+    /// Registry zarizeni (Device-nGnRE).
+    pub const ATTR_DEVICE: u64 = 1;
+    /// Bezna pamet bez cache (Normal Non-cacheable), pro DMA na
+    /// nekoherentnich platformach.
+    pub const ATTR_NORMAL_NC: u64 = 2;
+    /// Hodnota MAIR_EL1 odpovidajici indexum vyse.
+    pub const MAIR: u64 = 0xFF | (0x04 << 8) | (0x44 << 16);
+
+    /// Hodnota TCR_EL1: 48bitove adresy v obou polovinach (T0SZ = T1SZ =
+    /// 16), granule 4 KiB, prochazeni tabulek s cache (Write-Back, inner
+    /// shareable), velikost fyzicke adresy `ips` (pole PARange z
+    /// ID_AA64MMFR0_EL1, 0..=6). ASID se nepouziva (8 bitu, z TTBR0).
+    pub const fn tcr(ips: u64) -> u64 {
+        const T0SZ: u64 = 16;
+        const T1SZ: u64 = 16 << 16;
+        const IRGN0_WB: u64 = 1 << 8;
+        const ORGN0_WB: u64 = 1 << 10;
+        const SH0_INNER: u64 = 3 << 12;
+        const TG0_4K: u64 = 0 << 14;
+        const IRGN1_WB: u64 = 1 << 24;
+        const ORGN1_WB: u64 = 1 << 26;
+        const SH1_INNER: u64 = 3 << 28;
+        const TG1_4K: u64 = 2 << 30;
+        T0SZ | T1SZ
+            | IRGN0_WB
+            | ORGN0_WB
+            | SH0_INNER
+            | TG0_4K
+            | IRGN1_WB
+            | ORGN1_WB
+            | SH1_INNER
+            | TG1_4K
+            | ((ips & 7) << 32)
+    }
 }
 
 /// Cas z hodin firmwaru prevedeny loaderem na sekundy od 1970.

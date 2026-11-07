@@ -381,6 +381,11 @@ pub fn acpi_check(platform: &Platform) -> crate::error::Result<()> {
     <Current as api::PlatformInfo>::acpi_check(platform)
 }
 
+/// Prvni krok na bootovacim CPU: prevzit od loaderu ladici linku apod.
+pub fn init_early(boot_info: &BootInfo) {
+    <Current as Diagnostics>::init_early(boot_info)
+}
+
 /// Vrati ladici seriovou linku (bezpecne opakovane i v panic handleru).
 pub fn debug_serial() -> SerialPort {
     <Current as Diagnostics>::debug_serial()

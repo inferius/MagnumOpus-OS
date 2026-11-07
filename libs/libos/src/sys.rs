@@ -6,12 +6,14 @@ use core::arch::asm;
 use abi::syscall as nr;
 use abi::{Error, Result};
 
-/// Syscall se sesti argumenty. Jadro zachova vsechny registry krome
-/// `rax` (vysledek) a `rcx`, `r11` (prepise je instrukce `syscall`).
+/// Syscall se sesti argumenty (x86_64: instrukce `syscall`, cislo v `rax`,
+/// argumenty `rdi, rsi, rdx, r10, r8, r9`). Jadro zachova vsechny registry
+/// krome `rax` (vysledek) a `rcx`, `r11` (prepise je instrukce `syscall`).
 ///
 /// # Safety
 ///
 /// Ukazatele v argumentech musi odpovidat popisu daneho syscallu.
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub unsafe fn raw(n: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> u64 {
     let ret;
@@ -28,6 +30,33 @@ pub unsafe fn raw(n: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) 
             in("r9") a5,
             lateout("rcx") _,
             lateout("r11") _,
+            options(nostack)
+        );
+    }
+    ret
+}
+
+/// Syscall se sesti argumenty (aarch64: `svc #0`, cislo v `x8`, argumenty
+/// `x0`-`x5`, vysledek v `x0`). Jadro zachova vsechny ostatni registry.
+///
+/// # Safety
+///
+/// Ukazatele v argumentech musi odpovidat popisu daneho syscallu.
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+pub unsafe fn raw(n: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> u64 {
+    let ret;
+    // SAFETY: predano volajicim; jadro meni jen x0 (vysledek).
+    unsafe {
+        asm!(
+            "svc #0",
+            in("x8") n,
+            inlateout("x0") a0 => ret,
+            in("x1") a1,
+            in("x2") a2,
+            in("x3") a3,
+            in("x4") a4,
+            in("x5") a5,
             options(nostack)
         );
     }
@@ -63,7 +92,11 @@ pub fn clock_realtime() -> Result<abi::time::Reading> {
 /// i do hardwarovych hodin.
 pub fn clock_set(resource: u32, req: &abi::time::SetRequest, flags: u64) -> Result<bool> {
     let buf = req.encode();
-    call(nr::CLOCK_SET, [resource as u64, buf.as_ptr() as u64, flags, 0, 0, 0]).map(|r| r == 1)
+    call(
+        nr::CLOCK_SET,
+        [resource as u64, buf.as_ptr() as u64, flags, 0, 0, 0],
+    )
+    .map(|r| r == 1)
 }
 
 pub fn handle_close(h: u32) -> Result<()> {

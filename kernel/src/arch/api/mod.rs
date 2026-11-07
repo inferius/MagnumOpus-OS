@@ -384,6 +384,12 @@ pub trait Diagnostics {
     /// Ladici seriova linka (x86: COM1, aarch64: PL011).
     type Serial: DebugSerial;
 
+    /// Uplne prvni krok na bootovacim CPU (pred kontrolou `BootInfo`
+    /// a konzoli): prevzit od loaderu, co architektura potrebuje uz pro
+    /// ladici vystup (aarch64: adresa PL011 z `BootInfo::debug_serial`).
+    /// `boot_info` jeste nemusi byt overeny - jen cist, nic nepredpokladat.
+    fn init_early(boot_info: &BootInfo);
+
     /// Vrati ladici seriovou linku. Musi byt bezpecne volat opakovane,
     /// i z panic handleru.
     fn debug_serial() -> Self::Serial;
