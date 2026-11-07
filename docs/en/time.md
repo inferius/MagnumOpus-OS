@@ -119,7 +119,19 @@ in the CMOS RTC too, so it survives a reboot:
 - The kernel takes the write format (BCD or binary, 12 or 24 h) from the
   clock's register B. During the write it holds the SET bit, so the clock
   does not update meanwhile.
-- The RTC has a 1 s resolution; nanoseconds are dropped.
+- **Fraction of a second:** the RTC has a 1 s resolution. During the write
+  the kernel therefore holds the clock divider (register A) in reset. After
+  the reset is released the first second comes 0.5 s later, so the kernel
+  writes exactly in the middle of a second
+  (`arch::HARDWARE_CLOCK_PHASE_NS`). The clock then ticks on second
+  boundaries. Without this it would be up to 1 s behind after every write.
+  A syscall with `WRITE_HARDWARE` can therefore **sleep up to 1 s**.
+- The system time **at the moment of the write** is written, not the time
+  from the request. The write is under a lock, so even concurrent settings
+  leave the newest system time in the RTC.
+- Valid input: a time in the years 1970–9999 (`SetRequest::MIN_SECS` to
+  `MAX_SECS`), nanoseconds below 10⁹ and `|rtc_offset|` at most 18 h
+  (`abi::time::MAX_ZONE_OFFSET`). Otherwise `INVALID_ARGS`.
 - Without a century register in the ACPI FADT the clock only covers
   2000–2099.
 - aarch64 has no hardware clock yet (`set_hardware_clock` returns `false`).

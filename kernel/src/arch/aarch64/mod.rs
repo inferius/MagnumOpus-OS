@@ -229,6 +229,8 @@ impl api::Time for Aarch64 {
         None
     }
 
+    const HARDWARE_CLOCK_PHASE_NS: u32 = 0;
+
     fn set_hardware_clock(_platform: &Platform, _t: abi::time::WallTime) -> bool {
         // Zatim zadne hodiny (PL031, EFI SetTime za behu): jen cas systemu.
         false

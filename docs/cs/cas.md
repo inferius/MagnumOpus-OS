@@ -113,7 +113,18 @@ i do CMOS RTC, aby platil po restartu:
   `time::set` ho spočítá z nastavení sám.
 - Formát zápisu (BCD nebo binárně, 12 nebo 24 h) jádro převezme z registru
   B hodin. Během zápisu drží bit SET, aby se hodiny mezitím neaktualizovaly.
-- RTC má rozlišení 1 s, nanosekundy se zahodí.
+- **Zlomek sekundy:** RTC má rozlišení 1 s. Jádro proto během zápisu drží
+  dělič hodin (registr A) v resetu. Po jeho uvolnění přijde první sekunda
+  za 0,5 s, takže jádro zapisuje přesně v polovině sekundy
+  (`arch::HARDWARE_CLOCK_PHASE_NS`). Hodiny pak tikají na hranici sekund.
+  Bez toho by byly po každém zápisu až o 1 s pozadu. Syscall s
+  `WRITE_HARDWARE` proto může **spát až 1 s**.
+- Zapisuje se čas systému **v okamžiku zápisu**, ne čas z požadavku. Zápis
+  je pod zámkem, takže i souběžná nastavení nechají v RTC nejnovější čas
+  systému.
+- Platný vstup: čas v letech 1970–9999 (`SetRequest::MIN_SECS` až
+  `MAX_SECS`), nanosekundy pod 10⁹ a `|rtc_offset|` nejvýš 18 h
+  (`abi::time::MAX_ZONE_OFFSET`). Jinak `INVALID_ARGS`.
 - Bez registru století v ACPI FADT umí hodiny jen roky 2000–2099.
 - aarch64 zatím hardwarové hodiny nemá (`set_hardware_clock` vrací
   `false`). Nastaví se jen čas systému a syscall vrátí 0.

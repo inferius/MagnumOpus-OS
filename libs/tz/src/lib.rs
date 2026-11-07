@@ -23,12 +23,13 @@ mod tests;
 
 use core::fmt;
 
-pub use abi::time::{Civil, WallTime};
+pub use abi::time::{Civil, WallTime, weekday};
 pub use settings::{ParseError, Settings, rtc_local_correction};
 pub use table::ZONES;
 
-/// Nejvetsi posun od UTC (absolutne), ktery prijmeme: 18 hodin.
-pub const MAX_OFFSET: i32 = 18 * 3600;
+/// Nejvetsi posun od UTC (absolutne), ktery prijmeme: 18 hodin (stejna mez
+/// jako `rtc_offset` v `CLOCK_SET`).
+pub const MAX_OFFSET: i32 = abi::time::MAX_ZONE_OFFSET;
 
 /// Vuci jakemu casu je zadana hodina prechodu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,11 +56,6 @@ pub struct Transition {
 
 /// Hodnota `Transition::week` = posledni takovy den v mesici.
 pub const LAST: u8 = 5;
-
-/// Den v tydnu dne `days` od 1970-01-01 (ctvrtek); 0 = nedele.
-pub const fn weekday(days: i64) -> u8 {
-    (days + 4).rem_euclid(7) as u8
-}
 
 impl Transition {
     /// Posledni den `weekday` mesice `month` v `secs` sekund po pulnoci.
@@ -255,10 +251,10 @@ impl Zone {
     pub fn local_secs_to_utc(&self, local: i64) -> LocalResult {
         let std = self.std_offset;
         let Some(d) = self.dst else {
-            return LocalResult::Single(local - std as i64);
+            return LocalResult::Single(local.saturating_sub(std as i64));
         };
-        let as_std = local - std as i64;
-        let as_dst = local - (std + d.save) as i64;
+        let as_std = local.saturating_sub(std as i64);
+        let as_dst = local.saturating_sub((std + d.save) as i64);
         let std_ok = self.offset_at(as_std).secs == std;
         let dst_ok = self.offset_at(as_dst).secs == std + d.save;
         match (std_ok, dst_ok) {

@@ -227,10 +227,17 @@ pub trait Time {
     /// nedal firmware. `None` = hodiny nejsou nebo vraci nesmysl. Volat po
     /// `init_platform`, jen pri startu.
     fn hardware_clock(platform: &Platform) -> Option<abi::time::WallTime>;
+    /// Ve kterem zlomku sekundy (ns) zapisovat do hardwarovych hodin, aby
+    /// tikaly na hranici sekund (x86 CMOS: 0,5 s, protoze po zapisu
+    /// prijde prvni sekunda az za pul sekundy). Hodiny s rozlisenim pod
+    /// sekundu nebo bez hodin: 0.
+    const HARDWARE_CLOCK_PHASE_NS: u32;
     /// Zapise cas do hardwarovych hodin platformy (`CLOCK_SET` s
     /// `WRITE_HARDWARE`). `t` uz je v case, ktery maji hodiny drzet (UTC,
-    /// nebo mistni cas, kdyz ho tak chce sluzba casu). Volat za behu z
-    /// libovolneho CPU; implementace si pristup k hodinam serializuje sama.
+    /// nebo mistni cas, kdyz ho tak chce sluzba casu), a je to cas
+    /// v okamziku volani (volajici ceka na [`Self::HARDWARE_CLOCK_PHASE_NS`]).
+    /// Volat za behu z libovolneho CPU, i s vypnutym prerusenim (nespi);
+    /// implementace si pristup k hodinam serializuje sama.
     /// `false` = hodiny nejsou, nebo se cas nevejde do jejich rozsahu.
     fn set_hardware_clock(platform: &Platform, t: abi::time::WallTime) -> bool;
 }

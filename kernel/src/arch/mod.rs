@@ -280,6 +280,9 @@ pub fn hardware_clock(platform: &Platform) -> Option<abi::time::WallTime> {
     <Current as Time>::hardware_clock(platform)
 }
 
+/// Zlomek sekundy (ns), ve kterem zapisovat do hardwarovych hodin.
+pub const HARDWARE_CLOCK_PHASE_NS: u32 = <Current as Time>::HARDWARE_CLOCK_PHASE_NS;
+
 /// Zapise cas do hardwarovych hodin platformy; false = nejdou nastavit.
 pub fn set_hardware_clock(platform: &Platform, t: abi::time::WallTime) -> bool {
     <Current as Time>::set_hardware_clock(platform, t)
