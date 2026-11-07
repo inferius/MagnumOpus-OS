@@ -107,6 +107,10 @@ pub mod error {
     pub const NO_SPACE: i32 = -23;
     pub const IO_ERROR: i32 = -24;
     pub const READ_ONLY: i32 = -25;
+    /// Sdileci rezim nebo zamek jineho handlu.
+    pub const LOCKED: i32 = -26;
+    /// Podminena zmena: objekt se mezitim zmenil.
+    pub const CONFLICT: i32 = -27;
 
     /// Strojove jmeno kodu (pro hlasky a logy).
     pub fn name(code: i32) -> &'static str {
@@ -128,6 +132,8 @@ pub mod error {
             NO_SPACE => "NO_SPACE",
             IO_ERROR => "IO_ERROR",
             READ_ONLY => "READ_ONLY",
+            LOCKED => "LOCKED",
+            CONFLICT => "CONFLICT",
             _ => "ERROR",
         }
     }

@@ -1,5 +1,5 @@
-//! Start systemovych sluzeb: spravce zarizeni, souborovy system a sluzba
-//! vstupu.
+//! Start systemovych sluzeb: sluzba casu, spravce zarizeni, souborovy
+//! system a sluzba vstupu.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -10,7 +10,7 @@ use fsproto::FsClient;
 use libos::abi::bootstrap::kind;
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
-use libos::{Channel, Error, Process, Result, Startup, println, time};
+use libos::{Channel, Error, Process, Result, Rights, Startup, println, time};
 
 /// Bezici spravce zarizeni, blokova zarizeni, ktera nasel, a souborovy
 /// system (pokud je na nekterem disku).
@@ -30,10 +30,11 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let fs = Initfs::open(startup)?;
     let image = fs.find("devmgr").ok_or(Error::NotFound)?;
     let resource = startup.root_resource.as_ref().ok_or(Error::NotFound)?;
+    // Spravce zarizeni dostane pristup k hardwaru, ale ne nastaveni hodin.
     let mut handles = vec![StartHandle::new(
         kind::ROOT_RESOURCE,
         0,
-        resource.handle().duplicate(None)?,
+        resource.handle().duplicate(Some(Rights::BASIC | Rights::MANAGE))?,
     )];
     for (vmo, arg) in &startup.pci_ecam {
         handles.push(StartHandle::new(
@@ -82,6 +83,41 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         fs: None,
         _fsd: None,
     })
+}
+
+/// Nastaveni casu systemu (format viz `libos::time::zone::Settings`).
+///
+/// TODO: cist z konfigurace systemu na disku. Do te doby pevne: QEMU ma RTC
+/// v UTC; na pocitaci s Windows (RTC v mistnim case) patri `rtc = local`.
+pub const TIME_SETTINGS: &str = "zone = Europe/Prague\nrtc = utc\n";
+
+/// Bezici sluzba casu a jeji kanal.
+pub struct TimeService {
+    pub _process: Process,
+    pub channel: Channel,
+}
+
+/// Spusti sluzbu casu: jako jedina dostane pravo nastavovat hodiny
+/// (`SET_CLOCK`, bez `MANAGE`). Posle ji nastaveni a pocka na potvrzeni
+/// (pripadna oprava RTC v mistnim case probehne pred startem ostatnich
+/// sluzeb, takze casy souboru jsou od zacatku spravne).
+pub fn start_time(startup: &Startup) -> Result<TimeService> {
+    let fs = Initfs::open(startup)?;
+    let image = fs.find("timed").ok_or(Error::NotFound)?;
+    let resource = startup.root_resource.as_ref().ok_or(Error::NotFound)?;
+    let clock = resource
+        .handle()
+        .duplicate(Some(Rights::BASIC | Rights::SET_CLOCK))?;
+    let (process, channel) = libos::spawn("timed", image, vec![StartHandle::user(clock)])?;
+    channel.write(TIME_SETTINGS.as_bytes(), Vec::new())?;
+    let msg = channel.read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    if msg.data != b"ok" {
+        println!(
+            "init: sluzba casu hlasi: {}",
+            core::str::from_utf8(&msg.data).unwrap_or("?")
+        );
+    }
+    Ok(TimeService { _process: process, channel })
 }
 
 /// Podpis superbloku naseho souboroveho systemu (format v3).

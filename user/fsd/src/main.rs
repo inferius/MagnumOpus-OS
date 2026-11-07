@@ -21,6 +21,7 @@ extern crate alloc;
 
 mod blkdev;
 mod serve;
+mod serve_perm;
 mod serve_v2;
 
 use alloc::vec::Vec;
@@ -32,7 +33,7 @@ use libos::{Channel, Error, Signals, Startup, println, time};
 
 use crate::blkdev::BlkDev;
 use crate::serve::Service;
-use crate::serve_v2::{MAX_SESSIONS, Session};
+use crate::serve_v2::{MAX_SESSIONS, Session, SessionOp};
 
 /// Jak casto ukladat zmeny commitem.
 const COMMIT_INTERVAL: Duration = Duration::from_secs(5);
@@ -115,6 +116,7 @@ fn main(startup: Startup) -> i64 {
         debug,
         temp_counter: 0,
         commit_requested: false,
+        session_counter: 0,
     };
     serve(&mut svc, client);
     if let Some(fs) = svc.fs.as_mut()
@@ -129,7 +131,7 @@ fn main(startup: Startup) -> i64 {
 /// Obsluha relaci: prvni (ze startovni zpravy) je hlavni - jeji zavreni
 /// sluzbu ukonci; dalsi vznikaji pres `CONNECT`.
 fn serve(svc: &mut Service, client: Channel) {
-    let mut sessions: Vec<Session> = alloc::vec![Session::new(client)];
+    let mut sessions: Vec<Session> = alloc::vec![Session::control(client)];
     let mut next_commit = time::deadline_after(COMMIT_INTERVAL);
     // Defragmentovat jen po zmenach (jinak by se system prochazel stale dokola).
     let mut idle = false;
@@ -190,15 +192,34 @@ fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Op
             Err(_) => return None,
         };
         did = true;
-        let (reply, handles, new_session) = match svc.handle(&mut sessions[i], &msg.data) {
-            Ok(r) => (fsproto::reply(Ok(r.body)), r.handles, r.new_session),
-            Err(e) => (fsproto::reply(Err(e)), Vec::new(), None),
+        let (reply, handles, new_session, ops) = match svc.handle(&mut sessions[i], &msg.data) {
+            Ok(r) => (fsproto::reply(Ok(r.body)), r.handles, r.new_session, r.session_ops),
+            Err(e) => (fsproto::reply(Err(e)), Vec::new(), None, Vec::new()),
         };
+        // Zmeny jinych relaci (ridici relace: GRANT/REVOKE).
+        let mut reply = reply;
+        for op in ops {
+            let (id, ok) = match &op {
+                SessionOp::Grant(id, _) | SessionOp::Revoke(id, _) => (*id, sessions.iter().any(|s| s.id == *id && !s.control)),
+            };
+            if !ok {
+                reply = fsproto::reply(Err(Error::NotFound));
+                continue;
+            }
+            let s = sessions.iter_mut().find(|s| s.id == id).unwrap();
+            match op {
+                SessionOp::Grant(_, m) => {
+                    s.mounts.retain(|x| x.name != m.name);
+                    s.mounts.push(m);
+                }
+                SessionOp::Revoke(_, name) => s.mounts.retain(|x| x.name != name),
+            }
+        }
         let (reply, handles) = match new_session {
             // Prilis mnoho relaci: novy kanal zahodit, klientovi chyba.
             Some(_) if sessions.len() >= MAX_SESSIONS => (fsproto::reply(Err(Error::NoResources)), Vec::new()),
-            Some(ch) => {
-                sessions.push(Session::new(ch));
+            Some(s) => {
+                sessions.push(s);
                 (reply, handles)
             }
             None => (reply, handles),

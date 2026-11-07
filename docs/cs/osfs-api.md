@@ -73,7 +73,8 @@ Zdroj: protokol a klient `libs/osfs-proto`, server `tools/osfs/src/api.rs`
   `PathArg::from_windows_full("Q:\a\b")`).
 - **`EntryInfo`:** `name` (náš FS), `windows_name` (prázdné = skryté),
   `hidden` (proč), `kind`, `oid`, `generation`, `size`, časy `mtime`,
-  `ctime`, `btime` (ns od 1970), `tree_*`, `dataset` (číslo datasetu,
+  `ctime`, `btime` (`Time`: sekundy od 1970 se znaménkem + nanosekundy,
+  i data před rokem 1970; `Time::to_filetime()` pro Win32), `tree_*`, `dataset` (číslo datasetu,
   1 = kořenový), `link_target`, `truncated`. Kořen vnořeného datasetu má
   `kind = Dataset` (pro uživatele složka).
   `windows_name` popisuje jen samotné jméno: položka ve skrytém adresáři

@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use fsproto::perm::{Acl, EVERYONE, Grant, Mount, Profile, grant, mount_flags, rights};
 use fsproto::v2::{access, lock, open_flags, share};
 use fsproto::{FsClient, kind};
 use libos::{Error, Startup};
@@ -24,6 +25,8 @@ pub const TESTS: &[Test] = &[
     ("v2: dve relace, ctenar po atomickem nahrazeni", v2_two_sessions),
     ("v2: podminene ulozeni a konflikt", v2_conditional_save),
     ("v2: konec relace uklidi handly, zamky mezi relacemi", v2_session_cleanup_and_locks),
+    ("opravneni: identita relace, pripojene cesty, GRANT", perm_sessions),
+    ("opravneni: zakaz spousteni a sdileni mezi uzivateli", perm_noexec_and_sharing),
     ("kontrola konzistence a scrub", check_clean),
 ];
 
@@ -171,8 +174,9 @@ fn errors(_: &Startup) -> TestResult {
     );
     check_eq!(
         f.create("/a/../b", kind::FILE).err(),
-        Some(Error::NotFound),
-        "neexistujici rodic"
+        // `..` a `.` sluzba odmita (z pripojene cesty relace nejde utect).
+        Some(Error::InvalidArgs),
+        "cesta s .."
     );
     Ok(())
 }
@@ -365,5 +369,90 @@ fn v2_session_cleanup_and_locks(_: &Startup) -> TestResult {
     // Kontrola: sirotek po konci relace zmizel, svazek je cisty.
     let problems = f.check(false).map_err(|e| fail("kontrola", e))?;
     check!(problems.is_empty(), alloc::format!("problemy: {problems:?}").as_str());
+    Ok(())
+}
+
+const ALICE: u64 = 1000;
+const BOB: u64 = 1001;
+
+/// Domov /perm/alice patri Alici; / a /perm jde projit.
+fn perm_setup(f: &FsClient) -> TestResult {
+    let traverse = Acl { flags: 0, grants: alloc::vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
+    f.set_acl("/", Some(&traverse)).map_err(|e| fail("acl /", e))?;
+    let _ = f.create("/perm", kind::DIR);
+    f.set_acl("/perm", Some(&traverse)).map_err(|e| fail("acl /perm", e))?;
+    let _ = f.create("/perm/alice", kind::DIR);
+    f.set_owner("/perm/alice", ALICE).map_err(|e| fail("vlastnik", e))?;
+    Ok(())
+}
+
+fn perm_sessions(_: &Startup) -> TestResult {
+    let f = fs()?;
+    perm_setup(f)?;
+    // Relace uzivatele: cely FS, prava podle opravneni.
+    let (_, alice) = f.connect_as(ALICE, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("connect_as", e))?;
+    let _ = alice.create("/perm/alice/apps", kind::DIR);
+    let _ = alice.create("/perm/alice/apps/editor", kind::DIR);
+    alice.write("/perm/alice/foto.jpg", 0, b"JPEG").or_else(|_| {
+        alice.create("/perm/alice/foto.jpg", kind::FILE)?;
+        alice.write("/perm/alice/foto.jpg", 0, b"JPEG")
+    }).map_err(|e| fail("foto", e))?;
+    let st = alice.stat("/perm/alice/foto.jpg").map_err(|e| fail("stat foto", e))?;
+    check_eq!(st.owner, ALICE, "vlastnik noveho souboru");
+    check_eq!(st.rights, rights::ALL, "vlastnik ma vse");
+    // Cizi soubory (z jinych testu) jsou neviditelne.
+    check_eq!(alice.stat("/vitejte.txt").err(), Some(Error::NotFound), "systemovy soubor");
+    // Klient si identitu vymyslet nemuze: zakladat relace smi jen ridici.
+    check_eq!(alice.connect_as(BOB, &[], &[]).err(), Some(Error::AccessDenied), "CONNECT_AS z relace uzivatele");
+    // Relace aplikace (profil Standardni): jen svuj adresar a vybrany soubor.
+    let picked = [Mount::new("/vybrane/foto.jpg", "/perm/alice/foto.jpg", mount_flags::READ_ONLY)];
+    let mounts = Profile::Standard.app_mounts("/perm/alice", "editor", &picked);
+    let (id, app) = f.connect_as(ALICE, &[], &mounts).map_err(|e| fail("relace aplikace", e))?;
+    let _ = app.create("/app/poznamky.txt", kind::FILE);
+    app.write("/app/poznamky.txt", 0, b"ahoj").map_err(|e| fail("zapis do /app", e))?;
+    check_eq!(
+        alice.read("/perm/alice/apps/editor/poznamky.txt", 0, 10).map_err(|e| fail("cteni uzivatelem", e))?,
+        b"ahoj".to_vec(),
+        "/app je adresar aplikace"
+    );
+    check_eq!(app.read("/vybrane/foto.jpg", 0, 4).map_err(|e| fail("vybrany soubor", e))?, b"JPEG".to_vec(), "vybrany soubor");
+    check_eq!(app.write("/vybrane/foto.jpg", 0, b"x").err(), Some(Error::AccessDenied), "vyber jen pro cteni");
+    check_eq!(app.stat("/perm/alice").err(), Some(Error::NotFound), "mimo pripojene cesty");
+    check_eq!(app.stat("/app/../foto.jpg").err(), Some(Error::InvalidArgs), "cesta s ..");
+    // Powerbox: uzivatel vybere slozku pozdeji.
+    f.grant(id, &Mount::new("/dokumenty", "/perm/alice", 0)).map_err(|e| fail("grant", e))?;
+    app.stat("/dokumenty/foto.jpg").map_err(|e| fail("po grant", e))?;
+    f.revoke(id, "/dokumenty").map_err(|e| fail("revoke", e))?;
+    check_eq!(app.stat("/dokumenty/foto.jpg").err(), Some(Error::NotFound), "po revoke");
+    check_eq!(f.grant(999_999, &Mount::new("/x", "/", 0)).err(), Some(Error::NotFound), "grant neexistujici relaci");
+    Ok(())
+}
+
+fn perm_noexec_and_sharing(_: &Startup) -> TestResult {
+    let f = fs()?;
+    perm_setup(f)?;
+    let (_, alice) = f.connect_as(ALICE, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("alice", e))?;
+    let (_, bob) = f.connect_as(BOB, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("bob", e))?;
+    let _ = alice.create("/perm/alice/sdilene", kind::DIR);
+    let _ = alice.create("/perm/alice/sdilene/plan.txt", kind::FILE);
+    check_eq!(bob.stat("/perm/alice/sdilene").err(), Some(Error::NotFound), "pred sdilenim");
+    let t = Acl { flags: 0, grants: alloc::vec![Grant { who: BOB, rights: rights::TRAVERSE, flags: grant::THIS }] };
+    alice.set_acl("/perm/alice", Some(&t)).map_err(|e| fail("acl domova", e))?;
+    let share_acl = Acl { flags: 0, grants: alloc::vec![Grant { who: BOB, rights: rights::EDIT, flags: grant::BOTH }] };
+    alice.set_acl("/perm/alice/sdilene", Some(&share_acl)).map_err(|e| fail("sdileni", e))?;
+    bob.write("/perm/alice/sdilene/plan.txt", 0, b"od Boba").map_err(|e| fail("zapis Boba", e))?;
+    let p = bob.permissions("/perm/alice/sdilene").map_err(|e| fail("permissions", e))?;
+    check_eq!(p.owner, ALICE, "vlastnik sdilene");
+    check_eq!(p.rights, rights::EDIT, "prava Boba");
+    check_eq!(bob.set_acl("/perm/alice/sdilene", None).err(), Some(Error::AccessDenied), "Bob nesmi menit prava");
+    check_eq!(bob.set_owner("/perm/alice/sdilene", BOB).err(), Some(Error::AccessDenied), "vlastnika meni jen system");
+    // Zakaz spousteni (na korenovem datasetu jen docasne).
+    let h = f.open("/vitejte.txt", access::EXECUTE, share::ALL, 0).map_err(|e| fail("spusteni", e))?;
+    f.close(h.handle).map_err(|e| fail("close", e))?;
+    f.set_noexec("/", true).map_err(|e| fail("noexec", e))?;
+    check!(f.noexec("/").map_err(|e| fail("noexec?", e))?, "zakaz nastaveny");
+    let denied = f.open("/vitejte.txt", access::EXECUTE, share::ALL, 0).err();
+    f.set_noexec("/", false).map_err(|e| fail("noexec vypnout", e))?;
+    check_eq!(denied, Some(Error::AccessDenied), "spusteni se zakazem");
     Ok(())
 }

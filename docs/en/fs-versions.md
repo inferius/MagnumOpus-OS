@@ -52,6 +52,7 @@ Done changes:
 | File size | no limit (overflow) | **2^63-1 B**, checked arithmetic, saturating summaries | sizes and differences always fit `i64`; huge sparse files do not overflow summaries |
 | Extent | at most 120 blocks, reserved u32 | **496 blocks**, flags u32 (reserved: preallocation) | larger node; fewer entries per large file |
 | Intent log | records 1-6 | + 7 symlink, generation on create, 8 dataset marker, 9 set times | a symlink survives `fsync`; the generation stays the original after replay; one batch for several datasets; set times survive a crash |
+| Permissions | none | **owner, inherited allow-only grants, visibility, shared descriptors** (`ACL`, `RO_COMPAT_ACL`), no execution on a dataset; in fsd a session identity from init and mounted paths | sharing between users, applications with only what they were given ([permissions](file-system.md#permissions-and-session-identity)) |
 | Times | u64 ns since 1970 | **seconds i64 + nanoseconds u32** (flag `INCOMPAT_TIME_SECS`) | dates before 1970 and no 2262 limit - see below |
 | Orphans | - | an `ORPHAN` entry (kind 9) for an open object without a name | an open file survives deletion and an atomic replace; cleanup at mount after a crash |
 | Datasets | one tree per volume | **datasets** (own trees, a `DATASET` record in the root dataset, a directory entry of kind 4), snapshots with a clone count and a "hidden" flag | history per folder (project, home), writable clones without copying |

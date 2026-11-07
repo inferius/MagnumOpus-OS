@@ -55,17 +55,194 @@ kernel: realny cas: 2026-11-07 14:03:13 UTC (zdroj UEFI, pasmo neuvedeno - bran 
 reports it as "unspecified". The kernel then takes the time as **UTC** and
 sets the `ZONE_ASSUMED_UTC` flag.
 
-Linux usually keeps UTC in the RTC; **Windows keeps local time**. On a
-Windows machine the real time will be off by the zone (1 to 2 hours in
-Central Europe) until zone settings and network sync arrive.
+Linux usually keeps UTC in the RTC, **Windows keeps local time**. On a
+machine with Windows real time is then off by the zone offset (1 to 2 hours
+in Central Europe). The time service corrects it when its settings say
+`rtc = local`, see
+[RTC in local time](#system-settings-and-an-rtc-in-local-time-dual-boot-with-windows).
 
 When the firmware does give a zone, UTC = local − zone. This is the UEFI
 2.x convention; other versions of the specification state it with the
 opposite sign.
 
 ⚠️ **Accuracy:** firmware and RTC have a 1 s resolution, so the origin is
-accurate to a second. Refining and setting the clock come with networking
-(source `source::SET`). Until then, `CLOCK_REALTIME` cannot be set.
+accurate to a second. Refining it from the network comes later. The clock
+can already be set (`CLOCK_SET`, see below).
+
+## Setting the clock (`CLOCK_SET`)
+
+At run time the real time is set by the **time service** `timed`. Apart from
+`init` it is the only process allowed to do so.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clock setting permission">
+<defs><marker id="tm2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="85" width="170" height="70" rx="6"/><text class="t b" x="95" y="110" text-anchor="middle">kernel</text><text class="m" x="95" y="128" text-anchor="middle">root Resource:</text><text class="m" x="95" y="144" text-anchor="middle">MANAGE + SET_CLOCK</text>
+<path class="ln" d="M180 120 L248 120" marker-end="url(#tm2)"/>
+<rect class="box" x="250" y="85" width="150" height="70" rx="6"/><text class="t b" x="325" y="110" text-anchor="middle">init</text><text class="m" x="325" y="128" text-anchor="middle">holds the root,</text><text class="m" x="325" y="144" text-anchor="middle">splits the rights</text>
+<path class="ln" d="M400 105 L498 55" marker-end="url(#tm2)"/>
+<path class="ln" d="M400 135 L498 185" marker-end="url(#tm2)"/>
+<rect class="ok" x="500" y="20" width="250" height="70" rx="6"/><text class="t b" x="625" y="45" text-anchor="middle">timed (time service)</text><text class="m" x="625" y="64" text-anchor="middle">Resource with SET_CLOCK only</text><text class="m" x="625" y="80" text-anchor="middle">no MANAGE = no hardware</text>
+<rect class="box" x="500" y="150" width="250" height="70" rx="6"/><text class="t b" x="625" y="175" text-anchor="middle">devmgr → drivers</text><text class="m" x="625" y="194" text-anchor="middle">root without SET_CLOCK; restricted</text><text class="m" x="625" y="210" text-anchor="middle">resources never have it</text>
+</svg>
+<figcaption>Only the root Resource has SET_CLOCK; init hands it to the time service only.</figcaption>
+</figure>
+
+The **permission** is the `SET_CLOCK` right on a Resource handle:
+
+- Only the **root** Resource, which the kernel gives to `init`, has it.
+- `init` gives the time service a duplicate with rights
+  `BASIC | SET_CLOCK`. Without `MANAGE` the service cannot touch hardware
+  (register windows, DMA, interrupts).
+- The device manager gets the root with `BASIC | MANAGE`, i.e. without
+  `SET_CLOCK`. Duplication can only remove rights, so it cannot get it back.
+- Restricted driver resources (`RESOURCE_CREATE`) never have `SET_CLOCK`.
+
+Without the right `CLOCK_SET` returns `ACCESS_DENIED`. After setting, the
+time has source `source::SET` and the `ZONE_ASSUMED_UTC` flag is cleared.
+
+```rust
+use libos::time::{self, zone::Settings, WallTime};
+
+// In timed: clock = Resource with the SET_CLOCK right.
+let t = WallTime { secs: 1_794_000_000, nanos: 0 };
+let hw = time::set(&clock, t, &settings, true)?; // true = also write the RTC
+```
+
+**Writing the hardware clock** (`set_flags::WRITE_HARDWARE`) stores the time
+in the CMOS RTC too, so it survives a reboot:
+
+- The kernel knows no time zones. It writes `UTC + rtc_offset` to the RTC;
+  the time service sends `rtc_offset`. For an RTC in UTC it is 0, for an RTC
+  in local time it is the zone offset at that moment (Prague in summer
+  +7200 s). The `time::set` wrapper computes it from the settings.
+- The kernel takes the write format (BCD or binary, 12 or 24 h) from the
+  clock's register B. During the write it holds the SET bit, so the clock
+  does not update meanwhile.
+- The RTC has a 1 s resolution; nanoseconds are dropped.
+- Without a century register in the ACPI FADT the clock only covers
+  2000–2099.
+- aarch64 has no hardware clock yet (`set_hardware_clock` returns `false`).
+  Only the system time is set and the syscall returns 0.
+
+⚠️ **Risks of setting the clock:**
+
+- Real time **jumps** forwards or backwards. Anyone measuring durations with
+  it gets nonsense. Always compute deadlines and timeouts from
+  `CLOCK_MONOTONIC`; setting the clock does not change it.
+- Files written before the change keep times from the old clock.
+- When the RTC holds local time and Windows runs on the machine too, only
+  write local time to the RTC (`rtc = local`). Writing UTC would shift
+  Windows by the zone offset.
+
+## Time zones
+
+The kernel keeps **UTC only**. The zone is a system setting read by the
+time service and programs, not by the kernel. `libos::time::zone` (crate
+`libs/tz`) does the conversion:
+
+- No tzdata. A compact table describes zones with their **current** rules.
+- Each zone has a standard offset from UTC and at most one daylight saving
+  rule. Start and end are given as "n-th / last Sunday of a month at hour
+  H", relative to UTC, standard time or local wall time.
+- A fixed offset works without the table: `UTC+2`, `UTC-03:30`, `GMT+05:45`.
+
+| Rule | DST starts | DST ends | Zones (selection) |
+|---|---|---|---|
+| EU | last Sunday of March 01:00 UTC | last Sunday of October 01:00 UTC | Europe/Prague, Bratislava, Berlin, London, Lisbon, Helsinki … |
+| USA | 2nd Sunday of March 02:00 local | 1st Sunday of November 02:00 local | America/New_York, Chicago, Denver, Los_Angeles |
+| Australia | 1st Sunday of October 02:00 standard | 1st Sunday of April 02:00 standard | Australia/Sydney |
+| no DST | – | – | UTC, Asia/Tokyo, Asia/Kolkata (+5:30), Europe/Moscow … |
+
+The full list is in `libs/tz/src/table.rs`. A new zone is one line.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DST transitions in Prague 2026">
+<rect class="box" x="10" y="60" width="180" height="50" rx="6"/><text class="t b" x="100" y="82" text-anchor="middle">CET</text><text class="m" x="100" y="100" text-anchor="middle">UTC+1</text>
+<rect class="ok" x="250" y="60" width="260" height="50" rx="6"/><text class="t b" x="380" y="82" text-anchor="middle">CEST</text><text class="m" x="380" y="100" text-anchor="middle">UTC+2</text>
+<rect class="box" x="570" y="60" width="180" height="50" rx="6"/><text class="t b" x="660" y="82" text-anchor="middle">CET</text><text class="m" x="660" y="100" text-anchor="middle">UTC+1</text>
+<path class="ln" d="M220 30 L220 140"/><path class="ln" d="M540 30 L540 140"/>
+<text class="t" x="220" y="22" text-anchor="middle">29 Mar 01:00 UTC</text><text class="t" x="540" y="22" text-anchor="middle">25 Oct 01:00 UTC</text>
+<text class="m" x="220" y="160" text-anchor="middle">02:00 → 03:00 local</text><text class="m" x="220" y="176" text-anchor="middle">02:30 does not exist (Gap)</text>
+<text class="m" x="540" y="160" text-anchor="middle">03:00 → 02:00 local</text><text class="m" x="540" y="176" text-anchor="middle">02:30 happens twice (Ambiguous)</text>
+</svg>
+<figcaption>2026 in Prague: an hour is skipped in spring and repeated in autumn.</figcaption>
+</figure>
+
+```rust
+use libos::time::{self, zone::{Zone, LocalResult}};
+
+let prague = Zone::by_name("Europe/Prague").unwrap();
+if let Some(l) = time::local(&prague) {
+    let c = l.civil;
+    println!("{:02}:{:02} {}", c.hour, c.minute, l.offset.abbrev); // 14:03 CET
+}
+
+// Local time -> UTC: not unique around transitions.
+match prague.local_to_utc(&civil).unwrap() {
+    LocalResult::Single(utc) => { /* the usual case */ }
+    LocalResult::Ambiguous { earlier, later } => { /* autumn: hour twice */ }
+    LocalResult::Gap(utc) => { /* spring: hour did not exist */ }
+}
+```
+
+`LocalResult::resolve()` picks one value: the earlier instant when ambiguous
+(still DST), and for a gap the conversion with the offset valid before it
+(02:30 → 03:30 CEST). This matches `mktime` with `tm_isdst = -1`.
+
+⚠️ **Table limits:**
+
+- No history: the rules apply to all years. The Czech Republic follows EU
+  rules since 1996. For older dates (and before 1979, when there was no DST)
+  the local time is off by an hour from what it really was.
+- When a country changes its rules, the table must be updated.
+- Zones with more than two transitions a year or negative DST (Ireland in
+  tzdata) are not supported. The offset from UTC is still correct.
+
+### System settings and an RTC in local time (dual boot with Windows)
+
+Time settings are `key = value` text:
+
+```text
+zone = Europe/Prague   # table name, or UTC+2, UTC-03:30
+rtc = local            # utc (default, Linux) | local (Windows)
+```
+
+For now they are fixed in `init` (`system::TIME_SETTINGS`, `rtc = utc` for
+QEMU). Once there is a system configuration on disk they will be read from
+there. At boot `init` sends them to the time service as its first message.
+
+Windows keeps **local time** in the RTC. Without zone information the kernel
+takes it as UTC, so real time is off by the zone offset. With `rtc = local`
+the time service fixes this right after boot, before other services start:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Correcting an RTC in local time">
+<defs><marker id="tm3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="40" width="170" height="80" rx="6"/><text class="t b" x="95" y="65" text-anchor="middle">RTC (Windows)</text><text class="m" x="95" y="84" text-anchor="middle">14:00 local</text><text class="m" x="95" y="100" text-anchor="middle">(summer, UTC+2)</text>
+<path class="ln" d="M180 80 L248 80" marker-end="url(#tm3)"/>
+<rect class="acc" x="250" y="40" width="210" height="80" rx="6"/><text class="t b" x="355" y="65" text-anchor="middle">kernel at boot</text><text class="m" x="355" y="84" text-anchor="middle">14:00 "UTC", source RTC/UEFI,</text><text class="m" x="355" y="100" text-anchor="middle">ZONE_ASSUMED_UTC</text>
+<path class="ln" d="M460 80 L528 80" marker-end="url(#tm3)"/>
+<rect class="ok" x="530" y="40" width="220" height="80" rx="6"/><text class="t b" x="640" y="65" text-anchor="middle">timed: rtc = local</text><text class="m" x="640" y="84" text-anchor="middle">14:00 − 2 h = 12:00 UTC</text><text class="m" x="640" y="100" text-anchor="middle">CLOCK_SET (RTC unchanged)</text>
+<text class="m" x="10" y="160">Corrected once only: the source must be UEFI or RTC with ZONE_ASSUMED_UTC. After CLOCK_SET the source</text>
+<text class="m" x="10" y="178">is SET, so restarting the service does not shift twice. If the firmware gave a zone, the kernel converted already.</text>
+</svg>
+<figcaption>RTC in local time: the kernel reads "UTC", the time service subtracts the zone offset.</figcaption>
+</figure>
+
+Functions: `zone::rtc_local_correction(&settings, &reading)` (pure
+computation, tested on the host) and `time::apply_rtc_local(&clock,
+&settings)` (reads, corrects, sets).
+
+⚠️ **Repeated hour:** at the end of DST (Prague: last Sunday of October
+02:00–03:00) the local time in the RTC cannot tell which of the two hours
+it is. The earlier one (DST) is taken. If the system boots in exactly that
+hour, the time is an hour ahead until the network corrects it.
+
+⚠️ **Transition while powered off:** Windows shifts the RTC itself on its
+first boot after a DST change. If our system boots first after the change,
+the RTC still has the old offset and the time is an hour off until the
+network or Windows corrects it.
 
 ## Format
 

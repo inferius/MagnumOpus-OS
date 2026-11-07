@@ -454,6 +454,7 @@ dependencies = [
  "elf",
  "initfs",
  "linked_list_allocator",
+ "tz",
 ]
 
 [[package]]
@@ -816,6 +817,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "timed"
+version = "0.1.0"
+dependencies = [
+ "libos",
+]
+
+[[package]]
 name = "tinyvec"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -849,6 +857,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
  "winnow",
+]
+
+[[package]]
+name = "tz"
+version = "0.1.0"
+dependencies = [
+ "abi",
 ]
 
 [[package]]

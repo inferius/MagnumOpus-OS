@@ -99,6 +99,14 @@ fn proto_kind(k: Kind) -> osfs_proto::Kind {
     }
 }
 
+/// Cas FS -> cas v protokolu (stejny tvar, nic se neztrati).
+fn time(t: fs::Timestamp) -> osfs_proto::Time {
+    osfs_proto::Time {
+        secs: t.secs,
+        nanos: t.nanos,
+    }
+}
+
 /// Polozka odpovedi. `kind` = druh polozky v adresari (u datasetu
 /// `Dataset`; `stat` datasetu vraci jeho korenovy adresar).
 fn entry(name: &str, s: &Stat, kind: Kind, link_target: String) -> EntryInfo {
@@ -112,9 +120,9 @@ fn entry(name: &str, s: &Stat, kind: Kind, link_target: String) -> EntryInfo {
         oid: s.oid,
         generation: s.generation,
         size: s.size,
-        mtime: crate::image::nanos_u64(s.mtime),
-        ctime: crate::image::nanos_u64(s.ctime),
-        btime: crate::image::nanos_u64(s.btime),
+        mtime: time(s.mtime),
+        ctime: time(s.ctime),
+        btime: time(s.btime),
         tree_bytes: s.tree_bytes,
         tree_files: s.tree_files,
         tree_dirs: s.tree_dirs,

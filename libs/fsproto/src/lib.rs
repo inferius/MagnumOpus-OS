@@ -14,6 +14,7 @@
 extern crate alloc;
 
 mod codec;
+pub mod perm;
 pub mod v2;
 
 use alloc::string::String;
@@ -95,6 +96,10 @@ pub struct Stat {
     pub ctime: WallTime,
     /// Cas vytvoreni.
     pub btime: WallTime,
+    /// Vlastnik (0 = system).
+    pub owner: u64,
+    /// Ucinna prava volajiciho (`perm::rights`).
+    pub rights: u8,
     /// U adresare: soucet velikosti souboru v podstromu (okamzite).
     pub tree_bytes: u64,
     pub tree_files: u64,
@@ -152,6 +157,7 @@ impl Stat {
         for t in [self.mtime, self.ctime, self.btime] {
             put_time(w, t);
         }
+        w.u64(self.owner).u8(self.rights);
         w.u64(self.tree_bytes)
             .u64(self.tree_files)
             .u64(self.tree_dirs);
@@ -165,6 +171,8 @@ impl Stat {
             mtime: get_time(r)?,
             ctime: get_time(r)?,
             btime: get_time(r)?,
+            owner: r.u64()?,
+            rights: r.u8()?,
             tree_bytes: r.u64()?,
             tree_files: r.u64()?,
             tree_dirs: r.u64()?,

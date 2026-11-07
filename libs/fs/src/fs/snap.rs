@@ -87,6 +87,7 @@ impl<D: BlockDevice> Fs<D> {
     /// Snapshot datasetu, jehoz korenem je `dataset` (napr. "/projekt").
     pub fn snapshot_of(&mut self, dataset: &str, name: &str) -> Result<u64> {
         validate_name(name)?;
+        self.require(dataset, crate::perm::rights::MANAGE)?;
         self.enter_dataset(dataset)?;
         if self
             .snapshots_active()?
@@ -123,6 +124,7 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Snapshoty datasetu `dataset` (skryte - drzene jen kvuli klonum - ne).
     pub fn snapshots_of(&mut self, dataset: &str) -> Result<Vec<SnapshotInfo>> {
+        self.require(dataset, crate::perm::rights::READ)?;
         self.enter_dataset(dataset)?;
         self.snapshots_active()
     }
@@ -164,6 +166,7 @@ impl<D: BlockDevice> Fs<D> {
     /// se jen skryje (bloky drzi dal pro klon) a smaze se se zanikem
     /// posledniho klonu.
     pub fn delete_snapshot_of(&mut self, dataset: &str, name: &str) -> Result<()> {
+        self.require(dataset, crate::perm::rights::MANAGE)?;
         self.guarded(|fs| {
             fs.enter_dataset(dataset)?;
             fs.ensure_room_freeing(16)?;
@@ -256,14 +259,41 @@ impl<D: BlockDevice> Fs<D> {
     /// `stat` ve snapshotu datasetu `dataset` (cesta uvnitr datasetu).
     pub fn snapshot_stat_of(&mut self, dataset: &str, snapshot: &str, path: &str) -> Result<Stat> {
         let root = self.snapshot_root(dataset, snapshot)?;
-        let oid = self.resolve(&root, path)?;
-        self.stat_oid(&root, oid)
+        if !self.checking() {
+            let oid = self.resolve(&root, path)?;
+            return self.stat_oid(&root, oid);
+        }
+        let w = self.walk_snapshot(dataset, &root, path)?;
+        let mut st = self.stat_oid(&root, w.oid)?;
+        st.rights = w.rights;
+        self.limit_stat(&mut st);
+        Ok(st)
     }
 
     pub fn snapshot_list_of(&mut self, dataset: &str, snapshot: &str, path: &str) -> Result<Vec<DirEntry>> {
         let root = self.snapshot_root(dataset, snapshot)?;
-        let oid = self.resolve(&root, path)?;
-        self.list_oid(&root, oid)
+        if !self.checking() {
+            let oid = self.resolve(&root, path)?;
+            return self.list_oid(&root, oid);
+        }
+        let w = self.walk_snapshot(dataset, &root, path)?;
+        if w.rights & crate::perm::rights::LIST == 0 {
+            return Err(Error::AccessDenied);
+        }
+        let list = self.list_oid(&root, w.oid)?;
+        self.visible(&root, &w.below, list)
+    }
+
+    /// Objekt ve snapshotu s kontrolou prav `need` (bez kontrol jen cesta).
+    pub(super) fn snapshot_object(&mut self, dataset: &str, root: &Child, path: &str, need: u8) -> Result<u64> {
+        if !self.checking() {
+            return self.resolve(root, path);
+        }
+        let w = self.walk_snapshot(dataset, root, path)?;
+        if w.rights & need != need {
+            return Err(Error::AccessDenied);
+        }
+        Ok(w.oid)
     }
 
     pub fn snapshot_read_of(
@@ -275,7 +305,7 @@ impl<D: BlockDevice> Fs<D> {
         len: usize,
     ) -> Result<Vec<u8>> {
         let root = self.snapshot_root(dataset, snapshot)?;
-        let oid = self.resolve(&root, path)?;
+        let oid = self.snapshot_object(dataset, &root, path, crate::perm::rights::READ)?;
         self.read_oid(&root, oid, offset, len, false)
     }
 

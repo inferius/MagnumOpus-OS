@@ -15,6 +15,7 @@ mod mount;
 mod objects;
 mod ondisk;
 mod perf;
+mod perm;
 mod times;
 
 use crate::{Algo, BlockDevice, FormatOptions, Fs, MemDevice};

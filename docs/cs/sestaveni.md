@@ -61,7 +61,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, fsd
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, fsd, timed
 ```
 
 QEMU dostane emulovanou IOMMU (`intel-iommu`, s `--iommu amd`
@@ -138,6 +138,7 @@ user/virtio-blk/ ovladač disku
 user/virtio-input/ ovladač klávesnice a myši
 user/inputd/     služba vstupu
 user/fsd/        služba souborového systému
+user/timed/      služba času (nastavení hodin, pásmo)
 libs/osfs-proto/ protokol rozšířeného API FS pro Windows (DeviceIoControl) + klient
 tools/osfs/      nástroj pro FS na hostiteli: format, check, mount ve Windows (WinFsp)
 xtask/           build, obraz disku, QEMU, testy

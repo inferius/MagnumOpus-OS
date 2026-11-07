@@ -10,6 +10,7 @@ mod input;
 mod ipc;
 mod memory;
 mod process;
+mod time;
 
 use alloc::string::String;
 
@@ -26,6 +27,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ovladace", drivers::TESTS),
     ("souborovy system", fs::TESTS),
     ("vstup", input::TESTS),
+    ("cas", time::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).
@@ -37,6 +39,17 @@ pub fn set_devices(d: crate::system::Devices) {
 
 fn devices() -> Option<&'static crate::system::Devices> {
     DEVICES.get()
+}
+
+/// Sluzba casu spustena pri startu (pro testy nastaveni hodin).
+static TIME: spin::Once<crate::system::TimeService> = spin::Once::new();
+
+pub fn set_time_service(t: crate::system::TimeService) {
+    TIME.call_once(|| t);
+}
+
+fn time_service() -> Option<&'static crate::system::TimeService> {
+    TIME.get()
 }
 
 /// Spusti vsechny testy, vraci pocet selhanych.

@@ -54,15 +54,186 @@ jako „neuvedeno“. Jádro pak čas bere jako **UTC** a nastaví příznak
 `ZONE_ASSUMED_UTC`.
 
 Linux má v RTC obvykle UTC, **Windows místní čas**. Na počítači
-s Windows bude reálný čas posunutý o pásmo (v ČR o 1 až 2 hodiny), dokud
-nepřijde nastavení pásma a synchronizace podle sítě.
+s Windows je pak reálný čas posunutý o pásmo (v ČR o 1 až 2 hodiny). Opraví
+ho služba času, když má v nastavení `rtc = local`, viz
+[RTC v místním čase](#nastavení-systému-a-rtc-v-místním-čase-dual-boot-s-windows).
 
 Když firmware pásmo uvede, platí UTC = místní − pásmo. To je konvence
 UEFI 2.x; jiné verze specifikace ji uvádějí s opačným znaménkem.
 
 ⚠️ **Přesnost:** firmware i RTC mají rozlišení 1 s, počátek je tedy přesný
-na sekundu. Zpřesnění a nastavování hodin přijde se sítí (zdroj
-`source::SET`). Do té doby `CLOCK_REALTIME` nejde nastavit.
+na sekundu. Zpřesnění podle sítě přijde později. Nastavit hodiny už jde
+(`CLOCK_SET`, viz níže).
+
+## Nastavení hodin (`CLOCK_SET`)
+
+Reálný čas za běhu nastavuje **služba času** `timed`. Je to jediný proces
+kromě `init`, který na to má oprávnění.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Opravneni k nastaveni hodin">
+<defs><marker id="tm2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="85" width="170" height="70" rx="6"/><text class="t b" x="95" y="110" text-anchor="middle">jádro</text><text class="m" x="95" y="128" text-anchor="middle">kořenový Resource:</text><text class="m" x="95" y="144" text-anchor="middle">MANAGE + SET_CLOCK</text>
+<path class="ln" d="M180 120 L248 120" marker-end="url(#tm2)"/>
+<rect class="box" x="250" y="85" width="150" height="70" rx="6"/><text class="t b" x="325" y="110" text-anchor="middle">init</text><text class="m" x="325" y="128" text-anchor="middle">drží kořen,</text><text class="m" x="325" y="144" text-anchor="middle">rozdělí práva</text>
+<path class="ln" d="M400 105 L498 55" marker-end="url(#tm2)"/>
+<path class="ln" d="M400 135 L498 185" marker-end="url(#tm2)"/>
+<rect class="ok" x="500" y="20" width="250" height="70" rx="6"/><text class="t b" x="625" y="45" text-anchor="middle">timed (služba času)</text><text class="m" x="625" y="64" text-anchor="middle">Resource jen SET_CLOCK</text><text class="m" x="625" y="80" text-anchor="middle">bez MANAGE = bez hardwaru</text>
+<rect class="box" x="500" y="150" width="250" height="70" rx="6"/><text class="t b" x="625" y="175" text-anchor="middle">devmgr → ovladače</text><text class="m" x="625" y="194" text-anchor="middle">kořen bez SET_CLOCK; omezené</text><text class="m" x="625" y="210" text-anchor="middle">prostředky ho nemají nikdy</text>
+</svg>
+<figcaption>Právo SET_CLOCK má jen kořenový Resource; init ho předá jen službě času.</figcaption>
+</figure>
+
+**Oprávnění** je právo `SET_CLOCK` na handlu typu Resource:
+
+- Má ho jen **kořenový** Resource, který jádro dá procesu `init`.
+- `init` službě času předá duplikát s právy `BASIC | SET_CLOCK`. Bez
+  `MANAGE` s ním služba nesmí na hardware (okna registrů, DMA, přerušení).
+- Správce zařízení dostane kořen s právy `BASIC | MANAGE`, tedy bez
+  `SET_CLOCK`. Práva jdou při duplikaci jen ubírat, takže si ho nevrátí.
+- Omezené prostředky ovladačů (`RESOURCE_CREATE`) `SET_CLOCK` nemají nikdy.
+
+Bez práva vrátí `CLOCK_SET` chybu `ACCESS_DENIED`. Po nastavení má čas zdroj
+`source::SET` a příznak `ZONE_ASSUMED_UTC` zmizí.
+
+```rust
+use libos::time::{self, zone::Settings, WallTime};
+
+// V timed: clock = Resource s pravem SET_CLOCK.
+let t = WallTime { secs: 1_794_000_000, nanos: 0 };
+let hw = time::set(&clock, t, &settings, true)?; // true = zapsat i do RTC
+```
+
+**Zápis do hardwarových hodin** (`set_flags::WRITE_HARDWARE`) uloží čas
+i do CMOS RTC, aby platil po restartu:
+
+- Jádro pásma nezná. Do RTC zapíše `UTC + rtc_offset`, kde `rtc_offset`
+  pošle služba času. Pro RTC v UTC je 0, pro RTC v místním čase je to
+  posun pásma v daném okamžiku (Praha v létě +7200 s). Obal
+  `time::set` ho spočítá z nastavení sám.
+- Formát zápisu (BCD nebo binárně, 12 nebo 24 h) jádro převezme z registru
+  B hodin. Během zápisu drží bit SET, aby se hodiny mezitím neaktualizovaly.
+- RTC má rozlišení 1 s, nanosekundy se zahodí.
+- Bez registru století v ACPI FADT umí hodiny jen roky 2000–2099.
+- aarch64 zatím hardwarové hodiny nemá (`set_hardware_clock` vrací
+  `false`). Nastaví se jen čas systému a syscall vrátí 0.
+
+⚠️ **Rizika nastavení hodin:**
+
+- Reálný čas **skočí** dopředu i dozadu. Kdo podle něj měří dobu, dostane
+  nesmysl. Termíny a timeouty proto vždy počítejte z `CLOCK_MONOTONIC`,
+  ty se nastavením nezmění.
+- Čas souborů zapsaných před nastavením zůstane podle starého času.
+- Když je RTC v místním čase a běží zároveň Windows, zapisujte do RTC jen
+  místní čas (`rtc = local`). Zápis UTC by Windows posunul o pásmo.
+
+## Časová pásma
+
+Jádro drží **jen UTC**. Pásmo je nastavení systému, které čte služba času
+a programy, ne jádro. Převod dělá `libos::time::zone` (crate `libs/tz`):
+
+- Nemá tzdata. Pásma popisuje kompaktní tabulka se **současnými** pravidly.
+- Každé pásmo má standardní posun od UTC a nejvýš jedno pravidlo letního
+  času. Začátek a konec jsou zadané jako „n-tá / poslední neděle v měsíci
+  v hodinu H“, vztažená k UTC, standardnímu nebo místnímu času.
+- Pevný posun jde zapsat i bez tabulky: `UTC+2`, `UTC-03:30`, `GMT+05:45`.
+
+| Pravidlo | Začátek letního času | Konec | Pásma (výběr) |
+|---|---|---|---|
+| EU | poslední neděle v březnu 01:00 UTC | poslední neděle v říjnu 01:00 UTC | Europe/Prague, Bratislava, Berlin, London, Lisbon, Helsinki … |
+| USA | 2. neděle v březnu 02:00 místního | 1. neděle v listopadu 02:00 místního | America/New_York, Chicago, Denver, Los_Angeles |
+| Austrálie | 1. neděle v říjnu 02:00 standardního | 1. neděle v dubnu 02:00 standardního | Australia/Sydney |
+| bez letního času | – | – | UTC, Asia/Tokyo, Asia/Kolkata (+5:30), Europe/Moscow … |
+
+Úplný seznam je v `libs/tz/src/table.rs`. Nové pásmo = jeden řádek.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Prechody letniho casu v Praze 2026">
+<rect class="box" x="10" y="60" width="180" height="50" rx="6"/><text class="t b" x="100" y="82" text-anchor="middle">SEČ (CET)</text><text class="m" x="100" y="100" text-anchor="middle">UTC+1</text>
+<rect class="ok" x="250" y="60" width="260" height="50" rx="6"/><text class="t b" x="380" y="82" text-anchor="middle">SELČ (CEST)</text><text class="m" x="380" y="100" text-anchor="middle">UTC+2</text>
+<rect class="box" x="570" y="60" width="180" height="50" rx="6"/><text class="t b" x="660" y="82" text-anchor="middle">SEČ (CET)</text><text class="m" x="660" y="100" text-anchor="middle">UTC+1</text>
+<path class="ln" d="M220 30 L220 140"/><path class="ln" d="M540 30 L540 140"/>
+<text class="t" x="220" y="22" text-anchor="middle">29. 3. 01:00 UTC</text><text class="t" x="540" y="22" text-anchor="middle">25. 10. 01:00 UTC</text>
+<text class="m" x="220" y="160" text-anchor="middle">02:00 → 03:00 místního</text><text class="m" x="220" y="176" text-anchor="middle">02:30 neexistuje (Gap)</text>
+<text class="m" x="540" y="160" text-anchor="middle">03:00 → 02:00 místního</text><text class="m" x="540" y="176" text-anchor="middle">02:30 nastane 2× (Ambiguous)</text>
+</svg>
+<figcaption>Rok 2026 v Praze: na jaře se hodina přeskočí, na podzim se opakuje.</figcaption>
+</figure>
+
+```rust
+use libos::time::{self, zone::{Zone, LocalResult}};
+
+let praha = Zone::by_name("Europe/Prague").unwrap();
+if let Some(l) = time::local(&praha) {
+    let c = l.civil;
+    println!("{:02}:{:02} {}", c.hour, c.minute, l.offset.abbrev); // 14:03 CET
+}
+
+// Místní čas -> UTC: na přechodech nemusí být jednoznačný.
+match praha.local_to_utc(&civil).unwrap() {
+    LocalResult::Single(utc) => { /* běžný případ */ }
+    LocalResult::Ambiguous { earlier, later } => { /* podzim: hodina 2× */ }
+    LocalResult::Gap(utc) => { /* jaro: hodina neexistovala */ }
+}
+```
+
+`LocalResult::resolve()` vybere jednu hodnotu: při dvojznačnosti dřívější
+okamžik (ještě letní čas), při mezeře převod posunem platným před ní
+(02:30 → 03:30 SELČ). Chová se stejně jako `mktime` s `tm_isdst = -1`.
+
+⚠️ **Omezení tabulky:**
+
+- Historie se nepočítá, pravidla platí pro všechny roky. V Česku platí
+  pravidla EU od roku 1996. Pro starší data (a před rokem 1979, kdy se
+  letní čas nepoužíval) vyjde místní čas o hodinu jinak, než skutečně byl.
+- Až stát pravidla změní, je třeba upravit tabulku.
+- Pásma s víc než dvěma přechody za rok nebo se záporným letním časem
+  (Irsko v tzdata) tabulka neumí. Posun od UTC je ale správný.
+
+### Nastavení systému a RTC v místním čase (dual-boot s Windows)
+
+Nastavení času je text `klíč = hodnota`:
+
+```text
+zone = Europe/Prague   # jméno z tabulky, nebo UTC+2, UTC-03:30
+rtc = local            # utc (výchozí, Linux) | local (Windows)
+```
+
+Zatím je pevně v `init` (`system::TIME_SETTINGS`, pro QEMU `rtc = utc`).
+Až bude konfigurace systému na disku, načte se odtud. `init` ho při startu
+pošle službě času jako první zprávu.
+
+Windows drží v RTC **místní čas**. Jádro ho bez údaje o pásmu bere jako UTC,
+takže je reálný čas posunutý o pásmo. Při `rtc = local` to služba času
+hned po startu opraví, ještě před spuštěním ostatních služeb:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Oprava RTC v mistnim case">
+<defs><marker id="tm3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="40" width="170" height="80" rx="6"/><text class="t b" x="95" y="65" text-anchor="middle">RTC (Windows)</text><text class="m" x="95" y="84" text-anchor="middle">14:00 místního</text><text class="m" x="95" y="100" text-anchor="middle">(léto, UTC+2)</text>
+<path class="ln" d="M180 80 L248 80" marker-end="url(#tm3)"/>
+<rect class="acc" x="250" y="40" width="210" height="80" rx="6"/><text class="t b" x="355" y="65" text-anchor="middle">jádro při startu</text><text class="m" x="355" y="84" text-anchor="middle">14:00 „UTC“, zdroj RTC/UEFI,</text><text class="m" x="355" y="100" text-anchor="middle">ZONE_ASSUMED_UTC</text>
+<path class="ln" d="M460 80 L528 80" marker-end="url(#tm3)"/>
+<rect class="ok" x="530" y="40" width="220" height="80" rx="6"/><text class="t b" x="640" y="65" text-anchor="middle">timed: rtc = local</text><text class="m" x="640" y="84" text-anchor="middle">14:00 − 2 h = 12:00 UTC</text><text class="m" x="640" y="100" text-anchor="middle">CLOCK_SET (RTC beze změny)</text>
+<text class="m" x="10" y="160">Oprava jen jednou: zdroj musí být UEFI nebo RTC a mít ZONE_ASSUMED_UTC. Po CLOCK_SET je zdroj SET,</text>
+<text class="m" x="10" y="178">takže restart služby čas neposune podruhé. Když firmware pásmo uvedl, jádro už převedlo samo.</text>
+</svg>
+<figcaption>RTC v místním čase: jádro čte „UTC“, služba času odečte posun pásma.</figcaption>
+</figure>
+
+Funkce: `zone::rtc_local_correction(&settings, &reading)` (čistý výpočet,
+testovaný na hostiteli) a `time::apply_rtc_local(&clock, &settings)`
+(přečte, opraví, nastaví).
+
+⚠️ **Opakovaná hodina:** při konci letního času (v Praze poslední neděle
+v říjnu 02:00–03:00) nejde z místního času v RTC poznat, která z obou hodin
+to je. Bere se dřívější (letní čas). Pokud systém startuje právě v té
+hodině, je čas o hodinu napřed, dokud ho neopraví síť.
+
+⚠️ **Přechod během vypnutí:** Windows při prvním startu po změně letního
+času posune RTC samo. Když po přechodu nastartuje dřív náš systém, RTC ještě
+drží starý posun. Výsledek je pak o hodinu vedle, dokud čas neopraví síť
+nebo Windows.
 
 ## Formát
 

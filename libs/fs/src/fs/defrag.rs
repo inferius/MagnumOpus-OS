@@ -36,6 +36,7 @@ fn worth(blocks: u64, runs: u64) -> bool {
 impl<D: BlockDevice> Fs<D> {
     /// Defragmentuje soubor; vraci pocet prepsanych bloku.
     pub fn defrag_file(&mut self, path: &str) -> Result<u64> {
+        self.require_system()?;
         self.guarded(|fs| {
             let (oid, inode) = fs.file_oid(path)?;
             fs.defrag_oid(oid, &inode)
@@ -97,6 +98,7 @@ impl<D: BlockDevice> Fs<D> {
     /// `budget` bloku. Volat opakovane (napr. kdyz je disk necinny); po
     /// dokonceni pruchodu zacne znovu od zacatku.
     pub fn defrag_step(&mut self, budget: u64) -> Result<DefragReport> {
+        self.require_system()?;
         self.guarded(|fs| {
             let mut report = DefragReport::default();
             let root = fs.s.root;
@@ -139,6 +141,7 @@ impl<D: BlockDevice> Fs<D> {
     /// pocet bloku. Bezne staci `set_discard(true)`, ktery posila TRIM
     /// prubezne.
     pub fn trim_all(&mut self) -> Result<u64> {
+        self.require_system()?;
         let mut total = 0;
         for (s, l) in self.s.space.free_extents() {
             match self.s.dev.discard(s, l) {

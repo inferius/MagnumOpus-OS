@@ -28,6 +28,8 @@ pub(crate) fn stat(s: fs::Stat) -> Stat {
         mtime: s.mtime,
         ctime: s.ctime,
         btime: s.btime,
+        owner: s.owner,
+        rights: s.rights,
         tree_bytes: s.tree_bytes,
         tree_files: s.tree_files,
         tree_dirs: s.tree_dirs,
@@ -66,6 +68,8 @@ pub struct Service {
     pub temp_counter: u64,
     /// Klient prave udelal COMMIT (posunout automaticky commit).
     pub commit_requested: bool,
+    /// Cislovani relaci (`CONNECT`, `CONNECT_AS`).
+    pub session_counter: u64,
 }
 
 /// Klic a obsah rozpracovaneho vypisu (polozky serazene podle slozeneho
@@ -77,8 +81,20 @@ impl Service {
         self.fs.as_mut().ok_or(Error::IoError)
     }
 
-    /// Zpracuje jeden pozadavek relace `sess`; vraci odpoved.
+    /// Zpracuje jeden pozadavek relace `sess`; vraci odpoved. FS po dobu
+    /// pozadavku kontroluje opravneni podle identity relace.
     pub fn handle(&mut self, sess: &mut Session, msg: &[u8]) -> Result<Reply> {
+        if let Some(fs) = self.fs.as_mut() {
+            fs.set_principal(sess.identity.clone());
+        }
+        let r = self.handle_inner(sess, msg);
+        if let Some(fs) = self.fs.as_mut() {
+            fs.set_principal(None);
+        }
+        r
+    }
+
+    fn handle_inner(&mut self, sess: &mut Session, msg: &[u8]) -> Result<Reply> {
         let mut r = Reader::new(msg);
         let opcode = r.u32()?;
         // Rozpracovany vypis zahodi kazda jina operace (nikdy neni zastaraly).
@@ -107,6 +123,22 @@ impl Service {
         if opcode == op::CHECK && !self.debug {
             return Err(Error::AccessDenied);
         }
+        // Operace nad celym korenovym datasetem (jeho snapshoty, kontrola,
+        // defragmentace) jen relace, ktera vidi cely FS.
+        if matches!(
+            opcode,
+            op::SNAPSHOT
+                | op::SNAPSHOTS
+                | op::DELETE_SNAPSHOT
+                | op::SNAP_STAT
+                | op::SNAP_LIST
+                | op::SNAP_READ
+                | op::SNAP_LIST_PAGE
+                | op::CHECK
+                | op::DEFRAG
+        ) {
+            sess.full_root()?;
+        }
         let now = fs_now();
         let fs = self.fs()?;
         fs.set_time(now);
@@ -126,9 +158,9 @@ impl Service {
                 }
                 .put(&mut w);
             }
-            op::STAT => stat(fs.stat(&r.str()?)?).put(&mut w),
+            op::STAT => stat(fs.stat(&sess.map(&r.str()?, false)?)?).put(&mut w),
             op::LIST => {
-                let list = entries(fs.list(&r.str()?)?);
+                let list = entries(fs.list(&sess.map(&r.str()?, false)?)?);
                 fsproto::encode_list(&mut w, &list);
                 if w.len() > fsproto::MAX_REPLY {
                     return Err(Error::BufferTooSmall);
@@ -136,7 +168,10 @@ impl Service {
             }
             op::LIST_PAGE | op::SNAP_LIST_PAGE => {
                 let snap = if opcode == op::SNAP_LIST_PAGE { Some(r.str()?) } else { None };
-                let path = r.str()?;
+                let path = match snap {
+                    Some(_) => r.str()?,
+                    None => sess.map(&r.str()?, false)?,
+                };
                 let after = r.str()?;
                 let max = r.u32()? as usize;
                 let key = (snap.clone(), path.clone());
@@ -169,18 +204,18 @@ impl Service {
                 return Ok(Reply::body(w));
             }
             op::READ => {
-                let path = r.str()?;
+                let path = sess.map(&r.str()?, false)?;
                 let off = r.u64()?;
                 let n = io_len(&mut r)?;
                 w.bytes(&fs.read(&path, off, n)?);
             }
             op::WRITE => {
-                let path = r.str()?;
+                let path = sess.map(&r.str()?, true)?;
                 let off = r.u64()?;
                 fs.write(&path, off, r.rest())?;
             }
             op::CREATE => {
-                let path = r.str()?;
+                let path = sess.map(&r.str()?, true)?;
                 let k = match r.u8()? {
                     kind::FILE => Kind::File,
                     kind::DIR => Kind::Dir,
@@ -188,13 +223,14 @@ impl Service {
                 };
                 fs.create(&path, k)?;
             }
-            op::REMOVE => fs.remove(&r.str()?)?,
+            op::REMOVE => fs.remove(&sess.map(&r.str()?, true)?)?,
             op::RENAME => {
-                let from = r.str()?;
-                fs.rename(&from, &r.str()?)?;
+                let from = sess.map(&r.str()?, true)?;
+                let to = sess.map(&r.str()?, true)?;
+                fs.rename(&from, &to)?;
             }
             op::TRUNCATE => {
-                let path = r.str()?;
+                let path = sess.map(&r.str()?, true)?;
                 fs.truncate(&path, r.u64()?)?;
             }
             op::COMMIT => fs.commit()?,
@@ -232,7 +268,7 @@ impl Service {
                 w.u64(fs.defrag_file(&r.str()?)?);
             }
             op::FRAGMENTS => {
-                w.u64(fs.fragments(&r.str()?)?);
+                w.u64(fs.fragments(&sess.map(&r.str()?, false)?)?);
             }
             op::CHECK => {
                 let report = fs.check(r.u8()? != 0)?;

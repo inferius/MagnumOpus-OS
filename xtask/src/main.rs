@@ -169,7 +169,7 @@ fn run_cli() -> Result<()> {
 }
 
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
-/// chyb a syscallu, protokol vstupu a rozlozeni klavesnice).
+/// chyb a syscallu, casova pasma, protokol vstupu a rozlozeni klavesnice).
 fn host_tests() -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = Command::new(cargo)
@@ -181,6 +181,8 @@ fn host_tests() -> Result<()> {
             "abi",
             "--package",
             "initfs",
+            "--package",
+            "tz",
             "--package",
             "fs",
             "--package",
@@ -268,6 +270,7 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-input",
     "inputd",
     "fsd",
+    "timed",
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

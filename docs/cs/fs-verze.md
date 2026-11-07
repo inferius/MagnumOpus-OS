@@ -50,6 +50,7 @@ Návrh a důvody celé v3: [navrh-fs-v3.md](navrh-fs-v3.md). Hotové změny:
 | Velikost souboru | bez limitu (přetečení) | **2^63-1 B**, kontrolovaná aritmetika, saturující souhrny | velikosti a rozdíly vždy v `i64`; obří řídké soubory nepřetečou souhrny |
 | Extent | nejvýš 120 bloků, rezerva u32 | **496 bloků**, příznaky u32 (vyhrazeno: předalokace) | větší uzel; méně položek na velký soubor |
 | Intent log | záznamy 1-6 | + 7 symlink, generace u vytvoření, 8 značka datasetu, 9 nastavení časů | symlink přežije `fsync`; generace po přehrání zůstane původní; jedna dávka pro víc datasetů; nastavené časy přežijí pád |
+| Oprávnění | žádná | **vlastník, granty s dědičností (jen povolení), viditelnost, sdílené popisy** (`ACL`, `RO_COMPAT_ACL`), zákaz spouštění na datasetu; ve fsd identita relace od initu a připojené cesty | sdílení mezi uživateli, aplikace jen s tím, co dostaly ([oprávnění](souborovy-system.md#oprávnění-a-identita-relací)) |
 | Časy | u64 ns od 1970 | **sekundy i64 + nanosekundy u32** (příznak `INCOMPAT_TIME_SECS`) | data před rokem 1970 a bez hranice 2262 - viz níže |
 | Sirotci | - | položka `ORPHAN` (druh 9) pro otevřený objekt bez jména | otevřený soubor přežije smazání i atomické nahrazení; po pádu úklid při připojení |
 | Datasety | jeden strom pro svazek | **datasety** (vlastní stromy, záznam `DATASET` v kořenovém datasetu, položka adresáře druhu 4), snapshot s počtem klonů a příznakem „skrytý“ | historie po složkách (projekt, domov), zapisovatelné klony bez kopírování |

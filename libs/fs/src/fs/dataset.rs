@@ -175,7 +175,7 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Vsechny datasety: korenovy, ulozene i nove v pameti.
     pub(super) fn all_dataset_ids(&mut self) -> Result<Vec<u64>> {
-        let mut ids: Vec<u64> = self.datasets()?.into_iter().map(|d| d.id).collect();
+        let mut ids: Vec<u64> = self.datasets_all()?.into_iter().map(|d| d.id).collect();
         ids.push(ROOT_DATASET);
         ids.sort_unstable();
         Ok(ids)
@@ -307,12 +307,14 @@ impl<D: BlockDevice> Fs<D> {
     /// s vlastni historii). Hned commituje.
     pub fn create_dataset(&mut self, path: &str) -> Result<u64> {
         self.guarded(|fs| {
+            fs.require_parent(path, crate::perm::rights::CREATE)?;
             let (parent_path, name) = split_parent(path)?;
             validate_name(name)?;
             let parent = fs.dir_of(parent_path)?;
             fs.ensure_room(8)?;
             let id = fs.next_dataset_id()?;
-            let root_dir = Inode::new(KIND_DIR, 0, fs.now, fs.s.txg);
+            let mut root_dir = Inode::new(KIND_DIR, 0, fs.now, fs.s.txg);
+            root_dir.owner = fs.new_owner();
             let node = fs.s.new_node(
                 0,
                 Body::Leaf(alloc::vec![(Key::new(ROOT_OID, item::INODE, 0), root_dir.encode(fs.s.time_format()))]),
@@ -337,6 +339,8 @@ impl<D: BlockDevice> Fs<D> {
     /// Zapisovatelny klon snapshotu `snapshot` datasetu `dataset` jako novy
     /// dataset `path`. Okamzity (sdili bloky). Hned commituje.
     pub fn clone_snapshot(&mut self, dataset: &str, snapshot: &str, path: &str) -> Result<u64> {
+        self.require(dataset, crate::perm::rights::MANAGE)?;
+        self.require_parent(path, crate::perm::rights::CREATE)?;
         self.guarded(|fs| {
             let (parent_path, name) = split_parent(path)?;
             validate_name(name)?;
@@ -372,6 +376,7 @@ impl<D: BlockDevice> Fs<D> {
     /// Odmitne korenovy dataset, dataset s vnorenymi datasety (`NOT_EMPTY`)
     /// a dataset, z jehoz snapshotu vznikl klon (`BAD_STATE`).
     pub fn delete_dataset(&mut self, path: &str) -> Result<()> {
+        self.require(path, crate::perm::rights::MANAGE | crate::perm::rights::DELETE)?;
         self.guarded(|fs| {
             let (parent_path, name) = split_parent(path)?;
             let parent = fs.dir_of(parent_path)?;
@@ -492,8 +497,24 @@ impl<D: BlockDevice> Fs<D> {
         Ok(())
     }
 
-    /// Datasety ve svazku (krome korenoveho).
+    /// Datasety ve svazku (krome korenoveho). S kontrolou opravneni jen
+    /// ty, jejichz koren volajici vidi.
     pub fn datasets(&mut self) -> Result<Vec<DatasetInfo>> {
+        let all = self.datasets_all()?;
+        if !self.checking() {
+            return Ok(all);
+        }
+        let mut out = Vec::new();
+        for d in all {
+            if !d.path.is_empty() && self.walk(&d.path).is_ok() {
+                out.push(d);
+            }
+        }
+        self.activate(ROOT_DATASET)?;
+        Ok(out)
+    }
+
+    pub(super) fn datasets_all(&mut self) -> Result<Vec<DatasetInfo>> {
         let root = self.root_tree();
         let mut out = Vec::new();
         for (k, v) in btree::collect(

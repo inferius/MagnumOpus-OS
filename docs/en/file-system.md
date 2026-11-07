@@ -33,7 +33,8 @@ what works:
 | `BlockPtr` flags (compression, encryption, sharing, cloud) | reserved | **unused**; a node with a flag = `NOT_SUPPORTED` |
 | extent flags (preallocation) | reserved | **unused**; an extent with a flag = `NOT_SUPPORTED` |
 | object flag `INODE_REMOTE` | reserved | **unused** (phase 6) |
-| permissions (`acl`), owner, extended attribute count in the object record | yes | **writes 0**, does not read (phase 1d and later) |
+| permissions (`acl`), owner | yes | **uses** ([Permissions](#permissions-and-session-identity)) |
+| extended attribute count in the object record | yes | **writes 0**, does not read (later) |
 | access time (`atime`) | yes | **only by setting it** (`set_times`); reading does not change it |
 | object generation, creation time | yes | **uses** (`Stat`, log replay) |
 | symbolic links, names up to 1024 characters, size limit | yes | **uses** |
@@ -182,6 +183,7 @@ never damages it by not understanding new structures.
 |---|---|---|---|
 | 0 | incompat | `INCOMPAT_REMOTE` | reserved: data only in the cloud (phase 6); the driver still refuses it |
 | 1 | incompat | `INCOMPAT_TIME_SECS` | times are seconds i64 + nanoseconds u32 ([times](#object-times)); new volumes always have it |
+| 0 | ro_compat | `RO_COMPAT_ACL` | the volume has permission descriptors with reference counts ([permissions](#permissions-and-session-identity)); an older driver only reads |
 
 The **UUID** comes from `FormatOptions::uuid` at format time; host tools
 (`xtask`) pass a random one. Without it, it is derived from the label, size
@@ -274,6 +276,9 @@ content).
 | `SNAPSHOT` | 5 | snapshot number (object 0) | root `BlockPtr`, generation u64, clone count u32, flags u32 (1 = hidden), name |
 | `DEADLIST` | 6 | list << 32 \| sequence (object 0) | up to 80 dead ranges (start u64, length u64, birth u64) |
 | `SYMLINK` | 7 | 0 | target of a symbolic link (UTF-8, 1-4096 B) |
+| `ACL` | 10 | descriptor number (object 0) | permission descriptor with a reference count ([permissions](#on-disk)) |
+| `ACL_INDEX` | 11 | descriptor hash (object 0) | descriptor numbers u64 with the same hash |
+| `PROPS` | 12 | 0 (object 0) | dataset properties: flags u32 (1 = no execution) |
 | `ORPHAN` | 9 | orphan oid (object 0) | empty - an open object without a name; deleted by the last `close` or at mount |
 | `DATASET` | 8 | dataset number (object 0, only in the root dataset) | `DatasetRecord` 100 B: root, next oid, next snapshot, generation of the last snapshot, deadlist sequence, clone origin (dataset, snapshot, generation), flags |
 
@@ -727,7 +732,9 @@ name), 2 remove (parent, time, name), 3 rename (source, target, time, name,
 new name), 4 size change (oid, size, time), 5 small file content (oid,
 size, mtime, data), 6 data mapping (oid, size, mtime, list of extents with
 checksums), 7 symbolic link, 8 dataset marker, 9 set times (oid, mask u8:
-bit 0 mtime, 1 btime, 2 atime, change time, the present times). A time in a
+bit 0 mtime, 1 btime, 2 atime, change time, the present times), 10/11
+create/symlink with an owner (owner u64, then record 1/7), 12 set
+permission descriptor, 13 change owner. A time in a
 record takes 12 B (seconds i64 + nanoseconds u32); on a volume without
 `INCOMPAT_TIME_SECS` 8 B (u64 ns).
 
@@ -1381,6 +1388,182 @@ crash and intent log replay a file may have a different revision (the
 content version is not logged) - the client then gets `CONFLICT` (the safe
 direction). Data is still copied in messages (32 KiB per message); shared
 memory and request queues come later.
+
+## Permissions and session identity
+
+> **Change from v2:** v2 had no permissions (whoever had the channel could
+> do anything). **Why:** user files, sharing between users and applications
+> that see only what the user gave them. The format has been ready since v3
+> (owner and descriptor number in the object record); now it is used.
+> ([all changes](fs-versions.md#transition-v2---v3))
+
+<figure class="diagram">
+<svg viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Session identity and permissions">
+<defs><marker id="pm1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="180" height="70" rx="6"/><text class="t b" x="100" y="45" text-anchor="middle">init / session manager</text><text class="m" x="100" y="64" text-anchor="middle">fsd control channel</text><text class="m" x="100" y="80" text-anchor="middle">(system)</text>
+<path class="ln" d="M190 55 L268 55" marker-end="url(#pm1)"/><text class="m" x="229" y="47" text-anchor="middle">CONNECT_AS</text>
+<rect class="box" x="270" y="15" width="220" height="80" rx="6"/><text class="t b" x="380" y="38" text-anchor="middle">application session</text><text class="m" x="380" y="56" text-anchor="middle">identity: Alice (1000)</text><text class="m" x="380" y="72" text-anchor="middle">/app -> /home/alice/apps/editor</text><text class="m" x="380" y="88" text-anchor="middle">/picked/photo.jpg (read only)</text>
+<path class="ln" d="M490 55 L568 55" marker-end="url(#pm1)"/><text class="m" x="529" y="47" text-anchor="middle">FS path</text>
+<rect class="ok" x="570" y="20" width="180" height="70" rx="6"/><text class="t b" x="660" y="45" text-anchor="middle">libs/fs</text><text class="m" x="660" y="64" text-anchor="middle">owner, grants,</text><text class="m" x="660" y="80" text-anchor="middle">inheritance, visibility</text>
+<path class="ln" d="M100 90 L100 150 L268 150" marker-end="url(#pm1)"/><text class="m" x="185" y="142" text-anchor="middle">GRANT / REVOKE</text>
+<rect class="box" x="270" y="125" width="220" height="50" rx="6"/><text class="t" x="380" y="147" text-anchor="middle">Open dialog (powerbox)</text><text class="m" x="380" y="165" text-anchor="middle">adds a mounted path to the session</text>
+<text class="m" x="10" y="215">Outside mounted paths = NOT_FOUND, ".." = INVALID_ARGS. Inside, FS permissions decide by the session identity;</text>
+<text class="m" x="10" y="233">an object without any right is invisible (NOT_FOUND); with a right but not the needed one = ACCESS_DENIED.</text>
+<text class="m" x="10" y="251">A client cannot invent an identity: it only gets a channel from whoever created the session.</text>
+</svg>
+<figcaption>init mints the session identity and namespace; the FS evaluates permissions.</figcaption>
+</figure>
+
+### Model
+
+- **Who asks** (`Principal`): a user and their groups. User 0 is the
+  system: checks do not apply (host tools, the Windows driver, internal
+  operations). The FS gets the identity from the caller
+  (`Fs::set_principal`); the fsd service sets it per session.
+- The **owner** of an object has all rights. A new object belongs to whoever
+  created it. Only the system changes the owner (`set_owner`).
+- **Rights:** `LIST`, `TRAVERSE`, `READ`, `WRITE`, `CREATE`, `DELETE`,
+  `EXECUTE`, `MANAGE` (permissions, snapshots, datasets). Levels:
+  **View** `VIEW` = list + traverse + read, **Edit** `EDIT` = view + write +
+  create + delete, **Run** `RUN` = view + execute.
+- **Grants:** a permission descriptor (`Acl`) = a list "who -> rights",
+  **allow only**. A grant applies to the object itself (`THIS`), is
+  inherited by descendants (`INHERIT`), or both. The grantee is a user, a
+  group or `EVERYONE` (everyone except the system).
+- **Inheritance:** an object has its parent's inherited grants plus its own.
+  The `PROTECTED` flag stops inheritance - a private folder inside a shared
+  one without any deny entries.
+- **Visibility:** an entry the caller has no right to is not listed and
+  `stat` returns `NOT_FOUND` for it (not `ACCESS_DENIED` - not even the name
+  leaks). Every directory along the path needs `TRAVERSE`. Subtree summaries
+  (`tree_*`) are shown only to the owner and `MANAGE`.
+
+| Operation | Required right |
+|---|---|
+| `stat`, `revision` | any (visibility) |
+| `list` | `LIST` |
+| `read`, `readlink`, `fragments` | `READ` |
+| `write`, `truncate`, `set_times` | `WRITE` |
+| `create`, `symlink`, `create_dataset` | `CREATE` on the parent |
+| `remove` | `DELETE` on the object |
+| `rename`, `rename_replace` | `DELETE` on the source (and on a replaced target) + `CREATE` on the target parent |
+| `open` | by access: `READ`, `WRITE`, `DELETE`, `EXECUTE` |
+| `set_acl`, `set_noexec`, `snapshot_of`, `delete_snapshot_of`, `diff`, `clone_snapshot` (source) | `MANAGE` |
+| `delete_dataset` | `MANAGE` + `DELETE` |
+| `snapshots_of`, reading in a snapshot | `READ` on the dataset root, inside the permissions **from the snapshot** |
+| `set_owner`, `check`, defragmentation | system only |
+
+**Handles:** rights are checked at `open`; operations through the handle are
+not checked again (a capability). Listing through a handle (`list_h`) hides
+entries the same way as `list`.
+
+**Snapshots** keep the permissions from when they were taken: a file the
+author hid later is visible in an old snapshot to whoever could see it then
+and has `READ` on the dataset root.
+
+### On disk
+
+- A **permission descriptor** is an `ACL` item (kind 10, object 0, offset =
+  descriptor number) in the dataset: flags u32, grant count u16, reserved
+  u16, **reference count u64**, grants (who u64, rights u8, flags u8).
+  Objects point to it by number (`Inode::acl`, 0 = inherit only), so
+  thousands of files with the same rights cost one record.
+- The **index** `ACL_INDEX` (kind 11, offset = descriptor hash) finds the
+  same descriptor when setting one: grants are sorted and merged before
+  storing, so equal rights = the same descriptor. The last reference deletes
+  the descriptor and its index entry.
+- The **`RO_COMPAT_ACL`** flag (ro_compat bit 0) is set with the first
+  descriptor: an older driver may only read the volume (when deleting it
+  would not decrement reference counts).
+- **Dataset properties** `PROPS` (kind 12, object 0): flags u32, bit 0 =
+  **no execution** (`NOEXEC`). `open` with `EXECUTE` then fails for
+  everyone, even the system - data datasets (downloads, documents) cannot
+  hold runnable programs.
+- **Intent log:** 10/11 = create/symlink with an owner (only when the owner
+  is not the system - volumes without users stay readable by an older
+  driver), 12 set descriptor, 13 change owner. They survive `fsync` and a
+  crash.
+- **fsck** checks that descriptors exist, reference counts match and the
+  index is complete.
+
+```rust
+use fs::{Acl, Grant, Principal, grant, rights, acl_flags};
+
+fs.set_owner("/home/alice", 1000)?;                    // system
+fs.set_principal(Some(Principal::user(1000, &[])));     // from now on as Alice
+fs.set_acl("/home/alice/shared", Some(Acl {
+    flags: 0,
+    grants: vec![Grant { who: 5000, rights: rights::EDIT, flags: grant::BOTH }], // team
+}))?;
+fs.set_acl("/home/alice/shared/private", Some(Acl {
+    flags: acl_flags::PROTECTED, grants: vec![],        // private folder inside a shared one
+}))?;
+```
+
+### Sessions in fsd: identity and mounted paths
+
+- The **control session** = the main channel from the startup message (init
+  has it, later the session manager). It is the system and sees the whole
+  FS.
+- **`CONNECT_AS`** (control only) creates a user session: identity (user,
+  groups) and **mounted paths** `name in the session -> path in the FS`
+  (read-only flag). It returns the session number and a channel that can be
+  handed to an application. **A client cannot invent an identity** - the
+  identity belongs to the channel.
+- **Session namespace:** a path is translated by the longest mount at a
+  folder boundary; outside the mounts `NOT_FOUND`, `..` and `.` =
+  `INVALID_ARGS` (no escaping a mount). The FS does not follow links, so no
+  escape through them either.
+- **`GRANT` / `REVOKE`** (control only) add or remove a mounted path of a
+  session - the Open/Save dialog (powerbox): the application gets only what
+  the user picked.
+- `CONNECT` from a user session creates another session with the same
+  identity and paths (not a control one).
+- Operations on the whole root dataset (v1 snapshots, check,
+  defragmentation) are allowed only for a session with the mount `/ -> /`.
+
+| op | Name | Parameters | Result |
+|---|---|---|---|
+| 46 | `CONNECT_AS` | user u64, groups (u32 + u64...), mounts (u32 + name, target, flags u8) | session number u64 + channel |
+| 47 | `GRANT` | session u64, name, target, flags u8 | - |
+| 48 | `REVOKE` | session u64, name | - |
+| 49 | `PERMISSIONS` | path | owner u64, rights u8, has descriptor u8, [descriptor] |
+| 50 | `SET_ACL` | path, has descriptor u8, [descriptor: flags u32, count u32, (who u64, rights u8, flags u8)...] | - |
+| 51 | `SET_OWNER` | path, owner u64 (control only) | - |
+| 52 | `SET_NOEXEC` | dataset root, enable u8 | - |
+| 53 | `NOEXEC` | dataset root | flag u8 |
+
+`Stat` additionally has the owner u64 and the caller's effective rights u8.
+`OPEN` knows the `EXECUTE` access (8).
+
+### Profiles
+
+A profile is a **system setting, not a format** (the boundary from the
+design: what must hold for every write is in the FS; settings and decisions
+are outside). The session manager uses it through `fsproto::perm::Profile`:
+
+| | Standard (default) | Strict | Free |
+|---|---|---|---|
+| application session (`app_mounts`) | `/app` + picked items | `/app` + picked items | whole home + `/app` |
+| remember picks (`remember_picks`) | yes | no (always the dialog) | yes |
+| no execution on data (`noexec_on_data`) | yes | yes | no |
+| user session (`user_mounts`) | `/ -> /`, permissions decide | same | same |
+
+```rust
+use fsproto::perm::{Mount, Profile, mount_flags};
+
+let p = Profile::Standard;
+let picked = [Mount::new("/picked/photo.jpg", "/home/alice/photo.jpg", mount_flags::READ_ONLY)];
+let (id, app) = fs.connect_as(1000, &[], &p.app_mounts("/home/alice", "editor", &picked))?;
+// ... later the user picks a folder:
+fs.grant(id, &Mount::new("/documents", "/home/alice/Documents", 0))?;
+```
+
+⚠️ **Limitations:** subtree size summaries are not computed per user - who
+lacks `MANAGE` sees 0. A dataset entry in a listing is judged by the
+permissions of its root. Auditing (access log) and quotas come in phase 4.
+The Windows driver (`osfs mount`) runs as the system: the mounted image is
+entirely the Windows user's; permissions are kept but not enforced.
 
 ## Error codes
 

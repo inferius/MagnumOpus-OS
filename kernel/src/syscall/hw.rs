@@ -1,4 +1,5 @@
-//! Pristup k hardwaru pro ovladace (vyzaduje Resource s pravem MANAGE).
+//! Pristup k hardwaru pro ovladace (vyzaduje Resource s pravem MANAGE)
+//! a nastaveni realneho casu (Resource s pravem SET_CLOCK).
 
 use alloc::sync::Arc;
 
@@ -6,6 +7,7 @@ use super::handle::arg_handle;
 use super::{Args, current_process, user};
 use crate::arch::paging::PAGE_SIZE;
 use crate::error::{Error, Result};
+use crate::log;
 use crate::mm;
 use crate::object::interrupt::Interrupt;
 use crate::object::process::Process;
@@ -16,6 +18,25 @@ use crate::object::{KernelObject, Rights};
 fn check_resource(p: &Process, v: u64) -> Result<Arc<Resource>> {
     p.handles()
         .get_as::<Resource>(arg_handle(v)?, Rights::MANAGE)
+}
+
+/// `CLOCK_SET(resource, in_ptr, flags) -> 1/0`: nastavi realny cas.
+/// Vyzaduje Resource s pravem `SET_CLOCK` (ma ho jen korenovy). Vraci 1,
+/// kdyz se cas zapsal i do hardwarovych hodin (`set_flags::WRITE_HARDWARE`).
+pub fn clock_set(a: Args) -> Result<u64> {
+    use abi::time::{SetRequest, set_flags};
+    let p = current_process();
+    p.handles()
+        .get_as::<Resource>(arg_handle(a[0])?, Rights::SET_CLOCK)?;
+    if a[2] & !set_flags::ALL != 0 {
+        return Err(Error::InvalidArgs);
+    }
+    let raw = user::read_bytes(&p, a[1], SetRequest::SIZE)?;
+    let bytes: &[u8; SetRequest::SIZE] = raw.as_slice().try_into().map_err(|_| Error::InvalidArgs)?;
+    let req = SetRequest::decode(bytes).ok_or(Error::InvalidArgs)?;
+    log::info!("[{} {}] nastavuje realny cas", p.name, p.id);
+    let hw = crate::clock::set(req, a[2] & set_flags::WRITE_HARDWARE != 0);
+    Ok(hw as u64)
 }
 
 fn insert(p: &Process, object: Arc<dyn KernelObject>) -> Result<u64> {

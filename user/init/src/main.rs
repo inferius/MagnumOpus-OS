@@ -1,7 +1,7 @@
 //! init: prvni proces v userspace.
 //!
-//! Spusti spravce zarizeni (ten spusti ovladace), sluzbu souboroveho
-//! systemu a sluzbu vstupu, pak testy rozhrani jadra, libos, ovladacu a FS (`tests/`). Pozdeji bude spoustet systemove sluzby podle
+//! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
+//! souboroveho systemu a sluzbu vstupu, pak testy rozhrani jadra, libos, ovladacu a FS (`tests/`). Pozdeji bude spoustet systemove sluzby podle
 //! konfigurace.
 
 #![no_std]
@@ -19,6 +19,10 @@ libos::entry!(main);
 
 fn main(startup: Startup) -> i64 {
     println!("init: bezim v userspace");
+    match system::start_time(&startup) {
+        Ok(t) => tests::set_time_service(t),
+        Err(e) => println!("init: sluzbu casu nelze spustit: {e}"),
+    }
     match system::start_devices(&startup) {
         Ok(mut devices) => {
             if let Err(e) = system::start_fs(&startup, &mut devices) {

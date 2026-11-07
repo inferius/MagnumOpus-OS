@@ -85,6 +85,7 @@ impl<D: BlockDevice> Fs<D> {
     ///   z disku. Zmeny prehrane z logu jen v pameti zkontrolovane nejsou -
     ///   rika to `live_not_checked`.
     pub fn check(&mut self, scrub: bool) -> Result<CheckReport> {
+        self.require_system()?;
         let read_only = self.s.read_only;
         if !read_only {
             self.commit()?;
@@ -280,6 +281,12 @@ struct Objects {
     dirents: Vec<(u64, u8)>,
     /// oid -> delka cile odkazu.
     links: BTreeMap<u64, u64>,
+    /// Popis opravneni -> kolik objektu na nej ukazuje.
+    acl_uses: BTreeMap<u64, u64>,
+    /// Popis opravneni -> (pocet odkazu v zaznamu, otisk).
+    acls: BTreeMap<u64, (u64, u64)>,
+    /// Index popisu: (otisk, cislo popisu).
+    acl_index: Vec<(u64, u64)>,
 }
 
 impl Objects {
@@ -291,6 +298,9 @@ impl Objects {
             item::INODE => match Inode::decode(v, tf) {
                 Ok(i) => {
                     self.inodes.insert(k.oid, (i.kind, i.size));
+                    if i.acl != 0 {
+                        *self.acl_uses.entry(i.acl as u64).or_default() += 1;
+                    }
                 }
                 Err(e) => r.problem(format!("zaznam objektu {} je poskozeny: {e:?}", k.oid)),
             },
@@ -313,11 +323,47 @@ impl Objects {
             item::SYMLINK => {
                 self.links.insert(k.oid, v.len() as u64);
             }
+            item::ACL if k.oid == crate::layout::META_OID => match crate::perm::decode_acl(v) {
+                Ok((a, refs)) => {
+                    self.acls.insert(k.offset, (refs, crate::perm::acl_hash(&a)));
+                }
+                Err(e) => r.problem(format!("popis opravneni {} je poskozeny: {e:?}", k.offset)),
+            },
+            item::ACL_INDEX if k.oid == crate::layout::META_OID => {
+                if v.is_empty() || v.len() % 8 != 0 {
+                    r.problem(format!("index popisu opravneni {:#x} je poskozeny", k.offset));
+                }
+                for c in v.chunks_exact(8) {
+                    self.acl_index.push((k.offset, u64::from_le_bytes(c.try_into().unwrap())));
+                }
+            }
             _ => {}
         }
     }
 
     fn verify(&self, r: &mut CheckReport) {
+        for (&id, &uses) in &self.acl_uses {
+            match self.acls.get(&id) {
+                None => r.problem(format!("objekty ukazuji na neexistujici popis opravneni {id}")),
+                Some(&(refs, _)) if refs != uses => {
+                    r.problem(format!("popis opravneni {id}: {refs} odkazu v zaznamu, {uses} objektu"))
+                }
+                _ => {}
+            }
+        }
+        for (&id, &(_, hash)) in &self.acls {
+            if !self.acl_uses.contains_key(&id) {
+                r.problem(format!("popis opravneni {id} nema zadny objekt"));
+            }
+            if !self.acl_index.contains(&(hash, id)) {
+                r.problem(format!("popis opravneni {id} chybi v indexu"));
+            }
+        }
+        for &(hash, id) in &self.acl_index {
+            if self.acls.get(&id).is_none_or(|&(_, h)| h != hash) {
+                r.problem(format!("index popisu opravneni ukazuje na spatny popis {id}"));
+            }
+        }
         for &(oid, kind) in &self.dirents {
             match self.inodes.get(&oid) {
                 None => r.problem(format!("polozka adresare ukazuje na neexistujici objekt {oid}")),

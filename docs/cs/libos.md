@@ -72,7 +72,9 @@ map.write::<u32>(0x14, status | 1);
 ```
 
 Funkce: `wait_one`, `wait_many` (čekání na signály), `time::now`,
-`time::deadline_after`, `time::sleep`, `exit(kód)`, `println!` (log jádra).
+`time::deadline_after`, `time::sleep`, `time::wall`, `time::local` (místní
+čas v pásmu z `time::zone`), `exit(kód)`, `println!` (log jádra). Viz
+[Reálný čas](cas.md).
 
 Chyby jsou `libos::Error` (= `abi::Error`), popsané v [chyby.md](chyby.md).
 Konstanty rozhraní (příznaky mapování, kódy procesů) jsou v `libos::abi`.

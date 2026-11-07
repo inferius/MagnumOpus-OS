@@ -47,6 +47,10 @@ Tests (name translation including the property test):
 cargo test -p osfs
 ```
 
+The driver's behavior (orphans, sharing modes, locks, delete-on-close,
+replace, datasets) is checked on a mounted drive by the manual script
+`tools/osfs/scripts/overeni-mount.ps1 -Drive Q:` (steps in its header).
+
 ## Commands
 
 | Command | What it does |
@@ -133,22 +137,32 @@ in the state after the last commit plus changes confirmed by `fsync` - see
 - **Concurrency:** WinFsp calls from several threads, `Fs` is single
   threaded - to start with, there is **one lock** around it (operations run
   one at a time).
-- **Path based:** an open file only remembers its path in our FS. The
-  handle layer (deleted but still open files, sharing modes) comes later.
-  A rename rewrites the paths of open handles under the renamed name.
+- **Library handles:** every open on Windows = a handle of the `fs`
+  library (`Fs::open`). A handle holds **the object, not a path**: reads,
+  writes, size changes, times and directory listings go through it
+  (`read_h`, `write_h`, `set_len_h`, `set_times_h`, `list_h`), so an open
+  file survives a rename of its own name or of a parent.
+- **Deletion like NTFS on Windows 10+ (POSIX):** the volume reports
+  `SupportsPosixUnlinkRename`. A deleted name disappears at once and a new
+  file can be created in its place right away; whoever had the old file
+  open keeps reading and writing (an "orphan" in the library), and with the
+  last handle closed the object and its data disappear. The next mount
+  cleans up orphans after a crash.
+- **What WinFsp enforces itself (in the kernel):** `CreateFile` sharing
+  modes (`FILE_SHARE_*`), `LockFileEx` range locks and delete-on-close
+  (`FILE_FLAG_DELETE_ON_CLOSE`). The library has its own checks (sharing,
+  locks) that protect against other clients (the extended API); handles
+  from Windows are therefore opened with "share everything" so the checks
+  are not done twice.
 - **Case:** the volume reports "case-insensitive, case-preserving". On
   open, WinFsp gets the real name back (normalized, looked up in the parent
   listing); without it WinFsp would use the upper-cased path as the file
   name and would treat a rename `a.txt` -> `A.TXT` as "no change".
-- **Rename with replace** (`MoveFileEx` with `REPLACE_EXISTING`): the
-  target is first only moved aside to a temporary name `.osfs-nahrazeni-N`
-  in the same directory, then the source is renamed and only then the
-  moved-aside target is deleted. If the rename fails, the target is moved
-  back - nothing is lost. Everything happens under one lock, so neither a
-  commit nor `fsync` captures the intermediate state. Handles that were
-  open on the replaced file return "file deleted" from then on (their path
-  would now lead to a different object); usually WinFsp refuses this
-  already (an open target cannot be replaced).
+- **Rename with replace** (`MoveFileEx` with `REPLACE_EXISTING`) is one
+  atomic library operation (`Fs::rename_replace`): either the target is
+  replaced or nothing changed. Whoever had the original target open keeps
+  reading its content (orphan). A directory cannot be replaced as a target
+  (as on NTFS).
 - **Directory listing** in parts: the first request takes a snapshot of
   the name list, further parts (WinFsp asks repeatedly while the buffer
   fills up) continue in the same snapshot, and metadata (`stat`) is read
@@ -157,11 +171,16 @@ in the state after the last commit plus changes confirmed by `fsync` - see
   by entry: a create adds one name, delete and rename remove it. Bulk file
   creation in one directory is therefore linear (3000 files in about 1 s).
   At most 256 directories, then the whole cache is dropped.
-- **The volume serial number** is stable (derived from the image file's
-  creation time, size and label): Windows uses it to recognize the volume
-  (shortcuts, thumbnail cache).
-- **Times:** our ns since 1970 -> FILETIME (100 ns since 1601). Creation
-  time = `btime`, last write and last access = `mtime`, change = `ctime`.
+- **The volume serial number** is stable, derived from the volume UUID
+  (superblock): Windows uses it to recognize the volume (shortcuts,
+  thumbnail cache); it does not change even when the image is moved. **The
+  volume creation time** = creation time of the root (`btime`, written by
+  `osfs format`).
+- **Times:** our time (signed seconds since 1970 + nanoseconds, handles
+  dates before 1970 too) -> FILETIME (100 ns since 1601; earlier = 0).
+  Creation time = `btime`, last write and last access = `mtime`, change =
+  `ctime`. Setting a time from Windows (`SetFileTime`, file properties) is
+  stored through `Fs::set_times`.
 - **File ID** (`IndexNumber`) = the object's `oid`.
 
 ### Saving: commit and fsync
@@ -244,8 +263,6 @@ be entered from Windows.
   ("name already exists").
 - No named data streams (`file:stream`), extended attributes or reparse
   points.
-- No deleted-but-still-open files (POSIX delete) yet - that needs the
-  handle layer.
 - Renaming a folder that contains an open file is refused by Windows
   itself (same as NTFS).
 - Case rules differ in details: our FS compares after Unicode lower-casing
@@ -394,11 +411,9 @@ Common problems:
   `Fs::set_times`.
 - **"Is there anything to save"** - commits are currently tracked by our
   own flag.
-- **Volume UUID** in `FsInfo` - the serial number for Windows is now
-  derived from the image file's creation time (will not work for a real
-  disk).
 - **Device lock** in the library (or at least in `FileDevice`) - `osfs`
   holds it itself now.
-- **Atomic replace on rename** - now move-aside of the target, rename and
-  deletion of the moved-aside file under one lock.
-- **Operations by handle/oid** instead of paths (handle layer).
+- **Stat of a directory entry through a handle** (e.g.
+  `stat_at_h(dir, name)` or a listing with metadata): the Windows directory
+  listing now reads entry metadata by path from the directory's last known
+  path.

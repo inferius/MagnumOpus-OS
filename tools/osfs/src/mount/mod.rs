@@ -2,9 +2,11 @@
 //!
 //! - **Jeden zamek** kolem celeho `Fs` (WinFsp vola z vice vlaken, `Fs` je
 //!   jednovlaknovy).
-//! - **Po cestach:** kontext otevreneho souboru drzi jen cestu v nasem FS
-//!   (vrstva handlu - sirotci, sdileci rezimy - prijde pozdeji). Prejmenovani
-//!   prepise cesty otevrenych handlu pod prejmenovanym jmenem.
+//! - **Handly knihovny:** kontext otevreneho souboru drzi handle `fs`
+//!   (objekt, ne cestu); cteni, zapis, velikost, casy a vypis jdou pres nej.
+//!   Mazani jako POSIX (`SupportsPosixUnlinkRename`): smazany otevreny soubor
+//!   zustane jako sirotek do zavreni. Sdileci rezimy, `LockFileEx`
+//!   a smazani pri zavreni hlida WinFsp v jadre.
 //! - **Commit** kazdych `COMMIT_EVERY` (jen kdyz se neco zmenilo) a pri
 //!   odpojeni; `FlushFileBuffers` = `fsync` (intent log), flush cele
 //!   jednotky = commit.
@@ -31,11 +33,12 @@ const SDDL: &str = "O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)";
 
 /// Otevreny soubor nebo adresar.
 struct Handle {
-    /// Cesta v nasem FS (`/a/b`).
+    /// Handle knihovny `fs`: drzi objekt (ne cestu), takze otevreny soubor
+    /// prezije prejmenovani i smazani sveho jmena (sirotek az do zavreni).
+    fh: fs::Handle,
+    /// Posledni znama cesta (vypis adresare stati polozky po jmenech,
+    /// ladici vypisy). Prejmenovani ji prepise.
     path: String,
-    /// Objekt pod handlem uz neexistuje (byl nahrazen pri prejmenovani):
-    /// cesta by ted vedla na jiny objekt, operace vraci `STATUS_FILE_DELETED`.
-    gone: bool,
     /// Snimek vypisu adresare pro `ReadDirectory` po castech: porizuje se
     /// pri prvnim dotazu (bez markeru), dalsi casti z nej jen pokracuji.
     listing: Option<Vec<ops::ListItem>>,
@@ -132,28 +135,23 @@ fn commit_now(st: &mut State) {
 
 /// Stale seriove cislo a cas vytvoreni svazku. Windows podle serioveho
 /// cisla poznavaji svazek (zastupci, mezipamet nahledu), proto se nesmi
-/// menit s kazdym pripojenim. UUID svazku API `fs` nevraci, pouzije se tedy
-/// cas vytvoreni souboru s obrazem (prezije prejmenovani i presun na
-/// stejnem disku) spolu s velikosti a jmenovkou.
-fn volume_identity(image_path: &Path, info: &fs::FsInfo) -> (u32, u64) {
-    let created = std::fs::metadata(image_path)
-        .and_then(|m| m.created())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    // FNV-1a 64 pres cas vytvoreni, pocet bloku a jmenovku.
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in created
-        .to_le_bytes()
+/// menit s kazdym pripojenim: odvodi se z UUID svazku (superblok), takze
+/// zustane stejne i po presunu obrazu nebo na skutecnem disku. Cas
+/// vytvoreni = cas vytvoreni korene (`btime`, zapsany pri formatovani).
+pub(crate) fn volume_identity(fs: &mut Volume) -> (u32, fs::Timestamp) {
+    let uuid = fs.info().uuid;
+    // XOR ctyr slov UUID: kazdy bajt ovlivni vysledek.
+    let serial = uuid
+        .as_chunks::<4>()
+        .0
         .iter()
-        .chain(&info.block_count.to_le_bytes())
-        .chain(info.label.as_bytes())
-    {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    ((h ^ (h >> 32)) as u32, created)
+        .map(|w| u32::from_le_bytes(*w))
+        .fold(0, |a, w| a ^ w);
+    let created = fs
+        .stat("/")
+        .map(|s| s.btime)
+        .unwrap_or(fs::Timestamp::UNIX_EPOCH);
+    (serial, created)
 }
 
 /// Jmeno udalosti, kterou `osfs unmount X:` pozada o odpojeni (jen v ramci
@@ -184,6 +182,15 @@ pub fn unmount(drive: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Zavre vsechny handly knihovny (pred poslednim commitem): sirotci
+/// smazanych, ale jeste otevrenych souboru tak zmizi hned, ne az pri
+/// pristim pripojeni.
+fn close_all(st: &mut State) {
+    for (_, h) in st.handles.drain() {
+        let _ = st.fs.close(h.fh);
+    }
+}
+
 /// Pripoji obraz jako jednotku `drive` a ceka na Ctrl+C nebo `osfs unmount`.
 pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     if !valid_drive(drive) {
@@ -208,8 +215,8 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
         return Err(format!("{drive}: uz ho pripojuje jiny proces osfs mount"));
     }
 
-    let (fs, image_lock) = image::open(image_path, false)?;
-    let (serial, created) = volume_identity(image_path, &fs.info());
+    let (mut fs, image_lock) = image::open(image_path, false)?;
+    let (serial, created) = volume_identity(&mut fs);
     let info = fs.info();
     if info.read_only {
         eprintln!(
@@ -232,7 +239,7 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     vp.SectorSize = fs::BLOCK_SIZE as u16;
     vp.SectorsPerAllocationUnit = 1;
     vp.MaxComponentLength = crate::names::WIN_NAME_MAX as u16;
-    vp.VolumeCreationTime = ops::filetime(fs::Timestamp::new(0, created.min(i64::MAX as u64) as i64));
+    vp.VolumeCreationTime = ops::filetime(created);
     vp.VolumeSerialNumber = serial;
     vp.FileInfoTimeout = 1000;
     vp.Flags = VP_CASE_PRESERVED_NAMES
@@ -240,7 +247,10 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
         | VP_POST_CLEANUP_WHEN_MODIFIED_ONLY
         | VP_UM_FILE_CONTEXT_IS_USER_CONTEXT2
         // Rozsirene API pres DeviceIoControl (`osfs-proto`).
-        | VP_DEVICE_CONTROL;
+        | VP_DEVICE_CONTROL
+        // Mazani a nahrazeni jako NTFS ve Windows 10+ (POSIX): knihovna
+        // drzi otevreny objekt jako sirotka.
+        | VP_SUPPORTS_POSIX_UNLINK_RENAME;
     // Nas FS nerozlisuje velikost pismen stejne jako Windows; opravneni
     // zatim nema.
     debug_assert_eq!(
@@ -332,6 +342,7 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     let _ = committer.join();
     let result = match lock().take() {
         Some(mut st) => {
+            close_all(&mut st);
             st.dirty = true;
             commit_now(&mut st);
             if st.dirty && !st.read_only {
