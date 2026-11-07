@@ -6,7 +6,9 @@ První část milníku 6 („síť“). Hotové jsou tyto části:
 - služba sítě **`netd`** se stackem TCP/IP (ARP, IPv4, ICMP, UDP, TCP),
   klientem DHCP a resolverem DNS,
 - protokol **`netproto`** s přístupem přes capability a omezením cílů,
-- klient **NTP**, který přes službu času seřídí hodiny.
+- klient **NTP**, který přes službu času seřídí hodiny,
+- **firewall**: manifest aplikace, dotazy uživateli, paketový filtr,
+  profily sítí, audit a filtr DNS (viz [firewall.md](firewall.md)).
 
 TLS a HTTP přijdou později. Rozhraní na ně je připravené (viz
 [Příprava na TLS a HTTP](#příprava-na-tls-a-http)).
@@ -17,7 +19,8 @@ TLS a HTTP přijdou později. Rozhraní na ně je připravené (viz
 | služba | `user/netd` | stack TCP/IP (smoltcp), DHCP, DNS, oprávnění, sockety |
 | protokol | `libs/netproto` | zprávy, oprávnění, formáty DNS a NTP, klientská knihovna |
 | správce zařízení | `user/devmgr` | najde kartu na PCI, spustí ovladač |
-| init | `user/init/src/system.rs` | spustí `netd`, drží kořenovou relaci, NTP |
+| firewall | `user/fwd`, `libs/netfilter`, `libs/manifest` | konfigurace, dotazy uživateli, filtr paketů, manifesty |
+| init | `user/init/src/system.rs`, `apps.rs` | spustí `netd` a `fwd` v jobech podle manifestů, drží kořenovou relaci, NTP |
 | testy | `user/init/src/tests/net.rs`, `xtask/src/nethelper.rs` | testy v QEMU přes slirp proti serverům hostitele |
 
 ## Architektura
@@ -79,7 +82,9 @@ dostane:
 (kontrolní součty počítá stack), stejně jako `MRG_RXBUF` (rámec se vždy
 vejde do jednoho bufferu).
 
-**Fronty:** 0 = příjem, 1 = odesílání, každá nejvýš 64 bufferů po 2 KiB.
+**Fronty:** 0 = příjem, 1 = odesílání, každá nejvýš 256 bufferů po 2 KiB
+(kolik zařízení nabídne; QEMU 256). Paměť pro DMA a přerušení dostane
+ovladač od `devmgr` podle druhu zařízení (síť: 2 MiB, 4 přerušení).
 Buffer obsahuje hlavičku virtio-net (12 B) a rámec. Obě fronty mají
 jeden vektor MSI-X. Ovladač čeká jedním `OBJECT_WAIT_MANY` na přerušení
 a na zprávy od služby:
@@ -120,7 +125,9 @@ zatím chybí).
 Start (handly `USER` v pořadí):
 
 1. kanál k ovladači karty,
-2. kanál **kořenové relace**, kterou drží `init`.
+2. kanál **kořenové relace**, kterou drží `init`,
+3. (volitelně) kanál ke službě firewallu `fwd` (viz [firewall.md](firewall.md)).
+   Bez něj platí veřejný profil a dotazy aplikací se odmítnou.
 
 Služba počká na `INFO` od ovladače, odpoví rodiči `ok` a spustí DHCP.
 Pak v jednom vlákně dokola opakuje:
@@ -137,14 +144,14 @@ Pak v jednom vlákně dokola opakuje:
 
 | Vlastnost | Hodnota |
 |---|---|
-| buffery TCP | 64 KiB příjem + 64 KiB odesílání na spojení |
+| buffery TCP | výchozí 64 KiB příjem + 64 KiB odesílání na spojení; program může zvolit 4 KiB až 16 MiB (`Buffers`, jako `SO_RCVBUF`) |
 | keep-alive TCP | po 60 s nečinnosti, spojení bez odezvy zrušeno po 120 s |
 | navázání spojení bez limitu | vzdá se po 75 s (`TIMED_OUT`) |
 | zavření spojení | FIN, úklid po doběhnutí nebo nejpozději po 30 s |
-| fronta naslouchání | 1 až 8 spojení |
+| fronta naslouchání | 1 až 4096 spojení (jako `SOMAXCONN`); 16 souběžných navázání mezi dvěma koly služby |
 | dočasné porty | 49152 až 65535, začátek náhodný |
-| datagram UDP | nejvýš 8 KiB; fronta 32 datagramů / 64 KiB |
-| DNS | dotaz A (a AAAA), opakování po 1 s se střídáním serverů, nejvýš 30 s |
+| datagram UDP | nejvýš 65 507 B (největší obsah datagramu IPv4; fragmentace a skládání IPv4) a nejvýš velikost fronty socketu (výchozí 64 KiB) |
+| DNS | dotaz A (a AAAA) s EDNS0 (1232 B), zkrácená odpověď přes TCP, opakování po 1 s se střídáním serverů, nejvýš 30 s |
 
 **DHCP** nastaví adresu, výchozí bránu a servery DNS. Ztráta pronájmu
 adresu zruší a spojení pak dostanou `UNREACHABLE`. Ručně nastavené servery
@@ -162,8 +169,17 @@ a navazování skončí `TIMED_OUT`. Na Linuxu slirp pošle RST
 (`refuses` v `net-test`).
 
 **Počet socketů:** díky portu cena čekání nezávisí na počtu kanálů.
-Relací a socketů může být najednou až 16 384 (ochrana paměti služby),
-další dostanou `NO_RESOURCES`. Test otevře 200 socketů najednou.
+Pevný počet není: každý socket (i relace) se strhává z **rozpočtu své
+relace** (počet socketů a bajty bufferů, viz [Oprávnění](#oprávnění)).
+Kořenová relace dostane 3/4 uživatelské paměti, kterou job služby ještě
+smí dostat (limit z manifestu `netd.manifest.toml`). Kanály a registrace
+na portu hlídá rozpočet jádra jobu. Test otevře 200 socketů najednou.
+
+> **Změna proti druhé verzi:** pevné meze služby byly 16 384 objektů,
+> fronta naslouchání 8, datagram 8 KiB, buffery 64 KiB pro všechny,
+> 256 zapamatovaných jmen na relaci a dotaz DNS jen přes UDP s 512 B.
+> Velký server by na ně narazil, a přitom nechránily rozumně paměť
+> služby. Teď platí rozpočty relací a jobu a meze dané protokoly.
 
 > **Změna proti první verzi:** služba čekala jedním `OBJECT_WAIT_MANY`
 > (nejvýš 64 objektů), takže socketů mohlo být nejvýš 63. Teď čeká na
@@ -199,6 +215,7 @@ služba, klient je nevidí a nemůže je změnit.
 | `PING` | 5 | ICMP echo |
 | `RESTRICT` | 6 | vytvářet uzší relace pro jiné programy |
 | `CONFIGURE` | 7 | nastavení rozhraní (zatím servery DNS) |
+| `AUDIT` | 8 | audit firewallu a provoz aplikací (`audit`, `stats`) |
 
 `rights::CLIENT` = `INFO | TCP_CONNECT | UDP | RESOLVE` je běžný klient.
 
@@ -228,10 +245,23 @@ znamená bez omezení:
 
 **Pravidlo se jménem hostitele** platí pro adresy, které relace pro to
 jméno dostala od **systémového** resolveru (servery z DHCP nebo nastavené
-přes `SET_DNS`). Služba si překlad zapamatuje (nejvýš 256 záznamů na
-relaci). Odpověď od serveru, který si program zvolil sám (`resolve_with`
-se serverem), se nepočítá. Jinak by si program mohl povolené jméno
-„přeložit“ na libovolnou adresu.
+přes `SET_DNS`). Služba si překlad zapamatuje s platností podle TTL
+(nejméně 5 minut, protože program se po překladu připojuje později
+a krátké TTL CDN by spojení rozbilo; nejvýš den). Na relaci je nejvýš
+4096 záznamů: nejdřív vypadnou vypršené, pak nejstarší. Odpověď od
+serveru, který si program zvolil sám (`resolve_with` se serverem), se
+nepočítá. Jinak by si program mohl povolené jméno „přeložit“ na
+libovolnou adresu.
+
+**Rozpočet relace** (`Quota`): nejvíc socketů a bajtů bufferů. Každý
+socket (spojení, naslouchání, socket UDP, rozpracovaný dotaz DNS a ping)
+a každá podřízená relace (2 KiB) se strhne z rozpočtu relace i všech
+nadřazených, stejně jako u jobů jádra. Překročení = `NO_RESOURCES`.
+
+**Identita aplikace a dotaz:** zúžení (`RESTRICT`) může nést identitu
+aplikace (z manifestu) a příznak `ask`. Cíl mimo pravidla takové vrstvy
+pak rozhodne uživatel přes firewall (viz [Dotaz uživateli](firewall.md#dotaz-uživateli)).
+Vrstva bez `ask` je pevná hranice.
 
 **Socket UDP** podléhá omezení i při příjmu: datagram od odesílatele mimo
 povolené cíle se zahodí. Naslouchání TCP omezuje jen `bind` a příchozí
@@ -295,11 +325,13 @@ fn main(startup: libos::Startup) -> i64 {
 | `Net::udp_bind` | `UDP` + `bind` | `ADDRESS_IN_USE` |
 | `Net::resolve`, `resolve_with` | `RESOLVE` (+ cíl UDP u vlastního serveru) | `NOT_FOUND`, `TIMED_OUT`, `UNREACHABLE` |
 | `Net::ping` | `PING` + cíl ICMP | `TIMED_OUT`, `UNREACHABLE` |
-| `Net::restrict` | `RESTRICT` | `INVALID_ARGS` (neplatná pravidla) |
+| `Net::restrict`, `restrict_with` | `RESTRICT` | `INVALID_ARGS` (neplatná pravidla, `ask` bez identity), `NO_RESOURCES` |
+| `Net::audit`, `stats` | `AUDIT` | |
+| `Net::tcp_connect_with`, `tcp_listen_with`, `udp_bind_with` | jako bez `_with` | `NO_RESOURCES` (rozpočet relace) |
 | `Net::set_dns` | `CONFIGURE` | |
 | `Net::ntp_query` | `UDP` + cíl | `TIMED_OUT`, `BAD_STATE` (server nesynchronizovaný) |
 | `TcpStream::read`, `write` | | `CONNECTION_RESET`, `TIMED_OUT` |
-| `UdpSocket::send_to` | cíl | `OUT_OF_RANGE` (nad 8 KiB) |
+| `UdpSocket::send_to` | cíl | `OUT_OF_RANGE` (nad 65 507 B nebo nad frontu socketu) |
 
 Chybějící právo nebo cíl mimo omezení vrací `ACCESS_DENIED`. Nové kódy
 chyb popisuje [chyby.md](chyby.md).
@@ -327,13 +359,15 @@ data = zbytek zprávy. Timeout je u64 v ms: 0 = nečekat,
 |---|---|---|
 | relace | `INFO` (1) | → Info |
 | relace | `WAIT_CONFIGURED` (2) | timeout → Info |
-| relace | `TCP_CONNECT` (3) | cíl, timeout → místní adresa + kanál spojení |
-| relace | `TCP_LISTEN` (4) | port u16, fronta u16 → místní adresa + kanál naslouchání |
-| relace | `UDP_BIND` (5) | port u16 → místní adresa + kanál socketu |
+| relace | `TCP_CONNECT` (3) | cíl, timeout, Buffers → místní adresa + kanál spojení |
+| relace | `TCP_LISTEN` (4) | port u16, fronta u16, Buffers → místní adresa + kanál naslouchání |
+| relace | `UDP_BIND` (5) | port u16, Buffers → místní adresa + kanál socketu |
 | relace | `RESOLVE` (6) | jméno, rodina u8 (0/4/6), má server u8 [server], timeout → počet u16, adresy, TTL u32 |
 | relace | `PING` (7) | adresa, pořadí u16, délka u16, timeout → odezva ns u64 |
-| relace | `RESTRICT` (8) | práva u32, Policy → kanál relace |
+| relace | `RESTRICT` (8) | Restriction → kanál relace |
 | relace | `SET_DNS` (9) | počet u8, servery → () |
+| relace | `AUDIT` (10) | od u64, nejvíc u16 → další u64, počet u16, záznamy |
+| relace | `STATS` (11) | → profil, počet u16, provoz aplikací |
 | spojení | `SEND` (20) | timeout, data → přijato u32 |
 | spojení | `RECV` (21) | nejvýš u32, timeout → data (prázdná = konec proudu) |
 | spojení | `SHUTDOWN` (22) | → () (FIN, čtení pokračuje) |
@@ -346,6 +380,13 @@ data = zbytek zprávy. Timeout je u64 v ms: 0 = nečekat,
 **Info:** MAC (6 B), MTU u16, příznaky u8 (bit 0 linka, bit 1 nastaveno),
 má adresu u8 [adresa, prefix u8], má bránu u8 [brána], počet DNS u8
 [adresy], práva relace u32.
+
+**Buffers:** příjem u32, odesílání u32 (0 = výchozí 64 KiB, jinak
+4 KiB až 16 MiB).
+
+**Restriction:** práva u32, Policy, příznaky u8 (bit 0 = `ask`), aplikace
+(řetězec, nejvýš 128 znaků `a-z A-Z 0-9 . - _`), sockety u32, bajty u64
+(`u32::MAX` / `u64::MAX` = bez limitu).
 
 **Policy:** má connect u8 [počet u32, pravidla], má bind u8 [počet u32,
 (od u16, do u16)...]. Pravidlo = protokoly u8, druh cíle u8
@@ -364,9 +405,15 @@ v `netproto::dns`, kde ho používá i testovací server.
 - Komprese jmen se rozbaluje s ochranou proti smyčce (nejvýš 32 skoků).
 - NXDOMAIN = `NOT_FOUND`, jiná chyba serveru = `IO_ERROR`.
 - Adresa místo jména (`"10.0.2.2"`) se vrátí hned bez dotazu.
+- **EDNS0:** dotaz nabízí odpověď až 1232 B přes UDP (DNS Flag Day 2020:
+  vejde se do jednoho paketu i přes IPv6 s MTU 1280, bez fragmentace).
+- **Zkrácená odpověď** (bit TC): resolver se zeptá přes TCP na stejný
+  server a port (RFC 7766, zpráva s délkou u16). U vlastního serveru
+  stačí, že relace smí na server UDP.
+- **Blokované domény** firewallu vrátí `ACCESS_DENIED` bez dotazu (viz
+  [Filtr DNS](firewall.md#filtr-dns)).
 
-TODO: mezipaměť podle TTL, dotaz přes TCP u zkrácené odpovědi, DoT/DoH
-(až s TLS).
+TODO: mezipaměť podle TTL, DoT/DoH (až s TLS).
 
 ## NTP a hodiny
 
@@ -446,11 +493,13 @@ překládá adresu 10.0.2.2 na 127.0.0.1 hostitele.
 | DHCP | adresa 10.0.2.15/24, brána 10.0.2.2, DNS 10.0.2.3, MTU, linka |
 | ping | ICMP echo na bránu (slirp odpovídá sám), IPv6 = `UNREACHABLE` |
 | DNS | dotaz přes slirp na server hostitele: A, A+AAAA, NXDOMAIN, neplatné jméno, adresa místo jména |
+| DNS velká odpověď | 100 adres (víc než 512 B), odpověď zkrácená přes UDP → dotaz přes TCP |
 | TCP echo | 256 KiB tam a zpět, místní a vzdálená adresa, `shutdown_write` a konec proudu |
 | TCP odmítnutí | zavřený port = `CONNECTION_REFUSED` (na Windows `TIMED_OUT`, viz výše), port 0 = `INVALID_ARGS` |
 | TCP přerušení | hostitel zavře spojení s nepřečtenými daty (RST): čtení i zápis = `CONNECTION_RESET` |
 | TCP naslouchání | hostitel se připojí přes `hostfwd`, `ADDRESS_IN_USE`, vypršení `accept` |
 | UDP echo | datagramy tam a zpět, dočasný port, vypršení |
+| UDP velký datagram | 60 000 B tam a zpět (fragmentace a skládání IPv4) |
 | oprávnění | chybějící práva, cíle mimo omezení, předání spojení jinému kanálu |
 | jméno hostitele | pravidlo `*.magnumopus` platí po systémovém překladu, ne po překladu vlastním serverem |
 | NTP | dotaz na server hostitele, nastavení přes `timed`, zdroj času `SET` |
@@ -461,7 +510,8 @@ se testy, které je potřebují, přeskočí. V logu je pak
 `[preskoceno] sit: ...`.
 
 Formáty a oprávnění testuje i hostitel: `cargo test -p netproto
---features std` (součást `cargo xtask test`).
+--features std` (součást `cargo xtask test`). Testy firewallu popisuje
+[firewall.md](firewall.md#testy).
 
 ## Plán
 

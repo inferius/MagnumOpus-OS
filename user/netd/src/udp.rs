@@ -1,14 +1,19 @@
 //! Sockety UDP.
 
+use alloc::collections::VecDeque;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::net::SocketAddr;
 
 use libos::{Error, Result};
-use netproto::{MAX_DATAGRAM, ReadAddr, Reader, WriteAddr, Writer, op, proto, rights};
+use netproto::{Buffers, MAX_DATAGRAM, ReadAddr, Reader, Verdict, WriteAddr, Writer, op, proto, rights};
 use smoltcp::wire::IpAddress;
 
-use crate::obj::{AuthRef, Kind, Pending, Step, Udp};
+use crate::fw::app_name;
+use crate::obj::{
+    AuthRef, Deferred, Gate, Kind, Pending, Step, UDP_TARGETS_MAX, Udp, ask_progress, ask_wait, gate,
+};
 use crate::stack::{PortProto, Stack, deadline, now_ns, v4};
 use crate::tcp::to_sa;
 
@@ -18,17 +23,22 @@ const SEND_WAIT_NS: u64 = 5_000_000_000;
 /// `UDP_BIND` na relaci.
 pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
     let port = r.u16()?;
+    let buffers = Buffers::get(r)?;
     auth.borrow().require(rights::UDP)?;
     if !auth.borrow().allows_bind(port) {
         return Err(Error::AccessDenied);
     }
+    let (rx, tx) = buffers.resolved();
+    let usage = auth.borrow().charge((rx + tx) as u64)?;
     let port = stack.take_port(PortProto::Udp, port)?;
-    let sock = stack.new_udp();
+    let sock = stack.new_udp(rx, tx);
     if stack.udp(sock).bind(port).is_err() {
         stack.remove(sock);
         stack.release_port(PortProto::Udp, port);
         return Err(Error::InvalidArgs);
     }
+    let app = app_name(&auth.borrow());
+    stack.fw.socket_opened(&app);
     let local = stack.local_addr(port);
     let mut w = Writer::new();
     w.socket_addr(local);
@@ -38,6 +48,10 @@ pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
             sock,
             port,
             auth: auth.clone(),
+            app,
+            allowed: Vec::new(),
+            seen: VecDeque::new(),
+            _usage: usage,
         })),
     ))
 }
@@ -47,25 +61,14 @@ pub fn request(stack: &mut Stack, u: &mut Udp, code: u32, r: &mut Reader) -> Res
         op::SEND_TO => {
             let to = r.socket_addr()?;
             let data = r.rest().to_vec();
-            if data.len() > MAX_DATAGRAM {
+            if data.len() > MAX_DATAGRAM || data.len() > stack.udp(u.sock).payload_send_capacity() {
                 return Err(Error::OutOfRange);
-            }
-            if !u.auth.borrow().allows(proto::UDP, to) {
-                return Err(Error::AccessDenied);
             }
             let ip = v4(to.ip())?;
             if to.port() == 0 || ip.is_unspecified() {
                 return Err(Error::InvalidArgs);
             }
-            stack.local_ip()?;
-            Ok(send_progress(
-                stack,
-                u,
-                to,
-                data,
-                now_ns().saturating_add(SEND_WAIT_NS),
-                now_ns(),
-            ))
+            send_to_start(stack, u, to, data, Vec::new())
         }
         op::RECV_FROM => {
             let max = (r.u32()? as usize).clamp(1, MAX_DATAGRAM);
@@ -81,10 +84,69 @@ pub fn request(stack: &mut Stack, u: &mut Udp, code: u32, r: &mut Reader) -> Res
     }
 }
 
+fn remember(list: &mut VecDeque<SocketAddr>, to: SocketAddr) -> bool {
+    if list.contains(&to) {
+        return false;
+    }
+    if list.len() >= UDP_TARGETS_MAX {
+        list.pop_front();
+    }
+    list.push_back(to);
+    true
+}
+
+/// Odeslani po kontrole cile (cile povolene pro socket se nekontroluji
+/// znovu; prvni datagram na cil se zapise do auditu).
+fn send_to_start(
+    stack: &mut Stack,
+    u: &mut Udp,
+    to: SocketAddr,
+    data: Vec<u8>,
+    granted: Vec<String>,
+) -> Result<Step> {
+    if !u.allowed.contains(&to) {
+        // Uz videny cil s platnym povolenim: bez noveho zapisu do auditu.
+        let quiet = granted.is_empty()
+            && u.seen.contains(&to)
+            && u.auth.borrow().check(proto::UDP, to, now_ns(), &stack.fw.user, &[]) == Verdict::Allow;
+        if !quiet {
+            match gate(stack, &u.auth.borrow(), proto::UDP, to, &granted)? {
+                Gate::Go => {}
+                Gate::Ask(id, app) => {
+                    return Ok(ask_wait(id, app, proto::UDP, to, granted, Deferred::SendTo { to, data }));
+                }
+            }
+            remember(&mut u.seen, to);
+        }
+        if !granted.is_empty() {
+            if u.allowed.len() >= UDP_TARGETS_MAX {
+                u.allowed.remove(0);
+            }
+            u.allowed.push(to);
+        }
+    }
+    stack.local_ip()?;
+    Ok(send_progress(
+        stack,
+        u,
+        to,
+        data,
+        now_ns().saturating_add(SEND_WAIT_NS),
+        now_ns(),
+    ))
+}
+
 pub fn progress(stack: &mut Stack, u: &mut Udp, p: Pending, now: u64) -> Step {
     match p {
         Pending::SendTo { to, data, deadline } => send_progress(stack, u, to, data, deadline, now),
         Pending::RecvFrom { max, deadline } => recv_progress(stack, u, max, deadline, now),
+        Pending::Ask(a) => match ask_progress(stack, a, now) {
+            Ok((granted, Deferred::SendTo { to, data })) => {
+                send_to_start(stack, u, to, data, granted).unwrap_or_else(Step::err)
+            }
+            Ok(_) => Step::err(Error::BadState),
+            Err(step) => step,
+        },
         _ => Step::err(Error::BadState),
     }
 }
@@ -104,7 +166,11 @@ fn send_progress(
         .udp(u.sock)
         .send_slice(&data, (IpAddress::Ipv4(ip), to.port()))
     {
-        Ok(()) => Step::ok(),
+        Ok(()) => {
+            stack.note_udp_out(u.port, to);
+            stack.fw.traffic(&u.app, data.len(), 0);
+            Step::ok()
+        }
         Err(smoltcp::socket::udp::SendError::BufferFull) if now < deadline => {
             Step::Wait(Pending::SendTo { to, data, deadline })
         }
@@ -114,13 +180,17 @@ fn send_progress(
 }
 
 fn recv_progress(stack: &mut Stack, u: &Udp, max: usize, deadline: u64, now: u64) -> Step {
-    let mut buf = vec![0u8; MAX_DATAGRAM];
+    let mut buf = vec![0u8; stack.udp(u.sock).payload_recv_capacity().min(MAX_DATAGRAM)];
     while let Ok((n, meta)) = stack.udp(u.sock).recv_slice(&mut buf) {
         let from = to_sa(meta.endpoint);
-        // Datagram od odesilatele mimo omezeni relace se zahodi.
-        if !u.auth.borrow().allows(proto::UDP, from) {
+        // Datagram od odesilatele mimo omezeni relace se zahodi (bez dotazu:
+        // prichozi provoz se uzivateli nenabizi).
+        let ok = u.allowed.contains(&from)
+            || u.auth.borrow().check(proto::UDP, from, now, &stack.fw.user, &[]) == Verdict::Allow;
+        if !ok {
             continue;
         }
+        stack.fw.traffic(&u.app, 0, n);
         let mut w = Writer::new();
         w.socket_addr(from).bytes(&buf[..n.min(max)]);
         return Step::reply(Ok(w));

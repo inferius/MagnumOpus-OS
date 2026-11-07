@@ -207,6 +207,12 @@ fn host_tests() -> Result<()> {
             "csprng",
             "--package",
             "wire",
+            "--package",
+            "conf",
+            "--package",
+            "manifest",
+            "--package",
+            "netfilter",
             "--features",
             "initfs/std,fs/std,netproto/std",
         ])
@@ -290,6 +296,17 @@ const USER_PROGRAMS: &[&str] = &[
     "fsd",
     "timed",
     "netd",
+    "fwd",
+    "netprobe",
+];
+
+/// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
+/// Manifesty aplikaci lezi vedle programu (`<program>.manifest.toml`).
+const INITFS_FILES: &[(&str, &str)] = &[
+    ("firewall.toml", "user/fwd/firewall.toml"),
+    ("fwd.manifest.toml", "user/fwd/fwd.manifest.toml"),
+    ("netd.manifest.toml", "user/netd/netd.manifest.toml"),
+    ("netprobe.manifest.toml", "user/netprobe/netprobe.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
@@ -340,6 +357,11 @@ fn build(opts: &Options) -> Result<Artifacts> {
     for name in USER_PROGRAMS {
         let data = std::fs::read(user_bin.join(name))
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
+        files.push((name.to_string(), data));
+    }
+    for (name, path) in INITFS_FILES {
+        let data = std::fs::read(workspace_root().join(path))
+            .map_err(|e| format!("nelze cist {path}: {e}"))?;
         files.push((name.to_string(), data));
     }
     files.extend(opts.extra_initfs.iter().cloned());

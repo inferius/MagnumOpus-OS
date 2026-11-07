@@ -35,6 +35,10 @@ const VIRTIO_RNG: (u16, u16) = (0x1044, 0x1005);
 struct DriverKind {
     image: &'static str,
     message: &'static [u8],
+    /// Nejvic preruseni a pameti pro DMA (nejmensi prava: ovladac dostane
+    /// jen to, co jeho zarizeni potrebuje).
+    irq_max: u32,
+    dma_max: u64,
 }
 
 const DRIVERS: &[((u16, u16), DriverKind)] = &[
@@ -43,6 +47,9 @@ const DRIVERS: &[((u16, u16), DriverKind)] = &[
         DriverKind {
             image: "virtio-blk",
             message: b"block",
+            // Fronta 16 + buffer dat az 1 MiB na pozadavek.
+            irq_max: 4,
+            dma_max: 4 << 20,
         },
     ),
     (
@@ -50,6 +57,9 @@ const DRIVERS: &[((u16, u16), DriverKind)] = &[
         DriverKind {
             image: "virtio-net",
             message: b"net",
+            // 2 fronty po 256 bufferech 2 KiB (1 MiB) + krouzky.
+            irq_max: 4,
+            dma_max: 2 << 20,
         },
     ),
     (
@@ -57,6 +67,9 @@ const DRIVERS: &[((u16, u16), DriverKind)] = &[
         DriverKind {
             image: "virtio-rng",
             message: b"rng",
+            // Fronta 4 + jedna stranka dat.
+            irq_max: 2,
+            dma_max: 256 << 10,
         },
     ),
 ];
@@ -119,10 +132,6 @@ fn main(startup: Startup) -> i64 {
     0
 }
 
-/// Nejvic preruseni a DMA pameti pro jeden ovladac.
-const DRIVER_IRQ_MAX: u32 = 8;
-const DRIVER_DMA_MAX: u64 = 4 * 1024 * 1024;
-
 /// Prostredky jednoho zarizeni: jeho pametove BARy (zaokrouhlene na
 /// stranky) a stranka jeho konfiguracniho prostoru.
 fn device_ranges(
@@ -172,7 +181,7 @@ fn start_driver(
     let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
     let a = f.address;
     let id = (segment, a.bus, a.device, a.function);
-    let device = resource.restrict_device(&ranges, DRIVER_IRQ_MAX, DRIVER_DMA_MAX, id)?;
+    let device = resource.restrict_device(&ranges, kind.irq_max, kind.dma_max, id)?;
     let config = device.device_memory(config_phys, pci::CONFIG_SIZE)?;
     let (client_end, driver_end) = Channel::create()?;
     let handles = vec![

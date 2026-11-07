@@ -61,7 +61,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, virtio-rng, fsd, timed, netd
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, virtio-rng, fsd, timed, netd, fwd, netprobe, manifesty, firewall.toml
                        (+ net-test u `cargo xtask test`: porty pomocných serverů)
 ```
 
@@ -136,6 +136,9 @@ libs/fsproto/    protokol souborového systému (klient <-> fsd)
 libs/csprng/     generátor náhodných čísel jádra (ChaCha20, BLAKE2s)
 libs/wire/       společné kódování zpráv protokolů (fsproto, netproto)
 libs/netproto/   protokol sítě (programy <-> netd <-> ovladač), DNS, NTP, oprávnění
+libs/netfilter/  paketový filtr sítě (profily, toky UDP, omezení rychlosti)
+libs/conf/       čtení a zápis konfigurace TOML
+libs/manifest/   manifest aplikace (identita, rozpočet, síť)
 user/init/       první proces: start služeb a testy userspace
 user/echo/       testovací server pro IPC
 user/devmgr/     správce zařízení (PCI, spouští ovladače)
@@ -144,7 +147,9 @@ user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
 user/virtio-net/ ovladač síťové karty
 user/virtio-rng/ ovladač zdroje náhody (entropie pro jádro)
-user/netd/       služba sítě (TCP/IP, DHCP, DNS)
+user/netd/       služba sítě (TCP/IP, DHCP, DNS, firewall)
+user/fwd/        služba firewallu (konfigurace, dotazy uživateli)
+user/netprobe/   testovací aplikace sítě s manifestem
 libs/osfs-proto/ protokol rozšířeného API FS pro Windows (DeviceIoControl) + klient
 tools/osfs/      nástroj pro FS na hostiteli: format, check, mount ve Windows (WinFsp)
 xtask/           build, obraz disku, QEMU, testy

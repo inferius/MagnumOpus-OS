@@ -1,5 +1,6 @@
 //! Stav sitoveho stacku: rozhrani smoltcp, sockety, DHCP, servery DNS,
-//! pridelovani portu.
+//! pridelovani portu a firewall ([`crate::fw`]; kazdy prijaty ramec projde
+//! prichozim filtrem driv, nez ho dostane smoltcp).
 //!
 //! smoltcp je tu schovany: zbytek sluzby pracuje s `Stack` a s handly
 //! socketu. Vlastni stack (TODO, viz `docs/cs/sit.md`) nahradi tento modul
@@ -17,14 +18,16 @@ use smoltcp::socket::{dhcpv4, tcp, udp};
 use smoltcp::time::{Duration as SmolDuration, Instant};
 use smoltcp::wire::{EthernetAddress, HardwareAddress, IpCidr, Ipv4Cidr};
 
+use crate::fw::Firewall;
 use crate::link::Link;
 use crate::rand::Rng;
 
-/// Velikost bufferu spojeni TCP (kazdy smer).
-pub const TCP_BUFFER: usize = 64 * 1024;
-/// Prijimaci a odesilaci fronta socketu UDP: pocet datagramu a bajty.
-const UDP_PACKETS: usize = 32;
-const UDP_BYTES: usize = 64 * 1024;
+/// Pocet datagramu ve fronte socketu UDP: jeden na kazdy zacaty 2 KiB
+/// bufferu (male datagramy), nejmene 8.
+fn udp_packets(bytes: usize) -> usize {
+    (bytes / 2048).max(8)
+}
+
 /// Docasne porty (RFC 6335).
 const EPHEMERAL: core::ops::RangeInclusive<u16> = 49152..=65535;
 
@@ -48,6 +51,9 @@ pub struct Stack {
     gateway: Option<Ipv4Addr>,
     pub rng: Rng,
     ports: BTreeSet<(PortProto, u16)>,
+    /// Porty TCP, na kterych nekdo nasloucha (pro prichozi filtr).
+    listening: BTreeSet<u16>,
+    pub fw: Firewall,
     /// Spojeni zavrena klientem, ktera jeste dobihaji: (socket, termin,
     /// obsazeny docasny port).
     pub closing: Vec<(SocketHandle, u64, Option<u16>)>,
@@ -79,8 +85,24 @@ pub fn v4(ip: IpAddr) -> Result<Ipv4Addr> {
     }
 }
 
+/// Co prichozi filtr potrebuje vedet o portech.
+struct PortsView<'a> {
+    listening: &'a BTreeSet<u16>,
+    ports: &'a BTreeSet<(PortProto, u16)>,
+}
+
+impl netfilter::Ports for PortsView<'_> {
+    fn tcp_listening(&self, port: u16) -> bool {
+        self.listening.contains(&port)
+    }
+
+    fn udp_bound(&self, port: u16) -> bool {
+        self.ports.contains(&(PortProto::Udp, port))
+    }
+}
+
 impl Stack {
-    pub fn new(mut dev: Link) -> Self {
+    pub fn new(mut dev: Link, fw: Firewall) -> Self {
         let mac = dev.info.mac;
         let (mut rng, seeded) = Rng::new();
         if !seeded {
@@ -104,8 +126,32 @@ impl Stack {
             gateway: None,
             rng,
             ports: BTreeSet::new(),
+            listening: BTreeSet::new(),
+            fw,
             closing: Vec::new(),
         }
+    }
+
+    /// Precte ramce od ovladace; kazdy projde prichozim filtrem.
+    /// `Err(PEER_CLOSED)` = ovladac skoncil.
+    pub fn pump(&mut self) -> Result<()> {
+        let now = now_ns();
+        let view = PortsView {
+            listening: &self.listening,
+            ports: &self.ports,
+        };
+        let fw = &mut self.fw;
+        let gateway = self.gateway;
+        self.dev
+            .pump(&mut |frame| fw.inbound(frame, &view, gateway, now))
+    }
+
+    pub fn listen_started(&mut self, port: u16) {
+        self.listening.insert(port);
+    }
+
+    pub fn listen_stopped(&mut self, port: u16) {
+        self.listening.remove(&port);
     }
 
     /// Zpracuje prijate ramce, casovace a odeslani; pak udalosti DHCP.
@@ -113,6 +159,7 @@ impl Stack {
         let now = instant(now_ns());
         self.iface.poll(now, &mut self.dev, &mut self.sockets);
         self.dhcp_events();
+        self.fw.announce_network();
     }
 
     /// Za kolik ns chce smoltcp znovu zavolat `poll` (casovace TCP, DHCP).
@@ -168,6 +215,7 @@ impl Stack {
                 self.dhcp_dns.clear();
                 self.gateway = None;
                 self.configured = false;
+                self.fw.network_lost();
                 println!("netd: DHCP: adresa ztracena");
             }
             None => {}
@@ -255,12 +303,16 @@ impl Stack {
 
     pub fn release_port(&mut self, proto: PortProto, port: u16) {
         self.ports.remove(&(proto, port));
+        if proto == PortProto::Udp {
+            self.fw.filter.forget_udp_port(port);
+        }
     }
 
-    pub fn new_tcp(&mut self) -> SocketHandle {
+    /// Socket TCP s buffery `rx` a `tx` bajtu.
+    pub fn new_tcp(&mut self, rx: usize, tx: usize) -> SocketHandle {
         let mut s = tcp::Socket::new(
-            tcp::SocketBuffer::new(vec![0u8; TCP_BUFFER]),
-            tcp::SocketBuffer::new(vec![0u8; TCP_BUFFER]),
+            tcp::SocketBuffer::new(vec![0u8; rx]),
+            tcp::SocketBuffer::new(vec![0u8; tx]),
         );
         // Udrzovani spojeni: mrtvou druhou stranu poznat do ~2 min.
         s.set_keep_alive(Some(SmolDuration::from_secs(60)));
@@ -268,16 +320,24 @@ impl Stack {
         self.sockets.add(s)
     }
 
-    pub fn new_udp(&mut self) -> SocketHandle {
+    /// Socket UDP s frontami `rx` a `tx` bajtu (nejvetsi datagram = fronta).
+    pub fn new_udp(&mut self, rx: usize, tx: usize) -> SocketHandle {
         let rx = udp::PacketBuffer::new(
-            vec![udp::PacketMetadata::EMPTY; UDP_PACKETS],
-            vec![0u8; UDP_BYTES],
+            vec![udp::PacketMetadata::EMPTY; udp_packets(rx)],
+            vec![0u8; rx],
         );
         let tx = udp::PacketBuffer::new(
-            vec![udp::PacketMetadata::EMPTY; UDP_PACKETS],
-            vec![0u8; UDP_BYTES],
+            vec![udp::PacketMetadata::EMPTY; udp_packets(tx)],
+            vec![0u8; tx],
         );
         self.sockets.add(udp::Socket::new(rx, tx))
+    }
+
+    /// Odchozi datagram UDP: odpovedi z cile pak projdou filtrem.
+    pub fn note_udp_out(&mut self, local_port: u16, to: SocketAddr) {
+        if let IpAddr::V4(ip) = to.ip() {
+            self.fw.filter.note_udp_out(local_port, ip, to.port(), now_ns());
+        }
     }
 
     pub fn tcp(&mut self, h: SocketHandle) -> &mut tcp::Socket<'static> {

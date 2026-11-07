@@ -3,7 +3,10 @@
 //! Start (kind USER, v tomto poradi):
 //! 1. kanal k ovladaci sitove karty (`netproto::link`),
 //! 2. kanal korenove relace (vsechna prava) - drzi ho init a z nej
-//!    vytvari uzsi relace pro programy (`op::RESTRICT`).
+//!    vytvari uzsi relace pro programy (`op::RESTRICT`),
+//! 3. (volitelne) kanal ke sluzbe firewallu `fwd` (`netproto::fw`):
+//!    dotazy uzivateli, profil site, konfigurace filtru. Bez nej plati
+//!    verejny profil a dotazy se odmitaji.
 //!
 //! Sluzba pocka na `INFO` od ovladace, odpovi rodici na bootstrap kanalu
 //! `ok` (nebo `err:<popis>`) a spusti DHCP. Pak obsluhuje kanaly relaci
@@ -14,14 +17,18 @@
 //!
 //! Cekani: jeden port jadra (`PORT_WAIT`). Kazdy kanal ma na portu dve
 //! jednorazove registrace: "ke cteni" (obnovi se po precteni zpravy, ale
-//! ne behem rozpracovaneho pozadavku) a "zavreno" (jen jednou). Pocet
-//! socketu tak neomezuje cekani, jen [`MAX_OBJECTS`].
+//! ne behem rozpracovaneho pozadavku) a "zavreno" (jen jednou).
+//!
+//! Pocet socketu neomezuje pevna konstanta: kazdy socket se strhava
+//! z rozpoctu sve relace (`Auth::charge`), korenova relace dostane rozpocet
+//! podle pameti jobu sluzby a kanaly a registrace hlida rozpocet jadra.
 
 #![no_std]
 #![no_main]
 
 extern crate alloc;
 
+mod fw;
 mod link;
 mod obj;
 mod ping;
@@ -39,14 +46,26 @@ use core::cell::RefCell;
 use core::time::Duration;
 
 use libos::{Channel, Error, Port, Signals, Startup, println};
-use netproto::Auth;
+use netproto::{Auth, Quota};
 
 use crate::obj::{Kind, Obj, Step};
 use crate::stack::{Stack, now_ns};
 
-/// Nejvic relaci a socketu najednou (ochrana pameti sluzby; kazdy objekt
-/// ma na portu dve registrace).
-pub const MAX_OBJECTS: usize = 16_384;
+/// Slot klice pro kanal sluzby firewallu.
+const FW_SLOT: u64 = 0xFFFF_FFFF;
+
+/// Rozpocet korenove relace: 3/4 uzivatelske pameti, kterou job sluzby
+/// jeste muze dostat (zbytek na relace, fronty a smoltcp); bez limitu jobu
+/// bez limitu.
+fn root_quota() -> Quota {
+    match libos::job::current_info() {
+        Ok(info) if info.user.available != libos::job::UNLIMITED => Quota {
+            sockets: netproto::auth::UNLIMITED_SOCKETS,
+            bytes: info.user.available / 4 * 3,
+        },
+        _ => Quota::UNLIMITED,
+    }
+}
 
 /// Klic paketu portu: bit 63 = registrace "zavreno", bity 32..63 =
 /// generace slotu (stary paket po znovupouziti slotu se pozna), dolnich
@@ -88,7 +107,11 @@ fn main(startup: Startup) -> i64 {
             return 2;
         }
     };
-    let mut stack = Stack::new(link::Link::new(link_ch, info));
+    let fw_ch = handles.next().map(Channel::from_handle);
+    if fw_ch.is_none() {
+        println!("netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)");
+    }
+    let mut stack = Stack::new(link::Link::new(link_ch, info), fw::Firewall::new(fw_ch));
     let _ = bootstrap.write(b"ok", Vec::new());
     println!("netd: bezim, cekam na DHCP");
 
@@ -96,7 +119,7 @@ fn main(startup: Startup) -> i64 {
         port,
         Obj::new(
             Channel::from_handle(root_h),
-            Kind::Session(Rc::new(RefCell::new(Auth::root()))),
+            Kind::Session(Rc::new(RefCell::new(Auth::root_with(root_quota())))),
         ),
     );
     svc.run(&mut stack);
@@ -121,6 +144,7 @@ struct Service {
     /// Sloty, ktere potrebuji obnovit registraci na portu: (slot, generace).
     to_arm: Vec<(usize, u32)>,
     link_armed: bool,
+    fw_armed: bool,
 }
 
 impl Service {
@@ -134,6 +158,7 @@ impl Service {
             pending: Vec::new(),
             to_arm: Vec::new(),
             link_armed: false,
+            fw_armed: false,
         };
         svc.add_objects(vec![root]);
         svc
@@ -204,7 +229,7 @@ impl Service {
                 continue;
             };
             let step = obj::progress(stack, &mut o.kind, p);
-            finish(stack, o, step, &mut created, self.live);
+            finish(stack, o, step, &mut created);
             if o.pending.is_some() {
                 self.pending.push(i);
             } else {
@@ -224,6 +249,13 @@ impl Service {
                 Signals::READABLE,
             )?;
             self.link_armed = true;
+        }
+        if !self.fw_armed
+            && let Some(ch) = stack.fw.channel()
+        {
+            self.port
+                .wait_async(ch.handle(), FW_SLOT, Signals::READABLE | Signals::PEER_CLOSED)?;
+            self.fw_armed = true;
         }
         for (i, g) in core::mem::take(&mut self.to_arm) {
             if self.gens.get(i) != Some(&g) {
@@ -256,7 +288,14 @@ impl Service {
                 return false;
             }
             self.link_armed = false;
-            return !matches!(stack.dev.pump(), Err(Error::PeerClosed));
+            return !matches!(stack.pump(), Err(Error::PeerClosed));
+        }
+        if slot as u64 == FW_SLOT {
+            // Zavreny kanal = dal bez fwd (registrace se uz neobnovi,
+            // `arm` kanal nenajde).
+            stack.fw.pump();
+            self.fw_armed = false;
+            return true;
         }
         let i = slot - 1;
         // Paket pro uz uvolneny slot (stara generace) se ignoruje.
@@ -279,7 +318,7 @@ impl Service {
         match o.ch.try_read() {
             Ok(msg) => {
                 let step = obj::request(stack, &mut o.kind, &msg.data);
-                finish(stack, o, step, &mut created, self.live);
+                finish(stack, o, step, &mut created);
                 if o.pending.is_some() {
                     self.pending.push(i);
                 } else {
@@ -324,7 +363,7 @@ impl Service {
 
 /// Dokonci krok pozadavku: ulozi rozpracovany, nebo posle odpoved
 /// (s kanalem noveho objektu).
-fn finish(stack: &mut Stack, o: &mut Obj, step: Step, created: &mut Vec<Obj>, live: usize) {
+fn finish(stack: &mut Stack, o: &mut Obj, step: Step, created: &mut Vec<Obj>) {
     let (mut result, new) = match step {
         Step::Wait(p) => {
             o.pending = Some(p);
@@ -336,9 +375,6 @@ fn finish(stack: &mut Stack, o: &mut Obj, step: Step, created: &mut Vec<Obj>, li
     if let Some(kind) = new {
         if result.is_err() {
             obj::close(stack, kind, None);
-        } else if live + created.len() >= MAX_OBJECTS {
-            obj::close(stack, kind, None);
-            result = Err(Error::NoResources);
         } else {
             match Channel::create() {
                 Ok((client, server)) => {

@@ -12,7 +12,8 @@ use abi::time::WallTime;
 use libos::{Channel, Error, Handle, Result};
 
 use crate::codec::{ReadAddr, Reader, WriteAddr, Writer};
-use crate::{Info, MAX_DATAGRAM, MAX_IO, Policy, io, ntp, op, parse_reply, timeout_ms};
+use crate::fw::{AppStats, AuditRecord};
+use crate::{Buffers, Info, MAX_DATAGRAM, MAX_IO, Policy, io, ntp, op, parse_reply, timeout_ms};
 
 /// Posle pozadavek a pocka na odpoved: (telo, handly).
 fn call(ch: &Channel, req: Writer) -> Result<(Vec<u8>, Vec<Handle>)> {
@@ -67,11 +68,45 @@ impl Net {
     /// Uzsi relace pro jiny program: prava `rights` (jen podmnozina
     /// vlastnich) a dalsi vrstva omezeni `policy`. Vyzaduje pravo `RESTRICT`.
     pub fn restrict(&self, rights: u32, policy: &Policy) -> Result<Net> {
+        self.restrict_with(&crate::Restriction::new(rights, policy.clone()))
+    }
+
+    /// Uzsi relace s identitou aplikace, dotazem na uzivatele a rozpoctem
+    /// (init podle manifestu aplikace).
+    pub fn restrict_with(&self, r: &crate::Restriction) -> Result<Net> {
         let mut w = Writer::op(op::RESTRICT);
-        w.u32(rights);
-        policy.put(&mut w);
+        r.put(&mut w);
         let (_, ch) = call_channel(&self.ch, w)?;
         Ok(Net::new(ch))
+    }
+
+    /// Zaznamy auditu firewallu od poradoveho cisla `from` (nejvys `max`).
+    /// Vraci zaznamy a cislo, od ktereho cist priste. Pravo `AUDIT`.
+    pub fn audit(&self, from: u64, max: u16) -> Result<(Vec<AuditRecord>, u64)> {
+        let mut w = Writer::op(op::AUDIT);
+        w.u64(from).u16(max);
+        let (b, _) = call(&self.ch, w)?;
+        let mut r = Reader::new(&b);
+        let next = r.u64()?;
+        let n = r.u16()?;
+        let mut out = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            out.push(AuditRecord::get(&mut r)?);
+        }
+        Ok((out, next))
+    }
+
+    /// Aktivni profil site a provoz podle aplikaci. Pravo `AUDIT`.
+    pub fn stats(&self) -> Result<(alloc::string::String, Vec<AppStats>)> {
+        let (b, _) = call(&self.ch, Writer::op(op::STATS))?;
+        let mut r = Reader::new(&b);
+        let profile = r.str()?;
+        let n = r.u16()?;
+        let mut out = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            out.push(AppStats::get(&mut r)?);
+        }
+        Ok((profile, out))
     }
 
     /// Nastavi systemove servery DNS (pravo `CONFIGURE`); prazdny seznam =
@@ -130,10 +165,22 @@ impl Net {
         Ok(Duration::from_nanos(Reader::new(&b).u64()?))
     }
 
-    /// Spojeni TCP.
+    /// Spojeni TCP (vychozi buffery).
     pub fn tcp_connect(&self, addr: SocketAddr, timeout: Option<Duration>) -> Result<TcpStream> {
+        self.tcp_connect_with(addr, timeout, Buffers::DEFAULT)
+    }
+
+    /// Spojeni TCP s velikosti bufferu (vetsi = vyssi propustnost na
+    /// vzdalene lince; strhava se z rozpoctu relace).
+    pub fn tcp_connect_with(
+        &self,
+        addr: SocketAddr,
+        timeout: Option<Duration>,
+        buffers: Buffers,
+    ) -> Result<TcpStream> {
         let mut w = Writer::op(op::TCP_CONNECT);
         w.socket_addr(addr).u64(timeout_ms(timeout));
+        buffers.put(&mut w);
         let (b, ch) = call_channel(&self.ch, w)?;
         let local = Reader::new(&b).socket_addr()?;
         Ok(TcpStream {
@@ -166,16 +213,28 @@ impl Net {
     /// Naslouchani TCP na mistnim portu (`0` = prideli sluzba); `backlog`
     /// = kolik spojeni muze cekat na `accept`.
     pub fn tcp_listen(&self, port: u16, backlog: u16) -> Result<TcpListener> {
+        self.tcp_listen_with(port, backlog, Buffers::DEFAULT)
+    }
+
+    /// Naslouchani s velikosti bufferu prijatych spojeni.
+    pub fn tcp_listen_with(&self, port: u16, backlog: u16, buffers: Buffers) -> Result<TcpListener> {
         let mut w = Writer::op(op::TCP_LISTEN);
         w.u16(port).u16(backlog);
+        buffers.put(&mut w);
         let (_, ch) = call_channel(&self.ch, w)?;
         Ok(TcpListener { ch })
     }
 
     /// Socket UDP na mistnim portu (`0` = prideli sluzba).
     pub fn udp_bind(&self, port: u16) -> Result<UdpSocket> {
+        self.udp_bind_with(port, Buffers::DEFAULT)
+    }
+
+    /// Socket UDP s velikosti front (nejvetsi odeslany datagram = `tx`).
+    pub fn udp_bind_with(&self, port: u16, buffers: Buffers) -> Result<UdpSocket> {
         let mut w = Writer::op(op::UDP_BIND);
         w.u16(port);
+        buffers.put(&mut w);
         let (_, ch) = call_channel(&self.ch, w)?;
         Ok(UdpSocket { ch })
     }

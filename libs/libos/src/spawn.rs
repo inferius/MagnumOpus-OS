@@ -17,8 +17,23 @@ use abi::{Error, Result};
 use crate::job::{CHILD_RIGHTS, Job};
 use crate::{Channel, Handle, Process, Thread, Vmo};
 
-/// Velikost zasobniku hlavniho vlakna noveho procesu.
+/// Vychozi velikost zasobniku hlavniho vlakna noveho procesu.
 pub const STACK_SIZE: u64 = 256 * 1024;
+
+/// Volby spusteni.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    /// Zasobnik hlavniho vlakna (zaokrouhli se na stranku potomka).
+    pub stack_size: u64,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            stack_size: STACK_SIZE,
+        }
+    }
+}
 
 /// Handle predavany novemu procesu ve startovni zprave.
 pub struct StartHandle {
@@ -58,6 +73,17 @@ pub fn spawn_in(
     image: &[u8],
     handles: Vec<StartHandle>,
 ) -> Result<(Process, Channel)> {
+    spawn_with(job, name, image, handles, Options::default())
+}
+
+/// Jako [`spawn_in`] s volbami (velikost zasobniku).
+pub fn spawn_with(
+    job: &Job,
+    name: &str,
+    image: &[u8],
+    handles: Vec<StartHandle>,
+    opts: Options,
+) -> Result<(Process, Channel)> {
     let elf = elf::ElfFile::parse(image).map_err(|_| Error::Corrupted)?;
     let process = Process::create(job, name)?;
     // Segmenty se zarovnavaji na stranku potomka (muze mit jinou nez my).
@@ -81,8 +107,9 @@ pub fn spawn_in(
         process.map(&vmo, 0, end - start, flags, start)?;
     }
 
-    let stack = Vmo::create_for(STACK_SIZE, &process)?;
-    let stack_top = process.map(&stack, 0, STACK_SIZE, MAP_READ | MAP_WRITE, 0)? + STACK_SIZE;
+    let stack_size = opts.stack_size.max(page).next_multiple_of(page);
+    let stack = Vmo::create_for(stack_size, &process)?;
+    let stack_top = process.map(&stack, 0, stack_size, MAP_READ | MAP_WRITE, 0)? + stack_size;
 
     let (parent_end, child_end) = Channel::create()?;
     let mut data = Vec::new();

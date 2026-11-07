@@ -64,7 +64,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, virtio-rng, fsd, timed, netd
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, virtio-rng, fsd, timed, netd, fwd, netprobe, manifests, firewall.toml
                        (+ net-test with `cargo xtask test`: helper server ports)
 ```
 
@@ -142,6 +142,9 @@ libs/fsproto/    file system protocol (client <-> fsd)
 libs/csprng/     kernel random number generator (ChaCha20, BLAKE2s)
 libs/wire/       shared message encoding of protocols (fsproto, netproto)
 libs/netproto/   network protocol (programs <-> netd <-> driver), DNS, NTP, permissions
+libs/netfilter/  network packet filter (profiles, UDP flows, rate limits)
+libs/conf/       reading and writing TOML configuration
+libs/manifest/   application manifest (identity, budget, network)
 user/init/       first process: starts services, userspace tests
 user/echo/       IPC test server
 user/devmgr/     device manager (PCI, starts drivers)
@@ -150,7 +153,9 @@ user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
 user/virtio-net/ network card driver
 user/virtio-rng/ randomness source driver (entropy for the kernel)
-user/netd/       network service (TCP/IP, DHCP, DNS)
+user/netd/       network service (TCP/IP, DHCP, DNS, firewall)
+user/fwd/        firewall service (configuration, asking the user)
+user/netprobe/   network test application with a manifest
 libs/osfs-proto/ protocol of the extended FS API for Windows (DeviceIoControl) + client
 tools/osfs/      host tool for the FS: format, check, mount on Windows (WinFsp)
 xtask/           build, disk image, QEMU, tests

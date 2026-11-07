@@ -1,21 +1,37 @@
 //! Ping: ICMP echo pres socket ICMP smoltcp.
 
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::net::{Ipv4Addr, SocketAddr};
+use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use libos::{Error, Result};
+use netproto::auth::Usage;
 use netproto::{ReadAddr, Reader, Writer, proto, rights};
 use smoltcp::iface::SocketHandle;
 use smoltcp::phy::ChecksumCapabilities;
 use smoltcp::socket::icmp;
 use smoltcp::wire::{Icmpv4Packet, Icmpv4Repr, IpAddress};
 
-use crate::obj::{AuthRef, Pending, Step};
+use crate::obj::{AuthRef, Deferred, Gate, Pending, Step, ask_wait, gate};
 use crate::stack::{Stack, deadline, now_ns, v4};
 
-/// Nejvic dat v jednom pozadavku.
-const MAX_PAYLOAD: u16 = 1024;
+/// Hlavicka IPv4 + ICMP: nejvic dat = MTU - 28 (bez fragmentace; stack
+/// fragmenty nesklada a mnoho siti je zahazuje).
+const HEADERS: u16 = 20 + 8;
+/// Fronta socketu ICMP: jeden paket o velikosti MTU (a rezerva na
+/// hlavicku); strhava se z rozpoctu relace.
+fn ping_buffer(mtu: u16) -> usize {
+    mtu as usize + 64
+}
+
+/// Parametry `PING`.
+pub struct PingReq {
+    addr: IpAddr,
+    seq: u16,
+    size: u16,
+    timeout: u64,
+}
 
 pub struct Ping {
     sock: SocketHandle,
@@ -25,6 +41,7 @@ pub struct Ping {
     payload: Vec<u8>,
     sent_at: Option<u64>,
     pub deadline: u64,
+    _usage: Usage,
 }
 
 impl Ping {
@@ -52,21 +69,43 @@ impl Ping {
 
 /// `PING` na relaci.
 pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
-    let addr = r.ip()?;
-    let seq = r.u16()?;
-    let size = r.u16()?;
-    let timeout = r.u64()?;
+    let req = PingReq {
+        addr: r.ip()?,
+        seq: r.u16()?,
+        size: r.u16()?,
+        timeout: r.u64()?,
+    };
     auth.borrow().require(rights::PING)?;
-    if !auth.borrow().allows(proto::ICMP, SocketAddr::new(addr, 0)) {
-        return Err(Error::AccessDenied);
-    }
-    if size > MAX_PAYLOAD {
+    start_checked(stack, auth, req, Vec::new())
+}
+
+/// Ping po kontrole cile (`granted` = povoleno uzivatelem).
+pub fn start_checked(stack: &mut Stack, auth: &AuthRef, req: PingReq, granted: Vec<String>) -> Result<Step> {
+    let PingReq {
+        addr,
+        seq,
+        size,
+        timeout,
+    } = req;
+    let mtu = stack.dev.info.mtu;
+    if size > mtu.saturating_sub(HEADERS) {
         return Err(Error::OutOfRange);
     }
     let dest = v4(addr)?;
+    let target = SocketAddr::new(addr, 0);
+    if let Gate::Ask(id, app) = gate(stack, &auth.borrow(), proto::ICMP, target, &granted)? {
+        return Ok(ask_wait(id, app, proto::ICMP, target, granted, Deferred::Ping(PingReq {
+            addr,
+            seq,
+            size,
+            timeout,
+        })));
+    }
     stack.local_ip()?;
-    let rx = icmp::PacketBuffer::new(vec![icmp::PacketMetadata::EMPTY; 4], vec![0u8; 4096]);
-    let tx = icmp::PacketBuffer::new(vec![icmp::PacketMetadata::EMPTY; 4], vec![0u8; 4096]);
+    let len = ping_buffer(mtu);
+    let usage = auth.borrow().charge(5 * len as u64)?;
+    let rx = icmp::PacketBuffer::new(vec![icmp::PacketMetadata::EMPTY; 4], vec![0u8; 4 * len]);
+    let tx = icmp::PacketBuffer::new(vec![icmp::PacketMetadata::EMPTY; 4], vec![0u8; len]);
     let mut sock = icmp::Socket::new(rx, tx);
     let ident = stack.rng.next_u16();
     if sock.bind(icmp::Endpoint::Ident(ident)).is_err() {
@@ -82,6 +121,7 @@ pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> 
         payload,
         sent_at: None,
         deadline: deadline(timeout),
+        _usage: usage,
     };
     p.try_send(stack);
     Ok(Step::Wait(Pending::Ping(p)))
@@ -89,7 +129,7 @@ pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> 
 
 pub fn progress(stack: &mut Stack, mut p: Ping, now: u64) -> Step {
     p.try_send(stack);
-    let mut buf = [0u8; 2048];
+    let mut buf = vec![0u8; ping_buffer(stack.dev.info.mtu)];
     loop {
         let sock = stack.sockets.get_mut::<icmp::Socket>(p.sock);
         let Ok((n, from)) = sock.recv_slice(&mut buf) else {

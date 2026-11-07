@@ -10,6 +10,7 @@
 
 extern crate alloc;
 
+mod apps;
 mod system;
 mod tests;
 

@@ -91,10 +91,24 @@ let reply = channel.read(None)?;
 let code = process.wait_exit(None)?;
 ```
 
-`spawn` creates an empty process, maps the ELF segments into it (with
-per-segment rights, W^X) plus a 256 KiB stack, sends the startup message and
-starts the first thread. It returns the process and the channel end to the
-child.
+`spawn` creates an empty process in the same job as the caller, maps the
+ELF segments into it (with rights by segment, W^X) and a 256 KiB stack,
+sends the startup message and starts the first thread. It returns the
+process and the channel end to the child. The program memory (segments,
+stack) is charged to the child's job.
+
+`spawn_in(&job, ...)` starts a program in another job, for example a
+sub-job with limits:
+
+```rust
+use libos::job::{Job, pool};
+let job = Job::create(&libos::job::current()?)?;
+job.set_limit(pool::USER, 64 << 20)?;
+let (process, channel) = libos::spawn_in(&job, "echo", image, Vec::new())?;
+```
+
+The child gets its job in the startup message without the `WRITE` right,
+so it cannot change the limits (see [Jobs](syscalls.md#jobs-resource-budgets)).
 
 ## Page size
 

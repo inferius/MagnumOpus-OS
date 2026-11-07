@@ -1,0 +1,26 @@
+# Testovaci aplikace site (cargo xtask test). Bez dotazu smi jen UDP na
+# DNS slirp a na pomocne servery hostitele; ostatni rozhodne uzivatel.
+[app]
+id = "org.magnumopus.netprobe"
+name = "Sitova sonda"
+
+[limits]
+memory = "16M"
+kernel_memory = "4M"
+
+[network]
+rights = ["info", "tcp", "udp", "dns", "ping"]
+ask = true
+sockets = 32
+buffers = "4M"
+
+[[network.connect]]
+proto = ["udp"]
+to = "10.0.2.3"
+ports = "53"
+
+# Pomocne servery hostitele pres UDP (DNS testu).
+[[network.connect]]
+proto = ["udp"]
+to = "10.0.2.2"
+ports = "1024-65535"

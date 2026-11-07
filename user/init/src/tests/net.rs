@@ -26,11 +26,13 @@ pub const TESTS: &[Test] = &[
     ("DHCP: adresa, brana a DNS od slirp", dhcp),
     ("ping brany 10.0.2.2", ping),
     ("DNS: dotaz pres slirp na server hostitele", dns),
+    ("DNS: velka odpoved (EDNS0) a zkracena -> TCP", dns_large),
     ("TCP: spojeni a echo 256 KiB", tcp_echo),
     ("TCP: odmitnute spojeni -> CONNECTION_REFUSED", tcp_refused),
     ("TCP: preruseni spojeni (RST) -> CONNECTION_RESET", tcp_reset),
     ("TCP: naslouchani a prijeti spojeni z hostitele", tcp_accept),
     ("UDP: echo pres slirp", udp_echo),
+    ("UDP: datagram 60 000 B (fragmentace IPv4)", udp_large),
     ("200 socketu najednou (driv limit 63)", many_sockets),
     ("opravneni: prava a omezeni cilu relace", restricted),
     ("opravneni: pravidlo se jmenem hostitele", host_rule),
@@ -38,35 +40,35 @@ pub const TESTS: &[Test] = &[
 ];
 
 /// Hostitel ze site slirp.
-const HOST: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2));
+pub(super) const HOST: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2));
 /// Jmena, ktera zna pomocny server DNS (viz `xtask/src/nethelper.rs`).
 const TEST_NAME: &str = "test.magnumopus";
 const TEST_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 2, 77));
 const ECHO_NAME: &str = "echo.magnumopus";
 
-fn net() -> Result<&'static Net, String> {
+pub(super) fn net() -> Result<&'static Net, String> {
     net_service()
         .map(|n| &n.root)
         .ok_or_else(|| String::from("sluzba site nebezi (chybi sitova karta?)"))
 }
 
 /// Porty pomocnych serveru z `net-test`.
-struct Ports {
-    echo: u16,
-    udp_echo: u16,
-    dns: u16,
+pub(super) struct Ports {
+    pub echo: u16,
+    pub udp_echo: u16,
+    pub dns: u16,
     ntp: u16,
-    closed: u16,
+    pub closed: u16,
     /// Hlasi slirp odmitnuti spojeni na hostitele (RST)? Na Windows ne.
     refuses: bool,
     reset: u16,
-    callback: u16,
+    pub callback: u16,
     /// Port v hostovi, na ktery slirp presmeruje spojeni z hostitele
     /// (`hostfwd`).
-    forwarded: u16,
+    pub forwarded: u16,
 }
 
-fn ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
+pub(super) fn ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
     let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let Some(cfg) = fs.find("net-test") else {
         println!("[preskoceno] sit: {test}: chybi pomocne servery (jen `cargo xtask test`)");
@@ -93,11 +95,11 @@ fn ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
     }))
 }
 
-fn host(port: u16) -> SocketAddr {
+pub(super) fn host(port: u16) -> SocketAddr {
     SocketAddr::new(HOST, port)
 }
 
-fn configured(net: &Net) -> Result<(), String> {
+pub(super) fn configured(net: &Net) -> Result<(), String> {
     net.wait_configured(Some(Duration::from_secs(15)))
         .map(|_| ())
         .map_err(|e| fail("DHCP", e))
@@ -277,7 +279,28 @@ fn tcp_reset(s: &Startup) -> TestResult {
     Ok(())
 }
 
-fn tcp_accept(s: &Startup) -> TestResult {
+fn dns_large(s: &Startup) -> TestResult {
+    let Some(p) = ports(s, "DNS EDNS0")? else {
+        return Ok(());
+    };
+    let net = net()?;
+    configured(net)?;
+    let server = Some(host(p.dns));
+    let t = Some(Duration::from_secs(10));
+    // 100 adres: odpoved ~1,7 KiB, pres 512 B bez EDNS by se nevesla.
+    let (addrs, _) = net
+        .resolve_with("many.magnumopus", 4, server, t)
+        .map_err(|e| fail("velka odpoved", e))?;
+    check_eq!(addrs.len(), 100, "adresy z velke odpovedi");
+    // Server odpovi pres UDP zkracene (TC): resolver se zepta pres TCP.
+    let (addrs, _) = net
+        .resolve_with("tcp.magnumopus", 4, server, t)
+        .map_err(|e| fail("dotaz pres TCP", e))?;
+    check_eq!(addrs, vec![IpAddr::V4(Ipv4Addr::new(10, 0, 2, 88))], "odpoved pres TCP");
+    Ok(())
+}
+
+pub(super) fn tcp_accept(s: &Startup) -> TestResult {
     let Some(p) = ports(s, "TCP naslouchani")? else {
         return Ok(());
     };
@@ -316,6 +339,26 @@ fn tcp_accept(s: &Startup) -> TestResult {
         "accept bez spojeni"
     );
     Ok(())
+}
+
+fn udp_large(s: &Startup) -> TestResult {
+    let Some(p) = ports(s, "UDP velky datagram")? else {
+        return Ok(());
+    };
+    let net = net()?;
+    configured(net)?;
+    let sock = net.udp_bind(0).map_err(|e| fail("bind", e))?;
+    let data: Vec<u8> = (0..60_000u32).map(|i| (i % 251) as u8).collect();
+    let mut buf = vec![0u8; 65_536];
+    for _ in 0..3 {
+        sock.send_to(&data, host(p.udp_echo)).map_err(|e| fail("send_to 60 000 B", e))?;
+        if let Ok((n, _)) = sock.recv_from(&mut buf, Some(Duration::from_secs(3))) {
+            check_eq!(n, data.len(), "delka odpovedi");
+            check!(buf[..n] == data[..], "obsah odpovedi");
+            return Ok(());
+        }
+    }
+    Err(String::from("velky datagram se nevratil"))
 }
 
 fn udp_echo(s: &Startup) -> TestResult {

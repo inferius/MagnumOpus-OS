@@ -2,8 +2,12 @@
 //!
 //! Pouziva ho resolver ve sluzbe `netd` a pomocny server DNS v testech
 //! (`xtask`). Jen zaznamy A a AAAA; CNAME v odpovedi se preskoci (adresy
-//! ciloveho jmena jsou ve stejne odpovedi). Zkracena odpoved (bit TC) se
-//! bere tak, jak je - dotaz pres TCP zatim neni.
+//! ciloveho jmena jsou ve stejne odpovedi).
+//!
+//! Dotaz nese EDNS0 (RFC 6891) s nabidkou [`EDNS_UDP`] bajtu, takze se
+//! do UDP vejdou i velke odpovedi. Zkracena odpoved (bit TC) =
+//! `BUFFER_TOO_SMALL`: resolver se zepta znovu pres TCP (RFC 7766,
+//! zprava s delkou u16 na zacatku).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -20,6 +24,15 @@ pub const TYPE_AAAA: u16 = 28;
 const CLASS_IN: u16 = 1;
 /// Nejdelsi zprava pres UDP bez EDNS.
 pub const MAX_UDP: usize = 512;
+/// Velikost odpovedi pres UDP nabizena v EDNS0: 1232 B podle DNS Flag Day
+/// 2020 - odpoved se vejde do jednoho paketu i pres IPv6 s MTU 1280, bez
+/// fragmentace (fragmenty mnoho siti zahazuje a jdou podvrhnout). Vetsi
+/// odpoved server zkrati a resolver se zepta pres TCP.
+pub const EDNS_UDP: usize = 1232;
+/// Typ zaznamu OPT (EDNS0).
+pub const TYPE_OPT: u16 = 41;
+/// Bit TC (zkracena odpoved) v priznacich.
+pub const FLAG_TC: u16 = 0x0200;
 /// Kody odpovedi (RCODE).
 pub const RCODE_OK: u8 = 0;
 pub const RCODE_SERVFAIL: u8 = 2;
@@ -50,20 +63,48 @@ fn put_name(out: &mut Vec<u8>, name: &str) {
 }
 
 /// Dotaz na jmeno `name` typu `qtype` s identifikatorem `id` (rekurze
-/// vyzadana).
+/// vyzadana, EDNS0 s nabidkou [`EDNS_UDP`] B).
 pub fn build_query(id: u16, name: &str, qtype: u16) -> Result<Vec<u8>> {
     if !valid_name(name) {
         return Err(Error::InvalidArgs);
     }
-    let mut q = Vec::with_capacity(18 + name.len());
+    let mut q = Vec::with_capacity(29 + name.len());
     q.extend_from_slice(&id.to_be_bytes());
     q.extend_from_slice(&0x0100u16.to_be_bytes()); // RD
     q.extend_from_slice(&1u16.to_be_bytes()); // QDCOUNT
-    q.extend_from_slice(&[0; 6]); // AN, NS, AR
+    q.extend_from_slice(&[0; 4]); // AN, NS
+    q.extend_from_slice(&1u16.to_be_bytes()); // AR: OPT
     put_name(&mut q, name);
     q.extend_from_slice(&qtype.to_be_bytes());
     q.extend_from_slice(&CLASS_IN.to_be_bytes());
+    // OPT: korenove jmeno, typ 41, trida = velikost UDP, TTL 0, bez dat.
+    q.push(0);
+    q.extend_from_slice(&TYPE_OPT.to_be_bytes());
+    q.extend_from_slice(&(EDNS_UDP as u16).to_be_bytes());
+    q.extend_from_slice(&[0; 6]);
     Ok(q)
+}
+
+/// Velikost odpovedi pres UDP, kterou nabizi dotaz (EDNS0), jinak 512.
+pub fn query_udp_size(d: &[u8]) -> usize {
+    let Ok(ar) = be16(d, 10) else {
+        return MAX_UDP;
+    };
+    let Ok((_, next)) = read_name(d, 12) else {
+        return MAX_UDP;
+    };
+    let mut at = next + 4;
+    for _ in 0..ar {
+        let Ok((_, n)) = read_name(d, at) else {
+            break;
+        };
+        if be16(d, n).ok() == Some(TYPE_OPT) {
+            return (be16(d, n + 2).unwrap_or(0) as usize).max(MAX_UDP);
+        }
+        let rdlen = be16(d, n + 8).unwrap_or(0) as usize;
+        at = n + 10 + rdlen;
+    }
+    MAX_UDP
 }
 
 fn be16(d: &[u8], at: usize) -> Result<u16> {
@@ -128,7 +169,8 @@ pub struct Answer {
 
 /// Rozebere odpoved na dotaz s identifikatorem `id`. Jina zprava (jine ID,
 /// neni odpoved) = `INVALID_ARGS` (resolver ji ignoruje a ceka dal).
-/// NXDOMAIN = `NOT_FOUND`, jina chyba serveru = `IO_ERROR`, odpoved bez
+/// NXDOMAIN = `NOT_FOUND`, jina chyba serveru = `IO_ERROR`, zkracena
+/// odpoved (TC) = `BUFFER_TOO_SMALL` (zeptat se pres TCP), odpoved bez
 /// adres = prazdny seznam.
 pub fn parse_response(id: u16, d: &[u8]) -> Result<Answer> {
     if d.len() < 12 {
@@ -137,6 +179,9 @@ pub fn parse_response(id: u16, d: &[u8]) -> Result<Answer> {
     let flags = be16(d, 2)?;
     if be16(d, 0)? != id || flags & 0x8000 == 0 {
         return Err(Error::InvalidArgs);
+    }
+    if flags & FLAG_TC != 0 {
+        return Err(Error::BufferTooSmall);
     }
     match (flags & 0xF) as u8 {
         RCODE_OK => {}
@@ -194,7 +239,7 @@ pub struct Query {
     pub qtype: u16,
 }
 
-/// Rozebere dotaz s jednou otazkou.
+/// Rozebere dotaz s jednou otazkou (doplnkove zaznamy, napr. OPT, smi byt).
 pub fn parse_query(d: &[u8]) -> Result<Query> {
     if d.len() < 12 || be16(d, 2)? & 0x8000 != 0 || be16(d, 4)? != 1 {
         return Err(Error::InvalidArgs);
@@ -205,6 +250,13 @@ pub fn parse_query(d: &[u8]) -> Result<Query> {
         name,
         qtype: be16(d, next)?,
     })
+}
+
+/// Zkracena odpoved (jen otazka, bit TC): klient se ma zeptat pres TCP.
+pub fn build_truncated(q: &Query) -> Vec<u8> {
+    let mut r = build_response(q, &[], 0, RCODE_OK);
+    r[2] |= (FLAG_TC >> 8) as u8;
+    r
 }
 
 /// Odpoved serveru na dotaz `q`: zaznamy `addrs` (jen ty, ktere odpovidaji

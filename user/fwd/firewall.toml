@@ -1,0 +1,37 @@
+# Vychozi konfigurace firewallu (initfs). Pri prvnim startu ji fwd ulozi
+# na FS do /system/config/firewall/firewall.toml; dalsi zmeny (rozhodnuti
+# uzivatele, profily siti) jdou tam. Popis: docs/cs/firewall.md.
+
+[firewall]
+# Bez agenta uzivatele nebo po vyprseni dotazu: deny | allow.
+ask_default = "deny"
+# Jak dlouho ceka dotaz na uzivatele (s).
+ask_timeout = 60
+# Profil site, ktera jeste neni znama (nez rozhodne uzivatel).
+unknown_network = "public"
+audit_entries = 4096
+
+[profiles.public]
+inbound = "deny"
+ping = false
+stealth = true
+
+[profiles.home]
+inbound = "listeners"
+ping = true
+stealth = false
+
+[profiles.work]
+inbound = "deny"
+ping = true
+stealth = true
+
+[rate]
+syn_per_sec = 100
+syn_burst = 200
+icmp_per_sec = 10
+icmp_burst = 20
+
+[block]
+networks = []
+domains = []

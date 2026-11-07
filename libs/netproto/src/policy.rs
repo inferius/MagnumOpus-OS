@@ -40,10 +40,11 @@ pub mod rights {
     pub const PING: u32 = 1 << 5;
     /// Smi vytvaret uzsi relace pro jine programy (`Net::restrict`).
     pub const RESTRICT: u32 = 1 << 6;
-    /// Zmena nastaveni rozhrani (zatim nepouzito; pozdeji staticka adresa,
-    /// servery DNS).
+    /// Zmena nastaveni rozhrani (servery DNS, pozdeji staticka adresa).
     pub const CONFIGURE: u32 = 1 << 7;
-    pub const ALL: u32 = (1 << 8) - 1;
+    /// Cteni auditu firewallu a provozu aplikaci (`Net::audit`, `stats`).
+    pub const AUDIT: u32 = 1 << 8;
+    pub const ALL: u32 = (1 << 9) - 1;
     /// Bezny klient: odchozi TCP a UDP, DNS a stav rozhrani.
     pub const CLIENT: u32 = INFO | TCP_CONNECT | UDP | RESOLVE;
 }
@@ -56,12 +57,13 @@ pub mod proto {
     pub const ALL: u8 = TCP | UDP | ICMP;
 }
 
-/// Nejvic pravidel v jedne vrstve a vrstev v relaci (ochrana sluzby pred
-/// prilis velkym popisem).
+/// Nejvic pravidel v jedne vrstve: popis vrstvy jde v jedne zprave kanalu
+/// (64 KiB; pravidlo se jmenem az ~260 B). Na vic cilu jsou site a vzory
+/// jmen (`*.example.com`).
 pub const MAX_RULES: usize = 256;
+/// Nejvic vrstev relace (kazde zuzeni jednu; hloubka delegace, ne pocet
+/// pravidel).
 pub const MAX_LAYERS: usize = 16;
-/// Nejvic zapamatovanych prekladu jmen jedne relace.
-pub const MAX_LEARNED: usize = 256;
 
 /// Cil pravidla.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +86,45 @@ pub struct Rule {
 }
 
 impl Rule {
+    pub fn put(&self, w: &mut Writer) {
+        w.u8(self.protos);
+        match &self.target {
+            Target::Any => {
+                w.u8(0);
+            }
+            Target::Net { addr, prefix } => {
+                w.u8(1).ip(*addr).u8(*prefix);
+            }
+            Target::Host(h) => {
+                w.u8(2).str(h);
+            }
+        }
+        w.u16(self.ports.0).u16(self.ports.1);
+    }
+
+    /// Precte pravidlo (bez kontroly, viz [`Rule::validate`]).
+    pub fn get(r: &mut Reader) -> Result<Self> {
+        let protos = r.u8()?;
+        let target = match r.u8()? {
+            0 => Target::Any,
+            1 => {
+                let addr = r.ip()?;
+                Target::Net {
+                    addr,
+                    prefix: r.u8()?,
+                }
+            }
+            2 => Target::Host(r.str()?),
+            _ => return Err(Error::InvalidArgs),
+        };
+        let lo = r.u16()?;
+        Ok(Rule {
+            protos,
+            target,
+            ports: (lo, r.u16()?),
+        })
+    }
+
     /// Pravidlo pro vsechny porty.
     pub fn any_port(protos: u8, target: Target) -> Self {
         Self {
@@ -102,7 +143,9 @@ impl Rule {
         }
     }
 
-    fn matches(&self, proto: u8, dest: SocketAddr, learned: &[(String, IpAddr)]) -> bool {
+    /// Odpovida cil pravidlu? `host(vzor, adresa)` = patri adresa jmenu
+    /// podle vzoru (preklady ze systemoveho resolveru).
+    pub fn matches_with(&self, proto: u8, dest: SocketAddr, host: impl Fn(&str, IpAddr) -> bool) -> bool {
         if self.protos & proto == 0 {
             return false;
         }
@@ -113,13 +156,11 @@ impl Rule {
         match &self.target {
             Target::Any => true,
             Target::Net { addr, prefix } => in_network(dest.ip(), *addr, *prefix),
-            Target::Host(pattern) => learned
-                .iter()
-                .any(|(name, ip)| *ip == dest.ip() && host_matches(pattern, name)),
+            Target::Host(pattern) => host(pattern, dest.ip()),
         }
     }
 
-    fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         if self.protos == 0 || self.protos & !proto::ALL != 0 || self.ports.0 > self.ports.1 {
             return Err(Error::InvalidArgs);
         }
@@ -193,19 +234,7 @@ impl Policy {
             Some(rules) => {
                 w.u8(1).u32(rules.len() as u32);
                 for r in rules {
-                    w.u8(r.protos);
-                    match &r.target {
-                        Target::Any => {
-                            w.u8(0);
-                        }
-                        Target::Net { addr, prefix } => {
-                            w.u8(1).ip(*addr).u8(*prefix);
-                        }
-                        Target::Host(h) => {
-                            w.u8(2).str(h);
-                        }
-                    }
-                    w.u16(r.ports.0).u16(r.ports.1);
+                    r.put(w);
                 }
             }
         }
@@ -232,25 +261,7 @@ impl Policy {
                 }
                 let mut rules = Vec::with_capacity(n);
                 for _ in 0..n {
-                    let protos = r.u8()?;
-                    let target = match r.u8()? {
-                        0 => Target::Any,
-                        1 => {
-                            let addr = r.ip()?;
-                            Target::Net {
-                                addr,
-                                prefix: r.u8()?,
-                            }
-                        }
-                        2 => Target::Host(r.str()?),
-                        _ => return Err(Error::InvalidArgs),
-                    };
-                    let lo = r.u16()?;
-                    rules.push(Rule {
-                        protos,
-                        target,
-                        ports: (lo, r.u16()?),
-                    });
+                    rules.push(Rule::get(r)?);
                 }
                 Some(rules)
             }
@@ -275,98 +286,6 @@ impl Policy {
         let p = Self { connect, bind };
         p.validate()?;
         Ok(p)
-    }
-}
-
-/// Opravneni jedne relace (drzi ho sluzba `netd`, klient ho nevidi).
-#[derive(Debug, Clone, Default)]
-pub struct Auth {
-    pub rights: u32,
-    layers: Vec<Policy>,
-    /// Preklady jmen ze systemoveho resolveru: (jmeno, adresa).
-    learned: Vec<(String, IpAddr)>,
-}
-
-impl Auth {
-    /// Korenova relace (ma ji init): vsechna prava, bez omezeni.
-    pub fn root() -> Self {
-        Self {
-            rights: rights::ALL,
-            layers: Vec::new(),
-            learned: Vec::new(),
-        }
-    }
-
-    /// Uzsi relace: prava jen podmnozina, k vrstvam pribude `policy`.
-    /// Zapamatovane preklady se zdedi.
-    pub fn restrict(&self, rights: u32, policy: Policy) -> Result<Self> {
-        policy.validate()?;
-        if self.layers.len() >= MAX_LAYERS {
-            return Err(Error::NoResources);
-        }
-        let mut layers = self.layers.clone();
-        layers.push(policy);
-        Ok(Self {
-            rights: self.rights & rights,
-            layers,
-            learned: self.learned.clone(),
-        })
-    }
-
-    pub fn has(&self, right: u32) -> bool {
-        self.rights & right == right
-    }
-
-    /// Ma pravo `right`? Jinak `ACCESS_DENIED`.
-    pub fn require(&self, right: u32) -> Result<()> {
-        if self.has(right) {
-            Ok(())
-        } else {
-            Err(Error::AccessDenied)
-        }
-    }
-
-    /// Smi relace komunikovat s `dest` protokolem `proto` (jeden bit
-    /// z [`proto`])?
-    pub fn allows(&self, proto: u8, dest: SocketAddr) -> bool {
-        self.layers.iter().all(|l| match &l.connect {
-            None => true,
-            Some(rules) => rules.iter().any(|r| r.matches(proto, dest, &self.learned)),
-        })
-    }
-
-    /// Smi relace naslouchat / prijimat na mistnim portu `port`?
-    pub fn allows_bind(&self, port: u16) -> bool {
-        port == 0
-            || self.layers.iter().all(|l| match &l.bind {
-                None => true,
-                Some(ranges) => ranges.iter().any(|(lo, hi)| (*lo..=*hi).contains(&port)),
-            })
-    }
-
-    /// Zapamatuje si preklad jmena od systemoveho resolveru (pro pravidla
-    /// se jmenem hostitele). Nejstarsi zaznamy nad limit se zahodi.
-    pub fn learn(&mut self, name: &str, addrs: &[IpAddr]) {
-        let name = normalize_name(name);
-        for a in addrs {
-            if self.learned.iter().any(|(n, ip)| *n == name && ip == a) {
-                continue;
-            }
-            if self.learned.len() >= MAX_LEARNED {
-                self.learned.remove(0);
-            }
-            self.learned.push((name.clone(), *a));
-        }
-    }
-
-    /// Ma nektera vrstva pravidlo se jmenem hostitele? (Jen pak ma smysl
-    /// preklady zapamatovat.)
-    pub fn has_host_rules(&self) -> bool {
-        self.layers.iter().any(|l| {
-            l.connect
-                .as_ref()
-                .is_some_and(|r| r.iter().any(|r| matches!(r.target, Target::Host(_))))
-        })
     }
 }
 
@@ -419,6 +338,7 @@ pub fn rights_names(r: u32) -> String {
         (PING, "ping"),
         (RESTRICT, "restrict"),
         (CONFIGURE, "configure"),
+        (AUDIT, "audit"),
     ];
     let mut s = String::new();
     for (bit, name) in names {

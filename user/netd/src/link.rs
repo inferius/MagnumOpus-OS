@@ -84,9 +84,10 @@ impl Link {
         &self.ch
     }
 
-    /// Precte cekajici zpravy od ovladace. `Err(PEER_CLOSED)` = ovladac
-    /// skoncil.
-    pub fn pump(&mut self) -> libos::Result<()> {
+    /// Precte cekajici zpravy od ovladace; ramec, pro ktery `accept`
+    /// vrati `false` (prichozi filtr), se zahodi. `Err(PEER_CLOSED)` =
+    /// ovladac skoncil.
+    pub fn pump(&mut self, accept: &mut dyn FnMut(&[u8]) -> bool) -> libos::Result<()> {
         // Omezeny pocet za kolo, aby zaplava ramcu nezablokovala klienty.
         for _ in 0..256 {
             let msg = match self.ch.try_read() {
@@ -96,6 +97,9 @@ impl Link {
             };
             match msg.data.first() {
                 Some(&link::FRAME) if msg.data.len() > 14 => {
+                    if !accept(&msg.data[1..]) {
+                        continue;
+                    }
                     if self.rx.len() >= RX_QUEUE_MAX {
                         self.rx_dropped += 1;
                     } else {

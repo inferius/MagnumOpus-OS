@@ -157,3 +157,19 @@ invariant was broken (a kernel bug).
 | `netd: chybi handly ve startovni zprave` | The service was started incorrectly (code 1). |
 | `init: sluzbu site nelze spustit: ...` | No network card (`NOT_FOUND`) or the service did not answer. |
 | `init: hodiny serizeny podle NTP ...` | The time service set the clock from the NTP server; the offset is how far off the clock was. |
+| `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` did not pass the channel to `fwd` ("without the firewall service"). The public profile applies (nothing inbound), questions of applications with `ask` are denied right away. |
+| `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` exited. The last configuration applies, pending and further questions are denied. |
+| `netd: profil site P` | `fwd` sent a configuration with another network profile (`public`, `home`, ...). See [Network profiles](firewall.md#network-profiles). |
+| `netd: neplatna konfigurace firewallu: ...` | A `CONFIG` message from `fwd` cannot be read; the previous configuration applies. |
+| `fwd: bezim (agent ano\|ne, ukladani na FS\|jen v pameti)` | The firewall service runs. "jen v pameti" (memory only) = no FS session, decisions are lost on restart. |
+| `fwd: vychozi konfigurace ulozena do /config/firewall.toml` | First start: there was no configuration on the FS yet. |
+| `fwd: ... je neplatna (...), pouzivam vychozi` | The file on the FS cannot be read or is invalid (line number in the description). Fix the file, `fwd` takes it on the next start. |
+| `fwd: sit M (brana G), profil P (neznama sit)` | `netd` announced a network (gateway MAC). An unknown network gets `unknown_network` and the agent gets a question. |
+| `fwd: A povolit\|zakazat vzdy: cil` | The user decided permanently (allow / deny always); the rule is in the configuration. |
+| `fwd: dotaz N (A) vyprsel` | The agent did not answer within `ask_timeout`; `ask_default` applies. |
+| `fwd: agent uzivatele skoncil, dotazy maji vychozi odpoved` | The agent channel is closed; further questions get `ask_default`. |
+| `fwd: konfiguraci nejde ulozit: ...` | Writing to the FS failed; the configuration applies in memory. |
+| `init: P (aplikace) v jobu: pamet ..., pamet jadra ...` | The program runs in a job with limits from its manifest. |
+| `init: manifest P: ...` | The program manifest is invalid (error description); the program does not start. |
+| `init: firewall bez FS (konfigurace se neulozi): ...` | An FS session for `fwd` cannot be prepared (no FS or rights). |
+| `init: sluzbu firewallu nelze spustit: ...` | `fwd` did not start; `netd` sees a closed channel and denies questions. |

@@ -13,4 +13,5 @@ bench = false
 [dependencies]
 libos = { path = "../../libs/libos" }
 netproto = { path = "../../libs/netproto" }
-smoltcp = { version = "0.14", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp", "socket-icmp", "socket-dhcpv4"] }
+netfilter = { path = "../../libs/netfilter" }
+smoltcp = { version = "0.14", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "proto-ipv4-fragmentation", "fragmentation-buffer-size-65536", "reassembly-buffer-size-65536", "reassembly-buffer-count-4", "socket-tcp", "socket-udp", "socket-icmp", "socket-dhcpv4"] }

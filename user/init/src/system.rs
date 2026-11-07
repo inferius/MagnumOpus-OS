@@ -1,6 +1,7 @@
 //! Start systemovych sluzeb: sluzba casu, spravce zarizeni, souborovy
 //! system a sluzba site.
 
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
@@ -171,7 +172,18 @@ pub struct NetService {
     pub _process: Process,
     pub _control: Channel,
     pub root: Net,
+    /// Sluzba firewallu (proces, bootstrap kanal); `None` = nebezi.
+    pub _fwd: Option<(Process, Channel)>,
+    /// Kanal agenta uzivatele u `fwd` (dotazy na cile a site). Zatim ho
+    /// drzi init (testy); pozdeji ho dostane UI sezeni.
+    pub agent: Option<Channel>,
 }
+
+/// Cesta konfigurace firewallu na FS (fwd ji vidi jako `/config`).
+pub const FIREWALL_DIR: &str = "/system/config/firewall";
+/// Servisni ucet sluzby firewallu na FS (systemovy ucet 0 relaci dostat
+/// nemuze - ma ho jen ridici kanal). Ucty sluzeb: 900-999.
+pub const FWD_USER: u64 = 900;
 
 /// Spusti sluzbu site nad prvni sitovou kartou.
 ///
@@ -182,14 +194,15 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
         return Err(Error::NotFound);
     }
     let link = devices.nets.remove(0);
-    let fs = Initfs::open(startup)?;
-    let image = fs.find("netd").ok_or(Error::NotFound)?;
     let (root, server) = Channel::create()?;
+    let (fw_netd, fw_fwd) = Channel::create()?;
     let handles = vec![
         StartHandle::user(link.into_handle()),
         StartHandle::user(server.into_handle()),
+        StartHandle::user(fw_netd.into_handle()),
     ];
-    let (process, control) = libos::spawn("netd", image, handles)?;
+    let app = crate::apps::spawn(startup, "netd", handles)?;
+    let (process, control) = (app.process, app.control);
     let msg = control.read(Some(time::deadline_after(Duration::from_secs(10))))?;
     if msg.data != b"ok" {
         println!(
@@ -198,11 +211,92 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
         );
         return Err(Error::IoError);
     }
+    // Firewall: kdyz nenabehne, netd uvidi zavreny kanal a dotazy odmita
+    // (verejny profil, nic dovnitr).
+    let (fwd, agent) = match start_fwd(startup, devices, fw_fwd) {
+        Ok((p, c, a)) => (Some((p, c)), Some(a)),
+        Err(e) => {
+            println!("init: sluzbu firewallu nelze spustit: {e}");
+            (None, None)
+        }
+    };
     Ok(NetService {
         _process: process,
         _control: control,
         root: Net::new(root),
+        _fwd: fwd,
+        agent,
     })
+}
+
+/// Prida uctu `who` pravo pruchodu adresarem (ostatni granty zustanou).
+fn grant_traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
+    use fsproto::perm::{Grant, grant, rights};
+    let mut acl = fs.permissions(path)?.acl.unwrap_or_default();
+    if acl.grants.iter().any(|g| g.who == who && g.rights & rights::TRAVERSE != 0) {
+        return Ok(());
+    }
+    acl.grants.push(Grant {
+        who,
+        rights: rights::TRAVERSE,
+        flags: grant::THIS,
+    });
+    fs.set_acl(path, Some(&acl))
+}
+
+/// Relace FS pro fwd: jen adresar konfigurace firewallu jako `/config`.
+/// Adresar patri servisnimu uctu fwd, nadrazene adresare smi jen projit.
+fn firewall_fs(devices: &Devices) -> Result<Channel> {
+    use fsproto::kind;
+    use fsproto::perm::Mount;
+    let fs = devices.fs.as_ref().ok_or(Error::NotFound)?;
+    grant_traverse(fs, "/", FWD_USER)?;
+    let mut path = String::new();
+    for part in FIREWALL_DIR.split('/').filter(|p| !p.is_empty()) {
+        path.push('/');
+        path.push_str(part);
+        match fs.create(&path, kind::DIR) {
+            Ok(()) | Err(Error::AlreadyExists) => {}
+            Err(e) => return Err(e),
+        }
+        if path != FIREWALL_DIR {
+            grant_traverse(fs, &path, FWD_USER)?;
+        }
+    }
+    fs.set_owner(FIREWALL_DIR, FWD_USER)?;
+    let (_, session) = fs.connect_as(FWD_USER, &[], &[Mount::new("/config", FIREWALL_DIR, 0)])?;
+    Ok(session.into_channel())
+}
+
+/// Spusti fwd: kanal k netd, kanal agenta, relace FS a vychozi konfigurace
+/// z initfs. Vraci proces, jeho bootstrap kanal a kanal agenta.
+fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel) -> Result<(Process, Channel, Channel)> {
+    let defaults = Initfs::open(startup)?
+        .find("firewall.toml")
+        .ok_or(Error::NotFound)?
+        .to_vec();
+    let (agent, agent_fwd) = Channel::create()?;
+    let mut handles = vec![
+        StartHandle::user(netd.into_handle()),
+        StartHandle::user(agent_fwd.into_handle()),
+    ];
+    match firewall_fs(devices) {
+        Ok(ch) => handles.push(StartHandle::user(ch.into_handle())),
+        Err(e) => println!("init: firewall bez FS (konfigurace se neulozi): {e}"),
+    }
+    let app = crate::apps::spawn(startup, "fwd", handles)?;
+    app.control.write(&defaults, Vec::new())?;
+    let msg = app
+        .control
+        .read(Some(time::deadline_after(Duration::from_secs(10))))?;
+    if msg.data != b"ok" {
+        println!(
+            "init: sluzba firewallu hlasi: {}",
+            core::str::from_utf8(&msg.data).unwrap_or("?")
+        );
+        return Err(Error::IoError);
+    }
+    Ok((app.process, app.control, agent))
 }
 
 /// Seridi hodiny podle serveru NTP: dotaz pres sit, nastaveni pres sluzbu

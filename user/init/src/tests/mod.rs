@@ -6,6 +6,7 @@
 mod basic;
 mod drivers;
 mod events;
+mod firewall;
 mod fs;
 mod ipc;
 mod jobs;
@@ -31,6 +32,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ovladace", drivers::TESTS),
     ("souborovy system", fs::TESTS),
     ("cas", time::TESTS),
+    ("firewall", firewall::TESTS),
     ("sit", net::TESTS),
 ];
 

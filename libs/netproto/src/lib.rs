@@ -27,8 +27,10 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
+pub mod auth;
 mod codec;
 pub mod dns;
+pub mod fw;
 pub mod link;
 pub mod ntp;
 pub mod policy;
@@ -48,15 +50,57 @@ use core::time::Duration;
 use abi::{Error, Result};
 
 pub use codec::{ReadAddr, Reader, WriteAddr, Writer};
-pub use policy::{Auth, Policy, Rule, Target, proto, rights, rights_names};
+pub use auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
+pub use policy::{Policy, Rule, Target, proto, rights, rights_names};
 
 #[cfg(feature = "client")]
 pub use client::{Net, NtpSync, TcpListener, TcpStream, UdpSocket};
 
-/// Nejvic bajtu dat v jedne zprave (rezerva pro hlavicku v limitu kanalu).
-pub const MAX_IO: usize = 32 * 1024;
-/// Nejvetsi datagram UDP, ktery sluzba prenese.
-pub const MAX_DATAGRAM: usize = 8 * 1024;
+/// Nejvic bajtu dat v jedne zprave proudu (kousek; klient vetsi data deli,
+/// zprava kanalu ma nejvys 64 KiB).
+pub const MAX_IO: usize = 60 * 1024;
+/// Nejvetsi datagram UDP: nejvetsi obsah datagramu IPv4 (65 535 - 20 B
+/// hlavicky IP - 8 B hlavicky UDP). Vejde se do jedne zpravy kanalu.
+pub const MAX_DATAGRAM: usize = 65_507;
+
+/// Velikost bufferu socketu (prijem, odesilani) v bajtech; 0 = vychozi
+/// (64 KiB). Sluzba hodnotu omezi na [`Buffers::MIN`]..=[`Buffers::MAX`]
+/// a strhne ji z rozpoctu relace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Buffers {
+    pub rx: u32,
+    pub tx: u32,
+}
+
+impl Buffers {
+    pub const DEFAULT: Self = Self { rx: 0, tx: 0 };
+    pub const DEFAULT_SIZE: u32 = 64 * 1024;
+    pub const MIN: u32 = 4 * 1024;
+    pub const MAX: u32 = 16 * 1024 * 1024;
+
+    pub fn put(&self, w: &mut Writer) {
+        w.u32(self.rx).u32(self.tx);
+    }
+
+    pub fn get(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            rx: r.u32()?,
+            tx: r.u32()?,
+        })
+    }
+
+    /// Skutecne velikosti (vychozi a meze).
+    pub fn resolved(&self) -> (usize, usize) {
+        let f = |v: u32| {
+            if v == 0 {
+                Self::DEFAULT_SIZE
+            } else {
+                v.clamp(Self::MIN, Self::MAX)
+            }
+        };
+        (f(self.rx) as usize, f(self.tx) as usize)
+    }
+}
 
 /// Timeout "necekat".
 pub const NO_WAIT: u64 = 0;
@@ -81,22 +125,28 @@ pub mod op {
     pub const INFO: u32 = 1;
     /// timeout -> Info (az bude rozhrani nastavene, napr. po DHCP)
     pub const WAIT_CONFIGURED: u32 = 2;
-    /// cil socket_addr, timeout -> mistni socket_addr + kanal spojeni
+    /// cil socket_addr, timeout, Buffers -> mistni socket_addr + kanal spojeni
     pub const TCP_CONNECT: u32 = 3;
-    /// port u16, fronta u16 -> mistni socket_addr + kanal naslouchani
+    /// port u16, fronta u16, Buffers -> mistni socket_addr + kanal naslouchani
     pub const TCP_LISTEN: u32 = 4;
-    /// port u16 -> mistni socket_addr + kanal socketu UDP
+    /// port u16, Buffers -> mistni socket_addr + kanal socketu UDP
     pub const UDP_BIND: u32 = 5;
     /// jmeno str, rodina u8 (0 = obe, 4, 6), ma server u8 [socket_addr],
     /// timeout -> pocet u16, adresy, TTL u32
     pub const RESOLVE: u32 = 6;
     /// adresa, poradi u16, delka dat u16, timeout -> doba odezvy ns u64
     pub const PING: u32 = 7;
-    /// prava u32, Policy -> kanal nove (uzsi) relace
+    /// Restriction (prava u32, Policy, priznaky u8, aplikace str, sockety
+    /// u32, bajty u64) -> kanal nove (uzsi) relace
     pub const RESTRICT: u32 = 8;
     /// pocet u8, servery socket_addr -> () - systemove servery DNS
     /// (pravo `CONFIGURE`); prazdny seznam = zpet servery z DHCP
     pub const SET_DNS: u32 = 9;
+    /// od seq u64, nejvic u16 -> dalsi seq u64, pocet u16, zaznamy
+    /// (`fw::AuditRecord`); pravo `AUDIT`
+    pub const AUDIT: u32 = 10;
+    /// () -> profil str, pocet u16, `fw::AppStats`; pravo `AUDIT`
+    pub const STATS: u32 = 11;
 
     // Kanal spojeni TCP.
     /// timeout, data -> prijato u32 (vse, nebo cast pri vyprseni)

@@ -9,7 +9,8 @@ use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use abi::Error;
 use abi::time::WallTime;
 
-use crate::policy::{Auth, Policy, Rule, Target, host_matches, in_network, proto, rights};
+use crate::auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
+use crate::policy::{Policy, Rule, Target, host_matches, in_network, proto, rights};
 use crate::{Info, ReadAddr, Reader, WriteAddr, Writer, dns, link, ntp, parse_reply, reply};
 
 fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
@@ -19,6 +20,9 @@ fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
 fn sa(ip: IpAddr, port: u16) -> SocketAddr {
     SocketAddr::new(ip, port)
 }
+
+/// Monotonicky cas testu (ns).
+const NOW: u64 = 1_000_000_000_000;
 
 #[test]
 fn codec_roundtrip_addresses() {
@@ -95,7 +99,7 @@ fn host_patterns() {
 fn root_allows_everything() {
     let a = Auth::root();
     assert!(a.has(rights::ALL));
-    assert!(a.allows(proto::TCP, sa(v4(8, 8, 8, 8), 443)));
+    assert!(a.allows(proto::TCP, sa(v4(8, 8, 8, 8), 443), NOW));
     assert!(a.allows_bind(80));
 }
 
@@ -117,9 +121,9 @@ fn restrict_rights_and_targets() {
     assert!(!a.has(rights::PING));
     assert!(!a.has(rights::RESTRICT));
     assert_eq!(a.require(rights::TCP_LISTEN), Err(Error::AccessDenied));
-    assert!(a.allows(proto::TCP, sa(v4(10, 0, 2, 2), 22)));
-    assert!(!a.allows(proto::TCP, sa(v4(10, 0, 3, 2), 22)));
-    assert!(!a.allows(proto::ICMP, sa(v4(10, 0, 2, 2), 0)));
+    assert!(a.allows(proto::TCP, sa(v4(10, 0, 2, 2), 22), NOW));
+    assert!(!a.allows(proto::TCP, sa(v4(10, 0, 3, 2), 22), NOW));
+    assert!(!a.allows(proto::ICMP, sa(v4(10, 0, 2, 2), 0), NOW));
     assert!(a.allows_bind(8080));
     assert!(a.allows_bind(0));
     assert!(!a.allows_bind(80));
@@ -128,10 +132,10 @@ fn restrict_rights_and_targets() {
     let web = Policy::only(vec![Rule::port(proto::TCP, Target::Any, 80)]);
     let b = a.restrict(rights::ALL, web).unwrap();
     assert_eq!(b.rights, a.rights, "prava nejdou rozsirit");
-    assert!(b.allows(proto::TCP, sa(v4(10, 0, 2, 2), 80)));
-    assert!(!b.allows(proto::TCP, sa(v4(10, 0, 2, 2), 22)));
+    assert!(b.allows(proto::TCP, sa(v4(10, 0, 2, 2), 80), NOW));
+    assert!(!b.allows(proto::TCP, sa(v4(10, 0, 2, 2), 22), NOW));
     assert!(
-        !b.allows(proto::TCP, sa(v4(1, 1, 1, 1), 80)),
+        !b.allows(proto::TCP, sa(v4(1, 1, 1, 1), 80), NOW),
         "mimo sit prvni vrstvy"
     );
     assert!(!b.allows_bind(8080), "Policy::only zakazuje naslouchani");
@@ -145,24 +149,25 @@ fn host_rules_use_learned_addresses() {
         443,
     )]);
     let mut a = Auth::root().restrict(rights::CLIENT, p).unwrap();
-    assert!(a.has_host_rules());
+    assert!(a.has_host_rules(&UserRules::default()));
     let ip = v4(93, 184, 216, 34);
-    assert!(!a.allows(proto::TCP, sa(ip, 443)), "pred prekladem nic");
-    a.learn("www.example.com", &[ip]);
-    assert!(a.allows(proto::TCP, sa(ip, 443)));
-    assert!(!a.allows(proto::TCP, sa(ip, 80)), "jiny port");
-    a.learn("evil.test", &[v4(6, 6, 6, 6)]);
+    assert!(!a.allows(proto::TCP, sa(ip, 443), NOW), "pred prekladem nic");
+    a.learn("www.example.com", &[ip], 60, NOW);
+    assert!(a.allows(proto::TCP, sa(ip, 443), NOW));
+    assert!(!a.allows(proto::TCP, sa(ip, 80), NOW), "jiny port");
+    a.learn("evil.test", &[v4(6, 6, 6, 6)], 60, NOW);
     assert!(
-        !a.allows(proto::TCP, sa(v4(6, 6, 6, 6), 443)),
+        !a.allows(proto::TCP, sa(v4(6, 6, 6, 6), 443), NOW),
         "jmeno mimo vzor"
     );
 }
 
 #[test]
-fn learned_is_bounded() {
+fn learned_is_bounded_and_expires() {
     let mut a = Auth::root();
-    for i in 0..(crate::policy::MAX_LEARNED as u32 + 10) {
-        a.learn("x.test", &[IpAddr::V4(Ipv4Addr::from(i))]);
+    let max = crate::auth::MAX_LEARNED as u32;
+    for i in 0..(max + 10) {
+        a.learn("x.test", &[IpAddr::V4(Ipv4Addr::from(i))], 60, NOW + i as u64);
     }
     // Interni seznam je omezeny; nejnovejsi zaznam plati.
     let p = Policy::only(vec![Rule::any_port(
@@ -170,9 +175,133 @@ fn learned_is_bounded() {
         Target::Host(String::from("x.test")),
     )]);
     let b = a.restrict(rights::ALL, p).unwrap();
-    let last = IpAddr::V4(Ipv4Addr::from(crate::policy::MAX_LEARNED as u32 + 9));
-    assert!(b.allows(proto::TCP, sa(last, 1)));
-    assert!(!b.allows(proto::TCP, sa(IpAddr::V4(Ipv4Addr::from(0u32)), 1)));
+    let last = IpAddr::V4(Ipv4Addr::from(max + 9));
+    assert!(b.allows(proto::TCP, sa(last, 1), NOW));
+    assert!(!b.allows(proto::TCP, sa(IpAddr::V4(Ipv4Addr::from(0u32)), 1), NOW));
+    // Platnost: TTL 60 s se prodlouzi na LEARNED_MIN_TTL, pak vyprsi.
+    let min = crate::auth::LEARNED_MIN_TTL * 1_000_000_000;
+    assert!(b.allows(proto::TCP, sa(last, 1), NOW + min));
+    assert!(!b.allows(proto::TCP, sa(last, 1), NOW + 2 * min));
+}
+
+#[test]
+fn session_budget_is_hierarchical() {
+    // Relace sama stoji jeden socket a SESSION_COST bajtu rodice.
+    let session = crate::auth::SESSION_COST;
+    let root = Auth::root_with(Quota {
+        sockets: 4,
+        bytes: 1000 + session,
+    });
+    let child = root
+        .restrict_with(Restriction {
+            rights: rights::ALL,
+            quota: Quota {
+                sockets: 10,
+                bytes: 600,
+            },
+            ..Restriction::default()
+        })
+        .unwrap();
+    let a = child.charge(500).unwrap();
+    assert_eq!(child.charge(200).err(), Some(Error::NoResources), "limit relace");
+    let b = root.charge(400).unwrap();
+    assert_eq!(root.budget().used(), (3, 900 + session), "predek vidi potomka");
+    assert_eq!(root.charge(200).err(), Some(Error::NoResources), "bajty predka");
+    let c = child.charge(10).unwrap();
+    assert_eq!(child.charge(0).err(), Some(Error::NoResources), "sockety predka");
+    drop((a, b, c));
+    assert_eq!(root.budget().used(), (1, session), "strzeni socketu se vratilo");
+    drop(child);
+    assert_eq!(root.budget().used(), (0, 0), "zanikla relace se vratila");
+}
+
+#[test]
+fn ask_layers_and_user_rules() {
+    let only_lan = Policy::only(vec![Rule::any_port(
+        proto::TCP,
+        Target::Net {
+            addr: v4(10, 0, 0, 0),
+            prefix: 8,
+        },
+    )]);
+    let app = root_app(only_lan.clone(), true);
+    let lan = sa(v4(10, 1, 1, 1), 80);
+    let web = sa(v4(93, 184, 216, 34), 443);
+    let none = UserRules::default();
+    assert_eq!(app.check(proto::TCP, lan, NOW, &none, &[]), Verdict::Allow);
+    assert_eq!(
+        app.check(proto::TCP, web, NOW, &none, &[]),
+        Verdict::Ask {
+            app: String::from("org.test.app")
+        }
+    );
+    assert!(!app.allows(proto::TCP, web, NOW), "bez rozhodnuti ne");
+    // Povoleni jen pro tento pozadavek.
+    assert_eq!(app.check(proto::TCP, web, NOW, &none, &[String::from("org.test.app")]), Verdict::Allow);
+    // Trvale rozhodnuti: povolit 443, zakaz ma prednost.
+    let mut user = UserRules::default();
+    user.rules.push((String::from("org.test.app"), Rule::port(proto::TCP, Target::Any, 443), true));
+    assert_eq!(app.check(proto::TCP, web, NOW, &user, &[]), Verdict::Allow);
+    user.rules.push((
+        String::from("org.test.app"),
+        Rule::any_port(proto::TCP, Target::Net { addr: v4(93, 0, 0, 0), prefix: 8 }),
+        false,
+    ));
+    assert_eq!(app.check(proto::TCP, web, NOW, &user, &[]), Verdict::Deny);
+    // Rozhodnuti jine aplikace neplati.
+    let other = UserRules {
+        rules: vec![(String::from("org.jina"), Rule::any_port(proto::TCP, Target::Any), true)],
+    };
+    assert!(matches!(app.check(proto::TCP, web, NOW, &other, &[]), Verdict::Ask { .. }));
+    // Vrstva bez dotazu je pevna hranice i s rozhodnutim uzivatele.
+    let strict = root_app(only_lan, false);
+    assert_eq!(strict.check(proto::TCP, web, NOW, &user, &[]), Verdict::Deny);
+    // Dotaz bez identity aplikace nejde.
+    assert!(
+        Auth::root()
+            .restrict_with(Restriction {
+                rights: rights::ALL,
+                flags: layer_flags::ASK,
+                ..Restriction::default()
+            })
+            .is_err()
+    );
+}
+
+fn root_app(policy: Policy, ask: bool) -> Auth {
+    Auth::root()
+        .restrict_with(Restriction {
+            rights: rights::CLIENT,
+            policy,
+            app: String::from("org.test.app"),
+            flags: if ask { layer_flags::ASK } else { 0 },
+            quota: Quota::UNLIMITED,
+        })
+        .unwrap()
+}
+
+#[test]
+fn restriction_wire_roundtrip() {
+    let r = Restriction {
+        rights: rights::CLIENT,
+        policy: Policy::only(vec![Rule::port(proto::TCP, Target::Any, 443)]),
+        app: String::from("org.magnumopus.test"),
+        flags: layer_flags::ASK,
+        quota: Quota {
+            sockets: 100,
+            bytes: 1 << 20,
+        },
+    };
+    let mut w = Writer::new();
+    r.put(&mut w);
+    let b = w.finish();
+    assert_eq!(Restriction::get(&mut Reader::new(&b)).unwrap(), r);
+    let mut bad = r.clone();
+    bad.app = String::from("zla identita!");
+    let mut w = Writer::new();
+    bad.put(&mut w);
+    let b = w.finish();
+    assert_eq!(Restriction::get(&mut Reader::new(&b)).err(), Some(Error::InvalidArgs));
 }
 
 #[test]
@@ -258,6 +387,93 @@ fn dns_query_response_roundtrip() {
 }
 
 #[test]
+fn dns_edns_and_truncation() {
+    let q = dns::build_query(9, "big.test", dns::TYPE_A).unwrap();
+    assert_eq!(dns::query_udp_size(&q), dns::EDNS_UDP, "dotaz nabizi EDNS0");
+    let parsed = dns::parse_query(&q).unwrap();
+    assert_eq!(parsed.name, "big.test");
+    // Dotaz bez EDNS: 512 B.
+    let mut plain = q[..q.len() - 11].to_vec();
+    plain[11] = 0;
+    assert_eq!(dns::query_udp_size(&plain), dns::MAX_UDP);
+    // Zkracena odpoved = zeptat se pres TCP.
+    let tc = dns::build_truncated(&parsed);
+    assert_eq!(dns::parse_response(9, &tc), Err(Error::BufferTooSmall));
+    // Velka odpoved (200 adres) se rozebere cela.
+    let addrs: Vec<IpAddr> = (0..200u32).map(|i| IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i))).collect();
+    let big = dns::build_response(&parsed, &addrs, 60, dns::RCODE_OK);
+    assert!(big.len() > dns::MAX_UDP);
+    assert_eq!(dns::parse_response(9, &big).unwrap().addrs.len(), 200);
+}
+
+#[test]
+fn fw_messages_roundtrip() {
+    use crate::fw::{AppStats, Ask, AuditRecord, FwConfig, InRule, audit, inbound};
+    let cfg = FwConfig {
+        profile: String::from("home"),
+        inbound: inbound::LISTENERS,
+        ping: true,
+        stealth: false,
+        allow_in: vec![InRule {
+            protos: proto::TCP,
+            from: (v4(10, 0, 0, 0), 8),
+            ports: (22, 22),
+        }],
+        blocked: vec![(v4(192, 0, 2, 0), 24)],
+        syn_rate: (50, 100),
+        icmp_rate: (5, 10),
+        dns_block: vec![String::from("*.ads.example")],
+        user_rules: vec![(
+            String::from("org.test.app"),
+            Rule::port(proto::TCP, Target::Host(String::from("api.example.com")), 443),
+            true,
+        )],
+        audit_capacity: 100,
+    };
+    let mut w = Writer::new();
+    cfg.put(&mut w);
+    let b = w.finish();
+    assert_eq!(FwConfig::get(&mut Reader::new(&b)).unwrap(), cfg);
+
+    let ask = Ask {
+        id: 7,
+        app: String::from("org.test.app"),
+        proto: proto::TCP,
+        dest: sa(v4(1, 2, 3, 4), 443),
+        host: String::from("api.example.com"),
+    };
+    let b = ask.encode();
+    let mut r = Reader::new(&b);
+    assert_eq!(r.u32().unwrap(), crate::fw::op::ASK);
+    assert_eq!(Ask::get(&mut r).unwrap(), ask);
+
+    let rec = AuditRecord {
+        seq: 5,
+        time: 123,
+        kind: audit::DENIED,
+        app: String::from("org.test.app"),
+        proto: proto::UDP,
+        remote: Some(sa(v4(8, 8, 8, 8), 53)),
+        local_port: 50000,
+        detail: String::from("pravidla relace"),
+    };
+    let mut w = Writer::new();
+    rec.put(&mut w);
+    let b = w.finish();
+    assert_eq!(AuditRecord::get(&mut Reader::new(&b)).unwrap(), rec);
+    let st = AppStats {
+        app: String::from("a"),
+        sent: 1,
+        received: 2,
+        sockets: 3,
+    };
+    let mut w = Writer::new();
+    st.put(&mut w);
+    let b = w.finish();
+    assert_eq!(AppStats::get(&mut Reader::new(&b)).unwrap(), st);
+}
+
+#[test]
 fn dns_compression_loop_is_rejected() {
     // Hlavicka odpovedi s jednou otazkou, jejiz jmeno je ukazatel sam na sebe.
     let mut d = vec![0x12, 0x34, 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0, 0];
@@ -269,7 +485,9 @@ fn dns_compression_loop_is_rejected() {
 fn dns_cname_then_address() {
     // Odpoved: CNAME a pak A (rucne sestavena, s kompresi jmen).
     let q = dns::build_query(7, "www.test", dns::TYPE_A).unwrap();
-    let mut d = q.clone();
+    // Bez zaznamu OPT (11 B na konci dotazu), odpovedi jdou za otazku.
+    let mut d = q[..q.len() - 11].to_vec();
+    d[11] = 0;
     d[2] = 0x81;
     d[3] = 0x80;
     d[7] = 2; // ANCOUNT

@@ -21,7 +21,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -3 | `WRONG_TYPE` | objekt je jiného typu |
 | -4 | `TIMED_OUT` | vypršel čas čekání |
 | -5 | `NO_MEMORY` | nedostatek paměti |
-| -6 | `NO_RESOURCES` | vyčerpaný limit |
+| -6 | `NO_RESOURCES` | vyčerpaný rozpočet jobu nebo limit |
 | -7 | `INVALID_ARGS` | neplatný argument |
 | -8 | `NOT_FOUND` | požadovaná věc neexistuje |
 | -9 | `NOT_SUPPORTED` | operace není podporovaná |
@@ -110,15 +110,19 @@ Opakovaný výskyt znamená únik paměti nebo příliš malou RAM.
 
 ### `NO_RESOURCES` (-6)
 
-**Význam:** vyčerpal se jiný limit než paměť.
+**Význam:** vyčerpal se rozpočet jobu (paměť jádra nebo uživatelská
+paměť, viz [Joby](syscally.md#joby-rozpočty-prostředků)), rozpočet relace
+sítě (sockety, buffery) nebo strukturální mez.
 
-**Kdy vzniká:** plná tabulka handlů procesu (max. 1 048 575 handlů), plná
-fronta kanálu (`CHANNEL_MAX_QUEUED` = 1024 zpráv; zápis pak vrací
-`SHOULD_WAIT`), nedostatek volného virtuálního prostoru procesu při
-`VM_MAP` bez `MAP_FIXED`.
+**Kdy vzniká:** objekt, handle, registrace portu, zpráva ve frontě,
+mapování, vlákno nebo objekt paměti by překročil rozpočet jobu procesu
+nebo některého předka; socket by překročil rozpočet relace sítě; plná
+tabulka handlů (max. 1 048 575 handlů); nedostatek volného virtuálního
+prostoru při `VM_MAP` bez `MAP_FIXED`.
 
-**Co s tím:** zavírat nepotřebné handly, číst zprávy z kanálu, mapovat
-menší úseky.
+**Co s tím:** uvolnit, co proces drží (handly, objekty paměti, sockety).
+Když rozpočet nestačí, zvětší ho ten, kdo job nebo relaci vytvořil
+(manifest aplikace, `JOB_SET_LIMIT`).
 
 ### `INVALID_ARGS` (-7)
 

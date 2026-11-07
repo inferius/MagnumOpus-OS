@@ -1,20 +1,26 @@
 //! Objekty sluzby: kazdy kanal od klienta je relace, spojeni TCP,
 //! naslouchani TCP nebo socket UDP. Na kanalu je nejvys jeden rozpracovany
 //! pozadavek (`Pending`); dalsi zpravu sluzba precte az po odpovedi.
+//!
+//! Kazdy socket drzi strzeni z rozpoctu sve relace ([`Usage`]); zanikem
+//! objektu se vrati.
 
+use alloc::collections::VecDeque;
 use alloc::rc::Rc;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::net::SocketAddr;
 
 use libos::{Channel, Error, Result};
-use netproto::{Auth, Reader, Writer};
+use netproto::auth::Usage;
+use netproto::{Auth, Reader, Verdict, Writer};
 use smoltcp::iface::SocketHandle;
 
-use crate::ping::Ping;
-use crate::resolve::Resolve;
-use crate::stack::Stack;
-use crate::{session, tcp, udp};
+use crate::ping::{Ping, PingReq};
+use crate::resolve::{Resolve, ResolveReq};
+use crate::stack::{Stack, now_ns};
+use crate::{fw, session, tcp, udp};
 
 /// Opravneni relace sdilene s jejimi sockety (sockety UDP podle nej
 /// filtruji, a preklady jmen z relace plati i pro ne).
@@ -58,18 +64,62 @@ pub struct Stream {
     pub port: Option<u16>,
     /// Druha strana poslala FIN (rozliseni konce proudu od RST).
     pub fin_seen: bool,
+    /// Aplikace (statistiky provozu).
+    pub app: String,
+    pub _usage: Usage,
 }
 
 pub struct Listener {
     pub port: u16,
-    /// Sockety ve stavu naslouchani nebo navazane, cekajici na `accept`.
-    pub backlog: Vec<SocketHandle>,
+    /// Sockety ve stavu naslouchani (prijimaji SYN).
+    pub listening: Vec<SocketHandle>,
+    /// Navazana spojeni cekajici na `accept`.
+    pub ready: VecDeque<SocketHandle>,
+    /// Nejvic spojeni ve fronte (`ready` + rozpracovana).
+    pub backlog: usize,
+    /// Buffery prijatych spojeni.
+    pub rx: usize,
+    pub tx: usize,
+    pub auth: AuthRef,
+    pub app: String,
+    /// Strzeni za sockety naslouchani.
+    pub _usage: Usage,
 }
 
 pub struct Udp {
     pub sock: SocketHandle,
     pub port: u16,
     pub auth: AuthRef,
+    pub app: String,
+    /// Cile, ktere uzivatel pro tento socket povolil jednorazove (plati do
+    /// zavreni socketu, vcetne odpovedi z nich).
+    pub allowed: Vec<SocketAddr>,
+    /// Cile, ktere uz jsou v auditu (prvni datagram na cil se zapise).
+    pub seen: VecDeque<SocketAddr>,
+    pub _usage: Usage,
+}
+
+/// Nejvic jednorazove povolenych a zapamatovanych cilu socketu UDP.
+pub const UDP_TARGETS_MAX: usize = 64;
+
+/// Operace, ktera ceka na rozhodnuti uzivatele.
+pub enum Deferred {
+    Connect(tcp::ConnectReq),
+    Ping(PingReq),
+    Resolve(ResolveReq),
+    SendTo { to: SocketAddr, data: Vec<u8> },
+}
+
+pub struct AskWait {
+    pub id: u32,
+    pub app: String,
+    pub proto: u8,
+    pub dest: SocketAddr,
+    pub deadline: u64,
+    /// Aplikace, kterym uz uzivatel tento pozadavek povolil (vic vrstev
+    /// s dotazem).
+    pub granted: Vec<String>,
+    pub then: Deferred,
 }
 
 /// Rozpracovany pozadavek.
@@ -80,6 +130,7 @@ pub enum Pending {
     Connect(tcp::Connect),
     Resolve(Resolve),
     Ping(Ping),
+    Ask(AskWait),
     Send {
         data: Vec<u8>,
         done: usize,
@@ -116,6 +167,7 @@ impl Pending {
             Self::Connect(c) => c.deadline,
             Self::Resolve(r) => r.wake_at(),
             Self::Ping(p) => p.deadline,
+            Self::Ask(a) => a.deadline,
         }
     }
 }
@@ -143,6 +195,74 @@ impl Step {
     }
 }
 
+/// Vysledek kontroly cile operace.
+pub enum Gate {
+    /// Smi hned.
+    Go,
+    /// Ceka na uzivatele (dotaz odeslan): id dotazu a aplikace.
+    Ask(u32, String),
+}
+
+/// Kontrola cile: povoleno, zakazano (`ACCESS_DENIED`), nebo dotaz pres
+/// `fwd` (vrstva s `ask`). Bez `fwd` se dotaz rovnou odmitne.
+pub fn gate(
+    stack: &mut Stack,
+    auth: &Auth,
+    proto: u8,
+    dest: SocketAddr,
+    granted: &[String],
+) -> Result<Gate> {
+    let now = now_ns();
+    match stack.fw.check(auth, proto, dest, now, granted) {
+        Verdict::Allow => Ok(Gate::Go),
+        Verdict::Deny => Err(Error::AccessDenied),
+        Verdict::Ask { app } => {
+            let host = auth.name_for(dest.ip(), now).unwrap_or("");
+            match stack.fw.ask(&app, proto, dest, host) {
+                Some(id) => Ok(Gate::Ask(id, app)),
+                None => {
+                    stack.fw.record_answer(&app, proto, dest, false);
+                    Err(Error::AccessDenied)
+                }
+            }
+        }
+    }
+}
+
+/// Zalozi cekani na uzivatele.
+pub fn ask_wait(id: u32, app: String, proto: u8, dest: SocketAddr, granted: Vec<String>, then: Deferred) -> Step {
+    Step::Wait(Pending::Ask(AskWait {
+        id,
+        app,
+        proto,
+        dest,
+        deadline: now_ns().saturating_add(fw::ASK_WAIT_NS),
+        granted,
+        then,
+    }))
+}
+
+/// Posun cekani na uzivatele: `Ok(granted)` = povoleno (pokracovat
+/// s timto seznamem povolenych aplikaci), `Err(krok)` = jeste ceka nebo
+/// zamitnuto.
+pub fn ask_progress(stack: &mut Stack, mut a: AskWait, now: u64) -> core::result::Result<(Vec<String>, Deferred), Step> {
+    match stack.fw.take_answer(a.id) {
+        Some(true) => {
+            a.granted.push(a.app);
+            Ok((a.granted, a.then))
+        }
+        Some(false) => {
+            stack.fw.record_answer(&a.app, a.proto, a.dest, false);
+            Err(Step::err(Error::AccessDenied))
+        }
+        None if now >= a.deadline => {
+            stack.fw.record_answer(&a.app, a.proto, a.dest, false);
+            Err(Step::err(Error::AccessDenied))
+        }
+        None => Err(Step::Wait(Pending::Ask(a))),
+    }
+}
+
 /// Novy pozadavek na objektu.
 pub fn request(stack: &mut Stack, kind: &mut Kind, data: &[u8]) -> Step {
     let mut r = Reader::new(data);
@@ -163,7 +283,7 @@ pub fn request(stack: &mut Stack, kind: &mut Kind, data: &[u8]) -> Step {
 
 /// Posun rozpracovaneho pozadavku (po zpracovani site nebo vyprseni).
 pub fn progress(stack: &mut Stack, kind: &mut Kind, p: Pending) -> Step {
-    let now = crate::stack::now_ns();
+    let now = now_ns();
     match (kind, p) {
         (Kind::Session(auth), p) => session::progress(stack, auth, p, now),
         (Kind::Stream(s), p) => tcp::stream_progress(stack, s, p, now),
@@ -182,6 +302,10 @@ pub fn close(stack: &mut Stack, kind: Kind, pending: Option<Pending>) {
             Pending::Connect(c) => c.cancel(stack),
             Pending::Resolve(r) => r.cancel(stack),
             Pending::Ping(p) => p.cancel(stack),
+            Pending::Ask(a) => {
+                // Odpoved, ktera jeste prijde, uz nikdo nevyzvedne.
+                stack.fw.forget_answer(a.id);
+            }
             _ => {}
         }
     }

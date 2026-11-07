@@ -7,7 +7,9 @@ The first part of milestone 6 ("network"). These parts are done:
   UDP, TCP), a DHCP client and a DNS resolver,
 - the **`netproto`** protocol with access through a capability and
   destination restrictions,
-- an **NTP** client that sets the clock through the time service.
+- an **NTP** client that sets the clock through the time service,
+- a **firewall**: application manifest, asking the user, packet filter,
+  network profiles, audit and DNS filter (see [firewall.md](firewall.md)).
 
 TLS and HTTP come later. The interface for them is ready (see
 [Preparing for TLS and HTTP](#preparing-for-tls-and-http)).
@@ -18,7 +20,8 @@ TLS and HTTP come later. The interface for them is ready (see
 | service | `user/netd` | TCP/IP stack (smoltcp), DHCP, DNS, permissions, sockets |
 | protocol | `libs/netproto` | messages, permissions, DNS and NTP formats, client library |
 | device manager | `user/devmgr` | finds the card on PCI, starts the driver |
-| init | `user/init/src/system.rs` | starts `netd`, holds the root session, NTP |
+| firewall | `user/fwd`, `libs/netfilter`, `libs/manifest` | configuration, asking the user, packet filter, manifests |
+| init | `user/init/src/system.rs`, `apps.rs` | starts `netd` and `fwd` in jobs by their manifests, holds the root session, NTP |
 | tests | `user/init/src/tests/net.rs`, `xtask/src/nethelper.rs` | tests in QEMU through slirp against host servers |
 
 ## Architecture
@@ -80,8 +83,10 @@ receives:
 Checksum offload and GSO are not used (the stack computes checksums), and
 neither is `MRG_RXBUF` (a frame always fits in one buffer).
 
-**Queues:** 0 = receive, 1 = transmit, each with at most 64 buffers of
-2 KiB. A buffer holds the virtio-net header (12 B) and the frame. Both
+**Queues:** 0 = receive, 1 = transmit, each with at most 256 buffers of
+2 KiB (as many as the device offers; QEMU 256). The driver gets DMA memory
+and interrupts from `devmgr` by the device kind (network: 2 MiB, 4
+interrupts). A buffer holds the virtio-net header (12 B) and the frame. Both
 queues share one MSI-X vector. The driver waits with one
 `OBJECT_WAIT_MANY` for the interrupt and for messages from the service:
 
@@ -124,7 +129,9 @@ drivers is not implemented yet).
 Start (`USER` handles in order):
 
 1. channel to the card driver,
-2. channel of the **root session**, held by `init`.
+2. channel of the **root session**, held by `init`,
+3. (optional) channel to the firewall service `fwd` (see [firewall.md](firewall.md)).
+   Without it the public profile applies and application questions are denied.
 
 The service waits for `INFO` from the driver, replies `ok` to its parent
 and starts DHCP. Then a single thread repeats:
@@ -142,14 +149,14 @@ and starts DHCP. Then a single thread repeats:
 
 | Property | Value |
 |---|---|
-| TCP buffers | 64 KiB receive + 64 KiB send per connection |
+| TCP buffers | default 64 KiB receive + 64 KiB send per connection; a program may choose 4 KiB to 16 MiB (`Buffers`, like `SO_RCVBUF`) |
 | TCP keep-alive | after 60 s of inactivity, an unresponsive connection is dropped after 120 s |
 | connect without a limit | gives up after 75 s (`TIMED_OUT`) |
 | closing a connection | FIN, cleanup when finished or after 30 s at the latest |
-| listen backlog | 1 to 8 connections |
+| listen backlog | 1 to 4096 connections (like `SOMAXCONN`); 16 concurrent handshakes between two rounds of the service |
 | ephemeral ports | 49152 to 65535, random start |
-| UDP datagram | at most 8 KiB; queue of 32 datagrams / 64 KiB |
-| DNS | A (and AAAA) query, retry after 1 s alternating servers, at most 30 s |
+| UDP datagram | at most 65,507 B (the largest IPv4 datagram payload; IPv4 fragmentation and reassembly) and at most the socket queue size (default 64 KiB) |
+| DNS | A (and AAAA) query with EDNS0 (1232 B), a truncated reply over TCP, retry after 1 s alternating servers, at most 30 s |
 
 **DHCP** sets the address, the default gateway and the DNS servers. Losing
 the lease removes the address and connections then get `UNREACHABLE`.
@@ -168,9 +175,20 @@ Linux slirp sends an RST (`CONNECTION_REFUSED`). The test checks
 whichever behaviour applies on the host (`refuses` in `net-test`).
 
 **Number of sockets:** thanks to the port the cost of waiting does not
-depend on the number of channels. There can be up to 16,384 sessions and
-sockets at once (protecting the service's memory); more get
-`NO_RESOURCES`. A test opens 200 sockets at once.
+depend on the number of channels. There is no fixed count: every socket
+(and session) is charged to the **budget of its session** (number of
+sockets and buffer bytes, see [Permissions](#permissions)). The root
+session gets 3/4 of the user memory the service job may still get (the
+limit from the `netd.manifest.toml` manifest). Channels and port
+registrations are guarded by the kernel budget of the job. A test opens
+200 sockets at once.
+
+> **Change from the second version:** the fixed limits of the service were
+> 16,384 objects, a listen backlog of 8, an 8 KiB datagram, 64 KiB buffers
+> for everybody, 256 remembered names per session and DNS only over UDP
+> with 512 B. A large server would hit them, and they did not protect the
+> service memory sensibly. Session and job budgets and the limits given by
+> the protocols apply now.
 
 > **Change from the first version:** the service waited with a single
 > `OBJECT_WAIT_MANY` (at most 64 objects), so there could be at most 63
@@ -208,6 +226,7 @@ change them.
 | `PING` | 5 | ICMP echo |
 | `RESTRICT` | 6 | creating narrower sessions for other programs |
 | `CONFIGURE` | 7 | interface configuration (DNS servers for now) |
+| `AUDIT` | 8 | firewall audit and traffic per application (`audit`, `stats`) |
 
 `rights::CLIENT` = `INFO | TCP_CONNECT | UDP | RESOLVE` is an ordinary
 client.
@@ -238,10 +257,25 @@ means unrestricted:
 
 **A host-name rule** applies to addresses the session got for that name
 from the **system** resolver (DHCP servers or the ones set with
-`SET_DNS`). The service remembers the resolution (at most 256 entries per
-session). A reply from a server the program chose itself (`resolve_with`
+`SET_DNS`). The service remembers the resolution with a validity from the
+TTL (at least 5 minutes, because a program connects some time after the
+resolution and a short CDN TTL would break it; at most a day). A session
+holds at most 4096 entries: expired ones drop out first, then the
+oldest. A reply from a server the program chose itself (`resolve_with`
 with a server) does not count. Otherwise a program could "resolve" an
 allowed name to any address.
+
+**The session budget** (`Quota`): at most this many sockets and buffer
+bytes. Every socket (connection, listener, UDP socket, pending DNS query
+and ping) and every sub-session (2 KiB) is charged to the budget of the
+session and all its parents, just like kernel jobs. Exceeding it =
+`NO_RESOURCES`.
+
+**Application identity and asking:** a narrowing (`RESTRICT`) can carry an
+application identity (from the manifest) and the `ask` flag. The user
+then decides about a target outside the rules of such a layer through the
+firewall (see [Asking the user](firewall.md#asking-the-user)). A layer
+without `ask` is a hard boundary.
 
 **A UDP socket** is restricted on receive too: a datagram from a sender
 outside the allowed destinations is dropped. TCP listening is restricted
@@ -305,11 +339,13 @@ fn main(startup: libos::Startup) -> i64 {
 | `Net::udp_bind` | `UDP` + `bind` | `ADDRESS_IN_USE` |
 | `Net::resolve`, `resolve_with` | `RESOLVE` (+ UDP destination for an own server) | `NOT_FOUND`, `TIMED_OUT`, `UNREACHABLE` |
 | `Net::ping` | `PING` + ICMP destination | `TIMED_OUT`, `UNREACHABLE` |
-| `Net::restrict` | `RESTRICT` | `INVALID_ARGS` (invalid rules) |
+| `Net::restrict`, `restrict_with` | `RESTRICT` | `INVALID_ARGS` (invalid rules, `ask` without an identity), `NO_RESOURCES` |
+| `Net::audit`, `stats` | `AUDIT` | |
+| `Net::tcp_connect_with`, `tcp_listen_with`, `udp_bind_with` | as without `_with` | `NO_RESOURCES` (session budget) |
 | `Net::set_dns` | `CONFIGURE` | |
 | `Net::ntp_query` | `UDP` + destination | `TIMED_OUT`, `BAD_STATE` (unsynchronized server) |
 | `TcpStream::read`, `write` | | `CONNECTION_RESET`, `TIMED_OUT` |
-| `UdpSocket::send_to` | destination | `OUT_OF_RANGE` (over 8 KiB) |
+| `UdpSocket::send_to` | destination | `OUT_OF_RANGE` (over 65,507 B or over the socket queue) |
 
 A missing right or a destination outside the restrictions returns
 `ACCESS_DENIED`. The new error codes are described in
@@ -339,13 +375,15 @@ wait, `u64::MAX` = no limit.
 |---|---|---|
 | session | `INFO` (1) | → Info |
 | session | `WAIT_CONFIGURED` (2) | timeout → Info |
-| session | `TCP_CONNECT` (3) | destination, timeout → local address + connection channel |
-| session | `TCP_LISTEN` (4) | port u16, backlog u16 → local address + listener channel |
-| session | `UDP_BIND` (5) | port u16 → local address + socket channel |
+| session | `TCP_CONNECT` (3) | destination, timeout, Buffers → local address + connection channel |
+| session | `TCP_LISTEN` (4) | port u16, backlog u16, Buffers → local address + listener channel |
+| session | `UDP_BIND` (5) | port u16, Buffers → local address + socket channel |
 | session | `RESOLVE` (6) | name, family u8 (0/4/6), has server u8 [server], timeout → count u16, addresses, TTL u32 |
 | session | `PING` (7) | address, sequence u16, length u16, timeout → round trip ns u64 |
-| session | `RESTRICT` (8) | rights u32, Policy → session channel |
+| session | `RESTRICT` (8) | Restriction → session channel |
 | session | `SET_DNS` (9) | count u8, servers → () |
+| session | `AUDIT` (10) | from u64, max u16 → next u64, count u16, records |
+| session | `STATS` (11) | → profile, count u16, traffic per application |
 | connection | `SEND` (20) | timeout, data → accepted u32 |
 | connection | `RECV` (21) | max u32, timeout → data (empty = end of stream) |
 | connection | `SHUTDOWN` (22) | → () (FIN, reading continues) |
@@ -358,6 +396,13 @@ wait, `u64::MAX` = no limit.
 **Info:** MAC (6 B), MTU u16, flags u8 (bit 0 link, bit 1 configured),
 has address u8 [address, prefix u8], has gateway u8 [gateway], DNS count
 u8 [addresses], session rights u32.
+
+**Buffers:** receive u32, send u32 (0 = default 64 KiB, otherwise 4 KiB
+to 16 MiB).
+
+**Restriction:** rights u32, Policy, flags u8 (bit 0 = `ask`),
+application (string, at most 128 characters `a-z A-Z 0-9 . - _`), sockets
+u32, bytes u64 (`u32::MAX` / `u64::MAX` = no limit).
 
 **Policy:** has connect u8 [count u32, rules], has bind u8 [count u32,
 (from u16, to u16)...]. Rule = protocols u8, target kind u8 (0 any,
@@ -377,9 +422,16 @@ format in `netproto::dns`, where the test server uses it too.
 - NXDOMAIN = `NOT_FOUND`, another server error = `IO_ERROR`.
 - An address instead of a name (`"10.0.2.2"`) is returned at once without
   a query.
+- **EDNS0:** the query offers a reply of up to 1232 B over UDP (DNS Flag
+  Day 2020: it fits one packet even over IPv6 with an MTU of 1280,
+  without fragmentation).
+- **A truncated reply** (the TC bit): the resolver asks over TCP on the
+  same server and port (RFC 7766, a message with a u16 length). For an
+  own server it is enough that the session may send UDP to the server.
+- **Blocked domains** of the firewall return `ACCESS_DENIED` without a
+  query (see [DNS filter](firewall.md#dns-filter)).
 
-TODO: a cache by TTL, a TCP query for truncated replies, DoT/DoH (with
-TLS).
+TODO: a cache by TTL, DoT/DoH (with TLS).
 
 ## NTP and the clock
 
@@ -461,11 +513,13 @@ host's 127.0.0.1.
 | DHCP | address 10.0.2.15/24, gateway 10.0.2.2, DNS 10.0.2.3, MTU, link |
 | ping | ICMP echo to the gateway (slirp answers itself), IPv6 = `UNREACHABLE` |
 | DNS | a query through slirp to the host server: A, A+AAAA, NXDOMAIN, invalid name, address instead of a name |
+| DNS large reply | 100 addresses (more than 512 B), a reply truncated over UDP → query over TCP |
 | TCP echo | 256 KiB there and back, local and remote address, `shutdown_write` and end of stream |
 | TCP refusal | closed port = `CONNECTION_REFUSED` (on Windows `TIMED_OUT`, see above), port 0 = `INVALID_ARGS` |
 | TCP reset | the host closes the connection with unread data (RST): read and write = `CONNECTION_RESET` |
 | TCP listening | the host connects through `hostfwd`, `ADDRESS_IN_USE`, `accept` timeout |
 | UDP echo | datagrams there and back, ephemeral port, timeout |
+| UDP large datagram | 60,000 B there and back (IPv4 fragmentation and reassembly) |
 | permissions | missing rights, destinations outside restrictions, handing a connection to another channel |
 | host name | the `*.magnumopus` rule applies after a system resolution, not after one by an own server |
 | NTP | a query to the host server, setting through `timed`, time source `SET` |
@@ -476,7 +530,8 @@ servers (`cargo xtask run`) the tests that need them are skipped. The log
 then shows `[preskoceno] sit: ...` ("skipped").
 
 The host also tests the formats and permissions: `cargo test -p netproto
---features std` (part of `cargo xtask test`).
+--features std` (part of `cargo xtask test`). The firewall tests are
+described in [firewall.md](firewall.md#tests).
 
 ## Plan
 

@@ -21,7 +21,7 @@ is documented in this file and in the Czech version.
 | -3 | `WRONG_TYPE` | object has a different type |
 | -4 | `TIMED_OUT` | wait deadline expired |
 | -5 | `NO_MEMORY` | out of memory |
-| -6 | `NO_RESOURCES` | a limit was exhausted |
+| -6 | `NO_RESOURCES` | job budget or a limit exhausted |
 | -7 | `INVALID_ARGS` | invalid argument |
 | -8 | `NOT_FOUND` | the requested thing does not exist |
 | -9 | `NOT_SUPPORTED` | operation not supported |
@@ -110,15 +110,19 @@ Repeated occurrences mean a leak or too little RAM.
 
 ### `NO_RESOURCES` (-6)
 
-**Meaning:** a limit other than memory was exhausted.
+**Meaning:** the job budget is exhausted (kernel or user memory, see
+[Jobs](syscalls.md#jobs-resource-budgets)), the network session budget
+(sockets, buffers), or a structural limit.
 
-**When:** the process handle table is full (max 1,048,575 handles), a
-channel queue is full (`CHANNEL_MAX_QUEUED` = 1024 messages; writes then
-return `SHOULD_WAIT`), no free virtual address range for `VM_MAP` without
-`MAP_FIXED`.
+**When:** an object, handle, port registration, queued message, mapping,
+thread or memory object would exceed the budget of the process job or of
+an ancestor; a socket would exceed the network session budget; the handle
+table is full (max 1,048,575 handles); no free virtual address range for
+`VM_MAP` without `MAP_FIXED`.
 
-**What to do:** close unneeded handles, drain channel messages, map smaller
-ranges.
+**What to do:** release what the process holds (handles, memory objects,
+sockets). When the budget is not enough, whoever created the job or the
+session enlarges it (application manifest, `JOB_SET_LIMIT`).
 
 ### `INVALID_ARGS` (-7)
 

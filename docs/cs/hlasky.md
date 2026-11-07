@@ -155,3 +155,19 @@ porušený vnitřní předpoklad (chyba jádra).
 | `netd: chybi handly ve startovni zprave` | Chybný start služby (kód 1). |
 | `init: sluzbu site nelze spustit: ...` | Chybí síťová karta (`NOT_FOUND`) nebo služba neodpověděla. |
 | `init: hodiny serizeny podle NTP ...` | Čas ze serveru NTP předala služba času do hodin; posun = o kolik hodiny šly špatně. |
+| `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` nepředal kanál k `fwd`. Platí veřejný profil (nic dovnitř), dotazy aplikací s `ask` se rovnou odmítnou. |
+| `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` skončil. Platí poslední konfigurace, rozpracované a další dotazy se odmítnou. |
+| `netd: profil site P` | `fwd` poslal konfiguraci s jiným profilem sítě (`public`, `home`, ...). Viz [Profily sítí](firewall.md#profily-sítí). |
+| `netd: neplatna konfigurace firewallu: ...` | Zpráva `CONFIG` od `fwd` nejde přečíst; platí předchozí konfigurace. |
+| `fwd: bezim (agent ano\|ne, ukladani na FS\|jen v pameti)` | Služba firewallu běží. „jen v paměti“ = bez relace FS, rozhodnutí se po restartu ztratí. |
+| `fwd: vychozi konfigurace ulozena do /config/firewall.toml` | První start: na FS ještě konfigurace nebyla. |
+| `fwd: ... je neplatna (...), pouzivam vychozi` | Soubor na FS nejde přečíst nebo je neplatný (číslo řádku v popisu). Opravit soubor, `fwd` ho při dalším startu převezme. |
+| `fwd: sit M (brana G), profil P (neznama sit)` | `netd` ohlásil síť (MAC brány). Neznámá síť dostane `unknown_network` a agent dostane dotaz. |
+| `fwd: A povolit\|zakazat vzdy: cil` | Uživatel trvale rozhodl; pravidlo je v konfiguraci. |
+| `fwd: dotaz N (A) vyprsel` | Agent neodpověděl do `ask_timeout`; platí `ask_default`. |
+| `fwd: agent uzivatele skoncil, dotazy maji vychozi odpoved` | Kanál agenta je zavřený; další dotazy dostanou `ask_default`. |
+| `fwd: konfiguraci nejde ulozit: ...` | Zápis na FS selhal; konfigurace platí v paměti. |
+| `init: P (aplikace) v jobu: pamet ..., pamet jadra ...` | Program běží v jobu s limity ze svého manifestu. |
+| `init: manifest P: ...` | Manifest programu je neplatný (popis chyby); program se nespustí. |
+| `init: firewall bez FS (konfigurace se neulozi): ...` | Pro `fwd` nejde připravit relaci FS (chybí FS nebo práva). |
+| `init: sluzbu firewallu nelze spustit: ...` | `fwd` nenaběhl; `netd` uvidí zavřený kanál a dotazy odmítá. |

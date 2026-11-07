@@ -41,8 +41,9 @@ const F_ACCESS_PLATFORM: u64 = 1 << 33;
 const HDR: usize = 12;
 /// Velikost jednoho bufferu (hlavicka + ramec 1514 B, zaokrouhleno).
 const BUF: u64 = 2048;
-/// Nejvic bufferu v kazde fronte.
-const QUEUE_MAX: u16 = 64;
+/// Nejvic bufferu v kazde fronte (QEMU nabizi 256; vic zarizeni nabidne
+/// i 1024 - pak by DMA presahla kvotu ovladace od devmgr, 2 MiB).
+const QUEUE_MAX: u16 = 256;
 
 const RX_QUEUE: u16 = 0;
 const TX_QUEUE: u16 = 1;

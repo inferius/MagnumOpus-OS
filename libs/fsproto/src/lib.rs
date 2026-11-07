@@ -233,6 +233,11 @@ impl FsClient {
         Self { channel }
     }
 
+    /// Kanal relace (napr. pro predani relace jinemu procesu).
+    pub fn into_channel(self) -> Channel {
+        self.channel
+    }
+
     /// Posle pozadavek, vrati telo odpovedi.
     fn call(&self, req: Writer) -> Result<Vec<u8>> {
         self.call_with_handles(req).map(|(b, _)| b)

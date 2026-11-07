@@ -10,6 +10,7 @@
 | [hlasky.md](cs/hlasky.md) | [messages.md](en/messages.md) | hlášky v logu a co znamenají / log messages and their meaning |
 | [cas.md](cs/cas.md) | [time.md](en/time.md) | reálný čas: zdroje (UEFI, RTC), formát, pásmo / real time: sources (UEFI, RTC), format, zone |
 | [sit.md](cs/sit.md) | [network.md](en/network.md) | síť: virtio-net, služba netd, TCP/IP, DNS, NTP, oprávnění, API / network: virtio-net, netd service, TCP/IP, DNS, NTP, permissions, API |
+| [firewall.md](cs/firewall.md) | [firewall.md](en/firewall.md) | firewall: manifest aplikace, dotazy uživateli, paketový filtr, profily sítí, audit, filtr DNS / firewall: application manifest, asking the user, packet filter, network profiles, audit, DNS filter |
 | [libos.md](cs/libos.md) | [libos.md](en/libos.md) | knihovna pro programy / program library |
 | [souborovy-system.md](cs/souborovy-system.md) | [file-system.md](en/file-system.md) | souborový systém: formát, algoritmy, služba fsd, protokol / file system: format, algorithms, fsd service, protocol |
 | [osfs.md](cs/osfs.md) | [osfs.md](en/osfs.md) | nástroj osfs: obraz FS, kontrola, připojení ve Windows / osfs tool: FS image, check, mounting on Windows |
