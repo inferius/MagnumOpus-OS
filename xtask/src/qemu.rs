@@ -226,7 +226,8 @@ fn run_interactive(mut cmd: Command) -> Result<()> {
 }
 
 fn run_test(mut cmd: Command, opts: &Options) -> Result<()> {
-    let timeout = opts.arch.test_timeout;
+    // Opakovany beh (--repeat): kazde dalsi kolo az 60 s navic.
+    let timeout = opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1);
     let mut child = cmd.spawn()?;
     let start = Instant::now();
     let status = loop {

@@ -24,6 +24,7 @@ mod usb;
 mod web;
 
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use libos::{Startup, println};
 
@@ -62,20 +63,58 @@ fn net_service() -> Option<&'static crate::system::NetService> {
     crate::system::NET.get()
 }
 
+/// Vyber testu z initfs `test-filter` (`cargo xtask test --only ...
+/// --repeat N`): `suites = sit,firewall` (jmena sad, prazdne = vse),
+/// `repeat = N` (kolikrat vybrane sady pustit; hledani nestabilnich testu).
+fn filter(startup: &Startup) -> (Vec<String>, usize) {
+    let Some(text) = libos::initfs::Initfs::open(startup)
+        .ok()
+        .and_then(|fs| fs.find("test-filter").map(|d| String::from_utf8_lossy(d).into_owned()))
+    else {
+        return (Vec::new(), 1);
+    };
+    let mut suites = Vec::new();
+    let mut repeat = 1;
+    for line in text.lines() {
+        match line.split_once('=') {
+            Some((k, v)) if k.trim() == "suites" => {
+                suites = v.split(',').map(|s| String::from(s.trim())).filter(|s| !s.is_empty()).collect();
+            }
+            Some((k, v)) if k.trim() == "repeat" => repeat = v.trim().parse().unwrap_or(1).clamp(1, 1000),
+            _ => {}
+        }
+    }
+    (suites, repeat)
+}
+
 /// Spusti vsechny testy, vraci pocet selhanych.
 pub fn run_all(startup: &Startup) -> usize {
+    let (only, repeat) = filter(startup);
     let mut failed = 0;
     let mut passed = 0;
-    for (suite, tests) in SUITES {
-        for (name, test) in *tests {
-            match test(startup) {
-                Ok(()) => {
-                    println!("[ok] {suite}: {name}");
-                    passed += 1;
+    for round in 1..=repeat {
+        if repeat > 1 {
+            println!("--- kolo {round}/{repeat} ---");
+        }
+        for (suite, tests) in SUITES {
+            if !only.is_empty() && !only.iter().any(|s| s == suite) {
+                continue;
+            }
+            for (name, test) in *tests {
+                let start = libos::time::now();
+                match test(startup) {
+                    Ok(()) => {
+                        println!("[ok] {suite}: {name}");
+                        passed += 1;
+                    }
+                    Err(e) => {
+                        println!("[SELHAL] {suite}: {name}: {e}");
+                        failed += 1;
+                    }
                 }
-                Err(e) => {
-                    println!("[SELHAL] {suite}: {name}: {e}");
-                    failed += 1;
+                let ms = (libos::time::now() - start) / 1_000_000;
+                if ms > 20_000 {
+                    println!("[pomaly] {suite}: {name}: {ms} ms");
                 }
             }
         }

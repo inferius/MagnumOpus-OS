@@ -302,6 +302,16 @@ let app_net = root.restrict(rights::INFO | rights::TCP_CONNECT | rights::RESOLVE
 The client library is in `netproto` (feature `client`). All methods
 block. A `None` timeout means no limit.
 
+**Client safeguard:** `netd` enforces operation limits, and the client has
+its own as well: the operation limit + 10 s, 30 s for operations without a
+limit (status, session, socket), plus 300 s for operations that may wait for
+a firewall question (connect, datagram to a new target, ping, resolution by
+an own server). When `netd` does not answer, the program gets `TIMED_OUT`
+and the log shows `netproto: sluzba site neodpovedela na pozadavek <op> do
+N s` ("the network service did not answer request <op> within N s"). The
+channel is then unusable (`BAD_STATE`): a late answer would belong to
+another request.
+
 ```rust
 use core::time::Duration;
 use netproto::io::{Read, Write};

@@ -303,6 +303,9 @@ pub(super) fn tcp_accept(s: &Startup) -> TestResult {
     };
     let net = net()?;
     configured(net)?;
+    // Prichozi spojeni pusti jen profil home (testy firewallu ho nastavi;
+    // s `--only sit` si ho test zajisti sam).
+    super::firewall::ensure_home()?;
     let listener = net
         .tcp_listen(p.forwarded, 2)
         .map_err(|e| fail("naslouchani", e))?;
@@ -408,17 +411,22 @@ fn many_sockets(s: &Startup) -> TestResult {
     }
     // Posledni i prvni socket funguji (sluzba ceka na vsechny kanaly).
     let mut buf = [0u8; 64];
-    for sock in [socks.last().unwrap(), &socks[0]] {
+    for (which, sock) in [("posledni", socks.last().unwrap()), ("prvni", &socks[0])] {
         let mut ok = false;
-        for _ in 0..3 {
+        let mut last = None;
+        // UDP muze slirp ztratit: 5 pokusu po 2 s.
+        for _ in 0..5 {
             sock.send_to(b"mnoho", host(p.udp_echo)).map_err(|e| fail("send_to", e))?;
-            if let Ok((n, _)) = sock.recv_from(&mut buf, Some(Duration::from_secs(2))) {
-                check_eq!(&buf[..n], b"mnoho", "echo");
-                ok = true;
-                break;
+            match sock.recv_from(&mut buf, Some(Duration::from_secs(2))) {
+                Ok((n, _)) => {
+                    check_eq!(&buf[..n], b"mnoho", "echo");
+                    ok = true;
+                    break;
+                }
+                Err(e) => last = Some(e),
             }
         }
-        check!(ok, "UDP echo z jednoho z 200 socketu");
+        check!(ok, format!("UDP echo z {which} z 200 socketu: {last:?}"));
     }
     drop(socks);
     // Po zavreni jdou sockety otevrit znovu (sloty a porty se uvolnily).

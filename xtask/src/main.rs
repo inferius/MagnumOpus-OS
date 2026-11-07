@@ -54,6 +54,9 @@ prepinace:
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
                    none; aarch64 smmu (vychozi), none
+  --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
+                   carkou, napr. sit,firewall; jmena jako v logu)
+  --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
@@ -78,6 +81,9 @@ pub struct Options {
     test: bool,
     /// Dalsi soubory do initfs (konfigurace testu site).
     extra_initfs: Vec<(String, Vec<u8>)>,
+    /// `--only` (sady testu userspace) a `--repeat` (kolikrat).
+    test_only: String,
+    test_repeat: u32,
     /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
     hostfwd: Option<String>,
     /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
@@ -112,6 +118,8 @@ fn run_cli() -> Result<()> {
         arch: &arch::X86_64,
         test: false,
         extra_initfs: Vec::new(),
+        test_only: String::new(),
+        test_repeat: 1,
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
     };
@@ -126,6 +134,14 @@ fn run_cli() -> Result<()> {
                 let value = args.next().ok_or("--arch ocekava x86_64 nebo aarch64")?;
                 opts.arch = arch::by_name(&value.to_string_lossy())
                     .ok_or("--arch ocekava x86_64 nebo aarch64")?;
+            }
+            Some("--only") => {
+                let value = args.next().ok_or("--only ocekava jmena sad oddelena carkou")?;
+                opts.test_only = value.to_string_lossy().into_owned();
+            }
+            Some("--repeat") => {
+                let value = args.next().ok_or("--repeat ocekava pocet")?;
+                opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
@@ -176,6 +192,12 @@ fn run_cli() -> Result<()> {
             let web = webhelper::start()?;
             let config = format!("{}{}", helper.config, web.config);
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
+            if !opts.test_only.is_empty() || opts.test_repeat > 1 {
+                let filter = format!("suites = {}
+repeat = {}
+", opts.test_only, opts.test_repeat);
+                opts.extra_initfs.push((String::from("test-filter"), filter.into_bytes()));
+            }
             opts.extra_initfs
                 .push((String::from("net-test-ca.pem"), web.ca_pem.into_bytes()));
             opts.extra_initfs

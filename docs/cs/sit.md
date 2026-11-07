@@ -287,6 +287,14 @@ let app_net = root.restrict(rights::INFO | rights::TCP_CONNECT | rights::RESOLVE
 Klientská knihovna je v `netproto` (feature `client`). Všechny metody
 blokují. Timeout `None` znamená bez limitu.
 
+**Pojistka v klientovi:** limity operací hlídá `netd`, klient má navíc
+vlastní: limit operace + 10 s, operace bez limitu (stav, relace, socket)
+30 s, operace s možným dotazem firewallu (spojení, datagram na nový cíl,
+ping, překlad vlastním serverem) navíc 300 s. Když `netd` neodpoví,
+program dostane `TIMED_OUT` a v logu je `netproto: sluzba site
+neodpovedela na pozadavek <op> do N s`. Kanál pak už nejde použít
+(`BAD_STATE`): pozdní odpověď by patřila jinému požadavku.
+
 ```rust
 use core::time::Duration;
 use netproto::io::{Read, Write};

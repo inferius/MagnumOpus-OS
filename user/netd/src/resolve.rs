@@ -87,6 +87,12 @@ pub struct ResolveReq {
 
 impl Resolve {
     pub fn wake_at(&self) -> u64 {
+        // Pres TCP se neopakuje (posun ridi pakety spojeni): jen termin.
+        // Driv tu byl i propadly cas opakovani UDP a sluzba se do terminu
+        // tocila naprazdno.
+        if self.tcp.is_some() {
+            return self.deadline;
+        }
         self.next_retry.min(self.deadline)
     }
 

@@ -216,6 +216,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | `revocd: OneCRL: neplatny dokument` | Stažený JSON nejde přečíst; platí předchozí seznam, nový pokus za `retry_minutes`. |
 | `revocd: <url>: ...` | Stažení CRL nebo OneCRL selhalo (stav HTTP, chyba spojení); adresa se `retry_minutes` nezkouší, stav odvolání je zatím neznámý. |
 | `revocd: <url>: neni CRL` | Server vrátil něco jiného než CRL. |
+| `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` požadavek nedokončil ani po limitu + rezervě (chyba nebo zaseknutí služby). Program dostal `TIMED_OUT`, kanál už nejde použít. OP = kód operace (`netproto::op`). |
 | `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | Systémový resolver běží. |
 | `dnsd: <resolver>: ...` | Resolver neodpověděl (spojení, TLS, HTTP); `dnsd` zkusí další. |
 | `dnsd: <jméno>: DNSSEC neprosel (...)` | Odpověď je podvržená nebo poškozená (důvod v závorce); program dostane `CORRUPTED`. |

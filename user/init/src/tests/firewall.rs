@@ -214,6 +214,10 @@ fn need_ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
 }
 
 fn classify_network(_: &Startup) -> TestResult {
+    classify()
+}
+
+fn classify() -> TestResult {
     let a = agent()?;
     let root = net()?;
     configured(root)?;
@@ -247,6 +251,17 @@ fn classify_network(_: &Startup) -> TestResult {
         libos::time::sleep(Duration::from_millis(20));
     }
     Err(String::from("profil se neprepnul na home"))
+}
+
+/// Sit v profilu `home` (prichozi spojeni na naslouchajici porty). Pro
+/// testy site spustene bez sady firewallu (`--only sit`): odpovi na dotaz
+/// agenta na neznamou sit, kdyz jeste nebyl.
+pub(super) fn ensure_home() -> TestResult {
+    let root = net()?;
+    if root.stats().map_err(|e| fail("STATS", e))?.0 == "home" {
+        return Ok(());
+    }
+    classify()
 }
 
 fn probe_started(s: &Startup) -> TestResult {
