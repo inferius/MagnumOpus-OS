@@ -185,6 +185,7 @@ značkou:
 |---|---|
 | `IDEV` | verze u16 (1), schopnosti u16 (`KEYBOARD` 1, `POINTER` 2), jméno UTF-8 (nejvýš 128 B) |
 | `IEVT` | události po 8 B: typ u16, kód u16, hodnota i32 (nejvýš 1024 v jedné zprávě) |
+| `IAXS` | rozsahy absolutních os po 12 B: kód u16, rezerva u16, min i32, max i32 (zdroj se schopností `ABSOLUTE` 4, po představení) |
 
 Události mají tvar evdev a kódy se berou z Linuxu (`inputproto::code`):
 
@@ -252,6 +253,7 @@ Jedna zpráva je jeden snímek a skládá se ze záznamů po 32 B:
 | 9 `LAYOUT` | `Layout(id)` | 0 `us`, 1 `cz` | | | |
 | 10 `DROPPED` | `Dropped { messages }` | počet zpráv, které klientovi neprošly | | | |
 | 11 `NEW_DEVICE` | `NewDevice { source, state }` | id zdroje | 0 čeká, 1 ověřena, 2 odmítnuta | | |
+| 12 `ABSOLUTE` | `Absolute { x, y }` | x 0-65535 | y 0-65535 (podíl rozsahu osy zařízení) | | |
 
 - `flags`: `SYNTHETIC` (1) = událost pochází z umělého vstupu.
 - `mods`: modifikátory po události. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -451,7 +453,8 @@ ověří, že jeho události přišly ze zdrojů virtio.
   Plný parser reportů (multimédia, tablety) přijde ve fázi 4.
 - **PS/2 bez hotplugu:** klávesnice nebo myš připojená za běhu se
   nenajde. Kontrolky klávesnice zatím nesvítí.
-- **Tablet a dotyk** (`EV_ABS`) zatím ne.
+- **Tablet a pero** (`EV_ABS`) jen s jedním bodem. Dotyk více prsty zatím
+  ne.
 - **Kontrolky** Caps Lock a Num Lock nesvítí (fronta stavu virtio-input).
 - **Fokus má jeden vlastník.** Rozdělení oknům udělá kompozitor (6c).
 - **Metody zadávání** (Unicode vstup, IME) zatím ne. Budou posílat `Text`.

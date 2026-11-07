@@ -19,8 +19,10 @@ extern crate alloc;
 
 pub mod desc;
 pub mod hid;
+pub mod hid_report;
 pub mod hub;
 pub mod msg;
+pub mod report;
 
 /// Rychlost zarizeni.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,5 +76,7 @@ impl Speed {
     }
 }
 
+#[cfg(test)]
+mod report_tests;
 #[cfg(test)]
 mod tests;

@@ -26,6 +26,7 @@ pub const TESTS: &[Test] = &[
     ("nova klavesnice ceka na overeni (BadUSB)", verify_new_keyboard),
     ("nova mys ceka na overeni (BadUSB)", verify_new_mouse),
     ("externi hub: klavesnice za hubem", external_hub),
+    ("tablet USB: absolutni poloha (report protokol)", tablet),
 ];
 
 // Znacky (musi sedet s `xtask/src/qmp.rs`).
@@ -44,6 +45,9 @@ pub const MARKER_MOUSE2_UNPLUG: &str = "init: test usb: odpoj druhou mys";
 pub const MARKER_HUB_PLUG: &str = "init: test usb: pripoj hub";
 pub const MARKER_HUB_KEYS: &str = "init: test usb: klavesy za hubem";
 pub const MARKER_HUB_UNPLUG: &str = "init: test usb: odpoj hub";
+pub const MARKER_TABLET_PLUG: &str = "init: test usb: pripoj tablet";
+pub const MARKER_TABLET_MOVE: &str = "init: test usb: poloha tabletu";
+pub const MARKER_TABLET_UNPLUG: &str = "init: test usb: odpoj tablet";
 
 /// Jmeno klavesnice QEMU usb-kbd (vyrobce 0627, vyrobek 0001).
 const USB_KBD: &str = "USB klavesnice 0627:0001";
@@ -308,5 +312,40 @@ fn external_hub(_: &Startup) -> TestResult {
     .map_err(|e| failr("klavesa za hubem", e))?;
     // Odpojeni hubu odpoji i klavesnici za nim.
     println!("{MARKER_HUB_UNPLUG}");
+    wait_gone(inp, id)
+}
+
+fn tablet(_: &Startup) -> TestResult {
+    let inp = input()?;
+    let old = ids(inp)?;
+    println!("{MARKER_TABLET_PLUG}");
+    let (id, _) = wait_new_source(inp, "USB tablet 0627:0001", &old)?;
+    drain(&inp.focus);
+    println!("{MARKER_TABLET_MOVE}");
+    // xtask: absolutni x = 0x4000, y = 0x2000 (rozsah 0..0x7FFF), leve
+    // tlacitko - na konzoli video1, kam je tablet navazany.
+    let press = Event::Button {
+        button: Button::Left,
+        action: Action::Press,
+    };
+    let got = read_until(&inp.focus, deadline(TIMEOUT), |r| {
+        r.iter().any(|x| x.source == id && x.event == press)
+            && r.iter().any(|x| x.source == id && matches!(x.event, Event::Absolute { .. }))
+    })
+    .map_err(|e| failr("udalosti tabletu", e))?;
+    let last = got
+        .iter()
+        .rev()
+        .find_map(|r| match r.event {
+            Event::Absolute { x, y } if r.source == id => Some((x, y)),
+            _ => None,
+        })
+        .ok_or("chybi absolutni poloha")?;
+    // 0x4000 / 0x7FFF z 65535 = 32769, 0x2000 / 0x7FFF = 16384.
+    check!(
+        last.0.abs_diff(32769) <= 2 && last.1.abs_diff(16384) <= 2,
+        alloc::format!("poloha tabletu {last:?}, ocekavano asi (32769, 16384)")
+    );
+    println!("{MARKER_TABLET_UNPLUG}");
     wait_gone(inp, id)
 }

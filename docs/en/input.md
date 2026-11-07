@@ -201,6 +201,7 @@ that start with a tag:
 |---|---|
 | `IDEV` | version u16 (1), capabilities u16 (`KEYBOARD` 1, `POINTER` 2), UTF-8 name (at most 128 B) |
 | `IEVT` | 8-byte events: type u16, code u16, value i32 (at most 1024 per message) |
+| `IAXS` | 12-byte absolute axis ranges: code u16, reserved u16, min i32, max i32 (a source with the `ABSOLUTE` capability 4, after the greeting) |
 
 Events use the evdev format, and the codes come from Linux
 (`inputproto::code`):
@@ -269,6 +270,7 @@ One message is one frame, made of 32-byte records:
 | 9 `LAYOUT` | `Layout(id)` | 0 `us`, 1 `cz` | | | |
 | 10 `DROPPED` | `Dropped { messages }` | number of messages the client missed | | | |
 | 11 `NEW_DEVICE` | `NewDevice { source, state }` | source id | 0 pending, 1 trusted, 2 rejected | | |
+| 12 `ABSOLUTE` | `Absolute { x, y }` | x 0-65535 | y 0-65535 (fraction of the device's axis range) | | |
 
 - `flags`: `SYNTHETIC` (1) means the event comes from synthetic input.
 - `mods`: modifiers after the event. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -482,7 +484,8 @@ from the virtio sources.
   phase 4.
 - **PS/2 without hotplug:** a keyboard or mouse plugged in at run time is
   not found. The keyboard LEDs stay off for now.
-- **Tablets and touch** (`EV_ABS`) are not supported yet.
+- **Tablets and pens** (`EV_ABS`) with a single point only. No multi-touch
+  yet.
 - **The Caps Lock and Num Lock LEDs** stay off (virtio-input status
   queue).
 - **Focus has a single owner.** The compositor (6c) will split it between

@@ -300,7 +300,7 @@ impl Service {
             // Klavesnice nebo mys pripojena za behu muze byt podvrzena
             // (BadUSB: pise prikazy, klika do dialogu): s volbou overeni jde
             // jeji vstup jen systemu, dokud ji neoveri.
-            let input = s.caps & (caps::KEYBOARD | caps::POINTER) != 0;
+            let input = s.caps & (caps::KEYBOARD | caps::POINTER | caps::ABSOLUTE) != 0;
             if !s.synthetic && input && self.settled && self.verify_new {
                 s.trust = DeviceTrust::Pending;
                 let id = s.id;
@@ -309,8 +309,13 @@ impl Service {
             }
             return;
         }
-        let DeviceMessage::Events(events) = msg else {
-            return;
+        let events = match msg {
+            DeviceMessage::Events(e) => e,
+            DeviceMessage::Axes(a) => {
+                self.sources[index].set_axes(&a);
+                return;
+            }
+            DeviceMessage::Hello { .. } => return,
         };
         let now = time::now();
         let layout = self.layout();
@@ -424,7 +429,10 @@ impl Service {
         for r in out.iter_mut() {
             if matches!(
                 r.event,
-                Event::Motion { .. } | Event::Button { .. } | Event::Scroll { .. }
+                Event::Motion { .. }
+                    | Event::Absolute { .. }
+                    | Event::Button { .. }
+                    | Event::Scroll { .. }
             ) {
                 r.mods |= all;
             }

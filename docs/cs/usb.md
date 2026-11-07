@@ -120,26 +120,63 @@ usb.control(hid::set_boot_protocol(info.interface), &[])?;
 let report = usb.call(op::INTERRUPT_IN, 0x81, 8, &[], None)?;
 ```
 
-## HID: klávesnice a myš (boot protokol)
+## HID: klávesnice, myš, tablet, multimediální klávesy
 
-`usb-hid` přepne rozhraní do boot protokolu (`SET_PROTOCOL(0)`) a vypne
-opakování reportů (`SET_IDLE(0)`, klávesy opakuje služba vstupu). Pak čte
-interrupt endpoint. STALL u těchto požadavků nevadí, protože zařízení boot
-protokol už používá.
+`usb-hid` nejdřív přečte **deskriptor reportu** rozhraní
+(`GET_DESCRIPTOR(0x22)`). Když mu rozumí, čte reporty v **report
+protokolu**, který je výchozí po resetu zařízení. Jinak přepne rozhraní do
+**boot protokolu** (`SET_PROTOCOL(0)`), pokud ho rozhraní nabízí. Vždy vypne
+opakování reportů (`SET_IDLE(0)`), protože klávesy opakuje služba vstupu.
+STALL u těchto požadavků nevadí.
 
-- **Klávesnice**, report 8 B: modifikátory (bit 0 levý Ctrl ... bit 7
-  pravá klávesa Windows), rezerva, až 6 stisknutých kláves (HID usage
-  strany 0x07). Události vznikají z rozdílu proti minulému reportu:
-  nejdřív uvolnění, pak stisky. Report „rollover“ (usage 1-3, příliš mnoho
-  kláves) se ignoruje. `MSC_SCAN` = `0x70000 | usage`, takže například
-  `u` má scan kód `0x70018`.
-- **Myš**, report 3-4 B: tlačítka (5), dx, dy (i8, Y kladně dolů jako
-  evdev), kolečko (i8, kladně nahoru).
+**Parser deskriptoru** (`usbproto::report`) projde položky (main, global,
+local; long items přeskočí) a sestaví vstupní pole: id reportu, bitovou
+pozici, velikost a počet prvků, logický rozsah a usage (seznam nebo
+rozsah). Je obranný: nejvýš 256 polí, 1024 usage na pole, 8 kbit na report,
+vnoření kolekcí do 32 a zásobník Push/Pop do 16. Poškozený deskriptor
+vrátí `None` a ovladač zkusí boot protokol.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Report HID na udalosti">
+<defs><marker id="us3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="200" height="70" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">deskriptor reportu</text><text class="m" x="110" y="64" text-anchor="middle">Usage Page, Usage, Report</text><text class="m" x="110" y="80" text-anchor="middle">Size/Count, Input ...</text>
+<rect class="acc" x="270" y="20" width="200" height="70" rx="6"/><text class="t b" x="370" y="45" text-anchor="middle">pole (report::Field)</text><text class="m" x="370" y="64" text-anchor="middle">id, bity, rozsah, usage,</text><text class="m" x="370" y="80" text-anchor="middle">proměnná / pole indexů</text>
+<rect class="ok" x="530" y="20" width="220" height="70" rx="6"/><text class="t b" x="640" y="45" text-anchor="middle">události evdev</text><text class="m" x="640" y="64" text-anchor="middle">EV_KEY, EV_REL, EV_ABS,</text><text class="m" x="640" y="80" text-anchor="middle">MSC_SCAN = usage</text>
+<path class="ln" d="M210 55 L268 55" marker-end="url(#us3)"/><path class="ln" d="M470 55 L528 55" marker-end="url(#us3)"/>
+<rect class="box" x="270" y="120" width="200" height="56" rx="6"/><text class="t b" x="370" y="143" text-anchor="middle">report ze zařízení</text><text class="m" x="370" y="162" text-anchor="middle">bajty (s id reportu)</text>
+<path class="ln" d="M470 148 L560 92" marker-end="url(#us3)"/>
+<text class="m" x="10" y="115">parse()</text><text class="m" x="490" y="140">Decoder::report()</text>
+</svg>
+<figcaption>Deskriptor reportu popisuje bity reportu, dekodér z nich dělá události.</figcaption>
+</figure>
+
+**Význam polí** (`usbproto::hid_report`):
+
+| Strana | Usage | Událost |
+|---|---|---|
+| 0x01 Generic Desktop | X, Y relativní | `REL_X`, `REL_Y` (myš) |
+| 0x01 | X, Y absolutní | `ABS_X`, `ABS_Y` s rozsahem z logického min/max (tablet) |
+| 0x01 | Wheel | `REL_WHEEL` |
+| 0x07 Keyboard | 0x04-0x65, 0xE0-0xE7 | klávesy (proměnná = bitmapa, pole = až N stisknutých) |
+| 0x09 Button | 1-5 (6-15) | `BTN_LEFT` ... `BTN_EXTRA` (`BTN_MISC`+) |
+| 0x0C Consumer | hlasitost, ztlumení, přehrávání, jas, pošta, kalkulačka, hledání; AC Pan | multimediální klávesy; `REL_HWHEEL` |
+| 0x0D Digitizer | Tip Switch, Barrel, In Range | `BTN_TOUCH`, `BTN_STYLUS`, `BTN_TOOL_PEN` |
+
+- Proměnná pole dávají událost při změně, relativní osy při každé nenulové
+  hodnotě.
+- Pole indexů (stisknuté klávesy) se porovnají s minulým reportem: nejdřív
+  uvolnění, pak stisky. Report „rollover“ (usage 1-3) se ignoruje.
+- `MSC_SCAN` = usage (strana << 16 | id), takže `u` má scan kód `0x70018`
+  a hlasitost+ `0xC00E9`.
+- Jeden report je jeden snímek.
+- **Schopnosti** zdroje určí dekodér: `KEYBOARD`, `POINTER`, nebo
+  `ABSOLUTE`. Rozsahy absolutních os ovladač pošle službě zprávou `IAXS`
+  a služba je převede na `Absolute { x, y }` v rozsahu 0-65535.
+- **Boot protokol** (`usbproto::hid`): klávesnice 8 B (modifikátory,
+  rezerva, 6 kláves), myš 3-4 B. Používá se jen tehdy, když rozhraní nemá
+  použitelný deskriptor.
 - **Odpojení:** kanál rozhraní se zavře, ovladač pošle uvolnění všech
   držených kláves a tlačítek a skončí. Služba vstupu pak zdroj odebere.
-
-Převod usage na kódy evdev a rozdíly reportů jsou v knihovně
-`usbproto::hid`, testované na hostiteli.
 
 ## Ověření nového vstupního zařízení (proti BadUSB)
 
@@ -202,8 +239,8 @@ přímo zprávou `trust`.
 
 | Kde | Co |
 |---|---|
-| `cargo test -p usbproto` | deskriptory (konfigurace, alternativní nastavení, poškozené délky), setup pakety, zprávy, hub (deskriptor, stav portu, rychlost), HID boot (rozdíl reportů, rollover, tabulka usage, myš) |
-| `cargo xtask test`, sada `usb` | klávesnice USB ze startu je důvěryhodná; klávesy z QEMU až do služby (zdroj, scan kód HID); hotplug myši (připojení, pohyb, kolečko, odpojení); nová klávesnice a nová myš čekají na ověření (vstup jen na `secure`, po `trust` vlastníkovi fokusu) |
+| `cargo test -p usbproto` | deskriptory (konfigurace, alternativní nastavení, poškozené délky), setup pakety, zprávy, hub (deskriptor, stav portu, rychlost), HID boot (rozdíl reportů, rollover, tabulka usage, myš), parser reportu (deskriptory QEMU klávesnice, myši a tabletu, multimédia s id reportu, hodnoty se znaménkem, poškozené deskriptory) |
+| `cargo xtask test`, sada `usb` | klávesnice USB ze startu je důvěryhodná; klávesy z QEMU až do služby (zdroj, scan kód HID); hotplug myši (připojení, pohyb, kolečko, odpojení); nová klávesnice a nová myš čekají na ověření (vstup jen na `secure`, po `trust` vlastníkovi fokusu); externí hub s klávesnicí za ním; tablet (absolutní poloha přes report protokol) |
 
 V QEMU je `qemu-xhci` s klávesnicí `usb-kbd` navázanou na konzoli druhé
 grafiky (`secondary-vga,id=video1`). Xtask jí přes QMP posílá události
@@ -217,12 +254,16 @@ a brala by si události, které má dostat PS/2.
 |---|---|---|
 | 1 | hotovo | řadič xHCI: převzetí od firmwaru, reset, kontexty, fronty, MSI-X, kořenové porty, kontrolní a interrupt přenosy |
 | 2 | hotovo | HID boot protokol (klávesnice, myš), hotplug, ověření nového vstupního zařízení |
-| 3 | plán | externí huby: v kontextu slotu route string, hub bit, počet portů a TT pro low/full speed za high-speed hubem. Ovladač hubu je hotový a řadič teď na externím hubu `ATTACH` odmítne |
-| 4 | plán | plný parser deskriptoru reportu HID (multimediální klávesy, myši s vysokým rozlišením kolečka, tablety: rozšíření `inputproto` o `EV_ABS`) |
+| 3 | hotovo | externí huby: route string, příznak hubu, počet portů, MTT a TT think time v kontextu slotu, TT pro low/full speed za high-speed hubem; odpojení hubu odpojí i zařízení za ním (nejvýš 5 úrovní hubů) |
+| 4 | hotovo | parser deskriptoru reportu HID: multimediální klávesy, myši s více tlačítky a vodorovným kolečkem, tablety a pera (`EV_ABS`, událost `Absolute`) |
 | 5 | plán | I2C-HID (touchpady notebooků: potřebuje AML a ovladač I2C) |
 
 Další omezení první verze:
 
+- hub USB 3 (deskriptor 0x2A, jiný formát stavu portu) zatím ne, za
+  řadičem USB 3 funguje zařízení USB 3 jen na kořenovém portu,
+- dotyk více prsty (Multi-touch, kolekce Finger) a gesta zatím ne, jen
+  jedno pero nebo jeden bod,
 - bulk a izochronní endpointy zatím ne (disky, zvuk), jeden interrupter,
 - jen stránky 4 KiB, cíl přerušení je bootovací CPU,
 - kontrolky klávesnice USB (`SET_REPORT`) zatím nesvítí,

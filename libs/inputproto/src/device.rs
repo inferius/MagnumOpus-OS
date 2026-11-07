@@ -6,6 +6,7 @@
 //! |---|---|
 //! | `IDEV` | predstaveni: verze u16, schopnosti u16 ([`caps`]), jmeno v UTF-8 |
 //! | `IEVT` | surove udalosti, kazda 8 B: typ u16, kod u16, hodnota i32 |
+//! | `IAXS` | rozsahy absolutnich os, kazdy 12 B: kod u16, rezerva u16, min i32, max i32 |
 //!
 //! Vse little-endian. Udalosti jsou ve tvaru evdev (stejne jako
 //! `virtio_input_event`), skupinu zakoncuje `EV_SYN`/`SYN_REPORT`. Jedna
@@ -19,6 +20,33 @@ pub const VERSION: u16 = 1;
 
 pub const TAG_HELLO: &[u8; 4] = b"IDEV";
 pub const TAG_EVENTS: &[u8; 4] = b"IEVT";
+pub const TAG_AXES: &[u8; 4] = b"IAXS";
+
+/// Nejvic absolutnich os v `IAXS`.
+pub const MAX_AXES: usize = 16;
+
+/// Rozsah absolutni osy (`ABS_X`, `ABS_Y`): hodnoty `EV_ABS` jsou v
+/// `min..=max`, sluzba je prevede na 0..=65535.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisInfo {
+    pub code: u16,
+    pub min: i32,
+    pub max: i32,
+}
+
+/// Zprava `IAXS` (posila zdroj s `caps::ABSOLUTE` po predstaveni).
+pub fn encode_axes(axes: &[AxisInfo]) -> Vec<u8> {
+    let axes = &axes[..axes.len().min(MAX_AXES)];
+    let mut v = Vec::with_capacity(4 + axes.len() * 12);
+    v.extend_from_slice(TAG_AXES);
+    for a in axes {
+        v.extend_from_slice(&a.code.to_le_bytes());
+        v.extend_from_slice(&[0, 0]);
+        v.extend_from_slice(&a.min.to_le_bytes());
+        v.extend_from_slice(&a.max.to_le_bytes());
+    }
+    v
+}
 
 /// Nejvic udalosti v jedne zprave (`IEVT`).
 pub const MAX_EVENTS: usize = 1024;
@@ -31,6 +59,8 @@ pub mod caps {
     pub const KEYBOARD: u16 = 1 << 0;
     /// Ma relativni osy a tlacitka (mys).
     pub const POINTER: u16 = 1 << 1;
+    /// Ma absolutni osy (tablet, dotykova plocha); rozsahy posle `IAXS`.
+    pub const ABSOLUTE: u16 = 1 << 2;
 }
 
 /// Jedna surova udalost (evdev).
@@ -89,6 +119,7 @@ pub enum DeviceMessage<'a> {
         name: &'a str,
     },
     Events(Vec<RawEvent>),
+    Axes(Vec<AxisInfo>),
 }
 
 /// Zprava `IDEV`. Jmeno delsi nez [`MAX_NAME`] se zkrati (na hranici znaku).
@@ -134,6 +165,19 @@ pub fn decode(data: &[u8]) -> Option<DeviceMessage<'_>> {
             caps,
             name,
         })
+    } else if tag == TAG_AXES {
+        if rest.len() % 12 != 0 || rest.len() / 12 > MAX_AXES {
+            return None;
+        }
+        let axes = rest
+            .chunks_exact(12)
+            .map(|c| AxisInfo {
+                code: u16::from_le_bytes([c[0], c[1]]),
+                min: i32::from_le_bytes(c[4..8].try_into().unwrap()),
+                max: i32::from_le_bytes(c[8..12].try_into().unwrap()),
+            })
+            .collect();
+        Some(DeviceMessage::Axes(axes))
     } else if tag == TAG_EVENTS {
         if rest.len() % RawEvent::SIZE != 0 || rest.len() / RawEvent::SIZE > MAX_EVENTS {
             return None;

@@ -130,7 +130,7 @@ libs/blockproto/ protokol blokového zařízení (klient <-> ovladač)
 libs/inputproto/ protokol vstupu (ovladač -> inputd -> vlastník fokusu)
 libs/keymap/     rozložení klávesnice (US, CZ), mrtvé klávesy
 libs/i8042/      PS/2: scan kódy a pakety myši (bez hardwaru, testy na hostiteli)
-libs/usbproto/   USB: protokol xhci <-> třídní ovladače, deskriptory, hub, HID boot
+libs/usbproto/   USB: protokol xhci <-> třídní ovladače, deskriptory, hub, HID (boot i parser reportu)
 libs/usbclient/  klient kanálu USB pro třídní ovladače
 libs/fs/         souborový systém (no_std; std pro nástroje)
   src/space/        volné místo: alokační skupiny, space logy

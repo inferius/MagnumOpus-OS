@@ -425,8 +425,8 @@ widget). It is possible, but the trusted elements stay with the system:
   globally (protection against keyloggers).
 - **Drivers, in order:** virtio-input (keyboard, mouse; done) in QEMU -
   PS/2 (done; internal laptop keyboards and the firmware's USB emulation) -
-  USB HID through our own xHCI driver (phases 1-2 done: boot protocol,
-  hotplug, new keyboard verification; see [USB](usb.md)) - USB HID through our own xHCI
+  USB HID through our own xHCI driver (phases 1-4 done: controller, hubs,
+  HID with a report parser, hotplug, new device verification; see [USB](usb.md)) - USB HID through our own xHCI
   driver (the USB stack is a big separate piece of work).
 - **Layouts:** Czech and English in the first version, diacritics
   composition (dead keys), Unicode input.
@@ -881,7 +881,7 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
    TCP/IP, DNS, TLS 1.3, HTTP client - services, access through a capability)
    - **6a Input (done):** input service, keyboard and mouse (virtio-input;
-     PS/2, USB HID in the boot protocol), US and CZ layouts, secure attention shortcut -
+     PS/2, USB HID), US and CZ layouts, secure attention shortcut -
      see [Input](input.md)
    - **6b Shell and smart terminal:** console, structured output, command
      undo, "show what will happen", permissions at launch - see [Shell](#shell-and-smart-terminal-proposal)

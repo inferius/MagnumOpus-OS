@@ -124,27 +124,67 @@ usb.control(hid::set_boot_protocol(info.interface), &[])?;
 let report = usb.call(op::INTERRUPT_IN, 0x81, 8, &[], None)?;
 ```
 
-## HID: keyboard and mouse (boot protocol)
+## HID: keyboard, mouse, tablet, multimedia keys
 
-`usb-hid` switches the interface to the boot protocol (`SET_PROTOCOL(0)`)
-and turns off report repeating (`SET_IDLE(0)`, the input service repeats
-keys). Then it reads the interrupt endpoint. A STALL on these requests does
-no harm, because the device already uses the boot protocol.
+`usb-hid` first reads the interface's **report descriptor**
+(`GET_DESCRIPTOR(0x22)`). If it understands it, it reads reports in the
+**report protocol**, which is the default after a device reset. Otherwise
+it switches the interface to the **boot protocol** (`SET_PROTOCOL(0)`) if
+the interface offers one. It always turns off report repeating
+(`SET_IDLE(0)`), because the input service repeats keys. A STALL on these
+requests does no harm.
 
-- **Keyboard**, 8-byte report: modifiers (bit 0 left Ctrl ... bit 7 right
-  Windows key), reserved, up to 6 pressed keys (HID usages of page 0x07).
-  Events come from the difference against the previous report: releases
-  first, then presses. A "rollover" report (usage 1-3, too many keys) is
-  ignored. `MSC_SCAN` = `0x70000 | usage`, so for example `u` has scan code
-  `0x70018`.
-- **Mouse**, 3-4 byte report: buttons (5), dx, dy (i8, Y positive down as
-  in evdev), wheel (i8, positive up).
+The **descriptor parser** (`usbproto::report`) walks the items (main,
+global, local; long items are skipped) and builds the input fields: report
+id, bit position, element size and count, logical range and usages (a list
+or a range). It is defensive: at most 256 fields, 1024 usages per field,
+8 kbit per report, collections nested up to 32 deep and a Push/Pop stack of
+16. A broken descriptor returns `None`, and the driver tries the boot
+protocol.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="HID report to events">
+<defs><marker id="us3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="200" height="70" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">report descriptor</text><text class="m" x="110" y="64" text-anchor="middle">Usage Page, Usage, Report</text><text class="m" x="110" y="80" text-anchor="middle">Size/Count, Input ...</text>
+<rect class="acc" x="270" y="20" width="200" height="70" rx="6"/><text class="t b" x="370" y="45" text-anchor="middle">fields (report::Field)</text><text class="m" x="370" y="64" text-anchor="middle">id, bits, range, usages,</text><text class="m" x="370" y="80" text-anchor="middle">variable / index array</text>
+<rect class="ok" x="530" y="20" width="220" height="70" rx="6"/><text class="t b" x="640" y="45" text-anchor="middle">evdev events</text><text class="m" x="640" y="64" text-anchor="middle">EV_KEY, EV_REL, EV_ABS,</text><text class="m" x="640" y="80" text-anchor="middle">MSC_SCAN = usage</text>
+<path class="ln" d="M210 55 L268 55" marker-end="url(#us3)"/><path class="ln" d="M470 55 L528 55" marker-end="url(#us3)"/>
+<rect class="box" x="270" y="120" width="200" height="56" rx="6"/><text class="t b" x="370" y="143" text-anchor="middle">report from the device</text><text class="m" x="370" y="162" text-anchor="middle">bytes (with report id)</text>
+<path class="ln" d="M470 148 L560 92" marker-end="url(#us3)"/>
+<text class="m" x="10" y="115">parse()</text><text class="m" x="490" y="140">Decoder::report()</text>
+</svg>
+<figcaption>The report descriptor describes the report bits, and the decoder turns them into events.</figcaption>
+</figure>
+
+**What the fields mean** (`usbproto::hid_report`):
+
+| Page | Usage | Event |
+|---|---|---|
+| 0x01 Generic Desktop | X, Y relative | `REL_X`, `REL_Y` (mouse) |
+| 0x01 | X, Y absolute | `ABS_X`, `ABS_Y` with the range from the logical min/max (tablet) |
+| 0x01 | Wheel | `REL_WHEEL` |
+| 0x07 Keyboard | 0x04-0x65, 0xE0-0xE7 | keys (variable = bitmap, array = up to N pressed) |
+| 0x09 Button | 1-5 (6-15) | `BTN_LEFT` ... `BTN_EXTRA` (`BTN_MISC`+) |
+| 0x0C Consumer | volume, mute, playback, brightness, mail, calculator, search; AC Pan | multimedia keys; `REL_HWHEEL` |
+| 0x0D Digitizer | Tip Switch, Barrel, In Range | `BTN_TOUCH`, `BTN_STYLUS`, `BTN_TOOL_PEN` |
+
+- Variable fields give an event on change, relative axes on every non-zero
+  value.
+- Index arrays (pressed keys) are compared with the previous report:
+  releases first, then presses. A "rollover" report (usage 1-3) is ignored.
+- `MSC_SCAN` = the usage (page << 16 | id), so `u` has scan code `0x70018`
+  and volume up `0xC00E9`.
+- One report is one frame.
+- The decoder decides the source's **capabilities**: `KEYBOARD`,
+  `POINTER` or `ABSOLUTE`. The driver sends the absolute axis ranges to the
+  service in an `IAXS` message, and the service converts them to
+  `Absolute { x, y }` in the range 0-65535.
+- **Boot protocol** (`usbproto::hid`): an 8-byte keyboard report
+  (modifiers, reserved, 6 keys), a 3-4 byte mouse report. It is used only
+  when the interface has no usable descriptor.
 - **Unplugging:** the interface channel closes, the driver sends a release
   for every held key and button and exits. The input service then removes
   the source.
-
-The usage-to-evdev mapping and the report differencing live in the
-`usbproto::hid` library, tested on the host.
 
 ## Verifying a new input device (against BadUSB)
 
@@ -208,8 +248,8 @@ mechanism is done in `inputd`. The dialog with the code comes with the GUI
 
 | Where | What |
 |---|---|
-| `cargo test -p usbproto` | descriptors (configuration, alternate settings, broken lengths), setup packets, messages, hub (descriptor, port status, speed), HID boot (report differencing, rollover, usage table, mouse) |
-| `cargo xtask test`, suite `usb` | the USB keyboard from boot is trusted; keys from QEMU all the way to the service (source, HID scan code); mouse hotplug (attach, motion, wheel, detach); a new keyboard and a new mouse wait for verification (input only on `secure`, after `trust` to the focus owner) |
+| `cargo test -p usbproto` | descriptors (configuration, alternate settings, broken lengths), setup packets, messages, hub (descriptor, port status, speed), HID boot (report differencing, rollover, usage table, mouse), report parser (the QEMU keyboard, mouse and tablet descriptors, multimedia with a report id, signed values, broken descriptors) |
+| `cargo xtask test`, suite `usb` | the USB keyboard from boot is trusted; keys from QEMU all the way to the service (source, HID scan code); mouse hotplug (attach, motion, wheel, detach); a new keyboard and a new mouse wait for verification (input only on `secure`, after `trust` to the focus owner); an external hub with a keyboard behind it; a tablet (absolute position through the report protocol) |
 
 QEMU has `qemu-xhci` with a `usb-kbd` keyboard bound to the console of a
 second graphics card (`secondary-vga,id=video1`). Xtask sends it events
@@ -224,12 +264,16 @@ PS/2.
 |---|---|---|
 | 1 | done | xHCI controller: takeover from the firmware, reset, contexts, rings, MSI-X, root ports, control and interrupt transfers |
 | 2 | done | HID boot protocol (keyboard, mouse), hotplug, new input device verification |
-| 3 | plan | external hubs: route string, hub bit, port count and the TT for low/full speed behind a high-speed hub in the slot context. The hub driver is ready and the controller now refuses `ATTACH` from an external hub |
-| 4 | plan | a full HID report descriptor parser (multimedia keys, mice with high-resolution wheels, tablets: extending `inputproto` with `EV_ABS`) |
+| 3 | done | external hubs: route string, hub flag, port count, MTT and TT think time in the slot context, the TT for low/full speed behind a high-speed hub; detaching a hub detaches everything behind it (at most 5 hub tiers) |
+| 4 | done | HID report descriptor parser: multimedia keys, mice with more buttons and a horizontal wheel, tablets and pens (`EV_ABS`, the `Absolute` event) |
 | 5 | plan | I2C-HID (laptop touchpads: needs AML and an I2C driver) |
 
 Other limits of the first version:
 
+- no USB 3 hubs yet (descriptor 0x2A, a different port status format); a
+  USB 3 device works only on a root port of a USB 3 controller,
+- no multi-touch (the Finger collection) or gestures yet, only one pen or
+  one point,
 - no bulk or isochronous endpoints yet (disks, audio), one interrupter,
 - 4 KiB pages only, interrupts target the boot CPU,
 - the USB keyboard LEDs (`SET_REPORT`) stay off for now,

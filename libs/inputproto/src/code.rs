@@ -27,6 +27,10 @@ pub const SYN_DROPPED: u16 = 3;
 /// `EV_MSC`: surovy scan kod (napr. PS/2 sada 1, USB HID usage).
 pub const MSC_SCAN: u16 = 4;
 
+// Absolutni osy (tablet, dotyk).
+pub const ABS_X: u16 = 0x00;
+pub const ABS_Y: u16 = 0x01;
+
 // Relativni osy.
 pub const REL_X: u16 = 0x00;
 pub const REL_Y: u16 = 0x01;
@@ -34,6 +38,13 @@ pub const REL_Y: u16 = 0x01;
 pub const REL_HWHEEL: u16 = 0x06;
 /// Svisle kolecko: kladne od uzivatele (nahoru).
 pub const REL_WHEEL: u16 = 0x08;
+
+// Tlacitka tabletu a pera.
+pub const BTN_TOOL_PEN: u16 = 0x140;
+/// Hrot pera nebo prst se dotyka plochy.
+pub const BTN_TOUCH: u16 = 0x14A;
+/// Tlacitko na tele pera.
+pub const BTN_STYLUS: u16 = 0x14B;
 
 // Tlacitka mysi.
 pub const BTN_LEFT: u16 = 0x110;
@@ -152,6 +163,20 @@ pub const KEY_PAUSE: u16 = 119;
 pub const KEY_LEFTMETA: u16 = 125;
 pub const KEY_RIGHTMETA: u16 = 126;
 pub const KEY_COMPOSE: u16 = 127;
+// Multimedialni klavesy.
+pub const KEY_MUTE: u16 = 113;
+pub const KEY_VOLUMEDOWN: u16 = 114;
+pub const KEY_VOLUMEUP: u16 = 115;
+pub const KEY_NEXTSONG: u16 = 163;
+pub const KEY_PLAYPAUSE: u16 = 164;
+pub const KEY_PREVIOUSSONG: u16 = 165;
+pub const KEY_STOPCD: u16 = 166;
+pub const KEY_HOMEPAGE: u16 = 172;
+pub const KEY_MAIL: u16 = 155;
+pub const KEY_CALC: u16 = 140;
+pub const KEY_SEARCH: u16 = 217;
+pub const KEY_BRIGHTNESSDOWN: u16 = 224;
+pub const KEY_BRIGHTNESSUP: u16 = 225;
 
 /// Nejvyssi kod klavesy, ktery protokol prenasi (evdev `KEY_MAX`).
 pub const KEY_MAX: u16 = 0x2FF;

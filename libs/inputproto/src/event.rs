@@ -42,6 +42,9 @@ pub mod kind {
     /// Nove vstupni zarizeni (klavesnice, mys) ceka na overeni: a = id
     /// zdroje, b = 0 ceka, 1 overeno (duveryhodne), 2 odmitnuto.
     pub const NEW_DEVICE: u16 = 11;
+    /// Absolutni poloha ukazatele (tablet): a = x, b = y, oboji 0..=65535
+    /// (podil rozsahu osy zarizeni; kompozitor ho prevede na obrazovku).
+    pub const ABSOLUTE: u16 = 12;
 }
 
 /// Priznaky zaznamu.
@@ -167,6 +170,9 @@ pub enum Event {
     Text(char),
     /// Relativni pohyb ukazatele (kladne doprava a dolu).
     Motion { dx: i32, dy: i32 },
+    /// Absolutni poloha (tablet, dotyk): 0..=65535 na kazde ose, 0 = levy
+    /// / horni okraj rozsahu zarizeni.
+    Absolute { x: u16, y: u16 },
     Button { button: Button, action: Action },
     /// Kolecko v kroccich (`dy` kladne nahoru / od uzivatele).
     Scroll { dx: i32, dy: i32 },
@@ -244,6 +250,7 @@ impl Record {
             ),
             Event::Text(ch) => (kind::TEXT, ch as u32, 0, 0, 0),
             Event::Motion { dx, dy } => (kind::MOTION, dx as u32, dy as u32, 0, 0),
+            Event::Absolute { x, y } => (kind::ABSOLUTE, x as u32, y as u32, 0, 0),
             Event::Button { button, action } => {
                 (kind::BUTTON, button.code() as u32, 0, action.to_u32(), 0)
             }
@@ -301,6 +308,10 @@ impl Record {
                     Action::Repeat => return None,
                     x => x,
                 },
+            },
+            kind::ABSOLUTE => Event::Absolute {
+                x: u16::try_from(a).ok()?,
+                y: u16::try_from(bb).ok()?,
             },
             kind::SCROLL => Event::Scroll {
                 dx: a as i32,

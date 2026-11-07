@@ -127,9 +127,10 @@ invariant was broken (a kernel bug).
 | `xhci: prikaz typu T selhal (kod C)` | A controller command (Enable Slot, Address Device, Configure Endpoint ...) failed; the device is not used. |
 | `usb-hub: root hub, N portu` | The hub driver runs on the root ports. |
 | `usb-hub: port P: zarizeni nelze nastavit: ...` | Port reset or device setup failed (`TIMED_OUT`, `IO_ERROR`). |
-| `usb-hub: externi hub ... zatim nepodporovany (faze 3)` | External hubs are not set up yet. |
+| `usb-hub: externi hub [path], N portu` | The hub driver runs on an external hub. |
 | `usb-hid: USB klavesnice/mys vvvv:pppp (port [...], speed)` | The HID driver introduced itself to the input service. |
-| `usb-hid: rozhrani ... bez boot protokolu zatim nepodporovane` | HID without the boot protocol (multimedia, tablet) waits for phase 4. |
+| `usb-hid: rozhrani cc/ss/pp: deskriptoru reportu nerozumim` | The report descriptor is missing, broken or has nothing known, and the interface has no boot protocol. The interface is not used. |
+| `usb-hid: rozhrani N nema interrupt endpoint IN` | A HID interface without an input endpoint; it is not used. |
 | `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | No driver for the interface class (e.g. a USB disk). |
 | `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` did not arrive within 10 s; init gets `done` anyway. |
 | `inputd: nove zarizeni '...' ceka na overeni`, `inputd: zarizeni '...' overeno` / `odmitnuto` | The new keyboard verification option (BadUSB): pending / trusted / rejected, see [USB](usb.md). |

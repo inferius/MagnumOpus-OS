@@ -34,6 +34,20 @@ pub struct Source {
     /// Overeni klavesnice pripojene za behu (volba zabezpeceni); ostatni
     /// zdroje jsou `Trusted`.
     pub trust: inputproto::DeviceTrust,
+    /// Rozsahy absolutnich os X a Y (z `IAXS`).
+    axes: [(i32, i32); 2],
+    /// Posledni absolutni hodnoty X a Y (snimek muze nest jen jednu osu).
+    abs: [i32; 2],
+    abs_dirty: bool,
+}
+
+/// Prevod hodnoty osy z rozsahu `min..=max` na 0..=65535.
+fn normalize(v: i32, (min, max): (i32, i32)) -> u16 {
+    if max <= min {
+        return 0;
+    }
+    let v = v.clamp(min, max) as i64 - min as i64;
+    (v * 65535 / (max as i64 - min as i64)) as u16
 }
 
 /// Co ma sluzba udelat s udalosti klavesy (rozhoduje o bezpecne zkratce
@@ -61,6 +75,9 @@ impl Source {
             wheel_y: 0,
             swallowed: Vec::new(),
             trust: inputproto::DeviceTrust::Trusted,
+            axes: [(0, 65535); 2],
+            abs: [0; 2],
+            abs_dirty: false,
         }
     }
 
@@ -74,6 +91,16 @@ impl Source {
 
     pub fn is_pointer(&self) -> bool {
         !self.synthetic && self.caps & caps::POINTER != 0
+    }
+
+    /// Rozsahy absolutnich os (`IAXS`); nezname osy a prazdny rozsah se
+    /// ignoruji.
+    pub fn set_axes(&mut self, axes: &[inputproto::device::AxisInfo]) {
+        for a in axes {
+            if a.max > a.min && (a.code == ABS_X || a.code == ABS_Y) {
+                self.axes[a.code as usize] = (a.min, a.max);
+            }
+        }
     }
 
     /// Zpracuje predstaveni zdroje; vraci `false`, kdyz zprava neni
@@ -141,6 +168,10 @@ impl Source {
                 }
                 self.key(layout, e.code, scancode, action, time, out);
             }
+            EV_ABS if e.code == ABS_X || e.code == ABS_Y => {
+                self.abs[e.code as usize] = e.value;
+                self.abs_dirty = true;
+            }
             EV_REL => match e.code {
                 REL_X => self.dx = self.dx.saturating_add(e.value),
                 REL_Y => self.dy = self.dy.saturating_add(e.value),
@@ -193,6 +224,18 @@ impl Source {
                 Event::Motion {
                     dx: self.dx,
                     dy: self.dy,
+                },
+                mods,
+                self.flags(),
+                time,
+            ));
+        }
+        if self.abs_dirty {
+            self.abs_dirty = false;
+            out.push(Record::new(
+                Event::Absolute {
+                    x: normalize(self.abs[0], self.axes[0]),
+                    y: normalize(self.abs[1], self.axes[1]),
                 },
                 mods,
                 self.flags(),

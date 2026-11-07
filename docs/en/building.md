@@ -135,7 +135,7 @@ libs/blockproto/ block device protocol (client <-> driver)
 libs/inputproto/ input protocol (driver -> inputd -> focus owner)
 libs/keymap/     keyboard layouts (US, CZ), dead keys
 libs/i8042/      PS/2: scan codes and mouse packets (no hardware, host tests)
-libs/usbproto/   USB: xhci <-> class driver protocol, descriptors, hub, HID boot
+libs/usbproto/   USB: xhci <-> class driver protocol, descriptors, hub, HID (boot and report parser)
 libs/usbclient/  USB channel client for class drivers
 libs/fs/         file system (no_std; std for tools)
   src/space/        free space: allocation groups, space logs

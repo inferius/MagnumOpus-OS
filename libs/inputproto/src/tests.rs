@@ -36,6 +36,28 @@ fn hello_roundtrip_and_name_limit() {
 }
 
 #[test]
+fn axes_roundtrip() {
+    use crate::device::AxisInfo;
+    let axes = [
+        AxisInfo {
+            code: ABS_X,
+            min: 0,
+            max: 0x7FFF,
+        },
+        AxisInfo {
+            code: ABS_Y,
+            min: -100,
+            max: 100,
+        },
+    ];
+    assert_eq!(
+        device::decode(&device::encode_axes(&axes)),
+        Some(DeviceMessage::Axes(axes.to_vec()))
+    );
+    assert_eq!(device::decode(b"IAXS\x00\x00"), None);
+}
+
+#[test]
 fn events_roundtrip() {
     let evs = [
         RawEvent::key(KEY_A, true),
@@ -82,6 +104,7 @@ fn records_roundtrip_all_kinds() {
         Event::Text('ě'),
         Event::Text('😀'),
         Event::Motion { dx: -3, dy: 12 },
+        Event::Absolute { x: 0, y: 65535 },
         Event::Button {
             button: Button::Left,
             action: Action::Press,

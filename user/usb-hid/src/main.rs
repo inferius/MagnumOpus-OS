@@ -1,11 +1,15 @@
-//! usb-hid: ovladac klavesnice a mysi USB v boot protokolu (HID 1.11).
+//! usb-hid: ovladac zarizeni USB HID (klavesnice, mys, tablet,
+//! multimedialni klavesy; HID 1.11).
 //!
 //! Startovni zprava (kind USER, v tomto poradi): kanal rozhrani
 //! (`usbproto::msg`) a kanal ke sluzbe vstupu (`inputproto::device`).
-//! Ovladac prepne rozhrani do boot protokolu, vypne opakovani reportu
-//! (`SET_IDLE(0)`, opakuje sluzba vstupu) a pak cte reporty z interrupt
-//! endpointu. Rozhrani bez boot protokolu (multimedialni klavesy, tablety)
-//! zatim neobsluhuje - potrebuji parser deskriptoru reportu (faze 4).
+//!
+//! Ovladac precte deskriptor reportu a kdyz mu rozumi
+//! (`usbproto::report`, `usbproto::hid_report`), cte reporty v report
+//! protokolu - umi tak multimedialni klavesy, tablety (absolutni osy) a mysi
+//! s vic tlacitky. Jinak prepne rozhrani do boot protokolu (klavesnice
+//! a mys bez deskriptoru). Opakovani reportu vypne (`SET_IDLE(0)`, klavesy
+//! opakuje sluzba vstupu) a pak cte reporty z interrupt endpointu.
 
 #![no_std]
 #![no_main]
@@ -18,8 +22,9 @@ use alloc::vec::Vec;
 use inputproto::device::{self, RawEvent, caps};
 use libos::{Channel, Error, Signals, Startup, println};
 use usbclient::{UsbClient, is_stall};
-use usbproto::desc::{Configuration, Transfer, class};
+use usbproto::desc::{Configuration, Interface, Setup, Transfer, class, kind, request, rt};
 use usbproto::hid::{self, BootKeyboard, BootMouse};
+use usbproto::hid_report::Decoder;
 use usbproto::msg::op;
 
 libos::entry!(main);
@@ -27,6 +32,28 @@ libos::entry!(main);
 enum Kind {
     Keyboard(BootKeyboard),
     Mouse(BootMouse),
+    Report(Decoder),
+}
+
+/// Nejdelsi deskriptor reportu, ktery ovladac cte.
+const MAX_REPORT_DESC: u16 = 4096;
+
+/// Precte a rozebere deskriptor reportu rozhrani; `None` = neni, nejde
+/// precist, nebo nema nic, cemu dekoder rozumi.
+fn report_decoder(usb: &mut UsbClient, iface: &Interface) -> Option<Decoder> {
+    if iface.hid_report_len == 0 {
+        return None;
+    }
+    let setup = Setup {
+        request_type: rt::DEVICE_TO_HOST | rt::STANDARD | rt::TO_INTERFACE,
+        request: request::GET_DESCRIPTOR,
+        value: (kind::HID_REPORT as u16) << 8,
+        index: iface.number as u16,
+        length: iface.hid_report_len.min(MAX_REPORT_DESC),
+    };
+    let raw = usb.control(setup, &[]).ok()?;
+    let dec = Decoder::new(usbproto::report::parse(&raw)?);
+    (dec.caps() != 0).then_some(dec)
 }
 
 fn main(startup: Startup) -> i64 {
@@ -55,25 +82,34 @@ fn main(startup: Startup) -> i64 {
         .iter()
         .find(|e| e.is_in() && e.transfer == Transfer::Interrupt)
         .copied();
+    let Some(ep) = ep else {
+        println!("usb-hid: rozhrani {} nema interrupt endpoint IN", iface.number);
+        return 0;
+    };
     let boot = iface.class == class::HID && iface.subclass == hid::SUBCLASS_BOOT;
-    let (Some(ep), true) = (ep, boot) else {
+    let mut axes = Vec::new();
+    let (mut kind, caps, mut setups) = if let Some(dec) = report_decoder(&mut usb, &iface) {
+        let c = dec.caps();
+        axes = dec.axes();
+        // Report protokol je vychozi po resetu zarizeni.
+        (Kind::Report(dec), c, alloc::vec![hid::set_idle_zero(iface.number)])
+    } else if boot && iface.protocol == hid::PROTOCOL_KEYBOARD {
+        (Kind::Keyboard(BootKeyboard::new()), caps::KEYBOARD, alloc::vec![])
+    } else if boot && iface.protocol == hid::PROTOCOL_MOUSE {
+        (Kind::Mouse(BootMouse::new()), caps::POINTER, alloc::vec![])
+    } else {
         println!(
-            "usb-hid: rozhrani {:02x}/{:02x}/{:02x} bez boot protokolu zatim nepodporovane",
+            "usb-hid: rozhrani {:02x}/{:02x}/{:02x}: deskriptoru reportu nerozumim",
             iface.class, iface.subclass, iface.protocol
         );
         return 0;
     };
-    let (mut kind, caps, what) = match iface.protocol {
-        hid::PROTOCOL_KEYBOARD => (Kind::Keyboard(BootKeyboard::new()), caps::KEYBOARD, "klavesnice"),
-        hid::PROTOCOL_MOUSE => (Kind::Mouse(BootMouse::new()), caps::POINTER, "mys"),
-        p => {
-            println!("usb-hid: boot protokol {p} nepodporovany");
-            return 0;
-        }
-    };
-    // Boot protokol a bez opakovani reportu; zarizeni, ktere pozadavek
-    // nezna (STALL), uz boot protokol pouziva.
-    for setup in [hid::set_boot_protocol(iface.number), hid::set_idle_zero(iface.number)] {
+    if !matches!(kind, Kind::Report(_)) {
+        // Boot protokol a bez opakovani reportu; zarizeni, ktere
+        // pozadavek nezna (STALL), uz boot protokol pouziva.
+        setups = alloc::vec![hid::set_boot_protocol(iface.number), hid::set_idle_zero(iface.number)];
+    }
+    for setup in setups {
         if let Err(e) = usb.control(setup, &[])
             && !is_stall(&e)
         {
@@ -81,12 +117,25 @@ fn main(startup: Startup) -> i64 {
             return 3;
         }
     }
+    let what = if caps & caps::KEYBOARD != 0 {
+        "klavesnice"
+    } else if caps & caps::ABSOLUTE != 0 {
+        "tablet"
+    } else if caps & caps::POINTER != 0 {
+        "mys"
+    } else {
+        "HID"
+    };
     let name = format!(
         "USB {what} {:04x}:{:04x}",
         info.device.vendor, info.device.product
     );
     println!("usb-hid: {name} (port {:?}, {})", info.path, info.speed.name());
-    let max = (ep.max_packet as u32).clamp(8, 64);
+    let report_len = match &kind {
+        Kind::Report(d) => d.max_report_len() as u32,
+        _ => 8,
+    };
+    let max = (ep.max_packet as u32).max(report_len).clamp(8, 1024);
     let mut hello = Some(device::encode_hello(caps, &name));
     loop {
         let id = match usb.send(op::INTERRUPT_IN, ep.address as u32, max, &[]) {
@@ -95,10 +144,13 @@ fn main(startup: Startup) -> i64 {
         };
         // Predstavit se sluzbe az s prvnim dotazem na data: zarizeni je pak
         // pripravene (QEMU napr. smeruje udalosti mysi az po prvnim dotazu).
-        if let Some(h) = hello.take()
-            && input.write(&h, Vec::new()).is_err()
-        {
-            return 0;
+        if let Some(h) = hello.take() {
+            if input.write(&h, Vec::new()).is_err() {
+                return 0;
+            }
+            if !axes.is_empty() {
+                let _ = input.write(&device::encode_axes(&axes), Vec::new());
+            }
         }
         // Cekat na report, nebo na zavreni sluzby vstupu.
         let items = [
@@ -115,12 +167,14 @@ fn main(startup: Startup) -> i64 {
             Ok(t) => match &mut kind {
                 Kind::Keyboard(k) => k.report(&t.data, &mut events),
                 Kind::Mouse(m) => m.report(&t.data, &mut events),
+                Kind::Report(d) => d.report(&t.data, &mut events),
             },
             Err(e) if e.error == Error::PeerClosed => {
                 // Zarizeni odpojeno: drzene klavesy a tlacitka uvolnit.
                 match &mut kind {
                     Kind::Keyboard(k) => k.release_all(&mut events),
                     Kind::Mouse(m) => m.release_all(&mut events),
+                    Kind::Report(d) => d.release_all(&mut events),
                 }
                 send(&input, &events);
                 return 0;

@@ -125,9 +125,10 @@ porušený vnitřní předpoklad (chyba jádra).
 | `xhci: prikaz typu T selhal (kod C)` | Příkaz řadiče (Enable Slot, Address Device, Configure Endpoint ...) vrátil chybu; zařízení se nepoužije. |
 | `usb-hub: root hub, N portu` | Ovladač hubu běží na kořenových portech. |
 | `usb-hub: port P: zarizeni nelze nastavit: ...` | Reset portu nebo nastavení zařízení selhalo (`TIMED_OUT`, `IO_ERROR`). |
-| `usb-hub: externi hub ... zatim nepodporovany (faze 3)` | Externí hub se zatím nenastaví. |
+| `usb-hub: externi hub [cesta], N portu` | Ovladač hubu běží na externím hubu. |
 | `usb-hid: USB klavesnice/mys vvvv:pppp (port [...], rychlost)` | Ovladač HID se představil službě vstupu. |
-| `usb-hid: rozhrani ... bez boot protokolu zatim nepodporovane` | HID bez boot protokolu (multimédia, tablet) čeká na fázi 4. |
+| `usb-hid: rozhrani cc/ss/pp: deskriptoru reportu nerozumim` | Deskriptor reportu chybí, je poškozený nebo nemá nic známého a rozhraní nemá boot protokol. Rozhraní se nepoužije. |
+| `usb-hid: rozhrani N nema interrupt endpoint IN` | Rozhraní HID bez vstupního endpointu; nepoužije se. |
 | `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | Pro třídu rozhraní není ovladač (např. disk USB). |
 | `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` nepřišlo do 10 s; init dostane `done` i tak. |
 | `inputd: nove zarizeni '...' ceka na overeni`, `inputd: zarizeni '...' overeno` / `odmitnuto` | Volba ověření nové klávesnice (BadUSB), viz [USB](usb.md). |

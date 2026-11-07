@@ -76,6 +76,10 @@ fn btn(button: &str, down: bool) -> String {
     format!(r#"{{"type":"btn","data":{{"down":{down},"button":"{button}"}}}}"#)
 }
 
+fn abs(axis: &str, value: i32) -> String {
+    format!(r#"{{"type":"abs","data":{{"axis":"{axis}","value":{value}}}}}"#)
+}
+
 fn rel(axis: &str, value: i32) -> String {
     format!(r#"{{"type":"rel","data":{{"axis":"{axis}","value":{value}}}}}"#)
 }
@@ -204,6 +208,17 @@ fn script() -> Vec<Step> {
     s.push(Step::SendPs2(vec![key("h", false)]));
     s.push(Step::WaitFor(usb::HUB_UNPLUG));
     s.push(Step::Qmp(device_del("usbhub1")));
+    // Tablet (absolutni osy, report protokol) navazany na konzoli video1.
+    s.push(Step::WaitFor(usb::TABLET_PLUG));
+    s.push(Step::Qmp(format!(
+        r#"{{"execute":"device_add","arguments":{{"driver":"usb-tablet","id":"usbtablet1","bus":"xhci.0","display":"video1"}}}}"#
+    )));
+    s.push(Step::WaitFor(usb::TABLET_MOVE));
+    s.push(Step::SendUsb(vec![abs("x", 0x4000), abs("y", 0x2000)]));
+    s.push(Step::SendUsb(vec![btn("left", true)]));
+    s.push(Step::SendUsb(vec![btn("left", false)]));
+    s.push(Step::WaitFor(usb::TABLET_UNPLUG));
+    s.push(Step::Qmp(device_del("usbtablet1")));
     s
 }
 
@@ -224,6 +239,9 @@ mod usb {
     pub const HUB_PLUG: &str = "init: test usb: pripoj hub";
     pub const HUB_KEYS: &str = "init: test usb: klavesy za hubem";
     pub const HUB_UNPLUG: &str = "init: test usb: odpoj hub";
+    pub const TABLET_PLUG: &str = "init: test usb: pripoj tablet";
+    pub const TABLET_MOVE: &str = "init: test usb: poloha tabletu";
+    pub const TABLET_UNPLUG: &str = "init: test usb: odpoj tablet";
 }
 
 /// Pripojeni zarizeni USB za behu na radic `xhci`.
