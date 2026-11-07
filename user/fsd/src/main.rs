@@ -50,8 +50,8 @@ const DEDUP_BUDGET: u64 = 64;
 /// Kolik bloku overit jednim krokem scrubu (1 MiB; maly krok = pozadavky
 /// klientu cekaji nejvys na jeden).
 const SCRUB_BUDGET: u64 = 256;
-/// Pauza mezi kroky scrubu.
-const SCRUB_PAUSE: Duration = Duration::from_millis(5);
+/// Jak dlouho bez pozadavku, nez scrub udela krok.
+const SCRUB_QUIET: Duration = Duration::from_millis(50);
 /// Jak casto spoustet scrub sam (tyden).
 const SCRUB_PERIOD_SECS: i64 = 7 * 86_400;
 
@@ -156,14 +156,17 @@ fn serve(svc: &mut Service, client: Channel) {
     let mut idle = false;
     let mut changed = false;
     let mut running = true;
+    let mut last_request = time::now();
     while running {
         // V necinnosti (po commitu bez novych pozadavku) defragmentovat.
-        // Scrub s nizkou prioritou: krok po 1 MiB nejvys kazdych 5 ms
-        // (~200 MiB/s), pozadavky klientu maji vzdy prednost.
+        // Scrub s nizkou prioritou: jen kdyz `SCRUB_QUIET` neprisel zadny
+        // pozadavek; pak kroky po 1 MiB bez pauzy (pozadavek ceka nejvys
+        // na jeden krok).
+        let scrub_at = last_request.saturating_add(SCRUB_QUIET.as_nanos() as u64);
         let mut deadline = if idle {
             time::now()
         } else if svc.scrubbing {
-            time::deadline_after(SCRUB_PAUSE).min(next_commit).min(next_history)
+            scrub_at.min(next_commit).min(next_history)
         } else {
             next_commit.min(next_history)
         };
@@ -184,6 +187,7 @@ fn serve(svc: &mut Service, client: Channel) {
                         Some(true) => {
                             idle = false;
                             changed = true;
+                            last_request = time::now();
                             i += 1;
                         }
                         Some(false) => i += 1,
@@ -208,8 +212,8 @@ fn serve(svc: &mut Service, client: Channel) {
         if running {
             background(svc, &mut next_commit, &mut idle, &mut changed);
             history(svc, &mut next_history);
-            // Scrub jen kdyz zadny klient nic nechtel (nizka priorita).
-            if quiet {
+            // Scrub jen kdyz klienti chvili nic nechteji (nizka priorita).
+            if quiet && time::now() >= last_request.saturating_add(SCRUB_QUIET.as_nanos() as u64) {
                 scrub(svc);
             }
             poll_watches(svc, &mut sessions);

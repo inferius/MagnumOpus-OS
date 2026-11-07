@@ -54,6 +54,9 @@ pub(super) struct DedupPass {
     generation: u64,
     /// Kde v aktualnim datasetu pokracovat.
     next_key: Option<Key>,
+    /// Generace posledniho dokonceneho pruchodu (bez noveho commitu neni
+    /// co hledat).
+    done_generation: Option<u64>,
 }
 
 /// Otisk nekomprimovaneho kusu ze souctu jeho bloku.
@@ -202,8 +205,13 @@ impl<D: BlockDevice> Fs<D> {
         self.s.check_writable()?;
         let mut rep = DedupReport::default();
         if self.dedup.pending.is_empty() && self.dedup.next_key.is_none() {
-            // Novy pruchod: vsechny datasety, hranice = posledni commit.
-            self.commit()?;
+            // Novy pruchod: vsechny datasety, hranice = posledni commit
+            // (data z rozpracovane transakce prijdou na radu priste). Bez
+            // noveho commitu od posledniho pruchodu neni co delat.
+            if self.dedup.done_generation == Some(self.s.sb.generation) {
+                rep.done = true;
+                return Ok(rep);
+            }
             let mut ids = alloc::vec![ROOT_DATASET];
             ids.extend(self.all_dataset_ids()?);
             ids.reverse();
@@ -284,7 +292,9 @@ impl<D: BlockDevice> Fs<D> {
             if finished {
                 // Dataset hotovy az do generace zacatku pruchodu.
                 let g = self.dedup.generation;
-                self.put(Key::new(META_OID, item::DEDUPPOS, 0), g.to_le_bytes().to_vec())?;
+                if g != pos {
+                    self.put(Key::new(META_OID, item::DEDUPPOS, 0), g.to_le_bytes().to_vec())?;
+                }
                 self.dedup.pending.pop();
                 self.dedup.next_key = None;
             } else {
@@ -296,6 +306,7 @@ impl<D: BlockDevice> Fs<D> {
             }
         }
         rep.done = true;
+        self.dedup.done_generation = Some(self.dedup.generation);
         Ok(())
     }
 }
