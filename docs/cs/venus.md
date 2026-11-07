@@ -73,7 +73,7 @@ na Windows QEMU.
 | 3 | `CREATE_CONTEXT 4` | ovladač pošle `CTX_CREATE` s `context_init` = 4 |
 | 4 | `CREATE_BLOB HOST3D, MAPPABLE, blob_id 0, 64 KiB` | renderer vytvoří sdílenou paměť (shm), ovladač ji namapuje do BARu a klientovi pošle VMO okna |
 | 5 | `vkSetReplyCommandStreamMESA` | renderer bude odpovědi psát do toho blobu |
-| volání | `vkSeekReplyCommandStreamMESA(0)` + příkazy s `GENERATE_REPLY` | `SUBMIT` s plotem na ose 0 |
+| volání | `vkSeekReplyCommandStreamMESA(0)` + příkazy s `GENERATE_REPLY` | `SUBMIT` s plotem na ose 0; odpovědi se čtou po kusech (4 KiB, pak 4x víc) |
 
 **Synchronizace:** render server dekóduje proud asynchronně, odpověď na
 `SUBMIT_3D` by mohla přijít dřív, než renderer odpovědi zapíše. Proto
@@ -136,7 +136,8 @@ struktury (`encode`, `encode_partial`, `decode`) a příkazy v modulu `cmd`
 v C (`enabled_layer_count`).
 
 `cargo xtask test` spouští `venus-check`: vygenerovaný kód musí odpovídat
-vstupům. Generátor přebírá pravidla `vn_protocol.py`: nekonstantní
+vstupům (otisk vstupů v `target/venus-check.stamp`; beze změny se XML
+znovu neparsuje). Generátor přebírá pravidla `vn_protocol.py`: nekonstantní
 ukazatel parametru je výstup, výstup, který je délkou jiného parametru,
 je vstup i výstup (`pPhysicalDeviceCount`), výstupní handle a struktury
 jsou „částečné“.
@@ -157,7 +158,7 @@ displeje (`guiproto::display` `OPEN_RENDER`) a předá dál.
 | `CREATE_CONTEXT` | capset | `CONTEXT` |
 | `CREATE_BLOB` | paměť (`HOST3D`), příznaky (`MAPPABLE`...), blob_id, velikost | `BLOB` (resource, velikost, `map_info`) + VMO, když `MAPPABLE` |
 | `DESTROY_BLOB` | resource | `DONE` |
-| `SUBMIT` | ring_idx, plot, proud (nejvýš 60 KiB, násobek 4) | `SUBMITTED` (s plotem až po zpracování) |
+| `SUBMIT` | ring_idx (zatím jen 0), plot, proud (nejvýš 60 KiB, násobek 4) | `SUBMITTED` (s plotem až po zpracování) |
 
 Zavření kanálu: ovladač odmapuje a uvolní bloby a zničí kontext.
 
@@ -173,9 +174,13 @@ x86_64 s KVM se to v praxi chová jako paměť s cache, na aarch64 by
 nezarovnané přístupy spadly a čtení je pomalé. Potřeba: mapování podle
 `map_info` (cached/WC) v jádře - malá změna jádra, pro hlavní větev.
 
-⚠️ **Ovladač čeká synchronně.** Během `SUBMIT` s plotem neobslouží displej
-ani jiné klienty (první `vkCreateInstance` s lavapipe trvá i sekundy).
-Pro kompozitor přes Vulkan bude potřeba asynchronní fronta s ploty.
+⚠️ **Ovladač čeká synchronně.** Během `SUBMIT` s plotem (nejvýš 30 s)
+neobslouží displej ani jiné klienty (první `vkCreateInstance` s lavapipe
+trvá i sekundy). Když plot nedoběhne, klient dostane `TIMED_OUT`, další
+příkazy počkají na jeho odpověď a ovladač běží dál; klient čeká 40 s
+a po vypršení spojení označí za rozjeté (`Error::Broken`). Jiný `ring_idx`
+než 0 ovladač odmítne (plot na neexistující ose by se nesplnil). Pro
+kompozitor přes Vulkan bude potřeba asynchronní fronta s ploty.
 
 Bez KVM nebo s TCG (aarch64 ve WSL) Venus netestujeme; `vk.xml` má
 3,3 MB (v gitu komprimovaný na zlomek).

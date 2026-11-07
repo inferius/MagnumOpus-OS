@@ -17,7 +17,6 @@
 //! aarch64 jde o pamet zarizeni: nezarovnane pristupy by spadly a cteni je
 //! pomale. Az bude jadro umet mapovat podle `map_info` (cached/WC), zmenit.
 
-use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
@@ -33,8 +32,11 @@ use crate::vk::{self, VkCommandStreamDescriptionMESA, VkResult, cmd};
 pub const CAPSET_VENUS: u32 = 4;
 /// Velikost bloku pro odpovedi.
 pub const REPLY_SIZE: u64 = 64 * 1024;
-/// Jak dlouho cekat na ovladac.
-const TIMEOUT: Duration = Duration::from_secs(10);
+/// Jak dlouho cekat na ovladac: dele nez ovladac ceka na plot (30 s),
+/// aby pozdni odpoved nepripadla dalsimu pozadavku.
+const TIMEOUT: Duration = Duration::from_secs(40);
+/// Prvni kus odpovedi, ktery se cte ze sdilene pameti (pak 4x vic).
+const REPLY_CHUNK: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -44,6 +46,11 @@ pub enum Error {
     Cs(CsError),
     /// Renderer ma jiny format proudu nebo neumi blob s id 0.
     Incompatible,
+    /// Zarizeni ma Venus, ale malo sdilene pameti (QEMU bez `hostmem=`).
+    NoSharedMemory,
+    /// Spojeni je rozjete (vyprsel cas cekani na odpoved): dalsi odpovedi
+    /// by nepatrily k pozadavkum, spojeni uz nejde pouzit.
+    Broken,
     /// Prikaz Vulkanu vratil chybu.
     Vk(VkResult),
 }
@@ -71,6 +78,7 @@ pub struct Venus {
     reply: Mapping,
     _reply_vmo: Vmo,
     next_id: u64,
+    broken: bool,
 }
 
 impl Venus {
@@ -84,7 +92,7 @@ impl Venus {
             return Err(Error::Os(libos::Error::NotSupported));
         }
         if shm_size < REPLY_SIZE {
-            return Err(Error::Os(libos::Error::NotSupported));
+            return Err(Error::NoSharedMemory);
         }
         let (data, _) = request(&ch, &Request::GetCapset { id: CAPSET_VENUS, version: 0 })?;
         let Reply::Capset(data) = data else {
@@ -112,7 +120,7 @@ impl Venus {
         }
         let vmo = Vmo::from_handle(handles.remove(0));
         let reply = Mapping::new(&vmo, 0, REPLY_SIZE, MAP_READ)?;
-        let mut v = Self { ch, capset, shm_size, reply_resource: resource, reply, _reply_vmo: vmo, next_id: 1 };
+        let mut v = Self { ch, capset, shm_size, reply_resource: resource, reply, _reply_vmo: vmo, next_id: 1, broken: false };
         let mut e = Encoder::new();
         let stream = VkCommandStreamDescriptionMESA { resource_id: resource, offset: 0, size: REPLY_SIZE };
         cmd::set_reply_command_stream_mesa(&mut e, 0, &stream);
@@ -137,25 +145,40 @@ impl Venus {
         if stream.len() > gpuproto::MAX_SUBMIT {
             return Err(Error::Os(libos::Error::InvalidArgs));
         }
-        let (r, _) = request(&self.ch, &Request::Submit { ring_idx: 0, fence, data: stream })?;
-        expect(r, |r| matches!(r, Reply::Submitted))
+        if self.broken {
+            return Err(Error::Broken);
+        }
+        let r = request(&self.ch, &Request::Submit { ring_idx: 0, fence, data: stream });
+        if matches!(r, Err(Error::Os(libos::Error::TimedOut))) {
+            self.broken = true;
+        }
+        expect(r?.0, |r| matches!(r, Reply::Submitted))
     }
 
     /// Zakoduje prikazy (`encode`, s priznakem [`crate::REPLY`]), pocka na
     /// jejich zpracovani a precte odpovedi (`decode`, ve stejnem poradi).
+    ///
+    /// Odpovedi se ze sdilene pameti ctou po kusech (4 KiB, pak 4x vic):
+    /// kdyz dekoder narazi na konec dat, zkusi se znovu s vetsim kusem.
     pub fn call<T>(
         &mut self,
         encode: impl FnOnce(&mut Encoder),
-        decode: impl FnOnce(&mut Decoder) -> cs::Result<T>,
+        decode: impl Fn(&mut Decoder) -> cs::Result<T>,
     ) -> Result<T> {
         let mut e = Encoder::new();
         cmd::seek_reply_command_stream_mesa(&mut e, 0, 0);
         encode(&mut e);
         self.submit(e.finish()?, true)?;
-        let mut buf = vec![0u8; REPLY_SIZE as usize];
-        self.reply.read_bytes(0, &mut buf);
-        let mut d = Decoder::new(&buf);
-        Ok(decode(&mut d)?)
+        let mut n = REPLY_CHUNK;
+        let mut buf = Vec::new();
+        loop {
+            buf.resize(n, 0);
+            self.reply.read_bytes(0, &mut buf);
+            match decode(&mut Decoder::new(&buf)) {
+                Err(CsError::Truncated) if n < REPLY_SIZE as usize => n = (n * 4).min(REPLY_SIZE as usize),
+                r => return Ok(r?),
+            }
+        }
     }
 
     /// Prikazy bez odpovedi (napr. vkDestroy*); pocka na zpracovani.

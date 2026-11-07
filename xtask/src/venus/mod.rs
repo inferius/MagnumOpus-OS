@@ -7,7 +7,9 @@
 //! (typy, konstanty, struktury, prikazy), soubory do ~1000 radku.
 //!
 //! `--check` nic nezapisuje, jen overi, ze vygenerovany kod v repozitari
-//! odpovida vstupum (soucast `cargo xtask test`).
+//! odpovida vstupum (soucast `cargo xtask test`). Kdyz se vstupy ani vystup
+//! od posledni uspesne kontroly nezmenily (otisk v
+//! `target/venus-check.stamp`), XML se znovu neparsuje.
 
 mod emit;
 mod emit_cmd;
@@ -139,8 +141,49 @@ pub fn generate(root: &Path) -> std::result::Result<Vec<(String, String)>, Strin
     Ok(out)
 }
 
+/// Otisk vstupu (XML, subset.txt, zdroj generatoru) a vygenerovanych
+/// souboru: kdyz se nezmenil od posledni uspesne kontroly, neni treba
+/// znovu parsovat 3,3 MB vk.xml.
+fn fingerprint(root: &Path) -> Option<u64> {
+    use std::hash::Hasher;
+    let mut paths = Vec::new();
+    for d in ["libs/venus/xml", "libs/venus/src/vk", "xtask/src/venus"] {
+        for e in fs::read_dir(root.join(d)).ok()?.flatten() {
+            paths.push(e.path());
+        }
+    }
+    paths.push(root.join("libs/venus/subset.txt"));
+    paths.sort();
+    // FNV-1a (stabilni napric verzemi Rustu, na rozdil od DefaultHasher).
+    struct Fnv(u64);
+    impl Hasher for Fnv {
+        fn finish(&self) -> u64 {
+            self.0
+        }
+        fn write(&mut self, b: &[u8]) {
+            for &x in b {
+                self.0 = (self.0 ^ x as u64).wrapping_mul(0x100_0000_01b3);
+            }
+        }
+    }
+    let mut h = Fnv(0xcbf2_9ce4_8422_2325);
+    for p in paths {
+        h.write(p.file_name()?.to_string_lossy().as_bytes());
+        h.write(&fs::read(&p).ok()?);
+    }
+    Some(h.finish())
+}
+
 pub fn run(check: bool) -> Result<()> {
     let root = workspace_root();
+    let stamp = root.join("target/venus-check.stamp");
+    let print = fingerprint(&root);
+    if check
+        && let Some(f) = print
+        && fs::read_to_string(&stamp).ok().as_deref() == Some(f.to_string().as_str())
+    {
+        return Ok(());
+    }
     let files = generate(&root)?;
     let dir = root.join("libs/venus/src/vk");
     if check {
@@ -160,6 +203,10 @@ pub fn run(check: bool) -> Result<()> {
         }
         if !stale.is_empty() {
             return Err(format!("libs/venus/src/vk neodpovida vstupum ({}): spust `cargo xtask venus-gen`", stale.join(", ")).into());
+        }
+        if let Some(f) = print {
+            let _ = fs::create_dir_all(root.join("target"));
+            let _ = fs::write(&stamp, f.to_string());
         }
         return Ok(());
     }

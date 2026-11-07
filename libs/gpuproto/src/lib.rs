@@ -157,18 +157,12 @@ impl Request {
             },
             op::CREATE_CONTEXT => Request::CreateContext { capset: r.u32()? },
             op::CREATE_BLOB => {
-                let m = Request::CreateBlob {
-                    mem: r.u32()?,
-                    flags: r.u32()?,
-                    blob_id: r.u64()?,
-                    size: r.u64()?,
-                };
-                if let Request::CreateBlob { flags, .. } = m
-                    && flags & !flags::ALL != 0
-                {
+                let mem = r.u32()?;
+                let f = r.u32()?;
+                if f & !flags::ALL != 0 {
                     return Err(Error::InvalidArgs);
                 }
-                m
+                Request::CreateBlob { mem, flags: f, blob_id: r.u64()?, size: r.u64()? }
             }
             op::DESTROY_BLOB => Request::DestroyBlob { resource: r.u32()? },
             op::SUBMIT => {

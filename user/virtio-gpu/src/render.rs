@@ -13,8 +13,10 @@
 //! proces (init, kompozitor a jim povolene aplikace).
 //!
 //! RIZIKO (odezva): ovladac ceka na odpoved zarizeni synchronne, u
-//! `SUBMIT` s plotem az do zpracovani proudu rendererem. Mezitim neobslouzi
-//! displej ani jine klienty.
+//! `SUBMIT` s plotem az do zpracovani proudu rendererem (nejvys 30 s).
+//! Mezitim neobslouzi displej ani jine klienty. Kdyz plot nedobehne,
+//! klient dostane `TIMED_OUT` a dalsi prikazy pockaji na jeho odpoved;
+//! ovladac nekonci.
 
 use alloc::vec::Vec;
 
@@ -80,6 +82,10 @@ impl Client {
                 if !gpu.context_init || !gpu.capsets.iter().any(|c| c.0 == capset) {
                     return Err(Error::NotSupported);
                 }
+                // Venus bez blobu a sdilene pameti nema kam psat odpovedi.
+                if capset == vgpu::CAPSET_VENUS && (!gpu.blob || gpu.shm.is_none()) {
+                    return Err(Error::NotSupported);
+                }
                 self.ctx = Some(gpu.create_context(capset)?);
                 none(Reply::Context)
             }
@@ -102,6 +108,11 @@ impl Client {
             }
             Request::Submit { ring_idx, fence, data } => {
                 let ctx = self.ctx.ok_or(Error::BadState)?;
+                // Jen osa 0 (CPU): plot na ose, kterou renderer nema, by se
+                // nikdy nesplnil. Dalsi osy az s frontami (VkQueue s ring_idx).
+                if ring_idx != 0 {
+                    return Err(Error::NotSupported);
+                }
                 gpu.submit(ctx, ring_idx, fence, &data)?;
                 none(Reply::Submitted)
             }

@@ -82,6 +82,10 @@ pub struct Gpu {
     pub shm_alloc: Option<vgpu::shm::RangeAlloc>,
     next_ctx: u32,
     next_fence: u64,
+    /// `SUBMIT_3D` s plotem nedobehl vcas: jeho odpoved jeste prijde do
+    /// stejneho bufferu, dalsi prikaz musi pockat. Zarizeni neni vadne
+    /// (pomaly renderer jednoho klienta nesmi shodit displej).
+    stalled: bool,
     /// Zarizeni neodpovedelo nebo vratilo neplatnou frontu: dal ho
     /// nepouzivat.
     pub broken: bool,
@@ -105,6 +109,7 @@ impl Gpu {
             shm_alloc: shm.map(|m| vgpu::shm::RangeAlloc::new(m.len, SHM_ALIGN)),
             next_ctx: 1,
             next_fence: 1,
+            stalled: false,
             device: s.device,
             queue: s.queue,
             irq: s.irq,
@@ -151,12 +156,41 @@ impl Gpu {
     /// Posle prikaz a pocka na odpoved (`resp_len` bajtu). Chyba fronty
     /// nebo vyprseni = zarizeni je vadne (`broken`).
     fn command(&mut self, c: &[u8], resp_len: usize) -> Result<Vec<u8>> {
-        self.command_timeout(c, resp_len, TIMEOUT)
+        self.command_timeout(c, resp_len, TIMEOUT, false)
     }
 
-    fn command_timeout(&mut self, c: &[u8], resp_len: usize, timeout: Duration) -> Result<Vec<u8>> {
+    /// Ceka na dokonceny pozadavek. Chyba fronty = `broken`; vyprseni
+    /// vraci `TIMED_OUT` (rozhodne volajici).
+    fn wait_used(&mut self, timeout: Duration) -> Result<()> {
+        let deadline = libos::time::deadline_after(timeout);
+        loop {
+            match self.queue.take_used() {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) => {}
+                Err(e) => {
+                    self.broken = true;
+                    return Err(e);
+                }
+            }
+            match self.irq.wait(Some(deadline)) {
+                Ok(_) => {}
+                Err(Error::TimedOut) => return Err(Error::TimedOut),
+                Err(e) => {
+                    self.broken = true;
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    /// `fenced`: vyprseni neznamena vadne zarizeni, jen `stalled`.
+    fn command_timeout(&mut self, c: &[u8], resp_len: usize, timeout: Duration, fenced: bool) -> Result<Vec<u8>> {
         if self.broken {
             return Err(Error::IoError);
+        }
+        if self.stalled {
+            self.wait_used(TIMEOUT)?;
+            self.stalled = false;
         }
         if c.len() > RESP_OFF as usize || resp_len > (CMD_PAGE - RESP_OFF) as usize {
             return Err(Error::InvalidArgs);
@@ -176,17 +210,13 @@ impl Gpu {
             },
         ])?;
         self.device.notify(&self.queue);
-        let deadline = libos::time::deadline_after(timeout);
-        loop {
-            match self.queue.take_used() {
-                Ok(Some(_)) => break,
-                Ok(None) => {}
-                Err(e) => {
-                    self.broken = true;
-                    return Err(e);
-                }
+        match self.wait_used(timeout) {
+            Ok(()) => {}
+            Err(Error::TimedOut) if fenced => {
+                self.stalled = true;
+                return Err(Error::TimedOut);
             }
-            if let Err(e) = self.irq.wait(Some(deadline)) {
+            Err(e) => {
                 self.broken = true;
                 return Err(e);
             }
@@ -260,7 +290,7 @@ impl Gpu {
         }
         let id = self.next_fence;
         self.next_fence += 1;
-        let r = self.command_timeout(&vgpu::blob::submit_3d_fenced(ctx, ring_idx, id, data), vgpu::HEADER_SIZE, FENCE_TIMEOUT)?;
+        let r = self.command_timeout(&vgpu::blob::submit_3d_fenced(ctx, ring_idx, id, data), vgpu::HEADER_SIZE, FENCE_TIMEOUT, true)?;
         resp_result(&r)
     }
 }

@@ -76,7 +76,7 @@ That does not affect Venus; the full suite runs on the Windows QEMU.
 | 3 | `CREATE_CONTEXT 4` | the driver sends `CTX_CREATE` with `context_init` = 4 |
 | 4 | `CREATE_BLOB HOST3D, MAPPABLE, blob_id 0, 64 KiB` | the renderer creates shared memory (shm), the driver maps it into the BAR and sends the client a VMO of the window |
 | 5 | `vkSetReplyCommandStreamMESA` | the renderer writes replies into that blob |
-| call | `vkSeekReplyCommandStreamMESA(0)` + commands with `GENERATE_REPLY` | fenced `SUBMIT` on timeline 0 |
+| call | `vkSeekReplyCommandStreamMESA(0)` + commands with `GENERATE_REPLY` | fenced `SUBMIT` on timeline 0; replies are read in chunks (4 KiB, then 4x more) |
 
 **Synchronization:** the render server decodes the stream asynchronously;
 the `SUBMIT_3D` response could arrive before the replies are written. The
@@ -140,7 +140,8 @@ structs hold references (`Option<&'a T>`, `&'a [T]`, `Option<&'a str>`);
 counts stay as in C (`enabled_layer_count`).
 
 `cargo xtask test` runs `venus-check`: the generated code must match the
-inputs. The generator follows the rules of `vn_protocol.py`: a non-const
+inputs (input fingerprint in `target/venus-check.stamp`; without changes
+the XML is not parsed again). The generator follows the rules of `vn_protocol.py`: a non-const
 pointer parameter is an output, an output that is the length of another
 parameter is both input and output (`pPhysicalDeviceCount`), output
 handles and structs are "partial".
@@ -161,7 +162,7 @@ it (`guiproto::display` `OPEN_RENDER`) and passes it on.
 | `CREATE_CONTEXT` | capset | `CONTEXT` |
 | `CREATE_BLOB` | memory (`HOST3D`), flags (`MAPPABLE`...), blob_id, size | `BLOB` (resource, size, `map_info`) + VMO when `MAPPABLE` |
 | `DESTROY_BLOB` | resource | `DONE` |
-| `SUBMIT` | ring_idx, fence, stream (at most 60 KiB, multiple of 4) | `SUBMITTED` (with a fence, after processing) |
+| `SUBMIT` | ring_idx (only 0 for now), fence, stream (at most 60 KiB, multiple of 4) | `SUBMITTED` (with a fence, after processing) |
 
 Closing the channel: the driver unmaps and frees the blobs and destroys
 the context.
@@ -180,10 +181,15 @@ unaligned accesses would fault and reads are slow. Needed: mapping by
 `map_info` (cached/WC) in the kernel - a small kernel change, for the main
 branch.
 
-⚠️ **The driver waits synchronously.** During a fenced `SUBMIT` it serves
-neither the display nor other clients (the first `vkCreateInstance` with
-lavapipe can take seconds). The compositor over Vulkan will need an
-asynchronous queue with fences.
+⚠️ **The driver waits synchronously.** During a fenced `SUBMIT` (at most
+30 s) it serves neither the display nor other clients (the first
+`vkCreateInstance` with lavapipe can take seconds). If the fence does not
+signal, the client gets `TIMED_OUT`, later commands wait for its
+response and the driver keeps running; the client waits 40 s and then
+marks the connection as desynchronized (`Error::Broken`). A `ring_idx`
+other than 0 is rejected (a fence on a missing timeline would never
+signal). The compositor over Vulkan will need an asynchronous queue with
+fences.
 
 Venus is not tested without KVM or under TCG (aarch64 in WSL); `vk.xml`
 is 3.3 MB (a fraction of that compressed in git).
