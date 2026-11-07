@@ -13,9 +13,15 @@ fn entry(name: &str) -> EntryInfo {
         oid: 42,
         generation: 7,
         size: 1234,
-        mtime: 1,
-        ctime: 2,
-        btime: 3,
+        mtime: Time { secs: 1, nanos: 5 },
+        ctime: Time {
+            secs: -2,
+            nanos: 999_999_999,
+        },
+        btime: Time {
+            secs: -12_000_000_000,
+            nanos: 0,
+        },
         tree_bytes: 0,
         tree_files: 0,
         tree_dirs: 0,
@@ -162,6 +168,34 @@ fn oversized_entry_is_truncated_to_fit() {
     let mut small = entry("a");
     small.fit(budget);
     assert!(!small.truncated);
+}
+
+#[test]
+fn time_and_filetime() {
+    // 1. 1. 1970 a cas pred rokem 1970 (zaporne sekundy).
+    assert_eq!(
+        Time { secs: 0, nanos: 0 }.to_filetime(),
+        116_444_736_000_000_000
+    );
+    let t = Time {
+        secs: -86_400,
+        nanos: 500,
+    };
+    assert_eq!(Time::from_filetime(t.to_filetime()), t);
+    // Pred rokem 1601 FILETIME neumi: 0.
+    assert_eq!(
+        Time {
+            secs: -20_000_000_000,
+            nanos: 0
+        }
+        .to_filetime(),
+        0
+    );
+    // Nanosekundy mimo rozsah ve zprave = poskozena zprava.
+    let mut e = entry("a");
+    e.mtime.nanos = 1_000_000_000;
+    let b = Response::Entry(e).encode(op::STAT);
+    assert_eq!(Response::decode(op::STAT, &b), Err(error::CORRUPTED));
 }
 
 #[test]

@@ -75,7 +75,8 @@ Source: protocol and client `libs/osfs-proto`, server `tools/osfs/src/api.rs`
   `PathArg::from_windows_full("Q:\a\b")`).
 - **`EntryInfo`:** `name` (our FS), `windows_name` (empty = hidden),
   `hidden` (why), `kind`, `oid`, `generation`, `size`, times `mtime`,
-  `ctime`, `btime` (ns since 1970), `tree_*`, `dataset` (dataset
+  `ctime`, `btime` (`Time`: signed seconds since 1970 + nanoseconds,
+  dates before 1970 too; `Time::to_filetime()` for Win32), `tree_*`, `dataset` (dataset
   number, 1 = root), `link_target`, `truncated`. The root of a nested
   dataset has `kind = Dataset` (a folder for the user).
   `windows_name` describes only the name itself: an entry inside a hidden

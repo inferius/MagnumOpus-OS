@@ -45,6 +45,10 @@ Testy (překlad jmen včetně vlastnostního testu):
 cargo test -p osfs
 ```
 
+Chování ovladače (sirotci, sdílecí režimy, zámky, „smazat při zavření“,
+nahrazení, datasety) ověří na připojené jednotce ruční skript
+`tools/osfs/scripts/overeni-mount.ps1 -Drive Q:` (postup v jeho hlavičce).
+
 ## Příkazy
 
 | Příkaz | Co dělá |
@@ -129,23 +133,30 @@ zůstane ve stavu po posledním commitu plus změny potvrzené `fsync` - viz
 
 - **Souběh:** WinFsp volá z více vláken, `Fs` je jednovláknový - na
   začátek je kolem něj **jeden zámek** (operace jdou po jedné).
-- **Po cestách:** otevřený soubor si pamatuje jen svou cestu v našem FS.
-  Vrstva handlů (smazaný, ale ještě otevřený soubor, sdílecí režimy) přijde
-  později. Přejmenování přepíše cesty otevřených handlů pod přejmenovaným
-  jménem.
+- **Handly knihovny:** každé otevření ve Windows = handle knihovny `fs`
+  (`Fs::open`). Handle drží **objekt, ne cestu**: čtení, zápis, změna
+  velikosti, časy a výpis adresáře jdou přes něj (`read_h`, `write_h`,
+  `set_len_h`, `set_times_h`, `list_h`), takže otevřený soubor přežije
+  přejmenování svého i nadřazeného jména.
+- **Mazání jako NTFS ve Windows 10+ (POSIX):** svazek hlásí
+  `SupportsPosixUnlinkRename`. Smazané jméno zmizí hned a na jeho místě
+  jde hned vytvořit nový soubor; kdo měl starý soubor otevřený, čte a píše
+  dál (v knihovně je to „sirotek“) a se zavřením posledního handlu objekt
+  i jeho data zmizí. Sirotka po pádu uklidí příští připojení.
+- **Co hlídá WinFsp sám (v jádře):** sdílecí režimy z `CreateFile`
+  (`FILE_SHARE_*`), zámky rozsahu `LockFileEx` a „smazat při zavření“
+  (`FILE_FLAG_DELETE_ON_CLOSE`). Knihovna má vlastní kontroly (sdílení,
+  zámky), které chrání proti jiným klientům (rozšířené API); handly z
+  Windows proto otevírá se sdílením „vše“, aby se kontroly nezdvojovaly.
 - **Velikost písmen:** svazek se hlásí jako „nerozlišuje velikost písmen,
   zachovává ji“. Při otevření se WinFsp vrací skutečné jméno (normalizované,
   dohledané ve výpisu rodiče); bez toho by WinFsp bral jako jméno souboru
   zadanou cestu velkými písmeny a přejmenování `a.txt` -> `A.TXT` by
   považoval za „beze změny“.
-- **Přejmenování s nahrazením** (`MoveFileEx` s `REPLACE_EXISTING`): cíl
-  se nejdřív jen odsune na dočasné jméno `.osfs-nahrazeni-N` ve stejném
-  adresáři, pak se přejmenuje zdroj a teprve potom se odsunutý cíl smaže.
-  Když přejmenování selže, cíl se vrátí zpět - nic se neztratí. Vše probíhá
-  pod jedním zámkem, takže commit ani `fsync` mezistav nezachytí. Handly,
-  které byly otevřené na nahrazeném souboru, už vrací „soubor smazán“
-  (jejich cesta by teď vedla na jiný objekt); obvykle to ale odmítne už
-  WinFsp (otevřený cíl nejde nahradit).
+- **Přejmenování s nahrazením** (`MoveFileEx` s `REPLACE_EXISTING`) je
+  jedna atomická operace knihovny (`Fs::rename_replace`): buď je cíl
+  nahrazený, nebo se nic nezměnilo. Kdo měl původní cíl otevřený, čte dál
+  jeho obsah (sirotek). Adresář jako cíl nahradit nejde (jako u NTFS).
 - **Výpis adresáře** po částech: při prvním dotazu se pořídí snímek seznamu
   jmen, další části (WinFsp se ptá opakovaně, dokud se buffer plní)
   pokračují ve stejném snímku a metadata (`stat`) se čtou jen pro položky,
@@ -154,11 +165,15 @@ zůstane ve stavu po posledním commitu plus změny potvrzené `fsync` - viz
   položkách: vytvoření přidá jedno jméno, smazání a přejmenování ho odeberou.
   Hromadné vytváření souborů v jednom adresáři je proto lineární (3000
   souborů asi za 1 s). Nejvýš 256 adresářů, pak se mezipaměť zahodí celá.
-- **Sériové číslo svazku** je stálé (z času vytvoření souboru s obrazem,
-  velikosti a jmenovky): Windows podle něj poznávají svazek (zástupci,
-  mezipaměť náhledů).
-- **Časy:** naše ns od 1970 -> FILETIME (100 ns od 1601). Čas vytvoření =
-  `btime`, poslední zápis i přístup = `mtime`, změna = `ctime`.
+- **Sériové číslo svazku** je stálé, odvozené z UUID svazku (superblok):
+  Windows podle něj poznávají svazek (zástupci, mezipaměť náhledů); nezmění
+  se ani po přesunu obrazu. **Čas vytvoření svazku** = čas vytvoření
+  kořene (`btime`, zapíše ho `osfs format`).
+- **Časy:** náš čas (sekundy od 1970 se znaménkem + nanosekundy, umí
+  i data před rokem 1970) -> FILETIME (100 ns od 1601; dřívější čas = 0).
+  Čas vytvoření = `btime`, poslední zápis i přístup = `mtime`, změna =
+  `ctime`. Nastavení času z Windows (`SetFileTime`, vlastnosti souboru) se
+  uloží přes `Fs::set_times`.
 - **ID souboru** (`IndexNumber`) = `oid` objektu.
 
 ### Ukládání: commit a fsync
@@ -238,8 +253,6 @@ z Windows nedá zadat.
   selže (`jméno už existuje`).
 - Bez pojmenovaných datových proudů (`soubor:proud`), rozšířených
   atributů a reparse pointů.
-- Smazaný, ale ještě otevřený soubor (POSIXové mazání) zatím ne - až
-  s vrstvou handlů.
 - Přejmenování složky, ve které je otevřený soubor, odmítne už Windows
   (stejně jako u NTFS).
 - Pravidla velikosti písmen se liší v detailech: náš FS porovnává po
@@ -382,10 +395,8 @@ osfs: delete /Slozka/A.TXT
 - **Nastavení atributů** (příznak jen pro čtení, skrytý). Časy už jdou: ovladač
   ukládá čas vytvoření, zápisu a přístupu z `SetBasicInfo` přes `Fs::set_times`.
 - **Informace „je co ukládat“** - commit se teď hlídá vlastním příznakem.
-- **UUID svazku** ve `FsInfo` - sériové číslo pro Windows se teď počítá
-  z času vytvoření souboru s obrazem (u skutečného disku nepůjde).
 - **Zámek zařízení** v knihovně (nebo aspoň v `FileDevice`) - teď ho drží
   `osfs` sám.
-- **Atomické nahrazení při přejmenování** - teď odsunutí cíle, přejmenování
-  a smazání odsunutého pod jedním zámkem.
-- **Operace přes handle/oid** místo cest (vrstva handlů).
+- **Stat položky adresáře přes handle** (např. `stat_at_h(adresář, jméno)`
+  nebo výpis rovnou s metadaty): výpis adresáře ve Windows teď čte
+  metadata položek po cestách z poslední známé cesty adresáře.

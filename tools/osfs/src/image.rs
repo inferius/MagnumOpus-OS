@@ -29,11 +29,6 @@ pub fn now() -> fs::Timestamp {
     }
 }
 
-/// Cas jako u64 ns od 1970 (rozhrani osfs-proto): pred 1970 -> 0.
-pub fn nanos_u64(t: fs::Timestamp) -> u64 {
-    t.as_nanos().clamp(0, u64::MAX as i128) as u64
-}
-
 /// Rozdil mezi 1. 1. 1601 (FILETIME) a 1. 1. 1970 v sekundach.
 const EPOCH_DIFF_SECS: i64 = 11_644_473_600;
 
@@ -47,7 +42,10 @@ pub fn filetime(t: fs::Timestamp) -> u64 {
 /// FILETIME -> cas FS (presne, FILETIME ma rozliseni 100 ns).
 pub fn from_filetime(ft: u64) -> fs::Timestamp {
     let secs = (ft / 10_000_000) as i64 - EPOCH_DIFF_SECS;
-    fs::Timestamp { secs, nanos: (ft % 10_000_000) as u32 * 100 }
+    fs::Timestamp {
+        secs,
+        nanos: (ft % 10_000_000) as u32 * 100,
+    }
 }
 
 /// Vypada cesta jako skutecny disk nebo oddil (ne soubor)? Takove cesty

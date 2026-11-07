@@ -6,7 +6,7 @@
 //! v datasetu `/projekt`), zivy svazek s cestou ve svazku
 //! (`/projekt/cfg.toml`). Prevod resi [`dataset_of`].
 
-use fs::{BlockDevice, Change, ChangeKind, Error, Fs, Kind};
+use fs::{BlockDevice, Change, ChangeKind, Error, Fs};
 
 use crate::image::join;
 
@@ -78,32 +78,27 @@ pub struct DatasetRow {
 
 /// Vsechny datasety svazku (vcetne korenoveho `/`), serazene podle cesty.
 pub fn datasets<D: BlockDevice>(fs: &mut Fs<D>) -> Result<Vec<DatasetRow>, Error> {
-    // Cesty: pruchod stromem, polozky druhu Dataset (i vnorene).
-    let mut found: Vec<(String, u64)> = vec![("/".into(), fs.stat("/")?.dataset)];
-    let mut stack = vec![String::from("/")];
-    while let Some(dir) = stack.pop() {
-        for e in fs.list(&dir)? {
-            let p = join(&dir, &e.name);
-            match e.kind {
-                Kind::Dataset => {
-                    found.push((p.clone(), fs.stat(&p)?.dataset));
-                    stack.push(p);
-                }
-                Kind::Dir => stack.push(p),
-                _ => {}
-            }
-        }
-    }
     let info = fs.datasets()?;
-    let mut rows = Vec::new();
-    for (path, id) in &found {
-        let origin = match info.iter().find(|d| d.id == *id).and_then(|d| d.origin) {
+    let root_id = fs.stat("/")?.dataset;
+    // Cesta podle cisla (i pro puvod klonu).
+    let path_of = |id: u64| -> Option<String> {
+        if id == root_id {
+            return Some("/".into());
+        }
+        info.iter()
+            .find(|d| d.id == id && !d.path.is_empty())
+            .map(|d| d.path.clone())
+    };
+    let mut rows = vec![DatasetRow {
+        path: "/".into(),
+        id: root_id,
+        origin: None,
+    }];
+    for d in &info {
+        let origin = match d.origin {
             None => None,
             Some((ods, osnap, _)) => {
-                let opath = found
-                    .iter()
-                    .find(|(_, i)| *i == ods)
-                    .map(|(p, _)| p.clone());
+                let opath = path_of(ods);
                 let sname = match &opath {
                     Some(p) => fs
                         .snapshots_of(p)
@@ -119,8 +114,13 @@ pub fn datasets<D: BlockDevice>(fs: &mut Fs<D>) -> Result<Vec<DatasetRow>, Error
             }
         };
         rows.push(DatasetRow {
-            path: path.clone(),
-            id: *id,
+            // Bez cesty (nemelo by nastat): aspon cislo.
+            path: if d.path.is_empty() {
+                format!("(dataset #{})", d.id)
+            } else {
+                d.path.clone()
+            },
+            id: d.id,
             origin,
         });
     }

@@ -42,6 +42,11 @@ impl Writer {
         self
     }
 
+    pub fn i64(&mut self, v: i64) -> &mut Self {
+        self.buf.extend_from_slice(&v.to_le_bytes());
+        self
+    }
+
     /// Retezec: delka u16 + UTF-8. Delsi nez `u16::MAX` bajtu se zkrati na
     /// hranici znaku (u nas jmena max. 4 KiB, cesty se omezuji zvlast).
     pub fn str(&mut self, s: &str) -> &mut Self {
@@ -106,6 +111,10 @@ impl<'a> Reader<'a> {
 
     pub fn u64(&mut self) -> Option<u64> {
         Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
+    }
+
+    pub fn i64(&mut self) -> Option<i64> {
+        Some(i64::from_le_bytes(self.take(8)?.try_into().ok()?))
     }
 
     pub fn str(&mut self) -> Option<String> {

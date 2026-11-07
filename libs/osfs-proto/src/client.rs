@@ -80,6 +80,7 @@ pub fn server_error(code: i32) -> io::Error {
         error::NOT_FOUND => io::ErrorKind::NotFound,
         error::ALREADY_EXISTS => io::ErrorKind::AlreadyExists,
         error::ACCESS_DENIED | error::READ_ONLY => io::ErrorKind::PermissionDenied,
+        error::LOCKED => io::ErrorKind::ResourceBusy,
         error::INVALID_ARGS => io::ErrorKind::InvalidInput,
         error::NOT_SUPPORTED => io::ErrorKind::Unsupported,
         error::CORRUPTED => io::ErrorKind::InvalidData,
