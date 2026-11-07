@@ -8,6 +8,11 @@ use alloc::vec::Vec;
 
 use crate::value::Value;
 
+/// Text bunky tabulky.
+pub fn cell_text(v: &Value) -> String {
+    cell(v)
+}
+
 fn cell(v: &Value) -> String {
     match v {
         Value::Str(s) => s.replace('\n', " "),
@@ -21,6 +26,10 @@ fn width(s: &str) -> usize {
 }
 
 /// Je hodnota sloupec cisla (zarovnat doprava)?
+pub fn is_numeric(v: &Value) -> bool {
+    numeric(v)
+}
+
 fn numeric(v: &Value) -> bool {
     matches!(v, Value::Int(_) | Value::Float(_) | Value::Size(_) | Value::Duration(_))
 }

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Přihlášení</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+.page { max-width: 1400px; }
+#ldesk { height: 680px; margin-top: var(--s4); display: grid; place-items: center; }
+.lock { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s3); cursor: pointer;
+  transition: opacity var(--m-slow) var(--ease-standard), transform var(--m-slow) var(--ease-standard); }
+.lock.gone { opacity: 0; transform: translateY(-40px); pointer-events: none; }
+.lock .time { font-size: var(--t-clock-size); line-height: var(--t-clock-line); font-weight: var(--t-clock-weight); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.lock .date { font-size: var(--t-title-size); color: var(--c-ink-muted); }
+.lock .hint { margin-top: var(--s8); font-size: var(--t-small-size); color: var(--c-ink-muted); display: flex; gap: var(--s2); align-items: center; }
+.lock .notes { display: flex; gap: var(--s3); margin-top: var(--s5); }
+.login { position: relative; width: min(380px, calc(100% - 32px)); text-align: center; opacity: 0; transform: translateY(20px); pointer-events: none;
+  transition: opacity var(--m-slow) var(--ease-enter), transform var(--m-slow) var(--ease-enter); }
+.login.on { opacity: 1; transform: none; pointer-events: auto; }
+.avatar { width: 88px; height: 88px; border-radius: 44px; margin: 0 auto var(--s4); display: grid; place-items: center; font-size: 32px; font-weight: 700;
+  background: linear-gradient(135deg, var(--c-accent), var(--c-ai)); color: #fff; box-shadow: var(--sh-popover); }
+.users { display: flex; justify-content: center; gap: var(--s3); margin-bottom: var(--s5); }
+.users button { border: 2px solid transparent; border-radius: var(--r-card); background: transparent; padding: var(--s2) var(--s3); cursor: pointer; font-size: var(--t-small-size); }
+.users button[aria-checked="true"] { border-color: var(--c-accent); background: color-mix(in srgb, var(--c-surface) 70%, transparent); font-weight: 600; }
+.users .ua { width: 44px; height: 44px; border-radius: 22px; margin: 0 auto var(--s1); display: grid; place-items: center; font-weight: 700; color: #fff; }
+.pw { display: flex; gap: var(--s2); align-items: center; padding: var(--s1); border-radius: var(--r-pill); background: var(--c-surface); border: 1px solid var(--c-border-strong); box-shadow: var(--sh-popover); }
+.pw input { flex: 1; border: 0; background: transparent; height: 40px; padding: 0 var(--s4); font-size: var(--t-body-lg-size); min-width: 0; }
+.pw input:focus-visible { outline: none; }
+.pw:focus-within { box-shadow: 0 0 0 2px var(--c-focus), var(--sh-popover); }
+.pw .go { width: 40px; height: 40px; border-radius: 20px; border: 0; background: var(--c-accent); color: var(--c-on-accent); display: grid; place-items: center; cursor: pointer; flex: none; }
+.phrase-card { margin: var(--s4) auto 0; display: inline-flex; gap: var(--s2); align-items: center; padding: var(--s2) var(--s4); border-radius: var(--r-pill);
+  background: var(--c-trust-bg); color: var(--c-trust-ink); border: 1px solid var(--c-trust-border); font-size: var(--t-small-size); }
+.msg { min-height: 24px; margin-top: var(--s3); font-size: var(--t-small-size); }
+.msg.err { color: var(--c-danger); }
+.caps { color: var(--c-warn); }
+.foot { position: absolute; left: var(--s4); right: var(--s4); bottom: var(--s4); display: flex; gap: var(--s2); align-items: center; z-index: 5; }
+.foot .bar-btn { background: color-mix(in srgb, var(--c-surface) 70%, transparent); }
+.shake { animation: shake var(--m-slow) var(--ease-standard); }
+@keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.welcome { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; animation: fade-in var(--m-slow) var(--ease-standard); }
+.methods { display: flex; justify-content: center; gap: var(--s2); margin-top: var(--s4); flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<a class="skip" href="#ldesk">Přeskočit na přihlášení</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header style="margin-bottom:var(--s4)">
+    <h1>Přihlášení</h1>
+    <p class="lead">Zamčená obrazovka a přihlášení kreslí systém ve vrstvě, kam aplikace nesmí. Bezpečnostní fráze se ukáže až po výběru účtu, takže podvržená přihlašovací obrazovka ji neumí napodobit.</p>
+  </header>
+  <div class="hstack">
+    <span class="note" style="margin:0">Režim:</span>
+    <div class="seg" role="radiogroup" aria-label="Režim přihlášení" id="sas">
+      <button role="radio" aria-checked="true" data-value="click">Klik nebo klávesa</button>
+      <button role="radio" aria-checked="false" data-value="sas">Nejdřív Ctrl+Alt+Del (Přísný profil)</button></div>
+    <span class="note" style="margin:0">Heslo v ukázce: <code>heslo</code></span>
+  </div>
+
+  <div class="desk" id="ldesk" aria-label="Přihlašovací obrazovka">
+    <div class="lock" id="lock" tabindex="0" role="button" aria-label="Zamčeno. Stiskni Enter nebo klikni pro přihlášení.">
+      <div class="time" id="time">14:05</div><div class="date" id="date">sobota 7. listopadu</div>
+      <div class="notes"></div>
+      <div class="hint" id="lhint"><svg class="ic s"><use href="#ic-up"/></svg>Klikni nebo stiskni libovolnou klávesu</div>
+    </div>
+    <form class="login" id="login" aria-label="Přihlášení" autocomplete="off">
+      <div class="users" role="radiogroup" aria-label="Účet" id="users">
+        <button type="button" role="radio" aria-checked="true" data-value="0"><span class="ua" style="background:linear-gradient(135deg,#6b3fd6,#c3264d)">M</span>Michal</button>
+        <button type="button" role="radio" aria-checked="false" data-value="1"><span class="ua" style="background:linear-gradient(135deg,#1b7543,#2350c4)">H</span>Host</button>
+      </div>
+      <h2 style="font-size:var(--t-heading-size);margin-bottom:var(--s4)" id="uname">Michal</h2>
+      <label for="pw" class="sr-only">Heslo</label>
+      <div class="pw" id="pwbox"><input id="pw" type="password" autocomplete="current-password" placeholder="Heslo" aria-describedby="msg phrase">
+        <button class="go" type="submit" aria-label="Přihlásit"><svg class="ic"><use href="#ic-right"/></svg></button></div>
+      <div class="msg" id="msg" role="status" aria-live="polite"></div>
+      <div class="phrase-card" id="phrase"><svg class="ic s"><use href="#ic-shieldcheck"/></svg>Systém &middot; tvá fráze: <b>modrá konvice</b></div>
+      <div class="methods"><button type="button" class="btn small ghost"><svg class="ic s"><use href="#ic-key"/></svg>Bezpečnostní klíč</button><button type="button" class="btn small ghost">Zapomenuté heslo</button></div>
+    </form>
+    <div class="foot">
+      <button class="bar-btn" aria-label="Přístupnost: čtečka, velké písmo, vysoký kontrast" id="b-a11y"><svg class="ic"><use href="#ic-accessibility"/></svg></button>
+      <button class="bar-btn" aria-label="Rozložení klávesnice: čeština"><span style="font-weight:700;font-size:12px">CZ</span></button>
+      <span class="spacer"></span>
+      <button class="bar-btn" aria-label="Síť: připojeno"><svg class="ic"><use href="#ic-wifi"/></svg></button>
+      <button class="bar-btn" aria-label="Vypnout nebo restartovat"><svg class="ic"><use href="#ic-power"/></svg></button>
+    </div>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var lock = document.getElementById('lock'), login = document.getElementById('login'), pw = document.getElementById('pw'), msg = document.getElementById('msg');
+  var needSas = false, tries = 0;
+  var DAYS = ['neděle', 'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota'], MON = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince'];
+  function tick() { var d = new Date(); document.getElementById('time').textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); document.getElementById('date').textContent = DAYS[d.getDay()] + ' ' + d.getDate() + '. ' + MON[d.getMonth()]; }
+  tick(); setInterval(tick, 20000);
+  document.querySelector('.lock .notes').innerHTML = '<span class="chip">' + ic('bell', 's') + '2 oznámení</span><span class="chip agent">' + ic('agent', 's') + 'agent čeká na kontrolu</span>';
+  function hint() {
+    document.getElementById('lhint').innerHTML = needSas ? 'Pro přihlášení stiskni <span class="kbd">Ctrl</span> <span class="kbd">Alt</span> <span class="kbd">Del</span>' : ic('up', 's') + 'Klikni nebo stiskni libovolnou klávesu';
+  }
+  function open() {
+    lock.classList.add('gone'); login.classList.add('on');
+    setTimeout(function () { pw.focus(); }, 50);
+  }
+  function close() { lock.classList.remove('gone'); login.classList.remove('on'); pw.value = ''; msg.textContent = ''; lock.focus(); }
+  lock.addEventListener('click', function () { if (!needSas) open(); });
+  lock.addEventListener('keydown', function (e) {
+    if (needSas) { if (e.ctrlKey && e.altKey && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); open(); } return; }
+    if (e.key !== 'Tab') { e.preventDefault(); open(); }
+  });
+  window.MO_SEG(document.getElementById('sas'), function (v) { needSas = v === 'sas'; close(); hint(); });
+  window.MO_SEG(document.getElementById('users'), function (v) {
+    document.getElementById('uname').textContent = v === '0' ? 'Michal' : 'Host';
+    document.getElementById('phrase').style.visibility = v === '0' ? 'visible' : 'hidden';
+    pw.focus();
+  });
+  pw.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') close();
+    var caps = e.getModifierState && e.getModifierState('CapsLock');
+    if (caps) { msg.className = 'msg caps'; msg.textContent = 'Je zapnutý Caps Lock'; } else if (msg.classList.contains('caps')) { msg.textContent = ''; msg.className = 'msg'; }
+  });
+  login.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (pw.value === 'heslo') {
+      login.classList.remove('on');
+      document.getElementById('ldesk').insertAdjacentHTML('beforeend', '<div class="welcome" id="wel" role="status"><div><div class="avatar">M</div><h2 style="font-size:var(--t-display-size)">Dobré odpoledne</h2>' +
+        '<p class="note" style="margin-top:var(--s3)">Obnovuji okna z minula: Terminál, Soubory&hellip;</p><button class="btn" id="again">Zamknout znovu</button></div></div>');
+      document.getElementById('again').addEventListener('click', function () { document.getElementById('wel').remove(); close(); });
+      document.getElementById('again').focus();
+      return;
+    }
+    tries++;
+    var box = document.getElementById('pwbox'); box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+    msg.className = 'msg err';
+    msg.textContent = tries >= 3 ? 'Nesprávné heslo. Další pokus za 30 s (ochrana proti hádání).' : 'Nesprávné heslo. Zkus to znovu.';
+    pw.select();
+  });
+  document.getElementById('b-a11y').addEventListener('click', function () { window.MO_SET('contrast', window.MO_STATE.contrast === 'more' ? 'normal' : 'more'); });
+  hint();
+});
+</script>
+</body>
+</html>

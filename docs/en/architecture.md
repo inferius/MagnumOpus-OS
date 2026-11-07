@@ -969,7 +969,7 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 | What | Why | Gone when |
 |---|---|---|
 | serial driver in the kernel | debug output before userspace exists | stays only as an early console |
-| framebuffer console in the kernel | same | only until init starts: then the kernel hands the framebuffer over (bootstrap `FRAMEBUFFER`) and the compositor takes the screen through virtio-gpu, or without it through `fbdisplay` ([GUI](gui.md#displays-virtio-gpu-and-fbdisplay)); afterwards only a kernel panic writes into the framebuffer |
+| framebuffer console in the kernel | same | draws until the screen owner takes over (`FB_CONTROL` `CLAIM`): without virtio-gpu `fbdisplay` under the compositor ([GUI](gui.md#displays-virtio-gpu-and-fbdisplay)), otherwise the rescue console; after `RELEASE` or a crash of the owner it draws again, a panic always does |
 | `fbdisplay` (GOP framebuffer) | GUI on machines without virtio-gpu (VMware, Hyper-V, VirtualBox, PCs) | fixed firmware resolution, no acceleration and no vsync; replaced by native GPU drivers |
 
 ## Milestones
@@ -980,9 +980,10 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 4. Userspace: syscalls, first process, IPC, libos, initfs (done)
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
 6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
-   TCP/IP, DHCP, DNS, NTP, access through a capability and the firewall
-   done - see [network.md](network.md) and [firewall.md](firewall.md);
-   TLS 1.3, HTTP client, IPv6, own stack remain), jobs with resource
+   TCP/IP, DHCP, DNS, time synchronization `ntpd`, access through a
+   capability, the firewall, TLS 1.3 and an HTTP/1.1 and HTTP/2 client
+   done - see [network.md](network.md), [firewall.md](firewall.md) and
+   [tls-http.md](tls-http.md); IPv6, own stack remain), jobs with resource
    budgets (done)
    - **6a Input (done):** input service, keyboard and mouse (virtio-input;
      PS/2, USB HID), US and CZ layouts, secure attention shortcut -

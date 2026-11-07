@@ -37,8 +37,9 @@ Jádro (u `init`) nebo rodič (u ostatních) spustí první vlákno na symbolu
    - `process` - handle na vlastní proces (mapování paměti, vlákna),
    - `initfs` - obraz initfs (jen `init`),
    - `handles` - další handly od rodiče,
-   - `framebuffer` - framebuffer z firmwaru a jeho geometrie (jen `init`,
-     druh `FRAMEBUFFER`, viz [Syscally](syscally.md#framebuffer-z-firmwaru)),
+   - `framebuffer` - framebuffer z firmwaru (`init` od jádra, vlastník
+     obrazovky od initu; druh `FRAMEBUFFER`, geometrie a převzetí
+     `sys::fb_info` / `sys::fb_claim`, viz [Syscally](syscally.md#fb_control)),
    - `bootstrap` - kanál k rodiči pro další komunikaci,
    - `flags` - příznaky startu z argumentu `SELF_PROCESS`
      (`abi::bootstrap::flags`; jádro nastavuje jen initu, např. `TEST_RUN`),

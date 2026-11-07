@@ -45,6 +45,42 @@ pub fn set(
     clock.set_clock(&req, flags)
 }
 
+/// Jako [`set`], ale cas je ze synchronizace podle site (zdroj
+/// `source::NETWORK`).
+pub fn set_synced(clock: &Resource, t: WallTime, settings: &zone::Settings, write_hardware: bool) -> crate::Result<bool> {
+    let req = SetRequest { time: t, rtc_offset: settings.rtc_offset(t) };
+    let mut flags = set_flags::NETWORK;
+    if write_hardware {
+        flags |= set_flags::WRITE_HARDWARE;
+    }
+    clock.set_clock(&req, flags)
+}
+
+/// Plynula korekce realneho casu (`clock` = Resource s `SET_CLOCK`):
+/// `offset` = posun k dorovnani bez skoku (nahradi zbytek predchoziho),
+/// `freq` = trvala oprava frekvence v ppb. `None` = nemenit. Bez zmen jen
+/// vrati stav. Meze: `abi::time::adjust`.
+pub fn adjust(
+    clock: &Resource,
+    offset: Option<i64>,
+    freq: Option<i64>,
+) -> crate::Result<abi::time::AdjustStatus> {
+    use abi::time::adjust as a;
+    let mut flags = 0;
+    if offset.is_some() {
+        flags |= a::OFFSET;
+    }
+    if freq.is_some() {
+        flags |= a::FREQUENCY;
+    }
+    sys::clock_adjust(
+        clock.handle().raw(),
+        offset.unwrap_or(0),
+        freq.unwrap_or(0),
+        flags,
+    )
+}
+
 /// Oprava pri startu, kdyz je RTC v mistnim case (dual-boot s Windows):
 /// jadro precteny cas bralo jako UTC, takze se od nej odecte posun pasma.
 /// Hardwarove hodiny se nemeni (zustavaji v mistnim case). Vraci opraveny

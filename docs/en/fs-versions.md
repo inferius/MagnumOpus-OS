@@ -99,9 +99,45 @@ nodes (`JOURNAL_ROOM`), otherwise a commit on a full disk might have nowhere
 to store the tree; changes the commit adds itself (the journal) do not
 count as an operation in progress.
 
+### Phase 3: data (`INCOMPAT_PTR_COPY`, `INCOMPAT_DATA`)
+
+> **Change from v3 (phase 2):** a 48 B pointer with the address of a second
+> copy, an extent with flags and compression, a deadlist with a copy, items
+> 24-29. **Why:** metadata 2x with self-healing, compression, instant
+> copies, deduplication and preallocation need room in the format. In
+> detail: [FS data](fs-data.md#on-disk).
+
+A change within v3, recognised by the flags `INCOMPAT_PTR_COPY` (incompat
+bit 2, **required**) and `INCOMPAT_DATA` (incompat bit 3); formatting sets
+both.
+
+| Area | Phase 2 | Phase 3 | Why |
+|---|---|---|---|
+| pointer (`BlockPtr`) | 40 B | **48 B**: + address of the second copy (offset 40) | every node 2x, repair from the copy without falling back a generation |
+| superblock | root 80-120, space 120-160, label 216-248 | root **80-128**, space **128-176**, other fields from 176, label **232-264** | pointers are longer |
+| internal node | 64 B entry, up to 255 children | **72 B** entry, up to **227** children | 48 B child pointer |
+| extent | flags reserved (0) | bit 0 unwritten, 1 shared, 2 copy (+ address), 8-15 compression (+ physical length and bytes, one checksum) | preallocation, instant copies and deduplication, data 2x, compression in 128 KiB chunks |
+| deadlist | 24 B (start, length, birth) | **32 B**: + start of the copy | the copy is freed with the first |
+| tree items | 1-23 | + 24 `DATAOPT`, 25 `SHARE`, 26 `DEDUP`, 27 `SCRUB`, 28 `SCRUBERR`, 29 `DEDUPPOS` | data settings, sharing table, deduplication index, scrub state and errors, deduplication position |
+| intent log | extent: block, checksums | extent in **full encoding** (compression, copy); writes into preallocated blocks | `fsync` of compressed data and in-place writes |
+| protocol v2 | op 54-86 | + **110-117** (`fsproto::data`; 87-92 nested datasets) | copies, preallocation, data settings, scrub |
+
+**An older volume** (without `INCOMPAT_PTR_COPY`, 40 B pointer) is
+**rejected** by the driver (`NOT_SUPPORTED`) - a different pointer layout in
+all nodes would mean double code on the hottest path; the FS is in
+development, volumes are created again.
+
+**Behaviour (no format change):** writing zero blocks creates holes (they
+used to be stored); restoring from a snapshot, file versions and merge share
+blocks (instant, no extra space); a shared extent is never freed
+immediately; a read with a bad first copy repairs the copy (during mounting
+only once the mode is decided); defragmentation skips shared, compressed and
+preallocated extents; compression is **off** by default (on NVMe it would
+slow a long write several times).
+
 ### Remaining in v3
 
-Phases 3-6 (data, protection, other, cloud) - order in the [design](fs-v3-design.md#implementation-order).
+Phases 4-6 (protection, other, cloud) - order in the [design](fs-v3-design.md#implementation-order).
 
 ## Object times: u64 ns -> i64 s + u32 ns
 

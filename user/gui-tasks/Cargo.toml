@@ -1,0 +1,18 @@
+[package]
+name = "gui-tasks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "gui-tasks"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+guiproto = { path = "../../libs/guiproto" }
+taskproto = { path = "../../libs/taskproto" }
+taskview = { path = "../../libs/taskview" }
+ui = { path = "../../libs/ui", features = ["os"] }

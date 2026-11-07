@@ -6,17 +6,21 @@ members = [
     "libs/abi",
     "libs/boot-info",
     "libs/conf",
+    "libs/dns",
     "libs/elf",
     "libs/fs",
     "libs/fsproto",
     "libs/netfilter",
     "libs/netproto",
     "libs/osfs-proto",
+    "libs/httpc",
     "libs/initfs",
     "libs/manifest",
     "libs/blockproto",
     "libs/inputproto",
     "libs/guiproto",
+    "libs/taskproto",
+    "libs/taskview",
     "libs/gfx",
     "libs/font",
     "libs/vgpu",
@@ -30,20 +34,28 @@ members = [
     "libs/csprng",
     "libs/libos",
     "libs/pci",
+    "libs/tls",
     "libs/tz",
     "libs/shlang",
     "libs/term",
     "libs/virtio",
+    "libs/web",
     "libs/wire",
     "tools/osfs",
+    "user/console",
     "user/devmgr",
     "user/echo",
     "user/fsd",
     "user/fwd",
     "user/netd",
     "user/netprobe",
+    "user/ntpd",
+    "user/fetch",
+    "user/revocd",
+    "user/dnsd",
     "user/init",
     "user/ps2",
+    "user/shsess",
     "user/inputd",
     "user/termd",
     "user/timed",
@@ -59,6 +71,7 @@ members = [
     "user/compd",
     "user/gui-demo",
     "user/gui-term",
+    "user/gui-tasks",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace
@@ -106,6 +119,77 @@ opt-level = 2
 
 [profile.dev.package.ui]
 opt-level = 2
+
+# Kryptografie TLS: bez optimalizace je handshake v QEMU (TCG) o rad
+# pomalejsi (skalarni nasobeni na krivce, RSA) a testy by vyprsely.
+[profile.dev.package.tls]
+opt-level = 3
+
+[profile.dev.package.rustls]
+opt-level = 3
+
+[profile.dev.package."rustls-webpki"]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.hmac]
+opt-level = 3
+
+[profile.dev.package.aes]
+opt-level = 3
+
+[profile.dev.package."aes-gcm"]
+opt-level = 3
+
+[profile.dev.package.ghash]
+opt-level = 3
+
+[profile.dev.package.polyval]
+opt-level = 3
+
+[profile.dev.package.chacha20]
+opt-level = 3
+
+[profile.dev.package.poly1305]
+opt-level = 3
+
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+
+[profile.dev.package."curve25519-dalek"]
+opt-level = 3
+
+[profile.dev.package."x25519-dalek"]
+opt-level = 3
+
+[profile.dev.package."ed25519-dalek"]
+opt-level = 3
+
+[profile.dev.package.p256]
+opt-level = 3
+
+[profile.dev.package.p384]
+opt-level = 3
+
+[profile.dev.package.primeorder]
+opt-level = 3
+
+[profile.dev.package."elliptic-curve"]
+opt-level = 3
+
+[profile.dev.package."crypto-bigint"]
+opt-level = 3
+
+[profile.dev.package.ecdsa]
+opt-level = 3
+
+[profile.dev.package.rsa]
+opt-level = 3
+
+[profile.dev.package."num-bigint-dig"]
+opt-level = 3
 
 [profile.release]
 panic = "abort"

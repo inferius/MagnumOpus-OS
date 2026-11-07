@@ -33,15 +33,19 @@ pub mod dns;
 pub mod fw;
 pub mod link;
 pub mod ntp;
+#[cfg(feature = "nts")]
+pub mod nts;
 pub mod policy;
+pub mod resolver;
 
 #[cfg(feature = "client")]
 mod client;
-#[cfg(feature = "client")]
 pub mod io;
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, feature = "nts"))]
+mod tests_nts;
 
 use alloc::vec::Vec;
 use core::net::IpAddr;
@@ -187,6 +191,8 @@ pub struct Info {
     pub dns: Vec<IpAddr>,
     /// Prava relace, ktera se ptala.
     pub rights: u32,
+    /// Profil site dovoluje neoverene DNS a NTP jako zalohu (firewall).
+    pub unauthenticated_fallback: bool,
 }
 
 impl Info {
@@ -214,6 +220,7 @@ impl Info {
             w.ip(*d);
         }
         w.u32(self.rights);
+        w.u8(self.unauthenticated_fallback as u8);
     }
 
     pub fn get(r: &mut Reader) -> Result<Self> {
@@ -248,6 +255,7 @@ impl Info {
             gateway,
             dns,
             rights: r.u32()?,
+            unauthenticated_fallback: r.u8()? != 0,
         })
     }
 }

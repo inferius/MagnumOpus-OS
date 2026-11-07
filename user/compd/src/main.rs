@@ -297,6 +297,17 @@ impl Service {
                 self.peers.add_inspect(mine);
                 (String::new(), alloc::vec![theirs.into_handle()])
             }),
+            control::TASKS => {
+                let mut n = || words.next().and_then(|w| w.parse::<u32>().ok());
+                match (n(), n(), self.comp.as_mut()) {
+                    (Some(run), Some(agent), Some(c)) => {
+                        c.set_tasks(run, agent.min(run));
+                        Ok((String::new(), Vec::new()))
+                    }
+                    (_, _, None) => Err(Error::NotFound),
+                    _ => Err(Error::InvalidArgs),
+                }
+            }
             control::STATUS => match &self.comp {
                 Some(c) => {
                     let mut s = String::new();

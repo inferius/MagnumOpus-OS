@@ -75,7 +75,7 @@ init
  ├─ devmgr ── najde PCI 1af4:1050 (virtio-gpu) ── spustí virtio-gpu
  │            initu pošle zprávu `display` + kanál (displayproto)
  ├─ fbdisplay ─ jen když `display` nepřišel: framebuffer z firmwaru
- │              (bootstrap FRAMEBUFFER od jádra), viz Displeje
+ │              (bootstrap FRAMEBUFFER, FB_CONTROL CLAIM), viz Displeje
  ├─ inputd
  └─ compd ─── init mu pošle `display` (kanál ovladače), `input`
               (nový kanál fokusu od inputd), `secure` (kanál zkratky)
@@ -413,6 +413,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `actions <volající> [automat]` | - | `ok` + kanál volání akcí; `automat` = kanál agenta, každé volání se potvrzuje dialogem (příznak ve zprávě volající neobejde) |
 | `inspect` | - | `ok` + kanál inspekce |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
+| `tasks <běží> <agent>` | - | `ok` (ikona úloh v panelu) |
 
 **Inspekce** (`inspect`, pro testy, později čtečku obrazovky a lupu):
 seznam oken, strom přístupnosti okna v souřadnicích obrazovky, akce přes
@@ -546,7 +547,7 @@ framebuffer není a bez virtio-gpu GUI nenaběhne (`init: grafika
 <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Výběr ovladače displeje">
 <defs><marker id="fbd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="20" width="200" height="70" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">loader (UEFI)</text><text class="m" x="110" y="64" text-anchor="middle">vybere GOP mimo virtio-gpu</text><text class="m" x="110" y="80" text-anchor="middle">fyz. adresa, w, h, stride, RGB/BGR</text>
-<rect class="box" x="10" y="130" width="200" height="80" rx="6"/><text class="t b" x="110" y="155" text-anchor="middle">jádro</text><text class="m" x="110" y="174" text-anchor="middle">konzole do fb do startu initu</text><text class="m" x="110" y="190" text-anchor="middle">pak bootstrap FRAMEBUFFER</text><text class="m" x="110" y="204" text-anchor="middle">(VMO write-combining)</text>
+<rect class="box" x="10" y="130" width="200" height="80" rx="6"/><text class="t b" x="110" y="155" text-anchor="middle">jádro</text><text class="m" x="110" y="174" text-anchor="middle">log do fb do FB_CONTROL CLAIM</text><text class="m" x="110" y="190" text-anchor="middle">bootstrap FRAMEBUFFER initu</text><text class="m" x="110" y="204" text-anchor="middle">(VMO write-combining)</text>
 <path class="ln" d="M110 90 L110 128" marker-end="url(#fbd1)"/>
 <rect class="acc" x="290" y="130" width="200" height="80" rx="6"/><text class="t b" x="390" y="155" text-anchor="middle">init</text><text class="m" x="390" y="174" text-anchor="middle">devmgr hlásí display?</text><text class="m" x="390" y="190" text-anchor="middle">ano: virtio-gpu</text><text class="m" x="390" y="204" text-anchor="middle">ne: spustí fbdisplay</text>
 <path class="ln" d="M210 170 L288 170" marker-end="url(#fbd1)"/>
@@ -560,25 +561,33 @@ framebuffer není a bez virtio-gpu GUI nenaběhne (`init: grafika
 <figcaption>Výběr ovladače displeje. Kompozitor neví, který z nich běží.</figcaption>
 </figure>
 
-### Předání framebufferu z jádra
+### Kdo vlastní framebuffer
 
-Jádro předá initu framebuffer ve startovní zprávě (druh `FRAMEBUFFER`,
-viz [Syscally](syscally.md#framebuffer-z-firmwaru)): fyzický objekt paměti
-a geometrii (`abi::bootstrap::FramebufferInfo`: šířka, výška, krok
-v pixelech, formát). Od té chvíle konzole jádra do framebufferu nekreslí,
-log jde dál na sériovou linku. Výjimka je panika jádra: tu jádro do
-framebufferu vypíše i po předání (systém stejně končí a hlášení je
-cennější než obraz).
+Jádro dá initu framebuffer ve startovní zprávě (druh `FRAMEBUFFER`, viz
+[Syscally](syscally.md#framebuffer-z-firmwaru)) a kreslí do něj log, dokud
+ho vlastník výslovně nepřevezme ([`FB_CONTROL`](syscally.md#fb_control)
+`CLAIM`). Po `RELEASE` nebo pádu vlastníka jádro obrazovku smaže a kreslí
+log dál; panika jádra kreslí vždy.
 
-Jádro framebuffer nepředá (zůstane u konzole jádra a varuje v logu), když
-by překrýval RAM pro alokátor, nezačíná na hranici stránky nebo je menší
-než jeho geometrie.
+O vlastníkovi rozhoduje init na jednom místě (`gui::display`):
+
+| Situace | Vlastník framebufferu |
+|---|---|
+| virtio-gpu je | nikdo z GUI (obraz jde přes virtio-gpu); framebuffer zůstává pro záchrannou konzoli |
+| virtio-gpu není | `fbdisplay` pod kompozitorem (init mu dá duplikát handlu) |
+| GUI neběží nebo spadne | záchranná konzole `user/console` (příkaz `display`), viz [Shell](navrh-shell.md) |
+
+Kompozitor skončí -> `fbdisplay` dostane zavřený kanál a skončí; jádro mu
+obrazovku vezme zpět při konci procesu (i při pádu), ale jen když ji pořád
+drží. Výslovný `RELEASE` `fbdisplay` nevolá: jádro neověřuje volajícího
+a po pádu kompozitoru už obrazovku mohla převzít záchranná konzole. `Startup::framebuffer`
+initu zůstává, takže ji init může hned předat konzoli.
 
 ### Ovladač fbdisplay
 
 `user/fbdisplay` dostane od initu objekt paměti framebufferu a kanál
-displeje (kind USER) a jako první zprávu na bootstrap kanálu konfiguraci
-`fb <šířka> <výška> <krok> <rgb|bgr>` (`fbcopy::Geometry`). Protokol:
+displeje (kind USER). Geometrii zjistí sám (`FB_CONTROL` `INFO`),
+framebuffer namapuje a pak obrazovku převezme (`CLAIM`). Protokol:
 
 1. `INFO` -> `MODES` s jediným výstupem o rozlišení firmwaru, schopnosti 0,
 2. `ATTACH` s VMO kompozitoru (jen čtení); jiná velikost než framebuffer
@@ -605,7 +614,7 @@ z framebufferu nikdy nečte.
   vykreslování monitoru). Firmware nedává žádné přerušení snímku.
 - ⚠️ **Mapování framebufferu i v přímé mapě jádra** má typ cache podle MTRR
   firmwaru, proces ho má WC. Dvě mapování s různým typem jsou na x86
-  formálně nedefinovaná; jádro po předání přes svoje mapování nepíše
+  formálně nedefinovaná; jádro po `CLAIM` přes svoje mapování nepíše
   (jen při panice), takže v praxi nevadí.
 
 ## Nativní knihovna UI (`libs/ui`)
@@ -687,6 +696,41 @@ přístupnosti `set-value` nebo akcí `terminal.run` (vyžaduje potvrzení).
 Napojení na službu relací (`termd`, protokol `term::proto`) dělá vlákno
 terminálu: místo místního řádkového editoru pošle `Run` a vykreslí bloky
 výstupu do stejné mřížky.
+
+## Správce úloh
+
+Okno se stejnými daty jako příkaz `tasks` v terminálu (viz [Přehled
+úloh](architektura.md#přehled-úloh-odsouhlaseno)) a ikona „běží N úloh“
+v panelu kompozitoru.
+
+| Část | Kde | Co dělá |
+|---|---|---|
+| protokol | `libs/taskproto` (návrh, odsouhlasuje vlákno shellu, které dělá `taskd`) | seznam úloh, odběr změn se snímkem a pořadovým číslem (navázání po výpadku), akce zrušit, pozastavit, pokračovat, výpis; registrace úloh producenty |
+| model a okno | `libs/taskview` (testy na hostiteli), program `gui-tasks` | seznam (úlohy agenta nahoře), filtr „jen agent“ a „dokončené“, detail s průběhem a spotřebou z jobu, tlačítka akcí |
+| ikona v panelu | `libs/comp` | „Úlohy: N“, oranžově „Úlohy: N (agent M)“, když běží úloha agenta AI; klik dá správce úloh do popředí |
+
+- **Úlohy agenta AI** jsou výrazně označené: štítek „[AGENT AI]“ v seznamu,
+  oranžový štítek „Spustil agent AI (kdo)“ v detailu, počet v záhlaví
+  a oranžová ikona v panelu.
+- **Oprávnění:** tlačítko je aktivní jen tehdy, když akci `taskd`
+  volajícímu povolil (bity `actions` úlohy) a dovoluje ji stav úlohy.
+  Rozhoduje vždy `taskd` (odpověď `ACCESS_DENIED`); systémová úloha bez
+  práva má všechna tlačítka neaktivní a okno to řekne.
+- **Teď:** dokud `taskd` není v systému, okno běží nad testovacími daty
+  (`TestBackend` se chová jako taskd: kontrola práv, změny stavu
+  událostmi) a počet pro ikonu posílá init řídicím příkazem
+  `tasks <běží> <agent>`. Až bude `taskd`, dostane init od něj kanál
+  (`connect`) pro okno a kompozitor (jen čtení).
+
+```text
+Úlohy: běží 4                         [Agent AI: 1 běžících úloh]
+[x] Jen úlohy agenta   [x] Zobrazit dokončené
+[AGENT AI] Refaktorace projektu (klon) - běží 15 %
+Kopírování 3 souborů do /zaloha - běží 40 %
+Scrub svazku data - běží 12 %
+build.sh - čeká: Přepsat výstup? [a/n]
+Stažení aktualizací - hotovo: 3 balíky
+```
 
 ## 3D: Venus a virgl (stav)
 

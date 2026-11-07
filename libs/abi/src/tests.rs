@@ -108,6 +108,8 @@ fn every_syscall_is_documented() {
         "JOB_CREATE",
         "JOB_SET_LIMIT",
         "JOB_INFO",
+        "CLOCK_ADJUST",
+        "FB_CONTROL",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
@@ -137,27 +139,4 @@ fn job_info_roundtrip() {
         },
     };
     assert_eq!(JobInfo::decode(&info.encode()), info);
-}
-
-#[test]
-fn framebuffer_info_roundtrip_and_validation() {
-    use crate::bootstrap::{FramebufferInfo, pixel};
-    let i = FramebufferInfo {
-        width: 1280,
-        height: 800,
-        stride: 1344,
-        format: pixel::BGR,
-    };
-    assert_eq!(FramebufferInfo::from_bytes(&i.to_bytes()), Some(i));
-    assert_eq!(i.bytes(), 1344 * 800 * 4);
-    // Kratka data, nulova sirka, stride < sirka, neznamy format.
-    assert_eq!(FramebufferInfo::from_bytes(&i.to_bytes()[..12]), None);
-    for bad in [
-        FramebufferInfo { width: 0, ..i },
-        FramebufferInfo { stride: 1000, ..i },
-        FramebufferInfo { format: 0, ..i },
-        FramebufferInfo { format: 3, ..i },
-    ] {
-        assert_eq!(FramebufferInfo::from_bytes(&bad.to_bytes()), None);
-    }
 }

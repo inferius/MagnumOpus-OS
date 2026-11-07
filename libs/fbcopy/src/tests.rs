@@ -139,30 +139,3 @@ fn surface_validity() {
     assert!(!Surface { base: core::ptr::null_mut(), ..s }.is_valid());
 }
 
-#[test]
-fn geometry_config_roundtrip() {
-    let g = Geometry {
-        width: 1280,
-        height: 800,
-        stride: 1344,
-        format: Format::Rgb,
-    };
-    let mut text = String::new();
-    g.write(&mut text).unwrap();
-    assert_eq!(text, "fb 1280 800 1344 rgb");
-    assert_eq!(Geometry::parse(&text), Some(g));
-    assert_eq!(g.bytes(), 1344 * 800 * 4);
-    for bad in [
-        "",
-        "pci 0 1 0",
-        "fb 1280 800 1344",
-        "fb 1280 800 1344 xrgb",
-        "fb 1280 800 1000 bgr",
-        "fb 0 800 1344 bgr",
-        "fb 1280 800 1344 bgr navic",
-        "fb 99999 800 99999 bgr",
-        "fb -1 800 1344 bgr",
-    ] {
-        assert_eq!(Geometry::parse(bad), None, "{bad:?}");
-    }
-}

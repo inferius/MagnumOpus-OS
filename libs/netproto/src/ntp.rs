@@ -123,3 +123,93 @@ pub fn corrected(t4: WallTime, offset_ns: i128) -> WallTime {
         nanos: total.rem_euclid(1_000_000_000) as u32,
     }
 }
+
+/// Vzorek mereni: posun a zpozdeni (ns).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sample {
+    pub offset_ns: i128,
+    pub delay_ns: i128,
+}
+
+/// Z davky mereni jednoho serveru vybere vzorek s nejmensim zpozdenim:
+/// u nej se nejmene projevi nesymetricka cesta a fronty (filtr hodin NTP).
+pub fn best_sample(samples: &[Sample]) -> Option<Sample> {
+    samples.iter().copied().min_by_key(|s| s.delay_ns)
+}
+
+/// Spoji posuny vic serveru: median (jeden spatny server vysledek nestahne).
+pub fn combine(offsets: &mut [i128]) -> Option<i128> {
+    if offsets.is_empty() {
+        return None;
+    }
+    offsets.sort_unstable();
+    let n = offsets.len();
+    Some(if n % 2 == 1 {
+        offsets[n / 2]
+    } else {
+        (offsets[n / 2 - 1] + offsets[n / 2]) / 2
+    })
+}
+
+/// Rychlost dorovnavani jadra (500 ppm), aby slo odhadnout, kolik
+/// z predchozi korekce uz probehlo.
+pub const SLEW_PPB: i128 = 500_000;
+
+/// Rizeni hodin klientem (zjednodusena smycka FLL): z posunu mezi
+/// mericimi body odhadne, o kolik krystal trvale predbiha, a navrhne
+/// opravu frekvence. Posun samotny dorovnava jadro (timed).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Discipline {
+    /// Posledni korekce: (monotonni cas ns, posun ns).
+    last: Option<(u64, i128)>,
+    /// Navrzena celkova oprava frekvence (ppb).
+    pub freq_ppb: i64,
+    /// Interval dotazu (s).
+    pub poll_secs: u64,
+    pub min_poll: u64,
+    pub max_poll: u64,
+}
+
+/// Nejkratsi interval, ze ktereho se odhaduje frekvence (kratsi = sum).
+pub const FREQ_MIN_INTERVAL_NS: u64 = 16_000_000_000;
+/// Posun, pod kterym se interval dotazu prodluzuje (hodiny jsou srovnane).
+pub const STABLE_OFFSET_NS: i128 = 2_000_000;
+
+impl Discipline {
+    pub fn new(min_poll: u64, max_poll: u64) -> Self {
+        Self {
+            last: None,
+            freq_ppb: 0,
+            poll_secs: min_poll,
+            min_poll,
+            max_poll,
+        }
+    }
+
+    /// Nove mereni posunu `offset` v okamziku `now` (ns). Vraci navrh
+    /// frekvence (`None` = jeste neni z ceho odhadnout).
+    pub fn update(&mut self, now: u64, offset: i128) -> Option<i64> {
+        let freq = match self.last {
+            Some((t, prev)) if now >= t + FREQ_MIN_INTERVAL_NS => {
+                let dt = (now - t) as i128;
+                // Cast predchozi korekce, kterou jadro jeste nestihlo dorovnat.
+                let done = (dt * SLEW_PPB / 1_000_000_000).min(prev.abs());
+                let residual = prev - prev.signum() * done;
+                let drift = offset - residual;
+                let err_ppb = drift * 1_000_000_000 / dt;
+                // Polovinu chyby (tlumeni sumu), meze jako v jadru.
+                let next = (self.freq_ppb as i128 + err_ppb / 2).clamp(-500_000, 500_000);
+                self.freq_ppb = next as i64;
+                Some(self.freq_ppb)
+            }
+            _ => None,
+        };
+        self.last = Some((now, offset));
+        self.poll_secs = if offset.abs() < STABLE_OFFSET_NS {
+            (self.poll_secs * 2).min(self.max_poll)
+        } else {
+            self.min_poll
+        };
+        freq
+    }
+}

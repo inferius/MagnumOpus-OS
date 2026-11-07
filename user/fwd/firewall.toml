@@ -11,20 +11,25 @@ ask_timeout = 60
 unknown_network = "public"
 audit_entries = 4096
 
+# unauthenticated: kdyz overene DNS (DoH/DoT) nebo NTP (NTS) nefunguje,
+# smi se pouzit neoverene? "never" / "fallback".
 [profiles.public]
 inbound = "deny"
 ping = false
 stealth = true
+unauthenticated = "never"
 
 [profiles.home]
 inbound = "listeners"
 ping = true
 stealth = false
+unauthenticated = "fallback"
 
 [profiles.work]
 inbound = "deny"
 ping = true
 stealth = true
+unauthenticated = "fallback"
 
 [rate]
 syn_per_sec = 100

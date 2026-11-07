@@ -23,13 +23,19 @@ impl<M: Clone> Ui<M> {
             let ty = |h: u32| r.y + (h as i32 - lh as i32) / 2 + base;
             let dim = e.disabled;
             match &e.kind {
-                ElemKind::Label { text, heading } => {
+                ElemKind::Label { text, heading, warn } => {
                     let px = if *heading { theme::HEADING_PX } else { theme::PX };
                     let (hl, hb) = self.text.line(px);
                     let y = r.y + (r.h as i32 - hl as i32) / 2 + hb;
                     let old = c.clip();
                     c.set_clip(old.intersect(&r));
-                    self.text.draw(c, r.x, y, text, px, theme::TEXT);
+                    if *warn {
+                        let tw = self.text.width(text, px) + 16;
+                        c.rounded(Rect::new(r.x, r.y, tw.min(r.w), r.h), 5, theme::WARN);
+                        self.text.draw(c, r.x + 8, y, text, px, theme::WARN_TEXT);
+                    } else {
+                        self.text.draw(c, r.x, y, text, px, theme::TEXT);
+                    }
                     c.set_clip(old);
                 }
                 ElemKind::Button { text, .. } => {

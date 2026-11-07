@@ -7,12 +7,15 @@
 //! zadny displej.
 //!
 //! Startovni zprava (kind USER, v tomto poradi):
-//! 1. fyzicky objekt pameti framebufferu (od jadra, bootstrap `FRAMEBUFFER`),
+//! 1. fyzicky objekt pameti framebufferu (od jadra pres init, bootstrap
+//!    `FRAMEBUFFER`),
 //! 2. kanal ke klientovi (kompozitor, protokol `guiproto::display`);
 //!    jeho zavreni = konec ovladace.
 //!
-//! Prvni zprava na bootstrap kanalu: `fb <sirka> <vyska> <krok> <rgb|bgr>`
-//! (krok v pixelech).
+//! Geometrii zjisti ovladac sam (`FB_CONTROL` `INFO`) a obrazovku prevezme
+//! vyslovne (`CLAIM`: jadro prestane kreslit log). Pri konci procesu
+//! (i padu) ji jadro vrati samo, pokud ji mezitim neprevzal nekdo jiny
+//! (zachranna konzole `user/console`, kterou spousti init).
 //!
 //! Omezeni: jediny vystup s pevnym rozlisenim z firmwaru (`ATTACH` jine
 //! velikosti = `NOT_SUPPORTED`), bez akcelerace a bez vsync - `PRESENTED`
@@ -31,13 +34,44 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{Ordering, fence};
 
-use fbcopy::{Geometry, Surface};
+use fbcopy::{Format, Surface};
 use guiproto::Rect;
 use guiproto::display::{Output, Reply, Request};
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::{Channel, Error, Mapping, Result, Signals, Startup, Vmo, println};
 
 libos::entry!(main);
+
+/// Geometrie framebufferu (z `FB_CONTROL` `INFO`).
+#[derive(Debug, Clone, Copy)]
+struct Geometry {
+    width: u32,
+    height: u32,
+    /// Krok radku v pixelech.
+    stride: u32,
+    format: Format,
+}
+
+impl Geometry {
+    fn query(vmo: &Vmo) -> Result<Self> {
+        let i = libos::sys::fb_info(vmo.handle().raw())?;
+        let format = Format::from_abi(i.format).ok_or(Error::NotSupported)?;
+        let dim = 1..=guiproto::MAX_DIM;
+        if !dim.contains(&i.width) || !dim.contains(&i.height) || i.stride < i.width {
+            return Err(Error::NotSupported);
+        }
+        Ok(Self {
+            width: i.width,
+            height: i.height,
+            stride: i.stride,
+            format,
+        })
+    }
+
+    fn bytes(&self) -> u64 {
+        self.stride as u64 * self.height as u64 * 4
+    }
+}
 
 /// Zdroj kompozitoru (VMO jen pro cteni).
 struct Source {
@@ -54,10 +88,12 @@ struct Display {
 }
 
 impl Display {
-    fn open(vmo: Vmo, geo: Geometry) -> Result<Self> {
-        let size = geo.bytes();
+    fn open(vmo: Vmo) -> Result<Self> {
+        let geo = Geometry::query(&vmo)?;
         // Jadro mapuje framebuffer write-combining (vlastnost objektu).
-        let fb = Mapping::new(&vmo, 0, size, MAP_READ | MAP_WRITE)?;
+        let fb = Mapping::new(&vmo, 0, geo.bytes(), MAP_READ | MAP_WRITE)?;
+        // Az je vse pripravene: od ted do framebufferu kreslime jen my.
+        libos::sys::fb_claim(vmo.handle().raw(), true)?;
         Ok(Self {
             geo,
             fb,
@@ -132,22 +168,14 @@ fn main(startup: Startup) -> i64 {
     };
     let fb = Vmo::from_handle(fb);
     let client = Channel::from_handle(client);
-    let geo = startup
-        .bootstrap
-        .read(None)
-        .ok()
-        .and_then(|m| Geometry::parse(core::str::from_utf8(&m.data).ok()?));
-    let Some(geo) = geo else {
-        println!("fbdisplay: neplatna konfigurace od initu");
-        return 2;
-    };
-    let mut display = match Display::open(fb, geo) {
+    let mut display = match Display::open(fb) {
         Ok(d) => d,
         Err(e) => {
-            println!("fbdisplay: framebuffer nelze namapovat: {e}");
+            println!("fbdisplay: framebuffer nelze prevzit: {e}");
             return 3;
         }
     };
+    let geo = display.geo;
     println!(
         "fbdisplay: framebuffer {}x{} (krok {}, {})",
         geo.width,
@@ -172,6 +200,11 @@ fn main(startup: Startup) -> i64 {
             break;
         }
     }
+    // Obrazovku vrati jadro samo pri konci procesu, a jen kdyz ji porad
+    // drzime. Vyslovny `RELEASE` tu ne: jadro neoveruje, kdo obrazovku
+    // drzi, a po padu kompozitoru ji uz mohla prevzit zachranna konzole
+    // (smazali bychom ji obraz).
+    drop(display);
     0
 }
 

@@ -11,9 +11,11 @@ use crate::framebuffer::FbConsole;
 struct Console {
     serial: SerialPort,
     fb: Option<FbConsole>,
-    /// Framebuffer predan do userspace (`release_framebuffer`): bezny
-    /// vystup jde jen na seriovou linku, do framebufferu pise jen panika.
-    released: bool,
+    /// Popis framebufferu z firmware (pro objekt pameti pro userspace).
+    desc: Option<Framebuffer>,
+    /// Framebuffer prevzal userspace (`FB_CONTROL` `CLAIM`): id procesu;
+    /// log jen na seriovou linku.
+    claimed: Option<u64>,
 }
 
 static CONSOLE: SpinLock<Option<Console>> = SpinLock::new(None);
@@ -28,21 +30,9 @@ pub unsafe fn init(fb: &Framebuffer) {
     let mut serial = arch::debug_serial();
     arch::init_debug_serial(&mut serial);
     // SAFETY: predano od volajiciho.
+    let desc = fb.is_present().then_some(*fb);
     let fb = fb.is_present().then(|| unsafe { FbConsole::new(fb) });
-    *CONSOLE.lock() = Some(Console {
-        serial,
-        fb,
-        released: false,
-    });
-}
-
-/// Framebuffer prevezme userspace (bootstrap `FRAMEBUFFER`): jadro do nej
-/// od ted kresli jen pri panice (system stejne konci a hlaseni je
-/// uzitecnejsi nez obraz).
-pub fn release_framebuffer() {
-    if let Some(console) = CONSOLE.lock().as_mut() {
-        console.released = true;
-    }
+    *CONSOLE.lock() = Some(Console { serial, fb, desc, claimed: None });
 }
 
 /// Zapise text na seriovou linku a pripadne i do framebufferu.
@@ -50,12 +40,38 @@ pub fn release_framebuffer() {
 pub fn write(text: &str, to_framebuffer: bool) {
     if let Some(console) = CONSOLE.lock().as_mut() {
         let _ = console.serial.write_str(text);
-        if to_framebuffer
-            && !console.released
-            && let Some(fb) = console.fb.as_mut() {
+        if to_framebuffer && console.claimed.is_none() && let Some(fb) = console.fb.as_mut() {
             let _ = fb.write_str(text);
         }
     }
+}
+
+/// Framebuffer z firmware, kdyz je.
+pub fn framebuffer() -> Option<Framebuffer> {
+    CONSOLE.lock().as_ref().and_then(|c| c.desc)
+}
+
+/// Prevzeti framebufferu procesem `Some(id)` nebo vraceni jadru (`None`;
+/// obrazovka se smaze a log se kresli dal). Panika kresli vzdy.
+pub fn set_claimed(claimed: Option<u64>) {
+    if let Some(c) = CONSOLE.lock().as_mut() {
+        if c.claimed.is_some() && claimed.is_none()
+            && let Some(fb) = c.fb.as_mut()
+        {
+            fb.clear();
+        }
+        c.claimed = claimed;
+    }
+}
+
+/// Proces skoncil: kdyz drzel framebuffer, vrati se jadru (pad konzole
+/// nenecha obrazovku zamrzlou). Vola se mimo zamky procesu.
+pub fn process_finished(pid: u64) -> bool {
+    let held = CONSOLE.lock().as_ref().is_some_and(|c| c.claimed == Some(pid));
+    if held {
+        set_claimed(None);
+    }
+    held
 }
 
 /// Vystup z panic handleru: nesmi cekat na zamek (panika mohla nastat

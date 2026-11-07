@@ -29,6 +29,15 @@ pub static TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
 /// Sluzba site (a firewallu) spustena pri startu.
 pub static NET: spin::Once<NetService> = spin::Once::new();
 
+/// Synchronizace casu (ntpd) spustena po siti.
+pub static NTP: spin::Once<crate::ntp::NtpService> = spin::Once::new();
+/// Sluzba odvolani certifikatu (kanal pro `client`, viz `revocation`).
+pub static REVOCD: spin::Once<crate::revocation::Revocd> = spin::Once::new();
+/// Systemovy resolver (sifrovane DNS, DNSSEC).
+pub static DNSD: spin::Once<crate::dns::Dnsd> = spin::Once::new();
+/// Zamek kanalu k revocd (zprava `client` a odpoved patri k sobe).
+pub static REVOCD_LOCK: spin::Mutex<()> = spin::Mutex::new(());
+
 /// Bezici spravce zarizeni, blokova zarizeni, ktera nasel, a souborovy
 /// system (pokud je na nekterem disku).
 pub struct Devices {
@@ -279,6 +288,8 @@ pub struct NetService {
     /// Kanal agenta uzivatele u `fwd` (dotazy na cile a site). Zatim ho
     /// drzi init (testy); pozdeji ho dostane UI sezeni.
     pub agent: Option<Channel>,
+    /// Konec kanalu netd <-> dnsd pro dnsd (preda se pri jejim startu).
+    pub dnsd_end: Option<Channel>,
 }
 
 /// Cesta konfigurace firewallu na FS (fwd ji vidi jako `/config`).
@@ -298,10 +309,12 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
     let link = devices.nets.remove(0);
     let (root, server) = Channel::create()?;
     let (fw_netd, fw_fwd) = Channel::create()?;
+    let (dns_netd, dns_dnsd) = Channel::create()?;
     let handles = vec![
         StartHandle::user(link.into_handle()),
         StartHandle::user(server.into_handle()),
         StartHandle::user(fw_netd.into_handle()),
+        StartHandle::user(dns_netd.into_handle()),
     ];
     let app = crate::apps::spawn(startup, "netd", handles)?;
     let (process, control) = (app.process, app.control);
@@ -328,11 +341,12 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
         root: Net::new(root),
         fwd,
         agent,
+        dnsd_end: Some(dns_dnsd),
     })
 }
 
 /// Prida uctu `who` pravo pruchodu adresarem (ostatni granty zustanou).
-fn grant_traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
+pub(crate) fn grant_traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
     use fsproto::perm::{Grant, grant, rights};
     let mut acl = fs.permissions(path)?.acl.unwrap_or_default();
     if acl.grants.iter().any(|g| g.who == who && g.rights & rights::TRAVERSE != 0) {
@@ -399,39 +413,4 @@ fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel) -> Result<(Pro
         return Err(Error::IoError);
     }
     Ok((app.process, app.control, agent))
-}
-
-/// Seridi hodiny podle serveru NTP: dotaz pres sit, nastaveni pres sluzbu
-/// casu (jen ta smi `CLOCK_SET`). Vraci posun hodin pred nastavenim v ns.
-pub fn sync_time_ntp(
-    net: &Net,
-    time_service: &TimeService,
-    server: core::net::SocketAddr,
-) -> Result<i128> {
-    let sync = net.ntp_query(server, Duration::from_secs(5))?;
-    let mut msg = Vec::with_capacity(16);
-    msg.extend_from_slice(b"set");
-    msg.extend_from_slice(&sync.time.secs.to_le_bytes());
-    msg.extend_from_slice(&sync.time.nanos.to_le_bytes());
-    // Do RTC nezapisovat: cas ze site plati jen do restartu, RTC opravi
-    // az nastaveni systemu (TODO: zapis do RTC podle konfigurace).
-    msg.push(0);
-    time_service.channel.write(&msg, Vec::new())?;
-    let reply = time_service
-        .channel
-        .read(Some(time::deadline_after(Duration::from_secs(5))))?;
-    if !reply.data.starts_with(b"ok") {
-        println!(
-            "init: sluzba casu odmitla cas z NTP: {}",
-            core::str::from_utf8(&reply.data).unwrap_or("?")
-        );
-        return Err(Error::IoError);
-    }
-    println!(
-        "init: hodiny serizeny podle NTP {} (posun {} ms, zpozdeni {} ms)",
-        server,
-        sync.offset_ns / 1_000_000,
-        sync.delay_ns / 1_000_000
-    );
-    Ok(sync.offset_ns)
 }

@@ -36,7 +36,6 @@ pub const TESTS: &[Test] = &[
     ("200 socketu najednou (driv limit 63)", many_sockets),
     ("opravneni: prava a omezeni cilu relace", restricted),
     ("opravneni: pravidlo se jmenem hostitele", host_rule),
-    ("NTP: seridi hodiny pres sluzbu casu", ntp),
 ];
 
 /// Hostitel ze site slirp.
@@ -57,7 +56,6 @@ pub(super) struct Ports {
     pub echo: u16,
     pub udp_echo: u16,
     pub dns: u16,
-    ntp: u16,
     pub closed: u16,
     /// Hlasi slirp odmitnuti spojeni na hostitele (RST)? Na Windows ne.
     refuses: bool,
@@ -86,7 +84,6 @@ pub(super) fn ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
         echo: get("echo")?,
         udp_echo: get("udp_echo")?,
         dns: get("dns")?,
-        ntp: get("ntp")?,
         closed: get("closed")?,
         refuses: get("refuses")? != 0,
         reset: get("reset")?,
@@ -306,6 +303,9 @@ pub(super) fn tcp_accept(s: &Startup) -> TestResult {
     };
     let net = net()?;
     configured(net)?;
+    // Prichozi spojeni pusti jen profil home (testy firewallu ho nastavi;
+    // s `--only sit` si ho test zajisti sam).
+    super::firewall::ensure_home()?;
     let listener = net
         .tcp_listen(p.forwarded, 2)
         .map_err(|e| fail("naslouchani", e))?;
@@ -411,17 +411,22 @@ fn many_sockets(s: &Startup) -> TestResult {
     }
     // Posledni i prvni socket funguji (sluzba ceka na vsechny kanaly).
     let mut buf = [0u8; 64];
-    for sock in [socks.last().unwrap(), &socks[0]] {
+    for (which, sock) in [("posledni", socks.last().unwrap()), ("prvni", &socks[0])] {
         let mut ok = false;
-        for _ in 0..3 {
+        let mut last = None;
+        // UDP muze slirp ztratit: 5 pokusu po 2 s.
+        for _ in 0..5 {
             sock.send_to(b"mnoho", host(p.udp_echo)).map_err(|e| fail("send_to", e))?;
-            if let Ok((n, _)) = sock.recv_from(&mut buf, Some(Duration::from_secs(2))) {
-                check_eq!(&buf[..n], b"mnoho", "echo");
-                ok = true;
-                break;
+            match sock.recv_from(&mut buf, Some(Duration::from_secs(2))) {
+                Ok((n, _)) => {
+                    check_eq!(&buf[..n], b"mnoho", "echo");
+                    ok = true;
+                    break;
+                }
+                Err(e) => last = Some(e),
             }
         }
-        check!(ok, "UDP echo z jednoho z 200 socketu");
+        check!(ok, format!("UDP echo z {which} z 200 socketu: {last:?}"));
     }
     drop(socks);
     // Po zavreni jdou sockety otevrit znovu (sloty a porty se uvolnily).
@@ -561,25 +566,5 @@ fn host_rule_inner(root: &Net, p: &Ports) -> TestResult {
         Some(Error::AccessDenied),
         "jiny port nez v pravidle"
     );
-    Ok(())
-}
-
-fn ntp(s: &Startup) -> TestResult {
-    let Some(p) = ports(s, "NTP")? else {
-        return Ok(());
-    };
-    let net = net()?;
-    configured(net)?;
-    let guard = crate::system::TIME.lock();
-    let time = guard.as_ref().ok_or("sluzba casu nebezi")?;
-    let offset = crate::system::sync_time_ntp(net, time, host(p.ntp)).map_err(|e| fail("NTP", e))?;
-    drop(guard);
-    // Hodiny hosta jdou z RTC QEMU = cas hostitele; server NTP je tentyz.
-    check!(
-        offset.abs() < 10_000_000_000,
-        format!("posun {} ms je prilis velky", offset / 1_000_000)
-    );
-    let r = libos::time::wall_reading().map_err(|e| fail("cteni casu", e))?;
-    check_eq!(r.source, libos::time::source::SET, "zdroj casu po NTP");
     Ok(())
 }

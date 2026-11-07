@@ -5,16 +5,14 @@
 //!
 //! `init` dostane bootstrap kanal se zpravou (viz `abi::bootstrap`):
 //! handle na vlastni proces, korenovy job (bez limitu, se vsemi pravy)
-//! a objekt pameti s obrazem initfs. Je-li framebuffer z firmwaru (GOP),
-//! dostane ho init jako fyzicky objekt pameti s geometrii (kind
-//! `FRAMEBUFFER`) a konzole jadra do nej od te chvile nekresli.
+//! a objekt pameti s obrazem initfs.
 
 use alloc::sync::Arc;
 use alloc::vec;
 
-use abi::bootstrap::{self, Entry, FramebufferInfo, Header};
+use abi::bootstrap::{self, Entry, Header};
 use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE};
-use boot_info::{BootInfo, Framebuffer, MemoryKind, MemoryRegion, PixelFormat};
+use boot_info::{BootInfo, Framebuffer, MemoryKind, MemoryRegion};
 
 use crate::acpi::Platform;
 use crate::error::{Error, Result};
@@ -68,7 +66,7 @@ fn load_init(
     initfs_vmo: &Arc<MemoryObject>,
     root_job: &Arc<Job>,
     platform: &Platform,
-    framebuffer: Option<(Arc<MemoryObject>, FramebufferInfo)>,
+    framebuffer: Option<Arc<MemoryObject>>,
 ) -> Result<Arc<Process>> {
     let fs = initfs::Initfs::parse(image).map_err(|e| {
         log::error!("initfs je poskozeny: {e}");
@@ -92,12 +90,7 @@ fn load_init(
         .handles()
         .insert(init_end.clone(), init_end.default_rights())?;
     drop(init_end);
-    let has_fb = framebuffer.is_some();
     send_bootstrap(&kernel_end, &process, initfs_vmo, root_job, platform, framebuffer)?;
-    if has_fb {
-        crate::console::release_framebuffer();
-        log::info!("framebuffer predan initu, konzole jadra dal jen na seriove lince");
-    }
     drop(kernel_end);
 
     let thread = sched::create_user_thread(&process, "init")?;
@@ -144,13 +137,17 @@ fn map_stack(process: &Process) -> Result<u64> {
     Ok(base + STACK_SIZE)
 }
 
+/// Objekt pameti framebufferu predany initu (`FB_CONTROL` overi, ze volajici
+/// drzi prave tento objekt).
+pub static FB_VMO: crate::sync::SpinLock<Option<Arc<MemoryObject>>> = crate::sync::SpinLock::new(None);
+
 fn send_bootstrap(
     channel: &Channel,
     process: &Arc<Process>,
     initfs: &Arc<MemoryObject>,
     root_job: &Arc<Job>,
     platform: &Platform,
-    framebuffer: Option<(Arc<MemoryObject>, FramebufferInfo)>,
+    framebuffer: Option<Arc<MemoryObject>>,
 ) -> Result<()> {
     let mut entries: vec::Vec<(u32, u32, Arc<dyn KernelObject>, Rights)> = vec![
         (
@@ -180,6 +177,18 @@ fn send_bootstrap(
     let root = Resource::new_root();
     let root_rights = root.default_rights();
     entries.push((bootstrap::kind::ROOT_RESOURCE, 0, root, root_rights));
+    // Framebuffer z firmware (overeny v `framebuffer_vmo`): init ho preda
+    // vlastnikovi obrazovky (fbdisplay nebo textova konzole), ten ho
+    // prevezme pres `FB_CONTROL` `CLAIM`.
+    if let Some(vmo) = framebuffer {
+        *FB_VMO.lock() = Some(vmo.clone());
+        entries.push((
+            bootstrap::kind::FRAMEBUFFER,
+            0,
+            vmo,
+            Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP,
+        ));
+    }
     for ecam in &platform.pci_ecam {
         let buses = ecam.bus_end as u64 - ecam.bus_start as u64 + 1;
         // Okno pocina na sbernici bus_start; 1 MiB konfigurace na sbernici.
@@ -192,16 +201,6 @@ fn send_bootstrap(
             vmo,
             Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP,
         ));
-    }
-
-    // Doplnkova data za polozkami (geometrie framebufferu).
-    let entries_end = bootstrap::HEADER_SIZE
-        + (entries.len() + framebuffer.is_some() as usize) * bootstrap::ENTRY_SIZE;
-    let mut extra = vec::Vec::new();
-    if let Some((vmo, info)) = framebuffer {
-        let offset = (entries_end + extra.len()) as u32;
-        extra.extend_from_slice(&info.to_bytes());
-        entries.push((bootstrap::kind::FRAMEBUFFER, offset, vmo, Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP));
     }
 
     let mut data = vec::Vec::new();
@@ -217,58 +216,43 @@ fn send_bootstrap(
         data.extend_from_slice(&Entry { kind, arg }.to_bytes());
         handles.push((object, rights));
     }
-    data.extend_from_slice(&extra);
     channel.write(Message::new(data, handles))
 }
 
-/// Framebuffer z firmwaru jako objekt pameti pro init, nebo `None`, kdyz
-/// neni nebo ho nelze bezpecne predat (prekryv s RAM alokatoru,
-/// nezarovnany zacatek, prilis maly na geometrii).
-fn framebuffer_vmo(boot_info: &BootInfo) -> Option<(Arc<MemoryObject>, FramebufferInfo)> {
-    let fb = &boot_info.framebuffer;
-    if !fb.is_present() {
-        return None;
-    }
+/// Framebuffer z firmwaru jako objekt pameti pro init (mapuje se
+/// write-combining), nebo `None`, kdyz neni nebo ho nelze bezpecne predat
+/// (prekryv s RAM alokatoru, nezarovnany zacatek, prilis maly na geometrii).
+fn framebuffer_vmo(boot_info: &BootInfo) -> Option<Arc<MemoryObject>> {
+    let fb = crate::console::framebuffer()?;
     // SAFETY: BootInfo overeny pri startu.
     let regions = unsafe { boot_info.memory_map() };
-    match check_framebuffer(fb, regions) {
-        Ok(info) => match MemoryObject::new_framebuffer(fb.phys_addr, info.bytes()) {
-            Ok(vmo) => Some((vmo, info)),
-            Err(e) => {
-                log::warn!("framebuffer: objekt pameti nelze vytvorit: {e:?}");
-                None
-            }
-        },
-        Err(why) => {
-            log::warn!("framebuffer se do userspace nepreda: {why}");
+    if let Err(why) = check_framebuffer(&fb, regions) {
+        log::warn!("framebuffer se do userspace nepreda: {why}");
+        return None;
+    }
+    match MemoryObject::new_framebuffer(fb.phys_addr, fb.len) {
+        Ok(vmo) => Some(vmo),
+        Err(e) => {
+            log::warn!("framebuffer: objekt pameti nelze vytvorit: {e:?}");
             None
         }
     }
 }
 
-fn check_framebuffer(fb: &Framebuffer, regions: &[MemoryRegion]) -> core::result::Result<FramebufferInfo, &'static str> {
-    let format = match fb.format {
-        PixelFormat::Rgb => bootstrap::pixel::RGB,
-        PixelFormat::Bgr => bootstrap::pixel::BGR,
-        PixelFormat::None => return Err("neni"),
-    };
-    let info = FramebufferInfo {
-        width: fb.width,
-        height: fb.height,
-        stride: fb.stride,
-        format,
-    };
-    if FramebufferInfo::from_bytes(&info.to_bytes()).is_none() {
+fn check_framebuffer(fb: &Framebuffer, regions: &[MemoryRegion]) -> core::result::Result<(), &'static str> {
+    const PAGE: u64 = crate::arch::paging::PAGE_SIZE;
+    let geometry = fb.stride as u64 * fb.height as u64 * 4;
+    if fb.width == 0 || fb.height == 0 || fb.stride < fb.width {
         return Err("neplatna geometrie");
     }
-    if info.bytes() > fb.len {
+    if fb.len == 0 || geometry > fb.len {
         return Err("geometrie je vetsi nez pamet framebufferu");
     }
-    if !fb.phys_addr.is_multiple_of(crate::arch::paging::PAGE_SIZE) {
+    if !fb.phys_addr.is_multiple_of(PAGE) {
         return Err("zacatek neni zarovnany na stranku");
     }
     let start = fb.phys_addr;
-    let end = start + info.bytes().next_multiple_of(crate::arch::paging::PAGE_SIZE);
+    let end = start + fb.len.next_multiple_of(PAGE);
     // Stranky, ktere jadro dava alokatoru: framebuffer s nimi nesmi
     // sdilet ani jednu (proces by zapisoval do cizi pameti).
     let allocatable = |k: MemoryKind| {
@@ -287,5 +271,5 @@ fn check_framebuffer(fb: &Framebuffer, regions: &[MemoryRegion]) -> core::result
     {
         return Err("prekryva RAM pro alokator");
     }
-    Ok(info)
+    Ok(())
 }

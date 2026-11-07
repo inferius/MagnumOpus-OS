@@ -33,7 +33,7 @@ fn child_index(children: &[(Key, Child)], key: &Key) -> usize {
 }
 
 /// Overi uroven uz nacteneho uzlu proti ocekavane (`None` = koren).
-fn check_level(n: &Node, expect: Option<u8>) -> Result<u8> {
+pub(crate) fn check_level(n: &Node, expect: Option<u8>) -> Result<u8> {
     let ok = match &n.body {
         Body::Leaf(_) => n.level == 0,
         Body::Internal(ch) => n.level > 0 && !ch.is_empty(),
@@ -345,6 +345,60 @@ fn range_rec<D: BlockDevice>(
     };
     for child in children {
         if !range_rec(s, &child, Some(level - 1), start, end, f)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Jako `range` od `start` do konce, ale preskoci ulozene podstromy
+/// narozene nejpozdeji v generaci `min_birth` (v nich se od te doby nic
+/// nezmenilo). Pruchod jen novymi zmenami (deduplikace na pozadi, scrub
+/// snapshotu): cena je umerna zmenam, ne velikosti stromu.
+pub fn range_newer<D: BlockDevice>(
+    s: &mut Store<D>,
+    root: &Child,
+    start: &Key,
+    min_birth: u64,
+    f: &mut dyn FnMut(&Key, &[u8]) -> Result<bool>,
+) -> Result<bool> {
+    if matches!(root, Child::Disk(p) if p.birth <= min_birth) {
+        return Ok(true);
+    }
+    newer_rec(s, root, None, start, min_birth, f)
+}
+
+fn newer_rec<D: BlockDevice>(
+    s: &mut Store<D>,
+    c: &Child,
+    expect: Option<u8>,
+    start: &Key,
+    min_birth: u64,
+    f: &mut dyn FnMut(&Key, &[u8]) -> Result<bool>,
+) -> Result<bool> {
+    let n = s.node(c)?;
+    let level = check_level(n, expect)?;
+    let children = match &n.body {
+        Body::Leaf(items) => {
+            let from = items.partition_point(|(k, _)| k < start);
+            for (k, v) in &items[from..] {
+                if !f(k, v)? {
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
+        Body::Internal(children) => {
+            let first = child_index(children, start);
+            children[first..]
+                .iter()
+                .map(|&(_, ch)| ch)
+                .filter(|ch| !matches!(ch, Child::Disk(p) if p.birth <= min_birth))
+                .collect::<Vec<_>>()
+        }
+    };
+    for child in children {
+        if !newer_rec(s, &child, Some(level - 1), start, min_birth, f)? {
             return Ok(false);
         }
     }

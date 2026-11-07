@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nastavení</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+.page { max-width: 1400px; }
+#sdesk { height: 780px; margin-top: var(--s4); }
+#swin { left: 16px; right: 16px; top: 16px; bottom: 16px; }
+.sx { display: grid; grid-template-columns: 230px 1fr; height: 100%; }
+.snav { background: var(--c-surface-2); border-right: 1px solid var(--c-border); padding: var(--s3); overflow: auto; }
+.snav .search { display: flex; align-items: center; gap: var(--s2); height: 34px; padding: 0 var(--s3); border-radius: var(--r-pill); background: var(--c-surface); border: 1px solid var(--c-border); margin-bottom: var(--s3); }
+.snav .search input { border: 0; background: transparent; width: 100%; font-size: var(--t-small-size); }
+.snav .search input:focus-visible { outline: none; }
+.snav [role="tab"] { display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: 40px; padding: 0 var(--s3); border: 0; border-radius: var(--r-control);
+  background: transparent; text-align: left; cursor: pointer; }
+.snav [role="tab"]:hover { background: var(--c-surface-3); }
+.snav [role="tab"][aria-selected="true"] { background: var(--c-accent-soft); color: var(--c-accent-ink); font-weight: 600; }
+.spanel { overflow: auto; padding: var(--s6) var(--s7) var(--s9); }
+.spanel h2 { font-size: var(--t-heading-size); line-height: var(--t-heading-line); margin-bottom: var(--s2); }
+.spanel h3 { font-size: var(--t-body-lg-size); margin: var(--s7) 0 var(--s3); }
+.profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s3); margin-top: var(--s4); }
+.prof { text-align: left; border: 2px solid var(--c-border); border-radius: var(--r-card); background: var(--c-surface); padding: var(--s4); cursor: pointer; position: relative; }
+.prof:hover { border-color: var(--c-border-strong); }
+.prof[aria-checked="true"] { border-color: var(--c-accent); background: var(--c-accent-soft); }
+.prof .pi { width: 40px; height: 40px; border-radius: var(--r-control); display: grid; place-items: center; background: var(--c-surface-3); color: var(--c-accent-ink); margin-bottom: var(--s3); }
+.prof[aria-checked="true"] .pi { background: var(--c-accent); color: var(--c-on-accent); }
+.prof b { font-size: var(--t-body-lg-size); display: block; }
+.prof .d { font-size: var(--t-small-size); color: var(--c-ink-muted); margin-top: var(--s1); }
+.prof ul { margin: var(--s3) 0 0; padding-left: 18px; font-size: var(--t-small-size); }
+.prof .tag { position: absolute; right: var(--s3); top: var(--s3); }
+.opt { display: grid; grid-template-columns: 36px 1fr auto; gap: var(--s4); align-items: center; padding: var(--s4) 0; border-bottom: 1px solid var(--c-border); }
+.opt .oi { width: 36px; height: 36px; border-radius: var(--r-control); background: var(--c-surface-3); display: grid; place-items: center; color: var(--c-accent-ink); }
+.opt .t { font-weight: 600; }
+.opt .h { font-size: var(--t-small-size); color: var(--c-ink-muted); margin-top: 2px; }
+.opt .mod { display: none; margin-top: var(--s2); gap: var(--s2); align-items: center; font-size: var(--t-small-size); }
+.opt.modified .mod { display: flex; }
+.opt select.input { width: auto; min-width: 200px; }
+.opt .ctl { display: flex; align-items: center; gap: var(--s3); justify-content: flex-end; flex-wrap: wrap; }
+.summary { display: flex; gap: var(--s3); align-items: center; padding: var(--s3) var(--s4); border-radius: var(--r-card); background: var(--c-surface-2); margin-top: var(--s4); font-size: var(--t-small-size); flex-wrap: wrap; }
+.barpos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--s3); }
+.barpos button { border: 2px solid var(--c-border); border-radius: var(--r-card); background: var(--c-surface); padding: var(--s2); cursor: pointer; font-size: var(--t-small-size); }
+.barpos button[aria-checked="true"] { border-color: var(--c-accent); background: var(--c-accent-soft); font-weight: 600; }
+.barpos .scr { position: relative; height: 62px; border-radius: 8px; background: linear-gradient(135deg, var(--c-wall-a), var(--c-wall-b)); margin-bottom: var(--s2); overflow: hidden; }
+.barpos .scr i { position: absolute; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 4px; }
+.themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s3); }
+.themes button { border: 2px solid var(--c-border); border-radius: var(--r-card); background: var(--c-surface); padding: var(--s2); cursor: pointer; font-size: var(--t-small-size); text-align: left; }
+.themes button[aria-checked="true"] { border-color: var(--c-accent); background: var(--c-accent-soft); font-weight: 600; }
+.themes .pv { height: 64px; border-radius: 8px; margin-bottom: var(--s2); display: flex; overflow: hidden; }
+.preview-text { padding: var(--s4); border-radius: var(--r-card); border: 1px solid var(--c-border); background: var(--c-surface); }
+.sys-ov { position: absolute; inset: 0; z-index: 900; }
+@media (max-width: 900px) { .sx { grid-template-columns: 1fr; } .snav { display: none; } .opt { grid-template-columns: 1fr; } .opt .oi { display: none; } .opt .ctl { justify-content: flex-start; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#panel">Přeskočit na nastavení</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header style="margin-bottom:var(--s4)">
+    <h1>Nastavení</h1>
+    <p class="lead">Profily zabezpečení nastaví desítku voleb najednou; každou jde změnit zvlášť a nastavení ukáže, co se od profilu liší. Zmírnění zabezpečení potvrzuje systémový dialog s heslem. Stránky Vzhled a Přístupnost ovládají i tento prototyp.</p>
+  </header>
+  <div class="desk" id="sdesk">
+    <section class="win" id="swin" role="region" aria-label="Nastavení">
+      <div class="win-title">
+        <span class="trust" tabindex="0" role="button" aria-label="Systém, aplikace Nastavení"><svg class="ic s"><use href="#ic-shieldcheck"/></svg>Systém</span>
+        <span class="name">Nastavení</span>
+        <div class="wbtns"><button class="wbtn" aria-label="Minimalizovat"><svg class="ic"><use href="#ic-min"/></svg></button><button class="wbtn" aria-label="Maximalizovat"><svg class="ic"><use href="#ic-max"/></svg></button><button class="wbtn close" aria-label="Zavřít"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      </div>
+      <div class="win-body">
+        <div class="sx">
+          <nav class="snav" aria-label="Kategorie">
+            <div class="search"><svg class="ic s"><use href="#ic-search"/></svg><input aria-label="Hledat v nastavení" placeholder="Hledat v nastavení"></div>
+            <div role="tablist" aria-orientation="vertical" id="tabs" aria-label="Kategorie nastavení"></div>
+          </nav>
+          <div class="spanel" id="panel" role="tabpanel" tabindex="-1"></div>
+        </div>
+      </div>
+    </section>
+    <div id="sysl"></div>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var CATS = [['security', 'shieldcheck', 'Zabezpečení'], ['look', 'palette', 'Vzhled'], ['a11y', 'accessibility', 'Přístupnost'], ['net', 'wifi', 'Síť'],
+    ['dev', 'keyboard', 'Zařízení'], ['ai', 'agent', 'AI a agenti'], ['users', 'user', 'Účty'], ['about', 'info', 'O systému']];
+  var cur = 'security';
+
+  // ---- Profily a volby -----------------------------------------------------
+  // Hodnota kazde volby v profilech [standardni, prisny, volny]; poradi voleb v select = od nejvolnejsi.
+  var OPTS = [
+    { id: 'badusb', ic: 'usb', t: 'Ověření nového vstupního zařízení', h: 'Ochrana proti BadUSB: stisky z nového zařízení se zahazují, dokud na něm nenapíšeš kód ze systémového dialogu.',
+      kind: 'select', vals: ['vypnuto', 'jen klávesnice', 'všechna vstupní zařízení'], prof: [1, 2, 0] },
+    { id: 'net', ic: 'globe', t: 'Nové síťové spojení aplikace', h: 'Kdy se firewall ptá, když aplikace chce na nový cíl.',
+      kind: 'select', vals: ['podle manifestu, bez dotazu', 'dotaz u aplikací bez manifestu', 'dotaz u každého nového cíle'], prof: [1, 2, 0] },
+    { id: 'launch', ic: 'shield', t: 'Spouštění programů', h: 'Brána spuštění ověřuje podpis programu.',
+      kind: 'select', vals: ['povolit vše', 'nepodepsané se zeptá', 'jen podepsané'], prof: [1, 2, 0] },
+    { id: 'synth', ic: 'keyboard', t: 'Umělý vstup (automatizace, vzdálená plocha, agent)', h: 'Vždy viditelné: lišta ukáže, kdo ovládá klávesnici a myš.',
+      kind: 'select', vals: ['povolit s indikátorem', 'zeptat se pokaždé', 'zakázat'], prof: [1, 2, 0] },
+    { id: 'screen', ic: 'monitor', t: 'Snímání obrazovky', h: 'Snímek nebo nahrávání jen přes capability; běžící snímání je vidět v liště.',
+      kind: 'select', vals: ['pamatovat povolení', 'zeptat se pokaždé'], prof: [0, 1, 0] },
+    { id: 'lock', ic: 'terminal', t: 'Zámek nebezpečných operací v terminálu', h: 'Příkaz, který změní víc souborů, se vždy spustí nanečisto a zeptá se.',
+      kind: 'select', vals: ['nad 100 souborů', 'nad 20 souborů', 'nad 5 souborů'], prof: [1, 2, 0] },
+    { id: 'cloud', ic: 'cloud', t: 'Cloudové modely AI', h: 'Výchozí jsou lokální modely; poslání dat ven je viditelná volba.',
+      kind: 'select', vals: ['povolit s dotazem', 'vypnuto', 'vypnuto a zamčeno'], prof: [1, 2, 0] },
+    { id: 'agent', ic: 'agent', t: 'Agent pracuje jen bokem', h: 'Změny agenta vznikají v klonu a převezmou se až po kontrole rozdílu.',
+      kind: 'select', vals: ['převzít bez kontroly do 5 změn', 'vždy kontrola rozdílu', 'kontrola + heslo u převzetí'], prof: [1, 2, 0] },
+    { id: 'autolock', ic: 'lock', t: 'Automatické zamčení', h: 'Po nečinnosti se obrazovka zamkne.',
+      kind: 'select', vals: ['po 15 minutách', 'po 5 minutách', 'po 1 minutě'], prof: [1, 2, 0] }
+  ];
+  var PROFILES = [
+    { id: 0, n: 'Standardní', ic: 'shieldcheck', d: 'Doporučeno. Bezpečné, ale neobtěžuje.', li: ['nová klávesnice se ověří kódem', 'nepodepsané programy se zeptají', 'agent jen bokem, s kontrolou'] },
+    { id: 1, n: 'Přísný', ic: 'lock', d: 'Pro citlivá data a sdílené počítače.', li: ['ověří se každé vstupní zařízení', 'jen podepsané programy', 'umělý vstup zakázán'] },
+    { id: 2, n: 'Volný', ic: 'unlock', d: 'Pro vývoj a testování. Méně dotazů.', li: ['bez ověření zařízení', 'spustí se vše', 'síť podle manifestů'] }
+  ];
+  var profile = 0, values = {};
+  OPTS.forEach(function (o) { values[o.id] = o.prof[0]; });
+  // Mira prisnosti volby: vyssi index = prisnejsi.
+  function modified() { return OPTS.filter(function (o) { return values[o.id] !== o.prof[profile]; }); }
+
+  function security() {
+    var mods = modified();
+    return '<h2>Zabezpečení</h2><p class="note">Profil nastaví volby níže najednou. Volba, kterou změníš zvlášť, se označí a jde vrátit podle profilu.</p>' +
+      '<div class="profiles" role="radiogroup" aria-label="Profil zabezpečení">' + PROFILES.map(function (p) {
+        var on = p.id === profile;
+        return '<button class="prof" role="radio" aria-checked="' + on + '" data-p="' + p.id + '" tabindex="' + (on ? 0 : -1) + '"><span class="pi">' + ic(p.ic) + '</span><b>' + p.n + '</b><div class="d">' + p.d + '</div>' +
+          '<ul>' + p.li.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>' + (on && mods.length ? '<span class="chip warn tag">upraveno: ' + mods.length + '</span>' : (p.id === 0 ? '<span class="chip accent tag">výchozí</span>' : '')) + '</button>';
+      }).join('') + '</div>' +
+      (mods.length ? '<div class="summary">' + ic('info', 's') + '<span>Od profilu <b>' + PROFILES[profile].n + '</b> se liší ' + mods.length + ' ' + (mods.length === 1 ? 'volba' : mods.length < 5 ? 'volby' : 'voleb') + '.</span><span class="spacer"></span><button class="btn small" id="reset-all">Vrátit vše podle profilu</button></div>' : '') +
+      '<h3>Jednotlivé volby</h3>' + OPTS.map(function (o) {
+        var mod = values[o.id] !== o.prof[profile];
+        return '<div class="opt' + (mod ? ' modified' : '') + '" id="o-' + o.id + '"><span class="oi">' + ic(o.ic) + '</span><div><div class="t" id="ol-' + o.id + '">' + o.t + '</div><div class="h" id="oh-' + o.id + '">' + o.h + '</div>' +
+          '<div class="mod"><span class="chip warn">upraveno</span><span>profil: ' + o.vals[o.prof[profile]] + '</span><button class="btn small ghost" data-reset="' + o.id + '">Vrátit</button></div></div>' +
+          '<div class="ctl"><select class="input" data-o="' + o.id + '" aria-labelledby="ol-' + o.id + '" aria-describedby="oh-' + o.id + '">' + o.vals.map(function (v, i) { return '<option value="' + i + '"' + (i === values[o.id] ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select></div></div>';
+      }).join('') +
+      '<h3>Bezpečnostní fráze</h3><div class="opt"><span class="oi">' + ic('key') + '</span><div><div class="t">Fráze v systémových dialozích</div><div class="h">Ukazuje se jen v dialozích, které kreslí systém. Dialog bez ní je podvrh.</div></div>' +
+      '<div class="ctl"><span class="chip" style="background:var(--c-trust-bg);color:var(--c-trust-ink)">' + ic('key', 's') + 'modrá konvice</span><button class="btn small" data-strict="phrase">Změnit</button></div></div>';
+  }
+  function look() {
+    var st = window.MO_STATE;
+    var TH = [['auto', 'Podle denní doby', 'light', 'dark'], ['light', 'Světlý', 'light', 'light'], ['dark', 'Tmavý', 'dark', 'dark']];
+    var PV = { light: ['#fff4ee', '#6b3fd6'], dark: ['#2b2232', '#b79bff'] };
+    var bp = (function () { try { return localStorage.getItem('mo.barpos') || 'bottom-inset'; } catch (e) { return 'bottom-inset'; } })();
+    var BP = [['bottom-inset', 'Dole, odsazená', 'left:6px;right:6px;bottom:5px;height:10px'], ['dock', 'Plovoucí dok', 'left:35%;right:35%;bottom:5px;height:10px'],
+      ['bottom-full', 'Dole, přes šířku', 'left:0;right:0;bottom:0;height:10px;border-radius:0'], ['left', 'Vlevo', 'left:5px;top:5px;bottom:5px;width:10px'],
+      ['right', 'Vpravo', 'right:5px;top:5px;bottom:5px;width:10px'], ['top', 'Nahoře', 'left:0;right:0;top:0;height:8px;border-radius:0']];
+    return '<h2>Vzhled</h2><h3>Motiv</h3><div class="themes" role="radiogroup" aria-label="Motiv" id="theme-g">' + TH.map(function (t) {
+      return '<button role="radio" aria-checked="' + (st.theme === t[0]) + '" data-value="' + t[0] + '"><div class="pv"><span style="flex:1;background:' + PV[t[2]][0] + '"></span><span style="flex:1;background:' + PV[t[3]][0] + '"></span></div>' + t[1] + '</button>';
+    }).join('') + '</div><p class="note" style="margin-top:var(--s3)">„Podle denní doby“ přepíná po východu a západu slunce v nastaveném časovém pásmu. Přechod je prolnutí 240 ms a nikdy nenastane, když právě píšeš.</p>' +
+      '<h3>Poloha lišty</h3><div class="barpos" role="radiogroup" aria-label="Poloha lišty" id="bar-g">' + BP.map(function (b) {
+        return '<button role="radio" aria-checked="' + (bp === b[0]) + '" data-value="' + b[0] + '"><div class="scr"><i style="' + b[2] + '"></i></div>' + b[1] + '</button>';
+      }).join('') + '</div>' +
+      '<h3>Písmo</h3><div class="opt"><span class="oi">' + ic('textsize') + '</span><div><div class="t">Písmo systému</div><div class="h">Inter; v terminálu JetBrains Mono</div></div><div class="ctl"><span class="chip">Inter</span><span class="chip mono">JetBrains Mono</span></div></div>';
+  }
+  function a11y() {
+    var st = window.MO_STATE;
+    return '<h2>Přístupnost</h2><p class="note">Každá aplikace posílá kompozitoru strom přístupnosti (role, popisky, stavy). Proto tyto volby fungují všude stejně, i u vlastního titulku okna.</p>' +
+      '<h3>Zrak</h3>' +
+      '<div class="opt"><span class="oi">' + ic('textsize') + '</span><div><div class="t" id="l-scale">Velikost písma</div><div class="h">Zvětší celé rozhraní; rozvržení se přepočítá, nic se neořízne.</div></div><div class="ctl">' +
+      '<div class="seg" role="radiogroup" aria-labelledby="l-scale" id="scale-g">' + [['1', '100 %'], ['1.25', '125 %'], ['1.5', '150 %'], ['2', '200 %']].map(function (s) { return '<button role="radio" aria-checked="' + (st.scale === s[0]) + '" data-value="' + s[0] + '">' + s[1] + '</button>'; }).join('') + '</div></div></div>' +
+      '<div class="opt"><span class="oi">' + ic('contrast') + '</span><div><div class="t" id="l-hc">Vysoký kontrast</div><div class="h">Text 7 : 1, hranice prvků 4,5 : 1, bez stínů a průhlednosti.</div></div><div class="ctl"><button class="switch" role="switch" id="hc" aria-labelledby="l-hc" aria-checked="' + (st.contrast === 'more') + '"></button></div></div>' +
+      '<div class="opt"><span class="oi">' + ic('eye') + '</span><div><div class="t" id="l-sr">Čtečka obrazovky</div><div class="h">Čte strom přístupnosti; Ctrl+Alt+S zapne kdykoli, i na přihlášení.</div></div><div class="ctl"><button class="switch" role="switch" id="sr" aria-labelledby="l-sr" aria-checked="false"></button></div></div>' +
+      '<h3>Pohyb</h3><div class="opt"><span class="oi">' + ic('gauge') + '</span><div><div class="t" id="l-rm">Omezit pohyb</div><div class="h">Posuny a měřítka nahradí krátké prolnutí (90 ms).</div></div><div class="ctl"><button class="switch" role="switch" id="rm" aria-labelledby="l-rm" aria-checked="' + (st.motion === 'reduce') + '"></button></div></div>' +
+      '<h3>Ovládání</h3><div class="opt"><span class="oi">' + ic('keyboard') + '</span><div><div class="t" id="l-kb">Vždy zvýraznit fokus</div><div class="h">Rámeček fokusu i při ovládání myší. Vše jde ovládat klávesnicí: Tab, šipky, Enter, Esc.</div></div><div class="ctl"><button class="switch" role="switch" id="kb" aria-labelledby="l-kb" aria-checked="false"></button></div></div>' +
+      '<div class="opt"><span class="oi">' + ic('accessibility') + '</span><div><div class="t" id="l-tg">Větší cíle kliknutí</div><div class="h">Nejmenší cíl 48 px místo 40 px.</div></div><div class="ctl"><button class="switch" role="switch" id="tg" aria-labelledby="l-tg" aria-checked="false"></button></div></div>' +
+      '<h3>Náhled</h3><div class="preview-text"><b>Příliš žluťoučký kůň</b> úpěl ďábelské ódy. <button class="btn small primary">Tlačítko</button> <a href="#" onclick="return false">odkaz</a></div>';
+  }
+  function placeholder(name) { return '<h2>' + name + '</h2><p class="note">Mimo rozsah tohoto prototypu.</p>'; }
+
+  // ---- Vykresleni ------------------------------------------------------------
+  function renderTabs() {
+    document.getElementById('tabs').innerHTML = CATS.map(function (c) {
+      var on = c[0] === cur;
+      return '<button role="tab" id="tab-' + c[0] + '" aria-selected="' + on + '" aria-controls="panel" tabindex="' + (on ? 0 : -1) + '" data-c="' + c[0] + '">' + ic(c[1]) + c[2] + '</button>';
+    }).join('');
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('#tabs [role=tab]'));
+    tabs.forEach(function (t, i) {
+      t.addEventListener('click', function () { cur = t.dataset.c; render(true); });
+      t.addEventListener('keydown', function (e) {
+        var d = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+        if (d) { e.preventDefault(); var n = tabs[(i + d + tabs.length) % tabs.length]; cur = n.dataset.c; render(); document.getElementById('tab-' + cur).focus(); }
+      });
+    });
+  }
+  function render(focusPanel) {
+    renderTabs();
+    var p = document.getElementById('panel');
+    p.setAttribute('aria-labelledby', 'tab-' + cur);
+    p.innerHTML = cur === 'security' ? security() : cur === 'look' ? look() : cur === 'a11y' ? a11y() : placeholder(CATS.filter(function (c) { return c[0] === cur; })[0][2]);
+    wire();
+    if (focusPanel) p.focus();
+  }
+  function wire() {
+    var p = document.getElementById('panel');
+    if (cur === 'security') {
+      window.MO_SEG(p.querySelector('.profiles'), function (v) {
+        v = +v;
+        var weaker = v === 2 && profile !== 2;
+        function applyP() { profile = v; OPTS.forEach(function (o) { values[o.id] = o.prof[v]; }); render(); p.querySelector('[data-p="' + v + '"]').focus(); }
+        if (weaker) confirmPass('Změna profilu na <b>Volný</b> sníží zabezpečení.', applyP, function () { render(); }); else applyP();
+      });
+      p.querySelectorAll('select[data-o]').forEach(function (s) {
+        s.addEventListener('change', function () {
+          var o = OPTS.filter(function (x) { return x.id === s.dataset.o; })[0], nv = +s.value;
+          function applyV() { values[o.id] = nv; render(); var el = document.querySelector('select[data-o="' + o.id + '"]'); if (el) el.focus(); }
+          if (nv < values[o.id]) confirmPass('Zmírnění volby <b>' + o.t + '</b> na „' + o.vals[nv] + '“.', applyV, function () { s.value = values[o.id]; }); else applyV();
+        });
+      });
+      p.querySelectorAll('[data-reset]').forEach(function (b) { b.addEventListener('click', function () { var o = OPTS.filter(function (x) { return x.id === b.dataset.reset; })[0]; values[o.id] = o.prof[profile]; render(); }); });
+      var ra = document.getElementById('reset-all'); if (ra) ra.addEventListener('click', function () { OPTS.forEach(function (o) { values[o.id] = o.prof[profile]; }); render(); });
+      p.querySelector('[data-strict=phrase]').addEventListener('click', function () { confirmPass('Změna bezpečnostní fráze.', function () {}, function () {}); });
+    }
+    if (cur === 'look') {
+      window.MO_SEG(document.getElementById('theme-g'), function (v) { window.MO_SET('theme', v); });
+      window.MO_SEG(document.getElementById('bar-g'), function (v) { try { localStorage.setItem('mo.barpos', v); } catch (e) {} });
+    }
+    if (cur === 'a11y') {
+      window.MO_SEG(document.getElementById('scale-g'), function (v) { window.MO_SET('scale', v); });
+      window.MO_SWITCH(document.getElementById('hc'), function (v) { window.MO_SET('contrast', v ? 'more' : 'normal'); });
+      window.MO_SWITCH(document.getElementById('rm'), function (v) { window.MO_SET('motion', v ? 'reduce' : 'system'); });
+      window.MO_SWITCH(document.getElementById('sr'));
+      window.MO_SWITCH(document.getElementById('kb'));
+      window.MO_SWITCH(document.getElementById('tg'));
+    }
+  }
+
+  // ---- Systemovy dialog s heslem (zmirneni zabezpeceni) --------------------
+  function confirmPass(text, ok, cancel) {
+    var opener = document.activeElement, l = document.getElementById('sysl');
+    l.innerHTML = '<div class="sys-ov"><div class="scrim"></div><div class="sysdlg" role="alertdialog" aria-modal="true" aria-labelledby="pw-h" aria-describedby="pw-d">' +
+      '<div class="sys-band">' + ic('shieldcheck', 's') + 'Systém<span class="phrase">' + ic('key', 's') + 'tvá fráze: <b>modrá konvice</b></span></div>' +
+      '<div class="content"><h2 id="pw-h">Potvrď heslem</h2><p id="pw-d">' + text + '</p><label class="field"><span>Heslo uživatele</span><input class="input" type="password" autocomplete="current-password"></label></div>' +
+      '<div class="actions"><button class="btn primary" data-ok disabled>Potvrdit</button><button class="btn" data-x disabled>Zrušit</button></div></div></div>';
+    var dlg = l.querySelector('.sysdlg');
+    setTimeout(function () { dlg.querySelectorAll('button').forEach(function (b) { b.disabled = false; }); dlg.querySelector('input').focus(); }, 300);
+    function close(yes) { l.innerHTML = ''; if (yes) ok(); else { cancel(); if (opener && opener.focus) opener.focus(); } }
+    dlg.querySelector('[data-ok]').addEventListener('click', function () { close(true); });
+    dlg.querySelector('[data-x]').addEventListener('click', function () { close(false); });
+    dlg.querySelector('input').addEventListener('keydown', function (e) { if (e.key === 'Enter') close(true); });
+    window.MO_TRAP(dlg, function () { close(false); });
+  }
+  document.addEventListener('mo-theme', function () { if (cur === 'look' || cur === 'a11y') { var a = document.activeElement && document.activeElement.id; render(); if (a && document.getElementById(a)) document.getElementById(a).focus(); } });
+  render();
+});
+</script>
+</body>
+</html>

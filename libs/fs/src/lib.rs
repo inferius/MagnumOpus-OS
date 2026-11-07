@@ -29,6 +29,8 @@
 extern crate alloc;
 
 mod btree;
+mod compress;
+pub mod datarec;
 mod device;
 mod fs;
 mod hash;
@@ -40,17 +42,19 @@ pub mod perm;
 pub mod records;
 mod space;
 mod store;
+mod treediff;
 
 #[cfg(test)]
 mod tests;
 
 pub use abi::{Error, Result};
 pub use device::{BlockDevice, Durability, MemDevice};
-pub use fs::{ConflictKind, MergeConflict, MergeReport, BranchInfo, CommitInfo, id_hex, FileVersion, RestoreMode, Undone, Change, ChangeKind, CheckReport, DatasetInfo, Handle, JournalPage, Revision, TrashEntry, View, access, share, DefragReport, DirEntry, Fs, FsInfo, Kind, MountOptions, Permissions, SetTimes, SnapshotInfo, Stat, ds_flags};
+pub use fs::{DedupReport, ScrubStatus, ConflictKind, MergeConflict, MergeReport, BranchInfo, CommitInfo, id_hex, FileVersion, RestoreMode, Undone, Change, ChangeKind, CheckReport, DatasetInfo, Handle, JournalPage, Revision, TrashEntry, View, access, share, DefragReport, DirEntry, Fs, FsInfo, Kind, MountOptions, Permissions, SetTimes, SnapshotInfo, Stat, ds_flags};
 pub use records::{AutoRule, CommitId, JournalEntry, Settings, jattr, jop, snapkind};
 pub use perm::{Acl, EVERYONE, Grant, Principal, SYSTEM, acl_flags, grant, rights};
 pub use hash::Algo;
-pub use layout::{BLOCK_SIZE, INLINE_MAX, MAX_EXTENT, MAX_FILE_SIZE, REUSE_DELAY, SYMLINK_MAX, TimeFormat, Timestamp};
+pub use datarec::{DataSettings, DedupMode, ScrubState};
+pub use layout::{Compress, BLOCK_SIZE, INLINE_MAX, MAX_EXTENT, MAX_FILE_SIZE, REUSE_DELAY, SYMLINK_MAX, TimeFormat, Timestamp};
 pub use names::{NAME_MAX, NAME_MAX_CHARS, fold_name, is_bidi_control, validate_name};
 pub use store::FormatOptions;
 

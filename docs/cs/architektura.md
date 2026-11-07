@@ -920,7 +920,7 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 | Co | Proč | Kdy pryč |
 |---|---|---|
 | sériový ovladač v jádře | ladicí výstup před existencí userspace | zůstává jen jako early console |
-| konzole na framebufferu v jádře | totéž | jen do startu initu: pak jádro předá framebuffer (bootstrap `FRAMEBUFFER`) a obraz převezme kompozitor přes virtio-gpu, nebo bez něj přes `fbdisplay` ([Grafika](gui.md#displeje-virtio-gpu-a-fbdisplay)); do framebufferu pak píše jen panika jádra |
+| konzole na framebufferu v jádře | totéž | kreslí, dokud obrazovku nepřevezme vlastník (`FB_CONTROL` `CLAIM`): bez virtio-gpu `fbdisplay` pod kompozitorem ([Grafika](gui.md#displeje-virtio-gpu-a-fbdisplay)), jinak záchranná konzole; po `RELEASE` nebo pádu vlastníka kreslí zase, panika vždy |
 | `fbdisplay` (framebuffer GOP) | GUI na strojích bez virtio-gpu (VMware, Hyper-V, VirtualBox, PC) | pevné rozlišení z firmwaru, bez akcelerace a vsync; nahradí ho nativní ovladače GPU |
 
 ## Milníky
@@ -931,9 +931,10 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
-   TCP/IP, DHCP, DNS, NTP, přístup přes capability a firewall hotové - viz
-   [sit.md](sit.md) a [firewall.md](firewall.md); zbývá TLS 1.3, HTTP
-   klient, IPv6, vlastní stack), joby s rozpočty prostředků (hotovo)
+   TCP/IP, DHCP, DNS, synchronizace času `ntpd`, přístup přes capability,
+   firewall, TLS 1.3 a klient HTTP/1.1 a HTTP/2 hotové - viz
+   [sit.md](sit.md), [firewall.md](firewall.md) a [tls-http.md](tls-http.md);
+   zbývá IPv6, vlastní stack), joby s rozpočty prostředků (hotovo)
    - **6a Vstup (hotovo):** služba vstupu, klávesnice a myš (virtio-input;
      PS/2, USB HID), rozložení US a CZ, bezpečná zkratka - viz
      [Vstup](vstup.md)

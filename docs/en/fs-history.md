@@ -81,7 +81,7 @@ fs.aside_discard("/project-try")?;
 ```
 
 Through the fsd service the same is done by `FsClient` (`fsproto::hist`),
-see [Protocol](#protocol-operations-54-86).
+see [Protocol](#protocol-operations-54-92).
 
 ## Change journal
 
@@ -393,6 +393,22 @@ fs.aside_discard("/project-try")?;                  // clone and snapshot in one
   alongside. Taking over is atomic (a commit).
 - Taking over can be repeated (e.g. `/src` first, then the rest).
 - Deleted files go to the original's trash.
+- **Nested datasets are boundaries in the clone.** A clone can be made of
+  a dataset with nested datasets too (even of the root `/`) and it may lie
+  inside the original (`/tmp/.aside-1`). The nested dataset's entry is
+  visible in the clone (a listing and `stat` show it as `Dataset`, `stat`
+  with rights 0), but entering it, writing, renaming and deleting return
+  `NOT_SUPPORTED` - a second writable path to the same dataset never
+  appears. Only the entry the dataset's back link (`DSLINK`) points to is
+  valid; a copy in a clone (also the entry of a dataset that has since
+  disappeared) is a boundary. `diff_clone` does not report boundaries and
+  `aside_apply` never changes the original's nested datasets: their names
+  are taken (a new file of the same name = a conflict) and a folder with
+  a dataset is not deleted (a `DirNotEmpty` conflict). Two concurrent
+  clones of the same dataset (two shell sessions) therefore work
+  independently - the second sees the first only as a boundary.
+  `clone_snapshot` and `branch` behave the same; in addition a clone does
+  not inherit the original's older snapshots.
 
 ## On disk
 
@@ -433,7 +449,7 @@ record, that the expiry index matches the attributes (oid + generation),
 the hash cache only for files, and that settings, branches and `HEAD` are
 readable.
 
-## Protocol (operations 54-86)
+## Protocol (operations 54-92)
 
 Module `fsproto::hist`; paths are session paths, the FS checks rights by the
 session identity. Time on the wire = seconds i64 + nanoseconds u32.
@@ -460,14 +476,20 @@ session identity. Time on the wire = seconds i64 + nanoseconds u32.
 | 72 | `MERGE` | target, source | merge report |
 | 73 | `MERGE_ABORT` | target | - |
 | 74 | `ASIDE_BEGIN` | dataset, clone path | clone dataset u64 |
-| 75 | `ASIDE_APPLY` | clone, all u8, count + paths | merge report |
+| 75 | `ASIDE_APPLY` | clone, all u8, count + paths | merge report; after the conflicts the total number of conflicts u32 (the list may be cut to 1024) |
 | 76 | `ASIDE_DISCARD` | clone | - |
-| 77 | `ASIDE_CHANGES` | clone | count + (kind u8, path, old path, oid, folder u8) |
+| 77 | `ASIDE_CHANGES` | clone, [skip u32] | page: total u32, count u32 + (kind u8, path, old path, oid, folder u8) |
 | 78-81 | `XATTR_GET` / `SET` / `REMOVE` / `LIST` | path, name [, value = rest of the message] | value / - / - / names |
 | 82 / 83 | `SET_EXPIRES` / `EXPIRES` | path [, has u8, time] | has u8, time |
 | 84 | `HEAD` | dataset | has u8 + commit |
 | 85 | `DATASET_CREATE` | path | dataset number u64 (a new folder with its own history; `CREATE` right in the parent) |
 | 86 | `DATASET_DELETE` | path | - (including snapshots; `MANAGE` + `DELETE`; not with nested datasets or clones) |
+| 87 | `LIST_STAT_PAGE` | path, cursor, at most u32 | listing with metadata, described in the [fsproto protocol](file-system.md#the-fsproto-protocol) (module `fsproto::op`) |
+| 88 | `DIFF` | dataset, from snapshot, to u8 (0 = live version, 1 = a snapshot name follows), [skip u32] | page like `ASIDE_CHANGES`; `MANAGE` on the dataset root |
+| 89 | `DATASET_OF` | path | path of the root of the dataset the path lies in (`/` = the root one); rights like `STAT` |
+| 90 | `SNAP_STAT_OF` | dataset, snapshot, path inside the dataset | `Stat` |
+| 91 | `SNAP_LIST_OF` | dataset, snapshot, path inside the dataset, cursor, at most u32 | like `LIST_PAGE` |
+| 92 | `SNAP_READ_OF` | dataset, snapshot, path inside the dataset, offset u64, length u32 | data (shorter at the end of the file) |
 
 A commit on the wire: ID (32 B), snapshot, dataset u64, snapshot id u64,
 time, author u64, message, count u32 + parent IDs. A merge report: paths
@@ -476,6 +498,53 @@ deleted, 3 ours deleted / theirs changed, 4 added on both sides, 5 moved on
 both sides, 6 folder missing, 7 folder not empty, 8 cycle; where their
 version was saved) and optionally the merge commit. Lists have at most 4096
 items.
+
+**Version difference and reading a dataset snapshot (88-92)** - for the
+shell (`diff`, change preview, reading from a view):
+
+- **Paths in `Change`** (both `DIFF` and `ASIDE_CHANGES`) are **inside the
+  dataset** (from its root, e.g. `/a.txt` in the dataset `/project`), not
+  session paths. The client gets an absolute path by joining it with the
+  dataset path. Sorted by path; kind 1 added, 2 removed, 3 modified,
+  4 moved, 5 moved and modified.
+- **`DIFF`** compares the snapshot `from` with the snapshot `to`, or with
+  the live version (including unsaved changes). The snapshot may also be
+  the temporary snapshot of a view (`VIEW`).
+- **Pages of changes** (`DIFF`, `ASIDE_CHANGES`): the reply carries the
+  total number of changes and one page (at most 4096 items and 60 KiB).
+  The client sends the same request with `skip` = the number already
+  received until it has them all (`FsClient::diff`, `aside_changes` do it
+  themselves). The list is never cut silently. Every page computes the
+  difference again; the cost is proportional to the changes, not to the
+  size of the tree, so it is cheap.
+- **Conflicts in `ASIDE_APPLY`/`MERGE`**: the list fits into the reply cut
+  (at most 1024), but the total number is always sent. The client thus
+  knows it does not know all conflicts (the shell then does not allow
+  undoing that apply).
+- **`DATASET_OF`**: the service walks the ancestors of the path from the
+  root (`STAT` of each) and returns the first one with the same dataset.
+  A path the session does not see, and a dataset root outside the
+  session's mounted paths, give `NOT_FOUND` (like `STAT`).
+- **`SNAP_*_OF`** read a snapshot of any dataset (including a view from
+  `VIEW`); `SNAP_STAT`, `SNAP_LIST_PAGE` and `SNAP_READ` handle only the
+  root dataset and only for a session that sees the whole FS. The dataset
+  is a session path (a read-only mount is enough), the path in the
+  snapshot is inside the dataset. The FS checks rights like for reading
+  (walking to the dataset, ACLs in the snapshot).
+
+Client: `diff(dataset, from, to: Option)`, `dataset_of(path)`,
+`snapshot_stat_of`, `snapshot_list_of`, `snapshot_read_of` and
+`snapshot_read_file_of` (the whole file).
+
+```rust
+let v = fs.view("/project")?;
+// ... changes ...
+for c in fs.diff("/project", &v.snapshot, None)? {
+    // c.path is inside the dataset: "/project" + c.path
+}
+let old = fs.snapshot_read_file_of("/project", &v.snapshot, "/a.txt")?;
+fs.release_view("/project", &v.snapshot)?;
+```
 
 **The fsd service** calls `auto_snapshot_tick`, `expire_tick`,
 `trash_tick` and `journal_tick` every minute (as the system) - not on a
@@ -501,9 +570,20 @@ in it).
   contents only after a change). For a dataset with millions of objects a
   commit takes time proportional to the object count. An incremental hash
   in folders is a possible later optimisation.
-- ⚠️ **A clone of a dataset with nested datasets** would contain a second
-  path to the same datasets: `branch` and `aside_begin` refuse such a
-  dataset (`NOT_SUPPORTED`).
+- **Diff and merge cost is proportional to the change, not the dataset
+  size.** `diff`, `diff_clone`, `aside_apply` and `merge` walk both trees
+  together and skip shared subtrees (same node pointer - a clone and its
+  origin snapshot share everything unchanged); changed objects are then
+  looked up by point queries (record, name in the parent folder, path via
+  ancestors). The listings of folders that contain changes are read too (a
+  large folder with a changed file = a pass over its entries). Example from
+  the tests: 5000 files, 2 changed - `diff_clone` reads 15 nodes from disk
+  instead of 154, `aside_apply` 15 instead of 154. Assumption:
+  `Inode::parent` matches the directory entry (verified by `check`).
+- ⚠️ **A clone of a dataset with nested datasets** does not see into them:
+  nested datasets are only boundaries in the clone (`NOT_SUPPORTED`), so
+  changes inside them cannot be tried "aside" - that takes a clone of the
+  nested dataset itself.
 - **Version restore and merge copy data** (instant copies via shared blocks
   come with phase 3).
 - **Merge** pairs new objects by path; the common ancestor is the first one
@@ -523,4 +603,5 @@ in it).
 | `tests/trash.rs` | trash: move without a copy, restore (also to another path), purge and freeing space, an open handle, through the intent log after a crash, cleanup by age, visibility and rights; attributes and namespaces; expiry (index, cancelling, crash) |
 | `tests/history.rs` | file versions across a rename, restore as a copy and by replacing, `undo` of all kinds, automatic snapshots and pruning, settings; diff3 (also a property test) |
 | `tests/commits.rs` | commits and log, **logical ID independent of block placement**, a branch and a clean merge, text and binary file conflicts, "aside" with a selection and a conflict, new folders and name swaps |
+| `tests/aside_nested.rs` | "aside" over `/` with a nested dataset: boundaries (listing, `stat`, write, rename, delete), changes and taking over without boundaries, two concurrent clones inside `/` (take over one, discard the other and the reverse), a folder with a dataset, `clone_snapshot` and a branch, permission checks |
 | init `tests/fs_hist.rs` | in the system through fsd: journal and `JOURNAL_WATCH` with a limit, view, trash, commit, branch and merge, "aside", attributes and expiry, fsck |

@@ -15,17 +15,94 @@ use crate::codec::{ReadAddr, Reader, WriteAddr, Writer};
 use crate::fw::{AppStats, AuditRecord};
 use crate::{Buffers, Info, MAX_DATAGRAM, MAX_IO, Policy, io, ntp, op, parse_reply, timeout_ms};
 
+/// Jak dlouho cekat na odpoved sluzby site.
+///
+/// Limity operaci (spojeni, cteni, preklad) hlida `netd`. Klient ma navic
+/// vlastni pojistku: kdyby sluzba pozadavek nedokoncila (chyba ve sluzbe,
+/// zaseknuty ovladac), program dostane `TIMED_OUT` s hlaskou v logu misto
+/// cekani navzdy.
+#[derive(Clone, Copy)]
+enum Wait {
+    /// Operace bez cekani na sit (stav, relace, socket): nejvys 30 s.
+    Immediate,
+    /// Operace s limitem programu (`None` = bez limitu - program o to
+    /// pozadal).
+    Op(Option<Duration>),
+    /// Operace, ktera muze cekat i na rozhodnuti uzivatele (dotaz
+    /// firewallu): limit + az 300 s na dotaz.
+    Gated(Option<Duration>),
+}
+
+/// Rezerva nad limit operace (zpracovani ve sluzbe, zatizeny system).
+const REPLY_MARGIN: Duration = Duration::from_secs(10);
+const IMMEDIATE: Duration = Duration::from_secs(30);
+/// Nejdelsi cekani na rozhodnuti uzivatele ve sluzbe (`fw::ASK_WAIT_NS`).
+const ASK_WAIT: Duration = Duration::from_secs(300);
+
+impl Wait {
+    fn limit(self) -> Option<Duration> {
+        match self {
+            Self::Immediate => Some(IMMEDIATE),
+            Self::Op(t) => t.map(|t| t.saturating_add(REPLY_MARGIN)),
+            Self::Gated(t) => t.map(|t| t.saturating_add(ASK_WAIT).saturating_add(REPLY_MARGIN)),
+        }
+    }
+}
+
+/// Kanaly, na ktere sluzba neodpovedela vcas. Pozdni odpoved by se
+/// precetla jako odpoved na dalsi pozadavek, proto kanal uz nejde pouzit.
+static STALE: [core::sync::atomic::AtomicU32; 32] = [const { core::sync::atomic::AtomicU32::new(0) }; 32];
+
+fn is_stale(raw: u32) -> bool {
+    raw != 0 && STALE.iter().any(|s| s.load(core::sync::atomic::Ordering::Relaxed) == raw)
+}
+
+fn mark_stale(raw: u32) {
+    use core::sync::atomic::Ordering;
+    for s in &STALE {
+        if s.compare_exchange(0, raw, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+            return;
+        }
+    }
+}
+
 /// Posle pozadavek a pocka na odpoved: (telo, handly).
 fn call(ch: &Channel, req: Writer) -> Result<(Vec<u8>, Vec<Handle>)> {
-    ch.write(&req.finish(), Vec::new())?;
-    let msg = ch.read(None)?;
+    call_wait(ch, req, Wait::Immediate)
+}
+
+fn call_wait(ch: &Channel, req: Writer, wait: Wait) -> Result<(Vec<u8>, Vec<Handle>)> {
+    let raw = ch.handle().raw();
+    if is_stale(raw) {
+        return Err(Error::BadState);
+    }
+    let data = req.finish();
+    ch.write(&data, Vec::new())?;
+    let limit = wait.limit();
+    let msg = match ch.read(limit.map(libos::time::deadline_after)) {
+        Ok(m) => m,
+        Err(Error::TimedOut) => {
+            mark_stale(raw);
+            let op = data.get(..4).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()));
+            libos::println!(
+                "netproto: sluzba site neodpovedela na pozadavek {op} do {} s (kanal uz nejde pouzit)",
+                limit.map_or(0, |l| l.as_secs())
+            );
+            return Err(Error::TimedOut);
+        }
+        Err(e) => return Err(e),
+    };
     let rest = parse_reply(&msg.data)?.rest().to_vec();
     Ok((rest, msg.handles))
 }
 
 /// Odpoved s prave jednim novym kanalem.
 fn call_channel(ch: &Channel, req: Writer) -> Result<(Vec<u8>, Channel)> {
-    let (body, mut handles) = call(ch, req)?;
+    call_channel_wait(ch, req, Wait::Immediate)
+}
+
+fn call_channel_wait(ch: &Channel, req: Writer, wait: Wait) -> Result<(Vec<u8>, Channel)> {
+    let (body, mut handles) = call_wait(ch, req, wait)?;
     if handles.len() != 1 {
         return Err(Error::Corrupted);
     }
@@ -61,7 +138,7 @@ impl Net {
     pub fn wait_configured(&self, timeout: Option<Duration>) -> Result<Info> {
         let mut w = Writer::op(op::WAIT_CONFIGURED);
         w.u64(timeout_ms(timeout));
-        let (b, _) = call(&self.ch, w)?;
+        let (b, _) = call_wait(&self.ch, w, Wait::Op(timeout))?;
         Info::get(&mut Reader::new(&b))
     }
 
@@ -147,7 +224,10 @@ impl Net {
             }
         }
         w.u64(timeout_ms(timeout));
-        let (b, _) = call(&self.ch, w)?;
+        // Vlastni server muze cekat na dotaz firewallu; systemovy preklad
+        // nejvys 30 s ve sluzbe.
+        let wait = if server.is_some() { Wait::Gated(timeout) } else { Wait::Op(Some(timeout.unwrap_or(Duration::from_secs(30)))) };
+        let (b, _) = call_wait(&self.ch, w, wait)?;
         let mut r = Reader::new(&b);
         let n = r.u16()?;
         let mut addrs = Vec::with_capacity(n as usize);
@@ -161,7 +241,7 @@ impl Net {
     pub fn ping(&self, addr: IpAddr, seq: u16, size: u16, timeout: Duration) -> Result<Duration> {
         let mut w = Writer::op(op::PING);
         w.ip(addr).u16(seq).u16(size).u64(timeout_ms(Some(timeout)));
-        let (b, _) = call(&self.ch, w)?;
+        let (b, _) = call_wait(&self.ch, w, Wait::Gated(Some(timeout)))?;
         Ok(Duration::from_nanos(Reader::new(&b).u64()?))
     }
 
@@ -181,7 +261,7 @@ impl Net {
         let mut w = Writer::op(op::TCP_CONNECT);
         w.socket_addr(addr).u64(timeout_ms(timeout));
         buffers.put(&mut w);
-        let (b, ch) = call_channel(&self.ch, w)?;
+        let (b, ch) = call_channel_wait(&self.ch, w, Wait::Gated(timeout))?;
         let local = Reader::new(&b).socket_addr()?;
         Ok(TcpStream {
             ch,
@@ -369,7 +449,7 @@ impl io::Read for TcpStream {
         let mut w = Writer::op(op::RECV);
         w.u32(buf.len().min(MAX_IO) as u32)
             .u64(timeout_ms(self.read_timeout));
-        let (b, _) = call(&self.ch, w)?;
+        let (b, _) = call_wait(&self.ch, w, Wait::Op(self.read_timeout))?;
         let n = b.len().min(buf.len());
         buf[..n].copy_from_slice(&b[..n]);
         Ok(n)
@@ -384,7 +464,7 @@ impl io::Write for TcpStream {
         let chunk = &buf[..buf.len().min(MAX_IO)];
         let mut w = Writer::op(op::SEND);
         w.u64(timeout_ms(self.write_timeout)).bytes(chunk);
-        let (b, _) = call(&self.ch, w)?;
+        let (b, _) = call_wait(&self.ch, w, Wait::Op(self.write_timeout))?;
         let n = Reader::new(&b).u32()? as usize;
         if n == 0 {
             // Nic neprijato az do vyprseni.
@@ -419,7 +499,7 @@ impl TcpListener {
     pub fn accept_timeout(&self, timeout: Option<Duration>) -> Result<(TcpStream, SocketAddr)> {
         let mut w = Writer::op(op::ACCEPT);
         w.u64(timeout_ms(timeout));
-        let (b, ch) = call_channel(&self.ch, w)?;
+        let (b, ch) = call_channel_wait(&self.ch, w, Wait::Op(timeout))?;
         let mut r = Reader::new(&b);
         let remote = r.socket_addr()?;
         let local = r.socket_addr()?;
@@ -445,7 +525,8 @@ impl UdpSocket {
         }
         let mut w = Writer::op(op::SEND_TO);
         w.socket_addr(to).bytes(data);
-        call(&self.ch, w).map(|_| ())
+        // Muze cekat na dotaz firewallu (neznamy cil).
+        call_wait(&self.ch, w, Wait::Gated(Some(Duration::ZERO))).map(|_| ())
     }
 
     /// Prijme datagram: (delka, odesilatel). Delsi datagram se zkrati.
@@ -457,7 +538,7 @@ impl UdpSocket {
         let mut w = Writer::op(op::RECV_FROM);
         w.u32(buf.len().min(MAX_DATAGRAM) as u32)
             .u64(timeout_ms(timeout));
-        let (b, _) = call(&self.ch, w)?;
+        let (b, _) = call_wait(&self.ch, w, Wait::Op(timeout))?;
         let mut r = Reader::new(&b);
         let from = r.socket_addr()?;
         let data = r.rest();

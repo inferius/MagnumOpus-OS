@@ -1,0 +1,14 @@
+[package]
+name = "taskview"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Spravce uloh v GUI: model nad taskproto a rozhrani v knihovne ui"
+
+[dependencies]
+taskproto = { path = "../taskproto" }
+guiproto = { path = "../guiproto" }
+ui = { path = "../ui" }
+
+[dev-dependencies]
+gfx = { path = "../gfx" }

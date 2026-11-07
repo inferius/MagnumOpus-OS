@@ -62,7 +62,7 @@ a zobrazení. Na `out_ptr` zapíše 16 B (little endian):
 |---|---|---|
 | 0 | i64 | sekundy od 1970-01-01 00:00:00 UTC (záporné = dřív) |
 | 8 | u32 | nanosekundy uvnitř sekundy (0..10⁹) |
-| 12 | u16 | zdroj: 1 UEFI, 2 CMOS RTC, 3 nastaveno za běhu |
+| 12 | u16 | zdroj: 1 UEFI, 2 CMOS RTC, 3 nastaveno za běhu, 4 synchronizováno podle sítě (`CLOCK_SET` s `NETWORK` nebo `CLOCK_ADJUST` s posunem) |
 | 14 | u16 | příznaky: bit 0 = pásmo neuvedeno, čas brán jako UTC |
 
 Jádro si při startu uloží reálný čas v okamžiku 0 monotónních hodin; výsledek
@@ -87,17 +87,40 @@ endian, `abi::time::SetRequest`):
 | 12 | i32 | `rtc_offset`: sekundy přičtené k UTC při zápisu do hardwarových hodin (RTC v místním čase = posun pásma, jinak 0); nejvýš ±18 h, jinak `INVALID_ARGS` |
 
 `flags`: bit 0 `WRITE_HARDWARE` = zapsat čas i do hardwarových hodin (x86:
-CMOS RTC). Ostatní bity = `INVALID_ARGS`. Vrací 1, když se hardwarové
+CMOS RTC), bit 1 `NETWORK` = čas je ze synchronizace podle sítě (zdroj 4).
+Ostatní bity = `INVALID_ARGS`. Vrací 1, když se hardwarové
 hodiny zapsaly. Vrací 0 bez `WRITE_HARDWARE`, když hodiny chybí (aarch64,
 ACPI hlásí, že RTC není) nebo když se rok nevejde do jejich rozsahu. S
 `WRITE_HARDWARE` může volání spát až 1 s: jádro zapisuje do RTC v polovině
 sekundy, aby hodiny tikaly na hranici sekund. Čas
 systému se nastaví v každém případě. Poté `CLOCK_REALTIME` hlásí zdroj 3
-(nastaveno za běhu) a žádné příznaky. Termíny čekání se nemění, počítají se
+(nastaveno za běhu; s `NETWORK` zdroj 4) a žádné příznaky. Termíny čekání se nemění, počítají se
 z `CLOCK_MONOTONIC`. Obal: `libos::time::set`, `Resource::set_clock`.
 Chyby: `ACCESS_DENIED` (chybí `SET_CLOCK`), `WRONG_TYPE`, `BAD_HANDLE`,
 `INVALID_ARGS`, `BAD_ADDRESS`. Podrobnosti:
 [Nastavení hodin](cas.md#nastavení-hodin-clock_set).
+
+### `CLOCK_ADJUST`
+
+`(resource, offset_ns i64, freq_ppb i64, flags, out_ptr) -> 0`. Plynulá
+korekce reálného času bez skoku. Vyžaduje Resource s právem `SET_CLOCK`.
+Příznaky (`abi::time::adjust`):
+
+- `OFFSET` (1): začít dorovnávat posun `offset_ns`, nahradí zbytek
+  předchozího. Dorovnává se rychlostí 500 ppm (`MAX_SLEW_PPB`), takže
+  posun 1 s trvá 2000 s. Nejvýš 1 hodina (`MAX_OFFSET_NS`).
+- `FREQUENCY` (2): trvalá oprava frekvence `freq_ppb`, nejvýš ±500 ppm
+  (`MAX_FREQ_PPB`).
+- bez příznaků: jen stav.
+
+Na `out_ptr` (0 = nic) zapíše `abi::time::AdjustStatus` (24 B): zbývá
+dorovnat (ns), frekvence (ppb), aktuální rychlost dorovnávání (ppb).
+Reálný čas nikdy nejde pozpátku. S `OFFSET` hlásí `CLOCK_REALTIME`
+zdroj 4 (synchronizováno podle sítě). `CLOCK_SET` dorovnávání zruší
+a frekvenci nechá. Obal: `libos::time::adjust`. Chyby: `ACCESS_DENIED`
+(chybí `SET_CLOCK`), `INVALID_ARGS` (meze, neznámé příznaky), `BAD_STATE`
+(reálný čas není znám), `WRONG_TYPE`, `BAD_HANDLE`, `BAD_ADDRESS`.
+Podrobnosti: [Plynulá korekce](cas.md#plynulá-korekce-clock_adjust).
 
 ## Handly
 
@@ -439,6 +462,24 @@ strhnout – nejmenší volné místo přes job a všechny předky; `u64::MAX` =
 nikde limit). Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.
 
+### `FB_CONTROL`
+
+`(vmo, op, out_ptr) -> 0`. Framebuffer z firmware: `vmo` musí být právě
+objekt z bootstrapu `kind::FRAMEBUFFER` (jiný objekt paměti =
+`WRONG_TYPE`). Operace (`abi::syscall::fb_op`):
+
+- `INFO` (0): zapíše `abi::syscall::FbInfo` (16 B: šířka, výška, pixelů
+  na řádek, formát 1 = RGB, 2 = BGR; vše u32). Vyžaduje `READ`.
+- `CLAIM` (1): **výslovné převzetí** - jádro přestane kreslit log do
+  framebufferu, log dál jde na sériovou linku. Vyžaduje `WRITE`.
+- `RELEASE` (2): vrácení - jádro obrazovku smaže a kreslí log dál.
+  Vyžaduje `WRITE`. Konec procesu, který framebuffer převzal, ho vrátí
+  sám.
+
+Panika jádra kreslí do framebufferu vždy. Chyby: `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `BAD_ADDRESS`, `NOT_FOUND`
+(bez framebufferu).
+
 ## Strukturální meze
 
 Meze dané formátem dat nebo voláním, ne politikou:
@@ -477,23 +518,19 @@ a omezené prostředky ho nemají nikdy.
 ### Framebuffer z firmwaru
 
 Není to syscall, ale druh handlu ve startovní zprávě initu
-(`abi::bootstrap::kind::FRAMEBUFFER` = 7). Jádro ho pošle, když loader
-našel framebuffer GOP a ten leží mimo RAM pro alokátor a začíná na hranici
-stránky:
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7): fyzický objekt paměti
+framebufferu GOP, práva `READ | WRITE | MAP`. Číst a psát jde jen přes
+mapování (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`, jako buffer syscallu
+`BAD_ADDRESS`). Geometrii a převzetí obrazovky řídí [`FB_CONTROL`](#fb_control).
 
-| Pole | Význam |
-|---|---|
-| handle | fyzický objekt paměti framebufferu, práva `READ \| WRITE \| MAP`; číst a psát jde jen přes mapování (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`, jako buffer syscallu `BAD_ADDRESS`) |
-| `arg` | offset struktury `FramebufferInfo` v datech zprávy (za položkami) |
-| `FramebufferInfo` (16 B, LE) | `width`, `height`, `stride` (pixely na řádek, >= `width`), `format` (`pixel::RGB` = 1: bajty R, G, B, rezerva; `pixel::BGR` = 2: B, G, R, rezerva) |
-
-Objekt se mapuje **write-combining** (x86_64: PAT položka 1 = WC, jádro ji
-nastaví na každém CPU; aarch64: Normal Non-cacheable). Po odeslání zprávy
-konzole jádra do framebufferu nekreslí (jen panika), výstup jádra jde na
-sériovou linku. Init objekt předá ovladači `fbdisplay` (viz
-[Grafika](gui.md#displeje-virtio-gpu-a-fbdisplay)), když není virtio-gpu.
-Data za položkami jsou nová v této verzi zprávy (verze zůstává 1: starší
-program je ignoruje); libos čte nejvýš 64 B doplňkových dat.
+Objekt se mapuje **write-combining** (x86_64: položka PAT 1 = WC, jádro ji
+nastaví na každém CPU; aarch64: Normal Non-cacheable): zápisy se slučují,
+čtení je pomalé. Jádro handle nepošle, když framebuffer překrývá RAM pro
+alokátor, nezačíná na hranici stránky nebo je menší než jeho geometrie
+(varování v logu, konzole jádra ho dál používá). Init ho předá vlastníkovi
+obrazovky: bez virtio-gpu ovladači `fbdisplay` (viz
+[Grafika](gui.md#displeje-virtio-gpu-a-fbdisplay)), jinak záchranné
+konzoli `user/console`.
 
 ### `VMO_CREATE_CONTIGUOUS`
 

@@ -76,7 +76,7 @@ init
  ├─ devmgr ── finds PCI 1af4:1050 (virtio-gpu) ── starts virtio-gpu
  │            sends init the message `display` + channel (displayproto)
  ├─ fbdisplay ─ only when `display` did not arrive: firmware framebuffer
- │              (bootstrap FRAMEBUFFER from the kernel), see Displays
+ │              (bootstrap FRAMEBUFFER, FB_CONTROL CLAIM), see Displays
  ├─ inputd
  └─ compd ─── init sends it `display` (driver channel), `input`
               (a new focus channel from inputd), `secure` (shortcut channel)
@@ -432,6 +432,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `actions <caller> [automat]` | - | `ok` + action call channel; `automat` = an agent's channel, every call is confirmed with a dialog (the caller cannot bypass it with the message flag) |
 | `inspect` | - | `ok` + inspection channel |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
+| `tasks <running> <agent>` | - | `ok` (task icon in the panel) |
 
 **Inspection** (`inspect`, for tests, later a screen reader and
 magnifier): list of windows, the accessibility tree of a window in screen
@@ -567,7 +568,7 @@ does not start (`init: grafika (virtio-gpu ani framebuffer) neni`).
 <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Choosing the display driver">
 <defs><marker id="fbd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="20" width="200" height="70" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">loader (UEFI)</text><text class="m" x="110" y="64" text-anchor="middle">picks a GOP that is not virtio-gpu</text><text class="m" x="110" y="80" text-anchor="middle">phys. address, w, h, stride, RGB/BGR</text>
-<rect class="box" x="10" y="130" width="200" height="80" rx="6"/><text class="t b" x="110" y="155" text-anchor="middle">kernel</text><text class="m" x="110" y="174" text-anchor="middle">console on fb until init starts</text><text class="m" x="110" y="190" text-anchor="middle">then bootstrap FRAMEBUFFER</text><text class="m" x="110" y="204" text-anchor="middle">(write-combining VMO)</text>
+<rect class="box" x="10" y="130" width="200" height="80" rx="6"/><text class="t b" x="110" y="155" text-anchor="middle">kernel</text><text class="m" x="110" y="174" text-anchor="middle">log on fb until FB_CONTROL CLAIM</text><text class="m" x="110" y="190" text-anchor="middle">bootstrap FRAMEBUFFER to init</text><text class="m" x="110" y="204" text-anchor="middle">(write-combining VMO)</text>
 <path class="ln" d="M110 90 L110 128" marker-end="url(#fbd1)"/>
 <rect class="acc" x="290" y="130" width="200" height="80" rx="6"/><text class="t b" x="390" y="155" text-anchor="middle">init</text><text class="m" x="390" y="174" text-anchor="middle">did devmgr report display?</text><text class="m" x="390" y="190" text-anchor="middle">yes: virtio-gpu</text><text class="m" x="390" y="204" text-anchor="middle">no: starts fbdisplay</text>
 <path class="ln" d="M210 170 L288 170" marker-end="url(#fbd1)"/>
@@ -581,28 +582,36 @@ does not start (`init: grafika (virtio-gpu ani framebuffer) neni`).
 <figcaption>Choosing the display driver. The compositor does not know which one runs.</figcaption>
 </figure>
 
-### Handing over the framebuffer from the kernel
+### Who owns the framebuffer
 
 The kernel gives init the framebuffer in the start message (kind
-`FRAMEBUFFER`, see [System calls](syscalls.md#firmware-framebuffer)): a
-physical memory object and the geometry (`abi::bootstrap::FramebufferInfo`:
-width, height, stride in pixels, format). From then on the kernel console
-no longer draws into the framebuffer; the log keeps going to the serial
-line. The exception is a kernel panic: the kernel prints it into the
-framebuffer even after the hand-over (the system is going down anyway and
-the report is worth more than the picture).
+`FRAMEBUFFER`, see [System calls](syscalls.md#firmware-framebuffer)) and
+draws the log into it until an owner explicitly takes it over
+([`FB_CONTROL`](syscalls.md#fb_control) `CLAIM`). After `RELEASE` or a
+crash of the owner the kernel clears the screen and keeps drawing the log;
+a kernel panic always draws.
 
-The kernel does not hand the framebuffer over (it stays with the kernel
-console and a warning is logged) when it would overlap RAM used by the
-allocator, does not start on a page boundary or is smaller than its
-geometry.
+Init decides about the owner in one place (`gui::display`):
+
+| Situation | Framebuffer owner |
+|---|---|
+| virtio-gpu present | nobody from the GUI (the picture goes through virtio-gpu); the framebuffer stays for the rescue console |
+| no virtio-gpu | `fbdisplay` under the compositor (init gives it a duplicate handle) |
+| GUI not running or crashed | the rescue console `user/console` (command `display`), see [Shell](shell-design.md) |
+
+When the compositor ends, `fbdisplay` sees its channel closed and exits;
+the kernel takes the screen back when the process ends (also on a crash),
+but only if it still holds it. `fbdisplay` does not call `RELEASE`
+explicitly: the kernel does not check the caller and after a compositor
+crash the rescue console may already own the screen. Init keeps its `Startup::framebuffer`, so it can hand the screen
+to the console right away.
 
 ### The fbdisplay driver
 
 `user/fbdisplay` gets the framebuffer memory object and the display
-channel from init (kind USER) and, as the first message on the bootstrap
-channel, the configuration `fb <width> <height> <stride> <rgb|bgr>`
-(`fbcopy::Geometry`). Protocol:
+channel from init (kind USER). It queries the geometry itself
+(`FB_CONTROL` `INFO`), maps the framebuffer and then takes over the
+screen (`CLAIM`). Protocol:
 
 1. `INFO` -> `MODES` with a single output at the firmware resolution,
    capabilities 0,
@@ -632,8 +641,8 @@ reads from the framebuffer.
 - ⚠️ **The framebuffer is also in the kernel's direct map** with the cache
   type from the firmware MTRRs, while the process has it WC. Two mappings
   with different types are formally undefined on x86; the kernel does not
-  write through its mapping after the hand-over (only on panic), so in
-  practice it does not matter.
+  write through its mapping after `CLAIM` (only on panic), so in practice
+  it does not matter.
 
 ## Native UI library (`libs/ui`)
 
@@ -717,6 +726,31 @@ the accessibility action `set-value` or with the action `terminal.run`
 Connecting to the session service (`termd`, protocol `term::proto`) is
 done by the terminal thread: instead of the local line editor it sends
 `Run` and draws the output blocks into the same grid.
+
+## Task manager
+
+A window with the same data as the `tasks` command in the terminal (see
+[Task overview](architecture.md#task-overview-agreed)) and a "N tasks
+running" icon in the compositor panel.
+
+| Part | Where | What it does |
+|---|---|---|
+| protocol | `libs/taskproto` (proposal, agreed with the shell thread that builds `taskd`) | task list, change subscription with a snapshot and sequence numbers (resume after an outage), actions cancel, pause, resume, log; task registration by producers |
+| model and window | `libs/taskview` (host tests), program `gui-tasks` | list (agent tasks first), filters "agent only" and "finished", detail with progress and job usage, action buttons |
+| panel icon | `libs/comp` | "Úlohy: N", orange "Úlohy: N (agent M)" while an AI agent task runs; a click brings the task manager to the front |
+
+- **AI agent tasks** are clearly marked: a "[AGENT AI]" tag in the list,
+  an orange "Spustil agent AI (who)" label in the detail, a count in the
+  header and an orange panel icon.
+- **Permissions:** a button is enabled only when `taskd` allowed the action
+  for the caller (the task's `actions` bits) and the task state permits
+  it. `taskd` always decides (reply `ACCESS_DENIED`); a system task without
+  rights has all buttons disabled and the window says so.
+- **Now:** until `taskd` is in the system the window runs on test data
+  (`TestBackend` behaves like taskd: permission checks, state changes as
+  events) and init sends the icon count with the control command
+  `tasks <running> <agent>`. Once `taskd` exists, init gets a channel from
+  it (`connect`) for the window and the compositor (read-only).
 
 ## 3D: Venus and virgl (status)
 

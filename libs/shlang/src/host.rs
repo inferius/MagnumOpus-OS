@@ -35,6 +35,33 @@ pub struct Meta {
     pub size: u64,
     /// Cas zmeny v ns od 1970 (UTC), pokud ho FS zna.
     pub mtime: Option<i64>,
+    /// Prava relace k polozce ([`access`]); `None` = FS je nehlasi.
+    pub access: Option<u8>,
+    /// Slozka je koren vnoreneho datasetu (vlastni historie).
+    pub dataset: bool,
+}
+
+impl Meta {
+    /// Polozka jen s druhem a velikosti (bez casu a prav).
+    pub const fn basic(kind: NodeKind, size: u64) -> Self {
+        Self { kind, size, mtime: None, access: None, dataset: false }
+    }
+}
+
+/// Prava relace k polozce (bity `Meta::access`).
+pub mod access {
+    pub const READ: u8 = 1;
+    pub const WRITE: u8 = 2;
+    pub const EXEC: u8 = 4;
+
+    /// Text `rwx` (pomlcka = chybi).
+    pub fn text(a: u8) -> alloc::string::String {
+        let mut s = alloc::string::String::new();
+        s.push(if a & READ != 0 { 'r' } else { '-' });
+        s.push(if a & WRITE != 0 { 'w' } else { '-' });
+        s.push(if a & EXEC != 0 { 'x' } else { '-' });
+        s
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,22 +92,100 @@ pub trait Fs {
         Err(abi::Error::NotSupported)
     }
 
-    // Snapshoty (pro undo). Bez nich si undo pamatuje puvodni obsah.
-    fn snapshot(&mut self, _name: &str) -> FsResult<()> {
+    // ---- Verze (FS v3): datasety, klony bokem, pohledy ----
+    //
+    // Vsechny cesty jsou absolutni v jmennem prostoru FS (ne uvnitr
+    // datasetu); prevod resi implementace.
+
+    /// Koren datasetu, ve kterem `path` lezi. FS bez datasetu: "/".
+    fn dataset_of(&mut self, _path: &str) -> FsResult<String> {
+        Ok(String::from("/"))
+    }
+    /// Zapisovatelny klon datasetu "bokem" (zmeny nanecisto). Misto klonu
+    /// vybere implementace. Vnorene datasety jsou v klonu hranice (zapis
+    /// do nich selze).
+    fn aside_begin(&mut self, _dataset: &str) -> FsResult<Aside> {
         Err(abi::Error::NotSupported)
     }
-    fn delete_snapshot(&mut self, _name: &str) -> FsResult<()> {
+    /// Co klon zmenil proti puvodu (cesty v puvodu).
+    fn aside_changes(&mut self, _aside: &Aside) -> FsResult<Vec<FsChange>> {
         Err(abi::Error::NotSupported)
     }
-    fn snapshot_stat(&mut self, _snap: &str, _path: &str) -> FsResult<Meta> {
+    /// Prevezme zmeny klonu do puvodu (atomicky). Vrati cesty v konfliktu
+    /// (puvod se mezitim zmenil i jinak) - ty se neprevzaly.
+    fn aside_apply(&mut self, _aside: &Aside) -> FsResult<Applied> {
         Err(abi::Error::NotSupported)
     }
-    fn snapshot_list(&mut self, _snap: &str, _path: &str) -> FsResult<Vec<DirEntry>> {
+    /// Zahodi klon (i po `aside_apply`).
+    fn aside_discard(&mut self, _aside: &Aside) -> FsResult<()> {
         Err(abi::Error::NotSupported)
     }
-    fn snapshot_read(&mut self, _snap: &str, _path: &str) -> FsResult<Vec<u8>> {
+    /// Pohled: levny docasny snapshot datasetu a pozice v zurnalu zmen.
+    fn view(&mut self, _dataset: &str) -> FsResult<ViewRef> {
         Err(abi::Error::NotSupported)
     }
+    fn release_view(&mut self, _view: &ViewRef) -> FsResult<()> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Co se v datasetu zmenilo od pohledu. Nic nezmeneno (podle zurnalu)
+    /// = prazdny seznam bez pruchodu stromem.
+    fn changed_since(&mut self, _view: &ViewRef) -> FsResult<Vec<FsChange>> {
+        Err(abi::Error::NotSupported)
+    }
+    fn view_stat(&mut self, _view: &ViewRef, _path: &str) -> FsResult<Meta> {
+        Err(abi::Error::NotSupported)
+    }
+    fn view_list(&mut self, _view: &ViewRef, _path: &str) -> FsResult<Vec<DirEntry>> {
+        Err(abi::Error::NotSupported)
+    }
+    fn view_read(&mut self, _view: &ViewRef, _path: &str) -> FsResult<Vec<u8>> {
+        Err(abi::Error::NotSupported)
+    }
+}
+
+/// Klon datasetu "bokem".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Aside {
+    /// Koren puvodniho datasetu.
+    pub dataset: String,
+    /// Kde klon lezi (absolutni cesta).
+    pub root: String,
+}
+
+/// Vysledek prevzeti klonu.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Applied {
+    /// Cesty v konfliktu (neprevzaly se).
+    pub conflicts: Vec<String>,
+    /// `false` = FS seznam konfliktu zkratil (jich je vic): neni jiste,
+    /// co se prevzalo, undo takoveho prevzeti nejde.
+    pub complete: bool,
+}
+
+/// Pohled na dataset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewRef {
+    pub dataset: String,
+    pub snapshot: String,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FsChangeKind {
+    Added,
+    Removed,
+    Modified,
+    /// Presun (obsah se mohl zmenit taky); puvodni cesta v `old_path`.
+    Moved,
+}
+
+/// Zmena ve FS (z klonu nebo od pohledu).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FsChange {
+    pub kind: FsChangeKind,
+    pub path: String,
+    pub old_path: Option<String>,
+    pub is_dir: bool,
 }
 
 /// Prostredi interpretu.
@@ -103,6 +208,14 @@ pub trait Host {
         -> Option<Result<Value, ShError>> {
         None
     }
+    /// Prubeh dlouhe operace (`done` z `total`; `total = 0` = neznamy).
+    /// Hostitel ho ukaze na miste (jeden pruh na `id` v bloku); stejne `id`
+    /// = aktualizace. Rychlost a odhad si spocita okno.
+    fn progress(&mut self, _id: u32, _done: u64, _total: u64, _label: &str) {}
+    /// Vyber ze seznamu (vyzva s volbami). `None` = zruseno / bez okna.
+    fn choose(&mut self, _question: &str, _choices: &[String]) -> Option<usize> {
+        None
+    }
     /// Domovska slozka uzivatele.
     fn home(&self) -> String {
         String::from("/home")
@@ -118,4 +231,9 @@ pub struct ExecNeeds {
     pub net: bool,
     /// Bez omezeni (interaktivni relace bez `needs`).
     pub all: bool,
+    /// Program bezi nanecisto (`preview`): (koren datasetu, koren klonu).
+    /// Cesty uvnitr datasetu se programu pripoji z klonu (pod puvodnim
+    /// jmenem). Zapis mimo klony se mu pripoji jen pro cteni - skutecny FS
+    /// v nahledu menit nesmi.
+    pub aside: Vec<(String, String)>,
 }

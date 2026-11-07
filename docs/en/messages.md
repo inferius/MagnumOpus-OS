@@ -74,7 +74,6 @@ The loader writes through the firmware console (screen and serial) as
 | `initfs je poskozeny: ...` | E | The initfs image has the wrong format (`libs/initfs`). Rebuild. |
 | `initfs neobsahuje program init` | E | The `init` file is missing from initfs. |
 | `init neni platny program: ...` | E | `init` is not a static ELF64 for x86_64. |
-| `framebuffer predan initu, konzole jadra dal jen na seriove lince` | I | Init got the firmware framebuffer (bootstrap `FRAMEBUFFER`); `fbdisplay` or virtio-gpu takes over the screen. Afterwards only a panic writes into the framebuffer. |
 | `framebuffer se do userspace nepreda: ...` | W | The framebuffer overlaps RAM used by the allocator, does not start on a page boundary or is smaller than its geometry. The kernel console keeps using it, the GUI does not start without virtio-gpu. |
 | `init: poskozeny segment: ...` | E | An ELF segment lies outside the file. |
 | `init se nepodarilo spustit: ...` | E | Summary with the error code ([errors.md](errors.md)). |
@@ -105,7 +104,6 @@ invariant was broken (a kernel bug).
 | `libos: chybi nebo je prilis velka startovni zprava` | The process got no startup message (`abi::bootstrap`). It exits with code -1,000,001. |
 | `libos: neplatna startovni zprava` | The message has the wrong magic number or version. |
 | `libos: startovni zprava neobsahuje handle procesu` | `SELF_PROCESS` is missing. |
-| `libos: neplatna geometrie framebufferu` | The `FRAMEBUFFER` entry points outside the message data or has an invalid geometry; the handle is closed and the program gets no framebuffer. |
 | `PANIC: ...` when out of memory | A panic is formatted into a stack buffer (max. 512 B), so it can be printed even without free memory. A panic during a panic just ends the process. |
 | `libos: nedostatek pameti pro heap` | The program cannot start: the initial heap (4 MiB) cannot be created or mapped. The heap then grows on demand; when it can no longer grow (out of memory or the reserved 64 GiB range), the allocation fails and the program panics (`PANIC: ... alloc.rs ...`). |
 | `PANIC: ...` | The program panicked; the process exits with code -1,000,001. |
@@ -127,10 +125,10 @@ invariant was broken (a kernel bug).
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | The PS/2 driver found a keyboard, a mouse (kind from the ID: wheel, 5 buttons). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 reads `0xFF` (no controller) or no device was found (PS/2 controller not found). Normal on modern boards without PS/2. |
-| `init: displej je framebuffer z firmwaru (fb W H STRIDE FORMAT)` | The device manager found no virtio-gpu, the GUI runs through `fbdisplay` at the fixed firmware resolution (display is the firmware framebuffer). |
-| `fbdisplay: framebuffer WxH (krok S, rgb/bgr)` | The framebuffer driver is ready. |
-| `fbdisplay: chybi handly ...`, `fbdisplay: neplatna konfigurace od initu` | Init started it without the memory object and channel or with a broken first message (an init bug). |
-| `fbdisplay: framebuffer nelze namapovat: ...` | Mapping the framebuffer failed (e.g. `NO_RESOURCES` - no free space in the address space). |
+| `init: displej je framebuffer z firmwaru (fbdisplay)` | The device manager found no virtio-gpu, the GUI runs through `fbdisplay` at the fixed firmware resolution (display is the firmware framebuffer). |
+| `fbdisplay: framebuffer WxH (krok S, rgb/bgr)` | The framebuffer driver took over the screen (`FB_CONTROL` `CLAIM`). |
+| `fbdisplay: chybi handly ve startovni zprave` | Init started it without the memory object and channel (an init bug). |
+| `fbdisplay: framebuffer nelze prevzit: ...` | `FB_CONTROL` or the mapping failed: `WRONG_TYPE` (not the kernel's framebuffer object), `NOT_SUPPORTED` (unknown format or size), `NO_RESOURCES` (no room in the address space). |
 | `init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim` | There is no virtio-gpu and the kernel did not hand over a framebuffer (no GOP, unsupported pixel format, see the kernel messages). |
 | `ps2: radic neodpovida spravne: ...` | The controller exists but failed its self-test or did not answer in time (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | The port exists but no device answers on it (nothing connected). |
@@ -206,7 +204,34 @@ invariant was broken (a kernel bug).
 | `netd: ovladac skoncil (zahozeno ramcu: ...)` | The card driver exited (faulty device) and the service exits with it (code 3). |
 | `netd: chybi handly ve startovni zprave` | The service was started incorrectly (code 1). |
 | `init: sluzbu site nelze spustit: ...` | No network card (`NOT_FOUND`) or the service did not answer. |
-| `init: hodiny serizeny podle NTP ...` | The time service set the clock from the NTP server; the offset is how far off the clock was. |
+| `ntpd: bezim, servery [...]` | Time synchronization runs; servers from `ntpd.toml` (the host server in tests). |
+| `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | First successful measurement (authenticated NTS or unauthenticated NTP in fallback; "offset", "delay"); `step` = the time was set with a jump (offset over 128 ms), `slew` = smooth adjustment. |
+| `ntpd: NTS-KE <server>: ...` | The NTS key exchange failed (connection, certificate, reply); the server is skipped this round. With an invalid certificate check the clock (RTC). |
+| `ntpd: neoverene servery: Never\|Fallback` | Init changed the rule ("unauthenticated servers") by network profile. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | No reply in this round (network, firewall, server). Next attempt after the interval; the clock keeps running at the last frequency. |
+| `ntpd: konfigurace: ...` | The configuration from init is invalid; `ntpd` exits. Fix `ntpd.toml`. |
+| `timed: prvni synchronizace: skok o N ms` | The first correction from `ntpd` was large: the time was set with a jump (the only allowed jump). |
+| `timed: prvni synchronizace: dorovnani o N ms` | The first correction was small: it is applied smoothly. |
+| `timed: klient synchronizace skoncil` | `ntpd` exited or closed the channel; the clock keeps running without corrections. |
+| `init: ntpd.toml: ...`, `init: timed odmitl ntpd: ...`, `init: ntpd hlasi: ...` | `ntpd` did not start (invalid configuration, `timed` refused the channel, start-up error); the clock stays as set from the RTC. |
+| `init: synchronizaci casu nelze spustit: ...` | Summary of the above; the system runs without synchronization. |
+| `init: korenove certifikaty aktualizovany (N kB)` | The Mozilla CA set in `/system/config/certs/mozilla.pem` changed (first start, new system version). See [TLS and HTTP](tls-http.md#root-certificate-store). |
+| `init: uloziste certifikatu nelze pripravit: ...` | No FS or no permissions: programs have no CA and `https` fails (`UnknownIssuer`). |
+| `fetch: uloziste certifikatu: ...`, `fetch: /certs/F: ...` | `fetch` cannot read the store or a file (over 4 MiB, FS error); the other files are loaded. |
+| `fetch: TLS: ...` | The TLS configuration cannot be created; `fetch` exits with code 2. |
+| `revocd: bezim (OneCRL ano\|ne, N zaznamu, mezipamet na FS\|jen v pameti)` | The revocation service runs ("OneCRL yes/no, N entries, cache on the FS / in memory only"); N = OneCRL entries loaded from the FS. |
+| `revocd: OneCRL: N zaznamu` | A new list of revoked CAs was downloaded and stored. |
+| `revocd: OneCRL: neplatny dokument` | The downloaded JSON cannot be read ("invalid document"); the previous list stays, a new attempt after `retry_minutes`. |
+| `revocd: <url>: ...` | Downloading a CRL or OneCRL failed (HTTP status, connection error); the URL is not retried for `retry_minutes`, the revocation status is unknown meanwhile. |
+| `revocd: <url>: neni CRL` | The server returned something other than a CRL ("not a CRL"). |
+| `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` did not finish the request even after the limit plus margin (a bug or a stuck service). The program got `TIMED_OUT`, the channel is unusable. OP = operation code (`netproto::op`). |
+| `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | The system resolver runs ("resolvers", "anchors"). |
+| `dnsd: <resolver>: ...` | A resolver did not answer (connection, TLS, HTTP); `dnsd` tries the next one. |
+| `dnsd: <name>: DNSSEC neprosel (...)` | The answer is spoofed or damaged ("DNSSEC failed", reason in brackets); the program gets `CORRUPTED`. |
+| `netd: dnsd skoncil (...), preklad bez nej` | System resolution only by the profile rule ("dnsd exited"; public network = none). |
+| `init: sifrovane DNS nelze spustit (...)` | `dnsd` did not start ("encrypted DNS cannot start"); resolution only by the profile rule. |
+| `init: kontrolu odvolani certifikatu nelze spustit: ...` | `revocd` did not start; programs check OCSP stapling only. |
+| `init: revocd bez FS (...)` | No FS: the cache is in memory only and there are no root CAs for OneCRL over https. |
 | `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` did not pass the channel to `fwd` ("without the firewall service"). The public profile applies (nothing inbound), questions of applications with `ask` are denied right away. |
 | `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` exited. The last configuration applies, pending and further questions are denied. |
 | `netd: profil site P` | `fwd` sent a configuration with another network profile (`public`, `home`, ...). See [Network profiles](firewall.md#network-profiles). |
@@ -224,11 +249,29 @@ invariant was broken (a kernel bug).
 | `init: firewall bez FS (konfigurace se neulozi): ...` | An FS session for `fwd` cannot be prepared (no FS or rights). |
 | `init: sluzbu firewallu nelze spustit: ...` | `fwd` did not start; `netd` sees a closed channel and denies questions. |
 
+## Text console console
+
+| Message | Meaning and fix |
+|---|---|
+| `console: bezim (ceka na displej a fokus)` | The console runs; it starts drawing after `display` and takes keys after `focus`. |
+| `console: displej prevzat (SxR znaku)` | It took over the framebuffer; the character grid follows the resolution. |
+| `console: displej vracen` | After `release`; the framebuffer is back with the kernel. |
+| `console: ridici kanal zavren, koncim` | The owner of the console ended; the display goes back to the kernel. |
+| `console: chybi kanal k termd` | Started without a channel to the session service; the console exits with code 1. |
+| `framebuffer prevzal proces X N (log jadra dal na seriove lince)` | Kernel: `FB_CONTROL` `CLAIM`; it no longer draws the log on the screen. |
+| `framebuffer vratil proces X N` | Kernel: `FB_CONTROL` `RELEASE`; the screen is cleared and the log is drawn again. |
+
 ## Session service termd
 
 | Message | Meaning and fix |
 |---|---|
-| `termd: bezim (protokol vN, FS fsd/zadny)` | The session service is running. `zadny` (none) = it got no fsd channel; the shell then sees only an empty root (writes return `READ_ONLY`). |
+| `termd: bezim (protokol vN, FS fsd/zadny, registr ano/ne, prevzato N)` | The broker is running. `zadny` (none) = it got no fsd channel; the shell then sees only an empty root (writes return `READ_ONLY`). `registr ne` (no registry) = sessions do not survive the end of termd. `prevzato N` = number of sessions taken over from the previous termd. |
+| `termd: prevzata relace N` | A session from the registry moved to the new termd; the window can attach to it. |
 | `termd\| ...` | Mirror of session output as text (VT100 adapter) so it can be read on the serial line. Blocks start with `> command`. |
-| `termd: okno zavreno, koncim` | The channel to the parent closed. Background jobs finish, then the service exits (sessions do not survive the process yet). |
-| `termd: chyba cteni: ...` | Unexpected channel error; the service exits with code 1. |
+| `termd: okno zavreno, koncim (N relaci bezi dal)` | The window closed; sessions detach and keep running in their processes. A new termd takes them over from the registry. |
+| `termd: chyba cekani: ...` | Unexpected error waiting on channels; the broker exits with code 1 (sessions keep running). |
+| `shsess N: bezim (znacka)` | The process of session N is running; the tag is in the names of its clones aside. |
+| `shsess N: termd skoncil, cekam na prevzeti` | The main channel closed; the command and jobs finish, the session waits for `Adopt` from a new termd. |
+| `shsess N: prevzato novym termd` | The session moved to a new termd. |
+| `shsess N: nikdo neprevzal, koncim` | The registry closed the channel (or there is none) and no job waits; the session ends. |
+| `shsess: chybi Init` / `prvni zprava neni Init` | The session process did not get the initial message from termd; it exits with code 1. |

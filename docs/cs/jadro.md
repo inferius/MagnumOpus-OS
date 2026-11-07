@@ -213,6 +213,14 @@ Záznam:
 - Úrovně: `E` chyba, `W` varování, `I` info, `D` ladění, `T` trasování.
 - Výstupy: sériová linka (vše povolené), framebuffer (do Info), kruhový
   buffer 64 KiB (`log::snapshot`, pro budoucí službu logu).
+- **Framebuffer pro userspace:** když ho firmware dal (a fyzická adresa je
+  zarovnaná na stránku), init dostane ve startovní zprávě objekt paměti
+  `bootstrap::kind::FRAMEBUFFER` (geometrie z `BootInfo`, `FB_CONTROL`
+  `INFO`). Init ho předá jedinému procesu - textové a záchranné konzoli
+  (`user/console`). Převzetí je výslovné (`FB_CONTROL` `CLAIM`): jádro pak
+  log do framebufferu nekreslí, na sériovou linku jde dál. `RELEASE` ho
+  jádru vrátí (obrazovka se smaže); totéž udělá konec (i pád) procesu,
+  který ho převzal. Bez framebufferu položka chybí.
 - Filtr: globální úroveň (`log::set_level`), úroveň pro modul a jeho
   podmoduly (`log::set_target_level("sched", Level::Trace)`). Release build
   vůbec nepřeloží Trace (feature `log-trace` ho vrátí). Vypnutá úroveň stojí

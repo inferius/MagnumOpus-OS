@@ -3,7 +3,8 @@
 use alloc::vec::Vec;
 
 use fs::{Fs, Kind};
-use fsproto::{DirEntry, Info, Reader, Stat, Writer, kind, op};
+use fsproto::hist::op as hop;
+use fsproto::{DirEntry, Info, Reader, Stat, StatEntry, Writer, kind, op};
 use libos::{Error, Result};
 
 use crate::blkdev::BlkDev;
@@ -36,18 +37,18 @@ pub(crate) fn stat(s: fs::Stat) -> Stat {
     }
 }
 
+fn kind_raw(k: Kind) -> u8 {
+    match k {
+        Kind::File => kind::FILE,
+        Kind::Dir => kind::DIR,
+        Kind::Symlink => kind::SYMLINK,
+        Kind::Dataset => kind::DATASET,
+    }
+}
+
 pub(crate) fn entries(list: Vec<fs::DirEntry>) -> Vec<DirEntry> {
     list.into_iter()
-        .map(|e| DirEntry {
-            name: e.name,
-            kind: match e.kind {
-                Kind::File => kind::FILE,
-                Kind::Dir => kind::DIR,
-                Kind::Symlink => kind::SYMLINK,
-            Kind::Dataset => kind::DATASET,
-            },
-            oid: e.oid,
-        })
+        .map(|e| DirEntry { name: e.name, kind: kind_raw(e.kind), oid: e.oid })
         .collect()
 }
 
@@ -70,11 +71,19 @@ pub struct Service {
     pub commit_requested: bool,
     /// Cislovani relaci (`CONNECT`, `CONNECT_AS`).
     pub session_counter: u64,
+    /// Prace v necinnosti: po defragmentaci deduplikace.
+    pub dedup_phase: bool,
+    /// Bezi scrub (smycka dela kroky mezi pozadavky).
+    pub scrubbing: bool,
 }
+
+/// Klic rozpracovaneho vypisu: (dataset, snapshot) u vypisu snapshotu
+/// (`None` = ziva verze) a cesta.
+pub type ListKey = (Option<(alloc::string::String, alloc::string::String)>, alloc::string::String);
 
 /// Klic a obsah rozpracovaneho vypisu (polozky serazene podle slozeneho
 /// jmena - kurzor se hleda pulenim, slozeny tvar se neuklada).
-pub type ListCache = ((Option<alloc::string::String>, alloc::string::String), Vec<fs::DirEntry>);
+pub type ListCache = (ListKey, Vec<fs::DirEntry>);
 
 impl Service {
     fn fs(&mut self) -> Result<&mut Fs<BlkDev>> {
@@ -98,7 +107,7 @@ impl Service {
         let mut r = Reader::new(msg);
         let opcode = r.u32()?;
         // Rozpracovany vypis zahodi kazda jina operace (nikdy neni zastaraly).
-        if opcode != op::LIST_PAGE && opcode != op::SNAP_LIST_PAGE {
+        if !matches!(opcode, op::LIST_PAGE | op::SNAP_LIST_PAGE | op::LIST_STAT_PAGE | hop::SNAP_LIST_OF) {
             sess.list_cache = None;
         }
         if opcode == op::COMMIT {
@@ -108,6 +117,9 @@ impl Service {
             return res;
         }
         if let Some(res) = self.handle_hist(sess, opcode, &mut r) {
+            return res;
+        }
+        if let Some(res) = self.handle_data(sess, opcode, &mut r) {
             return res;
         }
         let mut w = Writer::new();
@@ -169,14 +181,33 @@ impl Service {
                     return Err(Error::BufferTooSmall);
                 }
             }
-            op::LIST_PAGE | op::SNAP_LIST_PAGE => {
-                let snap = if opcode == op::SNAP_LIST_PAGE { Some(r.str()?) } else { None };
+            op::LIST_PAGE | op::SNAP_LIST_PAGE | op::LIST_STAT_PAGE | hop::SNAP_LIST_OF => {
+                // Zdroj vypisu: (dataset, snapshot) nebo ziva verze. Cesta
+                // ve snapshotu je cesta uvnitr datasetu (bez prekladu).
+                let snap = match opcode {
+                    op::SNAP_LIST_PAGE => Some((alloc::string::String::from("/"), r.str()?)),
+                    hop::SNAP_LIST_OF => {
+                        let ds = sess.map(&r.str()?, false)?;
+                        Some((ds, r.str()?))
+                    }
+                    _ => None,
+                };
                 let path = match snap {
                     Some(_) => r.str()?,
                     None => sess.map(&r.str()?, false)?,
                 };
                 let after = r.str()?;
                 let max = r.u32()? as usize;
+                let with_stat = opcode == op::LIST_STAT_PAGE;
+                if with_stat {
+                    // Metadata polozek = STAT kazde z nich: bez TRAVERSE
+                    // k adresari by STAT nesel (viz `op::LIST_STAT_PAGE`).
+                    if fs.stat(&path)?.rights & fs::rights::TRAVERSE == 0 {
+                        return Err(Error::AccessDenied);
+                    }
+                }
+                // Stejny vypis jako LIST_PAGE (sdileny rozpracovany vypis
+                // nevadi: obsah je pro obe operace stejny).
                 let key = (snap.clone(), path.clone());
                 // Vypis pro dalsi stranky drzet v pameti (jinak by se pro
                 // kazdou stranku sestavoval znovu); zahodi ho kazda jina
@@ -187,7 +218,7 @@ impl Service {
                     None => {
                         let fs = self.fs.as_mut().ok_or(Error::IoError)?;
                         match &snap {
-                            Some(s) => fs.snapshot_list(s, &path)?,
+                            Some((ds, s)) => fs.snapshot_list_of(ds, s, &path)?,
                             None => fs.list(&path)?,
                         }
                     }
@@ -199,8 +230,31 @@ impl Service {
                     // Vypis je serazeny podle slozeneho jmena (fs::list).
                     list.partition_point(|e| fs::fold_name(&e.name) <= a)
                 };
-                let page: Vec<DirEntry> = entries(list[start..].to_vec());
-                let n = fsproto::encode_list_page(&mut w, &page, max, fsproto::MAX_REPLY);
+                let n = if with_stat {
+                    let rest = &list[start..];
+                    let n = fsproto::list_stat_fit(rest.iter().map(|e| e.name.as_str()), max, fsproto::MAX_REPLY);
+                    let fs = self.fs.as_mut().ok_or(Error::IoError)?;
+                    let page = rest[..n]
+                        .iter()
+                        .map(|e| {
+                            let st = fs.stat(&alloc::format!("{}/{}", path.trim_end_matches('/'), e.name))?;
+                            // Druh a oid jako LIST (u datasetu vstup, ne jeho koren).
+                            Ok(StatEntry {
+                                name: e.name.clone(),
+                                kind: kind_raw(e.kind),
+                                oid: e.oid,
+                                size: st.size,
+                                mtime: st.mtime,
+                                rights: st.rights,
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    fsproto::encode_list_stat_page(&mut w, &page, n < rest.len());
+                    n
+                } else {
+                    let page: Vec<DirEntry> = entries(list[start..].to_vec());
+                    fsproto::encode_list_page(&mut w, &page, max, fsproto::MAX_REPLY)
+                };
                 if start + n < list.len() {
                     sess.list_cache = Some((key, list));
                 }
@@ -266,6 +320,19 @@ impl Service {
                 let off = r.u64()?;
                 let n = io_len(&mut r)?;
                 w.bytes(&fs.snapshot_read(&snap, &path, off, n)?);
+            }
+            hop::SNAP_STAT_OF => {
+                let ds = sess.map(&r.str()?, false)?;
+                let snap = r.str()?;
+                stat(fs.snapshot_stat_of(&ds, &snap, &r.str()?)?).put(&mut w);
+            }
+            hop::SNAP_READ_OF => {
+                let ds = sess.map(&r.str()?, false)?;
+                let snap = r.str()?;
+                let path = r.str()?;
+                let off = r.u64()?;
+                let n = io_len(&mut r)?;
+                w.bytes(&fs.snapshot_read_of(&ds, &snap, &path, off, n)?);
             }
             op::DEFRAG => {
                 w.u64(fs.defrag_file(&r.str()?)?);

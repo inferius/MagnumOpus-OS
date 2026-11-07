@@ -11,7 +11,7 @@
 //! casti roury je prikaz, pokud to neni promenna ani klicove slovo. Podle
 //! rozsahu se rozhoduje i v podmince `where` (pole radku vs promenna).
 
-mod cmd;
+pub(crate) mod cmd;
 mod expr;
 
 pub use cmd::usage;

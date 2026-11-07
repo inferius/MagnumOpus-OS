@@ -80,7 +80,7 @@ fs.aside_discard("/projekt-zkouska")?;
 ```
 
 Přes službu fsd totéž dělá `FsClient` (`fsproto::hist`), viz
-[Protokol](#protokol-operace-54-86).
+[Protokol](#protokol-operace-54-92).
 
 ## Žurnál změn
 
@@ -374,6 +374,21 @@ fs.aside_discard("/projekt-zkouska")?;              // klon i snapshot jedním k
   sloučení se značkami nebo uložení vedle. Převzetí je atomické (commit).
 - Převzetí jde opakovat (např. nejdřív `/src`, pak zbytek).
 - Smazané soubory jdou do koše originálu.
+- **Vnořené datasety jsou v klonu hranice.** Klon jde udělat i z datasetu
+  s vnořenými datasety (i z kořene `/`) a smí ležet uvnitř originálu
+  (`/tmp/.aside-1`). Položka vnořeného datasetu je v klonu vidět (výpis
+  i `stat` ji ukážou jako `Dataset`, `stat` s právy 0), ale vstup do ní,
+  zápis, přejmenování i smazání vrátí `NOT_SUPPORTED` - druhá
+  zapisovatelná cesta k témuž datasetu nikdy nevznikne. Platná je jen
+  položka, na kterou ukazuje zpětný odkaz datasetu (`DSLINK`); kopie
+  v klonu (i položka datasetu, který mezitím zanikl) je hranice.
+  `diff_clone` hranice nehlásí a `aside_apply` vnořené datasety originálu
+  nemění: jejich jména jsou obsazená (nový soubor stejného jména =
+  konflikt) a složka s datasetem se nesmaže (konflikt `DirNotEmpty`).
+  Dva současné klony téhož datasetu (dvě relace shellu) tak fungují
+  nezávisle - druhý vidí první jen jako hranici. Stejně se chovají
+  `clone_snapshot` a `branch`; klon navíc nedědí starší snapshoty
+  originálu.
 
 ## Na disku
 
@@ -411,7 +426,7 @@ v adresáři koše a počítadlo, počet atributů v záznamu objektu, shodu
 indexu expirace s atributy (oid + generace), paměť hashe jen u souborů,
 čitelnost nastavení, větví a `HEAD`.
 
-## Protokol (operace 54-86)
+## Protokol (operace 54-92)
 
 Modul `fsproto::hist`; cesty jsou cesty relace, práva kontroluje FS podle
 identity relace. Čas na drátě = sekundy i64 + nanosekundy u32.
@@ -438,14 +453,20 @@ identity relace. Čas na drátě = sekundy i64 + nanosekundy u32.
 | 72 | `MERGE` | cíl, zdroj | zpráva o sloučení |
 | 73 | `MERGE_ABORT` | cíl | - |
 | 74 | `ASIDE_BEGIN` | dataset, cesta klonu | dataset klonu u64 |
-| 75 | `ASIDE_APPLY` | klon, vše u8, počet + cesty | zpráva o sloučení |
+| 75 | `ASIDE_APPLY` | klon, vše u8, počet + cesty | zpráva o sloučení; za konflikty celkový počet konfliktů u32 (seznam může být zkrácený na 1024) |
 | 76 | `ASIDE_DISCARD` | klon | - |
-| 77 | `ASIDE_CHANGES` | klon | počet + (druh u8, cesta, stará cesta, oid, složka u8) |
+| 77 | `ASIDE_CHANGES` | klon, [přeskočit u32] | stránka: celkem u32, počet u32 + (druh u8, cesta, stará cesta, oid, složka u8) |
 | 78-81 | `XATTR_GET` / `SET` / `REMOVE` / `LIST` | cesta, jméno [, hodnota = zbytek zprávy] | hodnota / - / - / jména |
 | 82 / 83 | `SET_EXPIRES` / `EXPIRES` | cesta [, má u8, čas] | má u8, čas |
 | 84 | `HEAD` | dataset | má u8 + commit |
 | 85 | `DATASET_CREATE` | cesta | číslo datasetu u64 (nová složka s vlastní historií; právo `CREATE` v rodiči) |
 | 86 | `DATASET_DELETE` | cesta | - (i se snapshoty; `MANAGE` + `DELETE`; ne s vnořenými datasety a klony) |
+| 87 | `LIST_STAT_PAGE` | cesta, kurzor, nejvýš u32 | výpis s metadaty, popis v [protokolu fsproto](souborovy-system.md#protokol-fsproto) (modul `fsproto::op`) |
+| 88 | `DIFF` | dataset, od snapshot, do u8 (0 = živá verze, 1 = následuje jméno snapshotu), [přeskočit u32] | stránka jako `ASIDE_CHANGES`; `MANAGE` ke kořeni datasetu |
+| 89 | `DATASET_OF` | cesta | cesta kořene datasetu, ve kterém cesta leží (`/` = kořenový); práva jako `STAT` |
+| 90 | `SNAP_STAT_OF` | dataset, snapshot, cesta uvnitř datasetu | `Stat` |
+| 91 | `SNAP_LIST_OF` | dataset, snapshot, cesta uvnitř datasetu, kurzor, nejvýš u32 | jako `LIST_PAGE` |
+| 92 | `SNAP_READ_OF` | dataset, snapshot, cesta uvnitř datasetu, offset u64, délka u32 | data (kratší na konci souboru) |
 
 Commit na drátě: ID (32 B), snapshot, dataset u64, id snapshotu u64, čas,
 autor u64, zpráva, počet u32 + ID rodičů. Zpráva o sloučení: převzaté
@@ -454,6 +475,49 @@ smazáno, 3 naše smazáno / jejich změněno, 4 přidáno na obou stranách,
 5 přesunuto na obou stranách, 6 chybí složka, 7 složka není prázdná,
 8 cyklus; kam se uložila jejich verze) a volitelně commit sloučení.
 Seznamy mají nejvýš 4096 položek.
+
+**Rozdíl verzí a čtení snapshotu datasetu (88-92)** - pro shell (`diff`,
+náhled změn, čtení z pohledu):
+
+- **Cesty v `Change`** (`DIFF` i `ASIDE_CHANGES`) jsou **uvnitř datasetu**
+  (od jeho kořene, např. `/a.txt` v datasetu `/projekt`), ne cesty relace.
+  Absolutní cestu dostane klient spojením s cestou datasetu. Seřazené podle
+  cesty; druh 1 přidáno, 2 smazáno, 3 změněno, 4 přesunuto, 5 přesunuto
+  a změněno.
+- **`DIFF`** porovná snapshot `od` se snapshotem `do`, nebo se živou verzí
+  (i neuložené změny). Snapshot může být i dočasný snapshot pohledu
+  (`VIEW`).
+- **Stránky změn** (`DIFF`, `ASIDE_CHANGES`): odpověď nese celkový počet
+  změn a jednu stránku (nejvýš 4096 položek a 60 KiB). Klient pošle stejný
+  požadavek s `přeskočit` = počet už přijatých, dokud nemá všechny
+  (`FsClient::diff`, `aside_changes` to dělají samy). Seznam se nikdy
+  tiše nezkrátí. Každá stránka rozdíl spočítá znovu; cena je úměrná
+  změnám, ne velikosti stromu, takže to stojí málo.
+- **Konflikty v `ASIDE_APPLY`/`MERGE`**: seznam se do odpovědi vejde
+  zkrácený (nejvýš 1024), ale celkový počet jde vždy. Klient tak pozná,
+  že nezná všechny konflikty (shell pak převzetí nedovolí vrátit).
+- **`DATASET_OF`**: služba projde předky cesty od kořene (`STAT` každého)
+  a vrátí prvního se stejným datasetem. Cesta, kterou relace nevidí,
+  i kořen datasetu mimo připojené cesty relace = `NOT_FOUND` (jako `STAT`).
+- **`SNAP_*_OF`** čtou snapshot libovolného datasetu (i pohled z `VIEW`);
+  `SNAP_STAT`, `SNAP_LIST_PAGE` a `SNAP_READ` umí jen kořenový dataset
+  a jen relace, která vidí celý FS. Dataset je cesta relace (stačí
+  připojení jen pro čtení), cesta ve snapshotu je uvnitř datasetu. Práva
+  kontroluje FS jako u čtení (průchod k datasetu, ACL ve snapshotu).
+
+Klient: `diff(dataset, od, do: Option)`, `dataset_of(cesta)`,
+`snapshot_stat_of`, `snapshot_list_of`, `snapshot_read_of` a
+`snapshot_read_file_of` (celý soubor).
+
+```rust
+let v = fs.view("/projekt")?;
+// ... změny ...
+for c in fs.diff("/projekt", &v.snapshot, None)? {
+    // c.path je uvnitř datasetu: "/projekt" + c.path
+}
+let stary = fs.snapshot_read_file_of("/projekt", &v.snapshot, "/a.txt")?;
+fs.release_view("/projekt", &v.snapshot)?;
+```
 
 **Služba fsd** každou minutu (jako systém) volá `auto_snapshot_tick`,
 `expire_tick`, `trash_tick` a `journal_tick` - na svazku jen pro čtení ne.
@@ -476,9 +540,19 @@ snapshot).
   commitu (obsah souborů jen po změně). U datasetu s miliony objektů trvá
   commit úměrně počtu objektů. Přírůstkový hash ve složkách je možná
   pozdější optimalizace.
-- ⚠️ **Klon datasetu s vnořenými datasety** by obsahoval druhou cestu
-  k týmž datasetům: `branch` a `aside_begin` takový dataset odmítnou
-  (`NOT_SUPPORTED`).
+- **Rozdíl a sloučení stojí úměrně změně, ne velikosti datasetu.**
+  `diff`, `diff_clone`, `aside_apply` i `merge` porovnají stromy současně
+  a sdílené podstromy (stejný ukazatel uzlu - klon a jeho výchozí snapshot
+  sdílejí všechno nezměněné) přeskočí; změněné objekty pak dohledají
+  bodovými dotazy (záznam, jméno v rodičovské složce, cesta přes předky).
+  Navíc se čtou výpisy složek, ve kterých změny leží (velká složka se
+  změněným souborem = průchod jejích položek). Příklad z testu: 5000
+  souborů, změna 2 - `diff_clone` 15 čtení uzlů z disku místo 154,
+  `aside_apply` 15 místo 154. Předpoklad: `Inode::parent` odpovídá položce
+  adresáře (hlídá `check`).
+- ⚠️ **Klon datasetu s vnořenými datasety** do nich nevidí: vnořené
+  datasety jsou v klonu jen hranice (`NOT_SUPPORTED`), změny v nich
+  „bokem“ vyzkoušet nejde - na to je klon vnořeného datasetu samotného.
 - **Obnova verze a merge kopírují data** (okamžité kopie přes sdílené bloky
   přijdou s fází 3).
 - **Merge** páruje nové objekty podle cesty; společný předek je první
@@ -498,4 +572,5 @@ snapshot).
 | `tests/trash.rs` | koš: přesun bez kopie, obnova (i do jiné cesty), vysypání a uvolnění místa, otevřený handle, přes intent log po pádu, úklid podle stáří, viditelnost a práva; atributy a jmenné prostory; expirace (index, zrušení, pád) |
 | `tests/history.rs` | verze souboru přes přejmenování, obnova kopií i nahrazením, `undo` všech druhů, automatické snapshoty a prořezání, nastavení; diff3 (i property test) |
 | `tests/commits.rs` | commity a log, **logické ID nezávislé na rozmístění bloků**, větev a čistý merge, konflikty textu a binárních souborů, „bokem“ s výběrem a konfliktem, nové složky a výměny jmen |
+| `tests/aside_nested.rs` | „bokem“ nad `/` s vnořeným datasetem: hranice (výpis, `stat`, zápis, přejmenování, smazání), změny a převzetí bez hranic, dva současné klony uvnitř `/` (převzít jeden, zahodit druhý a obráceně), složka s datasetem, `clone_snapshot` a větev, kontrola oprávnění |
 | init `tests/fs_hist.rs` | v systému přes fsd: žurnál a `JOURNAL_WATCH` s limitem, pohled, koš, commit, větev a merge, „bokem“, atributy a expirace, fsck |

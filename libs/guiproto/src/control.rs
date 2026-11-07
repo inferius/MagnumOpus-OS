@@ -16,6 +16,7 @@
 //! | `actions <volajici>` | - | `ok` + kanal akci ([`CallerMsg`]) |
 //! | `inspect` | - | `ok` + kanal inspekce ([`InspectRequest`]) |
 //! | `status` | - | `ok` + [`Status`] v textu |
+//! | `tasks <bezi> <agent>` | - | `ok` (ikona uloh v panelu) |
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -32,6 +33,9 @@ pub const DIALOG: &str = "dialog";
 pub const ACTIONS: &str = "actions";
 pub const INSPECT: &str = "inspect";
 pub const STATUS: &str = "status";
+/// `tasks <bezi> <z toho agent>`: pocet uloh pro ikonu v panelu (do
+/// pripojeni kompozitoru k taskd ho posila init nebo test).
+pub const TASKS: &str = "tasks";
 
 /// Identita aplikace pri `connect`: posila ji init (duveryhodny), ne
 /// aplikace. Odznak duvery ukazuje `name` a `perms`.

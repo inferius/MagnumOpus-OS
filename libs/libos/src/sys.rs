@@ -99,6 +99,17 @@ pub fn clock_set(resource: u32, req: &abi::time::SetRequest, flags: u64) -> Resu
     .map(|r| r == 1)
 }
 
+/// Plynula korekce realneho casu (Resource s pravem `SET_CLOCK`), viz
+/// `abi::time::adjust`. Vraci stav po zmene.
+pub fn clock_adjust(resource: u32, offset_ns: i64, freq_ppb: i64, flags: u64) -> Result<abi::time::AdjustStatus> {
+    let mut buf = [0u8; abi::time::AdjustStatus::SIZE];
+    call(
+        nr::CLOCK_ADJUST,
+        [resource as u64, offset_ns as u64, freq_ppb as u64, flags, buf.as_mut_ptr() as u64, 0],
+    )?;
+    Ok(abi::time::AdjustStatus::decode(&buf))
+}
+
 pub fn handle_close(h: u32) -> Result<()> {
     call(nr::HANDLE_CLOSE, [h as u64, 0, 0, 0, 0, 0]).map(|_| ())
 }
@@ -468,6 +479,19 @@ pub fn job_create(parent: u32) -> Result<u32> {
 
 pub fn job_set_limit(job: u32, pool: u32, bytes: u64) -> Result<()> {
     call(nr::JOB_SET_LIMIT, [job as u64, pool as u64, bytes, 0, 0, 0]).map(|_| ())
+}
+
+/// `FB_CONTROL`: geometrie framebufferu.
+pub fn fb_info(vmo: u32) -> Result<abi::syscall::FbInfo> {
+    let mut buf = [0u8; abi::syscall::FbInfo::SIZE];
+    call(nr::FB_CONTROL, [vmo as u64, abi::syscall::fb_op::INFO, buf.as_mut_ptr() as u64, 0, 0, 0])?;
+    Ok(abi::syscall::FbInfo::decode(&buf))
+}
+
+/// `FB_CONTROL`: prevzit (`true`) nebo vratit (`false`) framebuffer.
+pub fn fb_claim(vmo: u32, claim: bool) -> Result<()> {
+    let op = if claim { abi::syscall::fb_op::CLAIM } else { abi::syscall::fb_op::RELEASE };
+    call(nr::FB_CONTROL, [vmo as u64, op, 0, 0, 0, 0]).map(|_| ())
 }
 
 pub fn job_info(job: u32) -> Result<abi::job::JobInfo> {

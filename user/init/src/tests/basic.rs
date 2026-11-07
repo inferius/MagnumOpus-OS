@@ -32,9 +32,11 @@ fn clock(_: &Startup) -> TestResult {
 
 fn wall_clock(_: &Startup) -> TestResult {
     // QEMU s OVMF ma vzdy hodiny (UEFI i CMOS) nastavene podle hostitele.
+    // ntpd (v testech server hostitele) muze cas stihnout seridit drive
+    // (zdroj NETWORK) - po startu init a pred timto testem.
     let r = time::wall_reading().map_err(|e| fail("CLOCK_REALTIME", e))?;
     check!(
-        r.source == time::source::UEFI || r.source == time::source::RTC,
+        matches!(r.source, time::source::UEFI | time::source::RTC | time::source::NETWORK),
         alloc::format!("neocekavany zdroj casu {}", r.source)
     );
     let c = r.time.to_civil();

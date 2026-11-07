@@ -27,7 +27,7 @@ pub enum Format {
 }
 
 impl Format {
-    /// Z hodnoty `abi::bootstrap::pixel` (1 = RGB, 2 = BGR).
+    /// Z hodnoty `abi::syscall::FbInfo::format` (1 = RGB, 2 = BGR).
     pub fn from_abi(v: u32) -> Option<Self> {
         match v {
             1 => Some(Self::Rgb),
@@ -36,7 +36,7 @@ impl Format {
         }
     }
 
-    /// Jmeno pro konfiguraci a vypisy (`rgb`, `bgr`).
+    /// Jmeno pro vypisy (`rgb`, `bgr`).
     pub fn name(self) -> &'static str {
         match self {
             Self::Rgb => "rgb",
@@ -50,53 +50,6 @@ impl Format {
             "bgr" => Some(Self::Bgr),
             _ => None,
         }
-    }
-}
-
-/// Nejvetsi sirka a vyska (jako `guiproto::MAX_DIM`).
-pub const MAX_DIM: u32 = 16384;
-
-/// Geometrie framebufferu: konfigurace ovladace `fbdisplay` od initu,
-/// text `fb <sirka> <vyska> <krok> <rgb|bgr>` (krok v pixelech).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Geometry {
-    pub width: u32,
-    pub height: u32,
-    /// Krok radku v pixelech (>= `width`).
-    pub stride: u32,
-    pub format: Format,
-}
-
-impl Geometry {
-    /// Rozebere konfiguraci; slova navic nebo hodnoty mimo rozsah = `None`.
-    pub fn parse(text: &str) -> Option<Self> {
-        let mut p = text.split_whitespace();
-        if p.next()? != "fb" {
-            return None;
-        }
-        let mut num = || p.next()?.parse::<u32>().ok();
-        let (width, height, stride) = (num()?, num()?, num()?);
-        let format = Format::parse(p.next()?)?;
-        let ok = p.next().is_none()
-            && (1..=MAX_DIM).contains(&width)
-            && (1..=MAX_DIM).contains(&height)
-            && (width..=MAX_DIM * 2).contains(&stride);
-        ok.then_some(Self {
-            width,
-            height,
-            stride,
-            format,
-        })
-    }
-
-    /// Zapise konfiguraci (opak [`Geometry::parse`]).
-    pub fn write(&self, out: &mut impl core::fmt::Write) -> core::fmt::Result {
-        write!(out, "fb {} {} {} {}", self.width, self.height, self.stride, self.format.name())
-    }
-
-    /// Velikost framebufferu v bajtech.
-    pub fn bytes(&self) -> u64 {
-        self.stride as u64 * self.height as u64 * 4
     }
 }
 

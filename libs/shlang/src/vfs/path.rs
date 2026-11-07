@@ -67,6 +67,17 @@ pub fn join(dir: &str, name: &str) -> String {
     if dir == "/" { alloc::format!("/{name}") } else { alloc::format!("{dir}/{name}") }
 }
 
+/// Presune cestu `p` (lezi v `from`) pod `to` po celych castech:
+/// `rebase("/a/b", "/a", "/c")` = `/c/b`.
+pub fn rebase(p: &str, from: &str, to: &str) -> String {
+    let skip = from.split('/').filter(|s| !s.is_empty()).count();
+    let mut out = String::from(to);
+    for part in p.split('/').filter(|s| !s.is_empty()).skip(skip) {
+        out = join(&out, part);
+    }
+    out
+}
+
 /// Je `p` rovno `prefix` nebo lezi uvnitr (po celych castech, bez ohledu
 /// na velikost pismen)?
 pub fn within(p: &str, prefix: &str) -> bool {

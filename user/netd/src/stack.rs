@@ -54,6 +54,8 @@ pub struct Stack {
     /// Porty TCP, na kterych nekdo nasloucha (pro prichozi filtr).
     listening: BTreeSet<u16>,
     pub fw: Firewall,
+    /// Systemovy preklad pres dnsd (sifrovane DNS, DNSSEC).
+    pub resolver: crate::forward::Forwarder,
     /// Spojeni zavrena klientem, ktera jeste dobihaji: (socket, termin,
     /// obsazeny docasny port).
     pub closing: Vec<(SocketHandle, u64, Option<u16>)>,
@@ -102,7 +104,7 @@ impl netfilter::Ports for PortsView<'_> {
 }
 
 impl Stack {
-    pub fn new(mut dev: Link, fw: Firewall) -> Self {
+    pub fn new(mut dev: Link, fw: Firewall, resolver: crate::forward::Forwarder) -> Self {
         let mac = dev.info.mac;
         let (mut rng, seeded) = Rng::new();
         if !seeded {
@@ -128,6 +130,7 @@ impl Stack {
             ports: BTreeSet::new(),
             listening: BTreeSet::new(),
             fw,
+            resolver,
             closing: Vec::new(),
         }
     }
@@ -259,6 +262,7 @@ impl Stack {
             gateway,
             dns: self.dns_servers().iter().map(|s| s.ip()).collect(),
             rights,
+            unauthenticated_fallback: self.fw.unauthenticated_fallback,
         }
     }
 

@@ -96,6 +96,8 @@ pub struct Comp {
     pub(crate) token_source: Box<dyn FnMut() -> u128>,
     /// Posledni znamy cas (z volani se `now`).
     pub(crate) input_now: u64,
+    /// Bezici ulohy a z toho ulohy agenta AI (ikona v panelu).
+    pub(crate) tasks: (u32, u32),
 }
 
 impl Comp {
@@ -118,6 +120,7 @@ impl Comp {
             services: services::Services::default(),
             token_source,
             input_now: 0,
+            tasks: (0, 0),
         };
         c.damage_all();
         c
@@ -144,6 +147,14 @@ impl Comp {
     /// Zpravy k odeslani (vyprazdni frontu).
     pub fn take_out(&mut self) -> Vec<Out> {
         core::mem::take(&mut self.out)
+    }
+
+    /// Pocet bezicich uloh pro ikonu v panelu (od sluzby uloh).
+    pub fn set_tasks(&mut self, running: u32, agent: u32) {
+        if self.tasks != (running, agent) {
+            self.tasks = (running, agent);
+            self.damage_panel();
+        }
     }
 
     pub fn status(&self) -> Status {
