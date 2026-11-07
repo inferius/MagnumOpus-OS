@@ -282,6 +282,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "taskproto",
             "--package",
+            "taskcore",
+            "--package",
             "svcclient",
             "--package",
             "taskview",

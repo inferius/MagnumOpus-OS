@@ -2074,6 +2074,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "taskcore"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "taskproto",
+]
+
+[[package]]
 name = "taskproto"
 version = "0.1.0"
 dependencies = [
