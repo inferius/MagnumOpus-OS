@@ -140,8 +140,9 @@ fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
 }
 
 /// Stroj virt: GICv3 s ITS (MSI pro PCIe), volitelne SMMUv3, CPU Cortex-A76
-/// (stejne jadro jako Raspberry Pi 5). Bez EL2 (virtualization=off), aby
-/// loader i jadro bezely v EL1. Vraci, zda smi systemovy disk prochazet
+/// (stejne jadro jako Raspberry Pi 5). S EL2 (virtualization=on): firmware
+/// bezi v EL2 a loader sestupuje do EL1 stejne jako na realnem hardwaru
+/// (PSCI pak pres SMC). Vraci, zda smi systemovy disk prochazet
 /// IOMMU (SMMU je do zapnuti jadrem v rezimu bypass, firmware ho nevidi).
 fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     let iommu = if opts.iommu == "smmu" {
@@ -151,7 +152,7 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     };
     cmd.arg("-machine")
         .arg(format!(
-            "virt,gic-version=3,its=on,virtualization=off,secure=off{iommu},accel={accel}"
+            "virt,gic-version=3,its=on,virtualization=on,secure=off{iommu},accel={accel}"
         ))
         .args(["-cpu", "cortex-a76", "-smp", "4", "-m", "1G"]);
     if !opts.headless {

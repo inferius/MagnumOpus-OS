@@ -148,8 +148,23 @@ pub fn init(phys: u64) {
 }
 
 impl Its {
-    /// Zapise prikaz do fronty a pocka, az ho ITS zpracuje.
+    /// Zapise prikaz do fronty (bez cekani na zpracovani - ITS zpracovava
+    /// prikazy v poradi, na dokonceni se ceka v `sync`).
     fn command(&mut self, cmd: [u64; 4]) {
+        // Fronta je plna, kdyz by zapis dohnal cteni: pockat na misto.
+        let next = (self.write + CMD_SIZE) % QUEUE_LEN;
+        let mut spins = 0u32;
+        while read64(self.regs + GITS_CREADR) & 0xF_FFE0 == next {
+            spins += 1;
+            if spins > 10_000_000 {
+                log::error!(
+                    "ITS: fronta prikazu stoji, prikaz {:#x} zahozen",
+                    cmd[0] & 0xFF
+                );
+                return;
+            }
+            core::hint::spin_loop();
+        }
         let slot = PhysAddr::new(self.queue + self.write).to_virt().as_u64();
         // SAFETY: slot fronty prikazu (32 B) v prime mape.
         unsafe {
@@ -159,24 +174,26 @@ impl Its {
             }
         }
         dcache_clean_invalidate(slot, CMD_SIZE);
-        self.write = (self.write + CMD_SIZE) % QUEUE_LEN;
+        self.write = next;
         write64(self.regs + GITS_CWRITER, self.write);
-        let mut spins = 0u32;
-        while read64(self.regs + GITS_CREADR) & 0xF_FFE0 != self.write && spins < 10_000_000 {
-            core::hint::spin_loop();
-            spins += 1;
-        }
-        if spins == 10_000_000 {
-            log::error!(
-                "ITS nezpracoval prikaz {:#x} (CREADR {:#x})",
-                cmd[0] & 0xFF,
-                read64(self.regs + GITS_CREADR)
-            );
-        }
     }
 
+    /// Prikaz SYNC a cekani, az ITS zpracuje vsechny predchozi prikazy.
     fn sync(&mut self) {
         self.command([0x05, 0, self.target & 0x000F_FFFF_FFFF_0000, 0]);
+        let mut spins = 0u32;
+        while read64(self.regs + GITS_CREADR) & 0xF_FFE0 != self.write {
+            spins += 1;
+            if spins > 10_000_000 {
+                log::error!(
+                    "ITS nezpracoval prikazy (CREADR {:#x}, CWRITER {:#x})",
+                    read64(self.regs + GITS_CREADR),
+                    self.write
+                );
+                return;
+            }
+            core::hint::spin_loop();
+        }
     }
 
     /// Zalozi ITT zarizeni (MAPD), pokud jeste neni.

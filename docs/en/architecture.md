@@ -769,16 +769,20 @@ Modules in `kernel/src/arch/aarch64/`:
 
 Boot on aarch64:
 
-1. **The loader** (`loader/src/arch/aarch64`) runs in EL1 under UEFI, finds
-   the PL011 in ACPI SPCR (maps it identity as a device), cleans the kernel
-   image to memory, turns the MMU off, sets MAIR, TCR, TTBR0 = TTBR1 and
-   jumps to the kernel in the upper half.
+1. **The loader** (`loader/src/arch/aarch64`) runs under UEFI in EL1 or EL2
+   (real hardware), finds the PL011 in ACPI SPCR (maps it identity as a
+   device) and cleans the kernel image to memory. From EL1 it turns the MMU
+   off, sets MAIR, TCR, TTBR0 = TTBR1 and jumps to the kernel in the upper
+   half; from EL2 it sets the EL1 registers directly, prepares EL2 without
+   traps (EL1 in AArch64, timer, FPU, GIC, no stage 2) and drops into the
+   kernel in EL1 via `eret`.
 2. **The kernel** sets up the vector table, takes over the tables (TTBR1),
    disables the lower half, reads ACPI and enables GICv3, the ITS and the
    timer.
 3. **Other CPUs**: PSCI CPU_ON at the physical address of the `__ap_entry`
-   stub (the page is temporarily identity mapped); the stub loads its
-   parameters, enables the MMU and jumps into the kernel.
+   stub (the page is temporarily identity mapped); the stub drops from EL2
+   to EL1 if needed, loads its parameters, enables the MMU and jumps into
+   the kernel.
 4. **IOMMU**: SMMUv3 from IORT; from enabling on all streams are blocked, a
    device gets a domain only with a restricted Resource (like VT-d on x86).
 
@@ -793,7 +797,8 @@ cargo xtask test --arch aarch64
 ```
 
 QEMU: the `virt` machine with GICv3 and ITS, `-cpu cortex-a76` (the same
-core as Raspberry Pi 5), no EL2 (`virtualization=off`), SMMUv3 (`--iommu
+core as Raspberry Pi 5), with EL2 (`virtualization=on`: the firmware runs in
+EL2 as on real hardware and the loader and other CPUs drop to EL1), SMMUv3 (`--iommu
 smmu`, default; `--iommu none` without DMA translation). Tests end via
 semihosting (code 33 = success as on x86; zero is not used because QEMU also returns it on a plain shutdown). Under TCG emulation it runs roughly 2x
 slower than x86 under TCG.

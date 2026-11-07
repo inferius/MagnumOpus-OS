@@ -39,6 +39,9 @@ const CR0ACK: u64 = 0x24;
 const CR1: u64 = 0x28;
 const CR2: u64 = 0x2C;
 const GERROR: u64 = 0x60;
+const GERRORN: u64 = 0x64;
+/// GERROR/GERRORN: chyba fronty prikazu.
+const GERROR_CMDQ_ERR: u32 = 1 << 0;
 const STRTAB_BASE: u64 = 0x80;
 const STRTAB_BASE_CFG: u64 = 0x88;
 const CMDQ_BASE: u64 = 0x90;
@@ -213,15 +216,27 @@ impl Smmu {
     /// Zapise prikaz (2 slova) do fronty.
     fn command(&mut self, cmd: [u64; 2]) {
         let size = 1u32 << CMDQ_LOG2;
-        // Pockat na misto ve fronte (index s bitem obehu).
+        let index_mask = 2 * size - 1;
+        // Pockat na misto ve fronte (index s bitem obehu; CONS nese v bitech
+        // 30:24 i kod posledni chyby, proto maskovat).
         let mut spins = 0u32;
         loop {
-            let cons = read32(self.regs + CMDQ_CONS);
-            let used = self.cmdq_prod.wrapping_sub(cons) & (2 * size - 1);
-            if used < size || spins > 10_000_000 {
+            self.recover_cmdq_error();
+            let cons = read32(self.regs + CMDQ_CONS) & index_mask;
+            let used = self.cmdq_prod.wrapping_sub(cons) & index_mask;
+            if used < size {
                 break;
             }
             spins += 1;
+            if spins > 10_000_000 {
+                // Fronta stoji: prikaz radeji zahodit nez prepsat
+                // nezpracovane prikazy.
+                log::error!(
+                    "SMMUv3: fronta prikazu je plna, prikaz {:#x} zahozen",
+                    cmd[0] & 0xFF
+                );
+                return;
+            }
             core::hint::spin_loop();
         }
         let index = (self.cmdq_prod & (size - 1)) as u64;
@@ -235,21 +250,34 @@ impl Smmu {
     fn sync(&mut self) {
         self.command([0x46, 0]);
         for _ in 0..10_000_000 {
+            self.recover_cmdq_error();
             let cons = read32(self.regs + CMDQ_CONS);
-            if cons & 0x7F00_0000 != 0 {
-                log::error!(
-                    "SMMUv3: chyba prikazu {:#x} (GERROR {:#x})",
-                    (cons >> 24) & 0x7F,
-                    read32(self.regs + GERROR)
-                );
-                return;
-            }
             if cons & ((2 << CMDQ_LOG2) - 1) == self.cmdq_prod {
                 return;
             }
             core::hint::spin_loop();
         }
         log::error!("SMMUv3: CMD_SYNC nedobehl");
+    }
+
+    /// Kdyz SMMU hlasi chybu prikazu (GERROR.CMDQ_ERR != GERRORN), fronta
+    /// stoji na chybnem prikazu: nahradit ho prikazem SYNC (nic nedela),
+    /// chybu potvrdit (prepnout GERRORN.CMDQ_ERR) a SMMU pokracuje.
+    fn recover_cmdq_error(&mut self) {
+        let gerror = read32(self.regs + GERROR);
+        let gerrorn = read32(self.regs + GERRORN);
+        if (gerror ^ gerrorn) & GERROR_CMDQ_ERR == 0 {
+            return;
+        }
+        let cons = read32(self.regs + CMDQ_CONS);
+        let index = (cons & ((1 << CMDQ_LOG2) - 1)) as u64;
+        log::error!(
+            "SMMUv3: chyba prikazu na pozici {index} (kod {:#x}), prikaz preskocen",
+            (cons >> 24) & 0x7F
+        );
+        write_words(self.cmdq + index * 16, &[0x46, 0]);
+        dsb_sy();
+        write32(self.regs + GERRORN, gerrorn ^ GERROR_CMDQ_ERR);
     }
 
     /// Fyzicka adresa STE pro `sid` (zalozi druhou uroven tabulky).
@@ -345,9 +373,19 @@ pub fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Arc<SmmuDomain>
         );
         return Err(Error::NoResources);
     }
-    NEXT_ASID.store(asid.wrapping_add(1), Ordering::Relaxed);
+    // Pamet nejdriv, ASID az po uspechu: pri nedostatku pameti se nic
+    // neztrati (ani cislo ASID, ani tabulky).
     let coherent = COHERENT.load(Ordering::Relaxed);
     let table = PageTable::new_for_device(!coherent).map_err(|_| Error::NoMemory)?;
+    let cd = match try_alloc(64) {
+        Ok(cd) => cd,
+        Err(e) => {
+            // SAFETY: tabulky jsou prave vytvorene a nikde aktivni.
+            unsafe { table.destroy() };
+            return Err(e);
+        }
+    };
+    NEXT_ASID.store(asid.wrapping_add(1), Ordering::Relaxed);
 
     // Kontextovy deskriptor: stage 1, 48 bitu, granule 4 KiB, ASID domeny,
     // MAIR jako CPU. Pruchod tabulek s cache (WB, inner shareable), jen kdyz
@@ -357,7 +395,6 @@ pub fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Arc<SmmuDomain>
     } else {
         0
     };
-    let cd = try_alloc(64)?;
     let cd0 = 16 // T0SZ
         | walk_attrs
         | (16 << 16) | (2 << 22) // T1SZ, TG1 4 KiB (platne, i kdyz nepouzite)

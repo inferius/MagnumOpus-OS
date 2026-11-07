@@ -737,15 +737,17 @@ v `kernel/src/arch/aarch64/`:
 
 Start na aarch64:
 
-1. **Loader** (`loader/src/arch/aarch64`) běží v EL1 pod UEFI, najde PL011
-   v ACPI SPCR (identicky ji namapuje jako zařízení), zapíše cache obrazu
-   jádra do paměti, vypne MMU, nastaví MAIR, TCR, TTBR0 = TTBR1 a skočí do
-   jádra v horní polovině.
+1. **Loader** (`loader/src/arch/aarch64`) běží pod UEFI v EL1 nebo EL2
+   (skutečný hardware), najde PL011 v ACPI SPCR (identicky ji namapuje jako
+   zařízení) a zapíše cache obrazu jádra do paměti. Z EL1 vypne MMU,
+   nastaví MAIR, TCR, TTBR0 = TTBR1 a skočí do jádra v horní polovině;
+   z EL2 nastaví registry EL1 přímo, EL2 připraví bez pastí (EL1 v AArch64,
+   časovač, FPU, GIC, bez stage 2) a do jádra v EL1 sestoupí přes `eret`.
 2. **Jádro** nastaví tabulku výjimek, převezme tabulky (TTBR1), vypne
    spodní polovinu, přečte ACPI a zapne GICv3, ITS a časovač.
 3. **Další CPU**: PSCI CPU_ON na fyzickou adresu stubu `__ap_entry`
-   (stránka je dočasně identicky namapovaná); stub načte parametry, zapne
-   MMU a skočí do jádra.
+   (stránka je dočasně identicky namapovaná); stub případně sestoupí z EL2
+   do EL1, načte parametry, zapne MMU a skočí do jádra.
 4. **IOMMU**: SMMUv3 z IORT; od zapnutí jsou všechny streamy zablokované,
    doménu dostane až omezený Resource se zařízením (jako VT-d na x86).
 
@@ -760,7 +762,8 @@ cargo xtask test --arch aarch64
 ```
 
 QEMU: stroj `virt` s GICv3 a ITS, `-cpu cortex-a76` (stejné jádro jako
-Raspberry Pi 5), bez EL2 (`virtualization=off`), SMMUv3 (`--iommu smmu`,
+Raspberry Pi 5), s EL2 (`virtualization=on`: firmware běží v EL2 jako na
+skutečném hardwaru a loader i další CPU sestupují do EL1), SMMUv3 (`--iommu smmu`,
 výchozí; `--iommu none` bez překladu DMA). Testy končí přes semihosting
 (kód 33 = úspěch jako na x86; nula se nepoužívá, tu vrací QEMU i při obyčejném vypnutí). V emulaci TCG běží zhruba 2x pomaleji než x86 s TCG.
 

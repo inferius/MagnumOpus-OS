@@ -1,6 +1,7 @@
 //! Start dalsich CPU pres PSCI (`CPU_ON`).
 //!
-//! Firmware (na QEMU virt primo QEMU) zapne CPU v EL1 s vypnutou MMU na
+//! Firmware (na QEMU virt primo QEMU) zapne CPU v EL1 nebo EL2 (pak stub
+//! nejdriv sestoupi do EL1 jako loader) s vypnutou MMU na
 //! fyzicke adrese vstupniho stubu `__ap_entry` a s `x0` = kontext (fyzicka
 //! adresa bloku parametru). Stub nastavi MAIR, TCR, TTBR0 i TTBR1 na tabulky
 //! jadra, zapne MMU a skoci do jadra v horni polovine. Stranka se stubem
@@ -29,6 +30,38 @@ global_asm!(
     .balign 4096
     .global __ap_entry
 __ap_entry:
+    // Firmware na realnem hardwaru startuje CPU v EL2: stejne jako loader
+    // pripravit EL2 (EL1 v AArch64, bez pasti) a sestoupit do EL1h.
+    mrs x9, CurrentEL
+    cmp x9, #(2 << 2)
+    b.ne 1f
+    mov x9, #(1 << 31)
+    msr hcr_el2, x9
+    msr vttbr_el2, xzr
+    mrs x9, cnthctl_el2
+    orr x9, x9, #3
+    msr cnthctl_el2, x9
+    msr cntvoff_el2, xzr
+    mov x9, #0x33ff
+    msr cptr_el2, x9
+    mrs x9, S3_4_C12_C9_5
+    orr x9, x9, #1
+    orr x9, x9, #8
+    msr S3_4_C12_C9_5, x9
+    mrs x9, midr_el1
+    msr vpidr_el2, x9
+    mrs x9, mpidr_el1
+    msr vmpidr_el2, x9
+    movz x9, #0x0800
+    movk x9, #0x30d0, lsl #16
+    msr sctlr_el1, x9
+    mov x9, #0x3c5
+    msr spsr_el2, x9
+    adr x9, 1f
+    msr elr_el2, x9
+    isb
+    eret
+1:
     // Vse z bloku parametru nacist pred zapnutim MMU: po zapnuti je
     // identicky namapovana jen stranka se stubem, ne blok parametru.
     ldr x3, [x0, #24]
