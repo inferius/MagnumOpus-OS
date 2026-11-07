@@ -19,6 +19,10 @@ pub const SIZE_2M: u64 = 0x20_0000;
 pub struct Flags {
     pub writable: bool,
     pub executable: bool,
+    /// Registry zarizeni. Na x86 se typ cache ridi MTRR firmwaru, priznak
+    /// se ignoruje (stejne chovani jako drive).
+    #[allow(dead_code, reason = "vyznam ma jen na aarch64")]
+    pub device: bool,
 }
 
 pub struct PageTables {

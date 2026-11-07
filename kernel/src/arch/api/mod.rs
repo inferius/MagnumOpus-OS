@@ -51,6 +51,7 @@ pub trait Architecture:
     + Ipi
     + Memory
     + DeviceIrq
+    + LegacyIo
     + Iommu
     + Smp
     + PlatformInfo
@@ -235,10 +236,17 @@ pub trait Time {
     /// nedal firmware. `None` = hodiny nejsou nebo vraci nesmysl. Volat po
     /// `init_platform`, jen pri startu.
     fn hardware_clock(platform: &Platform) -> Option<abi::time::WallTime>;
+    /// Ve kterem zlomku sekundy (ns) zapisovat do hardwarovych hodin, aby
+    /// tikaly na hranici sekund (x86 CMOS: 0,5 s, protoze po zapisu
+    /// prijde prvni sekunda az za pul sekundy). Hodiny s rozlisenim pod
+    /// sekundu nebo bez hodin: 0.
+    const HARDWARE_CLOCK_PHASE_NS: u32;
     /// Zapise cas do hardwarovych hodin platformy (`CLOCK_SET` s
     /// `WRITE_HARDWARE`). `t` uz je v case, ktery maji hodiny drzet (UTC,
-    /// nebo mistni cas, kdyz ho tak chce sluzba casu). Volat za behu z
-    /// libovolneho CPU; implementace si pristup k hodinam serializuje sama.
+    /// nebo mistni cas, kdyz ho tak chce sluzba casu), a je to cas
+    /// v okamziku volani (volajici ceka na [`Self::HARDWARE_CLOCK_PHASE_NS`]).
+    /// Volat za behu z libovolneho CPU, i s vypnutym prerusenim (nespi);
+    /// implementace si pristup k hodinam serializuje sama.
     /// `false` = hodiny nejsou, nebo se cas nevejde do jejich rozsahu.
     fn set_hardware_clock(platform: &Platform, t: abi::time::WallTime) -> bool;
 }
@@ -309,6 +317,34 @@ pub trait DeviceIrq {
     /// bez zarizeni na GICv3, `NoResources` pri plne tabulce ITS) se vrati
     /// programu ze syscallu `INTERRUPT_CREATE`.
     fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error>;
+
+    /// Preruseni `irq` uz nikdo nepouziva (objekt zanikl): zrusit, co pro
+    /// nej architektura nastavila (aarch64: preklad v ITS a LPI), aby ho
+    /// zarizeni zanikleho ovladace nemohlo dal vyvolavat. Na x86 nic.
+    fn release(irq: u32);
+}
+
+/// Starsi rozhrani zarizeni: I/O porty a pevne linky preruseni (x86:
+/// porty `in`/`out`, IOAPIC pro ISA IRQ). Architektura bez nich vraci
+/// `NotSupported`. Potrebuji je zarizeni na desce bez PCI (PS/2 radic).
+pub trait LegacyIo {
+    /// Precte I/O port o sirce `width` (1, 2 nebo 4 B).
+    fn port_read(port: u16, width: u8) -> Result<u32, Error>;
+
+    /// Zapise I/O port o sirce `width` (1, 2 nebo 4 B).
+    fn port_write(port: u16, width: u8, value: u32) -> Result<(), Error>;
+
+    /// Nasmeruje starou linku (ISA IRQ `line`) na cislo preruseni `irq`
+    /// (z rozsahu zarizeni). Vraci, zda je linka spoustena urovni: takovou
+    /// jadro po kazdem preruseni zamaskuje a odmaskuje az pri potvrzeni.
+    /// Pouzita linka = `AlreadyExists`.
+    fn line_route(line: u32, irq: u32) -> Result<bool, Error>;
+
+    /// Zamaskuje / odmaskuje linku.
+    fn line_mask(line: u32, masked: bool);
+
+    /// Uvolni linku (zamaskuje ji).
+    fn line_release(line: u32);
 }
 
 /// IOMMU: preklad DMA zarizeni (x86: VT-d, AMD-Vi; aarch64: SMMUv3).
@@ -352,11 +388,23 @@ pub trait Smp {
     unsafe fn prepare_cpu_start(boot_info: &BootInfo) -> Option<Self::Starter>;
 }
 
+/// Vysledek pokusu o start CPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CpuStartResult {
+    /// CPU nabehlo a ohlasilo se.
+    Started,
+    /// CPU dostalo pokyn ke startu, ale vcas se neohlasilo - muze jeste
+    /// nabehnout (a pouzit zasobnik i pomocna data startu).
+    TimedOut,
+    /// CPU spustit nejde (firmware odmitl, CPU uz bezi mimo jadro, ...);
+    /// zasobnik ani data startu nepouzije, jadro pokracuje dalsim CPU.
+    Failed,
+}
+
 /// Pripraveny mechanismus startu CPU.
 pub trait CpuStarter {
     /// Nastartuje CPU `hw_id`: skoci do `entry(arg)` na zasobniku
-    /// `stack_top`. `started` vraci true, jakmile CPU ohlasi start. Vraci,
-    /// zda CPU vcas nabehlo.
+    /// `stack_top`. `started` vraci true, jakmile CPU ohlasi start.
     fn start(
         &self,
         hw_id: u32,
@@ -364,7 +412,7 @@ pub trait CpuStarter {
         entry: extern "C" fn(u64) -> !,
         arg: u64,
         started: impl Fn() -> bool,
-    ) -> bool;
+    ) -> CpuStartResult;
 
     /// Uklid po startu vsech CPU (nevola se, pokud nektere neodpovedelo -
     /// to muze nabehnout pozdeji a pomocna data jeste potrebovat).
@@ -391,6 +439,12 @@ pub trait PlatformInfo {
 pub trait Diagnostics {
     /// Ladici seriova linka (x86: COM1, aarch64: PL011).
     type Serial: DebugSerial;
+
+    /// Uplne prvni krok na bootovacim CPU (pred kontrolou `BootInfo`
+    /// a konzoli): prevzit od loaderu, co architektura potrebuje uz pro
+    /// ladici vystup (aarch64: adresa PL011 z `BootInfo::debug_serial`).
+    /// `boot_info` jeste nemusi byt overeny - jen cist, nic nepredpokladat.
+    fn init_early(boot_info: &BootInfo);
 
     /// Vrati ladici seriovou linku. Musi byt bezpecne volat opakovane,
     /// i z panic handleru.

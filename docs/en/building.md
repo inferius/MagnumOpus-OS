@@ -4,31 +4,36 @@
 
 - **Rust via rustup.** The nightly, components and targets are pinned in
   `rust-toolchain.toml`; rustup installs them on the first build.
-- **QEMU** (`qemu-system-x86_64`) with edk2/OVMF firmware:
-  - Windows: `winget install SoftwareFreedomConservancy.QEMU`
-  - Debian/Ubuntu: `apt install qemu-system-x86 ovmf`
-  - Fedora: `dnf install qemu-system-x86 edk2-ovmf`
-  - Arch: `pacman -S qemu-desktop edk2-ovmf`
+- **QEMU** (`qemu-system-x86_64`, for aarch64 `qemu-system-aarch64`) with
+  edk2 firmware (OVMF, for aarch64 AAVMF):
+  - Windows: `winget install SoftwareFreedomConservancy.QEMU` (both
+    architectures and firmware)
+  - Debian/Ubuntu: `apt install qemu-system-x86 ovmf qemu-system-arm qemu-efi-aarch64`
+  - Fedora: `dnf install qemu-system-x86 edk2-ovmf qemu-system-aarch64 edk2-aarch64`
+  - Arch: `pacman -S qemu-desktop edk2-ovmf edk2-aarch64`
   - macOS: `brew install qemu`
 - Optionally **GDB** for debugging.
 
-xtask looks for QEMU in `PATH` and common install locations, and for OVMF
-next to QEMU or in `/usr/share/...`. Otherwise set `QEMU`, `OVMF_CODE`,
-`OVMF_VARS`.
+xtask looks for QEMU in `PATH` and common install locations, and for the
+firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
+(or `QEMU`), `QEMU_AARCH64`, `X86_64_FW_CODE`/`X86_64_FW_VARS` (or
+`OVMF_CODE`/`OVMF_VARS`) and `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `cargo xtask build` | builds the kernel, loader and userspace programs, creates initfs |
-| `cargo xtask image` | build + disk image `target/os-x86_64-<profile>.img` (GPT, FAT32 ESP) |
-| `cargo xtask run` | image + QEMU with a window; serial output in the terminal |
-| `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for aarch64, documentation, then kernel and userspace in QEMU without a window |
-| `cargo xtask check [--arch aarch64]` | only checks that the kernel builds for the given architecture (default x86_64); see [architecture interface](architecture.md#architecture-interface) |
+| `cargo xtask image` | build + disk image `target/os-<arch>-<profile>.img` (GPT, FAT32 ESP) |
+| `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)) |
+| `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for the other architectures, documentation, then kernel and userspace in QEMU without a window |
+| `cargo xtask check` | only checks that the kernel builds for the given architecture; see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
-Options: `--release`, `--headless` (no window), `--iommu <intel|amd|none>`
-(emulated IOMMU, default `intel`; `none` checks running without DMA
+Options: `--arch <x86_64|aarch64>` (all commands, default `x86_64`; aarch64
+= QEMU `virt`, see [the aarch64 implementation](architecture.md#the-aarch64-implementation-qemu-virt)),
+`--release`, `--headless` (no window), `--iommu <type>` (emulated IOMMU:
+x86_64 `intel` (default), `amd`, `none`; aarch64 `smmu` (default), `none`; `none` checks running without DMA
 translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" then
 fails as expected),
 `--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
@@ -64,7 +69,8 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, virtio-rng, fsd, timed, netd, fwd, netprobe, manifests, firewall.toml
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd,
+                       virtio-net, virtio-rng, netd, fwd, netprobe, manifests, firewall.toml
                        (+ net-test with `cargo xtask test`: helper server ports)
 ```
 
@@ -83,6 +89,14 @@ stored boot entries would not match.
 | data | `target/data.img` | 64 MiB, our file system (label `data`); created by xtask with the `fs` library, containing `/vitejte.txt` and `/dokumenty/navod.md`; TRIM enabled (`discard=unmap`) |
 
 The scratch and data disks are recreated on every `run`/`test`.
+
+QEMU also gets `VGA,id=video0` graphics (instead of the default
+`-vga std`), a virtio keyboard and mouse (`virtio-keyboard-pci`,
+`virtio-mouse-pci`, with `iommu_platform=on`, bound to `display=video0`), a second graphics
+card `secondary-vga,id=video1`, a `qemu-xhci` controller with a `usb-kbd`
+keyboard (bound to `video1`) and a QMP server on a random
+localhost port (`-qmp tcp:127.0.0.1:<port>`). Xtask injects events for the
+input test over QMP, see [Input](input.md#tests).
 
 The `virtio-rng-pci` randomness source (data from the host) adds entropy to
 the kernel. The network card is `virtio-net-pci` (modern mode, `iommu_platform=on`, no
@@ -118,7 +132,7 @@ loader/          UEFI loader
 kernel/          kernel
   src/arch/api/     architecture contract (traits), see architecture.md
   src/arch/x86_64/  everything x86_64-specific
-  src/arch/aarch64/ aarch64 skeleton (todo!)
+  src/arch/aarch64/ everything aarch64-specific (QEMU virt)
   src/trap.rs       reverse direction: architecture -> kernel
   src/mm/           memory
   src/sched/        scheduler
@@ -134,11 +148,18 @@ libs/libos/      library for programs
 libs/pci/        PCI Express (ECAM, BAR, MSI-X)
 libs/virtio/     virtio 1.x over PCI (virtqueue)
 libs/blockproto/ block device protocol (client <-> driver)
+libs/inputproto/ input protocol (driver -> inputd -> focus owner)
+libs/keymap/     keyboard layouts (US, CZ), dead keys
+libs/i8042/      PS/2: scan codes and mouse packets (no hardware, host tests)
+libs/usbproto/   USB: xhci <-> class driver protocol, descriptors, hub, HID (boot and report parser)
+libs/usbclient/  USB channel client for class drivers
 libs/fs/         file system (no_std; std for tools)
   src/space/        free space: allocation groups, space logs
   src/fs/           files, directories, snapshots, intent log, defrag, fsck
   src/tests/        FS tests (model, power loss, performance)
 libs/fsproto/    file system protocol (client <-> fsd)
+libs/shlang/     shell language: lexer, B and C parsers, tree, formatter, interpreter
+libs/term/       smart terminal: protocol, session service, VT100, screen
 libs/csprng/     kernel random number generator (ChaCha20, BLAKE2s)
 libs/wire/       shared message encoding of protocols (fsproto, netproto)
 libs/netproto/   network protocol (programs <-> netd <-> driver), DNS, NTP, permissions
@@ -149,8 +170,15 @@ user/init/       first process: starts services, userspace tests
 user/echo/       IPC test server
 user/devmgr/     device manager (PCI, starts drivers)
 user/virtio-blk/ disk driver
+user/virtio-input/ keyboard and mouse driver
+user/inputd/     input service
+user/ps2/        PS/2 controller driver (keyboard, mouse)
+user/xhci/       xHCI USB controller driver and USB core (enumeration, root hub)
+user/usb-hub/    hub class driver (root hub and external)
+user/usb-hid/    USB keyboard and mouse driver (boot protocol)
 user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
+user/termd/      shell and terminal session service
 user/virtio-net/ network card driver
 user/virtio-rng/ randomness source driver (entropy for the kernel)
 user/netd/       network service (TCP/IP, DHCP, DNS, firewall)

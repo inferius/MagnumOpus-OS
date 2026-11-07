@@ -65,7 +65,7 @@ fn main(startup: Startup) -> i64 {
     let resource = Resource::from_handle(res);
     let ecam_vmo = Vmo::from_handle(ecam_vmo);
     let parent = Channel::from_handle(parent);
-    let Some(address) = virtio::driver_address(&startup.bootstrap) else {
+    let Some(address) = virtio::read_driver_config(&startup.bootstrap) else {
         println!("virtio-rng: neplatna konfigurace od spravce zarizeni");
         return 2;
     };

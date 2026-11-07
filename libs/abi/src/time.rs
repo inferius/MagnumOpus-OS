@@ -140,6 +140,10 @@ pub mod set_flags {
     pub const ALL: u64 = WRITE_HARDWARE;
 }
 
+/// Nejvetsi posun casoveho pasma od UTC (absolutne): 18 hodin. Mez pro
+/// `SetRequest::rtc_offset` i pevne posuny v knihovne pasem.
+pub const MAX_ZONE_OFFSET: i32 = 18 * 3600;
+
 /// Vstup `CLOCK_SET` (16 B, little endian: sekundy i64, nanosekundy u32,
 /// posun hardwarovych hodin i32).
 ///
@@ -147,6 +151,10 @@ pub mod set_flags {
 /// Jadro drzi jen UTC a pasma nezna; kdyz ma RTC byt v mistnim case
 /// (dual-boot s Windows), posle sluzba casu posun pasma v danem okamziku
 /// (napr. +7200 v lete v Praze). Pro RTC v UTC je 0.
+///
+/// Platny vstup: cas v [`SetRequest::MIN_SECS`]..=[`SetRequest::MAX_SECS`]
+/// (roky 1970..=9999), nanosekundy pod 10^9, `|rtc_offset|` nejvys
+/// [`MAX_ZONE_OFFSET`]. Jinak `INVALID_ARGS`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetRequest {
     pub time: WallTime,
@@ -155,6 +163,10 @@ pub struct SetRequest {
 
 impl SetRequest {
     pub const SIZE: usize = 16;
+    /// Nejmensi nastavitelny cas: 1970-01-01 00:00:00 UTC.
+    pub const MIN_SECS: i64 = 0;
+    /// Nejvetsi nastavitelny cas: 9999-12-31 23:59:59 UTC.
+    pub const MAX_SECS: i64 = 253_402_300_799;
 
     pub fn encode(&self) -> [u8; Self::SIZE] {
         let mut b = [0u8; Self::SIZE];
@@ -164,12 +176,16 @@ impl SetRequest {
         b
     }
 
-    /// `None` = nanosekundy mimo 0..1e9 (neplatny vstup).
+    /// `None` = neplatny vstup (viz popis typu: rozsah casu, nanosekund
+    /// a posunu).
     pub fn decode(b: &[u8; Self::SIZE]) -> Option<Self> {
         let secs = i64::from_le_bytes(b[0..8].try_into().unwrap());
         let nanos = u32::from_le_bytes(b[8..12].try_into().unwrap());
         let rtc_offset = i32::from_le_bytes(b[12..16].try_into().unwrap());
-        (nanos < 1_000_000_000).then_some(Self {
+        let valid = (Self::MIN_SECS..=Self::MAX_SECS).contains(&secs)
+            && nanos < 1_000_000_000
+            && rtc_offset.unsigned_abs() <= MAX_ZONE_OFFSET as u32;
+        valid.then_some(Self {
             time: WallTime { secs, nanos },
             rtc_offset,
         })
@@ -227,6 +243,11 @@ pub fn days_from_civil(year: i64, month: u8, day: u8) -> Option<i64> {
     let doy = (153 * mp + 2) / 5 + day as i64 - 1; // 0..=365
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // 0..=146096
     era.checked_mul(146_097)?.checked_add(doe - 719_468)
+}
+
+/// Den v tydnu dne `days` od 1970-01-01 (ctvrtek); 0 = nedele .. 6 = sobota.
+pub const fn weekday(days: i64) -> u8 {
+    (days.rem_euclid(7) as u8 + 4) % 7
 }
 
 /// Opak [`days_from_civil`]: (rok, mesic, den).

@@ -47,6 +47,7 @@ static PLATFORM: spin::Once<Platform> = spin::Once::new();
 #[unsafe(no_mangle)]
 extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
     arch::clear_cpu_local();
+    arch::init_early(boot_info);
     if boot_info.magic != BOOT_INFO_MAGIC || boot_info.version != BOOT_INFO_VERSION {
         let _ = writeln!(arch::debug_serial(), "kernel: neplatny BootInfo od loaderu");
         arch::halt_forever();

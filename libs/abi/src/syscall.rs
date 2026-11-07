@@ -81,33 +81,40 @@ pub const CLOCK_REALTIME: u64 = 32;
 /// `(resource, in_ptr, flags) -> 1 = zapsano i do hardwarovych hodin`;
 /// na `in_ptr` je [`crate::time::SetRequest`] (16 B), `flags` z [`crate::time::set_flags`]
 pub const CLOCK_SET: u64 = 33;
+/// Precte I/O port (x86). `(resource, port, width) -> hodnota`; width 1, 2, 4
+pub const IOPORT_READ: u64 = 34;
+/// Zapise I/O port (x86). `(resource, port, width, value)`
+pub const IOPORT_WRITE: u64 = 35;
+/// Objekt preruseni na stare lince (ISA IRQ 0-15 pres IOAPIC).
+/// `(resource, line) -> handle`
+pub const INTERRUPT_CREATE_LINE: u64 = 36;
 
 /// Nahodne bajty z generatoru jadra. `(buf_ptr, len, flags) -> 1 = nasazeny`;
 /// `len` nejvys [`RANDOM_MAX`], `flags` z [`random_flags`]
-pub const RANDOM_GET: u64 = 34;
+pub const RANDOM_GET: u64 = 37;
 /// Prida entropii do zasobniku jadra (Resource s pravem `MANAGE`).
 /// `(resource, ptr, len, credit_bits)`
-pub const RANDOM_ADD: u64 = 35;
+pub const RANDOM_ADD: u64 = 38;
 /// Vytvori port (fronta udalosti). `() -> handle`
-pub const PORT_CREATE: u64 = 36;
+pub const PORT_CREATE: u64 = 39;
 /// Jednorazova registrace: az signaly objektu protnou masku, port dostane
 /// paket s klicem. `(handle, port, key, mask)`
-pub const OBJECT_WAIT_ASYNC: u64 = 37;
+pub const OBJECT_WAIT_ASYNC: u64 = 40;
 /// Vyzvedne paket z portu (ceka do terminu). `(port, deadline_ns, out_ptr)`;
 /// na `out_ptr` zapise [`crate::object::PortPacket`] (16 B)
-pub const PORT_WAIT: u64 = 38;
+pub const PORT_WAIT: u64 = 41;
 
 /// Vytvori podrizeny job. `(parent_job) -> handle`; rodic potrebuje `MANAGE`
-pub const JOB_CREATE: u64 = 39;
+pub const JOB_CREATE: u64 = 42;
 /// Nastavi limit rozpoctu jobu. `(job, pool, bytes)`; job potrebuje `WRITE`,
 /// `pool` z [`crate::job::pool`], `bytes` = [`crate::job::UNLIMITED`] = bez limitu
-pub const JOB_SET_LIMIT: u64 = 40;
+pub const JOB_SET_LIMIT: u64 = 43;
 /// Stav rozpoctu jobu. `(job, out_ptr)`; job potrebuje `READ`, na `out_ptr`
 /// zapise [`crate::job::JobInfo`] (48 B)
-pub const JOB_INFO: u64 = 41;
+pub const JOB_INFO: u64 = 44;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 42;
+pub const COUNT: u64 = 45;
 
 /// Nejvic bajtu v jednom `RANDOM_GET` / `RANDOM_ADD` (jedno volani = jedna
 /// kopie pres buffer jadra; vic dat = vic volani).
@@ -138,6 +145,15 @@ pub const WAIT_MANY_MAX: usize = 64;
 pub const NAME_MAX: usize = 64;
 /// Maximalni delka zpravy DEBUG_LOG.
 pub const DEBUG_LOG_MAX: usize = 1024;
+
+/// Druh rozsahu v `RESOURCE_CREATE` (horni dva bity zacatku rozsahu):
+/// 0 = fyzicka pamet (zarovnana na stranky), [`RANGE_IO_PORTS`] = I/O porty,
+/// [`RANGE_IRQ_LINES`] = stare linky preruseni (ISA IRQ).
+pub const RANGE_KIND_MASK: u64 = 3 << 62;
+/// Rozsah I/O portu: zacatek = `RANGE_IO_PORTS | port`, delka = pocet portu.
+pub const RANGE_IO_PORTS: u64 = 1 << 62;
+/// Rozsah linek preruseni: zacatek = `RANGE_IRQ_LINES | linka`, delka = pocet.
+pub const RANGE_IRQ_LINES: u64 = 2 << 62;
 
 /// Hodnota argumentu `device` syscallu `RESOURCE_CREATE` pro zarizeni PCI.
 pub const fn pci_device(segment: u16, bus: u8, device: u8, function: u8) -> u64 {

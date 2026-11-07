@@ -1,6 +1,8 @@
-//! Minimalni parser ELF64 pro x86_64: staticke spustitelne soubory
-//! (ET_EXEC). Pouziva ho UEFI loader (jadro), jadro (proces init) a libos
-//! (dalsi procesy). Overuje, ze vsechna data lezi uvnitr souboru.
+//! Minimalni parser ELF64: staticke spustitelne soubory (ET_EXEC) pro
+//! architekturu, pro kterou je crate prelozeny (x86_64 nebo aarch64).
+//! Pouziva ho UEFI loader (jadro), jadro (proces init) a libos (dalsi
+//! procesy) - vsichni nahravaji kod pro sve vlastni CPU. Overuje, ze vsechna
+//! data lezi uvnitr souboru.
 
 #![no_std]
 
@@ -8,7 +10,12 @@ const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 const ELFCLASS64: u8 = 2;
 const ELFDATA2LSB: u8 = 1;
 const ET_EXEC: u16 = 2;
-const EM_X86_64: u16 = 0x3E;
+/// Architektura, jejiz programy tento build umi nahrat (EM_X86_64 = 0x3E,
+/// EM_AARCH64 = 0xB7).
+#[cfg(target_arch = "x86_64")]
+const EM_NATIVE: (u16, &str) = (0x3E, "ocekavan x86_64");
+#[cfg(target_arch = "aarch64")]
+const EM_NATIVE: (u16, &str) = (0xB7, "ocekavan aarch64");
 const PT_LOAD: u32 = 1;
 
 pub const PF_X: u32 = 1;
@@ -85,8 +92,8 @@ impl<'a> ElfFile<'a> {
         if u16_at(data, 16)? != ET_EXEC {
             return Err(ElfError::Unsupported("ocekavan ET_EXEC (staticky, ne-PIE)"));
         }
-        if u16_at(data, 18)? != EM_X86_64 {
-            return Err(ElfError::Unsupported("ocekavan x86_64"));
+        if u16_at(data, 18)? != EM_NATIVE.0 {
+            return Err(ElfError::Unsupported(EM_NATIVE.1));
         }
         let elf = Self {
             data,

@@ -73,11 +73,35 @@ Done changes:
 | fsck | map block -> who, always commits | bitmaps (fixed memory), works read-only too | 1 TiB volume = 96 MiB; checking during uncertain recovery without writes |
 | Writing data | assembling byte by byte | whole blocks | 2x faster writes (0.7 -> 1.4 GiB/s) |
 
+### Phase 2: history (`RO_COMPAT_HISTORY`)
+
+A change within v3, recognised by the flag `RO_COMPAT_HISTORY` (ro_compat
+bit 1). In detail: [FS history](fs-history.md#on-disk).
+
+| Area | Phase 1 | Phase 2 | Why |
+|---|---|---|---|
+| tree items | 1-12 | + 13 `JOURNAL`, 14 `JSTATE`, 15 `SNAPMETA`, 16 `SETTINGS`, 17 `TRASH`, 18 `XATTR`, 19 `EXPIRY`, 20 `LHASH`, 21 `BRANCH`, 22 `HEAD`, 23 `DSLINK` | change journal, snapshot and commit metadata, dataset settings, trash, attributes, expiry index, logical hash cache, branches, dataset back-reference (fast path lookup) |
+| fixed objects | 0 META, 1 root | + **2 trash** (`TRASH_OID`, parent 0) | deleting to the trash is a move, no copy |
+| attribute count in the object record | always 0 | **number of `XATTR` items** (fsck checks it) | attributes exist |
+| intent log | records 1-13 | + 14 `Actor`, 15 `Trash`, 16 `Restore`, 17 `Purge`, 18 `SetXattr` | the same journal numbers and users after replay; trash and attributes survive a crash |
+| errors | down to -27 | + `JOURNAL_GAP` (-28) | older records were discarded by retention - never a silent skip |
+| protocol v2 | op 30-53 | + **54-86** (`fsproto::hist`) | history for the file manager, indexer, sync, agents; dataset creation and deletion |
+
+**An older volume** (without the bit) is upgraded by the driver on the first
+writable mount: it sets the bit and from then on maintains the journal
+(starting at number 1); snapshots from before phase 2 have no metadata
+(manual, time 1970). An older driver only reads a volume with the bit -
+otherwise it would not maintain the journal or the indexes when writing.
+
+**Behaviour (no format change):** `remove` stays permanent, only `trash`
+moves to the trash; every modifying operation reserves room for journal
+nodes (`JOURNAL_ROOM`), otherwise a commit on a full disk might have nowhere
+to store the tree; changes the commit adds itself (the journal) do not
+count as an operation in progress.
+
 ### Remaining in v3
 
-Datasets, versioning (clones, diff, restore), the handle layer and the
-Windows driver, permissions, protocol v2 - order in the
-[design](fs-v3-design.md#implementation-order).
+Phases 3-6 (data, protection, other, cloud) - order in the [design](fs-v3-design.md#implementation-order).
 
 ## Object times: u64 ns -> i64 s + u32 ns
 

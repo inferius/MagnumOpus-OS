@@ -12,6 +12,7 @@
 
 pub mod acpi;
 mod apic;
+mod ioapic;
 mod context;
 mod cpu;
 mod gdt;
@@ -249,6 +250,7 @@ impl api::Time for X86_64 {
 
         // SAFETY: jednou na BSP, IDT je nahrana, preruseni zakazana.
         unsafe { apic::init_cpu(true, platform.arch.lapic_phys) };
+        ioapic::init(&platform.arch.ioapics, &platform.arch.overrides);
         apic::calibrate_timer(|read| hpet.measure_hz(WINDOW_NS, read));
 
         TimerInfo {
@@ -287,6 +289,8 @@ impl api::Time for X86_64 {
         }
         rtc::read_time(platform.arch.rtc_century)
     }
+
+    const HARDWARE_CLOCK_PHASE_NS: u32 = rtc::WRITE_PHASE_NS;
 
     fn set_hardware_clock(platform: &Platform, t: abi::time::WallTime) -> bool {
         if platform.arch.rtc_absent {
@@ -356,6 +360,51 @@ impl api::DeviceIrq for X86_64 {
     fn msi_message(irq: u32, _device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
         Ok(msi_message(irq as u8))
     }
+
+    /// Vektor nema v radici zadny stav: nic.
+    fn release(_irq: u32) {}
+}
+
+impl api::LegacyIo for X86_64 {
+    fn port_read(port: u16, width: u8) -> Result<u32, Error> {
+        // SAFETY: opravneni k portu overil volajici (Resource); cteni
+        // portu nesaha do pameti jadra.
+        unsafe {
+            Ok(match width {
+                1 => cpu::inb(port) as u32,
+                2 => cpu::inw(port) as u32,
+                4 => cpu::inl(port),
+                _ => return Err(Error::InvalidArgs),
+            })
+        }
+    }
+
+    fn port_write(port: u16, width: u8, value: u32) -> Result<(), Error> {
+        // SAFETY: viz `port_read`.
+        unsafe {
+            match width {
+                1 => cpu::outb(port, value as u8),
+                2 => cpu::outw(port, value as u16),
+                4 => cpu::outl(port, value),
+                _ => return Err(Error::InvalidArgs),
+            }
+        }
+        Ok(())
+    }
+
+    /// Cil = stejne CPU jako u MSI (bootovaci).
+    fn line_route(line: u32, irq: u32) -> Result<bool, Error> {
+        let vector = u8::try_from(irq).map_err(|_| Error::InvalidArgs)?;
+        ioapic::route(line, vector, crate::trap::irq_target_hw_id())
+    }
+
+    fn line_mask(line: u32, masked: bool) {
+        ioapic::set_masked(line, masked)
+    }
+
+    fn line_release(line: u32) {
+        ioapic::release(line)
+    }
 }
 
 /// Zprava MSI pro vektor `vector` (i pro preruseni chyb IOMMU).
@@ -406,6 +455,9 @@ impl api::PlatformInfo for X86_64 {
 
 impl api::Diagnostics for X86_64 {
     type Serial = SerialPort;
+
+    /// x86 pouziva COM1 na pevnem portu, od loaderu nic nepotrebuje.
+    fn init_early(_boot_info: &BootInfo) {}
 
     /// Port I/O na COM1 je neskodny i kdyz tam zadna linka neni (zapisy se
     /// zahodi), proto je bezpecne ho vytvaret opakovane, napr. v panic

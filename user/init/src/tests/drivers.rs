@@ -17,6 +17,7 @@ pub const TESTS: &[Test] = &[
         "IOMMU: zarizeni nezapise mimo prideleny DMA",
         dma_protection,
     ),
+    ("Resource: I/O porty a linky preruseni", ports_and_lines),
 ];
 
 /// Testovaci disk ma presne 1 MiB (viz xtask).
@@ -86,8 +87,22 @@ fn restricted_resource(s: &Startup) -> TestResult {
     let base = root
         .phys_addr(ecam, 0)
         .map_err(|e| fail("fyzicka adresa ECAM", e))?;
-    let child = root
+    // Preruseni z prostredku bez identity zarizeni: na x86 jde (MSI cili
+    // jen CPU), na aarch64 ne - ITS potrebuje DeviceID, INTERRUPT_CREATE
+    // vrati INVALID_ARGS. Overit obe chovani na obou architekturach.
+    let plain = root
         .restrict(&[(base, page)], 1, page)
+        .and_then(|r| r.interrupt().map(|_| ()));
+    let expected = if cfg!(target_arch = "aarch64") {
+        Err(Error::InvalidArgs)
+    } else {
+        Ok(())
+    };
+    check_eq!(plain, expected, "preruseni bez identity zarizeni");
+    // Dal prostredek se zarizenim 00:00.0 (jeho konfiguracni prostor je
+    // prave tato stranka): preruseni musi jit na obou architekturach.
+    let child = root
+        .restrict_device(&[(base, page)], 1, page, (0, 0, 0, 0))
         .map_err(|e| fail("vytvoreni omezeneho", e))?;
     child
         .device_memory(base, page)
@@ -157,6 +172,99 @@ fn dma_protection(_: &Startup) -> TestResult {
     check!(
         protected,
         "zarizeni zapsalo mimo svou DMA pamet (IOMMU nechrani)"
+    );
+    Ok(())
+}
+
+fn ports_and_lines(s: &Startup) -> TestResult {
+    use libos::hw::{io_ports, irq_lines};
+    // I/O porty a linky IOAPIC ma jen x86 (jinde jadro vraci NOT_SUPPORTED).
+    if !cfg!(target_arch = "x86_64") {
+        return Ok(());
+    }
+    let root = s.root_resource.as_ref().ok_or("chybi korenovy Resource")?;
+    // Stav radice PS/2 (cteni nema vedlejsi efekt).
+    let child = root
+        .restrict(&[io_ports(0x64, 1), irq_lines(5, 1)], 1, 0)
+        .map_err(|e| fail("prostredek s porty", e))?;
+    child
+        .port_read8(0x64)
+        .map_err(|e| fail("povoleny port", e))?;
+    check_eq!(
+        child.port_read8(0x60).err(),
+        Some(Error::AccessDenied),
+        "port mimo povolene"
+    );
+    check_eq!(
+        libos::sys::ioport_read(child.handle().raw(), 0x64, 2).err(),
+        Some(Error::AccessDenied),
+        "16bitove cteni presahuje povoleny port"
+    );
+    check_eq!(
+        libos::sys::ioport_read(child.handle().raw(), 0x64, 3).err(),
+        Some(Error::InvalidArgs),
+        "neplatna sirka"
+    );
+    check_eq!(
+        libos::sys::ioport_write(root.handle().raw(), 0x80, 1, 0x100).err(),
+        Some(Error::InvalidArgs),
+        "hodnota se nevejde do sirky"
+    );
+    check_eq!(
+        child.restrict(&[io_ports(0x60, 1)], 0, 0).err(),
+        Some(Error::AccessDenied),
+        "potomek s portem navic"
+    );
+    check_eq!(
+        child.restrict(&[irq_lines(6, 1)], 0, 0).err(),
+        Some(Error::AccessDenied),
+        "potomek s linkou navic"
+    );
+    check_eq!(
+        root.restrict(&[(3 << 62, 1)], 0, 0).err(),
+        Some(Error::InvalidArgs),
+        "neznamy druh rozsahu"
+    );
+    check_eq!(
+        root.restrict(&[io_ports(0xFFFF, 2)], 0, 0).err(),
+        Some(Error::InvalidArgs),
+        "porty za 0xFFFF"
+    );
+    check_eq!(
+        child.interrupt_line(6).err(),
+        Some(Error::AccessDenied),
+        "linka mimo povolene"
+    );
+    {
+        let _irq = child
+            .interrupt_line(5)
+            .map_err(|e| fail("povolena linka 5", e))?;
+        check_eq!(
+            root.interrupt_line(5).err(),
+            Some(Error::AlreadyExists),
+            "druhy objekt na stejne lince"
+        );
+    }
+    // Po zavreni objektu je linka znovu volna (ale kvota potomka je vycerpana).
+    check_eq!(
+        child.interrupt_line(5).err(),
+        Some(Error::NoResources),
+        "kvota preruseni potomka"
+    );
+    let again = root
+        .interrupt_line(5)
+        .map_err(|e| fail("linka po uvolneni", e))?;
+    drop(again);
+    check_eq!(
+        root.interrupt_line(16).err(),
+        Some(Error::InvalidArgs),
+        "linka nad 15"
+    );
+    // Linku 1 drzi ovladac PS/2.
+    check_eq!(
+        root.interrupt_line(1).err(),
+        Some(Error::AlreadyExists),
+        "linka klavesnice PS/2 je obsazena"
     );
     Ok(())
 }

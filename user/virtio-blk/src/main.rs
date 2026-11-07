@@ -85,7 +85,7 @@ fn main(startup: Startup) -> i64 {
     let ecam_vmo = Vmo::from_handle(ecam_vmo);
     let client = Channel::from_handle(client);
 
-    let Some(address) = virtio::driver_address(&startup.bootstrap) else {
+    let Some(address) = virtio::read_driver_config(&startup.bootstrap) else {
         println!("virtio-blk: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
@@ -110,16 +110,19 @@ fn main(startup: Startup) -> i64 {
 
 impl Disk {
     fn open(ecam: &Ecam, a: Address, resource: &Resource) -> Result<Self> {
-        let device = Device::open(ecam, a, resource)?;
-        device.begin_init()?;
-        let features = device.negotiate(F_VERSION_1 | F_RO | F_FLUSH | F_DISCARD | F_ACCESS_PLATFORM)?;
-
-        let irq = resource.interrupt()?;
-        let msix = MsixTable::open(ecam, a, resource)?;
-        msix.set(0, irq.msi())?;
-        msix.enable(ecam);
-        let queue = device.setup_queue(0, 16, 0, resource)?;
-        device.driver_ok();
+        let virtio::Started {
+            device,
+            queue,
+            irq,
+            msix,
+            features,
+        } = virtio::start(
+            ecam,
+            a,
+            resource,
+            F_VERSION_1 | F_RO | F_FLUSH | F_DISCARD | F_ACCESS_PLATFORM,
+            16,
+        )?;
 
         let dma = resource.dma_memory(DMA_SIZE)?;
         let buf_phys = resource.phys_addr(&dma, 0)?;

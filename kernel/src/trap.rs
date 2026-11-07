@@ -83,6 +83,10 @@ pub fn current_cpu_index() -> usize {
 /// Hardwarove ID CPU, na ktere se smeruji preruseni zarizeni (zatim vzdy
 /// bootovaci CPU).
 #[inline]
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    allow(dead_code, reason = "aarch64 smeruje MSI pres kolekci ITS")
+)]
 pub fn irq_target_hw_id() -> u32 {
     sched::all_cpus().next().map_or(0, |c| c.hw_id)
 }

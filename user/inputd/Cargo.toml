@@ -1,0 +1,16 @@
+[package]
+name = "inputd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "inputd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+inputproto = { path = "../../libs/inputproto" }
+keymap = { path = "../../libs/keymap" }

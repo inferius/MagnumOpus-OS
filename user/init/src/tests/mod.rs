@@ -8,12 +8,17 @@ mod drivers;
 mod events;
 mod firewall;
 mod fs;
+mod fs_hist;
+mod input;
 mod ipc;
 mod jobs;
 mod memory;
 mod net;
 mod process;
+mod shell;
+mod supervisor;
 mod time;
+mod usb;
 
 use alloc::string::String;
 
@@ -31,42 +36,24 @@ const SUITES: &[(&str, &[Test])] = &[
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("souborovy system", fs::TESTS),
+    ("vstup", input::TESTS),
+    ("usb", usb::TESTS),
+    ("historie FS", fs_hist::TESTS),
     ("cas", time::TESTS),
     ("firewall", firewall::TESTS),
     ("sit", net::TESTS),
+    ("supervisor", supervisor::TESTS),
+    ("shell", shell::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).
-static DEVICES: spin::Once<crate::system::Devices> = spin::Once::new();
-
-pub fn set_devices(d: crate::system::Devices) {
-    DEVICES.call_once(|| d);
-}
-
 fn devices() -> Option<&'static crate::system::Devices> {
-    DEVICES.get()
-}
-
-/// Sluzba casu spustena pri startu (pro testy nastaveni hodin).
-static TIME: spin::Once<crate::system::TimeService> = spin::Once::new();
-
-pub fn set_time_service(t: crate::system::TimeService) {
-    TIME.call_once(|| t);
-}
-
-fn time_service() -> Option<&'static crate::system::TimeService> {
-    TIME.get()
+    crate::system::devices()
 }
 
 /// Sluzba site spustena pri startu (pro testy site).
-static NET: spin::Once<crate::system::NetService> = spin::Once::new();
-
-pub fn set_net_service(n: crate::system::NetService) {
-    NET.call_once(|| n);
-}
-
 fn net_service() -> Option<&'static crate::system::NetService> {
-    NET.get()
+    crate::system::NET.get()
 }
 
 /// Spusti vsechny testy, vraci pocet selhanych.

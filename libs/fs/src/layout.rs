@@ -36,7 +36,7 @@ pub const VERSION: u32 = 3;
 /// *compat*: starsi ovladac smi svazek normalne pouzivat; *ro_compat*:
 /// jen cist; *incompat*: nesmi vubec. Neznamy bit ro_compat nebo
 /// incompat = pripojeni odmitnuto (`NOT_SUPPORTED`).
-pub const FEATURES_RO_COMPAT: u64 = feature::RO_COMPAT_ACL;
+pub const FEATURES_RO_COMPAT: u64 = feature::RO_COMPAT_ACL | feature::RO_COMPAT_HISTORY;
 pub const FEATURES_INCOMPAT: u64 = feature::INCOMPAT_TIME_SECS;
 
 /// Rezervovane bity vlastnosti (zatim je ovladac neumi, takze svazek s nimi
@@ -52,6 +52,11 @@ pub mod feature {
     /// ro_compat: svazek ma popisy opravneni s pocty odkazu. Starsi ovladac
     /// smi jen cist (pri mazani by pocty nesnizoval).
     pub const RO_COMPAT_ACL: u64 = 1 << 0;
+    /// ro_compat: svazek vede historii (faze 2): zurnal zmen, metadata
+    /// snapshotu a commitu, kos, rozsirene atributy, index expirace, vetve.
+    /// Starsi ovladac smi jen cist - pri zmene by zurnal ani indexy
+    /// neaktualizoval.
+    pub const RO_COMPAT_HISTORY: u64 = 1 << 1;
 }
 
 /// Tvar casu na svazku (podle `feature::INCOMPAT_TIME_SECS`).
@@ -97,6 +102,10 @@ const _: () = assert!(INLINE_MAX <= crate::node::MAX_VALUE);
 /// Pevna ID objektu.
 pub const META_OID: u64 = 0;
 pub const ROOT_OID: u64 = 1;
+/// Kos datasetu: skryty adresar (rodic 0, zadne jmeno), do ktereho se
+/// presouvaji smazane objekty (`Fs::trash`). Polozky se jmenuji cislem
+/// zaznamu kose (`item::TRASH`).
+pub const TRASH_OID: u64 = 2;
 pub const FIRST_FREE_OID: u64 = 16;
 
 /// Druhy polozek stromu (cast klice).
@@ -130,6 +139,38 @@ pub mod item {
     /// Vlastnosti datasetu (objekt META_OID, offset 0): priznaky u32
     /// (`fs::ds_flags`).
     pub const PROPS: u8 = 12;
+    /// Zaznam zurnalu zmen (`records::JournalEntry`), objekt META_OID,
+    /// offset = poradove cislo (od 1, nikdy se neopakuje).
+    pub const JOURNAL: u8 = 13;
+    /// Stav zurnalu (`records::JournalState`), objekt META_OID, offset 0.
+    pub const JSTATE: u8 = 14;
+    /// Metadata snapshotu (`records::SnapMeta`: druh, cas, pozice zurnalu,
+    /// u commitu autor, zprava, rodice, logicke ID), offset = cislo snapshotu.
+    pub const SNAPMETA: u8 = 15;
+    /// Nastaveni datasetu (`records::Settings`: retence zurnalu a kose,
+    /// pravidla automatickych snapshotu), objekt META_OID, offset 0.
+    pub const SETTINGS: u8 = 16;
+    /// Zaznam kose (`records::TrashRecord`), objekt META_OID, offset =
+    /// cislo zaznamu (= jmeno polozky v adresari `TRASH_OID`).
+    pub const TRASH: u8 = 17;
+    /// Rozsirene atributy objektu (`records::encode_xattrs`), offset =
+    /// hash jmena; vic atributu se stejnym hashem sdili hodnotu.
+    pub const XATTR: u8 = 18;
+    /// Index expirace, objekt META_OID, offset = cas (`records::expiry_key`),
+    /// hodnota = seznam (oid, generace).
+    pub const EXPIRY: u8 = 19;
+    /// Pamet logickeho hashe obsahu souboru (`records::LogicalHash`), offset 0.
+    pub const LHASH: u8 = 20;
+    /// Vetve datasetu (`records::encode_branches`), objekt META_OID,
+    /// offset = hash slozeneho jmena.
+    pub const BRANCH: u8 = 21;
+    /// Posledni commit datasetu a rozpracovany merge (`records::Head`),
+    /// objekt META_OID, offset 0.
+    pub const HEAD: u8 = 22;
+    /// Kde je dataset pripojeny (`records::DsLink`: dataset rodice, slozka,
+    /// jmeno) - ve strome datasetu samotneho, objekt META_OID, offset 0.
+    /// Cesta datasetu se tak zjisti bez pruchodu celym stromem.
+    pub const DSLINK: u8 = 23;
 }
 
 /// Klic polozky stromu; razeni podle (oid, kind, offset).

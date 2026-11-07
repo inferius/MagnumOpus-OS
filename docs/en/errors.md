@@ -43,10 +43,11 @@ is documented in this file and in the Czech version.
 | -25 | `READ_ONLY` | read-only |
 | -26 | `LOCKED` | the object is open or locked by another handle |
 | -27 | `CONFLICT` | the object has changed in the meantime |
-| -28 | `CONNECTION_REFUSED` | the other side refused the connection |
-| -29 | `CONNECTION_RESET` | the connection was reset by the other side |
-| -30 | `UNREACHABLE` | the destination is unreachable (network not configured, no route) |
-| -31 | `ADDRESS_IN_USE` | the address or port is already in use |
+| -28 | `JOURNAL_GAP` | the requested change journal entries are no longer stored |
+| -29 | `CONNECTION_REFUSED` | the other side refused the connection |
+| -30 | `CONNECTION_RESET` | the connection was reset by the other side |
+| -31 | `UNREACHABLE` | the destination is unreachable (network not configured, no route) |
+| -32 | `ADDRESS_IN_USE` | the address or port is already in use |
 
 ## Details
 
@@ -347,7 +348,21 @@ editor, an agent, sync.
 offer saving alongside, comparing versions, or a deliberate overwrite (the
 operation with the new revision).
 
-### `CONNECTION_REFUSED` (-28)
+### `JOURNAL_GAP` (-28)
+
+**Meaning:** a change journal subscriber asks for entries from a sequence
+number older than the oldest stored entry - retention (entry count or age,
+a dataset setting) has dropped them in the meantime.
+
+**When:** `journal_read` / `JOURNAL_READ` and `JOURNAL_WATCH`, when an
+indexer, sync or the explorer has not checked in for a long time. Entries
+are never skipped silently.
+
+**What to do:** load a new starting state: `VIEW` (a temporary snapshot and
+the number of the last entry it contains), walk it and resume the
+subscription from that number + 1. Subscribing more often or a longer
+retention prevents it from happening again.
+### `CONNECTION_REFUSED` (-29)
 
 **Meaning:** the TCP destination answered with a refusal (RST to SYN):
 nothing listens on the port.
@@ -357,7 +372,7 @@ nothing listens on the port.
 **What to do:** check the address and port, or retry later (the service on
 the other side is not running yet).
 
-### `CONNECTION_RESET` (-29)
+### `CONNECTION_RESET` (-30)
 
 **Meaning:** an established TCP connection was reset by the other side
 (RST), or the network service dropped it because the other side stopped
@@ -369,7 +384,7 @@ connection that was reset before `accept`.
 **What to do:** close the connection and reconnect if needed. Data sent
 after the last confirmed write may not have arrived.
 
-### `UNREACHABLE` (-30)
+### `UNREACHABLE` (-31)
 
 **Meaning:** the destination is unreachable: the interface has no address
 (DHCP has not finished yet), there is no route to the destination, or the
@@ -380,7 +395,7 @@ address is not supported (e.g. IPv6 until the network service supports it).
 **What to do:** wait for the network configuration
 (`Net::wait_configured`), check the address.
 
-### `ADDRESS_IN_USE` (-31)
+### `ADDRESS_IN_USE` (-32)
 
 **Meaning:** the local port is already used by another socket.
 

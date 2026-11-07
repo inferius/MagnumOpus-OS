@@ -102,6 +102,9 @@ pub struct Startup {
     pub pci_ecam: Vec<(Vmo, u32)>,
     /// Bootstrap kanal: spojeni s rodicem.
     pub bootstrap: Channel,
+    /// Priznaky startu (`abi::bootstrap::flags`; nastavuje je jen jadro
+    /// initu, napr. testovaci beh).
+    pub flags: u32,
 }
 
 unsafe extern "Rust" {
@@ -109,13 +112,31 @@ unsafe extern "Rust" {
     fn __libos_main(startup: Startup) -> i64;
 }
 
-/// Vstupni bod procesu. Jadro skoci sem s handlem bootstrap kanalu v `rdi`
-/// a zasobnikem zarovnanym na 16 B; vlastni kod chce zarovnani jako po
-/// instrukci `call`, proto tenky asembler.
+/// Vstupni bod procesu. Jadro skoci sem s handlem bootstrap kanalu v prvnim
+/// argumentu (x86_64 `rdi`, aarch64 `x0`) a zasobnikem zarovnanym na 16 B;
+/// vlastni kod chce zarovnani jako po instrukci `call` a nulovy ukazatel
+/// ramce (konec vypisu zasobniku), proto tenky asembler.
+#[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 extern "C" fn _start() -> ! {
     naked_asm!("xor ebp, ebp", "and rsp, -16", "call {}", "ud2", sym start_rust)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+extern "C" fn _start() -> ! {
+    naked_asm!(
+        "mov x9, sp",
+        "and x9, x9, #-16",
+        "mov sp, x9",
+        "mov x29, xzr",
+        "mov x30, xzr",
+        "bl {}",
+        "brk #1",
+        sym start_rust
+    )
 }
 
 fn fail(msg: &str) -> ! {
@@ -132,6 +153,7 @@ const START_DATA_MAX: usize = bootstrap::HEADER_SIZE + MAX_START_HANDLES * boots
 struct Received {
     process: Option<u32>,
     job: Option<u32>,
+    flags: u32,
     initfs: Option<u32>,
     resource: Option<u32>,
     ecam: [(u32, u32); 4],
@@ -157,6 +179,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
     let mut got = Received {
         process: None,
         job: None,
+        flags: 0,
         initfs: None,
         resource: None,
         ecam: [(0, 0); 4],
@@ -173,7 +196,10 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             .and_then(Entry::from_bytes)
             .map_or((0, 0), |e| (e.kind, e.arg));
         match kind {
-            bootstrap::kind::SELF_PROCESS => got.process = Some(handle),
+            bootstrap::kind::SELF_PROCESS => {
+                got.process = Some(handle);
+                got.flags = arg;
+            }
             bootstrap::kind::JOB => got.job = Some(handle),
             bootstrap::kind::INITFS => got.initfs = Some(handle),
             bootstrap::kind::ROOT_RESOURCE => got.resource = Some(handle),
@@ -212,6 +238,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             .map(|&(h, arg)| (Vmo::from_handle(Handle::from_raw(h)), arg))
             .collect(),
         bootstrap,
+        flags: got.flags,
     };
     // SAFETY: funkci definuje program makrem `entry!` se spravnou signaturou.
     let code = unsafe { __libos_main(startup) };

@@ -514,6 +514,7 @@ whole system).
 | vaults lock on sleep | convenience | option | on | option |
 | inline deduplication on write | medium to large | off (background only) | off | option |
 | checksum verification on every read | small | on (cannot be disabled) | on | on |
+| new input device verification - keyboard, mouse (against BadUSB, [USB](usb.md#verifying-a-new-input-device-against-badusb)) | convenience (a code on attach) | option | on | off |
 
 Data integrity (checksums, the Merkle tree, metadata twice) does not change
 with profiles - it protects against corruption, not against an attacker,
@@ -777,7 +778,7 @@ Order:
 | Phase | Contents |
 |---|---|
 | 1 - format | 16 KiB nodes, superblock/pointer/record v3, feature flags, datasets and the dataset tree (with case sensitivity), names and symlinks, review fixes, protocol v2 with handles and locks, permissions (capabilities, grants, visibility, profiles, no execution on data) |
-| 2 - versions | commits, branches, clones, diff, merge, change journal, automatic snapshots, trash, version history, undo, change watching, file expiry |
+| 2 - versions (**done**, [FS history](fs-history.md)) | commits, branches, clones, diff, merge, change journal, automatic snapshots, trash, version history, undo, change watching, file expiry |
 | 3 - data | compression, instant copies, deduplication, automatic holes, metadata twice and self-healing, background scrub, preallocation |
 | 4 - protection | encrypted vaults (key protectors, optional TPM), immutable snapshots, quotas also for applications, audit with a hash chain, file origin, ransomware detection and decoys, disk health, verified system |
 | 5 - other | indexes and tags, send/receive, transactions, ARC and prefetching, resize, git layer, memory-mapped files (with the kernel) |

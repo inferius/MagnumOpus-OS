@@ -243,7 +243,7 @@ impl<D: BlockDevice> Fs<D> {
     pub(super) fn truncate_oid(&mut self, oid: u64, size: u64) -> Result<()> {
         let inode = self.live_inode(oid)?;
         self.set_content(oid, inode, size, None)?;
-        self.zil.op(zil::Op::Truncate {
+        self.zil_op(zil::Op::Truncate {
             oid,
             size,
             time: self.now,
@@ -407,6 +407,7 @@ impl<D: BlockDevice> Fs<D> {
         inode.version = inode.version.wrapping_add(1);
         self.put_inode(oid, &inode)?;
         self.zil.touch(oid);
+        self.jnote_content(oid);
         let parent = inode.parent;
         self.adjust_tree(parent, new_size as i128 - old_size as i128, 0, 0)
     }

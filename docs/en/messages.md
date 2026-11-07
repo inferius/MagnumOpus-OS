@@ -112,7 +112,7 @@ invariant was broken (a kernel bug).
 | Message | Meaning and fix |
 |---|---|
 | `devmgr: pci BB:DD.F vvvv:dddd trida cc.ss.pp` | A PCI device was found (information). |
-| `devmgr: ovladac pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
+| `devmgr: ovladac X pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
 | `virtio-blk BB:DD.F: N MiB, flush ano/ne, discard ano/ne` | The disk is ready. `discard ne` = the device has no TRIM (in QEMU the drive lacks `discard=unmap`); the FS then skips TRIM. |
 | `virtio-blk ...: inicializace selhala: ...` | The device does not follow virtio 1.x, did not finish its reset within a second (`TIMED_OUT`) or resources are missing (MSI-X, DMA memory, `NO_RESOURCES` = the restricted Resource quota is exhausted). |
 | `virtio-net BB:DD.F: MAC xx:..., linka pripojena/odpojena` | The network card is ready ("link up/down"). The MAC comes from the device configuration, otherwise it is locally administered (`02:...`). |
@@ -122,7 +122,49 @@ invariant was broken (a kernel bug).
 | `virtio-rng BB:DD.F: 256 B entropie predano jadru` | The host randomness source is ready and the kernel got the first data ("256 B of entropy passed to the kernel"). More batches every minute. |
 | `virtio-rng ...: zarizeni neodpovida (...), koncim` | The device did not complete a request within 5 s or returns empty data. The kernel keeps using its other sources. |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
+| `ps2: klavesnice`, `ps2: PS/2 mys ...` | The PS/2 driver found a keyboard, a mouse (kind from the ID: wheel, 5 buttons). |
+| `devmgr: radic PS/2 nenalezen` | Port 0x64 reads `0xFF` (no controller) or no device was found (PS/2 controller not found). Normal on modern boards without PS/2. |
+| `ps2: radic neodpovida spravne: ...` | The controller exists but failed its self-test or did not answer in time (`TIMED_OUT`). |
+| `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | The port exists but no device answers on it (nothing connected). |
+| `xhci BB:DD.F: N portu (M USB 3), S slotu, kontext K B` | The USB controller is ready (N ports, M of them USB 3, S slots, K-byte contexts). |
+| `xhci: firmware radic nepustil, pokracuji` | The firmware did not release the controller within a second (USB Legacy Support); PS/2 emulation of USB may keep running. |
+| `xhci ...: inicializace selhala: ...` | The controller did not finish halting, reset or start (`TIMED_OUT`), or resources are missing. |
+| `xhci: port P: zarizeni vvvv:pppp (speed), slot S` / `zarizeni odpojeno` | A device on the port was set up / detached. |
+| `xhci: prikaz typu T selhal (kod C)` | A controller command (Enable Slot, Address Device, Configure Endpoint ...) failed; the device is not used. |
+| `usb-hub: root hub, N portu` | The hub driver runs on the root ports. |
+| `usb-hub: port P: zarizeni nelze nastavit: ...` | Port reset or device setup failed (`TIMED_OUT`, `IO_ERROR`). |
+| `usb-hub: externi hub [path], N portu` | The hub driver runs on an external hub. |
+| `usb-hid: USB klavesnice/mys vvvv:pppp (port [...], speed)` | The HID driver introduced itself to the input service. |
+| `usb-hid: rozhrani cc/ss/pp: deskriptoru reportu nerozumim` | The report descriptor is missing, broken or has nothing known, and the interface has no boot protocol. The interface is not used. |
+| `usb-hid: rozhrani N nema interrupt endpoint IN` | A HID interface without an input endpoint; it is not used. |
+| `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | No driver for the interface class (e.g. a USB disk). |
+| `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` did not arrive within 10 s; init gets `done` anyway. |
+| `inputd: nove zarizeni '...' ceka na overeni`, `inputd: zarizeni '...' overeno` / `odmitnuto` | The new keyboard verification option (BadUSB): pending / trusted / rejected, see [USB](usb.md). |
+| `init: supervisor bezi` | Start-up is done, init watches the services and devices ([Init](init.md)). |
+| `init: sluzba X skoncila: ...` | A watched service exited (reason from the exit code). |
+| `init: sluzba X znovu spustena` | The supervisor restarted the service. |
+| `init: sluzba X spadla 6x za 60 s, vzdavam to` | Too many crashes; the service stays stopped. |
+| `init: sluzbu X zatim neumim obnovit` | A service without restart crashed (`devmgr`, `fsd`, `inputd`); the system runs without it. |
+| `init: spravce zarizeni skoncil, hotplug nefunguje` | `devmgr` closed its channel; devices attached later are not found. |
 | `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
+| `virtio-input BB:DD.F: 'name' (klavesnice/mys)` | An input device is ready; the kind (keyboard/mouse) comes from the supported events. `nezname zarizeni` (unknown device) = it has neither keys nor relative axes (a tablet, not supported yet). |
+| `virtio-input ...: inicializace selhala: ...` | As for virtio-blk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA). |
+| `virtio-input: prvni udalosti od zarizeni (N)` | The device sent events for the first time (information; confirms that interrupts and the queue work). |
+| `virtio-input: sluzba nestiha, zahozeno N zprav` | The channel queue to the input service is full; the driver drops events so as not to block the device. Reported at 1, 2, 4, 8 ... messages. |
+| `init: N blokovych a M vstupnich zarizeni` | What the device manager found (N block and M input devices). |
+
+## Input service (inputd)
+
+| Message | Meaning and fix |
+|---|---|
+| `inputd: bezim (rozlozeni us)` | The service is running with the default layout. |
+| `inputd: zarizeni 'name' pripojeno` / `odpojeno` | A driver introduced itself (`IDEV`) or closed its channel (connected / disconnected). |
+| `inputd: neplatna zprava od zdroje N` | A source sent a message that does not follow the device protocol (unknown tag, wrong length); the message is dropped. |
+| `inputd: bezpecna zkratka, ale nikdo ji neposloucha` | Ctrl+Alt+Delete, but nobody holds the secure channel; the shortcut is only swallowed. |
+| `inputd: bezpecna zkratka neprosla, kanal secure je plny` | The shortcut receiver is not reading; the shortcut is swallowed and secure mode does not start (input stays with the focus owner). |
+| `inputd: bezpecna zkratka, ale kanal secure je zavreny` | The shortcut receiver has exited; the shortcut is swallowed. |
+| `init: sluzba vstupu bezi (N zarizeni)` | Init started `inputd` and connected N drivers. |
+| `init: sluzbu vstupu nelze spustit: ...` | `inputd` is missing from initfs or did not answer a command (`TIMED_OUT`). The input tests then fail (`sluzba vstupu nebezi`). |
 
 ## fsd service and file system
 
@@ -173,3 +215,12 @@ invariant was broken (a kernel bug).
 | `init: manifest P: ...` | The program manifest is invalid (error description); the program does not start. |
 | `init: firewall bez FS (konfigurace se neulozi): ...` | An FS session for `fwd` cannot be prepared (no FS or rights). |
 | `init: sluzbu firewallu nelze spustit: ...` | `fwd` did not start; `netd` sees a closed channel and denies questions. |
+
+## Session service termd
+
+| Message | Meaning and fix |
+|---|---|
+| `termd: bezim (protokol vN, FS fsd/zadny)` | The session service is running. `zadny` (none) = it got no fsd channel; the shell then sees only an empty root (writes return `READ_ONLY`). |
+| `termd\| ...` | Mirror of session output as text (VT100 adapter) so it can be read on the serial line. Blocks start with `> command`. |
+| `termd: okno zavreno, koncim` | The channel to the parent closed. Background jobs finish, then the service exits (sessions do not survive the process yet). |
+| `termd: chyba cteni: ...` | Unexpected channel error; the service exits with code 1. |

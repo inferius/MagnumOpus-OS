@@ -68,7 +68,8 @@ impl<D: BlockDevice> Fs<D> {
         }
         inode.ctime = self.now;
         self.put_inode(oid, &inode)?;
-        self.zil.op(zil::Op::SetTimes { oid, times: t, time: self.now });
+        self.jlog_attr(oid, crate::records::jattr::TIMES)?;
+        self.zil_op(zil::Op::SetTimes { oid, times: t, time: self.now });
         Ok(())
     }
 }

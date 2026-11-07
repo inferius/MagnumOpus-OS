@@ -39,6 +39,8 @@ thread at libos's `_start` symbol with the bootstrap channel handle in
    - `initfs` - the initfs image (`init` only),
    - `handles` - further handles from the parent,
    - `bootstrap` - channel to the parent for further communication,
+   - `flags` - start flags from the `SELF_PROCESS` argument
+     (`abi::bootstrap::flags`; the kernel sets them only for init, e.g. `TEST_RUN`),
 4. uses the return value as the process exit code (`PROCESS_EXIT`).
 
 A panic in the program logs the message and exits with code -1,000,001.
@@ -56,8 +58,8 @@ Each type owns a handle and closes it when dropped.
 | `Process` | process | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |
 | `Thread` | thread | `create`, `start`, `wait_exit` |
 | `Mapping` | a memory object mapped into the own address space (unmapped when dropped) | `new`, `read::<T>`, `write::<T>`, `read_bytes`, `write_bytes` |
-| `hw::Resource` | hardware access (drivers) | `restrict`, `restrict_device` (with an IOMMU domain), `device_memory`, `dma_memory`, `phys_addr`, `interrupt` |
-| `hw::Interrupt` | device interrupt (MSI) | `msi`, `wait(deadline)` |
+| `hw::Resource` | hardware access (drivers) | `restrict`, `restrict_device` (with an IOMMU domain), `device_memory`, `dma_memory`, `phys_addr`, `interrupt`, `interrupt_line`, `port_read8`, `port_write8` (ranges incl. `hw::io_ports`, `hw::irq_lines`) |
+| `hw::Interrupt` | device interrupt (MSI or legacy line) | `msi`, `wait(deadline)`, `ack` |
 
 `Mapping::read`/`write` are volatile (suitable for device registers too)
 and accept only integers (`libos::Pod`: `u8`..`u64`, `i8`..`i64`) - arbitrary

@@ -71,10 +71,34 @@ Návrh a důvody celé v3: [navrh-fs-v3.md](navrh-fs-v3.md). Hotové změny:
 | fsck | mapa blok -> kdo, commit vždy | bitové mapy (pevná paměť), funguje i jen pro čtení | 1 TiB svazek = 96 MiB; kontrola při nejisté obnově bez zápisu |
 | Zápis dat | skládání po bajtech | po celých blocích | 2x rychlejší zápis (0,7 -> 1,4 GiB/s) |
 
+### Fáze 2: historie (`RO_COMPAT_HISTORY`)
+
+Změna uvnitř v3, poznaná příznakem `RO_COMPAT_HISTORY` (bit 1 ro_compat).
+Podrobně: [Historie FS](fs-historie.md#na-disku).
+
+| Oblast | Fáze 1 | Fáze 2 | Proč |
+|---|---|---|---|
+| položky stromu | 1-12 | + 13 `JOURNAL`, 14 `JSTATE`, 15 `SNAPMETA`, 16 `SETTINGS`, 17 `TRASH`, 18 `XATTR`, 19 `EXPIRY`, 20 `LHASH`, 21 `BRANCH`, 22 `HEAD`, 23 `DSLINK` | žurnál změn, metadata snapshotů a commitů, nastavení datasetu, koš, atributy, index expirace, paměť logického hashe, větve, zpětný odkaz datasetu (rychlá cesta) |
+| pevné objekty | 0 META, 1 kořen | + **2 koš** (`TRASH_OID`, rodič 0) | smazání do koše je přesun, žádná kopie |
+| počet atributů v záznamu objektu | vždy 0 | **počet položek `XATTR`** (fsck kontroluje) | atributy existují |
+| intent log | záznamy 1-13 | + 14 `Actor`, 15 `Trash`, 16 `Restore`, 17 `Purge`, 18 `SetXattr` | stejná čísla a uživatelé žurnálu po přehrání; koš a atributy přežijí pád |
+| chyby | do -27 | + `JOURNAL_GAP` (-28) | starší záznamy zahodila retence - nikdy tiché vynechání |
+| protokol v2 | op 30-53 | + **54-86** (`fsproto::hist`) | historie pro průzkumník, indexer, sync, agenty; vytvoření a smazání datasetu |
+
+**Starší svazek** (bez bitu) ovladač při prvním zapisovatelném připojení
+povýší: nastaví bit a odteď vede žurnál (začíná číslem 1); snapshoty z doby
+před fází 2 nemají metadata (ruční, čas 1970). Starší ovladač svazek s
+bitem jen čte - jinak by při zápisu nevedl žurnál ani indexy.
+
+**Chování (bez změny formátu):** `remove` zůstává trvalé, do koše
+přesouvá jen `trash`; každá změnová operace počítá s místem pro uzly
+žurnálu (`JOURNAL_ROOM`), jinak by commit na plném disku nemusel mít kam
+uložit strom; změny, které commit sám přidává (žurnál), se nepočítají jako
+rozpracovaná operace.
+
 ### Zbývá ve v3
 
-Datasety, verzování (klony, diff, obnova), vrstva handlů a ovladač pro
-Windows, oprávnění, protokol v2 - pořadí v [návrhu](navrh-fs-v3.md#pořadí-implementace).
+Fáze 3-6 (data, ochrana, ostatní, cloud) - pořadí v [návrhu](navrh-fs-v3.md#pořadí-implementace).
 
 ## Časy objektů: u64 ns -> i64 s + u32 ns
 

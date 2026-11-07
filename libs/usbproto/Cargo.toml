@@ -1,0 +1,9 @@
+[package]
+name = "usbproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "USB: protokol xhci <-> tridni ovladace, deskriptory, hub, HID boot"
+
+[dependencies]
+inputproto = { path = "../inputproto" }

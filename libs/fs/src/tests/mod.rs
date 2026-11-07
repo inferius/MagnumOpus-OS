@@ -4,11 +4,14 @@
 //! `PROPTEST_CASES` (napr. `PROPTEST_CASES=5000` pro dukladny beh).
 
 mod basic;
+mod commits;
 mod crash;
 mod datasets;
 mod errors;
 mod features;
 mod handles;
+mod history;
+mod journal;
 mod model;
 mod versions;
 mod mount;
@@ -17,6 +20,7 @@ mod ondisk;
 mod perf;
 mod perm;
 mod times;
+mod trash;
 
 use crate::{Algo, BlockDevice, FormatOptions, Fs, MemDevice};
 

@@ -419,6 +419,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "i8042"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -459,14 +466,30 @@ dependencies = [
  "blockproto",
  "conf",
  "fsproto",
+ "inputproto",
  "libos",
  "manifest",
  "netproto",
+ "shlang",
  "spin",
+ "term",
 ]
 
 [[package]]
 name = "initfs"
+version = "0.1.0"
+
+[[package]]
+name = "inputd"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "keymap",
+ "libos",
+]
+
+[[package]]
+name = "inputproto"
 version = "0.1.0"
 
 [[package]]
@@ -491,6 +514,13 @@ dependencies = [
  "initfs",
  "noto-sans-mono-bitmap",
  "spin",
+]
+
+[[package]]
+name = "keymap"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
 ]
 
 [[package]]
@@ -693,6 +723,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ps2"
+version = "0.1.0"
+dependencies = [
+ "i8042",
+ "inputproto",
+ "libos",
+]
+
+[[package]]
 name = "ptr_meta"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -850,6 +889,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "shlang"
+version = "0.1.0"
+dependencies = [
+ "abi",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -932,6 +978,25 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys",
+]
+
+[[package]]
+name = "term"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "noto-sans-mono-bitmap",
+ "shlang",
+]
+
+[[package]]
+name = "termd"
+version = "0.1.0"
+dependencies = [
+ "fsproto",
+ "libos",
+ "shlang",
+ "term",
 ]
 
 [[package]]
@@ -1084,6 +1149,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "usb-hid"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "libos",
+ "usbclient",
+ "usbproto",
+]
+
+[[package]]
+name = "usb-hub"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "libos",
+ "usbclient",
+ "usbproto",
+]
+
+[[package]]
+name = "usbclient"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "usbproto",
+]
+
+[[package]]
+name = "usbproto"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+]
+
+[[package]]
 name = "virtio"
 version = "0.1.0"
 dependencies = [
@@ -1096,6 +1196,16 @@ name = "virtio-blk"
 version = "0.1.0"
 dependencies = [
  "blockproto",
+ "libos",
+ "pci",
+ "virtio",
+]
+
+[[package]]
+name = "virtio-input"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
  "libos",
  "pci",
  "virtio",
@@ -1258,6 +1368,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xhci"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "pci",
+ "usbproto",
+ "virtio",
+]
+
+[[package]]
 name = "xtask"
 version = "0.1.0"
 dependencies = [
@@ -1268,6 +1388,7 @@ dependencies = [
  "initfs",
  "netproto",
  "pulldown-cmark",
+ "shlang",
 ]
 
 [[package]]

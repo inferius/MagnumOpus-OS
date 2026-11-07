@@ -14,6 +14,7 @@
 extern crate alloc;
 
 mod codec;
+pub mod hist;
 pub mod perm;
 pub mod v2;
 
@@ -233,7 +234,7 @@ impl FsClient {
         Self { channel }
     }
 
-    /// Kanal relace (napr. pro predani relace jinemu procesu).
+    /// Kanal relace (napr. pro predani jine sluzbe).
     pub fn into_channel(self) -> Channel {
         self.channel
     }

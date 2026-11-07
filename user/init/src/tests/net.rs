@@ -19,7 +19,7 @@ use libos::{Error, Startup, println};
 use netproto::io::{Read, Write};
 use netproto::{Net, Policy, Rule, Target, proto, rights};
 
-use super::{Test, TestResult, fail, net_service, time_service};
+use super::{Test, TestResult, fail, net_service};
 use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
@@ -570,8 +570,10 @@ fn ntp(s: &Startup) -> TestResult {
     };
     let net = net()?;
     configured(net)?;
-    let time = time_service().ok_or("sluzba casu nebezi")?;
+    let guard = crate::system::TIME.lock();
+    let time = guard.as_ref().ok_or("sluzba casu nebezi")?;
     let offset = crate::system::sync_time_ntp(net, time, host(p.ntp)).map_err(|e| fail("NTP", e))?;
+    drop(guard);
     // Hodiny hosta jdou z RTC QEMU = cas hostitele; server NTP je tentyz.
     check!(
         offset.abs() < 10_000_000_000,

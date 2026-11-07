@@ -14,6 +14,11 @@
 //! prostredek. init ho preda sluzbe casu (handle bez `MANAGE`) a spravci
 //! zarizeni da koren bez `SET_CLOCK`.
 //!
+//! Krome pameti muze omezeny prostredek povolit I/O porty a stare linky
+//! preruseni (ISA IRQ) - rozsahy oznacene horni dvojici bitu zacatku
+//! (`abi::syscall::RANGE_IO_PORTS`, `RANGE_IRQ_LINES`). Potrebuji je
+//! zarizeni na desce bez PCI (radic PS/2).
+//!
 //! Bez IOMMU muze zarizeni pres DMA zapsat kamkoli do pameti - ovladac, ktery
 //! zarizeni naprogramuje spatne, porad muze poskodit system. TODO: IOMMU
 //! (VT-d / AMD-Vi) a domena DMA na zarizeni.
@@ -29,6 +34,10 @@ use crate::error::Error;
 struct Limits {
     /// Povolene fyzicke rozsahy (zacatek, delka).
     ranges: Vec<(u64, u64)>,
+    /// Povolene I/O porty (zacatek, pocet).
+    ports: Vec<(u64, u64)>,
+    /// Povolene linky preruseni (bit = ISA IRQ).
+    lines: u32,
     irq_max: u32,
     irqs: AtomicU32,
     dma_max: u64,
@@ -107,15 +116,43 @@ impl Resource {
                 || !l.is_multiple_of(PAGE)
                 || s.checked_add(l).is_none()
         };
-        if ranges.len() > MAX_RANGES || ranges.iter().any(bad) {
+        if ranges.len() > MAX_RANGES {
+            return Err(Error::InvalidArgs);
+        }
+        let (mut memory, mut ports, mut lines) = (Vec::new(), Vec::new(), 0u32);
+        for (start, len) in ranges {
+            let base = start & !abi::syscall::RANGE_KIND_MASK;
+            match start & abi::syscall::RANGE_KIND_MASK {
+                0 => memory.push((start, len)),
+                abi::syscall::RANGE_IO_PORTS => {
+                    if len == 0 || base.checked_add(len).is_none_or(|e| e > 0x1_0000) {
+                        return Err(Error::InvalidArgs);
+                    }
+                    ports.push((base, len));
+                }
+                abi::syscall::RANGE_IRQ_LINES => {
+                    if len == 0 || base.checked_add(len).is_none_or(|e| e > 32) {
+                        return Err(Error::InvalidArgs);
+                    }
+                    for line in base..base + len {
+                        lines |= 1 << line;
+                    }
+                }
+                _ => return Err(Error::InvalidArgs),
+            }
+        }
+        if memory.iter().any(bad) {
             return Err(Error::InvalidArgs);
         }
         if let Some(p) = &self.limits {
-            let inside = ranges.iter().all(|&(s, l)| contains(&p.ranges, s, l));
+            let inside = memory.iter().all(|&(s, l)| contains(&p.ranges, s, l))
+                && ports.iter().all(|&(s, l)| contains(&p.ports, s, l))
+                && lines & !p.lines == 0;
             if !inside || irq_max > p.irq_max || dma_max > p.dma_max {
                 return Err(Error::AccessDenied);
             }
         }
+        let ranges = memory;
         // Zarizeni: potomek zdedi zarizeni rodice; jine nesmi zvolit.
         let device = match (self.device, device) {
             (Some(p), Some(d)) if p != d => return Err(Error::AccessDenied),
@@ -131,6 +168,8 @@ impl Resource {
             core: ObjectCore::new(Signals::NONE),
             limits: Some(Limits {
                 ranges,
+                ports,
+                lines,
                 irq_max,
                 irqs: AtomicU32::new(0),
                 dma_max,
@@ -155,6 +194,22 @@ impl Resource {
         self.limits
             .as_ref()
             .is_none_or(|l| contains(&l.ranges, first, end - first))
+    }
+
+    /// Smi prostredek pristupovat k portum `port..port + width`?
+    pub fn allows_ports(&self, port: u16, width: u8) -> bool {
+        self.limits
+            .as_ref()
+            .is_none_or(|l| contains(&l.ports, port as u64, width as u64))
+    }
+
+    /// Smi prostredek vytvorit preruseni na lince `line` (ISA IRQ)?
+    pub fn allows_line(&self, line: u32) -> bool {
+        line < 32
+            && self
+                .limits
+                .as_ref()
+                .is_none_or(|l| l.lines & (1 << line) != 0)
     }
 
     /// Zarizeni, ke kteremu prostredek patri (segment, sbernice,

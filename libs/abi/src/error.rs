@@ -68,10 +68,13 @@ pub enum Error {
     Locked = -26,
     /// Objekt se mezitim zmenil (podminena operace s ocekavanou revizi).
     Conflict = -27,
-    ConnectionRefused = -28,
-    ConnectionReset = -29,
-    Unreachable = -30,
-    AddressInUse = -31,
+    /// Pozadovane zaznamy zurnalu zmen uz nejsou ulozene (retence):
+    /// odberatel musi nacist novy vychozi stav (`VIEW`).
+    JournalGap = -28,
+    ConnectionRefused = -29,
+    ConnectionReset = -30,
+    Unreachable = -31,
+    AddressInUse = -32,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -103,6 +106,7 @@ pub const ALL: &[Error] = &[
     Error::ReadOnly,
     Error::Locked,
     Error::Conflict,
+    Error::JournalGap,
     Error::ConnectionRefused,
     Error::ConnectionReset,
     Error::Unreachable,
@@ -150,6 +154,7 @@ impl Error {
             Self::ReadOnly => "READ_ONLY",
             Self::Locked => "LOCKED",
             Self::Conflict => "CONFLICT",
+            Self::JournalGap => "JOURNAL_GAP",
             Self::ConnectionRefused => "CONNECTION_REFUSED",
             Self::ConnectionReset => "CONNECTION_RESET",
             Self::Unreachable => "UNREACHABLE",
@@ -187,6 +192,7 @@ impl Error {
             Self::ReadOnly => "jen pro cteni",
             Self::Locked => "objekt je otevreny nebo zamceny jinym handlem",
             Self::Conflict => "objekt se mezitim zmenil",
+            Self::JournalGap => "pozadovane zaznamy zurnalu uz nejsou ulozene",
             Self::ConnectionRefused => "druha strana spojeni odmitla",
             Self::ConnectionReset => "spojeni bylo preruseno druhou stranou",
             Self::Unreachable => "cil neni dosazitelny (sit nenastavena, chybi cesta)",

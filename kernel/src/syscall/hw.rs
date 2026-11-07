@@ -7,7 +7,6 @@ use super::handle::arg_handle;
 use super::{Args, current_process, user};
 use crate::arch::paging::PAGE_SIZE;
 use crate::error::{Error, Result};
-use crate::log;
 use crate::mm;
 use crate::object::interrupt::Interrupt;
 use crate::object::process::Process;
@@ -34,8 +33,11 @@ pub fn clock_set(a: Args) -> Result<u64> {
     let raw = user::read_bytes(&p, a[1], SetRequest::SIZE)?;
     let bytes: &[u8; SetRequest::SIZE] = raw.as_slice().try_into().map_err(|_| Error::InvalidArgs)?;
     let req = SetRequest::decode(bytes).ok_or(Error::InvalidArgs)?;
-    log::info!("[{} {}] nastavuje realny cas", p.name, p.id);
-    let hw = crate::clock::set(req, a[2] & set_flags::WRITE_HARDWARE != 0);
+    let hw = crate::clock::set(
+        req,
+        a[2] & set_flags::WRITE_HARDWARE != 0,
+        format_args!("[{} {}]", p.name, p.id),
+    );
     Ok(hw as u64)
 }
 
@@ -90,6 +92,54 @@ pub fn interrupt_create(a: Args) -> Result<u64> {
     out[8..12].copy_from_slice(&data.to_le_bytes());
     user::write_bytes(&p, a[1], &out)?;
     insert(&p, irq)
+}
+
+/// `INTERRUPT_CREATE_LINE(resource, line) -> handle`: preruseni na stare
+/// lince (ISA IRQ). Linku musi prostredek povolovat; jedna linka = jeden
+/// objekt.
+pub fn interrupt_create_line(a: Args) -> Result<u64> {
+    let p = current_process();
+    let res = check_resource(&p, a[0])?;
+    let line = u32::try_from(a[1]).map_err(|_| Error::InvalidArgs)?;
+    if !res.allows_line(line) {
+        return Err(Error::AccessDenied);
+    }
+    res.charge_irq()?;
+    let irq = Interrupt::new_line(line).inspect_err(|_| res.refund_irq())?;
+    insert(&p, irq)
+}
+
+/// Port a sirka z argumentu, overene proti prostredku.
+fn port_args(res: &Resource, port: u64, width: u64) -> Result<(u16, u8)> {
+    let port = u16::try_from(port).map_err(|_| Error::InvalidArgs)?;
+    let width = match width {
+        1 | 2 | 4 => width as u8,
+        _ => return Err(Error::InvalidArgs),
+    };
+    if !res.allows_ports(port, width) {
+        return Err(Error::AccessDenied);
+    }
+    Ok((port, width))
+}
+
+/// `IOPORT_READ(resource, port, width) -> value`.
+pub fn ioport_read(a: Args) -> Result<u64> {
+    let p = current_process();
+    let res = check_resource(&p, a[0])?;
+    let (port, width) = port_args(&res, a[1], a[2])?;
+    crate::arch::port_read(port, width).map(|v| v as u64)
+}
+
+/// `IOPORT_WRITE(resource, port, width, value)`.
+pub fn ioport_write(a: Args) -> Result<u64> {
+    let p = current_process();
+    let res = check_resource(&p, a[0])?;
+    let (port, width) = port_args(&res, a[1], a[2])?;
+    let value = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
+    if width < 4 && value >> (8 * width as u32) != 0 {
+        return Err(Error::InvalidArgs);
+    }
+    crate::arch::port_write(port, width, value).map(|_| 0)
 }
 
 /// `INTERRUPT_ACK(interrupt)`.

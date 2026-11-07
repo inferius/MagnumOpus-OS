@@ -81,7 +81,7 @@ fn main(startup: Startup) -> i64 {
     let ecam_vmo = Vmo::from_handle(ecam_vmo);
     let client = Channel::from_handle(client);
 
-    let Some(address) = virtio::driver_address(&startup.bootstrap) else {
+    let Some(address) = virtio::read_driver_config(&startup.bootstrap) else {
         println!("virtio-net: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
@@ -248,7 +248,7 @@ impl Nic {
         let mut reposted = false;
         let mut frame = [0u8; 1 + link::MAX_FRAME];
         frame[0] = link::FRAME;
-        while let Some((id, len)) = self.rx.take_used_any()? {
+        while let Some((id, len)) = self.rx.take_posted()? {
             let len = len as usize;
             let off = id as u64 * BUF;
             if (HDR + 14..=HDR + link::MAX_FRAME).contains(&len) {
@@ -281,7 +281,7 @@ impl Nic {
 
     /// Odeslane buffery vratit mezi volne.
     fn reclaim_tx(&mut self) -> Result<()> {
-        while let Some((id, _)) = self.tx.take_used_any()? {
+        while let Some((id, _)) = self.tx.take_posted()? {
             if self.tx_free.contains(&id) {
                 // Zarizeni vratilo buffer, ktery nemelo.
                 return Err(Error::Corrupted);

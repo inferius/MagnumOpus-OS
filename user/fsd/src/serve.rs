@@ -107,6 +107,9 @@ impl Service {
         if let Some(res) = self.handle_v2(sess, opcode, &mut r) {
             return res;
         }
+        if let Some(res) = self.handle_hist(sess, opcode, &mut r) {
+            return res;
+        }
         let mut w = Writer::new();
         if opcode == op::SIMULATE_POWER_LOSS {
             if !self.debug {

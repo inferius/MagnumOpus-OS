@@ -15,10 +15,17 @@ members = [
     "libs/initfs",
     "libs/manifest",
     "libs/blockproto",
+    "libs/inputproto",
+    "libs/keymap",
+    "libs/i8042",
+    "libs/usbproto",
+    "libs/usbclient",
     "libs/csprng",
     "libs/libos",
     "libs/pci",
     "libs/tz",
+    "libs/shlang",
+    "libs/term",
     "libs/virtio",
     "libs/wire",
     "tools/osfs",
@@ -29,8 +36,15 @@ members = [
     "user/netd",
     "user/netprobe",
     "user/init",
+    "user/ps2",
+    "user/inputd",
+    "user/termd",
     "user/timed",
     "user/virtio-blk",
+    "user/virtio-input",
+    "user/xhci",
+    "user/usb-hub",
+    "user/usb-hid",
     "user/virtio-net",
     "user/virtio-rng",
     "xtask",
@@ -55,6 +69,14 @@ fs = { path = "libs/fs" }
 
 [profile.dev]
 panic = "abort"
+
+# Interpret shellu je rekurzivni; bez optimalizace by jedna uroven volani
+# zabrala ~50 KB zasobniku (s optimalizaci ~6 KB). Program ma 256 KB.
+[profile.dev.package.shlang]
+opt-level = 2
+
+[profile.dev.package.term]
+opt-level = 2
 
 [profile.release]
 panic = "abort"

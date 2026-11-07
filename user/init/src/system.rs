@@ -1,5 +1,5 @@
 //! Start systemovych sluzeb: sluzba casu, spravce zarizeni, souborovy
-//! system a sluzba site.
+//! system, sluzba vstupu a sluzba site.
 
 use alloc::string::String;
 use alloc::vec;
@@ -14,19 +14,43 @@ use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
 use libos::{Channel, Error, Process, Result, Rights, Startup, println, time};
 
+use crate::supervisor::{Restart, Started};
+
+/// Zarizeni a sluzby spustene pri startu (testy a supervisor je ctou).
+pub static DEVICES: spin::Once<Devices> = spin::Once::new();
+
+pub fn devices() -> Option<&'static Devices> {
+    DEVICES.get()
+}
+
+/// Sluzba casu; supervisor ji po padu vymeni za novou.
+pub static TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
+
+/// Sluzba site (a firewallu) spustena pri startu.
+pub static NET: spin::Once<NetService> = spin::Once::new();
+
 /// Bezici spravce zarizeni, blokova zarizeni, ktera nasel, a souborovy
 /// system (pokud je na nekterem disku).
 pub struct Devices {
-    pub _devmgr: Process,
-    pub _control: Channel,
+    pub devmgr: Process,
+    /// Kanal ke spravci zarizeni (po `done` jim chodi zarizeni pripojena za
+    /// behu; zpracovava je supervisor).
+    pub control: Channel,
     pub blocks: Vec<BlockClient>,
+    /// Kanaly k ovladacum vstupnich zarizeni (predaji se sluzbe vstupu).
+    pub inputs: Vec<Channel>,
+    pub input: Option<crate::input::Input>,
     /// Kanaly k ovladacum sitovych karet (dokud je neprevezme sluzba site).
     pub nets: Vec<Channel>,
     /// Kanaly k ovladacum zdroje nahody (drzet = ovladac bezi).
     pub _rngs: Vec<Channel>,
     pub fs: Option<FsClient>,
-    pub _fsd: Option<(Process, Channel)>,
+    pub fsd: Option<(Process, Channel)>,
 }
+
+/// Nejdelsi ticho od spravce zarizeni pri startu (vic nez jeho vlastni
+/// cekani na PS/2 a USB dohromady).
+const DEVMGR_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Spusti spravce zarizeni a pocka, az nahlasi vsechna zarizeni.
 pub fn start_devices(startup: &Startup) -> Result<Devices> {
@@ -55,10 +79,12 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
 
     let (devmgr, control) = libos::spawn("devmgr", image, handles)?;
     let mut blocks = Vec::new();
+    let mut inputs = Vec::new();
     let mut nets = Vec::new();
     let mut rngs = Vec::new();
     loop {
-        let msg = control.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        // Spravce muze mlcet dlouho: PS/2 (az 5 s) a pruchod USB (az 10 s).
+        let msg = control.read(Some(time::deadline_after(DEVMGR_TIMEOUT)))?;
         match &msg.data[..] {
             b"done" => break,
             b"block" => {
@@ -69,24 +95,28 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
                     }
                 }
             }
+            b"input" => inputs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"net" => nets.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"rng" => rngs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             other => println!("init: neznama zprava od devmgr: {:?}", other),
         }
     }
     println!(
-        "init: {} blokovych zarizeni, {} sitovych karet",
+        "init: {} blokovych a {} vstupnich zarizeni, {} sitovych karet",
         blocks.len(),
+        inputs.len(),
         nets.len()
     );
     Ok(Devices {
-        _devmgr: devmgr,
-        _control: control,
+        devmgr,
+        control,
         blocks,
+        inputs,
+        input: None,
         nets,
         _rngs: rngs,
         fs: None,
-        _fsd: None,
+        fsd: None,
     })
 }
 
@@ -98,7 +128,7 @@ pub const TIME_SETTINGS: &str = "zone = Europe/Prague\nrtc = utc\n";
 
 /// Bezici sluzba casu a jeji kanal.
 pub struct TimeService {
-    pub _process: Process,
+    pub process: Process,
     pub channel: Channel,
 }
 
@@ -107,6 +137,21 @@ pub struct TimeService {
 /// (pripadna oprava RTC v mistnim case probehne pred startem ostatnich
 /// sluzeb, takze casy souboru jsou od zacatku spravne).
 pub fn start_time(startup: &Startup) -> Result<TimeService> {
+    let t = spawn_time(startup)?;
+    let deadline = Some(time::deadline_after(Duration::from_secs(5)));
+    match time_ready(&t, |c| c.read(deadline)) {
+        Ok(()) => Ok(t),
+        Err(e) => {
+            let _ = t.process.kill();
+            Err(e)
+        }
+    }
+}
+
+/// Spusti proces sluzby casu a posle mu nastaveni (potvrzeni precte
+/// [`time_ready`]). Kdyz zapis selze, proces ukonci: nesmi zustat bezet
+/// nikym nehlidany s pravem nastavovat hodiny.
+pub(crate) fn spawn_time(startup: &Startup) -> Result<TimeService> {
     let fs = Initfs::open(startup)?;
     let image = fs.find("timed").ok_or(Error::NotFound)?;
     let resource = startup.root_resource.as_ref().ok_or(Error::NotFound)?;
@@ -114,15 +159,23 @@ pub fn start_time(startup: &Startup) -> Result<TimeService> {
         .handle()
         .duplicate(Some(Rights::BASIC | Rights::SET_CLOCK))?;
     let (process, channel) = libos::spawn("timed", image, vec![StartHandle::user(clock)])?;
-    channel.write(TIME_SETTINGS.as_bytes(), Vec::new())?;
-    let msg = channel.read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    if let Err(e) = channel.write(TIME_SETTINGS.as_bytes(), Vec::new()) {
+        let _ = process.kill();
+        return Err(e);
+    }
+    Ok(TimeService { process, channel })
+}
+
+/// Potvrzeni nastaveni od nove sluzby casu (`read` = jak ho precist).
+fn time_ready(t: &TimeService, read: impl Fn(&Channel) -> Result<libos::Message>) -> Result<()> {
+    let msg = read(&t.channel)?;
     if msg.data != b"ok" {
         println!(
             "init: sluzba casu hlasi: {}",
             core::str::from_utf8(&msg.data).unwrap_or("?")
         );
     }
-    Ok(TimeService { _process: process, channel })
+    Ok(())
 }
 
 /// Podpis superbloku naseho souboroveho systemu (format v3).
@@ -153,8 +206,11 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
         StartHandle::user(server.into_handle()),
     ];
     let (process, control) = libos::spawn("fsd", image, handles)?;
-    // Testy potrebuji simulaci vypadku proudu.
-    control.write(b"debug", Vec::new())?;
+    // Testy potrebuji simulaci vypadku proudu - jen v testovacim behu, na
+    // beznem systemu by ji mohl spustit kterykoli klient.
+    if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
+        control.write(b"debug", Vec::new())?;
+    }
     let client = FsClient::new(client);
     let info = client.info()?;
     println!(
@@ -162,18 +218,59 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
         info.label, info.generation
     );
     devices.fs = Some(client);
-    devices._fsd = Some((process, control));
+    devices.fsd = Some((process, control));
+    Ok(())
+}
+
+/// Sluzba casu po restartu, ktera jeste nepotvrdila nastaveni.
+static STARTING_TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
+
+/// Restart sluzby casu pro supervisor: spusti ji a neceka. Supervisor
+/// pocka na jeji kanal a zavola [`time_started`].
+pub const TIME_RESTART: Restart = Restart {
+    start: restart_time,
+    ready: Some(time_started),
+};
+
+fn restart_time(startup: &Startup) -> Result<Started> {
+    let t = spawn_time(startup)?;
+    let handles = t
+        .process
+        .handle()
+        .duplicate(None)
+        .and_then(|p| Ok((p, t.channel.handle().duplicate(None)?)));
+    match handles {
+        Ok((process, ready)) => {
+            *STARTING_TIME.lock() = Some(t);
+            Ok(Started {
+                process,
+                ready: Some(ready),
+            })
+        }
+        Err(e) => {
+            let _ = t.process.kill();
+            Err(e)
+        }
+    }
+}
+
+/// Nova sluzba casu odpovedela (nebo zavrela kanal): nahradi starou
+/// v [`TIME`]. Chyba = supervisor ji ukonci.
+fn time_started() -> Result<()> {
+    let t = STARTING_TIME.lock().take().ok_or(Error::NotFound)?;
+    time_ready(&t, |c| c.try_read())?;
+    *TIME.lock() = Some(t);
     Ok(())
 }
 
 /// Bezici sluzba site a korenova relace (vsechna prava). Programy dostavaji
 /// jen uzsi relace (`Net::restrict`).
 pub struct NetService {
-    pub _process: Process,
+    pub process: Process,
     pub _control: Channel,
     pub root: Net,
     /// Sluzba firewallu (proces, bootstrap kanal); `None` = nebezi.
-    pub _fwd: Option<(Process, Channel)>,
+    pub fwd: Option<(Process, Channel)>,
     /// Kanal agenta uzivatele u `fwd` (dotazy na cile a site). Zatim ho
     /// drzi init (testy); pozdeji ho dostane UI sezeni.
     pub agent: Option<Channel>,
@@ -221,10 +318,10 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
         }
     };
     Ok(NetService {
-        _process: process,
+        process,
         _control: control,
         root: Net::new(root),
-        _fwd: fwd,
+        fwd,
         agent,
     })
 }

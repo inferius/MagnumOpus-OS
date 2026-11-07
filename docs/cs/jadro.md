@@ -123,8 +123,9 @@ horní polovinu sdílí s jádrem):
 Zařízení zapisuje do paměti samo (DMA), na adresy, které mu ovladač napíše
 do deskriptorů. Bez IOMMU tak chybný ovladač může nechat zařízení přepsat
 jádro. Jádro proto zapíná IOMMU, pokud ji stroj má: **Intel VT-d** (tabulka
-ACPI DMAR) nebo **AMD-Vi** (tabulka ACPI IVRS). Obě fungují stejně a zbytek
-jádra je nerozlišuje (`arch::iommu::Domain`):
+ACPI DMAR) nebo **AMD-Vi** (tabulka ACPI IVRS), na aarch64 **SMMUv3**
+(tabulka ACPI IORT). Všechny fungují stejně a zbytek jádra je nerozlišuje
+(`arch::iommu::Domain`):
 
 <figure class="diagram">
 <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="IOMMU">
@@ -178,6 +179,14 @@ Implementace v `kernel/src/arch/x86_64/iommu/`:
 | `mod.rs` | společné rozhraní: `init`, `domain(segment, sběrnice, funkce)`, `Domain::map/unmap`, obsluha přerušení chyb |
 | `vtd.rs` | Intel VT-d: kořenová tabulka → tabulky kontextu sběrnic → stránkové tabulky domény (3 nebo 4 úrovně podle jednotky); po každé změně globální zneplatnění cache kontextu a IOTLB přes registry; chyby z registrů záznamů chyb |
 | `amdvi.rs` | AMD-Vi: tabulka zařízení (65 536 záznamů, výchozí „vše zablokováno“) → stránkové tabulky domény (4 úrovně); zneplatnění přes frontu příkazů s čekáním na dokončení; chyby ze záznamu událostí (přerušení MSI nastavené v konfiguraci PCI samotné IOMMU) |
+
+Na aarch64 je to `kernel/src/arch/aarch64/smmu.rs` (SMMUv3): dvouúrovňová
+tabulka streamů (StreamID = RID podle IORT, neplatná položka = DMA
+zablokované) → STE s konfigurací stage 1 → kontextový deskriptor s vlastním
+ASID a tabulkami stránek ve formátu CPU; zneplatnění přes frontu příkazů
+(CFGI_STE, TLBI_NH_ASID, SYNC); chyby z fronty událostí se vypisují při
+operacích s doménami. Zprávy MSI zařízení procházejí SMMU, proto se do
+domény zařízení mapuje i stránka ITS (GITS_TRANSLATER).
 
 Výpis chyb je omezený: jeden zablokovaný přenos může vyvolat desítky
 událostí, podrobně se vypíšou první 4 a zbytek souhrnem.

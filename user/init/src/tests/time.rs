@@ -8,11 +8,12 @@ use libos::hw::Resource;
 use libos::time::{self, SetRequest, WallTime, source, zone};
 use libos::{Error, Event, Rights, Startup, sys};
 
-use super::{Test, TestResult, fail, time_service};
+use super::{Test, TestResult, fail};
 use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
     ("CLOCK_SET bez prava SET_CLOCK -> ACCESS_DENIED", set_without_right),
+    ("odmitnuty CLOCK_SET cas nezmeni", set_without_right_keeps_time),
     ("CLOCK_SET: neplatne priznaky a nanosekundy", set_invalid_args),
     ("CLOCK_SET nastavi cas (zdroj SET)", set_and_restore),
     ("sluzba casu nastavi cas i do RTC", time_service_set),
@@ -49,15 +50,29 @@ fn set_without_right(s: &Startup) -> TestResult {
         "event"
     );
     check_eq!(sys::clock_set(0, &req, 0).err(), Some(Error::BadHandle), "handle 0");
-    // Cas se nezmenil na "nastaveny za behu" od nikoho z nich.
-    let r = time::wall_reading().map_err(|e| fail("cteni", e))?;
-    check!(r.source != source::SET || set_before(), "zdroj se zmenil bez prava");
     Ok(())
 }
 
-/// Nastavila uz hodiny sluzba casu (oprava RTC v mistnim case)?
-fn set_before() -> bool {
-    crate::system::TIME_SETTINGS.contains("rtc = local")
+/// Odmitnute nastaveni cas nezmeni: pokus o skok o rok dopredu, pak
+/// porovnani s monotonnimi hodinami (zdroj by nestacil - mohl uz byt SET).
+fn set_without_right_keeps_time(s: &Startup) -> TestResult {
+    let root = root(s)?;
+    let h = root
+        .handle()
+        .duplicate(Some(Rights::BASIC | Rights::MANAGE))
+        .map_err(|e| fail("duplikace", e))?;
+    let no_clock = Resource::from_handle(h);
+    let before = time::wall_reading().map_err(|e| fail("cteni", e))?;
+    let mono = time::now();
+    let far = SetRequest { time: before.time.add_ns(365 * 86_400 * 1_000_000_000), rtc_offset: 0 };
+    check!(no_clock.set_clock(&far, 0).is_err(), "nastaveni bez prava proslo");
+    let after = time::wall_reading().map_err(|e| fail("cteni", e))?;
+    let elapsed = (time::now() - mono) as i128;
+    let drift = after.time.as_nanos() - before.time.as_nanos() - elapsed;
+    // Rozliseni a doba cteni: tolerance 50 ms.
+    check!(drift.abs() < 50_000_000, "cas se zmenil bez prava");
+    check_eq!(after.source, before.source, "zdroj");
+    Ok(())
 }
 
 fn set_invalid_args(s: &Startup) -> TestResult {
@@ -69,6 +84,16 @@ fn set_invalid_args(s: &Startup) -> TestResult {
     // SAFETY: ukazatel na platny 16B buffer.
     let r = unsafe { sys::raw(nr::CLOCK_SET, root as u64, bad.as_ptr() as u64, 0, 0, 0, 0) };
     check_eq!(libos::abi::error::decode(r).err(), Some(Error::InvalidArgs), "nanosekundy >= 1e9");
+    // Cas mimo roky 1970..=9999 a posun RTC nad 18 h.
+    let bad_time = |secs| SetRequest { time: WallTime { secs, nanos: 0 }, rtc_offset: 0 };
+    check_eq!(sys::clock_set(root, &bad_time(-1), 0).err(), Some(Error::InvalidArgs), "pred 1970");
+    check_eq!(
+        sys::clock_set(root, &bad_time(SetRequest::MAX_SECS + 1), 0).err(),
+        Some(Error::InvalidArgs),
+        "po roce 9999"
+    );
+    let bad_offset = SetRequest { time: req.time, rtc_offset: 18 * 3600 + 1 };
+    check_eq!(sys::clock_set(root, &bad_offset, 0).err(), Some(Error::InvalidArgs), "rtc_offset");
     // SAFETY: neplatny ukazatel jadro odmitne (BAD_ADDRESS), nic necte.
     let r = unsafe { sys::raw(nr::CLOCK_SET, root as u64, 0x10, 0, 0, 0, 0) };
     check_eq!(libos::abi::error::decode(r).err(), Some(Error::BadAddress), "spatny ukazatel");
@@ -100,20 +125,30 @@ fn set_and_restore(s: &Startup) -> TestResult {
     Ok(())
 }
 
-fn time_service_set(_: &Startup) -> TestResult {
-    let t = time_service().ok_or("sluzba casu nebezi")?;
-    let now = time::wall().ok_or("realny cas neni znamy")?;
+/// Pozadavek `set` sluzby casu: cas a priznak zapisu do RTC.
+pub(super) fn set_request(now: WallTime, hardware: bool) -> Vec<u8> {
     let mut msg = Vec::from(&b"set"[..]);
     msg.extend_from_slice(&now.secs.to_le_bytes());
     msg.extend_from_slice(&now.nanos.to_le_bytes());
-    msg.push(1);
-    t.channel.write(&msg, Vec::new()).map_err(|e| fail("zapis", e))?;
+    msg.push(hardware as u8);
+    msg
+}
+
+fn time_service_set(_: &Startup) -> TestResult {
+    let guard = crate::system::TIME.lock();
+    let t = guard.as_ref().ok_or("sluzba casu nebezi")?;
+    let now = time::wall().ok_or("realny cas neni znamy")?;
+    t.channel
+        .write(&set_request(now, true), Vec::new())
+        .map_err(|e| fail("zapis", e))?;
     let reply = t
         .channel
         .read(Some(time::deadline_after(Duration::from_secs(5))))
         .map_err(|e| fail("odpoved", e))?;
-    // QEMU ma CMOS RTC, takze zapis do hardwarovych hodin musi projit.
-    check_eq!(core::str::from_utf8(&reply.data).unwrap_or("?"), "ok:hw", "odpoved sluzby");
+    // QEMU na x86_64 ma CMOS RTC, takze zapis do hardwarovych hodin musi
+    // projit. aarch64 hardwarove hodiny zatim nema (cas jen z UEFI): `ok`.
+    let expected = if cfg!(target_arch = "x86_64") { "ok:hw" } else { "ok" };
+    check_eq!(core::str::from_utf8(&reply.data).unwrap_or("?"), expected, "odpoved sluzby");
     let r = time::wall_reading().map_err(|e| fail("cteni", e))?;
     check_eq!(r.source, source::SET, "zdroj");
     Ok(())
