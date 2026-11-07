@@ -176,10 +176,12 @@ impl<D: BlockDevice> Fs<D> {
         if ks != a || e.len() != COMP_CHUNK || e.is_compressed() || e.is_unwritten() {
             return Ok(());
         }
+        if !self.share_index(e.phys, COMP_CHUNK, e.copy, h)? {
+            return Ok(());
+        }
         let mut flagged = e.clone();
         flagged.flags |= EXTENT_SHARED;
-        self.put(Key::new(oid, item::EXTENT, a), flagged.encode())?;
-        self.share_index(e.phys, COMP_CHUNK, e.copy, h)
+        self.put(Key::new(oid, item::EXTENT, a), flagged.encode())
     }
 
     /// Generace, do ktere je dataset `id` deduplikovany.
@@ -232,13 +234,16 @@ impl<D: BlockDevice> Fs<D> {
             let mut found: Vec<(u64, Candidate)> = Vec::new();
             let mut last: Option<Key> = None;
             let root = self.s.root;
+            let txg = self.s.txg;
             let mut bad = false;
             let mut cand: Vec<(Key, Extent)> = Vec::new();
             btree::range_newer(&mut self.s, &root, &from, pos, &mut |k, v| {
                 last = Some(*k);
                 if k.kind == item::EXTENT {
                     match Extent::decode(v) {
-                        Ok(e) if e.birth > pos => cand.push((*k, e)),
+                        // Jen ulozena data: bloky z rozpracovane transakce
+                        // by se smely uvolnit hned, i kdyz uz jsou v indexu.
+                        Ok(e) if e.birth > pos && e.birth < txg => cand.push((*k, e)),
                         Ok(_) => {}
                         Err(_) => {
                             bad = true;
@@ -271,7 +276,9 @@ impl<D: BlockDevice> Fs<D> {
                         }
                     }
                     Some(_) => {}
-                    None => self.share_index(part.phys, part.plen(), part.copy, h)?,
+                    None => {
+                        self.share_index(part.phys, part.plen(), part.copy, h)?;
+                    }
                 }
             }
             if finished {

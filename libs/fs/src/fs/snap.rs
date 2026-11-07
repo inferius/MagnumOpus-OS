@@ -48,7 +48,15 @@ impl<D: BlockDevice> Fs<D> {
             let mut merged: Vec<DeadExtent> = Vec::with_capacity(dead.len());
             for d in dead {
                 match merged.last_mut() {
-                    Some(p) if p.birth == d.birth && p.start + p.len == d.start => p.len += d.len,
+                    // Kopie musi navazovat stejne (jinak by sloucene uvolneni
+                    // vzalo cizi bloky za koncem prvni kopie).
+                    Some(p)
+                        if p.birth == d.birth
+                            && p.start + p.len == d.start
+                            && ((p.copy == 0 && d.copy == 0) || (p.copy != 0 && d.copy == p.copy + p.len)) =>
+                    {
+                        p.len += d.len
+                    }
                     _ => merged.push(d),
                 }
             }

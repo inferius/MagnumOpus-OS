@@ -148,3 +148,23 @@ impl<D: BlockDevice> Fs<D> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+impl<D: BlockDevice> Fs<D> {
+    /// Testy: extenty souboru (logicky zacatek, extent) v zive verzi.
+    pub(crate) fn test_extents(&mut self, path: &str) -> Vec<(u64, Extent)> {
+        let oid = self.enter(path).unwrap();
+        let root = self.s.root;
+        self.extents_in(&root, oid, 0, u64::MAX).unwrap()
+    }
+
+    /// Testy: rozpracovana data na disk bez commitu.
+    pub(crate) fn flush_for_test(&mut self) {
+        self.for_each_dataset(|f| f.flush_all_data()).unwrap();
+    }
+
+    /// Testy: kolik kopii se od pripojeni opravilo.
+    pub(crate) fn test_healed(&self) -> u64 {
+        self.s.healed
+    }
+}

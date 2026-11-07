@@ -9,7 +9,9 @@
 //! - obsluhuje pozadavky klienta,
 //! - kazdych `COMMIT_INTERVAL` ulozi zmeny commitem (fsync klienta je
 //!   trvaly okamzite pres intent log),
-//! - kdyz je necinna, defragmentuje po malych krocich,
+//! - kdyz je necinna, defragmentuje a deduplikuje po malych krocich,
+//! - scrub (overeni vsech dat, oprava z kopii) jednou tydne a na povel,
+//!   po malych krocich mezi pozadavky,
 //! - posila disku TRIM pro uvolnene bloky.
 //!
 //! Kdyz klient kanal zavre, ulozi zmeny a skonci.
@@ -21,6 +23,7 @@ extern crate alloc;
 
 mod blkdev;
 mod serve;
+mod serve_data;
 mod serve_hist;
 mod serve_perm;
 mod serve_v2;
@@ -42,6 +45,15 @@ const COMMIT_INTERVAL: Duration = Duration::from_secs(5);
 const HISTORY_INTERVAL: Duration = Duration::from_secs(60);
 /// Kolik bloku prepsat jednim krokem defragmentace v necinnosti.
 const DEFRAG_BUDGET: u64 = 256;
+/// Kolik kusu (128 KiB) prohlednout jednim krokem deduplikace na pozadi.
+const DEDUP_BUDGET: u64 = 64;
+/// Kolik bloku overit jednim krokem scrubu (1 MiB; maly krok = pozadavky
+/// klientu cekaji nejvys na jeden).
+const SCRUB_BUDGET: u64 = 256;
+/// Pauza mezi kroky scrubu.
+const SCRUB_PAUSE: Duration = Duration::from_millis(5);
+/// Jak casto spoustet scrub sam (tyden).
+const SCRUB_PERIOD_SECS: i64 = 7 * 86_400;
 
 libos::entry!(main);
 
@@ -120,6 +132,9 @@ fn main(startup: Startup) -> i64 {
         temp_counter: 0,
         commit_requested: false,
         session_counter: 0,
+        dedup_phase: false,
+        // Scrub mohl bezet pred restartem: prvni krok to zjisti.
+        scrubbing: true,
     };
     serve(&mut svc, client);
     if let Some(fs) = svc.fs.as_mut()
@@ -143,7 +158,15 @@ fn serve(svc: &mut Service, client: Channel) {
     let mut running = true;
     while running {
         // V necinnosti (po commitu bez novych pozadavku) defragmentovat.
-        let mut deadline = if idle { time::now() } else { next_commit.min(next_history) };
+        // Scrub s nizkou prioritou: krok po 1 MiB nejvys kazdych 5 ms
+        // (~200 MiB/s), pozadavky klientu maji vzdy prednost.
+        let mut deadline = if idle {
+            time::now()
+        } else if svc.scrubbing {
+            time::deadline_after(SCRUB_PAUSE).min(next_commit).min(next_history)
+        } else {
+            next_commit.min(next_history)
+        };
         for s in &sessions {
             if let Some(w) = &s.watch {
                 deadline = deadline.min(w.deadline);
@@ -152,6 +175,7 @@ fn serve(svc: &mut Service, client: Channel) {
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
         let items: Vec<(&libos::Handle, Signals)> =
             sessions.iter().map(|s| (s.channel.handle(), mask)).collect();
+        let mut quiet = false;
         match libos::wait_many(&items, Some(deadline)) {
             Ok(_) => {
                 let mut i = 0;
@@ -175,7 +199,7 @@ fn serve(svc: &mut Service, client: Channel) {
                     }
                 }
             }
-            Err(Error::TimedOut) => {}
+            Err(Error::TimedOut) => quiet = true,
             Err(e) => {
                 println!("fsd: chyba cekani: {e}");
                 break;
@@ -184,6 +208,10 @@ fn serve(svc: &mut Service, client: Channel) {
         if running {
             background(svc, &mut next_commit, &mut idle, &mut changed);
             history(svc, &mut next_history);
+            // Scrub jen kdyz zadny klient nic nechtel (nizka priorita).
+            if quiet {
+                scrub(svc);
+            }
             poll_watches(svc, &mut sessions);
         }
     }
@@ -305,6 +333,33 @@ fn history(svc: &mut Service, next: &mut u64) {
     if let Err(e) = fs.journal_tick(now) {
         println!("fsd: retence zurnalu: {e}");
     }
+    // Scrub jednou tydne (od konce posledniho dokonceneho behu).
+    match fs.scrub_status() {
+        Ok(st) if st.state.state == fs::datarec::SCRUB_IDLE && now.secs - st.state.finished.secs >= SCRUB_PERIOD_SECS => {
+            if let Err(e) = fs.scrub_start(now) {
+                println!("fsd: scrub: {e}");
+            }
+        }
+        Ok(_) => {}
+        Err(e) => println!("fsd: stav scrubu: {e}"),
+    }
+}
+
+/// Krok scrubu, kdyz bezi (mezi pozadavky, s nizkou prioritou).
+fn scrub(svc: &mut Service) {
+    let Some(fs) = svc.fs.as_mut() else { return };
+    if fs.info().read_only {
+        svc.scrubbing = false;
+        return;
+    }
+    let now = crate::serve::fs_now();
+    match fs.scrub_step(SCRUB_BUDGET, now) {
+        Ok(done) => svc.scrubbing = !done,
+        Err(e) => {
+            println!("fsd: scrub: {e}");
+            svc.scrubbing = false;
+        }
+    }
 }
 
 /// Automaticky commit a defragmentace v necinnosti.
@@ -321,14 +376,23 @@ fn background(svc: &mut Service, next_commit: &mut u64, idle: &mut bool, changed
         *next_commit = time::deadline_after(COMMIT_INTERVAL);
         *idle = *changed;
     } else if *idle {
-        match fs.defrag_step(DEFRAG_BUDGET) {
-            Ok(r) if r.done => {
+        // Nejdriv defragmentace, pak deduplikace novych dat.
+        let step = if svc.dedup_phase {
+            fs.dedup_step(DEDUP_BUDGET).map(|r| r.done)
+        } else {
+            fs.defrag_step(DEFRAG_BUDGET).map(|r| r.done)
+        };
+        match step {
+            Ok(true) if !svc.dedup_phase => svc.dedup_phase = true,
+            Ok(true) => {
+                svc.dedup_phase = false;
                 *idle = false;
                 *changed = false;
             }
-            Ok(_) => {}
+            Ok(false) => {}
             Err(e) => {
-                println!("fsd: defragmentace: {e}");
+                println!("fsd: {}: {e}", if svc.dedup_phase { "deduplikace" } else { "defragmentace" });
+                svc.dedup_phase = false;
                 *idle = false;
             }
         }

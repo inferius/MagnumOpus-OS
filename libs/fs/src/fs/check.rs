@@ -252,13 +252,11 @@ impl<D: BlockDevice> Fs<D> {
                             if e.is_shared() && !shared(e.phys) && live {
                                 r.problem(format!("{name}: sdileny extent objektu {} chybi v tabulce sdileni", k.oid));
                             }
-                            if scrub && !e.is_unwritten() {
-                                if let Err(err) = self.extent_data(&e, 0, e.len()) {
-                                    r.problem(format!(
-                                        "{name}: data objektu {} od bloku {}: {err:?}",
-                                        k.oid, e.phys
-                                    ));
-                                }
+                            if scrub
+                                && !e.is_unwritten()
+                                && let Err(err) = self.extent_data(&e, 0, e.len())
+                            {
+                                r.problem(format!("{name}: data objektu {} od bloku {}: {err:?}", k.oid, e.phys));
                             }
                         }
                     }

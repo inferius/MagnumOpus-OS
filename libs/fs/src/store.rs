@@ -166,6 +166,9 @@ pub struct Store<D: BlockDevice> {
     /// Smi cteni opravovat spatnou kopii zapisem? Az kdyz pripojeni
     /// rozhodlo o rezimu (pripojeni jen pro cteni nesmi zapsat nic).
     pub heal: bool,
+    /// Opravy nalezene pred rozhodnutim o rezimu (pri pripojeni):
+    /// (blok, spravny obsah). Zapise je `start_healing`.
+    pending_heal: Vec<(u64, Vec<u8>)>,
 }
 
 /// Velikost AG pro disk: vychozi, ale tolik, aby tabulka mela nejvys
@@ -276,6 +279,7 @@ impl<D: BlockDevice> Store<D> {
             unref: Vec::new(),
             healed: 0,
             heal: false,
+            pending_heal: Vec::new(),
             dev,
             sb,
         }
@@ -546,8 +550,13 @@ impl<D: BlockDevice> Store<D> {
         if second.is_ok() && ok(self.algo, buf) {
             // Samoleceni: prvni kopii prepsat spravnym obsahem. Chyba
             // zapisu neni fatalni (cteni uspelo, scrub to zkusi znovu).
-            if self.heal && !self.read_only && self.dev.write_blocks(start, buf).is_ok() {
-                self.healed += 1;
+            // Pri pripojeni (rezim jeste neni rozhodnuty) jen poznamenat.
+            if self.heal {
+                if !self.read_only && self.dev.write_blocks(start, buf).is_ok() {
+                    self.healed += 1;
+                }
+            } else if self.pending_heal.len() < 64 {
+                self.pending_heal.push((start, buf.to_vec()));
             }
             return Ok(());
         }
@@ -555,6 +564,17 @@ impl<D: BlockDevice> Store<D> {
         match (first, second) {
             (Err(e), _) | (_, Err(e)) if e != Error::Corrupted => Err(e),
             _ => Err(Error::Corrupted),
+        }
+    }
+
+    /// Zapne samoleceni (pripojeni rozhodlo, ze svazek je zapisovatelny)
+    /// a zapise opravy nalezene behem pripojeni.
+    pub fn start_healing(&mut self) {
+        self.heal = !self.read_only;
+        for (b, data) in core::mem::take(&mut self.pending_heal) {
+            if self.heal && self.dev.write_blocks(b, &data).is_ok() {
+                self.healed += 1;
+            }
         }
     }
 

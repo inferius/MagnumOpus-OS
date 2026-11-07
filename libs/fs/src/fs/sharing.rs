@@ -213,11 +213,12 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Zalozi indexovany zaznam pro cely kus `start..start+len` s jedinym
-    /// odkazem (deduplikace: kus je kandidat pro dalsi shody).
-    pub(super) fn share_index(&mut self, start: u64, len: u64, copy: u64, hash: Csum) -> Result<()> {
+    /// odkazem (deduplikace: kus je kandidat pro dalsi shody). `false` =
+    /// usek uz v tabulce je (sdileny jinak), index se nezaklada.
+    pub(super) fn share_index(&mut self, start: u64, len: u64, copy: u64, hash: Csum) -> Result<bool> {
         self.in_root(|fs| {
             if !fs.share_overlaps(start, len)?.is_empty() {
-                return Ok(());
+                return Ok(false);
             }
             let e = ShareEntry {
                 len: len as u32,
@@ -234,7 +235,8 @@ impl<D: BlockDevice> Fs<D> {
                 None => Vec::new(),
             };
             list.push((hash, start));
-            fs.put(k, encode_dedup(&list))
+            fs.put(k, encode_dedup(&list))?;
+            Ok(true)
         })
     }
 

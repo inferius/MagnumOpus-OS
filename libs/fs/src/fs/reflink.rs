@@ -195,7 +195,7 @@ impl<D: BlockDevice> Fs<D> {
     /// celych blocich (4 KiB); delka smi koncit na konci zdroje. Cil se
     /// pripadne zvetsi. Prava: cist zdroj, zapsat do cile.
     pub fn clone_range(&mut self, src: &str, src_off: u64, dst: &str, dst_off: u64, len: u64) -> Result<()> {
-        if src_off % BS != 0 || dst_off % BS != 0 {
+        if !src_off.is_multiple_of(BS) || !dst_off.is_multiple_of(BS) {
             return Err(Error::InvalidArgs);
         }
         self.commit()?;
@@ -208,7 +208,7 @@ impl<D: BlockDevice> Fs<D> {
                 return Err(Error::WrongType);
             }
             let end = src_off.checked_add(len).ok_or(Error::OutOfRange)?.min(si.size);
-            if len % BS != 0 && src_off + len < si.size {
+            if !len.is_multiple_of(BS) && src_off + len < si.size {
                 return Err(Error::InvalidArgs);
             }
             if end <= src_off {
@@ -234,7 +234,7 @@ impl<D: BlockDevice> Fs<D> {
             }
             // Kopie konci uprostred bloku (konec zdroje) a cil za ni
             // pokracuje: ocas bloku by se prepsal nulami ze zdroje.
-            if bytes % BS != 0 && dend < di.size {
+            if !bytes.is_multiple_of(BS) && dend < di.size {
                 return Err(Error::InvalidArgs);
             }
             fs.ensure_room(16)?;

@@ -645,7 +645,7 @@ impl<D: BlockDevice> Fs<D> {
         let shared = records
             .iter()
             .any(|r| matches!(r, Record::Extents { list, .. } if list.iter().any(|(_, e)| e.is_shared())));
-        if shared {
+        if shared || core::mem::take(&mut self.zil_hole) {
             return self.commit();
         }
         // Zapis dat narazil na neplatne uvolneni (poskozena hodnota): nic
@@ -741,6 +741,20 @@ impl<D: BlockDevice> Fs<D> {
                         }
                         list.push((ks, e));
                     }
+                }
+            }
+            // Zapsane nuly jsou dira (zadny extent): log diry nenese, takze
+            // takovy fsync udela commit (`zil_hole`).
+            let bs = crate::layout::BLOCK_SIZE as u64;
+            let root = self.s.root;
+            for &lb in &blocks {
+                if lb * bs >= inode.size {
+                    continue;
+                }
+                let covered = self.extents_in(&root, oid, lb, lb + 1)?.into_iter().any(|(ks, e)| ks <= lb && lb < ks + e.len());
+                if !covered {
+                    self.zil_hole = true;
+                    break;
                 }
             }
             records.push(Record::Extents {

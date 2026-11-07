@@ -184,7 +184,9 @@ impl<D: BlockDevice> Fs<D> {
             .filter(|&e| e <= MAX_FILE_SIZE)
             .ok_or(Error::OutOfRange)?;
         let blocks = end.div_ceil(BS) - offset / BS;
-        self.ensure_room(blocks + 8)?;
+        // S kopiemi dat zabere kazdy blok dvakrat.
+        let copies = self.data_settings()?.copies as u64;
+        self.ensure_room(blocks * copies + 8)?;
         if self.dirty_blocks + blocks > DIRTY_HARD_LIMIT {
             // Pred prijetim: kdyz se buffer neda vyprazdnit, nic neprijmout.
             self.for_each_dataset(|fs| fs.flush_all_data())?;

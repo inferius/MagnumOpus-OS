@@ -231,6 +231,8 @@ pub struct Fs<D: BlockDevice> {
     inplace: BTreeMap<u64, u64>,
     /// Rozpracovany pruchod deduplikace na pozadi.
     dedup: dedup::DedupPass,
+    /// `fsync` narazil na diru z nulovych bloku (log ji neumi): commit.
+    zil_hole: bool,
 }
 
 /// Volby pripojeni.
@@ -301,7 +303,7 @@ impl<D: BlockDevice> Fs<D> {
         // (nastavi `open`).
         s.read_only |= no_durability || opts.read_only;
         // Od ted smi cteni opravovat spatne kopie (ne jen pro cteni).
-        s.heal = !s.read_only;
+        s.start_healing();
         let mut fs = Self {
             s,
             now: Timestamp::UNIX_EPOCH,
@@ -326,6 +328,7 @@ impl<D: BlockDevice> Fs<D> {
             dcfg: BTreeMap::new(),
             inplace: BTreeMap::new(),
             dedup: dedup::DedupPass::default(),
+            zil_hole: false,
         };
         // Sdilene bloky: dokud tabulka nema zaznam, uvolnuje se primo.
         fs.s.share_live = fs.share_any()?;

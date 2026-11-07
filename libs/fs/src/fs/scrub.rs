@@ -48,6 +48,8 @@ struct Walk {
     /// Kde pokracovat (klic polozky, ktera jeste neprobehla).
     resume: Option<Key>,
     label: String,
+    /// Prochazeny strom (cesty souboru v hlaseni chyb).
+    root: Child,
 }
 
 impl<D: BlockDevice> Fs<D> {
@@ -147,13 +149,10 @@ impl<D: BlockDevice> Fs<D> {
         if st.state != SCRUB_RUNNING {
             return Ok(true);
         }
-        // Overuje se ulozeny stav (koreny na disku).
-        self.commit()?;
-        let back = self.cur_ds;
+        // Overuje se posledni ulozeny stav (koreny podle superbloku), takze
+        // krok nic necommituje; pozice se ulozi s pristim commitem.
         let mut left = budget as i64;
-        let r = self.scrub_run(&mut st, &mut left);
-        self.activate(back)?;
-        let done = r?;
+        let done = self.scrub_run(&mut st, &mut left)?;
         if done {
             st.state = SCRUB_IDLE;
             st.finished = now;
@@ -162,15 +161,30 @@ impl<D: BlockDevice> Fs<D> {
         Ok(done)
     }
 
+    /// Ulozene koreny: (dataset, koren, generace puvodu klonu).
+    fn committed_trees(&mut self) -> Result<Vec<(u64, BlockPtr, u64)>> {
+        let top = Child::Disk(self.s.sb.root);
+        let mut out = alloc::vec![(ROOT_DATASET, self.s.sb.root, 0)];
+        for (k, v) in btree::collect(
+            &mut self.s,
+            &top,
+            &Key::new(META_OID, item::DATASET, 0),
+            &Key::new(META_OID, item::DATASET + 1, 0),
+        )? {
+            let r = crate::layout::DatasetRecord::decode(&v)?;
+            out.push((k.offset, r.root, r.origin_gen));
+        }
+        out.sort_unstable_by_key(|t| t.0);
+        Ok(out)
+    }
+
     fn scrub_run(&mut self, st: &mut ScrubState, left: &mut i64) -> Result<bool> {
-        let healed_before = self.s.healed;
         loop {
             if *left <= 0 {
                 return Ok(false);
             }
-            let ids = self.all_dataset_ids()?;
-            let Some(&ds) = ids.iter().find(|&&i| i >= st.dataset) else {
-                st.repaired += self.s.healed - healed_before;
+            let trees = self.committed_trees()?;
+            let Some(&(ds, live, floor)) = trees.iter().find(|t| t.0 >= st.dataset) else {
                 return Ok(true);
             };
             if ds != st.dataset {
@@ -178,10 +192,8 @@ impl<D: BlockDevice> Fs<D> {
                 st.snapshot = 0;
                 st.key = Key::MIN;
             }
-            self.activate(ds)?;
-            let live = self.s.root;
-            let floor = self.cur_origin.2;
-            let snaps = self.records(&live)?;
+            let live_root = Child::Disk(live);
+            let snaps = self.records(&live_root)?;
             // Cil: snapshot s cislem >= pozice, jinak ziva verze.
             let (root, min_birth, label) = if st.snapshot != LIVE
                 && let Some((id, rec)) = snaps.iter().find(|(i, _)| *i >= st.snapshot)
@@ -197,17 +209,15 @@ impl<D: BlockDevice> Fs<D> {
                     st.snapshot = LIVE;
                     st.key = Key::MIN;
                 }
-                let Child::Disk(p) = self.tree_of(ds)? else {
-                    return Err(Error::BadState);
-                };
                 let last = snaps.iter().map(|(_, r)| r.generation).max().unwrap_or(0);
-                (p, last.max(floor), format!("dataset {ds}"))
+                (live, last.max(floor), format!("dataset {ds}"))
             };
             let mut w = Walk {
                 min_birth,
                 budget: *left,
                 resume: None,
                 label,
+                root: Child::Disk(root),
             };
             let start = st.key;
             let finished = if root.birth <= min_birth {
@@ -306,7 +316,7 @@ impl<D: BlockDevice> Fs<D> {
         st.bad += r.bad;
         st.repaired += r.repaired;
         if r.lost > 0 {
-            let root = self.s.root;
+            let root = w.root;
             let path = self.path_in(&root, k.oid).ok().flatten().unwrap_or_else(|| format!("objekt {}", k.oid));
             let lb = k.offset + if e.is_compressed() { 0 } else { r.first_lost.unwrap_or(0) };
             let msg = format!("{}: {path}: data od bloku {lb} jsou poskozena ({} bloku)", w.label, r.lost);

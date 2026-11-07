@@ -387,9 +387,10 @@ impl<D: BlockDevice> Fs<D> {
         while lb < hi {
             let end;
             let zero;
-            if cfg.compress.is_some() {
-                // Kus: do konce zarovnaneho kusu; nuly uvnitr se komprimuji
-                // s nim, cely nulovy kus je dira.
+            if cfg.compress.is_some() || cfg.dedup == DedupMode::Inline {
+                // Kus: do konce zarovnaneho kusu (komprese a deduplikace
+                // pri zapisu pracuji po kusech); nuly uvnitr se ulozi s nim,
+                // cely nulovy kus je dira.
                 end = hi.min((lb / COMP_CHUNK + 1) * COMP_CHUNK);
                 zero = (lb..end).all(|k| is_zero(&picked[&k]));
             } else {
@@ -441,13 +442,13 @@ impl<D: BlockDevice> Fs<D> {
             let algo = self.s.algo;
             raw.chunks(BLOCK_SIZE).map(|c| algo.sum(c)).collect()
         };
-        if cfg.dedup == DedupMode::Inline && n == COMP_CHUNK && a % COMP_CHUNK == 0 && self.dedup_inline(oid, a, &raw, &csums)? {
+        if cfg.dedup == DedupMode::Inline && n == COMP_CHUNK && a.is_multiple_of(COMP_CHUNK) && self.dedup_inline(oid, a, &raw, &csums)? {
             for k in a..b {
                 picked.remove(&k);
             }
             return Ok(());
         }
-        let inline = cfg.dedup == DedupMode::Inline && n == COMP_CHUNK && a % COMP_CHUNK == 0;
+        let inline = cfg.dedup == DedupMode::Inline && n == COMP_CHUNK && a.is_multiple_of(COMP_CHUNK);
         let hash = inline.then(|| super::dedup::plain_hash(self.s.algo, &csums));
         self.write_plain(oid, a, &raw, csums, cfg)?;
         for k in a..b {
