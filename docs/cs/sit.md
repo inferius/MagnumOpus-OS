@@ -149,7 +149,7 @@ Pak v jednom vlákně dokola opakuje:
 | navázání spojení bez limitu | vzdá se po 75 s (`TIMED_OUT`) |
 | zavření spojení | FIN, úklid po doběhnutí nebo nejpozději po 30 s |
 | fronta naslouchání | 1 až 4096 spojení (jako `SOMAXCONN`); 16 souběžných navázání mezi dvěma koly služby |
-| dočasné porty | 49152 až 65535, začátek náhodný |
+| dočasné porty | 49152 až 65535, začátek náhodný; posledních 4096 uvolněných se znovu nepřidělí (stará relace v NAT/slirp) |
 | datagram UDP | nejvýš 65 507 B (největší obsah datagramu IPv4; fragmentace a skládání IPv4) a nejvýš velikost fronty socketu (výchozí 64 KiB) |
 | DNS | dotaz A (a AAAA) s EDNS0 (1232 B), zkrácená odpověď přes TCP, opakování po 1 s se střídáním serverů, nejvýš 30 s |
 

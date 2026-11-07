@@ -6,7 +6,7 @@
 //! socketu. Vlastni stack (TODO, viz `docs/cs/sit.md`) nahradi tento modul
 //! a moduly socketu; protokol `netproto` a ovladac se nezmeni.
 
-use alloc::collections::BTreeSet;
+use alloc::collections::{BTreeSet, VecDeque};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -31,6 +31,12 @@ fn udp_packets(bytes: usize) -> usize {
 /// Docasne porty (RFC 6335).
 const EPHEMERAL: core::ops::RangeInclusive<u16> = 49152..=65535;
 
+/// Kolik naposledy uvolnenych docasnych portu se nepridely znovu (karantena,
+/// ctvrtina rozsahu). Druha strana nebo NAT (slirp drzi relaci UDP 240 s
+/// podle mistniho portu) muze mit o starem toku jeste stav; novy socket na
+/// stejnem portu by pak zdedil jeho chyby nebo pozdni odpovedi.
+const PORT_QUARANTINE: usize = 4096;
+
 /// Protokol obsazeneho portu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PortProto {
@@ -51,6 +57,9 @@ pub struct Stack {
     gateway: Option<Ipv4Addr>,
     pub rng: Rng,
     ports: BTreeSet<(PortProto, u16)>,
+    /// Naposledy uvolnene docasne porty (poradi, [`PORT_QUARANTINE`]).
+    recent: VecDeque<(PortProto, u16)>,
+    recent_set: BTreeSet<(PortProto, u16)>,
     /// Porty TCP, na kterych nekdo nasloucha (pro prichozi filtr).
     listening: BTreeSet<u16>,
     pub fw: Firewall,
@@ -128,6 +137,8 @@ impl Stack {
             gateway: None,
             rng,
             ports: BTreeSet::new(),
+            recent: VecDeque::new(),
+            recent_set: BTreeSet::new(),
             listening: BTreeSet::new(),
             fw,
             resolver,
@@ -296,10 +307,16 @@ impl Stack {
         }
         let span = (EPHEMERAL.end() - EPHEMERAL.start()) as u32 + 1;
         let start = self.rng.next_u16() as u32 % span;
-        for i in 0..span {
-            let p = EPHEMERAL.start() + ((start + i) % span) as u16;
-            if self.ports.insert((proto, p)) {
-                return Ok(p);
+        // Nejdriv port mimo karantenu; kdyz zadny neni, i z karanteny.
+        for avoid_recent in [true, false] {
+            for i in 0..span {
+                let p = EPHEMERAL.start() + ((start + i) % span) as u16;
+                if avoid_recent && self.recent_set.contains(&(proto, p)) {
+                    continue;
+                }
+                if self.ports.insert((proto, p)) {
+                    return Ok(p);
+                }
             }
         }
         Err(Error::NoResources)
@@ -307,6 +324,14 @@ impl Stack {
 
     pub fn release_port(&mut self, proto: PortProto, port: u16) {
         self.ports.remove(&(proto, port));
+        if EPHEMERAL.contains(&port) && self.recent_set.insert((proto, port)) {
+            self.recent.push_back((proto, port));
+            if self.recent.len() > PORT_QUARANTINE
+                && let Some(old) = self.recent.pop_front()
+            {
+                self.recent_set.remove(&old);
+            }
+        }
         if proto == PortProto::Udp {
             self.fw.filter.forget_udp_port(port);
         }

@@ -155,7 +155,7 @@ and starts DHCP. Then a single thread repeats:
 | connect without a limit | gives up after 75 s (`TIMED_OUT`) |
 | closing a connection | FIN, cleanup when finished or after 30 s at the latest |
 | listen backlog | 1 to 4096 connections (like `SOMAXCONN`); 16 concurrent handshakes between two rounds of the service |
-| ephemeral ports | 49152 to 65535, random start |
+| ephemeral ports | 49152 to 65535, random start; the last 4096 released ones are not handed out again (an old session in NAT/slirp) |
 | UDP datagram | at most 65,507 B (the largest IPv4 datagram payload; IPv4 fragmentation and reassembly) and at most the socket queue size (default 64 KiB) |
 | DNS | A (and AAAA) query with EDNS0 (1232 B), a truncated reply over TCP, retry after 1 s alternating servers, at most 30 s |
 

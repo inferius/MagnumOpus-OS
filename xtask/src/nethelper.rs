@@ -222,10 +222,25 @@ fn udp_loop(sock: UdpSocket, answer: impl Fn(&[u8]) -> Option<Vec<u8>>) {
 }
 
 /// Port DNS pro UDP i TCP (slirp preklada oboji na stejny port hostitele).
+/// UDP i TCP na stejnem portu (zkracena odpoved -> dotaz pres TCP na tentyz
+/// port). Prvni pokusy: docasny port TCP od jadra (ten se vyhyba vyhrazenym
+/// rozsahum TCP, napr. Hyper-V na Windows) a k nemu UDP. Jadro ale prideluje
+/// docasne porty po sobe, takze kdyz je UDP v bloku obsazenem jinak, dalsi
+/// pokusy se mu nevyhnou - zbyle pokusy proto zkousi nahodne porty
+/// z dynamickeho rozsahu.
 fn dns_sockets() -> std::io::Result<(UdpSocket, TcpListener)> {
+    let mut attempt = 0u32;
     retry("dns", || {
-        let udp = UdpSocket::bind((localhost(), 0))?;
-        let tcp = TcpListener::bind(udp.local_addr()?)?;
+        attempt += 1;
+        let tcp = if attempt <= 5 {
+            TcpListener::bind((localhost(), 0))?
+        } else {
+            let mut b = [0u8; 2];
+            ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b)
+                .map_err(|_| std::io::Error::other("nahodne cislo"))?;
+            TcpListener::bind((localhost(), 49152 + u16::from_le_bytes(b) % 16384))?
+        };
+        let udp = UdpSocket::bind(tcp.local_addr()?)?;
         Ok((udp, tcp))
     })
 }

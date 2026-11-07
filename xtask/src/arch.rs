@@ -46,7 +46,9 @@ pub const X86_64: Arch = Arch {
     test_success: 33,
     // Cely beh (USB/vstup, FS faze 2 a 3, sit s TLS a DNSSEC pod TCG, GUI,
     // shell s padem termd) trva ~200-270 s; s rezervou na vytizeny stroj.
-    test_timeout: Duration::from_secs(300),
+    // Stejne jako aarch64: pomale testy FS pod zatezi (vic QEMU naraz)
+    // presahly 300 s.
+    test_timeout: Duration::from_secs(600),
     ps2: true,
 };
 
