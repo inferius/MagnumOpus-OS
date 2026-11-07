@@ -25,7 +25,11 @@ const LANGS: [(&str, &str); 2] = [("cs", "Česky"), ("en", "English")];
 /// Jedna stranka v obou jazycich.
 struct PageDef {
     files: [String; 2],
+    /// Nazev v menu (text odkazu v README).
+    names: [String; 2],
     descriptions: [String; 2],
+    /// Skupina v menu (nadpis `###` v README).
+    group: [String; 2],
 }
 
 /// Vyrenderovana stranka.
@@ -83,11 +87,21 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
     Ok(out.join("index.html"))
 }
 
-/// Precte tabulku stranek z docs/README.md: `| [x](cs/x.md) | [y](en/y.md) | popis cs / popis en |`.
+/// Precte stranky z docs/README.md: skupiny `### cs / en` a radky
+/// `| [Nazev](cs/x.md) | [Name](en/y.md) | popis cs / popis en |`.
 fn read_index(path: &Path) -> Result<Vec<PageDef>> {
     let text = fs::read_to_string(path)?;
     let mut pages = Vec::new();
-    for line in text.lines().filter(|l| l.starts_with("| [")) {
+    let mut group = [String::new(), String::new()];
+    for line in text.lines() {
+        if let Some(h) = line.strip_prefix("### ") {
+            let (cs, en) = h.split_once(" / ").unwrap_or((h, h));
+            group = [cs.trim().to_string(), en.trim().to_string()];
+            continue;
+        }
+        if !line.starts_with("| [") {
+            continue;
+        }
         let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
         if cells.len() < 3 {
             continue;
@@ -100,10 +114,15 @@ fn read_index(path: &Path) -> Result<Vec<PageDef>> {
         let (Some(cs), Some(en)) = (target(cells[0]), target(cells[1])) else {
             continue;
         };
+        let name = |cell: &str| -> String {
+            cell.find("](").map_or(String::new(), |e| cell[1..e].trim_start_matches('[').to_string())
+        };
         let (dcs, den) = cells[2].split_once(" / ").unwrap_or((cells[2], cells[2]));
         pages.push(PageDef {
             files: [cs, en],
+            names: [name(cells[0]), name(cells[1])],
             descriptions: [dcs.to_string(), den.to_string()],
+            group: group.clone(),
         });
     }
     if pages.is_empty() {
@@ -327,19 +346,24 @@ fn sidebar(li: usize, pages: &[PageDef], titles: &[String], current: Option<usiz
         ""
     };
     let _ = write!(s, "<a href=\"index.html\"{cls}>{home}</a>");
+    let mut last_group = "";
     for (i, p) in pages.iter().enumerate() {
+        if p.group[li] != last_group && !p.group[li].is_empty() {
+            last_group = &p.group[li];
+            let _ = write!(s, "<h5>{}</h5>", escape(last_group));
+        }
         let cls = if current == Some(i) {
             " class=\"current\""
         } else {
             ""
         };
-        let name = short_title(&titles[i]);
+        let name = if p.names[li].is_empty() { short_title(&titles[i]) } else { &p.names[li] };
         let _ = write!(
             s,
-            "<a href=\"{}\"{cls}>{}<small>{}</small></a>",
+            "<a href=\"{}\"{cls} title=\"{}\">{}</a>",
             html_name(&p.files[li]),
-            escape(name),
-            escape(&p.descriptions[li])
+            escape(&p.descriptions[li]),
+            escape(name)
         );
     }
     s.push_str("</nav>");
@@ -436,8 +460,19 @@ fn index_html(li: usize, pages: &[PageDef], titles: &[String], rendered: &[Rende
             "A new operating system written from scratch in Rust: a microkernel, capabilities, drivers and services in userspace, later Windows applications in an isolated layer.",
         )
     };
-    let mut main = format!("<h1>{title}</h1><p>{intro}</p><table><tbody>");
+    let mut main = format!("<h1>{title}</h1><p>{intro}</p>");
+    let mut last_group: Option<&str> = None;
     for (p, r) in pages.iter().zip(rendered) {
+        if last_group != Some(p.group[li].as_str()) {
+            if last_group.is_some() {
+                main.push_str("</tbody></table>");
+            }
+            last_group = Some(&p.group[li]);
+            if !p.group[li].is_empty() {
+                let _ = write!(main, "<h2>{}</h2>", escape(&p.group[li]));
+            }
+            main.push_str("<table><tbody>");
+        }
         let _ = write!(
             main,
             "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td>{}</td></tr>",
@@ -446,7 +481,9 @@ fn index_html(li: usize, pages: &[PageDef], titles: &[String], rendered: &[Rende
             escape(&p.descriptions[li])
         );
     }
-    main.push_str("</tbody></table>");
+    if last_group.is_some() {
+        main.push_str("</tbody></table>");
+    }
     shell(
         li,
         title,

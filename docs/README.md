@@ -1,22 +1,43 @@
 # Dokumentace / Documentation
 
+Stránky jsou rozdělené do skupin; text odkazu je název v menu webu
+(`cargo xtask docs`). Pages are grouped; the link text is the name in the
+site menu.
+
+### Začínáme / Getting started
+
 | Česky | English | Obsah / Contents |
 |---|---|---|
-| [architektura.md](cs/architektura.md) | [architecture.md](en/architecture.md) | návrh systému a důvody / system design and reasons |
-| [sestaveni.md](cs/sestaveni.md) | [building.md](en/building.md) | nástroje, příkazy, testy, ladění, struktura / tools, commands, tests, debugging, layout |
-| [jadro.md](cs/jadro.md) | [kernel.md](en/kernel.md) | jak jádro funguje / how the kernel works |
-| [syscally.md](cs/syscally.md) | [syscalls.md](en/syscalls.md) | referenční popis syscallů / syscall reference |
-| [chyby.md](cs/chyby.md) | [errors.md](en/errors.md) | kódy chyb a návratové kódy procesů / error and exit codes |
-| [hlasky.md](cs/hlasky.md) | [messages.md](en/messages.md) | hlášky v logu a co znamenají / log messages and their meaning |
-| [navrh-shell.md](cs/navrh-shell.md) | [shell-design.md](en/shell-design.md) | návrh jazyka shellu k rozhodnutí / shell language design for decision |
-| [cas.md](cs/cas.md) | [time.md](en/time.md) | reálný čas: zdroje (UEFI, RTC), formát, pásmo / real time: sources (UEFI, RTC), format, zone |
-| [libos.md](cs/libos.md) | [libos.md](en/libos.md) | knihovna pro programy / program library |
-| [souborovy-system.md](cs/souborovy-system.md) | [file-system.md](en/file-system.md) | souborový systém: formát, algoritmy, služba fsd, protokol / file system: format, algorithms, fsd service, protocol |
-| [osfs.md](cs/osfs.md) | [osfs.md](en/osfs.md) | nástroj osfs: obraz FS, kontrola, připojení ve Windows / osfs tool: FS image, check, mounting on Windows |
-| [osfs-api.md](cs/osfs-api.md) | [osfs-api.md](en/osfs-api.md) | rozšířené API FS pro aplikace ve Windows (DeviceIoControl) / extended FS API for Windows applications (DeviceIoControl) |
-| [fs-verze.md](cs/fs-verze.md) | [fs-versions.md](en/fs-versions.md) | verze formátu FS: co se změnilo a proč / FS format versions: what changed and why |
-| [navrh-fs-v3.md](cs/navrh-fs-v3.md) | [fs-v3-design.md](en/fs-v3-design.md) | návrh FS v3 (odsouhlasený, zavádí se po fázích) / FS v3 design (agreed, introduced in phases) |
-| [fs-v2.md](cs/fs-v2.md) | [fs-v2.md](en/fs-v2.md) | archiv: formát FS v2 / archive: FS format v2 |
+| [Sestavení a ladění](cs/sestaveni.md) | [Building and debugging](en/building.md) | nástroje, příkazy, testy, ladění, struktura / tools, commands, tests, debugging, layout |
+| [Architektura](cs/architektura.md) | [Architecture](en/architecture.md) | návrh systému, milníky a důvody / system design, milestones and reasons |
+
+### Jádro a programy / Kernel and programs
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Jádro](cs/jadro.md) | [Kernel](en/kernel.md) | jak jádro funguje / how the kernel works |
+| [Syscally](cs/syscally.md) | [Syscalls](en/syscalls.md) | referenční popis syscallů / syscall reference |
+| [libos](cs/libos.md) | [libos](en/libos.md) | knihovna pro programy / program library |
+| [Reálný čas](cs/cas.md) | [Real time](en/time.md) | zdroje (UEFI, RTC), formát, pásmo / sources (UEFI, RTC), format, zone |
+| [Kódy chyb](cs/chyby.md) | [Error codes](en/errors.md) | kódy chyb a návratové kódy procesů / error and exit codes |
+| [Hlášky v logu](cs/hlasky.md) | [Log messages](en/messages.md) | co znamenají a co dělat / what they mean and what to do |
+
+### Souborový systém / File system
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Souborový systém](cs/souborovy-system.md) | [File system](en/file-system.md) | formát, algoritmy, oprávnění, služba fsd, protokol / format, algorithms, permissions, fsd service, protocol |
+| [Verze formátu](cs/fs-verze.md) | [Format versions](en/fs-versions.md) | co se mezi verzemi změnilo a proč / what changed between versions and why |
+| [Nástroj osfs](cs/osfs.md) | [osfs tool](en/osfs.md) | obraz FS, kontrola, připojení ve Windows / FS image, check, mounting on Windows |
+| [API pro Windows](cs/osfs-api.md) | [Windows API](en/osfs-api.md) | rozšířené API FS pro aplikace ve Windows / extended FS API for Windows applications |
+| [Návrh FS v3](cs/navrh-fs-v3.md) | [FS v3 design](en/fs-v3-design.md) | odsouhlasený návrh, zavádí se po fázích / agreed design, introduced in phases |
+| [Archiv: FS v2](cs/fs-v2.md) | [Archive: FS v2](en/fs-v2.md) | původní formát v2 / the original v2 format |
+
+### Návrhy k rozhodnutí / Proposals for decision
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Jazyk shellu](cs/navrh-shell.md) | [Shell language](en/shell-design.md) | průzkum, varianty a doporučení / research, variants and recommendation |
 
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).
