@@ -533,6 +533,25 @@ With an IOMMU the device may moreover DMA only into memory created through
 its resource (see [kernel.md](kernel.md#iommu-dma-protection)); without an
 IOMMU it can write anywhere.
 
+### Firmware framebuffer
+
+Not a system call but a handle kind in init's start message
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7): the physical memory object of
+the GOP framebuffer, rights `READ | WRITE | MAP`. It can be read and
+written only through a mapping (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`,
+as a syscall buffer `BAD_ADDRESS`). Geometry and taking over the screen
+go through [`FB_CONTROL`](#fb_control).
+
+The object is mapped **write-combining** (x86_64: PAT entry 1 = WC, set by
+the kernel on every CPU; aarch64: Normal Non-cacheable): writes are
+merged, reads are slow. The kernel does not send the handle when the
+framebuffer overlaps RAM used by the allocator, does not start on a page
+boundary or is smaller than its geometry (a warning in the log, the kernel
+console keeps using it). Init passes it to the owner of the screen: the
+`fbdisplay` driver when there is no virtio-gpu (see
+[GUI](gui.md#displays-virtio-gpu-and-fbdisplay)), otherwise the rescue
+console `user/console`.
+
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. A physically contiguous memory object for DMA

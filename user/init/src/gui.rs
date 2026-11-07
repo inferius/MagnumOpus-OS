@@ -26,14 +26,14 @@ use core::time::Duration;
 use guiproto::control::{self, ConnectInfo, Status};
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
-use libos::{Channel, Error, Handle, Process, Result, Startup, println, time};
+use libos::{Channel, Error, Handle, Process, Result, Startup, Vmo, println, time};
 
 use crate::apps::{self, App};
 use crate::input::{self, Input};
 use crate::supervisor::{Dep, Kept, Service, Spec, StartCtx, Started, Supervisor};
 
-/// Kanal ovladace grafiky (od spravce zarizeni), dokud ho nevezme
-/// kompozitor.
+/// Kanal ovladace grafiky (od spravce zarizeni, nebo `fbdisplay`), dokud
+/// ho nevezme kompozitor.
 pub static DISPLAY: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Bezici GUI (bezny beh).
@@ -43,6 +43,8 @@ pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
 pub const NAME: &str = "compd";
 /// Zavislosti kompozitoru: o restartu `inputd` se jen dozvi (fokus zustava).
 pub const DEPS: &[Dep] = &[Dep::notify("inputd")];
+/// Ovladac `fbdisplay` (framebuffer z firmwaru), bezi-li.
+pub static FBDISPLAY: spin::Mutex<Option<Process>> = spin::Mutex::new(None);
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Odpoved na `connect` (relace okna; kompozitor odpovida hned).
@@ -188,10 +190,42 @@ pub struct Gui {
     pub size: (u32, u32),
 }
 
-/// Spusti prvni instanci kompozitoru nad displejem z [`DISPLAY`] a pocka
+/// Displej pro kompozitor - jedine misto, kde init rozhoduje, kdo
+/// kresli na obrazovku: kanal virtio-gpu od spravce zarizeni (ma
+/// prednost), jinak ovladac `fbdisplay` nad framebufferem z firmwaru
+/// (bootstrap `FRAMEBUFFER`, init preda duplikat handlu, takze
+/// `Startup::framebuffer` zustava pro zachrannou konzoli).
+pub fn display(startup: &Startup) -> Result<Channel> {
+    if let Some(ch) = DISPLAY.lock().take() {
+        return Ok(ch);
+    }
+    let fb = startup.framebuffer.as_ref().ok_or(Error::NotFound)?;
+    let fb = Vmo::from_handle(fb.handle().duplicate(None)?);
+    let fs = Initfs::open(startup)?;
+    let image = fs.find("fbdisplay").ok_or(Error::NotFound)?;
+    let (mine, theirs) = Channel::create()?;
+    let (process, _boot) = libos::spawn(
+        "fbdisplay",
+        image,
+        vec![StartHandle::user(fb.into_handle()), StartHandle::user(theirs.into_handle())],
+    )?;
+    println!("init: displej je framebuffer z firmwaru (fbdisplay)");
+    *FBDISPLAY.lock() = Some(process);
+    Ok(mine)
+}
+
+/// Bezi GUI nad framebufferem (`fbdisplay`)? Kdyz skonci, jadro
+/// framebuffer uvolni a init muze spustit zachrannou konzoli.
+// Pouzije start zachranne konzole (vlakno terminalu 6b).
+#[allow(dead_code)]
+pub fn uses_framebuffer() -> bool {
+    FBDISPLAY.lock().is_some()
+}
+
+/// Spusti prvni instanci kompozitoru nad displejem z [`display`] a pocka
 /// na jeji start (mimo supervisor: start systemu, testy).
 pub fn start(startup: &Startup) -> Result<Gui> {
-    let display = DISPLAY.lock().take().ok_or(Error::NotFound)?;
+    let display = display(startup)?;
     let shared: CompdRef = Arc::new(spin::Mutex::new(Compd {
         process: None,
         control: None,
@@ -332,7 +366,7 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
     let mut gui = match start(startup) {
         Ok(g) => g,
         Err(Error::NotFound) => {
-            println!("init: grafika (virtio-gpu) neni, GUI nespoustim");
+            println!("init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim");
             return;
         }
         Err(e) => {

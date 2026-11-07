@@ -1,6 +1,6 @@
 # Graphics and windows (GUI)
 
-Milestone 6c. Describes the `virtio-gpu` driver, the `compd` compositor,
+Milestone 6c. Describes the display drivers (`virtio-gpu`, `fbdisplay`), the `compd` compositor,
 the window protocol (`libs/guiproto`), the native UI library (`libs/ui`),
 fonts (`libs/font`), drawing (`libs/gfx`), system dialogs and the action
 API. The agreed decisions are in the [Architecture](architecture.md#decisions-for-milestones-6a-6d-agreed)
@@ -75,6 +75,8 @@ and in the [6c decisions](#6c-decisions-agreed) table below.
 init
  ├─ devmgr ── finds PCI 1af4:1050 (virtio-gpu) ── starts virtio-gpu
  │            sends init the message `display` + channel (displayproto)
+ ├─ fbdisplay ─ only when `display` did not arrive: firmware framebuffer
+ │              (bootstrap FRAMEBUFFER, FB_CONTROL CLAIM), see Displays
  ├─ inputd
  └─ compd ─── init sends it `display` (driver channel), `input`
               (a new focus channel from inputd), `secure` (shortcut channel)
@@ -563,6 +565,108 @@ limit and reports the message `display` to init. In QEMU the device is
 `virtio-gpu-pci,iommu_platform=on,xres=1280,yres=800` on both x86_64 and
 aarch64.
 
+## Displays: virtio-gpu and fbdisplay
+
+The compositor draws the whole frame into its VMO and sends the display
+driver only the damaged rectangles (`guiproto::display`). The driver can
+therefore be swapped without changing the compositor. There are two:
+
+| | `virtio-gpu` | `fbdisplay` |
+|---|---|---|
+| where | QEMU (and other hypervisors with virtio-gpu) | anything with UEFI GOP: VMware, Hyper-V gen2, VirtualBox, real PCs; in QEMU `--gpu none` |
+| started by | `devmgr` (PCI `1af4:1050`), message `display` | `init`, when `display` does not arrive |
+| resolution | from `GET_DISPLAY_INFO` (fixed after start for now) | **fixed**: the mode the firmware set (the loader does not change it) |
+| copy | into DMA buffers + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` | direct writes into screen memory (write-combining), row by row |
+| format | `B8G8R8X8_UNORM` (same as the compositor) | RGB or BGR as the firmware says; converted and alpha stripped while copying |
+| acceleration, vsync | virgl/Venus as the next step; `PRESENTED` after flush | **none**; `PRESENTED` right after the copy (no vsync wait) |
+| multiple monitors | several outputs (scanouts) | one (output 0) |
+
+**virtio-gpu wins.** That is why the loader already picks a GOP that is
+not virtio-gpu (`loader/src/pci_id.rs`): VGA on QEMU x86_64, ramfb on
+aarch64. Without a GOP (or with an unsupported format such as
+`PixelBitMask`) there is no framebuffer and without virtio-gpu the GUI
+does not start (`init: grafika (virtio-gpu ani framebuffer) neni`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Choosing the display driver">
+<defs><marker id="fbd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="200" height="70" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">loader (UEFI)</text><text class="m" x="110" y="64" text-anchor="middle">picks a GOP that is not virtio-gpu</text><text class="m" x="110" y="80" text-anchor="middle">phys. address, w, h, stride, RGB/BGR</text>
+<rect class="box" x="10" y="130" width="200" height="80" rx="6"/><text class="t b" x="110" y="155" text-anchor="middle">kernel</text><text class="m" x="110" y="174" text-anchor="middle">log on fb until FB_CONTROL CLAIM</text><text class="m" x="110" y="190" text-anchor="middle">bootstrap FRAMEBUFFER to init</text><text class="m" x="110" y="204" text-anchor="middle">(write-combining VMO)</text>
+<path class="ln" d="M110 90 L110 128" marker-end="url(#fbd1)"/>
+<rect class="acc" x="290" y="130" width="200" height="80" rx="6"/><text class="t b" x="390" y="155" text-anchor="middle">init</text><text class="m" x="390" y="174" text-anchor="middle">did devmgr report display?</text><text class="m" x="390" y="190" text-anchor="middle">yes: virtio-gpu</text><text class="m" x="390" y="204" text-anchor="middle">no: starts fbdisplay</text>
+<path class="ln" d="M210 170 L288 170" marker-end="url(#fbd1)"/>
+<rect class="box" x="570" y="20" width="200" height="70" rx="6"/><text class="t b" x="670" y="45" text-anchor="middle">virtio-gpu</text><text class="m" x="670" y="64" text-anchor="middle">DMA + TRANSFER + FLUSH</text><text class="m" x="670" y="80" text-anchor="middle">(preferred)</text>
+<rect class="box" x="570" y="130" width="200" height="80" rx="6"/><text class="t b" x="670" y="155" text-anchor="middle">fbdisplay</text><text class="m" x="670" y="174" text-anchor="middle">copies rectangles into fb</text><text class="m" x="670" y="190" text-anchor="middle">RGB/BGR conversion, no alpha</text><text class="m" x="670" y="204" text-anchor="middle">fixed resolution</text>
+<path class="ln" d="M490 150 L568 70" marker-end="url(#fbd1)"/><text class="m" x="500" y="100">display</text>
+<path class="ln" d="M490 175 L568 175" marker-end="url(#fbd1)"/><text class="m" x="500" y="168">otherwise</text>
+<rect class="ok" x="290" y="240" width="200" height="50" rx="6"/><text class="t b" x="390" y="262" text-anchor="middle">compd</text><text class="m" x="390" y="279" text-anchor="middle">same protocol for both</text>
+<path class="ln" d="M390 210 L390 238" marker-end="url(#fbd1)"/><text class="m" x="398" y="228">display channel (gui::DISPLAY)</text>
+</svg>
+<figcaption>Choosing the display driver. The compositor does not know which one runs.</figcaption>
+</figure>
+
+### Who owns the framebuffer
+
+The kernel gives init the framebuffer in the start message (kind
+`FRAMEBUFFER`, see [System calls](syscalls.md#firmware-framebuffer)) and
+draws the log into it until an owner explicitly takes it over
+([`FB_CONTROL`](syscalls.md#fb_control) `CLAIM`). After `RELEASE` or a
+crash of the owner the kernel clears the screen and keeps drawing the log;
+a kernel panic always draws.
+
+Init decides about the owner in one place (`gui::display`):
+
+| Situation | Framebuffer owner |
+|---|---|
+| virtio-gpu present | nobody from the GUI (the picture goes through virtio-gpu); the framebuffer stays for the rescue console |
+| no virtio-gpu | `fbdisplay` under the compositor (init gives it a duplicate handle) |
+| GUI not running or crashed | the rescue console `user/console` (command `display`), see [Shell](shell-design.md) |
+
+When the compositor ends, `fbdisplay` sees its channel closed and exits;
+the kernel takes the screen back when the process ends (also on a crash),
+but only if it still holds it. `fbdisplay` does not call `RELEASE`
+explicitly: the kernel does not check the caller and after a compositor
+crash the rescue console may already own the screen. Init keeps its `Startup::framebuffer`, so it can hand the screen
+to the console right away.
+
+### The fbdisplay driver
+
+`user/fbdisplay` gets the framebuffer memory object and the display
+channel from init (kind USER). It queries the geometry itself
+(`FB_CONTROL` `INFO`), maps the framebuffer and then takes over the
+screen (`CLAIM`). Protocol:
+
+1. `INFO` -> `MODES` with a single output at the firmware resolution,
+   capabilities 0,
+2. `ATTACH` with the compositor VMO (read-only); a size other than the
+   framebuffer = `NOT_SUPPORTED`, after attaching the whole screen is
+   redrawn,
+3. `PRESENT` -> rectangles are clipped to the screen (`normalize_rects`)
+   and copied row by row (`fbcopy::copy_rect`): for BGR only the alpha is
+   cleared, for RGB R and B are swapped; then a barrier (flushes the
+   write-combining buffers) and `PRESENTED` with the time.
+
+The framebuffer is mapped **write-combining** (x86_64: PAT entry 1, which
+the kernel rewrites from WT to WC; aarch64: Normal Non-cacheable). Writes
+are merged into full bus lines, reads are slow - so the driver never
+reads from the framebuffer.
+
+**Performance and limitations:**
+
+- a full 1920 x 1080 screen = 8 MiB per frame; with write-combining a real
+  PC does that in a few ms (it is bound by the bus to the graphics).
+  An uncached (UC) mapping would be an order of magnitude slower - hence WC.
+- ⚠️ **The resolution is fixed**: GOP does not allow mode changes after
+  `ExitBootServices`. A different resolution only via the firmware setup
+  or (later) the loader before the kernel starts.
+- ⚠️ **No vsync**: a frame may tear (the copy runs while the monitor is
+  scanning out). The firmware provides no frame interrupt.
+- ⚠️ **The framebuffer is also in the kernel's direct map** with the cache
+  type from the firmware MTRRs, while the process has it WC. Two mappings
+  with different types are formally undefined on x86; the kernel does not
+  write through its mapping after `CLAIM` (only on panic), so in practice
+  it does not matter.
+
 ## Native UI library (`libs/ui`)
 
 One library for all applications, declarative in Rust:
@@ -682,7 +786,7 @@ for compositor composition.
 
 | What | Status |
 |---|---|
-| `cargo xtask run/test --gpu 2d\|gl\|venus` | device choice: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; without a window the `egl-headless` display |
+| `cargo xtask run/test --gpu 2d\|gl\|venus\|none` | device choice: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; without a window the `egl-headless` display; `none` = no virtio-gpu (GUI through `fbdisplay`) |
 | driver | negotiates `VIRGL`, `RESOURCE_BLOB`, `CONTEXT_INIT` and logs the capsets, e.g. `virgl(v1) virgl2(v2)` |
 | `vgpu::virgl` | own encoder of the virgl command stream (state objects, TGSI shaders, vertices, draws, scissor) and virtio-gpu 3D commands, host tests |
 | GPU composition | pending: on this host (QEMU 11.1 for Windows) the virtual machine stalls after the kernel starts whenever OpenGL is on (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) |
@@ -773,14 +877,16 @@ instance places the window again (the position is not remembered yet).
 | compositor restart | the supervisor (`CompdService` adapter, display from the endpoint keeper) | dialogs and transaction groups of the old instance are lost |
 | commit held in a group | applied together with the whole group, even if the client sent another plain commit meanwhile | a client in a group should wait for `PRESENTED`; strict per-client commit order comes with the GPU backend |
 | display driver crash | the compositor keeps running without a picture (windows, dialogs, actions) | no driver restart yet |
+| display without virtio-gpu | `fbdisplay`: fixed firmware resolution, no acceleration and no vsync | native GPU drivers (later milestone) |
 
 ## Tests
 
 - **host** (part of `cargo xtask test`): `cargo test -p guiproto -p gfx
-  -p font -p vgpu -p comp -p ui` - message encoding and robustness against
+  -p font -p vgpu -p fbcopy -p comp -p ui` - message encoding and robustness against
   broken messages, colours and blending, clipping, damaged regions, text,
   rasterizer (exact square coverage, caron above the letter, randomly
-  corrupted font file), virtio-gpu commands, transactions and their
+  corrupted font file), virtio-gpu commands, RGB/BGR conversion and
+  clipped rectangle copies into the framebuffer (`fbcopy`), transactions and their
   atomicity, transaction groups (including the deadline), synchronized
   resize, input routing and focus, moving a window by its title without
   the app, custom title regions, badge above application content,
@@ -802,3 +908,9 @@ instance places the window again (the position is not remembered yet).
   another process with a lease; after the kill the window comes back with
   the same identity, badge and state, the app keeps responding, one window
   and one client).
+- **QEMU without virtio-gpu** (`cargo xtask test --gpu none`, x86_64 and
+  aarch64): the same `gui` suite on top of `fbdisplay` (x86_64 VGA,
+  aarch64 ramfb). Pixels are checked through the compositor inspection,
+  not the driver, so the suite verifies the compositor and the display
+  protocol on top of fbdisplay; the QEMU test does not read the
+  framebuffer contents themselves.

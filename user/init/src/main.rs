@@ -132,6 +132,9 @@ fn main(startup: Startup) -> i64 {
             // Bez GUI: terminal v zalozni konzoli nad framebufferem.
             println!("init: zalozni konzoli nelze spustit: {e}");
         }
+        if let Some(p) = gui::FBDISPLAY.lock().as_ref() {
+            sup.watch("fbdisplay", p, None);
+        }
         // Bezny beh: init je supervisor a nekonci.
         sup.run(&startup);
     }

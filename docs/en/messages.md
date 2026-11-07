@@ -74,6 +74,7 @@ The loader writes through the firmware console (screen and serial) as
 | `initfs je poskozeny: ...` | E | The initfs image has the wrong format (`libs/initfs`). Rebuild. |
 | `initfs neobsahuje program init` | E | The `init` file is missing from initfs. |
 | `init neni platny program: ...` | E | `init` is not a static ELF64 for x86_64. |
+| `framebuffer se do userspace nepreda: ...` | W | The framebuffer overlaps RAM used by the allocator, does not start on a page boundary or is smaller than its geometry. The kernel console keeps using it, the GUI does not start without virtio-gpu. |
 | `init: poskozeny segment: ...` | E | An ELF segment lies outside the file. |
 | `init se nepodarilo spustit: ...` | E | Summary with the error code ([errors.md](errors.md)). |
 | `init spusten (proces N), vstup ...` | I | The first process is running. |
@@ -124,6 +125,11 @@ invariant was broken (a kernel bug).
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | The PS/2 driver found a keyboard, a mouse (kind from the ID: wheel, 5 buttons). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 reads `0xFF` (no controller) or no device was found (PS/2 controller not found). Normal on modern boards without PS/2. |
+| `init: displej je framebuffer z firmwaru (fbdisplay)` | The device manager found no virtio-gpu, the GUI runs through `fbdisplay` at the fixed firmware resolution (display is the firmware framebuffer). |
+| `fbdisplay: framebuffer WxH (krok S, rgb/bgr)` | The framebuffer driver took over the screen (`FB_CONTROL` `CLAIM`). |
+| `fbdisplay: chybi handly ve startovni zprave` | Init started it without the memory object and channel (an init bug). |
+| `fbdisplay: framebuffer nelze prevzit: ...` | `FB_CONTROL` or the mapping failed: `WRONG_TYPE` (not the kernel's framebuffer object), `NOT_SUPPORTED` (unknown format or size), `NO_RESOURCES` (no room in the address space). |
+| `init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim` | There is no virtio-gpu and the kernel did not hand over a framebuffer (no GOP, unsupported pixel format, see the kernel messages). |
 | `ps2: radic neodpovida spravne: ...` | The controller exists but failed its self-test or did not answer in time (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | The port exists but no device answers on it (nothing connected). |
 | `xhci BB:DD.F: N portu (M USB 3), S slotu, kontext K B` | The USB controller is ready (N ports, M of them USB 3, S slots, K-byte contexts). |

@@ -36,7 +36,9 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     // se posunou, ulozene bootovaci polozky by pak nesedely.
     // Verze rozlozeni zarizeni je v nazvu: po zmene zarizeni PCI by stare
     // bootovaci polozky nesedely a firmware by skoncil ve svem shellu.
-    let fw_vars = target_dir().join(format!("fw-{}-vars-{}-l{DEVICE_LAYOUT}.fd", arch.name, opts.iommu));
+    // Bez virtio-gpu (`--gpu none`) se sloty PCI take posunou.
+    let no_gpu = if opts.gpu == "none" { "-nogpu" } else { "" };
+    let fw_vars = target_dir().join(format!("fw-{}-vars-{}-l{DEVICE_LAYOUT}{no_gpu}.fd", arch.name, opts.iommu));
     if !fw_vars.exists() {
         std::fs::copy(&fw_vars_template, &fw_vars)?;
     }
@@ -117,7 +119,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         // Ve WSL neni uzel DRM pro egl-headless: GTK s OpenGL (EGL) pod
         // xvfb-run; SDL tam kontext OpenGL 3+ pro virgl nevytvori.
         let display = match (opts.gpu.as_str(), opts.qemu_wsl) {
-            ("2d", _) => "none",
+            ("2d" | "none", _) => "none",
             (_, true) => "gtk,gl=on",
             _ => "egl-headless",
         };
@@ -232,9 +234,13 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
 }
 
 /// Grafika virtio-gpu (ovladac `virtio-gpu`, kompozitor `compd`) s prekladem
-/// DMA pres IOMMU. Rezim 2D funguje s kazdym displejem QEMU (i bez okna).
+/// DMA pres IOMMU. Rezim 2D funguje s kazdym displejem QEMU (i bez okna);
+/// `--gpu none` virtio-gpu neprida.
 fn gpu_device(cmd: &mut Command, opts: &Options) {
     match opts.gpu.as_str() {
+        // Bez virtio-gpu: GUI bezi nad framebufferem z firmwaru (`fbdisplay`;
+        // x86_64 VGA, aarch64 ramfb).
+        "none" => {}
         // Venus: Vulkan pres virtio-gpu (blob zdroje v pameti hostitele
         // mapovane pres BAR). Potrebuje displej s OpenGL (`egl-headless`
         // bez okna). Bez IOMMU: blob pamet hostitele preklad DMA nepouziva.

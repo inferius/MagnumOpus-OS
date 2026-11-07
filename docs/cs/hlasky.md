@@ -72,6 +72,7 @@ Loader píše přes konzoli firmware (obrazovka i sériová linka) ve formátu
 | `initfs je poskozeny: ...` | E | Obraz initfs nemá správný formát (`libs/initfs`). Znovu sestavit. |
 | `initfs neobsahuje program init` | E | V initfs chybí soubor `init`. |
 | `init neni platny program: ...` | E | `init` není statický ELF64 pro x86_64. |
+| `framebuffer se do userspace nepreda: ...` | W | Framebuffer překrývá RAM pro alokátor, nezačíná na hranici stránky nebo je menší než jeho geometrie. Konzole jádra ho dál používá, GUI bez virtio-gpu nenaběhne. |
 | `init: poskozeny segment: ...` | E | Segment ELF leží mimo soubor. |
 | `init se nepodarilo spustit: ...` | E | Souhrnná hláška s kódem chyby ([chyby.md](chyby.md)). |
 | `init spusten (proces N), vstup ...` | I | První proces běží. |
@@ -122,6 +123,11 @@ porušený vnitřní předpoklad (chyba jádra).
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | Ovladač PS/2 našel klávesnici, myš (druh podle ID: kolečko, 5 tlačítek). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 čte `0xFF` (řadič chybí) nebo nenašel žádné zařízení. Na moderních deskách bez PS/2 normální. |
+| `init: displej je framebuffer z firmwaru (fbdisplay)` | Správce zařízení nenašel virtio-gpu, GUI poběží přes `fbdisplay` s pevným rozlišením firmwaru. |
+| `fbdisplay: framebuffer WxH (krok K, rgb/bgr)` | Ovladač framebufferu převzal obrazovku (`FB_CONTROL` `CLAIM`). |
+| `fbdisplay: chybi handly ve startovni zprave` | Init ho spustil bez objektu paměti a kanálu (chyba initu). |
+| `fbdisplay: framebuffer nelze prevzit: ...` | `FB_CONTROL` nebo mapování selhalo: `WRONG_TYPE` (objekt není framebuffer z jádra), `NOT_SUPPORTED` (neznámý formát nebo rozměry), `NO_RESOURCES` (není místo v adresním prostoru). |
+| `init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim` | Není virtio-gpu a jádro nepředalo framebuffer (bez GOP, nepodporovaný formát pixelu, viz hlášky jádra). |
 | `ps2: radic neodpovida spravne: ...` | Řadič je, ale neprošel self-testem nebo neodpovídá včas (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | Port je, ale zařízení na něm nereaguje (nepřipojené). |
 | `xhci BB:ZZ.F: N portu (M USB 3), S slotu, kontext K B` | Řadič USB je připravený. |

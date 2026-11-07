@@ -519,6 +519,23 @@ Kořenový Resource má navíc právo `SET_CLOCK` (nastavení hodin,
 [`CLOCK_SET`](#clock_set)). Správce zařízení dostane kořen bez něj
 a omezené prostředky ho nemají nikdy.
 
+### Framebuffer z firmwaru
+
+Není to syscall, ale druh handlu ve startovní zprávě initu
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7): fyzický objekt paměti
+framebufferu GOP, práva `READ | WRITE | MAP`. Číst a psát jde jen přes
+mapování (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`, jako buffer syscallu
+`BAD_ADDRESS`). Geometrii a převzetí obrazovky řídí [`FB_CONTROL`](#fb_control).
+
+Objekt se mapuje **write-combining** (x86_64: položka PAT 1 = WC, jádro ji
+nastaví na každém CPU; aarch64: Normal Non-cacheable): zápisy se slučují,
+čtení je pomalé. Jádro handle nepošle, když framebuffer překrývá RAM pro
+alokátor, nezačíná na hranici stránky nebo je menší než jeho geometrie
+(varování v logu, konzole jádra ho dál používá). Init ho předá vlastníkovi
+obrazovky: bez virtio-gpu ovladači `fbdisplay` (viz
+[Grafika](gui.md#displeje-virtio-gpu-a-fbdisplay)), jinak záchranné
+konzoli `user/console`.
+
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. Fyzicky souvislý objekt paměti pro DMA

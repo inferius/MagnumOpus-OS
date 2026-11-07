@@ -659,6 +659,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fbcopy"
+version = "0.1.0"
+
+[[package]]
+name = "fbdisplay"
+version = "0.1.0"
+dependencies = [
+ "fbcopy",
+ "guiproto",
+ "libos",
+]
+
+[[package]]
 name = "fetch"
 version = "0.1.0"
 dependencies = [
