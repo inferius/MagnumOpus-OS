@@ -64,6 +64,8 @@ prepinace:
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
                    carkou, napr. sit,firewall; jmena jako v logu)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
+  --net-online     (test) i testy proti skutecne siti hostitele (resolver
+                   hostitele pres slirp); bez nej jen lokalni servery
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
@@ -99,6 +101,8 @@ pub struct Options {
     /// `--only` (sady testu userspace) a `--repeat` (kolikrat).
     test_only: String,
     test_repeat: u32,
+    /// `--net-online`: i testy proti skutecne siti hostitele.
+    net_online: bool,
     /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
     hostfwd: Option<String>,
     /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
@@ -137,6 +141,7 @@ fn run_cli() -> Result<()> {
         extra_initfs: Vec::new(),
         test_only: String::new(),
         test_repeat: 1,
+        net_online: false,
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
     };
@@ -168,6 +173,7 @@ fn run_cli() -> Result<()> {
                 let value = args.next().ok_or("--repeat ocekava pocet")?;
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
+            Some("--net-online") => opts.net_online = true,
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
             Some("--accel") => {
@@ -217,6 +223,9 @@ fn run_cli() -> Result<()> {
             let web = webhelper::start()?;
             let config = format!("{}{}", helper.config, web.config);
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
+            if opts.net_online {
+                opts.extra_initfs.push((String::from("net-online"), b"1".to_vec()));
+            }
             if !opts.test_only.is_empty() || opts.test_repeat > 1 {
                 let filter = format!("suites = {}
 repeat = {}

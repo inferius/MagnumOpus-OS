@@ -330,7 +330,23 @@ fn revoked_onecrl(s: &Startup) -> TestResult {
     let Some((f, p)) = fetch(s)? else {
         return Ok(());
     };
-    expect_revoked(f, p.onecrl, "OneCRL")?;
+    // revocd stahuje OneCRL az v klidu po prvnim dotazu `ca` (handshake na
+    // nej neceka): prvni spojeni ho vyvola, pak pockat na seznam.
+    let _ = f.run(&format!("get https://10.0.2.2:{}/hello", p.onecrl))?;
+    let deadline = time::deadline_after(core::time::Duration::from_secs(30));
+    let text = loop {
+        let text = revocd_status()?;
+        // Zaznam s "enabled": false se nepocita.
+        if text.contains("onecrl=1") || time::now() > deadline {
+            break text;
+        }
+        time::sleep(core::time::Duration::from_millis(100));
+    };
+    check!(text.contains("onecrl=1"), format!("stav revocd do 30 s: {text}"));
+    expect_revoked(f, p.onecrl, "OneCRL")
+}
+
+fn revocd_status() -> Result<String, String> {
     let r = crate::system::REVOCD.get().ok_or("revocd nebezi")?;
     let _g = crate::system::REVOCD_LOCK.lock();
     r.control.write(b"status", Vec::new()).map_err(|e| fail("status", e))?;
@@ -338,8 +354,5 @@ fn revoked_onecrl(s: &Startup) -> TestResult {
         .control
         .read(Some(time::deadline_after(core::time::Duration::from_secs(5))))
         .map_err(|e| fail("status", e))?;
-    let text = String::from_utf8(m.data).unwrap_or_default();
-    // Zaznam s "enabled": false se nepocita.
-    check!(text.contains("onecrl=1"), format!("stav revocd: {text}"));
-    Ok(())
+    Ok(String::from_utf8(m.data).unwrap_or_default())
 }

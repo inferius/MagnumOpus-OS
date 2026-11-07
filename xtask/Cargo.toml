@@ -27,6 +27,8 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 ring = "0.17"
+# Vyhrazeny zavreny port pro test odmitnuti spojeni (bind bez listen).
+socket2 = "0.6"
 # Cteni poli certifikatu pro odpovedi OCSP a OneCRL.
 tls = { path = "../libs/tls" }
 dns = { path = "../libs/dns", features = ["testzone"] }

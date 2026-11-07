@@ -206,7 +206,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | První úspěšné měření (ověřené NTS, nebo neověřené NTP v záloze); `step` = čas se nastavil skokem (posun nad 128 ms), `slew` = plynulé dorovnání. |
 | `ntpd: NTS-KE <server>: ...` | Výměna klíčů NTS selhala (spojení, certifikát, odpověď); server se v kole přeskočí. Při neplatném certifikátu zkontrolovat hodiny (RTC). |
 | `ntpd: neoverene servery: Never\|Fallback` | Init změnil pravidlo podle profilu sítě. |
-| `ntpd: zadny server neodpovedel (..., NTS: ...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za interval; hodiny běží dál podle poslední frekvence. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za 2, 4, 8, … s (nejvýš `min_poll`), stejná hláška se znovu nevypíše; hodiny běží dál podle poslední frekvence. |
 | `ntpd: konfigurace: ...` | Konfigurace od init je neplatná; `ntpd` skončí. Opravit `ntpd.toml`. |
 | `timed: prvni synchronizace: skok o N ms` | První korekce od `ntpd` byla velká: čas se nastavil skokem (jediný povolený skok). |
 | `timed: prvni synchronizace: dorovnani o N ms` | První korekce byla malá: dorovná se plynule. |
@@ -222,6 +222,8 @@ porušený vnitřní předpoklad (chyba jádra).
 | `revocd: OneCRL: neplatny dokument` | Stažený JSON nejde přečíst; platí předchozí seznam, nový pokus za `retry_minutes`. |
 | `revocd: <url>: ...` | Stažení CRL nebo OneCRL selhalo (stav HTTP, chyba spojení); adresa se `retry_minutes` nezkouší, stav odvolání je zatím neznámý. |
 | `revocd: <url>: neni CRL` | Server vrátil něco jiného než CRL. |
+| `tls: CRL <url> nejde pouzit (...)` | CRL z distribučního bodu certifikátu nejde přečíst ani ověřit (nepodporované rozšíření, špatný podpis, vydavatel mimo řetěz); přeskočí se, stav odvolání z ní je neznámý a spojení pokračuje. Jednou pro adresu. |
+| `netd: DNS pres TCP: spojeni se nenavazalo do 3 s, novy pokus (n)` | Spojení TCP pro zkrácenou odpověď DNS uvázlo; resolver zkouší nové (nejvýš 3×). |
 | `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` požadavek nedokončil ani po limitu + rezervě (chyba nebo zaseknutí služby). Program dostal `TIMED_OUT`, kanál už nejde použít. OP = kód operace (`netproto::op`). |
 | `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | Systémový resolver běží. |
 | `dnsd: <resolver>: ...` | Resolver neodpověděl (spojení, TLS, HTTP); `dnsd` zkusí další. |

@@ -88,6 +88,11 @@ fn main(startup: Startup) -> i64 {
                         sup.watch("fwd", p, None);
                     }
                     let n = system::NET.call_once(|| n);
+                    // Testy: zalozni neovereny resolver jen na pomocny
+                    // server hostitele, nikdy skutecne DNS (nestabilni).
+                    if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
+                        tests::net::local_dns(&startup, &n.root);
+                    }
                     // dnsd hned po netd: systemovy preklad (i pro ntpd a revocd).
                     if let Some(end) = dnsd_end {
                         match dns::start(&startup, n, end, &devices) {

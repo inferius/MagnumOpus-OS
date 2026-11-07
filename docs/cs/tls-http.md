@@ -257,11 +257,20 @@ tři zdroje:
 | **OCSP stapling** (`tls::ocsp`) | koncový certifikát, když server odpověď OCSP pošle v handshaku | stav `revoked`; špatný podpis = `InvalidOcspResponse` (podvržená odpověď). Propadlá odpověď = stav neznámý |
 | **OneCRL** (Mozilla) | odvolané mezilehlé CA (stovky záznamů, jako Firefox) | certifikát řetězu na seznamu (vystavitel + číslo, nebo subjekt + SHA-256 klíče) |
 | **CRL** | certifikáty s distribučním bodem `http://...` (téměř všechny veřejné CA) | číslo certifikátu v CRL podepsané jeho vystavitelem; propadlá CRL se nepoužije |
+| **CRL „jen CA“** (`tls::crl`) | CRL kořenů s rozsahem jen pro certifikáty CA (Issuing Distribution Point s `onlyContainsCACerts`, např. ISRG Root X1 a Root YR od Let's Encrypt) – webpki je neumí | číslo mezilehlé CA v CRL; podpis vydavatele CRL ověří `tls` sám |
 
 **Neznámý stav spojení nezastaví** (revocd neběží, CRL nejde stáhnout,
 server bez staplingu). Stejně se chovají prohlížeče: tvrdé odmítnutí by
 útočník, který blokuje CRL, změnil v nefunkční síť. Odvolaný certifikát
 (`Error::Certificate("Revoked")`, kód `ACCESS_DENIED`) se odmítne vždy.
+
+**Každá CRL zvlášť:** CRL, kterou webpki přečte, ověří webpki; CRL „jen
+CA“ ověří `tls::crl`. CRL, kterou nepřečte nikdo (delta CRL, nepřímá CRL,
+`onlySomeReasons`, neznámé kritické rozšíření), nebo se špatným podpisem
+se přeskočí s hláškou `tls: CRL <url> nejde pouzit (...)` (jednou pro
+adresu) a stav z ní je neznámý. Dřív jedna taková CRL shodila celé
+spojení chybou `unexpected error: provided CRL could not be parsed` – tak
+selhávalo NTS-KE s každým serverem s certifikátem Let's Encrypt.
 
 ### Služba `revocd`
 
@@ -281,8 +290,12 @@ Programy se ptají kanálem, který jim předá init
   (HTTP/HTTPS, nejvýš 16 MiB, limit 15 s). Po neúspěchu se adresa
   10 minut nezkouší. Podpis neověřuje revocd, ale webpki v programu:
   podvržená CRL od revocd nic nezpůsobí.
-- **OneCRL:** stahuje se při prvním dotazu a pak každých 24 h z adresy
-  v `revocd.toml`; poslední platná verze leží v `/crl/onecrl.json`.
+- **OneCRL:** stahuje se po prvním dotazu `ca` a pak každých 24 h
+  z adresy v `revocd.toml`; poslední platná verze leží v
+  `/crl/onecrl.json`. Stahuje se až v klidu (0,5 s bez dotazu): dotaz `ca`
+  odpoví hned z posledního seznamu (při úplně prvním startu prázdného =
+  stav neznámý), takže handshake programu (NTS-KE `ntpd` při startu) na
+  megabajty OneCRL nečeká.
   Záznamy s `"enabled": false` se přeskočí.
 - **Práva:** relace sítě TCP 80/443 kamkoli (adresy CRL určují CA),
   relace FS účtu `REVOCD_USER` (901): `/certs` jen pro čtení, `/crl`
@@ -468,6 +481,7 @@ TCP spojení i čtení mají časový limit 30 s.
 | `tls`: zkrácení, obnovení | konec TCP bez `close_notify` = `Truncated`; druhé spojení přes PSK |
 | `tls`: kořeny | PEM s komentáři, DER, poškozené bloky, `distrust.txt`, base64 |
 | `tls`: odvolání | CRL koncového a mezilehlého certifikátu, propadlá a podvržená CRL, OneCRL, OCSP dobrá / odvolaná / propadlá / podvržená, KeyUpdate |
+| `tls`: CRL „jen CA“ | skutečné CRL ISRG Root X1 a Root YR (`libs/tls/testdata/letsencrypt/`, webpki je odmítne, `tls::crl` je přečte a ověří podpis), skutečný řetěz `nts.netnod.se` s nimi projde; odvolaná mezilehlá CA v CRL „jen CA“, podvržená CRL spojení neshodí |
 | `httpc`: HPACK | příklady RFC 7541 C.1, C.4 (Huffman, dynamická tabulka), C.5 (vyřazování), Huffman všech bajtů, chybná výplň, „HPACK bomb“ |
 | `httpc`: HTTP/1.1 skriptem | chunked s rozšířením a trailery, TE vs. CL, 1xx, 304, data po bajtu, 15 chybných odpovědí, limity |
 | `httpc`: HTTP/2 skriptem | PING, výplň, CONTINUATION, 1xx, trailery, 17 chybných odpovědí, řízení toku těla, limit těla |

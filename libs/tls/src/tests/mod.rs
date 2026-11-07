@@ -4,8 +4,10 @@
 //! Pokryva vsechny sady sifer, skupiny vymeny klicu a typy klicu serveru
 //! (ECDSA P-256/P-384, Ed25519, RSA), ALPN, chyby certifikatu (cizi CA,
 //! spatne jmeno, propadly), zkraceni bez `close_notify` a uloziste korenu.
-//! Kontrolu odvolani testuje [`revocation`].
+//! Kontrolu odvolani testuje [`revocation`], CRL "jen CA" (i skutecne CRL
+//! Let's Encrypt) [`crl`].
 
+mod crl;
 mod revocation;
 
 use std::io::{Read as _, Write as _};

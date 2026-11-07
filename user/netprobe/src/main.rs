@@ -56,7 +56,8 @@ fn main(startup: Startup) -> i64 {
 
 fn run(net: &Net, cmd: &str) -> libos::Result<String> {
     let (verb, arg) = cmd.split_once(' ').unwrap_or((cmd, ""));
-    let timeout = Some(Duration::from_secs(10));
+    // Rezerva pro beh testu pod TCG a zatezi (DNS, spojeni).
+    let timeout = Some(Duration::from_secs(30));
     let sa = |s: &str| s.parse::<SocketAddr>().map_err(|_| Error::InvalidArgs);
     match verb {
         "connect" => {

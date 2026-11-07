@@ -2819,6 +2819,7 @@ dependencies = [
  "ring",
  "rustls",
  "shlang",
+ "socket2",
  "term",
  "tls",
  "tokio",
