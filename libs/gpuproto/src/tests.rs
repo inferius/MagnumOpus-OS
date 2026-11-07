@@ -17,6 +17,7 @@ fn request_roundtrip() {
             size: 1 << 20,
         },
         Request::DestroyBlob { resource: 7 },
+        Request::ScanoutBlob { resource: 7, w: 64, h: 64, format: 2, stride: 256 },
         Request::Submit {
             ring_idx: 0,
             fence: true,

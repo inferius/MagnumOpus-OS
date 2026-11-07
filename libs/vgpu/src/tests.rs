@@ -156,6 +156,12 @@ fn blob_commands_layout() {
     assert_eq!((u(&c, 0), u(&c, 24)), (cmd::RESOURCE_MAP_BLOB, 9));
     assert_eq!(u64::from_le_bytes(c[32..40].try_into().unwrap()), 0x20_0000);
     assert_eq!(blob::resource_unmap_blob(2, 9).len(), 32);
+    // virtio_gpu_set_scanout_blob: 24 + rect 16 + 6 x u32 + strides 16 + offsets 16.
+    let c = blob::set_scanout_blob(0, 9, 64, 32, FORMAT_B8G8R8X8_UNORM, 256, 0);
+    assert_eq!(c.len(), 96);
+    assert_eq!((u(&c, 0), u(&c, 32), u(&c, 36)), (cmd::SET_SCANOUT_BLOB, 64, 32));
+    assert_eq!((u(&c, 40), u(&c, 44), u(&c, 48), u(&c, 52), u(&c, 56)), (0, 9, 64, 32, 2));
+    assert_eq!((u(&c, 64), u(&c, 80)), (256, 0));
     assert_eq!(blob::get_capset(CAPSET_VENUS, 0).len(), 32);
 }
 

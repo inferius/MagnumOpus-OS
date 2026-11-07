@@ -115,6 +115,19 @@ pub fn resource_unmap_blob(ctx: u32, resource: u32) -> Vec<u8> {
     c.finish()
 }
 
+/// `SET_SCANOUT_BLOB`: vystup `scanout` zobrazi blob `resource` (`w` x `h`,
+/// format `format`, krok radku `stride`, zacatek `offset`). U virgl/Venus
+/// musi byt blob podlozeny dmabuf (QEMU ho preda displeji jako dmabuf).
+/// `resource` 0 vystup vypne. Rozlozeni `virtio_gpu_set_scanout_blob`.
+pub fn set_scanout_blob(scanout: u32, resource: u32, w: u32, h: u32, format: u32, stride: u32, offset: u32) -> Vec<u8> {
+    let mut c = Cmd::new(cmd::SET_SCANOUT_BLOB);
+    c.rect(crate::Rect { x: 0, y: 0, w, h });
+    c.u32(scanout).u32(resource).u32(w).u32(h).u32(format).u32(0);
+    c.u32(stride).u32(0).u32(0).u32(0);
+    c.u32(offset).u32(0).u32(0).u32(0);
+    c.finish()
+}
+
 /// `map_info` z odpovedi `RESOURCE_MAP_BLOB` (typ cache v dolnich 4 bitech).
 pub fn parse_map_info(b: &[u8]) -> Option<u32> {
     if response_type(b)? != cmd::RESP_OK_MAP_INFO {

@@ -321,6 +321,25 @@ impl Gpu {
         self.present(output, &[Rect::new(0, 0, w, h)])
     }
 
+    /// Vystup 0 zobrazi blob `resource` (pokus kroku 4 Venusu): `SET_SCANOUT_BLOB`
+    /// a `RESOURCE_FLUSH`. Zarizeni odmitne blob bez dmabuf (`IO_ERROR`).
+    pub fn scanout_blob(&mut self, resource: u32, w: u32, h: u32, format: u32, stride: u32) -> Result<()> {
+        self.simple(&vgpu::blob::set_scanout_blob(0, resource, w, h, format, stride, 0))?;
+        self.simple(&vgpu::resource_flush(resource, vgpu::Rect { x: 0, y: 0, w, h }))
+    }
+
+    /// Vypne zobrazeni blobu na vystupu 0 a vrati puvodni obraz 2D
+    /// (kdyz ho displej mel).
+    pub fn restore_scanout(&mut self) -> Result<()> {
+        self.simple(&vgpu::blob::set_scanout_blob(0, 0, 16, 16, vgpu::FORMAT_B8G8R8X8_UNORM, 64, 0))?;
+        if let Some(s) = self.scanouts.iter().find(|s| s.output == 0) {
+            let (res, w, h) = (s.resource, s.w, s.h);
+            self.simple(&vgpu::set_scanout(0, res, vgpu::Rect { x: 0, y: 0, w, h }))?;
+            return self.present(0, &[Rect::new(0, 0, w, h)]);
+        }
+        Ok(())
+    }
+
     /// Zkopiruje obdelniky do bufferu DMA a preda je zarizeni.
     pub fn present(&mut self, output: u32, rects: &[Rect]) -> Result<()> {
         let i = self.scanouts.iter().position(|s| s.output == output).ok_or(Error::NotFound)?;

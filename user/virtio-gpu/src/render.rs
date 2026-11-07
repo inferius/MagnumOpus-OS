@@ -46,11 +46,13 @@ pub struct Client {
     pending: usize,
     /// Posledni pozadavek ceka na dokonceni (odpoved pozdeji).
     deferred: bool,
+    /// Blob klienta zobrazeny na vystupu 0 (`SCANOUT_BLOB`).
+    scanout: Option<u32>,
 }
 
 impl Client {
     pub fn new(ch: Channel, id: u64) -> Self {
-        Self { ch, id, ctx: None, blobs: Vec::new(), pending: 0, deferred: false }
+        Self { ch, id, ctx: None, blobs: Vec::new(), pending: 0, deferred: false, scanout: None }
     }
 
     /// Obslouzi zpravu; odpoved a handly k ni, nebo `None`, kdyz odpoved
@@ -122,9 +124,33 @@ impl Client {
             Request::DestroyBlob { resource } => {
                 let ctx = self.ctx.ok_or(Error::BadState)?;
                 let i = self.blobs.iter().position(|b| b.resource == resource).ok_or(Error::NotFound)?;
+                if self.scanout == Some(resource) {
+                    self.scanout = None;
+                    let _ = gpu.restore_scanout();
+                }
                 let b = self.blobs.remove(i);
                 destroy_blob(gpu, ctx, &b);
                 none(Reply::Done { op: gpuproto::op::DESTROY_BLOB })
+            }
+            Request::ScanoutBlob { resource, w, h, format, stride } => {
+                // Pokus kroku 4: jen vlastni blob klienta. RIZIKO: render
+                // klient tak prekryje obraz kompozitoru; az bude backend
+                // kompozitoru, patri tohle jen vlastnikovi displeje.
+                if resource == 0 {
+                    if self.scanout.take().is_some() {
+                        gpu.restore_scanout()?;
+                    }
+                    return none(Reply::Done { op: gpuproto::op::SCANOUT_BLOB });
+                }
+                if !self.blobs.iter().any(|b| b.resource == resource) {
+                    return Err(Error::NotFound);
+                }
+                if w < 16 || h < 16 || stride < w * 4 {
+                    return Err(Error::InvalidArgs);
+                }
+                gpu.scanout_blob(resource, w, h, format, stride)?;
+                self.scanout = Some(resource);
+                none(Reply::Done { op: gpuproto::op::SCANOUT_BLOB })
             }
             Request::Submit { ring_idx, fence, data } => {
                 let ctx = self.ctx.ok_or(Error::BadState)?;
@@ -196,6 +222,9 @@ impl Client {
 
     /// Konec klienta: bloby a kontext pryc.
     pub fn close(&mut self, gpu: &mut Gpu) {
+        if self.scanout.take().is_some() {
+            let _ = gpu.restore_scanout();
+        }
         let Some(ctx) = self.ctx.take() else { return };
         for b in core::mem::take(&mut self.blobs) {
             destroy_blob(gpu, ctx, &b);

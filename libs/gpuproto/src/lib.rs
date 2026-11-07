@@ -36,6 +36,7 @@ pub mod op {
     pub const CREATE_BLOB: u32 = 4;
     pub const DESTROY_BLOB: u32 = 5;
     pub const SUBMIT: u32 = 6;
+    pub const SCANOUT_BLOB: u32 = 7;
 
     pub const INFO_REPLY: u32 = 101;
     pub const CAPSET: u32 = 102;
@@ -91,6 +92,10 @@ pub enum Request {
     /// Proud prikazu kontextu. `fence`: odpoved az po splneni plotu na
     /// casove ose `ring_idx` (u Venusu osa 0 = po zpracovani proudu).
     Submit { ring_idx: u8, fence: bool, data: Vec<u8> },
+    /// Pokus (krok 4 Venusu): vystup 0 zobrazi blob klienta (`w` x `h`,
+    /// format virtio-gpu, krok radku). `resource` 0 = vratit puvodni obraz.
+    /// Blob musi byt podlozeny dmabuf.
+    ScanoutBlob { resource: u32, w: u32, h: u32, format: u32, stride: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +148,10 @@ impl Request {
                 w = Writer::op(op::SUBMIT);
                 w.u8(*ring_idx).u8(*fence as u8).bytes(data);
             }
+            Request::ScanoutBlob { resource, w: bw, h, format, stride } => {
+                w = Writer::op(op::SCANOUT_BLOB);
+                w.u32(*resource).u32(*bw).u32(*h).u32(*format).u32(*stride);
+            }
         }
         w.finish()
     }
@@ -178,6 +187,13 @@ impl Request {
                 }
                 Request::Submit { ring_idx, fence, data: data.into() }
             }
+            op::SCANOUT_BLOB => Request::ScanoutBlob {
+                resource: r.u32()?,
+                w: r.u32()?,
+                h: r.u32()?,
+                format: r.u32()?,
+                stride: r.u32()?,
+            },
             _ => return Err(Error::NotSupported),
         };
         finish(r)?;

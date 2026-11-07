@@ -211,6 +211,15 @@ impl Venus {
         Ok(Blob { resource, size, map_info, map, _vmo: vmo })
     }
 
+    /// Pokus kroku 4: vystup 0 zobrazi blob (`format` virtio-gpu, napr.
+    /// `B8G8R8X8_UNORM` = 2); `None` vrati puvodni obraz. Blob musi byt
+    /// podlozeny dmabuf.
+    pub fn scanout_blob(&mut self, blob: Option<&Blob>, w: u32, h: u32, format: u32, stride: u32) -> Result<()> {
+        let resource = blob.map_or(0, |b| b.resource);
+        let (r, _) = request(&self.ch, &Request::ScanoutBlob { resource, w, h, format, stride })?;
+        expect(r, |r| matches!(r, Reply::Done { .. }))
+    }
+
     /// Znici blob (ovladac odvola jeho mapovani).
     pub fn destroy_blob(&mut self, b: Blob) -> Result<()> {
         let resource = b.resource;

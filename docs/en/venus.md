@@ -185,6 +185,7 @@ it (`guiproto::display` `OPEN_RENDER`) and passes it on.
 | `CREATE_BLOB` | memory (`HOST3D`), flags (`MAPPABLE`...), blob_id, size | `BLOB` (resource, size, `map_info`) + VMO when `MAPPABLE` |
 | `DESTROY_BLOB` | resource | `DONE` |
 | `SUBMIT` | ring_idx (only 0 for now), fence, stream (at most 60 KiB, multiple of 4) | `SUBMITTED` (with a fence, after processing) |
+| `SCANOUT_BLOB` | resource (0 = restore the original image), w, h, format, row pitch | `DONE`; step 4 experiment, only the client's own blob |
 
 Closing the channel: the driver revokes the shared-memory windows
 (`VMO_REVOKE`), unmaps and frees the blobs and destroys the context.
@@ -233,3 +234,23 @@ is 3.3 MB (a fraction of that compressed in git).
    (unions in the generator), `vkCmdCopyImageToBuffer`, `vkQueueSubmit`,
    a fence, reading pixels back from the blob.
 4. Compositor composition over Vulkan.
+
+### Experiment: zero-copy scanout (`SET_SCANOUT_BLOB`)
+
+The ideal for the compositor: the GPU composes the image into its memory
+and that memory is shown directly, without a CPU copy. virtio-gpu has
+`SET_SCANOUT_BLOB` for this; with virgl/Venus the blob must be backed by a
+dmabuf and the QEMU display imports it through EGL.
+
+Experiment (`vk-probe`, the step 3 buffer on output 0 for 0.5 s):
+
+| Part | Result in WSL |
+|---|---|
+| exporting `VkDeviceMemory` as a dmabuf (lavapipe `VK_EXT_external_memory_dma_buf`) | works |
+| `SET_SCANOUT_BLOB` in the device, restoring the original image | accepted, OK response |
+| drawing in the GTK display under Xvfb | **fails**: `eglMakeCurrent failed` exactly when showing and restoring; software EGL under Xvfb does not import the dmabuf (WSL has neither `/dev/dri` nor `/dev/udmabuf`) |
+
+Conclusion: the zero-copy path is right on the system side but cannot be
+verified on screen in WSL. The compositor over Vulkan will therefore have
+both paths: zero-copy (Linux with a real GPU) and reading the frame back
+into a buffer plus today's 2D path (WSL and everywhere else).

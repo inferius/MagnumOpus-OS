@@ -180,6 +180,7 @@ displeje (`guiproto::display` `OPEN_RENDER`) a předá dál.
 | `CREATE_BLOB` | paměť (`HOST3D`), příznaky (`MAPPABLE`...), blob_id, velikost | `BLOB` (resource, velikost, `map_info`) + VMO, když `MAPPABLE` |
 | `DESTROY_BLOB` | resource | `DONE` |
 | `SUBMIT` | ring_idx (zatím jen 0), plot, proud (nejvýš 60 KiB, násobek 4) | `SUBMITTED` (s plotem až po zpracování) |
+| `SCANOUT_BLOB` | resource (0 = vrátit původní obraz), w, h, formát, krok řádku | `DONE`; pokus kroku 4, jen vlastní blob klienta |
 
 Zavření kanálu: ovladač odvolá okna sdílené paměti (`VMO_REVOKE`),
 odmapuje a uvolní bloby a zničí kontext.
@@ -224,3 +225,23 @@ Bez KVM nebo s TCG (aarch64 ve WSL) Venus netestujeme; `vk.xml` má
    (unie v generátoru), `vkCmdCopyImageToBuffer`, `vkQueueSubmit`, plot,
    zpětné čtení pixelů z bloba.
 4. Skládání kompozitoru přes Vulkan.
+
+### Pokus: zobrazení bez kopie (`SET_SCANOUT_BLOB`)
+
+Ideál pro kompozitor: grafická karta poskládá obraz do své paměti a ta se
+rovnou zobrazí, bez kopie přes procesor. virtio-gpu na to má
+`SET_SCANOUT_BLOB`; u virgl/Venus musí být blob podložený dmabuf
+a displej QEMU ho importuje přes EGL.
+
+Pokus (`vk-probe`, buffer z kroku 3 na výstupu 0 po dobu 0,5 s):
+
+| Část | Výsledek ve WSL |
+|---|---|
+| export `VkDeviceMemory` jako dmabuf (lavapipe `VK_EXT_external_memory_dma_buf`) | funguje |
+| `SET_SCANOUT_BLOB` v zařízení, vrácení původního obrazu | zařízení přijme, odpověď OK |
+| vykreslení v displeji GTK pod Xvfb | **nejde**: `eglMakeCurrent failed` přesně při zobrazení i vrácení; softwarové EGL pod Xvfb dmabuf neimportuje (ve WSL chybí `/dev/dri` i `/dev/udmabuf`) |
+
+Závěr: cesta bez kopie je správně na straně systému, ale ve WSL ji nejde
+ověřit na obrazovce. Kompozitor přes Vulkan proto bude mít obě cesty:
+bez kopie (Linux se skutečnou GPU) a se zpětným čtením snímku do bufferu
+a dnešní 2D cestou (WSL a všude jinde).
