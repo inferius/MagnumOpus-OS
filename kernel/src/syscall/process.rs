@@ -3,18 +3,21 @@
 use super::handle::arg_handle;
 use super::{Args, current_process, user};
 use crate::error::{Error, Result};
+use crate::object::job::Job;
 use crate::object::process::Process;
 use crate::object::{KernelObject, Rights};
 use crate::sched::{self, Thread};
 
-/// `PROCESS_CREATE(name_ptr, name_len) -> handle`: prazdny proces.
+/// `PROCESS_CREATE(job, name_ptr, name_len) -> handle`: prazdny proces
+/// v jobu `job` (pravo `MANAGE`).
 pub fn create(a: Args) -> Result<u64> {
     let p = current_process();
-    let name = user::read_name(&p, a[0], a[1])?;
+    let job = p.handles().get_as::<Job>(arg_handle(a[0])?, Rights::MANAGE)?;
+    let name = user::read_name(&p, a[1], a[2])?;
     if !crate::mm::phys::user_room(8) {
         return Err(Error::NoMemory);
     }
-    let child = Process::new(&name)?;
+    let child = Process::new(&name, job)?;
     let rights = child.default_rights();
     Ok(p.handles().insert(child, rights)?.0 as u64)
 }

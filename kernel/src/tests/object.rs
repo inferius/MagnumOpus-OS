@@ -5,6 +5,7 @@ use core::time::Duration;
 use super::join;
 use crate::mm::{self, VirtAddr, phys};
 use crate::object::event::Event;
+use crate::object::job::{Charge, Job, Pool};
 use crate::object::process::Process;
 use crate::object::wait::{self, deadline_after};
 use crate::object::{Error, Handle, HandleTable, KernelObject, Rights, Signals};
@@ -23,6 +24,8 @@ pub const TESTS: &[(&str, fn())] = &[
         "casovace: zrusene cekani neopousti zaznam",
         timers_cancelled,
     ),
+    ("joby: limity predku, vraceni strzeni", jobs),
+    ("handly: tabulka nad 4 MiB slotu", handles_many),
 ];
 
 fn events_wait_many() {
@@ -78,7 +81,7 @@ fn ping_pong() {
 }
 
 fn handles() {
-    let mut table = HandleTable::new();
+    let mut table = HandleTable::new(Charge::none());
     let event = Event::new();
     let h = table.insert(event.clone(), event.default_rights()).unwrap();
     assert!(table.get_as::<Event>(h, Rights::SIGNAL).is_ok());
@@ -121,7 +124,7 @@ fn handles() {
 }
 
 fn processes() {
-    let p = Process::new("test").expect("vytvoreni procesu");
+    let p = Process::new("test", Job::new_root()).expect("vytvoreni procesu");
     // Jadro je ve vsech adresnich prostorech stejne, spodni polovina prazdna.
     let kernel_addr = VirtAddr::new(processes as *const () as u64);
     assert_eq!(
@@ -143,7 +146,7 @@ fn processes() {
     // Opakovane vytvoreni a zruseni procesu nesmi ztracet pamet.
     let before = phys::stats().0;
     for _ in 0..100 {
-        drop(Process::new("tmp").unwrap());
+        drop(Process::new("tmp", Job::new_root()).unwrap());
     }
     let after = phys::stats().0;
     assert!(
@@ -153,7 +156,7 @@ fn processes() {
 }
 
 fn handle_generation_exhausted() {
-    let mut table = HandleTable::new();
+    let mut table = HandleTable::new(Charge::none());
     let event = Event::new();
     let first = table.insert(event.clone(), Rights::WAIT).unwrap();
     table.close(first).unwrap();
@@ -189,4 +192,66 @@ fn timers_cancelled() {
         before,
         "zrusene casovace zustaly ve fronte"
     );
+}
+
+fn jobs() {
+    let root = Job::new_root();
+    let a = Job::new_child(&root).unwrap();
+    let b = Job::new_child(&a).unwrap();
+    let base = root.info().kernel.used;
+    a.set_limit(Pool::User, 1000);
+
+    // Strzeni v potomkovi se pocita i predkum.
+    let c1 = b.charge(Pool::User, 600).unwrap();
+    assert_eq!(a.info().user.used, 600);
+    assert_eq!(root.info().user.used, 600);
+    assert_eq!(b.info().user.available, 400);
+
+    // Limit predka plati i pres vlastni limit potomka.
+    b.set_limit(Pool::User, 1 << 40);
+    assert_eq!(b.charge(Pool::User, 500).err(), Some(Error::NoResources));
+    // Neuspech nic nenechal strzene (ani u potomka na ceste).
+    assert_eq!(b.info().user.used, 600);
+    assert_eq!(root.info().user.used, 600);
+
+    // Rozpocty jsou oddelene.
+    let k = b.charge(Pool::Kernel, 5000).unwrap();
+    drop(c1);
+    assert_eq!(root.info().user.used, 0);
+    drop(k);
+    assert_eq!(root.info().kernel.used, base);
+
+    // Grow/shrink drzitele.
+    let mut c = a.charge(Pool::User, 100).unwrap();
+    c.grow(800).unwrap();
+    assert_eq!(c.grow(200).err(), Some(Error::NoResources));
+    c.shrink(500);
+    assert_eq!(a.info().user.used, 400);
+    drop(c);
+    assert_eq!(a.info().user.used, 0);
+
+    // Limit pod spotrebou: dalsi strzeni selze, uvolneni projde.
+    let c = a.charge(Pool::User, 900).unwrap();
+    a.set_limit(Pool::User, 100);
+    assert_eq!(a.charge(Pool::User, 1).err(), Some(Error::NoResources));
+    drop(c);
+    assert!(a.charge(Pool::User, 100).is_ok());
+}
+
+fn handles_many() {
+    // Vic slotu, nez by se veslo do jednoho bloku heapu (4 MiB): drive by
+    // tabulka v obycejnem `Vec` pri rustu selhala.
+    let job = Job::new_root();
+    let mut table = HandleTable::new(job.charge(Pool::Kernel, 0).unwrap());
+    let event = Event::new();
+    let n = 200_000;
+    let mut last = Handle::INVALID;
+    for _ in 0..n {
+        last = table.insert(event.clone(), Rights::WAIT).unwrap();
+    }
+    assert_eq!(table.slot_count(), n);
+    assert!(table.get(last, Rights::WAIT).is_ok());
+    assert!(job.info().kernel.used >= n as u64 * 16);
+    drop(table);
+    assert_eq!(job.info().kernel.used, 0);
 }

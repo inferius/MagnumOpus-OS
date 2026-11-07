@@ -113,8 +113,10 @@ horní polovinu sdílí s jádrem):
   (FCW 0x037F, MXCSR 0x1F80), takže data jiného vlákna nemohou uniknout.
   Jádro samo FPU/SSE nepoužívá (soft-float). AVX není zapnuté (instrukce
   skončí výjimkou #UD).
-- **Limity:** handly, vlákna, mapování, fronty kanálů a rezerva paměti
-  jádra - viz [syscally.md](syscally.md#limity-prostředků).
+- **Rozpočty a meze:** paměť jádra a uživatelská paměť se strhává
+  z rozpočtu jobu procesu (strom jobů, limity v bajtech), rezerva paměti
+  jádra a strukturální meze - viz
+  [syscally.md](syscally.md#joby-rozpočty-prostředků).
 
 ## IOMMU (ochrana DMA)
 

@@ -7,6 +7,10 @@
 //! Signaly konce: `READABLE` (fronta neni prazdna), `PEER_CLOSED` (druhy
 //! konec uz neexistuje; zpravy, ktere uz ve fronte jsou, jde dal cist).
 //!
+//! Pamet zpravy ve fronte se strhava z rozpoctu jadra jobu odesilatele
+//! a vrati se, kdyz si ji prijemce precte (nebo s kanalem zanikne).
+//! Limity poctu zprav a bajtu ve fronte jsou rizeni toku (`SHOULD_WAIT`).
+//!
 //! Poradi zamku: fronta -> signaly objektu -> planovac.
 
 use alloc::collections::VecDeque;
@@ -15,6 +19,7 @@ use alloc::vec::Vec;
 
 use abi::syscall::{CHANNEL_MAX_DATA, CHANNEL_MAX_HANDLES, CHANNEL_MAX_QUEUED};
 
+use super::job::Charge;
 use super::{Error, KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::sync::SpinLock;
 
@@ -22,12 +27,47 @@ use crate::sync::SpinLock;
 pub struct Message {
     pub data: Vec<u8>,
     pub handles: Vec<(Arc<dyn KernelObject>, Rights)>,
+    /// Strzeni za zpravu z rozpoctu odesilatele (vrati se se zanikem zpravy).
+    #[expect(dead_code, reason = "drzi strzeni, cte se jen v Drop")]
+    pub charge: Charge,
+}
+
+impl Message {
+    /// Zprava bez strzeni (posila jadro).
+    pub fn new(data: Vec<u8>, handles: Vec<(Arc<dyn KernelObject>, Rights)>) -> Self {
+        Self {
+            data,
+            handles,
+            charge: Charge::none(),
+        }
+    }
+
+    /// Pamet jadra, kterou zprava ve fronte zabira.
+    pub fn cost(data_len: usize, handles: usize) -> u64 {
+        (data_len + handles * 24 + 64) as u64
+    }
+}
+
+/// Fronta prichozich zprav jednoho konce.
+#[derive(Default)]
+struct Queue {
+    msgs: VecDeque<Message>,
+    /// Soucet bajtu dat ve fronte (rizeni toku bez prochazeni fronty).
+    bytes: usize,
+}
+
+impl Queue {
+    fn pop(&mut self) -> Option<Message> {
+        let m = self.msgs.pop_front()?;
+        self.bytes -= m.data.len();
+        Some(m)
+    }
 }
 
 pub struct Channel {
     core: ObjectCore,
     peer: SpinLock<Weak<Channel>>,
-    queue: SpinLock<VecDeque<Message>>,
+    queue: SpinLock<Queue>,
 }
 
 impl Channel {
@@ -37,7 +77,7 @@ impl Channel {
             Arc::new(Self {
                 core: ObjectCore::new(Signals::NONE),
                 peer: SpinLock::new(Weak::new()),
-                queue: SpinLock::new(VecDeque::new()),
+                queue: SpinLock::new(Queue::default()),
             })
         };
         let (a, b) = (new(), new());
@@ -53,15 +93,14 @@ impl Channel {
         }
         let peer = self.peer.lock().upgrade().ok_or(Error::PeerClosed)?;
         let mut queue = peer.queue.lock();
-        // Limit poctu zprav i bajtu: fronta jinak muze drzet az
-        // 1024 x 64 KiB pameti jadra.
-        let queued: usize = queue.iter().map(|m| m.data.len()).sum();
-        if queue.len() >= CHANNEL_MAX_QUEUED
-            || queued + msg.data.len() > abi::limits::CHANNEL_MAX_QUEUED_BYTES
+        // Rizeni toku: odesilatel nepredbehne prijemce neomezene.
+        if queue.msgs.len() >= CHANNEL_MAX_QUEUED
+            || queue.bytes + msg.data.len() > abi::limits::CHANNEL_MAX_QUEUED_BYTES
         {
             return Err(Error::ShouldWait);
         }
-        queue.push_back(msg);
+        queue.bytes += msg.data.len();
+        queue.msgs.push_back(msg);
         peer.core.update(Signals::NONE, Signals::READABLE);
         Ok(())
     }
@@ -70,6 +109,7 @@ impl Channel {
     pub fn peek_size(&self) -> Option<(usize, usize)> {
         self.queue
             .lock()
+            .msgs
             .front()
             .map(|m| (m.data.len(), m.handles.len()))
     }
@@ -78,7 +118,7 @@ impl Channel {
     /// `BufferTooSmall` a zprava zustane ve fronte.
     pub fn read(&self, data_cap: usize, handles_cap: usize) -> Result<Message, Error> {
         let mut queue = self.queue.lock();
-        let Some(front) = queue.front() else {
+        let Some(front) = queue.msgs.front() else {
             return Err(if self.core.signals().intersects(Signals::PEER_CLOSED) {
                 Error::PeerClosed
             } else {
@@ -88,8 +128,8 @@ impl Channel {
         if front.data.len() > data_cap || front.handles.len() > handles_cap {
             return Err(Error::BufferTooSmall);
         }
-        let msg = queue.pop_front().unwrap();
-        if queue.is_empty() {
+        let msg = queue.pop().unwrap();
+        if queue.msgs.is_empty() {
             self.core.update(Signals::READABLE, Signals::NONE);
         }
         Ok(msg)
@@ -103,7 +143,7 @@ impl Channel {
     /// Lezi ve fronte tohoto konce nejaky konec kanalu? Takovy konec se
     /// nesmi poslat dal (viz `syscall::channel::write` - zabrana cyklum).
     pub fn holds_channels(&self) -> bool {
-        self.queue.lock().iter().any(|m| {
+        self.queue.lock().msgs.iter().any(|m| {
             m.handles
                 .iter()
                 .any(|(o, _)| o.object_type() == ObjectType::Channel)

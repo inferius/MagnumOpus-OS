@@ -11,7 +11,7 @@ use super::{Args, current_process, user};
 use crate::error::{Error, Result};
 use crate::object::event::Event;
 use crate::object::port::Port;
-use crate::object::{KernelObject, ObjectType, Rights, Signals, wait};
+use crate::object::{KernelObject, ObjectType, Rights, Signals, charged, wait};
 
 fn deadline(v: u64) -> Option<u64> {
     (v != DEADLINE_INFINITE).then_some(v)
@@ -90,16 +90,17 @@ pub fn signal(a: Args) -> Result<u64> {
 
 /// `EVENT_CREATE() -> handle`.
 pub fn event_create() -> Result<u64> {
-    let event = Event::new();
+    let p = current_process();
+    let event = charged(Event::new(), p.job())?;
     let rights = event.default_rights();
-    let h = current_process().handles().insert(event, rights)?;
+    let h = p.handles().insert(event, rights)?;
     Ok(h.0 as u64)
 }
 
 /// `PORT_CREATE() -> handle`.
 pub fn port_create() -> Result<u64> {
     let p = current_process();
-    let port = Port::new(p.port_budget());
+    let port = charged(Port::new(Some(p.job().clone())), p.job())?;
     let rights = port.default_rights();
     let h = p.handles().insert(port, rights)?;
     Ok(h.0 as u64)

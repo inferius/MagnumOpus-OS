@@ -68,7 +68,7 @@ fn vmo_out_of_range(_: &Startup) -> TestResult {
         "cteni pres konec"
     );
     check_eq!(
-        sys::vmo_create(0),
+        sys::vmo_create(0, 0),
         Err(Error::InvalidArgs),
         "objekt velikosti 0"
     );

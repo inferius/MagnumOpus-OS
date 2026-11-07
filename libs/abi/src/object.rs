@@ -130,6 +130,7 @@ pub enum ObjectType {
     Resource = 6,
     Interrupt = 7,
     Port = 8,
+    Job = 9,
 }
 
 /// Zprava MSI, kterou ovladac zapise do zarizeni (vystup `INTERRUPT_CREATE`).

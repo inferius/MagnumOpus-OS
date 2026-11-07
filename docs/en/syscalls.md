@@ -159,12 +159,12 @@ on the number of watched objects.
 
 - **Room for the packet is reserved at registration**, so delivery (even
   from an interrupt handler) does not allocate and a packet is never lost.
-  A port holds at most `PORT_MAX_PENDING` (65,536) registrations and
-  pending packets, and all ports of one process together at most
-  `PROCESS_MAX_PORT_PENDING` (65,536), because every registration holds
-  kernel memory. Room in the quota is returned when a packet is picked
-  up, the object is destroyed or the port is closed. An empty port
-  returns spare queue capacity.
+  Every registration and unpicked packet costs 64 B of the kernel-memory
+  budget of the job of the process that created the port
+  ([Jobs](#jobs-resource-budgets)); there is no fixed count. The charge
+  is returned when a packet is picked up, the object is destroyed or the
+  port is closed. Packets live in 4 KiB blocks (no large contiguous
+  allocation), an empty port returns spare blocks.
 - **A destroyed object** (its last handle closed) returns the reservation
   of its undelivered registrations. **A closed port**: objects drop its
   registrations.
@@ -189,7 +189,7 @@ loop {
 
 ### `PORT_CREATE`
 
-`() -> handle`. A new empty port with rights `DUPLICATE`, `TRANSFER`,
+`() -> handle`. A new empty port (charged to the job budget) with rights `DUPLICATE`, `TRANSFER`,
 `WAIT`, `READ`, `WRITE`. Errors: `NO_RESOURCES`.
 
 ### `OBJECT_WAIT_ASYNC`
@@ -201,8 +201,7 @@ holds, the packet arrives at once. Requires `WAIT` on the object and
 `WRITE` on the port. Registering on a port itself is not possible.
 Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`port` is not a
 port), `NOT_SUPPORTED` (the object is a port), `INVALID_ARGS` (empty
-mask), `NO_RESOURCES` (the port holds `PORT_MAX_PENDING` registrations and
-packets, or the process used up `PROCESS_MAX_PORT_PENDING`), `NO_MEMORY`.
+mask), `NO_RESOURCES` (the kernel budget of the job is used up), `NO_MEMORY`.
 
 ### `PORT_WAIT`
 
@@ -254,10 +253,14 @@ are written to `out_actual_ptr`), `BAD_HANDLE`, `ACCESS_DENIED`,
 
 ### `VMO_CREATE`
 
-`(size) -> handle`. A memory object of `size` bytes (rounded up to 4 KiB,
-max 4 GiB), zero-filled. Pages are allocated up front for now. Rights:
-`DUPLICATE`, `TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`. Errors:
-`INVALID_ARGS` (0 or too large), `NO_MEMORY`, `NO_RESOURCES`.
+`(size, process) -> handle`. A memory object of `size` bytes (rounded up
+to 4 KiB, max 1 TiB), zero-filled. Pages are allocated up front for now
+and charged to the user-memory budget of the job of `process` (a handle
+with `WRITE`; 0 = the caller). A parent thus creates a program's memory
+(segments, stack) on the child's account. Rights: `DUPLICATE`,
+`TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`. Errors:
+`INVALID_ARGS` (0 or too large), `NO_MEMORY`, `NO_RESOURCES` (job
+budget), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`process`).
 
 ### `VMO_READ`
 
@@ -314,10 +317,12 @@ and writing the startup message -> `THREAD_CREATE` -> `PROCESS_START`.
 
 ### `PROCESS_CREATE`
 
-`(name_ptr, name_len) -> handle`. An empty process with no memory or
-threads. Name: UTF-8, max 64 B (for logs). Rights: `DUPLICATE`, `TRANSFER`,
-`WAIT`, `MANAGE`, `WRITE`, `READ`. Errors: `INVALID_ARGS`, `NO_MEMORY`,
-`BAD_ADDRESS`.
+`(job, name_ptr, name_len) -> handle`. An empty process with no memory or
+threads in job `job` (right `MANAGE`); everything the process costs is
+charged to the job budget. Name: UTF-8, max 64 B (for logs). Rights:
+`DUPLICATE`, `TRANSFER`, `WAIT`, `MANAGE`, `WRITE`, `READ`. Errors:
+`INVALID_ARGS`, `NO_MEMORY`, `NO_RESOURCES` (job budget), `BAD_ADDRESS`,
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
 
 ### `PROCESS_START`
 
@@ -373,23 +378,95 @@ the process ends (code -1,000,002 unless `PROCESS_EXIT` was called before).
 `() -> 0`. Gives the CPU to the next ready thread of the same or higher
 class.
 
-## Resource limits
+## Jobs (resource budgets)
 
-A program must not consume kernel memory without bounds (`abi::limits`):
+Every process belongs to one **job**. Jobs form a tree: init gets the
+root from the kernel (no limit, all rights) and divides it among
+services. Everything a process costs is charged to the budget of its job
+**and of all ancestors**, so a job limit applies to its whole subtree.
 
-| Limit | Value | When exceeded |
-|---|---|---|
-| kernel reserve: memory of memory objects (`VMO_CREATE*`), thread stacks, message data in queues, page tables of mappings, new processes and objects (every new handle) is not allocated if less free memory would remain | 1/32 of RAM, at least 16 MiB | `NO_MEMORY` |
-| handles in a process table | 65,536 | `NO_RESOURCES` |
-| threads of a process (including finished ones somebody holds a handle to) | 1024 | `NO_RESOURCES` |
-| mappings in a process address space | 65,536 | `NO_RESOURCES` |
-| messages queued at one channel end | 1024 | `SHOULD_WAIT` |
-| data bytes queued at one channel end | 4 MiB | `SHOULD_WAIT` |
-| registrations and unpicked packets in all ports of a process | 65,536 | `NO_RESOURCES` |
+Two budgets in bytes (`abi::job::pool`):
 
-Memory exhaustion by a program therefore cannot bring the kernel down: page
-tables, the heap and kernel stacks may also use the reserve. Planned:
-quotas for groups of processes (job) set by the parent.
+| Budget | What is charged |
+|---|---|
+| `KERNEL` (0) - kernel memory | the process (structure + root page table), objects (event, channel, port, memory object, interrupt, resource, job), handle slots, port registrations (64 B), messages in channel queues (charged to the sender), mappings (record + upper estimate of page tables), threads (structure + 64 KiB kernel stack), page lists of memory objects |
+| `USER` (1) - user memory | pages of memory objects (`VMO_CREATE`, `VMO_CREATE_CONTIGUOUS`, DMA memory too) |
+
+- A charge is returned automatically when the thing holding it goes away.
+- Exceeding a budget = `NO_RESOURCES`. Running out of physical memory of
+  the system is still `NO_MEMORY` (kernel reserve below).
+- A child gets its job **without the `WRITE` right**: it may start
+  processes and create sub-jobs in it (`MANAGE`) but cannot change the
+  limit. Even if it raised the limit of a sub-job, the ancestor limit
+  still applies.
+- A limit below current usage is allowed: nothing is taken away, only
+  further charges fail.
+- Races: two concurrent charges just below the limit may both fail; the
+  limit is never exceeded.
+- Wrappers: `libos::job` (`Job::create`, `set_limit`, `info`, `current`),
+  `libos::spawn_in` (start a program in a given job; `spawn` = the same
+  job as the parent). The startup message carries the job as
+  `bootstrap::kind::JOB`.
+
+```rust
+use libos::job::{Job, pool};
+let job = Job::create(&libos::job::current()?)?;
+job.set_limit(pool::USER, 64 << 20)?;   // 64 MiB of user memory
+job.set_limit(pool::KERNEL, 4 << 20)?;  // 4 MiB of kernel memory
+let (proc, ch) = libos::spawn_in(&job, "service", image, handles)?;
+let info = job.info()?;                 // usage, limits, remaining
+```
+
+> **Change from the previous version:** limits were fixed counts per
+> process (65,536 handles, 1024 threads, 65,536 mappings, 65,536 port
+> registrations per port and per process). A large server (hundreds of
+> thousands of connections) would hit them, and they did not protect what
+> matters - memory: 65,536 memory objects of 1 GiB each would not exceed
+> the limit. Byte budgets protect memory directly, the parent sets them
+> and they can be graded along the tree.
+
+### `JOB_CREATE`
+
+`(parent) -> handle`. A sub-job with no own limit (ancestor limits
+apply). `parent` needs `MANAGE`. The object is charged to the kernel
+budget of `parent`. Rights: `DUPLICATE`, `TRANSFER`, `WAIT`, `READ`,
+`WRITE`, `MANAGE`. Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
+`NO_RESOURCES`.
+
+### `JOB_SET_LIMIT`
+
+`(job, pool, bytes) -> 0`. Sets the own limit of budget `pool`
+(`KERNEL` = 0, `USER` = 1) in bytes; `u64::MAX` (`job::UNLIMITED`) = no
+own limit. Requires `WRITE`. Errors: `INVALID_ARGS` (unknown `pool`),
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
+### `JOB_INFO`
+
+`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (48 B, little endian):
+for kernel memory and then user memory always `used` (charged to the job
+including descendants), `limit` (own limit) and `available` (how much
+can still be charged - the smallest free room over the job and all
+ancestors; `u64::MAX` = no limit anywhere). Requires `READ`. Errors:
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
+
+## Structural limits
+
+Limits given by data formats or calls, not policy:
+
+| Limit | Value | When exceeded | Why |
+|---|---|---|---|
+| kernel reserve: memory for programs (memory objects, thread stacks, message data, page tables, objects and handles) is not allocated if less free memory would remain | 1/32 of RAM, at least 16 MiB | `NO_MEMORY` | the kernel must survive memory exhaustion by a program |
+| handles in a process table | 1,048,575 | `NO_RESOURCES` | a handle has 20 index bits (the rest is the slot generation) |
+| size of a memory object | 1 TiB | `INVALID_ARGS` | the page list is a two-level array |
+| messages queued at one channel end | 1024 | `SHOULD_WAIT` | flow control (memory is guarded by the budget) |
+| data bytes queued at one channel end | 4 MiB | `SHOULD_WAIT` | flow control |
+| one channel message | 64 KiB, 64 handles | `INVALID_ARGS` | copied in one call; larger data go in a memory object |
+| objects in `OBJECT_WAIT_MANY` | 64 | `INVALID_ARGS` | array on the kernel stack; use a port for more |
+| port registrations on one object | ~100,000 | `NO_MEMORY` | the waiter list of an object is a contiguous array (no limit across objects) |
+| `VMO_READ` / `VMO_WRITE`, `RANDOM_GET` | 1 MiB, 4 KiB per call | `INVALID_ARGS` | copied through a kernel buffer; libos splits into parts |
+
+Page tables, the heap and kernel stacks may also use the reserve, so
+memory exhaustion by a program cannot bring the kernel down.
 
 ## Hardware (drivers)
 

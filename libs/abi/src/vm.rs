@@ -35,5 +35,7 @@ pub const USER_MAX: u64 = 0x0000_7FFF_FFFF_F000;
 /// Odkud jadro vybira adresy pro mapovani bez MAP_FIXED.
 pub const USER_ALLOC_BASE: u64 = 0x0000_1000_0000_0000;
 
-/// Maximalni velikost jednoho objektu pameti.
-pub const VMO_MAX_SIZE: u64 = 1 << 32;
+/// Nejvetsi objekt pameti (1 TiB). Strukturalni mez: seznam stranek objektu
+/// je dvouurovnove pole v blocich po 4 KiB. Skutecny strop urcuje rozpocet
+/// uzivatelske pameti jobu a fyzicka pamet.
+pub const VMO_MAX_SIZE: u64 = 1 << 40;

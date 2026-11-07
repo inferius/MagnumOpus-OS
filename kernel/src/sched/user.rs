@@ -21,6 +21,11 @@ pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thre
     if !crate::mm::phys::user_room(crate::mm::KERNEL_STACK_SIZE / crate::arch::paging::PAGE_SIZE) {
         return Err(Error::NoMemory);
     }
+    // Vlakno a jeho zasobnik jadra plati job procesu.
+    let charge = process.job().charge(
+        crate::object::job::Pool::Kernel,
+        crate::object::job::object_cost::<Thread>() + crate::mm::KERNEL_STACK_SIZE,
+    )?;
     let stack = KernelStack::new().ok_or(Error::NoMemory)?;
     // SAFETY: zasobnik je novy a patri jen tomuto vlaknu.
     let ctx = unsafe { Context::new(stack.top(), thread_start) };
@@ -34,6 +39,7 @@ pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thre
         cpu,
         Some(process.clone()),
     ));
+    crate::object::KernelObject::core(&*t).set_charge(charge);
     process.add_thread(&t)?;
     Ok(t)
 }

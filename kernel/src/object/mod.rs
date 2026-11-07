@@ -4,12 +4,14 @@
 //! k objektu pristupuje jen pres handle ve sve tabulce ([`HandleTable`]),
 //! ktery nese prava ([`Rights`]). Kazdy objekt ma signaly ([`Signals`]),
 //! na ktere lze cekat ([`wait`]) - primo vlaknem, nebo pres port
-//! ([`port`], jednorazova registrace s paketem).
+//! ([`port`], jednorazova registrace s paketem). Pamet objektu vytvorenych
+//! na pozadani procesu se strhava z rozpoctu jeho jobu ([`job`]).
 
 pub mod channel;
 pub mod event;
 pub mod handle;
 pub mod interrupt;
+pub mod job;
 pub mod port;
 pub mod process;
 pub mod resource;
@@ -27,6 +29,7 @@ pub use abi::{ObjectType, Rights, Signals};
 
 use crate::sched::{self, Thread};
 use crate::sync::SpinLock;
+use job::{Charge, Job, Pool, object_cost};
 
 pub trait KernelObject: Any + Send + Sync {
     fn core(&self) -> &ObjectCore;
@@ -60,9 +63,19 @@ impl Drop for Observer {
     }
 }
 
-/// Spolecna cast vsech objektu: signaly a seznam cekajicich.
+/// Spolecna cast vsech objektu: signaly, seznam cekajicich a strzeni
+/// z rozpoctu jobu (vrati se se zanikem objektu).
 pub struct ObjectCore {
     inner: SpinLock<CoreInner>,
+    charge: SpinLock<Charge>,
+}
+
+/// Strhne pamet objektu (odhad [`object_cost`]) z rozpoctu jadra jobu
+/// `job`; pri prekroceni rozpoctu objekt zanikne a vrati `NoResources`.
+pub fn charged<T: KernelObject>(obj: Arc<T>, job: &Arc<Job>) -> Result<Arc<T>, Error> {
+    let c = job.charge(Pool::Kernel, object_cost::<T>())?;
+    obj.core().set_charge(c);
+    Ok(obj)
 }
 
 struct CoreInner {
@@ -77,7 +90,13 @@ impl ObjectCore {
                 signals: initial,
                 observers: Vec::new(),
             }),
+            charge: SpinLock::new(Charge::none()),
         }
+    }
+
+    /// Prida k objektu strzeni (vrati se se zanikem objektu).
+    pub fn set_charge(&self, c: Charge) {
+        *self.charge.lock() = c;
     }
 
     pub fn signals(&self) -> Signals {

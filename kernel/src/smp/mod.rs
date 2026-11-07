@@ -27,6 +27,13 @@ pub fn start_secondary_cpus(platform: &Platform, boot_info: &BootInfo) -> usize 
 
     let mut index = 1;
     for cpu in platform.cpus.iter().filter(|c| c.hw_id != bsp) {
+        if index >= sched::MAX_CPUS {
+            log::warn!(
+                "vic CPU nez {} - dalsi nespoustim",
+                sched::MAX_CPUS
+            );
+            break;
+        }
         let Some(stack) = KernelStack::new() else {
             log::error!("nedostatek pameti pro zasobnik CPU {}", cpu.hw_id);
             break;

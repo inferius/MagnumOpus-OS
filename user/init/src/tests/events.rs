@@ -2,8 +2,7 @@
 
 use alloc::vec::Vec;
 
-use libos::abi::limits::PROCESS_MAX_PORT_PENDING;
-use libos::abi::syscall::{PORT_MAX_PENDING, RANDOM_MAX, random_flags};
+use libos::abi::syscall::{RANDOM_MAX, random_flags};
 use libos::hw::Resource;
 use libos::{Channel, Error, Event, Port, Rights, Signals, Startup, sys, time};
 
@@ -17,7 +16,7 @@ pub const TESTS: &[Test] = &[
     ("port: kanal ke cteni a zavreny kanal", port_channel),
     ("port: neplatne argumenty", port_invalid),
     ("port: zanikly objekt vrati rezervaci (bez uniku)", port_no_leak),
-    ("port: kvota registraci na proces pres vsechny porty", port_process_quota),
+    ("port: 300 000 registraci (bez pevneho limitu)", port_unbounded),
     ("RANDOM_GET: data, nasazeni, limity", random_get),
     ("RANDOM_ADD: jen s Resource MANAGE", random_add),
     ("virtio-rng: ovladac spusten", virtio_rng_started),
@@ -154,56 +153,77 @@ fn port_invalid(_: &Startup) -> TestResult {
     Ok(())
 }
 
+/// Init sdili korenovy job se sluzbami, ktere bezi soubezne: spotreba
+/// jadra se muze mirne menit i bez testu. Unik registraci by byl o rady
+/// vetsi (70 000 x 64 B).
+fn near(a: u64, b: u64) -> bool {
+    a.abs_diff(b) < 256 * 1024
+}
+
 fn port_no_leak(_: &Startup) -> TestResult {
     let port = Port::create().map_err(|e| fail("port", e))?;
-    // Vic registraci, nez port pojme: kazda patri objektu, ktery hned
-    // zanikne. Kdyby rezervace unikala, skoncilo by to NO_RESOURCES.
-    for i in 0..(PORT_MAX_PENDING as u64 + 100) {
+    let before = libos::job::current_info().map_err(|e| fail("JOB_INFO", e))?;
+    // Registrace objektu, ktere hned zaniknou: rezervace se musi vratit
+    // (rozpocet jadra jobu se vrati na puvodni hodnotu).
+    for i in 0..70_000u64 {
         let ev = Event::create().map_err(|e| fail("event", e))?;
         port.wait_async(ev.handle(), i, Signals::SIGNALED)
             .map_err(|e| fail("wait_async", e))?;
     }
     check_eq!(port.wait(no_wait()).err(), Some(Error::TimedOut), "zadne pakety");
+    let after = libos::job::current_info().map_err(|e| fail("JOB_INFO", e))?;
+    check!(
+        near(after.kernel.used, before.kernel.used),
+        alloc::format!("rozpocet jadra po zaniku objektu: {} -> {}", before.kernel.used, after.kernel.used)
+    );
     Ok(())
 }
 
-fn port_process_quota(_: &Startup) -> TestResult {
-    // Stejny event muze mit libovolne registraci; kvota je spolecna pro
-    // vsechny porty procesu.
-    let ev = Event::create().map_err(|e| fail("event", e))?;
+fn port_unbounded(_: &Startup) -> TestResult {
+    // Drive pevny limit 65 536 na port i proces; ted jen rozpocet jobu.
+    // 300 000 paketu je i vic, nez by se veslo do jedne souvisle fronty.
+    // Registrace jsou rozlozene na 300 eventu (jako sluzba s mnoha kanaly).
+    let n = 300_000u64;
+    let per_event = 1000;
+    let events: Vec<Event> = (0..n / per_event)
+        .map(|_| Event::create())
+        .collect::<Result<_, _>>()
+        .map_err(|e| fail("event", e))?;
     let a = Port::create().map_err(|e| fail("port A", e))?;
     let b = Port::create().map_err(|e| fail("port B", e))?;
-    let half = PROCESS_MAX_PORT_PENDING / 2;
-    for i in 0..half as u64 {
+    let before = libos::job::current_info().map_err(|e| fail("JOB_INFO", e))?;
+    for i in 0..n {
+        let ev = &events[(i / per_event) as usize];
         a.wait_async(ev.handle(), i, Signals::SIGNALED)
             .map_err(|e| fail("registrace A", e))?;
     }
-    for i in 0..(PROCESS_MAX_PORT_PENDING - half) as u64 {
-        b.wait_async(ev.handle(), i, Signals::SIGNALED)
+    for i in 0..1000 {
+        b.wait_async(events[0].handle(), i, Signals::SIGNALED)
             .map_err(|e| fail("registrace B", e))?;
     }
-    check_eq!(
-        b.wait_async(ev.handle(), 0, Signals::SIGNALED).err(),
-        Some(Error::NoResources),
-        "kvota procesu vycerpana"
+    let during = libos::job::current_info().map_err(|e| fail("JOB_INFO", e))?;
+    check!(
+        during.kernel.used + 256 * 1024 >= before.kernel.used + n * 64,
+        "registrace se nestrhavaji z rozpoctu"
     );
-    // Zavreny port vrati svou cast kvoty.
-    drop(a);
-    b.wait_async(ev.handle(), 1, Signals::SIGNALED)
-        .map_err(|e| fail("registrace po zavreni A", e))?;
-    // Vyzvednuty paket taky: signal doruci vsechny registrace B.
-    ev.signal().map_err(|e| fail("signal", e))?;
-    let mut n = 0;
-    while b.wait(no_wait()).is_ok() {
-        n += 1;
+    for ev in &events {
+        ev.signal().map_err(|e| fail("signal", e))?;
     }
-    check_eq!(n, PROCESS_MAX_PORT_PENDING - half + 1, "pakety B");
-    let c = Port::create().map_err(|e| fail("port C", e))?;
-    ev.reset().map_err(|e| fail("reset", e))?;
-    for i in 0..half as u64 {
-        c.wait_async(ev.handle(), i, Signals::SIGNALED)
-            .map_err(|e| fail("registrace C po vyzvednuti", e))?;
+    let mut count = 0u64;
+    let mut ordered = true;
+    while let Ok(p) = a.wait(no_wait()) {
+        ordered &= p.key == count;
+        count += 1;
     }
+    check_eq!(count, n, "pakety A");
+    check!(ordered, "poradi paketu = poradi signalu");
+    // Zavreny port vrati nevyzvednute pakety.
+    drop(b);
+    let after = libos::job::current_info().map_err(|e| fail("JOB_INFO", e))?;
+    check!(
+        near(after.kernel.used, before.kernel.used),
+        alloc::format!("rozpocet po vyzvednuti a zavreni: {} -> {}", before.kernel.used, after.kernel.used)
+    );
     Ok(())
 }
 

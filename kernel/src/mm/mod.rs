@@ -13,6 +13,7 @@
 //! prepnuti na tabulky jadra zahodi.
 
 mod address_space;
+pub mod chunked;
 pub mod heap;
 pub mod phys;
 pub mod tlb;

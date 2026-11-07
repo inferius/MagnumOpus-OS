@@ -33,6 +33,7 @@ mod event;
 mod handle;
 pub mod hw;
 pub mod initfs;
+pub mod job;
 pub mod log;
 mod mapping;
 mod port;
@@ -56,7 +57,8 @@ pub use mapping::{Mapping, Pod};
 pub use port::{Port, PortPacket};
 pub use process::{Process, Thread};
 pub use rt::Startup;
-pub use spawn::spawn;
+pub use job::Job;
+pub use spawn::{spawn, spawn_in};
 pub use vmo::Vmo;
 pub use wait::{wait_many, wait_one};
 

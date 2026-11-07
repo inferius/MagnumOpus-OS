@@ -29,7 +29,8 @@ pub const CHANNEL_CREATE: u64 = 8;
 pub const CHANNEL_WRITE: u64 = 9;
 /// Precte zpravu. `(handle, data_ptr, data_cap, handles_ptr, handles_cap, out_actual_ptr)`
 pub const CHANNEL_READ: u64 = 10;
-/// Vytvori objekt pameti. `(size) -> handle`
+/// Vytvori objekt pameti. `(size, process) -> handle`; stranky se strhnou
+/// z rozpoctu jobu procesu `process` (handle s pravem `WRITE`, 0 = volajici)
 pub const VMO_CREATE: u64 = 11;
 /// Cte z objektu pameti. `(handle, offset, buf_ptr, len)`
 pub const VMO_READ: u64 = 12;
@@ -39,7 +40,8 @@ pub const VMO_WRITE: u64 = 13;
 pub const VM_MAP: u64 = 14;
 /// Zrusi mapovani. `(process, addr, len)`
 pub const VM_UNMAP: u64 = 15;
-/// Vytvori prazdny proces. `(name_ptr, name_len) -> handle`
+/// Vytvori prazdny proces v jobu. `(job, name_ptr, name_len) -> handle`;
+/// job potrebuje pravo `MANAGE`
 pub const PROCESS_CREATE: u64 = 16;
 /// Spusti proces prvnim vlaknem. `(process, thread, entry, stack, bootstrap_handle)`
 pub const PROCESS_START: u64 = 17;
@@ -95,13 +97,21 @@ pub const OBJECT_WAIT_ASYNC: u64 = 37;
 /// na `out_ptr` zapise [`crate::object::PortPacket`] (16 B)
 pub const PORT_WAIT: u64 = 38;
 
-/// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 39;
+/// Vytvori podrizeny job. `(parent_job) -> handle`; rodic potrebuje `MANAGE`
+pub const JOB_CREATE: u64 = 39;
+/// Nastavi limit rozpoctu jobu. `(job, pool, bytes)`; job potrebuje `WRITE`,
+/// `pool` z [`crate::job::pool`], `bytes` = [`crate::job::UNLIMITED`] = bez limitu
+pub const JOB_SET_LIMIT: u64 = 40;
+/// Stav rozpoctu jobu. `(job, out_ptr)`; job potrebuje `READ`, na `out_ptr`
+/// zapise [`crate::job::JobInfo`] (48 B)
+pub const JOB_INFO: u64 = 41;
 
-/// Nejvic bajtu v jednom `RANDOM_GET` / `RANDOM_ADD`.
+/// Pocet definovanych syscallu (pro tabulky a testy).
+pub const COUNT: u64 = 42;
+
+/// Nejvic bajtu v jednom `RANDOM_GET` / `RANDOM_ADD` (jedno volani = jedna
+/// kopie pres buffer jadra; vic dat = vic volani).
 pub const RANDOM_MAX: usize = 4096;
-/// Nejvic registraci a cekajicich paketu jednoho portu.
-pub const PORT_MAX_PENDING: usize = 65_536;
 
 /// Priznaky `RANDOM_GET`.
 pub mod random_flags {
@@ -113,12 +123,16 @@ pub mod random_flags {
 /// Deadline "cekat neomezene".
 pub const DEADLINE_INFINITE: u64 = u64::MAX;
 
-/// Limity zprav kanalu.
+/// Limity jedne zpravy kanalu. Zprava se kopiruje jednim syscallem pres
+/// buffer jadra; vetsi data patri do objektu pameti (handle ve zprave).
 pub const CHANNEL_MAX_DATA: usize = 64 * 1024;
 pub const CHANNEL_MAX_HANDLES: usize = 64;
-/// Maximalni pocet zprav cekajicich ve fronte jednoho konce kanalu.
+/// Rizeni toku: nejvic zprav cekajicich ve fronte jednoho konce kanalu.
+/// Pamet front hlida rozpocet jobu odesilatele; tento limit jen brani tomu,
+/// aby odesilatel predbehl prijemce neomezene daleko (`SHOULD_WAIT`).
 pub const CHANNEL_MAX_QUEUED: usize = 1024;
-/// Maximalni pocet objektu v jednom `OBJECT_WAIT_MANY`.
+/// Nejvic objektu v jednom `OBJECT_WAIT_MANY` (pole lezi na zasobniku
+/// jadra). Na vic objektu je port (`OBJECT_WAIT_ASYNC`), bez limitu poctu.
 pub const WAIT_MANY_MAX: usize = 64;
 /// Maximalni delka jmena procesu nebo vlakna (bajty UTF-8).
 pub const NAME_MAX: usize = 64;

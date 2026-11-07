@@ -102,6 +102,9 @@ fn every_syscall_is_documented() {
         "PORT_CREATE",
         "OBJECT_WAIT_ASYNC",
         "PORT_WAIT",
+        "JOB_CREATE",
+        "JOB_SET_LIMIT",
+        "JOB_INFO",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
@@ -113,4 +116,22 @@ fn every_syscall_is_documented() {
             );
         }
     }
+}
+
+#[test]
+fn job_info_roundtrip() {
+    use crate::job::{JobInfo, PoolInfo, UNLIMITED};
+    let info = JobInfo {
+        kernel: PoolInfo {
+            used: 1,
+            limit: UNLIMITED,
+            available: 3,
+        },
+        user: PoolInfo {
+            used: 4,
+            limit: 5,
+            available: 1,
+        },
+    };
+    assert_eq!(JobInfo::decode(&info.encode()), info);
 }

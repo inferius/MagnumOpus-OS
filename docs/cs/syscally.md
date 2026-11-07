@@ -154,13 +154,12 @@ paket vyzvedne a po obsluze objekt zaregistruje znovu. Cena události
 nezávisí na počtu hlídaných objektů.
 
 - **Místo pro paket se rezervuje při registraci**, takže doručení
-  (i z obsluhy přerušení) nealokuje a paket se neztratí. Registrací
-  a čekajících paketů může být na portu nejvýš `PORT_MAX_PENDING`
-  (65 536) a ve všech portech jednoho procesu dohromady nejvýš
-  `PROCESS_MAX_PORT_PENDING` (65 536), protože každá registrace drží
-  paměť jádra. Místo v kvótě se vrátí vyzvednutím paketu, zánikem
-  objektu nebo zavřením portu. Prázdný port vrátí přebytečnou kapacitu
-  fronty.
+  (i z obsluhy přerušení) nealokuje a paket se neztratí. Každá registrace
+  a nevyzvednutý paket stojí 64 B z rozpočtu paměti jádra jobu procesu,
+  který port vytvořil ([Joby](#joby-rozpočty-prostředků)); pevný počet
+  není. Strženo se vrátí vyzvednutím paketu, zánikem objektu nebo
+  zavřením portu. Pakety leží v blocích po 4 KiB (žádná velká souvislá
+  alokace), prázdný port vrátí přebytečné bloky.
 - **Zaniklý objekt** (zavřený poslední handle) vrátí rezervaci svých
   nedoručených registrací. **Zavřený port**: objekty jeho registrace
   zahodí.
@@ -186,7 +185,7 @@ loop {
 ### `PORT_CREATE`
 
 `() -> handle`. Nový prázdný port s právy `DUPLICATE`, `TRANSFER`, `WAIT`,
-`READ`, `WRITE`. Chyby: `NO_RESOURCES`.
+`READ`, `WRITE`. Chyby: `NO_RESOURCES` (rozpočet jobu).
 
 ### `OBJECT_WAIT_ASYNC`
 
@@ -196,8 +195,7 @@ určuje program). Když je podmínka splněná už teď, paket přijde hned.
 Vyžaduje `WAIT` na objektu a `WRITE` na portu. Na port samotný registrovat
 nejde. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`port` není
 port), `NOT_SUPPORTED` (objekt je port), `INVALID_ARGS` (prázdná maska),
-`NO_RESOURCES` (port má `PORT_MAX_PENDING` registrací a paketů, nebo
-proces vyčerpal `PROCESS_MAX_PORT_PENDING`), `NO_MEMORY`.
+`NO_RESOURCES` (vyčerpaný rozpočet jádra jobu), `NO_MEMORY`.
 
 ### `PORT_WAIT`
 
@@ -249,10 +247,14 @@ se zapíšou potřebné velikosti), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
 
 ### `VMO_CREATE`
 
-`(size) -> handle`. Objekt paměti o velikosti `size` (zaokrouhleno na 4 KiB,
-max. 4 GiB), vyplněný nulami. Stránky se zatím alokují hned. Práva:
-`DUPLICATE`, `TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`. Chyby:
-`INVALID_ARGS` (0 nebo příliš velký), `NO_MEMORY`, `NO_RESOURCES`.
+`(size, process) -> handle`. Objekt paměti o velikosti `size` (zaokrouhleno
+na 4 KiB, max. 1 TiB), vyplněný nulami. Stránky se zatím alokují hned
+a strhnou se z rozpočtu uživatelské paměti jobu procesu `process`
+(handle s právem `WRITE`; 0 = volající). Rodič tak vytváří paměť programu
+(segmenty, zásobník) na účet potomka. Práva: `DUPLICATE`, `TRANSFER`,
+`WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`. Chyby: `INVALID_ARGS` (0 nebo
+příliš velký), `NO_MEMORY`, `NO_RESOURCES` (rozpočet jobu), `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE` (`process`).
 
 ### `VMO_READ`
 
@@ -308,9 +310,12 @@ a zápis startovní zprávy -> `THREAD_CREATE` -> `PROCESS_START`.
 
 ### `PROCESS_CREATE`
 
-`(name_ptr, name_len) -> handle`. Prázdný proces bez paměti a vláken. Jméno:
-UTF-8, max. 64 B (pro logy). Práva: `DUPLICATE`, `TRANSFER`, `WAIT`,
-`MANAGE`, `WRITE`, `READ`. Chyby: `INVALID_ARGS`, `NO_MEMORY`, `BAD_ADDRESS`.
+`(job, name_ptr, name_len) -> handle`. Prázdný proces bez paměti a vláken
+v jobu `job` (právo `MANAGE`); vše, co proces stojí, se strhává z rozpočtu
+jobu. Jméno: UTF-8, max. 64 B (pro logy). Práva: `DUPLICATE`, `TRANSFER`,
+`WAIT`, `MANAGE`, `WRITE`, `READ`. Chyby: `INVALID_ARGS`, `NO_MEMORY`,
+`NO_RESOURCES` (rozpočet jobu), `BAD_ADDRESS`, `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`.
 
 ### `PROCESS_START`
 
@@ -364,23 +369,92 @@ proces (kód -1 000 002, pokud předtím nevolal `PROCESS_EXIT`).
 
 `() -> 0`. Přenechá CPU dalšímu připravenému vláknu stejné nebo vyšší třídy.
 
-## Limity prostředků
+## Joby (rozpočty prostředků)
 
-Program nesmí spotřebovat paměť jádra bez omezení (`abi::limits`):
+Každý proces patří do jednoho **jobu**. Joby tvoří strom: kořen dostane
+init od jádra (bez limitu, se všemi právy) a rozděluje ho mezi služby.
+Vše, co proces stojí, se strhává z rozpočtu jeho jobu **a zároveň ze
+všech předků**, takže limit jobu platí pro celý jeho podstrom.
 
-| Limit | Hodnota | Po překročení |
-|---|---|---|
-| rezerva jádra: paměť objektů paměti (`VMO_CREATE*`), zásobníky vláken, data zpráv ve frontách, tabulky stránek mapování, nové procesy a objekty (každý nový handle) se nealokují, kdyby volné paměti zbylo méně | 1/32 RAM, nejméně 16 MiB | `NO_MEMORY` |
-| handly v tabulce procesu | 65 536 | `NO_RESOURCES` |
-| vlákna procesu (včetně ukončených, na která někdo drží handle) | 1024 | `NO_RESOURCES` |
-| mapování v adresním prostoru procesu | 65 536 | `NO_RESOURCES` |
-| zprávy ve frontě jednoho konce kanálu | 1024 | `SHOULD_WAIT` |
-| bajty dat ve frontě jednoho konce kanálu | 4 MiB | `SHOULD_WAIT` |
-| registrace a nevyzvednuté pakety ve všech portech procesu | 65 536 | `NO_RESOURCES` |
+Dva rozpočty v bajtech (`abi::job::pool`):
 
-Vyčerpání paměti programem tak jádro neshodí: tabulky stránek, heap a
-zásobníky jádra smí čerpat i z rezervy. Plán: kvóty pro skupiny procesů
-(job) nastavitelné rodičem.
+| Rozpočet | Co se strhává |
+|---|---|
+| `KERNEL` (0) – paměť jádra | proces (struktura + kořenová tabulka stránek), objekty (event, kanál, port, objekt paměti, přerušení, prostředek, job), sloty handlů, registrace portů (64 B), zprávy ve frontách kanálů (strhne se odesílateli), mapování (záznam + horní odhad tabulek stránek), vlákna (struktura + 64 KiB zásobníku jádra), seznamy stránek objektů paměti |
+| `USER` (1) – uživatelská paměť | stránky objektů paměti (`VMO_CREATE`, `VMO_CREATE_CONTIGUOUS`, i paměť pro DMA) |
+
+- Strženo se vrací automaticky se zánikem věci, která ho drží.
+- Překročení rozpočtu = `NO_RESOURCES`. Nedostatek fyzické paměti
+  systému je dál `NO_MEMORY` (rezerva jádra viz níže).
+- Potomek dostane svůj job **bez práva `WRITE`**: smí v něm spouštět
+  procesy a zakládat podřízené joby (`MANAGE`), ale limit si nezmění.
+  I kdyby si v podřízeném jobu limit zvedl, platí limit předka.
+- Limit pod aktuální spotřebou je povolený: nic se neodebírá, jen další
+  stržení selžou.
+- Souběh: dvě současná stržení těsně pod limitem mohou obě selhat; limit
+  se ale nepřekročí nikdy.
+- Obaly: `libos::job` (`Job::create`, `set_limit`, `info`, `current`),
+  `libos::spawn_in` (spuštění programu v daném jobu; `spawn` = stejný job
+  jako rodič). Startovní zpráva nese job jako `bootstrap::kind::JOB`.
+
+```rust
+use libos::job::{Job, pool};
+let job = Job::create(&libos::job::current()?)?;
+job.set_limit(pool::USER, 64 << 20)?;   // 64 MiB uživatelské paměti
+job.set_limit(pool::KERNEL, 4 << 20)?;  // 4 MiB paměti jádra
+let (proc, ch) = libos::spawn_in(&job, "sluzba", image, handles)?;
+let info = job.info()?;                 // spotřeba, limity, zbývá
+```
+
+> **Změna proti předchozí verzi:** limity byly pevné počty na proces
+> (65 536 handlů, 1024 vláken, 65 536 mapování, 65 536 registrací portů
+> na port i na proces). Velký server (stovky tisíc spojení) by na ně
+> narazil, a přitom nechránily to podstatné – paměť: 65 536 objektů
+> paměti po 1 GiB by limit nepřekročilo. Rozpočty v bajtech chrání paměť
+> přímo, nastavuje je rodič a dají se odstupňovat po stromu.
+
+### `JOB_CREATE`
+
+`(parent) -> handle`. Podřízený job bez vlastního limitu (platí limity
+předků). `parent` potřebuje `MANAGE`. Objekt se strhne z rozpočtu jádra
+`parent`. Práva: `DUPLICATE`, `TRANSFER`, `WAIT`, `READ`, `WRITE`,
+`MANAGE`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
+`NO_RESOURCES`.
+
+### `JOB_SET_LIMIT`
+
+`(job, pool, bytes) -> 0`. Nastaví vlastní limit rozpočtu `pool`
+(`KERNEL` = 0, `USER` = 1) v bajtech; `u64::MAX` (`job::UNLIMITED`) =
+bez vlastního limitu. Vyžaduje `WRITE`. Chyby: `INVALID_ARGS` (neznámý
+`pool`), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
+### `JOB_INFO`
+
+`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (48 B, little endian):
+pro paměť jádra a pak uživatelskou paměť vždy `used` (strženo z jobu
+včetně potomků), `limit` (vlastní limit) a `available` (kolik ještě jde
+strhnout – nejmenší volné místo přes job a všechny předky; `u64::MAX` =
+nikde limit). Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
+`WRONG_TYPE`, `BAD_ADDRESS`.
+
+## Strukturální meze
+
+Meze dané formátem dat nebo voláním, ne politikou:
+
+| Mez | Hodnota | Po překročení | Proč |
+|---|---|---|---|
+| rezerva jádra: paměť pro programy (objekty paměti, zásobníky vláken, data zpráv, tabulky stránek, objekty a handly) se nealokuje, kdyby volné paměti zbylo méně | 1/32 RAM, nejméně 16 MiB | `NO_MEMORY` | jádro musí přežít vyčerpání paměti programem |
+| handly v tabulce procesu | 1 048 575 | `NO_RESOURCES` | handle má 20 bitů indexu (zbytek je generace slotu) |
+| velikost objektu paměti | 1 TiB | `INVALID_ARGS` | seznam stránek je dvouúrovňové pole |
+| zprávy ve frontě jednoho konce kanálu | 1024 | `SHOULD_WAIT` | řízení toku (paměť hlídá rozpočet) |
+| bajty dat ve frontě jednoho konce kanálu | 4 MiB | `SHOULD_WAIT` | řízení toku |
+| jedna zpráva kanálu | 64 KiB, 64 handlů | `INVALID_ARGS` | kopie jedním voláním; větší data v objektu paměti |
+| objekty v `OBJECT_WAIT_MANY` | 64 | `INVALID_ARGS` | pole na zásobníku jádra; na víc je port |
+| registrace portů u jednoho objektu | ~100 000 | `NO_MEMORY` | seznam čekajících objektu je souvislé pole (na víc objektů žádná mez) |
+| `VMO_READ` / `VMO_WRITE`, `RANDOM_GET` | 1 MiB, 4 KiB na volání | `INVALID_ARGS` | kopie přes buffer jádra; libos dělí na části |
+
+Tabulky stránek, heap a zásobníky jádra smí čerpat i z rezervy, takže
+vyčerpání paměti programem jádro neshodí.
 
 ## Hardware (ovladače)
 

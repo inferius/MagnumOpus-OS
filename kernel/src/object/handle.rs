@@ -5,11 +5,17 @@
 //! znovupouziti slotu neukazuje na cizi objekt. Slot, ktery vycerpal vsechny
 //! generace, se uz nikdy nepouzije (generace by pretekla a stary handle by
 //! zacal znovu platit). Hodnota 0 neni nikdy platna.
+//!
+//! Sloty lezi v dvouurovnovem poli (bloky po 4 KiB, bez velkych souvislych
+//! alokaci) a volne sloty tvori seznam uvnitr slotu. Kazdy novy slot se
+//! strhne z rozpoctu jadra jobu procesu; sloty se nevraci (znovu se
+//! pouziji), uvolni se az s tabulkou.
 
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
+use super::job::Charge;
 use super::{Error, KernelObject, Rights};
+use crate::mm::chunked::ChunkedVec;
 
 const INDEX_BITS: u32 = 20;
 const GENERATION_BITS: u32 = 32 - INDEX_BITS;
@@ -39,18 +45,37 @@ struct Entry {
 
 struct Slot {
     generation: u16,
+    /// Dalsi volny slot (index + 1, 0 = konec seznamu), plati jen pro volny slot.
+    next_free: u32,
     entry: Option<Entry>,
 }
 
+/// Pamet jadra za jeden slot.
+const SLOT_COST: u64 = core::mem::size_of::<Slot>() as u64;
+
 #[derive(Default)]
 pub struct HandleTable {
-    slots: Vec<Slot>,
-    free: Vec<usize>,
+    slots: ChunkedVec<Slot>,
+    /// Prvni volny slot (index + 1, 0 = zadny).
+    free_head: u32,
+    /// Strzeni za sloty (rozpocet jadra jobu procesu).
+    charge: Charge,
 }
 
 impl HandleTable {
-    pub fn new() -> Self {
-        Self::default()
+    /// Prazdna tabulka; sloty se strhavaji pres `charge` (0 B z rozpoctu
+    /// jadra jobu procesu, nebo `Charge::none()`).
+    pub fn new(charge: Charge) -> Self {
+        Self {
+            slots: ChunkedVec::new(),
+            free_head: 0,
+            charge,
+        }
+    }
+
+    /// Pocet slotu (obsazenych i volnych), pro testy.
+    pub fn slot_count(&self) -> usize {
+        self.slots.len()
     }
 
     pub fn insert(
@@ -63,16 +88,23 @@ impl HandleTable {
         if !crate::mm::phys::user_room(1) {
             return Err(Error::NoMemory);
         }
-        let index = match self.free.pop() {
-            Some(i) => i,
-            None if self.slots.len() < MAX_HANDLES.min(abi::limits::PROCESS_MAX_HANDLES) => {
-                self.slots.push(Slot {
-                    generation: 0,
-                    entry: None,
-                });
-                self.slots.len() - 1
+        let index = if self.free_head != 0 {
+            let i = self.free_head as usize - 1;
+            self.free_head = self.slots[i].next_free;
+            i
+        } else if self.slots.len() < MAX_HANDLES.min(abi::limits::PROCESS_MAX_HANDLES) {
+            self.charge.grow(SLOT_COST)?;
+            if let Err(e) = self.slots.push(Slot {
+                generation: 0,
+                next_free: 0,
+                entry: None,
+            }) {
+                self.charge.shrink(SLOT_COST);
+                return Err(e);
             }
-            None => return Err(Error::NoResources),
+            self.slots.len() - 1
+        } else {
+            return Err(Error::NoResources);
         };
         let slot = &mut self.slots[index];
         slot.entry = Some(Entry { object, rights });
@@ -137,7 +169,8 @@ impl HandleTable {
         let entry = slot.entry.take().unwrap();
         if slot.generation < MAX_GENERATION {
             slot.generation += 1;
-            self.free.push(index);
+            slot.next_free = self.free_head;
+            self.free_head = index as u32 + 1;
         }
         // Jinak slot vyradime: zustane prazdny a uz se nepouzije.
         Ok((entry.object, entry.rights))

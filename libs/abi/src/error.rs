@@ -23,7 +23,7 @@ pub enum Error {
     TimedOut = -4,
     /// Nedostatek pameti.
     NoMemory = -5,
-    /// Vycerpany limit (pocet handlu, delka fronty, ...).
+    /// Vycerpany rozpocet jobu nebo strukturalni mez (pocet handlu, ...).
     NoResources = -6,
     /// Neplatny argument (hodnota mimo povoleny rozsah, nepovolena kombinace).
     InvalidArgs = -7,
@@ -165,7 +165,7 @@ impl Error {
             Self::WrongType => "objekt je jineho typu, nez operace ocekava",
             Self::TimedOut => "vyprsel cas cekani",
             Self::NoMemory => "nedostatek pameti",
-            Self::NoResources => "vycerpany limit (handly, fronta, ...)",
+            Self::NoResources => "vycerpany rozpocet jobu nebo mez (handly, ...)",
             Self::InvalidArgs => "neplatny argument",
             Self::NotFound => "pozadovana vec neexistuje",
             Self::NotSupported => "operace neni podporovana",

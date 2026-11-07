@@ -120,8 +120,10 @@ the upper half with the kernel):
   state (FCW 0x037F, MXCSR 0x1F80), so data of another thread cannot leak.
   The kernel itself does not use FPU/SSE (soft-float). AVX is not enabled
   (its instructions fault with #UD).
-- **Limits:** handles, threads, mappings, channel queues and the kernel
-  memory reserve - see [syscalls.md](syscalls.md#resource-limits).
+- **Budgets and limits:** kernel memory and user memory are charged to
+  the budget of the process job (a tree of jobs, limits in bytes), the
+  kernel memory reserve and structural limits - see
+  [syscalls.md](syscalls.md#jobs-resource-budgets).
 
 ## IOMMU (DMA protection)
 

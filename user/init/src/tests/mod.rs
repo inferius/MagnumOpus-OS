@@ -8,6 +8,7 @@ mod drivers;
 mod events;
 mod fs;
 mod ipc;
+mod jobs;
 mod memory;
 mod net;
 mod process;
@@ -26,6 +27,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ipc", ipc::TESTS),
     ("udalosti a nahoda", events::TESTS),
     ("procesy", process::TESTS),
+    ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("souborovy system", fs::TESTS),
     ("cas", time::TESTS),

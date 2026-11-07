@@ -12,6 +12,7 @@ use crate::error::Error;
 use crate::mm::VirtAddr;
 use crate::object::channel::{Channel, Message};
 use crate::object::event::Event;
+use crate::object::job::Job;
 use crate::object::process::Process;
 use crate::object::vmo::MemoryObject;
 use crate::object::{KernelObject, Rights, Signals};
@@ -26,9 +27,9 @@ pub const TESTS: &[(&str, fn())] = &[
 ];
 
 fn address_space() {
-    let p = Process::new("test-as").unwrap();
+    let p = Process::new("test-as", Job::new_root()).unwrap();
     let space = p.address_space();
-    let vmo = MemoryObject::new(2 * PAGE_SIZE).unwrap();
+    let vmo = MemoryObject::new(2 * PAGE_SIZE, None).unwrap();
     let addr = space
         .map(vmo.clone(), 0, 2 * PAGE_SIZE, MAP_READ | MAP_WRITE, 0)
         .unwrap();
@@ -59,9 +60,9 @@ fn address_space() {
 }
 
 fn address_space_checks() {
-    let p = Process::new("test-as2").unwrap();
+    let p = Process::new("test-as2", Job::new_root()).unwrap();
     let space = p.address_space();
-    let vmo = MemoryObject::new(PAGE_SIZE).unwrap();
+    let vmo = MemoryObject::new(PAGE_SIZE, None).unwrap();
     let wx = MAP_READ | MAP_WRITE | MAP_EXECUTE;
     assert_eq!(
         space.map(vmo.clone(), 0, PAGE_SIZE, wx, 0),
@@ -96,10 +97,7 @@ fn address_space_checks() {
 fn channel() {
     let (a, b) = Channel::create();
     let event = Event::new();
-    let msg = Message {
-        data: b"ahoj".to_vec(),
-        handles: vec![(event.clone(), Rights::WAIT)],
-    };
+    let msg = Message::new(b"ahoj".to_vec(), vec![(event.clone(), Rights::WAIT)]);
     a.write(msg).unwrap();
     assert!(b.core().signals().contains(Signals::READABLE));
     assert_eq!(b.read(2, 1).err(), Some(Error::BufferTooSmall));
@@ -111,9 +109,6 @@ fn channel() {
     drop(a);
     assert!(b.core().signals().contains(Signals::PEER_CLOSED));
     assert_eq!(b.read(100, 1).err(), Some(Error::PeerClosed));
-    let empty = Message {
-        data: Vec::new(),
-        handles: Vec::new(),
-    };
+    let empty = Message::new(Vec::new(), Vec::new());
     assert_eq!(b.write(empty).err(), Some(Error::PeerClosed));
 }

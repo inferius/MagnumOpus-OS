@@ -9,7 +9,8 @@ use super::handle::arg_handle;
 use super::{Args, current_process, user};
 use crate::error::{Error, Result};
 use crate::object::channel::{Channel, Message};
-use crate::object::{Handle, KernelObject, ObjectType, Rights};
+use crate::object::job::Pool;
+use crate::object::{Handle, KernelObject, ObjectType, Rights, charged};
 use crate::sync::SpinLock;
 
 /// Serializuje zpravy, ktere prenaseji handly (kontrola cyklu kanalu).
@@ -19,6 +20,7 @@ static TRANSFER_LOCK: SpinLock<()> = SpinLock::new(());
 pub fn create(a: Args) -> Result<u64> {
     let p = current_process();
     let (c0, c1) = Channel::create();
+    let (c0, c1) = (charged(c0, p.job())?, charged(c1, p.job())?);
     let rights = c0.default_rights();
     let (h0, h1) = {
         let mut table = p.handles();
@@ -53,6 +55,10 @@ pub fn write(a: Args) -> Result<u64> {
     if !crate::mm::phys::user_room(data_len.div_ceil(4096) as u64 + 1) {
         return Err(Error::NoMemory);
     }
+    // Zprava ve fronte se strhne z rozpoctu odesilatele (vrati se prectenim).
+    let charge = p
+        .job()
+        .charge(Pool::Kernel, Message::cost(data_len, count))?;
     let data = user::read_bytes(&p, a[1], data_len)?;
     let raw_handles = user::read_u32s(&p, a[3], count)?;
 
@@ -87,7 +93,11 @@ pub fn write(a: Args) -> Result<u64> {
             .collect();
         (channel, handles)
     };
-    channel.write(Message { data, handles })?;
+    channel.write(Message {
+        data,
+        handles,
+        charge,
+    })?;
     Ok(0)
 }
 
