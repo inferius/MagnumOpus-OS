@@ -357,6 +357,8 @@ application may draw into that layer.
   input is ignored.
 - The result `ANSWER { id, choice }` or `ANSWER { id, text }` (password)
   goes only to the requester.
+- An action confirmation shows the actual parameters (path, recipient, file
+  list) and the confirmation binds exactly to them (see [Action API](#action-api)).
 
 The `dialog` channel messages are binary (`guiproto::control`):
 
@@ -394,7 +396,7 @@ confirm = false          # true = confirm with a system dialog
 
 [[action.param]]
 name = "title"
-type = "text"            # text, int, bool, path, choice
+type = "text"            # text, int, bool, path, paths, choice
 required = true
 
 [[action.param]]
@@ -414,6 +416,24 @@ choices = ["yellow", "blue"]
 An action with `confirm = true`, or one called from a synthetic source
 (agent), is confirmed with a system dialog before it is passed on. A
 caller sees only actions, not windows.
+
+**What is confirmed is what is shown.** The system draws the dialog and
+shows the **actual arguments** by their manifest type, not just the
+action name:
+
+| Type | In the dialog |
+|---|---|
+| `path` | the whole path (a long one wraps by characters, nothing is hidden) |
+| `paths` | number of items and a preview of the first 8 whole paths, "... and N more" |
+| `text` | the value in quotes (recipient, network target, message), at most 300 characters |
+| `int`, `bool`, `choice` | the value (`ano`/`ne` for `bool`) |
+
+When the dialog is shown, the compositor stores a fingerprint of the
+arguments (FNV-1a over their encoding) and after confirmation hands the
+application **exactly the arguments the user saw**. If they changed
+between showing and confirming, the call is rejected ("arguments changed
+after display") and the application gets nothing. The caller has no
+message to change the arguments after confirmation.
 
 ## Compositor control commands
 

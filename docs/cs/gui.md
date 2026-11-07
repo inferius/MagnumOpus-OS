@@ -340,6 +340,8 @@ vrstvě nad ztlumenými okny**. Do té vrstvy nesmí kreslit žádná aplikace.
   ignorován.
 - Výsledek `ANSWER { id, choice }` nebo `ANSWER { id, text }` (heslo)
   jde jen žadateli.
+- U potvrzení akce dialog ukazuje skutečné parametry (cestu, příjemce,
+  seznam souborů) a potvrzení se váže přesně na ně (viz [API akcí](#api-akcí)).
 
 Zprávy kanálu `dialog` jsou binární (`guiproto::control`):
 
@@ -376,7 +378,7 @@ confirm = false          # true = potvrdit systémovým dialogem
 
 [[action.param]]
 name = "title"
-type = "text"            # text, int, bool, path, choice
+type = "text"            # text, int, bool, path, paths, choice
 required = true
 
 [[action.param]]
@@ -395,6 +397,32 @@ choices = ["zluta", "modra"]
 
 Akce s `confirm = true` nebo volaná z umělého zdroje (agent) se před
 předáním potvrdí systémovým dialogem. Volající vidí jen akce, ne okna.
+
+**Potvrzuje se to, co je vidět.** Dialog kreslí systém a ukazuje
+**skutečné argumenty** podle jejich typu z manifestu, ne jen název akce:
+
+| Typ | V dialogu |
+|---|---|
+| `path` | celá cesta (dlouhá se zalomí po znacích, nic se neschová) |
+| `paths` | počet položek a náhled prvních 8 celých cest, „... a dalších N“ |
+| `text` | hodnota v uvozovkách (příjemce, cíl v síti, zpráva), nejvýš 300 znaků |
+| `int`, `bool`, `choice` | hodnota (`ano`/`ne` u `bool`) |
+
+Kompozitor si při zobrazení dialogu uloží otisk argumentů (FNV-1a nad
+jejich zakódováním) a aplikaci po potvrzení předá **přesně ty argumenty,
+které uživatel viděl**. Když by se mezi zobrazením a potvrzením změnily,
+volání se odmítne („argumenty se po zobrazení změnily“) a aplikace nic
+nedostane. Volající nemá zprávu, kterou by argumenty po potvrzení změnil.
+
+```text
+Systém: potvrzení
+asistent (automat) chce v aplikaci Pošta provést akci „Odeslat přílohu“.
+Akce potřebuje: síť, soubory.
+Parametry:
+recipient: "jana@example.com"
+file (cesta): /home/michal/Dokumenty/rozpocet-2027-final.xlsx
+                                        [Povolit]  [Zamítnout]
+```
 
 ## Řídicí příkazy kompozitoru
 
