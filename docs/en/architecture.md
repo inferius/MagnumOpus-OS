@@ -36,7 +36,7 @@ the primary one.)
 |  Microkernel: memory, scheduler, IPC, interrupts, objects,   |
 |  handles + rights, asynchronous queues                       |
 +--------------------------------------------------------------+
-|  arch/x86_64 (later arch/aarch64)    |  UEFI loader          |
+|  arch/x86_64, arch/aarch64          |  UEFI loader          |
 +--------------------------------------------------------------+
 ```
 
@@ -567,10 +567,9 @@ documentation is in Czech and English (`docs/cs`, `docs/en`).
 3. QEMU aarch64 `virt`
 4. Raspberry Pi, PinePhone (Pro)
 
-aarch64 is ported per the milestone plan (milestone 9): QEMU `virt` first,
-then Raspberry Pi. The kernel already has an explicit [architecture
-interface](#architecture-interface), so the port means writing its
-implementation in `kernel/src/arch/aarch64/` (the skeleton exists).
+aarch64 runs in QEMU `virt` (milestone 9, see [the aarch64
+implementation](#the-aarch64-implementation-qemu-virt)); Raspberry Pi comes
+later as another platform of the same architecture.
 
 ## Architecture interface
 
@@ -578,9 +577,8 @@ Goal: **porting to another architecture = writing a new implementation of
 one interface**, not rewriting half of the kernel. Everything that depends on
 the CPU or its surroundings (interrupts, timers, paging, CPU startup, IOMMU)
 lives in `kernel/src/arch/<arch>/`, and the rest of the kernel talks to it
-only through a fixed contract. Status: x86_64 is fully behind the
-interface, **aarch64 is only a skeleton so far** (it compiles; at run time
-it stops at the first `todo!`).
+only through a fixed contract. Status: the interface is implemented by
+**x86_64 and aarch64** (QEMU `virt`); both architectures pass all tests.
 
 > **Change (2026-11-06):** previously the kernel called `arch::*`
 > functions that existed only for x86_64, and several places outside
@@ -614,9 +612,9 @@ it stops at the first `todo!`).
 <rect class="ok" x="10" y="276" width="270" height="62" rx="6"/>
 <text class="t b" x="145" y="298" text-anchor="middle">arch/x86_64 (done)</text>
 <text class="m" x="145" y="318" text-anchor="middle">GDT/IDT, APIC, TSC+HPET, VT-d, AMD-Vi, SIPI</text>
-<rect class="warn" x="300" y="276" width="270" height="62" rx="6"/>
-<text class="t b" x="435" y="298" text-anchor="middle">arch/aarch64 (skeleton)</text>
-<text class="m" x="435" y="318" text-anchor="middle">GICv3, generic timer, SMMUv3, PSCI: todo!</text>
+<rect class="ok" x="300" y="276" width="270" height="62" rx="6"/>
+<text class="t b" x="435" y="298" text-anchor="middle">arch/aarch64 (QEMU virt)</text>
+<text class="m" x="435" y="318" text-anchor="middle">GICv3 + ITS, generic timer, SMMUv3, PSCI</text>
 <path class="ln dash" d="M145 276 L145 242" marker-end="url(#ae1)"/>
 <path class="ln dash" d="M435 276 L435 242" marker-end="url(#ae1)"/>
 <text class="m" x="152" y="262">implements</text>
@@ -649,7 +647,7 @@ it stops at the first `todo!`).
    architecture code calls into the kernel: timer, IPIs, device interrupts,
    syscalls, user-space exceptions, return to user space.
 
-| trait | what the architecture provides | x86_64 | aarch64 (plan) |
+| trait | what the architecture provides | x86_64 | aarch64 |
 |---|---|---|---|
 | `Cpu` | CPU init, HW ID, per-CPU pointer, halt, breakpoint | GDT/TSS/IDT, local APIC ID, GS base | VBAR_EL1, MPIDR_EL1, TPIDR_EL1 |
 | `Interrupts` | enable/disable interrupts, sleep until an interrupt | `sti`/`cli`/`hlt` | DAIF, `wfi` |
@@ -743,32 +741,90 @@ Checking that the kernel builds for another architecture (also part of
 cargo xtask check --arch aarch64
 ```
 
-### The aarch64 skeleton and what goes into it
+### The aarch64 implementation (QEMU virt)
 
-`kernel/src/arch/aarch64/mod.rs` implements the whole contract; every
-function that has to do something ends in a `todo!` describing what it
-will contain. The first target is **QEMU `virt`** (GICv3, PL011, PSCI,
-SMMUv3, UEFI from edk2 with ACPI), then Raspberry Pi. Planned modules:
+> **Change (2026-11-07):** the `todo!` skeleton became a working
+> implementation for QEMU `virt`. **Why:** milestone 9 - a second
+> architecture proves the interface really is enough; the generic kernel
+> did not change for the port (only `init` tests got aarch64 branches and
+> programs are linked with one script from xtask).
+
+The whole system runs on aarch64: the loader under UEFI (edk2), the kernel
+on 4 CPUs, device interrupts via the ITS, DMA translation via SMMUv3,
+drivers, the file system and all tests (`cargo xtask test --arch aarch64`).
+Modules in `kernel/src/arch/aarch64/`:
 
 | module | contents |
 |---|---|
-| `exceptions` | vector table (VBAR_EL1), saving registers, ESR -> ABI fault number |
-| `gic` | GICv3: distributor, per-CPU redistributor, ITS for MSI (LPIs) |
-| `timer` | generic timer: CNTVCT_EL0 as the clock, CNTP_TVAL_EL0 one-shot |
-| `mmu` | 4 levels with 4 KiB granule, TTBR0 (process) and TTBR1 (kernel), MAIR, TCR |
-| `context` | x19-x30, sp, FPU/SIMD v0-v31, FPCR/FPSR; switching |
-| `user` | EL0 <-> EL1: SVC, ERET, SP_EL0 |
-| `psci` | CPU startup via CPU_ON (HVC/SMC per ACPI FADT) |
-| `smmu` | SMMUv3: stream table, domains |
-| `acpi` | MADT (GICC, GICD, GIC ITS), GTDT, IORT (RID -> StreamID/DeviceID), SPCR |
-| `pl011` | debug serial port |
+| `exceptions` | vector table (VBAR_EL1), register frame, ESR -> ABI fault number, syscall `svc #0` |
+| `gic` | GICv3: distributor, per-CPU redistributor, SGIs (IPIs), timer PPI, LPI tables |
+| `its` | ITS: command queue (MAPD, MAPC, MAPTI, INV, SYNC), MSI message = GITS_TRANSLATER + event |
+| `timer` | generic timer: CNTVCT_EL0 as the clock, EL1 virtual timer (PPI 27) one-shot |
+| `mmu` | 4 levels, 4 KiB granule, TTBR1 kernel / TTBR0 process (EPD0 for kernel threads), ASID 0 + nG |
+| `context` | x19-x30, sp and the whole FPU/SIMD state (q0-q31, FPCR, FPSR); entering EL0 via `eret` |
+| `smp` | CPU startup via PSCI CPU_ON (HVC/SMC per FADT), a stub enables the MMU with the kernel tables |
+| `smmu` | SMMUv3: two-level stream table, stage 1 STE with a CD and its own ASID per device |
+| `acpi` | MADT (GICC, GICD, GICR, GIC ITS), FADT (PSCI), IORT (SMMUv3, RID -> StreamID) |
+| `pl011`, `semihosting` | debug serial port (address from SPCR via the loader), test exit in QEMU |
 
-Outside the kernel the port will also need: a loader for
-`aarch64-unknown-uefi` (today x86_64: paging and the jump into the
-kernel), xtask (QEMU `virt`, edk2 firmware for aarch64, ending tests via
-semihosting), `libs/elf` (accepts only `EM_X86_64` today), `libs/libos` and
-`libs/abi` (syscall instruction, `svc` instead of `syscall`) and
-`user/user.ld`.
+Boot on aarch64:
+
+1. **The loader** (`loader/src/arch/aarch64`) runs under UEFI in EL1 or EL2
+   (real hardware), finds the PL011 in ACPI SPCR (maps it identity as a
+   device) and cleans the kernel image to memory. From EL1 it turns the MMU
+   off, sets MAIR, TCR, TTBR0 = TTBR1 and jumps to the kernel in the upper
+   half; from EL2 it sets the EL1 registers directly, prepares EL2 without
+   traps (EL1 in AArch64, timer, FPU, GIC, no stage 2) and drops into the
+   kernel in EL1 via `eret`.
+2. **The kernel** sets up the vector table, takes over the tables (TTBR1),
+   disables the lower half, reads ACPI and enables GICv3, the ITS and the
+   timer.
+3. **Other CPUs**: PSCI CPU_ON at the physical address of the `__ap_entry`
+   stub (the page is temporarily identity mapped); the stub drops from EL2
+   to EL1 if needed, loads its parameters, enables the MMU and jumps into
+   the kernel.
+4. **IOMMU**: SMMUv3 from IORT; from enabling on all streams are blocked, a
+   device gets a domain only with a restricted Resource (like VT-d on x86).
+
+Running and testing:
+
+```bash
+cargo xtask run --arch aarch64
+```
+
+```bash
+cargo xtask test --arch aarch64
+```
+
+QEMU: the `virt` machine with GICv3 and ITS, `-cpu cortex-a76` (the same
+core as Raspberry Pi 5), with EL2 (`virtualization=on`: the firmware runs in
+EL2 as on real hardware and the loader and other CPUs drop to EL1), SMMUv3 (`--iommu
+smmu`, default; `--iommu none` without DMA translation). Tests end via
+semihosting (code 33 = success as on x86; zero is not used because QEMU also returns it on a plain shutdown). Under TCG emulation it runs roughly 2x
+slower than x86 under TCG.
+
+Differences from x86 worth knowing:
+
+- **Programs are built without FPU for now** (`aarch64-unknown-none-softfloat`,
+  like x86 without SSE). The kernel still saves the FPU state on switches;
+  a test checks register V0.
+- **MSI needs the device identity** (DeviceID for the ITS): `INTERRUPT_CREATE`
+  without a device returns `INVALID_ARGS`. The ITS page (GITS_TRANSLATER)
+  is mapped into the device's SMMU domain, otherwise the SMMU would block
+  its MSIs.
+- **No hardware clock** (PL031 is not in ACPI, the kernel does not call the
+  EFI RTC at run time): time comes only from UEFI at boot and `set` does not
+  write a clock.
+- **IORT**: only one root complex mapping is read (segment 0); the ITS
+  assumes DeviceID = RID (true on QEMU virt).
+- **A kernel stack overflow** loops on the guard page (x86 has a separate
+  IST stack for double faults); it shows up as a hang, not memory
+  corruption.
+
+Outside the kernel the port changed: `loader` (the `arch/aarch64` part),
+`xtask` (`--arch`, `arch.rs`, `qemu.rs`), `libs/elf` (accepts the machine
+of the build target), `libs/libos` (`svc` and the `_start` entry),
+`libs/boot-info` (version 4: PL011 and device tree from the loader).
 
 ### Serious limitations and how they are solved
 
@@ -885,8 +941,8 @@ covers C, C++ and Rust), but it makes sense as a separate project:
    (libc++/libunwind on top of libc), cross-compiled with clang from the
    host, then TinyCC in the system
 8. Windows layer v2: user32/gdi32, GUI, DirectX via Vulkan
-9. aarch64 port and the first ARM device (architecture interface and aarch64
-   skeleton done, implementation remains)
+9. aarch64 port and the first ARM device (architecture interface and QEMU
+   `virt` done, Raspberry Pi remains)
 
 ## Current deviations from the design
 

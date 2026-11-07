@@ -4,30 +4,36 @@
 
 - **Rust přes rustup.** Nightly, komponenty a targety jsou v
   `rust-toolchain.toml`; rustup je stáhne při prvním buildu sám.
-- **QEMU** (`qemu-system-x86_64`) s firmwarem edk2/OVMF:
-  - Windows: `winget install SoftwareFreedomConservancy.QEMU`
-  - Debian/Ubuntu: `apt install qemu-system-x86 ovmf`
-  - Fedora: `dnf install qemu-system-x86 edk2-ovmf`
-  - Arch: `pacman -S qemu-desktop edk2-ovmf`
+- **QEMU** (`qemu-system-x86_64`, pro aarch64 `qemu-system-aarch64`)
+  s firmwarem edk2 (OVMF, pro aarch64 AAVMF):
+  - Windows: `winget install SoftwareFreedomConservancy.QEMU` (obě
+    architektury i firmware)
+  - Debian/Ubuntu: `apt install qemu-system-x86 ovmf qemu-system-arm qemu-efi-aarch64`
+  - Fedora: `dnf install qemu-system-x86 edk2-ovmf qemu-system-aarch64 edk2-aarch64`
+  - Arch: `pacman -S qemu-desktop edk2-ovmf edk2-aarch64`
   - macOS: `brew install qemu`
 - Volitelně **GDB** pro ladění.
 
-xtask hledá QEMU v `PATH` a na obvyklých místech, OVMF vedle QEMU nebo
-v `/usr/share/...`. Jinak proměnné prostředí `QEMU`, `OVMF_CODE`, `OVMF_VARS`.
+xtask hledá QEMU v `PATH` a na obvyklých místech, firmware vedle QEMU nebo
+v `/usr/share/...`. Jinak proměnné prostředí `QEMU_X86_64` (nebo `QEMU`),
+`QEMU_AARCH64`, `X86_64_FW_CODE`/`X86_64_FW_VARS` (nebo `OVMF_CODE`/`OVMF_VARS`)
+a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 
 ## Příkazy
 
 | Příkaz | Co dělá |
 |---|---|
 | `cargo xtask build` | přeloží jádro, loader a programy userspace, sestaví initfs |
-| `cargo xtask image` | build + obraz disku `target/os-x86_64-<profil>.img` (GPT, ESP FAT32) |
+| `cargo xtask image` | build + obraz disku `target/os-<arch>-<profil>.img` (GPT, ESP FAT32) |
 | `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu |
-| `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro aarch64, dokumentace, pak jádro a userspace v QEMU bez okna |
-| `cargo xtask check [--arch aarch64]` | jen kontrola, že se jádro přeloží pro danou architekturu (výchozí x86_64); viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
+| `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro ostatní architektury, dokumentace, pak jádro a userspace v QEMU bez okna |
+| `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 
-Přepínače: `--release`, `--headless` (bez okna), `--iommu <intel|amd|none>`
-(emulovaná IOMMU, výchozí `intel`; `none` ověří běh bez překladu DMA - test
+Přepínače: `--arch <x86_64|aarch64>` (všechny příkazy, výchozí `x86_64`;
+aarch64 = QEMU `virt`, viz [implementace aarch64](architektura.md#implementace-aarch64-qemu-virt)),
+`--release`, `--headless` (bez okna), `--iommu <typ>` (emulovaná IOMMU:
+x86_64 `intel` (výchozí), `amd`, `none`; aarch64 `smmu` (výchozí), `none`; `none` ověří běh bez překladu DMA - test
 „IOMMU: zarizeni nezapise mimo prideleny DMA“ pak podle očekávání selže), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
@@ -103,7 +109,7 @@ loader/          UEFI loader
 kernel/          jádro
   src/arch/api/     smlouva architektury (traity), viz architektura.md
   src/arch/x86_64/  vše specifické pro x86_64
-  src/arch/aarch64/ kostra pro aarch64 (todo!)
+  src/arch/aarch64/ vše specifické pro aarch64 (QEMU virt)
   src/trap.rs       zpětný směr: architektura -> jádro
   src/mm/           paměť
   src/sched/        plánovač

@@ -116,8 +116,8 @@ A device writes into memory on its own (DMA), to the addresses its driver
 puts into descriptors. Without an IOMMU a buggy driver can therefore make
 the device overwrite the kernel. The kernel therefore enables the IOMMU when
 the machine has one: **Intel VT-d** (ACPI DMAR table) or **AMD-Vi** (ACPI
-IVRS table). Both work the same way and the rest of the kernel does not
-distinguish them (`arch::iommu::Domain`):
+IVRS table), on aarch64 **SMMUv3** (ACPI IORT table). All work the same way
+and the rest of the kernel does not distinguish them (`arch::iommu::Domain`):
 
 <figure class="diagram">
 <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="IOMMU">
@@ -171,6 +171,14 @@ Implementation in `kernel/src/arch/x86_64/iommu/`:
 | `mod.rs` | the common interface: `init`, `domain(segment, bus, function)`, `Domain::map/unmap`, fault interrupt handling |
 | `vtd.rs` | Intel VT-d: root table -> bus context tables -> domain page tables (3 or 4 levels depending on the unit); after every change a global invalidation of the context cache and IOTLB through registers; faults from the fault recording registers |
 | `amdvi.rs` | AMD-Vi: device table (65,536 entries, default "everything blocked") -> domain page tables (4 levels); invalidation through the command queue with a completion wait; faults from the event log (MSI interrupt set up in the IOMMU's own PCI configuration) |
+
+On aarch64 it is `kernel/src/arch/aarch64/smmu.rs` (SMMUv3): a two-level
+stream table (StreamID = RID per IORT, an invalid entry = DMA blocked) ->
+an STE with stage 1 configuration -> a context descriptor with its own ASID
+and page tables in the CPU format; invalidation through the command queue
+(CFGI_STE, TLBI_NH_ASID, SYNC); faults from the event queue are logged
+during domain operations. Device MSIs pass through the SMMU, so the ITS
+page (GITS_TRANSLATER) is also mapped into the device's domain.
 
 Fault output is limited: one blocked transfer can raise dozens of events,
 the first 4 are logged in detail and the rest as a summary.

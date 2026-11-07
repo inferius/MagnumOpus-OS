@@ -5,7 +5,8 @@
 //! 2. pripravi tabulky stranek (identita, prima mapa fyzicke pameti, kernel),
 //! 3. zjisti framebuffer (GOP) a ACPI RSDP,
 //! 4. ukonci boot services, prelozi mapu pameti do formatu `boot_info`,
-//! 5. prepne CR3 a skoci na vstupni bod kernelu s ukazatelem na `BootInfo`.
+//! 5. prepne tabulky stranek a skoci na vstupni bod kernelu s ukazatelem na
+//!    `BootInfo` (architekturne zavisle casti v `arch/`).
 
 #![no_std]
 #![no_main]
@@ -51,10 +52,17 @@ const MEMORY_MAP_SLACK: usize = 128;
 const RW: Flags = Flags {
     writable: true,
     executable: false,
+    device: false,
 };
 const RWX: Flags = Flags {
     writable: true,
     executable: true,
+    device: false,
+};
+const DEVICE: Flags = Flags {
+    writable: true,
+    executable: false,
+    device: true,
 };
 
 #[entry]
@@ -76,9 +84,16 @@ fn main() -> Status {
             .expect("mapovani framebufferu selhalo");
     }
     let acpi_rsdp = find_acpi_rsdp();
+    let device_tree = find_device_tree();
+    // Ladici linka (aarch64: z ACPI SPCR, loader ji identicky namapuje jako
+    // zarizeni, aby jadro mohlo psat hned od startu).
+    let debug_serial = arch::debug_serial(acpi_rsdp, &mut tables);
     let (initfs_phys, initfs_len) = load_initfs();
 
     let (kernel_phys_start, kernel_phys_len) = load_kernel(&elf, &mut tables);
+    // aarch64: kod jadra zapsany pres datovou cache musi byt videt
+    // instrukcni cache (a CPU startujicim s vypnutou MMU).
+    arch::sync_kernel_image(kernel_phys_start, kernel_phys_len);
     let entry = elf.entry;
     drop(kernel_file);
 
@@ -128,6 +143,8 @@ fn main() -> Status {
         initfs_phys,
         initfs_len,
         firmware_time,
+        device_tree,
+        debug_serial,
     };
     // SAFETY: `boot_info_phys` je cela stranka alokovana pro BootInfo,
     // zarovnana na 4 KiB (vic nez zarovnani BootInfo).
@@ -194,6 +211,15 @@ fn map_physical_memory(tables: &mut PageTables) {
     let map = boot::memory_map(MemoryType::LOADER_DATA).expect("ziskani mapy pameti selhalo");
     for desc in map.entries() {
         let len = desc.page_count * SIZE_4K;
+        // Registry zarizeni se mapuji jako zarizeni (na aarch64 by mapovani
+        // jako bezne pameti dovolilo spekulativni cteni registru); do prime
+        // mapy nepatri, jadro je mapuje samo (`mm::map_mmio`).
+        if matches!(desc.ty, MemoryType::MMIO | MemoryType::MMIO_PORT_SPACE) {
+            tables
+                .map_range_2m(0, desc.phys_start, len, DEVICE)
+                .expect("nedostatek pameti pro tabulky stranek");
+            continue;
+        }
         tables
             .map_range_2m(0, desc.phys_start, len, RWX)
             .and_then(|()| tables.map_range_2m(PHYS_MAP_BASE, desc.phys_start, len, RW))
@@ -241,6 +267,7 @@ fn load_kernel(elf: &ElfFile, tables: &mut PageTables) -> (u64, u64) {
         let flags = Flags {
             writable: seg.flags & PF_W != 0,
             executable: seg.flags & PF_X != 0,
+            device: false,
         };
         let first = seg.vaddr & !(SIZE_4K - 1);
         let last = (seg.vaddr + seg.mem_size).next_multiple_of(SIZE_4K);
@@ -351,6 +378,19 @@ fn read_firmware_time() -> FirmwareTime {
         _reserved2: 0,
         counter,
     }
+}
+
+/// GUID tabulky firmwaru s device tree (EFI_DTB_TABLE_GUID).
+const DTB_GUID: uefi::Guid = uefi::guid!("b1b621d5-f19c-41a5-830b-d9152c69aae0");
+
+/// Fyzicka adresa device tree od firmwaru, 0 pokud ho nedal.
+fn find_device_tree() -> u64 {
+    uefi::system::with_config_table(|entries| {
+        entries
+            .iter()
+            .find(|e| e.guid == DTB_GUID)
+            .map_or(0, |e| e.address as u64)
+    })
 }
 
 fn find_acpi_rsdp() -> u64 {

@@ -137,8 +137,10 @@ fn time_service_set(_: &Startup) -> TestResult {
         .channel
         .read(Some(time::deadline_after(Duration::from_secs(5))))
         .map_err(|e| fail("odpoved", e))?;
-    // QEMU ma CMOS RTC, takze zapis do hardwarovych hodin musi projit.
-    check_eq!(core::str::from_utf8(&reply.data).unwrap_or("?"), "ok:hw", "odpoved sluzby");
+    // QEMU na x86_64 ma CMOS RTC, takze zapis do hardwarovych hodin musi
+    // projit. aarch64 hardwarove hodiny zatim nema (cas jen z UEFI): `ok`.
+    let expected = if cfg!(target_arch = "x86_64") { "ok:hw" } else { "ok" };
+    check_eq!(core::str::from_utf8(&reply.data).unwrap_or("?"), expected, "odpoved sluzby");
     let r = time::wall_reading().map_err(|e| fail("cteni", e))?;
     check_eq!(r.source, source::SET, "zdroj");
     Ok(())

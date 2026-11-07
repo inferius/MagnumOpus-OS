@@ -354,6 +354,9 @@ impl api::DeviceIrq for X86_64 {
     fn msi_message(irq: u32, _device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
         Ok(msi_message(irq as u8))
     }
+
+    /// Vektor nema v radici zadny stav: nic.
+    fn release(_irq: u32) {}
 }
 
 /// Zprava MSI pro vektor `vector` (i pro preruseni chyb IOMMU).
@@ -404,6 +407,9 @@ impl api::PlatformInfo for X86_64 {
 
 impl api::Diagnostics for X86_64 {
     type Serial = SerialPort;
+
+    /// x86 pouziva COM1 na pevnem portu, od loaderu nic nepotrebuje.
+    fn init_early(_boot_info: &BootInfo) {}
 
     /// Port I/O na COM1 je neskodny i kdyz tam zadna linka neni (zapisy se
     /// zahodi), proto je bezpecne ho vytvaret opakovane, napr. v panic
