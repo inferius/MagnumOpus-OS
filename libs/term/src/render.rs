@@ -108,7 +108,9 @@ pub fn file_class(rec: &Value, t: &Theme) -> Option<FileClass> {
     if !access.is_empty() && !access.contains('r') {
         return Some(FileClass::NoAccess);
     }
+    let dataset = matches!(rec.field("dataset"), Some(Value::Bool(true)));
     Some(match kind.as_str() {
+        "dir" if dataset => FileClass::Dataset,
         "dir" => FileClass::Dir,
         "dataset" => FileClass::Dataset,
         "symlink" => FileClass::Symlink,
@@ -139,7 +141,7 @@ fn cell_style(col: &str, v: &Value, rec: &Value, t: &Theme, now: Option<i64>) ->
     }
     match col {
         "name" => file_class(rec, t).map(|c| t.file(c)),
-        "kind" | "ext" | "access" if file_class(rec, t).is_some() => Some(color(t.ui.muted)),
+        "kind" | "ext" | "access" | "dataset" if file_class(rec, t).is_some() => Some(color(t.ui.muted)),
         "change" => Some(color(match v {
             Value::Str(s) if s.contains("removed") => t.ui.err,
             Value::Str(s) if s.contains("added") => t.ui.ok,

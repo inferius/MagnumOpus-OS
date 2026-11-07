@@ -463,7 +463,8 @@ the object from the bootstrap `kind::FRAMEBUFFER` (any other memory object
   into the framebuffer, the log keeps going to the serial line. Requires
   `WRITE`.
 - `RELEASE` (2): give back - the kernel clears the screen and keeps
-  drawing the log. Requires `WRITE`.
+  drawing the log. Requires `WRITE`. The end of the process that took the
+  framebuffer over gives it back by itself.
 
 A kernel panic always draws into the framebuffer. Errors: `BAD_HANDLE`,
 `ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `BAD_ADDRESS`, `NOT_FOUND`

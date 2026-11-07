@@ -179,6 +179,9 @@ impl Process {
         // muze budit dalsi vlakna).
         let table = core::mem::take(&mut *self.handles.lock());
         drop(table);
+        if crate::console::process_finished(self.id) {
+            log::info!("framebuffer: proces {} skoncil, vracen jadru", self.id);
+        }
         self.core.update(Signals::NONE, Signals::TERMINATED);
     }
 

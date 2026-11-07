@@ -42,7 +42,11 @@ fn theme_file_overrides_builtin() {
 fn file_records_get_kind_colors() {
     let t = Theme::dark();
     assert_eq!(file_class(&rec("foto", "dir", "", "rwx", 0), &t), Some(FileClass::Dir));
-    assert_eq!(file_class(&rec("repo", "dataset", "", "rw-", 0), &t), Some(FileClass::Dataset));
+    let mut repo = rec("repo", "dir", "", "rw-", 0);
+    if let Value::Record(f) = &mut repo {
+        f.push(("dataset".into(), Value::Bool(true)));
+    }
+    assert_eq!(file_class(&repo, &t), Some(FileClass::Dataset), "kind dir + dataset");
     assert_eq!(file_class(&rec("a.jpg", "file", "jpg", "rw-", 0), &t), Some(FileClass::Image));
     assert_eq!(file_class(&rec("b.zst", "file", "zst", "rw-", 0), &t), Some(FileClass::Archive));
     assert_eq!(file_class(&rec("run", "file", "", "r-x", 0), &t), Some(FileClass::Exec));

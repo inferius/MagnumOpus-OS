@@ -98,6 +98,56 @@ fn lines_typed_before_attach_wait_for_the_session() {
 }
 
 #[test]
+fn file_names_are_data_not_code() {
+    use crate::ui::{Action, quote, row_action};
+    // Vlozeny vyraz ve jmenu se escapuje; jmeno se po parsovani nezmeni.
+    let evil = "/home/x{exec(\"zle\")}.txt";
+    let q = quote(evil);
+    assert_eq!(q, "\"/home/x\\{exec(\\\"zle\\\")\\}.txt\"");
+    struct H(MemFs, Vec<Value>);
+    impl shlang::host::Host for H {
+        fn fs(&mut self) -> &mut dyn shlang::host::Fs {
+            &mut self.0
+        }
+        fn emit(&mut self, v: Value) {
+            self.1.push(v);
+        }
+        fn note(&mut self, _: &str) {}
+        fn now(&mut self) -> Option<i64> {
+            None
+        }
+        fn sleep(&mut self, _: i64) {}
+        fn interrupted(&mut self) -> bool {
+            false
+        }
+        fn confirm(&mut self, _: &str, _: &Value) -> bool {
+            false
+        }
+    }
+    let mut h = H(MemFs::new(), Vec::new());
+    let mut it = shlang::eval::Interp::new(Box::new(shlang::sig::Builtins), "/");
+    it.run_line(&mut h, &alloc::format!("echo {q}")).result.unwrap();
+    assert_eq!(h.1, vec![Value::str(evil)], "jmeno je text, ne kod");
+    let line = row_action(Some(&rec("x{exec(\"zle\")}.txt", "file", 1)), Action::Open).unwrap();
+    assert!(line.contains("\\{"), "{line}");
+}
+
+#[test]
+fn links_and_stopped_progress_render_cleanly() {
+    let mut a = app();
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 1, line: "help".into() });
+    a.on_msg(ServerMsg::Item { session: 7, block: 1, item: Item::Link { text: "dokumentace".into(), target: "https://x/y".into() } });
+    a.on_msg(ServerMsg::Item { session: 7, block: 1, item: Item::Progress { done: 3, total: 10, label: "for".into() } });
+    a.on_msg(ServerMsg::BlockEnd { session: 7, block: 1, ok: true, duration: 0 });
+    let mut s = Screen::new(100, 30);
+    s.write(&a.frame());
+    let lines: Vec<String> = (0..30).map(|y| s.line(y)).collect();
+    assert!(lines.iter().any(|l| l.trim() == "dokumentace"), "odkaz bez zbytku escape: {lines:?}");
+    assert!(!lines.iter().any(|l| l.contains("]8;;")));
+    assert!(lines.iter().any(|l| l.contains("30 %") && l.contains("zastaveno")), "{lines:?}");
+}
+
+#[test]
 fn completion_menu_from_service() {
     let mut a = app();
     typ(&mut a, "open d");

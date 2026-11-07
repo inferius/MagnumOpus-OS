@@ -227,7 +227,8 @@ A record:
   the text and rescue console (`user/console`). The takeover is explicit
   (`FB_CONTROL` `CLAIM`): the kernel then no longer draws the log into the
   framebuffer, it keeps going to the serial line. `RELEASE` gives it back
-  to the kernel (the screen is cleared). Without a framebuffer the entry is
+  to the kernel (the screen is cleared); the end (or crash) of the process
+  that took it over does the same. Without a framebuffer the entry is
   missing.
 - Filter: global level (`log::set_level`), level for a module and its
   submodules (`log::set_target_level("sched", Level::Trace)`). Release builds

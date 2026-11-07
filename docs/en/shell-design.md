@@ -780,15 +780,15 @@ for f in (ls *.jpg) { echo "processing {f.name}" }
 **Colored listings** (`term::render`): tables are colored by the types of
 the values and the schema, not by ANSI in programs.
 
-- **File name by kind:** `dir`, `dataset` (nested dataset,
-  `kind = "dataset"`), `symlink`, `exec` (the right to run `x` in the
+- **File name by kind:** `dir`, `dataset` (nested dataset: `kind`
+  stays `"dir"`, field `dataset = true`), `symlink`, `exec` (the right to run `x` in the
   `access` field), `image`, `archive`, `document`, `media` (by extension),
   `hidden` (dot), `noaccess` (no right to read).
 - **Size and age on a color scale** (4 steps): size up to 1 MB, 100 MB,
   1 GB and more; age up to a day, 30 days, a year and older.
 - `true` green, `false` and errors in the error color, `null` muted,
   changes in a diff by kind.
-- `ls` has a new field `access` (the session's rights `rwx` from fsd,
+- `ls` has new fields `dataset` (root of a nested dataset) and `access` (the session's rights `rwx` from fsd,
   `LIST_STAT_PAGE` sends them with every entry).
 
 **Theme** (`term::theme`): built-in dark (default) and light. The user
@@ -901,9 +901,11 @@ way as to the compositor. Control commands are text with the answer
 | `status` | - | `ok drawing=… focus=… session=… connected=…` |
 | `dump` | - | `ok` + text of the screen (tests, diagnostics) |
 
-It draws into an image in memory and copies the whole frame to the
-framebuffer at once, only on a change or while a command runs (at most
-about 7 frames per second).
+It draws into an image in memory and copies only the changed text lines
+to the framebuffer (while typing usually just the editor line), only on a
+change or while a command runs (at most about 7 frames per second). A file
+name in an action on a row is always text: an embedded expression `{…}` is
+escaped.
 
 ⚠️ **Limits:** the mouse (click on a row, a link) is not supported yet;
 the display and focus in the normal run will be split by the supervisor

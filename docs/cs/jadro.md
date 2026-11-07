@@ -219,7 +219,8 @@ Záznam:
   `INFO`). Init ho předá jedinému procesu - textové a záchranné konzoli
   (`user/console`). Převzetí je výslovné (`FB_CONTROL` `CLAIM`): jádro pak
   log do framebufferu nekreslí, na sériovou linku jde dál. `RELEASE` ho
-  jádru vrátí (obrazovka se smaže). Bez framebufferu položka chybí.
+  jádru vrátí (obrazovka se smaže); totéž udělá konec (i pád) procesu,
+  který ho převzal. Bez framebufferu položka chybí.
 - Filtr: globální úroveň (`log::set_level`), úroveň pro modul a jeho
   podmoduly (`log::set_target_level("sched", Level::Trace)`). Release build
   vůbec nepřeloží Trace (feature `log-trace` ho vrátí). Vypnutá úroveň stojí

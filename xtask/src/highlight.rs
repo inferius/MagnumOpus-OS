@@ -429,6 +429,34 @@ mod tests {
         assert!(checked > 10, "prikladu shellu: {checked}");
     }
 
+    /// Terminal kresli kazdy usek barvou sve tridy z motivu a dokumentace
+    /// ma pro tutez tridu tutez barvu (CSS z motivu): pro vsechny
+    /// priklady shellu v dokumentaci, oba motivy.
+    #[test]
+    fn terminal_colors_match_docs_css() {
+        use term::theme::Theme;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let md = std::fs::read_to_string(root.join("docs/cs/navrh-shell.md")).unwrap().replace("\r\n", "\n");
+        let css = super::shell_css();
+        for theme in [Theme::dark(), Theme::light()] {
+            let mut checked = 0;
+            for block in md.split("```shell-b\n").skip(1) {
+                let code = block.split("```").next().unwrap();
+                let h = shlang::highlight::highlight(code, None);
+                let ansi = term::render::line(code, &h, &theme);
+                for sp in &h.spans {
+                    let st = theme.syntax(sp.class);
+                    let want = format!("{}{}", term::render::sgr(st), &code[sp.start..sp.end]);
+                    assert!(ansi.contains(&want), "{}: usek {:?} bez barvy sve tridy", theme.name, &code[sp.start..sp.end]);
+                    let var = format!("--sh-{}: {};", sp.class.name(), st.fg.hex());
+                    assert!(css.contains(&var), "CSS dokumentace nema barvu {var}");
+                    checked += 1;
+                }
+            }
+            assert!(checked > 50, "useku: {checked}");
+        }
+    }
+
     #[test]
     fn shell_css_has_every_class() {
         let css = super::shell_css();

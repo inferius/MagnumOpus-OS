@@ -113,13 +113,30 @@ pub fn clip(s: &str, cols: usize) -> String {
     while let Some(c) = it.next() {
         if c == '\x1b' {
             out.push(c);
-            if it.peek() == Some(&'[') {
-                for d in it.by_ref() {
-                    out.push(d);
-                    if ('@'..='~').contains(&d) && d != '[' {
-                        break;
+            match it.peek() {
+                // CSI: do koncoveho znaku.
+                Some('[') => {
+                    for d in it.by_ref() {
+                        out.push(d);
+                        if ('@'..='~').contains(&d) && d != '[' {
+                            break;
+                        }
                     }
                 }
+                // OSC (odkaz): do BEL nebo ESC \.
+                Some(']') => {
+                    while let Some(d) = it.next() {
+                        out.push(d);
+                        if d == '\x07' {
+                            break;
+                        }
+                        if d == '\x1b' && it.peek() == Some(&'\\') {
+                            out.push(it.next().unwrap());
+                            break;
+                        }
+                    }
+                }
+                _ => {}
             }
             continue;
         }

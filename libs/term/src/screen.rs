@@ -71,6 +71,11 @@ impl Screen {
         self.cells[y * self.cols + x]
     }
 
+    /// Bunky radku (porovnani snimku: co se zmenilo).
+    pub fn row_cells(&self, y: usize) -> &[Cell] {
+        &self.cells[y * self.cols..(y + 1) * self.cols]
+    }
+
     /// Radek jako text (bez koncovych mezer).
     pub fn line(&self, y: usize) -> alloc::string::String {
         let s: alloc::string::String = self.cells[y * self.cols..(y + 1) * self.cols].iter().map(|c| c.ch).collect();
@@ -240,16 +245,42 @@ fn blend(fg: (u8, u8, u8), bg: (u8, u8, u8), a: u8) -> (u8, u8, u8) {
 
 /// Vykresli obrazovku (s okrajem 8 px).
 pub fn paint(screen: &Screen, s: &mut Surface) {
-    let font = font_for(s.height);
-    let (cw, ch) = cell_size(font);
-    let bg = PALETTE[0];
-    let bgc = s.encode(bg);
+    let bgc = s.encode(PALETTE[0]);
     for y in 0..s.height {
         for x in 0..s.width {
             s.put(x, y, bgc);
         }
     }
-    for row in 0..screen.rows {
+    let rows: alloc::vec::Vec<usize> = (0..screen.rows).collect();
+    paint_rows(screen, s, &rows, false);
+}
+
+/// Rozsah pixelovych radku textoveho radku `row` (pro kopii jen zmenenych
+/// radku do framebufferu).
+pub fn row_pixels(s_height: usize, row: usize) -> core::ops::Range<usize> {
+    let (_, ch) = cell_size(font_for(s_height));
+    let top = 8 + row * ch;
+    top..top + ch
+}
+
+/// Vykresli jen radky `rows` (`clear` = nejdriv jejich pas vyplnit
+/// pozadim). Konzole tak pri psani prekresli jen radek editoru.
+pub fn paint_rows(screen: &Screen, s: &mut Surface, rows: &[usize], clear: bool) {
+    let font = font_for(s.height);
+    let (cw, ch) = cell_size(font);
+    let bg = PALETTE[0];
+    let bgc = s.encode(bg);
+    for &row in rows {
+        if row >= screen.rows {
+            continue;
+        }
+        if clear {
+            for y in row_pixels(s.height, row) {
+                for x in 0..s.width {
+                    s.put(x, y, bgc);
+                }
+            }
+        }
         for col in 0..screen.cols {
             let c = screen.cell(col, row);
             let (ox, oy) = (8 + col * cw, 8 + row * ch);

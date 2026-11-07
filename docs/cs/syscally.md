@@ -450,7 +450,8 @@ objekt z bootstrapu `kind::FRAMEBUFFER` (jiný objekt paměti =
 - `CLAIM` (1): **výslovné převzetí** - jádro přestane kreslit log do
   framebufferu, log dál jde na sériovou linku. Vyžaduje `WRITE`.
 - `RELEASE` (2): vrácení - jádro obrazovku smaže a kreslí log dál.
-  Vyžaduje `WRITE`.
+  Vyžaduje `WRITE`. Konec procesu, který framebuffer převzal, ho vrátí
+  sám.
 
 Panika jádra kreslí do framebufferu vždy. Chyby: `BAD_HANDLE`,
 `ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `BAD_ADDRESS`, `NOT_FOUND`

@@ -31,7 +31,7 @@ use core::time::Duration;
 use libos::Mapping;
 use libos::{Channel, Error, Handle, Signals, Startup, Vmo, println, time};
 use term::proto::ServerMsg;
-use term::screen::{PixelFormat, Screen, Surface, cell_size, font_for, paint};
+use term::screen::{PixelFormat, Screen, Surface, cell_size, font_for, paint, paint_rows, row_pixels};
 use term::theme::Theme;
 use term::ui::App;
 
@@ -51,6 +51,8 @@ struct Display {
     stride: usize,
     format: PixelFormat,
     back: Vec<u32>,
+    /// Bunky posledniho zobrazeneho snimku (`None` = prekreslit vse).
+    shown: Option<Vec<Vec<term::screen::Cell>>>,
 }
 
 impl Display {
@@ -65,7 +67,7 @@ impl Display {
         let map = Mapping::new(&vmo, 0, bytes.next_multiple_of(libos::vm::page_size()), abi_rw())?;
         libos::sys::fb_claim(vmo.handle().raw(), true)?;
         let (w, h, s) = (info.width as usize, info.height as usize, info.stride as usize);
-        Ok(Display { vmo, map, width: w, height: h, stride: s, format, back: alloc::vec![0; s * h] })
+        Ok(Display { vmo, map, width: w, height: h, stride: s, format, back: alloc::vec![0; s * h], shown: None })
     }
 
     fn grid(&self) -> (usize, usize) {
@@ -73,13 +75,33 @@ impl Display {
         ((self.width.saturating_sub(16)) / cw, (self.height.saturating_sub(16)) / ch)
     }
 
+    /// Zobrazi snimek: prekresli a do framebufferu (pamet bez cache)
+    /// zkopiruje jen zmenene textove radky; poprve vse.
     fn show(&mut self, screen: &Screen) {
+        let rows: Vec<Vec<term::screen::Cell>> = (0..screen.rows).map(|y| screen.row_cells(y).to_vec()).collect();
         let mut surf =
             Surface { buf: &mut self.back, width: self.width, height: self.height, stride: self.stride, format: self.format };
-        paint(screen, &mut surf);
-        // SAFETY: `back` je souvisle pole u32; bajty jen ctu.
-        let bytes = unsafe { core::slice::from_raw_parts(self.back.as_ptr() as *const u8, self.back.len() * 4) };
-        self.map.write_bytes(0, bytes);
+        let changed: Vec<usize> = match &self.shown {
+            Some(prev) if prev.len() == rows.len() => (0..rows.len()).filter(|y| prev[*y] != rows[*y]).collect(),
+            _ => {
+                paint(screen, &mut surf);
+                let all = self.back.len() * 4;
+                // SAFETY: `back` je souvisle pole u32; bajty jen ctu.
+                let bytes = unsafe { core::slice::from_raw_parts(self.back.as_ptr() as *const u8, all) };
+                self.map.write_bytes(0, bytes);
+                self.shown = Some(rows);
+                return;
+            }
+        };
+        paint_rows(screen, &mut surf, &changed, true);
+        for y in &changed {
+            let px = row_pixels(self.height, *y);
+            let (a, b) = (px.start.min(self.height) * self.stride, px.end.min(self.height) * self.stride);
+            // SAFETY: rozsah lezi v `back` (radky omezene vyskou).
+            let bytes = unsafe { core::slice::from_raw_parts(self.back[a..b].as_ptr() as *const u8, (b - a) * 4) };
+            self.map.write_bytes(a as u64 * 4, bytes);
+        }
+        self.shown = Some(rows);
     }
 
     /// Vratit displej jadru; vrati VMO (pro dalsiho vlastnika).

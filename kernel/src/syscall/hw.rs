@@ -102,10 +102,10 @@ pub fn fb_control(a: Args) -> Result<u64> {
         }
         fb_op::CLAIM => {
             crate::log::info!("framebuffer prevzal proces {} {} (log jadra dal na seriove lince)", p.name, p.id);
-            crate::console::set_claimed(true);
+            crate::console::set_claimed(Some(p.id));
         }
         fb_op::RELEASE => {
-            crate::console::set_claimed(false);
+            crate::console::set_claimed(None);
             crate::log::info!("framebuffer vratil proces {} {}", p.name, p.id);
         }
         _ => return Err(Error::InvalidArgs),

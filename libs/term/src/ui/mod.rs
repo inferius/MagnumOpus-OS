@@ -56,8 +56,9 @@ pub struct UiBlock {
     pub ok: Option<bool>,
     pub duration: i64,
     pub collapsed: bool,
-    /// Interaktivni tabulka (prvni tabulka bloku).
+    /// Interaktivni tabulka (prvni tabulka bloku) a index jeji polozky.
     pub table: Option<TableView>,
+    table_item: Option<usize>,
     /// Rychlost a odhad pruhu (index polozky -> stopa).
     tracks: Vec<(usize, Track)>,
 }
@@ -188,6 +189,7 @@ impl App {
                     duration: 0,
                     collapsed: false,
                     table: None,
+                    table_item: None,
                     tracks: Vec::new(),
                 });
                 if self.blocks.len() > KEEP_BLOCKS {
@@ -204,6 +206,9 @@ impl App {
                         && let Item::Value(v) = &item
                     {
                         b.table = TableView::of(v);
+                        if b.table.is_some() {
+                            b.table_item = Some(b.items.len());
+                        }
                     }
                     if let (Item::Progress { done, .. }, Some(t)) = (&item, now) {
                         let mut tr = Track::default();
@@ -265,6 +270,7 @@ impl App {
                     duration: 0,
                     collapsed: false,
                     table: None,
+                    table_item: None,
                     tracks: Vec::new(),
                 });
             }
@@ -708,12 +714,12 @@ impl App {
             out.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("  ({} položek, mezera rozbalí)", b.items.len())));
             return out;
         }
-        let mut table_drawn = false;
         for (ii, it) in b.items.iter().enumerate() {
             match it {
-                Item::Value(v) if !table_drawn && b.table.is_some() && TableView::of(v).is_some() => {
-                    table_drawn = true;
-                    out.extend(self.draw_table(b.table.as_ref().unwrap(), focused));
+                Item::Value(_) if b.table_item == Some(ii) => {
+                    if let Some(t) = &b.table {
+                        out.extend(self.draw_table(t, focused));
+                    }
                 }
                 Item::Progress { done, total, label } => {
                     let track = b.tracks.iter().find(|(k, _)| *k == ii).map(|(_, tr)| tr);
@@ -787,7 +793,7 @@ impl App {
         let mut l = Line::new();
         l.push(None, "  ");
         let width = (self.cols / 3).clamp(10, 40);
-        if total == 0 {
+        if total == 0 && running {
             // Neznamy celek: putujici usek.
             let pos = self.tick as usize % width;
             for i in 0..width {
@@ -802,11 +808,21 @@ impl App {
         }
         let pct = (done.min(total) * 100 / total) as usize;
         let full = width * pct / 100;
-        let color = if pct >= 100 { t.ui.ok } else { t.ui.accent };
+        // Blok skoncil pred 100 % (break, chyba, preruseni): zastaveny pruh.
+        let color = if pct >= 100 {
+            t.ui.ok
+        } else if running {
+            t.ui.accent
+        } else {
+            t.ui.muted
+        };
         l.push_bg(None, color, &" ".repeat(full));
         l.push_bg(None, t.ui.select, &" ".repeat(width - full));
         l.push(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &alloc::format!("  {pct} %"));
         let mut info = alloc::format!("  {done} / {total} {label}");
+        if !running && pct < 100 {
+            info.push_str(" · zastaveno");
+        }
         if running && let Some(tr) = track {
             if let Some(r) = tr.rate() {
                 let rate = progress::human_rate(r, label);
@@ -849,7 +865,7 @@ fn cell_style(col: &str, v: &Value, rec: &Value, t: &Theme, now: Option<i64>) ->
         Value::Bool(false) | Value::Error(_) => Some(Style::fg(t.ui.err)),
         Value::Null | Value::Nothing => Some(Style::fg(t.ui.muted)),
         _ if col == "name" => render::file_class(rec, t).map(|c| t.file(c)),
-        _ if matches!(col, "kind" | "ext" | "access") => Some(Style::fg(t.ui.muted)),
+        _ if matches!(col, "kind" | "ext" | "access" | "dataset") => Some(Style::fg(t.ui.muted)),
         _ => None,
     }
 }
@@ -876,20 +892,32 @@ pub fn row_path(row: Option<&Value>) -> Option<String> {
     str_field(r, "path").or_else(|| str_field(r, "name"))
 }
 
-/// Slovo zapisu B v uvozovkach, kdyz je treba.
-fn quote(p: &str) -> String {
+/// Slovo zapisu B v uvozovkach, kdyz je treba. Jmeno souboru je data,
+/// ne kod: escapuje se i vlozeny vyraz `{...}` (jinak by jmeno
+/// `x{exec(...)}` pri akci nad radkem spustilo kod).
+pub fn quote(p: &str) -> String {
     if p.chars().all(|c| c.is_alphanumeric() || "/._-~".contains(c)) {
-        p.into()
-    } else {
-        alloc::format!("\"{}\"", p.replace('\\', "\\\\").replace('"', "\\\""))
+        return p.into();
     }
+    let mut out = String::from("\"");
+    for c in p.chars() {
+        if matches!(c, '\\' | '"' | '{' | '}') {
+            out.push('\\');
+        }
+        match c {
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Prikaz akce nad radkem (spusti se jako bezny radek - vidi ho historie
 /// a plati pro nej nahled, zamek i undo).
 pub fn row_action(row: Option<&Value>, a: Action) -> Option<String> {
     let path = row_path(row)?;
-    let dir = row.and_then(|r| str_field(r, "kind")).is_some_and(|k| k == "dir" || k == "dataset");
+    let dir = row.and_then(|r| str_field(r, "kind")).is_some_and(|k| k == "dir");
     let p = quote(&path);
     Some(match a {
         Action::Open if dir => alloc::format!("cd {p}; ls"),

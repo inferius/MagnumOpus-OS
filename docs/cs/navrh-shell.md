@@ -738,15 +738,15 @@ for f in (ls *.jpg) { echo "zpracovávám {f.name}" }
 **Barevné výpisy** (`term::render`): tabulky se barví podle typu hodnot
 a schématu, ne podle ANSI v programech.
 
-- **Jméno souboru podle druhu:** `dir`, `dataset` (vnořený dataset,
-  `kind = "dataset"`), `symlink`, `exec` (právo spustit `x` v poli
+- **Jméno souboru podle druhu:** `dir`, `dataset` (vnořený dataset: `kind`
+  zůstává `"dir"`, pole `dataset = true`), `symlink`, `exec` (právo spustit `x` v poli
   `access`), `image`, `archive`, `document`, `media` (podle přípony),
   `hidden` (tečka), `noaccess` (bez práva číst).
 - **Velikost a stáří v barevné škále** (4 stupně): velikost do 1 MB,
   100 MB, 1 GB a víc; stáří do dne, 30 dnů, roku a starší.
 - `true` zeleně, `false` a chyby barvou chyby, `null` tlumeně, změny
   v diffu podle druhu.
-- `ls` má nové pole `access` (práva relace `rwx` z fsd, `LIST_STAT_PAGE`
+- `ls` má nová pole `dataset` (kořen vnořeného datasetu) a `access` (práva relace `rwx` z fsd, `LIST_STAT_PAGE`
   je posílá u každé položky).
 
 **Motiv** (`term::theme`): vestavěný tmavý (výchozí) a světlý. Uživatel je
@@ -853,8 +853,10 @@ s odpovědí `ok` / `err KÓD` jako u inputd:
 | `status` | - | `ok drawing=… focus=… session=… connected=…` |
 | `dump` | - | `ok` + text obrazovky (testy, diagnostika) |
 
-Kreslí do obrazu v paměti a do framebufferu kopíruje celý snímek naráz,
-jen při změně nebo u běžícího příkazu (nejvýš asi 7 snímků za sekundu).
+Kreslí do obrazu v paměti a do framebufferu kopíruje jen změněné textové
+řádky (při psaní typicky jen řádek editoru), jen při změně nebo u
+běžícího příkazu (nejvýš asi 7 snímků za sekundu). Jméno souboru v akci
+nad řádkem je vždy text: vložený výraz `{…}` se escapuje.
 
 ⚠️ **Omezení:** myš (klik na řádek, odkaz) ještě není; displej a fokus
 v běžném běhu rozdělí supervisor spolu s GUI 6c.
