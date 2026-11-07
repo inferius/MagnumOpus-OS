@@ -455,11 +455,24 @@ bez vlastního limitu. Vyžaduje `WRITE`. Chyby: `INVALID_ARGS` (neznámý
 
 ### `JOB_INFO`
 
-`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (48 B, little endian):
+`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (56 B, little endian):
 pro paměť jádra a pak uživatelskou paměť vždy `used` (strženo z jobu
 včetně potomků), `limit` (vlastní limit) a `available` (kolik ještě jde
 strhnout – nejmenší volné místo přes job a všechny předky; `u64::MAX` =
-nikde limit). Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
+nikde limit), nakonec `id` (číslo jobu, jedinečné do restartu).
+Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
+`WRONG_TYPE`, `BAD_ADDRESS`.
+
+### `JOB_PROCESSES`
+
+`(job, out_ptr, max) -> počet`. Procesy jobu a všech jeho potomků
+(přehled úloh: i proces, který se sám neregistroval). Na `out_ptr` zapíše
+nejvýš `max` (do 4096) záznamů `abi::job::ProcEntry` (64 B, little
+endian): `pid`, `job` (číslo jobu procesu), `cpu_ns` (čas na CPU všech
+vláken, přičítá scheduler při přepnutí), `threads` (živá vlákna), `flags`
+(`proc_flags::FINISHED` = skončil, čeká na úklid), `name` (32 B UTF-8,
+doplněno nulami). Vrátí celkový počet (i nad `max`). Vyžaduje `READ`.
+Chyby: `INVALID_ARGS` (`max` > 4096), `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.
 
 ### `FB_CONTROL`

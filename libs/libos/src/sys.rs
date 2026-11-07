@@ -494,6 +494,13 @@ pub fn fb_claim(vmo: u32, claim: bool) -> Result<()> {
     call(nr::FB_CONTROL, [vmo as u64, op, 0, 0, 0, 0]).map(|_| ())
 }
 
+/// Procesy jobu a jeho potomku (`JOB_PROCESSES`); `buf` = misto pro zaznamy
+/// (nasobek 64 B). Vrati celkovy pocet (i nad kapacitu `buf`).
+pub fn job_processes(job: u32, buf: &mut [u8]) -> Result<usize> {
+    let max = buf.len() / abi::job::ProcEntry::SIZE;
+    call(nr::JOB_PROCESSES, [job as u64, buf.as_mut_ptr() as u64, max as u64, 0, 0, 0]).map(|n| n as usize)
+}
+
 pub fn job_info(job: u32) -> Result<abi::job::JobInfo> {
     let mut buf = [0u8; abi::job::JobInfo::SIZE];
     call(nr::JOB_INFO, [job as u64, buf.as_mut_ptr() as u64, 0, 0, 0, 0])?;

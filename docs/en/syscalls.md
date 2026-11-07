@@ -467,12 +467,25 @@ own limit. Requires `WRITE`. Errors: `INVALID_ARGS` (unknown `pool`),
 
 ### `JOB_INFO`
 
-`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (48 B, little endian):
+`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (56 B, little endian):
 for kernel memory and then user memory always `used` (charged to the job
 including descendants), `limit` (own limit) and `available` (how much
 can still be charged - the smallest free room over the job and all
-ancestors; `u64::MAX` = no limit anywhere). Requires `READ`. Errors:
+ancestors; `u64::MAX` = no limit anywhere), finally `id` (the job number,
+unique until reboot). Requires `READ`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
+
+### `JOB_PROCESSES`
+
+`(job, out_ptr, max) -> count`. Processes of the job and all its
+descendants (task overview: also a process that did not register itself).
+Writes at most `max` (up to 4096) `abi::job::ProcEntry` records (64 B,
+little endian) to `out_ptr`: `pid`, `job` (the process's job number),
+`cpu_ns` (CPU time of all threads, added by the scheduler on a switch),
+`threads` (live threads), `flags` (`proc_flags::FINISHED` = exited,
+waiting for cleanup), `name` (32 B UTF-8, zero padded). Returns the total
+count (also above `max`). Requires `READ`. Errors: `INVALID_ARGS` (`max`
+> 4096), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
 ### `FB_CONTROL`
 
