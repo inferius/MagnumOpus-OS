@@ -49,6 +49,8 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
+  --qemu-wsl       (run, test) spustit QEMU ve WSL (QEMU_WSL_DISTRO, vychozi
+                   Ubuntu; QEMU_WSL_PREFIX, vychozi ~/venus/prefix) - Venus
   --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi), gl (virgl 3D)
                    nebo venus (Vulkan; QEMU s virglrenderer a render serverem);
                    gl a venus bez okna pouziji displej egl-headless
@@ -72,6 +74,10 @@ pub struct Options {
     /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
     /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl).
     gpu: String,
+    /// QEMU ve WSL (Linux): `--qemu-wsl` (vychozi distribuce Ubuntu, QEMU
+    /// z `~/venus/prefix`, kde je preklad s Venusem). Cesty se prevedou na
+    /// `/mnt/<disk>/...`.
+    qemu_wsl: bool,
     qemu_args: Vec<OsString>,
     /// Cilova architektura.
     arch: &'static Arch,
@@ -111,6 +117,7 @@ fn run_cli() -> Result<()> {
         accel: None,
         iommu: String::new(),
         gpu: String::from("2d"),
+        qemu_wsl: false,
         qemu_args: Vec::new(),
         arch: &arch::X86_64,
         test: false,
@@ -125,6 +132,7 @@ fn run_cli() -> Result<()> {
                 let value = args.next().ok_or("--iommu ocekava typ IOMMU")?;
                 opts.iommu = value.to_string_lossy().into_owned();
             }
+            Some("--qemu-wsl") => opts.qemu_wsl = true,
             Some("--gpu") => {
                 let value = args.next().ok_or("--gpu ocekava 2d, gl nebo venus")?;
                 opts.gpu = value.to_string_lossy().into_owned();

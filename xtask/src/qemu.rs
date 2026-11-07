@@ -49,7 +49,8 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     // Stary log nesmi obsahovat znacku testu vstupu z minuleho behu.
     let _ = std::fs::remove_file(&serial_log);
     let qmp_port = qmp::free_port()?;
-    let accel = opts.accel.as_deref().unwrap_or(default_accel());
+    // Ve WSL je KVM (vnorena virtualizace).
+    let accel = opts.accel.as_deref().unwrap_or(if opts.qemu_wsl { "kvm" } else { default_accel() });
     let mut cmd = Command::new(&qemu);
     let translate_os_disk = match arch.name {
         "x86_64" => machine_x86_64(&mut cmd, accel, opts),
@@ -113,7 +114,13 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         .arg("-no-reboot");
     if opts.headless {
         // Venus potrebuje OpenGL i bez okna.
-        let display = if opts.gpu == "2d" { "none" } else { "egl-headless" };
+        // Ve WSL neni uzel DRM pro egl-headless: GTK s OpenGL (EGL) pod
+        // xvfb-run; SDL tam kontext OpenGL 3+ pro virgl nevytvori.
+        let display = match (opts.gpu.as_str(), opts.qemu_wsl) {
+            ("2d", _) => "none",
+            (_, true) => "gtk,gl=on",
+            _ => "egl-headless",
+        };
         cmd.args(["-display", display]);
     }
     if opts.gdb {
@@ -130,7 +137,10 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
         h.release_forwarded_port();
     }
-    println!("xtask: spoustim {}", qemu.display());
+    if opts.qemu_wsl {
+        cmd = wsl_command(&cmd, arch.qemu, opts.headless && opts.gpu != "2d");
+    }
+    println!("xtask: spoustim {}", if opts.qemu_wsl { String::from("QEMU ve WSL") } else { qemu.display().to_string() });
     qmp::spawn_injector(serial_log.clone(), qmp_port, arch.ps2);
     let result = if opts.test {
         run_test(cmd, opts)
@@ -242,6 +252,62 @@ fn gpu_device(cmd: &mut Command, opts: &Options) {
             cmd.args(["-device", "virtio-gpu-pci,id=gpu0,disable-legacy=on,iommu_platform=on,xres=1280,yres=800"]);
         }
     }
+}
+
+/// Windows cesta `X:\a\b` -> WSL `/mnt/x/a/b` (vsechny vyskyty v argumentu,
+/// cesta konci carkou nebo koncem argumentu).
+fn to_wsl_paths(arg: &str) -> String {
+    let b = arg.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        let drive = b[i].is_ascii_alphabetic()
+            && b.get(i + 1) == Some(&b':')
+            && matches!(b.get(i + 2), Some(b'\\') | Some(b'/'))
+            && (i == 0 || matches!(b[i - 1], b'=' | b','));
+        if drive {
+            out.push_str("/mnt/");
+            out.push((b[i] as char).to_ascii_lowercase());
+            i += 2;
+            while i < b.len() && b[i] != b',' {
+                out.push(if b[i] == b'\\' { '/' } else { b[i] as char });
+                i += 1;
+            }
+        } else {
+            out.push(b[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Prikaz QEMU prevedeny na beh ve WSL: `wsl.exe -d <distro> -- <qemu> ...`.
+fn wsl_command(cmd: &Command, qemu_name: &str, xvfb: bool) -> Command {
+    let distro = std::env::var("QEMU_WSL_DISTRO").unwrap_or_else(|_| String::from("Ubuntu"));
+    let prefix = std::env::var("QEMU_WSL_PREFIX").unwrap_or_else(|_| String::from("~/venus/prefix"));
+    // Bez shellu by se `~` nerozvinula: spustit pres bash -c s exec.
+    // Knihovny z prefixu (virglrenderer s Venusem); bez okna virtualni X
+    // server (OpenGL softwarove, Vulkan hostitele lavapipe nebo GPU).
+    // OpenGL pod Xvfb jen softwarove (llvmpipe): ovladac D3D12 z WSL tam
+    // kontext nevytvori.
+    let (env, run) = if xvfb {
+        ("export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe; ", "xvfb-run -a -s '-screen 0 1280x1024x24 +extension GLX' ")
+    } else {
+        ("", "")
+    };
+    let mut line = format!(
+        "export LD_LIBRARY_PATH={prefix}/lib/x86_64-linux-gnu:{prefix}/lib; export VIRGL_DEBUG=${{VIRGL_DEBUG:-}} VKR_DEBUG=${{VKR_DEBUG:-}}; {env}exec {run}{prefix}/bin/{qemu_name}"
+    );
+    for a in cmd.get_args() {
+        let a = to_wsl_paths(&a.to_string_lossy());
+        line.push(' ');
+        line.push('\'');
+        line.push_str(&a.replace('\'', "'\\''"));
+        line.push('\'');
+    }
+    let mut w = Command::new("wsl.exe");
+    w.args(["-d", &distro, "--", "bash", "-lc", &line]);
+    w
 }
 
 fn run_interactive(mut cmd: Command) -> Result<()> {
