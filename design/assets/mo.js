@@ -119,7 +119,7 @@
   apply();
 
   var PAGES = [
-    ['index.html', 'Přehled'], ['design-system.html', 'Design systém'], ['okna.html', 'Okna'],
+    ['index.html', 'Přehled'], ['prirucka.html', 'Příručka'], ['design-system.html', 'Design systém'], ['okna.html', 'Okna'],
     ['plocha.html', 'Plocha'], ['terminal.html', 'Terminál'], ['soubory.html', 'Soubory'],
     ['nastaveni.html', 'Nastavení'], ['prihlaseni.html', 'Přihlášení'], ['start.html', 'Start']
   ];

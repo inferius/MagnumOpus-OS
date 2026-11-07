@@ -13,12 +13,22 @@ the UI library `libs/ui` and the terminal window are built by milestone 6c
 (the *Graphics and windows* page). They take the appearance and behavior from
 here; the values come as data from `design/tokens.toml`.
 
+> **Visual language handbook:** [design/prirucka.html](../../design/prirucka.html)
+> (Czech and English). Rules for anyone drawing a window, writing an
+> application, copy or an icon: values, logo, color, type, icons, layout,
+> components, motion, voice and copy, trust and the agent, accessibility,
+> with "do / don't" examples. This page is the technical design and plan;
+> the handbook is a concise guide for authors. The link works in the
+> repository (open the file in a browser); the documentation website does
+> not copy the `design/` folder yet.
+
 **Clickable prototypes** are in `design/` (open `design/index.html` in a
 browser). Every page has a switch for theme, high contrast, font size and
 reduced motion.
 
 | Prototype | What it shows |
 |---|---|
+| `design/prirucka.html` | **visual language handbook** (cs / en) |
 | `design/design-system.html` | colors with a contrast table, typography, grid, corner radii, shadows, icons, motion, components |
 | `design/okna.html` | window anatomy, trust badge (removing permissions), window modes, states |
 | `design/plocha.html` | bar in 6 positions, window switching, notifications, system dialogs, file picker, secure screen, task manager, agent in the bar |

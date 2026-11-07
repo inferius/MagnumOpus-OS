@@ -13,12 +13,21 @@ Tahle stránka je **návrh**, ne popis kódu. Kompozitor `compd`, knihovnu UI
 Odsud si bere vzhled a chování; hodnoty bere jako data z
 `design/tokens.toml`.
 
+> **Příručka grafického jazyka:** [design/prirucka.html](../../design/prirucka.html)
+> (česky i anglicky). Pravidla pro každého, kdo kreslí okno, píše aplikaci,
+> text nebo ikonu: hodnoty, logo, barvy, písmo, ikony, rozvržení,
+> komponenty, pohyb, hlas a texty, důvěra a agent, přístupnost, s příklady
+> „správně / špatně“. Tahle stránka je technický návrh a plán; příručka
+> je stručný výklad pro autory. Odkaz funguje v repozitáři (otevři soubor
+> v prohlížeči); web dokumentace složku `design/` zatím nekopíruje.
+
 **Klikací prototypy** jsou v `design/` (otevři `design/index.html`
 v prohlížeči). Každá stránka má přepínač motivu, vysokého kontrastu,
 velikosti písma a omezení pohybu.
 
 | Prototyp | Co ukazuje |
 |---|---|
+| `design/prirucka.html` | **příručka grafického jazyka** (cs / en) |
 | `design/design-system.html` | barvy s tabulkou kontrastu, typografie, mřížka, zaoblení, stíny, ikony, pohyb, komponenty |
 | `design/okna.html` | anatomie okna, odznak důvěry (odebrání oprávnění), režimy okna, stavy |
 | `design/plocha.html` | lišta v 6 polohách, přepínání oken, oznámení, systémové dialogy, výběr souboru, bezpečná obrazovka, správce úloh, agent v liště |
