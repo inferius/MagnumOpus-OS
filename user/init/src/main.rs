@@ -15,6 +15,7 @@ extern crate alloc;
 
 mod apps;
 mod certs;
+mod dns;
 mod input;
 mod ntp;
 mod revocation;
@@ -57,7 +58,8 @@ fn main(startup: Startup) -> i64 {
             }
             // Sit az po FS: firewall uklada konfiguraci na FS.
             match system::start_net(&startup, &mut devices) {
-                Ok(n) => {
+                Ok(mut n) => {
+                    let dnsd_end = n.dnsd_end.take();
                     // Restart zatim neni (jako u fsd): netd drzi kanaly
                     // vsech socketu, fwd stav dotazu.
                     sup.watch("netd", &n.process, None);
@@ -65,6 +67,16 @@ fn main(startup: Startup) -> i64 {
                         sup.watch("fwd", p, None);
                     }
                     let n = system::NET.call_once(|| n);
+                    // dnsd hned po netd: systemovy preklad (i pro ntpd a revocd).
+                    if let Some(end) = dnsd_end {
+                        match dns::start(&startup, n, end, &devices) {
+                            Ok(d) => {
+                                sup.watch("dnsd", &d.process, None);
+                                system::DNSD.call_once(|| d);
+                            }
+                            Err(e) => println!("init: sifrovane DNS nelze spustit (preklad podle profilu site): {e}"),
+                        }
+                    }
                     // revocd pred ntpd: ntpd dostane kanal pro TLS NTS-KE.
                     match revocation::start(&startup, n, &devices) {
                         Ok(r) => {

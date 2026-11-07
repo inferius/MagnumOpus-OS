@@ -18,6 +18,7 @@ mod highlight;
 mod image;
 mod qemu;
 mod nethelper;
+mod dnshelper;
 mod ntshelper;
 mod revhelper;
 mod webhelper;
@@ -177,6 +178,8 @@ fn run_cli() -> Result<()> {
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
             opts.extra_initfs
                 .push((String::from("net-test-ca.pem"), web.ca_pem.into_bytes()));
+            opts.extra_initfs
+                .push((String::from("net-test-dns-anchor"), web.dns_anchor.into_bytes()));
             opts.hostfwd = Some(helper.hostfwd.clone());
             *opts.net_helper.borrow_mut() = Some(helper);
             let artifacts = build(&opts)?;
@@ -331,6 +334,7 @@ const USER_PROGRAMS: &[&str] = &[
     "ntpd",
     "fetch",
     "revocd",
+    "dnsd",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
@@ -345,6 +349,8 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
     ("revocd.manifest.toml", "user/revocd/revocd.manifest.toml"),
     ("revocd.toml", "user/revocd/revocd.toml"),
+    ("dnsd.manifest.toml", "user/dnsd/dnsd.manifest.toml"),
+    ("dnsd.toml", "user/dnsd/dnsd.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

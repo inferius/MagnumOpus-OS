@@ -34,7 +34,9 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 4. `inputd`: init hands it the input devices, its own focus channel and the
    `secure` channel, and sends `settled` (devices attached now are
    trusted),
-5. `netd` on the first network card and `fwd` (firewall, configuration on
+5. `netd` on the first network card (with a channel for `dnsd`), `dnsd`
+   (encrypted DNS and DNSSEC, see
+   [Network](network.md#encrypted-dns-and-dnssec-dnsd)) and `fwd` (firewall, configuration on
    the FS), both in jobs by their manifests (see [Network](network.md),
    [Firewall](firewall.md)), then `ntpd` (time synchronization, see
    [Real time](time.md#synchronization-over-the-network-ntpd)) and `revocd`

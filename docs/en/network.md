@@ -413,8 +413,10 @@ than the address, an invalid name and more than 256 rules or 16 layers.
 
 ## DNS
 
-The resolver is in the service (`user/netd/src/resolve.rs`), the message
-format in `netproto::dns`, where the test server uses it too.
+System resolution goes through `dnsd` (see below). The unauthenticated
+resolver in the service (`user/netd/src/resolve.rs`, format
+`netproto::dns`) serves queries to an own server and the fallback by
+network profile:
 
 - For family 0 both A and AAAA queries are sent. One answer is enough,
   and an empty AAAA answer does not matter.
@@ -432,7 +434,74 @@ format in `netproto::dns`, where the test server uses it too.
 - **Blocked domains** of the firewall return `ACCESS_DENIED` without a
   query (see [DNS filter](firewall.md#dns-filter)).
 
-TODO: a cache by TTL, DoT/DoH (with TLS).
+### Encrypted DNS and DNSSEC (`dnsd`)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Encrypted DNS">
+<defs><marker id="sd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="130" height="60" rx="6"/><text class="t b" x="75" y="45" text-anchor="middle">program</text><text class="m" x="75" y="64" text-anchor="middle">resolve()</text>
+<path class="ln" d="M140 50 L198 50" marker-end="url(#sd1)"/>
+<rect class="acc" x="200" y="20" width="160" height="110" rx="6"/><text class="t b" x="280" y="45" text-anchor="middle">netd</text><text class="m" x="280" y="64" text-anchor="middle">blocked domains</text><text class="m" x="280" y="82" text-anchor="middle">→ dnsd (channel)</text><text class="m" x="280" y="100" text-anchor="middle">learns name</text><text class="m" x="280" y="118" text-anchor="middle">rules</text>
+<path class="ln-acc" d="M360 50 L418 50" marker-end="url(#sd1)"/>
+<rect class="ok" x="420" y="20" width="170" height="110" rx="6"/><text class="t b" x="505" y="45" text-anchor="middle">dnsd</text><text class="m" x="505" y="64" text-anchor="middle">DO + CD, DNSSEC</text><text class="m" x="505" y="82" text-anchor="middle">chain from IANA anchor</text><text class="m" x="505" y="100" text-anchor="middle">cache (TTL)</text><text class="m" x="505" y="118" text-anchor="middle">OK/NX/BOGUS/…</text>
+<path class="ln" d="M590 50 L638 50" marker-end="url(#sd1)"/>
+<rect class="box" x="640" y="20" width="110" height="60" rx="6"/><text class="t b" x="695" y="45" text-anchor="middle">resolver</text><text class="m" x="695" y="64" text-anchor="middle">DoH / DoT</text>
+<path class="ln" d="M280 130 L280 168" marker-end="url(#sd1)"/>
+<rect class="warn" x="200" y="170" width="160" height="60" rx="6"/><text class="t b" x="280" y="195" text-anchor="middle">UDP/TCP fallback</text><text class="m" x="280" y="214" text-anchor="middle">DHCP servers</text>
+<text class="m" x="380" y="190">only when dnsd replies UNAVAILABLE</text>
+<text class="m" x="380" y="208">and the network profile has</text>
+<text class="m" x="380" y="226">unauthenticated = "fallback"</text>
+</svg>
+<figcaption>System resolution: encrypted and validated; an unauthenticated fallback only by network profile.</figcaption>
+</figure>
+
+System resolution (sessions without an own server) goes from `netd` to the
+**`dnsd`** service. It asks **encrypted** (DoH, RFC 8484, or DoT,
+RFC 7858) and **validates** the answers itself (DNSSEC): the DS chain from
+the IANA root anchor, RRSIG signatures, NSEC and NSEC3 denial proofs. The
+resolver is not trusted - it can only lie by calling a zone unsigned, and a
+proof from the parent zone does not let that through.
+
+| `dnsd` result | For the program |
+|---|---|
+| addresses (validated, or an unsigned zone) | addresses; `netd` learns name rules from them |
+| NXDOMAIN, NODATA (validated) | `NOT_FOUND` |
+| **BOGUS** (a signature or proof failed) | `CORRUPTED` - an attack, no fallback |
+| UNAVAILABLE (no resolver answered) | by network profile: the unauthenticated resolver (UDP/TCP to DHCP or `SET_DNS` servers), or `UNREACHABLE` |
+
+- **The channel** `netd` ↔ `dnsd` is created before `netd` starts (4th
+  handle); queries wait in it until `dnsd` is up. When `dnsd` exits, `netd`
+  resolves only by the profile rule.
+- **Resolvers** in `dnsd.toml` carry an address
+  (`doh:https://name/path@address`, `dot:name@address[:port]`): `dnsd`
+  does not resolve resolver names. The `dnsd` network session may only use
+  TCP to these addresses. After an error it tries the next one and keeps
+  the last working one.
+- **Anchors:** the root DS per IANA `root-anchors.xml`: KSK-2017 (20326)
+  and KSK-2024 (38696, signing the root since 2026-10-11). At the next root
+  key rollover `trust_anchors` must be updated (no RFC 5011 yet).
+- **Algorithms:** RSASHA256, RSASHA512, ECDSA P-256/P-384, Ed25519; SHA-256
+  and SHA-384 digests. A zone with another algorithm or NSEC3 above 100
+  iterations (RFC 9276) is treated as unsigned.
+- **Cache** by TTL (negative answers by SOA), 1,024 entries, at most 1 day;
+  zone states (keys) separately, at most 1 h. Bogus answers are not cached.
+- **No revocation check** of the resolver certificate (OCSP stapling only):
+  `revocd` resolves names through `dnsd`, the check would loop.
+- Bootstrap commands: `status` (`queries upstream cache_hits secure
+  insecure bogus unavailable dnssec server error`), `flush`, `prefer <n>`.
+
+```toml
+# dnsd.toml
+servers = ["doh:https://cloudflare-dns.com/dns-query@1.1.1.1", "dot:one.one.one.one@1.0.0.1"]
+dnssec = true
+trust_anchors = ["20326 8 2 E06D44B8...", "38696 8 2 683D2D0A..."]
+```
+
+> **Change from the first version:** `netd` asked the DHCP servers
+> unencrypted and unvalidated. **Why:** the network (Wi-Fi, ISP) saw where
+> you connect and could spoof answers. TLS detects a spoofed server, but
+> DNSSEC and encryption also protect names without TLS and privacy.
+
 
 ## NTP and the clock
 
@@ -506,6 +575,7 @@ host's 127.0.0.1.
 | UDP large datagram | 60,000 B there and back (IPv4 fragmentation and reassembly) |
 | permissions | missing rights, destinations outside restrictions, handing a connection to another channel |
 | host name | the `*.magnumopus` rule applies after a system resolution, not after one by an own server |
+| encrypted DNS | the "sifrovane DNS" suite: validated A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC and NSEC3), NODATA; unsigned and bogus zone; failover from a broken resolver, DoT, cache; the profile rule |
 | NTP | `ntpd` against the host server (the "synchronizace casu" suite, see [time.md](time.md#synchronization-over-the-network-ntpd)) |
 
 DNS through 10.0.2.3 (slirp forwards the queries to the host's DNS) is not

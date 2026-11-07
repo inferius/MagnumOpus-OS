@@ -44,8 +44,10 @@ se ověřuje podle reálného času, proto na ní TLS závisí.
 >   (viz [Reálný čas](cas.md#nts-ověřený-čas)); neověřené NTP se podle
 >   profilu sítě použije jen jako záloha. V záloze může útočník čas
 >   posunout (`timed` to omezí na 500 ppm a odmítne skoky nad 60 s).
-> - **DNS není ověřené** (bez DNSSEC a DoH): podvržená adresa neprojde
->   ověřením certifikátu, ale útočník zjistí, kam se program připojuje.
+> - **DNS:** systémový překlad je šifrovaný (DoH/DoT) a ověřený (DNSSEC,
+>   viz [Síť](sit.md#šifrované-dns-a-dnssec-dnsd)). Nepodepsané zóny
+>   (většina domén) chrání jen šifrování k resolveru, ne podpis; resolver
+>   tak vidí, kam se program připojuje.
 
 ## Architektura
 

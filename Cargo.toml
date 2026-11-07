@@ -42,6 +42,7 @@ members = [
     "user/ntpd",
     "user/fetch",
     "user/revocd",
+    "user/dnsd",
     "user/init",
     "user/ps2",
     "user/inputd",

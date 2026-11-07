@@ -6,7 +6,9 @@
 //! pravidla se jmenem hostitele (`Auth::learn`, platnost podle TTL).
 //! Jmena na seznamu blokovanych domen firewallu = `ACCESS_DENIED`.
 //!
-//! TODO: mezipamet odpovedi podle TTL, DNSSEC/DoT/DoH (az s TLS).
+//! Systemovy preklad jde pres `dnsd` (sifrovane DNS, DNSSEC, mezipamet;
+//! `forward.rs`); tento resolver je pro dotazy na vlastni server a jako
+//! zaloha podle profilu site.
 
 use alloc::string::String;
 use alloc::vec;
@@ -21,6 +23,7 @@ use smoltcp::iface::SocketHandle;
 use smoltcp::socket::tcp::State;
 use smoltcp::wire::IpAddress;
 
+use crate::forward::{Forward, Outcome, outcome};
 use crate::fw::app_name;
 use crate::obj::{AuthRef, Deferred, Gate, Pending, Step, ask_wait, gate};
 use crate::stack::{PortProto, Stack, deadline, now_ns, v4};
@@ -271,8 +274,16 @@ pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> 
             Vec::new(),
         ),
         None => {
-            let servers = stack.dns_servers().to_vec();
-            begin(stack, auth, name, family, servers, true, timeout)
+            if let Some(id) = stack.resolver.send(&netproto::policy::normalize_name(&name), family) {
+                return Ok(Step::Wait(Pending::Forward(Forward {
+                    id,
+                    name,
+                    family,
+                    deadline: deadline(timeout).min(now_ns().saturating_add(RESOLVE_MAX_NS)),
+                    timeout,
+                })));
+            }
+            fallback(stack, auth, name, family, timeout)
         }
     }
 }
@@ -342,6 +353,46 @@ fn begin(
     };
     res.send(stack);
     Ok(Step::Wait(Pending::Resolve(res)))
+}
+
+/// Neovereny systemovy resolver: bez dnsd vzdy, s dnsd jen kdyz to profil
+/// site dovoli (`unauthenticated = "fallback"`).
+fn fallback(stack: &mut Stack, auth: &AuthRef, name: String, family: u8, timeout: u64) -> Result<Step> {
+    if stack.resolver.configured && !stack.fw.unauthenticated_fallback {
+        return Err(Error::Unreachable);
+    }
+    let servers = stack.dns_servers().to_vec();
+    begin(stack, auth, name, family, servers, true, timeout)
+}
+
+/// Odpoved od dnsd, termin, nebo zaloha.
+pub fn progress_forward(stack: &mut Stack, auth: &AuthRef, f: Forward, now: u64) -> Step {
+    let outcome = match stack.resolver.take(f.id) {
+        Some(a) => outcome(&a),
+        None if now >= f.deadline || !stack.resolver.alive() => {
+            stack.resolver.forget(f.id);
+            Outcome::Fallback
+        }
+        None => return Step::Wait(Pending::Forward(f)),
+    };
+    match outcome {
+        Outcome::Addrs(addrs, ttl) => {
+            let name = netproto::policy::normalize_name(&f.name);
+            auth.borrow_mut().learn(&name, &addrs, ttl, now);
+            let mut w = Writer::new();
+            w.u16(addrs.len() as u16);
+            for a in &addrs {
+                w.ip(*a);
+            }
+            w.u32(ttl);
+            Step::reply(Ok(w))
+        }
+        Outcome::Fail(e) => Step::reply(Err(e)),
+        Outcome::Fallback => match fallback(stack, auth, f.name, f.family, f.timeout) {
+            Ok(step) => step,
+            Err(e) => Step::reply(Err(e)),
+        },
+    }
 }
 
 pub fn progress(stack: &mut Stack, auth: &AuthRef, mut res: Resolve, now: u64) -> Step {

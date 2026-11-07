@@ -45,7 +45,8 @@ pub const X86_64: Arch = Arch {
     // isa-debug-exit vraci (v << 1) | 1, jadro zapisuje v = 0x10.
     test_success: 33,
     // Beh s AMD IOMMU a testy USB/vstupu trva az ~90 s.
-    test_timeout: Duration::from_secs(180),
+    // Sady TLS, DNSSEC a odvolani pridaly kryptografii pod TCG (~3 min).
+    test_timeout: Duration::from_secs(300),
     ps2: true,
 };
 

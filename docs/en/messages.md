@@ -218,6 +218,11 @@ invariant was broken (a kernel bug).
 | `revocd: OneCRL: neplatny dokument` | The downloaded JSON cannot be read ("invalid document"); the previous list stays, a new attempt after `retry_minutes`. |
 | `revocd: <url>: ...` | Downloading a CRL or OneCRL failed (HTTP status, connection error); the URL is not retried for `retry_minutes`, the revocation status is unknown meanwhile. |
 | `revocd: <url>: neni CRL` | The server returned something other than a CRL ("not a CRL"). |
+| `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | The system resolver runs ("resolvers", "anchors"). |
+| `dnsd: <resolver>: ...` | A resolver did not answer (connection, TLS, HTTP); `dnsd` tries the next one. |
+| `dnsd: <name>: DNSSEC neprosel (...)` | The answer is spoofed or damaged ("DNSSEC failed", reason in brackets); the program gets `CORRUPTED`. |
+| `netd: dnsd skoncil (...), preklad bez nej` | System resolution only by the profile rule ("dnsd exited"; public network = none). |
+| `init: sifrovane DNS nelze spustit (...)` | `dnsd` did not start ("encrypted DNS cannot start"); resolution only by the profile rule. |
 | `init: kontrolu odvolani certifikatu nelze spustit: ...` | `revocd` did not start; programs check OCSP stapling only. |
 | `init: revocd bez FS (...)` | No FS: the cache is in memory only and there are no root CAs for OneCRL over https. |
 | `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` did not pass the channel to `fwd` ("without the firewall service"). The public profile applies (nothing inbound), questions of applications with `ask` are denied right away. |

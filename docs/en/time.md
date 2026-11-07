@@ -223,7 +223,7 @@ it after the network service:
 ```toml
 # ntpd.toml (initfs)
 servers = ["nts://time.cloudflare.com", "nts://nts.netnod.se", "nts://ptbtime1.ptb.de", "pool.ntp.org"]
-unauthenticated = "never"   # unauthenticated servers: never / fallback
+unauthenticated = "profile" # unauthenticated servers: never / fallback / profile
 min_poll = 64
 max_poll = 1024
 samples = 4
@@ -297,11 +297,11 @@ attacker can only block synchronization, not shift the time.
 
 | `unauthenticated` | When unauthenticated servers are used |
 |---|---|
-| `never` (default) | never; without a reply from an NTS server the clock is not corrected |
+| `never` | never; without a reply from an NTS server the clock is not corrected |
 | `fallback` | only when no NTS server replies in a round |
+| `profile` (default) | by network profile (`unauthenticated` in the [firewall](firewall.md#network-profiles); public network = `never`), read every round from `Net::info()` |
 
-Init changes the rule at run time with `policy never|fallback` (by network
-profile). The `ntpd` network session for an `nts://` server: TCP to NTS-KE,
+The message `policy never|fallback|profile` changes the rule at run time. The `ntpd` network session for an `nts://` server: TCP to NTS-KE,
 UDP to the NTS-KE server (any port) and UDP 123 anywhere (NTS-KE chooses
 the NTP server).
 

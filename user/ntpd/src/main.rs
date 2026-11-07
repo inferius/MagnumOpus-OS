@@ -14,15 +14,17 @@
 //! # nts://jmeno[:port] = overene NTS (RFC 8915, NTS-KE port 4460),
 //! # jmeno nebo adresa[:port] = neoverene NTP (port 123)
 //! servers = ["nts://time.cloudflare.com", "pool.ntp.org"]
-//! unauthenticated = "never"   # neoverene servery: "never" / "fallback"
+//! unauthenticated = "profile" # neoverene servery: "never" / "fallback" /
+//!                             # "profile" (podle profilu site, vychozi)
 //! min_poll = 16               # s
 //! max_poll = 1024
 //! samples = 4                 # mereni v jedne davce
 //! ```
 //!
 //! S `never` se neoverene servery nepouzijou vubec; s `fallback` jen, kdyz
-//! v kole neodpovi zadny server NTS. Pravidlo meni init podle profilu site
-//! zpravou `policy never|fallback`.
+//! v kole neodpovi zadny server NTS; s `profile` podle profilu site (pravidlo
+//! `unauthenticated` profilu ve firewallu, verejna sit = never). Zprava
+//! `policy ...` pravidlo zmeni za behu.
 //!
 //! ntpd odpovi `ok` a hned meri. Kazde kolo: z kazdeho serveru davka
 //! mereni, z ni vzorek s nejmensim zpozdenim, ze serveru median; posun
@@ -68,6 +70,8 @@ pub enum Server {
 pub enum Unauthenticated {
     Never,
     Fallback,
+    /// Podle profilu site (`Net::info`, pravidlo firewallu).
+    Profile,
 }
 
 impl Unauthenticated {
@@ -75,6 +79,7 @@ impl Unauthenticated {
         match s {
             "never" => Some(Self::Never),
             "fallback" => Some(Self::Fallback),
+            "profile" => Some(Self::Profile),
             _ => None,
         }
     }
@@ -106,8 +111,8 @@ fn parse_config(text: &str) -> Result<Config, String> {
         servers.push(parse_server(s).ok_or_else(|| format!("neplatny server {s}"))?);
     }
     let unauthenticated = match t.get_str("unauthenticated") {
-        None => Unauthenticated::Never,
-        Some(v) => Unauthenticated::parse(v).ok_or("unauthenticated: never nebo fallback")?,
+        None => Unauthenticated::Profile,
+        Some(v) => Unauthenticated::parse(v).ok_or("unauthenticated: never, fallback nebo profile")?,
     };
     if servers.is_empty() {
         return Err(String::from("prazdny seznam serveru"));
@@ -246,7 +251,7 @@ fn main(startup: Startup) -> i64 {
                                 }
                                 String::from("ok")
                             }
-                            None => String::from("err:never nebo fallback"),
+                            None => String::from("err:never, fallback nebo profile"),
                         }
                     } else {
                         String::from("err:neznama zprava")
@@ -345,9 +350,15 @@ fn round(
         }
     }
     let has_nts = cfg.servers.iter().any(|s| matches!(s, Server::Nts(..)));
+    let fallback = match cfg.unauthenticated {
+        Unauthenticated::Never => false,
+        Unauthenticated::Fallback => true,
+        // Pravidlo profilu site (verejna sit = ne); bez odpovedi = ne.
+        Unauthenticated::Profile => net.info().is_ok_and(|i| i.unauthenticated_fallback),
+    };
     let auth = if !offsets.is_empty() {
         "nts"
-    } else if cfg.unauthenticated == Unauthenticated::Fallback || !has_nts {
+    } else if fallback || !has_nts {
         for server in &cfg.servers {
             if let Server::Plain(name) = server
                 && let Some(best) = ntp::best_sample(&measure_plain(net, name, cfg.samples, st))

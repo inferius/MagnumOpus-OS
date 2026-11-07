@@ -518,6 +518,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dnsd"
+version = "0.1.0"
+dependencies = [
+ "conf",
+ "dns",
+ "fsproto",
+ "httpc",
+ "libos",
+ "netproto",
+ "tls",
+ "web",
+]
+
+[[package]]
 name = "ecdsa"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2597,6 +2611,7 @@ dependencies = [
  "abi",
  "bytes",
  "crc32fast",
+ "dns",
  "fatfs",
  "fs",
  "http-body-util",

@@ -46,9 +46,11 @@ validity is checked against real time, so TLS depends on it.
 >   unauthenticated NTP is used only as a fallback depending on the network
 >   profile. In fallback an attacker can shift the time (`timed` limits it
 >   to 500 ppm and rejects jumps over 60 s).
-> - **DNS is not authenticated** (no DNSSEC or DoH): a spoofed address
->   fails certificate verification, but the attacker learns where the
->   program connects.
+> - **DNS:** system resolution is encrypted (DoH/DoT) and validated
+>   (DNSSEC, see [Network](network.md#encrypted-dns-and-dnssec-dnsd)).
+>   Unsigned zones (most domains) are protected only by the encryption to
+>   the resolver, not by a signature; the resolver sees where the program
+>   connects.
 
 ## Architecture
 

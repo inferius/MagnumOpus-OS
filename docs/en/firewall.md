@@ -190,11 +190,19 @@ profile of a stored network. An unknown network gets `unknown_network`
 stores the `CLASSIFY` answer in `[[networks]]`. Until `netd` gets a
 configuration, the public profile applies.
 
-| Profile (default) | Inbound connections | Ping | Stealth |
-|---|---|---|---|
-| `public` | none | no | yes |
-| `home` | to ports somebody listens on | yes | no |
-| `work` | none (only `allow_in`) | yes | yes |
+| Profile (default) | Inbound connections | Ping | Stealth | Unauthenticated DNS and NTP |
+|---|---|---|---|---|
+| `public` | none | no | yes | `never` |
+| `home` | to ports somebody listens on | yes | no | `fallback` |
+| `work` | none (only `allow_in`) | yes | yes | `fallback` |
+
+`unauthenticated` (in `[profiles.*]`) says what to do when the
+authenticated path fails (encrypted DNS in `dnsd`, NTS in `ntpd` - the
+network blocks the ports): `never` = nothing, `fallback` = the
+unauthenticated DHCP resolver and unauthenticated NTP. On a public network
+a fallback would let an attacker on the same Wi-Fi spoof answers. `netd`
+gets the rule with the profile and reports it in `Net::info()`
+(`unauthenticated_fallback`), where `ntpd` reads it.
 
 ⚠️ **A gateway MAC can be spoofed.** Somebody on the same network (public
 Wi-Fi) can pretend to have the MAC of your home router. The system would

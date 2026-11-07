@@ -33,6 +33,8 @@ pub static NET: spin::Once<NetService> = spin::Once::new();
 pub static NTP: spin::Once<crate::ntp::NtpService> = spin::Once::new();
 /// Sluzba odvolani certifikatu (kanal pro `client`, viz `revocation`).
 pub static REVOCD: spin::Once<crate::revocation::Revocd> = spin::Once::new();
+/// Systemovy resolver (sifrovane DNS, DNSSEC).
+pub static DNSD: spin::Once<crate::dns::Dnsd> = spin::Once::new();
 /// Zamek kanalu k revocd (zprava `client` a odpoved patri k sobe).
 pub static REVOCD_LOCK: spin::Mutex<()> = spin::Mutex::new(());
 
@@ -281,6 +283,8 @@ pub struct NetService {
     /// Kanal agenta uzivatele u `fwd` (dotazy na cile a site). Zatim ho
     /// drzi init (testy); pozdeji ho dostane UI sezeni.
     pub agent: Option<Channel>,
+    /// Konec kanalu netd <-> dnsd pro dnsd (preda se pri jejim startu).
+    pub dnsd_end: Option<Channel>,
 }
 
 /// Cesta konfigurace firewallu na FS (fwd ji vidi jako `/config`).
@@ -300,10 +304,12 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
     let link = devices.nets.remove(0);
     let (root, server) = Channel::create()?;
     let (fw_netd, fw_fwd) = Channel::create()?;
+    let (dns_netd, dns_dnsd) = Channel::create()?;
     let handles = vec![
         StartHandle::user(link.into_handle()),
         StartHandle::user(server.into_handle()),
         StartHandle::user(fw_netd.into_handle()),
+        StartHandle::user(dns_netd.into_handle()),
     ];
     let app = crate::apps::spawn(startup, "netd", handles)?;
     let (process, control) = (app.process, app.control);
@@ -330,6 +336,7 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
         root: Net::new(root),
         fwd,
         agent,
+        dnsd_end: Some(dns_dnsd),
     })
 }
 

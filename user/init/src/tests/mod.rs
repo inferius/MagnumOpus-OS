@@ -4,6 +4,7 @@
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
 mod basic;
+mod dns;
 mod clock_sync;
 mod drivers;
 mod events;
@@ -46,6 +47,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("firewall", firewall::TESTS),
     ("sit", net::TESTS),
     ("TLS a HTTP", web::TESTS),
+    ("sifrovane DNS", dns::TESTS),
     ("supervisor", supervisor::TESTS),
     ("shell", shell::TESTS),
 ];

@@ -65,6 +65,7 @@ fn info_roundtrip() {
         gateway: Some(v4(10, 0, 2, 2)),
         dns: vec![v4(10, 0, 2, 3)],
         rights: rights::CLIENT,
+        unauthenticated_fallback: true,
     };
     let mut w = Writer::new();
     i.put(&mut w);
@@ -429,6 +430,7 @@ fn fw_messages_roundtrip() {
             true,
         )],
         audit_capacity: 100,
+        unauthenticated_fallback: true,
     };
     let mut w = Writer::new();
     cfg.put(&mut w);
@@ -630,4 +632,14 @@ fn ntp_filter_and_discipline() {
     assert_eq!(p.poll_secs, 32);
     p.update(100 * S, 50_000_000);
     assert_eq!(p.poll_secs, 16);
+}
+
+#[test]
+fn resolver_messages() {
+    use crate::resolver::{Answer, Query, status};
+    let q = Query { id: 7, family: 0, name: String::from("www.example.test") };
+    assert_eq!(Query::decode(&q.encode()).unwrap(), q);
+    let a = Answer { id: 7, status: status::OK, ttl: 300, addrs: vec![v4(10, 0, 2, 50)], secure: true };
+    assert_eq!(Answer::decode(&a.encode()).unwrap(), a);
+    assert!(Answer::decode(&a.encode()[..5]).is_err());
 }

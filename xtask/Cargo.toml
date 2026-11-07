@@ -28,3 +28,4 @@ bytes = "1"
 ring = "0.17"
 # Cteni poli certifikatu pro odpovedi OCSP a OneCRL.
 tls = { path = "../libs/tls" }
+dns = { path = "../libs/dns", features = ["testzone"] }

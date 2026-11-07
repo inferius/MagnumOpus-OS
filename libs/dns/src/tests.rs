@@ -258,6 +258,8 @@ fn validator_secure_and_insecure() {
     // Nepodepsana delegace: data bez overeni.
     let (s, resp) = check(&h, &mut v, "www.unsigned.test.", rtype::A);
     assert_eq!((s, resp.answers.len()), (Security::Insecure, 1));
+    let (s, resp) = check(&h, &mut v, "echo.magnumopus.", rtype::A);
+    assert_eq!((s, resp.answers.len()), (Security::Insecure, 1));
     // DS jineho klice: podvrzene.
     let (s, _) = check(&h, &mut v, "www.bad.test.", rtype::A);
     assert!(matches!(s, Security::Bogus(_)), "{s:?}");

@@ -396,8 +396,9 @@ delší než adresa, neplatné jméno a víc než 256 pravidel nebo 16 vrstev.
 
 ## DNS
 
-Resolver je ve službě (`user/netd/src/resolve.rs`), formát zpráv
-v `netproto::dns`, kde ho používá i testovací server.
+Systémový překlad jde přes `dnsd` (viz níže). Neověřený resolver ve
+službě (`user/netd/src/resolve.rs`, formát `netproto::dns`) slouží
+dotazům na vlastní server a jako záloha podle profilu sítě:
 
 - Pro rodinu 0 se posílají dotazy A i AAAA. Stačí, když odpoví jeden.
   Prázdná odpověď na AAAA nevadí.
@@ -413,7 +414,75 @@ v `netproto::dns`, kde ho používá i testovací server.
 - **Blokované domény** firewallu vrátí `ACCESS_DENIED` bez dotazu (viz
   [Filtr DNS](firewall.md#filtr-dns)).
 
-TODO: mezipaměť podle TTL, DoT/DoH (až s TLS).
+### Šifrované DNS a DNSSEC (`dnsd`)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sifrovane DNS">
+<defs><marker id="sd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="130" height="60" rx="6"/><text class="t b" x="75" y="45" text-anchor="middle">program</text><text class="m" x="75" y="64" text-anchor="middle">resolve()</text>
+<path class="ln" d="M140 50 L198 50" marker-end="url(#sd1)"/>
+<rect class="acc" x="200" y="20" width="160" height="110" rx="6"/><text class="t b" x="280" y="45" text-anchor="middle">netd</text><text class="m" x="280" y="64" text-anchor="middle">blokované domény</text><text class="m" x="280" y="82" text-anchor="middle">→ dnsd (kanál)</text><text class="m" x="280" y="100" text-anchor="middle">učí se pravidla</text><text class="m" x="280" y="118" text-anchor="middle">se jmény</text>
+<path class="ln-acc" d="M360 50 L418 50" marker-end="url(#sd1)"/>
+<rect class="ok" x="420" y="20" width="170" height="110" rx="6"/><text class="t b" x="505" y="45" text-anchor="middle">dnsd</text><text class="m" x="505" y="64" text-anchor="middle">DO + CD, DNSSEC</text><text class="m" x="505" y="82" text-anchor="middle">řetěz od kotvy IANA</text><text class="m" x="505" y="100" text-anchor="middle">mezipaměť (TTL)</text><text class="m" x="505" y="118" text-anchor="middle">OK/NX/BOGUS/…</text>
+<path class="ln" d="M590 50 L638 50" marker-end="url(#sd1)"/>
+<rect class="box" x="640" y="20" width="110" height="60" rx="6"/><text class="t b" x="695" y="45" text-anchor="middle">resolver</text><text class="m" x="695" y="64" text-anchor="middle">DoH / DoT</text>
+<path class="ln" d="M280 130 L280 168" marker-end="url(#sd1)"/>
+<rect class="warn" x="200" y="170" width="160" height="60" rx="6"/><text class="t b" x="280" y="195" text-anchor="middle">záloha UDP/TCP</text><text class="m" x="280" y="214" text-anchor="middle">servery z DHCP</text>
+<text class="m" x="380" y="190">jen když dnsd odpoví UNAVAILABLE</text>
+<text class="m" x="380" y="208">a profil sítě má</text>
+<text class="m" x="380" y="226">unauthenticated = "fallback"</text>
+</svg>
+<figcaption>Systémový překlad: šifrovaně a ověřeně; neověřená záloha jen podle profilu sítě.</figcaption>
+</figure>
+
+Systémový překlad (relace bez vlastního serveru) jde ze `netd` do služby
+**`dnsd`**. Ta se ptá **šifrovaně** (DoH, RFC 8484, nebo DoT, RFC 7858)
+a odpovědi **ověřuje sama** (DNSSEC): řetěz DS od kořenové kotvy IANA, podpisy
+RRSIG, důkazy neexistence NSEC a NSEC3. Resolveru se nevěří – lhát může
+jen tak, že zónu prohlásí za nepodepsanou, a to důkaz z nadřazené zóny
+nepustí.
+
+| Výsledek `dnsd` | Pro program |
+|---|---|
+| adresy (ověřené, nebo zóna nepodepsaná) | adresy; `netd` se z nich učí pravidla se jménem |
+| NXDOMAIN, NODATA (ověřené) | `NOT_FOUND` |
+| **BOGUS** (podpis nebo důkaz neprošel) | `CORRUPTED` – útok, záloha se nespustí |
+| UNAVAILABLE (žádný resolver neodpověděl) | podle profilu sítě: neověřený resolver (UDP/TCP na servery z DHCP nebo `SET_DNS`), nebo `UNREACHABLE` |
+
+- **Kanál** `netd` ↔ `dnsd` vzniká před startem `netd` (4. handle); dotazy
+  čekají v kanálu, než `dnsd` naběhne. Když `dnsd` skončí, `netd` překládá
+  jen podle pravidla profilu.
+- **Resolvery** v `dnsd.toml` mají adresu (`doh:https://jméno/cesta@adresa`,
+  `dot:jméno@adresa[:port]`): `dnsd` jména resolverů nepřekládá. Relace
+  sítě `dnsd` smí jen TCP na tyto adresy. Po chybě zkusí další a drží se
+  posledního funkčního.
+- **Kotvy:** DS kořene podle IANA `root-anchors.xml`: KSK-2017 (20326)
+  a KSK-2024 (38696, podepisuje kořen od 11. 10. 2026). Při další výměně
+  klíče kořene je potřeba `trust_anchors` aktualizovat (RFC 5011 zatím
+  ne).
+- **Algoritmy:** RSASHA256, RSASHA512, ECDSA P-256/P-384, Ed25519; otisky
+  SHA-256 a SHA-384. Zóna s jiným algoritmem nebo s NSEC3 nad 100 iterací
+  (RFC 9276) se bere jako nepodepsaná.
+- **Mezipaměť** podle TTL (záporné odpovědi podle SOA), 1 024 záznamů,
+  nejvýš 1 den; stavy zón (klíče) zvlášť, nejvýš 1 h. Podvržené odpovědi se
+  neukládají.
+- **Bez kontroly odvolání** certifikátu resolveru (jen OCSP stapling):
+  `revocd` překládá jména přes `dnsd`, kontrola by se zacyklila.
+- Bootstrap příkazy: `status` (`queries upstream cache_hits secure
+  insecure bogus unavailable dnssec server error`), `flush`, `prefer <n>`.
+
+```toml
+# dnsd.toml
+servers = ["doh:https://cloudflare-dns.com/dns-query@1.1.1.1", "dot:one.one.one.one@1.0.0.1"]
+dnssec = true
+trust_anchors = ["20326 8 2 E06D44B8...", "38696 8 2 683D2D0A..."]
+```
+
+> **Změna proti první verzi:** `netd` se ptal serverů z DHCP nešifrovaně
+> a bez ověření. **Proč:** síť (Wi-Fi, poskytovatel) viděla, kam se
+> připojujete, a mohla odpovědi podvrhnout. TLS sice podvržený server
+> odhalí, ale DNSSEC a šifrování chrání i jména bez TLS a soukromí.
+
 
 ## NTP a hodiny
 
@@ -484,6 +553,7 @@ překládá adresu 10.0.2.2 na 127.0.0.1 hostitele.
 | UDP velký datagram | 60 000 B tam a zpět (fragmentace a skládání IPv4) |
 | oprávnění | chybějící práva, cíle mimo omezení, předání spojení jinému kanálu |
 | jméno hostitele | pravidlo `*.magnumopus` platí po systémovém překladu, ne po překladu vlastním serverem |
+| šifrované DNS | sada „sifrovane DNS“: ověřené A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC i NSEC3), NODATA; nepodepsaná a podvržená zóna; přechod z nefunkčního resolveru, DoT, mezipaměť; pravidlo profilu |
 | NTP | `ntpd` proti serveru hostitele (sada „synchronizace casu“, viz [cas.md](cas.md#synchronizace-podle-sítě-ntpd)) |
 
 DNS přes 10.0.2.3 (slirp předává dotazy DNS hostitele) se netestuje, protože

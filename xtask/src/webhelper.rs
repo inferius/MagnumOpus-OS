@@ -115,6 +115,17 @@ async fn handle(req: hyper::Request<Incoming>) -> Result<Resp, Infallible> {
     Ok(match uri.path() {
         "/hello" => full(200, "ahoj z hostitele"),
         "/ca.crl" => full(200, CRL.get().cloned().unwrap_or_default()),
+        "/dns-query" => {
+            let body = req.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default();
+            match crate::dnshelper::answer(&body) {
+                Some(a) => {
+                    let mut r = full(200, a);
+                    r.headers_mut().insert("content-type", "application/dns-message".parse().unwrap());
+                    r
+                }
+                None => full(400, "neplatny dotaz DNS"),
+            }
+        }
         "/onecrl.json" => full(200, ONECRL.get().cloned().unwrap_or_default()),
         "/stream" => {
             let n = query(&uri, "n").and_then(|n| n.parse().ok()).unwrap_or(0);
@@ -266,6 +277,8 @@ async fn run_server(listener: std::net::TcpListener, tls: Option<Arc<rustls::Ser
 pub struct WebHelper {
     /// Radky pro `net-test`.
     pub config: String,
+    /// Kotva DNSSEC testovaci hierarchie (initfs `net-test-dns-anchor`).
+    pub dns_anchor: String,
     /// Certifikat testovaci CA (PEM) pro initfs.
     pub ca_pem: String,
 }
@@ -297,6 +310,11 @@ pub fn start() -> std::io::Result<WebHelper> {
     // NTS-KE (testy ntpd): certifikat testovaci CA pro 10.0.2.2.
     let (chain, key) = leaf(&ca_ok, &[SanType::IpAddress(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2)))]);
     let nts = crate::ntshelper::start(tls_config(chain, key, &[netproto::nts::ALPN]))?;
+    // DoT (testy dnsd); DoH je cesta /dns-query na serveru `https`.
+    let (chain, key) = leaf(&ca_ok, &[SanType::IpAddress(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2)))]);
+    let dot = listen()?;
+    let dot_port = dot.local_addr()?.port();
+    crate::dnshelper::start_dot(dot, tls_config(chain, key, &[]));
     let _ = CRL.set(crate::revhelper::crl(&ca_ok.cert, &ca_ok.key, &[REVOKED_SERIAL]));
     let _ = ONECRL.set(crate::revhelper::onecrl(inter.cert.der()));
 
@@ -310,7 +328,8 @@ pub fn start() -> std::io::Result<WebHelper> {
         ("https_ocsp_revoked", listen()?, Some(ocsp_revoked)),
         ("https_onecrl", listen()?, Some(onecrl_revoked)),
     ];
-    let mut config = nts.config;
+    let mut config = format!("{}dot = {dot_port}
+", nts.config);
     for (name, l, _) in &servers {
         config.push_str(&format!("{name} = {}
 ", l.local_addr()?.port()));
@@ -327,5 +346,5 @@ pub fn start() -> std::io::Result<WebHelper> {
             }
         });
     });
-    Ok(WebHelper { config, ca_pem: ca_ok.cert.pem() })
+    Ok(WebHelper { config, ca_pem: ca_ok.cert.pem(), dns_anchor: crate::dnshelper::anchor() })
 }

@@ -11,6 +11,6 @@ kernel_memory = "2M"
 stack = "512K"
 
 [network]
-rights = ["tcp", "udp", "dns"]
+rights = ["info", "tcp", "udp", "dns"]
 sockets = 8
 buffers = "1M"

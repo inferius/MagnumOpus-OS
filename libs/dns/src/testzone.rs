@@ -6,7 +6,9 @@
 //! - `test.` (DS v korenu), NSEC; delegace `unsigned.test.` bez DS
 //!   (nepodepsana zona) a `bad.test.` s DS jineho klice (podvrzena),
 //! - `example.test.` (DS v `test.`), NSEC3 (0 iteraci, bez soli):
-//!   `www` A, `alias` CNAME na `www`, `*.wild` A, `v6` AAAA.
+//!   `www` A, `alias` CNAME na `www`, `*.wild` A, `v6` AAAA,
+//! - `magnumopus.` nepodepsana (delegace z korene bez DS): jmena pomocnych
+//!   serveru testu site (`echo` 10.0.2.2, `test` 10.0.2.77).
 //!
 //! Odpovidac se chova jako rekurzivni resolver s DO+CD: vrati data
 //! z nejhlubsi zony, DS z nadrazene, s RRSIG a dukazy neexistence.
@@ -314,6 +316,9 @@ impl Hierarchy {
         let mut example = Zone::new("example.test.", Some(3), true);
         let mut unsigned = Zone::new("unsigned.test.", None, false);
         let mut bad = Zone::new("bad.test.", Some(4), false);
+        let mut magnum = Zone::new("magnumopus.", None, false);
+        magnum.add(a("echo.magnumopus.", [10, 0, 2, 2]));
+        magnum.add(a("test.magnumopus.", [10, 0, 2, 77]));
         example.add(a("www.example.test.", [10, 0, 2, 50]));
         example.add(a("*.wild.example.test.", [10, 0, 2, 51]));
         example.add(record(&name("alias.example.test."), rtype::CNAME, name("www.example.test.").to_wire(false)));
@@ -322,6 +327,7 @@ impl Hierarchy {
         bad.add(a("www.bad.test.", [10, 0, 2, 53]));
         let ns = |z: &str| record(&name(z), rtype::NS, name(&alloc::format!("ns.{z}")).to_wire(false));
         root.add(ns("test."));
+        root.add(ns("magnumopus."));
         root.add(test.ds().unwrap());
         test.add(ns("example.test."));
         test.add(example.ds().unwrap());
@@ -333,7 +339,7 @@ impl Hierarchy {
         test.add(wrong);
         test.add(a("host.test.", [10, 0, 2, 54]));
         Self {
-            zones: vec![root, test, example, unsigned, bad],
+            zones: vec![root, test, example, unsigned, bad, magnum],
         }
     }
 

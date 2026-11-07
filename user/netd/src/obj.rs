@@ -129,6 +129,8 @@ pub enum Pending {
     },
     Connect(tcp::Connect),
     Resolve(Resolve),
+    /// Preklad pres dnsd (ceka na odpoved podle id).
+    Forward(crate::forward::Forward),
     Ping(Ping),
     Ask(AskWait),
     Send {
@@ -166,6 +168,7 @@ impl Pending {
             | Self::RecvFrom { deadline, .. } => *deadline,
             Self::Connect(c) => c.deadline,
             Self::Resolve(r) => r.wake_at(),
+            Self::Forward(f) => f.deadline,
             Self::Ping(p) => p.deadline,
             Self::Ask(a) => a.deadline,
         }
@@ -301,6 +304,7 @@ pub fn close(stack: &mut Stack, kind: Kind, pending: Option<Pending>) {
         match p {
             Pending::Connect(c) => c.cancel(stack),
             Pending::Resolve(r) => r.cancel(stack),
+            Pending::Forward(f) => stack.resolver.forget(f.id),
             Pending::Ping(p) => p.cancel(stack),
             Pending::Ask(a) => {
                 // Odpoved, ktera jeste prijde, uz nikdo nevyzvedne.

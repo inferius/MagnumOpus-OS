@@ -8,8 +8,9 @@ servers = [
     "pool.ntp.org",
 ]
 # Neoverene servery: "never" = nikdy, "fallback" = jen kdyz neodpovi zadny
-# server NTS. Init hodnotu prepise podle profilu site (verejna sit = never).
-unauthenticated = "never"
+# server NTS, "profile" = podle profilu site (firewall.toml, pravidlo
+# unauthenticated; verejna sit = never).
+unauthenticated = "profile"
 # Interval dotazu v sekundach: zacina na min_poll, pri srovnanych hodinach
 # se zdvojnasobuje az na max_poll.
 min_poll = 64

@@ -216,6 +216,11 @@ porušený vnitřní předpoklad (chyba jádra).
 | `revocd: OneCRL: neplatny dokument` | Stažený JSON nejde přečíst; platí předchozí seznam, nový pokus za `retry_minutes`. |
 | `revocd: <url>: ...` | Stažení CRL nebo OneCRL selhalo (stav HTTP, chyba spojení); adresa se `retry_minutes` nezkouší, stav odvolání je zatím neznámý. |
 | `revocd: <url>: neni CRL` | Server vrátil něco jiného než CRL. |
+| `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | Systémový resolver běží. |
+| `dnsd: <resolver>: ...` | Resolver neodpověděl (spojení, TLS, HTTP); `dnsd` zkusí další. |
+| `dnsd: <jméno>: DNSSEC neprosel (...)` | Odpověď je podvržená nebo poškozená (důvod v závorce); program dostane `CORRUPTED`. |
+| `netd: dnsd skoncil (...), preklad bez nej` | Systémový překlad jen podle pravidla profilu (veřejná síť = žádný). |
+| `init: sifrovane DNS nelze spustit (...)` | `dnsd` nenaběhl; překlad jen podle pravidla profilu. |
 | `init: kontrolu odvolani certifikatu nelze spustit: ...` | `revocd` nenaběhl; programy kontrolují jen OCSP stapling. |
 | `init: revocd bez FS (...)` | Bez FS: mezipaměť jen v paměti a bez kořenových CA pro OneCRL přes https. |
 | `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` nepředal kanál k `fwd`. Platí veřejný profil (nic dovnitř), dotazy aplikací s `ask` se rovnou odmítnou. |

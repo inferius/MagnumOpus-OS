@@ -211,7 +211,7 @@ službě sítě:
 ```toml
 # ntpd.toml (initfs)
 servers = ["nts://time.cloudflare.com", "nts://nts.netnod.se", "nts://ptbtime1.ptb.de", "pool.ntp.org"]
-unauthenticated = "never"   # neověřené servery: never / fallback
+unauthenticated = "profile" # neověřené servery: never / fallback / profile
 min_poll = 64
 max_poll = 1024
 samples = 4
@@ -282,11 +282,11 @@ synchronizaci jen zablokovat, ne posunout.
 
 | `unauthenticated` | Kdy se použijí neověřené servery |
 |---|---|
-| `never` (výchozí) | nikdy; bez odpovědi serveru NTS se hodiny nekorigují |
+| `never` | nikdy; bez odpovědi serveru NTS se hodiny nekorigují |
 | `fallback` | jen když v kole neodpoví žádný server NTS |
+| `profile` (výchozí) | podle profilu sítě (`unauthenticated` ve [firewallu](firewall.md#profily-sítí); veřejná síť = `never`), čte se každé kolo z `Net::info()` |
 
-Pravidlo za běhu mění init zprávou `policy never|fallback` (podle profilu
-sítě). Relace sítě `ntpd` pro `nts://` server: TCP na NTS-KE, UDP na
+Zpráva `policy never|fallback|profile` pravidlo změní za běhu. Relace sítě `ntpd` pro `nts://` server: TCP na NTS-KE, UDP na
 server NTS-KE (libovolný port) a UDP 123 kamkoli (server NTP určuje
 NTS-KE).
 
