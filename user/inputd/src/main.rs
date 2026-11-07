@@ -26,6 +26,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use inputproto::control::{self, Status};
+use inputproto::KeyboardTrust;
 use keymap::LayoutId;
 use libos::{Channel, Error, Handle, Signals, Startup, println};
 
@@ -125,10 +126,19 @@ fn secure_input(svc: &mut Service, sig: Signals) {
         return;
     };
     let mut release = false;
+    let mut decisions = Vec::new();
     while let Ok(m) = ch.channel.try_read() {
-        if m.data == control::RELEASE.as_bytes() {
-            release = true;
+        let text = core::str::from_utf8(&m.data).unwrap_or("");
+        let mut w = text.split_whitespace();
+        match (w.next(), w.next().and_then(|s| s.parse::<u16>().ok())) {
+            (Some(control::RELEASE), None) => release = true,
+            (Some(control::TRUST), Some(id)) => decisions.push((id, KeyboardTrust::Trusted)),
+            (Some(control::REJECT), Some(id)) => decisions.push((id, KeyboardTrust::Rejected)),
+            _ => {}
         }
+    }
+    for (id, state) in decisions {
+        svc.decide(id, state);
     }
     if release {
         svc.leave_secure_mode();
@@ -219,11 +229,23 @@ fn command(svc: &mut Service, data: &[u8], mut handles: Vec<Handle>) -> (String,
                     id: s.id,
                     caps: s.caps,
                     synthetic: s.synthetic,
+                    trust: s.trust,
                     name: &s.name,
                 };
                 let _ = info.format(&mut text);
             }
             (text, Vec::new())
+        }
+        control::POLICY => match (words.next(), words.next()) {
+            (Some(control::VERIFY_NEW_KEYBOARDS), Some(v @ ("on" | "off"))) => {
+                svc.verify_new = v == "on";
+                ok()
+            }
+            _ => err(Error::InvalidArgs),
+        },
+        control::SETTLED => {
+            svc.settled = true;
+            ok()
         }
         _ => err(Error::NotSupported),
     }

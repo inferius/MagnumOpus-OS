@@ -14,6 +14,8 @@ members = [
     "libs/inputproto",
     "libs/keymap",
     "libs/i8042",
+    "libs/usbproto",
+    "libs/usbclient",
     "libs/libos",
     "libs/pci",
     "libs/tz",
@@ -28,6 +30,9 @@ members = [
     "user/timed",
     "user/virtio-blk",
     "user/virtio-input",
+    "user/xhci",
+    "user/usb-hub",
+    "user/usb-hid",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace

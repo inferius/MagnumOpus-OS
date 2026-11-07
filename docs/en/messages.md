@@ -120,6 +120,19 @@ invariant was broken (a kernel bug).
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 reads `0xFF` (no controller) or no device was found (PS/2 controller not found). Normal on modern boards without PS/2. |
 | `ps2: radic neodpovida spravne: ...` | The controller exists but failed its self-test or did not answer in time (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | The port exists but no device answers on it (nothing connected). |
+| `xhci BB:DD.F: N portu (M USB 3), S slotu, kontext K B` | The USB controller is ready (N ports, M of them USB 3, S slots, K-byte contexts). |
+| `xhci: firmware radic nepustil, pokracuji` | The firmware did not release the controller within a second (USB Legacy Support); PS/2 emulation of USB may keep running. |
+| `xhci ...: inicializace selhala: ...` | The controller did not finish halting, reset or start (`TIMED_OUT`), or resources are missing. |
+| `xhci: port P: zarizeni vvvv:pppp (speed), slot S` / `zarizeni odpojeno` | A device on the port was set up / detached. |
+| `xhci: prikaz typu T selhal (kod C)` | A controller command (Enable Slot, Address Device, Configure Endpoint ...) failed; the device is not used. |
+| `usb-hub: root hub, N portu` | The hub driver runs on the root ports. |
+| `usb-hub: port P: zarizeni nelze nastavit: ...` | Port reset or device setup failed (`TIMED_OUT`, `IO_ERROR`). |
+| `usb-hub: externi hub ... zatim nepodporovany (faze 3)` | External hubs are not set up yet. |
+| `usb-hid: USB klavesnice/mys vvvv:pppp (port [...], speed)` | The HID driver introduced itself to the input service. |
+| `usb-hid: rozhrani ... bez boot protokolu zatim nepodporovane` | HID without the boot protocol (multimedia, tablet) waits for phase 4. |
+| `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | No driver for the interface class (e.g. a USB disk). |
+| `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` did not arrive within 10 s; init gets `done` anyway. |
+| `inputd: nova klavesnice '...' ceka na overeni` / `overena` / `odmitnuta` | The new keyboard verification option (BadUSB): pending / trusted / rejected, see [USB](usb.md). |
 | `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
 | `virtio-input BB:DD.F: 'name' (klavesnice/mys)` | An input device is ready; the kind (keyboard/mouse) comes from the supported events. `nezname zarizeni` (unknown device) = it has neither keys nor relative axes (a tablet, not supported yet). |
 | `virtio-input ...: inicializace selhala: ...` | As for virtio-blk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA). |

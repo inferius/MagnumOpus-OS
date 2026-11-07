@@ -16,7 +16,9 @@ use libos::{Channel, Error, Process, Result, Rights, Startup, println, time};
 /// system (pokud je na nekterem disku).
 pub struct Devices {
     pub _devmgr: Process,
-    pub _control: Channel,
+    /// Kanal ke spravci zarizeni (po `done` jim chodi zarizeni USB
+    /// pripojena za behu: [`crate::input::pump_hotplug`]).
+    pub control: Channel,
     pub blocks: Vec<BlockClient>,
     /// Kanaly k ovladacum vstupnich zarizeni (predaji se sluzbe vstupu).
     pub inputs: Vec<Channel>,
@@ -76,7 +78,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     );
     Ok(Devices {
         _devmgr: devmgr,
-        _control: control,
+        control,
         blocks,
         inputs,
         input: None,

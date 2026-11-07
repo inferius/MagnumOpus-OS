@@ -7,7 +7,8 @@ use core::time::Duration;
 
 use inputproto::code::KEY_DELETE;
 use inputproto::device::{self, DeviceMessage};
-use inputproto::{Action, Event, Record, event};
+use inputproto::device::caps;
+use inputproto::{Action, Event, KeyboardTrust, Record, event};
 use keymap::{Layout, LayoutId, layout};
 use libos::{Channel, Error, println, time};
 
@@ -109,6 +110,10 @@ pub struct Service {
     pub dropped: u32,
     /// Id pristiho zdroje (0 je vyhrazena pro udalosti sluzby).
     next_id: u16,
+    /// Start dokoncen (`settled`): zarizeni pripojena potom jsou "nova".
+    pub settled: bool,
+    /// Volba zabezpeceni: nova klavesnice ceka na overeni.
+    pub verify_new: bool,
 }
 
 impl Service {
@@ -122,6 +127,8 @@ impl Service {
             repeat: None,
             dropped: 0,
             next_id: 1,
+            settled: false,
+            verify_new: false,
         }
     }
 
@@ -286,9 +293,17 @@ impl Service {
             return;
         };
         if self.sources[index].hello(&msg) {
-            let s = &self.sources[index];
+            let s = &mut self.sources[index];
             if !s.synthetic {
                 println!("inputd: zarizeni '{}' pripojeno", s.name);
+            }
+            // Klavesnice pripojena za behu muze byt podvrzena (BadUSB):
+            // s volbou overeni jde jeji vstup jen systemu, dokud ji neoveri.
+            if !s.synthetic && s.caps & caps::KEYBOARD != 0 && self.settled && self.verify_new {
+                s.trust = KeyboardTrust::Pending;
+                let id = s.id;
+                println!("inputd: nova klavesnice '{}' ceka na overeni", s.name);
+                self.trust_changed(id, KeyboardTrust::Pending);
             }
             return;
         }
@@ -302,9 +317,12 @@ impl Service {
             let mut sak = false;
             let mut repeat = None::<Option<Repeat>>;
             let current = self.repeat.as_ref().map(|r| (r.source, r.code));
+            let trusted = self.sources[index].trust == KeyboardTrust::Trusted;
             self.sources[index].raw(e, layout, now, &mut out, |s, code, scancode, action| {
-                // Bezpecnou zkratku umi jen fyzicka klavesnice.
+                // Bezpecnou zkratku umi jen fyzicka klavesnice, ktera neni
+                // ve stavu overovani.
                 if !s.synthetic
+                    && trusted
                     && code == KEY_DELETE
                     && action == Action::Press
                     && s.keyboard.ctrl_alt_held()
@@ -313,7 +331,9 @@ impl Service {
                     return KeyVerdict::SecureAttention;
                 }
                 match action {
-                    Action::Press if !keymap::is_modifier(code) => {
+                    // Opakovani jen u duveryhodnych zdroju (doruceni opakovani
+                    // jde vlastnikovi fokusu).
+                    Action::Press if !keymap::is_modifier(code) && trusted => {
                         repeat = Some(Some(Repeat {
                             source: index,
                             code,
@@ -340,7 +360,46 @@ impl Service {
         // Konec zpravy uzavre rozpracovany snimek (pohyb a kolecko).
         self.sources[index].flush(layout, now, &mut out);
         self.tag(index, &mut out);
-        self.deliver_frame(&mut out, layout);
+        match self.sources[index].trust {
+            KeyboardTrust::Trusted => self.deliver_frame(&mut out, layout),
+            // Ceka na overeni: vstup vidi jen system (dialog overeni).
+            KeyboardTrust::Pending => {
+                if let Some(s) = &mut self.secure
+                    && s.send(&out, &mut self.dropped) == Sent::Closed
+                {
+                    self.secure = None;
+                }
+            }
+            KeyboardTrust::Rejected => {}
+        }
+    }
+
+    /// Oznameni o overeni klavesnice vlastnikovi fokusu i kanalu `secure`.
+    fn trust_changed(&mut self, source: u16, state: KeyboardTrust) {
+        let e = Event::NewKeyboard { source, state };
+        self.notify_focus(e);
+        if self.secure.is_some() {
+            self.notify_secure(e);
+        }
+    }
+
+    /// Rozhodnuti systemu o nove klavesnici (`trust` / `reject` na kanalu
+    /// `secure`). Neznamy zdroj nebo zdroj, ktery neceka = nic.
+    pub fn decide(&mut self, source: u16, state: KeyboardTrust) {
+        let Some(s) = self
+            .sources
+            .iter_mut()
+            .find(|s| s.id == source && s.trust == KeyboardTrust::Pending)
+        else {
+            return;
+        };
+        s.trust = state;
+        println!(
+            "inputd: klavesnice '{}' {}",
+            s.name,
+            if state == KeyboardTrust::Trusted { "overena" } else { "odmitnuta" }
+        );
+        self.trust_changed(source, state);
     }
 
     /// Oznaci zaznamy zdrojem `index`.

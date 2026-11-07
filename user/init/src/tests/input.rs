@@ -50,7 +50,7 @@ const QEMU_TIMEOUT: Duration = Duration::from_secs(20);
 /// Jak dlouho cekat na udalosti z umeleho vstupu.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-fn input() -> Result<&'static Input, String> {
+pub(super) fn input() -> Result<&'static Input, String> {
     let d = devices().ok_or("spravce zarizeni nebezi")?;
     d.input.as_ref().ok_or_else(|| "sluzba vstupu nebezi".into())
 }
@@ -59,7 +59,7 @@ fn input() -> Result<&'static Input, String> {
 /// vesel do radku logu): K30+ stisk klavesy 30, K30- uvolneni, K30r
 /// opakovani, T'a' text, M(dx,dy), B272+ tlacitko, S(dx,dy), F0/F1 fokus,
 /// SA zkratka, I1 umely vstup, L0 rozlozeni.
-fn failr(what: &str, (e, got): (Error, Vec<Record>)) -> String {
+pub(super) fn failr(what: &str, (e, got): (Error, Vec<Record>)) -> String {
     let mut s = alloc::format!("{what}: {e}; prislo {}:", got.len());
     for r in got.iter().take(48) {
         let a = |x: Action| match x {
@@ -78,6 +78,7 @@ fn failr(what: &str, (e, got): (Error, Vec<Record>)) -> String {
             Event::Injection { active } => alloc::format!("I{active}"),
             Event::Layout(l) => alloc::format!("L{l}"),
             Event::Dropped { messages } => alloc::format!("D{messages}"),
+            Event::NewKeyboard { source, state } => alloc::format!("N{source}:{}", state.to_u32()),
             Event::Unknown { kind } => alloc::format!("?{kind}"),
         };
         s.push(' ');
@@ -86,12 +87,12 @@ fn failr(what: &str, (e, got): (Error, Vec<Record>)) -> String {
     s
 }
 
-fn deadline(d: Duration) -> u64 {
+pub(super) fn deadline(d: Duration) -> u64 {
     time::deadline_after(d)
 }
 
 /// Vlozeny text ze zaznamu.
-fn text(records: &[Record]) -> String {
+pub(super) fn text(records: &[Record]) -> String {
     records
         .iter()
         .filter_map(|r| match r.event {
@@ -101,12 +102,12 @@ fn text(records: &[Record]) -> String {
         .collect()
 }
 
-fn has(records: &[Record], e: Event) -> bool {
+pub(super) fn has(records: &[Record], e: Event) -> bool {
     records.iter().any(|r| r.event == e)
 }
 
 /// Stisk a uvolneni klavesy, kazde jako jeden snimek.
-fn tap(code: u16) -> [RawEvent; 4] {
+pub(super) fn tap(code: u16) -> [RawEvent; 4] {
     [
         RawEvent::key(code, true),
         RawEvent::syn(),

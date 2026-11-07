@@ -399,7 +399,9 @@ důvěryhodné prvky zůstávají systému:
   **jen tomu, kdo má fokus** (terminál, kompozitor). Žádná aplikace
   nečte vstup globálně (ochrana proti keyloggerům).
 - **Ovladače, postup:** virtio-input (klávesnice, myš; hotovo) v QEMU -
-  PS/2 (hotovo; vnitřní klávesnice notebooků a emulace USB ve firmwaru) - USB HID přes vlastní ovladač
+  PS/2 (hotovo; vnitřní klávesnice notebooků a emulace USB ve firmwaru) -
+  USB HID přes vlastní ovladač xHCI (fáze 1-2 hotové: boot protokol,
+  hotplug, ověření nové klávesnice; viz [USB](usb.md)) - USB HID přes vlastní ovladač
   xHCI (USB stack je velká samostatná práce).
 - **Rozložení:** česká a anglická v první verzi, skládání diakritiky
   (mrtvé klávesy), Unicode vstup.
@@ -838,7 +840,7 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
    TCP/IP, DNS, TLS 1.3, HTTP klient - služby, přístup přes capability)
    - **6a Vstup (hotovo):** služba vstupu, klávesnice a myš (virtio-input;
-     PS/2; USB HID později), rozložení US a CZ, bezpečná zkratka - viz
+     PS/2, USB HID v boot protokolu), rozložení US a CZ, bezpečná zkratka - viz
      [Vstup](vstup.md)
    - **6b Shell a chytrý terminál:** konzole, strukturovaný výstup, undo
      příkazů, „ukaž, co se stane“, oprávnění při spuštění - viz [Shell](#shell-a-chytrý-terminál-návrh)

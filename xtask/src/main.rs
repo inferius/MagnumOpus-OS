@@ -77,7 +77,7 @@ struct Options {
 /// Navratovy kod QEMU pri uspechu testu: isa-debug-exit vraci (v << 1) | 1
 /// a kernel zapisuje v = 0x10 (viz arch::qemu_exit).
 const QEMU_TEST_SUCCESS: i32 = 33;
-const QEMU_TEST_TIMEOUT: Duration = Duration::from_secs(120);
+const QEMU_TEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 fn main() -> ExitCode {
     match run_cli() {
@@ -191,6 +191,8 @@ fn host_tests() -> Result<()> {
             "keymap",
             "--package",
             "i8042",
+            "--package",
+            "usbproto",
             "--features",
             "initfs/std,fs/std",
         ])
@@ -272,6 +274,9 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-input",
     "inputd",
     "ps2",
+    "xhci",
+    "usb-hub",
+    "usb-hid",
     "fsd",
     "timed",
 ];
@@ -522,6 +527,13 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             "-device",
             "virtio-mouse-pci,iommu_platform=on,display=video0",
         ])
+        // USB: radic xHCI s klavesnici (ovladace xhci, usb-hub, usb-hid),
+        // navazanou na konzoli druhe graficke karty, aby ji QMP umelo
+        // oslovit zvlast (`device=video1`). Mys USB nema vlastnost
+        // `display` a brala by udalosti PS/2 - test ji pripoji az za behu.
+        .args(["-device", "secondary-vga,id=video1"])
+        .args(["-device", "qemu-xhci,id=xhci"])
+        .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"])
         .arg("-qmp")
         .arg(qmp::qemu_arg(qmp_port))
         // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.

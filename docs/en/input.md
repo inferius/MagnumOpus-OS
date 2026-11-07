@@ -268,6 +268,7 @@ One message is one frame, made of 32-byte records:
 | 8 `INJECTION` | `Injection { active }` | number of synthetic input sources | | | |
 | 9 `LAYOUT` | `Layout(id)` | 0 `us`, 1 `cz` | | | |
 | 10 `DROPPED` | `Dropped { messages }` | number of messages the client missed | | | |
+| 11 `NEW_KEYBOARD` | `NewKeyboard { source, state }` | source id | 0 pending, 1 trusted, 2 rejected | | |
 
 - `flags`: `SYNTHETIC` (1) means the event comes from synthetic input.
 - `mods`: modifiers after the event. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -338,7 +339,9 @@ e.g. `err NOT_FOUND`.
 | `inject` | - | `ok` + channel of a new synthetic input source |
 | `layout us` / `layout cz` | - | `ok`; unknown `err NOT_FOUND` |
 | `status` | - | `ok devices=2 keyboards=1 pointers=1 layout=us injecting=0 dropped=0 secure=0` |
-| `sources` | - | `ok` and lines `<id> <capabilities> <real\|inject> <name>`, e.g. `3 1 real PS/2 klavesnice` |
+| `sources` | - | `ok` and lines `<id> <capabilities> <real\|inject\|pending\|rejected> <name>`, e.g. `3 1 real PS/2 klavesnice` |
+| `policy verify-new-keyboards on\|off` | - | `ok`; the [new keyboard verification](usb.md#verifying-a-new-keyboard-against-badusb) security option |
+| `settled` | - | `ok`; devices attached up to now are trusted (init after boot) |
 
 An unknown command returns `err NOT_SUPPORTED`, a missing handle
 `err INVALID_ARGS`.
@@ -474,8 +477,9 @@ from the virtio sources.
 - **Key modifiers are tracked per device.** Shift on one keyboard does not
   change the character typed on another. Mouse events carry the modifiers
   of all keyboards combined (Ctrl+click works).
-- **No USB HID yet** (the design is awaiting approval). The device
-  protocol is ready for it (`MSC_SCAN` carries the scan code).
+- **USB HID in the boot protocol only** (keyboard, mouse), see
+  [USB](usb.md). A full report parser (multimedia, tablets) comes in
+  phase 4.
 - **PS/2 without hotplug:** a keyboard or mouse plugged in at run time is
   not found. The keyboard LEDs stay off for now.
 - **Tablets and touch** (`EV_ABS`) are not supported yet.

@@ -514,6 +514,7 @@ whole system).
 | vaults lock on sleep | convenience | option | on | option |
 | inline deduplication on write | medium to large | off (background only) | off | option |
 | checksum verification on every read | small | on (cannot be disabled) | on | on |
+| new keyboard verification (against BadUSB, [USB](usb.md#verifying-a-new-keyboard-against-badusb)) | convenience (a code on attach) | option | on | off |
 
 Data integrity (checksums, the Merkle tree, metadata twice) does not change
 with profiles - it protects against corruption, not against an attacker,

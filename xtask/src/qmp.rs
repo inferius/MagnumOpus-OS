@@ -85,8 +85,13 @@ fn rel(axis: &str, value: i32) -> String {
 enum Step {
     /// Udalosti pro virtio (konzole `video0`).
     Send(Vec<String>),
-    /// Udalosti bez zarizeni: dostane je PS/2.
+    /// Udalosti bez zarizeni: dostane je PS/2 (nebo naposled aktivni
+    /// zarizeni USB bez vazby na konzoli, pripojene za behu).
     SendPs2(Vec<String>),
+    /// Udalosti pro klavesnici USB (konzole `video1`).
+    SendUsb(Vec<String>),
+    /// Primo prikaz QMP (pripojeni a odpojeni zarizeni).
+    Qmp(String),
     /// Pockat na znacku v logu seriove linky.
     WaitFor(&'static str),
 }
@@ -144,7 +149,66 @@ fn script() -> Vec<Step> {
     s.push(Step::SendPs2(vec![btn("right", false)]));
     s.push(Step::SendPs2(vec![btn("wheel-up", true)]));
     s.push(Step::SendPs2(vec![btn("wheel-up", false)]));
+
+    // USB (`user/init/src/tests/usb.rs`): klavesnice ze startu, hotplug mysi
+    // a overeni nove klavesnice.
+    s.push(Step::WaitFor(usb::KEYS));
+    for (k, d) in [
+        ("u", true),
+        ("u", false),
+        ("shift", true),
+        ("3", true),
+        ("3", false),
+        ("shift", false),
+    ] {
+        s.push(Step::SendUsb(vec![key(k, d)]));
+    }
+    s.push(Step::WaitFor(usb::MOUSE_PLUG));
+    s.push(Step::Qmp(device_add("usb-mouse", "usbmouse1")));
+    s.push(Step::WaitFor(usb::MOUSE_READY));
+    s.push(Step::SendPs2(vec![rel("x", 4), rel("y", 6)]));
+    for (b, d) in [
+        ("middle", true),
+        ("middle", false),
+        ("wheel-down", true),
+        ("wheel-down", false),
+    ] {
+        s.push(Step::SendPs2(vec![btn(b, d)]));
+    }
+    s.push(Step::WaitFor(usb::MOUSE_UNPLUG));
+    s.push(Step::Qmp(device_del("usbmouse1")));
+    s.push(Step::WaitFor(usb::KBD_PLUG));
+    s.push(Step::Qmp(device_add("usb-kbd", "usbkbd2")));
+    s.push(Step::WaitFor(usb::KBD_READY));
+    s.push(Step::SendPs2(vec![key("x", true)]));
+    s.push(Step::SendPs2(vec![key("x", false)]));
+    s.push(Step::WaitFor(usb::KBD_TRUSTED));
+    s.push(Step::SendPs2(vec![key("y", true)]));
+    s.push(Step::SendPs2(vec![key("y", false)]));
+    s.push(Step::WaitFor(usb::KBD_UNPLUG));
+    s.push(Step::Qmp(device_del("usbkbd2")));
     s
+}
+
+/// Znacky testu USB (musi sedet s `user/init/src/tests/usb.rs`).
+mod usb {
+    pub const KEYS: &str = "init: test usb: stisky na video1";
+    pub const MOUSE_PLUG: &str = "init: test usb: pripoj mys";
+    pub const MOUSE_READY: &str = "init: test usb: udalosti mysi";
+    pub const MOUSE_UNPLUG: &str = "init: test usb: odpoj mys";
+    pub const KBD_PLUG: &str = "init: test usb: pripoj klavesnici";
+    pub const KBD_READY: &str = "init: test usb: klavesy nove klavesnice";
+    pub const KBD_TRUSTED: &str = "init: test usb: klavesy overene klavesnice";
+    pub const KBD_UNPLUG: &str = "init: test usb: odpoj klavesnici";
+}
+
+/// Pripojeni zarizeni USB za behu na radic `xhci`.
+fn device_add(driver: &str, id: &str) -> String {
+    format!(r#"{{"execute":"device_add","arguments":{{"driver":"{driver}","id":"{id}","bus":"xhci.0"}}}}"#)
+}
+
+fn device_del(id: &str) -> String {
+    format!(r#"{{"execute":"device_del","arguments":{{"id":"{id}"}}}}"#)
 }
 
 /// Precte odpoved na prikaz (preskoci asynchronni udalosti QMP).
@@ -187,6 +251,11 @@ fn inject(port: u16, log: &Path, start: Instant) -> Result<(), String> {
         let (events, device) = match step {
             Step::Send(e) => (e, r#""device":"video0","#),
             Step::SendPs2(e) => (e, ""),
+            Step::SendUsb(e) => (e, r#""device":"video1","#),
+            Step::Qmp(cmd) => {
+                send(cmd, &mut reader)?;
+                continue;
+            }
             Step::WaitFor(marker) => {
                 if !wait_marker(log, marker, start) {
                     return Err(format!("znacka '{marker}' se neobjevila"));

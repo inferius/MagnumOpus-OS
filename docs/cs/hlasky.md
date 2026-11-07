@@ -118,6 +118,19 @@ porušený vnitřní předpoklad (chyba jádra).
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 čte `0xFF` (řadič chybí) nebo nenašel žádné zařízení. Na moderních deskách bez PS/2 normální. |
 | `ps2: radic neodpovida spravne: ...` | Řadič je, ale neprošel self-testem nebo neodpovídá včas (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | Port je, ale zařízení na něm nereaguje (nepřipojené). |
+| `xhci BB:ZZ.F: N portu (M USB 3), S slotu, kontext K B` | Řadič USB je připravený. |
+| `xhci: firmware radic nepustil, pokracuji` | Firmware do sekundy neuvolnil řadič (USB Legacy Support); emulace PS/2 z USB může dál běžet. |
+| `xhci ...: inicializace selhala: ...` | Řadič nedokončil zastavení, reset nebo start (`TIMED_OUT`), nebo chybí prostředky. |
+| `xhci: port P: zarizeni vvvv:pppp (rychlost), slot S` / `zarizeni odpojeno` | Zařízení na portu nastavené / odpojené. |
+| `xhci: prikaz typu T selhal (kod C)` | Příkaz řadiče (Enable Slot, Address Device, Configure Endpoint ...) vrátil chybu; zařízení se nepoužije. |
+| `usb-hub: root hub, N portu` | Ovladač hubu běží na kořenových portech. |
+| `usb-hub: port P: zarizeni nelze nastavit: ...` | Reset portu nebo nastavení zařízení selhalo (`TIMED_OUT`, `IO_ERROR`). |
+| `usb-hub: externi hub ... zatim nepodporovany (faze 3)` | Externí hub se zatím nenastaví. |
+| `usb-hid: USB klavesnice/mys vvvv:pppp (port [...], rychlost)` | Ovladač HID se představil službě vstupu. |
+| `usb-hid: rozhrani ... bez boot protokolu zatim nepodporovane` | HID bez boot protokolu (multimédia, tablet) čeká na fázi 4. |
+| `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | Pro třídu rozhraní není ovladač (např. disk USB). |
+| `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` nepřišlo do 10 s; init dostane `done` i tak. |
+| `inputd: nova klavesnice '...' ceka na overeni` / `overena` / `odmitnuta` | Volba ověření nové klávesnice (BadUSB), viz [USB](usb.md). |
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
 | `virtio-input BB:ZZ.F: 'jméno' (klavesnice/mys)` | Vstupní zařízení je připravené; druh podle podporovaných událostí. `nezname zarizeni` = nemá klávesy ani relativní osy (tablet, zatím nepodporovaný). |
 | `virtio-input ...: inicializace selhala: ...` | Jako u virtio-blk: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA). |

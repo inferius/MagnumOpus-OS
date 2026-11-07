@@ -11,6 +11,7 @@ mod ipc;
 mod memory;
 mod process;
 mod time;
+mod usb;
 
 use alloc::string::String;
 
@@ -27,6 +28,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ovladace", drivers::TESTS),
     ("souborovy system", fs::TESTS),
     ("vstup", input::TESTS),
+    ("usb", usb::TESTS),
     ("cas", time::TESTS),
 ];
 

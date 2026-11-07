@@ -10,6 +10,7 @@
 | [hlasky.md](cs/hlasky.md) | [messages.md](en/messages.md) | hlášky v logu a co znamenají / log messages and their meaning |
 | [cas.md](cs/cas.md) | [time.md](en/time.md) | reálný čas: zdroje (UEFI, RTC), formát, pásmo / real time: sources (UEFI, RTC), format, zone |
 | [vstup.md](cs/vstup.md) | [input.md](en/input.md) | vstup: virtio-input, služba inputd, protokol událostí, rozložení, bezpečná zkratka / input: virtio-input, inputd service, event protocol, layouts, secure attention shortcut |
+| [usb.md](cs/usb.md) | [usb.md](en/usb.md) | USB: řadič xHCI, root hub, huby, HID, ověření nové klávesnice / USB: xHCI controller, root hub, hubs, HID, new keyboard verification |
 | [libos.md](cs/libos.md) | [libos.md](en/libos.md) | knihovna pro programy / program library |
 | [souborovy-system.md](cs/souborovy-system.md) | [file-system.md](en/file-system.md) | souborový systém: formát, algoritmy, služba fsd, protokol / file system: format, algorithms, fsd service, protocol |
 | [osfs.md](cs/osfs.md) | [osfs.md](en/osfs.md) | nástroj osfs: obraz FS, kontrola, připojení ve Windows / osfs tool: FS image, check, mounting on Windows |

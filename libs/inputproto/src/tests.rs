@@ -97,6 +97,14 @@ fn records_roundtrip_all_kinds() {
         Event::Injection { active: 2 },
         Event::Layout(1),
         Event::Dropped { messages: 7 },
+        Event::NewKeyboard {
+            source: 5,
+            state: crate::KeyboardTrust::Pending,
+        },
+        Event::NewKeyboard {
+            source: 6,
+            state: crate::KeyboardTrust::Rejected,
+        },
     ];
     let records: Vec<Record> = events
         .iter()
@@ -207,13 +215,22 @@ fn source_list_roundtrip() {
             id: 1,
             caps: crate::device::caps::KEYBOARD,
             synthetic: false,
+            trust: crate::KeyboardTrust::Trusted,
             name: "QEMU Virtio Keyboard",
         },
         SourceInfo {
             id: 7,
             caps: 0,
             synthetic: true,
+            trust: crate::KeyboardTrust::Trusted,
             name: "",
+        },
+        SourceInfo {
+            id: 9,
+            caps: 1,
+            synthetic: false,
+            trust: crate::KeyboardTrust::Pending,
+            name: "USB klavesnice 0627:0001",
         },
     ];
     let mut text = String::new();

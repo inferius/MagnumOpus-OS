@@ -251,6 +251,7 @@ Jedna zpráva je jeden snímek a skládá se ze záznamů po 32 B:
 | 8 `INJECTION` | `Injection { active }` | počet zdrojů umělého vstupu | | | |
 | 9 `LAYOUT` | `Layout(id)` | 0 `us`, 1 `cz` | | | |
 | 10 `DROPPED` | `Dropped { messages }` | počet zpráv, které klientovi neprošly | | | |
+| 11 `NEW_KEYBOARD` | `NewKeyboard { source, state }` | id zdroje | 0 čeká, 1 ověřena, 2 odmítnuta | | |
 
 - `flags`: `SYNTHETIC` (1) = událost pochází z umělého vstupu.
 - `mods`: modifikátory po události. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -316,7 +317,9 @@ je jméno z [chyb](chyby.md), např. `err NOT_FOUND`.
 | `inject` | - | `ok` + kanál nového zdroje umělého vstupu |
 | `layout us` / `layout cz` | - | `ok`; neznámé `err NOT_FOUND` |
 | `status` | - | `ok devices=2 keyboards=1 pointers=1 layout=us injecting=0 dropped=0 secure=0` |
-| `sources` | - | `ok` a řádky `<id> <schopnosti> <real\|inject> <jméno>`, např. `3 1 real PS/2 klavesnice` |
+| `sources` | - | `ok` a řádky `<id> <schopnosti> <real\|inject\|pending\|rejected> <jméno>`, např. `3 1 real PS/2 klavesnice` |
+| `policy verify-new-keyboards on\|off` | - | `ok`; volba zabezpečení [ověření nové klávesnice](usb.md#ověření-nové-klávesnice-proti-badusb) |
+| `settled` | - | `ok`; zařízení připojená do teď jsou důvěryhodná (init po startu) |
 
 Neznámý příkaz vrátí `err NOT_SUPPORTED`, chybějící handle
 `err INVALID_ARGS`.
@@ -444,8 +447,8 @@ ověří, že jeho události přišly ze zdrojů virtio.
 - **Modifikátory kláves se počítají pro každé zařízení zvlášť.** Shift na
   jedné klávesnici neovlivní znak z druhé. Události myši nesou modifikátory
   všech klávesnic dohromady (Ctrl+klik funguje).
-- **USB HID zatím ne** (návrh čeká na odsouhlasení). Protokol zařízení je
-  na něj připravený (`MSC_SCAN` nese scan kód).
+- **USB HID jen v boot protokolu** (klávesnice, myš), viz [USB](usb.md).
+  Plný parser reportů (multimédia, tablety) přijde ve fázi 4.
 - **PS/2 bez hotplugu:** klávesnice nebo myš připojená za běhu se
   nenajde. Kontrolky klávesnice zatím nesvítí.
 - **Tablet a dotyk** (`EV_ABS`) zatím ne.

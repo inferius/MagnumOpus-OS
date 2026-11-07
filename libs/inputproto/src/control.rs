@@ -13,9 +13,13 @@
 //! | `layout <jmeno>` | - | `ok` / `err NOT_FOUND` |
 //! | `status` | - | `ok` + [`Status`] v textu |
 //! | `sources` | - | `ok` + radky [`SourceInfo`] (id zdroju v zaznamech) |
+//! | `policy verify-new-keyboards on\|off` | - | `ok` (volba zabezpeceni) |
+//! | `settled` | - | `ok`; zarizeni nalezena pri startu jsou duveryhodna |
 //!
 //! Na kanalu `secure` posila jeho vlastnik `release` (konec bezpecneho
-//! rezimu, fokus se vrati). Na kanalu fokusu klient zatim nic neposila.
+//! rezimu, fokus se vrati), `trust <id>` (nova klavesnice overena)
+//! a `reject <id>` (odmitnuta; jeji udalosti se zahazuji). Na kanalu
+//! fokusu klient zatim nic neposila.
 
 /// Pripoji zdroj vstupu (ovladac). Handle: kanal (protokol [`crate::device`]).
 pub const DEVICE: &str = "device";
@@ -34,6 +38,15 @@ pub const LAYOUT: &str = "layout";
 pub const STATUS: &str = "status";
 /// Seznam zdroju vstupu (id, druh, jmeno).
 pub const SOURCES: &str = "sources";
+/// Volby zabezpeceni: `policy verify-new-keyboards on|off`.
+pub const POLICY: &str = "policy";
+/// Volba: klavesnice pripojena za behu ceka na overeni (proti BadUSB).
+pub const VERIFY_NEW_KEYBOARDS: &str = "verify-new-keyboards";
+/// Start dokoncen: co je pripojene ted, je duveryhodne.
+pub const SETTLED: &str = "settled";
+/// Kanal `secure`: nova klavesnice `trust <id>` / `reject <id>`.
+pub const TRUST: &str = "trust";
+pub const REJECT: &str = "reject";
 /// Kanal `secure`: konec bezpecneho rezimu.
 pub const RELEASE: &str = "release";
 
@@ -107,8 +120,9 @@ impl Status {
     }
 }
 
-/// Jeden zdroj v odpovedi na `sources`: radek `<id> <schopnosti> <real|inject>
-/// <jmeno>` (schopnosti desitkove, bity `device::caps`; jmeno do konce
+/// Jeden zdroj v odpovedi na `sources`: radek `<id> <schopnosti>
+/// <real|inject|pending|rejected> <jmeno>` (schopnosti desitkove, bity
+/// `device::caps`; `pending` = klavesnice ceka na overeni; jmeno do konce
 /// radku, muze byt prazdne). Radky oddeluje `\n`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceInfo<'a> {
@@ -116,13 +130,21 @@ pub struct SourceInfo<'a> {
     pub id: u16,
     pub caps: u16,
     pub synthetic: bool,
+    /// Stav overeni (u umeleho vstupu vzdy `Trusted`).
+    pub trust: crate::KeyboardTrust,
     pub name: &'a str,
 }
 
 impl<'a> SourceInfo<'a> {
     /// Jeden radek vcetne `\n`.
     pub fn format(&self, out: &mut impl core::fmt::Write) -> core::fmt::Result {
-        let kind = if self.synthetic { "inject" } else { "real" };
+        use crate::KeyboardTrust::*;
+        let kind = match (self.synthetic, self.trust) {
+            (true, _) => "inject",
+            (false, Trusted) => "real",
+            (false, Pending) => "pending",
+            (false, Rejected) => "rejected",
+        };
         writeln!(out, "{} {} {} {}", self.id, self.caps, kind, self.name)
     }
 
@@ -132,15 +154,19 @@ impl<'a> SourceInfo<'a> {
             let mut it = line.splitn(4, ' ');
             let id = it.next()?.parse().ok()?;
             let caps = it.next()?.parse().ok()?;
-            let synthetic = match it.next()? {
-                "inject" => true,
-                "real" => false,
+            use crate::KeyboardTrust::*;
+            let (synthetic, trust) = match it.next()? {
+                "inject" => (true, Trusted),
+                "real" => (false, Trusted),
+                "pending" => (false, Pending),
+                "rejected" => (false, Rejected),
                 _ => return None,
             };
             Some(SourceInfo {
                 id,
                 caps,
                 synthetic,
+                trust,
                 name: it.next().unwrap_or(""),
             })
         })

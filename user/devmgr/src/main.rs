@@ -2,10 +2,13 @@
 //!
 //! Projde sbernice PCI Express, zaloguje nalezena zarizeni a pro znama
 //! zarizeni spusti ovladace z initfs. Na x86 navic spusti ovladac radice
-//! PS/2 (`ps2`, zarizeni na desce mimo PCI; kdyz radic chybi, skonci). Rodici (init) posle po bootstrap
-//! kanalu pro kazde zarizeni zpravu s koncem kanalu ke klientovi ovladace:
-//! `block` (disk, protokol `blockproto`) nebo `input` (klavesnice, mys,
-//! protokol `inputproto::device`), a nakonec `done`.
+//! PS/2 (`ps2`, zarizeni na desce mimo PCI; kdyz radic chybi, skonci).
+//! Pro radice USB (xHCI) spusti `xhci` a podle jeho zprav tridni ovladace
+//! (`usb.rs`). Rodici (init) posle po bootstrap kanalu pro kazde zarizeni
+//! zpravu s koncem kanalu ke klientovi ovladace: `block` (disk, protokol
+//! `blockproto`) nebo `input` (klavesnice, mys, protokol
+//! `inputproto::device`), a `done`, az jsou nalezena zarizeni pri startu
+//! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
 //!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
 
@@ -20,10 +23,15 @@ use alloc::vec::Vec;
 
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
-use libos::{Channel, Process, Startup, println};
+use libos::{Channel, Process, Signals, Startup, println};
 use pci::{Ecam, Function};
 
+mod usb;
+
 libos::entry!(main);
+
+/// Jak dlouho cekat na prvni pruchod sbernic USB pred hlasenim `done`.
+const USB_READY_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(10);
 
 /// Ovladac pro jeden typ zarizeni virtio.
 struct Driver {
@@ -64,6 +72,7 @@ fn main(startup: Startup) -> i64 {
         }
     };
     let mut drivers: Vec<Process> = Vec::new();
+    let mut controllers: Vec<usb::Controller> = Vec::new();
     for (vmo, arg) in &startup.pci_ecam {
         let ecam = match Ecam::new(vmo, *arg) {
             Ok(e) => e,
@@ -100,6 +109,15 @@ fn main(startup: Startup) -> i64 {
                 }
             }
         }
+        for f in functions
+            .iter()
+            .filter(|f| (f.class, f.subclass, f.prog_if) == usb::XHCI_CLASS)
+        {
+            match start_xhci(&fs, resource, vmo, &ecam, (*arg >> 16) as u16, f) {
+                Ok(c) => controllers.push(c),
+                Err(e) => println!("devmgr: ovladac xhci pro {} nelze spustit: {e}", f.address),
+            }
+        }
     }
     #[cfg(target_arch = "x86_64")]
     match start_ps2(&fs, resource, &startup.bootstrap) {
@@ -107,12 +125,91 @@ fn main(startup: Startup) -> i64 {
         Ok(None) => {}
         Err(e) => println!("devmgr: ovladac ps2 nelze spustit: {e}"),
     }
+    // Zarizeni USB pri startu: pockat, az radice projdou porty.
+    let deadline = libos::time::deadline_after(USB_READY_TIMEOUT);
+    while controllers.iter().any(|c| !c.ready) {
+        if !serve_usb(&fs, &mut controllers, &startup.bootstrap, &mut drivers, Some(deadline)) {
+            println!("devmgr: radic USB nedokoncil pruchod porty");
+            break;
+        }
+    }
     let _ = startup.bootstrap.write(b"done", Vec::new());
-    // Zustat bezet, dokud init drzi spojeni (pozdeji: hotplug, restart
+    // Zustat bezet, dokud init drzi spojeni: hotplug USB (pozdeji restart
     // spadlych ovladacu).
-    let _ = startup.bootstrap.read(None);
+    while serve_usb(&fs, &mut controllers, &startup.bootstrap, &mut drivers, None) {}
     drop(drivers);
     0
+}
+
+/// Jedno kolo cekani na radice USB (a zavreni initu). `false` = konec
+/// (init skoncil nebo vyprsel termin).
+fn serve_usb(
+    fs: &Initfs,
+    controllers: &mut [usb::Controller],
+    parent: &Channel,
+    procs: &mut Vec<Process>,
+    deadline: Option<u64>,
+) -> bool {
+    let mut items = vec![(parent.handle(), Signals::PEER_CLOSED)];
+    for c in controllers.iter() {
+        items.push((c.channel.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+    }
+    let observed = match libos::wait_many(&items, deadline) {
+        Ok((_, o)) => o,
+        Err(_) => return false,
+    };
+    drop(items);
+    if observed[0].intersects(Signals::PEER_CLOSED) {
+        return false;
+    }
+    for (i, c) in controllers.iter_mut().enumerate() {
+        let s = observed[i + 1];
+        if s.intersects(Signals::READABLE) {
+            while let Ok(m) = c.channel.try_read() {
+                if usb::handle(fs, m, parent, procs) {
+                    c.ready = true;
+                }
+            }
+        } else if s.intersects(Signals::PEER_CLOSED) {
+            // Radic skoncil: nic dalsiho nehlasi.
+            c.ready = true;
+        }
+    }
+    true
+}
+
+/// Spusti ovladac radice xHCI: jako virtio, navic kanal ke spravci
+/// (hlaseni rozhrani) a adresa a velikost BAR0.
+fn start_xhci(
+    fs: &Initfs,
+    resource: &libos::hw::Resource,
+    ecam_vmo: &libos::Vmo,
+    ecam: &Ecam,
+    segment: u16,
+    f: &Function,
+) -> libos::Result<usb::Controller> {
+    let image = fs.find("xhci").ok_or(libos::Error::NotFound)?;
+    let a = f.address;
+    let bar = ecam.memory_bar(a, 0).ok_or(libos::Error::NotSupported)?;
+    let bar_size = ecam.memory_bar_size(a, 0).ok_or(libos::Error::NotSupported)?;
+    let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
+    let id = (segment, a.bus, a.device, a.function);
+    let device = resource.restrict_device(&ranges, DRIVER_IRQ_MAX, DRIVER_DMA_MAX, id)?;
+    let config = device.device_memory(config_phys, pci::CONFIG_SIZE)?;
+    let (mine, theirs) = Channel::create()?;
+    let handles = vec![
+        StartHandle::user(device.handle().duplicate(None)?),
+        StartHandle::user(config.handle().duplicate(None)?),
+        StartHandle::user(theirs.into_handle()),
+    ];
+    let (process, control) = libos::spawn("xhci", image, handles)?;
+    control.write(format!("pci {} {} {}", a.bus, a.device, a.function).as_bytes(), Vec::new())?;
+    control.write(format!("bar0 {} {}", bar.phys, bar_size).as_bytes(), Vec::new())?;
+    Ok(usb::Controller {
+        _process: process,
+        channel: mine,
+        ready: false,
+    })
 }
 
 /// Nejvic preruseni a DMA pameti pro jeden ovladac.
