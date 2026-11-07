@@ -24,7 +24,8 @@ mod vtd;
 
 use alloc::sync::Arc;
 
-use crate::acpi::{AmdIommuUnit, IommuUnit, PciEcam};
+use super::acpi::{AmdIommuUnit, IommuUnit};
+use crate::acpi::PciEcam;
 use crate::error::Error;
 use crate::log;
 
@@ -38,9 +39,9 @@ pub enum Domain {
     Amd(Arc<amdvi::Domain>),
 }
 
-impl Domain {
+impl crate::arch::api::IommuDomain for Domain {
     /// Povoli zarizeni cteni i zapis `pages` stranek od `phys` (identicky).
-    pub fn map(&self, phys: u64, pages: u64) -> Result<(), Error> {
+    fn map(&self, phys: u64, pages: u64) -> Result<(), Error> {
         match self {
             Domain::Vtd(d) => d.map(phys, pages),
             Domain::Amd(d) => d.map(phys, pages),
@@ -48,7 +49,7 @@ impl Domain {
     }
 
     /// Odebere zarizeni pristup ke strankam (pred vracenim pameti).
-    pub fn unmap(&self, phys: u64, pages: u64) {
+    fn unmap(&self, phys: u64, pages: u64) {
         match self {
             Domain::Vtd(d) => d.unmap(phys, pages),
             Domain::Amd(d) => d.unmap(phys, pages),

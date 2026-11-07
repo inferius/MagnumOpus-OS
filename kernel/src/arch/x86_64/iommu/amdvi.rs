@@ -21,8 +21,9 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
+use super::super::acpi::AmdIommuUnit;
 use super::VECTOR_IOMMU_FAULT;
-use crate::acpi::{AmdIommuUnit, PciEcam};
+use crate::acpi::PciEcam;
 use crate::error::Error;
 use crate::log;
 use crate::mm::{self, PhysAddr};

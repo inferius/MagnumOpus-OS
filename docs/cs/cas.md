@@ -31,7 +31,8 @@ okamžitě nebo nikdy.
 1. **UEFI `GetTime`.** Loader přečte čas těsně před `ExitBootServices`
    a zároveň hodnotu TSC. Jádro po kalibraci TSC dopočítá, kolik času
    uběhlo do startu jeho hodin, a uloží počátek.
-2. **CMOS RTC.** Když firmware čas nedal (chyba, neplatné datum), jádro
+2. **Hardwarové hodiny** (`arch::hardware_clock`, na x86 CMOS RTC; aarch64
+   zatím žádné). Když firmware čas nedal (chyba, neplatné datum), jádro
    přečte hodiny MC146818 samo:
    - Čte dvakrát po sobě, dokud se čtení neshodují. Během aktualizace by
      se jinak smíchaly dvě sekundy.

@@ -1,6 +1,7 @@
 //! Preruseni zarizeni pro ovladac v userspace.
 //!
-//! Objekt dostane volny vektor CPU a vrati zpravu MSI (adresa + data), kterou
+//! Objekt dostane volne cislo preruseni (x86: vektor CPU, aarch64: LPI)
+//! a vrati zpravu MSI (adresa + data), kterou
 //! ovladac zapise do zarizeni (MSI nebo MSI-X). Kdyz zarizeni preruseni
 //! vyvola, jadro jen nastavi signal SIGNALED; ovladac na nej ceka, potvrdi
 //! ho (`ack` = smaze signal) a obslouzi zarizeni. Potvrzeni pred obsluhou
@@ -15,36 +16,41 @@ use super::{Error, KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::sync::SpinLock;
 use crate::{arch, log};
 
-/// Rozsah vektoru pro zarizeni (nize jsou vyjimky a vektory jadra, nahore
-/// spurious).
-const FIRST: usize = 48;
-const LAST: usize = 239;
+/// Rozsah cisel preruseni pro zarizeni (urcuje architektura).
+const FIRST: u32 = arch::DEVICE_IRQ_FIRST;
+const LAST: u32 = arch::DEVICE_IRQ_LAST;
+const COUNT: usize = (LAST - FIRST + 1) as usize;
 
-static TABLE: SpinLock<[Option<Weak<Interrupt>>; 256]> = SpinLock::new([const { None }; 256]);
+/// Objekty podle cisla preruseni (index = cislo - FIRST).
+static TABLE: SpinLock<[Option<Weak<Interrupt>>; COUNT]> = SpinLock::new([const { None }; COUNT]);
 
 pub struct Interrupt {
     core: ObjectCore,
-    vector: u8,
+    irq: u32,
+    /// Zarizeni (segment, sbernice, zarizeni << 3 | funkce), pokud je zname.
+    device: Option<(u16, u8, u8)>,
 }
 
 impl Interrupt {
-    /// Novy objekt s volnym vektorem.
-    pub fn new() -> Result<Arc<Self>, Error> {
+    /// Novy objekt s volnym cislem preruseni pro zarizeni `device`.
+    pub fn new(device: Option<(u16, u8, u8)>) -> Result<Arc<Self>, Error> {
         let mut table = TABLE.lock();
-        let vector = (FIRST..=LAST)
-            .find(|&v| table[v].as_ref().is_none_or(|w| w.strong_count() == 0))
+        let slot = (0..COUNT)
+            .find(|&i| table[i].as_ref().is_none_or(|w| w.strong_count() == 0))
             .ok_or(Error::NoResources)?;
         let irq = Arc::new(Self {
             core: ObjectCore::new(Signals::NONE),
-            vector: vector as u8,
+            irq: FIRST + slot as u32,
+            device,
         });
-        table[vector] = Some(Arc::downgrade(&irq));
+        table[slot] = Some(Arc::downgrade(&irq));
         Ok(irq)
     }
 
-    /// Zprava MSI pro zarizeni: (adresa, data).
-    pub fn msi_message(&self) -> (u64, u32) {
-        arch::msi_message(self.vector)
+    /// Zprava MSI pro zarizeni: (adresa, data). Chyba = architektura
+    /// zpravu bez znalosti zarizeni vytvorit neumi (GICv3 ITS).
+    pub fn msi_message(&self) -> Result<(u64, u32), Error> {
+        arch::msi_message(self.irq, self.device)
     }
 
     /// Potvrzeni: smaze SIGNALED (dalsi preruseni ho znovu nastavi).
@@ -55,24 +61,20 @@ impl Interrupt {
 
 impl Drop for Interrupt {
     fn drop(&mut self) {
-        TABLE.lock()[self.vector as usize] = None;
+        TABLE.lock()[(self.irq - FIRST) as usize] = None;
     }
 }
 
-/// Volano z obsluhy preruseni pro vektor zarizeni.
-pub fn dispatch(vector: u8) {
-    let irq = TABLE.lock()[vector as usize]
-        .as_ref()
-        .and_then(Weak::upgrade);
-    match irq {
-        Some(irq) => irq.core.update(Signals::NONE, Signals::SIGNALED),
-        None => log::warn!("preruseni na vektoru {vector}, ktery nikdo nepouziva"),
+/// Volano z obsluhy preruseni (`trap::device_irq`) pro cislo z rozsahu
+/// zarizeni.
+pub fn dispatch(irq: u32) {
+    let obj = irq
+        .checked_sub(FIRST)
+        .and_then(|i| TABLE.lock().get(i as usize)?.as_ref()?.upgrade());
+    match obj {
+        Some(obj) => obj.core.update(Signals::NONE, Signals::SIGNALED),
+        None => log::warn!("preruseni na vektoru {irq}, ktery nikdo nepouziva"),
     }
-}
-
-/// Je vektor z rozsahu zarizeni?
-pub fn is_device_vector(vector: u64) -> bool {
-    (FIRST as u64..=LAST as u64).contains(&vector)
 }
 
 impl KernelObject for Interrupt {

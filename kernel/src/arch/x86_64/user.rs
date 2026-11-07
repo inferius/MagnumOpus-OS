@@ -36,9 +36,9 @@ pub struct CpuLocal {
     tss: u64,
 }
 
-impl CpuLocal {
+impl crate::arch::api::CpuLocalData for CpuLocal {
     /// Data pro aktualni CPU (volat po nahrani GDT a TSS).
-    pub fn for_this_cpu() -> Self {
+    fn for_this_cpu() -> Self {
         Self {
             kernel_rsp: 0,
             user_rsp: 0,
@@ -177,9 +177,9 @@ extern "sysv64" fn syscall_dispatch(frame: &mut TrapFrame) {
     let args = [
         frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
     ];
-    frame.rax = crate::syscall::dispatch(frame.rax, args);
+    frame.rax = crate::trap::syscall(frame.rax, args);
     super::interrupts::disable();
-    crate::sched::on_return_to_user();
+    crate::trap::return_to_user();
 }
 
 /// Vrati true, pokud ramec patri preruseni z userspace (CPL 3).

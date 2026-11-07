@@ -77,8 +77,11 @@ pub fn report(log: &Path, kernel_elf: &Path) -> Result<()> {
     for line in text.lines() {
         let trimmed = line.trim();
         let hex = trimmed.strip_prefix("0x").or_else(|| {
+            // Adresa instrukce z vypisu fatalni vyjimky: "rip 0x..." (x86_64)
+            // nebo "pc 0x..." (aarch64), viz `arch::PC_NAME` v jadru.
             trimmed
                 .strip_prefix("rip 0x")
+                .or_else(|| trimmed.strip_prefix("pc 0x"))
                 .map(|r| r.split_whitespace().next().unwrap_or(""))
         });
         let Some(addr) = hex.and_then(|h| u64::from_str_radix(h, 16).ok()) else {

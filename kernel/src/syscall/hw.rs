@@ -4,6 +4,7 @@ use alloc::sync::Arc;
 
 use super::handle::arg_handle;
 use super::{Args, current_process, user};
+use crate::arch::paging::PAGE_SIZE;
 use crate::error::{Error, Result};
 use crate::mm;
 use crate::object::interrupt::Interrupt;
@@ -50,10 +51,8 @@ pub fn vmo_phys_addr(a: Args) -> Result<u64> {
     let vmo = p
         .handles()
         .get_as::<MemoryObject>(arg_handle(a[1])?, Rights::NONE)?;
-    let page = vmo
-        .page(a[2] & !(abi::vm::PAGE_SIZE - 1))
-        .ok_or(Error::OutOfRange)?;
-    Ok(page.as_u64() + (a[2] % abi::vm::PAGE_SIZE))
+    let page = vmo.page(a[2] & !(PAGE_SIZE - 1)).ok_or(Error::OutOfRange)?;
+    Ok(page.as_u64() + (a[2] % PAGE_SIZE))
 }
 
 /// `INTERRUPT_CREATE(resource, out_msi_ptr) -> handle`.
@@ -61,8 +60,8 @@ pub fn interrupt_create(a: Args) -> Result<u64> {
     let p = current_process();
     let res = check_resource(&p, a[0])?;
     res.charge_irq()?;
-    let irq = Interrupt::new().inspect_err(|_| res.refund_irq())?;
-    let (address, data) = irq.msi_message();
+    let irq = Interrupt::new(res.device()).inspect_err(|_| res.refund_irq())?;
+    let (address, data) = irq.msi_message().inspect_err(|_| res.refund_irq())?;
     let mut out = [0u8; 16];
     out[0..8].copy_from_slice(&address.to_le_bytes());
     out[8..12].copy_from_slice(&data.to_le_bytes());

@@ -183,7 +183,8 @@ bajtů objektu od `vmo_offset` do adresního prostoru procesu `process`
 (může být vlastní i jiný, např. při spouštění programu). `flags`:
 `MAP_READ` (povinné), `MAP_WRITE`, `MAP_EXECUTE` (nesmí být s `MAP_WRITE` -
 W^X), `MAP_FIXED` (přesně na `addr`; jinak je `addr` nápověda a 0 = vybere
-jádro). Adresa, délka a offset musí být zarovnané na 4 KiB, rozsah v
+jádro). Adresa, délka a offset musí být zarovnané na velikost stránky
+procesu (`VM_PAGE_SIZE`, dnes 4 KiB), rozsah v
 `0x10000..0x7FFF_FFFF_F000` (`USER_MIN`..`USER_MAX`; poslední stránka
 spodní poloviny zůstává vždy nenamapovaná). Práva: proces `WRITE`; objekt `MAP` + `READ`,
 případně `WRITE`/`EXECUTE` podle příznaků. Mapování drží objekt naživu i po
@@ -197,6 +198,18 @@ zavření handlu. Chyby: `INVALID_ARGS`, `OUT_OF_RANGE`, `BAD_STATE`
 celá mapování (částečné odmapování zatím není). Po návratu žádné CPU nemá
 starý překlad v TLB. Vyžaduje `WRITE` na procesu. Chyby: `NOT_FOUND`,
 `INVALID_ARGS`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `VM_PAGE_SIZE`
+
+`(process) -> bajty`. Velikost stránky adresního prostoru procesu: mocnina
+dvou od `MIN_PAGE_SIZE` (4 KiB) do `MAX_PAGE_SIZE` (64 KiB) z `abi::vm`.
+Na tuto hodnotu musí být zarovnané adresy, délky a offsety pro `VM_MAP`
+a `VM_UNMAP`. Není to konstanta ABI: dnes je všude 4 KiB, ale na aarch64
+může jádro dát nativním procesům 16 KiB a procesům Windows vrstvy 4 KiB
+(každý adresní prostor má vlastní granuli). Rodič se ptá na potomka při
+nahrávání programu (`libos::vm::page_size_of`), program na sebe
+(`libos::vm::page_size`, zjistí jednou a uloží). Stačí libovolný handle
+procesu (žádná práva). Chyby: `BAD_HANDLE`, `WRONG_TYPE`.
 
 ## Procesy a vlákna
 
@@ -294,8 +307,13 @@ bez IOMMU může zapsat kamkoli.
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. Fyzicky souvislý objekt paměti pro DMA
-(max. 4 MiB), vyplněný nulami. Chyby: `INVALID_ARGS` (0 nebo nad 4 MiB),
-`NO_MEMORY` (není souvislý blok), `ACCESS_DENIED`, `WRONG_TYPE`.
+(max. 4 MiB), vyplněný nulami. Do procesu se mapuje jako paměť pro DMA:
+na koherentní platformě (x86_64, QEMU virt) normálně s cache, na
+nekoherentní (např. Raspberry Pi 4) bez cache, aby zařízení i ovladač
+viděli stejná data bez ruční údržby cache. Pořadí zápisů vůči zařízení
+musí ovladač zajistit bariérami (`libos::barrier`). Chyby: `INVALID_ARGS`
+(0 nebo nad 4 MiB), `NO_MEMORY` (není souvislý blok), `ACCESS_DENIED`,
+`WRONG_TYPE`.
 
 ### `VMO_CREATE_PHYSICAL`
 
@@ -318,8 +336,11 @@ u běžného jen v rámci jedné stránky. Chyby: `OUT_OF_RANGE`, `ACCESS_DENIED
 `(resource, out_msi_ptr) -> handle`. Objekt přerušení s volným vektorem
 CPU. Do `out_msi_ptr` zapíše zprávu MSI `{ address: u64, data: u32,
 reserved: u32 }`, kterou ovladač zapíše do zařízení (tabulka MSI-X).
-Když zařízení přerušení vyvolá, objekt dostane signál `SIGNALED`. Chyby:
-`NO_RESOURCES` (došly vektory), `ACCESS_DENIED`, `BAD_ADDRESS`.
+Když zařízení přerušení vyvolá, objekt dostane signál `SIGNALED`. Na
+aarch64 (GICv3 ITS) musí být prostředek omezený na zařízení
+(`RESOURCE_CREATE` s `device`), jinak `INVALID_ARGS`; na x86_64 to není
+potřeba. Chyby: `NO_RESOURCES` (došly vektory), `INVALID_ARGS`,
+`ACCESS_DENIED`, `BAD_ADDRESS`.
 
 ### `RESOURCE_CREATE`
 

@@ -1,84 +1,35 @@
 //! Cteni statickych ACPI tabulek.
 //!
-//! Jadro cte jen to, co nutne potrebuje samo: seznam CPU a radicu preruseni
-//! (MADT) a casovac HPET. Interpretaci AML (napajeni, tlacitka, ...) bude
-//! delat sluzba v userspace.
+//! Jadro cte jen to, co nutne potrebuje samo. Obecna cast (tento modul):
+//! RSDP, XSDT/RSDT a MCFG (okna konfigurace PCI Express). Ostatni tabulky
+//! (seznam CPU a radicu preruseni v MADT, casovace, IOMMU) jsou specificke
+//! pro architekturu a zpracuje je `arch` (`api::PlatformInfo`). Interpretaci
+//! AML (napajeni, tlacitka, ...) bude delat sluzba v userspace.
 
 use alloc::vec::Vec;
 
+use crate::arch;
 use crate::error::{Error, Result, ResultExt};
 use crate::log;
 use crate::mm::PhysAddr;
 
+use self::read::{checksum_ok, u8_at, u16_at, u32_at, u64_at};
+
 #[derive(Debug, Clone, Copy)]
 pub struct Cpu {
-    /// ID lokalniho APIC (x2APIC ID).
-    pub apic_id: u32,
-}
-
-#[allow(
-    dead_code,
-    reason = "IOAPIC pouzije sprava preruseni zarizeni (milnik 6)"
-)]
-#[derive(Debug, Clone, Copy)]
-pub struct IoApic {
-    pub id: u8,
-    pub phys: u64,
-    pub gsi_base: u32,
-}
-
-#[allow(
-    dead_code,
-    reason = "IOAPIC pouzije sprava preruseni zarizeni (milnik 6)"
-)]
-#[derive(Debug, Clone, Copy)]
-pub struct InterruptOverride {
-    pub source_irq: u8,
-    pub gsi: u32,
-    pub flags: u16,
+    /// Hardwarove ID CPU (x86: x2APIC ID, aarch64: afinita z MPIDR).
+    pub hw_id: u32,
 }
 
 /// Informace o platforme z ACPI.
 #[derive(Debug, Default)]
 pub struct Platform {
+    /// Povolena CPU (plni architektura z MADT).
     pub cpus: Vec<Cpu>,
-    pub lapic_phys: u64,
-    pub ioapics: Vec<IoApic>,
-    pub overrides: Vec<InterruptOverride>,
-    pub hpet_phys: Option<u64>,
-    /// Registr stoleti v CMOS RTC (ACPI FADT), 0 = neni.
-    pub rtc_century: u8,
-    /// FADT hlasi, ze CMOS RTC chybi (IAPC_BOOT_ARCH bit 5).
-    pub rtc_absent: bool,
     /// Okna konfiguracniho prostoru PCI Express (ECAM) z tabulky MCFG.
     pub pci_ecam: Vec<PciEcam>,
-    /// Jednotky IOMMU (Intel VT-d) z tabulky DMAR.
-    pub iommus: Vec<IommuUnit>,
-    /// Jednotky IOMMU (AMD-Vi) z tabulky IVRS.
-    pub amd_iommus: Vec<AmdIommuUnit>,
-}
-
-/// Jednotka AMD-Vi (IVHD z tabulky IVRS). Pokryva zarizeni sveho segmentu.
-#[derive(Debug, Clone)]
-pub struct AmdIommuUnit {
-    pub segment: u16,
-    /// Fyzicka adresa registru.
-    pub registers: u64,
-    /// Adresa samotne IOMMU na sbernici PCI (sbernice << 8 | zarizeni << 3
-    /// | funkce) - pres jeji konfiguraci se nastavuje preruseni MSI.
-    pub device_id: u16,
-}
-
-/// Jednotka preklada DMA (DRHD z tabulky DMAR).
-#[derive(Debug, Clone)]
-pub struct IommuUnit {
-    pub segment: u16,
-    /// Fyzicka adresa registru.
-    pub registers: u64,
-    /// Pokryva vsechna zarizeni segmentu, ktera nepokryva jina jednotka.
-    pub include_all: bool,
-    /// Zarizeni vyjmenovana v tabulce: (sbernice, zarizeni << 3 | funkce).
-    pub devices: Vec<(u8, u8)>,
+    /// Udaje specificke pro architekturu (radice preruseni, casovace, IOMMU).
+    pub arch: arch::PlatformArchInfo,
 }
 
 /// Jedno okno ECAM: konfigurace sbernic `bus_start..=bus_end` segmentu.
@@ -98,25 +49,28 @@ fn bytes(phys: u64, len: usize) -> &'static [u8] {
     unsafe { core::slice::from_raw_parts(PhysAddr::new(phys).to_virt().as_mut_ptr(), len) }
 }
 
-// Cteni poli s kontrolou mezi: poskozena tabulka firmwaru nesmi shodit jadro.
-fn u8_at(b: &[u8], off: usize) -> Option<u8> {
-    b.get(off).copied()
-}
+/// Cteni poli tabulek s kontrolou mezi: poskozena tabulka firmwaru nesmi
+/// shodit jadro. Pouziva i cast ACPI v `arch`.
+pub mod read {
+    pub fn u8_at(b: &[u8], off: usize) -> Option<u8> {
+        b.get(off).copied()
+    }
 
-fn u16_at(b: &[u8], off: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(b.get(off..off + 2)?.try_into().ok()?))
-}
+    pub fn u16_at(b: &[u8], off: usize) -> Option<u16> {
+        Some(u16::from_le_bytes(b.get(off..off + 2)?.try_into().ok()?))
+    }
 
-fn u32_at(b: &[u8], off: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(b.get(off..off + 4)?.try_into().ok()?))
-}
+    pub fn u32_at(b: &[u8], off: usize) -> Option<u32> {
+        Some(u32::from_le_bytes(b.get(off..off + 4)?.try_into().ok()?))
+    }
 
-fn u64_at(b: &[u8], off: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(b.get(off..off + 8)?.try_into().ok()?))
-}
+    pub fn u64_at(b: &[u8], off: usize) -> Option<u64> {
+        Some(u64::from_le_bytes(b.get(off..off + 8)?.try_into().ok()?))
+    }
 
-fn checksum_ok(b: &[u8]) -> bool {
-    b.iter().fold(0u8, |acc, &x| acc.wrapping_add(x)) == 0
+    pub fn checksum_ok(b: &[u8]) -> bool {
+        b.iter().fold(0u8, |acc, &x| acc.wrapping_add(x)) == 0
+    }
 }
 
 const HEADER_LEN: usize = 36;
@@ -163,7 +117,6 @@ pub fn parse(rsdp_phys: u64) -> Result<Platform> {
     let root = table(root_phys).warn_context("korenova ACPI tabulka (XSDT/RSDT)")?;
 
     let mut platform = Platform::default();
-    let mut found_madt = false;
     let mut off = HEADER_LEN;
     while off + entry_size <= root.len() {
         let phys = if entry_size == 8 {
@@ -187,74 +140,14 @@ pub fn parse(rsdp_phys: u64) -> Result<Platform> {
             phys.unwrap_or(0),
             t.len()
         );
-        match &t[0..4] {
-            b"APIC" => {
-                parse_madt(t, &mut platform);
-                found_madt = true;
-            }
+        let signature: &[u8; 4] = t[0..4].try_into().unwrap();
+        match signature {
             b"MCFG" => parse_mcfg(t, &mut platform),
-            b"DMAR" => parse_dmar(t, &mut platform),
-            b"IVRS" => parse_ivrs(t, &mut platform),
-            b"FACP" => {
-                platform.rtc_century = u8_at(t, 108).unwrap_or(0);
-                platform.rtc_absent = u16_at(t, 109).is_some_and(|f| f & (1 << 5) != 0);
-            }
-            b"HPET" => match u64_at(t, 44) {
-                Some(addr) => platform.hpet_phys = Some(addr),
-                None => log::warn!("tabulka HPET je prilis kratka, vynechana"),
-            },
-            _ => {}
+            _ => arch::acpi_table(signature, t, &mut platform),
         }
     }
-    if !found_madt {
-        log::error!("chybi platna tabulka MADT (seznam CPU a radicu preruseni)");
-        return Err(Error::NotFound);
-    }
+    arch::acpi_check(&platform)?;
     Ok(platform)
-}
-
-fn parse_madt(t: &[u8], p: &mut Platform) {
-    p.lapic_phys = u32_at(t, 36).unwrap_or(0xFEE0_0000) as u64;
-    let mut off = 44;
-    while off + 2 <= t.len() {
-        let (kind, len) = (t[off], t[off + 1] as usize);
-        if len < 2 || off + len > t.len() {
-            log::warn!("MADT: poskozena polozka na offsetu {off}, zbytek vynechan");
-            break;
-        }
-        let e = &t[off..off + len];
-        if parse_madt_entry(kind, e, p).is_none() {
-            log::warn!("MADT: prilis kratka polozka typu {kind} ({len} B), vynechana");
-        }
-        off += len;
-    }
-}
-
-/// Zpracuje jednu polozku MADT; `None` = polozka je kratsi nez ocekavany format.
-pub(crate) fn parse_madt_entry(kind: u8, e: &[u8], p: &mut Platform) -> Option<()> {
-    match kind {
-        // Lokalni APIC: bit 0 = povolen. CPU s jen "online capable"
-        // (hotplug) zatim nestartujeme.
-        0 if u32_at(e, 4)? & 1 != 0 => p.cpus.push(Cpu {
-            apic_id: u8_at(e, 3)? as u32,
-        }),
-        1 => p.ioapics.push(IoApic {
-            id: u8_at(e, 2)?,
-            phys: u32_at(e, 4)? as u64,
-            gsi_base: u32_at(e, 8)?,
-        }),
-        2 => p.overrides.push(InterruptOverride {
-            source_irq: u8_at(e, 3)?,
-            gsi: u32_at(e, 4)?,
-            flags: u16_at(e, 8)?,
-        }),
-        5 => p.lapic_phys = u64_at(e, 4)?,
-        9 if u32_at(e, 8)? & 1 != 0 => p.cpus.push(Cpu {
-            apic_id: u32_at(e, 4)?,
-        }),
-        _ => {}
-    }
-    Some(())
 }
 
 fn parse_mcfg(t: &[u8], p: &mut Platform) {
@@ -273,88 +166,5 @@ fn parse_mcfg(t: &[u8], p: &mut Platform) {
             p.pci_ecam.push(e);
         }
         off += 16;
-    }
-}
-
-/// DMAR: popis jednotek IOMMU. Za hlavickou (36 B) sirka adresy (1 B),
-/// priznaky (1 B), rezerva (10 B); od offsetu 48 struktury (typ u16, delka
-/// u16). Typ 0 = DRHD: priznaky (bit 0 = vsechna zarizeni segmentu),
-/// segment (offset 6), adresa registru (offset 8), od offsetu 16 rozsahy
-/// zarizeni (typ u8, delka u8, ..., sbernice na offsetu 5, cesta
-/// (zarizeni, funkce) od offsetu 6). Ostatni typy (RMRR, ATSR) se zatim
-/// nepouzivaji.
-fn parse_dmar(t: &[u8], p: &mut Platform) {
-    let mut off = 48;
-    while let (Some(kind), Some(len)) = (u16_at(t, off), u16_at(t, off + 2)) {
-        let len = len as usize;
-        if len < 4 || off + len > t.len() {
-            log::warn!("DMAR: poskozena struktura na offsetu {off}, zbytek vynechan");
-            return;
-        }
-        let s = &t[off..off + len];
-        if kind == 0 {
-            let (Some(flags), Some(segment), Some(registers)) =
-                (u8_at(s, 4), u16_at(s, 6), u64_at(s, 8))
-            else {
-                log::warn!("DMAR: prilis kratka DRHD, vynechana");
-                off += len;
-                continue;
-            };
-            let mut devices = Vec::new();
-            let mut so = 16;
-            while let (Some(_stype), Some(slen)) = (u8_at(s, so), u8_at(s, so + 1)) {
-                let slen = slen as usize;
-                if slen < 6 || so + slen > s.len() {
-                    break;
-                }
-                // Jen primo pripojena zarizeni (cesta delky 1); mosty
-                // s podrizenymi sbernicemi zatim ne.
-                if let (Some(bus), Some(dev), Some(func)) =
-                    (u8_at(s, so + 5), u8_at(s, so + 6), u8_at(s, so + 7))
-                {
-                    devices.push((bus, dev << 3 | (func & 7)));
-                }
-                so += slen;
-            }
-            p.iommus.push(IommuUnit {
-                segment,
-                registers,
-                include_all: flags & 1 != 0,
-                devices,
-            });
-        }
-        off += len;
-    }
-}
-
-/// IVRS: popis jednotek AMD-Vi. Za hlavickou (36 B) informace (4 B)
-/// a rezerva (8 B); od offsetu 48 bloky (typ u8, priznaky u8, delka u16).
-/// IVHD (typ 0x10, 0x11, 0x40): ID zarizeni IOMMU (offset 4), adresa
-/// registru (offset 8), segment (offset 16). Firmware muze tutez jednotku
-/// popsat vic typy IVHD - pouzije se jen prvni podle adresy registru.
-fn parse_ivrs(t: &[u8], p: &mut Platform) {
-    let mut off = 48;
-    while let (Some(kind), Some(len)) = (u8_at(t, off), u16_at(t, off + 2)) {
-        let len = len as usize;
-        if len < 4 || off + len > t.len() {
-            log::warn!("IVRS: poskozeny blok na offsetu {off}, zbytek vynechan");
-            return;
-        }
-        if matches!(kind, 0x10 | 0x11 | 0x40) {
-            let s = &t[off..off + len];
-            match (u16_at(s, 4), u64_at(s, 8), u16_at(s, 16)) {
-                (Some(device_id), Some(registers), Some(segment)) => {
-                    if !p.amd_iommus.iter().any(|u| u.registers == registers) {
-                        p.amd_iommus.push(AmdIommuUnit {
-                            segment,
-                            registers,
-                            device_id,
-                        });
-                    }
-                }
-                _ => log::warn!("IVRS: prilis kratky blok IVHD, vynechan"),
-            }
-        }
-        off += len;
     }
 }

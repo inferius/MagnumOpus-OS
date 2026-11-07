@@ -12,7 +12,7 @@
 
 use abi::time::{Civil, WallTime};
 
-use super::cpu;
+use super::{cpu, time};
 
 const INDEX: u16 = 0x70;
 const DATA: u16 = 0x71;
@@ -33,8 +33,8 @@ struct Raw([u8; 7]);
 
 fn read_raw(century_reg: u8) -> Raw {
     // Pockat, az neprobiha aktualizace (trva < 2 ms; 1 s = mez).
-    let end = super::now_ns() + 1_000_000_000;
-    while read(0x0A) & 0x80 != 0 && super::now_ns() < end {
+    let end = time::now_ns() + 1_000_000_000;
+    while read(0x0A) & 0x80 != 0 && time::now_ns() < end {
         core::hint::spin_loop();
     }
     let century = if century_reg != 0 { read(century_reg) } else { 0 };

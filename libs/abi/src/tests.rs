@@ -94,6 +94,7 @@ fn every_syscall_is_documented() {
         "INTERRUPT_CREATE",
         "INTERRUPT_ACK",
         "RESOURCE_CREATE",
+        "VM_PAGE_SIZE",
         "CLOCK_REALTIME",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);

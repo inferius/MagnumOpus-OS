@@ -23,7 +23,8 @@ next to QEMU or in `/usr/share/...`. Otherwise set `QEMU`, `OVMF_CODE`,
 | `cargo xtask build` | builds the kernel, loader and userspace programs, creates initfs |
 | `cargo xtask image` | build + disk image `target/os-x86_64-<profile>.img` (GPT, FAT32 ESP) |
 | `cargo xtask run` | image + QEMU with a window; serial output in the terminal |
-| `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), documentation, then kernel and userspace in QEMU without a window |
+| `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for aarch64, documentation, then kernel and userspace in QEMU without a window |
+| `cargo xtask check [--arch aarch64]` | only checks that the kernel builds for the given architecture (default x86_64); see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
 Options: `--release`, `--headless` (no window), `--iommu <intel|amd|none>`
@@ -105,7 +106,10 @@ Userspace programs have their own ELF files in
 ```text
 loader/          UEFI loader
 kernel/          kernel
+  src/arch/api/     architecture contract (traits), see architecture.md
   src/arch/x86_64/  everything x86_64-specific
+  src/arch/aarch64/ aarch64 skeleton (todo!)
+  src/trap.rs       reverse direction: architecture -> kernel
   src/mm/           memory
   src/sched/        scheduler
   src/object/       objects and handles

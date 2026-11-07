@@ -71,11 +71,13 @@ pub const INTERRUPT_ACK: u64 = 29;
 /// Omezeny prostredek pro ovladac.
 /// `(resource, ranges_ptr, ranges_count, irq_max, dma_max, device) -> handle`
 pub const RESOURCE_CREATE: u64 = 30;
+/// Velikost stranky adresniho prostoru procesu. `(process) -> bajty`
+pub const VM_PAGE_SIZE: u64 = 31;
 /// Realny cas. `(out_ptr)` - zapise [`crate::time::Reading`] (16 B)
-pub const CLOCK_REALTIME: u64 = 31;
+pub const CLOCK_REALTIME: u64 = 32;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 32;
+pub const COUNT: u64 = 33;
 
 /// Deadline "cekat neomezene".
 pub const DEADLINE_INFINITE: u64 = u64::MAX;

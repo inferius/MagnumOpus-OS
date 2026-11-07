@@ -10,7 +10,11 @@
 
 use core::arch::global_asm;
 
+use boot_info::{BootInfo, MemoryKind};
+
 use super::{apic, cpu, time};
+use crate::arch::api::CpuStarter;
+use crate::log;
 use crate::mm::{self, PhysAddr};
 
 global_asm!(
@@ -135,6 +139,36 @@ mod labels {
     }
 }
 
+/// Najde `N` volnych stranek pod 1 MiB (alokator tuto pamet nespravuje,
+/// je vyhrazena pro start CPU). Stranku 0 vynechava.
+fn low_pages<const N: usize>(boot_info: &BootInfo) -> Option<[u64; N]> {
+    // SAFETY: BootInfo overeny pri startu.
+    let regions = unsafe { boot_info.memory_map() };
+    let mut pages = regions
+        .iter()
+        .filter(|r| matches!(r.kind, MemoryKind::Usable | MemoryKind::Reclaimable))
+        .flat_map(|r| (r.start.max(0x1000)..r.end().min(0x10_0000)).step_by(4096));
+    let mut out = [0; N];
+    for slot in &mut out {
+        *slot = pages.next()?;
+    }
+    Some(out)
+}
+
+/// Pripravi trampolinu pro start AP (`api::Smp::prepare_cpu_start`).
+///
+/// # Safety
+///
+/// Volat jednou, na BSP, po inicializaci pameti.
+pub unsafe fn prepare(boot_info: &BootInfo) -> Option<Trampoline> {
+    let Some([code, pml4]) = low_pages::<2>(boot_info) else {
+        log::warn!("chybi volna pamet pod 1 MiB, bezim jen na jednom CPU");
+        return None;
+    };
+    // SAFETY: obe stranky jsou volna RAM pod 1 MiB, kterou alokator nespravuje.
+    Some(unsafe { Trampoline::new(code, pml4) })
+}
+
 /// Pripravena trampolina ve dvou strankach pod 1 MiB.
 pub struct Trampoline {
     code: u64,
@@ -148,7 +182,7 @@ impl Trampoline {
     /// # Safety
     ///
     /// Obe stranky musi byt volna RAM, kterou do `finish` nikdo nepouziva.
-    pub unsafe fn new(code: u64, pml4: u64) -> Self {
+    unsafe fn new(code: u64, pml4: u64) -> Self {
         assert!(
             code < 0x10_0000 && code % 4096 == 0,
             "trampolina musi lezet pod 1 MiB"
@@ -200,14 +234,16 @@ impl Trampoline {
 
         Self { code }
     }
+}
 
+impl CpuStarter for Trampoline {
     /// Nastartuje jedno AP: skoci do `entry(arg)` na zasobniku `stack_top`.
     /// `started` vraci true, jakmile AP ohlasi start. Vraci, zda AP nabehl.
-    pub fn start(
+    fn start(
         &self,
         apic_id: u32,
         stack_top: u64,
-        entry: extern "sysv64" fn(u64) -> !,
+        entry: extern "C" fn(u64) -> !,
         arg: u64,
         started: impl Fn() -> bool,
     ) -> bool {
@@ -236,7 +272,7 @@ impl Trampoline {
     }
 
     /// Zrusi docasne identicke mapovani.
-    pub fn finish(self) {
+    fn finish(self) {
         mm::unmap_identity_page(PhysAddr::new(self.code));
     }
 }

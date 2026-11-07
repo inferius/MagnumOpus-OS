@@ -32,7 +32,8 @@ would then expire immediately or never.
    `ExitBootServices`, together with the TSC value. After calibrating the
    TSC, the kernel computes how much time passed until its clock started
    and stores the origin.
-2. **CMOS RTC.** When the firmware gave no time (an error or an invalid
+2. **Hardware clock** (`arch::hardware_clock`, on x86 the CMOS RTC; none
+   on aarch64 yet). When the firmware gave no time (an error or an invalid
    date), the kernel reads the MC146818 clock itself:
    - It reads twice in a row until the readings match. During an update,
      two different seconds could otherwise mix.

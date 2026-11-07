@@ -4,6 +4,7 @@
 //! - `build`  - prelozi kernel a loader
 //! - `image`  - build + bootovatelny obraz disku (GPT + ESP s FAT32)
 //! - `run`    - image + spusteni v QEMU s OVMF
+//! - `check`  - jen kontrola prekladu jadra pro architekturu (`--arch`)
 //!
 //! Prepinace: `--release`, a pro `run` navic `--gdb`, `--headless`,
 //! `--accel <tcg|kvm|whpx|hvf>` a cokoli za `--` se preda primo QEMU.
@@ -23,6 +24,12 @@ use std::time::{Duration, Instant};
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
 const KERNEL_TARGET: &str = "x86_64-unknown-none";
+/// Architektury, pro ktere existuje implementace `kernel/src/arch/<arch>`
+/// (aarch64 zatim jen kostra, ktera se prelozi), a jejich Rust cil.
+const KERNEL_ARCHES: &[(&str, &str)] = &[
+    ("x86_64", "x86_64-unknown-none"),
+    ("aarch64", "aarch64-unknown-none-softfloat"),
+];
 const LOADER_TARGET: &str = "x86_64-unknown-uefi";
 
 const USAGE: &str = "\
@@ -32,7 +39,9 @@ prikazy:
   build    prelozi kernel a loader
   image    build + vytvori target/os-x86_64.img (GPT, ESP FAT32)
   run      image + spusti QEMU (x86_64, OVMF)
-  test     testy knihoven na hostiteli, pak jadro a userspace v QEMU bez okna
+  test     testy knihoven na hostiteli, kontrola prekladu jadra pro aarch64,
+           pak jadro a userspace v QEMU bez okna
+  check    jen kontrola prekladu jadra (vychozi --arch x86_64)
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
 
 prepinace:
@@ -41,6 +50,7 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: intel (vychozi), amd, none
+  --arch <arch>    (check) architektura jadra: x86_64 (vychozi), aarch64
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
@@ -57,6 +67,8 @@ struct Options {
     /// Emulovana IOMMU: "intel" (VT-d, vychozi), "amd" (AMD-Vi), "none".
     iommu: String,
     qemu_args: Vec<OsString>,
+    /// Architektura pro `check`.
+    arch: String,
     /// Testovaci beh: kernel s feature `qemu-test`, QEMU s isa-debug-exit.
     test: bool,
 }
@@ -90,6 +102,7 @@ fn run_cli() -> Result<()> {
         accel: None,
         iommu: String::from("intel"),
         qemu_args: Vec::new(),
+        arch: String::from("x86_64"),
         test: false,
     };
     while let Some(arg) = args.next() {
@@ -100,6 +113,13 @@ fn run_cli() -> Result<()> {
                 opts.iommu = value.to_string_lossy().into_owned();
                 if !matches!(opts.iommu.as_str(), "intel" | "amd" | "none") {
                     return Err("--iommu ocekava intel, amd nebo none".into());
+                }
+            }
+            Some("--arch") => {
+                let value = args.next().ok_or("--arch ocekava x86_64 nebo aarch64")?;
+                opts.arch = value.to_string_lossy().into_owned();
+                if !KERNEL_ARCHES.iter().any(|(a, _)| *a == opts.arch) {
+                    return Err("--arch ocekava x86_64 nebo aarch64".into());
                 }
             }
             Some("--gdb") => opts.gdb = true,
@@ -131,11 +151,13 @@ fn run_cli() -> Result<()> {
             opts.test = true;
             opts.headless = true;
             host_tests()?;
+            check_kernel("aarch64", &opts)?;
             build_docs()?;
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             run_qemu(&image, &opts)
         }
+        Some("check") => check_kernel(&opts.arch, &opts),
         Some("docs") => build_docs().map(|_| ()),
         Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
@@ -168,6 +190,36 @@ fn host_tests() -> Result<()> {
         return Err("testy knihoven na hostiteli selhaly".into());
     }
     println!("xtask: testy knihoven na hostiteli prosly");
+    Ok(())
+}
+
+/// Overi, ze se jadro prelozi (a slinkuje) pro architekturu `arch`. Hlida,
+/// ze rozhrani architektury (`kernel/src/arch/api`) jde implementovat i jinde
+/// nez na x86_64 a ze obecna cast jadra nepouziva nic x86 specifickeho.
+fn check_kernel(arch: &str, opts: &Options) -> Result<()> {
+    let target = KERNEL_ARCHES
+        .iter()
+        .find(|(a, _)| *a == arch)
+        .map(|(_, t)| *t)
+        .ok_or_else(|| format!("neznama architektura {arch}"))?;
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut cmd = Command::new(cargo);
+    cmd.current_dir(workspace_root())
+        .args(["rustc", "--quiet", "--package", "kernel", "--bin", "kernel"])
+        .args(["--target", target]);
+    if opts.release {
+        cmd.arg("--release");
+    }
+    if arch == "aarch64" {
+        // Kostra konci `todo!`, takze vetsina jadra je pro prekladac
+        // nedosazitelna: varovani o nepouzitem kodu by zakryla skutecne chyby.
+        cmd.args(["--", "-A", "dead_code", "-A", "unused_variables"]);
+    }
+    let status = cmd.status()?;
+    if !status.success() {
+        return Err(format!("kontrola prekladu jadra pro {arch} ({target}) selhala").into());
+    }
+    println!("xtask: jadro se prelozi pro {arch}");
     Ok(())
 }
 

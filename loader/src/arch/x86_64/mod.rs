@@ -2,8 +2,8 @@ pub mod paging;
 
 use core::arch::asm;
 
-/// Citac TSC (pro navazani casu firmwaru na hodiny jadra).
-pub fn rdtsc() -> u64 {
+/// Citac cyklu (TSC) pro navazani casu firmwaru na hodiny jadra.
+pub fn cycle_counter() -> u64 {
     // SAFETY: RDTSC je dostupna na kazdem x86_64 CPU.
     unsafe { core::arch::x86_64::_rdtsc() }
 }

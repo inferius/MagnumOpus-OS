@@ -79,7 +79,7 @@ fn read_past_end(_: &Startup) -> TestResult {
 }
 
 fn restricted_resource(s: &Startup) -> TestResult {
-    const PAGE: u64 = 4096;
+    let page = libos::vm::page_size();
     let root = s.root_resource.as_ref().ok_or("chybi korenovy Resource")?;
     let (ecam, _) = s.pci_ecam.first().ok_or("chybi okno ECAM")?;
     // Dve stranky konfiguracniho prostoru PCI (registry zarizeni, ne RAM).
@@ -87,23 +87,23 @@ fn restricted_resource(s: &Startup) -> TestResult {
         .phys_addr(ecam, 0)
         .map_err(|e| fail("fyzicka adresa ECAM", e))?;
     let child = root
-        .restrict(&[(base, PAGE)], 1, PAGE)
+        .restrict(&[(base, page)], 1, page)
         .map_err(|e| fail("vytvoreni omezeneho", e))?;
     child
-        .device_memory(base, PAGE)
+        .device_memory(base, page)
         .map_err(|e| fail("povoleny rozsah", e))?;
     check_eq!(
-        child.device_memory(base + PAGE, PAGE).err(),
+        child.device_memory(base + page, page).err(),
         Some(Error::AccessDenied),
         "rozsah mimo povolene"
     );
     check_eq!(
-        child.restrict(&[(base, 2 * PAGE)], 1, PAGE).err(),
+        child.restrict(&[(base, 2 * page)], 1, page).err(),
         Some(Error::AccessDenied),
         "rozsireni rozsahu potomkem"
     );
     check_eq!(
-        child.restrict(&[(base, PAGE)], 2, PAGE).err(),
+        child.restrict(&[(base, page)], 2, page).err(),
         Some(Error::AccessDenied),
         "zvyseni limitu preruseni potomkem"
     );
@@ -114,16 +114,16 @@ fn restricted_resource(s: &Startup) -> TestResult {
         "druhe preruseni nad limit"
     );
     child
-        .dma_memory(PAGE)
+        .dma_memory(page)
         .map_err(|e| fail("DMA v limitu", e))?;
     check_eq!(
-        child.dma_memory(PAGE).err(),
+        child.dma_memory(page).err(),
         Some(Error::NoResources),
         "DMA nad limit"
     );
     // Vnoreny prostredek nesmi obejit kvoty rodice (pocitaji se v retezci).
     let grandchild = child
-        .restrict(&[], 1, PAGE)
+        .restrict(&[], 1, page)
         .map_err(|e| fail("vnoreny prostredek", e))?;
     check_eq!(
         grandchild.interrupt().err(),
@@ -131,12 +131,12 @@ fn restricted_resource(s: &Startup) -> TestResult {
         "preruseni pres vnoreny prostredek"
     );
     check_eq!(
-        grandchild.dma_memory(PAGE).err(),
+        grandchild.dma_memory(page).err(),
         Some(Error::NoResources),
         "DMA pres vnoreny prostredek"
     );
     check_eq!(
-        root.restrict(&[(base + 16, PAGE)], 1, PAGE).err(),
+        root.restrict(&[(base + 16, page)], 1, page).err(),
         Some(Error::InvalidArgs),
         "nezarovnany rozsah"
     );

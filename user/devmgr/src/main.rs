@@ -90,7 +90,7 @@ fn device_ranges(
     resource: &libos::hw::Resource,
     f: &Function,
 ) -> libos::Result<(Vec<(u64, u64)>, u64)> {
-    const PAGE: u64 = libos::abi::vm::PAGE_SIZE;
+    let page = libos::vm::page_size();
     let a = f.address;
     let mut ranges = Vec::new();
     let mut index = 0;
@@ -99,8 +99,8 @@ fn device_ranges(
         if let (Some(bar), Some(size)) = (bar, ecam.memory_bar_size(a, index))
             && bar.phys != 0
         {
-            let start = bar.phys & !(PAGE - 1);
-            let end = bar.phys.saturating_add(size).next_multiple_of(PAGE);
+            let start = bar.phys & !(page - 1);
+            let end = bar.phys.saturating_add(size).next_multiple_of(page);
             ranges.push((start, end - start));
         }
         index += if bar.is_some_and(|b| b.is_64bit) {

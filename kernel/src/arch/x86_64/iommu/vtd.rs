@@ -11,7 +11,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
-use crate::acpi::IommuUnit;
+use super::super::acpi::IommuUnit;
 use crate::error::Error;
 use crate::log;
 use crate::mm::{self, PhysAddr};
