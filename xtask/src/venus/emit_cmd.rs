@@ -214,7 +214,7 @@ pub fn emit_command(r: &Registry, p: &Plan, name: &str) -> Result<String, String
     let ty_const = format!("VK_COMMAND_TYPE_{name}_EXT");
     let mut o = String::new();
     // Kodovani.
-    let mut args = vec!["e: &mut Encoder".to_string(), "flags: VkCommandFlagsEXT".to_string()];
+    let mut args = vec!["e: &mut Encoder".to_string(), "cmd_flags: VkCommandFlagsEXT".to_string()];
     for prm in &params {
         if let Some(t) = arg_ty(r, p, prm) {
             args.push(format!("{}: {t}", prm.name));
@@ -222,7 +222,7 @@ pub fn emit_command(r: &Registry, p: &Plan, name: &str) -> Result<String, String
     }
     writeln!(o, "/// `{name}`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).").unwrap();
     writeln!(o, "pub fn {fname}({}) {{", args.join(", ")).unwrap();
-    writeln!(o, "    e.i32({ty_const});\n    e.u32(flags);").unwrap();
+    writeln!(o, "    e.i32({ty_const});\n    e.u32(cmd_flags);").unwrap();
     for prm in &params {
         writeln!(o, "    {}", encode_param(&params, prm, name)?).unwrap();
     }

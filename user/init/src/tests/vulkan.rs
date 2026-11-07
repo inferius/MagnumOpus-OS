@@ -21,6 +21,7 @@ use super::{Test, TestResult, fail};
 pub const TESTS: &[Test] = &[
     ("venus: jmeno fyzickeho zarizeni Vulkan od hostitele", device_name),
     ("venus: obrazek vyplneny barvou a precteny zpet (pamet, command buffer)", clear_image),
+    ("venus: skladani vrstev na GPU shodne s gfx (vkcomp, shader SPIR-V)", compose),
 ];
 
 /// Spusteny `vk-probe`: kanal s vysledky (radek na test), `None` = test
@@ -109,5 +110,16 @@ fn clear_image(s: &Startup) -> TestResult {
     let line = next_line(p)?;
     let rest = line.strip_prefix("ok ").ok_or_else(|| alloc::format!("vk-probe: obrazek: {line}"))?;
     println!("init: test vulkan: obrazek: {rest}");
+    Ok(())
+}
+
+fn compose(s: &Startup) -> TestResult {
+    let Some(p) = probe(s)? else { return Ok(()) };
+    if SKIPPED.load(core::sync::atomic::Ordering::Relaxed) {
+        return Ok(());
+    }
+    let line = next_line(p)?;
+    let rest = line.strip_prefix("ok ").ok_or_else(|| alloc::format!("vk-probe: skladani: {line}"))?;
+    println!("init: test vulkan: skladani: {rest}");
     Ok(())
 }

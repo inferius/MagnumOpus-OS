@@ -85,6 +85,38 @@ impl<'a> VkApplicationInfo<'a> {
 
 }
 
+/// `VkBufferCopy` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkBufferCopy {
+    pub src_offset: VkDeviceSize,
+    pub dst_offset: VkDeviceSize,
+    pub size: VkDeviceSize,
+}
+
+impl Default for VkBufferCopy {
+    fn default() -> Self {
+        Self {
+            src_offset: 0,
+            dst_offset: 0,
+            size: 0,
+        }
+    }
+}
+
+impl VkBufferCopy {
+    pub fn encode(&self, e: &mut Encoder) {
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u64(self.src_offset);
+        e.u64(self.dst_offset);
+        e.u64(self.size);
+    }
+
+}
+
 /// `VkBufferCreateInfo` (vstup).
 #[derive(Debug, Clone, Copy)]
 pub struct VkBufferCreateInfo<'a> {
@@ -407,6 +439,350 @@ impl VkCommandStreamDescriptionMESA {
 
 }
 
+/// `VkComputePipelineCreateInfo` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkComputePipelineCreateInfo<'a> {
+    pub flags: VkPipelineCreateFlags,
+    pub stage: VkPipelineShaderStageCreateInfo<'a>,
+    pub layout: VkPipelineLayout,
+    pub base_pipeline_handle: VkPipeline,
+    pub base_pipeline_index: i32,
+}
+
+impl Default for VkComputePipelineCreateInfo<'_> {
+    fn default() -> Self {
+        Self {
+            flags: 0,
+            stage: VkPipelineShaderStageCreateInfo::default(),
+            layout: VkPipelineLayout(0),
+            base_pipeline_handle: VkPipeline(0),
+            base_pipeline_index: 0,
+        }
+    }
+}
+
+impl<'a> VkComputePipelineCreateInfo<'a> {
+    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+
+    pub fn encode(&self, e: &mut Encoder) {
+        e.i32(Self::S_TYPE);
+        e.pointer(false);
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u32(self.flags);
+        self.stage.encode(e);
+        e.u64(self.layout.0);
+        e.u64(self.base_pipeline_handle.0);
+        e.i32(self.base_pipeline_index);
+    }
+
+}
+
+/// `VkCopyDescriptorSet` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkCopyDescriptorSet {
+    pub src_set: VkDescriptorSet,
+    pub src_binding: u32,
+    pub src_array_element: u32,
+    pub dst_set: VkDescriptorSet,
+    pub dst_binding: u32,
+    pub dst_array_element: u32,
+    pub descriptor_count: u32,
+}
+
+impl Default for VkCopyDescriptorSet {
+    fn default() -> Self {
+        Self {
+            src_set: VkDescriptorSet(0),
+            src_binding: 0,
+            src_array_element: 0,
+            dst_set: VkDescriptorSet(0),
+            dst_binding: 0,
+            dst_array_element: 0,
+            descriptor_count: 0,
+        }
+    }
+}
+
+impl VkCopyDescriptorSet {
+    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
+
+    pub fn encode(&self, e: &mut Encoder) {
+        e.i32(Self::S_TYPE);
+        e.pointer(false);
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u64(self.src_set.0);
+        e.u32(self.src_binding);
+        e.u32(self.src_array_element);
+        e.u64(self.dst_set.0);
+        e.u32(self.dst_binding);
+        e.u32(self.dst_array_element);
+        e.u32(self.descriptor_count);
+    }
+
+}
+
+/// `VkDescriptorBufferInfo` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkDescriptorBufferInfo {
+    pub buffer: VkBuffer,
+    pub offset: VkDeviceSize,
+    pub range: VkDeviceSize,
+}
+
+impl Default for VkDescriptorBufferInfo {
+    fn default() -> Self {
+        Self {
+            buffer: VkBuffer(0),
+            offset: 0,
+            range: 0,
+        }
+    }
+}
+
+impl VkDescriptorBufferInfo {
+    pub fn encode(&self, e: &mut Encoder) {
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u64(self.buffer.0);
+        e.u64(self.offset);
+        e.u64(self.range);
+    }
+
+}
+
+/// `VkDescriptorImageInfo` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkDescriptorImageInfo {
+    pub sampler: VkSampler,
+    pub image_view: VkImageView,
+    pub image_layout: VkImageLayout,
+}
+
+impl Default for VkDescriptorImageInfo {
+    fn default() -> Self {
+        Self {
+            sampler: VkSampler(0),
+            image_view: VkImageView(0),
+            image_layout: 0,
+        }
+    }
+}
+
+impl VkDescriptorImageInfo {
+    pub fn encode(&self, e: &mut Encoder) {
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u64(self.sampler.0);
+        e.u64(self.image_view.0);
+        e.i32(self.image_layout);
+    }
+
+}
+
+/// `VkDescriptorPoolCreateInfo` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkDescriptorPoolCreateInfo<'a> {
+    pub flags: VkDescriptorPoolCreateFlags,
+    pub max_sets: u32,
+    pub pool_size_count: u32,
+    pub p_pool_sizes: &'a [VkDescriptorPoolSize],
+}
+
+impl Default for VkDescriptorPoolCreateInfo<'_> {
+    fn default() -> Self {
+        Self {
+            flags: 0,
+            max_sets: 0,
+            pool_size_count: 0,
+            p_pool_sizes: &[],
+        }
+    }
+}
+
+impl<'a> VkDescriptorPoolCreateInfo<'a> {
+    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+
+    pub fn encode(&self, e: &mut Encoder) {
+        e.i32(Self::S_TYPE);
+        e.pointer(false);
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u32(self.flags);
+        e.u32(self.max_sets);
+        e.u32(self.pool_size_count);
+        {
+            let s = e.dyn_array(self.p_pool_sizes, self.pool_size_count as usize);
+            for x in s { x.encode(e); }
+        }
+    }
+
+}
+
+/// `VkDescriptorPoolSize` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkDescriptorPoolSize {
+    pub r#type: VkDescriptorType,
+    pub descriptor_count: u32,
+}
+
+impl Default for VkDescriptorPoolSize {
+    fn default() -> Self {
+        Self {
+            r#type: 0,
+            descriptor_count: 0,
+        }
+    }
+}
+
+impl VkDescriptorPoolSize {
+    pub fn encode(&self, e: &mut Encoder) {
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.i32(self.r#type);
+        e.u32(self.descriptor_count);
+    }
+
+}
+
+/// `VkDescriptorSetAllocateInfo` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkDescriptorSetAllocateInfo<'a> {
+    pub descriptor_pool: VkDescriptorPool,
+    pub descriptor_set_count: u32,
+    pub p_set_layouts: &'a [VkDescriptorSetLayout],
+}
+
+impl Default for VkDescriptorSetAllocateInfo<'_> {
+    fn default() -> Self {
+        Self {
+            descriptor_pool: VkDescriptorPool(0),
+            descriptor_set_count: 0,
+            p_set_layouts: &[],
+        }
+    }
+}
+
+impl<'a> VkDescriptorSetAllocateInfo<'a> {
+    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+
+    pub fn encode(&self, e: &mut Encoder) {
+        e.i32(Self::S_TYPE);
+        e.pointer(false);
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u64(self.descriptor_pool.0);
+        e.u32(self.descriptor_set_count);
+        {
+            let s = e.dyn_array(self.p_set_layouts, self.descriptor_set_count as usize);
+            for x in s { e.u64(x.0); }
+        }
+    }
+
+}
+
+/// `VkDescriptorSetLayoutBinding` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkDescriptorSetLayoutBinding<'a> {
+    pub binding: u32,
+    pub descriptor_type: VkDescriptorType,
+    pub descriptor_count: u32,
+    pub stage_flags: VkShaderStageFlags,
+    pub p_immutable_samplers: &'a [VkSampler],
+}
+
+impl Default for VkDescriptorSetLayoutBinding<'_> {
+    fn default() -> Self {
+        Self {
+            binding: 0,
+            descriptor_type: 0,
+            descriptor_count: 0,
+            stage_flags: 0,
+            p_immutable_samplers: &[],
+        }
+    }
+}
+
+impl<'a> VkDescriptorSetLayoutBinding<'a> {
+    pub fn encode(&self, e: &mut Encoder) {
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u32(self.binding);
+        e.i32(self.descriptor_type);
+        e.u32(self.descriptor_count);
+        e.u32(self.stage_flags);
+        {
+            let s = e.dyn_array(self.p_immutable_samplers, self.descriptor_count as usize);
+            for x in s { e.u64(x.0); }
+        }
+    }
+
+}
+
+/// `VkDescriptorSetLayoutCreateInfo` (vstup).
+#[derive(Debug, Clone, Copy)]
+pub struct VkDescriptorSetLayoutCreateInfo<'a> {
+    pub flags: VkDescriptorSetLayoutCreateFlags,
+    pub binding_count: u32,
+    pub p_bindings: &'a [VkDescriptorSetLayoutBinding<'a>],
+}
+
+impl Default for VkDescriptorSetLayoutCreateInfo<'_> {
+    fn default() -> Self {
+        Self {
+            flags: 0,
+            binding_count: 0,
+            p_bindings: &[],
+        }
+    }
+}
+
+impl<'a> VkDescriptorSetLayoutCreateInfo<'a> {
+    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+
+    pub fn encode(&self, e: &mut Encoder) {
+        e.i32(Self::S_TYPE);
+        e.pointer(false);
+        self.encode_self(e);
+    }
+
+    /// Cleny bez sType a pNext.
+    pub fn encode_self(&self, e: &mut Encoder) {
+        e.u32(self.flags);
+        e.u32(self.binding_count);
+        {
+            let s = e.dyn_array(self.p_bindings, self.binding_count as usize);
+            for x in s { x.encode(e); }
+        }
+    }
+
+}
+
 /// `VkDeviceCreateInfo` (vstup).
 #[derive(Debug, Clone, Copy)]
 pub struct VkDeviceCreateInfo<'a> {
@@ -584,413 +960,6 @@ impl VkDeviceQueueTimelineInfoMESA {
     /// Cleny bez sType a pNext.
     pub fn encode_self(&self, e: &mut Encoder) {
         e.u32(self.ring_idx);
-    }
-
-}
-
-/// `VkExtent3D` (vstup i vystup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkExtent3D {
-    pub width: u32,
-    pub height: u32,
-    pub depth: u32,
-}
-
-impl Default for VkExtent3D {
-    fn default() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            depth: 0,
-        }
-    }
-}
-
-impl VkExtent3D {
-    pub fn encode(&self, e: &mut Encoder) {
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u32(self.width);
-        e.u32(self.height);
-        e.u32(self.depth);
-    }
-
-    /// Castecne kodovani vystupu (sType, pNext, id handlu).
-    pub fn encode_partial(&self, e: &mut Encoder) {
-        let _ = e;
-    }
-
-    pub fn decode(d: &mut Decoder) -> Result<Self> {
-        let mut v = Self::default();
-        v.width = d.u32()?;
-        v.height = d.u32()?;
-        v.depth = d.u32()?;
-        Ok(v)
-    }
-}
-
-/// `VkFenceCreateInfo` (vstup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkFenceCreateInfo {
-    pub flags: VkFenceCreateFlags,
-}
-
-impl Default for VkFenceCreateInfo {
-    fn default() -> Self {
-        Self {
-            flags: 0,
-        }
-    }
-}
-
-impl VkFenceCreateInfo {
-    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-
-    pub fn encode(&self, e: &mut Encoder) {
-        e.i32(Self::S_TYPE);
-        e.pointer(false);
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u32(self.flags);
-    }
-
-}
-
-/// `VkFormatProperties` (vystup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkFormatProperties {
-    pub linear_tiling_features: VkFormatFeatureFlags,
-    pub optimal_tiling_features: VkFormatFeatureFlags,
-    pub buffer_features: VkFormatFeatureFlags,
-}
-
-impl Default for VkFormatProperties {
-    fn default() -> Self {
-        Self {
-            linear_tiling_features: 0,
-            optimal_tiling_features: 0,
-            buffer_features: 0,
-        }
-    }
-}
-
-impl VkFormatProperties {
-    #[cfg(test)]
-    pub fn encode(&self, e: &mut Encoder) {
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    #[cfg(test)]
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u32(self.linear_tiling_features);
-        e.u32(self.optimal_tiling_features);
-        e.u32(self.buffer_features);
-    }
-
-    /// Castecne kodovani vystupu (sType, pNext, id handlu).
-    pub fn encode_partial(&self, e: &mut Encoder) {
-        let _ = e;
-    }
-
-    pub fn decode(d: &mut Decoder) -> Result<Self> {
-        let mut v = Self::default();
-        v.linear_tiling_features = d.u32()?;
-        v.optimal_tiling_features = d.u32()?;
-        v.buffer_features = d.u32()?;
-        Ok(v)
-    }
-}
-
-/// `VkImageCreateInfo` (vstup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkImageCreateInfo<'a> {
-    pub flags: VkImageCreateFlags,
-    pub image_type: VkImageType,
-    pub format: VkFormat,
-    pub extent: VkExtent3D,
-    pub mip_levels: u32,
-    pub array_layers: u32,
-    pub samples: VkSampleCountFlagBits,
-    pub tiling: VkImageTiling,
-    pub usage: VkImageUsageFlags,
-    pub sharing_mode: VkSharingMode,
-    pub queue_family_index_count: u32,
-    pub p_queue_family_indices: &'a [u32],
-    pub initial_layout: VkImageLayout,
-}
-
-impl Default for VkImageCreateInfo<'_> {
-    fn default() -> Self {
-        Self {
-            flags: 0,
-            image_type: 0,
-            format: 0,
-            extent: VkExtent3D::default(),
-            mip_levels: 0,
-            array_layers: 0,
-            samples: 0,
-            tiling: 0,
-            usage: 0,
-            sharing_mode: 0,
-            queue_family_index_count: 0,
-            p_queue_family_indices: &[],
-            initial_layout: 0,
-        }
-    }
-}
-
-impl<'a> VkImageCreateInfo<'a> {
-    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-
-    pub fn encode(&self, e: &mut Encoder) {
-        e.i32(Self::S_TYPE);
-        e.pointer(false);
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u32(self.flags);
-        e.i32(self.image_type);
-        e.i32(self.format);
-        self.extent.encode(e);
-        e.u32(self.mip_levels);
-        e.u32(self.array_layers);
-        e.u32(self.samples);
-        e.i32(self.tiling);
-        e.u32(self.usage);
-        e.i32(self.sharing_mode);
-        e.u32(self.queue_family_index_count);
-        {
-            let s = e.dyn_array(self.p_queue_family_indices, self.queue_family_index_count as usize);
-            e.u32_array(s);
-        }
-        e.i32(self.initial_layout);
-    }
-
-}
-
-/// `VkImageMemoryBarrier` (vstup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkImageMemoryBarrier {
-    pub src_access_mask: VkAccessFlags,
-    pub dst_access_mask: VkAccessFlags,
-    pub old_layout: VkImageLayout,
-    pub new_layout: VkImageLayout,
-    pub src_queue_family_index: u32,
-    pub dst_queue_family_index: u32,
-    pub image: VkImage,
-    pub subresource_range: VkImageSubresourceRange,
-}
-
-impl Default for VkImageMemoryBarrier {
-    fn default() -> Self {
-        Self {
-            src_access_mask: 0,
-            dst_access_mask: 0,
-            old_layout: 0,
-            new_layout: 0,
-            src_queue_family_index: 0,
-            dst_queue_family_index: 0,
-            image: VkImage(0),
-            subresource_range: VkImageSubresourceRange::default(),
-        }
-    }
-}
-
-impl VkImageMemoryBarrier {
-    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-
-    pub fn encode(&self, e: &mut Encoder) {
-        e.i32(Self::S_TYPE);
-        e.pointer(false);
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u32(self.src_access_mask);
-        e.u32(self.dst_access_mask);
-        e.i32(self.old_layout);
-        e.i32(self.new_layout);
-        e.u32(self.src_queue_family_index);
-        e.u32(self.dst_queue_family_index);
-        e.u64(self.image.0);
-        self.subresource_range.encode(e);
-    }
-
-}
-
-/// `VkImageSubresourceLayers` (vstup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkImageSubresourceLayers {
-    pub aspect_mask: VkImageAspectFlags,
-    pub mip_level: u32,
-    pub base_array_layer: u32,
-    pub layer_count: u32,
-}
-
-impl Default for VkImageSubresourceLayers {
-    fn default() -> Self {
-        Self {
-            aspect_mask: 0,
-            mip_level: 0,
-            base_array_layer: 0,
-            layer_count: 0,
-        }
-    }
-}
-
-impl VkImageSubresourceLayers {
-    pub fn encode(&self, e: &mut Encoder) {
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u32(self.aspect_mask);
-        e.u32(self.mip_level);
-        e.u32(self.base_array_layer);
-        e.u32(self.layer_count);
-    }
-
-}
-
-/// `VkImageSubresourceRange` (vstup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkImageSubresourceRange {
-    pub aspect_mask: VkImageAspectFlags,
-    pub base_mip_level: u32,
-    pub level_count: u32,
-    pub base_array_layer: u32,
-    pub layer_count: u32,
-}
-
-impl Default for VkImageSubresourceRange {
-    fn default() -> Self {
-        Self {
-            aspect_mask: 0,
-            base_mip_level: 0,
-            level_count: 0,
-            base_array_layer: 0,
-            layer_count: 0,
-        }
-    }
-}
-
-impl VkImageSubresourceRange {
-    pub fn encode(&self, e: &mut Encoder) {
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u32(self.aspect_mask);
-        e.u32(self.base_mip_level);
-        e.u32(self.level_count);
-        e.u32(self.base_array_layer);
-        e.u32(self.layer_count);
-    }
-
-}
-
-/// `VkInstanceCreateInfo` (vstup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkInstanceCreateInfo<'a> {
-    pub flags: VkInstanceCreateFlags,
-    pub p_application_info: Option<&'a VkApplicationInfo<'a>>,
-    pub enabled_layer_count: u32,
-    pub pp_enabled_layer_names: &'a [&'a str],
-    pub enabled_extension_count: u32,
-    pub pp_enabled_extension_names: &'a [&'a str],
-}
-
-impl Default for VkInstanceCreateInfo<'_> {
-    fn default() -> Self {
-        Self {
-            flags: 0,
-            p_application_info: None,
-            enabled_layer_count: 0,
-            pp_enabled_layer_names: &[],
-            enabled_extension_count: 0,
-            pp_enabled_extension_names: &[],
-        }
-    }
-}
-
-impl<'a> VkInstanceCreateInfo<'a> {
-    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-
-    pub fn encode(&self, e: &mut Encoder) {
-        e.i32(Self::S_TYPE);
-        e.pointer(false);
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u32(self.flags);
-        match self.p_application_info {
-            Some(x) => {
-                e.pointer(true);
-                x.encode(e);
-            }
-            None => e.pointer(false),
-        }
-        e.u32(self.enabled_layer_count);
-        {
-            let s = e.dyn_array(self.pp_enabled_layer_names, self.enabled_layer_count as usize);
-            for x in s {
-                e.string(x);
-            }
-        }
-        e.u32(self.enabled_extension_count);
-        {
-            let s = e.dyn_array(self.pp_enabled_extension_names, self.enabled_extension_count as usize);
-            for x in s {
-                e.string(x);
-            }
-        }
-    }
-
-}
-
-/// `VkMemoryAllocateInfo` (vstup).
-#[derive(Debug, Clone, Copy)]
-pub struct VkMemoryAllocateInfo {
-    pub allocation_size: VkDeviceSize,
-    pub memory_type_index: u32,
-}
-
-impl Default for VkMemoryAllocateInfo {
-    fn default() -> Self {
-        Self {
-            allocation_size: 0,
-            memory_type_index: 0,
-        }
-    }
-}
-
-impl VkMemoryAllocateInfo {
-    pub const S_TYPE: VkStructureType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-
-    pub fn encode(&self, e: &mut Encoder) {
-        e.i32(Self::S_TYPE);
-        e.pointer(false);
-        self.encode_self(e);
-    }
-
-    /// Cleny bez sType a pNext.
-    pub fn encode_self(&self, e: &mut Encoder) {
-        e.u64(self.allocation_size);
-        e.u32(self.memory_type_index);
     }
 
 }

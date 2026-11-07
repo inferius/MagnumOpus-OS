@@ -15,6 +15,8 @@ pub type VkBufferCreateFlags = u32;
 pub type VkBufferUsageFlagBits = u32;
 pub type VkBufferUsageFlags = u32;
 pub type VkCommandBufferLevel = i32;
+pub type VkCommandBufferResetFlagBits = u32;
+pub type VkCommandBufferResetFlags = u32;
 pub type VkCommandBufferUsageFlagBits = u32;
 pub type VkCommandBufferUsageFlags = u32;
 pub type VkCommandFlagBitsEXT = u32;
@@ -24,6 +26,11 @@ pub type VkCommandPoolCreateFlags = u32;
 pub type VkCommandTypeEXT = i32;
 pub type VkDependencyFlagBits = u32;
 pub type VkDependencyFlags = u32;
+pub type VkDescriptorPoolCreateFlagBits = u32;
+pub type VkDescriptorPoolCreateFlags = u32;
+pub type VkDescriptorSetLayoutCreateFlagBits = u32;
+pub type VkDescriptorSetLayoutCreateFlags = u32;
+pub type VkDescriptorType = i32;
 pub type VkDeviceCreateFlags = u32;
 pub type VkDeviceQueueCreateFlagBits = u32;
 pub type VkDeviceQueueCreateFlags = u32;
@@ -49,6 +56,13 @@ pub type VkMemoryHeapFlags = u32;
 pub type VkMemoryPropertyFlagBits = u32;
 pub type VkMemoryPropertyFlags = u32;
 pub type VkPhysicalDeviceType = i32;
+pub type VkPipelineBindPoint = i32;
+pub type VkPipelineCreateFlagBits = u32;
+pub type VkPipelineCreateFlags = u32;
+pub type VkPipelineLayoutCreateFlagBits = u32;
+pub type VkPipelineLayoutCreateFlags = u32;
+pub type VkPipelineShaderStageCreateFlagBits = u32;
+pub type VkPipelineShaderStageCreateFlags = u32;
 pub type VkPipelineStageFlagBits = u32;
 pub type VkPipelineStageFlags = u32;
 pub type VkQueryControlFlagBits = u32;
@@ -60,6 +74,9 @@ pub type VkQueueFlags = u32;
 pub type VkResult = i32;
 pub type VkSampleCountFlagBits = u32;
 pub type VkSampleCountFlags = u32;
+pub type VkShaderModuleCreateFlags = u32;
+pub type VkShaderStageFlagBits = u32;
+pub type VkShaderStageFlags = u32;
 pub type VkSharingMode = i32;
 pub type VkStructureType = i32;
 
@@ -69,10 +86,22 @@ pub type VkStructureType = i32;
 pub struct VkBuffer(pub u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
+pub struct VkBufferView(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
 pub struct VkCommandBuffer(pub u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct VkCommandPool(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct VkDescriptorPool(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct VkDescriptorSet(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct VkDescriptorSetLayout(pub u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct VkDevice(pub u64);
@@ -90,10 +119,22 @@ pub struct VkFramebuffer(pub u64);
 pub struct VkImage(pub u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
+pub struct VkImageView(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
 pub struct VkInstance(pub u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct VkPhysicalDevice(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct VkPipeline(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct VkPipelineCache(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct VkPipelineLayout(pub u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct VkQueue(pub u64);
@@ -102,7 +143,13 @@ pub struct VkQueue(pub u64);
 pub struct VkRenderPass(pub u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
+pub struct VkSampler(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
 pub struct VkSemaphore(pub u64);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct VkShaderModule(pub u64);
 
 // Konstanty API.
 pub const VK_ATTACHMENT_UNUSED: u32 = u32::MAX;
@@ -230,6 +277,9 @@ pub const VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT: VkBufferUsageFlagBits = 0x100
 pub const VK_COMMAND_BUFFER_LEVEL_PRIMARY: VkCommandBufferLevel = 0;
 pub const VK_COMMAND_BUFFER_LEVEL_SECONDARY: VkCommandBufferLevel = 1;
 
+// VkCommandBufferResetFlagBits
+pub const VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT: VkCommandBufferResetFlagBits = 1;
+
 // VkCommandBufferUsageFlagBits
 pub const VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT: VkCommandBufferUsageFlagBits = 1;
 pub const VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT: VkCommandBufferUsageFlagBits = 2;
@@ -270,16 +320,35 @@ pub const VK_COMMAND_TYPE_vkCreateBuffer_EXT: VkCommandTypeEXT = 50;
 pub const VK_COMMAND_TYPE_vkDestroyBuffer_EXT: VkCommandTypeEXT = 51;
 pub const VK_COMMAND_TYPE_vkCreateImage_EXT: VkCommandTypeEXT = 54;
 pub const VK_COMMAND_TYPE_vkDestroyImage_EXT: VkCommandTypeEXT = 55;
+pub const VK_COMMAND_TYPE_vkCreateShaderModule_EXT: VkCommandTypeEXT = 59;
+pub const VK_COMMAND_TYPE_vkDestroyShaderModule_EXT: VkCommandTypeEXT = 60;
+pub const VK_COMMAND_TYPE_vkCreateComputePipelines_EXT: VkCommandTypeEXT = 66;
+pub const VK_COMMAND_TYPE_vkDestroyPipeline_EXT: VkCommandTypeEXT = 67;
+pub const VK_COMMAND_TYPE_vkCreatePipelineLayout_EXT: VkCommandTypeEXT = 68;
+pub const VK_COMMAND_TYPE_vkDestroyPipelineLayout_EXT: VkCommandTypeEXT = 69;
+pub const VK_COMMAND_TYPE_vkCreateDescriptorSetLayout_EXT: VkCommandTypeEXT = 72;
+pub const VK_COMMAND_TYPE_vkDestroyDescriptorSetLayout_EXT: VkCommandTypeEXT = 73;
+pub const VK_COMMAND_TYPE_vkCreateDescriptorPool_EXT: VkCommandTypeEXT = 74;
+pub const VK_COMMAND_TYPE_vkDestroyDescriptorPool_EXT: VkCommandTypeEXT = 75;
+pub const VK_COMMAND_TYPE_vkAllocateDescriptorSets_EXT: VkCommandTypeEXT = 77;
+pub const VK_COMMAND_TYPE_vkFreeDescriptorSets_EXT: VkCommandTypeEXT = 78;
+pub const VK_COMMAND_TYPE_vkUpdateDescriptorSets_EXT: VkCommandTypeEXT = 79;
 pub const VK_COMMAND_TYPE_vkCreateCommandPool_EXT: VkCommandTypeEXT = 85;
 pub const VK_COMMAND_TYPE_vkDestroyCommandPool_EXT: VkCommandTypeEXT = 86;
 pub const VK_COMMAND_TYPE_vkAllocateCommandBuffers_EXT: VkCommandTypeEXT = 88;
 pub const VK_COMMAND_TYPE_vkFreeCommandBuffers_EXT: VkCommandTypeEXT = 89;
 pub const VK_COMMAND_TYPE_vkBeginCommandBuffer_EXT: VkCommandTypeEXT = 90;
 pub const VK_COMMAND_TYPE_vkEndCommandBuffer_EXT: VkCommandTypeEXT = 91;
+pub const VK_COMMAND_TYPE_vkResetCommandBuffer_EXT: VkCommandTypeEXT = 92;
+pub const VK_COMMAND_TYPE_vkCmdBindPipeline_EXT: VkCommandTypeEXT = 93;
+pub const VK_COMMAND_TYPE_vkCmdBindDescriptorSets_EXT: VkCommandTypeEXT = 103;
+pub const VK_COMMAND_TYPE_vkCmdDispatch_EXT: VkCommandTypeEXT = 110;
+pub const VK_COMMAND_TYPE_vkCmdCopyBuffer_EXT: VkCommandTypeEXT = 112;
 pub const VK_COMMAND_TYPE_vkCmdCopyBufferToImage_EXT: VkCommandTypeEXT = 115;
 pub const VK_COMMAND_TYPE_vkCmdCopyImageToBuffer_EXT: VkCommandTypeEXT = 116;
 pub const VK_COMMAND_TYPE_vkCmdClearColorImage_EXT: VkCommandTypeEXT = 119;
 pub const VK_COMMAND_TYPE_vkCmdPipelineBarrier_EXT: VkCommandTypeEXT = 126;
+pub const VK_COMMAND_TYPE_vkCmdPushConstants_EXT: VkCommandTypeEXT = 132;
 pub const VK_COMMAND_TYPE_vkEnumerateInstanceVersion_EXT: VkCommandTypeEXT = 137;
 pub const VK_COMMAND_TYPE_vkGetDeviceQueue2_EXT: VkCommandTypeEXT = 155;
 pub const VK_COMMAND_TYPE_vkSetReplyCommandStreamMESA_EXT: VkCommandTypeEXT = 178;
@@ -294,6 +363,50 @@ pub const VK_DEPENDENCY_DEVICE_GROUP_BIT_KHR: VkDependencyFlagBits = 4;
 pub const VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT: VkDependencyFlagBits = 8;
 pub const VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR: VkDependencyFlagBits = 0x20;
 pub const VK_DEPENDENCY_ASYMMETRIC_EVENT_BIT_KHR: VkDependencyFlagBits = 0x40;
+
+// VkDescriptorPoolCreateFlagBits
+pub const VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT: VkDescriptorPoolCreateFlagBits = 1;
+pub const VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT: VkDescriptorPoolCreateFlagBits = 2;
+pub const VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT_EXT: VkDescriptorPoolCreateFlagBits = 2;
+pub const VK_DESCRIPTOR_POOL_CREATE_HOST_ONLY_BIT_EXT: VkDescriptorPoolCreateFlagBits = 4;
+pub const VK_DESCRIPTOR_POOL_CREATE_HOST_ONLY_BIT_VALVE: VkDescriptorPoolCreateFlagBits = 4;
+pub const VK_DESCRIPTOR_POOL_CREATE_ALLOW_OVERALLOCATION_SETS_BIT_NV: VkDescriptorPoolCreateFlagBits = 8;
+pub const VK_DESCRIPTOR_POOL_CREATE_ALLOW_OVERALLOCATION_POOLS_BIT_NV: VkDescriptorPoolCreateFlagBits = 0x10;
+
+// VkDescriptorSetLayoutCreateFlagBits
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT: VkDescriptorSetLayoutCreateFlagBits = 1;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR: VkDescriptorSetLayoutCreateFlagBits = 1;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT: VkDescriptorSetLayoutCreateFlagBits = 2;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT_EXT: VkDescriptorSetLayoutCreateFlagBits = 2;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_EXT: VkDescriptorSetLayoutCreateFlagBits = 4;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_VALVE: VkDescriptorSetLayoutCreateFlagBits = 4;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT: VkDescriptorSetLayoutCreateFlagBits = 0x10;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT: VkDescriptorSetLayoutCreateFlagBits = 0x20;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_PER_STAGE_BIT_NV: VkDescriptorSetLayoutCreateFlagBits = 0x40;
+pub const VK_DESCRIPTOR_SET_LAYOUT_CREATE_INDIRECT_BINDABLE_BIT_NV: VkDescriptorSetLayoutCreateFlagBits = 0x80;
+
+// VkDescriptorType
+pub const VK_DESCRIPTOR_TYPE_SAMPLER: VkDescriptorType = 0;
+pub const VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: VkDescriptorType = 1;
+pub const VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: VkDescriptorType = 2;
+pub const VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: VkDescriptorType = 3;
+pub const VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER: VkDescriptorType = 4;
+pub const VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER: VkDescriptorType = 5;
+pub const VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER: VkDescriptorType = 6;
+pub const VK_DESCRIPTOR_TYPE_STORAGE_BUFFER: VkDescriptorType = 7;
+pub const VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC: VkDescriptorType = 8;
+pub const VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC: VkDescriptorType = 9;
+pub const VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT: VkDescriptorType = 10;
+pub const VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK: VkDescriptorType = 1000138000;
+pub const VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT: VkDescriptorType = 1000138000;
+pub const VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR: VkDescriptorType = 1000150000;
+pub const VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV: VkDescriptorType = 1000165000;
+pub const VK_DESCRIPTOR_TYPE_MUTABLE_EXT: VkDescriptorType = 1000351000;
+pub const VK_DESCRIPTOR_TYPE_MUTABLE_VALVE: VkDescriptorType = 1000351000;
+pub const VK_DESCRIPTOR_TYPE_SAMPLE_WEIGHT_IMAGE_QCOM: VkDescriptorType = 1000440000;
+pub const VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM: VkDescriptorType = 1000440001;
+pub const VK_DESCRIPTOR_TYPE_TENSOR_ARM: VkDescriptorType = 1000460000;
+pub const VK_DESCRIPTOR_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_NV: VkDescriptorType = 1000570000;
 
 // VkDeviceQueueCreateFlagBits
 pub const VK_DEVICE_QUEUE_CREATE_PROTECTED_BIT: VkDeviceQueueCreateFlagBits = 1;
@@ -862,145 +975,12 @@ pub const VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: VkPhysicalDeviceType = 2;
 pub const VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: VkPhysicalDeviceType = 3;
 pub const VK_PHYSICAL_DEVICE_TYPE_CPU: VkPhysicalDeviceType = 4;
 
-// VkPipelineStageFlagBits
-pub const VK_PIPELINE_STAGE_NONE: VkPipelineStageFlagBits = 0;
-pub const VK_PIPELINE_STAGE_NONE_KHR: VkPipelineStageFlagBits = 0;
-pub const VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT: VkPipelineStageFlagBits = 1;
-pub const VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT: VkPipelineStageFlagBits = 2;
-pub const VK_PIPELINE_STAGE_VERTEX_INPUT_BIT: VkPipelineStageFlagBits = 4;
-pub const VK_PIPELINE_STAGE_VERTEX_SHADER_BIT: VkPipelineStageFlagBits = 8;
-pub const VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT: VkPipelineStageFlagBits = 0x10;
-pub const VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT: VkPipelineStageFlagBits = 0x20;
-pub const VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT: VkPipelineStageFlagBits = 0x40;
-pub const VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT: VkPipelineStageFlagBits = 0x80;
-pub const VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT: VkPipelineStageFlagBits = 0x100;
-pub const VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT: VkPipelineStageFlagBits = 0x200;
-pub const VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT: VkPipelineStageFlagBits = 0x400;
-pub const VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT: VkPipelineStageFlagBits = 0x800;
-pub const VK_PIPELINE_STAGE_TRANSFER_BIT: VkPipelineStageFlagBits = 0x1000;
-pub const VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT: VkPipelineStageFlagBits = 0x2000;
-pub const VK_PIPELINE_STAGE_HOST_BIT: VkPipelineStageFlagBits = 0x4000;
-pub const VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT: VkPipelineStageFlagBits = 0x8000;
-pub const VK_PIPELINE_STAGE_ALL_COMMANDS_BIT: VkPipelineStageFlagBits = 0x10000;
-pub const VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT: VkPipelineStageFlagBits = 0x20000;
-pub const VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_NV: VkPipelineStageFlagBits = 0x20000;
-pub const VK_PIPELINE_STAGE_CONDITIONAL_RENDERING_BIT_EXT: VkPipelineStageFlagBits = 0x40000;
-pub const VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT: VkPipelineStageFlagBits = 0x80000;
-pub const VK_PIPELINE_STAGE_TASK_SHADER_BIT_NV: VkPipelineStageFlagBits = 0x80000;
-pub const VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT: VkPipelineStageFlagBits = 0x100000;
-pub const VK_PIPELINE_STAGE_MESH_SHADER_BIT_NV: VkPipelineStageFlagBits = 0x100000;
-pub const VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR: VkPipelineStageFlagBits = 0x200000;
-pub const VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV: VkPipelineStageFlagBits = 0x200000;
-pub const VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR: VkPipelineStageFlagBits = 0x400000;
-pub const VK_PIPELINE_STAGE_SHADING_RATE_IMAGE_BIT_NV: VkPipelineStageFlagBits = 0x400000;
-pub const VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT: VkPipelineStageFlagBits = 0x800000;
-pub const VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT: VkPipelineStageFlagBits = 0x1000000;
-pub const VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR: VkPipelineStageFlagBits = 0x2000000;
-pub const VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV: VkPipelineStageFlagBits = 0x2000000;
-
-// VkQueryControlFlagBits
-pub const VK_QUERY_CONTROL_PRECISE_BIT: VkQueryControlFlagBits = 1;
-
-// VkQueryPipelineStatisticFlagBits
-pub const VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT: VkQueryPipelineStatisticFlagBits = 1;
-pub const VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT: VkQueryPipelineStatisticFlagBits = 2;
-pub const VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT: VkQueryPipelineStatisticFlagBits = 4;
-pub const VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_INVOCATIONS_BIT: VkQueryPipelineStatisticFlagBits = 8;
-pub const VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_PRIMITIVES_BIT: VkQueryPipelineStatisticFlagBits = 0x10;
-pub const VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT: VkQueryPipelineStatisticFlagBits = 0x20;
-pub const VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_BIT: VkQueryPipelineStatisticFlagBits = 0x40;
-pub const VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT: VkQueryPipelineStatisticFlagBits = 0x80;
-pub const VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_CONTROL_SHADER_PATCHES_BIT: VkQueryPipelineStatisticFlagBits = 0x100;
-pub const VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_EVALUATION_SHADER_INVOCATIONS_BIT: VkQueryPipelineStatisticFlagBits = 0x200;
-pub const VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT: VkQueryPipelineStatisticFlagBits = 0x400;
-pub const VK_QUERY_PIPELINE_STATISTIC_TASK_SHADER_INVOCATIONS_BIT_EXT: VkQueryPipelineStatisticFlagBits = 0x800;
-pub const VK_QUERY_PIPELINE_STATISTIC_MESH_SHADER_INVOCATIONS_BIT_EXT: VkQueryPipelineStatisticFlagBits = 0x1000;
-pub const VK_QUERY_PIPELINE_STATISTIC_CLUSTER_CULLING_SHADER_INVOCATIONS_BIT_HUAWEI: VkQueryPipelineStatisticFlagBits = 0x2000;
-
-// VkQueueFlagBits
-pub const VK_QUEUE_GRAPHICS_BIT: VkQueueFlagBits = 1;
-pub const VK_QUEUE_COMPUTE_BIT: VkQueueFlagBits = 2;
-pub const VK_QUEUE_TRANSFER_BIT: VkQueueFlagBits = 4;
-pub const VK_QUEUE_SPARSE_BINDING_BIT: VkQueueFlagBits = 8;
-pub const VK_QUEUE_PROTECTED_BIT: VkQueueFlagBits = 0x10;
-pub const VK_QUEUE_VIDEO_DECODE_BIT_KHR: VkQueueFlagBits = 0x20;
-pub const VK_QUEUE_VIDEO_ENCODE_BIT_KHR: VkQueueFlagBits = 0x40;
-pub const VK_QUEUE_OPTICAL_FLOW_BIT_NV: VkQueueFlagBits = 0x100;
-pub const VK_QUEUE_DATA_GRAPH_BIT_ARM: VkQueueFlagBits = 0x400;
-
-// VkResult
-pub const VK_ERROR_NOT_ENOUGH_SPACE_KHR: VkResult = -1000483000;
-pub const VK_ERROR_COMPRESSION_EXHAUSTED_EXT: VkResult = -1000338000;
-pub const VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR: VkResult = -1000299000;
-pub const VK_ERROR_INVALID_DEVICE_ADDRESS_EXT: VkResult = -1000257000;
-pub const VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS: VkResult = -1000257000;
-pub const VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS_KHR: VkResult = -1000257000;
-pub const VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT: VkResult = -1000255000;
-pub const VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT: VkResult = -1000208000;
-pub const VK_ERROR_NOT_PERMITTED: VkResult = -1000174001;
-pub const VK_ERROR_NOT_PERMITTED_EXT: VkResult = -1000174001;
-pub const VK_ERROR_NOT_PERMITTED_KHR: VkResult = -1000174001;
-pub const VK_ERROR_FRAGMENTATION: VkResult = -1000161000;
-pub const VK_ERROR_FRAGMENTATION_EXT: VkResult = -1000161000;
-pub const VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT: VkResult = -1000158000;
-pub const VK_ERROR_INVALID_EXTERNAL_HANDLE: VkResult = -1000072003;
-pub const VK_ERROR_INVALID_EXTERNAL_HANDLE_KHR: VkResult = -1000072003;
-pub const VK_ERROR_OUT_OF_POOL_MEMORY: VkResult = -1000069000;
-pub const VK_ERROR_OUT_OF_POOL_MEMORY_KHR: VkResult = -1000069000;
-pub const VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR: VkResult = -1000023005;
-pub const VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR: VkResult = -1000023004;
-pub const VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR: VkResult = -1000023003;
-pub const VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR: VkResult = -1000023002;
-pub const VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR: VkResult = -1000023001;
-pub const VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR: VkResult = -1000023000;
-pub const VK_ERROR_INVALID_SHADER_NV: VkResult = -1000012000;
-pub const VK_ERROR_VALIDATION_FAILED: VkResult = -1000011001;
-pub const VK_ERROR_VALIDATION_FAILED_EXT: VkResult = -1000011001;
-pub const VK_ERROR_INCOMPATIBLE_DISPLAY_KHR: VkResult = -1000003001;
-pub const VK_ERROR_OUT_OF_DATE_KHR: VkResult = -1000001004;
-pub const VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: VkResult = -1000000001;
-pub const VK_ERROR_SURFACE_LOST_KHR: VkResult = -1000000000;
-pub const VK_ERROR_UNKNOWN: VkResult = -13;
-pub const VK_ERROR_FRAGMENTED_POOL: VkResult = -12;
-pub const VK_ERROR_FORMAT_NOT_SUPPORTED: VkResult = -11;
-pub const VK_ERROR_TOO_MANY_OBJECTS: VkResult = -10;
-pub const VK_ERROR_INCOMPATIBLE_DRIVER: VkResult = -9;
-pub const VK_ERROR_FEATURE_NOT_PRESENT: VkResult = -8;
-pub const VK_ERROR_EXTENSION_NOT_PRESENT: VkResult = -7;
-pub const VK_ERROR_LAYER_NOT_PRESENT: VkResult = -6;
-pub const VK_ERROR_MEMORY_MAP_FAILED: VkResult = -5;
-pub const VK_ERROR_DEVICE_LOST: VkResult = -4;
-pub const VK_ERROR_INITIALIZATION_FAILED: VkResult = -3;
-pub const VK_ERROR_OUT_OF_DEVICE_MEMORY: VkResult = -2;
-pub const VK_ERROR_OUT_OF_HOST_MEMORY: VkResult = -1;
-pub const VK_SUCCESS: VkResult = 0;
-pub const VK_NOT_READY: VkResult = 1;
-pub const VK_TIMEOUT: VkResult = 2;
-pub const VK_EVENT_SET: VkResult = 3;
-pub const VK_EVENT_RESET: VkResult = 4;
-pub const VK_INCOMPLETE: VkResult = 5;
-pub const VK_SUBOPTIMAL_KHR: VkResult = 1000001003;
-pub const VK_THREAD_IDLE_KHR: VkResult = 1000268000;
-pub const VK_THREAD_DONE_KHR: VkResult = 1000268001;
-pub const VK_OPERATION_DEFERRED_KHR: VkResult = 1000268002;
-pub const VK_OPERATION_NOT_DEFERRED_KHR: VkResult = 1000268003;
-pub const VK_ERROR_PIPELINE_COMPILE_REQUIRED_EXT: VkResult = 1000297000;
-pub const VK_PIPELINE_COMPILE_REQUIRED: VkResult = 1000297000;
-pub const VK_PIPELINE_COMPILE_REQUIRED_EXT: VkResult = 1000297000;
-pub const VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT: VkResult = 1000482000;
-pub const VK_INCOMPATIBLE_SHADER_BINARY_EXT: VkResult = 1000482000;
-pub const VK_PIPELINE_BINARY_MISSING_KHR: VkResult = 1000483000;
-
-// VkSampleCountFlagBits
-pub const VK_SAMPLE_COUNT_1_BIT: VkSampleCountFlagBits = 1;
-pub const VK_SAMPLE_COUNT_2_BIT: VkSampleCountFlagBits = 2;
-pub const VK_SAMPLE_COUNT_4_BIT: VkSampleCountFlagBits = 4;
-pub const VK_SAMPLE_COUNT_8_BIT: VkSampleCountFlagBits = 8;
-pub const VK_SAMPLE_COUNT_16_BIT: VkSampleCountFlagBits = 0x10;
-pub const VK_SAMPLE_COUNT_32_BIT: VkSampleCountFlagBits = 0x20;
-pub const VK_SAMPLE_COUNT_64_BIT: VkSampleCountFlagBits = 0x40;
-
-// VkSharingMode
-pub const VK_SHARING_MODE_EXCLUSIVE: VkSharingMode = 0;
-pub const VK_SHARING_MODE_CONCURRENT: VkSharingMode = 1;
+// VkPipelineBindPoint
+pub const VK_PIPELINE_BIND_POINT_GRAPHICS: VkPipelineBindPoint = 0;
+pub const VK_PIPELINE_BIND_POINT_COMPUTE: VkPipelineBindPoint = 1;
+pub const VK_PIPELINE_BIND_POINT_EXECUTION_GRAPH_AMDX: VkPipelineBindPoint = 1000134000;
+pub const VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR: VkPipelineBindPoint = 1000165000;
+pub const VK_PIPELINE_BIND_POINT_RAY_TRACING_NV: VkPipelineBindPoint = 1000165000;
+pub const VK_PIPELINE_BIND_POINT_SUBPASS_SHADING_HUAWEI: VkPipelineBindPoint = 1000369003;
+pub const VK_PIPELINE_BIND_POINT_DATA_GRAPH_ARM: VkPipelineBindPoint = 1000507000;
 

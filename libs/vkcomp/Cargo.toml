@@ -1,0 +1,19 @@
+[package]
+name = "vkcomp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Skladani kompozitoru na GPU pres Venus (vypocetni shader z libs/spirv)"
+
+[features]
+# GPU cast nad spojenim Venus (jen v systemu).
+os = ["dep:venus", "dep:libos"]
+
+[dependencies]
+guiproto = { path = "../guiproto" }
+spirv = { path = "../spirv" }
+venus = { path = "../venus", features = ["os"], optional = true }
+libos = { path = "../libos", optional = true }
+
+[dev-dependencies]
+gfx = { path = "../gfx" }

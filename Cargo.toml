@@ -19,6 +19,8 @@ members = [
     "libs/guiproto",
     "libs/gpuproto",
     "libs/venus",
+    "libs/spirv",
+    "libs/vkcomp",
     "libs/taskproto",
     "libs/taskview",
     "libs/gfx",

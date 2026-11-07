@@ -7,9 +7,9 @@ use super::super::*;
 use crate::cs::{CsError, Decoder, Encoder, Result};
 
 /// `vkSetReplyCommandStreamMESA`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn set_reply_command_stream_mesa(e: &mut Encoder, flags: VkCommandFlagsEXT, p_stream: &VkCommandStreamDescriptionMESA) {
+pub fn set_reply_command_stream_mesa(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, p_stream: &VkCommandStreamDescriptionMESA) {
     e.i32(VK_COMMAND_TYPE_vkSetReplyCommandStreamMESA_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.pointer(true);
     p_stream.encode(e);
 }
@@ -29,9 +29,9 @@ pub fn decode_set_reply_command_stream_mesa_reply(d: &mut Decoder) -> Result<Set
 }
 
 /// `vkSeekReplyCommandStreamMESA`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn seek_reply_command_stream_mesa(e: &mut Encoder, flags: VkCommandFlagsEXT, position: u64) {
+pub fn seek_reply_command_stream_mesa(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, position: u64) {
     e.i32(VK_COMMAND_TYPE_vkSeekReplyCommandStreamMESA_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(position);
 }
 
@@ -50,9 +50,9 @@ pub fn decode_seek_reply_command_stream_mesa_reply(d: &mut Decoder) -> Result<Se
 }
 
 /// `vkEnumerateInstanceVersion`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn enumerate_instance_version(e: &mut Encoder, flags: VkCommandFlagsEXT) {
+pub fn enumerate_instance_version(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT) {
     e.i32(VK_COMMAND_TYPE_vkEnumerateInstanceVersion_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.pointer(true);
 }
 
@@ -75,9 +75,9 @@ pub fn decode_enumerate_instance_version_reply(d: &mut Decoder) -> Result<Enumer
 }
 
 /// `vkCreateInstance`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn create_instance(e: &mut Encoder, flags: VkCommandFlagsEXT, p_create_info: &VkInstanceCreateInfo<'_>, p_instance: VkInstance) {
+pub fn create_instance(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, p_create_info: &VkInstanceCreateInfo<'_>, p_instance: VkInstance) {
     e.i32(VK_COMMAND_TYPE_vkCreateInstance_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.pointer(true);
     p_create_info.encode(e);
     e.pointer(false);
@@ -104,9 +104,9 @@ pub fn decode_create_instance_reply(d: &mut Decoder) -> Result<CreateInstanceRep
 }
 
 /// `vkDestroyInstance`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn destroy_instance(e: &mut Encoder, flags: VkCommandFlagsEXT, instance: VkInstance) {
+pub fn destroy_instance(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, instance: VkInstance) {
     e.i32(VK_COMMAND_TYPE_vkDestroyInstance_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(instance.0);
     e.pointer(false);
 }
@@ -126,9 +126,9 @@ pub fn decode_destroy_instance_reply(d: &mut Decoder) -> Result<DestroyInstanceR
 }
 
 /// `vkEnumeratePhysicalDevices`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn enumerate_physical_devices(e: &mut Encoder, flags: VkCommandFlagsEXT, instance: VkInstance, p_physical_device_count: Option<u32>, p_physical_devices: Option<&[VkPhysicalDevice]>) {
+pub fn enumerate_physical_devices(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, instance: VkInstance, p_physical_device_count: Option<u32>, p_physical_devices: Option<&[VkPhysicalDevice]>) {
     e.i32(VK_COMMAND_TYPE_vkEnumeratePhysicalDevices_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(instance.0);
     match p_physical_device_count {
         Some(x) => {
@@ -178,9 +178,9 @@ pub fn decode_enumerate_physical_devices_reply(d: &mut Decoder) -> Result<Enumer
 }
 
 /// `vkGetPhysicalDeviceProperties`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn get_physical_device_properties(e: &mut Encoder, flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice) {
+pub fn get_physical_device_properties(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice) {
     e.i32(VK_COMMAND_TYPE_vkGetPhysicalDeviceProperties_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(physical_device.0);
     e.pointer(true);
     VkPhysicalDeviceProperties::default().encode_partial(e);
@@ -203,9 +203,9 @@ pub fn decode_get_physical_device_properties_reply(d: &mut Decoder) -> Result<Ge
 }
 
 /// `vkGetPhysicalDeviceQueueFamilyProperties`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn get_physical_device_queue_family_properties(e: &mut Encoder, flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice, p_queue_family_property_count: Option<u32>, p_queue_family_properties: bool) {
+pub fn get_physical_device_queue_family_properties(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice, p_queue_family_property_count: Option<u32>, p_queue_family_properties: bool) {
     e.i32(VK_COMMAND_TYPE_vkGetPhysicalDeviceQueueFamilyProperties_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(physical_device.0);
     match p_queue_family_property_count {
         Some(x) => {
@@ -253,9 +253,9 @@ pub fn decode_get_physical_device_queue_family_properties_reply(d: &mut Decoder)
 }
 
 /// `vkGetPhysicalDeviceMemoryProperties`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn get_physical_device_memory_properties(e: &mut Encoder, flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice) {
+pub fn get_physical_device_memory_properties(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice) {
     e.i32(VK_COMMAND_TYPE_vkGetPhysicalDeviceMemoryProperties_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(physical_device.0);
     e.pointer(true);
     VkPhysicalDeviceMemoryProperties::default().encode_partial(e);
@@ -278,9 +278,9 @@ pub fn decode_get_physical_device_memory_properties_reply(d: &mut Decoder) -> Re
 }
 
 /// `vkGetPhysicalDeviceFormatProperties`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn get_physical_device_format_properties(e: &mut Encoder, flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice, format: VkFormat) {
+pub fn get_physical_device_format_properties(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice, format: VkFormat) {
     e.i32(VK_COMMAND_TYPE_vkGetPhysicalDeviceFormatProperties_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(physical_device.0);
     e.i32(format);
     e.pointer(true);
@@ -304,9 +304,9 @@ pub fn decode_get_physical_device_format_properties_reply(d: &mut Decoder) -> Re
 }
 
 /// `vkCreateDevice`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn create_device(e: &mut Encoder, flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice, p_create_info: &VkDeviceCreateInfo<'_>, p_device: VkDevice) {
+pub fn create_device(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, physical_device: VkPhysicalDevice, p_create_info: &VkDeviceCreateInfo<'_>, p_device: VkDevice) {
     e.i32(VK_COMMAND_TYPE_vkCreateDevice_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(physical_device.0);
     e.pointer(true);
     p_create_info.encode(e);
@@ -334,9 +334,9 @@ pub fn decode_create_device_reply(d: &mut Decoder) -> Result<CreateDeviceReply> 
 }
 
 /// `vkDestroyDevice`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn destroy_device(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice) {
+pub fn destroy_device(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice) {
     e.i32(VK_COMMAND_TYPE_vkDestroyDevice_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.pointer(false);
 }
@@ -356,9 +356,9 @@ pub fn decode_destroy_device_reply(d: &mut Decoder) -> Result<DestroyDeviceReply
 }
 
 /// `vkGetDeviceQueue2`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn get_device_queue2(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, p_queue_info: &VkDeviceQueueInfo2<'_>, p_queue: VkQueue) {
+pub fn get_device_queue2(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, p_queue_info: &VkDeviceQueueInfo2<'_>, p_queue: VkQueue) {
     e.i32(VK_COMMAND_TYPE_vkGetDeviceQueue2_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.pointer(true);
     p_queue_info.encode(e);
@@ -383,9 +383,9 @@ pub fn decode_get_device_queue2_reply(d: &mut Decoder) -> Result<GetDeviceQueue2
 }
 
 /// `vkDeviceWaitIdle`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn device_wait_idle(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice) {
+pub fn device_wait_idle(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice) {
     e.i32(VK_COMMAND_TYPE_vkDeviceWaitIdle_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
 }
 
@@ -406,9 +406,9 @@ pub fn decode_device_wait_idle_reply(d: &mut Decoder) -> Result<DeviceWaitIdleRe
 }
 
 /// `vkAllocateMemory`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn allocate_memory(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, p_allocate_info: &VkMemoryAllocateInfo, p_memory: VkDeviceMemory) {
+pub fn allocate_memory(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, p_allocate_info: &VkMemoryAllocateInfo, p_memory: VkDeviceMemory) {
     e.i32(VK_COMMAND_TYPE_vkAllocateMemory_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.pointer(true);
     p_allocate_info.encode(e);
@@ -436,9 +436,9 @@ pub fn decode_allocate_memory_reply(d: &mut Decoder) -> Result<AllocateMemoryRep
 }
 
 /// `vkFreeMemory`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn free_memory(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, memory: VkDeviceMemory) {
+pub fn free_memory(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, memory: VkDeviceMemory) {
     e.i32(VK_COMMAND_TYPE_vkFreeMemory_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(memory.0);
     e.pointer(false);
@@ -459,9 +459,9 @@ pub fn decode_free_memory_reply(d: &mut Decoder) -> Result<FreeMemoryReply> {
 }
 
 /// `vkCreateBuffer`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn create_buffer(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, p_create_info: &VkBufferCreateInfo<'_>, p_buffer: VkBuffer) {
+pub fn create_buffer(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, p_create_info: &VkBufferCreateInfo<'_>, p_buffer: VkBuffer) {
     e.i32(VK_COMMAND_TYPE_vkCreateBuffer_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.pointer(true);
     p_create_info.encode(e);
@@ -489,9 +489,9 @@ pub fn decode_create_buffer_reply(d: &mut Decoder) -> Result<CreateBufferReply> 
 }
 
 /// `vkDestroyBuffer`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn destroy_buffer(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, buffer: VkBuffer) {
+pub fn destroy_buffer(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, buffer: VkBuffer) {
     e.i32(VK_COMMAND_TYPE_vkDestroyBuffer_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(buffer.0);
     e.pointer(false);
@@ -512,9 +512,9 @@ pub fn decode_destroy_buffer_reply(d: &mut Decoder) -> Result<DestroyBufferReply
 }
 
 /// `vkGetBufferMemoryRequirements`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn get_buffer_memory_requirements(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, buffer: VkBuffer) {
+pub fn get_buffer_memory_requirements(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, buffer: VkBuffer) {
     e.i32(VK_COMMAND_TYPE_vkGetBufferMemoryRequirements_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(buffer.0);
     e.pointer(true);
@@ -538,9 +538,9 @@ pub fn decode_get_buffer_memory_requirements_reply(d: &mut Decoder) -> Result<Ge
 }
 
 /// `vkBindBufferMemory`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn bind_buffer_memory(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, buffer: VkBuffer, memory: VkDeviceMemory, memory_offset: VkDeviceSize) {
+pub fn bind_buffer_memory(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, buffer: VkBuffer, memory: VkDeviceMemory, memory_offset: VkDeviceSize) {
     e.i32(VK_COMMAND_TYPE_vkBindBufferMemory_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(buffer.0);
     e.u64(memory.0);
@@ -564,9 +564,9 @@ pub fn decode_bind_buffer_memory_reply(d: &mut Decoder) -> Result<BindBufferMemo
 }
 
 /// `vkCreateImage`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn create_image(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, p_create_info: &VkImageCreateInfo<'_>, p_image: VkImage) {
+pub fn create_image(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, p_create_info: &VkImageCreateInfo<'_>, p_image: VkImage) {
     e.i32(VK_COMMAND_TYPE_vkCreateImage_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.pointer(true);
     p_create_info.encode(e);
@@ -594,9 +594,9 @@ pub fn decode_create_image_reply(d: &mut Decoder) -> Result<CreateImageReply> {
 }
 
 /// `vkDestroyImage`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn destroy_image(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, image: VkImage) {
+pub fn destroy_image(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, image: VkImage) {
     e.i32(VK_COMMAND_TYPE_vkDestroyImage_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(image.0);
     e.pointer(false);
@@ -617,9 +617,9 @@ pub fn decode_destroy_image_reply(d: &mut Decoder) -> Result<DestroyImageReply> 
 }
 
 /// `vkGetImageMemoryRequirements`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn get_image_memory_requirements(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, image: VkImage) {
+pub fn get_image_memory_requirements(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, image: VkImage) {
     e.i32(VK_COMMAND_TYPE_vkGetImageMemoryRequirements_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(image.0);
     e.pointer(true);
@@ -643,9 +643,9 @@ pub fn decode_get_image_memory_requirements_reply(d: &mut Decoder) -> Result<Get
 }
 
 /// `vkBindImageMemory`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn bind_image_memory(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, image: VkImage, memory: VkDeviceMemory, memory_offset: VkDeviceSize) {
+pub fn bind_image_memory(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, image: VkImage, memory: VkDeviceMemory, memory_offset: VkDeviceSize) {
     e.i32(VK_COMMAND_TYPE_vkBindImageMemory_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(image.0);
     e.u64(memory.0);
@@ -669,9 +669,9 @@ pub fn decode_bind_image_memory_reply(d: &mut Decoder) -> Result<BindImageMemory
 }
 
 /// `vkCreateCommandPool`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn create_command_pool(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, p_create_info: &VkCommandPoolCreateInfo, p_command_pool: VkCommandPool) {
+pub fn create_command_pool(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, p_create_info: &VkCommandPoolCreateInfo, p_command_pool: VkCommandPool) {
     e.i32(VK_COMMAND_TYPE_vkCreateCommandPool_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.pointer(true);
     p_create_info.encode(e);
@@ -699,9 +699,9 @@ pub fn decode_create_command_pool_reply(d: &mut Decoder) -> Result<CreateCommand
 }
 
 /// `vkDestroyCommandPool`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn destroy_command_pool(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, command_pool: VkCommandPool) {
+pub fn destroy_command_pool(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, command_pool: VkCommandPool) {
     e.i32(VK_COMMAND_TYPE_vkDestroyCommandPool_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(command_pool.0);
     e.pointer(false);
@@ -722,9 +722,9 @@ pub fn decode_destroy_command_pool_reply(d: &mut Decoder) -> Result<DestroyComma
 }
 
 /// `vkAllocateCommandBuffers`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn allocate_command_buffers(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, p_allocate_info: &VkCommandBufferAllocateInfo, p_command_buffers: Option<&[VkCommandBuffer]>) {
+pub fn allocate_command_buffers(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, p_allocate_info: &VkCommandBufferAllocateInfo, p_command_buffers: Option<&[VkCommandBuffer]>) {
     e.i32(VK_COMMAND_TYPE_vkAllocateCommandBuffers_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.pointer(true);
     p_allocate_info.encode(e);
@@ -767,9 +767,9 @@ pub fn decode_allocate_command_buffers_reply(d: &mut Decoder) -> Result<Allocate
 }
 
 /// `vkFreeCommandBuffers`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn free_command_buffers(e: &mut Encoder, flags: VkCommandFlagsEXT, device: VkDevice, command_pool: VkCommandPool, command_buffer_count: u32, p_command_buffers: &[VkCommandBuffer]) {
+pub fn free_command_buffers(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, device: VkDevice, command_pool: VkCommandPool, command_buffer_count: u32, p_command_buffers: &[VkCommandBuffer]) {
     e.i32(VK_COMMAND_TYPE_vkFreeCommandBuffers_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(device.0);
     e.u64(command_pool.0);
     e.u32(command_buffer_count);
@@ -794,9 +794,9 @@ pub fn decode_free_command_buffers_reply(d: &mut Decoder) -> Result<FreeCommandB
 }
 
 /// `vkBeginCommandBuffer`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn begin_command_buffer(e: &mut Encoder, flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, p_begin_info: &VkCommandBufferBeginInfo<'_>) {
+pub fn begin_command_buffer(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, p_begin_info: &VkCommandBufferBeginInfo<'_>) {
     e.i32(VK_COMMAND_TYPE_vkBeginCommandBuffer_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(command_buffer.0);
     e.pointer(true);
     p_begin_info.encode(e);
@@ -819,9 +819,9 @@ pub fn decode_begin_command_buffer_reply(d: &mut Decoder) -> Result<BeginCommand
 }
 
 /// `vkEndCommandBuffer`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn end_command_buffer(e: &mut Encoder, flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer) {
+pub fn end_command_buffer(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer) {
     e.i32(VK_COMMAND_TYPE_vkEndCommandBuffer_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(command_buffer.0);
 }
 
@@ -842,9 +842,9 @@ pub fn decode_end_command_buffer_reply(d: &mut Decoder) -> Result<EndCommandBuff
 }
 
 /// `vkCmdPipelineBarrier`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn cmd_pipeline_barrier(e: &mut Encoder, flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, src_stage_mask: VkPipelineStageFlags, dst_stage_mask: VkPipelineStageFlags, dependency_flags: VkDependencyFlags, memory_barrier_count: u32, p_memory_barriers: &[VkMemoryBarrier], buffer_memory_barrier_count: u32, p_buffer_memory_barriers: &[VkBufferMemoryBarrier], image_memory_barrier_count: u32, p_image_memory_barriers: &[VkImageMemoryBarrier]) {
+pub fn cmd_pipeline_barrier(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, src_stage_mask: VkPipelineStageFlags, dst_stage_mask: VkPipelineStageFlags, dependency_flags: VkDependencyFlags, memory_barrier_count: u32, p_memory_barriers: &[VkMemoryBarrier], buffer_memory_barrier_count: u32, p_buffer_memory_barriers: &[VkBufferMemoryBarrier], image_memory_barrier_count: u32, p_image_memory_barriers: &[VkImageMemoryBarrier]) {
     e.i32(VK_COMMAND_TYPE_vkCmdPipelineBarrier_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(command_buffer.0);
     e.u32(src_stage_mask);
     e.u32(dst_stage_mask);
@@ -881,9 +881,9 @@ pub fn decode_cmd_pipeline_barrier_reply(d: &mut Decoder) -> Result<CmdPipelineB
 }
 
 /// `vkCmdClearColorImage`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn cmd_clear_color_image(e: &mut Encoder, flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, image: VkImage, image_layout: VkImageLayout, p_color: &VkClearColorValue, range_count: u32, p_ranges: &[VkImageSubresourceRange]) {
+pub fn cmd_clear_color_image(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, image: VkImage, image_layout: VkImageLayout, p_color: &VkClearColorValue, range_count: u32, p_ranges: &[VkImageSubresourceRange]) {
     e.i32(VK_COMMAND_TYPE_vkCmdClearColorImage_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(command_buffer.0);
     e.u64(image.0);
     e.i32(image_layout);
@@ -911,9 +911,9 @@ pub fn decode_cmd_clear_color_image_reply(d: &mut Decoder) -> Result<CmdClearCol
 }
 
 /// `vkCmdCopyImageToBuffer`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn cmd_copy_image_to_buffer(e: &mut Encoder, flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, src_image: VkImage, src_image_layout: VkImageLayout, dst_buffer: VkBuffer, region_count: u32, p_regions: &[VkBufferImageCopy]) {
+pub fn cmd_copy_image_to_buffer(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, src_image: VkImage, src_image_layout: VkImageLayout, dst_buffer: VkBuffer, region_count: u32, p_regions: &[VkBufferImageCopy]) {
     e.i32(VK_COMMAND_TYPE_vkCmdCopyImageToBuffer_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(command_buffer.0);
     e.u64(src_image.0);
     e.i32(src_image_layout);
@@ -940,9 +940,9 @@ pub fn decode_cmd_copy_image_to_buffer_reply(d: &mut Decoder) -> Result<CmdCopyI
 }
 
 /// `vkCmdCopyBufferToImage`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn cmd_copy_buffer_to_image(e: &mut Encoder, flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, src_buffer: VkBuffer, dst_image: VkImage, dst_image_layout: VkImageLayout, region_count: u32, p_regions: &[VkBufferImageCopy]) {
+pub fn cmd_copy_buffer_to_image(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, command_buffer: VkCommandBuffer, src_buffer: VkBuffer, dst_image: VkImage, dst_image_layout: VkImageLayout, region_count: u32, p_regions: &[VkBufferImageCopy]) {
     e.i32(VK_COMMAND_TYPE_vkCmdCopyBufferToImage_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(command_buffer.0);
     e.u64(src_buffer.0);
     e.u64(dst_image.0);
@@ -969,9 +969,9 @@ pub fn decode_cmd_copy_buffer_to_image_reply(d: &mut Decoder) -> Result<CmdCopyB
 }
 
 /// `vkQueueSubmit`: zakoduje prikaz (`flags` s `VK_COMMAND_GENERATE_REPLY_BIT_EXT` = chci odpoved).
-pub fn queue_submit(e: &mut Encoder, flags: VkCommandFlagsEXT, queue: VkQueue, submit_count: u32, p_submits: &[VkSubmitInfo<'_>], fence: VkFence) {
+pub fn queue_submit(e: &mut Encoder, cmd_flags: VkCommandFlagsEXT, queue: VkQueue, submit_count: u32, p_submits: &[VkSubmitInfo<'_>], fence: VkFence) {
     e.i32(VK_COMMAND_TYPE_vkQueueSubmit_EXT);
-    e.u32(flags);
+    e.u32(cmd_flags);
     e.u64(queue.0);
     e.u32(submit_count);
     {

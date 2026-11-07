@@ -6,7 +6,9 @@
 //!    `ok <pocet>|<jmeno>|<typ>|<api x.y.z>|<vendor:device>` prvniho,
 //!    `skip <duvod>` (zarizeni nema Venus) nebo `err <popis>`,
 //! 2. obrazek (`clear.rs`): vyplneni barvou a zpetne cteni pixelu -
-//!    `ok <w>x<h> <rgba> ...` nebo `err <popis>` (po `skip` se neposila).
+//!    `ok <w>x<h> <rgba> ...` nebo `err <popis>` (po `skip` se neposila),
+//! 3. skladani na GPU (`compose.rs`, `libs/vkcomp`) proti `gfx` -
+//!    `ok ...` nebo `err <popis>`.
 
 #![no_std]
 #![no_main]
@@ -20,6 +22,7 @@ use alloc::vec::Vec;
 use libos::{Channel, Startup, println};
 
 mod clear;
+mod compose;
 use venus::client::{Error, Venus, check};
 use venus::vk::{self, cmd};
 use venus::{REPLY, api_version, cs, version_parts};
@@ -46,7 +49,11 @@ fn main(startup: Startup) -> i64 {
     };
     println!("vk-probe: obrazek: {line}");
     let _ = out.write(line.as_bytes(), Vec::new());
+    // Kontext smi mit jen jednu instanci: skladac si vytvori vlastni.
     let _ = v.send(|e| cmd::destroy_instance(e, 0, instance));
+    let (line, _v) = compose::run(v);
+    println!("vk-probe: skladani: {line}");
+    let _ = out.write(line.as_bytes(), Vec::new());
     0
 }
 

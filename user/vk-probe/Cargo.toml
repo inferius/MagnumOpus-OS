@@ -13,3 +13,6 @@ bench = false
 [dependencies]
 libos = { path = "../../libs/libos" }
 venus = { path = "../../libs/venus", features = ["os"] }
+vkcomp = { path = "../../libs/vkcomp", features = ["os"] }
+gfx = { path = "../../libs/gfx" }
+guiproto = { path = "../../libs/guiproto" }

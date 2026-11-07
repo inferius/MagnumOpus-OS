@@ -54,3 +54,24 @@ command vkWaitForFences
 
 # Fronta musi mit casovou osu (ring_idx >= 1), jinak renderer vkGetDeviceQueue2 odmitne.
 chain VkDeviceQueueTimelineInfoMESA
+
+# Krok 4: vypocetni pipeline skladani kompozitoru (libs/vkcomp).
+command vkCreateShaderModule
+command vkDestroyShaderModule
+command vkCreateDescriptorSetLayout
+command vkDestroyDescriptorSetLayout
+command vkCreatePipelineLayout
+command vkDestroyPipelineLayout
+command vkCreateComputePipelines
+command vkDestroyPipeline
+command vkCreateDescriptorPool
+command vkDestroyDescriptorPool
+command vkAllocateDescriptorSets
+command vkUpdateDescriptorSets
+command vkCmdBindPipeline
+command vkCmdBindDescriptorSets
+command vkCmdPushConstants
+command vkCmdDispatch
+command vkCmdCopyBuffer
+command vkResetCommandBuffer
+command vkFreeDescriptorSets

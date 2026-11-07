@@ -1023,6 +1023,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spirv"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1369,7 +1376,21 @@ dependencies = [
 name = "vk-probe"
 version = "0.1.0"
 dependencies = [
+ "gfx",
+ "guiproto",
  "libos",
+ "venus",
+ "vkcomp",
+]
+
+[[package]]
+name = "vkcomp"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "spirv",
  "venus",
 ]
 

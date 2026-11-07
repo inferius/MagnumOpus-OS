@@ -18,6 +18,8 @@ mod structs2;
 pub use structs2::*;
 mod structs3;
 pub use structs3::*;
+mod structs4;
+pub use structs4::*;
 
 /// Prikazy: kodovani a cteni odpovedi.
 pub mod cmd {
