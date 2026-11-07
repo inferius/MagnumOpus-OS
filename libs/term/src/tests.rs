@@ -13,9 +13,9 @@ use crate::screen::{PixelFormat, Screen, Surface, paint};
 use crate::session::{Env, Link, Service};
 
 #[derive(Default)]
-struct TestLink {
-    incoming: VecDeque<ClientMsg>,
-    sent: Vec<ServerMsg>,
+pub(crate) struct TestLink {
+    pub incoming: VecDeque<ClientMsg>,
+    pub sent: Vec<ServerMsg>,
 }
 
 impl Link for TestLink {
@@ -33,7 +33,8 @@ impl Link for TestLink {
     }
 }
 
-struct TestEnv(i64);
+#[derive(Default)]
+pub(crate) struct TestEnv(i64);
 
 impl Env for TestEnv {
     fn now(&mut self) -> Option<i64> {
@@ -238,6 +239,7 @@ fn program_mounts_from_needs() {
         write: vec!["/home/foto/out".into(), "/data".into()],
         net: false,
         all: false,
+        aside: Vec::new(),
     };
     let m = mounts(&n);
     let spec = |p: &str, ro| MountSpec { name: p.into(), target: p.into(), read_only: ro };

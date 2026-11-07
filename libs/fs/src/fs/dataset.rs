@@ -19,6 +19,16 @@
 //!
 //! Operace s datasety (vytvoreni, klon, smazani) hned commituji, proto se
 //! nezapisuji do intent logu.
+//!
+//! **Hranice.** Klon (i "zkusit zmeny bokem" a vetev) obsahuje kopie
+//! polozek vnorenych datasetu originalu. Takova kopie nesmi byt druhou
+//! cestou k temuz datasetu: platna je jen polozka, na kterou ukazuje
+//! zpetny odkaz datasetu (`DSLINK`: dataset rodice, slozka, jmeno). Ostatni
+//! polozky `KIND_DATASET` jsou **hranice** (`is_boundary`): ve vypisu jsou
+//! videt jako `Kind::Dataset`, `stat` je ukaze jako `Kind::Dataset` bez prav
+//! (`rights = 0`), ale vstup do nich, zapis, presun i smazani hlasi
+//! `NOT_SUPPORTED`. Hranici je i polozka datasetu, ktery uz neexistuje
+//! (napr. klon jine relace, ktery mezitim zanikl).
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -33,7 +43,7 @@ use crate::layout::{
     DatasetRecord, DeadExtent, Dirent, FIRST_FREE_OID, Inode, KIND_DATASET, KIND_DIR, Key, META_OID,
     NODE_BLOCKS, ROOT_DATASET, ROOT_OID, SnapshotRecord, item,
 };
-use crate::names::{stored_name, validate_name};
+use crate::names::{fold_name, stored_name, validate_name};
 use crate::node::{Body, Child};
 
 /// Stav neaktivniho datasetu (aktivni ma stejna pole primo v `Store`/`Fs`).
@@ -160,6 +170,9 @@ impl<D: BlockDevice> Fs<D> {
             }
             let d = self.lookup_child(&root, oid, name)?.ok_or(Error::NotFound)?;
             if d.kind == KIND_DATASET {
+                if self.is_boundary(oid, &d)? {
+                    return Err(Error::NotSupported);
+                }
                 self.activate(d.oid)?;
                 oid = ROOT_OID;
             } else {
@@ -167,6 +180,38 @@ impl<D: BlockDevice> Fs<D> {
             }
         }
         Ok(oid)
+    }
+
+    /// Je polozka `d` ve slozce `dir` aktivniho datasetu hranici (viz popis
+    /// modulu)? Jen polozka datasetu; aktivni dataset se nezmeni.
+    pub(super) fn is_boundary(&mut self, dir: u64, d: &Dirent) -> Result<bool> {
+        if d.kind != KIND_DATASET {
+            return Ok(false);
+        }
+        let here = self.cur_ds;
+        if d.oid == here || d.oid == ROOT_DATASET || !self.dataset_exists(d.oid)? {
+            return Ok(true);
+        }
+        self.activate(d.oid)?;
+        let root = self.s.root;
+        let raw = btree::get(&mut self.s, &root, &Key::new(META_OID, item::DSLINK, 0));
+        self.activate(here)?;
+        let Some(raw) = raw? else {
+            // Dataset bez zpetneho odkazu (z doby pred nim): v klonu hranice,
+            // jinde plati polozka (jina tam byt nemuze).
+            return Ok(self.cur_origin.0 != 0);
+        };
+        let link = crate::records::DsLink::decode(&raw)?;
+        Ok(link.parent_ds != here || link.dir != dir || fold_name(&link.name) != fold_name(&d.name))
+    }
+
+    /// Existuje dataset `id` (v pameti nebo se zaznamem)?
+    pub(super) fn dataset_exists(&mut self, id: u64) -> Result<bool> {
+        if id == self.cur_ds || self.others.contains_key(&id) {
+            return Ok(true);
+        }
+        let root = self.root_tree();
+        Ok(btree::get(&mut self.s, &root, &Key::new(META_OID, item::DATASET, id))?.is_some())
     }
 
     /// Aktivuje dataset, jehoz korenem je `path` (napr. "/" nebo "/projekt").
@@ -420,6 +465,9 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Zapisovatelny klon snapshotu `snapshot` datasetu `dataset` jako novy
     /// dataset `path`. Okamzity (sdili bloky). Hned commituje.
+    ///
+    /// Vnorene datasety snapshotu jsou v klonu hranice (viz popis modulu):
+    /// klon nikdy nevytvori druhou cestu k vnorenemu datasetu.
     pub fn clone_snapshot(&mut self, dataset: &str, snapshot: &str, path: &str) -> Result<u64> {
         self.require(dataset, crate::perm::rights::MANAGE)?;
         self.require_parent(path, crate::perm::rights::CREATE)?;
@@ -446,10 +494,38 @@ impl<D: BlockDevice> Fs<D> {
                     ..DsCtx::default()
                 },
             );
+            let parent_ds = fs.cur_ds;
+            fs.activate(id)?;
+            fs.drop_inherited_snapshots()?;
+            fs.activate(parent_ds)?;
             fs.link_dataset(parent, name, id)?;
             fs.commit()?;
             Ok(id)
         })
+    }
+
+    /// Klon zdedil ze snapshotu zaznamy starsich snapshotu puvodu, jejich
+    /// metadata a deadlisty. Patri puvodu: v klonu by se tvarily jako jeho
+    /// vlastni (smazani klonu by je "mazalo", kontrola by je brala jako
+    /// koreny a pocet klonu zdedeneho snapshotu by smazani klonu blokoval -
+    /// napr. dva soucasne klony "bokem" tehoz datasetu). Aktivni = klon.
+    fn drop_inherited_snapshots(&mut self) -> Result<()> {
+        for kind in [item::SNAPSHOT, item::SNAPMETA, item::DEADLIST] {
+            let root = self.s.root;
+            let keys: Vec<Key> = btree::collect(
+                &mut self.s,
+                &root,
+                &Key::new(META_OID, kind, 0),
+                &Key::new(META_OID, kind + 1, 0),
+            )?
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+            for k in keys {
+                self.del(&k)?;
+            }
+        }
+        Ok(())
     }
 
     /// Smaze dataset `path` i s jeho snapshoty a uvolni bloky, ktere drzel
@@ -467,6 +543,10 @@ impl<D: BlockDevice> Fs<D> {
             let d = fs.lookup_child(&root, parent, name)?.ok_or(Error::NotFound)?;
             if d.kind != KIND_DATASET {
                 return Err(Error::WrongType);
+            }
+            // Hranice v klonu: smazani by zrusilo dataset originalu.
+            if fs.is_boundary(parent, &d)? {
+                return Err(Error::NotSupported);
             }
             let id = d.oid;
             fs.ensure_room_freeing(16)?;
@@ -521,10 +601,11 @@ impl<D: BlockDevice> Fs<D> {
         self.put(key, rec.encode())
     }
 
-    /// Obsahuje aktivni dataset polozku jineho datasetu?
+    /// Obsahuje aktivni dataset polozku jineho datasetu (vlastni vnoreny
+    /// dataset, ne hranici - ta s klonem jen zmizi)?
     pub(super) fn contains_datasets(&mut self) -> Result<bool> {
         let root = self.s.root;
-        let mut found = false;
+        let mut found: Vec<(u64, Dirent)> = Vec::new();
         btree::range(
             &mut self.s,
             &root,
@@ -533,15 +614,18 @@ impl<D: BlockDevice> Fs<D> {
             &mut |k, v| {
                 if k.kind == item::DIRENT
                     && let Ok(list) = crate::layout::decode_dirents(v)
-                    && list.iter().any(|d| d.kind == KIND_DATASET)
                 {
-                    found = true;
-                    return Ok(false);
+                    found.extend(list.into_iter().filter(|d| d.kind == KIND_DATASET).map(|d| (k.oid, d)));
                 }
                 Ok(true)
             },
         )?;
-        Ok(found)
+        for (dir, d) in found {
+            if !self.is_boundary(dir, &d)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Uvolni bloky aktivniho (ulozeneho) datasetu narozene po `floor`:
@@ -652,6 +736,10 @@ impl<D: BlockDevice> Fs<D> {
                 match e.kind {
                     super::Kind::Dir => stack.push((ds, e.oid, p)),
                     super::Kind::Dataset => {
+                        let d = Dirent { oid: e.oid, kind: KIND_DATASET, name: e.name.clone() };
+                        if self.is_boundary(oid, &d)? {
+                            continue;
+                        }
                         out.insert(e.oid, p.clone());
                         stack.push((e.oid, ROOT_OID, p));
                     }

@@ -167,18 +167,27 @@ impl<D: BlockDevice> Fs<D> {
                     r.problem(format!("{name}: uzel {} lezi mimo svazek", p.block));
                     continue;
                 }
-                if seen_nodes.set(p.block) {
+                // Uzel uz videny v jine verzi (sdileny se snapshotem): bloky
+                // uz jsou zapocitane. Zivy strom datasetu (napr. klon) ho
+                // ale musi projit kvuli objektum - jinak by objekty
+                // a zaznamy zurnalu ve sdilenych listech chybely.
+                let shared = seen_nodes.set(p.block);
+                if shared {
                     if live {
                         r.problem(format!("uzel {} je ve zivem strome vickrat", p.block));
+                        continue;
                     }
-                    continue;
-                }
-                for b in p.block..p.block + crate::layout::NODE_BLOCKS {
-                    if used.set(b) {
-                        r.problem(format!("blok {b} pouziva uzel i neco jineho"));
+                    if group.is_none() {
+                        continue;
                     }
+                } else {
+                    for b in p.block..p.block + crate::layout::NODE_BLOCKS {
+                        if used.set(b) {
+                            r.problem(format!("blok {b} pouziva uzel i neco jineho"));
+                        }
+                    }
+                    r.tree_blocks += crate::layout::NODE_BLOCKS;
                 }
-                r.tree_blocks += crate::layout::NODE_BLOCKS;
                 let node = match self.s.load(&p) {
                     Ok(n) => n.clone(),
                     Err(e) => {
@@ -193,7 +202,7 @@ impl<D: BlockDevice> Fs<D> {
                             if let Some(g) = group {
                                 objects[g].note(&k, &v, tf, &mut r);
                             }
-                            if k.kind != item::EXTENT {
+                            if shared || k.kind != item::EXTENT {
                                 continue;
                             }
                             let e = match Extent::decode(&v) {
@@ -352,8 +361,10 @@ impl Objects {
 struct Objects {
     /// oid -> (druh, velikost) ze zaznamu objektu.
     inodes: BTreeMap<u64, (u8, u64)>,
-    /// (oid, druh) z polozek adresaru.
-    dirents: Vec<(u64, u8)>,
+    /// oid -> rodic ze zaznamu objektu.
+    parents: BTreeMap<u64, u64>,
+    /// (oid, druh, slozka) z polozek adresaru.
+    dirents: Vec<(u64, u8, u64)>,
     /// oid -> delka cile odkazu.
     links: BTreeMap<u64, u64>,
     /// Popis opravneni -> kolik objektu na nej ukazuje.
@@ -391,6 +402,7 @@ impl Objects {
             item::INODE => match Inode::decode(v, tf) {
                 Ok(i) => {
                     self.inodes.insert(k.oid, (i.kind, i.size));
+                    self.parents.insert(k.oid, i.parent);
                     self.gens.insert(k.oid, (i.generation, i.xattrs));
                     if i.acl != 0 {
                         *self.acl_uses.entry(i.acl as u64).or_default() += 1;
@@ -412,7 +424,7 @@ impl Objects {
                     self.dirents.extend(
                         list.into_iter()
                             .filter(|d| d.kind != crate::layout::KIND_DATASET)
-                            .map(|d| (d.oid, d.kind)),
+                            .map(|d| (d.oid, d.kind, k.oid)),
                     );
                 }
                 Err(e) => r.problem(format!("polozka adresare {} je poskozena: {e:?}", k.oid)),
@@ -535,7 +547,21 @@ impl Objects {
                 r.problem(format!("index popisu opravneni ukazuje na spatny popis {id}"));
             }
         }
-        for &(oid, kind) in &self.dirents {
+        // Kazdy objekt ma nejvys jednu polozku adresare a jeho rodic je
+        // slozka s ni (na tom stavi rozdil a slouceni - jmeno hledaji
+        // v rodici).
+        let mut named: BTreeMap<u64, u64> = BTreeMap::new();
+        for &(oid, _, dir) in &self.dirents {
+            if named.insert(oid, dir).is_some() {
+                r.problem(format!("objekt {oid} ma vic polozek adresare"));
+            }
+            if let Some(&p) = self.parents.get(&oid)
+                && p != dir
+            {
+                r.problem(format!("objekt {oid}: rodic v zaznamu {p}, polozka ve slozce {dir}"));
+            }
+        }
+        for &(oid, kind, _) in &self.dirents {
             match self.inodes.get(&oid) {
                 None => r.problem(format!("polozka adresare ukazuje na neexistujici objekt {oid}")),
                 Some(&(k, _)) if k != kind => {

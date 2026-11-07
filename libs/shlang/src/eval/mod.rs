@@ -5,8 +5,8 @@
 //!   Preruseni (Ctrl-C, `SH_INTERRUPTED`) zachytit nejde.
 //! - Prikaz na nejvyssi urovni (radek, telo cyklu) vypise svou hodnotu
 //!   (`Host::emit`); v tele closure a funkce je hodnotou posledni prikaz.
-//! - Zmeny souboru jdou nejdriv do prekryvu ([`crate::vfs::overlay`]);
-//!   na konci radku se prevezmou s linym undo, nad limit (zamek
+//! - Zmeny souboru jdou nejdriv do konceptu radku ([`crate::vfs::draft`]:
+//!   klony FS bokem); na konci radku se prevezmou s undo, nad limit (zamek
 //!   nebezpecnych operaci) az po potvrzeni.
 
 mod builtins;
@@ -28,7 +28,8 @@ use crate::parse::{Options, parse};
 use crate::sig::Sigs;
 use crate::span::Span;
 use crate::value::{ClosureVal, Value};
-use crate::vfs::overlay::{DiffEntry, Overlay};
+use crate::vfs::diff::{DiffEntry, diff_value};
+use crate::vfs::draft::Draft;
 use crate::vfs::undo::UndoLog;
 
 #[cfg(test)]
@@ -129,13 +130,12 @@ pub struct Interp {
     pub cwd: String,
     pub home: String,
     pub undo: UndoLog,
-    overlay: Overlay,
+    pub(crate) draft: Draft,
     /// Prikaz, ktery zmeni vic souboru (mimo /tmp), se prevezme az po
     /// potvrzeni.
     pub lock_threshold: usize,
     /// Zmeny uz potvrdil `preview`.
     confirmed: bool,
-    preview_depth: usize,
     pub history: History,
     needs: Option<NeedsRt>,
     pub jobs: Vec<Job>,
@@ -161,10 +161,9 @@ impl Interp {
             cwd: home.into(),
             home: home.into(),
             undo: UndoLog::new(),
-            overlay: Overlay::new(),
+            draft: Draft::new(),
             lock_threshold: 20,
             confirmed: false,
-            preview_depth: 0,
             history: History::default(),
             needs: None,
             jobs: Vec::new(),
@@ -244,7 +243,11 @@ impl Interp {
 
     /// Konec radku: prevzeti zmen.
     fn finish(&mut self, host: &mut dyn Host, r: Result<(), ShError>) -> (Result<(), ShError>, Vec<DiffEntry>) {
-        let out = self.commit_overlay(host);
+        // Preruseni uprostred `preview`: rozpracovane vrstvy nahledu pryc.
+        while self.draft.depth() > 0 {
+            self.draft.discard_top(host.fs());
+        }
+        let out = self.commit_draft(host);
         self.confirmed = false;
         match out {
             Ok(d) => (r, d),
@@ -252,28 +255,47 @@ impl Interp {
         }
     }
 
-    /// Prevezme zmeny prekryvu do FS: zamek nebezpecnych operaci (nad limit
-    /// jen po potvrzeni) a line undo. Pouziva ho konec radku i spusteni
+    /// Prevezme koncept radku do FS: zamek nebezpecnych operaci (nad limit
+    /// jen po potvrzeni) a undo. Pouziva ho konec radku i spusteni
     /// programu, takze zamek nejde obejit. Odmitnuti = nic se nezmeni.
-    pub(crate) fn commit_overlay(&mut self, host: &mut dyn Host) -> Result<Vec<DiffEntry>, ShError> {
-        let overlay = core::mem::take(&mut self.overlay);
-        if overlay.is_empty() {
+    pub(crate) fn commit_draft(&mut self, host: &mut dyn Host) -> Result<Vec<DiffEntry>, ShError> {
+        if self.draft.is_empty() {
             return Ok(Vec::new());
         }
-        let diff = overlay.changes(host.fs()).map_err(|e| ShError::sys(e, "zmeny nejde spocitat"))?;
+        let diff = match self.draft.changes(host.fs()) {
+            Ok(d) => d,
+            Err(e) => {
+                self.draft.discard_all(host.fs());
+                return Err(ShError::sys(e, "zmeny nejde spocitat (nic se nezmenilo)"));
+            }
+        };
         let risky = diff.iter().filter(|d| !crate::vfs::path::within(&d.path, "/tmp")).count();
         if risky > self.lock_threshold && !self.confirmed {
             let q = alloc::format!(
                 "Prikaz zmeni {risky} souboru (vic nez {}). Prevzit zmeny?",
                 self.lock_threshold
             );
-            if !host.confirm(&q, &crate::vfs::overlay::diff_value(&diff)) {
+            if !host.confirm(&q, &diff_value(&diff)) {
+                self.draft.discard_all(host.fs());
                 return Err(ShError::new(code::REJECTED, "zmeny nebyly prevzaty (nic se nezmenilo)"));
             }
         }
-        self.undo
-            .commit_diff(host.fs(), &overlay, diff, &self.line)
-            .map_err(|e| ShError::sys(e, "zmeny nejde zapsat"))
+        let c = self
+            .undo
+            .commit(host.fs(), &mut self.draft, diff, &self.line)
+            .map_err(|e| ShError::sys(e, "zmeny nejde zapsat"))?;
+        if c.no_undo {
+            host.note("varovani: FS nema pohledy, zmeny nepujde vratit");
+        }
+        if !c.conflicts.is_empty() {
+            let list = c.conflicts.join(", ");
+            return Err(ShError::new(
+                code::CONFLICT,
+                alloc::format!("{} zmen se neprevzalo, soubory se mezitim zmenily jinak: {list}", c.conflicts.len()),
+            )
+            .hint("ostatni zmeny jsou zapsane; prikaz zopakujte nad aktualnim stavem"));
+        }
+        Ok(c.diff)
     }
 
     /// Spusti skript ze souboru (s hlavickou `lang` a manifestem `needs`).

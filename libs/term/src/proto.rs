@@ -74,26 +74,26 @@ pub struct DecodeError;
 pub struct W(pub Vec<u8>);
 
 impl W {
-    fn u8(&mut self, v: u8) {
+    pub(crate) fn u8(&mut self, v: u8) {
         self.0.push(v);
     }
-    fn u16(&mut self, v: u16) {
+    pub(crate) fn u16(&mut self, v: u16) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
-    fn u32(&mut self, v: u32) {
+    pub(crate) fn u32(&mut self, v: u32) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
-    fn u64(&mut self, v: u64) {
+    pub(crate) fn u64(&mut self, v: u64) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
-    fn i64(&mut self, v: i64) {
+    pub(crate) fn i64(&mut self, v: i64) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
-    fn bytes(&mut self, b: &[u8]) {
+    pub(crate) fn bytes(&mut self, b: &[u8]) {
         self.u32(b.len() as u32);
         self.0.extend_from_slice(b);
     }
-    fn str(&mut self, s: &str) {
+    pub(crate) fn str(&mut self, s: &str) {
         self.bytes(s.as_bytes());
     }
 }
@@ -107,34 +107,34 @@ impl<'a> R<'a> {
     pub fn new(b: &'a [u8]) -> Self {
         Self { b, i: 0 }
     }
-    fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
+    pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
         let s = self.b.get(self.i..self.i.checked_add(n).ok_or(DecodeError)?).ok_or(DecodeError)?;
         self.i += n;
         Ok(s)
     }
-    fn u8(&mut self) -> Result<u8, DecodeError> {
+    pub(crate) fn u8(&mut self) -> Result<u8, DecodeError> {
         Ok(self.take(1)?[0])
     }
-    fn u16(&mut self) -> Result<u16, DecodeError> {
+    pub(crate) fn u16(&mut self) -> Result<u16, DecodeError> {
         Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
     }
-    fn u32(&mut self) -> Result<u32, DecodeError> {
+    pub(crate) fn u32(&mut self) -> Result<u32, DecodeError> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
     }
-    fn u64(&mut self) -> Result<u64, DecodeError> {
+    pub(crate) fn u64(&mut self) -> Result<u64, DecodeError> {
         Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
-    fn i64(&mut self) -> Result<i64, DecodeError> {
+    pub(crate) fn i64(&mut self) -> Result<i64, DecodeError> {
         Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
-    fn bytes(&mut self) -> Result<Vec<u8>, DecodeError> {
+    pub(crate) fn bytes(&mut self) -> Result<Vec<u8>, DecodeError> {
         let n = self.u32()? as usize;
         Ok(self.take(n)?.to_vec())
     }
-    fn str(&mut self) -> Result<String, DecodeError> {
+    pub(crate) fn str(&mut self) -> Result<String, DecodeError> {
         String::from_utf8(self.bytes()?).map_err(|_| DecodeError)
     }
-    fn done(&self) -> Result<(), DecodeError> {
+    pub(crate) fn done(&self) -> Result<(), DecodeError> {
         if self.i == self.b.len() { Ok(()) } else { Err(DecodeError) }
     }
 }

@@ -1328,6 +1328,7 @@ data = rest of the message. One read/write moves at most 32 KiB
 | 20 | `CHECK` | scrub u8 | generation u64, total problems u64, unchecked changes in memory u8, count u32 + descriptions (as many as fit); only with `debug` |
 | 21 | `LIST_PAGE` | path, cursor (name of the last entry of the previous page, empty = from the start), at most u32 | more u8 (1 = something is left) + a page like `LIST` (as much as fits into 60 KiB) |
 | 22 | `SNAP_LIST_PAGE` | snapshot, path, cursor, at most u32 | like `LIST_PAGE` |
+| 87 | `LIST_STAT_PAGE` | path, cursor, at most u32 | more u8 + count u32 + (name, kind u8, oid u64, size u64, mtime) - as much as fits into 60 KiB; rights `LIST` and `TRAVERSE` on the directory |
 | 100 | `SIMULATE_POWER_LOSS` | - | replayed operations u64; only with `debug`, otherwise `ACCESS_DENIED` |
 
 `FsClient::list` and `snapshot_list` read page by page - this solves the
@@ -1344,6 +1345,17 @@ data = rest of the message. One read/write moves at most 32 KiB
   entries ~ 100 MiB on each side). Listing without keeping the whole list
   comes with protocol v2 (a cursor in the tree, the client processes pages
   one by one).
+
+**`LIST_STAT_PAGE`** (`FsClient::list_stat` -> `Vec<StatEntry>`) is a
+listing with metadata for `ls -l`: the client does not have to send `STAT`
+for every entry (thousands of messages for a large directory). Cursor and
+paging like `LIST_PAGE`. The entries are the same as with `LIST` (only
+those the caller has some right to); kind and oid like in `LIST` (for a
+dataset entry kind 4 and the dataset number), size and mtime like `STAT`
+of the entry. Because the metadata is the `STAT` of the entries, the
+operation requires `TRAVERSE` on the directory besides `LIST` (without it
+`STAT` of the entries would fail; otherwise `ACCESS_DENIED`). Works for v1
+and v2 sessions (the same handler).
 
 Example message `READ "/a.txt", offset 0, 100 B`:
 
@@ -1418,8 +1430,10 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 
 History operations (the journal and watching it, view, trash, undo of
 operations, versions, dataset settings, commits, branches, merge, "aside",
-attributes, expiry, dataset creation and deletion) have numbers **54-86** - the table is in
-[FS history](fs-history.md#protocol-operations-54-86).
+attributes, expiry, dataset creation and deletion, version difference, the
+dataset of a path and reading a dataset snapshot) have numbers **54-86** and **88-92** - the table is in
+[FS history](fs-history.md#protocol-operations-54-92). The listing with metadata
+`LIST_STAT_PAGE` has number 87 (module `fsproto::op`, the table above).
 
 ⚠️ **Limitations:** handles are valid until the service restarts; after a
 crash and intent log replay a file may have a different revision (the

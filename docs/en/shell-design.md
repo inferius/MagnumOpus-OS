@@ -7,7 +7,7 @@
 > The research and variants chapters show what was chosen from.
 >
 > Code: `libs/shlang` (language, `no_std` + `alloc`, host tests),
-> `libs/term` (protocol, sessions, VT100, screen), `user/termd` (service).
+> `libs/term` (protocol, sessions, VT100, screen), `user/termd` (broker), `user/shsess` (session process).
 
 ## What to learn from others
 
@@ -180,8 +180,8 @@ for f in (ls ~/Photos | where ext == "jpg") {
 }
 ```
 
-- **Safe defaults:** a command that changes files gets a lazy snapshot
-  (undo). A bulk change over N files runs through "show what will happen"
+- **Safe defaults:** a command that changes files gets a draft in a
+  file system clone and undo. A bulk change over N files runs through "show what will happen"
   ([terminal](architecture.md#shell-and-smart-terminal-proposal)).
 
 ## Grammar decisions
@@ -415,7 +415,7 @@ earlier statements are dropped there; use `log` for a note.
   shell is idle, or on `wait`. `jobs` lists them, `kill N` cancels a waiting
   job.
 - **Recursion depth** is guarded by actual stack use. The host sets the
-  budget; termd has a 256 KB stack and the interpreter may use 160 KB.
+  budget; `shsess` has a 256 KB stack and the interpreter may use 160 KB.
   Exceeding it gives `SH_DEPTH`, not a crash.
 
 ### Language version
@@ -442,7 +442,7 @@ Every command has a short name and a full `verb-noun` name (an alias).
 | `echo`, `log`, `lines`, `split`, `join`, `trim`, `upper`, `lower`, `contains`, `starts-with`, `ends-with`, `replace` | `text-...` | text |
 | `from`, `to`, `describe` | `data-from`, `data-to`, `value-type` | explicit conversions (`json`, `text`, `lines`) |
 | `now`, `sleep` | `time-now`, `time-sleep` | |
-| `undo`, `preview` | `command-undo`, `command-preview` | see [Files](#files-lazy-undo-preview-and-lock) |
+| `undo`, `preview` | `command-undo`, `command-preview` | see [Files](#files-draft-in-a-clone-undo-preview-and-lock) |
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | background jobs |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
 
@@ -506,38 +506,61 @@ for f in (ls ~/Photos | where ext == "jpg") {
 }
 ```
 
-## Files: lazy undo, preview and lock
+## Files: draft in a clone, undo, preview and lock
+
+> **Change from the first shell version:** changes in a dry run are no
+> longer an overlay in the shell's memory but a **clone of the dataset
+> "aside" directly in the file system** (`ASIDE_*` from [FS phase
+> 2](fs-history.md)). Undo no longer relies on a snapshot of the whole
+> volume but on a **view** (`VIEW`) of the affected datasets only. After a
+> program, the changes come from the journal and the `DIFF` operation, not
+> from walking the tree. Why: large writes cost no memory, a program in
+> `preview` works on the same draft as built-in commands, and undo after a
+> program is fast even on a large disk.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="File changes of a command">
-<defs><marker id="se2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="80" width="130" height="56" rx="6"/><text class="t b" x="75" y="104" text-anchor="middle">command</text><text class="m" x="75" y="122" text-anchor="middle">rm, save, mv ...</text>
-<path class="ln" d="M140 108 L188 108" marker-end="url(#se2)"/>
-<rect class="acc" x="190" y="80" width="140" height="56" rx="6"/><text class="t b" x="260" y="104" text-anchor="middle">overlay</text><text class="m" x="260" y="122" text-anchor="middle">dry-run changes</text>
-<path class="ln" d="M330 108 L378 108" marker-end="url(#se2)"/>
-<rect class="box" x="380" y="80" width="120" height="56" rx="6"/><text class="t b" x="440" y="104" text-anchor="middle">diff</text><text class="m" x="440" y="122" text-anchor="middle">end of line</text>
-<path class="ln" d="M500 95 L558 48" marker-end="url(#se2)"/>
-<path class="ln" d="M500 122 L558 172" marker-end="url(#se2)"/>
-<rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N files: apply</text><text class="m" x="655" y="60" text-anchor="middle">lazy snapshot first</text>
-<rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N or preview</text><text class="m" x="655" y="185" text-anchor="middle">show diff, confirm</text>
-<path class="ln dash" d="M655 145 L655 78" marker-end="url(#se2)"/>
-<text class="m" x="10" y="232">A read-only command costs nothing (the overlay is empty, no snapshot). undo restores the last applied changes from the snapshot.</text>
+<svg viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Line draft in a file system clone">
+<defs><marker id="sh2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="80" width="130" height="56" rx="6"/><text class="t b" x="75" y="104" text-anchor="middle">command</text><text class="m" x="75" y="122" text-anchor="middle">rm, save, mv, program</text>
+<path class="ln" d="M140 108 L188 108" marker-end="url(#sh2)"/>
+<rect class="acc" x="190" y="70" width="150" height="76" rx="6"/><text class="t b" x="265" y="94" text-anchor="middle">clone aside</text><text class="m" x="265" y="112" text-anchor="middle">ASIDE_BEGIN on</text><text class="m" x="265" y="128" text-anchor="middle">the first write</text>
+<path class="ln" d="M340 108 L378 108" marker-end="url(#sh2)"/>
+<rect class="box" x="380" y="80" width="130" height="56" rx="6"/><text class="t b" x="445" y="104" text-anchor="middle">ASIDE_CHANGES</text><text class="m" x="445" y="122" text-anchor="middle">end of line</text>
+<path class="ln" d="M510 95 L558 48" marker-end="url(#sh2)"/>
+<path class="ln" d="M510 122 L558 172" marker-end="url(#sh2)"/>
+<rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N: VIEW + APPLY</text><text class="m" x="655" y="60" text-anchor="middle">view for undo, apply</text>
+<rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N or preview</text><text class="m" x="655" y="185" text-anchor="middle">diff, confirm / DISCARD</text>
+<path class="ln dash" d="M655 145 L655 78" marker-end="url(#sh2)"/>
+<text class="m" x="10" y="236">A reading line creates no clone and costs nothing. Clones live in /tmp/.aside/&lt;session&gt;-&lt;n&gt;; nested datasets are</text>
+<text class="m" x="10" y="254">boundaries there and a write into one gets its own clone. Applying is three-way: a foreign change = SH_CONFLICT, not an overwrite.</text>
 </svg>
-<figcaption>Changes go to an overlay; they are applied at the end of the line with a lazy snapshot.</figcaption>
+<figcaption>A line's changes go to a clone of the dataset in the file system; at the end of the line they are applied with a view for undo.</figcaption>
 </figure>
 
-- **Lazy undo:** every command writes to an overlay. At the end of the line
-  the shell computes the diff. An empty diff = nothing happens (read-only
-  commands cost nothing). Otherwise the shell **only now** creates a
-  snapshot (`shell-undo-N`, a cheap CoW snapshot on FS v3) and applies the
-  changes. `undo` reverts the last command and works repeatedly (the last 16
-  commands). On a file system without snapshots the shell keeps the
-  original content of changed files in memory.
-- **"Show what will happen":** `preview { ... }` runs the block as a dry
-  run, shows a table of changes (`added`, `modified`, `removed`,
-  `dir-added`, `dir-removed`, `replaced` = a file replaced by a directory or
-  the other way round) and applies them only after confirmation (`-y`
-  without asking). Rejecting = `SH_REJECTED` and nothing changes.
+- **Line draft:** the first write of a line into a dataset creates its
+  clone (`ASIDE_BEGIN`, `libs/shlang/src/vfs/draft.rs`). Further writes and
+  reads of that dataset go to the clone, so the line sees its own changes.
+  A write into a nested dataset (a boundary in the clone) gets a clone of
+  that dataset. At the end of the line the shell takes the diff from the
+  file system (`ASIDE_CHANGES`). A line that only reads creates no clone
+  and costs nothing extra.
+- **Undo:** before applying (`ASIDE_APPLY`) the shell creates a **view**
+  (`VIEW`, a cheap temporary snapshot and a journal position) of every
+  dataset with changes. `undo` syncs the changed paths with the state in
+  the view (reading via `SNAP_*_OF`) and works repeatedly (last 16
+  commands, older views are released). The file system itself cleans up
+  views after a restart.
+- **Conflict:** applying is three-way against the state the clone started
+  from. When another session or a program changed the same file
+  meanwhile, the change is not applied and the line ends with
+  `SH_CONFLICT` and the list of paths. The other changes are written and
+  `undo` reverts only them.
+- **"Show what will happen":** `preview { ... }` adds another layer (a
+  clone of the clone), runs the block, shows a table of changes (`added`,
+  `modified`, `removed`, `dir-added`, `dir-removed`, `replaced` = a file
+  replaced by a directory or the other way round, `moved`) and applies it
+  to the line draft only after confirmation (`-y` without asking).
+  Rejecting = `ASIDE_DISCARD`, `SH_REJECTED` and nothing changes.
 - **Dangerous operation lock:** a command that would change more than N
   files outside `/tmp` (default N = 20) always asks before the changes are
   applied. It is the same question as with `preview`. Without an attached
@@ -550,42 +573,94 @@ for f in (ls ~/Photos | where ext == "jpg") {
   Otherwise `SH_NEEDS` before it starts. A background job (`bg`, `&`)
   carries the restriction with it, even when it finishes after the script
   has ended.
-- **Programs** get permissions from their manifest through their own fsd
-  session (`CONNECT_AS` with mounted paths, `term::perm::mounts`; write
-  overrides read, paths are mounted at the same place). Before a program
-  starts, the shell applies the line's changes so far (the program sees the
-  real file system), **with the same dangerous operation lock** as at the
-  end of a line: rejecting = the program does not start. Then it takes a
-  snapshot and remembers the directories the program may write to (the
-  whole file system with full rights). When the program changed nothing,
-  the undo entry is dropped, so `undo` reverts the previous command.
-  Otherwise `undo` syncs those directories with the snapshot.
+- **Programs:** get the permissions from their manifest through their own
+  fsd session (`CONNECT_AS` with mounted paths, `term::perm::mounts`; write
+  overrides read). Outside `preview` the shell applies the line draft so
+  far before the program starts, **with the same lock** as at the end of a
+  line (rejecting = the program does not start), and creates views of the
+  datasets the program may write to (with full rights `/`, home and the
+  working directory). Afterwards one journal message tells whether
+  anything changed. If not, the undo entry is dropped, so `undo` reverts
+  the previous command. If so, `DIFF` returns the changed paths and `undo`
+  syncs them with the view.
+- **A program in `preview`:** the shell creates clones of the datasets the
+  program may write to and mounts them for it **under the original names**
+  (`ExecNeeds::aside`). Writes outside the clones get read-only access. The
+  program thus changes only the draft: its changes are in the preview
+  table and disappear after rejecting.
 
-⚠️ **Limits:** the overlay keeps written data in memory until the end of
-the line (large writes cost memory). Programs outside the shell do not see
-the overlay, so `preview` refuses them (`SH_NEEDS`) until fsd can do
-dataset clones and diffs over the protocol (`libs/fs` can, `fsproto` cannot
-yet). A snapshot over `fsproto` is a snapshot of the whole volume, not only
-of the affected dataset.
+```shell-b
+preview { rm *.tmp; echo hotovo | save ~/vysledek.txt }
+undo
+```
+
+⚠️ **Limits:**
+
+- A clone cannot be created where the file system has no writable
+  `/tmp`. The write then ends with an error and a hint (`NOT_SUPPORTED`).
+- Undo of a program with full rights guards the datasets of `/`, home and
+  the working directory. It does not revert a change in another nested
+  dataset.
+- A view also captures changes of other sessions in the same directories
+  while the program runs. `undo` would revert them too.
+- A `DIFF` larger than one message ends with `BUFFER_TOO_SMALL`. Undo of
+  the program then syncs the whole dataset with the view (slower, but
+  correct).
 
 ## Terminal and session service
 
 <figure class="diagram">
-<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Session service">
-<defs><marker id="se3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Session service">
+<defs><marker id="sh3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="30" width="170" height="60" rx="6"/><text class="t b" x="95" y="55" text-anchor="middle">terminal window</text><text class="m" x="95" y="74" text-anchor="middle">(6c GUI, test, later SSH)</text>
-<path class="ln" d="M180 60 L268 90" marker-end="url(#se3)"/>
-<text class="m" x="185" y="56">native protocol</text>
-<rect class="acc" x="270" y="50" width="220" height="110" rx="6"/><text class="t b" x="380" y="75" text-anchor="middle">termd</text><text class="m" x="380" y="95" text-anchor="middle">session: interpreter, cwd,</text><text class="m" x="380" y="111" text-anchor="middle">history, undo, jobs</text><text class="m" x="380" y="127" text-anchor="middle">output blocks</text><text class="m" x="380" y="143" text-anchor="middle">survive a detached window</text>
-<path class="ln" d="M490 80 L578 60" marker-end="url(#se3)"/>
-<rect class="box" x="580" y="30" width="170" height="56" rx="6"/><text class="t b" x="665" y="54" text-anchor="middle">fsd</text><text class="m" x="665" y="72" text-anchor="middle">files, snapshots</text>
-<path class="ln" d="M490 125 L578 140" marker-end="url(#se3)"/>
-<rect class="box" x="580" y="115" width="170" height="56" rx="6"/><text class="t b" x="665" y="139" text-anchor="middle">VT100 adapter</text><text class="m" x="665" y="157" text-anchor="middle">log / serial line</text>
-<path class="ln dash" d="M380 160 L380 198" marker-end="url(#se3)"/>
-<rect class="box" x="270" y="200" width="220" height="44" rx="6"/><text class="t b" x="380" y="220" text-anchor="middle">screen + own font</text><text class="m" x="380" y="236" text-anchor="middle">framebuffer (capability)</text>
+<path class="ln" d="M180 60 L248 60" marker-end="url(#sh3)"/>
+<text class="m" x="184" y="50">protocol</text>
+<rect class="acc" x="250" y="30" width="150" height="60" rx="6"/><text class="t b" x="325" y="55" text-anchor="middle">termd</text><text class="m" x="325" y="74" text-anchor="middle">only routes messages</text>
+<path class="ln" d="M400 50 L468 40" marker-end="url(#sh3)"/>
+<path class="ln" d="M400 75 L468 110" marker-end="url(#sh3)"/>
+<rect class="box" x="470" y="15" width="150" height="50" rx="6"/><text class="t b" x="545" y="36" text-anchor="middle">shsess 1</text><text class="m" x="545" y="54" text-anchor="middle">interpreter, undo, jobs</text>
+<rect class="box" x="470" y="85" width="150" height="50" rx="6"/><text class="t b" x="545" y="106" text-anchor="middle">shsess 2</text><text class="m" x="545" y="124" text-anchor="middle">own process</text>
+<path class="ln" d="M620 40 L668 75" marker-end="url(#sh3)"/>
+<path class="ln" d="M620 110 L668 85" marker-end="url(#sh3)"/>
+<rect class="box" x="670" y="55" width="80" height="50" rx="6"/><text class="t b" x="710" y="78" text-anchor="middle">fsd</text><text class="m" x="710" y="95" text-anchor="middle">clones</text>
+<rect class="warn" x="250" y="170" width="150" height="56" rx="6"/><text class="t b" x="325" y="193" text-anchor="middle">session registry</text><text class="m" x="325" y="211" text-anchor="middle">spare ends</text>
+<path class="ln dash" d="M400 198 L545 137" marker-end="url(#sh3)"/>
+<path class="ln dash" d="M325 90 L325 168" marker-end="url(#sh3)"/>
+<text class="m" x="332" y="140">Park / Claim</text>
+<text class="m" x="10" y="262">A crashing session does not bring down the others or termd. termd crashes: sessions and jobs keep running, a new termd</text>
+<text class="m" x="10" y="280">takes them over from the registry (Adopt) and the window attaches to them (Attach) with block replay.</text>
 </svg>
-<figcaption>Sessions belong to the termd service; a window only attaches.</figcaption>
+<figcaption>Each session in its own process; termd is only a broker, the registry keeps sessions across its restart.</figcaption>
 </figure>
+
+**A process per session** (`libs/term/src/broker.rs`, `libs/term/src/ctl.rs`):
+
+- termd (`user/termd`) has no interpreter. It receives the window's
+  messages and routes them by session number to the `shsess` process
+  (`user/shsess`), one per session. Block and prompt numbers of session `N`
+  lie in the range `N << 32`, so an answer to a prompt (`Answer`) can be
+  routed without a table.
+- **A crashing session** does not bring down the other sessions or termd;
+  the window gets `Fail` "relace N skoncila".
+- **Session registry:** besides the main channel to termd every session has
+  a spare channel. termd stores its other end in the registry (`Park`). The
+  registry is held by the process that starts termd (today a test in init,
+  later the supervisor).
+- **termd ends or crashes:** the sessions detach. A running command and
+  background jobs finish and the output is stored in blocks. After its
+  start a new termd collects the spare ends (`Claim`), sends `Adopt` on
+  them and the sessions move to the new termd. The window then attaches
+  (`Attach`) with block replay. Without a registry the sessions finish and
+  end.
+- **Clones aside** carry the session's tag in their name
+  (`/tmp/.aside/<tag>-<n>`). A new termd discards clones of sessions that
+  no longer run (a crash in the middle of a line). That is why only one
+  termd (one registry) may run in the system.
+
+⚠️ **Limit:** `Sessions` reports the working directory from the last
+`Attach` (termd does not ask the session, so it does not block on a busy
+session).
+
 
 ### Native protocol (`libs/term/src/proto.rs`)
 
@@ -611,7 +686,7 @@ and `Fail`.
 - Every command is a **block** (line, items, result, duration). A block can
   be collapsed, copied, rerun or two runs compared; the terminal does that,
   the service holds the data.
-- **Sessions belong to the service.** `Detach` (a window closed or crashed)
+- **Sessions belong to the service, not the window.** `Detach` (a window closed or crashed)
   does not end the session: a running command finishes, its output is
   stored in blocks and replayed on `Attach`. A question without an attached
   window is safely refused.
@@ -644,12 +719,12 @@ used. The same screen will serve as the rescue text console.
 | What | Status |
 |---|---|
 | language, formatter, interpreter, undo, preview, lock, needs | done, host tests (`cargo test -p shlang`) |
-| protocol, session service, VT100, screen, mounted paths | done, host tests (`cargo test -p term`) |
-| `termd` in initfs | done; file system over `fsproto`, output mirrored to the log |
-| QEMU test | done: `user/init/src/tests/shell.rs` starts termd with its own fsd session and checks writes, undo via an fsd snapshot, Ctrl-C, notation conversion and block replay after detaching; starting termd outside tests belongs in the init supervisor (later) |
+| protocol, session service, broker, registry, VT100, screen, mounted paths | done, host tests (`cargo test -p term`) |
+| `termd` and `shsess` in initfs | done; sessions in their own processes, file system over `fsproto` (clones aside, views, `LIST_STAT_PAGE`), output mirrored to the log |
+| QEMU test | done: `user/init/src/tests/shell.rs` starts termd with its own fsd session and checks writes (draft in a clone), undo via an fsd view, Ctrl-C, notation conversion, block replay after detaching and that a session and its job survive a termd crash and a new termd takes them over from the registry; starting termd outside tests belongs in the init supervisor (later) |
 | keyboard input | waits for `inputd` (milestone 6a, branch not in `main`); until then the window or test sends lines |
 | drawing into the framebuffer | library done; waits for the framebuffer to be passed as a capability (kernel, `userboot`) |
-| starting programs with their own fsd session | permission mapping done (`term::perm`); no program with a shell interface yet |
+| starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
 ## Shell errors
 
@@ -788,3 +863,16 @@ already been reverted (16 commands are remembered).
 It is guarded by stack use, not by the number of calls.
 
 **What to do:** rewrite the recursion as a loop (`for`, `while`).
+
+### `SH_CONFLICT` (conflict)
+
+**Meaning:** part of a line's changes was not applied because the file
+had meanwhile changed in another way too (another session, a program).
+
+**When:** when a line's draft or a preview is applied. Applying is
+three-way: against the state the clone started from. What changed in the
+original only elsewhere is applied; what changed on both sides stays as it
+is in the original.
+
+**What to do:** the other changes are written and `undo` reverts them.
+Repeat the command over the current state of the files in the message.

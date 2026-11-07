@@ -1,6 +1,7 @@
-//! Operace historie (protokol v2, op 54-86): zurnal zmen a jeho
+//! Operace historie (protokol v2, op 54-86, 88-89): zurnal zmen a jeho
 //! sledovani, pohled, kos, vraceni operaci, verze, nastaveni datasetu,
-//! commity, vetve a merge, "zkusit zmeny bokem", atributy a expirace.
+//! commity, vetve a merge, "zkusit zmeny bokem", atributy a expirace,
+//! rozdil verzi a dataset cesty.
 //!
 //! Cesty jsou cesty relace (`Session::map`); cesty, ktere vraci FS, se
 //! prelozi zpet (`Session::unmap`). Prava kontroluje FS podle identity.
@@ -14,7 +15,7 @@ use alloc::vec::Vec;
 
 use fsproto::hist::{
     AutoRule, Branch, Change, CommitInfo, FileVersion, JournalEntry, JournalPage, MergeConflict, MergeReport,
-    Settings, TrashEntry, Undone, conflict, get_opt_time, op, put_opt_time,
+    Settings, TrashEntry, Undone, conflict, encode_diff, get_diff_request, get_opt_time, op, put_opt_time,
 };
 use fsproto::{Reader, Writer};
 use libos::{Error, Result, time};
@@ -108,6 +109,45 @@ fn kind_raw(k: fs::Kind) -> u8 {
     }
 }
 
+fn change(c: fs::Change) -> Change {
+    Change {
+        kind: match c.kind {
+            fs::ChangeKind::Added => 1,
+            fs::ChangeKind::Removed => 2,
+            fs::ChangeKind::Modified => 3,
+            fs::ChangeKind::Moved => 4,
+            fs::ChangeKind::MovedModified => 5,
+        },
+        path: c.path,
+        old_path: c.old_path.unwrap_or_default(),
+        oid: c.oid,
+        is_dir: c.is_dir,
+    }
+}
+
+/// Koren datasetu, ve kterem lezi `path` (cesta ve FS). libs/fs na to
+/// nema verejne API: pruchod predku od korene, prvni se stejnym datasetem
+/// (`Stat::dataset`) je jeho koren. Kdyz STAT `path` projde, projdou i
+/// predci (pruchod k `path` potrebuje `TRAVERSE` na kazdem z nich).
+fn dataset_root(fs: &mut fs::Fs<crate::blkdev::BlkDev>, path: &str) -> Result<String> {
+    let id = fs.stat(path)?.dataset;
+    let mut prefix = String::from("/");
+    if fs.stat(&prefix)?.dataset == id {
+        return Ok(prefix);
+    }
+    for name in path.split('/').filter(|n| !n.is_empty()) {
+        if prefix.len() > 1 {
+            prefix.push('/');
+        }
+        prefix.push_str(name);
+        if fs.stat(&prefix)?.dataset == id {
+            return Ok(prefix);
+        }
+    }
+    // Sam `path` ma dataset `id`: sem se nedojde.
+    Err(Error::Corrupted)
+}
+
 fn put_list<T>(w: &mut Writer, items: &[T], f: impl Fn(&mut Writer, &T)) {
     let n = items.len().min(fsproto::hist::MAX_ITEMS);
     w.u32(n as u32);
@@ -117,9 +157,12 @@ fn put_list<T>(w: &mut Writer, items: &[T], f: impl Fn(&mut Writer, &T)) {
 }
 
 impl Service {
-    /// Operace historie; `None` = neni z teto skupiny.
+    /// Operace historie; `None` = neni z teto skupiny. Vypis s metadaty
+    /// (`LIST_STAT_PAGE`, 87) a cteni snapshotu datasetu (`SNAP_*_OF`,
+    /// 90-92) obsluhuje `serve.rs` spolu s ostatnimi vypisy a ctenim
+    /// snapshotu.
     pub fn handle_hist(&mut self, sess: &mut Session, opcode: u32, r: &mut Reader) -> Option<Result<Reply>> {
-        if !(op::JOURNAL_READ..=op::DATASET_DELETE).contains(&opcode) {
+        if opcode == fsproto::op::LIST_STAT_PAGE || !(op::JOURNAL_READ..=op::DATASET_OF).contains(&opcode) {
             return None;
         }
         Some(self.hist(sess, opcode, r))
@@ -337,26 +380,26 @@ impl Service {
             }
             op::ASIDE_CHANGES => {
                 let clone = sess.map(&r.str()?, false)?;
-                let list: Vec<Change> = fs
-                    .diff_clone(&clone)?
-                    .into_iter()
-                    .map(|c| Change {
-                        kind: match c.kind {
-                            fs::ChangeKind::Added => 1,
-                            fs::ChangeKind::Removed => 2,
-                            fs::ChangeKind::Modified => 3,
-                            fs::ChangeKind::Moved => 4,
-                            fs::ChangeKind::MovedModified => 5,
-                        },
-                        path: c.path,
-                        old_path: c.old_path.unwrap_or_default(),
-                        oid: c.oid,
-                        is_dir: c.is_dir,
-                    })
-                    .collect();
-                put_list(&mut w, &list, |w, c| {
-                    w.u8(c.kind).str(&c.path).str(&c.old_path).u64(c.oid).u8(c.is_dir as u8);
-                });
+                let list: Vec<Change> = fs.diff_clone(&clone)?.into_iter().map(change).collect();
+                put_list(&mut w, &list, |w, c| c.put(w));
+            }
+            op::DIFF => {
+                // Jen cteni historie (jako VIEW, ASIDE_CHANGES); MANAGE ke
+                // koreni datasetu overi FS.
+                let (ds, from, to) = get_diff_request(r)?;
+                let ds = sess.map(&ds, false)?;
+                let list: Vec<Change> = fs.diff(&ds, &from, to.as_deref())?.into_iter().map(change).collect();
+                encode_diff(&mut w, &list, fsproto::MAX_REPLY)?;
+            }
+            op::DATASET_OF => {
+                let path = sess.map(&r.str()?, false)?;
+                let root = sess.unmap(&dataset_root(fs, &path)?);
+                // Koren mimo pripojene cesty relace: relace ho nevidi, pro
+                // ni neexistuje (jako STAT cesty mimo pripojene).
+                if root.is_empty() {
+                    return Err(Error::NotFound);
+                }
+                w.str(&root);
             }
             op::XATTR_GET => {
                 let path = sess.map(&r.str()?, false)?;

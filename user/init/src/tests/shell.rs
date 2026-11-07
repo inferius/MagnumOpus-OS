@@ -1,17 +1,21 @@
 //! Shell a sluzba relaci (milnik 6b) v systemu: termd z initfs, FS pres
 //! fsd, nativni protokol terminalu.
 //!
-//! Test hraje roli okna terminalu: pripoji se, posila radky, odpoji se
-//! a znovu pripoji. Overuje zapis do FS, line undo pres snapshot fsd,
-//! preruseni (Ctrl-C), prevod zapisu a prehrani bloku po odpojeni.
+//! Test hraje roli okna terminalu a registru relaci: pripoji se, posila
+//! radky, odpoji se a znovu pripoji. Overuje zapis do FS (koncept radku
+//! v klonu bokem), undo pres pohled fsd, preruseni (Ctrl-C), prevod zapisu,
+//! prehrani bloku po odpojeni a to, ze relace (proces `shsess`) i jeji
+//! uloha na pozadi preziji pad termd a novy termd je prevezme z registru.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use libos::abi::bootstrap::kind;
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
-use libos::{Channel, Startup, time};
+use libos::{Channel, Handle, Process, Startup, time};
+use term::ctl::{RegMsg, Registry};
 use shlang::value::Value;
 use term::proto::{ClientMsg, Item, ServerMsg};
 
@@ -71,19 +75,72 @@ impl Window {
     }
 }
 
-fn session(s: &Startup) -> TestResult {
+/// Registr relaci (roli supervisoru tu hraje test): drzi nahradni konce
+/// kanalu relaci, aby prezily konec termd.
+struct Reg {
+    store: Registry<Handle>,
+    chan: Option<Channel>,
+}
+
+impl Reg {
+    /// Zpracuje zpravy termd; `until_claim` = pockat na `Claim` (start).
+    fn pump(&mut self, until_claim: bool) -> TestResult {
+        let Some(chan) = &self.chan else { return Ok(()) };
+        loop {
+            let m = if until_claim {
+                chan.read(Some(time::deadline_after(Duration::from_secs(10))))
+            } else {
+                chan.try_read()
+            };
+            let m = match m {
+                Ok(m) => m,
+                Err(libos::Error::ShouldWait) => return Ok(()),
+                // termd skoncil: konec kanalu, uschovane konce zustavaji.
+                Err(libos::Error::PeerClosed) if !until_claim => {
+                    self.chan = None;
+                    return Ok(());
+                }
+                Err(e) => return Err(fail("cteni registru", e)),
+            };
+            let msg = RegMsg::decode(&m.data).map_err(|_| String::from("neplatna zprava registru"))?;
+            let claim = msg == RegMsg::Claim;
+            if let Some((reply, hs)) = self.store.handle(msg, m.handles) {
+                chan.write(&reply.encode(), hs).map_err(|e| fail("odpoved registru", e))?;
+            }
+            if claim && until_claim {
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Spusti termd s FS, initfs a novym kanalem registru; vrati okno.
+fn start_termd(s: &Startup, reg: &mut Reg) -> Result<(Process, Window), String> {
     let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
     let own = fs.connect().map_err(|e| fail("nova relace fsd", e))?;
     let initfs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let image = initfs.find("termd").ok_or("termd neni v initfs")?;
-    let handles = alloc::vec![StartHandle::user(own.into_channel().into_handle())];
-    let (_proc, chan) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
+    let vmo = s.initfs.as_ref().ok_or("initfs chybi")?;
+    let (here, there) = Channel::create().map_err(|e| fail("kanal registru", e))?;
+    let handles = alloc::vec![
+        StartHandle::user(own.into_channel().into_handle()),
+        StartHandle::user(there.into_handle()),
+        StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None).map_err(|e| fail("initfs", e))?),
+    ];
+    let (proc, chan) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
+    reg.chan = Some(here);
+    reg.pump(true)?;
     let w = Window { chan };
-
     w.send(ClientMsg::Hello { version: term::proto::VERSION, cols: 80, rows: 25 })?;
     if !matches!(w.recv()?, ServerMsg::Welcome { .. }) {
         return Err("termd neposlal Welcome".into());
     }
+    Ok((proc, w))
+}
+
+fn session(s: &Startup) -> TestResult {
+    let mut reg = Reg { store: Registry::default(), chan: None };
+    let (proc, w) = start_termd(s, &mut reg)?;
     w.send(ClientMsg::Attach { session: 0 })?;
     let id = match w.recv()? {
         ServerMsg::Attached { session, .. } => session,
@@ -148,6 +205,36 @@ fn session(s: &Startup) -> TestResult {
     if !replayed {
         return Err("blok spusteny bez okna se neprehral".into());
     }
+
+    // Pad termd: relace (vlastni proces) i uloha na pozadi bezi dal.
+    w.ok(id, "bg { sleep 2s; echo prezil > /shell-test/bg.txt }")?;
+    reg.pump(false)?;
+    if reg.store.is_empty() {
+        return Err("termd neuschoval nahradni konec relace".into());
+    }
+    proc.kill().map_err(|e| fail("ukonceni termd", e))?;
+    let _ = proc.wait_exit(Some(time::deadline_after(Duration::from_secs(5))));
+    drop(w);
+    reg.pump(false)?;
+    let (proc2, w) = start_termd(s, &mut reg)?;
+    w.send(ClientMsg::Attach { session: id })?;
+    loop {
+        match w.recv()? {
+            ServerMsg::Attached { session, .. } if session == id => break,
+            ServerMsg::Fail { message } => return Err(alloc::format!("relace se neprevzala: {message}")),
+            _ => {}
+        }
+    }
+    w.ok(id, "sleep 3s")?;
+    crate::check_eq!(
+        w.value(id, "open /shell-test/bg.txt | from text")?,
+        Value::str("prezil"),
+        "uloha dobehla bez termd"
+    );
+    // Klony bokem se po radcich uklizi.
+    crate::check_eq!(w.value(id, "ls -a /tmp/.aside | count")?, Value::Int(0), "zadne zbyle klony");
     w.ok(id, "rm -r /shell-test")?;
+    drop(w);
+    let _ = proc2.wait_exit(Some(time::deadline_after(Duration::from_secs(5))));
     Ok(())
 }

@@ -68,6 +68,8 @@ pub struct Service {
     deferred: Vec<ClientMsg>,
     /// Rozpocet zasobniku interpretu (podle zasobniku sluzby).
     pub stack_budget: usize,
+    /// Proces jedne relace (`shsess`): jedine povolene cislo relace.
+    fixed: Option<u64>,
 }
 
 /// Hostitel interpretu pro jeden radek relace.
@@ -194,7 +196,26 @@ impl Service {
             keep_blocks: 200,
             deferred: Vec::new(),
             stack_budget: 512 * 1024,
+            fixed: None,
         }
+    }
+
+    /// Sluzba jedne relace s cislem `session` (proces relace). Cisla bloku
+    /// a vyzev lezi v rozsahu relace ([`crate::broker::id_base`]), takze je
+    /// prostrednik smeruje bez tabulky.
+    pub fn single(home: &str, session: u64) -> Self {
+        let mut s = Self::new(home);
+        s.fixed = Some(session);
+        s.next_block = crate::broker::id_base(session);
+        s.next_prompt = crate::broker::id_base(session);
+        s
+    }
+
+    /// Ceka nejaka uloha na pozadi?
+    pub fn has_jobs(&self) -> bool {
+        self.sessions
+            .iter()
+            .any(|s| s.interp.jobs.iter().any(|j| j.state == shlang::eval::JobState::Pending))
     }
 
     fn session_index(&self, id: u64) -> Option<usize> {
@@ -202,7 +223,7 @@ impl Service {
     }
 
     fn new_session(&mut self) -> u64 {
-        let id = self.next_session;
+        let id = self.fixed.unwrap_or(self.next_session);
         self.next_session += 1;
         let mut interp = Interp::new(Box::new(Builtins), &self.home);
         interp.stack_budget = self.stack_budget;
@@ -223,7 +244,8 @@ impl Service {
         match msg {
             ClientMsg::Hello { .. } => link.send(&ServerMsg::Welcome { version: VERSION }),
             ClientMsg::Attach { session } => {
-                let id = if session == 0 { self.new_session() } else { session };
+                let first = self.fixed.is_some_and(|f| f == session) && self.sessions.is_empty();
+                let id = if session == 0 || first { self.new_session() } else { session };
                 let Some(i) = self.session_index(id) else {
                     link.send(&ServerMsg::Fail { message: alloc::format!("relace {id} neexistuje") });
                     return;
@@ -341,7 +363,7 @@ impl Service {
             host.push(Item::Warning(w.message));
         }
         if !out.diff.is_empty() {
-            host.push(Item::Diff(shlang::vfs::overlay::diff_value(&out.diff)));
+            host.push(Item::Diff(shlang::vfs::diff::diff_value(&out.diff)));
         }
         let ok = out.result.is_ok();
         if let Err(e) = out.result {

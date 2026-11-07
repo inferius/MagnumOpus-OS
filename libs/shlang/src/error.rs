@@ -40,11 +40,13 @@ pub mod code {
     pub const LANG: &str = "SH_LANG";
     /// Prilis hluboke vnoreni (rekurze).
     pub const DEPTH: &str = "SH_DEPTH";
+    /// Cast zmen radku se neprevzala: soubor se mezitim zmenil jinak.
+    pub const CONFLICT: &str = "SH_CONFLICT";
 
     /// Vsechny kody shellu (test hlida, ze jsou popsane v dokumentaci).
     pub const ALL: &[&str] = &[
         PARSE, UNKNOWN, TYPE, ARGS, NO_MATCH, INTERRUPTED, NEEDS, REJECTED, NO_UNDO, ARITH, USER, FORMAT, LANG,
-        DEPTH,
+        DEPTH, CONFLICT,
     ];
 }
 

@@ -13,12 +13,12 @@ use proptest::prelude::*;
 use super::{assert_clean, opts};
 use crate::{BlockDevice, Fs, Kind, MemDevice, Result};
 
-struct CrashDevice {
-    durable: MemDevice,
-    pending: Vec<(u64, Vec<u8>)>,
+pub(super) struct CrashDevice {
+    pub durable: MemDevice,
+    pub pending: Vec<(u64, Vec<u8>)>,
     /// Po kolika zapisech "vypadne proud": dalsi flush uz nic neulozi.
-    fail_after: Option<usize>,
-    writes: usize,
+    pub fail_after: Option<usize>,
+    pub writes: usize,
 }
 
 impl BlockDevice for CrashDevice {

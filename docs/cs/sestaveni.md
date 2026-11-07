@@ -67,7 +67,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd, shsess
 ```
 
 QEMU dostane emulovanou IOMMU (`intel-iommu`, s `--iommu amd`
@@ -157,7 +157,8 @@ user/usb-hub/    ovladač třídy hub (root hub i externí)
 user/usb-hid/    ovladač klávesnice a myši USB (boot protokol)
 user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
-user/termd/      služba relací shellu a terminálu
+user/termd/      prostředník terminálu (směruje zprávy, registr relací)
+user/shsess/     proces jedné relace shellu (interpret, koncept, undo)
 libs/osfs-proto/ protokol rozšířeného API FS pro Windows (DeviceIoControl) + klient
 tools/osfs/      nástroj pro FS na hostiteli: format, check, mount ve Windows (WinFsp)
 xtask/           build, obraz disku, QEMU, testy

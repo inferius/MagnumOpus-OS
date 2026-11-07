@@ -282,6 +282,7 @@ const USER_PROGRAMS: &[&str] = &[
     "fsd",
     "timed",
     "termd",
+    "shsess",
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

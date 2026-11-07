@@ -69,7 +69,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd, shsess
 ```
 
 QEMU gets an emulated IOMMU (`intel-iommu`, with `--iommu amd`
@@ -161,7 +161,8 @@ user/usb-hub/    hub class driver (root hub and external)
 user/usb-hid/    USB keyboard and mouse driver (boot protocol)
 user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
-user/termd/      shell and terminal session service
+user/termd/      terminal broker (routes messages, session registry)
+user/shsess/     process of one shell session (interpreter, draft, undo)
 libs/osfs-proto/ protocol of the extended FS API for Windows (DeviceIoControl) + client
 tools/osfs/      host tool for the FS: format, check, mount on Windows (WinFsp)
 xtask/           build, disk image, QEMU, tests

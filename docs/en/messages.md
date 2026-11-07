@@ -182,7 +182,13 @@ invariant was broken (a kernel bug).
 
 | Message | Meaning and fix |
 |---|---|
-| `termd: bezim (protokol vN, FS fsd/zadny)` | The session service is running. `zadny` (none) = it got no fsd channel; the shell then sees only an empty root (writes return `READ_ONLY`). |
+| `termd: bezim (protokol vN, FS fsd/zadny, registr ano/ne, prevzato N)` | The broker is running. `zadny` (none) = it got no fsd channel; the shell then sees only an empty root (writes return `READ_ONLY`). `registr ne` (no registry) = sessions do not survive the end of termd. `prevzato N` = number of sessions taken over from the previous termd. |
+| `termd: prevzata relace N` | A session from the registry moved to the new termd; the window can attach to it. |
 | `termd\| ...` | Mirror of session output as text (VT100 adapter) so it can be read on the serial line. Blocks start with `> command`. |
-| `termd: okno zavreno, koncim` | The channel to the parent closed. Background jobs finish, then the service exits (sessions do not survive the process yet). |
-| `termd: chyba cteni: ...` | Unexpected channel error; the service exits with code 1. |
+| `termd: okno zavreno, koncim (N relaci bezi dal)` | The window closed; sessions detach and keep running in their processes. A new termd takes them over from the registry. |
+| `termd: chyba cekani: ...` | Unexpected error waiting on channels; the broker exits with code 1 (sessions keep running). |
+| `shsess N: bezim (znacka)` | The process of session N is running; the tag is in the names of its clones aside. |
+| `shsess N: termd skoncil, cekam na prevzeti` | The main channel closed; the command and jobs finish, the session waits for `Adopt` from a new termd. |
+| `shsess N: prevzato novym termd` | The session moved to a new termd. |
+| `shsess N: nikdo neprevzal, koncim` | The registry closed the channel (or there is none) and no job waits; the session ends. |
+| `shsess: chybi Init` / `prvni zprava neni Init` | The session process did not get the initial message from termd; it exits with code 1. |

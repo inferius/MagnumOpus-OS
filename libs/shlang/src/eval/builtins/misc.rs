@@ -10,7 +10,7 @@ use crate::error::{ShError, code};
 use crate::host::Host;
 use crate::sig::{BUILTINS, builtin};
 use crate::value::Value;
-use crate::vfs::overlay::diff_value;
+use crate::vfs::diff::diff_value;
 
 pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _input: Value) -> R<Value> {
     match name {
@@ -29,7 +29,7 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
             _ => Err(a.err(code::TYPE, "sleep ceka dobu, napr. sleep 2s")),
         },
         "undo" => {
-            if !it.overlay.is_empty() {
+            if !it.draft.is_empty() {
                 return Err(a.err(code::ARGS, "undo patri na samostatny radek"));
             }
             match it.undo.undo(host.fs()) {
@@ -144,31 +144,45 @@ pub fn help_for(s: &crate::sig::Sig) -> String {
     out
 }
 
-/// `preview { ... }`: blok nanecisto, diff, prevzeti po potvrzeni.
+/// `preview { ... }`: blok nanecisto (dalsi vrstva klonu), diff,
+/// prevzeti do konceptu radku po potvrzeni.
 fn preview(it: &mut Interp, host: &mut dyn Host, a: &Args) -> R<Value> {
     let body = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "preview: chybi blok"))?;
-    let before = it.overlay.clone();
-    it.preview_depth += 1;
+    it.draft.push();
+    let depth = it.draft.depth();
     let r = it.call_value(host, &body, Vec::new());
-    it.preview_depth -= 1;
     if let Err(e) = r {
-        it.overlay = before;
+        // Vnorene vrstvy (preruseny vnitrni preview) i tuhle zahodit.
+        while it.draft.depth() >= depth {
+            it.draft.discard_top(host.fs());
+        }
         return Err(e);
     }
-    let fs = host.fs();
-    let old = before.changes(fs).map_err(|e| ShError::sys(e, "zmeny nejde spocitat"))?;
-    let new = it.overlay.changes(fs).map_err(|e| ShError::sys(e, "zmeny nejde spocitat"))?;
-    let diff: Vec<_> = new.into_iter().filter(|d| !old.contains(d)).collect();
+    let diff = match it.draft.changes(host.fs()) {
+        Ok(d) => d,
+        Err(e) => {
+            it.draft.discard_top(host.fs());
+            return Err(Flow::Err(ShError::sys(e, "zmeny nejde spocitat")));
+        }
+    };
     let table = diff_value(&diff);
     if diff.is_empty() {
+        it.draft.discard_top(host.fs());
         return Ok(Value::record(&[("applied", Value::Bool(false)), ("changes", table)]));
     }
     let ok = a.flag("yes") || host.confirm(&alloc::format!("Nahled: {} zmen. Prevzit?", diff.len()), &table);
     if !ok {
-        it.overlay = before;
+        it.draft.discard_top(host.fs());
         return Err(Flow::Err(
             ShError::new(code::REJECTED, "zmeny nebyly prevzaty (nic se nezmenilo)").at(a.span),
         ));
+    }
+    let conflicts = it.draft.apply_top(host.fs()).map_err(|e| Flow::Err(ShError::sys(e, "zmeny nejde prevzit")))?;
+    if !conflicts.is_empty() {
+        return Err(Flow::Err(ShError::new(
+            code::CONFLICT,
+            alloc::format!("{} zmen nahledu se neprevzalo: {}", conflicts.len(), conflicts.join(", ")),
+        )));
     }
     it.confirmed = true;
     Ok(Value::record(&[("applied", Value::Bool(true)), ("changes", table)]))

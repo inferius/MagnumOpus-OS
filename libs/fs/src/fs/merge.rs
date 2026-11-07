@@ -19,6 +19,13 @@
 //! (`merge3`), binarni soubor nebo zmena proti smazani jako kopie vedle
 //! ("jmeno (konflikt vetev).ext"); v rezimu `Aside` se konfliktni zmena
 //! neprevezme vubec a jen se ohlasi.
+//!
+//! **Vnorene datasety** (polozky `KIND_DATASET`) slouceni nikdy nemeni:
+//! v B a T jsou to jen hranice (kopie polozek, viz `dataset.rs`), v O
+//! skutecne datasety (i klony jinych relaci, ktere mezitim vznikly). Jejich
+//! jmena v O jsou obsazena (nova polozka z T stejneho jmena = konflikt)
+//! a slozka v O, ktera obsahuje dataset, neni prazdna - smazani v T je
+//! konflikt `DirNotEmpty` (do kose by odnesla i dataset).
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
@@ -26,12 +33,12 @@ use alloc::vec::Vec;
 
 use abi::{Error, Result};
 
+use super::merge_index::{Index, Obj};
 use super::{Fs, Kind, zil};
 use crate::btree;
 use crate::device::BlockDevice;
-use crate::hash::{Csum, xxh3};
 use crate::layout::{
-    BLOCK_SIZE, Inode, KIND_DATASET, KIND_DIR, KIND_FILE, KIND_SYMLINK, Key, META_OID, ROOT_OID, TRASH_OID, item,
+    BLOCK_SIZE, Inode, KIND_DIR, KIND_FILE, KIND_SYMLINK, Key, META_OID, ROOT_OID, item,
 };
 use crate::merge3;
 use crate::names::fold_name;
@@ -88,59 +95,6 @@ pub(super) enum Mode {
     Aside,
 }
 
-/// Objekt jedne verze stromu.
-#[derive(Clone)]
-struct Obj {
-    kind: u8,
-    generation: u64,
-    size: u64,
-    /// Otisk polozek s obsahem (fyzicky - stejny blok = stejny obsah).
-    fp: Csum,
-    parent: u64,
-    name: String,
-}
-
-#[derive(Default)]
-struct Index {
-    objs: BTreeMap<u64, Obj>,
-    children: BTreeMap<u64, Vec<u64>>,
-}
-
-impl Index {
-    fn path(&self, mut oid: u64) -> String {
-        let mut parts: Vec<&str> = Vec::new();
-        for _ in 0..super::MAX_DEPTH {
-            if oid == ROOT_OID {
-                break;
-            }
-            let Some(o) = self.objs.get(&oid) else { break };
-            parts.push(&o.name);
-            oid = o.parent;
-        }
-        let mut p = String::new();
-        for part in parts.iter().rev() {
-            p.push('/');
-            p.push_str(part);
-        }
-        if p.is_empty() {
-            p.push('/');
-        }
-        p
-    }
-
-    fn depth(&self, mut oid: u64) -> usize {
-        let mut d = 0;
-        while oid != ROOT_OID && d < super::MAX_DEPTH {
-            match self.objs.get(&oid) {
-                Some(o) => oid = o.parent,
-                None => break,
-            }
-            d += 1;
-        }
-        d
-    }
-}
-
 /// Cil v nasem strome: existujici slozka (oid) nebo nova slozka z T (jejich oid).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum Dir {
@@ -169,9 +123,14 @@ fn split_ext(name: &str) -> (&str, &str) {
 }
 
 struct Planner<'a> {
-    b: &'a Index,
-    o: &'a Index,
-    t: &'a Index,
+    b: Index,
+    o: Index,
+    t: Index,
+    /// Objekty, ktere se zmenily v T proti B (jen ty mohou neco zmenit),
+    /// vzestupne podle oid; viz `merge_index.rs`.
+    cands: Vec<u64>,
+    /// Objekty nactene ve vsech trech indexech.
+    ensured: BTreeSet<u64>,
     mode: Mode,
     label: String,
     select: Option<&'a [String]>,
@@ -203,18 +162,14 @@ impl Planner<'_> {
     }
 
     fn base_obj(&self, side: &Index, oid: u64) -> Option<Obj> {
-        let b = self.b.objs.get(&oid)?;
-        side.objs.get(&oid).filter(|o| o.generation == b.generation && o.kind == b.kind).cloned()
+        let b = self.b.obj(oid)?;
+        side.obj(oid).filter(|o| o.generation == b.generation && o.kind == b.kind).cloned()
     }
 
     fn dir_names(&mut self, d: Dir) -> &mut BTreeSet<String> {
-        let o = self.o;
+        let o = &self.o;
         self.names.entry(d).or_insert_with(|| match d {
-            Dir::Ours(oid) => o
-                .children
-                .get(&oid)
-                .map(|c| c.iter().filter_map(|x| o.objs.get(x)).map(|x| fold_name(&x.name)).collect())
-                .unwrap_or_default(),
+            Dir::Ours(oid) => o.entries(oid).iter().map(|e| fold_name(&e.name)).collect(),
             Dir::New(_) => BTreeSet::new(),
         })
     }
@@ -258,79 +213,17 @@ impl Planner<'_> {
         if let Some(&o) = self.alias.get(&p) {
             return Some(Dir::Ours(o));
         }
-        if self.b.objs.contains_key(&p) {
-            return self.base_obj(self.o, p).filter(|o| o.kind == KIND_DIR && !self.trashed.contains(&p)).map(|_| Dir::Ours(p));
+        if self.b.has(p) {
+            return self.base_obj(&self.o, p).filter(|o| o.kind == KIND_DIR && !self.trashed.contains(&p)).map(|_| Dir::Ours(p));
         }
         self.created.contains(&p).then_some(Dir::New(p))
     }
 }
 
 impl<D: BlockDevice> Fs<D> {
-    /// Souhrn stromu pro slouceni (bez kose a vstupu do jinych datasetu).
-    fn merge_index(&mut self, root: &Child) -> Result<Index> {
-        let mut idx = Index::default();
-        let mut names: BTreeMap<u64, (u64, String)> = BTreeMap::new();
-        let mut content: BTreeMap<u64, Csum> = BTreeMap::new();
-        let mut inodes: BTreeMap<u64, Inode> = BTreeMap::new();
-        let tf = self.s.time_format();
-        let mut err = None;
-        btree::range(&mut self.s, root, &Key::new(ROOT_OID, 0, 0), &Key::new(u64::MAX, u8::MAX, u64::MAX), &mut |k, v| {
-            if k.oid == META_OID || k.oid == TRASH_OID {
-                return Ok(true);
-            }
-            let r: Result<()> = (|| {
-                match k.kind {
-                    item::INODE => {
-                        inodes.insert(k.oid, Inode::decode(v, tf)?);
-                    }
-                    item::DIRENT => {
-                        for d in crate::layout::decode_dirents(v)? {
-                            if d.kind != KIND_DATASET {
-                                names.insert(d.oid, (k.oid, d.name));
-                            }
-                        }
-                    }
-                    item::INLINE | item::EXTENT | item::SYMLINK => {
-                        let prev = content.get(&k.oid).copied().unwrap_or_default();
-                        let mut buf = Vec::with_capacity(16 + 9 + v.len());
-                        buf.extend_from_slice(&prev.0);
-                        buf.push(k.kind);
-                        buf.extend_from_slice(&k.offset.to_le_bytes());
-                        buf.extend_from_slice(v);
-                        content.insert(k.oid, xxh3(&buf));
-                    }
-                    _ => {}
-                }
-                Ok(())
-            })();
-            if let Err(e) = r {
-                err = Some(e);
-                return Ok(false);
-            }
-            Ok(true)
-        })?;
-        if let Some(e) = err {
-            return Err(e);
-        }
-        for (oid, i) in inodes {
-            let (parent, name) = if oid == ROOT_OID {
-                (0, String::new())
-            } else {
-                match names.remove(&oid) {
-                    Some(x) => x,
-                    // Bez jmena (sirotek): do slouceni nepatri.
-                    None => continue,
-                }
-            };
-            if oid != ROOT_OID {
-                idx.children.entry(parent).or_default().push(oid);
-            }
-            idx.objs.insert(
-                oid,
-                Obj { kind: i.kind, generation: i.generation, size: i.size, fp: content.get(&oid).copied().unwrap_or_default(), parent, name },
-            );
-        }
-        Ok(idx)
+    /// Nacte objekt `oid` do indexu planovace (viz `merge_index.rs`).
+    fn ensure_planner(&mut self, p: &mut Planner<'_>, oid: u64) -> Result<()> {
+        self.ensure_in(&mut p.b, &mut p.o, &mut p.t, &mut p.ensured, oid)
     }
 
     /// Cely obsah souboru (pro slouceni textu; jen do `TEXT_MAX`).
@@ -378,14 +271,14 @@ impl<D: BlockDevice> Fs<D> {
         label: &str,
         select: Option<&[String]>,
     ) -> Result<MergeReport> {
-        let b = self.merge_index(base)?;
-        let t = self.merge_index(theirs)?;
         let ours = self.s.root;
-        let o = self.merge_index(&ours)?;
+        let ix = self.merge_indexes(base, theirs, &ours)?;
         let mut p = Planner {
-            b: &b,
-            o: &o,
-            t: &t,
+            b: ix.b,
+            o: ix.o,
+            t: ix.t,
+            cands: ix.cands,
+            ensured: ix.ensured,
             mode,
             label: label.into(),
             select,
@@ -403,16 +296,14 @@ impl<D: BlockDevice> Fs<D> {
         self.plan_new(&mut p, theirs)?;
         Self::plan_deferred(&mut p);
         Self::check_cycles(&mut p);
-        let steps = core::mem::take(&mut p.steps);
-        let report = core::mem::take(&mut p.report);
-        drop(p);
+        let Planner { steps, report, t, .. } = p;
         // Odhad mista predem: nova data + uzly (chyba pred prvni zmenou).
         let mut blocks = 16u64;
         for s in &steps {
             blocks += match s {
-                Step::Create { t_oid, .. } => t.objs.get(t_oid).map_or(0, |x| x.size.div_ceil(BLOCK_SIZE as u64)) + 4,
+                Step::Create { t_oid, .. } => t.obj(*t_oid).map_or(0, |x| x.size.div_ceil(BLOCK_SIZE as u64)) + 4,
                 Step::Content { t_oid, data, .. } => {
-                    data.as_ref().map_or_else(|| t.objs.get(t_oid).map_or(0, |x| x.size), |d| d.len() as u64).div_ceil(BLOCK_SIZE as u64) + 4
+                    data.as_ref().map_or_else(|| t.obj(*t_oid).map_or(0, |x| x.size), |d| d.len() as u64).div_ceil(BLOCK_SIZE as u64) + 4
                 }
                 _ => 4,
             };
@@ -424,11 +315,11 @@ impl<D: BlockDevice> Fs<D> {
 
     fn plan_base(&mut self, p: &mut Planner<'_>, base: &Child, theirs: &Child) -> Result<()> {
         let ours = self.s.root;
-        let base_ids: Vec<u64> = p.b.objs.keys().copied().filter(|&x| x != ROOT_OID).collect();
+        let base_ids: Vec<u64> = p.cands.iter().copied().filter(|&x| x != ROOT_OID && p.b.has(x)).collect();
         for x in base_ids {
-            let bo = p.b.objs[&x].clone();
-            let oo = p.base_obj(p.o, x);
-            let to = p.base_obj(p.t, x);
+            let Some(bo) = p.b.obj(x).cloned() else { continue };
+            let oo = p.base_obj(&p.o, x);
+            let to = p.base_obj(&p.t, x);
             let tpath = if to.is_some() { p.t.path(x) } else { p.b.path(x) };
             if !p.selected(&[&tpath, &p.b.path(x)]) {
                 continue;
@@ -471,7 +362,7 @@ impl<D: BlockDevice> Fs<D> {
                     let (lb, lo, lt) = ((bo.parent, &bo.name), (oo.parent, &oo.name), (to.parent, &to.name));
                     if lt != lb {
                         if lo == lb || lo == lt {
-                            if lo != lt && !p.b.objs.contains_key(&to.parent) && to.parent != ROOT_OID {
+                            if lo != lt && !p.b.has(to.parent) && to.parent != ROOT_OID {
                                 // Do nove slozky z T: az po jejim naplanovani.
                                 p.moved.insert(x, Dir::New(to.parent));
                                 p.deferred.push((x, oo.parent, oo.name.clone(), to.parent, to.name.clone(), tpath.clone()));
@@ -550,31 +441,44 @@ impl<D: BlockDevice> Fs<D> {
     /// Nove objekty z T (rodice pred potomky).
     fn plan_new(&mut self, p: &mut Planner<'_>, theirs: &Child) -> Result<()> {
         let ours = self.s.root;
-        let mut new: Vec<u64> = p.t.objs.keys().copied().filter(|x| *x != ROOT_OID && p.base_obj(p.t, *x).is_none()).collect();
+        let mut new: Vec<u64> = p.cands.iter().copied().filter(|&x| x != ROOT_OID && p.t.has(x) && p.base_obj(&p.t, x).is_none()).collect();
         new.sort_by_key(|&x| (p.t.depth(x), x));
         for x in new {
-            let to = p.t.objs[&x].clone();
+            let Some(to) = p.t.obj(x).cloned() else { continue };
             let tpath = p.t.path(x);
             if !p.selected(&[&tpath]) {
                 continue;
             }
             let Some(d) = p.target_dir(to.parent) else {
                 // Rodic chybi u nas (smazany) nebo nebyl vytvoren (konflikt vyse).
-                if p.b.objs.contains_key(&to.parent) {
+                if p.b.has(to.parent) {
                     p.conflict(tpath, ConflictKind::ParentMissing, String::new());
                 }
                 continue;
             };
             // Stejne jmeno pridane i u nas se stejnym obsahem: nic.
             if let Dir::Ours(od) = d {
-                let existing = p.o.children.get(&od).and_then(|c| {
-                    c.iter().copied().find(|c| {
-                        p.o.objs.get(c).is_some_and(|o| fold_name(&o.name) == fold_name(&to.name)) && !p.moved.contains_key(c)
-                    })
-                });
+                // Nase polozka stejneho jmena (nactena az ted - kandidati
+                // jsou jen zmeny v T).
+                let folded = fold_name(&to.name);
+                let same: Vec<u64> = p
+                    .o
+                    .entries(od)
+                    .iter()
+                    .filter(|e| !e.dataset && fold_name(&e.name) == folded && !p.moved.contains_key(&e.oid))
+                    .map(|e| e.oid)
+                    .collect();
+                let mut existing = None;
+                for c in same {
+                    self.ensure_planner(p, c)?;
+                    if p.o.has(c) {
+                        existing = Some(c);
+                        break;
+                    }
+                }
                 if let Some(e) = existing
-                    && !p.b.objs.contains_key(&e)
-                    && p.o.objs[&e].kind == to.kind
+                    && !p.b.has(e)
+                    && p.o.obj(e).is_some_and(|o| o.kind == to.kind)
                 {
                     if to.kind == KIND_DIR {
                         // Slozka pridana na obou stranach: obsah se slouci do ni.
@@ -608,12 +512,11 @@ impl<D: BlockDevice> Fs<D> {
     /// to, co se maze take; jinak konflikt.
     fn plan_dir_deletes(p: &mut Planner<'_>) {
         let mut dirs: Vec<u64> = p
-            .b
-            .objs
+            .cands
             .iter()
-            .filter(|(x, o)| **x != ROOT_OID && o.kind == KIND_DIR)
-            .map(|(x, _)| *x)
-            .filter(|&x| p.base_obj(p.o, x).is_some() && p.base_obj(p.t, x).is_none())
+            .copied()
+            .filter(|&x| x != ROOT_OID && p.b.obj(x).is_some_and(|o| o.kind == KIND_DIR))
+            .filter(|&x| p.base_obj(&p.o, x).is_some() && p.base_obj(&p.t, x).is_none())
             .filter(|&x| p.selected(&[&p.b.path(x)]))
             .collect();
         // Nejhlubsi prvni.
@@ -631,9 +534,10 @@ impl<D: BlockDevice> Fs<D> {
             })
             .collect();
         for x in dirs {
-            let kids = p.o.children.get(&x).cloned().unwrap_or_default();
+            let kids: Vec<u64> = p.o.entries(x).iter().filter(|e| !e.dataset).map(|e| e.oid).collect();
             let ok = !moved_in.contains(&Dir::Ours(x))
                 && !created_in.contains(&Dir::Ours(x))
+                && !p.o.has_datasets(x)
                 && kids.iter().all(|c| (p.trashed.contains(c) || whole.contains(c)) && !p.moved.contains_key(c));
             if ok {
                 whole.insert(x);
@@ -645,14 +549,14 @@ impl<D: BlockDevice> Fs<D> {
         // Do kose jen nejvyssi cele slozky; jejich obsah s nimi.
         let mut top = Vec::new();
         for &x in &whole {
-            let parent = p.o.objs[&x].parent;
+            let Some(parent) = p.o.obj(x).map(|o| o.parent) else { continue };
             if !whole.contains(&parent) {
                 top.push(x);
             }
         }
         let inside = |p: &Planner<'_>, mut c: u64| -> bool {
             for _ in 0..super::MAX_DEPTH {
-                let Some(o) = p.o.objs.get(&c) else { return false };
+                let Some(o) = p.o.obj(c) else { return false };
                 if whole.contains(&o.parent) {
                     return true;
                 }
@@ -671,8 +575,9 @@ impl<D: BlockDevice> Fs<D> {
         }
         for x in top {
             p.trashed.insert(x);
-            let o = p.o.objs[&x].clone();
-            p.release(Dir::Ours(o.parent), &o.name);
+            if let Some(o) = p.o.obj(x).cloned() {
+                p.release(Dir::Ours(o.parent), &o.name);
+            }
             p.report.applied.push(p.b.path(x));
             p.steps.push(Step::Trash { oid: x });
         }
@@ -704,7 +609,7 @@ impl<D: BlockDevice> Fs<D> {
     fn check_cycles(p: &mut Planner<'_>) {
         let moved = p.moved.clone();
         for &x in moved.keys() {
-            if p.o.objs.get(&x).is_none_or(|o| o.kind != KIND_DIR) {
+            if p.o.obj(x).is_none_or(|o| o.kind != KIND_DIR) {
                 continue;
             }
             let mut cur = Some(x);
@@ -714,7 +619,7 @@ impl<D: BlockDevice> Fs<D> {
                 let parent = match p.moved.get(&c) {
                     Some(Dir::Ours(d)) => Some(*d),
                     Some(Dir::New(_)) => None,
-                    None => p.o.objs.get(&c).map(|o| o.parent),
+                    None => p.o.obj(c).map(|o| o.parent),
                 };
                 match parent {
                     Some(d) if d == x => {
@@ -780,7 +685,7 @@ impl<D: BlockDevice> Fs<D> {
             if let Step::Create { t_oid, dir, name } = s {
                 let parent = resolve(*dir, &new_dirs)?;
                 let oid = self.copy_new(theirs, *t_oid, parent, name)?;
-                if t.objs.get(t_oid).is_some_and(|o| o.kind == KIND_DIR) {
+                if t.obj(*t_oid).is_some_and(|o| o.kind == KIND_DIR) {
                     new_dirs.insert(*t_oid, oid);
                 }
             }
@@ -933,11 +838,9 @@ impl<D: BlockDevice> Fs<D> {
     pub fn aside_begin(&mut self, dataset: &str, path: &str) -> Result<u64> {
         self.require(dataset, rights::MANAGE)?;
         let name = self.guarded(|fs| {
+            // Vnorene datasety (i jine klony "bokem" uvnitr originalu) jsou
+            // v klonu hranice: videt, ale nejde do nich (`dataset.rs`).
             fs.enter_dataset(dataset)?;
-            // Vnorene datasety by v klonu byly druhou cestou k temuz datasetu.
-            if fs.contains_datasets()? {
-                return Err(Error::NotSupported);
-            }
             let name = alloc::format!("aside-{}", fs.s.next_snapshot);
             fs.snapshot_internal(&name, snapkind::ASIDE)?;
             Ok(name)
@@ -988,6 +891,38 @@ impl<D: BlockDevice> Fs<D> {
             fs.commit()?;
             Ok(report)
         })
+    }
+
+    /// Uklid po padu (pri pripojeni): snapshot "bokem" bez klonu. Zacatek
+    /// (snapshot, pak klon) i zahozeni (klon, pak snapshot) jsou dva
+    /// commity; pad mezi nimi necha snapshot, ktery uz nikdo nepouzije
+    /// (klon vznika jen v `aside_begin`), ale drzel by bloky. Klon sam
+    /// vznika i zanika jednim commitem - po padu je cely, nebo neni.
+    pub(super) fn cleanup_asides(&mut self) -> Result<()> {
+        let mut changed = false;
+        for id in self.all_dataset_ids()? {
+            self.activate(id)?;
+            for (sid, rec) in self.records_active()? {
+                if rec.clones == 0 && self.snap_meta(sid)?.kind == snapkind::ASIDE {
+                    self.destroy_snapshot(sid)?;
+                    changed = true;
+                }
+            }
+        }
+        self.activate(crate::layout::ROOT_DATASET)?;
+        if changed {
+            self.commit()?;
+        }
+        Ok(())
+    }
+
+    /// Testy: jen snapshot "bokem" bez klonu (stav po padu v `aside_begin`).
+    #[cfg(test)]
+    pub(crate) fn aside_snapshot_only(&mut self, dataset: &str) -> Result<()> {
+        self.enter_dataset(dataset)?;
+        let name = alloc::format!("aside-{}", self.s.next_snapshot);
+        self.snapshot_internal(&name, snapkind::ASIDE)?;
+        Ok(())
     }
 
     /// Zahodi klon "bokem" i jeho vychozi snapshot (jednim krokem).

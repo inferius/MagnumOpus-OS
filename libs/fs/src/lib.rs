@@ -40,6 +40,7 @@ pub mod perm;
 pub mod records;
 mod space;
 mod store;
+mod treediff;
 
 #[cfg(test)]
 mod tests;
