@@ -271,6 +271,81 @@ impl<D: BlockDevice> Fs<D> {
     }
 }
 
+const META: u64 = crate::layout::META_OID;
+
+impl Objects {
+    /// Kontroly struktur historie (faze 2).
+    fn verify_history(&self, r: &mut CheckReport) {
+        // Zurnal: souvisla rada first..next, stav musi existovat.
+        match self.jstate {
+            None if !self.journal.is_empty() => {
+                r.problem(format!("zurnal ma {} zaznamu, ale chybi stav", self.journal.len()))
+            }
+            None => {}
+            Some(st) => {
+                // Pruchod stromu neni serazeny: seradit.
+                let mut seqs = self.journal.clone();
+                seqs.sort_unstable();
+                let ok = seqs.len() as u64 == st.next - st.first
+                    && seqs.iter().enumerate().all(|(i, &q)| q == st.first + i as u64);
+                if !ok {
+                    r.problem(format!("zurnal: zaznamy nesedi se stavem {}..{}", st.first, st.next));
+                }
+            }
+        }
+        for m in &self.snapmeta {
+            if !self.snapshots.contains(m) {
+                r.problem(format!("metadata snapshotu {m} bez snapshotu"));
+            }
+        }
+        // Kos: zaznam <-> polozka adresare kose.
+        for (&id, &oid) in &self.trash {
+            if !self.trash_dir.iter().any(|(n, o)| *o == oid && n.parse::<u64>().ok() == Some(id)) {
+                r.problem(format!("zaznam kose {id}: objekt {oid} v kosi neni"));
+            }
+            if self.trash_next.is_none_or(|n| n <= id) {
+                r.problem(format!("pocitadlo kose je mensi nez zaznam {id}"));
+            }
+        }
+        for (n, oid) in &self.trash_dir {
+            let id = n.parse::<u64>().unwrap_or(0);
+            if self.trash.get(&id) != Some(oid) {
+                r.problem(format!("objekt {oid} v kosi nema zaznam"));
+            }
+        }
+        // Atributy: pocet v zaznamu objektu.
+        for (&oid, &(_, count)) in &self.gens {
+            let have = self.xattr_count.get(&oid).copied().unwrap_or(0);
+            if have != count {
+                r.problem(format!("objekt {oid}: {count} atributu v zaznamu, ulozeno {have}"));
+            }
+        }
+        for &oid in self.xattr_count.keys() {
+            if !self.gens.contains_key(&oid) {
+                r.problem(format!("atributy neexistujiciho objektu {oid}"));
+            }
+        }
+        // Expirace: atribut <-> index (oid, generace).
+        let mut attr: Vec<(u64, u64)> =
+            self.expires_attr.iter().map(|&o| (o, self.gens.get(&o).map_or(0, |g| g.0))).collect();
+        let mut index = self.expires_index.clone();
+        attr.sort_unstable();
+        index.sort_unstable();
+        if attr != index {
+            r.problem(format!(
+                "index expirace nesedi s atributy ({} v indexu, {} atributu)",
+                index.len(),
+                attr.len()
+            ));
+        }
+        for oid in &self.lhash {
+            if self.inodes.get(oid).is_none_or(|&(k, _)| k != crate::layout::KIND_FILE) {
+                r.problem(format!("pamet hashe neexistujiciho souboru {oid}"));
+            }
+        }
+    }
+}
+
 /// Sber druhu objektu ze zive verze pro kontrolu, ze polozky adresaru,
 /// zaznamy objektu a cile odkazu k sobe sedi.
 #[derive(Default)]
@@ -287,6 +362,24 @@ struct Objects {
     acls: BTreeMap<u64, (u64, u64)>,
     /// Index popisu: (otisk, cislo popisu).
     acl_index: Vec<(u64, u64)>,
+    /// Historie (faze 2): generace a pocet atributu objektu.
+    gens: BTreeMap<u64, (u64, u32)>,
+    /// Zurnal: poradova cisla zaznamu a stav.
+    journal: Vec<u64>,
+    jstate: Option<crate::records::JournalState>,
+    /// Snapshoty a jejich metadata (cisla).
+    snapshots: Vec<u64>,
+    snapmeta: Vec<u64>,
+    /// Kos: zaznamy (cislo -> oid), pocitadlo, polozky adresare kose.
+    trash: BTreeMap<u64, u64>,
+    trash_next: Option<u64>,
+    trash_dir: Vec<(String, u64)>,
+    /// Atributy: oid -> pocet; expirace z atributu a z indexu.
+    xattr_count: BTreeMap<u64, u32>,
+    expires_attr: Vec<u64>,
+    expires_index: Vec<(u64, u64)>,
+    /// Pamet logickeho hashe (oid).
+    lhash: Vec<u64>,
 }
 
 impl Objects {
@@ -298,6 +391,7 @@ impl Objects {
             item::INODE => match Inode::decode(v, tf) {
                 Ok(i) => {
                     self.inodes.insert(k.oid, (i.kind, i.size));
+                    self.gens.insert(k.oid, (i.generation, i.xattrs));
                     if i.acl != 0 {
                         *self.acl_uses.entry(i.acl as u64).or_default() += 1;
                     }
@@ -306,6 +400,9 @@ impl Objects {
             },
             item::DIRENT => match decode_dirents(v) {
                 Ok(list) => {
+                    if k.oid == crate::layout::TRASH_OID {
+                        self.trash_dir.extend(list.iter().map(|d| (d.name.clone(), d.oid)));
+                    }
                     for d in &list {
                         if !crate::names::valid_stored(&d.name) {
                             r.problem(format!("adresar {}: neplatne jmeno polozky", k.oid));
@@ -329,6 +426,74 @@ impl Objects {
                 }
                 Err(e) => r.problem(format!("popis opravneni {} je poskozeny: {e:?}", k.offset)),
             },
+            item::JOURNAL if k.oid == META => match crate::records::JournalEntry::decode(v) {
+                Ok(_) => self.journal.push(k.offset),
+                Err(e) => r.problem(format!("zaznam zurnalu {} je poskozeny: {e:?}", k.offset)),
+            },
+            item::JSTATE if k.oid == META => match crate::records::JournalState::decode(v) {
+                Ok(st) => self.jstate = Some(st),
+                Err(e) => r.problem(format!("stav zurnalu je poskozeny: {e:?}")),
+            },
+            item::SNAPSHOT if k.oid == META => self.snapshots.push(k.offset),
+            item::SNAPMETA if k.oid == META => match crate::records::SnapMeta::decode(v) {
+                Ok(_) => self.snapmeta.push(k.offset),
+                Err(e) => r.problem(format!("metadata snapshotu {} jsou poskozena: {e:?}", k.offset)),
+            },
+            item::SETTINGS if k.oid == META => {
+                if let Err(e) = crate::records::Settings::decode(v) {
+                    r.problem(format!("nastaveni datasetu je poskozene: {e:?}"));
+                }
+            }
+            item::HEAD if k.oid == META => {
+                if let Err(e) = crate::records::Head::decode(v) {
+                    r.problem(format!("zaznam HEAD je poskozeny: {e:?}"));
+                }
+            }
+            item::BRANCH if k.oid == META => {
+                if let Err(e) = crate::records::decode_branches(v) {
+                    r.problem(format!("vetve jsou poskozene: {e:?}"));
+                }
+            }
+            item::TRASH if k.oid == META && k.offset == 0 => {
+                if v.len() == 8 {
+                    self.trash_next = Some(crate::layout::u64_at(v, 0));
+                } else {
+                    r.problem(String::from("pocitadlo kose je poskozene"));
+                }
+            }
+            item::TRASH if k.oid == META => match crate::records::TrashRecord::decode(v) {
+                Ok(t) => {
+                    self.trash.insert(k.offset, t.oid);
+                }
+                Err(e) => r.problem(format!("zaznam kose {} je poskozeny: {e:?}", k.offset)),
+            },
+            item::EXPIRY if k.oid == META => match crate::records::decode_pairs(v) {
+                Ok(list) => self.expires_index.extend(list),
+                Err(e) => r.problem(format!("index expirace je poskozeny: {e:?}")),
+            },
+            item::XATTR => match crate::records::decode_xattrs(v) {
+                Ok(list) => {
+                    for (n, val) in &list {
+                        if crate::names::name_hash(n) != k.offset {
+                            r.problem(format!("objekt {}: atribut {n} pod spatnym klicem", k.oid));
+                        }
+                        if n == crate::records::XATTR_EXPIRES {
+                            if crate::records::decode_expires(val).is_err() {
+                                r.problem(format!("objekt {}: neplatne datum expirace", k.oid));
+                            }
+                            self.expires_attr.push(k.oid);
+                        }
+                    }
+                    *self.xattr_count.entry(k.oid).or_default() += list.len() as u32;
+                }
+                Err(e) => r.problem(format!("atributy objektu {} jsou poskozene: {e:?}", k.oid)),
+            },
+            item::LHASH => {
+                if crate::records::LogicalHash::decode(v).is_err() {
+                    r.problem(format!("pamet hashe objektu {} je poskozena", k.oid));
+                }
+                self.lhash.push(k.oid);
+            }
             item::ACL_INDEX if k.oid == crate::layout::META_OID => {
                 if v.is_empty() || v.len() % 8 != 0 {
                     r.problem(format!("index popisu opravneni {:#x} je poskozeny", k.offset));
@@ -342,6 +507,7 @@ impl Objects {
     }
 
     fn verify(&self, r: &mut CheckReport) {
+        self.verify_history(r);
         for (&id, &uses) in &self.acl_uses {
             match self.acls.get(&id) {
                 None => r.problem(format!("objekty ukazuji na neexistujici popis opravneni {id}")),

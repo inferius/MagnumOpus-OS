@@ -379,6 +379,7 @@ impl<D: BlockDevice> Fs<D> {
         if inode.acl != 0 {
             self.acl_release(inode.acl)?;
         }
+        self.drop_extras(oid)?;
         self.del(&Key::new(oid, item::INODE, 0))?;
         self.del(&Key::new(META_OID, item::ORPHAN, oid))?;
         self.zil.forget(oid);

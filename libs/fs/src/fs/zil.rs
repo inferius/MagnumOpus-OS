@@ -96,12 +96,41 @@ pub enum Op {
         owner: u64,
         time: Timestamp,
     },
+    /// Presun objektu `parent`/`name` do kose pod cislem `id`.
+    Trash {
+        parent: u64,
+        name: String,
+        id: u64,
+        time: Timestamp,
+    },
+    /// Obnova zaznamu kose `id` do `dst`/`name`.
+    Restore {
+        id: u64,
+        dst: u64,
+        name: String,
+        time: Timestamp,
+    },
+    /// Trvale smazani zaznamu kose `id` (i s podstromem).
+    Purge {
+        id: u64,
+        time: Timestamp,
+    },
+    /// Nastaveni (`Some`) nebo smazani (`None`) rozsireneho atributu.
+    SetXattr {
+        oid: u64,
+        name: String,
+        value: Option<Vec<u8>>,
+        time: Timestamp,
+    },
 }
 
 /// Zaznam davky.
 enum Record {
     /// Nasledujici zaznamy patri datasetu s timto cislem (az do dalsiho).
     Dataset(u64),
+    /// Nasledujici zaznamy provedl tento uzivatel (pro zurnal zmen: po
+    /// prehrani musi zaznamy vyjit stejne jako pred padem).
+    Actor(u64),
     Op(Op),
     Inline {
         oid: u64,
@@ -120,14 +149,15 @@ enum Record {
 /// Zmeny od posledniho zapisu do logu.
 #[derive(Default)]
 pub struct Pending {
-    ops: Vec<Op>,
+    /// (kdo, operace)
+    ops: Vec<(u64, Op)>,
     /// Soubory se zmenenym obsahem/velikosti -> zmenene logicke bloky.
     touched: BTreeMap<u64, BTreeSet<u64>>,
 }
 
 impl Pending {
-    pub fn op(&mut self, op: Op) {
-        self.ops.push(op);
+    pub fn op(&mut self, actor: u64, op: Op) {
+        self.ops.push((actor, op));
     }
 
     pub fn touch(&mut self, oid: u64) {
@@ -305,6 +335,44 @@ fn encode(records: &[Record], tf: TimeFormat) -> Vec<u8> {
                 b.push(8);
                 put_u64(&mut b, *id);
             }
+            Record::Actor(a) => {
+                b.push(14);
+                put_u64(&mut b, *a);
+            }
+            Record::Op(Op::Trash { parent, name, id, time }) => {
+                b.push(15);
+                put_u64(&mut b, *parent);
+                put_u64(&mut b, *id);
+                put_time(&mut b, *time, tf);
+                put_str(&mut b, name);
+            }
+            Record::Op(Op::Restore { id, dst, name, time }) => {
+                b.push(16);
+                put_u64(&mut b, *id);
+                put_u64(&mut b, *dst);
+                put_time(&mut b, *time, tf);
+                put_str(&mut b, name);
+            }
+            Record::Op(Op::Purge { id, time }) => {
+                b.push(17);
+                put_u64(&mut b, *id);
+                put_time(&mut b, *time, tf);
+            }
+            Record::Op(Op::SetXattr { oid, name, value, time }) => {
+                // 18: oid, cas, jmeno, ma hodnotu u8, delka u32, hodnota.
+                b.push(18);
+                put_u64(&mut b, *oid);
+                put_time(&mut b, *time, tf);
+                put_str(&mut b, name);
+                match value {
+                    Some(v) => {
+                        b.push(1);
+                        b.extend_from_slice(&(v.len() as u32).to_le_bytes());
+                        b.extend_from_slice(v);
+                    }
+                    None => b.push(0),
+                }
+            }
             Record::Extents {
                 oid,
                 size,
@@ -477,6 +545,31 @@ fn decode(b: &[u8], tf: TimeFormat) -> Result<Vec<Record>> {
                 }
             }
             8 => Record::Dataset(r.u64()?),
+            14 => Record::Actor(r.u64()?),
+            15 => {
+                let (parent, id, time) = (r.u64()?, r.u64()?, r.time()?);
+                Record::Op(Op::Trash { parent, id, time, name: r.str()? })
+            }
+            16 => {
+                let (id, dst, time) = (r.u64()?, r.u64()?, r.time()?);
+                Record::Op(Op::Restore { id, dst, time, name: r.str()? })
+            }
+            17 => Record::Op(Op::Purge { id: r.u64()?, time: r.time()? }),
+            18 => {
+                let (oid, time, name) = (r.u64()?, r.time()?, r.str()?);
+                let value = match r.u8()? {
+                    0 => None,
+                    1 => {
+                        let n = r.u32()? as usize;
+                        if n > crate::records::XATTR_VALUE_MAX {
+                            return Err(Error::Corrupted);
+                        }
+                        Some(r.take(n)?.to_vec())
+                    }
+                    _ => return Err(Error::Corrupted),
+                };
+                Record::Op(Op::SetXattr { oid, name, value, time })
+            }
             12 => {
                 let (oid, time) = (r.u64()?, r.time()?);
                 let acl = match r.u8()? {
@@ -552,7 +645,11 @@ impl<D: BlockDevice> Fs<D> {
         for id in pending {
             self.activate(id)?;
             records.push(Record::Dataset(id));
+            // Zaznamy logu potrebuji, kdo menil obsah (`content_actor`).
             records.extend(self.log_records()?);
+            // Sloucene zaznamy CONTENT dostanou cisla ted (po prehrani
+            // davky znovu stejna - viz `replay_log`).
+            self.jflush()?;
         }
         self.activate(back)?;
         // Zapis dat narazil na neplatne uvolneni (poskozena hodnota): nic
@@ -583,15 +680,30 @@ impl<D: BlockDevice> Fs<D> {
             return Err(e);
         }
         self.clear_all_pending();
+        self.jpublish_all();
         Ok(())
     }
 
     /// Zaznamy davky pro `fsync` (cekajici seznam zustava nedotceny).
     /// Zmenena data souboru zapise do novych bloku.
     fn log_records(&mut self) -> Result<Vec<Record>> {
-        let mut records: Vec<Record> = self.zil.ops.iter().cloned().map(Record::Op).collect();
+        let mut records: Vec<Record> = Vec::new();
+        let mut last_actor = None;
+        for (actor, op) in &self.zil.ops {
+            if last_actor != Some(*actor) {
+                records.push(Record::Actor(*actor));
+                last_actor = Some(*actor);
+            }
+            records.push(Record::Op(op.clone()));
+        }
         let touched = self.zil.touched.clone();
         for (oid, blocks) in touched {
+            // Kdo obsah zmenil (zaznam CONTENT v zurnalu po prehrani).
+            let actor = self.jr.content_actor(oid);
+            if last_actor != Some(actor) {
+                records.push(Record::Actor(actor));
+                last_actor = Some(actor);
+            }
             let root = self.s.root;
             let Some(raw) = btree::get(&mut self.s, &root, &Key::new(oid, item::INODE, 0))? else {
                 continue;
@@ -714,10 +826,14 @@ impl<D: BlockDevice> Fs<D> {
                 }
             }
             for r in records {
-                let op = !matches!(r, Record::Dataset(_));
+                let op = !matches!(r, Record::Dataset(_) | Record::Actor(_));
                 self.apply(r)?;
                 self.replayed += op as u64;
             }
+            // Zaznamy CONTENT dostaly cisla na konci davky (pri fsync) -
+            // po prehrani take, aby cisla vysla stejne.
+            self.actor_override = None;
+            self.for_each_dataset(|fs| fs.jflush())?;
         }
         if unreadable {
             if self.discard_unreadable_log && !self.s.read_only {
@@ -765,6 +881,29 @@ impl<D: BlockDevice> Fs<D> {
         let bad = |_| Error::Corrupted;
         match r {
             Record::Dataset(id) => self.activate(id).map_err(bad),
+            Record::Actor(a) => {
+                self.actor_override = Some(a);
+                Ok(())
+            }
+            Record::Op(Op::Trash { parent, name, id, time }) => {
+                self.now = time;
+                self.trash_at(parent, &name, id).map_err(bad)
+            }
+            Record::Op(Op::Restore { id, dst, name, time }) => {
+                self.now = time;
+                self.restore_at(id, dst, &name).map_err(bad)
+            }
+            Record::Op(Op::Purge { id, time }) => {
+                self.now = time;
+                self.purge_at(id).map_err(bad)
+            }
+            Record::Op(Op::SetXattr { oid, name, value, time }) => {
+                self.now = time;
+                if !self.object_exists(oid).map_err(bad)? {
+                    return Ok(());
+                }
+                self.set_xattr_oid(oid, &name, value.as_deref()).map_err(bad)
+            }
             Record::Op(Op::Create {
                 parent,
                 oid,
@@ -886,7 +1025,10 @@ impl<D: BlockDevice> Fs<D> {
                 }
                 let mut inode = self.live_inode(oid)?;
                 inode.mtime = mtime;
-                self.put_inode(oid, &inode)
+                self.put_inode(oid, &inode)?;
+                let actor = self.actor();
+                self.jr.note_content(oid, actor);
+                Ok(())
             }
         }
     }

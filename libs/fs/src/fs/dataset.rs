@@ -50,6 +50,7 @@ pub(super) struct DsCtx {
     defrag_cursor: u64,
     /// Zaznam datasetu je potreba zapsat i bez zmeny stromu (novy klon).
     rec_dirty: bool,
+    pub(super) jr: super::journal::DsJournal,
 }
 
 impl Default for Child {
@@ -108,6 +109,7 @@ impl<D: BlockDevice> Fs<D> {
             zil: core::mem::take(&mut self.zil),
             defrag_cursor: self.defrag_cursor,
             rec_dirty: self.cur_rec_dirty,
+            jr: core::mem::take(&mut self.jr),
         };
         self.others.insert(self.cur_ds, old);
         self.s.root = target.root;
@@ -121,6 +123,7 @@ impl<D: BlockDevice> Fs<D> {
         self.zil = target.zil;
         self.defrag_cursor = target.defrag_cursor;
         self.cur_rec_dirty = target.rec_dirty;
+        self.jr = target.jr;
         self.cur_ds = id;
         Ok(())
     }
@@ -232,6 +235,8 @@ impl<D: BlockDevice> Fs<D> {
             if !self.cur_dirty() {
                 continue;
             }
+            self.jprune()?;
+            self.jflush()?;
             self.flush_all_data()?;
             self.flush_dead()?;
             let ptr = self.s.write_tree(self.s.root)?;
@@ -252,6 +257,8 @@ impl<D: BlockDevice> Fs<D> {
             self.put(Key::new(META_OID, item::DATASET, id), rec.encode())?;
         }
         self.activate(ROOT_DATASET)?;
+        self.jprune()?;
+        self.jflush()?;
         self.flush_all_data()?;
         self.flush_dead()?;
         self.s.commit()?;
@@ -259,6 +266,7 @@ impl<D: BlockDevice> Fs<D> {
         for c in self.others.values_mut() {
             c.zil.clear();
         }
+        self.jpublish_all();
         self.activate(back)
     }
 
@@ -292,15 +300,17 @@ impl<D: BlockDevice> Fs<D> {
         if self.lookup_child(&root, parent, name)?.is_some() {
             return Err(Error::AlreadyExists);
         }
+        let name = stored_name(name);
         self.add_dirent(
             parent,
             Dirent {
                 oid: id,
                 kind: KIND_DATASET,
-                name: stored_name(name),
+                name: name.clone(),
             },
         )?;
-        self.touch_dir(parent)
+        self.touch_dir(parent)?;
+        self.jlog(crate::records::jop::CREATE, KIND_DATASET, id, 0, parent, &name, 0)
     }
 
     /// Vytvori novy prazdny dataset `path` (pro uzivatele obycejna slozka
@@ -412,6 +422,7 @@ impl<D: BlockDevice> Fs<D> {
             fs.others.remove(&id);
             fs.remove_dirent(parent, &d.name)?;
             fs.touch_dir(parent)?;
+            fs.jlog(crate::records::jop::REMOVE, KIND_DATASET, id, 0, parent, &d.name, 0)?;
             fs.activate(ROOT_DATASET)?;
             fs.del(&Key::new(META_OID, item::DATASET, id))?;
             if origin.0 != 0 {
