@@ -334,7 +334,7 @@ mobilu, bez závislostního pekla linuxových balíčkovačů.
 | # | Otázka | Rozhodnutí |
 |---|---|---|
 | 1 | protokol terminálu | **vlastní nativní protokol** (typované záznamy, tabulky, odkazy, obrázky, průběh, výzvy); VT100/pty jen jako adaptér pro převzaté programy |
-| 2 | jazyk shellu | **nový jazyk s typy, dva zápisy jednoho jazyka** (příkazový a výrazový blízký Rustu, [návrh](navrh-shell.md)): bez implicitního dělení slov, chyba jako hodnota (kód + popis), `?` jako v Rustu; **skript nese manifest oprávnění**; POSIX `sh` zvlášť pro převzaté skripty |
+| 2 | jazyk shellu | **nový jazyk s typy, dva zápisy jednoho jazyka** (příkazový a výrazový blízký Rustu, [návrh](navrh-shell.md)): bez implicitního dělení slov, chyba jako hodnota (kód + popis), která se bez ošetření šíří sama a skript zastaví; **skript nese manifest oprávnění**; POSIX `sh` zvlášť pro převzaté skripty |
 | 3 | co posílá aplikace kompozitoru | **strom vrstev + strom přístupnosti** (obsah kreslí aplikace do bufferů, posun, průhlednost, animace a scroll dělá kompozitor; struktura okna - role, texty, stav - je součást protokolu) |
 | 4 | dekorace oken | **kreslí systém**; vlastní vzhled jde, ale s pravidly níže |
 | 5 | API akcí aplikací | **v základu GUI** (6c): aplikace v manifestu deklaruje akce s typovanými parametry a potřebnými oprávněními; volá je shell, průzkumník, asistent i agent |

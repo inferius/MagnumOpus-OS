@@ -1,7 +1,8 @@
 # Návrh: jazyk shellu (k rozhodnutí)
 
-> Stav: **zápisy rozhodnuty** (viz [Rozhodnutí](#rozhodnutí-jeden-jazyk-dva-zápisy-b-a-c)),
-> otázky 2-7 dole čekají. Původně **návrh k diskusi**. Odsouhlaseno je zatím jen to, že jde o nový
+> Stav: **odsouhlaseno** - [dva zápisy](#rozhodnutí-jeden-jazyk-dva-zápisy-b-a-c)
+> a [rozhodnutí k zápisu](#rozhodnutí-k-zápisu). Kapitoly o průzkumu
+> a variantách níže ukazují, z čeho se vybíralo. Odsouhlaseno je zatím jen to, že jde o nový
 > jazyk s typy, chyba je hodnota (`?` jako v Rustu), skript nese manifest
 > oprávnění a POSIX `sh` je zvlášť ([rozhodnutí 6a-6d](architektura.md#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno)).
 > Tady je syntaxe a chování, které je potřeba vybrat.
@@ -44,9 +45,9 @@ Oils, ale bez textového mezikroku.
    v uvozovkách, žádné skryté převody typů. **Bajtový proud je jiný typ
    než proud záznamů** a mezi nimi se převádí jen výslovně (`from json`,
    `to text`). Chyba PowerShellu s binárními daty tak nemůže nastat.
-4. **Chyby jsou hodnoty:** kód + popis + místo. `?` chybu vrátí výš,
-   `try {...} else {...}` ji zpracuje. Neošetřená chyba ve skriptu ho
-   zastaví (jako `set -e`, ale spolehlivě). Interaktivně se vypíše
+4. **Chyby jsou hodnoty:** kód + popis + místo. Neošetřená chyba se šíří
+   sama a skript zastaví (jako `set -e`, ale spolehlivě);
+   `try {...} else {...}` ji zpracuje. Interaktivně se vypíše
    s vysvětlením z [chyby.md](chyby.md).
 5. **To, co v shellu běžně čekáš, je od začátku:** `&&` a `||`, řízení
    úloh (pozadí, přepnutí, Ctrl-C vždy funguje), přesměrování.
@@ -98,15 +99,15 @@ ls("~/Dokumenty", recursive: true).filter(|f| f.size > 100.mb && f.mtime < now()
 > Oba jsou **zápisy téhož jazyka**, ne dva jazyky. To se musí přísně hlídat.
 
 ```text
-ls ~/Dok -r | where size > 100MB              # B
-ls("~/Dok", recursive: true).where(|f| f.size > 100MB)   # C, totéž
-ls ~/Dok -r | where (f.size > 100MB && f.ext == "pdf")   # míchání: výraz v ( ) je C
+ls ~/Dok -r | where size > 100MB                          # B
+ls("~/Dok", recursive: true).where(f => f.size > 100MB)   # C, totéž
+ls ~/Dok -r | where (f.size > 100MB && f.ext == "pdf")    # míchání: výraz v ( ) je C
 ```
 
 **Pravidla, která to drží pohromadě** (kontroluje je CI, ne jen dohoda):
 
 1. **Jeden strom, jedna sémantika.** Oba parsery vytvoří stejný strom
-   výrazů. Typy, vyhodnocení, roury, chyby a `?`, manifest oprávnění,
+   výrazů. Typy, vyhodnocení, roury, chyby, manifest oprávnění,
    doplňování i nápověda existují jen jednou, nad stromem. Zápis nesmí mít
    vlastní chování.
 2. **Každá konstrukce v obou zápisech.** Nová funkce jazyka se přijme jen
@@ -122,23 +123,38 @@ ls ~/Dok -r | where (f.size > 100MB && f.ext == "pdf")   # míchání: výraz v 
    příkazu je C, příkaz uvnitř výrazu se volá jako funkce.
 6. **Verze jazyka (`lang 1`) platí pro oba zápisy** najednou.
 
+**Tabulka výjimek** (konstrukce jen v jednom zápisu): zatím prázdná.
+
+## Rozhodnutí k zápisu
+
+| # | Otázka | Rozhodnutí |
+|---|---|---|
+| 1 | základní styl | **B i C jako dva zápisy jednoho jazyka** |
+| 2 | názvy příkazů | **obojí**: krátký název (`ls`, `cp`) a plné jméno `sloveso-podstatné` (`file-list`) jako alias; nápověda ukazuje oba |
+| 3 | proměnné | **`$` jen v argumentech příkazu** (tam, kde by jinak byl text); ve výrazech, v podmínkách `where` a v zápisu C bez `$`. Holé slovo v argumentu, které se jmenuje jako proměnná, vyvolá napovídku „myslel jsi `$x`?“ |
+| 4 | funkce (closure) | **`x => výraz`** a `(a, b) => výraz`, tělo s víc příkazy `x => { ... }`, v obou zápisech; pojmenovaná `fn jméno(x) { }`. Ne `\|x\|` - `\|` je v shellu roura |
+| 5 | chyby | **neošetřená chyba se šíří sama** (jako výjimka) a zastaví skript; **chyba je hodnota** s kódem, popisem, místem a příčinou. Ošetření `try { } else e => ...`, záloha `cmd \|\| jiný`, výsledek jako hodnota `let r = try cmd`. `?` jen volitelně ve funkcích v C |
+| 6 | čeština | **anglické názvy**, česká nápověda a chybové hlášky |
+| 7 | skript bez `lang` | **nejnovější verze + varování** |
+
 ## Pravidla zápisu B
 
 - **Příkazový režim:** `prikaz arg -p hodnota --dlouhy`. Slovo je text,
   `$x` je hodnota proměnné, `*.txt` rozvine shell podle FS (jen bez
   uvozovek). Argumenty mají typy z manifestu programu: chyba „čekám cestu,
   dostal jsem číslo“ přijde před spuštěním.
-- **Výrazový režim:** za `let`, `if`, `for`, `while`, `return` a uvnitř
-  `( )`. Čísla s jednotkami (`100MB`, `1y`, `30s`), porovnání, `&&`
-  `||` `!`, řetězce v `"..."` s `{výraz}` uvnitř, seznamy `[1, 2]`, záznamy
-  `{name: "a", size: 1KB}`.
+- **Výrazový režim:** za `let`, `if`, `for`, `while`, `return`, v podmínce
+  `where` a uvnitř `( )`. Čísla s jednotkami (`100MB`, `1y`, `30s`),
+  porovnání, `&&` `||` `!`, řetězce v `"..."` s `{výraz}` uvnitř, seznamy
+  `[1, 2]`, záznamy `{name: "a", size: 1KB}`. Proměnné bez `$`.
 - **Roura:** `|` předává záznamy (nebo bajty, podle manifestu). Běžné
   operace jsou krátká slova: `where`, `select`, `sort`, `group`, `first`,
-  `count`, `each { |x| ... }`. Převody jsou výslovné: `from json`,
+  `count`, `each f => ...`. Převody jsou výslovné: `from json`,
   `to text`, `lines`.
-- **Chyby:** `prikaz?` chybu propustí výš, `try { } else |e| { }` ji
-  zpracuje, `$e.code` a `$e.message` jsou k dispozici. `&&`/`||` se řídí
-  úspěchem.
+- **Chyby:** neošetřená chyba zastaví skript s vysvětlením.
+  `try { rm $f } else e => log "nešlo: {e.message}"` ji zpracuje,
+  `rm $f || echo "nevadí"` použije zálohu, `let r = try rm $f` vrátí
+  výsledek jako hodnotu (`r.failed`, `r.error.code`).
 - **Manifest skriptu:** hlavička, kterou shell zkontroluje před spuštěním
   a podle které předá capabilities:
 
@@ -150,22 +166,10 @@ needs {
     net: none
 }
 for f in (ls ~/Fotky | where ext == "jpg") {
-    image resize $f.path --width 1600 -o ~/Fotky/zmensene/{f.name}?
+    image resize $f.path --width 1600 -o ~/Fotky/zmensene/{f.name}
 }
 ```
 
 - **Bezpečné výchozí chování:** příkaz, který mění soubory, dostane
   líný snapshot (undo). Hromadná změna nad N souborů běží přes „ukaž, co se
   stane“ ([terminál](architektura.md#shell-a-chytrý-terminál-návrh)).
-
-## Otevřené otázky k rozhodnutí
-
-| # | Otázka | Varianty | Doporučení |
-|---|---|---|---|
-| 1 | základní styl | A / **B** / C | **rozhodnuto: B i C jako dva zápisy jednoho jazyka** |
-| 2 | názvy příkazů | krátké (`ls`, `cp`) / `sloveso-podstatné` (`file-list`) / obojí (krátký alias) | krátké, plné jméno v nápovědě |
-| 3 | proměnné v příkazu | `$x` / bez znaku (jen ve výrazech) | `$x` v příkazech, bez `$` ve výrazech |
-| 4 | zápis funkce (closure) | `{ \|x\| ... }` / `fn(x) { ... }` / `x => ...` | `{ \|x\| ... }` (krátké v rouře), `fn jméno(x) { }` pro pojmenované |
-| 5 | chyby | hodnoty + `?` / výjimky (Elvish) | hodnoty + `?` (odsouhlaseno) |
-| 6 | čeština v příkazech | jen anglické názvy / lokalizované aliasy | anglické názvy, česká nápověda a chybové hlášky |
-| 7 | bez `lang` ve skriptu | chyba / nejnovější verze | nejnovější verze + varování |

@@ -355,7 +355,7 @@ sandbox, without the dependency hell of Linux package managers.
 | # | Question | Decision |
 |---|---|---|
 | 1 | terminal protocol | **our own native protocol** (typed records, tables, links, images, progress, prompts); VT100/pty only as an adapter for ported programs |
-| 2 | shell language | **a new typed language, two notations of one language** (command and expression close to Rust, [design](shell-design.md)): no implicit word splitting, errors as values (code + description), `?` as in Rust; **a script carries a permission manifest**; POSIX `sh` separately for ported scripts |
+| 2 | shell language | **a new typed language, two notations of one language** (command and expression close to Rust, [design](shell-design.md)): no implicit word splitting, errors as values (code + description) that propagate by themselves when unhandled and stop the script; **a script carries a permission manifest**; POSIX `sh` separately for ported scripts |
 | 3 | what an application sends to the compositor | **a layer tree + an accessibility tree** (the application draws content into buffers, the compositor does scrolling, transparency, animations; the window structure - roles, texts, state - is part of the protocol) |
 | 4 | window decorations | **drawn by the system**; a custom look is possible, with the rules below |
 | 5 | application action API | **in the GUI foundation** (6c): an application declares actions with typed parameters and required permissions in its manifest; the shell, file manager, assistant and agents call them |

@@ -1,7 +1,8 @@
 # Design: the shell language (for decision)
 
-> Status: **notations decided** (see [Decision](#decision-one-language-two-notations-b-and-c)),
-> questions 2-7 below are still open. Originally **a proposal for discussion**. So far only these points are
+> Status: **agreed** - [two notations](#decision-one-language-two-notations-b-and-c)
+> and [notation decisions](#notation-decisions). The research and variants
+> chapters below show what was chosen from. So far only these points are
 > agreed: it is a new typed language, an error is a value (`?` as in Rust),
 > a script carries a permission manifest, and POSIX `sh` is separate
 > ([decisions 6a-6d](architecture.md#decisions-for-milestones-6a-6d-agreed)).
@@ -45,9 +46,9 @@ like Oils, without a text step in between.
    quotes, no hidden type conversions. **A byte stream is a different type
    from a record stream**, and converting between them is always explicit
    (`from json`, `to text`). PowerShell's binary-data bug cannot happen.
-4. **Errors are values:** a code, a message and a location. `?` passes the
-   error up; `try {...} else {...}` handles it. An unhandled error stops the
-   script (like `set -e`, but reliably). Interactively it is printed with an
+4. **Errors are values:** a code, a message and a location. An unhandled
+   error propagates by itself and stops the script (like `set -e`, but
+   reliably); `try {...} else {...}` handles it. Interactively it is printed with an
    explanation from [errors.md](errors.md).
 5. **What you expect from a shell is there from the start:** `&&` and
    `||`, job control (background, switching, Ctrl-C always works) and
@@ -102,15 +103,15 @@ ls("~/Documents", recursive: true).filter(|f| f.size > 100.mb && f.mtime < now()
 > two languages. This must be guarded strictly.
 
 ```text
-ls ~/Doc -r | where size > 100MB              # B
-ls("~/Doc", recursive: true).where(|f| f.size > 100MB)   # C, the same
-ls ~/Doc -r | where (f.size > 100MB && f.ext == "pdf")   # mixing: an expression in ( ) is C
+ls ~/Doc -r | where size > 100MB                          # B
+ls("~/Doc", recursive: true).where(f => f.size > 100MB)   # C, the same
+ls ~/Doc -r | where (f.size > 100MB && f.ext == "pdf")    # mixing: an expression in ( ) is C
 ```
 
 **Rules that keep it together** (checked by CI, not just agreed):
 
 1. **One tree, one semantics.** Both parsers produce the same expression
-   tree. Types, evaluation, pipes, errors and `?`, the permission manifest,
+   tree. Types, evaluation, pipes, errors, the permission manifest,
    completion and help exist only once, on top of the tree. A notation may
    not have behaviour of its own.
 2. **Every construct in both notations.** A new language feature is
@@ -128,23 +129,39 @@ ls ~/Doc -r | where (f.size > 100MB && f.ext == "pdf")   # mixing: an expression
    function.
 6. **The language version (`lang 1`) applies to both notations** at once.
 
+**Exceptions table** (constructs in one notation only): empty so far.
+
+## Notation decisions
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | basic style | **B and C as two notations of one language** |
+| 2 | command names | **both**: a short name (`ls`, `cp`) and a full `verb-noun` name (`file-list`) as an alias; help shows both |
+| 3 | variables | **`$` only in command arguments** (where a word would otherwise be text); no `$` in expressions, `where` conditions and notation C. A bare word in an argument named like a variable triggers a hint "did you mean `$x`?" |
+| 4 | function (closure) | **`x => expression`** and `(a, b) => expression`, a body with several commands `x => { ... }`, in both notations; named `fn name(x) { }`. Not `\|x\|` - `\|` is the pipe in a shell |
+| 5 | errors | **an unhandled error propagates by itself** (like an exception) and stops the script; **an error is a value** with a code, message, location and cause. Handling `try { } else e => ...`, fallback `cmd \|\| other`, the result as a value `let r = try cmd`. `?` only optionally in functions in C |
+| 6 | Czech | **English names**, Czech help and error messages |
+| 7 | script without `lang` | **latest version + a warning** |
+
 ## Rules of notation B
 
 - **Command mode:** `command arg -p value --long`. A word is text, `$x` is
   a variable's value, and the shell expands `*.txt` against the FS (only
   when unquoted). Arguments are typed from the program's manifest, so an
   error like "expected a path, got a number" comes before the program runs.
-- **Expression mode:** after `let`, `if`, `for`, `while`, `return` and
-  inside `( )`. It has numbers with units (`100MB`, `1y`, `30s`),
-  comparisons, `&&` `||` `!`, strings in `"..."` with `{expression}`
-  inside, lists `[1, 2]` and records `{name: "a", size: 1KB}`.
+- **Expression mode:** after `let`, `if`, `for`, `while`, `return`, in a
+  `where` condition and inside `( )`. It has numbers with units (`100MB`,
+  `1y`, `30s`), comparisons, `&&` `||` `!`, strings in `"..."` with
+  `{expression}` inside, lists `[1, 2]` and records `{name: "a", size: 1KB}`.
+  Variables have no `$`.
 - **Pipe:** `|` passes records (or bytes, according to the manifest). Common
   operations are short words: `where`, `select`, `sort`, `group`, `first`,
-  `count`, `each { |x| ... }`. Conversions are explicit: `from json`,
+  `count`, `each f => ...`. Conversions are explicit: `from json`,
   `to text`, `lines`.
-- **Errors:** `command?` passes the error up, and
-  `try { } else |e| { }` handles it, with `$e.code` and `$e.message`
-  available. `&&`/`||` follow success.
+- **Errors:** an unhandled error stops the script with an explanation.
+  `try { rm $f } else e => log "failed: {e.message}"` handles it,
+  `rm $f || echo "never mind"` uses a fallback, and `let r = try rm $f`
+  returns the result as a value (`r.failed`, `r.error.code`).
 - **Script manifest:** a header the shell checks before running the script;
   it hands out capabilities according to it:
 
@@ -156,22 +173,10 @@ needs {
     net: none
 }
 for f in (ls ~/Photos | where ext == "jpg") {
-    image resize $f.path --width 1600 -o ~/Photos/small/{f.name}?
+    image resize $f.path --width 1600 -o ~/Photos/small/{f.name}
 }
 ```
 
 - **Safe defaults:** a command that changes files gets a lazy snapshot
   (undo). A bulk change over N files runs through "show what will happen"
   ([terminal](architecture.md#shell-and-smart-terminal-proposal)).
-
-## Open questions to decide
-
-| # | Question | Variants | Recommendation |
-|---|---|---|---|
-| 1 | basic style | A / **B** / C | **decided: B and C as two notations of one language** |
-| 2 | command names | short (`ls`, `cp`) / `verb-noun` (`file-list`) / both (short alias) | short, the full name in help |
-| 3 | variables in a command | `$x` / no sigil (only in expressions) | `$x` in commands, no `$` in expressions |
-| 4 | function (closure) syntax | `{ \|x\| ... }` / `fn(x) { ... }` / `x => ...` | `{ \|x\| ... }` (short in a pipe), `fn name(x) { }` for named functions |
-| 5 | errors | values + `?` / exceptions (Elvish) | values + `?` (agreed) |
-| 6 | Czech in commands | English names only / localised aliases | English names, Czech help and error messages |
-| 7 | no `lang` in a script | error / latest version | latest version + a warning |
