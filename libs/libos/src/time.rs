@@ -45,6 +45,17 @@ pub fn set(
     clock.set_clock(&req, flags)
 }
 
+/// Jako [`set`], ale cas je ze synchronizace podle site (zdroj
+/// `source::NETWORK`).
+pub fn set_synced(clock: &Resource, t: WallTime, settings: &zone::Settings, write_hardware: bool) -> crate::Result<bool> {
+    let req = SetRequest { time: t, rtc_offset: settings.rtc_offset(t) };
+    let mut flags = set_flags::NETWORK;
+    if write_hardware {
+        flags |= set_flags::WRITE_HARDWARE;
+    }
+    clock.set_clock(&req, flags)
+}
+
 /// Plynula korekce realneho casu (`clock` = Resource s `SET_CLOCK`):
 /// `offset` = posun k dorovnani bez skoku (nahradi zbytek predchoziho),
 /// `freq` = trvala oprava frekvence v ppb. `None` = nemenit. Bez zmen jen

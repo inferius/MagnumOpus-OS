@@ -36,6 +36,7 @@ pub fn clock_set(a: Args) -> Result<u64> {
     let hw = crate::clock::set(
         req,
         a[2] & set_flags::WRITE_HARDWARE != 0,
+        a[2] & set_flags::NETWORK != 0,
         format_args!("[{} {}]", p.name, p.id),
     );
     Ok(hw as u64)

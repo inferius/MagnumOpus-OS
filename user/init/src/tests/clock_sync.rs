@@ -182,6 +182,10 @@ fn timed_policy(_: &Startup) -> TestResult {
     check_eq!(r.len(), 7 + AdjustStatus::SIZE, "stav v odpovedi");
     let after = time::wall().ok_or("cas")?.as_nanos();
     check!(after >= before, "korekce zpet nesmi skocit");
+    // Zdroj casu v jadre: podle nej timed po restartu pozna, ze prvni
+    // synchronizace (jediny skok) uz byla.
+    let src = time::wall_reading().map_err(|e| fail("cteni", e))?.source;
+    check_eq!(src, libos::abi::time::source::NETWORK, "zdroj po korekci");
     // Podezrele velka korekce po synchronizaci se odmitne.
     let r = sync(&c, -120_000_000_000)?;
     check!(r.starts_with(b"err:OUT_OF_RANGE"), format!("velky posun: {}", String::from_utf8_lossy(&r)));

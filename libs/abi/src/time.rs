@@ -17,6 +17,10 @@ pub mod source {
     pub const RTC: u16 = 2;
     /// Nastaveny za behu (`CLOCK_SET`: sluzba casu, synchronizace podle site).
     pub const SET: u16 = 3;
+    /// Synchronizovany podle site (`CLOCK_SET` s `set_flags::NETWORK` nebo
+    /// `CLOCK_ADJUST` s posunem). Sluzba casu podle nej po restartu pozna,
+    /// ze prvni synchronizace (jediny povoleny skok) uz probehla.
+    pub const NETWORK: u16 = 4;
 }
 
 /// Priznaky realneho casu.
@@ -136,8 +140,10 @@ pub mod set_flags {
     /// restartu. Kdyz platforma hodiny nema (aarch64 zatim), nastavi se jen
     /// cas systemu a syscall vrati 0.
     pub const WRITE_HARDWARE: u64 = 1;
+    /// Cas je ze synchronizace podle site (zdroj `source::NETWORK`).
+    pub const NETWORK: u64 = 2;
     /// Vsechny zname priznaky (ostatni bity = `INVALID_ARGS`).
-    pub const ALL: u64 = WRITE_HARDWARE;
+    pub const ALL: u64 = WRITE_HARDWARE | NETWORK;
 }
 
 /// Plynula korekce realneho casu (`CLOCK_ADJUST`).

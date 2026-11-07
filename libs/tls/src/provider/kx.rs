@@ -2,29 +2,16 @@
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicPtr, Ordering};
 
 use rustls::crypto::{ActiveKeyExchange, SharedSecret, SupportedKxGroup};
 use rustls::{Error, NamedGroup, PeerMisbehaved};
 
 use super::{Platform, Rng};
 
-/// Platforma pro generovani docasnych klicu (nastavi `provider`).
-static PLATFORM: AtomicPtr<Platform> = AtomicPtr::new(core::ptr::null_mut());
-
-pub(crate) fn set_platform(p: &'static Platform) {
-    PLATFORM.store(p as *const Platform as *mut Platform, Ordering::Release);
-}
-
-fn rng() -> Result<Rng, Error> {
-    let p = PLATFORM.load(Ordering::Acquire);
-    if p.is_null() {
-        return Err(Error::FailedToGetRandomBytes);
-    }
-    // SAFETY: ukazatel prisel z `&'static Platform` (`set_platform`).
-    let platform: &'static Platform = unsafe { &*p };
-    // Generatory klicu RustCrypto chybu nahody neumi vratit (RngCore
-    // `fill_bytes` by panikaril): overit dostupnost predem a vratit chybu.
+/// Generator nad nahodou `platform`. Generatory klicu RustCrypto chybu
+/// nahody neumi vratit (RngCore `fill_bytes` by panikaril): dostupnost se
+/// overi predem a vrati se chyba.
+fn rng(platform: &'static Platform) -> Result<Rng, Error> {
     let mut probe = [0u8; 1];
     if !(platform.random)(&mut probe) {
         return Err(Error::FailedToGetRandomBytes);
@@ -36,8 +23,9 @@ fn bad_share() -> Error {
     Error::from(PeerMisbehaved::InvalidKeyShare)
 }
 
+/// Skupina nese platformu (kazdy `Client` muze mit vlastni).
 #[derive(Debug)]
-struct X25519;
+struct X25519(&'static Platform);
 
 struct X25519Exchange {
     secret: x25519_dalek::EphemeralSecret,
@@ -46,7 +34,7 @@ struct X25519Exchange {
 
 impl SupportedKxGroup for X25519 {
     fn start(&self) -> Result<Box<dyn ActiveKeyExchange>, Error> {
-        let secret = x25519_dalek::EphemeralSecret::random_from_rng(rng()?);
+        let secret = x25519_dalek::EphemeralSecret::random_from_rng(rng(self.0)?);
         let public = x25519_dalek::PublicKey::from(&secret);
         Ok(Box::new(X25519Exchange { secret, public }))
     }
@@ -79,7 +67,7 @@ impl ActiveKeyExchange for X25519Exchange {
 macro_rules! nist_kx {
     ($group:ident, $exchange:ident, $curve:ident, $named:expr) => {
         #[derive(Debug)]
-        struct $group;
+        struct $group(&'static Platform);
 
         struct $exchange {
             secret: $curve::ecdh::EphemeralSecret,
@@ -88,7 +76,7 @@ macro_rules! nist_kx {
 
         impl SupportedKxGroup for $group {
             fn start(&self) -> Result<Box<dyn ActiveKeyExchange>, Error> {
-                let mut r = rng()?;
+                let mut r = rng(self.0)?;
                 let secret = $curve::ecdh::EphemeralSecret::random(&mut r);
                 let public = $curve::EncodedPoint::from(secret.public_key()).as_bytes().to_vec();
                 Ok(Box::new($exchange { secret, public }))
@@ -125,5 +113,13 @@ macro_rules! nist_kx {
 nist_kx!(Secp256r1, Secp256r1Exchange, p256, NamedGroup::secp256r1);
 nist_kx!(Secp384r1, Secp384r1Exchange, p384, NamedGroup::secp384r1);
 
-/// Skupiny v poradi preference.
-pub static ALL: &[&dyn SupportedKxGroup] = &[&X25519, &Secp256r1, &Secp384r1];
+/// Skupiny v poradi preference pro `platform`. Kazda skupina je jedna
+/// mala alokace na cely beh programu (rustls chce `&'static`); `provider`
+/// se vola jednou pro kazdy `Client`.
+pub fn all(platform: &'static Platform) -> alloc::vec::Vec<&'static dyn SupportedKxGroup> {
+    alloc::vec![
+        Box::leak(Box::new(X25519(platform))) as &'static dyn SupportedKxGroup,
+        Box::leak(Box::new(Secp256r1(platform))),
+        Box::leak(Box::new(Secp384r1(platform))),
+    ]
+}

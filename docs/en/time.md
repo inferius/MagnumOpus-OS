@@ -238,6 +238,16 @@ right to the clock:
 | after the first synchronization, offset over 60 s | rejects it (`OUT_OF_RANGE`): a clock does not drift that much by itself, it is more likely spoofed |
 | frequency | at most ±500 ppm and one change at most by 100 ppm |
 
+`timed` does not keep "first synchronization" only in memory: afterwards
+the kernel reports time source 4 (`source::NETWORK`, set by `CLOCK_SET`
+with the `NETWORK` flag and by `CLOCK_ADJUST` with an offset). A new
+`timed` restarted by the supervisor sees it and does not allow another
+step.
+
+> **Change from the first version:** the state lived only in `timed`'s
+> memory, so after a restart the clock could be stepped again. **Why:** the
+> "single step" rule must hold for the whole uptime.
+
 Status: the `status` message on init's channel to `timed`
 (`synced=1 updates=… last_offset_ns=… remaining_ns=… freq_ppb=…
 slew_ppb=…`) and to `ntpd` (`rounds=… offset_ns=… delay_ns=… freq_ppb=…

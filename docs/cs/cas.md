@@ -224,6 +224,15 @@ samples = 4
 | po první synchronizaci posun nad 60 s | odmítne (`OUT_OF_RANGE`), hodiny se tolik samy nerozejdou, spíš jde o podvržení |
 | frekvence | nejvýš ±500 ppm a jedna změna nejvýš o 100 ppm |
 
+„První synchronizace“ si `timed` nepamatuje jen v paměti: jádro po ní hlásí
+zdroj času 4 (`source::NETWORK`, nastaví ho `CLOCK_SET` s příznakem
+`NETWORK` i `CLOCK_ADJUST` s posunem). Nový `timed` po restartu
+supervisorem podle něj pozná, že skok už proběhl, a další skok nepovolí.
+
+> **Změna proti první verzi:** stav byl jen v paměti `timed`, takže po
+> jeho restartu šlo hodiny skokem posunout znovu. **Proč:** pravidlo
+> „jediný skok“ musí platit po celou dobu běhu systému.
+
 Stav: zpráva `status` na kanálu initu k `timed` (`synced=1 updates=…
 last_offset_ns=… remaining_ns=… freq_ppb=… slew_ppb=…`) a k `ntpd`
 (`rounds=… offset_ns=… delay_ns=… freq_ppb=… poll_s=…`).

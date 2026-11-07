@@ -209,13 +209,13 @@ static HW_WRITE: SpinLock<()> = SpinLock::new(());
 /// posila sluzba casu). Zapis ceka (spankem, nejvys 1 s) na zlomek sekundy
 /// [`arch::HARDWARE_CLOCK_PHASE_NS`], aby hodiny tikaly na hranici sekund,
 /// a zapisuje aktualni cas systemu v tom okamziku.
-pub fn set(req: SetRequest, write_hardware: bool, by: core::fmt::Arguments<'_>) -> bool {
+pub fn set(req: SetRequest, write_hardware: bool, network: bool, by: core::fmt::Arguments<'_>) -> bool {
     let now = arch::now_ns() as i128;
     let old = {
         let mut o = ORIGIN.lock();
         let old = (o.source != source::NONE).then(|| o.time.real_at(now));
         o.time.step(now, req.time);
-        o.source = source::SET;
+        o.source = if network { source::NETWORK } else { source::SET };
         o.flags = 0;
         old
     };
@@ -271,6 +271,9 @@ pub fn adjust(
             return Err(crate::error::Error::BadState);
         }
         o.time.adjust(now, offset, freq);
+        if offset.is_some() {
+            o.source = source::NETWORK;
+        }
         o.time.status(now)
     };
     // Jen zmena (dotaz na stav bez priznaku se neloguje - ntpd a testy

@@ -136,14 +136,13 @@ pub const TLS13_CHACHA20_POLY1305_SHA256: SupportedCipherSuite = SupportedCipher
 
 /// Poskytovatel kryptografie s nahodou a casem `platform`.
 pub fn provider(platform: &'static Platform) -> CryptoProvider {
-    kx::set_platform(platform);
     CryptoProvider {
         cipher_suites: alloc::vec![
             TLS13_AES_128_GCM_SHA256,
             TLS13_AES_256_GCM_SHA384,
             TLS13_CHACHA20_POLY1305_SHA256,
         ],
-        kx_groups: kx::ALL.to_vec(),
+        kx_groups: kx::all(platform),
         signature_verification_algorithms: verify::ALGORITHMS,
         secure_random: platform,
         key_provider: platform,

@@ -39,9 +39,12 @@ pub struct Sync {
 }
 
 impl Sync {
+    /// `synced` podle zdroje casu v jadre: po restartu timed (supervisor)
+    /// uz prvni synchronizace probehla a dalsi skok se nepovoli.
     pub fn new() -> Self {
+        let synced = time::wall_reading().is_ok_and(|r| r.source == libos::abi::time::source::NETWORK);
         Self {
-            synced: false,
+            synced,
             last_offset: 0,
             updates: 0,
         }
@@ -87,7 +90,7 @@ impl Sync {
         });
         let kind = if !self.synced && offset.abs() > STEP_THRESHOLD_NS {
             let now = time::wall().ok_or(Error::BadState)?;
-            time::set(clock, now.add_ns(offset as i128), settings, false)?;
+            time::set_synced(clock, now.add_ns(offset as i128), settings, false)?;
             println!("timed: prvni synchronizace: skok o {} ms", offset / 1_000_000);
             if let Some(f) = freq {
                 time::adjust(clock, None, Some(f))?;

@@ -411,19 +411,26 @@ fn h2_flow_control_request_body() {
 }
 
 #[test]
-fn h2_settings_shrink_window() {
-    // SETTINGS zmensi pocatecni okno pod uz poslana data: okno je zaporne
-    // a klient ceka (RFC 9113 6.9.2), server odpovi drive = chyba.
+fn h2_early_response() {
+    // SETTINGS zmensi okno pod uz poslana data (klient ceka, RFC 9113
+    // 6.9.2) a server mezitim odpovi 413: klient prestane posilat telo
+    // a vrati odpoved serveru.
     let mut settings = Vec::new();
     settings.extend_from_slice(&h2::settings::INITIAL_WINDOW_SIZE.to_be_bytes());
     settings.extend_from_slice(&10u32.to_be_bytes());
     let mut input = fr(frame::SETTINGS, 0, 0, &settings);
-    input.extend(fr(frame::HEADERS, flags::END_HEADERS | flags::END_STREAM, 1, &status_block("413", &[])));
+    input.extend(fr(frame::HEADERS, flags::END_HEADERS, 1, &status_block("413", &[])));
+    input.extend(fr(frame::DATA, flags::END_STREAM, 1, b"moc velke"));
     let req = Request {
         body: vec![b'x'; 70_000],
         ..Request::new(Method::Post, Url::parse("http://h/").unwrap())
     };
-    assert!(crate::h2::send(Script::new(&input), &req, &Limits::default()).is_err());
+    let r = crate::h2::send(Script::new(&input), &req, &Limits::default()).unwrap();
+    assert_eq!((r.status, r.body.as_slice()), (413, &b"moc velke"[..]));
+    // RST_STREAM misto odpovedi = chyba s kodem.
+    let mut input = fr(frame::SETTINGS, 0, 0, &settings);
+    input.extend(fr(frame::RST_STREAM, 0, 1, &7u32.to_be_bytes()));
+    assert_eq!(crate::h2::send(Script::new(&input), &req, &Limits::default()), Err(Error::Reset(7)));
 }
 
 #[test]

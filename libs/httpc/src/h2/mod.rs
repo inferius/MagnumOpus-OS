@@ -252,24 +252,27 @@ impl<S: Read + Write> Conn<S> {
     }
 
     /// Ceka, az bude v okne serveru misto pro data.
-    fn wait_window(&mut self) -> core::result::Result<(), ConnError> {
+    /// Ceka, az bude v okne serveru misto pro data. `Some(ramec)` = server
+    /// uz odpovida (napr. 413 pred koncem tela, RFC 9113 8.1): telo se dal
+    /// neposila a ramec patri odpovedi.
+    fn wait_window(&mut self) -> core::result::Result<Option<Frame>, ConnError> {
         while self.send_conn <= 0 || self.send_stream <= 0 {
             let f = self.read_frame()?;
             if !self.control(&f)? {
-                // Odpoved pred koncem tela (napr. 413): RST nebo hlavicky.
-                if f.kind == frame::RST_STREAM && f.stream == STREAM {
-                    return Err(ConnError(code::NO_ERROR, Error::Reset(rst_code(&f)?)));
-                }
-                return Err(conn_err(code::PROTOCOL_ERROR, "server odpovida pred koncem tela pozadavku"));
+                return Ok(Some(f));
             }
         }
-        Ok(())
+        Ok(None)
     }
 
-    fn send_body(&mut self, body: &[u8]) -> core::result::Result<(), ConnError> {
+    /// Posle telo v ramci okna; vraci prvni ramec odpovedi, kdyz server
+    /// odpovedel drive.
+    fn send_body(&mut self, body: &[u8]) -> core::result::Result<Option<Frame>, ConnError> {
         let mut rest = body;
         while !rest.is_empty() {
-            self.wait_window()?;
+            if let Some(f) = self.wait_window()? {
+                return Ok(Some(f));
+            }
             let n = rest.len().min(self.peer_max_frame).min(self.send_conn.min(self.send_stream) as usize);
             let last = n == rest.len();
             let mut out = Vec::with_capacity(9 + n);
@@ -280,7 +283,7 @@ impl<S: Read + Write> Conn<S> {
             self.send_stream -= n as i64;
             rest = &rest[n..];
         }
-        Ok(())
+        Ok(None)
     }
 
     fn window_update(&mut self, stream: u32, inc: usize) -> core::result::Result<(), ConnError> {
@@ -438,8 +441,9 @@ fn run<S: Read + Write>(conn: &mut Conn<S>, req: &Request, limits: &Limits) -> c
         first = false;
     }
     conn.write(&out)?;
+    let mut early = None;
     if body_follows {
-        conn.send_body(&req.body)?;
+        early = conn.send_body(&req.body)?;
     }
 
     // Odpoved.
@@ -447,7 +451,10 @@ fn run<S: Read + Write>(conn: &mut Conn<S>, req: &Request, limits: &Limits) -> c
     let mut headers = Vec::new();
     let mut body: Vec<u8> = Vec::new();
     loop {
-        let f = conn.read_frame()?;
+        let f = match early.take() {
+            Some(f) => f,
+            None => conn.read_frame()?,
+        };
         if conn.control(&f)? {
             continue;
         }
