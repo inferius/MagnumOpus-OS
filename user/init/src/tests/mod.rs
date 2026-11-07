@@ -19,6 +19,8 @@ mod jobs;
 mod memory;
 mod net;
 mod process;
+mod recovery;
+mod recovery_kit;
 mod console;
 mod shell;
 mod supervisor;
@@ -54,6 +56,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("TLS a HTTP", web::TESTS),
     ("sifrovane DNS", dns::TESTS),
     ("supervisor", supervisor::TESTS),
+    ("obnova sluzeb", recovery::TESTS),
     ("shell", shell::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),

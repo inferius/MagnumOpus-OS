@@ -48,6 +48,8 @@ is documented in this file and in the Czech version.
 | -30 | `CONNECTION_RESET` | the connection was reset by the other side |
 | -31 | `UNREACHABLE` | the destination is unreachable (network not configured, no route) |
 | -32 | `ADDRESS_IN_USE` | the address or port is already in use |
+| -33 | `SERVICE_RESTARTED` | the service restarted during the request; we do not know whether it carried it out |
+| -34 | `SERVICE_UNAVAILABLE` | the service is not running (the restart did not finish in time or the supervisor gave up) |
 
 ## Details
 
@@ -403,6 +405,37 @@ address is not supported (e.g. IPv6 until the network service supports it).
 
 **What to do:** choose another port or port 0 (the service assigns a free
 one).
+
+### `SERVICE_RESTARTED` (-33)
+
+**Meaning:** the service crashed while handling a request with a side
+effect (write, rename, lock, conditional save, sending data). The client
+library has already connected to the new instance but did **not** repeat
+the request: we do not know whether the old instance managed to carry it
+out.
+
+**When:** `svcclient::Conn::call` with `Kind::Effect` or with handles, when
+the channel to the service died before the reply arrived (see
+[Service recovery](service-recovery.md#rules-for-client-libraries)).
+
+**What to do:** find out the state and decide: repeat a write at an
+offset, repeat a conditional save with the new revision (it checks that
+nothing changed), take the lock again. Further requests go to the new
+instance.
+
+### `SERVICE_UNAVAILABLE` (-34)
+
+**Meaning:** the service is not running and a new instance did not come up
+within the client's limit (10 s by default), or the supervisor gave up on
+it (more than 5 crashes in 60 s), or the client has no lease to reconnect
+with.
+
+**When:** any call through `svcclient::Conn` after the channel was lost;
+the reply to `RECONNECT` on a lease.
+
+**What to do:** show the user that the service is not running (the task
+overview shows why) and try again later: the next call tries to recover
+again. A batch job may set a longer wait (`Conn::set_wait`).
 
 ## Process exit codes
 

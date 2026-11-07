@@ -54,7 +54,8 @@ watched processes:
 | `devmgr` sends `block` | only logs it for now (disks at run time come with multiple disks in `fsd`) |
 | `devmgr` closes its channel | logs it, hotplug stops working |
 | a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). It does not block waiting for the new service to confirm: its channel is one more item of the loop. If it does not answer within 5 s (or answers with an error), it kills it and the attempt counts as another crash. More than 5 restarts within 60 s = it gives up and the service stays stopped |
-| another service exits (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`) | logs the code. No recovery yet (see below) |
+| a service with an adapter in the registry exits | as with `timed`, plus in dependency order: services with `Dep::restart` on the crashed service are stopped and started after it, services with `Dep::notify` get a notification; clients reconnect through leases (see [Service recovery](service-recovery.md)) |
+| a service that is only watched exits (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`, until their threads wire them up) | logs the code. No recovery yet (see below) |
 
 Log when a service crashes:
 
@@ -65,9 +66,9 @@ init: sluzba timed znovu spustena
 init: sluzba timed spadla 6x za 60 s, vzdavam to
 ```
 
-The code is in `user/init/src/supervisor.rs`. One round is
+The code is in `user/init/src/supervisor/` (`mod.rs` the loop, `lifecycle.rs` restarts and dependencies, `leases.rs` leases, `service.rs` the adapter). One round is
 `Supervisor::step(startup, deadline)`. It returns what happened
-(`DeviceAdded`, `Exited`, `Restarted`, `GaveUp`, `DevmgrGone`), so the
+(`DeviceAdded`, `Exited`, `Restarted`, `GaveUp`, `Stopped`, `Notified`, `Reconnected`, `DevmgrGone`), so the
 tests drive it the same way as a normal run, only with a deadline. A new
 service is handed to the supervisor with `watch(name, process, restart)`,
 where `restart` is `Restart { start, ready }` (`None` = only watch it).
@@ -83,24 +84,15 @@ sup.watch("fsd", &fsd_process, None);
 sup.run(&startup); // never returns
 ```
 
-## Why `inputd`, `fsd`, `netd` and `devmgr` are not recovered yet
+## Recovering `inputd`, `fsd`, `netd`, `compd` and `devmgr`
 
-A crashed service closes its channels to its drivers and clients, and they
-then exit. An input driver exits when its channel to the service closes.
-A new `inputd` would therefore have no devices, and `devmgr` would have to
-start the drivers again. For USB, the controller would also have to walk
-its ports again. Recovery therefore needs:
-
-- drivers that do not exit when they lose their service and wait for a new
-  connection (through `devmgr`),
-- restart with dependencies (a `devmgr` crash = restart the services on
-  top of the drivers too),
-- for `fsd`, mounting the same disk again and restoring client sessions,
-- for `netd`, new sessions for programs (every socket is a channel that
-  dies with the service) and restarting `fwd` with a new channel to `netd`.
-
-That is the supervisor's next step. The `watch` / `restart` mechanism is
-ready for it.
+The common protocol (a service registry with dependencies, leases, the
+driver endpoint keeper, rules for client libraries) is described on the
+[Service recovery](service-recovery.md) page. The registry
+(`register(Spec { name, deps, service }, process)`) and leases are done in
+the supervisor; the adapters of the individual services are wired up by
+their threads. Until then these services are only watched with
+`watch(name, process, None)`.
 
 ## Test run
 

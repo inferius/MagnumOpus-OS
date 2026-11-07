@@ -48,6 +48,8 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -30 | `CONNECTION_RESET` | spojení bylo přerušeno druhou stranou |
 | -31 | `UNREACHABLE` | cíl není dosažitelný (síť nenastavená, chybí cesta) |
 | -32 | `ADDRESS_IN_USE` | adresa nebo port už se používá |
+| -33 | `SERVICE_RESTARTED` | služba se během požadavku restartovala, nevíme, jestli ho provedla |
+| -34 | `SERVICE_UNAVAILABLE` | služba neběží (restart se nepovedl do lhůty nebo ho supervisor vzdal) |
 
 ## Podrobně
 
@@ -402,6 +404,34 @@ zkontrolovat adresu.
 **Kdy vzniká:** `TcpListener::bind`, `UdpSocket::bind` s konkrétním portem.
 
 **Co dělat:** zvolit jiný port nebo port 0 (služba přidělí volný).
+
+### `SERVICE_RESTARTED` (-33)
+
+**Význam:** služba spadla, zatímco zpracovávala požadavek s vedlejším
+účinkem (zápis, přejmenování, zámek, podmíněné uložení, odeslání dat).
+Knihovna klienta se už připojila k nové instanci, ale požadavek
+**nezopakovala**: nevíme, jestli ho stará instance stihla provést.
+
+**Kdy vzniká:** `svcclient::Conn::call` s `Kind::Effect` nebo s handly,
+když kanál ke službě zanikl dřív, než přišla odpověď (viz
+[Obnova služeb](obnova-sluzeb.md#pravidla-pro-knihovny-klientů)).
+
+**Co dělat:** zjistit stav a rozhodnout: zápis podle offsetu zopakovat,
+podmíněné uložení zopakovat s novou revizí (ověří, že se nic nezměnilo),
+zámek získat znovu. Další požadavky už jdou na novou instanci.
+
+### `SERVICE_UNAVAILABLE` (-34)
+
+**Význam:** služba neběží a nová instance nenaběhla do lhůty klienta
+(výchozí 10 s), nebo ji supervisor vzdal (víc než 5 pádů za 60 s), nebo
+klient nemá lístek, přes který by se připojil znovu.
+
+**Kdy vzniká:** každé volání služby přes `svcclient::Conn` po ztrátě
+kanálu; odpověď `RECONNECT` na lístku.
+
+**Co dělat:** ukázat uživateli, že služba neběží (přehled úloh ukazuje
+důvod), a zkusit to později: další volání zkusí obnovu znovu. Dávková
+úloha si může nastavit delší čekání (`Conn::set_wait`).
 
 ## Návratové kódy procesů
 
