@@ -18,11 +18,49 @@ pub struct Endpoint {
     pub buf: Dma,
 }
 
+/// Kde zarizeni visi: cesta, route string a transakcni prekladac (TT).
+#[derive(Debug, Clone)]
+pub struct Location {
+    /// Cesta porty od radice: root port, port 1. hubu, ...
+    pub path: Vec<u8>,
+    /// Route string xHCI: port na kazde urovni hubu po 4 bitech (bez root
+    /// portu; port > 15 se zkrati na 15, jak pozaduje specifikace).
+    pub route: u32,
+    /// Zarizeni low/full speed za hubem high speed: (slot hubu s TT,
+    /// port na nem, hub ma TT na kazdy port).
+    pub tt: Option<(u8, u8, bool)>,
+}
+
+impl Location {
+    pub fn root(port: u8) -> Self {
+        Self {
+            path: alloc::vec![port],
+            route: 0,
+            tt: None,
+        }
+    }
+
+    pub fn root_port(&self) -> u8 {
+        self.path[0]
+    }
+}
+
+/// Udaje hubu pro kontext slotu.
+#[derive(Debug, Clone, Copy)]
+pub struct HubInfo {
+    pub ports: u8,
+    /// TT na kazdy port (protokol zarizeni 2).
+    pub multi_tt: bool,
+    /// TT think time (bity 6:5 wHubCharacteristics).
+    pub think_time: u8,
+}
+
 pub struct Device {
     pub slot: u8,
-    /// Cesta porty od radice (root port, ...).
-    pub path: Vec<u8>,
+    pub location: Location,
     pub speed: Speed,
+    /// Zarizeni je hub (trida 09).
+    pub hub: Option<HubInfo>,
     /// Vystupni kontext (zapisuje radic; drzet po dobu zivota slotu).
     pub _out_ctx: Dma,
     pub in_ctx: Dma,
@@ -109,9 +147,36 @@ impl Hc {
         index * self.ctx_size
     }
 
-    /// Nastavi zarizeni na root portu `port` (po resetu portu): slot,
-    /// adresa, deskriptory, konfigurace a endpointy jeho rozhrani.
-    pub fn enumerate(&mut self, port: u8, speed: Speed) -> Result<u8> {
+    /// Umisteni zarizeni na portu `port` hubu ve slotu `hub` (`None` =
+    /// root port): cesta, route string a TT.
+    pub fn location(&self, hub: Option<u8>, port: u8, speed: Speed) -> Result<Location> {
+        let Some(h) = hub else {
+            return Ok(Location::root(port));
+        };
+        let parent = self.devices[h as usize].as_ref().ok_or(Error::NotFound)?;
+        let tier = parent.location.path.len() - 1;
+        if tier >= 5 || parent.hub.is_none() {
+            // Specifikace USB dovoli nejvys 5 urovni hubu.
+            return Err(Error::NotSupported);
+        }
+        let mut path = parent.location.path.clone();
+        path.push(port);
+        let route = parent.location.route | (port.min(15) as u32) << (4 * tier);
+        // TT: low/full speed za hubem high speed; za hubem, ktery sam visi
+        // za TT, plati TT rodice.
+        let tt = match (speed, parent.speed) {
+            (Speed::Low | Speed::Full, Speed::High) => {
+                let multi = parent.hub.is_some_and(|i| i.multi_tt);
+                Some((h, port, multi))
+            }
+            _ => parent.location.tt,
+        };
+        Ok(Location { path, route, tt })
+    }
+
+    /// Nastavi zarizeni na portu (po resetu portu): slot, adresa,
+    /// deskriptory, konfigurace a endpointy jeho rozhrani.
+    pub fn enumerate(&mut self, loc: Location, speed: Speed) -> Result<u8> {
         let ev = self.command(Trb {
             param: 0,
             status: 0,
@@ -121,7 +186,7 @@ impl Hc {
         if slot == 0 || slot as usize >= self.devices.len() {
             return Err(Error::NoResources);
         }
-        match self.setup_device(slot, port, speed) {
+        match self.setup_device(slot, loc, speed) {
             Ok(()) => Ok(slot),
             Err(e) => {
                 self.disable_slot(slot);
@@ -130,7 +195,8 @@ impl Hc {
         }
     }
 
-    fn setup_device(&mut self, slot: u8, port: u8, speed: Speed) -> Result<()> {
+    fn setup_device(&mut self, slot: u8, loc: Location, speed: Speed) -> Result<()> {
+        let port = loc.root_port();
         let ctx = self.ctx_size;
         let out_ctx = Dma::new(&self.res, 32 * ctx)?;
         let in_ctx = Dma::new(&self.res, 33 * ctx)?;
@@ -141,9 +207,14 @@ impl Hc {
         // Kontext vstupu: pridat slot (A0) a EP0 (A1).
         in_ctx.map.write::<u32>(4, 0b11);
         let s = self.in_off(1);
-        // Slot: route string 0 (root port), rychlost, 1 polozka kontextu.
-        in_ctx.map.write::<u32>(s, speed_id(speed) << 20 | 1 << 27);
+        // Slot: route string, rychlost, 1 polozka kontextu; root port; TT
+        // (slot hubu, port, MTT).
+        let mtt = loc.tt.is_some_and(|(_, _, m)| m);
+        in_ctx.map.write::<u32>(s, loc.route | speed_id(speed) << 20 | (mtt as u32) << 25 | 1 << 27);
         in_ctx.map.write::<u32>(s + 4, (port as u32) << 16);
+        if let Some((hub_slot, hub_port, _)) = loc.tt {
+            in_ctx.map.write::<u32>(s + 8, hub_slot as u32 | (hub_port as u32) << 8);
+        }
         let e = self.in_off(2);
         let mps = speed.default_ep0_packet() as u32;
         // EP0: CErr 3, typ Control (4), max. paket.
@@ -153,8 +224,9 @@ impl Hc {
 
         self.devices[slot as usize] = Some(Device {
             slot,
-            path: alloc::vec![port],
+            location: loc.clone(),
             speed,
+            hub: None,
             _out_ctx: out_ctx,
             in_ctx,
             ep0,
@@ -193,6 +265,20 @@ impl Hc {
             self.control_sync(slot, Setup::get_descriptor(kind::CONFIGURATION, 0, total), &[])?;
         let config = Configuration::parse(&raw_config).ok_or(Error::Corrupted)?;
         self.control_sync(slot, Setup::set_configuration(config.value), &[])?;
+        // Hub: pocet portu a TT do kontextu slotu (radic podle nich
+        // smeruje pakety zarizeni za hubem).
+        let hub = if descriptor.class == usbproto::desc::class::HUB {
+            let d = self.control_sync(slot, usbproto::hub::get_hub_descriptor(16), &[])?;
+            let h = usbproto::hub::HubDescriptor::parse(&d).ok_or(Error::Corrupted)?;
+            Some(HubInfo {
+                ports: h.ports,
+                multi_tt: descriptor.protocol == 2,
+                think_time: ((h.characteristics >> 5) & 3) as u8,
+            })
+        } else {
+            None
+        };
+        self.devices[slot as usize].as_mut().unwrap().hub = hub;
         {
             let dev = self.devices[slot as usize].as_mut().unwrap();
             dev.raw_device.copy_from_slice(&raw[..DeviceDescriptor::SIZE]);
@@ -202,7 +288,8 @@ impl Hc {
         self.configure_endpoints(slot, &config)?;
         self.devices[slot as usize].as_mut().unwrap().config = Some(config);
         println!(
-            "xhci: port {port}: zarizeni {:04x}:{:04x} ({}), slot {slot}",
+            "xhci: port {:?}: zarizeni {:04x}:{:04x} ({}), slot {slot}",
+            loc.path,
             descriptor.vendor,
             descriptor.product,
             speed.name()
@@ -243,7 +330,8 @@ impl Hc {
                 }
             }
         }
-        if eps.is_empty() {
+        let hub = self.devices[slot as usize].as_ref().and_then(|d| d.hub);
+        if eps.is_empty() && hub.is_none() {
             return Ok(());
         }
         let mut add = 1u32; // slot
@@ -272,10 +360,18 @@ impl Hc {
             let m = &dev.in_ctx.map;
             m.write::<u32>(0, 0);
             m.write::<u32>(4, add);
-            // Slot: pocet polozek kontextu = nejvyssi DCI.
+            // Slot: pocet polozek kontextu = nejvyssi DCI; u hubu priznak
+            // hubu, MTT, pocet portu a TT think time.
             let s = self.ctx_size;
-            let w = m.read::<u32>(s);
-            m.write::<u32>(s, (w & !(0x1F << 27)) | max_dci << 27);
+            let mut w = (m.read::<u32>(s) & !(0x1F << 27)) | max_dci << 27;
+            if let Some(h) = hub {
+                w |= 1 << 26 | (h.multi_tt as u32) << 25;
+                let w1 = m.read::<u32>(s + 4);
+                m.write::<u32>(s + 4, (w1 & 0x00FF_FFFF) | (h.ports as u32) << 24);
+                let w2 = m.read::<u32>(s + 8);
+                m.write::<u32>(s + 8, (w2 & !(3 << 16)) | (h.think_time as u32) << 16);
+            }
+            m.write::<u32>(s, w);
             dev.endpoints.extend(new_eps);
             dev.in_ctx.phys
         };

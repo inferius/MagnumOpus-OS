@@ -285,13 +285,13 @@ impl Server {
                     return Err(Error::InvalidArgs);
                 }
                 let speed = self.hc.port_speed(port);
-                let slot = self.hc.enumerate(port, speed)?;
+                let slot = self.hc.enumerate(device::Location::root(port), speed)?;
                 self.start_interfaces(slot)?;
                 Ok(Some(ok_reply(r.id, slot as u32, &[])))
             }
             op::DETACH => {
                 let port = u8::try_from(r.a).map_err(|_| Error::InvalidArgs)?;
-                self.detach(port);
+                self.detach(&[port]);
                 Ok(Some(ok_reply(r.id, 0, &[])))
             }
             op::SCAN_DONE => {
@@ -323,24 +323,28 @@ impl Server {
         Ok(())
     }
 
-    /// Zarizeni z root portu zmizelo: zavrit kanaly rozhrani a zrusit slot.
-    fn detach(&mut self, port: u8) {
-        let slots: Vec<u8> = self
+    /// Zarizeni na ceste `path` zmizelo (i se vsim, co viselo za nim, kdyz
+    /// to byl hub): zavrit kanaly rozhrani a zrusit sloty.
+    fn detach(&mut self, path: &[u8]) {
+        let mut slots: Vec<(usize, u8)> = self
             .hc
             .devices
             .iter()
             .flatten()
-            .filter(|d| d.path.first() == Some(&port))
-            .map(|d| d.slot)
+            .filter(|d| d.location.path.starts_with(path))
+            .map(|d| (d.location.path.len(), d.slot))
             .collect();
-        for slot in slots {
+        // Nejdriv zarizeni nejdal od radice (za huby), pak huby.
+        slots.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, slot) in slots {
+            let port = self.hc.devices[slot as usize].as_ref().map(|d| d.location.path.clone()).unwrap_or_default();
             for c in self.clients.iter_mut() {
                 if matches!(c, Some(Client { kind: Kind::Interface { slot: s, .. }, .. }) if *s == slot) {
                     *c = None;
                 }
             }
             self.hc.disable_slot(slot);
-            println!("xhci: port {port}: zarizeni odpojeno (slot {slot})");
+            println!("xhci: port {port:?}: zarizeni odpojeno (slot {slot})");
         }
     }
 
@@ -359,7 +363,7 @@ impl Server {
                 let info = Info {
                     speed: dev.speed,
                     interface: iface,
-                    path: dev.path.clone(),
+                    path: dev.location.path.clone(),
                     device: dev.descriptor,
                     config: dev.raw_config.clone(),
                 };
@@ -379,6 +383,32 @@ impl Server {
                 self.hc
                     .submit_control(slot, setup, out, Owner::Client(idx, r.id))?;
                 Ok(None)
+            }
+            // Kanal externiho hubu: zarizeni na jeho portech.
+            op::ATTACH | op::DETACH | op::SCAN_DONE => {
+                let dev = self.hc.devices[slot as usize].as_ref().ok_or(Error::PeerClosed)?;
+                let ports = dev.hub.ok_or(Error::NotSupported)?.ports;
+                let mut path = dev.location.path.clone();
+                if r.op == op::SCAN_DONE {
+                    return Ok(Some(ok_reply(r.id, 0, &[])));
+                }
+                let port = u8::try_from(r.a).map_err(|_| Error::InvalidArgs)?;
+                if port == 0 || port > ports {
+                    return Err(Error::InvalidArgs);
+                }
+                if r.op == op::DETACH {
+                    path.push(port);
+                    self.detach(&path);
+                    return Ok(Some(ok_reply(r.id, 0, &[])));
+                }
+                let speed = u8::try_from(r.b)
+                    .ok()
+                    .and_then(usbproto::Speed::from_u8)
+                    .ok_or(Error::InvalidArgs)?;
+                let loc = self.hc.location(Some(slot), port, speed)?;
+                let new = self.hc.enumerate(loc, speed)?;
+                self.start_interfaces(new)?;
+                Ok(Some(ok_reply(r.id, new as u32, &[])))
             }
             op::INTERRUPT_IN | op::INTERRUPT_OUT => {
                 let addr = u8::try_from(r.a).map_err(|_| Error::InvalidArgs)?;

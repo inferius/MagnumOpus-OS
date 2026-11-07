@@ -195,6 +195,15 @@ fn script() -> Vec<Step> {
     s.push(Step::SendPs2(vec![rel("x", 5), rel("y", 1)]));
     s.push(Step::WaitFor(usb::MOUSE2_UNPLUG));
     s.push(Step::Qmp(device_del("usbmouse2")));
+    // Externi hub na port 4 radice a klavesnice na jeho port 1.
+    s.push(Step::WaitFor(usb::HUB_PLUG));
+    s.push(Step::Qmp(device_add_at("usb-hub", "usbhub1", "4")));
+    s.push(Step::Qmp(device_add_at("usb-kbd", "usbkbd3", "4.1")));
+    s.push(Step::WaitFor(usb::HUB_KEYS));
+    s.push(Step::SendPs2(vec![key("h", true)]));
+    s.push(Step::SendPs2(vec![key("h", false)]));
+    s.push(Step::WaitFor(usb::HUB_UNPLUG));
+    s.push(Step::Qmp(device_del("usbhub1")));
     s
 }
 
@@ -212,11 +221,20 @@ mod usb {
     pub const MOUSE2_PENDING: &str = "init: test usb: pohyb neoverene mysi";
     pub const MOUSE2_TRUSTED: &str = "init: test usb: pohyb overene mysi";
     pub const MOUSE2_UNPLUG: &str = "init: test usb: odpoj druhou mys";
+    pub const HUB_PLUG: &str = "init: test usb: pripoj hub";
+    pub const HUB_KEYS: &str = "init: test usb: klavesy za hubem";
+    pub const HUB_UNPLUG: &str = "init: test usb: odpoj hub";
 }
 
 /// Pripojeni zarizeni USB za behu na radic `xhci`.
 fn device_add(driver: &str, id: &str) -> String {
     format!(r#"{{"execute":"device_add","arguments":{{"driver":"{driver}","id":"{id}","bus":"xhci.0"}}}}"#)
+}
+
+/// Pripojeni zarizeni na urcity port (`4` = port radice, `4.1` = port 1
+/// hubu na nem).
+fn device_add_at(driver: &str, id: &str, port: &str) -> String {
+    format!(r#"{{"execute":"device_add","arguments":{{"driver":"{driver}","id":"{id}","bus":"xhci.0","port":"{port}"}}}}"#)
 }
 
 fn device_del(id: &str) -> String {

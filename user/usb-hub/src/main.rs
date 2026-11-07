@@ -6,8 +6,9 @@
 //! (hotplug: pripojeni i odpojeni).
 //!
 //! Startovni zprava (kind USER): kanal rozhrani hubu (protokol
-//! `usbproto::msg`). Externi huby (TT, route string) zatim radic
-//! nenastavi - prijdou ve fazi 3 navrhu USB.
+//! `usbproto::msg`). U externiho hubu radic sam nastavi route string a TT
+//! (zarizeni low/full speed za hubem high speed); hub USB 3 (deskriptor
+//! 0x2A, jiny format stavu portu) zatim ne.
 
 #![no_std]
 #![no_main]
@@ -51,10 +52,6 @@ fn main(startup: Startup) -> i64 {
         }
     };
     let root = info.path.is_empty();
-    if !root {
-        println!("usb-hub: externi hub {:?} zatim nepodporovany (faze 3)", info.path);
-        return 0;
-    }
     let desc = match usb
         .control(hub::get_hub_descriptor(16), &[])
         .map(|d| HubDescriptor::parse(&d))
@@ -69,7 +66,12 @@ fn main(startup: Startup) -> i64 {
             return 3;
         }
     };
-    println!("usb-hub: {} hub, {} portu", if root { "root" } else { "externi" }, desc.ports);
+    println!(
+        "usb-hub: {} hub {:?}, {} portu",
+        if root { "root" } else { "externi" },
+        info.path,
+        desc.ports
+    );
     let mut h = Hub {
         usb,
         ports: desc.ports,

@@ -25,6 +25,7 @@ pub const TESTS: &[Test] = &[
     ("hotplug: mys USB pripojena a odpojena", hotplug_mouse),
     ("nova klavesnice ceka na overeni (BadUSB)", verify_new_keyboard),
     ("nova mys ceka na overeni (BadUSB)", verify_new_mouse),
+    ("externi hub: klavesnice za hubem", external_hub),
 ];
 
 // Znacky (musi sedet s `xtask/src/qmp.rs`).
@@ -40,6 +41,9 @@ pub const MARKER_MOUSE2_PLUG: &str = "init: test usb: pripoj druhou mys";
 pub const MARKER_MOUSE2_PENDING: &str = "init: test usb: pohyb neoverene mysi";
 pub const MARKER_MOUSE2_TRUSTED: &str = "init: test usb: pohyb overene mysi";
 pub const MARKER_MOUSE2_UNPLUG: &str = "init: test usb: odpoj druhou mys";
+pub const MARKER_HUB_PLUG: &str = "init: test usb: pripoj hub";
+pub const MARKER_HUB_KEYS: &str = "init: test usb: klavesy za hubem";
+pub const MARKER_HUB_UNPLUG: &str = "init: test usb: odpoj hub";
 
 /// Jmeno klavesnice QEMU usb-kbd (vyrobce 0627, vyrobek 0001).
 const USB_KBD: &str = "USB klavesnice 0627:0001";
@@ -286,5 +290,23 @@ fn verify_mouse_inner(inp: &Input) -> TestResult {
     read_until(&inp.focus, deadline(TIMEOUT), |r| motion_of(r, id) == (5, 1))
         .map_err(|e| failr("pohyb overene mysi", e))?;
     println!("{MARKER_MOUSE2_UNPLUG}");
+    wait_gone(inp, id)
+}
+
+fn external_hub(_: &Startup) -> TestResult {
+    let inp = input()?;
+    let old = ids(inp)?;
+    println!("{MARKER_HUB_PLUG}");
+    // xtask: hub USB na root port a za nej klavesnice (port hubu 1).
+    let (id, trust) = wait_new_source(inp, USB_KBD, &old)?;
+    check_eq!(trust, DeviceTrust::Trusted, "klavesnice za hubem (overeni vypnute)");
+    drain(&inp.focus);
+    println!("{MARKER_HUB_KEYS}");
+    read_until(&inp.focus, deadline(TIMEOUT), |r| {
+        r.iter().any(|x| x.source == id && x.event == Event::Text('h'))
+    })
+    .map_err(|e| failr("klavesa za hubem", e))?;
+    // Odpojeni hubu odpoji i klavesnici za nim.
+    println!("{MARKER_HUB_UNPLUG}");
     wait_gone(inp, id)
 }
