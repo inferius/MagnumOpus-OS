@@ -58,6 +58,17 @@ fn main(startup: Startup) -> i64 {
             return 3;
         }
     };
+    if !gpu.capsets.is_empty() || gpu.virgl {
+        let mut s = alloc::string::String::new();
+        for (id, ver, size) in &gpu.capsets {
+            use core::fmt::Write;
+            let _ = write!(s, " {}(v{ver}, {size} B)", vgpu::capset_name(*id));
+        }
+        println!(
+            "virtio-gpu {address}: 3D: virgl={} blob={} context_init={} capsety:{s}",
+            gpu.virgl as u8, gpu.blob as u8, gpu.context_init as u8
+        );
+    }
     let outs = gpu.outputs();
     match outs.first() {
         Some(o) => println!(

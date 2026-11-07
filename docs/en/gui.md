@@ -53,6 +53,16 @@ and in the [6c decisions](#6c-decisions-agreed) table below.
 - **Software compositing** costs CPU: at 1280x800 and 60 Hz that is
   ~250 MB/s of writes. Therefore only damaged regions are composed and
   nothing is drawn when nothing changes.
+- **Kernel console and firmware GOP:** the firmware (edk2/OVMF) has the
+  `VirtioGpuDxe` driver and turns virtio-gpu into a GOP as well. Its
+  framebuffer is plain RAM pushed to the screen by virtio commands - after
+  ExitBootServices nobody would refresh it and the kernel console would be
+  blank until `compd` takes over. The loader takes the **first** GOP;
+  verified in the test logs: aarch64 `framebuffer 800x600 at 0x7c7a0000`
+  (ramfb), x86_64 `framebuffer 1280x800 at 0x80000000` (VGA BAR). It depends
+  on the device order in QEMU; if the log shows a RAM address at 1280x800
+  without VGA/ramfb, the firmware picked virtio-gpu. Future fix: the loader
+  should prefer a GOP that is not virtio-gpu.
 - **Imitating a system dialog** in a fullscreen application cannot be
   ruled out by looks alone. The protection is that a permission dialog
   accepts only physical input (synthetic input does not count), shows the
@@ -611,6 +621,25 @@ the accessibility action `set-value` or with the action `terminal.run`
 Connecting to the session service (`termd`, protocol `term::proto`) is
 done by the terminal thread: instead of the local line editor it sends
 `Run` and draws the output blocks into the same grid.
+
+## 3D: Venus and virgl (status)
+
+The system's target API is Vulkan, so in a virtual machine **Venus**
+(Vulkan over virtio-gpu). Temporarily **virgl** (Gallium/host OpenGL) only
+for compositor composition.
+
+| What | Status |
+|---|---|
+| `cargo xtask run/test --gpu 2d\|gl\|venus` | device choice: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; without a window the `egl-headless` display |
+| driver | negotiates `VIRGL`, `RESOURCE_BLOB`, `CONTEXT_INIT` and logs the capsets, e.g. `virgl(v1) virgl2(v2)` |
+| `vgpu::virgl` | own encoder of the virgl command stream (state objects, TGSI shaders, vertices, draws, scissor) and virtio-gpu 3D commands, host tests |
+| GPU composition | pending: on this host (QEMU 11.1 for Windows) the virtual machine stalls after the kernel starts whenever OpenGL is on (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) |
+| Venus | QEMU for Windows lacks it: "Render server support was not enabled in virglrenderer" |
+
+⚠️ **Where to test Venus:** Linux with a physical GPU and QEMU +
+virglrenderer with the render server (or crosvm). WSL2 only with Vulkan
+translated to D3D12 (uncertain). Not VMware - its SVGA3D is a different
+protocol. On real hardware Vulkan comes with the Mesa port (milestone 7).
 
 ## Status and deviations from the design
 

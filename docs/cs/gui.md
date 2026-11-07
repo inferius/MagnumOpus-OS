@@ -53,6 +53,16 @@ a v tabulce [Rozhodnutí 6c](#rozhodnutí-6c-odsouhlaseno) níže.
 - **Softwarové skládání** stojí CPU: při 1280x800 a 60 Hz je to ~250 MB/s
   zápisu. Proto se skládají jen poškozené oblasti a nic se nekreslí, když
   se nic nemění.
+- **Konzole jádra a GOP firmwaru:** firmware (edk2/OVMF) má ovladač
+  `VirtioGpuDxe` a z virtio-gpu udělá také GOP. Jeho framebuffer je obyčejná
+  RAM, kterou na obrazovku posílají příkazy virtio - po ExitBootServices
+  by ho nikdo neobnovoval a konzole jádra by byla prázdná, dokud obraz
+  nepřevezme `compd`. Loader bere **první** GOP; ověřeno v logu testů:
+  aarch64 `framebuffer 800x600 na 0x7c7a0000` (ramfb), x86_64
+  `framebuffer 1280x800 na 0x80000000` (BAR karty VGA). Závisí to na
+  pořadí zařízení v QEMU; když se v logu objeví adresa v RAM s velikostí
+  1280x800 bez VGA/ramfb, vzal firmware virtio-gpu. Oprava do budoucna:
+  loader má dávat přednost GOP, který není virtio-gpu.
 - **Napodobení systémového dialogu** v celoobrazovkové aplikaci nejde
   úplně vyloučit pohledem. Ochrana je v tom, že dialog oprávnění přijme
   jen fyzický vstup (umělý vstup ne), obsahuje bezpečnostní frázi
@@ -588,6 +598,25 @@ přístupnosti `set-value` nebo akcí `terminal.run` (vyžaduje potvrzení).
 Napojení na službu relací (`termd`, protokol `term::proto`) dělá vlákno
 terminálu: místo místního řádkového editoru pošle `Run` a vykreslí bloky
 výstupu do stejné mřížky.
+
+## 3D: Venus a virgl (stav)
+
+Cílové API systému je Vulkan, ve virtuálním stroji tedy **Venus** (Vulkan
+přes virtio-gpu). Přechodně **virgl** (Gallium/OpenGL hostitele) jen pro
+skládání kompozitoru.
+
+| Co | Stav |
+|---|---|
+| `cargo xtask run/test --gpu 2d\|gl\|venus` | volba zařízení: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; bez okna displej `egl-headless` |
+| ovladač | vyjedná `VIRGL`, `RESOURCE_BLOB`, `CONTEXT_INIT` a vypíše capsety, např. `virgl(v1) virgl2(v2)` |
+| `vgpu::virgl` | vlastní kodér proudu příkazů virgl (stavové objekty, shadery TGSI, vrcholy, kreslení, scissor) a příkazy 3D virtio-gpu, testy na hostiteli |
+| skládání přes GPU | čeká: na tomto hostiteli (QEMU 11.1 pro Windows) se se zapnutým OpenGL (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) virtuální stroj po startu jádra zastaví |
+| Venus | QEMU pro Windows ho nemá: „Render server support was not enabled in virglrenderer“ |
+
+⚠️ **Kde testovat Venus:** Linux s fyzickou GPU a QEMU + virglrenderer
+s render serverem (nebo crosvm). WSL2 jen s Vulkanem přeloženým přes
+D3D12 (nejisté). VMware ne - jeho SVGA3D je jiný protokol. Na skutečném
+hardwaru Vulkan přinese port Mesy (milník 7).
 
 ## Stav a odchylky od návrhu
 

@@ -49,6 +49,9 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
+  --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi), gl (virgl 3D)
+                   nebo venus (Vulkan; QEMU s virglrenderer a render serverem);
+                   gl a venus bez okna pouziji displej egl-headless
                    none; aarch64 smmu (vychozi), none
   -- <args>        (run) dalsi argumenty pro QEMU
 
@@ -66,6 +69,9 @@ pub struct Options {
     /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
     /// aarch64 "smmu", "none".
     iommu: String,
+    /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
+    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl).
+    gpu: String,
     qemu_args: Vec<OsString>,
     /// Cilova architektura.
     arch: &'static Arch,
@@ -104,6 +110,7 @@ fn run_cli() -> Result<()> {
         headless: false,
         accel: None,
         iommu: String::new(),
+        gpu: String::from("2d"),
         qemu_args: Vec::new(),
         arch: &arch::X86_64,
         test: false,
@@ -117,6 +124,13 @@ fn run_cli() -> Result<()> {
             Some("--iommu") => {
                 let value = args.next().ok_or("--iommu ocekava typ IOMMU")?;
                 opts.iommu = value.to_string_lossy().into_owned();
+            }
+            Some("--gpu") => {
+                let value = args.next().ok_or("--gpu ocekava 2d, gl nebo venus")?;
+                opts.gpu = value.to_string_lossy().into_owned();
+                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus") {
+                    return Err("--gpu ocekava 2d, gl nebo venus".into());
+                }
             }
             Some("--arch") => {
                 let value = args.next().ok_or("--arch ocekava x86_64 nebo aarch64")?;

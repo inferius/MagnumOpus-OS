@@ -66,6 +66,10 @@ pub struct Gpu {
     scanouts: Vec<Scanout>,
     next_resource: u32,
     pub virgl: bool,
+    /// Capsety (id, nejvyssi verze, velikost), napr. venus = 4.
+    pub capsets: Vec<(u32, u32, u32)>,
+    pub blob: bool,
+    pub context_init: bool,
     /// Zarizeni neodpovedelo nebo vratilo neplatnou frontu: dal ho
     /// nepouzivat.
     pub broken: bool,
@@ -73,13 +77,17 @@ pub struct Gpu {
 
 impl Gpu {
     pub fn open(ecam: &Ecam, a: Address, resource: Resource) -> Result<Self> {
-        let s = virtio::start(ecam, a, &resource, F_VERSION_1 | F_ACCESS_PLATFORM | vgpu::F_VIRGL, 16)?;
+        let wanted = F_VERSION_1 | F_ACCESS_PLATFORM | vgpu::F_VIRGL | vgpu::F_RESOURCE_BLOB | vgpu::F_CONTEXT_INIT;
+        let s = virtio::start(ecam, a, &resource, wanted, 16)?;
         let cmd_vmo = resource.dma_memory(CMD_PAGE)?;
         let cmd_phys = resource.phys_addr(&cmd_vmo, 0)?;
         let cmd = Mapping::new(&cmd_vmo, 0, CMD_PAGE, MAP_READ | MAP_WRITE)?;
         let num_scanouts: u32 = s.device.config(vgpu::config::NUM_SCANOUTS);
         let mut gpu = Self {
             virgl: s.features & vgpu::F_VIRGL != 0,
+            capsets: Vec::new(),
+            blob: s.features & vgpu::F_RESOURCE_BLOB != 0,
+            context_init: s.features & vgpu::F_CONTEXT_INIT != 0,
             device: s.device,
             queue: s.queue,
             irq: s.irq,
@@ -93,6 +101,14 @@ impl Gpu {
             next_resource: 1,
             broken: false,
         };
+        let num_capsets: u32 = gpu.device.config(vgpu::config::NUM_CAPSETS);
+        for i in 0..num_capsets.min(16) {
+            if let Ok(r) = gpu.command(&vgpu::get_capset_info(i), vgpu::HEADER_SIZE + 16)
+                && let Some(c) = vgpu::parse_capset_info(&r)
+            {
+                gpu.capsets.push(c);
+            }
+        }
         let resp = gpu.command(&vgpu::get_display_info(), vgpu::DISPLAY_INFO_SIZE)?;
         let scanouts = vgpu::parse_display_info(&resp, num_scanouts.max(1)).ok_or(Error::NotSupported)?;
         for (i, so) in scanouts.iter().enumerate() {

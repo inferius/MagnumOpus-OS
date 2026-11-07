@@ -112,7 +112,9 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         .args(["-serial", "chardev:serial0"])
         .arg("-no-reboot");
     if opts.headless {
-        cmd.args(["-display", "none"]);
+        // Venus potrebuje OpenGL i bez okna.
+        let display = if opts.gpu == "2d" { "none" } else { "egl-headless" };
+        cmd.args(["-display", display]);
     }
     if opts.gdb {
         cmd.args(["-s", "-S"]);
@@ -221,8 +223,25 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
 
 /// Grafika virtio-gpu (ovladac `virtio-gpu`, kompozitor `compd`) s prekladem
 /// DMA pres IOMMU. Rezim 2D funguje s kazdym displejem QEMU (i bez okna).
-fn gpu_device(cmd: &mut Command, _opts: &Options) {
-    cmd.args(["-device", "virtio-gpu-pci,id=gpu0,disable-legacy=on,iommu_platform=on,xres=1280,yres=800"]);
+fn gpu_device(cmd: &mut Command, opts: &Options) {
+    match opts.gpu.as_str() {
+        // Venus: Vulkan pres virtio-gpu (blob zdroje v pameti hostitele
+        // mapovane pres BAR). Potrebuje displej s OpenGL (`egl-headless`
+        // bez okna). Bez IOMMU: blob pamet hostitele preklad DMA nepouziva.
+        "venus" => {
+            cmd.args([
+                "-device",
+                "virtio-gpu-gl-pci,id=gpu0,disable-legacy=on,venus=on,blob=on,hostmem=256M,xres=1280,yres=800",
+            ]);
+        }
+        // virgl 3D (OpenGL hostitele); DMA pres IOMMU jako 2D.
+        "gl" => {
+            cmd.args(["-device", "virtio-gpu-gl-pci,id=gpu0,disable-legacy=on,iommu_platform=on,xres=1280,yres=800"]);
+        }
+        _ => {
+            cmd.args(["-device", "virtio-gpu-pci,id=gpu0,disable-legacy=on,iommu_platform=on,xres=1280,yres=800"]);
+        }
+    }
 }
 
 fn run_interactive(mut cmd: Command) -> Result<()> {

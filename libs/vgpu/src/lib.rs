@@ -19,6 +19,8 @@ use alloc::vec::Vec;
 /// Vlastnosti zarizeni.
 pub const F_VIRGL: u64 = 1 << 0;
 pub const F_EDID: u64 = 1 << 1;
+pub const F_RESOURCE_BLOB: u64 = 1 << 3;
+pub const F_CONTEXT_INIT: u64 = 1 << 4;
 
 /// Fronty.
 pub const CONTROL_QUEUE: u16 = 0;
@@ -258,4 +260,69 @@ pub fn rows_per_chunk(stride: u32, chunk_max: u64) -> u32 {
         return 0;
     }
     (chunk_max / stride as u64).min(u32::MAX as u64) as u32
+}
+
+/// Kapabilita (capset) virgl.
+pub const CAPSET_VIRGL: u32 = 1;
+pub const CAPSET_VIRGL2: u32 = 2;
+pub const CAPSET_VENUS: u32 = 4;
+
+/// Jmeno capsetu (log).
+pub fn capset_name(id: u32) -> &'static str {
+    match id {
+        CAPSET_VIRGL => "virgl",
+        CAPSET_VIRGL2 => "virgl2",
+        3 => "gfxstream-vulkan",
+        CAPSET_VENUS => "venus",
+        5 => "cross-domain",
+        6 => "drm",
+        _ => "?",
+    }
+}
+
+fn with_ctx(ty: u32, ctx: u32) -> Cmd {
+    Cmd::with(Header { ty, ctx, ..Default::default() })
+}
+
+/// Novy 3D kontext `ctx` (jmeno pro ladeni nejvys 64 B).
+pub fn ctx_create(ctx: u32, name: &str) -> Vec<u8> {
+    let n = name.len().min(63);
+    let mut c = with_ctx(cmd::CTX_CREATE, ctx);
+    c.u32(n as u32).u32(0);
+    let mut buf = [0u8; 64];
+    buf[..n].copy_from_slice(&name.as_bytes()[..n]);
+    c.bytes(&buf);
+    c.finish()
+}
+
+pub fn ctx_attach_resource(ctx: u32, resource: u32) -> Vec<u8> {
+    let mut c = with_ctx(cmd::CTX_ATTACH_RESOURCE, ctx);
+    c.u32(resource).u32(0);
+    c.finish()
+}
+
+/// Zdroj 3D (textura, cil vykresleni, buffer): cil, format a pouziti jsou
+/// hodnoty virgl (`virgl::target`, `virgl::format`, `virgl::bind`).
+#[allow(clippy::too_many_arguments)]
+pub fn resource_create_3d(resource: u32, target: u32, format: u32, bind: u32, w: u32, h: u32) -> Vec<u8> {
+    let mut c = Cmd::new(cmd::RESOURCE_CREATE_3D);
+    c.u32(resource).u32(target).u32(format).u32(bind).u32(w).u32(h).u32(1).u32(1).u32(0).u32(0).u32(0).u32(0);
+    c.finish()
+}
+
+/// Prenos 3D (`TRANSFER_TO_HOST_3D` / `TRANSFER_FROM_HOST_3D`): obdelnik,
+/// offset v backingu a krok radku.
+pub fn transfer_3d(to_host: bool, ctx: u32, resource: u32, r: Rect, offset: u64, stride: u32) -> Vec<u8> {
+    let ty = if to_host { cmd::TRANSFER_TO_HOST_3D } else { cmd::TRANSFER_FROM_HOST_3D };
+    let mut c = with_ctx(ty, ctx);
+    c.u32(r.x).u32(r.y).u32(0).u32(r.w).u32(r.h).u32(1);
+    c.u64(offset).u32(resource).u32(0).u32(stride).u32(0);
+    c.finish()
+}
+
+/// `SUBMIT_3D`: hlavicka a za ni proud prikazu virgl.
+pub fn submit_3d(ctx: u32, stream: &[u8]) -> Vec<u8> {
+    let mut c = with_ctx(cmd::SUBMIT_3D, ctx);
+    c.u32(stream.len() as u32).u32(0).bytes(stream);
+    c.finish()
 }
