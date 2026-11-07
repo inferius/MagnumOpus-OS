@@ -683,13 +683,16 @@ obnovu dělá `ui::client`.
 |---|---|---|
 | 1 | supervisor | adaptér `CompdService` (`user/init/src/gui.rs`) spustí novou instanci a pošle jí `display` s duplikátem konce kanálu k ovladači displeje (držák konců `Kept`) |
 | 2 | `compd` | pošle ovladači `SYNC` s náhodným tokenem a zahodí vše, co přijde před `SYNCED` (pozdní odpovědi staré instance), pak `INFO` a znovu `ATTACH` (nová VMO snímku nahradí starou) |
-| 3 | adaptér | odpověď na `display` = potvrzení startu; pak nový fokus a kanál `secure` od `inputd` (jako `take_input`) |
+| 3 | adaptér | odpověď na `display` = potvrzení startu; pak nový fokus a kanál `secure` od `inputd` (`take_input`) |
 | 4 | aplikace | `ui::client` vidí `PEER_CLOSED`, zavolá `conn.recover()`: supervisor přes lístek vydá relaci podle receptu (`ConnectInfo` z manifestu - identitu dává init, ne aplikace) |
 | 5 | aplikace | `HELLO` a poslední **potvrzený** stav okna ze záznamu (`guiproto::replay`): okno, buffery (VMO drží aplikace, pošle je znovu jen pro čtení), vrstvy s vlastnostmi, titulek, oblasti a strom přístupnosti; po `CONFIGURE` `COMMIT` (stejná velikost) nebo událost `Resized` |
 | 6 | aplikace | událost `Restored { generation }`; `run` okno nakreslí znovu |
 
-Po restartu `inputd` (`Dep::notify("inputd")`) dostane kompozitor od
-adaptéru nový fokus a `secure`, okna zůstanou.
+Restart `inputd` (`Dep::notify("inputd")`) kanál fokusu ani `secure`
+nezavře: konce na straně `inputd` drží init v držáku konců a předá je nové
+instanci. Kompozitor dostane `Focus(false)` (ukončí tažení, zapomene
+stisk a oknu s fokusem pošle `Focus(false)` - aplikace pustí klávesy)
+a pak `Focus(true)`. Okna zůstanou.
 
 **Co se neobnoví** (pravidla obnovy, odsouhlaseno):
 

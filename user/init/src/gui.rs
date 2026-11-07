@@ -11,8 +11,9 @@
 //! (drzak koncu [`Kept`]; compd se s ovladacem nejdriv synchronizuje),
 //! preda ji fokus a bezpecnou zkratku od `inputd` a z receptu (=
 //! `ConnectInfo` z manifestu) vytvori relace oken. Aplikace se pripoji
-//! sama pres listek (`ui::client`). Po restartu `inputd`
-//! (`Dep::notify("inputd")`) dostane kompozitor novy fokus.
+//! sama pres listek (`ui::client`). Restart `inputd` (`Dep::notify`)
+//! kanal fokusu nezavre (konce drzi init), kompozitor jen dostane
+//! `Focus(false)` a `Focus(true)`.
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -40,7 +41,7 @@ pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
 
 /// Jmeno kompozitoru v registru supervisoru.
 pub const NAME: &str = "compd";
-/// Zavislosti kompozitoru: po restartu `inputd` novy fokus.
+/// Zavislosti kompozitoru: o restartu `inputd` se jen dozvi (fokus zustava).
 pub const DEPS: &[Dep] = &[Dep::notify("inputd")];
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -164,11 +165,13 @@ impl Service for CompdService {
         Ok(Channel::from_handle(h.remove(0)))
     }
 
+    /// Restart `inputd`: kanal fokusu a `secure` kompozitoru zustava
+    /// (konce na strane `inputd` drzi init v drzaku koncu a preda je nove
+    /// instanci). Kompozitor dostane `Focus(false)`, `Focus(true)` a pusti
+    /// stisknute klavesy a tazeni (`libs/comp`). Nove predani by bylo jen
+    /// zbytecne `Focus(false)` navic.
     fn dependency_restarted(&mut self, dep: &str, generation: u64) {
-        if dep == "inputd" {
-            println!("init: inputd bezi znovu (generace {generation}), predavam fokus kompozitoru");
-            self.shared.lock().input_from_inputd();
-        }
+        println!("init: {dep} bezi znovu (generace {generation}), fokus kompozitoru zustava");
     }
 
     fn stopped(&mut self) {

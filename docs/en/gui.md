@@ -702,8 +702,12 @@ Applications need to do nothing: `ui::client` does the recovery.
 | 5 | application | `HELLO` and the last **committed** window state from the record (`guiproto::replay`): window, buffers (the app holds the VMOs and sends them again read-only), layers with properties, title, regions and the accessibility tree; after `CONFIGURE` a `COMMIT` (same size) or a `Resized` event |
 | 6 | application | event `Restored { generation }`; `run` redraws the window |
 
-After an `inputd` restart (`Dep::notify("inputd")`) the adapter gives the
-compositor a new focus and `secure` channel; windows stay.
+An `inputd` restart (`Dep::notify("inputd")`) closes neither the focus
+nor the `secure` channel: init keeps the `inputd`-side endpoints in the
+endpoint keeper and hands them to the new instance. The compositor gets
+`Focus(false)` (ends a drag, forgets the press and sends `Focus(false)` to
+the focused window - the app releases its keys) and then `Focus(true)`.
+Windows stay.
 
 **What is not restored** (recovery rules, agreed):
 

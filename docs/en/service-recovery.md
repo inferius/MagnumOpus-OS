@@ -317,7 +317,7 @@ same commands `call`, `narrow`, `wait`, `gen` as `svctest client`).
 | lease protocol, `svcclient::Conn`, retry rules | done, tests on the host and in QEMU |
 | registry, dependencies (`Dep::restart`, `Dep::notify`), generations, backoff, giving up, `revive`, `status()` | done, suite `obnova sluzeb` |
 | endpoint keeper (`Kept`) | done in the supervisor; used by the service adapters |
-| `compd` (windows, display from `Kept` + `SYNC`, focus via `Dep::notify("inputd")`) | done ([GUI: recovery](gui.md#recovery-after-a-compositor-crash)), test `compd: pad kompozitoru uprostred prace` in suite `gui` |
+| `compd` (windows, display from `Kept` + `SYNC`, focus survives an `inputd` restart, `Focus(false)` releases keys) | done ([GUI: recovery](gui.md#recovery-after-a-compositor-crash)), test `compd: pad kompozitoru uprostred prace` in suite `gui` |
 | `fsd`, `inputd`, `netd` + `fwd`/`dnsd`, `termd`/`taskd` | wired up by the service threads following this page |
 | restarting `devmgr` (`driver` message, killing drivers) | next step after the services are wired up: without them a `devmgr` restart would only detach the devices |
 | task view (`taskproto` producer) | once `taskd` runs (shell thread) |
