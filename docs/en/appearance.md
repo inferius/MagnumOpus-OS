@@ -223,11 +223,11 @@ controls.
 
 The shadow tells what is higher: inactive window < active window < menu <
 dialog. In the light theme the window shadow has a purple tint
-(`rgba(107,63,214,.16)`), in the dark one it is black. **The compositor does
-not draw shadows by blurring every frame**: for every kind of shadow and
-radius it has a precomputed texture made of 9 pieces (corners, edges,
-center), so moving a window does not make the shadow more expensive. In high
-contrast, shadows are replaced by a 2 px border.
+(`rgba(107,63,214,.16)`), in the dark one it is black. On the GPU the
+compositor draws the shadow with a shader and caches it per window size, so
+moving a window does not make the shadow more expensive. The 2D fallback
+path uses a precomputed texture made of 9 pieces (corners, edges, center).
+In high contrast, shadows are replaced by a 2 px border.
 
 ### Icons
 
@@ -638,31 +638,97 @@ Proposed additions:
 | Tab / Shift+Tab, arrows, Enter, Esc | operating controls and dialogs |
 | in the terminal: Tab, Up / Down, Ctrl+C, Ctrl+Shift+P, Ctrl+Shift+F | complete, history, interrupt, dry run, switch notation B / C |
 
-## For implementation (6c)
+## Implementation plan
 
-What to take from the design and where:
+**Assumption:** the compositor gets a GPU backend (virgl now, Vulkan via
+Venus later). The design therefore counts on blur under the bar and menus,
+soft shadows and gloss. Software compositing over virtio-gpu 2D stays as a
+**fallback path** (machine without a supported GPU, recovery mode): the
+same layer tree, just without blur (the bar then has a solid `surface`
+background at 90 % opacity) and with shadows from precomputed textures.
 
-| What | Where | Note |
+<figure class="diagram">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Order of implementation threads">
+<defs><marker id="vz3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="m" x="10" y="16">phase 1</text><text class="m" x="270" y="16">phase 2</text><text class="m" x="530" y="16">phase 3 (in parallel)</text>
+<rect class="acc" x="10" y="30" width="200" height="56" rx="6"/><text class="t b" x="110" y="53" text-anchor="middle">G1 GPU rendering</text><text class="m" x="110" y="71" text-anchor="middle">shapes, shadows, blur, motion</text>
+<rect class="acc" x="10" y="110" width="200" height="56" rx="6"/><text class="t b" x="110" y="133" text-anchor="middle">G2 type and icons</text><text class="m" x="110" y="151" text-anchor="middle">Inter, GPOS, glyph atlas</text>
+<rect class="box" x="10" y="190" width="200" height="56" rx="6"/><text class="t b" x="110" y="213" text-anchor="middle">S1 taskd</text><text class="m" x="110" y="231" text-anchor="middle">task service (shell thread)</text>
+<rect class="box" x="10" y="270" width="200" height="56" rx="6"/><text class="t b" x="110" y="293" text-anchor="middle">S2 fsproto: clones, diff</text><text class="m" x="110" y="311" text-anchor="middle">FS thread</text>
+<path class="ln" d="M210 58 L268 70" marker-end="url(#vz3)"/><path class="ln" d="M210 138 L268 80" marker-end="url(#vz3)"/>
+<path class="ln" d="M210 58 L268 150" marker-end="url(#vz3)"/><path class="ln" d="M210 138 L268 160" marker-end="url(#vz3)"/>
+<rect class="acc" x="270" y="46" width="200" height="56" rx="6"/><text class="t b" x="370" y="69" text-anchor="middle">G3 system layer</text><text class="m" x="370" y="87" text-anchor="middle">decorations, badge, dialogs</text>
+<rect class="acc" x="270" y="126" width="200" height="56" rx="6"/><text class="t b" x="370" y="149" text-anchor="middle">G4 UI controls</text><text class="m" x="370" y="167" text-anchor="middle">libs/ui, a11y roles</text>
+<path class="ln" d="M470 154 L528 50" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 110" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 170" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 230" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 290" marker-end="url(#vz3)"/>
+<path class="ln" d="M470 74 L528 290" marker-end="url(#vz3)"/>
+<path class="ln" d="M210 218 L528 54" marker-end="url(#vz3)"/><path class="ln" d="M210 298 L528 176" marker-end="url(#vz3)"/>
+<rect class="ok" x="530" y="26" width="220" height="44" rx="6"/><text class="t b" x="640" y="53" text-anchor="middle">A1 desktop shell</text>
+<rect class="ok" x="530" y="86" width="220" height="44" rx="6"/><text class="t b" x="640" y="113" text-anchor="middle">A2 terminal</text>
+<rect class="ok" x="530" y="146" width="220" height="44" rx="6"/><text class="t b" x="640" y="173" text-anchor="middle">A3 files</text>
+<rect class="ok" x="530" y="206" width="220" height="44" rx="6"/><text class="t b" x="640" y="233" text-anchor="middle">A4 settings</text>
+<rect class="ok" x="530" y="266" width="220" height="44" rx="6"/><text class="t b" x="640" y="293" text-anchor="middle">A5 sign-in</text>
+</svg>
+<figcaption>Threads and dependencies. G1 and G2 run in parallel, then G3 and G4, then the applications.</figcaption>
+</figure>
+
+### Phase 1: foundation (in parallel)
+
+| Thread | Content | Where | Done when |
+|---|---|---|---|
+| **G1 GPU rendering** | rounded rectangles and borders as a shader (distance field, anti-aliased edges in one pass); shadows as a blurred shape (two-pass Gaussian or dual Kawase) cached per size; **background blur** for the bar, menus and dimming (only under the region, at half size); gradients; group opacity through an intermediate buffer; **animation timeline** in `compd` (curves and durations from tokens, interruptible, drop a frame instead of delaying input); token loading and theme switching | `compd`, `libs/comp`, virgl backend | a frame with 10 windows, shadows and a blurred bar within 4 ms of GPU time in QEMU; window-open animation without a dropped frame; the 2D fallback draws the same without blur |
+| **G2 type and icons** | static instances of Inter (400, 500, 600, 700) and JetBrains Mono (400, 600) in `libs/font/fonts/`; pair kerning from `GPOS`; **GPU glyph atlas** with subpixel positioning (1/4 px); cache for scaling 100-200 % and HiDPI; icons: convert the paths from `design/assets/mo.js` at build time into a format the rasterizer understands (same curves as glyphs) and draw them into the atlas like glyphs | `libs/font`, `libs/gfx`, build script | "Te", "Vo" kerned; Czech without errors; the corrupted-font test still passes without panic; 64 icons in 4 sizes |
+
+### Phase 2: system and controls (in parallel, after phase 1)
+
+| Thread | Content | Where | Done when |
+|---|---|---|---|
+| **G3 system layer** | decorations per [Anatomy](#anatomy) and [Modes](#modes) (title bar 40 / 44 px, buttons 28 px with a 40 px target, edge 6 px); window states including "agent acting"; the **trust badge** and the permission overview with revoke (data from init and the permission broker); system dialogs in the prototype look ("System" strip, phrase, 300 ms); secure screen; Alt+Tab window switcher (thumbnails are layers the compositor already has); full-screen strip and Esc held for 1 s | `compd`, `guiproto::control`, init | all modes and states from `design/okna.html` in QEMU; revoking a permission shows within one frame; the dialog rejects synthetic input |
+| **G4 UI controls** | new controls: switch, segmented control, tabs, sortable table, combobox with completion, menu, popover, tooltip, notification, application dialog, scrollbar; styled by tokens (radii, pills, 2 px focus); keyboard operation per [Accessibility](#accessibility); **new roles** in `guiproto::a11y::Role`; large text and high contrast | `libs/ui`, `libs/guiproto` | a demo application with all controls matches `design/design-system.html` in both themes and in high contrast; accessibility-tree tests for every control |
+
+### Phase 3: applications (in parallel, after G4)
+
+| Thread | Content | Depends on | Done when |
+|---|---|---|---|
+| **A1 desktop shell** | a new system application with a capability for layers 200-400: bar in 6 positions, launcher with search (action API), notification center (notification service), task manager, "agent acting" pill with Stop | G3, G4, **S1 `taskd`** (shell thread) | `design/plocha.html` without the system dialogs (those are G3) |
+| **A2 terminal** | `gui-term` draws blocks, tables, errors and dry runs as UI controls on top of `termd`; completion as a combobox; task panel; B / C switch | G4, `termd` | the demos from `design/terminal.html` against the real `termd` |
+| **A3 files** | file explorer: list, details, version timeline and restore, try aside, applying selected changes, conflicts | G4, **S2 clones and diff in `fsproto`** (FS thread) | the whole "aside" flow from `design/soubory.html` on the real FS |
+| **A4 settings** | the Settings application and a **configuration service** (TOML with a schema, versioned with the FS); security profiles and individual options wired to `inputd` (BadUSB), `fwd` (network), the launch gate (only planned so far), the terminal lock; appearance and accessibility | G4, G3 (password dialog) | a profile change takes effect in services without restart; relaxing requires a password |
+| **A5 sign-in** | lock screen and sign-in in the system layer, user session manager, password storage (slow hash, e.g. Argon2id), lock on idle, Ctrl+Alt+Del mode | G3, G4, init (session = a set of capabilities) | sign-in, lock, unlock and user switch in QEMU |
+
+**Why this order:** after phase 1 and G3 the system already "looks like
+itself" (windows, decorations, badge, shadows, typeface), even while the
+applications are still simple. The applications then run in parallel
+because they do not need each other; they will only be held back by
+services outside the GUI (`taskd`, clones in `fsproto`, configuration).
+
+**Tests (all threads):**
+
+- **screenshots**: QEMU `screendump` via QMP compared to a reference image
+  with a tolerance (light, dark, high-contrast theme; text at 100 and 200 %);
+- **smoothness**: the compositor records the time of each frame; the test
+  fails when more than 1 frame in 60 is dropped during a window animation;
+- **accessibility**: the accessibility tree of every screen has a role and a
+  name on all controls; Tab traversal reaches every control;
+- **contrast**: `node design/tools/build-tokens.mjs --check` in `cargo xtask test`.
+
+**Open questions (decide before G1):**
+
+| Question | Options | Recommendation |
 |---|---|---|
-| tokens | `libs/ui` (TOML loading), `compd` (decorations) | the compositor switches the theme and sends an event to windows; applications have no colors of their own for `trust-*` |
-| decorations per Anatomy and Modes | `compd` | title bar 40 px (custom 44 px), buttons 28 px with a 40 px target, edge 6 px |
-| badge and permission overview | `compd` + permission broker | permission data from init, not from the application |
-| shadows as 9-piece textures | `compd` | precompute for `window`, `window-inactive`, `popover`, `dialog` |
-| system dialogs per the prototype | `compd`, `guiproto::control` | "System" strip, phrase, 300 ms, physical input only (already in the 6c design) |
-| bar, launcher, switcher, notifications, task manager | a new system application "desktop shell" with a capability for layers 200-400 | task data from `taskd` |
-| accessibility roles | `guiproto::a11y::Role` | add per the table above |
-| typeface | `libs/font` | static instances of Inter and JetBrains Mono, kerning from `GPOS` (see the risks) |
+| how tokens get into code | A) `build.rs` generates Rust constants from `tokens.toml`; B) the library reads TOML at run time; C) A for defaults + B for user themes | **C**: fast start without a parser, themes can be added without a rebuild |
+| who draws the bar and launcher | A) the compositor; B) a separate application with a capability for system layers | **B**: a crashing bar does not take the compositor down, the supervisor restarts it |
+| notification service | A) part of the desktop shell; B) a separate service | **B**: notifications must survive a bar restart and can be sent without the GUI (terminal, log) |
 
 ⚠️ **Risks (stated up front):**
 
 - **Kerning and the typeface**: without reading `GPOS`, Inter will have no
   kerning (see [Typography](#typography)). It can be solved by preprocessing
   at build time.
-- **Blur under the bar** (`backdrop-filter` in the prototype) is expensive in
-  software compositing (blurring a region every frame in which something
-  under the bar changes). In the 2D backend the bar should have an opaque
-  `surface` background at 90 % opacity without blur; blur only with the 3D
-  backend.
+- **Blur and the GPU in QEMU**: virgl needs a host with OpenGL
+  (`egl-headless` for tests); where it is missing, tests run only on the 2D
+  fallback path and blur is not verified. Blur costs GPU time proportional
+  to the area: therefore only under the bar, menus and dialog, at half size,
+  and only when something under it changed.
 - **Theme by time of day** needs a location (sunrise and sunset). Without a
   location a fixed time of 7:00-20:00 per the time zone is used.
 - **Imitating a system dialog in a full-screen application** cannot be ruled
@@ -677,3 +743,4 @@ What to take from the design and where:
 | Version | Date | What |
 |---|---|---|
 | v1 | 2026-11-07 | first design: style C Warm, design system, windows, system elements, 4 applications, accessibility, tokens |
+| v1.1 | 2026-11-07 | implementation plan in 3 phases; assumes the GPU backend (blur, shader shadows), 2D as a fallback path |

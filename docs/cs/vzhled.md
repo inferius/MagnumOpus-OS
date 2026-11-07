@@ -215,10 +215,10 @@ Vše leží na **mřížce 4 px**. Rozestupy: 2, 4, 8, 12, 16, 20, 24, 32, 40,
 
 Stín říká, co je výš: neaktivní okno < aktivní okno < nabídka < dialog.
 Ve světlém motivu má stín okna fialový nádech (`rgba(107,63,214,.16)`),
-v tmavém je černý. **Kompozitor stíny nekreslí rozmazáním za každý
-snímek**: pro každý druh stínu a zaoblení má předpočítanou texturu
-z 9 dílů (rohy, hrany, střed), takže pohyb okna stín nezdraží. Ve vysokém
-kontrastu stíny nahradí rámeček 2 px.
+v tmavém je černý. Na GPU kreslí kompozitor stín shaderem a výsledek si
+pamatuje podle velikosti okna, takže pohyb okna stín nezdraží. Záložní 2D
+cesta použije předpočítanou texturu z 9 dílů (rohy, hrany, střed). Ve
+vysokém kontrastu stíny nahradí rámeček 2 px.
 
 ### Ikony
 
@@ -607,29 +607,95 @@ doplnění:
 | Tab / Shift+Tab, šipky, Enter, Esc | ovládání prvků a dialogů |
 | v terminálu: Tab, ↑ ↓, Ctrl+C, Ctrl+Shift+P, Ctrl+Shift+F | doplnit, historie, přerušit, nanečisto, přepnout zápis B / C |
 
-## Pro implementaci (6c)
+## Plán implementace
 
-Co z návrhu převzít a kde:
+**Předpoklad:** kompozitor dostane GPU backend (virgl hned, Vulkan přes
+Venus později). Návrh proto počítá s rozmazáním pod lištou a nabídkami,
+jemnými stíny a leskem. Softwarové skládání nad virtio-gpu 2D zůstane
+jako **záložní cesta** (stroj bez podporované GPU, záchranný režim):
+stejný strom vrstev, jen bez rozmazání (lišta má pak plné pozadí
+`surface` s krytím 90 %) a se stíny z předpočítaných textur.
 
-| Co | Kde | Poznámka |
+<figure class="diagram">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Poradi vlaken implementace">
+<defs><marker id="vz3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="m" x="10" y="16">fáze 1</text><text class="m" x="270" y="16">fáze 2</text><text class="m" x="530" y="16">fáze 3 (souběžně)</text>
+<rect class="acc" x="10" y="30" width="200" height="56" rx="6"/><text class="t b" x="110" y="53" text-anchor="middle">G1 vykreslování na GPU</text><text class="m" x="110" y="71" text-anchor="middle">tvary, stíny, blur, animace</text>
+<rect class="acc" x="10" y="110" width="200" height="56" rx="6"/><text class="t b" x="110" y="133" text-anchor="middle">G2 písmo a ikony</text><text class="m" x="110" y="151" text-anchor="middle">Inter, GPOS, atlas glyfů</text>
+<rect class="box" x="10" y="190" width="200" height="56" rx="6"/><text class="t b" x="110" y="213" text-anchor="middle">S1 taskd</text><text class="m" x="110" y="231" text-anchor="middle">služba úloh (vlákno shellu)</text>
+<rect class="box" x="10" y="270" width="200" height="56" rx="6"/><text class="t b" x="110" y="293" text-anchor="middle">S2 fsproto: klony, diff</text><text class="m" x="110" y="311" text-anchor="middle">vlákno FS</text>
+<path class="ln" d="M210 58 L268 70" marker-end="url(#vz3)"/><path class="ln" d="M210 138 L268 80" marker-end="url(#vz3)"/>
+<path class="ln" d="M210 58 L268 150" marker-end="url(#vz3)"/><path class="ln" d="M210 138 L268 160" marker-end="url(#vz3)"/>
+<rect class="acc" x="270" y="46" width="200" height="56" rx="6"/><text class="t b" x="370" y="69" text-anchor="middle">G3 systémová vrstva</text><text class="m" x="370" y="87" text-anchor="middle">dekorace, odznak, dialogy</text>
+<rect class="acc" x="270" y="126" width="200" height="56" rx="6"/><text class="t b" x="370" y="149" text-anchor="middle">G4 prvky UI</text><text class="m" x="370" y="167" text-anchor="middle">libs/ui, role a11y</text>
+<path class="ln" d="M470 154 L528 50" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 110" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 170" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 230" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 290" marker-end="url(#vz3)"/>
+<path class="ln" d="M470 74 L528 290" marker-end="url(#vz3)"/>
+<path class="ln" d="M210 218 L528 54" marker-end="url(#vz3)"/><path class="ln" d="M210 298 L528 176" marker-end="url(#vz3)"/>
+<rect class="ok" x="530" y="26" width="220" height="44" rx="6"/><text class="t b" x="640" y="53" text-anchor="middle">A1 shell plochy</text>
+<rect class="ok" x="530" y="86" width="220" height="44" rx="6"/><text class="t b" x="640" y="113" text-anchor="middle">A2 terminál</text>
+<rect class="ok" x="530" y="146" width="220" height="44" rx="6"/><text class="t b" x="640" y="173" text-anchor="middle">A3 soubory</text>
+<rect class="ok" x="530" y="206" width="220" height="44" rx="6"/><text class="t b" x="640" y="233" text-anchor="middle">A4 nastavení</text>
+<rect class="ok" x="530" y="266" width="220" height="44" rx="6"/><text class="t b" x="640" y="293" text-anchor="middle">A5 přihlášení</text>
+</svg>
+<figcaption>Vlákna a závislosti. G1 a G2 běží souběžně, potom G3 a G4, potom aplikace.</figcaption>
+</figure>
+
+### Fáze 1: základ (souběžně)
+
+| Vlákno | Obsah | Kde | Hotovo, když |
+|---|---|---|---|
+| **G1 vykreslování na GPU** | zaoblené obdélníky a rámečky jako shader (vzdálenostní pole, vyhlazené hrany v jednom průchodu); stíny jako rozmazaný tvar (dvouprůchodový Gauss nebo dual Kawase) s mezipamětí podle velikosti; **rozmazání pozadí** pro lištu, nabídky a ztlumení (jen pod oblastí, v poloviční velikosti); přechody; průhlednost skupin přes mezibuffer; **časová osa animací** v `compd` (křivky a délky z tokenů, přerušitelné, vynechání snímku místo zpoždění vstupu); načtení tokenů a přepínání motivu | `compd`, `libs/comp`, backend virgl | snímek s 10 okny, stíny a rozmazanou lištou do 4 ms GPU času v QEMU; animace otevření okna bez vynechaného snímku; záložní 2D cesta vykreslí totéž bez rozmazání |
+| **G2 písmo a ikony** | statické řezy Inter (400, 500, 600, 700) a JetBrains Mono (400, 600) v `libs/font/fonts/`; párový kerning z `GPOS`; **atlas glyfů na GPU** se subpixelovým umístěním (1/4 px); mezipaměť pro škálování 100-200 % a HiDPI; ikony: cesty z `design/assets/mo.js` převést při sestavení do formátu, který rasterizér umí (stejné křivky jako glyfy), a kreslit je do atlasu jako glyfy | `libs/font`, `libs/gfx`, build skript | „Te“, „Vo“ s kerningem; čeština bez chyb; test s poškozeným souborem písma dál bez paniky; 64 ikon ve 4 velikostech |
+
+### Fáze 2: systém a prvky (souběžně, po fázi 1)
+
+| Vlákno | Obsah | Kde | Hotovo, když |
+|---|---|---|---|
+| **G3 systémová vrstva** | dekorace podle [Anatomie](#anatomie) a [Režimů](#režimy) (titulek 40 / 44 px, tlačítka 28 px s cílem 40 px, okraj 6 px); stavy okna včetně „agent jedná“; **odznak důvěry** a přehled oprávnění s odebráním (data od initu a zprostředkovatele oprávnění); systémové dialogy ve vzhledu prototypu (pruh „Systém“, fráze, 300 ms); bezpečná obrazovka; přepínač oken Alt+Tab (náhledy jsou vrstvy, které kompozitor má); celoobrazovkový pruh a Esc 1 s | `compd`, `guiproto::control`, init | všechny režimy a stavy z `design/okna.html` v QEMU; odebrání oprávnění se projeví do jednoho snímku; dialog nepřijme umělý vstup |
+| **G4 prvky UI** | nové prvky: přepínač, segmenty, karty, tabulka s řazením, combobox s doplňováním, nabídka, plovoucí panel, tooltip, oznámení, dialog aplikace, posuvník; styl podle tokenů (zaoblení, pilulky, fokus 2 px); ovládání klávesnicí podle [Přístupnosti](#přístupnost); **nové role** v `guiproto::a11y::Role`; velké písmo a vysoký kontrast | `libs/ui`, `libs/guiproto` | ukázková aplikace se všemi prvky odpovídá `design/design-system.html` v obou motivech a v kontrastu; testy stromu přístupnosti pro každý prvek |
+
+### Fáze 3: aplikace (souběžně, po G4)
+
+| Vlákno | Obsah | Závisí na | Hotovo, když |
+|---|---|---|---|
+| **A1 shell plochy** | nová systémová aplikace s capability pro vrstvy 200-400: lišta v 6 polohách, spouštěč s vyhledáváním (API akcí), centrum oznámení (služba oznámení), správce úloh, pilulka „agent jedná“ se Zastavit | G3, G4, **S1 `taskd`** (vlákno shellu) | `design/plocha.html` bez systémových dialogů (ty jsou G3) |
+| **A2 terminál** | `gui-term` kreslí bloky, tabulky, chyby a nanečisto jako prvky UI nad `termd`; doplňování jako combobox; panel úloh; přepínač B / C | G4, `termd` | ukázky z `design/terminal.html` proti skutečnému `termd` |
+| **A3 soubory** | průzkumník: seznam, podrobnosti, časová osa verzí a obnova, zkusit bokem, převzetí vybraných změn, konflikty | G4, **S2 klony a diff v `fsproto`** (vlákno FS) | celý tok „bokem“ z `design/soubory.html` nad skutečným FS |
+| **A4 nastavení** | aplikace Nastavení a **konfigurační služba** (TOML se schématem, verzovaná s FS); profily zabezpečení a samostatné volby napojené na `inputd` (BadUSB), `fwd` (síť), bránu spuštění (zatím jen plán), zámek v terminálu; vzhled a přístupnost | G4, G3 (dialog s heslem) | změna profilu se projeví ve službách bez restartu; zmírnění chce heslo |
+| **A5 přihlášení** | zamčená obrazovka a přihlášení ve vrstvě systému, správce relací uživatelů, ukládání hesel (pomalý hash, např. Argon2id), zamykání po nečinnosti, režim s Ctrl+Alt+Del | G3, G4, init (relace = sada capabilities) | přihlášení, zamčení, odemčení a přepnutí uživatele v QEMU |
+
+**Proč takhle:** po fázi 1 a G3 už systém „vypadá jako on“ (okna,
+dekorace, odznak, stíny, písmo), i když aplikace jsou ještě jednoduché.
+Aplikace pak běží souběžně, protože se navzájem nepotřebují; brzdit je
+budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
+
+**Testy (všechna vlákna):**
+
+- **snímky obrazovky**: QEMU `screendump` přes QMP a porovnání s referenčním
+  obrázkem s tolerancí (motiv světlý, tmavý, kontrast; písmo 100 a 200 %);
+- **plynulost**: kompozitor zapisuje čas každého snímku; test selže, když
+  při animaci okna vypadne víc než 1 snímek z 60;
+- **přístupnost**: strom přístupnosti každé obrazovky má u všech
+  ovládacích prvků roli a jméno; průchod Tabem dosáhne každého prvku;
+- **kontrast**: `node design/tools/build-tokens.mjs --check` v `cargo xtask test`.
+
+**Otevřené otázky (rozhodnout před G1):**
+
+| Otázka | Možnosti | Doporučení |
 |---|---|---|
-| tokeny | `libs/ui` (načtení TOML), `compd` (dekorace) | motiv přepíná kompozitor a pošle oknům událost; aplikace nemají vlastní barvy pro `trust-*` |
-| dekorace podle Anatomie a Režimů | `compd` | titulek 40 px (vlastní 44 px), tlačítka 28 px s cílem 40 px, okraj 6 px |
-| odznak a přehled oprávnění | `compd` + zprostředkovatel oprávnění | data o oprávněních od initu, ne od aplikace |
-| stíny jako 9dílné textury | `compd` | předpočítat pro `window`, `window-inactive`, `popover`, `dialog` |
-| systémové dialogy podle prototypu | `compd`, `guiproto::control` | pruh „Systém“, fráze, 300 ms, jen fyzický vstup (už v návrhu 6c) |
-| lišta, spouštěč, přepínač, oznámení, správce úloh | nová systémová aplikace „shell plochy“ s capability pro vrstvy 200-400 | data úloh od `taskd` |
-| role přístupnosti | `guiproto::a11y::Role` | doplnit podle tabulky výše |
-| písmo | `libs/font` | statické řezy Inter a JetBrains Mono, kerning z `GPOS` (viz rizika) |
+| jak se tokeny dostanou do kódu | A) `build.rs` vygeneruje Rust konstanty z `tokens.toml`; B) knihovna čte TOML za běhu; C) A pro výchozí hodnoty + B pro uživatelské motivy | **C**: rychlý start bez parseru, motivy jdou přidat bez překladu |
+| kdo kreslí lištu a spouštěč | A) kompozitor; B) samostatná aplikace s capability pro systémové vrstvy | **B**: pád lišty neshodí kompozitor, supervisor ji restartuje |
+| služba oznámení | A) součást shellu plochy; B) samostatná služba | **B**: oznámení musí přežít restart lišty a jde je posílat i bez GUI (terminál, log) |
 
 ⚠️ **Rizika (řečená předem):**
 
 - **Kerning a písmo**: bez čtení `GPOS` bude Inter bez kerningu (viz
   [Typografie](#typografie)). Dá se to vyřešit předzpracováním při sestavení.
-- **Rozmazání pod lištou** (`backdrop-filter` v prototypu) je při
-  softwarovém skládání drahé (rozmazání oblasti za každý snímek, kdy se
-  pod lištou něco mění). Ve 2D backendu má lišta mít neprůhledné pozadí
-  `surface` s 90 % krytím bez rozmazání; rozmazání až s 3D backendem.
+- **Rozmazání a GPU v QEMU**: virgl potřebuje hostitele s OpenGL
+  (`egl-headless` pro testy); kde chybí, testy poběží jen se záložní 2D
+  cestou a rozmazání se neověří. Rozmazání stojí GPU čas úměrný ploše:
+  proto jen pod lištou, nabídkami a dialogem, v poloviční velikosti
+  a jen když se pod ním něco změnilo.
 - **Motiv podle denní doby** potřebuje polohu (východ a západ slunce).
   Bez polohy se použije pevný čas 7:00-20:00 podle pásma.
 - **Napodobení systémového dialogu v celoobrazovkové aplikaci** nejde
@@ -644,3 +710,4 @@ Co z návrhu převzít a kde:
 | Verze | Datum | Co |
 |---|---|---|
 | v1 | 7. 11. 2026 | první návrh: styl C Vřelý, design systém, okna, systémové prvky, 4 aplikace, přístupnost, tokeny |
+| v1.1 | 7. 11. 2026 | plán implementace ve 3 fázích; počítá s GPU backendem (rozmazání, stíny shaderem), 2D jako záložní cesta |

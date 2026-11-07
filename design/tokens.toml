@@ -302,8 +302,9 @@ term_magenta = "term_magenta term_bg 4.5"
 term_cyan = "term_cyan term_bg 4.5"
 
 # ---------------------------------------------------------------------------
-# Stiny. Kompozitor je kresli z predpocitanych textur (9 dilu), ne rozmazanim
-# za kazdy snimek - stin nestoji nic navic pri pohybu okna.
+# Stiny. Na GPU je kompozitor kresli shaderem a pamatuje si je podle velikosti
+# okna; zalozni 2D cesta pouzije predpocitane textury (9 dilu). Stin tak
+# nestoji nic navic pri pohybu okna.
 # Zapis: "x y blur spread barva", vrstvy oddelene " | ".
 # ---------------------------------------------------------------------------
 [shadow.light]

@@ -94,7 +94,7 @@
   <h2 id="zaobleni">Zaoblení a stíny</h2>
   <div class="hstack" id="radii" style="gap:var(--s5)"></div>
   <h3>Stíny</h3>
-  <p class="note">Stín říká, co je výš: aktivní okno víc než neaktivní, dialog nejvíc. Kompozitor je kreslí z předpočítaných textur (9 dílů), takže pohyb okna stín nezdraží. Ve vysokém kontrastu stíny nahradí rámeček 2 px.</p>
+  <p class="note">Stín říká, co je výš: aktivní okno víc než neaktivní, dialog nejvíc. Na GPU je kompozitor kreslí shaderem a pamatuje si je podle velikosti okna (záložní 2D cesta: předpočítané textury z 9 dílů), takže pohyb okna stín nezdraží. Ve vysokém kontrastu stíny nahradí rámeček 2 px.</p>
   <div class="grid" id="shadows"></div>
 
   <h2 id="ikony">Ikony</h2>
