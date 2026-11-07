@@ -14,7 +14,11 @@
 //! + handle kanalu programu, `status`.
 //!
 //! Dotazy se vyrizuji postupne: stahovani CRL pro jeden program zdrzi
-//! ostatni (nejvys casovy limit spojeni).
+//! ostatni (nejvys casovy limit spojeni). OneCRL (megabajty) se ale
+//! nestahuje uprostred dotazu: `ca` odpovi hned z posledniho seznamu
+//! (z FS, pri prvnim startu prazdny = stav nezname) a stazeni probehne,
+//! az se klienti [`IDLE`] neozvou - handshake programu (napr. NTS-KE
+//! ntpd pri startu) tak na nej neceka.
 
 #![no_std]
 #![no_main]
@@ -42,6 +46,8 @@ use store::Entry;
 libos::entry!(main);
 
 const HOUR: i64 = 3600;
+/// Klid (zadny dotaz), po kterem se stahne OneCRL.
+const IDLE: Duration = Duration::from_millis(500);
 const ONECRL_PATH: &str = "/crl/onecrl.json";
 /// Nejvetsi CRL (velke CA deli CRL na casti; jedna cast byva do MB).
 const MAX_CRL: usize = 16 << 20;
@@ -75,6 +81,8 @@ struct Service<'a> {
     onecrl: OneCrl,
     /// Kdy (realny cas) OneCRL znovu stahnout.
     onecrl_next: i64,
+    /// Nekdo se ptal na OneCRL: stahovat (az v klidu, viz [`IDLE`]).
+    onecrl_wanted: bool,
     fetched: u64,
 }
 
@@ -196,7 +204,7 @@ impl Service<'_> {
             };
         }
         if let Some(q) = proto::decode_ca(msg) {
-            self.refresh_onecrl(false);
+            self.onecrl_wanted = self.cfg.onecrl.is_some();
             return Vec::from(if self.onecrl.revoked(&q) { &b"revoked"[..] } else { &b"ok"[..] });
         }
         Vec::from(&b"err:neznamy dotaz"[..])
@@ -248,6 +256,7 @@ fn main(startup: Startup) -> i64 {
         failed: Vec::new(),
         onecrl: OneCrl::default(),
         onecrl_next: 0,
+        onecrl_wanted: false,
         fetched: 0,
     };
     // Posledni ulozeny OneCRL hned (sit muze byt jeste bez adresy).
@@ -275,8 +284,18 @@ fn main(startup: Startup) -> i64 {
         for c in &clients {
             items.push((c.handle(), Signals::READABLE | Signals::PEER_CLOSED));
         }
-        let observed = match libos::wait_many(&items, None) {
+        // OneCRL v klidu: po IDLE bez dotazu, nejdriv v dobe obnovy.
+        let deadline = svc.onecrl_wanted.then(|| {
+            let wait = Duration::from_secs((svc.onecrl_next - wall()).max(0) as u64).max(IDLE);
+            time::deadline_after(wait)
+        });
+        let observed = match libos::wait_many(&items, deadline) {
             Ok((_, o)) => o,
+            Err(Error::TimedOut) => {
+                drop(items);
+                svc.refresh_onecrl(false);
+                continue;
+            }
             Err(e) => {
                 println!("revocd: cekani: {e}");
                 return 5;

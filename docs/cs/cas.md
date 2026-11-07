@@ -206,7 +206,10 @@ službě sítě:
   jádro ještě nestihlo dorovnat) odhadne drift krystalu. Navrhne polovinu
   chyby, aby šum měření nerozkmital smyčku (`netproto::ntp::Discipline`).
 - **Interval** začíná na `min_poll` a při srovnaných hodinách (posun pod
-  2 ms) se zdvojnásobuje až na `max_poll`.
+  2 ms) se zdvojnásobuje až na `max_poll`. Kolo bez měření (při startu
+  ještě nejede síť nebo DNS, server neodpověděl) se opakuje za 2, 4, 8, …
+  s, nejvýš za `min_poll`: hodiny se nastaví pár sekund po startu sítě,
+  ne až za `min_poll` (64 s).
 
 ```toml
 # ntpd.toml (initfs)

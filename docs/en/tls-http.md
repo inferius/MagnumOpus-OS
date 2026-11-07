@@ -264,12 +264,22 @@ three sources:
 | **OCSP stapling** (`tls::ocsp`) | the end-entity certificate, when the server sends an OCSP response in the handshake | status `revoked`; a bad signature = `InvalidOcspResponse` (spoofed response). An expired response = unknown status |
 | **OneCRL** (Mozilla) | revoked intermediate CAs (hundreds of entries, as in Firefox) | a chain certificate on the list (issuer + serial, or subject + SHA-256 of the key) |
 | **CRL** | certificates with an `http://...` distribution point (almost all public CAs) | the certificate serial in a CRL signed by its issuer; an expired CRL is not used |
+| **"CA only" CRL** (`tls::crl`) | root CRLs scoped to CA certificates only (Issuing Distribution Point with `onlyContainsCACerts`, e.g. ISRG Root X1 and Root YR from Let's Encrypt) - webpki cannot read them | an intermediate CA serial in the CRL; `tls` verifies the CRL issuer's signature itself |
 
 **Unknown status does not stop the connection** (revocd not running, the
 CRL cannot be downloaded, a server without stapling). Browsers behave the
 same way: a hard failure would let an attacker who blocks CRLs turn it
 into a broken network. A revoked certificate
 (`Error::Certificate("Revoked")`, code `ACCESS_DENIED`) is always rejected.
+
+**Each CRL on its own:** a CRL webpki can read is checked by webpki; a
+"CA only" CRL by `tls::crl`. A CRL nobody can read (delta CRL, indirect
+CRL, `onlySomeReasons`, an unknown critical extension) or one with a bad
+signature is skipped with the message `tls: CRL <url> nejde pouzit (...)`
+("cannot be used", once per address), and the status from it is unknown.
+Before, one such CRL failed the whole connection with `unexpected error:
+provided CRL could not be parsed` - that is how NTS-KE failed with every
+server holding a Let's Encrypt certificate.
 
 ### The `revocd` service
 
@@ -291,9 +301,13 @@ connection data.
   most 16 MiB, 15 s limit). After a failure the URL is not retried for
   10 minutes. revocd does not verify the signature, webpki in the program
   does: a spoofed CRL from revocd achieves nothing.
-- **OneCRL:** downloaded on the first query and then every 24 h from the
-  URL in `revocd.toml`; the last valid version is kept in
-  `/crl/onecrl.json`. Entries with `"enabled": false` are skipped.
+- **OneCRL:** downloaded after the first `ca` query and then every 24 h
+  from the address in `revocd.toml`; the last valid version lies in
+  `/crl/onecrl.json`. It is downloaded only when idle (0.5 s without a
+  query): a `ca` query is answered at once from the last list (empty on
+  the very first start = unknown status), so a program's handshake (NTS-KE
+  of `ntpd` at start) does not wait for megabytes of OneCRL.
+  Entries with `"enabled": false` are skipped.
 - **Permissions:** network session TCP 80/443 anywhere (CAs choose the CRL
   URLs), FS session of the `REVOCD_USER` account (901): `/certs`
   read-only, `/crl` writable. The cache inherits read access for everyone
@@ -480,6 +494,7 @@ TCP connections and reads time out after 30 s.
 | `tls`: truncation, resumption | TCP end without `close_notify` = `Truncated`; second connection over PSK |
 | `tls`: roots | PEM with comments, DER, damaged blocks, `distrust.txt`, base64 |
 | `tls`: revocation | CRL of the end-entity and intermediate certificate, expired and spoofed CRL, OneCRL, OCSP good / revoked / expired / spoofed, KeyUpdate |
+| `tls`: "CA only" CRL | real CRLs of ISRG Root X1 and Root YR (`libs/tls/testdata/letsencrypt/`; webpki rejects them, `tls::crl` reads them and verifies the signature), the real `nts.netnod.se` chain passes with them; a revoked intermediate CA in a "CA only" CRL, a spoofed CRL does not fail the connection |
 | `httpc`: HPACK | RFC 7541 examples C.1, C.4 (Huffman, dynamic table), C.5 (eviction), Huffman of all bytes, bad padding, "HPACK bomb" |
 | `httpc`: scripted HTTP/1.1 | chunked with extensions and trailers, TE vs. CL, 1xx, 304, byte-by-byte data, 15 bad responses, limits |
 | `httpc`: scripted HTTP/2 | PING, padding, CONTINUATION, 1xx, trailers, 17 bad responses, request body flow control, body limit |

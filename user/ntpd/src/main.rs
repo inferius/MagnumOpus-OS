@@ -29,7 +29,10 @@
 //! ntpd odpovi `ok` a hned meri. Kazde kolo: z kazdeho serveru davka
 //! mereni, z ni vzorek s nejmensim zpozdenim, ze serveru median; posun
 //! (a odhad frekvence) jde do `timed`. Interval se prodluzuje, kdyz jsou
-//! hodiny srovnane (`netproto::ntp::Discipline`).
+//! hodiny srovnane (`netproto::ntp::Discipline`). Kolo bez mereni (pri
+//! startu jeste nema sit adresu nebo DNS) se opakuje za 2, 4, 8, ... s,
+//! nejvys za `min_poll` - hodiny se tak nastavi do par sekund po startu
+//! site, ne az za `min_poll`.
 //!
 //! Dalsi zpravy od init: `status` -> `ok:` + text stavu, `policy ...`.
 //!
@@ -159,6 +162,8 @@ struct State {
     /// Odkud bylo posledni mereni: "nts", "plain" nebo "-".
     last_auth: &'static str,
     last_nts_error: String,
+    /// Posledni vypsany duvod kola bez mereni.
+    last_failure: String,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -215,12 +220,21 @@ fn main(startup: Startup) -> i64 {
         last_reply: String::new(),
         last_auth: "-",
         last_nts_error: String::new(),
+        last_failure: String::new(),
     };
     let mut next = time::now();
+    let mut retry_s = RETRY_FIRST_S;
     loop {
         if time::now() >= next {
-            round(&net, &tls, &timed, &cfg, &mut sessions, &mut disc, &mut st);
-            next = time::now() + disc.poll_secs * 1_000_000_000;
+            let wait_s = if round(&net, &tls, &timed, &cfg, &mut sessions, &mut disc, &mut st) {
+                retry_s = RETRY_FIRST_S;
+                disc.poll_secs
+            } else {
+                let w = retry_s.min(cfg.min_poll);
+                retry_s = (retry_s * 2).min(cfg.min_poll);
+                w
+            };
+            next = time::now() + wait_s * 1_000_000_000;
         }
         // Cekat na dalsi kolo, prikazy od init nebo konec.
         match libos::wait_one(ctl.handle(), Signals::READABLE | Signals::PEER_CLOSED, Some(next)) {
@@ -328,8 +342,12 @@ fn measure_plain(net: &Net, server: &str, samples: usize, st: &mut State) -> Vec
     out
 }
 
+/// Prvni opakovani kola bez mereni (s); kazde dalsi dvojnasob, nejvys
+/// `min_poll`.
+const RETRY_FIRST_S: u64 = 2;
+
 /// Jedno kolo: mereni (nejdriv NTS, neoverene jen podle pravidla), vyber,
-/// navrh korekce.
+/// navrh korekce. `false` = zadne mereni.
 fn round(
     net: &Net,
     tls: &tls::Client,
@@ -338,7 +356,7 @@ fn round(
     sessions: &mut [Option<nts::Session>],
     disc: &mut Discipline,
     st: &mut State,
-) {
+) -> bool {
     let mut offsets = Vec::new();
     let mut delay = 0;
     for (i, server) in cfg.servers.iter().enumerate() {
@@ -372,8 +390,13 @@ fn round(
         "-"
     };
     let Some(offset) = ntp::combine(&mut offsets) else {
-        println!("ntpd: zadny server neodpovedel ({:?}, NTS: {})", st.last_error, st.last_nts_error);
-        return;
+        // Pri rychlem opakovani (start) stejnou hlasku jen jednou.
+        let why = format!("{:?}, NTS: {}", st.last_error, st.last_nts_error);
+        if why != st.last_failure {
+            println!("ntpd: zadny server neodpovedel ({why})");
+            st.last_failure = why;
+        }
+        return false;
     };
     st.last_auth = auth;
     let freq = disc.update(time::now(), offset);
@@ -386,6 +409,7 @@ fn round(
         .write(&msg, Vec::new())
         .and_then(|_| timed.read(Some(time::deadline_after(Duration::from_secs(5)))));
     st.rounds += 1;
+    st.last_failure.clear();
     st.last_offset = offset;
     st.last_delay = delay;
     st.last_reply = match reply {
@@ -403,4 +427,5 @@ fn round(
             st.last_reply
         );
     }
+    true
 }

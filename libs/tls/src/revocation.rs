@@ -8,7 +8,10 @@
 //!    certifikat retezu krome korene.
 //! 3. **CRL** z distribucnich bodu certifikatu (`http://...`): zdroj je
 //!    vrati (stazene a v mezipameti), webpki overi jejich podpis a hleda
-//!    v nich cisla certifikatu. Propadle CRL se zahodi.
+//!    v nich cisla certifikatu. Propadle CRL se zahodi. Kazda CRL se
+//!    posuzuje zvlast: CRL "jen certifikaty CA" (korenove CA Let's Encrypt),
+//!    kterou webpki neumi, overi [`crate::crl`]; CRL, kterou neprecte nikdo,
+//!    se preskoci s varovanim (stav nezname), spojeni neshodi.
 //!
 //! Stav, ktery nejde zjistit (zdroj nebezi, CRL nejde stahnout, server bez
 //! staplingu), spojeni **nezastavi** - stejne jako v prohlizecich. Kdyz
@@ -17,7 +20,7 @@
 //! Zdroj je v systemu sluzba `revocd` ([`ChannelSource`] s feature
 //! `libos`); protokol je v [`proto`].
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -28,6 +31,7 @@ use rustls::crypto::CryptoProvider;
 use rustls::{CertificateError, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use sha2::{Digest, Sha256};
 
+use crate::crl::{self, CrlError};
 use crate::ocsp;
 use crate::provider::ALGORITHMS;
 use crate::x509::{self, Cert, Key};
@@ -61,6 +65,8 @@ pub(crate) struct Verifier {
     provider: Arc<CryptoProvider>,
     plain: Arc<WebPkiServerVerifier>,
     source: Option<Arc<dyn RevocationSource>>,
+    /// Adresy CRL, ktere nejdou pouzit (varovani jen jednou).
+    unusable: spin::Mutex<Vec<String>>,
 }
 
 fn revoked() -> Error {
@@ -81,12 +87,56 @@ impl Verifier {
             provider,
             plain,
             source,
+            unusable: spin::Mutex::new(Vec::new()),
         })
     }
 
-    /// Vydavatel certifikatu `cert`: z retezu, nebo korenova CA.
-    fn issuer_key<'a>(&'a self, cert: &Cert<'_>, chain: &'a [Cert<'a>], anchor_subject: &'a mut Vec<u8>) -> Option<Key<'a>> {
-        if let Some(c) = chain.iter().find(|c| c.subject == cert.issuer) {
+    /// Lze CRL predat webpki? (Jedna CRL, kterou webpki neprecte, by jinak
+    /// shodila overeni vsech.)
+    fn webpki_reads(&self, der: &[u8]) -> Result<(), String> {
+        WebPkiServerVerifier::builder_with_provider(self.roots.clone(), self.provider.clone())
+            .with_crls([CertificateRevocationListDer::from(der.to_vec())])
+            .build()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// CRL nejde pouzit: varovani (jednou pro adresu), stav nezname.
+    fn unusable(&self, url: &str, why: &str) {
+        let mut seen = self.unusable.lock();
+        if seen.iter().any(|u| u == url) {
+            return;
+        }
+        if seen.len() >= 64 {
+            seen.remove(0);
+        }
+        seen.push(url.to_string());
+        #[cfg(feature = "libos")]
+        libos::println!("tls: CRL {url} nejde pouzit ({why}), odvolani z ni se neoveri");
+        #[cfg(not(feature = "libos"))]
+        let _ = why;
+    }
+
+    /// CRL "jen certifikaty CA": podpis vydavatele, platnost a cisla
+    /// mezilehlych CA z retezu. `Ok(true)` = nektera je odvolana.
+    fn check_ca_crl(&self, c: &crl::CaCrl<'_>, chain: &[Cert<'_>], now_s: i64) -> Result<bool, &'static str> {
+        if c.next_update.is_some_and(|n| n < now_s) {
+            return Err("propadla");
+        }
+        let mut anchor = Vec::new();
+        let issuer = self.issuer_key(c.issuer, chain, &mut anchor).ok_or("vydavatel neni v retezu ani v korenech")?;
+        if !ocsp::verify_signature(&issuer, c.sig_alg, c.tbs, c.signature) {
+            return Err("podpis nesedi");
+        }
+        Ok(chain
+            .iter()
+            .any(|cert| cert.issuer == c.issuer && c.revoked.contains(&cert.serial)))
+    }
+
+    /// Klic vydavatele se jmenem `issuer` (cela polozka Name): z retezu,
+    /// nebo korenova CA.
+    fn issuer_key<'a>(&'a self, issuer: &[u8], chain: &'a [Cert<'a>], anchor_subject: &'a mut Vec<u8>) -> Option<Key<'a>> {
+        if let Some(c) = chain.iter().find(|c| c.subject == issuer) {
             return Some(c.key());
         }
         for a in self.roots.roots.iter() {
@@ -95,7 +145,7 @@ impl Verifier {
             raw.push(x509::tag::SEQUENCE);
             push_len(&mut raw, a.subject.as_ref().len());
             raw.extend_from_slice(a.subject.as_ref());
-            if raw == cert.issuer {
+            if raw == issuer {
                 let (alg, key) = x509::spki_parts(a.subject_public_key_info.as_ref()).ok()?;
                 *anchor_subject = raw;
                 let subject: &'a Vec<u8> = anchor_subject;
@@ -143,7 +193,7 @@ impl ServerCertVerifier for Verifier {
         let mut leaf_known = false;
         if !ocsp_response.is_empty() {
             let mut anchor = Vec::new();
-            if let Some(issuer) = self.issuer_key(&leaf, &chain, &mut anchor) {
+            if let Some(issuer) = self.issuer_key(leaf.issuer, &chain, &mut anchor) {
                 match ocsp::check(ocsp_response, &leaf, &issuer, now_s) {
                     Ok(ocsp::Status::Revoked) => return Err(revoked()),
                     Ok(ocsp::Status::Good) => leaf_known = true,
@@ -179,15 +229,28 @@ impl ServerCertVerifier for Verifier {
         }
         urls.sort();
         urls.dedup();
-        let crls: Vec<CertificateRevocationListDer<'static>> = urls
-            .iter()
-            .filter_map(|u| source.crl(u))
-            .filter(|der| {
-                // Propadla CRL = stav nezname (radeji nez odmitnuti).
-                x509::crl_info(der).is_ok_and(|i| i.next_update.is_none_or(|n| n >= now_s))
-            })
-            .map(CertificateRevocationListDer::from)
-            .collect();
+        let mut crls: Vec<CertificateRevocationListDer<'static>> = Vec::new();
+        for url in &urls {
+            let Some(der) = source.crl(url) else {
+                continue;
+            };
+            // Propadla CRL = stav nezname (radeji nez odmitnuti).
+            if !x509::crl_info(&der).is_ok_and(|i| i.next_update.is_none_or(|n| n >= now_s)) {
+                continue;
+            }
+            match self.webpki_reads(&der) {
+                Ok(()) => crls.push(CertificateRevocationListDer::from(der)),
+                Err(webpki_err) => match crl::parse_ca_only(&der) {
+                    Ok(c) => match self.check_ca_crl(&c, &chain, now_s) {
+                        Ok(true) => return Err(revoked()),
+                        Ok(false) => {}
+                        Err(why) => self.unusable(url, why),
+                    },
+                    Err(CrlError::NotCaOnly) => self.unusable(url, &webpki_err),
+                    Err(e) => self.unusable(url, &alloc::format!("{e:?}, webpki: {webpki_err}")),
+                },
+            }
+        }
         if crls.is_empty() {
             return Ok(ServerCertVerified::assertion());
         }
@@ -196,7 +259,15 @@ impl ServerCertVerifier for Verifier {
             .allow_unknown_revocation_status()
             .build()
             .map_err(|e| Error::General(alloc::format!("{e}")))?;
-        with_crls.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+        match with_crls.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now) {
+            // CRL, kterou webpki precetl, ale nejde pouzit (podpis nesedi,
+            // vydavatel nesmi podepisovat CRL, ...): stav nezname.
+            Err(Error::InvalidCertRevocationList(e)) => {
+                self.unusable(&urls.join(" "), &alloc::format!("{e:?}"));
+                Ok(ServerCertVerified::assertion())
+            }
+            r => r,
+        }
     }
 
     fn verify_tls12_signature(

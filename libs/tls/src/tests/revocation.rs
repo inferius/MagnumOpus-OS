@@ -17,15 +17,15 @@ use crate::roots::Roots;
 use crate::x509::{self, Cert, oid};
 use crate::{Client, Error};
 
-const CRL_CA: &str = "http://crl.test/ca.crl";
-const CRL_INTER: &str = "http://crl.test/inter.crl";
+pub(super) const CRL_CA: &str = "http://crl.test/ca.crl";
+pub(super) const CRL_INTER: &str = "http://crl.test/inter.crl";
 
-struct Ca {
-    cert: rcgen::Certificate,
-    key: KeyPair,
+pub(super) struct Ca {
+    pub(super) cert: rcgen::Certificate,
+    pub(super) key: KeyPair,
 }
 
-fn ca(name: &str, parent: Option<&Ca>, crl_url: Option<&str>) -> Ca {
+pub(super) fn ca(name: &str, parent: Option<&Ca>, crl_url: Option<&str>) -> Ca {
     let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
     let mut p = CertificateParams::new(Vec::<String>::new()).unwrap();
     p.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -43,7 +43,7 @@ fn ca(name: &str, parent: Option<&Ca>, crl_url: Option<&str>) -> Ca {
 }
 
 /// Certifikat serveru `localhost` s cislem `serial`.
-fn leaf(issuer: &Ca, serial: u64, crl_url: Option<&str>) -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
+pub(super) fn leaf(issuer: &Ca, serial: u64, crl_url: Option<&str>) -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
     let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
     let mut p = CertificateParams::new(vec![String::from("localhost")]).unwrap();
     p.serial_number = Some(SerialNumber::from(serial));
@@ -56,7 +56,7 @@ fn leaf(issuer: &Ca, serial: u64, crl_url: Option<&str>) -> (CertificateDer<'sta
     (cert.der().clone(), PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())))
 }
 
-fn crl(issuer: &Ca, revoked: &[u64], next_year: i32) -> Vec<u8> {
+pub(super) fn crl(issuer: &Ca, revoked: &[u64], next_year: i32) -> Vec<u8> {
     let params = rcgen::CertificateRevocationListParams {
         this_update: rcgen::date_time_ymd(2020, 1, 1),
         next_update: rcgen::date_time_ymd(next_year, 1, 1),
@@ -78,10 +78,10 @@ fn crl(issuer: &Ca, revoked: &[u64], next_year: i32) -> Vec<u8> {
 
 /// Testovaci zdroj odvolani.
 #[derive(Debug, Default)]
-struct Source {
-    crls: Vec<(&'static str, Vec<u8>)>,
-    revoked_cas: Vec<CaQuery>,
-    asked: Mutex<Vec<String>>,
+pub(super) struct Source {
+    pub(super) crls: Vec<(&'static str, Vec<u8>)>,
+    pub(super) revoked_cas: Vec<CaQuery>,
+    pub(super) asked: Mutex<Vec<String>>,
 }
 
 impl RevocationSource for Source {
@@ -95,7 +95,7 @@ impl RevocationSource for Source {
     }
 }
 
-fn pki(root: &Ca, chain: Vec<CertificateDer<'static>>, key: PrivateKeyDer<'static>) -> Pki {
+pub(super) fn pki(root: &Ca, chain: Vec<CertificateDer<'static>>, key: PrivateKeyDer<'static>) -> Pki {
     Pki {
         ca_pem: root.cert.pem(),
         chain,
@@ -104,7 +104,7 @@ fn pki(root: &Ca, chain: Vec<CertificateDer<'static>>, key: PrivateKeyDer<'stati
 }
 
 /// Spojeni k serveru s `pki` (a OCSP); vrati vysledek handshaku.
-fn try_connect(pki: &Pki, source: Option<Arc<Source>>, ocsp: Vec<u8>) -> Result<(), Error> {
+pub(super) fn try_connect(pki: &Pki, source: Option<Arc<Source>>, ocsp: Vec<u8>) -> Result<(), Error> {
     let roots = Roots::from_files([("ca.pem", pki.ca_pem.as_bytes())]);
     let src = source.map(|s| s as Arc<dyn RevocationSource>);
     let c = Client::with_revocation(&PLATFORM, &roots, &[], src).unwrap();
@@ -116,7 +116,7 @@ fn try_connect(pki: &Pki, source: Option<Arc<Source>>, ocsp: Vec<u8>) -> Result<
     r
 }
 
-fn expect_revoked(r: Result<(), Error>) {
+pub(super) fn expect_revoked(r: Result<(), Error>) {
     match r {
         Err(Error::Certificate(m)) if m.contains("Revoked") => {}
         other => panic!("cekano Revoked, prislo {other:?}"),
@@ -151,8 +151,8 @@ fn crl_revoked_leaf() {
         ..Default::default()
     });
     let (good, good_key) = leaf(&root, 100, Some(CRL_CA));
-    let r = try_connect(&pki(&root, vec![good], good_key), Some(forged), Vec::new());
-    assert!(!matches!(&r, Err(Error::Certificate(m)) if m.contains("Revoked")), "{r:?}");
+    // Podpis nesedi = stav nezname: spojeni projde (mekke selhani).
+    try_connect(&pki(&root, vec![good], good_key), Some(forged), Vec::new()).unwrap();
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn onecrl_revoked_ca() {
 
 // --- OCSP ---
 
-fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+pub(super) fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
     let mut out = vec![tag];
     let len = content.len();
     if len < 0x80 {
@@ -236,11 +236,11 @@ fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
     out
 }
 
-fn seq(parts: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn seq(parts: &[Vec<u8>]) -> Vec<u8> {
     tlv(0x30, &parts.concat())
 }
 
-fn gtime(s: &str) -> Vec<u8> {
+pub(super) fn gtime(s: &str) -> Vec<u8> {
     tlv(0x18, s.as_bytes())
 }
 
