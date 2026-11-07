@@ -119,6 +119,7 @@ impl Decoder {
         for f in &self.desc.fields {
             for u in self.field_usages(f) {
                 match meaning(u, f.is_relative()) {
+                    Some(Meaning::Key(_)) if u >> 16 == PAGE_CONSUMER as u32 => c |= caps::MEDIA,
                     Some(Meaning::Key(k)) if !is_button(k) => c |= caps::KEYBOARD,
                     Some(Meaning::Rel(REL_X | REL_Y)) => c |= caps::POINTER,
                     Some(Meaning::Abs(_)) => c |= caps::ABSOLUTE,

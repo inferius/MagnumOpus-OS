@@ -61,6 +61,9 @@ pub mod caps {
     pub const POINTER: u16 = 1 << 1;
     /// Ma absolutni osy (tablet, dotykova plocha); rozsahy posle `IAXS`.
     pub const ABSOLUTE: u16 = 1 << 2;
+    /// Jen multimedialni a systemove klavesy (hlasitost, prehravani, jas):
+    /// nepise text, neni to klavesnice.
+    pub const MEDIA: u16 = 1 << 3;
 }
 
 /// Jedna surova udalost (evdev).

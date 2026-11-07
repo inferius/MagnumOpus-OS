@@ -199,7 +199,7 @@ that start with a tag:
 
 | Tag | Content (little-endian) |
 |---|---|
-| `IDEV` | version u16 (1), capabilities u16 (`KEYBOARD` 1, `POINTER` 2), UTF-8 name (at most 128 B) |
+| `IDEV` | version u16 (1), capabilities u16 (`KEYBOARD` 1, `POINTER` 2, `ABSOLUTE` 4, `MEDIA` 8 = multimedia keys only), UTF-8 name (at most 128 B) |
 | `IEVT` | 8-byte events: type u16, code u16, value i32 (at most 1024 per message) |
 | `IAXS` | 12-byte absolute axis ranges: code u16, reserved u16, min i32, max i32 (a source with the `ABSOLUTE` capability 4, after the greeting) |
 

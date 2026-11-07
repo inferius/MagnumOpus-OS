@@ -169,8 +169,9 @@ vrátí `None` a ovladač zkusí boot protokol.
 - `MSC_SCAN` = usage (strana << 16 | id), takže `u` má scan kód `0x70018`
   a hlasitost+ `0xC00E9`.
 - Jeden report je jeden snímek.
-- **Schopnosti** zdroje určí dekodér: `KEYBOARD`, `POINTER`, nebo
-  `ABSOLUTE`. Rozsahy absolutních os ovladač pošle službě zprávou `IAXS`
+- **Schopnosti** zdroje určí dekodér: `KEYBOARD` (strana Keyboard),
+  `MEDIA` (jen klávesy strany Consumer, třeba ovládání hlasitosti na
+  sluchátkách), `POINTER`, nebo `ABSOLUTE`. Rozsahy absolutních os ovladač pošle službě zprávou `IAXS`
   a služba je převede na `Absolute { x, y }` v rozsahu 0-65535.
 - **Boot protokol** (`usbproto::hid`): klávesnice 8 B (modifikátory,
   rezerva, 6 kláves), myš 3-4 B. Používá se jen tehdy, když rozhraní nemá
@@ -214,8 +215,10 @@ Zařízení USB se může vydávat za klávesnici a samo psát příkazy (BadUSB
    aplikace nepřekreslí):
    - **u klávesnice** s náhodným kódem, který uživatel napíše na nové
      klávesnici. Dialog to vidí, protože vstup jde na `secure`;
-   - **u myši** s dotazem, který uživatel potvrdí **na už ověřené
-     klávesnici**, protože kliknutí nové myši by mohlo být podvržené.
+   - **u myši, tabletu a multimediálních kláves** (`MEDIA`: hlasitost,
+     přehrávání; nepíšou text, takže kód opsat nejde) s dotazem, který
+     uživatel potvrdí **na už ověřené klávesnici**, protože jejich vlastní
+     vstup by mohl být podvržený.
 
    Pak dialog pošle `trust <id>`. Při nesouhlasu pošle `reject <id>`
    a vstup zařízení se pak zahazuje.
@@ -254,7 +257,7 @@ a brala by si události, které má dostat PS/2.
 |---|---|---|
 | 1 | hotovo | řadič xHCI: převzetí od firmwaru, reset, kontexty, fronty, MSI-X, kořenové porty, kontrolní a interrupt přenosy |
 | 2 | hotovo | HID boot protokol (klávesnice, myš), hotplug, ověření nového vstupního zařízení |
-| 3 | hotovo | externí huby: route string, příznak hubu, počet portů, MTT a TT think time v kontextu slotu, TT pro low/full speed za high-speed hubem; odpojení hubu odpojí i zařízení za ním (nejvýš 5 úrovní hubů) |
+| 3 | hotovo | externí huby: route string, příznak hubu, počet portů, MTT (po výběru alternativního nastavení hubu s TT na port) a TT think time v kontextu slotu, TT pro low/full speed za high-speed hubem; odpojení hubu odpojí i zařízení za ním (nejvýš 5 úrovní hubů; port hubu nad 15 nejde adresovat a `ATTACH` vrátí `NOT_SUPPORTED`) |
 | 4 | hotovo | parser deskriptoru reportu HID: multimediální klávesy, myši s více tlačítky a vodorovným kolečkem, tablety a pera (`EV_ABS`, událost `Absolute`) |
 | 5 | plán | I2C-HID (touchpady notebooků: potřebuje AML a ovladač I2C) |
 

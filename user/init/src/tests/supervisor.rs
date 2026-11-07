@@ -53,11 +53,9 @@ fn time_answers() -> TestResult {
     let g = crate::system::TIME.lock();
     let t = g.as_ref().ok_or("sluzba casu nebezi")?;
     let now = time::wall().ok_or("realny cas neni znamy")?;
-    let mut msg = Vec::from(&b"set"[..]);
-    msg.extend_from_slice(&now.secs.to_le_bytes());
-    msg.extend_from_slice(&now.nanos.to_le_bytes());
-    msg.push(0);
-    t.channel.write(&msg, Vec::new()).map_err(|e| fail("zapis", e))?;
+    t.channel
+        .write(&super::time::set_request(now, false), Vec::new())
+        .map_err(|e| fail("zapis", e))?;
     let reply = t
         .channel
         .read(Some(time::deadline_after(Duration::from_secs(5))))

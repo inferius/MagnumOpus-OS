@@ -24,7 +24,7 @@ pub struct Location {
     /// Cesta porty od radice: root port, port 1. hubu, ...
     pub path: Vec<u8>,
     /// Route string xHCI: port na kazde urovni hubu po 4 bitech (bez root
-    /// portu; port > 15 se zkrati na 15, jak pozaduje specifikace).
+    /// portu; port hubu nad 15 nejde adresovat).
     pub route: u32,
     /// Zarizeni low/full speed za hubem high speed: (slot hubu s TT,
     /// port na nem, hub ma TT na kazdy port).
@@ -159,9 +159,14 @@ impl Hc {
             // Specifikace USB dovoli nejvys 5 urovni hubu.
             return Err(Error::NotSupported);
         }
+        // Route string ma na kazdou uroven 4 bity: port nad 15 nejde
+        // adresovat (zkraceni by oslovilo jine zarizeni).
+        if port > 15 {
+            return Err(Error::NotSupported);
+        }
         let mut path = parent.location.path.clone();
         path.push(port);
-        let route = parent.location.route | (port.min(15) as u32) << (4 * tier);
+        let route = parent.location.route | (port as u32) << (4 * tier);
         // TT: low/full speed za hubem high speed; za hubem, ktery sam visi
         // za TT, plati TT rodice.
         let tt = match (speed, parent.speed) {
@@ -270,9 +275,27 @@ impl Hc {
         let hub = if descriptor.class == usbproto::desc::class::HUB {
             let d = self.control_sync(slot, usbproto::hub::get_hub_descriptor(16), &[])?;
             let h = usbproto::hub::HubDescriptor::parse(&d).ok_or(Error::Corrupted)?;
+            // Hub s TT na kazdy port (protokol 2) ho pouziva jen po vyberu
+            // alternativniho nastaveni 1 rozhrani 0; bez nej je to hub
+            // s jednim TT a MTT v kontextu slotu by nesedelo.
+            let multi_tt = descriptor.protocol == 2
+                && self
+                    .control_sync(
+                        slot,
+                        Setup {
+                            request_type: usbproto::desc::rt::HOST_TO_DEVICE
+                                | usbproto::desc::rt::TO_INTERFACE,
+                            request: usbproto::desc::request::SET_INTERFACE,
+                            value: 1,
+                            index: 0,
+                            length: 0,
+                        },
+                        &[],
+                    )
+                    .is_ok();
             Some(HubInfo {
                 ports: h.ports,
-                multi_tt: descriptor.protocol == 2,
+                multi_tt,
                 think_time: ((h.characteristics >> 5) & 3) as u8,
             })
         } else {

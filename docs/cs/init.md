@@ -3,7 +3,8 @@
 `init` je první proces v userspace. Spustí systémové služby a pak zůstane
 jako **supervisor**: předává zařízení připojená za běhu a hlídá služby.
 V testovacím běhu místo toho spustí testy userspace a skončí s jejich
-výsledkem.
+výsledkem. Jen v testovacím běhu zapne `fsd` ladicí režim (simulace
+výpadku proudu pro testy FS).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Init a supervisor">
@@ -41,7 +42,7 @@ Smyčka čeká na kanál správce zařízení a na konec hlídaných procesů:
 | `devmgr` pošle `input` s kanálem | předá ho službě vstupu (`device`). Takhle se do systému dostanou zařízení USB připojená za běhu |
 | `devmgr` pošle `block` | zatím jen zaloguje (disky za běhu přijdou s více disky v `fsd`) |
 | `devmgr` zavře kanál | zaloguje, hotplug přestane fungovat |
-| skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
+| skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na odpověď nové služby čeká nejvýš 1 s (mezitím nic jiného neobsluhuje), jinak ji ukončí a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
 | skončila jiná služba (`devmgr`, `fsd`, `inputd`) | zaloguje kód. Obnova zatím není (viz níže) |
 
 Log při pádu služby:

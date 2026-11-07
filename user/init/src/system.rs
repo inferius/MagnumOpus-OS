@@ -119,6 +119,16 @@ pub struct TimeService {
 /// (pripadna oprava RTC v mistnim case probehne pred startem ostatnich
 /// sluzeb, takze casy souboru jsou od zacatku spravne).
 pub fn start_time(startup: &Startup) -> Result<TimeService> {
+    start_time_within(startup, Duration::from_secs(5))
+}
+
+/// Jak dlouho supervisor pri restartu ceka na novou sluzbu casu (mezitim
+/// nic jineho neobsluhuje, proto kratce).
+const RESTART_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Spusti sluzbu casu a pocka nejvys `timeout` na potvrzeni nastaveni;
+/// sluzbu, ktera neodpovi, ukonci.
+fn start_time_within(startup: &Startup, timeout: Duration) -> Result<TimeService> {
     let fs = Initfs::open(startup)?;
     let image = fs.find("timed").ok_or(Error::NotFound)?;
     let resource = startup.root_resource.as_ref().ok_or(Error::NotFound)?;
@@ -127,7 +137,13 @@ pub fn start_time(startup: &Startup) -> Result<TimeService> {
         .duplicate(Some(Rights::BASIC | Rights::SET_CLOCK))?;
     let (process, channel) = libos::spawn("timed", image, vec![StartHandle::user(clock)])?;
     channel.write(TIME_SETTINGS.as_bytes(), Vec::new())?;
-    let msg = channel.read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    let msg = match channel.read(Some(time::deadline_after(timeout))) {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = process.kill();
+            return Err(e);
+        }
+    };
     if msg.data != b"ok" {
         println!(
             "init: sluzba casu hlasi: {}",
@@ -165,8 +181,11 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
         StartHandle::user(server.into_handle()),
     ];
     let (process, control) = libos::spawn("fsd", image, handles)?;
-    // Testy potrebuji simulaci vypadku proudu.
-    control.write(b"debug", Vec::new())?;
+    // Testy potrebuji simulaci vypadku proudu - jen v testovacim behu, na
+    // beznem systemu by ji mohl spustit kterykoli klient.
+    if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
+        control.write(b"debug", Vec::new())?;
+    }
     let client = FsClient::new(client);
     let info = client.info()?;
     println!(
@@ -180,7 +199,7 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
 
 /// Restart sluzby casu (supervisor): nova sluzba nahradi starou v [`TIME`].
 pub fn restart_time(startup: &Startup) -> Result<libos::Handle> {
-    let t = start_time(startup)?;
+    let t = start_time_within(startup, RESTART_TIMEOUT)?;
     let h = t.process.handle().duplicate(None)?;
     *TIME.lock() = Some(t);
     Ok(h)

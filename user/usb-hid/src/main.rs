@@ -123,6 +123,8 @@ fn main(startup: Startup) -> i64 {
         "tablet"
     } else if caps & caps::POINTER != 0 {
         "mys"
+    } else if caps & caps::MEDIA != 0 {
+        "multimedialni klavesy"
     } else {
         "HID"
     };

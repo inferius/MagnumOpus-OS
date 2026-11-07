@@ -300,7 +300,8 @@ impl Service {
             // Klavesnice nebo mys pripojena za behu muze byt podvrzena
             // (BadUSB: pise prikazy, klika do dialogu): s volbou overeni jde
             // jeji vstup jen systemu, dokud ji neoveri.
-            let input = s.caps & (caps::KEYBOARD | caps::POINTER | caps::ABSOLUTE) != 0;
+            let input =
+                s.caps & (caps::KEYBOARD | caps::POINTER | caps::ABSOLUTE | caps::MEDIA) != 0;
             if !s.synthetic && input && self.settled && self.verify_new {
                 s.trust = DeviceTrust::Pending;
                 let id = s.id;

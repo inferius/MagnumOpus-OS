@@ -183,7 +183,7 @@ značkou:
 
 | Značka | Obsah (little-endian) |
 |---|---|
-| `IDEV` | verze u16 (1), schopnosti u16 (`KEYBOARD` 1, `POINTER` 2), jméno UTF-8 (nejvýš 128 B) |
+| `IDEV` | verze u16 (1), schopnosti u16 (`KEYBOARD` 1, `POINTER` 2, `ABSOLUTE` 4, `MEDIA` 8 = jen multimediální klávesy), jméno UTF-8 (nejvýš 128 B) |
 | `IEVT` | události po 8 B: typ u16, kód u16, hodnota i32 (nejvýš 1024 v jedné zprávě) |
 | `IAXS` | rozsahy absolutních os po 12 B: kód u16, rezerva u16, min i32, max i32 (zdroj se schopností `ABSOLUTE` 4, po představení) |
 

@@ -100,15 +100,22 @@ fn set_and_restore(s: &Startup) -> TestResult {
     Ok(())
 }
 
+/// Pozadavek `set` sluzby casu: cas a priznak zapisu do RTC.
+pub(super) fn set_request(now: WallTime, hardware: bool) -> Vec<u8> {
+    let mut msg = Vec::from(&b"set"[..]);
+    msg.extend_from_slice(&now.secs.to_le_bytes());
+    msg.extend_from_slice(&now.nanos.to_le_bytes());
+    msg.push(hardware as u8);
+    msg
+}
+
 fn time_service_set(_: &Startup) -> TestResult {
     let guard = crate::system::TIME.lock();
     let t = guard.as_ref().ok_or("sluzba casu nebezi")?;
     let now = time::wall().ok_or("realny cas neni znamy")?;
-    let mut msg = Vec::from(&b"set"[..]);
-    msg.extend_from_slice(&now.secs.to_le_bytes());
-    msg.extend_from_slice(&now.nanos.to_le_bytes());
-    msg.push(1);
-    t.channel.write(&msg, Vec::new()).map_err(|e| fail("zapis", e))?;
+    t.channel
+        .write(&set_request(now, true), Vec::new())
+        .map_err(|e| fail("zapis", e))?;
     let reply = t
         .channel
         .read(Some(time::deadline_after(Duration::from_secs(5))))

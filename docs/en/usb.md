@@ -175,8 +175,9 @@ protocol.
 - `MSC_SCAN` = the usage (page << 16 | id), so `u` has scan code `0x70018`
   and volume up `0xC00E9`.
 - One report is one frame.
-- The decoder decides the source's **capabilities**: `KEYBOARD`,
-  `POINTER` or `ABSOLUTE`. The driver sends the absolute axis ranges to the
+- The decoder decides the source's **capabilities**: `KEYBOARD` (the
+  Keyboard page), `MEDIA` (Consumer page keys only, e.g. volume control on
+  a headset), `POINTER` or `ABSOLUTE`. The driver sends the absolute axis ranges to the
   service in an `IAXS` message, and the service converts them to
   `Absolute { x, y }` in the range 0-65535.
 - **Boot protocol** (`usbproto::hid`): an 8-byte keyboard report
@@ -222,8 +223,10 @@ dialogs. The **security option** "verify new input devices" stops this:
    applications cannot paint over):
    - **for a keyboard** with a random code the user types on the new
      keyboard. The dialog sees it, because the input goes to `secure`;
-   - **for a mouse** with a question the user confirms **on an already
-     trusted keyboard**, because a click of the new mouse could be forged.
+   - **for a mouse, tablet or multimedia keys** (`MEDIA`: volume,
+     playback; they type no text, so no code can be typed) with a question
+     the user confirms **on an already trusted keyboard**, because their own
+     input could be forged.
 
    Then the dialog sends `trust <id>`. If the user declines, it sends
    `reject <id>`, and the device's input is dropped from then on.
@@ -264,7 +267,7 @@ PS/2.
 |---|---|---|
 | 1 | done | xHCI controller: takeover from the firmware, reset, contexts, rings, MSI-X, root ports, control and interrupt transfers |
 | 2 | done | HID boot protocol (keyboard, mouse), hotplug, new input device verification |
-| 3 | done | external hubs: route string, hub flag, port count, MTT and TT think time in the slot context, the TT for low/full speed behind a high-speed hub; detaching a hub detaches everything behind it (at most 5 hub tiers) |
+| 3 | done | external hubs: route string, hub flag, port count, MTT (after selecting the per-port-TT alternate setting of the hub) and TT think time in the slot context, the TT for low/full speed behind a high-speed hub; detaching a hub detaches everything behind it (at most 5 hub tiers; a hub port above 15 cannot be addressed and `ATTACH` returns `NOT_SUPPORTED`) |
 | 4 | done | HID report descriptor parser: multimedia keys, mice with more buttons and a horizontal wheel, tablets and pens (`EV_ABS`, the `Absolute` event) |
 | 5 | plan | I2C-HID (laptop touchpads: needs AML and an I2C driver) |
 

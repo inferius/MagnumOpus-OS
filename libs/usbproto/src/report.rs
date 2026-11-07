@@ -144,6 +144,24 @@ impl ReportDescriptor {
     }
 }
 
+/// Usage z lokalni polozky pred doplnenim strany.
+#[derive(Clone, Copy)]
+struct LocalUsage {
+    value: u32,
+    /// Data mela 4 B: strana je soucasti hodnoty.
+    full: bool,
+}
+
+impl LocalUsage {
+    fn resolve(self, page: u16) -> Usage {
+        if self.full {
+            self.value
+        } else {
+            usage(page, self.value as u16)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Globals {
     usage_page: u16,
@@ -160,9 +178,9 @@ pub fn parse(d: &[u8]) -> Option<ReportDescriptor> {
     let mut out = ReportDescriptor::default();
     let mut g = Globals::default();
     let mut stack: Vec<Globals> = Vec::new();
-    let mut usages: Vec<Usage> = Vec::new();
-    let mut umin: Option<Usage> = None;
-    let mut umax: Option<Usage> = None;
+    let mut usages: Vec<LocalUsage> = Vec::new();
+    let mut umin: Option<LocalUsage> = None;
+    let mut umax: Option<LocalUsage> = None;
     // Bitova pozice dalsiho vstupniho pole pro kazde id reportu.
     let mut offsets = [0u32; 256];
     let mut depth = 0usize;
@@ -192,13 +210,11 @@ pub fn parse(d: &[u8]) -> Option<ReportDescriptor> {
         };
         let kind = (prefix >> 2) & 3;
         let tag = prefix >> 4;
-        // Usage s 4 B dat obsahuje i stranu, jinak plati Usage Page.
-        let full = |v: u32| -> Usage {
-            if size == 4 {
-                v
-            } else {
-                usage(g.usage_page, v as u16)
-            }
+        // Lokalni usage: 4 B dat = i strana, kratsi jen id - stranu doplni
+        // az polozka main (plati Usage Page platna v ni, HID 1.11 6.2.2.8).
+        let local = LocalUsage {
+            value: unsigned,
+            full: size == 4,
         };
         match (kind, tag) {
             // Main.
@@ -217,7 +233,8 @@ pub fn parse(d: &[u8]) -> Option<ReportDescriptor> {
                     if out.fields.len() >= MAX_FIELDS || usages.len() > MAX_USAGES {
                         return None;
                     }
-                    let usage_range = match (umin, umax) {
+                    let page = g.usage_page;
+                    let usage_range = match (umin.map(|u| u.resolve(page)), umax.map(|u| u.resolve(page))) {
                         (Some(a), Some(b)) if a <= b => Some((a, b)),
                         _ => None,
                     };
@@ -229,7 +246,7 @@ pub fn parse(d: &[u8]) -> Option<ReportDescriptor> {
                         flags,
                         logical_min: g.logical_min,
                         logical_max: g.logical_max,
-                        usages: core::mem::take(&mut usages),
+                        usages: usages.iter().map(|u| u.resolve(page)).collect(),
                         usage_range,
                     });
                 }
@@ -282,10 +299,10 @@ pub fn parse(d: &[u8]) -> Option<ReportDescriptor> {
                 if usages.len() >= MAX_USAGES {
                     return None;
                 }
-                usages.push(full(unsigned));
+                usages.push(local);
             }
-            (2, 0x1) => umin = Some(full(unsigned)),
-            (2, 0x2) => umax = Some(full(unsigned)),
+            (2, 0x1) => umin = Some(local),
+            (2, 0x2) => umax = Some(local),
             _ => {}
         }
     }

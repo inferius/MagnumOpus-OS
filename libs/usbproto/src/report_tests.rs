@@ -147,7 +147,8 @@ fn consumer_keys_with_report_id() {
     assert!(d.uses_ids);
     assert_eq!(d.max_input_len(), 2);
     let mut dec = Decoder::new(d);
-    assert_eq!(dec.caps(), caps::KEYBOARD);
+    // Jen multimedialni klavesy: neni to klavesnice.
+    assert_eq!(dec.caps(), caps::MEDIA);
     let mut out = Vec::new();
     dec.report(&[0x02, 0b001], &mut out);
     assert_eq!(keys(&out), vec![(KEY_VOLUMEUP, true)]);
@@ -176,6 +177,19 @@ fn parser_rejects_garbage() {
     assert_eq!(report::parse(&[0xA1, 0x01].repeat(40)), None);
     // Prazdny deskriptor je platny (zadna pole).
     assert_eq!(report::parse(&[]).map(|d| d.fields.len()), Some(0));
+}
+
+#[test]
+fn usage_page_applies_at_main_item() {
+    // Usage (0x30) pred Usage Page (Generic Desktop): plati strana
+    // v okamziku polozky Input -> X.
+    let d = [0x05, 0x09, 0x09, 0x30, 0x05, 0x01, 0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x01, 0x81, 0x06];
+    let desc = report::parse(&d).unwrap();
+    assert_eq!(desc.fields[0].usage_of(0), Some(usage(1, 0x30)));
+    // Usage s 4 B dat ma vlastni stranu.
+    let d = [0x05, 0x09, 0x0B, 0x30, 0x00, 0x01, 0x00, 0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x01, 0x81, 0x06];
+    let desc = report::parse(&d).unwrap();
+    assert_eq!(desc.fields[0].usage_of(0), Some(usage(1, 0x30)));
 }
 
 #[test]

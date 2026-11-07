@@ -3,7 +3,8 @@
 `init` is the first process in userspace. It starts the system services
 and then stays on as the **supervisor**: it hands over devices attached at
 run time and watches the services. In a test run it instead runs the
-userspace tests and exits with their result.
+userspace tests and exits with their result. Only in a test run does it
+switch `fsd` to debug mode (power-loss simulation for the FS tests).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Init and the supervisor">
@@ -43,7 +44,7 @@ watched processes:
 | `devmgr` sends `input` with a channel | passes it to the input service (`device`). This is how USB devices attached at run time get into the system |
 | `devmgr` sends `block` | only logs it for now (disks at run time come with multiple disks in `fsd`) |
 | `devmgr` closes its channel | logs it, hotplug stops working |
-| a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). More than 5 restarts within 60 s = it gives up and the service stays stopped |
+| a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). It waits at most 1 s for the new service to answer (it serves nothing else meanwhile), otherwise it kills it and the attempt counts as another crash. More than 5 restarts within 60 s = it gives up and the service stays stopped |
 | another service exits (`devmgr`, `fsd`, `inputd`) | logs the code. No recovery yet (see below) |
 
 Log when a service crashes:

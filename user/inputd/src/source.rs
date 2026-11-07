@@ -131,6 +131,8 @@ impl Source {
             // Tlacitka (mys, joystick, gamepad, tablet) nejsou klavesy:
             // nejdou pres rozlozeni a neopakuji se.
             EV_KEY if is_button(e.code) => {
+                // Scan kod patri tomuto tlacitku, ne pristi klavese.
+                self.scan = None;
                 let action = match e.value {
                     0 => Action::Release,
                     1 => Action::Press,
