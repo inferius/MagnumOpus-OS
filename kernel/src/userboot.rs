@@ -140,7 +140,11 @@ fn send_bootstrap(
     let mut entries: vec::Vec<(u32, u32, Arc<dyn KernelObject>, Rights)> = vec![
         (
             bootstrap::kind::SELF_PROCESS,
-            0,
+            if cfg!(feature = "qemu-test") {
+                bootstrap::flags::TEST_RUN
+            } else {
+                0
+            },
             process.clone(),
             process.default_rights(),
         ),

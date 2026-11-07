@@ -15,8 +15,8 @@ use inputproto::{Action, Button, Event, DeviceTrust, Record};
 use libos::{Startup, println, time};
 
 use super::input::{deadline, failr, has, input, text};
-use super::{Test, TestResult, devices, fail};
-use crate::input::{Input, drain, pump_hotplug, read_until};
+use super::{Test, TestResult, fail};
+use crate::input::{Input, drain, read_until};
 use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
@@ -65,13 +65,20 @@ fn sources(inp: &Input) -> Result<Vec<(u16, DeviceTrust, String)>, String> {
         .collect())
 }
 
-/// Pocka, az se objevi zdroj se jmenem `name`, ktery nema id z `old`
-/// (mezitim predava sluzbe vstupu zarizeni pripojena za behu).
-fn wait_new_source(inp: &Input, name: &str, old: &[u16]) -> Result<(u16, DeviceTrust), String> {
-    let d = devices().ok_or("spravce zarizeni nebezi")?;
+/// Pocka, az se objevi zdroj se jmenem `name`, ktery nema id z `old`.
+/// Zarizeni pripojene za behu preda sluzbe vstupu supervisor (tady ho
+/// ridi test, v beznem behu bezi sam).
+fn wait_new_source(
+    s: &Startup,
+    inp: &Input,
+    name: &str,
+    old: &[u16],
+) -> Result<(u16, DeviceTrust), String> {
     let until = deadline(TIMEOUT);
     loop {
-        pump_hotplug(&d.control, inp);
+        crate::supervisor::SUPERVISOR
+            .lock()
+            .step(s, Some(time::deadline_after(Duration::from_millis(50))));
         if let Some((id, trust, _)) = sources(inp)?
             .into_iter()
             .find(|(id, _, n)| n == name && !old.contains(id))
@@ -81,7 +88,6 @@ fn wait_new_source(inp: &Input, name: &str, old: &[u16]) -> Result<(u16, DeviceT
         if time::now() > until {
             return Err(alloc::format!("zarizeni '{name}' se neobjevilo"));
         }
-        libos::time::sleep(Duration::from_millis(50));
     }
 }
 
@@ -144,11 +150,11 @@ fn qemu_keyboard(_: &Startup) -> TestResult {
     Ok(())
 }
 
-fn hotplug_mouse(_: &Startup) -> TestResult {
+fn hotplug_mouse(s: &Startup) -> TestResult {
     let inp = input()?;
     let old = ids(inp)?;
     println!("{MARKER_MOUSE_PLUG}");
-    let (id, _) = wait_new_source(inp, USB_MOUSE, &old)?;
+    let (id, _) = wait_new_source(s, inp, USB_MOUSE, &old)?;
     drain(&inp.focus);
     println!("{MARKER_MOUSE_READY}");
     // xtask: pohyb (4, 6), prostredni tlacitko, kolecko dolu (bez zarizeni:
@@ -179,21 +185,21 @@ fn hotplug_mouse(_: &Startup) -> TestResult {
     wait_gone(inp, id)
 }
 
-fn verify_new_keyboard(_: &Startup) -> TestResult {
+fn verify_new_keyboard(s: &Startup) -> TestResult {
     let inp = input()?;
     inp.command("policy verify-new-devices on", Vec::new())
         .map_err(|e| fail("zapnuti overeni", e))?;
-    let r = verify_inner(inp);
+    let r = verify_inner(s, inp);
     let _ = inp.command("policy verify-new-devices off", Vec::new());
     r
 }
 
-fn verify_inner(inp: &Input) -> TestResult {
+fn verify_inner(s: &Startup, inp: &Input) -> TestResult {
     let old = ids(inp)?;
     drain(&inp.focus);
     drain(&inp.secure);
     println!("{MARKER_KBD_PLUG}");
-    let (id, trust) = wait_new_source(inp, USB_KBD, &old)?;
+    let (id, trust) = wait_new_source(s, inp, USB_KBD, &old)?;
     check_eq!(trust, DeviceTrust::Pending, "nova klavesnice ceka na overeni");
     let pending = Event::NewDevice {
         source: id,
@@ -240,11 +246,11 @@ fn verify_inner(inp: &Input) -> TestResult {
     wait_gone(inp, id)
 }
 
-fn verify_new_mouse(_: &Startup) -> TestResult {
+fn verify_new_mouse(s: &Startup) -> TestResult {
     let inp = input()?;
     inp.command("policy verify-new-devices on", Vec::new())
         .map_err(|e| fail("zapnuti overeni", e))?;
-    let r = verify_mouse_inner(inp);
+    let r = verify_mouse_inner(s, inp);
     let _ = inp.command("policy verify-new-devices off", Vec::new());
     r
 }
@@ -260,12 +266,12 @@ fn motion_of(records: &[Record], id: u16) -> (i32, i32) {
         })
 }
 
-fn verify_mouse_inner(inp: &Input) -> TestResult {
+fn verify_mouse_inner(s: &Startup, inp: &Input) -> TestResult {
     let old = ids(inp)?;
     drain(&inp.focus);
     drain(&inp.secure);
     println!("{MARKER_MOUSE2_PLUG}");
-    let (id, trust) = wait_new_source(inp, USB_MOUSE, &old)?;
+    let (id, trust) = wait_new_source(s, inp, USB_MOUSE, &old)?;
     check_eq!(trust, DeviceTrust::Pending, "nova mys ceka na overeni");
     drain(&inp.focus);
     println!("{MARKER_MOUSE2_PENDING}");
@@ -297,12 +303,12 @@ fn verify_mouse_inner(inp: &Input) -> TestResult {
     wait_gone(inp, id)
 }
 
-fn external_hub(_: &Startup) -> TestResult {
+fn external_hub(s: &Startup) -> TestResult {
     let inp = input()?;
     let old = ids(inp)?;
     println!("{MARKER_HUB_PLUG}");
     // xtask: hub USB na root port a za nej klavesnice (port hubu 1).
-    let (id, trust) = wait_new_source(inp, USB_KBD, &old)?;
+    let (id, trust) = wait_new_source(s, inp, USB_KBD, &old)?;
     check_eq!(trust, DeviceTrust::Trusted, "klavesnice za hubem (overeni vypnute)");
     drain(&inp.focus);
     println!("{MARKER_HUB_KEYS}");
@@ -315,11 +321,11 @@ fn external_hub(_: &Startup) -> TestResult {
     wait_gone(inp, id)
 }
 
-fn tablet(_: &Startup) -> TestResult {
+fn tablet(s: &Startup) -> TestResult {
     let inp = input()?;
     let old = ids(inp)?;
     println!("{MARKER_TABLET_PLUG}");
-    let (id, _) = wait_new_source(inp, "USB tablet 0627:0001", &old)?;
+    let (id, _) = wait_new_source(s, inp, "USB tablet 0627:0001", &old)?;
     drain(&inp.focus);
     println!("{MARKER_TABLET_MOVE}");
     // xtask: absolutni x = 0x4000, y = 0x2000 (rozsah 0..0x7FFF), leve

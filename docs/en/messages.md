@@ -134,6 +134,12 @@ invariant was broken (a kernel bug).
 | `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | No driver for the interface class (e.g. a USB disk). |
 | `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` did not arrive within 10 s; init gets `done` anyway. |
 | `inputd: nove zarizeni '...' ceka na overeni`, `inputd: zarizeni '...' overeno` / `odmitnuto` | The new keyboard verification option (BadUSB): pending / trusted / rejected, see [USB](usb.md). |
+| `init: supervisor bezi` | Start-up is done, init watches the services and devices ([Init](init.md)). |
+| `init: sluzba X skoncila: ...` | A watched service exited (reason from the exit code). |
+| `init: sluzba X znovu spustena` | The supervisor restarted the service. |
+| `init: sluzba X spadla 6x za 60 s, vzdavam to` | Too many crashes; the service stays stopped. |
+| `init: sluzbu X zatim neumim obnovit` | A service without restart crashed (`devmgr`, `fsd`, `inputd`); the system runs without it. |
+| `init: spravce zarizeni skoncil, hotplug nefunguje` | `devmgr` closed its channel; devices attached later are not found. |
 | `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
 | `virtio-input BB:DD.F: 'name' (klavesnice/mys)` | An input device is ready; the kind (keyboard/mouse) comes from the supported events. `nezname zarizeni` (unknown device) = it has neither keys nor relative axes (a tablet, not supported yet). |
 | `virtio-input ...: inicializace selhala: ...` | As for virtio-blk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA). |

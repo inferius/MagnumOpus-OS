@@ -132,6 +132,12 @@ porušený vnitřní předpoklad (chyba jádra).
 | `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | Pro třídu rozhraní není ovladač (např. disk USB). |
 | `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` nepřišlo do 10 s; init dostane `done` i tak. |
 | `inputd: nove zarizeni '...' ceka na overeni`, `inputd: zarizeni '...' overeno` / `odmitnuto` | Volba ověření nové klávesnice (BadUSB), viz [USB](usb.md). |
+| `init: supervisor bezi` | Start hotový, init hlídá služby a zařízení ([Init](init.md)). |
+| `init: sluzba X skoncila: ...` | Hlídaná služba skončila (důvod podle návratového kódu). |
+| `init: sluzba X znovu spustena` | Supervisor službu obnovil. |
+| `init: sluzba X spadla 6x za 60 s, vzdavam to` | Příliš mnoho pádů; služba zůstane zastavená. |
+| `init: sluzbu X zatim neumim obnovit` | Pád služby bez restartu (`devmgr`, `fsd`, `inputd`); systém běží bez ní. |
+| `init: spravce zarizeni skoncil, hotplug nefunguje` | `devmgr` zavřel kanál; zařízení připojená potom se nenajdou. |
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
 | `virtio-input BB:ZZ.F: 'jméno' (klavesnice/mys)` | Vstupní zařízení je připravené; druh podle podporovaných událostí. `nezname zarizeni` = nemá klávesy ani relativní osy (tablet, zatím nepodporovaný). |
 | `virtio-input ...: inicializace selhala: ...` | Jako u virtio-blk: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA). |

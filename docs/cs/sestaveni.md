@@ -21,7 +21,7 @@ v `/usr/share/...`. Jinak proměnné prostředí `QEMU`, `OVMF_CODE`, `OVMF_VARS
 |---|---|
 | `cargo xtask build` | přeloží jádro, loader a programy userspace, sestaví initfs |
 | `cargo xtask image` | build + obraz disku `target/os-x86_64-<profil>.img` (GPT, ESP FAT32) |
-| `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu |
+| `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)) |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro aarch64, dokumentace, pak jádro a userspace v QEMU bez okna |
 | `cargo xtask check [--arch aarch64]` | jen kontrola, že se jádro přeloží pro danou architekturu (výchozí x86_64); viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |

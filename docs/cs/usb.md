@@ -267,5 +267,5 @@ Další omezení první verze:
 - bulk a izochronní endpointy zatím ne (disky, zvuk), jeden interrupter,
 - jen stránky 4 KiB, cíl přerušení je bootovací CPU,
 - kontrolky klávesnice USB (`SET_REPORT`) zatím nesvítí,
-- zařízení připojená za běhu předává init službě vstupu jen při testu
-  (`pump_hotplug`). Trvale to bude dělat smyčka událostí initu (supervisor).
+- zařízení připojená za běhu předává službě vstupu supervisor initu
+  ([Init](init.md)). Disky připojené za běhu zatím jen zaloguje.

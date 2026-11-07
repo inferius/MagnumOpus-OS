@@ -101,6 +101,9 @@ pub struct Startup {
     pub pci_ecam: Vec<(Vmo, u32)>,
     /// Bootstrap kanal: spojeni s rodicem.
     pub bootstrap: Channel,
+    /// Priznaky startu (`abi::bootstrap::flags`; nastavuje je jen jadro
+    /// initu, napr. testovaci beh).
+    pub flags: u32,
 }
 
 unsafe extern "Rust" {
@@ -125,6 +128,7 @@ fn fail(msg: &str) -> ! {
 /// Handly ze startovni zpravy roztridene podle druhu (bez heapu).
 struct Received {
     process: Option<u32>,
+    flags: u32,
     initfs: Option<u32>,
     resource: Option<u32>,
     ecam: [(u32, u32); 4],
@@ -149,6 +153,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
 
     let mut got = Received {
         process: None,
+        flags: 0,
         initfs: None,
         resource: None,
         ecam: [(0, 0); 4],
@@ -165,7 +170,10 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             .and_then(Entry::from_bytes)
             .map_or((0, 0), |e| (e.kind, e.arg));
         match kind {
-            bootstrap::kind::SELF_PROCESS => got.process = Some(handle),
+            bootstrap::kind::SELF_PROCESS => {
+                got.process = Some(handle);
+                got.flags = arg;
+            }
             bootstrap::kind::INITFS => got.initfs = Some(handle),
             bootstrap::kind::ROOT_RESOURCE => got.resource = Some(handle),
             bootstrap::kind::PCI_ECAM if got.ecam_count < got.ecam.len() => {
@@ -200,6 +208,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             .map(|&(h, arg)| (Vmo::from_handle(Handle::from_raw(h)), arg))
             .collect(),
         bootstrap,
+        flags: got.flags,
     };
     // SAFETY: funkci definuje program makrem `entry!` se spravnou signaturou.
     let code = unsafe { __libos_main(startup) };

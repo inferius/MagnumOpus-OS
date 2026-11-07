@@ -277,6 +277,6 @@ Other limits of the first version:
 - no bulk or isochronous endpoints yet (disks, audio), one interrupter,
 - 4 KiB pages only, interrupts target the boot CPU,
 - the USB keyboard LEDs (`SET_REPORT`) stay off for now,
-- devices attached at run time are passed by init to the input service
-  only during the test (`pump_hotplug`). The init event loop (supervisor)
-  will do it permanently.
+- devices attached at run time are passed to the input service by the init
+  supervisor ([Init](init.md)). Disks attached at run time are only logged
+  so far.

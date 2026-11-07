@@ -153,7 +153,7 @@ ve Windows nebo vDSO + libc v Linuxu).
 
 | Služba | Úkol |
 |---|---|
-| init / supervisor | spouští služby, restartuje padlé |
+| init / supervisor | spouští služby, předává zařízení připojená za běhu, restartuje padlé (zatím samostatné služby; viz [Init](init.md)) |
 | device manager | enumerace PCI, ACPI, device tree; spouští ovladače s jejich prostředky |
 | ovladače | nejdřív virtio, pak NVMe, xHCI, HDA, ... |
 | ACPI | interpret AML; jádro samo parsuje jen statické tabulky (MADT, HPET, MCFG) |

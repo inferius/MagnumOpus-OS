@@ -18,7 +18,7 @@ use libos::{Channel, Error, Handle, Process, Result, Startup, println, time};
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Input {
-    pub _process: Process,
+    pub process: Process,
     pub control: Channel,
     /// Vlastnik fokusu: sem chodi udalosti.
     pub focus: Channel,
@@ -35,7 +35,7 @@ pub fn start(startup: &Startup, devices: Vec<Channel>) -> Result<Input> {
     let (focus, focus_srv) = Channel::create()?;
     let (secure, secure_srv) = Channel::create()?;
     let input = Input {
-        _process: process,
+        process,
         control,
         focus,
         secure,
@@ -105,25 +105,6 @@ impl Input {
         let cmd = alloc::format!("{} {name}", control::LAYOUT);
         self.command(&cmd, Vec::new()).map(|_| ())
     }
-}
-
-/// Preda sluzbe vstupu zarizeni, ktera spravce ohlasil po startu (USB
-/// pripojene za behu, zprava `input`). Vraci pocet novych zarizeni.
-///
-/// TODO: az bude init supervisor se smyckou udalosti, bude to delat
-/// trvale; zatim to volaji testy hotplugu.
-pub fn pump_hotplug(devmgr: &Channel, input: &Input) -> usize {
-    let mut n = 0;
-    while let Ok(m) = devmgr.try_read() {
-        if m.data == b"input" {
-            for h in m.handles {
-                if input.command(control::DEVICE, vec![h]).is_ok() {
-                    n += 1;
-                }
-            }
-        }
-    }
-    n
 }
 
 /// Zahodi vsechny cekajici zpravy kanalu.

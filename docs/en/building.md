@@ -22,7 +22,7 @@ next to QEMU or in `/usr/share/...`. Otherwise set `QEMU`, `OVMF_CODE`,
 |---|---|
 | `cargo xtask build` | builds the kernel, loader and userspace programs, creates initfs |
 | `cargo xtask image` | build + disk image `target/os-x86_64-<profile>.img` (GPT, FAT32 ESP) |
-| `cargo xtask run` | image + QEMU with a window; serial output in the terminal |
+| `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)) |
 | `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for aarch64, documentation, then kernel and userspace in QEMU without a window |
 | `cargo xtask check [--arch aarch64]` | only checks that the kernel builds for the given architecture (default x86_64); see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |

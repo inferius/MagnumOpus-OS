@@ -30,9 +30,18 @@ pub struct Entry {
     pub arg: u32,
 }
 
+/// Priznaky startu v `arg` polozky `SELF_PROCESS`.
+pub mod flags {
+    /// Testovaci beh (jadro s feature `qemu-test`): init spusti testy
+    /// userspace a skonci s jejich vysledkem. Bez priznaku bezi init jako
+    /// supervisor stale.
+    pub const TEST_RUN: u32 = 1 << 0;
+}
+
 /// Co znamena predany handle.
 pub mod kind {
-    /// Handle na vlastni proces (mapovani pameti, vlakna).
+    /// Handle na vlastni proces (mapovani pameti, vlakna). `arg` = priznaky
+    /// startu ([`super::flags`]); nastavuje je jen jadro pro init.
     pub const SELF_PROCESS: u32 = 1;
     /// Objekt pameti s obrazem initfs (jen pro cteni).
     pub const INITFS: u32 = 2;

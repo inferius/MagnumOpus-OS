@@ -12,19 +12,29 @@ use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
 use libos::{Channel, Error, Process, Result, Rights, Startup, println, time};
 
+/// Zarizeni a sluzby spustene pri startu (testy a supervisor je ctou).
+pub static DEVICES: spin::Once<Devices> = spin::Once::new();
+
+pub fn devices() -> Option<&'static Devices> {
+    DEVICES.get()
+}
+
+/// Sluzba casu; supervisor ji po padu vymeni za novou.
+pub static TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
+
 /// Bezici spravce zarizeni, blokova zarizeni, ktera nasel, a souborovy
 /// system (pokud je na nekterem disku).
 pub struct Devices {
-    pub _devmgr: Process,
-    /// Kanal ke spravci zarizeni (po `done` jim chodi zarizeni USB
-    /// pripojena za behu: [`crate::input::pump_hotplug`]).
+    pub devmgr: Process,
+    /// Kanal ke spravci zarizeni (po `done` jim chodi zarizeni pripojena za
+    /// behu; zpracovava je supervisor).
     pub control: Channel,
     pub blocks: Vec<BlockClient>,
     /// Kanaly k ovladacum vstupnich zarizeni (predaji se sluzbe vstupu).
     pub inputs: Vec<Channel>,
     pub input: Option<crate::input::Input>,
     pub fs: Option<FsClient>,
-    pub _fsd: Option<(Process, Channel)>,
+    pub fsd: Option<(Process, Channel)>,
 }
 
 /// Nejdelsi ticho od spravce zarizeni pri startu (vic nez jeho vlastni
@@ -82,13 +92,13 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         inputs.len()
     );
     Ok(Devices {
-        _devmgr: devmgr,
+        devmgr,
         control,
         blocks,
         inputs,
         input: None,
         fs: None,
-        _fsd: None,
+        fsd: None,
     })
 }
 
@@ -100,7 +110,7 @@ pub const TIME_SETTINGS: &str = "zone = Europe/Prague\nrtc = utc\n";
 
 /// Bezici sluzba casu a jeji kanal.
 pub struct TimeService {
-    pub _process: Process,
+    pub process: Process,
     pub channel: Channel,
 }
 
@@ -124,7 +134,7 @@ pub fn start_time(startup: &Startup) -> Result<TimeService> {
             core::str::from_utf8(&msg.data).unwrap_or("?")
         );
     }
-    Ok(TimeService { _process: process, channel })
+    Ok(TimeService { process, channel })
 }
 
 /// Podpis superbloku naseho souboroveho systemu (format v3).
@@ -164,6 +174,14 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
         info.label, info.generation
     );
     devices.fs = Some(client);
-    devices._fsd = Some((process, control));
+    devices.fsd = Some((process, control));
     Ok(())
+}
+
+/// Restart sluzby casu (supervisor): nova sluzba nahradi starou v [`TIME`].
+pub fn restart_time(startup: &Startup) -> Result<libos::Handle> {
+    let t = start_time(startup)?;
+    let h = t.process.handle().duplicate(None)?;
+    *TIME.lock() = Some(t);
+    Ok(h)
 }

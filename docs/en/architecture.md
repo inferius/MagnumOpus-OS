@@ -164,7 +164,7 @@ Windows or vDSO + libc on Linux).
 
 | Service | Task |
 |---|---|
-| init / supervisor | starts services, restarts crashed ones |
+| init / supervisor | starts services, hands over devices attached at run time, restarts crashed ones (standalone services so far; see [Init](init.md)) |
 | device manager | enumerates PCI, ACPI, device tree; starts drivers with their resources |
 | drivers | virtio first, then NVMe, xHCI, HDA, ... |
 | ACPI | AML interpreter; the kernel itself parses only static tables (MADT, HPET, MCFG) |

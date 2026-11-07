@@ -8,7 +8,7 @@ use libos::hw::Resource;
 use libos::time::{self, SetRequest, WallTime, source, zone};
 use libos::{Error, Event, Rights, Startup, sys};
 
-use super::{Test, TestResult, fail, time_service};
+use super::{Test, TestResult, fail};
 use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
@@ -101,7 +101,8 @@ fn set_and_restore(s: &Startup) -> TestResult {
 }
 
 fn time_service_set(_: &Startup) -> TestResult {
-    let t = time_service().ok_or("sluzba casu nebezi")?;
+    let guard = crate::system::TIME.lock();
+    let t = guard.as_ref().ok_or("sluzba casu nebezi")?;
     let now = time::wall().ok_or("realny cas neni znamy")?;
     let mut msg = Vec::from(&b"set"[..]);
     msg.extend_from_slice(&now.secs.to_le_bytes());
