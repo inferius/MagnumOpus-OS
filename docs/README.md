@@ -65,7 +65,7 @@ site menu.
 
 | Česky | English | Obsah / Contents |
 |---|---|---|
-| [Vzhled a ovládání](cs/vzhled.md) | [Look and feel](en/appearance.md) | design systém a tokeny, okna a odznak důvěry, lišta, systémové dialogy, správce úloh, terminál, soubory, nastavení, přihlášení, přístupnost; prototypy v `design/` / design system and tokens, windows and trust badge, bar, system dialogs, task manager, terminal, files, settings, sign-in, accessibility; prototypes in `design/` |
+| [Vzhled a ovládání](cs/vzhled.md) | [Look and feel](en/appearance.md) | design systém a tokeny, okna a odznak důvěry, lišta, systémové dialogy, správce úloh, terminál, soubory, nastavení, přihlášení, přístupnost; prototypy a příručka grafického jazyka v `design/` / design system and tokens, windows and trust badge, bar, system dialogs, task manager, terminal, files, settings, sign-in, accessibility; prototypes and visual language handbook in `design/` |
 
 ### Síť / Network
 
