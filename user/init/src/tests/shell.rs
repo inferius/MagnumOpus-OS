@@ -238,9 +238,12 @@ v.error.code")?,
     // Ctrl-C ukonci nekonecny cyklus.
     w.send(ClientMsg::Run { session: id, line: "while true { let x = 1 }".into() })?;
     w.send(ClientMsg::Interrupt { session: id })?;
+    // Konec bloku cyklu (ne pozdni konec bloku zrusene ulohy async).
+    let mut lp = None;
     loop {
         match w.recv()? {
-            ServerMsg::BlockEnd { ok, .. } => {
+            ServerMsg::BlockStart { block, line, .. } if line.starts_with("while true") => lp = Some(block),
+            ServerMsg::BlockEnd { ok, block, .. } if Some(block) == lp => {
                 if ok {
                     return Err("preruseny cyklus skoncil uspechem".into());
                 }
