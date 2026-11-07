@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir};
 
 /// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
-const DEVICE_LAYOUT: u32 = 3;
+const DEVICE_LAYOUT: u32 = 4;
 
 fn default_accel() -> &'static str {
     if cfg!(target_os = "linux") && Path::new("/dev/kvm").exists() {
@@ -185,8 +185,11 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     // Jednoduchy framebuffer v RAM (GOP firmwaru, bez ovladace v jadru) jako
     // konzole `video0` a druha karta `video1`: k nim se navazi klavesnice a mys
     // virtio a klavesnice USB stejne jako na x86 (udalosti QMP testu vstupu).
+    // Druha karta je bochs-display, pro kterou edk2 na ARM nema ovladac:
+    // virtio-gpu by firmware vzal jako GOP a jeho framebuffer by po konci
+    // boot services uz nikdo neobnovoval (prazdna obrazovka).
     cmd.args(["-device", "ramfb,id=video0"])
-        .args(["-device", "virtio-gpu-pci,id=video1"])
+        .args(["-device", "bochs-display,id=video1"])
         .args(["-device", "virtio-keyboard-pci,iommu_platform=on,display=video0"])
         .args(["-device", "virtio-mouse-pci,iommu_platform=on,display=video0"])
         .args(["-device", "qemu-xhci,id=xhci"])
