@@ -189,7 +189,8 @@ impl Comp {
                 self.z
                     .iter()
                     .filter_map(|g| {
-                        let w = self.windows.get(g)?;
+                        // Jen zobrazena okna (po prvnim COMMIT).
+                        let w = self.windows.get(g).filter(|w| w.mapped)?;
                         let c = self.clients.get(&w.client)?;
                         Some(WindowInfo {
                             id: *g,

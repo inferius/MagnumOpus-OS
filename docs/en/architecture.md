@@ -332,6 +332,8 @@ sandbox, without the dependency hell of Linux package managers.
 
 ## Graphics
 
+> Detailed design and status: [Graphics and windows (GUI)](gui.md).
+
 - Compositor in userspace (Wayland-like concept); clients render into
   buffers and pass them over a channel.
 - Vulkan-first, HiDPI with fractional scaling, touch as a first-class input.
@@ -585,6 +587,9 @@ documentation is in Czech and English (`docs/cs`, `docs/en`).
 - Project license `MIT OR Apache-2.0`.
 - Anything may be reused (Mesa, DXVK, VKD3D, ...) where writing our own does
   not make sense. Long-term we aim for our own components.
+- The system font Tuffy (Thatcher Ulrich) is public domain
+  (`libs/font/fonts/Tuffy.ttf`); the terminal font Noto Sans Mono is
+  under the OFL (crate `noto-sans-mono-bitmap`).
 
 ## Platforms
 
@@ -944,7 +949,7 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 | What | Why | Gone when |
 |---|---|---|
 | serial driver in the kernel | debug output before userspace exists | stays only as an early console |
-| framebuffer console in the kernel | same | taken over by the compositor |
+| framebuffer console in the kernel | same | with a virtio-gpu device the compositor takes over the screen; without one (UEFI framebuffer) it stays until the kernel hands the framebuffer over (bootstrap FRAMEBUFFER) |
 
 ## Milestones
 
@@ -964,8 +969,10 @@ covers C, C++ and Rust), but it makes sense as a separate project:
    - **6b Shell and smart terminal:** console, structured output, command
      undo, "show what will happen", permissions at launch - see [Shell](#shell-and-smart-terminal-proposal)
      (language, session service and QEMU test done; input and framebuffer pending)
-   - **6c GUI:** virtio-gpu, compositor, native UI library, system dialogs -
-     see [Graphics](#graphics)
+   - **6c GUI:** virtio-gpu, compositor, native UI library, system dialogs,
+     action API - see [Graphics and windows](gui.md) (software compositing
+     on virtio-gpu 2D, compositor, UI library, fonts, dialogs, actions and
+     QEMU tests done; the virgl 3D backend remains)
    - **6d AI-ready:** primitives for safe agents (mostly from FS v3), model
      service, semantic search, assistant - see [AI in the system](#ai-in-the-system-proposal)
 7. Languages and compilers (see [Languages and compilers](#languages-and-compilers-plan)):

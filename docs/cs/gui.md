@@ -79,7 +79,7 @@ dostává také on (kanál `secure`) a ukáže na ni systémovou obrazovku.
 
 Pixel je `u32` v pořadí bajtů B, G, R, A (formát virtio-gpu
 `B8G8R8A8_UNORM`, v registru `0xAARRGGBB`) s **předem vynásobenou alfou**
-(premultiplied). Buffer má šířku, výšku a krok řádku (stride, násobek 4).
+(premultiplied). Buffer má šířku, výšku a krok řádku (stride) **v pixelech**.
 
 <figure class="diagram">
 <svg viewBox="0 0 780 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Zivotni cyklus bufferu">
@@ -100,13 +100,16 @@ Pixel je `u32` v pořadí bajtů B, G, R, A (formát virtio-gpu
 <figcaption>Buffer patří aplikaci, kompozitor ho jen čte mezi COMMIT a RELEASED.</figcaption>
 </figure>
 
-- Aplikace vytvoří VMO a pošle `BUFFER_CREATE` s handlem. Kompozitor ověří,
-  že `stride * height` se vejde do VMO a že rozměry nepřekročí limit
-  (16384 px), a namapuje ho jen pro čtení.
+- Aplikace vytvoří VMO a pošle `BUFFER_CREATE` s handlem (jen s právy
+  `READ`, `MAP` a základními). Kompozitor ho namapuje jen pro čtení
+  (`stride * height * 4` bajtů - menší VMO mapování odmítne) a ověří
+  rozměry (nejvýš 16384 px).
 - Paměť bufferu platí job aplikace: aplikace nemůže vyčerpat paměť
   kompozitoru.
 - Kompozitor buffer drží od `COMMIT`, který ho připojil k vrstvě, do zprávy
-  `RELEASED` (vrstva dostala jiný buffer nebo zanikla).
+  `RELEASED`. Tu pošle, jakmile buffer neukazuje žádná vrstva (vrstva
+  dostala jiný buffer nebo zanikla). Knihovna `ui` proto kreslí střídavě
+  do dvou bufferů a na kompozitor nikdy nečeká.
 
 ## Strom vrstev
 
@@ -283,7 +286,9 @@ dál.
 
 ## Vstup v oknech
 
-Kompozitor dostává události od `inputd` ([Vstup](vstup.md)) a rozděluje je:
+Kompozitor dostává události od `inputd` ([Vstup](vstup.md)) - z kanálu
+fokusu i z kanálu `secure` (v bezpečném režimu jde vstup jen tam) - a
+rozděluje je:
 
 - **klávesnice** (`Key`, `Text`) -> okno s fokusem,
 - **myš** -> okno pod ukazatelem (přepočet na souřadnice okna); stisk
@@ -291,10 +296,17 @@ Kompozitor dostává události od `inputd` ([Vstup](vstup.md)) a rozděluje je:
 - **kolečko** -> okno pod ukazatelem,
 - **bezpečná zkratka** (`secure`) -> systémová obrazovka,
 - událost s příznakem `SYNTHETIC` (umělý vstup) jde oknu jen s příznakem;
-  systémový dialog ji **ignoruje**.
+  systémový dialog ji **ignoruje**,
+- **nové vstupní zařízení** (`NewDevice`, ochrana proti BadUSB): kompozitor
+  ukáže systémový dialog „Povolit zařízení?“ a do rozhodnutí události
+  z toho zařízení zahazuje - zařízení se tedy nemůže povolit samo
+  (vypsat Enter). Odpověď pošle `inputd` jako `trust <id>` / `reject <id>`.
 
-Okno dostane `INPUT` se stejným 32bajtovým záznamem jako `inputproto`,
-jen `a`, `b` u ukazatele jsou souřadnice v okně.
+Okno dostane `INPUT` se záznamy `InputRecord` (28 B): klávesa (kód
+nezávislý na rozložení, akce, znak), vložený text, ukazatel v souřadnicích
+okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
+modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
+oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
 ## Systémové dialogy
 
@@ -310,10 +322,22 @@ vrstvě nad ztlumenými okny**. Do té vrstvy nesmí kreslit žádná aplikace.
 - Výsledek `ANSWER { id, choice }` nebo `ANSWER { id, text }` (heslo)
   jde jen žadateli.
 
-```text
--> dialog ask 7 permission "Poznámky" "Povolit přístup k síti?" allow,deny
-<- answer 7 allow
-```
+Zprávy kanálu `dialog` jsou binární (`guiproto::control`):
+
+| Zpráva | Pole |
+|---|---|
+| `Ask` | id, druh (`permission`, `confirm`, `password`), aplikace, text, volby (1-8) |
+| `Cancel` | id |
+| `Phrase` | bezpečnostní fráze (nejvýš 64 znaků) |
+| `Answer` (odpověď) | id, index volby, text (heslo) |
+| `Cancelled` (odpověď) | id |
+
+Klávesy v dialogu: Tab a šipky mění volbu, Enter potvrdí, Esc vybere
+poslední volbu (zamítnutí). Myš: klik na tlačítko.
+
+**Bezpečná obrazovka:** Ctrl+Alt+Delete (zachytí `inputd`, ne aplikace)
+ukáže systémovou obrazovku přes všechno. Zavře ji jen fyzický vstup;
+kompozitor pak pošle `inputd` zprávu `release` a fokus se vrátí.
 
 ## API akcí
 
@@ -342,13 +366,35 @@ choices = ["zluta", "modra"]
 
 | Zpráva | Směr | Obsah |
 |---|---|---|
-| `ACTIONS_LIST` | volající -> compd | akce běžících aplikací (id aplikace, id akce, parametry) |
-| `ACTION_CALL` | volající -> compd | aplikace, akce, argumenty (typované hodnoty) |
+| `List` | volající -> compd | odpověď `Actions`: akce běžících aplikací (id aplikace, deklarace) |
+| `Call` | volající -> compd | id volání, aplikace, akce, argumenty (typované hodnoty), příznak automatu |
 | `ACTION_INVOKE` | compd -> aplikace | ověřené argumenty, id volání, kdo volá |
-| `ACTION_RESULT` | aplikace -> compd -> volající | `ok` + hodnota, nebo kód chyby |
+| `ACTION_RESULT` | aplikace -> compd | `ok` + hodnota, nebo text chyby |
+| `Result` | compd -> volající | výsledek s id volání volajícího |
 
 Akce s `confirm = true` nebo volaná z umělého zdroje (agent) se před
 předáním potvrdí systémovým dialogem. Volající vidí jen akce, ne okna.
+
+## Řídicí příkazy kompozitoru
+
+Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
+`inputd`); odpověď je `ok`, `ok <data>` nebo `err <KÓD>`.
+
+| Příkaz | Handly | Odpověď |
+|---|---|---|
+| `display` | kanál ovladače grafiky | `ok <w> <h>` |
+| `input` | kanál fokusu od `inputd` | `ok` |
+| `secure` | kanál bezpečné zkratky od `inputd` | `ok` |
+| `connect` + identita aplikace (binárně) | - | `ok` + kanál okna |
+| `dialog` | - | `ok` + kanál systémových dialogů |
+| `actions <volající>` | - | `ok` + kanál volání akcí |
+| `inspect` | - | `ok` + kanál inspekce |
+| `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
+
+**Inspekce** (`inspect`, pro testy, později čtečku obrazovky a lupu):
+seznam oken, strom přístupnosti okna v souřadnicích obrazovky, akce přes
+uzel, barva pixelu obrazovky a „počkej na ustálení“ (vše složeno
+a zobrazeno).
 
 ## Protokol okna (`libs/guiproto`)
 
@@ -365,7 +411,7 @@ Aplikace -> kompozitor:
 | 2 | `WINDOW_CREATE` | okno, režim, w, h, titulek |
 | 3 | `WINDOW_SET` | okno, titulek, min. velikost, strana a barva tlačítek |
 | 4 | `WINDOW_DESTROY` | okno |
-| 5 | `BUFFER_CREATE` | buffer, w, h, stride + handle VMO |
+| 5 | `BUFFER_CREATE` | buffer, w, h, stride (v pixelech) + handle VMO |
 | 6 | `BUFFER_DESTROY` | buffer |
 | 7 | `LAYER_CREATE` | vrstva, okno, rodič, druh |
 | 8 | `LAYER_SET` | vrstva, maska vlastností, hodnoty |
@@ -404,7 +450,7 @@ Příklad (okno s jedním bufferem):
 -> HELLO 1
 <- WELCOME 1 1280 800 100
 -> WINDOW_CREATE 1 STANDARD 400 300 "Ukázka"
--> BUFFER_CREATE 1 400 300 1600        + handle VMO
+-> BUFFER_CREATE 1 400 300 400         + handle VMO
 -> LAYER_CREATE 1 okno=1 rodič=0 BUFFER
 -> LAYER_SET 1 rect=0,0,400,300 buffer=1
 -> A11Y_UPDATE [1 window "Ukázka"] [2 button "OK" vrstva 1 (150,250,100,30)]
@@ -423,7 +469,7 @@ celý obraz do své VMO a říká, které obdélníky se změnily.
 |---|---|---|
 | `INFO` | compd -> ovladač | - |
 | `MODES` | ovladač -> compd | výstupy: w, h, zapnutý; schopnosti (`3D`) |
-| `ATTACH` | compd -> ovladač | výstup, w, h, stride + handle VMO (jen čtení) |
+| `ATTACH` | compd -> ovladač | výstup, w, h, stride (v bajtech) + handle VMO (jen čtení) |
 | `PRESENT` | compd -> ovladač | seq, obdélníky |
 | `PRESENTED` | ovladač -> compd | seq, čas (ns) |
 
@@ -434,43 +480,73 @@ a `RESOURCE_FLUSH` a po dokončení odpoví `PRESENTED`.
 ## Ovladač virtio-gpu
 
 Inicializace jako u ostatních virtio ([Vstup](vstup.md#ovladač-virtio-input)):
-vlastnosti `VERSION_1`, `ACCESS_PLATFORM` (a `VIRGL` pro 3D), přerušení
-MSI-X, fronta 0 (řízení) a 1 (kurzor). Příkazy 2D:
+vlastnosti `VERSION_1`, `ACCESS_PLATFORM` (a `VIRGL`, když ho zařízení
+nabídne), přerušení MSI-X a fronta 0 (řízení); fronta kurzoru se zatím
+nepoužívá (kurzor kreslí kompozitor). Příkazy 2D:
 
 1. `GET_DISPLAY_INFO` - velikost výstupů,
-2. `RESOURCE_CREATE_2D` (formát `B8G8R8A8_UNORM`),
+2. `RESOURCE_CREATE_2D` (formát `B8G8R8X8_UNORM`, výstup alfu nepotřebuje),
 3. `RESOURCE_ATTACH_BACKING` - seznam kusů DMA paměti (každý nejvýš
-   4 MiB, souvislá DMA paměť),
+   4 MiB souvislé paměti, vždy celé řádky),
 4. `SET_SCANOUT`,
-5. pro každý snímek `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`.
+5. pro každý snímek `TRANSFER_TO_HOST_2D` po obdélnících + jeden
+   `RESOURCE_FLUSH`.
+
+Ovladač spouští `devmgr` pro PCI `1af4:1050` s limitem 40 MiB DMA paměti
+a initu hlásí zprávu `display`. V QEMU je zařízení
+`virtio-gpu-pci,iommu_platform=on,xres=1280,yres=800` na x86_64
+i aarch64.
 
 ## Nativní knihovna UI (`libs/ui`)
 
 Jedna knihovna pro všechny aplikace, deklarativní v Rustu:
 
 ```rust
-fn view(s: &State) -> Node<Msg> {
-    column([
-        label("Poznámky").heading(),
-        text_input(&s.title).on_change(Msg::Title),
-        row([
-            checkbox("Důležitá", s.important).on_toggle(Msg::Important),
-            button("Uložit").on_click(Msg::Save),
-        ]),
-        list(s.items.iter().map(|i| list_item(i))),
-    ])
+impl App for Poznamky {
+    type Msg = Msg;
+    fn title(&self) -> String { "Poznámky".into() }
+    fn view(&self) -> Node<Msg> {
+        column([
+            label("Poznámky").heading(),
+            text_input(&self.title).placeholder("Název").on_change(Msg::Title),
+            row([
+                checkbox("Důležitá", self.important).on_toggle(Msg::Important),
+                spacer(),
+                button("Uložit").on_click(Msg::Save),
+            ]),
+            scroll(list(self.items.clone(), self.selected).on_select(Msg::Select)).height(150),
+        ])
+    }
+    fn update(&mut self, m: Msg) { /* změna stavu */ }
 }
+
+ui::client::run(kanal_okna, Poznamky::default(), Mode::Standard, 420, 380)
 ```
 
-Knihovna z popisu sestaví prvky, rozvrhne je (sloupce, řádky, pevné
-a pružné rozměry), vykreslí je do bufferů (`libs/gfx`, `libs/font`)
+Knihovna z popisu sestaví prvky, rozvrhne je (sloupce, řádky, pružné
+prvky `grow` a `spacer`), vykreslí je do bufferů (`libs/gfx`, `libs/font`)
 a odvodí z nich **strom vrstev i strom přístupnosti** - aplikace nic
 z toho nepíše ručně. Vstup (klávesy, text, myš, akce přístupnosti)
-převede na zprávy `Msg`. Fokus se posouvá klávesou Tab.
+převede na zprávy `Msg`.
 
-Prvky: `label`, `button`, `text_input`, `checkbox`, `list`, `progress`,
-`text_grid` (mřížka znaků pro okno terminálu), kontejnery `column`, `row`,
-`scroll`.
+| Prvek | Myš | Klávesnice | Přístupnost |
+|---|---|---|---|
+| `label` | - | - | `label` |
+| `button` | klik | Enter, mezerník | `button`, `activate` |
+| `text_input` | klik = kurzor | text, Backspace, Delete, šipky, Home, End, Enter = `on_submit` | `text-input`, `set-value` |
+| `checkbox` | klik | mezerník, Enter | `checkbox`, `toggle` |
+| `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
+| `progress` | - | - | `progress` (hodnota v procentech) |
+| `column`, `row`, `scroll`, `spacer` | kolečko v `scroll` | - | `group` |
+
+Fokus se posouvá klávesou Tab (Shift+Tab zpět). **Posouvaná oblast**
+(`scroll`) je vlastní vrstva: kolečko změní jen vlastnost vrstvy
+`scroll` a obsah posune kompozitor, aplikace nic nepřekresluje.
+
+Běhové prostředí `ui::client` (vlastnost `os`) drží okno: dvojité buffery
+ve VMO, vrstvy, celý strom přístupnosti po každé změně, `COMMIT`
+s potvrzením `CONFIGURE`, odpovědi na `PING` a akce. Nižší vrstva
+`ui::client::Window` slouží aplikacím, které kreslí samy (okno terminálu).
 
 ## Písmo (`libs/font`)
 
@@ -478,26 +554,61 @@ Vlastní čtení TrueType (`.ttf`): tabulky `head`, `hhea`, `maxp`, `cmap`
 (formáty 4 a 12), `loca`, `glyf` (jednoduché i složené glyfy), `hmtx`,
 `kern` (formát 0). Rasterizér převede kvadratické křivky na úsečky
 a spočítá **plošné pokrytí pixelu** (vyhlazení bez hintingu). Glyfy se
-ukládají do mezipaměti podle velikosti.
+ukládají do mezipaměti podle velikosti (`gfx::text`).
 
 Soubor písma je nedůvěryhodný vstup: každé čtení kontroluje meze, vadný
-glyf je prázdný glyf, nikdy panika. Bez shapingu (arabština, indická
-písma) a bez hintingu - to přijde s přechodem na plné vykreslování textu.
+glyf je prázdný glyf, nikdy panika (test přepisuje náhodné bajty souboru).
+Bez shapingu (arabština, indická písma) a bez hintingu.
+
+Systémové písmo je **Tuffy** (Thatcher Ulrich, public domain): pokrývá
+latinku včetně češtiny a je přibalené v `libs/font/fonts/`.
 
 ## Okno terminálu
 
-Terminál 6b se v GUI stane oknem nad svým nativním protokolem: okno
-terminálu je aplikace `libs/ui` s prvkem `text_grid`, která mluví se
-službou relací (`termd`) protokolem `term::proto`. V 6c je hotová ukázka
-`gui-term` (mřížka znaků, kurzor, vstup z klávesnice do řádku); napojení
-na `termd` dělá vlákno terminálu.
+Terminál 6b se v GUI stane oknem nad svým nativním protokolem. Ukázka
+`gui-term` je připravené okno: **vlastní titulek** (aplikace kreslí kartu
+„Relace 1“ a deklaruje oblast `DRAG` s výjimkou `NO_DRAG` pro kartu,
+odznak a tlačítka kreslí systém), obsah je mřížka znaků `term::screen`
+(písmo Noto Sans Mono, stejné jako v konzoli) a strom přístupnosti má
+uzel `terminal` s viditelným textem. Řádek jde zadat klávesnicí, akcí
+přístupnosti `set-value` nebo akcí `terminal.run` (vyžaduje potvrzení).
+
+Napojení na službu relací (`termd`, protokol `term::proto`) dělá vlákno
+terminálu: místo místního řádkového editoru pošle `Run` a vykreslí bloky
+výstupu do stejné mřížky.
+
+## Stav a odchylky od návrhu
+
+| Co | Teď | Proč to nevadí / kdy jinak |
+|---|---|---|
+| vykreslování | softwarové skládání nad virtio-gpu 2D | 3D (virgl) je další krok, viz rizika |
+| QoS `interactive` pro kompozitor | jádro zatím nemá API pro třídu vlákna | priorita vstupu je ve smyčce kompozitoru; QoS doplní plánovač |
+| průhlednost skupiny | násobí se do dětí (bez mezibufferu) | překrývající se děti poloprůhledné skupiny se prolnou i mezi sebou; GPU backend to udělá správně |
+| vsync | čas `PRESENTED` od ovladače (konec `RESOURCE_FLUSH`) | virtio-gpu 2D vsync nehlásí |
+| kurzor | kreslí ho kompozitor do snímku | hardwarový kurzor (fronta 1) přijde s 3D |
+| obnova oken po restartu | není | v návrhu ([Grafika](architektura.md#grafika)) |
+| restart kompozitoru | supervisor ho jen hlídá | okna patří kompozitoru; po pádu by se aplikace musely připojit znovu |
 
 ## Testy
 
-- **hostitel:** `cargo test -p guiproto -p gfx -p font -p ui` - kódování
-  zpráv, skládání vrstev, ořez a průhlednost, rasterizér (glyf proti
-  očekávané bitmapě), rozvržení prvků, vstup a fokus, strom přístupnosti.
-- **QEMU** (`cargo xtask test`, x86_64 i aarch64): ovladač virtio-gpu
-  ukáže obraz, kompozitor složí okno ukázkové aplikace, test přes strom
-  přístupnosti klikne na tlačítko, umělý vstup do systémového dialogu
-  neprojde, skutečný (QMP) ano, transakce skupiny se uplatní zároveň.
+- **hostitel** (součást `cargo xtask test`): `cargo test -p guiproto -p gfx
+  -p font -p vgpu -p comp -p ui` - kódování zpráv a odolnost proti
+  vadným zprávám, barvy a prolínání, ořez, poškozené oblasti, text,
+  rasterizér (přesné pokrytí čtverce, háček nad písmenem, náhodně poškozený
+  soubor písma), příkazy virtio-gpu, transakce a jejich atomicita,
+  skupiny transakcí (včetně termínu), synchronizovaná změna velikosti,
+  rozdělení vstupu a fokus, přesun okna titulkem bez aplikace, deklarované
+  oblasti vlastního titulku, odznak nad obsahem aplikace, odznak
+  bezrámového okna, panel, dialogy jen z fyzického vstupu, heslo,
+  bezpečná obrazovka, nové zařízení (BadUSB), akce (ověření, potvrzení,
+  konec aplikace), inspekce, scroll a animace v kompozitoru, ping,
+  rozvržení a ovládání prvků UI, editace textu s diakritikou. Testy
+  kompozitoru a UI ukládají snímky `target/comp-scene.png`
+  a `target/ui-window.png` pro kontrolu okem.
+- **QEMU** (`cargo xtask test`, x86_64 i aarch64, sada `gui` poslední):
+  kompozitor nad virtio-gpu, okno `gui-demo`, klik přes strom
+  přístupnosti, barvy pixelů obrazovky (pozadí aplikace, odznak), klik
+  umělým vstupem (`inject`), akce z manifestu (špatný argument odmítnut,
+  `note.add`, akce agenta čeká na potvrzení), systémový dialog nepřijme
+  umělý Enter a přijme fyzické klávesy z QEMU (QMP), bezpečná obrazovka
+  po Ctrl+Alt+Del z QEMU, okno terminálu s vlastním titulkem.
