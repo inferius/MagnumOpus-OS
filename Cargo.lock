@@ -730,7 +730,17 @@ name = "fsproto"
 version = "0.1.0"
 dependencies = [
  "libos",
+ "spin 0.12.3",
+ "svcclient",
  "wire",
+]
+
+[[package]]
+name = "fsrtest"
+version = "0.1.0"
+dependencies = [
+ "fsproto",
+ "libos",
 ]
 
 [[package]]

@@ -24,6 +24,9 @@ use alloc::vec::Vec;
 
 use libos::{Channel, Error, Result};
 
+use svcclient::Kind;
+
+use crate::recover::Rec;
 use crate::{DirEntry, FsClient, Reader, Stat, Writer, decode_list};
 
 /// Verze protokolu, kterou tento klient mluvi.
@@ -62,6 +65,10 @@ pub mod op {
     pub const REPLACE_COMMIT: u32 = 44;
     /// handle
     pub const REPLACE_ABORT: u32 = 45;
+    /// Trvaly handle po restartu sluzby: dataset u64, oid u64, generace
+    /// u64, pristup u8, sdileni u8 -> handle u64, Stat, Revision (jako
+    /// `OPEN`). Prava se overi znovu; objekt s jinou generaci = `NOT_FOUND`.
+    pub const REOPEN: u32 = 118;
 }
 
 /// Pristup a sdileni pri `OPEN` (stejne bity jako `fs::access`/`fs::share`).
@@ -90,6 +97,13 @@ pub mod open_flags {
     pub const TRUNCATE: u8 = 4;
     /// S `CREATE`: vytvorit adresar.
     pub const DIR: u8 = 8;
+}
+
+/// Priznaky `CONNECT`.
+pub mod connect_flags {
+    /// Nova relace je ridici (smi `CONNECT_AS`, granty); jen z ridici
+    /// relace.
+    pub const CONTROL: u32 = 1;
 }
 
 /// Priznaky `LOCK`.
@@ -139,34 +153,145 @@ impl FsClient {
 
     /// Nova relace (vlastni handly, nezavisla na teto).
     pub fn connect(&self) -> Result<FsClient> {
+        self.connect_with(0)
+    }
+
+    /// (Ridici relace) Dalsi ridici relace (init ji drzi s listkem,
+    /// adapter sluzby svou).
+    pub fn connect_control(&self) -> Result<FsClient> {
+        self.connect_with(connect_flags::CONTROL)
+    }
+
+    fn connect_with(&self, flags: u32) -> Result<FsClient> {
         let mut w = Self::req(op::CONNECT);
-        w.u32(0);
+        w.u32(flags);
         let (_, mut handles) = self.call_with_handles(w)?;
         let h = handles.pop().ok_or(Error::Corrupted)?;
         Ok(FsClient::new(Channel::from_handle(h)))
     }
 
-    /// Otevre `path` (priznaky `open_flags`).
+    /// Otevre `path` (priznaky `open_flags`). Cislo handlu je cislo
+    /// knihovny (trvaly handle, prezije restart sluzby - viz `recover`).
     pub fn open(&self, path: &str, access: u8, share: u8, flags: u8) -> Result<Opened> {
         let mut w = Self::req(op::OPEN);
         w.str(path).u8(access).u8(share).u8(flags);
-        let body = self.call(w)?;
+        // Otevreni bez vytvoreni a zkraceni jde zopakovat.
+        let kind = if flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0 { Kind::Effect } else { Kind::Idempotent };
+        let body = self.call_as(kind, w)?;
         let mut r = Reader::new(&body);
-        Ok(Opened {
-            handle: r.u64()?,
-            stat: Stat::get(&mut r)?,
-            revision: Revision::get(&mut r)?,
-        })
+        let fsd = r.u64()?;
+        let stat = Stat::get(&mut r)?;
+        let revision = Revision::get(&mut r)?;
+        let handle = self.handles.lock().insert(Rec {
+            fsd,
+            generation: self.conn.generation(),
+            revision,
+            access,
+            share,
+            replace: false,
+            locked: false,
+            delete_on_close: false,
+            dead: false,
+        });
+        Ok(Opened { handle, stat, revision })
+    }
+
+    /// Je handle z jine instance sluzby, nez s jakou mluvi spojeni?
+    fn stale(&self, local: u64) -> bool {
+        self.handles
+            .lock()
+            .get(local)
+            .is_ok_and(|r| r.generation != self.conn.generation())
+    }
+
+    /// Cislo handlu u bezici instance; po restartu sluzby ho otevre znovu.
+    fn resolve(&self, local: u64) -> Result<u64> {
+        let rec = self.handles.lock().get(local)?;
+        if rec.dead {
+            return Err(Error::BadHandle);
+        }
+        if rec.generation == self.conn.generation() {
+            return Ok(rec.fsd);
+        }
+        if rec.replace {
+            // Docasny soubor podmineneho ulozeni patril stare instanci.
+            self.handles.lock().update(local, |r| r.dead = true);
+            return Err(Error::ServiceRestarted);
+        }
+        let mut w = Self::req(op::REOPEN);
+        w.u64(rec.revision.dataset)
+            .u64(rec.revision.oid)
+            .u64(rec.revision.generation)
+            .u8(rec.access)
+            .u8(rec.share);
+        let fsd = match self.call_as(Kind::Idempotent, w).and_then(|b| Reader::new(&b).u64()) {
+            Ok(h) => h,
+            Err(e) => {
+                self.handles.lock().update(local, |r| r.dead = true);
+                return Err(e);
+            }
+        };
+        let generation = self.conn.generation();
+        self.handles.lock().update(local, |r| {
+            r.fsd = fsd;
+            r.generation = generation;
+        });
+        if rec.delete_on_close {
+            let mut w = Self::req(op::DELETE_ON_CLOSE);
+            w.u64(fsd).u8(1);
+            let _ = self.call_as(Kind::Effect, w);
+        }
+        if rec.locked {
+            // Zamky stare instance zanikly: aplikace je musi ziskat znovu.
+            self.handles.lock().update(local, |r| r.locked = false);
+            return Err(Error::ServiceRestarted);
+        }
+        Ok(fsd)
+    }
+
+    /// Operace s handlem `local`; `build(cislo u sluzby)` sestavi
+    /// pozadavek. Po restartu sluzby handle otevre znovu; `Idempotent`
+    /// operaci zopakuje, ostatni vrati `SERVICE_RESTARTED`.
+    fn h_call(&self, local: u64, kind: Kind, build: impl Fn(u64) -> Writer) -> Result<Vec<u8>> {
+        for _ in 0..3 {
+            let fsd = self.resolve(local)?;
+            // Cislo handlu patri jedne instanci: nikdy neopakovat stejne
+            // bajty na nove (proto Effect na urovni spojeni).
+            match self.call_as(Kind::Effect, build(fsd)) {
+                Err(Error::ServiceRestarted | Error::BadHandle) if self.stale(local) => {
+                    if kind == Kind::Effect {
+                        return Err(Error::ServiceRestarted);
+                    }
+                }
+                r => return r,
+            }
+        }
+        Err(Error::ServiceRestarted)
     }
 
     pub fn close(&self, h: u64) -> Result<()> {
-        self.h_op(op::CLOSE, h).map(|_| ())
+        let rec = self.handles.lock().get(h)?;
+        let r = if rec.dead || rec.generation != self.conn.generation() {
+            // Handle zanikl se starou instanci sluzby.
+            Ok(Vec::new())
+        } else {
+            let mut w = Self::req(op::CLOSE);
+            w.u64(rec.fsd);
+            match self.call_as(Kind::Effect, w) {
+                Err(Error::ServiceRestarted | Error::BadHandle) if self.stale(h) => Ok(Vec::new()),
+                r => r,
+            }
+        };
+        self.handles.lock().remove(h);
+        r.map(|_| ())
     }
 
-    fn h_op(&self, opcode: u32, h: u64) -> Result<Vec<u8>> {
-        let mut w = Self::req(opcode);
-        w.u64(h);
-        self.call(w)
+    fn h_op(&self, opcode: u32, h: u64, kind: Kind) -> Result<Vec<u8>> {
+        self.h_call(h, kind, |fsd| {
+            let mut w = Self::req(opcode);
+            w.u64(fsd);
+            w
+        })
     }
 
     /// Precte az `len` bajtu (po kusech `MAX_IO`).
@@ -174,9 +299,12 @@ impl FsClient {
         let mut out = Vec::new();
         while out.len() < len {
             let n = (len - out.len()).min(crate::MAX_IO);
-            let mut w = Self::req(op::READ_H);
-            w.u64(h).u64(offset + out.len() as u64).u32(n as u32);
-            let chunk = self.call(w)?;
+            let at = offset + out.len() as u64;
+            let chunk = self.h_call(h, Kind::Idempotent, |fsd| {
+                let mut w = Self::req(op::READ_H);
+                w.u64(fsd).u64(at).u32(n as u32);
+                w
+            })?;
             let got = chunk.len();
             out.extend_from_slice(&chunk);
             if got < n {
@@ -192,10 +320,13 @@ impl FsClient {
     pub fn write_h(&self, h: u64, offset: u64, data: &[u8]) -> core::result::Result<usize, (usize, Error)> {
         let mut done = 0;
         for chunk in data.chunks(crate::MAX_IO) {
-            let mut w = Self::req(op::WRITE_H);
-            w.u64(h).u64(offset + done as u64).bytes(chunk);
+            let at = offset + done as u64;
             let accepted = self
-                .call(w)
+                .h_call(h, Kind::Effect, |fsd| {
+                    let mut w = Self::req(op::WRITE_H);
+                    w.u64(fsd).u64(at).bytes(chunk);
+                    w
+                })
                 .and_then(|b| Reader::new(&b).u32())
                 .map_err(|e| (done, e))? as usize;
             done += accepted;
@@ -207,13 +338,16 @@ impl FsClient {
     }
 
     pub fn set_len(&self, h: u64, size: u64) -> Result<()> {
-        let mut w = Self::req(op::SET_LEN);
-        w.u64(h).u64(size);
-        self.call(w).map(|_| ())
+        self.h_call(h, Kind::Effect, |fsd| {
+            let mut w = Self::req(op::SET_LEN);
+            w.u64(fsd).u64(size);
+            w
+        })
+        .map(|_| ())
     }
 
     pub fn stat_h(&self, h: u64) -> Result<(Stat, Revision)> {
-        let body = self.h_op(op::STAT_H, h)?;
+        let body = self.h_op(op::STAT_H, h, Kind::Idempotent)?;
         let mut r = Reader::new(&body);
         Ok((Stat::get(&mut r)?, Revision::get(&mut r)?))
     }
@@ -222,10 +356,12 @@ impl FsClient {
     pub fn list_h(&self, h: u64) -> Result<Vec<DirEntry>> {
         let mut out: Vec<DirEntry> = Vec::new();
         loop {
-            let mut w = Self::req(op::LIST_H);
-            let after = out.last().map_or("", |e| e.name.as_str());
-            w.u64(h).str(after).u32(u32::MAX);
-            let body = self.call(w)?;
+            let after = String::from(out.last().map_or("", |e| e.name.as_str()));
+            let body = self.h_call(h, Kind::Idempotent, |fsd| {
+                let mut w = Self::req(op::LIST_H);
+                w.u64(fsd).str(&after).u32(u32::MAX);
+                w
+            })?;
             let mut r = Reader::new(&body);
             let more = r.u8()? != 0;
             let page = decode_list(r.rest())?;
@@ -238,21 +374,32 @@ impl FsClient {
     }
 
     pub fn lock(&self, h: u64, start: u64, len: u64, flags: u8) -> Result<()> {
-        let mut w = Self::req(op::LOCK);
-        w.u64(h).u64(start).u64(len).u8(flags);
-        self.call(w).map(|_| ())
+        self.h_call(h, Kind::Effect, |fsd| {
+            let mut w = Self::req(op::LOCK);
+            w.u64(fsd).u64(start).u64(len).u8(flags);
+            w
+        })?;
+        self.handles.lock().update(h, |r| r.locked = true);
+        Ok(())
     }
 
     pub fn unlock(&self, h: u64, start: u64, len: u64) -> Result<()> {
-        let mut w = Self::req(op::UNLOCK);
-        w.u64(h).u64(start).u64(len);
-        self.call(w).map(|_| ())
+        self.h_call(h, Kind::Effect, |fsd| {
+            let mut w = Self::req(op::UNLOCK);
+            w.u64(fsd).u64(start).u64(len);
+            w
+        })
+        .map(|_| ())
     }
 
     pub fn delete_on_close(&self, h: u64, on: bool) -> Result<()> {
-        let mut w = Self::req(op::DELETE_ON_CLOSE);
-        w.u64(h).u8(on as u8);
-        self.call(w).map(|_| ())
+        self.h_call(h, Kind::Effect, |fsd| {
+            let mut w = Self::req(op::DELETE_ON_CLOSE);
+            w.u64(fsd).u8(on as u8);
+            w
+        })?;
+        self.handles.lock().update(h, |r| r.delete_on_close = on);
+        Ok(())
     }
 
     pub fn rename_replace(&self, from: &str, to: &str) -> Result<()> {
@@ -267,19 +414,43 @@ impl FsClient {
         let mut w = Self::req(op::REPLACE_BEGIN);
         w.str(path).u8(expected.is_some() as u8);
         expected.unwrap_or_default().put(&mut w);
-        Reader::new(&self.call(w)?).u64()
+        let fsd = Reader::new(&self.call(w)?).u64()?;
+        Ok(self.handles.lock().insert(Rec {
+            fsd,
+            generation: self.conn.generation(),
+            revision: Revision::default(),
+            access: access::READ | access::WRITE,
+            share: 0,
+            replace: true,
+            locked: false,
+            delete_on_close: false,
+            dead: false,
+        }))
     }
 
     /// Dokonci podminene ulozeni; `CONFLICT` = cil se zmenil (docasny soubor
     /// zustava, jde potvrdit s `force` nebo zahodit `replace_abort`).
     pub fn replace_commit(&self, h: u64, force: bool) -> Result<Revision> {
-        let mut w = Self::req(op::REPLACE_COMMIT);
-        w.u64(h).u8(force as u8);
-        Revision::get(&mut Reader::new(&self.call(w)?))
+        let body = self.h_call(h, Kind::Effect, |fsd| {
+            let mut w = Self::req(op::REPLACE_COMMIT);
+            w.u64(fsd).u8(force as u8);
+            w
+        })?;
+        let rev = Revision::get(&mut Reader::new(&body))?;
+        // Potvrzene ulozeni handle zavrelo.
+        self.handles.lock().remove(h);
+        Ok(rev)
     }
 
     pub fn replace_abort(&self, h: u64) -> Result<()> {
-        self.h_op(op::REPLACE_ABORT, h).map(|_| ())
+        let gone = |c: &Self| c.stale(h) || c.handles.lock().get(h).is_ok_and(|r| r.dead);
+        let r = match self.h_op(op::REPLACE_ABORT, h, Kind::Effect) {
+            // Docasny soubor stare instance: zahodi ho uklid sluzby.
+            Err(Error::ServiceRestarted | Error::BadHandle) if gone(self) => Ok(Vec::new()),
+            r => r,
+        };
+        self.handles.lock().remove(h);
+        r.map(|_| ())
     }
 
     /// Cele podminene ulozeni najednou: zacatek, zapis, potvrzeni. Pri

@@ -323,7 +323,8 @@ same commands `call`, `narrow`, `wait`, `gen` as `svctest client`).
 | lease protocol, `svcclient::Conn`, retry rules | done, tests on the host and in QEMU |
 | registry, dependencies (`Dep::restart`, `Dep::notify`), generations, backoff, giving up, `revive`, `status()` | done, suite `obnova sluzeb` |
 | endpoint keeper (`Kept`) | done in the supervisor; used by the service adapters |
-| `fsd`, `inputd`, `netd` + `fwd`/`dnsd`, `compd`, `termd`/`taskd` | wired up by the service threads following this page |
+| `fsd` | done: adapter (`user/init/src/fsd.rs`, recipe and narrowing in the [file system](file-system.md#recovery-after-an-fsd-crash)), `FsClient` over `Conn` (`with_lease`), persistent handles and `REOPEN`, orphans kept for 30 s, disk `SYNC`; init and `fwd` hold a lease. Test `obnova fsd`. Remaining: leases for `dnsd`, `ntpd`, `revocd` (network thread) |
+| `inputd`, `netd` + `fwd`/`dnsd`, `compd`, `termd`/`taskd` | wired up by the service threads following this page |
 | restarting `devmgr` (`driver` message, killing drivers) | next step after the services are wired up: without them a `devmgr` restart would only detach the devices |
 | task view (`taskproto` producer) | once `taskd` runs (shell thread) |
 

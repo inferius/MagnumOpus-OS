@@ -12,6 +12,7 @@ mod firewall;
 mod fs;
 mod fs_data;
 mod fs_hist;
+mod fs_recovery;
 mod gui;
 mod input;
 mod ipc;
@@ -60,6 +61,9 @@ const SUITES: &[(&str, &[Test])] = &[
     ("shell", shell::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
+    // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery
+    // v testovacim behu ridi jen tato sada).
+    ("obnova fsd", fs_recovery::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).

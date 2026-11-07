@@ -1570,6 +1570,73 @@ fs.set_acl("/home/alice/sdilene/soukrome", Some(Acl {
 `Stat` má navíc vlastníka u64 a účinná práva volajícího u8. `OPEN` zná
 přístup `EXECUTE` (8).
 
+### Obnova po pádu fsd
+
+> **Změna proti v3 (fáze 3):** nová kapitola. `fsd` běží pod supervisorem
+> initu a po pádu se spustí znovu; klienti s lístkem pokračují (společný
+> protokol [Obnova služeb po pádu](obnova-sluzeb.md)). Nové: operace
+> `REOPEN` (118), příznak `CONNECT` „řídicí relace“, operace disku `SYNC`
+> (`blockproto`, 6), volba připojení `keep_orphans`. Formát na disku beze
+> změny. **Proč:** pád služby nesmí znamenat restart celého systému ani
+> ztrátu otevřených souborů.
+
+**Adaptér** (`user/init/src/fsd.rs`): konec kanálu k ovladači disku drží
+supervisor (`Kept`), každá instance dostane duplikát. Konfigurace na
+bootstrap: `start`, v testovacím běhu `debug`, po pádu `restart <generace>`.
+Instance potvrdí start zprávou `ok`. Nová instance po pádu:
+
+1. pošle disku `SYNC` s jedinečným číslem a zahodí všechno před jeho
+   ozvěnou (pozdní odpovědi staré instance - blokový protokol nemá čísla
+   požadavků),
+2. připojí svazek s `keep_orphans`: sirotky (smazané, ale otevřené
+   soubory) 30 s neuklidí, klienti je stihnou znovu otevřít; pak uklidí
+   jen ty, které nikdo neotevřel,
+3. čísluje handly od `generace << 40`, takže číslo handlu staré instance
+   nikdy neukáže na cizí soubor nové instance.
+
+**Recept** relace (kódování `libs/wire`):
+
+| Druh | Pole | Relace |
+|---|---|---|
+| 0 systém | - | další řídicí relace (`CONNECT` s příznakem `CONTROL`) - drží ji init |
+| 1 uživatel | `u64` uživatel, `u32` počet + `u64` skupiny, `u32` počet + připojené cesty (jméno, cíl, příznaky) | `CONNECT_AS` z řídicí relace adaptéru |
+
+**Zúžení** (pro dítě, `NARROW` lístku): seznam připojených cest (`u32`
+počet + cesty). Každá musí ležet v některé původní (stejný cíl nebo pod
+ním) a původní jen pro čtení musí zůstat jen pro čtení; uživatel a skupiny
+zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
+
+**Knihovna** (`FsClient` přes `svcclient::Conn`, `FsClient::with_lease`):
+
+- každá operace má druh: čtení, `stat`, výpisy, `info`, stav, historie
+  ke čtení se po pádu zopakují samy; ostatní vrátí `SERVICE_RESTARTED`
+  (`OPEN` bez `CREATE`/`TRUNCATE` se opakuje),
+- **trvalé handly**: aplikace dostává číslo handlu knihovny (jedinečné
+  v procesu), knihovna u něj drží identitu objektu (dataset, oid, generace
+  z `Revision`), přístup a sdílení. Po pádu ho před další operací otevře
+  znovu (`REOPEN`): práva se ověří znovu podle identity relace, cesta musí
+  ležet v připojených cestách relace; objekt s jinou generací =
+  `NOT_FOUND`. Sirotka (bez cesty) smí znovu otevřít jen vlastník,
+- čtení přes handle (`READ_H`, `STAT_H`, `LIST_H`) se pak zopakuje; zápis
+  a ostatní operace s handlem vrátí `SERVICE_RESTARTED` (stará instance je
+  mohla provést),
+- handle se **zámkem**: zámky zanikly se starou instancí - první operace
+  vrátí `SERVICE_RESTARTED` (aplikace zámek získá znovu), další projdou;
+  „smazat při zavření“ se nastaví znovu sám,
+- handle **podmíněného uložení** (dočasný soubor) po pádu neplatí:
+  `SERVICE_RESTARTED`, pak `BAD_HANDLE`; aplikace uloží znovu.
+
+| Op | Jméno | Pole | Výsledek |
+|---|---|---|---|
+| 31 | `CONNECT` | příznaky u32 (1 = řídicí, jen z řídicí relace) | nová relace (handle) |
+| 118 | `REOPEN` | dataset u64, oid u64, generace u64, přístup u8, sdílení u8 | handle u64, `Stat`, `Revision` (jako `OPEN`) |
+
+Relace s lístkem dnes: init (řídicí), `fwd` (`/config`). Relace pro
+`dnsd`, `ntpd` (úložiště certifikátů) a `revocd` zatím lístek nemají -
+po pádu `fsd` dostanou `SERVICE_UNAVAILABLE` (zapojení patří vláknu sítě).
+Test: sada `obnova fsd` (`user/init/src/tests/fs_recovery.rs`, klient
+`user/fsrtest`).
+
 ### Profily
 
 Profil je **nastavení systému, ne formát** (hranice z návrhu: co musí platit

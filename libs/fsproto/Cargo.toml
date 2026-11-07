@@ -8,3 +8,5 @@ description = "Protokol souboroveho systemu (klient <-> fsd)"
 [dependencies]
 libos = { path = "../libos" }
 wire = { path = "../wire" }
+svcclient = { path = "../svcclient", features = ["client"] }
+spin = "0.12"

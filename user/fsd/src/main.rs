@@ -52,6 +52,9 @@ const DEDUP_BUDGET: u64 = 64;
 const SCRUB_BUDGET: u64 = 256;
 /// Jak dlouho bez pozadavku, nez scrub udela krok.
 const SCRUB_QUIET: Duration = Duration::from_millis(50);
+/// Po restartu sluzby: jak dlouho neuklizet sirotky (klienti je stihnou
+/// znovu otevrit).
+const ORPHAN_GRACE: Duration = Duration::from_secs(30);
 /// Jak casto spoustet scrub sam (tyden).
 const SCRUB_PERIOD_SECS: i64 = 7 * 86_400;
 
@@ -68,19 +71,35 @@ fn main(startup: Startup) -> i64 {
         .read(None)
         .map(|m| m.data)
         .unwrap_or_default();
-    let debug = core::str::from_utf8(&config)
-        .unwrap_or("")
-        .split_whitespace()
-        .any(|w| w == "debug");
+    let words: Vec<&str> = core::str::from_utf8(&config).unwrap_or("").split_whitespace().collect();
+    let debug = words.contains(&"debug");
+    // `restart <generace>`: nova instance po padu (ne start systemu).
+    let restart: Option<u64> = words
+        .windows(2)
+        .find(|w| w[0] == "restart")
+        .and_then(|w| w[1].parse().ok());
     let client = Channel::from_handle(client);
-    let disk = match BlockClient::new(Channel::from_handle(block)) {
+    // Po restartu je kanal k ovladaci stejny jako u stare instance (konec
+    // drzel supervisor): nejdriv zahodit jeji pozdni odpovedi.
+    let block = Channel::from_handle(block);
+    let disk = match restart {
+        Some(_) => BlockClient::new_synced(block, time::now()),
+        None => BlockClient::new(block),
+    };
+    let disk = match disk {
         Ok(c) => BlkDev::new(c),
         Err(e) => {
             println!("fsd: disk neodpovida: {e}");
             return 2;
         }
     };
-    let mut fs = match Fs::mount(disk) {
+    // Po restartu sirotky (smazane, ale otevrene soubory) neuklizet hned:
+    // klienti je mohou znovu otevrit (REOPEN), uklid az po ORPHAN_GRACE.
+    let opts = fs::MountOptions {
+        keep_orphans: restart.is_some(),
+        ..fs::MountOptions::default()
+    };
+    let mut fs = match Fs::mount_with(disk, opts) {
         Ok(f) => f,
         Err(e) => {
             println!("fsd: souborovy system nejde pripojit: {e}");
@@ -88,6 +107,10 @@ fn main(startup: Startup) -> i64 {
         }
     };
     fs.set_discard(true);
+    if let Some(g) = restart {
+        // Cisla handlu nove instance se nepotkaji s cisly stare.
+        fs.set_handle_base(g << 40);
+    }
     let i = fs.info();
     println!(
         "fsd: pripojeno '{}': {} MiB, volno {} MiB, generace {}, soucty {:?}",
@@ -135,7 +158,13 @@ fn main(startup: Startup) -> i64 {
         dedup_phase: false,
         // Scrub mohl bezet pred restartem: prvni krok to zjisti.
         scrubbing: true,
+        orphan_cleanup: restart.map(|_| time::deadline_after(ORPHAN_GRACE)),
     };
+    if let Some(g) = restart {
+        println!("fsd: nova instance po padu (generace {g}), sirotky uklidi za {} s", ORPHAN_GRACE.as_secs());
+    }
+    // Start potvrdit (init/supervisor ceka na `ok`).
+    let _ = startup.bootstrap.write(b"ok", Vec::new());
     serve(&mut svc, client);
     if let Some(fs) = svc.fs.as_mut()
         && let Err(e) = fs.commit()
@@ -170,6 +199,9 @@ fn serve(svc: &mut Service, client: Channel) {
         } else {
             next_commit.min(next_history)
         };
+        if let Some(t) = svc.orphan_cleanup {
+            deadline = deadline.min(t);
+        }
         for s in &sessions {
             if let Some(w) = &s.watch {
                 deadline = deadline.min(w.deadline);
@@ -212,6 +244,7 @@ fn serve(svc: &mut Service, client: Channel) {
         if running {
             background(svc, &mut next_commit, &mut idle, &mut changed);
             history(svc, &mut next_history);
+            orphans(svc);
             // Scrub jen kdyz klienti chvili nic nechteji (nizka priorita).
             if quiet && time::now() >= last_request.saturating_add(SCRUB_QUIET.as_nanos() as u64) {
                 scrub(svc);
@@ -346,6 +379,22 @@ fn history(svc: &mut Service, next: &mut u64) {
         }
         Ok(_) => {}
         Err(e) => println!("fsd: stav scrubu: {e}"),
+    }
+}
+
+/// Po lhute od restartu uklidi sirotky, ktere nikdo znovu neotevrel.
+fn orphans(svc: &mut Service) {
+    let Some(at) = svc.orphan_cleanup else { return };
+    if time::now() < at {
+        return;
+    }
+    svc.orphan_cleanup = None;
+    let Some(fs) = svc.fs.as_mut() else { return };
+    if fs.info().read_only {
+        return;
+    }
+    if let Err(e) = fs.cleanup_unopened_orphans() {
+        println!("fsd: uklid sirotku: {e}");
     }
 }
 

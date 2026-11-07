@@ -75,6 +75,8 @@ pub struct Service {
     pub dedup_phase: bool,
     /// Bezi scrub (smycka dela kroky mezi pozadavky).
     pub scrubbing: bool,
+    /// Po restartu: kdy uklidit sirotky, ktere nikdo znovu neotevrel.
+    pub orphan_cleanup: Option<u64>,
 }
 
 /// Klic rozpracovaneho vypisu: (dataset, snapshot) u vypisu snapshotu

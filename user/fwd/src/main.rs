@@ -69,9 +69,11 @@ fn main(startup: Startup) -> i64 {
         return 1;
     };
     let agent = handles.next().map(Channel::from_handle);
-    let fs = handles
-        .next()
-        .map(|h| fsproto::FsClient::new(Channel::from_handle(h)));
+    // Relace FS a listek k ni (obnova po padu fsd).
+    let fs = handles.next().map(Channel::from_handle).map(|ch| match handles.next() {
+        Some(lease) => fsproto::FsClient::with_lease(ch, Channel::from_handle(lease)),
+        None => fsproto::FsClient::new(ch),
+    });
     let defaults = match bootstrap.read(Some(libos::time::deadline_after(Duration::from_secs(5)))) {
         Ok(m) => m.data,
         Err(e) => {
