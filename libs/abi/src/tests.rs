@@ -96,6 +96,7 @@ fn every_syscall_is_documented() {
         "RESOURCE_CREATE",
         "VM_PAGE_SIZE",
         "CLOCK_REALTIME",
+        "CLOCK_SET",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

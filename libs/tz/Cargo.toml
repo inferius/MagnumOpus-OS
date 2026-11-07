@@ -1,0 +1,9 @@
+[package]
+name = "tz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Casova pasma: prevod UTC na mistni cas podle kompaktni tabulky pravidel (bez tzdata)"
+
+[dependencies]
+abi.workspace = true

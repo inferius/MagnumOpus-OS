@@ -228,6 +228,11 @@ impl api::Time for Aarch64 {
         // RTC na ARM (PL031, EFI RTC) zatim neni: jen cas z UEFI.
         None
     }
+
+    fn set_hardware_clock(_platform: &Platform, _t: abi::time::WallTime) -> bool {
+        // Zatim zadne hodiny (PL031, EFI SetTime za behu): jen cas systemu.
+        false
+    }
 }
 
 impl api::Ipi for Aarch64 {

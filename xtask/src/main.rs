@@ -168,7 +168,7 @@ fn run_cli() -> Result<()> {
 }
 
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
-/// chyb a syscallu).
+/// chyb a syscallu, casova pasma).
 fn host_tests() -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = Command::new(cargo)
@@ -180,6 +180,8 @@ fn host_tests() -> Result<()> {
             "abi",
             "--package",
             "initfs",
+            "--package",
+            "tz",
             "--package",
             "fs",
             "--features",
@@ -255,7 +257,7 @@ struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
-const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk", "fsd"];
+const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk", "fsd", "timed"];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());

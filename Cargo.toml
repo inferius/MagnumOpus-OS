@@ -13,12 +13,14 @@ members = [
     "libs/blockproto",
     "libs/libos",
     "libs/pci",
+    "libs/tz",
     "libs/virtio",
     "tools/osfs",
     "user/devmgr",
     "user/echo",
     "user/fsd",
     "user/init",
+    "user/timed",
     "user/virtio-blk",
     "xtask",
 ]
@@ -36,6 +38,7 @@ abi = { path = "libs/abi" }
 boot-info = { path = "libs/boot-info" }
 elf = { path = "libs/elf" }
 initfs = { path = "libs/initfs" }
+tz = { path = "libs/tz" }
 fs = { path = "libs/fs" }
 
 [profile.dev]

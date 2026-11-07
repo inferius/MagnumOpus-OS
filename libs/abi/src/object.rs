@@ -46,10 +46,13 @@ impl Rights {
     pub const SIGNAL: Self = Self(1 << 7);
     /// Ridit objekt: spoustet a ukoncovat vlakna a procesy.
     pub const MANAGE: Self = Self(1 << 8);
+    /// Nastavovat realny cas (`CLOCK_SET`). Ma ho jen korenovy Resource;
+    /// init ho preda jen sluzbe casu (prostredky ovladacu ho nemaji).
+    pub const SET_CLOCK: Self = Self(1 << 9);
 
     pub const BASIC: Self = Self(Self::DUPLICATE.0 | Self::TRANSFER.0 | Self::WAIT.0);
     /// Vsechna prava (jen jako horni mez, napr. "zachovat prava" pri duplikaci).
-    pub const ALL: Self = Self((1 << 9) - 1);
+    pub const ALL: Self = Self((1 << 10) - 1);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

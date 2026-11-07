@@ -10,6 +10,10 @@
 //! konfiguracniho prostoru), nejvys N preruseni a nejvys M bajtu DMA pameti.
 //! Chyba v jednom ovladaci tak nemuze prepsat registry jineho zarizeni.
 //!
+//! Pravo `SET_CLOCK` (nastaveni realneho casu, `CLOCK_SET`) ma jen korenovy
+//! prostredek. init ho preda sluzbe casu (handle bez `MANAGE`) a spravci
+//! zarizeni da koren bez `SET_CLOCK`.
+//!
 //! Bez IOMMU muze zarizeni pres DMA zapsat kamkoli do pameti - ovladac, ktery
 //! zarizeni naprogramuje spatne, porad muze poskodit system. TODO: IOMMU
 //! (VT-d / AMD-Vi) a domena DMA na zarizeni.
@@ -215,6 +219,12 @@ impl KernelObject for Resource {
     }
 
     fn default_rights(&self) -> Rights {
-        Rights::BASIC | Rights::MANAGE
+        // Nastaveni hodin jen pro korenovy prostredek: omezene prostredky
+        // ovladacu (`restrict`) ho nedostanou nikdy.
+        if self.limits.is_none() {
+            Rights::BASIC | Rights::MANAGE | Rights::SET_CLOCK
+        } else {
+            Rights::BASIC | Rights::MANAGE
+        }
     }
 }
