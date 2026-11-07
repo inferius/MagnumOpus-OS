@@ -117,6 +117,8 @@ porušený vnitřní předpoklad (chyba jádra).
 | `virtio-net ...: inicializace selhala: ...` | Jako u disku: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA paměť). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | Zařízení vrátilo nesmyslný index fronty nebo buffer, který nemělo (`CORRUPTED`). Ovladač ho resetuje (přestane používat DMA) a skončí; síť do restartu nefunguje. |
 | `virtio-net ...: zahozeno N prijatych ramcu` | Při ukončení: rámce, které služba sítě nestíhala přijímat (plná fronta kanálu) nebo byly neplatné. |
+| `virtio-rng BB:ZZ.F: 256 B entropie predano jadru` | Zdroj náhody z hostitele je připravený a jádro dostalo první data. Další dávky každou minutu. |
+| `virtio-rng ...: zarizeni neodpovida (...), koncim` | Zařízení nedokončilo požadavek do 5 s nebo vrací prázdná data. Jádro dál používá ostatní zdroje. |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
 
@@ -145,7 +147,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | `netd: bezim, cekam na DHCP` | Služba dostala `INFO` od ovladače a spustila klienta DHCP. |
 | `netd: DHCP: adresa A/P, brana G, DNS [...]` | Rozhraní je nastavené; programy čekající na `wait_configured` pokračují. |
 | `netd: DHCP: adresa ztracena` | Pronájem vypršel nebo server adresu odebral. Spojení dostávají `UNREACHABLE`, dokud DHCP adresu neobnoví. |
-| `netd: VAROVANI: procesor nema RDRAND, ...` | Generátor náhodných čísel má slabé semeno: ID dotazů DNS a čísla TCP jsou odhadnutelná. Viz [sit.md](sit.md#služba-netd). |
+| `netd: VAROVANI: generator jadra neni nasazeny, ...` | Jádro zatím nemá dost entropie (bez RDRAND a bez virtio-rng): ID dotazů DNS a čísla TCP jsou odhadnutelná. Viz [Náhodná čísla](syscally.md#náhodná-čísla). |
 | `netd: nova relace s pravy ...` | Někdo s právem `RESTRICT` (init) vytvořil uzší relaci. |
 | `netd: servery DNS nastaveny rucne: [...]` | `SET_DNS` (právo `CONFIGURE`); prázdný seznam = zpět servery z DHCP. |
 | `netd: ovladac sitove karty neposlal INFO: ...` | Ovladač do 5 s neodpověděl (kód 2); `init` pak síť nespustí. |

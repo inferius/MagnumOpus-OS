@@ -20,6 +20,7 @@ mod framebuffer;
 mod log;
 mod mm;
 mod object;
+mod random;
 mod sched;
 mod smp;
 mod sync;
@@ -72,6 +73,7 @@ extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
     log::info!("casovace: {timers}");
 
     clock::init(boot_info, platform);
+    random::init(boot_info);
 
     // ACPI tabulky jsou prectene, tabulky CPU vlastni: pamet firmwaru je volna.
     mm::reclaim_boot_memory(boot_info);

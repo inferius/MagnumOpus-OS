@@ -97,6 +97,11 @@ fn every_syscall_is_documented() {
         "VM_PAGE_SIZE",
         "CLOCK_REALTIME",
         "CLOCK_SET",
+        "RANDOM_GET",
+        "RANDOM_ADD",
+        "PORT_CREATE",
+        "OBJECT_WAIT_ASYNC",
+        "PORT_WAIT",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

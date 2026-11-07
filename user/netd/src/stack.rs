@@ -82,11 +82,10 @@ pub fn v4(ip: IpAddr) -> Result<Ipv4Addr> {
 impl Stack {
     pub fn new(mut dev: Link) -> Self {
         let mac = dev.info.mac;
-        let mac_bits = mac.iter().fold(0u64, |a, b| a << 8 | *b as u64);
-        let (mut rng, hw) = Rng::new(mac_bits);
-        if !hw {
+        let (mut rng, seeded) = Rng::new();
+        if !seeded {
             println!(
-                "netd: VAROVANI: procesor nema RDRAND, ID dotazu DNS a cisla TCP jsou odhadnutelna"
+                "netd: VAROVANI: generator jadra neni nasazeny, ID dotazu DNS a cisla TCP jsou odhadnutelna"
             );
         }
         let mut config = Config::new(HardwareAddress::Ethernet(EthernetAddress(mac)));

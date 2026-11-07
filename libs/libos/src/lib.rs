@@ -5,7 +5,8 @@
 //!
 //! - typy objektu s automatickym zavrenim handlu ([`Handle`], [`Event`],
 //!   [`Channel`], [`Vmo`], [`Process`], [`Thread`]),
-//! - cekani ([`wait_one`], [`wait_many`]), cas ([`time`]),
+//! - cekani ([`wait_one`], [`wait_many`], [`Port`]), cas ([`time`]),
+//!   nahodna cisla ([`random`]),
 //! - log do jadra ([`println!`]),
 //! - start procesu: vstupni bod, heap, panic handler, startovni zprava
 //!   ([`Startup`], makro [`entry!`]),
@@ -34,7 +35,9 @@ pub mod hw;
 pub mod initfs;
 pub mod log;
 mod mapping;
+mod port;
 mod process;
+pub mod random;
 mod rt;
 pub mod spawn;
 pub mod sys;
@@ -50,6 +53,7 @@ pub use channel::{Channel, Message};
 pub use event::Event;
 pub use handle::Handle;
 pub use mapping::{Mapping, Pod};
+pub use port::{Port, PortPacket};
 pub use process::{Process, Thread};
 pub use rt::Startup;
 pub use spawn::spawn;

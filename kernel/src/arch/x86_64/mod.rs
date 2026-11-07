@@ -98,6 +98,10 @@ impl api::Cpu for X86_64 {
         apic::id()
     }
 
+    fn hw_random() -> Option<u64> {
+        cpu::hw_random()
+    }
+
     fn clear_cpu_local() {
         // SAFETY: staticka promenna zije navzdy a jeji prvni slovo je 0.
         unsafe { cpu::wrmsr(MSR_GS_BASE, &raw const EMPTY_CPU_LOCAL as u64) };

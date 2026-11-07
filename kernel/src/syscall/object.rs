@@ -10,7 +10,8 @@ use super::handle::arg_handle;
 use super::{Args, current_process, user};
 use crate::error::{Error, Result};
 use crate::object::event::Event;
-use crate::object::{KernelObject, Rights, Signals, wait};
+use crate::object::port::Port;
+use crate::object::{KernelObject, ObjectType, Rights, Signals, wait};
 
 fn deadline(v: u64) -> Option<u64> {
     (v != DEADLINE_INFINITE).then_some(v)
@@ -93,4 +94,53 @@ pub fn event_create() -> Result<u64> {
     let rights = event.default_rights();
     let h = current_process().handles().insert(event, rights)?;
     Ok(h.0 as u64)
+}
+
+/// `PORT_CREATE() -> handle`.
+pub fn port_create() -> Result<u64> {
+    let port = Port::new();
+    let rights = port.default_rights();
+    let h = current_process().handles().insert(port, rights)?;
+    Ok(h.0 as u64)
+}
+
+/// `OBJECT_WAIT_ASYNC(handle, port, key, mask)`: jednorazova registrace.
+/// Objekt potrebuje pravo `WAIT`, port `WRITE`; na port samotny nejde.
+pub fn wait_async(a: Args) -> Result<u64> {
+    let p = current_process();
+    let (object, port) = {
+        let table = p.handles();
+        (
+            table.get(arg_handle(a[0])?, Rights::WAIT)?,
+            table.get_as::<Port>(arg_handle(a[1])?, Rights::WRITE)?,
+        )
+    };
+    if object.object_type() == ObjectType::Port {
+        return Err(Error::NotSupported);
+    }
+    let m = mask(a[3])?;
+    if m == Signals::NONE {
+        return Err(Error::InvalidArgs);
+    }
+    object.core().observe_async(&port, a[2], m)?;
+    Ok(0)
+}
+
+/// `PORT_WAIT(port, deadline, out_ptr)`: vyzvedne paket (16 B na `out_ptr`).
+pub fn port_wait(a: Args) -> Result<u64> {
+    let p = current_process();
+    let port = p.handles().get_as::<Port>(arg_handle(a[0])?, Rights::READ)?;
+    loop {
+        if let Some(packet) = port.pop() {
+            let out = abi::object::PortPacket {
+                key: packet.key,
+                signals: packet.signals.0,
+                _reserved: 0,
+            };
+            // Neplatna adresa vystupu = chyba programu; paket je pak ztraceny.
+            user::write_bytes(&p, a[2], &out.encode())?;
+            return Ok(0);
+        }
+        wait::wait_one(&*port, Signals::READABLE, deadline(a[1]))?;
+    }
 }

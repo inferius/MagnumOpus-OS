@@ -3,8 +3,8 @@
 //! Projde sbernice PCI Express, zaloguje nalezena zarizeni a pro znama
 //! zarizeni spusti ovladace z initfs. Rodici (init) posle po bootstrap
 //! kanalu pro kazde blokove zarizeni zpravu `block` a pro kazdou sitovou
-//! kartu zpravu `net`, obe s koncem kanalu ke klientovi ovladace, a nakonec
-//! `done`.
+//! kartu zpravu `net` a pro zdroj nahody `rng`, vse s koncem kanalu ke
+//! klientovi ovladace, a nakonec `done`.
 //!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
 
@@ -28,6 +28,8 @@ libos::entry!(main);
 const VIRTIO_BLK: (u16, u16) = (0x1042, 0x1001);
 /// Virtio sitova karta: moderni ID 0x1041, prechodne 0x1000.
 const VIRTIO_NET: (u16, u16) = (0x1041, 0x1000);
+/// Virtio zdroj nahody: moderni ID 0x1044, prechodne 0x1005.
+const VIRTIO_RNG: (u16, u16) = (0x1044, 0x1005);
 
 /// Druh ovladace: jmeno programu v initfs a zprava pro init.
 struct DriverKind {
@@ -48,6 +50,13 @@ const DRIVERS: &[((u16, u16), DriverKind)] = &[
         DriverKind {
             image: "virtio-net",
             message: b"net",
+        },
+    ),
+    (
+        VIRTIO_RNG,
+        DriverKind {
+            image: "virtio-rng",
+            message: b"rng",
         },
     ),
 ];

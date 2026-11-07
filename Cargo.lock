@@ -213,6 +213,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "csprng"
+version = "0.1.0"
+
+[[package]]
 name = "defmt"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -464,6 +468,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "boot-info",
+ "csprng",
  "elf",
  "initfs",
  "noto-sans-mono-bitmap",
@@ -1062,6 +1067,15 @@ version = "0.1.0"
 dependencies = [
  "libos",
  "netproto",
+ "pci",
+ "virtio",
+]
+
+[[package]]
+name = "virtio-rng"
+version = "0.1.0"
+dependencies = [
+ "libos",
  "pci",
  "virtio",
 ]

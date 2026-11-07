@@ -24,6 +24,22 @@ pub struct Obj {
     pub ch: Channel,
     pub kind: Kind,
     pub pending: Option<Pending>,
+    /// Je na portu registrace "kanal je ke cteni"?
+    pub read_armed: bool,
+    /// Je na portu registrace "klient kanal zavrel"?
+    pub close_armed: bool,
+}
+
+impl Obj {
+    pub fn new(ch: Channel, kind: Kind) -> Self {
+        Self {
+            ch,
+            kind,
+            pending: None,
+            read_armed: false,
+            close_armed: false,
+        }
+    }
 }
 
 pub enum Kind {

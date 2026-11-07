@@ -64,7 +64,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, fsd, timed, netd
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, virtio-rng, fsd, timed, netd
                        (+ net-test with `cargo xtask test`: helper server ports)
 ```
 
@@ -84,7 +84,8 @@ stored boot entries would not match.
 
 The scratch and data disks are recreated on every `run`/`test`.
 
-The network card is `virtio-net-pci` (modern mode, `iommu_platform=on`, no
+The `virtio-rng-pci` randomness source (data from the host) adds entropy to
+the kernel. The network card is `virtio-net-pci` (modern mode, `iommu_platform=on`, no
 option ROM) in QEMU user-mode networking (slirp): the guest has 10.0.2.15,
 sees the gateway and the host as 10.0.2.2, and the slirp DNS is 10.0.2.3.
 `cargo xtask test` also starts helper servers on the host for the network
@@ -138,6 +139,7 @@ libs/fs/         file system (no_std; std for tools)
   src/fs/           files, directories, snapshots, intent log, defrag, fsck
   src/tests/        FS tests (model, power loss, performance)
 libs/fsproto/    file system protocol (client <-> fsd)
+libs/csprng/     kernel random number generator (ChaCha20, BLAKE2s)
 libs/netproto/   network protocol (programs <-> netd <-> driver), DNS, NTP, permissions
 user/init/       first process: starts services, userspace tests
 user/echo/       IPC test server
@@ -146,6 +148,7 @@ user/virtio-blk/ disk driver
 user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
 user/virtio-net/ network card driver
+user/virtio-rng/ randomness source driver (entropy for the kernel)
 user/netd/       network service (TCP/IP, DHCP, DNS)
 libs/osfs-proto/ protocol of the extended FS API for Windows (DeviceIoControl) + client
 tools/osfs/      host tool for the FS: format, check, mount on Windows (WinFsp)

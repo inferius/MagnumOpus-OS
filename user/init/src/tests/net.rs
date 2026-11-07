@@ -31,6 +31,7 @@ pub const TESTS: &[Test] = &[
     ("TCP: preruseni spojeni (RST) -> CONNECTION_RESET", tcp_reset),
     ("TCP: naslouchani a prijeti spojeni z hostitele", tcp_accept),
     ("UDP: echo pres slirp", udp_echo),
+    ("200 socketu najednou (driv limit 63)", many_sockets),
     ("opravneni: prava a omezeni cilu relace", restricted),
     ("opravneni: pravidlo se jmenem hostitele", host_rule),
     ("NTP: seridi hodiny pres sluzbu casu", ntp),
@@ -329,6 +330,37 @@ fn udp_echo(s: &Startup) -> TestResult {
         Some(Error::TimedOut),
         "prazdna fronta"
     );
+    Ok(())
+}
+
+fn many_sockets(s: &Startup) -> TestResult {
+    let Some(p) = ports(s, "mnoho socketu")? else {
+        return Ok(());
+    };
+    let net = net()?;
+    configured(net)?;
+    let mut socks = Vec::new();
+    for i in 0..200 {
+        socks.push(net.udp_bind(0).map_err(|e| fail(&format!("bind {i}"), e))?);
+    }
+    // Posledni i prvni socket funguji (sluzba ceka na vsechny kanaly).
+    let mut buf = [0u8; 64];
+    for sock in [socks.last().unwrap(), &socks[0]] {
+        let mut ok = false;
+        for _ in 0..3 {
+            sock.send_to(b"mnoho", host(p.udp_echo)).map_err(|e| fail("send_to", e))?;
+            if let Ok((n, _)) = sock.recv_from(&mut buf, Some(Duration::from_secs(2))) {
+                check_eq!(&buf[..n], b"mnoho", "echo");
+                ok = true;
+                break;
+            }
+        }
+        check!(ok, "UDP echo z jednoho z 200 socketu");
+    }
+    drop(socks);
+    // Po zavreni jdou sockety otevrit znovu (sloty a porty se uvolnily).
+    let again = net.udp_bind(0).map_err(|e| fail("bind po uvolneni", e))?;
+    drop(again);
     Ok(())
 }
 

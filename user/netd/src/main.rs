@@ -12,10 +12,10 @@
 //! Stack: smoltcp (ARP, IPv4, ICMP, UDP, TCP, DHCP) za modulem `stack`;
 //! resolver DNS je vlastni (`resolve`).
 //!
-//! Omezeni: sluzba ceka na vsechny kanaly jednim `OBJECT_WAIT_MANY`, ktery
-//! bere nejvys 64 objektu. Relaci a socketu muze byt najednou nejvys
-//! [`MAX_OBJECTS`]; dalsi dostanou `NO_RESOURCES`. TODO: objekt jadra pro
-//! cekani na libovolne mnozstvi kanalu (port).
+//! Cekani: jeden port jadra (`PORT_WAIT`). Kazdy kanal ma na portu dve
+//! jednorazove registrace: "ke cteni" (obnovi se po precteni zpravy, ale
+//! ne behem rozpracovaneho pozadavku) a "zavreno" (jen jednou). Pocet
+//! socketu tak neomezuje cekani, jen [`MAX_OBJECTS`].
 
 #![no_std]
 #![no_main]
@@ -38,16 +38,25 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::time::Duration;
 
-use libos::abi::syscall::WAIT_MANY_MAX;
-use libos::{Channel, Error, Handle, Signals, Startup, println, wait_many};
+use libos::{Channel, Error, Port, Signals, Startup, println};
 use netproto::Auth;
 
 use crate::obj::{Kind, Obj, Step};
 use crate::stack::{Stack, now_ns};
 
-/// Nejvic relaci a socketu najednou (jedno misto v `wait_many` je kanal
-/// ovladace).
-pub const MAX_OBJECTS: usize = WAIT_MANY_MAX - 1;
+/// Nejvic relaci a socketu najednou (ochrana pameti sluzby; kazdy objekt
+/// ma na portu dve registrace).
+pub const MAX_OBJECTS: usize = 16_384;
+
+/// Klic paketu portu: bit 63 = registrace "zavreno", bity 32..63 =
+/// generace slotu (stary paket po znovupouziti slotu se pozna), dolnich
+/// 32 bitu = slot + 1 (0 = kanal ovladace).
+const KEY_CLOSE: u64 = 1 << 63;
+
+fn key(slot: Option<usize>, generation: u32, close: bool) -> u64 {
+    let s = slot.map_or(0, |i| i as u64 + 1);
+    (close as u64) << 63 | ((generation as u64) & 0x7FFF_FFFF) << 32 | s
+}
 
 libos::entry!(main);
 
@@ -71,16 +80,28 @@ fn main(startup: Startup) -> i64 {
             return 2;
         }
     };
+    let port = match Port::create() {
+        Ok(p) => p,
+        Err(e) => {
+            println!("netd: port nelze vytvorit: {e}");
+            let _ = bootstrap.write(b"err:port", Vec::new());
+            return 2;
+        }
+    };
     let mut stack = Stack::new(link::Link::new(link_ch, info));
     let _ = bootstrap.write(b"ok", Vec::new());
     println!("netd: bezim, cekam na DHCP");
 
-    let mut objs: Vec<Option<Obj>> = vec![Some(Obj {
-        ch: Channel::from_handle(root_h),
-        kind: Kind::Session(Rc::new(RefCell::new(Auth::root()))),
-        pending: None,
-    })];
-    run(&mut stack, &mut objs);
+    let mut svc = Service {
+        port,
+        objs: vec![Some(Obj::new(
+            Channel::from_handle(root_h),
+            Kind::Session(Rc::new(RefCell::new(Auth::root()))),
+        ))],
+        gens: vec![0],
+        link_armed: false,
+    };
+    svc.run(&mut stack);
     println!(
         "netd: ovladac skoncil (zahozeno ramcu: prijem {}, odesilani {})",
         stack.dev.rx_dropped, stack.dev.tx_dropped
@@ -88,13 +109,67 @@ fn main(startup: Startup) -> i64 {
     3
 }
 
-/// Hlavni smycka; vrati se, kdyz skonci ovladac.
-fn run(stack: &mut Stack, objs: &mut Vec<Option<Obj>>) {
-    loop {
-        stack.poll();
+struct Service {
+    port: Port,
+    objs: Vec<Option<Obj>>,
+    /// Generace slotu (zvysi se pri kazdem uvolneni).
+    gens: Vec<u32>,
+    link_armed: bool,
+}
+
+impl Service {
+    /// Hlavni smycka; vrati se, kdyz skonci ovladac.
+    fn run(&mut self, stack: &mut Stack) {
+        // Konec ovladace hlidat jednou registraci.
+        if self
+            .port
+            .wait_async(
+                stack.dev.channel().handle(),
+                key(None, 0, true),
+                Signals::PEER_CLOSED,
+            )
+            .is_err()
+        {
+            return;
+        }
+        loop {
+            stack.poll();
+            self.progress_all(stack);
+            // Odeslat, co pozadavky zaradily, a uklidit zavrena spojeni.
+            stack.poll();
+            tcp::reap_closing(stack);
+            if self.arm(stack).is_err() {
+                println!("netd: registrace na portu selhala, koncim");
+                return;
+            }
+
+            let now = now_ns();
+            let mut wake = stack
+                .poll_delay_ns()
+                .map_or(u64::MAX, |d| now.saturating_add(d));
+            for o in self.objs.iter().flatten() {
+                if let Some(p) = &o.pending {
+                    wake = wake.min(p.wake_at());
+                }
+            }
+            if stack.dev.has_rx() {
+                wake = now;
+            }
+            // Prvni paket s terminem, dalsi uz jen bez cekani.
+            let mut deadline = if wake == u64::MAX { None } else { Some(wake) };
+            while let Ok(packet) = self.port.wait(deadline) {
+                if !self.handle_packet(stack, packet.key, Signals(packet.signals)) {
+                    return;
+                }
+                deadline = Some(0);
+            }
+        }
+    }
+
+    fn progress_all(&mut self, stack: &mut Stack) {
         let mut created = Vec::new();
-        let live = objs.iter().flatten().count();
-        for o in objs.iter_mut().flatten() {
+        let live = self.objs.iter().flatten().count();
+        for o in self.objs.iter_mut().flatten() {
             if let Kind::Stream(s) = &mut o.kind {
                 tcp::update_fin(stack, s);
             }
@@ -103,83 +178,100 @@ fn run(stack: &mut Stack, objs: &mut Vec<Option<Obj>>) {
                 finish(stack, o, step, &mut created, live);
             }
         }
-        add_objects(objs, created);
-        // Odeslat, co pozadavky zaradily, a uklidit zavrena spojeni.
-        stack.poll();
-        tcp::reap_closing(stack);
+        self.add_objects(created);
+    }
 
-        let now = now_ns();
-        let mut wake = stack
-            .poll_delay_ns()
-            .map_or(u64::MAX, |d| now.saturating_add(d));
-        for o in objs.iter().flatten() {
-            if let Some(p) = &o.pending {
-                wake = wake.min(p.wake_at());
-            }
+    /// Obnovi registrace: kanal ovladace, "zavreno" u novych objektu
+    /// a "ke cteni" u objektu bez rozpracovaneho pozadavku.
+    fn arm(&mut self, stack: &Stack) -> libos::Result<()> {
+        if !self.link_armed {
+            self.port.wait_async(
+                stack.dev.channel().handle(),
+                key(None, 0, false),
+                Signals::READABLE,
+            )?;
+            self.link_armed = true;
         }
-        if stack.dev.has_rx() {
-            wake = now;
-        }
-
-        // Cekani: kanal ovladace a vsechny kanaly klientu. Kanal
-        // s rozpracovanym pozadavkem se necte (jen se hlida jeho zavreni).
-        let mut slots = Vec::new();
-        let mut items: Vec<(&Handle, Signals)> = vec![(
-            stack.dev.channel().handle(),
-            Signals::READABLE | Signals::PEER_CLOSED,
-        )];
-        for (i, o) in objs.iter().enumerate() {
-            if let Some(o) = o {
-                let mask = if o.pending.is_some() {
-                    Signals::PEER_CLOSED
-                } else {
-                    Signals::READABLE | Signals::PEER_CLOSED
-                };
-                items.push((o.ch.handle(), mask));
-                slots.push(i);
-            }
-        }
-        let deadline = if wake == u64::MAX { None } else { Some(wake) };
-        let observed = match wait_many(&items, deadline) {
-            Ok((_, s)) => Some(s),
-            Err(_) => None,
-        };
-        drop(items);
-
-        if let Err(Error::PeerClosed) = stack.dev.pump() {
-            return;
-        }
-        let Some(observed) = observed else {
-            continue;
-        };
-        let mut created = Vec::new();
-        let live = objs.iter().flatten().count();
-        for (k, &i) in slots.iter().enumerate() {
-            let sig = observed[k + 1];
-            let Some(o) = objs[i].as_mut() else {
+        for (i, slot) in self.objs.iter_mut().enumerate() {
+            let Some(o) = slot else {
                 continue;
             };
-            if sig.contains(Signals::PEER_CLOSED) {
-                let o = objs[i].take().unwrap();
-                obj::close(stack, o.kind, o.pending);
-                continue;
+            let g = self.gens[i];
+            if !o.close_armed {
+                self.port
+                    .wait_async(o.ch.handle(), key(Some(i), g, true), Signals::PEER_CLOSED)?;
+                o.close_armed = true;
             }
-            if o.pending.is_some() || !sig.contains(Signals::READABLE) {
-                continue;
+            if !o.read_armed && o.pending.is_none() {
+                self.port
+                    .wait_async(o.ch.handle(), key(Some(i), g, false), Signals::READABLE)?;
+                o.read_armed = true;
             }
-            match o.ch.try_read() {
-                Ok(msg) => {
-                    let step = obj::request(stack, &mut o.kind, &msg.data);
-                    finish(stack, o, step, &mut created, live);
-                }
-                Err(Error::ShouldWait) => {}
-                Err(_) => {
-                    let o = objs[i].take().unwrap();
-                    obj::close(stack, o.kind, o.pending);
+        }
+        Ok(())
+    }
+
+    /// Zpracuje paket portu. `false` = ovladac skoncil.
+    fn handle_packet(&mut self, stack: &mut Stack, k: u64, signals: Signals) -> bool {
+        let close = k & KEY_CLOSE != 0;
+        let slot = (k & 0xFFFF_FFFF) as usize;
+        let generation = ((k >> 32) & 0x7FFF_FFFF) as u32;
+        if slot == 0 {
+            if close {
+                return false;
+            }
+            self.link_armed = false;
+            return !matches!(stack.dev.pump(), Err(Error::PeerClosed));
+        }
+        let i = slot - 1;
+        // Paket pro uz uvolneny slot (stara generace) se ignoruje.
+        if self.gens.get(i) != Some(&(generation & 0x7FFF_FFFF)) {
+            return true;
+        }
+        let Some(o) = self.objs[i].as_mut() else {
+            return true;
+        };
+        if close || signals.contains(Signals::PEER_CLOSED) && !signals.contains(Signals::READABLE) {
+            self.free(stack, i);
+            return true;
+        }
+        o.read_armed = false;
+        if o.pending.is_some() {
+            return true;
+        }
+        let mut created = Vec::new();
+        let live = self.objs.iter().flatten().count();
+        let o = self.objs[i].as_mut().unwrap();
+        match o.ch.try_read() {
+            Ok(msg) => {
+                let step = obj::request(stack, &mut o.kind, &msg.data);
+                finish(stack, o, step, &mut created, live);
+            }
+            Err(Error::ShouldWait) => {}
+            Err(_) => self.free(stack, i),
+        }
+        self.add_objects(created);
+        true
+    }
+
+    /// Uvolni slot: uklid objektu a nova generace (stare pakety neplati).
+    fn free(&mut self, stack: &mut Stack, i: usize) {
+        if let Some(o) = self.objs[i].take() {
+            obj::close(stack, o.kind, o.pending);
+        }
+        self.gens[i] = self.gens[i].wrapping_add(1) & 0x7FFF_FFFF;
+    }
+
+    fn add_objects(&mut self, created: Vec<Obj>) {
+        for n in created {
+            match self.objs.iter_mut().position(|o| o.is_none()) {
+                Some(i) => self.objs[i] = Some(n),
+                None => {
+                    self.objs.push(Some(n));
+                    self.gens.push(0);
                 }
             }
         }
-        add_objects(objs, created);
     }
 }
 
@@ -204,11 +296,7 @@ fn finish(stack: &mut Stack, o: &mut Obj, step: Step, created: &mut Vec<Obj>, li
             match Channel::create() {
                 Ok((client, server)) => {
                     handles.push(client.into_handle());
-                    created.push(Obj {
-                        ch: server,
-                        kind,
-                        pending: None,
-                    });
+                    created.push(Obj::new(server, kind));
                 }
                 Err(e) => {
                     obj::close(stack, kind, None);
@@ -217,15 +305,6 @@ fn finish(stack: &mut Stack, o: &mut Obj, step: Step, created: &mut Vec<Obj>, li
             }
         }
     }
-    // Klient, ktery mezitim kanal zavrel, se uklidi pri dalsim cekani.
+    // Klient, ktery mezitim kanal zavrel, se uklidi po paketu "zavreno".
     let _ = o.ch.write(&netproto::reply(result), handles);
-}
-
-fn add_objects(objs: &mut Vec<Option<Obj>>, created: Vec<Obj>) {
-    for n in created {
-        match objs.iter_mut().find(|o| o.is_none()) {
-            Some(slot) => *slot = Some(n),
-            None => objs.push(Some(n)),
-        }
-    }
 }

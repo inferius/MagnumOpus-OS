@@ -129,3 +129,16 @@ pub fn resource_create(a: Args) -> Result<u64> {
     };
     insert(&p, parent.restrict(ranges, irq_max, a[4], device)?)
 }
+
+/// `RANDOM_ADD(resource, ptr, len, credit_bits)`: entropie od ovladace
+/// (virtio-rng). Vyzaduje Resource s pravem `MANAGE`; kredit nejvys 8 bitu
+/// na bajt.
+pub fn random_add(a: Args) -> Result<u64> {
+    let p = current_process();
+    check_resource(&p, a[0])?;
+    let len = user::check_len(a[2], abi::syscall::RANDOM_MAX)?;
+    let credit = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
+    let data = user::read_bytes(&p, a[1], len)?;
+    crate::random::add(&data, credit);
+    Ok(0)
+}

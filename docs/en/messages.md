@@ -119,6 +119,8 @@ invariant was broken (a kernel bug).
 | `virtio-net ...: inicializace selhala: ...` | As for the disk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | The device returned a nonsensical queue index or a buffer it did not own (`CORRUPTED`). The driver resets it (it stops using DMA) and exits; the network does not work until a restart. |
 | `virtio-net ...: zahozeno N prijatych ramcu` | At exit: frames the network service could not receive in time (full channel queue) or invalid ones ("N received frames dropped"). |
+| `virtio-rng BB:DD.F: 256 B entropie predano jadru` | The host randomness source is ready and the kernel got the first data ("256 B of entropy passed to the kernel"). More batches every minute. |
+| `virtio-rng ...: zarizeni neodpovida (...), koncim` | The device did not complete a request within 5 s or returns empty data. The kernel keeps using its other sources. |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
 
@@ -147,7 +149,7 @@ invariant was broken (a kernel bug).
 | `netd: bezim, cekam na DHCP` | The service got `INFO` from the driver and started the DHCP client ("running, waiting for DHCP"). |
 | `netd: DHCP: adresa A/P, brana G, DNS [...]` | The interface is configured (address, gateway, DNS); programs waiting in `wait_configured` continue. |
 | `netd: DHCP: adresa ztracena` | The lease expired or the server removed the address ("address lost"). Connections get `UNREACHABLE` until DHCP renews it. |
-| `netd: VAROVANI: procesor nema RDRAND, ...` | The random generator has a weak seed: DNS query IDs and TCP numbers are predictable. See [network.md](network.md#the-netd-service). |
+| `netd: VAROVANI: generator jadra neni nasazeny, ...` | The kernel does not have enough entropy yet (no RDRAND and no virtio-rng): DNS query IDs and TCP numbers are predictable ("kernel generator not seeded"). See [Random numbers](syscalls.md#random-numbers). |
 | `netd: nova relace s pravy ...` | Someone with the `RESTRICT` right (init) created a narrower session ("new session with rights"). |
 | `netd: servery DNS nastaveny rucne: [...]` | `SET_DNS` (the `CONFIGURE` right); an empty list = back to the DHCP servers. |
 | `netd: ovladac sitove karty neposlal INFO: ...` | The driver did not answer within 5 s (code 2); `init` then does not start the network. |

@@ -198,6 +198,8 @@ fn host_tests() -> Result<()> {
             "fs",
             "--package",
             "netproto",
+            "--package",
+            "csprng",
             "--features",
             "initfs/std,fs/std,netproto/std",
         ])
@@ -277,6 +279,7 @@ const USER_PROGRAMS: &[&str] = &[
     "devmgr",
     "virtio-blk",
     "virtio-net",
+    "virtio-rng",
     "fsd",
     "timed",
     "netd",
@@ -523,6 +526,9 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             "-device",
             "virtio-net-pci,netdev=net0,disable-legacy=on,iommu_platform=on,romfile=",
         ])
+        // Zdroj nahody z hostitele (doplnuje entropii jadra, viz
+        // docs/cs/syscally.md RANDOM_ADD).
+        .args(["-device", "virtio-rng-pci,disable-legacy=on,iommu_platform=on"])
         // Seriova linka do terminalu a zaroven do souboru (target/serial.log),
         // aby se dal vystup dohledat i po skonceni behu.
         .arg("-chardev")

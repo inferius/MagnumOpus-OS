@@ -233,6 +233,12 @@ pub fn breakpoint() {
     <Current as Cpu>::breakpoint()
 }
 
+/// 64 bitu z hardwaroveho generatoru CPU (viz `api::Cpu::hw_random`).
+#[inline]
+pub fn hw_random() -> Option<u64> {
+    <Current as Cpu>::hw_random()
+}
+
 /// Prepne na novy zasobnik a zavola `f(arg)`.
 ///
 /// # Safety

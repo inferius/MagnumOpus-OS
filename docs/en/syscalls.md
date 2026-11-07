@@ -146,6 +146,69 @@ than `SIGNALED`).
 `() -> handle`. A new (unsignaled) event with rights `DUPLICATE`,
 `TRANSFER`, `WAIT`, `SIGNAL`. Errors: `NO_RESOURCES`.
 
+## Ports
+
+A port is an event queue for waiting on **any number of objects**
+(services with hundreds of channels, e.g. `netd`). `OBJECT_WAIT_MANY` is
+limited to 64 objects and registers the thread with all of them on every
+wait. A port instead holds **one-shot registrations**: an object whose
+signals intersect the mask puts a packet (key + signals) into the port
+and the registration ends. The program picks the packet up and registers
+the object again after servicing it. The cost of an event does not depend
+on the number of watched objects.
+
+- **Room for the packet is reserved at registration**, so delivery (even
+  from an interrupt handler) does not allocate and a packet is never lost.
+  A port holds at most `PORT_MAX_PENDING` (65,536) registrations and
+  pending packets.
+- **A destroyed object** (its last handle closed) returns the reservation
+  of its undelivered registrations. **A closed port**: objects drop its
+  registrations.
+- A port has the `READABLE` signal while it holds a packet, so it can also
+  be waited on with `OBJECT_WAIT_ONE`/`OBJECT_WAIT_MANY`.
+- Packets arrive in the order the conditions occurred.
+- Wrappers: `libos::Port` (`create`, `wait_async`, `wait`).
+
+```rust
+let port = libos::Port::create()?;
+port.wait_async(ch.handle(), 1, Signals::READABLE)?;     // key 1
+port.wait_async(ch.handle(), 2, Signals::PEER_CLOSED)?;  // key 2
+loop {
+    let p = port.wait(None)?;
+    match p.key {
+        1 => { /* read the message */ port.wait_async(ch.handle(), 1, Signals::READABLE)?; }
+        2 => break, // the other side closed
+        _ => {}
+    }
+}
+```
+
+### `PORT_CREATE`
+
+`() -> handle`. A new empty port with rights `DUPLICATE`, `TRANSFER`,
+`WAIT`, `READ`, `WRITE`. Errors: `NO_RESOURCES`.
+
+### `OBJECT_WAIT_ASYNC`
+
+`(handle, port, key, mask) -> 0`. A one-shot registration: when the
+signals of the object `handle` intersect `mask`, the port gets a packet
+with `key` (u64, meaning chosen by the program). If the condition already
+holds, the packet arrives at once. Requires `WAIT` on the object and
+`WRITE` on the port. Registering on a port itself is not possible.
+Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`port` is not a
+port), `NOT_SUPPORTED` (the object is a port), `INVALID_ARGS` (empty
+mask), `NO_RESOURCES` (the port holds `PORT_MAX_PENDING` registrations and
+packets), `NO_MEMORY`.
+
+### `PORT_WAIT`
+
+`(port, deadline, out_ptr) -> 0`. Removes the oldest packet and writes it
+to `out_ptr` (16 B, `abi::object::PortPacket`): key u64, the object's
+signals when the condition held u32, reserved u32. An empty port waits
+until the deadline (`deadline` = 0: just try). Requires `READ`. Errors:
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `TIMED_OUT`, `CANCELED`,
+`BAD_ADDRESS` (the packet is then lost).
+
 ## Channels
 
 A message = data (max 64 KiB) + handles (max 64). Each end has its own queue
@@ -405,3 +468,45 @@ recorded.
 `(interrupt) -> 0`. Acknowledges the interrupt (clears `SIGNALED`). A
 driver should acknowledge **before** servicing the device so an interrupt
 arriving during servicing is not lost. Requires `WRITE`.
+
+## Random numbers
+
+The kernel has a cryptographic generator (`kernel/src/random.rs`, crate
+`libs/csprng`):
+
+- **The entropy pool** mixes inputs with BLAKE2s. Each input has a credit
+  = an estimate of real randomness: RDSEED/RDRAND 32 bits out of 64, data
+  from the virtio-rng driver as the driver says (4 bits per byte), counter
+  jitter, firmware time and interrupt timing 0.
+- **The generator is ChaCha20.** Reseed: key = BLAKE2s(old key, pool), at
+  the latest after 10 s or when at least 256 bits of credit are waiting.
+  After every request the key is overwritten by the first block of the
+  stream (fast key erasure), so a later leak of the kernel state does not
+  reveal earlier output.
+- **Seeded** is the generator after a reseed with at least 256 bits of
+  credit in total. In QEMU RDRAND is enough (`-cpu max`), on a machine
+  without it the virtio-rng driver.
+
+⚠️ Without a hardware source and without virtio-rng the generator will not
+be seeded (output only from time and jitter) and the kernel logs it. Take
+keys (TLS) with `REQUIRE_SEEDED`.
+
+### `RANDOM_GET`
+
+`(buf_ptr, len, flags) -> 0 | 1`. Fills the buffer (max `RANDOM_MAX` =
+4096 B) with random bytes. Returns 1 when the generator is seeded, 0 when
+not yet (the data is weak then). `flags`: bit 0 `REQUIRE_SEEDED` = an
+unseeded generator returns `SHOULD_WAIT` and writes nothing. Needs no
+handle. Wrappers: `libos::random::fill`, `fill_seeded`, `u64`. Errors:
+`INVALID_ARGS` (length, unknown flag), `SHOULD_WAIT`, `BAD_ADDRESS`.
+
+### `RANDOM_ADD`
+
+`(resource, ptr, len, credit_bits) -> 0`. Mixes data (max 4096 B) into the
+entropy pool with credit `credit_bits` (the kernel limits it to 8 bits per
+byte). Requires a Resource with the `MANAGE` right (a device driver).
+Mixing never lowers the quality of the generator, but **the credit trusts
+the caller**: a faulty driver can declare the generator seeded before it
+really is. Wrapper: `libos::random::add`. Used by the `virtio-rng`
+driver. Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
+`INVALID_ARGS`, `BAD_ADDRESS`.

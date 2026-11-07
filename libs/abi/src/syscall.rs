@@ -80,8 +80,35 @@ pub const CLOCK_REALTIME: u64 = 32;
 /// na `in_ptr` je [`crate::time::SetRequest`] (16 B), `flags` z [`crate::time::set_flags`]
 pub const CLOCK_SET: u64 = 33;
 
+/// Nahodne bajty z generatoru jadra. `(buf_ptr, len, flags) -> 1 = nasazeny`;
+/// `len` nejvys [`RANDOM_MAX`], `flags` z [`random_flags`]
+pub const RANDOM_GET: u64 = 34;
+/// Prida entropii do zasobniku jadra (Resource s pravem `MANAGE`).
+/// `(resource, ptr, len, credit_bits)`
+pub const RANDOM_ADD: u64 = 35;
+/// Vytvori port (fronta udalosti). `() -> handle`
+pub const PORT_CREATE: u64 = 36;
+/// Jednorazova registrace: az signaly objektu protnou masku, port dostane
+/// paket s klicem. `(handle, port, key, mask)`
+pub const OBJECT_WAIT_ASYNC: u64 = 37;
+/// Vyzvedne paket z portu (ceka do terminu). `(port, deadline_ns, out_ptr)`;
+/// na `out_ptr` zapise [`crate::object::PortPacket`] (16 B)
+pub const PORT_WAIT: u64 = 38;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 34;
+pub const COUNT: u64 = 39;
+
+/// Nejvic bajtu v jednom `RANDOM_GET` / `RANDOM_ADD`.
+pub const RANDOM_MAX: usize = 4096;
+/// Nejvic registraci a cekajicich paketu jednoho portu.
+pub const PORT_MAX_PENDING: usize = 65_536;
+
+/// Priznaky `RANDOM_GET`.
+pub mod random_flags {
+    /// Nenasazeny generator = `SHOULD_WAIT` misto slabych dat (pro klice).
+    pub const REQUIRE_SEEDED: u64 = 1;
+    pub const ALL: u64 = REQUIRE_SEEDED;
+}
 
 /// Deadline "cekat neomezene".
 pub const DEADLINE_INFINITE: u64 = u64::MAX;

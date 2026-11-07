@@ -21,6 +21,8 @@ pub struct Devices {
     pub blocks: Vec<BlockClient>,
     /// Kanaly k ovladacum sitovych karet (dokud je neprevezme sluzba site).
     pub nets: Vec<Channel>,
+    /// Kanaly k ovladacum zdroje nahody (drzet = ovladac bezi).
+    pub _rngs: Vec<Channel>,
     pub fs: Option<FsClient>,
     pub _fsd: Option<(Process, Channel)>,
 }
@@ -53,6 +55,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let (devmgr, control) = libos::spawn("devmgr", image, handles)?;
     let mut blocks = Vec::new();
     let mut nets = Vec::new();
+    let mut rngs = Vec::new();
     loop {
         let msg = control.read(Some(time::deadline_after(Duration::from_secs(10))))?;
         match &msg.data[..] {
@@ -66,6 +69,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
                 }
             }
             b"net" => nets.extend(msg.handles.into_iter().map(Channel::from_handle)),
+            b"rng" => rngs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             other => println!("init: neznama zprava od devmgr: {:?}", other),
         }
     }
@@ -79,6 +83,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         _control: control,
         blocks,
         nets,
+        _rngs: rngs,
         fs: None,
         _fsd: None,
     })

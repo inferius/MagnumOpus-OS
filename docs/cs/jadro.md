@@ -77,6 +77,19 @@ horní polovinu sdílí s jádrem):
   `WAIT`, `SIGNAL`, `MANAGE`) lze při duplikaci jen ubírat.
 - **Kanály**: zprávy s daty a handly; předání handlu ho přesune (odesílatel
   o něj přijde). Zavření konce nastaví druhému `PEER_CLOSED`.
+- **Porty** (`kernel/src/object/port.rs`): jednorázové registrace „až
+  signály objektu protnou masku, vlož paket s klíčem“. Čekání na libovolně
+  mnoho objektů bez limitu `OBJECT_WAIT_MANY`. Objekt drží registraci
+  v seznamu čekajících stejně jako vlákno (`ObjectCore`), na port jen slabý
+  odkaz. Místo pro paket se rezervuje předem, doručení z přerušení tedy
+  nealokuje. Pořadí zámků: objekt, fronta portu, signály portu. Viz
+  [Porty](syscally.md#porty).
+- **Náhodná čísla** (`kernel/src/random.rs`, crate `libs/csprng`):
+  zásobník entropie (BLAKE2s) a generátor ChaCha20 s mazáním klíče po
+  každém požadavku. Zdroje: `arch::hw_random` (x86 RDSEED/RDRAND),
+  jitter čítače, časování přerušení (bez zámku v `trap::device_irq`)
+  a ovladač virtio-rng (`RANDOM_ADD`). Viz
+  [Náhodná čísla](syscally.md#náhodná-čísla).
 
 ## Procesy a vlákna
 

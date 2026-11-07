@@ -143,6 +143,67 @@ a `INVALID_ARGS` (count > 64).
 `() -> handle`. Nový event (nesignalizovaný) s právy `DUPLICATE`,
 `TRANSFER`, `WAIT`, `SIGNAL`. Chyby: `NO_RESOURCES`.
 
+## Porty
+
+Port je fronta událostí pro čekání na **libovolně mnoho objektů** (služby
+se stovkami kanálů, např. `netd`). `OBJECT_WAIT_MANY` je omezený na 64
+objektů a při každém čekání registruje vlákno u všech. Port místo toho
+drží **jednorázové registrace**: objekt, jehož signály protnou masku,
+vloží do portu paket (klíč + signály) a registrace zanikne. Program
+paket vyzvedne a po obsluze objekt zaregistruje znovu. Cena události
+nezávisí na počtu hlídaných objektů.
+
+- **Místo pro paket se rezervuje při registraci**, takže doručení
+  (i z obsluhy přerušení) nealokuje a paket se neztratí. Registrací
+  a čekajících paketů může být na portu nejvýš `PORT_MAX_PENDING`
+  (65 536).
+- **Zaniklý objekt** (zavřený poslední handle) vrátí rezervaci svých
+  nedoručených registrací. **Zavřený port**: objekty jeho registrace
+  zahodí.
+- Port má signál `READABLE`, dokud v něm je paket. Lze na něj tedy čekat
+  i přes `OBJECT_WAIT_ONE`/`OBJECT_WAIT_MANY`.
+- Pakety přicházejí v pořadí, v jakém nastaly.
+- Obaly: `libos::Port` (`create`, `wait_async`, `wait`).
+
+```rust
+let port = libos::Port::create()?;
+port.wait_async(ch.handle(), 1, Signals::READABLE)?;     // klíč 1
+port.wait_async(ch.handle(), 2, Signals::PEER_CLOSED)?;  // klíč 2
+loop {
+    let p = port.wait(None)?;
+    match p.key {
+        1 => { /* přečíst zprávu */ port.wait_async(ch.handle(), 1, Signals::READABLE)?; }
+        2 => break, // druhá strana zavřela
+        _ => {}
+    }
+}
+```
+
+### `PORT_CREATE`
+
+`() -> handle`. Nový prázdný port s právy `DUPLICATE`, `TRANSFER`, `WAIT`,
+`READ`, `WRITE`. Chyby: `NO_RESOURCES`.
+
+### `OBJECT_WAIT_ASYNC`
+
+`(handle, port, key, mask) -> 0`. Jednorázová registrace: až signály
+objektu `handle` protnou `mask`, port dostane paket s `key` (u64, význam
+určuje program). Když je podmínka splněná už teď, paket přijde hned.
+Vyžaduje `WAIT` na objektu a `WRITE` na portu. Na port samotný registrovat
+nejde. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`port` není
+port), `NOT_SUPPORTED` (objekt je port), `INVALID_ARGS` (prázdná maska),
+`NO_RESOURCES` (port má `PORT_MAX_PENDING` registrací a paketů),
+`NO_MEMORY`.
+
+### `PORT_WAIT`
+
+`(port, deadline, out_ptr) -> 0`. Vyjme nejstarší paket a zapíše ho na
+`out_ptr` (16 B, `abi::object::PortPacket`): klíč u64, signály objektu
+v okamžiku splnění u32, rezerva u32. Prázdný port čeká do termínu
+(`deadline` = 0: jen zkusit). Vyžaduje `READ`. Chyby: `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`, `TIMED_OUT`, `CANCELED`, `BAD_ADDRESS`
+(paket je pak ztracený).
+
 ## Kanály
 
 Zpráva = data (max. 64 KiB) + handly (max. 64). Každý konec má vlastní
@@ -398,3 +459,42 @@ namapuje. Potomek zdědí zařízení rodiče a jiné zvolit nesmí
 `(interrupt) -> 0`. Potvrdí přerušení (smaže `SIGNALED`). Ovladač má
 potvrdit **před** obsluhou zařízení, aby se přerušení, které přijde během
 obsluhy, neztratilo. Vyžaduje `WRITE`.
+
+## Náhodná čísla
+
+Jádro má kryptografický generátor (`kernel/src/random.rs`, crate
+`libs/csprng`):
+
+- **Zásobník entropie** míchá vstupy hashem BLAKE2s. Každý vstup má kredit
+  = odhad skutečné náhody: RDSEED/RDRAND 32 bitů z 64, data od ovladače
+  virtio-rng podle ovladače (4 bity na bajt), jitter čítače, čas firmwaru
+  a časování přerušení 0.
+- **Generátor je ChaCha20.** Reseed: klíč = BLAKE2s(starý klíč, zásobník),
+  nejpozději po 10 s nebo když čeká aspoň 256 bitů kreditu. Po každém
+  požadavku se klíč přepíše prvním blokem proudu (fast key erasure), takže
+  pozdější únik stavu jádra neprozradí dřívější výstupy.
+- **Nasazený** je generátor po reseedu se součtem kreditu aspoň 256 bitů.
+  V QEMU stačí RDRAND (`-cpu max`), na stroji bez něj ovladač virtio-rng.
+
+⚠️ Bez hardwarového zdroje a bez virtio-rng generátor nasazený nebude
+(výstup jen z času a jitteru) a jádro to zaloguje. Klíče (TLS) proto berte
+přes `REQUIRE_SEEDED`.
+
+### `RANDOM_GET`
+
+`(buf_ptr, len, flags) -> 0 | 1`. Naplní buffer (max. `RANDOM_MAX` =
+4096 B) náhodnými bajty. Vrací 1, když je generátor nasazený, 0, když
+ještě ne (data jsou pak slabá). `flags`: bit 0 `REQUIRE_SEEDED` =
+nenasazený generátor vrátí `SHOULD_WAIT` a nic nezapíše. Nepotřebuje
+handle. Obaly: `libos::random::fill`, `fill_seeded`, `u64`. Chyby:
+`INVALID_ARGS` (délka, neznámý příznak), `SHOULD_WAIT`, `BAD_ADDRESS`.
+
+### `RANDOM_ADD`
+
+`(resource, ptr, len, credit_bits) -> 0`. Přimíchá data (max. 4096 B) do
+zásobníku entropie s kreditem `credit_bits` (jádro ho omezí na 8 bitů na
+bajt). Vyžaduje Resource s právem `MANAGE` (ovladač zařízení). Přimíchání
+nikdy nesníží kvalitu generátoru, ale **kredit věří volajícímu**: vadný
+ovladač může generátor prohlásit za nasazený dřív, než skutečně je. Obal:
+`libos::random::add`. Používá ho ovladač `virtio-rng`. Chyby: `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `BAD_ADDRESS`.

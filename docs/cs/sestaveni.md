@@ -61,7 +61,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, fsd, timed, netd
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-net, virtio-rng, fsd, timed, netd
                        (+ net-test u `cargo xtask test`: porty pomocných serverů)
 ```
 
@@ -80,6 +80,7 @@ AMD IOMMU zabere slot PCI a uložené bootovací položky by neseděly.
 
 Testovací a datový disk se vytvoří znovu při každém `run`/`test`.
 
+Zdroj náhody `virtio-rng-pci` (data z hostitele) doplňuje entropii jádra.
 Síťová karta je `virtio-net-pci` (moderní režim, `iommu_platform=on`, bez
 option ROM) v user-mode síti QEMU (slirp): host má 10.0.2.15, bránu
 a hostitele vidí jako 10.0.2.2, DNS slirp je 10.0.2.3. `cargo xtask test`
@@ -132,6 +133,7 @@ libs/fs/         souborový systém (no_std; std pro nástroje)
   src/fs/           soubory, adresáře, snapshoty, intent log, defrag, fsck
   src/tests/        testy FS (model, výpadky, výkon)
 libs/fsproto/    protokol souborového systému (klient <-> fsd)
+libs/csprng/     generátor náhodných čísel jádra (ChaCha20, BLAKE2s)
 libs/netproto/   protokol sítě (programy <-> netd <-> ovladač), DNS, NTP, oprávnění
 user/init/       první proces: start služeb a testy userspace
 user/echo/       testovací server pro IPC
@@ -140,6 +142,7 @@ user/virtio-blk/ ovladač disku
 user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
 user/virtio-net/ ovladač síťové karty
+user/virtio-rng/ ovladač zdroje náhody (entropie pro jádro)
 user/netd/       služba sítě (TCP/IP, DHCP, DNS)
 libs/osfs-proto/ protokol rozšířeného API FS pro Windows (DeviceIoControl) + klient
 tools/osfs/      nástroj pro FS na hostiteli: format, check, mount ve Windows (WinFsp)

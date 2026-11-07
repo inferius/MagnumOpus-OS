@@ -129,6 +129,7 @@ pub enum ObjectType {
     MemoryObject = 5,
     Resource = 6,
     Interrupt = 7,
+    Port = 8,
 }
 
 /// Zprava MSI, kterou ovladac zapise do zarizeni (vystup `INTERRUPT_CREATE`).
@@ -138,6 +139,35 @@ pub struct MsiMessage {
     pub address: u64,
     pub data: u32,
     pub _reserved: u32,
+}
+
+/// Paket portu (vystup `PORT_WAIT`, 16 B): klic zadany pri
+/// `OBJECT_WAIT_ASYNC` a signaly objektu v okamziku, kdy podminka nastala.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct PortPacket {
+    pub key: u64,
+    pub signals: u32,
+    pub _reserved: u32,
+}
+
+impl PortPacket {
+    pub const SIZE: usize = 16;
+
+    pub fn encode(&self) -> [u8; 16] {
+        let mut b = [0u8; 16];
+        b[..8].copy_from_slice(&self.key.to_le_bytes());
+        b[8..12].copy_from_slice(&self.signals.to_le_bytes());
+        b
+    }
+
+    pub fn decode(b: &[u8; 16]) -> Self {
+        Self {
+            key: u64::from_le_bytes(b[..8].try_into().unwrap()),
+            signals: u32::from_le_bytes(b[8..12].try_into().unwrap()),
+            _reserved: 0,
+        }
+    }
 }
 
 /// Polozka pro `OBJECT_WAIT_MANY`: vstupem handle a maska, vystupem

@@ -32,7 +32,7 @@ TLS a HTTP přijdou později. Rozhraní na ně je připravené (viz
 <path class="ln" d="M170 130 L298 135" marker-end="url(#sa1)"/>
 <path class="ln-acc" d="M170 230 L298 160" marker-end="url(#sa1)"/>
 <text class="m" x="200" y="200">RESTRICT: uzší relace</text>
-<rect class="ok" x="300" y="80" width="200" height="110" rx="6"/><text class="t b" x="400" y="105" text-anchor="middle">netd</text><text class="m" x="400" y="125" text-anchor="middle">oprávnění, sockety = kanály</text><text class="m" x="400" y="143" text-anchor="middle">smoltcp: ARP IPv4 ICMP UDP TCP</text><text class="m" x="400" y="161" text-anchor="middle">DHCP, vlastní resolver DNS</text><text class="m" x="400" y="179" text-anchor="middle">1 vlákno, OBJECT_WAIT_MANY</text>
+<rect class="ok" x="300" y="80" width="200" height="110" rx="6"/><text class="t b" x="400" y="105" text-anchor="middle">netd</text><text class="m" x="400" y="125" text-anchor="middle">oprávnění, sockety = kanály</text><text class="m" x="400" y="143" text-anchor="middle">smoltcp: ARP IPv4 ICMP UDP TCP</text><text class="m" x="400" y="161" text-anchor="middle">DHCP, vlastní resolver DNS</text><text class="m" x="400" y="179" text-anchor="middle">1 vlákno, port jádra</text>
 <path class="ln" d="M500 135 L568 135" marker-end="url(#sa1)"/>
 <text class="m" x="505" y="125">rámce</text>
 <rect class="box" x="570" y="95" width="180" height="80" rx="6"/><text class="t b" x="660" y="120" text-anchor="middle">virtio-net</text><text class="m" x="660" y="139" text-anchor="middle">fronty RX/TX, 2 KiB buffery</text><text class="m" x="660" y="157" text-anchor="middle">DMA v doméně IOMMU</text>
@@ -127,9 +127,11 @@ Pak v jednom vlákně dokola opakuje:
 
 1. `poll` stacku: přijaté rámce, časovače TCP, DHCP,
 2. posun rozpracovaných požadavků (spojení, čtení, dotazy DNS, ping),
-3. `OBJECT_WAIT_MANY` na kanál ovladače a na kanály klientů, s termínem
-   podle nejbližšího časovače. Kanál s rozpracovaným požadavkem se nečte,
-   hlídá se jen jeho zavření.
+3. `PORT_WAIT` na **portu jádra** (viz [Porty](syscally.md#porty)),
+   s termínem podle nejbližšího časovače. Každý kanál má na portu dvě
+   jednorázové registrace: „ke čtení“ (obnoví se po přečtení zprávy, ale ne
+   během rozpracovaného požadavku) a „zavřeno“. Klíč paketu nese číslo
+   slotu a jeho generaci, takže starý paket po uvolnění slotu nic nespletě.
 
 | Vlastnost | Hodnota |
 |---|---|
@@ -157,16 +159,24 @@ a navazování skončí `TIMED_OUT`. Na Linuxu slirp pošle RST
 (`CONNECTION_REFUSED`). Test ověří to chování, které na hostiteli platí
 (`refuses` v `net-test`).
 
-⚠️ **Omezení počtu socketů:** služba čeká jedním `OBJECT_WAIT_MANY`, který
-bere nejvýš 64 objektů. Relací a socketů tedy může být najednou nejvýš
-63. Další dostanou `NO_RESOURCES`. Na první programy to stačí, odstraní
-to objekt jádra pro čekání na libovolně mnoho kanálů (port).
+**Počet socketů:** díky portu cena čekání nezávisí na počtu kanálů.
+Relací a socketů může být najednou až 16 384 (ochrana paměti služby),
+další dostanou `NO_RESOURCES`. Test otevře 200 socketů najednou.
 
-⚠️ **Náhodnost:** čísla TCP, dočasné porty a ID dotazů DNS pocházejí
-z generátoru se semenem z RDRAND (když ho procesor má), času a MAC.
-Kryptografický generátor to **není**. Bez RDRAND jsou hodnoty odhadnutelné
-a útočník na stejné síti by mohl podvrhnout odpověď DNS. Služba to
-zaloguje. Patří sem zdroj entropie od jádra (TODO).
+> **Změna proti první verzi:** služba čekala jedním `OBJECT_WAIT_MANY`
+> (nejvýš 64 objektů), takže socketů mohlo být nejvýš 63. Teď čeká na
+> portu jádra (`PORT_WAIT`).
+
+**Náhodnost:** čísla TCP (semeno smoltcp), dočasné porty, ID dotazů DNS
+a identifikátory pingu jdou přímo z generátoru jádra (`RANDOM_GET`,
+ChaCha20, viz [Náhodná čísla](syscally.md#náhodná-čísla)). Služba nedrží
+vlastní stav, ze kterého by šlo odhadnout další hodnoty. Když generátor
+jádra ještě není nasazený (bez RDRAND a bez virtio-rng), služba to
+zaloguje.
+
+> **Změna proti první verzi:** služba měla vlastní nekryptografický
+> generátor se semenem z RDRAND, času a MAC. Bez RDRAND byla ID dotazů DNS
+> odhadnutelná.
 
 ⚠️ **DNS bez ověření:** odpovědi nejsou podepsané (DNSSEC) ani šifrované
 (DoT, DoH). Kdo ovládá síť, může jméno přeložit na jinou adresu. Ochranu
@@ -399,8 +409,8 @@ a plynulé dorovnání místo skoku.
 - **Oprávnění podle jmen:** pravidla `Target::Host` už teď počítají
   s aplikacemi, které smí jen na své API (`*.example.com:443`). TLS
   k tomu přidá ověření, že server jméno opravdu vlastní.
-- **Náhodnost:** TLS potřebuje kryptografický generátor. Bez zdroje
-  entropie od jádra (TODO výše) TLS nevznikne.
+- **Náhodnost:** klíče TLS vezme z jádra přes
+  `libos::random::fill_seeded` (`REQUIRE_SEEDED`).
 
 ## Testy
 
@@ -454,9 +464,6 @@ Formáty a oprávnění testuje i hostitel: `cargo test -p netproto
   Protokol a programy se nezmění.
 - **IPv6:** SLAAC, ICMPv6, AAAA už resolver umí. Protokol je připravený
   (adresy `IpAddr`).
-- **Objekt jádra pro čekání** na libovolný počet kanálů: zruší limit 63
-  socketů.
-- **Zdroj entropie v jádře** (syscall): pro TCP, DNS a hlavně TLS.
 - **Sdílená paměť pro data** místo kopírování zprávami (jako u disku).
 - **Víc karet**, statická konfigurace, mezipaměť DNS, NTP periodicky.
 - **TLS 1.3 a klient HTTP** jako knihovny nad `Read + Write`.

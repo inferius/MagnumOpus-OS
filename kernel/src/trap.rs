@@ -14,7 +14,7 @@
 //! - `after_interrupt` se vola po kazdem preruseni (ne vyjimce),
 //!   `return_to_user` pred kazdym navratem do userspace.
 
-use crate::{mm, object, sched, syscall};
+use crate::{mm, object, random, sched, syscall};
 
 /// Preruseni casovace naplanovaneho pres `arch::set_timer`.
 #[inline]
@@ -37,6 +37,8 @@ pub fn tlb_flush_ipi() {
 /// Preruseni zarizeni s cislem z rozsahu `DEVICE_IRQ_FIRST..=DEVICE_IRQ_LAST`.
 #[inline]
 pub fn device_irq(irq: u32) {
+    // Casovani preruseni plni zasobnik entropie (bez zamku, levne).
+    random::on_interrupt(irq);
     object::interrupt::dispatch(irq);
 }
 

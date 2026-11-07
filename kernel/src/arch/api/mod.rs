@@ -116,6 +116,14 @@ pub trait Cpu {
 
     /// Vyvola ladici vyjimku (breakpoint), ktera se vrati zpet (test).
     fn breakpoint();
+
+    /// 64 bitu z hardwaroveho generatoru nahodnych cisel procesoru
+    /// (x86: RDSEED, jinak RDRAND; aarch64: RNDR s FEAT_RNG), `None` = CPU
+    /// ho nema nebo selhal. Plni zasobnik entropie jadra (`crate::random`).
+    /// Vychozi implementace nic nema - architektura ji prepise, kdyz umi.
+    fn hw_random() -> Option<u64> {
+        None
+    }
 }
 
 /// Per-CPU data architektury.

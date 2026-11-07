@@ -1,0 +1,8 @@
+[package]
+name = "csprng"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Kryptograficky generator nahodnych cisel (ChaCha20, BLAKE2s) pro jadro"
+
+[dependencies]

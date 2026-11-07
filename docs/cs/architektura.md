@@ -865,9 +865,7 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
   (jádro to zaloguje).
 - **Kvóty jen na proces**, ne pro skupiny procesů (job).
 - **Stack TCP/IP je smoltcp** (za modulem `stack` služby `netd`), vlastní
-  stack ho nahradí později; služba sítě čeká na nejvýš 63 socketů
-  (limit `OBJECT_WAIT_MANY`) a nemá kryptografický zdroj náhodnosti - viz
-  [sit.md](sit.md#plán).
+  stack ho nahradí později - viz [sit.md](sit.md#plán).
 - **Mezi třídami QoS přísná priorita** (nižší třídy mohou hladovět).
 - **Paměť po ukončených vláknech** (zásobníky jádra) se používá znovu, ale
   nevrací se.

@@ -33,7 +33,7 @@ TLS and HTTP come later. The interface for them is ready (see
 <path class="ln" d="M170 130 L298 135" marker-end="url(#na1)"/>
 <path class="ln-acc" d="M170 230 L298 160" marker-end="url(#na1)"/>
 <text class="m" x="200" y="200">RESTRICT: narrower session</text>
-<rect class="ok" x="300" y="80" width="200" height="110" rx="6"/><text class="t b" x="400" y="105" text-anchor="middle">netd</text><text class="m" x="400" y="125" text-anchor="middle">permissions, sockets = channels</text><text class="m" x="400" y="143" text-anchor="middle">smoltcp: ARP IPv4 ICMP UDP TCP</text><text class="m" x="400" y="161" text-anchor="middle">DHCP, own DNS resolver</text><text class="m" x="400" y="179" text-anchor="middle">1 thread, OBJECT_WAIT_MANY</text>
+<rect class="ok" x="300" y="80" width="200" height="110" rx="6"/><text class="t b" x="400" y="105" text-anchor="middle">netd</text><text class="m" x="400" y="125" text-anchor="middle">permissions, sockets = channels</text><text class="m" x="400" y="143" text-anchor="middle">smoltcp: ARP IPv4 ICMP UDP TCP</text><text class="m" x="400" y="161" text-anchor="middle">DHCP, own DNS resolver</text><text class="m" x="400" y="179" text-anchor="middle">1 thread, kernel port</text>
 <path class="ln" d="M500 135 L568 135" marker-end="url(#na1)"/>
 <text class="m" x="505" y="125">frames</text>
 <rect class="box" x="570" y="95" width="180" height="80" rx="6"/><text class="t b" x="660" y="120" text-anchor="middle">virtio-net</text><text class="m" x="660" y="139" text-anchor="middle">RX/TX queues, 2 KiB buffers</text><text class="m" x="660" y="157" text-anchor="middle">DMA in the IOMMU domain</text>
@@ -131,9 +131,12 @@ and starts DHCP. Then a single thread repeats:
 
 1. `poll` of the stack: received frames, TCP timers, DHCP,
 2. progress of pending requests (connections, reads, DNS queries, ping),
-3. `OBJECT_WAIT_MANY` on the driver channel and on client channels, with
-   a deadline from the nearest timer. A channel with a pending request is
-   not read, only its closing is watched.
+3. `PORT_WAIT` on a **kernel port** (see [Ports](syscalls.md#ports)),
+   with a deadline from the nearest timer. Every channel has two one-shot
+   registrations on the port: "readable" (renewed after a message is read,
+   but not while a request is pending) and "closed". The packet key carries
+   the slot number and its generation, so an old packet after the slot is
+   freed confuses nothing.
 
 | Property | Value |
 |---|---|
@@ -162,18 +165,25 @@ SYN simply stays unanswered and the connect ends with `TIMED_OUT`. On
 Linux slirp sends an RST (`CONNECTION_REFUSED`). The test checks
 whichever behaviour applies on the host (`refuses` in `net-test`).
 
-⚠️ **Limit on the number of sockets:** the service waits with a single
-`OBJECT_WAIT_MANY`, which takes at most 64 objects. So there can be at
-most 63 sessions and sockets at once. More get `NO_RESOURCES`. That is
-enough for the first programs. A kernel object for waiting on any number
-of channels (a port) will remove the limit.
+**Number of sockets:** thanks to the port the cost of waiting does not
+depend on the number of channels. There can be up to 16,384 sessions and
+sockets at once (protecting the service's memory); more get
+`NO_RESOURCES`. A test opens 200 sockets at once.
 
-⚠️ **Randomness:** TCP numbers, ephemeral ports and DNS query IDs come
-from a generator seeded from RDRAND (when the CPU has it), the time and
-the MAC. It is **not** a cryptographic generator. Without RDRAND the
-values are predictable and an attacker on the same network could spoof a
-DNS reply. The service logs this. A kernel entropy source belongs here
-(TODO).
+> **Change from the first version:** the service waited with a single
+> `OBJECT_WAIT_MANY` (at most 64 objects), so there could be at most 63
+> sockets. It now waits on a kernel port (`PORT_WAIT`).
+
+**Randomness:** TCP numbers (the smoltcp seed), ephemeral ports, DNS query
+IDs and ping identifiers come straight from the kernel generator
+(`RANDOM_GET`, ChaCha20, see [Random numbers](syscalls.md#random-numbers)).
+The service keeps no state of its own from which further values could be
+guessed. When the kernel generator is not seeded yet (no RDRAND and no
+virtio-rng), the service logs it.
+
+> **Change from the first version:** the service had its own
+> non-cryptographic generator seeded from RDRAND, the time and the MAC.
+> Without RDRAND the DNS query IDs were predictable.
 
 ⚠️ **DNS without verification:** replies are neither signed (DNSSEC) nor
 encrypted (DoT, DoH). Whoever controls the network can resolve a name to
@@ -413,8 +423,8 @@ synchronization and gradual adjustment instead of a jump.
 - **Name-based permissions:** `Target::Host` rules already expect
   applications that may only talk to their API (`*.example.com:443`). TLS
   adds verification that the server really owns the name.
-- **Randomness:** TLS needs a cryptographic generator. TLS will not happen
-  without a kernel entropy source (TODO above).
+- **Randomness:** TLS takes its keys from the kernel through
+  `libos::random::fill_seeded` (`REQUIRE_SEEDED`).
 
 ## Tests
 
@@ -469,9 +479,6 @@ The host also tests the formats and permissions: `cargo test -p netproto
   tests as a comparison suite. The protocol and programs do not change.
 - **IPv6:** SLAAC, ICMPv6; the resolver already handles AAAA. The protocol
   is ready (`IpAddr` addresses).
-- **A kernel object for waiting** on any number of channels: removes the
-  limit of 63 sockets.
-- **A kernel entropy source** (syscall): for TCP, DNS and above all TLS.
 - **Shared memory for data** instead of copying in messages (as for the
   disk).
 - **More cards**, static configuration, DNS cache, periodic NTP.

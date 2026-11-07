@@ -908,8 +908,6 @@ fine for now):
   IOMMU DMA is not restricted (the kernel logs it).
 - **Quotas only per process**, not for groups of processes (job).
 - **The TCP/IP stack is smoltcp** (behind the `stack` module of the `netd`
-  service), our own stack replaces it later; the network service waits on
-  at most 63 sockets (the `OBJECT_WAIT_MANY` limit) and has no
-  cryptographic randomness source - see [network.md](network.md#plan).
+  service), our own stack replaces it later - see [network.md](network.md#plan).
 - **Strict priority between QoS classes** (lower classes can starve).
 - **Memory of finished threads** (kernel stacks) is reused but not returned.
