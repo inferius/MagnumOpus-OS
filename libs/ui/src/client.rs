@@ -380,7 +380,13 @@ impl Window {
 }
 
 /// Spusti aplikaci s rozhranim z knihovny v okne. Vraci po zavreni okna.
-pub fn run<A: App>(ch: Channel, mut app: A, mode: Mode, w: u32, h: u32) -> Result<()> {
+pub fn run<A: App>(ch: Channel, app: A, mode: Mode, w: u32, h: u32) -> Result<()> {
+    run_with(ch, app, mode, w, h, None)
+}
+
+/// Jako [`run`], navic cte zpravy z kanalu `extra` (sluzba, od ktere
+/// aplikace bere data) a predava je [`App::external`].
+pub fn run_with<A: App>(ch: Channel, mut app: A, mode: Mode, w: u32, h: u32, extra: Option<Channel>) -> Result<()> {
     let mut win = Window::open(ch, mode, w, h, &app.title())?;
     let mut ui: Ui<A::Msg> = Ui::new(Text::system(), win.w, win.h);
     let mut dirty = true;
@@ -389,6 +395,22 @@ pub fn run<A: App>(ch: Channel, mut app: A, mode: Mode, w: u32, h: u32) -> Resul
             ui.rebuild(app.title(), app.view());
             render(&mut win, &mut ui)?;
             dirty = false;
+        }
+        // Zpravy z dalsiho kanalu (bez blokovani okna).
+        if let Some(x) = &extra
+            && win.queue.is_empty()
+        {
+            let rd = libos::Signals::READABLE | libos::Signals::PEER_CLOSED;
+            let items = [(win.ch.handle(), rd), (x.handle(), libos::Signals::READABLE)];
+            let obs = libos::wait_many(&items, None)?.1;
+            if obs[1].intersects(libos::Signals::READABLE) {
+                while let Ok(m) = x.try_read() {
+                    dirty |= app.external(&m.data);
+                }
+                if !obs[0].intersects(rd) {
+                    continue;
+                }
+            }
         }
         let ev = match win.next(None) {
             Ok(e) => e,

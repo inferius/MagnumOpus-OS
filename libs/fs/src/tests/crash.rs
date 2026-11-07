@@ -54,7 +54,7 @@ impl BlockDevice for CrashDevice {
 }
 
 /// Stav systemu jako mapa cesta -> obsah.
-fn snapshot_state(fs: &mut Fs<impl BlockDevice>) -> BTreeMap<alloc::string::String, Vec<u8>> {
+pub(super) fn snapshot_state(fs: &mut Fs<impl BlockDevice>) -> BTreeMap<alloc::string::String, Vec<u8>> {
     let mut out = BTreeMap::new();
     for e in fs.list("/").unwrap() {
         let path = alloc::format!("/{}", e.name);

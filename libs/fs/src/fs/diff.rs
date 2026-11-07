@@ -140,6 +140,11 @@ impl<D: BlockDevice> Fs<D> {
     /// v originalu, cas zmeny obsahu zachovany. Spolecne pro obnovu ze
     /// snapshotu a merge.
     pub(super) fn copy_content(&mut self, root: &Child, src: u64, dst: u64) -> Result<()> {
+        // Ulozeny strom (snapshot, commit): okamzita kopie sdilenim bloku.
+        if matches!(root, Child::Disk(_)) {
+            self.share_file(super::reflink::Src::Fixed(*root), src, dst, true)?;
+            return Ok(());
+        }
         let i = self.inode(root, src)?;
         let mut off = 0u64;
         while off < i.size {

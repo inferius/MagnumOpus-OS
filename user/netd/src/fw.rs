@@ -28,6 +28,8 @@ pub struct Firewall {
     pub user: UserRules,
     dns_block: Vec<String>,
     pub profile: String,
+    /// Neoverene DNS a NTP v zaloze (podle profilu site od fwd).
+    pub unauthenticated_fallback: bool,
     audit: VecDeque<AuditRecord>,
     audit_capacity: usize,
     next_seq: u64,
@@ -100,6 +102,7 @@ impl Firewall {
             user: UserRules::default(),
             dns_block: Vec::new(),
             profile: d.profile,
+            unauthenticated_fallback: d.unauthenticated_fallback,
             audit: VecDeque::new(),
             audit_capacity: d.audit_capacity as usize,
             next_seq: 1,
@@ -129,6 +132,7 @@ impl Firewall {
         };
         self.dns_block = c.dns_block;
         self.profile = c.profile;
+        self.unauthenticated_fallback = c.unauthenticated_fallback;
         self.audit_capacity = (c.audit_capacity as usize).max(16);
         while self.audit.len() > self.audit_capacity {
             self.audit.pop_front();

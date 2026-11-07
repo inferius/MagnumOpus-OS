@@ -112,15 +112,20 @@ pub const JOB_SET_LIMIT: u64 = 43;
 /// Stav rozpoctu jobu. `(job, out_ptr)`; job potrebuje `READ`, na `out_ptr`
 /// zapise [`crate::job::JobInfo`] (48 B)
 pub const JOB_INFO: u64 = 44;
+/// Plynula korekce realneho casu (Resource s pravem `SET_CLOCK`).
+/// `(resource, offset_ns i64, freq_ppb i64, flags, out_ptr)`; `flags`
+/// z [`crate::time::adjust`], na `out_ptr` (0 = nic) zapise
+/// [`crate::time::AdjustStatus`] po zmene
+pub const CLOCK_ADJUST: u64 = 45;
 
 /// Framebuffer z firmware (objekt z bootstrapu `FRAMEBUFFER`).
 /// `(vmo, op, out_ptr)`; `op` z [`fb_op`]. `INFO` potrebuje `READ` a na
 /// `out_ptr` zapise [`FbInfo`] (16 B); `CLAIM` a `RELEASE` potrebuji
 /// `WRITE`. Jiny objekt pameti = `WRONG_TYPE`.
-pub const FB_CONTROL: u64 = 45;
+pub const FB_CONTROL: u64 = 46;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 46;
+pub const COUNT: u64 = 47;
 
 /// Operace `FB_CONTROL`.
 pub mod fb_op {

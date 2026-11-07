@@ -10,7 +10,13 @@
 //! `zil` (intent log), `defrag` (defragmentace), `check` (kontrola
 //! konzistence).
 
+mod blocks;
 mod check;
+mod dataopt;
+mod dedup;
+mod reflink;
+mod scrub;
+mod sharing;
 mod commit;
 mod data;
 mod dataset;
@@ -54,7 +60,9 @@ use crate::store::{FormatOptions, Store};
 pub use check::CheckReport;
 pub use commit::{BranchInfo, CommitInfo, id_hex};
 pub use dataset::DatasetInfo;
+pub use dedup::DedupReport;
 pub use defrag::DefragReport;
+pub use scrub::ScrubStatus;
 pub use diff::{Change, ChangeKind};
 pub use handles::{Handle, Revision, access, share};
 pub use history::{FileVersion, RestoreMode, Undone};
@@ -218,6 +226,17 @@ pub struct Fs<D: BlockDevice> {
     jr: journal::DsJournal,
     /// Kdo provadi operace pri prehrani logu (`Record::Actor`).
     actor_override: Option<u64>,
+    /// Rozbalene komprimovane kusy (faze 3).
+    chunks: blocks::ChunkCache,
+    /// Nastaveni dat nactenych datasetu (`data_settings`).
+    dcfg: BTreeMap<u64, crate::datarec::DataSettings>,
+    /// Fyzicke useky zapsane v teto transakci na misto (predalokace):
+    /// zacatek -> delka. Intent log je zapise i bez nove generace vzniku.
+    inplace: BTreeMap<u64, u64>,
+    /// Rozpracovany pruchod deduplikace na pozadi.
+    dedup: dedup::DedupPass,
+    /// `fsync` narazil na diru z nulovych bloku (log ji neumi): commit.
+    zil_hole: bool,
 }
 
 /// Volby pripojeni.
@@ -318,6 +337,8 @@ impl<D: BlockDevice> Fs<D> {
         // Jen pro cteni i kvuli neznamemu bitu ro_compat a nejiste obnove
         // (nastavi `open`).
         s.read_only |= no_durability || opts.read_only;
+        // Od ted smi cteni opravovat spatne kopie (ne jen pro cteni).
+        s.start_healing();
         let mut fs = Self {
             s,
             now: Timestamp::UNIX_EPOCH,
@@ -338,7 +359,14 @@ impl<D: BlockDevice> Fs<D> {
             owner_override: None,
             jr: journal::DsJournal::default(),
             actor_override: None,
+            chunks: blocks::ChunkCache::default(),
+            dcfg: BTreeMap::new(),
+            inplace: BTreeMap::new(),
+            dedup: dedup::DedupPass::default(),
+            zil_hole: false,
         };
+        // Sdilene bloky: dokud tabulka nema zaznam, uvolnuje se primo.
+        fs.s.share_live = fs.share_any()?;
         fs.replay_log()?;
         if !fs.s.read_only {
             // Svazek bez historie (z doby pred fazi 2): odted ji vede.

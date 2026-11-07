@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terminál</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+.page { max-width: 1400px; }
+#tdesk { height: 720px; margin-top: var(--s4); }
+#twin { left: 16px; right: 16px; top: 16px; bottom: 16px; }
+.tbody { display: grid; grid-template-columns: 1fr 280px; height: 100%; background: var(--c-term-bg); color: var(--c-term-ink); }
+.tmain { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#blocks { flex: 1 1 auto; overflow: auto; padding: var(--s4) var(--s5) var(--s2); font-family: var(--font-mono); font-size: var(--t-mono-size);
+  line-height: var(--t-mono-line); font-feature-settings: "calt" 0, "liga" 0; scroll-behavior: smooth; }
+.blk { position: relative; margin-bottom: var(--s4); border-left: 3px solid var(--c-border); padding-left: var(--s4); border-radius: 2px;
+  animation: blk-in var(--m-base) var(--ease-enter); }
+@keyframes blk-in { from { opacity: 0; transform: translateY(6px); } }
+.blk.ok { border-left-color: var(--c-ok); }
+.blk.run { border-left-color: var(--c-accent); }
+.blk.err { border-left-color: var(--c-danger); }
+.blk.preview { border-left-color: var(--c-warn); }
+.blk.agent { border-left-color: var(--c-ai); }
+.blk-head { display: flex; align-items: center; gap: var(--s3); min-height: 28px; }
+.blk-head .cmd { font-weight: 600; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.blk-head .meta { color: var(--c-term-dim); font-size: var(--t-caption-size); font-family: var(--font-ui); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.blk-act { display: flex; gap: 2px; opacity: 0; transition: opacity var(--m-fast); }
+.blk:hover .blk-act, .blk:focus-within .blk-act { opacity: 1; }
+.blk-act button { width: 28px; height: 28px; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--c-term-dim); cursor: pointer; display: grid; place-items: center; }
+.blk-act button:hover { background: var(--c-surface-3); color: var(--c-term-ink); }
+.blk.collapsed .blk-out { display: none; }
+.blk-out { margin-top: var(--s2); }
+.st { font-family: var(--font-ui); }
+.c-dim { color: var(--c-term-dim); } .c-ok { color: var(--c-term-green); } .c-err { color: var(--c-term-red); } .c-warn { color: var(--c-term-yellow); }
+.c-blue { color: var(--c-term-blue); } .c-mag { color: var(--c-term-magenta); } .c-cyan { color: var(--c-term-cyan); }
+.ttab { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.ttab th { text-align: left; font-weight: 400; color: var(--c-term-dim); padding: 2px var(--s5) 2px 0; border-bottom: 1px solid var(--c-border); cursor: pointer; white-space: nowrap; }
+.ttab th small { font-size: 10px; color: var(--c-term-dim); opacity: .8; margin-left: 4px; }
+.ttab td { padding: 2px var(--s5) 2px 0; white-space: nowrap; }
+.ttab td.r, .ttab th.r { text-align: right; }
+.ttab tr:hover td { background: var(--c-surface-3); }
+.tfoot { color: var(--c-term-dim); margin-top: var(--s2); font-family: var(--font-ui); font-size: var(--t-small-size); }
+.errbox { border: 1px solid color-mix(in srgb, var(--c-danger) 45%, transparent); background: color-mix(in srgb, var(--c-danger-soft) 60%, transparent);
+  border-radius: var(--r-control); padding: var(--s3) var(--s4); font-family: var(--font-ui); font-size: var(--t-small-size); max-width: 680px; }
+.errbox .code { font-family: var(--font-mono); font-weight: 600; color: var(--c-danger); }
+.errbox .loc { font-family: var(--font-mono); margin: var(--s2) 0; white-space: pre; color: var(--c-term-ink); }
+.diffbox { border: 1px solid color-mix(in srgb, var(--c-warn) 50%, transparent); border-radius: var(--r-control); overflow: hidden; max-width: 680px; font-family: var(--font-ui); font-size: var(--t-small-size); }
+.diffbox header { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); background: var(--c-warn-soft); color: var(--c-ink); }
+.diffbox ul { list-style: none; margin: 0; padding: var(--s2) var(--s4); font-family: var(--font-mono); max-height: 150px; overflow: auto; }
+.diffbox li { display: flex; gap: var(--s3); }
+.diffbox footer { display: flex; gap: var(--s3); padding: var(--s3) var(--s4); border-top: 1px solid var(--c-border); flex-wrap: wrap; align-items: center; }
+.prog { display: flex; align-items: center; gap: var(--s3); font-family: var(--font-ui); font-size: var(--t-small-size); }
+.prog .progress { width: 220px; }
+/* Radek vstupu */
+.input-wrap { position: relative; border-top: 1px solid var(--c-border); padding: var(--s3) var(--s5) var(--s3); background: var(--c-term-bg); }
+.prompt-row { display: flex; align-items: center; gap: var(--s3); }
+.cwd { display: inline-flex; align-items: center; gap: var(--s1); height: 28px; padding: 0 var(--s3); border-radius: var(--r-pill); background: var(--c-accent-soft);
+  color: var(--c-accent-ink); font-family: var(--font-ui); font-size: var(--t-small-size); font-weight: 600; white-space: nowrap; }
+#line { flex: 1 1 auto; min-width: 0; height: 36px; border: 0; background: transparent; font-family: var(--font-mono); font-size: var(--t-body-size); color: var(--c-term-ink);
+  font-feature-settings: "calt" 0, "liga" 0; }
+#line:focus-visible { outline: none; }
+.input-wrap:focus-within { box-shadow: inset 0 2px 0 var(--c-focus); }
+.hintbar { display: flex; gap: var(--s4); flex-wrap: wrap; margin-top: var(--s2); font-size: var(--t-caption-size); color: var(--c-term-dim); align-items: center; }
+.ghost { position: absolute; pointer-events: none; color: var(--c-term-dim); font-family: var(--font-mono); font-size: var(--t-body-size); white-space: pre; }
+#compl { position: absolute; bottom: calc(100% - 4px); left: 120px; width: 380px; max-height: 260px; overflow: auto; padding: var(--s2); z-index: 50; font-size: var(--t-small-size); }
+#compl [role="option"] { display: grid; grid-template-columns: 20px 1fr auto; gap: var(--s3); align-items: center; min-height: 32px; padding: 0 var(--s3); border-radius: var(--r-xs); cursor: pointer; }
+#compl [role="option"][aria-selected="true"] { background: var(--c-accent-soft); }
+#compl .nm { font-family: var(--font-mono); font-weight: 600; }
+#compl .ty { color: var(--c-ink-muted); font-size: var(--t-caption-size); }
+#compl .hd { padding: var(--s2) var(--s3); font-size: var(--t-caption-size); color: var(--c-ink-muted); font-weight: 600; }
+/* Panel uloh */
+.tasks-panel { border-left: 1px solid var(--c-border); background: var(--c-surface-2); color: var(--c-ink); display: flex; flex-direction: column; min-height: 0; }
+.tasks-panel h2 { font-size: var(--t-body-size); display: flex; align-items: center; gap: var(--s2); padding: var(--s4) var(--s4) var(--s2); margin: 0; }
+.tasks-panel ul { list-style: none; margin: 0; padding: 0 var(--s3) var(--s3); overflow: auto; }
+.task { padding: var(--s3); border-radius: var(--r-control); margin-bottom: var(--s2); background: var(--c-surface); border: 1px solid var(--c-border); font-size: var(--t-small-size); }
+.task.agent { border-left: 4px solid var(--c-ai); }
+.task .t1 { display: flex; align-items: center; gap: var(--s2); font-weight: 600; }
+.task .t2 { color: var(--c-ink-muted); font-size: var(--t-caption-size); margin: var(--s1) 0 var(--s2); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task .t3 { display: flex; align-items: center; gap: var(--s2); }
+.task .progress { flex: 1; }
+.player { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
+.scen { display: flex; gap: var(--s1); flex-wrap: wrap; }
+.scen button[aria-current="true"] { background: var(--c-accent-soft); color: var(--c-accent-ink); border-color: var(--c-accent); }
+@media (max-width: 900px) { .tbody { grid-template-columns: 1fr; } .tasks-panel { display: none; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#line">Přeskočit na příkazový řádek</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header style="margin-bottom:var(--s4)">
+    <h1>Terminál</h1>
+    <p class="lead">Barevný a interaktivní terminál nad nativním protokolem: každý příkaz je blok, tabulky mají schéma, doplňování zná typy, změny souborů jdou nanečisto a úlohy jsou v panelu vpravo.</p>
+  </header>
+  <div class="player" aria-label="Ukázky">
+    <div class="scen" id="scen" role="group" aria-label="Ukázky"></div>
+    <span class="spacer"></span>
+    <button class="btn small" id="play" aria-pressed="false">Přehrát vše dokola</button>
+    <button class="btn small ghost" id="clear">Vyčistit</button>
+  </div>
+  <p class="note" style="margin-top:var(--s3)">Nebo piš sám: <code>ls</code>, <code>ls | where </code> + <span class="kbd">Tab</span>, <code>rm ~/tmp/*.log</code>, <code>undo</code>, <code>cd ~/Projekt</code>, <code>help</code>. <span class="kbd">Ctrl</span> <span class="kbd">Shift</span> <span class="kbd">F</span> přepne zápis B / C.</p>
+
+  <div class="desk" id="tdesk">
+    <section class="win mode-custom" id="twin" role="region" aria-label="Terminál">
+      <div class="win-title" style="height:44px">
+        <span class="trust" tabindex="0" role="button" aria-label="Terminál, systémová aplikace. Smí: domovská složka, spouštět programy.">
+          <svg class="ic s"><use href="#ic-shield"/></svg>Terminál<span class="perm"><svg class="ic"><use href="#ic-folder"/></svg></span></span>
+        <div class="tabs" role="tablist" aria-label="Relace">
+          <button class="tab" role="tab" aria-selected="true"><svg class="ic s"><use href="#ic-terminal"/></svg>Relace 1</button>
+          <button class="tab" role="tab" aria-selected="false" title="Relace patří službě termd a přežije zavření okna">build <span class="chip" style="height:18px;padding:0 6px">odpojená</span></button>
+          <button class="btn ghost small icon" aria-label="Nová relace"><svg class="ic s"><use href="#ic-plus"/></svg></button>
+        </div>
+        <div class="drag-zone" aria-hidden="true"></div>
+        <div class="seg" role="radiogroup" aria-label="Zápis jazyka" id="notation" style="padding:2px">
+          <button role="radio" aria-checked="true" data-value="B" title="příkazový zápis" style="min-height:26px;padding:0 10px">B</button>
+          <button role="radio" aria-checked="false" data-value="C" title="výrazový zápis" style="min-height:26px;padding:0 10px">C</button></div>
+        <div class="wbtns"><button class="wbtn" aria-label="Minimalizovat"><svg class="ic"><use href="#ic-min"/></svg></button><button class="wbtn" aria-label="Maximalizovat"><svg class="ic"><use href="#ic-max"/></svg></button><button class="wbtn close" aria-label="Zavřít"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      </div>
+      <div class="win-body">
+        <div class="tbody">
+          <div class="tmain">
+            <div id="blocks" role="log" aria-live="polite" aria-label="Výstup příkazů" tabindex="0"></div>
+            <div class="input-wrap">
+              <div class="prompt-row">
+                <span class="cwd"><svg class="ic s"><use href="#ic-folder"/></svg><span id="cwd">~/projekt</span></span>
+                <input id="line" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="compl-list" aria-label="Příkaz" autocomplete="off" spellcheck="false">
+                <span class="ghost" id="ghost" aria-hidden="true"></span>
+              </div>
+              <div class="hintbar" id="hintbar">
+                <span><span class="kbd">Tab</span> doplnit</span><span><span class="kbd">&uarr;</span> historie</span><span><span class="kbd">Ctrl</span> <span class="kbd">C</span> přerušit</span>
+                <span><span class="kbd">Ctrl</span> <span class="kbd">Shift</span> <span class="kbd">P</span> nanečisto</span><span class="spacer"></span><span id="undo-hint"></span>
+              </div>
+              <div class="popover" id="compl" hidden><div class="hd" id="compl-hd"></div><div id="compl-list" role="listbox" aria-label="Návrhy"></div></div>
+            </div>
+          </div>
+          <aside class="tasks-panel" aria-label="Úlohy">
+            <h2><svg class="ic s"><use href="#ic-tasks"/></svg>Úlohy<span class="spacer"></span><span class="count" id="tcount">2</span></h2>
+            <ul id="tasks"></ul>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var blocks = document.getElementById('blocks'), line = document.getElementById('line');
+  var compl = document.getElementById('compl'), complList = document.getElementById('compl-list');
+  var notation = 'B', history = [], hIdx = 0, undoStack = [];
+  function esc(s) { return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+  function now() { var d = new Date(); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function reduced() { return document.documentElement.getAttribute('data-motion') === 'reduce' || (matchMedia('(prefers-reduced-motion: reduce)').matches && document.documentElement.getAttribute('data-motion') !== 'full'); }
+
+  // ---- Zapis B <-> C (ukazkove prevody, ve skutecnosti je dela formatovac shlang).
+  var TO_C = {
+    'ls ~/Dokumenty -r | where size > 100MB && mtime < now() - 1y | sort size -d':
+      'ls("~/Dokumenty", recursive: true).where(it => it.size > 100MB && it.mtime < now() - 1y).sort("size", desc: true)',
+    'rm ~/tmp/*.log': 'rm("~/tmp/*.log")',
+    'cd ~/Projekt': 'cd("~/Projekt")',
+    'let n = async { ls ~/Fotky -r | where ext == "jpg" | count }': 'let n = async { ls("~/Fotky", recursive: true).where(it => it.ext == "jpg").count() }',
+    'ls': 'ls()', 'undo': 'undo()', 'help': 'help()'
+  };
+  function show(cmd) { if (notation === 'B') return cmd; return TO_C[cmd] || cmd; }
+
+  // ---- Bloky -------------------------------------------------------------
+  var bid = 0;
+  function block(cmd, cls, meta, out, opts) {
+    opts = opts || {};
+    var id = 'b' + (++bid);
+    var icon = { ok: 'check', err: 'alert', run: 'refresh', preview: 'eye', agent: 'agent' }[cls] || 'right';
+    var html = '<article class="blk ' + cls + '" id="' + id + '" aria-label="Příkaz ' + esc(cmd) + '">' +
+      '<div class="blk-head"><span class="st ' + ({ ok: 'c-ok', err: 'c-err', run: 'c-blue', preview: 'c-warn', agent: 'c-mag' }[cls] || '') + '">' + ic(icon, 's') + '</span>' +
+      (opts.agent ? '<span class="chip agent">' + ic('agent', 's') + 'agent</span>' : '') +
+      '<span class="cmd" data-cmd="' + esc(cmd) + '">' + esc(show(cmd)) + '</span><span class="meta">' + meta + '</span>' +
+      '<span class="blk-act"><button aria-label="Sbalit blok" data-a="fold">' + ic('down', 's') + '</button><button aria-label="Kopírovat výstup" data-a="copy">' + ic('copy', 's') + '</button>' +
+      '<button aria-label="Spustit znovu" data-a="again">' + ic('refresh', 's') + '</button><button aria-label="Porovnat s předchozím během" data-a="diff">' + ic('diff', 's') + '</button></span></div>' +
+      '<div class="blk-out">' + out + '</div></article>';
+    blocks.insertAdjacentHTML('beforeend', html);
+    var el = document.getElementById(id);
+    el.querySelector('[data-a=fold]').addEventListener('click', function () {
+      var c = el.classList.toggle('collapsed'); this.setAttribute('aria-label', c ? 'Rozbalit blok' : 'Sbalit blok');
+      this.innerHTML = ic(c ? 'right' : 'down', 's');
+    });
+    el.querySelector('[data-a=again]').addEventListener('click', function () { run(cmd); });
+    blocks.scrollTop = blocks.scrollHeight;
+    return el;
+  }
+
+  var FILES = [
+    ['zaloha-2024.tar', 'file', 4.2e9, '2024-09-03'], ['video-dovolena.mkv', 'file', 2.7e9, '2025-06-18'],
+    ['obraz-disku.img', 'file', 1.2e9, '2025-02-11'], ['prezentace.pptx', 'file', 312e6, '2025-03-30'], ['skeny.pdf', 'file', 148e6, '2025-05-02']
+  ];
+  function size(b) { var u = ['B', 'kB', 'MB', 'GB']; var i = 0; while (b >= 1000 && i < 3) { b /= 1000; i++; } return (i ? b.toFixed(1).replace('.', ',') : b) + ' ' + u[i]; }
+  function tableOut(rows) {
+    return '<table class="ttab" aria-label="Výsledek: soubory"><thead><tr><th scope="col">name<small>text</small></th><th scope="col">kind<small>druh</small></th><th class="r" scope="col" aria-sort="descending">size<small>velikost &#9662;</small></th><th scope="col">mtime<small>čas</small></th></tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr><td class="c-blue">' + r[0] + '</td><td class="c-dim">' + r[1] + '</td><td class="r">' + size(r[2]) + '</td><td>' + r[3].split('-').reverse().map(Number).join('. ') + '</td></tr>'; }).join('') +
+      '</tbody></table><div class="tfoot">' + rows.length + ' řádků &middot; tabulka se schématem: sloupec řadíš klikem, <code>size</code> se ukazuje v jednotkách, <code>mtime</code> v místním čase</div>';
+  }
+
+  // ---- Prikazy (ukazkovy interpret) --------------------------------------
+  function run(cmd) {
+    cmd = cmd.trim(); if (!cmd) return;
+    history.push(cmd); hIdx = history.length;
+    var c = cmd.replace(/\s+/g, ' ');
+    if (c === 'ls' || c.indexOf('ls ~/Dokumenty') === 0 || c.indexOf('ls |') === 0) {
+      var rows = c === 'ls' ? [['src', 'dir', 0, '2025-11-07'], ['Cargo.toml', 'file', 1840, '2025-11-06'], ['README.md', 'file', 6210, '2025-10-30']] : FILES;
+      if (c === 'ls') return block(cmd, 'ok', '3 ms &middot; ' + now(), '<table class="ttab"><thead><tr><th>name<small>text</small></th><th>kind<small>druh</small></th><th class="r">size<small>velikost</small></th></tr></thead><tbody>' +
+        rows.map(function (r) { return '<tr><td class="' + (r[1] === 'dir' ? 'c-mag' : 'c-blue') + '">' + r[0] + (r[1] === 'dir' ? '/' : '') + '</td><td class="c-dim">' + r[1] + '</td><td class="r">' + (r[1] === 'dir' ? '-' : size(r[2])) + '</td></tr>'; }).join('') + '</tbody></table>');
+      return block(cmd, 'ok', '41 ms &middot; ' + now(), tableOut(rows));
+    }
+    if (c.indexOf('rm ~/tmp') === 0) {
+      var list = []; for (var i = 1; i <= 34; i++) list.push('~/tmp/build-' + ('0' + i).slice(-2) + '.log');
+      var el = block(cmd, 'preview', 'nanečisto &middot; ' + now(),
+        '<div class="diffbox" role="group" aria-label="Náhled změn"><header>' + ic('eye', 's') + '<b>Zámek nebezpečných operací:</b> příkaz by smazal 34 souborů (limit 20). Nic se zatím nezměnilo.</header>' +
+        '<ul>' + list.slice(0, 6).map(function (f) { return '<li><span class="c-err">removed</span><span>' + f + '</span></li>'; }).join('') + '<li class="c-dim">&hellip; a 28 dalších</li></ul>' +
+        '<footer><button class="btn small primary" data-take>' + ic('check', 's') + 'Převzít 34 změn</button><button class="btn small" data-drop>Zahodit</button>' +
+        '<span class="note" style="margin:0">před převzetím vznikne snapshot, <code>undo</code> vše vrátí</span></footer></div>');
+      el.querySelector('[data-take]').addEventListener('click', function () {
+        el.className = 'blk ok'; el.querySelector('.st').className = 'st c-ok'; el.querySelector('.st').innerHTML = ic('check', 's');
+        el.querySelector('.meta').innerHTML = 'převzato &middot; ' + now();
+        el.querySelector('.blk-out').innerHTML = '<span class="c-ok">&#10003; smazáno 34 souborů</span> <span class="c-dim">&middot; snapshot shell-undo-7</span>';
+        undoStack.push('34 souborů v ~/tmp'); setUndo();
+      });
+      el.querySelector('[data-drop]').addEventListener('click', function () {
+        el.className = 'blk err'; el.querySelector('.blk-out').innerHTML = '<span class="c-dim">zahozeno (SH_REJECTED), nic se nezměnilo</span>';
+      });
+      return el;
+    }
+    if (c === 'undo') {
+      if (!undoStack.length) return block(cmd, 'err', now(), errBox('SH_NO_UNDO', 'Není co vrátit', 'Posledních 16 změn se pamatuje; žádná teď není.', null));
+      var what = undoStack.pop(); setUndo();
+      return block(cmd, 'ok', '120 ms &middot; ' + now(), '<span class="c-ok">&#10003; vráceno: ' + what + '</span> <span class="c-dim">(podle snapshotu shell-undo-7)</span>');
+    }
+    if (c.indexOf('cd ') === 0) {
+      return block(cmd, 'err', now(), errBox('NOT_FOUND', 'Cesta neexistuje', 'Složka <code>~/Projekt</code> nebyla nalezena.',
+        'cd ~/Projekt\n   ^^^^^^^^^^ tady', 'Myslel jsi <a href="#" data-fix="cd ~/Projekty">~/Projekty</a>?'));
+    }
+    if (c.indexOf('let n = async') === 0) {
+      addTask({ id: 'jpg', name: 'n = async { ... count }', cmd: 'ls ~/Fotky -r | where ext == "jpg" | count', p: 0 });
+      var el2 = block(cmd, 'run', 'úloha na pozadí &middot; ' + now(), '<div class="prog">' + ic('refresh', 's') + '<span>běží jako úloha <b>n</b>, výsledek přes <code>await n</code></span></div>');
+      var p = 0, t = setInterval(function () {
+        p += 9; updTask('jpg', Math.min(p, 100));
+        if (p >= 100) {
+          clearInterval(t); el2.className = 'blk ok'; el2.querySelector('.st').className = 'st c-ok'; el2.querySelector('.st').innerHTML = ic('check', 's');
+          el2.querySelector('.blk-out').innerHTML = '<span class="c-ok">&#10003; úloha n hotová:</span> <b>4 812</b> <span class="c-dim">&middot; int &middot; 2,8 s</span>';
+        }
+      }, 260);
+      return el2;
+    }
+    if (c === 'help') {
+      return block(cmd, 'ok', now(), '<table class="ttab"><tbody>' + [['ls', 'file-list', 'soubory jako tabulka'], ['where', 'list-filter', 'filtr řádků'], ['sort', 'list-sort', 'řazení'], ['rm', 'file-remove', 'smazat (nanečisto nad limit)'], ['undo', 'command-undo', 'vrátit poslední změnu'], ['explain', 'error-explain', 'vysvětlit chybu']]
+        .map(function (r) { return '<tr><td class="c-blue">' + r[0] + '</td><td class="c-dim">' + r[1] + '</td><td>' + r[2] + '</td></tr>'; }).join('') + '</tbody></table>');
+    }
+    var w = c.split(' ')[0];
+    return block(cmd, 'err', now(), errBox('SH_UNKNOWN', 'Neznámé jméno', 'Příkaz ani funkce <code>' + esc(w) + '</code> neexistuje.', null, 'Zkus <code>help</code> nebo <span class="kbd">Tab</span> na prázdném řádku.'));
+  }
+  function errBox(code, title, text, loc, fix) {
+    return '<div class="errbox" role="alert"><div><span class="code">' + code + '</span> &middot; <b>' + title + '</b></div><div>' + text + '</div>' +
+      (loc ? '<div class="loc">' + esc(loc) + '</div>' : '') + (fix ? '<div style="margin-top:var(--s2)">' + fix + '</div>' : '') +
+      '<div class="tfoot">' + ic('info', 's') + ' <a href="#" onclick="return false">explain ' + code + '</a> &middot; text z dokumentace chyb</div></div>';
+  }
+  blocks.addEventListener('click', function (e) {
+    var a = e.target.closest('[data-fix]'); if (!a) return;
+    e.preventDefault(); line.value = a.dataset.fix; line.focus();
+  });
+  function setUndo() {
+    document.getElementById('undo-hint').innerHTML = undoStack.length ? '<button class="btn small" id="undo-btn">' + ic('undo', 's') + 'Vrátit: ' + undoStack[undoStack.length - 1] + '</button>' : '';
+    var b = document.getElementById('undo-btn'); if (b) b.addEventListener('click', function () { run('undo'); });
+  }
+
+  // ---- Ulohy -------------------------------------------------------------
+  var TASKS = [
+    { id: 'test', name: 'cargo xtask test', cmd: 'relace build, odpojená', p: 64 },
+    { id: 'agent', name: 'Úklid ~/Stažené', cmd: 'v klonu, 14 změn zatím', p: 38, agent: true }
+  ];
+  function renderTasks() {
+    document.getElementById('tasks').innerHTML = TASKS.map(function (t) {
+      return '<li class="task' + (t.agent ? ' agent' : '') + '" id="t-' + t.id + '"><div class="t1">' + (t.agent ? '<span class="chip agent">' + ic('agent', 's') + 'agent</span>' : ic('terminal', 's')) +
+        '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(t.name) + '</span></div>' +
+        '<div class="t2">' + esc(t.cmd) + '</div><div class="t3"><div class="progress' + (t.agent ? ' agent' : '') + '" role="progressbar" aria-label="Průběh ' + esc(t.name) + '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + t.p + '"><i style="width:' + t.p + '%"></i></div>' +
+        '<span class="num muted" style="font-size:11px;width:32px;text-align:right">' + (t.p >= 100 ? 'hotovo' : t.p + ' %') + '</span>' +
+        '<button class="btn ghost small icon" aria-label="' + (t.p >= 100 ? 'Výsledek' : 'Připojit') + '">' + ic(t.p >= 100 ? 'check' : 'right', 's') + '</button>' +
+        (t.p < 100 ? '<button class="btn ghost small icon" aria-label="Zrušit ' + esc(t.name) + '">' + ic('stop', 's') + '</button>' : '') + '</div></li>';
+    }).join('');
+    document.getElementById('tcount').textContent = TASKS.filter(function (t) { return t.p < 100; }).length;
+  }
+  function addTask(t) { TASKS = TASKS.filter(function (x) { return x.id !== t.id; }); TASKS.unshift(t); renderTasks(); }
+  function updTask(id, p) { TASKS.forEach(function (t) { if (t.id === id) t.p = p; }); renderTasks(); }
+  renderTasks();
+  setInterval(function () { TASKS.forEach(function (t) { if (t.id === 'test' && t.p < 100) t.p = Math.min(100, t.p + 1); }); renderTasks(); }, 1500);
+
+  // ---- Doplnovani podle typu ---------------------------------------------
+  var CMDS = [['ls', 'file-list', 'soubory jako tabulka'], ['where', 'list-filter', 'filtr'], ['sort', 'list-sort', 'řazení'], ['select', 'list-select', 'sloupce'],
+    ['rm', 'file-remove', 'smazat'], ['cp', 'file-copy', 'kopírovat'], ['undo', 'command-undo', 'vrátit'], ['preview', 'command-preview', 'nanečisto'], ['explain', 'error-explain', 'vysvětlit chybu']];
+  var FIELDS = [['name', 'text'], ['path', 'path'], ['kind', 'druh'], ['size', 'velikost'], ['mtime', 'čas'], ['ext', 'text']];
+  var PATHS = [['~/Dokumenty/', 'složka'], ['~/Fotky/', 'složka'], ['~/Projekty/', 'složka'], ['~/tmp/', 'složka']];
+  var items = [], sel = 0;
+  function suggest() {
+    var v = line.value, m;
+    if (/(\|\s*(where|sort|select)\s+)(\w*)$/.test(v)) {
+      m = v.match(/(\w*)$/)[1];
+      items = FIELDS.filter(function (f) { return f[0].indexOf(m) === 0; }).map(function (f) { return { t: f[0], ty: f[1], ic: 'filter', rep: m }; });
+      return 'Pole vstupu (schéma z <code>ls</code>)';
+    }
+    if (/^\s*\w*$/.test(v) || /\|\s*\w*$/.test(v)) {
+      m = v.match(/(\w*)$/)[1];
+      items = CMDS.filter(function (c) { return c[0].indexOf(m) === 0; }).map(function (c) { return { t: c[0], ty: c[1], ic: 'terminal', rep: m }; });
+      return 'Příkazy';
+    }
+    m = v.match(/(\S*)$/)[1];
+    items = PATHS.filter(function (p) { return p[0].indexOf(m) === 0; }).map(function (p) { return { t: p[0], ty: p[1], ic: 'folder', rep: m }; });
+    return 'Cesty';
+  }
+  function openCompl() {
+    var hd = suggest();
+    if (!items.length) { closeCompl(); return; }
+    if (items.length === 1) { accept(items[0]); return; }
+    sel = 0; compl.hidden = false; line.setAttribute('aria-expanded', 'true');
+    document.getElementById('compl-hd').innerHTML = hd;
+    drawCompl();
+  }
+  function drawCompl() {
+    complList.innerHTML = items.map(function (it, i) {
+      return '<div role="option" id="co' + i + '" aria-selected="' + (i === sel) + '" data-i="' + i + '">' + ic(it.ic, 's') + '<span class="nm">' + it.t + '</span><span class="ty">' + it.ty + '</span></div>';
+    }).join('');
+    line.setAttribute('aria-activedescendant', 'co' + sel);
+    complList.querySelectorAll('[role=option]').forEach(function (o) { o.addEventListener('mousedown', function (e) { e.preventDefault(); accept(items[+o.dataset.i]); }); });
+  }
+  function closeCompl() { compl.hidden = true; line.setAttribute('aria-expanded', 'false'); line.removeAttribute('aria-activedescendant'); }
+  function accept(it) {
+    line.value = line.value.slice(0, line.value.length - it.rep.length) + it.t + (/\/$/.test(it.t) ? '' : ' ');
+    closeCompl(); line.focus(); ghost();
+  }
+  // Napoveda z historie jako sedy text za kurzorem.
+  var gh = document.getElementById('ghost');
+  function ghost() {
+    var v = line.value, s = '';
+    if (v) for (var i = history.length - 1; i >= 0; i--) if (history[i].indexOf(v) === 0 && history[i] !== v) { s = history[i].slice(v.length); break; }
+    var cv = document.createElement('canvas').getContext('2d'); cv.font = getComputedStyle(line).font;
+    gh.style.left = (line.offsetLeft + cv.measureText(v).width) + 'px'; gh.style.top = (line.offsetTop + 8) + 'px'; gh.textContent = s;
+    gh.dataset.rest = s;
+  }
+  line.addEventListener('input', function () { ghost(); if (!compl.hidden) openCompl(); });
+  line.addEventListener('keydown', function (e) {
+    if (!compl.hidden) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % items.length; drawCompl(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + items.length) % items.length; drawCompl(); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); accept(items[sel]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); closeCompl(); return; }
+    }
+    if (e.key === 'Tab') { e.preventDefault(); openCompl(); return; }
+    if (e.key === 'ArrowRight' && gh.dataset.rest && line.selectionStart === line.value.length) { e.preventDefault(); line.value += gh.dataset.rest; ghost(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); var v = line.value; line.value = ''; ghost(); run(v); return; }
+    if (e.key === 'ArrowUp' && history.length) { e.preventDefault(); hIdx = Math.max(0, hIdx - 1); line.value = history[hIdx]; ghost(); return; }
+    if (e.key === 'ArrowDown' && history.length) { e.preventDefault(); hIdx = Math.min(history.length, hIdx + 1); line.value = history[hIdx] || ''; ghost(); return; }
+  });
+  line.addEventListener('blur', function () { setTimeout(closeCompl, 100); });
+
+  // ---- Zapis B / C ---------------------------------------------------------
+  window.MO_SEG(document.getElementById('notation'), function (v) {
+    notation = v;
+    blocks.querySelectorAll('.cmd').forEach(function (c) { c.textContent = show(c.dataset.cmd); });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+      e.preventDefault(); document.querySelector('#notation [data-value=' + (notation === 'B' ? 'C' : 'B') + ']').click();
+    }
+  });
+
+  // ---- Ukazky (prehravani) ------------------------------------------------
+  var SCEN = [
+    { name: 'Tabulka', cmd: 'ls ~/Dokumenty -r | where size > 100MB && mtime < now() - 1y | sort size -d' },
+    { name: 'Doplňování', type: 'ls | where s', tab: true },
+    { name: 'Nanečisto a undo', cmd: 'rm ~/tmp/*.log', after: function (el) { setTimeout(function () { var b = el.querySelector('[data-take]'); if (b) b.click(); }, 1400); setTimeout(function () { run('undo'); }, 2600); } },
+    { name: 'Chyba', cmd: 'cd ~/Projekt' },
+    { name: 'Async úloha', cmd: 'let n = async { ls ~/Fotky -r | where ext == "jpg" | count }' }
+  ];
+  var playing = false, timer = null, si = 0;
+  document.getElementById('scen').innerHTML = SCEN.map(function (s, i) { return '<button class="btn small" data-s="' + i + '">' + (i + 1) + '. ' + s.name + '</button>'; }).join('');
+  document.querySelectorAll('[data-s]').forEach(function (b) { b.addEventListener('click', function () { stop(); playOne(+b.dataset.s); }); });
+  function typeInto(text, done) {
+    line.value = ''; line.focus();
+    if (reduced()) { line.value = text; ghost(); done(); return; }
+    var i = 0;
+    (function step() { line.value = text.slice(0, ++i); ghost(); if (i < text.length) timer = setTimeout(step, 28); else timer = setTimeout(done, 350); })();
+  }
+  function playOne(i, next) {
+    document.querySelectorAll('[data-s]').forEach(function (b) { b.setAttribute('aria-current', +b.dataset.s === i); });
+    var s = SCEN[i];
+    typeInto(s.type || s.cmd, function () {
+      if (s.tab) { openCompl(); timer = setTimeout(function () { sel = 3 % items.length; drawCompl(); timer = setTimeout(function () { accept(items[sel]); line.value += '> 1MB'; timer = setTimeout(function () { var v = line.value; line.value = ''; ghost(); run(v); if (next) timer = setTimeout(next, 2200); }, 700); }, 700); }, 900); return; }
+      line.value = ''; ghost(); var el = run(s.cmd); if (s.after) s.after(el);
+      if (next) timer = setTimeout(next, s.after ? 4200 : 3000);
+    });
+  }
+  function loop() { if (!playing) return; playOne(si, function () { si = (si + 1) % SCEN.length; loop(); }); }
+  function stop() { playing = false; clearTimeout(timer); var b = document.getElementById('play'); b.setAttribute('aria-pressed', 'false'); b.textContent = 'Přehrát vše dokola'; }
+  document.getElementById('play').addEventListener('click', function () {
+    if (playing) { stop(); return; }
+    playing = true; this.setAttribute('aria-pressed', 'true'); this.textContent = 'Pozastavit'; loop();
+  });
+  document.getElementById('clear').addEventListener('click', function () { stop(); blocks.innerHTML = ''; });
+
+  // Uvodni stav: dva bloky.
+  run('ls');
+  block('cargo xtask test', 'run', 'relace build &middot; běží', '<div class="prog">' + ic('refresh', 's') + '<span>testy 91 / 140</span><div class="progress"><i style="width:64%"></i></div></div>');
+});
+</script>
+</body>
+</html>

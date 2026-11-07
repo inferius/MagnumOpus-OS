@@ -98,6 +98,7 @@ pub fn progress(stack: &mut Stack, auth: &AuthRef, p: Pending, now: u64) -> Step
         }
         Pending::Connect(c) => tcp::connect_progress(stack, c, now),
         Pending::Resolve(res) => resolve::progress(stack, auth, res, now),
+        Pending::Forward(f) => resolve::progress_forward(stack, auth, f, now),
         Pending::Ping(png) => ping::progress(stack, png, now),
         Pending::Ask(a) => match ask_progress(stack, a, now) {
             Ok((granted, then)) => {

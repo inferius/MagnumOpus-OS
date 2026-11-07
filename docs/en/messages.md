@@ -198,7 +198,34 @@ invariant was broken (a kernel bug).
 | `netd: ovladac skoncil (zahozeno ramcu: ...)` | The card driver exited (faulty device) and the service exits with it (code 3). |
 | `netd: chybi handly ve startovni zprave` | The service was started incorrectly (code 1). |
 | `init: sluzbu site nelze spustit: ...` | No network card (`NOT_FOUND`) or the service did not answer. |
-| `init: hodiny serizeny podle NTP ...` | The time service set the clock from the NTP server; the offset is how far off the clock was. |
+| `ntpd: bezim, servery [...]` | Time synchronization runs; servers from `ntpd.toml` (the host server in tests). |
+| `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | First successful measurement (authenticated NTS or unauthenticated NTP in fallback; "offset", "delay"); `step` = the time was set with a jump (offset over 128 ms), `slew` = smooth adjustment. |
+| `ntpd: NTS-KE <server>: ...` | The NTS key exchange failed (connection, certificate, reply); the server is skipped this round. With an invalid certificate check the clock (RTC). |
+| `ntpd: neoverene servery: Never\|Fallback` | Init changed the rule ("unauthenticated servers") by network profile. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | No reply in this round (network, firewall, server). Next attempt after the interval; the clock keeps running at the last frequency. |
+| `ntpd: konfigurace: ...` | The configuration from init is invalid; `ntpd` exits. Fix `ntpd.toml`. |
+| `timed: prvni synchronizace: skok o N ms` | The first correction from `ntpd` was large: the time was set with a jump (the only allowed jump). |
+| `timed: prvni synchronizace: dorovnani o N ms` | The first correction was small: it is applied smoothly. |
+| `timed: klient synchronizace skoncil` | `ntpd` exited or closed the channel; the clock keeps running without corrections. |
+| `init: ntpd.toml: ...`, `init: timed odmitl ntpd: ...`, `init: ntpd hlasi: ...` | `ntpd` did not start (invalid configuration, `timed` refused the channel, start-up error); the clock stays as set from the RTC. |
+| `init: synchronizaci casu nelze spustit: ...` | Summary of the above; the system runs without synchronization. |
+| `init: korenove certifikaty aktualizovany (N kB)` | The Mozilla CA set in `/system/config/certs/mozilla.pem` changed (first start, new system version). See [TLS and HTTP](tls-http.md#root-certificate-store). |
+| `init: uloziste certifikatu nelze pripravit: ...` | No FS or no permissions: programs have no CA and `https` fails (`UnknownIssuer`). |
+| `fetch: uloziste certifikatu: ...`, `fetch: /certs/F: ...` | `fetch` cannot read the store or a file (over 4 MiB, FS error); the other files are loaded. |
+| `fetch: TLS: ...` | The TLS configuration cannot be created; `fetch` exits with code 2. |
+| `revocd: bezim (OneCRL ano\|ne, N zaznamu, mezipamet na FS\|jen v pameti)` | The revocation service runs ("OneCRL yes/no, N entries, cache on the FS / in memory only"); N = OneCRL entries loaded from the FS. |
+| `revocd: OneCRL: N zaznamu` | A new list of revoked CAs was downloaded and stored. |
+| `revocd: OneCRL: neplatny dokument` | The downloaded JSON cannot be read ("invalid document"); the previous list stays, a new attempt after `retry_minutes`. |
+| `revocd: <url>: ...` | Downloading a CRL or OneCRL failed (HTTP status, connection error); the URL is not retried for `retry_minutes`, the revocation status is unknown meanwhile. |
+| `revocd: <url>: neni CRL` | The server returned something other than a CRL ("not a CRL"). |
+| `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` did not finish the request even after the limit plus margin (a bug or a stuck service). The program got `TIMED_OUT`, the channel is unusable. OP = operation code (`netproto::op`). |
+| `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | The system resolver runs ("resolvers", "anchors"). |
+| `dnsd: <resolver>: ...` | A resolver did not answer (connection, TLS, HTTP); `dnsd` tries the next one. |
+| `dnsd: <name>: DNSSEC neprosel (...)` | The answer is spoofed or damaged ("DNSSEC failed", reason in brackets); the program gets `CORRUPTED`. |
+| `netd: dnsd skoncil (...), preklad bez nej` | System resolution only by the profile rule ("dnsd exited"; public network = none). |
+| `init: sifrovane DNS nelze spustit (...)` | `dnsd` did not start ("encrypted DNS cannot start"); resolution only by the profile rule. |
+| `init: kontrolu odvolani certifikatu nelze spustit: ...` | `revocd` did not start; programs check OCSP stapling only. |
+| `init: revocd bez FS (...)` | No FS: the cache is in memory only and there are no root CAs for OneCRL over https. |
 | `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` did not pass the channel to `fwd` ("without the firewall service"). The public profile applies (nothing inbound), questions of applications with `ask` are denied right away. |
 | `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` exited. The last configuration applies, pending and further questions are denied. |
 | `netd: profil site P` | `fwd` sent a configuration with another network profile (`public`, `home`, ...). See [Network profiles](firewall.md#network-profiles). |

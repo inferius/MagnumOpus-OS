@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varianty stylu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+/* Stranka k vyberu stylu: tri varianty vedle sebe, prepinac motivu. */
+:root {
+  --page: #f4f4f2; --ink: #1d1d1b; --muted: #5d5d58; --line: #d9d9d4;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --page: #141413; --ink: #ececea; --muted: #a3a39d; --line: #33332f;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #141413; --ink: #ececea; --muted: #a3a39d; --line: #33332f;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.5 Inter, system-ui, sans-serif; }
+header { max-width: 1400px; margin: 0 auto; padding: 24px 16px 8px;
+  display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 22px; flex: 1 1 300px; }
+header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; font-weight: 400; }
+button.theme { font: inherit; padding: 6px 12px; border-radius: 6px;
+  border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+button.theme:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+main { max-width: 1400px; margin: 0 auto; padding: 8px 16px 40px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 20px; }
+section.v { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+section.v > h2 { margin: 0; padding: 12px 14px 2px; font-size: 17px; }
+section.v > .desc { margin: 0; padding: 0 14px 12px; color: var(--muted); font-size: 13px; }
+dl { margin: 0; padding: 10px 14px 14px; display: grid; grid-template-columns: max-content 1fr;
+  gap: 4px 12px; font-size: 13px; border-top: 1px solid var(--line); }
+dt { color: var(--muted); }
+dd { margin: 0; }
+
+/* ---------- spolecna kostra mini plochy ---------- */
+.desk { position: relative; height: 380px; overflow: hidden;
+  background: var(--d-bg); font-family: var(--d-font); color: var(--d-ink); }
+.win { position: absolute; background: var(--d-surface); color: var(--d-ink);
+  border: 1px solid var(--d-border); border-radius: var(--d-r); box-shadow: var(--d-shadow);
+  overflow: hidden; display: flex; flex-direction: column; }
+.win.inactive { opacity: 1; }
+.win.inactive .title { color: var(--d-muted); background: var(--d-title-in); }
+.title { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 8px;
+  background: var(--d-title); border-bottom: 1px solid var(--d-border); font-size: 13px; font-weight: 600; }
+.badge { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px;
+  border-radius: var(--d-r-s); background: var(--d-trust-bg); color: var(--d-trust-ink);
+  font-size: 11px; font-weight: 600; white-space: nowrap; }
+.badge svg { width: 12px; height: 12px; }
+.title .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbtn { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--d-r-s);
+  color: var(--d-muted); }
+.wbtn svg { width: 12px; height: 12px; }
+.wbtn.close:hover { background: var(--d-danger); color: #fff; }
+.body { padding: 10px; font-size: 12px; flex: 1; }
+.term { font-family: var(--d-mono); font-size: 11.5px; background: var(--d-term-bg); color: var(--d-term-ink); }
+.term .blk { border-left: 3px solid var(--d-accent); padding: 2px 0 4px 8px; margin-bottom: 8px; }
+.term .cmd { color: var(--d-term-ink); font-weight: 600; }
+.term .ok { color: var(--d-ok); }
+.term .dim { color: var(--d-term-dim); }
+.term table { border-collapse: collapse; margin-top: 3px; }
+.term td, .term th { padding: 1px 10px 1px 0; text-align: left; }
+.term th { color: var(--d-term-dim); font-weight: 400; }
+.btn { display: inline-block; padding: 5px 12px; border-radius: var(--d-r-s); font-size: 12px; font-weight: 600;
+  background: var(--d-accent); color: var(--d-on-accent); }
+.btn.ghost { background: transparent; color: var(--d-ink); border: 1px solid var(--d-border); }
+.row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: var(--d-r-s); }
+.item.sel { background: var(--d-sel); }
+.item svg { width: 16px; height: 16px; color: var(--d-icon); flex: none; }
+.bar { position: absolute; display: flex; align-items: center; gap: 6px; background: var(--d-bar);
+  border: 1px solid var(--d-border); box-shadow: var(--d-shadow); }
+.bar .ico { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--d-r-s);
+  color: var(--d-icon); position: relative; }
+.bar .ico svg { width: 18px; height: 18px; }
+.bar .ico.on::after { content: ""; position: absolute; width: 4px; height: 4px; border-radius: 2px;
+  background: var(--d-accent); }
+.bar .clock { font-size: 11px; color: var(--d-muted); padding: 0 6px; font-variant-numeric: tabular-nums; }
+.bar .tasks { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--d-r-s);
+  background: var(--d-sel); color: var(--d-ink); white-space: nowrap; }
+.bar .tasks b { color: var(--d-ai); }
+
+/* ---------- A: Klidny (minimalisticky) ---------- */
+.A { --d-font: Inter, system-ui, sans-serif; --d-mono: "JetBrains Mono", ui-monospace, monospace;
+  --d-r: 12px; --d-r-s: 8px;
+  --d-bg: linear-gradient(160deg, #dfe6e4, #eceae4);
+  --d-surface: #fbfbf9; --d-title: #fbfbf9; --d-title-in: #f1f1ee; --d-border: #e1e1dc;
+  --d-ink: #1f2321; --d-muted: #66706b; --d-accent: #1f7a6d; --d-on-accent: #fff;
+  --d-sel: #e3efec; --d-icon: #3e4a46; --d-bar: rgba(251,251,249,.86);
+  --d-shadow: 0 8px 28px rgba(30,40,36,.12), 0 1px 3px rgba(30,40,36,.08);
+  --d-trust-bg: #e3efec; --d-trust-ink: #155a50; --d-danger: #c4413a; --d-ok: #1f7a46; --d-ai: #7a4fd0;
+  --d-term-bg: #fbfbf9; --d-term-ink: #1f2321; --d-term-dim: #6f7873; }
+:root[data-theme="dark"] .A, .dk .A { --d-bg: linear-gradient(160deg, #1b2422, #1c1b19);
+  --d-surface: #222624; --d-title: #222624; --d-title-in: #1c1f1e; --d-border: #343a37;
+  --d-ink: #e6ebe8; --d-muted: #9aa5a0; --d-accent: #5cc4b2; --d-on-accent: #0d2622;
+  --d-sel: #26403b; --d-icon: #c2ccc8; --d-bar: rgba(34,38,36,.88);
+  --d-shadow: 0 8px 28px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.3);
+  --d-trust-bg: #20403a; --d-trust-ink: #9fe3d5; --d-ok: #6fd39a; --d-ai: #b79bff;
+  --d-term-bg: #1a1d1c; --d-term-ink: #e6ebe8; --d-term-dim: #8f9a95; }
+.A .bar { left: 50%; transform: translateX(-50%); bottom: 10px; padding: 5px 8px; border-radius: 14px; }
+
+/* ---------- B: Technicky (presny) ---------- */
+.B { --d-font: "IBM Plex Sans", Inter, system-ui, sans-serif; --d-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --d-r: 4px; --d-r-s: 3px;
+  --d-bg: #d7dbe0; --d-surface: #ffffff; --d-title: #eef0f3; --d-title-in: #f6f7f9; --d-border: #b9c0c9;
+  --d-ink: #161b22; --d-muted: #58616d; --d-accent: #0b62c4; --d-on-accent: #fff;
+  --d-sel: #dce8f7; --d-icon: #2f3946; --d-bar: #eef0f3; --d-shadow: none;
+  --d-trust-bg: #161b22; --d-trust-ink: #ffd166; --d-danger: #c9302c; --d-ok: #1a7f37; --d-ai: #8250df;
+  --d-term-bg: #0f141a; --d-term-ink: #d8dee6; --d-term-dim: #8592a3; }
+:root[data-theme="dark"] .B, .dk .B { --d-bg: #0b0e12; --d-surface: #151a21; --d-title: #1b222b; --d-title-in: #151a21;
+  --d-border: #2e3845; --d-ink: #dde3ea; --d-muted: #8b97a6; --d-accent: #58a6ff; --d-on-accent: #04192f;
+  --d-sel: #1c3350; --d-icon: #c3ccd7; --d-bar: #151a21;
+  --d-trust-bg: #ffd166; --d-trust-ink: #161b22; --d-ok: #56d364; --d-ai: #c297ff;
+  --d-term-bg: #0b0e12; }
+.B .bar { left: 0; top: 0; bottom: 0; width: 44px; flex-direction: column; padding: 8px 0; border-width: 0 1px 0 0; }
+.B .bar .clock { writing-mode: vertical-rl; margin-top: auto; }
+.B .bar .tasks { writing-mode: vertical-rl; padding: 8px 3px; }
+.B .bar .ico.on::after { left: -1px; top: 8px; width: 3px; height: 14px; }
+.B .title { height: 30px; font-weight: 500; }
+
+/* ---------- C: Hravy (vrely) ---------- */
+.C { --d-font: Nunito, "Atkinson Hyperlegible", system-ui, sans-serif; --d-mono: "JetBrains Mono", ui-monospace, monospace;
+  --d-r: 18px; --d-r-s: 11px;
+  --d-bg: radial-gradient(circle at 20% 20%, #ffd9c7, transparent 50%), radial-gradient(circle at 80% 70%, #d9d0ff, transparent 55%), #fff4ec;
+  --d-surface: #fffdfb; --d-title: #fff1ea; --d-title-in: #fbf3ef; --d-border: #f0dcd2;
+  --d-ink: #2a1f2d; --d-muted: #74657a; --d-accent: #6b3fd6; --d-on-accent: #fff;
+  --d-sel: #efe8ff; --d-icon: #6b3fd6; --d-bar: rgba(255,253,251,.9);
+  --d-shadow: 0 10px 30px rgba(107,63,214,.16);
+  --d-trust-bg: #ffe2d4; --d-trust-ink: #8a2f0c; --d-danger: #d6365a; --d-ok: #1d8a4e; --d-ai: #d6365a;
+  --d-term-bg: #2a1f2d; --d-term-ink: #fbefe9; --d-term-dim: #bba9c0; }
+:root[data-theme="dark"] .C, .dk .C { --d-bg: radial-gradient(circle at 20% 20%, #4a2a22, transparent 50%), radial-gradient(circle at 80% 70%, #2f2560, transparent 55%), #1a1420;
+  --d-surface: #251d2b; --d-title: #2e2434; --d-title-in: #251d2b; --d-border: #3e3246;
+  --d-ink: #f6edf3; --d-muted: #b9a8c2; --d-accent: #b79bff; --d-on-accent: #1d0f40;
+  --d-sel: #3a2d5c; --d-icon: #c9b4ff; --d-bar: rgba(37,29,43,.9); --d-shadow: 0 10px 30px rgba(0,0,0,.45);
+  --d-trust-bg: #5a2a1a; --d-trust-ink: #ffcdb8; --d-ok: #6fd39a; --d-ai: #ff8fa8;
+  --d-term-bg: #17111c; }
+.C .bar { left: 10px; right: 10px; bottom: 10px; padding: 5px 8px; border-radius: 20px; }
+.C .bar .ico { border-radius: 50%; background: var(--d-sel); }
+.C .title { background: var(--d-title); border-bottom: 0; }
+.C .btn { border-radius: 999px; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .A { --d-bg: linear-gradient(160deg, #1b2422, #1c1b19);
+    --d-surface: #222624; --d-title: #222624; --d-title-in: #1c1f1e; --d-border: #343a37;
+    --d-ink: #e6ebe8; --d-muted: #9aa5a0; --d-accent: #5cc4b2; --d-on-accent: #0d2622;
+    --d-sel: #26403b; --d-icon: #c2ccc8; --d-bar: rgba(34,38,36,.88);
+    --d-shadow: 0 8px 28px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.3);
+    --d-trust-bg: #20403a; --d-trust-ink: #9fe3d5; --d-ok: #6fd39a; --d-ai: #b79bff;
+    --d-term-bg: #1a1d1c; --d-term-ink: #e6ebe8; --d-term-dim: #8f9a95; }
+  :root:not([data-theme="light"]) .B { --d-bg: #0b0e12; --d-surface: #151a21; --d-title: #1b222b; --d-title-in: #151a21;
+    --d-border: #2e3845; --d-ink: #dde3ea; --d-muted: #8b97a6; --d-accent: #58a6ff; --d-on-accent: #04192f;
+    --d-sel: #1c3350; --d-icon: #c3ccd7; --d-bar: #151a21;
+    --d-trust-bg: #ffd166; --d-trust-ink: #161b22; --d-ok: #56d364; --d-ai: #c297ff; --d-term-bg: #0b0e12; }
+  :root:not([data-theme="light"]) .C { --d-bg: radial-gradient(circle at 20% 20%, #4a2a22, transparent 50%), radial-gradient(circle at 80% 70%, #2f2560, transparent 55%), #1a1420;
+    --d-surface: #251d2b; --d-title: #2e2434; --d-title-in: #251d2b; --d-border: #3e3246;
+    --d-ink: #f6edf3; --d-muted: #b9a8c2; --d-accent: #b79bff; --d-on-accent: #1d0f40;
+    --d-sel: #3a2d5c; --d-icon: #c9b4ff; --d-bar: rgba(37,29,43,.9); --d-shadow: 0 10px 30px rgba(0,0,0,.45);
+    --d-trust-bg: #5a2a1a; --d-trust-ink: #ffcdb8; --d-ok: #6fd39a; --d-ai: #ff8fa8; --d-term-bg: #17111c; }
+}
+@media (max-width: 420px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- Linkove ikony 24x24, tah 1.75 -->
+  <symbol id="i-term" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3-3 3M12 15h5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/></symbol>
+  <symbol id="i-net" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></symbol>
+  <symbol id="i-min" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 12h12"/></symbol>
+  <symbol id="i-max" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></symbol>
+  <!-- Plne ikony (varianta C) -->
+  <symbol id="f-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="4" fill="currentColor"/><path d="M7.5 9l3 3-3 3M12.5 15h4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="f-folder" viewBox="0 0 24 24"><path fill="currentColor" d="M3 8a3 3 0 0 1 3-3h4l2 2h6a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/></symbol>
+  <symbol id="f-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="currentColor"/><circle cx="12" cy="12" r="3" fill="#fff"/></symbol>
+  <!-- Geometricke ikony na mrizce (varianta B) -->
+  <symbol id="g-term" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="miter"><rect x="3.5" y="4.5" width="17" height="15"/><path d="M7 9l3 3-3 3M12 15h5"/></symbol>
+  <symbol id="g-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="miter"><path d="M3.5 5.5h6l2 2h9v11h-17z"/></symbol>
+  <symbol id="g-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="6" height="6"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/></symbol>
+</svg>
+
+<header>
+  <h1>Varianty stylu MagnumOpus-OS<p>Stejná plocha ve třech charakterech: okno terminálu, průzkumník, lišta, odznak důvěry. Vyber charakter; ostatní volby (lišta, ikony, písmo) jdou kombinovat.</p></h1>
+  <button class="theme" type="button" id="themeBtn" aria-pressed="false">Přepnout motiv</button>
+</header>
+
+<main>
+  <!-- ======================= A ======================= -->
+  <section class="v" aria-labelledby="hA">
+    <h2 id="hA">A - Klidný</h2>
+    <p class="desc">Minimalistický, hodně vzduchu, jedna tlumená barva akcentu, měkké stíny. Lišta jako plovoucí dok dole uprostřed.</p>
+    <div class="desk A" role="img" aria-label="Ukázka varianty A">
+      <div class="win" style="left:18px;top:18px;width:300px;height:210px">
+        <div class="title">
+          <span class="badge"><svg><use href="#i-shield"/></svg>Terminál &middot; ~/projekt</span>
+          <span class="name"></span>
+          <span class="wbtn"><svg><use href="#i-min"/></svg></span><span class="wbtn"><svg><use href="#i-max"/></svg></span><span class="wbtn close"><svg><use href="#i-x"/></svg></span>
+        </div>
+        <div class="body term">
+          <div class="blk"><span class="cmd">ls src | where size &gt; 4kb</span>
+            <table><tr><th>jméno</th><th>velikost</th><th>změněno</th></tr>
+            <tr><td>main.rs</td><td>12 kB</td><td>dnes 14:02</td></tr>
+            <tr><td>shell.rs</td><td>6 kB</td><td>včera</td></tr></table>
+            <span class="ok">&#10003; 2 položky</span> <span class="dim">&middot; 4 ms</span></div>
+          <div><span class="dim">&rsaquo;</span> cp *.rs <span class="dim">/zaloha/</span>&#9612;</div>
+        </div>
+      </div>
+      <div class="win inactive" style="left:170px;top:120px;width:250px;height:180px">
+        <div class="title">
+          <span class="badge"><svg><use href="#i-shield"/></svg>Soubory</span><span class="name"></span>
+          <span class="wbtn"><svg><use href="#i-min"/></svg></span><span class="wbtn"><svg><use href="#i-max"/></svg></span><span class="wbtn close"><svg><use href="#i-x"/></svg></span>
+        </div>
+        <div class="body">
+          <div class="item sel"><svg><use href="#i-folder"/></svg>Dokumenty</div>
+          <div class="item"><svg><use href="#i-folder"/></svg>Projekty</div>
+          <div class="item"><svg><use href="#i-doc"/></svg>poznamky.toml</div>
+          <div class="row"><span class="btn">Otevřít</span><span class="btn ghost">Zkusit bokem</span></div>
+        </div>
+      </div>
+      <div class="bar">
+        <span class="ico on"><svg><use href="#i-term"/></svg></span>
+        <span class="ico on"><svg><use href="#i-folder"/></svg></span>
+        <span class="ico"><svg><use href="#i-gear"/></svg></span>
+        <span class="tasks">3 úlohy &middot; <b>1 agent</b></span>
+        <span class="clock">14:05</span>
+      </div>
+    </div>
+    <dl><dt>písmo</dt><dd>Inter + JetBrains Mono</dd><dt>zaoblení</dt><dd>12 / 8 px</dd>
+      <dt>stíny</dt><dd>měkké, dvouvrstvé</dd><dt>ikony</dt><dd>linkové, tah 1,75</dd><dt>akcent</dt><dd>tlumená zelenomodrá</dd></dl>
+  </section>
+
+  <!-- ======================= B ======================= -->
+  <section class="v" aria-labelledby="hB">
+    <h2 id="hB">B - Technický</h2>
+    <p class="desc">Přesný, hustý, tenké linky místo stínů, malé zaoblení. Odznak důvěry výrazně kontrastní. Lišta svisle vlevo.</p>
+    <div class="desk B" role="img" aria-label="Ukázka varianty B">
+      <div class="win" style="left:62px;top:14px;width:300px;height:210px">
+        <div class="title">
+          <span class="badge"><svg><use href="#i-shield"/></svg>Terminál &middot; ~/projekt</span>
+          <span class="name"></span>
+          <span class="wbtn"><svg><use href="#i-min"/></svg></span><span class="wbtn"><svg><use href="#i-max"/></svg></span><span class="wbtn close"><svg><use href="#i-x"/></svg></span>
+        </div>
+        <div class="body term">
+          <div class="blk"><span class="cmd">ls src | where size &gt; 4kb</span>
+            <table><tr><th>jméno</th><th>velikost</th><th>změněno</th></tr>
+            <tr><td>main.rs</td><td>12 kB</td><td>dnes 14:02</td></tr>
+            <tr><td>shell.rs</td><td>6 kB</td><td>včera</td></tr></table>
+            <span class="ok">ok 2 položky</span> <span class="dim">&middot; 4 ms</span></div>
+          <div><span class="dim">&gt;</span> cp *.rs <span class="dim">/zaloha/</span>&#9612;</div>
+        </div>
+      </div>
+      <div class="win inactive" style="left:200px;top:130px;width:240px;height:175px">
+        <div class="title">
+          <span class="badge"><svg><use href="#i-shield"/></svg>Soubory</span><span class="name"></span>
+          <span class="wbtn"><svg><use href="#i-min"/></svg></span><span class="wbtn"><svg><use href="#i-max"/></svg></span><span class="wbtn close"><svg><use href="#i-x"/></svg></span>
+        </div>
+        <div class="body">
+          <div class="item sel"><svg><use href="#g-folder"/></svg>Dokumenty</div>
+          <div class="item"><svg><use href="#g-folder"/></svg>Projekty</div>
+          <div class="item"><svg><use href="#i-doc"/></svg>poznamky.toml</div>
+          <div class="row"><span class="btn">Otevřít</span><span class="btn ghost">Zkusit bokem</span></div>
+        </div>
+      </div>
+      <div class="bar">
+        <span class="ico on"><svg><use href="#g-term"/></svg></span>
+        <span class="ico on"><svg><use href="#g-folder"/></svg></span>
+        <span class="ico"><svg><use href="#g-gear"/></svg></span>
+        <span class="tasks">3 &middot; <b>AI 1</b></span>
+        <span class="clock">14:05</span>
+      </div>
+    </div>
+    <dl><dt>písmo</dt><dd>IBM Plex Sans + IBM Plex Mono</dd><dt>zaoblení</dt><dd>4 / 3 px</dd>
+      <dt>stíny</dt><dd>žádné, linky 1 px</dd><dt>ikony</dt><dd>geometrické na mřížce</dd><dt>akcent</dt><dd>modrá, odznak žlutý</dd></dl>
+  </section>
+
+  <!-- ======================= C ======================= -->
+  <section class="v" aria-labelledby="hC">
+    <h2 id="hC">C - Vřelý</h2>
+    <p class="desc">Hravější, výrazný fialový akcent, velké zaoblení, plné ikony v kruzích. Lišta přes celou šířku dole, ale odsazená.</p>
+    <div class="desk C" role="img" aria-label="Ukázka varianty C">
+      <div class="win" style="left:18px;top:16px;width:300px;height:210px">
+        <div class="title">
+          <span class="badge"><svg><use href="#i-shield"/></svg>Terminál &middot; ~/projekt</span>
+          <span class="name"></span>
+          <span class="wbtn"><svg><use href="#i-min"/></svg></span><span class="wbtn"><svg><use href="#i-max"/></svg></span><span class="wbtn close"><svg><use href="#i-x"/></svg></span>
+        </div>
+        <div class="body term">
+          <div class="blk"><span class="cmd">ls src | where size &gt; 4kb</span>
+            <table><tr><th>jméno</th><th>velikost</th><th>změněno</th></tr>
+            <tr><td>main.rs</td><td>12 kB</td><td>dnes 14:02</td></tr>
+            <tr><td>shell.rs</td><td>6 kB</td><td>včera</td></tr></table>
+            <span class="ok">&#10003; 2 položky</span> <span class="dim">&middot; 4 ms</span></div>
+          <div><span class="dim">&rsaquo;</span> cp *.rs <span class="dim">/zaloha/</span>&#9612;</div>
+        </div>
+      </div>
+      <div class="win inactive" style="left:175px;top:115px;width:250px;height:180px">
+        <div class="title">
+          <span class="badge"><svg><use href="#i-shield"/></svg>Soubory</span><span class="name"></span>
+          <span class="wbtn"><svg><use href="#i-min"/></svg></span><span class="wbtn"><svg><use href="#i-max"/></svg></span><span class="wbtn close"><svg><use href="#i-x"/></svg></span>
+        </div>
+        <div class="body">
+          <div class="item sel"><svg><use href="#f-folder"/></svg>Dokumenty</div>
+          <div class="item"><svg><use href="#f-folder"/></svg>Projekty</div>
+          <div class="item"><svg><use href="#i-doc"/></svg>poznamky.toml</div>
+          <div class="row"><span class="btn">Otevřít</span><span class="btn ghost">Zkusit bokem</span></div>
+        </div>
+      </div>
+      <div class="bar">
+        <span class="ico on"><svg><use href="#f-term"/></svg></span>
+        <span class="ico on"><svg><use href="#f-folder"/></svg></span>
+        <span class="ico"><svg><use href="#f-gear"/></svg></span>
+        <span style="flex:1"></span>
+        <span class="tasks">3 úlohy &middot; <b>1 agent</b></span>
+        <span class="clock">14:05</span>
+      </div>
+    </div>
+    <dl><dt>písmo</dt><dd>Nunito + JetBrains Mono</dd><dt>zaoblení</dt><dd>18 / 11 px</dd>
+      <dt>stíny</dt><dd>barevné, měkké</dd><dt>ikony</dt><dd>plné, v kruzích</dd><dt>akcent</dt><dd>fialová, korálová pro AI</dd></dl>
+  </section>
+</main>
+
+<script>
+// Prepinac motivu: svetly <-> tmavy, pamatuje si volbu (kdyz uloziste jde).
+(function () {
+  var root = document.documentElement, btn = document.getElementById('themeBtn');
+  function cur() {
+    var t = root.getAttribute('data-theme');
+    if (t) return t;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  try { var s = localStorage.getItem('mo-theme'); if (s) root.setAttribute('data-theme', s); } catch (e) {}
+  function sync() { btn.setAttribute('aria-pressed', cur() === 'dark'); btn.textContent = cur() === 'dark' ? 'Světlý motiv' : 'Tmavý motiv'; }
+  btn.addEventListener('click', function () {
+    var n = cur() === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', n);
+    try { localStorage.setItem('mo-theme', n); } catch (e) {}
+    sync();
+  });
+  sync();
+})();
+</script>
+</body>
+</html>

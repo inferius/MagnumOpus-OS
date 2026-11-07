@@ -430,6 +430,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `actions <caller> [automat]` | - | `ok` + action call channel; `automat` = an agent's channel, every call is confirmed with a dialog (the caller cannot bypass it with the message flag) |
 | `inspect` | - | `ok` + inspection channel |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
+| `tasks <running> <agent>` | - | `ok` (task icon in the panel) |
 
 **Inspection** (`inspect`, for tests, later a screen reader and
 magnifier): list of windows, the accessibility tree of a window in screen
@@ -621,6 +622,31 @@ the accessibility action `set-value` or with the action `terminal.run`
 Connecting to the session service (`termd`, protocol `term::proto`) is
 done by the terminal thread: instead of the local line editor it sends
 `Run` and draws the output blocks into the same grid.
+
+## Task manager
+
+A window with the same data as the `tasks` command in the terminal (see
+[Task overview](architecture.md#task-overview-agreed)) and a "N tasks
+running" icon in the compositor panel.
+
+| Part | Where | What it does |
+|---|---|---|
+| protocol | `libs/taskproto` (proposal, agreed with the shell thread that builds `taskd`) | task list, change subscription with a snapshot and sequence numbers (resume after an outage), actions cancel, pause, resume, log; task registration by producers |
+| model and window | `libs/taskview` (host tests), program `gui-tasks` | list (agent tasks first), filters "agent only" and "finished", detail with progress and job usage, action buttons |
+| panel icon | `libs/comp` | "Úlohy: N", orange "Úlohy: N (agent M)" while an AI agent task runs; a click brings the task manager to the front |
+
+- **AI agent tasks** are clearly marked: a "[AGENT AI]" tag in the list,
+  an orange "Spustil agent AI (who)" label in the detail, a count in the
+  header and an orange panel icon.
+- **Permissions:** a button is enabled only when `taskd` allowed the action
+  for the caller (the task's `actions` bits) and the task state permits
+  it. `taskd` always decides (reply `ACCESS_DENIED`); a system task without
+  rights has all buttons disabled and the window says so.
+- **Now:** until `taskd` is in the system the window runs on test data
+  (`TestBackend` behaves like taskd: permission checks, state changes as
+  events) and init sends the icon count with the control command
+  `tasks <running> <agent>`. Once `taskd` exists, init gets a channel from
+  it (`connect`) for the window and the compositor (read-only).
 
 ## 3D: Venus and virgl (status)
 

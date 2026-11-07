@@ -20,7 +20,10 @@ cheap `fsync`) and **not waste space** (metadata overhead ~0.4 %).
 > journal, trash, undo of operations, file versions, automatic snapshots,
 > commits with a logical ID, branches and merge, "try changes aside",
 > extended attributes and expiry - described in the separate chapter
-> [FS history](fs-history.md). A v2 volume is not mounted
+> [FS history](fs-history.md) - and **phase 3 - data**: compression,
+> instant copies, deduplication, automatic holes, metadata 2x with
+> self-healing, data 2x, background scrub and preallocation - chapter
+> [FS data](fs-data.md). A v2 volume is not mounted
 > (`NOT_SUPPORTED`); data is not converted yet, disks from the `xtask` tool
 > are simply recreated.
 
@@ -31,10 +34,11 @@ what works:
 
 | Item | In the format | Driver today |
 |---|---|---|
-| volume UUID, feature flags | yes | **uses**; defined bits `INCOMPAT_TIME_SECS` ([times](#object-times)), `RO_COMPAT_ACL`, `RO_COMPAT_HISTORY` ([history](fs-history.md#on-disk)) |
+| volume UUID, feature flags | yes | **uses**; defined bits `INCOMPAT_TIME_SECS` ([times](#object-times)), `INCOMPAT_PTR_COPY`, `INCOMPAT_DATA` ([data](fs-data.md#on-disk)), `RO_COMPAT_ACL`, `RO_COMPAT_HISTORY` ([history](fs-history.md#on-disk)) |
 | device number in `BlockPtr`, `device_index/count` in the superblock | yes | **one device only**: the device must be 0 and the count 1, otherwise `CORRUPTED`; several disks (mirror, RAID) after phase 5 |
-| `BlockPtr` flags (compression, encryption, sharing, cloud) | reserved | **unused**; a node with a flag = `NOT_SUPPORTED` |
-| extent flags (preallocation) | reserved | **unused**; an extent with a flag = `NOT_SUPPORTED` |
+| second copy in `BlockPtr` (metadata 2x) | yes | **uses** ([self-healing](fs-data.md#metadata-2x-and-self-healing)) |
+| `BlockPtr` flags (compression, encryption, sharing, cloud) | reserved | **unused** for nodes (a node with a flag = `NOT_SUPPORTED`); data compression and sharing are in the extent |
+| extent flags (unwritten, shared, copy, compression) | yes | **uses** ([extent](fs-data.md#extent)) |
 | object flag `INODE_REMOTE` | reserved | **unused** (phase 6) |
 | permissions (`acl`), owner | yes | **uses** ([Permissions](#permissions-and-session-identity)) |
 | extended attributes (`XATTR`), count in the object record | yes | **uses** ([attributes](fs-history.md#extended-attributes-and-expiry)) |
@@ -74,6 +78,11 @@ what works:
 | Trash, undo of operations, file versions, automatic snapshots | done | [History](fs-history.md#trash) |
 | Commits with a logical ID, branches, three-way merge, "try changes aside" | done | [History: commits](fs-history.md#commits-and-logical-id) |
 | Extended attributes, file expiry | done | [History: attributes](fs-history.md#extended-attributes-and-expiry) |
+| Per-chunk compression (LZ4, Zstd; off by default) | done | [Data: compression](fs-data.md#compression) |
+| Instant copies of files, ranges and folders (shared blocks) | done | [Data: instant copies](fs-data.md#instant-copies-reflink) |
+| Deduplication in the background and at write | done | [Data: deduplication](fs-data.md#deduplication) |
+| Automatic holes, preallocation with in-place writes | done | [Data: preallocation](fs-data.md#preallocation) |
+| Metadata 2x with self-healing, optional data 2x, background scrub | done | [Data: self-healing](fs-data.md#metadata-2x-and-self-healing) |
 | Git layer, indexes, search | planned | [Versioning and git](#versioning-and-git) |
 
 ## Quick example
@@ -167,18 +176,18 @@ valid one is the one with the highest generation whose state can be loaded.
 | 56 | 8 | features_compat | features an older driver may use normally |
 | 64 | 8 | features_ro_compat | features an older driver may only read |
 | 72 | 8 | features_incompat | features without which the volume must not be mounted |
-| 80 | 40 | root | `BlockPtr` of the B+tree root |
-| 120 | 40 | space | `BlockPtr` of the AG table index |
-| 160 | 8 | zil_block | first intent log block of this epoch |
-| 168 | 8 | zil_seed | seed of the intent log checksums |
-| 176 | 8 | next_oid | next free object number |
-| 184 | 8 | snapshot_generation | generation of the last snapshot |
-| 192 | 8 | next_snapshot | number of the next snapshot (= dead list of the live version) |
-| 200 | 8 | dead_seq | sequence of the next dead list entry |
-| 208 | 4 | unicode_version | Unicode table version for names |
-| 212 | 2 | device_index | this device in the volume (0 for now) |
-| 214 | 2 | device_count | number of devices of the volume (1 for now) |
-| 216 | 32 | label | volume name (UTF-8, zero padded) |
+| 80 | 48 | root | `BlockPtr` of the B+tree root |
+| 128 | 48 | space | `BlockPtr` of the AG table index |
+| 176 | 8 | zil_block | first intent log block of this epoch |
+| 184 | 8 | zil_seed | seed of the intent log checksums |
+| 192 | 8 | next_oid | next free object number |
+| 200 | 8 | snapshot_generation | generation of the last snapshot |
+| 208 | 8 | next_snapshot | number of the next snapshot (= dead list of the live version) |
+| 216 | 8 | dead_seq | sequence of the next dead list entry |
+| 224 | 4 | unicode_version | Unicode table version for names |
+| 228 | 2 | device_index | this device in the volume (0 for now) |
+| 230 | 2 | device_count | number of devices of the volume (1 for now) |
+| 232 | 32 | label | volume name (UTF-8, zero padded) |
 | 4080 | 16 | csum | XXH3-128 of bytes 0..4080 |
 
 **Feature flags** work as in ext4: every bit = one format feature
@@ -190,6 +199,8 @@ never damages it by not understanding new structures.
 |---|---|---|---|
 | 0 | incompat | `INCOMPAT_REMOTE` | reserved: data only in the cloud (phase 6); the driver still refuses it |
 | 1 | incompat | `INCOMPAT_TIME_SECS` | times are seconds i64 + nanoseconds u32 ([times](#object-times)); new volumes always have it |
+| 2 | incompat | `INCOMPAT_PTR_COPY` | 48 B pointer with the address of a second copy ([data](fs-data.md#48-b-pointer-and-the-superblock)); **required** - a volume without it (40 B pointer) is rejected with `NOT_SUPPORTED` |
+| 3 | incompat | `INCOMPAT_DATA` | phase 3 extents: compression, shared blocks, unwritten, with a copy ([data](fs-data.md#extent)) |
 | 0 | ro_compat | `RO_COMPAT_ACL` | the volume has permission descriptors with reference counts ([permissions](#permissions-and-session-identity)); an older driver only reads |
 
 The **UUID** comes from `FormatOptions::uuid` at format time; host tools
@@ -248,7 +259,12 @@ The hashes currently come from the `xxhash-rust` and `blake3` libraries
 warning with newer Rust - to be solved by an update or our own
 implementation.
 
-### Pointer (`BlockPtr`, 40 B)
+### Pointer (`BlockPtr`, 48 B)
+
+> **Change from v3 (phase 2):** from 40 B to 48 B: the address of a second
+> copy (metadata 2x). **Why:** a damaged node is repaired from the copy
+> without data loss (self-healing); the copy lies elsewhere on the disk.
+> The driver rejects the old layout. ([FS data](fs-data.md#metadata-2x-and-self-healing))
 
 > **Change from v2:** from 32 B to 40 B: device number (16 bits), length in blocks and flags. **Why:** a node has 4 blocks and the format is ready for several disks and for compression, encryption and shared blocks (visible right on the pointer). **The driver so far** supports only one device (number 0) and no flag - see [What the format contains](#what-the-format-contains-and-what-the-driver-uses). ([all changes](fs-versions.md#transition-v2---v3))
 
@@ -260,6 +276,7 @@ implementation.
 | 32 | 4 | length in blocks (tree node = 4) |
 | 36 | 2 | flags: 1 = compressed, 2 = encrypted, 4 = shared blocks, 8 = cloud only (reserved; a node with a flag is refused with `NOT_SUPPORTED`) |
 | 38 | 2 | reserved (zeros) |
+| 40 | 8 | address of the second copy (same layout as the address; 0 = no copy); the checksum holds for both |
 
 48 bits of block number = up to 1 EiB per device; the device number is
 prepared in the format for volumes spanning several disks, **the driver so
@@ -374,12 +391,12 @@ written as a whole.
 8   generation of creation u64
 32  entries:
       leaf (32 B):      key 24 B, value offset u16, length u16, reserved
-      internal (64 B):  key 24 B, child BlockPtr 40 B
+      internal (72 B):  key 24 B, child BlockPtr 48 B
     leaf values are stored from the end of the node downwards
 ```
 
 Limits: a value is at most 8144 B (`MAX_VALUE`, guarantees that an
-overfull leaf can always be split), an internal node has at most 255
+overfull leaf can always be split), an internal node has at most 227
 children. The level is stored in every node and checked on every descent
 (a child must be exactly one level lower) - so a damaged pointer cannot turn
 the tree into a loop or slip in a leaf in place of an internal node.
@@ -549,9 +566,14 @@ A block with generation of creation `birth`, when overwritten or removed:
 
 | Condition | What happens | Why |
 |---|---|---|
-| `birth == txg` and the intent log does not reference it | free **immediately** | no saved state points to it |
+| `birth == txg`, the intent log does not reference it and the extent is not shared | free **immediately** | no saved state points to it |
 | `birth > snapshot_generation` | free after a **delay** (`REUSE_DELAY` = 4 commits) | previous saved states may point to it (generation fallback) |
 | `birth ≤ snapshot_generation` | into the **deadlist** | a snapshot holds it; freed when the snapshot is deleted |
+
+The second copy is always freed too (for nodes and data with a copy). A
+data range in the **sharing table** (instant copies, deduplication) is only
+decremented when finally freed and is freed with its last reference - see
+[Sharing table](fs-data.md#sharing-table).
 
 ## Commit step by step
 
@@ -1186,6 +1208,13 @@ the dirty tree before every operation; it comes with application
 transactions (phase 5).
 
 ## Consistency check and scrub
+
+> **Change from v3 (phase 2):** also checks the copies of nodes and
+> extents, the sharing table (a block used more than once must be shared,
+> a record without used blocks = an error) and the deduplication index;
+> scrub reads both copies and repairs. In addition a **background scrub**
+> in steps. **Why:** every format change must be verifiable.
+> ([FS data](fs-data.md#scrub))
 
 > **Change from v3 (phase 1):** also checks the history structures: a
 > contiguous journal sequence and its state, snapshot metadata, the trash

@@ -310,10 +310,14 @@ fn aside_cost_scales_with_change() {
     std::eprintln!("  rychle,        1000 souboru: {:?} / {:?}", small[0], small[1]);
     std::eprintln!("  rychle,        5000 souboru: {:?} / {:?}", fast[0], fast[1]);
     // Horni mez umerna zmene (cesty k nekolika listum, vypisy dvou slozek
-    // po 100 polozkach a korene, zapis a commit), ne poctu souboru.
-    assert!(fast[0].0 <= 60 && fast[0].1 <= 40, "diff_clone: {:?}", fast[0]);
+    // po 100 polozkach a korene, zapis a commit), ne poctu souboru. Ukazatel
+    // s kopii uzlu (FS faze 3, 48 B) dava mensi vetveni uzlu, a proto o neco
+    // vyssi strom nez puvodni 40 B ukazatel - meze maji rezervu na uroven.
+    assert!(fast[0].0 <= 90 && fast[0].1 <= 40, "diff_clone: {:?}", fast[0]);
     assert!(fast[1].1 <= 80, "aside_apply: {:?}", fast[1]);
-    assert!(fast[0].0 <= small[0].0 + 15 && fast[1].0 <= small[1].0 + 40);
+    assert!(fast[0].0 <= small[0].0 + 30 && fast[1].0 <= small[1].0 + 80);
+    // Rychla cesta je vzdy vyrazne levnejsi nez uplny pruchod.
+    assert!(fast[0].0 * 3 <= full[0].0 && fast[1].0 * 2 <= full[1].0);
     assert!(full[0].1 > 5 * fast[0].1 && full[1].1 > 3 * fast[1].1);
     assert!(full[0].0 > 4 * fast[0].0 && full[1].0 > 2 * fast[1].0);
 }

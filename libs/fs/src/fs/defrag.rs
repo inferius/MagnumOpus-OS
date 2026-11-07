@@ -62,11 +62,13 @@ impl<D: BlockDevice> Fs<D> {
         if !worth(blocks, runs) {
             return Ok(0);
         }
-        // Jen bloky, ktere nedrzi snapshot.
+        // Jen bloky, ktere nedrzi snapshot. Sdilene (kopie, deduplikace)
+        // by prepis rozdelil, predalokovane jsou souvisle uz z podstaty
+        // a komprimovane kusy by se jen znovu komprimovaly.
         let snap_gen = self.s.snapshot_generation;
         let eligible: Vec<_> = ext
             .into_iter()
-            .filter(|(_, e)| e.birth > snap_gen)
+            .filter(|(_, e)| e.birth > snap_gen && !e.is_shared() && !e.is_unwritten() && !e.is_compressed())
             .collect();
         let window = DIRTY_LIMIT / 2;
         let mut rewritten = 0;
@@ -75,8 +77,7 @@ impl<D: BlockDevice> Fs<D> {
             if !self.s.has_room(self.dirty_blocks + e.len() + 16) {
                 break;
             }
-            let mut buf = alloc::vec![0u8; e.len() as usize * BLOCK_SIZE];
-            self.s.read_data(e.phys, &e.csums, &mut buf)?;
+            let buf = self.extent_data(&e, 0, e.len())?;
             let fd = self.data.entry(oid).or_default();
             for (j, block) in buf.chunks(BLOCK_SIZE).enumerate() {
                 if fd.blocks.insert(ks + j as u64, block.to_vec()).is_none() {

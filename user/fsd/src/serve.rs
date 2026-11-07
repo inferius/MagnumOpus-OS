@@ -71,6 +71,10 @@ pub struct Service {
     pub commit_requested: bool,
     /// Cislovani relaci (`CONNECT`, `CONNECT_AS`).
     pub session_counter: u64,
+    /// Prace v necinnosti: po defragmentaci deduplikace.
+    pub dedup_phase: bool,
+    /// Bezi scrub (smycka dela kroky mezi pozadavky).
+    pub scrubbing: bool,
 }
 
 /// Klic rozpracovaneho vypisu: (dataset, snapshot) u vypisu snapshotu
@@ -113,6 +117,9 @@ impl Service {
             return res;
         }
         if let Some(res) = self.handle_hist(sess, opcode, &mut r) {
+            return res;
+        }
+        if let Some(res) = self.handle_data(sess, opcode, &mut r) {
             return res;
         }
         let mut w = Writer::new();

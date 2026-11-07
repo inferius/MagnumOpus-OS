@@ -101,6 +101,9 @@ pub struct FwConfig {
     pub user_rules: Vec<(String, Rule, bool)>,
     /// Kapacita auditu (zaznamy).
     pub audit_capacity: u32,
+    /// Smi se v teto siti pouzit neoverene DNS a NTP, kdyz overene
+    /// (DoH/DoT, NTS) nefunguje? Verejna sit: ne.
+    pub unauthenticated_fallback: bool,
 }
 
 impl Default for FwConfig {
@@ -118,6 +121,7 @@ impl Default for FwConfig {
             dns_block: Vec::new(),
             user_rules: Vec::new(),
             audit_capacity: 4096,
+            unauthenticated_fallback: false,
         }
     }
 }
@@ -159,6 +163,7 @@ impl FwConfig {
             rule.put(w);
         }
         w.u32(self.audit_capacity);
+        w.u8(self.unauthenticated_fallback as u8);
     }
 
     pub fn get(r: &mut Reader) -> Result<Self> {
@@ -202,6 +207,7 @@ impl FwConfig {
             user_rules.push((app, rule, allow));
         }
         let audit_capacity = r.u32()?;
+        let unauthenticated_fallback = r.u8()? != 0;
         if inbound > inbound::LISTENERS {
             return Err(Error::InvalidArgs);
         }
@@ -217,6 +223,7 @@ impl FwConfig {
             dns_block,
             user_rules,
             audit_capacity,
+            unauthenticated_fallback,
         })
     }
 }

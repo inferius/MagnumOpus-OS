@@ -1,5 +1,6 @@
 //! Realny cas: nastaveni hodin (`CLOCK_SET`), prava, sluzba casu, pasma.
 
+use alloc::format;
 use alloc::vec::Vec;
 use core::time::Duration;
 
@@ -111,7 +112,8 @@ fn set_and_restore(s: &Startup) -> TestResult {
         .map_err(|e| fail("nastaveni", e))?;
     check!(!hw, "bez WRITE_HARDWARE se RTC nesmi zapsat");
     let after = time::wall_reading().map_err(|e| fail("cteni", e))?;
-    check_eq!(after.source, source::SET, "zdroj");
+    // ntpd bezi soubezne: jeho korekce muze zdroj hned prepsat na NETWORK.
+    check!(matches!(after.source, source::SET | source::NETWORK), format!("zdroj {}", after.source));
     check_eq!(after.flags, 0, "priznaky (pasmo uz neni jen predpokladane)");
     let diff = after.time.as_nanos() - target.as_nanos();
     check!((0..1_000_000_000).contains(&diff), "nastaveny cas neodpovida");
@@ -150,7 +152,7 @@ fn time_service_set(_: &Startup) -> TestResult {
     let expected = if cfg!(target_arch = "x86_64") { "ok:hw" } else { "ok" };
     check_eq!(core::str::from_utf8(&reply.data).unwrap_or("?"), expected, "odpoved sluzby");
     let r = time::wall_reading().map_err(|e| fail("cteni", e))?;
-    check_eq!(r.source, source::SET, "zdroj");
+    check!(matches!(r.source, source::SET | source::NETWORK), format!("zdroj {}", r.source));
     Ok(())
 }
 

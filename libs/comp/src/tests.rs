@@ -920,3 +920,25 @@ fn app_exit_removes_its_confirmation() {
     t.c.remove_client(a);
     assert!(t.c.dialogs.active().is_none());
 }
+
+#[test]
+fn tasks_icon_shows_count_and_focuses_task_manager() {
+    let mut t = T::new();
+    assert!(t.c.tasks_icon().is_none(), "nic nebezi = zadna ikona");
+    let a = t.client("org.magnumopus.tasks");
+    t.window(a, Mode::Standard, RED);
+    let b = t.client("b");
+    t.window(b, Mode::Standard, BLUE);
+    t.c.set_tasks(3, 1);
+    t.frame();
+    let r = t.c.tasks_icon().unwrap();
+    // Uloha agenta: oranzova ikona.
+    assert_eq!(t.px(r.x + 2, r.y + r.h as i32 / 2), render::color::WARN);
+    let ga = t.c.clients[&a].windows[&1];
+    t.c.minimize(ga);
+    t.click(r.x + 4, r.y + 4);
+    assert_eq!(t.c.focus, Some(ga));
+    assert!(!t.c.windows[&ga].minimized);
+    t.c.set_tasks(0, 0);
+    assert!(t.c.tasks_icon().is_none());
+}

@@ -184,11 +184,18 @@ neznámou síť platí `unknown_network` (výchozí `public`) a `fwd` se agenta
 zeptá (`NETWORK_QUESTION`). Odpověď `CLASSIFY` uloží do `[[networks]]`.
 Dokud `netd` konfiguraci nedostane, platí veřejný profil.
 
-| Profil (výchozí) | Příchozí spojení | Ping | Stealth |
-|---|---|---|---|
-| `public` | žádná | ne | ano |
-| `home` | na porty, kde někdo naslouchá | ano | ne |
-| `work` | žádná (jen `allow_in`) | ano | ano |
+| Profil (výchozí) | Příchozí spojení | Ping | Stealth | Neověřené DNS a NTP |
+|---|---|---|---|---|
+| `public` | žádná | ne | ano | `never` |
+| `home` | na porty, kde někdo naslouchá | ano | ne | `fallback` |
+| `work` | žádná (jen `allow_in`) | ano | ano | `fallback` |
+
+`unauthenticated` (v `[profiles.*]`) říká, co dělat, když ověřená cesta
+nefunguje (šifrované DNS v `dnsd`, NTS v `ntpd` – síť blokuje porty):
+`never` = nic, `fallback` = neověřený resolver z DHCP a neověřené NTP. Ve
+veřejné síti by záloha dala útočníkovi v téže Wi-Fi možnost podvrhnout
+odpovědi. `netd` pravidlo dostává s profilem a hlásí ho v `Net::info()`
+(`unauthenticated_fallback`), odkud ho čte `ntpd`.
 
 ⚠️ **MAC brány jde podvrhnout.** Kdo je ve stejné síti (veřejná Wi-Fi),
 může předstírat MAC domácího routeru. Systém by pak síť považoval za

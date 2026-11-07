@@ -196,7 +196,34 @@ porušený vnitřní předpoklad (chyba jádra).
 | `netd: ovladac skoncil (zahozeno ramcu: ...)` | Ovladač karty skončil (vadné zařízení) a služba končí s ním (kód 3). |
 | `netd: chybi handly ve startovni zprave` | Chybný start služby (kód 1). |
 | `init: sluzbu site nelze spustit: ...` | Chybí síťová karta (`NOT_FOUND`) nebo služba neodpověděla. |
-| `init: hodiny serizeny podle NTP ...` | Čas ze serveru NTP předala služba času do hodin; posun = o kolik hodiny šly špatně. |
+| `ntpd: bezim, servery [...]` | Synchronizace času běží; servery z `ntpd.toml` (v testech server hostitele). |
+| `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | První úspěšné měření (ověřené NTS, nebo neověřené NTP v záloze); `step` = čas se nastavil skokem (posun nad 128 ms), `slew` = plynulé dorovnání. |
+| `ntpd: NTS-KE <server>: ...` | Výměna klíčů NTS selhala (spojení, certifikát, odpověď); server se v kole přeskočí. Při neplatném certifikátu zkontrolovat hodiny (RTC). |
+| `ntpd: neoverene servery: Never\|Fallback` | Init změnil pravidlo podle profilu sítě. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za interval; hodiny běží dál podle poslední frekvence. |
+| `ntpd: konfigurace: ...` | Konfigurace od init je neplatná; `ntpd` skončí. Opravit `ntpd.toml`. |
+| `timed: prvni synchronizace: skok o N ms` | První korekce od `ntpd` byla velká: čas se nastavil skokem (jediný povolený skok). |
+| `timed: prvni synchronizace: dorovnani o N ms` | První korekce byla malá: dorovná se plynule. |
+| `timed: klient synchronizace skoncil` | `ntpd` skončil nebo zavřel kanál; hodiny běží dál bez korekcí. |
+| `init: ntpd.toml: ...`, `init: timed odmitl ntpd: ...`, `init: ntpd hlasi: ...` | `ntpd` se nespustil (neplatná konfigurace, `timed` nepřijal kanál, chyba při startu); hodiny zůstanou podle RTC. |
+| `init: synchronizaci casu nelze spustit: ...` | Souhrn předchozího; systém běží bez synchronizace. |
+| `init: korenove certifikaty aktualizovany (N kB)` | Sada CA Mozilla v `/system/config/certs/mozilla.pem` se změnila (první start, nová verze systému). Viz [TLS a HTTP](tls-http.md#úložiště-kořenových-certifikátů). |
+| `init: uloziste certifikatu nelze pripravit: ...` | Bez FS nebo bez práv: programy nemají žádnou CA a `https` selže (`UnknownIssuer`). |
+| `fetch: uloziste certifikatu: ...`, `fetch: /certs/F: ...` | `fetch` nemůže číst úložiště nebo soubor (větší než 4 MiB, chyba FS); ostatní soubory načte. |
+| `fetch: TLS: ...` | Konfigurace TLS nejde vytvořit; `fetch` skončí s kódem 2. |
+| `revocd: bezim (OneCRL ano\|ne, N zaznamu, mezipamet na FS\|jen v pameti)` | Služba odvolání běží; N = záznamy OneCRL načtené z FS. |
+| `revocd: OneCRL: N zaznamu` | Nový seznam odvolaných CA stažen a uložen. |
+| `revocd: OneCRL: neplatny dokument` | Stažený JSON nejde přečíst; platí předchozí seznam, nový pokus za `retry_minutes`. |
+| `revocd: <url>: ...` | Stažení CRL nebo OneCRL selhalo (stav HTTP, chyba spojení); adresa se `retry_minutes` nezkouší, stav odvolání je zatím neznámý. |
+| `revocd: <url>: neni CRL` | Server vrátil něco jiného než CRL. |
+| `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` požadavek nedokončil ani po limitu + rezervě (chyba nebo zaseknutí služby). Program dostal `TIMED_OUT`, kanál už nejde použít. OP = kód operace (`netproto::op`). |
+| `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | Systémový resolver běží. |
+| `dnsd: <resolver>: ...` | Resolver neodpověděl (spojení, TLS, HTTP); `dnsd` zkusí další. |
+| `dnsd: <jméno>: DNSSEC neprosel (...)` | Odpověď je podvržená nebo poškozená (důvod v závorce); program dostane `CORRUPTED`. |
+| `netd: dnsd skoncil (...), preklad bez nej` | Systémový překlad jen podle pravidla profilu (veřejná síť = žádný). |
+| `init: sifrovane DNS nelze spustit (...)` | `dnsd` nenaběhl; překlad jen podle pravidla profilu. |
+| `init: kontrolu odvolani certifikatu nelze spustit: ...` | `revocd` nenaběhl; programy kontrolují jen OCSP stapling. |
+| `init: revocd bez FS (...)` | Bez FS: mezipaměť jen v paměti a bez kořenových CA pro OneCRL přes https. |
 | `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` nepředal kanál k `fwd`. Platí veřejný profil (nic dovnitř), dotazy aplikací s `ask` se rovnou odmítnou. |
 | `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` skončil. Platí poslední konfigurace, rozpracované a další dotazy se odmítnou. |
 | `netd: profil site P` | `fwd` poslal konfiguraci s jiným profilem sítě (`public`, `home`, ...). Viz [Profily sítí](firewall.md#profily-sítí). |

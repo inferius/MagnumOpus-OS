@@ -1,0 +1,19 @@
+[package]
+name = "ntpd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "ntpd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+netproto = { path = "../../libs/netproto", features = ["client", "nts"] }
+fsproto = { path = "../../libs/fsproto" }
+tls = { path = "../../libs/tls", features = ["libos"] }
+web = { path = "../../libs/web" }
+conf = { workspace = true }

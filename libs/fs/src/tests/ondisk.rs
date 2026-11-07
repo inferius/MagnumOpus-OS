@@ -14,7 +14,7 @@ fn extent_outside_volume_is_corrupted() {
     fs.create("/f", Kind::File).unwrap();
     fs.truncate("/f", 3 * 4096).unwrap();
     let (oid, _) = fs.test_inode("/f").unwrap();
-    let bad = Extent { phys: 5000, birth: 1, csums: alloc::vec![Csum::default(); 3] };
+    let bad = Extent::plain(5000, 1, alloc::vec![Csum::default(); 3]);
     fs.test_put(Key::new(oid, item::EXTENT, 0), bad.encode()).unwrap();
     assert_eq!(fs.read("/f", 0, 10).err(), Some(Error::Corrupted));
     assert_eq!(fs.truncate("/f", 0).err(), Some(Error::Corrupted));
@@ -28,7 +28,7 @@ fn freeing_free_blocks_poisons_instead_of_double_free() {
     fs.commit().unwrap();
     let (oid, _) = fs.test_inode("/f").unwrap();
     // Extent ve svazku, ale na volnych blocich (blizko konce disku).
-    let bad = Extent { phys: 1000, birth: 1, csums: alloc::vec![Csum::default(); 3] };
+    let bad = Extent::plain(1000, 1, alloc::vec![Csum::default(); 3]);
     fs.test_put(Key::new(oid, item::EXTENT, 0), bad.encode()).unwrap();
     // Zkraceni by bloky "uvolnilo" podruhe: odmitnuto, svazek ve stavu chyby.
     assert_eq!(fs.truncate("/f", 0).err(), Some(Error::Corrupted));
@@ -96,7 +96,7 @@ fn fsync_refuses_after_invalid_free() {
     fs.truncate("/f", 3 * 4096).unwrap();
     fs.commit().unwrap();
     let (oid, _) = fs.test_inode("/f").unwrap();
-    let bad = Extent { phys: 1000, birth: 1, csums: alloc::vec![Csum::default(); 3] };
+    let bad = Extent::plain(1000, 1, alloc::vec![Csum::default(); 3]);
     fs.test_put(Key::new(oid, item::EXTENT, 0), bad.encode()).unwrap();
     // Prepis dat v bufferu: fsync je zapise a pri prepojeni narazi na
     // "uvolneni" volnych bloku - nesmi nic potvrdit.

@@ -1,0 +1,21 @@
+[package]
+name = "revocd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "revocd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+netproto = { path = "../../libs/netproto", features = ["client"] }
+fsproto = { path = "../../libs/fsproto" }
+tls = { path = "../../libs/tls", features = ["libos"] }
+httpc = { path = "../../libs/httpc" }
+web = { path = "../../libs/web" }
+conf = { workspace = true }
+sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }

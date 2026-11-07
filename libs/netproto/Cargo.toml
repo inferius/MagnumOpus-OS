@@ -13,8 +13,11 @@ description = "Protokol site (programy <-> netd, netd <-> ovladac sitove karty)"
 default = []
 client = ["dep:libos"]
 std = []
+# NTS (RFC 8915): zaznamy NTS-KE a rozsireni NTP s AES-SIV (ntpd, testy).
+nts = ["dep:aes-siv"]
 
 [dependencies]
 abi = { workspace = true }
 wire = { path = "../wire" }
 libos = { path = "../libos", optional = true }
+aes-siv = { version = "0.7", default-features = false, features = ["alloc"], optional = true }

@@ -42,6 +42,7 @@ site menu.
 |---|---|---|
 | [Souborový systém](cs/souborovy-system.md) | [File system](en/file-system.md) | formát, algoritmy, oprávnění, služba fsd, protokol / format, algorithms, permissions, fsd service, protocol |
 | [Historie a verze souborů](cs/fs-historie.md) | [File history](en/fs-history.md) | žurnál změn, koš, verze, commity, větve, merge / change journal, trash, versions, commits, branches, merge |
+| [Data FS](cs/fs-data.md) | [FS data](en/fs-data.md) | komprese, okamžité kopie, deduplikace, předalokace, metadata 2x, scrub / compression, instant copies, deduplication, preallocation, metadata 2x, scrub |
 | [Verze formátu](cs/fs-verze.md) | [Format versions](en/fs-versions.md) | co se mezi verzemi změnilo a proč / what changed between versions and why |
 | [Nástroj osfs](cs/osfs.md) | [osfs tool](en/osfs.md) | obraz FS, kontrola, připojení ve Windows / FS image, check, mounting on Windows |
 | [API pro Windows](cs/osfs-api.md) | [Windows API](en/osfs-api.md) | rozšířené API FS pro aplikace ve Windows / extended FS API for Windows applications |
@@ -54,12 +55,19 @@ site menu.
 |---|---|---|
 | [Shell a terminál](cs/navrh-shell.md) | [Shell and terminal](en/shell-design.md) | jazyk (zápisy B a C, gramatika, sémantika), undo a náhled, služba relací, protokol terminálu, kódy chyb shellu / language (notations B and C, grammar, semantics), undo and preview, session service, terminal protocol, shell error codes |
 
+### Vzhled a ovládání / Look and feel
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Vzhled a ovládání](cs/vzhled.md) | [Look and feel](en/appearance.md) | design systém a tokeny, okna a odznak důvěry, lišta, systémové dialogy, správce úloh, terminál, soubory, nastavení, přihlášení, přístupnost; prototypy v `design/` / design system and tokens, windows and trust badge, bar, system dialogs, task manager, terminal, files, settings, sign-in, accessibility; prototypes in `design/` |
+
 ### Síť / Network
 
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Síť](cs/sit.md) | [Network](en/network.md) | virtio-net, služba netd, TCP/IP, DNS, NTP, oprávnění, API / virtio-net, netd service, TCP/IP, DNS, NTP, permissions, API |
 | [Firewall](cs/firewall.md) | [Firewall](en/firewall.md) | manifest aplikace, dotazy uživateli, paketový filtr, profily sítí, audit, filtr DNS / application manifest, asking the user, packet filter, network profiles, audit, DNS filter |
+| [TLS a HTTP](cs/tls-http.md) | [TLS and HTTP](en/tls-http.md) | TLS 1.3, kořenové certifikáty, HTTP/1.1 a HTTP/2, program fetch, rizika / TLS 1.3, root certificates, HTTP/1.1 and HTTP/2, the fetch program, risks |
 
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).

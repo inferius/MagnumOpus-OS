@@ -17,7 +17,7 @@ use abi::Result;
 use super::Fs;
 use crate::device::BlockDevice;
 use crate::layout::{
-    BLOCK_SIZE, DATA_START, Extent, Inode, KIND_SYMLINK, Key, decode_dirents, item,
+    DATA_START, Extent, Inode, KIND_SYMLINK, Key, decode_dirents, item,
 };
 use crate::node::{Body, Child};
 
@@ -29,6 +29,12 @@ pub struct CheckReport {
     pub data_blocks: u64,
     /// Bloky metadat volneho mista a intent logu.
     pub meta_blocks: u64,
+    /// Uzly bez druhe kopie (zapsane na disk bez souvisleho mista pro ni) -
+    /// neni chyba, jen mensi odolnost.
+    pub nodes_without_copy: u64,
+    /// Zaznamy tabulky sdileni (sdilene useky) a jejich bloky.
+    pub shared_ranges: u64,
+    pub shared_blocks: u64,
     /// Nalezene problemy (prazdne = v poradku); nejvys `MAX_PROBLEMS`
     /// popisu, celkovy pocet je v `problems_total`.
     pub problems: Vec<String>,
@@ -157,6 +163,12 @@ impl<D: BlockDevice> Fs<D> {
             let snaps = self.snapshot_roots_of(&ds_root)?;
             roots.extend(snaps.into_iter().map(|(n, c)| (format!("dataset {}: {n}", k.offset), c, None)));
         }
+        // Tabulka sdileni a index deduplikace (ulozeny korenovy strom).
+        let share = self.check_share_table(&stored, n, &mut r)?;
+        let shared = |b: u64| {
+            let i = share.partition_point(|&(s, _)| s <= b);
+            i > 0 && b < share[i - 1].0 + share[i - 1].1
+        };
         for (index, (name, root, group)) in roots.into_iter().enumerate() {
             let live = index == 0;
             let mut stack = alloc::vec![root];
@@ -171,8 +183,8 @@ impl<D: BlockDevice> Fs<D> {
                 // uz jsou zapocitane. Zivy strom datasetu (napr. klon) ho
                 // ale musi projit kvuli objektum - jinak by objekty
                 // a zaznamy zurnalu ve sdilenych listech chybely.
-                let shared = seen_nodes.set(p.block);
-                if shared {
+                let node_shared = seen_nodes.set(p.block);
+                if node_shared {
                     if live {
                         r.problem(format!("uzel {} je ve zivem strome vickrat", p.block));
                         continue;
@@ -187,6 +199,18 @@ impl<D: BlockDevice> Fs<D> {
                         }
                     }
                     r.tree_blocks += crate::layout::NODE_BLOCKS;
+                    if p.copy == 0 {
+                        r.nodes_without_copy += 1;
+                    } else if p.copy < DATA_START || p.copy.checked_add(crate::layout::NODE_BLOCKS).is_none_or(|e| e > n) {
+                        r.problem(format!("{name}: kopie uzlu {} lezi mimo svazek", p.block));
+                    } else {
+                        for b in p.copy..p.copy + crate::layout::NODE_BLOCKS {
+                            if used.set(b) {
+                                r.problem(format!("blok {b} pouziva kopie uzlu i neco jineho"));
+                            }
+                        }
+                        r.tree_blocks += crate::layout::NODE_BLOCKS;
+                    }
                 }
                 let node = match self.s.load(&p) {
                     Ok(n) => n.clone(),
@@ -202,7 +226,7 @@ impl<D: BlockDevice> Fs<D> {
                             if let Some(g) = group {
                                 objects[g].note(&k, &v, tf, &mut r);
                             }
-                            if shared || k.kind != item::EXTENT {
+                            if node_shared || k.kind != item::EXTENT {
                                 continue;
                             }
                             let e = match Extent::decode(&v) {
@@ -212,29 +236,36 @@ impl<D: BlockDevice> Fs<D> {
                                     continue;
                                 }
                             };
-                            let end = e.phys.checked_add(e.len());
-                            if e.phys < DATA_START || end.is_none_or(|x| x > n) {
+                            let within = |p: u64| p >= DATA_START && p.checked_add(e.plen()).is_some_and(|x| x <= n);
+                            if !within(e.phys) || (e.copy != 0 && !within(e.copy)) {
                                 r.problem(format!("{name}: extent objektu {} lezi mimo svazek", k.oid));
                                 continue;
                             }
-                            for b in e.phys..e.phys + e.len() {
-                                if !used.set(b) {
-                                    is_data.set(b);
-                                    r.data_blocks += 1;
-                                } else if !(is_data.get(b) && !live) {
-                                    // Sdilena data snapshotu jsou v poradku;
-                                    // jinak je blok pouzity dvakrat.
-                                    r.problem(format!("datovy blok {b} je pouzity vickrat"));
+                            let ranges = [(e.phys, true), (e.copy, e.copy != 0)];
+                            for (start, present) in ranges {
+                                if !present {
+                                    continue;
+                                }
+                                for b in start..start + e.plen() {
+                                    if !used.set(b) {
+                                        is_data.set(b);
+                                        r.data_blocks += 1;
+                                    } else if !(is_data.get(b) && (!live || shared(b))) {
+                                        // Data snapshotu a sdilene useky (tabulka
+                                        // sdileni) se opakuji legitimne; jinak je
+                                        // blok pouzity dvakrat.
+                                        r.problem(format!("datovy blok {b} je pouzity vickrat"));
+                                    }
                                 }
                             }
-                            if scrub {
-                                let mut buf = alloc::vec![0u8; e.len() as usize * BLOCK_SIZE];
-                                if let Err(err) = self.s.read_data(e.phys, &e.csums, &mut buf) {
-                                    r.problem(format!(
-                                        "{name}: data objektu {} od bloku {}: {err:?}",
-                                        k.oid, e.phys
-                                    ));
-                                }
+                            if e.is_shared() && !shared(e.phys) && live {
+                                r.problem(format!("{name}: sdileny extent objektu {} chybi v tabulce sdileni", k.oid));
+                            }
+                            if scrub
+                                && !e.is_unwritten()
+                                && let Err(err) = self.extent_data(&e, 0, e.len())
+                            {
+                                r.problem(format!("{name}: data objektu {} od bloku {}: {err:?}", k.oid, e.phys));
                             }
                         }
                     }
@@ -243,6 +274,13 @@ impl<D: BlockDevice> Fs<D> {
         }
         for o in &objects {
             o.verify(&mut r);
+        }
+        // Zaznam tabulky sdileni bez pouzitych bloku = ztracena reference
+        // (uvolneni ji nesnizilo).
+        for &(s, l) in &share {
+            if (s..s + l).any(|b| !used.get(b)) {
+                r.problem(format!("sdileny usek {s}+{l} nikdo nepouziva"));
+            }
         }
         meta.extend(log_blocks);
         for b in meta {
@@ -281,6 +319,85 @@ impl<D: BlockDevice> Fs<D> {
 }
 
 const META: u64 = crate::layout::META_OID;
+
+impl<D: BlockDevice> Fs<D> {
+    /// Projde tabulku sdileni a index deduplikace ve strome `root`: zaznamy
+    /// se neprekryvaji, lezi ve svazku, indexovane maji polozku indexu
+    /// a naopak. Vraci serazene useky (zacatek, delka) vcetne kopii.
+    fn check_share_table(&mut self, root: &Child, n: u64, r: &mut CheckReport) -> Result<Vec<(u64, u64)>> {
+        use crate::datarec::{ShareEntry, decode_dedup, dedup_key};
+        let items = crate::btree::collect(
+            &mut self.s,
+            root,
+            &Key::new(META, item::SHARE, 0),
+            &Key::new(META, item::SHARE + 1, 0),
+        )?;
+        let mut out: Vec<(u64, u64)> = Vec::new();
+        let mut last_end = 0u64;
+        let mut indexed: Vec<(crate::hash::Csum, u64)> = Vec::new();
+        for (k, v) in items {
+            let e = match ShareEntry::decode(&v) {
+                Ok(e) => e,
+                Err(err) => {
+                    r.problem(format!("zaznam sdileni {}: {err:?}", k.offset));
+                    continue;
+                }
+            };
+            let len = e.len as u64;
+            let inside = |p: u64| p >= DATA_START && p.checked_add(len).is_some_and(|x| x <= n);
+            if !inside(k.offset) || (e.copy != 0 && !inside(e.copy)) || len > crate::layout::MAX_EXTENT {
+                r.problem(format!("zaznam sdileni {} lezi mimo svazek", k.offset));
+                continue;
+            }
+            if k.offset < last_end {
+                r.problem(format!("zaznamy sdileni se prekryvaji u bloku {}", k.offset));
+            }
+            last_end = k.offset + len;
+            r.shared_ranges += 1;
+            r.shared_blocks += len;
+            out.push((k.offset, len));
+            if e.copy != 0 {
+                out.push((e.copy, len));
+            }
+            if let Some(h) = e.hash {
+                indexed.push((h, k.offset));
+            }
+        }
+        out.sort_unstable();
+        // Index: kazda polozka ukazuje na indexovany zaznam se stejnym
+        // hashem a kazdy indexovany zaznam je v indexu.
+        let index = crate::btree::collect(
+            &mut self.s,
+            root,
+            &Key::new(META, item::DEDUP, 0),
+            &Key::new(META, item::DEDUP + 1, 0),
+        )?;
+        let mut listed: Vec<(crate::hash::Csum, u64)> = Vec::new();
+        for (k, v) in index {
+            match decode_dedup(&v) {
+                Ok(list) => {
+                    for (h, s) in list {
+                        if dedup_key(&h) != k.offset {
+                            r.problem(format!("index deduplikace: polozka {} ma cizi hash", k.offset));
+                        }
+                        listed.push((h, s));
+                    }
+                }
+                Err(err) => r.problem(format!("index deduplikace {}: {err:?}", k.offset)),
+            }
+        }
+        indexed.sort_unstable();
+        listed.sort_unstable();
+        if indexed != listed {
+            r.problem(format!(
+                "index deduplikace nesedi s tabulkou sdileni ({} indexovanych, {} v indexu)",
+                indexed.len(),
+                listed.len()
+            ));
+        }
+        Ok(out)
+    }
+}
 
 impl Objects {
     /// Kontroly struktur historie (faze 2).

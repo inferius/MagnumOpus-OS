@@ -14,6 +14,9 @@ unicode-normalization = { version = "0.1", default-features = false }
 # Prevzate hashe (no_std, ciste Rust): XXH3-128 vychozi, BLAKE3 volitelne.
 xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 blake3 = { version = "1.8", default-features = false, features = ["pure"] }
+# Komprese extentu (faze 3, no_std, ciste Rust): LZ4 blok a Zstd ramec.
+lz4_flex = { version = "0.11", default-features = false, features = ["safe-encode", "safe-decode", "checked-decode"] }
+ruzstd = { version = "0.9", default-features = false }
 
 [dev-dependencies]
 proptest = "1"

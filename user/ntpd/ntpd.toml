@@ -1,0 +1,19 @@
+# Servery: nts://jmeno[:port] = overene NTS (RFC 8915, NTS-KE na portu 4460),
+# jmeno nebo adresa[:port] = neoverene NTP (port 123). Init podle nich omezi
+# relaci site ntpd (TCP na NTS-KE, UDP na NTP).
+servers = [
+    "nts://time.cloudflare.com",
+    "nts://nts.netnod.se",
+    "nts://ptbtime1.ptb.de",
+    "pool.ntp.org",
+]
+# Neoverene servery: "never" = nikdy, "fallback" = jen kdyz neodpovi zadny
+# server NTS, "profile" = podle profilu site (firewall.toml, pravidlo
+# unauthenticated; verejna sit = never).
+unauthenticated = "profile"
+# Interval dotazu v sekundach: zacina na min_poll, pri srovnanych hodinach
+# se zdvojnasobuje az na max_poll.
+min_poll = 64
+max_poll = 1024
+# Mereni v jedne davce (pouzije se to s nejmensim zpozdenim).
+samples = 4

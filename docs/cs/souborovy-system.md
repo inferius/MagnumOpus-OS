@@ -18,7 +18,10 @@ zápisy, levný `fsync`) a **nezabírat místo zbytečně** (režie metadat ~0,4
 > **fáze 2 - historie**: žurnál změn, koš, vracení operací, verze souborů,
 > automatické snapshoty, commity s logickým ID, větve a merge, „zkusit
 > změny bokem“, rozšířené atributy a expirace - popis v samostatné kapitole
-> [Historie FS](fs-historie.md). Svazek formátu v2 se nepřipojí
+> [Historie FS](fs-historie.md) - a **fáze 3 - data**: komprese, okamžité
+> kopie, deduplikace, automatické díry, metadata 2x se samoléčením, data
+> 2x, scrub na pozadí a předalokace - kapitola [Data FS](fs-data.md).
+> Svazek formátu v2 se nepřipojí
 > (`NOT_SUPPORTED`); data se zatím nepřevádějí, disky z nástroje `xtask` se
 > vytvářejí znovu.
 
@@ -29,10 +32,11 @@ sporné, co funguje:
 
 | Položka | Ve formátu | Ovladač dnes |
 |---|---|---|
-| UUID svazku, příznaky vlastností | ano | **používá**; definované bity `INCOMPAT_TIME_SECS` ([časy](#časy-objektů)), `RO_COMPAT_ACL`, `RO_COMPAT_HISTORY` ([historie](fs-historie.md#na-disku)) |
+| UUID svazku, příznaky vlastností | ano | **používá**; definované bity `INCOMPAT_TIME_SECS` ([časy](#časy-objektů)), `INCOMPAT_PTR_COPY`, `INCOMPAT_DATA` ([data](fs-data.md#na-disku)), `RO_COMPAT_ACL`, `RO_COMPAT_HISTORY` ([historie](fs-historie.md#na-disku)) |
 | číslo zařízení v `BlockPtr`, `device_index/count` v superbloku | ano | **jen jedno zařízení**: zařízení musí být 0 a počet 1, jinak `CORRUPTED`; víc disků (zrcadlo, RAID) až po fázi 5 |
-| příznaky `BlockPtr` (komprese, šifrování, sdílení, cloud) | vyhrazené | **nepoužívá**; uzel s příznakem = `NOT_SUPPORTED` |
-| příznaky extentu (předalokace) | vyhrazené | **nepoužívá**; extent s příznakem = `NOT_SUPPORTED` |
+| druhá kopie v `BlockPtr` (metadata 2x) | ano | **používá** ([samoléčení](fs-data.md#metadata-2x-a-samoléčení)) |
+| příznaky `BlockPtr` (komprese, šifrování, sdílení, cloud) | vyhrazené | **nepoužívá** pro uzly (uzel s příznakem = `NOT_SUPPORTED`); komprese a sdílení dat jsou v extentu |
+| příznaky extentu (nezapsaný, sdílený, kopie, komprese) | ano | **používá** ([extent](fs-data.md#extent)) |
 | příznak objektu `INODE_REMOTE` | vyhrazený | **nepoužívá** (fáze 6) |
 | oprávnění (`acl`), vlastník | ano | **používá** ([Oprávnění](#oprávnění-a-identita-relací)) |
 | rozšířené atributy (`XATTR`), počet v záznamu objektu | ano | **používá** ([atributy](fs-historie.md#rozšířené-atributy-a-expirace)) |
@@ -72,6 +76,11 @@ sporné, co funguje:
 | Koš, vracení operací, verze souborů, automatické snapshoty | hotovo | [Historie](fs-historie.md#koš) |
 | Commity s logickým ID, větve, trojcestný merge, „zkusit změny bokem“ | hotovo | [Historie: commity](fs-historie.md#commity-a-logické-id) |
 | Rozšířené atributy, expirace souborů | hotovo | [Historie: atributy](fs-historie.md#rozšířené-atributy-a-expirace) |
+| Komprese po kusech (LZ4, Zstd; výchozí vypnuto) | hotovo | [Data: komprese](fs-data.md#komprese) |
+| Okamžité kopie souborů, rozsahů a složek (sdílené bloky) | hotovo | [Data: okamžité kopie](fs-data.md#okamžité-kopie-reflink) |
+| Deduplikace na pozadí a při zápisu | hotovo | [Data: deduplikace](fs-data.md#deduplikace) |
+| Automatické díry, předalokace se zápisem na místo | hotovo | [Data: předalokace](fs-data.md#předalokace) |
+| Metadata 2x se samoléčením, volitelně data 2x, scrub na pozadí | hotovo | [Data: samoléčení](fs-data.md#metadata-2x-a-samoléčení) |
 | Vrstva pro git, indexy, vyhledávání | plán | [Verzování a git](#verzování-a-git) |
 
 ## Rychlý příklad
@@ -165,18 +174,18 @@ s nejvyšší generací, jehož stav jde načíst.
 | 56 | 8 | features_compat | vlastnosti, se kterými starší ovladač smí normálně pracovat |
 | 64 | 8 | features_ro_compat | vlastnosti, se kterými starší ovladač smí jen číst |
 | 72 | 8 | features_incompat | vlastnosti, bez jejichž znalosti se svazek nesmí připojit |
-| 80 | 40 | root | `BlockPtr` kořene B+stromu |
-| 120 | 40 | space | `BlockPtr` indexu tabulky AG |
-| 160 | 8 | zil_block | první blok intent logu této epochy |
-| 168 | 8 | zil_seed | semínko součtů intent logu |
-| 176 | 8 | next_oid | další volné číslo objektu |
-| 184 | 8 | snapshot_generation | generace posledního snapshotu |
-| 192 | 8 | next_snapshot | číslo dalšího snapshotu (= seznam mrtvých bloků živé verze) |
-| 200 | 8 | dead_seq | pořadí další položky deadlistu |
-| 208 | 4 | unicode_version | verze tabulek Unicode pro jména |
-| 212 | 2 | device_index | toto zařízení ve svazku (zatím 0) |
-| 214 | 2 | device_count | počet zařízení svazku (zatím 1) |
-| 216 | 32 | label | jméno svazku (UTF-8, doplněné nulami) |
+| 80 | 48 | root | `BlockPtr` kořene B+stromu |
+| 128 | 48 | space | `BlockPtr` indexu tabulky AG |
+| 176 | 8 | zil_block | první blok intent logu této epochy |
+| 184 | 8 | zil_seed | semínko součtů intent logu |
+| 192 | 8 | next_oid | další volné číslo objektu |
+| 200 | 8 | snapshot_generation | generace posledního snapshotu |
+| 208 | 8 | next_snapshot | číslo dalšího snapshotu (= seznam mrtvých bloků živé verze) |
+| 216 | 8 | dead_seq | pořadí další položky deadlistu |
+| 224 | 4 | unicode_version | verze tabulek Unicode pro jména |
+| 228 | 2 | device_index | toto zařízení ve svazku (zatím 0) |
+| 230 | 2 | device_count | počet zařízení svazku (zatím 1) |
+| 232 | 32 | label | jméno svazku (UTF-8, doplněné nulami) |
 | 4080 | 16 | csum | XXH3-128 bajtů 0..4080 |
 
 **Příznaky vlastností** fungují jako v ext4: každý bit = jedna vlastnost
@@ -188,6 +197,8 @@ tím, že by nerozuměl novým strukturám.
 |---|---|---|---|
 | 0 | incompat | `INCOMPAT_REMOTE` | vyhrazený: data jen v cloudu (fáze 6), ovladač ho zatím odmítne |
 | 1 | incompat | `INCOMPAT_TIME_SECS` | časy jsou sekundy i64 + nanosekundy u32 ([časy](#časy-objektů)); nové svazky ho mají vždy |
+| 2 | incompat | `INCOMPAT_PTR_COPY` | ukazatel 48 B s adresou druhé kopie ([data](fs-data.md#ukazatel-48-b-a-superblok)); **povinný** - svazek bez něj (ukazatel 40 B) se odmítne `NOT_SUPPORTED` |
+| 3 | incompat | `INCOMPAT_DATA` | extenty fáze 3: komprese, sdílené bloky, nezapsané, s kopií ([data](fs-data.md#extent)) |
 | 0 | ro_compat | `RO_COMPAT_ACL` | svazek má popisy oprávnění s počty odkazů ([oprávnění](#oprávnění-a-identita-relací)); starší ovladač jen čte |
 
 **UUID** se při formátování bere z `FormatOptions::uuid`; nástroje na
@@ -245,7 +256,12 @@ Rust, `no_std`). Poznámka: `blake3` 1.8 hlásí varování o budoucí
 nekompatibilitě s novějším Rustem - řešit aktualizací nebo vlastní
 implementací.
 
-### Ukazatel (`BlockPtr`, 40 B)
+### Ukazatel (`BlockPtr`, 48 B)
+
+> **Změna proti v3 (fáze 2):** z 40 B na 48 B: adresa druhé kopie
+> (metadata 2x). **Proč:** poškozený uzel se opraví z kopie bez ztráty dat
+> (samoléčení); kopie leží jinde na disku. Starý tvar ovladač odmítne.
+> ([Data FS](fs-data.md#metadata-2x-a-samoléčení))
 
 > **Změna proti v2:** z 32 B na 40 B: číslo zařízení (16 bitů), délka v blocích a příznaky. **Proč:** uzel má 4 bloky a formát je připravený na víc disků a na kompresi, šifrování a sdílené bloky (poznají se přímo na ukazateli). **Ovladač zatím** umí jen jedno zařízení (číslo 0) a žádný příznak - viz [Co formát obsahuje](#co-formát-obsahuje-a-co-ovladač-používá). ([všechny změny](fs-verze.md#přechod-v2---v3))
 
@@ -257,6 +273,7 @@ implementací.
 | 32 | 4 | délka v blocích (uzel stromu = 4) |
 | 36 | 2 | příznaky: 1 = komprimováno, 2 = šifrováno, 4 = sdílené bloky, 8 = jen v cloudu (rezervované; uzel s příznakem se odmítne `NOT_SUPPORTED`) |
 | 38 | 2 | rezerva (nuly) |
+| 40 | 8 | adresa druhé kopie (tvar jako adresa; 0 = bez kopie); součet platí pro obě |
 
 48 bitů čísla bloku = až 1 EiB na zařízení; číslo zařízení je ve formátu
 připravené pro svazky přes víc disků, **ovladač zatím přijme jen zařízení 0**.
@@ -369,12 +386,12 @@ Uzel zabírá 4 souvislé bloky (`NODE_BLOCKS`), alokuje se a zapisuje vcelku.
 8   generace vzniku u64
 32  položky:
       list (32 B):     klíč 24 B, offset hodnoty u16, délka u16, rezerva
-      vnitřní (64 B):  klíč 24 B, BlockPtr potomka 40 B
+      vnitřní (72 B):  klíč 24 B, BlockPtr potomka 48 B
     hodnoty listu leží od konce uzlu směrem dolů
 ```
 
 Limity: hodnota nejvýš 8144 B (`MAX_VALUE`, zaručuje, že přeplněný list
-jde vždy rozdělit), vnitřní uzel nejvýš 255 potomků. Úroveň je uložená
+jde vždy rozdělit), vnitřní uzel nejvýš 227 potomků. Úroveň je uložená
 v každém uzlu a při každém sestupu se kontroluje (potomek musí mít úroveň
 o 1 nižší) - poškozený ukazatel tak nemůže udělat ze stromu smyčku ani
 podstrčit list místo vnitřního uzlu.
@@ -543,9 +560,14 @@ Blok s generací vzniku `birth` se při přepsání nebo smazání:
 
 | Podmínka | Co se stane | Proč |
 |---|---|---|
-| `birth == txg` a nikdo na něj neodkazuje z intent logu | volný **hned** | žádný uložený stav na něj neukazuje |
+| `birth == txg`, nikdo na něj neodkazuje z intent logu a extent není sdílený | volný **hned** | žádný uložený stav na něj neukazuje |
 | `birth > snapshot_generation` | volný po **odložení** (`REUSE_DELAY` = 4 commity) | předchozí uložené stavy na něj mohou ukazovat (návrat o generaci) |
 | `birth ≤ snapshot_generation` | do **deadlistu** | drží ho snapshot; uvolní se se smazáním snapshotu |
+
+Uvolní se vždy i druhá kopie (u uzlů a dat s kopií). Datový úsek, který je
+v **tabulce sdílení** (okamžité kopie, deduplikace), se při definitivním
+uvolnění jen odečte a uvolní až s posledním odkazem - viz [Tabulka
+sdílení](fs-data.md#tabulka-sdílení).
 
 ## Commit krok za krokem
 
@@ -1150,6 +1172,12 @@ rozpracovaného stromu před každou operací; přijde s transakcemi pro
 aplikace (fáze 5).
 
 ## Kontrola konzistence a scrub
+
+> **Změna proti v3 (fáze 2):** kontroluje i kopie uzlů a extentů,
+> tabulku sdílení (blok použitý víckrát musí být sdílený, záznam bez
+> použitých bloků = chyba) a index deduplikace; scrub čte obě kopie
+> a opravuje. Navíc **scrub na pozadí** po krocích. **Proč:** každá změna
+> formátu musí jít ověřit. ([Data FS](fs-data.md#scrub))
 
 > **Změna proti v3 (fáze 1):** kontroluje i struktury historie: souvislou
 > řadu žurnálu a jeho stav, metadata snapshotů, koš (záznam ↔ položka

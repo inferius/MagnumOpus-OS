@@ -10,7 +10,6 @@
 //! - Prepsani casti extentu ho rozdeli (levy zbytek, nova data, pravy
 //!   zbytek); prepsane fyzicke bloky se uvolni podle pravidel `Store::release`.
 
-use alloc::collections::BTreeSet;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -79,11 +78,10 @@ impl<D: BlockDevice> Fs<D> {
         let mut bad = false;
         btree::range(&mut self.s, root, &start, &end, &mut |k, raw| {
             let e = Extent::decode(raw)?;
-            // Extent musi lezet ve svazku (jinak by cteni i uvolneni slo
-            // mimo; uvolneni by navic poskodilo alokator).
-            let inside = e.phys >= crate::layout::DATA_START
-                && e.phys.checked_add(e.len()).is_some_and(|x| x <= blocks)
-                && k.offset.checked_add(e.len()).is_some();
+            // Extent (i kopie) musi lezet ve svazku (jinak by cteni
+            // i uvolneni slo mimo; uvolneni by navic poskodilo alokator).
+            let within = |p: u64| p >= crate::layout::DATA_START && p.checked_add(e.plen()).is_some_and(|x| x <= blocks);
+            let inside = within(e.phys) && (e.copy == 0 || within(e.copy)) && k.offset.checked_add(e.len()).is_some();
             if !inside {
                 bad = true;
                 return Ok(false);
@@ -130,11 +128,7 @@ impl<D: BlockDevice> Fs<D> {
             if lo >= hi {
                 continue;
             }
-            let rel = (lo - ks) as usize;
-            let n = (hi - lo) as usize;
-            let mut buf = vec![0u8; n * BLOCK_SIZE];
-            self.s
-                .read_data(e.phys + rel as u64, &e.csums[rel..rel + n], &mut buf)?;
+            let buf = self.extent_data(&e, lo - ks, hi - lo)?;
             for (j, block) in buf.chunks(BLOCK_SIZE).enumerate() {
                 copy_block(&mut out, offset, lo + j as u64, block);
             }
@@ -190,7 +184,9 @@ impl<D: BlockDevice> Fs<D> {
             .filter(|&e| e <= MAX_FILE_SIZE)
             .ok_or(Error::OutOfRange)?;
         let blocks = end.div_ceil(BS) - offset / BS;
-        self.ensure_room(blocks + 8)?;
+        // S kopiemi dat zabere kazdy blok dvakrat.
+        let copies = self.data_settings()?.copies as u64;
+        self.ensure_room(blocks * copies + 8)?;
         if self.dirty_blocks + blocks > DIRTY_HARD_LIMIT {
             // Pred prijetim: kdyz se buffer neda vyprazdnit, nic neprijmout.
             self.for_each_dataset(|fs| fs.flush_all_data())?;
@@ -283,9 +279,7 @@ impl<D: BlockDevice> Fs<D> {
             if partial {
                 let root = self.s.root;
                 if let Some((ks, e)) = self.extents_in(&root, oid, lb, lb + 1)?.into_iter().next() {
-                    let rel = (lb - ks) as usize;
-                    self.s
-                        .read_data(e.phys + rel as u64, &e.csums[rel..rel + 1], &mut block)?;
+                    block = self.extent_data(&e, lb - ks, 1)?;
                 }
             }
             self.data.entry(oid).or_default().blocks.insert(lb, block);
@@ -410,202 +404,6 @@ impl<D: BlockDevice> Fs<D> {
         self.jnote_content(oid);
         let parent = inode.parent;
         self.adjust_tree(parent, new_size as i128 - old_size as i128, 0, 0)
-    }
-
-    /// Odstrani mapovani logickych bloku `a..b` (rozdeli castecne prekryte
-    /// extenty) a uvolni jejich fyzicke bloky.
-    pub(super) fn punch_range(&mut self, oid: u64, a: u64, b: u64) -> Result<()> {
-        // Po davkach (pamet nezavisi na velikosti souboru); kazda davka
-        // zacina za koncem posledniho zpracovaneho extentu.
-        const BATCH: usize = 256;
-        let mut from = a;
-        while from < b {
-            let root = self.s.root;
-            let batch = self.extents_batch(&root, oid, from, b, BATCH)?;
-            let full = batch.len() == BATCH;
-            let Some(last_end) = batch.last().map(|(ks, e)| ks + e.len()) else {
-                break;
-            };
-            self.punch_batch(oid, a, b, batch)?;
-            if !full {
-                break;
-            }
-            from = last_end.max(from + 1);
-        }
-        Ok(())
-    }
-
-    fn punch_batch(&mut self, oid: u64, a: u64, b: u64, batch: Vec<(u64, Extent)>) -> Result<()> {
-        for (ks, e) in batch {
-            let ke = ks + e.len();
-            let lo = ks.max(a);
-            let hi = ke.min(b);
-            if lo >= hi {
-                continue;
-            }
-            self.s.release(e.phys + (lo - ks), hi - lo, e.birth);
-            if ks < lo {
-                let left = Extent {
-                    phys: e.phys,
-                    birth: e.birth,
-                    csums: e.csums[..(lo - ks) as usize].to_vec(),
-                };
-                self.put(Key::new(oid, item::EXTENT, ks), left.encode())?;
-            } else {
-                self.del(&Key::new(oid, item::EXTENT, ks))?;
-            }
-            if hi < ke {
-                let r = (hi - ks) as usize;
-                let right = Extent {
-                    phys: e.phys + r as u64,
-                    birth: e.birth,
-                    csums: e.csums[r..].to_vec(),
-                };
-                self.put(Key::new(oid, item::EXTENT, hi), right.encode())?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Fyzicky blok hned za extentem, ktery mapuje logicky blok `lb`.
-    fn goal_after(&mut self, oid: u64, lb: u64) -> Result<Option<u64>> {
-        let root = self.s.root;
-        Ok(self
-            .extents_in(&root, oid, lb, lb + 1)?
-            .into_iter()
-            .next()
-            .map(|(ks, e)| e.phys + (lb - ks) + 1))
-    }
-
-    /// Zapise rozpracovane bloky souboru na disk (vsechny, nebo jen `only`).
-    /// Po sobe jdouci bloky dostanou jeden souvisly usek.
-    pub(super) fn writeback(&mut self, oid: u64, only: Option<&BTreeSet<u64>>) -> Result<()> {
-        let Some(fd) = self.data.get_mut(&oid) else {
-            return Ok(());
-        };
-        let picked: Vec<(u64, Vec<u8>)> = match only {
-            None => core::mem::take(&mut fd.blocks).into_iter().collect(),
-            Some(set) => {
-                let keys: Vec<u64> = set
-                    .iter()
-                    .copied()
-                    .filter(|lb| fd.blocks.contains_key(lb))
-                    .collect();
-                keys.into_iter()
-                    .map(|lb| (lb, fd.blocks.remove(&lb).unwrap()))
-                    .collect()
-            }
-        };
-        if fd.blocks.is_empty() {
-            self.data.remove(&oid);
-        }
-        self.dirty_blocks -= picked.len() as u64;
-        let mut i = 0;
-        while i < picked.len() {
-            let mut j = i + 1;
-            while j < picked.len() && picked[j].0 == picked[j - 1].0 + 1 {
-                j += 1;
-            }
-            if let Err(e) = self.write_run(oid, &picked[i..j]) {
-                // Nezapsane bloky vratit do bufferu: chyba zapisu nesmi
-                // ztratit data, ktera klient uz predal (zkusi se znovu).
-                let rest = &picked[i..];
-                let fd = self.data.entry(oid).or_default();
-                for (lb, b) in rest {
-                    fd.blocks.insert(*lb, b.clone());
-                }
-                self.dirty_blocks += rest.len() as u64;
-                return Err(e);
-            }
-            i = j;
-        }
-        Ok(())
-    }
-
-    /// Zapise souvisly beh bloku `run` do novych bloku a teprve pak
-    /// prepoji extenty. Poradi je dulezite: kdyz alokace nebo zapis selze,
-    /// stara data zustanou namapovana (zadna dira) a nove alokovane bloky
-    /// se hned vrati.
-    fn write_run(&mut self, oid: u64, run: &[(u64, Vec<u8>)]) -> Result<()> {
-        let a = run[0].0;
-        let n = run.len() as u64;
-        let mut goal = if a > 0 {
-            self.goal_after(oid, a - 1)?
-        } else {
-            None
-        };
-        let txg = self.s.txg;
-        // (logicky offset v behu, fyzicky zacatek, pocet)
-        let mut pieces: Vec<(u64, u64, u64)> = Vec::new();
-        let mut done = 0u64;
-        while done < n {
-            let r = self.s.alloc_data(n - done, goal).and_then(|(start, got)| {
-                pieces.push((done, start, got));
-                // Slozeni bloku do souvisleho bufferu po celych blocich
-                // (iterator po bajtech byl 3x pomalejsi nez memcpy).
-                let piece = &run[done as usize..(done + got) as usize];
-                let mut buf = Vec::with_capacity(piece.len() * BLOCK_SIZE);
-                for (_, b) in piece {
-                    buf.extend_from_slice(b);
-                }
-                self.s.dev.write_blocks(start, &buf).map(|()| (start, got))
-            });
-            match r {
-                Ok((start, got)) => {
-                    done += got;
-                    goal = Some(start + got);
-                }
-                Err(e) => {
-                    for &(_, start, got) in &pieces {
-                        self.s.space.free(start, got, txg, true);
-                    }
-                    return Err(e);
-                }
-            }
-        }
-        // Od ted se meni strom: chyba (cteni uzlu) by nechala beh napul
-        // prepojeny - svazek do stavu chyby, nic se nepotvrdi.
-        let r = self.relink_run(oid, a, n, run, &pieces);
-        if r.is_err() {
-            self.s.poisoned = true;
-        }
-        r
-    }
-
-    fn relink_run(
-        &mut self,
-        oid: u64,
-        a: u64,
-        n: u64,
-        run: &[(u64, Vec<u8>)],
-        pieces: &[(u64, u64, u64)],
-    ) -> Result<()> {
-        let txg = self.s.txg;
-        self.punch_range(oid, a, a + n)?;
-        let algo = self.s.algo;
-        for &(off0, start, got) in pieces {
-            let piece = &run[off0 as usize..(off0 + got) as usize];
-            let csums: Vec<_> = piece.iter().map(|(_, b)| algo.sum(b)).collect();
-            for (k, chunk) in csums.chunks(MAX_EXTENT as usize).enumerate() {
-                let off = k as u64 * MAX_EXTENT;
-                let e = Extent {
-                    phys: start + off,
-                    birth: txg,
-                    csums: chunk.to_vec(),
-                };
-                self.put(Key::new(oid, item::EXTENT, a + off0 + off), e.encode())?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Zapise vsechna rozpracovana data.
-    pub(super) fn flush_all_data(&mut self) -> Result<()> {
-        let oids: Vec<u64> = self.data.keys().copied().collect();
-        for oid in oids {
-            self.writeback(oid, None)?;
-        }
-        Ok(())
     }
 
     /// Pocet souvislych fyzickych useku souboru (1 = nefragmentovany).
