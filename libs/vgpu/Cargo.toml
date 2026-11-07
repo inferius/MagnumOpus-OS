@@ -1,0 +1,8 @@
+[package]
+name = "vgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Prikazy virtio-gpu (2D, 3D/virgl): kodovani a cteni odpovedi"
+
+[dependencies]

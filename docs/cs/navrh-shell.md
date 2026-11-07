@@ -873,6 +873,50 @@ v běžném běhu rozdělí supervisor spolu s GUI 6c.
 | kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
 | spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
 
+## Souběžnost: async a await (rozhodnuto, zatím neimplementováno)
+
+> **Odsouhlaseno (varianta A):** úloha `async { }`, čekání `await`,
+> `await all [...]`, `await any [...]`, časový limit `timeout`, zrušení
+> `cancel` a paralelní `each --parallel N`. Stejně v obou zápisech.
+> Implementace přijde po barvách a interaktivitě terminálu.
+
+Příklady jsou zatím jako text (parser `async` ještě nezná, dokumentace by je odmítla):
+
+```text
+let a = async { fetch https://example.com/data.json | from json }
+let b = async { ls ~/Fotky -r | where ext == "jpg" | count }
+let (data, pocet) = await all [a, b]          # počká na obě, chyba se šíří
+let prvni = await any [a, b] timeout 5s       # první hotová, jinak TIMED_OUT
+ls ~/Fotky | each --parallel 8 f => image resize $f.path --width 800
+```
+
+```text
+let a = async { fetch("https://example.com/data.json").from_json() }
+let data = a.await
+```
+
+**Pravidla:**
+
+- **Strukturovaná souběžnost.** Úloha nepřežije blok, ve kterém vznikla:
+  když blok skončí (i chybou nebo Ctrl-C), běžící podúlohy se zruší.
+  Nezůstanou tak zapomenuté procesy. Výjimka je výslovné `bg`, které úlohu
+  předá službě relací.
+- **Chyby:** chyba úlohy se projeví při `await` a šíří se sama;
+  `let r = try await a` ji vrátí jako hodnotu.
+- **Oprávnění se nerozšiřují:** úloha dědí manifest `needs` skriptu
+  (průnik, stejně jako `bg`).
+- **Terminál:** každá úloha má vlastní blok s průběhem, mezi běžícími
+  úlohami jde přepínat.
+- **Pod tím:** úloha je proces nebo vlákno s handlem, `await` čeká na jeho
+  signál přes objekt **port** jádra (jedno vlákno čeká na mnoho událostí),
+  `timeout` je časovač portu, `cancel` ukončí úlohu. Žádné aktivní čekání.
+
+| Varianta | Zápis | Proč ne |
+|---|---|---|
+| **A (zvoleno)** | `async`/`await`, `await all/any`, `each --parallel` | - |
+| B | `&` a `wait` jako v bash | bez návratových hodnot, chyby se ztrácejí |
+| C | jen `each --parallel`, `par { }` | nejde čekat na libovolnou ani první hotovou úlohu |
+
 ## Chyby shellu
 
 Kódy chyb shellu (`SH_*`). Chyby systému (`NOT_FOUND`, ...) jsou

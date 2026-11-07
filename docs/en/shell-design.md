@@ -923,6 +923,52 @@ together with GUI 6c.
 | drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
 | starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
+## Concurrency: async and await (decided, not implemented yet)
+
+> **Agreed (variant A):** a task `async { }`, waiting `await`,
+> `await all [...]`, `await any [...]`, a `timeout`, cancellation `cancel`
+> and parallel `each --parallel N`. The same in both notations.
+> Implementation comes after the terminal colours and interactivity.
+
+The examples are plain text for now (the parser does not know `async` yet and the documentation check would reject them):
+
+```text
+let a = async { fetch https://example.com/data.json | from json }
+let b = async { ls ~/Photos -r | where ext == "jpg" | count }
+let (data, count) = await all [a, b]          # waits for both, errors propagate
+let first = await any [a, b] timeout 5s       # the first one done, else TIMED_OUT
+ls ~/Photos | each --parallel 8 f => image resize $f.path --width 800
+```
+
+```text
+let a = async { fetch("https://example.com/data.json").from_json() }
+let data = a.await
+```
+
+**Rules:**
+
+- **Structured concurrency.** A task does not outlive the block it was
+  created in: when the block ends (also by an error or Ctrl-C), running
+  subtasks are cancelled. No forgotten processes are left behind. The
+  exception is an explicit `bg`, which hands the task to the session
+  service.
+- **Errors:** a task's error shows at `await` and propagates by itself;
+  `let r = try await a` returns it as a value.
+- **Permissions do not widen:** a task inherits the script's `needs`
+  manifest (an intersection, as with `bg`).
+- **Terminal:** each task has its own block with progress; you can switch
+  between running tasks.
+- **Underneath:** a task is a process or thread with a handle; `await`
+  waits for its signal through the kernel **port** object (one thread waits
+  for many events), `timeout` is a port timer, `cancel` ends the task. No
+  busy waiting.
+
+| Variant | Syntax | Why not |
+|---|---|---|
+| **A (chosen)** | `async`/`await`, `await all/any`, `each --parallel` | - |
+| B | `&` and `wait` as in bash | no return values, errors get lost |
+| C | only `each --parallel`, `par { }` | cannot wait for an arbitrary or the first finished task |
+
 ## Shell errors
 
 Shell error codes (`SH_*`). System errors (`NOT_FOUND`, ...) are in

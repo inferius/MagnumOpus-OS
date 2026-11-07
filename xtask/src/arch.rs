@@ -44,8 +44,8 @@ pub const X86_64: Arch = Arch {
     iommus: &["intel", "amd", "none"],
     // isa-debug-exit vraci (v << 1) | 1, jadro zapisuje v = 0x10.
     test_success: 33,
-    // Cely beh (USB/vstup, FS faze 2, sit, shell s padem termd) trva
-    // ~200 s; s rezervou na vytizeny stroj.
+    // Cely beh (USB/vstup, FS faze 2, sit, GUI, shell s padem termd) trva
+    // ~200 s (TCG); s rezervou na vytizeny stroj.
     test_timeout: Duration::from_secs(300),
     ps2: true,
 };

@@ -44,6 +44,8 @@ pub struct Devices {
     pub nets: Vec<Channel>,
     /// Kanaly k ovladacum zdroje nahody (drzet = ovladac bezi).
     pub _rngs: Vec<Channel>,
+    /// Kanaly k ovladacum grafiky (dokud je neprevezme kompozitor).
+    pub displays: Vec<Channel>,
     pub fs: Option<FsClient>,
     pub fsd: Option<(Process, Channel)>,
 }
@@ -82,6 +84,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let mut inputs = Vec::new();
     let mut nets = Vec::new();
     let mut rngs = Vec::new();
+    let mut displays = Vec::new();
     loop {
         // Spravce muze mlcet dlouho: PS/2 (az 5 s) a pruchod USB (az 10 s).
         let msg = control.read(Some(time::deadline_after(DEVMGR_TIMEOUT)))?;
@@ -98,6 +101,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
             b"input" => inputs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"net" => nets.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"rng" => rngs.extend(msg.handles.into_iter().map(Channel::from_handle)),
+            b"display" => displays.extend(msg.handles.into_iter().map(Channel::from_handle)),
             other => println!("init: neznama zprava od devmgr: {:?}", other),
         }
     }
@@ -115,6 +119,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         input: None,
         nets,
         _rngs: rngs,
+        displays,
         fs: None,
         fsd: None,
     })

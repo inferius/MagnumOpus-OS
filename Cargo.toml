@@ -16,6 +16,12 @@ members = [
     "libs/manifest",
     "libs/blockproto",
     "libs/inputproto",
+    "libs/guiproto",
+    "libs/gfx",
+    "libs/font",
+    "libs/vgpu",
+    "libs/comp",
+    "libs/ui",
     "libs/keymap",
     "libs/i8042",
     "libs/usbproto",
@@ -49,6 +55,10 @@ members = [
     "user/usb-hid",
     "user/virtio-net",
     "user/virtio-rng",
+    "user/virtio-gpu",
+    "user/compd",
+    "user/gui-demo",
+    "user/gui-term",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace
@@ -78,6 +88,23 @@ panic = "abort"
 opt-level = 2
 
 [profile.dev.package.term]
+opt-level = 2
+
+# Skladani a rasterizace bez optimalizace by byly desetkrat pomalejsi
+# (pixelove smycky); kompozitor by nestihal takt snimku.
+[profile.dev.package.guiproto]
+opt-level = 2
+
+[profile.dev.package.gfx]
+opt-level = 2
+
+[profile.dev.package.font]
+opt-level = 2
+
+[profile.dev.package.comp]
+opt-level = 2
+
+[profile.dev.package.ui]
 opt-level = 2
 
 [profile.release]

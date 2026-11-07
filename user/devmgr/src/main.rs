@@ -7,7 +7,8 @@
 //! (`usb.rs`). Rodici (init) posle po bootstrap kanalu pro kazde zarizeni
 //! zpravu s koncem kanalu ke klientovi ovladace: `block` (disk, protokol
 //! `blockproto`), `input` (klavesnice, mys, protokol `inputproto::device`),
-//! `net` (sitova karta, `netproto::link`) nebo `rng` (zdroj nahody), a `done`, az jsou nalezena zarizeni pri startu
+//! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody) nebo
+//! `display` (grafika, `guiproto::display`), a `done`, az jsou nalezena zarizeni pri startu
 //! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
 //!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
@@ -72,6 +73,16 @@ const DRIVERS: &[Driver] = &[
         message: b"rng",
         irq_max: 2,
         dma_max: 256 << 10,
+    },
+    // Grafika (typ 16): fronta prikazu + obraz vystupu po kusech 4 MiB
+    // (1920x1200 = 9 MiB; rezerva na zmenu rozliseni). Prechodne rozhrani
+    // nema.
+    Driver {
+        ids: (0x1050, 0x1050),
+        program: "virtio-gpu",
+        message: b"display",
+        irq_max: 4,
+        dma_max: 40 << 20,
     },
     // Vstupni zarizeni (typ 18): klavesnice, mys, tablet. Prechodne
     // rozhrani nema.
