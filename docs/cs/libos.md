@@ -38,6 +38,8 @@ Jádro (u `init`) nebo rodič (u ostatních) spustí první vlákno na symbolu
    - `initfs` - obraz initfs (jen `init`),
    - `handles` - další handly od rodiče,
    - `bootstrap` - kanál k rodiči pro další komunikaci,
+   - `flags` - příznaky startu z argumentu `SELF_PROCESS`
+     (`abi::bootstrap::flags`; jádro nastavuje jen initu, např. `TEST_RUN`),
 4. návratovou hodnotu použije jako návratový kód procesu (`PROCESS_EXIT`).
 
 Panika v programu vypíše zprávu do logu a ukončí proces s kódem -1 000 001.
@@ -55,8 +57,8 @@ Každý typ vlastní handle a zavře ho při zrušení (`Drop`).
 | `Process` | proces | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |
 | `Thread` | vlákno | `create`, `start`, `wait_exit` |
 | `Mapping` | namapovaný objekt paměti ve vlastním adresním prostoru (odmapuje se při zrušení) | `new`, `read::<T>`, `write::<T>`, `read_bytes`, `write_bytes` |
-| `hw::Resource` | oprávnění k hardwaru (ovladače) | `restrict`, `restrict_device` (s doménou IOMMU), `device_memory`, `dma_memory`, `phys_addr`, `interrupt` |
-| `hw::Interrupt` | přerušení zařízení (MSI) | `msi`, `wait(deadline)` |
+| `hw::Resource` | oprávnění k hardwaru (ovladače) | `restrict` (rozsahy paměti, `hw::io_ports`, `hw::irq_lines`), `restrict_device` (s doménou IOMMU), `device_memory`, `dma_memory`, `phys_addr`, `interrupt`, `interrupt_line`, `port_read8`, `port_write8` |
+| `hw::Interrupt` | přerušení zařízení (MSI nebo stará linka) | `msi`, `wait(deadline)`, `ack` |
 
 `Mapping::read`/`write` jsou volatile (vhodné i pro registry zařízení) a
 přijímají jen celá čísla (`libos::Pod`: `u8`..`u64`, `i8`..`i64`) - z

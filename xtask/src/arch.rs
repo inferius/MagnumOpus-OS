@@ -41,7 +41,8 @@ pub const X86_64: Arch = Arch {
     iommus: &["intel", "amd", "none"],
     // isa-debug-exit vraci (v << 1) | 1, jadro zapisuje v = 0x10.
     test_success: 33,
-    test_timeout: Duration::from_secs(120),
+    // Beh s AMD IOMMU a testy USB/vstupu trva az ~90 s.
+    test_timeout: Duration::from_secs(180),
 };
 
 pub const AARCH64: Arch = Arch {

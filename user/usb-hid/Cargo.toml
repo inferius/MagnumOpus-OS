@@ -1,0 +1,17 @@
+[package]
+name = "usb-hid"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "usb-hid"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+usbproto = { path = "../../libs/usbproto" }
+usbclient = { path = "../../libs/usbclient" }
+inputproto = { path = "../../libs/inputproto" }

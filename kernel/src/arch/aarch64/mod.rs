@@ -368,6 +368,26 @@ impl api::Memory for Aarch64 {
     }
 }
 
+/// aarch64 nema I/O porty ani linky ISA (zarizeni na desce jsou MMIO
+/// a preruseni SPI pres GIC - pripadne pozdeji vlastni cesta).
+impl api::LegacyIo for Aarch64 {
+    fn port_read(_port: u16, _width: u8) -> Result<u32, Error> {
+        Err(Error::NotSupported)
+    }
+
+    fn port_write(_port: u16, _width: u8, _value: u32) -> Result<(), Error> {
+        Err(Error::NotSupported)
+    }
+
+    fn line_route(_line: u32, _irq: u32) -> Result<bool, Error> {
+        Err(Error::NotSupported)
+    }
+
+    fn line_mask(_line: u32, _masked: bool) {}
+
+    fn line_release(_line: u32) {}
+}
+
 impl api::DeviceIrq for Aarch64 {
     const DEVICE_IRQ_FIRST: u32 = gic::LPI_FIRST;
     const DEVICE_IRQ_LAST: u32 = DEVICE_IRQ_LAST;

@@ -79,9 +79,16 @@ pub const CLOCK_REALTIME: u64 = 32;
 /// `(resource, in_ptr, flags) -> 1 = zapsano i do hardwarovych hodin`;
 /// na `in_ptr` je [`crate::time::SetRequest`] (16 B), `flags` z [`crate::time::set_flags`]
 pub const CLOCK_SET: u64 = 33;
+/// Precte I/O port (x86). `(resource, port, width) -> hodnota`; width 1, 2, 4
+pub const IOPORT_READ: u64 = 34;
+/// Zapise I/O port (x86). `(resource, port, width, value)`
+pub const IOPORT_WRITE: u64 = 35;
+/// Objekt preruseni na stare lince (ISA IRQ 0-15 pres IOAPIC).
+/// `(resource, line) -> handle`
+pub const INTERRUPT_CREATE_LINE: u64 = 36;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 34;
+pub const COUNT: u64 = 37;
 
 /// Deadline "cekat neomezene".
 pub const DEADLINE_INFINITE: u64 = u64::MAX;
@@ -97,6 +104,15 @@ pub const WAIT_MANY_MAX: usize = 64;
 pub const NAME_MAX: usize = 64;
 /// Maximalni delka zpravy DEBUG_LOG.
 pub const DEBUG_LOG_MAX: usize = 1024;
+
+/// Druh rozsahu v `RESOURCE_CREATE` (horni dva bity zacatku rozsahu):
+/// 0 = fyzicka pamet (zarovnana na stranky), [`RANGE_IO_PORTS`] = I/O porty,
+/// [`RANGE_IRQ_LINES`] = stare linky preruseni (ISA IRQ).
+pub const RANGE_KIND_MASK: u64 = 3 << 62;
+/// Rozsah I/O portu: zacatek = `RANGE_IO_PORTS | port`, delka = pocet portu.
+pub const RANGE_IO_PORTS: u64 = 1 << 62;
+/// Rozsah linek preruseni: zacatek = `RANGE_IRQ_LINES | linka`, delka = pocet.
+pub const RANGE_IRQ_LINES: u64 = 2 << 62;
 
 /// Hodnota argumentu `device` syscallu `RESOURCE_CREATE` pro zarizeni PCI.
 pub const fn pci_device(segment: u16, bus: u8, device: u8, function: u8) -> u64 {

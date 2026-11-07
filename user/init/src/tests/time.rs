@@ -8,7 +8,7 @@ use libos::hw::Resource;
 use libos::time::{self, SetRequest, WallTime, source, zone};
 use libos::{Error, Event, Rights, Startup, sys};
 
-use super::{Test, TestResult, fail, time_service};
+use super::{Test, TestResult, fail};
 use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
@@ -125,14 +125,22 @@ fn set_and_restore(s: &Startup) -> TestResult {
     Ok(())
 }
 
-fn time_service_set(_: &Startup) -> TestResult {
-    let t = time_service().ok_or("sluzba casu nebezi")?;
-    let now = time::wall().ok_or("realny cas neni znamy")?;
+/// Pozadavek `set` sluzby casu: cas a priznak zapisu do RTC.
+pub(super) fn set_request(now: WallTime, hardware: bool) -> Vec<u8> {
     let mut msg = Vec::from(&b"set"[..]);
     msg.extend_from_slice(&now.secs.to_le_bytes());
     msg.extend_from_slice(&now.nanos.to_le_bytes());
-    msg.push(1);
-    t.channel.write(&msg, Vec::new()).map_err(|e| fail("zapis", e))?;
+    msg.push(hardware as u8);
+    msg
+}
+
+fn time_service_set(_: &Startup) -> TestResult {
+    let guard = crate::system::TIME.lock();
+    let t = guard.as_ref().ok_or("sluzba casu nebezi")?;
+    let now = time::wall().ok_or("realny cas neni znamy")?;
+    t.channel
+        .write(&set_request(now, true), Vec::new())
+        .map_err(|e| fail("zapis", e))?;
     let reply = t
         .channel
         .read(Some(time::deadline_after(Duration::from_secs(5))))

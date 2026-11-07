@@ -25,7 +25,7 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 |---|---|
 | `cargo xtask build` | přeloží jádro, loader a programy userspace, sestaví initfs |
 | `cargo xtask image` | build + obraz disku `target/os-<arch>-<profil>.img` (GPT, ESP FAT32) |
-| `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu |
+| `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)) |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro ostatní architektury, dokumentace, pak jádro a userspace v QEMU bez okna |
 | `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
@@ -67,7 +67,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, fsd, timed
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed
 ```
 
 QEMU dostane emulovanou IOMMU (`intel-iommu`, s `--iommu amd`
@@ -84,6 +84,14 @@ AMD IOMMU zabere slot PCI a uložené bootovací položky by neseděly.
 | datový | `target/data.img` | 64 MiB, náš souborový systém (jméno `data`); vytvoří ho xtask knihovnou `fs` se soubory `/vitejte.txt` a `/dokumenty/navod.md`; TRIM povolen (`discard=unmap`) |
 
 Testovací a datový disk se vytvoří znovu při každém `run`/`test`.
+
+Dál QEMU dostane grafiku `VGA,id=video0` (místo výchozí `-vga std`),
+klávesnici a myš virtio (`virtio-keyboard-pci`, `virtio-mouse-pci`,
+s `iommu_platform=on`, navázané na `display=video0`), druhou grafiku
+`secondary-vga,id=video1`, řadič `qemu-xhci` s klávesnicí `usb-kbd`
+(navázanou na `video1`) a server QMP na náhodném portu
+localhostu (`-qmp tcp:127.0.0.1:<port>`). Přes QMP xtask vkládá události
+pro test vstupu, viz [Vstup](vstup.md#testy).
 
 ## Výstup a dohledání chyb
 
@@ -125,6 +133,11 @@ libs/libos/      knihovna pro programy
 libs/pci/        PCI Express (ECAM, BAR, MSI-X)
 libs/virtio/     virtio 1.x přes PCI (virtqueue)
 libs/blockproto/ protokol blokového zařízení (klient <-> ovladač)
+libs/inputproto/ protokol vstupu (ovladač -> inputd -> vlastník fokusu)
+libs/keymap/     rozložení klávesnice (US, CZ), mrtvé klávesy
+libs/i8042/      PS/2: scan kódy a pakety myši (bez hardwaru, testy na hostiteli)
+libs/usbproto/   USB: protokol xhci <-> třídní ovladače, deskriptory, hub, HID (boot i parser reportu)
+libs/usbclient/  klient kanálu USB pro třídní ovladače
 libs/fs/         souborový systém (no_std; std pro nástroje)
   src/space/        volné místo: alokační skupiny, space logy
   src/fs/           soubory, adresáře, snapshoty, intent log, defrag, fsck
@@ -134,6 +147,12 @@ user/init/       první proces: start služeb a testy userspace
 user/echo/       testovací server pro IPC
 user/devmgr/     správce zařízení (PCI, spouští ovladače)
 user/virtio-blk/ ovladač disku
+user/virtio-input/ ovladač klávesnice a myši
+user/inputd/     služba vstupu
+user/ps2/        ovladač řadiče PS/2 (klávesnice, myš)
+user/xhci/       ovladač řadiče USB xHCI a jádro USB (enumerace, root hub)
+user/usb-hub/    ovladač třídy hub (root hub i externí)
+user/usb-hid/    ovladač klávesnice a myši USB (boot protokol)
 user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
 libs/osfs-proto/ protokol rozšířeného API FS pro Windows (DeviceIoControl) + klient

@@ -110,11 +110,53 @@ porušený vnitřní předpoklad (chyba jádra).
 | Hláška | Význam a řešení |
 |---|---|
 | `devmgr: pci BB:ZZ.F vvvv:dddd trida cc.ss.pp` | Nalezené zařízení PCI (informace). |
-| `devmgr: ovladac pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
+| `devmgr: ovladac X pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
 | `virtio-blk BB:ZZ.F: N MiB, flush ano/ne, discard ano/ne` | Disk je připravený. `discard ne` = zařízení neumí TRIM (v QEMU chybí `discard=unmap` u disku); FS pak TRIM přeskakuje. |
 | `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x, nedokončilo reset do sekundy (`TIMED_OUT`) nebo chybí prostředky (MSI-X, DMA paměť, `NO_RESOURCES` = vyčerpaná kvóta omezeného Resource). |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
+| `ps2: klavesnice`, `ps2: PS/2 mys ...` | Ovladač PS/2 našel klávesnici, myš (druh podle ID: kolečko, 5 tlačítek). |
+| `devmgr: radic PS/2 nenalezen` | Port 0x64 čte `0xFF` (řadič chybí) nebo nenašel žádné zařízení. Na moderních deskách bez PS/2 normální. |
+| `ps2: radic neodpovida spravne: ...` | Řadič je, ale neprošel self-testem nebo neodpovídá včas (`TIMED_OUT`). |
+| `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | Port je, ale zařízení na něm nereaguje (nepřipojené). |
+| `xhci BB:ZZ.F: N portu (M USB 3), S slotu, kontext K B` | Řadič USB je připravený. |
+| `xhci: firmware radic nepustil, pokracuji` | Firmware do sekundy neuvolnil řadič (USB Legacy Support); emulace PS/2 z USB může dál běžet. |
+| `xhci ...: inicializace selhala: ...` | Řadič nedokončil zastavení, reset nebo start (`TIMED_OUT`), nebo chybí prostředky. |
+| `xhci: port P: zarizeni vvvv:pppp (rychlost), slot S` / `zarizeni odpojeno` | Zařízení na portu nastavené / odpojené. |
+| `xhci: prikaz typu T selhal (kod C)` | Příkaz řadiče (Enable Slot, Address Device, Configure Endpoint ...) vrátil chybu; zařízení se nepoužije. |
+| `usb-hub: root hub, N portu` | Ovladač hubu běží na kořenových portech. |
+| `usb-hub: port P: zarizeni nelze nastavit: ...` | Reset portu nebo nastavení zařízení selhalo (`TIMED_OUT`, `IO_ERROR`). |
+| `usb-hub: externi hub [cesta], N portu` | Ovladač hubu běží na externím hubu. |
+| `usb-hid: USB klavesnice/mys vvvv:pppp (port [...], rychlost)` | Ovladač HID se představil službě vstupu. |
+| `usb-hid: rozhrani cc/ss/pp: deskriptoru reportu nerozumim` | Deskriptor reportu chybí, je poškozený nebo nemá nic známého a rozhraní nemá boot protokol. Rozhraní se nepoužije. |
+| `usb-hid: rozhrani N nema interrupt endpoint IN` | Rozhraní HID bez vstupního endpointu; nepoužije se. |
+| `devmgr: usb vvvv:pppp rozhrani cc/ss/pp: ovladac neni` | Pro třídu rozhraní není ovladač (např. disk USB). |
+| `devmgr: radic USB nedokoncil pruchod porty` | `usb-ready` nepřišlo do 10 s; init dostane `done` i tak. |
+| `inputd: nove zarizeni '...' ceka na overeni`, `inputd: zarizeni '...' overeno` / `odmitnuto` | Volba ověření nové klávesnice (BadUSB), viz [USB](usb.md). |
+| `init: supervisor bezi` | Start hotový, init hlídá služby a zařízení ([Init](init.md)). |
+| `init: sluzba X skoncila: ...` | Hlídaná služba skončila (důvod podle návratového kódu). |
+| `init: sluzba X znovu spustena` | Supervisor službu obnovil. |
+| `init: sluzba X spadla 6x za 60 s, vzdavam to` | Příliš mnoho pádů; služba zůstane zastavená. |
+| `init: sluzbu X zatim neumim obnovit` | Pád služby bez restartu (`devmgr`, `fsd`, `inputd`); systém běží bez ní. |
+| `init: spravce zarizeni skoncil, hotplug nefunguje` | `devmgr` zavřel kanál; zařízení připojená potom se nenajdou. |
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
+| `virtio-input BB:ZZ.F: 'jméno' (klavesnice/mys)` | Vstupní zařízení je připravené; druh podle podporovaných událostí. `nezname zarizeni` = nemá klávesy ani relativní osy (tablet, zatím nepodporovaný). |
+| `virtio-input ...: inicializace selhala: ...` | Jako u virtio-blk: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA). |
+| `virtio-input: prvni udalosti od zarizeni (N)` | Zařízení poprvé poslalo události (informace; potvrzuje, že fungují přerušení a fronta). |
+| `virtio-input: sluzba nestiha, zahozeno N zprav` | Fronta kanálu ke službě vstupu je plná; ovladač události zahazuje, aby neblokoval zařízení. Hlásí se při 1, 2, 4, 8 ... zprávách. |
+| `init: N blokovych a M vstupnich zarizeni` | Co správce zařízení našel. |
+
+## Služba vstupu (inputd)
+
+| Hláška | Význam a řešení |
+|---|---|
+| `inputd: bezim (rozlozeni us)` | Služba běží s výchozím rozložením. |
+| `inputd: zarizeni 'jméno' pripojeno` / `odpojeno` | Ovladač se představil (`IDEV`) nebo zavřel kanál. |
+| `inputd: neplatna zprava od zdroje N` | Zdroj poslal zprávu, která neodpovídá protokolu zařízení (neznámá značka, špatná délka); zpráva se zahodí. |
+| `inputd: bezpecna zkratka, ale nikdo ji neposloucha` | Ctrl+Alt+Delete, ale nikdo nemá kanál `secure`; zkratka se jen pohltí. |
+| `inputd: bezpecna zkratka neprosla, kanal secure je plny` | Příjemce zkratky nečte; zkratka se pohltí a bezpečný režim nezačne (vstup zůstává vlastníkovi fokusu). |
+| `inputd: bezpecna zkratka, ale kanal secure je zavreny` | Příjemce zkratky skončil; zkratka se pohltí. |
+| `init: sluzba vstupu bezi (N zarizeni)` | Init spustil `inputd` a připojil N ovladačů. |
+| `init: sluzbu vstupu nelze spustit: ...` | `inputd` chybí v initfs nebo neodpověděla na příkaz (`TIMED_OUT`). Testy vstupu pak selžou (`sluzba vstupu nebezi`). |
 
 ## Služba fsd a souborový systém
 

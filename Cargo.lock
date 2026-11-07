@@ -349,6 +349,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
+name = "i8042"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -388,12 +395,26 @@ version = "0.1.0"
 dependencies = [
  "blockproto",
  "fsproto",
+ "inputproto",
  "libos",
  "spin",
 ]
 
 [[package]]
 name = "initfs"
+version = "0.1.0"
+
+[[package]]
+name = "inputd"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "keymap",
+ "libos",
+]
+
+[[package]]
+name = "inputproto"
 version = "0.1.0"
 
 [[package]]
@@ -417,6 +438,13 @@ dependencies = [
  "initfs",
  "noto-sans-mono-bitmap",
  "spin",
+]
+
+[[package]]
+name = "keymap"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
 ]
 
 [[package]]
@@ -571,6 +599,15 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
+]
+
+[[package]]
+name = "ps2"
+version = "0.1.0"
+dependencies = [
+ "i8042",
+ "inputproto",
+ "libos",
 ]
 
 [[package]]
@@ -925,6 +962,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "usb-hid"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "libos",
+ "usbclient",
+ "usbproto",
+]
+
+[[package]]
+name = "usb-hub"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "libos",
+ "usbclient",
+ "usbproto",
+]
+
+[[package]]
+name = "usbclient"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "usbproto",
+]
+
+[[package]]
+name = "usbproto"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+]
+
+[[package]]
 name = "virtio"
 version = "0.1.0"
 dependencies = [
@@ -937,6 +1009,16 @@ name = "virtio-blk"
 version = "0.1.0"
 dependencies = [
  "blockproto",
+ "libos",
+ "pci",
+ "virtio",
+]
+
+[[package]]
+name = "virtio-input"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
  "libos",
  "pci",
  "virtio",
@@ -1070,6 +1152,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "xhci"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "pci",
+ "usbproto",
+ "virtio",
 ]
 
 [[package]]

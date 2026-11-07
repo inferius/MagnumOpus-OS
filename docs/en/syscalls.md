@@ -402,6 +402,59 @@ children) is mapped into it. A child inherits the parent's device and may
 not choose another (`ACCESS_DENIED`). Without an IOMMU `device` is only
 recorded.
 
+**Ports and interrupt lines.** The top two bits of a range start give its
+kind (`abi::syscall::RANGE_KIND_MASK`): 0 = physical memory (above),
+`RANGE_IO_PORTS` (`1 << 62`) = I/O ports from `start & 0xFFFF`, length =
+number of ports (the end at most 0x10000), `RANGE_IRQ_LINES` (`2 << 62`) =
+legacy interrupt lines (ISA IRQ) from `start`, length = count (lines 0-31).
+Ports and lines need no alignment. A child may only have its parent's ports
+and lines. The root resource may use all of them. Any other kind is
+`INVALID_ARGS`. In libos: `hw::io_ports(first, count)` and
+`hw::irq_lines(first, count)`. Example (the PS/2 driver):
+
+```rust
+let ranges = [io_ports(0x60, 1), io_ports(0x64, 1), irq_lines(1, 1), irq_lines(12, 1)];
+let ps2 = root.restrict(&ranges, 2, 0)?;
+```
+
+### `IOPORT_READ`
+
+`(resource, port, width) -> value`. Reads an I/O port of `width` bytes
+(1, 2 or 4). x86_64 only, elsewhere `NOT_SUPPORTED`. The resource must
+allow the ports `port..port + width` (`RESOURCE_CREATE` with
+`RANGE_IO_PORTS`), otherwise `ACCESS_DENIED`. It is a syscall rather than
+an `in` instruction in userspace: slower, but every access passes the
+permission check, and it is enough for slow devices (PS/2). Errors:
+`INVALID_ARGS` (width, port above 0xFFFF), `ACCESS_DENIED`,
+`NOT_SUPPORTED`, `BAD_HANDLE`, `WRONG_TYPE`. In libos
+`Resource::port_read8`.
+
+### `IOPORT_WRITE`
+
+`(resource, port, width, value) -> 0`. Writes an I/O port. Conditions and
+errors as for `IOPORT_READ`; also `INVALID_ARGS` when `value` does not fit
+the width (e.g. 0x100 for 1 byte). In libos `Resource::port_write8`.
+
+### `INTERRUPT_CREATE_LINE`
+
+`(resource, line) -> handle`. An interrupt object on a legacy line (ISA
+IRQ 0-15 through the IOAPIC; PS/2 keyboard 1, mouse 12). The kernel maps
+the line to a GSI using the ACPI MADT overrides (polarity, trigger mode)
+and routes it to a free vector on the boot CPU. On an interrupt the object
+gets `SIGNALED` as with `INTERRUPT_CREATE`, and it is acknowledged with
+`INTERRUPT_ACK`. The kernel masks a **level**-triggered line after the
+interrupt and unmasks it on acknowledgement (otherwise the interrupt would
+repeat endlessly). An **edge**-triggered line is not masked, so after each
+interrupt the driver should service everything the device has, and check
+the device now and then even without an interrupt. The resource must
+allow the line (`RANGE_IRQ_LINES`), and the object counts towards
+`irq_max`. A line can have only one object (`ALREADY_EXISTS`). When the
+last handle closes, the line is masked and released. Errors:
+`INVALID_ARGS` (line above 15), `ACCESS_DENIED`, `ALREADY_EXISTS`,
+`NO_RESOURCES`, `NOT_SUPPORTED` (aarch64, a platform without an IOAPIC),
+`NOT_FOUND` (the line is not an IOAPIC input). In libos
+`Resource::interrupt_line`.
+
 ### `INTERRUPT_ACK`
 
 `(interrupt) -> 0`. Acknowledges the interrupt (clears `SIGNALED`). A

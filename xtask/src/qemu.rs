@@ -13,7 +13,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use crate::{Artifacts, Options, Result, datadisk, symbolize, target_dir};
+use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir};
+
+/// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
+const DEVICE_LAYOUT: u32 = 3;
 
 fn default_accel() -> &'static str {
     if cfg!(target_os = "linux") && Path::new("/dev/kvm").exists() {
@@ -31,7 +34,9 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     // Firmware do vars zapisuje (boot polozky), proto pracujeme s kopii.
     // Vlastni kopie pro kazdy rezim IOMMU: IOMMU muze zabrat slot PCI a disky
     // se posunou, ulozene bootovaci polozky by pak nesedely.
-    let fw_vars = target_dir().join(format!("fw-{}-vars-{}.fd", arch.name, opts.iommu));
+    // Verze rozlozeni zarizeni je v nazvu: po zmene zarizeni PCI by stare
+    // bootovaci polozky nesedely a firmware by skoncil ve svem shellu.
+    let fw_vars = target_dir().join(format!("fw-{}-vars-{}-l{DEVICE_LAYOUT}.fd", arch.name, opts.iommu));
     if !fw_vars.exists() {
         std::fs::copy(&fw_vars_template, &fw_vars)?;
     }
@@ -41,6 +46,9 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     } else {
         format!("serial-{}.log", arch.name)
     });
+    // Stary log nesmi obsahovat znacku testu vstupu z minuleho behu.
+    let _ = std::fs::remove_file(&serial_log);
+    let qmp_port = qmp::free_port()?;
     let accel = opts.accel.as_deref().unwrap_or(default_accel());
     let mut cmd = Command::new(&qemu);
     let translate_os_disk = match arch.name {
@@ -80,6 +88,8 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
             datadisk::create(&target_dir())?.display()
         ))
         .args(["-device", &blk("data")])
+        .arg("-qmp")
+        .arg(qmp::qemu_arg(qmp_port))
         // Bez sitove karty, jinak firmware zbytecne zkousi PXE boot.
         .args(["-nic", "none"])
         // Seriova linka do terminalu a zaroven do souboru, aby se dal vystup
@@ -102,6 +112,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     cmd.args(&opts.qemu_args);
 
     println!("xtask: spoustim {}", qemu.display());
+    qmp::spawn_injector(serial_log.clone(), qmp_port);
     let result = if opts.test {
         run_test(cmd, opts)
     } else {
@@ -120,6 +131,9 @@ fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     cmd.arg("-machine")
         .arg(format!("q35,accel={accel}"))
         .args(["-cpu", "max", "-smp", "4", "-m", "512M"]);
+    // Graficka karta s vlastnim id (jinak stejna jako vychozi `-vga std`
+    // na 00:01.0): k jeji konzoli se navazi klavesnice a mys virtio, viz nize.
+    cmd.args(["-vga", "none", "-device", "VGA,id=video0"]);
     // IOMMU (Intel VT-d nebo AMD-Vi) pred zarizenimi PCI, ktera preklada;
     // preklad preruseni zatim ne (intremap=off).
     match opts.iommu.as_str() {
@@ -134,6 +148,19 @@ fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     if opts.test {
         cmd.args(["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]);
     }
+    // Klavesnice a mys virtio (ovladac virtio-input, sluzba inputd),
+    // navazane na konzoli grafiky: vstup z okna QEMU a udalosti QMP
+    // s `device=video0` jdou do nich, udalosti QMP bez zarizeni do
+    // PS/2 (radic i8042 ma q35 vzdy). QMP slouzi testu vstupu.
+    cmd.args(["-device", "virtio-keyboard-pci,iommu_platform=on,display=video0"])
+        .args(["-device", "virtio-mouse-pci,iommu_platform=on,display=video0"])
+        // USB: radic xHCI s klavesnici (ovladace xhci, usb-hub, usb-hid),
+        // navazanou na konzoli druhe graficke karty, aby ji QMP umelo
+        // oslovit zvlast (`device=video1`). Mys USB nema vlastnost
+        // `display` a brala by udalosti PS/2 - test ji pripoji az za behu.
+        .args(["-device", "secondary-vga,id=video1"])
+        .args(["-device", "qemu-xhci,id=xhci"])
+        .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"]);
     // Pod AMD-Vi firmware OVMF z disku s prekladem DMA nenabootuje, proto
     // tam systemovy disk prekladem neprochazi (ostatni disky ano).
     opts.iommu != "amd"
@@ -155,10 +182,15 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
             "virt,gic-version=3,its=on,virtualization=on,secure=off{iommu},accel={accel}"
         ))
         .args(["-cpu", "cortex-a76", "-smp", "4", "-m", "1G"]);
-    if !opts.headless {
-        // Jednoduchy framebuffer v RAM (GOP firmwaru), bez ovladace v jadru.
-        cmd.args(["-device", "ramfb"]);
-    }
+    // Jednoduchy framebuffer v RAM (GOP firmwaru, bez ovladace v jadru) jako
+    // konzole `video0` a druha karta `video1`: k nim se navazi klavesnice a mys
+    // virtio a klavesnice USB stejne jako na x86 (udalosti QMP testu vstupu).
+    cmd.args(["-device", "ramfb,id=video0"])
+        .args(["-device", "virtio-gpu-pci,id=video1"])
+        .args(["-device", "virtio-keyboard-pci,iommu_platform=on,display=video0"])
+        .args(["-device", "virtio-mouse-pci,iommu_platform=on,display=video0"])
+        .args(["-device", "qemu-xhci,id=xhci"])
+        .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"]);
     if opts.test {
         cmd.args(["-semihosting-config", "enable=on,target=native"]);
     }

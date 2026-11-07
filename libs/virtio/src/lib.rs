@@ -15,8 +15,9 @@ pub use queue::{Buffer, Virtqueue};
 use alloc::vec::Vec;
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
-use libos::hw::Resource;
-use libos::{Error, Mapping, Result};
+use libos::hw::{Interrupt, Resource};
+use libos::{Channel, Error, Mapping, Result};
+use pci::msix::MsixTable;
 use pci::{Address, CAP_VENDOR, Ecam};
 
 pub const VENDOR: u16 = 0x1AF4;
@@ -265,10 +266,84 @@ impl Device {
         self.device_cfg.read(off)
     }
 
+    /// Zapis do konfigurace zarizeni (napr. vyber polozky u virtio-input);
+    /// za koncem konfigurace se ignoruje.
+    pub fn set_config<T: libos::Pod>(&self, off: u64, v: T) {
+        self.device_cfg.write(off, v)
+    }
+
     /// Delka konfigurace zarizeni (volitelna pole za ni zarizeni nema).
     pub fn config_len(&self) -> u64 {
         self.device_cfg.len
     }
+}
+
+/// Zarizeni po spolecne inicializaci ovladace s jednou frontou (viz
+/// [`start`]).
+pub struct Started {
+    pub device: Device,
+    /// Fronta 0 s prerusenim na polozce MSI-X 0.
+    pub queue: Virtqueue,
+    pub irq: Interrupt,
+    /// Tabulka MSI-X (drzet po celou dobu zivota ovladace).
+    pub msix: MsixTable,
+    /// Vyjednane vlastnosti.
+    pub features: u64,
+}
+
+/// Spolecny start ovladace: reset, vyjednani vlastnosti `wanted` (musi
+/// obsahovat [`F_VERSION_1`]), preruseni MSI-X a fronta 0 s nejvys
+/// `queue_max` polozkami, nakonec `DRIVER_OK`. Konfiguraci zarizeni jde cist
+/// i potom.
+pub fn start(
+    ecam: &Ecam,
+    a: Address,
+    resource: &Resource,
+    wanted: u64,
+    queue_max: u16,
+) -> Result<Started> {
+    let device = Device::open(ecam, a, resource)?;
+    device.begin_init()?;
+    let features = device.negotiate(wanted)?;
+    let irq = resource.interrupt()?;
+    let msix = MsixTable::open(ecam, a, resource)?;
+    msix.set(0, irq.msi())?;
+    msix.enable(ecam);
+    let queue = device.setup_queue(0, queue_max, 0, resource)?;
+    device.driver_ok();
+    Ok(Started {
+        device,
+        queue,
+        irq,
+        msix,
+        features,
+    })
+}
+
+/// Precte konfiguraci od spravce zarizeni (prvni zprava na bootstrap
+/// kanalu ovladace): `pci <sbernice> <zarizeni> <funkce>` desitkove.
+pub fn read_driver_config(bootstrap: &Channel) -> Option<Address> {
+    let msg = bootstrap.read(None).ok()?;
+    parse_driver_config(core::str::from_utf8(&msg.data).ok()?)
+}
+
+/// Rozebere text `pci <sbernice> <zarizeni> <funkce>`; navic slova
+/// navic nebo hodnoty mimo rozsah = `None`.
+pub fn parse_driver_config(text: &str) -> Option<Address> {
+    let mut parts = text.split_whitespace();
+    if parts.next()? != "pci" {
+        return None;
+    }
+    let mut num = || parts.next()?.parse::<u8>().ok();
+    let a = Address {
+        bus: num()?,
+        device: num()?,
+        function: num()?,
+    };
+    if parts.next().is_some() || a.device > 31 || a.function > 7 {
+        return None;
+    }
+    Some(a)
 }
 
 /// Seznam funkci, ktere jsou zarizeni virtio daneho typu (ID zarizeni

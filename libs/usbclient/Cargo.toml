@@ -1,0 +1,10 @@
+[package]
+name = "usbclient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Klient kanalu USB pro tridni ovladace"
+
+[dependencies]
+libos = { path = "../libos" }
+usbproto = { path = "../usbproto" }

@@ -153,13 +153,14 @@ ve Windows nebo vDSO + libc v Linuxu).
 
 | Služba | Úkol |
 |---|---|
-| init / supervisor | spouští služby, restartuje padlé |
+| init / supervisor | spouští služby, předává zařízení připojená za běhu, restartuje padlé (zatím samostatné služby; viz [Init](init.md)) |
 | device manager | enumerace PCI, ACPI, device tree; spouští ovladače s jejich prostředky |
 | ovladače | nejdřív virtio, pak NVMe, xHCI, HDA, ... |
 | ACPI | interpret AML; jádro samo parsuje jen statické tabulky (MADT, HPET, MCFG) |
 | storage + FS | blokové zařízení, oddíly, souborový systém (`fsd` hotovo) |
 | namespace | skládá pohled procesu na strom |
-| kompozitor | displej, vstup, okna |
+| vstup (`inputd`) | klávesnice a myš, rozložení, bezpečná zkratka (hotovo, viz [Vstup](vstup.md)) |
+| kompozitor | displej, okna |
 | konfigurace | čtení, validace a verzování nastavení |
 
 ## Souborový systém
@@ -386,15 +387,21 @@ důvěryhodné prvky zůstávají systému:
   a Windows (rozšíření obsahu do rámu); navíc je u nás odznak oprávnění
   a deklarované oblasti místo testování kliknutí v aplikaci.
 
-## Vstup: klávesnice a myš (plán)
+## Vstup: klávesnice a myš
+
+> Hotovo v 6a (virtio-input, `inputd`, rozložení US a CZ, bezpečná
+> zkratka Ctrl+Alt+Delete); podrobně v [Vstup](vstup.md).
+
 
 - **Služba vstupu** (`inputd`) v userspace: ovladače zařízení posílají
   události (klávesa, pohyb, tlačítko, kolečko, dotyk) jednotným protokolem
   přes kanál; služba je převádí podle rozložení klávesnice a předává
   **jen tomu, kdo má fokus** (terminál, kompozitor). Žádná aplikace
   nečte vstup globálně (ochrana proti keyloggerům).
-- **Ovladače, postup:** virtio-input (klávesnice, myš, tablet) v QEMU -
-  PS/2 jako záloha na starším hardwaru - USB HID přes vlastní ovladač
+- **Ovladače, postup:** virtio-input (klávesnice, myš; hotovo) v QEMU -
+  PS/2 (hotovo; vnitřní klávesnice notebooků a emulace USB ve firmwaru) -
+  USB HID přes vlastní ovladač xHCI (fáze 1-4 hotové: řadič, huby, HID
+  s parserem reportu, hotplug, ověření nového zařízení; viz [USB](usb.md)) - USB HID přes vlastní ovladač
   xHCI (USB stack je velká samostatná práce).
 - **Rozložení:** česká a anglická v první verzi, skládání diakritiky
   (mrtvé klávesy), Unicode vstup.
@@ -577,7 +584,7 @@ obě architektury projdou všemi testy.
 <rect class="box" x="10" y="178" width="560" height="62" rx="6"/>
 <text class="t b" x="290" y="198" text-anchor="middle">smlouva arch::api (traity, impl Architecture)</text>
 <text class="m mono" x="290" y="216" text-anchor="middle">Cpu, Interrupts, Threads, Time, Ipi, Memory,</text>
-<text class="m mono" x="290" y="232" text-anchor="middle">DeviceIrq, Iommu, Smp, PlatformInfo, Diagnostics</text>
+<text class="m mono" x="290" y="232" text-anchor="middle">DeviceIrq, LegacyIo, Iommu, Smp, PlatformInfo, Diagnostics</text>
 <rect class="ok" x="10" y="276" width="270" height="62" rx="6"/>
 <text class="t b" x="145" y="298" text-anchor="middle">arch/x86_64 (hotové)</text>
 <text class="m" x="145" y="318" text-anchor="middle">GDT/IDT, APIC, TSC+HPET, VT-d, AMD-Vi, SIPI</text>
@@ -625,6 +632,7 @@ obě architektury projdou všemi testy.
 | `Ipi` | přeplánuj, zastav, vyprázdni TLB | APIC IPI | GICv3 SGI |
 | `Memory` | tabulky stránek (`PageTableOps`), TLB, cache pro DMA | 4 úrovně, CR3, IPI shootdown | TTBR0/TTBR1, `TLBI ... IS` bez IPI |
 | `DeviceIrq` | rozsah čísel přerušení zařízení, zpráva MSI | vektory 48..239, 0xFEE.. | LPI od 8192 přes ITS |
+| `LegacyIo` | I/O porty a staré linky přerušení (ISA IRQ) pro zařízení na desce bez PCI ([PS/2](vstup.md#ovladač-ps2)) | `in`/`out`, IOAPIC (přepisy z MADT) | `NOT_SUPPORTED` |
 | `Iommu` | domény překladu DMA (`IommuDomain`) | VT-d, AMD-Vi | SMMUv3 |
 | `Smp` | start dalších CPU (`CpuStarter`) | INIT-SIPI, trampolína pod 1 MiB | PSCI CPU_ON |
 | `PlatformInfo` | ACPI tabulky, které obecná část nezná | MADT, HPET, DMAR, IVRS | MADT (GICC/GICD/ITS), GTDT, IORT, SPCR |
@@ -883,8 +891,9 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
    TCP/IP, DNS, TLS 1.3, HTTP klient - služby, přístup přes capability)
-   - **6a Vstup:** služba vstupu, klávesnice a myš (virtio-input, PS/2,
-     později USB HID), rozložení, bezpečná zkratka - viz [Vstup](#vstup-klávesnice-a-myš-plán)
+   - **6a Vstup (hotovo):** služba vstupu, klávesnice a myš (virtio-input;
+     PS/2, USB HID), rozložení US a CZ, bezpečná zkratka - viz
+     [Vstup](vstup.md)
    - **6b Shell a chytrý terminál:** konzole, strukturovaný výstup, undo
      příkazů, „ukaž, co se stane“, oprávnění při spuštění - viz [Shell](#shell-a-chytrý-terminál-návrh)
    - **6c GUI:** virtio-gpu, kompozitor, nativní knihovna UI, systémové

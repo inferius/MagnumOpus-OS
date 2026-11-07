@@ -1,0 +1,9 @@
+[package]
+name = "i8042"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PS/2 (i8042): scan kody sady 1 a pakety mysi na udalosti inputproto"
+
+[dependencies]
+inputproto = { path = "../inputproto" }

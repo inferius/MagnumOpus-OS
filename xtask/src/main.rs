@@ -17,6 +17,7 @@ mod docs;
 mod highlight;
 mod image;
 mod qemu;
+mod qmp;
 mod symbolize;
 
 use std::env;
@@ -170,7 +171,7 @@ fn run_cli() -> Result<()> {
 }
 
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
-/// chyb a syscallu, casova pasma).
+/// chyb a syscallu, casova pasma, protokol vstupu a rozlozeni klavesnice).
 fn host_tests() -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = Command::new(cargo)
@@ -186,6 +187,14 @@ fn host_tests() -> Result<()> {
             "tz",
             "--package",
             "fs",
+            "--package",
+            "inputproto",
+            "--package",
+            "keymap",
+            "--package",
+            "i8042",
+            "--package",
+            "usbproto",
             "--features",
             "initfs/std,fs/std",
         ])
@@ -255,7 +264,20 @@ pub struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
-const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk", "fsd", "timed"];
+const USER_PROGRAMS: &[&str] = &[
+    "init",
+    "echo",
+    "devmgr",
+    "virtio-blk",
+    "virtio-input",
+    "inputd",
+    "ps2",
+    "xhci",
+    "usb-hub",
+    "usb-hid",
+    "fsd",
+    "timed",
+];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());

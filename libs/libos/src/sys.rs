@@ -355,6 +355,30 @@ pub fn interrupt_create(resource: u32) -> Result<(u32, abi::object::MsiMessage)>
     Ok((h as u32, msi))
 }
 
+pub fn interrupt_create_line(resource: u32, line: u32) -> Result<u32> {
+    call(
+        nr::INTERRUPT_CREATE_LINE,
+        [resource as u64, line as u64, 0, 0, 0, 0],
+    )
+    .map(|h| h as u32)
+}
+
+pub fn ioport_read(resource: u32, port: u16, width: u8) -> Result<u32> {
+    call(
+        nr::IOPORT_READ,
+        [resource as u64, port as u64, width as u64, 0, 0, 0],
+    )
+    .map(|v| v as u32)
+}
+
+pub fn ioport_write(resource: u32, port: u16, width: u8, value: u32) -> Result<()> {
+    call(
+        nr::IOPORT_WRITE,
+        [resource as u64, port as u64, width as u64, value as u64, 0, 0],
+    )
+    .map(|_| ())
+}
+
 pub fn interrupt_ack(h: u32) -> Result<()> {
     call(nr::INTERRUPT_ACK, [h as u64, 0, 0, 0, 0, 0]).map(|_| ())
 }

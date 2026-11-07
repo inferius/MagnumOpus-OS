@@ -164,13 +164,14 @@ Windows or vDSO + libc on Linux).
 
 | Service | Task |
 |---|---|
-| init / supervisor | starts services, restarts crashed ones |
+| init / supervisor | starts services, hands over devices attached at run time, restarts crashed ones (standalone services so far; see [Init](init.md)) |
 | device manager | enumerates PCI, ACPI, device tree; starts drivers with their resources |
 | drivers | virtio first, then NVMe, xHCI, HDA, ... |
 | ACPI | AML interpreter; the kernel itself parses only static tables (MADT, HPET, MCFG) |
 | storage + FS | block devices, partitions, file system (`fsd` done) |
 | namespace | composes each process's view of the tree |
-| compositor | display, input, windows |
+| input (`inputd`) | keyboard and mouse, layouts, secure attention shortcut (done, see [Input](input.md)) |
+| compositor | display, windows |
 | configuration | reading, validating and versioning settings |
 
 ## File system
@@ -411,15 +412,21 @@ widget). It is possible, but the trusted elements stay with the system:
   addition we have the permission badge and declared regions instead of
   hit testing in the application.
 
-## Input: keyboard and mouse (plan)
+## Input: keyboard and mouse
+
+> Done in 6a (virtio-input, `inputd`, US and CZ layouts, the
+> Ctrl+Alt+Delete secure attention shortcut); details in [Input](input.md).
+
 
 - An **input service** (`inputd`) in userspace: device drivers send events
   (key, motion, button, wheel, touch) through one protocol over a channel;
   the service translates them by keyboard layout and delivers them **only
   to whoever has focus** (terminal, compositor). No application reads input
   globally (protection against keyloggers).
-- **Drivers, in order:** virtio-input (keyboard, mouse, tablet) in QEMU -
-  PS/2 as a fallback on older hardware - USB HID through our own xHCI
+- **Drivers, in order:** virtio-input (keyboard, mouse; done) in QEMU -
+  PS/2 (done; internal laptop keyboards and the firmware's USB emulation) -
+  USB HID through our own xHCI driver (phases 1-4 done: controller, hubs,
+  HID with a report parser, hotplug, new device verification; see [USB](usb.md)) - USB HID through our own xHCI
   driver (the USB stack is a big separate piece of work).
 - **Layouts:** Czech and English in the first version, diacritics
   composition (dead keys), Unicode input.
@@ -608,7 +615,7 @@ only through a fixed contract. Status: the interface is implemented by
 <rect class="box" x="10" y="178" width="560" height="62" rx="6"/>
 <text class="t b" x="290" y="198" text-anchor="middle">contract arch::api (traits, impl Architecture)</text>
 <text class="m mono" x="290" y="216" text-anchor="middle">Cpu, Interrupts, Threads, Time, Ipi, Memory,</text>
-<text class="m mono" x="290" y="232" text-anchor="middle">DeviceIrq, Iommu, Smp, PlatformInfo, Diagnostics</text>
+<text class="m mono" x="290" y="232" text-anchor="middle">DeviceIrq, LegacyIo, Iommu, Smp, PlatformInfo, Diagnostics</text>
 <rect class="ok" x="10" y="276" width="270" height="62" rx="6"/>
 <text class="t b" x="145" y="298" text-anchor="middle">arch/x86_64 (done)</text>
 <text class="m" x="145" y="318" text-anchor="middle">GDT/IDT, APIC, TSC+HPET, VT-d, AMD-Vi, SIPI</text>
@@ -656,6 +663,7 @@ only through a fixed contract. Status: the interface is implemented by
 | `Ipi` | reschedule, halt, flush TLB | APIC IPI | GICv3 SGI |
 | `Memory` | page tables (`PageTableOps`), TLB, cache for DMA | 4 levels, CR3, IPI shootdown | TTBR0/TTBR1, `TLBI ... IS` without IPI |
 | `DeviceIrq` | device interrupt number range, MSI message | vectors 48..239, 0xFEE.. | LPIs from 8192 via ITS |
+| `LegacyIo` | I/O ports and legacy interrupt lines (ISA IRQ) for on-board devices without PCI ([PS/2](input.md#the-ps2-driver)) | `in`/`out`, IOAPIC (MADT overrides) | `NOT_SUPPORTED` |
 | `Iommu` | DMA translation domains (`IommuDomain`) | VT-d, AMD-Vi | SMMUv3 |
 | `Smp` | starting other CPUs (`CpuStarter`) | INIT-SIPI, trampoline below 1 MiB | PSCI CPU_ON |
 | `PlatformInfo` | ACPI tables the generic part does not know | MADT, HPET, DMAR, IVRS | MADT (GICC/GICD/ITS), GTDT, IORT, SPCR |
@@ -928,8 +936,9 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
 6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
    TCP/IP, DNS, TLS 1.3, HTTP client - services, access through a capability)
-   - **6a Input:** input service, keyboard and mouse (virtio-input, PS/2,
-     later USB HID), layouts, secure key combination - see [Input](#input-keyboard-and-mouse-plan)
+   - **6a Input (done):** input service, keyboard and mouse (virtio-input;
+     PS/2, USB HID), US and CZ layouts, secure attention shortcut -
+     see [Input](input.md)
    - **6b Shell and smart terminal:** console, structured output, command
      undo, "show what will happen", permissions at launch - see [Shell](#shell-and-smart-terminal-proposal)
    - **6c GUI:** virtio-gpu, compositor, native UI library, system dialogs -

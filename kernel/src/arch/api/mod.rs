@@ -51,6 +51,7 @@ pub trait Architecture:
     + Ipi
     + Memory
     + DeviceIrq
+    + LegacyIo
     + Iommu
     + Smp
     + PlatformInfo
@@ -313,6 +314,29 @@ pub trait DeviceIrq {
     /// nej architektura nastavila (aarch64: preklad v ITS a LPI), aby ho
     /// zarizeni zanikleho ovladace nemohlo dal vyvolavat. Na x86 nic.
     fn release(irq: u32);
+}
+
+/// Starsi rozhrani zarizeni: I/O porty a pevne linky preruseni (x86:
+/// porty `in`/`out`, IOAPIC pro ISA IRQ). Architektura bez nich vraci
+/// `NotSupported`. Potrebuji je zarizeni na desce bez PCI (PS/2 radic).
+pub trait LegacyIo {
+    /// Precte I/O port o sirce `width` (1, 2 nebo 4 B).
+    fn port_read(port: u16, width: u8) -> Result<u32, Error>;
+
+    /// Zapise I/O port o sirce `width` (1, 2 nebo 4 B).
+    fn port_write(port: u16, width: u8, value: u32) -> Result<(), Error>;
+
+    /// Nasmeruje starou linku (ISA IRQ `line`) na cislo preruseni `irq`
+    /// (z rozsahu zarizeni). Vraci, zda je linka spoustena urovni: takovou
+    /// jadro po kazdem preruseni zamaskuje a odmaskuje az pri potvrzeni.
+    /// Pouzita linka = `AlreadyExists`.
+    fn line_route(line: u32, irq: u32) -> Result<bool, Error>;
+
+    /// Zamaskuje / odmaskuje linku.
+    fn line_mask(line: u32, masked: bool);
+
+    /// Uvolni linku (zamaskuje ji).
+    fn line_release(line: u32);
 }
 
 /// IOMMU: preklad DMA zarizeni (x86: VT-d, AMD-Vi; aarch64: SMMUv3).

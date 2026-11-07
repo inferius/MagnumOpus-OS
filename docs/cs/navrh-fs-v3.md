@@ -490,6 +490,7 @@ i samostatně v nastavení (pro jeden dataset nebo celý systém).
 | zamčení trezorů při uspání | pohodlí | volba | zapnuto | volba |
 | okamžitá deduplikace při zápisu | střední až velká | vypnuto (jen na pozadí) | vypnuto | volba |
 | ověření součtu při každém čtení | malá | zapnuto (nejde vypnout) | zapnuto | zapnuto |
+| ověření nového vstupního zařízení - klávesnice, myš (proti BadUSB, [USB](usb.md#ověření-nového-vstupního-zařízení-proti-badusb)) | pohodlí (kód při připojení) | volba | zapnuto | vypnuto |
 
 Integrita dat (součty, Merkleův strom, metadata 2x) se profily nemění -
 chrání proti poškození, ne proti útočníkovi, a stojí málo.

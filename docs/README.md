@@ -20,7 +20,15 @@ site menu.
 | [libos](cs/libos.md) | [libos](en/libos.md) | knihovna pro programy / program library |
 | [Reálný čas](cs/cas.md) | [Real time](en/time.md) | zdroje (UEFI, RTC), formát, pásmo / sources (UEFI, RTC), format, zone |
 | [Kódy chyb](cs/chyby.md) | [Error codes](en/errors.md) | kódy chyb a návratové kódy procesů / error and exit codes |
+| [Init a supervisor](cs/init.md) | [Init and supervisor](en/init.md) | start služeb, zařízení za běhu, restart spadlých služeb, testovací běh / service start-up, run-time devices, restarting crashed services, test run |
 | [Hlášky v logu](cs/hlasky.md) | [Log messages](en/messages.md) | co znamenají a co dělat / what they mean and what to do |
+
+### Vstup a zařízení / Input and devices
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
+| [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
 
 ### Souborový systém / File system
 
