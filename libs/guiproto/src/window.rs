@@ -744,6 +744,23 @@ impl ClientMsg {
         Ok(m)
     }
 
+    /// Ma zprava cekat na `COMMIT` (meni platny stav okna)? Kompozitor ji
+    /// do te doby jen odlozi; zaznam stavu okna ([`crate::replay`]) taky.
+    pub fn is_staged(&self) -> bool {
+        matches!(
+            self,
+            ClientMsg::WindowSet { .. }
+                | ClientMsg::LayerCreate { .. }
+                | ClientMsg::LayerSet { .. }
+                | ClientMsg::LayerDestroy { .. }
+                | ClientMsg::Damage { .. }
+                | ClientMsg::Animate { .. }
+                | ClientMsg::A11yUpdate { .. }
+                | ClientMsg::A11yRemove { .. }
+                | ClientMsg::Regions { .. }
+        )
+    }
+
     /// Kod operace zpravy (pro odpoved `ERROR`).
     pub fn op_of(data: &[u8]) -> u32 {
         data.get(..4).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()))
@@ -911,6 +928,11 @@ impl ServerMsg {
 /// limitu zpravy (jeden uzel je nejvys ~128 KiB jen teoreticky - texty se
 /// zkrati na 16 KiB).
 pub fn a11y_messages(window: u32, nodes: &[Node]) -> Vec<Vec<u8>> {
+    a11y_chunks(window, nodes).iter().map(ClientMsg::encode).collect()
+}
+
+/// Jako [`a11y_messages`], ale zpravy nezakodovane (zaznam stavu okna).
+pub fn a11y_chunks(window: u32, nodes: &[Node]) -> Vec<ClientMsg> {
     const TEXT_MAX: usize = 16 * 1024;
     let mut out = Vec::new();
     let mut batch: Vec<Node> = Vec::new();
@@ -921,20 +943,17 @@ pub fn a11y_messages(window: u32, nodes: &[Node]) -> Vec<Vec<u8>> {
         truncate(&mut n.value, TEXT_MAX);
         let l = n.encoded_len();
         if size + l > MAX_MESSAGE && !batch.is_empty() {
-            out.push(
-                ClientMsg::A11yUpdate {
-                    window,
-                    nodes: core::mem::take(&mut batch),
-                }
-                .encode(),
-            );
+            out.push(ClientMsg::A11yUpdate {
+                window,
+                nodes: core::mem::take(&mut batch),
+            });
             size = 16;
         }
         size += l;
         batch.push(n);
     }
     if !batch.is_empty() {
-        out.push(ClientMsg::A11yUpdate { window, nodes: batch }.encode());
+        out.push(ClientMsg::A11yUpdate { window, nodes: batch });
     }
     out
 }

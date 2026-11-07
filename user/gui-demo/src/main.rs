@@ -5,7 +5,8 @@
 //! `notes.clear`) dela totez co tlacitka - volat je muze shell, asistent
 //! i agent (pres kompozitor, ktery overi argumenty).
 //!
-//! Startovni zprava (kind USER): kanal okna ke kompozitoru.
+//! Startovni zprava (kind USER): kanal okna ke kompozitoru a listek
+//! k supervisoru (obnova okna po padu kompozitoru).
 
 #![no_std]
 #![no_main]
@@ -18,7 +19,7 @@ use alloc::vec::Vec;
 
 use guiproto::action::{Arg, Value};
 use guiproto::window::Mode;
-use libos::{Channel, Startup, println};
+use libos::{Startup, println};
 use ui::{App, Node, button, checkbox, column, label, list, progress, row, scroll, spacer, text_input};
 
 libos::entry!(main);
@@ -110,7 +111,8 @@ impl App for Demo {
 }
 
 fn main(startup: Startup) -> i64 {
-    let Some(h) = startup.handles.into_iter().next() else {
+    // Handly: kanal okna, listek (obnova okna po padu kompozitoru).
+    let Some(link) = ui::client::Link::from_handles(&mut startup.handles.into_iter()) else {
         println!("gui-demo: chybi kanal okna");
         return 1;
     };
@@ -121,7 +123,7 @@ fn main(startup: Startup) -> i64 {
         notes: Vec::new(),
         selected: None,
     };
-    match ui::client::run(Channel::from_handle(h), app, Mode::Standard, 420, 380) {
+    match ui::client::run(link, app, Mode::Standard, 420, 380) {
         Ok(()) => 0,
         Err(e) => {
             println!("gui-demo: {e}");

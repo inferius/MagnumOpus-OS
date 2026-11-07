@@ -2369,6 +2369,7 @@ dependencies = [
  "guiproto",
  "inputproto",
  "libos",
+ "svcclient",
 ]
 
 [[package]]

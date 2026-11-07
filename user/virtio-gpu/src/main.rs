@@ -81,7 +81,9 @@ fn main(startup: Startup) -> i64 {
         None => println!("virtio-gpu {address}: zadny vystup"),
     }
     loop {
-        // Ovladac konci, az klient (init, pak kompozitor) zavre kanal.
+        // Ovladac konci, az klient (init, pak kompozitor) zavre kanal. Po
+        // padu kompozitoru kanal nezanikne (konec drzi supervisor), nova
+        // instance se synchronizuje (`SYNC`) a pripoji znovu (`ATTACH`).
         let items = [(client.handle(), Signals::READABLE | Signals::PEER_CLOSED)];
         let Ok((_, obs)) = libos::wait_many(&items, None) else {
             break;
@@ -136,6 +138,8 @@ fn handle(gpu: &mut Gpu, data: &[u8], handles: Vec<libos::Handle>) -> Reply {
                 Err(e) => err(e),
             }
         }
+        // Znacka pro novou instanci kompozitoru (zahodi odpovedi stare).
+        Request::Sync { token } => Reply::Synced { token },
         Request::Present { seq, output, rects } => {
             let rects: Vec<Rect> = if rects.is_empty() { vec![Rect::new(0, 0, u32::MAX, u32::MAX)] } else { rects };
             match gpu.present(output, &rects) {

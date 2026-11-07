@@ -6,6 +6,18 @@
 //!
 //! Buffery jsou dvojite: kresli se do toho, ktery kompozitor zrovna
 //! nepouziva (`RELEASED`), takze aplikace na kompozitor nikdy neceka.
+//!
+//! **Obnova po padu kompozitoru** (`restore.rs`, protokol
+//! `docs/cs/obnova-sluzeb.md`): okno mluvi s kompozitorem pres
+//! `svcclient::Conn` s listkem od supervisoru ([`Link`]). Vse, co okno
+//! posle, se zaznamena (`guiproto::replay`). Kdyz kanal zanikne
+//! (`PEER_CLOSED`), okno pozada o novou relaci (stejna identita z
+//! manifestu) a posle znovu posledni potvrzeny stav: okno, buffery (VMO
+//! drzi aplikace), vrstvy, oblasti titulku a strom pristupnosti. Aplikace
+//! dostane [`Event::Restored`]. Rozpracovana transakce a odpoved na akci
+//! vrati `SERVICE_RESTARTED` ([`run`] pak okno nakresli znovu).
+
+mod restore;
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -16,10 +28,12 @@ use gfx::Canvas;
 use gfx::text::Text;
 use guiproto::a11y::Node;
 use guiproto::action::{Arg, Value};
+use guiproto::replay::Replay;
 use guiproto::window::{ClientMsg, InputRecord, LayerKind, LayerProps, Mode, ServerMsg, commit, prop};
 use guiproto::{Rect, window};
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
-use libos::{Channel, Error, Mapping, Result, Rights, Vmo};
+use libos::{Channel, Error, Handle, Mapping, Result, Rights, Signals, Vmo};
+use svcclient::Conn;
 
 use crate::{App, ROOT_LAYER, Ui, scroll_layers};
 
@@ -35,13 +49,42 @@ pub enum Event {
     Action { call: u32, id: String, args: Vec<Arg>, caller: String, synthetic: bool },
     /// Termin dalsiho snimku (aplikace o nej pozadala).
     Frame,
+    /// Kompozitor spadl a okno je zpet na jeho nove instanci (generace)
+    /// s poslednim potvrzenym obsahem. Rozpracovana zmena se ztratila:
+    /// aplikace, ktera kresli sama, at okno nakresli znovu.
+    Restored { generation: u64 },
+}
+
+/// Kanal okna a listek k jeho obnove ze startovni zpravy aplikace.
+///
+/// Poradi handlu aplikace s oknem: 0 = kanal okna, 1 = listek, 2+ =
+/// handly aplikace (napr. `gui-tasks`: kanal na `taskd`).
+pub struct Link {
+    pub window: Channel,
+    /// `None` = bez obnovy (pad kompozitoru = konec okna).
+    pub lease: Option<Channel>,
+}
+
+impl Link {
+    /// Prvni dva handly startovni zpravy (okno, listek).
+    pub fn from_handles(it: &mut impl Iterator<Item = Handle>) -> Option<Self> {
+        let window = Channel::from_handle(it.next()?);
+        let lease = it.next().map(Channel::from_handle);
+        Some(Self { window, lease })
+    }
+}
+
+impl From<Channel> for Link {
+    fn from(window: Channel) -> Self {
+        Self { window, lease: None }
+    }
 }
 
 struct Buf {
     id: u32,
     w: u32,
     h: u32,
-    _vmo: Vmo,
+    vmo: Vmo,
     map: Mapping,
     busy: bool,
 }
@@ -53,6 +96,11 @@ impl Buf {
         let px = unsafe { core::slice::from_raw_parts_mut(self.map.addr() as *mut u32, (self.w * self.h) as usize) };
         Canvas::new(px, self.w, self.h, self.w).unwrap()
     }
+
+    /// Handle VMO pro kompozitor (jen cteni).
+    fn readonly(&self) -> Result<Handle> {
+        self.vmo.handle().duplicate(Some(Rights::READ | Rights::MAP | Rights::BASIC))
+    }
 }
 
 /// Dvojice bufferu jedne vrstvy.
@@ -62,7 +110,7 @@ struct Pair {
 }
 
 pub struct Window {
-    ch: Channel,
+    conn: Conn,
     pub w: u32,
     pub h: u32,
     pub screen: (u32, u32),
@@ -78,11 +126,13 @@ pub struct Window {
     pub frame_pending: bool,
     a11y_ids: alloc::collections::BTreeSet<u32>,
     groups: BTreeMap<u32, Rect>,
+    /// Platny stav okna pro obnovu po padu kompozitoru.
+    replay: Replay,
 }
 
 /// Zapis, ktery pri plne fronte kanalu chvili pocka (kompozitor zrovna
 /// nestiha cist); po 2 s to vzda.
-fn write(ch: &Channel, data: &[u8], handles: Vec<libos::Handle>) -> Result<()> {
+fn write(ch: &Channel, data: &[u8], handles: Vec<Handle>) -> Result<()> {
     let end = libos::time::deadline_after(core::time::Duration::from_secs(2));
     let mut handles = Some(handles);
     loop {
@@ -98,62 +148,105 @@ fn write(ch: &Channel, data: &[u8], handles: Vec<libos::Handle>) -> Result<()> {
     }
 }
 
-fn read(ch: &Channel) -> Result<ServerMsg> {
-    let m = ch.read(None)?;
+fn read(ch: &Channel, deadline: Option<u64>) -> Result<ServerMsg> {
+    let m = ch.read(deadline)?;
     ServerMsg::decode(&m.data)
+}
+
+/// Pozdrav a vytvoreni okna na (nove) instanci kompozitoru: `HELLO` ->
+/// `WELCOME`, pak `zbytek` zprav (vytvoreni okna, obnova), pak prvni
+/// `CONFIGURE`. Vraci (obrazovka, aplikace, (w, h, serial)).
+fn handshake(ch: &Channel, rest: &[(ClientMsg, Vec<Handle>)], deadline: Option<u64>) -> Result<((u32, u32), String, (u32, u32, u32))> {
+    ch.write(&ClientMsg::Hello { version: guiproto::VERSION }.encode(), Vec::new())?;
+    let (screen, app) = loop {
+        match read(ch, deadline)? {
+            ServerMsg::Welcome { w, h, app, .. } => break ((w, h), app),
+            ServerMsg::Error { code, .. } => return Err(code),
+            _ => {}
+        }
+    };
+    for (m, h) in rest {
+        let dup = h.iter().map(|x| x.duplicate(None)).collect::<Result<Vec<_>>>()?;
+        write(ch, &m.encode(), dup)?;
+    }
+    loop {
+        match read(ch, deadline)? {
+            ServerMsg::Configure { w, h, serial, .. } => return Ok((screen, app, (w, h, serial))),
+            ServerMsg::Error { code, .. } => return Err(code),
+            _ => {}
+        }
+    }
 }
 
 impl Window {
     /// Pozdravi kompozitor a vytvori okno (ceka na prvni `CONFIGURE`).
-    pub fn open(ch: Channel, mode: Mode, w: u32, h: u32, title: &str) -> Result<Self> {
-        ch.write(&ClientMsg::Hello { version: guiproto::VERSION }.encode(), Vec::new())?;
-        let (screen, app) = loop {
-            match read(&ch)? {
-                ServerMsg::Welcome { w, h, app, .. } => break ((w, h), app),
-                ServerMsg::Error { code, .. } => return Err(code),
-                _ => {}
-            }
-        };
-        let msg = ClientMsg::WindowCreate { window: 1, mode, w, h, title: title.into() };
-        ch.write(&msg.encode(), Vec::new())?;
+    /// `link` = kanal okna (bez obnovy) nebo [`Link`] s listkem.
+    pub fn open(link: impl Into<Link>, mode: Mode, w: u32, h: u32, title: &str) -> Result<Self> {
+        let link = link.into();
+        let create = ClientMsg::WindowCreate { window: 1, mode, w, h, title: title.into() };
+        let (screen, app, (cw, ch, serial)) = handshake(&link.window, &[(create.clone(), Vec::new())], None)?;
+        let mut replay = Replay::new();
+        replay.record(&create);
+        replay.configured(1, cw, ch);
         let mut win = Self {
-            ch,
-            w,
-            h,
+            conn: Conn::new("compd", link.window, link.lease),
+            w: cw,
+            h: ch,
             screen,
             app,
             next_buffer: 1,
             pairs: BTreeMap::new(),
             queue: Vec::new(),
-            ack: None,
+            ack: Some(serial),
             txn: 0,
             frame_pending: false,
             a11y_ids: Default::default(),
             groups: BTreeMap::new(),
+            replay,
         };
-        loop {
-            match read(&win.ch)? {
-                ServerMsg::Configure { w, h, serial, .. } => {
-                    win.w = w;
-                    win.h = h;
-                    win.ack = Some(serial);
-                    break;
-                }
-                ServerMsg::Error { code, .. } => return Err(code),
-                _ => {}
-            }
-        }
         win.send(ClientMsg::LayerCreate { layer: ROOT_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
         win.pairs.insert(ROOT_LAYER, Pair { bufs: [None, None], front: 1 });
         Ok(win)
     }
 
-    fn send(&self, m: ClientMsg) -> Result<()> {
-        write(&self.ch, &m.encode(), Vec::new())
+    /// Posle zpravu kompozitoru (a zaznamena ji pro obnovu). Po padu
+    /// kompozitoru okno obnovi; zprava rozpracovane transakce (vrstvy,
+    /// pristupnost, titulek bez `COMMIT`) pak vrati `SERVICE_RESTARTED`.
+    pub fn send(&mut self, m: ClientMsg) -> Result<()> {
+        self.send_with(m, Vec::new())
     }
 
-    pub fn channel(&self) -> &Channel {
-        &self.ch
+    fn send_with(&mut self, m: ClientMsg, handles: Vec<Handle>) -> Result<()> {
+        // Predchozi obnova selhala: nejdriv okno (jinak by zprava sla na
+        // instanci, ktera o okne nevi).
+        self.ensure()?;
+        self.replay.record(&m);
+        let data = m.encode();
+        match self.conn.with_channel(|ch| write(ch, &data, handles)) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(Error::PeerClosed)) | Err(Error::PeerClosed) => {
+                // Zprava je v zaznamu: obnova ji posle s platnym stavem
+                // (buffer, `COMMIT`), nebo zahodi (rozpracovana transakce).
+                self.restore().map(|_| ())
+            }
+            Ok(Err(e)) | Err(e) => Err(e),
+        }
+    }
+
+    /// Generace instance kompozitoru, na ktere okno je (0 = prvni,
+    /// bez obnovy).
+    pub fn generation(&self) -> u64 {
+        self.conn.generation()
+    }
+
+    /// Kanal okna pro cekani spolu s jinymi kanaly (jen cteni signalu;
+    /// po obnove je jiny).
+    pub fn with_channel<R>(&mut self, f: impl FnOnce(&Channel) -> R) -> Result<R> {
+        match self.ensure() {
+            Ok(()) | Err(Error::ServiceRestarted) => {}
+            Err(e) => return Err(e),
+        }
+        self.conn.with_channel(f)
     }
 
     fn new_buffer(&mut self, w: u32, h: u32) -> Result<Buf> {
@@ -162,11 +255,12 @@ impl Window {
         let map = Mapping::new(&vmo, 0, size, MAP_READ | MAP_WRITE)?;
         let id = self.next_buffer;
         self.next_buffer += 1;
+        let b = Buf { id, w, h, vmo, map, busy: false };
         // Kompozitor dostane buffer jen pro cteni.
-        let ro = vmo.handle().duplicate(Some(Rights::READ | Rights::MAP | Rights::BASIC))?;
-        let msg = ClientMsg::BufferCreate { buffer: id, w, h, stride: w };
-        self.ch.write(&msg.encode(), vec![ro])?;
-        Ok(Buf { id, w, h, _vmo: vmo, map, busy: false })
+        let ro = b.readonly()?;
+        // Buffer je v zaznamu i pri padu (obnova ho posle znovu).
+        self.send_with(ClientMsg::BufferCreate { buffer: id, w, h, stride: w }, vec![ro])?;
+        Ok(b)
     }
 
     /// Zpracuje zpravu kompozitoru; udalosti pro aplikaci vrati.
@@ -191,6 +285,7 @@ impl Window {
                 if (w, h) != (self.w, self.h) {
                     self.w = w;
                     self.h = h;
+                    self.replay.configured(1, w, h);
                     Some(Event::Resized { w, h })
                 } else {
                     None
@@ -214,14 +309,27 @@ impl Window {
         })
     }
 
+    /// Precte zpravu kompozitoru (nejdel do `deadline`). Po padu
+    /// kompozitoru okno obnovi a vrati `Ok(None)` (udalost `Restored` je
+    /// ve fronte).
+    fn read_msg(&mut self, deadline: Option<u64>) -> Result<Option<ServerMsg>> {
+        self.ensure()?;
+        match self.conn.with_channel(|ch| read(ch, deadline)) {
+            Ok(Ok(m)) => Ok(Some(m)),
+            Ok(Err(Error::PeerClosed)) | Err(Error::PeerClosed) => self.restore().map(|_| None),
+            // Neplatna zprava: preskocit.
+            Ok(Err(Error::InvalidArgs | Error::NotSupported)) => Ok(None),
+            Ok(Err(e)) | Err(e) => Err(e),
+        }
+    }
+
     /// Dalsi udalost (blokuje az do `deadline`).
     pub fn next(&mut self, deadline: Option<u64>) -> Result<Event> {
-        if !self.queue.is_empty() {
-            return Ok(self.queue.remove(0));
-        }
         loop {
-            let m = self.ch.read(deadline)?;
-            let Ok(msg) = ServerMsg::decode(&m.data) else { continue };
+            if !self.queue.is_empty() {
+                return Ok(self.queue.remove(0));
+            }
+            let Some(msg) = self.read_msg(deadline)? else { continue };
             if let ServerMsg::Error { op, code } = &msg {
                 libos::println!("{}: kompozitor odmitl operaci {op}: {code}", self.app);
                 continue;
@@ -244,9 +352,14 @@ impl Window {
             self.pairs.get_mut(&layer).unwrap().bufs[back] = Some(b);
         }
         while self.pairs[&layer].bufs[back].as_ref().unwrap().busy {
-            let m = read(&self.ch)?;
-            if let Some(e) = self.handle(m)? {
-                self.queue.push(e);
+            match self.read_msg(None)? {
+                Some(m) => {
+                    if let Some(e) = self.handle(m)? {
+                        self.queue.push(e);
+                    }
+                }
+                // Obnova: buffery jsou volne, ale transakce se ztratila.
+                None => return Err(Error::ServiceRestarted),
             }
         }
         Ok(back)
@@ -333,8 +446,8 @@ impl Window {
         if !gone.is_empty() {
             self.send(ClientMsg::A11yRemove { window: 1, ids: gone })?;
         }
-        for m in window::a11y_messages(1, nodes) {
-            write(&self.ch, &m, Vec::new())?;
+        for m in window::a11y_chunks(1, nodes) {
+            self.send(m)?;
         }
         self.a11y_ids = ids;
         Ok(())
@@ -366,44 +479,61 @@ impl Window {
         if frame {
             self.frame_pending = true;
         }
+        // Commit je v zaznamu: po padu ho obnova uplatni (stav okna je pak
+        // stejny, jako kdyby ho stara instance prijala).
         self.send(ClientMsg::Commit { txn: self.txn, flags, window: 1, serial, token: 0 })
     }
 
-    /// Odpoved na volani akce.
-    pub fn action_result(&self, call: u32, r: core::result::Result<Option<Value>, String>) -> Result<()> {
+    /// Odpoved na volani akce. Volani patri instanci kompozitoru, ktera ho
+    /// poslala: po jejim padu `SERVICE_RESTARTED` (volajici odpoved
+    /// nedostal, akce ale probehla - rozhodne aplikace).
+    pub fn action_result(&mut self, call: u32, r: core::result::Result<Option<Value>, String>) -> Result<()> {
         let (ok, value, message) = match r {
             Ok(v) => (true, v, String::new()),
             Err(m) => (false, None, m),
         };
-        self.send(ClientMsg::ActionResult { call, ok, value, message })
+        let generation = self.conn.generation();
+        self.send(ClientMsg::ActionResult { call, ok, value, message })?;
+        if self.conn.generation() != generation {
+            return Err(Error::ServiceRestarted);
+        }
+        Ok(())
     }
 }
 
 /// Spusti aplikaci s rozhranim z knihovny v okne. Vraci po zavreni okna.
-pub fn run<A: App>(ch: Channel, app: A, mode: Mode, w: u32, h: u32) -> Result<()> {
-    run_with(ch, app, mode, w, h, None)
+pub fn run<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u32) -> Result<()> {
+    run_with(link, app, mode, w, h, None)
 }
 
 /// Jako [`run`], navic cte zpravy z kanalu `extra` (sluzba, od ktere
 /// aplikace bere data) a predava je [`App::external`].
-pub fn run_with<A: App>(ch: Channel, mut app: A, mode: Mode, w: u32, h: u32, extra: Option<Channel>) -> Result<()> {
-    let mut win = Window::open(ch, mode, w, h, &app.title())?;
+pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extra: Option<Channel>) -> Result<()> {
+    let mut win = Window::open(link, mode, w, h, &app.title())?;
     let mut ui: Ui<A::Msg> = Ui::new(Text::system(), win.w, win.h);
     let mut dirty = true;
     loop {
         if dirty && !win.frame_pending {
             ui.rebuild(app.title(), app.view());
-            render(&mut win, &mut ui)?;
-            dirty = false;
+            match render(&mut win, &mut ui) {
+                Ok(()) => dirty = false,
+                // Kompozitor spadl uprostred snimku: okno je obnovene,
+                // nakreslit ho znovu.
+                Err(Error::ServiceRestarted) => continue,
+                Err(Error::PeerClosed) => return Ok(()),
+                Err(e) => return Err(e),
+            }
         }
         // Zpravy z dalsiho kanalu (bez blokovani okna).
         if let Some(x) = &extra
             && win.queue.is_empty()
         {
-            let rd = libos::Signals::READABLE | libos::Signals::PEER_CLOSED;
-            let items = [(win.ch.handle(), rd), (x.handle(), libos::Signals::READABLE)];
-            let obs = libos::wait_many(&items, None)?.1;
-            if obs[1].intersects(libos::Signals::READABLE) {
+            let rd = Signals::READABLE | Signals::PEER_CLOSED;
+            let obs = match win.with_channel(|ch| libos::wait_many(&[(ch.handle(), rd), (x.handle(), Signals::READABLE)], None)) {
+                Ok(Ok((_, o))) => o,
+                Ok(Err(e)) | Err(e) => return Err(e),
+            };
+            if obs[1].intersects(Signals::READABLE) {
                 while let Ok(m) = x.try_read() {
                     dirty |= app.external(&m.data);
                 }
@@ -417,48 +547,68 @@ pub fn run_with<A: App>(ch: Channel, mut app: A, mode: Mode, w: u32, h: u32, ext
             Err(Error::PeerClosed) => return Ok(()),
             Err(e) => return Err(e),
         };
-        match ev {
-            Event::Input(r) => {
-                let resp = ui.event(r.event, r.mods);
-                let changed = !resp.msgs.is_empty();
-                for m in resp.msgs {
-                    app.update(m);
-                }
-                // Dalsi udalost (rychle psani pred snimkem) musi videt novy
-                // stav: rozvrhnout hned, kreslit az na snimek.
-                if changed {
-                    ui.rebuild(app.title(), app.view());
-                }
-                for (i, off) in &resp.scrolls {
-                    win.set_scroll(*i, *off)?;
-                }
-                if !resp.scrolls.is_empty() && !changed && !resp.redraw {
-                    win.commit(false)?;
-                }
-                dirty |= changed || resp.redraw;
-            }
-            Event::Resized { w, h } => {
-                ui.resize(w, h);
-                dirty = true;
-            }
-            Event::Close => return Ok(()),
-            Event::A11yAction { node, action, value } => {
-                let resp = ui.a11y_action(node, action, &value);
-                for m in resp.msgs {
-                    app.update(m);
-                }
-                ui.rebuild(app.title(), app.view());
-                dirty = true;
-            }
-            Event::Action { call, id, args, .. } => {
-                let r = app.action(&id, &args);
-                win.action_result(call, r)?;
-                ui.rebuild(app.title(), app.view());
-                dirty = true;
-            }
-            Event::Frame => {}
+        let r = handle_event(&mut win, &mut ui, &mut app, ev, &mut dirty);
+        match r {
+            Ok(true) => {}
+            Ok(false) => return Ok(()),
+            Err(Error::ServiceRestarted) => dirty = true,
+            Err(Error::PeerClosed) => return Ok(()),
+            Err(e) => return Err(e),
         }
     }
+}
+
+/// Udalost okna v [`run_with`]; `Ok(false)` = zavrit.
+fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: Event, dirty: &mut bool) -> Result<bool> {
+    match ev {
+        Event::Input(r) => {
+            let resp = ui.event(r.event, r.mods);
+            let changed = !resp.msgs.is_empty();
+            for m in resp.msgs {
+                app.update(m);
+            }
+            // Dalsi udalost (rychle psani pred snimkem) musi videt novy
+            // stav: rozvrhnout hned, kreslit az na snimek.
+            if changed {
+                ui.rebuild(app.title(), app.view());
+            }
+            *dirty |= changed || resp.redraw;
+            for (i, off) in &resp.scrolls {
+                win.set_scroll(*i, *off)?;
+            }
+            if !resp.scrolls.is_empty() && !changed && !resp.redraw {
+                win.commit(false)?;
+            }
+        }
+        Event::Resized { w, h } => {
+            ui.resize(w, h);
+            *dirty = true;
+        }
+        Event::Close => return Ok(false),
+        Event::A11yAction { node, action, value } => {
+            let resp = ui.a11y_action(node, action, &value);
+            for m in resp.msgs {
+                app.update(m);
+            }
+            ui.rebuild(app.title(), app.view());
+            *dirty = true;
+        }
+        Event::Action { call, id, args, .. } => {
+            let r = app.action(&id, &args);
+            ui.rebuild(app.title(), app.view());
+            *dirty = true;
+            // Volajici patril spadle instanci: odpoved nema kam, akce
+            // probehla (stav aplikace je novy).
+            match win.action_result(call, r) {
+                Err(Error::ServiceRestarted) => {}
+                o => o?,
+            }
+        }
+        // Obnovene okno ma posledni potvrzeny obsah; nakreslit aktualni.
+        Event::Restored { .. } => *dirty = true,
+        Event::Frame => {}
+    }
+    Ok(true)
 }
 
 /// Vykresli rozhrani do vrstev okna a uplatni ho jednou transakci.

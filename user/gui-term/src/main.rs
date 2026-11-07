@@ -26,9 +26,9 @@ use guiproto::a11y::{Node, Role, actions};
 use guiproto::action::Value;
 use guiproto::window::{ClientMsg, InputEvent, Mode, RegionKind};
 use inputproto::code::*;
-use libos::{Channel, Error, Startup, println};
+use libos::{Error, Startup, println};
 use term::screen::{self, Screen, Surface};
-use ui::client::{Event, Window};
+use ui::client::{Event, Link, Window};
 
 libos::entry!(main);
 
@@ -158,13 +158,26 @@ impl Term {
         self.win.commit_redrawn(false)
     }
 
+    /// Oblasti a cely obsah. Kdyz kompozitor spadne uprostred, okno se
+    /// obnovi (`SERVICE_RESTARTED`) a kresli se znovu.
+    fn redraw_all(&mut self) -> Result<(), Error> {
+        let mut r = Ok(());
+        for _ in 0..3 {
+            r = self.regions().and_then(|_| self.render());
+            if r != Err(Error::ServiceRestarted) {
+                break;
+            }
+        }
+        r
+    }
+
     /// Deklarovane oblasti: titulek tahne okno, karta ne.
-    fn regions(&self) -> Result<(), Error> {
+    fn regions(&mut self) -> Result<(), Error> {
         let msg = ClientMsg::Regions {
             window: 1,
             regions: vec![(Rect::new(0, 0, self.win.w, TITLE_H), RegionKind::Drag), (TAB, RegionKind::NoDrag)],
         };
-        self.win.channel().write(&msg.encode(), Vec::new())
+        self.win.send(msg)
     }
 
     fn key(&mut self, code: u16) -> bool {
@@ -184,11 +197,12 @@ impl Term {
 }
 
 fn main(startup: Startup) -> i64 {
-    let Some(h) = startup.handles.into_iter().next() else {
+    // Handly: kanal okna, listek (obnova po padu kompozitoru).
+    let Some(link) = Link::from_handles(&mut startup.handles.into_iter()) else {
         println!("gui-term: chybi kanal okna");
         return 1;
     };
-    let win = match Window::open(Channel::from_handle(h), Mode::CustomTitle, 720, 420, "Terminál") {
+    let win = match Window::open(link, Mode::CustomTitle, 720, 420, "Terminál") {
         Ok(w) => w,
         Err(e) => {
             println!("gui-term: okno nelze otevrit: {e}");
@@ -196,11 +210,16 @@ fn main(startup: Startup) -> i64 {
         }
     };
     let mut t = Term::new(win);
-    if t.regions().and_then(|_| t.render()).is_err() {
+    if t.redraw_all().is_err() {
         return 3;
     }
     loop {
-        let Ok(ev) = t.win.next(None) else { return 0 };
+        let ev = match t.win.next(None) {
+            Ok(e) => e,
+            // Kompozitor spadl uprostred transakce: okno je zpet, nakreslit.
+            Err(Error::ServiceRestarted) => Event::Restored { generation: t.win.generation() },
+            Err(_) => return 0,
+        };
         let redraw = match ev {
             Event::Input(r) => match r.event {
                 InputEvent::Text(ch) => {
@@ -217,6 +236,7 @@ fn main(startup: Startup) -> i64 {
                 true
             }
             Event::Close => return 0,
+            Event::Restored { .. } => true,
             Event::A11yAction { action, value, .. } if action & actions::SET_VALUE != 0 => {
                 // Ctecka obrazovky nebo test "napise" radek a odesle ho.
                 t.run(&value);
@@ -244,7 +264,7 @@ fn main(startup: Startup) -> i64 {
             }
             _ => false,
         };
-        if redraw && t.render().is_err() {
+        if redraw && t.redraw_all().is_err() {
             return 4;
         }
     }

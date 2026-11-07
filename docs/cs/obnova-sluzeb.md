@@ -298,7 +298,8 @@ Box::new(MůjAdaptér))`, klient je vlastní testovací program služby
 | protokol lístku, `svcclient::Conn`, pravidla opakování | hotovo, testy na hostiteli i v QEMU |
 | registr, závislosti (`Dep::restart`, `Dep::notify`), generace, backoff, vzdání, `revive`, `status()` | hotovo, testy `obnova sluzeb` |
 | držák konců (`Kept`) | hotovo v supervisoru; používají ho adaptéry služeb |
-| `fsd`, `inputd`, `netd` + `fwd`/`dnsd`, `compd`, `termd`/`taskd` | zapojí vlákna služeb podle této stránky |
+| `compd` (okna, displej z `Kept` + `SYNC`, fokus přes `Dep::notify("inputd")`) | hotovo ([GUI: obnova](gui.md#obnova-po-pádu-kompozitoru)), test `compd: pad kompozitoru uprostred prace` v sadě `gui` |
+| `fsd`, `inputd`, `netd` + `fwd`/`dnsd`, `termd`/`taskd` | zapojí vlákna služeb podle této stránky |
 | restart `devmgr` (zpráva `driver`, ukončení ovladačů) | další krok po zapojení služeb: bez nich by restart `devmgr` jen odpojil zařízení |
 | přehled úloh (`taskproto` producent) | po spuštění `taskd` (vlákno shellu) |
 

@@ -168,6 +168,15 @@ impl<'a> Harness<'a> {
             .map(|_| ())
     }
 
+    /// Jedno kolo supervisoru (nejdel `ms`); udalosti jdou do [`Self::log`].
+    /// Pro testy, ktere cekaji na vlastni podminku (napr. okno po obnove).
+    pub fn step(&mut self, ms: u64) {
+        let h = self
+            .sup
+            .step(self.startup, Some(time::deadline_after(Duration::from_millis(ms))));
+        self.log.extend(h);
+    }
+
     /// Ridi supervisor, dokud `done` nad vsim, co se od volani stalo,
     /// nevrati `true`. Vraci tyto udalosti.
     pub fn drive_until(&mut self, mut done: impl FnMut(&[Happened]) -> bool) -> core::result::Result<Vec<Happened>, String> {

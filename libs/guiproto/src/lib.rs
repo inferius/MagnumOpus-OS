@@ -6,6 +6,7 @@
 //! - [`display`]: kompozitor <-> ovladac grafiky (`virtio-gpu`).
 //! - [`action`]: akce aplikaci deklarovane v manifestu, typovane hodnoty.
 //! - [`control`]: ridici prikazy kompozitoru (od initu) a systemove dialogy.
+//! - [`replay`]: zaznam platneho stavu okna pro obnovu po padu kompozitoru.
 //!
 //! Zprava kanalu = kod operace `u32` + pole kodovana `libs/wire`. Cteni
 //! neplatne zpravy vrati `INVALID_ARGS`, nikdy paniku: kompozitor tak
@@ -23,8 +24,11 @@ pub mod a11y;
 pub mod action;
 pub mod control;
 pub mod display;
+pub mod replay;
 pub mod window;
 
+#[cfg(test)]
+mod replay_tests;
 #[cfg(test)]
 mod tests;
 

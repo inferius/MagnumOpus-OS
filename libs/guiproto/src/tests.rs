@@ -319,6 +319,7 @@ fn display_roundtrip() {
             output: 0,
             rects: vec![Rect::new(0, 0, 10, 10)],
         },
+        Request::Sync { token: u64::MAX - 7 },
     ] {
         assert_eq!(Request::decode(&m.encode()), Ok(m));
     }
@@ -333,6 +334,7 @@ fn display_roundtrip() {
         },
         Reply::Attached { output: 0 },
         Reply::Presented { seq: 3, time: 5 },
+        Reply::Synced { token: 9 },
         Reply::Error {
             op: display::op::ATTACH,
             code: Error::NoMemory,
@@ -340,6 +342,17 @@ fn display_roundtrip() {
     ] {
         assert_eq!(Reply::decode(&m.encode()), Ok(m));
     }
+}
+
+#[test]
+fn display_sync_marker() {
+    assert!(Reply::Synced { token: 9 }.ends_sync(9));
+    // Znacka predchozi instance (jiny token) synchronizaci nekonci.
+    assert!(!Reply::Synced { token: 8 }.ends_sync(9));
+    assert!(!Reply::Presented { seq: 1, time: 2 }.ends_sync(9));
+    // Ovladac bez SYNC odpovi chybou na op SYNC.
+    assert!(Reply::Error { op: display::op::SYNC, code: Error::NotSupported }.ends_sync(9));
+    assert!(!Reply::Error { op: display::op::PRESENT, code: Error::NotSupported }.ends_sync(9));
 }
 
 #[test]

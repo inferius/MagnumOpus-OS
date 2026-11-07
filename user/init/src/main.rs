@@ -104,12 +104,9 @@ fn main(startup: Startup) -> i64 {
     }
     if startup.flags & libos::abi::bootstrap::flags::TEST_RUN == 0 {
         // GUI: kompozitor prevezme vstup a obrazovku (testy si ho spusti samy).
+        // Kompozitor obnovuje supervisor (okna se pripoji pres listky).
         let input = system::devices().and_then(|d| d.input.as_ref());
-        gui::start_desktop(&startup, input);
-        if let Some(g) = gui::GUI.lock().as_ref() {
-            // Restart zatim neni: okna aplikaci patri kompozitoru.
-            sup.watch("compd", &g.process, None);
-        }
+        gui::start_desktop(&startup, input, &mut sup);
         // Bezny beh: init je supervisor a nekonci.
         sup.run(&startup);
     }
