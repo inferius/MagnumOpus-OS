@@ -38,6 +38,7 @@ members = [
     "libs/tls",
     "libs/tz",
     "libs/shlang",
+    "libs/sizeclass",
     "libs/term",
     "libs/virtio",
     "libs/web",

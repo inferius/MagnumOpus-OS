@@ -47,6 +47,21 @@ Jádro (u `init`) nebo rodič (u ostatních) spustí první vlákno na symbolu
 
 Panika v programu vypíše zprávu do logu a ukončí proces s kódem -1 000 001.
 
+### Alokátor heapu
+
+- **Malé alokace** (do 4 KiB, zarovnání do 16 B) jdou do 16 velikostních
+  tříd (`libs/sizeclass`): každá třída má vlastní seznam volných objektů,
+  alokace i uvolnění je O(1). Prázdná třída si vezme kus 4-32 KiB
+  a rozdělí ho na objekty. Uvolněný objekt zůstane ve své třídě.
+- **Velké alokace** a kusy pro třídy jdou do `linked_list_allocator`
+  (first-fit). Jeho seznam volných úseků tak zůstane krátký.
+- **Proč:** samotný first-fit prochází při každé alokaci celý seznam
+  volných úseků. Po roztříštění heapu (fsd s velkou cache uzlů po testech
+  FS) měl seznam tisíce položek: jedno vložení do B-stromu stálo ~10 ms
+  a řádek shellu se zápisem 2-4 s. S třídami 0,3 s.
+- **Režie:** zaokrouhlení na třídu (nejvýš ~1,5x) a nejvýš jeden
+  nevyužitý kus na třídu (dohromady pod 0,3 MiB).
+
 ## Typy objektů
 
 Každý typ vlastní handle a zavře ho při zrušení (`Drop`).

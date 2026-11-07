@@ -250,21 +250,26 @@ v.error.code")?,
     }
     crate::check_eq!(w.value(id, "try { rm /shell-test/neni.txt } else e => e.code")?, Value::str("NOT_FOUND"), "try");
 
-    // Ctrl-C ukonci nekonecny cyklus.
+    // Ctrl-C ukonci nekonecny cyklus. Preruseni az po zacatku jeho bloku
+    // (jinak by pod zatezi mohlo prijit drive a cyklus by bezel dal) a konec
+    // jen toho bloku - udalosti jinych bloku (async, bg) se preskoci.
     w.send(ClientMsg::Run { session: id, line: "while true { let x = 1 }".into() })?;
+    let looping = loop {
+        if let ServerMsg::BlockStart { block, line, .. } = w.recv()?
+            && line.starts_with("while true")
+        {
+            break block;
+        }
+    };
     w.send(ClientMsg::Interrupt { session: id })?;
-    // Konec bloku cyklu (ne pozdni konec bloku zrusene ulohy async).
-    let mut lp = None;
     loop {
-        match w.recv()? {
-            ServerMsg::BlockStart { block, line, .. } if line.starts_with("while true") => lp = Some(block),
-            ServerMsg::BlockEnd { ok, block, .. } if Some(block) == lp => {
-                if ok {
-                    return Err("preruseny cyklus skoncil uspechem".into());
-                }
-                break;
+        if let ServerMsg::BlockEnd { block, ok, .. } = w.recv()?
+            && block == looping
+        {
+            if ok {
+                return Err("preruseny cyklus skoncil uspechem".into());
             }
-            _ => {}
+            break;
         }
     }
 

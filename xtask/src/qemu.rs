@@ -485,7 +485,13 @@ impl RunFiles {
 
 impl Drop for RunFiles {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.data);
+        // `OS_KEEP_DATA=1`: datovy disk nechat (rozbor stavu FS po behu,
+        // napr. mereni na hostiteli nad skutecnym obsahem).
+        if std::env::var_os("OS_KEEP_DATA").is_some() {
+            eprintln!("xtask: datovy disk zustava v {}", self.data.display());
+        } else {
+            let _ = std::fs::remove_file(&self.data);
+        }
         let _ = std::fs::remove_file(&self.scratch);
     }
 }

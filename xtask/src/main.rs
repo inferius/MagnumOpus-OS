@@ -72,6 +72,7 @@ promenne prostredi:
   QEMU_X86_64, QEMU_AARCH64   cesta k QEMU (QEMU plati pro x86_64)
   X86_64_FW_CODE, _FW_VARS    firmware UEFI (take OVMF_CODE, OVMF_VARS)
   AARCH64_FW_CODE, _FW_VARS   firmware UEFI pro aarch64 (edk2, AAVMF)
+  OS_KEEP_DATA=1              datovy disk po behu nemazat (rozbor stavu FS)
 ";
 
 pub struct Options {
@@ -280,6 +281,8 @@ fn host_tests() -> Result<()> {
             "usbproto",
             "--package",
             "shlang",
+            "--package",
+            "sizeclass",
             "--package",
             "term",
             "--package",

@@ -48,6 +48,22 @@ thread at libos's `_start` symbol with the bootstrap channel handle in
 
 A panic in the program logs the message and exits with code -1,000,001.
 
+### Heap allocator
+
+- **Small allocations** (up to 4 KiB, alignment up to 16 B) go to 16 size
+  classes (`libs/sizeclass`): each class has its own list of free objects,
+  allocation and free are O(1). An empty class takes a 4-32 KiB chunk and
+  splits it into objects. A freed object stays in its class.
+- **Large allocations** and chunks for the classes go to
+  `linked_list_allocator` (first-fit). Its list of free ranges thus stays
+  short.
+- **Why:** first-fit alone walks the whole list of free ranges on every
+  allocation. After the heap fragmented (fsd with a large node cache after
+  the FS tests) the list had thousands of entries: one B-tree insert cost
+  ~10 ms and a shell line with a write 2-4 s. With the classes 0.3 s.
+- **Overhead:** rounding up to the class (at most ~1.5x) and at most one
+  unused chunk per class (under 0.3 MiB in total).
+
 ## Object types
 
 Each type owns a handle and closes it when dropped.
