@@ -20,7 +20,7 @@ use alloc::vec::Vec;
 use libos::time::WallTime;
 use libos::{Error, Result};
 
-use crate::{FsClient, Reader, Writer, get_time, put_time};
+use crate::{DirEntry, FsClient, MAX_IO, Reader, Stat, Writer, decode_list, get_time, put_time};
 
 /// Kody operaci (navazuji na `perm::op`).
 pub mod op {
@@ -90,6 +90,32 @@ pub mod op {
     pub const DATASET_CREATE: u32 = 85;
     /// cesta (i se snapshoty; ne s vnorenymi datasety a klony)
     pub const DATASET_DELETE: u32 = 86;
+    /// dataset, od snapshot str, do u8 (0 = ziva verze, 1 = nasleduje
+    /// jmeno snapshotu str) -> pocet u32 + `Change` (cesty od korene
+    /// datasetu, serazene). Vyzaduje `MANAGE` ke koreni datasetu. Snapshot
+    /// muze byt i docasny snapshot pohledu (`VIEW`). Kdyz se rozdil nevejde
+    /// do odpovedi (`MAX_ITEMS` polozek nebo `MAX_REPLY` bajtu), vrati
+    /// `BUFFER_TOO_SMALL` (nestrankuje se: rozdil se pocita cely).
+    pub const DIFF: u32 = 88;
+    /// cesta -> cesta korene datasetu, ve kterem `cesta` lezi (str; cesta
+    /// relace). Prava jako `STAT` cesty: cesta, kterou relace nevidi,
+    /// i koren datasetu mimo pripojene cesty relace = `NOT_FOUND`.
+    pub const DATASET_OF: u32 = 89;
+    /// Cteni snapshotu libovolneho datasetu (vcetne docasneho snapshotu
+    /// pohledu z `VIEW`); `SNAP_STAT` / `SNAP_LIST_PAGE` / `SNAP_READ` umi
+    /// jen korenovy dataset. Dataset je cesta relace, cesta ve snapshotu je
+    /// cesta uvnitr datasetu (`/` = koren datasetu). Prava jako cteni zive
+    /// verze (pruchod k datasetu a ACL ve snapshotu kontroluje FS); relace
+    /// musi mit dataset pripojeny (staci jen pro cteni).
+    ///
+    /// dataset, snapshot str, cesta -> `Stat`
+    pub const SNAP_STAT_OF: u32 = 90;
+    /// dataset, snapshot str, cesta, kurzor str, nejvic u32 -> jako
+    /// `LIST_PAGE` (dalsi u8, pocet u32, polozky)
+    pub const SNAP_LIST_OF: u32 = 91;
+    /// dataset, snapshot str, cesta, offset u64, delka u32 (nejvic `MAX_IO`)
+    /// -> data (kratsi na konci souboru)
+    pub const SNAP_READ_OF: u32 = 92;
 }
 
 /// Nejvic polozek ve vypisu (ochrana pameti sluzby i klienta).
@@ -410,6 +436,9 @@ pub struct MergeReport {
     pub applied: Vec<String>,
     pub conflicts: Vec<MergeConflict>,
     pub commit: Option<CommitInfo>,
+    /// Kolik konfliktu bylo celkem (u klienta; `conflicts` muze byt zkraceny
+    /// na `MAX_ITEMS / 4`). Pri kodovani se bere `conflicts.len()`.
+    pub conflicts_total: usize,
 }
 
 impl MergeReport {
@@ -425,6 +454,8 @@ impl MergeReport {
         for c in &self.conflicts[..conflicts] {
             w.str(&c.path).u8(c.kind).str(&c.resolved_as);
         }
+        // Celkovy pocet: klient pozna, ze seznam je zkraceny.
+        w.u32(self.conflicts.len().min(u32::MAX as usize) as u32);
         match &self.commit {
             Some(c) => {
                 w.u8(1);
@@ -446,14 +477,15 @@ impl MergeReport {
         if n > MAX_ITEMS {
             return Err(Error::InvalidArgs);
         }
-        let conflicts = (0..n)
+        let conflicts: Vec<MergeConflict> = (0..n)
             .map(|_| Ok(MergeConflict { path: r.str()?, kind: r.u8()?, resolved_as: r.str()? }))
             .collect::<Result<_>>()?;
+        let conflicts_total = (r.u32()? as usize).max(conflicts.len());
         let commit = match r.u8()? {
             0 => None,
             _ => Some(CommitInfo::get(r)?),
         };
-        Ok(Self { applied, conflicts, commit })
+        Ok(Self { applied, conflicts, commit, conflicts_total })
     }
 }
 
@@ -466,6 +498,19 @@ pub struct Change {
     pub old_path: String,
     pub oid: u64,
     pub is_dir: bool,
+}
+
+impl Change {
+    /// Velikost na drate bez cest (druh, 2x delka u16, oid, slozka).
+    pub const FIXED: usize = 1 + 2 + 2 + 8 + 1;
+
+    pub fn put(&self, w: &mut Writer) {
+        w.u8(self.kind).str(&self.path).str(&self.old_path).u64(self.oid).u8(self.is_dir as u8);
+    }
+
+    pub fn get(r: &mut Reader) -> Result<Self> {
+        Ok(Self { kind: r.u8()?, path: r.str()?, old_path: r.str()?, oid: r.u64()?, is_dir: r.u8()? != 0 })
+    }
 }
 
 pub fn put_opt_time(w: &mut Writer, t: Option<WallTime>) {
@@ -485,6 +530,80 @@ pub fn get_opt_time(r: &mut Reader) -> Result<Option<WallTime>> {
     let has = r.u8()? != 0;
     let t = get_time(r)?;
     Ok(has.then_some(t))
+}
+
+/// Pozadavek `DIFF`.
+pub fn diff_request(dataset: &str, from: &str, to: Option<&str>, skip: u32) -> Writer {
+    let mut w = FsClient::req(op::DIFF);
+    w.str(dataset).str(from);
+    match to {
+        Some(t) => {
+            w.u8(1).str(t);
+        }
+        None => {
+            w.u8(0);
+        }
+    }
+    w.u32(skip);
+    w
+}
+
+/// Precte parametry `DIFF` (za kodem operace) -> (dataset, od, do,
+/// preskocit). `skip` chybi = 0.
+pub fn get_diff_request(r: &mut Reader) -> Result<(String, String, Option<String>, usize)> {
+    let (ds, from) = (r.str()?, r.str()?);
+    let to = match r.u8()? {
+        0 => None,
+        1 => Some(r.str()?),
+        _ => return Err(Error::InvalidArgs),
+    };
+    Ok((ds, from, to, get_skip(r)?))
+}
+
+/// Volitelny posun stranky na konci pozadavku (`DIFF`, `ASIDE_CHANGES`).
+pub fn get_skip(r: &mut Reader) -> Result<usize> {
+    if r.is_empty() { Ok(0) } else { Ok(r.u32()? as usize) }
+}
+
+/// Zakoduje stranku zmen (`DIFF`, `ASIDE_CHANGES`) od `skip`: celkem u32,
+/// pocet u32, zmeny - kolik se vejde do `MAX_ITEMS` a `budget` bajtu.
+/// Seznam se nikdy tise nezkrati: klient si vyzada dalsi stranky.
+pub fn encode_changes_page(w: &mut Writer, changes: &[Change], skip: usize, budget: usize) {
+    let rest = changes.get(skip..).unwrap_or(&[]);
+    let (mut size, mut n) = (8usize, 0usize);
+    for c in rest {
+        let one = Change::FIXED + c.path.len() + c.old_path.len();
+        // Aspon jedna polozka na stranku (cesta je vzdy mensi nez zprava).
+        if n >= MAX_ITEMS || (n > 0 && size + one > budget) {
+            break;
+        }
+        size += one;
+        n += 1;
+    }
+    w.u32(changes.len().min(u32::MAX as usize) as u32).u32(n as u32);
+    for c in &rest[..n] {
+        c.put(w);
+    }
+}
+
+/// Precte vsechny stranky zmen; `req(skip)` = pozadavek na stranku.
+fn changes_pages(f: &FsClient, mut req: impl FnMut(u32) -> Writer) -> Result<Vec<Change>> {
+    let mut out: Vec<Change> = Vec::new();
+    loop {
+        let body = f.call(req(out.len() as u32))?;
+        let mut r = Reader::new(&body);
+        let total = r.u32()? as usize;
+        let n = r.u32()? as usize;
+        if n > MAX_ITEMS {
+            return Err(Error::InvalidArgs);
+        }
+        for _ in 0..n {
+            out.push(Change::get(&mut r)?);
+        }
+        if out.len() >= total || n == 0 {
+            return Ok(out);
+        }
+    }
 }
 
 fn list<T>(body: &[u8], f: impl Fn(&mut Reader) -> Result<T>) -> Result<Vec<T>> {
@@ -623,10 +742,75 @@ impl FsClient {
         Reader::new(&self.call(w)?).u64()
     }
 
+    /// Vsechny zmeny klonu (po strankach, nikdy zkracene).
     pub fn aside_changes(&self, clone: &str) -> Result<Vec<Change>> {
-        list(&self.path_op(op::ASIDE_CHANGES, clone)?, |r| {
-            Ok(Change { kind: r.u8()?, path: r.str()?, old_path: r.str()?, oid: r.u64()?, is_dir: r.u8()? != 0 })
+        changes_pages(self, |skip| {
+            let mut w = Self::req(op::ASIDE_CHANGES);
+            w.str(clone).u32(skip);
+            w
         })
+    }
+
+    /// Rozdil verzi datasetu: ze snapshotu `from` do snapshotu `to`, nebo do
+    /// zive verze (`to = None`). Cesty od korene datasetu.
+    pub fn diff(&self, dataset: &str, from: &str, to: Option<&str>) -> Result<Vec<Change>> {
+        changes_pages(self, |skip| diff_request(dataset, from, to, skip))
+    }
+
+    /// `stat` ve snapshotu `snap` datasetu `dataset` (cesta uvnitr datasetu).
+    pub fn snapshot_stat_of(&self, dataset: &str, snap: &str, path: &str) -> Result<Stat> {
+        let mut w = Self::req(op::SNAP_STAT_OF);
+        w.str(dataset).str(snap).str(path);
+        Stat::get(&mut Reader::new(&self.call(w)?))
+    }
+
+    /// Cely vypis adresare ve snapshotu datasetu (po strankach).
+    pub fn snapshot_list_of(&self, dataset: &str, snap: &str, path: &str) -> Result<Vec<DirEntry>> {
+        let mut out: Vec<DirEntry> = Vec::new();
+        loop {
+            let mut w = Self::req(op::SNAP_LIST_OF);
+            let after = out.last().map_or("", |e| e.name.as_str());
+            w.str(dataset).str(snap).str(path).str(after).u32(u32::MAX);
+            let body = self.call(w)?;
+            let mut r = Reader::new(&body);
+            let more = r.u8()? != 0;
+            let page = decode_list(r.rest())?;
+            let empty = page.is_empty();
+            out.extend(page);
+            if !more || empty {
+                return Ok(out);
+            }
+        }
+    }
+
+    /// Precte az `len` bajtu od `offset` ze souboru ve snapshotu datasetu
+    /// (vetsi pozadavek rozdeli po `MAX_IO`).
+    pub fn snapshot_read_of(&self, dataset: &str, snap: &str, path: &str, offset: u64, len: usize) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        while out.len() < len {
+            let n = (len - out.len()).min(MAX_IO);
+            let mut w = Self::req(op::SNAP_READ_OF);
+            w.str(dataset).str(snap).str(path).u64(offset + out.len() as u64).u32(n as u32);
+            let part = self.call(w)?;
+            let got = part.len();
+            out.extend_from_slice(&part);
+            if got < n {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    /// Cely soubor ze snapshotu datasetu (velikost podle `snapshot_stat_of`).
+    pub fn snapshot_read_file_of(&self, dataset: &str, snap: &str, path: &str) -> Result<Vec<u8>> {
+        let size = self.snapshot_stat_of(dataset, snap, path)?.size;
+        let len = usize::try_from(size).map_err(|_| Error::NoMemory)?;
+        self.snapshot_read_of(dataset, snap, path, 0, len)
+    }
+
+    /// Cesta korene datasetu, ve kterem lezi `path` (`/` = korenovy).
+    pub fn dataset_of(&self, path: &str) -> Result<String> {
+        Reader::new(&self.path_op(op::DATASET_OF, path)?).str()
     }
 
     /// `select = None` = prevzit vse.

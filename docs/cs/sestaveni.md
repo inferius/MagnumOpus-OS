@@ -68,7 +68,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd,
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd, shsess, console,
                        virtio-net, virtio-rng, netd, fwd, netprobe, manifesty, firewall.toml
                        (+ net-test u `cargo xtask test`: porty pomocných serverů)
 ```
@@ -174,7 +174,9 @@ user/usb-hub/    ovladač třídy hub (root hub i externí)
 user/usb-hid/    ovladač klávesnice a myši USB (boot protokol)
 user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
-user/termd/      služba relací shellu a terminálu
+user/termd/      prostředník terminálu (směruje zprávy, registr relací)
+user/shsess/     proces jedné relace shellu (interpret, koncept, undo)
+user/console/    textová a záchranná konzole (framebuffer, klávesy z inputd)
 user/virtio-net/ ovladač síťové karty
 user/virtio-rng/ ovladač zdroje náhody (entropie pro jádro)
 user/netd/       služba sítě (TCP/IP, DHCP, DNS, firewall)

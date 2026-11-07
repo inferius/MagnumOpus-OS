@@ -243,11 +243,29 @@ invariant was broken (a kernel bug).
 | `init: firewall bez FS (konfigurace se neulozi): ...` | An FS session for `fwd` cannot be prepared (no FS or rights). |
 | `init: sluzbu firewallu nelze spustit: ...` | `fwd` did not start; `netd` sees a closed channel and denies questions. |
 
+## Text console console
+
+| Message | Meaning and fix |
+|---|---|
+| `console: bezim (ceka na displej a fokus)` | The console runs; it starts drawing after `display` and takes keys after `focus`. |
+| `console: displej prevzat (SxR znaku)` | It took over the framebuffer; the character grid follows the resolution. |
+| `console: displej vracen` | After `release`; the framebuffer is back with the kernel. |
+| `console: ridici kanal zavren, koncim` | The owner of the console ended; the display goes back to the kernel. |
+| `console: chybi kanal k termd` | Started without a channel to the session service; the console exits with code 1. |
+| `framebuffer prevzal proces X N (log jadra dal na seriove lince)` | Kernel: `FB_CONTROL` `CLAIM`; it no longer draws the log on the screen. |
+| `framebuffer vratil proces X N` | Kernel: `FB_CONTROL` `RELEASE`; the screen is cleared and the log is drawn again. |
+
 ## Session service termd
 
 | Message | Meaning and fix |
 |---|---|
-| `termd: bezim (protokol vN, FS fsd/zadny)` | The session service is running. `zadny` (none) = it got no fsd channel; the shell then sees only an empty root (writes return `READ_ONLY`). |
+| `termd: bezim (protokol vN, FS fsd/zadny, registr ano/ne, prevzato N)` | The broker is running. `zadny` (none) = it got no fsd channel; the shell then sees only an empty root (writes return `READ_ONLY`). `registr ne` (no registry) = sessions do not survive the end of termd. `prevzato N` = number of sessions taken over from the previous termd. |
+| `termd: prevzata relace N` | A session from the registry moved to the new termd; the window can attach to it. |
 | `termd\| ...` | Mirror of session output as text (VT100 adapter) so it can be read on the serial line. Blocks start with `> command`. |
-| `termd: okno zavreno, koncim` | The channel to the parent closed. Background jobs finish, then the service exits (sessions do not survive the process yet). |
-| `termd: chyba cteni: ...` | Unexpected channel error; the service exits with code 1. |
+| `termd: okno zavreno, koncim (N relaci bezi dal)` | The window closed; sessions detach and keep running in their processes. A new termd takes them over from the registry. |
+| `termd: chyba cekani: ...` | Unexpected error waiting on channels; the broker exits with code 1 (sessions keep running). |
+| `shsess N: bezim (znacka)` | The process of session N is running; the tag is in the names of its clones aside. |
+| `shsess N: termd skoncil, cekam na prevzeti` | The main channel closed; the command and jobs finish, the session waits for `Adopt` from a new termd. |
+| `shsess N: prevzato novym termd` | The session moved to a new termd. |
+| `shsess N: nikdo neprevzal, koncim` | The registry closed the channel (or there is none) and no job waits; the session ends. |
+| `shsess: chybi Init` / `prvni zprava neni Init` | The session process did not get the initial message from termd; it exits with code 1. |

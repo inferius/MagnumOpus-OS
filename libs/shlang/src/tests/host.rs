@@ -20,6 +20,8 @@ pub struct TestHost {
     pub time: i64,
     /// Spustene programy (jmeno, argumenty, needs).
     pub execs: Vec<(String, Vec<String>, ExecNeeds)>,
+    /// Pri dotazu zapsat do FS (jina relace meni soubor behem dotazu).
+    pub write_on_confirm: Option<(String, Vec<u8>)>,
 }
 
 impl TestHost {
@@ -42,6 +44,7 @@ impl TestHost {
             calls: 0,
             time: 1_700_000_000_000_000_000,
             execs: Vec::new(),
+            write_on_confirm: None,
         }
     }
 
@@ -73,6 +76,9 @@ impl Host for TestHost {
     }
     fn confirm(&mut self, question: &str, _detail: &Value) -> bool {
         self.asked.push(question.into());
+        if let Some((p, d)) = self.write_on_confirm.take() {
+            self.fs.write(&p, &d).unwrap();
+        }
         self.answer
     }
     fn exec(
@@ -90,8 +96,12 @@ impl Host for TestHost {
         if name == "ro-tool" {
             return Some(Ok(Value::str("jen cteni")));
         }
-        // Program zapise do slozky, kam smi.
-        let _ = self.fs.write("/home/tool.out", b"z programu");
+        // Program zapise do slozky, kam smi; v nahledu do klonu.
+        let mut target = String::from("/home/tool.out");
+        if let Some((ds, root)) = needs.aside.iter().find(|(ds, _)| crate::vfs::path::within(&target, ds)) {
+            target = crate::vfs::path::rebase(&target, ds, root);
+        }
+        let _ = self.fs.write(&target, b"z programu");
         Some(Ok(Value::str("tool ok")))
     }
     fn home(&self) -> String {

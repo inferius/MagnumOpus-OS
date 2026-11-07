@@ -1,7 +1,9 @@
 //! Historie FS pres sluzbu fsd (faze 2): zurnal zmen a cekani na zmeny,
-//! kos, commity, vetve a merge, "zkusit zmeny bokem", atributy.
+//! kos, commity, vetve a merge, "zkusit zmeny bokem", atributy; dotazy
+//! shellu (vypis s metadaty, rozdil verzi, dataset cesty).
 
 use fsproto::hist::jop;
+use fsproto::perm::{Acl, EVERYONE, Grant, Mount, Profile, grant, rights};
 use fsproto::{FsClient, kind};
 use libos::{Error, Startup};
 
@@ -14,6 +16,9 @@ pub const TESTS: &[Test] = &[
     ("commit, vetev a merge", branch_merge),
     ("zkusit zmeny bokem: prevzit a zahodit", aside),
     ("rozsirene atributy a expirace", xattrs),
+    ("vypis s metadaty (LIST_STAT_PAGE)", list_stat),
+    ("rozdil verzi po pohledu (DIFF) a dataset cesty", diff_dataset_of),
+    ("vypis s metadaty a dataset cesty s omezenou relaci", restricted_session),
     ("kontrola konzistence po historii", check_clean),
 ];
 
@@ -142,5 +147,128 @@ fn xattrs(_: &Startup) -> TestResult {
 fn check_clean(_: &Startup) -> TestResult {
     let problems = fs()?.check(true).map_err(|e| fail("kontrola", e))?;
     check!(problems.is_empty(), alloc::format!("problemy: {problems:?}").as_str());
+    Ok(())
+}
+
+/// `list_stat` vrati stejne polozky jako `list` a metadata jako `stat`.
+fn list_stat(_: &Startup) -> TestResult {
+    let f = fs()?;
+    let _ = f.create("/f2-ls", kind::DIR);
+    let _ = f.create("/f2-ls/a.txt", kind::FILE);
+    f.write("/f2-ls/a.txt", 0, b"12345").map_err(|e| fail("zapis", e))?;
+    let _ = f.create("/f2-ls/B.txt", kind::FILE);
+    let _ = f.create("/f2-ls/sub", kind::DIR);
+    let list = f.list("/f2-ls").map_err(|e| fail("list", e))?;
+    let ls = f.list_stat("/f2-ls").map_err(|e| fail("list_stat", e))?;
+    check_eq!(ls.len(), list.len(), "pocet polozek");
+    for (e, s) in list.iter().zip(ls.iter()) {
+        check_eq!((&s.name, s.kind, s.oid), (&e.name, e.kind, e.oid), "polozka jako list");
+        let st = f.stat(&alloc::format!("/f2-ls/{}", e.name)).map_err(|e| fail("stat", e))?;
+        check_eq!((s.size, s.mtime), (st.size, st.mtime), "metadata jako stat");
+    }
+    check!(ls.iter().any(|s| s.name == "a.txt" && s.size == 5 && s.kind == kind::FILE), "velikost a.txt");
+    check!(ls.iter().any(|s| s.name == "sub" && s.kind == kind::DIR), "podslozka");
+    check_eq!(f.list_stat("/f2-ls/a.txt").err(), Some(Error::NotADirectory), "vypis souboru");
+    Ok(())
+}
+
+/// Rozdil verzi proti pohledu (`VIEW`) a mezi dvema pohledy v malem
+/// datasetu; `dataset_of` uvnitr datasetu a v koreni.
+fn diff_dataset_of(_: &Startup) -> TestResult {
+    let f = fs()?;
+    match f.create_dataset("/f2-diff") {
+        Ok(_) | Err(Error::AlreadyExists) => {}
+        Err(e) => return Err(fail("create_dataset", e)),
+    }
+    let _ = f.create("/f2-diff/stary.txt", kind::FILE);
+    f.write("/f2-diff/stary.txt", 0, b"puvodni").map_err(|e| fail("zapis", e))?;
+    let v1 = f.view("/f2-diff").map_err(|e| fail("view", e))?;
+    f.create("/f2-diff/novy.txt", kind::FILE).map_err(|e| fail("create", e))?;
+    f.write("/f2-diff/novy.txt", 0, b"novy").map_err(|e| fail("zapis", e))?;
+    let d = f.diff("/f2-diff", &v1.snapshot, None).map_err(|e| fail("diff do zive verze", e))?;
+    check!(d.iter().any(|c| c.path == "/novy.txt" && c.kind == 1 && !c.is_dir), alloc::format!("pridany soubor: {d:?}").as_str());
+    check!(!d.iter().any(|c| c.path == "/stary.txt"), "nezmeneny soubor v rozdilu");
+    let v2 = f.view("/f2-diff").map_err(|e| fail("view 2", e))?;
+    let d2 = f.diff("/f2-diff", &v1.snapshot, Some(&v2.snapshot)).map_err(|e| fail("diff mezi pohledy", e))?;
+    check_eq!(d2, d, "rozdil do pohledu = rozdil do zive verze");
+    check_eq!(f.diff("/f2-diff", "neni-takovy", None).err(), Some(Error::NotFound), "neznamy snapshot");
+    // Cteni z pohledu datasetu (SNAP_*_OF; cesty uvnitr datasetu).
+    let st = f.snapshot_stat_of("/f2-diff", &v1.snapshot, "/stary.txt").map_err(|e| fail("snapshot_stat_of", e))?;
+    check_eq!(st.size, 7, "velikost ve snapshotu");
+    check_eq!(f.snapshot_stat_of("/f2-diff", &v1.snapshot, "/novy.txt").err(), Some(Error::NotFound), "novy soubor v pohledu neni");
+    let names: alloc::vec::Vec<_> = f
+        .snapshot_list_of("/f2-diff", &v1.snapshot, "/")
+        .map_err(|e| fail("snapshot_list_of", e))?
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+    check!(names.iter().any(|n| n == "stary.txt") && !names.iter().any(|n| n == "novy.txt"), "vypis pohledu");
+    check_eq!(
+        f.snapshot_read_file_of("/f2-diff", &v1.snapshot, "/stary.txt").map_err(|e| fail("snapshot_read_file_of", e))?,
+        b"puvodni".to_vec(),
+        "obsah ve snapshotu"
+    );
+    check_eq!(
+        f.snapshot_read_of("/f2-diff", &v2.snapshot, "/novy.txt", 1, 2).map_err(|e| fail("snapshot_read_of", e))?,
+        b"ov".to_vec(),
+        "cast souboru ve snapshotu"
+    );
+    f.release_view("/f2-diff", &v2.snapshot).map_err(|e| fail("release_view", e))?;
+    f.release_view("/f2-diff", &v1.snapshot).map_err(|e| fail("release_view", e))?;
+    // Dataset cesty.
+    let _ = f.create("/f2-diff/sub", kind::DIR);
+    let _ = f.create("/f2-diff/sub/y.txt", kind::FILE);
+    check_eq!(f.dataset_of("/f2-diff/sub/y.txt").map_err(|e| fail("dataset_of", e))?, alloc::string::String::from("/f2-diff"), "soubor v datasetu");
+    check_eq!(f.dataset_of("/f2-diff").map_err(|e| fail("dataset_of", e))?, alloc::string::String::from("/f2-diff"), "koren datasetu");
+    check_eq!(f.dataset_of("/f2-ls/a.txt").map_err(|e| fail("dataset_of", e))?, alloc::string::String::from("/"), "soubor v koreni");
+    check_eq!(f.dataset_of("/").map_err(|e| fail("dataset_of", e))?, alloc::string::String::from("/"), "koren");
+    check_eq!(f.dataset_of("/f2-diff/neni").err(), Some(Error::NotFound), "neexistujici cesta");
+    f.delete_dataset("/f2-diff").map_err(|e| fail("delete_dataset", e))?;
+    Ok(())
+}
+
+/// Uzivatel bez prav k vlastnimu adresari.
+const CAROL: u64 = 1002;
+
+/// `LIST_STAT_PAGE` nevrati polozku, kterou relace nevidi; `DATASET_OF`
+/// pro neviditelnou cestu a pro koren mimo pripojene cesty = `NOT_FOUND`.
+fn restricted_session(_: &Startup) -> TestResult {
+    let f = fs()?;
+    // Koren jde projit (stejne jako v testech opravneni FS).
+    let traverse = Acl { flags: 0, grants: alloc::vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
+    f.set_acl("/", Some(&traverse)).map_err(|e| fail("acl /", e))?;
+    let _ = f.create("/f2-omez", kind::DIR);
+    let dir_acl = Acl {
+        flags: 0,
+        grants: alloc::vec![Grant { who: CAROL, rights: rights::LIST | rights::TRAVERSE, flags: grant::THIS }],
+    };
+    f.set_acl("/f2-omez", Some(&dir_acl)).map_err(|e| fail("acl slozky", e))?;
+    let _ = f.create("/f2-omez/moje.txt", kind::FILE);
+    f.write("/f2-omez/moje.txt", 0, b"carol").map_err(|e| fail("zapis", e))?;
+    f.set_owner("/f2-omez/moje.txt", CAROL).map_err(|e| fail("vlastnik", e))?;
+    let _ = f.create("/f2-omez/cizi.txt", kind::FILE);
+    let (_, carol) = f.connect_as(CAROL, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("connect_as", e))?;
+    let list: alloc::vec::Vec<_> = carol.list("/f2-omez").map_err(|e| fail("list", e))?.into_iter().map(|e| e.name).collect();
+    let ls = carol.list_stat("/f2-omez").map_err(|e| fail("list_stat", e))?;
+    let names: alloc::vec::Vec<_> = ls.iter().map(|e| e.name.clone()).collect();
+    check_eq!(names, list, "stejne polozky jako list");
+    check_eq!(names, alloc::vec![alloc::string::String::from("moje.txt")], "jen viditelna polozka");
+    check_eq!(ls[0].size, 5, "velikost viditelne polozky");
+    // Systemova relace vidi obe.
+    check_eq!(f.list_stat("/f2-omez").map_err(|e| fail("list_stat systemu", e))?.len(), 2, "system vidi vse");
+    check_eq!(carol.dataset_of("/f2-omez/moje.txt").map_err(|e| fail("dataset_of", e))?, alloc::string::String::from("/"), "viditelna cesta");
+    check_eq!(carol.dataset_of("/f2-omez/cizi.txt").err(), Some(Error::NotFound), "neviditelna cesta");
+    // Relace aplikace jen s /app -> /f2-omez: koren datasetu "/" nevidi.
+    let mounts = [Mount::new("/app", "/f2-omez", 0)];
+    let (_, app) = f.connect_as(CAROL, &[], &mounts).map_err(|e| fail("relace aplikace", e))?;
+    let names: alloc::vec::Vec<_> = app.list_stat("/app").map_err(|e| fail("list_stat aplikace", e))?.into_iter().map(|e| e.name).collect();
+    check_eq!(names, alloc::vec![alloc::string::String::from("moje.txt")], "vypis pres pripojenou cestu");
+    check_eq!(app.dataset_of("/app/moje.txt").err(), Some(Error::NotFound), "koren mimo pripojene cesty");
+    check_eq!(app.dataset_of("/f2-omez/moje.txt").err(), Some(Error::NotFound), "cesta mimo pripojene");
+    drop(app);
+    drop(carol);
+    f.remove("/f2-omez/cizi.txt").map_err(|e| fail("uklid", e))?;
+    f.remove("/f2-omez/moje.txt").map_err(|e| fail("uklid", e))?;
+    f.remove("/f2-omez").map_err(|e| fail("uklid", e))?;
     Ok(())
 }

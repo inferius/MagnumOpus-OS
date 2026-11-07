@@ -331,6 +331,15 @@ name = "conf"
 version = "0.1.0"
 
 [[package]]
+name = "console"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "libos",
+ "term",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1917,6 +1926,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "shsess"
+version = "0.1.0"
+dependencies = [
+ "fsproto",
+ "libos",
+ "shlang",
+ "term",
+]
+
+[[package]]
 name = "signature"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2756,6 +2775,7 @@ dependencies = [
  "ring",
  "rustls",
  "shlang",
+ "term",
  "tls",
  "tokio",
  "tokio-rustls",

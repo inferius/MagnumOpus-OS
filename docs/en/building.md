@@ -70,7 +70,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd,
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd, shsess, console,
                        virtio-net, virtio-rng, netd, fwd, netprobe, manifests, firewall.toml
                        (+ net-test with `cargo xtask test`: helper server ports)
 ```
@@ -179,7 +179,9 @@ user/usb-hub/    hub class driver (root hub and external)
 user/usb-hid/    USB keyboard and mouse driver (boot protocol)
 user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
-user/termd/      shell and terminal session service
+user/termd/      terminal broker (routes messages, session registry)
+user/shsess/     process of one shell session (interpreter, draft, undo)
+user/console/    text and rescue console (framebuffer, keys from inputd)
 user/virtio-net/ network card driver
 user/virtio-rng/ randomness source driver (entropy for the kernel)
 user/netd/       network service (TCP/IP, DHCP, DNS, firewall)

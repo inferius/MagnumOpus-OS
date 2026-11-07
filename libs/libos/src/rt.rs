@@ -93,6 +93,10 @@ pub struct Startup {
     pub process: Process,
     /// Obraz initfs (dostava jen init).
     pub initfs: Option<Vmo>,
+    /// Framebuffer z firmware (`kind::FRAMEBUFFER`: init od jadra, textova
+    /// konzole od initu). Geometrie a prevzeti: [`crate::sys::fb_info`],
+    /// [`crate::sys::fb_claim`].
+    pub framebuffer: Option<Vmo>,
     /// Handly predane rodicem (`kind::USER`), v poradi zpravy.
     pub handles: Vec<Handle>,
     /// Pristup k hardwaru (dostava init, ten ho preda spravci zarizeni).
@@ -155,6 +159,7 @@ struct Received {
     job: Option<u32>,
     flags: u32,
     initfs: Option<u32>,
+    framebuffer: Option<u32>,
     resource: Option<u32>,
     ecam: [(u32, u32); 4],
     ecam_count: usize,
@@ -181,6 +186,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
         job: None,
         flags: 0,
         initfs: None,
+        framebuffer: None,
         resource: None,
         ecam: [(0, 0); 4],
         ecam_count: 0,
@@ -202,6 +208,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             }
             bootstrap::kind::JOB => got.job = Some(handle),
             bootstrap::kind::INITFS => got.initfs = Some(handle),
+            bootstrap::kind::FRAMEBUFFER => got.framebuffer = Some(handle),
             bootstrap::kind::ROOT_RESOURCE => got.resource = Some(handle),
             bootstrap::kind::PCI_ECAM if got.ecam_count < got.ecam.len() => {
                 got.ecam[got.ecam_count] = (handle, arg);
@@ -226,6 +233,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
     let startup = Startup {
         process: Process::from_handle(Handle::from_raw(process)),
         initfs: got.initfs.map(|h| Vmo::from_handle(Handle::from_raw(h))),
+        framebuffer: got.framebuffer.map(|h| Vmo::from_handle(Handle::from_raw(h))),
         handles: got.user[..got.user_count]
             .iter()
             .map(|&h| Handle::from_raw(h))

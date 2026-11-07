@@ -135,6 +135,10 @@ fn map_stack(process: &Process) -> Result<u64> {
     Ok(base + STACK_SIZE)
 }
 
+/// Objekt pameti framebufferu predany initu (`FB_CONTROL` overi, ze volajici
+/// drzi prave tento objekt).
+pub static FB_VMO: crate::sync::SpinLock<Option<Arc<MemoryObject>>> = crate::sync::SpinLock::new(None);
+
 fn send_bootstrap(
     channel: &Channel,
     process: &Arc<Process>,
@@ -170,6 +174,21 @@ fn send_bootstrap(
     let root = Resource::new_root();
     let root_rights = root.default_rights();
     entries.push((bootstrap::kind::ROOT_RESOURCE, 0, root, root_rights));
+    // Framebuffer z firmware: init ho preda jedinemu procesu (textova
+    // konzole). Bez framebufferu (nebo s nezarovnanou adresou) polozka chybi.
+    if let Some(fb) = crate::console::framebuffer()
+        && fb.phys_addr % crate::arch::paging::PAGE_SIZE == 0
+        && fb.len > 0
+    {
+        let vmo = MemoryObject::new_physical(fb.phys_addr, fb.len, None)?;
+        *FB_VMO.lock() = Some(vmo.clone());
+        entries.push((
+            bootstrap::kind::FRAMEBUFFER,
+            0,
+            vmo,
+            Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP,
+        ));
+    }
     for ecam in &platform.pci_ecam {
         let buses = ecam.bus_end as u64 - ecam.bus_start as u64 + 1;
         // Okno pocina na sbernici bus_start; 1 MiB konfigurace na sbernici.

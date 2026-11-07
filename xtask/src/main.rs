@@ -379,6 +379,8 @@ const USER_PROGRAMS: &[&str] = &[
     "fsd",
     "timed",
     "termd",
+    "shsess",
+    "console",
     "virtio-net",
     "virtio-rng",
     "virtio-gpu",

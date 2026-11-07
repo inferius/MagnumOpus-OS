@@ -91,6 +91,10 @@ impl<D: BlockDevice> Fs<D> {
         let root = self.s.root;
         let d = self.lookup_child(&root, parent, name)?.ok_or(Error::NotFound)?;
         if d.kind == KIND_DATASET {
+            // Hranice v klonu: `NOT_SUPPORTED` jako kazda zmena hranice.
+            if self.is_boundary(parent, &d)? {
+                return Err(Error::NotSupported);
+            }
             // Dataset ma vlastni historii a bloky: maze ho `delete_dataset`.
             return Err(Error::WrongType);
         }

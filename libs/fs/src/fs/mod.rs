@@ -21,11 +21,15 @@ mod commit;
 mod data;
 mod dataset;
 mod defrag;
+mod delta;
 mod diff;
+#[cfg(test)]
+mod diff_ref;
 mod handles;
 mod history;
 mod journal;
 mod merge;
+mod merge_index;
 mod perm;
 mod snap;
 mod times;
@@ -251,6 +255,37 @@ pub struct MountOptions {
 /// z poskozeneho zaznamu (`CORRUPTED`), ne zacykleni.
 const MAX_DEPTH: usize = 65_536;
 
+#[cfg(test)]
+std::thread_local! {
+    static REFERENCE: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Testy: rozdil a slouceni puvodnim uplnym pruchodem stromu (reference
+/// pro porovnani s rychlou cestou, ktera preskakuje sdilene podstromy).
+#[cfg(test)]
+pub(crate) fn set_reference_mode(on: bool) {
+    REFERENCE.with(|r| r.set(on));
+}
+
+#[cfg(test)]
+fn reference_mode() -> bool {
+    REFERENCE.with(|r| r.get())
+}
+
+#[cfg(not(test))]
+fn reference_mode() -> bool {
+    false
+}
+
+#[cfg(test)]
+impl<D: BlockDevice> Fs<D> {
+    /// Testy: (navstivene ulozene uzly stromu vcetne cache, cteni uzlu
+    /// z disku) od pripojeni.
+    pub(crate) fn node_counters(&self) -> (u64, u64) {
+        (self.s.node_visits, self.s.node_reads)
+    }
+}
+
 /// Kolik rozpracovanych bloku dat drzet v pameti, nez se zapisi (16 MiB).
 const DIRTY_LIMIT: u64 = 4096;
 /// Nad tolik bloku v bufferu (32 MiB) se dalsi zapis neprijme, dokud nejde
@@ -341,9 +376,11 @@ impl<D: BlockDevice> Fs<D> {
                 fs.s.mark_changed();
                 fs.commit()?;
             }
-            // Sirotci a pohledy z minula: po restartu je nikdo nema otevrene.
+            // Sirotci a pohledy z minula: po restartu je nikdo nema otevrene;
+            // zbytky "bokem" po padu mezi commity.
             fs.cleanup_orphans()?;
             fs.cleanup_views()?;
+            fs.cleanup_asides()?;
         }
         Ok(fs)
     }
@@ -528,7 +565,47 @@ impl<D: BlockDevice> Fs<D> {
     /// Metadata objektu. S kontrolou opravneni: `rights` = ucinna prava
     /// volajiciho a souhrny podstromu jen pro vlastnika a `MANAGE` (jinak
     /// by prozradily velikost cizich souboru).
+    ///
+    /// Hranice vnoreneho datasetu v klonu (viz `dataset.rs`): `Kind::Dataset`,
+    /// `oid` = cislo vnoreneho datasetu, `dataset` = klon, `rights = 0`,
+    /// nulove casy a souhrny.
     pub fn stat(&mut self, path: &str) -> Result<Stat> {
+        match self.stat_inner(path) {
+            Err(Error::NotSupported) => self.boundary_stat(path)?.ok_or(Error::NotSupported),
+            r => r,
+        }
+    }
+
+    /// Stat hranice na ceste `path` (`None`, kdyz tam hranice neni).
+    fn boundary_stat(&mut self, path: &str) -> Result<Option<Stat>> {
+        let Ok((parent, name)) = split_parent(path) else { return Ok(None) };
+        let dir = if self.checking() { self.walk(parent)?.oid } else { self.enter(parent)? };
+        let root = self.s.root;
+        if self.inode(&root, dir)?.kind != KIND_DIR {
+            return Ok(None);
+        }
+        let Some(d) = self.lookup_child(&root, dir, name)? else { return Ok(None) };
+        if !self.is_boundary(dir, &d)? {
+            return Ok(None);
+        }
+        Ok(Some(Stat {
+            oid: d.oid,
+            kind: Kind::Dataset,
+            size: 0,
+            mtime: Timestamp::default(),
+            ctime: Timestamp::default(),
+            btime: Timestamp::default(),
+            generation: 0,
+            tree_bytes: 0,
+            tree_files: 0,
+            tree_dirs: 0,
+            dataset: self.cur_ds,
+            owner: 0,
+            rights: 0,
+        }))
+    }
+
+    fn stat_inner(&mut self, path: &str) -> Result<Stat> {
         if !self.checking() {
             let oid = self.enter(path)?;
             let root = self.s.root;
@@ -893,6 +970,10 @@ impl<D: BlockDevice> Fs<D> {
             .lookup_child(&root, parent, name)?
             .ok_or(Error::NotFound)?;
         if d.kind == KIND_DATASET {
+            // Hranice v klonu: `NOT_SUPPORTED` jako kazda zmena hranice.
+            if self.is_boundary(parent, &d)? {
+                return Err(Error::NotSupported);
+            }
             // Dataset se maze `delete_dataset` (uvolni jeho bloky).
             return Err(Error::WrongType);
         }
@@ -993,6 +1074,10 @@ impl<D: BlockDevice> Fs<D> {
             self.check_delete_allowed(d.oid)?;
         }
         if d.kind == KIND_DATASET {
+            // Hranice v klonu: presun by prepsal zpetny odkaz datasetu originalu.
+            if self.is_boundary(src, &d)? {
+                return Err(Error::NotSupported);
+            }
             // Polozka datasetu nema zaznam objektu: jen presun polozky.
             let new_name = stored_name(tname);
             self.prepare_dirent(dst, Dirent { oid: d.oid, kind: d.kind, name: new_name.clone() })?;

@@ -33,7 +33,7 @@ fn child_index(children: &[(Key, Child)], key: &Key) -> usize {
 }
 
 /// Overi uroven uz nacteneho uzlu proti ocekavane (`None` = koren).
-fn check_level(n: &Node, expect: Option<u8>) -> Result<u8> {
+pub(crate) fn check_level(n: &Node, expect: Option<u8>) -> Result<u8> {
     let ok = match &n.body {
         Body::Leaf(_) => n.level == 0,
         Body::Internal(ch) => n.level > 0 && !ch.is_empty(),

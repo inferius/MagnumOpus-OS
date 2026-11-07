@@ -1320,6 +1320,7 @@ větší požadavky rozdělí.
 | 20 | `CHECK` | scrub u8 | generace u64, celkem problémů u64, nezkontrolované změny v paměti u8, počet u32 + popisy (kolik se vejde); jen s `debug` |
 | 21 | `LIST_PAGE` | cesta, kurzor (jméno poslední položky předchozí stránky, prázdný = od začátku), nejvýš u32 | další u8 (1 = něco zbylo) + stránka jako `LIST` (kolik se vejde do 60 KiB) |
 | 22 | `SNAP_LIST_PAGE` | snapshot, cesta, kurzor, nejvýš u32 | jako `LIST_PAGE` |
+| 87 | `LIST_STAT_PAGE` | cesta, kurzor, nejvýš u32 | další u8 + počet u32 + (jméno, druh u8, oid u64, velikost u64, mtime, práva u8) - kolik se vejde do 60 KiB; práva `LIST` a `TRAVERSE` k adresáři |
 | 100 | `SIMULATE_POWER_LOSS` | - | přehrané operace u64; jen s `debug`, jinak `ACCESS_DENIED` |
 
 `FsClient::list` a `snapshot_list` čtou po stránkách - tím je vyřešený
@@ -1335,6 +1336,16 @@ větší požadavky rozdělí.
   roste s velikostí adresáře (~100 B na položku: 1 milion položek ~
   100 MiB na každé straně). Výpis bez držení celého seznamu přinese
   protokol v2 (kurzor ve stromu, klient zpracovává stránky postupně).
+
+**`LIST_STAT_PAGE`** (`FsClient::list_stat` -> `Vec<StatEntry>`) je výpis
+i s metadaty pro `ls -l`: klient nemusí posílat `STAT` na každou položku
+(tisíce zpráv u velkého adresáře). Kurzor a stránkování jako `LIST_PAGE`.
+Položky jsou tytéž jako u `LIST` (jen ty, ke kterým má volající nějaké
+právo); druh a oid jako ve `LIST` (u vstupu do datasetu druh 4 a číslo
+datasetu), velikost a mtime jako `STAT` položky. Protože metadata jsou
+`STAT` položek, operace vyžaduje kromě `LIST` i `TRAVERSE` k adresáři (bez
+něj by `STAT` položek nešel; jinak `ACCESS_DENIED`). Funguje pro relace v1
+i v2 (stejná obsluha).
 
 Příklad zprávy `READ "/a.txt", offset 0, 100 B`:
 
@@ -1406,8 +1417,10 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 
 Operace historie (žurnál a jeho sledování, pohled, koš, vracení operací,
 verze, nastavení datasetu, commity, větve, merge, „bokem“, atributy,
-expirace, vytvoření a smazání datasetu) mají čísla **54-86** - tabulka je
-v [Historii FS](fs-historie.md#protokol-operace-54-86).
+expirace, vytvoření a smazání datasetu, rozdíl verzí, dataset cesty a čtení
+snapshotu datasetu) mají čísla **54-86** a **88-92** - tabulka je
+v [Historii FS](fs-historie.md#protokol-operace-54-92). Výpis s metadaty
+`LIST_STAT_PAGE` má číslo 87 (modul `fsproto::op`, tabulka výše).
 
 ⚠️ **Omezení:** handly platí do restartu služby; po pádu a přehrání intent
 logu může mít soubor jinou revizi (verze obsahu se do logu nepíše) - klient

@@ -71,6 +71,20 @@ pub mod op {
     pub const LIST_PAGE: u32 = 21;
     /// Totez pro snapshot: (snapshot, cesta, kurzor str, nejvic u32).
     pub const SNAP_LIST_PAGE: u32 = 22;
+    /// Stranka vypisu i s metadaty polozek: (cesta, kurzor str, nejvic u32)
+    /// -> dalsi u8, pocet u32, polozky `StatEntry` (jmeno str, druh u8,
+    /// oid u64, velikost u64, mtime). Kurzor a strankovani jako `LIST_PAGE`
+    /// (do jedne odpovedi tolik polozek, kolik se vejde do `MAX_REPLY`).
+    /// Klient tak nemusi posilat `STAT` na kazdou polozku (`ls -l`).
+    ///
+    /// Prava: vypis adresare jako `LIST` (pravo `LIST`) a navic `TRAVERSE`
+    /// k adresari - bez nej by `STAT` polozek nesel, takze ani jejich
+    /// metadata nejsou videt (`ACCESS_DENIED`). Polozky jsou jen ty, ktere
+    /// vraci `LIST` (volajici k nim ma nejake pravo).
+    ///
+    /// Cislo navazuje na operace historie (`hist::op`, 54-86); obsluha ve
+    /// fsd je u ostatnich vypisu, ne v historii.
+    pub const LIST_STAT_PAGE: u32 = 87;
     /// Jen pro testy (sluzba spustena v rezimu `debug`): zahodi neulozeny
     /// stav a pripoji system znovu, jako po vypadku proudu.
     pub const SIMULATE_POWER_LOSS: u32 = 100;
@@ -113,6 +127,43 @@ pub struct DirEntry {
     pub name: String,
     pub kind: u8,
     pub oid: u64,
+}
+
+/// Polozka vypisu s metadaty (`LIST_STAT_PAGE`). `kind` a `oid` jsou
+/// jako ve `LIST` (u vstupu do datasetu `kind::DATASET` a cislo datasetu),
+/// `size` a `mtime` jako `STAT` polozky.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatEntry {
+    pub name: String,
+    pub kind: u8,
+    pub oid: u64,
+    pub size: u64,
+    pub mtime: WallTime,
+    /// Prava relace k polozce (jako `Stat::rights`).
+    pub rights: u8,
+}
+
+impl StatEntry {
+    /// Velikost polozky na drate bez jmena (delka jmena u16, druh, oid,
+    /// velikost, mtime, prava).
+    pub const FIXED: usize = 2 + 1 + 8 + 8 + 12 + 1;
+
+    pub fn put(&self, w: &mut Writer) {
+        w.str(&self.name).u8(self.kind).u64(self.oid).u64(self.size);
+        put_time(w, self.mtime);
+        w.u8(self.rights);
+    }
+
+    pub fn get(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            name: r.str()?,
+            kind: r.u8()?,
+            oid: r.u64()?,
+            size: r.u64()?,
+            mtime: get_time(r)?,
+            rights: r.u8()?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -301,6 +352,24 @@ impl FsClient {
             let mut r = Reader::new(&body);
             let more = r.u8()? != 0;
             let page = decode_list(r.rest())?;
+            let empty = page.is_empty();
+            out.extend(page);
+            if !more || empty {
+                return Ok(out);
+            }
+        }
+    }
+
+    /// Cely vypis adresare i s metadaty polozek (`LIST_STAT_PAGE`, po
+    /// strankach jako `list`).
+    pub fn list_stat(&self, path: &str) -> Result<Vec<StatEntry>> {
+        let mut out: Vec<StatEntry> = Vec::new();
+        loop {
+            let mut w = Self::req(op::LIST_STAT_PAGE);
+            let after = out.last().map_or("", |e| e.name.as_str());
+            w.str(path).str(after).u32(u32::MAX);
+            let body = self.call(w)?;
+            let (more, page) = decode_list_stat_page(&body)?;
             let empty = page.is_empty();
             out.extend(page);
             if !more || empty {
@@ -510,6 +579,45 @@ pub fn encode_list_page(w: &mut Writer, entries: &[DirEntry], max: usize, budget
     w.u8((n < entries.len()) as u8);
     encode_list(w, &entries[..n]);
     n
+}
+
+/// Kolik polozek s metadaty (`LIST_STAT_PAGE`) se jmeny `names` se vejde
+/// do jedne stranky: nejvic `max`, dokud se vejdou do `budget` bajtu (aspon
+/// jedna). Sluzba podle toho zjisti metadata jen polozek stranky.
+pub fn list_stat_fit<'a>(names: impl IntoIterator<Item = &'a str>, max: usize, budget: usize) -> usize {
+    // Hlavicka: dalsi u8 + pocet u32.
+    let mut size = 5;
+    let mut n = 0;
+    for name in names.into_iter().take(max) {
+        let item = StatEntry::FIXED + name.len().min(u16::MAX as usize);
+        if n > 0 && size + item > budget {
+            break;
+        }
+        size += item;
+        n += 1;
+    }
+    n
+}
+
+/// Zakoduje stranku `LIST_STAT_PAGE`: dalsi u8, pocet u32, polozky.
+pub fn encode_list_stat_page(w: &mut Writer, entries: &[StatEntry], more: bool) {
+    w.u8(more as u8).u32(entries.len() as u32);
+    for e in entries {
+        e.put(w);
+    }
+}
+
+/// Precte stranku `LIST_STAT_PAGE` -> (dalsi, polozky).
+pub fn decode_list_stat_page(body: &[u8]) -> Result<(bool, Vec<StatEntry>)> {
+    let mut r = Reader::new(body);
+    let more = r.u8()? != 0;
+    let n = r.u32()? as usize;
+    // Kazda polozka ma aspon `FIXED` bajtu: vetsi pocet je poskozena zprava.
+    if n > body.len() / StatEntry::FIXED {
+        return Err(Error::InvalidArgs);
+    }
+    let list = (0..n).map(|_| StatEntry::get(&mut r)).collect::<Result<_>>()?;
+    Ok((more, list))
 }
 
 /// Zakoduje seznam polozek adresare (pro sluzbu).

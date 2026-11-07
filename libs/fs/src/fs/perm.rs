@@ -113,7 +113,8 @@ impl<D: BlockDevice> Fs<D> {
             inherited = inherited.child(acl.as_ref());
             let d = self.lookup_child(&root, oid, name)?.ok_or(Error::NotFound)?;
             if d.kind == KIND_DATASET {
-                if !cross {
+                // Hranice v klonu (viz `dataset.rs`): dovnitr nejde.
+                if !cross || self.is_boundary(oid, &d)? {
                     return Err(Error::NotSupported);
                 }
                 self.activate(d.oid)?;
@@ -348,7 +349,10 @@ impl<D: BlockDevice> Fs<D> {
         let mut out = Vec::with_capacity(list.len());
         let mut acls: BTreeMap<u32, Option<Acl>> = BTreeMap::new();
         for e in list {
-            let (owner, acl) = if e.kind == Kind::Dataset {
+            let (owner, acl) = if e.kind == Kind::Dataset && !self.dataset_exists(e.oid)? {
+                // Hranice na zanikly dataset: jen zdedena prava slozky.
+                (0, None)
+            } else if e.kind == Kind::Dataset {
                 self.activate(e.oid)?;
                 let r = self.s.root;
                 let i = self.inode(&r, ROOT_OID)?;
