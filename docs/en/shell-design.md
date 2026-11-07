@@ -686,6 +686,12 @@ The window sends `Hello`, `Attach` (0 = new session), `Detach`, `Run`,
 The service sends `BlockStart`, `Item`, `BlockEnd`, `Prompt`,
 `Completions`, `Formatted`, `Highlighted` and `Fail`.
 
+- **Matching replies (version 2):** `Complete` and `Format` carry a request
+  number `seq`, which `Completions` and `Formatted` return. Events of other
+  blocks (`async` tasks, `bg`, the late end of a cancelled task) may arrive
+  between a request and its reply. The window therefore matches replies by
+  `seq` and drops a reply to an older request. `seq` of `Highlight` works
+  the same way.
 - **Block items:** a typed value, a note, a warning, an error (code,
   description, report with the location), a diff, progress, a link.
 - **Values are sent typed.** A list of records with the same columns goes

@@ -206,9 +206,12 @@ impl Terminals {
         // Zpravy stareho registru (Park) zpracovat, nez ho zahodime.
         self.registry(i);
         let fs = crate::system::devices().and_then(|d| d.fs.as_ref()).ok_or(Error::NotFound)?;
-        if !self.cleaned {
-            // Pred prvni relaci tohoto behu: vsechny klony jsou zbytky po
-            // padu nebo vypnuti (zadna relace jeste nebezi).
+        // Pred prvni relaci beziciho systemu: vsechny klony jsou zbytky po
+        // padu nebo vypnuti (zadna relace jeste nebezi). V testovacim behu
+        // ne: relace drivejsich testu (shsess) muzou jeste bezet a disk je
+        // pri kazdem behu novy.
+        let test_run = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
+        if !self.cleaned && !test_run {
             self.cleaned = true;
             if let Ok(list) = fs.list(ASIDE_DIR) {
                 for e in list {

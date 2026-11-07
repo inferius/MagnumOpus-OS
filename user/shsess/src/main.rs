@@ -157,6 +157,10 @@ impl Env for SysEnv {
         self.notify.clone().map(|n| n as Arc<dyn Notify>)
     }
 
+    fn new_notifier(&mut self) -> Option<Arc<dyn Notify>> {
+        Event::create().ok().map(|e| Arc::new(EventNotify(e)) as Arc<dyn Notify>)
+    }
+
     fn clock(&self) -> Option<Clock> {
         Some(Clock { now: wall_ns, sleep: sleep_ns })
     }

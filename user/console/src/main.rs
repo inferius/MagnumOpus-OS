@@ -24,6 +24,7 @@
 
 extern crate alloc;
 
+mod connect;
 mod keys;
 
 use alloc::string::String;
@@ -41,30 +42,6 @@ libos::entry!(main);
 
 /// Prekreslit nejvys jednou za tolik (animace pruhu a tociciho znaku).
 const TICK: Duration = Duration::from_millis(150);
-/// Prodleva pred novym pripojenim k termd.
-const RETRY: Duration = Duration::from_millis(500);
-
-/// Pozada init o termd; vrati kanal k nemu. Odpoved `err CANCELED` patri
-/// drivejsimu pokusu (init ho nahradil novejsim) - cist dal.
-fn connect(conn: &Channel) -> Result<Channel, Error> {
-    // Zastarale odpovedi (pokus, ktery vyprsel) zahodit: jejich termd init
-    // pri dalsim `connect` ukonci.
-    while conn.try_read().is_ok() {}
-    conn.write(b"connect", Vec::new())?;
-    let end = time::deadline_after(Duration::from_secs(10));
-    loop {
-        let m = conn.read(Some(end))?;
-        if m.data.starts_with(b"ok") {
-            return m.handles.into_iter().next().map(Channel::from_handle).ok_or(Error::Corrupted);
-        }
-        if m.data.starts_with(b"err CANCELED") {
-            continue;
-        }
-        println!("console: termd nejde spustit: {}", String::from_utf8_lossy(&m.data));
-        return Err(Error::Unreachable);
-    }
-}
-
 /// Displej: framebuffer, mapovani a obraz v pameti (do framebufferu se
 /// kopiruje cely snimek najednou - zapis po pixelech do pameti zarizeni je
 /// pomaly).
@@ -145,9 +122,8 @@ struct Console {
     screen: Screen,
     display: Option<Display>,
     focus: Option<Channel>,
-    conn: Channel,
+    conn: connect::Connector,
     termd: Option<Channel>,
-    retry_at: Option<u64>,
     dirty: bool,
 }
 
@@ -166,24 +142,19 @@ impl Console {
     fn lost(&mut self) {
         self.termd = None;
         self.app.disconnected();
-        self.retry_at = Some(time::deadline_after(RETRY));
+        self.conn.lost();
         self.dirty = true;
     }
 
-    /// Pripoji se k termd (start i po padu: stejna relace).
-    fn reconnect(&mut self) {
-        match connect(&self.conn) {
-            Ok(ch) => {
-                self.termd = Some(ch);
-                self.retry_at = None;
-                let s = self.app.session;
-                self.app.start(s);
-                self.send_out();
-            }
-            Err(e) => {
-                println!("console: pripojeni k termd: {e}");
-                self.retry_at = Some(time::deadline_after(RETRY * 4));
-            }
+    /// Odpoved initu na `connect`: pripojit se (start i po padu termd:
+    /// stejna relace).
+    fn poll_connect(&mut self) {
+        if let Some(ch) = self.conn.poll() {
+            self.termd = Some(ch);
+            let s = self.app.session;
+            self.app.start(s);
+            self.send_out();
+            self.dirty = true;
         }
     }
 
@@ -269,7 +240,7 @@ fn main(mut startup: Startup) -> i64 {
         println!("console: chybi kanal pripojeni k termd");
         return 1;
     };
-    let conn = Channel::from_handle(h);
+    let conn = connect::Connector::new(Some(Channel::from_handle(h)), "console");
     // Bez displeje (pred `display`) se kresli jen do obrazovky v pameti.
     let (cols, rows) = (100, 30);
     let mut c = Console {
@@ -279,11 +250,11 @@ fn main(mut startup: Startup) -> i64 {
         focus: None,
         conn,
         termd: None,
-        retry_at: None,
         dirty: true,
     };
     c.app.welcome = true;
-    c.reconnect();
+    // Bez cekani: init konzoli hned po spusteni posila `display`.
+    c.conn.start();
     println!("console: bezim (ceka na displej a fokus)");
     let mut next_tick = time::deadline_after(TICK);
     loop {
@@ -295,11 +266,14 @@ fn main(mut startup: Startup) -> i64 {
         if let Some(f) = &c.focus {
             items.push((f.handle(), mask));
         }
-        let wake = c.retry_at.map_or(next_tick, |r| r.min(next_tick));
+        if let Some(h) = c.conn.handle() {
+            items.push((h, mask));
+        }
+        let wake = c.conn.deadline().map_or(next_tick, |r| r.min(next_tick));
         let _ = libos::wait_many(&items, Some(wake));
-        if c.retry_at.is_some_and(|r| time::now() >= r) {
-            c.reconnect();
-            c.dirty = true;
+        drop(items);
+        if c.conn.waiting() {
+            c.poll_connect();
         }
         // Ridici kanal.
         loop {

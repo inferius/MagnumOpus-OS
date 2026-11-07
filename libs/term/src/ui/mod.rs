@@ -112,6 +112,8 @@ pub struct App {
     pub welcome: bool,
     /// Uvodni napoveda uz se ukazala.
     welcomed: bool,
+    /// Cislo posledniho pozadavku `Complete`/`Format` (`seq`).
+    req: u32,
 }
 
 /// Uvodni napoveda nove relace (blok bez prikazu).
@@ -147,6 +149,7 @@ impl App {
             pending: Vec::new(),
             welcome: false,
             welcomed: false,
+            req: 0,
         }
     }
 
@@ -287,7 +290,9 @@ impl App {
             ServerMsg::Prompt { prompt, question, detail, choices } => {
                 self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0 });
             }
-            ServerMsg::Completions { start, items } => {
+            // Odpoved na starsi pozadavek (mezitim novy): zahodit.
+            ServerMsg::Completions { seq, .. } | ServerMsg::Formatted { seq, .. } if seq != self.req => {}
+            ServerMsg::Completions { start, items, .. } => {
                 if items.len() == 1 {
                     // Jedina moznost: doplnit rovnou.
                     self.apply_completion(start as usize, &items[0].0);
@@ -299,7 +304,7 @@ impl App {
                 let h = Editor::decode_spans(&spans, &error);
                 self.editor.set_semantic(seq, h);
             }
-            ServerMsg::Formatted { text } => self.editor.set(&text),
+            ServerMsg::Formatted { text, .. } => self.editor.set(&text),
             ServerMsg::Fail { message } => {
                 // Zobrazi se jako samostatny blok bez prikazu.
                 let id = u64::MAX - self.blocks.len() as u64;
@@ -461,17 +466,21 @@ impl App {
             Key::Ctrl('f') => {
                 // Prevod rozepsaneho radku do druheho zapisu (B <-> C).
                 let c = self.editor.text.contains('(') && self.editor.text.contains(").");
+                self.req = self.req.wrapping_add(1);
                 self.out.push(ClientMsg::Format {
                     session: self.session,
                     line: self.editor.text.clone(),
                     style: if c { 0 } else { 1 },
+                    seq: self.req,
                 });
             }
             Key::Tab => {
+                self.req = self.req.wrapping_add(1);
                 self.out.push(ClientMsg::Complete {
                     session: self.session,
                     line: self.editor.text.clone(),
                     cursor: self.editor.cursor as u32,
+                    seq: self.req,
                 });
             }
             Key::PageUp | Key::BackTab => {

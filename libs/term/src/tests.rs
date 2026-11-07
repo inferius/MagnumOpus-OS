@@ -76,7 +76,7 @@ fn protocol_roundtrip() {
         ServerMsg::Item { session: 1, block: 2, item: Item::Link { text: "napoveda".into(), target: "help:ls".into() } },
         ServerMsg::Prompt { prompt: 3, question: "Prevzit?".into(), detail: Item::Diff(Value::List(vec![])), choices: vec!["a".into()] },
         ServerMsg::ItemUpdate { session: 1, block: 2, index: 0, item: Item::Progress { done: 1, total: 4, label: "x".into() } },
-        ServerMsg::Completions { start: 3, items: vec![("ls".into(), 0, "vypise".into())] },
+        ServerMsg::Completions { seq: 4, start: 3, items: vec![("ls".into(), 0, "vypise".into())] },
         ServerMsg::SessionList { sessions: vec![(1, 2, "/home".into())] },
         ServerMsg::BlockEnd { session: 1, block: 2, ok: false, duration: -1 },
     ];
@@ -86,10 +86,10 @@ fn protocol_roundtrip() {
     let cm = vec![
         ClientMsg::Hello { version: 1, cols: 80, rows: 25 },
         ClientMsg::Run { session: 1, line: "ls | where size > 1KB".into() },
-        ClientMsg::Complete { session: 1, line: "l".into(), cursor: 1 },
+        ClientMsg::Complete { session: 1, line: "l".into(), cursor: 1, seq: 2 },
         ClientMsg::Answer { prompt: 1, yes: true },
         ClientMsg::Choose { prompt: 1, index: 2 },
-        ClientMsg::Format { session: 1, line: "ls".into(), style: 1 },
+        ClientMsg::Format { session: 1, line: "ls".into(), style: 1, seq: 3 },
         ClientMsg::Sessions,
     ];
     for m in cm {
@@ -190,14 +190,14 @@ fn completion_format_and_jobs() {
     let mut env = TestEnv(0);
     svc.handle(ClientMsg::Attach { session: 0 }, &mut link, &mut f, &mut env);
     // Neznama relace: odpoved Fail, ne ticho (okno by cekalo navzdy).
-    svc.handle(ClientMsg::Complete { session: 99, line: "l".into(), cursor: 1 }, &mut link, &mut f, &mut env);
+    svc.handle(ClientMsg::Complete { session: 99, line: "l".into(), cursor: 1, seq: 1 }, &mut link, &mut f, &mut env);
     assert!(matches!(link.sent.last(), Some(ServerMsg::Fail { .. })));
-    svc.handle(ClientMsg::Complete { session: 1, line: "open a".into(), cursor: 6 }, &mut link, &mut f, &mut env);
-    assert!(matches!(link.sent.last(), Some(ServerMsg::Completions { start: 5, items }) if items[0].0 == "a.txt"));
-    svc.handle(ClientMsg::Format { session: 1, line: "ls ~ -r | where size > 1KB".into(), style: 1 }, &mut link, &mut f, &mut env);
+    svc.handle(ClientMsg::Complete { session: 1, line: "open a".into(), cursor: 6, seq: 5 }, &mut link, &mut f, &mut env);
+    assert!(matches!(link.sent.last(), Some(ServerMsg::Completions { seq: 5, start: 5, items }) if items[0].0 == "a.txt"));
+    svc.handle(ClientMsg::Format { session: 1, line: "ls ~ -r | where size > 1KB".into(), style: 1, seq: 6 }, &mut link, &mut f, &mut env);
     assert_eq!(
         link.sent.last(),
-        Some(&ServerMsg::Formatted { text: "ls(\"~\", recursive: true).where(it => it.size > 1KB)".into() })
+        Some(&ServerMsg::Formatted { seq: 6, text: "ls(\"~\", recursive: true).where(it => it.size > 1KB)".into() })
     );
     svc.handle(ClientMsg::Run { session: 1, line: "echo hotovo &".into() }, &mut link, &mut f, &mut env);
     link.sent.clear();

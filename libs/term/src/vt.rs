@@ -134,7 +134,7 @@ pub fn message(m: &ServerMsg, theme: Option<&Theme>) -> String {
                 out.push_str(&alloc::format!("{id}  {n} bloku  {cwd}\n"));
             }
         }
-        ServerMsg::Formatted { text } => {
+        ServerMsg::Formatted { text, .. } => {
             out.push_str(text);
             out.push('\n');
         }

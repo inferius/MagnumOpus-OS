@@ -47,6 +47,21 @@ impl Window {
         ServerMsg::decode(&msg.data).map_err(|_| String::from("neplatna zprava od termd"))
     }
 
+    /// Pocka na odpoved, kterou vybere `pick`; ostatni zpravy (udalosti
+    /// jinych bloku) preskoci. Vlastni limit 60 s.
+    fn reply<T>(&self, pick: impl Fn(&ServerMsg) -> Option<T>) -> Result<T, String> {
+        let end = time::deadline_after(Duration::from_secs(60));
+        loop {
+            let m = self.recv()?;
+            if let Some(v) = pick(&m) {
+                return Ok(v);
+            }
+            if time::now() > end {
+                return Err(alloc::format!("odpoved neprisla, posledni zprava: {m:?}"));
+            }
+        }
+    }
+
     /// Spusti radek; vrati polozky jeho bloku a vysledek (bloky uloh
     /// `async`, ktere radek spusti, se preskoci).
     fn run(&self, session: u64, line: &str) -> Result<(Vec<Item>, bool), String> {
@@ -235,36 +250,33 @@ v.error.code")?,
     }
     crate::check_eq!(w.value(id, "try { rm /shell-test/neni.txt } else e => e.code")?, Value::str("NOT_FOUND"), "try");
 
-    // Ctrl-C ukonci nekonecny cyklus. Preruseni az po zacatku jeho bloku
-    // (jinak by pod zatezi mohlo prijit drive a cyklus by bezel dal) a konec
-    // jen toho bloku - udalosti jinych bloku (async, bg) se preskoci.
+    // Ctrl-C ukonci nekonecny cyklus.
     w.send(ClientMsg::Run { session: id, line: "while true { let x = 1 }".into() })?;
-    let looping = loop {
-        if let ServerMsg::BlockStart { block, line, .. } = w.recv()?
-            && line.starts_with("while true")
-        {
-            break block;
-        }
-    };
     w.send(ClientMsg::Interrupt { session: id })?;
+    // Konec bloku cyklu (ne pozdni konec bloku zrusene ulohy async).
+    let mut lp = None;
     loop {
-        if let ServerMsg::BlockEnd { block, ok, .. } = w.recv()?
-            && block == looping
-        {
-            if ok {
-                return Err("preruseny cyklus skoncil uspechem".into());
+        match w.recv()? {
+            ServerMsg::BlockStart { block, line, .. } if line.starts_with("while true") => lp = Some(block),
+            ServerMsg::BlockEnd { ok, block, .. } if Some(block) == lp => {
+                if ok {
+                    return Err("preruseny cyklus skoncil uspechem".into());
+                }
+                break;
             }
-            break;
+            _ => {}
         }
     }
 
     // Prevod zapisu.
-    w.send(ClientMsg::Format { session: id, line: "ls / -r | where size > 1KB".into(), style: 1 })?;
-    crate::check_eq!(
-        w.recv()?,
-        ServerMsg::Formatted { text: "ls(\"/\", recursive: true).where(it => it.size > 1KB)".into() },
-        "fmt --style c"
-    );
+    // Odpoved se paruje podle `seq`; udalosti bloku (pozdni konec zrusene
+    // ulohy, bg) mezitim preskocit.
+    w.send(ClientMsg::Format { session: id, line: "ls / -r | where size > 1KB".into(), style: 1, seq: 77 })?;
+    let text = w.reply(|m| match m {
+        ServerMsg::Formatted { seq: 77, text } => Some(text.clone()),
+        _ => None,
+    })?;
+    crate::check_eq!(text, String::from("ls(\"/\", recursive: true).where(it => it.size > 1KB)"), "fmt --style c");
 
     // Okno se zavre; prikaz dobehne bez nej a po pripojeni se prehraje.
     w.send(ClientMsg::Detach { session: id })?;
