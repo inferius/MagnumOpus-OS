@@ -7,8 +7,10 @@ stream following the venus-protocol format; the renderer on the host
 real Vulkan (software **lavapipe** in WSL, the GPU driver on Linux with
 a GPU).
 
-Status: **step 1 done** - a QEMU test prints the name of the host's
-Vulkan physical device. Next steps: see [Plan](#plan).
+Status: **steps 1-3 done** - a QEMU test prints the name of the host's
+Vulkan physical device, creates a logical device, fills an image with a
+color (`vkCmdClearColorImage`) and reads the pixels back through a blob
+of a `VkDeviceMemory`. Next steps: see [Plan](#plan).
 
 <figure class="diagram">
 <svg viewBox="0 0 780 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Venus layers">
@@ -49,7 +51,15 @@ the display):
    with it.
 3. `vk-probe` uses `libs/venus` to create an instance, enumerate physical
    devices, read their properties and send the line
-   `ok <count>|<name>|<type>|<api>|<vendor:device>`.
+   `ok <count>|<name>|<type>|<api>|<vendor:device>` (first test).
+4. Then (`user/vk-probe/src/clear.rs`, second test): a logical device
+   with a queue on timeline 1, a 64x64 `R8G8B8A8_UNORM` image in device
+   memory, a buffer in `HOST_VISIBLE | HOST_COHERENT` memory, a command
+   buffer (barrier, `vkCmdClearColorImage`, barrier,
+   `vkCmdCopyImageToBuffer`, host barrier), `vkQueueSubmit` with a fence,
+   waiting with `vkGetFenceStatus`. Pixels are read straight from the blob
+   mapped from the buffer's `VkDeviceMemory`; all 4096 must have the fill
+   color.
 
 Output of a WSL run (lavapipe):
 
@@ -60,7 +70,13 @@ vk-probe: zarizeni 0: llvmpipe (LLVM 20.1.2, 256 bits) (CPU), Vulkan 1.4.318, 10
 vk-probe: rodin front 1, typu pameti 2, hald 1
 init: test vulkan: fyzicke zarizeni Vulkan: llvmpipe (LLVM 20.1.2, 256 bits) (...)
 [ok] vulkan: venus: jmeno fyzickeho zarizeni Vulkan od hostitele
+vk-probe: obrazek: ok 64x64 4080bfff map_info=1 276 ms
+[ok] vulkan: venus: obrazek vyplneny barvou a precteny zpet (pamet, command buffer)
 ```
+
+`map_info=1` = cached memory (`MAP_CACHE_CACHED`): the shared-memory
+window is mapped as normal memory (cache type of a physical VMO, see
+[Syscalls](syscalls.md), `VMO_CREATE_PHYSICAL`).
 
 In WSL the network tests also fail (the helper servers run on Windows and
 are not reachable from WSL) and so does the `gui` suite (the GTK display
@@ -146,9 +162,15 @@ pointer parameter is an output, an output that is the length of another
 parameter is both input and output (`pPhysicalDeviceCount`), output
 handles and structs are "partial".
 
+Unions (input only) are enums with a variant per member; the encoding is
+the member index (u32) and the member, and the renderer accepts any
+(`VkClearColorValue::Float32([..])`). pNext chain structs (`chain` in
+`subset.txt`, e.g. `VkDeviceQueueTimelineInfoMESA`) are variants of the
+`Next` enum and the parent's `p_next` field.
+
 Not supported yet (generation error, never silently wrong encoding):
-unions (`VkClearColorValue` - step 3), pNext chains in outputs,
-multidimensional arrays, pointers in output structs.
+unions in outputs, pNext chains in outputs, multidimensional arrays,
+pointers in output structs.
 
 ## Render node (`gpuproto`)
 
@@ -164,32 +186,38 @@ it (`guiproto::display` `OPEN_RENDER`) and passes it on.
 | `DESTROY_BLOB` | resource | `DONE` |
 | `SUBMIT` | ring_idx (only 0 for now), fence, stream (at most 60 KiB, multiple of 4) | `SUBMITTED` (with a fence, after processing) |
 
-Closing the channel: the driver unmaps and frees the blobs and destroys
-the context.
+Closing the channel: the driver revokes the shared-memory windows
+(`VMO_REVOKE`), unmaps and frees the blobs and destroys the context.
+
+**Asynchronous queue.** The driver has 32 slots (each 72 KiB of DMA
+memory for the command and response, a pair of descriptors). Synchronous
+commands (display, blobs, contexts) wait only for their own slot. A fenced
+`SUBMIT` is only sent; the main loop replies `SUBMITTED` once the device
+returns the slot (the interrupt is in `wait_many` together with the
+channels). A slow renderer of one client thus blocks neither the display
+nor other clients. Two slots are always kept for synchronous commands;
+a client may have at most 4 pending `SUBMIT`s (then `SHOULD_WAIT`).
 
 ## Risks
 
-⚠️ **Shared-memory VMOs cannot be revoked.** A client may keep the BAR
-window after `DESTROY_BLOB`; when the driver gives the same range to
-another client, it sees that client's data. Until the kernel supports
-revocable mappings, only trusted processes may get a render node (init,
-the compositor and applications it allows).
+Risks from step 1 that are now solved:
 
-⚠️ **Uncached mapping.** The physical VMO is mapped as device memory. On
-x86_64 with KVM it behaves like cached memory in practice; on aarch64
-unaligned accesses would fault and reads are slow. Needed: mapping by
-`map_info` (cached/WC) in the kernel - a small kernel change, for the main
-branch.
+- **Revocation.** The shared-memory window is a physical VMO and the
+  driver revokes it on `DESTROY_BLOB` and when the client ends
+  (`VMO_REVOKE`): the mapping disappears in the client process too and
+  access through an old mapping faults. If revocation fails, the range is
+  never lent again (quarantine).
+- **Cache type.** The physical VMO gets a cache type from the device's
+  `map_info` (QEMU reports `CACHED`); x86_64 PAT has a WC entry, aarch64
+  uses Normal-NC.
+- **Synchronous waiting.** See the asynchronous queue above; the client
+  waits 40 s and then marks the connection as desynchronized
+  (`Error::Broken`).
 
-⚠️ **The driver waits synchronously.** During a fenced `SUBMIT` (at most
-30 s) it serves neither the display nor other clients (the first
-`vkCreateInstance` with lavapipe can take seconds). If the fence does not
-signal, the client gets `TIMED_OUT`, later commands wait for its
-response and the driver keeps running; the client waits 40 s and then
-marks the connection as desynchronized (`Error::Broken`). A `ring_idx`
-other than 0 is rejected (a fence on a missing timeline would never
-signal). The compositor over Vulkan will need an asynchronous queue with
-fences.
+⚠️ Remaining: a `ring_idx` other than 0 is rejected - a fence on a
+timeline the client did not bind to a queue would never signal and the
+slot would stay taken. Waiting for the GPU therefore uses
+`vkGetFenceStatus` for now.
 
 Venus is not tested without KVM or under TCG (aarch64 in WSL); `vk.xml`
 is 3.3 MB (a fraction of that compressed in git).
@@ -198,9 +226,10 @@ is 3.3 MB (a fraction of that compressed in git).
 
 1. ✅ Physical device name (`vkCreateInstance`, `vkEnumeratePhysicalDevices`,
    `vkGetPhysicalDeviceProperties`, queue families and memory types).
-2. Memory: `vkCreateDevice`, `vkAllocateMemory` with a blob (`blob_id` =
-   `VkDeviceMemory` id), mapped into the client.
-3. Image and command buffer: `vkCreateImage`, `vkCmdClearColorImage`
-   (`VkClearColorValue` union in the generator), `vkQueueSubmit`, reading
-   pixels back through a buffer.
+2. ✅ Memory: `vkCreateDevice`, `vkGetDeviceQueue2` with a timeline,
+   `vkAllocateMemory`, a blob with `blob_id` = `VkDeviceMemory` id mapped
+   into the client.
+3. ✅ Image and command buffer: `vkCreateImage`, `vkCmdClearColorImage`
+   (unions in the generator), `vkCmdCopyImageToBuffer`, `vkQueueSubmit`,
+   a fence, reading pixels back from the blob.
 4. Compositor composition over Vulkan.

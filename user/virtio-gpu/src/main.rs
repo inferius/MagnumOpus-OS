@@ -26,6 +26,7 @@
 
 extern crate alloc;
 
+mod cmdq;
 mod device;
 mod render;
 
@@ -90,10 +91,15 @@ fn main(startup: Startup) -> i64 {
         None => println!("virtio-gpu {address}: zadny vystup"),
     }
     let mut renders: Vec<Client> = Vec::new();
+    let mut next_client = 1u64;
     loop {
         // Ovladac konci, az klient displeje (init, pak kompozitor) zavre
-        // kanal. Render klienti se obsluhuji vedle nej.
-        let mut items = alloc::vec![(client.handle(), Signals::READABLE | Signals::PEER_CLOSED)];
+        // kanal. Render klienti a preruseni zarizeni (dokonceni
+        // asynchronnich prikazu) se obsluhuji vedle nej.
+        let mut items = alloc::vec![
+            (client.handle(), Signals::READABLE | Signals::PEER_CLOSED),
+            (gpu.q.irq.handle(), Signals::SIGNALED),
+        ];
         for r in &renders {
             items.push((r.ch.handle(), Signals::READABLE | Signals::PEER_CLOSED));
         }
@@ -101,14 +107,18 @@ fn main(startup: Startup) -> i64 {
             break;
         };
         drop(items);
+        if obs[1].intersects(Signals::SIGNALED) {
+            let _ = gpu.q.irq.ack();
+        }
         // Render klienti (odzadu, zavrene se odebiraji).
         for i in (0..renders.len()).rev() {
-            let o = obs[i + 1];
+            let o = obs[i + 2];
             if o.intersects(Signals::READABLE) {
                 while let Ok(m) = renders[i].ch.try_read() {
-                    let (reply, handles) = renders[i].handle(&mut gpu, &m.data);
-                    let _ = renders[i].ch.write(&reply.encode(), handles);
-                    if gpu.broken {
+                    if let Some((reply, handles)) = renders[i].handle(&mut gpu, &m.data) {
+                        let _ = renders[i].ch.write(&reply.encode(), handles);
+                    }
+                    if gpu.broken() {
                         break;
                     }
                 }
@@ -119,7 +129,7 @@ fn main(startup: Startup) -> i64 {
         }
         if obs[0].intersects(Signals::READABLE) {
             while let Ok(m) = client.try_read() {
-                let (reply, handles) = handle(&mut gpu, &m.data, m.handles, &mut renders);
+                let (reply, handles) = handle(&mut gpu, &m.data, m.handles, &mut renders, &mut next_client);
                 if client.write(&reply.encode(), handles).is_err() {
                     break;
                 }
@@ -127,7 +137,16 @@ fn main(startup: Startup) -> i64 {
         } else if obs[0].intersects(Signals::PEER_CLOSED) {
             break;
         }
-        if gpu.broken {
+        // Dokoncene asynchronni prikazy (i ty, ktere vyzvedl synchronni
+        // prikaz behem obsluhy zprav): odpovedi klientum. Klient, ktery
+        // mezitim skoncil, odpoved nedostane.
+        for c in gpu.completions() {
+            if let Some(r) = renders.iter_mut().find(|r| r.id == c.tag) {
+                let reply = r.complete(c.resp_type);
+                let _ = r.ch.write(&reply.encode(), Vec::new());
+            }
+        }
+        if gpu.broken() {
             println!("virtio-gpu {address}: zarizeni neodpovida, koncim");
             let _ = gpu.reset();
             return 4;
@@ -139,14 +158,20 @@ fn main(startup: Startup) -> i64 {
 }
 
 /// Zprava displeje; odpoved a handly k ni.
-fn handle(gpu: &mut Gpu, data: &[u8], handles: Vec<libos::Handle>, renders: &mut Vec<Client>) -> (Reply, Vec<libos::Handle>) {
+fn handle(
+    gpu: &mut Gpu,
+    data: &[u8],
+    handles: Vec<libos::Handle>,
+    renders: &mut Vec<Client>,
+    next_client: &mut u64,
+) -> (Reply, Vec<libos::Handle>) {
     let op = guiproto::window::ClientMsg::op_of(data);
     let req = match Request::decode(data) {
         Ok(r) => r,
         Err(code) => return (Reply::Error { op, code }, Vec::new()),
     };
     if req == Request::OpenRender {
-        return match open_render(gpu, renders) {
+        return match open_render(gpu, renders, next_client) {
             Ok(h) => (Reply::Render, alloc::vec![h]),
             Err(code) => (Reply::Error { op, code }, Vec::new()),
         };
@@ -160,7 +185,7 @@ fn has_venus(gpu: &Gpu) -> bool {
 }
 
 /// Novy kanal render uzlu (jen se zarizenim s kontexty 3D).
-fn open_render(gpu: &Gpu, renders: &mut Vec<Client>) -> Result<libos::Handle, Error> {
+fn open_render(gpu: &Gpu, renders: &mut Vec<Client>, next_client: &mut u64) -> Result<libos::Handle, Error> {
     if !gpu.virgl || !gpu.context_init {
         return Err(Error::NotSupported);
     }
@@ -168,7 +193,8 @@ fn open_render(gpu: &Gpu, renders: &mut Vec<Client>) -> Result<libos::Handle, Er
         return Err(Error::NoResources);
     }
     let (mine, theirs) = Channel::create()?;
-    renders.push(Client::new(mine));
+    renders.push(Client::new(mine, *next_client));
+    *next_client += 1;
     Ok(theirs.into_handle())
 }
 

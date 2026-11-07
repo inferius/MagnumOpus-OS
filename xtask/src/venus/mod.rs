@@ -100,6 +100,9 @@ pub fn generate(root: &Path) -> std::result::Result<Vec<(String, String)>, Strin
     for s in all {
         structs.push(emit::emit_struct(&reg, &plan, s)?);
     }
+    for u in &plan.unions {
+        structs.push(emit::emit_union(&reg, u)?);
+    }
     chunk("structs", structs, &mut files);
     let mut cmd_items = Vec::new();
     for c in &plan.commands {

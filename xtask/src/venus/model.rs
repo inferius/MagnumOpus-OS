@@ -72,6 +72,8 @@ pub enum Base {
     Prim { prim: Prim, rust: String, char: bool },
     Handle(String),
     Struct(String),
+    /// Unie (jen vstup): tag = index clenu (u32), pak vybrany clen.
+    Union(String),
     /// `void` (jen jako blob s delkou).
     Void,
 }
@@ -80,7 +82,7 @@ impl Base {
     pub fn rust(&self) -> &str {
         match self {
             Base::Prim { rust, .. } => rust,
-            Base::Handle(n) | Base::Struct(n) => n,
+            Base::Handle(n) | Base::Struct(n) | Base::Union(n) => n,
             Base::Void => "u8",
         }
     }
@@ -161,6 +163,7 @@ impl Registry {
         let t = self.ty(name).ok_or_else(|| format!("neznamy typ {name}"))?;
         Ok(match &t.category {
             Category::Struct => Base::Struct(canon),
+            Category::Union => Base::Union(canon),
             Category::Handle => Base::Handle(canon),
             Category::Enum => {
                 let p = if self.enums64.contains(&canon) {
@@ -249,6 +252,8 @@ pub struct Plan {
     pub chain: BTreeMap<String, Vec<String>>,
     /// Struktury v nejakem retezci pNext.
     pub chained: BTreeSet<String>,
+    /// Unie (jen vstup).
+    pub unions: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -307,6 +312,20 @@ impl Plan {
             }
             Base::Handle(h) => {
                 self.handles.insert(h.clone());
+            }
+            Base::Union(u) => {
+                if dir == Dir::Out {
+                    return Err(format!("unie {u} ve vystupu neni podporovana"));
+                }
+                if !self.unions.insert(u.clone()) {
+                    return Ok(());
+                }
+                for f in r.struct_fields(u)? {
+                    if !matches!(f.shape, Shape::Value | Shape::Static(_)) {
+                        return Err(format!("unie {u}.{}: ukazatel neni podporovany", f.m.name));
+                    }
+                    self.walk_base(r, &f.base, dir)?;
+                }
             }
             Base::Struct(s) => {
                 let set = if dir == Dir::In { &mut self.input } else { &mut self.output };

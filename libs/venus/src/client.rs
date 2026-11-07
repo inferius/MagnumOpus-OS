@@ -20,19 +20,20 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 use gpuproto::{Reply, Request};
-use libos::abi::vm::MAP_READ;
+use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::{Channel, Handle, Mapping, Vmo, time};
 
 use crate::capset::VenusCapset;
 use crate::cs::{self, CsError, Decoder, Encoder};
-use crate::vk::{self, VkCommandStreamDescriptionMESA, VkResult, cmd};
+use crate::vk::{self, VkCommandStreamDescriptionMESA, VkDevice, VkFence, VkResult, cmd};
 
 /// Capset Venusu ve virtio-gpu.
 pub const CAPSET_VENUS: u32 = 4;
 /// Velikost bloku pro odpovedi.
 pub const REPLY_SIZE: u64 = 64 * 1024;
-/// Jak dlouho cekat na ovladac: dele nez ovladac ceka na plot (30 s),
-/// aby pozdni odpoved nepripadla dalsimu pozadavku.
+/// Jak dlouho cekat na ovladac (u `SUBMIT` s plotem az do zpracovani
+/// proudu rendererem; ovladac sam nevyprsi). Po vyprseni je spojeni
+/// rozjete (`Error::Broken`).
 const TIMEOUT: Duration = Duration::from_secs(40);
 /// Prvni kus odpovedi, ktery se cte ze sdilene pameti (pak 4x vic).
 const REPLY_CHUNK: usize = 4096;
@@ -67,6 +68,17 @@ impl From<CsError> for Error {
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
+
+/// Blob zdroj v kontextu (u `VkDeviceMemory` jeho pamet hostitele),
+/// namapovany do procesu pro cteni a zapis.
+pub struct Blob {
+    pub resource: u32,
+    pub size: u64,
+    /// Typ cache od zarizeni (`MAP_CACHE_*`).
+    pub map_info: u32,
+    pub map: Mapping,
+    _vmo: Vmo,
+}
 
 pub struct Venus {
     ch: Channel,
@@ -176,6 +188,48 @@ impl Venus {
             match decode(&mut Decoder::new(&buf)) {
                 Err(CsError::Truncated) if n < REPLY_SIZE as usize => n = (n * 4).min(REPLY_SIZE as usize),
                 r => return Ok(r?),
+            }
+        }
+    }
+
+    /// Blob z objektu kontextu `blob_id` (u Venusu id `VkDeviceMemory`
+    /// s typem pameti HOST_VISIBLE), namapovany do procesu. Velikost po
+    /// strankach, nejvys velikost alokace.
+    pub fn create_blob(&mut self, blob_id: u64, size: u64) -> Result<Blob> {
+        let (r, mut handles) = request(
+            &self.ch,
+            &Request::CreateBlob { mem: gpuproto::mem::HOST3D, flags: gpuproto::flags::MAPPABLE, blob_id, size },
+        )?;
+        let Reply::Blob { resource, size, map_info } = r else {
+            return Err(Error::Os(libos::Error::Corrupted));
+        };
+        if handles.len() != 1 {
+            return Err(Error::Os(libos::Error::Corrupted));
+        }
+        let vmo = Vmo::from_handle(handles.remove(0));
+        let map = Mapping::new(&vmo, 0, size, MAP_READ | MAP_WRITE)?;
+        Ok(Blob { resource, size, map_info, map, _vmo: vmo })
+    }
+
+    /// Znici blob (ovladac odvola jeho mapovani).
+    pub fn destroy_blob(&mut self, b: Blob) -> Result<()> {
+        let resource = b.resource;
+        drop(b);
+        let (r, _) = request(&self.ch, &Request::DestroyBlob { resource })?;
+        expect(r, |r| matches!(r, Reply::Done { .. }))
+    }
+
+    /// Pocka na plot (`vkGetFenceStatus` po kratkych pauzach; renderer
+    /// blokujici cekani nepovoluje, jen `vkWaitForFences` s casem).
+    pub fn wait_fence(&mut self, device: VkDevice, fence: VkFence, timeout: Duration) -> Result<()> {
+        let deadline = time::deadline_after(timeout);
+        loop {
+            let r = self.call(|e| cmd::get_fence_status(e, crate::REPLY, device, fence), cmd::decode_get_fence_status_reply)?;
+            match r.ret {
+                vk::VK_SUCCESS => return Ok(()),
+                vk::VK_NOT_READY if time::now() < deadline => time::sleep(Duration::from_millis(1)),
+                vk::VK_NOT_READY => return Err(Error::Vk(vk::VK_TIMEOUT)),
+                e => return Err(Error::Vk(e)),
             }
         }
     }

@@ -33,7 +33,7 @@ fn zero(b: &Base) -> String {
         Base::Prim { prim: Prim::F32 | Prim::F64, .. } => "0.0".into(),
         Base::Prim { .. } | Base::Void => "0".into(),
         Base::Handle(h) => format!("{h}(0)"),
-        Base::Struct(s) => format!("{s}::default()"),
+        Base::Struct(s) | Base::Union(s) => format!("{s}::default()"),
     }
 }
 
@@ -51,7 +51,7 @@ pub fn enc_ref(b: &Base, x: &str) -> String {
     match b {
         Base::Prim { prim, .. } => format!("e.{}(*{x});", prim.rust()),
         Base::Handle(_) => format!("e.u64({x}.0);"),
-        Base::Struct(_) => format!("{x}.encode(e);"),
+        Base::Struct(_) | Base::Union(_) => format!("{x}.encode(e);"),
         Base::Void => format!("e.u8(*{x});"),
     }
 }
@@ -61,7 +61,7 @@ pub fn enc_val(b: &Base, x: &str) -> String {
     match b {
         Base::Prim { prim, .. } => format!("e.{}({x});", prim.rust()),
         Base::Handle(_) => format!("e.u64({x}.0);"),
-        Base::Struct(_) => format!("{x}.encode(e);"),
+        Base::Struct(_) | Base::Union(_) => format!("{x}.encode(e);"),
         Base::Void => format!("e.u8({x});"),
     }
 }
@@ -90,6 +90,8 @@ pub fn dec(b: &Base) -> String {
         Base::Prim { prim, .. } => format!("d.{}()?", prim.rust()),
         Base::Handle(h) => format!("{h}(d.u64()?)"),
         Base::Struct(s) => format!("{s}::decode(d)?"),
+        // Unie ve vystupu odmitne uz `Plan::build`.
+        Base::Union(u) => format!("{u}::default()"),
         Base::Void => "d.u8()?".into(),
     }
 }
@@ -99,7 +101,7 @@ pub fn min_elem(b: &Base) -> usize {
     match b {
         Base::Prim { prim, .. } => prim.size(),
         Base::Handle(_) => 8,
-        Base::Struct(_) => 4,
+        Base::Struct(_) | Base::Union(_) => 4,
         Base::Void => 1,
     }
 }
@@ -310,6 +312,74 @@ pub fn emit_struct(r: &Registry, p: &Plan, name: &str) -> Result<String, String>
         writeln!(o, "        Ok(v)\n    }}").unwrap();
     }
     writeln!(o, "}}").unwrap();
+    Ok(o)
+}
+
+/// Velbloudi jmeno varianty unie (`float32` -> `Float32`).
+fn variant(name: &str) -> String {
+    let mut c = name.chars();
+    match c.next() {
+        Some(f) => f.to_ascii_uppercase().to_string() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Unie: vycet s variantou pro kazdy clen; kodovani = index clenu (u32)
+/// a clen (renderer prijme kterykoli, `vn_decode_*` prepina podle tagu).
+pub fn emit_union(r: &Registry, name: &str) -> Result<String, String> {
+    let fields = r.struct_fields(name)?;
+    let first = fields.first().ok_or_else(|| format!("prazdna unie {name}"))?;
+    let mut o = String::new();
+    writeln!(o, "/// Unie `{name}` (vstup): varianta = clen.").unwrap();
+    writeln!(o, "#[derive(Debug, Clone, Copy)]").unwrap();
+    writeln!(o, "pub enum {name} {{").unwrap();
+    for f in &fields {
+        let t = match &f.shape {
+            Shape::Static(n) => format!("[{}; {n}]", f.base.rust()),
+            _ => f.base.rust().to_string(),
+        };
+        writeln!(o, "    {}({t}),", variant(&f.m.name)).unwrap();
+    }
+    writeln!(o, "}}
+").unwrap();
+    writeln!(o, "impl Default for {name} {{").unwrap();
+    writeln!(o, "    fn default() -> Self {{").unwrap();
+    let z = match &first.shape {
+        Shape::Static(n) => format!("[{}; {n}]", zero(&first.base)),
+        _ => zero(&first.base),
+    };
+    writeln!(o, "        Self::{}({z})
+    }}
+}}
+", variant(&first.m.name)).unwrap();
+    writeln!(o, "impl {name} {{").unwrap();
+    writeln!(o, "    pub fn encode(&self, e: &mut Encoder) {{").unwrap();
+    writeln!(o, "        match self {{").unwrap();
+    for (i, f) in fields.iter().enumerate() {
+        let body = match &f.shape {
+            Shape::Static(n) => {
+                let arr = match f.base {
+                    Base::Prim { .. } => enc_slice(&f.base, "&x[..]"),
+                    _ => enc_slice(&f.base, "x.iter()"),
+                };
+                format!("e.array_size({n});
+                {arr}")
+            }
+            _ => enc_ref(&f.base, "x"),
+        };
+        writeln!(
+            o,
+            "            Self::{}(x) => {{
+                e.u32({i});
+                {body}
+            }}",
+            variant(&f.m.name)
+        )
+        .unwrap();
+    }
+    writeln!(o, "        }}
+    }}
+}}").unwrap();
     Ok(o)
 }
 

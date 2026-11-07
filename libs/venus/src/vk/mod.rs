@@ -10,8 +10,14 @@
 
 mod types1;
 pub use types1::*;
+mod types2;
+pub use types2::*;
 mod structs1;
 pub use structs1::*;
+mod structs2;
+pub use structs2::*;
+mod structs3;
+pub use structs3::*;
 
 /// Prikazy: kodovani a cteni odpovedi.
 pub mod cmd {
@@ -19,4 +25,7 @@ pub mod cmd {
     #[path = "../cmds1.rs"]
     mod cmds1;
     pub use cmds1::*;
+    #[path = "../cmds2.rs"]
+    mod cmds2;
+    pub use cmds2::*;
 }

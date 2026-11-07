@@ -1,12 +1,12 @@
 //! vk-probe: testovaci program Vulkanu pres Venus (testy v `cargo xtask test`).
 //!
-//! Dostane kanal render uzlu ovladace GPU (startovni zprava, kind USER),
-//! pres knihovnu `venus` vytvori instanci Vulkanu, vyjmenuje fyzicka
-//! zarizeni a precte jejich vlastnosti. Vysledek posle na bootstrap kanal
-//! (init) jednim radkem a skonci:
-//! - `ok <pocet>|<jmeno>|<typ>|<api x.y.z>|<vendor:device>` - prvni zarizeni,
-//! - `skip <duvod>` - zarizeni nema Venus (capset 4),
-//! - `err <popis>`.
+//! Dostane kanal render uzlu ovladace GPU (startovni zprava, kind USER)
+//! a pres knihovnu `venus` posle na bootstrap kanal (init) dva radky:
+//! 1. zarizeni: instance, fyzicka zarizeni a jejich vlastnosti -
+//!    `ok <pocet>|<jmeno>|<typ>|<api x.y.z>|<vendor:device>` prvniho,
+//!    `skip <duvod>` (zarizeni nema Venus) nebo `err <popis>`,
+//! 2. obrazek (`clear.rs`): vyplneni barvou a zpetne cteni pixelu -
+//!    `ok <w>x<h> <rgba> ...` nebo `err <popis>` (po `skip` se neposila).
 
 #![no_std]
 #![no_main]
@@ -18,6 +18,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use libos::{Channel, Startup, println};
+
+mod clear;
 use venus::client::{Error, Venus, check};
 use venus::vk::{self, cmd};
 use venus::{REPLY, api_version, cs, version_parts};
@@ -30,13 +32,21 @@ fn main(startup: Startup) -> i64 {
         let _ = out.write(b"err chybi kanal render uzlu", Vec::new());
         return 1;
     };
-    let line = match probe(ch) {
-        Ok(s) => s,
-        Err(Error::Os(libos::Error::NotSupported)) => String::from("skip zarizeni nema Venus"),
-        Err(e) => format!("err {e:?}"),
+    let (line, rest) = match probe(ch) {
+        Ok((s, v, pd, instance)) => (s, Some((v, pd, instance))),
+        Err(Error::Os(libos::Error::NotSupported)) => (String::from("skip zarizeni nema Venus"), None),
+        Err(e) => (format!("err {e:?}"), None),
     };
     println!("vk-probe: {line}");
     let _ = out.write(line.as_bytes(), Vec::new());
+    let Some((mut v, pd, instance)) = rest else { return 0 };
+    let line = match clear::run(&mut v, pd) {
+        Ok(s) => s,
+        Err(e) => format!("err {e:?}"),
+    };
+    println!("vk-probe: obrazek: {line}");
+    let _ = out.write(line.as_bytes(), Vec::new());
+    let _ = v.send(|e| cmd::destroy_instance(e, 0, instance));
     0
 }
 
@@ -50,7 +60,8 @@ fn device_type(t: vk::VkPhysicalDeviceType) -> &'static str {
     }
 }
 
-fn probe(ch: Channel) -> Result<String, Error> {
+/// Zarizeni: radek vysledku, spojeni, prvni fyzicke zarizeni a instance.
+fn probe(ch: Channel) -> Result<(String, Venus, vk::VkPhysicalDevice, vk::VkInstance), Error> {
     let mut v = Venus::connect(ch)?;
     let (maj, min, pat) = version_parts(v.capset.vk_xml_version);
     println!("vk-probe: renderer Venus, vk.xml {maj}.{min}.{pat}, format proudu {}", v.capset.wire_format_version);
@@ -126,6 +137,5 @@ fn probe(ch: Channel) -> Result<String, Error> {
             m.memory_heap_count
         );
     }
-    v.send(|e| cmd::destroy_instance(e, 0, instance))?;
-    Ok(line)
+    Ok((line, v, first, instance))
 }

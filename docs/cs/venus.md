@@ -6,8 +6,10 @@ podle protokolu venus-protocol; renderer na hostiteli (virglrenderer
 s render serverem) je dekóduje a volá skutečný Vulkan hostitele
 (ve WSL softwarový **lavapipe**, na Linuxu s GPU ovladač GPU).
 
-Stav: **krok 1 hotový** - test v QEMU vypíše jméno fyzického zařízení
-Vulkan od hostitele. Další kroky viz [Plán](#plán).
+Stav: **kroky 1-3 hotové** - test v QEMU vypíše jméno fyzického zařízení
+Vulkan od hostitele, vytvoří logické zařízení, obrázek vyplní barvou
+(`vkCmdClearColorImage`) a pixely přečte zpět přes blob z `VkDeviceMemory`.
+Další kroky viz [Plán](#plán).
 
 <figure class="diagram">
 <svg viewBox="0 0 780 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vrstvy Venusu">
@@ -46,7 +48,14 @@ Test `vulkan` v initu (před sadou `gui`, dokud displej drží init):
    kanálem.
 3. `vk-probe` přes `libs/venus` vytvoří instanci, vyjmenuje fyzická
    zařízení, přečte jejich vlastnosti a pošle řádek
-   `ok <počet>|<jméno>|<typ>|<api>|<vendor:device>`.
+   `ok <počet>|<jméno>|<typ>|<api>|<vendor:device>` (první test).
+4. Pak (`user/vk-probe/src/clear.rs`, druhý test): logické zařízení
+   s frontou na časové ose 1, obrázek 64x64 `R8G8B8A8_UNORM` v paměti
+   zařízení, buffer v paměti `HOST_VISIBLE | HOST_COHERENT`, command
+   buffer (bariéra, `vkCmdClearColorImage`, bariéra,
+   `vkCmdCopyImageToBuffer`, bariéra pro hosta), `vkQueueSubmit` s plotem,
+   čekání `vkGetFenceStatus`. Pixely se čtou přímo z bloba namapovaného
+   z `VkDeviceMemory` bufferu; všech 4096 musí mít vyplněnou barvu.
 
 Výpis z běhu ve WSL (lavapipe):
 
@@ -57,7 +66,13 @@ vk-probe: zarizeni 0: llvmpipe (LLVM 20.1.2, 256 bits) (CPU), Vulkan 1.4.318, 10
 vk-probe: rodin front 1, typu pameti 2, hald 1
 init: test vulkan: fyzicke zarizeni Vulkan: llvmpipe (LLVM 20.1.2, 256 bits) (...)
 [ok] vulkan: venus: jmeno fyzickeho zarizeni Vulkan od hostitele
+vk-probe: obrazek: ok 64x64 4080bfff map_info=1 276 ms
+[ok] vulkan: venus: obrazek vyplneny barvou a precteny zpet (pamet, command buffer)
 ```
+
+`map_info=1` = paměť s cache (`MAP_CACHE_CACHED`): okno sdílené paměti
+se mapuje jako běžná paměť (typ cache fyzické VMO, viz
+[Syscally](syscally.md), `VMO_CREATE_PHYSICAL`).
 
 Ve WSL zároveň selhávají testy sítě (pomocné servery běží na Windows
 a z WSL nejsou vidět) a sada `gui` (displej GTK pod Xvfb nezapne výstup,
@@ -142,9 +157,15 @@ ukazatel parametru je výstup, výstup, který je délkou jiného parametru,
 je vstup i výstup (`pPhysicalDeviceCount`), výstupní handle a struktury
 jsou „částečné“.
 
-Zatím neumí (chyba při generování, ne tiché špatné kódování): unie
-(`VkClearColorValue` - krok 3), řetězec pNext ve výstupu,
-vícerozměrná pole, ukazatele ve výstupních strukturách.
+Unie (jen vstup) jsou výčet s variantou pro každý člen; kóduje se index
+členu (u32) a člen, renderer přijme kterýkoli
+(`VkClearColorValue::Float32([..])`). Struktury řetězce pNext (`chain`
+v `subset.txt`, např. `VkDeviceQueueTimelineInfoMESA`) jsou varianty
+výčtu `Next` a pole `p_next` rodiče.
+
+Zatím neumí (chyba při generování, ne tiché špatné kódování): unie ve
+výstupu, řetězec pNext ve výstupu, vícerozměrná pole, ukazatele ve
+výstupních strukturách.
 
 ## Render uzel (`gpuproto`)
 
@@ -160,27 +181,34 @@ displeje (`guiproto::display` `OPEN_RENDER`) a předá dál.
 | `DESTROY_BLOB` | resource | `DONE` |
 | `SUBMIT` | ring_idx (zatím jen 0), plot, proud (nejvýš 60 KiB, násobek 4) | `SUBMITTED` (s plotem až po zpracování) |
 
-Zavření kanálu: ovladač odmapuje a uvolní bloby a zničí kontext.
+Zavření kanálu: ovladač odvolá okna sdílené paměti (`VMO_REVOKE`),
+odmapuje a uvolní bloby a zničí kontext.
+
+**Asynchronní fronta.** Ovladač má 32 slotů (každý 72 KiB DMA paměti
+pro příkaz a odpověď, dvojice deskriptorů). Synchronní příkazy (displej,
+bloby, kontexty) čekají jen na svůj slot. `SUBMIT` s plotem se jen
+odešle; odpověď `SUBMITTED` pošle hlavní smyčka, až zařízení slot vrátí
+(přerušení je ve `wait_many` spolu s kanály). Pomalý renderer jednoho
+klienta tak neblokuje displej ani jiné klienty. Dva sloty jsou vždy
+volné pro synchronní příkazy; klient smí mít nejvýš 4 nedokončené
+`SUBMIT` (pak `SHOULD_WAIT`).
 
 ## Rizika
 
-⚠️ **VMO sdílené paměti nejde odvolat.** Klient si okno BARu může nechat
-i po `DESTROY_BLOB`; až ovladač stejný rozsah dá jinému klientovi, uvidí
-jeho data. Dokud jádro neumí odvolatelné mapování, smí render uzel dostat
-jen důvěryhodný proces (init, kompozitor a jím povolené aplikace).
+Vyřešená rizika z kroku 1:
 
-⚠️ **Mapování bez cache.** Fyzická VMO se mapuje jako paměť zařízení. Na
-x86_64 s KVM se to v praxi chová jako paměť s cache, na aarch64 by
-nezarovnané přístupy spadly a čtení je pomalé. Potřeba: mapování podle
-`map_info` (cached/WC) v jádře - malá změna jádra, pro hlavní větev.
+- **Odvolání.** Okno sdílené paměti je fyzická VMO a ovladač ji při
+  `DESTROY_BLOB` a konci klienta odvolá (`VMO_REVOKE`): mapování zmizí
+  i v procesu klienta, přístup přes staré mapování skončí výjimkou. Když
+  odvolání selže, rozsah se už nikomu nepůjčí (karanténa).
+- **Typ cache.** Fyzická VMO dostane typ cache podle `map_info` zařízení
+  (QEMU hlásí `CACHED`); x86_64 PAT má položku WC, aarch64 Normal-NC.
+- **Synchronní čekání.** Viz asynchronní fronta výše; klient čeká 40 s
+  a po vypršení spojení označí za rozjeté (`Error::Broken`).
 
-⚠️ **Ovladač čeká synchronně.** Během `SUBMIT` s plotem (nejvýš 30 s)
-neobslouží displej ani jiné klienty (první `vkCreateInstance` s lavapipe
-trvá i sekundy). Když plot nedoběhne, klient dostane `TIMED_OUT`, další
-příkazy počkají na jeho odpověď a ovladač běží dál; klient čeká 40 s
-a po vypršení spojení označí za rozjeté (`Error::Broken`). Jiný `ring_idx`
-než 0 ovladač odmítne (plot na neexistující ose by se nesplnil). Pro
-kompozitor přes Vulkan bude potřeba asynchronní fronta s ploty.
+⚠️ Zbývá: jiný `ring_idx` než 0 ovladač odmítne - plot na ose, kterou
+klient nesvázal s frontou, by se nesplnil a slot by zůstal obsazený.
+Čekání na GPU proto zatím přes `vkGetFenceStatus`.
 
 Bez KVM nebo s TCG (aarch64 ve WSL) Venus netestujeme; `vk.xml` má
 3,3 MB (v gitu komprimovaný na zlomek).
@@ -189,9 +217,10 @@ Bez KVM nebo s TCG (aarch64 ve WSL) Venus netestujeme; `vk.xml` má
 
 1. ✅ Jméno fyzického zařízení (`vkCreateInstance`, `vkEnumeratePhysicalDevices`,
    `vkGetPhysicalDeviceProperties`, fronty a typy paměti).
-2. Paměť: `vkCreateDevice`, `vkAllocateMemory` s blobem (`blob_id` =
-   id `VkDeviceMemory`), mapování do klienta.
-3. Obrázek a command buffer: `vkCreateImage`, `vkCmdClearColorImage`
-   (unie `VkClearColorValue` v generátoru), `vkQueueSubmit`, zpětné čtení
-   pixelů přes buffer.
+2. ✅ Paměť: `vkCreateDevice`, `vkGetDeviceQueue2` s časovou osou,
+   `vkAllocateMemory`, blob s `blob_id` = id `VkDeviceMemory` namapovaný
+   do klienta.
+3. ✅ Obrázek a command buffer: `vkCreateImage`, `vkCmdClearColorImage`
+   (unie v generátoru), `vkCmdCopyImageToBuffer`, `vkQueueSubmit`, plot,
+   zpětné čtení pixelů z bloba.
 4. Skládání kompozitoru přes Vulkan.

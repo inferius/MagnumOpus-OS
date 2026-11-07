@@ -10,11 +10,10 @@
 //! a konci klienta ji ovladac odvola (`VMO_REVOKE`): mapovani zmizi i
 //! v procesu klienta, takze rozsah BARu muze bezpecne dostat jiny klient.
 //!
-//! RIZIKO (odezva): ovladac ceka na odpoved zarizeni synchronne, u
-//! `SUBMIT` s plotem az do zpracovani proudu rendererem (nejvys 30 s).
-//! Mezitim neobslouzi displej ani jine klienty. Kdyz plot nedobehne,
-//! klient dostane `TIMED_OUT` a dalsi prikazy pockaji na jeho odpoved;
-//! ovladac nekonci.
+//! `SUBMIT` s plotem je asynchronni: ovladac prikaz jen odesle a odpoved
+//! `SUBMITTED` posle, az zarizeni plot splni (hlavni smycka, `complete`).
+//! Mezitim obsluhuje displej i ostatni klienty. Klient smi mit nejvys
+//! `MAX_PENDING` takovych prikazu najednou (pak `SHOULD_WAIT`).
 
 use alloc::vec::Vec;
 
@@ -26,6 +25,8 @@ use crate::device::Gpu;
 
 /// Nejvetsi blob (zarizeni nema vic sdilene pameti nez par stovek MiB).
 const MAX_BLOB: u64 = 256 << 20;
+/// Nejvic nedokoncenych `SUBMIT` s plotem jednoho klienta.
+const MAX_PENDING: usize = 4;
 
 struct Blob {
     resource: u32,
@@ -37,22 +38,41 @@ struct Blob {
 
 pub struct Client {
     pub ch: Channel,
+    /// Jednoznacne id klienta (znacka asynchronnich prikazu).
+    pub id: u64,
     ctx: Option<u32>,
     blobs: Vec<Blob>,
+    /// Nedokoncene `SUBMIT` s plotem.
+    pending: usize,
+    /// Posledni pozadavek ceka na dokonceni (odpoved pozdeji).
+    deferred: bool,
 }
 
 impl Client {
-    pub fn new(ch: Channel) -> Self {
-        Self { ch, ctx: None, blobs: Vec::new() }
+    pub fn new(ch: Channel, id: u64) -> Self {
+        Self { ch, id, ctx: None, blobs: Vec::new(), pending: 0, deferred: false }
     }
 
-    /// Obslouzi zpravu; odpoved a handly k ni.
-    pub fn handle(&mut self, gpu: &mut Gpu, data: &[u8]) -> (Reply, Vec<Handle>) {
+    /// Obslouzi zpravu; odpoved a handly k ni, nebo `None`, kdyz odpoved
+    /// prijde az s dokoncenim (`complete`).
+    pub fn handle(&mut self, gpu: &mut Gpu, data: &[u8]) -> Option<(Reply, Vec<Handle>)> {
         let op = gpuproto::op_of(data);
         let r = Request::decode(data).and_then(|req| self.request(gpu, req));
-        match r {
+        if core::mem::take(&mut self.deferred) && r.is_ok() {
+            return None;
+        }
+        Some(match r {
             Ok(x) => x,
             Err(code) => (Reply::Error { op, code }, Vec::new()),
+        })
+    }
+
+    /// Odpoved na dokonceny `SUBMIT` s plotem (typ odpovedi zarizeni).
+    pub fn complete(&mut self, resp_type: u32) -> Reply {
+        self.pending = self.pending.saturating_sub(1);
+        match crate::device::completion_result(resp_type) {
+            Ok(()) => Reply::Submitted,
+            Err(code) => Reply::Error { op: gpuproto::op::SUBMIT, code },
         }
     }
 
@@ -113,7 +133,16 @@ impl Client {
                 if ring_idx != 0 {
                     return Err(Error::NotSupported);
                 }
-                gpu.submit(ctx, ring_idx, fence, &data)?;
+                if !fence {
+                    gpu.submit(ctx, &data)?;
+                    return none(Reply::Submitted);
+                }
+                if self.pending >= MAX_PENDING {
+                    return Err(Error::ShouldWait);
+                }
+                gpu.submit_fenced(ctx, ring_idx, &data, self.id)?;
+                self.pending += 1;
+                self.deferred = true;
                 none(Reply::Submitted)
             }
         }

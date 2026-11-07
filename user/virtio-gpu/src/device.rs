@@ -10,19 +10,16 @@ use libos::hw::Resource;
 use libos::{Error, Mapping, Result, Vmo};
 use pci::{Address, Ecam};
 use vgpu::cmd;
-use virtio::{Buffer, F_VERSION_1};
+use virtio::F_VERSION_1;
+
+use crate::cmdq::{CmdQueue, Completion};
 
 /// Vlastnost: DMA pres IOMMU (musi se prijmout, kdyz ji zarizeni nabidne).
 const F_ACCESS_PLATFORM: u64 = 1 << 33;
 /// Jak dlouho cekat na odpoved zarizeni.
 const TIMEOUT: Duration = Duration::from_secs(2);
-/// Jak dlouho cekat na `SUBMIT_3D` s plotem (renderer muze napr. pri
-/// prvnim vkCreateInstance prekladat shadery LLVM).
-const FENCE_TIMEOUT: Duration = Duration::from_secs(30);
-/// Buffer DMA pro prikaz (do `RESP_OFF`, i proud `SUBMIT_3D` do 60 KiB)
-/// a odpoved (za `RESP_OFF`, i obsah capsetu).
-const CMD_PAGE: u64 = 128 * 1024;
-const RESP_OFF: u64 = 96 * 1024;
+/// Velikost fronty prikazu (2 deskriptory na slot).
+const QUEUE_SIZE: u16 = 64;
 /// Zarovnani blobu ve sdilene pameti (stranka hostitele muze byt 64 KiB).
 const SHM_ALIGN: u64 = 64 * 1024;
 /// Nejvetsi kus souvisle DMA pameti (limit jadra).
@@ -61,14 +58,10 @@ struct Scanout {
 }
 
 pub struct Gpu {
-    device: virtio::Device,
-    queue: virtio::Virtqueue,
-    irq: libos::hw::Interrupt,
+    /// Fronta prikazu (zarizeni, preruseni, sloty).
+    pub q: CmdQueue,
     _msix: pci::msix::MsixTable,
     resource: Resource,
-    _cmd_vmo: Vmo,
-    cmd: Mapping,
-    cmd_phys: u64,
     outputs: Vec<Out>,
     scanouts: Vec<Scanout>,
     next_resource: u32,
@@ -82,22 +75,12 @@ pub struct Gpu {
     pub shm_alloc: Option<vgpu::shm::RangeAlloc>,
     next_ctx: u32,
     next_fence: u64,
-    /// `SUBMIT_3D` s plotem nedobehl vcas: jeho odpoved jeste prijde do
-    /// stejneho bufferu, dalsi prikaz musi pockat. Zarizeni neni vadne
-    /// (pomaly renderer jednoho klienta nesmi shodit displej).
-    stalled: bool,
-    /// Zarizeni neodpovedelo nebo vratilo neplatnou frontu: dal ho
-    /// nepouzivat.
-    pub broken: bool,
 }
 
 impl Gpu {
     pub fn open(ecam: &Ecam, a: Address, resource: Resource) -> Result<Self> {
         let wanted = F_VERSION_1 | F_ACCESS_PLATFORM | vgpu::F_VIRGL | vgpu::F_RESOURCE_BLOB | vgpu::F_CONTEXT_INIT;
-        let s = virtio::start(ecam, a, &resource, wanted, 16)?;
-        let cmd_vmo = resource.dma_memory(CMD_PAGE)?;
-        let cmd_phys = resource.phys_addr(&cmd_vmo, 0)?;
-        let cmd = Mapping::new(&cmd_vmo, 0, CMD_PAGE, MAP_READ | MAP_WRITE)?;
+        let s = virtio::start(ecam, a, &resource, wanted, QUEUE_SIZE)?;
         let num_scanouts: u32 = s.device.config(vgpu::config::NUM_SCANOUTS);
         let shm = s.device.shared_memory(vgpu::blob::SHM_ID_HOST_VISIBLE);
         let mut gpu = Self {
@@ -109,21 +92,14 @@ impl Gpu {
             shm_alloc: shm.map(|m| vgpu::shm::RangeAlloc::new(m.len, SHM_ALIGN)),
             next_ctx: 1,
             next_fence: 1,
-            stalled: false,
-            device: s.device,
-            queue: s.queue,
-            irq: s.irq,
+            q: CmdQueue::new(s.device, s.queue, s.irq, &resource)?,
             _msix: s.msix,
             resource,
-            _cmd_vmo: cmd_vmo,
-            cmd,
-            cmd_phys,
             outputs: Vec::new(),
             scanouts: Vec::new(),
             next_resource: 1,
-            broken: false,
         };
-        let num_capsets: u32 = gpu.device.config(vgpu::config::NUM_CAPSETS);
+        let num_capsets: u32 = gpu.q.device.config(vgpu::config::NUM_CAPSETS);
         for i in 0..num_capsets.min(16) {
             if let Ok(r) = gpu.command(&vgpu::get_capset_info(i), vgpu::HEADER_SIZE + 16)
                 && let Some(c) = vgpu::parse_capset_info(&r)
@@ -150,80 +126,19 @@ impl Gpu {
     }
 
     pub fn reset(&self) -> Result<()> {
-        self.device.reset()
+        self.q.device.reset()
+    }
+
+    /// Zarizeni neodpovedelo nebo vratilo neplatnou frontu: dal ho
+    /// nepouzivat.
+    pub fn broken(&self) -> bool {
+        self.q.broken
     }
 
     /// Posle prikaz a pocka na odpoved (`resp_len` bajtu). Chyba fronty
     /// nebo vyprseni = zarizeni je vadne (`broken`).
     fn command(&mut self, c: &[u8], resp_len: usize) -> Result<Vec<u8>> {
-        self.command_timeout(c, resp_len, TIMEOUT, false)
-    }
-
-    /// Ceka na dokonceny pozadavek. Chyba fronty = `broken`; vyprseni
-    /// vraci `TIMED_OUT` (rozhodne volajici).
-    fn wait_used(&mut self, timeout: Duration) -> Result<()> {
-        let deadline = libos::time::deadline_after(timeout);
-        loop {
-            match self.queue.take_used() {
-                Ok(Some(_)) => return Ok(()),
-                Ok(None) => {}
-                Err(e) => {
-                    self.broken = true;
-                    return Err(e);
-                }
-            }
-            match self.irq.wait(Some(deadline)) {
-                Ok(_) => {}
-                Err(Error::TimedOut) => return Err(Error::TimedOut),
-                Err(e) => {
-                    self.broken = true;
-                    return Err(e);
-                }
-            }
-        }
-    }
-
-    /// `fenced`: vyprseni neznamena vadne zarizeni, jen `stalled`.
-    fn command_timeout(&mut self, c: &[u8], resp_len: usize, timeout: Duration, fenced: bool) -> Result<Vec<u8>> {
-        if self.broken {
-            return Err(Error::IoError);
-        }
-        if self.stalled {
-            self.wait_used(TIMEOUT)?;
-            self.stalled = false;
-        }
-        if c.len() > RESP_OFF as usize || resp_len > (CMD_PAGE - RESP_OFF) as usize {
-            return Err(Error::InvalidArgs);
-        }
-        self.cmd.write_bytes(0, c);
-        self.cmd.write_bytes(RESP_OFF, &[0u8; vgpu::HEADER_SIZE]);
-        self.queue.submit(&[
-            Buffer {
-                phys: self.cmd_phys,
-                len: c.len() as u32,
-                device_writes: false,
-            },
-            Buffer {
-                phys: self.cmd_phys + RESP_OFF,
-                len: resp_len as u32,
-                device_writes: true,
-            },
-        ])?;
-        self.device.notify(&self.queue);
-        match self.wait_used(timeout) {
-            Ok(()) => {}
-            Err(Error::TimedOut) if fenced => {
-                self.stalled = true;
-                return Err(Error::TimedOut);
-            }
-            Err(e) => {
-                self.broken = true;
-                return Err(e);
-            }
-        }
-        let mut resp = alloc::vec![0u8; resp_len];
-        self.cmd.read_bytes(RESP_OFF, &mut resp);
-        Ok(resp)
+        self.q.command(c, resp_len, TIMEOUT)
     }
 
     /// Prikaz bez dat v odpovedi.
@@ -294,17 +209,32 @@ impl Gpu {
         self.resource.revoke(vmo)
     }
 
-    /// `SUBMIT_3D` proudu `data` v kontextu `ctx`; s `fence` odpoved az po
-    /// splneni plotu na ose `ring_idx`.
-    pub fn submit(&mut self, ctx: u32, ring_idx: u8, fence: bool, data: &[u8]) -> Result<()> {
-        if !fence {
-            return self.simple(&vgpu::submit_3d(ctx, data));
-        }
+    /// `SUBMIT_3D` proudu `data` v kontextu `ctx` bez plotu (odpoved hned
+    /// po prevzeti prikazu).
+    pub fn submit(&mut self, ctx: u32, data: &[u8]) -> Result<()> {
+        self.simple(&vgpu::submit_3d(ctx, data))
+    }
+
+    /// `SUBMIT_3D` s plotem na ose `ring_idx`: jen odeslat, dokonceni
+    /// (po splneni plotu) prijde jako `Completion` s `tag`.
+    pub fn submit_fenced(&mut self, ctx: u32, ring_idx: u8, data: &[u8], tag: u64) -> Result<()> {
         let id = self.next_fence;
         self.next_fence += 1;
-        let r = self.command_timeout(&vgpu::blob::submit_3d_fenced(ctx, ring_idx, id, data), vgpu::HEADER_SIZE, FENCE_TIMEOUT, true)?;
-        resp_result(&r)
+        self.q.submit_async(&vgpu::blob::submit_3d_fenced(ctx, ring_idx, id, data), tag)
     }
+
+    /// Dokoncene asynchronni prikazy (po preruseni nebo synchronnim prikazu).
+    pub fn completions(&mut self) -> Vec<Completion> {
+        let _ = self.q.poll();
+        self.q.take_completions()
+    }
+}
+
+/// Vysledek dokonceneho prikazu podle typu odpovedi.
+pub fn completion_result(resp_type: u32) -> Result<()> {
+    let mut h = [0u8; vgpu::HEADER_SIZE];
+    h[..4].copy_from_slice(&resp_type.to_le_bytes());
+    resp_result(&h)
 }
 
 /// Odpoved bez dat -> vysledek.
