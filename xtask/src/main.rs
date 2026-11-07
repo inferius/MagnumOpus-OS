@@ -189,6 +189,8 @@ fn host_tests() -> Result<()> {
             "inputproto",
             "--package",
             "keymap",
+            "--package",
+            "i8042",
             "--features",
             "initfs/std,fs/std",
         ])
@@ -269,6 +271,7 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-blk",
     "virtio-input",
     "inputd",
+    "ps2",
     "fsd",
     "timed",
 ];
@@ -458,6 +461,9 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
     cmd.arg("-machine")
         .arg(format!("q35,accel={accel}"))
         .args(["-cpu", "max", "-smp", "4", "-m", "512M"]);
+    // Graficka karta s vlastnim id (jinak stejna jako vychozi `-vga std`
+    // na 00:01.0): k jeji konzoli se navazi klavesnice a mys virtio, viz nize.
+    cmd.args(["-vga", "none", "-device", "VGA,id=video0"]);
     // IOMMU (Intel VT-d nebo AMD-Vi) pred zarizenimi PCI, ktera preklada; preklad
     // preruseni zatim ne (intremap=off).
     match opts.iommu.as_str() {
@@ -504,10 +510,18 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             datadisk::create(&target_dir())?.display()
         ))
         .args(["-device", &blk("data")])
-        // Klavesnice a mys virtio (ovladac virtio-input, sluzba inputd).
-        // QMP slouzi testu vstupu: xtask pres nej vklada udalosti.
-        .args(["-device", "virtio-keyboard-pci,iommu_platform=on"])
-        .args(["-device", "virtio-mouse-pci,iommu_platform=on"])
+        // Klavesnice a mys virtio (ovladac virtio-input, sluzba inputd),
+        // navazane na konzoli grafiky: vstup z okna QEMU a udalosti QMP
+        // s `device=video0` jdou do nich, udalosti QMP bez zarizeni do
+        // PS/2 (radic i8042 ma q35 vzdy). QMP slouzi testu vstupu.
+        .args([
+            "-device",
+            "virtio-keyboard-pci,iommu_platform=on,display=video0",
+        ])
+        .args([
+            "-device",
+            "virtio-mouse-pci,iommu_platform=on,display=video0",
+        ])
         .arg("-qmp")
         .arg(qmp::qemu_arg(qmp_port))
         // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.

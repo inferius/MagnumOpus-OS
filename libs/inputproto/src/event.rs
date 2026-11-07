@@ -8,7 +8,7 @@
 //! | 0 | u16 | druh udalosti ([`kind`]) |
 //! | 2 | u16 | priznaky ([`flags`]) |
 //! | 4 | u16 | modifikatory po udalosti ([`crate::mods`]) |
-//! | 6 | u16 | rezerva (0) |
+//! | 6 | u16 | id zdroje (zarizeni), 0 = udalost sluzby (viz `control::SOURCES`) |
 //! | 8 | u64 | cas v ns od startu (monotonni hodiny), kdy `inputd` snimek prijal |
 //! | 16 | u32 x 4 | `a`, `b`, `c`, `d` podle druhu |
 //!
@@ -169,6 +169,10 @@ pub struct Record {
     pub flags: u16,
     /// ns od startu (monotonni hodiny).
     pub time: u64,
+    /// Id zdroje (zarizeni nebo umely vstup), ze ktereho udalost prisla;
+    /// 0 = udalost samotne sluzby (fokus, rozlozeni, zkratka). Seznam zdroju
+    /// vraci prikaz `sources`.
+    pub source: u16,
 }
 
 impl Record {
@@ -180,6 +184,7 @@ impl Record {
             mods,
             flags,
             time,
+            source: 0,
         }
     }
 
@@ -218,6 +223,7 @@ impl Record {
         out[0..2].copy_from_slice(&k.to_le_bytes());
         out[2..4].copy_from_slice(&self.flags.to_le_bytes());
         out[4..6].copy_from_slice(&self.mods.to_le_bytes());
+        out[6..8].copy_from_slice(&self.source.to_le_bytes());
         out[8..16].copy_from_slice(&self.time.to_le_bytes());
         out[16..20].copy_from_slice(&a.to_le_bytes());
         out[20..24].copy_from_slice(&b.to_le_bytes());
@@ -272,6 +278,7 @@ impl Record {
             event,
             flags: u16_at(2),
             mods: u16_at(4),
+            source: u16_at(6),
             time: u64::from_le_bytes(b[8..16].try_into().ok()?),
         })
     }

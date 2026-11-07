@@ -51,7 +51,8 @@ Proč takhle:
 ```text
 init
  ├─ devmgr ── najde PCI 1af4:1052 (virtio-input) ── spustí virtio-input
- │            initu pošle zprávu `input` + kanál k ovladači
+ │            na x86 spustí ps2 (řadič i8042, mimo PCI)
+ │            initu pošle zprávu `input` + kanál pro každé zařízení
  └─ inputd ── init mu pošle `device` (kanál ovladače) pro každé zařízení,
               pak `focus` (svůj kanál fokusu) a `secure` (kanál zkratky)
 ```
@@ -61,14 +62,19 @@ Log při startu:
 ```text
 virtio-input 00:05.0: 'QEMU Virtio Keyboard' (klavesnice)
 virtio-input 00:06.0: 'QEMU Virtio Mouse' (mys)
-init: 3 blokovych a 2 vstupnich zarizeni
+ps2: PS/2 mys s koleckem a 5 tlacitky
+ps2: klavesnice
+init: 3 blokovych a 4 vstupnich zarizeni
 inputd: bezim (rozlozeni us)
 inputd: zarizeni 'QEMU Virtio Keyboard' pripojeno
-init: sluzba vstupu bezi (2 zarizeni)
+init: sluzba vstupu bezi (4 zarizeni)
 ```
 
 V QEMU (`cargo xtask run` / `test`) jsou zařízení `virtio-keyboard-pci`
-a `virtio-mouse-pci`, obě s překladem DMA přes IOMMU (`iommu_platform=on`).
+a `virtio-mouse-pci`, obě s překladem DMA přes IOMMU (`iommu_platform=on`)
+a navázaná na konzoli grafiky (`display=video0`). Vstup z okna QEMU tak
+dostanou ony. Řadič PS/2 má stroj q35 vždy a dostává události QMP bez
+zařízení, což využívá test.
 
 ## Ovladač virtio-input
 
@@ -88,6 +94,87 @@ Ovladač (`user/virtio-input`) je stejný pro klávesnici, myš i tablet:
    a skončí.
 
 Frontu 1 (stav, kontrolky Caps Lock a Num Lock) ovladač zatím nepoužívá.
+
+## Ovladač PS/2
+
+PS/2 není mrtvá technologie. Vnitřní klávesnice notebooků bývá připojená
+přes řadič klávesnice (EC) jako PS/2. Na stolních PC firmware předstírá
+PS/2 i pro USB klávesnici (emulace v SMM), dokud systém nepřevezme řadič
+USB. Ovladač `user/ps2` obsluhuje řadič i8042: klávesnici na prvním portu
+a myš na druhém.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cesta PS/2">
+<defs><marker id="pk1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="150" height="70" rx="6"/><text class="t b" x="85" y="45" text-anchor="middle">řadič i8042</text><text class="m" x="85" y="64" text-anchor="middle">porty 0x60, 0x64</text><text class="m" x="85" y="80" text-anchor="middle">klávesnice, myš</text>
+<rect class="acc" x="210" y="20" width="170" height="70" rx="6"/><text class="t b" x="295" y="45" text-anchor="middle">jádro</text><text class="m" x="295" y="64" text-anchor="middle">IOAPIC: IRQ 1, 12</text><text class="m" x="295" y="80" text-anchor="middle">IOPORT_READ / WRITE</text>
+<rect class="box" x="430" y="20" width="150" height="70" rx="6"/><text class="t b" x="505" y="45" text-anchor="middle">ps2 (proces)</text><text class="m" x="505" y="64" text-anchor="middle">knihovna i8042:</text><text class="m" x="505" y="80" text-anchor="middle">scan kódy, pakety</text>
+<rect class="ok" x="620" y="20" width="130" height="70" rx="6"/><text class="t b" x="685" y="45" text-anchor="middle">inputd</text><text class="m" x="685" y="64" text-anchor="middle">dva zdroje:</text><text class="m" x="685" y="80" text-anchor="middle">klávesnice, myš</text>
+<path class="ln" d="M160 45 L208 45" marker-end="url(#pk1)"/><text class="m" x="168" y="38">IRQ</text>
+<path class="ln" d="M380 45 L428 45" marker-end="url(#pk1)"/><text class="m" x="386" y="38">signál</text>
+<path class="ln" d="M428 70 L382 70" marker-end="url(#pk1)"/><text class="m" x="386" y="86">čtení</text>
+<path class="ln" d="M580 55 L618 55" marker-end="url(#pk1)"/><text class="m" x="584" y="48">IEVT</text>
+<rect class="box" x="210" y="140" width="370" height="70" rx="6"/><text class="t b" x="395" y="163" text-anchor="middle">Resource ovladače (od devmgr)</text><text class="m" x="395" y="182" text-anchor="middle">jen porty 0x60 a 0x64, linky 1 a 12, 2 přerušení, žádná DMA</text><text class="m" x="395" y="198" text-anchor="middle">jiný port nebo linka = ACCESS_DENIED</text>
+<path class="ln" d="M505 92 L470 138" marker-end="url(#pk1)"/>
+<text class="m" x="10" y="238">Ovladač čte řadič syscallem přes svůj Resource. Jádro kontroluje každý port a každou linku.</text>
+</svg>
+<figcaption>PS/2: řadič na desce, přerušení přes IOAPIC, ovladač v userspace.</figcaption>
+</figure>
+
+**Jádro** pro něj umí dvě věci, které ovladače PCI nepotřebují:
+
+- **I/O porty** syscallem [`IOPORT_READ`/`IOPORT_WRITE`](syscally.md#ioport_read).
+  Každý přístup projde kontrolou Resource. Je to pomalejší než instrukce
+  `in`/`out` v userspace, ale pro PS/2 (stovky bajtů za sekundu) to stačí.
+- **Staré linky přerušení** přes IOAPIC
+  ([`INTERRUPT_CREATE_LINE`](syscally.md#interrupt_create_line)). ISA IRQ 1
+  a 12 se převedou na GSI podle přepisů v MADT. Linku spouštěnou úrovní jádro
+  maskuje až do potvrzení. V rozhraní architektury je to trait `LegacyIo`,
+  aarch64 vrací `NOT_SUPPORTED`.
+
+**Spuštění:** `devmgr` na x86 spustí `ps2` vždy, protože řadič není na PCI.
+Dá mu Resource jen s porty 0x60, 0x64 a linkami 1, 12. Ovladač nahlásí, co
+našel (`ps2 klavesnice mys`, nebo `ps2 nic`), a `devmgr` pošle initu
+zprávu `input` jen pro nalezená zařízení.
+
+**Inicializace** (přerušení řadiče vypnutá, čte se dotazováním):
+
+1. Stavový port 0x64 čte `0xFF` = řadič chybí, ovladač skončí.
+2. Vypnout oba porty, vyprázdnit buffer, konfigurace: bez přerušení,
+   **s překladem** (klávesnice posílá sadu 2, řadič ji převádí na sadu 1).
+3. Self-test řadiče (`0xAA` -> `0x55`), zjistit druhý port, testy portů.
+4. Klávesnice: reset (`0xFF` -> `ACK`, `0xAA`), zapnout (`0xF4`).
+5. Myš: reset, pak posloupnosti vzorkovací frekvence 200, 100, 80
+   (IntelliMouse s kolečkem, ID 3) a 200, 200, 80 (5 tlačítek, ID 4).
+   Myš, která je neumí, hlásí dál ID 0.
+6. Zapnout přerušení jen pro nalezená zařízení.
+
+**Provoz:** čeká na přerušení obou linek. Po každém přečte všechno, co
+řadič má. Bit 5 stavu (`AUX_DATA`) rozliší myš od klávesnice. Kvůli ztracené
+hraně se na řadič podívá i bez přerušení, nejpozději po 500 ms.
+
+**Scan kódy** (`libs/i8042`, sada 1):
+
+| Bajty | Význam | Kód evdev / `MSC_SCAN` |
+|---|---|---|
+| `k` / `k \| 0x80` | stisk / uvolnění | `k` (pro 0x01-0x58 je kód sady 1 přímo kód evdev) |
+| `E0 k` | rozšířená klávesa (šipky, pravý Ctrl/Alt, Delete, Windows) | podle tabulky, `MSC_SCAN` = `0xE000 \| k` |
+| `E0 2A`, `E0 AA`, `E0 36`, `E0 B6` | falešné Shifty kolem rozšířených kláves | ignorují se |
+| `E1 1D 45` / `E1 9D C5` | Pause (stisk / uvolnění) | `KEY_PAUSE`, `0xE11D45` |
+| `FA FE EE 00 FF` | odpovědi a chyby, ne klávesy | ignorují se |
+
+**Pakety myši** (3 B, s kolečkem 4 B): tlačítka v bajtu 0, pohyb X a Y
+jako 9bitová čísla se znaménkem (Y nahoru, na evdev se otáčí), přetečení
+pohyb zahodí. Bajt bez synchronizačního bitu 3 na začátku paketu se
+zahodí, takže se ztracená synchronizace sama obnoví. Kolečko: kladné
+hodnoty PS/2 znamenají k uživateli, `REL_WHEEL` je obrácený. Tlačítka 4 a 5
+jsou `BTN_SIDE` a `BTN_EXTRA`.
+
+⚠️ **Riziko na skutečném hardwaru:** ovladač řadič hledá zkouškou portu
+0x64, nečte příznak 8042 z ACPI FADT. Na deskách bez řadiče je zápis na
+0x64 obvykle neškodný, ale na hardwaru bez starých portů ho firmware může
+přesměrovat jinam. Až se ukáže první takový stroj, má se nejdřív číst
+příznak z FADT (`IAPC_BOOT_ARCH` bit 1).
 
 ## Protokol zařízení (`inputproto::device`)
 
@@ -140,7 +227,7 @@ Jedna zpráva je jeden snímek a skládá se ze záznamů po 32 B:
 <rect class="acc" x="10" y="20" width="70" height="44" rx="4"/><text class="t" x="45" y="47" text-anchor="middle">kind</text>
 <rect class="box" x="80" y="20" width="70" height="44" rx="4"/><text class="t" x="115" y="47" text-anchor="middle">flags</text>
 <rect class="box" x="150" y="20" width="70" height="44" rx="4"/><text class="t" x="185" y="47" text-anchor="middle">mods</text>
-<rect class="box" x="220" y="20" width="60" height="44" rx="4"/><text class="m" x="250" y="47" text-anchor="middle">0</text>
+<rect class="box" x="220" y="20" width="60" height="44" rx="4"/><text class="t" x="250" y="47" text-anchor="middle">src</text>
 <rect class="box" x="280" y="20" width="160" height="44" rx="4"/><text class="t" x="360" y="47" text-anchor="middle">time u64 (ns)</text>
 <rect class="ok" x="440" y="20" width="77" height="44" rx="4"/><text class="t" x="478" y="47" text-anchor="middle">a</text>
 <rect class="ok" x="517" y="20" width="77" height="44" rx="4"/><text class="t" x="555" y="47" text-anchor="middle">b</text>
@@ -169,6 +256,9 @@ Jedna zpráva je jeden snímek a skládá se ze záznamů po 32 B:
 - `mods`: modifikátory po události. `SHIFT` 1, `CTRL` 2, `ALT` 4,
   `ALTGR` 8, `META` 16, `CAPS_LOCK` 32, `NUM_LOCK` 64.
 - `time`: monotónní čas v ns od startu, kdy služba snímek přijala.
+- `source`: id zdroje (zařízení nebo umělého vstupu), ze kterého událost
+  přišla; 0 = událost samotné služby (fokus, rozložení, zkratka). Seznam
+  vrací příkaz `sources`. Kompozitor podle něj pozná třeba tablet od myši.
 - Neznámý druh klient přeskočí (`Event::Unknown`). Nový druh události tak
   není nekompatibilní změna.
 
@@ -226,6 +316,7 @@ je jméno z [chyb](chyby.md), např. `err NOT_FOUND`.
 | `inject` | - | `ok` + kanál nového zdroje umělého vstupu |
 | `layout us` / `layout cz` | - | `ok`; neznámé `err NOT_FOUND` |
 | `status` | - | `ok devices=2 keyboards=1 pointers=1 layout=us injecting=0 dropped=0 secure=0` |
+| `sources` | - | `ok` a řádky `<id> <schopnosti> <real\|inject> <jméno>`, např. `3 1 real PS/2 klavesnice` |
 
 Neznámý příkaz vrátí `err NOT_SUPPORTED`, chybějící handle
 `err INVALID_ARGS`.
@@ -325,6 +416,7 @@ vždy.
 |---|---|
 | `cargo test -p inputproto` | formát zpráv: všechny druhy záznamů, neplatná data, stav |
 | `cargo test -p keymap` | US, CZ, AltGr, mrtvé klávesy, Caps Lock, Num Lock, opakování |
+| `cargo test -p i8042` | scan kódy (E0, E1, falešné Shifty, Print Screen), pakety myši (synchronizace, přetečení, kolečko, 5 tlačítek) |
 | `cargo xtask test`, sada `vstup` | služba v QEMU: zařízení, umělý vstup, CZ, myš, zkratka, opakování, tlačítka mimo myš, plná fronta (`Dropped`), neplatné příkazy |
 
 Test **„QEMU: klávesnice a myš až do služby“** prověří celou cestu ze
@@ -339,13 +431,23 @@ Ctrl+Alt+Delete až po ní. Test ověří text `a!`, součet pohybu, kolečko,
 bezpečnou zkratku jen na kanálu `secure` a návrat fokusu po `release`. Totéž dělá xtask
 v `cargo xtask run`, takže test projde i tam.
 
+Test **„QEMU: PS/2 klávesnice a myš“** vypíše třetí značku
+`init: test vstupu: cekam na udalosti PS/2 z QEMU`. Xtask pak pošle
+události **bez** `device`, které QEMU doručí do PS/2: `b`, Shift+`2`,
+Delete, pohyb (7, 3), pravé tlačítko a kolečko nahoru. Test ověří text
+`b@`, scan kód `0xE053` u Delete, součet pohybu, kolečko a to, že všechny
+události přišly ze zdrojů „PS/2 ...“ (pole `source`). Test virtio naopak
+ověří, že jeho události přišly ze zdrojů virtio.
+
 ## Omezení první verze
 
 - **Modifikátory kláves se počítají pro každé zařízení zvlášť.** Shift na
   jedné klávesnici neovlivní znak z druhé. Události myši nesou modifikátory
   všech klávesnic dohromady (Ctrl+klik funguje).
-- **Žádné PS/2 ani USB HID.** Návrh je pro první verzi nevyžaduje
-  a protokol zařízení na ně je připravený (`MSC_SCAN` nese scan kód).
+- **USB HID zatím ne** (návrh čeká na odsouhlasení). Protokol zařízení je
+  na něj připravený (`MSC_SCAN` nese scan kód).
+- **PS/2 bez hotplugu:** klávesnice nebo myš připojená za běhu se
+  nenajde. Kontrolky klávesnice zatím nesvítí.
 - **Tablet a dotyk** (`EV_ABS`) zatím ne.
 - **Kontrolky** Caps Lock a Num Lock nesvítí (fronta stavu virtio-input).
 - **Fokus má jeden vlastník.** Rozdělení oknům udělá kompozitor (6c).

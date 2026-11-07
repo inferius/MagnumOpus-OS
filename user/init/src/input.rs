@@ -89,6 +89,15 @@ impl Input {
         Ok(Channel::from_handle(h.remove(0)))
     }
 
+    /// Id zdroje, jehoz jmeno zacina `prefix` (fyzicka zarizeni).
+    pub fn source_id(&self, prefix: &str) -> Result<u16> {
+        let (text, _) = self.command(control::SOURCES, Vec::new())?;
+        control::SourceInfo::parse_list(&text)
+            .find(|s| !s.synthetic && s.name.starts_with(prefix))
+            .map(|s| s.id)
+            .ok_or(Error::NotFound)
+    }
+
     pub fn set_layout(&self, name: &str) -> Result<()> {
         let cmd = alloc::format!("{} {name}", control::LAYOUT);
         self.command(&cmd, Vec::new()).map(|_| ())

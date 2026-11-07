@@ -15,6 +15,8 @@ use libos::Channel;
 /// rozpracovany snimek (pohyb, kolecko) a pohlcene klavesy.
 pub struct Source {
     pub channel: Channel,
+    /// Id v zaznamech (`Record::source`), jedinecne po dobu behu sluzby.
+    pub id: u16,
     /// Umely vstup (z prikazu `inject`), ne fyzicke zarizeni.
     pub synthetic: bool,
     pub caps: u16,
@@ -41,9 +43,10 @@ pub enum KeyVerdict {
 }
 
 impl Source {
-    pub fn new(channel: Channel, synthetic: bool) -> Self {
+    pub fn new(channel: Channel, id: u16, synthetic: bool) -> Self {
         Self {
             channel,
+            id,
             synthetic,
             caps: 0,
             name: String::new(),

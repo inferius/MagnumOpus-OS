@@ -13,7 +13,17 @@ use crate::{Handle, Vmo, sys, wait_one};
 pub struct Resource(Handle);
 object_type!(Resource);
 
-/// Preruseni zarizeni (MSI).
+/// Rozsah I/O portu pro [`Resource::restrict`]: `count` portu od `first`.
+pub const fn io_ports(first: u16, count: u16) -> (u64, u64) {
+    (abi::syscall::RANGE_IO_PORTS | first as u64, count as u64)
+}
+
+/// Rozsah starych linek preruseni (ISA IRQ) pro [`Resource::restrict`].
+pub const fn irq_lines(first: u32, count: u32) -> (u64, u64) {
+    (abi::syscall::RANGE_IRQ_LINES | first as u64, count as u64)
+}
+
+/// Preruseni zarizeni (MSI nebo stara linka).
 #[derive(Debug)]
 pub struct Interrupt(Handle, MsiMessage);
 
@@ -36,8 +46,9 @@ impl Resource {
     }
 
     /// Uzsi prostredek pro ovladac: jen fyzicke rozsahy `ranges` (zacatek,
-    /// delka), nejvys `irq_max` preruseni a `dma_max` bajtu DMA pameti za
-    /// dobu zivota. Rozsahy i limity musi lezet v mezich tohoto prostredku.
+    /// delka; I/O porty a linky preruseni pres [`io_ports`] a
+    /// [`irq_lines`]), nejvys `irq_max` preruseni a `dma_max` bajtu DMA
+    /// pameti za dobu zivota. Rozsahy i limity musi lezet v mezich tohoto prostredku.
     pub fn restrict(&self, ranges: &[(u64, u64)], irq_max: u32, dma_max: u64) -> Result<Resource> {
         sys::resource_create(self.0.raw(), ranges, irq_max, dma_max, 0)
             .map(|h| Resource::from_handle(Handle::from_raw(h)))
@@ -62,6 +73,25 @@ impl Resource {
     /// sluzba casu). Viz `time::set`.
     pub fn set_clock(&self, req: &abi::time::SetRequest, flags: u64) -> Result<bool> {
         sys::clock_set(self.0.raw(), req, flags)
+    }
+
+    /// Preruseni na stare lince (ISA IRQ pres IOAPIC, napr. PS/2: 1 a 12).
+    /// Prostredek musi linku povolovat ([`irq_lines`]). Zprava MSI je
+    /// u takoveho objektu prazdna.
+    pub fn interrupt_line(&self, line: u32) -> Result<Interrupt> {
+        let h = sys::interrupt_create_line(self.0.raw(), line)?;
+        Ok(Interrupt(Handle::from_raw(h), MsiMessage::default()))
+    }
+
+    /// Precte bajt z I/O portu (x86; prostredek musi port povolovat,
+    /// [`io_ports`]).
+    pub fn port_read8(&self, port: u16) -> Result<u8> {
+        sys::ioport_read(self.0.raw(), port, 1).map(|v| v as u8)
+    }
+
+    /// Zapise bajt na I/O port.
+    pub fn port_write8(&self, port: u16, value: u8) -> Result<()> {
+        sys::ioport_write(self.0.raw(), port, 1, value as u32)
     }
 
     /// Novy objekt preruseni s volnym vektorem.

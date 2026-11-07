@@ -53,7 +53,8 @@ Why it works this way:
 ```text
 init
  ├─ devmgr ── finds PCI 1af4:1052 (virtio-input) ── starts virtio-input
- │            sends init an `input` message + channel to the driver
+ │            on x86 starts ps2 (the i8042 controller, not on PCI)
+ │            sends init an `input` message + channel for every device
  └─ inputd ── init sends it `device` (driver channel) for every device,
               then `focus` (its focus channel) and `secure` (shortcut channel)
 ```
@@ -63,15 +64,20 @@ Boot log:
 ```text
 virtio-input 00:05.0: 'QEMU Virtio Keyboard' (klavesnice)
 virtio-input 00:06.0: 'QEMU Virtio Mouse' (mys)
-init: 3 blokovych a 2 vstupnich zarizeni
+ps2: PS/2 mys s koleckem a 5 tlacitky
+ps2: klavesnice
+init: 3 blokovych a 4 vstupnich zarizeni
 inputd: bezim (rozlozeni us)
 inputd: zarizeni 'QEMU Virtio Keyboard' pripojeno
-init: sluzba vstupu bezi (2 zarizeni)
+init: sluzba vstupu bezi (4 zarizeni)
 ```
 
 QEMU (`cargo xtask run` / `test`) gets `virtio-keyboard-pci` and
 `virtio-mouse-pci` devices, both with DMA translated by the IOMMU
-(`iommu_platform=on`).
+(`iommu_platform=on`) and bound to the graphics console
+(`display=video0`), so input from the QEMU window goes to them. The q35
+machine always has a PS/2 controller, and it receives QMP events sent
+without a device, which the test uses.
 
 ## The virtio-input driver
 
@@ -97,6 +103,94 @@ tablets:
 
 The driver does not use queue 1 yet (status, i.e. the Caps Lock and Num
 Lock LEDs).
+
+## The PS/2 driver
+
+PS/2 is not a dead technology. A laptop's internal keyboard is often
+connected through the embedded controller (EC) as PS/2. On desktop PCs the
+firmware pretends to be PS/2 even for a USB keyboard (SMM emulation) until
+the system takes over the USB controller. The `user/ps2` driver runs the
+i8042 controller: the keyboard on the first port, the mouse on the second.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PS/2 path">
+<defs><marker id="pk1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="150" height="70" rx="6"/><text class="t b" x="85" y="45" text-anchor="middle">i8042 controller</text><text class="m" x="85" y="64" text-anchor="middle">ports 0x60, 0x64</text><text class="m" x="85" y="80" text-anchor="middle">keyboard, mouse</text>
+<rect class="acc" x="210" y="20" width="170" height="70" rx="6"/><text class="t b" x="295" y="45" text-anchor="middle">kernel</text><text class="m" x="295" y="64" text-anchor="middle">IOAPIC: IRQ 1, 12</text><text class="m" x="295" y="80" text-anchor="middle">IOPORT_READ / WRITE</text>
+<rect class="box" x="430" y="20" width="150" height="70" rx="6"/><text class="t b" x="505" y="45" text-anchor="middle">ps2 (process)</text><text class="m" x="505" y="64" text-anchor="middle">i8042 library:</text><text class="m" x="505" y="80" text-anchor="middle">scan codes, packets</text>
+<rect class="ok" x="620" y="20" width="130" height="70" rx="6"/><text class="t b" x="685" y="45" text-anchor="middle">inputd</text><text class="m" x="685" y="64" text-anchor="middle">two sources:</text><text class="m" x="685" y="80" text-anchor="middle">keyboard, mouse</text>
+<path class="ln" d="M160 45 L208 45" marker-end="url(#pk1)"/><text class="m" x="168" y="38">IRQ</text>
+<path class="ln" d="M380 45 L428 45" marker-end="url(#pk1)"/><text class="m" x="386" y="38">signal</text>
+<path class="ln" d="M428 70 L382 70" marker-end="url(#pk1)"/><text class="m" x="386" y="86">read</text>
+<path class="ln" d="M580 55 L618 55" marker-end="url(#pk1)"/><text class="m" x="584" y="48">IEVT</text>
+<rect class="box" x="210" y="140" width="370" height="70" rx="6"/><text class="t b" x="395" y="163" text-anchor="middle">driver Resource (from devmgr)</text><text class="m" x="395" y="182" text-anchor="middle">only ports 0x60 and 0x64, lines 1 and 12, 2 interrupts, no DMA</text><text class="m" x="395" y="198" text-anchor="middle">any other port or line = ACCESS_DENIED</text>
+<path class="ln" d="M505 92 L470 138" marker-end="url(#pk1)"/>
+<text class="m" x="10" y="238">The driver reads the controller by syscall through its Resource. The kernel checks every port and line.</text>
+</svg>
+<figcaption>PS/2: a controller on the board, interrupts through the IOAPIC, a driver in userspace.</figcaption>
+</figure>
+
+For it the **kernel** offers two things PCI drivers do not need:
+
+- **I/O ports** through the [`IOPORT_READ`/`IOPORT_WRITE`](syscalls.md#ioport_read)
+  syscalls. Every access passes the Resource check. This is slower than
+  `in`/`out` instructions in userspace, but enough for PS/2 (hundreds of
+  bytes a second).
+- **Legacy interrupt lines** through the IOAPIC
+  ([`INTERRUPT_CREATE_LINE`](syscalls.md#interrupt_create_line)). ISA IRQ 1
+  and 12 are mapped to GSIs using the MADT overrides. The kernel masks a
+  level-triggered line until it is acknowledged. In the architecture
+  interface this is the `LegacyIo` trait, and aarch64 returns
+  `NOT_SUPPORTED`.
+
+**Start-up:** on x86 `devmgr` always starts `ps2`, because the controller is
+not on PCI. It gives the driver a Resource with only ports 0x60 and 0x64
+and lines 1 and 12. The driver reports what it found (`ps2 klavesnice mys`
+for keyboard and mouse, or `ps2 nic` for nothing), and `devmgr` sends init
+an `input` message only for the devices found.
+
+**Initialisation** (controller interrupts off, polling):
+
+1. The status port 0x64 reads `0xFF` = no controller, the driver exits.
+2. Disable both ports, flush the buffer, configuration: no interrupts,
+   **with translation** (the keyboard sends set 2, the controller converts
+   it to set 1).
+3. Controller self-test (`0xAA` -> `0x55`), detect the second port, port
+   tests.
+4. Keyboard: reset (`0xFF` -> `ACK`, `0xAA`), enable (`0xF4`).
+5. Mouse: reset, then the sample-rate sequences 200, 100, 80 (IntelliMouse
+   wheel, ID 3) and 200, 200, 80 (5 buttons, ID 4). A mouse that does not
+   support them keeps reporting ID 0.
+6. Enable interrupts only for the devices found.
+
+**Operation:** the driver waits for the interrupts of both lines and after
+each one reads everything the controller has. Status bit 5 (`AUX_DATA`)
+tells mouse bytes from keyboard bytes. Because an edge can be lost, it also
+checks the controller without an interrupt, at the latest after 500 ms.
+
+**Scan codes** (`libs/i8042`, set 1):
+
+| Bytes | Meaning | evdev code / `MSC_SCAN` |
+|---|---|---|
+| `k` / `k \| 0x80` | press / release | `k` (for 0x01-0x58 a set 1 code is the evdev code) |
+| `E0 k` | extended key (arrows, right Ctrl/Alt, Delete, Windows) | from the table, `MSC_SCAN` = `0xE000 \| k` |
+| `E0 2A`, `E0 AA`, `E0 36`, `E0 B6` | fake Shifts around extended keys | ignored |
+| `E1 1D 45` / `E1 9D C5` | Pause (press / release) | `KEY_PAUSE`, `0xE11D45` |
+| `FA FE EE 00 FF` | replies and errors, not keys | ignored |
+
+**Mouse packets** (3 bytes, 4 with a wheel): buttons in byte 0, X and Y
+motion as 9-bit signed numbers (Y up, flipped for evdev), overflow drops the
+motion. A byte without sync bit 3 at the start of a packet is dropped, so
+lost synchronisation recovers by itself. Wheel: positive PS/2 values mean
+towards the user, `REL_WHEEL` is the opposite. Buttons 4 and 5 are
+`BTN_SIDE` and `BTN_EXTRA`.
+
+⚠️ **Risk on real hardware:** the driver detects the controller by probing
+port 0x64 and does not read the 8042 flag from the ACPI FADT. On boards
+without a controller a write to 0x64 is usually harmless, but on hardware
+without legacy ports the firmware may redirect it elsewhere. Once the first
+such machine shows up, the FADT flag (`IAPC_BOOT_ARCH` bit 1) should be
+read first.
 
 ## Device protocol (`inputproto::device`)
 
@@ -150,7 +244,7 @@ One message is one frame, made of 32-byte records:
 <rect class="acc" x="10" y="20" width="70" height="44" rx="4"/><text class="t" x="45" y="47" text-anchor="middle">kind</text>
 <rect class="box" x="80" y="20" width="70" height="44" rx="4"/><text class="t" x="115" y="47" text-anchor="middle">flags</text>
 <rect class="box" x="150" y="20" width="70" height="44" rx="4"/><text class="t" x="185" y="47" text-anchor="middle">mods</text>
-<rect class="box" x="220" y="20" width="60" height="44" rx="4"/><text class="m" x="250" y="47" text-anchor="middle">0</text>
+<rect class="box" x="220" y="20" width="60" height="44" rx="4"/><text class="t" x="250" y="47" text-anchor="middle">src</text>
 <rect class="box" x="280" y="20" width="160" height="44" rx="4"/><text class="t" x="360" y="47" text-anchor="middle">time u64 (ns)</text>
 <rect class="ok" x="440" y="20" width="77" height="44" rx="4"/><text class="t" x="478" y="47" text-anchor="middle">a</text>
 <rect class="ok" x="517" y="20" width="77" height="44" rx="4"/><text class="t" x="555" y="47" text-anchor="middle">b</text>
@@ -180,6 +274,10 @@ One message is one frame, made of 32-byte records:
   `ALTGR` 8, `META` 16, `CAPS_LOCK` 32, `NUM_LOCK` 64.
 - `time`: monotonic time in ns since boot when the service received the
   frame.
+- `source`: the id of the source (device or synthetic input) the event
+  came from; 0 = an event of the service itself (focus, layout, shortcut).
+  The `sources` command lists them. The compositor uses it, for example, to
+  tell a tablet from a mouse.
 - A client skips kinds it does not know (`Event::Unknown`), so adding a new
   event kind is not an incompatible change.
 
@@ -240,6 +338,7 @@ e.g. `err NOT_FOUND`.
 | `inject` | - | `ok` + channel of a new synthetic input source |
 | `layout us` / `layout cz` | - | `ok`; unknown `err NOT_FOUND` |
 | `status` | - | `ok devices=2 keyboards=1 pointers=1 layout=us injecting=0 dropped=0 secure=0` |
+| `sources` | - | `ok` and lines `<id> <capabilities> <real\|inject> <name>`, e.g. `3 1 real PS/2 klavesnice` |
 
 An unknown command returns `err NOT_SUPPORTED`, a missing handle
 `err INVALID_ARGS`.
@@ -343,6 +442,7 @@ the device are ignored.
 |---|---|
 | `cargo test -p inputproto` | message format: every record kind, invalid data, status |
 | `cargo test -p keymap` | US, CZ, AltGr, dead keys, Caps Lock, Num Lock, repeat |
+| `cargo test -p i8042` | scan codes (E0, E1, fake Shifts, Print Screen), mouse packets (sync, overflow, wheel, 5 buttons) |
 | `cargo xtask test`, suite `vstup` | the service in QEMU: devices, synthetic input, CZ, mouse, shortcut, repeat, non-mouse buttons, full queue (`Dropped`), invalid commands |
 
 The test **"QEMU: klavesnice a mys az do sluzby"** (keyboard and mouse all
@@ -360,14 +460,24 @@ motion, the wheel, that the shortcut reached only the secure channel, and
 that focus came back after `release`. Xtask does the same in `cargo xtask run`, so
 the test passes there too.
 
+The test **"QEMU: PS/2 klavesnice a mys"** (PS/2 keyboard and mouse)
+prints a third marker, `init: test vstupu: cekam na udalosti PS/2 z QEMU`.
+Xtask then sends events **without** `device`, which QEMU delivers to PS/2:
+`b`, Shift+`2`, Delete, motion (7, 3), the right button and the wheel up.
+The test checks the text `b@`, the scan code `0xE053` for Delete, the total
+motion, the wheel, and that every event came from the "PS/2 ..." sources
+(the `source` field). The virtio test, in turn, checks that its events came
+from the virtio sources.
+
 ## Limits of the first version
 
 - **Key modifiers are tracked per device.** Shift on one keyboard does not
   change the character typed on another. Mouse events carry the modifiers
   of all keyboards combined (Ctrl+click works).
-- **No PS/2 and no USB HID.** The design does not need them for the first
-  version, and the device protocol is ready for them (`MSC_SCAN` carries
-  the scan code).
+- **No USB HID yet** (the design is awaiting approval). The device
+  protocol is ready for it (`MSC_SCAN` carries the scan code).
+- **PS/2 without hotplug:** a keyboard or mouse plugged in at run time is
+  not found. The keyboard LEDs stay off for now.
 - **Tablets and touch** (`EV_ABS`) are not supported yet.
 - **The Caps Lock and Num Lock LEDs** stay off (virtio-input status
   queue).

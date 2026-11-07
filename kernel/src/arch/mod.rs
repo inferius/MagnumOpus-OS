@@ -21,7 +21,9 @@ mod aarch64;
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::Aarch64 as Current;
 
-use api::{Cpu, DebugSerial, DeviceIrq, Diagnostics, Ipi, Memory, Smp, Threads, Time};
+use api::{
+    Cpu, DebugSerial, DeviceIrq, Diagnostics, Ipi, LegacyIo, Memory, Smp, Threads, Time,
+};
 use boot_info::BootInfo;
 
 use crate::acpi::Platform;
@@ -359,6 +361,31 @@ pub const DEVICE_IRQ_LAST: u32 = <Current as DeviceIrq>::DEVICE_IRQ_LAST;
 /// Zprava MSI (adresa, data) pro preruseni `irq`.
 pub fn msi_message(irq: u32, device: Option<(u16, u8, u8)>) -> crate::error::Result<(u64, u32)> {
     <Current as DeviceIrq>::msi_message(irq, device)
+}
+
+/// Cteni I/O portu (jen architektury s porty, jinak `NotSupported`).
+pub fn port_read(port: u16, width: u8) -> crate::error::Result<u32> {
+    <Current as LegacyIo>::port_read(port, width)
+}
+
+/// Zapis I/O portu.
+pub fn port_write(port: u16, width: u8, value: u32) -> crate::error::Result<()> {
+    <Current as LegacyIo>::port_write(port, width, value)
+}
+
+/// Nasmeruje starou linku preruseni (ISA IRQ); vraci, zda je spoustena urovni.
+pub fn line_route(line: u32, irq: u32) -> crate::error::Result<bool> {
+    <Current as LegacyIo>::line_route(line, irq)
+}
+
+/// Zamaskuje / odmaskuje starou linku preruseni.
+pub fn line_mask(line: u32, masked: bool) {
+    <Current as LegacyIo>::line_mask(line, masked)
+}
+
+/// Uvolni starou linku preruseni.
+pub fn line_release(line: u32) {
+    <Current as LegacyIo>::line_release(line)
 }
 
 /// Pripravi start dalsich CPU; `None` = jadro pobezi na jednom CPU.

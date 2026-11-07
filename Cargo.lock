@@ -349,6 +349,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
+name = "i8042"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -592,6 +599,15 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
+]
+
+[[package]]
+name = "ps2"
+version = "0.1.0"
+dependencies = [
+ "i8042",
+ "inputproto",
+ "libos",
 ]
 
 [[package]]

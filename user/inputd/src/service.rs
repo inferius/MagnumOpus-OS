@@ -107,6 +107,8 @@ pub struct Service {
     pub repeat: Option<Repeat>,
     /// Zahozene zpravy (plna fronta prijemce).
     pub dropped: u32,
+    /// Id pristiho zdroje (0 je vyhrazena pro udalosti sluzby).
+    next_id: u16,
 }
 
 impl Service {
@@ -119,6 +121,7 @@ impl Service {
             layout: LayoutId::Us,
             repeat: None,
             dropped: 0,
+            next_id: 1,
         }
     }
 
@@ -206,7 +209,10 @@ impl Service {
         if self.sources.len() >= MAX_SOURCES {
             return Err(Error::NoResources);
         }
-        self.sources.push(Source::new(ch, synthetic));
+        // Id se neopakuje, dokud citac nepretece (65535 pripojeni).
+        let id = self.next_id;
+        self.next_id = self.next_id.checked_add(1).unwrap_or(1);
+        self.sources.push(Source::new(ch, id, synthetic));
         if synthetic {
             self.injection_changed();
         }
@@ -326,13 +332,23 @@ impl Service {
             if sak {
                 // Co prislo pred zkratkou, patri dosavadnimu prijemci; vse
                 // za ni uz jde na kanal `secure`.
+                self.tag(index, &mut out);
                 self.deliver_frame(&mut out, layout);
                 self.secure_attention();
             }
         }
         // Konec zpravy uzavre rozpracovany snimek (pohyb a kolecko).
         self.sources[index].flush(layout, now, &mut out);
+        self.tag(index, &mut out);
         self.deliver_frame(&mut out, layout);
+    }
+
+    /// Oznaci zaznamy zdrojem `index`.
+    fn tag(&self, index: usize, out: &mut [Record]) {
+        let id = self.sources[index].id;
+        for r in out {
+            r.source = id;
+        }
     }
 
     /// Doplni modifikatory udalostem mysi, doruci zaznamy a vyprazdni `out`.
@@ -373,6 +389,7 @@ impl Service {
         let layout = self.layout();
         let mut out = vec![];
         self.sources[index].key(layout, code, scancode, Action::Repeat, now, &mut out);
+        self.tag(index, &mut out);
         self.deliver(&out);
     }
 }

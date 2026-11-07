@@ -27,6 +27,10 @@ pub fn qemu_arg(port: u16) -> String {
     format!("tcp:127.0.0.1:{port},server=on,wait=off")
 }
 
+/// Treti znacka: test vstupu PS/2 (udalosti bez zarizeni jdou do PS/2).
+/// Musi sedet s `QEMU_MARKER_PS2` v `user/init/src/tests/input.rs`.
+pub const MARKER_PS2: &str = "init: test vstupu: cekam na udalosti PS/2 z QEMU";
+
 /// Druha znacka: test dostal klavesy i mys a ceka na bezpecnou zkratku.
 /// Musi sedet s `QEMU_MARKER_SECURE` v `user/init/src/tests/input.rs`.
 pub const MARKER_SECURE: &str = "init: test vstupu: cekam na zkratku z QEMU";
@@ -79,7 +83,10 @@ fn rel(axis: &str, value: i32) -> String {
 /// Krok skriptu: udalosti jednoho prikazu `input-send-event` (= jeden
 /// snimek), nebo pauza.
 enum Step {
+    /// Udalosti pro virtio (konzole `video0`).
     Send(Vec<String>),
+    /// Udalosti bez zarizeni: dostane je PS/2.
+    SendPs2(Vec<String>),
     /// Pockat na znacku v logu seriove linky.
     WaitFor(&'static str),
 }
@@ -117,6 +124,26 @@ fn script() -> Vec<Step> {
     ] {
         s.push(Step::Send(vec![key(k, d)]));
     }
+    // PS/2: b, Shift+2 (US: @), Delete (rozsirena klavesa E0), pohyb,
+    // prave tlacitko, kolecko nahoru.
+    s.push(Step::WaitFor(MARKER_PS2));
+    for (k, d) in [
+        ("b", true),
+        ("b", false),
+        ("shift", true),
+        ("2", true),
+        ("2", false),
+        ("shift", false),
+        ("delete", true),
+        ("delete", false),
+    ] {
+        s.push(Step::SendPs2(vec![key(k, d)]));
+    }
+    s.push(Step::SendPs2(vec![rel("x", 7), rel("y", 3)]));
+    s.push(Step::SendPs2(vec![btn("right", true)]));
+    s.push(Step::SendPs2(vec![btn("right", false)]));
+    s.push(Step::SendPs2(vec![btn("wheel-up", true)]));
+    s.push(Step::SendPs2(vec![btn("wheel-up", false)]));
     s
 }
 
@@ -157,8 +184,9 @@ fn inject(port: u16, log: &Path, start: Instant) -> Result<(), String> {
     };
     send(r#"{"execute":"qmp_capabilities"}"#.into(), &mut reader)?;
     for step in script() {
-        let events = match step {
-            Step::Send(e) => e,
+        let (events, device) = match step {
+            Step::Send(e) => (e, r#""device":"video0","#),
+            Step::SendPs2(e) => (e, ""),
             Step::WaitFor(marker) => {
                 if !wait_marker(log, marker, start) {
                     return Err(format!("znacka '{marker}' se neobjevila"));
@@ -167,7 +195,8 @@ fn inject(port: u16, log: &Path, start: Instant) -> Result<(), String> {
             }
         };
         let cmd = format!(
-            r#"{{"execute":"input-send-event","arguments":{{"events":[{}]}}}}"#,
+            r#"{{"execute":"input-send-event","arguments":{{{}"events":[{}]}}}}"#,
+            device,
             events.join(",")
         );
         send(cmd, &mut reader)?;

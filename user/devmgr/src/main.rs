@@ -1,7 +1,8 @@
 //! devmgr: spravce zarizeni.
 //!
 //! Projde sbernice PCI Express, zaloguje nalezena zarizeni a pro znama
-//! zarizeni spusti ovladace z initfs. Rodici (init) posle po bootstrap
+//! zarizeni spusti ovladace z initfs. Na x86 navic spusti ovladac radice
+//! PS/2 (`ps2`, zarizeni na desce mimo PCI; kdyz radic chybi, skonci). Rodici (init) posle po bootstrap
 //! kanalu pro kazde zarizeni zpravu s koncem kanalu ke klientovi ovladace:
 //! `block` (disk, protokol `blockproto`) nebo `input` (klavesnice, mys,
 //! protokol `inputproto::device`), a nakonec `done`.
@@ -100,6 +101,12 @@ fn main(startup: Startup) -> i64 {
             }
         }
     }
+    #[cfg(target_arch = "x86_64")]
+    match start_ps2(&fs, resource, &startup.bootstrap) {
+        Ok(Some(p)) => drivers.push(p),
+        Ok(None) => {}
+        Err(e) => println!("devmgr: ovladac ps2 nelze spustit: {e}"),
+    }
     let _ = startup.bootstrap.write(b"done", Vec::new());
     // Zustat bezet, dokud init drzi spojeni (pozdeji: hotplug, restart
     // spadlych ovladacu).
@@ -176,4 +183,58 @@ fn start_driver(
     // systemu nebo sluzbe vstupu).
     parent.write(driver.message, vec![client_end.into_handle()])?;
     Ok(process)
+}
+
+/// Jak dlouho cekat, nez ovladac PS/2 nahlasi, co nasel (reset klavesnice
+/// a mysi trva stovky ms).
+#[cfg(target_arch = "x86_64")]
+const PS2_REPORT_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(5);
+
+/// Spusti ovladac PS/2 a initu preda kanaly k nalezenym zarizenim
+/// (`input`). `Ok(None)` = radic chybi nebo nic nenasel (ovladac skoncil).
+#[cfg(target_arch = "x86_64")]
+fn start_ps2(
+    fs: &Initfs,
+    resource: &libos::hw::Resource,
+    parent: &Channel,
+) -> libos::Result<Option<Process>> {
+    use libos::hw::{io_ports, irq_lines};
+    let image = fs.find("ps2").ok_or(libos::Error::NotFound)?;
+    // Jen data a prikazy radice a jeho dve linky preruseni; zadna DMA.
+    let ranges = [
+        io_ports(0x60, 1),
+        io_ports(0x64, 1),
+        irq_lines(1, 1),
+        irq_lines(12, 1),
+    ];
+    let device = resource.restrict(&ranges, 2, 0)?;
+    let (kbd_client, kbd_driver) = Channel::create()?;
+    let (mouse_client, mouse_driver) = Channel::create()?;
+    let handles = vec![
+        StartHandle::user(device.handle().duplicate(None)?),
+        StartHandle::user(kbd_driver.into_handle()),
+        StartHandle::user(mouse_driver.into_handle()),
+    ];
+    let (process, control) = libos::spawn("ps2", image, handles)?;
+    let msg = control.read(Some(libos::time::deadline_after(PS2_REPORT_TIMEOUT)))?;
+    let report = core::str::from_utf8(&msg.data).unwrap_or("");
+    let mut words = report.split_whitespace();
+    if words.next() != Some("ps2") {
+        return Err(libos::Error::Corrupted);
+    }
+    let mut any = false;
+    for w in words {
+        let ch = match w {
+            "klavesnice" => &kbd_client,
+            "mys" => &mouse_client,
+            _ => continue,
+        };
+        parent.write(b"input", vec![ch.handle().duplicate(None)?])?;
+        any = true;
+    }
+    if !any {
+        println!("devmgr: radic PS/2 nenalezen");
+        return Ok(None);
+    }
+    Ok(Some(process))
 }

@@ -64,7 +64,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, fsd, timed
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, fsd, timed
 ```
 
 QEMU gets an emulated IOMMU (`intel-iommu`, with `--iommu amd`
@@ -83,8 +83,9 @@ stored boot entries would not match.
 
 The scratch and data disks are recreated on every `run`/`test`.
 
-QEMU also gets a virtio keyboard and mouse (`virtio-keyboard-pci`,
-`virtio-mouse-pci`, with `iommu_platform=on`) and a QMP server on a random
+QEMU also gets `VGA,id=video0` graphics (instead of the default
+`-vga std`), a virtio keyboard and mouse (`virtio-keyboard-pci`,
+`virtio-mouse-pci`, with `iommu_platform=on`, bound to `display=video0`) and a QMP server on a random
 localhost port (`-qmp tcp:127.0.0.1:<port>`). Xtask injects events for the
 input test over QMP, see [Input](input.md#tests).
 
@@ -131,6 +132,7 @@ libs/virtio/     virtio 1.x over PCI (virtqueue)
 libs/blockproto/ block device protocol (client <-> driver)
 libs/inputproto/ input protocol (driver -> inputd -> focus owner)
 libs/keymap/     keyboard layouts (US, CZ), dead keys
+libs/i8042/      PS/2: scan codes and mouse packets (no hardware, host tests)
 libs/fs/         file system (no_std; std for tools)
   src/space/        free space: allocation groups, space logs
   src/fs/           files, directories, snapshots, intent log, defrag, fsck
@@ -142,6 +144,7 @@ user/devmgr/     device manager (PCI, starts drivers)
 user/virtio-blk/ disk driver
 user/virtio-input/ keyboard and mouse driver
 user/inputd/     input service
+user/ps2/        PS/2 controller driver (keyboard, mouse)
 user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
 libs/osfs-proto/ protocol of the extended FS API for Windows (DeviceIoControl) + client

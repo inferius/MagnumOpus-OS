@@ -12,6 +12,7 @@
 //! | `inject` | - | `ok` + kanal pro umely vstup |
 //! | `layout <jmeno>` | - | `ok` / `err NOT_FOUND` |
 //! | `status` | - | `ok` + [`Status`] v textu |
+//! | `sources` | - | `ok` + radky [`SourceInfo`] (id zdroju v zaznamech) |
 //!
 //! Na kanalu `secure` posila jeho vlastnik `release` (konec bezpecneho
 //! rezimu, fokus se vrati). Na kanalu fokusu klient zatim nic neposila.
@@ -31,6 +32,8 @@ pub const INJECT: &str = "inject";
 pub const LAYOUT: &str = "layout";
 /// Stav sluzby.
 pub const STATUS: &str = "status";
+/// Seznam zdroju vstupu (id, druh, jmeno).
+pub const SOURCES: &str = "sources";
 /// Kanal `secure`: konec bezpecneho rezimu.
 pub const RELEASE: &str = "release";
 
@@ -101,5 +104,45 @@ impl Status {
             }
         }
         Some(s)
+    }
+}
+
+/// Jeden zdroj v odpovedi na `sources`: radek `<id> <schopnosti> <real|inject>
+/// <jmeno>` (schopnosti desitkove, bity `device::caps`; jmeno do konce
+/// radku, muze byt prazdne). Radky oddeluje `\n`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceInfo<'a> {
+    /// Id v poli `Record::source`.
+    pub id: u16,
+    pub caps: u16,
+    pub synthetic: bool,
+    pub name: &'a str,
+}
+
+impl<'a> SourceInfo<'a> {
+    /// Jeden radek vcetne `\n`.
+    pub fn format(&self, out: &mut impl core::fmt::Write) -> core::fmt::Result {
+        let kind = if self.synthetic { "inject" } else { "real" };
+        writeln!(out, "{} {} {} {}", self.id, self.caps, kind, self.name)
+    }
+
+    /// Radky odpovedi (bez `ok`); neplatne radky preskoci.
+    pub fn parse_list(text: &'a str) -> impl Iterator<Item = SourceInfo<'a>> {
+        text.lines().filter_map(|line| {
+            let mut it = line.splitn(4, ' ');
+            let id = it.next()?.parse().ok()?;
+            let caps = it.next()?.parse().ok()?;
+            let synthetic = match it.next()? {
+                "inject" => true,
+                "real" => false,
+                _ => return None,
+            };
+            Some(SourceInfo {
+                id,
+                caps,
+                synthetic,
+                name: it.next().unwrap_or(""),
+            })
+        })
     }
 }

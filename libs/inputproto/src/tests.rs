@@ -101,7 +101,10 @@ fn records_roundtrip_all_kinds() {
     let records: Vec<Record> = events
         .iter()
         .enumerate()
-        .map(|(i, &e)| Record::new(e, i as u16, flags::SYNTHETIC, 1_000 + i as u64))
+        .map(|(i, &e)| Record {
+            source: 100 + i as u16,
+            ..Record::new(e, i as u16, flags::SYNTHETIC, 1_000 + i as u64)
+        })
         .collect();
     let msg = event::encode(&records);
     assert_eq!(msg.len(), records.len() * Record::SIZE);
@@ -194,4 +197,30 @@ fn button_codes() {
     for c in [KEY_A, KEY_DELETE, 0x160, 0x2bf, 0x2e8, KEY_MAX] {
         assert!(!is_button(c), "{c:#x}");
     }
+}
+
+#[test]
+fn source_list_roundtrip() {
+    use crate::control::SourceInfo;
+    let list = [
+        SourceInfo {
+            id: 1,
+            caps: crate::device::caps::KEYBOARD,
+            synthetic: false,
+            name: "QEMU Virtio Keyboard",
+        },
+        SourceInfo {
+            id: 7,
+            caps: 0,
+            synthetic: true,
+            name: "",
+        },
+    ];
+    let mut text = String::new();
+    for s in &list {
+        s.format(&mut text).unwrap();
+    }
+    let parsed: Vec<_> = SourceInfo::parse_list(&text).collect();
+    assert_eq!(parsed, list.to_vec());
+    assert_eq!(SourceInfo::parse_list("x y").count(), 0);
 }

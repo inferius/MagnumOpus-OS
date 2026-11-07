@@ -61,7 +61,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, fsd, timed
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, fsd, timed
 ```
 
 QEMU dostane emulovanou IOMMU (`intel-iommu`, s `--iommu amd`
@@ -79,8 +79,9 @@ AMD IOMMU zabere slot PCI a uložené bootovací položky by neseděly.
 
 Testovací a datový disk se vytvoří znovu při každém `run`/`test`.
 
-Dál QEMU dostane klávesnici a myš virtio (`virtio-keyboard-pci`,
-`virtio-mouse-pci`, s `iommu_platform=on`) a server QMP na náhodném portu
+Dál QEMU dostane grafiku `VGA,id=video0` (místo výchozí `-vga std`),
+klávesnici a myš virtio (`virtio-keyboard-pci`, `virtio-mouse-pci`,
+s `iommu_platform=on`, navázané na `display=video0`) a server QMP na náhodném portu
 localhostu (`-qmp tcp:127.0.0.1:<port>`). Přes QMP xtask vkládá události
 pro test vstupu, viz [Vstup](vstup.md#testy).
 
@@ -126,6 +127,7 @@ libs/virtio/     virtio 1.x přes PCI (virtqueue)
 libs/blockproto/ protokol blokového zařízení (klient <-> ovladač)
 libs/inputproto/ protokol vstupu (ovladač -> inputd -> vlastník fokusu)
 libs/keymap/     rozložení klávesnice (US, CZ), mrtvé klávesy
+libs/i8042/      PS/2: scan kódy a pakety myši (bez hardwaru, testy na hostiteli)
 libs/fs/         souborový systém (no_std; std pro nástroje)
   src/space/        volné místo: alokační skupiny, space logy
   src/fs/           soubory, adresáře, snapshoty, intent log, defrag, fsck
@@ -137,6 +139,7 @@ user/devmgr/     správce zařízení (PCI, spouští ovladače)
 user/virtio-blk/ ovladač disku
 user/virtio-input/ ovladač klávesnice a myši
 user/inputd/     služba vstupu
+user/ps2/        ovladač řadiče PS/2 (klávesnice, myš)
 user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
 libs/osfs-proto/ protokol rozšířeného API FS pro Windows (DeviceIoControl) + klient

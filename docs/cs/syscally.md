@@ -393,6 +393,56 @@ přetečení), `ACCESS_DENIED`, `BAD_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`.
 namapuje. Potomek zdědí zařízení rodiče a jiné zvolit nesmí
 (`ACCESS_DENIED`). Bez IOMMU se `device` jen zaznamená.
 
+**Porty a linky přerušení.** Horní dva bity začátku rozsahu určují jeho
+druh (`abi::syscall::RANGE_KIND_MASK`): 0 = fyzická paměť (výše),
+`RANGE_IO_PORTS` (`1 << 62`) = I/O porty od `začátek & 0xFFFF`, délka =
+počet portů (konec nejvýš 0x10000), `RANGE_IRQ_LINES` (`2 << 62`) = staré
+linky přerušení (ISA IRQ) od `začátek`, délka = počet (linky 0-31). Porty
+a linky nemusí být zarovnané. Potomek smí jen porty a linky rodiče. Kořenový
+prostředek smí všechny. Jiný druh = `INVALID_ARGS`. V libos:
+`hw::io_ports(první, počet)` a `hw::irq_lines(první, počet)`. Příklad
+(ovladač PS/2):
+
+```rust
+let ranges = [io_ports(0x60, 1), io_ports(0x64, 1), irq_lines(1, 1), irq_lines(12, 1)];
+let ps2 = root.restrict(&ranges, 2, 0)?;
+```
+
+### `IOPORT_READ`
+
+`(resource, port, width) -> hodnota`. Přečte I/O port o šířce `width`
+(1, 2 nebo 4 B). Jen na x86_64, jinde `NOT_SUPPORTED`. Prostředek musí
+povolovat porty `port..port + width` (`RESOURCE_CREATE` s
+`RANGE_IO_PORTS`), jinak `ACCESS_DENIED`. Je to syscall, ne instrukce
+`in` v userspace: pomalejší, ale každý přístup projde kontrolou oprávnění
+a stačí pro pomalá zařízení (PS/2). Chyby: `INVALID_ARGS` (šířka, port nad
+0xFFFF), `ACCESS_DENIED`, `NOT_SUPPORTED`, `BAD_HANDLE`, `WRONG_TYPE`.
+V libos `Resource::port_read8`.
+
+### `IOPORT_WRITE`
+
+`(resource, port, width, value) -> 0`. Zapíše I/O port. Podmínky a chyby
+jako `IOPORT_READ`; navíc `INVALID_ARGS`, když `value` nevejde do šířky
+(např. 0x100 pro 1 B). V libos `Resource::port_write8`.
+
+### `INTERRUPT_CREATE_LINE`
+
+`(resource, line) -> handle`. Objekt přerušení na staré lince (ISA IRQ
+0-15 přes IOAPIC; PS/2 klávesnice 1, myš 12). Jádro převede linku na GSI
+podle přepisů z ACPI MADT (polarita, spouštění) a nasměruje ji na volný
+vektor bootovacího CPU. Na přerušení objekt dostane `SIGNALED` jako
+u `INTERRUPT_CREATE`; potvrzuje se `INTERRUPT_ACK`. Linku spouštěnou
+**úrovní** jádro po přerušení zamaskuje a odmaskuje až potvrzením (jinak by
+se přerušení opakovalo dokola). Linka spouštěná **hranou** se nemaskuje.
+Ovladač má proto po každém přerušení obsloužit vše, co zařízení má, a pro
+jistotu se na zařízení občas podívat i bez přerušení. Prostředek musí linku
+povolovat (`RANGE_IRQ_LINES`) a počítá se do `irq_max`. Jedna linka může
+mít jen jeden objekt (`ALREADY_EXISTS`). Po zavření posledního handlu se
+linka zamaskuje a uvolní. Chyby: `INVALID_ARGS` (linka nad 15),
+`ACCESS_DENIED`, `ALREADY_EXISTS`, `NO_RESOURCES`, `NOT_SUPPORTED`
+(aarch64, platforma bez IOAPIC), `NOT_FOUND` (linka mimo vstupy IOAPIC).
+V libos `Resource::interrupt_line`.
+
 ### `INTERRUPT_ACK`
 
 `(interrupt) -> 0`. Potvrdí přerušení (smaže `SIGNALED`). Ovladač má

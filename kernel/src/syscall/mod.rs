@@ -81,6 +81,9 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::RESOURCE_CREATE => hw::resource_create(a),
         nr::VM_PAGE_SIZE => vm::page_size(a),
         nr::CLOCK_SET => hw::clock_set(a),
+        nr::IOPORT_READ => hw::ioport_read(a),
+        nr::IOPORT_WRITE => hw::ioport_write(a),
+        nr::INTERRUPT_CREATE_LINE => hw::interrupt_create_line(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -126,6 +129,9 @@ pub fn name(number: u64) -> &'static str {
         "VM_PAGE_SIZE",
         "CLOCK_REALTIME",
         "CLOCK_SET",
+        "IOPORT_READ",
+        "IOPORT_WRITE",
+        "INTERRUPT_CREATE_LINE",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

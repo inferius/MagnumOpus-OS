@@ -97,6 +97,9 @@ fn every_syscall_is_documented() {
         "VM_PAGE_SIZE",
         "CLOCK_REALTIME",
         "CLOCK_SET",
+        "IOPORT_READ",
+        "IOPORT_WRITE",
+        "INTERRUPT_CREATE_LINE",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

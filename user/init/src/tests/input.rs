@@ -22,6 +22,7 @@ use crate::{check, check_eq};
 pub const TESTS: &[Test] = &[
     ("sluzba bezi a vidi klavesnici a mys", service_status),
     ("QEMU: klavesnice a mys az do sluzby", qemu_devices),
+    ("QEMU: PS/2 klavesnice a mys", qemu_ps2),
     ("umely vstup: text v rozlozeni US", inject_us),
     ("rozlozeni CZ: QWERTZ, hacky, carky, AltGr", layout_cz),
     ("mys: pohyb, tlacitka, kolecko", mouse_events),
@@ -39,6 +40,10 @@ pub const QEMU_MARKER: &str = "init: test vstupu: cekam na udalosti z QEMU";
 /// Druha znacka: klavesy a mys dorazily, xtask ma poslat Ctrl+Alt+Delete
 /// (`MARKER_SECURE` v `xtask/src/qmp.rs`).
 pub const QEMU_MARKER_SECURE: &str = "init: test vstupu: cekam na zkratku z QEMU";
+
+/// Treti znacka: xtask posle udalosti bez zarizeni, ktere dostane PS/2
+/// (`MARKER_PS2` v `xtask/src/qmp.rs`).
+pub const QEMU_MARKER_PS2: &str = "init: test vstupu: cekam na udalosti PS/2 z QEMU";
 
 /// Jak dlouho cekat na udalosti z QEMU (QMP spojeni, TCG muze byt pomaly).
 const QEMU_TIMEOUT: Duration = Duration::from_secs(20);
@@ -165,6 +170,22 @@ fn qemu_devices_inner() -> TestResult {
     check!(
         got.iter().all(|r| !r.is_synthetic()),
         "udalost ze zarizeni oznacena jako umela"
+    );
+    // Udalosti musi prijit z virtio (QEMU je smeruje na konzoli video0),
+    // ne z PS/2.
+    let kbd = inp
+        .source_id("QEMU Virtio Keyboard")
+        .map_err(|e| fail("zdroj virtio klavesnice", e))?;
+    let ptr = inp
+        .source_id("QEMU Virtio Mouse")
+        .map_err(|e| fail("zdroj virtio mysi", e))?;
+    check!(
+        got.iter().all(|r| match r.event {
+            Event::Key { .. } | Event::Text(_) => r.source == kbd,
+            Event::Motion { .. } | Event::Button { .. } | Event::Scroll { .. } => r.source == ptr,
+            _ => true,
+        }),
+        "udalost z jineho zdroje nez virtio"
     );
     check!(
         has(
@@ -629,5 +650,75 @@ fn full_queue(_: &Startup) -> TestResult {
         matches!(got.first().map(|r| r.event), Some(Event::Dropped { messages }) if messages >= 50),
         "prvni zaznam po zahozeni neni Dropped"
     );
+    Ok(())
+}
+
+fn qemu_ps2(_: &Startup) -> TestResult {
+    let inp = input()?;
+    let kbd = inp
+        .source_id("PS/2 klavesnice")
+        .map_err(|e| fail("zdroj PS/2 klavesnice (radic nenalezen?)", e))?;
+    let ptr = inp
+        .source_id("PS/2 mys")
+        .map_err(|e| fail("zdroj PS/2 mysi", e))?;
+    drain(&inp.focus);
+    println!("{QEMU_MARKER_PS2}");
+    // xtask: b, Shift+2, Delete, pohyb (7, 3), prave tlacitko, kolecko nahoru.
+    let got = read_until(&inp.focus, deadline(QEMU_TIMEOUT), |r| {
+        text(r).contains("b@")
+            && has(
+                r,
+                Event::Button {
+                    button: Button::Right,
+                    action: Action::Release,
+                },
+            )
+            && r.iter().any(|x| matches!(x.event, Event::Scroll { .. }))
+            && r.iter().any(|x| {
+                matches!(
+                    x.event,
+                    Event::Key {
+                        code: KEY_DELETE,
+                        action: Action::Release,
+                        ..
+                    }
+                )
+            })
+    })
+    .map_err(|e| failr("udalosti PS/2 z QEMU", e))?;
+    check!(
+        got.iter().all(|r| match r.event {
+            Event::Key { .. } | Event::Text(_) => r.source == kbd,
+            Event::Motion { .. } | Event::Button { .. } | Event::Scroll { .. } => r.source == ptr,
+            _ => true,
+        }),
+        "udalost PS/2 prisla z jineho zdroje"
+    );
+    // Rozsirena klavesa (E0 53) ma scan kod s prefixem.
+    check!(
+        has(
+            &got,
+            Event::Key {
+                code: KEY_DELETE,
+                scancode: 0xE053,
+                action: Action::Press,
+                ch: None,
+            }
+        ),
+        "Delete z PS/2 nema scan kod E053"
+    );
+    let (dx, dy) = got.iter().fold((0, 0), |(x, y), r| match r.event {
+        Event::Motion { dx, dy } => (x + dx, y + dy),
+        _ => (x, y),
+    });
+    check_eq!((dx, dy), (7, 3), "soucet pohybu mysi PS/2");
+    let wheel: i32 = got
+        .iter()
+        .map(|r| match r.event {
+            Event::Scroll { dy, .. } => dy,
+            _ => 0,
+        })
+        .sum();
+    check_eq!(wheel, 1, "kolecko PS/2 nahoru");
     Ok(())
 }

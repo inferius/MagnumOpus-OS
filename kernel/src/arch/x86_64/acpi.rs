@@ -10,10 +10,7 @@ use crate::acpi::{Cpu, Platform};
 use crate::error::{Error, Result};
 use crate::log;
 
-#[allow(
-    dead_code,
-    reason = "IOAPIC pouzije sprava preruseni zarizeni (milnik 6)"
-)]
+#[allow(dead_code, reason = "ID IOAPIC zatim nepotrebujeme (cil je LAPIC)")]
 #[derive(Debug, Clone, Copy)]
 pub struct IoApic {
     pub id: u8,
@@ -21,10 +18,6 @@ pub struct IoApic {
     pub gsi_base: u32,
 }
 
-#[allow(
-    dead_code,
-    reason = "IOAPIC pouzije sprava preruseni zarizeni (milnik 6)"
-)]
 #[derive(Debug, Clone, Copy)]
 pub struct InterruptOverride {
     pub source_irq: u8,

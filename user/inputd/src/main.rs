@@ -212,6 +212,19 @@ fn command(svc: &mut Service, data: &[u8], mut handles: Vec<Handle>) -> (String,
             let _ = st.format(&mut text);
             (text, Vec::new())
         }
+        control::SOURCES => {
+            let mut text = String::from("ok\n");
+            for s in &svc.sources {
+                let info = inputproto::control::SourceInfo {
+                    id: s.id,
+                    caps: s.caps,
+                    synthetic: s.synthetic,
+                    name: &s.name,
+                };
+                let _ = info.format(&mut text);
+            }
+            (text, Vec::new())
+        }
         _ => err(Error::NotSupported),
     }
 }

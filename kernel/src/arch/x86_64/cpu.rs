@@ -50,6 +50,50 @@ pub unsafe fn inb(port: u16) -> u8 {
 
 /// # Safety
 ///
+/// Jako [`inb`] (16 bitu).
+pub unsafe fn inw(port: u16) -> u16 {
+    let value: u16;
+    // SAFETY: predano volajicim.
+    unsafe {
+        asm!("in ax, dx", in("dx") port, out("ax") value, options(nomem, nostack, preserves_flags))
+    };
+    value
+}
+
+/// # Safety
+///
+/// Jako [`inb`] (32 bitu).
+pub unsafe fn inl(port: u16) -> u32 {
+    let value: u32;
+    // SAFETY: predano volajicim.
+    unsafe {
+        asm!("in eax, dx", in("dx") port, out("eax") value, options(nomem, nostack, preserves_flags))
+    };
+    value
+}
+
+/// # Safety
+///
+/// Jako [`outb`] (16 bitu).
+pub unsafe fn outw(port: u16, value: u16) {
+    // SAFETY: predano volajicim.
+    unsafe {
+        asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack, preserves_flags))
+    };
+}
+
+/// # Safety
+///
+/// Jako [`outb`] (32 bitu).
+pub unsafe fn outl(port: u16, value: u32) {
+    // SAFETY: predano volajicim.
+    unsafe {
+        asm!("out dx, eax", in("dx") port, in("eax") value, options(nomem, nostack, preserves_flags))
+    };
+}
+
+/// # Safety
+///
 /// Zapis na I/O port muze mit libovolny vedlejsi efekt na hardware;
 /// volajici ruci, ze port patri zarizeni, ktere obsluhuje.
 pub unsafe fn outb(port: u16, value: u8) {
