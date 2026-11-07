@@ -483,6 +483,28 @@ With an IOMMU the device may moreover DMA only into memory created through
 its resource (see [kernel.md](kernel.md#iommu-dma-protection)); without an
 IOMMU it can write anywhere.
 
+### Firmware framebuffer
+
+Not a system call but a handle kind in init's start message
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7). The kernel sends it when the
+loader found a GOP framebuffer that lies outside the RAM used by the
+allocator and starts on a page boundary:
+
+| Field | Meaning |
+|---|---|
+| handle | physical memory object of the framebuffer, rights `READ \| WRITE \| MAP`; it can be read and written only through a mapping (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`, as a syscall buffer `BAD_ADDRESS`) |
+| `arg` | offset of the `FramebufferInfo` structure in the message data (after the entries) |
+| `FramebufferInfo` (16 B, LE) | `width`, `height`, `stride` (pixels per row, >= `width`), `format` (`pixel::RGB` = 1: bytes R, G, B, reserved; `pixel::BGR` = 2: B, G, R, reserved) |
+
+The object is mapped **write-combining** (x86_64: PAT entry 1 = WC, set by
+the kernel on every CPU; aarch64: Normal Non-cacheable). After sending the
+message the kernel console no longer draws into the framebuffer (only a
+panic does), kernel output goes to the serial line. Init passes the object
+to the `fbdisplay` driver (see [GUI](gui.md#displays-virtio-gpu-and-fbdisplay))
+when there is no virtio-gpu. Data after the entries is new in this message
+version (the version stays 1: older programs ignore it); libos reads at
+most 64 B of extra data.
+
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. A physically contiguous memory object for DMA

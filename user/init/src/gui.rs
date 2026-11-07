@@ -14,17 +14,21 @@ use core::time::Duration;
 use guiproto::control::{self, ConnectInfo, Status};
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
-use libos::{Channel, Error, Handle, Process, Result, Startup, println, time};
+use libos::abi::bootstrap::FramebufferInfo;
+use libos::{Channel, Error, Handle, Process, Result, Startup, Vmo, println, time};
 
 use crate::apps::{self, App};
 use crate::input::Input;
 
-/// Kanal ovladace grafiky (od spravce zarizeni), dokud ho nevezme
-/// kompozitor.
+/// Kanal ovladace grafiky (od spravce zarizeni, nebo `fbdisplay`), dokud
+/// ho nevezme kompozitor.
 pub static DISPLAY: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Bezici GUI (bezny beh).
 pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
+
+/// Ovladac `fbdisplay` (framebuffer z firmwaru), bezi-li.
+pub static FBDISPLAY: spin::Mutex<Option<Process>> = spin::Mutex::new(None);
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -34,6 +38,32 @@ pub struct Gui {
     pub apps: Vec<App>,
     /// Velikost obrazovky.
     pub size: (u32, u32),
+}
+
+/// Spusti ovladac `fbdisplay` nad framebufferem z firmwaru (bootstrap
+/// `FRAMEBUFFER` od jadra) a vrati jeho proces a kanal displeje. Pouziva
+/// se, kdyz spravce zarizeni nenajde virtio-gpu (to ma prednost).
+pub fn start_fbdisplay(startup: &Startup, fb: Vmo, info: FramebufferInfo) -> Result<(Process, Channel)> {
+    let format = fbcopy::Format::from_abi(info.format).ok_or(Error::InvalidArgs)?;
+    let geo = fbcopy::Geometry {
+        width: info.width,
+        height: info.height,
+        stride: info.stride,
+        format,
+    };
+    let mut config = String::new();
+    geo.write(&mut config).map_err(|_| Error::InvalidArgs)?;
+    let fs = Initfs::open(startup)?;
+    let image = fs.find("fbdisplay").ok_or(Error::NotFound)?;
+    let (mine, theirs) = Channel::create()?;
+    let (process, boot) = libos::spawn(
+        "fbdisplay",
+        image,
+        vec![StartHandle::user(fb.into_handle()), StartHandle::user(theirs.into_handle())],
+    )?;
+    boot.write(config.as_bytes(), Vec::new())?;
+    println!("init: displej je framebuffer z firmwaru ({config})");
+    Ok((process, mine))
 }
 
 /// Spusti kompozitor nad displejem z [`DISPLAY`].
@@ -131,7 +161,7 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>) {
     let mut gui = match start(startup) {
         Ok(g) => g,
         Err(Error::NotFound) => {
-            println!("init: grafika (virtio-gpu) neni, GUI nespoustim");
+            println!("init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim");
             return;
         }
         Err(e) => {

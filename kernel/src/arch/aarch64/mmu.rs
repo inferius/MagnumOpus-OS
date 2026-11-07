@@ -77,6 +77,9 @@ fn leaf_bits(flags: MapFlags, size: PageSize, virt: u64) -> u64 {
     if flags.contains(MapFlags::UNCACHED) {
         // Registry zarizeni: nikdy spustitelne.
         bits |= ATTR_DEVICE << 2 | PXN | UXN;
+    } else if flags.contains(MapFlags::WRITE_COMBINE) {
+        // Framebuffer: Normal Non-cacheable (slucuje zapisy), nespustitelne.
+        bits |= ATTR_NORMAL_NC << 2 | SH_INNER | PXN | UXN;
     } else {
         let attr = if flags.contains(MapFlags::DMA) && !DMA_COHERENT.load(Ordering::Relaxed) {
             ATTR_NORMAL_NC

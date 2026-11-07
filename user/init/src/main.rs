@@ -2,7 +2,8 @@
 //!
 //! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
 //! souboroveho systemu, sluzbu vstupu, sluzbu site s firewallem a GUI
-//! (kompozitor a ukazkove aplikace, `gui.rs`). Pak bezi
+//! (kompozitor a ukazkove aplikace, `gui.rs`; displej je virtio-gpu od
+//! spravce zarizeni, jinak `fbdisplay` nad framebufferem z firmwaru). Pak bezi
 //! jako supervisor (`supervisor.rs`: zarizeni pripojena za behu, restart
 //! spadlych sluzeb). V testovacim behu (priznak `TEST_RUN` od jadra) misto
 //! toho spusti testy userspace (`tests/`) a skonci s jejich vysledkem.
@@ -24,7 +25,7 @@ use libos::{Startup, println};
 
 libos::entry!(main);
 
-fn main(startup: Startup) -> i64 {
+fn main(mut startup: Startup) -> i64 {
     println!("init: bezim v userspace");
     let mut sup = supervisor::SUPERVISOR.lock();
     match system::start_time(&startup) {
@@ -67,6 +68,20 @@ fn main(startup: Startup) -> i64 {
             system::DEVICES.call_once(|| devices);
         }
         Err(e) => println!("init: spravce zarizeni nelze spustit: {e}"),
+    }
+    // Bez virtio-gpu (ma prednost) displej nad framebufferem z firmwaru.
+    let framebuffer = startup.framebuffer.take();
+    if gui::DISPLAY.lock().is_none()
+        && let Some((vmo, info)) = framebuffer
+    {
+        match gui::start_fbdisplay(&startup, vmo, info) {
+            Ok((p, ch)) => {
+                sup.watch("fbdisplay", &p, None);
+                *gui::FBDISPLAY.lock() = Some(p);
+                *gui::DISPLAY.lock() = Some(ch);
+            }
+            Err(e) => println!("init: fbdisplay nelze spustit: {e}"),
+        }
     }
     if startup.flags & libos::abi::bootstrap::flags::TEST_RUN == 0 {
         // GUI: kompozitor prevezme vstup a obrazovku (testy si ho spusti samy).

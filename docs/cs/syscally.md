@@ -474,6 +474,27 @@ Kořenový Resource má navíc právo `SET_CLOCK` (nastavení hodin,
 [`CLOCK_SET`](#clock_set)). Správce zařízení dostane kořen bez něj
 a omezené prostředky ho nemají nikdy.
 
+### Framebuffer z firmwaru
+
+Není to syscall, ale druh handlu ve startovní zprávě initu
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7). Jádro ho pošle, když loader
+našel framebuffer GOP a ten leží mimo RAM pro alokátor a začíná na hranici
+stránky:
+
+| Pole | Význam |
+|---|---|
+| handle | fyzický objekt paměti framebufferu, práva `READ \| WRITE \| MAP`; číst a psát jde jen přes mapování (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`, jako buffer syscallu `BAD_ADDRESS`) |
+| `arg` | offset struktury `FramebufferInfo` v datech zprávy (za položkami) |
+| `FramebufferInfo` (16 B, LE) | `width`, `height`, `stride` (pixely na řádek, >= `width`), `format` (`pixel::RGB` = 1: bajty R, G, B, rezerva; `pixel::BGR` = 2: B, G, R, rezerva) |
+
+Objekt se mapuje **write-combining** (x86_64: PAT položka 1 = WC, jádro ji
+nastaví na každém CPU; aarch64: Normal Non-cacheable). Po odeslání zprávy
+konzole jádra do framebufferu nekreslí (jen panika), výstup jádra jde na
+sériovou linku. Init objekt předá ovladači `fbdisplay` (viz
+[Grafika](gui.md#displeje-virtio-gpu-a-fbdisplay)), když není virtio-gpu.
+Data za položkami jsou nová v této verzi zprávy (verze zůstává 1: starší
+program je ignoruje); libos čte nejvýš 64 B doplňkových dat.
+
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. Fyzicky souvislý objekt paměti pro DMA

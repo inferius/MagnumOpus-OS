@@ -969,7 +969,8 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 | What | Why | Gone when |
 |---|---|---|
 | serial driver in the kernel | debug output before userspace exists | stays only as an early console |
-| framebuffer console in the kernel | same | with a virtio-gpu device the compositor takes over the screen; without one (UEFI framebuffer) it stays until the kernel hands the framebuffer over (bootstrap FRAMEBUFFER) |
+| framebuffer console in the kernel | same | only until init starts: then the kernel hands the framebuffer over (bootstrap `FRAMEBUFFER`) and the compositor takes the screen through virtio-gpu, or without it through `fbdisplay` ([GUI](gui.md#displays-virtio-gpu-and-fbdisplay)); afterwards only a kernel panic writes into the framebuffer |
+| `fbdisplay` (GOP framebuffer) | GUI on machines without virtio-gpu (VMware, Hyper-V, VirtualBox, PCs) | fixed firmware resolution, no acceleration and no vsync; replaced by native GPU drivers |
 
 ## Milestones
 

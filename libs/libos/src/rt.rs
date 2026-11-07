@@ -100,6 +100,9 @@ pub struct Startup {
     /// Okna ECAM (konfigurace PCI Express): objekt pameti a `arg` ze zpravy
     /// (prvni sbernice | posledni << 8 | segment << 16).
     pub pci_ecam: Vec<(Vmo, u32)>,
+    /// Framebuffer z firmwaru (UEFI GOP) a jeho geometrie (dostava jen
+    /// init, ten ho preda ovladaci `fbdisplay`).
+    pub framebuffer: Option<(Vmo, bootstrap::FramebufferInfo)>,
     /// Bootstrap kanal: spojeni s rodicem.
     pub bootstrap: Channel,
     /// Priznaky startu (`abi::bootstrap::flags`; nastavuje je jen jadro
@@ -146,8 +149,11 @@ fn fail(msg: &str) -> ! {
 
 /// Nejvic handlu ve startovni zprave (= nejvic handlu jedne zpravy kanalu).
 const MAX_START_HANDLES: usize = abi::syscall::CHANNEL_MAX_HANDLES;
-/// Startovni zprava: hlavicka a polozka na kazdy handle.
-const START_DATA_MAX: usize = bootstrap::HEADER_SIZE + MAX_START_HANDLES * bootstrap::ENTRY_SIZE;
+/// Doplnkova data za polozkami (geometrie framebufferu).
+const START_EXTRA_MAX: usize = 64;
+/// Startovni zprava: hlavicka, polozka na kazdy handle a doplnkova data.
+const START_DATA_MAX: usize =
+    bootstrap::HEADER_SIZE + MAX_START_HANDLES * bootstrap::ENTRY_SIZE + START_EXTRA_MAX;
 
 /// Handly ze startovni zpravy roztridene podle druhu (bez heapu).
 struct Received {
@@ -158,6 +164,7 @@ struct Received {
     resource: Option<u32>,
     ecam: [(u32, u32); 4],
     ecam_count: usize,
+    framebuffer: Option<(u32, bootstrap::FramebufferInfo)>,
     user: [u32; MAX_START_HANDLES],
     user_count: usize,
 }
@@ -184,6 +191,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
         resource: None,
         ecam: [(0, 0); 4],
         ecam_count: 0,
+        framebuffer: None,
         user: [0; MAX_START_HANDLES],
         user_count: 0,
     };
@@ -206,6 +214,18 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             bootstrap::kind::PCI_ECAM if got.ecam_count < got.ecam.len() => {
                 got.ecam[got.ecam_count] = (handle, arg);
                 got.ecam_count += 1;
+            }
+            bootstrap::kind::FRAMEBUFFER => {
+                let info = data
+                    .get(arg as usize..dlen)
+                    .and_then(bootstrap::FramebufferInfo::from_bytes);
+                match info {
+                    Some(info) => got.framebuffer = Some((handle, info)),
+                    None => {
+                        sys::debug_log("libos: neplatna geometrie framebufferu");
+                        let _ = sys::handle_close(handle);
+                    }
+                }
             }
             _ if got.user_count < got.user.len() => {
                 got.user[got.user_count] = handle;
@@ -237,6 +257,9 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             .iter()
             .map(|&(h, arg)| (Vmo::from_handle(Handle::from_raw(h)), arg))
             .collect(),
+        framebuffer: got
+            .framebuffer
+            .map(|(h, info)| (Vmo::from_handle(Handle::from_raw(h)), info)),
         bootstrap,
         flags: got.flags,
     };

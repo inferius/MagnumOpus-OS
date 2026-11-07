@@ -16,6 +16,7 @@ blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }
 inputproto = { path = "../../libs/inputproto" }
 guiproto = { path = "../../libs/guiproto" }
+fbcopy = { path = "../../libs/fbcopy" }
 netproto = { path = "../../libs/netproto", features = ["client"] }
 manifest = { path = "../../libs/manifest" }
 conf = { workspace = true }

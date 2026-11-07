@@ -1,6 +1,6 @@
 # Grafika a okna (GUI)
 
-Milník 6c. Popisuje ovladač `virtio-gpu`, kompozitor `compd`, protokol
+Milník 6c. Popisuje ovladače displeje (`virtio-gpu`, `fbdisplay`), kompozitor `compd`, protokol
 okna (`libs/guiproto`), nativní knihovnu UI (`libs/ui`), písmo
 (`libs/font`), kreslení (`libs/gfx`), systémové dialogy a API akcí.
 Odsouhlasená rozhodnutí jsou v [Architektuře](architektura.md#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno)
@@ -74,6 +74,8 @@ a v tabulce [Rozhodnutí 6c](#rozhodnutí-6c-odsouhlaseno) níže.
 init
  ├─ devmgr ── najde PCI 1af4:1050 (virtio-gpu) ── spustí virtio-gpu
  │            initu pošle zprávu `display` + kanál (displayproto)
+ ├─ fbdisplay ─ jen když `display` nepřišel: framebuffer z firmwaru
+ │              (bootstrap FRAMEBUFFER od jádra), viz Displeje
  ├─ inputd
  └─ compd ─── init mu pošle `display` (kanál ovladače), `input`
               (nový kanál fokusu od inputd), `secure` (kanál zkratky)
@@ -518,6 +520,94 @@ a initu hlásí zprávu `display`. V QEMU je zařízení
 `virtio-gpu-pci,iommu_platform=on,xres=1280,yres=800` na x86_64
 i aarch64.
 
+## Displeje: virtio-gpu a fbdisplay
+
+Kompozitor kreslí celý snímek do své VMO a ovladači displeje posílá jen
+poškozené obdélníky (`guiproto::display`). Ovladač tak jde vyměnit bez
+změny kompozitoru. Jsou dva:
+
+| | `virtio-gpu` | `fbdisplay` |
+|---|---|---|
+| kde | QEMU (a jiné hypervizory s virtio-gpu) | cokoli s UEFI GOP: VMware, Hyper-V gen2, VirtualBox, skutečné PC; v QEMU `--gpu none` |
+| kdo spouští | `devmgr` (PCI `1af4:1050`), zpráva `display` | `init`, když `display` nepřijde |
+| rozlišení | z `GET_DISPLAY_INFO` (zatím pevné po startu) | **pevné**: režim, který nastavil firmware (loader ho nemění) |
+| kopie | do bufferů DMA + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` | přímý zápis do paměti obrazovky (write-combining), po řádcích |
+| formát | `B8G8R8X8_UNORM` (jako kompozitor) | RGB nebo BGR podle firmwaru; převod a odstranění alfy při kopii |
+| akcelerace, vsync | virgl/Venus jako další krok; `PRESENTED` po flush | **žádná**; `PRESENTED` hned po kopii (bez čekání na vsync) |
+| víc monitorů | víc výstupů (scanout) | jeden (výstup 0) |
+
+**Přednost má virtio-gpu.** Loader proto už při startu vybírá GOP, který
+není virtio-gpu (`loader/src/pci_id.rs`): na QEMU x86_64 VGA, na aarch64
+ramfb. Bez GOP (nebo s nepodporovaným formátem, např. `PixelBitMask`)
+framebuffer není a bez virtio-gpu GUI nenaběhne (`init: grafika
+(virtio-gpu ani framebuffer) neni`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Výběr ovladače displeje">
+<defs><marker id="fbd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="200" height="70" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">loader (UEFI)</text><text class="m" x="110" y="64" text-anchor="middle">vybere GOP mimo virtio-gpu</text><text class="m" x="110" y="80" text-anchor="middle">fyz. adresa, w, h, stride, RGB/BGR</text>
+<rect class="box" x="10" y="130" width="200" height="80" rx="6"/><text class="t b" x="110" y="155" text-anchor="middle">jádro</text><text class="m" x="110" y="174" text-anchor="middle">konzole do fb do startu initu</text><text class="m" x="110" y="190" text-anchor="middle">pak bootstrap FRAMEBUFFER</text><text class="m" x="110" y="204" text-anchor="middle">(VMO write-combining)</text>
+<path class="ln" d="M110 90 L110 128" marker-end="url(#fbd1)"/>
+<rect class="acc" x="290" y="130" width="200" height="80" rx="6"/><text class="t b" x="390" y="155" text-anchor="middle">init</text><text class="m" x="390" y="174" text-anchor="middle">devmgr hlásí display?</text><text class="m" x="390" y="190" text-anchor="middle">ano: virtio-gpu</text><text class="m" x="390" y="204" text-anchor="middle">ne: spustí fbdisplay</text>
+<path class="ln" d="M210 170 L288 170" marker-end="url(#fbd1)"/>
+<rect class="box" x="570" y="20" width="200" height="70" rx="6"/><text class="t b" x="670" y="45" text-anchor="middle">virtio-gpu</text><text class="m" x="670" y="64" text-anchor="middle">DMA + TRANSFER + FLUSH</text><text class="m" x="670" y="80" text-anchor="middle">(přednost)</text>
+<rect class="box" x="570" y="130" width="200" height="80" rx="6"/><text class="t b" x="670" y="155" text-anchor="middle">fbdisplay</text><text class="m" x="670" y="174" text-anchor="middle">kopie obdélníků do fb</text><text class="m" x="670" y="190" text-anchor="middle">převod RGB/BGR, bez alfy</text><text class="m" x="670" y="204" text-anchor="middle">pevné rozlišení</text>
+<path class="ln" d="M490 150 L568 70" marker-end="url(#fbd1)"/><text class="m" x="500" y="100">display</text>
+<path class="ln" d="M490 175 L568 175" marker-end="url(#fbd1)"/><text class="m" x="500" y="168">jinak</text>
+<rect class="ok" x="290" y="240" width="200" height="50" rx="6"/><text class="t b" x="390" y="262" text-anchor="middle">compd</text><text class="m" x="390" y="279" text-anchor="middle">stejný protokol pro oba</text>
+<path class="ln" d="M390 210 L390 238" marker-end="url(#fbd1)"/><text class="m" x="398" y="228">kanál displeje (gui::DISPLAY)</text>
+</svg>
+<figcaption>Výběr ovladače displeje. Kompozitor neví, který z nich běží.</figcaption>
+</figure>
+
+### Předání framebufferu z jádra
+
+Jádro předá initu framebuffer ve startovní zprávě (druh `FRAMEBUFFER`,
+viz [Syscally](syscally.md#framebuffer-z-firmwaru)): fyzický objekt paměti
+a geometrii (`abi::bootstrap::FramebufferInfo`: šířka, výška, krok
+v pixelech, formát). Od té chvíle konzole jádra do framebufferu nekreslí,
+log jde dál na sériovou linku. Výjimka je panika jádra: tu jádro do
+framebufferu vypíše i po předání (systém stejně končí a hlášení je
+cennější než obraz).
+
+Jádro framebuffer nepředá (zůstane u konzole jádra a varuje v logu), když
+by překrýval RAM pro alokátor, nezačíná na hranici stránky nebo je menší
+než jeho geometrie.
+
+### Ovladač fbdisplay
+
+`user/fbdisplay` dostane od initu objekt paměti framebufferu a kanál
+displeje (kind USER) a jako první zprávu na bootstrap kanálu konfiguraci
+`fb <šířka> <výška> <krok> <rgb|bgr>` (`fbcopy::Geometry`). Protokol:
+
+1. `INFO` -> `MODES` s jediným výstupem o rozlišení firmwaru, schopnosti 0,
+2. `ATTACH` s VMO kompozitoru (jen čtení); jiná velikost než framebuffer
+   = `NOT_SUPPORTED`, po připojení se překreslí celá obrazovka,
+3. `PRESENT` -> obdélníky se ořežou na obrazovku (`normalize_rects`)
+   a zkopírují po řádcích (`fbcopy::copy_rect`): u BGR jen vynulovaná
+   alfa, u RGB prohozené R a B; pak bariéra (vyprázdní buffery
+   write-combining) a `PRESENTED` s časem.
+
+Framebuffer se mapuje **write-combining** (x86_64: položka PAT 1, kterou
+jádro přepíše z WT na WC; aarch64: Normal Non-cacheable). Zápisy se
+slučují do celých řádků sběrnice, čtení je pomalé - proto ovladač
+z framebufferu nikdy nečte.
+
+**Výkon a omezení:**
+
+- celá obrazovka 1920 x 1080 = 8 MiB na snímek; s write-combining to
+  skutečné PC zvládne za jednotky ms (jde o rychlost sběrnice ke grafice).
+  Mapování bez cache (UC) by bylo řádově pomalejší - proto WC.
+- ⚠️ **Rozlišení je pevné**: GOP po `ExitBootServices` režim měnit nedovolí.
+  Jiné rozlišení jen volbou ve firmwaru nebo (později) v loaderu před
+  startem jádra.
+- ⚠️ **Bez vsync**: snímek se může roztrhnout (kopie běží v době
+  vykreslování monitoru). Firmware nedává žádné přerušení snímku.
+- ⚠️ **Mapování framebufferu i v přímé mapě jádra** má typ cache podle MTRR
+  firmwaru, proces ho má WC. Dvě mapování s různým typem jsou na x86
+  formálně nedefinovaná; jádro po předání přes svoje mapování nepíše
+  (jen při panice), takže v praxi nevadí.
+
 ## Nativní knihovna UI (`libs/ui`)
 
 Jedna knihovna pro všechny aplikace, deklarativní v Rustu:
@@ -606,7 +696,7 @@ skládání kompozitoru.
 
 | Co | Stav |
 |---|---|
-| `cargo xtask run/test --gpu 2d\|gl\|venus` | volba zařízení: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; bez okna displej `egl-headless` |
+| `cargo xtask run/test --gpu 2d\|gl\|venus\|none` | volba zařízení: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; bez okna displej `egl-headless`; `none` = bez virtio-gpu (GUI přes `fbdisplay`) |
 | ovladač | vyjedná `VIRGL`, `RESOURCE_BLOB`, `CONTEXT_INIT` a vypíše capsety, např. `virgl(v1) virgl2(v2)` |
 | `vgpu::virgl` | vlastní kodér proudu příkazů virgl (stavové objekty, shadery TGSI, vrcholy, kreslení, scissor) a příkazy 3D virtio-gpu, testy na hostiteli |
 | skládání přes GPU | čeká: na tomto hostiteli (QEMU 11.1 pro Windows) se se zapnutým OpenGL (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) virtuální stroj po startu jádra zastaví |
@@ -630,14 +720,16 @@ hardwaru Vulkan přinese port Mesy (milník 7).
 | restart kompozitoru | supervisor ho jen hlídá | okna patří kompozitoru; po pádu by se aplikace musely připojit znovu |
 | commit držený ve skupině | uplatní se až s celou skupinou, i když klient mezitím poslal další běžný commit | klient ve skupině má čekat na `PRESENTED`; přísné pořadí commitů jednoho klienta přijde s GPU backendem |
 | pád ovladače displeje | kompozitor běží dál bez obrazu (okna, dialogy, akce) | restart ovladače zatím není |
+| displej bez virtio-gpu | `fbdisplay`: pevné rozlišení z firmwaru, bez akcelerace a vsync | nativní ovladače GPU (pozdější milník) |
 
 ## Testy
 
 - **hostitel** (součást `cargo xtask test`): `cargo test -p guiproto -p gfx
-  -p font -p vgpu -p comp -p ui` - kódování zpráv a odolnost proti
+  -p font -p vgpu -p fbcopy -p comp -p ui` - kódování zpráv a odolnost proti
   vadným zprávám, barvy a prolínání, ořez, poškozené oblasti, text,
   rasterizér (přesné pokrytí čtverce, háček nad písmenem, náhodně poškozený
-  soubor písma), příkazy virtio-gpu, transakce a jejich atomicita,
+  soubor písma), příkazy virtio-gpu, převod RGB/BGR a kopie obdélníků
+  s ořezem do framebufferu (`fbcopy`), transakce a jejich atomicita,
   skupiny transakcí (včetně termínu), synchronizovaná změna velikosti,
   rozdělení vstupu a fokus, přesun okna titulkem bez aplikace, deklarované
   oblasti vlastního titulku, odznak nad obsahem aplikace, odznak
@@ -654,3 +746,8 @@ hardwaru Vulkan přinese port Mesy (milník 7).
   `note.add`, akce agenta čeká na potvrzení), systémový dialog nepřijme
   umělý Enter a přijme fyzické klávesy z QEMU (QMP), bezpečná obrazovka
   po Ctrl+Alt+Del z QEMU, okno terminálu s vlastním titulkem.
+- **QEMU bez virtio-gpu** (`cargo xtask test --gpu none`, x86_64
+  i aarch64): stejná sada `gui` nad `fbdisplay` (x86_64 VGA, aarch64
+  ramfb). Pixely kontroluje inspekce kompozitoru, ne ovladač, takže sada
+  ověří kompozitor a protokol displeje nad fbdisplay; obsah samotného
+  framebufferu QEMU test nečte.

@@ -11,6 +11,9 @@ use crate::framebuffer::FbConsole;
 struct Console {
     serial: SerialPort,
     fb: Option<FbConsole>,
+    /// Framebuffer predan do userspace (`release_framebuffer`): bezny
+    /// vystup jde jen na seriovou linku, do framebufferu pise jen panika.
+    released: bool,
 }
 
 static CONSOLE: SpinLock<Option<Console>> = SpinLock::new(None);
@@ -26,7 +29,20 @@ pub unsafe fn init(fb: &Framebuffer) {
     arch::init_debug_serial(&mut serial);
     // SAFETY: predano od volajiciho.
     let fb = fb.is_present().then(|| unsafe { FbConsole::new(fb) });
-    *CONSOLE.lock() = Some(Console { serial, fb });
+    *CONSOLE.lock() = Some(Console {
+        serial,
+        fb,
+        released: false,
+    });
+}
+
+/// Framebuffer prevezme userspace (bootstrap `FRAMEBUFFER`): jadro do nej
+/// od ted kresli jen pri panice (system stejne konci a hlaseni je
+/// uzitecnejsi nez obraz).
+pub fn release_framebuffer() {
+    if let Some(console) = CONSOLE.lock().as_mut() {
+        console.released = true;
+    }
 }
 
 /// Zapise text na seriovou linku a pripadne i do framebufferu.
@@ -34,7 +50,9 @@ pub unsafe fn init(fb: &Framebuffer) {
 pub fn write(text: &str, to_framebuffer: bool) {
     if let Some(console) = CONSOLE.lock().as_mut() {
         let _ = console.serial.write_str(text);
-        if to_framebuffer && let Some(fb) = console.fb.as_mut() {
+        if to_framebuffer
+            && !console.released
+            && let Some(fb) = console.fb.as_mut() {
             let _ = fb.write_str(text);
         }
     }

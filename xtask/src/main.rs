@@ -49,10 +49,12 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
+                   none; aarch64 smmu (vychozi), none
   --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi), gl (virgl 3D)
                    nebo venus (Vulkan; QEMU s virglrenderer a render serverem);
-                   gl a venus bez okna pouziji displej egl-headless
-                   none; aarch64 smmu (vychozi), none
+                   gl a venus bez okna pouziji displej egl-headless;
+                   none = bez virtio-gpu (GUI nad framebufferem z firmwaru,
+                   ovladac fbdisplay)
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
@@ -70,7 +72,8 @@ pub struct Options {
     /// aarch64 "smmu", "none".
     iommu: String,
     /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
-    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl).
+    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl);
+    /// "none" = bez virtio-gpu (displej `fbdisplay` nad framebufferem GOP).
     gpu: String,
     qemu_args: Vec<OsString>,
     /// Cilova architektura.
@@ -126,10 +129,10 @@ fn run_cli() -> Result<()> {
                 opts.iommu = value.to_string_lossy().into_owned();
             }
             Some("--gpu") => {
-                let value = args.next().ok_or("--gpu ocekava 2d, gl nebo venus")?;
+                let value = args.next().ok_or("--gpu ocekava 2d, gl, venus nebo none")?;
                 opts.gpu = value.to_string_lossy().into_owned();
-                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus") {
-                    return Err("--gpu ocekava 2d, gl nebo venus".into());
+                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus" | "none") {
+                    return Err("--gpu ocekava 2d, gl, venus nebo none".into());
                 }
             }
             Some("--arch") => {
@@ -252,6 +255,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "vgpu",
             "--package",
+            "fbcopy",
+            "--package",
             "comp",
             "--package",
             "ui",
@@ -341,6 +346,7 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-net",
     "virtio-rng",
     "virtio-gpu",
+    "fbdisplay",
     "compd",
     "gui-demo",
     "gui-term",

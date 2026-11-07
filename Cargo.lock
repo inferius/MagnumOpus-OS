@@ -326,6 +326,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fbcopy"
+version = "0.1.0"
+
+[[package]]
+name = "fbdisplay"
+version = "0.1.0"
+dependencies = [
+ "fbcopy",
+ "guiproto",
+ "libos",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -528,6 +541,7 @@ version = "0.1.0"
 dependencies = [
  "blockproto",
  "conf",
+ "fbcopy",
  "fsproto",
  "guiproto",
  "inputproto",

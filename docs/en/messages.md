@@ -74,6 +74,8 @@ The loader writes through the firmware console (screen and serial) as
 | `initfs je poskozeny: ...` | E | The initfs image has the wrong format (`libs/initfs`). Rebuild. |
 | `initfs neobsahuje program init` | E | The `init` file is missing from initfs. |
 | `init neni platny program: ...` | E | `init` is not a static ELF64 for x86_64. |
+| `framebuffer predan initu, konzole jadra dal jen na seriove lince` | I | Init got the firmware framebuffer (bootstrap `FRAMEBUFFER`); `fbdisplay` or virtio-gpu takes over the screen. Afterwards only a panic writes into the framebuffer. |
+| `framebuffer se do userspace nepreda: ...` | W | The framebuffer overlaps RAM used by the allocator, does not start on a page boundary or is smaller than its geometry. The kernel console keeps using it, the GUI does not start without virtio-gpu. |
 | `init: poskozeny segment: ...` | E | An ELF segment lies outside the file. |
 | `init se nepodarilo spustit: ...` | E | Summary with the error code ([errors.md](errors.md)). |
 | `init spusten (proces N), vstup ...` | I | The first process is running. |
@@ -103,6 +105,7 @@ invariant was broken (a kernel bug).
 | `libos: chybi nebo je prilis velka startovni zprava` | The process got no startup message (`abi::bootstrap`). It exits with code -1,000,001. |
 | `libos: neplatna startovni zprava` | The message has the wrong magic number or version. |
 | `libos: startovni zprava neobsahuje handle procesu` | `SELF_PROCESS` is missing. |
+| `libos: neplatna geometrie framebufferu` | The `FRAMEBUFFER` entry points outside the message data or has an invalid geometry; the handle is closed and the program gets no framebuffer. |
 | `PANIC: ...` when out of memory | A panic is formatted into a stack buffer (max. 512 B), so it can be printed even without free memory. A panic during a panic just ends the process. |
 | `libos: nedostatek pameti pro heap` | The program cannot start: the initial heap (4 MiB) cannot be created or mapped. The heap then grows on demand; when it can no longer grow (out of memory or the reserved 64 GiB range), the allocation fails and the program panics (`PANIC: ... alloc.rs ...`). |
 | `PANIC: ...` | The program panicked; the process exits with code -1,000,001. |
@@ -124,6 +127,11 @@ invariant was broken (a kernel bug).
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | The PS/2 driver found a keyboard, a mouse (kind from the ID: wheel, 5 buttons). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 reads `0xFF` (no controller) or no device was found (PS/2 controller not found). Normal on modern boards without PS/2. |
+| `init: displej je framebuffer z firmwaru (fb W H STRIDE FORMAT)` | The device manager found no virtio-gpu, the GUI runs through `fbdisplay` at the fixed firmware resolution (display is the firmware framebuffer). |
+| `fbdisplay: framebuffer WxH (krok S, rgb/bgr)` | The framebuffer driver is ready. |
+| `fbdisplay: chybi handly ...`, `fbdisplay: neplatna konfigurace od initu` | Init started it without the memory object and channel or with a broken first message (an init bug). |
+| `fbdisplay: framebuffer nelze namapovat: ...` | Mapping the framebuffer failed (e.g. `NO_RESOURCES` - no free space in the address space). |
+| `init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim` | There is no virtio-gpu and the kernel did not hand over a framebuffer (no GOP, unsupported pixel format, see the kernel messages). |
 | `ps2: radic neodpovida spravne: ...` | The controller exists but failed its self-test or did not answer in time (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | The port exists but no device answers on it (nothing connected). |
 | `xhci BB:DD.F: N portu (M USB 3), S slotu, kontext K B` | The USB controller is ready (N ports, M of them USB 3, S slots, K-byte contexts). |

@@ -173,6 +173,9 @@ impl AddressSpace {
         if vmo.is_uncached() {
             map_flags = map_flags | MapFlags::UNCACHED;
         }
+        if vmo.is_write_combine() {
+            map_flags = map_flags | MapFlags::WRITE_COMBINE;
+        }
         if vmo.is_dma() {
             map_flags = map_flags | MapFlags::DMA;
         }
@@ -276,7 +279,7 @@ impl AddressSpace {
             let (start, m) = inner.mapping_at(pos).ok_or(Error::BadAddress)?;
             // Registry zarizeni nejsou v prime mape: jako buffer syscallu
             // je nelze pouzit.
-            if (write && m.flags & MAP_WRITE == 0) || m.vmo.is_uncached() {
+            if (write && m.flags & MAP_WRITE == 0) || m.vmo.is_device() {
                 return Err(Error::BadAddress);
             }
             pos = start + m.len;

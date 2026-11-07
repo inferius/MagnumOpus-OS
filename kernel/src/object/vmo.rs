@@ -5,7 +5,9 @@
 //! - bezny: stranky RAM alokovane a vynulovane hned pri vytvoreni,
 //! - souvisly: fyzicky souvisla RAM pro DMA (ovladace zjisti fyzickou adresu),
 //! - fyzicky: okno na registry zarizeni (MMIO); stranky nepatri alokatoru
-//!   a mapuji se bez cache.
+//!   a mapuji se bez cache,
+//! - framebuffer: fyzicky rozsah obrazovky z firmwaru; jako fyzicky, ale
+//!   mapuje se write-combining.
 //!
 //! Objekt nemeni velikost. TODO: lazy alokace pri prvnim pristupu,
 //! copy-on-write klony.
@@ -57,6 +59,8 @@ enum Kind {
     Contiguous { order: usize },
     /// Fyzicky rozsah mimo RAM (registry zarizeni).
     Physical,
+    /// Fyzicky rozsah framebufferu (mapuje se write-combining).
+    Framebuffer,
 }
 
 pub struct MemoryObject {
@@ -159,6 +163,21 @@ impl MemoryObject {
         size: u64,
         job: Option<&Arc<Job>>,
     ) -> Result<Arc<Self>, Error> {
+        Self::physical(phys_start, size, job, Kind::Physical)
+    }
+
+    /// Okno na framebuffer z firmwaru (mapuje se write-combining). Volajici
+    /// ruci, ze rozsah nepatri alokatoru RAM.
+    pub fn new_framebuffer(phys_start: u64, size: u64) -> Result<Arc<Self>, Error> {
+        Self::physical(phys_start, size, None, Kind::Framebuffer)
+    }
+
+    fn physical(
+        phys_start: u64,
+        size: u64,
+        job: Option<&Arc<Job>>,
+        kind: Kind,
+    ) -> Result<Arc<Self>, Error> {
         if size == 0 || !phys_start.is_multiple_of(PAGE) || size > abi::vm::VMO_MAX_SIZE {
             return Err(Error::InvalidArgs);
         }
@@ -173,7 +192,7 @@ impl MemoryObject {
             core: ObjectCore::new(Signals::NONE),
             size: count * PAGE,
             pages,
-            kind: Kind::Physical,
+            kind,
             dma: None,
             for_dma: false,
             _charges: charges,
@@ -198,6 +217,17 @@ impl MemoryObject {
         self.kind == Kind::Physical
     }
 
+    /// Mapovat write-combining (framebuffer)?
+    pub fn is_write_combine(&self) -> bool {
+        self.kind == Kind::Framebuffer
+    }
+
+    /// Pamet mimo alokator RAM (registry, framebuffer): neni v prime mape
+    /// pro syscally a nejde pouzit jako buffer syscallu.
+    pub fn is_device(&self) -> bool {
+        matches!(self.kind, Kind::Physical | Kind::Framebuffer)
+    }
+
     /// Pamet pro DMA (mapuje se s `MapFlags::DMA`)?
     pub fn is_dma(&self) -> bool {
         self.for_dma
@@ -211,7 +241,7 @@ impl MemoryObject {
     /// Registry zarizeni nejsou v prime mape a cteni by mohlo mit vedlejsi
     /// efekty: jde jen mapovat, ne cist a zapisovat pres jadro.
     fn check_access(&self) -> Result<(), Error> {
-        if self.kind == Kind::Physical {
+        if self.is_device() {
             Err(Error::NotSupported)
         } else {
             Ok(())
@@ -296,7 +326,7 @@ impl Drop for MemoryObject {
                 }
             }
             Kind::Contiguous { order } => phys::free_pages(self.pages[0], order),
-            Kind::Physical => {}
+            Kind::Physical | Kind::Framebuffer => {}
         }
     }
 }
