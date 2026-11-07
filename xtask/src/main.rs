@@ -279,6 +279,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "taskproto",
             "--package",
+            "svcclient",
+            "--package",
             "taskview",
             "--package",
             "gfx",
@@ -368,6 +370,7 @@ pub struct Artifacts {
 const USER_PROGRAMS: &[&str] = &[
     "init",
     "echo",
+    "svctest",
     "devmgr",
     "virtio-blk",
     "virtio-input",

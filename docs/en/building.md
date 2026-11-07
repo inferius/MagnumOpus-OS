@@ -86,8 +86,8 @@ stored boot entries would not match.
 | Disk | File | Contents |
 |---|---|---|
 | system | `target/os-x86_64-<profile>.img` | GPT + the ESP above |
-| scratch | `target/scratch.img` | 1 MiB of zeros; driver tests write to it |
-| data | `target/data.img` | 64 MiB, our file system (label `data`); created by xtask with the `fs` library, containing `/vitejte.txt` and `/dokumenty/navod.md`; TRIM enabled (`discard=unmap`) |
+| scratch | `target/scratch-<pid>.img` | 1 MiB of zeros; driver tests write to it |
+| data | `target/data-<pid>.img` | 64 MiB, our file system (label `data`); created by xtask with the `fs` library, containing `/vitejte.txt` and `/dokumenty/navod.md`; TRIM enabled (`discard=unmap`) |
 
 The scratch and data disks are recreated on every `run`/`test`.
 
@@ -110,8 +110,12 @@ port from the host into the guest (`hostfwd`). Details:
 
 ## Output and tracking down errors
 
-- Serial output is saved to `target/serial.log` (tests:
-  `target/serial-test.log`).
+- Serial output is saved to `target/serial-<arch>.log`, for tests to
+  `target/serial-test-<arch>-<pid>.log` (xtask prints the path at the end).
+- Every run has its **own** scratch and data disk (`<pid>` = the xtask
+  process id) and deletes them when it ends. Concurrent runs (several
+  threads on one machine) therefore do not overwrite each other's disks, and
+  the QMP helper does not read test markers from someone else's log.
 - On a panic or fatal exception, xtask translates the stack trace addresses
   into function names after QEMU exits (`llvm-nm` from `llvm-tools`).
 - Kernel log levels: [kernel.md](kernel.md#logging); messages: [messages.md](messages.md).

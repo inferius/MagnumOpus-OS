@@ -41,11 +41,11 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         std::fs::copy(&fw_vars_template, &fw_vars)?;
     }
 
-    let serial_log = target_dir().join(if opts.test {
-        format!("serial-test-{}.log", arch.name)
-    } else {
-        format!("serial-{}.log", arch.name)
-    });
+    // Kazdy beh ma vlastni disky a testy i vlastni log: soubezne behy
+    // (vic vlaken na jednom stroji) si jinak prepisovaly datovy disk a QMP
+    // pomocnik cetl znacky testu z cizi seriove linky.
+    let run = RunFiles::new(arch.name, opts.test);
+    let serial_log = run.serial_log.clone();
     // Stary log nesmi obsahovat znacku testu vstupu z minuleho behu.
     let _ = std::fs::remove_file(&serial_log);
     let qmp_port = qmp::free_port()?;
@@ -78,7 +78,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         .arg("-drive")
         .arg(format!(
             "if=none,id=scratch,format=raw,file={}",
-            scratch_disk()?.display()
+            scratch_disk(&run.scratch)?.display()
         ))
         .args(["-device", &blk("scratch")])
         // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
@@ -91,7 +91,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         .arg("-drive")
         .arg(format!(
             "if=none,id=data,format=raw,discard=unmap,cache=unsafe,file={}",
-            datadisk::create(&target_dir())?.display()
+            datadisk::create(&run.data)?.display()
         ))
         .args(["-device", &blk("data")])
         .arg("-qmp")
@@ -284,10 +284,42 @@ fn run_test(mut cmd: Command, opts: &Options) -> Result<()> {
 }
 
 /// Prazdny disk 1 MiB pro testy ovladace (pri kazdem behu znovu vynulovany).
-fn scratch_disk() -> Result<PathBuf> {
-    let path = target_dir().join("scratch.img");
-    std::fs::write(&path, vec![0u8; 1024 * 1024])?;
-    Ok(path)
+fn scratch_disk(path: &Path) -> Result<PathBuf> {
+    std::fs::write(path, vec![0u8; 1024 * 1024])?;
+    Ok(path.to_path_buf())
+}
+
+/// Soubory jednoho behu QEMU. Disky jsou jen pro tento beh (cislo procesu
+/// xtask v nazvu) a po skonceni se smazou; log testu take nese cislo
+/// procesu, aby soubezne behy nesdilely znacky pro QMP. Interaktivni beh
+/// pise do `target/serial-<arch>.log` jako dosud.
+struct RunFiles {
+    data: PathBuf,
+    scratch: PathBuf,
+    serial_log: PathBuf,
+}
+
+impl RunFiles {
+    fn new(arch: &str, test: bool) -> Self {
+        let pid = std::process::id();
+        let t = target_dir();
+        Self {
+            data: t.join(format!("data-{pid}.img")),
+            scratch: t.join(format!("scratch-{pid}.img")),
+            serial_log: t.join(if test {
+                format!("serial-test-{arch}-{pid}.log")
+            } else {
+                format!("serial-{arch}.log")
+            }),
+        }
+    }
+}
+
+impl Drop for RunFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.data);
+        let _ = std::fs::remove_file(&self.scratch);
+    }
 }
 
 fn pflash_arg(path: &Path, readonly: bool) -> String {

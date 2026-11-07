@@ -60,7 +60,8 @@ Smyčka čeká na kanál správce zařízení a na konec hlídaných procesů:
 | skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na potvrzení nové služby nečeká blokující: její kanál je další položka smyčky. Když do 5 s neodpoví (nebo odpoví chybou), ukončí ji a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
 | okno terminálu pošle `connect`, `termd` skončí | spustí `termd`, obslouží registr relací (viz [Terminál](#terminál)) |
 | skončil `compd` | zaloguje a spustí záložní konzoli |
-| skončila jiná služba (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`) | zaloguje kód. Obnova zatím není (viz níže) |
+| skončila služba s adaptérem v registru | jako u `timed`, navíc v pořadí závislostí: služby s `Dep::restart` na spadlé službě ukončí a spustí po ní, služby s `Dep::notify` dostanou oznámení; klienti se připojí přes lístky (viz [Obnova služeb](obnova-sluzeb.md)) |
+| skončila jen hlídaná služba (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`, dokud je nezapojí jejich vlákna) | zaloguje kód. Obnova zatím není (viz níže) |
 
 Log při pádu služby:
 
@@ -71,9 +72,9 @@ init: sluzba timed znovu spustena
 init: sluzba timed spadla 6x za 60 s, vzdavam to
 ```
 
-Kód je v `user/init/src/supervisor.rs`. Jedno kolo je
+Kód je v `user/init/src/supervisor/` (`mod.rs` smyčka, `lifecycle.rs` restart a závislosti, `leases.rs` lístky, `service.rs` adaptér). Jedno kolo je
 `Supervisor::step(startup, deadline)`. Vrací, co se stalo
-(`DeviceAdded`, `Exited`, `Restarted`, `GaveUp`, `DevmgrGone`), takže ho
+(`DeviceAdded`, `Exited`, `Restarted`, `GaveUp`, `Stopped`, `Notified`, `Reconnected`, `DevmgrGone`), takže ho
 testy řídí stejně jako běžný běh, jen s termínem. Novou službu
 supervisoru předá `watch(jméno, proces, restart)`, kde `restart` je
 `Restart { start, ready }` (`None` = jen hlídat). `start` spustí nový
@@ -123,23 +124,14 @@ gui-term ──connect──▶ init (supervisor) ──spustí──▶ termd �
 `compd` zatím není). Jestli je framebuffer z firmware po převzetí obrazu
 ovladačem virtio-gpu ještě vidět, záleží na zařízení (QEMU q35 s VGA ano).
 
-## Proč se zatím neobnovuje `inputd`, `fsd`, `netd` a `devmgr`
+## Obnova `inputd`, `fsd`, `netd`, `compd` a `devmgr`
 
-Spadlá služba zavře kanály ke svým ovladačům a klientům a ti pak skončí.
-Ovladač vstupu při zavření kanálu ke službě skončí. Nová `inputd` by tak
-neměla žádná zařízení a `devmgr` by musel spustit ovladače znovu. U USB by
-navíc musel řadič znovu projít porty. Obnova tedy potřebuje:
-
-- ovladače, které při ztrátě služby nekončí a počkají na nové spojení
-  (přes `devmgr`),
-- restart se závislostmi (pád `devmgr` = znovu spustit i služby nad
-  ovladači),
-- u `fsd` připojení stejného disku a obnovu relací klientů,
-- u `netd` nové relace pro programy (každý socket je kanál, s pádem služby
-  zaniknou) a znovu spustit `fwd` s novým kanálem k `netd`.
-
-To je další krok supervisoru. Mechanismus v `watch` / `restart` je na něj
-připravený.
+Společný protokol (registr služeb se závislostmi, lístky, držák konců
+ovladačů, pravidla pro knihovny klientů) popisuje stránka
+[Obnova služeb](obnova-sluzeb.md). Registr (`register(Spec { name, deps,
+service }, proces)`) a lístky jsou v supervisoru hotové; adaptéry
+jednotlivých služeb zapojují jejich vlákna. Do té doby se tyto služby jen
+hlídají přes `watch(jméno, proces, None)`.
 
 ## Testovací běh
 
