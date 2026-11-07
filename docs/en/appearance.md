@@ -19,8 +19,8 @@ here; the values come as data from `design/tokens.toml`.
 > components, motion, voice and copy, trust and the agent, accessibility,
 > with "do / don't" examples. This page is the technical design and plan;
 > the handbook is a concise guide for authors. The link works in the
-> repository (open the file in a browser); the documentation website does
-> not copy the `design/` folder yet.
+> repository (open the file in a browser) and on the documentation website
+> (`cargo xtask docs` copies the `design/` folder to `target/docs/design/`).
 
 **Clickable prototypes** are in `design/` (open `design/index.html` in a
 browser). Every page has a switch for theme, high contrast, font size and

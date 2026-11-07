@@ -8,6 +8,15 @@
 //!
 //! Generator zaroven kontroluje odkazy: odkaz na neexistujici stranku nebo
 //! kotvu je chyba.
+//!
+//! Slozka `design/` (prirucka grafickeho jazyka, prototypy, `assets/`,
+//! `tokens.toml`) se kopiruje do `target/docs/design/`, tedy vedle `cs/`
+//! a `en/`. Markdown v `docs/cs` a `docs/en` na ni odkazuje relativne
+//! k repozitari (`../../design/x.html`), aby odkaz fungoval i v gitu; na
+//! webu lezi stranky o uroven mel, proto generator prepise predponu
+//! `../../design/` na `../design/` a zkontroluje, ze cilovy soubor existuje.
+//! Varianta s kopii primo do `cs/design/` a `en/design/` by zdvojila data
+//! a varianta s ponechanim `../../design/` by vedla mimo `target/docs`.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -52,6 +61,7 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
     fs::create_dir_all(out.join("assets"))?;
     fs::copy(docs.join("site/style.css"), out.join("assets/style.css"))?;
     fs::copy(docs.join("site/site.js"), out.join("assets/site.js"))?;
+    copy_design(&root.join("design"), &out.join("design"))?;
 
     let mut errors = Vec::new();
     for (li, (lang, _)) in LANGS.iter().enumerate() {
@@ -69,6 +79,7 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
             }
         }
         check_links(lang, &rendered, &mut errors);
+        check_design_links(lang, &rendered, &root.join("design"), &mut errors);
         let titles: Vec<String> = rendered.iter().map(|r| r.title.clone()).collect();
         for (pi, r) in rendered.iter().enumerate() {
             let other = &pages[pi].files[1 - li];
@@ -342,10 +353,55 @@ fn shell_pair(lang: &str, src: &str) -> std::result::Result<String, String> {
 "))
 }
 
-/// `x.md` -> `x.html`, `x.md#a` -> `x.html#a`; ostatni beze zmeny.
+/// Predpona odkazu do `design/` v markdownu (relativne k `docs/<jazyk>/`).
+const DESIGN_SRC: &str = "../../design/";
+/// Tataz predpona na webu (relativne k `target/docs/<jazyk>/`).
+const DESIGN_WEB: &str = "../design/";
+
+/// Podslozky `design/`, ktere na web nepatri (nastroje pro build tokenu).
+const DESIGN_SKIP: [&str; 1] = ["tools"];
+
+/// Zkopiruje `design/` do `out` (puvodni obsah `out` smaze, aby na webu
+/// nezustaly soubory, ktere uz v repozitari nejsou). Bez slozky `design/`
+/// se nic nekopiruje.
+fn copy_design(src: &Path, out: &Path) -> Result<()> {
+    if out.exists() {
+        fs::remove_dir_all(out)?;
+    }
+    if !src.is_dir() {
+        return Ok(());
+    }
+    copy_dir(src, out, &DESIGN_SKIP)
+}
+
+/// Rekurzivni kopie slozky; `skip` jsou jmena podslozek na nejvyssi urovni,
+/// ktere se vynechaji.
+fn copy_dir(src: &Path, out: &Path, skip: &[&str]) -> Result<()> {
+    fs::create_dir_all(out)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            if skip.iter().any(|s| name == *s) {
+                continue;
+            }
+            copy_dir(&path, &out.join(&name), &[])?;
+        } else {
+            fs::copy(&path, out.join(&name))?;
+        }
+    }
+    Ok(())
+}
+
+/// `x.md` -> `x.html`, `x.md#a` -> `x.html#a`, `../../design/x` ->
+/// `../design/x`; ostatni beze zmeny.
 fn rewrite_link(dest: &str) -> String {
     if dest.starts_with("http") {
         return dest.to_string();
+    }
+    if let Some(rest) = dest.strip_prefix(DESIGN_SRC) {
+        return format!("{DESIGN_WEB}{rest}");
     }
     let (path, frag) = dest
         .split_once('#')
@@ -388,6 +444,26 @@ fn check_links(lang: &str, pages: &[Rendered], errors: &mut Vec<String>) {
                     page.file
                 )),
                 _ => {}
+            }
+        }
+    }
+}
+
+/// Odkazy do `design/` musi vest na existujici soubor (nebo slozku)
+/// ve zdrojove `design/` mimo vynechane podslozky.
+fn check_design_links(lang: &str, pages: &[Rendered], design: &Path, errors: &mut Vec<String>) {
+    for page in pages {
+        for link in &page.links {
+            let Some(rest) = link.strip_prefix(DESIGN_WEB) else {
+                continue;
+            };
+            let path = rest.split(['#', '?']).next().unwrap_or("");
+            let skipped = DESIGN_SKIP.iter().any(|s| path.split('/').next() == Some(*s));
+            if skipped || path.split('/').any(|c| c == "..") || !design.join(path).exists() {
+                errors.push(format!(
+                    "{lang}/{}: odkaz do design/ na neexistujici soubor {link}",
+                    page.file
+                ));
             }
         }
     }
@@ -585,3 +661,7 @@ fn search_index(pages: &[Rendered]) -> String {
     s.push_str("];\n");
     s
 }
+
+#[cfg(test)]
+#[path = "docs_tests.rs"]
+mod tests;

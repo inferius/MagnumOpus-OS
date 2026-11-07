@@ -19,7 +19,8 @@ Odsud si bere vzhled a chování; hodnoty bere jako data z
 > komponenty, pohyb, hlas a texty, důvěra a agent, přístupnost, s příklady
 > „správně / špatně“. Tahle stránka je technický návrh a plán; příručka
 > je stručný výklad pro autory. Odkaz funguje v repozitáři (otevři soubor
-> v prohlížeči); web dokumentace složku `design/` zatím nekopíruje.
+> v prohlížeči) i na webu dokumentace (`cargo xtask docs` kopíruje složku
+> `design/` do `target/docs/design/`).
 
 **Klikací prototypy** jsou v `design/` (otevři `design/index.html`
 v prohlížeči). Každá stránka má přepínač motivu, vysokého kontrastu,
