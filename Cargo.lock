@@ -318,6 +318,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "font"
+version = "0.1.0"
+
+[[package]]
 name = "fs"
 version = "0.1.0"
 dependencies = [
@@ -391,6 +395,22 @@ dependencies = [
  "libc",
  "r-efi",
  "rand_core",
+]
+
+[[package]]
+name = "gfx"
+version = "0.1.0"
+dependencies = [
+ "guiproto",
+]
+
+[[package]]
+name = "guiproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "conf",
+ "wire",
 ]
 
 [[package]]
