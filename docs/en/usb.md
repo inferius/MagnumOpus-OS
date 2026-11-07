@@ -53,7 +53,11 @@ bug or malice in one class driver therefore cannot endanger the others.
    - the first 8 bytes of the device descriptor (EP0 packet size, with
      Evaluate Context if needed), the full descriptor and the whole
      configuration,
-   - SET_CONFIGURATION and Configure Endpoint for the interrupt endpoints.
+   - Configure Endpoint for the interrupt endpoints and only then
+     SET_CONFIGURATION (xHCI 4.3.5: the controller has resources for the
+     endpoints before the device starts using them). For a hub, then the
+     hub descriptor and another Configure Endpoint with the hub data in the
+     slot context (port count, TT, MTT).
 
    It then announces every interface: `usb-interface <class> <subclass>
    <protocol> <vid> <pid>`.
@@ -262,11 +266,6 @@ mouse cannot be bound to a console and would take the events meant for
 PS/2.
 
 ## Limits and next phases
-
-⚠️ **aarch64 (QEMU virt):** the root hub finds the USB keyboard, but keys
-from QEMU (QMP) and devices attached at run time do not arrive yet. The USB
-event and hotplug tests therefore run only on x86_64; the fix is a separate
-task.
 
 | Phase | State | What |
 |---|---|---|
