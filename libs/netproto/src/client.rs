@@ -11,7 +11,7 @@ use core::time::Duration;
 use abi::time::WallTime;
 use libos::{Channel, Error, Handle, Result};
 
-use crate::codec::{Reader, Writer};
+use crate::codec::{ReadAddr, Reader, WriteAddr, Writer};
 use crate::{Info, MAX_DATAGRAM, MAX_IO, Policy, io, ntp, op, parse_reply, timeout_ms};
 
 /// Posle pozadavek a pocka na odpoved: (telo, handly).
@@ -168,22 +168,16 @@ impl Net {
     pub fn tcp_listen(&self, port: u16, backlog: u16) -> Result<TcpListener> {
         let mut w = Writer::op(op::TCP_LISTEN);
         w.u16(port).u16(backlog);
-        let (b, ch) = call_channel(&self.ch, w)?;
-        Ok(TcpListener {
-            ch,
-            local: Reader::new(&b).socket_addr()?,
-        })
+        let (_, ch) = call_channel(&self.ch, w)?;
+        Ok(TcpListener { ch })
     }
 
     /// Socket UDP na mistnim portu (`0` = prideli sluzba).
     pub fn udp_bind(&self, port: u16) -> Result<UdpSocket> {
         let mut w = Writer::op(op::UDP_BIND);
         w.u16(port);
-        let (b, ch) = call_channel(&self.ch, w)?;
-        Ok(UdpSocket {
-            ch,
-            local: Reader::new(&b).socket_addr()?,
-        })
+        let (_, ch) = call_channel(&self.ch, w)?;
+        Ok(UdpSocket { ch })
     }
 
     /// Dotaz NTP na `server`: presny cas a posun mistnich hodin. Hodiny
@@ -344,12 +338,18 @@ impl io::Write for TcpStream {
 /// Naslouchani TCP.
 pub struct TcpListener {
     ch: Channel,
-    local: SocketAddr,
+}
+
+/// Mistni adresa od sluzby (meni se s adresou rozhrani, napr. po DHCP).
+fn local_addr_of(ch: &Channel) -> Result<SocketAddr> {
+    let (b, _) = call(ch, Writer::op(op::LOCAL_ADDR))?;
+    Reader::new(&b).socket_addr()
 }
 
 impl TcpListener {
-    pub fn local_addr(&self) -> SocketAddr {
-        self.local
+    /// Mistni adresa (pred nastavenim rozhrani 0.0.0.0:port).
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        local_addr_of(&self.ch)
     }
 
     /// Pocka na prichozi spojeni.
@@ -361,20 +361,22 @@ impl TcpListener {
         let mut w = Writer::op(op::ACCEPT);
         w.u64(timeout_ms(timeout));
         let (b, ch) = call_channel(&self.ch, w)?;
-        let remote = Reader::new(&b).socket_addr()?;
-        Ok((TcpStream::from_accept(ch, self.local, remote), remote))
+        let mut r = Reader::new(&b);
+        let remote = r.socket_addr()?;
+        let local = r.socket_addr()?;
+        Ok((TcpStream::from_accept(ch, local, remote), remote))
     }
 }
 
 /// Socket UDP.
 pub struct UdpSocket {
     ch: Channel,
-    local: SocketAddr,
 }
 
 impl UdpSocket {
-    pub fn local_addr(&self) -> SocketAddr {
-        self.local
+    /// Mistni adresa (pred nastavenim rozhrani 0.0.0.0:port).
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        local_addr_of(&self.ch)
     }
 
     /// Posle datagram (nejvys [`MAX_DATAGRAM`] bajtu).

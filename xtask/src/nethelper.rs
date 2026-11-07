@@ -12,8 +12,9 @@
 //!   (10.0.2.2), ostatni jmena NXDOMAIN.
 //! - `ntp` (UDP): server NTP s casem hostitele.
 //! - `closed` (TCP): port, na kterem nic neposloucha (odmitnuti spojeni).
-//!   `refuses` = 1, kdyz slirp odmitnuti hostu ohlasi (RST). Slirp na
-//!   Windows neohlasi nic - SYN hosta zustane bez odpovedi.
+//!   `refuses` = 1, kdyz se od slirp ceka odmitnuti (RST, Linux a macOS).
+//!   Slirp na Windows zatim neohlasi nic (SYN zustane bez odpovedi); test
+//!   tam prijme odmitnuti i vyprseni, takze novejsi QEMU ho nerozbije.
 //! - `reset` (TCP): prijme spojeni, pocka na data a zavre socket
 //!   s neprectenymi daty - system posle RST (preruseni spojeni).
 //! - `callback` (TCP): po prijeti radku se pripoji do hosta pres `hostfwd`
@@ -34,13 +35,25 @@ pub struct Helper {
     pub config: String,
     /// Argument `hostfwd` pro `-netdev user`.
     pub hostfwd: String,
+    /// Port pro `hostfwd` drzeny obsazeny, aby ho mezitim nevzal jiny
+    /// proces (soubezny beh testu). Uvolnit tesne pred startem QEMU
+    /// ([`Helper::release_forwarded_port`]), QEMU ho pak hned obsadi.
+    hold: Option<TcpListener>,
+}
+
+impl Helper {
+    pub fn release_forwarded_port(&mut self) {
+        self.hold = None;
+    }
 }
 
 fn localhost() -> IpAddr {
     IpAddr::V4(Ipv4Addr::LOCALHOST)
 }
 
-/// Volny port na 127.0.0.1 (zjisteny navazanim a uvolnenim).
+/// Volny port na 127.0.0.1 (zjisteny navazanim a uvolnenim). Port pro
+/// test odmitnuti zustane volny: nahodny docasny port, ktery by jiny proces
+/// behem testu zacal poslouchat, je velmi nepravdepodobny.
 fn free_tcp_port() -> std::io::Result<u16> {
     Ok(TcpListener::bind((localhost(), 0))?.local_addr()?.port())
 }
@@ -53,7 +66,8 @@ pub fn start() -> std::io::Result<Helper> {
     let callback = TcpListener::bind((localhost(), 0))?;
     let reset = TcpListener::bind((localhost(), 0))?;
     let closed = free_tcp_port()?;
-    let host_fwd = free_tcp_port()?;
+    let hold = TcpListener::bind((localhost(), 0))?;
+    let host_fwd = hold.local_addr()?.port();
 
     let config = format!(
         "echo = {}\nudp_echo = {}\ndns = {}\nntp = {}\nclosed = {}\nrefuses = {}\nreset = {}\ncallback = {}\nforwarded = {}\n",
@@ -90,6 +104,7 @@ pub fn start() -> std::io::Result<Helper> {
     Ok(Helper {
         config,
         hostfwd: format!("tcp:127.0.0.1:{host_fwd}-:{GUEST_FORWARDED}"),
+        hold: Some(hold),
     })
 }
 

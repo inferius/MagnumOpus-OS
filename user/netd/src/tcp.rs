@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use libos::{Error, Result};
-use netproto::{MAX_IO, Reader, Writer, op, proto, rights};
+use netproto::{MAX_IO, ReadAddr, Reader, WriteAddr, Writer, op, proto, rights};
 use smoltcp::iface::SocketHandle;
 use smoltcp::socket::tcp::State;
 use smoltcp::wire::{IpAddress, IpEndpoint};
@@ -318,18 +318,13 @@ pub fn listen(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step>
             }
         }
     }
-    let ip = stack
-        .local_ip()
-        .map(IpAddr::V4)
-        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let local = SocketAddr::new(ip, port);
+    let local = stack.local_addr(port);
     let mut w = Writer::new();
     w.socket_addr(local);
     Ok(Step::Done(
         Ok(w),
         Some(Kind::Listener(Listener {
             port,
-            local,
             backlog: sockets,
         })),
     ))
@@ -344,7 +339,12 @@ fn listening_socket(stack: &mut Stack, port: u16) -> Result<SocketHandle> {
     Ok(h)
 }
 
-pub fn listener_request(l: &mut Listener, code: u32, r: &mut Reader) -> Result<Step> {
+pub fn listener_request(
+    stack: &mut Stack,
+    l: &mut Listener,
+    code: u32,
+    r: &mut Reader,
+) -> Result<Step> {
     match code {
         op::ACCEPT => {
             let timeout = r.u64()?;
@@ -355,7 +355,7 @@ pub fn listener_request(l: &mut Listener, code: u32, r: &mut Reader) -> Result<S
         }
         op::LOCAL_ADDR => {
             let mut w = Writer::new();
-            w.socket_addr(l.local);
+            w.socket_addr(stack.local_addr(l.port));
             Ok(Step::reply(Ok(w)))
         }
         _ => Err(Error::NotSupported),
@@ -380,13 +380,16 @@ pub fn accept_progress(stack: &mut Stack, l: &mut Listener, deadline: u64, now: 
                 }
                 let sock = stack.tcp(h);
                 let remote = sock.remote_endpoint().map(to_sa);
-                let local = sock.local_endpoint().map(to_sa).unwrap_or(l.local);
+                let local = sock
+                    .local_endpoint()
+                    .map(to_sa)
+                    .unwrap_or_else(|| stack.local_addr(l.port));
                 let Some(remote) = remote else {
                     stack.remove(h);
                     continue;
                 };
                 let mut w = Writer::new();
-                w.socket_addr(remote);
+                w.socket_addr(remote).socket_addr(local);
                 return Step::Done(
                     Ok(w),
                     Some(Kind::Stream(Stream {

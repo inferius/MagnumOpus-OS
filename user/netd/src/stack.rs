@@ -222,6 +222,17 @@ impl Stack {
         self.iface.ipv4_addr().ok_or(Error::Unreachable)
     }
 
+    /// Mistni adresa socketu na portu `port` podle aktualniho stavu
+    /// rozhrani (pred DHCP 0.0.0.0). Pocita se pri kazdem dotazu, ne pri
+    /// vytvoreni socketu, aby adresa po DHCP nezustala neplatna.
+    pub fn local_addr(&self, port: u16) -> SocketAddr {
+        let ip = self
+            .local_ip()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        SocketAddr::new(ip, port)
+    }
+
     /// Obsadi port `port` (0 = volny docasny). Obsazeny = `ADDRESS_IN_USE`.
     pub fn take_port(&mut self, proto: PortProto, port: u16) -> Result<u16> {
         if port != 0 {

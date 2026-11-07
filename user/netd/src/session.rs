@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use libos::{Error, Result, println};
-use netproto::{Policy, Reader, Writer, op, rights};
+use netproto::{Policy, ReadAddr, Reader, Writer, op, rights};
 
 use crate::obj::{AuthRef, Kind, Pending, Step};
 use crate::stack::{Stack, deadline};

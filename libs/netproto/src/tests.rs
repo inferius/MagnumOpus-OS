@@ -10,7 +10,7 @@ use abi::Error;
 use abi::time::WallTime;
 
 use crate::policy::{Auth, Policy, Rule, Target, host_matches, in_network, proto, rights};
-use crate::{Info, Reader, Writer, dns, link, ntp, parse_reply, reply};
+use crate::{Info, ReadAddr, Reader, WriteAddr, Writer, dns, link, ntp, parse_reply, reply};
 
 fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(a, b, c, d))

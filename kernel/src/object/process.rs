@@ -11,7 +11,7 @@
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use super::{Error, HandleTable, KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::log;
@@ -39,6 +39,9 @@ pub struct Process {
     handles: SpinLock<HandleTable>,
     space: AddressSpace,
     state: SpinLock<State>,
+    /// Registrace a pakety ve vsech portech procesu (kvota
+    /// `PROCESS_MAX_PORT_PENDING`, sdili ji porty vytvorene procesem).
+    port_budget: Arc<AtomicUsize>,
 }
 
 impl Process {
@@ -57,6 +60,7 @@ impl Process {
                 exit_code: None,
                 finished: false,
             }),
+            port_budget: Arc::new(AtomicUsize::new(0)),
         });
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
@@ -64,6 +68,11 @@ impl Process {
 
     pub fn handles(&self) -> SpinLockGuard<'_, HandleTable> {
         self.handles.lock()
+    }
+
+    /// Kvota portu procesu (predava se portum, ktere proces vytvori).
+    pub fn port_budget(&self) -> Arc<AtomicUsize> {
+        self.port_budget.clone()
     }
 
     pub fn address_space(&self) -> &AddressSpace {

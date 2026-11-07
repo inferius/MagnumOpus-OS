@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 use core::net::{IpAddr, SocketAddr};
 
 use libos::{Error, Result};
-use netproto::{Reader, Writer, dns, proto, rights};
+use netproto::{ReadAddr, Reader, WriteAddr, Writer, dns, proto, rights};
 use smoltcp::iface::SocketHandle;
 use smoltcp::wire::IpAddress;
 
@@ -85,14 +85,24 @@ pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> 
     };
     let timeout = r.u64()?;
     auth.borrow().require(rights::RESOLVE)?;
-    if !dns::valid_name(&name) {
-        return Err(Error::InvalidArgs);
-    }
-    // Adresa misto jmena: vratit hned (jako getaddrinfo).
+    // Adresa misto jmena (IPv4 i IPv6): vratit hned, jako getaddrinfo.
+    // Musi byt pred kontrolou jmena - `::1` neni platne jmeno hostitele.
     if let Ok(ip) = name.parse::<IpAddr>() {
+        let fits = match family {
+            0 => true,
+            4 => ip.is_ipv4(),
+            6 => ip.is_ipv6(),
+            _ => return Err(Error::InvalidArgs),
+        };
+        if !fits {
+            return Err(Error::NotFound);
+        }
         let mut w = Writer::new();
         w.u16(1).ip(ip).u32(0);
         return Ok(Step::reply(Ok(w)));
+    }
+    if !dns::valid_name(&name) {
+        return Err(Error::InvalidArgs);
     }
     let qtypes: &[u16] = match family {
         0 => &[dns::TYPE_A, dns::TYPE_AAAA],

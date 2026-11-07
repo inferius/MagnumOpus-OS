@@ -140,6 +140,7 @@ libs/fs/         file system (no_std; std for tools)
   src/tests/        FS tests (model, power loss, performance)
 libs/fsproto/    file system protocol (client <-> fsd)
 libs/csprng/     kernel random number generator (ChaCha20, BLAKE2s)
+libs/wire/       shared message encoding of protocols (fsproto, netproto)
 libs/netproto/   network protocol (programs <-> netd <-> driver), DNS, NTP, permissions
 user/init/       first process: starts services, userspace tests
 user/echo/       IPC test server

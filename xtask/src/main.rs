@@ -76,6 +76,9 @@ struct Options {
     extra_initfs: Vec<(String, Vec<u8>)>,
     /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
     hostfwd: Option<String>,
+    /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
+    /// startem QEMU).
+    net_helper: std::cell::RefCell<Option<nethelper::Helper>>,
 }
 
 /// Navratovy kod QEMU pri uspechu testu: isa-debug-exit vraci (v << 1) | 1
@@ -111,6 +114,7 @@ fn run_cli() -> Result<()> {
         test: false,
         extra_initfs: Vec::new(),
         hostfwd: None,
+        net_helper: std::cell::RefCell::new(None),
     };
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -165,6 +169,7 @@ fn run_cli() -> Result<()> {
             opts.extra_initfs
                 .push((String::from("net-test"), helper.config.clone().into_bytes()));
             opts.hostfwd = Some(helper.hostfwd.clone());
+            *opts.net_helper.borrow_mut() = Some(helper);
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             run_qemu(&image, &opts)
@@ -200,6 +205,8 @@ fn host_tests() -> Result<()> {
             "netproto",
             "--package",
             "csprng",
+            "--package",
+            "wire",
             "--features",
             "initfs/std,fs/std,netproto/std",
         ])
@@ -555,6 +562,10 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
     }
     cmd.args(&opts.qemu_args);
 
+    // Port pro hostfwd uvolnit az ted (QEMU ho hned obsadi).
+    if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
+        h.release_forwarded_port();
+    }
     println!("xtask: spoustim {}", qemu.display());
     let kernel = target_dir()
         .join(KERNEL_TARGET)

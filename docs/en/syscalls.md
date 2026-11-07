@@ -160,7 +160,11 @@ on the number of watched objects.
 - **Room for the packet is reserved at registration**, so delivery (even
   from an interrupt handler) does not allocate and a packet is never lost.
   A port holds at most `PORT_MAX_PENDING` (65,536) registrations and
-  pending packets.
+  pending packets, and all ports of one process together at most
+  `PROCESS_MAX_PORT_PENDING` (65,536), because every registration holds
+  kernel memory. Room in the quota is returned when a packet is picked
+  up, the object is destroyed or the port is closed. An empty port
+  returns spare queue capacity.
 - **A destroyed object** (its last handle closed) returns the reservation
   of its undelivered registrations. **A closed port**: objects drop its
   registrations.
@@ -198,7 +202,7 @@ holds, the packet arrives at once. Requires `WAIT` on the object and
 Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`port` is not a
 port), `NOT_SUPPORTED` (the object is a port), `INVALID_ARGS` (empty
 mask), `NO_RESOURCES` (the port holds `PORT_MAX_PENDING` registrations and
-packets), `NO_MEMORY`.
+packets, or the process used up `PROCESS_MAX_PORT_PENDING`), `NO_MEMORY`.
 
 ### `PORT_WAIT`
 
@@ -381,6 +385,7 @@ A program must not consume kernel memory without bounds (`abi::limits`):
 | mappings in a process address space | 65,536 | `NO_RESOURCES` |
 | messages queued at one channel end | 1024 | `SHOULD_WAIT` |
 | data bytes queued at one channel end | 4 MiB | `SHOULD_WAIT` |
+| registrations and unpicked packets in all ports of a process | 65,536 | `NO_RESOURCES` |
 
 Memory exhaustion by a program therefore cannot bring the kernel down: page
 tables, the heap and kernel stacks may also use the reserve. Planned:
@@ -484,7 +489,9 @@ The kernel has a cryptographic generator (`kernel/src/random.rs`, crate
   stream (fast key erasure), so a later leak of the kernel state does not
   reveal earlier output.
 - **Seeded** is the generator after a reseed with at least 256 bits of
-  credit in total. In QEMU RDRAND is enough (`-cpu max`), on a machine
+  credit in total. Before seeding the credit adds up over all reseeds (the
+  entropy stays in the key), so a source that delivers in small batches
+  is enough. In QEMU RDRAND is enough (`-cpu max`), on a machine
   without it the virtio-rng driver.
 
 ⚠️ Without a hardware source and without virtio-rng the generator will not

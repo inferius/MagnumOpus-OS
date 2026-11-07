@@ -176,6 +176,16 @@ fn dns(s: &Startup) -> TestResult {
         .resolve_with("10.0.2.2", 0, None, None)
         .map_err(|e| fail("adresa jako jmeno", e))?;
     check_eq!(addrs, vec![HOST], "adresa jako jmeno");
+    let v6: IpAddr = "::1".parse().unwrap();
+    let (addrs, _) = net
+        .resolve_with("::1", 0, None, None)
+        .map_err(|e| fail("IPv6 adresa jako jmeno", e))?;
+    check_eq!(addrs, vec![v6], "IPv6 adresa jako jmeno");
+    check_eq!(
+        net.resolve_with("::1", 4, None, None).err(),
+        Some(Error::NotFound),
+        "IPv6 adresa pri rodine 4"
+    );
     Ok(())
 }
 
@@ -226,11 +236,21 @@ fn tcp_refused(s: &Startup) -> TestResult {
         let r = net.tcp_connect(host(p.closed), Some(Duration::from_secs(10)));
         check_eq!(r.err(), Some(Error::ConnectionRefused), "spojeni na zavreny port");
     } else {
-        // Slirp na Windows odmitnuti neohlasi: SYN zustane bez odpovedi
-        // a spojeni vyprsi (overi aspon timeout navazovani).
-        println!("init: slirp na tomto hostiteli odmitnuti spojeni nehlasi, overuji vyprseni");
+        // Slirp na Windows odmitnuti zatim neohlasi: SYN zustane bez
+        // odpovedi a spojeni vyprsi. Novejsi verze muze RST poslat - pak
+        // plati odmitnuti. Jine vysledky (spojeni, jina chyba) jsou chyba.
         let r = net.tcp_connect(host(p.closed), Some(Duration::from_secs(1)));
-        check_eq!(r.err(), Some(Error::TimedOut), "spojeni na zavreny port (bez RST)");
+        match r.err() {
+            Some(Error::TimedOut) => {
+                println!("init: slirp odmitnuti spojeni nehlasi, overeno vyprseni");
+            }
+            Some(Error::ConnectionRefused) => {}
+            other => {
+                return Err(format!(
+                    "spojeni na zavreny port: ocekavano TIMED_OUT nebo CONNECTION_REFUSED, je {other:?}"
+                ));
+            }
+        }
     }
     check_eq!(
         net.tcp_connect(host(0), None).err(),
@@ -266,7 +286,8 @@ fn tcp_accept(s: &Startup) -> TestResult {
     let listener = net
         .tcp_listen(p.forwarded, 2)
         .map_err(|e| fail("naslouchani", e))?;
-    check_eq!(listener.local_addr().port(), p.forwarded, "port naslouchani");
+    let local = listener.local_addr().map_err(|e| fail("local_addr", e))?;
+    check_eq!(local, SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 15)), p.forwarded), "adresa naslouchani");
     // Stejny port podruhe nejde.
     check_eq!(
         net.tcp_listen(p.forwarded, 1).err(),
@@ -304,7 +325,9 @@ fn udp_echo(s: &Startup) -> TestResult {
     let net = net()?;
     configured(net)?;
     let sock = net.udp_bind(0).map_err(|e| fail("bind", e))?;
-    check!(sock.local_addr().port() >= 49152, "docasny port");
+    let local = sock.local_addr().map_err(|e| fail("local_addr", e))?;
+    check!(local.port() >= 49152, "docasny port");
+    check_eq!(local.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 2, 15)), "mistni adresa UDP");
     let mut buf = [0u8; 2048];
     for i in 0..3u8 {
         let msg = pattern(1000 + i as usize * 100);

@@ -134,6 +134,7 @@ libs/fs/         souborový systém (no_std; std pro nástroje)
   src/tests/        testy FS (model, výpadky, výkon)
 libs/fsproto/    protokol souborového systému (klient <-> fsd)
 libs/csprng/     generátor náhodných čísel jádra (ChaCha20, BLAKE2s)
+libs/wire/       společné kódování zpráv protokolů (fsproto, netproto)
 libs/netproto/   protokol sítě (programy <-> netd <-> ovladač), DNS, NTP, oprávnění
 user/init/       první proces: start služeb a testy userspace
 user/echo/       testovací server pro IPC

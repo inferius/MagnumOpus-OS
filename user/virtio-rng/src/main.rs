@@ -65,7 +65,7 @@ fn main(startup: Startup) -> i64 {
     let resource = Resource::from_handle(res);
     let ecam_vmo = Vmo::from_handle(ecam_vmo);
     let parent = Channel::from_handle(parent);
-    let Some(address) = read_config(&startup.bootstrap) else {
+    let Some(address) = virtio::driver_address(&startup.bootstrap) else {
         println!("virtio-rng: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
@@ -90,7 +90,11 @@ fn main(startup: Startup) -> i64 {
         match parent.read(Some(libos::time::deadline_after(REFILL))) {
             Err(Error::TimedOut) => {}
             Ok(_) => continue,
-            Err(_) => return 0,
+            Err(_) => {
+                // Zarizeni zastavit (zadne DMA po konci ovladace).
+                let _ = rng.device.reset();
+                return 0;
+            }
         }
         if let Err(e) = rng.feed(&resource, REFILL_BYTES) {
             let _ = rng.device.reset();
@@ -98,21 +102,6 @@ fn main(startup: Startup) -> i64 {
             return 4;
         }
     }
-}
-
-fn read_config(bootstrap: &Channel) -> Option<Address> {
-    let msg = bootstrap.read(None).ok()?;
-    let text = core::str::from_utf8(&msg.data).ok()?;
-    let mut parts = text.split_whitespace();
-    if parts.next()? != "pci" {
-        return None;
-    }
-    let mut num = || parts.next()?.parse::<u8>().ok();
-    Some(Address {
-        bus: num()?,
-        device: num()?,
-        function: num()?,
-    })
 }
 
 impl Rng {

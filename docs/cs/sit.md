@@ -132,6 +132,8 @@ Pak v jednom vlákně dokola opakuje:
    jednorázové registrace: „ke čtení“ (obnoví se po přečtení zprávy, ale ne
    během rozpracovaného požadavku) a „zavřeno“. Klíč paketu nese číslo
    slotu a jeho generaci, takže starý paket po uvolnění slotu nic nespletě.
+   Práce v každém kole je úměrná aktivním objektům (rozpracované
+   požadavky, přijaté pakety), ne počtu všech socketů.
 
 | Vlastnost | Hodnota |
 |---|---|
@@ -302,6 +304,11 @@ fn main(startup: libos::Startup) -> i64 {
 Chybějící právo nebo cíl mimo omezení vrací `ACCESS_DENIED`. Nové kódy
 chyb popisuje [chyby.md](chyby.md).
 
+`UdpSocket::local_addr` a `TcpListener::local_addr` se ptají služby
+(vracejí `Result`): socket vytvořený před DHCP má adresu 0.0.0.0 jen do
+nastavení rozhraní. Adresa místo jména (i IPv6, `"::1"`) se v `resolve`
+vrátí hned bez dotazu.
+
 `TcpStream::read` vrací `Ok(0)` na konci proudu (druhá strana ukončila
 zápis). `CONNECTION_RESET` znamená, že spojení přerušil RST nebo že druhá
 strana přestala odpovídat. Spojení lze předat jinému procesu:
@@ -331,8 +338,8 @@ data = zbytek zprávy. Timeout je u64 v ms: 0 = nečekat,
 | spojení | `RECV` (21) | nejvýš u32, timeout → data (prázdná = konec proudu) |
 | spojení | `SHUTDOWN` (22) | → () (FIN, čtení pokračuje) |
 | spojení | `ADDRS` (23) | → místní, vzdálená adresa |
-| naslouchání | `ACCEPT` (30) | timeout → vzdálená adresa + kanál spojení |
-| naslouchání, UDP | `LOCAL_ADDR` (31) | → místní adresa |
+| naslouchání | `ACCEPT` (30) | timeout → vzdálená adresa, místní adresa + kanál spojení |
+| naslouchání, UDP | `LOCAL_ADDR` (31) | → místní adresa (podle aktuální adresy rozhraní) |
 | UDP | `SEND_TO` (40) | cíl, data → () |
 | UDP | `RECV_FROM` (41) | nejvýš u32, timeout → odesílatel, data |
 

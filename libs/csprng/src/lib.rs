@@ -69,13 +69,16 @@ impl Generator {
         self.pending_bits = self.pending_bits.saturating_add(credit_bits.min(max));
     }
 
-    /// Kredit cekajici v zasobniku.
+    /// Kredit od posledniho reseedu (pred nasazenim soucet vseho kreditu).
     pub fn pending_bits(&self) -> u32 {
         self.pending_bits
     }
 
-    /// Premicha zasobnik do klice. Kdyz zasobnik nesl aspon `SEED_BITS`
-    /// kreditu, generator je od ted nasazeny.
+    /// Premicha zasobnik do klice. Novy klic zavisi na starem, takze
+    /// entropie z drivejsich reseedu v klici zustava: pred nasazenim se
+    /// kredit proto **scita** pres reseedy. Jakmile soucet dosahne
+    /// `SEED_BITS`, generator je nasazeny a dal se kredit pocita jen od
+    /// posledniho reseedu (urcuje, kdy reseedovat).
     pub fn reseed(&mut self) {
         let pool = core::mem::take(&mut self.pool).finalize();
         let mut h = Blake2s::new();
@@ -84,10 +87,12 @@ impl Generator {
         h.update(&pool);
         h.update(&self.reseeds.to_le_bytes());
         self.key = h.finalize();
-        if self.pending_bits >= SEED_BITS {
+        if self.seeded {
+            self.pending_bits = 0;
+        } else if self.pending_bits >= SEED_BITS {
             self.seeded = true;
+            self.pending_bits = 0;
         }
-        self.pending_bits = 0;
         self.reseeds += 1;
     }
 

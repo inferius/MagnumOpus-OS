@@ -2,10 +2,10 @@
 
 use alloc::vec;
 use alloc::vec::Vec;
-use core::net::{IpAddr, Ipv4Addr, SocketAddr};
+use core::net::SocketAddr;
 
 use libos::{Error, Result};
-use netproto::{MAX_DATAGRAM, Reader, Writer, op, proto, rights};
+use netproto::{MAX_DATAGRAM, ReadAddr, Reader, WriteAddr, Writer, op, proto, rights};
 use smoltcp::wire::IpAddress;
 
 use crate::obj::{AuthRef, Kind, Pending, Step, Udp};
@@ -29,11 +29,7 @@ pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
         stack.release_port(PortProto::Udp, port);
         return Err(Error::InvalidArgs);
     }
-    let ip = stack
-        .local_ip()
-        .map(IpAddr::V4)
-        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let local = SocketAddr::new(ip, port);
+    let local = stack.local_addr(port);
     let mut w = Writer::new();
     w.socket_addr(local);
     Ok(Step::Done(
@@ -41,7 +37,6 @@ pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
         Some(Kind::Udp(Udp {
             sock,
             port,
-            local,
             auth: auth.clone(),
         })),
     ))
@@ -79,7 +74,7 @@ pub fn request(stack: &mut Stack, u: &mut Udp, code: u32, r: &mut Reader) -> Res
         }
         op::LOCAL_ADDR => {
             let mut w = Writer::new();
-            w.socket_addr(u.local);
+            w.socket_addr(stack.local_addr(u.port));
             Ok(Step::reply(Ok(w)))
         }
         _ => Err(Error::NotSupported),

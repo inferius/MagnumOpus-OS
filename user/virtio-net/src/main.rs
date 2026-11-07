@@ -80,7 +80,7 @@ fn main(startup: Startup) -> i64 {
     let ecam_vmo = Vmo::from_handle(ecam_vmo);
     let client = Channel::from_handle(client);
 
-    let Some(address) = read_config(&startup.bootstrap) else {
+    let Some(address) = virtio::driver_address(&startup.bootstrap) else {
         println!("virtio-net: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
@@ -111,11 +111,13 @@ fn main(startup: Startup) -> i64 {
     if client.write(&nic.info.encode(), Vec::new()).is_err() {
         return 0;
     }
-    let code = match nic.serve(&client) {
+    let result = nic.serve(&client);
+    // Zarizeni zastavit v kazdem pripade, aby po konci ovladace uz
+    // nepouzivalo DMA buffery (pamet se s procesem uvolni).
+    let _ = nic.device.reset();
+    let code = match result {
         Ok(()) => 0,
         Err(e) => {
-            // Zarizeni zastavit, aby uz nepouzivalo DMA buffery.
-            let _ = nic.device.reset();
             println!("virtio-net {address}: zarizeni neodpovida spravne ({e}), koncim");
             4
         }
@@ -127,21 +129,6 @@ fn main(startup: Startup) -> i64 {
         );
     }
     code
-}
-
-fn read_config(bootstrap: &Channel) -> Option<Address> {
-    let msg = bootstrap.read(None).ok()?;
-    let text = core::str::from_utf8(&msg.data).ok()?;
-    let mut parts = text.split_whitespace();
-    if parts.next()? != "pci" {
-        return None;
-    }
-    let mut num = || parts.next()?.parse::<u8>().ok();
-    Some(Address {
-        bus: num()?,
-        device: num()?,
-        function: num()?,
-    })
 }
 
 /// Mistne spravovana MAC, kdyz ji zarizeni nehlasi (bit 1 prvniho bajtu =
@@ -228,13 +215,19 @@ impl Nic {
             } else {
                 Signals::READABLE | Signals::PEER_CLOSED
             };
-            let _ = wait_many(
+            let (_, observed) = wait_many(
                 &[
                     (self.irq.handle(), Signals::SIGNALED),
                     (client.handle(), client_mask),
                 ],
                 None,
-            );
+            )?;
+            // Sluzba skoncila: zbyle ramce od ni uz nikoho nezajimaji. Bez
+            // teto kontroly by se pri plne fronte odesilani (kanal se necte)
+            // trvale nastaveny PEER_CLOSED tocil dokola.
+            if observed[1].contains(Signals::PEER_CLOSED) {
+                return Ok(());
+            }
             // Potvrdit pred obsluhou: preruseni, ktere prijde behem ni,
             // znovu probudi.
             let _ = self.irq.ack();

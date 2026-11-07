@@ -22,7 +22,7 @@ use core::net::{IpAddr, SocketAddr};
 
 use abi::{Error, Result};
 
-use crate::codec::{Reader, Writer};
+use crate::codec::{ReadAddr, Reader, WriteAddr, Writer};
 
 /// Prava relace (bity).
 pub mod rights {

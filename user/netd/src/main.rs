@@ -92,15 +92,13 @@ fn main(startup: Startup) -> i64 {
     let _ = bootstrap.write(b"ok", Vec::new());
     println!("netd: bezim, cekam na DHCP");
 
-    let mut svc = Service {
+    let mut svc = Service::new(
         port,
-        objs: vec![Some(Obj::new(
+        Obj::new(
             Channel::from_handle(root_h),
             Kind::Session(Rc::new(RefCell::new(Auth::root()))),
-        ))],
-        gens: vec![0],
-        link_armed: false,
-    };
+        ),
+    );
     svc.run(&mut stack);
     println!(
         "netd: ovladac skoncil (zahozeno ramcu: prijem {}, odesilani {})",
@@ -114,11 +112,36 @@ struct Service {
     objs: Vec<Option<Obj>>,
     /// Generace slotu (zvysi se pri kazdem uvolneni).
     gens: Vec<u32>,
+    /// Volne sloty k znovupouziti.
+    free_slots: Vec<usize>,
+    /// Pocet zivych objektu.
+    live: usize,
+    /// Sloty s rozpracovanym pozadavkem (posouvaji se v kazdem kole).
+    pending: Vec<usize>,
+    /// Sloty, ktere potrebuji obnovit registraci na portu: (slot, generace).
+    to_arm: Vec<(usize, u32)>,
     link_armed: bool,
 }
 
 impl Service {
-    /// Hlavni smycka; vrati se, kdyz skonci ovladac.
+    fn new(port: Port, root: Obj) -> Self {
+        let mut svc = Self {
+            port,
+            objs: Vec::new(),
+            gens: Vec::new(),
+            free_slots: Vec::new(),
+            live: 0,
+            pending: Vec::new(),
+            to_arm: Vec::new(),
+            link_armed: false,
+        };
+        svc.add_objects(vec![root]);
+        svc
+    }
+
+    /// Hlavni smycka; vrati se, kdyz skonci ovladac. Prace v kazdem kole je
+    /// umerna aktivnim objektum (rozpracovane pozadavky, prijate pakety),
+    /// ne poctu vsech socketu.
     fn run(&mut self, stack: &mut Stack) {
         // Konec ovladace hlidat jednou registraci.
         if self
@@ -134,7 +157,7 @@ impl Service {
         }
         loop {
             stack.poll();
-            self.progress_all(stack);
+            self.progress_pending(stack);
             // Odeslat, co pozadavky zaradily, a uklidit zavrena spojeni.
             stack.poll();
             tcp::reap_closing(stack);
@@ -147,8 +170,10 @@ impl Service {
             let mut wake = stack
                 .poll_delay_ns()
                 .map_or(u64::MAX, |d| now.saturating_add(d));
-            for o in self.objs.iter().flatten() {
-                if let Some(p) = &o.pending {
+            for &i in &self.pending {
+                if let Some(Some(o)) = self.objs.get(i)
+                    && let Some(p) = &o.pending
+                {
                     wake = wake.min(p.wake_at());
                 }
             }
@@ -166,16 +191,24 @@ impl Service {
         }
     }
 
-    fn progress_all(&mut self, stack: &mut Stack) {
+    /// Posune rozpracovane pozadavky; dokoncene objekty pujdou znovu
+    /// zaregistrovat "ke cteni".
+    fn progress_pending(&mut self, stack: &mut Stack) {
         let mut created = Vec::new();
-        let live = self.objs.iter().flatten().count();
-        for o in self.objs.iter_mut().flatten() {
-            if let Kind::Stream(s) = &mut o.kind {
-                tcp::update_fin(stack, s);
-            }
-            if let Some(p) = o.pending.take() {
-                let step = obj::progress(stack, &mut o.kind, p);
-                finish(stack, o, step, &mut created, live);
+        let list = core::mem::take(&mut self.pending);
+        for i in list {
+            let Some(Some(o)) = self.objs.get_mut(i) else {
+                continue;
+            };
+            let Some(p) = o.pending.take() else {
+                continue;
+            };
+            let step = obj::progress(stack, &mut o.kind, p);
+            finish(stack, o, step, &mut created, self.live);
+            if o.pending.is_some() {
+                self.pending.push(i);
+            } else {
+                self.to_arm.push((i, self.gens[i]));
             }
         }
         self.add_objects(created);
@@ -192,11 +225,13 @@ impl Service {
             )?;
             self.link_armed = true;
         }
-        for (i, slot) in self.objs.iter_mut().enumerate() {
-            let Some(o) = slot else {
+        for (i, g) in core::mem::take(&mut self.to_arm) {
+            if self.gens.get(i) != Some(&g) {
+                continue;
+            }
+            let Some(Some(o)) = self.objs.get_mut(i) else {
                 continue;
             };
-            let g = self.gens[i];
             if !o.close_armed {
                 self.port
                     .wait_async(o.ch.handle(), key(Some(i), g, true), Signals::PEER_CLOSED)?;
@@ -225,10 +260,10 @@ impl Service {
         }
         let i = slot - 1;
         // Paket pro uz uvolneny slot (stara generace) se ignoruje.
-        if self.gens.get(i) != Some(&(generation & 0x7FFF_FFFF)) {
+        if self.gens.get(i) != Some(&generation) {
             return true;
         }
-        let Some(o) = self.objs[i].as_mut() else {
+        let Some(Some(o)) = self.objs.get_mut(i) else {
             return true;
         };
         if close || signals.contains(Signals::PEER_CLOSED) && !signals.contains(Signals::READABLE) {
@@ -237,17 +272,21 @@ impl Service {
         }
         o.read_armed = false;
         if o.pending.is_some() {
+            // Dalsi zprava pocka; registrace se obnovi po dokonceni.
             return true;
         }
         let mut created = Vec::new();
-        let live = self.objs.iter().flatten().count();
-        let o = self.objs[i].as_mut().unwrap();
         match o.ch.try_read() {
             Ok(msg) => {
                 let step = obj::request(stack, &mut o.kind, &msg.data);
-                finish(stack, o, step, &mut created, live);
+                finish(stack, o, step, &mut created, self.live);
+                if o.pending.is_some() {
+                    self.pending.push(i);
+                } else {
+                    self.to_arm.push((i, generation));
+                }
             }
-            Err(Error::ShouldWait) => {}
+            Err(Error::ShouldWait) => self.to_arm.push((i, generation)),
             Err(_) => self.free(stack, i),
         }
         self.add_objects(created);
@@ -258,19 +297,27 @@ impl Service {
     fn free(&mut self, stack: &mut Stack, i: usize) {
         if let Some(o) = self.objs[i].take() {
             obj::close(stack, o.kind, o.pending);
+            self.live -= 1;
+            self.free_slots.push(i);
         }
         self.gens[i] = self.gens[i].wrapping_add(1) & 0x7FFF_FFFF;
     }
 
     fn add_objects(&mut self, created: Vec<Obj>) {
         for n in created {
-            match self.objs.iter_mut().position(|o| o.is_none()) {
-                Some(i) => self.objs[i] = Some(n),
+            let i = match self.free_slots.pop() {
+                Some(i) => {
+                    self.objs[i] = Some(n);
+                    i
+                }
                 None => {
                     self.objs.push(Some(n));
                     self.gens.push(0);
+                    self.objs.len() - 1
                 }
-            }
+            };
+            self.live += 1;
+            self.to_arm.push((i, self.gens[i]));
         }
     }
 }

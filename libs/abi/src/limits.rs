@@ -18,3 +18,7 @@ pub const PROCESS_MAX_MAPPINGS: usize = 65_536;
 /// Nejvic bajtu dat ve fronte jednoho konce kanalu (krome limitu
 /// `CHANNEL_MAX_QUEUED` zprav).
 pub const CHANNEL_MAX_QUEUED_BYTES: usize = 4 * 1024 * 1024;
+/// Nejvic registraci a cekajicich paketu ve vsech portech jednoho procesu
+/// dohromady (kazda drzi pamet jadra; limit jednoho portu je
+/// `syscall::PORT_MAX_PENDING`).
+pub const PROCESS_MAX_PORT_PENDING: usize = 65_536;

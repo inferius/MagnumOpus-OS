@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use core::net::{Ipv4Addr, SocketAddr};
 
 use libos::{Error, Result};
-use netproto::{Reader, Writer, proto, rights};
+use netproto::{ReadAddr, Reader, Writer, proto, rights};
 use smoltcp::iface::SocketHandle;
 use smoltcp::phy::ChecksumCapabilities;
 use smoltcp::socket::icmp;

@@ -59,6 +59,7 @@ fn icmp_tcp_error(f: &[u8]) -> Option<IcmpError> {
 
 pub struct Link {
     ch: Channel,
+    /// Prijate zpravy `FRAME` (vcetne bajtu typu).
     rx: VecDeque<Vec<u8>>,
     pub info: link::Info,
     /// Posledni chyby ICMP k segmentum TCP (viz `icmp_tcp_error`).
@@ -98,9 +99,10 @@ impl Link {
                     if self.rx.len() >= RX_QUEUE_MAX {
                         self.rx_dropped += 1;
                     } else {
-                        let mut d = msg.data;
-                        d.remove(0);
-                        if let Some(e) = icmp_tcp_error(&d) {
+                        // Zprava se uklada cela (typ + ramec); ramec je od
+                        // bajtu 1, bez kopirovani.
+                        let d = msg.data;
+                        if let Some(e) = icmp_tcp_error(&d[1..]) {
                             if self.icmp_errors.len() >= ICMP_ERRORS_MAX {
                                 self.icmp_errors.pop_front();
                             }
@@ -134,6 +136,7 @@ impl Link {
     }
 }
 
+/// Prijata zprava `FRAME` od ovladace: bajt 0 = typ, ramec od bajtu 1.
 pub struct RxToken(Vec<u8>);
 
 pub struct TxToken<'a> {
@@ -146,7 +149,7 @@ impl phy::RxToken for RxToken {
     where
         F: FnOnce(&[u8]) -> R,
     {
-        f(&self.0)
+        f(&self.0[1..])
     }
 }
 

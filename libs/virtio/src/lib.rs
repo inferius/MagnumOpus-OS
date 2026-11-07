@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
-use libos::{Error, Mapping, Result};
+use libos::{Channel, Error, Mapping, Result};
 use pci::{Address, CAP_VENDOR, Ecam};
 
 pub const VENDOR: u16 = 0x1AF4;
@@ -279,4 +279,30 @@ pub fn find(functions: &[pci::Function], modern_id: u16, transitional_id: u16) -
         .filter(|f| f.vendor == VENDOR && (f.device == modern_id || f.device == transitional_id))
         .map(|f| f.address)
         .collect()
+}
+
+/// Adresa zarizeni od spravce zarizeni: prvni zprava na bootstrap kanalu
+/// ovladace je `pci <sbernice> <zarizeni> <funkce>` (desitkove). `None` =
+/// zprava chybi nebo je neplatna.
+pub fn driver_address(bootstrap: &Channel) -> Option<Address> {
+    let msg = bootstrap.read(None).ok()?;
+    parse_driver_address(core::str::from_utf8(&msg.data).ok()?)
+}
+
+/// Rozbor zpravy `pci <sbernice> <zarizeni> <funkce>`.
+pub fn parse_driver_address(text: &str) -> Option<Address> {
+    let mut parts = text.split_whitespace();
+    if parts.next()? != "pci" {
+        return None;
+    }
+    let mut num = || parts.next()?.parse::<u8>().ok();
+    let a = Address {
+        bus: num()?,
+        device: num()?,
+        function: num()?,
+    };
+    if a.device > 31 || a.function > 7 || parts.next().is_some() {
+        return None;
+    }
+    Some(a)
 }

@@ -98,9 +98,10 @@ pub fn event_create() -> Result<u64> {
 
 /// `PORT_CREATE() -> handle`.
 pub fn port_create() -> Result<u64> {
-    let port = Port::new();
+    let p = current_process();
+    let port = Port::new(p.port_budget());
     let rights = port.default_rights();
-    let h = current_process().handles().insert(port, rights)?;
+    let h = p.handles().insert(port, rights)?;
     Ok(h.0 as u64)
 }
 

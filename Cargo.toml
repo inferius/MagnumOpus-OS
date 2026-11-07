@@ -17,6 +17,7 @@ members = [
     "libs/pci",
     "libs/tz",
     "libs/virtio",
+    "libs/wire",
     "tools/osfs",
     "user/devmgr",
     "user/echo",

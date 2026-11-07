@@ -85,7 +85,7 @@ fn main(startup: Startup) -> i64 {
     let ecam_vmo = Vmo::from_handle(ecam_vmo);
     let client = Channel::from_handle(client);
 
-    let Some(address) = read_config(&startup.bootstrap) else {
+    let Some(address) = virtio::driver_address(&startup.bootstrap) else {
         println!("virtio-blk: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
@@ -106,21 +106,6 @@ fn main(startup: Startup) -> i64 {
     );
     serve(&mut disk, &client, &resource);
     0
-}
-
-fn read_config(bootstrap: &Channel) -> Option<Address> {
-    let msg = bootstrap.read(None).ok()?;
-    let text = core::str::from_utf8(&msg.data).ok()?;
-    let mut parts = text.split_whitespace();
-    if parts.next()? != "pci" {
-        return None;
-    }
-    let mut num = || parts.next()?.parse::<u8>().ok();
-    Some(Address {
-        bus: num()?,
-        device: num()?,
-        function: num()?,
-    })
 }
 
 impl Disk {

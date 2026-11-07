@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use libos::abi::limits::PROCESS_MAX_PORT_PENDING;
 use libos::abi::syscall::{PORT_MAX_PENDING, RANDOM_MAX, random_flags};
 use libos::hw::Resource;
 use libos::{Channel, Error, Event, Port, Rights, Signals, Startup, sys, time};
@@ -16,6 +17,7 @@ pub const TESTS: &[Test] = &[
     ("port: kanal ke cteni a zavreny kanal", port_channel),
     ("port: neplatne argumenty", port_invalid),
     ("port: zanikly objekt vrati rezervaci (bez uniku)", port_no_leak),
+    ("port: kvota registraci na proces pres vsechny porty", port_process_quota),
     ("RANDOM_GET: data, nasazeni, limity", random_get),
     ("RANDOM_ADD: jen s Resource MANAGE", random_add),
     ("virtio-rng: ovladac spusten", virtio_rng_started),
@@ -162,6 +164,46 @@ fn port_no_leak(_: &Startup) -> TestResult {
             .map_err(|e| fail("wait_async", e))?;
     }
     check_eq!(port.wait(no_wait()).err(), Some(Error::TimedOut), "zadne pakety");
+    Ok(())
+}
+
+fn port_process_quota(_: &Startup) -> TestResult {
+    // Stejny event muze mit libovolne registraci; kvota je spolecna pro
+    // vsechny porty procesu.
+    let ev = Event::create().map_err(|e| fail("event", e))?;
+    let a = Port::create().map_err(|e| fail("port A", e))?;
+    let b = Port::create().map_err(|e| fail("port B", e))?;
+    let half = PROCESS_MAX_PORT_PENDING / 2;
+    for i in 0..half as u64 {
+        a.wait_async(ev.handle(), i, Signals::SIGNALED)
+            .map_err(|e| fail("registrace A", e))?;
+    }
+    for i in 0..(PROCESS_MAX_PORT_PENDING - half) as u64 {
+        b.wait_async(ev.handle(), i, Signals::SIGNALED)
+            .map_err(|e| fail("registrace B", e))?;
+    }
+    check_eq!(
+        b.wait_async(ev.handle(), 0, Signals::SIGNALED).err(),
+        Some(Error::NoResources),
+        "kvota procesu vycerpana"
+    );
+    // Zavreny port vrati svou cast kvoty.
+    drop(a);
+    b.wait_async(ev.handle(), 1, Signals::SIGNALED)
+        .map_err(|e| fail("registrace po zavreni A", e))?;
+    // Vyzvednuty paket taky: signal doruci vsechny registrace B.
+    ev.signal().map_err(|e| fail("signal", e))?;
+    let mut n = 0;
+    while b.wait(no_wait()).is_ok() {
+        n += 1;
+    }
+    check_eq!(n, PROCESS_MAX_PORT_PENDING - half + 1, "pakety B");
+    let c = Port::create().map_err(|e| fail("port C", e))?;
+    ev.reset().map_err(|e| fail("reset", e))?;
+    for i in 0..half as u64 {
+        c.wait_async(ev.handle(), i, Signals::SIGNALED)
+            .map_err(|e| fail("registrace C po vyzvednuti", e))?;
+    }
     Ok(())
 }
 

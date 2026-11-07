@@ -47,7 +47,7 @@ use core::time::Duration;
 
 use abi::{Error, Result};
 
-pub use codec::{Reader, Writer};
+pub use codec::{ReadAddr, Reader, WriteAddr, Writer};
 pub use policy::{Auth, Policy, Rule, Target, proto, rights, rights_names};
 
 #[cfg(feature = "client")]
@@ -109,11 +109,11 @@ pub mod op {
     pub const ADDRS: u32 = 23;
 
     // Kanal naslouchani TCP.
-    /// timeout -> vzdalena socket_addr + kanal spojeni
+    /// timeout -> vzdalena socket_addr, mistni socket_addr + kanal spojeni
     pub const ACCEPT: u32 = 30;
 
     // Kanal naslouchani i socketu UDP.
-    /// () -> mistni socket_addr
+    /// () -> mistni socket_addr (podle aktualni adresy rozhrani)
     pub const LOCAL_ADDR: u32 = 31;
 
     // Kanal socketu UDP.

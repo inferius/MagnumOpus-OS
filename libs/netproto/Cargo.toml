@@ -16,4 +16,5 @@ std = []
 
 [dependencies]
 abi = { workspace = true }
+wire = { path = "../wire" }
 libos = { path = "../libos", optional = true }

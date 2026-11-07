@@ -62,7 +62,6 @@ pub struct Stream {
 
 pub struct Listener {
     pub port: u16,
-    pub local: SocketAddr,
     /// Sockety ve stavu naslouchani nebo navazane, cekajici na `accept`.
     pub backlog: Vec<SocketHandle>,
 }
@@ -70,7 +69,6 @@ pub struct Listener {
 pub struct Udp {
     pub sock: SocketHandle,
     pub port: u16,
-    pub local: SocketAddr,
     pub auth: AuthRef,
 }
 
@@ -154,7 +152,7 @@ pub fn request(stack: &mut Stack, kind: &mut Kind, data: &[u8]) -> Step {
     let step = match kind {
         Kind::Session(auth) => session::request(stack, auth, code, &mut r),
         Kind::Stream(s) => tcp::stream_request(stack, s, code, &mut r),
-        Kind::Listener(l) => tcp::listener_request(l, code, &mut r),
+        Kind::Listener(l) => tcp::listener_request(stack, l, code, &mut r),
         Kind::Udp(u) => udp::request(stack, u, code, &mut r),
     };
     match step {

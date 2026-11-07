@@ -156,7 +156,11 @@ nezávisí na počtu hlídaných objektů.
 - **Místo pro paket se rezervuje při registraci**, takže doručení
   (i z obsluhy přerušení) nealokuje a paket se neztratí. Registrací
   a čekajících paketů může být na portu nejvýš `PORT_MAX_PENDING`
-  (65 536).
+  (65 536) a ve všech portech jednoho procesu dohromady nejvýš
+  `PROCESS_MAX_PORT_PENDING` (65 536), protože každá registrace drží
+  paměť jádra. Místo v kvótě se vrátí vyzvednutím paketu, zánikem
+  objektu nebo zavřením portu. Prázdný port vrátí přebytečnou kapacitu
+  fronty.
 - **Zaniklý objekt** (zavřený poslední handle) vrátí rezervaci svých
   nedoručených registrací. **Zavřený port**: objekty jeho registrace
   zahodí.
@@ -192,8 +196,8 @@ určuje program). Když je podmínka splněná už teď, paket přijde hned.
 Vyžaduje `WAIT` na objektu a `WRITE` na portu. Na port samotný registrovat
 nejde. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`port` není
 port), `NOT_SUPPORTED` (objekt je port), `INVALID_ARGS` (prázdná maska),
-`NO_RESOURCES` (port má `PORT_MAX_PENDING` registrací a paketů),
-`NO_MEMORY`.
+`NO_RESOURCES` (port má `PORT_MAX_PENDING` registrací a paketů, nebo
+proces vyčerpal `PROCESS_MAX_PORT_PENDING`), `NO_MEMORY`.
 
 ### `PORT_WAIT`
 
@@ -372,6 +376,7 @@ Program nesmí spotřebovat paměť jádra bez omezení (`abi::limits`):
 | mapování v adresním prostoru procesu | 65 536 | `NO_RESOURCES` |
 | zprávy ve frontě jednoho konce kanálu | 1024 | `SHOULD_WAIT` |
 | bajty dat ve frontě jednoho konce kanálu | 4 MiB | `SHOULD_WAIT` |
+| registrace a nevyzvednuté pakety ve všech portech procesu | 65 536 | `NO_RESOURCES` |
 
 Vyčerpání paměti programem tak jádro neshodí: tabulky stránek, heap a
 zásobníky jádra smí čerpat i z rezervy. Plán: kvóty pro skupiny procesů
@@ -474,6 +479,8 @@ Jádro má kryptografický generátor (`kernel/src/random.rs`, crate
   požadavku se klíč přepíše prvním blokem proudu (fast key erasure), takže
   pozdější únik stavu jádra neprozradí dřívější výstupy.
 - **Nasazený** je generátor po reseedu se součtem kreditu aspoň 256 bitů.
+  Před nasazením se kredit sčítá přes všechny reseedy (entropie zůstává
+  v klíči), takže stačí i zdroj, který dodává po malých dávkách.
   V QEMU stačí RDRAND (`-cpu max`), na stroji bez něj ovladač virtio-rng.
 
 ⚠️ Bez hardwarového zdroje a bez virtio-rng generátor nasazený nebude

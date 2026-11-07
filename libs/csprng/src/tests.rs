@@ -68,9 +68,10 @@ fn generator_seeding_and_key_erasure() {
     g.add(&[1; 16], 64);
     g.reseed();
     assert!(!g.is_seeded(), "64 bitu nestaci");
+    assert_eq!(g.pending_bits(), 64, "kredit pred nasazenim zustava");
     // Kredit nejvys 8 bitu na bajt.
     g.add(&[2; 8], 1000);
-    assert_eq!(g.pending_bits(), 64);
+    assert_eq!(g.pending_bits(), 128);
     g.add(&[3; 32], SEED_BITS);
     g.reseed();
     assert!(g.is_seeded());
@@ -82,6 +83,20 @@ fn generator_seeding_and_key_erasure() {
     g.fill(&mut b);
     assert_ne!(a, b, "po kazdem pozadavku novy klic");
     assert!(a.iter().any(|&x| x != 0));
+}
+
+#[test]
+fn credit_accumulates_over_small_reseeds() {
+    // Zdroj, ktery mezi reseedy da jen 32 bitu: po 8 reseedech nasazeno.
+    let mut g = Generator::new();
+    for i in 0..7u8 {
+        g.add(&[i; 4], 32);
+        g.reseed();
+        assert!(!g.is_seeded(), "po {} reseedech jeste ne", i + 1);
+    }
+    g.add(&[9; 4], 32);
+    g.reseed();
+    assert!(g.is_seeded(), "8 x 32 bitu = 256");
 }
 
 #[test]

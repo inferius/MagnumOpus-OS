@@ -136,7 +136,9 @@ and starts DHCP. Then a single thread repeats:
    registrations on the port: "readable" (renewed after a message is read,
    but not while a request is pending) and "closed". The packet key carries
    the slot number and its generation, so an old packet after the slot is
-   freed confuses nothing.
+   freed confuses nothing. The work in each round is proportional to the
+   active objects (pending requests, received packets), not to the number
+   of all sockets.
 
 | Property | Value |
 |---|---|
@@ -313,6 +315,11 @@ A missing right or a destination outside the restrictions returns
 `ACCESS_DENIED`. The new error codes are described in
 [errors.md](errors.md).
 
+`UdpSocket::local_addr` and `TcpListener::local_addr` ask the service
+(they return `Result`): a socket created before DHCP has the address
+0.0.0.0 only until the interface is configured. An address instead of a
+name (IPv6 too, `"::1"`) is returned by `resolve` at once without a query.
+
 `TcpStream::read` returns `Ok(0)` at the end of the stream (the other side
 finished writing). `CONNECTION_RESET` means the connection was broken by an
 RST or the other side stopped responding. A connection can be handed to
@@ -343,8 +350,8 @@ wait, `u64::MAX` = no limit.
 | connection | `RECV` (21) | max u32, timeout → data (empty = end of stream) |
 | connection | `SHUTDOWN` (22) | → () (FIN, reading continues) |
 | connection | `ADDRS` (23) | → local, remote address |
-| listener | `ACCEPT` (30) | timeout → remote address + connection channel |
-| listener, UDP | `LOCAL_ADDR` (31) | → local address |
+| listener | `ACCEPT` (30) | timeout → remote address, local address + connection channel |
+| listener, UDP | `LOCAL_ADDR` (31) | → local address (from the current interface address) |
 | UDP | `SEND_TO` (40) | destination, data → () |
 | UDP | `RECV_FROM` (41) | max u32, timeout → sender, data |
 
