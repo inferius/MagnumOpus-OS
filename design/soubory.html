@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soubory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+.page { max-width: 1400px; }
+#fdesk { height: 720px; margin-top: var(--s4); }
+#fwin { left: 16px; right: 16px; top: 16px; bottom: 16px; }
+.fx { display: grid; grid-template-rows: auto auto 1fr; height: 100%; }
+.toolbar { display: flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s3); border-bottom: 1px solid var(--c-border); flex-wrap: wrap; }
+.crumbs { display: flex; align-items: center; gap: 2px; flex: 1 1 200px; min-width: 0; font-size: var(--t-small-size); }
+.crumbs button { border: 0; background: transparent; padding: var(--s1) var(--s3); border-radius: var(--r-xs); cursor: pointer; }
+.crumbs button:hover { background: var(--c-surface-3); }
+.crumbs button[aria-current] { font-weight: 600; }
+.search { display: flex; align-items: center; gap: var(--s2); height: 32px; padding: 0 var(--s3); border-radius: var(--r-pill); background: var(--c-surface-3); width: 200px; }
+.search input { border: 0; background: transparent; width: 100%; font-size: var(--t-small-size); }
+.search input:focus-visible { outline: none; }
+.search:focus-within { box-shadow: 0 0 0 2px var(--c-focus); }
+.aside-band { display: none; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); background: var(--c-warn-soft); color: var(--c-ink);
+  border-bottom: 1px solid color-mix(in srgb, var(--c-warn) 40%, transparent); flex-wrap: wrap; font-size: var(--t-small-size); }
+.aside-band.on { display: flex; }
+.aside-band .ic { color: var(--c-warn); }
+.aside-band.agent { background: var(--c-ai-soft); }
+.aside-band.agent .ic { color: var(--c-ai-ink); }
+.cols { display: grid; grid-template-columns: 210px 1fr 300px; min-height: 0; }
+.side { background: var(--c-surface-2); overflow: auto; padding: var(--s2); border-right: 1px solid var(--c-border); }
+.side h3 { font-size: var(--t-caption-size); color: var(--c-ink-muted); font-weight: 600; margin: var(--s4) var(--s3) var(--s1); text-transform: none; }
+.side .li { min-height: 34px; font-size: var(--t-small-size); }
+.side .li .chip { margin-left: auto; }
+.mainlist { overflow: auto; }
+.mainlist .tbl td:first-child { display: flex; align-items: center; gap: var(--s3); }
+.mainlist .tbl tr { cursor: default; }
+.mainlist .tbl tr:hover td { background: var(--c-surface-3); }
+.mainlist .tbl tr[aria-selected="true"] td { background: var(--c-accent-soft); }
+.mainlist .tbl tr.changed td:first-child::after { content: attr(data-change); margin-left: auto; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--c-warn-soft); color: var(--c-warn); }
+.mainlist .tbl tr.removed td { text-decoration: line-through; color: var(--c-ink-muted); }
+.mainlist .tbl .ic { color: var(--c-accent-ink); }
+.details { border-left: 1px solid var(--c-border); overflow: auto; padding: var(--s4); }
+.thumb { height: 120px; border-radius: var(--r-card); background: linear-gradient(135deg, var(--c-accent-soft), var(--c-ai-soft)); display: grid; place-items: center; color: var(--c-accent-ink); margin-bottom: var(--s3); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: var(--s1) var(--s4); font-size: var(--t-small-size); margin: var(--s3) 0; }
+.kv dt { color: var(--c-ink-muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.timeline { list-style: none; margin: var(--s3) 0 0; padding: 0; position: relative; }
+.timeline::before { content: ""; position: absolute; left: 9px; top: 6px; bottom: 6px; width: 2px; background: var(--c-border); }
+.timeline li { position: relative; padding: 0 0 var(--s3) 28px; font-size: var(--t-small-size); }
+.timeline li::before { content: ""; position: absolute; left: 4px; top: 4px; width: 12px; height: 12px; border-radius: 6px; background: var(--c-surface); border: 2px solid var(--c-ink-faint); }
+.timeline li.commit::before { border-color: var(--c-accent); background: var(--c-accent); }
+.timeline li.now::before { border-color: var(--c-ok); background: var(--c-ok); }
+.timeline li.agent::before { border-color: var(--c-ai); background: var(--c-ai-soft); }
+.timeline button.ver { border: 0; background: transparent; text-align: left; width: 100%; padding: var(--s1) var(--s2); border-radius: var(--r-xs); cursor: pointer; }
+.timeline button.ver:hover, .timeline button.ver[aria-pressed="true"] { background: var(--c-surface-3); }
+.timeline small { color: var(--c-ink-muted); display: block; }
+.verbox { margin-top: var(--s2); padding: var(--s3); border-radius: var(--r-control); background: var(--c-surface-2); font-size: var(--t-small-size); }
+.diffpane { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; border: 1px solid var(--c-border); border-radius: var(--r-card); }
+.diffpane li { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3); border-bottom: 1px solid var(--c-border); font-size: var(--t-small-size); }
+.diffpane li:last-child { border-bottom: 0; }
+.diffpane .kind { width: 82px; font-size: 11px; font-weight: 700; }
+.k-add { color: var(--c-ok); } .k-mod { color: var(--c-warn); } .k-del { color: var(--c-danger); } .k-conf { color: var(--c-danger); }
+.dlg { position: absolute; z-index: 500; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 24px)); background: var(--c-surface);
+  border: 1px solid var(--c-border); border-radius: var(--r-window); box-shadow: var(--sh-dialog); animation: pop-in var(--m-base) var(--ease-enter); }
+.dlg header { padding: var(--s5) var(--s5) var(--s2); }
+.dlg .content { padding: 0 var(--s5) var(--s4); }
+.dlg footer { display: flex; gap: var(--s3); justify-content: flex-end; padding: var(--s3) var(--s5) var(--s5); flex-wrap: wrap; }
+.dim { position: absolute; inset: 0; z-index: 499; background: color-mix(in srgb, var(--c-bg) 55%, transparent); }
+@media (max-width: 1000px) { .cols { grid-template-columns: 180px 1fr; } .details { display: none; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#flist">Přeskočit na seznam souborů</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header style="margin-bottom:var(--s4)">
+    <h1>Soubory</h1>
+    <p class="lead">Průzkumník nad FS s verzemi: u každého souboru je časová osa verzí a obnova jedním krokem; složku jde „zkusit bokem“ v klonu a převzít jen vybrané změny.</p>
+  </header>
+  <p class="note">Zkus: vyber <b>smlouva.pdf</b> a v panelu vpravo projdi verze. Pak <b>Zkusit bokem</b>, smaž nebo přejmenuj pár souborů (klávesa <span class="kbd">Delete</span> / <span class="kbd">F2</span> nebo tlačítka) a dej <b>Zkontrolovat a převzít</b>. Agent pracuje bokem ve složce <b>Stažené</b>.</p>
+
+  <div class="desk" id="fdesk">
+    <section class="win" id="fwin" role="region" aria-label="Soubory">
+      <div class="win-title">
+        <span class="trust" tabindex="0" role="button" aria-label="Soubory, systémová aplikace. Smí: celá domovská složka.">
+          <svg class="ic s"><use href="#ic-shield"/></svg>Soubory<span class="perm"><svg class="ic"><use href="#ic-home"/></svg></span></span>
+        <span class="name" id="wtitle">Dokumenty - Soubory</span>
+        <div class="wbtns"><button class="wbtn" aria-label="Minimalizovat"><svg class="ic"><use href="#ic-min"/></svg></button><button class="wbtn" aria-label="Maximalizovat"><svg class="ic"><use href="#ic-max"/></svg></button><button class="wbtn close" aria-label="Zavřít"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      </div>
+      <div class="win-body">
+        <div class="fx">
+          <div class="toolbar" role="toolbar" aria-label="Nástroje">
+            <button class="btn ghost small icon" aria-label="Zpět"><svg class="ic s"><use href="#ic-left"/></svg></button>
+            <button class="btn ghost small icon" aria-label="Vpřed"><svg class="ic s"><use href="#ic-right"/></svg></button>
+            <nav class="crumbs" aria-label="Cesta" id="crumbs"></nav>
+            <div class="search"><svg class="ic s"><use href="#ic-search"/></svg><input aria-label="Hledat v Dokumenty" placeholder="Hledat"></div>
+            <button class="btn small" id="b-aside"><svg class="ic s"><use href="#ic-branch"/></svg>Zkusit bokem</button>
+          </div>
+          <div class="aside-band" id="band" role="status"></div>
+          <div class="cols">
+            <nav class="side" aria-label="Místa">
+              <ul class="list" style="padding:0" id="places"></ul>
+            </nav>
+            <div class="mainlist">
+              <table class="tbl" id="flist" role="grid" aria-label="Soubory" aria-multiselectable="false">
+                <thead><tr><th>Jméno</th><th>Změněno</th><th class="r">Velikost</th><th>Verze</th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <div class="hstack" style="padding:var(--s3)" id="rowacts"></div>
+            </div>
+            <aside class="details" id="details" aria-label="Podrobnosti"></aside>
+          </div>
+        </div>
+      </div>
+    </section>
+    <div id="layer"></div>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var DATA = {
+    Dokumenty: [
+      { n: 'Faktury', k: 'folder', m: 'dnes 9:12', s: '-', v: 0 },
+      { n: 'Projekty', k: 'folder', m: 'včera', s: '-', v: 0, repo: true },
+      { n: 'smlouva.pdf', k: 'file', m: 'dnes 14:02', s: '412 kB', v: 6 },
+      { n: 'rozpocet-2026.ods', k: 'file', m: '5. 11.', s: '88 kB', v: 14 },
+      { n: 'poznamky.md', k: 'code', m: 'dnes 11:40', s: '6 kB', v: 31 },
+      { n: 'dovolena.jpg', k: 'image', m: '12. 8.', s: '3,1 MB', v: 1 },
+      { n: 'stary-zivotopis.docx', k: 'file', m: '2. 3. 2024', s: '54 kB', v: 3 }
+    ],
+    'Stažené': [
+      { n: 'instalator-2.3.pkg', k: 'file', m: 'dnes 13:20', s: '210 MB', v: 1 },
+      { n: 'faktura-0412.pdf', k: 'file', m: '30. 10.', s: '120 kB', v: 1 },
+      { n: 'obraz-disku.img', k: 'file', m: '11. 2.', s: '1,2 GB', v: 1 },
+      { n: 'screenshot-001.png', k: 'image', m: '2. 1.', s: '840 kB', v: 1 }
+    ]
+  };
+  var VERS = [
+    { t: 'teď', who: 'aktuální verze', cls: 'now', note: 'podepsaná verze, 412 kB' },
+    { t: 'dnes 14:02', who: 'Pošta uložila přílohu', cls: '', note: 'nahradila verzi z 11:20' },
+    { t: 'dnes 11:20', who: 'commit „Smlouva po připomínkách“', cls: 'commit', note: 'uloženo s popisem &middot; ty' },
+    { t: 'včera 18:45', who: 'automatická verze', cls: '', note: 'každou hodinu, drží se 2 dny' },
+    { t: '4. 11. 9:03', who: 'agent: doplnil obsah', cls: 'agent', note: 'převzato z klonu po kontrole' },
+    { t: '1. 11. 16:30', who: 'vytvořeno', cls: 'commit', note: 'commit „První návrh“' }
+  ];
+  var folder = 'Dokumenty', sel = 2, aside = null; // aside = { folder, changes: [], agent }
+  var agentAside = { folder: 'Stažené', changes: [['del', 'instalator-2.3.pkg'], ['del', 'obraz-disku.img'], ['add', 'Faktury/faktura-0412.pdf'], ['del', 'faktura-0412.pdf']], agent: true };
+
+  function rows() { return DATA[folder]; }
+  function renderPlaces() {
+    var P = [['home', 'Domů'], ['folder', 'Dokumenty'], ['download', 'Stažené'], ['image', 'Obrázky']];
+    var html = '<li><h3>Místa</h3></li>' + P.map(function (p) {
+      var on = p[1] === folder && !(aside && aside.view);
+      return '<li class="li' + (on ? ' is-sel' : '') + '" tabindex="0" role="button" data-f="' + p[1] + '"' + (on ? ' aria-current="true"' : '') + '>' + ic(p[0], 's') + p[1] +
+        (p[1] === 'Stažené' ? '<span class="chip agent" title="Agent pracuje bokem">' + ic('agent', 's') + '</span>' : '') + '</li>';
+    }).join('');
+    html += '<li><h3>Úložiště (repozitáře)</h3></li><li class="li" tabindex="0">' + ic('branch', 's') + 'Projekty<span class="chip">main</span></li><li class="li" tabindex="0">' + ic('disk', 's') + 'Záloha (USB)</li>';
+    html += '<li><h3>Bokem</h3></li>';
+    if (aside) html += '<li class="li" tabindex="0">' + ic('branch', 's') + aside.folder + ' (bokem)<span class="chip warn num">' + aside.changes.length + '</span></li>';
+    html += '<li class="li" tabindex="0" data-agent>' + ic('agent', 's') + 'Stažené (agent)<span class="chip agent num">' + agentAside.changes.length + '</span></li>';
+    html += '<li><h3>Další</h3></li><li class="li" tabindex="0">' + ic('trash', 's') + 'Koš<span class="chip num">12</span></li>';
+    var el = document.getElementById('places'); el.innerHTML = html;
+    el.querySelectorAll('[data-f]').forEach(function (li) {
+      function go() { folder = li.dataset.f in DATA ? li.dataset.f : folder; sel = 0; render(); }
+      li.addEventListener('click', go); li.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+    });
+    el.querySelector('[data-agent]').addEventListener('click', function () { reviewDialog(agentAside); });
+  }
+  function renderCrumbs() {
+    document.getElementById('crumbs').innerHTML = '<button>' + ic('home', 's') + '</button>' + ic('right', 's') + '<button aria-current="page">' + folder + (aside && aside.folder === folder ? ' <span class="chip warn">bokem</span>' : '') + '</button>';
+    document.getElementById('wtitle').textContent = folder + (aside && aside.folder === folder ? ' (bokem)' : '') + ' - Soubory';
+  }
+  function changeOf(n) {
+    if (!aside || aside.folder !== folder) return null;
+    for (var i = 0; i < aside.changes.length; i++) if (aside.changes[i][1] === n || aside.changes[i][2] === n) return aside.changes[i];
+    return null;
+  }
+  function renderList() {
+    var tb = document.querySelector('#flist tbody');
+    tb.innerHTML = rows().map(function (r, i) {
+      var ch = changeOf(r.n), cls = ch ? (ch[0] === 'del' ? 'removed changed' : 'changed') : '';
+      var label = ch ? { del: 'smazáno', ren: 'přejmenováno', add: 'nové' }[ch[0]] : '';
+      return '<tr role="row" tabindex="' + (i === sel ? 0 : -1) + '" aria-selected="' + (i === sel) + '" class="' + cls + '" data-change="' + label + '" data-i="' + i + '">' +
+        '<td role="gridcell" data-change="' + label + '">' + ic(r.k, 's') + '<span>' + (ch && ch[0] === 'ren' ? ch[1] : r.n) + '</span>' + (r.repo ? '<span class="chip">repo</span>' : '') + '</td><td role="gridcell" class="num">' + r.m + '</td><td role="gridcell" class="r num">' + r.s + '</td>' +
+        '<td role="gridcell" class="num muted">' + (r.v ? r.v + '&times;' : '-') + '</td></tr>';
+    }).join('');
+    var trs = Array.prototype.slice.call(tb.querySelectorAll('tr'));
+    trs.forEach(function (tr, i) {
+      tr.addEventListener('click', function () { select(i, true); });
+      tr.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown' && i < trs.length - 1) { e.preventDefault(); select(i + 1, true); }
+        if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); select(i - 1, true); }
+        if (e.key === 'Delete') { e.preventDefault(); act('del'); }
+        if (e.key === 'F2') { e.preventDefault(); act('ren'); }
+      });
+    });
+    var inAside = aside && aside.folder === folder;
+    document.getElementById('rowacts').innerHTML = inAside
+      ? '<button class="btn small" data-act="del">' + ic('trash', 's') + 'Smazat</button><button class="btn small" data-act="ren">Přejmenovat</button><span class="note" style="margin:0">Změny jdou jen do klonu.</span>'
+      : '';
+    document.querySelectorAll('[data-act]').forEach(function (b) { b.addEventListener('click', function () { act(b.dataset.act); }); });
+  }
+  function select(i, focus) {
+    sel = i;
+    document.querySelectorAll('#flist tbody tr').forEach(function (tr, j) { tr.setAttribute('aria-selected', j === i); tr.tabIndex = j === i ? 0 : -1; if (j === i && focus) tr.focus(); });
+    renderDetails();
+  }
+  function renderDetails() {
+    var r = rows()[sel], d = document.getElementById('details');
+    if (!r) { d.innerHTML = ''; return; }
+    var vers = r.n === 'smlouva.pdf' ? VERS : VERS.slice(0, 1).concat([{ t: r.m, who: 'automatická verze', cls: '', note: '' }]);
+    d.innerHTML = '<div class="thumb">' + ic(r.k, 'xl') + '</div><h3 style="margin:0;font-size:var(--t-title-size);overflow-wrap:anywhere">' + r.n + '</h3>' +
+      '<dl class="kv"><dt>Velikost</dt><dd>' + r.s + '</dd><dt>Změněno</dt><dd>' + r.m + '</dd><dt>Kdo smí</dt><dd>ty; Pošta (jen čtení, předáno)</dd><dt>Úložiště</dt><dd>Domov &middot; verze zapnuté</dd></dl>' +
+      '<div class="hstack"><b>Verze</b><span class="spacer"></span><span class="chip num">' + (r.v || 1) + '</span></div>' +
+      '<ol class="timeline" aria-label="Verze souboru">' + vers.map(function (v, i) {
+        return '<li class="' + v.cls + '"><button class="ver" aria-pressed="' + (i === 0) + '" data-v="' + i + '"><b>' + v.t + '</b>' +
+          (v.cls === 'agent' ? ' <span class="chip agent" style="height:18px">' + ic('agent', 's') + 'agent</span>' : '') + '<small>' + v.who + '</small></button></li>';
+      }).join('') + '</ol><div id="verbox"></div>';
+    d.querySelectorAll('.ver').forEach(function (b) {
+      b.addEventListener('click', function () {
+        d.querySelectorAll('.ver').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+        var v = vers[+b.dataset.v];
+        document.getElementById('verbox').innerHTML = +b.dataset.v === 0 ? '' : '<div class="verbox"><b>' + v.t + '</b> &middot; ' + v.note +
+          '<div class="hstack" style="margin-top:var(--s3)"><button class="btn small primary">' + ic('history', 's') + 'Obnovit</button><button class="btn small">Kopie vedle</button><button class="btn small ghost">Porovnat</button></div>' +
+          '<p class="note" style="margin:var(--s2) 0 0">Obnova nic nesmaže: současná verze jde do koše.</p></div>';
+      });
+    });
+  }
+  function renderBand() {
+    var b = document.getElementById('band');
+    var inAside = aside && aside.folder === folder;
+    var agentHere = folder === 'Stažené';
+    b.className = 'aside-band' + (inAside ? ' on' : agentHere ? ' on agent' : '');
+    if (inAside) {
+      b.innerHTML = ic('branch') + '<span><b>Pracuješ bokem</b> v klonu složky ' + aside.folder + '. Změny (' + aside.changes.length + ') se neprojeví, dokud je nepřevezmeš.</span><span class="spacer"></span>' +
+        '<button class="btn small primary" id="b-review"' + (aside.changes.length ? '' : ' disabled') + '>Zkontrolovat a převzít</button><button class="btn small" id="b-drop">Zahodit klon</button>';
+      document.getElementById('b-review').addEventListener('click', function () { reviewDialog(aside); });
+      document.getElementById('b-drop').addEventListener('click', function () { aside = null; render(); });
+    } else if (agentHere) {
+      b.innerHTML = ic('agent') + '<span><span class="chip agent">' + ic('agent', 's') + 'agent</span> <b>Asistent uklízí tuto složku bokem.</b> Vidíš originál; agent má přístup jen ke klonu. Navrhuje ' + agentAside.changes.length + ' změny.</span><span class="spacer"></span>' +
+        '<button class="btn small primary" id="b-agentrev">Zkontrolovat návrh</button><button class="btn small">Zastavit agenta</button>';
+      document.getElementById('b-agentrev').addEventListener('click', function () { reviewDialog(agentAside); });
+    } else b.innerHTML = '';
+    var ba = document.getElementById('b-aside');
+    ba.disabled = !!aside || agentHere;
+  }
+  function act(kind) {
+    if (!aside || aside.folder !== folder) return;
+    var r = rows()[sel]; if (!r || changeOf(r.n)) return;
+    if (kind === 'del') aside.changes.push(['del', r.n]);
+    if (kind === 'ren') { var nn = r.n.replace(/(\.[^.]+)?$/, '-2026$1'); aside.changes.push(['ren', nn, r.n]); }
+    render(); select(sel, true);
+  }
+  document.getElementById('b-aside').addEventListener('click', function () { aside = { folder: folder, changes: [] }; render(); });
+
+  // ---- Kontrola a prevzeti (vybrane zmeny, konflikty se neprevezmou) -----
+  function reviewDialog(a) {
+    var opener = document.activeElement;
+    var list = a.changes.slice();
+    if (!a.agent && list.length) list.push(['conf', 'poznamky.md', null, true]);
+    var K = { add: ['nové', 'k-add'], del: ['do koše', 'k-del'], ren: ['přejmenováno', 'k-mod'], conf: ['konflikt', 'k-conf'] };
+    var html = '<div class="dim"></div><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="rv-h">' +
+      '<header><h2 id="rv-h" style="font-size:var(--t-title-size)">' + (a.agent ? '<span class="chip agent">' + ic('agent', 's') + 'agent</span> Návrh agenta pro ' : 'Převzít změny do ') + a.folder + '</h2>' +
+      '<p class="note" style="margin:var(--s2) 0 0">Vyber, co převzít. Převzetí je atomické a jde vrátit; smazané soubory jdou do koše originálu.</p></header>' +
+      '<div class="content"><ul class="diffpane">' + list.map(function (c, i) {
+        var conf = c[0] === 'conf';
+        return '<li><input type="checkbox" id="c' + i + '" ' + (conf ? 'disabled' : 'checked') + ' aria-describedby="k' + i + '"><span class="kind ' + K[c[0]][1] + '" id="k' + i + '">' + K[c[0]][0] + '</span>' +
+          '<label for="c' + i + '" style="flex:1;overflow-wrap:anywhere">' + (c[0] === 'ren' ? c[2] + ' &rarr; ' + c[1] : c[1]) +
+          (conf ? '<br><span class="note" style="margin:0">změněno mezitím i v originálu (12:05) - nepřevezme se samo</span>' : '') + '</label>' +
+          (conf ? '<button class="btn small">Sloučit</button><button class="btn small ghost">Uložit vedle</button>' : '<button class="btn small ghost">Rozdíl</button>') + '</li>';
+      }).join('') + '</ul></div>' +
+      '<footer><button class="btn" data-x>Zrušit</button><button class="btn primary" data-ok>' + ic('check', 's') + 'Převzít vybrané</button></footer></div>';
+    var layer = document.getElementById('layer'); layer.innerHTML = html;
+    var dlg = layer.querySelector('.dlg');
+    function close() { layer.innerHTML = ''; if (opener && opener.focus) opener.focus(); }
+    dlg.querySelector('[data-x]').addEventListener('click', close);
+    dlg.querySelector('[data-ok]').addEventListener('click', function () {
+      var n = dlg.querySelectorAll('input:checked').length;
+      if (a === aside) {
+        var taken = a.changes.filter(function (c, i) { return dlg.querySelector('#c' + i).checked; });
+        DATA[a.folder] = DATA[a.folder].filter(function (r) { return !taken.some(function (c) { return c[0] === 'del' && c[1] === r.n; }); }).map(function (r) {
+          var c = taken.filter(function (c) { return c[0] === 'ren' && c[2] === r.n; })[0]; if (c) r = Object.assign({}, r, { n: c[1], m: 'teď' }); return r;
+        });
+        aside = null;
+      } else { agentAside.changes = []; }
+      close(); render();
+      var b = document.getElementById('band'); b.className = 'aside-band on'; b.style.background = 'var(--c-ok-soft)';
+      b.innerHTML = ic('check') + '<span><b>Převzato ' + n + ' změn.</b> Uloženo jako commit; vrátit jde v historii složky.</span><span class="spacer"></span><button class="btn small">' + ic('undo', 's') + 'Vrátit</button>';
+      setTimeout(function () { b.style.background = ''; renderBand(); }, 4000);
+    });
+    window.MO_TRAP(dlg, close);
+    (dlg.querySelector('input:not([disabled])') || dlg.querySelector('[data-ok]')).focus();
+  }
+
+  function render() { renderPlaces(); renderCrumbs(); renderBand(); renderList(); renderDetails(); }
+  render();
+});
+</script>
+</body>
+</html>

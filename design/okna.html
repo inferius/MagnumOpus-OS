@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Okna</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+.stage { height: 330px; margin-top: var(--s3); }
+.stage .win { left: 24px; right: 24px; top: 24px; bottom: 24px; }
+.demo-body { padding: var(--s5); }
+.anat { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s4); margin-top: var(--s4); }
+.anat .card { font-size: var(--t-small-size); }
+.anat b.n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 11px; background: var(--c-accent); color: var(--c-on-accent);
+  font-size: 12px; margin-right: var(--s2); }
+.callout { position: absolute; z-index: 30; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 11px; background: var(--c-accent);
+  color: var(--c-on-accent); font-size: 12px; font-weight: 700; box-shadow: 0 0 0 3px var(--c-surface); }
+.ctrls { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; margin-top: var(--s4); }
+.badge-pop { width: 320px; left: 24px; top: 70px; padding: 0; }
+.badge-pop header { display: flex; gap: var(--s3); align-items: center; padding: var(--s4); border-bottom: 1px solid var(--c-border); }
+.badge-pop .appico { width: 40px; height: 40px; border-radius: var(--r-control); background: var(--c-accent-soft); color: var(--c-accent-ink); display: grid; place-items: center; }
+.badge-pop .perms { list-style: none; margin: 0; padding: var(--s2); }
+.badge-pop .perms li { display: flex; align-items: center; gap: var(--s3); min-height: 44px; padding: 0 var(--s3); border-radius: var(--r-control); }
+.badge-pop .perms li:hover { background: var(--c-surface-3); }
+.badge-pop .perms .what { flex: 1; min-width: 0; }
+.badge-pop .perms small { display: block; color: var(--c-ink-muted); font-size: var(--t-caption-size); }
+.badge-pop footer { padding: var(--s3) var(--s4) var(--s4); border-top: 1px solid var(--c-border); font-size: var(--t-caption-size); color: var(--c-ink-muted); display: flex; gap: var(--s2); }
+.fs-hint { position: absolute; left: 50%; top: 8px; transform: translate(-50%, -60px); z-index: 30; transition: transform var(--m-base) var(--ease-standard); }
+.fs-hint.show { transform: translate(-50%, 0); }
+.fs-edge { position: absolute; left: 0; right: 0; top: 0; height: 12px; z-index: 31; }
+.game { position: absolute; inset: 0; background: linear-gradient(180deg, #1d1740, #40206b 60%, #e46b4c); display: grid; place-items: center; color: #fff; font-size: 28px; font-weight: 700; letter-spacing: .02em; }
+.state-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--s5); }
+.state-row .desk { height: 240px; }
+.state-row .win { left: 16px; right: 16px; top: 16px; bottom: 16px; }
+.cap { font-size: var(--t-small-size); color: var(--c-ink-muted); margin-top: var(--s2); }
+.editor-toolbar { display: flex; gap: var(--s2); align-items: center; }
+.search-pill { display: flex; align-items: center; gap: var(--s2); height: 30px; padding: 0 var(--s3); border-radius: var(--r-pill); background: var(--c-surface-3);
+  color: var(--c-ink-muted); font-size: var(--t-small-size); min-width: 120px; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Okna</h1>
+    <p class="lead">Rám, titulek a tlačítka kreslí kompozitor. Aplikace kreslí obsah, v režimu „vlastní titulek“ i plochu titulku. Odznak důvěry je vždy vlevo nahoře a aplikace ho nepřekreslí.</p>
+  </header>
+
+  <h2>Anatomie standardního okna</h2>
+  <div class="desk stage" id="anat-stage">
+    <div class="win" role="dialog" aria-label="Poznámky">
+      <div class="win-title">
+        <span class="trust" tabindex="0" role="button" aria-haspopup="dialog" aria-label="Poznámky, ověřená aplikace. Smí: složka Dokumenty/Poznámky. Zobrazit oprávnění.">
+          <svg class="ic s"><use href="#ic-shield"/></svg>Poznámky<span class="perm"><svg class="ic"><use href="#ic-folder"/></svg></span></span>
+        <span class="name">nakup.md - Poznámky</span>
+        <div class="wbtns"><button class="wbtn" aria-label="Minimalizovat"><svg class="ic"><use href="#ic-min"/></svg></button><button class="wbtn" aria-label="Maximalizovat"><svg class="ic"><use href="#ic-max"/></svg></button><button class="wbtn close" aria-label="Zavřít"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      </div>
+      <div class="win-body demo-body">
+        <h3 style="margin:0 0 var(--s3)">Nákup</h3>
+        <p class="muted">mléko, chleba, káva<br>baterie AA &times;4</p>
+      </div>
+    </div>
+    <span class="callout" style="left:30px;top:26px">1</span>
+    <span class="callout" style="left:50%;top:26px">2</span>
+    <span class="callout" style="right:30px;top:26px">3</span>
+    <span class="callout" style="left:50%;top:180px">4</span>
+    <span class="callout" style="right:16px;bottom:16px">5</span>
+  </div>
+  <div class="anat">
+    <div class="card"><b class="n">1</b><b>Odznak důvěry</b><br>Jméno z manifestu (předá ho init, ne aplikace) a ikony toho, co aplikace právě smí. Klik nebo Enter otevře přehled oprávnění, kde jde každé jedním krokem odebrat.</div>
+    <div class="card"><b class="n">2</b><b>Titulek</b><br>Text od aplikace, nejvýš 256 znaků, zkrácený třemi tečkami. Na střed, protože vlevo je místo vyhrazené odznaku. Dvojklik = maximalizovat.</div>
+    <div class="card"><b class="n">3</b><b>Tlačítka okna</b><br>Minimalizovat, maximalizovat, zavřít. Viditelná 28 px, cíl kliknutí 40 px (přesahuje do okraje titulku). Aplikace volí jen stranu (vlevo / vpravo).</div>
+    <div class="card"><b class="n">4</b><b>Obsah</b><br>Kreslí aplikace do svých bufferů; posun, průhlednost a animace dělá kompozitor. Strom přístupnosti popisuje vše, co je vidět.</div>
+    <div class="card"><b class="n">5</b><b>Okraje</b><br>Neviditelný okraj 6 px pro změnu velikosti, roh 18 px. Funguje i u zaseknuté aplikace, protože ho drží kompozitor.</div>
+  </div>
+
+  <h2>Odznak důvěry</h2>
+  <p class="note">Klikni na odznak nebo na něj přejdi klávesou Tab a stiskni Enter. Přehled kreslí systém (ve vrstvě nad okny), ne aplikace. Červená tečka znamená, že zařízení právě běží (kamera, mikrofon, snímání obrazovky).</p>
+  <div class="desk stage" id="badge-stage" style="height:400px">
+    <div class="win">
+      <div class="win-title">
+        <span class="trust" id="badge" tabindex="0" role="button" aria-haspopup="dialog" aria-expanded="false"
+          aria-label="Hovory, ověřená aplikace. Právě používá síť, kameru a mikrofon. Zobrazit oprávnění.">
+          <svg class="ic s"><use href="#ic-shield"/></svg>Hovory<span class="perm"><svg class="ic"><use href="#ic-globe"/></svg><svg class="ic"><use href="#ic-camera"/></svg><svg class="ic"><use href="#ic-mic"/></svg><i class="live"></i></span></span>
+        <span class="name">Porada týmu - Hovory</span>
+        <div class="wbtns"><button class="wbtn" aria-label="Minimalizovat"><svg class="ic"><use href="#ic-min"/></svg></button><button class="wbtn" aria-label="Maximalizovat"><svg class="ic"><use href="#ic-max"/></svg></button><button class="wbtn close" aria-label="Zavřít"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      </div>
+      <div class="win-body" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--s3);padding:var(--s4)">
+        <div style="border-radius:var(--r-card);background:linear-gradient(135deg,#5b3fb8,#c86b8a)"></div>
+        <div style="border-radius:var(--r-card);background:linear-gradient(135deg,#2d6a7a,#7ab89a)"></div>
+      </div>
+    </div>
+    <div class="popover badge-pop" id="badge-pop" role="dialog" aria-label="Oprávnění aplikace Hovory" hidden>
+      <header><div class="appico"><svg class="ic l"><use href="#ic-camera"/></svg></div>
+        <div><b>Hovory</b><br><span class="note" style="margin:0">org.priklad.hovory &middot; podpis ověřen</span></div></header>
+      <ul class="perms" id="perms">
+        <li data-p="kamera"><svg class="ic"><use href="#ic-camera"/></svg><div class="what"><b>Kamera</b><small>právě běží &middot; od 14:02</small></div><button class="btn small" data-revoke>Odebrat</button></li>
+        <li data-p="mikrofon"><svg class="ic"><use href="#ic-mic"/></svg><div class="what"><b>Mikrofon</b><small>právě běží &middot; od 14:02</small></div><button class="btn small" data-revoke>Odebrat</button></li>
+        <li data-p="síť"><svg class="ic"><use href="#ic-globe"/></svg><div class="what"><b>Síť</b><small>hovory.priklad.org &middot; 2 spojení</small></div><button class="btn small" data-revoke>Odebrat</button></li>
+        <li data-p="složka"><svg class="ic"><use href="#ic-folder"/></svg><div class="what"><b>Složka Stažené</b><small>jen čtení &middot; naposledy včera</small></div><button class="btn small" data-revoke>Odebrat</button></li>
+      </ul>
+      <footer><svg class="ic s"><use href="#ic-info"/></svg>Odebrání platí hned. Aplikace o právo znovu požádá systémovým dialogem.</footer>
+    </div>
+  </div>
+
+  <h2>Režimy okna</h2>
+  <div class="seg" role="radiogroup" aria-label="Režim okna" id="mode-seg">
+    <button role="radio" aria-checked="true" data-value="standard">Standardní</button>
+    <button role="radio" aria-checked="false" data-value="custom">Vlastní titulek</button>
+    <button role="radio" aria-checked="false" data-value="frameless">Bez rámu</button>
+    <button role="radio" aria-checked="false" data-value="fullscreen">Celá obrazovka</button>
+  </div>
+  <div class="ctrls">
+    <div class="hstack"><button class="switch" role="switch" aria-checked="false" id="regions-sw" aria-label="Ukázat deklarované oblasti"></button><span>Ukázat deklarované oblasti</span></div>
+    <div class="hstack" id="side-wrap"><span class="muted">Tlačítka okna:</span>
+      <div class="seg" role="radiogroup" aria-label="Strana tlačítek" id="side-seg"><button role="radio" aria-checked="true" data-value="right">vpravo</button><button role="radio" aria-checked="false" data-value="left">vlevo</button></div></div>
+  </div>
+  <div class="desk stage" id="mode-stage" style="height:360px"></div>
+  <p class="note" id="mode-note" style="margin-top:var(--s3)"></p>
+
+  <h2>Stavy okna</h2>
+  <div class="state-row">
+    <div>
+      <div class="desk"><div class="win">
+        <div class="win-title"><span class="trust"><svg class="ic s"><use href="#ic-shield"/></svg>Soubory</span><span class="name">Dokumenty</span>
+          <div class="wbtns"><button class="wbtn" aria-label="Minimalizovat"><svg class="ic"><use href="#ic-min"/></svg></button><button class="wbtn" aria-label="Maximalizovat"><svg class="ic"><use href="#ic-max"/></svg></button><button class="wbtn close" aria-label="Zavřít"><svg class="ic"><use href="#ic-close"/></svg></button></div></div>
+        <div class="win-body demo-body"><ul class="list" style="padding:0"><li class="li is-sel"><svg class="ic"><use href="#ic-folder"/></svg>Projekty</li><li class="li"><svg class="ic"><use href="#ic-folder"/></svg>Faktury</li></ul></div>
+      </div></div>
+      <p class="cap"><b>Aktivní:</b> zvýšený titulek, plné jméno, výrazný stín, odznak v plných barvách. Má fokus klávesnice.</p>
+    </div>
+    <div>
+      <div class="desk"><div class="win is-inactive">
+        <div class="win-title"><span class="trust"><svg class="ic s"><use href="#ic-shield"/></svg>Soubory</span><span class="name">Dokumenty</span>
+          <div class="wbtns"><button class="wbtn" aria-label="Minimalizovat"><svg class="ic"><use href="#ic-min"/></svg></button><button class="wbtn" aria-label="Maximalizovat"><svg class="ic"><use href="#ic-max"/></svg></button><button class="wbtn close" aria-label="Zavřít"><svg class="ic"><use href="#ic-close"/></svg></button></div></div>
+        <div class="win-body demo-body"><ul class="list" style="padding:0"><li class="li is-sel"><svg class="ic"><use href="#ic-folder"/></svg>Projekty</li><li class="li"><svg class="ic"><use href="#ic-folder"/></svg>Faktury</li></ul></div>
+      </div></div>
+      <p class="cap"><b>Neaktivní:</b> titulek splyne s obsahem, text titulku vedlejší barvou, menší stín. Obsah se neztlumí (dá se dál číst), odznak zůstane čitelný.</p>
+    </div>
+    <div>
+      <div class="desk"><div class="win is-hung" id="hung-win">
+        <div class="win-title"><span class="trust"><svg class="ic s"><use href="#ic-shield"/></svg>Editor</span><span class="name">main.rs - Editor (nereaguje)</span>
+          <div class="wbtns"><button class="wbtn" aria-label="Minimalizovat"><svg class="ic"><use href="#ic-min"/></svg></button><button class="wbtn" aria-label="Maximalizovat"><svg class="ic"><use href="#ic-max"/></svg></button><button class="wbtn close" aria-label="Zavřít"><svg class="ic"><use href="#ic-close"/></svg></button></div></div>
+        <div class="win-body demo-body"><pre class="mono" style="margin:0">fn main() {
+    let x = spocitej();
+}</pre>
+          <div class="hung" role="alertdialog" aria-label="Editor nereaguje"><div class="box">
+            <b>Editor nereaguje</b><p class="note" style="margin:var(--s2) 0 var(--s4)">3 s bez odpovědi. Rozpracovaná práce zůstane v jeho datasetu.</p>
+            <div class="hstack" style="justify-content:center"><button class="btn small">Počkat</button><button class="btn small danger">Ukončit</button></div></div></div>
+        </div>
+      </div></div>
+      <p class="cap"><b>Nereaguje:</b> kompozitor po 3 s bez <code>PONG</code> obsah zešedí a nabídne volby. Přesun, minimalizace a zavření fungují dál, protože je drží kompozitor.</p>
+    </div>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  // ---- Odznak duvery: otevreni prehledu, odebrani opravneni.
+  var badge = document.getElementById('badge'), pop = document.getElementById('badge-pop');
+  function toggle(open) {
+    pop.hidden = !open; badge.setAttribute('aria-expanded', open);
+    if (open) pop.querySelector('button').focus(); else badge.focus();
+  }
+  badge.addEventListener('click', function () { toggle(pop.hidden); });
+  badge.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(pop.hidden); } });
+  pop.addEventListener('keydown', function (e) { if (e.key === 'Escape') toggle(false); });
+  var ICON = { kamera: 'camera', mikrofon: 'mic', 'síť': 'globe', 'složka': 'folder' };
+  pop.querySelectorAll('[data-revoke]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var li = b.closest('li'), p = li.dataset.p;
+      li.querySelector('small').textContent = 'odebráno - aplikace musí požádat znovu';
+      b.replaceWith(Object.assign(document.createElement('span'), { className: 'chip', textContent: 'odebráno' }));
+      var perm = badge.querySelector('.perm');
+      perm.querySelectorAll('use').forEach(function (u) { if (u.getAttribute('href') === '#ic-' + ICON[p]) u.parentNode.remove(); });
+      if (!perm.querySelector('[href="#ic-camera"]') && !perm.querySelector('[href="#ic-mic"]')) { var l = perm.querySelector('.live'); if (l) l.remove(); }
+      badge.classList.remove('flash'); void badge.offsetWidth; badge.classList.add('flash');
+    });
+  });
+
+  // ---- Rezimy okna.
+  var stage = document.getElementById('mode-stage'), note = document.getElementById('mode-note');
+  var mode = 'standard', side = 'right';
+  var BTN = '<div class="wbtns no-drag"><button class="wbtn" aria-label="Minimalizovat">' + ic('min') + '</button><button class="wbtn" aria-label="Maximalizovat">' + ic('max') +
+    '</button><button class="wbtn close" aria-label="Zavřít">' + ic('close') + '</button></div>';
+  var TRUST = '<span class="trust no-drag" tabindex="0" role="button" aria-label="Prohlížeč, ověřená aplikace, smí síť">' + ic('shield', 's') + 'Prohlížeč<span class="perm">' + ic('globe') + '</span></span>';
+  var NOTES = {
+    standard: '<b>Standardní</b> (výchozí): aplikace kreslí jen obsah, systém rám, titulek, odznak a tlačítka.',
+    custom: '<b>Vlastní titulek:</b> aplikace kreslí karty a vyhledávání přímo do titulku. Odznak a tlačítka okna kreslí dál systém. Kde se okno táhne, aplikace deklaruje oblastmi (zapni „Ukázat deklarované oblasti“): žlutá = DRAG, zelená = NO_DRAG. Kompozitor tak okno přesune i tehdy, když aplikace nereaguje.',
+    frameless: '<b>Bez rámu</b> (widget, přehrávač): vše kreslí aplikace. Odznak se objeví u horního okraje okna při najetí myší a vždy na 3 s při změně oprávnění. Přesun jen přes deklarované oblasti.',
+    fullscreen: '<b>Celá obrazovka</b> (hra, prezentace): najeď myší k hornímu okraji ukázky - sjede lišta s odznakem a tlačítkem „Ukončit celou obrazovku“. Esc podržený 1 s ukončí celou obrazovku vždy. Bezpečná zkratka a systémové dialogy fungují taky vždy.'
+  };
+  function render() {
+    var titleInner, win;
+    var btns = BTN;
+    if (mode === 'standard') {
+      titleInner = side === 'left' ? btns + '<span class="name">Prohlížeč</span>' + TRUST : TRUST + '<span class="name">priklad.org - Prohlížeč</span>' + btns;
+      win = '<div class="win" style="left:24px;right:24px;top:24px;bottom:24px"><div class="win-title">' + titleInner + '</div>' +
+        '<div class="win-body demo-body"><div class="search-pill">' + ic('search', 's') + 'priklad.org</div><h3>Vítejte</h3><p class="muted">Obsah stránky kreslí aplikace.</p></div></div>';
+    } else if (mode === 'custom') {
+      var tabs = '<div class="tabs no-drag" role="tablist" aria-label="Karty"><button class="tab" role="tab" aria-selected="true">' + ic('globe', 's') + 'priklad.org</button><button class="tab" role="tab" aria-selected="false">Dokumentace</button>' +
+        '<button class="btn ghost small icon no-drag" aria-label="Nová karta">' + ic('plus', 's') + '</button></div>';
+      var search = '<div class="search-pill no-drag">' + ic('search', 's') + 'Hledat nebo adresa</div>';
+      titleInner = side === 'left' ? btns + TRUST + tabs + '<div class="drag-zone" aria-hidden="true"></div>' + search
+                                   : TRUST + tabs + '<div class="drag-zone" aria-hidden="true"></div>' + search + btns;
+      win = '<div class="win mode-custom" style="left:24px;right:24px;top:24px;bottom:24px"><div class="win-title" style="height:44px">' + titleInner + '</div>' +
+        '<div class="win-body demo-body" style="background:var(--c-surface-2)"><h3 style="margin-top:0">Vítejte</h3><p class="muted">Karty, tlačítko + a vyhledávání nahoře kreslí aplikace. Odznak a tlačítka okna systém.</p></div></div>';
+    } else if (mode === 'frameless') {
+      win = '<div class="win" id="fl" style="left:80px;top:40px;width:300px;height:220px;border-radius:var(--r-window)">' +
+        '<div class="drag-zone" style="position:absolute;left:0;right:0;top:0;height:36px" aria-hidden="true"></div>' +
+        '<div class="fs-hint" id="fl-badge" style="top:8px">' + TRUST.replace('Prohlížeč', 'Přehrávač').replace(ic('globe'), ic('folder')) + '</div>' +
+        '<div style="flex:1;display:grid;place-items:center;background:linear-gradient(160deg,var(--c-accent-soft),var(--c-ai-soft));padding:var(--s5);text-align:center">' +
+        '<div>' + ic('play', 'xl') + '<div style="font-weight:700;margin-top:var(--s3)">Přehrávač (widget)</div><div class="note" style="margin:var(--s2) 0 0">najeď myší k hornímu okraji</div></div></div></div>';
+    } else {
+      win = '<div class="game" aria-label="Hra na celé obrazovce">HRA</div><div class="fs-edge" id="fs-edge"></div>' +
+        '<div class="fs-hint" id="fs-hint"><div class="hstack" style="background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--r-pill);padding:var(--s2) var(--s2) var(--s2) var(--s2);box-shadow:var(--sh-popover)">' +
+        TRUST.replace('Prohlížeč', 'Hra').replace(ic('globe'), ic('globe')) + '<button class="btn small">' + ic('restore', 's') + 'Ukončit celou obrazovku</button></div></div>';
+    }
+    stage.innerHTML = win;
+    note.innerHTML = NOTES[mode];
+    document.getElementById('side-wrap').style.display = (mode === 'standard' || mode === 'custom') ? '' : 'none';
+    if (mode === 'fullscreen') {
+      var h = document.getElementById('fs-hint'), timer;
+      stage.addEventListener('mousemove', function (e) {
+        var r = stage.getBoundingClientRect();
+        if (e.clientY - r.top < 24) { h.classList.add('show'); clearTimeout(timer); timer = setTimeout(function () { h.classList.remove('show'); }, 2500); }
+      });
+    }
+    if (mode === 'frameless') {
+      var fl = document.getElementById('fl'), b = document.getElementById('fl-badge');
+      fl.addEventListener('mousemove', function (e) { var r = fl.getBoundingClientRect(); b.classList.toggle('show', e.clientY - r.top < 40); });
+      fl.addEventListener('mouseleave', function () { b.classList.remove('show'); });
+    }
+  }
+  window.MO_SEG(document.getElementById('mode-seg'), function (v) { mode = v; render(); });
+  window.MO_SEG(document.getElementById('side-seg'), function (v) { side = v; render(); });
+  window.MO_SWITCH(document.getElementById('regions-sw'), function (v) { stage.classList.toggle('show-regions', v); });
+  render();
+});
+</script>
+</body>
+</html>

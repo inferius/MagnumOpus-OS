@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design systém</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/tokens.js"></script>
+<script src="assets/mo.js"></script>
+<style>
+.sw { border-radius: var(--r-card); border: 1px solid var(--c-border); overflow: hidden; background: var(--c-surface); }
+.sw .chipc { height: 64px; display: flex; align-items: flex-end; padding: var(--s3); font-weight: 600; font-size: var(--t-small-size); }
+.sw .meta { padding: var(--s3); font-size: var(--t-caption-size); line-height: 16px; }
+.sw .meta code { font-family: var(--font-mono); }
+.swgrid { display: grid; gap: var(--s4); grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.type-row { display: grid; grid-template-columns: 140px 1fr; gap: var(--s5); align-items: baseline; padding: var(--s4) 0; border-bottom: 1px solid var(--c-border); }
+.type-row .k { font-size: var(--t-caption-size); color: var(--c-ink-muted); font-family: var(--font-mono); }
+.space-row { display: flex; align-items: center; gap: var(--s4); margin: var(--s2) 0; font-size: var(--t-small-size); }
+.space-row i { display: block; height: 16px; background: var(--c-accent); border-radius: 3px; }
+.space-row code { width: 60px; font-family: var(--font-mono); color: var(--c-ink-muted); }
+.rad { width: 110px; height: 80px; background: var(--c-accent-soft); border: 2px solid var(--c-accent); display: grid; place-items: center;
+  font-size: var(--t-small-size); color: var(--c-accent-ink); font-weight: 600; }
+.shadow-demo { height: 100px; border-radius: var(--r-card); background: var(--c-surface); display: grid; place-items: center; font-size: var(--t-small-size); }
+.icgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: var(--s2); }
+.icgrid div { display: flex; flex-direction: column; align-items: center; gap: var(--s2); padding: var(--s4) var(--s2); border-radius: var(--r-control);
+  font-size: var(--t-caption-size); color: var(--c-ink-muted); }
+.icgrid div:hover { background: var(--c-surface-3); color: var(--c-ink); }
+.icgrid .ic { width: 24px; height: 24px; color: var(--c-ink); }
+.motion-track { position: relative; height: 44px; border-radius: var(--r-control); background: var(--c-surface-3); margin: var(--s2) 0 var(--s4); }
+.motion-track .dot { position: absolute; left: 6px; top: 6px; width: 32px; height: 32px; border-radius: 16px; background: var(--c-accent); }
+.motion-track.go .dot { left: calc(100% - 38px); }
+.frame-bar { display: flex; height: 28px; border-radius: var(--r-xs); overflow: hidden; font-size: 11px; font-weight: 600; }
+.frame-bar span { display: grid; place-items: center; color: #fff; white-space: nowrap; overflow: hidden; }
+.ctab { width: 100%; }
+.ctab td:nth-child(4) { font-variant-numeric: tabular-nums; }
+.pass { color: var(--c-ok); font-weight: 600; }
+.fail { color: var(--c-danger); font-weight: 700; }
+.principles { display: grid; gap: var(--s4); grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.principles .card h3 { margin: var(--s2) 0 var(--s2); font-size: var(--t-body-lg-size); }
+.principles .card p { font-size: var(--t-small-size); color: var(--c-ink-muted); margin: 0; }
+.principles .card .ic { color: var(--c-accent-ink); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Design systém</h1>
+    <p class="lead">Charakter <b>Vřelý</b>: přátelský, s výrazným fialovým akcentem a velkým zaoblením, ale klidný tam, kde se pracuje. Hodnoty jsou data v <code>design/tokens.toml</code>; tato stránka je čte z vygenerovaného <code>assets/tokens.js</code>, takže ukazuje vždy aktuální stav.</p>
+  </header>
+
+  <h2 id="principy">Principy</h2>
+  <div class="principles">
+    <div class="card"><svg class="ic l"><use href="#ic-shieldcheck"/></svg><h3>Důvěra je vidět</h3><p>Identita aplikace a její oprávnění jsou vždy na stejném místě a ve stejné barvě, kterou žádná aplikace nesmí použít.</p></div>
+    <div class="card"><svg class="ic l"><use href="#ic-gauge"/></svg><h3>Plynulost před efekty</h3><p>Animuje kompozitor (průhlednost, posun, měřítko), ne aplikace. Žádná animace nečeká na aplikaci a žádná neblokuje vstup.</p></div>
+    <div class="card"><svg class="ic l"><use href="#ic-accessibility"/></svg><h3>Přístupné od základu</h3><p>Každý prvek má roli a popisek ve stromu přístupnosti. Vše jde klávesnicí, písmo se zvětší až na 200 % bez oříznutí.</p></div>
+    <div class="card"><svg class="ic l"><use href="#ic-agent"/></svg><h3>Agent je vždy poznat</h3><p>Co dělá agent AI, má vyhrazenou korálovou barvu, ikonu a slovo „agent“. Nikdy jen barvu.</p></div>
+    <div class="card"><svg class="ic l"><use href="#ic-undo"/></svg><h3>Bezpečné zkoušení</h3><p>Rizikové akce jdou „zkusit bokem“ v klonu a převzít až po kontrole rozdílu. UI to nabízí, ne skrývá.</p></div>
+    <div class="card"><svg class="ic l"><use href="#ic-palette"/></svg><h3>Vlastní tvář</h3><p>Zaoblené tvary, teplé pozadí, linkové ikony. Inspirace ano, kopie cizího systému ne.</p></div>
+  </div>
+
+  <h2 id="barvy">Barvy</h2>
+  <p class="note">Sémantické barvy, ne „modrá 500“. Přepni motiv v liště nahoře: vzorník ukazuje aktuální motiv, tabulka kontrastu všechny tři. Výchozí motiv se řídí denní dobou (světlý ve dne, tmavý po západu slunce) a přepíná se prolnutím 240 ms, nikdy ne během psaní.</p>
+  <h3>Plochy a text</h3>
+  <div class="swgrid" id="sw-base"></div>
+  <h3>Akcent, stavy a vyhrazené barvy</h3>
+  <div class="swgrid" id="sw-sem"></div>
+  <h3>Terminál</h3>
+  <div class="swgrid" id="sw-term"></div>
+  <h3>Kontrast podle WCAG 2.2</h3>
+  <p class="note">Text alespoň 4,5 : 1 (1.4.3), hranice prvků, ikony a fokus alespoň 3 : 1 (1.4.11). Ve vysokém kontrastu se minimum zvedá na 7 : 1 (AAA) a 4,5 : 1. Kontrolu dělá <code>node design/tools/build-tokens.mjs</code> a při nesplnění skončí chybou.</p>
+  <div style="overflow-x:auto"><table class="tbl ctab" id="ctab"><thead><tr><th>Motiv</th><th>Dvojice</th><th>Ukázka</th><th class="r">Poměr</th><th class="r">Minimum</th><th>Výsledek</th></tr></thead><tbody></tbody></table></div>
+
+  <h2 id="pismo">Typografie</h2>
+  <p class="note"><b>Inter</b> pro systém (navržený pro obrazovky, tabulkové číslice, dobrá čeština) a <b>JetBrains Mono</b> pro terminál a kód (odlišené 0/O, 1/l/I, vyšší malá písmena). Obě pod licencí SIL OFL, přibalí se do <code>libs/font/fonts/</code> místo Tuffy a Noto Sans Mono, které zůstanou jako záloha. V terminálu jsou ligatury vypnuté: jeden znak = jedna buňka.</p>
+  <div id="type-scale"></div>
+  <h3>Terminál</h3>
+  <div class="card mono" style="font-size:var(--t-mono-size);line-height:var(--t-mono-line);background:var(--c-term-bg);color:var(--c-term-ink)">
+    <div><span style="color:var(--c-term-dim)">~/projekt &rsaquo;</span> ls | where size &gt; 1mb | sort-by modified</div>
+    <div style="color:var(--c-term-green)">&#10003; 3 položky &middot; 12 ms</div>
+    <div><span style="color:var(--c-term-blue)">0O 1lI |</span> <span style="color:var(--c-term-magenta)">-&gt; =&gt; != &lt;=</span> <span style="color:var(--c-term-yellow)">ěščřžýáíé ĚŠČŘŽ</span> <span style="color:var(--c-term-cyan)">{ } [ ] ( )</span> <span style="color:var(--c-term-red)">chyba E_NOENT</span></div>
+  </div>
+
+  <h2 id="mrizka">Mřížka a rozestupy</h2>
+  <p class="note">Vše leží na mřížce 4 px. Cíl kliknutí a dotyku má nejméně 40 &times; 40 px (dotyk je výchozí vstup), i když je ikona menší. Rozestupy uvnitř prvku jsou menší než mezi prvky.</p>
+  <div id="space-scale"></div>
+  <h3>Rozměry prvků</h3>
+  <div style="overflow-x:auto"><table class="tbl" id="size-tab"><thead><tr><th>Token</th><th class="r">Hodnota</th><th>Použití</th></tr></thead><tbody></tbody></table></div>
+
+  <h2 id="zaobleni">Zaoblení a stíny</h2>
+  <div class="hstack" id="radii" style="gap:var(--s5)"></div>
+  <h3>Stíny</h3>
+  <p class="note">Stín říká, co je výš: aktivní okno víc než neaktivní, dialog nejvíc. Kompozitor je kreslí z předpočítaných textur (9 dílů), takže pohyb okna stín nezdraží. Ve vysokém kontrastu stíny nahradí rámeček 2 px.</p>
+  <div class="grid" id="shadows"></div>
+
+  <h2 id="ikony">Ikony</h2>
+  <p class="note">Linkové, zaoblené: mřížka 24 px, tah 1,75 px, zaoblené konce a spoje, 2 px okraj. Velikosti 16 / 20 / 24 / 32. Barvu dává text (<code>currentColor</code>), takže ikony samy přejdou do tmavého i vysokého kontrastu. Ikona nikdy nenese význam sama: v liště má popisek nebo tooltip a ve stromu přístupnosti jméno.</p>
+  <div class="icgrid" id="icons"></div>
+
+  <h2 id="pohyb">Pohyb a animace</h2>
+  <p class="note">Snímek při 60 Hz má 16,7 ms. Kompozitor plánuje podle termínu snímku; animace mění jen vlastnosti vrstev (průhlednost, posun, měřítko, ořez), které skládá sám. Aplikace během animace nic nekreslí, a proto se animace nezasekne, ani když aplikace počítá.</p>
+  <div class="frame-bar" aria-label="Rozpočet snímku 16,7 ms">
+    <span style="flex:2;background:#7a5bd6">vstup 1</span><span style="flex:4;background:#6b3fd6">aplikace (mimo cestu animace)</span><span style="flex:5;background:#4f2bb0">skládání 5</span><span style="flex:2;background:#2e7d5b">flush 2</span><span style="flex:3.7;background:#8a7894">rezerva 3,7 ms</span>
+  </div>
+  <p class="note" style="margin-top:var(--s2)">Orientační rozpočet pro softwarové skládání 1280 &times; 800 (jen poškozené oblasti). S 3D backendem je skládání levnější.</p>
+  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))" id="motion"></div>
+  <h3>Pravidla</h3>
+  <ul class="note">
+    <li>Délky 90 / 160 / 240 ms, nejvýš 320 ms. Odchod je kratší než příchod.</li>
+    <li>Každá animace jde přerušit: nový vstup ji ukončí v aktuálním stavu a pokračuje odtud (žádné čekání na doběhnutí).</li>
+    <li>Přesun a změna velikosti okna sledují ukazatel přímo, bez zpoždění a bez „pružení“.</li>
+    <li>Nic nebliká rychleji než 3&times; za sekundu (WCAG 2.3.1). Odznak důvěry při změně oprávnění pulzuje 3&times; za 1 s.</li>
+    <li><b>Omezit pohyb</b> (Přístupnost nebo systémové nastavení): posuny a měřítka se nahradí prolnutím 90 ms.</li>
+    <li>Když kompozitor nestihne termín, raději vynechá mezisnímek animace, než aby zpozdil reakci na vstup.</li>
+  </ul>
+
+  <h2 id="komponenty">Komponenty</h2>
+  <div class="grid">
+    <div class="card stack">
+      <h3 style="margin:0">Tlačítka</h3>
+      <div class="hstack"><button class="btn primary">Uložit</button><button class="btn">Zrušit</button><button class="btn ghost">Více</button></div>
+      <div class="hstack"><button class="btn danger"><svg class="ic s"><use href="#ic-trash"/></svg>Smazat</button><button class="btn small">Malé</button><button class="btn icon" aria-label="Hledat"><svg class="ic"><use href="#ic-search"/></svg></button><button class="btn" disabled>Nedostupné</button></div>
+    </div>
+    <div class="card stack">
+      <h3 style="margin:0">Vstupy</h3>
+      <label class="field"><span>Název souboru <span class="hint">&middot; bez přípony</span></span><input class="input" value="poznamky"></label>
+      <div class="hstack"><button class="switch" role="switch" aria-checked="true" aria-label="Wi-Fi" id="sw1"></button><span>Wi-Fi</span></div>
+      <div class="seg" role="radiogroup" aria-label="Zobrazení" id="seg1"><button role="radio" aria-checked="true" data-value="seznam">Seznam</button><button role="radio" aria-checked="false" data-value="mrizka">Mřížka</button><button role="radio" aria-checked="false" data-value="sloupce">Sloupce</button></div>
+    </div>
+    <div class="card stack">
+      <h3 style="margin:0">Štítky a stav</h3>
+      <div class="hstack"><span class="chip ok"><svg class="ic s"><use href="#ic-check"/></svg>hotovo</span><span class="chip warn">čeká</span><span class="chip danger">chyba</span><span class="chip accent">nové</span></div>
+      <div class="hstack"><span class="chip agent"><svg class="ic s"><use href="#ic-agent"/></svg>agent</span><span class="note" style="margin:0">vyhrazeno pro AI</span></div>
+      <div class="progress" role="progressbar" aria-valuenow="62" aria-valuemin="0" aria-valuemax="100" aria-label="Kopírování"><i style="width:62%"></i></div>
+      <div class="progress agent" role="progressbar" aria-valuenow="30" aria-valuemin="0" aria-valuemax="100" aria-label="Úloha agenta"><i style="width:30%"></i></div>
+      <div class="hstack"><span class="kbd">Ctrl</span><span class="kbd">Alt</span><span class="kbd">Del</span><span class="note" style="margin:0">bezpečná zkratka</span></div>
+    </div>
+    <div class="card stack">
+      <h3 style="margin:0">Seznam</h3>
+      <ul class="list" role="listbox" aria-label="Složky" style="padding:0">
+        <li class="li" role="option" aria-selected="true"><svg class="ic"><use href="#ic-folder"/></svg>Dokumenty</li>
+        <li class="li" role="option" aria-selected="false"><svg class="ic"><use href="#ic-folder"/></svg>Projekty</li>
+        <li class="li" role="option" aria-selected="false"><svg class="ic"><use href="#ic-image"/></svg>Obrázky</li>
+      </ul>
+    </div>
+    <div class="card stack">
+      <h3 style="margin:0">Odznak důvěry</h3>
+      <div class="hstack"><span class="trust"><svg class="ic s"><use href="#ic-shield"/></svg>Poznámky<span class="perm"><svg class="ic"><use href="#ic-folder"/></svg></span></span>
+      <span class="trust"><svg class="ic s"><use href="#ic-shield"/></svg>Hovory<span class="perm"><svg class="ic"><use href="#ic-globe"/></svg><svg class="ic"><use href="#ic-camera"/></svg><i class="live" aria-label="kamera právě běží"></i></span></span></div>
+      <p class="note" style="margin:0">Barvy <code>trust-*</code> jsou jen pro systém. Knihovna UI je aplikacím nenabízí.</p>
+    </div>
+    <div class="stack">
+      <h3 style="margin:0">Oznámení</h3>
+      <div class="notif" style="position:static"><div class="ico"><svg class="ic"><use href="#ic-download"/></svg></div><div><h4>Stahování dokončeno</h4><p>obraz-disku.img &middot; 1,2 GB</p><div class="hstack"><button class="btn small primary">Otevřít</button><button class="btn small ghost">Ve složce</button></div></div></div>
+      <div class="notif agent" style="position:static"><div class="ico"><svg class="ic"><use href="#ic-agent"/></svg></div><div><h4>Agent dokončil úlohu</h4><p>Úklid ~/Stažené: 14 změn v klonu čeká na kontrolu</p><div class="hstack"><button class="btn small primary">Zkontrolovat rozdíl</button></div></div></div>
+    </div>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var T = window.MO_TOKENS;
+  var cs = getComputedStyle(document.documentElement);
+  function v(name) { return cs.getPropertyValue('--c-' + name.replace(/_/g, '-')).trim(); }
+  var NAMES = {
+    bg: 'pozadí plochy', surface: 'plocha okna', surface_2: 'zvýšená (titulek)', surface_3: 'najetí, výplň',
+    border: 'dělicí čára', border_strong: 'hranice prvku', ink: 'text', ink_muted: 'vedlejší text', ink_faint: 'neaktivní',
+    accent: 'akcent', on_accent: 'text na akcentu', accent_soft: 'výběr', accent_ink: 'text akcentu', focus: 'fokus',
+    trust_bg: 'odznak důvěry', trust_ink: 'text odznaku', trust_border: 'rám odznaku',
+    ai: 'agent AI', on_ai: 'text na agentu', ai_soft: 'pozadí agenta', ai_ink: 'text agenta',
+    ok: 'v pořádku', ok_soft: 'pozadí ok', warn: 'varování', warn_soft: 'pozadí varování',
+    danger: 'nebezpečí', on_danger: 'text na nebezpečí', danger_soft: 'pozadí nebezpečí'
+  };
+  function swatches(id, keys) {
+    var html = '';
+    keys.forEach(function (k) {
+      var col = v(k);
+      var dark = /^#/.test(col) ? lum(col) < 0.35 : false;
+      html += '<div class="sw"><div class="chipc" style="background:' + col + ';color:' + (dark ? '#fff' : '#1a1a1a') + '">' + (NAMES[k] || k.replace('term_', '')) + '</div>' +
+        '<div class="meta"><code>' + k.replace(/_/g, '-') + '</code><br><span class="muted num">' + col + '</span></div></div>';
+    });
+    document.getElementById(id).innerHTML = html;
+  }
+  function lum(hex) { var n = parseInt(hex.slice(1), 16); var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255; return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; }
+  function renderColors() {
+    cs = getComputedStyle(document.documentElement);
+    swatches('sw-base', ['bg', 'surface', 'surface_2', 'surface_3', 'border', 'border_strong', 'ink', 'ink_muted', 'ink_faint']);
+    swatches('sw-sem', ['accent', 'on_accent', 'accent_soft', 'accent_ink', 'focus', 'trust_bg', 'trust_ink', 'trust_border', 'ai', 'ai_soft', 'ai_ink', 'ok', 'ok_soft', 'warn', 'warn_soft', 'danger', 'danger_soft']);
+    swatches('sw-term', ['term_bg', 'term_ink', 'term_dim', 'term_red', 'term_green', 'term_yellow', 'term_blue', 'term_magenta', 'term_cyan']);
+  }
+  renderColors();
+  document.addEventListener('mo-theme', renderColors);
+
+  // Tabulka kontrastu ze vsech motivu.
+  var TH = { light: 'světlý', dark: 'tmavý', contrast: 'vysoký kontrast' };
+  document.querySelector('#ctab tbody').innerHTML = window.MO_CONTRAST.map(function (r) {
+    var fg = T.color[r.theme][r.fg], bg = T.color[r.theme][r.bg];
+    return '<tr><td>' + TH[r.theme] + '</td><td><code>' + r.fg + '</code> na <code>' + r.bg + '</code></td>' +
+      '<td><span style="display:inline-block;padding:2px 10px;border-radius:6px;background:' + bg + ';color:' + fg + ';border:1px solid var(--c-border)">Aa 123</span></td>' +
+      '<td class="r">' + r.ratio.toFixed(2) + '</td><td class="r">' + r.min + '</td><td class="' + (r.ok ? 'pass' : 'fail') + '">' + (r.ok ? 'splňuje' : 'NESPLŇUJE') + '</td></tr>';
+  }).join('');
+
+  // Typograficka skala.
+  var SAMPLE = { display: 'Dobrý večer, Michale', heading: 'Nastavení zabezpečení', title: 'Oprávnění aplikace', body_lg: 'Aplikace žádá o přístup ke kameře.',
+    body: 'Příliš žluťoučký kůň úpěl ďábelské ódy. 0123456789', body_strong: 'Zkusit bokem', small: 'Změněno dnes ve 14:02 &middot; 12 kB',
+    caption: 'VEDLEJŠÍ POPISEK', mono: 'cp *.rs /zaloha/  # 0O 1lI', clock: '14:05' };
+  var html = '';
+  Object.keys(T.type).forEach(function (k) {
+    if (k === 'scale') return;
+    var ty = T.type[k], key = k.replace(/_/g, '-');
+    html += '<div class="type-row"><div class="k">' + key + '<br>' + ty.size + ' / ' + ty.line + ' &middot; ' + ty.weight + '</div>' +
+      '<div style="font-size:var(--t-' + key + '-size);line-height:var(--t-' + key + '-line);font-weight:' + ty.weight + (k === 'mono' ? ';font-family:var(--font-mono)' : '') + (k === 'clock' ? ';font-variant-numeric:tabular-nums' : '') + '">' + (SAMPLE[k] || '') + '</div></div>';
+  });
+  document.getElementById('type-scale').innerHTML = html;
+
+  // Rozestupy.
+  document.getElementById('space-scale').innerHTML = Object.keys(T.space).map(function (k) {
+    return '<div class="space-row"><code>' + k + '</code><i style="width:' + Math.max(T.space[k], 1) + 'px"></i><span class="num">' + T.space[k] + ' px</span></div>';
+  }).join('');
+  var USE = { grid: 'základ mřížky', hit_min: 'nejmenší cíl kliknutí a dotyku', control_h: 'tlačítko, pole', control_h_compact: 'husté seznamy, nástrojové lišty',
+    title_h: 'titulek okna', title_btn: 'tlačítko okna (cíl 40 px přes okraj titulku)', badge_h: 'odznak důvěry', bar_h: 'lišta', bar_inset: 'odsazení lišty od okraje',
+    bar_icon: 'tlačítko v liště', icon_s: 'ikona v textu', icon_m: 'ikona v prvku', icon_l: 'ikona v liště', icon_xl: 'ikona aplikace v seznamu',
+    icon_stroke: 'tah ikon (px)', focus_ring: 'tloušťka fokusu', focus_offset: 'odsazení fokusu', resize_edge: 'neviditelný okraj pro změnu velikosti', scrollbar: 'posuvník' };
+  document.querySelector('#size-tab tbody').innerHTML = Object.keys(T.size).map(function (k) {
+    return '<tr><td><code>' + k.replace(/_/g, '-') + '</code></td><td class="r">' + T.size[k] + (k === 'icon_stroke' ? '' : ' px') + '</td><td>' + (USE[k] || '') + '</td></tr>';
+  }).join('');
+
+  // Zaobleni a stiny.
+  var RU = { xs: 'klávesa, malý štítek', badge: 'odznak', control: 'pole, položka', card: 'karta, nabídka', window: 'okno, lišta, dialog', pill: 'tlačítko, štítek' };
+  document.getElementById('radii').innerHTML = Object.keys(T.radius).map(function (k) {
+    return '<div class="stack" style="align-items:center"><div class="rad" style="border-radius:' + Math.min(T.radius[k], 40) + 'px">' + k + '</div><span class="note num" style="margin:0;text-align:center">' + T.radius[k] + ' px<br>' + RU[k] + '</span></div>';
+  }).join('');
+  var SU = { window: 'aktivní okno', window_inactive: 'neaktivní okno', popover: 'nabídka, oznámení', bar: 'lišta', dialog: 'systémový dialog' };
+  document.getElementById('shadows').innerHTML = Object.keys(T.shadow.light).map(function (k) {
+    return '<div class="shadow-demo" style="box-shadow:var(--sh-' + k.replace(/_/g, '-') + ')"><div style="text-align:center"><b>' + SU[k] + '</b><br><code class="muted">sh-' + k.replace(/_/g, '-') + '</code></div></div>';
+  }).join('');
+
+  // Ikony.
+  document.getElementById('icons').innerHTML = window.MO_ICONS.map(function (n) {
+    return '<div>' + window.ic(n) + '<span>' + n + '</span></div>';
+  }).join('');
+
+  // Pohyb: ukazky delek a krivek.
+  var M = T.motion;
+  var demos = [
+    ['fast', 'ease_standard', 'Najetí, stisk, přepínač'], ['base', 'ease_standard', 'Nabídka, změna stavu'],
+    ['slow', 'ease_enter', 'Otevření okna, dialog'], ['fast', 'ease_exit', 'Zavření (odchod je kratší)']
+  ];
+  document.getElementById('motion').innerHTML = demos.map(function (d, i) {
+    return '<div class="card"><div class="hstack"><b>' + d[2] + '</b><span class="spacer"></span><span class="chip num">' + M[d[0]] + ' ms &middot; ' + d[1].replace('ease_', '') + '</span></div>' +
+      '<div class="motion-track" id="mt' + i + '"><div class="dot" style="transition:left var(--m-' + d[0] + ') var(--' + d[1].replace(/_/g, '-') + ')"></div></div>' +
+      '<button class="btn small" data-mt="' + i + '"><svg class="ic s"><use href="#ic-play"/></svg>Přehrát</button></div>';
+  }).join('');
+  document.querySelectorAll('[data-mt]').forEach(function (b) {
+    b.addEventListener('click', function () { document.getElementById('mt' + b.dataset.mt).classList.toggle('go'); });
+  });
+
+  window.MO_SWITCH(document.getElementById('sw1'));
+  window.MO_SEG(document.getElementById('seg1'));
+});
+</script>
+</body>
+</html>
