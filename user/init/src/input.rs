@@ -135,3 +135,10 @@ pub fn read_until(
         }
     }
 }
+
+/// Bezici instance sluzby vstupu (pro adaptery jinych sluzeb, napr.
+/// predani fokusu kompozitoru po jeho restartu). Po zapojeni obnovy
+/// `inputd` vrati vzdy aktualni instanci.
+pub fn with_input<R>(f: impl FnOnce(&Input) -> R) -> Option<R> {
+    crate::system::devices().and_then(|d| d.input.as_ref()).map(f)
+}

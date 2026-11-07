@@ -319,8 +319,8 @@ impl Supervisor {
             }
         }
         terminals.cleanup();
-        // Kompozitor spadl: terminal v zalozni konzoli.
-        if out.iter().any(|h| matches!(h, Happened::Exited { name: "compd", .. }))
+        // Kompozitor se nepodarilo obnovit: terminal v zalozni konzoli.
+        if out.iter().any(|h| matches!(h, Happened::GaveUp("compd")))
             && !terminals.console_running()
             && let Err(e) = terminals.start_console(startup)
         {

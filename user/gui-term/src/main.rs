@@ -34,7 +34,7 @@ use term::proto::ServerMsg;
 use term::screen::{self, Screen, Surface};
 use term::theme::Theme;
 use term::ui::App;
-use ui::client::{Event, Window};
+use ui::client::{Event, Link, Window};
 
 libos::entry!(main);
 
@@ -256,13 +256,14 @@ impl Term {
         self.win.commit_redrawn(false)
     }
 
-    /// Deklarovane oblasti: titulek tahne okno, karta ne.
-    fn regions(&self) -> Result<(), Error> {
+    /// Deklarovane oblasti: titulek tahne okno, karta ne. Jdou pres
+    /// `send`, takze je po padu kompozitoru obnova posle znovu.
+    fn regions(&mut self) -> Result<(), Error> {
         let msg = ClientMsg::Regions {
             window: 1,
             regions: vec![(Rect::new(0, 0, self.win.w, TITLE_H), RegionKind::Drag), (TAB, RegionKind::NoDrag)],
         };
-        self.win.channel().write(&msg.encode(), Vec::new())
+        self.win.send(msg)
     }
 
     /// Udalost okna; `Some(true)` = prekreslit, `None` = konec aplikace.
@@ -281,6 +282,8 @@ impl Term {
                 true
             }
             Event::Close => return None,
+            // Kompozitor spadl a okno je obnovene: nakreslit znovu.
+            Event::Restored { .. } => true,
             Event::A11yAction { action, value, .. } if action & actions::SET_VALUE != 0 => {
                 // Ctecka obrazovky nebo test "napise" radek a odesle ho.
                 self.app.run_line(&value);
@@ -312,8 +315,10 @@ impl Term {
 }
 
 fn main(startup: Startup) -> i64 {
+    // Handly: 0 = okno, 1 = listek (obnova po padu kompozitoru), 2 = kanal
+    // pripojeni k termd.
     let mut hs = startup.handles.into_iter();
-    let Some(h) = hs.next() else {
+    let Some(link) = Link::from_handles(&mut hs) else {
         println!("gui-term: chybi kanal okna");
         return 1;
     };
@@ -321,7 +326,7 @@ fn main(startup: Startup) -> i64 {
     if conn.is_none() {
         println!("gui-term: chybi kanal pripojeni k termd");
     }
-    let win = match Window::open(Channel::from_handle(h), Mode::CustomTitle, 760, 460, "Terminál") {
+    let win = match Window::open(link, Mode::CustomTitle, 760, 460, "Terminál") {
         Ok(w) => w,
         Err(e) => {
             println!("gui-term: okno nelze otevrit: {e}");
@@ -339,11 +344,15 @@ fn main(startup: Startup) -> i64 {
             let animate = t.app.busy() || t.app.prompt.is_some();
             let deadline = [animate.then_some(next_tick), t.retry_at].into_iter().flatten().min();
             let rd = Signals::READABLE | Signals::PEER_CLOSED;
-            let mut items: Vec<(&Handle, Signals)> = vec![(t.win.channel().handle(), rd)];
-            if let Some(d) = &t.termd {
-                items.push((d.handle(), rd));
-            }
-            let _ = libos::wait_many(&items, deadline);
+            let termd = &t.termd;
+            // Kanal okna se po obnove kompozitoru meni: jen v ramci volani.
+            let _ = t.win.with_channel(|ch| {
+                let mut items: Vec<(&Handle, Signals)> = vec![(ch.handle(), rd)];
+                if let Some(d) = termd {
+                    items.push((d.handle(), rd));
+                }
+                libos::wait_many(&items, deadline)
+            });
         }
         let mut redraw = t.termd_messages();
         // Udalosti okna (bez cekani).
@@ -354,6 +363,11 @@ fn main(startup: Startup) -> i64 {
                     None => return 0,
                 },
                 Err(Error::PeerClosed) => return 0,
+                // Obnova kompozitoru uprostred: okno je zpet, nakreslit.
+                Err(Error::ServiceRestarted) => {
+                    let _ = t.regions();
+                    redraw = true;
+                }
                 Err(_) => break,
             }
         }

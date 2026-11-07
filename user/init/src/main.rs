@@ -123,13 +123,12 @@ fn main(startup: Startup) -> i64 {
     }
     if startup.flags & libos::abi::bootstrap::flags::TEST_RUN == 0 {
         // GUI: kompozitor prevezme vstup a obrazovku (testy si ho spusti samy).
+        // Kompozitor obnovuje supervisor (okna se pripoji pres listky).
         let input = system::devices().and_then(|d| d.input.as_ref());
-        gui::start_desktop(&startup, input);
-        if let Some(g) = gui::GUI.lock().as_ref() {
-            // Restart zatim neni: okna aplikaci patri kompozitoru. Po padu
-            // supervisor spusti zalozni konzoli.
-            sup.watch("compd", &g.process, None);
-        } else if let Err(e) = terminal::TERMINALS.lock().start_console(&startup) {
+        gui::start_desktop(&startup, input, &mut sup);
+        if gui::GUI.lock().is_none()
+            && let Err(e) = terminal::TERMINALS.lock().start_console(&startup)
+        {
             // Bez GUI: terminal v zalozni konzoli nad framebufferem.
             println!("init: zalozni konzoli nelze spustit: {e}");
         }

@@ -200,22 +200,6 @@ impl Window {
     }
 }
 
-/// Ma zprava cekat na `COMMIT` (meni platny stav okna)?
-fn is_staged(m: &ClientMsg) -> bool {
-    matches!(
-        m,
-        ClientMsg::WindowSet { .. }
-            | ClientMsg::LayerCreate { .. }
-            | ClientMsg::LayerSet { .. }
-            | ClientMsg::LayerDestroy { .. }
-            | ClientMsg::Damage { .. }
-            | ClientMsg::Animate { .. }
-            | ClientMsg::A11yUpdate { .. }
-            | ClientMsg::A11yRemove { .. }
-            | ClientMsg::Regions { .. }
-    )
-}
-
 impl Comp {
     /// Novy klient (identitu dava init).
     pub fn add_client(&mut self, info: ConnectInfo, now: u64) -> ClientId {
@@ -295,7 +279,7 @@ impl Comp {
         if !cl.hello && !matches!(m, ClientMsg::Hello { .. }) {
             return self.error(c, op_of(&m), Error::InvalidArgs);
         }
-        if is_staged(&m) {
+        if m.is_staged() {
             // Dekodovana zprava zabere zhruba dvojnasobek zakodovane.
             let cost = size.saturating_mul(2) + 64;
             if cl.staged.len() >= MAX_STAGED || cl.staged_bytes + cost > MAX_STAGED_BYTES {

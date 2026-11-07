@@ -942,3 +942,26 @@ fn tasks_icon_shows_count_and_focuses_task_manager() {
     t.c.set_tasks(0, 0);
     assert!(t.c.tasks_icon().is_none());
 }
+
+#[test]
+fn input_focus_lost_releases_keys_and_drag() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let ra = t.rect_of(a);
+    // Stisk v okne (bez uvolneni), pak ztrata fokusu vstupu (restart inputd).
+    t.move_to(ra.x + 3, ra.y + 3);
+    t.input(Event::Button { button: Button::Left, action: Action::Press }, false);
+    t.out();
+    t.input(Event::Focus(false), false);
+    let out = t.out();
+    let ma = client_msgs(&out, a);
+    let lost = ma.iter().filter(|m| matches!(m, ServerMsg::Input { records, .. } if records[0].event == InputEvent::Focus(false))).count();
+    assert_eq!(lost, 1, "okno s fokusem i stiskem dostane jedno Focus(false)");
+    // Uvolneni po ztrate fokusu uz oknu nejde (stisk je zapomenuty).
+    t.input(Event::Button { button: Button::Left, action: Action::Release }, false);
+    assert!(!client_msgs(&t.out(), a).iter().any(|m| matches!(m, ServerMsg::Input { records, .. } if matches!(records[0].event, InputEvent::Button { pressed: false, .. }))));
+    t.input(Event::Focus(true), false);
+    assert!(client_msgs(&t.out(), a).iter().any(|m| matches!(m, ServerMsg::Input { records, .. } if records[0].event == InputEvent::Focus(true))));
+}

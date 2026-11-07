@@ -304,7 +304,8 @@ Box::new(MůjAdaptér))`, klient je vlastní testovací program služby
 | registr, závislosti (`Dep::restart`, `Dep::notify`), generace, backoff, vzdání, `revive`, `status()` | hotovo, testy `obnova sluzeb` |
 | držák konců (`Kept`) | hotovo v supervisoru; používají ho adaptéry služeb |
 | `fsd` | hotovo: adaptér (`user/init/src/fsd.rs`, recept a zúžení v [souborovém systému](souborovy-system.md#obnova-po-pádu-fsd)), `FsClient` přes `Conn` (`with_lease`), trvalé handly a `REOPEN`, šetření sirotků 30 s, synchronizace disku `SYNC`; lístek má init a `fwd`. Test `obnova fsd`. Zbývá: lístky pro `dnsd`, `ntpd`, `revocd` (vlákno sítě) |
-| `inputd`, `netd` + `fwd`/`dnsd`, `compd`, `termd`/`taskd` | zapojí vlákna služeb podle této stránky |
+| `compd` (okna, displej z `Kept` + `SYNC`, fokus po restartu `inputd` zůstává, `Focus(false)` pustí klávesy) | hotovo ([GUI: obnova](gui.md#obnova-po-pádu-kompozitoru)), test `compd: pad kompozitoru uprostred prace` v sadě `gui` |
+| `inputd`, `netd` + `fwd`/`dnsd`, `termd`/`taskd` | zapojí vlákna služeb podle této stránky |
 | restart `devmgr` (zpráva `driver`, ukončení ovladačů) | další krok po zapojení služeb: bez nich by restart `devmgr` jen odpojil zařízení |
 | přehled úloh (`taskproto` producent) | po spuštění `taskd` (vlákno shellu) |
 

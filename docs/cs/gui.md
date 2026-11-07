@@ -494,6 +494,8 @@ celý obraz do své VMO a říká, které obdélníky se změnily.
 | `ATTACH` | compd -> ovladač | výstup, w, h, stride (v bajtech) + handle VMO (jen čtení) |
 | `PRESENT` | compd -> ovladač | seq, obdélníky |
 | `PRESENTED` | ovladač -> compd | seq, čas (ns) |
+| `SYNC` | compd -> ovladač | token (u64) - značka po restartu kompozitoru |
+| `SYNCED` | ovladač -> compd | token; vše před ní patří předchozí instanci ([Obnova](#obnova-po-pádu-kompozitoru)) |
 
 Ovladač zkopíruje poškozené obdélníky do svých bufferů DMA (s IOMMU jediná
 paměť, kam smí zařízení zapisovat a číst), pošle `TRANSFER_TO_HOST_2D`
@@ -654,6 +656,71 @@ s render serverem (nebo crosvm). WSL2 jen s Vulkanem přeloženým přes
 D3D12 (nejisté). VMware ne - jeho SVGA3D je jiný protokol. Na skutečném
 hardwaru Vulkan přinese port Mesy (milník 7).
 
+## Obnova po pádu kompozitoru
+
+Když `compd` spadne, supervisor initu ho spustí znovu (společný protokol
+[Obnova služeb](obnova-sluzeb.md)) a **okna se vrátí sama** se stejnou
+identitou (odznak důvěry, id aplikace). Aplikace nic dělat nemusí:
+obnovu dělá `ui::client`.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Obnova oken po pádu kompozitoru">
+<defs><marker id="gr1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker><marker id="gr1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow-acc" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="210" height="120" rx="6"/><text class="t b" x="115" y="45" text-anchor="middle">aplikace (ui::client)</text><text class="m" x="115" y="66" text-anchor="middle">záznam stavu okna</text><text class="m" x="115" y="84" text-anchor="middle">(guiproto::replay)</text><text class="m" x="115" y="102" text-anchor="middle">VMO bufferů drží aplikace</text><text class="m" x="115" y="120" text-anchor="middle">kanál okna + lístek</text>
+<rect class="err" x="290" y="20" width="180" height="50" rx="6"/><text class="t b" x="380" y="50" text-anchor="middle">compd gen 1 (spadl)</text>
+<rect class="ok" x="290" y="110" width="180" height="60" rx="6"/><text class="t b" x="380" y="135" text-anchor="middle">compd gen 2</text><text class="m" x="380" y="155" text-anchor="middle">SYNC, ATTACH, fokus</text>
+<rect class="acc" x="550" y="20" width="200" height="150" rx="6"/><text class="t b" x="650" y="45" text-anchor="middle">supervisor (init)</text><text class="m" x="650" y="68" text-anchor="middle">adaptér CompdService</text><text class="m" x="650" y="86" text-anchor="middle">recept = ConnectInfo</text><text class="m" x="650" y="104" text-anchor="middle">z manifestu</text><text class="m" x="650" y="122" text-anchor="middle">Kept: konec k ovladači</text><text class="m" x="650" y="140" text-anchor="middle">Dep::notify(inputd)</text>
+<rect class="box" x="550" y="220" width="200" height="60" rx="6"/><text class="t b" x="650" y="245" text-anchor="middle">ovladač displeje</text><text class="m" x="650" y="264" text-anchor="middle">pád nepozná</text>
+<path class="ln dash" d="M220 45 L288 45" marker-end="url(#gr1)"/><text class="m" x="225" y="35">1. PEER_CLOSED</text>
+<path class="ln-acc" d="M150 140 C 250 260, 480 250, 548 160" marker-end="url(#gr1a)"/><text class="m" x="230" y="245">2. RECONNECT na lístku</text>
+<path class="ln" d="M548 140 L472 140" marker-end="url(#gr1)"/><text class="m" x="480" y="190">3. connect(recept)</text>
+<path class="ln-acc" d="M290 150 L222 120" marker-end="url(#gr1a)"/><text class="m" x="225" y="175">4. HELLO + stav okna</text>
+<path class="ln" d="M650 170 L650 218" marker-end="url(#gr1)"/><text class="m" x="656" y="200">duplikát konce</text>
+</svg>
+<figcaption>Pád kompozitoru: aplikace dostane přes lístek novou relaci se stejnou identitou a pošle znovu stav okna.</figcaption>
+</figure>
+
+| Krok | Kdo | Co |
+|---|---|---|
+| 1 | supervisor | adaptér `CompdService` (`user/init/src/gui.rs`) spustí novou instanci a pošle jí `display` s duplikátem konce kanálu k ovladači displeje (držák konců `Kept`) |
+| 2 | `compd` | pošle ovladači `SYNC` s náhodným tokenem a zahodí vše, co přijde před `SYNCED` (pozdní odpovědi staré instance), pak `INFO` a znovu `ATTACH` (nová VMO snímku nahradí starou) |
+| 3 | adaptér | odpověď na `display` = potvrzení startu; pak nový fokus a kanál `secure` od `inputd` (`take_input`) |
+| 4 | aplikace | `ui::client` vidí `PEER_CLOSED`, zavolá `conn.recover()`: supervisor přes lístek vydá relaci podle receptu (`ConnectInfo` z manifestu - identitu dává init, ne aplikace) |
+| 5 | aplikace | `HELLO` a poslední **potvrzený** stav okna ze záznamu (`guiproto::replay`): okno, buffery (VMO drží aplikace, pošle je znovu jen pro čtení), vrstvy s vlastnostmi, titulek, oblasti a strom přístupnosti; po `CONFIGURE` `COMMIT` (stejná velikost) nebo událost `Resized` |
+| 6 | aplikace | událost `Restored { generation }`; `run` okno nakreslí znovu |
+
+Restart `inputd` (`Dep::notify("inputd")`) kanál fokusu ani `secure`
+nezavře: konce na straně `inputd` drží init v držáku konců a předá je nové
+instanci. Kompozitor dostane `Focus(false)` (ukončí tažení, zapomene
+stisk a oknu s fokusem pošle `Focus(false)` - aplikace pustí klávesy)
+a pak `Focus(true)`. Okna zůstanou.
+
+**Co se neobnoví** (pravidla obnovy, odsouhlaseno):
+
+| Rozpracované | Výsledek |
+|---|---|
+| transakce (zprávy od posledního `COMMIT`) | zahodí se; volání vrátí `SERVICE_RESTARTED`, `run` okno nakreslí znovu (aplikace kreslící sama, např. `gui-term`, totéž) |
+| `COMMIT` | záznam ho uplatní: po obnově je stav okna stejný, jako kdyby ho stará instance přijala |
+| odpověď na akci (`ACTION_RESULT`) | `SERVICE_RESTARTED`: volající patřil staré instanci a odpověď nedostal; akce v aplikaci proběhla |
+| skupina transakcí (`SYNC_GROUP`), animace | token skupiny patří staré instanci; animace skončí rovnou v cílové hodnotě |
+| systémový dialog, bezpečná obrazovka | zmizí s instancí; volající (`dialog`, `actions`) vidí `PEER_CLOSED` |
+
+**Pořadí handlů aplikace s oknem** (startovní zpráva, kind USER): 0 = kanál
+okna, 1 = lístek, 2+ = handly aplikace (`gui-tasks`: kanál na `taskd`).
+`ui::client::Link::from_handles` vezme první dva. Bez supervisoru (testy)
+dostane aplikace lístek bez druhého konce: pád kompozitoru okno ukončí.
+
+**Nikdy nevisí**: čekání na lístek má termín (`Conn`, výchozí 10 s), pozdrav
+nové instanci 5 s, nejvýš 3 pokusy, když spadne i nová instance. Když to
+supervisor vzdá (víc než 5 pádů za 60 s), aplikace dostane
+`SERVICE_UNAVAILABLE` a skončí.
+
+**Rizika**: obnova posílá celý stav okna (strom přístupnosti velkého okna
+jsou desítky kB, buffery jen handly - pixely se nekopírují). Okno je po
+obnově vidět s posledním potvrzeným obsahem, i když aplikace zrovna
+kreslila nový (o snímek starší obraz). Kompozitor nové instance okno umístí
+znovu (poloha se zatím nepamatuje).
+
 ## Stav a odchylky od návrhu
 
 | Co | Teď | Proč to nevadí / kdy jinak |
@@ -663,8 +730,8 @@ hardwaru Vulkan přinese port Mesy (milník 7).
 | průhlednost skupiny | násobí se do dětí (bez mezibufferu) | překrývající se děti poloprůhledné skupiny se prolnou i mezi sebou; GPU backend to udělá správně |
 | vsync | čas `PRESENTED` od ovladače (konec `RESOURCE_FLUSH`) | virtio-gpu 2D vsync nehlásí |
 | kurzor | kreslí ho kompozitor do snímku | hardwarový kurzor (fronta 1) přijde s 3D |
-| obnova oken po restartu | není | v návrhu ([Grafika](architektura.md#grafika)) |
-| restart kompozitoru | supervisor ho jen hlídá | okna patří kompozitoru; po pádu by se aplikace musely připojit znovu |
+| obnova oken po restartu | aplikace pošle znovu poslední potvrzený stav ([Obnova](#obnova-po-pádu-kompozitoru)) | poloha okna se nepamatuje; rozpracovaná transakce vrátí `SERVICE_RESTARTED` |
+| restart kompozitoru | supervisor (adaptér `CompdService`, displej z držáku konců) | dialogy a skupiny transakcí staré instance zaniknou |
 | commit držený ve skupině | uplatní se až s celou skupinou, i když klient mezitím poslal další běžný commit | klient ve skupině má čekat na `PRESENTED`; přísné pořadí commitů jednoho klienta přijde s GPU backendem |
 | pád ovladače displeje | kompozitor běží dál bez obrazu (okna, dialogy, akce) | restart ovladače zatím není |
 
@@ -690,4 +757,8 @@ hardwaru Vulkan přinese port Mesy (milník 7).
   umělým vstupem (`inject`), akce z manifestu (špatný argument odmítnut,
   `note.add`, akce agenta čeká na potvrzení), systémový dialog nepřijme
   umělý Enter a přijme fyzické klávesy z QEMU (QMP), bezpečná obrazovka
-  po Ctrl+Alt+Del z QEMU, okno terminálu s vlastním titulkem.
+  po Ctrl+Alt+Del z QEMU, okno terminálu s vlastním titulkem, **pád
+  kompozitoru uprostřed práce** (poslední: kompozitor pod supervisorem
+  testu, `gui-demo` v jiném procesu s lístkem; po zabití se okno vrátí se
+  stejnou identitou, odznakem a stavem, aplikace dál reaguje, jedno okno
+  a jeden klient).

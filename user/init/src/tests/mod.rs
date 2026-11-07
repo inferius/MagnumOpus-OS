@@ -14,6 +14,7 @@ mod fs_data;
 mod fs_hist;
 mod fs_recovery;
 mod gui;
+mod gui_recovery;
 mod input;
 mod ipc;
 mod jobs;

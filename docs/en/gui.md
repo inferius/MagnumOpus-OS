@@ -514,6 +514,8 @@ the whole image into its VMO and says which rectangles changed.
 | `ATTACH` | compd -> driver | output, w, h, stride (in bytes) + VMO handle (read-only) |
 | `PRESENT` | compd -> driver | seq, rectangles |
 | `PRESENTED` | driver -> compd | seq, time (ns) |
+| `SYNC` | compd -> driver | token (u64) - marker after a compositor restart |
+| `SYNCED` | driver -> compd | token; everything before it belongs to the previous instance ([Recovery](#recovery-after-a-compositor-crash)) |
 
 The driver copies the damaged rectangles into its DMA buffers (with an
 IOMMU the only memory the device may access), sends
@@ -670,6 +672,73 @@ virglrenderer with the render server (or crosvm). WSL2 only with Vulkan
 translated to D3D12 (uncertain). Not VMware - its SVGA3D is a different
 protocol. On real hardware Vulkan comes with the Mesa port (milestone 7).
 
+## Recovery after a compositor crash
+
+When `compd` crashes, the init supervisor starts it again (shared
+[Service recovery](service-recovery.md) protocol) and **the windows come
+back on their own** with the same identity (trust badge, application id).
+Applications need to do nothing: `ui::client` does the recovery.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Restoring windows after a compositor crash">
+<defs><marker id="gr1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker><marker id="gr1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow-acc" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="210" height="120" rx="6"/><text class="t b" x="115" y="45" text-anchor="middle">application (ui::client)</text><text class="m" x="115" y="66" text-anchor="middle">window state record</text><text class="m" x="115" y="84" text-anchor="middle">(guiproto::replay)</text><text class="m" x="115" y="102" text-anchor="middle">app holds buffer VMOs</text><text class="m" x="115" y="120" text-anchor="middle">window channel + lease</text>
+<rect class="err" x="290" y="20" width="180" height="50" rx="6"/><text class="t b" x="380" y="50" text-anchor="middle">compd gen 1 (crashed)</text>
+<rect class="ok" x="290" y="110" width="180" height="60" rx="6"/><text class="t b" x="380" y="135" text-anchor="middle">compd gen 2</text><text class="m" x="380" y="155" text-anchor="middle">SYNC, ATTACH, focus</text>
+<rect class="acc" x="550" y="20" width="200" height="150" rx="6"/><text class="t b" x="650" y="45" text-anchor="middle">supervisor (init)</text><text class="m" x="650" y="68" text-anchor="middle">CompdService adapter</text><text class="m" x="650" y="86" text-anchor="middle">recipe = ConnectInfo</text><text class="m" x="650" y="104" text-anchor="middle">from the manifest</text><text class="m" x="650" y="122" text-anchor="middle">Kept: driver endpoint</text><text class="m" x="650" y="140" text-anchor="middle">Dep::notify(inputd)</text>
+<rect class="box" x="550" y="220" width="200" height="60" rx="6"/><text class="t b" x="650" y="245" text-anchor="middle">display driver</text><text class="m" x="650" y="264" text-anchor="middle">does not notice</text>
+<path class="ln dash" d="M220 45 L288 45" marker-end="url(#gr1)"/><text class="m" x="225" y="35">1. PEER_CLOSED</text>
+<path class="ln-acc" d="M150 140 C 250 260, 480 250, 548 160" marker-end="url(#gr1a)"/><text class="m" x="230" y="245">2. RECONNECT on the lease</text>
+<path class="ln" d="M548 140 L472 140" marker-end="url(#gr1)"/><text class="m" x="480" y="190">3. connect(recipe)</text>
+<path class="ln-acc" d="M290 150 L222 120" marker-end="url(#gr1a)"/><text class="m" x="225" y="175">4. HELLO + window state</text>
+<path class="ln" d="M650 170 L650 218" marker-end="url(#gr1)"/><text class="m" x="656" y="200">duplicate endpoint</text>
+</svg>
+<figcaption>Compositor crash: the app gets a new session with the same identity over its lease and resends the window state.</figcaption>
+</figure>
+
+| Step | Who | What |
+|---|---|---|
+| 1 | supervisor | the `CompdService` adapter (`user/init/src/gui.rs`) starts a new instance and sends it `display` with a duplicate of the channel endpoint to the display driver (endpoint keeper `Kept`) |
+| 2 | `compd` | sends the driver `SYNC` with a random token and drops everything before `SYNCED` (late replies to the old instance), then `INFO` and `ATTACH` again (the new frame VMO replaces the old one) |
+| 3 | adapter | the reply to `display` confirms the start; then a new focus and `secure` channel from `inputd` (like `take_input`) |
+| 4 | application | `ui::client` sees `PEER_CLOSED` and calls `conn.recover()`: over the lease the supervisor issues a session from the recipe (`ConnectInfo` from the manifest - init gives the identity, not the app) |
+| 5 | application | `HELLO` and the last **committed** window state from the record (`guiproto::replay`): window, buffers (the app holds the VMOs and sends them again read-only), layers with properties, title, regions and the accessibility tree; after `CONFIGURE` a `COMMIT` (same size) or a `Resized` event |
+| 6 | application | event `Restored { generation }`; `run` redraws the window |
+
+An `inputd` restart (`Dep::notify("inputd")`) closes neither the focus
+nor the `secure` channel: init keeps the `inputd`-side endpoints in the
+endpoint keeper and hands them to the new instance. The compositor gets
+`Focus(false)` (ends a drag, forgets the press and sends `Focus(false)` to
+the focused window - the app releases its keys) and then `Focus(true)`.
+Windows stay.
+
+**What is not restored** (recovery rules, agreed):
+
+| In progress | Result |
+|---|---|
+| transaction (messages since the last `COMMIT`) | dropped; the call returns `SERVICE_RESTARTED` and `run` redraws the window (apps drawing on their own, e.g. `gui-term`, do the same) |
+| `COMMIT` | the record applies it: after recovery the window state is the same as if the old instance had accepted it |
+| action reply (`ACTION_RESULT`) | `SERVICE_RESTARTED`: the caller belonged to the old instance and got no reply; the action did run in the app |
+| transaction group (`SYNC_GROUP`), animations | the group token belongs to the old instance; animations end at their target value |
+| system dialog, secure screen | gone with the instance; callers (`dialog`, `actions`) see `PEER_CLOSED` |
+
+**Handle order of an application with a window** (start message, kind
+USER): 0 = window channel, 1 = lease, 2+ = the app's own handles
+(`gui-tasks`: channel to `taskd`). `ui::client::Link::from_handles` takes
+the first two. Without a supervisor (tests) the app gets a lease with no
+other end: a compositor crash ends the window.
+
+**Never hangs**: waiting on the lease has a deadline (`Conn`, default
+10 s), the greeting to the new instance 5 s, at most 3 attempts if the new
+instance crashes too. When the supervisor gives up (more than 5 crashes in
+60 s) the app gets `SERVICE_UNAVAILABLE` and exits.
+
+**Risks**: recovery resends the whole window state (the accessibility tree
+of a large window is tens of kB; buffers are only handles - no pixels are
+copied). After recovery the window shows its last committed content even
+if the app was drawing a new one (a frame older picture). The new
+instance places the window again (the position is not remembered yet).
+
 ## Status and deviations from the design
 
 | What | Now | Why it is fine / when it changes |
@@ -679,8 +748,8 @@ protocol. On real hardware Vulkan comes with the Mesa port (milestone 7).
 | group opacity | multiplied into children (no intermediate buffer) | overlapping children of a translucent group blend with each other too; the GPU backend will do it properly |
 | vsync | `PRESENTED` time from the driver (end of `RESOURCE_FLUSH`) | virtio-gpu 2D does not report vsync |
 | cursor | drawn by the compositor into the frame | hardware cursor (queue 1) comes with 3D |
-| restoring windows after restart | none | in the design ([Graphics](architecture.md#graphics)) |
-| compositor restart | the supervisor only watches it | windows belong to the compositor; after a crash the apps would have to reconnect |
+| restoring windows after restart | the app resends its last committed state ([Recovery](#recovery-after-a-compositor-crash)) | the window position is not remembered; an unfinished transaction returns `SERVICE_RESTARTED` |
+| compositor restart | the supervisor (`CompdService` adapter, display from the endpoint keeper) | dialogs and transaction groups of the old instance are lost |
 | commit held in a group | applied together with the whole group, even if the client sent another plain commit meanwhile | a client in a group should wait for `PRESENTED`; strict per-client commit order comes with the GPU backend |
 | display driver crash | the compositor keeps running without a picture (windows, dialogs, actions) | no driver restart yet |
 
@@ -707,4 +776,8 @@ protocol. On real hardware Vulkan comes with the Mesa port (milestone 7).
   rejected, `note.add`, an agent action waits for confirmation), a system
   dialog rejects a synthetic Enter and accepts physical keys from QEMU
   (QMP), the secure screen after Ctrl+Alt+Del from QEMU, the terminal
-  window with a custom title bar.
+  window with a custom title bar, **a compositor crash in the middle of
+  work** (last: the compositor under the test's supervisor, `gui-demo` in
+  another process with a lease; after the kill the window comes back with
+  the same identity, badge and state, the app keeps responding, one window
+  and one client).
