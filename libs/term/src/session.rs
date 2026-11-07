@@ -72,6 +72,13 @@ pub struct Service {
     fixed: Option<u64>,
 }
 
+/// Zvyrazneni jako zprava protokolu.
+pub fn highlighted(seq: u32, h: &shlang::highlight::Highlight) -> ServerMsg {
+    let spans = h.spans.iter().map(|s| (s.start as u32, (s.end - s.start) as u32, s.class as u8)).collect();
+    let error = h.error.as_ref().map(|e| (e.start as u32, (e.end - e.start) as u32, e.message.clone()));
+    ServerMsg::Highlighted { seq, spans, error }
+}
+
 /// Spojeni bez okna (uklid ve volne chvili nic neposila).
 struct NullLink;
 
@@ -341,6 +348,18 @@ impl Service {
                     }
                     Err(e) => link.send(&ServerMsg::Fail { message: e.report(&line) }),
                 }
+            }
+            ClientMsg::Highlight { session, line, seq } => {
+                let Some(i) = self.session_index(session) else {
+                    link.send(&ServerMsg::Fail { message: alloc::format!("relace {session} neexistuje") });
+                    return;
+                };
+                let s = &self.sessions[i];
+                let vars = s.interp.var_names();
+                let commands = s.interp.fn_names();
+                let ctx = shlang::highlight::Ctx { sigs: &*s.interp.sigs, vars: &vars, commands: &commands };
+                let h = shlang::highlight::highlight(&line, Some(&ctx));
+                link.send(&highlighted(seq, &h));
             }
             ClientMsg::Sessions => {
                 let sessions =

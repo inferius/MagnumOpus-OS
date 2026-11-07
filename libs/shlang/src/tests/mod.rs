@@ -4,6 +4,7 @@
 mod draft;
 mod eval;
 mod fs;
+mod highlight;
 mod host;
 mod misc;
 mod regress;

@@ -48,6 +48,9 @@ pub enum ClientMsg {
     /// Prevod radku do druheho zapisu (0 = B, 1 = C).
     Format { session: u64, line: String, style: u8 },
     Sessions,
+    /// Vyznamove zvyrazneni rozepsaneho radku (okno ho posila pri psani;
+    /// `seq` = poradi, okno zahodi starsi odpovedi).
+    Highlight { session: u64, line: String, seq: u32 },
 }
 
 /// Sluzba -> terminal.
@@ -63,6 +66,9 @@ pub enum ServerMsg {
     SessionList { sessions: Vec<(u64, u32, String)> },
     Formatted { text: String },
     Fail { message: String },
+    /// Odpoved na `Highlight`: useky (zacatek, delka v bajtech, trida
+    /// `shlang::highlight::Class`) a misto chyby parseru.
+    Highlighted { seq: u32, spans: Vec<(u32, u32, u8)>, error: Option<(u32, u32, String)> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -419,6 +425,12 @@ impl ClientMsg {
                 w.u8(*style);
             }
             ClientMsg::Sessions => w.u8(9),
+            ClientMsg::Highlight { session, line, seq } => {
+                w.u8(10);
+                w.u64(*session);
+                w.str(line);
+                w.u32(*seq);
+            }
         }
         w.0
     }
@@ -435,6 +447,7 @@ impl ClientMsg {
             7 => ClientMsg::Answer { prompt: r.u64()?, yes: r.u8()? != 0 },
             8 => ClientMsg::Format { session: r.u64()?, line: r.str()?, style: r.u8()? },
             9 => ClientMsg::Sessions,
+            10 => ClientMsg::Highlight { session: r.u64()?, line: r.str()?, seq: r.u32()? },
             _ => return Err(DecodeError),
         };
         r.done()?;
@@ -508,6 +521,25 @@ impl ServerMsg {
                 w.u8(10);
                 w.str(message);
             }
+            ServerMsg::Highlighted { seq, spans, error } => {
+                w.u8(11);
+                w.u32(*seq);
+                w.u32(spans.len() as u32);
+                for (a, b, c) in spans {
+                    w.u32(*a);
+                    w.u32(*b);
+                    w.u8(*c);
+                }
+                match error {
+                    None => w.u8(0),
+                    Some((a, b, m)) => {
+                        w.u8(1);
+                        w.u32(*a);
+                        w.u32(*b);
+                        w.str(m);
+                    }
+                }
+            }
         }
         w.0
     }
@@ -546,6 +578,22 @@ impl ServerMsg {
             }
             9 => ServerMsg::Formatted { text: r.str()? },
             10 => ServerMsg::Fail { message: r.str()? },
+            11 => {
+                let seq = r.u32()?;
+                let n = r.u32()? as usize;
+                if n > MAX_ITEMS {
+                    return Err(DecodeError);
+                }
+                let mut spans = Vec::with_capacity(n.min(1024));
+                for _ in 0..n {
+                    spans.push((r.u32()?, r.u32()?, r.u8()?));
+                }
+                let error = match r.u8()? {
+                    0 => None,
+                    _ => Some((r.u32()?, r.u32()?, r.str()?)),
+                };
+                ServerMsg::Highlighted { seq, spans, error }
+            }
             _ => return Err(DecodeError),
         };
         r.done()?;

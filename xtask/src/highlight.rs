@@ -6,6 +6,11 @@
 //! (`#[...]`), lifetimy (`'a`). Podporovane jazyky: `rust`, `c`, `cpp`,
 //! `toml`, `bash`/`sh`; ostatni (`text`, bez jazyka) zustavaji bez barev.
 //! Vystup jsou `<span class="hl-...">`, barvy definuje `style.css`.
+//!
+//! Jazyk shellu (`shell-b`, `shell-c`) se nezvyraznuje tady: tokeny
+//! a tridy dava `shlang::highlight` - stejne jako terminal ([`mos`]).
+//! Tridy jsou `sh-<trida>`, barvy generuje motiv terminalu
+//! (`term::theme`, viz [`shell_css`]).
 
 const RUST_KW: &[&str] = &[
     "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
@@ -68,10 +73,6 @@ const BASH_KW: &[&str] = &[
     "cd", "do", "done", "echo", "elif", "else", "esac", "export", "fi", "for", "function", "if",
     "in", "then", "while",
 ];
-const MOS_KW: &[&str] = &[
-    "let", "fn", "if", "else", "for", "in", "while", "return", "break", "continue", "try", "bg", "true",
-    "false", "null", "lang", "needs",
-];
 /// Typy psane malymi pismeny (Rust primitivni typy, C typy maji klic. slova).
 const RUST_PRIM: &[&str] = &[
     "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "str", "u8", "u16",
@@ -94,7 +95,8 @@ fn lang_of(name: &str) -> Option<Lang> {
         "c" | "cpp" | "c++" | "h" => Some(Lang::C),
         "toml" => Some(Lang::Toml),
         "bash" | "sh" | "shell" | "powershell" => Some(Lang::Bash),
-        "shell-b" | "shell-c" => Some(Lang::Mos),
+        // `mos` = shell bez prevodu do druheho zapisu (smiseny priklad, skript).
+        "shell-b" | "shell-c" | "mos" => Some(Lang::Mos),
         _ => None,
     }
 }
@@ -119,6 +121,38 @@ fn span(out: &mut String, class: &str, text: &str) {
     out.push_str("</span>");
 }
 
+/// Jazyk shellu: useky z `shlang::highlight` (lexikalni uroven, jako radek
+/// bloku v terminalu) -> `<span class="sh-...">`.
+pub fn mos(code: &str) -> String {
+    let h = shlang::highlight::highlight(code, None);
+    let mut out = String::with_capacity(code.len() * 2);
+    let mut at = 0;
+    for sp in &h.spans {
+        esc(&mut out, &code[at..sp.start]);
+        out.push_str("<span class=\"sh-");
+        out.push_str(sp.class.name());
+        out.push_str("\">");
+        esc(&mut out, &code[sp.start..sp.end]);
+        out.push_str("</span>");
+        at = sp.end;
+    }
+    esc(&mut out, &code[at..]);
+    out
+}
+
+/// CSS barev shellu z motivu terminalu (svetly / tmavy jako zbytek webu).
+pub fn shell_css() -> String {
+    let (light, dark) = (term::theme::Theme::light(), term::theme::Theme::dark());
+    let mut out = String::from("\n/* Shell: generuje xtask z term::theme (stejne barvy jako terminal). */\n");
+    out.push_str(&light.css_vars(":root"));
+    out.push_str("@media (prefers-color-scheme: dark) {\n");
+    out.push_str(&dark.css_vars(":root:not([data-theme=\"light\"])"));
+    out.push_str("}\n");
+    out.push_str(&dark.css_vars(":root[data-theme=\"dark\"]"));
+    out.push_str(&dark.css_rules());
+    out
+}
+
 /// Zvyrazni `code` v jazyce `lang`; vraci HTML (bez obalu `<pre>`).
 pub fn highlight(lang: &str, code: &str) -> String {
     let mut out = String::with_capacity(code.len() * 2);
@@ -126,6 +160,9 @@ pub fn highlight(lang: &str, code: &str) -> String {
         esc(&mut out, code);
         return out;
     };
+    if l == Lang::Mos {
+        return mos(code);
+    }
     let chars: Vec<char> = code.chars().collect();
     let text = |a: usize, b: usize| -> String { chars[a..b].iter().collect() };
     let n = chars.len();
@@ -138,7 +175,9 @@ pub fn highlight(lang: &str, code: &str) -> String {
         // Komentare.
         let line_comment = match l {
             Lang::Rust | Lang::C => c == '/' && next == '/',
-            Lang::Toml | Lang::Bash | Lang::Mos => c == '#',
+            Lang::Toml | Lang::Bash => c == '#',
+            // Shell resi `mos` (vyse).
+            Lang::Mos => false,
         };
         if line_comment {
             let end = chars[i..]
@@ -260,7 +299,7 @@ pub fn highlight(lang: &str, code: &str) -> String {
         // Slova.
         if c.is_alphabetic()
             || c == '_'
-            || ((l == Lang::Bash || l == Lang::Mos)
+            || (l == Lang::Bash
                 && c == '-'
                 && next.is_alphabetic()
                 && (i == 0 || chars[i - 1] == ' '))
@@ -269,7 +308,7 @@ pub fn highlight(lang: &str, code: &str) -> String {
             while j < n
                 && (chars[j].is_alphanumeric()
                     || chars[j] == '_'
-                    || ((l == Lang::Bash || l == Lang::Mos) && chars[j] == '-'))
+                    || (l == Lang::Bash && chars[j] == '-'))
             {
                 j += 1;
             }
@@ -279,9 +318,6 @@ pub fn highlight(lang: &str, code: &str) -> String {
                 Lang::Rust if RUST_KW.contains(&word.as_str()) => Some("kw"),
                 Lang::C if C_KW.contains(&word.as_str()) => Some("kw"),
                 Lang::Bash if BASH_KW.contains(&word.as_str()) => Some("kw"),
-                Lang::Mos if MOS_KW.contains(&word.as_str()) => Some("kw"),
-                Lang::Mos if word.starts_with('-') => Some("attr"),
-                Lang::Mos if after == '(' => Some("fn"),
                 Lang::Bash if word.starts_with('-') => Some("attr"),
                 Lang::Bash
                     if line_start
@@ -351,6 +387,55 @@ mod tests {
         assert!(h.contains("<span class=\"hl-mac\">println!</span>"));
         assert!(h.contains("<span class=\"hl-str\">&quot;a&lt;b&quot;</span>"));
         assert!(h.contains("<span class=\"hl-com\">// konec</span>"));
+    }
+
+    /// Dokumentace a terminal se nerozchazeji: tridy v HTML jsou presne
+    /// useky `shlang::highlight` (stejna funkce kresli radek bloku v
+    /// terminalu) pro vsechny priklady shellu v dokumentaci.
+    #[test]
+    fn shell_docs_match_terminal() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut checked = 0;
+        for f in ["docs/cs/navrh-shell.md", "docs/en/shell-design.md"] {
+            let md = std::fs::read_to_string(root.join(f)).unwrap();
+            let mut code: Option<String> = None;
+            for line in md.lines() {
+                match &mut code {
+                    None if line.starts_with("```shell-") || line == "```mos" => code = Some(String::new()),
+                    Some(c) if line.starts_with("```") => {
+                        let html = super::mos(c);
+                        let classes: Vec<String> = html
+                            .split("<span class=\"sh-")
+                            .skip(1)
+                            .map(|p| p.split('"').next().unwrap().to_string())
+                            .collect();
+                        let term: Vec<String> = shlang::highlight::highlight(c, None)
+                            .spans
+                            .iter()
+                            .map(|s| s.class.name().to_string())
+                            .collect();
+                        assert_eq!(classes, term, "{f}: {c}");
+                        checked += 1;
+                        code = None;
+                    }
+                    Some(c) => {
+                        c.push_str(line);
+                        c.push('\n');
+                    }
+                    None => {}
+                }
+            }
+        }
+        assert!(checked > 10, "prikladu shellu: {checked}");
+    }
+
+    #[test]
+    fn shell_css_has_every_class() {
+        let css = super::shell_css();
+        for c in shlang::highlight::Class::ALL {
+            assert!(css.contains(&format!(".sh-{} ", c.name())), "{}", c.name());
+            assert!(css.contains(&format!("--sh-{}:", c.name())));
+        }
     }
 
     #[test]

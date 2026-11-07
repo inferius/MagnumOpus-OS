@@ -1328,7 +1328,7 @@ data = rest of the message. One read/write moves at most 32 KiB
 | 20 | `CHECK` | scrub u8 | generation u64, total problems u64, unchecked changes in memory u8, count u32 + descriptions (as many as fit); only with `debug` |
 | 21 | `LIST_PAGE` | path, cursor (name of the last entry of the previous page, empty = from the start), at most u32 | more u8 (1 = something is left) + a page like `LIST` (as much as fits into 60 KiB) |
 | 22 | `SNAP_LIST_PAGE` | snapshot, path, cursor, at most u32 | like `LIST_PAGE` |
-| 87 | `LIST_STAT_PAGE` | path, cursor, at most u32 | more u8 + count u32 + (name, kind u8, oid u64, size u64, mtime) - as much as fits into 60 KiB; rights `LIST` and `TRAVERSE` on the directory |
+| 87 | `LIST_STAT_PAGE` | path, cursor, at most u32 | more u8 + count u32 + (name, kind u8, oid u64, size u64, mtime, rights u8) - as much as fits into 60 KiB; rights `LIST` and `TRAVERSE` on the directory |
 | 100 | `SIMULATE_POWER_LOSS` | - | replayed operations u64; only with `debug`, otherwise `ACCESS_DENIED` |
 
 `FsClient::list` and `snapshot_list` read page by page - this solves the

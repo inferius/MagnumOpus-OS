@@ -73,7 +73,7 @@ ls ~/Dokumenty -r | where size > 100MB | each { |f| rm $f.path }
 
 **B - příkazový + výrazový režim (doporučeno)**
 
-```text
+```mos
 ls ~/Dokumenty -r | where size > 100MB && mtime < now - 1y | sort size desc
 let velke = ls ~/Dokumenty -r | where size > 100MB
 for f in $velke { rm $f.path? }          # ? = chyba přeruší skript
@@ -100,7 +100,7 @@ ls("~/Dokumenty", recursive: true).filter(|f| f.size > 100.mb && f.mtime < now()
 > interaktivní psaní) a výrazový C blízký Rustu (pro skripty a logiku).
 > Oba jsou **zápisy téhož jazyka**, ne dva jazyky. To se musí přísně hlídat.
 
-```text
+```mos
 ls ~/Dok -r | where size > 100MB                          # B
 ls("~/Dok", recursive: true).where(f => f.size > 100MB)   # C, totéž
 ls ~/Dok -r | where (size > 100MB && ext == "pdf")      # míchání: výraz v ( ) je C
@@ -162,7 +162,7 @@ zápisu B mají v C plný tvar se stejným stromem, viz
 - **Manifest skriptu:** hlavička, kterou shell zkontroluje před spuštěním
   a podle které předá capabilities:
 
-```text
+```mos
 lang 1
 needs {
     read: ["~/Fotky"]
@@ -648,8 +648,9 @@ undo
 
 Binární zprávy (1 B druh, pole little-endian, text = délka + UTF-8). Okno
 posílá `Hello`, `Attach` (0 = nová relace), `Detach`, `Run`, `Interrupt`,
-`Complete`, `Answer`, `Format` a `Sessions`. Služba posílá `BlockStart`,
-`Item`, `BlockEnd`, `Prompt`, `Completions`, `Formatted` a `Fail`.
+`Complete`, `Answer`, `Format`, `Sessions` a `Highlight`. Služba posílá
+`BlockStart`, `Item`, `BlockEnd`, `Prompt`, `Completions`, `Formatted`,
+`Highlighted` a `Fail`.
 
 - **Položky bloku:** typovaná hodnota, poznámka, varování, chyba (kód,
   popis, hlášení s místem), diff, průběh, odkaz.
@@ -688,6 +689,97 @@ posílá `Hello`, `Attach` (0 = nová relace), `Detach`, `Run`, `Interrupt`,
 VT100) a kreslí ji písmem Noto Sans Mono s diakritikou do lineárního
 framebufferu. Od 1080 řádků se použije větší písmo. Stejná obrazovka bude
 záchranná textová konzole.
+
+### Barvy terminálu
+
+> **Změna proti první verzi shellu:** terminál je barevný. Protokol nenese
+> barvy ani ANSI, jen **sémantické třídy**. Barvu přidělí až motiv na konci
+> cesty (okno, sériová linka, dokumentace). Zvýraznění bere tokeny
+> z lexeru `libs/shlang` (jediný zdroj pravdy pro terminál i tento web).
+
+**Dvě úrovně zvýraznění** (`shlang::highlight`):
+
+- **Lexikální, hned v okně** při každé klávese, bez zprávy. Slovo na místě
+  příkazu je příkaz, pak přepínače, řetězce, čísla, komentáře, klíčová
+  slova a roury. Stejné zvýraznění má řádek bloku ve výpisu a příklady
+  v dokumentaci.
+- **Významové, od služby** (`Highlight` -> `Highlighted`, s pořadím
+  `seq`). Služba zná příkazy, funkce, programy a proměnné relace.
+  Neznámý příkaz dostane třídu `unknown` (podtržení už při psaní),
+  proměnná `var`, pole v podmínce `where` `field`. Navíc vrátí místo chyby
+  parseru. Nedopsaný řádek (otevřený řetězec, roura na konci) chybu
+  nehlásí. Okno odpovědi se starším `seq` zahodí, takže písmena na
+  odpověď nikdy nečekají.
+
+| Třída | Co | Příklad |
+|---|---|---|
+| `cmd` | známý příkaz, funkce, program | `ls`, `where`, `.count()` |
+| `unknown` | neznámý příkaz (podtržený) | `lss` |
+| `kw` | klíčové slovo | `let`, `for`, `try`, `true` |
+| `flag` | přepínač | `-r`, `--depth` |
+| `var` | proměnná | `$f`, `it` |
+| `field` | pole záznamu | `it.size`, `size` ve `where` |
+| `str` | řetězec | `"ahoj"` |
+| `interp` | závorky vloženého výrazu | `"{f.name}"` |
+| `num` | číslo i s jednotkou | `5MB`, `2s`, `1.5` |
+| `path` | cesta, vzor, cíl přesměrování | `~/foto`, `*.jpg` |
+| `comment` | komentář | `# pozn.` |
+| `op` | operátor, závorka | `>`, `&&`, `=>` |
+| `pipe` | roura | `\|` |
+
+```shell-b
+ls ~/foto -r | where size > 5MB | sort mtime   # velké fotky
+```
+
+```shell-b
+for f in (ls *.jpg) { echo "zpracovávám {f.name}" }
+```
+
+**Barevné výpisy** (`term::render`): tabulky se barví podle typu hodnot
+a schématu, ne podle ANSI v programech.
+
+- **Jméno souboru podle druhu:** `dir`, `dataset` (vnořený dataset,
+  `kind = "dataset"`), `symlink`, `exec` (právo spustit `x` v poli
+  `access`), `image`, `archive`, `document`, `media` (podle přípony),
+  `hidden` (tečka), `noaccess` (bez práva číst).
+- **Velikost a stáří v barevné škále** (4 stupně): velikost do 1 MB,
+  100 MB, 1 GB a víc; stáří do dne, 30 dnů, roku a starší.
+- `true` zeleně, `false` a chyby barvou chyby, `null` tlumeně, změny
+  v diffu podle druhu.
+- `ls` má nové pole `access` (práva relace `rwx` z fsd, `LIST_STAT_PAGE`
+  je posílá u každé položky).
+
+**Motiv** (`term::theme`): vestavěný tmavý (výchozí) a světlý. Uživatel je
+přebije souborem `~/.config/term/theme.toml`; neznámá třída nebo špatná
+barva je chyba s číslem řádku.
+
+```toml
+base = "dark"            # nebo "light"
+[syntax]
+cmd = "#7ee2a8"
+unknown = "#ff8a80 underline"
+[files]
+dir = "#7fb4ff bold"
+[ui]
+bg = "#15171c"
+scale3 = "#ff8a80"       # nejvyšší stupeň škály
+[ext]
+image = "jpg png heic"   # přípony k druhu souboru
+```
+
+**Konec cesty:** adaptér VT100 kreslí 24bitové barvy (`38;2;r;g;b`), tučné
+a podtržení; obrazovka (`term::screen`) je umí vykreslit do framebufferu.
+Barvy tříd na tomto webu (`sh-*`, `fk-*`) generuje `xtask` z téhož motivu.
+Test hlídá, že zvýraznění v dokumentaci a v terminálu dávají stejné
+úseky.
+
+Příklad, který nejde převést do druhého zápisu (smíšený B a C, skript
+s hlavičkou), má v dokumentaci jazyk `mos`: zvýrazní se stejně, jen bez
+převodu.
+
+⚠️ **Plán:** obarvení vlastního textu uživatelem (např. `echo` se stylem
+třídy) je navazující návrh; interaktivní tabulky, nabídky, průběhy
+a výzvy přijdou v další fázi.
 
 ### Stav zapojení
 

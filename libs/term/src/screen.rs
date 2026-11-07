@@ -1,7 +1,8 @@
 //! Textova obrazovka a kresleni vlastnim pismem do framebufferu.
 //!
 //! [`Screen`] je mrizka znaku s barvou (rozumi textu z [`crate::vt`]:
-//! `\n`, `\r`, `\t` a SGR barvy); [`paint`] ji vykresli pismem Noto Sans
+//! `\n`, `\r`, `\t` a SGR: zakladni barvy, 24bitove `38;2;r;g;b`, tucne,
+//! podtrzene); [`paint`] ji vykresli pismem Noto Sans
 //! Mono (s diakritikou) do linearniho framebufferu, ktery sluzba terminalu
 //! dostane jako capability. Stejna obrazovka slouzi jako zachranna
 //! textova konzole.
@@ -17,12 +18,13 @@ pub const PALETTE: [(u8, u8, u8); 6] =
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub ch: char,
-    /// Index do [`PALETTE`] (1 = bezny text).
-    pub fg: u8,
+    /// Barva textu (RGB).
+    pub fg: (u8, u8, u8),
     pub bold: bool,
+    pub underline: bool,
 }
 
-const BLANK: Cell = Cell { ch: ' ', fg: 1, bold: false };
+const BLANK: Cell = Cell { ch: ' ', fg: PALETTE[1], bold: false, underline: false };
 
 pub struct Screen {
     pub cols: usize,
@@ -30,8 +32,9 @@ pub struct Screen {
     cells: Vec<Cell>,
     pub x: usize,
     pub y: usize,
-    fg: u8,
+    fg: (u8, u8, u8),
     bold: bool,
+    underline: bool,
     /// Rozpracovana escape sekvence.
     esc: Option<alloc::string::String>,
 }
@@ -39,7 +42,17 @@ pub struct Screen {
 impl Screen {
     pub fn new(cols: usize, rows: usize) -> Self {
         let (cols, rows) = (cols.max(1), rows.max(1));
-        Self { cols, rows, cells: alloc::vec![BLANK; cols * rows], x: 0, y: 0, fg: 1, bold: false, esc: None }
+        Self {
+            cols,
+            rows,
+            cells: alloc::vec![BLANK; cols * rows],
+            x: 0,
+            y: 0,
+            fg: PALETTE[1],
+            bold: false,
+            underline: false,
+            esc: None,
+        }
     }
 
     pub fn cell(&self, x: usize, y: usize) -> Cell {
@@ -67,20 +80,33 @@ impl Screen {
     }
 
     fn sgr(&mut self, params: &str) {
-        for p in params.split(';') {
-            match p {
+        let ps: Vec<&str> = params.split(';').collect();
+        let mut i = 0;
+        while i < ps.len() {
+            match ps[i] {
                 "" | "0" => {
-                    self.fg = 1;
+                    self.fg = PALETTE[1];
                     self.bold = false;
+                    self.underline = false;
                 }
                 "1" => self.bold = true,
-                "2" => self.fg = 2,
-                "31" => self.fg = 3,
-                "33" => self.fg = 4,
-                "36" => self.fg = 5,
-                "39" => self.fg = 1,
+                "2" => self.fg = PALETTE[2],
+                "4" => self.underline = true,
+                "22" => self.bold = false,
+                "24" => self.underline = false,
+                "31" => self.fg = PALETTE[3],
+                "33" => self.fg = PALETTE[4],
+                "36" => self.fg = PALETTE[5],
+                "39" => self.fg = PALETTE[1],
+                // 24bitova barva textu.
+                "38" if ps.get(i + 1) == Some(&"2") && i + 4 < ps.len() => {
+                    let c = |k: usize| ps[i + k].parse::<u8>().unwrap_or(0);
+                    self.fg = (c(2), c(3), c(4));
+                    i += 4;
+                }
                 _ => {}
             }
+            i += 1;
         }
     }
 
@@ -116,7 +142,7 @@ impl Screen {
                     if self.x >= self.cols {
                         self.newline();
                     }
-                    self.cells[self.y * self.cols + self.x] = Cell { ch: c, fg: self.fg, bold: self.bold };
+                    self.cells[self.y * self.cols + self.x] = Cell { ch: c, fg: self.fg, bold: self.bold, underline: self.underline };
                     self.x += 1;
                 }
             }
@@ -203,7 +229,7 @@ pub fn paint(screen: &Screen, s: &mut Surface) {
             }
             let weight = FontWeight::Regular;
             let Some(r) = get_raster(c.ch, weight, font).or_else(|| get_raster('?', weight, font)) else { continue };
-            let fg = PALETTE[c.fg as usize % PALETTE.len()];
+            let fg = c.fg;
             let (ox, oy) = (8 + col * cw, 8 + row * ch);
             for (dy, line) in r.rows().enumerate() {
                 for (dx, &a) in line.iter().enumerate() {
@@ -216,6 +242,12 @@ pub fn paint(screen: &Screen, s: &mut Surface) {
                     if c.bold {
                         s.put(ox + dx + 1, oy + dy, px);
                     }
+                }
+            }
+            if c.underline {
+                let px = s.encode(fg);
+                for dx in 0..cw {
+                    s.put(ox + dx, oy + ch - 2, px);
                 }
             }
         }

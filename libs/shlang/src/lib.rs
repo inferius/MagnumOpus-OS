@@ -20,6 +20,7 @@ pub mod error;
 pub mod eval;
 pub mod explain;
 pub mod fmt;
+pub mod highlight;
 pub mod history;
 pub mod host;
 pub mod json;

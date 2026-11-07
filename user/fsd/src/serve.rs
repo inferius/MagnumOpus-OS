@@ -238,6 +238,7 @@ impl Service {
                                 oid: e.oid,
                                 size: st.size,
                                 mtime: st.mtime,
+                                rights: st.rights,
                             })
                         })
                         .collect::<Result<Vec<_>>>()?;

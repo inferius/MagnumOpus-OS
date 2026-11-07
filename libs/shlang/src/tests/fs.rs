@@ -6,7 +6,7 @@ use crate::value::Value;
 
 #[test]
 fn reading_commands_cost_nothing() {
-    let (mut h, it, o) = run_lines(&["ls -r | count", "open a.txt"]);
+    let (h, it, o) = run_lines(&["ls -r | count", "open a.txt"]);
     o.result.unwrap();
     assert!(it.undo.entries.is_empty(), "cteni nesmi delat pohled");
     assert_eq!(h.fs.clones_made(), 0, "radek, ktery jen cte, nezaklada klon");

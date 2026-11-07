@@ -107,7 +107,8 @@ impl Broker {
             ClientMsg::Run { session, .. }
             | ClientMsg::Interrupt { session }
             | ClientMsg::Complete { session, .. }
-            | ClientMsg::Format { session, .. } => self.route_to(session, m),
+            | ClientMsg::Format { session, .. }
+            | ClientMsg::Highlight { session, .. } => self.route_to(session, m),
             ClientMsg::Answer { prompt, .. } => self.route_to(owner(prompt), m),
             ClientMsg::Sessions => {
                 let sessions = self.routes.iter().map(|r| (r.id, r.blocks, r.cwd.clone())).collect();

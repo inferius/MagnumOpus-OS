@@ -205,12 +205,12 @@ fn completion_format_and_jobs() {
 
 #[test]
 fn vt_adapter() {
-    let t = crate::vt::message(&ServerMsg::Item { session: 1, block: 1, item: Item::Note("pozn".into()) }, true);
-    assert_eq!(t, "\x1b[2mpozn\x1b[0m\n");
+    let t = crate::vt::message(&ServerMsg::Item { session: 1, block: 1, item: Item::Note("pozn".into()) }, Some(&crate::theme::Theme::dark()));
+    assert_eq!(t, "\x1b[0;38;2;124;130;145mpozn\x1b[0m\n", "poznamka barvou muted motivu");
     assert_eq!(crate::vt::strip(&t), "pozn\n");
-    let l = crate::vt::item(&Item::Link { text: "a".into(), target: "b".into() }, true);
+    let l = crate::vt::item(&Item::Link { text: "a".into(), target: "b".into() }, Some(&crate::theme::Theme::dark()));
     assert_eq!(crate::vt::strip(&l), "a\n");
-    let p = crate::vt::item(&Item::Progress { done: 1, total: 2, label: "x".into() }, false);
+    let p = crate::vt::item(&Item::Progress { done: 1, total: 2, label: "x".into() }, None);
     assert_eq!(p, "[##########----------] 50% x\r");
 }
 
@@ -219,7 +219,7 @@ fn screen_and_font() {
     let mut s = Screen::new(10, 3);
     s.write("ahoj\n\x1b[31mčervená\x1b[0m\nřádek3\nřádek4");
     assert_eq!(s.line(0), "červená");
-    assert_eq!(s.cell(0, 0).fg, 3);
+    assert_eq!(s.cell(0, 0).fg, crate::screen::PALETTE[3]);
     assert_eq!(s.line(2), "řádek4");
     let (w, h) = (200, 80);
     let mut buf = vec![0u32; w * h];

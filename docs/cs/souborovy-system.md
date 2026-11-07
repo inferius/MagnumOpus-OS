@@ -1292,7 +1292,7 @@ větší požadavky rozdělí.
 | 20 | `CHECK` | scrub u8 | generace u64, celkem problémů u64, nezkontrolované změny v paměti u8, počet u32 + popisy (kolik se vejde); jen s `debug` |
 | 21 | `LIST_PAGE` | cesta, kurzor (jméno poslední položky předchozí stránky, prázdný = od začátku), nejvýš u32 | další u8 (1 = něco zbylo) + stránka jako `LIST` (kolik se vejde do 60 KiB) |
 | 22 | `SNAP_LIST_PAGE` | snapshot, cesta, kurzor, nejvýš u32 | jako `LIST_PAGE` |
-| 87 | `LIST_STAT_PAGE` | cesta, kurzor, nejvýš u32 | další u8 + počet u32 + (jméno, druh u8, oid u64, velikost u64, mtime) - kolik se vejde do 60 KiB; práva `LIST` a `TRAVERSE` k adresáři |
+| 87 | `LIST_STAT_PAGE` | cesta, kurzor, nejvýš u32 | další u8 + počet u32 + (jméno, druh u8, oid u64, velikost u64, mtime, práva u8) - kolik se vejde do 60 KiB; práva `LIST` a `TRAVERSE` k adresáři |
 | 100 | `SIMULATE_POWER_LOSS` | - | přehrané operace u64; jen s `debug`, jinak `ACCESS_DENIED` |
 
 `FsClient::list` a `snapshot_list` čtou po stránkách - tím je vyřešený

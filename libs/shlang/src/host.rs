@@ -35,6 +35,33 @@ pub struct Meta {
     pub size: u64,
     /// Cas zmeny v ns od 1970 (UTC), pokud ho FS zna.
     pub mtime: Option<i64>,
+    /// Prava relace k polozce ([`access`]); `None` = FS je nehlasi.
+    pub access: Option<u8>,
+    /// Slozka je koren vnoreneho datasetu (vlastni historie).
+    pub dataset: bool,
+}
+
+impl Meta {
+    /// Polozka jen s druhem a velikosti (bez casu a prav).
+    pub const fn basic(kind: NodeKind, size: u64) -> Self {
+        Self { kind, size, mtime: None, access: None, dataset: false }
+    }
+}
+
+/// Prava relace k polozce (bity `Meta::access`).
+pub mod access {
+    pub const READ: u8 = 1;
+    pub const WRITE: u8 = 2;
+    pub const EXEC: u8 = 4;
+
+    /// Text `rwx` (pomlcka = chybi).
+    pub fn text(a: u8) -> alloc::string::String {
+        let mut s = alloc::string::String::new();
+        s.push(if a & READ != 0 { 'r' } else { '-' });
+        s.push(if a & WRITE != 0 { 'w' } else { '-' });
+        s.push(if a & EXEC != 0 { 'x' } else { '-' });
+        s
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

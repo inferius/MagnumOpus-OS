@@ -138,16 +138,19 @@ pub struct StatEntry {
     pub oid: u64,
     pub size: u64,
     pub mtime: WallTime,
+    /// Prava relace k polozce (jako `Stat::rights`).
+    pub rights: u8,
 }
 
 impl StatEntry {
     /// Velikost polozky na drate bez jmena (delka jmena u16, druh, oid,
-    /// velikost, mtime).
-    pub const FIXED: usize = 2 + 1 + 8 + 8 + 12;
+    /// velikost, mtime, prava).
+    pub const FIXED: usize = 2 + 1 + 8 + 8 + 12 + 1;
 
     pub fn put(&self, w: &mut Writer) {
         w.str(&self.name).u8(self.kind).u64(self.oid).u64(self.size);
         put_time(w, self.mtime);
+        w.u8(self.rights);
     }
 
     pub fn get(r: &mut Reader) -> Result<Self> {
@@ -157,6 +160,7 @@ impl StatEntry {
             oid: r.u64()?,
             size: r.u64()?,
             mtime: get_time(r)?,
+            rights: r.u8()?,
         })
     }
 }

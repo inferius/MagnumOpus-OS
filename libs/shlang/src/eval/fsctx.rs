@@ -126,10 +126,12 @@ impl Interp {
         Value::record(&[
             ("name", Value::str(name)),
             ("path", Value::str(full)),
-            ("kind", Value::str(m.kind.name())),
+            ("kind", Value::str(if m.dataset { "dataset" } else { m.kind.name() })),
             ("size", Value::Size(m.size as i64)),
             ("mtime", m.mtime.map(Value::Time).unwrap_or(Value::Null)),
             ("ext", Value::str(if m.kind == NodeKind::File { path::ext(name) } else { "" })),
+            // Prava relace (`rwx`); prazdne = FS je nehlasi.
+            ("access", Value::str(m.access.map(crate::host::access::text).unwrap_or_default())),
         ])
     }
 

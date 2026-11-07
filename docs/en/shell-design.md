@@ -75,7 +75,7 @@ ls ~/Documents -r | where size > 100MB | each { |f| rm $f.path }
 
 **B - command + expression mode (recommended)**
 
-```text
+```mos
 ls ~/Documents -r | where size > 100MB && mtime < now - 1y | sort size desc
 let big = ls ~/Documents -r | where size > 100MB
 for f in $big { rm $f.path? }          # ? = an error stops the script
@@ -103,7 +103,7 @@ ls("~/Documents", recursive: true).filter(|f| f.size > 100.mb && f.mtime < now()
 > (for scripts and logic). Both are **notations of the same language**, not
 > two languages. This must be guarded strictly.
 
-```text
+```mos
 ls ~/Doc -r | where size > 100MB                          # B
 ls("~/Doc", recursive: true).where(f => f.size > 100MB)   # C, the same
 ls ~/Doc -r | where (size > 100MB && ext == "pdf")      # mixing: an expression in ( ) is C
@@ -168,7 +168,7 @@ shorthands have a full form with the same tree in C, see
 - **Script manifest:** a header the shell checks before running the script;
   it hands out capabilities according to it:
 
-```text
+```mos
 lang 1
 needs {
     read: ["~/Photos"]
@@ -682,9 +682,9 @@ session).
 
 Binary messages (1 byte kind, little-endian fields, text = length + UTF-8).
 The window sends `Hello`, `Attach` (0 = new session), `Detach`, `Run`,
-`Interrupt`, `Complete`, `Answer`, `Format` and `Sessions`. The service
-sends `BlockStart`, `Item`, `BlockEnd`, `Prompt`, `Completions`, `Formatted`
-and `Fail`.
+`Interrupt`, `Complete`, `Answer`, `Format`, `Sessions` and `Highlight`.
+The service sends `BlockStart`, `Item`, `BlockEnd`, `Prompt`,
+`Completions`, `Formatted`, `Highlighted` and `Fail`.
 
 - **Block items:** a typed value, a note, a warning, an error (code,
   description, report with the location), a diff, progress, a link.
@@ -729,6 +729,100 @@ and `Fail`.
 the VT100 adapter) and draws it into a linear framebuffer with the Noto Sans
 Mono font, including accented letters. From 1080 lines up a larger font is
 used. The same screen will serve as the rescue text console.
+
+### Terminal colors
+
+> **Change from the first shell version:** the terminal has colors. The
+> protocol carries no colors and no ANSI, only **semantic classes**. A
+> theme assigns the color at the end of the path (window, serial line,
+> documentation). Highlighting takes its tokens from the lexer of
+> `libs/shlang` (the single source of truth for the terminal and this web).
+
+**Two levels of highlighting** (`shlang::highlight`):
+
+- **Lexical, right in the window** on every key press, without a message.
+  A word in command position is a command, then flags, strings, numbers,
+  comments, keywords and pipes. A block line in the output and the
+  examples in the documentation are highlighted the same way.
+- **Semantic, from the service** (`Highlight` -> `Highlighted`, ordered by
+  `seq`). The service knows the commands, functions, programs and
+  variables of the session. An unknown command gets the class `unknown`
+  (underlined while typing), a variable `var`, a field in a `where`
+  condition `field`. It also returns the place of a parser error. An
+  unfinished line (open string, pipe at the end) reports no error. The
+  window drops answers with an older `seq`, so letters never wait for an
+  answer.
+
+| Class | What | Example |
+|---|---|---|
+| `cmd` | known command, function, program | `ls`, `where`, `.count()` |
+| `unknown` | unknown command (underlined) | `lss` |
+| `kw` | keyword | `let`, `for`, `try`, `true` |
+| `flag` | flag | `-r`, `--depth` |
+| `var` | variable | `$f`, `it` |
+| `field` | record field | `it.size`, `size` in `where` |
+| `str` | string | `"hello"` |
+| `interp` | braces of an embedded expression | `"{f.name}"` |
+| `num` | number with a unit | `5MB`, `2s`, `1.5` |
+| `path` | path, pattern, redirect target | `~/photos`, `*.jpg` |
+| `comment` | comment | `# note` |
+| `op` | operator, bracket | `>`, `&&`, `=>` |
+| `pipe` | pipe | `\|` |
+
+```shell-b
+ls ~/photos -r | where size > 5MB | sort mtime   # large photos
+```
+
+```shell-b
+for f in (ls *.jpg) { echo "processing {f.name}" }
+```
+
+**Colored listings** (`term::render`): tables are colored by the types of
+the values and the schema, not by ANSI in programs.
+
+- **File name by kind:** `dir`, `dataset` (nested dataset,
+  `kind = "dataset"`), `symlink`, `exec` (the right to run `x` in the
+  `access` field), `image`, `archive`, `document`, `media` (by extension),
+  `hidden` (dot), `noaccess` (no right to read).
+- **Size and age on a color scale** (4 steps): size up to 1 MB, 100 MB,
+  1 GB and more; age up to a day, 30 days, a year and older.
+- `true` green, `false` and errors in the error color, `null` muted,
+  changes in a diff by kind.
+- `ls` has a new field `access` (the session's rights `rwx` from fsd,
+  `LIST_STAT_PAGE` sends them with every entry).
+
+**Theme** (`term::theme`): built-in dark (default) and light. The user
+overrides them with the file `~/.config/term/theme.toml`; an unknown class
+or a bad color is an error with a line number.
+
+```toml
+base = "dark"            # or "light"
+[syntax]
+cmd = "#7ee2a8"
+unknown = "#ff8a80 underline"
+[files]
+dir = "#7fb4ff bold"
+[ui]
+bg = "#15171c"
+scale3 = "#ff8a80"       # the highest step of the scale
+[ext]
+image = "jpg png heic"   # extensions for a file kind
+```
+
+**End of the path:** the VT100 adapter draws 24-bit colors
+(`38;2;r;g;b`), bold and underline; the screen (`term::screen`) can draw
+them into the framebuffer. The class colors on this web (`sh-*`, `fk-*`)
+are generated by `xtask` from the same theme. A test makes sure the
+highlighting in the documentation and in the terminal gives the same
+spans.
+
+An example that cannot be converted to the other notation (mixed B and C,
+a script with a header) has the language `mos` in the documentation: it is
+highlighted the same way, only without conversion.
+
+⚠️ **Plan:** coloring the user's own text (e.g. `echo` with a style class)
+is a follow-up proposal; interactive tables, menus, progress and prompts
+come in the next phase.
 
 ### Integration status
 

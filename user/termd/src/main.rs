@@ -53,7 +53,7 @@ struct Termd {
 }
 
 fn mirror(msg: &ServerMsg) {
-    let text = term::vt::message(msg, false);
+    let text = term::vt::message(msg, None);
     for line in text.lines() {
         println!("termd| {line}");
     }

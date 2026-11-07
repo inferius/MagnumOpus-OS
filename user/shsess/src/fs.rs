@@ -32,8 +32,32 @@ fn ns(t: WallTime) -> i64 {
     t.secs.saturating_mul(1_000_000_000).saturating_add(t.nanos as i64)
 }
 
+/// Prava FS v3 (`fs::rights`) -> `shlang::host::access`.
+fn access(rights: u8) -> u8 {
+    const READ: u8 = 1 << 2;
+    const WRITE: u8 = 1 << 3;
+    const EXECUTE: u8 = 1 << 6;
+    let mut a = 0;
+    if rights & READ != 0 {
+        a |= shlang::host::access::READ;
+    }
+    if rights & WRITE != 0 {
+        a |= shlang::host::access::WRITE;
+    }
+    if rights & EXECUTE != 0 {
+        a |= shlang::host::access::EXEC;
+    }
+    a
+}
+
 fn meta(s: &Stat) -> Meta {
-    Meta { kind: node(s.kind), size: s.size, mtime: Some(ns(s.mtime)) }
+    Meta {
+        kind: node(s.kind),
+        size: s.size,
+        mtime: Some(ns(s.mtime)),
+        access: Some(access(s.rights)),
+        dataset: s.kind == kind::DATASET,
+    }
 }
 
 impl FsdFs {
@@ -77,7 +101,16 @@ impl Fs for FsdFs {
             .client
             .list_stat(path)?
             .into_iter()
-            .map(|e| DirEntry { name: e.name, meta: Meta { kind: node(e.kind), size: e.size, mtime: Some(ns(e.mtime)) } })
+            .map(|e| DirEntry {
+                name: e.name,
+                meta: Meta {
+                    kind: node(e.kind),
+                    size: e.size,
+                    mtime: Some(ns(e.mtime)),
+                    access: Some(access(e.rights)),
+                    dataset: e.kind == kind::DATASET,
+                },
+            })
             .collect())
     }
 
@@ -86,7 +119,7 @@ impl Fs for FsdFs {
             .client
             .list(path)?
             .into_iter()
-            .map(|e| DirEntry { name: e.name, meta: Meta { kind: node(e.kind), size: 0, mtime: None } })
+            .map(|e| DirEntry { name: e.name, meta: Meta { dataset: e.kind == kind::DATASET, ..Meta::basic(node(e.kind), 0) } })
             .collect())
     }
 
@@ -203,7 +236,7 @@ impl Fs for FsdFs {
 
     fn view_list(&mut self, v: &ViewRef, path: &str) -> FsResult<Vec<DirEntry>> {
         let l = self.client.snapshot_list_of(&v.dataset, &v.snapshot, &Self::inner(&v.dataset, path))?;
-        Ok(l.into_iter().map(|e| DirEntry { name: e.name, meta: Meta { kind: node(e.kind), size: 0, mtime: None } }).collect())
+        Ok(l.into_iter().map(|e| DirEntry { name: e.name, meta: Meta::basic(node(e.kind), 0) }).collect())
     }
 
     fn view_read(&mut self, v: &ViewRef, path: &str) -> FsResult<Vec<u8>> {
@@ -217,7 +250,7 @@ pub struct NoFs;
 impl Fs for NoFs {
     fn stat(&mut self, path: &str) -> FsResult<Meta> {
         if path == "/" {
-            return Ok(Meta { kind: NodeKind::Dir, size: 0, mtime: None });
+            return Ok(Meta::basic(NodeKind::Dir, 0));
         }
         Err(Error::NotFound)
     }
