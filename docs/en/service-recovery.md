@@ -201,11 +201,12 @@ A lease ends when the client closes its endpoint. The recipe goes with it.
   reply. The synchronisation is defined by the driver protocol
   (`blockproto`, `inputproto::device`, `netproto::link`,
   `guiproto::display`),
-- **leases in the start message** go at the end of the handles, after the
-  program's other handles (their order does not change), in the same order
-  as the sessions they belong to. An application window:
-  `[window, other handles..., window lease]`. A program that does not read
-  the lease keeps working without recovery,
+- **a lease in the start message** goes right after the session it belongs
+  to: `[session 1, lease 1, session 2, lease 2, ..., other program
+  handles]`. An application window: `[window, window lease, application
+  handles...]` (`gui-tasks`: the channel to `taskd` is third). A session
+  without recovery gets a channel with no other end in place of the lease:
+  the library then reports `SERVICE_UNAVAILABLE`,
 - **drivers do not exit when they lose their service**: a closed channel
   to the service (when the supervisor does not keep the endpoint) and a
   closed channel to `devmgr` are only logged; the driver waits until the

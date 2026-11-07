@@ -189,10 +189,11 @@ Lístek zanikne, když klient zavře svůj konec. Recept zmizí s ním.
   ovladači synchronizační požadavek a čte, dokud nedostane jeho odpověď.
   Synchronizaci si definuje protokol ovladače (`blockproto`,
   `inputproto::device`, `netproto::link`, `guiproto::display`),
-- **lístky ve startovní zprávě** jdou na konec handlů, za ostatní handly
-  programu (jejich pořadí se nemění), ve stejném pořadí jako relace, ke
-  kterým patří. Okno aplikace: `[okno, další handly..., lístek okna]`.
-  Program, který lístek nečte, funguje dál bez obnovy,
+- **lístek ve startovní zprávě** jde hned za relaci, ke které patří:
+  `[relace 1, lístek 1, relace 2, lístek 2, ..., další handly programu]`.
+  Okno aplikace: `[okno, lístek okna, handly aplikace...]` (`gui-tasks`:
+  kanál na `taskd` je třetí). Relace bez obnovy dostane na místo lístku
+  kanál bez druhého konce: knihovna pak hlásí `SERVICE_UNAVAILABLE`,
 - **ovladače při ztrátě služby nekončí**: zavřený kanál ke službě (když
   supervisor konec nedrží) i zavřený kanál k `devmgr` jen zalogují a čekají,
   až je supervisor ukončí, nebo až dostanou nový kanál.
