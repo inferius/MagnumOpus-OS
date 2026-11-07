@@ -114,6 +114,48 @@ impl NeedsRt {
     }
 }
 
+/// Pruh prubehu cyklu nad dlouhym seznamem (`for`, `each`): ukaze se jen
+/// u seznamu od [`Progress::MIN`] polozek, aktualizace jen pri zmene
+/// procenta (ne pri kazde polozce).
+pub(crate) struct Progress {
+    total: usize,
+    done: usize,
+    last_pct: u64,
+    label: &'static str,
+    id: u32,
+}
+
+impl Progress {
+    pub(crate) const MIN: usize = 20;
+
+    pub(crate) fn new(total: usize, label: &'static str) -> Self {
+        static NEXT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(1);
+        let id = NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        Self { total, done: 0, last_pct: u64::MAX, label, id }
+    }
+
+    /// Pred kazdou polozkou (i po posledni se zavola `finish`).
+    pub(crate) fn step(&mut self, host: &mut dyn Host) {
+        if self.total < Self::MIN {
+            return;
+        }
+        let pct = (self.done * 100 / self.total) as u64;
+        if pct != self.last_pct {
+            self.last_pct = pct;
+            host.progress(self.id, self.done as u64, self.total as u64, self.label);
+        }
+        self.done += 1;
+    }
+
+    /// Cyklus dobehl: pruh na 100 %.
+    pub(crate) fn finish(&mut self, host: &mut dyn Host) {
+        if self.total >= Self::MIN {
+            host.progress(self.id, self.total as u64, self.total as u64, self.label);
+        }
+    }
+}
+
+
 /// Vysledek jednoho radku.
 #[derive(Debug)]
 pub struct Outcome {
@@ -638,8 +680,10 @@ impl Interp {
                         ));
                     }
                 };
+                let mut bar = Progress::new(items.len(), "for");
                 for item in items {
                     self.check_interrupt(host)?;
+                    bar.step(host);
                     self.frames.push(BTreeMap::new());
                     self.frames.last_mut().unwrap().insert(var.clone(), item);
                     let r = self.stmts(host, body, true);
@@ -650,6 +694,7 @@ impl Interp {
                         Err(other) => return Err(other),
                     }
                 }
+                bar.finish(host);
                 Ok(Value::Nothing)
             }
             Expr::While { cond, body, span } => {

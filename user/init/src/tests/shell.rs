@@ -21,7 +21,10 @@ use term::proto::{ClientMsg, Item, ServerMsg};
 
 use super::{Test, TestResult, devices, fail};
 
-pub const TESTS: &[Test] = &[("termd: relace, soubory, undo, odpojeni", session)];
+pub const TESTS: &[Test] = &[
+    ("termd: relace, soubory, undo, odpojeni", session),
+    ("console: displej, fokus, psani a vystup", super::console::console),
+];
 
 struct Window {
     chan: Channel,
@@ -48,7 +51,7 @@ impl Window {
             match self.recv()? {
                 ServerMsg::Item { item, .. } => items.push(item),
                 ServerMsg::BlockEnd { ok, .. } => return Ok((items, ok)),
-                ServerMsg::BlockStart { .. } => {}
+                ServerMsg::BlockStart { .. } | ServerMsg::ItemUpdate { .. } => {}
                 other => return Err(alloc::format!("necekana zprava: {other:?}")),
             }
         }

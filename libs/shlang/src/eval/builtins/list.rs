@@ -38,15 +38,18 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
             let f = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "each: chybi funkce"))?;
             let items = list_input(&a, "each", input)?;
             let mut out = Vec::with_capacity(items.len());
+            let mut bar = super::super::Progress::new(items.len(), "each");
             for x in items {
                 if host.interrupted() {
                     return Err(Flow::Err(ShError::new(code::INTERRUPTED, "preruseno (Ctrl-C)")));
                 }
+                bar.step(host);
                 let v = it.call_value(host, &f, alloc::vec![x])?;
                 if !matches!(v, Value::Nothing) {
                     out.push(v);
                 }
             }
+            bar.finish(host);
             Ok(Value::List(out))
         }
         "select" => {

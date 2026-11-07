@@ -30,6 +30,7 @@ pub mod render;
 pub mod screen;
 pub mod session;
 pub mod theme;
+pub mod ui;
 pub mod vt;
 
 #[cfg(test)]
@@ -38,3 +39,5 @@ mod tests;
 mod tests_broker;
 #[cfg(test)]
 mod tests_render;
+#[cfg(test)]
+mod tests_ui;

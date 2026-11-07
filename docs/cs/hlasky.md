@@ -214,6 +214,18 @@ porušený vnitřní předpoklad (chyba jádra).
 | `init: firewall bez FS (konfigurace se neulozi): ...` | Pro `fwd` nejde připravit relaci FS (chybí FS nebo práva). |
 | `init: sluzbu firewallu nelze spustit: ...` | `fwd` nenaběhl; `netd` uvidí zavřený kanál a dotazy odmítá. |
 
+## Textová konzole console
+
+| Hláška | Význam a řešení |
+|---|---|
+| `console: bezim (ceka na displej a fokus)` | Konzole běží; kreslit začne po `display`, klávesy bere po `focus`. |
+| `console: displej prevzat (SxR znaku)` | Převzala framebuffer; mřížka znaků podle rozlišení. |
+| `console: displej vracen` | Po `release`; framebuffer je zase u jádra. |
+| `console: ridici kanal zavren, koncim` | Vlastník konzole skončil; displej se vrátí jádru. |
+| `console: chybi kanal k termd` | Start bez kanálu ke službě relací; konzole končí s kódem 1. |
+| `framebuffer prevzal proces X N (log jadra dal na seriove lince)` | Jádro: `FB_CONTROL` `CLAIM`; log už nekreslí na obrazovku. |
+| `framebuffer vratil proces X N` | Jádro: `FB_CONTROL` `RELEASE`; obrazovka se smaže a log se kreslí dál. |
+
 ## Služba relací termd
 
 | Hláška | Význam a řešení |

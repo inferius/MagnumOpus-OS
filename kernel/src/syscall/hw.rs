@@ -78,6 +78,41 @@ pub fn vmo_phys_addr(a: Args) -> Result<u64> {
     Ok(page.as_u64() + (a[2] % PAGE_SIZE))
 }
 
+/// `FB_CONTROL(vmo, op, out_ptr)`: framebuffer z firmware (viz
+/// `abi::syscall::FB_CONTROL`).
+pub fn fb_control(a: Args) -> Result<u64> {
+    use abi::syscall::fb_op;
+    let p = current_process();
+    let need = if a[1] == fb_op::INFO { Rights::READ } else { Rights::WRITE };
+    let vmo = p.handles().get_as::<MemoryObject>(arg_handle(a[0])?, need)?;
+    let ours = crate::userboot::FB_VMO.lock().as_ref().is_some_and(|f| Arc::ptr_eq(f, &vmo));
+    if !ours {
+        return Err(Error::WrongType);
+    }
+    match a[1] {
+        fb_op::INFO => {
+            let fb = crate::console::framebuffer().ok_or(Error::NotFound)?;
+            let format = match fb.format {
+                boot_info::PixelFormat::Rgb => 1,
+                boot_info::PixelFormat::Bgr => 2,
+                _ => 0,
+            };
+            let info = abi::syscall::FbInfo { width: fb.width, height: fb.height, stride: fb.stride, format };
+            user::write_bytes(&p, a[2], &info.encode())?;
+        }
+        fb_op::CLAIM => {
+            crate::log::info!("framebuffer prevzal proces {} {} (log jadra dal na seriove lince)", p.name, p.id);
+            crate::console::set_claimed(true);
+        }
+        fb_op::RELEASE => {
+            crate::console::set_claimed(false);
+            crate::log::info!("framebuffer vratil proces {} {}", p.name, p.id);
+        }
+        _ => return Err(Error::InvalidArgs),
+    }
+    Ok(0)
+}
+
 /// `INTERRUPT_CREATE(resource, out_msi_ptr) -> handle`.
 pub fn interrupt_create(a: Args) -> Result<u64> {
     let p = current_process();

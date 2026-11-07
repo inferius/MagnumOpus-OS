@@ -110,9 +110,14 @@ pub fn message(m: &ServerMsg, theme: Option<&Theme>) -> String {
                 out.push('\n');
             }
         }
-        ServerMsg::Prompt { question, detail, .. } => {
+        ServerMsg::Prompt { question, detail, choices, .. } => {
             out.push_str(&item(detail, theme));
-            paint(&mut out, theme, |t| Style { bold: true, ..Style::fg(t.ui.fg) }, &alloc::format!("{question} [a/n] "));
+            let opts = if choices.is_empty() {
+                String::from("[a/n]")
+            } else {
+                choices.iter().enumerate().map(|(i, c)| alloc::format!("{}) {c}", i + 1)).collect::<alloc::vec::Vec<_>>().join("  ")
+            };
+            paint(&mut out, theme, |t| Style { bold: true, ..Style::fg(t.ui.fg) }, &alloc::format!("{question} {opts} "));
         }
         ServerMsg::Completions { items, .. } => {
             for (t, _, h) in items {
@@ -139,6 +144,8 @@ pub fn message(m: &ServerMsg, theme: Option<&Theme>) -> String {
         }
         // Zvyrazneni je pro editor radku v okne, v textu se neukazuje.
         ServerMsg::Highlighted { .. } => {}
+        // Zmena na miste: pruh se prepise (`\r`), jine polozky znovu.
+        ServerMsg::ItemUpdate { item: it, .. } => out.push_str(&item(it, theme)),
     }
     out
 }

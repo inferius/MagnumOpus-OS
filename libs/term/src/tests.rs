@@ -74,7 +74,8 @@ fn protocol_roundtrip() {
         ServerMsg::Item { session: 1, block: 2, item: Item::Error { code: "X".into(), message: "m".into(), report: "r".into() } },
         ServerMsg::Item { session: 1, block: 2, item: Item::Progress { done: 1, total: 3, label: "kopiruji".into() } },
         ServerMsg::Item { session: 1, block: 2, item: Item::Link { text: "napoveda".into(), target: "help:ls".into() } },
-        ServerMsg::Prompt { prompt: 3, question: "Prevzit?".into(), detail: Item::Diff(Value::List(vec![])) },
+        ServerMsg::Prompt { prompt: 3, question: "Prevzit?".into(), detail: Item::Diff(Value::List(vec![])), choices: vec!["a".into()] },
+        ServerMsg::ItemUpdate { session: 1, block: 2, index: 0, item: Item::Progress { done: 1, total: 4, label: "x".into() } },
         ServerMsg::Completions { start: 3, items: vec![("ls".into(), 0, "vypise".into())] },
         ServerMsg::SessionList { sessions: vec![(1, 2, "/home".into())] },
         ServerMsg::BlockEnd { session: 1, block: 2, ok: false, duration: -1 },
@@ -87,6 +88,7 @@ fn protocol_roundtrip() {
         ClientMsg::Run { session: 1, line: "ls | where size > 1KB".into() },
         ClientMsg::Complete { session: 1, line: "l".into(), cursor: 1 },
         ClientMsg::Answer { prompt: 1, yes: true },
+        ClientMsg::Choose { prompt: 1, index: 2 },
         ClientMsg::Format { session: 1, line: "ls".into(), style: 1 },
         ClientMsg::Sessions,
     ];

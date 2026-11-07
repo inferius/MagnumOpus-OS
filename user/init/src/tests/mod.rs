@@ -15,6 +15,7 @@ mod jobs;
 mod memory;
 mod net;
 mod process;
+mod console;
 mod shell;
 mod supervisor;
 mod time;

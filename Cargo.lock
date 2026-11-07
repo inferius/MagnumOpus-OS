@@ -181,6 +181,15 @@ name = "conf"
 version = "0.1.0"
 
 [[package]]
+name = "console"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "libos",
+ "term",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

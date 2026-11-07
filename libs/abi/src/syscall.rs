@@ -113,8 +113,53 @@ pub const JOB_SET_LIMIT: u64 = 43;
 /// zapise [`crate::job::JobInfo`] (48 B)
 pub const JOB_INFO: u64 = 44;
 
+/// Framebuffer z firmware (objekt z bootstrapu `FRAMEBUFFER`).
+/// `(vmo, op, out_ptr)`; `op` z [`fb_op`]. `INFO` potrebuje `READ` a na
+/// `out_ptr` zapise [`FbInfo`] (16 B); `CLAIM` a `RELEASE` potrebuji
+/// `WRITE`. Jiny objekt pameti = `WRONG_TYPE`.
+pub const FB_CONTROL: u64 = 45;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 45;
+pub const COUNT: u64 = 46;
+
+/// Operace `FB_CONTROL`.
+pub mod fb_op {
+    /// Geometrie a format pixelu.
+    pub const INFO: u64 = 0;
+    /// Vyslovne prevzeti: jadro prestane kreslit log do framebufferu (log
+    /// dal jde na seriovou linku).
+    pub const CLAIM: u64 = 1;
+    /// Vraceni: jadro obrazovku smaze a kresli log dal.
+    pub const RELEASE: u64 = 2;
+}
+
+/// Geometrie framebufferu (`FB_CONTROL`, `fb_op::INFO`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FbInfo {
+    pub width: u32,
+    pub height: u32,
+    /// Pixelu na radek (muze byt vic nez `width`).
+    pub stride: u32,
+    /// 1 = R, G, B v pameti; 2 = B, G, R (32 bitu na pixel).
+    pub format: u32,
+}
+
+impl FbInfo {
+    pub const SIZE: usize = 16;
+
+    pub fn encode(&self) -> [u8; 16] {
+        let mut b = [0u8; 16];
+        for (i, v) in [self.width, self.height, self.stride, self.format].iter().enumerate() {
+            b[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        b
+    }
+
+    pub fn decode(b: &[u8; 16]) -> Self {
+        let v = |i: usize| u32::from_le_bytes([b[i * 4], b[i * 4 + 1], b[i * 4 + 2], b[i * 4 + 3]]);
+        Self { width: v(0), height: v(1), stride: v(2), format: v(3) }
+    }
+}
 
 /// Nejvic bajtu v jednom `RANDOM_GET` / `RANDOM_ADD` (jedno volani = jedna
 /// kopie pres buffer jadra; vic dat = vic volani).

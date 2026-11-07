@@ -778,8 +778,86 @@ s hlavičkou), má v dokumentaci jazyk `mos`: zvýrazní se stejně, jen bez
 převodu.
 
 ⚠️ **Plán:** obarvení vlastního textu uživatelem (např. `echo` se stylem
-třídy) je navazující návrh; interaktivní tabulky, nabídky, průběhy
-a výzvy přijdou v další fázi.
+třídy) je navazující návrh.
+
+### Interaktivní terminál a konzole
+
+> **Změna proti první verzi shellu:** terminál není „konzole ze 70. let“.
+> Výsledky jsou interaktivní tabulky, doplňování je nabídka, průběh se
+> mění na místě v reálném čase a výzvy jsou prvky protokolu. Logika je
+> v knihovně `term::ui` (bez systémových volání, testy na hostiteli), takže
+> stejně poslouží textové konzoli i oknu v GUI 6c.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Konzole a interaktivni terminal">
+<defs><marker id="sh4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="140" height="56" rx="6"/><text class="t b" x="80" y="44" text-anchor="middle">inputd</text><text class="m" x="80" y="62" text-anchor="middle">fokus = klávesy</text>
+<rect class="box" x="10" y="140" width="140" height="56" rx="6"/><text class="t b" x="80" y="164" text-anchor="middle">jádro</text><text class="m" x="80" y="182" text-anchor="middle">FRAMEBUFFER, FB_CONTROL</text>
+<path class="ln" d="M150 48 L248 90" marker-end="url(#sh4)"/>
+<path class="ln" d="M150 168 L248 130" marker-end="url(#sh4)"/>
+<rect class="acc" x="250" y="60" width="220" height="100" rx="6"/><text class="t b" x="360" y="84" text-anchor="middle">user/console</text><text class="m" x="360" y="104" text-anchor="middle">term::ui (editor, tabulky,</text><text class="m" x="360" y="120" text-anchor="middle">nabídka, výzvy, průběhy)</text><text class="m" x="360" y="140" text-anchor="middle">term::screen -> framebuffer</text>
+<path class="ln" d="M470 110 L568 110" marker-end="url(#sh4)"/>
+<text class="m" x="478" y="102">nativní protokol</text>
+<rect class="box" x="570" y="82" width="180" height="56" rx="6"/><text class="t b" x="660" y="106" text-anchor="middle">termd + shsess</text><text class="m" x="660" y="124" text-anchor="middle">relace, interpret</text>
+<path class="ln dash" d="M360 60 L360 22" marker-end="url(#sh4)"/>
+<text class="m" x="372" y="30">supervisor / test: display, focus, release</text>
+</svg>
+<figcaption>Konzole dostane displej a fokus od jejich vlastníka; sama si je nebere.</figcaption>
+</figure>
+
+**Protokol** (doplněk k nativnímu protokolu):
+
+- `ItemUpdate { session, block, index, item }`: změna položky bloku na
+  místě. Pruh průběhu se tak mění v reálném čase a rychlost a odhad
+  zbývajícího času si okno spočítá samo z časů aktualizací.
+- `Prompt { …, choices }` + `Choose { prompt, index }`: výzva s volbami
+  (prázdné `choices` = ano/ne a odpověď `Answer`).
+- Průběh hlásí interpret (`Host::progress`): `for` a `each` nad seznamem
+  od 20 položek (aktualizace jen při změně procenta) a `sleep` od 1 s.
+
+**Okno** (`term::ui::App`):
+
+- **Editor řádku:** zvýraznění okamžitě, významové od služby podle `seq`;
+  šedá nápověda z historie (šipka doprava nebo End ji přijme); historie
+  šipkami; Ctrl-W slovo, Ctrl-U řádek, Ctrl-F převod B/C; Tab doplňování
+  (jedna možnost se doplní rovnou, víc = nabídka).
+- **Bloky:** každý příkaz s barevnou značkou stavu (běží, hotovo, chyba),
+  dobou běhu a točícím se znakem u běžícího. Ctrl-L sbalí všechny,
+  mezera sbalí vybraný.
+- **Interaktivní tabulka:** PgUp z editoru vstoupí do poslední tabulky.
+  Šipky a PgUp/PgDn vybírají řádek, `s` řadí podle dalšího sloupce, `S`
+  obrátí směr, `/` filtr (podřetězec v libovolné buňce). Akce nad řádkem
+  se spustí jako běžný řádek, takže platí historie, náhled, zámek
+  i undo: Enter otevře soubor (`open`) nebo složku (`cd …; ls`), `c` vloží
+  cestu do řádku a `d` smaže s náhledem (`preview { rm … }`).
+- **Výzvy:** tlačítka Ano/Ne nebo volby, šipky a Enter, `a`/`n`,
+  číslice u voleb.
+- **Řádek zadaný před připojením** k relaci počká a odešle se po
+  `Attached`.
+
+```shell-b
+for f in (ls ~/foto -r) { echo "kontroluji {f.name}" }
+```
+
+**Konzole** (`user/console`): textová a záchranná konzole pro běh bez
+GUI, pád GUI a nouzový režim (v GUI je terminál okno `gui-term`). Displej
+ani fokus si nebere sama. Předá jí je jejich vlastník (supervisor, zatím
+test v initu) stejně jako kompozitoru. Řídicí příkazy jsou text
+s odpovědí `ok` / `err KÓD` jako u inputd:
+
+| Příkaz | Handly | Co |
+|---|---|---|
+| `display` | framebuffer | převzít displej (`FB_CONTROL` `CLAIM`) a kreslit |
+| `focus` | kanál událostí od inputd | brát klávesy |
+| `release` | - | přestat kreslit, vrátit displej jádru; odpověď nese framebuffer, kanál fokusu se zavře |
+| `status` | - | `ok drawing=… focus=… session=… connected=…` |
+| `dump` | - | `ok` + text obrazovky (testy, diagnostika) |
+
+Kreslí do obrazu v paměti a do framebufferu kopíruje celý snímek naráz,
+jen při změně nebo u běžícího příkazu (nejvýš asi 7 snímků za sekundu).
+
+⚠️ **Omezení:** myš (klik na řádek, odkaz) ještě není; displej a fokus
+v běžném běhu rozdělí supervisor spolu s GUI 6c.
 
 ### Stav zapojení
 
@@ -789,8 +867,8 @@ a výzvy přijdou v další fázi.
 | protokol, služba relací, prostředník, registr, VT100, obrazovka, připojené cesty | hotovo, testy na hostiteli (`cargo test -p term`) |
 | `termd` a `shsess` v initfs | hotovo; relace ve vlastních procesech, FS přes `fsproto` (klony bokem, pohledy, `LIST_STAT_PAGE`), výstup zrcadlí do logu |
 | test v QEMU | hotovo: `user/init/src/tests/shell.rs` spustí termd s vlastní relací fsd a ověří zápis (koncept v klonu), undo přes pohled fsd, Ctrl-C, převod zápisu, přehrání bloků po odpojení a to, že relace i její úloha přežijí pád termd a nový termd je převezme z registru; spouštění termd mimo testy patří do supervisoru initu (později) |
-| vstup z klávesnice | čeká na `inputd` (milník 6a, větev mimo `main`); do té doby posílá řádky okno nebo test |
-| kreslení do framebufferu | knihovna hotová; čeká na předání framebufferu jako capability (jádro, `userboot`) |
+| vstup z klávesnice | hotovo: konzole dostane fokus od `inputd` (test v initu píše umělým vstupem) |
+| kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
 | spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
 
 ## Chyby shellu

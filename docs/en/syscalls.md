@@ -451,6 +451,24 @@ can still be charged - the smallest free room over the job and all
 ancestors; `u64::MAX` = no limit anywhere). Requires `READ`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
+### `FB_CONTROL`
+
+`(vmo, op, out_ptr) -> 0`. The firmware framebuffer: `vmo` must be exactly
+the object from the bootstrap `kind::FRAMEBUFFER` (any other memory object
+= `WRONG_TYPE`). Operations (`abi::syscall::fb_op`):
+
+- `INFO` (0): writes `abi::syscall::FbInfo` (16 B: width, height, pixels
+  per line, format 1 = RGB, 2 = BGR; all u32). Requires `READ`.
+- `CLAIM` (1): **explicit takeover** - the kernel stops drawing the log
+  into the framebuffer, the log keeps going to the serial line. Requires
+  `WRITE`.
+- `RELEASE` (2): give back - the kernel clears the screen and keeps
+  drawing the log. Requires `WRITE`.
+
+A kernel panic always draws into the framebuffer. Errors: `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `BAD_ADDRESS`, `NOT_FOUND`
+(no framebuffer).
+
 ## Structural limits
 
 Limits given by data formats or calls, not policy:

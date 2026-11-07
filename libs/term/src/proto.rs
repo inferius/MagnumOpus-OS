@@ -48,6 +48,8 @@ pub enum ClientMsg {
     /// Prevod radku do druheho zapisu (0 = B, 1 = C).
     Format { session: u64, line: String, style: u8 },
     Sessions,
+    /// Odpoved na vyzvu s volbami (`index` do `Prompt::choices`).
+    Choose { prompt: u64, index: u32 },
     /// Vyznamove zvyrazneni rozepsaneho radku (okno ho posila pri psani;
     /// `seq` = poradi, okno zahodi starsi odpovedi).
     Highlight { session: u64, line: String, seq: u32 },
@@ -61,7 +63,11 @@ pub enum ServerMsg {
     BlockStart { session: u64, block: u64, line: String },
     Item { session: u64, block: u64, item: Item },
     BlockEnd { session: u64, block: u64, ok: bool, duration: i64 },
-    Prompt { prompt: u64, question: String, detail: Item },
+    /// Vyzva: `choices` prazdne = ano/ne (`Answer`), jinak vyber (`Choose`).
+    Prompt { prompt: u64, question: String, detail: Item, choices: Vec<String> },
+    /// Zmena polozky bloku na miste (pruh prubehu, stav): `index` = poradi
+    /// polozky v bloku.
+    ItemUpdate { session: u64, block: u64, index: u32, item: Item },
     Completions { start: u32, items: Vec<(String, u8, String)> },
     SessionList { sessions: Vec<(u64, u32, String)> },
     Formatted { text: String },
@@ -425,6 +431,11 @@ impl ClientMsg {
                 w.u8(*style);
             }
             ClientMsg::Sessions => w.u8(9),
+            ClientMsg::Choose { prompt, index } => {
+                w.u8(11);
+                w.u64(*prompt);
+                w.u32(*index);
+            }
             ClientMsg::Highlight { session, line, seq } => {
                 w.u8(10);
                 w.u64(*session);
@@ -448,6 +459,7 @@ impl ClientMsg {
             8 => ClientMsg::Format { session: r.u64()?, line: r.str()?, style: r.u8()? },
             9 => ClientMsg::Sessions,
             10 => ClientMsg::Highlight { session: r.u64()?, line: r.str()?, seq: r.u32()? },
+            11 => ClientMsg::Choose { prompt: r.u64()?, index: r.u32()? },
             _ => return Err(DecodeError),
         };
         r.done()?;
@@ -488,11 +500,22 @@ impl ServerMsg {
                 w.u8(*ok as u8);
                 w.i64(*duration);
             }
-            ServerMsg::Prompt { prompt, question, detail } => {
+            ServerMsg::Prompt { prompt, question, detail, choices } => {
                 w.u8(6);
                 w.u64(*prompt);
                 w.str(question);
                 put_item(&mut w, detail);
+                w.u32(choices.len() as u32);
+                for c in choices {
+                    w.str(c);
+                }
+            }
+            ServerMsg::ItemUpdate { session, block, index, item } => {
+                w.u8(12);
+                w.u64(*session);
+                w.u64(*block);
+                w.u32(*index);
+                put_item(&mut w, item);
             }
             ServerMsg::Completions { start, items } => {
                 w.u8(7);
@@ -552,7 +575,19 @@ impl ServerMsg {
             3 => ServerMsg::BlockStart { session: r.u64()?, block: r.u64()?, line: r.str()? },
             4 => ServerMsg::Item { session: r.u64()?, block: r.u64()?, item: get_item(&mut r)? },
             5 => ServerMsg::BlockEnd { session: r.u64()?, block: r.u64()?, ok: r.u8()? != 0, duration: r.i64()? },
-            6 => ServerMsg::Prompt { prompt: r.u64()?, question: r.str()?, detail: get_item(&mut r)? },
+            6 => {
+                let (prompt, question, detail) = (r.u64()?, r.str()?, get_item(&mut r)?);
+                let n = r.u32()? as usize;
+                if n > MAX_ITEMS {
+                    return Err(DecodeError);
+                }
+                let mut choices = Vec::new();
+                for _ in 0..n {
+                    choices.push(r.str()?);
+                }
+                ServerMsg::Prompt { prompt, question, detail, choices }
+            }
+            12 => ServerMsg::ItemUpdate { session: r.u64()?, block: r.u64()?, index: r.u32()?, item: get_item(&mut r)? },
             7 => {
                 let start = r.u32()?;
                 let n = r.u32()? as usize;

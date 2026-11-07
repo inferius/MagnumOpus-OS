@@ -821,8 +821,93 @@ a script with a header) has the language `mos` in the documentation: it is
 highlighted the same way, only without conversion.
 
 ⚠️ **Plan:** coloring the user's own text (e.g. `echo` with a style class)
-is a follow-up proposal; interactive tables, menus, progress and prompts
-come in the next phase.
+is a follow-up proposal.
+
+### Interactive terminal and console
+
+> **Change from the first shell version:** the terminal is not a "console
+> from the 70s". Results are interactive tables, completion is a menu,
+> progress changes in place in real time and prompts are elements of the
+> protocol. The logic lives in the library `term::ui` (no system calls,
+> host tests), so the text console and the GUI 6c window use the same.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Console and interactive terminal">
+<defs><marker id="sh4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="140" height="56" rx="6"/><text class="t b" x="80" y="44" text-anchor="middle">inputd</text><text class="m" x="80" y="62" text-anchor="middle">focus = keys</text>
+<rect class="box" x="10" y="140" width="140" height="56" rx="6"/><text class="t b" x="80" y="164" text-anchor="middle">kernel</text><text class="m" x="80" y="182" text-anchor="middle">FRAMEBUFFER, FB_CONTROL</text>
+<path class="ln" d="M150 48 L248 90" marker-end="url(#sh4)"/>
+<path class="ln" d="M150 168 L248 130" marker-end="url(#sh4)"/>
+<rect class="acc" x="250" y="60" width="220" height="100" rx="6"/><text class="t b" x="360" y="84" text-anchor="middle">user/console</text><text class="m" x="360" y="104" text-anchor="middle">term::ui (editor, tables,</text><text class="m" x="360" y="120" text-anchor="middle">menu, prompts, progress)</text><text class="m" x="360" y="140" text-anchor="middle">term::screen -> framebuffer</text>
+<path class="ln" d="M470 110 L568 110" marker-end="url(#sh4)"/>
+<text class="m" x="478" y="102">native protocol</text>
+<rect class="box" x="570" y="82" width="180" height="56" rx="6"/><text class="t b" x="660" y="106" text-anchor="middle">termd + shsess</text><text class="m" x="660" y="124" text-anchor="middle">sessions, interpreter</text>
+<path class="ln dash" d="M360 60 L360 22" marker-end="url(#sh4)"/>
+<text class="m" x="372" y="30">supervisor / test: display, focus, release</text>
+</svg>
+<figcaption>The console gets the display and focus from their owner; it never takes them itself.</figcaption>
+</figure>
+
+**Protocol** (an addition to the native protocol):
+
+- `ItemUpdate { session, block, index, item }`: an item of a block changes
+  in place. A progress bar thus changes in real time and the window
+  computes the rate and the remaining time itself from the times of the
+  updates.
+- `Prompt { …, choices }` + `Choose { prompt, index }`: a prompt with
+  choices (empty `choices` = yes/no and the answer `Answer`).
+- The interpreter reports progress (`Host::progress`): `for` and `each`
+  over a list of 20 items or more (updates only when the percentage
+  changes) and `sleep` of 1 s or more.
+
+**Window** (`term::ui::App`):
+
+- **Line editor:** immediate highlighting, semantic from the service by
+  `seq`; a gray suggestion from history (right arrow or End accepts it);
+  history with the arrows; Ctrl-W word, Ctrl-U line, Ctrl-F convert B/C;
+  Tab completion (a single option is completed right away, several = a
+  menu).
+- **Blocks:** every command with a colored state mark (running, done,
+  error), its run time and a spinner while running. Ctrl-L collapses all,
+  space collapses the selected one.
+- **Interactive table:** PgUp from the editor enters the last table. The
+  arrows and PgUp/PgDn select a row, `s` sorts by the next column, `S`
+  reverses the order, `/` filters (a substring in any cell). An action on
+  a row runs as an ordinary line, so history, preview, the lock and undo
+  apply: Enter opens a file (`open`) or a directory (`cd …; ls`), `c`
+  inserts the path into the line and `d` deletes with a preview
+  (`preview { rm … }`).
+- **Prompts:** Yes/No buttons or choices, arrows and Enter, `a`/`n`,
+  digits for choices.
+- **A line entered before attaching** to a session waits and is sent
+  after `Attached`.
+
+```shell-b
+for f in (ls ~/photos -r) { echo "checking {f.name}" }
+```
+
+**Console** (`user/console`): the text and rescue console for running
+without GUI, a GUI crash and emergency mode (in the GUI the terminal is
+the window `gui-term`). It never takes the display or focus itself. Their
+owner (the supervisor, for now a test in init) hands them over the same
+way as to the compositor. Control commands are text with the answer
+`ok` / `err CODE` like with inputd:
+
+| Command | Handles | What |
+|---|---|---|
+| `display` | framebuffer | take over the display (`FB_CONTROL` `CLAIM`) and draw |
+| `focus` | channel of events from inputd | take keys |
+| `release` | - | stop drawing, give the display back to the kernel; the answer carries the framebuffer, the focus channel closes |
+| `status` | - | `ok drawing=… focus=… session=… connected=…` |
+| `dump` | - | `ok` + text of the screen (tests, diagnostics) |
+
+It draws into an image in memory and copies the whole frame to the
+framebuffer at once, only on a change or while a command runs (at most
+about 7 frames per second).
+
+⚠️ **Limits:** the mouse (click on a row, a link) is not supported yet;
+the display and focus in the normal run will be split by the supervisor
+together with GUI 6c.
 
 ### Integration status
 
@@ -832,8 +917,8 @@ come in the next phase.
 | protocol, session service, broker, registry, VT100, screen, mounted paths | done, host tests (`cargo test -p term`) |
 | `termd` and `shsess` in initfs | done; sessions in their own processes, file system over `fsproto` (clones aside, views, `LIST_STAT_PAGE`), output mirrored to the log |
 | QEMU test | done: `user/init/src/tests/shell.rs` starts termd with its own fsd session and checks writes (draft in a clone), undo via an fsd view, Ctrl-C, notation conversion, block replay after detaching and that a session and its job survive a termd crash and a new termd takes them over from the registry; starting termd outside tests belongs in the init supervisor (later) |
-| keyboard input | waits for `inputd` (milestone 6a, branch not in `main`); until then the window or test sends lines |
-| drawing into the framebuffer | library done; waits for the framebuffer to be passed as a capability (kernel, `userboot`) |
+| keyboard input | done: the console gets the focus from `inputd` (the test in init types with synthetic input) |
+| drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
 | starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
 ## Shell errors

@@ -11,6 +11,11 @@ use crate::framebuffer::FbConsole;
 struct Console {
     serial: SerialPort,
     fb: Option<FbConsole>,
+    /// Popis framebufferu z firmware (pro objekt pameti pro userspace).
+    desc: Option<Framebuffer>,
+    /// Framebuffer prevzal userspace (`FB_CONTROL` `CLAIM`): log jen na
+    /// seriovou linku.
+    claimed: bool,
 }
 
 static CONSOLE: SpinLock<Option<Console>> = SpinLock::new(None);
@@ -25,8 +30,9 @@ pub unsafe fn init(fb: &Framebuffer) {
     let mut serial = arch::debug_serial();
     arch::init_debug_serial(&mut serial);
     // SAFETY: predano od volajiciho.
+    let desc = fb.is_present().then_some(*fb);
     let fb = fb.is_present().then(|| unsafe { FbConsole::new(fb) });
-    *CONSOLE.lock() = Some(Console { serial, fb });
+    *CONSOLE.lock() = Some(Console { serial, fb, desc, claimed: false });
 }
 
 /// Zapise text na seriovou linku a pripadne i do framebufferu.
@@ -34,9 +40,27 @@ pub unsafe fn init(fb: &Framebuffer) {
 pub fn write(text: &str, to_framebuffer: bool) {
     if let Some(console) = CONSOLE.lock().as_mut() {
         let _ = console.serial.write_str(text);
-        if to_framebuffer && let Some(fb) = console.fb.as_mut() {
+        if to_framebuffer && !console.claimed && let Some(fb) = console.fb.as_mut() {
             let _ = fb.write_str(text);
         }
+    }
+}
+
+/// Framebuffer z firmware, kdyz je.
+pub fn framebuffer() -> Option<Framebuffer> {
+    CONSOLE.lock().as_ref().and_then(|c| c.desc)
+}
+
+/// Prevzeti framebufferu userspacem (`true`) nebo vraceni jadru (`false`;
+/// obrazovka se smaze a log se kresli dal). Panika kresli vzdy.
+pub fn set_claimed(claimed: bool) {
+    if let Some(c) = CONSOLE.lock().as_mut() {
+        if c.claimed && !claimed
+            && let Some(fb) = c.fb.as_mut()
+        {
+            fb.clear();
+        }
+        c.claimed = claimed;
     }
 }
 

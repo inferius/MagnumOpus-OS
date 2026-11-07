@@ -216,6 +216,18 @@ invariant was broken (a kernel bug).
 | `init: firewall bez FS (konfigurace se neulozi): ...` | An FS session for `fwd` cannot be prepared (no FS or rights). |
 | `init: sluzbu firewallu nelze spustit: ...` | `fwd` did not start; `netd` sees a closed channel and denies questions. |
 
+## Text console console
+
+| Message | Meaning and fix |
+|---|---|
+| `console: bezim (ceka na displej a fokus)` | The console runs; it starts drawing after `display` and takes keys after `focus`. |
+| `console: displej prevzat (SxR znaku)` | It took over the framebuffer; the character grid follows the resolution. |
+| `console: displej vracen` | After `release`; the framebuffer is back with the kernel. |
+| `console: ridici kanal zavren, koncim` | The owner of the console ended; the display goes back to the kernel. |
+| `console: chybi kanal k termd` | Started without a channel to the session service; the console exits with code 1. |
+| `framebuffer prevzal proces X N (log jadra dal na seriove lince)` | Kernel: `FB_CONTROL` `CLAIM`; it no longer draws the log on the screen. |
+| `framebuffer vratil proces X N` | Kernel: `FB_CONTROL` `RELEASE`; the screen is cleared and the log is drawn again. |
+
 ## Session service termd
 
 | Message | Meaning and fix |

@@ -208,6 +208,14 @@ pub trait Host {
         -> Option<Result<Value, ShError>> {
         None
     }
+    /// Prubeh dlouhe operace (`done` z `total`; `total = 0` = neznamy).
+    /// Hostitel ho ukaze na miste (jeden pruh na `id` v bloku); stejne `id`
+    /// = aktualizace. Rychlost a odhad si spocita okno.
+    fn progress(&mut self, _id: u32, _done: u64, _total: u64, _label: &str) {}
+    /// Vyber ze seznamu (vyzva s volbami). `None` = zruseno / bez okna.
+    fn choose(&mut self, _question: &str, _choices: &[String]) -> Option<usize> {
+        None
+    }
     /// Domovska slozka uzivatele.
     fn home(&self) -> String {
         String::from("/home")

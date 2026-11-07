@@ -22,9 +22,11 @@ pub struct Cell {
     pub fg: (u8, u8, u8),
     pub bold: bool,
     pub underline: bool,
+    /// Pozadi (`None` = pozadi obrazovky).
+    pub bg: Option<(u8, u8, u8)>,
 }
 
-const BLANK: Cell = Cell { ch: ' ', fg: PALETTE[1], bold: false, underline: false };
+const BLANK: Cell = Cell { ch: ' ', fg: PALETTE[1], bold: false, underline: false, bg: None };
 
 pub struct Screen {
     pub cols: usize,
@@ -35,6 +37,8 @@ pub struct Screen {
     fg: (u8, u8, u8),
     bold: bool,
     underline: bool,
+    bg: Option<(u8, u8, u8)>,
+    reverse: bool,
     /// Rozpracovana escape sekvence.
     esc: Option<alloc::string::String>,
 }
@@ -51,8 +55,16 @@ impl Screen {
             fg: PALETTE[1],
             bold: false,
             underline: false,
+            bg: None,
+            reverse: false,
             esc: None,
         }
+    }
+
+    /// Bunka se znakem a aktualnim stylem (obracene = prohozene barvy).
+    fn styled(&self, ch: char) -> Cell {
+        let (fg, bg) = if self.reverse { (self.bg.unwrap_or(PALETTE[0]), Some(self.fg)) } else { (self.fg, self.bg) };
+        Cell { ch, fg, bold: self.bold, underline: self.underline, bg }
     }
 
     pub fn cell(&self, x: usize, y: usize) -> Cell {
@@ -88,6 +100,17 @@ impl Screen {
                     self.fg = PALETTE[1];
                     self.bold = false;
                     self.underline = false;
+                    self.bg = None;
+                    self.reverse = false;
+                }
+                "7" => self.reverse = true,
+                "27" => self.reverse = false,
+                "49" => self.bg = None,
+                // 24bitova barva pozadi.
+                "48" if ps.get(i + 1) == Some(&"2") && i + 4 < ps.len() => {
+                    let c = |k: usize| ps[i + k].parse::<u8>().unwrap_or(0);
+                    self.bg = Some((c(2), c(3), c(4)));
+                    i += 4;
                 }
                 "1" => self.bold = true,
                 "2" => self.fg = PALETTE[2],
@@ -123,6 +146,11 @@ impl Screen {
                     let seq = self.esc.take().unwrap();
                     if let Some(p) = seq.strip_prefix('[').and_then(|s| s.strip_suffix('m')) {
                         self.sgr(p);
+                    } else if seq == "[2J" {
+                        self.clear();
+                    } else if seq == "[H" {
+                        self.x = 0;
+                        self.y = 0;
                     }
                 }
                 continue;
@@ -142,7 +170,7 @@ impl Screen {
                     if self.x >= self.cols {
                         self.newline();
                     }
-                    self.cells[self.y * self.cols + self.x] = Cell { ch: c, fg: self.fg, bold: self.bold, underline: self.underline };
+                    self.cells[self.y * self.cols + self.x] = self.styled(c);
                     self.x += 1;
                 }
             }
@@ -224,24 +252,34 @@ pub fn paint(screen: &Screen, s: &mut Surface) {
     for row in 0..screen.rows {
         for col in 0..screen.cols {
             let c = screen.cell(col, row);
+            let (ox, oy) = (8 + col * cw, 8 + row * ch);
+            let cbg = c.bg.unwrap_or(bg);
+            if let Some(b) = c.bg {
+                let px = s.encode(b);
+                for dy in 0..ch {
+                    for dx in 0..cw {
+                        s.put(ox + dx, oy + dy, px);
+                    }
+                }
+            }
             if c.ch == ' ' {
                 continue;
             }
             let weight = FontWeight::Regular;
             let Some(r) = get_raster(c.ch, weight, font).or_else(|| get_raster('?', weight, font)) else { continue };
             let fg = c.fg;
-            let (ox, oy) = (8 + col * cw, 8 + row * ch);
             for (dy, line) in r.rows().enumerate() {
-                for (dx, &a) in line.iter().enumerate() {
+                // Tucne: glyf a jeho kopie o pixel vpravo, pruhlednost
+                // slucena maximem (bez rozmazani slabych okraju).
+                let n = line.len() + c.bold as usize;
+                for dx in 0..n {
+                    let here = line.get(dx).copied().unwrap_or(0);
+                    let left = if c.bold && dx > 0 { line[dx - 1] } else { 0 };
+                    let a = here.max(left);
                     if a == 0 {
                         continue;
                     }
-                    // Tucne: o pixel vedle.
-                    let px = s.encode(blend(fg, bg, a));
-                    s.put(ox + dx, oy + dy, px);
-                    if c.bold {
-                        s.put(ox + dx + 1, oy + dy, px);
-                    }
+                    s.put(ox + dx, oy + dy, s.encode(blend(fg, cbg, a)));
                 }
             }
             if c.underline {

@@ -439,6 +439,23 @@ strhnout – nejmenší volné místo přes job a všechny předky; `u64::MAX` =
 nikde limit). Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.
 
+### `FB_CONTROL`
+
+`(vmo, op, out_ptr) -> 0`. Framebuffer z firmware: `vmo` musí být právě
+objekt z bootstrapu `kind::FRAMEBUFFER` (jiný objekt paměti =
+`WRONG_TYPE`). Operace (`abi::syscall::fb_op`):
+
+- `INFO` (0): zapíše `abi::syscall::FbInfo` (16 B: šířka, výška, pixelů
+  na řádek, formát 1 = RGB, 2 = BGR; vše u32). Vyžaduje `READ`.
+- `CLAIM` (1): **výslovné převzetí** - jádro přestane kreslit log do
+  framebufferu, log dál jde na sériovou linku. Vyžaduje `WRITE`.
+- `RELEASE` (2): vrácení - jádro obrazovku smaže a kreslí log dál.
+  Vyžaduje `WRITE`.
+
+Panika jádra kreslí do framebufferu vždy. Chyby: `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `BAD_ADDRESS`, `NOT_FOUND`
+(bez framebufferu).
+
 ## Strukturální meze
 
 Meze dané formátem dat nebo voláním, ne politikou:

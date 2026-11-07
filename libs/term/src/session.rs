@@ -105,9 +105,55 @@ struct SessionHost<'a> {
     deferred: &'a mut Vec<ClientMsg>,
     home: &'a str,
     polls: u32,
+    /// Pruhy prubehu radku: (id od interpretu, poradi polozky v bloku).
+    bars: Vec<(u32, usize)>,
 }
 
 impl SessionHost<'_> {
+    /// Pruh prubehu: prvni hlaseni prida polozku, dalsi ji zmeni na miste.
+    fn bar(&mut self, id: u32, done: u64, total: u64, label: &str) {
+        let item = Item::Progress { done, total, label: label.into() };
+        match self.bars.iter().find(|(b, _)| *b == id).map(|(_, i)| *i) {
+            Some(index) => {
+                self.block.items[index] = item.clone();
+                if *self.attached {
+                    self.link.send(&ServerMsg::ItemUpdate {
+                        session: self.session,
+                        block: self.block.id,
+                        index: index as u32,
+                        item,
+                    });
+                }
+            }
+            None => {
+                self.bars.push((id, self.block.items.len()));
+                self.push(item);
+            }
+        }
+    }
+
+    /// Vyzva a cekani na odpoved; `None` = zruseno (Ctrl-C, odpojeni).
+    fn ask(&mut self, question: &str, detail: Item, choices: &[String]) -> Option<ClientMsg> {
+        let id = *self.next_prompt;
+        *self.next_prompt += 1;
+        self.link.send(&ServerMsg::Prompt { prompt: id, question: question.into(), detail, choices: choices.to_vec() });
+        loop {
+            match self.link.wait() {
+                Some(m @ ClientMsg::Answer { prompt, .. }) | Some(m @ ClientMsg::Choose { prompt, .. }) if prompt == id => {
+                    return Some(m);
+                }
+                Some(m @ (ClientMsg::Interrupt { .. } | ClientMsg::Detach { .. })) => {
+                    self.incoming(m);
+                    return None;
+                }
+                Some(other) => self.deferred.push(other),
+                None => {
+                    *self.attached = false;
+                    return None;
+                }
+            }
+        }
+    }
     fn push(&mut self, item: Item) {
         if *self.attached {
             self.link.send(&ServerMsg::Item { session: self.session, block: self.block.id, item: item.clone() });
@@ -143,12 +189,37 @@ impl Host for SessionHost<'_> {
     }
 
     fn sleep(&mut self, ns: i64) {
-        // Spi po kouscich, aby slo prerusit.
+        // Spi po kouscich, aby slo prerusit; delsi cekani s pruhem prubehu.
         let step = 50_000_000;
         let mut left = ns;
+        let long = ns >= 1_000_000_000;
+        let ms = |v: i64| (v.max(0) / 1_000_000) as u64;
         while left > 0 && !self.interrupted() {
+            if long {
+                self.bar(0, ms(ns - left), ms(ns), "sleep");
+            }
             self.env.sleep(left.min(step));
             left -= step;
+        }
+        if long {
+            self.bar(0, ms(ns), ms(ns), "sleep");
+        }
+    }
+
+    fn progress(&mut self, id: u32, done: u64, total: u64, label: &str) {
+        self.bar(id, done, total, label);
+    }
+
+    fn choose(&mut self, question: &str, choices: &[String]) -> Option<usize> {
+        if !*self.attached || choices.is_empty() {
+            return None;
+        }
+        match self.ask(question, Item::Note(String::new()), choices)? {
+            ClientMsg::Choose { index, .. } if (index as usize) < choices.len() => {
+                self.block.items.push(Item::Note(alloc::format!("{question} -> {}", choices[index as usize])));
+                Some(index as usize)
+            }
+            _ => None,
         }
     }
 
@@ -170,29 +241,13 @@ impl Host for SessionHost<'_> {
             self.push(Item::Note(alloc::format!("{question} - okno neni pripojene, odmitnuto")));
             return false;
         }
-        let id = *self.next_prompt;
-        *self.next_prompt += 1;
-        self.link.send(&ServerMsg::Prompt { prompt: id, question: question.into(), detail: Item::Value(detail.clone()) });
-        loop {
-            match self.link.wait() {
-                Some(ClientMsg::Answer { prompt, yes }) if prompt == id => {
-                    self.block.items.push(Item::Note(alloc::format!(
-                        "{question} -> {}",
-                        if yes { "ano" } else { "ne" }
-                    )));
-                    return yes;
-                }
-                Some(m @ (ClientMsg::Interrupt { .. } | ClientMsg::Detach { .. })) => {
-                    self.incoming(m);
-                    return false;
-                }
-                Some(other) => self.deferred.push(other),
-                None => {
-                    *self.attached = false;
-                    return false;
-                }
-            }
-        }
+        let yes = match self.ask(question, Item::Value(detail.clone()), &[]) {
+            Some(ClientMsg::Answer { yes, .. }) => yes,
+            Some(ClientMsg::Choose { index, .. }) => index == 0,
+            _ => false,
+        };
+        self.block.items.push(Item::Note(alloc::format!("{question} -> {}", if yes { "ano" } else { "ne" })));
+        yes
     }
 
     fn exec(&mut self, name: &str, args: &[(Option<String>, Value)], input: Value, needs: &ExecNeeds)
@@ -254,6 +309,7 @@ impl Service {
                 deferred: &mut deferred,
                 home: &self.home,
                 polls: 0,
+                bars: Vec::new(),
             };
             s.interp.flush(&mut host);
         }
@@ -318,7 +374,7 @@ impl Service {
                 }
             }
             ClientMsg::Run { session, line } => self.run(session, &line, link, fs, env),
-            ClientMsg::Interrupt { .. } | ClientMsg::Answer { .. } => {}
+            ClientMsg::Interrupt { .. } | ClientMsg::Answer { .. } | ClientMsg::Choose { .. } => {}
             ClientMsg::Complete { session, line, cursor } => {
                 let Some(i) = self.session_index(session) else {
                     link.send(&ServerMsg::Fail { message: alloc::format!("relace {session} neexistuje") });
@@ -417,6 +473,7 @@ impl Service {
             deferred,
             home,
             polls: 0,
+            bars: Vec::new(),
         };
         let out = interp.run_line(&mut host, line);
         for w in out.warnings {
@@ -470,6 +527,7 @@ impl Service {
                     deferred,
                     home,
                     polls: 0,
+                    bars: Vec::new(),
                 };
                 let results = interp.run_pending_jobs(&mut host);
                 let mut ok = true;

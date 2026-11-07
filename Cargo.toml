@@ -29,6 +29,7 @@ members = [
     "libs/virtio",
     "libs/wire",
     "tools/osfs",
+    "user/console",
     "user/devmgr",
     "user/echo",
     "user/fsd",
