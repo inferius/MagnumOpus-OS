@@ -50,7 +50,11 @@ jedné třídy tak neohrozí ostatní.
    - Enable Slot a Address Device,
    - prvních 8 B deskriptoru zařízení (velikost paketu EP0, případně
      Evaluate Context), celý deskriptor a celou konfiguraci,
-   - SET_CONFIGURATION a Configure Endpoint pro interrupt endpointy.
+   - Configure Endpoint pro interrupt endpointy a teprve pak
+     SET_CONFIGURATION (xHCI 4.3.5: řadič má prostředky pro endpointy dřív,
+     než je zařízení začne používat). U hubu pak deskriptor hubu a další
+     Configure Endpoint s údaji hubu v kontextu slotu (počet portů, TT,
+     MTT).
 
    Každé rozhraní pak ohlásí: `usb-interface <třída> <podtřída>
    <protokol> <vid> <pid>`.

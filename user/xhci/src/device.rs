@@ -267,28 +267,22 @@ impl Hc {
         let raw_config =
             self.control_sync(slot, Setup::get_descriptor(kind::CONFIGURATION, 0, total), &[])?;
         let config = Configuration::parse(&raw_config).ok_or(Error::Corrupted)?;
-        self.control_sync(slot, Setup::set_configuration(config.value), &[])?;
-        // Hub: pocet portu a TT do kontextu slotu (radic podle nich
-        // smeruje pakety zarizeni za hubem).
-        let hub = if descriptor.class == usbproto::desc::class::HUB {
-            let d = self.control_sync(slot, usbproto::hub::get_hub_descriptor(16), &[])?;
-            let h = usbproto::hub::HubDescriptor::parse(&d).ok_or(Error::Corrupted)?;
-            Some(HubInfo {
-                ports: h.ports,
-                multi_tt: false,
-                think_time: ((h.characteristics >> 5) & 3) as u8,
-            })
-        } else {
-            None
-        };
         {
             let dev = self.devices[slot as usize].as_mut().unwrap();
-            dev.hub = hub;
             dev.raw_device.copy_from_slice(&raw[..DeviceDescriptor::SIZE]);
             dev.descriptor = descriptor;
             dev.raw_config = raw_config;
         }
-        let config = self.configure_hub_or_endpoints(slot, &descriptor, config)?;
+        // xHCI 4.3.5: endpointy konfigurace (Configure Endpoint) pred
+        // SET_CONFIGURATION, aby radic mel pro zarizeni prostredky driv,
+        // nez je zacne pouzivat.
+        self.configure_endpoints(slot, Some(&config))?;
+        self.control_sync(slot, Setup::set_configuration(config.value), &[])?;
+        let config = if descriptor.class == usbproto::desc::class::HUB {
+            self.configure_hub(slot, &descriptor, config)?
+        } else {
+            config
+        };
         self.devices[slot as usize].as_mut().unwrap().config = Some(config);
         println!(
             "xhci: port {:?}: zarizeni {:04x}:{:04x} ({}), slot {slot}",
@@ -321,37 +315,44 @@ impl Hc {
         .map(|_| ())
     }
 
-    /// Endpointy zarizeni; vraci konfiguraci, ktera plati (s pouzitou
-    /// alternativou rozhrani).
+    /// Hub po SET_CONFIGURATION (jeho deskriptor jde cist az v nastavenem
+    /// zarizeni): pocet portu, TT think time a MTT do kontextu slotu (radic
+    /// podle nich smeruje pakety zarizeni za hubem). Vraci konfiguraci,
+    /// ktera plati (s pouzitou alternativou rozhrani).
     ///
     /// Hub s TT na kazdy port (zarizeni s protokolem 2) ho zapne az
     /// alternativou 1 rozhrani hubu (USB 2.0 11.23.1); bez ni je to hub
     /// s jednim TT. Poradi podle xHCI 4.6.6: nejdriv Configure Endpoint
     /// s endpointy alternativy a MTT, pak SET_INTERFACE. Kdyz hub
     /// SET_INTERFACE odmitne, endpointy a kontext slotu se vrati na
-    /// zakladni nastaveni bez MTT.
-    fn configure_hub_or_endpoints(
+    /// zakladni nastaveni bez MTT. Hub bez alternativy dostane jen novy
+    /// kontext slotu (Configure Endpoint bez zmeny endpointu, xHCI 6.2.2.2).
+    fn configure_hub(
         &mut self,
         slot: u8,
         descriptor: &DeviceDescriptor,
         config: Configuration,
     ) -> Result<Configuration> {
-        let is_hub = self.devices[slot as usize]
-            .as_ref()
-            .is_some_and(|d| d.hub.is_some());
+        let d = self.control_sync(slot, usbproto::hub::get_hub_descriptor(16), &[])?;
+        let h = usbproto::hub::HubDescriptor::parse(&d).ok_or(Error::Corrupted)?;
+        self.devices[slot as usize].as_mut().ok_or(Error::NotFound)?.hub = Some(HubInfo {
+            ports: h.ports,
+            multi_tt: false,
+            think_time: ((h.characteristics >> 5) & 3) as u8,
+        });
         let multi = config
             .interfaces
             .iter()
             .find(|i| i.class == usbproto::desc::class::HUB)
-            .filter(|_| is_hub && descriptor.protocol == 2)
+            .filter(|_| descriptor.protocol == 2)
             .and_then(|i| config.with_alternate(i.number, 1).map(|c| (i.number, c)))
             .filter(|(n, c)| c.interfaces.iter().any(|i| i.number == *n && i.protocol == 2));
         let Some((number, alt)) = multi else {
-            self.configure_endpoints(slot, &config)?;
+            self.configure_endpoints(slot, None)?;
             return Ok(config);
         };
         self.set_multi_tt(slot, true);
-        self.configure_endpoints(slot, &alt)?;
+        self.configure_endpoints(slot, Some(&alt))?;
         if self
             .control_sync(slot, Setup::set_interface(number, 1), &[])
             .is_ok()
@@ -360,7 +361,7 @@ impl Hc {
         }
         println!("xhci: hub ve slotu {slot} odmitl TT na kazdy port, pouzije jeden TT");
         self.set_multi_tt(slot, false);
-        self.configure_endpoints(slot, &config)?;
+        self.configure_endpoints(slot, Some(&config))?;
         Ok(config)
     }
 
@@ -375,11 +376,12 @@ impl Hc {
     /// Configure Endpoint pro interrupt endpointy vsech rozhrani (bulk
     /// a isochronni zatim ne - tridy, ktere je potrebuji, prijdou pozdeji).
     /// Lze volat znovu (zmena alternativy): drive nastavene endpointy se
-    /// zrusi (drop) a nahradi novymi.
-    fn configure_endpoints(&mut self, slot: u8, config: &Configuration) -> Result<()> {
+    /// zrusi (drop) a nahradi novymi. `None` = endpointy beze zmeny, jen
+    /// novy kontext slotu (udaje hubu).
+    fn configure_endpoints(&mut self, slot: u8, config: Option<&Configuration>) -> Result<()> {
         let speed = self.devices[slot as usize].as_ref().ok_or(Error::NotFound)?.speed;
         let mut eps = Vec::new();
-        for i in &config.interfaces {
+        for i in config.map_or(&[][..], |c| &c.interfaces) {
             for e in &i.endpoints {
                 if e.transfer == Transfer::Interrupt {
                     eps.push(*e);
@@ -387,15 +389,22 @@ impl Hc {
             }
         }
         let hub = self.devices[slot as usize].as_ref().and_then(|d| d.hub);
-        // Drive nastavene endpointy (opakovane volani) se zrusi.
-        let drop = self.devices[slot as usize]
+        let current = self.devices[slot as usize]
             .as_ref()
             .map_or(0u32, |d| d.endpoints.iter().fold(0, |m, e| m | 1 << e.dci));
-        if eps.is_empty() && hub.is_none() && drop == 0 {
+        // Drive nastavene endpointy (opakovane volani) se zrusi; bez
+        // konfigurace zustanou.
+        let drop = if config.is_some() { current } else { 0 };
+        if config.is_some() && eps.is_empty() && hub.is_none() && drop == 0 {
             return Ok(());
         }
         let mut add = 1u32; // slot
-        let mut max_dci = 1;
+        // Pocet polozek kontextu = nejvyssi DCI platnych endpointu.
+        let mut max_dci = if config.is_some() {
+            1
+        } else {
+            (31 - current.leading_zeros().min(31)).max(1)
+        };
         let mut new_eps = Vec::new();
         for e in &eps {
             let d = dci(e.address);
@@ -425,7 +434,8 @@ impl Hc {
             let s = self.ctx_size;
             let mut w = (m.read::<u32>(s) & !(0x1F << 27)) | max_dci << 27;
             if let Some(h) = hub {
-                w |= 1 << 26 | (h.multi_tt as u32) << 25;
+                // Priznak hubu (26) a MTT (25) nastavit i shodit.
+                w = (w & !(3 << 25)) | 1 << 26 | (h.multi_tt as u32) << 25;
                 let w1 = m.read::<u32>(s + 4);
                 m.write::<u32>(s + 4, (w1 & 0x00FF_FFFF) | (h.ports as u32) << 24);
                 let w2 = m.read::<u32>(s + 8);
@@ -439,7 +449,9 @@ impl Hc {
             status: 0,
             control: trb::CONFIGURE_EP << 10 | (slot as u32) << 24,
         })?;
-        if let Some(Some(dev)) = self.devices.get_mut(slot as usize) {
+        if config.is_some()
+            && let Some(Some(dev)) = self.devices.get_mut(slot as usize)
+        {
             dev.endpoints = new_eps;
         }
         Ok(())
