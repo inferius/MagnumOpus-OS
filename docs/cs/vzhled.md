@@ -607,6 +607,94 @@ doplnění:
 | Tab / Shift+Tab, šipky, Enter, Esc | ovládání prvků a dialogů |
 | v terminálu: Tab, ↑ ↓, Ctrl+C, Ctrl+Shift+P, Ctrl+Shift+F | doplnit, historie, přerušit, nanečisto, přepnout zápis B / C |
 
+## Svižnost, plynulost a zotavení (požadavek)
+
+Základ celého GUI je, aby bylo **svižné a plynulé** a aby se **samo
+vzpamatovalo** z pádu kterékoli části. Hezký vzhled je až na tom.
+Proto jsou to měřitelné cíle a testy selžou, když je systém nesplní.
+
+### Cíle
+
+Měří se na referenčním stroji a v QEMU s virgl; při 120 Hz platí stejné
+cíle v milisekundách, animace jsou časové, ne po snímcích.
+
+| Ukazatel | Cíl |
+|---|---|
+| pohyb myši -> kurzor na obrazovce | do 1 snímku (16,7 ms při 60 Hz); kurzor v hardwarové rovině |
+| stisk klávesy -> znak v textovém poli | do 2 snímků |
+| klik -> viditelná reakce prvku | v dalším snímku |
+| vynechané snímky při animaci | 0 v běžném provozu; v testu nejvýš 1 z 60 v QEMU |
+| otevření spouštěče, přepínače oken, nabídky | do 50 ms |
+| první snímek nově spuštěné aplikace | do 150 ms (kostra z uloženého stavu UI) |
+| změna velikosti okna | okraj sleduje ukazatel v každém snímku, i když aplikace nestíhá |
+| kompozitor v klidu | 0 % CPU a GPU (když se nic nemění, nic se nekreslí) |
+| obraz po pádu kompozitoru | do 500 ms, okna na původních místech, fokus zachovaný |
+| lišta po pádu shellu plochy | do 300 ms; okna se pádu vůbec nedotknou |
+| pád nebo zaseknutí ovladače GPU | nejvýš 1 vynechaný snímek (přechod na 2D), po restartu ovladače zpět na GPU |
+
+### Jak se svižnost zajistí
+
+- **Kompozitor nikdy nečeká na aplikaci.** Skládá poslední potvrzený
+  buffer okna. Opožděná aplikace má v okně starší snímek, ostatní okna
+  ani kurzor to nezdrží. Při změně velikosti čeká na nový buffer nejvýš
+  1 snímek, pak použije starý roztažený s výplní okraje.
+- **Skládání co nejpozději před vsync**: kompozitor měří, jak dlouho
+  skládání trvá, a začne až tak, aby stihl termín s rezervou 2 ms. Poloha
+  ukazatele a nejnovější vstup se dosadí na poslední chvíli
+  (late latching). Kurzor je v hardwarové rovině, takže se hýbe i když
+  skládání trvá déle.
+- **Celá obrazovka bez skládání**: hra nebo video na celé obrazovce jde
+  přímo na výstup (direct scanout), kompozitor jen přidá odznak, když je
+  potřeba.
+- **Priority**: kompozitor a okno s fokusem mají QoS `interactive`,
+  priorita se dědí přes IPC do služeb, čtení pro UI předběhne práci na
+  pozadí ([Plynulost](architektura.md#plynulost-uživatelského-rozhraní-plán)).
+- **Rychlý start aplikací**: výchozí tokeny jsou zkompilované v kódu
+  (žádné čtení souboru při startu), písmo je ve **sdílené mezipaměti
+  glyfů** (objekt paměti jen pro čtení, který plní služba písma), aplikace
+  ukáže první snímek z uloženého stavu UI a teprve pak načítá data.
+  Spouštěč, přepínač a nabídky jsou součást už běžícího shellu plochy.
+- **Práce mimo UI vlákno**: knihovna UI dělá I/O asynchronně; UI vlákno
+  jen reaguje a kreslí.
+
+### Jak se GUI vzpamatuje
+
+| Co spadne | Co se stane | Co uživatel uvidí |
+|---|---|---|
+| **aplikace** | jen její okno zmizí; po restartu se vrátí ze stavu v jejím datasetu | nic jiného se nezmění |
+| **aplikace se zasekne** | `PING` bez `PONG` 3 s: okno zešedne, nabídne Počkat / Ukončit | ostatní okna běží dál |
+| **shell plochy** (lišta, spouštěč, oznámení na obrazovce) | supervisor ho spustí znovu; stav lišty je v konfiguraci, úlohy v `taskd`, oznámení ve službě oznámení | lišta na chvíli zmizí (do 300 ms), okna zůstanou |
+| **služba oznámení** | supervisor ji restartuje; fronta je uložená v jejím datasetu | nic se neztratí |
+| **ovladač GPU** | kompozitor pozná pád nebo zaseknutí (plot nesplněný do 250 ms), přepne stejný strom vrstev na záložní 2D cestu, supervisor restartuje ovladač, kompozitor se vrátí na GPU | na chvíli zmizí rozmazání, obraz běží dál |
+| **kompozitor** | viz níže | obraz zmizí nejvýš na 500 ms, okna se vrátí na svá místa |
+| **kompozitor 3× za minutu** | init přepne na záchranný režim: textový terminál na framebufferu (`term::screen`) s možností restartovat GUI | systém zůstane ovladatelný |
+
+**Restart kompozitoru bez ztráty oken:**
+
+1. Kompozitor si průběžně ukládá **stav scény** do objektu paměti, který
+   drží init (přežije pád kompozitoru): okna podle identity aplikace
+   a klíče okna, poloha, velikost, pořadí, režim, fokus, motiv. Zápis je
+   levný (jen změny) a atomický (dvě kopie, platná se přepne).
+2. Po pádu ho supervisor spustí znovu; nový kompozitor načte stav scény
+   a ukáže plochu a lištu hned.
+3. Knihovna UI v aplikaci (`ui::client`) pozná zavřený kanál, připojí se
+   znovu a **pošle celý stav okna v jednom `COMMIT`**: strom vrstev, strom
+   přístupnosti a handly svých bufferů. Buffery patří aplikaci, takže se
+   nic nepřekresluje: okno je zpět v dalším snímku.
+4. `inputd` mezitím drží vstup pro vlastníka fokusu (nejvýš 1 s, pak ho
+   zahodí), aby rozepsaný text nešel jinému oknu. Nový kompozitor nejdřív
+   obnoví fokus, pak dostane podržené události.
+5. Odznak důvěry nepotřebuje nic od aplikace: identitu a oprávnění dá
+   kompozitoru znovu init.
+
+Aplikace kreslící samy (bez `libs/ui`) dostanou totéž v nízké vrstvě
+`ui::client::Window`: zpětné volání „připojeno znovu“, ve kterém pošlou
+svůj strom vrstev.
+
+**Hlídací pes:** kompozitor posílá supervisoru tep každý snímek, kdy něco
+kreslí, a v klidu jednou za sekundu. Bez tepu 2 s (zablokování, nekonečná
+smyčka) ho supervisor ukončí a spustí znovu podle postupu výše.
+
 ## Plán implementace
 
 **Předpoklad:** kompozitor dostane GPU backend (virgl hned, Vulkan přes
@@ -628,6 +716,8 @@ stejný strom vrstev, jen bez rozmazání (lišta má pak plné pozadí
 <path class="ln" d="M210 58 L268 150" marker-end="url(#vz3)"/><path class="ln" d="M210 138 L268 160" marker-end="url(#vz3)"/>
 <rect class="acc" x="270" y="46" width="200" height="56" rx="6"/><text class="t b" x="370" y="69" text-anchor="middle">G3 systémová vrstva</text><text class="m" x="370" y="87" text-anchor="middle">dekorace, odznak, dialogy</text>
 <rect class="acc" x="270" y="126" width="200" height="56" rx="6"/><text class="t b" x="370" y="149" text-anchor="middle">G4 prvky UI</text><text class="m" x="370" y="167" text-anchor="middle">libs/ui, role a11y</text>
+<rect class="warn" x="270" y="206" width="200" height="56" rx="6"/><text class="t b" x="370" y="229" text-anchor="middle">G5 zotavení a svižnost</text><text class="m" x="370" y="247" text-anchor="middle">restart compd, měření</text>
+<path class="ln" d="M210 58 L268 230" marker-end="url(#vz3)"/>
 <path class="ln" d="M470 154 L528 50" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 110" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 170" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 230" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 290" marker-end="url(#vz3)"/>
 <path class="ln" d="M470 74 L528 290" marker-end="url(#vz3)"/>
 <path class="ln" d="M210 218 L528 54" marker-end="url(#vz3)"/><path class="ln" d="M210 298 L528 176" marker-end="url(#vz3)"/>
@@ -637,7 +727,7 @@ stejný strom vrstev, jen bez rozmazání (lišta má pak plné pozadí
 <rect class="ok" x="530" y="206" width="220" height="44" rx="6"/><text class="t b" x="640" y="233" text-anchor="middle">A4 nastavení</text>
 <rect class="ok" x="530" y="266" width="220" height="44" rx="6"/><text class="t b" x="640" y="293" text-anchor="middle">A5 přihlášení</text>
 </svg>
-<figcaption>Vlákna a závislosti. G1 a G2 běží souběžně, potom G3 a G4, potom aplikace.</figcaption>
+<figcaption>Vlákna a závislosti. G1 a G2 běží souběžně, potom G3, G4 a G5, potom aplikace.</figcaption>
 </figure>
 
 ### Fáze 1: základ (souběžně)
@@ -653,6 +743,7 @@ stejný strom vrstev, jen bez rozmazání (lišta má pak plné pozadí
 |---|---|---|---|
 | **G3 systémová vrstva** | dekorace podle [Anatomie](#anatomie) a [Režimů](#režimy) (titulek 40 / 44 px, tlačítka 28 px s cílem 40 px, okraj 6 px); stavy okna včetně „agent jedná“; **odznak důvěry** a přehled oprávnění s odebráním (data od initu a zprostředkovatele oprávnění); systémové dialogy ve vzhledu prototypu (pruh „Systém“, fráze, 300 ms); bezpečná obrazovka; přepínač oken Alt+Tab (náhledy jsou vrstvy, které kompozitor má); celoobrazovkový pruh a Esc 1 s | `compd`, `guiproto::control`, init | všechny režimy a stavy z `design/okna.html` v QEMU; odebrání oprávnění se projeví do jednoho snímku; dialog nepřijme umělý vstup |
 | **G4 prvky UI** | nové prvky: přepínač, segmenty, karty, tabulka s řazením, combobox s doplňováním, nabídka, plovoucí panel, tooltip, oznámení, dialog aplikace, posuvník; styl podle tokenů (zaoblení, pilulky, fokus 2 px); ovládání klávesnicí podle [Přístupnosti](#přístupnost); **nové role** v `guiproto::a11y::Role`; velké písmo a vysoký kontrast | `libs/ui`, `libs/guiproto` | ukázková aplikace se všemi prvky odpovídá `design/design-system.html` v obou motivech a v kontrastu; testy stromu přístupnosti pro každý prvek |
+| **G5 zotavení a svižnost** | [restart kompozitoru bez ztráty oken](#jak-se-gui-vzpamatuje) (stav scény v objektu paměti u initu, opětovné připojení v `ui::client`, podržení vstupu v `inputd`); přechod na 2D při pádu ovladače GPU; hlídací pes; záchranný režim; skládání před vsync s late latching, hardwarový kurzor, direct scanout; sdílená mezipaměť glyfů; **měření**: kompozitor zapisuje časy vstupu, skládání a výstupu každého snímku a `cargo xtask` z nich dělá zprávu | `compd`, `libs/ui`, `inputd`, init, supervisor | všechny [cíle](#cíle) splněné v QEMU testem; test zabije kompozitor, shell plochy a ovladač GPU a změří návrat |
 
 ### Fáze 3: aplikace (souběžně, po G4)
 
@@ -673,15 +764,19 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 
 - **snímky obrazovky**: QEMU `screendump` přes QMP a porovnání s referenčním
   obrázkem s tolerancí (motiv světlý, tmavý, kontrast; písmo 100 a 200 %);
-- **plynulost**: kompozitor zapisuje čas každého snímku; test selže, když
-  při animaci okna vypadne víc než 1 snímek z 60;
+- **plynulost a svižnost**: kompozitor zapisuje časy každého snímku; test
+  selže, když při animaci okna vypadne víc než 1 snímek z 60 nebo když
+  odezva vstupu překročí [cíle](#cíle);
+- **zotavení**: test zabije kompozitor, shell plochy, službu oznámení
+  a ovladač GPU a ověří, že se okna vrátila na svá místa v daném čase
+  a žádný stisk klávesy nešel jinému oknu;
 - **přístupnost**: strom přístupnosti každé obrazovky má u všech
   ovládacích prvků roli a jméno; průchod Tabem dosáhne každého prvku;
 - **kontrast**: `node design/tools/build-tokens.mjs --check` v `cargo xtask test`.
 
-**Otevřené otázky (rozhodnout před G1):**
+**Rozhodnutí k implementaci (odsouhlaseno 7. 11. 2026):**
 
-| Otázka | Možnosti | Doporučení |
+| Otázka | Možnosti | Rozhodnutí |
 |---|---|---|
 | jak se tokeny dostanou do kódu | A) `build.rs` vygeneruje Rust konstanty z `tokens.toml`; B) knihovna čte TOML za běhu; C) A pro výchozí hodnoty + B pro uživatelské motivy | **C**: rychlý start bez parseru, motivy jdou přidat bez překladu |
 | kdo kreslí lištu a spouštěč | A) kompozitor; B) samostatná aplikace s capability pro systémové vrstvy | **B**: pád lišty neshodí kompozitor, supervisor ji restartuje |
@@ -711,3 +806,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 |---|---|---|
 | v1 | 7. 11. 2026 | první návrh: styl C Vřelý, design systém, okna, systémové prvky, 4 aplikace, přístupnost, tokeny |
 | v1.1 | 7. 11. 2026 | plán implementace ve 3 fázích; počítá s GPU backendem (rozmazání, stíny shaderem), 2D jako záložní cesta |
+| v1.2 | 7. 11. 2026 | svižnost, plynulost a zotavení jako požadavek s měřitelnými cíli; restart kompozitoru bez ztráty oken; vlákno G5; rozhodnutí k implementaci (C, B, B) |

@@ -638,6 +638,101 @@ Proposed additions:
 | Tab / Shift+Tab, arrows, Enter, Esc | operating controls and dialogs |
 | in the terminal: Tab, Up / Down, Ctrl+C, Ctrl+Shift+P, Ctrl+Shift+F | complete, history, interrupt, dry run, switch notation B / C |
 
+## Responsiveness, smoothness and recovery (requirement)
+
+The foundation of the whole GUI is that it is **snappy and smooth** and
+that it **recovers on its own** from a crash of any part. The good looks
+come on top of that. These are therefore measurable goals and tests fail
+when the system misses them.
+
+### Goals
+
+Measured on a reference machine and in QEMU with virgl; at 120 Hz the same
+goals apply in milliseconds, animations are time-based, not frame-based.
+
+| Metric | Goal |
+|---|---|
+| mouse movement -> cursor on screen | within 1 frame (16.7 ms at 60 Hz); cursor on a hardware plane |
+| key press -> character in a text field | within 2 frames |
+| click -> visible reaction of the control | in the next frame |
+| dropped frames during an animation | 0 in normal operation; at most 1 in 60 in the QEMU test |
+| opening the launcher, window switcher, menu | within 50 ms |
+| first frame of a newly started application | within 150 ms (skeleton from the saved UI state) |
+| window resize | the edge follows the pointer every frame, even when the application lags |
+| idle compositor | 0 % CPU and GPU (when nothing changes, nothing is drawn) |
+| picture after a compositor crash | within 500 ms, windows in their original places, focus kept |
+| bar after a desktop shell crash | within 300 ms; windows are not affected at all |
+| GPU driver crash or hang | at most 1 dropped frame (switch to 2D), back on the GPU after the driver restarts |
+
+### How responsiveness is ensured
+
+- **The compositor never waits for an application.** It composes the
+  window's last committed buffer. A late application shows an older frame
+  in its window; other windows and the cursor are not held up. During a
+  resize it waits for a new buffer at most 1 frame, then uses the old one
+  stretched with the edge filled.
+- **Compose as late as possible before vsync**: the compositor measures
+  how long composition takes and starts just in time to meet the deadline
+  with a 2 ms margin. The pointer position and the latest input are filled
+  in at the last moment (late latching). The cursor is on a hardware plane,
+  so it moves even when composition takes longer.
+- **Full screen without composition**: a game or video in full screen goes
+  straight to the output (direct scanout); the compositor only adds the
+  badge when needed.
+- **Priorities**: the compositor and the focused window have QoS
+  `interactive`, priority is inherited across IPC into services, reads for
+  the UI overtake background work
+  ([Responsiveness](architecture.md#user-interface-responsiveness-plan)).
+- **Fast application start**: default tokens are compiled into the code (no
+  file read at start), the typeface lives in a **shared glyph cache** (a
+  read-only memory object filled by the font service), the application
+  shows its first frame from the saved UI state and only then loads data.
+  The launcher, switcher and menus are part of the already running desktop
+  shell.
+- **Work off the UI thread**: the UI library does I/O asynchronously; the UI
+  thread only reacts and draws.
+
+### How the GUI recovers
+
+| What crashes | What happens | What the user sees |
+|---|---|---|
+| **an application** | only its window disappears; after a restart it comes back from the state in its dataset | nothing else changes |
+| **an application hangs** | `PING` without `PONG` for 3 s: the window turns grey and offers Wait / Quit | other windows keep running |
+| **desktop shell** (bar, launcher, on-screen notifications) | the supervisor starts it again; the bar state is in the configuration, tasks in `taskd`, notifications in the notification service | the bar disappears briefly (up to 300 ms), windows stay |
+| **notification service** | the supervisor restarts it; the queue is stored in its dataset | nothing is lost |
+| **GPU driver** | the compositor detects the crash or hang (fence not signalled within 250 ms), switches the same layer tree to the 2D fallback path, the supervisor restarts the driver, the compositor returns to the GPU | blur disappears briefly, the picture keeps running |
+| **compositor** | see below | the picture is gone for at most 500 ms, windows return to their places |
+| **compositor 3 times in a minute** | init switches to recovery mode: a text terminal on the framebuffer (`term::screen`) with an option to restart the GUI | the system stays usable |
+
+**Restarting the compositor without losing windows:**
+
+1. The compositor continuously saves the **scene state** into a memory
+   object held by init (it survives the compositor's crash): windows by
+   application identity and window key, position, size, order, mode,
+   focus, theme. Writing is cheap (changes only) and atomic (two copies,
+   the valid one is switched).
+2. After a crash the supervisor starts it again; the new compositor loads
+   the scene state and shows the desktop and the bar right away.
+3. The UI library in the application (`ui::client`) notices the closed
+   channel, reconnects and **sends the whole window state in one
+   `COMMIT`**: the layer tree, the accessibility tree and the handles of
+   its buffers. The buffers belong to the application, so nothing is
+   redrawn: the window is back in the next frame.
+4. Meanwhile `inputd` holds input for the focus owner (at most 1 s, then
+   drops it), so half-typed text does not go to another window. The new
+   compositor first restores focus, then receives the held events.
+5. The trust badge needs nothing from the application: init gives the
+   identity and permissions to the compositor again.
+
+Applications that draw themselves (without `libs/ui`) get the same in the
+low layer `ui::client::Window`: a "reconnected" callback in which they send
+their layer tree.
+
+**Watchdog:** the compositor sends the supervisor a heartbeat every frame
+it draws, and once a second when idle. Without a heartbeat for 2 s
+(deadlock, infinite loop) the supervisor kills it and starts it again
+following the steps above.
+
 ## Implementation plan
 
 **Assumption:** the compositor gets a GPU backend (virgl now, Vulkan via
@@ -659,6 +754,8 @@ background at 90 % opacity) and with shadows from precomputed textures.
 <path class="ln" d="M210 58 L268 150" marker-end="url(#vz3)"/><path class="ln" d="M210 138 L268 160" marker-end="url(#vz3)"/>
 <rect class="acc" x="270" y="46" width="200" height="56" rx="6"/><text class="t b" x="370" y="69" text-anchor="middle">G3 system layer</text><text class="m" x="370" y="87" text-anchor="middle">decorations, badge, dialogs</text>
 <rect class="acc" x="270" y="126" width="200" height="56" rx="6"/><text class="t b" x="370" y="149" text-anchor="middle">G4 UI controls</text><text class="m" x="370" y="167" text-anchor="middle">libs/ui, a11y roles</text>
+<rect class="warn" x="270" y="206" width="200" height="56" rx="6"/><text class="t b" x="370" y="229" text-anchor="middle">G5 recovery and speed</text><text class="m" x="370" y="247" text-anchor="middle">compd restart, metrics</text>
+<path class="ln" d="M210 58 L268 230" marker-end="url(#vz3)"/>
 <path class="ln" d="M470 154 L528 50" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 110" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 170" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 230" marker-end="url(#vz3)"/><path class="ln" d="M470 154 L528 290" marker-end="url(#vz3)"/>
 <path class="ln" d="M470 74 L528 290" marker-end="url(#vz3)"/>
 <path class="ln" d="M210 218 L528 54" marker-end="url(#vz3)"/><path class="ln" d="M210 298 L528 176" marker-end="url(#vz3)"/>
@@ -668,7 +765,7 @@ background at 90 % opacity) and with shadows from precomputed textures.
 <rect class="ok" x="530" y="206" width="220" height="44" rx="6"/><text class="t b" x="640" y="233" text-anchor="middle">A4 settings</text>
 <rect class="ok" x="530" y="266" width="220" height="44" rx="6"/><text class="t b" x="640" y="293" text-anchor="middle">A5 sign-in</text>
 </svg>
-<figcaption>Threads and dependencies. G1 and G2 run in parallel, then G3 and G4, then the applications.</figcaption>
+<figcaption>Threads and dependencies. G1 and G2 run in parallel, then G3, G4 and G5, then the applications.</figcaption>
 </figure>
 
 ### Phase 1: foundation (in parallel)
@@ -684,6 +781,7 @@ background at 90 % opacity) and with shadows from precomputed textures.
 |---|---|---|---|
 | **G3 system layer** | decorations per [Anatomy](#anatomy) and [Modes](#modes) (title bar 40 / 44 px, buttons 28 px with a 40 px target, edge 6 px); window states including "agent acting"; the **trust badge** and the permission overview with revoke (data from init and the permission broker); system dialogs in the prototype look ("System" strip, phrase, 300 ms); secure screen; Alt+Tab window switcher (thumbnails are layers the compositor already has); full-screen strip and Esc held for 1 s | `compd`, `guiproto::control`, init | all modes and states from `design/okna.html` in QEMU; revoking a permission shows within one frame; the dialog rejects synthetic input |
 | **G4 UI controls** | new controls: switch, segmented control, tabs, sortable table, combobox with completion, menu, popover, tooltip, notification, application dialog, scrollbar; styled by tokens (radii, pills, 2 px focus); keyboard operation per [Accessibility](#accessibility); **new roles** in `guiproto::a11y::Role`; large text and high contrast | `libs/ui`, `libs/guiproto` | a demo application with all controls matches `design/design-system.html` in both themes and in high contrast; accessibility-tree tests for every control |
+| **G5 recovery and responsiveness** | [compositor restart without losing windows](#how-the-gui-recovers) (scene state in a memory object held by init, reconnect in `ui::client`, input held in `inputd`); switch to 2D when the GPU driver crashes; watchdog; recovery mode; compose before vsync with late latching, hardware cursor, direct scanout; shared glyph cache; **metrics**: the compositor records input, composition and output times of every frame and `cargo xtask` turns them into a report | `compd`, `libs/ui`, `inputd`, init, supervisor | all [goals](#goals) met in a QEMU test; the test kills the compositor, the desktop shell and the GPU driver and measures the recovery |
 
 ### Phase 3: applications (in parallel, after G4)
 
@@ -705,15 +803,19 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 
 - **screenshots**: QEMU `screendump` via QMP compared to a reference image
   with a tolerance (light, dark, high-contrast theme; text at 100 and 200 %);
-- **smoothness**: the compositor records the time of each frame; the test
-  fails when more than 1 frame in 60 is dropped during a window animation;
+- **smoothness and responsiveness**: the compositor records the times of
+  each frame; the test fails when more than 1 frame in 60 is dropped during
+  a window animation or when input latency exceeds the [goals](#goals);
+- **recovery**: the test kills the compositor, the desktop shell, the
+  notification service and the GPU driver and checks that windows came back
+  to their places in time and that no key press went to another window;
 - **accessibility**: the accessibility tree of every screen has a role and a
   name on all controls; Tab traversal reaches every control;
 - **contrast**: `node design/tools/build-tokens.mjs --check` in `cargo xtask test`.
 
-**Open questions (decide before G1):**
+**Implementation decisions (agreed 2026-11-07):**
 
-| Question | Options | Recommendation |
+| Question | Options | Decision |
 |---|---|---|
 | how tokens get into code | A) `build.rs` generates Rust constants from `tokens.toml`; B) the library reads TOML at run time; C) A for defaults + B for user themes | **C**: fast start without a parser, themes can be added without a rebuild |
 | who draws the bar and launcher | A) the compositor; B) a separate application with a capability for system layers | **B**: a crashing bar does not take the compositor down, the supervisor restarts it |
@@ -744,3 +846,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 |---|---|---|
 | v1 | 2026-11-07 | first design: style C Warm, design system, windows, system elements, 4 applications, accessibility, tokens |
 | v1.1 | 2026-11-07 | implementation plan in 3 phases; assumes the GPU backend (blur, shader shadows), 2D as a fallback path |
+| v1.2 | 2026-11-07 | responsiveness, smoothness and recovery as a requirement with measurable goals; compositor restart without losing windows; thread G5; implementation decisions (C, B, B) |
