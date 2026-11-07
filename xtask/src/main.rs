@@ -76,7 +76,10 @@ struct Options {
 /// Navratovy kod QEMU pri uspechu testu: isa-debug-exit vraci (v << 1) | 1
 /// a kernel zapisuje v = 0x10 (viz arch::qemu_exit).
 const QEMU_TEST_SUCCESS: i32 = 33;
-const QEMU_TEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// Limit testoveho behu v QEMU. Testy (hlavne FS: velky adresar, historie)
+/// trvaji kolem 100 s, na vytizenem stroji dele - limit ma rezervu, aby
+/// beh nebyl nahodne nestabilni.
+const QEMU_TEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 fn main() -> ExitCode {
     match run_cli() {

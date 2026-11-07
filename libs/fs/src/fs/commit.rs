@@ -410,6 +410,11 @@ impl<D: BlockDevice> Fs<D> {
         self.enter_dataset(dataset)?;
         let src = self.cur_ds;
         let head = self.head_active()?.head.ok_or(Error::BadState)?;
+        // Klon by obsahoval vstupy do tychz vnorenych datasetu (dve cesty
+        // k jednomu datasetu) - zatim nepodporovano.
+        if self.contains_datasets()? {
+            return Err(Error::NotSupported);
+        }
         if self.branches_active()?.iter().any(|(_, n)| fold_name(n) == fold_name(name)) {
             return Err(Error::AlreadyExists);
         }
@@ -443,33 +448,16 @@ impl<D: BlockDevice> Fs<D> {
         Ok(out)
     }
 
-    /// Cesta datasetu `id` v zive verzi.
-    pub(super) fn dataset_path(&mut self, id: u64) -> Result<String> {
-        if id == crate::layout::ROOT_DATASET {
-            return Ok("/".into());
-        }
-        let back = self.cur_ds;
-        let all = self.datasets_all()?;
-        self.activate(back)?;
-        all.into_iter().find(|d| d.id == id && !d.path.is_empty()).map(|d| d.path).ok_or(Error::NotFound)
-    }
-
     /// Vetve datasetu `dataset` (serazene podle jmena). Vyzaduje `READ`.
     pub fn branches(&mut self, dataset: &str) -> Result<Vec<BranchInfo>> {
         self.require(dataset, rights::READ)?;
         self.enter_dataset(dataset)?;
         let list = self.branches_active()?;
-        let back = self.cur_ds;
-        let all = self.datasets_all()?;
-        self.activate(back)?;
-        let mut out: Vec<BranchInfo> = list
-            .into_iter()
-            .map(|(id, name)| BranchInfo {
-                path: all.iter().find(|d| d.id == id).map(|d| d.path.clone()).unwrap_or_default(),
-                dataset: id,
-                name,
-            })
-            .collect();
+        let mut out: Vec<BranchInfo> = Vec::new();
+        for (id, name) in list {
+            let path = self.dataset_path(id).unwrap_or_default();
+            out.push(BranchInfo { path, dataset: id, name });
+        }
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
     }

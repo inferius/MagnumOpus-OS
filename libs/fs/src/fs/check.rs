@@ -444,6 +444,11 @@ impl Objects {
                     r.problem(format!("nastaveni datasetu je poskozene: {e:?}"));
                 }
             }
+            item::DSLINK if k.oid == META => {
+                if let Err(e) = crate::records::DsLink::decode(v) {
+                    r.problem(format!("odkaz pripojeni datasetu je poskozeny: {e:?}"));
+                }
+            }
             item::HEAD if k.oid == META => {
                 if let Err(e) = crate::records::Head::decode(v) {
                     r.problem(format!("zaznam HEAD je poskozeny: {e:?}"));

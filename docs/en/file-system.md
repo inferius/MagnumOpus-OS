@@ -15,9 +15,12 @@ cheap `fsync`) and **not waste space** (metadata overhead ~0.4 %).
 > [v2 archive](fs-v2.md).
 >
 > Format v3 is being introduced in phases according to the [FS v3
-> design](fs-v3-design.md). The first part of phase 1 is done: 16 KiB nodes,
-> v3 pointer, superblock and object record, names up to 1024 characters,
-> symbolic links and the file size limit. A v2 volume is not mounted
+> design](fs-v3-design.md). Done are phase 1 (format, datasets and clones,
+> handles, permissions, protocol v2) and **phase 2 - history**: change
+> journal, trash, undo of operations, file versions, automatic snapshots,
+> commits with a logical ID, branches and merge, "try changes aside",
+> extended attributes and expiry - described in the separate chapter
+> [FS history](fs-history.md). A v2 volume is not mounted
 > (`NOT_SUPPORTED`); data is not converted yet, disks from the `xtask` tool
 > are simply recreated.
 
@@ -28,13 +31,14 @@ what works:
 
 | Item | In the format | Driver today |
 |---|---|---|
-| volume UUID, feature flags | yes | **uses**; the bit `INCOMPAT_TIME_SECS` is defined ([times](#object-times)) |
+| volume UUID, feature flags | yes | **uses**; defined bits `INCOMPAT_TIME_SECS` ([times](#object-times)), `RO_COMPAT_ACL`, `RO_COMPAT_HISTORY` ([history](fs-history.md#on-disk)) |
 | device number in `BlockPtr`, `device_index/count` in the superblock | yes | **one device only**: the device must be 0 and the count 1, otherwise `CORRUPTED`; several disks (mirror, RAID) after phase 5 |
 | `BlockPtr` flags (compression, encryption, sharing, cloud) | reserved | **unused**; a node with a flag = `NOT_SUPPORTED` |
 | extent flags (preallocation) | reserved | **unused**; an extent with a flag = `NOT_SUPPORTED` |
 | object flag `INODE_REMOTE` | reserved | **unused** (phase 6) |
 | permissions (`acl`), owner | yes | **uses** ([Permissions](#permissions-and-session-identity)) |
-| extended attribute count in the object record | yes | **writes 0**, does not read (later) |
+| extended attributes (`XATTR`), count in the object record | yes | **uses** ([attributes](fs-history.md#extended-attributes-and-expiry)) |
+| change journal, trash, snapshot metadata, commits, branches, expiry index | yes | **uses** ([FS history](fs-history.md)) |
 | access time (`atime`) | yes | **only by setting it** (`set_times`); reading does not change it |
 | object generation, creation time | yes | **uses** (`Stat`, log replay) |
 | symbolic links, names up to 1024 characters, size limit | yes | **uses** |
@@ -42,7 +46,6 @@ what works:
 | diff of versions, restore as a copy | yes | **uses** ([Diff of versions](#diff-of-versions-and-restore-as-a-copy)) |
 | handles, orphans, share modes, range locks | yes | **uses** ([Handles](#open-files-handles)) |
 | protocol v2 in fsd (sessions, handles, conditional save) | yes | **uses** ([Protocol v2](#protocol-v2-sessions-handles-conditional-save)) |
-| permissions, owner | no (coming) | plan: [v3 design](fs-v3-design.md#implementation-order) |
 
 ## What it offers
 
@@ -67,7 +70,11 @@ what works:
 | Read-only snapshots and their deletion (deadlists) | done | [Snapshots](#snapshots) |
 | Datasets (folders with their own history), writable clones | done | [Datasets](#datasets-and-clones) |
 | Consistency check (fsck) and data verification (scrub) | done | [Check](#consistency-check-and-scrub) |
-| Writable clones, native git, indexes, search | planned | [Versioning and git](#versioning-and-git) |
+| Change journal with sequence numbers, change watching (`JOURNAL_WATCH`), a view with a position | done | [History: journal](fs-history.md#change-journal) |
+| Trash, undo of operations, file versions, automatic snapshots | done | [History](fs-history.md#trash) |
+| Commits with a logical ID, branches, three-way merge, "try changes aside" | done | [History: commits](fs-history.md#commits-and-logical-id) |
+| Extended attributes, file expiry | done | [History: attributes](fs-history.md#extended-attributes-and-expiry) |
+| Git layer, indexes, search | planned | [Versioning and git](#versioning-and-git) |
 
 ## Quick example
 
@@ -690,6 +697,13 @@ fallback and checksums help then - the last confirmed changes may be lost.
 
 ## fsync and the intent log
 
+> **Change from v3 (phase 1):** new records 14 `Actor` (who performed the
+> following operations), 15 `Trash`, 16 `Restore`, 17 `Purge`, 18
+> `SetXattr`; merged `CONTENT` journal records get their number at the end
+> of the batch. **Why:** the change journal must come out with the same
+> numbers and users after log replay, and the trash and attributes must
+> survive a crash. ([FS history](fs-history.md#on-disk))
+
 > **Change from v2:** pending changes are cleared only after flush, log blocks are allocated in advance, a log read error is not the end of the chain, a new record 7 (symlink) and the generation on create. **Why:** a confirmed `fsync` must not be lost and nothing may be confirmed falsely. ([all changes](fs-versions.md#transition-v2---v3))
 
 A commit rewrites many blocks and does two flushes - expensive for every
@@ -1074,6 +1088,13 @@ conflict returns `LOCKED` at once.
 
 ## Snapshots
 
+> **Change from v3 (phase 1):** a snapshot has metadata (the `SNAPMETA`
+> item): kind (manual, automatic, commit, view, aside), creation time and
+> journal position; `SnapshotInfo` returns them. Temporary views (`VIEW`)
+> are not in the listing. **Why:** automatic snapshots are pruned by time
+> and only their own, and undo of operations looks for "the last snapshot
+> before the operation" by the journal. ([FS history](fs-history.md))
+
 A snapshot is the tree root saved at creation time - read-only, created
 instantly (one commit), takes no space until live data changes.
 
@@ -1111,18 +1132,24 @@ the same as in ZFS:
 
 ## Versioning and git
 
-**Done:** snapshots give instant versions of the whole volume and reading
-any file from any version. The checksums in pointers form a Merkle tree -
+> **Change from v3 (phase 1):** versioned commits with a logical ID,
+> branches as clones, three-way merge, file versions and extended
+> attributes are done. **Why:** phase 2 of the design. ([FS history](fs-history.md))
+
+**Done:** snapshots and datasets give instant versions, writable clones
+and the diff of versions; phase 2 added **commits** (author, message,
+parents, a BLAKE3 logical ID independent of block placement), **branches**,
+**merge**, file versions, undo of operations and the change journal - see
+[FS history](fs-history.md). The checksums in pointers form a Merkle tree -
 the same principle git is built on.
 
 **Planned** (see [architecture](architecture.md#content-addressed-fs-and-native-versioning-proposal)):
 
-- writable snapshot clones (branches) and A/B system updates,
+- A/B system updates on top of clones,
 - the difference of two versions without walking the whole tree (comparing
   subtree checksums),
-- with BLAKE3 content addressing: deduplication and mapping to git objects
-  (blob/tree) - a git repository without duplicating data in `.git`,
-- programmatic access to file history and extended attributes,
+- a git layer (phase 5): git object IDs as extended attributes, repository
+  import and export, push/pull over the network,
 - indexes for search (name, type, time, size).
 
 ## Values from disk and all-or-nothing operations
@@ -1159,6 +1186,12 @@ the dirty tree before every operation; it comes with application
 transactions (phase 5).
 
 ## Consistency check and scrub
+
+> **Change from v3 (phase 1):** also checks the history structures: a
+> contiguous journal sequence and its state, snapshot metadata, the trash
+> (record <-> entry in the trash), the attribute count, the expiry index
+> against the attributes, the logical hash cache. **Why:** every format
+> change must be verifiable. ([FS history](fs-history.md#on-disk))
 
 > **Change from v2:** checks the stored state also on a read-only mount, fixed memory (bitmaps), a limited number of reports, checks of object kinds and link targets. **Why:** during uncertain recovery the state must be checked without writing, and a large or badly damaged volume must not overwhelm the check. ([all changes](fs-versions.md#transition-v2---v3))
 
@@ -1383,6 +1416,11 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
   `FsClient::save_if` does it all at once. Whoever had the original file
   open keeps reading the original content.
 
+History operations (the journal and watching it, view, trash, undo of
+operations, versions, dataset settings, commits, branches, merge, "aside",
+attributes, expiry, dataset creation and deletion) have numbers **54-86** - the table is in
+[FS history](fs-history.md#protocol-operations-54-86).
+
 ⚠️ **Limitations:** handles are valid until the service restarts; after a
 crash and intent log replay a file may have a different revision (the
 content version is not logged) - the client then gets `CONFLICT` (the safe
@@ -1604,8 +1642,10 @@ system returns them:
 | `tests/errors.rs` | device errors: a failed data write loses no data and can be retried, an overwrite leaves no hole, nothing is confirmed after a failed flush |
 | `tests/mount.rs` | superblock selection: unreadable slot, transient error without fallback, unknown `incompat` and newer version = refusal, unknown `ro_compat` = read-only without writes, nonsensical values = reported fallback, zeroing newer slots, device without a durability guarantee |
 | `tests/objects.rs` | format v3: object record, names up to 1024 characters, text direction controls rejected, symbolic links (also through the intent log), file size limit and summary saturation, object generation |
+| `tests/journal.rs`, `tests/trash.rs`, `tests/history.rs`, `tests/commits.rs` | history (phase 2) - see [FS history](fs-history.md#tests) |
 | `tests/perf.rs` | performance and overhead (run manually) |
 | init `tests/fs.rs` | 11 tests in the system through fsd and the real virtio-blk driver, including a file written on the host and a power-loss simulation |
+| init `tests/fs_hist.rs` | history in the system through fsd: journal and `JOURNAL_WATCH`, trash, commit, branch and merge, "aside", attributes, fsck |
 
 Number of random cases: `PROPTEST_CASES=150000 cargo test -p fs --features std --release`
 (verified without errors).

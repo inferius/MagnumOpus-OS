@@ -736,7 +736,7 @@ průzkumníku](#práce-s-verzemi-v-průzkumníku)) přijde hned po ní. Pořadí
 | Fáze | Obsah |
 |---|---|
 | 1 - formát | uzly 16 KiB, superblok/ukazatel/záznam v3, příznaky vlastností, datasety a strom datasetů (i rozlišení velikosti písmen), jména a symlinky, opravy z review, protokol v2 s handly a zámky, oprávnění (capabilities, granty, viditelnost, profily, zákaz spouštění na datech) |
-| 2 - verze | commity, větve, klony, diff, merge, žurnál změn, automatické snapshoty, koš, historie verzí, vrácení operací, sledování změn, expirace souborů |
+| 2 - verze (**hotovo**, [Historie FS](fs-historie.md)) | commity, větve, klony, diff, merge, žurnál změn, automatické snapshoty, koš, historie verzí, vrácení operací, sledování změn, expirace souborů |
 | 3 - data | komprese, okamžité kopie, deduplikace, automatické díry, metadata 2x a samoléčení, scrub na pozadí, předalokace |
 | 4 - ochrana | šifrované trezory (ochránci klíče, volitelně TPM), neměnné snapshoty, kvóty i pro aplikace, audit s hashovým řetězem, původ souboru, detekce ransomwaru a návnady, zdraví disku, ověřený systém |
 | 5 - ostatní | indexy a štítky, send/receive, transakce, ARC a přednačítání, změna velikosti, vrstva pro git, mapování souborů do paměti (s jádrem) |

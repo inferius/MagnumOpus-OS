@@ -236,3 +236,61 @@ fn merge_requires_commits() {
     assert_eq!(fs.stat("/x").unwrap_err(), Error::NotFound);
     assert_clean(&mut fs);
 }
+
+/// Stejna sekvence jako systemovy test (init `fs_hist.rs`) nad korenovym
+/// datasetem: vetev a merge korene, zrusit vetev, "bokem" korene, fsck.
+#[test]
+fn root_dataset_branch_merge_aside() {
+    let mut fs = new_fs(16384);
+    put(&mut fs, "/vitejte.txt", b"ahoj\n");
+    let v = fs.view("/").unwrap();
+    fs.release_view("/", &v.snapshot).unwrap();
+    fs.create("/f2-kos", Kind::Dir).unwrap();
+    put(&mut fs, "/f2-kos/smazat.txt", b"x");
+    let id = fs.trash("/f2-kos").unwrap();
+    fs.trash_purge("/", id).unwrap();
+    put(&mut fs, "/f2-repo.txt", b"radek 1\nradek 2\n");
+    let c1 = fs.commit_version("/", "zaklad").unwrap();
+    fs.branch("/", "f2-vetev", "/f2-vetev").unwrap();
+    put(&mut fs, "/f2-vetev/f2-repo.txt", b"radek 1\nradek 2\nradek 3\n");
+    fs.create("/f2-vetev/f2-novy.txt", Kind::File).unwrap();
+    let cb = fs.commit_version("/f2-vetev", "vetev").unwrap();
+    assert_eq!(cb.parents, [c1.id]);
+    let r = fs.merge("/", "/f2-vetev").unwrap();
+    assert!(r.conflicts.is_empty(), "{:?}", r.conflicts);
+    assert_clean(&mut fs);
+    fs.delete_branch("/", "f2-vetev").unwrap();
+    assert_clean(&mut fs);
+    put(&mut fs, "/f2-bokem.txt", b"original");
+    fs.aside_begin("/", "/f2-pokus").unwrap();
+    put(&mut fs, "/f2-pokus/f2-bokem.txt", b"ZMENENO");
+    let sel = [alloc::string::String::from("/f2-bokem.txt")];
+    fs.aside_apply("/f2-pokus", Some(&sel)).unwrap();
+    fs.aside_discard("/f2-pokus").unwrap();
+    assert_clean(&mut fs);
+    let mut fs = remount(fs);
+    assert_clean(&mut fs);
+}
+
+/// Cesta vetve (datasetu) podle zpetneho odkazu: vnoreni, presun, pad.
+#[test]
+fn branch_path_follows_moves() {
+    let mut fs = new_fs(16384);
+    fs.create("/a", Kind::Dir).unwrap();
+    fs.create_dataset("/a/repo").unwrap();
+    put(&mut fs, "/a/repo/f", b"x");
+    fs.commit_version("/a/repo", "c").unwrap();
+    fs.create("/w", Kind::Dir).unwrap();
+    fs.branch("/a/repo", "b", "/w/b").unwrap();
+    assert_eq!(fs.branches("/a/repo").unwrap()[0].path, "/w/b");
+    fs.create("/w/sub", Kind::Dir).unwrap();
+    fs.rename("/w/b", "/w/sub/b2").unwrap();
+    assert_eq!(fs.branches("/a/repo").unwrap()[0].path, "/w/sub/b2");
+    fs.fsync().unwrap();
+    let mut fs = remount(fs);
+    assert_eq!(fs.branches("/a/repo").unwrap()[0].path, "/w/sub/b2");
+    fs.rename("/a", "/c").unwrap();
+    fs.rename("/w/sub", "/w/s").unwrap();
+    assert_eq!(fs.branches("/c/repo").unwrap()[0].path, "/w/s/b2");
+    assert_clean(&mut fs);
+}

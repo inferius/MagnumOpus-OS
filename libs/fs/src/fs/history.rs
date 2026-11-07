@@ -5,7 +5,7 @@
 //!   snapshotech hleda primo podle nej (presun ani prejmenovani nevadi).
 //!   Verze = ruzna hodnota `Inode::version` (pocitadlo zmen obsahu).
 //! - **Vraceni operace** (`undo`) podle cisla v zurnalu: presun se vrati
-//!   zpet, koš obnovi, vytvoreni presune do kose, trvale smazani a zmena
+//!   zpet, kos obnovi, vytvoreni presune do kose, trvale smazani a zmena
 //!   obsahu se obnovi z posledniho snapshotu pred operaci. Nic se nemaze
 //!   natrvalo: co by se prepsalo, jde do kose.
 //! - **Automaticke snapshoty:** pravidla jsou nastaveni datasetu

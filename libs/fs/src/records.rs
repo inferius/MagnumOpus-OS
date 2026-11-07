@@ -595,6 +595,37 @@ pub fn decode_pairs(b: &[u8]) -> Result<Vec<(u64, u64)>> {
     Ok(b.chunks_exact(16).map(|c| (u64_at(c, 0), u64_at(c, 8))).collect())
 }
 
+// --- pripojeni datasetu ---
+
+/// Zpetny odkaz datasetu na misto, kde je pripojeny.
+///
+/// ```text
+/// 0 dataset rodice u64   8 slozka (oid v rodici) u64   16 jmeno (UTF-8)
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DsLink {
+    pub parent_ds: u64,
+    pub dir: u64,
+    pub name: String,
+}
+
+impl DsLink {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut b = Vec::with_capacity(16 + self.name.len());
+        put_u64(&mut b, self.parent_ds);
+        put_u64(&mut b, self.dir);
+        b.extend_from_slice(self.name.as_bytes());
+        b
+    }
+
+    pub fn decode(b: &[u8]) -> Result<Self> {
+        if b.len() < 16 {
+            return Err(Error::Corrupted);
+        }
+        Ok(Self { parent_ds: u64_at(b, 0), dir: u64_at(b, 8), name: utf8(&b[16..])? })
+    }
+}
+
 // --- logicky hash a vetve ---
 
 /// Pamet logickeho hashe obsahu souboru: plati, dokud se nezmeni verze

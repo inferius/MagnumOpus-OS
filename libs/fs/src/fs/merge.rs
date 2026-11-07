@@ -948,6 +948,10 @@ impl<D: BlockDevice> Fs<D> {
         self.require(dataset, rights::MANAGE)?;
         let name = self.guarded(|fs| {
             fs.enter_dataset(dataset)?;
+            // Vnorene datasety by v klonu byly druhou cestou k temuz datasetu.
+            if fs.contains_datasets()? {
+                return Err(Error::NotSupported);
+            }
             let name = alloc::format!("aside-{}", fs.s.next_snapshot);
             fs.snapshot_internal(&name, snapkind::ASIDE)?;
             Ok(name)

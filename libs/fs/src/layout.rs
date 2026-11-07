@@ -167,6 +167,10 @@ pub mod item {
     /// Posledni commit datasetu a rozpracovany merge (`records::Head`),
     /// objekt META_OID, offset 0.
     pub const HEAD: u8 = 22;
+    /// Kde je dataset pripojeny (`records::DsLink`: dataset rodice, slozka,
+    /// jmeno) - ve strome datasetu samotneho, objekt META_OID, offset 0.
+    /// Cesta datasetu se tak zjisti bez pruchodu celym stromem.
+    pub const DSLINK: u8 = 23;
 }
 
 /// Klic polozky stromu; razeni podle (oid, kind, offset).

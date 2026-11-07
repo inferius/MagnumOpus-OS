@@ -1,4 +1,4 @@
-//! Zurnal zmen datasetu: uspořádaný proud zmen (poradove cislo, operace,
+//! Zurnal zmen datasetu: usporadany proud zmen (poradove cislo, operace,
 //! objekt, kdo, cas) pro sledovani zmen, indexovani, synchronizaci
 //! a vraceni operaci.
 //!

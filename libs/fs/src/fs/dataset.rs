@@ -21,6 +21,7 @@
 //! nezapisuji do intent logu.
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use abi::{Error, Result};
@@ -177,10 +178,23 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Vsechny datasety: korenovy, ulozene i nove v pameti.
+    /// Jen cisla ze zaznamu (bez cest - ty by znamenaly pruchod celym
+    /// stromem; vola se pri pripojeni a z kroku historie kazdou minutu).
     pub(super) fn all_dataset_ids(&mut self) -> Result<Vec<u64>> {
-        let mut ids: Vec<u64> = self.datasets_all()?.into_iter().map(|d| d.id).collect();
+        let root = self.root_tree();
+        let mut ids: Vec<u64> = btree::collect(
+            &mut self.s,
+            &root,
+            &Key::new(META_OID, item::DATASET, 0),
+            &Key::new(META_OID, item::DATASET + 1, 0),
+        )?
+        .into_iter()
+        .map(|(k, _)| k.offset)
+        .collect();
+        ids.extend(self.loaded());
         ids.push(ROOT_DATASET);
         ids.sort_unstable();
+        ids.dedup();
         Ok(ids)
     }
 
@@ -310,7 +324,65 @@ impl<D: BlockDevice> Fs<D> {
             },
         )?;
         self.touch_dir(parent)?;
+        self.set_dslink(id, parent, &name)?;
         self.jlog(crate::records::jop::CREATE, KIND_DATASET, id, 0, parent, &name, 0)
+    }
+
+    /// Zapise datasetu `id` zpetny odkaz: je pripojeny v aktivnim datasetu
+    /// ve slozce `dir` pod jmenem `name` (vytvoreni, klon, presun polozky).
+    pub(super) fn set_dslink(&mut self, id: u64, dir: u64, name: &str) -> Result<()> {
+        let parent_ds = self.cur_ds;
+        let link = crate::records::DsLink { parent_ds, dir, name: name.into() };
+        self.activate(id)?;
+        let r = self.put(Key::new(META_OID, item::DSLINK, 0), link.encode());
+        self.cur_rec_dirty = true;
+        self.activate(parent_ds)?;
+        r
+    }
+
+    /// Cesta datasetu `id` v zive verzi podle zpetnych odkazu (cena podle
+    /// hloubky). Dataset bez odkazu (z doby pred nim): pruchod stromem.
+    pub(super) fn dataset_path(&mut self, id: u64) -> Result<String> {
+        let back = self.cur_ds;
+        let r = self.dataset_path_inner(id);
+        self.activate(back)?;
+        r
+    }
+
+    fn dataset_path_inner(&mut self, mut id: u64) -> Result<String> {
+        let mut parts: Vec<alloc::string::String> = Vec::new();
+        for _ in 0..super::MAX_DEPTH {
+            if id == ROOT_DATASET {
+                let mut p = alloc::string::String::new();
+                for part in parts.iter().rev() {
+                    let t = part.trim_end_matches('/');
+                    p.push_str(if t.is_empty() { "" } else { t });
+                }
+                if p.is_empty() {
+                    p.push('/');
+                }
+                return Ok(p);
+            }
+            self.activate(id)?;
+            let root = self.s.root;
+            let Some(raw) = btree::get(&mut self.s, &root, &Key::new(META_OID, item::DSLINK, 0))? else {
+                let all = self.datasets_all()?;
+                let rest: alloc::string::String = parts.iter().rev().map(|s| s.trim_end_matches('/')).collect();
+                return all
+                    .into_iter()
+                    .find(|d| d.id == id && !d.path.is_empty())
+                    .map(|d| alloc::format!("{}{rest}", d.path))
+                    .ok_or(Error::NotFound);
+            };
+            let link = crate::records::DsLink::decode(&raw)?;
+            self.activate(link.parent_ds)?;
+            // Slozka v rodici (cesta uvnitr rodice) + jmeno.
+            let dir = self.path_of(link.dir)?.ok_or(Error::NotFound)?;
+            let dir = if dir == "/" { alloc::string::String::new() } else { dir };
+            parts.push(alloc::format!("{dir}/{}", link.name));
+            id = link.parent_ds;
+        }
+        Err(Error::Corrupted)
     }
 
     /// Vytvori novy prazdny dataset `path` (pro uzivatele obycejna slozka
@@ -448,7 +520,7 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Obsahuje aktivni dataset polozku jineho datasetu?
-    fn contains_datasets(&mut self) -> Result<bool> {
+    pub(super) fn contains_datasets(&mut self) -> Result<bool> {
         let root = self.s.root;
         let mut found = false;
         btree::range(

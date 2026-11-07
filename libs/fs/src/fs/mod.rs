@@ -972,6 +972,7 @@ impl<D: BlockDevice> Fs<D> {
             self.add_dirent(dst, Dirent { oid: d.oid, kind: d.kind, name: new_name.clone() })?;
             self.touch_dir(src)?;
             self.touch_dir(dst)?;
+            self.set_dslink(d.oid, dst, &new_name)?;
             return Ok(Moved { kind: KIND_DATASET, oid: d.oid, generation: 0, name: d.name, new_name });
         }
         // Adresar nejde presunout do sveho podstromu (s mezi pro cyklus

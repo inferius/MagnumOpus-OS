@@ -40,6 +40,8 @@ pub struct Session {
     pub mounts: Vec<Mount>,
     /// Ridici relace (zaklada dalsi relace s identitou).
     pub control: bool,
+    /// Odlozene `JOURNAL_WATCH` (odpoved posle hlavni smycka).
+    pub watch: Option<crate::serve_hist::Watch>,
 }
 
 impl Session {
@@ -53,6 +55,7 @@ impl Session {
             identity,
             mounts,
             control: false,
+            watch: None,
         }
     }
 
@@ -71,6 +74,12 @@ impl Session {
             return Err(Error::AccessDenied);
         }
         Ok(p)
+    }
+
+    /// Cesta ve FS -> cesta relace (pro cesty, ktere vraci FS). Cesta mimo
+    /// pripojene se vrati prazdna (relace ji nevidi).
+    pub fn unmap(&self, path: &str) -> String {
+        fsproto::perm::unmap_path(&self.mounts, path).unwrap_or_default()
     }
 
     /// Vidi relace cely FS (`/ -> /`)? Operace nad celym korenovym
@@ -94,6 +103,8 @@ pub struct Reply {
     pub handles: Vec<Handle>,
     pub new_session: Option<Session>,
     pub session_ops: Vec<SessionOp>,
+    /// Odpoved odlozit (`JOURNAL_WATCH` bez zaznamu).
+    pub watch: Option<crate::serve_hist::Watch>,
 }
 
 impl Reply {
@@ -103,6 +114,7 @@ impl Reply {
             handles: Vec::new(),
             new_session: None,
             session_ops: Vec::new(),
+            watch: None,
         }
     }
 }
@@ -174,6 +186,7 @@ impl Service {
                 handles: alloc::vec![theirs.into_handle()],
                 new_session: Some(s),
                 session_ops: Vec::new(),
+                watch: None,
             });
         }
         let now = crate::serve::fs_now();
