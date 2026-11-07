@@ -76,6 +76,10 @@ pub fn status(e: Error) -> NTSTATUS {
         Error::NoMemory => STATUS_NO_MEMORY,
         Error::NoResources | Error::ShouldWait => STATUS_INSUFFICIENT_RESOURCES,
         Error::OutOfRange => STATUS_INVALID_PARAMETER,
+        // Sdileci rezim nebo zamek jineho handlu.
+        Error::Locked => STATUS_SHARING_VIOLATION,
+        // Objekt pod handlem uz neexistuje.
+        Error::BadHandle => STATUS_INVALID_HANDLE,
         _ => STATUS_UNSUCCESSFUL,
     }
 }
@@ -160,42 +164,62 @@ fn file_info(s: &Stat) -> FileInfo {
     }
 }
 
-fn handle_path(st: &State, ctx: *mut c_void) -> Result<String, NTSTATUS> {
+/// Handle knihovny a posledni znama cesta pro kontext WinFsp.
+fn handle_of(st: &State, ctx: *mut c_void) -> Result<(fs::Handle, String), NTSTATUS> {
     match st.handles.get(&(ctx as usize)) {
-        Some(h) if h.gone => Err(STATUS_FILE_DELETED),
-        Some(h) => Ok(h.path.clone()),
+        Some(h) => Ok((h.fh, h.path.clone())),
         None => Err(STATUS_INVALID_PARAMETER),
     }
 }
 
-/// Vyplni `FileInfo` podle cesty.
-fn put_info(st: &mut State, path: &str, out: *mut FileInfo) -> NTSTATUS {
-    match stat_visible(st, path) {
-        Ok(s) => {
-            if !out.is_null() {
-                // SAFETY: WinFsp predava platny vystupni ukazatel.
-                unsafe { *out = file_info(&s) };
-            }
-            STATUS_SUCCESS
-        }
-        Err(e) => e,
+fn put_stat(s: &Stat, out: *mut FileInfo) {
+    if !out.is_null() {
+        // SAFETY: WinFsp predava platny vystupni ukazatel.
+        unsafe { *out = file_info(s) };
     }
 }
 
-fn new_handle(st: &mut State, path: String, ctx: *mut *mut c_void) {
+/// Vyplni `FileInfo` podle handlu.
+fn put_info(st: &mut State, fh: fs::Handle, out: *mut FileInfo) -> NTSTATUS {
+    match st.fs.stat_h(fh) {
+        Ok(s) => {
+            put_stat(&s, out);
+            STATUS_SUCCESS
+        }
+        Err(e) => status(e),
+    }
+}
+
+/// Otevre objekt v knihovne a zaregistruje kontext pro WinFsp.
+///
+/// Pristup: cteni a mazani vzdy, zapis u souboru na zapisovatelnem
+/// svazku. Sdileni: vse. Skutecne sdileci rezimy (`FILE_SHARE_*`), zamky
+/// `LockFileEx` i smazani pri zavreni hlida WinFsp v jadre sam; knihovna
+/// je tak hlida jen proti jinym klientum (rozsirene API).
+fn new_handle(st: &mut State, path: String, kind: Kind, ctx: *mut *mut c_void) -> NTSTATUS {
+    let mut access = fs::access::READ | fs::access::DELETE;
+    if kind == Kind::File && !st.read_only {
+        access |= fs::access::WRITE;
+    }
+    let fh = match st.fs.open(&path, access, fs::share::ALL) {
+        Ok(fh) => fh,
+        Err(Error::WrongType) => return STATUS_OBJECT_NAME_NOT_FOUND,
+        Err(e) => return status(e),
+    };
     let id = st.next_handle;
     st.next_handle += 1;
     st.handles.insert(
         id,
         Handle {
+            fh,
             path,
-            gone: false,
             listing: None,
             api_list: None,
         },
     );
     // SAFETY: WinFsp predava platny vystupni ukazatel.
     unsafe { *ctx = id as *mut c_void };
+    STATUS_SUCCESS
 }
 
 /// Cesta s jmeny tak, jak jsou ulozena (skutecna velikost pismen), ve
@@ -273,12 +297,10 @@ fn cache_remove(cache: &mut NameCache, path: &str) {
     cache.retain(|k, _| *k != key && !k.starts_with(&sub));
 }
 
-/// Otevrene handly pod jmenem `from` (i v podstromu) presmeruje na `to`.
+/// Posledni znamou cestu handlu pod jmenem `from` (i v podstromu) prepise
+/// na `to`. Objekt handlu se prejmenovanim nemeni (drzi ho knihovna).
 fn retarget_handles(handles: &mut HashMap<usize, Handle>, from: &str, to: &str) {
     for h in handles.values_mut() {
-        if h.gone {
-            continue;
-        }
         if let Some(rest) = strip_prefix_folded(&h.path, from) {
             let mut p = to.to_string();
             for c in rest {
@@ -399,11 +421,15 @@ unsafe extern "system" fn create(
             };
         }
         cache_insert(&mut st.dir_cache, parent_of(&path), last_comp(&path));
-        let r = put_info(st, &path, out);
-        if r == STATUS_SUCCESS {
-            put_normalized(st, &path, out);
-            new_handle(st, path, ctx);
+        let r = new_handle(st, path.clone(), kind, ctx);
+        if r != STATUS_SUCCESS {
+            return r;
         }
+        // SAFETY: WinFsp predava platny ukazatel, `new_handle` ho vyplnil.
+        let id = unsafe { *ctx } as usize;
+        let fh = st.handles[&id].fh;
+        let r = put_info(st, fh, out);
+        put_normalized(st, &path, out);
         r
     })
 }
@@ -426,10 +452,12 @@ unsafe extern "system" fn open(
         if options & FILE_NON_DIRECTORY_FILE != 0 && s.kind == Kind::Dir {
             return STATUS_FILE_IS_A_DIRECTORY;
         }
-        // SAFETY: platny vystupni ukazatel.
-        unsafe { *out = file_info(&s) };
+        let r = new_handle(st, path.clone(), s.kind, ctx);
+        if r != STATUS_SUCCESS {
+            return r;
+        }
+        put_stat(&s, out);
         put_normalized(st, &path, out);
-        new_handle(st, path, ctx);
         STATUS_SUCCESS
     })
 }
@@ -443,25 +471,30 @@ unsafe extern "system" fn overwrite(
     out: *mut FileInfo,
 ) -> NTSTATUS {
     with_state(|st| {
-        let path = tri!(handle_path(st, ctx));
+        let (fh, _) = tri!(handle_of(st, ctx));
         tri!(mutating(st));
-        if let Err(e) = st.fs.truncate(&path, 0) {
+        if let Err(e) = st.fs.set_len_h(fh, 0) {
             return status(e);
         }
-        put_info(st, &path, out)
+        put_info(st, fh, out)
     })
 }
 
-unsafe extern "system" fn cleanup(_f: *mut FileSystem, ctx: *mut c_void, _name: PWSTR, flags: u32) {
+unsafe extern "system" fn cleanup(_f: *mut FileSystem, ctx: *mut c_void, name: PWSTR, flags: u32) {
     if flags & FSP_CLEANUP_DELETE == 0 {
         return;
     }
+    // Aktualni jmeno posila WinFsp (pri mazani vzdy).
+    // SAFETY: retezec od WinFsp (nebo null).
+    let given = unsafe { fs_path(name, Want::Existing) }.ok();
     with_state(|st| {
-        let path = tri!(handle_path(st, ctx));
+        let (_, known) = tri!(handle_of(st, ctx));
+        let path = given.unwrap_or(known);
         tri!(mutating(st));
         debug!("delete {path}");
         // Smazani uz WinFsp odsouhlasil pres CanDelete; chyba tu nejde
-        // vratit (Cleanup je void), jen vypsat.
+        // vratit (Cleanup je void), jen vypsat. Jmeno zmizi hned; objekt,
+        // ktery ma jeste nekdo otevreny, zustane jako sirotek do zavreni.
         match st.fs.remove(&path) {
             Ok(()) => cache_remove(&mut st.dir_cache, &path),
             Err(e) => eprintln!("osfs: smazani {path} selhalo: {e}"),
@@ -472,7 +505,11 @@ unsafe extern "system" fn cleanup(_f: *mut FileSystem, ctx: *mut c_void, _name: 
 
 unsafe extern "system" fn close(_f: *mut FileSystem, ctx: *mut c_void) {
     with_state(|st| {
-        st.handles.remove(&(ctx as usize));
+        if let Some(h) = st.handles.remove(&(ctx as usize))
+            && let Err(e) = st.fs.close(h.fh)
+        {
+            eprintln!("osfs: zavreni {} selhalo: {e}", h.path);
+        }
         STATUS_SUCCESS
     });
 }
@@ -486,13 +523,16 @@ unsafe extern "system" fn read(
     done: *mut u32,
 ) -> NTSTATUS {
     with_state(|st| {
-        let path = tri!(handle_path(st, ctx));
-        let s = tri!(stat_visible(st, &path));
+        let (fh, _) = tri!(handle_of(st, ctx));
+        let s = match st.fs.stat_h(fh) {
+            Ok(s) => s,
+            Err(e) => return status(e),
+        };
         if offset >= s.size {
             return STATUS_END_OF_FILE;
         }
         let n = (s.size - offset).min(len as u64) as usize;
-        match st.fs.read(&path, offset, n) {
+        match st.fs.read_h(fh, offset, n) {
             Ok(data) => {
                 // SAFETY: buffer od WinFsp ma `len` >= data.len() bajtu.
                 unsafe {
@@ -518,8 +558,11 @@ unsafe extern "system" fn write(
     out: *mut FileInfo,
 ) -> NTSTATUS {
     with_state(|st| {
-        let path = tri!(handle_path(st, ctx));
-        let s = tri!(stat_visible(st, &path));
+        let (fh, _) = tri!(handle_of(st, ctx));
+        let s = match st.fs.stat_h(fh) {
+            Ok(s) => s,
+            Err(e) => return status(e),
+        };
         let mut offset = offset;
         let mut len = len as u64;
         if constrained != 0 {
@@ -528,7 +571,8 @@ unsafe extern "system" fn write(
                 // Nic se nezapise, svazek se neoznaci jako zmeneny.
                 // SAFETY: platny vystupni ukazatel.
                 unsafe { *done = 0 };
-                return put_info(st, &path, out);
+                put_stat(&s, out);
+                return STATUS_SUCCESS;
             }
             len = len.min(s.size - offset);
         } else if to_end != 0 {
@@ -537,12 +581,12 @@ unsafe extern "system" fn write(
         tri!(mutating(st));
         // SAFETY: buffer od WinFsp ma `len` bajtu.
         let data = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
-        if let Err(e) = st.fs.write(&path, offset, data) {
+        if let Err(e) = st.fs.write_h(fh, offset, data) {
             return status(e);
         }
         // SAFETY: platny vystupni ukazatel.
         unsafe { *done = len as u32 };
-        put_info(st, &path, out)
+        put_info(st, fh, out)
     })
 }
 
@@ -566,11 +610,11 @@ unsafe extern "system" fn flush(
                 Err(e) => status(e),
             };
         }
-        let path = tri!(handle_path(st, ctx));
+        let (fh, _) = tri!(handle_of(st, ctx));
         if let Err(e) = st.fs.fsync() {
             return status(e);
         }
-        put_info(st, &path, out)
+        put_info(st, fh, out)
     })
 }
 
@@ -580,8 +624,8 @@ unsafe extern "system" fn get_file_info(
     out: *mut FileInfo,
 ) -> NTSTATUS {
     with_state(|st| {
-        let path = tri!(handle_path(st, ctx));
-        put_info(st, &path, out)
+        let (fh, _) = tri!(handle_of(st, ctx));
+        put_info(st, fh, out)
     })
 }
 
@@ -600,7 +644,7 @@ unsafe extern "system" fn set_basic_info(
     out: *mut FileInfo,
 ) -> NTSTATUS {
     with_state(|st| {
-        let path = tri!(handle_path(st, ctx));
+        let (fh, path) = tri!(handle_of(st, ctx));
         let pick = |ft: u64| (ft != 0).then(|| from_filetime(ft));
         let t = fs::SetTimes {
             mtime: pick(write),
@@ -608,13 +652,18 @@ unsafe extern "system" fn set_basic_info(
             atime: pick(access),
         };
         if !t.is_empty() {
-            st.fs.set_time(now());
-            if let Err(e) = st.fs.set_times(&path, t) {
+            tri!(mutating(st));
+            // Soubor pres handle; adresar (handle bez prava zapisu) pres
+            // posledni znamou cestu.
+            let r = match st.fs.set_times_h(fh, t) {
+                Err(Error::AccessDenied) => st.fs.set_times(&path, t),
+                r => r,
+            };
+            if let Err(e) = r {
                 return status(e);
             }
-            st.dirty = true;
         }
-        put_info(st, &path, out)
+        put_info(st, fh, out)
     })
 }
 
@@ -626,41 +675,51 @@ unsafe extern "system" fn set_file_size(
     out: *mut FileInfo,
 ) -> NTSTATUS {
     with_state(|st| {
-        let path = tri!(handle_path(st, ctx));
-        let s = tri!(stat_visible(st, &path));
+        let (fh, _) = tri!(handle_of(st, ctx));
+        let s = match st.fs.stat_h(fh) {
+            Ok(s) => s,
+            Err(e) => return status(e),
+        };
         // Velikost alokace nas FS nedrzi: ta soubor jen zkrati, kdyz je
         // mensi nez soucasna velikost.
         if alloc_only != 0 && size >= s.size {
-            return put_info(st, &path, out);
+            put_stat(&s, out);
+            return STATUS_SUCCESS;
         }
         if size != s.size {
             tri!(mutating(st));
-            if let Err(e) = st.fs.truncate(&path, size) {
+            if let Err(e) = st.fs.set_len_h(fh, size) {
                 return status(e);
             }
         }
-        put_info(st, &path, out)
+        put_info(st, fh, out)
     })
 }
 
 unsafe extern "system" fn can_delete(
     _f: *mut FileSystem,
     ctx: *mut c_void,
-    _name: PWSTR,
+    name: PWSTR,
 ) -> NTSTATUS {
+    // SAFETY: retezec od WinFsp (nebo null).
+    let given = unsafe { fs_path(name, Want::Existing) }.ok();
     with_state(|st| {
         if st.read_only {
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
-        let path = tri!(handle_path(st, ctx));
-        let s = tri!(stat_visible(st, &path));
+        let (fh, known) = tri!(handle_of(st, ctx));
+        let path = given.unwrap_or(known);
+        let s = match st.fs.stat_h(fh) {
+            Ok(s) => s,
+            Err(e) => return status(e),
+        };
         // Dataset (slozka s vlastni historii) se z Windows nemaze: smazal
         // by i vsechny snapshoty. Jen `osfs dataset delete`.
         if crate::versions::is_dataset_root(&mut st.fs, &path) {
             return STATUS_ACCESS_DENIED;
         }
         if s.kind == Kind::Dir {
-            match st.fs.list(&path) {
+            match st.fs.list_h(fh) {
                 Ok(v) if !v.is_empty() => return STATUS_DIRECTORY_NOT_EMPTY,
                 Ok(_) => {}
                 Err(e) => return status(e),
@@ -705,34 +764,26 @@ unsafe extern "system" fn rename(
     with_state(|st| {
         tri!(stat_visible(st, &from));
         tri!(mutating(st));
-        let same = comps(&from).len() == comps(&to).len()
-            && strip_prefix_folded(&from, &to).is_some_and(|r| r.is_empty());
-        // Nahrazeni existujiciho cile: cil se nejdriv jen odsune stranou
-        // (docasne jmeno ve stejnem adresari) a smaze az po uspesnem
-        // prejmenovani; kdyz prejmenovani selze, vrati se zpet. Vse pod
-        // jednim zamkem, takze commit ani fsync nezachyti mezistav.
-        let mut moved_aside: Option<String> = None;
+        let same = same_path(&from, &to);
+        let mut replaced = false;
         if !same {
             match st.fs.stat(&to) {
                 Ok(_) if replace == 0 => return STATUS_OBJECT_NAME_COLLISION,
+                // Adresar Windows nahradit nedovoli (jako NTFS).
                 Ok(t) if t.kind != Kind::File => return STATUS_ACCESS_DENIED,
-                Ok(_) => {
-                    let tmp = tri!(aside_name(st, parent_of(&to)));
-                    if let Err(e) = st.fs.rename(&to, &tmp) {
-                        return status(e);
-                    }
-                    moved_aside = Some(tmp);
-                }
+                Ok(_) => replaced = true,
                 Err(Error::NotFound) => {}
                 Err(e) => return status(e),
             }
         }
-        if let Err(e) = st.fs.rename(&from, &to) {
-            if let Some(tmp) = &moved_aside
-                && let Err(e2) = st.fs.rename(tmp, &to)
-            {
-                eprintln!("osfs: vraceni {tmp} -> {to} selhalo: {e2}");
-            }
+        // Nahrazeni je jedna atomicka operace knihovny: kdo mel puvodni cil
+        // otevreny, cte dal jeho obsah (sirotek do zavreni).
+        let r = if replaced {
+            st.fs.rename_replace(&from, &to)
+        } else {
+            st.fs.rename(&from, &to)
+        };
+        if let Err(e) = r {
             return match e {
                 Error::NotFound | Error::NotADirectory => STATUS_OBJECT_PATH_NOT_FOUND,
                 // Presun mezi datasety (jine stromy): Windows pak presun
@@ -741,21 +792,9 @@ unsafe extern "system" fn rename(
                 e => status(e),
             };
         }
-        if let Some(tmp) = &moved_aside {
-            if let Err(e) = st.fs.remove(tmp) {
-                eprintln!("osfs: nahrazeny soubor {tmp} nejde smazat: {e}");
-            }
-            // Handly na nahrazeny soubor: jejich cesta ted vede na
-            // presunuty objekt - nesmi do nej psat.
-            for h in st.handles.values_mut() {
-                if same_path(&h.path, &to) {
-                    h.gone = true;
-                }
-            }
-        }
         // Mezipamet jmen.
         cache_remove(&mut st.dir_cache, &from);
-        if moved_aside.is_some() {
+        if replaced {
             st.dir_cache.remove(&fold_name(parent_of(&to)));
         } else {
             cache_insert(&mut st.dir_cache, parent_of(&to), last_comp(&to));
@@ -768,19 +807,6 @@ unsafe extern "system" fn rename(
 /// Jsou to tataz cesta (bez ohledu na velikost pismen)?
 fn same_path(a: &str, b: &str) -> bool {
     comps(a).len() == comps(b).len() && strip_prefix_folded(a, b).is_some()
-}
-
-/// Volne docasne jmeno v adresari `dir` pro odsunuti nahrazovaneho cile.
-fn aside_name(st: &mut State, dir: &str) -> Result<String, NTSTATUS> {
-    for i in 0..1000 {
-        let p = join(dir, &format!(".osfs-nahrazeni-{i}"));
-        match st.fs.stat(&p) {
-            Err(Error::NotFound) => return Ok(p),
-            Ok(_) => continue,
-            Err(e) => return Err(status(e)),
-        }
-    }
-    Err(STATUS_OBJECT_NAME_COLLISION)
 }
 
 unsafe extern "system" fn get_security(
@@ -828,7 +854,7 @@ unsafe extern "system" fn read_directory(
     // SAFETY: retezec od WinFsp (nebo null).
     let marker = unsafe { win_string(marker) };
     with_state(|st| {
-        let path = tri!(handle_path(st, ctx));
+        let (fh, path) = tri!(handle_of(st, ctx));
         let id = ctx as usize;
         // Snimek vypisu: novy pri prvnim dotazu (bez markeru), dalsi casti
         // pokracuji ve stejnem (jinak by se cely adresar cetl znovu pro
@@ -836,7 +862,8 @@ unsafe extern "system" fn read_directory(
         let cached = st.handles.get_mut(&id).and_then(|h| h.listing.take());
         let listing = match cached {
             Some(l) if marker.is_some() => l,
-            _ => match st.fs.list(&path) {
+            // Seznam podle objektu handlu (ne podle cesty).
+            _ => match st.fs.list_h(fh) {
                 // Poradi podle slozeneho jmena (tak je vraci `list`).
                 Ok(entries) => entries
                     .into_iter()

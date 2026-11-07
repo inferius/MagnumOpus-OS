@@ -116,6 +116,8 @@ fn error_codes_match_abi() {
         (E::NoSpace, error::NO_SPACE),
         (E::IoError, error::IO_ERROR),
         (E::ReadOnly, error::READ_ONLY),
+        (E::Locked, error::LOCKED),
+        (E::Conflict, error::CONFLICT),
     ] {
         assert_eq!(e.code(), c, "{e:?}");
     }

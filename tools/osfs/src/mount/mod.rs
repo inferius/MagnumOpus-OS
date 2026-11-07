@@ -2,9 +2,11 @@
 //!
 //! - **Jeden zamek** kolem celeho `Fs` (WinFsp vola z vice vlaken, `Fs` je
 //!   jednovlaknovy).
-//! - **Po cestach:** kontext otevreneho souboru drzi jen cestu v nasem FS
-//!   (vrstva handlu - sirotci, sdileci rezimy - prijde pozdeji). Prejmenovani
-//!   prepise cesty otevrenych handlu pod prejmenovanym jmenem.
+//! - **Handly knihovny:** kontext otevreneho souboru drzi handle `fs`
+//!   (objekt, ne cestu); cteni, zapis, velikost, casy a vypis jdou pres nej.
+//!   Mazani jako POSIX (`SupportsPosixUnlinkRename`): smazany otevreny soubor
+//!   zustane jako sirotek do zavreni. Sdileci rezimy, `LockFileEx`
+//!   a smazani pri zavreni hlida WinFsp v jadre.
 //! - **Commit** kazdych `COMMIT_EVERY` (jen kdyz se neco zmenilo) a pri
 //!   odpojeni; `FlushFileBuffers` = `fsync` (intent log), flush cele
 //!   jednotky = commit.
@@ -31,11 +33,12 @@ const SDDL: &str = "O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)";
 
 /// Otevreny soubor nebo adresar.
 struct Handle {
-    /// Cesta v nasem FS (`/a/b`).
+    /// Handle knihovny `fs`: drzi objekt (ne cestu), takze otevreny soubor
+    /// prezije prejmenovani i smazani sveho jmena (sirotek az do zavreni).
+    fh: fs::Handle,
+    /// Posledni znama cesta (vypis adresare stati polozky po jmenech,
+    /// ladici vypisy). Prejmenovani ji prepise.
     path: String,
-    /// Objekt pod handlem uz neexistuje (byl nahrazen pri prejmenovani):
-    /// cesta by ted vedla na jiny objekt, operace vraci `STATUS_FILE_DELETED`.
-    gone: bool,
     /// Snimek vypisu adresare pro `ReadDirectory` po castech: porizuje se
     /// pri prvnim dotazu (bez markeru), dalsi casti z nej jen pokracuji.
     listing: Option<Vec<ops::ListItem>>,
@@ -179,6 +182,15 @@ pub fn unmount(drive: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Zavre vsechny handly knihovny (pred poslednim commitem): sirotci
+/// smazanych, ale jeste otevrenych souboru tak zmizi hned, ne az pri
+/// pristim pripojeni.
+fn close_all(st: &mut State) {
+    for (_, h) in st.handles.drain() {
+        let _ = st.fs.close(h.fh);
+    }
+}
+
 /// Pripoji obraz jako jednotku `drive` a ceka na Ctrl+C nebo `osfs unmount`.
 pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     if !valid_drive(drive) {
@@ -235,7 +247,10 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
         | VP_POST_CLEANUP_WHEN_MODIFIED_ONLY
         | VP_UM_FILE_CONTEXT_IS_USER_CONTEXT2
         // Rozsirene API pres DeviceIoControl (`osfs-proto`).
-        | VP_DEVICE_CONTROL;
+        | VP_DEVICE_CONTROL
+        // Mazani a nahrazeni jako NTFS ve Windows 10+ (POSIX): knihovna
+        // drzi otevreny objekt jako sirotka.
+        | VP_SUPPORTS_POSIX_UNLINK_RENAME;
     // Nas FS nerozlisuje velikost pismen stejne jako Windows; opravneni
     // zatim nema.
     debug_assert_eq!(
@@ -327,6 +342,7 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     let _ = committer.join();
     let result = match lock().take() {
         Some(mut st) => {
+            close_all(&mut st);
             st.dirty = true;
             commit_now(&mut st);
             if st.dirty && !st.read_only {
