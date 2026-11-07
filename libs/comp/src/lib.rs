@@ -94,6 +94,8 @@ pub struct Comp {
     pub(crate) services: services::Services,
     /// Zdroj tokenu skupin (sluzba dava nahodna cisla z jadra).
     pub(crate) token_source: Box<dyn FnMut() -> u128>,
+    /// Posledni znamy cas (z volani se `now`).
+    pub(crate) input_now: u64,
 }
 
 impl Comp {
@@ -115,6 +117,7 @@ impl Comp {
             dialogs: dialog::Dialogs::default(),
             services: services::Services::default(),
             token_source,
+            input_now: 0,
         };
         c.damage_all();
         c

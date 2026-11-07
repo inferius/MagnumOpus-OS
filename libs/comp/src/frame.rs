@@ -28,6 +28,7 @@ pub(crate) struct Held {
 }
 
 pub(crate) struct Group {
+    owner: ClientId,
     token: u128,
     count: u32,
     deadline: u64,
@@ -49,17 +50,26 @@ pub struct FrameState {
 
 /// Nejvic soucasnych skupin a clenu skupiny.
 const MAX_GROUPS: usize = 64;
+const MAX_GROUPS_PER_CLIENT: usize = 4;
 const MAX_GROUP_SIZE: u32 = 16;
 
 impl Comp {
-    pub(crate) fn new_group(&mut self, count: u32, now: u64) -> u128 {
+    pub(crate) fn new_group(&mut self, owner: ClientId, count: u32, now: u64) -> u128 {
         let token = (self.token_source)();
-        if self.frame.groups.len() >= MAX_GROUPS {
-            // Nejstarsi skupinu uplatnit a zahodit.
-            let g = self.frame.groups.remove(0);
-            self.release_group(g, now);
+        // Limit na klienta: uvolni se jen jeho vlastni nejstarsi skupina
+        // (cizi skupiny nikdo predcasne uvolnit nemuze).
+        let own = self.frame.groups.iter().filter(|g| g.owner == owner).count();
+        if own >= MAX_GROUPS_PER_CLIENT || self.frame.groups.len() >= MAX_GROUPS {
+            if let Some(i) = self.frame.groups.iter().position(|g| g.owner == owner) {
+                let g = self.frame.groups.remove(i);
+                self.release_group(g, now);
+            } else {
+                self.error(owner, guiproto::window::op::SYNC_GROUP, guiproto::Error::NoResources);
+                return 0;
+            }
         }
         self.frame.groups.push(Group {
+            owner,
             token,
             count: count.clamp(1, MAX_GROUP_SIZE),
             deadline: now + SYNC_TIMEOUT,
@@ -151,6 +161,7 @@ impl Comp {
 
     /// Casove veci, ktere nezavisi na snimku (skupiny, configure, ping).
     pub fn timers(&mut self, now: u64) {
+        self.input_now = now;
         let (late, keep): (Vec<_>, Vec<_>) = core::mem::take(&mut self.frame.groups).into_iter().partition(|g| g.deadline <= now);
         self.frame.groups = keep;
         for g in late {

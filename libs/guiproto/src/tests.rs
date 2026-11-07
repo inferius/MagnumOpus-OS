@@ -263,7 +263,7 @@ fn curves() {
 fn a11y_tree_update_remove_find() {
     let mut t = Tree::new();
     t.update([Node::new(1, 0, Role::Window, "W"), sample_node(), Node::new(3, 2, Role::Label, "child")]);
-    assert_eq!(t.nodes().len(), 3);
+    assert_eq!(t.len(), 3);
     assert_eq!(t.find(Role::Button, "Uložit").map(|n| n.id), Some(2));
     // Nahrada stejneho id.
     t.update([Node::new(2, 1, Role::Button, "Zrušit")]);
@@ -271,10 +271,10 @@ fn a11y_tree_update_remove_find() {
     assert_eq!(t.children(1).count(), 1);
     // Odebrani i s potomky.
     t.remove(&[2]);
-    assert_eq!(t.nodes().len(), 1);
+    assert_eq!(t.len(), 1);
     // Id 0 se ignoruje.
     t.update([Node::new(0, 0, Role::Label, "x")]);
-    assert_eq!(t.nodes().len(), 1);
+    assert_eq!(t.len(), 1);
 }
 
 #[test]

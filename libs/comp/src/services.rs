@@ -78,7 +78,10 @@ impl Services {
 
 impl Comp {
     /// Zprava na kanalu `actions` od volajiciho `peer` (jmeno mu dal init).
-    pub fn caller_msg(&mut self, peer: PeerId, caller_name: &str, msg: CallerMsg) {
+    /// `automat` = kanal patri automatu (agentovi): kazde volani se potvrzuje
+    /// bez ohledu na priznak ve zprave (ten si volajici muze zvolit sam).
+    pub fn caller_msg(&mut self, peer: PeerId, caller_name: &str, automat: bool, msg: CallerMsg, now: u64) {
+        self.input_now = now;
         match msg {
             CallerMsg::List => {
                 let list = self
@@ -95,6 +98,7 @@ impl Comp {
                 args,
                 synthetic,
             } => {
+                let synthetic = synthetic || automat;
                 let Some((&cid, cl)) = self.clients.iter().find(|(_, c)| c.info.id == app) else {
                     return self.out.push(Out::Caller(peer, fail(call, "aplikace nebezi")));
                 };
@@ -209,11 +213,15 @@ impl Comp {
                     let nodes = w
                         .a11y
                         .nodes()
-                        .iter()
                         .map(|n| {
                             let mut n = n.clone();
                             let (lx, ly) = if n.layer == 0 { (0, 0) } else { self.layer_origin(c, n.layer).unwrap_or((0, 0)) };
-                            n.bounds = Rect::new(origin.0 + lx + n.bounds.x, origin.1 + ly + n.bounds.y, n.bounds.w, n.bounds.h);
+                            n.bounds = Rect::new(
+                                origin.0.saturating_add(lx).saturating_add(n.bounds.x),
+                                origin.1.saturating_add(ly).saturating_add(n.bounds.y),
+                                n.bounds.w,
+                                n.bounds.h,
+                            );
                             n.layer = 0;
                             n
                         })

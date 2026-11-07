@@ -90,6 +90,9 @@ opt-level = 2
 
 # Skladani a rasterizace bez optimalizace by byly desetkrat pomalejsi
 # (pixelove smycky); kompozitor by nestihal takt snimku.
+[profile.dev.package.guiproto]
+opt-level = 2
+
 [profile.dev.package.gfx]
 opt-level = 2
 

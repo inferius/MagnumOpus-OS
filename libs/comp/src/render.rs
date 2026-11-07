@@ -289,7 +289,7 @@ fn draw_layer(
     if child_clip.is_empty() {
         return;
     }
-    draw_children(c, cl, kids, id, (r.x - p.scroll.0, r.y - p.scroll.1), child_clip, op, depth + 1);
+    draw_children(c, cl, kids, id, (r.x.saturating_sub(p.scroll.0), r.y.saturating_sub(p.scroll.1)), child_clip, op, depth + 1);
 }
 
 fn draw_buttons(c: &mut Canvas<'_>, text: &mut Text, w: &Window) {

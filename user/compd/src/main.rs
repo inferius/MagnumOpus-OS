@@ -81,7 +81,17 @@ fn main(startup: Startup) -> i64 {
 impl Service {
     fn wait_and_serve(&mut self) -> bool {
         let now = libos::time::now();
-        let deadline = self.comp.as_ref().and_then(|c| c.next_wakeup(now));
+        let mut deadline = match (&self.comp, &self.screen) {
+            (Some(c), Some(_)) => c.next_wakeup(now),
+            // Bez displeje se nesklada; jen casovace (ping, skupiny).
+            (Some(_), None) => Some(now + 1_000_000_000),
+            _ => None,
+        };
+        if self.peers.has_backlog() {
+            // Odlozene zpravy zkusit znovu brzy (kanal nema signal "volno").
+            let soon = now + 5_000_000;
+            deadline = Some(deadline.map_or(soon, |d| d.min(soon)));
+        }
         let mut items: Vec<(&Handle, Signals)> = Vec::new();
         let rd = Signals::READABLE | Signals::PEER_CLOSED;
         items.push((self.control.handle(), rd));
@@ -131,6 +141,15 @@ impl Service {
         // 2. Displej (potvrzeni snimku).
         if disp.intersects(Signals::READABLE) {
             self.read_display();
+        } else if disp.intersects(Signals::PEER_CLOSED) {
+            // Ovladac skoncil: bez displeje dal (okna, dialogy, akce bezi),
+            // snimek neni "na ceste".
+            println!("compd: ovladac displeje skoncil");
+            self.screen = None;
+            self.peers.frame = None;
+            if let Some(c) = self.comp.as_mut() {
+                c.presented(now);
+            }
         }
         // 3. Ridici kanal a klienti.
         if ctl.intersects(Signals::READABLE) {
@@ -184,7 +203,9 @@ impl Service {
     }
 
     fn maybe_tick(&mut self) {
-        let (Some(c), Some(sc)) = (self.comp.as_mut(), self.screen.as_mut()) else {
+        let Some(c) = self.comp.as_mut() else { return };
+        let Some(sc) = self.screen.as_mut() else {
+            c.timers(libos::time::now());
             return;
         };
         let now = libos::time::now();
@@ -205,6 +226,7 @@ impl Service {
 
     /// Rozesle zpravy z jadra kompozitoru.
     fn flush(&mut self) {
+        self.peers.flush_backlog();
         let Some(c) = self.comp.as_mut() else { return };
         for o in c.take_out() {
             match o {
@@ -264,8 +286,10 @@ impl Service {
             }),
             control::ACTIONS => {
                 let name = String::from(words.next().unwrap_or("?"));
+                // `actions <jmeno> automat`: kanal agenta - vse se potvrzuje.
+                let automat = words.next() == Some("automat");
                 Channel::create().map(|(mine, theirs)| {
-                    self.peers.add_caller(mine, name);
+                    self.peers.add_caller(mine, name, automat);
                     (String::new(), alloc::vec![theirs.into_handle()])
                 })
             }
@@ -349,7 +373,7 @@ fn token() -> u128 {
 
 impl VmoPixels {
     pub fn map(vmo: Vmo, px: u64) -> Result<Self> {
-        let map = Mapping::new(&vmo, 0, px * 4, MAP_READ)?;
+        let map = Mapping::new(&vmo, 0, px.checked_mul(4).ok_or(Error::InvalidArgs)?, MAP_READ)?;
         Ok(Self { _vmo: vmo, map, len: px as usize })
     }
 }

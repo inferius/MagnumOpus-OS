@@ -15,6 +15,9 @@ use crate::{ClientId, Comp, SYNC_TIMEOUT};
 
 /// Sirka okraje pro zmenu velikosti.
 const EDGE: i32 = 6;
+/// Nove okno jine aplikace dostane fokus jen tehdy, kdyz uzivatel aspon
+/// tak dlouho nepsal.
+pub const FOCUS_GRACE: u64 = 1_500_000_000;
 /// Jak dlouho ukazat odznak bezramoveho okna po najeti k okraji.
 pub const BADGE_SHOW: u64 = 3_000_000_000;
 
@@ -46,6 +49,8 @@ pub struct InputState {
     pub injecting: u32,
     /// Zdroje (zarizeni) cekajici na overeni: jejich udalosti se ignoruji.
     pub untrusted: alloc::vec::Vec<u16>,
+    /// Cas posledni klavesy (fokus novych oken).
+    pub last_key: u64,
 }
 
 impl InputState {
@@ -58,6 +63,7 @@ impl InputState {
             press_target: None,
             injecting: 0,
             untrusted: alloc::vec::Vec::new(),
+            last_key: 0,
         }
     }
 
@@ -152,6 +158,7 @@ impl Comp {
 
     /// Zaznamy od `inputd` (kanal fokusu).
     pub fn input(&mut self, records: &[Record], now: u64) {
+        self.input_now = now;
         for r in records {
             self.input_one(r, now);
         }
@@ -185,6 +192,9 @@ impl Comp {
                 }
             }
             Event::Key { code, action, ch, .. } => {
+                if !syn {
+                    self.input.last_key = now;
+                }
                 if self.dialogs.active().is_some() {
                     if !syn {
                         self.dialog_key(code, action, ch, mods, now);
@@ -337,12 +347,14 @@ impl Comp {
 
     fn button(&mut self, button: Button, pressed: bool, mods: u16, syn: bool, time: u64, now: u64) {
         let (px, py) = (self.input.px, self.input.py);
-        if self.dialogs.active().is_some() {
-            if pressed && !syn && button == Button::Left {
+        if self.dialogs.active().is_some() && pressed {
+            if !syn && button == Button::Left {
                 self.dialog_click(px, py, now);
             }
             return;
         }
+        // Uvolneni vzdy ukonci tazeni a dojde oknu se stiskem (i kdyz mezi
+        // tim vyskocil dialog).
         if !pressed {
             self.input.drag = None;
             if let Some(g) = self.input.press_target.take()

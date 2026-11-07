@@ -292,6 +292,15 @@ by init, not by the application) and what it may do right now (network,
 folders, camera). The application cannot paint over it: the compositor
 composes it above the window content.
 
+**Per-client limits** (protecting the compositor from an application): a
+buffer at most 64 MiB and all buffers 256 MiB, 256 buffers, 8192 layers,
+32 windows, 4096 accessibility nodes per window, pending messages before
+`COMMIT` at most 16 MiB, title 256 characters, 4 transaction groups.
+Messages that do not fit into an application's channel queue are deferred
+by the compositor (mouse motion and ping may be dropped, `RELEASED`,
+`FRAME` and `CONFIGURE` never); a client that does not read 4096
+deferred messages is disconnected.
+
 **Unresponsive application:** the compositor sends `PING`; without `PONG`
 within 3 s it dims the window and shows a warning. Moving, minimizing and
 closing keep working.
@@ -302,7 +311,10 @@ The compositor receives events from `inputd` ([Input](input.md)) - from the
 focus channel and from the `secure` channel (in secure mode input goes
 only there) - and routes them:
 
-- **keyboard** (`Key`, `Text`) -> the focused window,
+- **keyboard** (`Key`, `Text`) -> the focused window; a new window of
+  another application gets the focus only when the user has not typed for
+  at least 1.5 s (otherwise a background window could "take" a password
+  being typed),
 - **mouse** -> the window under the pointer (converted to window
   coordinates); a button press outside decoration areas activates the
   window and gives it focus,
@@ -347,7 +359,10 @@ The `dialog` channel messages are binary (`guiproto::control`):
 | `Cancelled` (reply) | id |
 
 Keys in a dialog: Tab and arrows change the option, Enter confirms, Esc
-selects the last option (deny). Mouse: click a button.
+selects the last option (deny). Mouse: click a button. For the first
+300 ms after it appears a dialog ignores input - the second click of a
+double click or a key typed into another window cannot confirm a dialog
+that just popped up.
 
 **Secure screen:** Ctrl+Alt+Delete (caught by `inputd`, not by
 applications) shows the system screen over everything. Only physical input
@@ -402,7 +417,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `secure` | secure shortcut channel from `inputd` | `ok` |
 | `connect` + application identity (binary) | - | `ok` + window channel |
 | `dialog` | - | `ok` + system dialog channel |
-| `actions <caller>` | - | `ok` + action call channel |
+| `actions <caller> [automat]` | - | `ok` + action call channel; `automat` = an agent's channel, every call is confirmed with a dialog (the caller cannot bypass it with the message flag) |
 | `inspect` | - | `ok` + inspection channel |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
 
@@ -608,6 +623,8 @@ done by the terminal thread: instead of the local line editor it sends
 | cursor | drawn by the compositor into the frame | hardware cursor (queue 1) comes with 3D |
 | restoring windows after restart | none | in the design ([Graphics](architecture.md#graphics)) |
 | compositor restart | the supervisor only watches it | windows belong to the compositor; after a crash the apps would have to reconnect |
+| commit held in a group | applied together with the whole group, even if the client sent another plain commit meanwhile | a client in a group should wait for `PRESENTED`; strict per-client commit order comes with the GPU backend |
+| display driver crash | the compositor keeps running without a picture (windows, dialogs, actions) | no driver restart yet |
 
 ## Tests
 

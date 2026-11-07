@@ -287,6 +287,8 @@ fn secure_screen(_: &Startup) -> TestResult {
         settle(&s.inspect)?;
         let w = windows(&s.inspect)?.into_iter().find(|w| w.id == s.demo).ok_or("okno ukazky zmizelo")?;
         check!(pixel(&s.inspect, w.rect.x + 3, w.rect.y + w.rect.h as i32 - 4)? != UI_BG, "pod bezpecnou obrazovkou je ztlumeno");
+        // Dialog prijima vstup az chvili po zobrazeni.
+        time::sleep(Duration::from_millis(400));
         println!("{QEMU_SECURE_ENTER}");
         while s.gui.status().map_err(|e| fail("status", e))?.secure {
             check!(time::now() < end, "Enter bezpecnou obrazovku nezavrel");

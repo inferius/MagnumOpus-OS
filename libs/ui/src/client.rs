@@ -80,6 +80,24 @@ pub struct Window {
     groups: BTreeMap<u32, Rect>,
 }
 
+/// Zapis, ktery pri plne fronte kanalu chvili pocka (kompozitor zrovna
+/// nestiha cist); po 2 s to vzda.
+fn write(ch: &Channel, data: &[u8], handles: Vec<libos::Handle>) -> Result<()> {
+    let end = libos::time::deadline_after(core::time::Duration::from_secs(2));
+    let mut handles = Some(handles);
+    loop {
+        // Handly se pri neuspechu zapisu nevraceji: zkusit znovu jen bez nich.
+        let h = handles.take().unwrap_or_default();
+        let had = !h.is_empty();
+        match ch.write(data, h) {
+            Err(Error::ShouldWait | Error::NoResources) if !had && libos::time::now() < end => {
+                libos::time::sleep(core::time::Duration::from_millis(1));
+            }
+            r => return r,
+        }
+    }
+}
+
 fn read(ch: &Channel) -> Result<ServerMsg> {
     let m = ch.read(None)?;
     ServerMsg::decode(&m.data)
@@ -131,7 +149,7 @@ impl Window {
     }
 
     fn send(&self, m: ClientMsg) -> Result<()> {
-        self.ch.write(&m.encode(), Vec::new())
+        write(&self.ch, &m.encode(), Vec::new())
     }
 
     pub fn channel(&self) -> &Channel {
@@ -297,8 +315,13 @@ impl Window {
         let gone: Vec<u32> = self.groups.keys().copied().filter(|g| !keep.iter().any(|&i| scroll_layers(i).0 == *g)).collect();
         for g in gone {
             self.groups.remove(&g);
-            self.pairs.remove(&(g + 1));
             self.send(ClientMsg::LayerDestroy { layer: g })?;
+            // Buffery obsahu uvolnit i v kompozitoru (jinak by se hromadily).
+            if let Some(p) = self.pairs.remove(&(g + 1)) {
+                for b in p.bufs.into_iter().flatten() {
+                    self.send(ClientMsg::BufferDestroy { buffer: b.id })?;
+                }
+            }
         }
         Ok(())
     }
@@ -311,7 +334,7 @@ impl Window {
             self.send(ClientMsg::A11yRemove { window: 1, ids: gone })?;
         }
         for m in window::a11y_messages(1, nodes) {
-            self.ch.write(&m, Vec::new())?;
+            write(&self.ch, &m, Vec::new())?;
         }
         self.a11y_ids = ids;
         Ok(())

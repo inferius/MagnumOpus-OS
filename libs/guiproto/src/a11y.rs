@@ -3,7 +3,7 @@
 //! (klik pres uzel misto souradnic) a dekoracim (vlastni titulek).
 
 use alloc::string::String;
-use alloc::vec::Vec;
+use alloc::collections::{BTreeMap, BTreeSet};
 
 use crate::{ReadExt, Reader, Rect, Result, WriteExt, Writer};
 
@@ -173,10 +173,11 @@ impl Node {
     }
 }
 
-/// Strom jednoho okna, jak ho drzi kompozitor (a test).
+/// Strom jednoho okna, jak ho drzi kompozitor (a test). Uzly podle id
+/// (operace v O(log n) - strom posila neduveryhodna aplikace).
 #[derive(Debug, Clone, Default)]
 pub struct Tree {
-    nodes: Vec<Node>,
+    nodes: BTreeMap<u32, Node>,
 }
 
 /// Nejvic uzlu jednoho okna (ochrana pameti kompozitoru).
@@ -193,47 +194,59 @@ impl Tree {
             if n.id == 0 {
                 continue;
             }
-            if let Some(old) = self.nodes.iter_mut().find(|o| o.id == n.id) {
-                *old = n;
-            } else if self.nodes.len() < MAX_NODES {
-                self.nodes.push(n);
-            } else {
+            if self.nodes.len() >= MAX_NODES && !self.nodes.contains_key(&n.id) {
                 return false;
             }
+            self.nodes.insert(n.id, n);
         }
         true
     }
 
     /// Odebere uzly i s jejich potomky.
     pub fn remove(&mut self, ids: &[u32]) {
-        let mut gone: Vec<u32> = ids.to_vec();
-        let mut i = 0;
-        while i < gone.len() {
-            let id = gone[i];
-            for n in &self.nodes {
-                if n.parent == id && !gone.contains(&n.id) {
-                    gone.push(n.id);
+        let mut gone: BTreeSet<u32> = ids.iter().copied().filter(|i| self.nodes.contains_key(i)).collect();
+        if gone.is_empty() {
+            return;
+        }
+        // Potomci: opakovane pruchody, dokud pribyvaji (hloubka stromu).
+        loop {
+            let before = gone.len();
+            for n in self.nodes.values() {
+                if gone.contains(&n.parent) {
+                    gone.insert(n.id);
                 }
             }
-            i += 1;
+            if gone.len() == before {
+                break;
+            }
         }
-        self.nodes.retain(|n| !gone.contains(&n.id));
+        for id in gone {
+            self.nodes.remove(&id);
+        }
     }
 
     pub fn get(&self, id: u32) -> Option<&Node> {
-        self.nodes.iter().find(|n| n.id == id)
+        self.nodes.get(&id)
     }
 
-    pub fn nodes(&self) -> &[Node] {
-        &self.nodes
+    pub fn nodes(&self) -> impl Iterator<Item = &Node> {
+        self.nodes.values()
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
     }
 
     /// Prvni uzel s roli a jmenem (dotaz testu nebo agenta).
     pub fn find(&self, role: Role, name: &str) -> Option<&Node> {
-        self.nodes.iter().find(|n| n.role == role && n.name == name)
+        self.nodes.values().find(|n| n.role == role && n.name == name)
     }
 
     pub fn children(&self, id: u32) -> impl Iterator<Item = &Node> {
-        self.nodes.iter().filter(move |n| n.parent == id)
+        self.nodes.values().filter(move |n| n.parent == id)
     }
 }

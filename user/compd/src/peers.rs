@@ -37,8 +37,26 @@ enum Kind {
 struct Peer {
     kind: Kind,
     ch: Channel,
+    /// Zpravy, ktere se nevesly do fronty kanalu (posilaji se pozdeji ve
+    /// stejnem poradi; RELEASED, FRAME, CONFIGURE se nesmi ztratit).
+    backlog: alloc::collections::VecDeque<Vec<u8>>,
+    /// Volajici akci je automat (agent).
+    automat: bool,
     name: String,
     closed: bool,
+}
+
+/// Nejvic odlozenych zprav; klient, ktery tolik nevycte, se odpoji.
+const BACKLOG_MAX: usize = 4096;
+
+impl Peer {
+    fn push_backlog(&mut self, d: Vec<u8>) {
+        if self.backlog.len() >= BACKLOG_MAX {
+            self.closed = true;
+        } else {
+            self.backlog.push_back(d);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -55,7 +73,7 @@ const BATCH: usize = 64;
 impl Peers {
     fn add(&mut self, kind: Kind, ch: Channel, name: String) -> PeerId {
         self.next += 1;
-        self.peers.insert(self.next, Peer { kind, ch, name, closed: false });
+        self.peers.insert(self.next, Peer { kind, ch, name, closed: false, backlog: Default::default(), automat: false });
         self.next
     }
 
@@ -67,8 +85,9 @@ impl Peers {
         self.add(Kind::Dialog, ch, String::new());
     }
 
-    pub fn add_caller(&mut self, ch: Channel, name: String) {
-        self.add(Kind::Caller, ch, name);
+    pub fn add_caller(&mut self, ch: Channel, name: String, automat: bool) {
+        let id = self.add(Kind::Caller, ch, name);
+        self.peers.get_mut(&id).unwrap().automat = automat;
     }
 
     pub fn add_inspect(&mut self, ch: Channel) {
@@ -90,8 +109,8 @@ impl Peers {
                 for _ in 0..BATCH {
                     let p = self.peers.get_mut(&id).unwrap();
                     let Ok(m) = p.ch.try_read() else { break };
-                    let (kind, name) = (p.kind, p.name.clone());
-                    self.message(id, kind, &name, m.data, m.handles, c, now);
+                    let (kind, name, automat) = (p.kind, p.name.clone(), p.automat);
+                    self.message(id, kind, &name, automat, m.data, m.handles, c, now);
                 }
             } else if s.intersects(Signals::PEER_CLOSED) {
                 self.peers.get_mut(&id).unwrap().closed = true;
@@ -100,19 +119,21 @@ impl Peers {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn message(&mut self, id: PeerId, kind: Kind, name: &str, data: Vec<u8>, handles: Vec<Handle>, c: &mut Comp, now: u64) {
+    fn message(&mut self, id: PeerId, kind: Kind, name: &str, automat: bool, data: Vec<u8>, handles: Vec<Handle>, c: &mut Comp, now: u64) {
         match kind {
             Kind::Client(cid) => match ClientMsg::decode(&data) {
                 Ok(m) => {
                     let px = match &m {
-                        ClientMsg::BufferCreate { w: _, h, stride, .. } => handles
+                        // Rozmery overit pred mapovanim (mapovani stoji pamet
+                        // jadra na ucet kompozitoru).
+                        ClientMsg::BufferCreate { w, h, stride, .. } if comp::scene::buffer_ok(*w, *h, *stride) => handles
                             .into_iter()
                             .next()
                             .and_then(|h2| VmoPixels::map(Vmo::from_handle(h2), *stride as u64 * *h as u64).ok())
                             .map(|p| Box::new(p) as Box<dyn Pixels>),
                         _ => None,
                     };
-                    c.client_msg(cid, m, px, now);
+                    c.client_msg_sized(cid, m, px, data.len(), now);
                 }
                 Err(e) => {
                     let op = ClientMsg::op_of(&data);
@@ -126,7 +147,7 @@ impl Peers {
             }
             Kind::Caller => {
                 if let Ok(m) = CallerMsg::decode(&data) {
-                    c.caller_msg(id, name, m);
+                    c.caller_msg(id, name, automat, m, now);
                 }
             }
             Kind::Inspect => match InspectRequest::decode(&data) {
@@ -149,9 +170,12 @@ impl Peers {
 
     /// Posle zpravu z jadra kompozitoru prislusne protistrane.
     pub fn send(&mut self, o: Out) {
+        let mut droppable = false;
         let (target, data) = match o {
             Out::Client(cid, m) => {
                 let Some((&id, _)) = self.peers.iter().find(|(_, p)| p.kind == Kind::Client(cid)) else { return };
+                // Pohyb mysi a podobne smi pri plne fronte vypadnout.
+                droppable = matches!(m, ServerMsg::Input { .. } | ServerMsg::Ping { .. });
                 (id, m.encode())
             }
             Out::Dialog(id, r) => (id, r.encode()),
@@ -159,12 +183,40 @@ impl Peers {
             Out::Inspect(id, r) => (id, r.encode()),
             _ => return,
         };
-        if let Some(p) = self.peers.get_mut(&target)
-            && let Err(e) = p.ch.write(&data, Vec::new())
-        {
-            // Plna fronta: klient nestiha cist. Zavreny kanal: konec.
-            if e == libos::Error::PeerClosed {
-                p.closed = true;
+        let Some(p) = self.peers.get_mut(&target) else { return };
+        if !p.backlog.is_empty() {
+            if !droppable {
+                p.push_backlog(data);
+            }
+            return;
+        }
+        match p.ch.write(&data, Vec::new()) {
+            Ok(()) => {}
+            Err(libos::Error::PeerClosed) => p.closed = true,
+            // Plna fronta: klient nestiha cist.
+            Err(_) if !droppable => p.push_backlog(data),
+            Err(_) => {}
+        }
+    }
+
+    pub fn has_backlog(&self) -> bool {
+        self.peers.values().any(|p| !p.backlog.is_empty())
+    }
+
+    /// Zkusi odeslat odlozene zpravy (volat v kazdem kole smycky).
+    pub fn flush_backlog(&mut self) {
+        for p in self.peers.values_mut() {
+            while let Some(d) = p.backlog.front() {
+                match p.ch.write(d, Vec::new()) {
+                    Ok(()) => {
+                        p.backlog.pop_front();
+                    }
+                    Err(libos::Error::PeerClosed) => {
+                        p.closed = true;
+                        break;
+                    }
+                    Err(_) => break,
+                }
             }
         }
     }

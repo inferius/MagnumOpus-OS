@@ -42,6 +42,9 @@ pub struct Dialog {
     pub password: String,
 }
 
+/// Jak dlouho po zobrazeni dialog vstup ignoruje.
+pub const INPUT_DELAY: u64 = 300_000_000;
+
 /// Nejvic cekajicich dialogu (dalsi se odmitnou).
 const MAX_QUEUE: usize = 32;
 const MAX_PASSWORD: usize = 256;
@@ -49,6 +52,9 @@ const MAX_PASSWORD: usize = 256;
 #[derive(Default)]
 pub struct Dialogs {
     queue: VecDeque<Dialog>,
+    /// Od kdy je aktivni dialog videt (vstup tesne po zobrazeni se
+    /// ignoruje - ochrana proti podstrceni kliku).
+    pub(crate) since: u64,
     /// Bezpecnostni fraze uzivatele (aplikace ji nezna).
     phrase: String,
 }
@@ -189,7 +195,8 @@ pub fn wrap(text: &Text, s: &str, px: f32, w: u32) -> Vec<String> {
 
 impl Comp {
     /// Zadost na kanalu `dialog`.
-    pub fn dialog_request(&mut self, peer: PeerId, req: DialogRequest, _now: u64) {
+    pub fn dialog_request(&mut self, peer: PeerId, req: DialogRequest, now: u64) {
+        self.input_now = now;
         match req {
             DialogRequest::Ask {
                 id,
@@ -232,6 +239,9 @@ impl Comp {
 
     pub(crate) fn open_dialog(&mut self, d: Dialog) {
         let first = self.dialogs.queue.is_empty();
+        if first || d.owner == Owner::Secure {
+            self.dialogs.since = self.input_now;
+        }
         if d.owner == Owner::Secure {
             // Bezpecna obrazovka predbehne vse.
             self.dialogs.queue.push_front(d);
@@ -253,7 +263,8 @@ impl Comp {
     }
 
     /// Bezpecna zkratka (Ctrl+Alt+Delete) od `inputd`.
-    pub fn secure_attention(&mut self, _now: u64) {
+    pub fn secure_attention(&mut self, now: u64) {
+        self.input_now = now;
         if self.dialogs.secure_active() {
             return;
         }
@@ -271,6 +282,7 @@ impl Comp {
 
     fn answer(&mut self, choice: usize) {
         let Some(d) = self.dialogs.queue.pop_front() else { return };
+        self.dialogs.since = self.input_now;
         self.damage_all();
         match d.owner {
             Owner::Peer(p) => self.out.push(Out::Dialog(
@@ -325,7 +337,7 @@ impl Comp {
     }
 
     pub(crate) fn dialog_key(&mut self, code: u16, action: Action, _ch: Option<char>, _mods: u16, _now: u64) {
-        if action == Action::Release {
+        if action == Action::Release || _now < self.dialogs.since + INPUT_DELAY {
             return;
         }
         let Some(d) = self.dialogs.queue.front_mut() else { return };
@@ -354,7 +366,10 @@ impl Comp {
         }
     }
 
-    pub(crate) fn dialog_click(&mut self, x: i32, y: i32, _now: u64) {
+    pub(crate) fn dialog_click(&mut self, x: i32, y: i32, now: u64) {
+        if now < self.dialogs.since + INPUT_DELAY {
+            return;
+        }
         let Some(l) = self.dialogs.layout(&self.text, self.w, self.h) else { return };
         if let Some(i) = l.buttons.iter().position(|b| b.contains(x, y)) {
             self.answer(i);

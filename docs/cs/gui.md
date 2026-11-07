@@ -280,6 +280,14 @@ na aplikaci.
 předal init, ne aplikace) a co právě smí (síť, složky, kamera). Aplikace
 ho nemůže překreslit: kompozitor ho skládá až nad obsahem okna.
 
+**Limity na klienta** (ochrana kompozitoru před aplikací): buffer nejvýš
+64 MiB a všechny buffery 256 MiB, 256 bufferů, 8192 vrstev, 32 oken,
+4096 uzlů přístupnosti na okno, rozpracované zprávy do `COMMIT` nejvýš
+16 MiB, titulek 256 znaků, 4 skupiny transakcí. Zprávy, které se
+aplikaci nevejdou do fronty kanálu, kompozitor odloží (pohyb myši a ping
+smí vypadnout, `RELEASED`, `FRAME` a `CONFIGURE` ne); kdo nevyčte 4096
+odložených zpráv, je odpojen.
+
 **Nereagující aplikace:** kompozitor posílá `PING`; bez `PONG` do 3 s
 ztlumí okno a nabídne zavření. Přesun, minimalizace a zavření fungují
 dál.
@@ -290,7 +298,9 @@ Kompozitor dostává události od `inputd` ([Vstup](vstup.md)) - z kanálu
 fokusu i z kanálu `secure` (v bezpečném režimu jde vstup jen tam) - a
 rozděluje je:
 
-- **klávesnice** (`Key`, `Text`) -> okno s fokusem,
+- **klávesnice** (`Key`, `Text`) -> okno s fokusem; nové okno jiné
+  aplikace dostane fokus jen tehdy, když uživatel aspoň 1,5 s nepsal
+  (jinak by si okno na pozadí mohlo „vzít“ rozepsané heslo),
 - **myš** -> okno pod ukazatelem (přepočet na souřadnice okna); stisk
   tlačítka mimo oblasti dekorace okno aktivuje a dá mu fokus,
 - **kolečko** -> okno pod ukazatelem,
@@ -333,7 +343,9 @@ Zprávy kanálu `dialog` jsou binární (`guiproto::control`):
 | `Cancelled` (odpověď) | id |
 
 Klávesy v dialogu: Tab a šipky mění volbu, Enter potvrdí, Esc vybere
-poslední volbu (zamítnutí). Myš: klik na tlačítko.
+poslední volbu (zamítnutí). Myš: klik na tlačítko. Prvních 300 ms po
+zobrazení dialog vstup ignoruje - druhý klik dvojkliku nebo klávesa
+napsaná do jiného okna tak nepotvrdí dialog, který právě vyskočil.
 
 **Bezpečná obrazovka:** Ctrl+Alt+Delete (zachytí `inputd`, ne aplikace)
 ukáže systémovou obrazovku přes všechno. Zavře ji jen fyzický vstup;
@@ -387,7 +399,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `secure` | kanál bezpečné zkratky od `inputd` | `ok` |
 | `connect` + identita aplikace (binárně) | - | `ok` + kanál okna |
 | `dialog` | - | `ok` + kanál systémových dialogů |
-| `actions <volající>` | - | `ok` + kanál volání akcí |
+| `actions <volající> [automat]` | - | `ok` + kanál volání akcí; `automat` = kanál agenta, každé volání se potvrzuje dialogem (příznak ve zprávě volající neobejde) |
 | `inspect` | - | `ok` + kanál inspekce |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
 
@@ -588,6 +600,8 @@ výstupu do stejné mřížky.
 | kurzor | kreslí ho kompozitor do snímku | hardwarový kurzor (fronta 1) přijde s 3D |
 | obnova oken po restartu | není | v návrhu ([Grafika](architektura.md#grafika)) |
 | restart kompozitoru | supervisor ho jen hlídá | okna patří kompozitoru; po pádu by se aplikace musely připojit znovu |
+| commit držený ve skupině | uplatní se až s celou skupinou, i když klient mezitím poslal další běžný commit | klient ve skupině má čekat na `PRESENTED`; přísné pořadí commitů jednoho klienta přijde s GPU backendem |
+| pád ovladače displeje | kompozitor běží dál bez obrazu (okna, dialogy, akce) | restart ovladače zatím není |
 
 ## Testy
 

@@ -26,6 +26,23 @@ pub const MAX_STAGED: usize = 16384;
 pub const MAX_LAYERS: usize = 8192;
 pub const MAX_BUFFERS: usize = 256;
 pub const MAX_WINDOWS: usize = 32;
+/// Nejvetsi buffer (64 MiB) a soucet bufferu klienta (256 MiB).
+pub const MAX_BUFFER_BYTES: u64 = 64 << 20;
+pub const MAX_CLIENT_BUFFER_BYTES: u64 = 256 << 20;
+/// Nejvic bajtu rozpracovanych zprav do `COMMIT`.
+pub const MAX_STAGED_BYTES: usize = 16 << 20;
+/// Nejdelsi titulek okna (znaku).
+pub const MAX_TITLE: usize = 256;
+
+/// Jsou rozmery bufferu prijatelne (pred mapovanim)?
+pub fn buffer_ok(w: u32, h: u32, stride: u32) -> bool {
+    w > 0 && h > 0 && w <= MAX_DIM && h <= MAX_DIM && stride >= w && stride <= MAX_DIM && stride as u64 * h as u64 * 4 <= MAX_BUFFER_BYTES
+}
+
+fn clip_title(s: String) -> String {
+    if s.chars().count() <= MAX_TITLE { s } else { s.chars().take(MAX_TITLE).collect() }
+}
+
 /// Po tolika chybach klienta se dalsi chyby uz nehlasi (ochrana fronty).
 pub const MAX_ERRORS: u32 = 64;
 
@@ -60,6 +77,8 @@ pub struct Client {
     pub info: ConnectInfo,
     pub hello: bool,
     pub staged: Vec<ClientMsg>,
+    /// Priblizna velikost `staged` v bajtech (z delky zprav).
+    pub staged_bytes: usize,
     pub buffers: BTreeMap<u32, Buf>,
     pub layers: BTreeMap<u32, Layer>,
     /// Mistni id okna -> globalni.
@@ -208,6 +227,7 @@ impl Comp {
                 info,
                 hello: false,
                 staged: Vec::new(),
+                staged_bytes: 0,
                 buffers: BTreeMap::new(),
                 layers: BTreeMap::new(),
                 windows: BTreeMap::new(),
@@ -260,15 +280,25 @@ impl Comp {
 
     /// Zprava od klienta. `buffer` = pamet z handlu zpravy `BUFFER_CREATE`.
     pub fn client_msg(&mut self, c: ClientId, m: ClientMsg, buffer: Option<Box<dyn Pixels>>, now: u64) {
+        self.client_msg_sized(c, m, buffer, 64, now)
+    }
+
+    /// Jako [`Comp::client_msg`] s delkou zakodovane zpravy (rozpocet pameti).
+    pub fn client_msg_sized(&mut self, c: ClientId, m: ClientMsg, buffer: Option<Box<dyn Pixels>>, size: usize, now: u64) {
+        self.input_now = now;
         let Some(cl) = self.clients.get_mut(&c) else { return };
         if !cl.hello && !matches!(m, ClientMsg::Hello { .. }) {
             return self.error(c, op_of(&m), Error::InvalidArgs);
         }
         if is_staged(&m) {
-            if cl.staged.len() >= MAX_STAGED {
+            // Dekodovana zprava zabere zhruba dvojnasobek zakodovane.
+            let cost = size.saturating_mul(2) + 64;
+            if cl.staged.len() >= MAX_STAGED || cl.staged_bytes + cost > MAX_STAGED_BYTES {
                 cl.staged.clear();
+                cl.staged_bytes = 0;
                 return self.error(c, op_of(&m), Error::NoResources);
             }
+            cl.staged_bytes += cost;
             cl.staged.push(m);
             return;
         }
@@ -290,7 +320,7 @@ impl Comp {
                     },
                 );
             }
-            ClientMsg::WindowCreate { window, mode, w, h, title } => self.window_create(c, window, mode, w, h, title),
+            ClientMsg::WindowCreate { window, mode, w, h, title } => self.window_create(c, window, mode, w, h, clip_title(title)),
             ClientMsg::WindowDestroy { window } => {
                 if let Some(gid) = cl.windows.remove(&window) {
                     cl.layers.retain(|_, l| l.window != window);
@@ -298,7 +328,8 @@ impl Comp {
                 }
             }
             ClientMsg::BufferCreate { buffer: id, w, h, stride } => {
-                let ok = w > 0 && h > 0 && w <= MAX_DIM && h <= MAX_DIM && stride >= w && stride <= MAX_DIM * 2;
+                let used: u64 = cl.buffers.values().map(|b| b.stride as u64 * b.h as u64 * 4).sum();
+                let ok = buffer_ok(w, h, stride) && used + stride as u64 * h as u64 * 4 <= MAX_CLIENT_BUFFER_BYTES;
                 let fits = buffer.as_ref().and_then(|b| b.pixels()).is_some_and(|p| p.len() as u64 >= stride as u64 * h as u64);
                 if !ok || !fits || cl.buffers.contains_key(&id) || cl.buffers.len() >= MAX_BUFFERS {
                     return self.error(c, guiproto::window::op::BUFFER_CREATE, Error::InvalidArgs);
@@ -316,13 +347,14 @@ impl Comp {
             }
             ClientMsg::Commit { txn, flags, window, serial, token } => {
                 let ops = core::mem::take(&mut cl.staged);
+                cl.staged_bytes = 0;
                 if flags & commit::GROUP != 0 && self.frame_hold(c, ops.clone(), txn, flags, window, serial, token, now) {
                     return;
                 }
                 self.apply(c, ops, txn, flags, window, serial, now);
             }
             ClientMsg::SyncGroup { count } => {
-                let token = self.new_group(count, now);
+                let token = self.new_group(c, count, now);
                 self.send(c, ServerMsg::SyncToken { token });
             }
             ClientMsg::Pong { serial } => {
@@ -427,7 +459,13 @@ impl Comp {
                 }
             }
             if became_mapped {
-                self.set_focus(Some(gid));
+                // Nove okno nesmi ukrast fokus, kdyz uzivatel prave pise do
+                // jine aplikace (klavesy by sly jinam, napr. heslo).
+                let other = self.focus.and_then(|f| self.windows.get(&f)).is_some_and(|w| w.client != c);
+                let typing = self.input.last_key != 0 && now.saturating_sub(self.input.last_key) <= crate::input::FOCUS_GRACE;
+                if !other || !typing {
+                    self.set_focus(Some(gid));
+                }
                 self.damage_panel();
             }
         }
@@ -451,7 +489,7 @@ impl Comp {
             } => {
                 let gid = *cl.windows.get(&window).ok_or(Error::NotFound)?;
                 let w = self.windows.get_mut(&gid).ok_or(Error::NotFound)?;
-                w.title = title;
+                w.title = clip_title(title);
                 w.min = (min_w.clamp(16, MAX_DIM), min_h.clamp(16, MAX_DIM));
                 w.side = side;
                 w.button_color = button_color;
@@ -582,8 +620,8 @@ impl Comp {
         let mut depth = 0;
         while l.parent != 0 {
             let p = cl.layers.get(&l.parent)?;
-            x = x.saturating_add(p.props.rect.x - p.props.scroll.0);
-            y = y.saturating_add(p.props.rect.y - p.props.scroll.1);
+            x = x.saturating_add(p.props.rect.x.saturating_sub(p.props.scroll.0));
+            y = y.saturating_add(p.props.rect.y.saturating_sub(p.props.scroll.1));
             l = p;
             depth += 1;
             if depth > 64 {

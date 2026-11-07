@@ -152,6 +152,8 @@ impl T {
     }
 
     fn click(&mut self, x: i32, y: i32) {
+        // Dialog prijima vstup az chvili po zobrazeni.
+        self.now += dialog::INPUT_DELAY;
         self.move_to(x, y);
         self.input(
             Event::Button {
@@ -170,6 +172,7 @@ impl T {
     }
 
     fn key(&mut self, code: u16, synthetic: bool) {
+        self.now += dialog::INPUT_DELAY;
         self.input(
             Event::Key {
                 code,
@@ -546,12 +549,13 @@ fn actions_validate_confirm_and_route() {
     let a = t.c.add_client(i, t.now);
     t.msg(a, ClientMsg::Hello { version: 1 });
     t.out();
-    t.c.caller_msg(5, "shell", CallerMsg::List);
+    t.c.caller_msg(5, "shell", false, CallerMsg::List, t.now);
     assert!(matches!(&t.out()[0], Out::Caller(5, CallerReply::Actions { list }) if list.len() == 2));
     // Spatny typ argumentu: aplikace nic nedostane.
     t.c.caller_msg(
         5,
         "shell",
+        false,
         CallerMsg::Call {
             call: 1,
             app: "org.test.app".into(),
@@ -559,6 +563,7 @@ fn actions_validate_confirm_and_route() {
             args: vec![("by".into(), action::Value::Text("x".into()))],
             synthetic: false,
         },
+        t.now,
     );
     let out = t.out();
     assert!(matches!(&out[0], Out::Caller(5, CallerReply::Result { call: 1, ok: false, .. })));
@@ -567,6 +572,7 @@ fn actions_validate_confirm_and_route() {
     t.c.caller_msg(
         5,
         "shell",
+        false,
         CallerMsg::Call {
             call: 2,
             app: "org.test.app".into(),
@@ -574,6 +580,7 @@ fn actions_validate_confirm_and_route() {
             args: vec![("by".into(), action::Value::Int(3))],
             synthetic: false,
         },
+        t.now,
     );
     let id = match client_msgs(&t.out(), a).pop() {
         Some(ServerMsg::ActionInvoke { call, caller, synthetic: false, .. }) if caller == "shell" => call,
@@ -593,6 +600,7 @@ fn actions_validate_confirm_and_route() {
     t.c.caller_msg(
         6,
         "agent",
+        false,
         CallerMsg::Call {
             call: 7,
             app: "org.test.app".into(),
@@ -600,6 +608,7 @@ fn actions_validate_confirm_and_route() {
             args: vec![("by".into(), action::Value::Int(1))],
             synthetic: true,
         },
+        t.now,
     );
     assert!(t.c.dialogs.active().is_some());
     assert!(client_msgs(&t.out(), a).is_empty());
@@ -610,6 +619,7 @@ fn actions_validate_confirm_and_route() {
     t.c.caller_msg(
         5,
         "shell",
+        false,
         CallerMsg::Call {
             call: 8,
             app: "org.test.app".into(),
@@ -617,6 +627,7 @@ fn actions_validate_confirm_and_route() {
             args: vec![],
             synthetic: false,
         },
+        t.now,
     );
     t.key(inputproto::code::KEY_LEFT, false);
     t.key(inputproto::code::KEY_ENTER, false);
@@ -814,6 +825,7 @@ fn new_device_must_be_confirmed_by_existing_input() {
     // Stavajici klavesnice: vlevo (Povolit) a Enter.
     left.source = 1;
     enter.source = 1;
+    t.now += dialog::INPUT_DELAY;
     t.c.input(&[left, enter], t.now);
     assert!(t.out().contains(&Out::Device { source: 9, trust: true }));
     assert!(t.c.input.untrusted.is_empty());
@@ -847,8 +859,51 @@ fn closed_caller_removes_its_confirmation() {
     i.actions = action::parse_manifest(MANIFEST).unwrap();
     let a = t.c.add_client(i, t.now);
     t.msg(a, ClientMsg::Hello { version: 1 });
-    t.c.caller_msg(5, "agent", CallerMsg::Call { call: 1, app: "org.test.app".into(), action: "file.delete".into(), args: vec![], synthetic: true });
+    t.c.caller_msg(5, "agent", false, CallerMsg::Call { call: 1, app: "org.test.app".into(), action: "file.delete".into(), args: vec![], synthetic: true }, t.now);
     assert!(t.c.dialogs.active().is_some());
     t.c.caller_gone(5);
     assert!(t.c.dialogs.active().is_none());
+}
+
+#[test]
+fn dialog_ignores_input_right_after_showing() {
+    let mut t = T::new();
+    t.c.dialog_request(1, DialogRequest::Ask { id: 1, kind: DialogKind::Confirm, app: String::new(), text: "?".into(), options: vec!["Ano".into(), "Ne".into()] }, t.now);
+    // Enter hned po zobrazeni (dvojklik, podstrceny klik) nic.
+    let r = Record::new(Event::Key { code: inputproto::code::KEY_ENTER, scancode: 0, action: Action::Press, ch: None }, 0, 0, t.now);
+    t.c.input(&[r], t.now + 1000);
+    assert!(t.out().is_empty());
+    t.key(inputproto::code::KEY_ENTER, false);
+    assert!(matches!(t.out()[0], Out::Dialog(1, DialogReply::Answer { choice: 0, .. })));
+}
+
+#[test]
+fn new_window_does_not_steal_focus_while_typing() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.key(30, false);
+    let b = t.client("b");
+    t.window(b, Mode::Standard, BLUE);
+    assert_eq!(t.c.focus, Some(t.c.clients[&a].windows[&1]), "fokus zustal u psani");
+    let _ = b;
+}
+
+#[test]
+fn group_limit_is_per_client() {
+    let mut t = T::new();
+    let a = t.client("a");
+    let b = t.client("b");
+    t.window(b, Mode::Standard, RED);
+    t.msg(b, ClientMsg::SyncGroup { count: 2 });
+    let tok = match client_msgs(&t.out(), b).pop() { Some(ServerMsg::SyncToken { token }) => token, o => panic!("{o:?}") };
+    t.set_color(b, BLUE);
+    t.commit(b, 2, commit::GROUP, 0, tok);
+    // Cizi klient zalozi hodne skupin: skupina b zustane drzena.
+    for _ in 0..100 {
+        t.msg(a, ClientMsg::SyncGroup { count: 2 });
+    }
+    t.frame();
+    let r = t.rect_of(b);
+    assert_eq!(t.px(r.x + 5, r.y + 5), RED);
 }
