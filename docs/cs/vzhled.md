@@ -610,8 +610,12 @@ doplnění:
 ## Svižnost, plynulost a zotavení (požadavek)
 
 Základ celého GUI je, aby bylo **svižné a plynulé** a aby se **samo
-vzpamatovalo** z pádu kterékoli části. Hezký vzhled je až na tom.
-Proto jsou to měřitelné cíle a testy selžou, když je systém nesplní.
+vzpamatovalo** z pádu kterékoli části, a zároveň **hezké**. Obojí platí
+stejně: efekty (rozmazání, stíny, animace) jsou navržené tak, aby běžely
+na GPU v rozpočtu snímku, a když by ho překročily, systém je zjednoduší
+(menší rozmazání, kratší animace), místo aby zpozdil odezvu. Svižnost
+a zotavení mají měřitelné cíle a testy selžou, když je systém nesplní;
+vzhled hlídají testy snímků obrazovky proti prototypům.
 
 ### Cíle
 

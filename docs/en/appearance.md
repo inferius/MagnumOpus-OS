@@ -641,9 +641,13 @@ Proposed additions:
 ## Responsiveness, smoothness and recovery (requirement)
 
 The foundation of the whole GUI is that it is **snappy and smooth** and
-that it **recovers on its own** from a crash of any part. The good looks
-come on top of that. These are therefore measurable goals and tests fail
-when the system misses them.
+that it **recovers on its own** from a crash of any part, and at the same
+time **beautiful**. Both count equally: effects (blur, shadows, animations)
+are designed to run on the GPU within the frame budget, and when they would
+exceed it, the system simplifies them (smaller blur, shorter animation)
+instead of delaying the response. Responsiveness and recovery have
+measurable goals and tests fail when the system misses them; the look is
+guarded by screenshot tests against the prototypes.
 
 ### Goals
 
