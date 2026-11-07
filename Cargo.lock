@@ -1070,6 +1070,7 @@ dependencies = [
  "abi",
  "noto-sans-mono-bitmap",
  "shlang",
+ "spin",
 ]
 
 [[package]]

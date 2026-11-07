@@ -919,55 +919,104 @@ together with GUI 6c.
 | protocol, session service, broker, registry, VT100, screen, mounted paths | done, host tests (`cargo test -p term`) |
 | `termd` and `shsess` in initfs | done; sessions in their own processes, file system over `fsproto` (clones aside, views, `LIST_STAT_PAGE`), output mirrored to the log |
 | QEMU test | done: `user/init/src/tests/shell.rs` starts termd with its own fsd session and checks writes (draft in a clone), undo via an fsd view, Ctrl-C, notation conversion, block replay after detaching and that a session and its job survive a termd crash and a new termd takes them over from the registry; starting termd outside tests belongs in the init supervisor (later) |
+| `async`/`await` | done: tasks in `shsess` threads with their own fsd session; tests `cargo test -p term` (std threads) and a QEMU test (concurrency, a task's undo, deadline, cancellation) |
 | keyboard input | done: the console gets the focus from `inputd` (the test in init types with synthetic input) |
 | drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
 | starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
-## Concurrency: async and await (decided, not implemented yet)
+## Concurrency: async and await
 
-> **Agreed (variant A):** a task `async { }`, waiting `await`,
-> `await all [...]`, `await any [...]`, a `timeout`, cancellation `cancel`
-> and parallel `each --parallel N`. The same in both notations.
-> Implementation comes after the terminal colours and interactivity.
+> **Done (variant A):** a task `async { }`, waiting `await` (in C also
+> `x.await`), `await all [...]`, `await any [...]`, a `timeout`,
+> cancellation `cancel` and parallel `each --parallel N`. The keywords are
+> the same in both notations.
 
-The examples are plain text for now (the parser does not know `async` yet and the documentation check would reject them):
-
-```text
-let a = async { fetch https://example.com/data.json | from json }
-let b = async { ls ~/Photos -r | where ext == "jpg" | count }
-let (data, count) = await all [a, b]          # waits for both, errors propagate
-let first = await any [a, b] timeout 5s       # the first one done, else TIMED_OUT
-ls ~/Photos | each --parallel 8 f => image resize $f.path --width 800
+```shell-b
+let a = async { ls ~/Photos -r | where ext == "jpg" | count }
+let b = async { ls ~/Documents -r | count }
+let (photos, documents) = await all [a, b]
+let first = await any [a, b] timeout 5s
 ```
 
-```text
-let a = async { fetch("https://example.com/data.json").from_json() }
-let data = a.await
+```shell-b
+let c = async { open ~/data.json | from json }
+let r = try await c
+if r.failed { echo "cannot: {r.error.message}" }
 ```
+
+```shell-b
+ls ~/Photos | each --parallel 4 f => { open $f.path | from text | lines | count }
+```
+
+The value of `async { }` is a task handle (the record `{task: n}`); `await`
+returns the block's result. `await all` returns a list in the order of the
+list (`let (a, b) = ...` destructures it), `await any` the result of the
+first task done.
 
 **Rules:**
 
 - **Structured concurrency.** A task does not outlive the block it was
-  created in: when the block ends (also by an error or Ctrl-C), running
-  subtasks are cancelled. No forgotten processes are left behind. The
-  exception is an explicit `bg`, which hands the task to the session
-  service.
-- **Errors:** a task's error shows at `await` and propagates by itself;
-  `let r = try await a` returns it as a value.
-- **Permissions do not widen:** a task inherits the script's `needs`
-  manifest (an intersection, as with `bg`).
-- **Terminal:** each task has its own block with progress; you can switch
-  between running tasks.
-- **Underneath:** a task is a process or thread with a handle; `await`
-  waits for its signal through the kernel **port** object (one thread waits
-  for many events), `timeout` is a port timer, `cancel` ends the task. No
-  busy waiting.
+  created in (a script, a function call): when the block ends (also with an
+  error or Ctrl-C), running tasks are cancelled and the block says so in a
+  note. A task from the command line belongs to the session, so a later line
+  can still wait for it. The exception is an explicit `bg`.
+- **Errors:** a task's error shows up at `await` and propagates by itself;
+  `let r = try await a` returns it as a value. `await all` stops at the
+  first error and cancels the other tasks.
+- **Deadline:** `await ... timeout 5s` returns the error `TIMED_OUT` after
+  the deadline; the task keeps running (`cancel` cancels it).
+- **Ctrl-C** during `await` cancels the tasks being waited for.
+- **Files:** a task has its own draft of changes. The changes are committed
+  when the task finishes and get their own `undo` entry in the session. A
+  cancelled or failed task discards its draft, nothing changes. The lock on
+  dangerous operations applies to a task too (a prompt in the terminal,
+  refused without a window).
+- **Permissions do not widen:** a task inherits the caller's `needs`
+  manifest, working directory and lock.
+- **Copies of variables:** a task sees a copy of the variables from the time
+  it was created (a later change does not affect it). A closure cannot be
+  passed into a task (`SH_TYPE`); define it inside `async { }`.
+- **Terminal:** every task has its own block (`async ...`) with output,
+  progress and result. The blocks are replayed after the window detaches and
+  attaches again.
 
-| Variant | Syntax | Why not |
+**Underneath** (the session process `shsess`):
+
+- every task runs in **its own thread** of the session process
+  (`libos::thread`, 256 KB stack) with its own interpreter and its own fsd
+  session (`CONNECT`: the same identity and paths), so the task's draft does
+  not mix with the line,
+- values cross threads encoded the same way as in the terminal protocol
+  (the interpreter uses `Rc`, which threads must not share),
+- the task thread reports output to a shared table and wakes the main
+  thread with a **kernel event**; the main thread waits for a window message
+  or the event (`wait_many`), `await` waits for the event with a deadline.
+  No busy waiting,
+- `cancel` sets a flag the task's interpreter reads (like Ctrl-C).
+
+```text
+window ──Run──▶ shsess (main thread: the line's interpreter)
+                   │ async { } ─▶ task thread (interpreter, fsd session, draft)
+                   │                 │ output, prompts, result ─▶ task table
+                   │ ◀── event ──────┘
+                   └─▶ task blocks to the window, await takes the result and undo
+```
+
+⚠️ **Limits:**
+
+- a host without threads (interpreter tests) runs tasks **in place** one
+  after another; the results are the same, just without concurrency,
+- a task does not start programs (`exec` is only in the main thread so far),
+- switching between running tasks in the window is not there yet (blocks
+  are stacked),
+- two tasks changing the same file end with the conflict `SH_CONFLICT` for
+  the one that finishes second (like two lines in different windows).
+
+| Variant | Notation | Why not |
 |---|---|---|
 | **A (chosen)** | `async`/`await`, `await all/any`, `each --parallel` | - |
-| B | `&` and `wait` as in bash | no return values, errors get lost |
-| C | only `each --parallel`, `par { }` | cannot wait for an arbitrary or the first finished task |
+| B | `&` and `wait` like in bash | no return values, errors get lost |
+| C | only `each --parallel`, `par { }` | cannot wait for any or the first task done |
 
 ## Shell errors
 

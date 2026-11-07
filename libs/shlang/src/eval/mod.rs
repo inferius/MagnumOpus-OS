@@ -12,6 +12,7 @@
 mod builtins;
 mod call;
 mod fsctx;
+mod tasks;
 pub mod ops;
 
 use alloc::boxed::Box;
@@ -192,6 +193,12 @@ pub struct Interp {
     line: String,
     /// `exit` - relace skonci.
     pub exit: bool,
+    /// Ulohy `async` (bezici a hotove).
+    pub(crate) tasks: BTreeMap<u64, tasks::TaskSlot>,
+    /// Rozsahy uloh (skript, funkce); prvni = relace.
+    pub(crate) task_scopes: Vec<Vec<u64>>,
+    /// Cislo dalsi ulohy na miste (hostitel bez soubeznosti).
+    next_task: u64,
 }
 
 impl Interp {
@@ -215,6 +222,9 @@ impl Interp {
             stack_base: 0,
             line: String::new(),
             exit: false,
+            tasks: BTreeMap::new(),
+            task_scopes: alloc::vec![Vec::new()],
+            next_task: 1,
         }
     }
 
@@ -284,6 +294,16 @@ impl Interp {
     }
 
     /// Konec radku: prevzeti zmen.
+    /// Konec ulohy: jako [`Self::finish`], s hodnotou.
+    pub(crate) fn finish_value(&mut self, host: &mut dyn Host, r: Result<Value, ShError>) -> (Result<Value, ShError>, Vec<DiffEntry>) {
+        let (value, unit) = match r {
+            Ok(v) => (Some(v), Ok(())),
+            Err(e) => (None, Err(e)),
+        };
+        let (res, diff) = self.finish(host, unit);
+        (res.map(|_| value.unwrap_or(Value::Nothing)), diff)
+    }
+
     fn finish(&mut self, host: &mut dyn Host, r: Result<(), ShError>) -> (Result<(), ShError>, Vec<DiffEntry>) {
         // Preruseni uprostred `preview`: rozpracovane vrstvy nahledu pryc.
         while self.draft.depth() > 0 {
@@ -361,7 +381,9 @@ impl Interp {
     pub fn run_script(&mut self, host: &mut dyn Host, src: &str) -> Result<Vec<Warning>, ShError> {
         self.line = String::from("run");
         self.stack_base = 0;
+        self.push_task_scope();
         let r = self.script_inner(host, src, None);
+        self.pop_task_scope(host);
         let (r, _) = self.finish(host, r.map(|_| ()));
         r.map(|_| Vec::new())
     }
@@ -491,6 +513,25 @@ impl Interp {
             Stmt::Let { name, value, span } => {
                 let v = self.eval(host, value).map_err(|f| at(f, *span))?;
                 self.frames.last_mut().unwrap().insert(name.clone(), v);
+                Ok(Value::Nothing)
+            }
+            Stmt::LetList { names, value, span } => {
+                let v = self.eval(host, value).map_err(|f| at(f, *span))?;
+                let Value::List(items) = v else {
+                    return Err(Flow::Err(
+                        ShError::new(code::TYPE, alloc::format!("let ({}) = ... ceka seznam, ne {}", names.join(", "), v.type_name()))
+                            .at(*span),
+                    ));
+                };
+                if items.len() != names.len() {
+                    return Err(Flow::Err(
+                        ShError::new(code::ARGS, alloc::format!("seznam ma {} polozek, jmen je {}", items.len(), names.len()))
+                            .at(*span),
+                    ));
+                }
+                for (n, x) in names.iter().zip(items) {
+                    self.frames.last_mut().unwrap().insert(n.clone(), x);
+                }
                 Ok(Value::Nothing)
             }
             Stmt::Assign { name, value, span } => {
@@ -659,6 +700,8 @@ impl Interp {
             Expr::For { .. } | Expr::While { .. } => self.eval_loop(host, e),
             Expr::Try { .. } => self.eval_try(host, e),
             Expr::Pipe(..) | Expr::Bg(..) | Expr::Unwrap(..) => self.eval_misc(host, e),
+            Expr::Async(b, span) => self.eval_async(host, b, *span),
+            Expr::Await { kind, target, timeout, span } => self.eval_await(host, *kind, target, timeout.as_deref(), *span),
         }
     }
 

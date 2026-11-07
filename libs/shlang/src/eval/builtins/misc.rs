@@ -68,6 +68,10 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                 Ok(Value::List(out))
             }
         },
+        "cancel" => {
+            let v = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "cancel: chybi uloha"))?;
+            it.cancel_value(host, &v, a.span)
+        }
         "kill" => {
             let id = int_arg(&a, 0, "id")?.unwrap_or(0) as u64;
             match it.jobs.iter_mut().find(|j| j.id == id) {

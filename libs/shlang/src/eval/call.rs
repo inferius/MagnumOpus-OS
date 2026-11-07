@@ -238,6 +238,14 @@ impl Interp {
     }
 
     fn call_fn(&mut self, host: &mut dyn Host, name: &str, f: &super::FnDef, a: Args, input: Value) -> R<Value> {
+        // Ulohy funkce neprezivaji jeji volani (strukturovana soubeznost).
+        self.push_task_scope();
+        let r = self.call_fn_inner(host, name, f, a, input);
+        self.pop_task_scope(host);
+        r
+    }
+
+    fn call_fn_inner(&mut self, host: &mut dyn Host, name: &str, f: &super::FnDef, a: Args, input: Value) -> R<Value> {
         let mut frame = BTreeMap::new();
         let mut pos = a.pos.into_iter();
         for p in &f.params {

@@ -160,6 +160,13 @@ impl<'a> Printer<'a> {
                 self.out.push_str(&alloc::format!("{name} = "));
                 self.chain(value);
             }
+            Stmt::LetList { names, value, .. } => {
+                self.out.push_str(&alloc::format!("let ({}) = ", names.join(", ")));
+                self.chain(value);
+                for n in names {
+                    self.declare(n);
+                }
+            }
             Stmt::Fn { name, params, body, .. } => {
                 self.out.push_str(&alloc::format!("fn {name}({}) ", params.join(", ")));
                 let mut inner = params.clone();

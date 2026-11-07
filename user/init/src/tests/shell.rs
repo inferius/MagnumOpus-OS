@@ -6,6 +6,8 @@
 //! v klonu bokem), undo pres pohled fsd, preruseni (Ctrl-C), prevod zapisu,
 //! prehrani bloku po odpojeni a to, ze relace (proces `shsess`) i jeji
 //! uloha na pozadi preziji pad termd a novy termd je prevezme z registru.
+//! Ulohy `async` bezi ve vlaknech shsess (soubezne, vlastni undo, termin,
+//! zruseni).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -43,15 +45,21 @@ impl Window {
         ServerMsg::decode(&msg.data).map_err(|_| String::from("neplatna zprava od termd"))
     }
 
-    /// Spusti radek; vrati polozky bloku a vysledek.
+    /// Spusti radek; vrati polozky jeho bloku a vysledek (bloky uloh
+    /// `async`, ktere radek spusti, se preskoci).
     fn run(&self, session: u64, line: &str) -> Result<(Vec<Item>, bool), String> {
         self.send(ClientMsg::Run { session, line: line.into() })?;
         let mut items = Vec::new();
+        let mut ours = None;
         loop {
             match self.recv()? {
-                ServerMsg::Item { item, .. } => items.push(item),
-                ServerMsg::BlockEnd { ok, .. } => return Ok((items, ok)),
-                ServerMsg::BlockStart { .. } | ServerMsg::ItemUpdate { .. } => {}
+                ServerMsg::BlockStart { block, .. } if ours.is_none() => ours = Some(block),
+                ServerMsg::Item { item, block, .. } if Some(block) == ours => items.push(item),
+                ServerMsg::BlockEnd { ok, block, .. } if Some(block) == ours => return Ok((items, ok)),
+                ServerMsg::BlockStart { .. }
+                | ServerMsg::Item { .. }
+                | ServerMsg::BlockEnd { .. }
+                | ServerMsg::ItemUpdate { .. } => {}
                 other => return Err(alloc::format!("necekana zprava: {other:?}")),
             }
         }
@@ -162,6 +170,45 @@ fn session(s: &Startup) -> TestResult {
     w.ok(id, "echo zmena > /shell-test/a.txt")?;
     w.ok(id, "undo")?;
     crate::check_eq!(w.value(id, "open /shell-test/a.txt | from text")?, Value::str("ahoj"), "obsah po undo");
+
+    // async: ulohy ve vlaknech shsess bezi soubezne, vysledky v poradi.
+    let t0 = time::now();
+    crate::check_eq!(
+        w.value(id, "let a = async { sleep 1s; 1 }
+let b = async { sleep 1s; 2 }
+await all [a, b]")?,
+        Value::List(alloc::vec![Value::Int(1), Value::Int(2)]),
+        "await all"
+    );
+    let took = time::now() - t0;
+    if took > 1_800_000_000 {
+        return Err(alloc::format!("ulohy nebezely soubezne ({} ms)", took / 1_000_000));
+    }
+    // Uloha zapisuje vlastni relaci fsd; zmenu vrati undo relace.
+    w.ok(id, "let c = async { echo uloha > /shell-test/t.txt }
+await c")?;
+    crate::check_eq!(w.value(id, "open /shell-test/t.txt | from text")?, Value::str("uloha"), "zapis ulohy");
+    w.ok(id, "undo")?;
+    crate::check_eq!(
+        w.value(id, "try { open /shell-test/t.txt } else e => e.code")?,
+        Value::str("NOT_FOUND"),
+        "undo ulohy"
+    );
+    // Termin: uloha bezi dal, cancel ji zrusi a jeji koncept zahodi.
+    crate::check_eq!(
+        w.value(id, "let s = async { echo x > /shell-test/s.txt; sleep 5s }
+let v = try await s timeout 300ms
+cancel $s
+v.error.code")?,
+        Value::str("TIMED_OUT"),
+        "await timeout"
+    );
+    w.ok(id, "sleep 500ms")?;
+    crate::check_eq!(
+        w.value(id, "try { open /shell-test/s.txt } else e => e.code")?,
+        Value::str("NOT_FOUND"),
+        "zrusena uloha nic nezapsala"
+    );
 
     // Chyba se siri a ma kod; try ji zachyti.
     let (items, ok) = w.run(id, "rm /shell-test/neni.txt")?;
