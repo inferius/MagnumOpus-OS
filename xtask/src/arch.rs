@@ -45,8 +45,9 @@ pub const X86_64: Arch = Arch {
     // isa-debug-exit vraci (v << 1) | 1, jadro zapisuje v = 0x10.
     test_success: 33,
     // Cely beh (USB/vstup, FS faze 2 a 3, sit s TLS a DNSSEC pod TCG, GUI,
-    // shell s padem termd) trva ~200-270 s; s rezervou na vytizeny stroj.
-    test_timeout: Duration::from_secs(300),
+    // shell s padem termd a ulohami async) trva ~200-280 s; s rezervou na
+    // vytizeny stroj (vic sezeni prekladajicich a testujicich soucasne).
+    test_timeout: Duration::from_secs(420),
     ps2: true,
 };
 

@@ -222,9 +222,10 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
     let (process, control) = libos::spawn("fsd", image, handles)?;
     // Testy potrebuji simulaci vypadku proudu - jen v testovacim behu, na
     // beznem systemu by ji mohl spustit kterykoli klient.
-    if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
-        control.write(b"debug", Vec::new())?;
-    }
+    // fsd na konfiguraci ceka (prvni zprava ridiciho kanalu), takze ji
+    // init posle vzdy; bez ni by fsd i init cekali navzajem.
+    let config: &[u8] = if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 { b"debug" } else { b"normal" };
+    control.write(config, Vec::new())?;
     let client = FsClient::new(client);
     let info = client.info()?;
     println!(

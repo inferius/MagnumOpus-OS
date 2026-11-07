@@ -108,7 +108,18 @@ pub struct App {
     pub connected: bool,
     /// Radky zadane pred pripojenim k relaci (odeslou se po `Attached`).
     pending: Vec<String>,
+    /// Ukazat uvodni napovedu v nove relaci ([`WELCOME`]).
+    pub welcome: bool,
+    /// Uvodni napoveda uz se ukazala.
+    welcomed: bool,
 }
+
+/// Uvodni napoveda nove relace (blok bez prikazu).
+pub const WELCOME: &[&str] = &[
+    "Terminál MagnumOpus. Napište help pro přehled příkazů, help <příkaz> pro podrobnosti.",
+    "Příklady:  ls | where size > 1KB   cd ~/Dokumenty   cat poznamky.txt | from text   history",
+    "Tab doplní, šipky nahoru/dolů historie, PgUp projde tabulku, Ctrl-C přeruší, undo vrátí změnu.",
+];
 
 /// Kolik bloku si okno drzi.
 const KEEP_BLOCKS: usize = 100;
@@ -134,7 +145,22 @@ impl App {
             tick: 0,
             connected: false,
             pending: Vec::new(),
+            welcome: false,
+            welcomed: false,
         }
+    }
+
+    /// Spusti radek, jako by ho uzivatel napsal (akce okna, ctecka).
+    pub fn run_line(&mut self, line: &str) {
+        self.run(line.into());
+    }
+
+    /// Spojeni se sluzbou spadlo (termd skoncil); po novem pripojeni
+    /// [`App::start`] se stejnou relaci.
+    pub fn disconnected(&mut self) {
+        self.connected = false;
+        self.prompt = None;
+        self.menu = None;
     }
 
     /// Prvni zpravy po pripojeni (nova relace, nebo `session`).
@@ -172,9 +198,24 @@ impl App {
     pub fn on_msg(&mut self, m: ServerMsg) {
         match m {
             ServerMsg::Welcome { .. } => self.connected = true,
-            ServerMsg::Attached { session, cwd, .. } => {
+            ServerMsg::Attached { session, cwd, blocks } => {
                 self.session = session;
                 self.cwd = cwd;
+                if self.welcome && blocks == 0 && !self.welcomed && self.blocks.is_empty() {
+                    self.welcomed = true;
+                    let items = WELCOME.iter().map(|l| Item::Note((*l).into())).collect();
+                    self.blocks.push(UiBlock {
+                        id: u64::MAX - 1_000_000,
+                        line: String::new(),
+                        items,
+                        ok: Some(true),
+                        duration: 0,
+                        collapsed: false,
+                        table: None,
+                        table_item: None,
+                        tracks: Vec::new(),
+                    });
+                }
                 for line in core::mem::take(&mut self.pending) {
                     self.out.push(ClientMsg::Run { session, line });
                 }

@@ -34,9 +34,6 @@ use term::proto::{ClientMsg, ServerMsg};
 
 libos::entry!(main);
 
-/// Kde lezi klony bokem relaci (viz `shsess`).
-const ASIDE_DIR: &str = "/tmp/.aside";
-
 struct Sess {
     id: u64,
     chan: Channel,
@@ -129,19 +126,6 @@ impl Termd {
         }
     }
 
-    /// Klony bokem relaci, ktere uz nebezi (pad pred prevzetim), zahodit.
-    fn cleanup_asides(&self) {
-        let Some(f) = &self.fsd else { return };
-        let Ok(list) = f.list(ASIDE_DIR) else { return };
-        for e in list {
-            let tag = e.name.rsplit_once('-').map(|(t, _)| t).unwrap_or("");
-            if self.broker.routes.iter().any(|r| r.tag == tag) {
-                continue;
-            }
-            let _ = f.aside_discard(&alloc::format!("{ASIDE_DIR}/{}", e.name));
-        }
-    }
-
     fn window_msg(&mut self) -> bool {
         loop {
             match self.window.try_read() {
@@ -194,7 +178,6 @@ fn main(mut startup: Startup) -> i64 {
         sessions: Vec::new(),
     };
     t.claim();
-    t.cleanup_asides();
     println!(
         "termd: bezim (protokol v{}, FS {}, registr {}, prevzato {})",
         term::proto::VERSION,

@@ -37,6 +37,15 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
         "each" => {
             let f = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "each: chybi funkce"))?;
             let items = list_input(&a, "each", input)?;
+            if let Some(n) = a.named("parallel") {
+                let Value::Int(n) = n else {
+                    return Err(a.err(code::TYPE, "each --parallel ceka pocet"));
+                };
+                let Value::Closure(c) = &f else {
+                    return Err(a.err(code::TYPE, "each --parallel ceka closure"));
+                };
+                return it.each_parallel(host, c, items, (*n).clamp(1, 256) as usize, a.span);
+            }
             let mut out = Vec::with_capacity(items.len());
             let mut bar = super::super::Progress::new(items.len(), "each");
             for x in items {

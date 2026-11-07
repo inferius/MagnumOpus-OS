@@ -42,6 +42,7 @@ pub mod random;
 mod rt;
 pub mod spawn;
 pub mod sys;
+pub mod thread;
 pub mod time;
 pub mod vm;
 mod vmo;

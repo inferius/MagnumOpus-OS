@@ -16,6 +16,9 @@ use libos::{Channel, Error, Handle, Result};
 
 use crate::serve::{ListCache, Service, entries, stat};
 
+/// Kolik cisel docasneho jmena zkusit, nez REPLACE_BEGIN to vzda.
+const TEMP_TRIES: usize = 64;
+
 /// Nejvic soucasnych relaci (ochrana sluzby pred zahlcenim).
 pub const MAX_SESSIONS: usize = 64;
 
@@ -287,10 +290,21 @@ impl Service {
                 let expected = has.then_some(rev);
                 let (dir, name) = split(&target)?;
                 fs::validate_name(name)?;
-                self.temp_counter += 1;
-                let temp = alloc::format!("{}/{}", dir.trim_end_matches('/'), fsproto::v2::temp_name(name, self.temp_counter));
                 let fs = self.fs.as_mut().ok_or(Error::IoError)?;
-                fs.create(&temp, fs::Kind::File)?;
+                // Vyhradne nove jmeno: existujici soubor (i zbytek po padu,
+                // i cizi soubor stejneho jmena) se nikdy nemaze, vezme se
+                // dalsi cislo.
+                let mut temp = String::new();
+                let mut made = Err(Error::AlreadyExists);
+                for _ in 0..TEMP_TRIES {
+                    self.temp_counter += 1;
+                    temp = alloc::format!("{}/{}", dir.trim_end_matches('/'), fsproto::v2::temp_name(name, self.temp_counter));
+                    made = fs.create(&temp, fs::Kind::File);
+                    if !matches!(made, Err(Error::AlreadyExists)) {
+                        break;
+                    }
+                }
+                made?;
                 let h = fs.open(&temp, fs::access::READ | fs::access::WRITE | fs::access::DELETE, fs::share::READ | fs::share::DELETE)?;
                 // Kdyz klient zmizi, docasny soubor zmizi s nim.
                 fs.set_delete_on_close(h, true)?;

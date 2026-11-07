@@ -472,7 +472,11 @@ objekt z bootstrapu `kind::FRAMEBUFFER` (jiný objekt paměti =
   na řádek, formát 1 = RGB, 2 = BGR; vše u32). Vyžaduje `READ`.
 - `CLAIM` (1): **výslovné převzetí** - jádro přestane kreslit log do
   framebufferu, log dál jde na sériovou linku. Vyžaduje `WRITE`.
-- `RELEASE` (2): vrácení - jádro obrazovku smaže a kreslí log dál.
+- Předání: když obrazovku drží jiný živý proces, `CLAIM` vrátí
+  `BAD_STATE`. Nový vlastník ji dostane, až ji starý vrátí (`RELEASE`)
+  nebo skončí (jádro ji pak vrátí samo). Předání řídí vlastník displeje
+  (supervisor initu: záložní konzole po pádu GUI).
+- `RELEASE` (2): vrácení - jádro obrazovku smaže a kreslí log dál. Smí jen vlastník (proces, který naposledy zavolal `CLAIM`), jinak `BAD_STATE`: pozdní vrácení předchozího vlastníka tak nesmaže obraz nového (konzole po pádu GUI).
   Vyžaduje `WRITE`. Konec procesu, který framebuffer převzal, ho vrátí
   sám.
 

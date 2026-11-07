@@ -13,6 +13,10 @@
 //!   `inputd`) jen zaloguje pad: obnova potrebuje znovu napojit ovladace
 //!   a je popsana jako dalsi krok v dokumentaci.
 //!
+//! - **Terminal**: kanaly pripojeni oken terminalu, registry relaci
+//!   a procesy `termd` ([`crate::terminal`]); po padu kompozitoru spusti
+//!   zalozni konzoli.
+//!
 //! Jedno kolo smycky je [`Supervisor::step`] (testy ji tak mohou ridit
 //! a videt, co se stalo); [`Supervisor::run`] ho opakuje do nekonecna.
 
@@ -100,6 +104,7 @@ enum Item {
     Service(usize),
     /// Kanal sluzby, ktera ceka na potvrzeni startu.
     Starting(usize),
+    Terminal(crate::terminal::Wait),
 }
 
 impl Supervisor {
@@ -171,6 +176,10 @@ impl Supervisor {
                 what.push(Item::Starting(i));
             }
         }
+        let terminals = crate::terminal::TERMINALS.lock();
+        let mut term_what = Vec::new();
+        terminals.wait_items(&mut items, &mut term_what);
+        what.extend(term_what.into_iter().map(Item::Terminal));
         let due = self
             .watched
             .iter()
@@ -186,6 +195,7 @@ impl Supervisor {
             Err(_) => Vec::new(),
         };
         drop(items);
+        let mut terminals = terminals;
         for (k, item) in what.iter().enumerate() {
             let Some(sig) = observed.get(k).copied() else { break };
             match *item {
@@ -202,9 +212,19 @@ impl Supervisor {
                 Item::Starting(i) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => {
                     self.started(i, &mut out)
                 }
+                Item::Terminal(w) => terminals.on_signal(startup, w, sig),
                 Item::Service(_) | Item::Starting(_) => {}
             }
         }
+        terminals.cleanup();
+        // Kompozitor spadl: terminal v zalozni konzoli.
+        if out.iter().any(|h| matches!(h, Happened::Exited { name: "compd", .. }))
+            && !terminals.console_running()
+            && let Err(e) = terminals.start_console(startup)
+        {
+            println!("init: zalozni konzoli nelze spustit: {e}");
+        }
+        drop(terminals);
         self.start_timeouts();
         self.restart_due(startup, &mut out);
         out

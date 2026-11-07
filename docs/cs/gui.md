@@ -587,17 +587,18 @@ latinku včetně češtiny a je přibalené v `libs/font/fonts/`.
 
 ## Okno terminálu
 
-Terminál 6b se v GUI stane oknem nad svým nativním protokolem. Ukázka
-`gui-term` je připravené okno: **vlastní titulek** (aplikace kreslí kartu
-„Relace 1“ a deklaruje oblast `DRAG` s výjimkou `NO_DRAG` pro kartu,
+Terminál 6b je v GUI oknem `gui-term` nad svým nativním protokolem:
+**vlastní titulek** (aplikace kreslí kartu relace „Relace N“ a deklaruje oblast `DRAG` s výjimkou `NO_DRAG` pro kartu,
 odznak a tlačítka kreslí systém), obsah je mřížka znaků `term::screen`
 (písmo Noto Sans Mono, stejné jako v konzoli) a strom přístupnosti má
 uzel `terminal` s viditelným textem. Řádek jde zadat klávesnicí, akcí
 přístupnosti `set-value` nebo akcí `terminal.run` (vyžaduje potvrzení).
 
-Napojení na službu relací (`termd`, protokol `term::proto`) dělá vlákno
-terminálu: místo místního řádkového editoru pošle `Run` a vykreslí bloky
-výstupu do stejné mřížky.
+Obsah je interaktivní terminál `term::ui` (editor se zvýrazněním,
+doplňování, bloky výstupu, tabulky, průběhy, výzvy) nad službou relací
+`termd`. Kanál k ní okno nedostane přímo: init mu dá kanál připojení a na
+`connect` spustí termd; po pádu termd se okno připojí znovu ke stejné
+relaci (viz [Init: Terminál](init.md#terminál)).
 
 ## Správce úloh
 

@@ -2,8 +2,10 @@
 //! rezim). Kresli interaktivni terminal (`term::ui`) do framebufferu
 //! z firmware a bere klavesy od `inputd`.
 //!
-//! Start: bootstrap kanal = ridici kanal (od initu, pozdeji supervisor);
-//! handly `kind::USER` = [kanal k termd (okno)].
+//! Start: bootstrap kanal = ridici kanal (od initu); handly `kind::USER`
+//! = [kanal pripojeni]. Na `connect` init spusti termd a vrati kanal k nemu
+//! (`ok` + handle); kdyz termd skonci, konzole pozada znovu a pripoji se
+//! ke stejne relaci.
 //!
 //! Displej ani fokus si konzole nebere sama - preda ji je ten, kdo je
 //! vlastni (supervisor), stejne jako kompozitoru. Ridici prikazy (text,
@@ -39,6 +41,29 @@ libos::entry!(main);
 
 /// Prekreslit nejvys jednou za tolik (animace pruhu a tociciho znaku).
 const TICK: Duration = Duration::from_millis(150);
+/// Prodleva pred novym pripojenim k termd.
+const RETRY: Duration = Duration::from_millis(500);
+
+/// Pozada init o termd; vrati kanal k nemu. Odpoved `err CANCELED` patri
+/// drivejsimu pokusu (init ho nahradil novejsim) - cist dal.
+fn connect(conn: &Channel) -> Result<Channel, Error> {
+    // Zastarale odpovedi (pokus, ktery vyprsel) zahodit: jejich termd init
+    // pri dalsim `connect` ukonci.
+    while conn.try_read().is_ok() {}
+    conn.write(b"connect", Vec::new())?;
+    let end = time::deadline_after(Duration::from_secs(10));
+    loop {
+        let m = conn.read(Some(end))?;
+        if m.data.starts_with(b"ok") {
+            return m.handles.into_iter().next().map(Channel::from_handle).ok_or(Error::Corrupted);
+        }
+        if m.data.starts_with(b"err CANCELED") {
+            continue;
+        }
+        println!("console: termd nejde spustit: {}", String::from_utf8_lossy(&m.data));
+        return Err(Error::Unreachable);
+    }
+}
 
 /// Displej: framebuffer, mapovani a obraz v pameti (do framebufferu se
 /// kopiruje cely snimek najednou - zapis po pixelech do pameti zarizeni je
@@ -120,15 +145,44 @@ struct Console {
     screen: Screen,
     display: Option<Display>,
     focus: Option<Channel>,
-    termd: Channel,
+    conn: Channel,
+    termd: Option<Channel>,
+    retry_at: Option<u64>,
     dirty: bool,
 }
 
 impl Console {
     fn send_out(&mut self) {
-        for m in self.app.take_out() {
-            if self.termd.write(&m.encode(), Vec::new()).is_err() {
-                self.app.connected = false;
+        let out = self.app.take_out();
+        let Some(t) = &self.termd else { return };
+        for m in out {
+            if t.write(&m.encode(), Vec::new()).is_err() {
+                self.lost();
+                return;
+            }
+        }
+    }
+
+    fn lost(&mut self) {
+        self.termd = None;
+        self.app.disconnected();
+        self.retry_at = Some(time::deadline_after(RETRY));
+        self.dirty = true;
+    }
+
+    /// Pripoji se k termd (start i po padu: stejna relace).
+    fn reconnect(&mut self) {
+        match connect(&self.conn) {
+            Ok(ch) => {
+                self.termd = Some(ch);
+                self.retry_at = None;
+                let s = self.app.session;
+                self.app.start(s);
+                self.send_out();
+            }
+            Err(e) => {
+                println!("console: pripojeni k termd: {e}");
+                self.retry_at = Some(time::deadline_after(RETRY * 4));
             }
         }
     }
@@ -212,10 +266,10 @@ fn now() -> Option<i64> {
 fn main(mut startup: Startup) -> i64 {
     let control = startup.bootstrap;
     let Some(h) = startup.handles.drain(..).next() else {
-        println!("console: chybi kanal k termd");
+        println!("console: chybi kanal pripojeni k termd");
         return 1;
     };
-    let termd = Channel::from_handle(h);
+    let conn = Channel::from_handle(h);
     // Bez displeje (pred `display`) se kresli jen do obrazovky v pameti.
     let (cols, rows) = (100, 30);
     let mut c = Console {
@@ -223,20 +277,30 @@ fn main(mut startup: Startup) -> i64 {
         screen: Screen::new(cols, rows),
         display: None,
         focus: None,
-        termd,
+        conn,
+        termd: None,
+        retry_at: None,
         dirty: true,
     };
-    c.app.start(0);
-    c.send_out();
+    c.app.welcome = true;
+    c.reconnect();
     println!("console: bezim (ceka na displej a fokus)");
     let mut next_tick = time::deadline_after(TICK);
     loop {
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
-        let mut items: Vec<(&Handle, Signals)> = alloc::vec![(control.handle(), mask), (c.termd.handle(), mask)];
+        let mut items: Vec<(&Handle, Signals)> = alloc::vec![(control.handle(), mask)];
+        if let Some(t) = &c.termd {
+            items.push((t.handle(), mask));
+        }
         if let Some(f) = &c.focus {
             items.push((f.handle(), mask));
         }
-        let _ = libos::wait_many(&items, Some(next_tick));
+        let wake = c.retry_at.map_or(next_tick, |r| r.min(next_tick));
+        let _ = libos::wait_many(&items, Some(wake));
+        if c.retry_at.is_some_and(|r| time::now() >= r) {
+            c.reconnect();
+            c.dirty = true;
+        }
         // Ridici kanal.
         loop {
             match control.try_read() {
@@ -258,7 +322,8 @@ fn main(mut startup: Startup) -> i64 {
         }
         // Zpravy od termd.
         loop {
-            match c.termd.try_read() {
+            let Some(t) = &c.termd else { break };
+            match t.try_read() {
                 Ok(m) => {
                     if let Ok(sm) = ServerMsg::decode(&m.data) {
                         c.app.on_msg(sm);
@@ -267,10 +332,8 @@ fn main(mut startup: Startup) -> i64 {
                 }
                 Err(Error::ShouldWait) => break,
                 Err(_) => {
-                    if c.app.connected {
-                        c.app.connected = false;
-                        c.dirty = true;
-                    }
+                    println!("console: termd skoncil, pripojim se znovu");
+                    c.lost();
                     break;
                 }
             }

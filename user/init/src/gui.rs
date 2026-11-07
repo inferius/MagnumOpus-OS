@@ -99,6 +99,11 @@ impl Gui {
     /// Spusti aplikaci z initfs s oknem: identita z manifestu, kanal okna
     /// jako prvni handle startovni zpravy.
     pub fn launch(&mut self, startup: &Startup, name: &str) -> Result<usize> {
+        self.launch_with(startup, name, Vec::new())
+    }
+
+    /// Jako [`Gui::launch`], s dalsimi handly za kanalem okna.
+    pub fn launch_with(&mut self, startup: &Startup, name: &str, extra: Vec<StartHandle>) -> Result<usize> {
         let fs = Initfs::open(startup)?;
         let text = fs.find(&format!("{name}.manifest.toml")).and_then(|t| core::str::from_utf8(t).ok()).unwrap_or("");
         let m = apps::manifest(&fs, name)?;
@@ -120,7 +125,9 @@ impl Gui {
             actions,
         };
         let ch = self.channel(&info.encode())?;
-        let app = apps::spawn(startup, name, vec![StartHandle::user(ch.into_handle())])?;
+        let mut handles = vec![StartHandle::user(ch.into_handle())];
+        handles.extend(extra);
+        let app = apps::spawn(startup, name, handles)?;
         self.apps.push(app);
         Ok(self.apps.len() - 1)
     }
@@ -144,10 +151,20 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>) {
     {
         println!("init: vstup pro kompozitor: {e}");
     }
-    for app in ["gui-term", "gui-demo"] {
-        if let Err(e) = gui.launch(startup, app) {
-            println!("init: {app} nelze spustit: {e}");
+    // Terminal: druhy handle = kanal pripojeni k termd (init ho spousti
+    // a hlida, viz `terminal.rs`).
+    let term = match crate::terminal::TERMINALS.lock().client("gui-term") {
+        Ok(c) => vec![StartHandle::user(c.into_handle())],
+        Err(e) => {
+            println!("init: kanal terminalu: {e}");
+            Vec::new()
         }
+    };
+    if let Err(e) = gui.launch_with(startup, "gui-term", term) {
+        println!("init: gui-term nelze spustit: {e}");
+    }
+    if let Err(e) = gui.launch(startup, "gui-demo") {
+        println!("init: gui-demo nelze spustit: {e}");
     }
     *GUI.lock() = Some(gui);
 }

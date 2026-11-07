@@ -56,8 +56,15 @@ pub(super) fn console(s: &Startup) -> TestResult {
     let image = initfs.find("termd").ok_or("termd neni v initfs")?;
     let (_termd, window) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
     let image = initfs.find("console").ok_or("console neni v initfs")?;
-    let (_console, ctl) = libos::spawn("console", image, alloc::vec![StartHandle::user(window.into_handle())])
+    // Kanal pripojeni (v beznem behu ho obsluhuje init, `terminal.rs`).
+    let (conn, conn_there) = Channel::create().map_err(|e| fail("kanal pripojeni", e))?;
+    let (_console, ctl) = libos::spawn("console", image, alloc::vec![StartHandle::user(conn_there.into_handle())])
         .map_err(|e| fail("spusteni console", e))?;
+    let m = conn.read(Some(time::deadline_after(Duration::from_secs(10)))).map_err(|e| fail("connect od konzole", e))?;
+    if m.data != b"connect" {
+        return Err("konzole neposlala connect".into());
+    }
+    conn.write(b"ok", alloc::vec![window.into_handle()]).map_err(|e| fail("odpoved connect", e))?;
 
     // Displej a fokus preda vlastnik (tady test, pozdeji supervisor).
     let fbh = fb.handle().duplicate(None).map_err(|e| fail("framebuffer", e))?;
@@ -108,6 +115,24 @@ pub(super) fn console(s: &Startup) -> TestResult {
     let (st, _) = command(&ctl, "status", Vec::new())?;
     if !st.contains("drawing=1") || !st.contains("focus=1") || !st.contains("connected=1") {
         return Err(alloc::format!("stav konzole: {st}"));
+    }
+    // Cizi proces (test) nesmi obrazovku vratit ani prevzit: BAD_STATE
+    // a obraz konzole zustane.
+    let raw = fb.handle().raw();
+    if libos::sys::fb_claim(raw, false) != Err(libos::Error::BadState) {
+        return Err("cizi RELEASE framebufferu nevratil BAD_STATE".into());
+    }
+    if libos::sys::fb_claim(raw, true) != Err(libos::Error::BadState) {
+        return Err("CLAIM obsazeneho framebufferu nevratil BAD_STATE".into());
+    }
+    let (st, _) = command(&ctl, "status", Vec::new())?;
+    if !st.contains("drawing=1") {
+        return Err(alloc::format!("po cizim RELEASE: {st}"));
+    }
+    let (reply, _) = command(&ctl, "dump", Vec::new())?;
+    if !reply.contains("| echo ahoj") {
+        return Err(alloc::format!("obraz konzole po cizim RELEASE zmizel:
+{reply}"));
     }
     // Vraceni displeje: odpoved nese framebuffer pro dalsiho vlastnika.
     let hs = ok(&ctl, "release", Vec::new())?;

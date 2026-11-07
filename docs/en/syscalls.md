@@ -485,8 +485,16 @@ the object from the bootstrap `kind::FRAMEBUFFER` (any other memory object
 - `CLAIM` (1): **explicit takeover** - the kernel stops drawing the log
   into the framebuffer, the log keeps going to the serial line. Requires
   `WRITE`.
+- Handover: when another live process holds the screen, `CLAIM` returns
+  `BAD_STATE`. The new owner gets it once the old one gives it back
+  (`RELEASE`) or exits (the kernel then gives it back by itself). The
+  owner of the display drives the handover (the init supervisor: the
+  fallback console after a GUI crash).
 - `RELEASE` (2): give back - the kernel clears the screen and keeps
-  drawing the log. Requires `WRITE`. The end of the process that took the
+  drawing the log. Requires `WRITE`. Only the owner may (the process that
+  last called `CLAIM`), otherwise `BAD_STATE`: a late give-back of the
+  previous owner does not clear the new owner's picture (the console after
+  a GUI crash). The end of the process that took the
   framebuffer over gives it back by itself.
 
 A kernel panic always draws into the framebuffer. Errors: `BAD_HANDLE`,

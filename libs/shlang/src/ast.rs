@@ -43,6 +43,8 @@ pub struct Block {
 pub enum Stmt {
     /// `let jmeno = hodnota`
     Let { name: String, value: Expr, span: Span },
+    /// `let (a, b) = seznam` - rozlozeni seznamu (napr. vysledku `await all`).
+    LetList { names: Vec<String>, value: Expr, span: Span },
     /// `jmeno = hodnota` (promenna uz existuje)
     Assign { name: String, value: Expr, span: Span },
     /// `fn jmeno(a, b) { ... }`
@@ -278,6 +280,22 @@ pub enum Expr {
     Bg(Block, Span),
     /// `x?` - vysledek z `try` rozbali, chybu vyvola.
     Unwrap(Box<Expr>, Span),
+    /// Uloha `async { }` (bezi soubezne; hodnota = popisovac ulohy).
+    Async(Block, Span),
+    /// `await x`, `await all [..]`, `await any [..]`, volitelne `timeout d`;
+    /// v C i `x.await`.
+    Await { kind: AwaitKind, target: Box<Expr>, timeout: Option<Box<Expr>>, span: Span },
+}
+
+/// Na co `await` ceka.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AwaitKind {
+    /// Jedna uloha.
+    One,
+    /// Vsechny ze seznamu (vysledky v poradi seznamu).
+    All,
+    /// Prvni hotova ze seznamu.
+    Any,
 }
 
 impl Expr {
@@ -297,7 +315,9 @@ impl Expr {
             | Expr::Block(_, s)
             | Expr::Pipe(_, s)
             | Expr::Bg(_, s)
+            | Expr::Async(_, s)
             | Expr::Unwrap(_, s) => *s,
+            Expr::Await { span, .. } => *span,
             Expr::If { span, .. }
             | Expr::For { span, .. }
             | Expr::While { span, .. }
@@ -328,6 +348,13 @@ pub fn walk(e: &Expr, f: &mut dyn FnMut(&Expr)) {
             }
         }
         Expr::Field(b, _, _) | Expr::Unary(_, b, _) | Expr::Unwrap(b, _) => walk(b, f),
+        Expr::Async(b, _) => walk_block(b, f),
+        Expr::Await { target, timeout, .. } => {
+            walk(target, f);
+            if let Some(t) = timeout {
+                walk(t, f);
+            }
+        }
         Expr::Index(a, b, _) | Expr::Binary(_, a, b, _) => {
             walk(a, f);
             walk(b, f);
@@ -379,7 +406,7 @@ pub fn walk(e: &Expr, f: &mut dyn FnMut(&Expr)) {
 pub fn walk_block(b: &Block, f: &mut dyn FnMut(&Expr)) {
     for s in &b.stmts {
         match s {
-            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => walk(value, f),
+            Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::LetList { value, .. } => walk(value, f),
             Stmt::Fn { body, .. } => walk_block(body, f),
             Stmt::Return { value: Some(v), .. } => walk(v, f),
             Stmt::Expr(e) => walk(e, f),

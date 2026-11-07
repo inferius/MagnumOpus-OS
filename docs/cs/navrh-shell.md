@@ -869,47 +869,91 @@ v běžném běhu rozdělí supervisor spolu s GUI 6c.
 | protokol, služba relací, prostředník, registr, VT100, obrazovka, připojené cesty | hotovo, testy na hostiteli (`cargo test -p term`) |
 | `termd` a `shsess` v initfs | hotovo; relace ve vlastních procesech, FS přes `fsproto` (klony bokem, pohledy, `LIST_STAT_PAGE`), výstup zrcadlí do logu |
 | test v QEMU | hotovo: `user/init/src/tests/shell.rs` spustí termd s vlastní relací fsd a ověří zápis (koncept v klonu), undo přes pohled fsd, Ctrl-C, převod zápisu, přehrání bloků po odpojení a to, že relace i její úloha přežijí pád termd a nový termd je převezme z registru; spouštění termd mimo testy patří do supervisoru initu (později) |
+| `async`/`await` | hotovo: úlohy ve vláknech `shsess` s vlastní relací fsd; testy `cargo test -p term` (vlákna std) a test v QEMU (souběh, undo úlohy, termín, zrušení) |
 | vstup z klávesnice | hotovo: konzole dostane fokus od `inputd` (test v initu píše umělým vstupem) |
 | kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
 | spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
 
-## Souběžnost: async a await (rozhodnuto, zatím neimplementováno)
+## Souběžnost: async a await
 
-> **Odsouhlaseno (varianta A):** úloha `async { }`, čekání `await`,
-> `await all [...]`, `await any [...]`, časový limit `timeout`, zrušení
-> `cancel` a paralelní `each --parallel N`. Stejně v obou zápisech.
-> Implementace přijde po barvách a interaktivitě terminálu.
+> **Hotovo (varianta A):** úloha `async { }`, čekání `await` (v C i
+> `x.await`), `await all [...]`, `await any [...]`, časový limit `timeout`,
+> zrušení `cancel` a paralelní `each --parallel N`. Klíčová slova jsou
+> stejná v obou zápisech.
 
-Příklady jsou zatím jako text (parser `async` ještě nezná, dokumentace by je odmítla):
-
-```text
-let a = async { fetch https://example.com/data.json | from json }
-let b = async { ls ~/Fotky -r | where ext == "jpg" | count }
-let (data, pocet) = await all [a, b]          # počká na obě, chyba se šíří
-let prvni = await any [a, b] timeout 5s       # první hotová, jinak TIMED_OUT
-ls ~/Fotky | each --parallel 8 f => image resize $f.path --width 800
+```shell-b
+let a = async { ls ~/Fotky -r | where ext == "jpg" | count }
+let b = async { ls ~/Dokumenty -r | count }
+let (fotky, dokumenty) = await all [a, b]
+let prvni = await any [a, b] timeout 5s
 ```
 
-```text
-let a = async { fetch("https://example.com/data.json").from_json() }
-let data = a.await
+```shell-b
+let c = async { open ~/data.json | from json }
+let r = try await c
+if r.failed { echo "nejde: {r.error.message}" }
 ```
+
+```shell-b
+ls ~/Fotky | each --parallel 4 f => { open $f.path | from text | lines | count }
+```
+
+Hodnota `async { }` je popisovač úlohy (záznam `{task: n}`); `await` vrátí
+výsledek bloku. `await all` vrátí seznam v pořadí seznamu (rozloží ho
+`let (a, b) = ...`), `await any` výsledek první hotové úlohy.
 
 **Pravidla:**
 
-- **Strukturovaná souběžnost.** Úloha nepřežije blok, ve kterém vznikla:
-  když blok skončí (i chybou nebo Ctrl-C), běžící podúlohy se zruší.
-  Nezůstanou tak zapomenuté procesy. Výjimka je výslovné `bg`, které úlohu
-  předá službě relací.
+- **Strukturovaná souběžnost.** Úloha nepřežije blok, ve kterém vznikla
+  (skript, volání funkce): když blok skončí (i chybou nebo Ctrl-C), běžící
+  úlohy se zruší a blok to oznámí poznámkou. Úloha z příkazové řádky patří
+  relaci, takže na ni jde počkat i dalším řádkem. Výjimka je výslovné `bg`.
 - **Chyby:** chyba úlohy se projeví při `await` a šíří se sama;
-  `let r = try await a` ji vrátí jako hodnotu.
-- **Oprávnění se nerozšiřují:** úloha dědí manifest `needs` skriptu
-  (průnik, stejně jako `bg`).
-- **Terminál:** každá úloha má vlastní blok s průběhem, mezi běžícími
-  úlohami jde přepínat.
-- **Pod tím:** úloha je proces nebo vlákno s handlem, `await` čeká na jeho
-  signál přes objekt **port** jádra (jedno vlákno čeká na mnoho událostí),
-  `timeout` je časovač portu, `cancel` ukončí úlohu. Žádné aktivní čekání.
+  `let r = try await a` ji vrátí jako hodnotu. `await all` skončí hned při
+  první chybě a ostatní úlohy zruší.
+- **Termín:** `await ... timeout 5s` po termínu vrátí chybu `TIMED_OUT`;
+  úloha běží dál (`cancel` ji zruší).
+- **Ctrl-C** během `await` zruší úlohy, na které se čeká.
+- **Soubory:** úloha má vlastní koncept změn. Změny se převezmou, až úloha
+  doběhne, a mají vlastní záznam `undo` v relaci. Zrušená nebo chybná úloha
+  koncept zahodí, nic se nezmění. Zámek nebezpečných operací platí i pro
+  úlohu (výzva v terminálu, bez okna se odmítne).
+- **Oprávnění se nerozšiřují:** úloha dědí manifest `needs`, pracovní
+  složku a zámek volajícího.
+- **Kopie proměnných:** úloha vidí kopii proměnných z doby vzniku (pozdější
+  změna ji neovlivní). Closure do úlohy předat nejde (`SH_TYPE`), definujte
+  ji uvnitř `async { }`.
+- **Terminál:** každá úloha má vlastní blok (`async ...`) s výstupem,
+  průběhem a výsledkem. Bloky se po odpojení a připojení okna přehrají.
+
+**Pod tím** (proces relace `shsess`):
+
+- každá úloha běží ve **vlastním vlákně** procesu relace (`libos::thread`,
+  zásobník 256 KB) s vlastním interpretem a vlastní relací fsd (`CONNECT`:
+  stejná identita a cesty), takže koncept úlohy se nemíchá s řádkem,
+- hodnoty jdou mezi vlákny zakódované stejně jako v protokolu terminálu
+  (interpret používá `Rc`, které vlákna sdílet nesmí),
+- vlákno úlohy hlásí výstup do sdílené tabulky a probudí hlavní vlákno
+  **událostí jádra**; hlavní vlákno čeká na zprávu okna nebo na událost
+  (`wait_many`), `await` čeká na událost s termínem. Žádné aktivní čekání,
+- `cancel` nastaví příznak, který interpret úlohy čte (jako Ctrl-C).
+
+```text
+okno ──Run──▶ shsess (hlavní vlákno: interpret řádku)
+                 │ async { } ─▶ vlákno úlohy (interpret, relace fsd, koncept)
+                 │                 │ výstup, výzvy, výsledek ─▶ tabulka úloh
+                 │ ◀── událost ────┘
+                 └─▶ bloky úloh oknu, await vyzvedne výsledek a undo
+```
+
+⚠️ **Omezení:**
+
+- hostitel bez vláken (testy interpretu) úlohy spustí **na místě**
+  postupně; výsledky jsou stejné, jen bez souběhu,
+- úloha nespouští programy (`exec` je zatím jen v hlavním vlákně),
+- přepínání mezi běžícími úlohami v okně zatím není (bloky jsou pod sebou),
+- dvě úlohy, které mění stejný soubor, skončí konfliktem `SH_CONFLICT`
+  u té, která doběhne druhá (jako dva řádky v různých oknech).
 
 | Varianta | Zápis | Proč ne |
 |---|---|---|

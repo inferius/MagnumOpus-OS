@@ -112,6 +112,27 @@ impl<'a> Printer<'a> {
         }
     }
 
+    /// `await`: v C jedna uloha jako `x.await`, jinak klicova slova (stejne
+    /// v B i C).
+    fn await_expr(&mut self, kind: crate::ast::AwaitKind, target: &Expr, timeout: Option<&Expr>, ctx: Ctx) {
+        use crate::ast::AwaitKind;
+        if kind == AwaitKind::One && timeout.is_none() && self.style == crate::parse::Style::C && self.atomic(target) {
+            self.base(target, ctx);
+            self.out.push_str(".await");
+            return;
+        }
+        self.out.push_str(match kind {
+            AwaitKind::One => "await ",
+            AwaitKind::All => "await all ",
+            AwaitKind::Any => "await any ",
+        });
+        self.base(target, ctx);
+        if let Some(t) = timeout {
+            self.out.push_str(" timeout ");
+            self.base(t, ctx);
+        }
+    }
+
     fn base(&mut self, e: &Expr, ctx: Ctx) {
         if self.atomic(e) {
             self.expr(e, 7, ctx);
@@ -167,6 +188,11 @@ impl<'a> Printer<'a> {
             Expr::Unwrap(base, _) => {
                 self.base(base, ctx);
                 self.out.push('?');
+            }
+            Expr::Await { kind, target, timeout, .. } => self.await_expr(*kind, target, timeout.as_deref(), ctx),
+            Expr::Async(b, _) => {
+                self.out.push_str("async ");
+                self.block(b, &[]);
             }
             Expr::List(items, _) => {
                 self.out.push('[');
@@ -407,6 +433,10 @@ impl<'a> Printer<'a> {
             }
             Expr::Bg(b, _) => {
                 self.out.push_str("bg ");
+                self.block(b, &[]);
+            }
+            Expr::Async(b, _) => {
+                self.out.push_str("async ");
                 self.block(b, &[]);
             }
             other => self.expr(other, 0, cctx),

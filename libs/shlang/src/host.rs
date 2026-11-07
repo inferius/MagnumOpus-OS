@@ -143,6 +143,37 @@ pub trait Fs {
     }
 }
 
+/// Uloha `async` pro hostitele: kod v zapisu B (formatovac), kopie
+/// zachycenych promennych a prava volajiciho.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskSpec {
+    pub code: String,
+    pub vars: Vec<(String, Value)>,
+    pub needs: Option<TaskNeeds>,
+    pub cwd: String,
+    /// Popis pro blok v terminalu.
+    pub label: String,
+    /// Zamek nebezpecnych operaci volajiciho (kolik zmen bez potvrzeni).
+    pub lock_threshold: usize,
+}
+
+/// Prava ulohy (manifest `needs` volajiciho; `None` = bez omezeni).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskNeeds {
+    pub read: Vec<String>,
+    pub write: Vec<String>,
+    pub net: bool,
+}
+
+/// Dokoncena uloha: vysledek a zaznamy undo jejich zmen souboru (prevezme
+/// je relace, `undo` je vrati).
+#[derive(Debug, Clone)]
+pub struct TaskDone {
+    pub id: u64,
+    pub result: Result<Value, ShError>,
+    pub undo: Vec<crate::vfs::undo::UndoEntry>,
+}
+
 /// Klon datasetu "bokem".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Aside {
@@ -214,6 +245,22 @@ pub trait Host {
     fn progress(&mut self, _id: u32, _done: u64, _total: u64, _label: &str) {}
     /// Vyber ze seznamu (vyzva s volbami). `None` = zruseno / bez okna.
     fn choose(&mut self, _question: &str, _choices: &[String]) -> Option<usize> {
+        None
+    }
+    /// Spusti ulohu `async` soubezne (vlastni vlakno, interpret, koncept
+    /// a blok). `None` = hostitel soubeznost neumi, uloha probehne hned.
+    fn task_spawn(&mut self, _spec: TaskSpec) -> Option<Result<u64, ShError>> {
+        None
+    }
+    /// Pocka na ulohy: `any` = staci jedna hotova, jinak vsechny. Vrati
+    /// hotove (poradi dokonceni). Termin `deadline` (ns od 1970) uplynul =
+    /// chyba `TIMED_OUT` (ulohy bezi dal). Termin v minulosti = jen
+    /// vyzvednout hotove bez cekani.
+    fn task_wait(&mut self, _ids: &[u64], _any: bool, _deadline: Option<i64>) -> Result<Vec<TaskDone>, ShError> {
+        Err(ShError::sys(abi::Error::NotSupported, "ulohy"))
+    }
+    /// Zrusi ulohu. Kdyz uz dobehla, vrati jeji vysledek (a undo).
+    fn task_cancel(&mut self, _id: u64) -> Option<TaskDone> {
         None
     }
     /// Domovska slozka uzivatele.

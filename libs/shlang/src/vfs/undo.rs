@@ -98,6 +98,16 @@ impl UndoLog {
         }
     }
 
+    /// Zaznamy undo dokoncene ulohy (`async`) - `undo` je vrati jako
+    /// ostatni prikazy.
+    pub fn adopt(&mut self, fs: &mut dyn Fs, entries: Vec<UndoEntry>) {
+        for mut e in entries {
+            e.id = self.next;
+            self.next += 1;
+            self.push(fs, e);
+        }
+    }
+
     fn entry(&mut self, line: &str, views: Vec<ViewRef>, trees: Vec<String>, diff: Vec<DiffEntry>) -> UndoEntry {
         let id = self.next;
         self.next += 1;

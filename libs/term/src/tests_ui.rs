@@ -375,3 +375,32 @@ fn snapshot() {
     }
     std::fs::write(path, out).unwrap();
 }
+
+#[test]
+fn welcome_shows_once_for_a_new_session_and_reconnect_keeps_session() {
+    let mut a = App::new(Theme::dark(), 100, 30);
+    a.welcome = true;
+    a.start(0);
+    a.take_out();
+    a.on_msg(ServerMsg::Welcome { version: 1 });
+    a.on_msg(ServerMsg::Attached { session: 3, cwd: "/".into(), blocks: 0 });
+    assert_eq!(a.blocks.len(), 1);
+    assert!(a.frame().contains("help"), "{}", a.frame());
+    // Spadlo spojeni (termd): nove pripojeni ke stejne relaci, napoveda znovu ne.
+    a.disconnected();
+    assert!(!a.connected);
+    a.start(a.session);
+    let out = a.take_out();
+    assert!(out.iter().any(|m| matches!(m, ClientMsg::Attach { session: 3 })), "{out:?}");
+    a.on_msg(ServerMsg::Welcome { version: 1 });
+    a.on_msg(ServerMsg::Attached { session: 3, cwd: "/".into(), blocks: 0 });
+    assert_eq!(a.blocks.len(), 1);
+    // Relace s bloky (prehrava se): bez napovedy.
+    let mut b = App::new(Theme::dark(), 100, 30);
+    b.welcome = true;
+    b.on_msg(ServerMsg::Attached { session: 4, cwd: "/".into(), blocks: 2 });
+    assert!(b.blocks.is_empty());
+    // run_line jako akce okna.
+    a.run_line("ls");
+    assert!(a.take_out().iter().any(|m| matches!(m, ClientMsg::Run { line, .. } if line == "ls")));
+}

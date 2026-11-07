@@ -51,27 +51,32 @@ pub fn framebuffer() -> Option<Framebuffer> {
     CONSOLE.lock().as_ref().and_then(|c| c.desc)
 }
 
-/// Prevzeti framebufferu procesem `Some(id)` nebo vraceni jadru (`None`;
-/// obrazovka se smaze a log se kresli dal). Panika kresli vzdy.
-pub fn set_claimed(claimed: Option<u64>) {
-    if let Some(c) = CONSOLE.lock().as_mut() {
-        if c.claimed.is_some() && claimed.is_none()
-            && let Some(fb) = c.fb.as_mut()
-        {
-            fb.clear();
-        }
-        c.claimed = claimed;
+/// Prevzeti framebufferu procesem `pid` (`FB_CONTROL` `CLAIM`); `false`
+/// = drzi ho jiny proces (atomicky: kontrola i zapis pod jednim zamkem).
+pub fn try_claim(pid: u64) -> bool {
+    let mut g = CONSOLE.lock();
+    let Some(c) = g.as_mut() else { return false };
+    if c.claimed.is_some_and(|o| o != pid) {
+        return false;
     }
+    c.claimed = Some(pid);
+    true
 }
 
-/// Proces skoncil: kdyz drzel framebuffer, vrati se jadru (pad konzole
-/// nenecha obrazovku zamrzlou). Vola se mimo zamky procesu.
+/// Proces skoncil (nebo vraci framebuffer): kdyz ho drzel, vrati se jadru
+/// (pad konzole nenecha obrazovku zamrzlou). Vrati, jestli ho drzel. Vola
+/// se mimo zamky procesu.
 pub fn process_finished(pid: u64) -> bool {
-    let held = CONSOLE.lock().as_ref().is_some_and(|c| c.claimed == Some(pid));
-    if held {
-        set_claimed(None);
+    let mut g = CONSOLE.lock();
+    let Some(c) = g.as_mut() else { return false };
+    if c.claimed != Some(pid) {
+        return false;
     }
-    held
+    if let Some(fb) = c.fb.as_mut() {
+        fb.clear();
+    }
+    c.claimed = None;
+    true
 }
 
 /// Vystup z panic handleru: nesmi cekat na zamek (panika mohla nastat
