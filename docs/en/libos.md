@@ -73,7 +73,9 @@ map.write::<u32>(0x14, status | 1);
 ```
 
 Functions: `wait_one`, `wait_many` (waiting for signals), `time::now`,
-`time::deadline_after`, `time::sleep`, `exit(code)`, `println!` (kernel log).
+`time::deadline_after`, `time::sleep`, `time::wall`, `time::local` (local
+time in a zone from `time::zone`), `exit(code)`, `println!` (kernel log). See
+[Real time](time.md).
 
 Errors are `libos::Error` (= `abi::Error`), described in [errors.md](errors.md).
 Interface constants (mapping flags, process exit codes) are in `libos::abi`.

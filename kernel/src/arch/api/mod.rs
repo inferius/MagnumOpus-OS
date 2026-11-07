@@ -227,6 +227,12 @@ pub trait Time {
     /// nedal firmware. `None` = hodiny nejsou nebo vraci nesmysl. Volat po
     /// `init_platform`, jen pri startu.
     fn hardware_clock(platform: &Platform) -> Option<abi::time::WallTime>;
+    /// Zapise cas do hardwarovych hodin platformy (`CLOCK_SET` s
+    /// `WRITE_HARDWARE`). `t` uz je v case, ktery maji hodiny drzet (UTC,
+    /// nebo mistni cas, kdyz ho tak chce sluzba casu). Volat za behu z
+    /// libovolneho CPU; implementace si pristup k hodinam serializuje sama.
+    /// `false` = hodiny nejsou, nebo se cas nevejde do jejich rozsahu.
+    fn set_hardware_clock(platform: &Platform, t: abi::time::WallTime) -> bool;
 }
 
 /// Preruseni mezi procesory. Cil je hardwarove ID ([`Cpu::hw_id`]).

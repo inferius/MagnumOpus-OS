@@ -1,6 +1,6 @@
 //! Testy prevodu realneho casu na kalendar.
 
-use crate::time::{Civil, Reading, WallTime, civil_from_days, days_from_civil, source};
+use crate::time::{Civil, Reading, SetRequest, WallTime, civil_from_days, days_from_civil, source};
 
 fn civil(year: i64, month: u8, day: u8, hour: u8, minute: u8, second: u8) -> Civil {
     Civil { year, month, day, hour, minute, second, nanos: 0 }
@@ -62,4 +62,17 @@ fn reading_encoding() {
         flags: 1,
     };
     assert_eq!(Reading::decode(&r.encode()), r);
+}
+
+#[test]
+fn set_request_encoding() {
+    let r = SetRequest {
+        time: WallTime { secs: -86_400 * 365, nanos: 999_999_999 },
+        rtc_offset: -7200,
+    };
+    assert_eq!(SetRequest::decode(&r.encode()), Some(r));
+    // Nanosekundy mimo rozsah jsou neplatny vstup, ne normalizace.
+    let mut b = r.encode();
+    b[8..12].copy_from_slice(&1_000_000_000u32.to_le_bytes());
+    assert_eq!(SetRequest::decode(&b), None);
 }

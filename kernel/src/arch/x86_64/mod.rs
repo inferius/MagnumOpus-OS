@@ -283,6 +283,13 @@ impl api::Time for X86_64 {
         }
         rtc::read_time(platform.arch.rtc_century)
     }
+
+    fn set_hardware_clock(platform: &Platform, t: abi::time::WallTime) -> bool {
+        if platform.arch.rtc_absent {
+            return false;
+        }
+        rtc::write_time(platform.arch.rtc_century, t)
+    }
 }
 
 impl api::Ipi for X86_64 {

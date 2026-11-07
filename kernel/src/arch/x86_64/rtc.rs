@@ -8,11 +8,13 @@
 //! (behem aktualizace by se mohly smichat dve sekundy).
 //!
 //! Pozor: RTC nezna casove pasmo. Linux tam typicky ma UTC, Windows mistni
-//! cas - jadro cas bere jako UTC a hlasi to priznakem.
+//! cas - jadro cas bere jako UTC a hlasi to priznakem. Zapis (`CLOCK_SET`
+//! s `WRITE_HARDWARE`) dostane cas uz posunuty o pasmo od sluzby casu.
 
 use abi::time::{Civil, WallTime};
 
 use super::{cpu, time};
+use crate::sync::SpinLock;
 
 const INDEX: u16 = 0x70;
 const DATA: u16 = 0x71;
@@ -90,4 +92,64 @@ pub fn read_time(century_reg: u8) -> Option<WallTime> {
         nanos: 0,
     };
     WallTime::from_civil(&civil)
+}
+
+/// Zamek pristupu k CMOS za behu (`CLOCK_SET` muze prijit z kterehokoli
+/// CPU; dvojice index/data se nesmi prolnout).
+static CMOS: SpinLock<()> = SpinLock::new(());
+
+fn write(reg: u8, value: u8) {
+    // SAFETY: porty 0x70/0x71 patri CMOS; za behu se k nim pristupuje jen
+    // pod zamkem `CMOS` (cteni pri startu bezi drive, na jednom CPU).
+    unsafe {
+        cpu::outb(INDEX, NMI_ENABLED | reg);
+        cpu::outb(DATA, value);
+    }
+}
+
+fn to_bcd(v: u8) -> u8 {
+    (v / 10) << 4 | v % 10
+}
+
+/// Zapise cas do RTC (ve formatu, ktery hodiny pouzivaji: BCD/binarne,
+/// 12/24 h podle stavu B). `century_reg` = registr stoleti z ACPI FADT
+/// (0 = neni, pak hodiny umi jen roky 2000..=2099). Rozliseni je 1 s,
+/// nanosekundy se zahodi. `false` = rok mimo rozsah hodin.
+pub fn write_time(century_reg: u8, t: WallTime) -> bool {
+    let c = t.to_civil();
+    let years = if century_reg != 0 { 1900..=9999 } else { 2000..=2099 };
+    if !years.contains(&c.year) {
+        return false;
+    }
+    // Den v tydnu: 1970-01-01 byl ctvrtek; RTC cisluje nedeli jako 1.
+    let weekday = (t.secs.div_euclid(86_400) + 4).rem_euclid(7) as u8 + 1;
+    let _guard = CMOS.lock();
+    let status_b = read(0x0B);
+    let binary = status_b & 0x04 != 0;
+    let h24 = status_b & 0x02 != 0;
+    let conv = |v: u8| if binary { v } else { to_bcd(v) };
+    let hour = if h24 {
+        conv(c.hour)
+    } else {
+        let h12 = match c.hour % 12 {
+            0 => 12,
+            h => h,
+        };
+        conv(h12) | if c.hour >= 12 { 0x80 } else { 0 }
+    };
+    // Bit SET (7) stavu B zastavi aktualizaci hodin behem zapisu (a prerusi
+    // probihajici), takze neni treba cekat na konec aktualizace.
+    write(0x0B, status_b | 0x80);
+    write(0, conv(c.second));
+    write(2, conv(c.minute));
+    write(4, hour);
+    write(6, conv(weekday));
+    write(7, conv(c.day));
+    write(8, conv(c.month));
+    write(9, conv((c.year % 100) as u8));
+    if century_reg != 0 {
+        write(century_reg, conv((c.year / 100) as u8));
+    }
+    write(0x0B, status_b & !0x80);
+    true
 }

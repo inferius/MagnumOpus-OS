@@ -67,11 +67,35 @@ a zobrazení. Na `out_ptr` zapíše 16 B (little endian):
 
 Jádro si při startu uloží reálný čas v okamžiku 0 monotónních hodin; výsledek
 je ten počátek + `CLOCK_MONOTONIC`. Přesnost počátku je 1 s (rozlišení
-firmwaru i RTC). Na rozdíl od `CLOCK_MONOTONIC` **není monotónní**: skočí,
-až půjde hodiny nastavit (synchronizace podle sítě). Pro měření a termíny
+firmwaru i RTC). Na rozdíl od `CLOCK_MONOTONIC` **není monotónní**: skočí
+při nastavení hodin (`CLOCK_SET`). Pro měření a termíny
 vždy `CLOCK_MONOTONIC`. Obal: `libos::time::wall()`, `wall_reading()`.
 Chyby: `NOT_SUPPORTED` (jádro reálný čas nezná), `BAD_ADDRESS`.
 Podrobnosti: [Reálný čas](cas.md).
+
+### `CLOCK_SET`
+
+`(resource, in_ptr, flags) -> 0 | 1`. Nastaví reálný čas. Vyžaduje handle
+na Resource s právem `SET_CLOCK`. Má ho jen kořenový Resource a `init` ho
+předá jen službě času `timed` (bez `MANAGE`). Na `in_ptr` je 16 B (little
+endian, `abi::time::SetRequest`):
+
+| Offset | Typ | Význam |
+|---|---|---|
+| 0 | i64 | nový čas: sekundy od 1970-01-01 00:00:00 UTC |
+| 8 | u32 | nanosekundy (0..10⁹, jinak `INVALID_ARGS`) |
+| 12 | i32 | `rtc_offset`: sekundy přičtené k UTC při zápisu do hardwarových hodin (RTC v místním čase = posun pásma, jinak 0) |
+
+`flags`: bit 0 `WRITE_HARDWARE` = zapsat čas i do hardwarových hodin (x86:
+CMOS RTC). Ostatní bity = `INVALID_ARGS`. Vrací 1, když se hardwarové
+hodiny zapsaly. Vrací 0 bez `WRITE_HARDWARE`, když hodiny chybí (aarch64,
+ACPI hlásí, že RTC není) nebo když se rok nevejde do jejich rozsahu. Čas
+systému se nastaví v každém případě. Poté `CLOCK_REALTIME` hlásí zdroj 3
+(nastaveno za běhu) a žádné příznaky. Termíny čekání se nemění, počítají se
+z `CLOCK_MONOTONIC`. Obal: `libos::time::set`, `Resource::set_clock`.
+Chyby: `ACCESS_DENIED` (chybí `SET_CLOCK`), `WRONG_TYPE`, `BAD_HANDLE`,
+`INVALID_ARGS`, `BAD_ADDRESS`. Podrobnosti:
+[Nastavení hodin](cas.md#nastavení-hodin-clock_set).
 
 ## Handly
 
@@ -303,6 +327,10 @@ nejvýš 8 přerušení a 4 MiB paměti pro DMA. Chyba v ovladači tak nemůže
 přepsat registry jiného zařízení. S IOMMU navíc zařízení smí přes DMA jen
 do paměti vytvořené přes svůj prostředek (viz [jadro.md](jadro.md#iommu-ochrana-dma));
 bez IOMMU může zapsat kamkoli.
+
+Kořenový Resource má navíc právo `SET_CLOCK` (nastavení hodin,
+[`CLOCK_SET`](#clock_set)). Správce zařízení dostane kořen bez něj
+a omezené prostředky ho nemají nikdy.
 
 ### `VMO_CREATE_CONTIGUOUS`
 

@@ -58,6 +58,12 @@ impl Resource {
             .map(|h| Resource::from_handle(Handle::from_raw(h)))
     }
 
+    /// Nastavi realny cas systemu (vyzaduje pravo `SET_CLOCK`, ma ho jen
+    /// sluzba casu). Viz `time::set`.
+    pub fn set_clock(&self, req: &abi::time::SetRequest, flags: u64) -> Result<bool> {
+        sys::clock_set(self.0.raw(), req, flags)
+    }
+
     /// Novy objekt preruseni s volnym vektorem.
     pub fn interrupt(&self) -> Result<Interrupt> {
         let (h, msi) = sys::interrupt_create(self.0.raw())?;

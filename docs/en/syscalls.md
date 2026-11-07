@@ -70,11 +70,34 @@ Writes 16 B (little endian) to `out_ptr`:
 At boot the kernel stores the real time at moment 0 of the monotonic clock;
 the result is that origin + `CLOCK_MONOTONIC`. The origin is accurate to
 1 s (the resolution of firmware and the RTC). Unlike `CLOCK_MONOTONIC` it
-is **not monotonic**: it will jump once the clock can be set (network
-sync). For measuring and deadlines always use `CLOCK_MONOTONIC`. Wrapper:
+is **not monotonic**: it jumps when the clock is set (`CLOCK_SET`). For measuring and deadlines always use `CLOCK_MONOTONIC`. Wrapper:
 `libos::time::wall()`, `wall_reading()`. Errors: `NOT_SUPPORTED` (the
 kernel does not know the real time), `BAD_ADDRESS`.
 Details: [Real time](time.md).
+
+### `CLOCK_SET`
+
+`(resource, in_ptr, flags) -> 0 | 1`. Sets the real time. Requires a
+Resource handle with the `SET_CLOCK` right. Only the root Resource has it,
+and `init` gives it only to the time service `timed` (without `MANAGE`).
+`in_ptr` points to 16 B (little endian, `abi::time::SetRequest`):
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | i64 | new time: seconds since 1970-01-01 00:00:00 UTC |
+| 8 | u32 | nanoseconds (0..10⁹, else `INVALID_ARGS`) |
+| 12 | i32 | `rtc_offset`: seconds added to UTC when writing the hardware clock (RTC in local time = zone offset, else 0) |
+
+`flags`: bit 0 `WRITE_HARDWARE` = also write the time to the hardware clock
+(x86: CMOS RTC). Other bits = `INVALID_ARGS`. Returns 1 when the hardware
+clock was written. Returns 0 without `WRITE_HARDWARE`, when there is no
+clock (aarch64, ACPI reports no RTC) or when the year does not fit its
+range. The system time is set in every case. Afterwards `CLOCK_REALTIME`
+reports source 3 (set at run time) and no flags. Wait deadlines do not
+change; they come from `CLOCK_MONOTONIC`. Wrapper: `libos::time::set`,
+`Resource::set_clock`. Errors: `ACCESS_DENIED` (no `SET_CLOCK`),
+`WRONG_TYPE`, `BAD_HANDLE`, `INVALID_ARGS`, `BAD_ADDRESS`. Details:
+[Setting the clock](time.md#setting-the-clock-clock_set).
 
 ## Handles
 

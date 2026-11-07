@@ -15,7 +15,7 @@ pub mod source {
     pub const UEFI: u16 = 1;
     /// Z hodin CMOS (RTC) primo jadrem.
     pub const RTC: u16 = 2;
-    /// Nastaveny za behu (napr. synchronizace podle site).
+    /// Nastaveny za behu (`CLOCK_SET`: sluzba casu, synchronizace podle site).
     pub const SET: u16 = 3;
 }
 
@@ -127,6 +127,52 @@ impl Reading {
             source: u16::from_le_bytes([b[12], b[13]]),
             flags: u16::from_le_bytes([b[14], b[15]]),
         }
+    }
+}
+
+/// Priznaky syscallu `CLOCK_SET`.
+pub mod set_flags {
+    /// Zapsat cas i do hardwarovych hodin (x86: CMOS RTC), aby platil i po
+    /// restartu. Kdyz platforma hodiny nema (aarch64 zatim), nastavi se jen
+    /// cas systemu a syscall vrati 0.
+    pub const WRITE_HARDWARE: u64 = 1;
+    /// Vsechny zname priznaky (ostatni bity = `INVALID_ARGS`).
+    pub const ALL: u64 = WRITE_HARDWARE;
+}
+
+/// Vstup `CLOCK_SET` (16 B, little endian: sekundy i64, nanosekundy u32,
+/// posun hardwarovych hodin i32).
+///
+/// `rtc_offset` = sekundy pridane k UTC pri zapisu do hardwarovych hodin.
+/// Jadro drzi jen UTC a pasma nezna; kdyz ma RTC byt v mistnim case
+/// (dual-boot s Windows), posle sluzba casu posun pasma v danem okamziku
+/// (napr. +7200 v lete v Praze). Pro RTC v UTC je 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetRequest {
+    pub time: WallTime,
+    pub rtc_offset: i32,
+}
+
+impl SetRequest {
+    pub const SIZE: usize = 16;
+
+    pub fn encode(&self) -> [u8; Self::SIZE] {
+        let mut b = [0u8; Self::SIZE];
+        b[0..8].copy_from_slice(&self.time.secs.to_le_bytes());
+        b[8..12].copy_from_slice(&self.time.nanos.to_le_bytes());
+        b[12..16].copy_from_slice(&self.rtc_offset.to_le_bytes());
+        b
+    }
+
+    /// `None` = nanosekundy mimo 0..1e9 (neplatny vstup).
+    pub fn decode(b: &[u8; Self::SIZE]) -> Option<Self> {
+        let secs = i64::from_le_bytes(b[0..8].try_into().unwrap());
+        let nanos = u32::from_le_bytes(b[8..12].try_into().unwrap());
+        let rtc_offset = i32::from_le_bytes(b[12..16].try_into().unwrap());
+        (nanos < 1_000_000_000).then_some(Self {
+            time: WallTime { secs, nanos },
+            rtc_offset,
+        })
     }
 }
 

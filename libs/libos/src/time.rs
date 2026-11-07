@@ -1,10 +1,17 @@
 //! Cas: monotonni (od startu, pro mereni a deadliny) a realny (hodiny na
 //! zdi, pro casy souboru a zobrazeni).
+//!
+//! Jadro drzi realny cas v UTC. Mistni cas je nastaveni systemu: pasmo
+//! a pravidla letniho casu jsou v [`zone`] (kompaktni tabulka, bez tzdata),
+//! prevod pres [`local`]. Nastavit hodiny smi jen sluzba casu ([`set`]).
 
 use core::time::Duration;
 
-pub use abi::time::{Civil, Reading, WallTime, flags, source};
+pub use abi::time::{Civil, Reading, SetRequest, WallTime, flags, set_flags, source};
+/// Casova pasma: [`zone::Zone`], [`zone::Settings`], prevody UTC <-> mistni.
+pub use tz as zone;
 
+use crate::hw::Resource;
 use crate::sys;
 
 /// Realny cas (sekundy a nanosekundy od 1970 UTC); `None` = system ho nezna.
@@ -16,6 +23,43 @@ pub fn wall() -> Option<WallTime> {
 /// Realny cas i se zdrojem a priznaky (napr. pasmo bylo jen predpokladane).
 pub fn wall_reading() -> crate::Result<Reading> {
     sys::clock_realtime()
+}
+
+/// Aktualni mistni cas v pasmu `zone`; `None` = system realny cas nezna.
+pub fn local(zone: &zone::Zone) -> Option<zone::Local> {
+    wall().map(|t| zone.to_local(t))
+}
+
+/// Nastavi realny cas na `t` (UTC). `clock` = Resource s pravem
+/// `SET_CLOCK` (bez nej `ACCESS_DENIED`). S `write_hardware` se cas zapise
+/// i do hardwarovych hodin - v mistnim case, kdyz to rika nastaveni
+/// (`settings.rtc_local`). Vraci true, kdyz se hardwarove hodiny zapsaly.
+pub fn set(
+    clock: &Resource,
+    t: WallTime,
+    settings: &zone::Settings,
+    write_hardware: bool,
+) -> crate::Result<bool> {
+    let req = SetRequest { time: t, rtc_offset: settings.rtc_offset(t) };
+    let flags = if write_hardware { set_flags::WRITE_HARDWARE } else { 0 };
+    clock.set_clock(&req, flags)
+}
+
+/// Oprava pri startu, kdyz je RTC v mistnim case (dual-boot s Windows):
+/// jadro precteny cas bralo jako UTC, takze se od nej odecte posun pasma.
+/// Hardwarove hodiny se nemeni (zustavaji v mistnim case). Vraci opraveny
+/// cas, nebo `None`, kdyz oprava nebyla potreba (viz
+/// [`zone::rtc_local_correction`]).
+pub fn apply_rtc_local(clock: &Resource, settings: &zone::Settings) -> crate::Result<Option<WallTime>> {
+    let reading = sys::clock_realtime()?;
+    let read_at = now();
+    let Some(fixed) = zone::rtc_local_correction(settings, &reading) else {
+        return Ok(None);
+    };
+    // Mezi ctenim a nastavenim ubehl cas: pricist ho (z monotonnich hodin).
+    let fixed = fixed.add_ns(now().saturating_sub(read_at) as i128);
+    set(clock, fixed, settings, false)?;
+    Ok(Some(fixed))
 }
 
 /// Nanosekundy od startu systemu (monotonicky).

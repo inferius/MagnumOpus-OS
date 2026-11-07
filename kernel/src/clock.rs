@@ -10,9 +10,13 @@
 //! 3. jinak cas neni znamy (`CLOCK_REALTIME` vrati `NOT_SUPPORTED`).
 //!
 //! Presnost: firmware i RTC maji rozliseni 1 s, takze pocatek je presny jen
-//! na sekundu. Pozdeji ho upresni sitova synchronizace (`source::SET`).
+//! na sekundu. Za behu ho nastavi sluzba casu (`CLOCK_SET`, zdroj
+//! `source::SET`), pozdeji podle site.
+//!
+//! Jadro drzi jen UTC a casova pasma nezna: prevod na mistni cas a oprava
+//! "RTC v mistnim case" (dual-boot s Windows) jsou v userspace (libos).
 
-use abi::time::{Reading, WallTime, flags, source};
+use abi::time::{Reading, SetRequest, WallTime, flags, source};
 use boot_info::{BootInfo, FirmwareTime};
 
 use crate::acpi::Platform;
@@ -85,4 +89,63 @@ pub fn now() -> Option<Reading> {
         source: o.source,
         flags: o.flags,
     })
+}
+
+/// Nastavi realny cas (`CLOCK_SET`); prava overil volajici. Vraci true,
+/// kdyz se cas zapsal i do hardwarovych hodin (`write_hardware`).
+///
+/// Do hardwarovych hodin jde `UTC + rtc_offset` (jadro pasmo nezna, posun
+/// posila sluzba casu). Zapis do RTC je mimo zamek pocatku.
+pub fn set(req: SetRequest, write_hardware: bool) -> bool {
+    let now = arch::now_ns() as i128;
+    let old = {
+        let mut o = ORIGIN.lock();
+        let old = (o.source != source::NONE).then(|| o.at_zero.add_ns(now));
+        *o = Origin {
+            at_zero: req.time.add_ns(-now),
+            source: source::SET,
+            flags: 0,
+        };
+        old
+    };
+    let c = req.time.to_civil();
+    let shift_ms = old.map(|old| (req.time.as_nanos() - old.as_nanos()) / 1_000_000);
+    log::info!(
+        "realny cas nastaven: {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC (posun {})",
+        c.year,
+        c.month,
+        c.day,
+        c.hour,
+        c.minute,
+        c.second,
+        ShiftMs(shift_ms)
+    );
+    if !write_hardware {
+        return false;
+    }
+    let Some(platform) = crate::PLATFORM.get() else {
+        return false;
+    };
+    // Do hodin az ted: posunout o dobu od nastaveni.
+    let elapsed = arch::now_ns() as i128 - now;
+    let hw = req
+        .time
+        .add_ns(elapsed + req.rtc_offset as i128 * 1_000_000_000);
+    let ok = arch::set_hardware_clock(platform, hw);
+    if !ok {
+        log::warn!("hardwarove hodiny nejde nastavit (nejsou, nebo je cas mimo jejich rozsah)");
+    }
+    ok
+}
+
+/// Posun hodin pro log; `None` = cas predtim nebyl znamy.
+struct ShiftMs(Option<i128>);
+
+impl core::fmt::Display for ShiftMs {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            Some(ms) => write!(f, "{ms:+} ms"),
+            None => f.write_str("predtim neznamy"),
+        }
+    }
 }

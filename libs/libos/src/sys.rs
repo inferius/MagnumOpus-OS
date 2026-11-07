@@ -59,6 +59,13 @@ pub fn clock_realtime() -> Result<abi::time::Reading> {
     Ok(abi::time::Reading::decode(&buf))
 }
 
+/// Nastavi realny cas (Resource s pravem `SET_CLOCK`); `Ok(true)` = zapsano
+/// i do hardwarovych hodin.
+pub fn clock_set(resource: u32, req: &abi::time::SetRequest, flags: u64) -> Result<bool> {
+    let buf = req.encode();
+    call(nr::CLOCK_SET, [resource as u64, buf.as_ptr() as u64, flags, 0, 0, 0]).map(|r| r == 1)
+}
+
 pub fn handle_close(h: u32) -> Result<()> {
     call(nr::HANDLE_CLOSE, [h as u64, 0, 0, 0, 0, 0]).map(|_| ())
 }
