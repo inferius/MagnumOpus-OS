@@ -95,6 +95,20 @@ panic = "abort"
 
 # Interpret shellu je rekurzivni; bez optimalizace by jedna uroven volani
 # zabrala ~50 KB zasobniku (s optimalizaci ~6 KB). Program ma 256 KB.
+# Souborovy system: bez optimalizace trva zapis radku shellu v debug ~5 s
+# a test velkeho adresare kolem 90 s (B+strom, soucty, komprese).
+[profile.dev.package.fs]
+opt-level = 2
+
+[profile.dev.package.fsd]
+opt-level = 2
+
+[profile.dev.package.fsproto]
+opt-level = 2
+
+[profile.dev.package.blake3]
+opt-level = 3
+
 [profile.dev.package.shlang]
 opt-level = 2
 
