@@ -159,7 +159,8 @@ ve Windows nebo vDSO + libc v Linuxu).
 | ACPI | interpret AML; jádro samo parsuje jen statické tabulky (MADT, HPET, MCFG) |
 | storage + FS | blokové zařízení, oddíly, souborový systém (`fsd` hotovo) |
 | namespace | skládá pohled procesu na strom |
-| kompozitor | displej, vstup, okna |
+| vstup (`inputd`) | klávesnice a myš, rozložení, bezpečná zkratka (hotovo, viz [Vstup](vstup.md)) |
+| kompozitor | displej, okna |
 | konfigurace | čtení, validace a verzování nastavení |
 
 ## Souborový systém
@@ -386,14 +387,18 @@ důvěryhodné prvky zůstávají systému:
   a Windows (rozšíření obsahu do rámu); navíc je u nás odznak oprávnění
   a deklarované oblasti místo testování kliknutí v aplikaci.
 
-## Vstup: klávesnice a myš (plán)
+## Vstup: klávesnice a myš
+
+> Hotovo v 6a (virtio-input, `inputd`, rozložení US a CZ, bezpečná
+> zkratka Ctrl+Alt+Delete); podrobně v [Vstup](vstup.md).
+
 
 - **Služba vstupu** (`inputd`) v userspace: ovladače zařízení posílají
   události (klávesa, pohyb, tlačítko, kolečko, dotyk) jednotným protokolem
   přes kanál; služba je převádí podle rozložení klávesnice a předává
   **jen tomu, kdo má fokus** (terminál, kompozitor). Žádná aplikace
   nečte vstup globálně (ochrana proti keyloggerům).
-- **Ovladače, postup:** virtio-input (klávesnice, myš, tablet) v QEMU -
+- **Ovladače, postup:** virtio-input (klávesnice, myš; hotovo) v QEMU -
   PS/2 jako záloha na starším hardwaru - USB HID přes vlastní ovladač
   xHCI (USB stack je velká samostatná práce).
 - **Rozložení:** česká a anglická v první verzi, skládání diakritiky
@@ -831,8 +836,9 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
    TCP/IP, DNS, TLS 1.3, HTTP klient - služby, přístup přes capability)
-   - **6a Vstup:** služba vstupu, klávesnice a myš (virtio-input, PS/2,
-     později USB HID), rozložení, bezpečná zkratka - viz [Vstup](#vstup-klávesnice-a-myš-plán)
+   - **6a Vstup (hotovo):** služba vstupu, klávesnice a myš (virtio-input;
+     PS/2 a USB HID později), rozložení US a CZ, bezpečná zkratka - viz
+     [Vstup](vstup.md)
    - **6b Shell a chytrý terminál:** konzole, strukturovaný výstup, undo
      příkazů, „ukaž, co se stane“, oprávnění při spuštění - viz [Shell](#shell-a-chytrý-terminál-návrh)
    - **6c GUI:** virtio-gpu, kompozitor, nativní knihovna UI, systémové

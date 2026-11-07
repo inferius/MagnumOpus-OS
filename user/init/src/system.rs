@@ -1,4 +1,5 @@
-//! Start systemovych sluzeb: spravce zarizeni a souborovy system.
+//! Start systemovych sluzeb: spravce zarizeni, souborovy system a sluzba
+//! vstupu.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -17,6 +18,9 @@ pub struct Devices {
     pub _devmgr: Process,
     pub _control: Channel,
     pub blocks: Vec<BlockClient>,
+    /// Kanaly k ovladacum vstupnich zarizeni (predaji se sluzbe vstupu).
+    pub inputs: Vec<Channel>,
+    pub input: Option<crate::input::Input>,
     pub fs: Option<FsClient>,
     pub _fsd: Option<(Process, Channel)>,
 }
@@ -47,6 +51,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
 
     let (devmgr, control) = libos::spawn("devmgr", image, handles)?;
     let mut blocks = Vec::new();
+    let mut inputs = Vec::new();
     loop {
         let msg = control.read(Some(time::deadline_after(Duration::from_secs(10))))?;
         match &msg.data[..] {
@@ -59,14 +64,21 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
                     }
                 }
             }
+            b"input" => inputs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             other => println!("init: neznama zprava od devmgr: {:?}", other),
         }
     }
-    println!("init: {} blokovych zarizeni", blocks.len());
+    println!(
+        "init: {} blokovych a {} vstupnich zarizeni",
+        blocks.len(),
+        inputs.len()
+    );
     Ok(Devices {
         _devmgr: devmgr,
         _control: control,
         blocks,
+        inputs,
+        input: None,
         fs: None,
         _fsd: None,
     })

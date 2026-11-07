@@ -110,11 +110,27 @@ porušený vnitřní předpoklad (chyba jádra).
 | Hláška | Význam a řešení |
 |---|---|
 | `devmgr: pci BB:ZZ.F vvvv:dddd trida cc.ss.pp` | Nalezené zařízení PCI (informace). |
-| `devmgr: ovladac pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
+| `devmgr: ovladac X pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
 | `virtio-blk BB:ZZ.F: N MiB, flush ano/ne, discard ano/ne` | Disk je připravený. `discard ne` = zařízení neumí TRIM (v QEMU chybí `discard=unmap` u disku); FS pak TRIM přeskakuje. |
 | `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x, nedokončilo reset do sekundy (`TIMED_OUT`) nebo chybí prostředky (MSI-X, DMA paměť, `NO_RESOURCES` = vyčerpaná kvóta omezeného Resource). |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
+| `virtio-input BB:ZZ.F: 'jméno' (klavesnice/mys)` | Vstupní zařízení je připravené; druh podle podporovaných událostí. `nezname zarizeni` = nemá klávesy ani relativní osy (tablet, zatím nepodporovaný). |
+| `virtio-input ...: inicializace selhala: ...` | Jako u virtio-blk: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA). |
+| `virtio-input: prvni udalosti od zarizeni (N)` | Zařízení poprvé poslalo události (informace; potvrzuje, že fungují přerušení a fronta). |
+| `virtio-input: sluzba nestiha, zahozeno N zprav` | Fronta kanálu ke službě vstupu je plná; ovladač události zahazuje, aby neblokoval zařízení. Hlásí se při 1, 2, 4, 8 ... zprávách. |
+| `init: N blokovych a M vstupnich zarizeni` | Co správce zařízení našel. |
+
+## Služba vstupu (inputd)
+
+| Hláška | Význam a řešení |
+|---|---|
+| `inputd: bezim (rozlozeni us)` | Služba běží s výchozím rozložením. |
+| `inputd: zarizeni 'jméno' pripojeno` / `odpojeno` | Ovladač se představil (`IDEV`) nebo zavřel kanál. |
+| `inputd: neplatna zprava od zdroje N` | Zdroj poslal zprávu, která neodpovídá protokolu zařízení (neznámá značka, špatná délka); zpráva se zahodí. |
+| `inputd: bezpecna zkratka, ale nikdo ji neposloucha` | Ctrl+Alt+Delete, ale nikdo nemá kanál `secure`; zkratka se jen pohltí. |
+| `init: sluzba vstupu bezi (N zarizeni)` | Init spustil `inputd` a připojil N ovladačů. |
+| `init: sluzbu vstupu nelze spustit: ...` | `inputd` chybí v initfs nebo neodpověděla na příkaz (`TIMED_OUT`). Testy vstupu pak selžou (`sluzba vstupu nebezi`). |
 
 ## Služba fsd a souborový systém
 

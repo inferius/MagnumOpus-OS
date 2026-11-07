@@ -1,0 +1,8 @@
+[package]
+name = "inputproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol vstupu: zpravy ovladacu vstupnich zarizeni a udalosti sluzby inputd"
+
+[dependencies]

@@ -1,7 +1,7 @@
 //! init: prvni proces v userspace.
 //!
-//! Spusti spravce zarizeni (ten spusti ovladace) a sluzbu souboroveho
-//! systemu, pak testy rozhrani jadra, libos, ovladacu a FS (`tests/`). Pozdeji bude spoustet systemove sluzby podle
+//! Spusti spravce zarizeni (ten spusti ovladace), sluzbu souboroveho
+//! systemu a sluzbu vstupu, pak testy rozhrani jadra, libos, ovladacu a FS (`tests/`). Pozdeji bude spoustet systemove sluzby podle
 //! konfigurace.
 
 #![no_std]
@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+mod input;
 mod system;
 mod tests;
 
@@ -22,6 +23,10 @@ fn main(startup: Startup) -> i64 {
         Ok(mut devices) => {
             if let Err(e) = system::start_fs(&startup, &mut devices) {
                 println!("init: souborovy system nelze spustit: {e}");
+            }
+            match input::start(&startup, core::mem::take(&mut devices.inputs)) {
+                Ok(i) => devices.input = Some(i),
+                Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
             tests::set_devices(devices);
         }

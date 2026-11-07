@@ -14,4 +14,5 @@ bench = false
 libos = { path = "../../libs/libos" }
 blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }
+inputproto = { path = "../../libs/inputproto" }
 spin = "0.12"

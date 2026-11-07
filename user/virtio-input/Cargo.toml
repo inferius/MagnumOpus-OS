@@ -1,0 +1,17 @@
+[package]
+name = "virtio-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "virtio-input"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+pci = { path = "../../libs/pci" }
+virtio = { path = "../../libs/virtio" }
+inputproto = { path = "../../libs/inputproto" }

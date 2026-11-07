@@ -388,12 +388,26 @@ version = "0.1.0"
 dependencies = [
  "blockproto",
  "fsproto",
+ "inputproto",
  "libos",
  "spin",
 ]
 
 [[package]]
 name = "initfs"
+version = "0.1.0"
+
+[[package]]
+name = "inputd"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
+ "keymap",
+ "libos",
+]
+
+[[package]]
+name = "inputproto"
 version = "0.1.0"
 
 [[package]]
@@ -417,6 +431,13 @@ dependencies = [
  "initfs",
  "noto-sans-mono-bitmap",
  "spin",
+]
+
+[[package]]
+name = "keymap"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
 ]
 
 [[package]]
@@ -922,6 +943,16 @@ name = "virtio-blk"
 version = "0.1.0"
 dependencies = [
  "blockproto",
+ "libos",
+ "pci",
+ "virtio",
+]
+
+[[package]]
+name = "virtio-input"
+version = "0.1.0"
+dependencies = [
+ "inputproto",
  "libos",
  "pci",
  "virtio",

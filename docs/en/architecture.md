@@ -170,7 +170,8 @@ Windows or vDSO + libc on Linux).
 | ACPI | AML interpreter; the kernel itself parses only static tables (MADT, HPET, MCFG) |
 | storage + FS | block devices, partitions, file system (`fsd` done) |
 | namespace | composes each process's view of the tree |
-| compositor | display, input, windows |
+| input (`inputd`) | keyboard and mouse, layouts, secure attention shortcut (done, see [Input](input.md)) |
+| compositor | display, windows |
 | configuration | reading, validating and versioning settings |
 
 ## File system
@@ -411,14 +412,18 @@ widget). It is possible, but the trusted elements stay with the system:
   addition we have the permission badge and declared regions instead of
   hit testing in the application.
 
-## Input: keyboard and mouse (plan)
+## Input: keyboard and mouse
+
+> Done in 6a (virtio-input, `inputd`, US and CZ layouts, the
+> Ctrl+Alt+Delete secure attention shortcut); details in [Input](input.md).
+
 
 - An **input service** (`inputd`) in userspace: device drivers send events
   (key, motion, button, wheel, touch) through one protocol over a channel;
   the service translates them by keyboard layout and delivers them **only
   to whoever has focus** (terminal, compositor). No application reads input
   globally (protection against keyloggers).
-- **Drivers, in order:** virtio-input (keyboard, mouse, tablet) in QEMU -
+- **Drivers, in order:** virtio-input (keyboard, mouse; done) in QEMU -
   PS/2 as a fallback on older hardware - USB HID through our own xHCI
   driver (the USB stack is a big separate piece of work).
 - **Layouts:** Czech and English in the first version, diacritics
@@ -872,8 +877,9 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
 6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
    TCP/IP, DNS, TLS 1.3, HTTP client - services, access through a capability)
-   - **6a Input:** input service, keyboard and mouse (virtio-input, PS/2,
-     later USB HID), layouts, secure key combination - see [Input](#input-keyboard-and-mouse-plan)
+   - **6a Input (done):** input service, keyboard and mouse (virtio-input;
+     PS/2 and USB HID later), US and CZ layouts, secure attention shortcut -
+     see [Input](input.md)
    - **6b Shell and smart terminal:** console, structured output, command
      undo, "show what will happen", permissions at launch - see [Shell](#shell-and-smart-terminal-proposal)
    - **6c GUI:** virtio-gpu, compositor, native UI library, system dialogs -

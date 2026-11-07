@@ -265,6 +265,12 @@ impl Device {
         self.device_cfg.read(off)
     }
 
+    /// Zapis do konfigurace zarizeni (napr. vyber polozky u virtio-input);
+    /// za koncem konfigurace se ignoruje.
+    pub fn set_config<T: libos::Pod>(&self, off: u64, v: T) {
+        self.device_cfg.write(off, v)
+    }
+
     /// Delka konfigurace zarizeni (volitelna pole za ni zarizeni nema).
     pub fn config_len(&self) -> u64 {
         self.device_cfg.len

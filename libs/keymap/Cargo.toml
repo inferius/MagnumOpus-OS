@@ -1,0 +1,9 @@
+[package]
+name = "keymap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rozlozeni klavesnice (US, CZ QWERTZ), modifikatory a mrtve klavesy"
+
+[dependencies]
+inputproto = { path = "../inputproto" }

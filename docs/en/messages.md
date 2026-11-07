@@ -112,11 +112,27 @@ invariant was broken (a kernel bug).
 | Message | Meaning and fix |
 |---|---|
 | `devmgr: pci BB:DD.F vvvv:dddd trida cc.ss.pp` | A PCI device was found (information). |
-| `devmgr: ovladac pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
+| `devmgr: ovladac X pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
 | `virtio-blk BB:DD.F: N MiB, flush ano/ne, discard ano/ne` | The disk is ready. `discard ne` = the device has no TRIM (in QEMU the drive lacks `discard=unmap`); the FS then skips TRIM. |
 | `virtio-blk ...: inicializace selhala: ...` | The device does not follow virtio 1.x, did not finish its reset within a second (`TIMED_OUT`) or resources are missing (MSI-X, DMA memory, `NO_RESOURCES` = the restricted Resource quota is exhausted). |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
+| `virtio-input BB:DD.F: 'name' (klavesnice/mys)` | An input device is ready; the kind (keyboard/mouse) comes from the supported events. `nezname zarizeni` (unknown device) = it has neither keys nor relative axes (a tablet, not supported yet). |
+| `virtio-input ...: inicializace selhala: ...` | As for virtio-blk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA). |
+| `virtio-input: prvni udalosti od zarizeni (N)` | The device sent events for the first time (information; confirms that interrupts and the queue work). |
+| `virtio-input: sluzba nestiha, zahozeno N zprav` | The channel queue to the input service is full; the driver drops events so as not to block the device. Reported at 1, 2, 4, 8 ... messages. |
+| `init: N blokovych a M vstupnich zarizeni` | What the device manager found (N block and M input devices). |
+
+## Input service (inputd)
+
+| Message | Meaning and fix |
+|---|---|
+| `inputd: bezim (rozlozeni us)` | The service is running with the default layout. |
+| `inputd: zarizeni 'name' pripojeno` / `odpojeno` | A driver introduced itself (`IDEV`) or closed its channel (connected / disconnected). |
+| `inputd: neplatna zprava od zdroje N` | A source sent a message that does not follow the device protocol (unknown tag, wrong length); the message is dropped. |
+| `inputd: bezpecna zkratka, ale nikdo ji neposloucha` | Ctrl+Alt+Delete, but nobody holds the secure channel; the shortcut is only swallowed. |
+| `init: sluzba vstupu bezi (N zarizeni)` | Init started `inputd` and connected N drivers. |
+| `init: sluzbu vstupu nelze spustit: ...` | `inputd` is missing from initfs or did not answer a command (`TIMED_OUT`). The input tests then fail (`sluzba vstupu nebezi`). |
 
 ## fsd service and file system
 

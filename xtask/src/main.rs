@@ -13,6 +13,7 @@ mod datadisk;
 mod docs;
 mod highlight;
 mod image;
+mod qmp;
 mod symbolize;
 
 use std::env;
@@ -168,7 +169,7 @@ fn run_cli() -> Result<()> {
 }
 
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
-/// chyb a syscallu).
+/// chyb a syscallu, protokol vstupu a rozlozeni klavesnice).
 fn host_tests() -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = Command::new(cargo)
@@ -182,6 +183,10 @@ fn host_tests() -> Result<()> {
             "initfs",
             "--package",
             "fs",
+            "--package",
+            "inputproto",
+            "--package",
+            "keymap",
             "--features",
             "initfs/std,fs/std",
         ])
@@ -255,7 +260,15 @@ struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
-const USER_PROGRAMS: &[&str] = &["init", "echo", "devmgr", "virtio-blk", "fsd"];
+const USER_PROGRAMS: &[&str] = &[
+    "init",
+    "echo",
+    "devmgr",
+    "virtio-blk",
+    "virtio-input",
+    "inputd",
+    "fsd",
+];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -434,6 +447,9 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
     } else {
         "serial.log"
     });
+    // Stary log nesmi obsahovat znacku testu vstupu z minuleho behu.
+    let _ = std::fs::remove_file(&serial_log);
+    let qmp_port = qmp::free_port()?;
     let accel = opts.accel.as_deref().unwrap_or(default_accel());
     let mut cmd = Command::new(&qemu);
     cmd.arg("-machine")
@@ -485,6 +501,12 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
             datadisk::create(&target_dir())?.display()
         ))
         .args(["-device", &blk("data")])
+        // Klavesnice a mys virtio (ovladac virtio-input, sluzba inputd).
+        // QMP slouzi testu vstupu: xtask pres nej vklada udalosti.
+        .args(["-device", "virtio-keyboard-pci,iommu_platform=on"])
+        .args(["-device", "virtio-mouse-pci,iommu_platform=on"])
+        .arg("-qmp")
+        .arg(qmp::qemu_arg(qmp_port))
         // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.
         .args(["-nic", "none"])
         // Seriova linka do terminalu a zaroven do souboru (target/serial.log),
@@ -514,6 +536,7 @@ fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
     cmd.args(&opts.qemu_args);
 
     println!("xtask: spoustim {}", qemu.display());
+    qmp::spawn_injector(serial_log.clone(), qmp_port);
     let kernel = target_dir()
         .join(KERNEL_TARGET)
         .join(profile_dir(opts))

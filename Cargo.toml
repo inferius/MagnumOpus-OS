@@ -11,6 +11,8 @@ members = [
     "libs/osfs-proto",
     "libs/initfs",
     "libs/blockproto",
+    "libs/inputproto",
+    "libs/keymap",
     "libs/libos",
     "libs/pci",
     "libs/virtio",
@@ -19,7 +21,9 @@ members = [
     "user/echo",
     "user/fsd",
     "user/init",
+    "user/inputd",
     "user/virtio-blk",
+    "user/virtio-input",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace

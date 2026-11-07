@@ -78,6 +78,12 @@ impl Interrupt {
         sys::interrupt_ack(self.0.raw())
     }
 
+    /// Potvrdi preruseni bez cekani (po `wait_many`, ktere cekalo i na jine
+    /// objekty).
+    pub fn ack(&self) -> Result<()> {
+        sys::interrupt_ack(self.0.raw())
+    }
+
     pub fn handle(&self) -> &Handle {
         &self.0
     }
