@@ -2,10 +2,23 @@
 //!
 //! Pravidla uvolneni bloku s generaci vzniku `birth` (zaklad konzistence):
 //! - `birth == txg`: blok vznikl v rozpracovane transakci, zadny ulozeny stav
-//!   na nej neukazuje - volny hned,
+//!   na nej neukazuje - volny hned (ne u sdilenych bloku),
 //! - `birth > snapshot_generation`: volny po odlozeni (`REUSE_DELAY`),
 //! - jinak ho drzi snapshot: jde do seznamu mrtvych bloku (deadlist) a
 //!   uvolni se az se smazanim snapshotu.
+//!
+//! **Sdilene bloky** (okamzite kopie, deduplikace) maji v tabulce sdileni
+//! pocet odkazu. Kazde "definitivni" uvolneni datoveho useku (odlozene,
+//! z deadlistu) proto jde pres frontu `unref`, kterou `Fs` pred commitem
+//! zpracuje: usek v tabulce jen snizi pocet a uvolni se az s poslednim
+//! odkazem. Dokud je tabulka prazdna (`share_live == false`), fronta se
+//! obchazi.
+//!
+//! **Metadata 2x:** kazdy uzel stromu se zapise dvakrat (druha kopie od
+//! konce disku, tedy daleko od prvni a pri vic AG v jine skupine). Cteni,
+//! ktere u prvni kopie narazi na spatny soucet nebo chybu I/O, vezme druhou
+//! a prvni prepise spravnym obsahem (samoleceni; obsah je dany souctem,
+//! takze prepis na miste nic nerozbije).
 //!
 //! Commit: (data a deadlisty zapise `Fs`), uzly stromu od listu ke koreni do
 //! jednoho souvisleho useku, space logy, flush, superblok do dalsiho slotu
@@ -26,6 +39,19 @@ use crate::layout::{
 };
 use crate::node::{Body, Child, Node};
 use crate::space::{Class, INDEX_PER_BLOCK, Space, TABLE_PER_BLOCK};
+
+/// Vysledek scrubu useku (`Store::scrub_units`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScrubUnits {
+    /// Spatnych kopii (kazda kopie zvlast).
+    pub bad: u64,
+    /// Opravenych kopii.
+    pub repaired: u64,
+    /// Jednotek bez jedine dobre kopie.
+    pub lost: u64,
+    /// Relativni blok prvni ztracene jednotky.
+    pub first_lost: Option<u64>,
+}
 
 /// Kolik cistych uzlu drzet v pameti, nez se cache vyprazdni.
 const CACHE_LIMIT: usize = 8192;
@@ -126,6 +152,23 @@ pub struct Store<D: BlockDevice> {
     /// Bloky dat, na ktere odkazuje intent log teto epochy (zacatek -> delka):
     /// do commitu se nesmi znovu pouzit, i kdyz vznikly v teto transakci.
     pub zil_logged: BTreeMap<u64, u64>,
+    // --- sdilene bloky ---
+    /// Tabulka sdileni muze mit zaznamy (nastavi `Fs` pri pripojeni a pri
+    /// prvnim sdileni); jinak se uvolnuje primo.
+    pub share_live: bool,
+    /// Datove useky k definitivnimu uvolneni pres tabulku sdileni:
+    /// (zacatek, delka, kopie).
+    pub unref: Vec<(u64, u64, u64)>,
+    // --- samoleceni ---
+    /// Kolik poskozenych kopii (uzly, data) se od pripojeni opravilo
+    /// z druhe kopie.
+    pub healed: u64,
+    /// Smi cteni opravovat spatnou kopii zapisem? Az kdyz pripojeni
+    /// rozhodlo o rezimu (pripojeni jen pro cteni nesmi zapsat nic).
+    pub heal: bool,
+    /// Opravy nalezene pred rozhodnutim o rezimu (pri pripojeni):
+    /// (blok, spravny obsah). Zapise je `start_healing`.
+    pending_heal: Vec<(u64, Vec<u8>)>,
 }
 
 /// Velikost AG pro disk: vychozi, ale tolik, aby tabulka mela nejvys
@@ -173,7 +216,9 @@ impl<D: BlockDevice> Store<D> {
             uuid: volume_uuid(&opts.label, blocks, opts.uuid),
             features_compat: 0,
             features_ro_compat: crate::layout::feature::RO_COMPAT_HISTORY,
-            features_incompat: crate::layout::feature::INCOMPAT_TIME_SECS,
+            features_incompat: crate::layout::feature::INCOMPAT_TIME_SECS
+                | crate::layout::feature::INCOMPAT_PTR_COPY
+                | crate::layout::feature::INCOMPAT_DATA,
             root: BlockPtr::default(),
             space: BlockPtr::default(),
             zil_block: 0,
@@ -230,6 +275,11 @@ impl<D: BlockDevice> Store<D> {
             zil_next: sb.zil_block,
             zil_seq: 0,
             zil_logged: BTreeMap::new(),
+            share_live: false,
+            unref: Vec::new(),
+            healed: 0,
+            heal: false,
+            pending_heal: Vec::new(),
             dev,
             sb,
         }
@@ -397,7 +447,8 @@ impl<D: BlockDevice> Store<D> {
     }
 
     fn has_room_keeping(&self, extra: u64, keep: u64) -> bool {
-        let nodes = self.dirty.len() as u64 * NODE_BLOCKS;
+        // Kazdy uzel se zapise dvakrat (metadata 2x).
+        let nodes = self.dirty.len() as u64 * NODE_BLOCKS * 2;
         nodes + extra + keep <= self.space.node_room()
     }
 
@@ -411,15 +462,45 @@ impl<D: BlockDevice> Store<D> {
         }
     }
 
-    /// Uvolni usek podle pravidel v hlavicce modulu.
-    pub fn release(&mut self, start: u64, len: u64, birth: u64) {
+    /// Uvolni uzel stromu (obe kopie) podle pravidel v hlavicce modulu.
+    pub fn release_ptr(&mut self, p: &BlockPtr) {
+        self.release_range(p.block, NODE_BLOCKS, p.copy, p.birth, false, false);
+    }
+
+    /// Uvolni fyzicke bloky `from..to` (relativne k zacatku) extentu.
+    pub fn release_extent(&mut self, e: &crate::layout::Extent, from: u64, to: u64) {
+        let copy = if e.copy != 0 { e.copy + from } else { 0 };
+        self.release_range(e.phys + from, to - from, copy, e.birth, true, e.is_shared());
+    }
+
+    /// Uvolni usek (a jeho kopii) podle pravidel v hlavicce modulu.
+    /// `data` = datovy usek (muze byt v tabulce sdileni), `shared` = extent
+    /// s priznakem sdileni (nikdy se neuvolni hned).
+    pub fn release_range(&mut self, start: u64, len: u64, copy: u64, birth: u64, data: bool, shared: bool) {
         self.changed = true;
-        if birth == self.txg && !self.logged(start, len) {
+        if birth == self.txg && !shared && !self.logged(start, len) {
             self.space.free(start, len, self.txg, true);
+            if copy != 0 {
+                self.space.free(copy, len, self.txg, true);
+            }
         } else if birth > self.snapshot_generation {
-            self.space.free(start, len, self.txg, false);
+            self.free_final(start, len, copy, data);
         } else {
-            self.dead.push(DeadExtent { start, len, birth });
+            self.dead.push(DeadExtent { start, len, birth, copy });
+        }
+    }
+
+    /// Definitivni (odlozene) uvolneni useku, ktery uz nikdo z ulozenych
+    /// stavu nedrzi. Datovy usek jde pres tabulku sdileni (fronta `unref`).
+    pub fn free_final(&mut self, start: u64, len: u64, copy: u64, data: bool) {
+        self.changed = true;
+        if data && self.share_live {
+            self.unref.push((start, len, copy));
+            return;
+        }
+        self.space.free(start, len, self.txg, false);
+        if copy != 0 {
+            self.space.free(copy, len, self.txg, false);
         }
     }
 
@@ -443,15 +524,66 @@ impl<D: BlockDevice> Store<D> {
         Ok(self.space.alloc(1, None, Class::Meta, self.txg)?.0)
     }
 
-    /// Nacte ulozeny uzel a overi jeho kontrolni soucet.
+    /// Lezi usek `start..start+len` ve svazku (za superbloky)?
+    fn inside(&self, start: u64, len: u64) -> bool {
+        start >= DATA_START && start.checked_add(len).is_some_and(|e| e <= self.sb.block_count)
+    }
+
+    /// Precte `buf.len()` bajtu od `start` a overi je funkci `ok`; kdyz
+    /// prvni kopie nesedi (nebo nejde precist) a existuje druha (`copy`),
+    /// vezme druhou a prvni opravi. `Corrupted` = ani jedna kopie nesedi.
+    pub fn read_verified(
+        &mut self,
+        start: u64,
+        copy: u64,
+        buf: &mut [u8],
+        ok: impl Fn(Algo, &[u8]) -> bool,
+    ) -> Result<()> {
+        let first = self.dev.read_blocks(start, buf);
+        if first.is_ok() && ok(self.algo, buf) {
+            return Ok(());
+        }
+        if copy == 0 {
+            return first.and(Err(Error::Corrupted));
+        }
+        let second = self.dev.read_blocks(copy, buf);
+        if second.is_ok() && ok(self.algo, buf) {
+            // Samoleceni: prvni kopii prepsat spravnym obsahem. Chyba
+            // zapisu neni fatalni (cteni uspelo, scrub to zkusi znovu).
+            // Pri pripojeni (rezim jeste neni rozhodnuty) jen poznamenat.
+            if self.heal {
+                if !self.read_only && self.dev.write_blocks(start, buf).is_ok() {
+                    self.healed += 1;
+                }
+            } else if self.pending_heal.len() < 64 {
+                self.pending_heal.push((start, buf.to_vec()));
+            }
+            return Ok(());
+        }
+        // Obe spatne: chyba I/O ma prednost (prechodna), jinak poskozeni.
+        match (first, second) {
+            (Err(e), _) | (_, Err(e)) if e != Error::Corrupted => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
+
+    /// Zapne samoleceni (pripojeni rozhodlo, ze svazek je zapisovatelny)
+    /// a zapise opravy nalezene behem pripojeni.
+    pub fn start_healing(&mut self) {
+        self.heal = !self.read_only;
+        for (b, data) in core::mem::take(&mut self.pending_heal) {
+            if self.heal && self.dev.write_blocks(b, &data).is_ok() {
+                self.healed += 1;
+            }
+        }
+    }
+
+    /// Nacte ulozeny uzel a overi jeho kontrolni soucet (pri chybe z druhe
+    /// kopie, viz `read_verified`).
     pub fn load(&mut self, ptr: &BlockPtr) -> Result<&Node> {
         if !self.cache.contains_key(&ptr.block) {
-            let inside = ptr.block >= DATA_START
-                && ptr
-                    .block
-                    .checked_add(NODE_BLOCKS)
-                    .is_some_and(|e| e <= self.sb.block_count);
-            if !inside || ptr.len as u64 != NODE_BLOCKS || ptr.dev != 0 {
+            let copy_ok = ptr.copy == 0 || (self.inside(ptr.copy, NODE_BLOCKS) && ptr.copy_dev == 0);
+            if !self.inside(ptr.block, NODE_BLOCKS) || !copy_ok || ptr.len as u64 != NODE_BLOCKS || ptr.dev != 0 {
                 return Err(Error::Corrupted);
             }
             // Komprimovany/sifrovany uzel tento ovladac neumi (svazek s
@@ -460,10 +592,8 @@ impl<D: BlockDevice> Store<D> {
                 return Err(Error::NotSupported);
             }
             let mut buf = vec![0u8; NODE_SIZE];
-            self.dev.read_blocks(ptr.block, &mut buf)?;
-            if self.algo.sum(&buf) != ptr.csum {
-                return Err(Error::Corrupted);
-            }
+            let csum = ptr.csum;
+            self.read_verified(ptr.block, ptr.copy, &mut buf, |a, b| a.sum(b) == csum)?;
             let node = Node::decode(&buf)?;
             if self.cache.len() >= CACHE_LIMIT {
                 self.cache.clear();
@@ -490,7 +620,7 @@ impl<D: BlockDevice> Store<D> {
                 let mut node = self.load(&p)?.clone();
                 node.generation = self.txg;
                 self.cache.remove(&p.block);
-                self.release(p.block, NODE_BLOCKS, p.birth);
+                self.release_ptr(&p);
                 Ok(self.insert_dirty(node))
             }
         }
@@ -528,30 +658,90 @@ impl<D: BlockDevice> Store<D> {
             }
             Child::Disk(p) => {
                 self.cache.remove(&p.block);
-                self.release(p.block, NODE_BLOCKS, p.birth);
+                self.release_ptr(&p);
             }
         }
         self.changed = true;
     }
 
-    /// Precte souvisly usek dat a overi kontrolni soucet kazdeho bloku.
+    /// Precte souvisly usek nekomprimovanych dat a overi kontrolni soucet
+    /// kazdeho bloku; `copy` = zacatek druhe kopie tehoz useku (0 = neni).
     pub fn read_data(
         &mut self,
         phys: u64,
+        copy: u64,
         csums: &[crate::hash::Csum],
         buf: &mut [u8],
     ) -> Result<()> {
         debug_assert_eq!(buf.len(), csums.len() * BLOCK_SIZE);
-        if phys < DATA_START || phys + csums.len() as u64 > self.sb.block_count {
+        let n = csums.len() as u64;
+        if !self.inside(phys, n) || (copy != 0 && !self.inside(copy, n)) {
             return Err(Error::Corrupted);
         }
-        self.dev.read_blocks(phys, buf)?;
-        for (c, b) in csums.iter().zip(buf.chunks(BLOCK_SIZE)) {
-            if self.algo.sum(b) != *c {
-                return Err(Error::Corrupted);
+        self.read_verified(phys, copy, buf, |a, b| {
+            csums.iter().zip(b.chunks(BLOCK_SIZE)).all(|(c, blk)| a.sum(blk) == *c)
+        })
+    }
+
+    /// Scrub useku: precte obe kopie (`copy` = 0: jen prvni), overi kazdou
+    /// jednotku `unit` bloku proti `csums` a spatnou kopii prepise dobrou.
+    /// Na rozdil od `read_verified` overi i druhou kopii, kdyz je prvni
+    /// v poradku (jinak by se poskozena kopie prozradila az ve chvili, kdy
+    /// je potreba).
+    pub fn scrub_units(&mut self, start: u64, copy: u64, unit: u64, csums: &[crate::hash::Csum]) -> Result<ScrubUnits> {
+        let n = unit * csums.len() as u64;
+        if !self.inside(start, n) || (copy != 0 && !self.inside(copy, n)) {
+            return Err(Error::Corrupted);
+        }
+        let size = unit as usize * BLOCK_SIZE;
+        let read = |s: &mut Self, at: u64| {
+            let mut b = vec![0u8; n as usize * BLOCK_SIZE];
+            s.dev.read_blocks(at, &mut b).ok().map(|()| b)
+        };
+        let a = read(self, start);
+        let b = if copy != 0 { read(self, copy) } else { None };
+        let mut r = ScrubUnits::default();
+        for (i, c) in csums.iter().enumerate() {
+            let part = |x: &Option<Vec<u8>>| x.as_ref().map(|v| v[i * size..(i + 1) * size].to_vec());
+            let (pa, pb) = (part(&a), part(&b));
+            let ok_a = pa.as_ref().is_some_and(|d| self.algo.sum(d) == *c);
+            let ok_b = copy != 0 && pb.as_ref().is_some_and(|d| self.algo.sum(d) == *c);
+            let off = i as u64 * unit;
+            if !ok_a {
+                r.bad += 1;
+            }
+            if copy != 0 && !ok_b {
+                r.bad += 1;
+            }
+            match (ok_a, ok_b) {
+                (true, false) if copy != 0 => {
+                    if self.heal && !self.read_only && self.dev.write_blocks(copy + off, pa.as_ref().unwrap()).is_ok() {
+                        r.repaired += 1;
+                    }
+                }
+                (false, true) => {
+                    if self.heal && !self.read_only && self.dev.write_blocks(start + off, pb.as_ref().unwrap()).is_ok() {
+                        r.repaired += 1;
+                    }
+                }
+                (false, false) => {
+                    r.lost += 1;
+                    r.first_lost.get_or_insert(off);
+                }
+                _ => {}
             }
         }
-        Ok(())
+        Ok(r)
+    }
+
+    /// Precte `plen` bloku komprimovanych dat (jeden soucet za cely usek).
+    pub fn read_packed(&mut self, phys: u64, copy: u64, plen: u64, csum: crate::hash::Csum) -> Result<Vec<u8>> {
+        if !self.inside(phys, plen) || (copy != 0 && !self.inside(copy, plen)) {
+            return Err(Error::Corrupted);
+        }
+        let mut buf = vec![0u8; plen as usize * BLOCK_SIZE];
+        self.read_verified(phys, copy, &mut buf, |a, b| a.sum(b) == csum)?;
+        Ok(buf)
     }
 
     pub fn mark_changed(&mut self) {
@@ -600,9 +790,24 @@ impl<D: BlockDevice> Store<D> {
             }
             starts.extend((0..usable / NODE_BLOCKS).map(|k| s + k * NODE_BLOCKS));
         }
+        // Druhe kopie: od konce disku (daleko od prvnich, pri vic AG v jine
+        // skupine). Na disku bez souvisleho mista pro kopii se zapise jen
+        // prvni - radsi bez kopie nez selhany commit; fsck to hlasi.
+        let mut copies: Vec<u64> = Vec::with_capacity(order.len());
+        while copies.len() < order.len() {
+            let want = (order.len() - copies.len()) as u64 * NODE_BLOCKS;
+            let Ok((s, l)) = self.space.alloc_min(want, NODE_BLOCKS, Class::MetaHigh, self.txg) else {
+                break;
+            };
+            let usable = l - l % NODE_BLOCKS;
+            if usable < l {
+                self.space.free(s + usable, l - usable, self.txg, true);
+            }
+            copies.extend((0..usable / NODE_BLOCKS).map(|k| s + k * NODE_BLOCKS));
+        }
         let mut ptrs: BTreeMap<u64, BlockPtr> = BTreeMap::new();
-        let mut out: Vec<(u64, Vec<u8>)> = Vec::with_capacity(order.len());
-        for (&id, &block) in order.iter().zip(&starts) {
+        let mut out: Vec<(u64, Vec<u8>)> = Vec::with_capacity(order.len() * 2);
+        for (i, (&id, &block)) in order.iter().zip(&starts).enumerate() {
             let mut node = self.dirty.remove(&id).unwrap();
             if let Body::Internal(children) = &mut node.body {
                 for (_, c) in children.iter_mut() {
@@ -612,16 +817,21 @@ impl<D: BlockDevice> Store<D> {
                 }
             }
             let data = node.encode();
+            let copy = copies.get(i).copied().unwrap_or(0);
             let ptr = BlockPtr {
                 block,
                 birth: self.txg,
                 csum: self.algo.sum(&data),
                 len: NODE_BLOCKS as u32,
+                copy,
                 ..BlockPtr::default()
             };
             ptrs.insert(id, ptr);
             if self.cache.len() < CACHE_LIMIT {
                 self.cache.insert(block, node);
+            }
+            if copy != 0 {
+                out.push((copy, data.clone()));
             }
             out.push((block, data));
         }

@@ -8,6 +8,7 @@ mod drivers;
 mod events;
 mod firewall;
 mod fs;
+mod fs_data;
 mod fs_hist;
 mod gui;
 mod input;
@@ -40,6 +41,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
     ("historie FS", fs_hist::TESTS),
+    ("data FS", fs_data::TESTS),
     ("cas", time::TESTS),
     ("firewall", firewall::TESTS),
     ("sit", net::TESTS),

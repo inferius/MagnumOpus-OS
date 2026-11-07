@@ -31,7 +31,7 @@ use crate::btree;
 use crate::device::BlockDevice;
 use crate::layout::{
     DatasetRecord, DeadExtent, Dirent, FIRST_FREE_OID, Inode, KIND_DATASET, KIND_DIR, Key, META_OID,
-    NODE_BLOCKS, ROOT_DATASET, ROOT_OID, SnapshotRecord, item,
+    ROOT_DATASET, ROOT_OID, SnapshotRecord, item,
 };
 use crate::names::{stored_name, validate_name};
 use crate::node::{Body, Child};
@@ -136,6 +136,18 @@ impl<D: BlockDevice> Fs<D> {
         } else {
             self.others[&ROOT_DATASET].root
         }
+    }
+
+    /// Aktualni koren stromu datasetu `id` (aktivniho, nacteneho nebo ze
+    /// zaznamu).
+    pub(super) fn tree_of(&mut self, id: u64) -> Result<Child> {
+        if id == self.cur_ds {
+            return Ok(self.s.root);
+        }
+        if let Some(c) = self.others.get(&id) {
+            return Ok(c.root);
+        }
+        Ok(Child::Disk(self.dataset_record(id)?.root))
     }
 
     fn dataset_record(&mut self, id: u64) -> Result<DatasetRecord> {
@@ -274,8 +286,12 @@ impl<D: BlockDevice> Fs<D> {
         self.jprune()?;
         self.jflush()?;
         self.flush_all_data()?;
+        // Sdilene bloky uvolnene ve vsech datasetech (tabulka je v tomto
+        // strome); zmena tabulky samotne uvolnuje jen uzly.
+        self.flush_unref()?;
         self.flush_dead()?;
         self.s.commit()?;
+        self.inplace.clear();
         self.zil.clear();
         for c in self.others.values_mut() {
             c.zil.clear();
@@ -413,6 +429,8 @@ impl<D: BlockDevice> Fs<D> {
                 },
             );
             fs.link_dataset(parent, name, id)?;
+            // Komprese, kopie a deduplikace jako rodicovsky dataset.
+            fs.inherit_data_settings(id)?;
             fs.commit()?;
             Ok(id)
         })
@@ -570,13 +588,13 @@ impl<D: BlockDevice> Fs<D> {
                         if k.kind == item::EXTENT {
                             let e = crate::layout::Extent::decode(&v)?;
                             if e.birth > floor {
-                                self.s.release(e.phys, e.len(), e.birth);
+                                self.s.release_extent(&e, 0, e.plen());
                             }
                         }
                     }
                 }
             }
-            self.s.release(p.block, NODE_BLOCKS, p.birth);
+            self.s.release_ptr(&p);
         }
         self.s.mark_changed();
         Ok(())

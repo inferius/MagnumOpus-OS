@@ -6,6 +6,8 @@
 mod basic;
 mod commits;
 mod crash;
+mod crash3;
+mod data;
 mod datasets;
 mod errors;
 mod features;
@@ -19,6 +21,8 @@ mod objects;
 mod ondisk;
 mod perf;
 mod perm;
+mod scrub;
+mod sharing;
 mod times;
 mod trash;
 

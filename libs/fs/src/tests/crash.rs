@@ -13,12 +13,12 @@ use proptest::prelude::*;
 use super::{assert_clean, opts};
 use crate::{BlockDevice, Fs, Kind, MemDevice, Result};
 
-struct CrashDevice {
-    durable: MemDevice,
-    pending: Vec<(u64, Vec<u8>)>,
+pub(super) struct CrashDevice {
+    pub(super) durable: MemDevice,
+    pub(super) pending: Vec<(u64, Vec<u8>)>,
     /// Po kolika zapisech "vypadne proud": dalsi flush uz nic neulozi.
-    fail_after: Option<usize>,
-    writes: usize,
+    pub(super) fail_after: Option<usize>,
+    pub(super) writes: usize,
 }
 
 impl BlockDevice for CrashDevice {
@@ -54,7 +54,7 @@ impl BlockDevice for CrashDevice {
 }
 
 /// Stav systemu jako mapa cesta -> obsah.
-fn snapshot_state(fs: &mut Fs<impl BlockDevice>) -> BTreeMap<alloc::string::String, Vec<u8>> {
+pub(super) fn snapshot_state(fs: &mut Fs<impl BlockDevice>) -> BTreeMap<alloc::string::String, Vec<u8>> {
     let mut out = BTreeMap::new();
     for e in fs.list("/").unwrap() {
         let path = alloc::format!("/{}", e.name);

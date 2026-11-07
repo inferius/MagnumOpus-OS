@@ -96,9 +96,44 @@ přesouvá jen `trash`; každá změnová operace počítá s místem pro uzly
 uložit strom; změny, které commit sám přidává (žurnál), se nepočítají jako
 rozpracovaná operace.
 
+### Fáze 3: data (`INCOMPAT_PTR_COPY`, `INCOMPAT_DATA`)
+
+> **Změna proti v3 (fáze 2):** ukazatel 48 B s adresou druhé kopie,
+> extent s příznaky a kompresí, deadlist s kopií, položky 24-29.
+> **Proč:** metadata 2x se samoléčením, komprese, okamžité kopie,
+> deduplikace a předalokace potřebují místo ve formátu. Podrobně: [Data
+> FS](fs-data.md#na-disku).
+
+Změna uvnitř v3, poznaná příznaky `INCOMPAT_PTR_COPY` (bit 2 incompat,
+**povinný**) a `INCOMPAT_DATA` (bit 3 incompat); oba nastaví formátování.
+
+| Oblast | Fáze 2 | Fáze 3 | Proč |
+|---|---|---|---|
+| ukazatel (`BlockPtr`) | 40 B | **48 B**: + adresa druhé kopie (offset 40) | každý uzel 2x, oprava z kopie bez návratu o generaci |
+| superblok | kořen 80-120, místo 120-160, jméno 216-248 | kořen **80-128**, místo **128-176**, další pole od 176, jméno **232-264** | ukazatele jsou delší |
+| vnitřní uzel | položka 64 B, až 255 potomků | položka **72 B**, až **227** potomků | ukazatel potomka 48 B |
+| extent | příznaky vyhrazené (0) | bit 0 nezapsaný, 1 sdílený, 2 kopie (+ adresa), 8-15 komprese (+ fyzická délka a bajty, jeden součet) | předalokace, okamžité kopie a deduplikace, data 2x, komprese po kusech 128 KiB |
+| deadlist | 24 B (začátek, délka, birth) | **32 B**: + začátek kopie | kopie se uvolní s první |
+| položky stromu | 1-23 | + 24 `DATAOPT`, 25 `SHARE`, 26 `DEDUP`, 27 `SCRUB`, 28 `SCRUBERR`, 29 `DEDUPPOS` | nastavení dat, tabulka sdílení, index deduplikace, stav a chyby scrubu, pozice deduplikace |
+| intent log | extent: blok, součty | extent v **úplném kódování** (komprese, kopie); zápis do předalokovaných bloků | `fsync` komprimovaných dat a zápisu na místo |
+| protokol v2 | op 54-86 | + **110-117** (`fsproto::data`; 87-92 vnořené datasety) | kopie, předalokace, nastavení dat, scrub |
+
+**Starší svazek** (bez `INCOMPAT_PTR_COPY`, ukazatel 40 B) ovladač
+**odmítne** (`NOT_SUPPORTED`) - jiný tvar ukazatele ve všech uzlech by
+znamenal dvojí kód v nejčastější cestě; FS je ve vývoji, svazky se
+vytvářejí znovu.
+
+**Chování (bez změny formátu):** zápis nulových bloků vytváří díry
+(dřív se ukládaly); obnova ze snapshotu, verze souboru a merge sdílejí
+bloky (okamžité, bez místa navíc); sdílený extent se nikdy neuvolní hned;
+čtení se špatnou první kopií opraví kopii (při připojení až po rozhodnutí
+o režimu); defragmentace přeskakuje sdílené, komprimované a předalokované
+extenty; komprese je ve výchozím stavu **vypnutá** (na NVMe by zpomalila
+dlouhý zápis až několikrát).
+
 ### Zbývá ve v3
 
-Fáze 3-6 (data, ochrana, ostatní, cloud) - pořadí v [návrhu](navrh-fs-v3.md#pořadí-implementace).
+Fáze 4-6 (ochrana, ostatní, cloud) - pořadí v [návrhu](navrh-fs-v3.md#pořadí-implementace).
 
 ## Časy objektů: u64 ns -> i64 s + u32 ns
 
