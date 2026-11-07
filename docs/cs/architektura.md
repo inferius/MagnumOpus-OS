@@ -455,6 +455,25 @@ Návrhy navíc k odsouhlasení:
 - **Kompatibilita:** klasický textový režim pro skripty a POSIX nástroje
   (C/C++ z milníku jazyků) - strukturovaný výstup je nadstavba, ne náhrada.
 
+## Přehled úloh (odsouhlaseno)
+
+Všechno, co běží na pozadí, je na **jednom místě**: úlohy z terminálu
+(`async`, `bg`), systémové služby, dlouhé operace FS (scrub, deduplikace,
+kontrola), akce aplikací a později agentů AI. Nic neběží „ve vzduchoprázdnu“.
+
+| Část | Co dělá | Kdo ji dělá |
+|---|---|---|
+| **joby v jádře** | skupina procesů s rozpočty (paměť, porty, DMA); strom „kdo spustil koho“ | hotovo (síť) |
+| **služba úloh `taskd`** | jeden seznam úloh: lidsky čitelný název, **kdo spustil** (uživatel, skript, aplikace, služba, agent), stav, průběh, odhad, spotřeba z rozpočtu jobu, akce (připojit, pozastavit, zrušit, log); dokončené úlohy chvíli zůstanou i s výsledkem a chybou | vlákno shellu (6b), po async |
+| **příkaz `tasks`** | strukturovaná tabulka (`tasks \| where owner == "agent"`), `attach`, `cancel`; panel úloh v terminálu, upozornění na dokončení nebo chybu | vlákno shellu (6b) |
+| **správce úloh v GUI** | okno se stejnými daty, ikona „běží N úloh“ v liště | vlákno GUI (6c) |
+
+- **Registrace:** úlohy se při vzniku registrují samy (shell, supervisor,
+  služby, API akcí). Proces bez registrace se v seznamu objeví taky, jako
+  „neznámý proces v jobu X“ - nic nezůstane skryté.
+- **Oprávnění:** uživatel vidí své úlohy, cizí a systémové jen s právem.
+  Úlohy spuštěné agentem AI jsou výrazně označené (viz [AI v systému](#ai-v-systému-návrh)).
+
 ## AI v systému (návrh)
 
 > Odsouhlasené pořadí a API akcí: [Rozhodnutí k milníkům 6a-6d](#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno).
