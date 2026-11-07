@@ -39,6 +39,24 @@ pub struct Source {
     /// Posledni absolutni hodnoty X a Y (snimek muze nest jen jednu osu).
     abs: [i32; 2],
     abs_dirty: bool,
+    /// Ceka na odpoved synchronizace (zdroj prevzaty po restartu sluzby).
+    pub sync: Option<SyncWait>,
+    /// Po synchronizaci: klavesy a tlacitka stisknute od ni. Uvolneni
+    /// jine klavesy patri stisku, ktery videla stara instance (vlastnik
+    /// fokusu uz dostal `Focus(false)`), a zahodi se. `None` = zdroj bez
+    /// restartu.
+    pressed: Option<Vec<u16>>,
+}
+
+/// Rozpracovana synchronizace zdroje (`ISYN`).
+#[derive(Debug, Clone, Copy)]
+pub struct SyncWait {
+    /// Cislo posledniho pozadavku (plati jen odpoved na nej).
+    pub token: u32,
+    /// Kdy pozadavek zopakovat.
+    pub retry_at: u64,
+    /// Pocet odeslanych pozadavku.
+    pub tries: u32,
 }
 
 /// Prevod hodnoty osy z rozsahu `min..=max` na 0..=65535.
@@ -78,6 +96,38 @@ impl Source {
             axes: [(0, 65535); 2],
             abs: [0; 2],
             abs_dirty: false,
+            sync: None,
+            pressed: None,
+        }
+    }
+
+    /// Synchronizace dokoncena: dal plati jen stisky od ted.
+    pub fn synced(&mut self) {
+        self.sync = None;
+        self.pressed = Some(Vec::new());
+    }
+
+    /// Uvolneni klavesy, jejiz stisk tato instance nevidela (po
+    /// synchronizaci)? Zaroven si pamatuje stisky.
+    fn stale_release(&mut self, code: u16, action: Action) -> bool {
+        let Some(p) = &mut self.pressed else {
+            return false;
+        };
+        match action {
+            Action::Press => {
+                if !p.contains(&code) {
+                    p.push(code);
+                }
+                false
+            }
+            Action::Release => match p.iter().position(|&c| c == code) {
+                Some(i) => {
+                    p.swap_remove(i);
+                    false
+                }
+                None => true,
+            },
+            Action::Repeat => false,
         }
     }
 
@@ -139,6 +189,9 @@ impl Source {
                     1 => Action::Press,
                     _ => return false,
                 };
+                if self.stale_release(e.code, action) {
+                    return false;
+                }
                 let mods = self.keyboard.mods(layout);
                 out.push(Record::new(
                     Event::Button {
@@ -159,6 +212,9 @@ impl Source {
                     _ => return false,
                 };
                 let scancode = scan.unwrap_or(e.code as u32);
+                if self.stale_release(e.code, action) {
+                    return false;
+                }
                 if action == Action::Release
                     && let Some(i) = self.swallowed.iter().position(|&c| c == e.code)
                 {

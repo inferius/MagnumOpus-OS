@@ -47,16 +47,25 @@ fn main(startup: Startup) -> i64 {
                 // Bez uloziste se spojeni TLS nenavazou (zadna duveryhodna CA).
                 println!("init: uloziste certifikatu nelze pripravit: {e}");
             }
-            match input::start(&startup, core::mem::take(&mut devices.inputs)) {
-                Ok(i) => devices.input = Some(i),
-                Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
-            }
             sup.watch("devmgr", &devices.devmgr, None);
             if let Some((p, _)) = &devices.fsd {
                 sup.watch("fsd", p, None);
             }
-            if let Some(i) = &devices.input {
-                sup.watch("inputd", &i.process, None);
+            match input::start(&startup, core::mem::take(&mut devices.inputs)) {
+                Ok((i, p)) => {
+                    // Restart po padu: adapter preda nove instanci ovladace,
+                    // fokus a `secure` znovu (input.rs).
+                    sup.register(
+                        supervisor::Spec {
+                            name: "inputd",
+                            deps: &[],
+                            service: Some(i.service()),
+                        },
+                        Some(&p),
+                    );
+                    devices.input = Some(i);
+                }
+                Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
             // Sit az po FS: firewall uklada konfiguraci na FS.
             match system::start_net(&startup, &mut devices) {

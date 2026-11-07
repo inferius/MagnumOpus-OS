@@ -59,8 +59,8 @@ sup.register(Spec {
     hold a channel directly to the instance of `x` without a lease (`fwd`
     and `dnsd` to `netd`),
   - `Dep::notify(x)`: the service keeps running; after `x` starts again the
-    supervisor calls its `dependency_restarted(x, generation)` (e.g.
-    `compd` gets a new input focus after `inputd` restarts),
+    supervisor calls its `dependency_restarted(x, generation)` (e.g. it restores
+    state the dependency forgot in its restart),
 - `service`: the adapter (`trait Service`):
 
 ```rust
@@ -242,8 +242,8 @@ let reply = conn.call(Kind::Idempotent, &request, Vec::new())?;
    deadline.
 4. **Events for the UI**: `Restarting` (show "the service is
    restarting"), `Restored { generation }`, `Unavailable(error)`.
-5. **Streams and push channels** (a `compd` window, the `inputd` focus, a
-   `netd` socket): the library waits on its channel; on `PEER_CLOSED` it
+5. **Streams and push channels** (a `compd` window, a
+   `netd` socket; not the `inputd` focus, the endpoint keeper holds it): the library waits on its channel; on `PEER_CLOSED` it
    calls `conn.recover()` and then restores the state itself (the window
    sends its layer tree again).
 6. **Derived sessions for children** only through `conn.narrow(narrowing)`
@@ -257,7 +257,7 @@ let reply = conn.call(Kind::Idempotent, &request, Vec::new())?;
 | Service | What is restored | What returns an error | Wired up by |
 |---|---|---|---|
 | `fsd` | sessions (identity, mounted paths) from the recipe; open handles by a durable handle (dataset, oid, generation, rights) - the library opens them again (`REOPEN`), rights are checked again. After a restart (not after system start) `fsd` keeps orphans (deleted but open files) for 30 s so clients can reopen them | locks, a conditional save in progress, an unconfirmed write: `SERVICE_RESTARTED`, the client repeats it | FS thread |
-| `inputd` | drivers (endpoint keeper + synchronisation), the supervisor hands over the focus and the `secure` channel again (`compd` through `Dep::notify`), keyboard layout | pressed keys are treated as released | input thread |
+| `inputd` | drivers (endpoint keeper + `ISYN` synchronisation), the focus and the `secure` channel (also in the endpoint keeper: `compd` does nothing, its channel stays open), layout, verification option, `settled`; devices attached at run time | pressed keys are treated as released (`Focus(false)`); secure mode after a restart, the system ends it with `release`; synthetic input (`inject`) gets `PEER_CLOSED` | input thread |
 | `netd` | program sessions (network rules) from the recipe, addresses (DHCP again), DNS, firewall (`fwd` and `dnsd` with `Dep::restart`) | sockets: `CONNECTION_RESET` (connection lost), listening sockets have to be opened again | network thread |
 | `compd` | windows: the application reconnects through its lease (recipe = identity from the manifest) and sends its layer tree again; the display from the endpoint keeper; the focus from `inputd` | a window transaction in progress | GUI thread |
 | `devmgr` | drivers and all services on top of them (see the order above) | as with the individual services | recovery coordinator (init) |
@@ -317,7 +317,8 @@ same commands `call`, `narrow`, `wait`, `gen` as `svctest client`).
 | lease protocol, `svcclient::Conn`, retry rules | done, tests on the host and in QEMU |
 | registry, dependencies (`Dep::restart`, `Dep::notify`), generations, backoff, giving up, `revive`, `status()` | done, suite `obnova sluzeb` |
 | endpoint keeper (`Kept`) | done in the supervisor; used by the service adapters |
-| `fsd`, `inputd`, `netd` + `fwd`/`dnsd`, `compd`, `termd`/`taskd` | wired up by the service threads following this page |
+| `inputd` + input drivers (virtio-input, PS/2, USB HID) | done: the `InputdService` adapter (`input.rs`), `ISYN` synchronisation, drivers do not exit when the service goes away; test "kill inputd in the middle of work" in the `vstup` suite, see [Input](input.md#recovery-after-a-crash) |
+| `fsd`, `netd` + `fwd`/`dnsd`, `compd`, `termd`/`taskd` | wired up by the service threads following this page |
 | restarting `devmgr` (`driver` message, killing drivers) | next step after the services are wired up: without them a `devmgr` restart would only detach the devices |
 | task view (`taskproto` producer) | once `taskd` runs (shell thread) |
 

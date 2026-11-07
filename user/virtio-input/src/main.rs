@@ -9,9 +9,11 @@
 //!
 //! Prvni zprava na bootstrap kanalu od spravce: `pci <sbernice> <zarizeni>
 //! <funkce>` (desitkove). Ovladac posle sluzbe predstaveni (`IDEV`: druh
-//! zarizeni a jmeno) a pak preposila udalosti zarizeni (`IEVT`), dokud
-//! sluzba kanal nezavre. Udalosti virtio-input maji uz tvar evdev, ovladac
-//! je jen prenese z fronty do kanalu.
+//! zarizeni a jmeno) a pak preposila udalosti zarizeni (`IEVT`). Na
+//! synchronizaci nove instance sluzby (`ISYN`) odpovi a predstavi se znovu;
+//! kdyz sluzba kanal zavre, nekonci (obnova sluzeb, viz
+//! `docs/cs/obnova-sluzeb.md`). Udalosti virtio-input maji uz tvar evdev,
+//! ovladac je jen prenese z fronty do kanalu.
 //!
 //! Specifikace: VIRTIO 1.2, kapitola 5.8 (Input Device).
 
@@ -98,13 +100,9 @@ fn main(startup: Startup) -> i64 {
             (false, false) => "nezname zarizeni",
         }
     );
-    if service
-        .write(&device::encode_hello(dev.caps, &dev.name), Vec::new())
-        .is_err()
-    {
-        return 0;
-    }
-    let r = dev.serve(&service);
+    let hello = device::encode_hello(dev.caps, &dev.name);
+    let _ = service.write(&hello, Vec::new());
+    let r = dev.serve(&service, &hello);
     // Zarizeni zastavit, aby uz nepouzivalo DMA buffery.
     let _ = dev.device.reset();
     match r {
@@ -165,17 +163,32 @@ impl InputDevice {
         )
     }
 
-    /// Preposila udalosti, dokud sluzba vstupu nezavre kanal.
-    fn serve(&mut self, service: &Channel) -> Result<()> {
+    /// Preposila udalosti sluzbe vstupu a odpovida na jeji synchronizaci
+    /// (`ISYN`, nova instance po restartu). Kdyz sluzba kanal zavre,
+    /// ovladac nekonci (obnova sluzeb): zaloguje to a dal obsluhuje
+    /// zarizeni, az ho ukonci spravce.
+    fn serve(&mut self, service: &Channel, hello: &[u8]) -> Result<()> {
         let mut dropped = 0u64;
+        let mut connected = true;
         loop {
             let items = [
                 (self.irq.handle(), Signals::SIGNALED),
-                (service.handle(), Signals::PEER_CLOSED),
+                (service.handle(), Signals::READABLE | Signals::PEER_CLOSED),
             ];
-            let (_, observed) = libos::wait_many(&items, None)?;
-            if observed[1].intersects(Signals::PEER_CLOSED) {
-                return Ok(());
+            let n = if connected { 2 } else { 1 };
+            let (_, observed) = libos::wait_many(&items[..n], None)?;
+            if connected && observed[1].intersects(Signals::READABLE) {
+                while let Ok(m) = service.try_read() {
+                    device::answer_sync(&m.data, hello, None, |b| {
+                        service.write(b, Vec::new()).is_ok()
+                    });
+                }
+            } else if connected && observed[1].intersects(Signals::PEER_CLOSED) {
+                println!("virtio-input: sluzba vstupu zavrela kanal, cekam");
+                connected = false;
+            }
+            if !observed[0].intersects(Signals::SIGNALED) {
+                continue;
             }
             // Potvrdit driv nez vyber fronty: preruseni behem vyberu se
             // neztrati.
@@ -198,16 +211,21 @@ impl InputDevice {
                 println!("virtio-input: prvni udalosti od zarizeni ({})", events.len());
             }
             for chunk in events.chunks(device::MAX_EVENTS) {
+                if !connected {
+                    break;
+                }
                 match service.write(&device::encode_events(chunk), Vec::new()) {
                     Ok(()) => {}
-                    // Sluzba nestiha: udalosti zahodit, neblokovat zarizeni.
+                    // Sluzba nestiha (nebo se restartuje): udalosti zahodit,
+                    // neblokovat zarizeni.
                     Err(Error::ShouldWait) => {
                         dropped += 1;
                         if dropped.is_power_of_two() {
                             println!("virtio-input: sluzba nestiha, zahozeno {dropped} zprav");
                         }
                     }
-                    Err(Error::PeerClosed) => return Ok(()),
+                    // Zavreni zjisti dalsi kolo cekani (PEER_CLOSED).
+                    Err(Error::PeerClosed) => break,
                     Err(e) => return Err(e),
                 }
             }

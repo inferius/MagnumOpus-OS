@@ -12,7 +12,7 @@ use inputproto::{Action, Event, DeviceTrust, Record, event};
 use keymap::{Layout, LayoutId, layout};
 use libos::{Channel, Error, println, time};
 
-use crate::source::{KeyVerdict, Source};
+use crate::source::{KeyVerdict, Source, SyncWait};
 
 /// Prodleva pred prvnim opakovanim drzene klavesy.
 pub const REPEAT_DELAY: Duration = Duration::from_millis(500);
@@ -23,6 +23,10 @@ pub const MAX_SOURCES: usize = 32;
 /// Nejvic zprav od jednoho zdroje v jednom kole (ostatni zdroje se
 /// mezitim nezablokuji).
 pub const MAX_BATCH: usize = 64;
+/// Po jake dobe zopakovat synchronizaci zdroje, ktery neodpovedel.
+pub const SYNC_RETRY: Duration = Duration::from_millis(200);
+/// Kolik pozadavku na synchronizaci nejvys (pak se zdroj odpoji).
+pub const SYNC_TRIES: u32 = 25;
 
 /// Opakovana klavesa.
 pub struct Repeat {
@@ -114,6 +118,12 @@ pub struct Service {
     pub settled: bool,
     /// Volba zabezpeceni: nova klavesnice nebo mys ceka na overeni.
     pub verify_new: bool,
+    /// Instance po padu predchozi (prikaz `restarted`): prvni vlastnik
+    /// fokusu dostane `Focus(false)`, prvni kanal `secure` bezpecny rezim.
+    restart_focus: bool,
+    restart_secure: bool,
+    /// Cislo pristiho pozadavku synchronizace.
+    next_sync: u32,
 }
 
 impl Service {
@@ -129,7 +139,31 @@ impl Service {
             next_id: 1,
             settled: false,
             verify_new: false,
+            restart_focus: false,
+            restart_secure: false,
+            next_sync: 1,
         }
+    }
+
+    /// Instance po padu predchozi (`restarted`).
+    pub fn set_restarted(&mut self) {
+        self.restart_focus = true;
+        self.restart_secure = true;
+    }
+
+    /// Zdroj `index` uz mela predchozi instance: poslat `ISYN` a do
+    /// odpovedi zahazovat jeho zpravy.
+    pub fn start_sync(&mut self, index: usize, tries: u32) {
+        let token = self.next_sync;
+        self.next_sync = self.next_sync.wrapping_add(1).max(1);
+        let s = &mut self.sources[index];
+        s.sync = Some(SyncWait {
+            token,
+            retry_at: time::now().saturating_add(SYNC_RETRY.as_nanos() as u64),
+            tries,
+        });
+        // Plna fronta ovladace: pozadavek se zopakuje (`tick`).
+        let _ = s.channel.write(&device::encode_sync(token), Vec::new());
     }
 
     fn layout(&self) -> &'static Layout {
@@ -187,6 +221,10 @@ impl Service {
     pub fn set_focus(&mut self, ch: Channel) {
         self.notify_focus(Event::Focus(false));
         self.focus = Some(Receiver::new(ch));
+        if core::mem::take(&mut self.restart_focus) {
+            // Stara instance mohla nechat klavesy stisknute.
+            self.notify_focus(Event::Focus(false));
+        }
         self.notify_focus(Event::Focus(!self.secure_mode));
         self.notify_focus(Event::Layout(self.layout as u32));
         let active = self.injecting();
@@ -198,6 +236,13 @@ impl Service {
         self.secure = Some(Receiver::new(ch));
         let active = self.injecting();
         self.notify_secure(Event::Injection { active });
+        if core::mem::take(&mut self.restart_secure) {
+            // Stara instance mohla byt v bezpecnem rezimu (zadavani hesla):
+            // radeji do nej, nez aby vstup sel aplikaci. System ho ukonci
+            // `release` jako po Ctrl+Alt+Delete.
+            println!("inputd: po restartu v bezpecnem rezimu");
+            self.secure_attention();
+        }
     }
 
     /// Kanal `secure` se zavrel: bezpecny rezim konci.
@@ -288,7 +333,15 @@ impl Service {
 
     /// Zpracuje zpravu od zdroje `index`.
     pub fn source_message(&mut self, index: usize, data: &[u8]) {
-        let Some(msg) = device::decode(data) else {
+        let msg = device::decode(data);
+        if let Some(w) = self.sources[index].sync {
+            // Do odpovedi na posledni pozadavek jsou to stare zpravy.
+            if msg == Some(DeviceMessage::Sync(w.token)) {
+                self.sources[index].synced();
+            }
+            return;
+        }
+        let Some(msg) = msg else {
             println!("inputd: neplatna zprava od zdroje {index}");
             return;
         };
@@ -316,7 +369,7 @@ impl Service {
                 self.sources[index].set_axes(&a);
                 return;
             }
-            DeviceMessage::Hello { .. } => return,
+            DeviceMessage::Hello { .. } | DeviceMessage::Sync(_) => return,
         };
         let now = time::now();
         let layout = self.layout();
@@ -444,11 +497,39 @@ impl Service {
 
     /// Termin pristiho opakovani klavesy.
     pub fn next_deadline(&self) -> Option<u64> {
-        self.repeat.as_ref().map(|r| r.next)
+        let syncs = self.sources.iter().filter_map(|s| s.sync.map(|w| w.retry_at));
+        self.repeat.as_ref().map(|r| r.next).into_iter().chain(syncs).min()
     }
 
-    /// Opakovani drzene klavesy, pokud nastal jeho cas.
+    /// Opakovani drzene klavesy a synchronizace zdroju, pokud nastal jejich
+    /// cas.
     pub fn tick(&mut self) {
+        self.sync_tick();
+        self.repeat_tick();
+    }
+
+    /// Zdroje, ktere neodpovedely na synchronizaci: novy pozadavek, po
+    /// [`SYNC_TRIES`] odpojit.
+    fn sync_tick(&mut self) {
+        let now = time::now();
+        for i in (0..self.sources.len()).rev() {
+            let Some(w) = self.sources[i].sync else { continue };
+            if w.retry_at > now {
+                continue;
+            }
+            if w.tries >= SYNC_TRIES {
+                println!(
+                    "inputd: zdroj {} neodpovida na synchronizaci, odpojuji",
+                    self.sources[i].id
+                );
+                self.remove_source(i);
+                continue;
+            }
+            self.start_sync(i, w.tries + 1);
+        }
+    }
+
+    fn repeat_tick(&mut self) {
         let now = time::now();
         let Some(r) = &mut self.repeat else {
             return;

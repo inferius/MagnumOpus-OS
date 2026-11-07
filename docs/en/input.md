@@ -202,6 +202,7 @@ that start with a tag:
 | `IDEV` | version u16 (1), capabilities u16 (`KEYBOARD` 1, `POINTER` 2, `ABSOLUTE` 4, `MEDIA` 8 = multimedia keys only), UTF-8 name (at most 128 B) |
 | `IEVT` | 8-byte events: type u16, code u16, value i32 (at most 1024 per message) |
 | `IAXS` | 12-byte absolute axis ranges: code u16, reserved u16, min i32, max i32 (a source with the `ABSOLUTE` capability 4, after the greeting) |
+| `ISYN` | synchronisation: number u32. The only service -> source message: a new instance after a restart asks, the source answers with the same message and then `IDEV` (and `IAXS`) again. See [Recovery after a crash](#recovery-after-a-crash) |
 
 Events use the evdev format, and the codes come from Linux
 (`inputproto::code`):
@@ -336,6 +337,8 @@ e.g. `err NOT_FOUND`.
 | Command | Handles | Reply |
 |---|---|---|
 | `device` | channel to the source | `ok`; above 32 sources `err NO_RESOURCES` |
+| `device sync` | channel to a source the previous instance had | `ok`; the service sends the source `ISYN` and drops its messages until the reply |
+| `restarted` | - | `ok`; an instance after the previous one crashed: the new focus owner first gets `Focus(false)`, with a `secure` channel it starts in secure mode |
 | `focus` | channel of the new focus owner | `ok`; the previous owner gets `Focus(false)`, the new one `Focus`, `Layout`, `Injection` |
 | `secure` | channel for the secure attention shortcut | `ok` |
 | `inject` | - | `ok` + channel of a new synthetic input source |
@@ -441,6 +444,62 @@ on (a decimal comma in `cz`). The operators `/ * - +` always type.
 the `Key` with the `Repeat` action, together with its `Text`. Repeats from
 the device are ignored.
 
+## Recovery after a crash
+
+When `inputd` crashes, the init supervisor starts it again (the
+`InputdService` adapter in `user/init/src/input.rs`, the common
+[service recovery](service-recovery.md) protocol). Neither the drivers nor
+the focus owner do anything:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Recovering inputd after a crash">
+<defs><marker id="vo1e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="160" height="60" rx="6"/><text class="t b" x="90" y="45" text-anchor="middle">driver</text><text class="m" x="90" y="64" text-anchor="middle">notices nothing</text>
+<rect class="acc" x="300" y="20" width="160" height="60" rx="6"/><text class="t b" x="380" y="45" text-anchor="middle">init (Kept)</text><text class="m" x="380" y="64" text-anchor="middle">keeps the ends and the state</text>
+<rect class="ok" x="590" y="20" width="160" height="60" rx="6"/><text class="t b" x="670" y="45" text-anchor="middle">inputd gen 2</text><text class="m" x="670" y="64" text-anchor="middle">new instance</text>
+<path class="ln" d="M460 105 L668 105" marker-end="url(#vo1e)"/><text class="m" x="470" y="98">1. restarted, policy, layout, device sync, focus, secure, settled</text>
+<path class="ln" d="M670 140 L92 140" marker-end="url(#vo1e)"/><text class="m" x="200" y="133">2. ISYN n (the same channel end, a duplicate from Kept)</text>
+<path class="ln" d="M90 175 L668 175" marker-end="url(#vo1e)"/><text class="m" x="200" y="168">3. old messages (dropped), ISYN n, IDEV, IAXS</text>
+<path class="ln" d="M670 210 L382 210" marker-end="url(#vo1e)"/><text class="m" x="430" y="203">4. focus: Focus(false); secure: SecureAttention</text>
+<rect class="box" x="10" y="235" width="740" height="55" rx="6"/><text class="m" x="20" y="256">The release of a key whose press the old instance saw is dropped. The focus owner already got Focus(false).</text><text class="m" x="20" y="276">The system ends secure mode with release (the old instance may have been in the middle of a password entry).</text>
+</svg>
+<figcaption>Recovering <code>inputd</code>: init hands everything to the new instance again, the drivers synchronise.</figcaption>
+</figure>
+
+- **Init remembers everything the service got:** it holds the channel
+  ends to the drivers, the focus and `secure` in the endpoint keeper
+  (`Kept`, the service gets a duplicate), and also the layout, the
+  verification option and `settled`. The new instance gets the same in the
+  same order: first `restarted`, the devices from start-up, `focus`,
+  `secure`, `settled`, then the devices attached at run time (with the
+  verification option they wait for verification again). Init drops the
+  ends of detached devices.
+- **Driver synchronisation** (`ISYN`, see the device protocol): a device
+  the old instance had comes as `device sync`. The service sends the
+  driver `ISYN n` and drops its messages until the reply; the driver then
+  introduces itself again. Without a reply it sends a new `ISYN` after
+  200 ms (at most 25 times, then it detaches the source).
+- **Keys pressed at the time of the crash count as released:** the focus
+  owner gets `Focus(false)`. The release of a key whose press the new
+  instance did not see is dropped.
+- **Secure mode after a restart:** with a `secure` channel the new
+  instance starts in secure mode and sends `SecureAttention`. We do not
+  know whether the old instance was in the middle of a secure dialog; the
+  password would otherwise go to an application. The system ends the mode
+  with `release`, as after Ctrl+Alt+Delete.
+- **Drivers do not exit when the service goes away:** they only log the
+  closed channel and keep serving the device until the device manager
+  stops them.
+- **What is not recovered:** synthetic input (`inject`) - the service
+  created that channel, the source gets `PEER_CLOSED` and has to ask for a
+  new one. Decisions about devices attached at run time (with the
+  verification option the system is asked again).
+- **During a restart** the commands of the `Input` client return
+  `SERVICE_UNAVAILABLE`; the remembered ones (`device`, `focus`, `secure`)
+  init stores and hands to the new instance. A device attached at run time
+  (`input` from the device manager) thus also reaches an instance that is
+  just starting.
+
 ## Tests
 
 | Where | What |
@@ -448,7 +507,7 @@ the device are ignored.
 | `cargo test -p inputproto` | message format: every record kind, invalid data, status |
 | `cargo test -p keymap` | US, CZ, AltGr, dead keys, Caps Lock, Num Lock, repeat |
 | `cargo test -p i8042` | scan codes (E0, E1, fake Shifts, Print Screen), mouse packets (sync, overflow, wheel, 5 buttons) |
-| `cargo xtask test`, suite `vstup` | the service in QEMU: devices, synthetic input, CZ, mouse, shortcut, repeat, non-mouse buttons, scan code only for the key right after it, full queue (`Dropped`), invalid commands |
+| `cargo xtask test`, suite `vstup` | the service in QEMU: devices, synthetic input, CZ, mouse, shortcut, repeat, non-mouse buttons, scan code only for the key right after it, full queue (`Dropped`), invalid commands, killing `inputd` in the middle of work |
 
 The test **"QEMU: klavesnice a mys az do sluzby"** (keyboard and mouse all
 the way to the service) checks the whole path from the device. Init prints
@@ -473,6 +532,8 @@ The test checks the text `b@`, the scan code `0xE053` for Delete, the total
 motion, the wheel, and that every event came from the "PS/2 ..." sources
 (the `source` field). The virtio test, in turn, checks that its events came
 from the virtio sources.
+
+The test **"kill inputd in the middle of work"** (last in the suite, `tests/input_recovery.rs`) plays both the driver and the focus owner: it holds key A, kills `inputd`, sends an old message (C) and drives the main supervisor until it recovers the service (generation +1). Then it answers `ISYN` and checks `Focus(false)`, secure mode and `Focus(true)` after `release`, that the release of A and the old C did not arrive while B did, and that the real drivers synchronised by themselves (the same source names). The `usb` and `gui` suites then run on the new instance.
 
 The virt machine (aarch64) has no PS/2 controller: the PS/2 test is skipped
 there and prints no marker, so xtask leaves out the PS/2 steps (`Arch::ps2`)
