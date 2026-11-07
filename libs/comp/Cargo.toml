@@ -1,0 +1,11 @@
+[package]
+name = "comp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Jadro kompozitoru: okna, strom vrstev, transakce, takt snimku, skladani, vstup, systemove dialogy, akce"
+
+[dependencies]
+guiproto = { path = "../guiproto" }
+inputproto = { path = "../inputproto" }
+gfx = { path = "../gfx" }

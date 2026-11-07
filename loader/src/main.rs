@@ -14,6 +14,7 @@
 extern crate alloc;
 
 mod arch;
+mod pci_id;
 
 use alloc::vec::Vec;
 use core::mem::size_of;
@@ -280,8 +281,31 @@ fn load_kernel(elf: &ElfFile, tables: &mut PageTables) -> (u64, u64) {
     (phys, len)
 }
 
+/// Vybere vystup GOP: prednost ma kazdy jiny nez virtio-gpu (jeho obraz se
+/// do zarizeni prenasi prikazy firmwaru, po ukonceni boot services by
+/// zustal prazdny). Virtio-gpu jen kdyz jiny vystup neni.
+fn pick_gop() -> Option<uefi::Handle> {
+    let handles = boot::find_handles::<GraphicsOutput>().ok()?;
+    for &h in &handles {
+        if let Some((v, d)) = pci_id::pci_ids_of(h) {
+            log::info!("GOP na zarizeni PCI {v:04x}:{d:04x}");
+        } else {
+            log::info!("GOP mimo PCI (napr. ramfb)");
+        }
+    }
+    let ok = handles.iter().copied().find(|&h| !pci_id::is_virtio_gpu(pci_id::pci_ids_of(h)));
+    match ok {
+        Some(h) => Some(h),
+        None => {
+            let h = handles.first().copied()?;
+            log::warn!("jediny GOP je virtio-gpu: po startu jadra muze byt obrazovka prazdna");
+            Some(h)
+        }
+    }
+}
+
 fn find_framebuffer() -> Framebuffer {
-    let Ok(handle) = boot::get_handle_for_protocol::<GraphicsOutput>() else {
+    let Some(handle) = pick_gop() else {
         log::warn!("GOP neni k dispozici, framebuffer nebude");
         return Framebuffer::none();
     };

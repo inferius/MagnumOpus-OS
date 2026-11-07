@@ -30,6 +30,12 @@ site menu.
 | [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
 | [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
 
+### Grafika / Graphics
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Grafika a okna](cs/gui.md) | [Graphics and windows](en/gui.md) | virtio-gpu, kompozitor, protokol okna, strom vrstev a přístupnosti, snímky a transakce, knihovna UI, písmo, systémové dialogy, API akcí / virtio-gpu, compositor, window protocol, layer and accessibility trees, frames and transactions, UI library, fonts, system dialogs, action API |
+
 ### Souborový systém / File system
 
 | Česky | English | Obsah / Contents |

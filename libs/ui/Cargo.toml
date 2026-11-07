@@ -1,0 +1,16 @@
+[package]
+name = "ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Nativni knihovna UI: deklarativni prvky, rozvrzeni, kresleni, vstup, strom vrstev a pristupnosti"
+
+[features]
+# Behove prostredi pro aplikace v OS (kanal ke kompozitoru, VMO bufferu).
+os = ["dep:libos"]
+
+[dependencies]
+guiproto = { path = "../guiproto" }
+gfx = { path = "../gfx" }
+inputproto = { path = "../inputproto" }
+libos = { path = "../libos", optional = true }

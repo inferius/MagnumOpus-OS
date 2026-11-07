@@ -141,7 +141,31 @@ fn script(ps2: bool) -> Vec<Step> {
         ps2_steps(&mut s);
     }
     usb_steps(&mut s);
+    gui_steps(&mut s);
     s
+}
+
+/// GUI (`user/init/src/tests/gui.rs`): fyzicka klavesnice odpovi na
+/// systemovy dialog (umely vstup ho nepotvrdi) a na bezpecnou obrazovku.
+fn gui_steps(s: &mut Vec<Step>) {
+    s.push(Step::WaitFor(gui::DIALOG));
+    for (k, d) in [("tab", true), ("tab", false), ("ret", true), ("ret", false)] {
+        s.push(Step::Send(vec![key(k, d)]));
+    }
+    s.push(Step::WaitFor(gui::SECURE));
+    for (k, d) in [("ctrl", true), ("alt", true), ("delete", true), ("delete", false), ("alt", false), ("ctrl", false)] {
+        s.push(Step::Send(vec![key(k, d)]));
+    }
+    s.push(Step::WaitFor(gui::SECURE_ENTER));
+    s.push(Step::Send(vec![key("ret", true)]));
+    s.push(Step::Send(vec![key("ret", false)]));
+}
+
+/// Znacky testu GUI (musi sedet s `user/init/src/tests/gui.rs`).
+mod gui {
+    pub const DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
+    pub const SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
+    pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
 }
 
 fn ps2_steps(s: &mut Vec<Step>) {

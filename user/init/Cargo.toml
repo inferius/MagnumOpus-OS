@@ -15,6 +15,7 @@ libos = { path = "../../libs/libos" }
 blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }
 inputproto = { path = "../../libs/inputproto" }
+guiproto = { path = "../../libs/guiproto" }
 netproto = { path = "../../libs/netproto", features = ["client"] }
 manifest = { path = "../../libs/manifest" }
 conf = { workspace = true }

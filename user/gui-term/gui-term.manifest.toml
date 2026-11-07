@@ -1,0 +1,18 @@
+# Ukazka okna terminalu (milnik 6c). Terminal 6b se v GUI stane timto
+# oknem nad nativnim protokolem sluzby relaci (`termd`).
+[app]
+id = "org.magnumopus.terminal"
+name = "Terminál"
+
+[limits]
+memory = "64M"
+
+[[action]]
+id = "terminal.run"
+title = "Spustit příkaz v terminálu"
+confirm = true
+
+[[action.param]]
+name = "command"
+type = "text"
+required = true

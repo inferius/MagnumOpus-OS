@@ -9,6 +9,7 @@ mod events;
 mod firewall;
 mod fs;
 mod fs_hist;
+mod gui;
 mod input;
 mod ipc;
 mod jobs;
@@ -44,6 +45,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("sit", net::TESTS),
     ("supervisor", supervisor::TESTS),
     ("shell", shell::TESTS),
+    // GUI posledni: kompozitor prevezme fokus vstupu.
+    ("gui", gui::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).

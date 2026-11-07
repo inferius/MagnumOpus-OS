@@ -311,6 +311,8 @@ mobilu, bez závislostního pekla linuxových balíčkovačů.
 
 ## Grafika
 
+> Podrobný návrh a stav: [Grafika a okna (GUI)](gui.md).
+
 - Kompozitor v userspace (koncept Waylandu), klienti renderují do bufferů
   a předávají je přes channel.
 - Vulkan-first, HiDPI se zlomkovým škálováním, dotyk jako výchozí vstup.
@@ -571,6 +573,9 @@ dokumentace česky i anglicky (`docs/cs`, `docs/en`).
 - Licence projektu `MIT OR Apache-2.0`.
 - Převzít smíme cokoli (Mesa, DXVK, VKD3D, ...), kde psaní vlastního
   nedává smysl. Dlouhodobě směřujeme k vlastním komponentám.
+- Písmo systému Tuffy (Thatcher Ulrich) je public domain
+  (`libs/font/fonts/Tuffy.ttf`); písmo terminálu Noto Sans Mono je
+  pod licencí OFL (crate `noto-sans-mono-bitmap`).
 
 ## Platformy
 
@@ -915,7 +920,7 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 | Co | Proč | Kdy pryč |
 |---|---|---|
 | sériový ovladač v jádře | ladicí výstup před existencí userspace | zůstává jen jako early console |
-| konzole na framebufferu v jádře | totéž | převezme kompozitor |
+| konzole na framebufferu v jádře | totéž | se zařízením virtio-gpu obraz převezme kompozitor; bez něj (UEFI framebuffer) zůstává, dokud jádro nepředá framebuffer (bootstrap FRAMEBUFFER) |
 
 ## Milníky
 
@@ -935,7 +940,9 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
      příkazů, „ukaž, co se stane“, oprávnění při spuštění - viz [Shell](#shell-a-chytrý-terminál-návrh)
      (jazyk, služba relací a test v QEMU hotové; vstup a framebuffer čekají)
    - **6c GUI:** virtio-gpu, kompozitor, nativní knihovna UI, systémové
-     dialogy - viz [Grafika](#grafika)
+     dialogy, API akcí - viz [Grafika a okna](gui.md) (softwarové skládání
+     nad virtio-gpu 2D, kompozitor, knihovna UI, písmo, dialogy, akce
+     a testy v QEMU hotové; zbývá backend virgl 3D)
    - **6d AI-ready:** primitiva pro bezpečné agenty (většina z FS v3),
      služba modelů, sémantické vyhledávání, asistent - viz [AI v systému](#ai-v-systému-návrh)
 7. Jazyky a překladač (viz [Jazyky a překladače](#jazyky-a-překladače-plán)):
