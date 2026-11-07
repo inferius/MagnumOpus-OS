@@ -444,6 +444,10 @@ Delete, pohyb (7, 3), pravé tlačítko a kolečko nahoru. Test ověří text
 události přišly ze zdrojů „PS/2 ...“ (pole `source`). Test virtio naopak
 ověří, že jeho události přišly ze zdrojů virtio.
 
+Stroj virt (aarch64) řadič PS/2 nemá: test PS/2 se tam přeskočí a značku
+nevypíše, proto xtask kroky PS/2 vynechá (`Arch::ps2`) a pokračuje rovnou
+kroky USB. Jinak by na značku čekal a události USB by nikdy neposlal.
+
 ## Omezení první verze
 
 - **Modifikátory kláves se počítají pro každé zařízení zvlášť.** Shift na

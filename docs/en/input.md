@@ -474,6 +474,11 @@ motion, the wheel, and that every event came from the "PS/2 ..." sources
 (the `source` field). The virtio test, in turn, checks that its events came
 from the virtio sources.
 
+The virt machine (aarch64) has no PS/2 controller: the PS/2 test is skipped
+there and prints no marker, so xtask leaves out the PS/2 steps (`Arch::ps2`)
+and goes straight to the USB steps. Otherwise it would wait for the marker
+and never send the USB events.
+
 ## Limits of the first version
 
 - **Key modifiers are tracked per device.** Shift on one keyboard does not

@@ -267,11 +267,6 @@ PS/2.
 
 ## Limits and next phases
 
-⚠️ **aarch64 (QEMU virt):** the root hub finds the USB keyboard, but keys
-from QEMU (QMP) and devices attached at run time do not arrive yet. The USB
-event and hotplug tests therefore run only on x86_64; the fix is a separate
-task.
-
 | Phase | State | What |
 |---|---|---|
 | 1 | done | xHCI controller: takeover from the firmware, reset, contexts, rings, MSI-X, root ports, control and interrupt transfers |

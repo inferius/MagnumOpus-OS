@@ -112,7 +112,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     cmd.args(&opts.qemu_args);
 
     println!("xtask: spoustim {}", qemu.display());
-    qmp::spawn_injector(serial_log.clone(), qmp_port);
+    qmp::spawn_injector(serial_log.clone(), qmp_port, arch.ps2);
     let result = if opts.test {
         run_test(cmd, opts)
     } else {

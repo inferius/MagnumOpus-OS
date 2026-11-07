@@ -121,9 +121,6 @@ fn boot_keyboard(_: &Startup) -> TestResult {
 }
 
 fn qemu_keyboard(_: &Startup) -> TestResult {
-    if !on_x86() {
-        return Ok(());
-    }
     let inp = input()?;
     let id = inp.source_id(USB_KBD).map_err(|e| fail("zdroj klavesnice USB", e))?;
     drain(&inp.focus);
@@ -154,9 +151,6 @@ fn qemu_keyboard(_: &Startup) -> TestResult {
 }
 
 fn hotplug_mouse(s: &Startup) -> TestResult {
-    if !on_x86() {
-        return Ok(());
-    }
     let inp = input()?;
     let old = ids(inp)?;
     println!("{MARKER_MOUSE_PLUG}");
@@ -192,9 +186,6 @@ fn hotplug_mouse(s: &Startup) -> TestResult {
 }
 
 fn verify_new_keyboard(s: &Startup) -> TestResult {
-    if !on_x86() {
-        return Ok(());
-    }
     let inp = input()?;
     inp.command("policy verify-new-devices on", Vec::new())
         .map_err(|e| fail("zapnuti overeni", e))?;
@@ -256,9 +247,6 @@ fn verify_inner(s: &Startup, inp: &Input) -> TestResult {
 }
 
 fn verify_new_mouse(s: &Startup) -> TestResult {
-    if !on_x86() {
-        return Ok(());
-    }
     let inp = input()?;
     inp.command("policy verify-new-devices on", Vec::new())
         .map_err(|e| fail("zapnuti overeni", e))?;
@@ -316,9 +304,6 @@ fn verify_mouse_inner(s: &Startup, inp: &Input) -> TestResult {
 }
 
 fn external_hub(s: &Startup) -> TestResult {
-    if !on_x86() {
-        return Ok(());
-    }
     let inp = input()?;
     let old = ids(inp)?;
     println!("{MARKER_HUB_PLUG}");
@@ -337,9 +322,6 @@ fn external_hub(s: &Startup) -> TestResult {
 }
 
 fn tablet(s: &Startup) -> TestResult {
-    if !on_x86() {
-        return Ok(());
-    }
     let inp = input()?;
     let old = ids(inp)?;
     println!("{MARKER_TABLET_PLUG}");
@@ -372,11 +354,4 @@ fn tablet(s: &Startup) -> TestResult {
     );
     println!("{MARKER_TABLET_UNPLUG}");
     wait_gone(inp, id)
-}
-
-/// Udalosti a hotplug USB z QEMU zatim funguji jen na x86_64. Na aarch64
-/// (QEMU virt) root hub klavesnici najde, ale klavesy z QMP a zarizeni
-/// pripojena za behu nedorazi - zname omezeni, oprava je samostatny ukol.
-fn on_x86() -> bool {
-    cfg!(target_arch = "x86_64")
 }

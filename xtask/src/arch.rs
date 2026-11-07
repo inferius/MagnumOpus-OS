@@ -28,6 +28,9 @@ pub struct Arch {
     pub test_success: i32,
     /// Jak dlouho smi testy v QEMU bezet (aarch64 bezi v emulaci TCG).
     pub test_timeout: Duration,
+    /// Stroj QEMU ma radic PS/2 (i8042): test vstupu PS/2 bezi a xtask mu
+    /// posila udalosti.
+    pub ps2: bool,
 }
 
 pub const X86_64: Arch = Arch {
@@ -43,6 +46,7 @@ pub const X86_64: Arch = Arch {
     test_success: 33,
     // Beh s AMD IOMMU a testy USB/vstupu trva az ~90 s.
     test_timeout: Duration::from_secs(180),
+    ps2: true,
 };
 
 pub const AARCH64: Arch = Arch {
@@ -58,6 +62,8 @@ pub const AARCH64: Arch = Arch {
     // na x86 - nula by se pletla s obycejnym vypnutim QEMU).
     test_success: 33,
     test_timeout: Duration::from_secs(600),
+    // Stroj virt PS/2 nema.
+    ps2: false,
 };
 
 pub const ALL: &[&Arch] = &[&X86_64, &AARCH64];
