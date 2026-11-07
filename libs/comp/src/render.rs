@@ -16,7 +16,7 @@ use guiproto::Rect;
 use guiproto::window::{LayerKind, Mode};
 
 use crate::scene::{BORDER, Client, Layer, TITLE_H, Window};
-use crate::{ClientId, Comp};
+use crate::Comp;
 
 /// Barvy systemu (tmavy motiv).
 pub mod color {
@@ -86,7 +86,7 @@ impl Comp {
         if c.info.perms.is_empty() {
             c.info.name.clone()
         } else {
-            format!("{} · {}", c.info.name, c.info.perms.join(", "))
+            format!("{} \u{00B7} {}", c.info.name, c.info.perms.join(", "))
         }
     }
 
@@ -114,18 +114,28 @@ impl Comp {
     pub(crate) fn compose(&mut self, canvas: &mut Canvas<'_>, rects: &[Rect], now: u64) {
         let panel_items = self.panel_items();
         let dialog_active = self.dialogs.active().is_some();
+        // Deti vrstev kazdeho viditelneho okna jednou za snimek (ne pro
+        // kazdy poskozeny obdelnik).
+        let mut trees: Vec<(u32, Kids)> = Vec::new();
+        for &gid in &self.z {
+            let Some(w) = self.windows.get(&gid) else { continue };
+            if !w.mapped || w.minimized || !rects.iter().any(|r| !w.outer().intersect(r).is_empty()) {
+                continue;
+            }
+            let Some(cl) = self.clients.get(&w.client) else { continue };
+            trees.push((gid, children(cl, w.local)));
+        }
         for r in rects {
             canvas.set_clip(*r);
             desktop(canvas, self.h);
-            let order: Vec<u32> = self.z.clone();
-            for gid in order {
-                let Some(w) = self.windows.get(&gid) else { continue };
-                if !w.mapped || w.minimized || w.outer().intersect(r).is_empty() {
+            for (gid, kids) in &trees {
+                let w = &self.windows[gid];
+                if w.outer().intersect(r).is_empty() {
                     continue;
                 }
-                let Some(cl) = self.clients.get(&w.client) else { continue };
-                let focused = self.focus == Some(gid);
-                draw_window(canvas, &mut self.text, w, cl, w.client, &self.clients, focused, now);
+                let cl = &self.clients[&w.client];
+                let focused = self.focus == Some(*gid);
+                draw_window(canvas, &mut self.text, w, cl, kids, focused, now);
             }
             let panel = Panel {
                 rect: self.panel_rect(),
@@ -159,17 +169,23 @@ fn desktop(c: &mut Canvas<'_>, h: u32) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn draw_window(
-    c: &mut Canvas<'_>,
-    text: &mut Text,
-    w: &Window,
-    cl: &Client,
-    cid: ClientId,
-    clients: &BTreeMap<ClientId, Client>,
-    focused: bool,
-    now: u64,
-) {
+/// Deti vrstev okna: rodic -> (poradi, id) serazene.
+type Kids = BTreeMap<u32, Vec<(i32, u32)>>;
+
+fn children(cl: &Client, window: u32) -> Kids {
+    let mut kids: Kids = BTreeMap::new();
+    for (&id, l) in &cl.layers {
+        if l.window == window {
+            kids.entry(l.parent).or_default().push((l.props.order, id));
+        }
+    }
+    for v in kids.values_mut() {
+        v.sort();
+    }
+    kids
+}
+
+fn draw_window(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client, kids: &Kids, focused: bool, now: u64) {
     let outer = w.outer();
     let clip = c.clip();
     // Ram a stin.
@@ -185,20 +201,9 @@ fn draw_window(
     c.fill(w.rect, color::CONTENT);
     let content_clip = clip.intersect(&w.rect);
     if !content_clip.is_empty() {
-        let mut kids: BTreeMap<u32, Vec<(i32, u32)>> = BTreeMap::new();
-        for (&id, l) in &cl.layers {
-            if l.window == w.local {
-                kids.entry(l.parent).or_default().push((l.props.order, id));
-            }
-        }
-        for v in kids.values_mut() {
-            v.sort();
-        }
-        let _ = clients;
-        draw_children(c, cl, &kids, 0, (w.rect.x, w.rect.y), content_clip, 255, 0);
+        draw_children(c, cl, kids, 0, (w.rect.x, w.rect.y), content_clip, 255, 0);
         c.set_clip(clip);
     }
-    let _ = cid;
     // Systemove prvky nad obsahem.
     if w.mode.has_frame() {
         if w.mode == Mode::Standard {

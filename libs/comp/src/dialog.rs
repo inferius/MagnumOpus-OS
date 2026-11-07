@@ -153,7 +153,7 @@ impl Dialogs {
         if let Some(fr) = l.field {
             c.rounded(fr, 6, rgb(0x14, 0x18, 0x1E));
             c.outline(fr, 1, color::BORDER_FOCUSED);
-            let dots: String = d.password.chars().map(|_| '•').collect();
+            let dots: String = d.password.chars().map(|_| '\u{2022}').collect();
             text.draw(c, fr.x + 10, fr.y + (32 - lh as i32) / 2 + base, &dots, UI_PX, color::TITLE_TEXT);
         }
         let phrase = if self.phrase.is_empty() { String::from("Fráze: (nenastavena)") } else { alloc::format!("Fráze: {}", self.phrase) };

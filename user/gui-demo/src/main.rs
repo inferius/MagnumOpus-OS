@@ -61,7 +61,7 @@ impl App for Demo {
         column([
             label(&format!("Počítadlo: {}", self.count)).heading(),
             row([button("Přičíst").on_click(Msg::Add), spacer()]),
-            text_input(&self.text).placeholder("Nová poznámka").on_change(Msg::Text).on_submit(Msg::Save).grow(),
+            text_input(&self.text).placeholder("Nová poznámka").on_change(Msg::Text).on_submit(Msg::Save),
             row([
                 checkbox("Důležitá", self.important).on_toggle(Msg::Important),
                 spacer(),

@@ -184,7 +184,6 @@ impl Gpu {
         }
         // Mapovani overi, ze je VMO dost velka.
         let src = Mapping::new(&vmo, 0, size, MAP_READ)?;
-        self.detach(output)?;
         let row = w * 4;
         let rpc = vgpu::rows_per_chunk(row, CHUNK_MAX).max(1);
         let page = libos::vm::page_size();
@@ -216,6 +215,13 @@ impl Gpu {
             let _ = self.simple(&vgpu::resource_unref(res));
             return Err(e);
         }
+        // Novy zdroj uz vystup ukazuje: stary (pokud byl) uvolnit az ted,
+        // aby pri chybe vyse zustal obraz.
+        if let Some(i) = self.scanouts.iter().position(|s| s.output == output) {
+            let old = self.scanouts.remove(i);
+            let _ = self.simple(&vgpu::resource_detach_backing(old.resource));
+            let _ = self.simple(&vgpu::resource_unref(old.resource));
+        }
         self.scanouts.push(Scanout {
             output,
             resource: res,
@@ -227,17 +233,6 @@ impl Gpu {
             chunks,
         });
         self.present(output, &[Rect::new(0, 0, w, h)])
-    }
-
-    fn detach(&mut self, output: u32) -> Result<()> {
-        let Some(i) = self.scanouts.iter().position(|s| s.output == output) else {
-            return Ok(());
-        };
-        let s = self.scanouts.remove(i);
-        // Vystup vypnout, pak zdroj uvolnit (zarizeni prestane cist backing).
-        self.simple(&vgpu::set_scanout(output, 0, vgpu::Rect::default()))?;
-        self.simple(&vgpu::resource_detach_backing(s.resource))?;
-        self.simple(&vgpu::resource_unref(s.resource))
     }
 
     /// Zkopiruje obdelniky do bufferu DMA a preda je zarizeni.

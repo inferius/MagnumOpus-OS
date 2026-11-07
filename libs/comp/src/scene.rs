@@ -250,6 +250,11 @@ impl Comp {
         for gid in c.windows.values() {
             self.drop_window(*gid);
         }
+        // Potvrzeni akci teto aplikace uz nema smysl.
+        let calls = self.services.calls_of(id);
+        if self.dialogs.remove_where(|o| matches!(o, crate::dialog::Owner::Action(k) if calls.contains(&k))) {
+            self.damage_all();
+        }
         self.services.client_gone(id, &mut self.out);
     }
 

@@ -907,3 +907,16 @@ fn group_limit_is_per_client() {
     let r = t.rect_of(b);
     assert_eq!(t.px(r.x + 5, r.y + 5), RED);
 }
+
+#[test]
+fn app_exit_removes_its_confirmation() {
+    let mut t = T::new();
+    let mut i = info("org.test.app", "Aplikace");
+    i.actions = action::parse_manifest(MANIFEST).unwrap();
+    let a = t.c.add_client(i, t.now);
+    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.c.caller_msg(5, "shell", false, CallerMsg::Call { call: 1, app: "org.test.app".into(), action: "file.delete".into(), args: vec![], synthetic: false }, t.now);
+    assert!(t.c.dialogs.active().is_some());
+    t.c.remove_client(a);
+    assert!(t.c.dialogs.active().is_none());
+}

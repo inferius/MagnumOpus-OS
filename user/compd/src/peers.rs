@@ -174,8 +174,16 @@ impl Peers {
         let (target, data) = match o {
             Out::Client(cid, m) => {
                 let Some((&id, _)) = self.peers.iter().find(|(_, p)| p.kind == Kind::Client(cid)) else { return };
-                // Pohyb mysi a podobne smi pri plne fronte vypadnout.
-                droppable = matches!(m, ServerMsg::Input { .. } | ServerMsg::Ping { .. });
+                // Pri plne fronte smi vypadnout jen pohyb ukazatele, kolecko
+                // a ping; tlacitka, klavesy a fokus ne (aplikace by mela
+                // "zaseknute" tlacitko nebo fokus).
+                droppable = match &m {
+                    ServerMsg::Input { records, .. } => records.iter().all(|r| {
+                        matches!(r.event, guiproto::window::InputEvent::PointerMove { .. } | guiproto::window::InputEvent::Scroll { .. })
+                    }),
+                    ServerMsg::Ping { .. } => true,
+                    _ => false,
+                };
                 (id, m.encode())
             }
             Out::Dialog(id, r) => (id, r.encode()),

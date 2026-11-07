@@ -67,6 +67,11 @@ impl Services {
         ));
     }
 
+    /// Vnitrni id volani aplikace `client`.
+    pub(crate) fn calls_of(&self, client: ClientId) -> Vec<u32> {
+        self.calls.iter().filter(|(_, c)| c.client == client).map(|(&k, _)| k).collect()
+    }
+
     pub(crate) fn client_gone(&mut self, client: ClientId, out: &mut Vec<Out>) {
         let gone: Vec<u32> = self.calls.iter().filter(|(_, c)| c.client == client).map(|(&k, _)| k).collect();
         for k in gone {
@@ -132,7 +137,7 @@ impl Comp {
                 );
                 if confirm {
                     let who = if synthetic { format!("{caller_name} (automat)") } else { String::from(caller_name) };
-                    let mut text = format!("{who} chce v aplikaci {app_name} provést akci „{title}“.");
+                    let mut text = format!("{who} chce v aplikaci {app_name} provést akci \u{201E}{title}\u{201C}.");
                     if !needs.is_empty() {
                         text.push_str(&format!("\nAkce potřebuje: {needs}."));
                     }

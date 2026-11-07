@@ -33,9 +33,7 @@ impl<M: Clone> Ui<M> {
                     c.set_clip(old);
                 }
                 ElemKind::Button { text, .. } => {
-                    let col = if dim {
-                        theme::PRESSED
-                    } else if pressed {
+                    let col = if dim || pressed {
                         theme::PRESSED
                     } else if hover {
                         theme::HOVER
