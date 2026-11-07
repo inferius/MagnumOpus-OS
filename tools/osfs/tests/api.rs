@@ -330,7 +330,14 @@ fn garbage_input_gives_error_reply() {
         &[0u8; 100][..],
         &Request::Hello.encode()[..7],
     ] {
-        let out = handle(&mut s.fs, &mut s.host, Code::Read, input, &mut s.cache, fs::Timestamp::new(1, 0));
+        let out = handle(
+            &mut s.fs,
+            &mut s.host,
+            Code::Read,
+            input,
+            &mut s.cache,
+            fs::Timestamp::new(1, 0),
+        );
         assert_eq!(out.len(), osfs_proto::RESPONSE_HEADER);
     }
     // Relativni cesta v nasem FS.

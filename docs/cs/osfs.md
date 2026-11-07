@@ -154,11 +154,15 @@ zůstane ve stavu po posledním commitu plus změny potvrzené `fsync` - viz
   položkách: vytvoření přidá jedno jméno, smazání a přejmenování ho odeberou.
   Hromadné vytváření souborů v jednom adresáři je proto lineární (3000
   souborů asi za 1 s). Nejvýš 256 adresářů, pak se mezipaměť zahodí celá.
-- **Sériové číslo svazku** je stálé (z času vytvoření souboru s obrazem,
-  velikosti a jmenovky): Windows podle něj poznávají svazek (zástupci,
-  mezipaměť náhledů).
-- **Časy:** naše ns od 1970 -> FILETIME (100 ns od 1601). Čas vytvoření =
-  `btime`, poslední zápis i přístup = `mtime`, změna = `ctime`.
+- **Sériové číslo svazku** je stálé, odvozené z UUID svazku (superblok):
+  Windows podle něj poznávají svazek (zástupci, mezipaměť náhledů); nezmění
+  se ani po přesunu obrazu. **Čas vytvoření svazku** = čas vytvoření
+  kořene (`btime`, zapíše ho `osfs format`).
+- **Časy:** náš čas (sekundy od 1970 se znaménkem + nanosekundy, umí
+  i data před rokem 1970) -> FILETIME (100 ns od 1601; dřívější čas = 0).
+  Čas vytvoření = `btime`, poslední zápis i přístup = `mtime`, změna =
+  `ctime`. Nastavení času z Windows (`SetFileTime`, vlastnosti souboru) se
+  uloží přes `Fs::set_times`.
 - **ID souboru** (`IndexNumber`) = `oid` objektu.
 
 ### Ukládání: commit a fsync
@@ -382,8 +386,6 @@ osfs: delete /Slozka/A.TXT
 - **Nastavení atributů** (příznak jen pro čtení, skrytý). Časy už jdou: ovladač
   ukládá čas vytvoření, zápisu a přístupu z `SetBasicInfo` přes `Fs::set_times`.
 - **Informace „je co ukládat“** - commit se teď hlídá vlastním příznakem.
-- **UUID svazku** ve `FsInfo` - sériové číslo pro Windows se teď počítá
-  z času vytvoření souboru s obrazem (u skutečného disku nepůjde).
 - **Zámek zařízení** v knihovně (nebo aspoň v `FileDevice`) - teď ho drží
   `osfs` sám.
 - **Atomické nahrazení při přejmenování** - teď odsunutí cíle, přejmenování

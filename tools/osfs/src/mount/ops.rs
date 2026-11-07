@@ -13,8 +13,8 @@ use std::collections::HashMap;
 
 use super::{Handle, NAME_CACHE_DIRS, NameCache, SD, State, debug, with_state};
 use crate::api;
-use crate::image::{from_filetime, join, now};
 pub use crate::image::filetime;
+use crate::image::{from_filetime, join, now};
 use crate::names::{self, to_windows};
 
 pub fn interface() -> Interface {
@@ -602,7 +602,11 @@ unsafe extern "system" fn set_basic_info(
     with_state(|st| {
         let path = tri!(handle_path(st, ctx));
         let pick = |ft: u64| (ft != 0).then(|| from_filetime(ft));
-        let t = fs::SetTimes { mtime: pick(write), btime: pick(creation), atime: pick(access) };
+        let t = fs::SetTimes {
+            mtime: pick(write),
+            btime: pick(creation),
+            atime: pick(access),
+        };
         if !t.is_empty() {
             st.fs.set_time(now());
             if let Err(e) = st.fs.set_times(&path, t) {

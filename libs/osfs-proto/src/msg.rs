@@ -337,7 +337,46 @@ impl Hidden {
     }
 }
 
-/// Polozka adresare nebo vysledek `Stat`. Casy v ns od 1. 1. 1970 (UTC).
+/// Cas: sekundy od 1. 1. 1970 UTC (zaporne = drive) + nanosekundy uvnitr
+/// sekundy (0..1e9). Stejny tvar jako cas v souborovem systemu, takze se
+/// neztrati ani data pred rokem 1970.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Time {
+    pub secs: i64,
+    pub nanos: u32,
+}
+
+impl Time {
+    /// Rozdil mezi 1. 1. 1601 (FILETIME) a 1. 1. 1970 v sekundach.
+    const FILETIME_EPOCH_DIFF: i64 = 11_644_473_600;
+
+    /// FILETIME Windows (100 ns od 1. 1. 1601). Cas pred rokem 1601 = 0.
+    pub fn to_filetime(self) -> u64 {
+        let ticks = (self.secs as i128 + Self::FILETIME_EPOCH_DIFF as i128) * 10_000_000
+            + (self.nanos / 100) as i128;
+        ticks.clamp(0, i64::MAX as i128) as u64
+    }
+
+    /// Z FILETIME Windows (presne, FILETIME ma rozliseni 100 ns).
+    pub fn from_filetime(ft: u64) -> Self {
+        Self {
+            secs: (ft / 10_000_000) as i64 - Self::FILETIME_EPOCH_DIFF,
+            nanos: (ft % 10_000_000) as u32 * 100,
+        }
+    }
+
+    fn put(&self, w: &mut Writer) {
+        w.i64(self.secs).u32(self.nanos);
+    }
+
+    fn get(r: &mut Reader) -> Option<Self> {
+        let secs = r.i64()?;
+        let nanos = r.u32()?;
+        (nanos < 1_000_000_000).then_some(Self { secs, nanos })
+    }
+}
+
+/// Polozka adresare nebo vysledek `Stat`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryInfo {
     /// Jmeno v nasem FS (u korene prazdne).
@@ -354,9 +393,12 @@ pub struct EntryInfo {
     pub oid: u64,
     pub generation: u64,
     pub size: u64,
-    pub mtime: u64,
-    pub ctime: u64,
-    pub btime: u64,
+    /// Posledni zmena obsahu.
+    pub mtime: Time,
+    /// Posledni zmena metadat.
+    pub ctime: Time,
+    /// Vytvoreni.
+    pub btime: Time,
     /// U adresare: soucet velikosti souboru v podstromu (okamzite).
     pub tree_bytes: u64,
     /// U adresare: pocet souboru v podstromu.
@@ -379,11 +421,11 @@ impl EntryInfo {
             .u8(self.kind.raw())
             .u64(self.oid)
             .u64(self.generation)
-            .u64(self.size)
-            .u64(self.mtime)
-            .u64(self.ctime)
-            .u64(self.btime)
-            .u64(self.tree_bytes)
+            .u64(self.size);
+        self.mtime.put(w);
+        self.ctime.put(w);
+        self.btime.put(w);
+        w.u64(self.tree_bytes)
             .u64(self.tree_files)
             .u64(self.tree_dirs)
             .u64(self.dataset)
@@ -400,9 +442,9 @@ impl EntryInfo {
             oid: r.u64()?,
             generation: r.u64()?,
             size: r.u64()?,
-            mtime: r.u64()?,
-            ctime: r.u64()?,
-            btime: r.u64()?,
+            mtime: Time::get(r)?,
+            ctime: Time::get(r)?,
+            btime: Time::get(r)?,
             tree_bytes: r.u64()?,
             tree_files: r.u64()?,
             tree_dirs: r.u64()?,
@@ -413,7 +455,14 @@ impl EntryInfo {
 
     /// Kolik bajtu polozka zabere ve zprave.
     pub fn encoded_len(&self) -> usize {
-        2 + self.name.len() + 2 + self.windows_name.len() + 3 + 8 * 10 + 2 + self.link_target.len()
+        2 + self.name.len()
+            + 2
+            + self.windows_name.len()
+            + 3
+            + 8 * 7
+            + 12 * 3
+            + 2
+            + self.link_target.len()
     }
 
     /// Zkrati polozku, aby se vesla do `budget` bajtu: nejdriv cil odkazu,
@@ -577,9 +626,9 @@ impl Response {
                 op::STAT => Response::Entry(EntryInfo::get(&mut r)?),
                 op::LIST => {
                     let n = r.u32()? as usize;
-                    // Kazda polozka ma aspon 89 bajtu: horni mez z delky
+                    // Kazda polozka ma aspon 101 bajtu: horni mez z delky
                     // zpravy, at poskozeny pocet nealokuje gigabajty.
-                    if n > b.len() / 89 {
+                    if n > b.len() / 101 {
                         return None;
                     }
                     let mut entries = Vec::with_capacity(n);

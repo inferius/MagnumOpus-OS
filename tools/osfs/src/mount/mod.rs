@@ -132,28 +132,23 @@ fn commit_now(st: &mut State) {
 
 /// Stale seriove cislo a cas vytvoreni svazku. Windows podle serioveho
 /// cisla poznavaji svazek (zastupci, mezipamet nahledu), proto se nesmi
-/// menit s kazdym pripojenim. UUID svazku API `fs` nevraci, pouzije se tedy
-/// cas vytvoreni souboru s obrazem (prezije prejmenovani i presun na
-/// stejnem disku) spolu s velikosti a jmenovkou.
-fn volume_identity(image_path: &Path, info: &fs::FsInfo) -> (u32, u64) {
-    let created = std::fs::metadata(image_path)
-        .and_then(|m| m.created())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    // FNV-1a 64 pres cas vytvoreni, pocet bloku a jmenovku.
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in created
-        .to_le_bytes()
+/// menit s kazdym pripojenim: odvodi se z UUID svazku (superblok), takze
+/// zustane stejne i po presunu obrazu nebo na skutecnem disku. Cas
+/// vytvoreni = cas vytvoreni korene (`btime`, zapsany pri formatovani).
+pub(crate) fn volume_identity(fs: &mut Volume) -> (u32, fs::Timestamp) {
+    let uuid = fs.info().uuid;
+    // XOR ctyr slov UUID: kazdy bajt ovlivni vysledek.
+    let serial = uuid
+        .as_chunks::<4>()
+        .0
         .iter()
-        .chain(&info.block_count.to_le_bytes())
-        .chain(info.label.as_bytes())
-    {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    ((h ^ (h >> 32)) as u32, created)
+        .map(|w| u32::from_le_bytes(*w))
+        .fold(0, |a, w| a ^ w);
+    let created = fs
+        .stat("/")
+        .map(|s| s.btime)
+        .unwrap_or(fs::Timestamp::UNIX_EPOCH);
+    (serial, created)
 }
 
 /// Jmeno udalosti, kterou `osfs unmount X:` pozada o odpojeni (jen v ramci
@@ -208,8 +203,8 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
         return Err(format!("{drive}: uz ho pripojuje jiny proces osfs mount"));
     }
 
-    let (fs, image_lock) = image::open(image_path, false)?;
-    let (serial, created) = volume_identity(image_path, &fs.info());
+    let (mut fs, image_lock) = image::open(image_path, false)?;
+    let (serial, created) = volume_identity(&mut fs);
     let info = fs.info();
     if info.read_only {
         eprintln!(
@@ -232,7 +227,7 @@ pub fn run(image_path: &Path, drive: &str) -> Result<(), String> {
     vp.SectorSize = fs::BLOCK_SIZE as u16;
     vp.SectorsPerAllocationUnit = 1;
     vp.MaxComponentLength = crate::names::WIN_NAME_MAX as u16;
-    vp.VolumeCreationTime = ops::filetime(fs::Timestamp::new(0, created.min(i64::MAX as u64) as i64));
+    vp.VolumeCreationTime = ops::filetime(created);
     vp.VolumeSerialNumber = serial;
     vp.FileInfoTimeout = 1000;
     vp.Flags = VP_CASE_PRESERVED_NAMES

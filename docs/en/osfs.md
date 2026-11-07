@@ -157,11 +157,16 @@ in the state after the last commit plus changes confirmed by `fsync` - see
   by entry: a create adds one name, delete and rename remove it. Bulk file
   creation in one directory is therefore linear (3000 files in about 1 s).
   At most 256 directories, then the whole cache is dropped.
-- **The volume serial number** is stable (derived from the image file's
-  creation time, size and label): Windows uses it to recognize the volume
-  (shortcuts, thumbnail cache).
-- **Times:** our ns since 1970 -> FILETIME (100 ns since 1601). Creation
-  time = `btime`, last write and last access = `mtime`, change = `ctime`.
+- **The volume serial number** is stable, derived from the volume UUID
+  (superblock): Windows uses it to recognize the volume (shortcuts,
+  thumbnail cache); it does not change even when the image is moved. **The
+  volume creation time** = creation time of the root (`btime`, written by
+  `osfs format`).
+- **Times:** our time (signed seconds since 1970 + nanoseconds, handles
+  dates before 1970 too) -> FILETIME (100 ns since 1601; earlier = 0).
+  Creation time = `btime`, last write and last access = `mtime`, change =
+  `ctime`. Setting a time from Windows (`SetFileTime`, file properties) is
+  stored through `Fs::set_times`.
 - **File ID** (`IndexNumber`) = the object's `oid`.
 
 ### Saving: commit and fsync
@@ -394,9 +399,6 @@ Common problems:
   `Fs::set_times`.
 - **"Is there anything to save"** - commits are currently tracked by our
   own flag.
-- **Volume UUID** in `FsInfo` - the serial number for Windows is now
-  derived from the image file's creation time (will not work for a real
-  disk).
 - **Device lock** in the library (or at least in `FileDevice`) - `osfs`
   holds it itself now.
 - **Atomic replace on rename** - now move-aside of the target, rename and
