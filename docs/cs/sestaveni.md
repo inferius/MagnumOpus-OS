@@ -83,8 +83,8 @@ AMD IOMMU zabere slot PCI a uložené bootovací položky by neseděly.
 | Disk | Soubor | Obsah |
 |---|---|---|
 | systémový | `target/os-x86_64-<profil>.img` | GPT + ESP výše |
-| testovací | `target/scratch.img` | 1 MiB nul; testy ovladače do něj zapisují |
-| datový | `target/data.img` | 64 MiB, náš souborový systém (jméno `data`); vytvoří ho xtask knihovnou `fs` se soubory `/vitejte.txt` a `/dokumenty/navod.md`; TRIM povolen (`discard=unmap`) |
+| testovací | `target/scratch-<pid>.img` | 1 MiB nul; testy ovladače do něj zapisují |
+| datový | `target/data-<pid>.img` | 64 MiB, náš souborový systém (jméno `data`); vytvoří ho xtask knihovnou `fs` se soubory `/vitejte.txt` a `/dokumenty/navod.md`; TRIM povolen (`discard=unmap`) |
 
 Testovací a datový disk se vytvoří znovu při každém `run`/`test`.
 
@@ -106,8 +106,11 @@ hosta (`hostfwd`). Podrobnosti: [sit.md](sit.md#testy).
 
 ## Výstup a dohledání chyb
 
-- Sériová linka se ukládá do `target/serial.log` (testy:
-  `target/serial-test.log`).
+- Sériová linka se ukládá do `target/serial-<arch>.log`, u testů do
+  `target/serial-test-<arch>-<pid>.log` (cestu xtask na konci vypíše).
+- Každý běh má **vlastní** testovací a datový disk (`<pid>` = číslo procesu
+  xtask) a po skončení je smaže. Souběžné běhy (víc vláken na jednom stroji)
+  si tak nepřepisují disky a pomocník QMP nečte značky testů z cizího logu.
 - Při panice nebo fatální výjimce xtask po skončení QEMU přeloží adresy ze
   zásobníku na jména funkcí (`llvm-nm` z komponenty `llvm-tools`).
 - Úroveň logu jádra: [jadro.md](jadro.md#logování); hlášky: [hlasky.md](hlasky.md).
