@@ -211,3 +211,18 @@ fn rtc_local_boot_correction() {
     let r = reading(utc(2026, 7, 1, 14, 0), source::UEFI, 0);
     assert_eq!(rtc_local_correction(&s, &r), None);
 }
+
+#[test]
+fn extreme_values_saturate() {
+    // Krajni hodnoty nesmi pretect (panika v debug buildu).
+    let prague = Zone::by_name("Europe/Prague").unwrap();
+    let ny = Zone::by_name("America/New_York").unwrap();
+    for z in [prague, ny, Zone::fixed(5 * 3600).unwrap(), Zone::fixed(-5 * 3600).unwrap()] {
+        for t in [i64::MIN, i64::MIN + 1, i64::MAX - 1, i64::MAX] {
+            let _ = z.local_secs_to_utc(t).resolve();
+            let _ = z.offset_at(t);
+            let _ = z.to_local(WallTime { secs: t, nanos: 0 });
+        }
+    }
+    assert_eq!(prague.local_secs_to_utc(i64::MIN).resolve(), i64::MIN);
+}

@@ -11,14 +11,20 @@
 //! konzistence).
 
 mod check;
+mod commit;
 mod data;
 mod dataset;
 mod defrag;
 mod diff;
 mod handles;
+mod history;
+mod journal;
+mod merge;
 mod perm;
 mod snap;
 mod times;
+mod trash;
+mod xattr;
 mod zil;
 
 use alloc::collections::BTreeMap;
@@ -42,10 +48,15 @@ use crate::node::Child;
 use crate::store::{FormatOptions, Store};
 
 pub use check::CheckReport;
+pub use commit::{BranchInfo, CommitInfo, id_hex};
 pub use dataset::DatasetInfo;
 pub use defrag::DefragReport;
 pub use diff::{Change, ChangeKind};
 pub use handles::{Handle, Revision, access, share};
+pub use history::{FileVersion, RestoreMode, Undone};
+pub use journal::{JournalPage, View};
+pub use merge::{ConflictKind, MergeConflict, MergeReport};
+pub use trash::TrashEntry;
 pub use perm::{Permissions, ds_flags};
 pub use times::SetTimes;
 
@@ -155,6 +166,12 @@ pub struct SnapshotInfo {
     pub generation: u64,
     /// Kolik zapisovatelnych klonu z nej vzniklo (a existuje).
     pub clones: u32,
+    /// Druh (`snapkind::*`: rucni, automaticky, commit, bokem).
+    pub kind: u8,
+    /// Kdy vznikl (snapshot z doby pred fazi 2: 1970).
+    pub time: Timestamp,
+    /// Posledni zaznam zurnalu, ktery snapshot obsahuje.
+    pub journal_seq: u64,
 }
 
 /// Rozpracovana data jednoho souboru (odlozena alokace).
@@ -193,6 +210,10 @@ pub struct Fs<D: BlockDevice> {
     principal: Option<crate::perm::Principal>,
     /// Vlastnik novych objektu pri prehrani logu (z zaznamu).
     owner_override: Option<u64>,
+    /// Zurnal zmen aktivniho datasetu.
+    jr: journal::DsJournal,
+    /// Kdo provadi operace pri prehrani logu (`Record::Actor`).
+    actor_override: Option<u64>,
 }
 
 /// Volby pripojeni.
@@ -216,6 +237,10 @@ const DIRTY_LIMIT: u64 = 4096;
 /// Nad tolik bloku v bufferu (32 MiB) se dalsi zapis neprijme, dokud nejde
 /// buffer zapsat na disk (opakovane selhavajici zarizeni).
 const DIRTY_HARD_LIMIT: u64 = 2 * DIRTY_LIMIT;
+
+/// Misto pro uzly zurnalu zmen, ktere kazda operace muze zmenit navic
+/// (list se zaznamy a cesta k nemu; viz `ensure_room_with`).
+const JOURNAL_ROOM: u64 = 2 * crate::layout::NODE_BLOCKS;
 
 fn split_path(path: &str) -> impl Iterator<Item = &str> {
     path.split('/').filter(|c| !c.is_empty())
@@ -276,11 +301,21 @@ impl<D: BlockDevice> Fs<D> {
             handles: handles::Handles::default(),
             principal: None,
             owner_override: None,
+            jr: journal::DsJournal::default(),
+            actor_override: None,
         };
         fs.replay_log()?;
-        // Sirotci z minula: po restartu je nikdo nema otevrene.
         if !fs.s.read_only {
+            // Svazek bez historie (z doby pred fazi 2): odted ji vede.
+            let hist = crate::layout::feature::RO_COMPAT_HISTORY;
+            if fs.s.sb.features_ro_compat & hist == 0 {
+                fs.s.sb.features_ro_compat |= hist;
+                fs.s.mark_changed();
+                fs.commit()?;
+            }
+            // Sirotci a pohledy z minula: po restartu je nikdo nema otevrene.
             fs.cleanup_orphans()?;
+            fs.cleanup_views()?;
         }
         Ok(fs)
     }
@@ -303,7 +338,13 @@ impl<D: BlockDevice> Fs<D> {
     /// Ulozi vsechny zmeny atomicky.
     pub fn commit(&mut self) -> Result<()> {
         self.s.check_writable()?;
-        self.commit_all()
+        // Zmeny, ktere commit sam pridava (zurnal: sloucene zaznamy, stav,
+        // retence), jsou samy o sobe konzistentni - nepocitaji se jako
+        // rozpracovana operace (`guarded`), i kdyz commit selze.
+        let m = self.mutations;
+        let r = self.commit_all();
+        self.mutations = m;
+        r
     }
 
     pub fn info(&self) -> FsInfo {
@@ -350,6 +391,10 @@ impl<D: BlockDevice> Fs<D> {
         self.s.check_writable()?;
         let mut tries = 0;
         let room = |s: &Store<D>, n: u64| if freeing { s.has_room_freeing(n) } else { s.has_room(n) };
+        // Kazda zmena pridava i zaznam zurnalu (jina cast stromu): misto
+        // pro jeho uzly navic, jinak by commit na plnem disku nemel kam
+        // ulozit strom.
+        let blocks = blocks + JOURNAL_ROOM;
         while !room(&self.s, self.dirty_blocks + blocks) {
             if self.s.space.deferred_blocks() == 0 || tries > crate::layout::REUSE_DELAY + 1 {
                 return Err(Error::NoSpace);
@@ -618,7 +663,8 @@ impl<D: BlockDevice> Fs<D> {
             i.tree_files = i.tree_files.saturating_add_signed(files);
             i.tree_dirs = i.tree_dirs.saturating_add_signed(dirs);
             self.put_inode(dir, &i)?;
-            if dir == ROOT_OID {
+            // Kos ma vlastni souhrn a zadneho rodice (nepatri pod koren).
+            if dir == ROOT_OID || dir == crate::layout::TRASH_OID {
                 return Ok(());
             }
             dir = i.parent;
@@ -711,7 +757,7 @@ impl<D: BlockDevice> Fs<D> {
             let oid = fs.s.next_oid;
             let generation = fs.s.txg;
             fs.symlink_at(parent, name, target, oid, generation)?;
-            fs.zil.op(zil::Op::Symlink {
+            fs.zil_op(zil::Op::Symlink {
                 parent,
                 oid,
                 generation,
@@ -732,7 +778,7 @@ impl<D: BlockDevice> Fs<D> {
 
     fn create_at(&mut self, parent: u64, name: &str, kind: Kind, oid: u64, generation: u64) -> Result<()> {
         let name = self.new_object(parent, name, kind, oid, 0, generation)?;
-        self.zil.op(zil::Op::Create {
+        self.zil_op(zil::Op::Create {
             parent,
             oid,
             generation,
@@ -781,6 +827,7 @@ impl<D: BlockDevice> Fs<D> {
             Kind::Dir => self.adjust_tree(parent, 0, 0, 1)?,
             Kind::Dataset => return Err(Error::InvalidArgs),
         }
+        self.jlog(crate::records::jop::CREATE, kind.raw(), oid, generation, parent, &name, size)?;
         Ok(name)
     }
 
@@ -798,6 +845,21 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     fn remove_at(&mut self, parent: u64, name: &str) -> Result<()> {
+        let (d, inode) = self.unlink_entry(parent, name)?;
+        self.jlog(crate::records::jop::REMOVE, inode.kind, d.oid, inode.generation, parent, &d.name, inode.size)?;
+        self.zil_op(zil::Op::Remove {
+            parent,
+            name: d.name,
+            time: self.now,
+        });
+        self.zil.forget(d.oid);
+        Ok(())
+    }
+
+    /// Smaze polozku `name` (soubor, odkaz, prazdny adresar) bez zaznamu
+    /// do zurnalu a intent logu (vola `remove_at` a vysypani kose).
+    /// Vraci polozku a zaznam objektu pred smazanim.
+    pub(super) fn unlink_entry(&mut self, parent: u64, name: &str) -> Result<(Dirent, Inode)> {
         let root = self.s.root;
         let d = self
             .lookup_child(&root, parent, name)?
@@ -827,6 +889,7 @@ impl<D: BlockDevice> Fs<D> {
             // Sirotek: data zustanou pro otevrene handly, zmizi s poslednim.
             self.make_orphan(d.oid, inode)?;
         } else {
+            self.drop_extras(d.oid)?;
             if inode.kind == KIND_SYMLINK {
                 self.del(&Key::new(d.oid, item::SYMLINK, 0))?;
             } else if inode.kind != KIND_DIR {
@@ -845,13 +908,7 @@ impl<D: BlockDevice> Fs<D> {
             // Velikost <= MAX_FILE_SIZE (overeno pri cteni zaznamu).
             _ => self.adjust_tree(parent, -(inode.size as i128), -1, 0)?,
         }
-        self.zil.op(zil::Op::Remove {
-            parent,
-            name: d.name,
-            time: self.now,
-        });
-        self.zil.forget(d.oid);
-        Ok(())
+        Ok((d, inode))
     }
 
     /// Presune nebo prejmenuje polozku. Cil nesmi existovat (krome zmeny
@@ -878,6 +935,21 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     fn rename_at(&mut self, src: u64, fname: &str, dst: u64, tname: &str) -> Result<()> {
+        let m = self.move_entry(src, fname, dst, tname)?;
+        self.jlog_rename(m.kind, m.oid, m.generation, src, &m.name, dst, &m.new_name)?;
+        self.zil_op(zil::Op::Rename {
+            src,
+            name: m.name,
+            dst,
+            new_name: m.new_name,
+            time: self.now,
+        });
+        Ok(())
+    }
+
+    /// Presun polozky bez zaznamu do zurnalu a intent logu (vola
+    /// `rename_at`, kos a obnova z kose).
+    pub(super) fn move_entry(&mut self, src: u64, fname: &str, dst: u64, tname: &str) -> Result<Moved> {
         let root = self.s.root;
         let d = self
             .lookup_child(&root, src, fname)?
@@ -900,14 +972,15 @@ impl<D: BlockDevice> Fs<D> {
             self.add_dirent(dst, Dirent { oid: d.oid, kind: d.kind, name: new_name.clone() })?;
             self.touch_dir(src)?;
             self.touch_dir(dst)?;
-            self.zil.op(zil::Op::Rename { src, name: d.name, dst, new_name, time: self.now });
-            return Ok(());
+            self.set_dslink(d.oid, dst, &new_name)?;
+            return Ok(Moved { kind: KIND_DATASET, oid: d.oid, generation: 0, name: d.name, new_name });
         }
         // Adresar nejde presunout do sveho podstromu (s mezi pro cyklus
         // rodicu z poskozeneho zaznamu).
         let mut a = dst;
         let mut depth = 0;
-        while a != ROOT_OID {
+        // Kos (a sirotek) nema rodice: cesta konci u nej.
+        while a != ROOT_OID && a != crate::layout::TRASH_OID && a != 0 {
             if a == d.oid {
                 return Err(Error::InvalidArgs);
             }
@@ -958,15 +1031,17 @@ impl<D: BlockDevice> Fs<D> {
             self.adjust_tree(src, -bytes, -files, -dirs)?;
             self.adjust_tree(dst, bytes, files, dirs)?;
         }
-        self.zil.op(zil::Op::Rename {
-            src,
-            name: d.name,
-            dst,
-            new_name,
-            time: self.now,
-        });
-        Ok(())
+        Ok(Moved { kind: inode.kind, oid: d.oid, generation: inode.generation, name: d.name, new_name })
     }
+}
+
+/// Vysledek presunu polozky (pro zurnal a intent log).
+pub(super) struct Moved {
+    pub kind: u8,
+    pub oid: u64,
+    pub generation: u64,
+    pub name: String,
+    pub new_name: String,
 }
 
 /// Cil symbolickeho odkazu: neprazdny, do `SYMLINK_MAX` bajtu, bez NUL

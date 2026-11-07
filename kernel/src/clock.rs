@@ -91,12 +91,20 @@ pub fn now() -> Option<Reading> {
     })
 }
 
-/// Nastavi realny cas (`CLOCK_SET`); prava overil volajici. Vraci true,
-/// kdyz se cas zapsal i do hardwarovych hodin (`write_hardware`).
+/// Zamek zapisu do hardwarovych hodin: cas pro hodiny se cte az pod nim,
+/// takze posledni zapis ma vzdy nejnovejsi cas systemu (i kdyz soubezne
+/// `CLOCK_SET` dobehnou v jinem poradi, nez zacaly).
+static HW_WRITE: SpinLock<()> = SpinLock::new(());
+
+/// Nastavi realny cas (`CLOCK_SET`); prava overil volajici, `by` = kdo
+/// nastavuje (do logu). Vraci true, kdyz se cas zapsal i do hardwarovych
+/// hodin (`write_hardware`).
 ///
 /// Do hardwarovych hodin jde `UTC + rtc_offset` (jadro pasmo nezna, posun
-/// posila sluzba casu). Zapis do RTC je mimo zamek pocatku.
-pub fn set(req: SetRequest, write_hardware: bool) -> bool {
+/// posila sluzba casu). Zapis ceka (spankem, nejvys 1 s) na zlomek sekundy
+/// [`arch::HARDWARE_CLOCK_PHASE_NS`], aby hodiny tikaly na hranici sekund,
+/// a zapisuje aktualni cas systemu v tom okamziku.
+pub fn set(req: SetRequest, write_hardware: bool, by: core::fmt::Arguments<'_>) -> bool {
     let now = arch::now_ns() as i128;
     let old = {
         let mut o = ORIGIN.lock();
@@ -111,7 +119,7 @@ pub fn set(req: SetRequest, write_hardware: bool) -> bool {
     let c = req.time.to_civil();
     let shift_ms = old.map(|old| (req.time.as_nanos() - old.as_nanos()) / 1_000_000);
     log::info!(
-        "realny cas nastaven: {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC (posun {})",
+        "{by} nastavil realny cas: {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC (posun {})",
         c.year,
         c.month,
         c.day,
@@ -126,12 +134,18 @@ pub fn set(req: SetRequest, write_hardware: bool) -> bool {
     let Some(platform) = crate::PLATFORM.get() else {
         return false;
     };
-    // Do hodin az ted: posunout o dobu od nastaveni.
-    let elapsed = arch::now_ns() as i128 - now;
-    let hw = req
-        .time
-        .add_ns(elapsed + req.rtc_offset as i128 * 1_000_000_000);
-    let ok = arch::set_hardware_clock(platform, hw);
+    let offset_ns = req.rtc_offset as i128 * 1_000_000_000;
+    let hw_now = |at_zero: WallTime| at_zero.add_ns(arch::now_ns() as i128 + offset_ns);
+    let frac = hw_now(req.time.add_ns(-now)).nanos;
+    let wait = (arch::HARDWARE_CLOCK_PHASE_NS as i64 - frac as i64).rem_euclid(1_000_000_000);
+    if wait > 0 {
+        crate::object::wait::sleep(core::time::Duration::from_nanos(wait as u64));
+    }
+    let ok = {
+        let _guard = HW_WRITE.lock();
+        let at_zero = ORIGIN.lock().at_zero;
+        arch::set_hardware_clock(platform, hw_now(at_zero))
+    };
     if !ok {
         log::warn!("hardwarove hodiny nejde nastavit (nejsou, nebo je cas mimo jejich rozsah)");
     }

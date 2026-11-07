@@ -690,6 +690,10 @@ fn full_queue(_: &Startup) -> TestResult {
 }
 
 fn qemu_ps2(_: &Startup) -> TestResult {
+    // Radic PS/2 (i8042) ma jen PC; QEMU virt (aarch64) ho nema.
+    if !cfg!(target_arch = "x86_64") {
+        return Ok(());
+    }
     let inp = input()?;
     let kbd = inp
         .source_id("PS/2 klavesnice")

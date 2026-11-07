@@ -111,13 +111,31 @@ unsafe extern "Rust" {
     fn __libos_main(startup: Startup) -> i64;
 }
 
-/// Vstupni bod procesu. Jadro skoci sem s handlem bootstrap kanalu v `rdi`
-/// a zasobnikem zarovnanym na 16 B; vlastni kod chce zarovnani jako po
-/// instrukci `call`, proto tenky asembler.
+/// Vstupni bod procesu. Jadro skoci sem s handlem bootstrap kanalu v prvnim
+/// argumentu (x86_64 `rdi`, aarch64 `x0`) a zasobnikem zarovnanym na 16 B;
+/// vlastni kod chce zarovnani jako po instrukci `call` a nulovy ukazatel
+/// ramce (konec vypisu zasobniku), proto tenky asembler.
+#[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 extern "C" fn _start() -> ! {
     naked_asm!("xor ebp, ebp", "and rsp, -16", "call {}", "ud2", sym start_rust)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+extern "C" fn _start() -> ! {
+    naked_asm!(
+        "mov x9, sp",
+        "and x9, x9, #-16",
+        "mov sp, x9",
+        "mov x29, xzr",
+        "mov x30, xzr",
+        "bl {}",
+        "brk #1",
+        sym start_rust
+    )
 }
 
 fn fail(msg: &str) -> ! {

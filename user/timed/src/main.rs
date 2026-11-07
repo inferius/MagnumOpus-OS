@@ -21,6 +21,7 @@
 
 extern crate alloc;
 
+use alloc::borrow::Cow;
 use alloc::format;
 use alloc::vec::Vec;
 
@@ -53,25 +54,25 @@ fn main(mut startup: Startup) -> i64 {
         },
         Err(_) => return 1,
     };
-    let reply = match time::apply_rtc_local(&clock, &settings) {
+    let reply: Cow<str> = match time::apply_rtc_local(&clock, &settings) {
         Ok(Some(t)) => {
             println!("timed: RTC je v mistnim case, cas opraven o pasmo {}", settings.zone.display());
             log_local(&settings, t);
-            format!("ok")
+            "ok".into()
         }
         Ok(None) => {
             if let Some(t) = time::wall() {
                 log_local(&settings, t);
             }
-            format!("ok")
+            "ok".into()
         }
         Err(Error::NotSupported) => {
             println!("timed: realny cas neni znamy");
-            format!("ok")
+            "ok".into()
         }
         Err(e) => {
             println!("timed: oprava casu selhala: {e}");
-            format!("err:{e}")
+            format!("err:{e}").into()
         }
     };
     if channel.write(reply.as_bytes(), Vec::new()).is_err() {
@@ -87,18 +88,18 @@ fn main(mut startup: Startup) -> i64 {
                 return 1;
             }
         };
-        let reply = match msg.data.strip_prefix(b"set") {
+        let reply: Cow<str> = match msg.data.strip_prefix(b"set") {
             Some(rest) if rest.len() == 13 => {
                 let secs = i64::from_le_bytes(rest[0..8].try_into().unwrap());
                 let nanos = u32::from_le_bytes(rest[8..12].try_into().unwrap());
                 let t = WallTime { secs, nanos };
                 match time::set(&clock, t, &settings, rest[12] == 1) {
-                    Ok(true) => format!("ok:hw"),
-                    Ok(false) => format!("ok"),
-                    Err(e) => format!("err:{e}"),
+                    Ok(true) => "ok:hw".into(),
+                    Ok(false) => "ok".into(),
+                    Err(e) => format!("err:{e}").into(),
                 }
             }
-            _ => format!("err:neznama zprava"),
+            _ => "err:neznama zprava".into(),
         };
         if channel.write(reply.as_bytes(), Vec::new()).is_err() {
             return 1;

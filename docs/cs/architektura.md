@@ -32,7 +32,7 @@ a cenu. Když se rozhodnutí změní, upraví se tady spolu s kódem.
 |  Mikrokernel: paměť, plánovač, IPC, přerušení, objekty,      |
 |  handly + práva, asynchronní fronty                          |
 +--------------------------------------------------------------+
-|  arch/x86_64 (později arch/aarch64)  |  UEFI loader          |
+|  arch/x86_64, arch/aarch64          |  UEFI loader          |
 +--------------------------------------------------------------+
 ```
 
@@ -335,7 +335,7 @@ mobilu, bez závislostního pekla linuxových balíčkovačů.
 | # | Otázka | Rozhodnutí |
 |---|---|---|
 | 1 | protokol terminálu | **vlastní nativní protokol** (typované záznamy, tabulky, odkazy, obrázky, průběh, výzvy); VT100/pty jen jako adaptér pro převzaté programy |
-| 2 | jazyk shellu | **nový jazyk s typy**: bez implicitního dělení slov, chyba jako hodnota (kód + popis), `?` jako v Rustu; **skript nese manifest oprávnění**; POSIX `sh` zvlášť pro převzaté skripty |
+| 2 | jazyk shellu | **nový jazyk s typy, dva zápisy jednoho jazyka** (příkazový a výrazový blízký Rustu, [návrh](navrh-shell.md)): bez implicitního dělení slov, chyba jako hodnota (kód + popis), která se bez ošetření šíří sama a skript zastaví; **skript nese manifest oprávnění**; POSIX `sh` zvlášť pro převzaté skripty |
 | 3 | co posílá aplikace kompozitoru | **strom vrstev + strom přístupnosti** (obsah kreslí aplikace do bufferů, posun, průhlednost, animace a scroll dělá kompozitor; struktura okna - role, texty, stav - je součást protokolu) |
 | 4 | dekorace oken | **kreslí systém**; vlastní vzhled jde, ale s pravidly níže |
 | 5 | API akcí aplikací | **v základu GUI** (6c): aplikace v manifestu deklaruje akce s typovanými parametry a potřebnými oprávněními; volá je shell, průzkumník, asistent i agent |
@@ -412,6 +412,12 @@ důvěryhodné prvky zůstávají systému:
 ## Shell a chytrý terminál (návrh)
 
 > Odsouhlasená rozhodnutí: [Rozhodnutí k milníkům 6a-6d](#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno).
+>
+> **Stav (6b):** jazyk, líné undo, „ukaž, co se stane“, zámek nebezpečných
+> operací, manifest `needs`, doplňování, historie, vysvětlení chyb, nativní
+> protokol a služba relací jsou hotové. Popis je na stránce
+> [Shell a terminál](navrh-shell.md#terminál-a-služba-relací), tam je i
+> [stav zapojení](navrh-shell.md#stav-zapojení) (init, `inputd`, framebuffer).
 
 Cíl: terminál, který je pohodlnější než dnešní a využívá, co umí náš FS
 a capabilities.
@@ -544,10 +550,9 @@ dokumentace česky i anglicky (`docs/cs`, `docs/en`).
 3. QEMU aarch64 `virt`
 4. Raspberry Pi, PinePhone (Pro)
 
-aarch64 se portuje podle plánu milníků (milník 9): nejdřív QEMU `virt`,
-pak Raspberry Pi. Jádro už má explicitní [rozhraní
-architektury](#rozhraní-architektury), takže port znamená napsat jeho
-implementaci v `kernel/src/arch/aarch64/` (kostra už existuje).
+aarch64 běží v QEMU `virt` (milník 9, viz [implementace
+aarch64](#implementace-aarch64-qemu-virt)); Raspberry Pi přijde později
+jako další platforma téže architektury.
 
 ## Rozhraní architektury
 
@@ -555,8 +560,8 @@ Cíl: **port na jinou architekturu = napsat novou implementaci jednoho
 rozhraní**, ne přepisovat půlku jádra. Všechno, co závisí na procesoru nebo
 na jeho okolí (přerušení, časovače, stránkování, start CPU, IOMMU), je
 v `kernel/src/arch/<arch>/` a zbytek jádra s tím mluví jen přes pevnou
-smlouvu. Stav: x86_64 je za rozhraním celé, **aarch64 je zatím jen kostra**
-(přeloží se, za běhu skončí na prvním `todo!`).
+smlouvu. Stav: rozhraní implementují **x86_64 a aarch64** (QEMU `virt`),
+obě architektury projdou všemi testy.
 
 > **Změna (2026-11-06):** dřív jádro volalo funkce `arch::*`, které
 > existovaly jen pro x86_64, a několik míst mimo `arch/` znalo x86 přímo
@@ -589,9 +594,9 @@ smlouvu. Stav: x86_64 je za rozhraním celé, **aarch64 je zatím jen kostra**
 <rect class="ok" x="10" y="276" width="270" height="62" rx="6"/>
 <text class="t b" x="145" y="298" text-anchor="middle">arch/x86_64 (hotové)</text>
 <text class="m" x="145" y="318" text-anchor="middle">GDT/IDT, APIC, TSC+HPET, VT-d, AMD-Vi, SIPI</text>
-<rect class="warn" x="300" y="276" width="270" height="62" rx="6"/>
-<text class="t b" x="435" y="298" text-anchor="middle">arch/aarch64 (kostra)</text>
-<text class="m" x="435" y="318" text-anchor="middle">GICv3, generic timer, SMMUv3, PSCI: todo!</text>
+<rect class="ok" x="300" y="276" width="270" height="62" rx="6"/>
+<text class="t b" x="435" y="298" text-anchor="middle">arch/aarch64 (QEMU virt)</text>
+<text class="m" x="435" y="318" text-anchor="middle">GICv3 + ITS, generic timer, SMMUv3, PSCI</text>
 <path class="ln dash" d="M145 276 L145 242" marker-end="url(#ar1)"/>
 <path class="ln dash" d="M435 276 L435 242" marker-end="url(#ar1)"/>
 <text class="m" x="152" y="262">implementuje</text>
@@ -624,7 +629,7 @@ smlouvu. Stav: x86_64 je za rozhraním celé, **aarch64 je zatím jen kostra**
    architektury volá do jádra: časovač, IPI, přerušení zařízení, syscall,
    výjimka v userspace, návrat do userspace.
 
-| trait | co dodává architektura | x86_64 | aarch64 (plán) |
+| trait | co dodává architektura | x86_64 | aarch64 |
 |---|---|---|---|
 | `Cpu` | start CPU, HW ID, per-CPU ukazatel, zastavení, breakpoint | GDT/TSS/IDT, ID lokálního APIC, GS báze | VBAR_EL1, MPIDR_EL1, TPIDR_EL1 |
 | `Interrupts` | zapnout/vypnout přerušení, uspat do přerušení | `sti`/`cli`/`hlt` | DAIF, `wfi` |
@@ -718,31 +723,84 @@ Kontrola, že se jádro přeloží pro jinou architekturu (je i součástí
 cargo xtask check --arch aarch64
 ```
 
-### Kostra aarch64 a co do ní patří
+### Implementace aarch64 (QEMU virt)
 
-`kernel/src/arch/aarch64/mod.rs` implementuje celou smlouvu; každá funkce,
-která má něco dělat, končí `todo!` s popisem, co v ní bude. Cíl je nejdřív
-**QEMU `virt`** (GICv3, PL011, PSCI, SMMUv3, UEFI z edk2 s ACPI), potom
-Raspberry Pi. Plánované moduly:
+> **Změna (2026-11-07):** z kostry s `todo!` je funkční implementace pro
+> QEMU `virt`. **Proč:** milník 9 - druhá architektura ověří, že rozhraní
+> opravdu stačí; obecná část jádra se kvůli portu nezměnila (jen testy
+> v `init` dostaly větve pro aarch64 a programy se linkují jedním skriptem
+> z xtask).
+
+Systém na aarch64 běží celý: loader pod UEFI (edk2), jádro na 4 CPU,
+přerušení zařízení přes ITS, překlad DMA přes SMMUv3, ovladače, souborový
+systém i všechny testy (`cargo xtask test --arch aarch64`). Moduly
+v `kernel/src/arch/aarch64/`:
 
 | modul | obsah |
 |---|---|
-| `exceptions` | tabulka vektorů (VBAR_EL1), uložení registrů, ESR -> číslo chyby ABI |
-| `gic` | GICv3: distributor, redistributor každého CPU, ITS pro MSI (LPI) |
-| `timer` | generic timer: CNTVCT_EL0 jako hodiny, CNTP_TVAL_EL0 jednorázově |
-| `mmu` | 4 úrovně s granulí 4 KiB, TTBR0 (proces) a TTBR1 (jádro), MAIR, TCR |
-| `context` | x19-x30, sp, FPU/SIMD v0-v31, FPCR/FPSR; přepínání |
-| `user` | EL0 <-> EL1: SVC, ERET, SP_EL0 |
-| `psci` | start CPU přes CPU_ON (HVC/SMC podle ACPI FADT) |
-| `smmu` | SMMUv3: stream table, domény |
-| `acpi` | MADT (GICC, GICD, GIC ITS), GTDT, IORT (RID -> StreamID/DeviceID), SPCR |
-| `pl011` | ladicí sériová linka |
+| `exceptions` | tabulka vektorů (VBAR_EL1), rámec registrů, ESR -> číslo chyby ABI, syscall `svc #0` |
+| `gic` | GICv3: distributor, redistributor každého CPU, SGI (IPI), PPI časovače, tabulky LPI |
+| `its` | ITS: fronta příkazů (MAPD, MAPC, MAPTI, INV, SYNC), zpráva MSI = GITS_TRANSLATER + událost |
+| `timer` | generic timer: CNTVCT_EL0 jako hodiny, virtuální časovač EL1 (PPI 27) jednorázově |
+| `mmu` | 4 úrovně, granule 4 KiB, TTBR1 jádro / TTBR0 proces (EPD0 pro vlákna jádra), ASID 0 + nG |
+| `context` | x19-x30, sp a celý stav FPU/SIMD (q0-q31, FPCR, FPSR); vstup do EL0 přes `eret` |
+| `smp` | start CPU přes PSCI CPU_ON (HVC/SMC podle FADT), stub zapne MMU s tabulkami jádra |
+| `smmu` | SMMUv3: dvouúrovňová tabulka streamů, STE stage 1 s CD a vlastním ASID na zařízení |
+| `acpi` | MADT (GICC, GICD, GICR, GIC ITS), FADT (PSCI), IORT (SMMUv3, RID -> StreamID) |
+| `pl011`, `semihosting` | ladicí sériová linka (adresa z SPCR od loaderu), konec testu v QEMU |
 
-Mimo jádro bude port potřebovat ještě: loader pro `aarch64-unknown-uefi`
-(dnes x86_64: stránkování a skok do jádra), xtask (QEMU `virt`, firmware
-edk2 pro aarch64, ukončení testu přes semihosting), `libs/elf` (dnes
-přijímá jen `EM_X86_64`), `libs/libos` a `libs/abi` (instrukce syscallu,
-`svc` místo `syscall`) a `user/user.ld`.
+Start na aarch64:
+
+1. **Loader** (`loader/src/arch/aarch64`) běží pod UEFI v EL1 nebo EL2
+   (skutečný hardware), najde PL011 v ACPI SPCR (identicky ji namapuje jako
+   zařízení) a zapíše cache obrazu jádra do paměti. Z EL1 vypne MMU,
+   nastaví MAIR, TCR, TTBR0 = TTBR1 a skočí do jádra v horní polovině;
+   z EL2 nastaví registry EL1 přímo, EL2 připraví bez pastí (EL1 v AArch64,
+   časovač, FPU, GIC, bez stage 2) a do jádra v EL1 sestoupí přes `eret`.
+2. **Jádro** nastaví tabulku výjimek, převezme tabulky (TTBR1), vypne
+   spodní polovinu, přečte ACPI a zapne GICv3, ITS a časovač.
+3. **Další CPU**: PSCI CPU_ON na fyzickou adresu stubu `__ap_entry`
+   (stránka je dočasně identicky namapovaná); stub případně sestoupí z EL2
+   do EL1, načte parametry, zapne MMU a skočí do jádra.
+4. **IOMMU**: SMMUv3 z IORT; od zapnutí jsou všechny streamy zablokované,
+   doménu dostane až omezený Resource se zařízením (jako VT-d na x86).
+
+Spuštění a testy:
+
+```bash
+cargo xtask run --arch aarch64
+```
+
+```bash
+cargo xtask test --arch aarch64
+```
+
+QEMU: stroj `virt` s GICv3 a ITS, `-cpu cortex-a76` (stejné jádro jako
+Raspberry Pi 5), s EL2 (`virtualization=on`: firmware běží v EL2 jako na
+skutečném hardwaru a loader i další CPU sestupují do EL1), SMMUv3 (`--iommu smmu`,
+výchozí; `--iommu none` bez překladu DMA). Testy končí přes semihosting
+(kód 33 = úspěch jako na x86; nula se nepoužívá, tu vrací QEMU i při obyčejném vypnutí). V emulaci TCG běží zhruba 2x pomaleji než x86 s TCG.
+
+Rozdíly proti x86, o kterých je dobré vědět:
+
+- **Programy jsou zatím bez FPU** (cíl `aarch64-unknown-none-softfloat`,
+  stejně jako x86 bez SSE). Jádro přesto ukládá stav FPU při přepnutí, test
+  ověřuje registr V0.
+- **MSI potřebuje identitu zařízení** (DeviceID pro ITS): `INTERRUPT_CREATE`
+  bez zařízení vrátí `INVALID_ARGS`. Stránka ITS (GITS_TRANSLATER) se
+  mapuje do domény SMMU zařízení, jinak by jeho MSI SMMU zablokovala.
+- **Hardwarové hodiny nejsou** (PL031 není v ACPI, EFI RTC za běhu jádro
+  nevolá): čas je jen z UEFI při startu a `set` hodiny nezapíše.
+- **IORT**: čte se jen jedno mapování kořenového komplexu (segment 0);
+  ITS předpokládá DeviceID = RID (na QEMU virt platí).
+- **Přetečení zásobníku jádra** se zacyklí na ochranné stránce (x86 má pro
+  double fault vlastní zásobník IST); projeví se zaseknutím, ne poškozením
+  paměti.
+
+Mimo jádro port změnil: `loader` (část `arch/aarch64`), `xtask` (`--arch`,
+`arch.rs`, `qemu.rs`), `libs/elf` (přijímá stroj podle cíle buildu),
+`libs/libos` (`svc` a vstup `_start`), `libs/boot-info` (verze 4: PL011
+a device tree od loaderu).
 
 ### Závazná omezení a jak jsou vyřešená
 
@@ -844,6 +902,7 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
      [Vstup](vstup.md)
    - **6b Shell a chytrý terminál:** konzole, strukturovaný výstup, undo
      příkazů, „ukaž, co se stane“, oprávnění při spuštění - viz [Shell](#shell-a-chytrý-terminál-návrh)
+     (jazyk, služba relací a test v QEMU hotové; vstup a framebuffer čekají)
    - **6c GUI:** virtio-gpu, kompozitor, nativní knihovna UI, systémové
      dialogy - viz [Grafika](#grafika)
    - **6d AI-ready:** primitiva pro bezpečné agenty (většina z FS v3),
@@ -852,8 +911,8 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
    Rust (`std` pro náš OS), C (vlastní libc nad libos), C++ (libc++/libunwind
    nad libc), překlad clangem z hostitele, pak TinyCC v systému
 8. Windows vrstva v2: user32/gdi32, GUI, DirectX přes Vulkan
-9. Port na aarch64 a první ARM zařízení (rozhraní architektury a kostra
-   aarch64 hotové, implementace zbývá)
+9. Port na aarch64 a první ARM zařízení (rozhraní architektury a QEMU
+   `virt` hotové, Raspberry Pi zbývá)
 
 ## Aktuální odchylky od návrhu
 
@@ -872,6 +931,11 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
   přerušení a oblasti RMRR/IVMD; na stroji bez IOMMU DMA omezené není
   (jádro to zaloguje).
 - **Kvóty jen na proces**, ne pro skupiny procesů (job).
+- **Náhled změn shellu je překryv v paměti shellu**, ne klon datasetu:
+  `fsproto` zatím klony a diff neumí. Programy proto v `preview` neběží
+  a undo jejich změn stojí na snapshotu celého svazku.
+- **Úlohy na pozadí shellu běží kooperativně** (když je shell volný),
+  ne ve vlastních vláknech.
 - **Mezi třídami QoS přísná priorita** (nižší třídy mohou hladovět).
 - **Paměť po ukončených vláknech** (zásobníky jádra) se používá znovu, ale
   nevrací se.

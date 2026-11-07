@@ -7,7 +7,6 @@ use super::handle::arg_handle;
 use super::{Args, current_process, user};
 use crate::arch::paging::PAGE_SIZE;
 use crate::error::{Error, Result};
-use crate::log;
 use crate::mm;
 use crate::object::interrupt::Interrupt;
 use crate::object::process::Process;
@@ -34,8 +33,11 @@ pub fn clock_set(a: Args) -> Result<u64> {
     let raw = user::read_bytes(&p, a[1], SetRequest::SIZE)?;
     let bytes: &[u8; SetRequest::SIZE] = raw.as_slice().try_into().map_err(|_| Error::InvalidArgs)?;
     let req = SetRequest::decode(bytes).ok_or(Error::InvalidArgs)?;
-    log::info!("[{} {}] nastavuje realny cas", p.name, p.id);
-    let hw = crate::clock::set(req, a[2] & set_flags::WRITE_HARDWARE != 0);
+    let hw = crate::clock::set(
+        req,
+        a[2] & set_flags::WRITE_HARDWARE != 0,
+        format_args!("[{} {}]", p.name, p.id),
+    );
     Ok(hw as u64)
 }
 

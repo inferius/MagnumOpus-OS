@@ -1,6 +1,9 @@
 //! Testy prevodu realneho casu na kalendar.
 
-use crate::time::{Civil, Reading, SetRequest, WallTime, civil_from_days, days_from_civil, source};
+use crate::time::{
+    Civil, MAX_ZONE_OFFSET, Reading, SetRequest, WallTime, civil_from_days, days_from_civil, source,
+    weekday,
+};
 
 fn civil(year: i64, month: u8, day: u8, hour: u8, minute: u8, second: u8) -> Civil {
     Civil { year, month, day, hour, minute, second, nanos: 0 }
@@ -67,7 +70,7 @@ fn reading_encoding() {
 #[test]
 fn set_request_encoding() {
     let r = SetRequest {
-        time: WallTime { secs: -86_400 * 365, nanos: 999_999_999 },
+        time: WallTime { secs: 1_800_000_000, nanos: 999_999_999 },
         rtc_offset: -7200,
     };
     assert_eq!(SetRequest::decode(&r.encode()), Some(r));
@@ -75,4 +78,34 @@ fn set_request_encoding() {
     let mut b = r.encode();
     b[8..12].copy_from_slice(&1_000_000_000u32.to_le_bytes());
     assert_eq!(SetRequest::decode(&b), None);
+}
+
+#[test]
+fn set_request_limits() {
+    let ok = |secs, rtc_offset| {
+        let r = SetRequest { time: WallTime { secs, nanos: 0 }, rtc_offset };
+        SetRequest::decode(&r.encode()).is_some()
+    };
+    assert!(ok(SetRequest::MIN_SECS, 0));
+    assert!(ok(SetRequest::MAX_SECS, 0));
+    assert!(!ok(-1, 0), "pred rokem 1970");
+    assert!(!ok(SetRequest::MAX_SECS + 1, 0), "po roce 9999");
+    assert!(!ok(i64::MAX, 0));
+    assert!(ok(0, MAX_ZONE_OFFSET));
+    assert!(ok(0, -MAX_ZONE_OFFSET));
+    assert!(!ok(0, MAX_ZONE_OFFSET + 1));
+    assert!(!ok(0, i32::MIN));
+    // MAX_SECS je opravdu posledni sekunda roku 9999.
+    let c = WallTime { secs: SetRequest::MAX_SECS, nanos: 0 }.to_civil();
+    assert_eq!((c.year, c.month, c.day, c.hour, c.minute, c.second), (9999, 12, 31, 23, 59, 59));
+}
+
+#[test]
+fn weekdays() {
+    assert_eq!(weekday(0), 4, "1970-01-01 byl ctvrtek");
+    assert_eq!(weekday(-1), 3);
+    assert_eq!(weekday(3), 0, "1970-01-04 byla nedele");
+    let d = days_from_civil(2026, 11, 7).unwrap();
+    assert_eq!(weekday(d), 6, "2026-11-07 je sobota");
+    assert_eq!(weekday(i64::MIN), weekday(i64::MIN.rem_euclid(7)));
 }

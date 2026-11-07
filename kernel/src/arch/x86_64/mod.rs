@@ -286,6 +286,8 @@ impl api::Time for X86_64 {
         rtc::read_time(platform.arch.rtc_century)
     }
 
+    const HARDWARE_CLOCK_PHASE_NS: u32 = rtc::WRITE_PHASE_NS;
+
     fn set_hardware_clock(platform: &Platform, t: abi::time::WallTime) -> bool {
         if platform.arch.rtc_absent {
             return false;
@@ -354,6 +356,9 @@ impl api::DeviceIrq for X86_64 {
     fn msi_message(irq: u32, _device: Option<(u16, u8, u8)>) -> Result<(u64, u32), Error> {
         Ok(msi_message(irq as u8))
     }
+
+    /// Vektor nema v radici zadny stav: nic.
+    fn release(_irq: u32) {}
 }
 
 impl api::LegacyIo for X86_64 {
@@ -446,6 +451,9 @@ impl api::PlatformInfo for X86_64 {
 
 impl api::Diagnostics for X86_64 {
     type Serial = SerialPort;
+
+    /// x86 pouziva COM1 na pevnem portu, od loaderu nic nepotrebuje.
+    fn init_early(_boot_info: &BootInfo) {}
 
     /// Port I/O na COM1 je neskodny i kdyz tam zadna linka neni (zapisy se
     /// zahodi), proto je bezpecne ho vytvaret opakovane, napr. v panic

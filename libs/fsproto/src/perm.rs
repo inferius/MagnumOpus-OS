@@ -219,6 +219,39 @@ pub fn map_path(mounts: &[Mount], path: &str) -> Result<(String, bool)> {
     Ok((out, m.read_only()))
 }
 
+/// Opak `map_path`: cesta ve FS -> cesta relace (nejdelsi cil pripojene
+/// cesty na hranici slozky). `None`, kdyz cesta lezi mimo vsechna pripojeni.
+pub fn unmap_path(mounts: &[Mount], path: &str) -> Option<String> {
+    let p = path.trim_end_matches('/');
+    let p = if p.is_empty() { "/" } else { p };
+    let mut best: Option<(&Mount, &str)> = None;
+    for m in mounts {
+        let target = m.target.trim_end_matches('/');
+        let rest = if target.is_empty() {
+            Some(p)
+        } else if p == target {
+            Some("")
+        } else {
+            p.strip_prefix(target).filter(|r| r.starts_with('/'))
+        };
+        if let Some(rest) = rest
+            && best.is_none_or(|(b, _)| b.target.trim_end_matches('/').len() < target.len())
+        {
+            best = Some((m, rest));
+        }
+    }
+    let (m, rest) = best?;
+    let mut out = String::from(m.name.trim_end_matches('/'));
+    if rest.is_empty() || rest == "/" {
+        if out.is_empty() {
+            out.push('/');
+        }
+    } else {
+        out.push_str(rest);
+    }
+    Some(out)
+}
+
 /// Profil zabezpeceni systemu (nastaveni, ne format). Rozhoduje o
 /// pripojenych cestach aplikaci a o zakazu spousteni na datech.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

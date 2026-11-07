@@ -11,7 +11,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use boot_info::BootInfo;
 
 use crate::acpi::Platform;
-use crate::arch::{self, CpuStarterOps};
+use crate::arch::{self, CpuStartResult, CpuStarterOps};
 use crate::mm::KernelStack;
 use crate::{log, sched};
 
@@ -33,13 +33,19 @@ pub fn start_secondary_cpus(platform: &Platform, boot_info: &BootInfo) -> usize 
         };
         AP_STARTED.store(false, Ordering::Release);
         clock_sync::reset();
-        let ok = starter.start(cpu.hw_id, stack.top(), ap_entry, index as u64, || {
+        let result = starter.start(cpu.hw_id, stack.top(), ap_entry, index as u64, || {
             AP_STARTED.load(Ordering::Acquire)
         });
+        if result == CpuStartResult::Failed {
+            // CPU zasobnik ani data startu nepouzije (duvod zalogovala
+            // architektura): uvolnit a zkusit dalsi CPU.
+            drop(stack);
+            continue;
+        }
         // Zasobnik patri novemu CPU navzdy - i kdyz se neohlasilo vcas, muze
         // jeste nabehnout a zasobnik pouzit, takze ho nesmime uvolnit.
         core::mem::forget(stack);
-        if !ok {
+        if result == CpuStartResult::TimedOut {
             // CPU muze nabehnout pozdeji: nechame mu jeho index i pomocna
             // data startu (x86: trampolinu vcetne identickeho mapovani)
             // a dalsi CPU uz nestartujeme, aby se neprepsala pod rukama.

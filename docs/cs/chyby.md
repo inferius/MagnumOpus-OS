@@ -43,6 +43,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -25 | `READ_ONLY` | jen pro čtení |
 | -26 | `LOCKED` | objekt je otevřený nebo zamčený jiným handlem |
 | -27 | `CONFLICT` | objekt se mezitím změnil |
+| -28 | `JOURNAL_GAP` | požadované záznamy žurnálu už nejsou uložené |
 
 ## Podrobně
 
@@ -340,6 +341,20 @@ agent, synchronizace.
 **Co s tím:** nic se nezměnilo a nová data zůstala klientovi; nabídnout
 uložení vedle, porovnání verzí, nebo vědomé přepsání (operace s novou
 revizí).
+
+### `JOURNAL_GAP` (-28)
+
+**Význam:** odběratel žurnálu změn žádá záznamy od pořadového čísla, které
+je starší než nejstarší uložený záznam - mezitím je zahodila retence
+(počet záznamů nebo stáří, nastavení datasetu).
+
+**Kdy vzniká:** `journal_read` / `JOURNAL_READ` a `JOURNAL_WATCH`, když se
+indexer, synchronizace nebo průzkumník dlouho neozval. Nikdy se záznamy
+tiše nevynechají.
+
+**Co s tím:** načíst nový výchozí stav: `VIEW` (dočasný snapshot a číslo
+posledního záznamu, který obsahuje), projít ho a navázat odběrem od čísla
++ 1. Častější odběr nebo delší retence zabrání opakování.
 
 ## Návratové kódy procesů
 

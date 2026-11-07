@@ -84,15 +84,17 @@ and `init` gives it only to the time service `timed` (without `MANAGE`).
 
 | Offset | Type | Meaning |
 |---|---|---|
-| 0 | i64 | new time: seconds since 1970-01-01 00:00:00 UTC |
+| 0 | i64 | new time: seconds since 1970-01-01 00:00:00 UTC (years 1970–9999, else `INVALID_ARGS`) |
 | 8 | u32 | nanoseconds (0..10⁹, else `INVALID_ARGS`) |
-| 12 | i32 | `rtc_offset`: seconds added to UTC when writing the hardware clock (RTC in local time = zone offset, else 0) |
+| 12 | i32 | `rtc_offset`: seconds added to UTC when writing the hardware clock (RTC in local time = zone offset, else 0); at most ±18 h, else `INVALID_ARGS` |
 
 `flags`: bit 0 `WRITE_HARDWARE` = also write the time to the hardware clock
 (x86: CMOS RTC). Other bits = `INVALID_ARGS`. Returns 1 when the hardware
 clock was written. Returns 0 without `WRITE_HARDWARE`, when there is no
 clock (aarch64, ACPI reports no RTC) or when the year does not fit its
-range. The system time is set in every case. Afterwards `CLOCK_REALTIME`
+range. With `WRITE_HARDWARE` the call can sleep up to 1 s: the kernel writes
+the RTC in the middle of a second so the clock ticks on second boundaries.
+The system time is set in every case. Afterwards `CLOCK_REALTIME`
 reports source 3 (set at run time) and no flags. Wait deadlines do not
 change; they come from `CLOCK_MONOTONIC`. Wrapper: `libos::time::set`,
 `Resource::set_clock`. Errors: `ACCESS_DENIED` (no `SET_CLOCK`),

@@ -1,24 +1,52 @@
 # Dokumentace / Documentation
 
+Stránky jsou rozdělené do skupin; text odkazu je název v menu webu
+(`cargo xtask docs`). Pages are grouped; the link text is the name in the
+site menu.
+
+### Začínáme / Getting started
+
 | Česky | English | Obsah / Contents |
 |---|---|---|
-| [architektura.md](cs/architektura.md) | [architecture.md](en/architecture.md) | návrh systému a důvody / system design and reasons |
-| [sestaveni.md](cs/sestaveni.md) | [building.md](en/building.md) | nástroje, příkazy, testy, ladění, struktura / tools, commands, tests, debugging, layout |
-| [jadro.md](cs/jadro.md) | [kernel.md](en/kernel.md) | jak jádro funguje / how the kernel works |
-| [syscally.md](cs/syscally.md) | [syscalls.md](en/syscalls.md) | referenční popis syscallů / syscall reference |
-| [chyby.md](cs/chyby.md) | [errors.md](en/errors.md) | kódy chyb a návratové kódy procesů / error and exit codes |
-| [hlasky.md](cs/hlasky.md) | [messages.md](en/messages.md) | hlášky v logu a co znamenají / log messages and their meaning |
-| [cas.md](cs/cas.md) | [time.md](en/time.md) | reálný čas: zdroje (UEFI, RTC), formát, pásmo / real time: sources (UEFI, RTC), format, zone |
-| [vstup.md](cs/vstup.md) | [input.md](en/input.md) | vstup: virtio-input, služba inputd, protokol událostí, rozložení, bezpečná zkratka / input: virtio-input, inputd service, event protocol, layouts, secure attention shortcut |
-| [usb.md](cs/usb.md) | [usb.md](en/usb.md) | USB: řadič xHCI, root hub, huby, HID, ověření nové klávesnice / USB: xHCI controller, root hub, hubs, HID, new keyboard verification |
-| [init.md](cs/init.md) | [init.md](en/init.md) | init a supervisor: start služeb, zařízení za běhu, restart spadlých služeb, testovací běh / init and the supervisor: service start-up, run-time devices, restarting crashed services, test run |
-| [libos.md](cs/libos.md) | [libos.md](en/libos.md) | knihovna pro programy / program library |
-| [souborovy-system.md](cs/souborovy-system.md) | [file-system.md](en/file-system.md) | souborový systém: formát, algoritmy, služba fsd, protokol / file system: format, algorithms, fsd service, protocol |
-| [osfs.md](cs/osfs.md) | [osfs.md](en/osfs.md) | nástroj osfs: obraz FS, kontrola, připojení ve Windows / osfs tool: FS image, check, mounting on Windows |
-| [osfs-api.md](cs/osfs-api.md) | [osfs-api.md](en/osfs-api.md) | rozšířené API FS pro aplikace ve Windows (DeviceIoControl) / extended FS API for Windows applications (DeviceIoControl) |
-| [fs-verze.md](cs/fs-verze.md) | [fs-versions.md](en/fs-versions.md) | verze formátu FS: co se změnilo a proč / FS format versions: what changed and why |
-| [navrh-fs-v3.md](cs/navrh-fs-v3.md) | [fs-v3-design.md](en/fs-v3-design.md) | návrh FS v3 (odsouhlasený, zavádí se po fázích) / FS v3 design (agreed, introduced in phases) |
-| [fs-v2.md](cs/fs-v2.md) | [fs-v2.md](en/fs-v2.md) | archiv: formát FS v2 / archive: FS format v2 |
+| [Sestavení a ladění](cs/sestaveni.md) | [Building and debugging](en/building.md) | nástroje, příkazy, testy, ladění, struktura / tools, commands, tests, debugging, layout |
+| [Architektura](cs/architektura.md) | [Architecture](en/architecture.md) | návrh systému, milníky a důvody / system design, milestones and reasons |
+
+### Jádro a programy / Kernel and programs
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Jádro](cs/jadro.md) | [Kernel](en/kernel.md) | jak jádro funguje / how the kernel works |
+| [Syscally](cs/syscally.md) | [Syscalls](en/syscalls.md) | referenční popis syscallů / syscall reference |
+| [libos](cs/libos.md) | [libos](en/libos.md) | knihovna pro programy / program library |
+| [Reálný čas](cs/cas.md) | [Real time](en/time.md) | zdroje (UEFI, RTC), formát, pásmo / sources (UEFI, RTC), format, zone |
+| [Kódy chyb](cs/chyby.md) | [Error codes](en/errors.md) | kódy chyb a návratové kódy procesů / error and exit codes |
+| [Init a supervisor](cs/init.md) | [Init and supervisor](en/init.md) | start služeb, zařízení za běhu, restart spadlých služeb, testovací běh / service start-up, run-time devices, restarting crashed services, test run |
+| [Hlášky v logu](cs/hlasky.md) | [Log messages](en/messages.md) | co znamenají a co dělat / what they mean and what to do |
+
+### Vstup a zařízení / Input and devices
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
+| [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
+
+### Souborový systém / File system
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Souborový systém](cs/souborovy-system.md) | [File system](en/file-system.md) | formát, algoritmy, oprávnění, služba fsd, protokol / format, algorithms, permissions, fsd service, protocol |
+| [Historie a verze souborů](cs/fs-historie.md) | [File history](en/fs-history.md) | žurnál změn, koš, verze, commity, větve, merge / change journal, trash, versions, commits, branches, merge |
+| [Verze formátu](cs/fs-verze.md) | [Format versions](en/fs-versions.md) | co se mezi verzemi změnilo a proč / what changed between versions and why |
+| [Nástroj osfs](cs/osfs.md) | [osfs tool](en/osfs.md) | obraz FS, kontrola, připojení ve Windows / FS image, check, mounting on Windows |
+| [API pro Windows](cs/osfs-api.md) | [Windows API](en/osfs-api.md) | rozšířené API FS pro aplikace ve Windows / extended FS API for Windows applications |
+| [Návrh FS v3](cs/navrh-fs-v3.md) | [FS v3 design](en/fs-v3-design.md) | odsouhlasený návrh, zavádí se po fázích / agreed design, introduced in phases |
+| [Archiv: FS v2](cs/fs-v2.md) | [Archive: FS v2](en/fs-v2.md) | původní formát v2 / the original v2 format |
+
+### Shell a terminál / Shell and terminal
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Shell a terminál](cs/navrh-shell.md) | [Shell and terminal](en/shell-design.md) | jazyk (zápisy B a C, gramatika, sémantika), undo a náhled, služba relací, protokol terminálu, kódy chyb shellu / language (notations B and C, grammar, semantics), undo and preview, session service, terminal protocol, shell error codes |
 
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).

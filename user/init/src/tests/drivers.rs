@@ -87,8 +87,22 @@ fn restricted_resource(s: &Startup) -> TestResult {
     let base = root
         .phys_addr(ecam, 0)
         .map_err(|e| fail("fyzicka adresa ECAM", e))?;
-    let child = root
+    // Preruseni z prostredku bez identity zarizeni: na x86 jde (MSI cili
+    // jen CPU), na aarch64 ne - ITS potrebuje DeviceID, INTERRUPT_CREATE
+    // vrati INVALID_ARGS. Overit obe chovani na obou architekturach.
+    let plain = root
         .restrict(&[(base, page)], 1, page)
+        .and_then(|r| r.interrupt().map(|_| ()));
+    let expected = if cfg!(target_arch = "aarch64") {
+        Err(Error::InvalidArgs)
+    } else {
+        Ok(())
+    };
+    check_eq!(plain, expected, "preruseni bez identity zarizeni");
+    // Dal prostredek se zarizenim 00:00.0 (jeho konfiguracni prostor je
+    // prave tato stranka): preruseni musi jit na obou architekturach.
+    let child = root
+        .restrict_device(&[(base, page)], 1, page, (0, 0, 0, 0))
         .map_err(|e| fail("vytvoreni omezeneho", e))?;
     child
         .device_memory(base, page)
@@ -164,6 +178,10 @@ fn dma_protection(_: &Startup) -> TestResult {
 
 fn ports_and_lines(s: &Startup) -> TestResult {
     use libos::hw::{io_ports, irq_lines};
+    // I/O porty a linky IOAPIC ma jen x86 (jinde jadro vraci NOT_SUPPORTED).
+    if !cfg!(target_arch = "x86_64") {
+        return Ok(());
+    }
     let root = s.root_resource.as_ref().ok_or("chybi korenovy Resource")?;
     // Stav radice PS/2 (cteni nema vedlejsi efekt).
     let child = root

@@ -1,18 +1,22 @@
 //! Build a spousteni systemu: `cargo xtask <prikaz>`.
 //!
 //! Prikazy:
-//! - `build`  - prelozi kernel a loader
+//! - `build`  - prelozi kernel, loader a programy userspace
 //! - `image`  - build + bootovatelny obraz disku (GPT + ESP s FAT32)
-//! - `run`    - image + spusteni v QEMU s OVMF
-//! - `check`  - jen kontrola prekladu jadra pro architekturu (`--arch`)
+//! - `run`    - image + spusteni v QEMU s UEFI firmwarem
+//! - `test`   - testy na hostiteli, pak jadro a userspace v QEMU
+//! - `check`  - jen kontrola prekladu jadra
 //!
-//! Prepinace: `--release`, a pro `run` navic `--gdb`, `--headless`,
-//! `--accel <tcg|kvm|whpx|hvf>` a cokoli za `--` se preda primo QEMU.
+//! Prepinace: `--release`, `--arch <x86_64|aarch64>` (vsechny prikazy), pro
+//! `run` navic `--gdb`, `--headless`, `--accel <tcg|kvm|whpx|hvf>` a cokoli
+//! za `--` se preda primo QEMU.
 
+mod arch;
 mod datadisk;
 mod docs;
 mod highlight;
 mod image;
+mod qemu;
 mod qmp;
 mod symbolize;
 
@@ -20,64 +24,54 @@ use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::time::{Duration, Instant};
+
+use arch::Arch;
 
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
-
-const KERNEL_TARGET: &str = "x86_64-unknown-none";
-/// Architektury, pro ktere existuje implementace `kernel/src/arch/<arch>`
-/// (aarch64 zatim jen kostra, ktera se prelozi), a jejich Rust cil.
-const KERNEL_ARCHES: &[(&str, &str)] = &[
-    ("x86_64", "x86_64-unknown-none"),
-    ("aarch64", "aarch64-unknown-none-softfloat"),
-];
-const LOADER_TARGET: &str = "x86_64-unknown-uefi";
 
 const USAGE: &str = "\
 pouziti: cargo xtask <prikaz> [prepinace]
 
 prikazy:
-  build    prelozi kernel a loader
-  image    build + vytvori target/os-x86_64.img (GPT, ESP FAT32)
-  run      image + spusti QEMU (x86_64, OVMF)
-  test     testy knihoven na hostiteli, kontrola prekladu jadra pro aarch64,
-           pak jadro a userspace v QEMU bez okna
-  check    jen kontrola prekladu jadra (vychozi --arch x86_64)
+  build    prelozi kernel, loader a programy userspace
+  image    build + vytvori target/os-<arch>-<profil>.img (GPT, ESP FAT32)
+  run      image + spusti QEMU (x86_64: q35 + OVMF, aarch64: virt + edk2)
+  test     testy knihoven na hostiteli, kontrola prekladu jadra pro ostatni
+           architektury, pak jadro a userspace v QEMU bez okna
+  check    jen kontrola prekladu jadra
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
 
 prepinace:
   --release        release profil
+  --arch <arch>    architektura: x86_64 (vychozi), aarch64
   --gdb            (run) QEMU ceka na GDB na localhost:1234
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
-  --iommu <typ>    (run, test) IOMMU v QEMU: intel (vychozi), amd, none
-  --arch <arch>    (check) architektura jadra: x86_64 (vychozi), aarch64
+  --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
+                   none; aarch64 smmu (vychozi), none
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
-  QEMU             cesta k qemu-system-x86_64
-  OVMF_CODE        cesta k OVMF code (pflash, read-only)
-  OVMF_VARS        cesta k sablone OVMF vars
+  QEMU_X86_64, QEMU_AARCH64   cesta k QEMU (QEMU plati pro x86_64)
+  X86_64_FW_CODE, _FW_VARS    firmware UEFI (take OVMF_CODE, OVMF_VARS)
+  AARCH64_FW_CODE, _FW_VARS   firmware UEFI pro aarch64 (edk2, AAVMF)
 ";
 
-struct Options {
+pub struct Options {
     release: bool,
     gdb: bool,
     headless: bool,
     accel: Option<String>,
-    /// Emulovana IOMMU: "intel" (VT-d, vychozi), "amd" (AMD-Vi), "none".
+    /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
+    /// aarch64 "smmu", "none".
     iommu: String,
     qemu_args: Vec<OsString>,
-    /// Architektura pro `check`.
-    arch: String,
-    /// Testovaci beh: kernel s feature `qemu-test`, QEMU s isa-debug-exit.
+    /// Cilova architektura.
+    arch: &'static Arch,
+    /// Testovaci beh: kernel s feature `qemu-test`, QEMU s testovacim
+    /// koncem (x86_64 isa-debug-exit, aarch64 semihosting).
     test: bool,
 }
-
-/// Navratovy kod QEMU pri uspechu testu: isa-debug-exit vraci (v << 1) | 1
-/// a kernel zapisuje v = 0x10 (viz arch::qemu_exit).
-const QEMU_TEST_SUCCESS: i32 = 33;
-const QEMU_TEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 fn main() -> ExitCode {
     match run_cli() {
@@ -101,27 +95,22 @@ fn run_cli() -> Result<()> {
         gdb: false,
         headless: false,
         accel: None,
-        iommu: String::from("intel"),
+        iommu: String::new(),
         qemu_args: Vec::new(),
-        arch: String::from("x86_64"),
+        arch: &arch::X86_64,
         test: false,
     };
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
             Some("--iommu") => {
-                let value = args.next().ok_or("--iommu ocekava intel, amd nebo none")?;
+                let value = args.next().ok_or("--iommu ocekava typ IOMMU")?;
                 opts.iommu = value.to_string_lossy().into_owned();
-                if !matches!(opts.iommu.as_str(), "intel" | "amd" | "none") {
-                    return Err("--iommu ocekava intel, amd nebo none".into());
-                }
             }
             Some("--arch") => {
                 let value = args.next().ok_or("--arch ocekava x86_64 nebo aarch64")?;
-                opts.arch = value.to_string_lossy().into_owned();
-                if !KERNEL_ARCHES.iter().any(|(a, _)| *a == opts.arch) {
-                    return Err("--arch ocekava x86_64 nebo aarch64".into());
-                }
+                opts.arch = arch::by_name(&value.to_string_lossy())
+                    .ok_or("--arch ocekava x86_64 nebo aarch64")?;
             }
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
@@ -139,6 +128,15 @@ fn run_cli() -> Result<()> {
             _ => return Err(format!("neznamy prepinac {arg:?}\n\n{USAGE}").into()),
         }
     }
+    if opts.iommu.is_empty() {
+        opts.iommu = opts.arch.iommus[0].to_string();
+    } else if !opts.arch.iommus.contains(&opts.iommu.as_str()) {
+        return Err(format!(
+            "--iommu pro {} ocekava jednu z hodnot {:?}",
+            opts.arch.name, opts.arch.iommus
+        )
+        .into());
+    }
 
     match command.to_str() {
         Some("build") => build(&opts).map(|_| ()),
@@ -146,19 +144,23 @@ fn run_cli() -> Result<()> {
         Some("run") => {
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
-            run_qemu(&image, &opts)
+            qemu::run(&image, &artifacts, &opts)
         }
         Some("test") => {
             opts.test = true;
             opts.headless = true;
             host_tests()?;
-            check_kernel("aarch64", &opts)?;
+            // Jadro se musi prelozit i pro ostatni architektury (rozhrani
+            // architektury nesmi zustat jen pro jednu).
+            for other in arch::ALL.iter().filter(|a| a.name != opts.arch.name) {
+                check_kernel(other, &opts)?;
+            }
             build_docs()?;
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
-            run_qemu(&image, &opts)
+            qemu::run(&image, &artifacts, &opts)
         }
-        Some("check") => check_kernel(&opts.arch, &opts),
+        Some("check") => check_kernel(opts.arch, &opts),
         Some("docs") => build_docs().map(|_| ()),
         Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
@@ -193,6 +195,10 @@ fn host_tests() -> Result<()> {
             "i8042",
             "--package",
             "usbproto",
+            "--package",
+            "shlang",
+            "--package",
+            "term",
             "--features",
             "initfs/std,fs/std",
         ])
@@ -205,14 +211,11 @@ fn host_tests() -> Result<()> {
 }
 
 /// Overi, ze se jadro prelozi (a slinkuje) pro architekturu `arch`. Hlida,
-/// ze rozhrani architektury (`kernel/src/arch/api`) jde implementovat i jinde
-/// nez na x86_64 a ze obecna cast jadra nepouziva nic x86 specifickeho.
-fn check_kernel(arch: &str, opts: &Options) -> Result<()> {
-    let target = KERNEL_ARCHES
-        .iter()
-        .find(|(a, _)| *a == arch)
-        .map(|(_, t)| *t)
-        .ok_or_else(|| format!("neznama architektura {arch}"))?;
+/// ze rozhrani architektury (`kernel/src/arch/api`) jde implementovat pro
+/// vsechny architektury a ze obecna cast jadra nepouziva nic specifickeho
+/// jen pro jednu z nich.
+fn check_kernel(arch: &Arch, opts: &Options) -> Result<()> {
+    let target = arch.kernel_target;
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut cmd = Command::new(cargo);
     cmd.current_dir(workspace_root())
@@ -221,16 +224,15 @@ fn check_kernel(arch: &str, opts: &Options) -> Result<()> {
     if opts.release {
         cmd.arg("--release");
     }
-    if arch == "aarch64" {
-        // Kostra konci `todo!`, takze vetsina jadra je pro prekladac
-        // nedosazitelna: varovani o nepouzitem kodu by zakryla skutecne chyby.
-        cmd.args(["--", "-A", "dead_code", "-A", "unused_variables"]);
-    }
     let status = cmd.status()?;
     if !status.success() {
-        return Err(format!("kontrola prekladu jadra pro {arch} ({target}) selhala").into());
+        return Err(format!(
+            "kontrola prekladu jadra pro {} ({target}) selhala",
+            arch.name
+        )
+        .into());
     }
-    println!("xtask: jadro se prelozi pro {arch}");
+    println!("xtask: jadro se prelozi pro {}", arch.name);
     Ok(())
 }
 
@@ -258,7 +260,7 @@ fn profile_dir(opts: &Options) -> &'static str {
     if opts.release { "release" } else { "debug" }
 }
 
-struct Artifacts {
+pub struct Artifacts {
     kernel: PathBuf,
     loader: PathBuf,
     initfs: PathBuf,
@@ -279,6 +281,7 @@ const USER_PROGRAMS: &[&str] = &[
     "usb-hid",
     "fsd",
     "timed",
+    "termd",
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
@@ -296,12 +299,24 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
         cmd.args(["--features", "qemu-test"]);
     }
     if user {
-        // Userspace ma stejny target jako jadro, ale jine priznaky (bez
-        // code-model=kernel z .cargo/config.toml). Vlastni adresar, aby se
-        // buildy jadra a userspace navzajem neprekladaly znovu.
+        // Userspace ma jine priznaky nez jadro (bez code-model=kernel
+        // z .cargo/config.toml). Vlastni adresar, aby se buildy jadra
+        // a userspace navzajem neprekladaly znovu.
         // CARGO_ENCODED_RUSTFLAGS oddeluje priznaky znakem 0x1F.
+        // Linker skript `user/user.ld` (adresy, zarovnani segmentu na
+        // MAX_PAGE_SIZE) plati pro vsechny programy - jedno misto misto
+        // build.rs v kazdem programu.
         let separator = char::from(0x1F).to_string();
-        let flags = ["-Crelocation-model=static", "-Cforce-frame-pointers=yes"].join(&separator);
+        let script = format!(
+            "-Clink-arg=-T{}",
+            workspace_root().join("user").join("user.ld").display()
+        );
+        let flags = [
+            "-Crelocation-model=static",
+            "-Cforce-frame-pointers=yes",
+            script.as_str(),
+        ]
+        .join(&separator);
         cmd.env("CARGO_ENCODED_RUSTFLAGS", flags)
             .arg("--target-dir")
             .arg(user_target_dir());
@@ -318,13 +333,14 @@ fn user_target_dir() -> PathBuf {
 }
 
 fn build(opts: &Options) -> Result<Artifacts> {
-    cargo_build(&["kernel"], KERNEL_TARGET, opts, false)?;
-    cargo_build(&["loader"], LOADER_TARGET, opts, false)?;
-    cargo_build(USER_PROGRAMS, KERNEL_TARGET, opts, true)?;
+    let a = opts.arch;
+    cargo_build(&["kernel"], a.kernel_target, opts, false)?;
+    cargo_build(&["loader"], a.loader_target, opts, false)?;
+    cargo_build(USER_PROGRAMS, a.user_target, opts, true)?;
     let target = target_dir();
     let profile = profile_dir(opts);
 
-    let user_bin = user_target_dir().join(KERNEL_TARGET).join(profile);
+    let user_bin = user_target_dir().join(a.user_target).join(profile);
     let mut files = Vec::new();
     for name in USER_PROGRAMS {
         let data = std::fs::read(user_bin.join(name))
@@ -335,293 +351,29 @@ fn build(opts: &Options) -> Result<Artifacts> {
         .iter()
         .map(|(n, d)| (n.as_str(), d.as_slice()))
         .collect();
-    let initfs = target.join(format!("initfs-{profile}.img"));
+    let initfs = target.join(format!("initfs-{}-{profile}.img", a.name));
     std::fs::write(&initfs, initfs::build(&refs))?;
 
     Ok(Artifacts {
-        kernel: target.join(KERNEL_TARGET).join(profile).join("kernel"),
-        loader: target.join(LOADER_TARGET).join(profile).join("loader.efi"),
+        kernel: target.join(a.kernel_target).join(profile).join("kernel"),
+        loader: target.join(a.loader_target).join(profile).join("loader.efi"),
         initfs,
     })
 }
 
 fn image_for(artifacts: &Artifacts, opts: &Options) -> Result<PathBuf> {
     let suffix = if opts.test { "-test" } else { "" };
-    let path = target_dir().join(format!("os-x86_64-{}{suffix}.img", profile_dir(opts)));
+    let path = target_dir().join(format!(
+        "os-{}-{}{suffix}.img",
+        opts.arch.name,
+        profile_dir(opts)
+    ));
     let files = [
-        ("EFI/BOOT/BOOTX64.EFI", artifacts.loader.as_path()),
+        (opts.arch.boot_file, artifacts.loader.as_path()),
         ("os/kernel.elf", artifacts.kernel.as_path()),
         ("os/initfs.img", artifacts.initfs.as_path()),
     ];
     image::create_disk_image(&path, &files)?;
     println!("xtask: obraz disku {}", path.display());
     Ok(path)
-}
-
-/// Najde spustitelny soubor QEMU: promenna QEMU, PATH, bezna instalacni mista.
-fn find_qemu() -> Result<PathBuf> {
-    if let Some(path) = env::var_os("QEMU") {
-        return Ok(path.into());
-    }
-    let exe = if cfg!(windows) {
-        "qemu-system-x86_64.exe"
-    } else {
-        "qemu-system-x86_64"
-    };
-    if let Some(paths) = env::var_os("PATH") {
-        for dir in env::split_paths(&paths) {
-            let candidate = dir.join(exe);
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
-    }
-    let fallback = [
-        r"C:\Program Files\qemu",
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-    ];
-    fallback
-        .iter()
-        .map(|dir| Path::new(dir).join(exe))
-        .find(|p| p.is_file())
-        .ok_or_else(|| "QEMU nenalezeno (nastav promennou QEMU nebo ho pridej do PATH)".into())
-}
-
-/// Najde par OVMF code + vars sablona. Pary musi byt ze stejne distribuce.
-fn find_ovmf(qemu: &Path) -> Result<(PathBuf, PathBuf)> {
-    if let (Some(code), Some(vars)) = (env::var_os("OVMF_CODE"), env::var_os("OVMF_VARS")) {
-        return Ok((code.into(), vars.into()));
-    }
-    let mut candidates: Vec<(PathBuf, PathBuf)> = Vec::new();
-    // Firmware dodavany primo s QEMU (Windows instalator, Homebrew, ...).
-    if let Some(bin_dir) = qemu.parent() {
-        for share in [bin_dir.join("share"), bin_dir.join("../share/qemu")] {
-            candidates.push((
-                share.join("edk2-x86_64-code.fd"),
-                share.join("edk2-i386-vars.fd"),
-            ));
-        }
-    }
-    for (code, vars) in [
-        (
-            "/usr/share/OVMF/OVMF_CODE_4M.fd",
-            "/usr/share/OVMF/OVMF_VARS_4M.fd",
-        ),
-        (
-            "/usr/share/OVMF/OVMF_CODE.fd",
-            "/usr/share/OVMF/OVMF_VARS.fd",
-        ),
-        (
-            "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
-            "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
-        ),
-        (
-            "/usr/share/edk2/ovmf/OVMF_CODE.fd",
-            "/usr/share/edk2/ovmf/OVMF_VARS.fd",
-        ),
-        (
-            "/usr/share/qemu/edk2-x86_64-code.fd",
-            "/usr/share/qemu/edk2-i386-vars.fd",
-        ),
-    ] {
-        candidates.push((code.into(), vars.into()));
-    }
-    candidates
-        .into_iter()
-        .find(|(code, vars)| code.is_file() && vars.is_file())
-        .ok_or_else(|| "OVMF nenalezen (nastav OVMF_CODE a OVMF_VARS)".into())
-}
-
-fn default_accel() -> &'static str {
-    if cfg!(target_os = "linux") && Path::new("/dev/kvm").exists() {
-        "kvm"
-    } else {
-        "tcg"
-    }
-}
-
-fn run_qemu(image: &Path, opts: &Options) -> Result<()> {
-    let qemu = find_qemu()?;
-    let (ovmf_code, ovmf_vars_template) = find_ovmf(&qemu)?;
-
-    // OVMF do vars zapisuje (boot polozky), proto pracujeme s kopii.
-    // Vlastni kopie pro kazdy rezim IOMMU: IOMMU AMD zabere slot PCI a disky
-    // se posunou, ulozene bootovaci polozky by pak nesedely.
-    let ovmf_vars = target_dir().join(format!("ovmf-x86_64-vars-{}.fd", opts.iommu));
-    if !ovmf_vars.exists() {
-        std::fs::copy(&ovmf_vars_template, &ovmf_vars)?;
-    }
-
-    let serial_log = target_dir().join(if opts.test {
-        "serial-test.log"
-    } else {
-        "serial.log"
-    });
-    // Stary log nesmi obsahovat znacku testu vstupu z minuleho behu.
-    let _ = std::fs::remove_file(&serial_log);
-    let qmp_port = qmp::free_port()?;
-    let accel = opts.accel.as_deref().unwrap_or(default_accel());
-    let mut cmd = Command::new(&qemu);
-    cmd.arg("-machine")
-        .arg(format!("q35,accel={accel}"))
-        .args(["-cpu", "max", "-smp", "4", "-m", "512M"]);
-    // Graficka karta s vlastnim id (jinak stejna jako vychozi `-vga std`
-    // na 00:01.0): k jeji konzoli se navazi klavesnice a mys virtio, viz nize.
-    cmd.args(["-vga", "none", "-device", "VGA,id=video0"]);
-    // IOMMU (Intel VT-d nebo AMD-Vi) pred zarizenimi PCI, ktera preklada; preklad
-    // preruseni zatim ne (intremap=off).
-    match opts.iommu.as_str() {
-        "intel" => {
-            cmd.args(["-device", "intel-iommu,intremap=off"]);
-        }
-        "amd" => {
-            cmd.args(["-device", "amd-iommu,dma-remap=on,intremap=off"]);
-        }
-        _ => {}
-    }
-    // Disky jen v modernim rezimu virtio a s prekladem DMA pres IOMMU.
-    // Pod AMD-Vi firmware OVMF z disku s prekladem DMA nenabootuje, proto
-    // tam systemovy disk prekladem neprochazi (ostatni disky ano).
-    let amd = opts.iommu == "amd";
-    let blk = |drive: &str| {
-        let translate = !(amd && drive == "osdisk");
-        format!(
-            "virtio-blk-pci,drive={drive},disable-legacy=on,iommu_platform={}",
-            if translate { "on" } else { "off" }
-        )
-    };
-    cmd.arg("-drive")
-        .arg(pflash_arg(&ovmf_code, true))
-        .arg("-drive")
-        .arg(pflash_arg(&ovmf_vars, false))
-        .arg("-drive")
-        .arg(format!(
-            "if=none,id=osdisk,format=raw,file={}",
-            image.display()
-        ))
-        .args(["-device", &blk("osdisk")])
-        // Maly prazdny disk jen pro test ovladace (testy do nej zapisuji).
-        .arg("-drive")
-        .arg(format!(
-            "if=none,id=scratch,format=raw,file={}",
-            scratch_disk()?.display()
-        ))
-        .args(["-device", &blk("scratch")])
-        // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
-        .arg("-drive")
-        .arg(format!(
-            "if=none,id=data,format=raw,discard=unmap,file={}",
-            datadisk::create(&target_dir())?.display()
-        ))
-        .args(["-device", &blk("data")])
-        // Klavesnice a mys virtio (ovladac virtio-input, sluzba inputd),
-        // navazane na konzoli grafiky: vstup z okna QEMU a udalosti QMP
-        // s `device=video0` jdou do nich, udalosti QMP bez zarizeni do
-        // PS/2 (radic i8042 ma q35 vzdy). QMP slouzi testu vstupu.
-        .args([
-            "-device",
-            "virtio-keyboard-pci,iommu_platform=on,display=video0",
-        ])
-        .args([
-            "-device",
-            "virtio-mouse-pci,iommu_platform=on,display=video0",
-        ])
-        // USB: radic xHCI s klavesnici (ovladace xhci, usb-hub, usb-hid),
-        // navazanou na konzoli druhe graficke karty, aby ji QMP umelo
-        // oslovit zvlast (`device=video1`). Mys USB nema vlastnost
-        // `display` a brala by udalosti PS/2 - test ji pripoji az za behu.
-        .args(["-device", "secondary-vga,id=video1"])
-        .args(["-device", "qemu-xhci,id=xhci"])
-        .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"])
-        .arg("-qmp")
-        .arg(qmp::qemu_arg(qmp_port))
-        // Bez sitove karty, jinak OVMF zbytecne zkousi PXE boot.
-        .args(["-nic", "none"])
-        // Seriova linka do terminalu a zaroven do souboru (target/serial.log),
-        // aby se dal vystup dohledat i po skonceni behu.
-        .arg("-chardev")
-        .arg(format!("stdio,id=serial0,logfile={}", serial_log.display()))
-        .args(["-serial", "chardev:serial0"])
-        .arg("-no-reboot");
-    if opts.headless {
-        cmd.args(["-display", "none"]);
-    }
-    if opts.gdb {
-        cmd.args(["-s", "-S"]);
-        let kernel = target_dir()
-            .join(KERNEL_TARGET)
-            .join(profile_dir(opts))
-            .join("kernel");
-        println!("xtask: QEMU ceka na GDB na localhost:1234, napr.:");
-        println!(
-            "  gdb {} -ex \"target remote localhost:1234\"",
-            kernel.display()
-        );
-    }
-    if opts.test {
-        cmd.args(["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]);
-    }
-    cmd.args(&opts.qemu_args);
-
-    println!("xtask: spoustim {}", qemu.display());
-    qmp::spawn_injector(serial_log.clone(), qmp_port);
-    let kernel = target_dir()
-        .join(KERNEL_TARGET)
-        .join(profile_dir(opts))
-        .join("kernel");
-    let result = if opts.test {
-        run_qemu_test(cmd)
-    } else {
-        run_qemu_interactive(cmd)
-    };
-    // Pri panice nebo fatalni vyjimce prelozit adresy na jmena funkci.
-    if let Err(e) = symbolize::report(&serial_log, &kernel) {
-        eprintln!("xtask: preklad adres selhal: {e}");
-    }
-    println!("xtask: vystup seriove linky je v {}", serial_log.display());
-    result
-}
-
-fn run_qemu_interactive(mut cmd: Command) -> Result<()> {
-    let status = cmd.status()?;
-    if !status.success() {
-        return Err(format!("QEMU skoncilo s {status}").into());
-    }
-    Ok(())
-}
-
-fn run_qemu_test(mut cmd: Command) -> Result<()> {
-    let mut child = cmd.spawn()?;
-    let start = Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if start.elapsed() > QEMU_TEST_TIMEOUT {
-            child.kill()?;
-            child.wait()?;
-            return Err(format!("testy nedobehly do {} s", QEMU_TEST_TIMEOUT.as_secs()).into());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-    match status.code() {
-        Some(QEMU_TEST_SUCCESS) => {
-            println!("xtask: testy prosly");
-            Ok(())
-        }
-        code => Err(format!("testy selhaly (navratovy kod QEMU {code:?})").into()),
-    }
-}
-
-/// Prazdny disk 1 MiB pro testy ovladace (pri kazdem behu znovu vynulovany).
-fn scratch_disk() -> Result<PathBuf> {
-    let path = target_dir().join("scratch.img");
-    std::fs::write(&path, vec![0u8; 1024 * 1024])?;
-    Ok(path)
-}
-
-fn pflash_arg(path: &Path, readonly: bool) -> String {
-    let ro = if readonly { ",readonly=on" } else { "" };
-    format!("if=pflash,format=raw{ro},file={}", path.display())
 }

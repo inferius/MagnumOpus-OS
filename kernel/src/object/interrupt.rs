@@ -100,6 +100,10 @@ impl Drop for Interrupt {
         if let Some((line, _)) = self.line {
             arch::line_release(line);
         }
+        // Nejdriv zrusit nastaveni v architekture (aarch64: preklad v ITS),
+        // teprve pak uvolnit cislo: jinak by ho mohl mezitim dostat novy
+        // objekt a pozdni uvolneni by vypnulo uz jeho preruseni.
+        arch::release_irq(self.irq);
         TABLE.lock()[(self.irq - FIRST) as usize] = None;
     }
 }

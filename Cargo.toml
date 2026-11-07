@@ -19,6 +19,8 @@ members = [
     "libs/libos",
     "libs/pci",
     "libs/tz",
+    "libs/shlang",
+    "libs/term",
     "libs/virtio",
     "tools/osfs",
     "user/devmgr",
@@ -27,6 +29,7 @@ members = [
     "user/init",
     "user/ps2",
     "user/inputd",
+    "user/termd",
     "user/timed",
     "user/virtio-blk",
     "user/virtio-input",
@@ -54,6 +57,14 @@ fs = { path = "libs/fs" }
 
 [profile.dev]
 panic = "abort"
+
+# Interpret shellu je rekurzivni; bez optimalizace by jedna uroven volani
+# zabrala ~50 KB zasobniku (s optimalizaci ~6 KB). Program ma 256 KB.
+[profile.dev.package.shlang]
+opt-level = 2
+
+[profile.dev.package.term]
+opt-level = 2
 
 [profile.release]
 panic = "abort"

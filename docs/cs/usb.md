@@ -257,6 +257,10 @@ a brala by si události, které má dostat PS/2.
 
 ## Omezení a další fáze
 
+⚠️ **aarch64 (QEMU virt):** kořenový hub klávesnici USB najde, ale klávesy
+z QEMU (QMP) a zařízení připojená za běhu zatím nedorazí. Testy událostí
+a hotplugu USB proto běží jen na x86_64; oprava je samostatný úkol.
+
 | Fáze | Stav | Co |
 |---|---|---|
 | 1 | hotovo | řadič xHCI: převzetí od firmwaru, reset, kontexty, fronty, MSI-X, kořenové porty, kontrolní a interrupt přenosy |

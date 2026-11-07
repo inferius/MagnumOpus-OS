@@ -177,16 +177,34 @@ fn thread_bad_entry(s: &Startup) -> TestResult {
 /// XMM0 nove spusteneho vlakna (musi byt 0) a hodnota, kterou si zapsalo.
 static SSE_SEEN: AtomicU64 = AtomicU64::new(u64::MAX);
 
+/// Spodnich 64 bitu prvniho registru FPU/SIMD (x86_64 XMM0, aarch64 V0).
 fn xmm0_read() -> u64 {
     let v: u64;
-    // SAFETY: jen presun z XMM0 do obecneho registru; jadro SSE zapnulo.
-    unsafe { core::arch::asm!("movq {}, xmm0", out(reg) v, options(nomem, nostack)) };
+    // SAFETY: jen presun z registru FPU do obecneho registru; jadro FPU
+    // pro programy zapnulo.
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!("movq {}, xmm0", out(reg) v, options(nomem, nostack))
+    };
+    // SAFETY: viz vyse.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        core::arch::asm!(".arch_extension fp", "fmov {}, d0", out(reg) v, options(nomem, nostack))
+    };
     v
 }
 
 fn xmm0_write(v: u64) {
     // SAFETY: XMM0 program (soft-float) jinak nepouziva.
-    unsafe { core::arch::asm!("movq xmm0, {}", in(reg) v, options(nomem, nostack)) };
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!("movq xmm0, {}", in(reg) v, options(nomem, nostack))
+    };
+    // SAFETY: V0 program (soft-float) jinak nepouziva.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        core::arch::asm!(".arch_extension fp", "fmov d0, {}", in(reg) v, options(nomem, nostack))
+    };
 }
 
 extern "C" fn sse_worker(event: u64, _: u64) -> ! {

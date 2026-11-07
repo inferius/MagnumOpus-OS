@@ -43,6 +43,7 @@ is documented in this file and in the Czech version.
 | -25 | `READ_ONLY` | read-only |
 | -26 | `LOCKED` | the object is open or locked by another handle |
 | -27 | `CONFLICT` | the object has changed in the meantime |
+| -28 | `JOURNAL_GAP` | the requested change journal entries are no longer stored |
 
 ## Details
 
@@ -338,6 +339,21 @@ editor, an agent, sync.
 **What to do:** nothing changed and the new data stayed with the client;
 offer saving alongside, comparing versions, or a deliberate overwrite (the
 operation with the new revision).
+
+### `JOURNAL_GAP` (-28)
+
+**Meaning:** a change journal subscriber asks for entries from a sequence
+number older than the oldest stored entry - retention (entry count or age,
+a dataset setting) has dropped them in the meantime.
+
+**When:** `journal_read` / `JOURNAL_READ` and `JOURNAL_WATCH`, when an
+indexer, sync or the explorer has not checked in for a long time. Entries
+are never skipped silently.
+
+**What to do:** load a new starting state: `VIEW` (a temporary snapshot and
+the number of the last entry it contains), walk it and resume the
+subscription from that number + 1. Subscribing more often or a longer
+retention prevents it from happening again.
 
 ## Process exit codes
 

@@ -14,6 +14,7 @@
 extern crate alloc;
 
 mod codec;
+pub mod hist;
 pub mod perm;
 pub mod v2;
 
@@ -231,6 +232,11 @@ pub struct FsClient {
 impl FsClient {
     pub fn new(channel: Channel) -> Self {
         Self { channel }
+    }
+
+    /// Kanal relace (napr. pro predani jine sluzbe).
+    pub fn into_channel(self) -> Channel {
+        self.channel
     }
 
     /// Posle pozadavek, vrati telo odpovedi.
