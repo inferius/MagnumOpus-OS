@@ -26,6 +26,8 @@ pub enum Owner {
     Action(u32),
     /// Bezpecna obrazovka po bezpecne zkratce.
     Secure,
+    /// Nove vstupni zarizeni ceka na overeni (id zdroje v `inputd`).
+    Device(u16),
 }
 
 #[derive(Debug, Clone)]
@@ -274,6 +276,44 @@ impl Comp {
             )),
             Owner::Action(call) => self.action_confirmed(call, choice == 0),
             Owner::Secure => self.out.push(Out::SecureRelease),
+            Owner::Device(source) => {
+                self.input.untrusted.retain(|&s| s != source);
+                self.out.push(Out::Device { source, trust: choice == 0 });
+            }
+        }
+    }
+
+    /// Nova klavesnice nebo mys ceka na overeni (proti BadUSB): jeji
+    /// udalosti se do rozhodnuti ignoruji, potvrdit ji musi stavajici vstup.
+    pub(crate) fn new_device(&mut self, source: u16, state: inputproto::DeviceTrust) {
+        use inputproto::DeviceTrust::*;
+        match state {
+            Pending => {
+                if self.input.untrusted.contains(&source) {
+                    return;
+                }
+                self.input.untrusted.push(source);
+                self.open_dialog(Dialog {
+                    owner: Owner::Device(source),
+                    id: source as u32,
+                    kind: DialogKind::Confirm,
+                    app: String::new(),
+                    text: alloc::format!(
+                        "Bylo připojeno nové vstupní zařízení (zdroj {source}). Povolte ho jen tehdy, když jste ho připojili vy. Zařízení do té doby nic nepíše."
+                    ),
+                    options: alloc::vec![String::from("Povolit zařízení"), String::from("Odmítnout")],
+                    sel: 1,
+                    password: String::new(),
+                });
+            }
+            Trusted | Rejected => {
+                self.input.untrusted.retain(|&s| s != source);
+                let front = self.dialogs.active().map(|d| d.owner) == Some(Owner::Device(source));
+                self.dialogs.queue.retain(|d| d.owner != Owner::Device(source));
+                if front {
+                    self.damage_all();
+                }
+            }
         }
     }
 

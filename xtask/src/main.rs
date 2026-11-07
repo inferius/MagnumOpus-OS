@@ -314,6 +314,7 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-net",
     "virtio-rng",
     "virtio-gpu",
+    "compd",
     "netd",
     "fwd",
     "netprobe",

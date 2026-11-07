@@ -69,6 +69,9 @@ pub enum Out {
     Inspect(PeerId, InspectReply),
     /// Konec bezpecne obrazovky: poslat `release` na kanal `secure`.
     SecureRelease,
+    /// Rozhodnuti o novem vstupnim zarizeni: `trust <id>` / `reject <id>`
+    /// na kanal `secure`.
+    Device { source: u16, trust: bool },
 }
 
 /// Kompozitor.

@@ -769,57 +769,8 @@ fn frame_callback_and_ping() {
 
 /// Ulozi snimek jako PNG (pro kontrolu okem: `target/comp-*.png`).
 fn save_png(name: &str, px: &[u32], w: u32, h: u32) {
-    let mut raw = Vec::with_capacity(((w * 3 + 1) * h) as usize);
-    for y in 0..h {
-        raw.push(0);
-        for x in 0..w {
-            let p = px[(y * w + x) as usize];
-            raw.extend_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, p as u8]);
-        }
-    }
-    // zlib s nekomprimovanymi bloky.
-    let mut z = vec![0x78, 0x01];
-    for (i, chunk) in raw.chunks(65535).enumerate() {
-        let last = (i + 1) * 65535 >= raw.len();
-        z.push(last as u8);
-        let n = chunk.len() as u16;
-        z.extend_from_slice(&n.to_le_bytes());
-        z.extend_from_slice(&(!n).to_le_bytes());
-        z.extend_from_slice(chunk);
-    }
-    let (mut a, mut b) = (1u32, 0u32);
-    for &x in &raw {
-        a = (a + x as u32) % 65521;
-        b = (b + a) % 65521;
-    }
-    z.extend_from_slice(&(b << 16 | a).to_be_bytes());
-    fn crc(d: &[u8]) -> u32 {
-        let mut c = !0u32;
-        for &b in d {
-            c ^= b as u32;
-            for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
-            }
-        }
-        !c
-    }
-    let mut png = vec![0x89, b'P', b'N', b'G', 13, 10, 26, 10];
-    let mut chunk = |ty: &[u8], data: &[u8]| {
-        png.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        let mut c = ty.to_vec();
-        c.extend_from_slice(data);
-        png.extend_from_slice(&c);
-        png.extend_from_slice(&crc(&c).to_be_bytes());
-    };
-    let mut ihdr = Vec::new();
-    ihdr.extend_from_slice(&w.to_be_bytes());
-    ihdr.extend_from_slice(&h.to_be_bytes());
-    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
-    chunk(b"IHDR", &ihdr);
-    chunk(b"IDAT", &z);
-    chunk(b"IEND", &[]);
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
-    let _ = std::fs::write(dir.join(name), png);
+    let _ = std::fs::write(dir.join(name), gfx::png::encode(px, w, h, w));
 }
 
 #[test]
@@ -845,4 +796,25 @@ fn render_scene_snapshot() {
     t.c.damage_all();
     t.frame();
     save_png("comp-scene.png", &t.frame, W, H);
+}
+
+#[test]
+fn new_device_must_be_confirmed_by_existing_input() {
+    let mut t = T::new();
+    let r = Record::new(Event::NewDevice { source: 9, state: inputproto::DeviceTrust::Pending }, 0, 0, t.now);
+    t.c.input(&[r], t.now);
+    assert!(t.c.dialogs.active().is_some());
+    // Nove zarizeni samo sebe nepotvrdi (Enter z neovereneho zdroje).
+    let mut left = Record::new(Event::Key { code: inputproto::code::KEY_LEFT, scancode: 0, action: Action::Press, ch: None }, 0, 0, t.now);
+    left.source = 9;
+    let mut enter = Record::new(Event::Key { code: inputproto::code::KEY_ENTER, scancode: 0, action: Action::Press, ch: None }, 0, 0, t.now);
+    enter.source = 9;
+    t.c.input(&[left, enter], t.now);
+    assert!(t.out().is_empty());
+    // Stavajici klavesnice: vlevo (Povolit) a Enter.
+    left.source = 1;
+    enter.source = 1;
+    t.c.input(&[left, enter], t.now);
+    assert!(t.out().contains(&Out::Device { source: 9, trust: true }));
+    assert!(t.c.input.untrusted.is_empty());
 }

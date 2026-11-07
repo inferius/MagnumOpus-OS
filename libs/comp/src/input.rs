@@ -44,6 +44,8 @@ pub struct InputState {
     press_target: Option<u32>,
     /// Pocet zdroju umeleho vstupu (ukazuje se v panelu).
     pub injecting: u32,
+    /// Zdroje (zarizeni) cekajici na overeni: jejich udalosti se ignoruji.
+    pub untrusted: alloc::vec::Vec<u16>,
 }
 
 impl InputState {
@@ -55,6 +57,7 @@ impl InputState {
             pointer_window: None,
             press_target: None,
             injecting: 0,
+            untrusted: alloc::vec::Vec::new(),
         }
     }
 
@@ -155,6 +158,9 @@ impl Comp {
     }
 
     fn input_one(&mut self, r: &Record, now: u64) {
+        if r.source != 0 && self.input.untrusted.contains(&r.source) {
+            return;
+        }
         let syn = r.is_synthetic();
         let mods = r.mods;
         match r.event {
@@ -211,6 +217,7 @@ impl Comp {
                 self.input.press_target = None;
             }
             Event::SecureAttention => self.secure_attention(now),
+            Event::NewDevice { source, state } => self.new_device(source, state),
             _ => {}
         }
     }
