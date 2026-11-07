@@ -242,7 +242,7 @@ přímo zprávou `trust`.
 
 | Kde | Co |
 |---|---|
-| `cargo test -p usbproto` | deskriptory (konfigurace, alternativní nastavení, poškozené délky), setup pakety, zprávy, hub (deskriptor, stav portu, rychlost), HID boot (rozdíl reportů, rollover, tabulka usage, myš), parser reportu (deskriptory QEMU klávesnice, myši a tabletu, multimédia s id reportu, hodnoty se znaménkem, poškozené deskriptory) |
+| `cargo test -p usbproto` | deskriptory (konfigurace, alternativní nastavení, poškozené délky), setup pakety, zprávy, hub (deskriptor, stav portu, rychlost, route string a jeho meze), HID boot (rozdíl reportů, rollover, tabulka usage, myš), parser reportu (deskriptory QEMU klávesnice, myši a tabletu, multimédia s id reportu, hodnoty se znaménkem, poškozené deskriptory) |
 | `cargo xtask test`, sada `usb` | klávesnice USB ze startu je důvěryhodná; klávesy z QEMU až do služby (zdroj, scan kód HID); hotplug myši (připojení, pohyb, kolečko, odpojení); nová klávesnice a nová myš čekají na ověření (vstup jen na `secure`, po `trust` vlastníkovi fokusu); externí hub s klávesnicí za ním; tablet (absolutní poloha přes report protokol) |
 
 V QEMU je `qemu-xhci` s klávesnicí `usb-kbd` navázanou na konzoli druhé
@@ -257,7 +257,7 @@ a brala by si události, které má dostat PS/2.
 |---|---|---|
 | 1 | hotovo | řadič xHCI: převzetí od firmwaru, reset, kontexty, fronty, MSI-X, kořenové porty, kontrolní a interrupt přenosy |
 | 2 | hotovo | HID boot protokol (klávesnice, myš), hotplug, ověření nového vstupního zařízení |
-| 3 | hotovo | externí huby: route string, příznak hubu, počet portů, MTT (po výběru alternativního nastavení hubu s TT na port) a TT think time v kontextu slotu, TT pro low/full speed za high-speed hubem; odpojení hubu odpojí i zařízení za ním (nejvýš 5 úrovní hubů; port hubu nad 15 nejde adresovat a `ATTACH` vrátí `NOT_SUPPORTED`) |
+| 3 | hotovo | externí huby: route string, příznak hubu, počet portů, MTT (Configure Endpoint s endpointy alternativy 1 a pak SET_INTERFACE; hub, který ji odmítne, zůstane s jedním TT) a TT think time v kontextu slotu, TT pro low/full speed za high-speed hubem; odpojení hubu odpojí i zařízení za ním (nejvýš 5 úrovní hubů; port hubu nad 15 nejde adresovat: `usb-hub` ho neresetuje a `ATTACH` by vrátil `NOT_SUPPORTED`; po neúspěšném `ATTACH` ovladač hubu port vypne, aby nenastavené zařízení neodpovídalo na adrese 0) |
 | 4 | hotovo | parser deskriptoru reportu HID: multimediální klávesy, myši s více tlačítky a vodorovným kolečkem, tablety a pera (`EV_ABS`, událost `Absolute`) |
 | 5 | plán | I2C-HID (touchpady notebooků: potřebuje AML a ovladač I2C) |
 

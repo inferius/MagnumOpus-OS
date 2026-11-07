@@ -161,6 +161,23 @@ pub const fn clear_port_feature(port: u8, feature: u16) -> Setup {
     }
 }
 
+/// Nejvyssi port hubu, ktery jde adresovat: route string xHCI ma na kazdou
+/// uroven hubu 4 bity.
+pub const MAX_ROUTE_PORT: u8 = 15;
+/// Nejvic urovni hubu za root portem (USB 2.0 11.1.2.1, USB 3.x 10.1.3).
+pub const MAX_TIERS: usize = 5;
+
+/// Route string zarizeni na portu `port` hubu, ktery je v urovni `tier`
+/// (0 = hub primo na root portu) a ma route string `parent`. `None` =
+/// zarizeni nejde adresovat (port 0, port nad [`MAX_ROUTE_PORT`], prilis
+/// mnoho urovni).
+pub fn route(parent: u32, tier: usize, port: u8) -> Option<u32> {
+    if port == 0 || port > MAX_ROUTE_PORT || tier >= MAX_TIERS {
+        return None;
+    }
+    Some(parent | (port as u32) << (4 * tier))
+}
+
 /// Endpoint stavu hubu: interrupt IN 1, bitmapa zmen (bit 0 hub, bit N
 /// port N).
 pub const STATUS_ENDPOINT: u8 = 0x81;

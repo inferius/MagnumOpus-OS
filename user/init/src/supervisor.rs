@@ -6,8 +6,10 @@
 //!   zaloguje.
 //! - **Konec sluzby**: zaloguje kod. Sluzbu, kterou jde spustit znovu
 //!   samostatne (`timed`), spusti znovu s rostouci prodlevou (100 ms,
-//!   200 ms, ... nejvys 5 s). Kdyz spadne vic nez [`RESTART_MAX`]-krat za
-//!   [`RESTART_WINDOW`], vzda to. U ostatnich sluzeb (`devmgr`, `fsd`,
+//!   200 ms, ... nejvys 5 s). Na jeji potvrzeni neceka blokujici: kanal
+//!   nove sluzby je dalsi polozka smycky; kdyz do [`START_TIMEOUT`]
+//!   neodpovi, ukonci ji a pocita to jako pad. Kdyz spadne vic nez
+//!   [`RESTART_MAX`]-krat za [`RESTART_WINDOW`], vzda to. U ostatnich sluzeb (`devmgr`, `fsd`,
 //!   `inputd`) jen zaloguje pad: obnova potrebuje znovu napojit ovladace
 //!   a je popsana jako dalsi krok v dokumentaci.
 //!
@@ -28,9 +30,26 @@ pub const RESTART_MAX: usize = 5;
 /// Prodleva pred prvnim restartem (pak dvojnasobna, nejvys 5 s).
 const RESTART_DELAY: Duration = Duration::from_millis(100);
 const RESTART_DELAY_MAX: Duration = Duration::from_secs(5);
+/// Jak dlouho ma nova sluzba na potvrzeni startu.
+pub const START_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Spusti sluzbu znovu; vraci handle noveho procesu (pro cekani).
-pub type Restart = fn(&Startup) -> libos::Result<Handle>;
+/// Jak sluzbu spustit znovu.
+#[derive(Clone, Copy)]
+pub struct Restart {
+    /// Spusti novy proces (neceka na nej).
+    pub start: fn(&Startup) -> libos::Result<Started>,
+    /// Kanal z [`Started::ready`] je citelny nebo zavreny: dokonci start
+    /// (precte potvrzeni). Chyba = sluzba se ukonci a pocita se jako pad.
+    pub ready: Option<fn() -> libos::Result<()>>,
+}
+
+/// Nove spustena sluzba.
+pub struct Started {
+    /// Proces (supervisor ceka na jeho konec).
+    pub process: Handle,
+    /// Kanal, na kterem sluzba potvrdi start (`None` = bezi hned).
+    pub ready: Option<Handle>,
+}
 
 /// Co se v kole stalo (pro testy a log).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +65,14 @@ pub enum Happened {
     DevmgrGone,
 }
 
+impl Watched {
+    fn kill(&self) {
+        if let Some(p) = &self.process {
+            let _ = libos::sys::process_kill(p.raw());
+        }
+    }
+}
+
 struct Watched {
     name: &'static str,
     /// Proces, na jehoz konec se ceka (`None` = nebezi).
@@ -54,12 +81,15 @@ struct Watched {
     /// Casy restartu v okne [`RESTART_WINDOW`].
     history: Vec<u64>,
     restart_at: Option<u64>,
+    /// Sluzba po restartu ceka na potvrzeni: kanal a nejzazsi cas.
+    starting: Option<(Handle, u64)>,
     given_up: bool,
 }
 
 pub struct Supervisor {
     watched: Vec<Watched>,
     devmgr_open: bool,
+    start_timeout: Duration,
 }
 
 /// Supervisor initu (testy ho ridi pres [`Supervisor::step`]).
@@ -68,6 +98,8 @@ pub static SUPERVISOR: spin::Mutex<Supervisor> = spin::Mutex::new(Supervisor::ne
 enum Item {
     Devmgr,
     Service(usize),
+    /// Kanal sluzby, ktera ceka na potvrzeni startu.
+    Starting(usize),
 }
 
 impl Supervisor {
@@ -75,6 +107,17 @@ impl Supervisor {
         Self {
             watched: Vec::new(),
             devmgr_open: true,
+            start_timeout: START_TIMEOUT,
+        }
+    }
+
+    /// Samostatny supervisor pro testy: jina lhuta na potvrzeni startu
+    /// a bez spravce zarizeni (zpravy devmgr zustanou hlavnimu).
+    pub const fn for_tests(start_timeout: Duration) -> Self {
+        Self {
+            watched: Vec::new(),
+            devmgr_open: false,
+            start_timeout,
         }
     }
 
@@ -88,6 +131,7 @@ impl Supervisor {
                 restart,
                 history: Vec::new(),
                 restart_at: None,
+                starting: None,
                 given_up: false,
             }),
             Err(e) => println!("init: sluzbu {name} nelze hlidat: {e}"),
@@ -121,7 +165,18 @@ impl Supervisor {
                 what.push(Item::Service(i));
             }
         }
-        let due = self.watched.iter().filter_map(|w| w.restart_at).min();
+        for (i, w) in self.watched.iter().enumerate() {
+            if let Some((h, _)) = &w.starting {
+                items.push((h, Signals::READABLE | Signals::PEER_CLOSED));
+                what.push(Item::Starting(i));
+            }
+        }
+        let due = self
+            .watched
+            .iter()
+            .flat_map(|w| [w.restart_at, w.starting.as_ref().map(|s| s.1)])
+            .flatten()
+            .min();
         let wake = match (deadline, due) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -144,11 +199,49 @@ impl Supervisor {
                     }
                 }
                 Item::Service(i) if sig.intersects(Signals::TERMINATED) => self.exited(i, &mut out),
-                Item::Service(_) => {}
+                Item::Starting(i) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => {
+                    self.started(i, &mut out)
+                }
+                Item::Service(_) | Item::Starting(_) => {}
             }
         }
+        self.start_timeouts();
         self.restart_due(startup, &mut out);
         out
+    }
+
+    /// Sluzba po restartu poslala potvrzeni (nebo zavrela kanal).
+    fn started(&mut self, i: usize, out: &mut Vec<Happened>) {
+        let w = &mut self.watched[i];
+        // Mezitim skoncila (zpracovano v `exited`).
+        if w.starting.take().is_none() {
+            return;
+        }
+        let ready = w.restart.and_then(|r| r.ready);
+        match ready.map_or(Ok(()), |f| f()) {
+            Ok(()) => {
+                println!("init: sluzba {} znovu spustena", w.name);
+                out.push(Happened::Restarted(w.name));
+            }
+            Err(e) => {
+                // Ukoncit: konec procesu pak zpracuje `exited` jako pad.
+                println!("init: sluzba {} nepotvrdila start: {e}", w.name);
+                w.kill();
+            }
+        }
+    }
+
+    /// Sluzby, ktere do lhuty nepotvrdily start, ukonci (konec procesu
+    /// zpracuje `exited` jako pad).
+    fn start_timeouts(&mut self) {
+        let now = time::now();
+        for w in self.watched.iter_mut() {
+            if w.starting.as_ref().is_some_and(|s| s.1 <= now) {
+                w.starting = None;
+                println!("init: sluzba {} neodpovedela, ukoncuji ji", w.name);
+                w.kill();
+            }
+        }
     }
 
     /// Zpravy spravce zarizeni po startu: zarizeni pripojena za behu.
@@ -174,6 +267,7 @@ impl Supervisor {
     fn exited(&mut self, i: usize, out: &mut Vec<Happened>) {
         let w = &mut self.watched[i];
         let Some(h) = w.process.take() else { return };
+        w.starting = None;
         let code = libos::sys::process_exit_code(h.raw()).unwrap_or(i64::MIN);
         println!(
             "init: sluzba {} skoncila: {}",
@@ -216,11 +310,20 @@ impl Supervisor {
             }
             w.restart_at = None;
             w.history.push(now);
-            match restart(startup) {
-                Ok(h) => {
-                    w.process = Some(h);
-                    println!("init: sluzba {} znovu spustena", w.name);
-                    out.push(Happened::Restarted(w.name));
+            match (restart.start)(startup) {
+                Ok(s) => {
+                    w.process = Some(s.process);
+                    match s.ready {
+                        Some(ch) => {
+                            let deadline =
+                                now.saturating_add(self.start_timeout.as_nanos() as u64);
+                            w.starting = Some((ch, deadline));
+                        }
+                        None => {
+                            println!("init: sluzba {} znovu spustena", w.name);
+                            out.push(Happened::Restarted(w.name));
+                        }
+                    }
                 }
                 Err(e) => {
                     // Start selhal: pocita se jako dalsi pad.
@@ -234,6 +337,13 @@ impl Supervisor {
                 }
             }
         }
+    }
+
+    /// Ceka sluzba po restartu na potvrzeni startu?
+    pub fn is_starting(&self, name: &str) -> bool {
+        self.watched
+            .iter()
+            .any(|w| w.name == name && w.starting.is_some())
     }
 
     /// Sluzba, ktera to vzdala, dostane novou sanci (rucni zasah spravce

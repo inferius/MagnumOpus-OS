@@ -112,6 +112,18 @@ impl Setup {
             length: 0,
         }
     }
+
+    /// SET_INTERFACE: alternativni nastaveni `alternate` rozhrani
+    /// `interface`.
+    pub const fn set_interface(interface: u8, alternate: u8) -> Self {
+        Self {
+            request_type: rt::HOST_TO_DEVICE | rt::STANDARD | rt::TO_INTERFACE,
+            request: request::SET_INTERFACE,
+            value: alternate as u16,
+            index: interface as u16,
+            length: 0,
+        }
+    }
 }
 
 /// Deskriptor zarizeni (18 B).
@@ -208,6 +220,9 @@ pub struct Configuration {
     pub max_power: u8,
     /// Jen zakladni nastaveni rozhrani (alternate 0).
     pub interfaces: Vec<Interface>,
+    /// Alternativni nastaveni rozhrani (alternate != 0), v poradi
+    /// deskriptoru.
+    pub alternates: Vec<Interface>,
 }
 
 impl Configuration {
@@ -222,9 +237,10 @@ impl Configuration {
             value: b[5],
             max_power: b[8],
             interfaces: Vec::new(),
+            alternates: Vec::new(),
         };
         let mut off = b[0] as usize;
-        // Rozhrani s alternate != 0 a jeho endpointy se preskoci.
+        // Rozhrani s alternate != 0 jdou do `alternates`.
         let mut current: Option<Interface> = None;
         while off + 2 <= total {
             let len = b[off] as usize;
@@ -234,10 +250,8 @@ impl Configuration {
             let d = &b[off..off + len];
             match d[1] {
                 kind::INTERFACE if len >= 9 => {
-                    if let Some(i) = current.take()
-                        && i.alternate == 0
-                    {
-                        cfg.interfaces.push(i);
+                    if let Some(i) = current.take() {
+                        cfg.push(i);
                     }
                     current = Some(Interface {
                         number: d[2],
@@ -276,12 +290,35 @@ impl Configuration {
             }
             off += len;
         }
-        if let Some(i) = current
-            && i.alternate == 0
-        {
-            cfg.interfaces.push(i);
+        if let Some(i) = current {
+            cfg.push(i);
         }
         Some(cfg)
+    }
+
+    fn push(&mut self, i: Interface) {
+        if i.alternate == 0 {
+            self.interfaces.push(i);
+        } else {
+            self.alternates.push(i);
+        }
+    }
+
+    /// Alternativni nastaveni `alternate` rozhrani `number`.
+    pub fn alternate(&self, number: u8, alternate: u8) -> Option<&Interface> {
+        self.alternates
+            .iter()
+            .find(|i| i.number == number && i.alternate == alternate)
+    }
+
+    /// Kopie konfigurace, kde rozhrani `number` pouziva alternativni
+    /// nastaveni `alternate` (pro endpointy po SET_INTERFACE).
+    pub fn with_alternate(&self, number: u8, alternate: u8) -> Option<Self> {
+        let alt = self.alternate(number, alternate)?.clone();
+        let mut c = self.clone();
+        let slot = c.interfaces.iter_mut().find(|i| i.number == number)?;
+        *slot = alt;
+        Some(c)
     }
 
     /// Celkova delka konfigurace z prvnich 9 B (pro druhe cteni).

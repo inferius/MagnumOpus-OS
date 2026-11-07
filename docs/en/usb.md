@@ -251,7 +251,7 @@ mechanism is done in `inputd`. The dialog with the code comes with the GUI
 
 | Where | What |
 |---|---|
-| `cargo test -p usbproto` | descriptors (configuration, alternate settings, broken lengths), setup packets, messages, hub (descriptor, port status, speed), HID boot (report differencing, rollover, usage table, mouse), report parser (the QEMU keyboard, mouse and tablet descriptors, multimedia with a report id, signed values, broken descriptors) |
+| `cargo test -p usbproto` | descriptors (configuration, alternate settings, broken lengths), setup packets, messages, hub (descriptor, port status, speed, route string and its limits), HID boot (report differencing, rollover, usage table, mouse), report parser (the QEMU keyboard, mouse and tablet descriptors, multimedia with a report id, signed values, broken descriptors) |
 | `cargo xtask test`, suite `usb` | the USB keyboard from boot is trusted; keys from QEMU all the way to the service (source, HID scan code); mouse hotplug (attach, motion, wheel, detach); a new keyboard and a new mouse wait for verification (input only on `secure`, after `trust` to the focus owner); an external hub with a keyboard behind it; a tablet (absolute position through the report protocol) |
 
 QEMU has `qemu-xhci` with a `usb-kbd` keyboard bound to the console of a
@@ -267,7 +267,7 @@ PS/2.
 |---|---|---|
 | 1 | done | xHCI controller: takeover from the firmware, reset, contexts, rings, MSI-X, root ports, control and interrupt transfers |
 | 2 | done | HID boot protocol (keyboard, mouse), hotplug, new input device verification |
-| 3 | done | external hubs: route string, hub flag, port count, MTT (after selecting the per-port-TT alternate setting of the hub) and TT think time in the slot context, the TT for low/full speed behind a high-speed hub; detaching a hub detaches everything behind it (at most 5 hub tiers; a hub port above 15 cannot be addressed and `ATTACH` returns `NOT_SUPPORTED`) |
+| 3 | done | external hubs: route string, hub flag, port count, MTT (Configure Endpoint with the endpoints of alternate setting 1, then SET_INTERFACE; a hub that rejects it stays single-TT) and TT think time in the slot context, the TT for low/full speed behind a high-speed hub; detaching a hub detaches everything behind it (at most 5 hub tiers; a hub port above 15 cannot be addressed: `usb-hub` does not reset it and `ATTACH` would return `NOT_SUPPORTED`; after a failed `ATTACH` the hub driver disables the port so that an unconfigured device does not answer at address 0) |
 | 4 | done | HID report descriptor parser: multimedia keys, mice with more buttons and a horizontal wheel, tablets and pens (`EV_ABS`, the `Absolute` event) |
 | 5 | plan | I2C-HID (laptop touchpads: needs AML and an I2C driver) |
 

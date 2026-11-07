@@ -44,7 +44,7 @@ watched processes:
 | `devmgr` sends `input` with a channel | passes it to the input service (`device`). This is how USB devices attached at run time get into the system |
 | `devmgr` sends `block` | only logs it for now (disks at run time come with multiple disks in `fsd`) |
 | `devmgr` closes its channel | logs it, hotplug stops working |
-| a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). It waits at most 1 s for the new service to answer (it serves nothing else meanwhile), otherwise it kills it and the attempt counts as another crash. More than 5 restarts within 60 s = it gives up and the service stays stopped |
+| a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). It does not block waiting for the new service to confirm: its channel is one more item of the loop. If it does not answer within 5 s (or answers with an error), it kills it and the attempt counts as another crash. More than 5 restarts within 60 s = it gives up and the service stays stopped |
 | another service exits (`devmgr`, `fsd`, `inputd`) | logs the code. No recovery yet (see below) |
 
 Log when a service crashes:
@@ -61,12 +61,15 @@ The code is in `user/init/src/supervisor.rs`. One round is
 (`DeviceAdded`, `Exited`, `Restarted`, `GaveUp`, `DevmgrGone`), so the
 tests drive it the same way as a normal run, only with a deadline. A new
 service is handed to the supervisor with `watch(name, process, restart)`,
-where `restart` is a function that starts the service again and returns
-the handle of the new process (`None` = only watch it):
+where `restart` is `Restart { start, ready }` (`None` = only watch it).
+`start` starts a new process and returns `Started { process, ready }`:
+the process handle and optionally a channel on which the service confirms
+the start. Once the channel is readable, the supervisor calls `ready`
+(reads the confirmation) and only then reports `Restarted`:
 
 ```rust
 let mut sup = supervisor::SUPERVISOR.lock();
-sup.watch("timed", &t.process, Some(system::restart_time));
+sup.watch("timed", &t.process, Some(system::TIME_RESTART));
 sup.watch("fsd", &fsd_process, None);
 sup.run(&startup); // never returns
 ```
@@ -109,3 +112,4 @@ Tests of the `supervisor` suite:
 |---|---|
 | time service crash: restart and reply | `timed` terminated with `PROCESS_KILL`: the supervisor notices, starts it again and the new service answers |
 | repeated crashes: the supervisor gives up | after 5 restarts within a minute the next crash = `GaveUp`, the service is not running; `revive` starts it again |
+| restart without confirmation: the supervisor kills the service | its own supervisor (`Supervisor::for_tests`, 300 ms limit) with a service that never confirms the start: the supervisor waits without blocking, kills it after the limit (`PROCESS_KILL`) and does not report `Restarted` |

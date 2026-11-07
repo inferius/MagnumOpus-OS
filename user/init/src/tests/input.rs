@@ -29,6 +29,7 @@ pub const TESTS: &[Test] = &[
     ("umely vstup nevyvola bezpecnou zkratku", inject_no_secure),
     ("opakovani drzene klavesy", key_repeat),
     ("tlacitka mimo mys nejsou klavesy", other_buttons),
+    ("scan kod plati jen pro klavesu hned za nim", scan_codes),
     ("plna fronta klienta: Dropped", full_queue),
     ("neplatne prikazy a zpravy", bad_commands),
 ];
@@ -602,6 +603,39 @@ fn other_buttons(_: &Startup) -> TestResult {
         !got.iter().any(|r| matches!(r.event, Event::Key { .. })),
         "tlacitko prislo jako klavesa (a opakovalo se)"
     );
+    Ok(())
+}
+
+fn scan_codes(_: &Startup) -> TestResult {
+    let inp = input()?;
+    drain(&inp.focus);
+    let inj = inp.inject().map_err(|e| fail("inject", e))?;
+    const SCAN: i32 = 0x0007_0005;
+    let msc = RawEvent::new(EV_MSC, MSC_SCAN, SCAN);
+    // Scan kod pred pohybem a koncem snimku k dalsi klavese nepatri.
+    send(&inj, &[msc, RawEvent::rel(REL_X, 1), RawEvent::syn()])?;
+    send(&inj, &[msc, RawEvent::syn()])?;
+    send(&inj, &[RawEvent::key(KEY_B, true), RawEvent::syn()])?;
+    send(&inj, &[RawEvent::key(KEY_B, false), RawEvent::syn()])?;
+    // Scan kod tesne pred klavesou ano.
+    send(&inj, &[msc, RawEvent::key(KEY_B, true), RawEvent::syn()])?;
+    send(&inj, &[RawEvent::key(KEY_B, false), RawEvent::syn()])?;
+    let presses = |got: &[Record]| -> Vec<u32> {
+        got.iter()
+            .filter_map(|r| match r.event {
+                Event::Key {
+                    code: KEY_B,
+                    scancode,
+                    action: Action::Press,
+                    ..
+                } => Some(scancode),
+                _ => None,
+            })
+            .collect()
+    };
+    let got = read_until(&inp.focus, deadline(TIMEOUT), |r| presses(r).len() >= 2)
+        .map_err(|e| failr("klavesy B", e))?;
+    check_eq!(presses(&got), alloc::vec![KEY_B as u32, SCAN as u32], "scan kody stisku B");
     Ok(())
 }
 

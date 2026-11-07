@@ -34,6 +34,9 @@ const RESET_RECOVERY: Duration = Duration::from_millis(10);
 struct Hub {
     usb: UsbClient,
     ports: u8,
+    /// Virtualni root hub radice: porty adresuje cislo root portu, ne
+    /// route string.
+    root: bool,
     /// Porty, na kterych je nastavene zarizeni.
     attached: Vec<bool>,
 }
@@ -75,6 +78,7 @@ fn main(startup: Startup) -> i64 {
     let mut h = Hub {
         usb,
         ports: desc.ports,
+        root,
         attached: alloc::vec![false; desc.ports as usize + 1],
     };
     match h.run(desc) {
@@ -140,7 +144,15 @@ impl Hub {
             match self.attach(p, st) {
                 Ok(()) => self.attached[i] = true,
                 Err(e) if e.error == Error::PeerClosed => return Err(e),
-                Err(e) => println!("usb-hub: port {p}: zarizeni nelze nastavit: {e}"),
+                Err(e) => {
+                    println!("usb-hub: port {p}: zarizeni nelze nastavit: {e}");
+                    // Povoleny port s nenastavenym zarizenim: to by dal
+                    // odpovidalo na vychozi adrese 0 a pletlo se do
+                    // nastavovani dalsich zarizeni za hubem.
+                    let _ = self
+                        .usb
+                        .control(hub::clear_port_feature(p, feature::PORT_ENABLE), &[]);
+                }
             }
         }
         Ok(())
@@ -149,6 +161,11 @@ impl Hub {
     /// Reset portu (USB 2; port USB 3 se po pripojeni povoli sam) a ohlaseni
     /// zarizeni radici.
     fn attach(&mut self, p: u8, st: PortStatus) -> UsbResult<()> {
+        // Port externiho hubu nad 15 radic neumi adresovat (route string):
+        // zarizeni na nem se ani neresetuje, zustane na zakazanem portu.
+        if !self.root && p > hub::MAX_ROUTE_PORT {
+            return Err(Error::NotSupported.into());
+        }
         let mut st = st;
         if st.status & port::ENABLE == 0 {
             self.usb.control(hub::set_port_feature(p, feature::PORT_RESET), &[])?;

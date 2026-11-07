@@ -214,7 +214,7 @@ Buttons are codes 0x100-0x15F and 0x2C0-0x2E7 (`code::is_button`: mouse,
 joystick, gamepad, tablet touch). They arrive as `Button`, do not go
 through the layout and do not repeat. Every other `EV_KEY` code is a key.
 | `EV_REL` (2) | `REL_X`, `REL_Y`, `REL_WHEEL` (positive is up), `REL_HWHEEL` | delta |
-| `EV_MSC` (4) | `MSC_SCAN` | raw scan code of the next key (PS/2, USB HID) |
+| `EV_MSC` (4) | `MSC_SCAN` | raw scan code of the key right after it (PS/2, USB HID); dropped when something else follows |
 | `EV_SYN` (0) | `SYN_REPORT` | end of frame |
 
 The service groups events into **frames**. It sums the motion in one frame
@@ -448,7 +448,7 @@ the device are ignored.
 | `cargo test -p inputproto` | message format: every record kind, invalid data, status |
 | `cargo test -p keymap` | US, CZ, AltGr, dead keys, Caps Lock, Num Lock, repeat |
 | `cargo test -p i8042` | scan codes (E0, E1, fake Shifts, Print Screen), mouse packets (sync, overflow, wheel, 5 buttons) |
-| `cargo xtask test`, suite `vstup` | the service in QEMU: devices, synthetic input, CZ, mouse, shortcut, repeat, non-mouse buttons, full queue (`Dropped`), invalid commands |
+| `cargo xtask test`, suite `vstup` | the service in QEMU: devices, synthetic input, CZ, mouse, shortcut, repeat, non-mouse buttons, scan code only for the key right after it, full queue (`Dropped`), invalid commands |
 
 The test **"QEMU: klavesnice a mys az do sluzby"** (keyboard and mouse all
 the way to the service) checks the whole path from the device. Init prints

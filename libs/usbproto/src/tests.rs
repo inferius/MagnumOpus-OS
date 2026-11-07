@@ -51,7 +51,7 @@ fn configuration_parse() {
 }
 
 #[test]
-fn configuration_skips_alternates_and_rejects_bad_length() {
+fn configuration_alternates_and_rejects_bad_length() {
     let mut c = CONFIG.to_vec();
     // Druhe nastaveni rozhrani 0 (alternate 1) s vlastnim endpointem.
     c.extend_from_slice(&[9, 4, 0, 1, 1, 3, 0, 0, 0, 7, 5, 0x82, 3, 4, 0, 10]);
@@ -60,6 +60,15 @@ fn configuration_skips_alternates_and_rejects_bad_length() {
     let parsed = Configuration::parse(&c).unwrap();
     assert_eq!(parsed.interfaces.len(), 1);
     assert_eq!(parsed.interfaces[0].endpoints.len(), 1);
+    assert_eq!(parsed.interfaces[0].endpoints[0].address, 0x81);
+    // Alternativni nastaveni je zvlast a jde ho pouzit misto zakladniho.
+    assert_eq!(parsed.alternates.len(), 1);
+    assert_eq!(parsed.alternate(0, 1).map(|i| i.endpoints[0].address), Some(0x82));
+    assert_eq!(parsed.alternate(0, 2), None);
+    let alt = parsed.with_alternate(0, 1).unwrap();
+    assert_eq!(alt.interfaces.len(), 1);
+    assert_eq!((alt.interfaces[0].alternate, alt.interfaces[0].endpoints[0].address), (1, 0x82));
+    assert_eq!(parsed.with_alternate(1, 1), None);
     // Deskriptor s delkou 0 (zacykleni) a pres konec.
     let mut bad = CONFIG.to_vec();
     bad[9] = 0;
@@ -78,6 +87,22 @@ fn setup_roundtrip() {
     assert!(!Setup::set_configuration(1).is_in());
     assert_eq!(hub::set_port_feature(3, hub::feature::PORT_RESET).to_bytes(), [0x23, 3, 4, 0, 3, 0, 0, 0]);
     assert_eq!(hub::get_port_status(2).to_bytes(), [0xA3, 0, 0, 0, 2, 0, 4, 0]);
+    // SET_INTERFACE rozhrani 2, alternativa 1: standardni, prijemce rozhrani.
+    assert_eq!(Setup::set_interface(2, 1).to_bytes(), [0x01, 11, 1, 0, 2, 0, 0, 0]);
+}
+
+#[test]
+fn hub_route_string() {
+    // Hub na root portu (uroven 0): port v nejnizsich 4 bitech.
+    assert_eq!(hub::route(0, 0, 3), Some(0x3));
+    // Dalsi uroven: port o 4 bity vys, rodic zustava.
+    assert_eq!(hub::route(0x3, 1, 15), Some(0xF3));
+    assert_eq!(hub::route(0x4321, 4, 5), Some(0x54321));
+    // Port 0, port nad 15 a sesta uroven nejde adresovat.
+    assert_eq!(hub::route(0, 0, 0), None);
+    assert_eq!(hub::route(0, 0, 16), None);
+    assert_eq!(hub::route(0x4321, 2, 255), None);
+    assert_eq!(hub::route(0x54321, 5, 1), None);
 }
 
 #[test]

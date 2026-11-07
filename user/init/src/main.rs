@@ -26,7 +26,7 @@ fn main(startup: Startup) -> i64 {
     let mut sup = supervisor::SUPERVISOR.lock();
     match system::start_time(&startup) {
         Ok(t) => {
-            sup.watch("timed", &t.process, Some(system::restart_time));
+            sup.watch("timed", &t.process, Some(system::TIME_RESTART));
             *system::TIME.lock() = Some(t);
         }
         Err(e) => println!("init: sluzbu casu nelze spustit: {e}"),

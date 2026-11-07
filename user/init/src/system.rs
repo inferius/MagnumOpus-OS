@@ -12,6 +12,8 @@ use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
 use libos::{Channel, Error, Process, Result, Rights, Startup, println, time};
 
+use crate::supervisor::{Restart, Started};
+
 /// Zarizeni a sluzby spustene pri startu (testy a supervisor je ctou).
 pub static DEVICES: spin::Once<Devices> = spin::Once::new();
 
@@ -119,16 +121,21 @@ pub struct TimeService {
 /// (pripadna oprava RTC v mistnim case probehne pred startem ostatnich
 /// sluzeb, takze casy souboru jsou od zacatku spravne).
 pub fn start_time(startup: &Startup) -> Result<TimeService> {
-    start_time_within(startup, Duration::from_secs(5))
+    let t = spawn_time(startup)?;
+    let deadline = Some(time::deadline_after(Duration::from_secs(5)));
+    match time_ready(&t, |c| c.read(deadline)) {
+        Ok(()) => Ok(t),
+        Err(e) => {
+            let _ = t.process.kill();
+            Err(e)
+        }
+    }
 }
 
-/// Jak dlouho supervisor pri restartu ceka na novou sluzbu casu (mezitim
-/// nic jineho neobsluhuje, proto kratce).
-const RESTART_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// Spusti sluzbu casu a pocka nejvys `timeout` na potvrzeni nastaveni;
-/// sluzbu, ktera neodpovi, ukonci.
-fn start_time_within(startup: &Startup, timeout: Duration) -> Result<TimeService> {
+/// Spusti proces sluzby casu a posle mu nastaveni (potvrzeni precte
+/// [`time_ready`]). Kdyz zapis selze, proces ukonci: nesmi zustat bezet
+/// nikym nehlidany s pravem nastavovat hodiny.
+pub(crate) fn spawn_time(startup: &Startup) -> Result<TimeService> {
     let fs = Initfs::open(startup)?;
     let image = fs.find("timed").ok_or(Error::NotFound)?;
     let resource = startup.root_resource.as_ref().ok_or(Error::NotFound)?;
@@ -136,21 +143,23 @@ fn start_time_within(startup: &Startup, timeout: Duration) -> Result<TimeService
         .handle()
         .duplicate(Some(Rights::BASIC | Rights::SET_CLOCK))?;
     let (process, channel) = libos::spawn("timed", image, vec![StartHandle::user(clock)])?;
-    channel.write(TIME_SETTINGS.as_bytes(), Vec::new())?;
-    let msg = match channel.read(Some(time::deadline_after(timeout))) {
-        Ok(m) => m,
-        Err(e) => {
-            let _ = process.kill();
-            return Err(e);
-        }
-    };
+    if let Err(e) = channel.write(TIME_SETTINGS.as_bytes(), Vec::new()) {
+        let _ = process.kill();
+        return Err(e);
+    }
+    Ok(TimeService { process, channel })
+}
+
+/// Potvrzeni nastaveni od nove sluzby casu (`read` = jak ho precist).
+fn time_ready(t: &TimeService, read: impl Fn(&Channel) -> Result<libos::Message>) -> Result<()> {
+    let msg = read(&t.channel)?;
     if msg.data != b"ok" {
         println!(
             "init: sluzba casu hlasi: {}",
             core::str::from_utf8(&msg.data).unwrap_or("?")
         );
     }
-    Ok(TimeService { process, channel })
+    Ok(())
 }
 
 /// Podpis superbloku naseho souboroveho systemu (format v3).
@@ -197,10 +206,43 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
     Ok(())
 }
 
-/// Restart sluzby casu (supervisor): nova sluzba nahradi starou v [`TIME`].
-pub fn restart_time(startup: &Startup) -> Result<libos::Handle> {
-    let t = start_time_within(startup, RESTART_TIMEOUT)?;
-    let h = t.process.handle().duplicate(None)?;
+/// Sluzba casu po restartu, ktera jeste nepotvrdila nastaveni.
+static STARTING_TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
+
+/// Restart sluzby casu pro supervisor: spusti ji a neceka. Supervisor
+/// pocka na jeji kanal a zavola [`time_started`].
+pub const TIME_RESTART: Restart = Restart {
+    start: restart_time,
+    ready: Some(time_started),
+};
+
+fn restart_time(startup: &Startup) -> Result<Started> {
+    let t = spawn_time(startup)?;
+    let handles = t
+        .process
+        .handle()
+        .duplicate(None)
+        .and_then(|p| Ok((p, t.channel.handle().duplicate(None)?)));
+    match handles {
+        Ok((process, ready)) => {
+            *STARTING_TIME.lock() = Some(t);
+            Ok(Started {
+                process,
+                ready: Some(ready),
+            })
+        }
+        Err(e) => {
+            let _ = t.process.kill();
+            Err(e)
+        }
+    }
+}
+
+/// Nova sluzba casu odpovedela (nebo zavrela kanal): nahradi starou
+/// v [`TIME`]. Chyba = supervisor ji ukonci.
+fn time_started() -> Result<()> {
+    let t = STARTING_TIME.lock().take().ok_or(Error::NotFound)?;
+    time_ready(&t, |c| c.try_read())?;
     *TIME.lock() = Some(t);
-    Ok(h)
+    Ok(())
 }

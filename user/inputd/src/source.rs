@@ -126,13 +126,14 @@ impl Source {
         out: &mut Vec<Record>,
         mut on_key: impl FnMut(&Self, u16, u32, Action) -> KeyVerdict,
     ) -> bool {
+        // Scan kod (MSC_SCAN) plati jen pro udalost hned za nim: kdyz to
+        // neni klavesa (tlacitko, pohyb, konec snimku), zahodi se.
+        let scan = self.scan.take();
         match e.kind {
             EV_MSC if e.code == MSC_SCAN => self.scan = Some(e.value as u32),
             // Tlacitka (mys, joystick, gamepad, tablet) nejsou klavesy:
             // nejdou pres rozlozeni a neopakuji se.
             EV_KEY if is_button(e.code) => {
-                // Scan kod patri tomuto tlacitku, ne pristi klavese.
-                self.scan = None;
                 let action = match e.value {
                     0 => Action::Release,
                     1 => Action::Press,
@@ -157,7 +158,7 @@ impl Source {
                     1 => Action::Press,
                     _ => return false,
                 };
-                let scancode = self.scan.take().unwrap_or(e.code as u32);
+                let scancode = scan.unwrap_or(e.code as u32);
                 if action == Action::Release
                     && let Some(i) = self.swallowed.iter().position(|&c| c == e.code)
                 {

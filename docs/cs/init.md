@@ -42,7 +42,7 @@ Smyčka čeká na kanál správce zařízení a na konec hlídaných procesů:
 | `devmgr` pošle `input` s kanálem | předá ho službě vstupu (`device`). Takhle se do systému dostanou zařízení USB připojená za běhu |
 | `devmgr` pošle `block` | zatím jen zaloguje (disky za běhu přijdou s více disky v `fsd`) |
 | `devmgr` zavře kanál | zaloguje, hotplug přestane fungovat |
-| skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na odpověď nové služby čeká nejvýš 1 s (mezitím nic jiného neobsluhuje), jinak ji ukončí a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
+| skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na potvrzení nové služby nečeká blokující: její kanál je další položka smyčky. Když do 5 s neodpoví (nebo odpoví chybou), ukončí ji a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
 | skončila jiná služba (`devmgr`, `fsd`, `inputd`) | zaloguje kód. Obnova zatím není (viz níže) |
 
 Log při pádu služby:
@@ -59,12 +59,14 @@ Kód je v `user/init/src/supervisor.rs`. Jedno kolo je
 (`DeviceAdded`, `Exited`, `Restarted`, `GaveUp`, `DevmgrGone`), takže ho
 testy řídí stejně jako běžný běh, jen s termínem. Novou službu
 supervisoru předá `watch(jméno, proces, restart)`, kde `restart` je
-funkce, která službu spustí znovu a vrátí handle nového procesu (`None` =
-jen hlídat):
+`Restart { start, ready }` (`None` = jen hlídat). `start` spustí nový
+proces a vrátí `Started { process, ready }`: handle procesu a případně
+kanál, na kterém služba potvrdí start. Až je kanál čitelný, supervisor
+zavolá `ready` (přečte potvrzení) a teprve pak hlásí `Restarted`:
 
 ```rust
 let mut sup = supervisor::SUPERVISOR.lock();
-sup.watch("timed", &t.process, Some(system::restart_time));
+sup.watch("timed", &t.process, Some(system::TIME_RESTART));
 sup.watch("fsd", &fsd_process, None);
 sup.run(&startup); // nikdy se nevrátí
 ```
@@ -104,3 +106,4 @@ Testy sady `supervisor`:
 |---|---|
 | pád služby času: restart a odpověď | `timed` ukončený přes `PROCESS_KILL`: supervisor zaznamená konec, spustí ho znovu a nová služba odpovídá |
 | opakované pády: supervisor to vzdá | po 5 restartech za minutu další pád = `GaveUp`, služba neběží; `revive` ji spustí znovu |
+| restart bez potvrzení: supervisor službu ukončí | vlastní supervisor (`Supervisor::for_tests`, lhůta 300 ms) se službou, která start nikdy nepotvrdí: supervisor na ni čeká bez blokování, po lhůtě ji ukončí (`PROCESS_KILL`) a nehlásí `Restarted` |

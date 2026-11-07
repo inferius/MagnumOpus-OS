@@ -197,7 +197,7 @@ Tlačítka jsou kódy 0x100-0x15F a 0x2C0-0x2E7 (`code::is_button`: myš,
 joystick, gamepad, dotyk tabletu). Přijdou jako `Button`, nejdou přes
 rozložení a neopakují se. Ostatní kódy `EV_KEY` jsou klávesy.
 | `EV_REL` (2) | `REL_X`, `REL_Y`, `REL_WHEEL` (kladně nahoru), `REL_HWHEEL` | posun |
-| `EV_MSC` (4) | `MSC_SCAN` | surový scan kód příští klávesy (PS/2, USB HID) |
+| `EV_MSC` (4) | `MSC_SCAN` | surový scan kód klávesy hned za ním (PS/2, USB HID); když za ním přijde něco jiného, zahodí se |
 | `EV_SYN` (0) | `SYN_REPORT` | konec snímku |
 
 Služba skládá události do **snímků**. Pohyb v jednom snímku sečte do
@@ -422,7 +422,7 @@ vždy.
 | `cargo test -p inputproto` | formát zpráv: všechny druhy záznamů, neplatná data, stav |
 | `cargo test -p keymap` | US, CZ, AltGr, mrtvé klávesy, Caps Lock, Num Lock, opakování |
 | `cargo test -p i8042` | scan kódy (E0, E1, falešné Shifty, Print Screen), pakety myši (synchronizace, přetečení, kolečko, 5 tlačítek) |
-| `cargo xtask test`, sada `vstup` | služba v QEMU: zařízení, umělý vstup, CZ, myš, zkratka, opakování, tlačítka mimo myš, plná fronta (`Dropped`), neplatné příkazy |
+| `cargo xtask test`, sada `vstup` | služba v QEMU: zařízení, umělý vstup, CZ, myš, zkratka, opakování, tlačítka mimo myš, scan kód jen pro klávesu hned za ním, plná fronta (`Dropped`), neplatné příkazy |
 
 Test **„QEMU: klávesnice a myš až do služby“** prověří celou cestu ze
 zařízení. Init vypíše značku `init: test vstupu: cekam na udalosti z QEMU`.
