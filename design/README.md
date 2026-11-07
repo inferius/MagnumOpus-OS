@@ -7,6 +7,8 @@ Clickable GUI prototypes and design-system tokens. Design description:
 
 | Soubor / File | Obsah / Contents |
 |---|---|
+| `start.html`, `start-varianty.html` | startovací obrazovka a její varianty (archiv) / boot screen and its variants (archive) |
+| `assets/logo/` | logo (vektory) / logo (vectors) |
 | `index.html` | rozcestník a rozhodnutí ke stylu / index and style decisions |
 | `design-system.html` | barvy, kontrast, písmo, mřížka, ikony, pohyb, komponenty / colors, contrast, type, grid, icons, motion, components |
 | `okna.html` | okna, odznak důvěry, režimy, stavy / windows, trust badge, modes, states |

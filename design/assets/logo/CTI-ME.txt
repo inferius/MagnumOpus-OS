@@ -1,0 +1,13 @@
+MagnumOpus OS — vektorové logo
+
+logo-svetle-pozadi.svg   Fialový symbol a tmavý název.
+logo-tmave-pozadi.svg    Levandulový symbol a světlý název.
+logo-jednobarevne.svg    Celé logo v jedné barvě.
+symbol-fialovy.svg      Samostatná značka.
+symbol-levandulovy.svg  Samostatná značka pro tmavé plochy.
+symbol-bily.svg         Bílá samostatná značka.
+
+Všechna SVG mají průhledné pozadí. Symbol i název jsou převedené na
+uzavřené Bézierovy křivky. Neobsahují bitmapu ani odkazy na fonty.
+Barvy lze změnit atributem fill. Skupiny symbol a wordmark lze upravovat
+samostatně. Ve značce byla odstraněna jemná rastrová textura návrhu.

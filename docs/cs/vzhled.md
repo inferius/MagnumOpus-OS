@@ -27,6 +27,8 @@ velikosti písma a omezení pohybu.
 | `design/nastaveni.html` | profily zabezpečení, samostatné volby, vzhled, přístupnost |
 | `design/prihlaseni.html` | zamčená obrazovka, výběr účtu, bezpečnostní fráze, režim s Ctrl+Alt+Del |
 | `design/varianty-stylu.html` | tři původní varianty stylu (archiv rozhodnutí) |
+| `design/start.html` | startovací obrazovka: logo s prstencem, log na Esc, zdržení kroku, chyba startu, přechod do avataru |
+| `design/start-varianty.html` | tři varianty startovací obrazovky (archiv rozhodnutí) |
 
 ## Rozhodnutí ke stylu (odsouhlaseno)
 
@@ -42,6 +44,8 @@ C Vřelý (hravější, výrazný akcent).
 | 4 | písmo | **Inter + JetBrains Mono** | obě pod SIL OFL 1.1; Tuffy a Noto Sans Mono zůstanou jako záloha |
 | 5 | výchozí motiv | **podle denní doby** | světlý ve dne, tmavý po západu slunce v nastaveném pásmu |
 | 6 | označení agenta AI | **vyhrazená barva + ikona + slovo** | korálová barva jen pro agenta, vždy s ikonou a slovem „agent“ (nikdy jen barvou) |
+| 7 | logo | **symbol M + nápis MagnumOpus OS** (vektory od uživatele) | `design/assets/logo/`; fialová `#6b3fd6` na světlém, levandulová `#b79bff` na tmavém, bílá na barevném |
+| 8 | startovací obrazovka | **A (logo s prstencem) + podrobný log z B**, na konci **přechod znaku do avataru** | vybráno ze tří variant v `design/start-varianty.html` |
 
 ## Principy
 
@@ -229,6 +233,25 @@ takže ikony samy přejdou do tmavého i kontrastního motivu. Sada má 64 ikon
 
 Ikona nikdy nenese význam sama: v liště má popisek nebo tooltip, ve stromu
 přístupnosti jméno.
+
+### Logo
+
+Logo tvoří **symbol** (písmeno M v oblouku) a **nápis** „MagnumOpus OS“.
+Obojí jsou uzavřené Bézierovy křivky bez písem a bitmap
+(`design/assets/logo/`, popis v `CTI-ME.txt`).
+
+| Soubor | Použití |
+|---|---|
+| `logo-svetle-pozadi.svg` | fialový symbol `#6b3fd6` a tmavý nápis `#221a28`: světlý motiv |
+| `logo-tmave-pozadi.svg` | levandulový symbol `#b79bff` a světlý nápis `#fffdfb`: tmavý motiv |
+| `logo-jednobarevne.svg` | jedna barva (tisk, vysoký kontrast) |
+| `symbol-fialovy.svg`, `symbol-levandulovy.svg`, `symbol-bily.svg` | samotná značka: ikona systému, lišta, start, odznak „Systém“ |
+
+Barvy loga jsou přesně tokeny `accent` (světlý a tmavý motiv)
+a `surface` tmavého motivu, takže logo vždy ladí s akcentem. V systému se
+symbol kreslí s výplní z tokenu `accent` (jedna cesta, barvu dá motiv);
+ve vysokém kontrastu bílý nebo žlutý akcent. Nejmenší velikost symbolu
+16 px, kolem něj volné místo aspoň čtvrtinu jeho šířky.
 
 ### Pohyb
 
@@ -559,6 +582,32 @@ větší cíle kliknutí). V prototypu tyto volby opravdu přepínají vzhled.
 - Dole vlevo přístupnost (vysoký kontrast, čtečka **Ctrl+Alt+S**)
   a rozložení klávesnice, vpravo síť a vypnutí.
 
+### Start systému
+
+Startovací obrazovku kreslí init do framebufferu ještě před kompozitorem
+(`design/start.html`). Proto jen levné efekty: plné barvy, přechody,
+průhlednost a posun s měřítkem jedné vrstvy, žádné rozmazání. Kreslí se
+jen změněná oblast kolem znaku, desítky kB za snímek.
+
+| Čas | Co se děje |
+|---|---|
+| 0 ms | firmware; init převezme framebuffer (UEFI GOP) bez bliknutí, černé pozadí |
+| +300 ms | teplé pozadí plochy a znak (symbol v prstenci) se prolnou za 900 ms, znak začne jemně dýchat, pod ním nápis |
+| průběžně | **prstenec průběhu** se plní podle skutečných kroků initu: jádro, zařízení, soubory, síť, plocha (ne podle odhadu času) |
+| krok déle než 2 s | pod znakem „čeká na: síť (DHCP)“; **Esc** kdykoli ukáže podrobný log startu a zpět |
+| konec + 200 ms | **přechod do avataru**: znak se zmenší tak, aby prstenec přesně obkreslil kruh avataru (88 px), vjede do něj (600 ms, křivka standard) a rozplyne se (300 ms), zatímco se objeví avatar |
+| +120 ms | jméno, pole hesla a bezpečnostní fráze najedou postupně; kompozitor převezme poslední snímek startu, takže přihlášení je pokračování téhož obrazu |
+
+- **Chyba startu**: místo zaseknutého loga obrazovka s tím, co selhalo
+  (služba, kód), a volbami **Zkusit znovu**, **Spustit předchozí verzi**
+  (snapshot FS) a **Záchranný režim**.
+- **Motiv**: podle posledního přihlášení (uložený u zavaděče), bez něj
+  podle denní doby.
+- **Omezit pohyb**: bez dýchání, prstenec se plní skokem, místo přesunu do
+  avataru prolnutí 90 ms.
+- Varianty, ze kterých se vybíralo (A dech, B kroky, C přechod do hodin),
+  jsou v `design/start-varianty.html`.
+
 ## Přístupnost
 
 Strom přístupnosti je součást protokolu okna (`guiproto::a11y`). Knihovna
@@ -811,3 +860,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1 | 7. 11. 2026 | první návrh: styl C Vřelý, design systém, okna, systémové prvky, 4 aplikace, přístupnost, tokeny |
 | v1.1 | 7. 11. 2026 | plán implementace ve 3 fázích; počítá s GPU backendem (rozmazání, stíny shaderem), 2D jako záložní cesta |
 | v1.2 | 7. 11. 2026 | svižnost, plynulost a zotavení jako požadavek s měřitelnými cíli; restart kompozitoru bez ztráty oken; vlákno G5; rozhodnutí k implementaci (C, B, B) |
+| v1.3 | 7. 11. 2026 | logo (vektory od uživatele) v prototypech a v design systému; startovací obrazovka s přechodem do avataru |

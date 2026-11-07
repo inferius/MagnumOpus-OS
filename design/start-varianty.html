@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Start: varianty</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+/* Startovaci obrazovka: tri varianty vedle sebe, kazda prehratelna znovu.
+ * Kresli ji init do framebufferu jeste pred kompozitorem, proto jen levne
+ * efekty: plne barvy, prechody, pruhlednost, zadne rozmazani. */
+.page { max-width: 1400px; }
+.vars { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: var(--s5); }
+.var h2 { margin: 0 0 var(--s1); font-size: var(--t-title-size); }
+.var p { font-size: var(--t-small-size); color: var(--c-ink-muted); margin: 0 0 var(--s3); min-height: 54px; }
+.screen { position: relative; aspect-ratio: 16 / 10; border-radius: var(--r-card); overflow: hidden; background: #000; color: #f6edf3;
+  border: 1px solid var(--c-border); font-family: var(--font-ui); }
+.screen .layer { position: absolute; inset: 0; display: grid; place-items: center; }
+.ctl { display: flex; gap: var(--s2); margin-top: var(--s3); flex-wrap: wrap; }
+.wall { position: absolute; inset: 0; opacity: 0;
+  background: radial-gradient(circle at 18% 22%, var(--c-wall-a), transparent 52%), radial-gradient(circle at 82% 72%, var(--c-wall-b), transparent 56%), var(--c-bg); }
+.logo { width: 72px; height: 72px; }
+.logo rect { fill: var(--c-accent); }
+.logo path, .logo circle { stroke: var(--c-on-accent); }
+.logo circle { fill: var(--c-on-accent); stroke: none; }
+.mark { position: relative; display: grid; place-items: center; }
+.word { margin-top: var(--s4); color: var(--c-ink); font-weight: 600; letter-spacing: .02em; opacity: 0; }
+/* A: dech a prstenec */
+.ring { position: absolute; width: 112px; height: 112px; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 3; stroke-linecap: round; }
+.ring .bg { stroke: color-mix(in srgb, var(--c-accent) 22%, transparent); }
+.ring .fg { stroke: var(--c-accent); stroke-dasharray: 333; stroke-dashoffset: 333; }
+.glow { position: absolute; width: 160px; height: 160px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--c-accent) 45%, transparent), transparent 65%); opacity: 0; }
+.A.run .wall { animation: fadein 900ms var(--ease-standard) 300ms forwards; }
+.A.run .glow { animation: breathe 2400ms var(--ease-standard) 600ms infinite; }
+.A.run .ring .fg { animation: ringfill 4200ms cubic-bezier(.4, 0, .2, 1) 500ms forwards; }
+.A.run .word { animation: fadein 600ms var(--ease-standard) 700ms forwards; }
+@keyframes ringfill { 30% { stroke-dashoffset: 210; } 60% { stroke-dashoffset: 120; } to { stroke-dashoffset: 0; } }
+@keyframes breathe { 0%, 100% { opacity: .25; transform: scale(.92); } 50% { opacity: .7; transform: scale(1.05); } }
+@keyframes fadein { to { opacity: 1; } }
+/* B: kroky startu */
+.steps { position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%); display: flex; gap: 18px; font-size: 11px; color: var(--c-ink-muted); }
+.steps span { display: flex; flex-direction: column; align-items: center; gap: 6px; opacity: .45; transition: opacity var(--m-base); white-space: nowrap; }
+.steps i { width: 10px; height: 10px; border-radius: 5px; border: 2px solid var(--c-accent); transition: background var(--m-base), transform var(--m-base) var(--ease-enter); }
+.steps span.on { opacity: 1; color: var(--c-ink); }
+.steps span.on i { background: var(--c-accent); transform: scale(1.15); }
+.steps span.now i { animation: breathe 1200ms infinite; }
+.hint { position: absolute; right: 12px; bottom: 10px; font-size: 10px; color: var(--c-ink-muted); opacity: 0; }
+.B.run .wall { animation: fadein 700ms var(--ease-standard) 200ms forwards; }
+.B.run .word, .B.run .hint { animation: fadein 600ms var(--ease-standard) 500ms forwards; }
+.log { position: absolute; inset: 0; background: #0c0a10; color: #cfc3d6; font: 11px/16px var(--font-mono); padding: 12px; overflow: hidden; display: none; }
+.log b { color: #7fdca5; font-weight: 600; }
+.screen.showlog .log { display: block; }
+/* C: plynuly prechod do zamcene obrazovky */
+.C .clock { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; color: var(--c-ink); text-align: center; }
+.C .clock .t { font-size: 46px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1; }
+.C .clock .d { font-size: 12px; color: var(--c-ink-muted); margin-top: 6px; }
+.C .spin { position: absolute; bottom: 18%; left: 50%; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--c-accent) 25%, transparent); border-top-color: var(--c-accent); opacity: 0; }
+.C.run .mark { animation: c-mark 5200ms var(--ease-standard) forwards; }
+.C.run .wall { animation: fadein 1400ms var(--ease-standard) 900ms forwards; }
+.C.run .spin { animation: c-spin 800ms linear infinite, c-spinshow 2600ms linear 3000ms forwards; }
+.C.run .clock { animation: fadein 700ms var(--ease-enter) 4600ms forwards; }
+@keyframes c-mark { 0% { opacity: 0; transform: scale(.9); } 12% { opacity: 1; transform: scale(1); } 80% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-40px) scale(.7); } }
+@keyframes c-spin { to { transform: rotate(360deg); } }
+@keyframes c-spinshow { 0% { opacity: 0; } 15% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+/* Spolecny konec: mekky prechod do prihlaseni */
+.handoff { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; color: var(--c-ink); }
+.handoff .av { width: 56px; height: 56px; border-radius: 28px; background: linear-gradient(135deg, var(--c-accent), var(--c-ai)); margin: 0 auto 8px; }
+.handoff .pw { width: 170px; height: 26px; border-radius: 13px; background: var(--c-surface); border: 1px solid var(--c-border-strong); margin: 8px auto 0; }
+.screen.done .handoff { animation: fadein 500ms var(--ease-enter) forwards; }
+.screen.done .mark, .screen.done .steps, .screen.done .hint { animation: fadeout 300ms var(--ease-exit) forwards !important; }
+@keyframes fadeout { to { opacity: 0; } }
+.err { position: absolute; inset: 0; display: none; place-items: center; text-align: center; color: var(--c-ink); background: var(--c-bg); padding: 16px; }
+.err .box { max-width: 300px; font-size: 12px; }
+.err h3 { font-size: 15px; margin: 8px 0 4px; }
+.screen.failed .err { display: grid; }
+.cmp { margin-top: var(--s8); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header style="margin-bottom:var(--s5)">
+    <h1>Start systému: varianty (archiv)</h1>
+    <p class="lead">Tři varianty startovací obrazovky. Všechny navazují bez bliknutí na firmware a končí měkkým přechodem do přihlášení. Kreslí je init do framebufferu ještě před kompozitorem, takže jen levné efekty (bez rozmazání). Tlačítkem Přehrát spustíš znovu, <span class="kbd">Esc</span> ve variantě B ukáže podrobný log.</p>
+  </header>
+
+  <div class="vars">
+    <section class="var" aria-labelledby="hA">
+      <h2 id="hA">A - Dech</h2>
+      <p>Logo uprostřed s jemným dýcháním a tenkým prstencem průběhu. Teplé pozadí plochy se rozsvítí hned, takže start vypadá jako součást systému. Nejklidnější.</p>
+      <div class="screen A" id="sA" role="img" aria-label="Varianta A: logo s prstencem průběhu">
+        <div class="wall"></div>
+        <div class="layer"><div class="mark"><div class="glow"></div>
+          <svg class="ring" viewBox="0 0 112 112"><circle class="bg" cx="56" cy="56" r="53"/><circle class="fg" cx="56" cy="56" r="53"/></svg>
+          <span class="logoslot"></span></div></div>
+        <div class="layer" style="place-items:end center;padding-bottom:9%"><div class="word">MagnumOpus</div></div>
+        <div class="handoff"><div style="text-align:center"><div class="av"></div><b>Michal</b><div class="pw"></div></div></div>
+      </div>
+      <div class="ctl"><button class="btn small" data-play="A">Přehrát</button><button class="btn small ghost" data-fail="A">Ukázat chybu startu</button></div>
+    </section>
+
+    <section class="var" aria-labelledby="hB">
+      <h2 id="hB">B - Kroky</h2>
+      <p>Logo a pod ním pět skutečných kroků startu (jádro, zařízení, soubory, síť, plocha). Je vidět, kde start je a kde se případně zasekl. Esc ukáže podrobný log.</p>
+      <div class="screen B" id="sB" role="img" aria-label="Varianta B: logo a kroky startu">
+        <div class="wall"></div>
+        <div class="layer"><div style="text-align:center"><div class="mark"><span class="logoslot"></span></div><div class="word">MagnumOpus</div></div></div>
+        <div class="steps" id="stepsB"><span><i></i>jádro</span><span><i></i>zařízení</span><span><i></i>soubory</span><span><i></i>síť</span><span><i></i>plocha</span></div>
+        <div class="hint">Esc: podrobnosti</div>
+        <div class="log" id="logB"></div>
+        <div class="handoff"><div style="text-align:center"><div class="av"></div><b>Michal</b><div class="pw"></div></div></div>
+      </div>
+      <div class="ctl"><button class="btn small" data-play="B">Přehrát</button><button class="btn small ghost" data-log="B">Esc: log</button><button class="btn small ghost" data-fail="B">Ukázat chybu startu</button></div>
+    </section>
+
+    <section class="var" aria-labelledby="hC">
+      <h2 id="hC">C - Přechod</h2>
+      <p>Bez ukazatele průběhu: logo na tmavé, pozadí se pomalu rozsvítí a logo odpluje nahoru, kde ho vystřídají hodiny zamčené obrazovky. Točítko jen když start trvá déle než 3 s.</p>
+      <div class="screen C" id="sC" role="img" aria-label="Varianta C: plynulý přechod do zamčené obrazovky">
+        <div class="wall"></div>
+        <div class="layer"><div class="mark"><span class="logoslot"></span></div></div>
+        <div class="spin"></div>
+        <div class="clock"><div><div class="t" id="tC">14:05</div><div class="d" id="dC">sobota 7. listopadu</div></div></div>
+      </div>
+      <div class="ctl"><button class="btn small" data-play="C">Přehrát</button><button class="btn small ghost" data-fail="C">Ukázat chybu startu</button></div>
+    </section>
+  </div>
+
+  <section class="cmp">
+    <h2>Společné pro všechny varianty</h2>
+    <ul class="note">
+      <li><b>Bez bliknutí:</b> init převezme framebuffer od firmwaru (UEFI GOP) a první snímek startovací obrazovky má stejné černé pozadí; kompozitor pak převezme poslední snímek startu, takže přechod do přihlášení je jedno prolnutí.</li>
+      <li><b>Motiv:</b> světlý nebo tmavý podle posledního přihlášení (uložený u zavaděče); bez něj podle denní doby.</li>
+      <li><b>Poctivý průběh:</b> stav berou z initu (které služby už běží), ne z odhadu času.</li>
+      <li><b>Chyba startu:</b> místo zaseknutého loga obrazovka s tím, co selhalo, a volbami Zkusit znovu / Spustit předchozí verzi systému (snapshot FS) / Záchranný režim.</li>
+      <li><b>Pohyb:</b> s Omezit pohyb (uložené jako motiv) jen prolnutí, bez dýchání a točení.</li>
+      <li><b>Cena:</b> kreslí se jen změněná oblast kolem loga a ukazatele, desítky kB za snímek; start se tím nezdrží.</li>
+    </ul>
+  </section>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var LOGO = window.MO_LOGO;
+  document.querySelectorAll('.logoslot').forEach(function (s) { s.outerHTML = LOGO; });
+  var timers = { A: [], B: [], C: [] };
+  function clear(v) { timers[v].forEach(clearTimeout); timers[v] = []; }
+  function later(v, ms, fn) { timers[v].push(setTimeout(fn, ms)); }
+  function reset(el) { el.classList.remove('run', 'done', 'showlog', 'failed'); void el.offsetWidth; }
+  var LOG = ['[0.000] jádro: MagnumOpus 0.6, x86_64, 4 CPU', '[0.112] jádro: paměť 4096 MiB, IOMMU zapnutá', '[0.240] init: <b>ok</b> supervisor', '[0.410] devmgr: virtio-blk, virtio-net, virtio-gpu, xhci',
+    '[0.630] fsd: svazek / připojen, žurnál čistý', '[0.810] inputd: <b>ok</b> klávesnice, myš', '[1.020] netd: DHCP 10.0.2.15', '[1.300] compd: GPU virgl, 1280x800', '[1.420] init: <b>ok</b> plocha připravena'];
+  function play(v) {
+    var el = document.getElementById('s' + v); clear(v); reset(el); el.classList.add('run');
+    if (v === 'B') {
+      var st = document.querySelectorAll('#stepsB span'), log = document.getElementById('logB'); log.innerHTML = '';
+      st.forEach(function (s) { s.className = ''; });
+      st.forEach(function (s, i) {
+        later(v, 400 + i * 800, function () { if (i) st[i - 1].classList.remove('now'); s.classList.add('on', 'now'); });
+      });
+      LOG.forEach(function (l, i) { later(v, 300 + i * 450, function () { log.innerHTML += l + '<br>'; }); });
+      later(v, 4700, function () { st[4].classList.remove('now'); el.classList.add('done'); });
+    }
+    if (v === 'A') later(v, 4900, function () { el.classList.add('done'); });
+    if (v === 'C') { var d = new Date(); document.getElementById('tC').textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  }
+  function fail(v) {
+    var el = document.getElementById('s' + v); clear(v); reset(el); el.classList.add('failed');
+    var e = el.querySelector('.err');
+    if (!e) {
+      el.insertAdjacentHTML('beforeend', '<div class="err" role="alert"><div class="box">' + ic('alert', 'l') + '<h3>Systém se nespustil</h3>' +
+        '<div>Služba <b>fsd</b> nepřipojila svazek / (kód <code>CORRUPT</code>).</div>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;margin-top:12px"><button class="btn small primary">Zkusit znovu</button><button class="btn small">Spustit předchozí verzi (včera 18:45)</button><button class="btn small ghost">Záchranný režim</button></div></div></div>');
+    }
+  }
+  document.querySelectorAll('[data-play]').forEach(function (b) { b.addEventListener('click', function () { play(b.dataset.play); }); });
+  document.querySelectorAll('[data-fail]').forEach(function (b) { b.addEventListener('click', function () { fail(b.dataset.fail); }); });
+  document.querySelector('[data-log]').addEventListener('click', function () { document.getElementById('sB').classList.toggle('showlog'); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') document.getElementById('sB').classList.toggle('showlog'); });
+  ['A', 'B', 'C'].forEach(play);
+});
+</script>
+</body>
+</html>

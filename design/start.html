@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Start systému</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<script src="assets/logo-wordmark.js"></script>
+<style>
+/* Startovaci obrazovka (odsouhlaseno: varianta A + log z B + prechod do avataru).
+ * Kresli ji init do framebufferu pred kompozitorem: jen plne barvy, prechody,
+ * pruhlednost a posun/meritko jedne vrstvy, zadne rozmazani. */
+.page { max-width: 1200px; }
+.screen { position: relative; aspect-ratio: 16 / 10; max-height: 680px; margin: var(--s4) auto 0; border-radius: var(--r-card); overflow: hidden;
+  background: #000; border: 1px solid var(--c-border); color: var(--c-ink); font-family: var(--font-ui); }
+.wall { position: absolute; inset: 0; opacity: 0;
+  background: radial-gradient(circle at 18% 22%, var(--c-wall-a), transparent 52%), radial-gradient(circle at 82% 72%, var(--c-wall-b), transparent 56%), var(--c-bg); }
+.center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+/* Znak: logo + prstenec + zare. Pri prechodu se posouva a zmensuje jako jedna vrstva. */
+.mark { position: relative; width: 132px; height: 132px; display: grid; place-items: center; will-change: transform, opacity; }
+.mark .logo { width: 84px; height: 84px; position: relative; }
+.word svg { display: block; height: 44px; width: auto; }
+.word g { fill: var(--c-ink); }
+.ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 3; stroke-linecap: round; }
+.ring .bg { stroke: color-mix(in srgb, var(--c-accent) 22%, transparent); }
+.ring .fg { stroke: var(--c-accent); stroke-dasharray: 389.6; stroke-dashoffset: 389.6; transition: stroke-dashoffset 700ms cubic-bezier(.4, 0, .2, 1); }
+.glow { position: absolute; inset: -26px; border-radius: 50%; opacity: 0;
+  background: radial-gradient(circle, color-mix(in srgb, var(--c-accent) 42%, transparent), transparent 65%); }
+.running .glow { animation: breathe 2400ms var(--ease-standard) infinite; }
+@keyframes breathe { 0%, 100% { opacity: .25; transform: scale(.92); } 50% { opacity: .7; transform: scale(1.05); } }
+.word { margin-top: var(--s5); font-weight: 600; letter-spacing: .02em; opacity: 0; transition: opacity 600ms var(--ease-standard); }
+.stall { margin-top: var(--s3); min-height: 20px; font-size: var(--t-small-size); color: var(--c-ink-muted); opacity: 0; transition: opacity var(--m-slow) var(--ease-standard);
+  display: flex; gap: var(--s2); align-items: center; }
+.stall.show { opacity: 1; }
+.hint { position: absolute; right: 14px; bottom: 12px; font-size: 11px; color: var(--c-ink-muted); opacity: 0; transition: opacity 600ms; }
+/* Podrobny log (Esc) */
+.log { position: absolute; inset: 0; background: #0c0a10; color: #cfc3d6; font: 12px/18px var(--font-mono); padding: 16px 18px; overflow: auto; display: none; z-index: 5; }
+.log b { color: #7fdca5; font-weight: 600; } .log em { color: #f2c46b; font-style: normal; }
+.log .top { color: #8f8199; margin-bottom: 8px; font-family: var(--font-ui); font-size: 11px; }
+.screen.showlog .log { display: block; }
+/* Prihlaseni: avatar je cil prechodu */
+.login { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+.login.on { pointer-events: auto; }
+.av { width: 88px; height: 88px; border-radius: 44px; display: grid; place-items: center; font-size: 32px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, var(--c-accent), var(--c-ai)); box-shadow: var(--sh-popover); opacity: 0; }
+.login .rest { display: flex; flex-direction: column; align-items: center; gap: var(--s3); margin-top: var(--s4); }
+.login .rest > * { opacity: 0; transform: translateY(8px); }
+.login.on .rest > * { transition: opacity var(--m-slow) var(--ease-enter), transform var(--m-slow) var(--ease-enter); opacity: 1; transform: none; }
+.login.on .rest > :nth-child(2) { transition-delay: 60ms; } .login.on .rest > :nth-child(3) { transition-delay: 120ms; }
+.login .name { font-size: var(--t-heading-size); font-weight: 650; }
+.login .pw { display: flex; align-items: center; width: 280px; max-width: 70vw; height: 42px; padding: 4px 4px 4px 16px; border-radius: var(--r-pill);
+  background: var(--c-surface); border: 1px solid var(--c-border-strong); box-shadow: var(--sh-popover); color: var(--c-ink-muted); font-size: var(--t-small-size); }
+.login .pw span { flex: 1; } .login .pw i { width: 34px; height: 34px; border-radius: 17px; background: var(--c-accent); display: grid; place-items: center; color: var(--c-on-accent); }
+.login .phrase { display: inline-flex; gap: var(--s2); align-items: center; padding: var(--s1) var(--s3); border-radius: var(--r-pill); font-size: var(--t-caption-size);
+  background: var(--c-trust-bg); color: var(--c-trust-ink); border: 1px solid var(--c-trust-border); }
+.err { position: absolute; inset: 0; display: none; place-items: center; text-align: center; background: var(--c-bg); padding: 16px; z-index: 4; }
+.err .box { max-width: 360px; }
+.err h3 { font-size: var(--t-title-size); margin: var(--s3) 0 var(--s2); }
+.screen.failed .err { display: grid; }
+.ctl { display: flex; gap: var(--s2); flex-wrap: wrap; justify-content: center; margin-top: var(--s4); }
+.timeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--s3); margin-top: var(--s5); }
+.timeline .card { font-size: var(--t-small-size); padding: var(--s4); }
+.timeline .card b { display: block; margin-bottom: var(--s1); }
+.timeline .card .num { color: var(--c-accent-ink); font-weight: 700; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Start systému</h1>
+    <p class="lead">Logo s dýcháním a prstencem průběhu na teplém pozadí. Když start skončí, znak se zmenší na velikost avataru, vjede do něj a rozplyne se, takže start plynule přejde do přihlášení. <span class="kbd">Esc</span> ukáže podrobný log; když se některý krok zdrží, pod logem se objeví, na co start čeká.</p>
+  </header>
+
+  <div class="screen" id="scr" role="img" aria-label="Startovací obrazovka">
+    <div class="wall" id="wall"></div>
+    <div class="login" id="login">
+      <div class="av" id="av">M</div>
+      <div class="rest"><div class="name">Michal</div><div class="pw"><span>Heslo</span><i><svg class="ic s"><use href="#ic-right"/></svg></i></div>
+        <div class="phrase"><svg class="ic s"><use href="#ic-shieldcheck"/></svg>Systém &middot; tvá fráze: <b>modrá konvice</b></div></div>
+    </div>
+    <div class="center" id="boot">
+      <div class="mark" id="mark">
+        <div class="glow"></div>
+        <svg class="ring" viewBox="0 0 132 132" aria-hidden="true"><circle class="bg" cx="66" cy="66" r="62"/><circle class="fg" id="ringfg" cx="66" cy="66" r="62"/></svg>
+        <span id="symslot"></span>
+      </div>
+      <div class="word" id="word" aria-label="MagnumOpus OS"></div>
+      <div class="stall" id="stall" role="status" aria-live="polite"></div>
+    </div>
+    <div class="hint" id="hint">Esc: podrobnosti</div>
+    <div class="log" id="log"><div class="top">Podrobný log startu &middot; Esc zpět</div><div id="loglines"></div></div>
+    <div class="err" role="alert"><div class="box"><svg class="ic xl"><use href="#ic-alert"/></svg><h3>Systém se nespustil</h3>
+      <div class="note" style="margin:0 auto">Služba <b>fsd</b> nepřipojila svazek / (kód <code>CORRUPT</code>).</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px"><button class="btn primary">Zkusit znovu</button><button class="btn">Spustit předchozí verzi (včera 18:45)</button><button class="btn ghost">Záchranný režim</button></div></div></div>
+  </div>
+  <div class="ctl">
+    <button class="btn primary small" id="b-play"><svg class="ic s"><use href="#ic-play"/></svg>Přehrát</button>
+    <button class="btn small" id="b-stall">Přehrát se zdržením (síť)</button>
+    <button class="btn small" id="b-log">Esc: log</button>
+    <button class="btn small ghost" id="b-fail">Chyba startu</button>
+  </div>
+
+  <div class="timeline">
+    <div class="card"><span class="num">0 ms</span><b>Firmware</b>černá obrazovka, init převezme framebuffer (UEFI GOP) bez bliknutí</div>
+    <div class="card"><span class="num">+300 ms</span><b>Rozsvícení</b>teplé pozadí a logo se prolnou (900 ms), začne dýchání</div>
+    <div class="card"><span class="num">průběžně</span><b>Prstenec</b>plní se podle skutečných kroků initu: jádro, zařízení, soubory, síť, plocha</div>
+    <div class="card"><span class="num">&gt; 2 s na kroku</span><b>Zdržení</b>pod logem „čeká na: síť (DHCP)“; Esc ukáže log</div>
+    <div class="card"><span class="num">konec + 200 ms</span><b>Do avataru</b>znak se zmenší a vjede do kruhu avataru (600 ms), pak se rozplyne (300 ms)</div>
+    <div class="card"><span class="num">+120 ms</span><b>Přihlášení</b>jméno, pole hesla a fráze najedou postupně; kompozitor převezme poslední snímek</div>
+  </div>
+  <p class="note" style="margin-top:var(--s5)">S volbou Omezit pohyb: bez dýchání, prstenec se plní skokem a místo přesunu do avataru je jen prolnutí 90 ms. Původní tři varianty jsou v <a href="start-varianty.html">archivu</a>.</p>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var scr = document.getElementById('scr'), mark = document.getElementById('mark'), ring = document.getElementById('ringfg');
+  var wall = document.getElementById('wall'), word = document.getElementById('word'), stall = document.getElementById('stall');
+  var hint = document.getElementById('hint'), login = document.getElementById('login'), av = document.getElementById('av'), lines = document.getElementById('loglines');
+  var CIRC = 389.6, timers = [], anims = [];
+  // Skutecne logo: symbol do prstence, napis pod nej (viewBox z getBBox).
+  document.getElementById('symslot').outerHTML = window.MO_LOGO;
+  var W = window.MO_WORDMARK;
+  word.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g transform="' + W.transform + '">' + W.paths + '</g></svg>';
+  var wsvg = word.querySelector('svg'), bb = wsvg.querySelector('g').getBBox();
+  var wt = W.transform.match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/);
+  wsvg.setAttribute('viewBox', (bb.x + +wt[1] - 4) + ' ' + (bb.y + +wt[2] - 4) + ' ' + (bb.width + 8) + ' ' + (bb.height + 8));
+  var STEPS = [
+    { n: 'jádro', ms: 500, log: ['[0.000] jádro: MagnumOpus 0.6, x86_64, 4 CPU', '[0.112] jádro: paměť 4096 MiB, IOMMU zapnutá'] },
+    { n: 'zařízení', ms: 800, log: ['[0.240] init: <b>ok</b> supervisor', '[0.410] devmgr: virtio-blk, virtio-net, virtio-gpu, xhci', '[0.520] inputd: <b>ok</b> klávesnice, myš'] },
+    { n: 'soubory', ms: 700, log: ['[0.630] fsd: svazek / připojen, žurnál čistý'] },
+    { n: 'síť', ms: 700, slow: 'síť (DHCP)', log: ['[0.900] netd: virtio-net nahoru', '[1.020] netd: DHCP 10.0.2.15'] },
+    { n: 'plocha', ms: 700, log: ['[1.300] compd: GPU virgl, 1280x800', '[1.420] init: <b>ok</b> plocha připravena'] }
+  ];
+  function reduced() { var m = document.documentElement.getAttribute('data-motion'); return m === 'reduce' || (m !== 'full' && matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  function later(ms, fn) { timers.push(setTimeout(fn, ms)); }
+  function reset() {
+    timers.forEach(clearTimeout); timers = []; anims.forEach(function (a) { a.cancel(); }); anims = [];
+    scr.classList.remove('running', 'showlog', 'failed'); login.classList.remove('on');
+    [wall, word, hint, av].forEach(function (e) { e.style.opacity = 0; });
+    mark.style.opacity = 1; mark.style.transform = ''; ring.style.strokeDashoffset = CIRC; stall.classList.remove('show'); stall.textContent = ''; lines.innerHTML = '';
+  }
+  function fade(el, to, ms, delay) { var a = el.animate([{ opacity: getComputedStyle(el).opacity }, { opacity: to }], { duration: ms, delay: delay || 0, easing: 'cubic-bezier(.2,0,0,1)', fill: 'forwards' }); anims.push(a); return a; }
+
+  function play(withStall) {
+    reset();
+    var r = reduced();
+    fade(wall, 1, r ? 90 : 900, 300);
+    later(700, function () { word.style.opacity = 1; hint.style.opacity = 1; });
+    later(300, function () { if (!r) scr.classList.add('running'); });
+    var t = 400;
+    STEPS.forEach(function (s, i) {
+      var dur = s.ms + (withStall && s.slow ? 3200 : 0);
+      later(t, function () { s.log.slice(0, 1).forEach(addLog); });
+      if (withStall && s.slow) {
+        later(t + 2000, function () { stall.innerHTML = ic('refresh', 's') + 'čeká na: ' + s.slow; stall.classList.add('show'); addLog('[1.0xx] netd: <em>čekám na odpověď DHCP...</em>'); });
+      }
+      t += dur;
+      later(t, function () {
+        s.log.slice(1).forEach(addLog);
+        ring.style.transition = r ? 'none' : '';
+        ring.style.strokeDashoffset = CIRC * (1 - (i + 1) / STEPS.length);
+        if (s.slow) stall.classList.remove('show');
+      });
+    });
+    later(t + (r ? 100 : 900), handoff);
+  }
+  function addLog(l) { lines.innerHTML += l + '<br>'; }
+
+  // Prechod: znak se zmensi na velikost avataru, vjede do nej a rozplyne se.
+  function handoff() {
+    scr.classList.remove('running');
+    var r = reduced();
+    fade(word, 0, 200); fade(hint, 0, 200);
+    var m = mark.getBoundingClientRect(), a = av.getBoundingClientRect();
+    var ringR = 62 / 132 * m.width;                 // polomer prstence v px obrazovky
+    var scale = (a.width / 2) / ringR;              // prstenec = obvod avataru
+    var dx = (a.left + a.width / 2) - (m.left + m.width / 2), dy = (a.top + a.height / 2) - (m.top + m.height / 2);
+    if (r) {
+      fade(mark, 0, 90); fade(av, 1, 90);
+      login.classList.add('on'); return;
+    }
+    var move = mark.animate([{ transform: 'translate(0,0) scale(1)' }, { transform: 'translate(' + dx + 'px,' + dy + 'px) scale(' + scale + ')' }],
+      { duration: 600, easing: 'cubic-bezier(.2,0,0,1)', fill: 'forwards' });
+    anims.push(move);
+    move.onfinish = function () {
+      fade(av, 1, 300); fade(mark, 0, 300);
+      later(120, function () { login.classList.add('on'); });
+    };
+  }
+
+  document.getElementById('b-play').addEventListener('click', function () { play(false); });
+  document.getElementById('b-stall').addEventListener('click', function () { play(true); });
+  document.getElementById('b-log').addEventListener('click', function () { scr.classList.toggle('showlog'); });
+  document.getElementById('b-fail').addEventListener('click', function () { reset(); wall.style.opacity = 1; scr.classList.add('failed'); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') scr.classList.toggle('showlog'); });
+  play(false);
+});
+</script>
+</body>
+</html>

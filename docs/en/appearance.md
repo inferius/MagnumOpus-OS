@@ -27,6 +27,8 @@ reduced motion.
 | `design/nastaveni.html` | security profiles, individual options, appearance, accessibility |
 | `design/prihlaseni.html` | lock screen, account selection, security phrase, mode with Ctrl+Alt+Del |
 | `design/varianty-stylu.html` | the three original style variants (decision archive) |
+| `design/start.html` | boot screen: logo with a ring, log on Esc, step delay, boot failure, transition into the avatar |
+| `design/start-varianty.html` | three boot screen variants (decision archive) |
 
 ## Style decisions (agreed)
 
@@ -42,6 +44,8 @@ C Warm (more playful, strong accent).
 | 4 | typeface | **Inter + JetBrains Mono** | both under SIL OFL 1.1; Tuffy and Noto Sans Mono stay as a fallback |
 | 5 | default theme | **by time of day** | light during the day, dark after sunset within the configured time zone |
 | 6 | AI agent marking | **reserved color + icon + word** | coral color only for the agent, always with an icon and the word "agent" (never by color alone) |
+| 7 | logo | **M symbol + MagnumOpus OS wordmark** (vectors from the user) | `design/assets/logo/`; purple `#6b3fd6` on light, lavender `#b79bff` on dark, white on color |
+| 8 | boot screen | **A (logo with a ring) + detailed log from B**, ending with a **transition of the mark into the avatar** | chosen from three variants in `design/start-varianty.html` |
 
 ## Principles
 
@@ -239,6 +243,26 @@ agent icon is two sparks.
 
 An icon never carries meaning alone: in the bar it has a label or tooltip, in
 the accessibility tree a name.
+
+### Logo
+
+The logo consists of the **symbol** (the letter M in an arch) and the
+**wordmark** "MagnumOpus OS". Both are closed Bezier curves without fonts or
+bitmaps (`design/assets/logo/`, description in `CTI-ME.txt`).
+
+| File | Use |
+|---|---|
+| `logo-svetle-pozadi.svg` | purple symbol `#6b3fd6` and dark wordmark `#221a28`: light theme |
+| `logo-tmave-pozadi.svg` | lavender symbol `#b79bff` and light wordmark `#fffdfb`: dark theme |
+| `logo-jednobarevne.svg` | single color (print, high contrast) |
+| `symbol-fialovy.svg`, `symbol-levandulovy.svg`, `symbol-bily.svg` | the mark alone: system icon, bar, boot, "System" badge |
+
+The logo colors are exactly the `accent` tokens (light and dark theme) and
+the dark theme's `surface`, so the logo always matches the accent. In the
+system the symbol is drawn with the fill from the `accent` token (one path,
+the theme gives the color); in high contrast white or the yellow accent.
+Minimum symbol size 16 px, with clear space of at least a quarter of its
+width around it.
 
 ### Motion
 
@@ -588,6 +612,32 @@ click targets). In the prototype these options really switch the appearance.
   **Ctrl+Alt+S**) and the keyboard layout, at the right network and shut
   down.
 
+### Boot screen
+
+The boot screen is drawn by init into the framebuffer before the compositor
+exists (`design/start.html`). Therefore only cheap effects: solid colors,
+gradients, opacity and translate/scale of one layer, no blur. Only the
+changed area around the mark is drawn, tens of kB per frame.
+
+| Time | What happens |
+|---|---|
+| 0 ms | firmware; init takes over the framebuffer (UEFI GOP) without a flicker, black background |
+| +300 ms | the warm desktop background and the mark (symbol in a ring) fade in over 900 ms, the mark starts to breathe gently, the wordmark below it |
+| ongoing | the **progress ring** fills according to init's real steps: kernel, devices, files, network, desktop (not a time estimate) |
+| a step longer than 2 s | below the mark "waiting for: network (DHCP)"; **Esc** shows the detailed boot log at any time and back |
+| end + 200 ms | **transition into the avatar**: the mark shrinks so that the ring exactly outlines the avatar circle (88 px), moves into it (600 ms, standard curve) and dissolves (300 ms) while the avatar appears |
+| +120 ms | name, password field and security phrase slide in one after another; the compositor takes over the last boot frame, so sign-in continues the same picture |
+
+- **Boot failure**: instead of a stuck logo, a screen with what failed
+  (service, code) and the options **Try again**, **Start the previous
+  version** (FS snapshot) and **Recovery mode**.
+- **Theme**: from the last sign-in (stored with the boot loader), otherwise
+  by time of day.
+- **Reduce motion**: no breathing, the ring fills in steps, a 90 ms
+  crossfade instead of the move into the avatar.
+- The variants that were chosen from (A breathing, B steps, C transition
+  into the clock) are in `design/start-varianty.html`.
+
 ## Accessibility
 
 The accessibility tree is part of the window protocol (`guiproto::a11y`).
@@ -851,3 +901,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1 | 2026-11-07 | first design: style C Warm, design system, windows, system elements, 4 applications, accessibility, tokens |
 | v1.1 | 2026-11-07 | implementation plan in 3 phases; assumes the GPU backend (blur, shader shadows), 2D as a fallback path |
 | v1.2 | 2026-11-07 | responsiveness, smoothness and recovery as a requirement with measurable goals; compositor restart without losing windows; thread G5; implementation decisions (C, B, B) |
+| v1.3 | 2026-11-07 | logo (vectors from the user) in the prototypes and the design system; boot screen with the transition into the avatar |
