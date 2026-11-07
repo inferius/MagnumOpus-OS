@@ -64,11 +64,13 @@ pub mod op {
     pub const MERGE: u32 = 72;
     /// cil str
     pub const MERGE_ABORT: u32 = 73;
-    /// dataset, cesta klonu str -> dataset klonu u64
+    /// dataset, cesta klonu str -> dataset klonu u64, snapshot puvodu str,
+    /// zurnal seq u64 (posledni zaznam ve snapshotu, jako `View::seq`)
     pub const ASIDE_BEGIN: u32 = 74;
-    /// klon, vse u8, pocet u32 + cesty str -> `MergeReport`
+    /// klon, vse u8, pocet u32 + cesty str, [priznaky u8 `aside_flags`]
+    /// -> `MergeReport`
     pub const ASIDE_APPLY: u32 = 75;
-    /// klon
+    /// klon; snapshot puvodu smaze, jen kdyz neni ponechany jako pohled
     pub const ASIDE_DISCARD: u32 = 76;
     /// klon -> pocet u32 + `Change`
     pub const ASIDE_CHANGES: u32 = 77;
@@ -216,6 +218,24 @@ impl JournalPage {
 pub struct View {
     pub snapshot: String,
     pub id: u64,
+    pub seq: u64,
+}
+
+/// Priznaky `ASIDE_APPLY`.
+pub mod aside_flags {
+    /// Po prevzeti ponechat snapshot puvodu (stav pred radkem) jako pohled
+    /// pro undo; uvolni ho `VIEW_RELEASE` (ne `ASIDE_DISCARD`).
+    pub const KEEP_VIEW: u8 = 1;
+}
+
+/// Odpoved `ASIDE_BEGIN`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsideBegun {
+    /// Cislo datasetu klonu.
+    pub dataset: u64,
+    /// Snapshot puvodu v puvodnim datasetu (s `KEEP_VIEW` pohled pro undo).
+    pub snapshot: String,
+    /// Posledni zaznam zurnalu, ktery snapshot obsahuje.
     pub seq: u64,
 }
 
@@ -737,9 +757,17 @@ impl FsClient {
     }
 
     pub fn aside_begin(&self, dataset: &str, path: &str) -> Result<u64> {
+        Ok(self.aside_begin_ex(dataset, path)?.dataset)
+    }
+
+    /// Jako `aside_begin`, navic snapshot puvodu a pozice zurnalu (undo bez
+    /// `VIEW`: `aside_apply_keep`).
+    pub fn aside_begin_ex(&self, dataset: &str, path: &str) -> Result<AsideBegun> {
         let mut w = Self::req(op::ASIDE_BEGIN);
         w.str(dataset).str(path);
-        Reader::new(&self.call(w)?).u64()
+        let body = self.call(w)?;
+        let mut r = Reader::new(&body);
+        Ok(AsideBegun { dataset: r.u64()?, snapshot: r.str()?, seq: r.u64()? })
     }
 
     /// Vsechny zmeny klonu (po strankach, nikdy zkracene).
@@ -815,6 +843,16 @@ impl FsClient {
 
     /// `select = None` = prevzit vse.
     pub fn aside_apply(&self, clone: &str, select: Option<&[&str]>) -> Result<MergeReport> {
+        self.aside_apply_flags(clone, select, 0)
+    }
+
+    /// Prevezme zmeny a snapshot puvodu ponecha jako pohled pro undo
+    /// (`View { snapshot, seq }` z `aside_begin_ex`; uvolnit `release_view`).
+    pub fn aside_apply_keep(&self, clone: &str, select: Option<&[&str]>) -> Result<MergeReport> {
+        self.aside_apply_flags(clone, select, aside_flags::KEEP_VIEW)
+    }
+
+    fn aside_apply_flags(&self, clone: &str, select: Option<&[&str]>, flags: u8) -> Result<MergeReport> {
         let mut w = Self::req(op::ASIDE_APPLY);
         w.str(clone).u8(select.is_none() as u8);
         let sel = select.unwrap_or(&[]);
@@ -822,6 +860,7 @@ impl FsClient {
         for p in sel {
             w.str(p);
         }
+        w.u8(flags);
         MergeReport::get(&mut Reader::new(&self.call(w)?))
     }
 

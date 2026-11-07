@@ -410,6 +410,57 @@ fs.aside_discard("/project-try")?;                  // clone and snapshot in one
   `clone_snapshot` and `branch` behave the same; in addition a clone does
   not inherit the original's older snapshots.
 
+### Shell line performance (undo without `VIEW`)
+
+> **Change from before (FS performance):** a shell line with a write took
+> 2-4 s in QEMU, more after the full test suite. **Why:** every commit sent
+> the disk driver 5-15 messages and waited for each reply (the round trip
+> fsd ↔ `virtio-blk` about 3-5 ms, the device itself 0.4 ms); a line made
+> 7-8 commits. **What changed:** (1) writes go to the driver without waiting
+> for the reply (`BlockClient::write_queued`, replies are collected before
+> the next read or `flush`), (2) temporary snapshots (`VIEW`, the start of
+> "aside") cost one commit instead of two, `ASIDE_BEGIN` two in total
+> instead of three, (3) the shell's undo can use the `ASIDE_BEGIN` snapshot
+> instead of `VIEW` (`KEEP_VIEW`), (4) a commit walks only datasets with
+> changes. No on-disk format change.
+
+| Step (QEMU, x86_64) | Before | Now |
+|---|---|---|
+| commit with a small change | 88 ms | 23-50 ms |
+| `ASIDE_BEGIN` | 264 ms | 60-90 ms |
+| `ASIDE_APPLY` | 248 ms | 70-130 ms |
+| `VIEW` | 2 commits | ~5 ms (only the state commit, often empty) |
+| whole line (median) | 666 ms (fresh disk), 2-4 s after the tests | 160-280 ms |
+
+```
+ASIDE_BEGIN ──> snapshot aside-N (state before the line) ──> clone /tmp/.aside/...
+writes in the clone, ASIDE_CHANGES (from memory, no commit)
+ASIDE_APPLY + KEEP_VIEW ──> take over; aside-N becomes a view (VIEW)
+undo reads from aside-N ── VIEW_RELEASE frees it (ASIDE_DISCARD keeps it)
+```
+
+- A view from the `ASIDE_BEGIN` snapshot is as good for undo as a view right
+  before the take-over: the paths taken over without a conflict were the
+  same in the original at both moments (otherwise they would conflict).
+- `VIEW_RELEASE` and `ASIDE_DISCARD` may come in any order; a released view
+  with a live clone is hidden and disappears with the clone.
+- After a crash the views are deleted on mount as before (no undo after an
+  `fsd` restart).
+- The record of a temporary snapshot is saved by the next commit. A crash in
+  between = the snapshot never existed (the on-disk state is consistent,
+  temporary snapshots are deleted after a crash anyway). `ASIDE_BEGIN`
+  saves the snapshot record and the clone in one commit: after a crash both
+  exist or neither. An occupied clone target is detected up front
+  (`ALREADY_EXISTS`; before, the volume got blocked after it).
+- **Risk:** a disk write error is reported at the next disk operation (a
+  read, `flush`), not at the write itself. A commit always calls `flush`
+  before writing the superblock, so a failed write stops the commit as
+  before; but a read after a failed write returns that write's error.
+- Guarded by tests: `libs/fs/src/tests/perf_shell.rs` (the number of writes
+  and `flush`es per line does not depend on the number of loaded datasets,
+  2 vs 300) and the QEMU suite `vykon FS` (`user/init/src/tests/fs_perf.rs`,
+  after all FS tests: a commit under 80 ms, a line under 300 ms).
+
 ## On disk
 
 | Kind | Key | Value |
@@ -475,9 +526,9 @@ session identity. Time on the wire = seconds i64 + nanoseconds u32.
 | 71 | `DELETE_BRANCH` | dataset, name | - |
 | 72 | `MERGE` | target, source | merge report |
 | 73 | `MERGE_ABORT` | target | - |
-| 74 | `ASIDE_BEGIN` | dataset, clone path | clone dataset u64 |
-| 75 | `ASIDE_APPLY` | clone, all u8, count + paths | merge report; after the conflicts the total number of conflicts u32 (the list may be cut to 1024) |
-| 76 | `ASIDE_DISCARD` | clone | - |
+| 74 | `ASIDE_BEGIN` | dataset, clone path | clone dataset u64, origin snapshot str, journal seq u64 (like `VIEW`) |
+| 75 | `ASIDE_APPLY` | clone, all u8, count + paths, [flags u8: 1 = `KEEP_VIEW`] | merge report; after the conflicts the total number of conflicts u32 (the list may be cut to 1024). With `KEEP_VIEW` the origin snapshot stays as a view (freed by `VIEW_RELEASE`) |
+| 76 | `ASIDE_DISCARD` | clone | - (deletes the origin snapshot only when it is not a view) |
 | 77 | `ASIDE_CHANGES` | clone, [skip u32] | page: total u32, count u32 + (kind u8, path, old path, oid, folder u8) |
 | 78-81 | `XATTR_GET` / `SET` / `REMOVE` / `LIST` | path, name [, value = rest of the message] | value / - / - / names |
 | 82 / 83 | `SET_EXPIRES` / `EXPIRES` | path [, has u8, time] | has u8, time |

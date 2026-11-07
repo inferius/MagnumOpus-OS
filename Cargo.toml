@@ -108,6 +108,12 @@ opt-level = 2
 
 [profile.dev.package.fsproto]
 opt-level = 2
+[profile.dev.package.blockproto]
+opt-level = 2
+[profile.dev.package."virtio-blk"]
+opt-level = 2
+[profile.dev.package.virtio]
+opt-level = 2
 
 [profile.dev.package.blake3]
 opt-level = 3

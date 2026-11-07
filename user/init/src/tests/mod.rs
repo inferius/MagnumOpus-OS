@@ -12,6 +12,7 @@ mod firewall;
 mod fs;
 mod fs_data;
 mod fs_hist;
+mod fs_perf;
 mod fs_recovery;
 mod gui;
 mod gui_recovery;
@@ -62,6 +63,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("shell", shell::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
+    // Po vsech testech FS: cena radku shellu na plnem svazku.
+    ("vykon FS", fs_perf::TESTS),
     // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery
     // v testovacim behu ridi jen tato sada).
     ("obnova fsd", fs_recovery::TESTS),

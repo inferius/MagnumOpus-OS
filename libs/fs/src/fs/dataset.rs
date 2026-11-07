@@ -71,6 +71,11 @@ impl Default for Child {
 }
 
 impl DsCtx {
+    /// Ma odlozeny dataset neco k zapisu (jako `Fs::cur_dirty`)?
+    fn dirty(&self) -> bool {
+        matches!(self.root, Child::Mem(_)) || !self.data.is_empty() || !self.dead.is_empty() || self.rec_dirty
+    }
+
     fn from_record(r: &DatasetRecord) -> Self {
         Self {
             root: Child::Disk(r.root),
@@ -291,21 +296,27 @@ impl<D: BlockDevice> Fs<D> {
             || self.cur_rec_dirty
     }
 
+    /// Nekorenove datasety se zmenami (aktivni i odlozene), bez aktivace.
+    fn dirty_datasets(&self) -> Vec<u64> {
+        let mut v: Vec<u64> = self.others.iter().filter(|(_, c)| c.dirty()).map(|(&id, _)| id).collect();
+        if self.cur_dirty() {
+            v.push(self.cur_ds);
+        }
+        v.retain(|&id| id != ROOT_DATASET);
+        v.sort_unstable();
+        v
+    }
+
     /// Commit vsech datasetu: kazdy zmeneny nekorenovy dataset zapise svuj
     /// strom a zaznam do korenoveho, nakonec commit korenoveho (superblok).
-    /// Vse v teze transakci = atomicky.
+    /// Vse v teze transakci = atomicky. Prochazi jen zmenene datasety (cena
+    /// nezavisi na tom, kolik jich je nactenych).
     pub(super) fn commit_all(&mut self) -> Result<()> {
         // Commit muze prijit uprostred operace (ensure_room): aktivni
         // dataset se na konci vrati.
         let back = self.cur_ds;
-        for id in self.loaded() {
-            if id == ROOT_DATASET {
-                continue;
-            }
+        for id in self.dirty_datasets() {
             self.activate(id)?;
-            if !self.cur_dirty() {
-                continue;
-            }
             self.jprune()?;
             self.jflush()?;
             self.flush_all_data()?;

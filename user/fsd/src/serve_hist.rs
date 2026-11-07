@@ -362,7 +362,8 @@ impl Service {
                 // Vytvori snapshot v datasetu: pripojeni jen pro cteni nestaci.
                 let ds = sess.map(&r.str()?, true)?;
                 let path = sess.map(&r.str()?, true)?;
-                w.u64(fs.aside_begin(&ds, &path)?);
+                let b = fs.aside_begin_ex(&ds, &path)?;
+                w.u64(b.dataset).str(&b.snapshot).u64(b.seq);
             }
             op::ASIDE_APPLY => {
                 let clone = sess.map(&r.str()?, false)?;
@@ -372,8 +373,11 @@ impl Service {
                     return Err(Error::InvalidArgs);
                 }
                 let sel = (0..n).map(|_| r.str()).collect::<Result<Vec<String>>>()?;
+                // Priznaky jsou novejsi: starsi klient je neposila.
+                let flags = if r.is_empty() { 0 } else { r.u8()? };
+                let keep = flags & fsproto::hist::aside_flags::KEEP_VIEW != 0;
                 Self::writable_original(fs, sess, &clone)?;
-                report(fs.aside_apply(&clone, if all { None } else { Some(&sel) })?).put(&mut w);
+                report(fs.aside_apply_with(&clone, if all { None } else { Some(&sel) }, keep)?).put(&mut w);
             }
             op::ASIDE_DISCARD => {
                 let clone = sess.map(&r.str()?, true)?;

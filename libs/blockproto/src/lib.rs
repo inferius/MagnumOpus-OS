@@ -7,8 +7,12 @@
 //! nejvyse `MAX_SECTORS` sektoru (data se vejdou do zpravy kanalu); vyjimkou
 //! je `DISCARD`, ktery nenese data a `count` muze byt libovolny.
 //!
-//! Verze 1 je synchronni a kopiruje data zpravou. TODO: sdilena pamet
-//! a fronty pozadavku (asynchronni I/O podle navrhu).
+//! Verze 1 kopiruje data zpravou. Ovladac zpracovava pozadavky po jednom
+//! v poradi prichodu a odpovida ve stejnem poradi, takze klient smi poslat
+//! vic zapisu bez cekani (`BlockClient::write_queued`): odpovedi vybere
+//! pred dalsim pozadavkem jineho druhu (cteni, flush, ...). Cteni po zapisu
+//! tak vidi zapsana data a chyba zapisu se ohlasi nejpozdeji u `flush`.
+//! TODO: sdilena pamet a fronty pozadavku (asynchronni I/O podle navrhu).
 
 #![no_std]
 
@@ -23,6 +27,9 @@ pub const SECTOR: usize = 512;
 /// Jak dlouho klient ceka na odpoved ovladace (pak `TIMED_OUT`).
 pub const REPLY_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(30);
 pub const MAX_SECTORS: u32 = 64;
+/// Nejvic zapisu na ceste bez odpovedi (32 x 32 KiB = 1 MiB, hluboko pod
+/// limitem fronty kanalu).
+pub const MAX_QUEUED_WRITES: u32 = 32;
 pub const HEADER: usize = 16;
 
 /// Kody operaci.
@@ -124,6 +131,10 @@ pub struct BlockClient {
     /// Odpoved neprisla vcas: pozdni odpoved by se mohla priradit dalsimu
     /// pozadavku (zpravy nemaji cislo), proto uz zadny dalsi pozadavek.
     failed: core::sync::atomic::AtomicBool,
+    /// Zapisy odeslane bez cekani na odpoved (`write_queued`).
+    queued: core::sync::atomic::AtomicU32,
+    /// Prvni chyba odpovedi na odeslany zapis (kod, 0 = zadna).
+    queued_error: core::sync::atomic::AtomicI64,
 }
 
 impl BlockClient {
@@ -132,6 +143,8 @@ impl BlockClient {
             channel,
             sectors: 0,
             failed: core::sync::atomic::AtomicBool::new(false),
+            queued: core::sync::atomic::AtomicU32::new(0),
+            queued_error: core::sync::atomic::AtomicI64::new(0),
         };
         c.sectors = c
             .call(
@@ -177,21 +190,39 @@ impl BlockClient {
         self.sectors
     }
 
+    /// Precte jednu odpoved (s limitem; vyprseni = klient uz nic neposle).
+    fn reply(&self) -> Result<libos::Message> {
+        use core::sync::atomic::Ordering;
+        // Ovladac, ktery neodpovi, nesmi zaseknout klienta navzdy.
+        let deadline = libos::time::deadline_after(REPLY_TIMEOUT);
+        self.channel.read(Some(deadline)).inspect_err(|_| self.failed.store(true, Ordering::Release))
+    }
+
+    /// Vybere odpovedi na odeslane zapisy; vrati prvni chybu (jednou).
+    pub fn drain(&self) -> Result<()> {
+        use core::sync::atomic::Ordering;
+        while self.queued.load(Ordering::Acquire) > 0 {
+            let m = self.reply()?;
+            self.queued.fetch_sub(1, Ordering::AcqRel);
+            if let Err(e) = decode_reply(&m.data) {
+                let _ = self.queued_error.compare_exchange(0, e.code() as i64, Ordering::AcqRel, Ordering::Acquire);
+            }
+        }
+        match self.queued_error.swap(0, Ordering::AcqRel) {
+            0 => Ok(()),
+            c => Err(Error::from_code(c).unwrap_or(Error::IoError)),
+        }
+    }
+
     fn call(&self, req: Request, data: &[u8]) -> Result<(u64, Vec<u8>)> {
         use core::sync::atomic::Ordering;
         if self.failed.load(Ordering::Acquire) {
             return Err(Error::IoError);
         }
+        // Odpovedi chodi v poradi: nejdriv ty na odeslane zapisy.
+        self.drain()?;
         self.channel.write(&req.encode(data), Vec::new())?;
-        // Ovladac, ktery neodpovi, nesmi zaseknout klienta navzdy.
-        let deadline = libos::time::deadline_after(REPLY_TIMEOUT);
-        let reply = match self.channel.read(Some(deadline)) {
-            Ok(r) => r,
-            Err(e) => {
-                self.failed.store(true, Ordering::Release);
-                return Err(e);
-            }
-        };
+        let reply = self.reply()?;
         let (value, payload) = decode_reply(&reply.data)?;
         Ok((value, payload.to_vec()))
     }
@@ -240,6 +271,29 @@ impl BlockClient {
         Ok(())
     }
 
+    /// Zapise sektory od `lba` bez cekani na odpoved ovladace (jako
+    /// `write`, ale odpovedi se vyberou az pred dalsim pozadavkem jineho
+    /// druhu nebo `drain`). Chyba zapisu se ohlasi tam. Rada zapisu tak
+    /// stoji jednu cestu tam a zpet misto jedne za kazdou zpravu.
+    pub fn write_queued(&self, lba: u64, data: &[u8]) -> Result<()> {
+        use core::sync::atomic::Ordering;
+        if !data.len().is_multiple_of(SECTOR) {
+            return Err(Error::InvalidArgs);
+        }
+        if self.failed.load(Ordering::Acquire) {
+            return Err(Error::IoError);
+        }
+        for (i, chunk) in data.chunks(MAX_SECTORS as usize * SECTOR).enumerate() {
+            if self.queued.load(Ordering::Acquire) >= MAX_QUEUED_WRITES {
+                self.drain()?;
+            }
+            let req = Request { op: op::WRITE, count: (chunk.len() / SECTOR) as u32, lba: lba + (i * MAX_SECTORS as usize) as u64 };
+            self.channel.write(&req.encode(chunk), Vec::new())?;
+            self.queued.fetch_add(1, Ordering::AcqRel);
+        }
+        Ok(())
+    }
+
     /// Oznaci sektory jako nepouzite (TRIM). `NOT_SUPPORTED`, kdyz to
     /// zarizeni neumi.
     pub fn discard(&self, lba: u64, sectors: u64) -> Result<()> {
@@ -284,8 +338,10 @@ impl BlockClient {
         }
     }
 
-    /// Kanal k ovladaci (predani klienta jinemu procesu).
+    /// Kanal k ovladaci (predani klienta jinemu procesu). Odpovedi na
+    /// odeslane zapisy se nejdriv vyberou (jinak by je dostal novy klient).
     pub fn into_channel(self) -> Channel {
+        let _ = self.drain();
         self.channel
     }
 
