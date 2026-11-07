@@ -50,7 +50,10 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
     let docs = root.join("docs");
     let pages = read_index(&docs.join("README.md"))?;
     fs::create_dir_all(out.join("assets"))?;
-    fs::copy(docs.join("site/style.css"), out.join("assets/style.css"))?;
+    // Styl webu + barvy shellu z motivu terminalu (jeden zdroj barev).
+    let mut css = fs::read_to_string(docs.join("site/style.css"))?;
+    css.push_str(&crate::highlight::shell_css());
+    fs::write(out.join("assets/style.css"), css)?;
     fs::copy(docs.join("site/site.js"), out.join("assets/site.js"))?;
 
     let mut errors = Vec::new();

@@ -3,6 +3,8 @@
 //! Pocet nahodnych pripadu property testu lze zvysit promennou prostredi
 //! `PROPTEST_CASES` (napr. `PROPTEST_CASES=5000` pro dukladny beh).
 
+mod aside_crash;
+mod aside_nested;
 mod basic;
 mod commits;
 mod crash;
@@ -10,6 +12,7 @@ mod crash3;
 mod data;
 mod datasets;
 mod errors;
+mod fastdiff;
 mod features;
 mod handles;
 mod history;

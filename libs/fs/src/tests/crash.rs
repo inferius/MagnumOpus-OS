@@ -14,11 +14,11 @@ use super::{assert_clean, opts};
 use crate::{BlockDevice, Fs, Kind, MemDevice, Result};
 
 pub(super) struct CrashDevice {
-    pub(super) durable: MemDevice,
-    pub(super) pending: Vec<(u64, Vec<u8>)>,
+    pub durable: MemDevice,
+    pub pending: Vec<(u64, Vec<u8>)>,
     /// Po kolika zapisech "vypadne proud": dalsi flush uz nic neulozi.
-    pub(super) fail_after: Option<usize>,
-    pub(super) writes: usize,
+    pub fail_after: Option<usize>,
+    pub writes: usize,
 }
 
 impl BlockDevice for CrashDevice {

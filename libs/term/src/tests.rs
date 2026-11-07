@@ -13,9 +13,9 @@ use crate::screen::{PixelFormat, Screen, Surface, paint};
 use crate::session::{Env, Link, Service};
 
 #[derive(Default)]
-struct TestLink {
-    incoming: VecDeque<ClientMsg>,
-    sent: Vec<ServerMsg>,
+pub(crate) struct TestLink {
+    pub incoming: VecDeque<ClientMsg>,
+    pub sent: Vec<ServerMsg>,
 }
 
 impl Link for TestLink {
@@ -33,7 +33,8 @@ impl Link for TestLink {
     }
 }
 
-struct TestEnv(i64);
+#[derive(Default)]
+pub(crate) struct TestEnv(i64);
 
 impl Env for TestEnv {
     fn now(&mut self) -> Option<i64> {
@@ -73,7 +74,8 @@ fn protocol_roundtrip() {
         ServerMsg::Item { session: 1, block: 2, item: Item::Error { code: "X".into(), message: "m".into(), report: "r".into() } },
         ServerMsg::Item { session: 1, block: 2, item: Item::Progress { done: 1, total: 3, label: "kopiruji".into() } },
         ServerMsg::Item { session: 1, block: 2, item: Item::Link { text: "napoveda".into(), target: "help:ls".into() } },
-        ServerMsg::Prompt { prompt: 3, question: "Prevzit?".into(), detail: Item::Diff(Value::List(vec![])) },
+        ServerMsg::Prompt { prompt: 3, question: "Prevzit?".into(), detail: Item::Diff(Value::List(vec![])), choices: vec!["a".into()] },
+        ServerMsg::ItemUpdate { session: 1, block: 2, index: 0, item: Item::Progress { done: 1, total: 4, label: "x".into() } },
         ServerMsg::Completions { start: 3, items: vec![("ls".into(), 0, "vypise".into())] },
         ServerMsg::SessionList { sessions: vec![(1, 2, "/home".into())] },
         ServerMsg::BlockEnd { session: 1, block: 2, ok: false, duration: -1 },
@@ -86,6 +88,7 @@ fn protocol_roundtrip() {
         ClientMsg::Run { session: 1, line: "ls | where size > 1KB".into() },
         ClientMsg::Complete { session: 1, line: "l".into(), cursor: 1 },
         ClientMsg::Answer { prompt: 1, yes: true },
+        ClientMsg::Choose { prompt: 1, index: 2 },
         ClientMsg::Format { session: 1, line: "ls".into(), style: 1 },
         ClientMsg::Sessions,
     ];
@@ -204,12 +207,12 @@ fn completion_format_and_jobs() {
 
 #[test]
 fn vt_adapter() {
-    let t = crate::vt::message(&ServerMsg::Item { session: 1, block: 1, item: Item::Note("pozn".into()) }, true);
-    assert_eq!(t, "\x1b[2mpozn\x1b[0m\n");
+    let t = crate::vt::message(&ServerMsg::Item { session: 1, block: 1, item: Item::Note("pozn".into()) }, Some(&crate::theme::Theme::dark()));
+    assert_eq!(t, "\x1b[0;38;2;124;130;145mpozn\x1b[0m\n", "poznamka barvou muted motivu");
     assert_eq!(crate::vt::strip(&t), "pozn\n");
-    let l = crate::vt::item(&Item::Link { text: "a".into(), target: "b".into() }, true);
+    let l = crate::vt::item(&Item::Link { text: "a".into(), target: "b".into() }, Some(&crate::theme::Theme::dark()));
     assert_eq!(crate::vt::strip(&l), "a\n");
-    let p = crate::vt::item(&Item::Progress { done: 1, total: 2, label: "x".into() }, false);
+    let p = crate::vt::item(&Item::Progress { done: 1, total: 2, label: "x".into() }, None);
     assert_eq!(p, "[##########----------] 50% x\r");
 }
 
@@ -218,7 +221,7 @@ fn screen_and_font() {
     let mut s = Screen::new(10, 3);
     s.write("ahoj\n\x1b[31mčervená\x1b[0m\nřádek3\nřádek4");
     assert_eq!(s.line(0), "červená");
-    assert_eq!(s.cell(0, 0).fg, 3);
+    assert_eq!(s.cell(0, 0).fg, crate::screen::PALETTE[3]);
     assert_eq!(s.line(2), "řádek4");
     let (w, h) = (200, 80);
     let mut buf = vec![0u32; w * h];
@@ -238,6 +241,7 @@ fn program_mounts_from_needs() {
         write: vec!["/home/foto/out".into(), "/data".into()],
         net: false,
         all: false,
+        aside: Vec::new(),
     };
     let m = mounts(&n);
     let spec = |p: &str, ro| MountSpec { name: p.into(), target: p.into(), read_only: ro };

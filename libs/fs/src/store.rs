@@ -119,6 +119,11 @@ pub struct Store<D: BlockDevice> {
     /// Mrtve bloky drzene snapshoty, cekajici na zapis do deadlistu.
     pub dead: Vec<DeadExtent>,
     cache: BTreeMap<u64, Node>,
+    /// Pocitadla pro mereni (testy rozsahu prace): kolikrat se sahlo na
+    /// ulozeny uzel (`node_visits`, i z cache) a kolikrat se cetl z disku
+    /// (`node_reads`).
+    pub node_visits: u64,
+    pub node_reads: u64,
     dirty: BTreeMap<u64, Node>,
     next_mem: u64,
     changed: bool,
@@ -260,6 +265,8 @@ impl<D: BlockDevice> Store<D> {
             space,
             dead: Vec::new(),
             cache: BTreeMap::new(),
+            node_visits: 0,
+            node_reads: 0,
             dirty: BTreeMap::new(),
             next_mem: 1,
             changed: false,
@@ -581,7 +588,9 @@ impl<D: BlockDevice> Store<D> {
     /// Nacte ulozeny uzel a overi jeho kontrolni soucet (pri chybe z druhe
     /// kopie, viz `read_verified`).
     pub fn load(&mut self, ptr: &BlockPtr) -> Result<&Node> {
+        self.node_visits += 1;
         if !self.cache.contains_key(&ptr.block) {
+            self.node_reads += 1;
             let copy_ok = ptr.copy == 0 || (self.inside(ptr.copy, NODE_BLOCKS) && ptr.copy_dev == 0);
             if !self.inside(ptr.block, NODE_BLOCKS) || !copy_ok || ptr.len as u64 != NODE_BLOCKS || ptr.dev != 0 {
                 return Err(Error::Corrupted);

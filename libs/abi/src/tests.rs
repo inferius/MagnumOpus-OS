@@ -109,6 +109,7 @@ fn every_syscall_is_documented() {
         "JOB_SET_LIMIT",
         "JOB_INFO",
         "CLOCK_ADJUST",
+        "FB_CONTROL",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

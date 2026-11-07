@@ -242,11 +242,29 @@ porušený vnitřní předpoklad (chyba jádra).
 | `init: firewall bez FS (konfigurace se neulozi): ...` | Pro `fwd` nejde připravit relaci FS (chybí FS nebo práva). |
 | `init: sluzbu firewallu nelze spustit: ...` | `fwd` nenaběhl; `netd` uvidí zavřený kanál a dotazy odmítá. |
 
+## Textová konzole console
+
+| Hláška | Význam a řešení |
+|---|---|
+| `console: bezim (ceka na displej a fokus)` | Konzole běží; kreslit začne po `display`, klávesy bere po `focus`. |
+| `console: displej prevzat (SxR znaku)` | Převzala framebuffer; mřížka znaků podle rozlišení. |
+| `console: displej vracen` | Po `release`; framebuffer je zase u jádra. |
+| `console: ridici kanal zavren, koncim` | Vlastník konzole skončil; displej se vrátí jádru. |
+| `console: chybi kanal k termd` | Start bez kanálu ke službě relací; konzole končí s kódem 1. |
+| `framebuffer prevzal proces X N (log jadra dal na seriove lince)` | Jádro: `FB_CONTROL` `CLAIM`; log už nekreslí na obrazovku. |
+| `framebuffer vratil proces X N` | Jádro: `FB_CONTROL` `RELEASE`; obrazovka se smaže a log se kreslí dál. |
+
 ## Služba relací termd
 
 | Hláška | Význam a řešení |
 |---|---|
-| `termd: bezim (protokol vN, FS fsd/zadny)` | Služba relací běží. `zadny` = nedostala kanál fsd; shell pak vidí jen prázdný kořen (zápis vrací `READ_ONLY`). |
+| `termd: bezim (protokol vN, FS fsd/zadny, registr ano/ne, prevzato N)` | Prostředník běží. `zadny` = nedostal kanál fsd; shell pak vidí jen prázdný kořen (zápis vrací `READ_ONLY`). `registr ne` = relace nepřežijí konec termd. `prevzato N` = počet relací převzatých po předchozím termd. |
+| `termd: prevzata relace N` | Relace z registru přešla na nový termd; okno se k ní může připojit. |
 | `termd\| ...` | Zrcadlo výstupu relací jako text (adaptér VT100), aby šlo číst i na sériové lince. Bloky začínají `> příkaz`. |
-| `termd: okno zavreno, koncim` | Zavřel se kanál k rodiči. Úlohy na pozadí ještě doběhnou, pak služba skončí (relace zatím nepřežijí konec procesu). |
-| `termd: chyba cteni: ...` | Neočekávaná chyba kanálu; služba končí s kódem 1. |
+| `termd: okno zavreno, koncim (N relaci bezi dal)` | Okno se zavřelo; relace se odpojí a běží dál ve svých procesech. Nový termd je převezme z registru. |
+| `termd: chyba cekani: ...` | Neočekávaná chyba čekání na kanály; prostředník končí s kódem 1 (relace běží dál). |
+| `shsess N: bezim (znacka)` | Proces relace N běží; značka je ve jménech jejích klonů bokem. |
+| `shsess N: termd skoncil, cekam na prevzeti` | Hlavní kanál zavřen; příkaz a úlohy doběhnou, relace čeká na `Adopt` od nového termd. |
+| `shsess N: prevzato novym termd` | Relace přešla na nový termd. |
+| `shsess N: nikdo neprevzal, koncim` | Registr kanál zavřel (nebo žádný není) a žádná úloha nečeká; relace končí. |
+| `shsess: chybi Init` / `prvni zprava neni Init` | Proces relace nedostal úvodní zprávu od termd; končí s kódem 1. |

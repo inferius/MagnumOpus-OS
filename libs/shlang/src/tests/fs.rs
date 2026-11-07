@@ -2,15 +2,15 @@
 
 use super::host::{TestHost, interp, run_lines};
 use crate::error::code;
-use crate::host::Fs;
 use crate::value::Value;
 
 #[test]
 fn reading_commands_cost_nothing() {
-    let (mut h, it, o) = run_lines(&["ls -r | count", "open a.txt"]);
+    let (h, it, o) = run_lines(&["ls -r | count", "open a.txt"]);
     o.result.unwrap();
-    assert!(it.undo.entries.is_empty(), "cteni nesmi delat snapshot");
-    assert!(h.fs.snapshot_list("shell-undo-1", "/").is_err());
+    assert!(it.undo.entries.is_empty(), "cteni nesmi delat pohled");
+    assert_eq!(h.fs.clones_made(), 0, "radek, ktery jen cte, nezaklada klon");
+    assert_eq!(h.fs.views_open(), 0);
 }
 
 #[test]
@@ -82,10 +82,28 @@ fn preview_shows_diff_and_applies_after_confirm() {
 }
 
 #[test]
-fn preview_refuses_external_programs() {
-    let (h, _, o) = run_lines(&["preview { tool }"]);
-    assert_eq!(o.result.unwrap_err().code, code::NEEDS);
-    assert!(h.execs.is_empty());
+fn preview_runs_external_programs_in_a_clone() {
+    // Odmitnuti: program bezel, ale jen v klonu - FS beze zmeny.
+    let mut h = TestHost::new();
+    h.answer = false;
+    let mut it = interp();
+    let o = it.run_line(&mut h, "preview { tool }");
+    assert_eq!(o.result.unwrap_err().code, code::REJECTED);
+    assert_eq!(h.execs.len(), 1);
+    assert!(!h.execs[0].2.aside.is_empty(), "program dostal strom z klonu");
+    assert!(!h.fs.exists("/home/tool.out"));
+    it.flush(&mut h);
+    assert_eq!(h.fs.asides_open(), 0, "klony se uklidily");
+    // Potvrzeni: zmena programu se prevezme a jde vratit.
+    h.answer = true;
+    let o = it.run_line(&mut h, "preview { tool }");
+    o.result.unwrap();
+    assert_eq!(h.fs.get("/home/tool.out"), Some(&b"z programu"[..]));
+    assert_eq!(o.diff.len(), 1);
+    it.run_line(&mut h, "undo").result.unwrap();
+    assert!(!h.fs.exists("/home/tool.out"));
+    it.flush(&mut h);
+    assert_eq!(h.fs.asides_open(), 0);
 }
 
 #[test]

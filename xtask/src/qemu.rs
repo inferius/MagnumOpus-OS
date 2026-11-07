@@ -52,11 +52,11 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         std::fs::copy(&fw_vars_template, &fw_vars)?;
     }
 
-    let serial_log = target_dir().join(if opts.test {
-        format!("serial-test-{}.log", arch.name)
-    } else {
-        format!("serial-{}.log", arch.name)
-    });
+    // Kazdy beh ma vlastni disky a testy i vlastni log: soubezne behy
+    // (vic vlaken na jednom stroji) si jinak prepisovaly datovy disk a QMP
+    // pomocnik cetl znacky testu z cizi seriove linky.
+    let run = RunFiles::new(arch.name, opts.test);
+    let serial_log = run.serial_log.clone();
     let qmp_port = Arc::new(AtomicU16::new(0));
     qmp::spawn_injector(serial_log.clone(), qmp_port.clone(), arch.ps2);
     let mut hostfwd = opts.hostfwd.clone();
@@ -67,7 +67,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         let _ = std::fs::remove_file(&serial_log);
         let port = qmp::free_port()?;
         qmp_port.store(port, Ordering::Relaxed);
-        let cmd = command(&qemu, image, artifacts, opts, (&fw_code, &fw_vars), &serial_log, port, hostfwd.as_deref())?;
+        let cmd = command(&qemu, image, artifacts, opts, (&fw_code, &fw_vars), &run, port, hostfwd.as_deref())?;
         // Port pro hostfwd uvolnit az ted (QEMU ho hned obsadi).
         if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
             h.release_forwarded_port();
@@ -104,11 +104,12 @@ fn command(
     artifacts: &Artifacts,
     opts: &Options,
     fw: (&Path, &Path),
-    serial_log: &Path,
+    run: &RunFiles,
     qmp_port: u16,
     hostfwd: Option<&str>,
 ) -> Result<Command> {
     let (fw_code, fw_vars) = fw;
+    let serial_log = &run.serial_log;
     let accel = opts.accel.as_deref().unwrap_or(default_accel());
     let mut cmd = Command::new(qemu);
     let translate_os_disk = match opts.arch.name {
@@ -138,14 +139,14 @@ fn command(
         .arg("-drive")
         .arg(format!(
             "if=none,id=scratch,format=raw,file={}",
-            scratch_disk()?.display()
+            scratch_disk(&run.scratch)?.display()
         ))
         .args(["-device", &blk("scratch")])
         // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
         .arg("-drive")
         .arg(format!(
             "if=none,id=data,format=raw,discard=unmap,file={}",
-            datadisk::create(&target_dir())?.display()
+            datadisk::create(&run.data)?.display()
         ))
         .args(["-device", &blk("data")])
         .arg("-qmp")
@@ -370,10 +371,42 @@ fn run_test(mut cmd: Command, opts: &Options) -> std::result::Result<(), TestErr
 }
 
 /// Prazdny disk 1 MiB pro testy ovladace (pri kazdem behu znovu vynulovany).
-fn scratch_disk() -> Result<PathBuf> {
-    let path = target_dir().join("scratch.img");
-    std::fs::write(&path, vec![0u8; 1024 * 1024])?;
-    Ok(path)
+fn scratch_disk(path: &Path) -> Result<PathBuf> {
+    std::fs::write(path, vec![0u8; 1024 * 1024])?;
+    Ok(path.to_path_buf())
+}
+
+/// Soubory jednoho behu QEMU. Disky jsou jen pro tento beh (cislo procesu
+/// xtask v nazvu) a po skonceni se smazou; log testu take nese cislo
+/// procesu, aby soubezne behy nesdilely znacky pro QMP. Interaktivni beh
+/// pise do `target/serial-<arch>.log` jako dosud.
+struct RunFiles {
+    data: PathBuf,
+    scratch: PathBuf,
+    serial_log: PathBuf,
+}
+
+impl RunFiles {
+    fn new(arch: &str, test: bool) -> Self {
+        let pid = std::process::id();
+        let t = target_dir();
+        Self {
+            data: t.join(format!("data-{pid}.img")),
+            scratch: t.join(format!("scratch-{pid}.img")),
+            serial_log: t.join(if test {
+                format!("serial-test-{arch}-{pid}.log")
+            } else {
+                format!("serial-{arch}.log")
+            }),
+        }
+    }
+}
+
+impl Drop for RunFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.data);
+        let _ = std::fs::remove_file(&self.scratch);
+    }
 }
 
 fn pflash_arg(path: &Path, readonly: bool) -> String {

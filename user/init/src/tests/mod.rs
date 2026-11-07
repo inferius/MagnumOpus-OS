@@ -19,6 +19,7 @@ mod jobs;
 mod memory;
 pub mod net;
 mod process;
+mod console;
 mod shell;
 mod supervisor;
 mod time;

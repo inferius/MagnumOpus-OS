@@ -56,6 +56,11 @@ pub mod kind {
     /// spoustet dalsi procesy a zakladat podrizene joby, ale nemeni si
     /// limity). Init dostane korenovy job se vsemi pravy.
     pub const JOB: u32 = 6;
+    /// Fyzicky objekt pameti s linearnim framebufferem z firmware (jen kdyz
+    /// je). Geometrie: syscall `FB_CONTROL` (`fb_op::INFO`). Init ho preda
+    /// jedinemu procesu (textova konzole); jadro dal kresli log do
+    /// framebufferu, dokud ho vlastnik neprevezme (`fb_op::CLAIM`).
+    pub const FRAMEBUFFER: u32 = 7;
 }
 
 pub const HEADER_SIZE: usize = core::mem::size_of::<Header>();
