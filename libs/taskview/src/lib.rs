@@ -30,6 +30,25 @@ use ui::{App, Node, button, checkbox, column, label, list, progress, row, scroll
 
 pub use test_backend::TestBackend;
 
+/// Spojeni s taskd pres kanal: pozadavky odesle zapisovac `send`, odpovedi
+/// prijdou zpravami kanalu do [`App::external`].
+pub struct ChannelBackend {
+    send: alloc::boxed::Box<dyn FnMut(Vec<u8>)>,
+}
+
+impl ChannelBackend {
+    pub fn new(send: impl FnMut(Vec<u8>) + 'static) -> Self {
+        Self { send: alloc::boxed::Box::new(send) }
+    }
+}
+
+impl Backend for ChannelBackend {
+    fn send(&mut self, req: Request) -> Vec<Reply> {
+        (self.send)(req.encode());
+        Vec::new()
+    }
+}
+
 /// Spojeni se sluzbou uloh: odesle pozadavek; odpovedi, ktere jsou hned
 /// k dispozici (testovaci zdroj), vrati, ostatni prijdou pres
 /// [`TaskManager::reply`].
@@ -262,6 +281,16 @@ impl<B: Backend> App for TaskManager<B> {
             items.push(label(l));
         }
         column(items)
+    }
+
+    fn external(&mut self, data: &[u8]) -> bool {
+        match Reply::decode(data) {
+            Ok(r) => {
+                self.reply(&r);
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     fn update(&mut self, m: Msg) {

@@ -9,7 +9,8 @@
 //!   udalostmi s poradovym cislem ([`Reply::Event`]); po vypadku jde navazat
 //!   od posledniho cisla (`Subscribe { since }`).
 //! - **producent** (shell, supervisor, sluzby, API akci): [`Produce`] -
-//!   registrace ulohy, prubeh, stav, konec.
+//!   registrace ulohy, prubeh, stav, konec. Taskd je prijme jen na kanalu
+//!   producenta (jina capability nez kanal klienta GUI nebo terminalu).
 //!
 //! Prava kontroluje taskd podle identity relace kanalu: klient vidi a ridi
 //! jen sve ulohy, cizi a systemove jen s pravem.
@@ -91,7 +92,8 @@ impl Origin {
 pub enum State {
     Running,
     Paused,
-    /// Ceka na vyzvu nebo vstup (text vyzvy).
+    /// Ceka na vyzvu nebo vstup (text vyzvy). Odpoved na vyzvu se dava
+    /// pres `attach` v terminalu, ne pres tento protokol.
     Waiting(String),
     /// Zruseni pozadano, uloha jeste konci.
     Cancelling,
@@ -481,7 +483,7 @@ impl Reply {
                 let seq = r.u64()?;
                 let last = r.u8()? != 0;
                 let n = r.u32()? as usize;
-                if n > MAX_TASKS_PER_MSG.max(len / Task::MIN_SIZE) || n.saturating_mul(Task::MIN_SIZE) > len {
+                if n > MAX_TASKS_PER_MSG.min(len / Task::MIN_SIZE) || n.saturating_mul(Task::MIN_SIZE) > len {
                     return Err(Error::InvalidArgs);
                 }
                 let mut tasks = Vec::with_capacity(n);

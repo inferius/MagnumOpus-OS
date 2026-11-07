@@ -6,7 +6,7 @@ use ui::App;
 
 use crate::*;
 
-fn ui_for(m: &TaskManager<TestBackend>) -> ui::Ui<Msg> {
+fn ui_for<B: Backend>(m: &TaskManager<B>) -> ui::Ui<Msg> {
     let mut u = ui::Ui::new(gfx_text(), 560, 620);
     u.rebuild(m.title(), m.view());
     u
@@ -20,7 +20,7 @@ fn names(u: &ui::Ui<Msg>, role: Role) -> Vec<String> {
     u.a11y().into_iter().filter(|n| n.role == role).map(|n| n.name).collect()
 }
 
-fn press(m: &mut TaskManager<TestBackend>, u: &mut ui::Ui<Msg>, name: &str) -> bool {
+fn press<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, name: &str) -> bool {
     let n = u.a11y().into_iter().find(|n| n.role == Role::Button && n.name == name).unwrap();
     if n.state & state::DISABLED != 0 {
         return false;
@@ -33,8 +33,8 @@ fn press(m: &mut TaskManager<TestBackend>, u: &mut ui::Ui<Msg>, name: &str) -> b
     true
 }
 
-fn select(m: &mut TaskManager<TestBackend>, u: &mut ui::Ui<Msg>, prefix: &str) {
-    let i = m.visible().iter().position(|t| TaskManager::<TestBackend>::row_text(t).contains(prefix)).unwrap();
+fn select<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, prefix: &str) {
+    let i = m.visible().iter().position(|t| TaskManager::<B>::row_text(t).contains(prefix)).unwrap();
     m.update(Msg::Select(i));
     u.rebuild(m.title(), m.view());
 }
@@ -96,4 +96,28 @@ fn taskd_decides_even_if_window_offers() {
     assert_eq!(r, vec![taskproto::Reply::Result { req: 9, result: Err(Error::InvalidArgs) }]);
     let r = b.send(Request::Cancel { req: 9, id: 99 });
     assert_eq!(r, vec![taskproto::Reply::Result { req: 9, result: Err(Error::NotFound) }]);
+}
+
+#[test]
+fn channel_backend_sends_requests_and_applies_replies() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let sent: Rc<RefCell<Vec<Vec<u8>>>> = Rc::default();
+    let s2 = sent.clone();
+    let mut m = TaskManager::new(ChannelBackend::new(move |d| s2.borrow_mut().push(d)));
+    // Prvni pozadavek je odber.
+    assert!(matches!(Request::decode(&sent.borrow()[0]), Ok(Request::Subscribe { since: None, .. })));
+    // Snimek z taskd prijde zpravou kanalu.
+    let snap = taskproto::Reply::Snapshot { req: 1, seq: 1, tasks: TestBackend::default().tasks, last: true };
+    assert!(m.external(&snap.encode()));
+    assert_eq!(m.list.tasks.len(), 5);
+    let mut u = ui_for(&m);
+    select(&mut m, &mut u, "Kopírování");
+    assert!(press(&mut m, &mut u, "Zrušit"));
+    assert!(matches!(Request::decode(sent.borrow().last().unwrap()), Ok(Request::Cancel { id: 1, .. })));
+    assert_eq!(m.status, "Čekám na službu úloh...");
+    // Odmitnuti od taskd.
+    assert!(m.external(&taskproto::Reply::Result { req: 2, result: Err(Error::AccessDenied) }.encode()));
+    assert_eq!(m.status, "Odmítnuto: ACCESS_DENIED");
+    assert!(!m.external(b"nesmysl"));
 }

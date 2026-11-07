@@ -89,6 +89,13 @@ pub trait App {
         let _ = (id, args);
         Err(String::from("akce neni implementovana"))
     }
+
+    /// Zprava z dalsiho kanalu aplikace (napr. sluzba uloh), viz
+    /// `client::run_with`. Vraci, zda se zmenil stav (prekreslit).
+    fn external(&mut self, data: &[u8]) -> bool {
+        let _ = data;
+        false
+    }
 }
 
 /// Stav rozhrani jednoho okna.
