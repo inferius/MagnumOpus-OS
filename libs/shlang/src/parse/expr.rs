@@ -155,6 +155,12 @@ impl<'a> Parser<'a> {
                 let name_start = self.lx.pos;
                 let name: String = self.lx.ident().into();
                 let name_span = Span::new(name_start, self.lx.pos);
+                if name == "await" && self.lx.peek_char() != Some('(') {
+                    // Zapis C `uloha.await`.
+                    let span = e.span().to(name_span);
+                    e = Expr::Await { kind: crate::ast::AwaitKind::One, target: Box::new(e), timeout: None, span };
+                    continue;
+                }
                 if self.lx.peek_char() == Some('(') {
                     // Cast roury: `x.where(...)`
                     let name = demangle(self, &name);
@@ -447,6 +453,12 @@ impl<'a> Parser<'a> {
                 let (b, s) = self.block(&[])?;
                 return Ok(Expr::Bg(b, span.to(s)));
             }
+            "async" => {
+                self.lx.skip_space();
+                let (b, s) = self.block(&[])?;
+                return Ok(Expr::Async(b, span.to(s)));
+            }
+            "await" => return self.await_expr(span),
             _ if is_keyword(&w) => {
                 return Err(self.err(alloc::format!("'{w}' tu nemuze byt"), span));
             }
@@ -585,6 +597,35 @@ impl<'a> Parser<'a> {
         self.lx.skip_space();
         let (body, end) = self.block(&[])?;
         Ok(Expr::While { cond: Box::new(cond), body, span: start.to(end) })
+    }
+
+    /// `await x`, `await all [..]`, `await any [..]` (`timeout d`).
+    fn await_expr(&mut self, start: Span) -> Result<Expr, ShError> {
+        use crate::ast::AwaitKind;
+        self.lx.skip_space();
+        let mut kind = AwaitKind::One;
+        {
+            let mut l = self.lx.clone();
+            let w = l.ident();
+            let after = l.peek_char();
+            if (w == "all" || w == "any") && matches!(after, Some(' ' | '\t' | '[' | '(')) {
+                kind = if w == "all" { AwaitKind::All } else { AwaitKind::Any };
+                self.lx = l;
+                self.lx.skip_space();
+            }
+        }
+        let target = self.unary()?;
+        let save = self.lx.pos;
+        self.lx.skip_space();
+        let mut timeout = None;
+        if self.is_ident("timeout")? {
+            self.next()?;
+            self.lx.skip_space();
+            timeout = Some(Box::new(self.unary()?));
+        } else {
+            self.lx.pos = save;
+        }
+        Ok(Expr::Await { kind, target: Box::new(target), timeout, span: start.to(self.here()) })
     }
 
     fn try_expr(&mut self, start: Span) -> Result<Expr, ShError> {

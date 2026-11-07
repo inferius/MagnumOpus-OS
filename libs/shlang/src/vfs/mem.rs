@@ -1,4 +1,5 @@
-//! Souborovy system v pameti (testy na hostiteli), vcetne snapshotu.
+//! Souborovy system v pameti (testy na hostiteli), vcetne datasetu,
+//! klonu bokem a pohledu (viz [`super::mem_hist`]).
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -7,10 +8,10 @@ use alloc::vec::Vec;
 use abi::Error;
 
 use super::path::{file_name, join, key, parent};
-use crate::host::{DirEntry, Fs, FsResult, Meta, NodeKind};
+use crate::host::{Applied, Aside, DirEntry, Fs, FsChange, FsResult, Meta, NodeKind, ViewRef};
 
 #[derive(Debug, Clone, PartialEq)]
-enum Node {
+pub(super) enum Node {
     File(Vec<u8>),
     Dir,
 }
@@ -18,16 +19,20 @@ enum Node {
 /// FS v pameti: klic = cesta malymi pismeny, hodnota = (puvodni cesta, uzel).
 #[derive(Debug, Clone, Default)]
 pub struct MemFs {
-    nodes: BTreeMap<String, (String, Node)>,
-    snapshots: BTreeMap<String, BTreeMap<String, (String, Node)>>,
+    pub(super) nodes: BTreeMap<String, (String, Node)>,
+    pub(super) hist: super::mem_hist::Hist,
     /// Pocet zapisu (testy: kolik se toho opravdu zapsalo).
     pub writes: usize,
     pub total: u64,
+    /// Kolik konfliktu FS vrati (vic = zkraceny seznam, jako fsd).
+    pub conflict_limit: usize,
+    /// Pocet dotazu `dataset_of` (testy: cteni se na dataset nepta).
+    pub dataset_queries: usize,
 }
 
 impl MemFs {
     pub fn new() -> Self {
-        let mut fs = Self { total: 1 << 30, ..Default::default() };
+        let mut fs = Self { total: 1 << 30, conflict_limit: usize::MAX, ..Default::default() };
         fs.nodes.insert("/".into(), ("/".into(), Node::Dir));
         fs
     }
@@ -59,14 +64,14 @@ impl MemFs {
         self.nodes.contains_key(&key(path))
     }
 
-    fn meta(n: &Node) -> Meta {
+    pub(super) fn meta(n: &Node) -> Meta {
         match n {
-            Node::File(d) => Meta { kind: NodeKind::File, size: d.len() as u64, mtime: None },
-            Node::Dir => Meta { kind: NodeKind::Dir, size: 0, mtime: None },
+            Node::File(d) => Meta::basic(NodeKind::File, d.len() as u64),
+            Node::Dir => Meta::basic(NodeKind::Dir, 0),
         }
     }
 
-    fn list_in(nodes: &BTreeMap<String, (String, Node)>, path: &str) -> FsResult<Vec<DirEntry>> {
+    pub(super) fn list_in(nodes: &BTreeMap<String, (String, Node)>, path: &str) -> FsResult<Vec<DirEntry>> {
         match nodes.get(&key(path)) {
             Some((_, Node::Dir)) => {}
             Some(_) => return Err(Error::NotADirectory),
@@ -92,14 +97,17 @@ impl MemFs {
 
 impl Fs for MemFs {
     fn stat(&mut self, path: &str) -> FsResult<Meta> {
+        self.guard_inside(path)?;
         self.nodes.get(&key(path)).map(|(_, n)| Self::meta(n)).ok_or(Error::NotFound)
     }
 
     fn list(&mut self, path: &str) -> FsResult<Vec<DirEntry>> {
+        self.guard(path)?;
         Self::list_in(&self.nodes, path)
     }
 
     fn read(&mut self, path: &str) -> FsResult<Vec<u8>> {
+        self.guard_inside(path)?;
         match self.nodes.get(&key(path)) {
             Some((_, Node::File(d))) => Ok(d.clone()),
             Some(_) => Err(Error::IsADirectory),
@@ -108,21 +116,25 @@ impl Fs for MemFs {
     }
 
     fn write(&mut self, path: &str, data: &[u8]) -> FsResult<()> {
+        self.guard(path)?;
         self.parent_dir(path)?;
         if let Some((_, Node::Dir)) = self.nodes.get(&key(path)) {
             return Err(Error::IsADirectory);
         }
         self.writes += 1;
+        self.bump(path);
         self.nodes.insert(key(path), (path.into(), Node::File(data.into())));
         Ok(())
     }
 
     fn mkdir(&mut self, path: &str) -> FsResult<()> {
+        self.guard(path)?;
         self.parent_dir(path)?;
         if self.nodes.contains_key(&key(path)) {
             return Err(Error::AlreadyExists);
         }
         self.writes += 1;
+        self.bump(path);
         self.nodes.insert(key(path), (path.into(), Node::Dir));
         Ok(())
     }
@@ -131,17 +143,21 @@ impl Fs for MemFs {
         if path == "/" {
             return Err(Error::AccessDenied);
         }
+        self.guard(path)?;
         match self.nodes.get(&key(path)) {
             None => return Err(Error::NotFound),
             Some((_, Node::Dir)) if !Self::list_in(&self.nodes, path)?.is_empty() => return Err(Error::NotEmpty),
             _ => {}
         }
         self.writes += 1;
+        self.bump(path);
         self.nodes.remove(&key(path));
         Ok(())
     }
 
     fn rename(&mut self, from: &str, to: &str) -> FsResult<()> {
+        self.guard(from)?;
+        self.guard(to)?;
         if !self.nodes.contains_key(&key(from)) {
             return Err(Error::NotFound);
         }
@@ -163,6 +179,8 @@ impl Fs for MemFs {
             self.nodes.insert(key(&new), (new, n));
         }
         self.writes += 1;
+        self.bump(from);
+        self.bump(to);
         Ok(())
     }
 
@@ -178,30 +196,61 @@ impl Fs for MemFs {
         Ok((self.total, self.total.saturating_sub(used)))
     }
 
-    fn snapshot(&mut self, name: &str) -> FsResult<()> {
-        if self.snapshots.contains_key(name) {
-            return Err(Error::AlreadyExists);
+    /// Jako fsd: neexistujici cesta = `NOT_FOUND`.
+    fn dataset_of(&mut self, path: &str) -> FsResult<String> {
+        self.dataset_queries += 1;
+        if !self.exists(path) {
+            return Err(Error::NotFound);
         }
-        self.snapshots.insert(name.into(), self.nodes.clone());
-        Ok(())
+        Ok(self.dataset_root(path))
     }
 
-    fn delete_snapshot(&mut self, name: &str) -> FsResult<()> {
-        self.snapshots.remove(name).map(|_| ()).ok_or(Error::NotFound)
+    fn aside_begin(&mut self, dataset: &str) -> FsResult<Aside> {
+        self.h_aside_begin(dataset)
     }
 
-    fn snapshot_stat(&mut self, snap: &str, path: &str) -> FsResult<Meta> {
-        let s = self.snapshots.get(snap).ok_or(Error::NotFound)?;
+    fn aside_changes(&mut self, aside: &Aside) -> FsResult<Vec<FsChange>> {
+        self.h_aside_changes(aside)
+    }
+
+    fn aside_apply(&mut self, aside: &Aside) -> FsResult<Applied> {
+        let conflicts = self.h_aside_apply(aside)?;
+        let complete = conflicts.len() <= self.conflict_limit;
+        let conflicts = conflicts.into_iter().take(self.conflict_limit).collect();
+        Ok(Applied { conflicts, complete })
+    }
+
+    fn aside_discard(&mut self, aside: &Aside) -> FsResult<()> {
+        self.h_aside_discard(aside)
+    }
+
+    fn view(&mut self, dataset: &str) -> FsResult<ViewRef> {
+        self.h_view(dataset)
+    }
+
+    fn release_view(&mut self, view: &ViewRef) -> FsResult<()> {
+        self.hist.views.remove(&view.snapshot).map(|_| ()).ok_or(Error::NotFound)
+    }
+
+    fn changed_since(&mut self, view: &ViewRef) -> FsResult<Vec<FsChange>> {
+        self.h_changed_since(view)
+    }
+
+    fn view_stat(&mut self, view: &ViewRef, path: &str) -> FsResult<Meta> {
+        self.view_guard(view, path, false)?;
+        let s = self.hist.views.get(&view.snapshot).ok_or(Error::NotFound)?;
         s.get(&key(path)).map(|(_, n)| Self::meta(n)).ok_or(Error::NotFound)
     }
 
-    fn snapshot_list(&mut self, snap: &str, path: &str) -> FsResult<Vec<DirEntry>> {
-        let s = self.snapshots.get(snap).ok_or(Error::NotFound)?;
+    fn view_list(&mut self, view: &ViewRef, path: &str) -> FsResult<Vec<DirEntry>> {
+        self.view_guard(view, path, true)?;
+        let s = self.hist.views.get(&view.snapshot).ok_or(Error::NotFound)?;
         Self::list_in(s, path)
     }
 
-    fn snapshot_read(&mut self, snap: &str, path: &str) -> FsResult<Vec<u8>> {
-        let s = self.snapshots.get(snap).ok_or(Error::NotFound)?;
+    fn view_read(&mut self, view: &ViewRef, path: &str) -> FsResult<Vec<u8>> {
+        self.view_guard(view, path, false)?;
+        let s = self.hist.views.get(&view.snapshot).ok_or(Error::NotFound)?;
         match s.get(&key(path)) {
             Some((_, Node::File(d))) => Ok(d.clone()),
             Some(_) => Err(Error::IsADirectory),

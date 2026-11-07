@@ -7,12 +7,13 @@ The first part of milestone 6 ("network"). These parts are done:
   UDP, TCP), a DHCP client and a DNS resolver,
 - the **`netproto`** protocol with access through a capability and
   destination restrictions,
-- an **NTP** client that sets the clock through the time service,
+- time synchronization by the **`ntpd`** service (smooth correction
+  through the time service),
 - a **firewall**: application manifest, asking the user, packet filter,
   network profiles, audit and DNS filter (see [firewall.md](firewall.md)).
 
-TLS and HTTP come later. The interface for them is ready (see
-[Preparing for TLS and HTTP](#preparing-for-tls-and-http)).
+- **TLS 1.3 and HTTP/1.1, HTTP/2** as libraries in programs, a root
+  certificate store and the `fetch` program (see [TLS and HTTP](tls-http.md)).
 
 | Part | Where | What it does |
 |---|---|---|
@@ -21,7 +22,7 @@ TLS and HTTP come later. The interface for them is ready (see
 | protocol | `libs/netproto` | messages, permissions, DNS and NTP formats, client library |
 | device manager | `user/devmgr` | finds the card on PCI, starts the driver |
 | firewall | `user/fwd`, `libs/netfilter`, `libs/manifest` | configuration, asking the user, packet filter, manifests |
-| init | `user/init/src/system.rs`, `apps.rs` | starts `netd` and `fwd` in jobs by their manifests, holds the root session, NTP |
+| init | `user/init/src/system.rs`, `apps.rs` | starts `netd` and `fwd` in jobs by their manifests, holds the root session, starts `ntpd` |
 | tests | `user/init/src/tests/net.rs`, `xtask/src/nethelper.rs` | tests in QEMU through slirp against host servers |
 
 ## Architecture
@@ -154,7 +155,7 @@ and starts DHCP. Then a single thread repeats:
 | connect without a limit | gives up after 75 s (`TIMED_OUT`) |
 | closing a connection | FIN, cleanup when finished or after 30 s at the latest |
 | listen backlog | 1 to 4096 connections (like `SOMAXCONN`); 16 concurrent handshakes between two rounds of the service |
-| ephemeral ports | 49152 to 65535, random start |
+| ephemeral ports | 49152 to 65535, random start; the last 4096 released ones are not handed out again (an old session in NAT/slirp) |
 | UDP datagram | at most 65,507 B (the largest IPv4 datagram payload; IPv4 fragmentation and reassembly) and at most the socket queue size (default 64 KiB) |
 | DNS | A (and AAAA) query with EDNS0 (1232 B), a truncated reply over TCP, retry after 1 s alternating servers, at most 30 s |
 
@@ -301,6 +302,16 @@ let app_net = root.restrict(rights::INFO | rights::TCP_CONNECT | rights::RESOLVE
 The client library is in `netproto` (feature `client`). All methods
 block. A `None` timeout means no limit.
 
+**Client safeguard:** `netd` enforces operation limits, and the client has
+its own as well: the operation limit + 10 s, 30 s for operations without a
+limit (status, session, socket), plus 300 s for operations that may wait for
+a firewall question (connect, datagram to a new target, ping, resolution by
+an own server). When `netd` does not answer, the program gets `TIMED_OUT`
+and the log shows `netproto: sluzba site neodpovedela na pozadavek <op> do
+N s` ("the network service did not answer request <op> within N s"). The
+channel is then unusable (`BAD_STATE`): a late answer would belong to
+another request.
+
 ```rust
 use core::time::Duration;
 use netproto::io::{Read, Write};
@@ -412,8 +423,10 @@ than the address, an invalid name and more than 256 rules or 16 layers.
 
 ## DNS
 
-The resolver is in the service (`user/netd/src/resolve.rs`), the message
-format in `netproto::dns`, where the test server uses it too.
+System resolution goes through `dnsd` (see below). The unauthenticated
+resolver in the service (`user/netd/src/resolve.rs`, format
+`netproto::dns`) serves queries to an own server and the fallback by
+network profile:
 
 - For family 0 both A and AAAA queries are sent. One answer is enough,
   and an empty AAAA answer does not matter.
@@ -428,10 +441,83 @@ format in `netproto::dns`, where the test server uses it too.
 - **A truncated reply** (the TC bit): the resolver asks over TCP on the
   same server and port (RFC 7766, a message with a u16 length). For an
   own server it is enough that the session may send UDP to the server.
+- **A stuck flow:** UDP retries switch to a new local port every 3
+  attempts, and a TCP connection that does not get established within 3 s
+  is dropped and reopened (at most 3 times). Slirp on Windows keeps one host
+  socket per flow; when it breaks, every further attempt from the same port
+  would be lost (message `netd: DNS pres TCP: spojeni se nenavazalo do 3 s,
+  novy pokus (n)` - "connection not established within 3 s, new attempt").
 - **Blocked domains** of the firewall return `ACCESS_DENIED` without a
   query (see [DNS filter](firewall.md#dns-filter)).
 
-TODO: a cache by TTL, DoT/DoH (with TLS).
+### Encrypted DNS and DNSSEC (`dnsd`)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Encrypted DNS">
+<defs><marker id="sd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="130" height="60" rx="6"/><text class="t b" x="75" y="45" text-anchor="middle">program</text><text class="m" x="75" y="64" text-anchor="middle">resolve()</text>
+<path class="ln" d="M140 50 L198 50" marker-end="url(#sd1)"/>
+<rect class="acc" x="200" y="20" width="160" height="110" rx="6"/><text class="t b" x="280" y="45" text-anchor="middle">netd</text><text class="m" x="280" y="64" text-anchor="middle">blocked domains</text><text class="m" x="280" y="82" text-anchor="middle">→ dnsd (channel)</text><text class="m" x="280" y="100" text-anchor="middle">learns name</text><text class="m" x="280" y="118" text-anchor="middle">rules</text>
+<path class="ln-acc" d="M360 50 L418 50" marker-end="url(#sd1)"/>
+<rect class="ok" x="420" y="20" width="170" height="110" rx="6"/><text class="t b" x="505" y="45" text-anchor="middle">dnsd</text><text class="m" x="505" y="64" text-anchor="middle">DO + CD, DNSSEC</text><text class="m" x="505" y="82" text-anchor="middle">chain from IANA anchor</text><text class="m" x="505" y="100" text-anchor="middle">cache (TTL)</text><text class="m" x="505" y="118" text-anchor="middle">OK/NX/BOGUS/…</text>
+<path class="ln" d="M590 50 L638 50" marker-end="url(#sd1)"/>
+<rect class="box" x="640" y="20" width="110" height="60" rx="6"/><text class="t b" x="695" y="45" text-anchor="middle">resolver</text><text class="m" x="695" y="64" text-anchor="middle">DoH / DoT</text>
+<path class="ln" d="M280 130 L280 168" marker-end="url(#sd1)"/>
+<rect class="warn" x="200" y="170" width="160" height="60" rx="6"/><text class="t b" x="280" y="195" text-anchor="middle">UDP/TCP fallback</text><text class="m" x="280" y="214" text-anchor="middle">DHCP servers</text>
+<text class="m" x="380" y="190">only when dnsd replies UNAVAILABLE</text>
+<text class="m" x="380" y="208">and the network profile has</text>
+<text class="m" x="380" y="226">unauthenticated = "fallback"</text>
+</svg>
+<figcaption>System resolution: encrypted and validated; an unauthenticated fallback only by network profile.</figcaption>
+</figure>
+
+System resolution (sessions without an own server) goes from `netd` to the
+**`dnsd`** service. It asks **encrypted** (DoH, RFC 8484, or DoT,
+RFC 7858) and **validates** the answers itself (DNSSEC): the DS chain from
+the IANA root anchor, RRSIG signatures, NSEC and NSEC3 denial proofs. The
+resolver is not trusted - it can only lie by calling a zone unsigned, and a
+proof from the parent zone does not let that through.
+
+| `dnsd` result | For the program |
+|---|---|
+| addresses (validated, or an unsigned zone) | addresses; `netd` learns name rules from them |
+| NXDOMAIN, NODATA (validated) | `NOT_FOUND` |
+| **BOGUS** (a signature or proof failed) | `CORRUPTED` - an attack, no fallback |
+| UNAVAILABLE (no resolver answered) | by network profile: the unauthenticated resolver (UDP/TCP to DHCP or `SET_DNS` servers), or `UNREACHABLE` |
+
+- **The channel** `netd` ↔ `dnsd` is created before `netd` starts (4th
+  handle); queries wait in it until `dnsd` is up. When `dnsd` exits, `netd`
+  resolves only by the profile rule.
+- **Resolvers** in `dnsd.toml` carry an address
+  (`doh:https://name/path@address`, `dot:name@address[:port]`): `dnsd`
+  does not resolve resolver names. The `dnsd` network session may only use
+  TCP to these addresses. After an error it tries the next one and keeps
+  the last working one.
+- **Anchors:** the root DS per IANA `root-anchors.xml`: KSK-2017 (20326)
+  and KSK-2024 (38696, signing the root since 2026-10-11). At the next root
+  key rollover `trust_anchors` must be updated (no RFC 5011 yet).
+- **Algorithms:** RSASHA256, RSASHA512, ECDSA P-256/P-384, Ed25519; SHA-256
+  and SHA-384 digests. A zone with another algorithm or NSEC3 above 100
+  iterations (RFC 9276) is treated as unsigned.
+- **Cache** by TTL (negative answers by SOA), 1,024 entries, at most 1 day;
+  zone states (keys) separately, at most 1 h. Bogus answers are not cached.
+- **No revocation check** of the resolver certificate (OCSP stapling only):
+  `revocd` resolves names through `dnsd`, the check would loop.
+- Bootstrap commands: `status` (`queries upstream cache_hits secure
+  insecure bogus unavailable dnssec server error`), `flush`, `prefer <n>`.
+
+```toml
+# dnsd.toml
+servers = ["doh:https://cloudflare-dns.com/dns-query@1.1.1.1", "dot:one.one.one.one@1.0.0.1"]
+dnssec = true
+trust_anchors = ["20326 8 2 E06D44B8...", "38696 8 2 683D2D0A..."]
+```
+
+> **Change from the first version:** `netd` asked the DHCP servers
+> unencrypted and unvalidated. **Why:** the network (Wi-Fi, ISP) saw where
+> you connect and could spoof answers. TLS detects a spoofed server, but
+> DNSSEC and encryption also protect names without TLS and privacy.
+
 
 ## NTP and the clock
 
@@ -440,50 +526,33 @@ corrected time, the clock offset and the round-trip delay. The reply is
 matched by the send time (the "originate" field). An unsynchronized server
 (stratum 0, leap 3) returns `BAD_STATE`.
 
-**Only the time service** `timed` may set the clock (the `SET_CLOCK`
-right, see [time.md](time.md)). So `init` only obtains the time and sends
-it to the time service with a `set` message:
+The clock is synchronized over the network by the **`ntpd`** service: it
+measures the offset against servers, filters the measurements and
+proposes corrections to the time service `timed`, the only one allowed to
+change the clock (the `SET_CLOCK` right). After the first synchronization
+the time is only adjusted smoothly (`CLOCK_ADJUST`) and never jumps back.
+Details in [Real time](time.md#synchronization-over-the-network-ntpd).
 
-<figure class="diagram">
-<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Setting the clock from NTP">
-<defs><marker id="na3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="50" width="150" height="60" rx="6"/><text class="t b" x="85" y="75" text-anchor="middle">NTP server</text><text class="m" x="85" y="93" text-anchor="middle">UDP 123</text>
-<path class="ln" d="M238 80 L162 80" marker-end="url(#na3)"/>
-<text class="m" x="170" y="70">t1 → t2, t3 → t4</text>
-<rect class="box" x="240" y="50" width="120" height="60" rx="6"/><text class="t b" x="300" y="75" text-anchor="middle">netd</text><text class="m" x="300" y="93" text-anchor="middle">UDP socket</text>
-<path class="ln" d="M438 80 L362 80" marker-end="url(#na3)"/>
-<rect class="acc" x="440" y="50" width="130" height="60" rx="6"/><text class="t b" x="505" y="75" text-anchor="middle">init</text><text class="m" x="505" y="93" text-anchor="middle">ntp_query</text>
-<path class="ln-acc" d="M570 80 L618 80" marker-end="url(#na3)"/>
-<rect class="ok" x="620" y="50" width="130" height="60" rx="6"/><text class="t b" x="685" y="75" text-anchor="middle">timed</text><text class="m" x="685" y="93" text-anchor="middle">CLOCK_SET</text>
-<text class="m" x="10" y="150">offset = ((t2 - t1) + (t3 - t4)) / 2; new time = t4 + offset. Not written to the RTC yet.</text>
-</svg>
-<figcaption>The network only obtains the time; only the time service may set it.</figcaption>
-</figure>
+> **Change from the first version:** init asked an NTP server once and
+> set the time with a jump (`sync_time_ntp`, tests only). **Why:** a jump
+> back breaks programs that compare times (certificates, files, logs) and
+> a single unfiltered measurement is easy to spoof. `ntpd` runs all the
+> time, with a network session limited to the configured servers.
 
-```rust
-// init (user/init/src/system.rs)
-let offset_ns = system::sync_time_ntp(&net_root, &time_service, server)?;
-```
+## TLS and HTTP
 
-For now the clock is set once and only in tests against the host's server.
-TODO: a server from the configuration or from DHCP (option 42), periodic
-synchronization and gradual adjustment instead of a jump.
+TLS 1.3 and the HTTP/1.1 and HTTP/2 client are libraries in the program's
+process (`libs/tls`, `libs/httpc`) over the generic stream
+`netproto::io::{Read, Write}`, so they work over plain TCP and over TLS
+alike. Root certificates live in the system store `/system/config/certs`,
+which a program gets as a read-only FS session. Everything is described
+in the [TLS and HTTP](tls-http.md) chapter.
 
-## Preparing for TLS and HTTP
-
-- **Streams:** `netproto::io::{Read, Write}` are a generic byte-stream
-  interface and `TcpStream` implements them. TLS will be a wrapper
-  `TlsStream<S: Read + Write>` that implements the same. The HTTP client
-  will work with any `Read + Write`, over plain TCP and over TLS alike.
-- **TLS will run in the program's process** (a library), not in the
-  network service. Session keys stay in the program that needs them. The
-  store of trusted certificates will be a system service or a read-only
-  file.
-- **Name-based permissions:** `Target::Host` rules already expect
-  applications that may only talk to their API (`*.example.com:443`). TLS
-  adds verification that the server really owns the name.
-- **Randomness:** TLS takes its keys from the kernel through
-  `libos::random::fill_seeded` (`REQUIRE_SEEDED`).
+> **Change from the first version:** the certificate store was meant to
+> be a service or a file; it is a directory on the FS (the Mozilla set +
+> custom CAs + `distrust.txt`). **Why:** an administrator adds a company
+> CA as a file, a system update does not overwrite their files, and the FS
+> checks permissions as for any other data.
 
 ## Tests
 
@@ -522,12 +591,36 @@ host's 127.0.0.1.
 | UDP large datagram | 60,000 B there and back (IPv4 fragmentation and reassembly) |
 | permissions | missing rights, destinations outside restrictions, handing a connection to another channel |
 | host name | the `*.magnumopus` rule applies after a system resolution, not after one by an own server |
-| NTP | a query to the host server, setting through `timed`, time source `SET` |
+| encrypted DNS | the "sifrovane DNS" suite: validated A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC and NSEC3), NODATA; unsigned and bogus zone; failover from a broken resolver, DoT, cache; the profile rule |
+| NTP | `ntpd` against the host server (the "synchronizace casu" suite, see [time.md](time.md#synchronization-over-the-network-ntpd)) |
 
-DNS through 10.0.2.3 (slirp forwards the queries to the host's DNS) is not
-tested because the test would need the internet. Without the helper
+**DNS in tests is local only:** all queries go to the host helper server
+from `nethelper` or to the test DoH/DoT; in a test run init also points the
+unauthenticated fallback of the system resolver at the helper (`set_dns`),
+so even a `dnsd` outage never reaches the real DNS. DNS query limits in
+tests are 30 s (running under TCG and load). The host resolver (10.0.2.3,
+slirp forwards to the Windows/Linux DNS) is tested only by
+`cargo xtask test --net-online` - it depends on the host network and the
+internet. Without the helper
 servers (`cargo xtask run`) the tests that need them are skipped. The log
 then shows `[preskoceno] sit: ...` ("skipped").
+
+**Helper server ports:** none is fixed or guessable. Every server takes
+an ephemeral port from the host kernel (bind to port 0, up to 20 attempts
+on an error such as Windows 10013), and xtask passes the ports to the guest
+in the initfs (`net-test`). The port for the refusal test (`closed`) is held
+by xtask for the whole run as a socket bound without `listen`: the kernel
+refuses connections to it and no other process can take it meanwhile. The
+`hostfwd` port is held by xtask until QEMU starts. When QEMU exits right
+after start with a message about a taken port (QMP or `hostfwd`, concurrent
+test runs), xtask starts it again with new ports (at most 3 attempts,
+message `xtask: QEMU nenastartovalo (...), novy pokus s jinymi porty` -
+"QEMU did not start, new attempt with other ports").
+
+**Load (several QEMUs at once):** UDP tests send every further attempt from
+a new socket (a new flow in slirp; a late reply to an old attempt does not
+arrive), and `dnsd` waits 5 s for a connection to a resolver (a lost SYN is
+retransmitted).
 
 The host also tests the formats and permissions: `cargo test -p netproto
 --features std` (part of `cargo xtask test`). The firewall tests are
@@ -543,5 +636,5 @@ described in [firewall.md](firewall.md#tests).
   is ready (`IpAddr` addresses).
 - **Shared memory for data** instead of copying in messages (as for the
   disk).
-- **More cards**, static configuration, DNS cache, periodic NTP.
-- **TLS 1.3 and an HTTP client** as libraries over `Read + Write`.
+- **More cards**, static configuration, DNS cache, NTP servers from DHCP
+  (option 42).

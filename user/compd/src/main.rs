@@ -332,7 +332,22 @@ impl Service {
             return Err(Error::InvalidArgs);
         }
         let ch = Channel::from_handle(handles.into_iter().next().ok_or(Error::InvalidArgs)?);
-        let deadline = || Some(libos::time::deadline_after(core::time::Duration::from_secs(5)));
+        let end = libos::time::deadline_after(core::time::Duration::from_secs(5));
+        let deadline = || Some(end);
+        // Konec kanalu mohla drzet predchozi instance (drzak koncu
+        // supervisoru): nejdriv zahodit jeji odpovedi.
+        let sync = token() as u64;
+        ch.write(&Request::Sync { token: sync }.encode(), Vec::new())?;
+        let mut skipped = 0;
+        loop {
+            match Reply::decode(&ch.read(deadline())?.data) {
+                Ok(r) if r.ends_sync(sync) => break,
+                _ => skipped += 1,
+            }
+        }
+        if skipped > 0 {
+            println!("compd: displej: zahozeno {skipped} odpovedi predchozi instance");
+        }
         ch.write(&Request::Info.encode(), Vec::new())?;
         let modes = Reply::decode(&ch.read(deadline())?.data)?;
         let Reply::Modes { outputs, caps } = modes else {

@@ -16,6 +16,9 @@ use libos::{Channel, Error, Handle, Result};
 
 use crate::serve::{ListCache, Service, entries, stat};
 
+/// Kolik cisel docasneho jmena zkusit, nez REPLACE_BEGIN to vzda.
+const TEMP_TRIES: usize = 64;
+
 /// Nejvic soucasnych relaci (ochrana sluzby pred zahlcenim).
 pub const MAX_SESSIONS: usize = 64;
 
@@ -164,7 +167,7 @@ impl Service {
         if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) {
             return Some(self.perm_op(sess, opcode, r));
         }
-        if !(op::HELLO..=op::REPLACE_ABORT).contains(&opcode) {
+        if !(op::HELLO..=op::REPLACE_ABORT).contains(&opcode) && opcode != op::REOPEN {
             return None;
         }
         Some(self.v2(sess, opcode, r))
@@ -177,10 +180,17 @@ impl Service {
             return Ok(Reply::body(w));
         }
         if opcode == op::CONNECT {
-            // Nova relace se stejnou identitou a cestami (ne ridici).
+            // Nova relace se stejnou identitou a cestami. Priznak 1 = ridici
+            // relace (jen z ridici: init po restartu sluzby, supervisor).
+            let flags = r.u32().unwrap_or(0);
+            let control = flags & fsproto::v2::connect_flags::CONTROL != 0;
+            if control && !sess.control {
+                return Err(Error::AccessDenied);
+            }
             let (ours, theirs) = Channel::create()?;
             self.session_counter += 1;
-            let s = Session::new(ours, self.session_counter, sess.identity.clone(), sess.mounts.clone());
+            let mut s = Session::new(ours, self.session_counter, sess.identity.clone(), sess.mounts.clone());
+            s.control = control;
             return Ok(Reply {
                 body: w,
                 handles: alloc::vec![theirs.into_handle()],
@@ -213,6 +223,27 @@ impl Service {
                 {
                     let _ = fs.close(h);
                     return Err(e);
+                }
+                sess.handles.insert(h);
+                w.u64(h);
+                stat(fs.stat_h(h)?).put(&mut w);
+                put_rev(&mut w, fs.revision_h(h)?);
+            }
+            op::REOPEN => {
+                // Trvaly handle po restartu sluzby (klient drzi identitu
+                // objektu); prava overi FS znovu podle identity relace.
+                let (ds, oid, generation) = (r.u64()?, r.u64()?, r.u64()?);
+                let (access, share) = (r.u8()?, r.u8()?);
+                let (h, path) = fs.reopen(ds, oid, generation, access, share)?;
+                // Objekt s cestou musi byt v pripojenych cestach relace;
+                // sirotek cestu nema (vlastnika overil FS).
+                if let Some(p) = &path {
+                    let writes = access & (v2access::WRITE | v2access::DELETE) != 0;
+                    let mapped = sess.unmap(p);
+                    if mapped.is_empty() || sess.map(&mapped, writes).is_err() {
+                        let _ = fs.close(h);
+                        return Err(Error::NotFound);
+                    }
                 }
                 sess.handles.insert(h);
                 w.u64(h);
@@ -287,10 +318,21 @@ impl Service {
                 let expected = has.then_some(rev);
                 let (dir, name) = split(&target)?;
                 fs::validate_name(name)?;
-                self.temp_counter += 1;
-                let temp = alloc::format!("{}/{}", dir.trim_end_matches('/'), fsproto::v2::temp_name(name, self.temp_counter));
                 let fs = self.fs.as_mut().ok_or(Error::IoError)?;
-                fs.create(&temp, fs::Kind::File)?;
+                // Vyhradne nove jmeno: existujici soubor (i zbytek po padu,
+                // i cizi soubor stejneho jmena) se nikdy nemaze, vezme se
+                // dalsi cislo.
+                let mut temp = String::new();
+                let mut made = Err(Error::AlreadyExists);
+                for _ in 0..TEMP_TRIES {
+                    self.temp_counter += 1;
+                    temp = alloc::format!("{}/{}", dir.trim_end_matches('/'), fsproto::v2::temp_name(name, self.temp_counter));
+                    made = fs.create(&temp, fs::Kind::File);
+                    if !matches!(made, Err(Error::AlreadyExists)) {
+                        break;
+                    }
+                }
+                made?;
                 let h = fs.open(&temp, fs::access::READ | fs::access::WRITE | fs::access::DELETE, fs::share::READ | fs::share::DELETE)?;
                 // Kdyz klient zmizi, docasny soubor zmizi s nim.
                 fs.set_delete_on_close(h, true)?;

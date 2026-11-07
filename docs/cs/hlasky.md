@@ -72,6 +72,7 @@ Loader píše přes konzoli firmware (obrazovka i sériová linka) ve formátu
 | `initfs je poskozeny: ...` | E | Obraz initfs nemá správný formát (`libs/initfs`). Znovu sestavit. |
 | `initfs neobsahuje program init` | E | V initfs chybí soubor `init`. |
 | `init neni platny program: ...` | E | `init` není statický ELF64 pro x86_64. |
+| `framebuffer se do userspace nepreda: ...` | W | Framebuffer překrývá RAM pro alokátor, nezačíná na hranici stránky nebo je menší než jeho geometrie. Konzole jádra ho dál používá, GUI bez virtio-gpu nenaběhne. |
 | `init: poskozeny segment: ...` | E | Segment ELF leží mimo soubor. |
 | `init se nepodarilo spustit: ...` | E | Souhrnná hláška s kódem chyby ([chyby.md](chyby.md)). |
 | `init spusten (proces N), vstup ...` | I | První proces běží. |
@@ -122,6 +123,11 @@ porušený vnitřní předpoklad (chyba jádra).
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | Ovladač PS/2 našel klávesnici, myš (druh podle ID: kolečko, 5 tlačítek). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 čte `0xFF` (řadič chybí) nebo nenašel žádné zařízení. Na moderních deskách bez PS/2 normální. |
+| `init: displej je framebuffer z firmwaru (fbdisplay)` | Správce zařízení nenašel virtio-gpu, GUI poběží přes `fbdisplay` s pevným rozlišením firmwaru. |
+| `fbdisplay: framebuffer WxH (krok K, rgb/bgr)` | Ovladač framebufferu převzal obrazovku (`FB_CONTROL` `CLAIM`). |
+| `fbdisplay: chybi handly ve startovni zprave` | Init ho spustil bez objektu paměti a kanálu (chyba initu). |
+| `fbdisplay: framebuffer nelze prevzit: ...` | `FB_CONTROL` nebo mapování selhalo: `WRONG_TYPE` (objekt není framebuffer z jádra), `NOT_SUPPORTED` (neznámý formát nebo rozměry), `NO_RESOURCES` (není místo v adresním prostoru). |
+| `init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim` | Není virtio-gpu a jádro nepředalo framebuffer (bez GOP, nepodporovaný formát pixelu, viz hlášky jádra). |
 | `ps2: radic neodpovida spravne: ...` | Řadič je, ale neprošel self-testem nebo neodpovídá včas (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | Port je, ale zařízení na něm nereaguje (nepřipojené). |
 | `xhci BB:ZZ.F: N portu (M USB 3), S slotu, kontext K B` | Řadič USB je připravený. |
@@ -196,7 +202,36 @@ porušený vnitřní předpoklad (chyba jádra).
 | `netd: ovladac skoncil (zahozeno ramcu: ...)` | Ovladač karty skončil (vadné zařízení) a služba končí s ním (kód 3). |
 | `netd: chybi handly ve startovni zprave` | Chybný start služby (kód 1). |
 | `init: sluzbu site nelze spustit: ...` | Chybí síťová karta (`NOT_FOUND`) nebo služba neodpověděla. |
-| `init: hodiny serizeny podle NTP ...` | Čas ze serveru NTP předala služba času do hodin; posun = o kolik hodiny šly špatně. |
+| `ntpd: bezim, servery [...]` | Synchronizace času běží; servery z `ntpd.toml` (v testech server hostitele). |
+| `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | První úspěšné měření (ověřené NTS, nebo neověřené NTP v záloze); `step` = čas se nastavil skokem (posun nad 128 ms), `slew` = plynulé dorovnání. |
+| `ntpd: NTS-KE <server>: ...` | Výměna klíčů NTS selhala (spojení, certifikát, odpověď); server se v kole přeskočí. Při neplatném certifikátu zkontrolovat hodiny (RTC). |
+| `ntpd: neoverene servery: Never\|Fallback` | Init změnil pravidlo podle profilu sítě. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za 2, 4, 8, … s (nejvýš `min_poll`), stejná hláška se znovu nevypíše; hodiny běží dál podle poslední frekvence. |
+| `ntpd: konfigurace: ...` | Konfigurace od init je neplatná; `ntpd` skončí. Opravit `ntpd.toml`. |
+| `timed: prvni synchronizace: skok o N ms` | První korekce od `ntpd` byla velká: čas se nastavil skokem (jediný povolený skok). |
+| `timed: prvni synchronizace: dorovnani o N ms` | První korekce byla malá: dorovná se plynule. |
+| `timed: klient synchronizace skoncil` | `ntpd` skončil nebo zavřel kanál; hodiny běží dál bez korekcí. |
+| `init: ntpd.toml: ...`, `init: timed odmitl ntpd: ...`, `init: ntpd hlasi: ...` | `ntpd` se nespustil (neplatná konfigurace, `timed` nepřijal kanál, chyba při startu); hodiny zůstanou podle RTC. |
+| `init: synchronizaci casu nelze spustit: ...` | Souhrn předchozího; systém běží bez synchronizace. |
+| `init: korenove certifikaty aktualizovany (N kB)` | Sada CA Mozilla v `/system/config/certs/mozilla.pem` se změnila (první start, nová verze systému). Viz [TLS a HTTP](tls-http.md#úložiště-kořenových-certifikátů). |
+| `init: uloziste certifikatu nelze pripravit: ...` | Bez FS nebo bez práv: programy nemají žádnou CA a `https` selže (`UnknownIssuer`). |
+| `fetch: uloziste certifikatu: ...`, `fetch: /certs/F: ...` | `fetch` nemůže číst úložiště nebo soubor (větší než 4 MiB, chyba FS); ostatní soubory načte. |
+| `fetch: TLS: ...` | Konfigurace TLS nejde vytvořit; `fetch` skončí s kódem 2. |
+| `revocd: bezim (OneCRL ano\|ne, N zaznamu, mezipamet na FS\|jen v pameti)` | Služba odvolání běží; N = záznamy OneCRL načtené z FS. |
+| `revocd: OneCRL: N zaznamu` | Nový seznam odvolaných CA stažen a uložen. |
+| `revocd: OneCRL: neplatny dokument` | Stažený JSON nejde přečíst; platí předchozí seznam, nový pokus za `retry_minutes`. |
+| `revocd: <url>: ...` | Stažení CRL nebo OneCRL selhalo (stav HTTP, chyba spojení); adresa se `retry_minutes` nezkouší, stav odvolání je zatím neznámý. |
+| `revocd: <url>: neni CRL` | Server vrátil něco jiného než CRL. |
+| `tls: CRL <url> nejde pouzit (...)` | CRL z distribučního bodu certifikátu nejde přečíst ani ověřit (nepodporované rozšíření, špatný podpis, vydavatel mimo řetěz); přeskočí se, stav odvolání z ní je neznámý a spojení pokračuje. Jednou pro adresu. |
+| `netd: DNS pres TCP: spojeni se nenavazalo do 3 s, novy pokus (n)` | Spojení TCP pro zkrácenou odpověď DNS uvázlo; resolver zkouší nové (nejvýš 3×). |
+| `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` požadavek nedokončil ani po limitu + rezervě (chyba nebo zaseknutí služby). Program dostal `TIMED_OUT`, kanál už nejde použít. OP = kód operace (`netproto::op`). |
+| `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | Systémový resolver běží. |
+| `dnsd: <resolver>: ...` | Resolver neodpověděl (spojení, TLS, HTTP); `dnsd` zkusí další. |
+| `dnsd: <jméno>: DNSSEC neprosel (...)` | Odpověď je podvržená nebo poškozená (důvod v závorce); program dostane `CORRUPTED`. |
+| `netd: dnsd skoncil (...), preklad bez nej` | Systémový překlad jen podle pravidla profilu (veřejná síť = žádný). |
+| `init: sifrovane DNS nelze spustit (...)` | `dnsd` nenaběhl; překlad jen podle pravidla profilu. |
+| `init: kontrolu odvolani certifikatu nelze spustit: ...` | `revocd` nenaběhl; programy kontrolují jen OCSP stapling. |
+| `init: revocd bez FS (...)` | Bez FS: mezipaměť jen v paměti a bez kořenových CA pro OneCRL přes https. |
 | `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` nepředal kanál k `fwd`. Platí veřejný profil (nic dovnitř), dotazy aplikací s `ask` se rovnou odmítnou. |
 | `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` skončil. Platí poslední konfigurace, rozpracované a další dotazy se odmítnou. |
 | `netd: profil site P` | `fwd` poslal konfiguraci s jiným profilem sítě (`public`, `home`, ...). Viz [Profily sítí](firewall.md#profily-sítí). |
@@ -214,11 +249,29 @@ porušený vnitřní předpoklad (chyba jádra).
 | `init: firewall bez FS (konfigurace se neulozi): ...` | Pro `fwd` nejde připravit relaci FS (chybí FS nebo práva). |
 | `init: sluzbu firewallu nelze spustit: ...` | `fwd` nenaběhl; `netd` uvidí zavřený kanál a dotazy odmítá. |
 
+## Textová konzole console
+
+| Hláška | Význam a řešení |
+|---|---|
+| `console: bezim (ceka na displej a fokus)` | Konzole běží; kreslit začne po `display`, klávesy bere po `focus`. |
+| `console: displej prevzat (SxR znaku)` | Převzala framebuffer; mřížka znaků podle rozlišení. |
+| `console: displej vracen` | Po `release`; framebuffer je zase u jádra. |
+| `console: ridici kanal zavren, koncim` | Vlastník konzole skončil; displej se vrátí jádru. |
+| `console: chybi kanal k termd` | Start bez kanálu ke službě relací; konzole končí s kódem 1. |
+| `framebuffer prevzal proces X N (log jadra dal na seriove lince)` | Jádro: `FB_CONTROL` `CLAIM`; log už nekreslí na obrazovku. |
+| `framebuffer vratil proces X N` | Jádro: `FB_CONTROL` `RELEASE`; obrazovka se smaže a log se kreslí dál. |
+
 ## Služba relací termd
 
 | Hláška | Význam a řešení |
 |---|---|
-| `termd: bezim (protokol vN, FS fsd/zadny)` | Služba relací běží. `zadny` = nedostala kanál fsd; shell pak vidí jen prázdný kořen (zápis vrací `READ_ONLY`). |
+| `termd: bezim (protokol vN, FS fsd/zadny, registr ano/ne, prevzato N)` | Prostředník běží. `zadny` = nedostal kanál fsd; shell pak vidí jen prázdný kořen (zápis vrací `READ_ONLY`). `registr ne` = relace nepřežijí konec termd. `prevzato N` = počet relací převzatých po předchozím termd. |
+| `termd: prevzata relace N` | Relace z registru přešla na nový termd; okno se k ní může připojit. |
 | `termd\| ...` | Zrcadlo výstupu relací jako text (adaptér VT100), aby šlo číst i na sériové lince. Bloky začínají `> příkaz`. |
-| `termd: okno zavreno, koncim` | Zavřel se kanál k rodiči. Úlohy na pozadí ještě doběhnou, pak služba skončí (relace zatím nepřežijí konec procesu). |
-| `termd: chyba cteni: ...` | Neočekávaná chyba kanálu; služba končí s kódem 1. |
+| `termd: okno zavreno, koncim (N relaci bezi dal)` | Okno se zavřelo; relace se odpojí a běží dál ve svých procesech. Nový termd je převezme z registru. |
+| `termd: chyba cekani: ...` | Neočekávaná chyba čekání na kanály; prostředník končí s kódem 1 (relace běží dál). |
+| `shsess N: bezim (znacka)` | Proces relace N běží; značka je ve jménech jejích klonů bokem. |
+| `shsess N: termd skoncil, cekam na prevzeti` | Hlavní kanál zavřen; příkaz a úlohy doběhnou, relace čeká na `Adopt` od nového termd. |
+| `shsess N: prevzato novym termd` | Relace přešla na nový termd. |
+| `shsess N: nikdo neprevzal, koncim` | Registr kanál zavřel (nebo žádný není) a žádná úloha nečeká; relace končí. |
+| `shsess: chybi Init` / `prvni zprava neni Init` | Proces relace nedostal úvodní zprávu od termd; končí s kódem 1. |

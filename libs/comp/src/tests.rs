@@ -942,3 +942,123 @@ fn tasks_icon_shows_count_and_focuses_task_manager() {
     t.c.set_tasks(0, 0);
     assert!(t.c.tasks_icon().is_none());
 }
+
+#[test]
+fn input_focus_lost_releases_keys_and_drag() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let ra = t.rect_of(a);
+    // Stisk v okne (bez uvolneni), pak ztrata fokusu vstupu (restart inputd).
+    t.move_to(ra.x + 3, ra.y + 3);
+    t.input(Event::Button { button: Button::Left, action: Action::Press }, false);
+    t.out();
+    t.input(Event::Focus(false), false);
+    let out = t.out();
+    let ma = client_msgs(&out, a);
+    let lost = ma.iter().filter(|m| matches!(m, ServerMsg::Input { records, .. } if records[0].event == InputEvent::Focus(false))).count();
+    assert_eq!(lost, 1, "okno s fokusem i stiskem dostane jedno Focus(false)");
+    // Uvolneni po ztrate fokusu uz oknu nejde (stisk je zapomenuty).
+    t.input(Event::Button { button: Button::Left, action: Action::Release }, false);
+    assert!(!client_msgs(&t.out(), a).iter().any(|m| matches!(m, ServerMsg::Input { records, .. } if matches!(records[0].event, InputEvent::Button { pressed: false, .. }))));
+    t.input(Event::Focus(true), false);
+    assert!(client_msgs(&t.out(), a).iter().any(|m| matches!(m, ServerMsg::Input { records, .. } if records[0].event == InputEvent::Focus(true))));
+}
+
+const EXPORT: &str = r#"
+[[action]]
+id = "file.export"
+title = "Exportovat"
+confirm = true
+
+[[action.param]]
+name = "path"
+type = "path"
+required = true
+
+[[action.param]]
+name = "recipient"
+type = "text"
+required = true
+"#;
+
+fn export_call(t: &mut T, path: &str) -> ClientId {
+    let mut i = info("org.test.app", "Aplikace");
+    i.actions = action::parse_manifest(EXPORT).unwrap();
+    let a = t.c.add_client(i, t.now);
+    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.out();
+    t.c.caller_msg(
+        5,
+        "agent",
+        false,
+        CallerMsg::Call {
+            call: 1,
+            app: "org.test.app".into(),
+            action: "file.export".into(),
+            args: vec![("path".into(), action::Value::Path(path.into())), ("recipient".into(), action::Value::Text("jana@example.com".into()))],
+            synthetic: false,
+        },
+        t.now,
+    );
+    a
+}
+
+#[test]
+fn action_confirmation_shows_real_arguments() {
+    let mut t = T::new();
+    let long = "/home/michal/Dokumenty/projekty/velmi-dlouha-slozka-s-nazvem-ktery-se-nevejde/rozpocet-2027-final.xlsx";
+    let a = export_call(&mut t, long);
+    let d = t.c.dialogs.active().unwrap();
+    assert!(d.text.contains(long), "cela cesta v dialogu");
+    assert!(d.text.contains("\"jana@example.com\""), "prijemce v dialogu");
+    // Dlouha cesta se zalomi, ale cela zustane videt.
+    let l = t.c.dialog_layout().unwrap();
+    let joined: String = l.lines.concat();
+    assert!(joined.contains("rozpocet-2027-final.xlsx"));
+    // Potvrzeni preda presne zobrazene argumenty.
+    t.key(inputproto::code::KEY_LEFT, false);
+    t.key(inputproto::code::KEY_ENTER, false);
+    let out = t.out();
+    assert!(client_msgs(&out, a).iter().any(|m| matches!(m, ServerMsg::ActionInvoke { args, .. } if args[0].1 == action::Value::Path(long.into()))));
+}
+
+#[test]
+fn arguments_changed_after_confirmation_dialog_are_rejected() {
+    let mut t = T::new();
+    let a = export_call(&mut t, "/home/michal/zprava.txt");
+    // Argumenty se zmeni po zobrazeni dialogu (napr. chyba nebo utok).
+    t.c.services.tamper(vec![("path".into(), action::Value::Path("/etc/tajne".into())), ("recipient".into(), action::Value::Text("utocnik@example.com".into()))]);
+    t.key(inputproto::code::KEY_LEFT, false);
+    t.key(inputproto::code::KEY_ENTER, false);
+    let out = t.out();
+    assert!(client_msgs(&out, a).is_empty(), "aplikace nic nedostala");
+    assert!(out.iter().any(|o| matches!(o, Out::Caller(5, CallerReply::Result { ok: false, message, .. }) if message.contains("zmenily"))));
+}
+
+#[test]
+fn bulk_paths_show_count_and_preview() {
+    let line = services::arg_line("files", &action::Value::Paths((1..=20).map(|i| format!("/data/f{i}.txt")).collect()));
+    assert!(line.starts_with("files: 20 položek"));
+    assert!(line.contains("/data/f1.txt") && line.contains("/data/f8.txt"));
+    assert!(!line.contains("/data/f9.txt"));
+    assert!(line.contains("... a dalších 12"));
+}
+
+#[test]
+fn same_length_different_arguments_are_rejected() {
+    // Ruzne zakodovani se stejnou delkou: kontrola porovnava cele bajty.
+    let a1 = vec![("path".into(), action::Value::Path("/home/a/x".into())), ("recipient".into(), action::Value::Text("jana@example.com".into()))];
+    let a2 = vec![("path".into(), action::Value::Path("/home/a/y".into())), ("recipient".into(), action::Value::Text("jana@example.com".into()))];
+    assert_eq!(services::args_bytes(&a1).len(), services::args_bytes(&a2).len());
+    assert_ne!(services::args_bytes(&a1), services::args_bytes(&a2));
+    let mut t = T::new();
+    let a = export_call(&mut t, "/home/a/x");
+    t.c.services.tamper(a2);
+    t.key(inputproto::code::KEY_LEFT, false);
+    t.key(inputproto::code::KEY_ENTER, false);
+    let out = t.out();
+    assert!(client_msgs(&out, a).is_empty());
+    assert!(out.iter().any(|o| matches!(o, Out::Caller(5, CallerReply::Result { ok: false, .. }))));
+}

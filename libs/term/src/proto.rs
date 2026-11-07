@@ -12,7 +12,8 @@ use alloc::vec::Vec;
 
 use shlang::value::Value;
 
-pub const VERSION: u32 = 1;
+/// Verze 2: `seq` v `Complete`/`Completions` a `Format`/`Formatted`.
+pub const VERSION: u32 = 2;
 
 /// Polozka vystupu v bloku.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,11 +44,17 @@ pub enum ClientMsg {
     Detach { session: u64 },
     Run { session: u64, line: String },
     Interrupt { session: u64 },
-    Complete { session: u64, line: String, cursor: u32 },
+    /// Doplneni; `seq` = cislo pozadavku (vrati se v `Completions`).
+    Complete { session: u64, line: String, cursor: u32, seq: u32 },
     Answer { prompt: u64, yes: bool },
     /// Prevod radku do druheho zapisu (0 = B, 1 = C).
-    Format { session: u64, line: String, style: u8 },
+    Format { session: u64, line: String, style: u8, seq: u32 },
     Sessions,
+    /// Odpoved na vyzvu s volbami (`index` do `Prompt::choices`).
+    Choose { prompt: u64, index: u32 },
+    /// Vyznamove zvyrazneni rozepsaneho radku (okno ho posila pri psani;
+    /// `seq` = poradi, okno zahodi starsi odpovedi).
+    Highlight { session: u64, line: String, seq: u32 },
 }
 
 /// Sluzba -> terminal.
@@ -58,11 +65,21 @@ pub enum ServerMsg {
     BlockStart { session: u64, block: u64, line: String },
     Item { session: u64, block: u64, item: Item },
     BlockEnd { session: u64, block: u64, ok: bool, duration: i64 },
-    Prompt { prompt: u64, question: String, detail: Item },
-    Completions { start: u32, items: Vec<(String, u8, String)> },
+    /// Vyzva: `choices` prazdne = ano/ne (`Answer`), jinak vyber (`Choose`).
+    Prompt { prompt: u64, question: String, detail: Item, choices: Vec<String> },
+    /// Zmena polozky bloku na miste (pruh prubehu, stav): `index` = poradi
+    /// polozky v bloku.
+    ItemUpdate { session: u64, block: u64, index: u32, item: Item },
+    /// Odpoved na `Complete` se stejnym `seq` (okno ji sparuje i kdyz
+    /// mezitim prisly udalosti bloku).
+    Completions { seq: u32, start: u32, items: Vec<(String, u8, String)> },
     SessionList { sessions: Vec<(u64, u32, String)> },
-    Formatted { text: String },
+    /// Odpoved na `Format` se stejnym `seq`.
+    Formatted { seq: u32, text: String },
     Fail { message: String },
+    /// Odpoved na `Highlight`: useky (zacatek, delka v bajtech, trida
+    /// `shlang::highlight::Class`) a misto chyby parseru.
+    Highlighted { seq: u32, spans: Vec<(u32, u32, u8)>, error: Option<(u32, u32, String)> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,26 +91,26 @@ pub struct DecodeError;
 pub struct W(pub Vec<u8>);
 
 impl W {
-    fn u8(&mut self, v: u8) {
+    pub(crate) fn u8(&mut self, v: u8) {
         self.0.push(v);
     }
-    fn u16(&mut self, v: u16) {
+    pub(crate) fn u16(&mut self, v: u16) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
-    fn u32(&mut self, v: u32) {
+    pub(crate) fn u32(&mut self, v: u32) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
-    fn u64(&mut self, v: u64) {
+    pub(crate) fn u64(&mut self, v: u64) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
-    fn i64(&mut self, v: i64) {
+    pub(crate) fn i64(&mut self, v: i64) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
-    fn bytes(&mut self, b: &[u8]) {
+    pub(crate) fn bytes(&mut self, b: &[u8]) {
         self.u32(b.len() as u32);
         self.0.extend_from_slice(b);
     }
-    fn str(&mut self, s: &str) {
+    pub(crate) fn str(&mut self, s: &str) {
         self.bytes(s.as_bytes());
     }
 }
@@ -107,34 +124,34 @@ impl<'a> R<'a> {
     pub fn new(b: &'a [u8]) -> Self {
         Self { b, i: 0 }
     }
-    fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
+    pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
         let s = self.b.get(self.i..self.i.checked_add(n).ok_or(DecodeError)?).ok_or(DecodeError)?;
         self.i += n;
         Ok(s)
     }
-    fn u8(&mut self) -> Result<u8, DecodeError> {
+    pub(crate) fn u8(&mut self) -> Result<u8, DecodeError> {
         Ok(self.take(1)?[0])
     }
-    fn u16(&mut self) -> Result<u16, DecodeError> {
+    pub(crate) fn u16(&mut self) -> Result<u16, DecodeError> {
         Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
     }
-    fn u32(&mut self) -> Result<u32, DecodeError> {
+    pub(crate) fn u32(&mut self) -> Result<u32, DecodeError> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
     }
-    fn u64(&mut self) -> Result<u64, DecodeError> {
+    pub(crate) fn u64(&mut self) -> Result<u64, DecodeError> {
         Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
-    fn i64(&mut self) -> Result<i64, DecodeError> {
+    pub(crate) fn i64(&mut self) -> Result<i64, DecodeError> {
         Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
-    fn bytes(&mut self) -> Result<Vec<u8>, DecodeError> {
+    pub(crate) fn bytes(&mut self) -> Result<Vec<u8>, DecodeError> {
         let n = self.u32()? as usize;
         Ok(self.take(n)?.to_vec())
     }
-    fn str(&mut self) -> Result<String, DecodeError> {
+    pub(crate) fn str(&mut self) -> Result<String, DecodeError> {
         String::from_utf8(self.bytes()?).map_err(|_| DecodeError)
     }
-    fn done(&self) -> Result<(), DecodeError> {
+    pub(crate) fn done(&self) -> Result<(), DecodeError> {
         if self.i == self.b.len() { Ok(()) } else { Err(DecodeError) }
     }
 }
@@ -401,24 +418,37 @@ impl ClientMsg {
                 w.u8(5);
                 w.u64(*session);
             }
-            ClientMsg::Complete { session, line, cursor } => {
+            ClientMsg::Complete { session, line, cursor, seq } => {
                 w.u8(6);
                 w.u64(*session);
                 w.str(line);
                 w.u32(*cursor);
+                w.u32(*seq);
             }
             ClientMsg::Answer { prompt, yes } => {
                 w.u8(7);
                 w.u64(*prompt);
                 w.u8(*yes as u8);
             }
-            ClientMsg::Format { session, line, style } => {
+            ClientMsg::Format { session, line, style, seq } => {
                 w.u8(8);
                 w.u64(*session);
                 w.str(line);
                 w.u8(*style);
+                w.u32(*seq);
             }
             ClientMsg::Sessions => w.u8(9),
+            ClientMsg::Choose { prompt, index } => {
+                w.u8(11);
+                w.u64(*prompt);
+                w.u32(*index);
+            }
+            ClientMsg::Highlight { session, line, seq } => {
+                w.u8(10);
+                w.u64(*session);
+                w.str(line);
+                w.u32(*seq);
+            }
         }
         w.0
     }
@@ -431,10 +461,12 @@ impl ClientMsg {
             3 => ClientMsg::Detach { session: r.u64()? },
             4 => ClientMsg::Run { session: r.u64()?, line: r.str()? },
             5 => ClientMsg::Interrupt { session: r.u64()? },
-            6 => ClientMsg::Complete { session: r.u64()?, line: r.str()?, cursor: r.u32()? },
+            6 => ClientMsg::Complete { session: r.u64()?, line: r.str()?, cursor: r.u32()?, seq: r.u32()? },
             7 => ClientMsg::Answer { prompt: r.u64()?, yes: r.u8()? != 0 },
-            8 => ClientMsg::Format { session: r.u64()?, line: r.str()?, style: r.u8()? },
+            8 => ClientMsg::Format { session: r.u64()?, line: r.str()?, style: r.u8()?, seq: r.u32()? },
             9 => ClientMsg::Sessions,
+            10 => ClientMsg::Highlight { session: r.u64()?, line: r.str()?, seq: r.u32()? },
+            11 => ClientMsg::Choose { prompt: r.u64()?, index: r.u32()? },
             _ => return Err(DecodeError),
         };
         r.done()?;
@@ -475,14 +507,26 @@ impl ServerMsg {
                 w.u8(*ok as u8);
                 w.i64(*duration);
             }
-            ServerMsg::Prompt { prompt, question, detail } => {
+            ServerMsg::Prompt { prompt, question, detail, choices } => {
                 w.u8(6);
                 w.u64(*prompt);
                 w.str(question);
                 put_item(&mut w, detail);
+                w.u32(choices.len() as u32);
+                for c in choices {
+                    w.str(c);
+                }
             }
-            ServerMsg::Completions { start, items } => {
+            ServerMsg::ItemUpdate { session, block, index, item } => {
+                w.u8(12);
+                w.u64(*session);
+                w.u64(*block);
+                w.u32(*index);
+                put_item(&mut w, item);
+            }
+            ServerMsg::Completions { seq, start, items } => {
                 w.u8(7);
+                w.u32(*seq);
                 w.u32(*start);
                 w.u32(items.len() as u32);
                 for (t, k, h) in items {
@@ -500,13 +544,33 @@ impl ServerMsg {
                     w.str(cwd);
                 }
             }
-            ServerMsg::Formatted { text } => {
+            ServerMsg::Formatted { seq, text } => {
                 w.u8(9);
+                w.u32(*seq);
                 w.str(text);
             }
             ServerMsg::Fail { message } => {
                 w.u8(10);
                 w.str(message);
+            }
+            ServerMsg::Highlighted { seq, spans, error } => {
+                w.u8(11);
+                w.u32(*seq);
+                w.u32(spans.len() as u32);
+                for (a, b, c) in spans {
+                    w.u32(*a);
+                    w.u32(*b);
+                    w.u8(*c);
+                }
+                match error {
+                    None => w.u8(0),
+                    Some((a, b, m)) => {
+                        w.u8(1);
+                        w.u32(*a);
+                        w.u32(*b);
+                        w.str(m);
+                    }
+                }
             }
         }
         w.0
@@ -520,8 +584,21 @@ impl ServerMsg {
             3 => ServerMsg::BlockStart { session: r.u64()?, block: r.u64()?, line: r.str()? },
             4 => ServerMsg::Item { session: r.u64()?, block: r.u64()?, item: get_item(&mut r)? },
             5 => ServerMsg::BlockEnd { session: r.u64()?, block: r.u64()?, ok: r.u8()? != 0, duration: r.i64()? },
-            6 => ServerMsg::Prompt { prompt: r.u64()?, question: r.str()?, detail: get_item(&mut r)? },
+            6 => {
+                let (prompt, question, detail) = (r.u64()?, r.str()?, get_item(&mut r)?);
+                let n = r.u32()? as usize;
+                if n > MAX_ITEMS {
+                    return Err(DecodeError);
+                }
+                let mut choices = Vec::new();
+                for _ in 0..n {
+                    choices.push(r.str()?);
+                }
+                ServerMsg::Prompt { prompt, question, detail, choices }
+            }
+            12 => ServerMsg::ItemUpdate { session: r.u64()?, block: r.u64()?, index: r.u32()?, item: get_item(&mut r)? },
             7 => {
+                let seq = r.u32()?;
                 let start = r.u32()?;
                 let n = r.u32()? as usize;
                 if n > MAX_ITEMS {
@@ -531,7 +608,7 @@ impl ServerMsg {
                 for _ in 0..n {
                     items.push((r.str()?, r.u8()?, r.str()?));
                 }
-                ServerMsg::Completions { start, items }
+                ServerMsg::Completions { seq, start, items }
             }
             8 => {
                 let n = r.u32()? as usize;
@@ -544,8 +621,24 @@ impl ServerMsg {
                 }
                 ServerMsg::SessionList { sessions }
             }
-            9 => ServerMsg::Formatted { text: r.str()? },
+            9 => ServerMsg::Formatted { seq: r.u32()?, text: r.str()? },
             10 => ServerMsg::Fail { message: r.str()? },
+            11 => {
+                let seq = r.u32()?;
+                let n = r.u32()? as usize;
+                if n > MAX_ITEMS {
+                    return Err(DecodeError);
+                }
+                let mut spans = Vec::with_capacity(n.min(1024));
+                for _ in 0..n {
+                    spans.push((r.u32()?, r.u32()?, r.u8()?));
+                }
+                let error = match r.u8()? {
+                    0 => None,
+                    _ => Some((r.u32()?, r.u32()?, r.str()?)),
+                };
+                ServerMsg::Highlighted { seq, spans, error }
+            }
             _ => return Err(DecodeError),
         };
         r.done()?;

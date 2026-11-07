@@ -413,11 +413,8 @@ impl<D: BlockDevice> Fs<D> {
         self.enter_dataset(dataset)?;
         let src = self.cur_ds;
         let head = self.head_active()?.head.ok_or(Error::BadState)?;
-        // Klon by obsahoval vstupy do tychz vnorenych datasetu (dve cesty
-        // k jednomu datasetu) - zatim nepodporovano.
-        if self.contains_datasets()? {
-            return Err(Error::NotSupported);
-        }
+        // Vnorene datasety jsou ve vetvi hranice (`dataset.rs`) a merge je
+        // nemeni (`merge.rs`).
         if self.branches_active()?.iter().any(|(_, n)| fold_name(n) == fold_name(name)) {
             return Err(Error::AlreadyExists);
         }

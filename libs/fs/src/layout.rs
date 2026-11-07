@@ -37,7 +37,12 @@ pub const VERSION: u32 = 3;
 /// jen cist; *incompat*: nesmi vubec. Neznamy bit ro_compat nebo
 /// incompat = pripojeni odmitnuto (`NOT_SUPPORTED`).
 pub const FEATURES_RO_COMPAT: u64 = feature::RO_COMPAT_ACL | feature::RO_COMPAT_HISTORY;
-pub const FEATURES_INCOMPAT: u64 = feature::INCOMPAT_TIME_SECS;
+pub const FEATURES_INCOMPAT: u64 =
+    feature::INCOMPAT_TIME_SECS | feature::INCOMPAT_PTR_COPY | feature::INCOMPAT_DATA;
+/// Vlastnosti, ktere svazek mit musi: bez `INCOMPAT_PTR_COPY` ma stary tvar
+/// ukazatele (40 B), ktery tento ovladac uz neumi (`NOT_SUPPORTED`,
+/// svazek je potreba preformatovat).
+pub const FEATURES_INCOMPAT_REQUIRED: u64 = feature::INCOMPAT_PTR_COPY;
 
 /// Rezervovane bity vlastnosti (zatim je ovladac neumi, takze svazek s nimi
 /// odmitne). Vyznam je pevny uz ted, aby se formaty nerozesly.
@@ -49,6 +54,14 @@ pub mod feature {
     /// miliard let). Bez nej (svazky z doby pred zmenou) jsou casy u64 ns
     /// od 1970 - ovladac je umi cist i zapisovat dal ve starem tvaru.
     pub const INCOMPAT_TIME_SECS: u64 = 1 << 1;
+    /// incompat: ukazatel 48 B s adresou druhe kopie (metadata 2x,
+    /// samoleceni; faze 3). Nastavuje se pri formatovani.
+    pub const INCOMPAT_PTR_COPY: u64 = 1 << 2;
+    /// incompat: extenty dat faze 3 - komprimovane kusy, sdilene bloky
+    /// (tabulka sdileni, okamzite kopie, deduplikace), predalokovane
+    /// (nezapsane) a s druhou kopii. Starsi ovladac by sdilene bloky pri
+    /// mazani uvolnil a komprimovana data cetl jako surova.
+    pub const INCOMPAT_DATA: u64 = 1 << 3;
     /// ro_compat: svazek ma popisy opravneni s pocty odkazu. Starsi ovladac
     /// smi jen cist (pri mazani by pocty nesnizoval).
     pub const RO_COMPAT_ACL: u64 = 1 << 0;
@@ -93,10 +106,13 @@ pub const REUSE_DELAY: u64 = 4;
 /// Musi se vejit do `node::MAX_VALUE`.
 pub const INLINE_MAX: usize = 1984;
 /// Nejvic bloku jednoho extentu (~2 MiB): polozka i se soucty kazdeho bloku
-/// (24 + 496 * 16 = 7960 B) se vejde do `node::MAX_VALUE`; rezie metadat
-/// dat ~0,39 % kapacity.
+/// a adresou kopie (24 + 8 + 496 * 16 = 7968 B) se vejde do
+/// `node::MAX_VALUE`; rezie metadat dat ~0,39 % kapacity.
 pub const MAX_EXTENT: u64 = 496;
-const _: () = assert!(24 + MAX_EXTENT as usize * 16 <= crate::node::MAX_VALUE);
+const _: () = assert!(32 + MAX_EXTENT as usize * 16 <= crate::node::MAX_VALUE);
+
+mod extent;
+pub use extent::*;
 const _: () = assert!(INLINE_MAX <= crate::node::MAX_VALUE);
 
 /// Pevna ID objektu.
@@ -171,10 +187,28 @@ pub mod item {
     /// jmeno) - ve strome datasetu samotneho, objekt META_OID, offset 0.
     /// Cesta datasetu se tak zjisti bez pruchodu celym stromem.
     pub const DSLINK: u8 = 23;
+    /// Nastaveni dat datasetu (`datarec::DataSettings`: komprese, kopie,
+    /// deduplikace), objekt META_OID, offset 0.
+    pub const DATAOPT: u8 = 24;
+    /// Tabulka sdileni bloku (`datarec::ShareEntry`) - jen ve strome
+    /// korenoveho datasetu, objekt META_OID, offset = fyzicky zacatek useku.
+    pub const SHARE: u8 = 25;
+    /// Index deduplikace (`datarec::encode_dedup`) - jen ve strome
+    /// korenoveho datasetu, objekt META_OID, offset = zacatek hashe.
+    pub const DEDUP: u8 = 26;
+    /// Stav scrubu (`datarec::ScrubState`) - jen ve strome korenoveho
+    /// datasetu, objekt META_OID, offset 0.
+    pub const SCRUB: u8 = 27;
+    /// Neopravitelna chyba nalezena scrubem (text: cesta a popis), objekt
+    /// META_OID, offset = poradi.
+    pub const SCRUBERR: u8 = 28;
+    /// Kde pokracuje deduplikace na pozadi v datasetu (generace u64),
+    /// objekt META_OID, offset 0.
+    pub const DEDUPPOS: u8 = 29;
 }
 
 /// Klic polozky stromu; razeni podle (oid, kind, offset).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Key {
     pub oid: u64,
     pub kind: u8,
@@ -201,17 +235,24 @@ pub fn csum_at(b: &[u8], o: usize) -> Csum {
     Csum(b[o..o + 16].try_into().unwrap())
 }
 
-/// Ukazatel na blok (40 B): kde lezi (zarizeni + blok), kolik bloku ma,
-/// generace vzniku, kontrolni soucet obsahu a priznaky.
+/// Ukazatel na blok (48 B): kde lezi (zarizeni + blok), kde lezi druha
+/// kopie, kolik bloku ma, generace vzniku, kontrolni soucet obsahu
+/// a priznaky.
 ///
 /// ```text
 /// 0   adresa u64: blok (bity 0-47) | zarizeni svazku (bity 48-63)
 /// 8   generace vzniku u64
-/// 16  kontrolni soucet (16 B)
+/// 16  kontrolni soucet (16 B) - plati pro obe kopie
 /// 32  delka v blocich u32 (uzel stromu = NODE_BLOCKS)
 /// 36  priznaky u16 (PTR_COMPRESSED, PTR_ENCRYPTED, PTR_SHARED, PTR_REMOTE)
 /// 38  rezerva u16
+/// 40  adresa druhe kopie u64 (tvar jako adresa; 0 = bez kopie)
 /// ```
+///
+/// Druha kopie (metadata 2x) lezi v jine alokacni skupine nez prvni, aby
+/// ji lokalni poskozeni disku nezasahlo spolu s prvni. Kdyz prvni kopie
+/// nesedi se souctem (nebo nejde precist), cte se druha a prvni se jeji
+/// obsah prepise (samoleceni).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct BlockPtr {
     /// Cislo bloku na zarizeni `dev`.
@@ -223,9 +264,12 @@ pub struct BlockPtr {
     /// Zarizeni svazku (zatim vzdy 0; pripraveno pro vic disku).
     pub dev: u16,
     pub flags: u16,
+    /// Blok druhe kopie (0 = bez kopie) a jeji zarizeni.
+    pub copy: u64,
+    pub copy_dev: u16,
 }
 
-pub const PTR_SIZE: usize = 40;
+pub const PTR_SIZE: usize = 48;
 /// Priznaky ukazatele (pouzije faze 3 a 4).
 #[allow(dead_code, reason = "pouzije faze 3 (komprese, sdilene bloky)")]
 pub const PTR_COMPRESSED: u16 = 1 << 0;
@@ -260,6 +304,9 @@ impl BlockPtr {
         b[32..36].copy_from_slice(&self.len.to_le_bytes());
         b[36..38].copy_from_slice(&self.flags.to_le_bytes());
         b[38..40].fill(0);
+        debug_assert!(self.copy <= BLOCK_BITS, "cislo bloku kopie nad 48 bitu");
+        let copy = (self.copy & BLOCK_BITS) | (self.copy_dev as u64) << 48;
+        b[40..48].copy_from_slice(&copy.to_le_bytes());
     }
 
     pub fn get(b: &[u8]) -> Self {
@@ -271,6 +318,8 @@ impl BlockPtr {
             csum: csum_at(b, 16),
             len: u32_at(b, 32),
             flags: u16::from_le_bytes([b[36], b[37]]),
+            copy: u64_at(b, 40) & BLOCK_BITS,
+            copy_dev: (u64_at(b, 40) >> 48) as u16,
         }
     }
 }
@@ -283,12 +332,12 @@ impl BlockPtr {
 /// 24   bloku u64                    32   velikost AG u64
 /// 40   UUID svazku (16 B)           56   vlastnosti compat u64
 /// 64   vlastnosti ro_compat u64     72   vlastnosti incompat u64
-/// 80   koren stromu (BlockPtr 40 B) 120  index mista (BlockPtr 40 B)
-/// 160  blok intent logu u64         168  seminko intent logu u64
-/// 176  dalsi oid u64                184  generace posl. snapshotu u64
-/// 192  dalsi snapshot u64           200  poradi deadlistu u64
-/// 208  verze Unicode u32            212  zarizeni svazku u16, pocet u16
-/// 216  jmeno svazku (32 B)          4080 soucet XXH3-128
+/// 80   koren stromu (BlockPtr 48 B) 128  index mista (BlockPtr 48 B)
+/// 176  blok intent logu u64         184  seminko intent logu u64
+/// 192  dalsi oid u64                200  generace posl. snapshotu u64
+/// 208  dalsi snapshot u64           216  poradi deadlistu u64
+/// 224  verze Unicode u32            228  zarizeni svazku u16, pocet u16
+/// 232  jmeno svazku (32 B)          4080 soucet XXH3-128
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Superblock {
@@ -342,18 +391,18 @@ impl Superblock {
         b[56..64].copy_from_slice(&self.features_compat.to_le_bytes());
         b[64..72].copy_from_slice(&self.features_ro_compat.to_le_bytes());
         b[72..80].copy_from_slice(&self.features_incompat.to_le_bytes());
-        self.root.put(&mut b[80..120]);
-        self.space.put(&mut b[120..160]);
-        b[160..168].copy_from_slice(&self.zil_block.to_le_bytes());
-        b[168..176].copy_from_slice(&self.zil_seed.to_le_bytes());
-        b[176..184].copy_from_slice(&self.next_oid.to_le_bytes());
-        b[184..192].copy_from_slice(&self.snapshot_generation.to_le_bytes());
-        b[192..200].copy_from_slice(&self.next_snapshot.to_le_bytes());
-        b[200..208].copy_from_slice(&self.dead_seq.to_le_bytes());
-        b[208..212].copy_from_slice(&self.unicode_version.to_le_bytes());
-        b[212..214].copy_from_slice(&self.device_index.to_le_bytes());
-        b[214..216].copy_from_slice(&self.device_count.to_le_bytes());
-        b[216..248].copy_from_slice(&self.label);
+        self.root.put(&mut b[80..128]);
+        self.space.put(&mut b[128..176]);
+        b[176..184].copy_from_slice(&self.zil_block.to_le_bytes());
+        b[184..192].copy_from_slice(&self.zil_seed.to_le_bytes());
+        b[192..200].copy_from_slice(&self.next_oid.to_le_bytes());
+        b[200..208].copy_from_slice(&self.snapshot_generation.to_le_bytes());
+        b[208..216].copy_from_slice(&self.next_snapshot.to_le_bytes());
+        b[216..224].copy_from_slice(&self.dead_seq.to_le_bytes());
+        b[224..228].copy_from_slice(&self.unicode_version.to_le_bytes());
+        b[228..230].copy_from_slice(&self.device_index.to_le_bytes());
+        b[230..232].copy_from_slice(&self.device_count.to_le_bytes());
+        b[232..264].copy_from_slice(&self.label);
         let c = xxh3(&b[..BLOCK_SIZE - 16]);
         b[BLOCK_SIZE - 16..].copy_from_slice(&c.0);
         b
@@ -386,8 +435,16 @@ impl Superblock {
         }
         let mut uuid = [0u8; 16];
         uuid.copy_from_slice(&b[40..56]);
+        // Pred cimkoli dalsim: bez ukazatele s kopii je to stary tvar
+        // superbloku (jine posuny poli) - nic dal nejde cist.
+        let incompat = u64_at(b, 72);
+        if incompat & !FEATURES_INCOMPAT != 0
+            || incompat & FEATURES_INCOMPAT_REQUIRED != FEATURES_INCOMPAT_REQUIRED
+        {
+            return Err(Error::NotSupported);
+        }
         let mut label = [0u8; 32];
-        label.copy_from_slice(&b[216..248]);
+        label.copy_from_slice(&b[232..264]);
         let sb = Self {
             algo: Algo::from_raw(b[12])?,
             generation: u64_at(b, 16),
@@ -397,22 +454,19 @@ impl Superblock {
             features_compat: u64_at(b, 56),
             features_ro_compat: u64_at(b, 64),
             features_incompat: u64_at(b, 72),
-            root: BlockPtr::get(&b[80..120]),
-            space: BlockPtr::get(&b[120..160]),
-            zil_block: u64_at(b, 160),
-            zil_seed: u64_at(b, 168),
-            next_oid: u64_at(b, 176),
-            snapshot_generation: u64_at(b, 184),
-            next_snapshot: u64_at(b, 192),
-            dead_seq: u64_at(b, 200),
-            unicode_version: u32_at(b, 208),
-            device_index: u16::from_le_bytes([b[212], b[213]]),
-            device_count: u16::from_le_bytes([b[214], b[215]]),
+            root: BlockPtr::get(&b[80..128]),
+            space: BlockPtr::get(&b[128..176]),
+            zil_block: u64_at(b, 176),
+            zil_seed: u64_at(b, 184),
+            next_oid: u64_at(b, 192),
+            snapshot_generation: u64_at(b, 200),
+            next_snapshot: u64_at(b, 208),
+            dead_seq: u64_at(b, 216),
+            unicode_version: u32_at(b, 224),
+            device_index: u16::from_le_bytes([b[228], b[229]]),
+            device_count: u16::from_le_bytes([b[230], b[231]]),
             label,
         };
-        if sb.features_incompat & !FEATURES_INCOMPAT != 0 {
-            return Err(Error::NotSupported);
-        }
         // Velikost AG: rozumny rozsah (jinak by pamet pro skupiny vybuchla).
         let ags = sb.block_count.checked_div(sb.ag_blocks).unwrap_or(u64::MAX);
         let bad = sb.ag_blocks < 64
@@ -630,63 +684,6 @@ pub fn decode_dirents(mut b: &[u8]) -> Result<Vec<Dirent>> {
     Ok(out)
 }
 
-/// Souvisly usek dat souboru: fyzicky zacatek, delka, generace vzniku
-/// (rozhoduje, zda bloky po prepsani uvolnit, nebo patri snapshotu) a
-/// kontrolni soucet kazdeho bloku (nahodne cteni overi jen svuj blok).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Extent {
-    pub phys: u64,
-    pub birth: u64,
-    pub csums: Vec<Csum>,
-}
-
-/// Hlavicka extentu: phys u64, pocet u32, priznaky u32, birth u64.
-const EXTENT_HEADER: usize = 24;
-/// Priznak extentu: predalokovany, jeste nezapsany (cte se jako nuly).
-/// Rezervovano pro fazi 3; zatim ovladac extent s priznakem odmitne.
-#[allow(dead_code, reason = "pouzije faze 3 (predalokace)")]
-pub const EXTENT_UNWRITTEN: u32 = 1 << 0;
-
-impl Extent {
-    pub fn len(&self) -> u64 {
-        self.csums.len() as u64
-    }
-
-    pub fn encode(&self) -> Vec<u8> {
-        let mut b = Vec::with_capacity(EXTENT_HEADER + self.csums.len() * 16);
-        b.extend_from_slice(&self.phys.to_le_bytes());
-        b.extend_from_slice(&(self.csums.len() as u32).to_le_bytes());
-        b.extend_from_slice(&[0; 4]);
-        b.extend_from_slice(&self.birth.to_le_bytes());
-        for c in &self.csums {
-            b.extend_from_slice(&c.0);
-        }
-        b
-    }
-
-    pub fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() < EXTENT_HEADER {
-            return Err(Error::Corrupted);
-        }
-        let len = u32_at(b, 8) as usize;
-        if len == 0 || len as u64 > MAX_EXTENT || b.len() != EXTENT_HEADER + len * 16 {
-            return Err(Error::Corrupted);
-        }
-        // Priznaky extentu tento ovladac zatim nezna (viz EXTENT_UNWRITTEN).
-        if u32_at(b, 12) != 0 {
-            return Err(Error::NotSupported);
-        }
-        let csums = (0..len)
-            .map(|i| csum_at(b, EXTENT_HEADER + i * 16))
-            .collect();
-        Ok(Self {
-            phys: u64_at(b, 0),
-            birth: u64_at(b, 16),
-            csums,
-        })
-    }
-}
-
 /// Snapshot: koren stromu v okamziku vytvoreni.
 #[derive(Debug, Clone, PartialEq, Eq)]
 ///
@@ -811,14 +808,17 @@ impl DatasetRecord {
 }
 
 /// Mrtvy usek: bloky, ktere zivy stav uz nepouziva, ale drzi je snapshot.
+/// `copy` = zacatek druhe kopie stejne delky (0 = bez kopie); uvolni se
+/// spolu s prvni (u sdilenych bloku az s posledni referenci).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeadExtent {
     pub start: u64,
     pub len: u64,
     pub birth: u64,
+    pub copy: u64,
 }
 
-const DEAD_SIZE: usize = 24;
+const DEAD_SIZE: usize = 32;
 /// Kolik mrtvych useku se vejde do jedne polozky.
 pub const DEAD_PER_ITEM: usize = 80;
 
@@ -828,6 +828,7 @@ pub fn encode_dead(list: &[DeadExtent]) -> Vec<u8> {
         b.extend_from_slice(&d.start.to_le_bytes());
         b.extend_from_slice(&d.len.to_le_bytes());
         b.extend_from_slice(&d.birth.to_le_bytes());
+        b.extend_from_slice(&d.copy.to_le_bytes());
     }
     b
 }
@@ -843,6 +844,7 @@ pub fn decode_dead(b: &[u8]) -> Result<Vec<DeadExtent>> {
             start: u64_at(c, 0),
             len: u64_at(c, 8),
             birth: u64_at(c, 16),
+            copy: u64_at(c, 24),
         })
         .collect())
 }

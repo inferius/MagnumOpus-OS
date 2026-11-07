@@ -1,0 +1,18 @@
+[package]
+name = "svcclient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Obnova sluzeb po padu: protokol listku k supervisoru a kostra klienta, ktery se znovu pripoji"
+
+[features]
+# Klient nad kanaly (Conn); zapina ho, kdo ho pouziva (knihovny sluzeb,
+# init). Bez nej zustane protokol a pravidla - ty jdou testovat na hostiteli.
+default = []
+client = ["dep:libos", "dep:spin"]
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }
+libos = { path = "../libos", optional = true }
+spin = { version = "0.12", optional = true }

@@ -7,7 +7,7 @@
 > o průzkumu a variantách ukazují, z čeho se vybíralo.
 >
 > Kód: `libs/shlang` (jazyk, `no_std` + `alloc`, testy na hostiteli),
-> `libs/term` (protokol, relace, VT100, obrazovka), `user/termd` (služba).
+> `libs/term` (protokol, relace, VT100, obrazovka), `user/termd` (prostředník), `user/shsess` (proces relace).
 
 ## Co se naučit od ostatních
 
@@ -73,7 +73,7 @@ ls ~/Dokumenty -r | where size > 100MB | each { |f| rm $f.path }
 
 **B - příkazový + výrazový režim (doporučeno)**
 
-```text
+```mos
 ls ~/Dokumenty -r | where size > 100MB && mtime < now - 1y | sort size desc
 let velke = ls ~/Dokumenty -r | where size > 100MB
 for f in $velke { rm $f.path? }          # ? = chyba přeruší skript
@@ -100,7 +100,7 @@ ls("~/Dokumenty", recursive: true).filter(|f| f.size > 100.mb && f.mtime < now()
 > interaktivní psaní) a výrazový C blízký Rustu (pro skripty a logiku).
 > Oba jsou **zápisy téhož jazyka**, ne dva jazyky. To se musí přísně hlídat.
 
-```text
+```mos
 ls ~/Dok -r | where size > 100MB                          # B
 ls("~/Dok", recursive: true).where(f => f.size > 100MB)   # C, totéž
 ls ~/Dok -r | where (size > 100MB && ext == "pdf")      # míchání: výraz v ( ) je C
@@ -162,7 +162,7 @@ zápisu B mají v C plný tvar se stejným stromem, viz
 - **Manifest skriptu:** hlavička, kterou shell zkontroluje před spuštěním
   a podle které předá capabilities:
 
-```text
+```mos
 lang 1
 needs {
     read: ["~/Fotky"]
@@ -175,7 +175,7 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 ```
 
 - **Bezpečné výchozí chování:** příkaz, který mění soubory, dostane
-  líný snapshot (undo). Hromadná změna nad N souborů běží přes „ukaž, co se
+  koncept v klonu FS a undo. Hromadná změna nad N souborů běží přes „ukaž, co se
   stane“ ([terminál](architektura.md#shell-a-chytrý-terminál-návrh)).
 
 ## Rozhodnutí ke gramatice
@@ -402,7 +402,7 @@ zahodí; poznámku vypíše `log`.
 - **Úloha na pozadí** (`cmd &`, `bg { }`) běží kooperativně: když je shell
   volný, nebo při `wait`. `jobs` je vypíše, `kill N` zruší čekající úlohu.
 - **Hloubku rekurze** hlídá skutečná spotřeba zásobníku. Rozpočet nastaví
-  hostitel; termd má zásobník 256 KB a interpret smí 160 KB. Při překročení
+  hostitel; `shsess` má zásobník 256 KB a interpret smí 160 KB. Při překročení
   vznikne `SH_DEPTH`, ne pád.
 
 ### Verze jazyka
@@ -428,7 +428,7 @@ Každý příkaz má krátké jméno a plné jméno `sloveso-podstatné` (alias)
 | `echo`, `log`, `lines`, `split`, `join`, `trim`, `upper`, `lower`, `contains`, `starts-with`, `ends-with`, `replace` | `text-...` | text |
 | `from`, `to`, `describe` | `data-from`, `data-to`, `value-type` | výslovné převody (`json`, `text`, `lines`) |
 | `now`, `sleep` | `time-now`, `time-sleep` | |
-| `undo`, `preview` | `command-undo`, `command-preview` | viz [Soubory](#soubory-líné-undo-náhled-a-zámek) |
+| `undo`, `preview` | `command-undo`, `command-preview` | viz [Soubory](#soubory-koncept-v-klonu-undo-náhled-a-zámek) |
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | úlohy na pozadí |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
 
@@ -491,37 +491,55 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 }
 ```
 
-## Soubory: líné undo, náhled a zámek
+## Soubory: koncept v klonu, undo, náhled a zámek
+
+> **Změna proti první verzi shellu:** změny nanečisto už nejsou překryv
+> v paměti shellu, ale **klon datasetu „bokem“ přímo ve FS** (`ASIDE_*`
+> z [FS fáze 2](fs-historie.md)). Undo nestojí na snapshotu celého svazku,
+> ale na **pohledu** (`VIEW`) jen dotčených datasetů. Po programu se změny
+> zjišťují ze žurnálu a operace `DIFF`, ne procházením stromu. Proč: velké
+> zápisy nestojí paměť, program v `preview` pracuje nad stejným konceptem
+> jako vestavěné příkazy a undo programu je rychlé i na velkém disku.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Zmeny souboru prikazu">
+<svg viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Koncept radku v klonu FS">
 <defs><marker id="sh2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="80" width="130" height="56" rx="6"/><text class="t b" x="75" y="104" text-anchor="middle">příkaz</text><text class="m" x="75" y="122" text-anchor="middle">rm, save, mv ...</text>
+<rect class="box" x="10" y="80" width="130" height="56" rx="6"/><text class="t b" x="75" y="104" text-anchor="middle">příkaz</text><text class="m" x="75" y="122" text-anchor="middle">rm, save, mv, program</text>
 <path class="ln" d="M140 108 L188 108" marker-end="url(#sh2)"/>
-<rect class="acc" x="190" y="80" width="140" height="56" rx="6"/><text class="t b" x="260" y="104" text-anchor="middle">překryv</text><text class="m" x="260" y="122" text-anchor="middle">změny nanečisto</text>
-<path class="ln" d="M330 108 L378 108" marker-end="url(#sh2)"/>
-<rect class="box" x="380" y="80" width="120" height="56" rx="6"/><text class="t b" x="440" y="104" text-anchor="middle">diff</text><text class="m" x="440" y="122" text-anchor="middle">konec řádku</text>
-<path class="ln" d="M500 95 L558 48" marker-end="url(#sh2)"/>
-<path class="ln" d="M500 122 L558 172" marker-end="url(#sh2)"/>
-<rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N souborů: převzít</text><text class="m" x="655" y="60" text-anchor="middle">nejdřív líný snapshot</text>
-<rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N nebo preview</text><text class="m" x="655" y="185" text-anchor="middle">ukázat diff, potvrdit</text>
+<rect class="acc" x="190" y="70" width="150" height="76" rx="6"/><text class="t b" x="265" y="94" text-anchor="middle">klon bokem</text><text class="m" x="265" y="112" text-anchor="middle">ASIDE_BEGIN při</text><text class="m" x="265" y="128" text-anchor="middle">prvním zápisu</text>
+<path class="ln" d="M340 108 L378 108" marker-end="url(#sh2)"/>
+<rect class="box" x="380" y="80" width="130" height="56" rx="6"/><text class="t b" x="445" y="104" text-anchor="middle">ASIDE_CHANGES</text><text class="m" x="445" y="122" text-anchor="middle">konec řádku</text>
+<path class="ln" d="M510 95 L558 48" marker-end="url(#sh2)"/>
+<path class="ln" d="M510 122 L558 172" marker-end="url(#sh2)"/>
+<rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N: VIEW + APPLY</text><text class="m" x="655" y="60" text-anchor="middle">pohled pro undo, převzetí</text>
+<rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N nebo preview</text><text class="m" x="655" y="185" text-anchor="middle">diff, potvrdit / DISCARD</text>
 <path class="ln dash" d="M655 145 L655 78" marker-end="url(#sh2)"/>
-<text class="m" x="10" y="232">Čtecí příkaz nic nestojí (překryv je prázdný, snapshot nevznikne). undo vrátí poslední převzaté změny podle snapshotu.</text>
+<text class="m" x="10" y="236">Čtecí řádek klon nezakládá a nic nestojí. Klon leží v /tmp/.aside/&lt;relace&gt;-&lt;n&gt;; vnořené datasety jsou v něm hranice</text>
+<text class="m" x="10" y="254">a zápis do nich dostane vlastní klon. Převzetí je trojcestné: cizí změna mezitím = SH_CONFLICT, ne přepsání.</text>
 </svg>
-<figcaption>Změny jdou do překryvu; převezmou se na konci řádku s líným snapshotem.</figcaption>
+<figcaption>Změny řádku jdou do klonu datasetu ve FS; na konci řádku se převezmou s pohledem pro undo.</figcaption>
 </figure>
 
-- **Líné undo:** každý příkaz zapisuje do překryvu. Na konci řádku shell
-  spočítá diff. Prázdný diff = nic (čtecí příkazy nestojí nic). Jinak
-  shell **teprve teď** vytvoří snapshot (`shell-undo-N`, na FS v3 levný
-  CoW) a změny převezme. `undo` vrátí poslední příkaz a funguje
-  opakovaně (posledních 16 příkazů). FS bez snapshotů: shell si původní
-  obsah změněných souborů drží v paměti.
-- **„Ukaž, co se stane“:** `preview { ... }` spustí blok nanečisto, ukáže
-  tabulku změn (`added`, `modified`, `removed`, `dir-added`, `dir-removed`,
-  `replaced` = soubor nahrazený složkou nebo naopak)
-  a převezme je až po potvrzení (`-y` bez dotazu). Odmítnutí = `SH_REJECTED`
-  a nic se nezmění.
+- **Koncept řádku:** první zápis řádku do datasetu založí jeho klon
+  (`ASIDE_BEGIN`, `libs/shlang/src/vfs/draft.rs`). Další zápisy i čtení
+  toho datasetu jdou do klonu, takže řádek vidí své vlastní změny. Zápis do
+  vnořeného datasetu (v klonu je to hranice) dostane klon toho datasetu.
+  Na konci řádku shell vezme diff z FS (`ASIDE_CHANGES`). Řádek, který jen
+  čte, klon nezaloží a nestojí nic navíc.
+- **Undo:** před převzetím (`ASIDE_APPLY`) shell vytvoří **pohled**
+  (`VIEW`, levný dočasný snapshot a pozice v žurnálu) každého datasetu se
+  změnami. `undo` srovná změněné cesty se stavem v pohledu (čte přes
+  `SNAP_*_OF`) a funguje opakovaně (posledních 16 příkazů, starší pohledy se
+  uvolní). Pohledy po restartu uklidí FS sám.
+- **Konflikt:** převzetí je trojcestné proti stavu, ze kterého klon
+  vznikl. Když jiná relace nebo program mezitím změnil stejný soubor,
+  změna se nepřevezme a řádek skončí `SH_CONFLICT` se seznamem cest.
+  Ostatní změny jsou zapsané a `undo` vrátí jen je.
+- **„Ukaž, co se stane“:** `preview { ... }` přidá další vrstvu (klon
+  klonu), spustí blok, ukáže tabulku změn (`added`, `modified`, `removed`,
+  `dir-added`, `dir-removed`, `replaced` = soubor nahrazený složkou nebo
+  naopak, `moved`) a převezme ji do konceptu řádku až po potvrzení (`-y` bez
+  dotazu). Odmítnutí = `ASIDE_DISCARD`, `SH_REJECTED` a nic se nezmění.
 - **Zámek nebezpečných operací:** příkaz, který by změnil víc než N
   souborů mimo `/tmp` (výchozí N = 20), se před převzetím vždy zeptá. Je to
   stejný dotaz jako u `preview`. Bez připojeného okna se odmítne.
@@ -534,46 +552,111 @@ for f in (ls ~/Fotky | where ext == "jpg") {
   skriptu.
 - **Programy:** dostanou oprávnění z manifestu přes vlastní relaci fsd
   (`CONNECT_AS` s připojenými cestami, `term::perm::mounts`; zápis přebije
-  čtení, cesty se připojí na stejné místo). Před spuštěním programu shell
-  převezme dosavadní změny řádku (program vidí skutečný FS), a to **se
-  stejným zámkem nebezpečných operací** jako na konci řádku: odmítnutí =
-  program se nespustí. Pak udělá snapshot a zapamatuje si složky, kam
-  program smí psát (s plnými právy celý FS). Když program nic nezměnil,
-  záznam undo se zahodí, takže `undo` vrátí předchozí příkaz. Jinak `undo`
-  ty složky srovná se snapshotem.
+  čtení). Mimo `preview` shell před spuštěním převezme dosavadní koncept
+  řádku **se stejným zámkem** jako na konci řádku (odmítnutí = program se
+  nespustí) a vytvoří pohledy datasetů, kam program smí psát (s plnými
+  právy `/`, domov a pracovní složka). Po skončení žurnál jednou zprávou
+  řekne, jestli se něco změnilo. Když ne, záznam undo se zahodí, takže
+  `undo` vrátí předchozí příkaz. Když ano, `DIFF` vrátí změněné cesty a
+  `undo` je srovná s pohledem.
+- **Program v `preview`:** shell založí klony datasetů, kam program smí
+  psát, a připojí mu je **pod původními jmény** (`ExecNeeds::aside`).
+  Zápis mimo klony dostane jen pro čtení. Program tak mění jen koncept:
+  jeho změny jsou v tabulce náhledu a po odmítnutí zmizí.
 
-⚠️ **Omezení:** překryv drží zapsaná data v paměti až do konce řádku
-(velké zápisy stojí paměť). Programy mimo shell do překryvu nevidí, proto je
-`preview` odmítne (`SH_NEEDS`), dokud fsd nebude umět klony a diff
-datasetů přes protokol (`libs/fs` je umí, `fsproto` zatím ne). Snapshot
-přes `fsproto` je snapshot celého svazku, ne jen dotčeného datasetu.
+```shell-b
+preview { rm *.tmp; echo hotovo | save ~/vysledek.txt }
+undo
+```
+
+⚠️ **Omezení:**
+
+- Klon nejde založit tam, kde FS nemá zapisovatelný `/tmp`. Zápis pak
+  skončí chybou s radou (`NOT_SUPPORTED`).
+- Undo programu s plnými právy hlídá datasety `/`, domova a pracovní
+  složky. Změnu v jiném vnořeném datasetu nevrátí.
+- Pohled zachytí i změny jiných relací ve stejných složkách během běhu
+  programu. `undo` by je vrátilo také.
+- Když je konfliktů víc, než FS vypíše (přes 1024), řádek skončí
+  `SH_CONFLICT` a převzetí nejde vrátit (shell neví jistě, co se převzalo).
+
+**Pojistky:**
+
+- `undo` se nikdy nedotkne vnořeného datasetu: pohled vidí jen svůj
+  dataset, srovnání vnořené datasety přeskočí (i při srovnání celé složky).
+- Po programu shell nejdřív potvrdí změny ve FS (`COMMIT`) a teprve pak se
+  ptá žurnálu - žurnál ukazuje jen potvrzené záznamy.
+- Čtení v řádku s klonem se FS na dataset neptá: vezme klon nad cestou
+  a jen u hranice vnořeného datasetu (`NOT_SUPPORTED`) to zopakuje přesně.
+- Zahození klonu (uvolnění bloků) se odkládá, až je shell volný; výsledek
+  příkazu je v terminálu hned.
+- Program v `preview` dostane klony i vnořených datasetů domova
+  a pracovní složky.
 
 ## Terminál a služba relací
 
 <figure class="diagram">
-<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sluzba relaci">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sluzba relaci">
 <defs><marker id="sh3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="30" width="170" height="60" rx="6"/><text class="t b" x="95" y="55" text-anchor="middle">okno terminálu</text><text class="m" x="95" y="74" text-anchor="middle">(6c GUI, test, později SSH)</text>
-<path class="ln" d="M180 60 L268 90" marker-end="url(#sh3)"/>
-<text class="m" x="185" y="56">nativní protokol</text>
-<rect class="acc" x="270" y="50" width="220" height="110" rx="6"/><text class="t b" x="380" y="75" text-anchor="middle">termd</text><text class="m" x="380" y="95" text-anchor="middle">relace: interpret, cwd,</text><text class="m" x="380" y="111" text-anchor="middle">historie, undo, úlohy</text><text class="m" x="380" y="127" text-anchor="middle">bloky výstupu</text><text class="m" x="380" y="143" text-anchor="middle">přežijí odpojení okna</text>
-<path class="ln" d="M490 80 L578 60" marker-end="url(#sh3)"/>
-<rect class="box" x="580" y="30" width="170" height="56" rx="6"/><text class="t b" x="665" y="54" text-anchor="middle">fsd</text><text class="m" x="665" y="72" text-anchor="middle">soubory, snapshoty</text>
-<path class="ln" d="M490 125 L578 140" marker-end="url(#sh3)"/>
-<rect class="box" x="580" y="115" width="170" height="56" rx="6"/><text class="t b" x="665" y="139" text-anchor="middle">VT100 adaptér</text><text class="m" x="665" y="157" text-anchor="middle">log / sériová linka</text>
-<path class="ln dash" d="M380 160 L380 198" marker-end="url(#sh3)"/>
-<rect class="box" x="270" y="200" width="220" height="44" rx="6"/><text class="t b" x="380" y="220" text-anchor="middle">obrazovka + vlastní písmo</text><text class="m" x="380" y="236" text-anchor="middle">framebuffer (capability)</text>
+<path class="ln" d="M180 60 L248 60" marker-end="url(#sh3)"/>
+<text class="m" x="184" y="50">protokol</text>
+<rect class="acc" x="250" y="30" width="150" height="60" rx="6"/><text class="t b" x="325" y="55" text-anchor="middle">termd</text><text class="m" x="325" y="74" text-anchor="middle">jen směruje zprávy</text>
+<path class="ln" d="M400 50 L468 40" marker-end="url(#sh3)"/>
+<path class="ln" d="M400 75 L468 110" marker-end="url(#sh3)"/>
+<rect class="box" x="470" y="15" width="150" height="50" rx="6"/><text class="t b" x="545" y="36" text-anchor="middle">shsess 1</text><text class="m" x="545" y="54" text-anchor="middle">interpret, undo, úlohy</text>
+<rect class="box" x="470" y="85" width="150" height="50" rx="6"/><text class="t b" x="545" y="106" text-anchor="middle">shsess 2</text><text class="m" x="545" y="124" text-anchor="middle">vlastní proces</text>
+<path class="ln" d="M620 40 L668 75" marker-end="url(#sh3)"/>
+<path class="ln" d="M620 110 L668 85" marker-end="url(#sh3)"/>
+<rect class="box" x="670" y="55" width="80" height="50" rx="6"/><text class="t b" x="710" y="78" text-anchor="middle">fsd</text><text class="m" x="710" y="95" text-anchor="middle">klony</text>
+<rect class="warn" x="250" y="170" width="150" height="56" rx="6"/><text class="t b" x="325" y="193" text-anchor="middle">registr relací</text><text class="m" x="325" y="211" text-anchor="middle">náhradní konce</text>
+<path class="ln dash" d="M400 198 L545 137" marker-end="url(#sh3)"/>
+<path class="ln dash" d="M325 90 L325 168" marker-end="url(#sh3)"/>
+<text class="m" x="332" y="140">Park / Claim</text>
+<text class="m" x="10" y="262">Pád relace neshodí ostatní ani termd. Pád termd: relace a úlohy běží dál, nový termd je převezme z registru (Adopt)</text>
+<text class="m" x="10" y="280">a okno se k nim připojí (Attach) s přehráním bloků.</text>
 </svg>
-<figcaption>Relace patří službě termd; okno se jen připojuje.</figcaption>
+<figcaption>Každá relace ve vlastním procesu; termd je jen prostředník, registr drží relace přes jeho restart.</figcaption>
 </figure>
+
+**Proces na relaci** (`libs/term/src/broker.rs`, `libs/term/src/ctl.rs`):
+
+- termd (`user/termd`) nemá interpret. Přijímá zprávy okna a směruje je
+  podle čísla relace do procesu `shsess` (`user/shsess`), jeden na relaci.
+  Čísla bloků a výzev relace `N` leží v rozsahu `N << 32`, takže odpověď na
+  výzvu (`Answer`) jde směrovat bez tabulky.
+- **Pád relace** neshodí ostatní relace ani termd; okno dostane `Fail`
+  „relace N skončila“.
+- **Registr relací:** každá relace má kromě hlavního kanálu k termd
+  náhradní kanál. Jeho druhý konec termd uschová v registru (`Park`).
+  Registr drží proces, který termd spouští (dnes test v initu, později
+  supervisor).
+- **Konec nebo pád termd:** relace se odpojí. Rozběhnutý příkaz i úlohy na
+  pozadí doběhnou a výstup se uloží do bloků. Nový termd si po startu
+  vyzvedne náhradní konce (`Claim`), pošle na ně `Adopt` a relace přejdou
+  na nový termd. Okno se pak připojí (`Attach`) s přehráním bloků. Bez
+  registru relace doběhnou a skončí.
+- **Klony bokem** mají ve jméně značku relace (`/tmp/.aside/<značka>-<n>`).
+  Nový termd zahodí klony relací, které už neběží (pád uprostřed řádku).
+  Proto smí v systému běžet jen jeden termd (jeden registr).
+
+⚠️ **Omezení:** `Sessions` hlásí pracovní složku z posledního `Attach`
+(termd se relace neptá, aby neblokoval na zaneprázdněné relaci).
+
 
 ### Nativní protokol (`libs/term/src/proto.rs`)
 
 Binární zprávy (1 B druh, pole little-endian, text = délka + UTF-8). Okno
 posílá `Hello`, `Attach` (0 = nová relace), `Detach`, `Run`, `Interrupt`,
-`Complete`, `Answer`, `Format` a `Sessions`. Služba posílá `BlockStart`,
-`Item`, `BlockEnd`, `Prompt`, `Completions`, `Formatted` a `Fail`.
+`Complete`, `Answer`, `Format`, `Sessions` a `Highlight`. Služba posílá
+`BlockStart`, `Item`, `BlockEnd`, `Prompt`, `Completions`, `Formatted`,
+`Highlighted` a `Fail`.
 
+- **Párování odpovědí (verze 2):** `Complete` a `Format` nesou číslo
+  požadavku `seq`, `Completions` a `Formatted` ho vrací. Mezi požadavkem
+  a odpovědí můžou přijít události jiných bloků (úlohy `async`, `bg`,
+  pozdní konec zrušené úlohy). Okno je proto páruje podle `seq` a odpověď
+  na starší požadavek zahodí. Stejně funguje `seq` u `Highlight`.
 - **Položky bloku:** typovaná hodnota, poznámka, varování, chyba (kód,
   popis, hlášení s místem), diff, průběh, odkaz.
 - **Hodnoty se posílají typovaně.** Seznam záznamů se stejnými sloupci jde
@@ -589,7 +672,7 @@ posílá `Hello`, `Attach` (0 = nová relace), `Detach`, `Run`, `Interrupt`,
 - Každý příkaz je **blok** (řádek, položky, výsledek, doba). Blok jde
   sbalit, zkopírovat, spustit znovu nebo porovnat dva běhy; to dělá
   terminál, služba drží data.
-- **Relace patří službě.** `Detach` (zavření nebo pád okna) relaci nezruší:
+- **Relace patří službě, ne oknu.** `Detach` (zavření nebo pád okna) relaci nezruší:
   rozběhnutý příkaz doběhne, výstup se uloží do bloků a po `Attach` se
   přehraje. Dotaz bez připojeného okna se bezpečně odmítne.
 - **Ctrl-C:** okno pošle `Interrupt`. Interpret se na přerušení ptá
@@ -612,55 +695,270 @@ VT100) a kreslí ji písmem Noto Sans Mono s diakritikou do lineárního
 framebufferu. Od 1080 řádků se použije větší písmo. Stejná obrazovka bude
 záchranná textová konzole.
 
+### Barvy terminálu
+
+> **Změna proti první verzi shellu:** terminál je barevný. Protokol nenese
+> barvy ani ANSI, jen **sémantické třídy**. Barvu přidělí až motiv na konci
+> cesty (okno, sériová linka, dokumentace). Zvýraznění bere tokeny
+> z lexeru `libs/shlang` (jediný zdroj pravdy pro terminál i tento web).
+
+**Dvě úrovně zvýraznění** (`shlang::highlight`):
+
+- **Lexikální, hned v okně** při každé klávese, bez zprávy. Slovo na místě
+  příkazu je příkaz, pak přepínače, řetězce, čísla, komentáře, klíčová
+  slova a roury. Stejné zvýraznění má řádek bloku ve výpisu a příklady
+  v dokumentaci.
+- **Významové, od služby** (`Highlight` -> `Highlighted`, s pořadím
+  `seq`). Služba zná příkazy, funkce, programy a proměnné relace.
+  Neznámý příkaz dostane třídu `unknown` (podtržení už při psaní),
+  proměnná `var`, pole v podmínce `where` `field`. Navíc vrátí místo chyby
+  parseru. Nedopsaný řádek (otevřený řetězec, roura na konci) chybu
+  nehlásí. Okno odpovědi se starším `seq` zahodí, takže písmena na
+  odpověď nikdy nečekají.
+
+| Třída | Co | Příklad |
+|---|---|---|
+| `cmd` | známý příkaz, funkce, program | `ls`, `where`, `.count()` |
+| `unknown` | neznámý příkaz (podtržený) | `lss` |
+| `kw` | klíčové slovo | `let`, `for`, `try`, `true` |
+| `flag` | přepínač | `-r`, `--depth` |
+| `var` | proměnná | `$f`, `it` |
+| `field` | pole záznamu | `it.size`, `size` ve `where` |
+| `str` | řetězec | `"ahoj"` |
+| `interp` | závorky vloženého výrazu | `"{f.name}"` |
+| `num` | číslo i s jednotkou | `5MB`, `2s`, `1.5` |
+| `path` | cesta, vzor, cíl přesměrování | `~/foto`, `*.jpg` |
+| `comment` | komentář | `# pozn.` |
+| `op` | operátor, závorka | `>`, `&&`, `=>` |
+| `pipe` | roura | `\|` |
+
+```shell-b
+ls ~/foto -r | where size > 5MB | sort mtime   # velké fotky
+```
+
+```shell-b
+for f in (ls *.jpg) { echo "zpracovávám {f.name}" }
+```
+
+**Barevné výpisy** (`term::render`): tabulky se barví podle typu hodnot
+a schématu, ne podle ANSI v programech.
+
+- **Jméno souboru podle druhu:** `dir`, `dataset` (vnořený dataset: `kind`
+  zůstává `"dir"`, pole `dataset = true`), `symlink`, `exec` (právo spustit `x` v poli
+  `access`), `image`, `archive`, `document`, `media` (podle přípony),
+  `hidden` (tečka), `noaccess` (bez práva číst).
+- **Velikost a stáří v barevné škále** (4 stupně): velikost do 1 MB,
+  100 MB, 1 GB a víc; stáří do dne, 30 dnů, roku a starší.
+- `true` zeleně, `false` a chyby barvou chyby, `null` tlumeně, změny
+  v diffu podle druhu.
+- `ls` má nová pole `dataset` (kořen vnořeného datasetu) a `access` (práva relace `rwx` z fsd, `LIST_STAT_PAGE`
+  je posílá u každé položky).
+
+**Motiv** (`term::theme`): vestavěný tmavý (výchozí) a světlý. Uživatel je
+přebije souborem `~/.config/term/theme.toml`; neznámá třída nebo špatná
+barva je chyba s číslem řádku.
+
+```toml
+base = "dark"            # nebo "light"
+[syntax]
+cmd = "#7ee2a8"
+unknown = "#ff8a80 underline"
+[files]
+dir = "#7fb4ff bold"
+[ui]
+bg = "#15171c"
+scale3 = "#ff8a80"       # nejvyšší stupeň škály
+[ext]
+image = "jpg png heic"   # přípony k druhu souboru
+```
+
+**Konec cesty:** adaptér VT100 kreslí 24bitové barvy (`38;2;r;g;b`), tučné
+a podtržení; obrazovka (`term::screen`) je umí vykreslit do framebufferu.
+Barvy tříd na tomto webu (`sh-*`, `fk-*`) generuje `xtask` z téhož motivu.
+Test hlídá, že zvýraznění v dokumentaci a v terminálu dávají stejné
+úseky.
+
+Příklad, který nejde převést do druhého zápisu (smíšený B a C, skript
+s hlavičkou), má v dokumentaci jazyk `mos`: zvýrazní se stejně, jen bez
+převodu.
+
+⚠️ **Plán:** obarvení vlastního textu uživatelem (např. `echo` se stylem
+třídy) je navazující návrh.
+
+### Interaktivní terminál a konzole
+
+> **Změna proti první verzi shellu:** terminál není „konzole ze 70. let“.
+> Výsledky jsou interaktivní tabulky, doplňování je nabídka, průběh se
+> mění na místě v reálném čase a výzvy jsou prvky protokolu. Logika je
+> v knihovně `term::ui` (bez systémových volání, testy na hostiteli), takže
+> stejně poslouží textové konzoli i oknu v GUI 6c.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Konzole a interaktivni terminal">
+<defs><marker id="sh4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="140" height="56" rx="6"/><text class="t b" x="80" y="44" text-anchor="middle">inputd</text><text class="m" x="80" y="62" text-anchor="middle">fokus = klávesy</text>
+<rect class="box" x="10" y="140" width="140" height="56" rx="6"/><text class="t b" x="80" y="164" text-anchor="middle">jádro</text><text class="m" x="80" y="182" text-anchor="middle">FRAMEBUFFER, FB_CONTROL</text>
+<path class="ln" d="M150 48 L248 90" marker-end="url(#sh4)"/>
+<path class="ln" d="M150 168 L248 130" marker-end="url(#sh4)"/>
+<rect class="acc" x="250" y="60" width="220" height="100" rx="6"/><text class="t b" x="360" y="84" text-anchor="middle">user/console</text><text class="m" x="360" y="104" text-anchor="middle">term::ui (editor, tabulky,</text><text class="m" x="360" y="120" text-anchor="middle">nabídka, výzvy, průběhy)</text><text class="m" x="360" y="140" text-anchor="middle">term::screen -> framebuffer</text>
+<path class="ln" d="M470 110 L568 110" marker-end="url(#sh4)"/>
+<text class="m" x="478" y="102">nativní protokol</text>
+<rect class="box" x="570" y="82" width="180" height="56" rx="6"/><text class="t b" x="660" y="106" text-anchor="middle">termd + shsess</text><text class="m" x="660" y="124" text-anchor="middle">relace, interpret</text>
+<path class="ln dash" d="M360 60 L360 22" marker-end="url(#sh4)"/>
+<text class="m" x="372" y="30">supervisor / test: display, focus, release</text>
+</svg>
+<figcaption>Konzole dostane displej a fokus od jejich vlastníka; sama si je nebere.</figcaption>
+</figure>
+
+**Protokol** (doplněk k nativnímu protokolu):
+
+- `ItemUpdate { session, block, index, item }`: změna položky bloku na
+  místě. Pruh průběhu se tak mění v reálném čase a rychlost a odhad
+  zbývajícího času si okno spočítá samo z časů aktualizací.
+- `Prompt { …, choices }` + `Choose { prompt, index }`: výzva s volbami
+  (prázdné `choices` = ano/ne a odpověď `Answer`).
+- Průběh hlásí interpret (`Host::progress`): `for` a `each` nad seznamem
+  od 20 položek (aktualizace jen při změně procenta) a `sleep` od 1 s.
+
+**Okno** (`term::ui::App`):
+
+- **Editor řádku:** zvýraznění okamžitě, významové od služby podle `seq`;
+  šedá nápověda z historie (šipka doprava nebo End ji přijme); historie
+  šipkami; Ctrl-W slovo, Ctrl-U řádek, Ctrl-F převod B/C; Tab doplňování
+  (jedna možnost se doplní rovnou, víc = nabídka).
+- **Bloky:** každý příkaz s barevnou značkou stavu (běží, hotovo, chyba),
+  dobou běhu a točícím se znakem u běžícího. Ctrl-L sbalí všechny,
+  mezera sbalí vybraný.
+- **Interaktivní tabulka:** PgUp z editoru vstoupí do poslední tabulky.
+  Šipky a PgUp/PgDn vybírají řádek, `s` řadí podle dalšího sloupce, `S`
+  obrátí směr, `/` filtr (podřetězec v libovolné buňce). Akce nad řádkem
+  se spustí jako běžný řádek, takže platí historie, náhled, zámek
+  i undo: Enter otevře soubor (`open`) nebo složku (`cd …; ls`), `c` vloží
+  cestu do řádku a `d` smaže s náhledem (`preview { rm … }`).
+- **Výzvy:** tlačítka Ano/Ne nebo volby, šipky a Enter, `a`/`n`,
+  číslice u voleb.
+- **Řádek zadaný před připojením** k relaci počká a odešle se po
+  `Attached`.
+
+```shell-b
+for f in (ls ~/foto -r) { echo "kontroluji {f.name}" }
+```
+
+**Konzole** (`user/console`): textová a záchranná konzole pro běh bez
+GUI, pád GUI a nouzový režim (v GUI je terminál okno `gui-term`). Displej
+ani fokus si nebere sama. Předá jí je jejich vlastník (supervisor, zatím
+test v initu) stejně jako kompozitoru. Řídicí příkazy jsou text
+s odpovědí `ok` / `err KÓD` jako u inputd:
+
+| Příkaz | Handly | Co |
+|---|---|---|
+| `display` | framebuffer | převzít displej (`FB_CONTROL` `CLAIM`) a kreslit |
+| `focus` | kanál událostí od inputd | brát klávesy |
+| `release` | - | přestat kreslit, vrátit displej jádru; odpověď nese framebuffer, kanál fokusu se zavře |
+| `status` | - | `ok drawing=… focus=… session=… connected=…` |
+| `dump` | - | `ok` + text obrazovky (testy, diagnostika) |
+
+Kreslí do obrazu v paměti a do framebufferu kopíruje jen změněné textové
+řádky (při psaní typicky jen řádek editoru), jen při změně nebo u
+běžícího příkazu (nejvýš asi 7 snímků za sekundu). Jméno souboru v akci
+nad řádkem je vždy text: vložený výraz `{…}` se escapuje.
+
+⚠️ **Omezení:** myš (klik na řádek, odkaz) ještě není; displej a fokus
+v běžném běhu rozdělí supervisor spolu s GUI 6c.
+
 ### Stav zapojení
 
 | Co | Stav |
 |---|---|
 | jazyk, formátovač, interpret, undo, preview, zámek, needs | hotovo, testy na hostiteli (`cargo test -p shlang`) |
-| protokol, služba relací, VT100, obrazovka, připojené cesty | hotovo, testy na hostiteli (`cargo test -p term`) |
-| `termd` v initfs | hotovo; FS přes `fsproto`, výstup zrcadlí do logu |
-| test v QEMU | hotovo: `user/init/src/tests/shell.rs` spustí termd s vlastní relací fsd a ověří zápis, undo přes snapshot fsd, Ctrl-C, převod zápisu a přehrání bloků po odpojení; spouštění termd mimo testy patří do supervisoru initu (později) |
-| vstup z klávesnice | čeká na `inputd` (milník 6a, větev mimo `main`); do té doby posílá řádky okno nebo test |
-| kreslení do framebufferu | knihovna hotová; čeká na předání framebufferu jako capability (jádro, `userboot`) |
-| spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`); zatím žádný program s rozhraním pro shell |
+| protokol, služba relací, prostředník, registr, VT100, obrazovka, připojené cesty | hotovo, testy na hostiteli (`cargo test -p term`) |
+| `termd` a `shsess` v initfs | hotovo; relace ve vlastních procesech, FS přes `fsproto` (klony bokem, pohledy, `LIST_STAT_PAGE`), výstup zrcadlí do logu |
+| test v QEMU | hotovo: `user/init/src/tests/shell.rs` spustí termd s vlastní relací fsd a ověří zápis (koncept v klonu), undo přes pohled fsd, Ctrl-C, převod zápisu, přehrání bloků po odpojení a to, že relace i její úloha přežijí pád termd a nový termd je převezme z registru; spouštění termd mimo testy patří do supervisoru initu (později) |
+| `async`/`await` | hotovo: úlohy ve vláknech `shsess` s vlastní relací fsd; testy `cargo test -p term` (vlákna std) a test v QEMU (souběh, undo úlohy, termín, zrušení) |
+| vstup z klávesnice | hotovo: konzole dostane fokus od `inputd` (test v initu píše umělým vstupem) |
+| kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
+| spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
 
-## Souběžnost: async a await (rozhodnuto, zatím neimplementováno)
+## Souběžnost: async a await
 
-> **Odsouhlaseno (varianta A):** úloha `async { }`, čekání `await`,
-> `await all [...]`, `await any [...]`, časový limit `timeout`, zrušení
-> `cancel` a paralelní `each --parallel N`. Stejně v obou zápisech.
-> Implementace přijde po barvách a interaktivitě terminálu.
+> **Hotovo (varianta A):** úloha `async { }`, čekání `await` (v C i
+> `x.await`), `await all [...]`, `await any [...]`, časový limit `timeout`,
+> zrušení `cancel` a paralelní `each --parallel N`. Klíčová slova jsou
+> stejná v obou zápisech.
 
-Příklady jsou zatím jako text (parser `async` ještě nezná, dokumentace by je odmítla):
-
-```text
-let a = async { fetch https://example.com/data.json | from json }
-let b = async { ls ~/Fotky -r | where ext == "jpg" | count }
-let (data, pocet) = await all [a, b]          # počká na obě, chyba se šíří
-let prvni = await any [a, b] timeout 5s       # první hotová, jinak TIMED_OUT
-ls ~/Fotky | each --parallel 8 f => image resize $f.path --width 800
+```shell-b
+let a = async { ls ~/Fotky -r | where ext == "jpg" | count }
+let b = async { ls ~/Dokumenty -r | count }
+let (fotky, dokumenty) = await all [a, b]
+let prvni = await any [a, b] timeout 5s
 ```
 
-```text
-let a = async { fetch("https://example.com/data.json").from_json() }
-let data = a.await
+```shell-b
+let c = async { open ~/data.json | from json }
+let r = try await c
+if r.failed { echo "nejde: {r.error.message}" }
 ```
+
+```shell-b
+ls ~/Fotky | each --parallel 4 f => { open $f.path | from text | lines | count }
+```
+
+Hodnota `async { }` je popisovač úlohy (záznam `{task: n}`); `await` vrátí
+výsledek bloku. `await all` vrátí seznam v pořadí seznamu (rozloží ho
+`let (a, b) = ...`), `await any` výsledek první hotové úlohy.
 
 **Pravidla:**
 
-- **Strukturovaná souběžnost.** Úloha nepřežije blok, ve kterém vznikla:
-  když blok skončí (i chybou nebo Ctrl-C), běžící podúlohy se zruší.
-  Nezůstanou tak zapomenuté procesy. Výjimka je výslovné `bg`, které úlohu
-  předá službě relací.
+- **Strukturovaná souběžnost.** Úloha nepřežije blok, ve kterém vznikla
+  (skript, volání funkce): když blok skončí (i chybou nebo Ctrl-C), běžící
+  úlohy se zruší a blok to oznámí poznámkou. Úloha z příkazové řádky patří
+  relaci, takže na ni jde počkat i dalším řádkem. Výjimka je výslovné `bg`.
 - **Chyby:** chyba úlohy se projeví při `await` a šíří se sama;
-  `let r = try await a` ji vrátí jako hodnotu.
-- **Oprávnění se nerozšiřují:** úloha dědí manifest `needs` skriptu
-  (průnik, stejně jako `bg`).
-- **Terminál:** každá úloha má vlastní blok s průběhem, mezi běžícími
-  úlohami jde přepínat.
-- **Pod tím:** úloha je proces nebo vlákno s handlem, `await` čeká na jeho
-  signál přes objekt **port** jádra (jedno vlákno čeká na mnoho událostí),
-  `timeout` je časovač portu, `cancel` ukončí úlohu. Žádné aktivní čekání.
+  `let r = try await a` ji vrátí jako hodnotu. `await all` skončí hned při
+  první chybě a ostatní úlohy zruší.
+- **Termín:** `await ... timeout 5s` po termínu vrátí chybu `TIMED_OUT`;
+  úloha běží dál (`cancel` ji zruší).
+- **Ctrl-C** během `await` zruší úlohy, na které se čeká.
+- **Soubory:** úloha má vlastní koncept změn. Změny se převezmou, až úloha
+  doběhne, a mají vlastní záznam `undo` v relaci. Zrušená nebo chybná úloha
+  koncept zahodí, nic se nezmění. Zámek nebezpečných operací platí i pro
+  úlohu (výzva v terminálu, bez okna se odmítne).
+- **Oprávnění se nerozšiřují:** úloha dědí manifest `needs`, pracovní
+  složku a zámek volajícího.
+- **Kopie proměnných:** úloha vidí kopii proměnných z doby vzniku (pozdější
+  změna ji neovlivní). Closure do úlohy předat nejde (`SH_TYPE`), definujte
+  ji uvnitř `async { }`.
+- **Terminál:** každá úloha má vlastní blok (`async ...`) s výstupem,
+  průběhem a výsledkem. Bloky se po odpojení a připojení okna přehrají.
+
+**Pod tím** (proces relace `shsess`):
+
+- každá úloha běží ve **vlastním vlákně** procesu relace (`libos::thread`,
+  zásobník 256 KB) s vlastním interpretem a vlastní relací fsd (`CONNECT`:
+  stejná identita a cesty), takže koncept úlohy se nemíchá s řádkem,
+- hodnoty jdou mezi vlákny zakódované stejně jako v protokolu terminálu
+  (interpret používá `Rc`, které vlákna sdílet nesmí),
+- vlákno úlohy hlásí výstup do sdílené tabulky a probudí hlavní vlákno
+  **událostí jádra**; hlavní vlákno čeká na zprávu okna nebo na událost
+  (`wait_many`), `await` čeká na událost s termínem. Žádné aktivní čekání,
+- `cancel` nastaví příznak, který interpret úlohy čte (jako Ctrl-C).
+
+```text
+okno ──Run──▶ shsess (hlavní vlákno: interpret řádku)
+                 │ async { } ─▶ vlákno úlohy (interpret, relace fsd, koncept)
+                 │                 │ výstup, výzvy, výsledek ─▶ tabulka úloh
+                 │ ◀── událost ────┘
+                 └─▶ bloky úloh oknu, await vyzvedne výsledek a undo
+```
+
+⚠️ **Omezení:**
+
+- hostitel bez vláken (testy interpretu) úlohy spustí **na místě**
+  postupně; výsledky jsou stejné, jen bez souběhu,
+- úloha nespouští programy (`exec` je zatím jen v hlavním vlákně),
+- přepínání mezi běžícími úlohami v okně zatím není (bloky jsou pod sebou),
+- dvě úlohy, které mění stejný soubor, skončí konfliktem `SH_CONFLICT`
+  u té, která doběhne druhá (jako dva řádky v různých oknech).
 
 | Varianta | Zápis | Proč ne |
 |---|---|---|
@@ -803,3 +1101,16 @@ vše (pamatuje se 16 příkazů).
 spotřeba zásobníku, ne počet volání.
 
 **Co s tím:** přepište rekurzi na cyklus (`for`, `while`).
+
+### `SH_CONFLICT` (konflikt)
+
+**Význam:** část změn řádku se nepřevzala, protože se soubor mezitím
+změnil i jinak (jiná relace, program).
+
+**Kdy vzniká:** při převzetí konceptu řádku nebo náhledu. Převzetí je
+trojcestné: proti stavu, ze kterého klon vznikl. Co se v původu změnilo jen
+jinde, se převezme; co se změnilo na obou stranách, zůstane, jak to je
+v původu.
+
+**Co s tím:** ostatní změny jsou zapsané a `undo` je vrátí. Příkaz
+zopakujte nad aktuálním stavem souborů ze zprávy.

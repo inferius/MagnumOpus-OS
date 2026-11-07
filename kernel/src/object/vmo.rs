@@ -4,11 +4,11 @@
 //! Druhy objektu:
 //! - bezny: stranky RAM alokovane a vynulovane hned pri vytvoreni,
 //! - souvisly: fyzicky souvisla RAM pro DMA (ovladace zjisti fyzickou adresu),
-//! - fyzicky: okno na fyzicky rozsah mimo RAM (registry zarizeni, BAR);
-//!   stranky nepatri alokatoru. Typ cache (bez cache, WC, s cache) urci
-//!   drzitel prostredku pri vytvoreni a kazde mapovani ho zdedi. Drzitel
-//!   prostredku ho muze odvolat (`revoke`): mapovani ve vsech procesech
-//!   zmizi a dalsi mapovani selze.
+//! - fyzicky: okno na fyzicky rozsah mimo RAM (registry zarizeni, BAR,
+//!   framebuffer z firmwaru); stranky nepatri alokatoru. Typ cache (bez
+//!   cache, WC, s cache) urci drzitel prostredku pri vytvoreni (framebuffer
+//!   = WC) a kazde mapovani ho zdedi. Drzitel prostredku ho muze odvolat
+//!   (`revoke`): mapovani ve vsech procesech zmizi a dalsi mapovani selze.
 //!
 //! Objekt nemeni velikost. TODO: lazy alokace pri prvnim pristupu,
 //! copy-on-write klony.
@@ -180,6 +180,21 @@ impl MemoryObject {
         cache: u64,
         job: Option<&Arc<Job>>,
     ) -> Result<Arc<Self>, Error> {
+        Self::physical(phys_start, size, job, cache)
+    }
+
+    /// Okno na framebuffer z firmwaru: fyzicky objekt s typem cache
+    /// `WRITE_COMBINING`. Volajici ruci, ze rozsah nepatri alokatoru RAM.
+    pub fn new_framebuffer(phys_start: u64, size: u64) -> Result<Arc<Self>, Error> {
+        Self::physical(phys_start, size, None, abi::vm::cache::WRITE_COMBINING)
+    }
+
+    fn physical(
+        phys_start: u64,
+        size: u64,
+        job: Option<&Arc<Job>>,
+        cache: u64,
+    ) -> Result<Arc<Self>, Error> {
         if size == 0 || !phys_start.is_multiple_of(PAGE) || size > abi::vm::VMO_MAX_SIZE {
             return Err(Error::InvalidArgs);
         }
@@ -231,7 +246,7 @@ impl MemoryObject {
         use arch::paging::MapFlags;
         match self.kind {
             Kind::Physical { cache: abi::vm::cache::UNCACHED } => MapFlags::UNCACHED,
-            Kind::Physical { cache: abi::vm::cache::WRITE_COMBINING } => MapFlags::WRITE_COMBINING,
+            Kind::Physical { cache: abi::vm::cache::WRITE_COMBINING } => MapFlags::WRITE_COMBINE,
             _ => MapFlags::READ,
         }
     }

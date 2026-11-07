@@ -148,6 +148,182 @@ in the CMOS RTC too, so it survives a reboot:
   write local time to the RTC (`rtc = local`). Writing UTC would shift
   Windows by the zone offset.
 
+## Smooth correction (`CLOCK_ADJUST`)
+
+Stepping the clock backwards breaks ordering: a file saved later has an
+older time, logs go out of order, TLS certificates may briefly look
+invalid. At run time the clock is therefore only **adjusted smoothly**.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Smooth time correction">
+<defs><marker id="tm7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<path class="ln" d="M60 190 L740 190" marker-end="url(#tm7)"/><text class="m" x="660" y="210">monotonic time</text>
+<path class="ln" d="M60 190 L60 20" marker-end="url(#tm7)"/><text class="m" x="66" y="30">real time</text>
+<path class="ln" d="M60 170 L720 40"/><text class="m" x="600" y="80">true time</text>
+<path class="ln-acc" d="M60 140 L300 92 L300 123 L720 40"/>
+<path class="ln-acc" d="M300 92 L560 72"/>
+<text class="m" x="310" y="145">step (CLOCK_SET): time goes back</text>
+<text class="m" x="250" y="60">smooth (CLOCK_ADJUST): only slower</text>
+</svg>
+<figcaption>A clock 30 ms ahead: a step moves time back, a smooth correction only slows it down for a while.</figcaption>
+</figure>
+
+The kernel computes real time from the point where it last changed. It
+adds the elapsed monotonic time and two corrections:
+
+- **frequency**: a permanent correction of the crystal rate (a computer
+  clock is permanently fast or slow, typically under 100 ppm),
+- **slew**: a temporary speed-up or slow-down (at most 500 ppm) until the
+  given offset is made up. Then it ends by itself.
+
+The rate of real time is thus always 1 ± 1000 ppm, never negative or
+zero. Syscall: [`CLOCK_ADJUST`](syscalls.md#clock_adjust), wrapper
+`libos::time::adjust(clock, offset, frequency)`.
+
+```rust
+use libos::time;
+// In timed: the clock is 20 ms ahead, the crystal is 35 ppm fast.
+let st = time::adjust(&clock, Some(-20_000_000), Some(-35_000))?;
+// st.remaining_ns = -20 ms, made up within 40 s.
+```
+
+## Synchronization over the network (`ntpd`)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ntpd and timed">
+<defs><marker id="tm8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="warn" x="10" y="50" width="150" height="70" rx="6"/><text class="t b" x="85" y="78" text-anchor="middle">NTP servers</text><text class="m" x="85" y="96" text-anchor="middle">UDP 123</text>
+<path class="ln" d="M160 85 L228 85" marker-end="url(#tm8)"/>
+<rect class="box" x="230" y="40" width="200" height="90" rx="6"/><text class="t b" x="330" y="65" text-anchor="middle">ntpd</text><text class="m" x="330" y="84" text-anchor="middle">session: these servers only</text><text class="m" x="330" y="100" text-anchor="middle">filter, median, frequency</text><text class="m" x="330" y="116" text-anchor="middle">no right to the clock</text>
+<path class="ln-acc" d="M430 85 L498 85" marker-end="url(#tm8)"/><text class="m" x="440" y="76">sync</text>
+<rect class="ok" x="500" y="40" width="250" height="90" rx="6"/><text class="t b" x="625" y="65" text-anchor="middle">timed</text><text class="m" x="625" y="84" text-anchor="middle">verifies and limits</text><text class="m" x="625" y="100" text-anchor="middle">CLOCK_ADJUST (SET_CLOCK)</text><text class="m" x="625" y="116" text-anchor="middle">step only on first sync</text>
+</svg>
+<figcaption>A process handling data from the network must not change the clock directly.</figcaption>
+</figure>
+
+**`ntpd`** asks NTP servers and only proposes corrections. Init starts
+it after the network service:
+
+- **A network session** by the manifest `ntpd.manifest.toml` (rights
+  `tcp`, `udp`, `dns`) plus only the targets of the servers from
+  `ntpd.toml` (see [NTS](#nts-authenticated-time)). Nowhere else.
+- **A channel to `timed`** only for `sync` messages (correction
+  proposals).
+- Every round: a batch of measurements from each server (`samples`), the
+  sample with the **smallest delay** (least distorted by queues and an
+  asymmetric path), and the **median** across servers (one bad server
+  does not pull the result).
+- **Frequency:** from the offset between rounds (minus the part of the
+  previous correction the kernel has not made up yet) it estimates the
+  crystal drift. It proposes half of the error so measurement noise does
+  not make the loop oscillate (`netproto::ntp::Discipline`).
+- **The interval** starts at `min_poll` and doubles up to `max_poll` while
+  the clock is in sync (offset under 2 ms). A round without a
+  measurement (at start the network or DNS is not up yet, a server did
+  not reply) is repeated after 2, 4, 8, ... s, at most after `min_poll`:
+  the clock is set a few seconds after the network comes up, not only
+  after `min_poll` (64 s).
+
+```toml
+# ntpd.toml (initfs)
+servers = ["nts://time.cloudflare.com", "nts://nts.netnod.se", "nts://ptbtime1.ptb.de", "pool.ntp.org"]
+unauthenticated = "profile" # unauthenticated servers: never / fallback / profile
+min_poll = 64
+max_poll = 1024
+samples = 4
+```
+
+**`timed`** verifies and applies the proposal, because only it has the
+right to the clock:
+
+| Situation | What `timed` does |
+|---|---|
+| first synchronization, offset over 128 ms | step (`CLOCK_SET`): an RTC clock may be minutes off and slewing would take days |
+| otherwise | smooth correction (`CLOCK_ADJUST`), never a step back |
+| after the first synchronization, offset over 60 s | rejects it (`OUT_OF_RANGE`): a clock does not drift that much by itself, it is more likely spoofed |
+| frequency | at most ±500 ppm and one change at most by 100 ppm |
+
+`timed` does not keep "first synchronization" only in memory: afterwards
+the kernel reports time source 4 (`source::NETWORK`, set by `CLOCK_SET`
+with the `NETWORK` flag and by `CLOCK_ADJUST` with an offset). A new
+`timed` restarted by the supervisor sees it and does not allow another
+step.
+
+> **Change from the first version:** the state lived only in `timed`'s
+> memory, so after a restart the clock could be stepped again. **Why:** the
+> "single step" rule must hold for the whole uptime.
+
+Status: the `status` message on init's channel to `timed`
+(`synced=1 updates=… last_offset_ns=… remaining_ns=… freq_ppb=…
+slew_ppb=…`) and to `ntpd` (`rounds=… offset_ns=… delay_ns=… freq_ppb=…
+poll_s=… error=… timed=… auth=nts|plain|- policy=… nts_error=…`).
+
+### NTS (authenticated time)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NTS">
+<defs><marker id="tm9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="20" width="160" height="190" rx="6"/><text class="t b" x="90" y="45" text-anchor="middle">ntpd</text>
+<text class="m" x="20" y="70">keys C2S, S2C</text><text class="m" x="20" y="88">from TLS export</text><text class="m" x="20" y="106">8 cookies</text>
+<rect class="ok" x="590" y="20" width="160" height="80" rx="6"/><text class="t b" x="670" y="45" text-anchor="middle">NTS-KE</text><text class="m" x="670" y="64" text-anchor="middle">TLS 1.3, TCP 4460</text><text class="m" x="670" y="82" text-anchor="middle">ALPN ntske/1</text>
+<rect class="ok" x="590" y="130" width="160" height="80" rx="6"/><text class="t b" x="670" y="155" text-anchor="middle">NTP server</text><text class="m" x="670" y="174" text-anchor="middle">UDP 123</text><text class="m" x="670" y="192" text-anchor="middle">AES-SIV-CMAC-256</text>
+<path class="ln" d="M170 50 L588 50" marker-end="url(#tm9)"/><text class="m" x="190" y="44">ClientHello, NTPv4 + AES-SIV, END</text>
+<path class="ln" d="M588 75 L172 75" marker-end="url(#tm9)"/><text class="m" x="190" y="69">certificate; 8 cookies, NTP port, END</text>
+<path class="ln-acc" d="M170 150 L588 150" marker-end="url(#tm9)"/><text class="m" x="190" y="144">NTP + UID + cookie + placeholders + authenticator (C2S)</text>
+<path class="ln-acc" d="M588 180 L172 180" marker-end="url(#tm9)"/><text class="m" x="190" y="174">NTP + UID + authenticator (S2C) with new cookies</text>
+</svg>
+<figcaption>Keys are agreed over TLS (authenticated server); every NTP query is authenticated and single-use.</figcaption>
+</figure>
+
+**NTS** (Network Time Security, RFC 8915) prevents time spoofing:
+
+1. **NTS-KE:** TLS 1.3 to port 4460 with ALPN `ntske/1`. The server
+   certificate is verified as for HTTPS (roots from the store, revocation
+   through `revocd`). The client sends NTPv4 and AEAD 15
+   (AES-SIV-CMAC-256), the server returns a set of 8 **cookies** and
+   possibly another server or port for NTP. The C2S and S2C keys (32 B)
+   come from the TLS exporter (`EXPORTER-network-time-security`).
+2. **NTP with extensions:** a query carries a random identifier (32 B), one
+   cookie, placeholders for new cookies and an AES-SIV **authenticator**
+   over the header and the previous extensions (C2S key). The reply is
+   verified with the S2C key and carries new cookies in its encrypted part.
+3. Every cookie is used **once** (queries cannot be linked). When they run
+   out or the server sends NTSN ("kiss of death"), NTS-KE runs again.
+
+A spoofed reply (another identifier, a changed byte, a missing
+authenticator) is dropped and ntpd keeps waiting for the real one; an
+attacker can only block synchronization, not shift the time.
+
+| `servers` | Meaning |
+|---|---|
+| `nts://name[:port]` | NTS, NTS-KE on the port (default 4460) |
+| `name`, `address[:port]` | unauthenticated NTP (default port 123) |
+
+| `unauthenticated` | When unauthenticated servers are used |
+|---|---|
+| `never` | never; without a reply from an NTS server the clock is not corrected |
+| `fallback` | only when no NTS server replies in a round |
+| `profile` (default) | by network profile (`unauthenticated` in the [firewall](firewall.md#network-profiles); public network = `never`), read every round from `Net::info()` |
+
+The message `policy never|fallback|profile` changes the rule at run time. The `ntpd` network session for an `nts://` server: TCP to NTS-KE,
+UDP to the NTS-KE server (any port) and UDP 123 anywhere (NTS-KE chooses
+the NTP server).
+
+> ⚠️ **The clock and the certificate need each other:** the NTS-KE server
+> certificate is checked against the clock. When the RTC clock is outside
+> the certificate validity (flat battery, year 1970), NTS-KE fails and the
+> time is not synchronized until the user sets it or an unauthenticated
+> server does (`fallback`).
+
+> **Change from the first version:** unauthenticated NTP only. **Why:**
+> whoever controls the network could shift the time and e.g. let an
+> expired or revoked certificate pass.
+
+⚠️ **Unauthenticated NTP** (servers without `nts://`, the `fallback` rule)
+can be spoofed by whoever controls the network. The limits in `timed`
+slow the attack down (at most 500 ppm, i.e. 43 s per day) but do not stop
+it; that is why the default is `never`.
+
 ## Time zones
 
 The kernel keeps **UTC only**. The zone is a system setting read by the

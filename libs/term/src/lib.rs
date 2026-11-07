@@ -9,6 +9,12 @@
 //!   prevzate programy).
 //! - [`screen`]: textova obrazovka a kresleni vlastnim pismem do
 //!   framebufferu (zachranna konzole a zaklad pro okno v 6c).
+//! - [`broker`]: prostrednik termd - smerovani zprav mezi oknem
+//!   a procesy relaci (kazda relace ve vlastnim procesu).
+//! - [`ctl`]: ridici zpravy termd <-> relace a registr relaci (relace
+//!   preziji konec termd).
+//! - [`theme`]: barevny motiv (semanticke tridy -> barvy, svetly a tmavy,
+//!   soubor `theme.toml`), [`render`]: vykresleni s motivem do ANSI.
 //! - [`perm`]: prevod opravneni programu (manifest) na pripojene cesty
 //!   relace fsd (`CONNECT_AS`/`GRANT`).
 
@@ -16,11 +22,25 @@
 
 extern crate alloc;
 
+pub mod broker;
+pub mod ctl;
 pub mod perm;
 pub mod proto;
+pub mod render;
 pub mod screen;
 pub mod session;
+pub mod tasks;
+pub mod theme;
+pub mod ui;
 pub mod vt;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_broker;
+#[cfg(test)]
+mod tests_render;
+#[cfg(test)]
+mod tests_tasks;
+#[cfg(test)]
+mod tests_ui;

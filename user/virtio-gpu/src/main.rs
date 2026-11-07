@@ -94,7 +94,9 @@ fn main(startup: Startup) -> i64 {
     let mut next_client = 1u64;
     loop {
         // Ovladac konci, az klient displeje (init, pak kompozitor) zavre
-        // kanal. Render klienti a preruseni zarizeni (dokonceni
+        // kanal. Po padu kompozitoru kanal nezanikne (konec drzi
+        // supervisor), nova instance se synchronizuje (`SYNC`) a pripoji
+        // znovu (`ATTACH`). Render klienti a preruseni zarizeni (dokonceni
         // asynchronnich prikazu) se obsluhuji vedle nej.
         let mut items = alloc::vec![
             (client.handle(), Signals::READABLE | Signals::PEER_CLOSED),
@@ -227,6 +229,8 @@ fn handle_display(gpu: &mut Gpu, req: Request, handles: Vec<libos::Handle>, op: 
                 Err(e) => err(e),
             }
         }
+        // Znacka pro novou instanci kompozitoru (zahodi odpovedi stare).
+        Request::Sync { token } => Reply::Synced { token },
         Request::Present { seq, output, rects } => {
             let rects: Vec<Rect> = if rects.is_empty() { vec![Rect::new(0, 0, u32::MAX, u32::MAX)] } else { rects };
             match gpu.present(output, &rects) {

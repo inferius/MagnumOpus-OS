@@ -27,6 +27,8 @@ firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
 | `cargo xtask image` | build + disk image `target/os-<arch>-<profile>.img` (GPT, FAT32 ESP) |
 | `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)) |
 | `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for the other architectures, documentation, then kernel and userspace in QEMU without a window |
+| `cargo xtask test --only sit --repeat 20` | only the selected userspace test suites (names as in the log, comma separated), n times in a row - for finding flaky tests; every extra round adds 60 s to the run limit. A test longer than 20 s is marked `[pomaly]` ("slow") in the log |
+| `cargo xtask test --net-online` | also the tests against the real host network (host resolver through slirp); skipped without the switch |
 | `cargo xtask check` | only checks that the kernel builds for the given architecture; see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
@@ -69,7 +71,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          kernel (ELF with debug symbols)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd,
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd, shsess, console,
                        virtio-net, virtio-rng, netd, fwd, netprobe, manifests, firewall.toml
                        (+ net-test with `cargo xtask test`: helper server ports)
 ```
@@ -85,8 +87,8 @@ stored boot entries would not match.
 | Disk | File | Contents |
 |---|---|---|
 | system | `target/os-x86_64-<profile>.img` | GPT + the ESP above |
-| scratch | `target/scratch.img` | 1 MiB of zeros; driver tests write to it |
-| data | `target/data.img` | 64 MiB, our file system (label `data`); created by xtask with the `fs` library, containing `/vitejte.txt` and `/dokumenty/navod.md`; TRIM enabled (`discard=unmap`) |
+| scratch | `target/scratch-<pid>.img` | 1 MiB of zeros; driver tests write to it |
+| data | `target/data-<pid>.img` | 64 MiB, our file system (label `data`); created by xtask with the `fs` library, containing `/vitejte.txt` and `/dokumenty/navod.md`; TRIM enabled (`discard=unmap`) |
 
 The scratch and data disks are recreated on every `run`/`test`.
 
@@ -109,8 +111,12 @@ port from the host into the guest (`hostfwd`). Details:
 
 ## Output and tracking down errors
 
-- Serial output is saved to `target/serial.log` (tests:
-  `target/serial-test.log`).
+- Serial output is saved to `target/serial-<arch>.log`, for tests to
+  `target/serial-test-<arch>-<pid>.log` (xtask prints the path at the end).
+- Every run has its **own** scratch and data disk (`<pid>` = the xtask
+  process id) and deletes them when it ends. Concurrent runs (several
+  threads on one machine) therefore do not overwrite each other's disks, and
+  the QMP helper does not read test markers from someone else's log.
 - On a panic or fatal exception, xtask translates the stack trace addresses
   into function names after QEMU exits (`llvm-nm` from `llvm-tools`).
 - Kernel log levels: [kernel.md](kernel.md#logging); messages: [messages.md](messages.md).
@@ -178,7 +184,9 @@ user/usb-hub/    hub class driver (root hub and external)
 user/usb-hid/    USB keyboard and mouse driver (boot protocol)
 user/fsd/        file system service
 user/timed/      time service (clock setting, time zone)
-user/termd/      shell and terminal session service
+user/termd/      terminal broker (routes messages, session registry)
+user/shsess/     process of one shell session (interpreter, draft, undo)
+user/console/    text and rescue console (framebuffer, keys from inputd)
 user/virtio-net/ network card driver
 user/virtio-rng/ randomness source driver (entropy for the kernel)
 user/netd/       network service (TCP/IP, DHCP, DNS, firewall)

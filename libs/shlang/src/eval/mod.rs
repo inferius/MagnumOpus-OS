@@ -5,13 +5,16 @@
 //!   Preruseni (Ctrl-C, `SH_INTERRUPTED`) zachytit nejde.
 //! - Prikaz na nejvyssi urovni (radek, telo cyklu) vypise svou hodnotu
 //!   (`Host::emit`); v tele closure a funkce je hodnotou posledni prikaz.
-//! - Zmeny souboru jdou nejdriv do prekryvu ([`crate::vfs::overlay`]);
-//!   na konci radku se prevezmou s linym undo, nad limit (zamek
+//! - Zmeny souboru jdou nejdriv do konceptu radku ([`crate::vfs::draft`]:
+//!   klony FS bokem); na konci radku se prevezmou s undo, nad limit (zamek
 //!   nebezpecnych operaci) az po potvrzeni.
 
 mod builtins;
 mod call;
 mod fsctx;
+mod tasks;
+#[cfg(test)]
+pub(crate) use tasks::KEEP_DONE as KEEP_DONE_FOR_TESTS;
 pub mod ops;
 
 use alloc::boxed::Box;
@@ -28,7 +31,8 @@ use crate::parse::{Options, parse};
 use crate::sig::Sigs;
 use crate::span::Span;
 use crate::value::{ClosureVal, Value};
-use crate::vfs::overlay::{DiffEntry, Overlay};
+use crate::vfs::diff::{DiffEntry, diff_value};
+use crate::vfs::draft::Draft;
 use crate::vfs::undo::UndoLog;
 
 #[cfg(test)]
@@ -113,6 +117,48 @@ impl NeedsRt {
     }
 }
 
+/// Pruh prubehu cyklu nad dlouhym seznamem (`for`, `each`): ukaze se jen
+/// u seznamu od [`Progress::MIN`] polozek, aktualizace jen pri zmene
+/// procenta (ne pri kazde polozce).
+pub(crate) struct Progress {
+    total: usize,
+    done: usize,
+    last_pct: u64,
+    label: &'static str,
+    id: u32,
+}
+
+impl Progress {
+    pub(crate) const MIN: usize = 20;
+
+    pub(crate) fn new(total: usize, label: &'static str) -> Self {
+        static NEXT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(1);
+        let id = NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        Self { total, done: 0, last_pct: u64::MAX, label, id }
+    }
+
+    /// Pred kazdou polozkou (i po posledni se zavola `finish`).
+    pub(crate) fn step(&mut self, host: &mut dyn Host) {
+        if self.total < Self::MIN {
+            return;
+        }
+        let pct = (self.done * 100 / self.total) as u64;
+        if pct != self.last_pct {
+            self.last_pct = pct;
+            host.progress(self.id, self.done as u64, self.total as u64, self.label);
+        }
+        self.done += 1;
+    }
+
+    /// Cyklus dobehl: pruh na 100 %.
+    pub(crate) fn finish(&mut self, host: &mut dyn Host) {
+        if self.total >= Self::MIN {
+            host.progress(self.id, self.total as u64, self.total as u64, self.label);
+        }
+    }
+}
+
+
 /// Vysledek jednoho radku.
 #[derive(Debug)]
 pub struct Outcome {
@@ -129,13 +175,12 @@ pub struct Interp {
     pub cwd: String,
     pub home: String,
     pub undo: UndoLog,
-    overlay: Overlay,
+    pub(crate) draft: Draft,
     /// Prikaz, ktery zmeni vic souboru (mimo /tmp), se prevezme az po
     /// potvrzeni.
     pub lock_threshold: usize,
     /// Zmeny uz potvrdil `preview`.
     confirmed: bool,
-    preview_depth: usize,
     pub history: History,
     needs: Option<NeedsRt>,
     pub jobs: Vec<Job>,
@@ -150,6 +195,12 @@ pub struct Interp {
     line: String,
     /// `exit` - relace skonci.
     pub exit: bool,
+    /// Ulohy `async` (bezici a hotove).
+    pub(crate) tasks: BTreeMap<u64, tasks::TaskSlot>,
+    /// Rozsahy uloh (skript, funkce); prvni = relace.
+    pub(crate) task_scopes: Vec<Vec<u64>>,
+    /// Cislo dalsi ulohy na miste (hostitel bez soubeznosti).
+    next_task: u64,
 }
 
 impl Interp {
@@ -161,10 +212,9 @@ impl Interp {
             cwd: home.into(),
             home: home.into(),
             undo: UndoLog::new(),
-            overlay: Overlay::new(),
+            draft: Draft::new(),
             lock_threshold: 20,
             confirmed: false,
-            preview_depth: 0,
             history: History::default(),
             needs: None,
             jobs: Vec::new(),
@@ -174,6 +224,9 @@ impl Interp {
             stack_base: 0,
             line: String::new(),
             exit: false,
+            tasks: BTreeMap::new(),
+            task_scopes: alloc::vec![Vec::new()],
+            next_task: 1,
         }
     }
 
@@ -243,8 +296,22 @@ impl Interp {
     }
 
     /// Konec radku: prevzeti zmen.
+    /// Konec ulohy: jako [`Self::finish`], s hodnotou.
+    pub(crate) fn finish_value(&mut self, host: &mut dyn Host, r: Result<Value, ShError>) -> (Result<Value, ShError>, Vec<DiffEntry>) {
+        let (value, unit) = match r {
+            Ok(v) => (Some(v), Ok(())),
+            Err(e) => (None, Err(e)),
+        };
+        let (res, diff) = self.finish(host, unit);
+        (res.map(|_| value.unwrap_or(Value::Nothing)), diff)
+    }
+
     fn finish(&mut self, host: &mut dyn Host, r: Result<(), ShError>) -> (Result<(), ShError>, Vec<DiffEntry>) {
-        let out = self.commit_overlay(host);
+        // Preruseni uprostred `preview`: rozpracovane vrstvy nahledu pryc.
+        while self.draft.depth() > 0 {
+            self.draft.discard_top(host.fs());
+        }
+        let out = self.commit_draft(host);
         self.confirmed = false;
         match out {
             Ok(d) => (r, d),
@@ -252,35 +319,73 @@ impl Interp {
         }
     }
 
-    /// Prevezme zmeny prekryvu do FS: zamek nebezpecnych operaci (nad limit
-    /// jen po potvrzeni) a line undo. Pouziva ho konec radku i spusteni
+    /// Prevezme koncept radku do FS: zamek nebezpecnych operaci (nad limit
+    /// jen po potvrzeni) a undo. Pouziva ho konec radku i spusteni
     /// programu, takze zamek nejde obejit. Odmitnuti = nic se nezmeni.
-    pub(crate) fn commit_overlay(&mut self, host: &mut dyn Host) -> Result<Vec<DiffEntry>, ShError> {
-        let overlay = core::mem::take(&mut self.overlay);
-        if overlay.is_empty() {
+    pub(crate) fn commit_draft(&mut self, host: &mut dyn Host) -> Result<Vec<DiffEntry>, ShError> {
+        if self.draft.is_empty() {
             return Ok(Vec::new());
         }
-        let diff = overlay.changes(host.fs()).map_err(|e| ShError::sys(e, "zmeny nejde spocitat"))?;
+        let diff = match self.draft.changes(host.fs()) {
+            Ok(d) => d,
+            Err(e) => {
+                self.draft.discard_all(host.fs());
+                return Err(ShError::sys(e, "zmeny nejde spocitat (nic se nezmenilo)"));
+            }
+        };
         let risky = diff.iter().filter(|d| !crate::vfs::path::within(&d.path, "/tmp")).count();
         if risky > self.lock_threshold && !self.confirmed {
             let q = alloc::format!(
                 "Prikaz zmeni {risky} souboru (vic nez {}). Prevzit zmeny?",
                 self.lock_threshold
             );
-            if !host.confirm(&q, &crate::vfs::overlay::diff_value(&diff)) {
+            if !host.confirm(&q, &diff_value(&diff)) {
+                self.draft.discard_all(host.fs());
                 return Err(ShError::new(code::REJECTED, "zmeny nebyly prevzaty (nic se nezmenilo)"));
             }
         }
-        self.undo
-            .commit_diff(host.fs(), &overlay, diff, &self.line)
-            .map_err(|e| ShError::sys(e, "zmeny nejde zapsat"))
+        let c = self
+            .undo
+            .commit(host.fs(), &mut self.draft, diff, &self.line)
+            .map_err(|e| ShError::sys(e, "zmeny nejde zapsat"))?;
+        if c.no_undo {
+            host.note("varovani: FS nema pohledy, zmeny nepujde vratit");
+        }
+        if !c.conflicts_complete {
+            return Err(ShError::new(
+                code::CONFLICT,
+                alloc::format!("vic nez {} zmen se neprevzalo (soubory se mezitim zmenily jinak)", c.conflicts.len()),
+            )
+            .hint("ostatni zmeny jsou zapsane, ale tento prikaz nejde vratit (undo); zkontrolujte soubory"));
+        }
+        if !c.conflicts.is_empty() {
+            let list = c.conflicts.join(", ");
+            return Err(ShError::new(
+                code::CONFLICT,
+                alloc::format!("{} zmen se neprevzalo, soubory se mezitim zmenily jinak: {list}", c.conflicts.len()),
+            )
+            .hint("ostatni zmeny jsou zapsane; prikaz zopakujte nad aktualnim stavem"));
+        }
+        Ok(c.diff)
+    }
+
+    /// Shell je volny: zahodit klony, ktere cekaji (uvolneni bloku trva).
+    pub fn flush(&mut self, host: &mut dyn Host) {
+        self.draft.flush(host.fs());
+    }
+
+    /// Ceka neco na volnou chvili (klony k zahozeni)?
+    pub fn has_flush(&self) -> bool {
+        self.draft.has_trash()
     }
 
     /// Spusti skript ze souboru (s hlavickou `lang` a manifestem `needs`).
     pub fn run_script(&mut self, host: &mut dyn Host, src: &str) -> Result<Vec<Warning>, ShError> {
         self.line = String::from("run");
         self.stack_base = 0;
+        self.push_task_scope();
         let r = self.script_inner(host, src, None);
+        self.pop_task_scope(host);
         let (r, _) = self.finish(host, r.map(|_| ()));
         r.map(|_| Vec::new())
     }
@@ -410,6 +515,25 @@ impl Interp {
             Stmt::Let { name, value, span } => {
                 let v = self.eval(host, value).map_err(|f| at(f, *span))?;
                 self.frames.last_mut().unwrap().insert(name.clone(), v);
+                Ok(Value::Nothing)
+            }
+            Stmt::LetList { names, value, span } => {
+                let v = self.eval(host, value).map_err(|f| at(f, *span))?;
+                let Value::List(items) = v else {
+                    return Err(Flow::Err(
+                        ShError::new(code::TYPE, alloc::format!("let ({}) = ... ceka seznam, ne {}", names.join(", "), v.type_name()))
+                            .at(*span),
+                    ));
+                };
+                if items.len() != names.len() {
+                    return Err(Flow::Err(
+                        ShError::new(code::ARGS, alloc::format!("seznam ma {} polozek, jmen je {}", items.len(), names.len()))
+                            .at(*span),
+                    ));
+                }
+                for (n, x) in names.iter().zip(items) {
+                    self.frames.last_mut().unwrap().insert(n.clone(), x);
+                }
                 Ok(Value::Nothing)
             }
             Stmt::Assign { name, value, span } => {
@@ -578,6 +702,8 @@ impl Interp {
             Expr::For { .. } | Expr::While { .. } => self.eval_loop(host, e),
             Expr::Try { .. } => self.eval_try(host, e),
             Expr::Pipe(..) | Expr::Bg(..) | Expr::Unwrap(..) => self.eval_misc(host, e),
+            Expr::Async(b, span) => self.eval_async(host, b, *span),
+            Expr::Await { kind, target, timeout, span } => self.eval_await(host, *kind, target, timeout.as_deref(), *span),
         }
     }
 
@@ -599,8 +725,10 @@ impl Interp {
                         ));
                     }
                 };
+                let mut bar = Progress::new(items.len(), "for");
                 for item in items {
                     self.check_interrupt(host)?;
+                    bar.step(host);
                     self.frames.push(BTreeMap::new());
                     self.frames.last_mut().unwrap().insert(var.clone(), item);
                     let r = self.stmts(host, body, true);
@@ -611,6 +739,7 @@ impl Interp {
                         Err(other) => return Err(other),
                     }
                 }
+                bar.finish(host);
                 Ok(Value::Nothing)
             }
             Expr::While { cond, body, span } => {

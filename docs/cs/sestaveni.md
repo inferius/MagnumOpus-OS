@@ -27,6 +27,8 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 | `cargo xtask image` | build + obraz disku `target/os-<arch>-<profil>.img` (GPT, ESP FAT32) |
 | `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)) |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro ostatní architektury, dokumentace, pak jádro a userspace v QEMU bez okna |
+| `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Test delší než 20 s se v logu označí `[pomaly]` |
+| `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
 | `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 
@@ -67,7 +69,7 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd,
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd, shsess, console,
                        virtio-net, virtio-rng, netd, fwd, netprobe, manifesty, firewall.toml
                        (+ net-test u `cargo xtask test`: porty pomocných serverů)
 ```
@@ -82,8 +84,8 @@ AMD IOMMU zabere slot PCI a uložené bootovací položky by neseděly.
 | Disk | Soubor | Obsah |
 |---|---|---|
 | systémový | `target/os-x86_64-<profil>.img` | GPT + ESP výše |
-| testovací | `target/scratch.img` | 1 MiB nul; testy ovladače do něj zapisují |
-| datový | `target/data.img` | 64 MiB, náš souborový systém (jméno `data`); vytvoří ho xtask knihovnou `fs` se soubory `/vitejte.txt` a `/dokumenty/navod.md`; TRIM povolen (`discard=unmap`) |
+| testovací | `target/scratch-<pid>.img` | 1 MiB nul; testy ovladače do něj zapisují |
+| datový | `target/data-<pid>.img` | 64 MiB, náš souborový systém (jméno `data`); vytvoří ho xtask knihovnou `fs` se soubory `/vitejte.txt` a `/dokumenty/navod.md`; TRIM povolen (`discard=unmap`) |
 
 Testovací a datový disk se vytvoří znovu při každém `run`/`test`.
 
@@ -105,8 +107,11 @@ hosta (`hostfwd`). Podrobnosti: [sit.md](sit.md#testy).
 
 ## Výstup a dohledání chyb
 
-- Sériová linka se ukládá do `target/serial.log` (testy:
-  `target/serial-test.log`).
+- Sériová linka se ukládá do `target/serial-<arch>.log`, u testů do
+  `target/serial-test-<arch>-<pid>.log` (cestu xtask na konci vypíše).
+- Každý běh má **vlastní** testovací a datový disk (`<pid>` = číslo procesu
+  xtask) a po skončení je smaže. Souběžné běhy (víc vláken na jednom stroji)
+  si tak nepřepisují disky a pomocník QMP nečte značky testů z cizího logu.
 - Při panice nebo fatální výjimce xtask po skončení QEMU přeloží adresy ze
   zásobníku na jména funkcí (`llvm-nm` z komponenty `llvm-tools`).
 - Úroveň logu jádra: [jadro.md](jadro.md#logování); hlášky: [hlasky.md](hlasky.md).
@@ -173,7 +178,9 @@ user/usb-hub/    ovladač třídy hub (root hub i externí)
 user/usb-hid/    ovladač klávesnice a myši USB (boot protokol)
 user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
-user/termd/      služba relací shellu a terminálu
+user/termd/      prostředník terminálu (směruje zprávy, registr relací)
+user/shsess/     proces jedné relace shellu (interpret, koncept, undo)
+user/console/    textová a záchranná konzole (framebuffer, klávesy z inputd)
 user/virtio-net/ ovladač síťové karty
 user/virtio-rng/ ovladač zdroje náhody (entropie pro jádro)
 user/netd/       služba sítě (TCP/IP, DHCP, DNS, firewall)

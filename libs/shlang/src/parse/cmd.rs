@@ -465,7 +465,7 @@ impl<'a> Parser<'a> {
         loop {
             let Some(c) = self.lx.peek_char() else { break };
             match c {
-                ' ' | '\t' | '\r' | '\n' | '|' | ';' | '&' | '(' | ')' | '"' | '\'' | '<' | '>' | '}' => break,
+                c if is_bare_end(c) => break,
                 '\\' => {
                     self.lx.bump();
                     match self.lx.bump() {
@@ -605,4 +605,10 @@ pub fn usage(s: &Sig) -> String {
         }
     }
     u
+}
+
+/// Znak, ktery ukonci hole slovo zapisu B (spolecne se zvyraznovacem
+/// [`crate::highlight`]).
+pub(crate) fn is_bare_end(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\r' | '\n' | '|' | ';' | '&' | '(' | ')' | '"' | '\'' | '<' | '>' | '}')
 }

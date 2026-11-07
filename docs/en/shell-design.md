@@ -7,7 +7,7 @@
 > The research and variants chapters show what was chosen from.
 >
 > Code: `libs/shlang` (language, `no_std` + `alloc`, host tests),
-> `libs/term` (protocol, sessions, VT100, screen), `user/termd` (service).
+> `libs/term` (protocol, sessions, VT100, screen), `user/termd` (broker), `user/shsess` (session process).
 
 ## What to learn from others
 
@@ -75,7 +75,7 @@ ls ~/Documents -r | where size > 100MB | each { |f| rm $f.path }
 
 **B - command + expression mode (recommended)**
 
-```text
+```mos
 ls ~/Documents -r | where size > 100MB && mtime < now - 1y | sort size desc
 let big = ls ~/Documents -r | where size > 100MB
 for f in $big { rm $f.path? }          # ? = an error stops the script
@@ -103,7 +103,7 @@ ls("~/Documents", recursive: true).filter(|f| f.size > 100.mb && f.mtime < now()
 > (for scripts and logic). Both are **notations of the same language**, not
 > two languages. This must be guarded strictly.
 
-```text
+```mos
 ls ~/Doc -r | where size > 100MB                          # B
 ls("~/Doc", recursive: true).where(f => f.size > 100MB)   # C, the same
 ls ~/Doc -r | where (size > 100MB && ext == "pdf")      # mixing: an expression in ( ) is C
@@ -168,7 +168,7 @@ shorthands have a full form with the same tree in C, see
 - **Script manifest:** a header the shell checks before running the script;
   it hands out capabilities according to it:
 
-```text
+```mos
 lang 1
 needs {
     read: ["~/Photos"]
@@ -180,8 +180,8 @@ for f in (ls ~/Photos | where ext == "jpg") {
 }
 ```
 
-- **Safe defaults:** a command that changes files gets a lazy snapshot
-  (undo). A bulk change over N files runs through "show what will happen"
+- **Safe defaults:** a command that changes files gets a draft in a
+  file system clone and undo. A bulk change over N files runs through "show what will happen"
   ([terminal](architecture.md#shell-and-smart-terminal-proposal)).
 
 ## Grammar decisions
@@ -415,7 +415,7 @@ earlier statements are dropped there; use `log` for a note.
   shell is idle, or on `wait`. `jobs` lists them, `kill N` cancels a waiting
   job.
 - **Recursion depth** is guarded by actual stack use. The host sets the
-  budget; termd has a 256 KB stack and the interpreter may use 160 KB.
+  budget; `shsess` has a 256 KB stack and the interpreter may use 160 KB.
   Exceeding it gives `SH_DEPTH`, not a crash.
 
 ### Language version
@@ -442,7 +442,7 @@ Every command has a short name and a full `verb-noun` name (an alias).
 | `echo`, `log`, `lines`, `split`, `join`, `trim`, `upper`, `lower`, `contains`, `starts-with`, `ends-with`, `replace` | `text-...` | text |
 | `from`, `to`, `describe` | `data-from`, `data-to`, `value-type` | explicit conversions (`json`, `text`, `lines`) |
 | `now`, `sleep` | `time-now`, `time-sleep` | |
-| `undo`, `preview` | `command-undo`, `command-preview` | see [Files](#files-lazy-undo-preview-and-lock) |
+| `undo`, `preview` | `command-undo`, `command-preview` | see [Files](#files-draft-in-a-clone-undo-preview-and-lock) |
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | background jobs |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
 
@@ -506,38 +506,61 @@ for f in (ls ~/Photos | where ext == "jpg") {
 }
 ```
 
-## Files: lazy undo, preview and lock
+## Files: draft in a clone, undo, preview and lock
+
+> **Change from the first shell version:** changes in a dry run are no
+> longer an overlay in the shell's memory but a **clone of the dataset
+> "aside" directly in the file system** (`ASIDE_*` from [FS phase
+> 2](fs-history.md)). Undo no longer relies on a snapshot of the whole
+> volume but on a **view** (`VIEW`) of the affected datasets only. After a
+> program, the changes come from the journal and the `DIFF` operation, not
+> from walking the tree. Why: large writes cost no memory, a program in
+> `preview` works on the same draft as built-in commands, and undo after a
+> program is fast even on a large disk.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="File changes of a command">
-<defs><marker id="se2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="80" width="130" height="56" rx="6"/><text class="t b" x="75" y="104" text-anchor="middle">command</text><text class="m" x="75" y="122" text-anchor="middle">rm, save, mv ...</text>
-<path class="ln" d="M140 108 L188 108" marker-end="url(#se2)"/>
-<rect class="acc" x="190" y="80" width="140" height="56" rx="6"/><text class="t b" x="260" y="104" text-anchor="middle">overlay</text><text class="m" x="260" y="122" text-anchor="middle">dry-run changes</text>
-<path class="ln" d="M330 108 L378 108" marker-end="url(#se2)"/>
-<rect class="box" x="380" y="80" width="120" height="56" rx="6"/><text class="t b" x="440" y="104" text-anchor="middle">diff</text><text class="m" x="440" y="122" text-anchor="middle">end of line</text>
-<path class="ln" d="M500 95 L558 48" marker-end="url(#se2)"/>
-<path class="ln" d="M500 122 L558 172" marker-end="url(#se2)"/>
-<rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N files: apply</text><text class="m" x="655" y="60" text-anchor="middle">lazy snapshot first</text>
-<rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N or preview</text><text class="m" x="655" y="185" text-anchor="middle">show diff, confirm</text>
-<path class="ln dash" d="M655 145 L655 78" marker-end="url(#se2)"/>
-<text class="m" x="10" y="232">A read-only command costs nothing (the overlay is empty, no snapshot). undo restores the last applied changes from the snapshot.</text>
+<svg viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Line draft in a file system clone">
+<defs><marker id="sh2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="80" width="130" height="56" rx="6"/><text class="t b" x="75" y="104" text-anchor="middle">command</text><text class="m" x="75" y="122" text-anchor="middle">rm, save, mv, program</text>
+<path class="ln" d="M140 108 L188 108" marker-end="url(#sh2)"/>
+<rect class="acc" x="190" y="70" width="150" height="76" rx="6"/><text class="t b" x="265" y="94" text-anchor="middle">clone aside</text><text class="m" x="265" y="112" text-anchor="middle">ASIDE_BEGIN on</text><text class="m" x="265" y="128" text-anchor="middle">the first write</text>
+<path class="ln" d="M340 108 L378 108" marker-end="url(#sh2)"/>
+<rect class="box" x="380" y="80" width="130" height="56" rx="6"/><text class="t b" x="445" y="104" text-anchor="middle">ASIDE_CHANGES</text><text class="m" x="445" y="122" text-anchor="middle">end of line</text>
+<path class="ln" d="M510 95 L558 48" marker-end="url(#sh2)"/>
+<path class="ln" d="M510 122 L558 172" marker-end="url(#sh2)"/>
+<rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N: VIEW + APPLY</text><text class="m" x="655" y="60" text-anchor="middle">view for undo, apply</text>
+<rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N or preview</text><text class="m" x="655" y="185" text-anchor="middle">diff, confirm / DISCARD</text>
+<path class="ln dash" d="M655 145 L655 78" marker-end="url(#sh2)"/>
+<text class="m" x="10" y="236">A reading line creates no clone and costs nothing. Clones live in /tmp/.aside/&lt;session&gt;-&lt;n&gt;; nested datasets are</text>
+<text class="m" x="10" y="254">boundaries there and a write into one gets its own clone. Applying is three-way: a foreign change = SH_CONFLICT, not an overwrite.</text>
 </svg>
-<figcaption>Changes go to an overlay; they are applied at the end of the line with a lazy snapshot.</figcaption>
+<figcaption>A line's changes go to a clone of the dataset in the file system; at the end of the line they are applied with a view for undo.</figcaption>
 </figure>
 
-- **Lazy undo:** every command writes to an overlay. At the end of the line
-  the shell computes the diff. An empty diff = nothing happens (read-only
-  commands cost nothing). Otherwise the shell **only now** creates a
-  snapshot (`shell-undo-N`, a cheap CoW snapshot on FS v3) and applies the
-  changes. `undo` reverts the last command and works repeatedly (the last 16
-  commands). On a file system without snapshots the shell keeps the
-  original content of changed files in memory.
-- **"Show what will happen":** `preview { ... }` runs the block as a dry
-  run, shows a table of changes (`added`, `modified`, `removed`,
-  `dir-added`, `dir-removed`, `replaced` = a file replaced by a directory or
-  the other way round) and applies them only after confirmation (`-y`
-  without asking). Rejecting = `SH_REJECTED` and nothing changes.
+- **Line draft:** the first write of a line into a dataset creates its
+  clone (`ASIDE_BEGIN`, `libs/shlang/src/vfs/draft.rs`). Further writes and
+  reads of that dataset go to the clone, so the line sees its own changes.
+  A write into a nested dataset (a boundary in the clone) gets a clone of
+  that dataset. At the end of the line the shell takes the diff from the
+  file system (`ASIDE_CHANGES`). A line that only reads creates no clone
+  and costs nothing extra.
+- **Undo:** before applying (`ASIDE_APPLY`) the shell creates a **view**
+  (`VIEW`, a cheap temporary snapshot and a journal position) of every
+  dataset with changes. `undo` syncs the changed paths with the state in
+  the view (reading via `SNAP_*_OF`) and works repeatedly (last 16
+  commands, older views are released). The file system itself cleans up
+  views after a restart.
+- **Conflict:** applying is three-way against the state the clone started
+  from. When another session or a program changed the same file
+  meanwhile, the change is not applied and the line ends with
+  `SH_CONFLICT` and the list of paths. The other changes are written and
+  `undo` reverts only them.
+- **"Show what will happen":** `preview { ... }` adds another layer (a
+  clone of the clone), runs the block, shows a table of changes (`added`,
+  `modified`, `removed`, `dir-added`, `dir-removed`, `replaced` = a file
+  replaced by a directory or the other way round, `moved`) and applies it
+  to the line draft only after confirmation (`-y` without asking).
+  Rejecting = `ASIDE_DISCARD`, `SH_REJECTED` and nothing changes.
 - **Dangerous operation lock:** a command that would change more than N
   files outside `/tmp` (default N = 20) always asks before the changes are
   applied. It is the same question as with `preview`. Without an attached
@@ -550,51 +573,125 @@ for f in (ls ~/Photos | where ext == "jpg") {
   Otherwise `SH_NEEDS` before it starts. A background job (`bg`, `&`)
   carries the restriction with it, even when it finishes after the script
   has ended.
-- **Programs** get permissions from their manifest through their own fsd
-  session (`CONNECT_AS` with mounted paths, `term::perm::mounts`; write
-  overrides read, paths are mounted at the same place). Before a program
-  starts, the shell applies the line's changes so far (the program sees the
-  real file system), **with the same dangerous operation lock** as at the
-  end of a line: rejecting = the program does not start. Then it takes a
-  snapshot and remembers the directories the program may write to (the
-  whole file system with full rights). When the program changed nothing,
-  the undo entry is dropped, so `undo` reverts the previous command.
-  Otherwise `undo` syncs those directories with the snapshot.
+- **Programs:** get the permissions from their manifest through their own
+  fsd session (`CONNECT_AS` with mounted paths, `term::perm::mounts`; write
+  overrides read). Outside `preview` the shell applies the line draft so
+  far before the program starts, **with the same lock** as at the end of a
+  line (rejecting = the program does not start), and creates views of the
+  datasets the program may write to (with full rights `/`, home and the
+  working directory). Afterwards one journal message tells whether
+  anything changed. If not, the undo entry is dropped, so `undo` reverts
+  the previous command. If so, `DIFF` returns the changed paths and `undo`
+  syncs them with the view.
+- **A program in `preview`:** the shell creates clones of the datasets the
+  program may write to and mounts them for it **under the original names**
+  (`ExecNeeds::aside`). Writes outside the clones get read-only access. The
+  program thus changes only the draft: its changes are in the preview
+  table and disappear after rejecting.
 
-⚠️ **Limits:** the overlay keeps written data in memory until the end of
-the line (large writes cost memory). Programs outside the shell do not see
-the overlay, so `preview` refuses them (`SH_NEEDS`) until fsd can do
-dataset clones and diffs over the protocol (`libs/fs` can, `fsproto` cannot
-yet). A snapshot over `fsproto` is a snapshot of the whole volume, not only
-of the affected dataset.
+```shell-b
+preview { rm *.tmp; echo hotovo | save ~/vysledek.txt }
+undo
+```
+
+⚠️ **Limits:**
+
+- A clone cannot be created where the file system has no writable
+  `/tmp`. The write then ends with an error and a hint (`NOT_SUPPORTED`).
+- Undo of a program with full rights guards the datasets of `/`, home and
+  the working directory. It does not revert a change in another nested
+  dataset.
+- A view also captures changes of other sessions in the same directories
+  while the program runs. `undo` would revert them too.
+- When there are more conflicts than the file system lists (over 1024),
+  the line ends with `SH_CONFLICT` and the apply cannot be undone (the
+  shell does not know for sure what was applied).
+
+**Safeguards:**
+
+- `undo` never touches a nested dataset: a view sees only its own
+  dataset, syncing skips nested datasets (even when syncing a whole
+  directory).
+- After a program the shell first commits the changes in the file system
+  (`COMMIT`) and only then asks the journal - the journal shows only
+  committed entries.
+- Reads in a line with a clone do not ask the file system for the
+  dataset: they take the clone above the path and repeat exactly only at
+  the boundary of a nested dataset (`NOT_SUPPORTED`).
+- Discarding a clone (freeing blocks) is deferred until the shell is idle;
+  the result of the command is in the terminal right away.
+- A program in `preview` also gets clones of the nested datasets of home
+  and the working directory.
 
 ## Terminal and session service
 
 <figure class="diagram">
-<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Session service">
-<defs><marker id="se3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Session service">
+<defs><marker id="sh3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="30" width="170" height="60" rx="6"/><text class="t b" x="95" y="55" text-anchor="middle">terminal window</text><text class="m" x="95" y="74" text-anchor="middle">(6c GUI, test, later SSH)</text>
-<path class="ln" d="M180 60 L268 90" marker-end="url(#se3)"/>
-<text class="m" x="185" y="56">native protocol</text>
-<rect class="acc" x="270" y="50" width="220" height="110" rx="6"/><text class="t b" x="380" y="75" text-anchor="middle">termd</text><text class="m" x="380" y="95" text-anchor="middle">session: interpreter, cwd,</text><text class="m" x="380" y="111" text-anchor="middle">history, undo, jobs</text><text class="m" x="380" y="127" text-anchor="middle">output blocks</text><text class="m" x="380" y="143" text-anchor="middle">survive a detached window</text>
-<path class="ln" d="M490 80 L578 60" marker-end="url(#se3)"/>
-<rect class="box" x="580" y="30" width="170" height="56" rx="6"/><text class="t b" x="665" y="54" text-anchor="middle">fsd</text><text class="m" x="665" y="72" text-anchor="middle">files, snapshots</text>
-<path class="ln" d="M490 125 L578 140" marker-end="url(#se3)"/>
-<rect class="box" x="580" y="115" width="170" height="56" rx="6"/><text class="t b" x="665" y="139" text-anchor="middle">VT100 adapter</text><text class="m" x="665" y="157" text-anchor="middle">log / serial line</text>
-<path class="ln dash" d="M380 160 L380 198" marker-end="url(#se3)"/>
-<rect class="box" x="270" y="200" width="220" height="44" rx="6"/><text class="t b" x="380" y="220" text-anchor="middle">screen + own font</text><text class="m" x="380" y="236" text-anchor="middle">framebuffer (capability)</text>
+<path class="ln" d="M180 60 L248 60" marker-end="url(#sh3)"/>
+<text class="m" x="184" y="50">protocol</text>
+<rect class="acc" x="250" y="30" width="150" height="60" rx="6"/><text class="t b" x="325" y="55" text-anchor="middle">termd</text><text class="m" x="325" y="74" text-anchor="middle">only routes messages</text>
+<path class="ln" d="M400 50 L468 40" marker-end="url(#sh3)"/>
+<path class="ln" d="M400 75 L468 110" marker-end="url(#sh3)"/>
+<rect class="box" x="470" y="15" width="150" height="50" rx="6"/><text class="t b" x="545" y="36" text-anchor="middle">shsess 1</text><text class="m" x="545" y="54" text-anchor="middle">interpreter, undo, jobs</text>
+<rect class="box" x="470" y="85" width="150" height="50" rx="6"/><text class="t b" x="545" y="106" text-anchor="middle">shsess 2</text><text class="m" x="545" y="124" text-anchor="middle">own process</text>
+<path class="ln" d="M620 40 L668 75" marker-end="url(#sh3)"/>
+<path class="ln" d="M620 110 L668 85" marker-end="url(#sh3)"/>
+<rect class="box" x="670" y="55" width="80" height="50" rx="6"/><text class="t b" x="710" y="78" text-anchor="middle">fsd</text><text class="m" x="710" y="95" text-anchor="middle">clones</text>
+<rect class="warn" x="250" y="170" width="150" height="56" rx="6"/><text class="t b" x="325" y="193" text-anchor="middle">session registry</text><text class="m" x="325" y="211" text-anchor="middle">spare ends</text>
+<path class="ln dash" d="M400 198 L545 137" marker-end="url(#sh3)"/>
+<path class="ln dash" d="M325 90 L325 168" marker-end="url(#sh3)"/>
+<text class="m" x="332" y="140">Park / Claim</text>
+<text class="m" x="10" y="262">A crashing session does not bring down the others or termd. termd crashes: sessions and jobs keep running, a new termd</text>
+<text class="m" x="10" y="280">takes them over from the registry (Adopt) and the window attaches to them (Attach) with block replay.</text>
 </svg>
-<figcaption>Sessions belong to the termd service; a window only attaches.</figcaption>
+<figcaption>Each session in its own process; termd is only a broker, the registry keeps sessions across its restart.</figcaption>
 </figure>
+
+**A process per session** (`libs/term/src/broker.rs`, `libs/term/src/ctl.rs`):
+
+- termd (`user/termd`) has no interpreter. It receives the window's
+  messages and routes them by session number to the `shsess` process
+  (`user/shsess`), one per session. Block and prompt numbers of session `N`
+  lie in the range `N << 32`, so an answer to a prompt (`Answer`) can be
+  routed without a table.
+- **A crashing session** does not bring down the other sessions or termd;
+  the window gets `Fail` "relace N skoncila".
+- **Session registry:** besides the main channel to termd every session has
+  a spare channel. termd stores its other end in the registry (`Park`). The
+  registry is held by the process that starts termd (today a test in init,
+  later the supervisor).
+- **termd ends or crashes:** the sessions detach. A running command and
+  background jobs finish and the output is stored in blocks. After its
+  start a new termd collects the spare ends (`Claim`), sends `Adopt` on
+  them and the sessions move to the new termd. The window then attaches
+  (`Attach`) with block replay. Without a registry the sessions finish and
+  end.
+- **Clones aside** carry the session's tag in their name
+  (`/tmp/.aside/<tag>-<n>`). A new termd discards clones of sessions that
+  no longer run (a crash in the middle of a line). That is why only one
+  termd (one registry) may run in the system.
+
+⚠️ **Limit:** `Sessions` reports the working directory from the last
+`Attach` (termd does not ask the session, so it does not block on a busy
+session).
+
 
 ### Native protocol (`libs/term/src/proto.rs`)
 
 Binary messages (1 byte kind, little-endian fields, text = length + UTF-8).
 The window sends `Hello`, `Attach` (0 = new session), `Detach`, `Run`,
-`Interrupt`, `Complete`, `Answer`, `Format` and `Sessions`. The service
-sends `BlockStart`, `Item`, `BlockEnd`, `Prompt`, `Completions`, `Formatted`
-and `Fail`.
+`Interrupt`, `Complete`, `Answer`, `Format`, `Sessions` and `Highlight`.
+The service sends `BlockStart`, `Item`, `BlockEnd`, `Prompt`,
+`Completions`, `Formatted`, `Highlighted` and `Fail`.
 
+- **Matching replies (version 2):** `Complete` and `Format` carry a request
+  number `seq`, which `Completions` and `Formatted` return. Events of other
+  blocks (`async` tasks, `bg`, the late end of a cancelled task) may arrive
+  between a request and its reply. The window therefore matches replies by
+  `seq` and drops a reply to an older request. `seq` of `Highlight` works
+  the same way.
 - **Block items:** a typed value, a note, a warning, an error (code,
   description, report with the location), a diff, progress, a link.
 - **Values are sent typed.** A list of records with the same columns goes
@@ -611,7 +708,7 @@ and `Fail`.
 - Every command is a **block** (line, items, result, duration). A block can
   be collapsed, copied, rerun or two runs compared; the terminal does that,
   the service holds the data.
-- **Sessions belong to the service.** `Detach` (a window closed or crashed)
+- **Sessions belong to the service, not the window.** `Detach` (a window closed or crashed)
   does not end the session: a running command finishes, its output is
   stored in blocks and replayed on `Attach`. A question without an attached
   window is safely refused.
@@ -639,63 +736,293 @@ the VT100 adapter) and draws it into a linear framebuffer with the Noto Sans
 Mono font, including accented letters. From 1080 lines up a larger font is
 used. The same screen will serve as the rescue text console.
 
+### Terminal colors
+
+> **Change from the first shell version:** the terminal has colors. The
+> protocol carries no colors and no ANSI, only **semantic classes**. A
+> theme assigns the color at the end of the path (window, serial line,
+> documentation). Highlighting takes its tokens from the lexer of
+> `libs/shlang` (the single source of truth for the terminal and this web).
+
+**Two levels of highlighting** (`shlang::highlight`):
+
+- **Lexical, right in the window** on every key press, without a message.
+  A word in command position is a command, then flags, strings, numbers,
+  comments, keywords and pipes. A block line in the output and the
+  examples in the documentation are highlighted the same way.
+- **Semantic, from the service** (`Highlight` -> `Highlighted`, ordered by
+  `seq`). The service knows the commands, functions, programs and
+  variables of the session. An unknown command gets the class `unknown`
+  (underlined while typing), a variable `var`, a field in a `where`
+  condition `field`. It also returns the place of a parser error. An
+  unfinished line (open string, pipe at the end) reports no error. The
+  window drops answers with an older `seq`, so letters never wait for an
+  answer.
+
+| Class | What | Example |
+|---|---|---|
+| `cmd` | known command, function, program | `ls`, `where`, `.count()` |
+| `unknown` | unknown command (underlined) | `lss` |
+| `kw` | keyword | `let`, `for`, `try`, `true` |
+| `flag` | flag | `-r`, `--depth` |
+| `var` | variable | `$f`, `it` |
+| `field` | record field | `it.size`, `size` in `where` |
+| `str` | string | `"hello"` |
+| `interp` | braces of an embedded expression | `"{f.name}"` |
+| `num` | number with a unit | `5MB`, `2s`, `1.5` |
+| `path` | path, pattern, redirect target | `~/photos`, `*.jpg` |
+| `comment` | comment | `# note` |
+| `op` | operator, bracket | `>`, `&&`, `=>` |
+| `pipe` | pipe | `\|` |
+
+```shell-b
+ls ~/photos -r | where size > 5MB | sort mtime   # large photos
+```
+
+```shell-b
+for f in (ls *.jpg) { echo "processing {f.name}" }
+```
+
+**Colored listings** (`term::render`): tables are colored by the types of
+the values and the schema, not by ANSI in programs.
+
+- **File name by kind:** `dir`, `dataset` (nested dataset: `kind`
+  stays `"dir"`, field `dataset = true`), `symlink`, `exec` (the right to run `x` in the
+  `access` field), `image`, `archive`, `document`, `media` (by extension),
+  `hidden` (dot), `noaccess` (no right to read).
+- **Size and age on a color scale** (4 steps): size up to 1 MB, 100 MB,
+  1 GB and more; age up to a day, 30 days, a year and older.
+- `true` green, `false` and errors in the error color, `null` muted,
+  changes in a diff by kind.
+- `ls` has new fields `dataset` (root of a nested dataset) and `access` (the session's rights `rwx` from fsd,
+  `LIST_STAT_PAGE` sends them with every entry).
+
+**Theme** (`term::theme`): built-in dark (default) and light. The user
+overrides them with the file `~/.config/term/theme.toml`; an unknown class
+or a bad color is an error with a line number.
+
+```toml
+base = "dark"            # or "light"
+[syntax]
+cmd = "#7ee2a8"
+unknown = "#ff8a80 underline"
+[files]
+dir = "#7fb4ff bold"
+[ui]
+bg = "#15171c"
+scale3 = "#ff8a80"       # the highest step of the scale
+[ext]
+image = "jpg png heic"   # extensions for a file kind
+```
+
+**End of the path:** the VT100 adapter draws 24-bit colors
+(`38;2;r;g;b`), bold and underline; the screen (`term::screen`) can draw
+them into the framebuffer. The class colors on this web (`sh-*`, `fk-*`)
+are generated by `xtask` from the same theme. A test makes sure the
+highlighting in the documentation and in the terminal gives the same
+spans.
+
+An example that cannot be converted to the other notation (mixed B and C,
+a script with a header) has the language `mos` in the documentation: it is
+highlighted the same way, only without conversion.
+
+⚠️ **Plan:** coloring the user's own text (e.g. `echo` with a style class)
+is a follow-up proposal.
+
+### Interactive terminal and console
+
+> **Change from the first shell version:** the terminal is not a "console
+> from the 70s". Results are interactive tables, completion is a menu,
+> progress changes in place in real time and prompts are elements of the
+> protocol. The logic lives in the library `term::ui` (no system calls,
+> host tests), so the text console and the GUI 6c window use the same.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Console and interactive terminal">
+<defs><marker id="sh4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="140" height="56" rx="6"/><text class="t b" x="80" y="44" text-anchor="middle">inputd</text><text class="m" x="80" y="62" text-anchor="middle">focus = keys</text>
+<rect class="box" x="10" y="140" width="140" height="56" rx="6"/><text class="t b" x="80" y="164" text-anchor="middle">kernel</text><text class="m" x="80" y="182" text-anchor="middle">FRAMEBUFFER, FB_CONTROL</text>
+<path class="ln" d="M150 48 L248 90" marker-end="url(#sh4)"/>
+<path class="ln" d="M150 168 L248 130" marker-end="url(#sh4)"/>
+<rect class="acc" x="250" y="60" width="220" height="100" rx="6"/><text class="t b" x="360" y="84" text-anchor="middle">user/console</text><text class="m" x="360" y="104" text-anchor="middle">term::ui (editor, tables,</text><text class="m" x="360" y="120" text-anchor="middle">menu, prompts, progress)</text><text class="m" x="360" y="140" text-anchor="middle">term::screen -> framebuffer</text>
+<path class="ln" d="M470 110 L568 110" marker-end="url(#sh4)"/>
+<text class="m" x="478" y="102">native protocol</text>
+<rect class="box" x="570" y="82" width="180" height="56" rx="6"/><text class="t b" x="660" y="106" text-anchor="middle">termd + shsess</text><text class="m" x="660" y="124" text-anchor="middle">sessions, interpreter</text>
+<path class="ln dash" d="M360 60 L360 22" marker-end="url(#sh4)"/>
+<text class="m" x="372" y="30">supervisor / test: display, focus, release</text>
+</svg>
+<figcaption>The console gets the display and focus from their owner; it never takes them itself.</figcaption>
+</figure>
+
+**Protocol** (an addition to the native protocol):
+
+- `ItemUpdate { session, block, index, item }`: an item of a block changes
+  in place. A progress bar thus changes in real time and the window
+  computes the rate and the remaining time itself from the times of the
+  updates.
+- `Prompt { …, choices }` + `Choose { prompt, index }`: a prompt with
+  choices (empty `choices` = yes/no and the answer `Answer`).
+- The interpreter reports progress (`Host::progress`): `for` and `each`
+  over a list of 20 items or more (updates only when the percentage
+  changes) and `sleep` of 1 s or more.
+
+**Window** (`term::ui::App`):
+
+- **Line editor:** immediate highlighting, semantic from the service by
+  `seq`; a gray suggestion from history (right arrow or End accepts it);
+  history with the arrows; Ctrl-W word, Ctrl-U line, Ctrl-F convert B/C;
+  Tab completion (a single option is completed right away, several = a
+  menu).
+- **Blocks:** every command with a colored state mark (running, done,
+  error), its run time and a spinner while running. Ctrl-L collapses all,
+  space collapses the selected one.
+- **Interactive table:** PgUp from the editor enters the last table. The
+  arrows and PgUp/PgDn select a row, `s` sorts by the next column, `S`
+  reverses the order, `/` filters (a substring in any cell). An action on
+  a row runs as an ordinary line, so history, preview, the lock and undo
+  apply: Enter opens a file (`open`) or a directory (`cd …; ls`), `c`
+  inserts the path into the line and `d` deletes with a preview
+  (`preview { rm … }`).
+- **Prompts:** Yes/No buttons or choices, arrows and Enter, `a`/`n`,
+  digits for choices.
+- **A line entered before attaching** to a session waits and is sent
+  after `Attached`.
+
+```shell-b
+for f in (ls ~/photos -r) { echo "checking {f.name}" }
+```
+
+**Console** (`user/console`): the text and rescue console for running
+without GUI, a GUI crash and emergency mode (in the GUI the terminal is
+the window `gui-term`). It never takes the display or focus itself. Their
+owner (the supervisor, for now a test in init) hands them over the same
+way as to the compositor. Control commands are text with the answer
+`ok` / `err CODE` like with inputd:
+
+| Command | Handles | What |
+|---|---|---|
+| `display` | framebuffer | take over the display (`FB_CONTROL` `CLAIM`) and draw |
+| `focus` | channel of events from inputd | take keys |
+| `release` | - | stop drawing, give the display back to the kernel; the answer carries the framebuffer, the focus channel closes |
+| `status` | - | `ok drawing=… focus=… session=… connected=…` |
+| `dump` | - | `ok` + text of the screen (tests, diagnostics) |
+
+It draws into an image in memory and copies only the changed text lines
+to the framebuffer (while typing usually just the editor line), only on a
+change or while a command runs (at most about 7 frames per second). A file
+name in an action on a row is always text: an embedded expression `{…}` is
+escaped.
+
+⚠️ **Limits:** the mouse (click on a row, a link) is not supported yet;
+the display and focus in the normal run will be split by the supervisor
+together with GUI 6c.
+
 ### Integration status
 
 | What | Status |
 |---|---|
 | language, formatter, interpreter, undo, preview, lock, needs | done, host tests (`cargo test -p shlang`) |
-| protocol, session service, VT100, screen, mounted paths | done, host tests (`cargo test -p term`) |
-| `termd` in initfs | done; file system over `fsproto`, output mirrored to the log |
-| QEMU test | done: `user/init/src/tests/shell.rs` starts termd with its own fsd session and checks writes, undo via an fsd snapshot, Ctrl-C, notation conversion and block replay after detaching; starting termd outside tests belongs in the init supervisor (later) |
-| keyboard input | waits for `inputd` (milestone 6a, branch not in `main`); until then the window or test sends lines |
-| drawing into the framebuffer | library done; waits for the framebuffer to be passed as a capability (kernel, `userboot`) |
-| starting programs with their own fsd session | permission mapping done (`term::perm`); no program with a shell interface yet |
+| protocol, session service, broker, registry, VT100, screen, mounted paths | done, host tests (`cargo test -p term`) |
+| `termd` and `shsess` in initfs | done; sessions in their own processes, file system over `fsproto` (clones aside, views, `LIST_STAT_PAGE`), output mirrored to the log |
+| QEMU test | done: `user/init/src/tests/shell.rs` starts termd with its own fsd session and checks writes (draft in a clone), undo via an fsd view, Ctrl-C, notation conversion, block replay after detaching and that a session and its job survive a termd crash and a new termd takes them over from the registry; starting termd outside tests belongs in the init supervisor (later) |
+| `async`/`await` | done: tasks in `shsess` threads with their own fsd session; tests `cargo test -p term` (std threads) and a QEMU test (concurrency, a task's undo, deadline, cancellation) |
+| keyboard input | done: the console gets the focus from `inputd` (the test in init types with synthetic input) |
+| drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
+| starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
-## Concurrency: async and await (decided, not implemented yet)
+## Concurrency: async and await
 
-> **Agreed (variant A):** a task `async { }`, waiting `await`,
-> `await all [...]`, `await any [...]`, a `timeout`, cancellation `cancel`
-> and parallel `each --parallel N`. The same in both notations.
-> Implementation comes after the terminal colours and interactivity.
+> **Done (variant A):** a task `async { }`, waiting `await` (in C also
+> `x.await`), `await all [...]`, `await any [...]`, a `timeout`,
+> cancellation `cancel` and parallel `each --parallel N`. The keywords are
+> the same in both notations.
 
-The examples are plain text for now (the parser does not know `async` yet and the documentation check would reject them):
-
-```text
-let a = async { fetch https://example.com/data.json | from json }
-let b = async { ls ~/Photos -r | where ext == "jpg" | count }
-let (data, count) = await all [a, b]          # waits for both, errors propagate
-let first = await any [a, b] timeout 5s       # the first one done, else TIMED_OUT
-ls ~/Photos | each --parallel 8 f => image resize $f.path --width 800
+```shell-b
+let a = async { ls ~/Photos -r | where ext == "jpg" | count }
+let b = async { ls ~/Documents -r | count }
+let (photos, documents) = await all [a, b]
+let first = await any [a, b] timeout 5s
 ```
 
-```text
-let a = async { fetch("https://example.com/data.json").from_json() }
-let data = a.await
+```shell-b
+let c = async { open ~/data.json | from json }
+let r = try await c
+if r.failed { echo "cannot: {r.error.message}" }
 ```
+
+```shell-b
+ls ~/Photos | each --parallel 4 f => { open $f.path | from text | lines | count }
+```
+
+The value of `async { }` is a task handle (the record `{task: n}`); `await`
+returns the block's result. `await all` returns a list in the order of the
+list (`let (a, b) = ...` destructures it), `await any` the result of the
+first task done.
 
 **Rules:**
 
 - **Structured concurrency.** A task does not outlive the block it was
-  created in: when the block ends (also by an error or Ctrl-C), running
-  subtasks are cancelled. No forgotten processes are left behind. The
-  exception is an explicit `bg`, which hands the task to the session
-  service.
-- **Errors:** a task's error shows at `await` and propagates by itself;
-  `let r = try await a` returns it as a value.
-- **Permissions do not widen:** a task inherits the script's `needs`
-  manifest (an intersection, as with `bg`).
-- **Terminal:** each task has its own block with progress; you can switch
-  between running tasks.
-- **Underneath:** a task is a process or thread with a handle; `await`
-  waits for its signal through the kernel **port** object (one thread waits
-  for many events), `timeout` is a port timer, `cancel` ends the task. No
-  busy waiting.
+  created in (a script, a function call): when the block ends (also with an
+  error or Ctrl-C), running tasks are cancelled and the block says so in a
+  note. A task from the command line belongs to the session, so a later line
+  can still wait for it. The exception is an explicit `bg`.
+- **Errors:** a task's error shows up at `await` and propagates by itself;
+  `let r = try await a` returns it as a value. `await all` stops at the
+  first error and cancels the other tasks.
+- **Deadline:** `await ... timeout 5s` returns the error `TIMED_OUT` after
+  the deadline; the task keeps running (`cancel` cancels it).
+- **Ctrl-C** during `await` cancels the tasks being waited for.
+- **Files:** a task has its own draft of changes. The changes are committed
+  when the task finishes and get their own `undo` entry in the session. A
+  cancelled or failed task discards its draft, nothing changes. The lock on
+  dangerous operations applies to a task too (a prompt in the terminal,
+  refused without a window).
+- **Permissions do not widen:** a task inherits the caller's `needs`
+  manifest, working directory and lock.
+- **Copies of variables:** a task sees a copy of the variables from the time
+  it was created (a later change does not affect it). A closure cannot be
+  passed into a task (`SH_TYPE`); define it inside `async { }`.
+- **Terminal:** every task has its own block (`async ...`) with output,
+  progress and result. The blocks are replayed after the window detaches and
+  attaches again.
 
-| Variant | Syntax | Why not |
+**Underneath** (the session process `shsess`):
+
+- every task runs in **its own thread** of the session process
+  (`libos::thread`, 256 KB stack) with its own interpreter and its own fsd
+  session (`CONNECT`: the same identity and paths), so the task's draft does
+  not mix with the line,
+- values cross threads encoded the same way as in the terminal protocol
+  (the interpreter uses `Rc`, which threads must not share),
+- the task thread reports output to a shared table and wakes the main
+  thread with a **kernel event**; the main thread waits for a window message
+  or the event (`wait_many`), `await` waits for the event with a deadline.
+  No busy waiting,
+- `cancel` sets a flag the task's interpreter reads (like Ctrl-C).
+
+```text
+window ──Run──▶ shsess (main thread: the line's interpreter)
+                   │ async { } ─▶ task thread (interpreter, fsd session, draft)
+                   │                 │ output, prompts, result ─▶ task table
+                   │ ◀── event ──────┘
+                   └─▶ task blocks to the window, await takes the result and undo
+```
+
+⚠️ **Limits:**
+
+- a host without threads (interpreter tests) runs tasks **in place** one
+  after another; the results are the same, just without concurrency,
+- a task does not start programs (`exec` is only in the main thread so far),
+- switching between running tasks in the window is not there yet (blocks
+  are stacked),
+- two tasks changing the same file end with the conflict `SH_CONFLICT` for
+  the one that finishes second (like two lines in different windows).
+
+| Variant | Notation | Why not |
 |---|---|---|
 | **A (chosen)** | `async`/`await`, `await all/any`, `each --parallel` | - |
-| B | `&` and `wait` as in bash | no return values, errors get lost |
-| C | only `each --parallel`, `par { }` | cannot wait for an arbitrary or the first finished task |
+| B | `&` and `wait` like in bash | no return values, errors get lost |
+| C | only `each --parallel`, `par { }` | cannot wait for any or the first task done |
 
 ## Shell errors
 
@@ -834,3 +1161,16 @@ already been reverted (16 commands are remembered).
 It is guarded by stack use, not by the number of calls.
 
 **What to do:** rewrite the recursion as a loop (`for`, `while`).
+
+### `SH_CONFLICT` (conflict)
+
+**Meaning:** part of a line's changes was not applied because the file
+had meanwhile changed in another way too (another session, a program).
+
+**When:** when a line's draft or a preview is applied. Applying is
+three-way: against the state the clone started from. What changed in the
+original only elsewhere is applied; what changed on both sides stays as it
+is in the original.
+
+**What to do:** the other changes are written and `undo` reverts them.
+Repeat the command over the current state of the files in the message.

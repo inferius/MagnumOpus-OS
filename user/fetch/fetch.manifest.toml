@@ -1,0 +1,27 @@
+# Klient HTTP(S): stahne adresu. Smi jen TCP na webove porty a DNS;
+# jiny port nebo protokol = dotaz uzivateli.
+[app]
+id = "org.magnumopus.fetch"
+name = "Stahovani z webu"
+
+[limits]
+# Kryptografie, telo odpovedi (az 16 MiB) a buffery.
+memory = "48M"
+kernel_memory = "4M"
+stack = "512K"
+
+[network]
+rights = ["tcp", "dns"]
+ask = true
+sockets = 8
+buffers = "4M"
+
+[[network.connect]]
+proto = ["tcp"]
+to = "*"
+ports = "80"
+
+[[network.connect]]
+proto = ["tcp"]
+to = "*"
+ports = "443"

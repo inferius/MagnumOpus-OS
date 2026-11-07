@@ -64,7 +64,7 @@ Writes 16 B (little endian) to `out_ptr`:
 |---|---|---|
 | 0 | i64 | seconds since 1970-01-01 00:00:00 UTC (negative = earlier) |
 | 8 | u32 | nanoseconds within the second (0..10⁹) |
-| 12 | u16 | source: 1 UEFI, 2 CMOS RTC, 3 set at run time |
+| 12 | u16 | source: 1 UEFI, 2 CMOS RTC, 3 set at run time, 4 synchronized over the network (`CLOCK_SET` with `NETWORK` or `CLOCK_ADJUST` with an offset) |
 | 14 | u16 | flags: bit 0 = time zone not given, time taken as UTC |
 
 At boot the kernel stores the real time at moment 0 of the monotonic clock;
@@ -89,17 +89,40 @@ and `init` gives it only to the time service `timed` (without `MANAGE`).
 | 12 | i32 | `rtc_offset`: seconds added to UTC when writing the hardware clock (RTC in local time = zone offset, else 0); at most ±18 h, else `INVALID_ARGS` |
 
 `flags`: bit 0 `WRITE_HARDWARE` = also write the time to the hardware clock
-(x86: CMOS RTC). Other bits = `INVALID_ARGS`. Returns 1 when the hardware
+(x86: CMOS RTC), bit 1 `NETWORK` = the time comes from network
+synchronization (source 4). Other bits = `INVALID_ARGS`. Returns 1 when the hardware
 clock was written. Returns 0 without `WRITE_HARDWARE`, when there is no
 clock (aarch64, ACPI reports no RTC) or when the year does not fit its
 range. With `WRITE_HARDWARE` the call can sleep up to 1 s: the kernel writes
 the RTC in the middle of a second so the clock ticks on second boundaries.
 The system time is set in every case. Afterwards `CLOCK_REALTIME`
-reports source 3 (set at run time) and no flags. Wait deadlines do not
+reports source 3 (set at run time; with `NETWORK` source 4) and no flags. Wait deadlines do not
 change; they come from `CLOCK_MONOTONIC`. Wrapper: `libos::time::set`,
 `Resource::set_clock`. Errors: `ACCESS_DENIED` (no `SET_CLOCK`),
 `WRONG_TYPE`, `BAD_HANDLE`, `INVALID_ARGS`, `BAD_ADDRESS`. Details:
 [Setting the clock](time.md#setting-the-clock-clock_set).
+
+### `CLOCK_ADJUST`
+
+`(resource, offset_ns i64, freq_ppb i64, flags, out_ptr) -> 0`. Smooth
+correction of real time without a step. Requires a Resource with the
+`SET_CLOCK` right. Flags (`abi::time::adjust`):
+
+- `OFFSET` (1): start slewing away the offset `offset_ns`, replacing the
+  rest of the previous one. The rate is 500 ppm (`MAX_SLEW_PPB`), so an
+  offset of 1 s takes 2000 s. At most 1 hour (`MAX_OFFSET_NS`).
+- `FREQUENCY` (2): a permanent frequency correction `freq_ppb`, at most
+  ±500 ppm (`MAX_FREQ_PPB`).
+- no flags: status only.
+
+At `out_ptr` (0 = nothing) it writes `abi::time::AdjustStatus` (24 B):
+remaining offset (ns), frequency (ppb), current slew rate (ppb). Real time
+never goes backwards. With `OFFSET`, `CLOCK_REALTIME` reports source 4
+(synchronized over the network). `CLOCK_SET` cancels the slew and keeps the
+frequency. Wrapper: `libos::time::adjust`. Errors: `ACCESS_DENIED` (no
+`SET_CLOCK`), `INVALID_ARGS` (limits, unknown flags), `BAD_STATE` (real
+time is not known), `WRONG_TYPE`, `BAD_HANDLE`, `BAD_ADDRESS`. Details:
+[Smooth correction](time.md#smooth-correction-clock_adjust).
 
 ## Handles
 
@@ -451,6 +474,33 @@ can still be charged - the smallest free room over the job and all
 ancestors; `u64::MAX` = no limit anywhere). Requires `READ`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
+### `FB_CONTROL`
+
+`(vmo, op, out_ptr) -> 0`. The firmware framebuffer: `vmo` must be exactly
+the object from the bootstrap `kind::FRAMEBUFFER` (any other memory object
+= `WRONG_TYPE`). Operations (`abi::syscall::fb_op`):
+
+- `INFO` (0): writes `abi::syscall::FbInfo` (16 B: width, height, pixels
+  per line, format 1 = RGB, 2 = BGR; all u32). Requires `READ`.
+- `CLAIM` (1): **explicit takeover** - the kernel stops drawing the log
+  into the framebuffer, the log keeps going to the serial line. Requires
+  `WRITE`.
+- Handover: when another live process holds the screen, `CLAIM` returns
+  `BAD_STATE`. The new owner gets it once the old one gives it back
+  (`RELEASE`) or exits (the kernel then gives it back by itself). The
+  owner of the display drives the handover (the init supervisor: the
+  fallback console after a GUI crash).
+- `RELEASE` (2): give back - the kernel clears the screen and keeps
+  drawing the log. Requires `WRITE`. Only the owner may (the process that
+  last called `CLAIM`), otherwise `BAD_STATE`: a late give-back of the
+  previous owner does not clear the new owner's picture (the console after
+  a GUI crash). The end of the process that took the
+  framebuffer over gives it back by itself.
+
+A kernel panic always draws into the framebuffer. Errors: `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS`, `BAD_ADDRESS`, `NOT_FOUND`
+(no framebuffer).
+
 ## Structural limits
 
 Limits given by data formats or calls, not policy:
@@ -482,6 +532,27 @@ memory. A driver bug therefore cannot overwrite another device's registers.
 With an IOMMU the device may moreover DMA only into memory created through
 its resource (see [kernel.md](kernel.md#iommu-dma-protection)); without an
 IOMMU it can write anywhere.
+
+### Firmware framebuffer
+
+Not a system call but a handle kind in init's start message
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7): the physical memory object of
+the GOP framebuffer, rights `READ | WRITE | MAP`. It can be read and
+written only through a mapping (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`,
+as a syscall buffer `BAD_ADDRESS`). Geometry and taking over the screen
+go through [`FB_CONTROL`](#fb_control).
+
+The object is mapped **write-combining** (a physical object with cache
+type `WRITE_COMBINING`, the same as with
+[`VMO_CREATE_PHYSICAL`](#vmo_create_physical); x86_64: PAT entry 1 = WC,
+set by the kernel on every CPU; aarch64: Normal Non-cacheable): writes are
+merged, reads are slow. The kernel does not send the handle when the
+framebuffer overlaps RAM used by the allocator, does not start on a page
+boundary or is smaller than its geometry (a warning in the log, the kernel
+console keeps using it). Init passes it to the owner of the screen: the
+`fbdisplay` driver when there is no virtio-gpu (see
+[GUI](gui.md#displays-virtio-gpu-and-fbdisplay)), otherwise the rescue
+console `user/console`.
 
 ### `VMO_CREATE_CONTIGUOUS`
 

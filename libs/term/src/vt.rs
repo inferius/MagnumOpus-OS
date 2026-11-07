@@ -2,63 +2,74 @@
 //! zachranna konzole, prevzate programy).
 //!
 //! Nativni protokol nese typovane hodnoty; tady se prevadi na text az na
-//! konci: tabulky zarovnane (`shlang::table`), chyby cervene, poznamky
-//! tlumene, odkazy jako OSC 8.
+//! konci: tabulky zarovnane (`shlang::table`), s motivem barevne podle
+//! typu ([`crate::render`]), chyby a poznamky barvou motivu, odkazy jako
+//! OSC 8.
 
 use alloc::string::String;
 
 use crate::proto::{Item, ServerMsg};
+use crate::render::{self, RESET, sgr};
+use crate::theme::{Rgb, Style, Theme};
 
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const RED: &str = "\x1b[31m";
-const YELLOW: &str = "\x1b[33m";
-const CYAN: &str = "\x1b[36m";
-
-fn paint(out: &mut String, color: bool, sgr: &str, text: &str) {
-    if color {
-        out.push_str(sgr);
-    }
-    out.push_str(text);
-    if color {
-        out.push_str(RESET);
+fn paint(out: &mut String, theme: Option<&Theme>, style: impl Fn(&Theme) -> Style, text: &str) {
+    match theme {
+        Some(t) => {
+            out.push_str(&sgr(style(t)));
+            out.push_str(text);
+            out.push_str(RESET);
+        }
+        None => out.push_str(text),
     }
 }
 
-/// Text polozky bloku.
-pub fn item(it: &Item, color: bool) -> String {
+fn fg(c: impl Fn(&Theme) -> Rgb) -> impl Fn(&Theme) -> Style {
+    move |t| Style::fg(c(t))
+}
+
+/// Text polozky bloku. `theme = None` = bez barev (log, test).
+pub fn item(it: &Item, theme: Option<&Theme>) -> String {
+    item_at(it, theme, None)
+}
+
+/// Jako [`item`]; `now` (ns od 1970) obarvi stari casu.
+pub fn item_at(it: &Item, theme: Option<&Theme>, now: Option<i64>) -> String {
     let mut out = String::new();
     match it {
-        Item::Value(v) => out.push_str(&shlang::table::render(v)),
+        Item::Value(v) => match theme {
+            Some(t) => out.push_str(&render::value(v, t, now)),
+            None => out.push_str(&shlang::table::render(v)),
+        },
         Item::Note(n) => {
-            paint(&mut out, color, DIM, n);
+            paint(&mut out, theme, fg(|t| t.ui.muted), n);
             out.push('\n');
         }
         Item::Warning(w) => {
-            paint(&mut out, color, YELLOW, &alloc::format!("varovani: {w}"));
+            paint(&mut out, theme, fg(|t| t.ui.warn), &alloc::format!("varovani: {w}"));
             out.push('\n');
         }
         Item::Error { report, .. } => {
-            paint(&mut out, color, RED, report);
+            paint(&mut out, theme, fg(|t| t.ui.err), report);
             out.push('\n');
         }
         Item::Diff(v) => {
-            paint(&mut out, color, CYAN, "zmeny souboru (vratit: undo):");
+            paint(&mut out, theme, fg(|t| t.ui.accent), "zmeny souboru (vratit: undo):");
             out.push('\n');
-            out.push_str(&shlang::table::render(v));
+            match theme {
+                Some(t) => out.push_str(&render::value(v, t, now)),
+                None => out.push_str(&shlang::table::render(v)),
+            }
         }
         Item::Progress { done, total, label } => {
             let pct = if *total == 0 { 100 } else { (done * 100 / total).min(100) };
             let full = (pct / 5) as usize;
+            let bar: String = (0..20).map(|i| if i < full { '#' } else { '-' }).collect();
             out.push('[');
-            for i in 0..20 {
-                out.push(if i < full { '#' } else { '-' });
-            }
+            paint(&mut out, theme, fg(|t| t.ui.accent), &bar);
             out.push_str(&alloc::format!("] {pct}% {label}\r"));
         }
         Item::Link { text, target } => {
-            if color {
+            if theme.is_some() {
                 out.push_str(&alloc::format!("\x1b]8;;{target}\x1b\\{text}\x1b]8;;\x1b\\\n"));
             } else {
                 out.push_str(&alloc::format!("{text} <{target}>\n"));
@@ -69,41 +80,51 @@ pub fn item(it: &Item, color: bool) -> String {
 }
 
 /// Text zpravy sluzby (pro terminal bez nativniho protokolu).
-pub fn message(m: &ServerMsg, color: bool) -> String {
+pub fn message(m: &ServerMsg, theme: Option<&Theme>) -> String {
     let mut out = String::new();
     match m {
         ServerMsg::Welcome { version } => out.push_str(&alloc::format!("terminal: protokol v{version}\n")),
         ServerMsg::Attached { session, cwd, .. } => {
-            paint(&mut out, color, DIM, &alloc::format!("relace {session} ({cwd})"));
+            paint(&mut out, theme, fg(|t| t.ui.muted), &alloc::format!("relace {session} ({cwd})"));
             out.push('\n');
         }
         ServerMsg::BlockStart { line, .. } => {
-            paint(&mut out, color, BOLD, &alloc::format!("> {line}"));
+            paint(&mut out, theme, fg(|t| t.ui.muted), "> ");
+            match theme {
+                // Radek bloku: lexikalni zvyrazneni (bez znalosti relace).
+                Some(t) => out.push_str(&render::line(line, &shlang::highlight::highlight(line, None), t)),
+                None => out.push_str(line),
+            }
             out.push('\n');
         }
-        ServerMsg::Item { item: it, .. } => out.push_str(&item(it, color)),
+        ServerMsg::Item { item: it, .. } => out.push_str(&item(it, theme)),
         ServerMsg::BlockEnd { ok, duration, .. } => {
             if !ok {
-                paint(&mut out, color, RED, "(neuspech)");
+                paint(&mut out, theme, fg(|t| t.ui.err), "(neuspech)");
                 out.push(' ');
             }
             if *duration > 0 {
-                paint(&mut out, color, DIM, &shlang::value::human_duration(*duration));
+                paint(&mut out, theme, fg(|t| t.ui.muted), &shlang::value::human_duration(*duration));
             }
             if !ok || *duration > 0 {
                 out.push('\n');
             }
         }
-        ServerMsg::Prompt { question, detail, .. } => {
-            out.push_str(&item(detail, color));
-            paint(&mut out, color, BOLD, &alloc::format!("{question} [a/n] "));
+        ServerMsg::Prompt { question, detail, choices, .. } => {
+            out.push_str(&item(detail, theme));
+            let opts = if choices.is_empty() {
+                String::from("[a/n]")
+            } else {
+                choices.iter().enumerate().map(|(i, c)| alloc::format!("{}) {c}", i + 1)).collect::<alloc::vec::Vec<_>>().join("  ")
+            };
+            paint(&mut out, theme, |t| Style { bold: true, ..Style::fg(t.ui.fg) }, &alloc::format!("{question} {opts} "));
         }
         ServerMsg::Completions { items, .. } => {
             for (t, _, h) in items {
                 out.push_str(t);
                 if !h.is_empty() {
                     out.push_str("  ");
-                    paint(&mut out, color, DIM, h);
+                    paint(&mut out, theme, fg(|t| t.ui.muted), h);
                 }
                 out.push('\n');
             }
@@ -113,14 +134,18 @@ pub fn message(m: &ServerMsg, color: bool) -> String {
                 out.push_str(&alloc::format!("{id}  {n} bloku  {cwd}\n"));
             }
         }
-        ServerMsg::Formatted { text } => {
+        ServerMsg::Formatted { text, .. } => {
             out.push_str(text);
             out.push('\n');
         }
         ServerMsg::Fail { message } => {
-            paint(&mut out, color, RED, message);
+            paint(&mut out, theme, fg(|t| t.ui.err), message);
             out.push('\n');
         }
+        // Zvyrazneni je pro editor radku v okne, v textu se neukazuje.
+        ServerMsg::Highlighted { .. } => {}
+        // Zmena na miste: pruh se prepise (`\r`), jine polozky znovu.
+        ServerMsg::ItemUpdate { item: it, .. } => out.push_str(&item(it, theme)),
     }
     out
 }

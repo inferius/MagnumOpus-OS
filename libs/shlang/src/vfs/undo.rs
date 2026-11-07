@@ -1,40 +1,34 @@
-//! Liny undo: snapshot az pri prvni zmene, "vrat posledni prikaz".
+//! Undo: "vrat posledni prikaz" nad pohledy FS.
 //!
 //! Prikaz, ktery nic nezmenil, nestoji nic. Kdyz zmenil, shell pred
-//! prevzetim zmen vytvori snapshot FS (`shell-undo-N`; na FS v3 je to
-//! levny CoW snapshot) a zapamatuje si, ktere cesty se meni. `undo` vrati
-//! tyto cesty do stavu ze snapshotu. FS bez snapshotu: shell si puvodni
-//! obsah zmenenych souboru drzi v pameti.
+//! prevzetim konceptu radku vytvori pohled (`VIEW`: levny docasny snapshot
+//! datasetu a pozice v zurnalu) kazdeho datasetu se zmenami. `undo` vrati
+//! zmenene cesty do stavu z pohledu.
 //!
-//! Programy mimo shell meni FS samy; pro ne se pamatuji cele slozky, kam
-//! smi zapisovat (z manifestu), a `undo` je srovna se snapshotem.
+//! Programy mimo shell meni FS samy: pred jejich spustenim se vytvori
+//! pohledy datasetu, kam smi zapisovat. Po skonceni zurnal rekne, jestli
+//! se neco zmenilo (bez pruchodu stromem); jen kdyz ano, FS vrati seznam
+//! zmenenych cest (`DIFF`). Nic nezmeneno = zadny zaznam (undo vrati
+//! predchozi prikaz).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use abi::Error;
 
-use super::overlay::{DiffEntry, Overlay};
-use super::path::join;
-use crate::host::{Fs, FsResult, NodeKind};
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Prior {
-    /// Cesta predtim neexistovala.
-    Missing,
-    Dir,
-    /// Soubor; `None` = obsah je ve snapshotu.
-    File(Option<Vec<u8>>),
-}
+use super::diff::{ChangeKind, DiffEntry};
+use super::draft::Draft;
+use super::path::{join, key, within};
+use crate::host::{Fs, FsChangeKind, FsResult, NodeKind, ViewRef};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UndoEntry {
     pub id: u64,
     /// Prikaz, ktery zmeny udelal.
     pub line: String,
-    pub snapshot: Option<String>,
-    pub prior: Vec<(String, Prior)>,
-    /// Slozky zmenene programy mimo shell (srovnaji se se snapshotem).
+    /// Pohledy datasetu pred zmenou.
+    pub views: Vec<ViewRef>,
+    /// Program: slozky, kam smel zapisovat (zmeny mimo ne nejsou jeho).
     pub trees: Vec<String>,
     pub diff: Vec<DiffEntry>,
 }
@@ -44,154 +38,200 @@ pub struct UndoEntry {
 pub struct UndoLog {
     pub entries: Vec<UndoEntry>,
     next: u64,
-    /// Kolik prikazu jde vratit (starsi snapshoty se mazou).
+    /// Kolik prikazu jde vratit (starsi pohledy se uvolni).
     pub keep: usize,
+    /// Zaznam programu, ktery prave bezi (doplni ho `after_external`).
+    pending: Option<UndoEntry>,
 }
 
-fn snap_name(id: u64) -> String {
-    alloc::format!("shell-undo-{id}")
+/// Vysledek prevzeti konceptu.
+#[derive(Debug)]
+pub struct Committed {
+    pub diff: Vec<DiffEntry>,
+    /// Cesty, ktere se neprevzaly (puvod se mezitim zmenil jinak).
+    pub conflicts: Vec<String>,
+    /// FS neumi pohledy: zmeny jsou zapsane, ale nepujdou vratit.
+    pub no_undo: bool,
+    /// `false` = konfliktu je vic, nez FS vypsal.
+    pub conflicts_complete: bool,
+}
+
+fn release(fs: &mut dyn Fs, views: &[ViewRef]) {
+    for v in views {
+        let _ = fs.release_view(v);
+    }
+}
+
+/// Pohledy na datasety (bez duplicit). `None` = FS pohledy neumi.
+fn views_of(fs: &mut dyn Fs, datasets: &[String]) -> Option<Vec<ViewRef>> {
+    let mut out: Vec<ViewRef> = Vec::new();
+    for ds in datasets {
+        if out.iter().any(|v| key(&v.dataset) == key(ds)) {
+            continue;
+        }
+        match fs.view(ds) {
+            Ok(v) => out.push(v),
+            Err(_) => {
+                release(fs, &out);
+                return None;
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Pohled datasetu, ve kterem `path` lezi (nejdelsi koren).
+fn view_for<'a>(views: &'a [ViewRef], path: &str) -> Option<&'a ViewRef> {
+    views.iter().filter(|v| within(path, &v.dataset)).max_by_key(|v| v.dataset.len())
 }
 
 impl UndoLog {
     pub fn new() -> Self {
-        Self { entries: Vec::new(), next: 1, keep: 16 }
+        Self { entries: Vec::new(), next: 1, keep: 16, pending: None }
     }
 
-    fn start(&mut self, base: &mut dyn Fs) -> (u64, Option<String>) {
-        let id = self.next;
-        self.next += 1;
-        let name = snap_name(id);
-        let snap = base.snapshot(&name).is_ok().then_some(name);
-        (id, snap)
-    }
-
-    fn push(&mut self, base: &mut dyn Fs, e: UndoEntry) {
+    fn push(&mut self, fs: &mut dyn Fs, e: UndoEntry) {
         self.entries.push(e);
         while self.entries.len() > self.keep {
             let old = self.entries.remove(0);
-            if let Some(s) = old.snapshot {
-                let _ = base.delete_snapshot(&s);
-            }
+            release(fs, &old.views);
         }
     }
 
-    /// Prevezme zmeny prekryvu do FS a zapamatuje si, jak je vratit.
-    /// Vrati diff (prazdny = nic se nezmenilo, snapshot se nedela).
-    pub fn commit(&mut self, base: &mut dyn Fs, overlay: &Overlay, line: &str) -> FsResult<Vec<DiffEntry>> {
-        let diff = overlay.changes(base)?;
-        self.commit_diff(base, overlay, diff, line)
+    /// Zaznamy undo dokoncene ulohy (`async`) - `undo` je vrati jako
+    /// ostatni prikazy.
+    pub fn adopt(&mut self, fs: &mut dyn Fs, entries: Vec<UndoEntry>) {
+        for mut e in entries {
+            e.id = self.next;
+            self.next += 1;
+            self.push(fs, e);
+        }
     }
 
-    /// Jako [`commit`](Self::commit) s uz spocitanym diffem prekryvu.
-    pub fn commit_diff(&mut self, base: &mut dyn Fs, overlay: &Overlay, diff: Vec<DiffEntry>, line: &str)
-        -> FsResult<Vec<DiffEntry>> {
+    fn entry(&mut self, line: &str, views: Vec<ViewRef>, trees: Vec<String>, diff: Vec<DiffEntry>) -> UndoEntry {
+        let id = self.next;
+        self.next += 1;
+        UndoEntry { id, line: line.into(), views, trees, diff }
+    }
+
+    /// Prevezme koncept radku (`diff` uz spocitany) do FS a zapamatuje si,
+    /// jak ho vratit. Prazdny diff = klony se jen zahodi.
+    pub fn commit(&mut self, fs: &mut dyn Fs, draft: &mut Draft, diff: Vec<DiffEntry>, line: &str)
+        -> FsResult<Committed> {
         if diff.is_empty() {
-            return Ok(diff);
+            draft.discard_top(fs);
+            return Ok(Committed { diff, conflicts: Vec::new(), no_undo: false, conflicts_complete: true });
         }
-        let (id, snapshot) = self.start(base);
-        // Puvodni stav podle FS (ne podle druhu zmeny): u nahrazeni souboru
-        // slozkou se tak pamatuje soubor a naopak.
-        let mut prior = Vec::new();
-        for d in &diff {
-            let p = match base.stat(&d.path) {
-                Err(_) => Prior::Missing,
-                Ok(m) if m.kind == NodeKind::Dir => Prior::Dir,
-                Ok(_) => Prior::File(if snapshot.is_some() { None } else { Some(base.read(&d.path)?) }),
-            };
-            prior.push((d.path.clone(), p));
+        let views = views_of(fs, &draft.datasets());
+        let applied = match draft.apply_top(fs) {
+            Ok(a) => a,
+            Err(e) => {
+                release(fs, views.as_deref().unwrap_or(&[]));
+                return Err(e);
+            }
+        };
+        let conflicts = applied.conflicts;
+        // Zkraceny seznam konfliktu: nevime, co se prevzalo - undo by mohlo
+        // prepsat cizi zmenu. Zaznam se nevytvori.
+        if !applied.complete {
+            release(fs, views.as_deref().unwrap_or(&[]));
+            return Ok(Committed { diff, conflicts, no_undo: true, conflicts_complete: false });
         }
-        let entry = UndoEntry { id, line: line.into(), snapshot, prior, trees: Vec::new(), diff: diff.clone() };
-        let r = overlay.commit(base);
-        // I po castecnem selhani jde vratit, co se zmenit stihlo.
-        self.push(base, entry);
-        r.map(|_| diff)
+        // Vratit jde jen to, co se opravdu prevzalo.
+        let applied: Vec<DiffEntry> =
+            diff.iter().filter(|d| !d.paths().any(|p| conflicts.iter().any(|c| key(c) == key(p)))).cloned().collect();
+        let no_undo = views.is_none();
+        match views {
+            Some(v) if !applied.is_empty() => {
+                let e = self.entry(line, v, Vec::new(), applied);
+                self.push(fs, e);
+            }
+            Some(v) => release(fs, &v),
+            None => {}
+        }
+        Ok(Committed { diff, conflicts, no_undo, conflicts_complete: true })
     }
 
-    /// Pred spustenim programu, ktery smi menit `trees`: snapshot (bez nej
-    /// undo programu neumi - vrati `false`).
-    pub fn before_external(&mut self, base: &mut dyn Fs, line: &str, trees: &[String]) -> bool {
+    /// Pred spustenim programu, ktery smi menit `datasets`/`trees`:
+    /// pohledy. `false` = FS pohledy neumi (undo programu nepujde).
+    pub fn before_external(&mut self, fs: &mut dyn Fs, line: &str, datasets: &[String], trees: &[String]) -> bool {
         if trees.is_empty() {
             return true;
         }
-        let (id, snapshot) = self.start(base);
-        if snapshot.is_none() {
-            return false;
-        }
-        let entry = UndoEntry {
-            id,
-            line: line.into(),
-            snapshot,
-            prior: Vec::new(),
-            trees: trees.into(),
-            diff: Vec::new(),
-        };
-        self.push(base, entry);
+        let Some(views) = views_of(fs, datasets) else { return false };
+        let e = self.entry(line, views, trees.into(), Vec::new());
+        self.pending = Some(e);
         true
     }
 
-    /// Po skonceni programu: kdyz se jeho slozky proti snapshotu nezmenily,
-    /// zaznam undo i snapshot zahodi.
-    pub fn after_external(&mut self, base: &mut dyn Fs) {
-        let Some(e) = self.entries.last() else { return };
-        let (Some(snap), false) = (e.snapshot.clone(), e.trees.is_empty()) else { return };
-        let changed = e.trees.clone().iter().any(|t| tree_differs(base, &snap, t).unwrap_or(true));
-        if !changed {
-            self.entries.pop();
-            let _ = base.delete_snapshot(&snap);
+    /// Po skonceni programu: co se zmenilo v jeho slozkach. Nic = zaznam
+    /// se zahodi (undo vrati predchozi prikaz).
+    pub fn after_external(&mut self, fs: &mut dyn Fs) -> Vec<DiffEntry> {
+        let Some(mut e) = self.pending.take() else { return Vec::new() };
+        let mut diff = Vec::new();
+        for v in e.views.clone() {
+            // Neznamy stav (chyba) = radsi zaznam ponechat s celou slozkou.
+            let changes = match fs.changed_since(&v) {
+                Ok(c) => c,
+                Err(_) => {
+                    diff.push(DiffEntry { path: v.dataset.clone(), change: ChangeKind::Modified, from: None, before: None, after: None });
+                    continue;
+                }
+            };
+            for c in changes {
+                if !e.trees.iter().any(|t| within(&c.path, t) || c.old_path.as_deref().is_some_and(|o| within(o, t))) {
+                    continue;
+                }
+                let before = fs.view_stat(&v, c.old_path.as_deref().unwrap_or(&c.path)).ok();
+                let after = fs.stat(&c.path).ok();
+                let size = |m: Option<crate::host::Meta>| m.filter(|m| m.kind != NodeKind::Dir).map(|m| m.size);
+                let change = match c.kind {
+                    FsChangeKind::Added if c.is_dir => ChangeKind::DirAdded,
+                    FsChangeKind::Added => ChangeKind::Added,
+                    FsChangeKind::Removed if c.is_dir => ChangeKind::DirRemoved,
+                    FsChangeKind::Removed => ChangeKind::Removed,
+                    FsChangeKind::Modified => ChangeKind::Modified,
+                    FsChangeKind::Moved => ChangeKind::Moved,
+                };
+                diff.push(DiffEntry { path: c.path, change, from: c.old_path, before: size(before), after: size(after) });
+            }
         }
+        if diff.is_empty() {
+            release(fs, &e.views);
+            return diff;
+        }
+        e.diff = super::diff::normalize(diff);
+        let out = e.diff.clone();
+        self.push(fs, e);
+        out
     }
 
     /// Vrati posledni prikaz a vrati jeho zaznam. Kdyz vraceni selze,
-    /// zaznam zustane (jde to zkusit znovu) a snapshot se nesmaze.
-    pub fn undo(&mut self, base: &mut dyn Fs) -> Result<UndoEntry, Error> {
+    /// zaznam zustane (jde to zkusit znovu) a pohledy se neuvolni.
+    pub fn undo(&mut self, fs: &mut dyn Fs) -> Result<UndoEntry, Error> {
         let e = self.entries.last().cloned().ok_or(Error::NotFound)?;
-        Self::restore(base, &e)?;
+        Self::restore(fs, &e)?;
         self.entries.pop();
-        if let Some(s) = &e.snapshot {
-            let _ = base.delete_snapshot(s);
-        }
+        release(fs, &e.views);
         Ok(e)
     }
 
-    fn restore(base: &mut dyn Fs, e: &UndoEntry) -> Result<(), Error> {
-        let snap = e.snapshot.as_deref();
-        // 1. smazane slozky zpet (od korene); soubor na jejich miste pryc
-        let mut dirs: Vec<&String> = e.prior.iter().filter(|(_, p)| *p == Prior::Dir).map(|(p, _)| p).collect();
-        dirs.sort_by_key(|p| p.len());
-        for d in dirs {
-            match base.stat(d) {
-                Ok(m) if m.kind == NodeKind::Dir => continue,
-                Ok(_) => base.remove(d)?,
-                Err(_) => {}
+    /// Kazdou zmenenou cestu srovna se stavem v pohledu: od korene (nejdriv
+    /// slozky, pak jejich obsah); co v pohledu neni, smaze.
+    fn restore(fs: &mut dyn Fs, e: &UndoEntry) -> Result<(), Error> {
+        let mut paths: Vec<&String> = e.diff.iter().flat_map(|d| d.paths()).collect();
+        paths.sort_by_key(|p| (p.matches('/').count(), key(p)));
+        paths.dedup_by(|a, b| key(a) == key(b));
+        // Slozka se srovna i s obsahem: cesty pod ni uz znovu ne.
+        let mut whole: Vec<&String> = Vec::new();
+        for p in paths {
+            if whole.iter().any(|w| within(p, w)) {
+                continue;
             }
-            base.mkdir(d)?;
-        }
-        // 2. puvodni obsah souboru (slozka na jejich miste pryc)
-        for (path, p) in &e.prior {
-            if let Prior::File(data) = p {
-                let content = match data {
-                    Some(d) => d.clone(),
-                    None => base.snapshot_read(snap.ok_or(Error::NotFound)?, path)?,
-                };
-                if matches!(base.stat(path), Ok(m) if m.kind == NodeKind::Dir) {
-                    remove_all(base, path)?;
-                }
-                base.write(path, &content)?;
-            }
-        }
-        // 3. nove vytvorene veci pryc (od listu)
-        let mut created: Vec<&String> = e.prior.iter().filter(|(_, p)| *p == Prior::Missing).map(|(p, _)| p).collect();
-        created.sort_by_key(|p| core::cmp::Reverse(p.len()));
-        for c in created {
-            match remove_all(base, c) {
-                Ok(()) | Err(Error::NotFound) => {}
-                Err(err) => return Err(err),
-            }
-        }
-        // 4. slozky zmenene programy
-        if let Some(s) = snap {
-            for t in &e.trees {
-                sync_tree(base, s, t)?;
+            let v = view_for(&e.views, p).ok_or(Error::NotFound)?;
+            sync_from_view(fs, v, p)?;
+            if matches!(fs.stat(p), Ok(m) if m.kind == NodeKind::Dir) {
+                whole.push(p);
             }
         }
         Ok(())
@@ -199,86 +239,68 @@ impl UndoLog {
 }
 
 /// Smaze soubor nebo slozku i s obsahem.
-pub fn remove_all(base: &mut dyn Fs, path: &str) -> FsResult<()> {
-    let m = base.stat(path)?;
+pub fn remove_all(fs: &mut dyn Fs, path: &str) -> FsResult<()> {
+    let m = fs.stat(path)?;
     if m.kind == NodeKind::Dir {
-        for e in base.list(path)? {
-            remove_all(base, &join(path, &e.name))?;
+        for e in fs.list_names(path)? {
+            remove_all(fs, &join(path, &e.name))?;
         }
     }
-    base.remove(path)
+    fs.remove(path)
 }
 
-/// Lisi se `path` od stavu ve snapshotu `snap`? Porovnava druh, velikost
-/// a cas zmeny; obsah cte jen tam, kde FS cas nezna.
-pub fn tree_differs(base: &mut dyn Fs, snap: &str, path: &str) -> FsResult<bool> {
-    let (old, cur) = match (base.snapshot_stat(snap, path), base.stat(path)) {
-        (Err(_), Err(_)) => return Ok(false),
-        (Ok(o), Ok(c)) => (o, c),
-        _ => return Ok(true),
+/// Lezi `path` (zive) v datasetu pohledu? Vnoreny dataset ma vlastni
+/// historii a pohled ho nevidi - srovnani se ho nesmi dotknout.
+fn own_dataset(fs: &mut dyn Fs, v: &ViewRef, path: &str) -> FsResult<bool> {
+    Ok(key(&super::draft::dataset_of(fs, path)?) == key(&v.dataset))
+}
+
+/// Srovna `path` se stavem v pohledu `v` (i s obsahem slozky). Vnorene
+/// datasety (v pohledu `NOT_SUPPORTED`, zive jiny dataset) preskoci.
+pub fn sync_from_view(fs: &mut dyn Fs, v: &ViewRef, path: &str) -> FsResult<()> {
+    let old = match fs.view_stat(v, path) {
+        Err(Error::NotSupported) => return Ok(()),
+        r => r,
     };
-    if old.kind != cur.kind {
-        return Ok(true);
+    if old.is_err() && fs.stat(path).is_ok() && !own_dataset(fs, v, path)? {
+        return Ok(());
     }
-    if old.kind == NodeKind::Dir {
-        let mut a: Vec<String> = base.snapshot_list(snap, path)?.into_iter().map(|e| e.name.to_lowercase()).collect();
-        let mut b: Vec<String> = base.list(path)?.into_iter().map(|e| e.name.to_lowercase()).collect();
-        a.sort();
-        b.sort();
-        if a != b {
-            return Ok(true);
-        }
-        for n in a {
-            if tree_differs(base, snap, &join(path, &n))? {
-                return Ok(true);
-            }
-        }
-        return Ok(false);
-    }
-    if old.size != cur.size {
-        return Ok(true);
-    }
-    match (old.mtime, cur.mtime) {
-        (Some(a), Some(b)) => Ok(a != b),
-        _ => Ok(base.snapshot_read(snap, path)? != base.read(path)?),
-    }
-}
-
-/// Srovna `path` se stavem ve snapshotu `snap`.
-pub fn sync_tree(base: &mut dyn Fs, snap: &str, path: &str) -> FsResult<()> {
-    let old = base.snapshot_stat(snap, path);
-    let cur = base.stat(path);
+    let cur = fs.stat(path);
     match (old, cur) {
-        (Err(_), Ok(_)) => remove_all(base, path),
+        (Err(_), Ok(_)) => remove_all(fs, path),
         (Err(_), Err(_)) => Ok(()),
         (Ok(o), cur) if o.kind == NodeKind::Dir => {
             match cur {
                 Ok(c) if c.kind == NodeKind::Dir => {}
                 Ok(_) => {
-                    base.remove(path)?;
-                    base.mkdir(path)?;
+                    fs.remove(path)?;
+                    fs.mkdir(path)?;
                 }
-                Err(_) => base.mkdir(path)?,
+                Err(_) => fs.mkdir(path)?,
             }
-            let mut names: Vec<String> = base.snapshot_list(snap, path)?.into_iter().map(|e| e.name).collect();
-            for e in base.list(path)? {
+            let mut names: Vec<String> = fs.view_list(v, path)?.into_iter().map(|e| e.name).collect();
+            for e in fs.list_names(path)? {
                 if !names.iter().any(|n| n.eq_ignore_ascii_case(&e.name)) {
                     names.push(e.name);
                 }
             }
             for n in names {
-                sync_tree(base, snap, &join(path, &n))?;
+                let child = join(path, &n);
+                if matches!(fs.stat(&child), Ok(m) if m.kind == NodeKind::Dir) && !own_dataset(fs, v, &child)? {
+                    continue;
+                }
+                sync_from_view(fs, v, &child)?;
             }
             Ok(())
         }
         (Ok(_), cur) => {
-            let data = base.snapshot_read(snap, path)?;
+            let data = fs.view_read(v, path)?;
             match cur {
-                Ok(c) if c.kind == NodeKind::Dir => remove_all(base, path)?,
-                Ok(_) if base.read(path).ok().as_deref() == Some(data.as_slice()) => return Ok(()),
+                Ok(c) if c.kind == NodeKind::Dir => remove_all(fs, path)?,
+                Ok(_) if fs.read(path).ok().as_deref() == Some(data.as_slice()) => return Ok(()),
                 _ => {}
             }
-            base.write(path, &data)
+            fs.write(path, &data)
         }
     }
 }

@@ -6,14 +6,16 @@
 //! pravidla se jmenem hostitele (`Auth::learn`, platnost podle TTL).
 //! Jmena na seznamu blokovanych domen firewallu = `ACCESS_DENIED`.
 //!
-//! TODO: mezipamet odpovedi podle TTL, DNSSEC/DoT/DoH (az s TLS).
+//! Systemovy preklad jde pres `dnsd` (sifrovane DNS, DNSSEC, mezipamet;
+//! `forward.rs`); tento resolver je pro dotazy na vlastni server a jako
+//! zaloha podle profilu site.
 
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::net::{IpAddr, SocketAddr};
 
-use libos::{Error, Result};
+use libos::{Error, Result, println};
 use netproto::auth::Usage;
 use netproto::fw::audit;
 use netproto::{ReadAddr, Reader, WriteAddr, Writer, dns, proto, rights};
@@ -21,6 +23,7 @@ use smoltcp::iface::SocketHandle;
 use smoltcp::socket::tcp::State;
 use smoltcp::wire::IpAddress;
 
+use crate::forward::{Forward, Outcome, outcome};
 use crate::fw::app_name;
 use crate::obj::{AuthRef, Deferred, Gate, Pending, Step, ask_wait, gate};
 use crate::stack::{PortProto, Stack, deadline, now_ns, v4};
@@ -28,6 +31,10 @@ use crate::tcp::to_sa;
 
 /// Opakovani dotazu (a prechod na dalsi server).
 const RETRY_NS: u64 = 1_000_000_000;
+/// Po tolika pokusech z jednoho mistniho portu novy port. Tok UDP muze
+/// cestou uvaznout (slirp na Windows drzi pro tok jeden socket hostitele;
+/// kdyz se ten pokazi, ztrati se kazdy dalsi pokus ze stejneho portu).
+const RETRIES_PER_PORT: u32 = 3;
 /// Dotaz bez limitu se po teto dobe vzda.
 const RESOLVE_MAX_NS: u64 = 30_000_000_000;
 /// Fronty socketu UDP resolveru (odpoved az `dns::EDNS_UDP`).
@@ -36,6 +43,12 @@ const UDP_TX: usize = 2048;
 /// Buffery spojeni TCP pro zkracene odpovedi (zprava DNS az 64 KiB).
 const TCP_RX: usize = 66 * 1024;
 const TCP_TX: usize = 2048;
+/// Spojeni TCP, ktere se do teto doby nenavaze, se zahodi a zkusi znovu
+/// (novy port). Slirp na Windows obcas spojeni na hostitele nechá viset
+/// ve stavu navazovani; jinak by dotaz cekal az do terminu.
+const TCP_CONNECT_RETRY_NS: u64 = 3_000_000_000;
+/// Nejvic pokusu o spojeni TCP na jeden dotaz.
+const TCP_ATTEMPTS: u8 = 3;
 
 struct Query {
     id: u16,
@@ -52,6 +65,8 @@ struct TcpDns {
     /// Dotazy s delkou u16 na zacatku, jeste neodeslane.
     out: Vec<u8>,
     inbuf: Vec<u8>,
+    /// Kdy zkusit nove spojeni, kdyz se toto do te doby nenavaze.
+    retry_at: u64,
     _usage: Usage,
 }
 
@@ -71,6 +86,9 @@ pub struct Resolve {
     /// Systemove servery (odpoved smi relace pouzit pro pravidla se jmenem).
     system: bool,
     tcp: Option<TcpDns>,
+    tcp_attempts: u8,
+    /// Pokusy z aktualniho mistniho portu.
+    sends_on_port: u32,
     _usage: Usage,
 }
 
@@ -84,6 +102,13 @@ pub struct ResolveReq {
 
 impl Resolve {
     pub fn wake_at(&self) -> u64 {
+        // Pres TCP se neopakuje (posun ridi pakety spojeni): jen termin.
+        // Driv tu byl i propadly cas opakovani UDP a sluzba se do terminu
+        // tocila naprazdno.
+        if let Some(t) = &self.tcp {
+            // A pripadne novy pokus o spojeni (viz `TCP_CONNECT_RETRY_NS`).
+            return if self.tcp_attempts < TCP_ATTEMPTS { t.retry_at.min(self.deadline) } else { self.deadline };
+        }
         self.next_retry.min(self.deadline)
     }
 
@@ -99,6 +124,25 @@ impl Resolve {
             stack.remove(t.sock);
             stack.release_port(PortProto::Tcp, t.port);
         }
+    }
+
+    /// Novy mistni port pro dalsi pokusy (stary socket se zavre; ID dotazu
+    /// zustavaji, odpoved na kterykoli pokus plati).
+    fn new_port(&mut self, stack: &mut Stack) {
+        let Ok(port) = stack.take_port(PortProto::Udp, 0) else {
+            return;
+        };
+        let sock = stack.new_udp(UDP_RX, UDP_TX);
+        if stack.udp(sock).bind(port).is_err() {
+            stack.remove(sock);
+            stack.release_port(PortProto::Udp, port);
+            return;
+        }
+        stack.remove(self.sock);
+        stack.release_port(PortProto::Udp, self.port);
+        self.sock = sock;
+        self.port = port;
+        self.sends_on_port = 0;
     }
 
     fn current_server(&self) -> SocketAddr {
@@ -118,6 +162,7 @@ impl Resolve {
             }
         }
         stack.note_udp_out(self.port, server);
+        self.sends_on_port += 1;
         self.next_retry = now_ns().saturating_add(RETRY_NS);
     }
 
@@ -151,8 +196,10 @@ impl Resolve {
             port,
             out,
             inbuf: Vec::new(),
+            retry_at: now_ns().saturating_add(TCP_CONNECT_RETRY_NS),
             _usage: usage,
         });
+        self.tcp_attempts += 1;
         Ok(())
     }
 
@@ -271,8 +318,16 @@ pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> 
             Vec::new(),
         ),
         None => {
-            let servers = stack.dns_servers().to_vec();
-            begin(stack, auth, name, family, servers, true, timeout)
+            if let Some(id) = stack.resolver.send(&netproto::policy::normalize_name(&name), family) {
+                return Ok(Step::Wait(Pending::Forward(Forward {
+                    id,
+                    name,
+                    family,
+                    deadline: deadline(timeout).min(now_ns().saturating_add(RESOLVE_MAX_NS)),
+                    timeout,
+                })));
+            }
+            fallback(stack, auth, name, family, timeout)
         }
     }
 }
@@ -338,10 +393,52 @@ fn begin(
         error: None,
         system,
         tcp: None,
+        tcp_attempts: 0,
+        sends_on_port: 0,
         _usage: usage,
     };
     res.send(stack);
     Ok(Step::Wait(Pending::Resolve(res)))
+}
+
+/// Neovereny systemovy resolver: bez dnsd vzdy, s dnsd jen kdyz to profil
+/// site dovoli (`unauthenticated = "fallback"`).
+fn fallback(stack: &mut Stack, auth: &AuthRef, name: String, family: u8, timeout: u64) -> Result<Step> {
+    if stack.resolver.configured && !stack.fw.unauthenticated_fallback {
+        return Err(Error::Unreachable);
+    }
+    let servers = stack.dns_servers().to_vec();
+    begin(stack, auth, name, family, servers, true, timeout)
+}
+
+/// Odpoved od dnsd, termin, nebo zaloha.
+pub fn progress_forward(stack: &mut Stack, auth: &AuthRef, f: Forward, now: u64) -> Step {
+    let outcome = match stack.resolver.take(f.id) {
+        Some(a) => outcome(&a),
+        None if now >= f.deadline || !stack.resolver.alive() => {
+            stack.resolver.forget(f.id);
+            Outcome::Fallback
+        }
+        None => return Step::Wait(Pending::Forward(f)),
+    };
+    match outcome {
+        Outcome::Addrs(addrs, ttl) => {
+            let name = netproto::policy::normalize_name(&f.name);
+            auth.borrow_mut().learn(&name, &addrs, ttl, now);
+            let mut w = Writer::new();
+            w.u16(addrs.len() as u16);
+            for a in &addrs {
+                w.ip(*a);
+            }
+            w.u32(ttl);
+            Step::reply(Ok(w))
+        }
+        Outcome::Fail(e) => Step::reply(Err(e)),
+        Outcome::Fallback => match fallback(stack, auth, f.name, f.family, f.timeout) {
+            Ok(step) => step,
+            Err(e) => Step::reply(Err(e)),
+        },
+    }
 }
 
 pub fn progress(stack: &mut Stack, auth: &AuthRef, mut res: Resolve, now: u64) -> Step {
@@ -359,6 +456,25 @@ pub fn progress(stack: &mut Stack, auth: &AuthRef, mut res: Resolve, now: u64) -
             q.done = true;
         }
         res.error = Some(e);
+    }
+    // Spojeni se nenavazalo: zahodit a zkusit znovu s novym portem.
+    let stuck = res.tcp.as_ref().is_some_and(|t| {
+        now >= t.retry_at && matches!(stack.tcp(t.sock).state(), State::SynSent | State::SynReceived)
+    });
+    if stuck && res.tcp_attempts < TCP_ATTEMPTS {
+        println!("netd: DNS pres TCP: spojeni se nenavazalo do 3 s, novy pokus ({})", res.tcp_attempts + 1);
+        res.close_tcp(stack);
+        if let Err(e) = res.start_tcp(stack, auth) {
+            for q in res.queries.iter_mut().filter(|q| !q.done && q.via_tcp) {
+                q.done = true;
+            }
+            res.error = Some(e);
+        }
+    } else if let Some(t) = res.tcp.as_mut()
+        && now >= t.retry_at
+    {
+        // Navazane (nebo posledni pokus): dal jen termin dotazu.
+        t.retry_at = u64::MAX;
     }
     res.poll_tcp(stack);
     if res.queries.iter().all(|q| q.done) {
@@ -378,6 +494,9 @@ pub fn progress(stack: &mut Stack, auth: &AuthRef, mut res: Resolve, now: u64) -
     }
     if now >= res.next_retry && res.tcp.is_none() {
         res.server += 1;
+        if res.sends_on_port >= RETRIES_PER_PORT {
+            res.new_port(stack);
+        }
         res.send(stack);
     }
     Step::Wait(Pending::Resolve(res))

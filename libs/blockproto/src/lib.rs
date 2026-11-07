@@ -40,6 +40,11 @@ pub mod op {
     /// vraci `NOT_SUPPORTED` (= zadne vlastnosti, tedy bez zaruky
     /// trvanlivosti).
     pub const FEATURES: u32 = 5;
+    /// Synchronizace: `value` = `lba` pozadavku (ozvena). Ovladac zpracovava
+    /// pozadavky po jednom v poradi, takze vse pred odpovedi na `SYNC` jsou
+    /// pozdni odpovedi na starsi pozadavky - nova instance klienta (restart
+    /// sluzby po padu, docs/cs/obnova-sluzeb.md) je zahodi.
+    pub const SYNC: u32 = 6;
     /// Test ochrany DMA (IOMMU): ovladac necha zarizeni zapsat do sve
     /// stranky, ktera neni DMA pamet. `value` = 1 zapis zablokovan, 0 ne.
     pub const TEST_DMA_PROTECTION: u32 = 100;
@@ -139,6 +144,32 @@ impl BlockClient {
             )?
             .0;
         Ok(c)
+    }
+
+    /// Jako [`Self::new`], ale nejdriv zahodi pozdni odpovedi predchozi
+    /// instance klienta na tomtez kanalu (konec drzel supervisor, viz
+    /// `op::SYNC`). `nonce` = libovolne cislo, ktere stara instance
+    /// nepouzila (napr. cas).
+    pub fn new_synced(channel: Channel, nonce: u64) -> Result<Self> {
+        let req = Request {
+            op: op::SYNC,
+            count: 0,
+            lba: nonce,
+        };
+        channel.write(&req.encode(&[]), Vec::new())?;
+        let deadline = libos::time::deadline_after(REPLY_TIMEOUT);
+        loop {
+            let m = channel.read(Some(deadline))?;
+            // Odpoved na SYNC: stav 0 a ozvena; cokoli jineho je pozdni
+            // odpoved stare instance.
+            if let Ok((value, _)) = decode_reply(&m.data)
+                && value == nonce
+                && m.data.len() == HEADER
+            {
+                break;
+            }
+        }
+        Self::new(channel)
     }
 
     /// Velikost zarizeni v sektorech po 512 B.

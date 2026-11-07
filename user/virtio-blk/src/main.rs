@@ -254,6 +254,7 @@ impl Disk {
                 )
             }
             op::FEATURES => (Ok(self.features()), Vec::new()),
+            op::SYNC => (Ok(req.lba), Vec::new()),
             op::FLUSH if self.flush => (self.request(REQ_FLUSH, 0, 0).map(|_| 0), Vec::new()),
             // Flush, ktery nic neudela, nesmi hlasit uspech.
             op::FLUSH => (Err(Error::NotSupported), Vec::new()),

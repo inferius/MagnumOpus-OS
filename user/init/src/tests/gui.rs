@@ -18,6 +18,7 @@ use guiproto::action::Value;
 use guiproto::control::*;
 use inputproto::code::*;
 use inputproto::device::{self, RawEvent};
+use libos::spawn::StartHandle;
 use libos::{Channel, Startup, println, time};
 
 use super::{Test, TestResult, devices, fail};
@@ -32,6 +33,8 @@ pub const TESTS: &[Test] = &[
     ("compd: bezpecna obrazovka po Ctrl+Alt+Del (QMP)", secure_screen),
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
     ("compd: spravce uloh a ikona uloh v panelu", task_manager),
+    // Posledni: kompozitor sady se ukonci.
+    ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
 ];
 
 /// Znacky pro xtask (musi sedet s `xtask/src/qmp.rs`, modul `gui`).
@@ -42,50 +45,50 @@ pub const QEMU_SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Barvy, ktere test ocekava na obrazovce (`libs/ui` a `libs/comp`).
-const UI_BG: u32 = 0xFF1E_232A;
-const BADGE: u32 = 0xFF1F_6F4E;
+pub(super) const UI_BG: u32 = 0xFF1E_232A;
+pub(super) const BADGE: u32 = 0xFF1F_6F4E;
 
-struct State {
-    gui: Gui,
-    inspect: Channel,
+pub(super) struct State {
+    pub(super) gui: Gui,
+    pub(super) inspect: Channel,
     /// Okno ukazky (id kompozitoru).
-    demo: u32,
+    pub(super) demo: u32,
 }
 
-static STATE: spin::Mutex<Option<State>> = spin::Mutex::new(None);
+pub(super) static STATE: spin::Mutex<Option<State>> = spin::Mutex::new(None);
 
-fn deadline() -> Option<u64> {
+pub(super) fn deadline() -> Option<u64> {
     Some(time::deadline_after(TIMEOUT))
 }
 
-fn ask(ch: &Channel, r: InspectRequest) -> Result<InspectReply, String> {
+pub(super) fn ask(ch: &Channel, r: InspectRequest) -> Result<InspectReply, String> {
     ch.write(&r.encode(), Vec::new()).map_err(|e| fail("inspekce: zapis", e))?;
     let m = ch.read(deadline()).map_err(|e| fail("inspekce: odpoved", e))?;
     InspectReply::decode(&m.data).map_err(|e| fail("inspekce: zprava", e))
 }
 
-fn settle(ch: &Channel) -> TestResult {
+pub(super) fn settle(ch: &Channel) -> TestResult {
     match ask(ch, InspectRequest::Settle)? {
         InspectReply::Done => Ok(()),
         o => Err(alloc::format!("settle: {o:?}")),
     }
 }
 
-fn windows(ch: &Channel) -> Result<Vec<WindowInfo>, String> {
+pub(super) fn windows(ch: &Channel) -> Result<Vec<WindowInfo>, String> {
     match ask(ch, InspectRequest::Windows)? {
         InspectReply::Windows(w) => Ok(w),
         o => Err(alloc::format!("windows: {o:?}")),
     }
 }
 
-fn tree(ch: &Channel, window: u32) -> Result<Vec<Node>, String> {
+pub(super) fn tree(ch: &Channel, window: u32) -> Result<Vec<Node>, String> {
     match ask(ch, InspectRequest::Tree { window })? {
         InspectReply::Tree(n) => Ok(n),
         o => Err(alloc::format!("tree: {o:?}")),
     }
 }
 
-fn pixel(ch: &Channel, x: i32, y: i32) -> Result<u32, String> {
+pub(super) fn pixel(ch: &Channel, x: i32, y: i32) -> Result<u32, String> {
     match ask(ch, InspectRequest::Pixel { x: x as u32, y: y as u32 })? {
         InspectReply::Pixel(p) => Ok(p),
         o => Err(alloc::format!("pixel: {o:?}")),
@@ -121,15 +124,15 @@ fn wait_window(ch: &Channel, app: &str) -> Result<WindowInfo, String> {
     }
 }
 
-fn has(t: &[Node], role: Role, name: &str) -> bool {
+pub(super) fn has(t: &[Node], role: Role, name: &str) -> bool {
     t.iter().any(|n| n.role == role && n.name == name)
 }
 
-fn node<'a>(t: &'a [Node], role: Role, name: &str) -> Result<&'a Node, String> {
+pub(super) fn node<'a>(t: &'a [Node], role: Role, name: &str) -> Result<&'a Node, String> {
     t.iter().find(|n| n.role == role && n.name == name).ok_or_else(|| alloc::format!("uzel {} '{name}' chybi", role.name()))
 }
 
-fn with<R>(f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
+pub(super) fn with<R>(f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
     let mut g = STATE.lock();
     let s = g.as_mut().ok_or("kompozitor nebezi (selhal prvni test)")?;
     f(s)
@@ -301,15 +304,26 @@ fn secure_screen(_: &Startup) -> TestResult {
 
 fn terminal_window(startup: &Startup) -> TestResult {
     with(|s| {
-        s.gui.launch(startup, "gui-term").map_err(|e| fail("spusteni gui-term", e))?;
+        // Jako v beznem behu: kanal pripojeni, termd spusti init
+        // (`terminal.rs`); smycku supervisoru tu nahrazuje `poll`.
+        let conn = crate::terminal::TERMINALS.lock().client("gui-term (test)").map_err(|e| fail("kanal terminalu", e))?;
+        s.gui
+            .launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
+            .map_err(|e| fail("spusteni gui-term", e))?;
+        let pump = || crate::terminal::TERMINALS.lock().poll(startup);
         let w = wait_window(&s.inspect, "org.magnumopus.terminal")?;
-        let t = wait_tree(&s.inspect, w.id, "okno terminalu", |t| t.iter().any(|n| n.role == Role::Terminal))?;
+        let t = wait_tree(&s.inspect, w.id, "uvitani terminalu", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.contains("Napište help"))
+        })?;
         check!(has(&t, Role::Titlebar, "Terminál"), "vlastni titulek je v pristupnosti");
         let term = t.iter().find(|n| n.role == Role::Terminal).unwrap();
-        check!(term.value.contains("Napište help"), "uvitani terminalu");
-        // Radek pres pristupnost (SET_VALUE = napsat a odeslat).
+        // Radek pres pristupnost (SET_VALUE = napsat a odeslat) jde do shellu.
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "echo ahoj z GUI".into() })?;
-        wait_tree(&s.inspect, w.id, "vystup prikazu", |t| t.iter().any(|n| n.role == Role::Terminal && n.value.contains("\nahoj z GUI")))?;
+        wait_tree(&s.inspect, w.id, "vystup prikazu", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "ahoj z GUI"))
+        })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
         check_eq!(pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?, BADGE, "odznak nad vlastnim titulkem");

@@ -9,15 +9,20 @@
 
 use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use shlang::eval::Interp;
-use shlang::host::{ExecNeeds, Fs, Host};
+use shlang::host::{ExecNeeds, Fs, Host, TaskDone, TaskSpec};
 use shlang::sig::Builtins;
 use shlang::value::Value;
-use shlang::{ShError, Style};
+use shlang::{ShError, Style, error::code};
 
 use crate::proto::{ClientMsg, Item, ServerMsg, VERSION};
+use crate::tasks::{self, Clock, Joinable, Notify};
+
+/// Nejdelsi cekani v `await` mezi kontrolami okna (Ctrl-C).
+const WAIT_STEP: i64 = 50_000_000;
 
 /// Spojeni s oknem terminalu (kanal v systemu, fronta v testech).
 pub trait Link {
@@ -28,12 +33,35 @@ pub trait Link {
     fn wait(&mut self) -> Option<ClientMsg>;
 }
 
-/// Zbytek prostredi (cas, spousteni programu).
+/// Zbytek prostredi (cas, spousteni programu, vlakna uloh).
+///
+/// Ulohy `async` bezi ve vlaknech jen kdyz prostredi umi vsechny ctyri
+/// casti (`spawn`, `task_fs`, `notifier`, `clock`); jinak probehnou na
+/// miste (postupne, stejny vysledek).
 pub trait Env {
     fn now(&mut self) -> Option<i64>;
     fn sleep(&mut self, ns: i64);
     fn exec(&mut self, _name: &str, _args: &[(Option<String>, Value)], _input: Value, _needs: &ExecNeeds)
         -> Option<Result<Value, ShError>> {
+        None
+    }
+    /// Spusti vlakno.
+    fn spawn(&mut self, _job: Box<dyn FnOnce() + Send>) -> Option<Box<dyn Joinable>> {
+        None
+    }
+    /// Nova relace FS pro ulohu (vlastni koncept, stejna prava).
+    fn task_fs(&mut self, _task: u64) -> Option<Box<dyn Fs + Send>> {
+        None
+    }
+    /// Probouzeni hlavniho vlakna (uloha neco poslala nebo dobehla).
+    fn notifier(&mut self) -> Option<Arc<dyn Notify>> {
+        None
+    }
+    /// Nove probouzeni pro jednu ulohu (odpoved na vyzvu, zruseni).
+    fn new_notifier(&mut self) -> Option<Arc<dyn Notify>> {
+        None
+    }
+    fn clock(&self) -> Option<Clock> {
         None
     }
 }
@@ -54,6 +82,64 @@ pub struct Session {
     pub interp: Interp,
     pub blocks: Vec<Block>,
     pub attached: bool,
+    /// Ulohy `async` ve vlaknech.
+    pub tasks: tasks::Shared,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        tasks::cancel_all(&self.tasks);
+    }
+}
+
+/// Zprava ulohy do bloku relace (blok ulohy je samostatny).
+fn apply(blocks: &mut Vec<Block>, keep: usize, m: ServerMsg) {
+    match m {
+        ServerMsg::BlockStart { block, line, .. } => {
+            blocks.push(Block { id: block, line, items: Vec::new(), ok: None, duration: 0 });
+            if blocks.len() > keep {
+                blocks.remove(0);
+            }
+        }
+        ServerMsg::Item { block, item, .. } => {
+            if let Some(b) = blocks.iter_mut().rev().find(|b| b.id == block) {
+                b.items.push(item);
+            }
+        }
+        ServerMsg::ItemUpdate { block, index, item, .. } => {
+            if let Some(b) = blocks.iter_mut().rev().find(|b| b.id == block)
+                && let Some(slot) = b.items.get_mut(index as usize)
+            {
+                *slot = item;
+            }
+        }
+        ServerMsg::BlockEnd { block, ok, duration, .. } => {
+            if let Some(b) = blocks.iter_mut().rev().find(|b| b.id == block) {
+                b.ok = Some(ok);
+                b.duration = duration;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Zpravy uloh: oknu (je-li pripojene) a do `log` (bloky relace).
+/// Vyzva bez okna se odmitne (jako u radku).
+fn pump(t: &tasks::Shared, next_prompt: &mut u64, attached: bool, link: &mut dyn Link, log: &mut Vec<ServerMsg>) {
+    for m in tasks::drain(t, next_prompt) {
+        if let ServerMsg::Prompt { prompt, .. } = &m {
+            if attached {
+                link.send(&m);
+            } else {
+                tasks::answer(t, *prompt, false);
+            }
+            continue;
+        }
+        if attached {
+            link.send(&m);
+        }
+        log.push(m);
+    }
 }
 
 pub struct Service {
@@ -68,6 +154,30 @@ pub struct Service {
     deferred: Vec<ClientMsg>,
     /// Rozpocet zasobniku interpretu (podle zasobniku sluzby).
     pub stack_budget: usize,
+    /// Rozpocet zasobniku interpretu ve vlakne ulohy.
+    pub task_stack: usize,
+    /// Proces jedne relace (`shsess`): jedine povolene cislo relace.
+    fixed: Option<u64>,
+}
+
+/// Zvyrazneni jako zprava protokolu.
+pub fn highlighted(seq: u32, h: &shlang::highlight::Highlight) -> ServerMsg {
+    let spans = h.spans.iter().map(|s| (s.start as u32, (s.end - s.start) as u32, s.class as u8)).collect();
+    let error = h.error.as_ref().map(|e| (e.start as u32, (e.end - e.start) as u32, e.message.clone()));
+    ServerMsg::Highlighted { seq, spans, error }
+}
+
+/// Spojeni bez okna (uklid ve volne chvili nic neposila).
+struct NullLink;
+
+impl Link for NullLink {
+    fn send(&mut self, _msg: &ServerMsg) {}
+    fn poll(&mut self) -> Option<ClientMsg> {
+        None
+    }
+    fn wait(&mut self) -> Option<ClientMsg> {
+        None
+    }
 }
 
 /// Hostitel interpretu pro jeden radek relace.
@@ -83,9 +193,60 @@ struct SessionHost<'a> {
     deferred: &'a mut Vec<ClientMsg>,
     home: &'a str,
     polls: u32,
+    /// Pruhy prubehu radku: (id od interpretu, poradi polozky v bloku).
+    bars: Vec<(u32, usize)>,
+    tasks: &'a tasks::Shared,
+    next_block: &'a mut u64,
+    task_stack: usize,
+    /// Zpravy uloh pro bloky relace (zapisou se po radku).
+    log: Vec<ServerMsg>,
 }
 
 impl SessionHost<'_> {
+    /// Pruh prubehu: prvni hlaseni prida polozku, dalsi ji zmeni na miste.
+    fn bar(&mut self, id: u32, done: u64, total: u64, label: &str) {
+        let item = Item::Progress { done, total, label: label.into() };
+        match self.bars.iter().find(|(b, _)| *b == id).map(|(_, i)| *i) {
+            Some(index) => {
+                self.block.items[index] = item.clone();
+                if *self.attached {
+                    self.link.send(&ServerMsg::ItemUpdate {
+                        session: self.session,
+                        block: self.block.id,
+                        index: index as u32,
+                        item,
+                    });
+                }
+            }
+            None => {
+                self.bars.push((id, self.block.items.len()));
+                self.push(item);
+            }
+        }
+    }
+
+    /// Vyzva a cekani na odpoved; `None` = zruseno (Ctrl-C, odpojeni).
+    fn ask(&mut self, question: &str, detail: Item, choices: &[String]) -> Option<ClientMsg> {
+        let id = *self.next_prompt;
+        *self.next_prompt += 1;
+        self.link.send(&ServerMsg::Prompt { prompt: id, question: question.into(), detail, choices: choices.to_vec() });
+        loop {
+            match self.link.wait() {
+                Some(m @ ClientMsg::Answer { prompt, .. }) | Some(m @ ClientMsg::Choose { prompt, .. }) if prompt == id => {
+                    return Some(m);
+                }
+                Some(m @ (ClientMsg::Interrupt { .. } | ClientMsg::Detach { .. })) => {
+                    self.incoming(m);
+                    return None;
+                }
+                Some(other) => self.deferred.push(other),
+                None => {
+                    *self.attached = false;
+                    return None;
+                }
+            }
+        }
+    }
     fn push(&mut self, item: Item) {
         if *self.attached {
             self.link.send(&ServerMsg::Item { session: self.session, block: self.block.id, item: item.clone() });
@@ -93,8 +254,23 @@ impl SessionHost<'_> {
         self.block.items.push(item);
     }
 
+    fn pump_tasks(&mut self) {
+        pump(self.tasks, self.next_prompt, *self.attached, self.link, &mut self.log);
+        // Odpoved, ktera prisla driv nez se vyzva ulohy zaregistrovala.
+        let tasks = self.tasks;
+        self.deferred.retain(|m| match m {
+            ClientMsg::Answer { prompt, yes } => !tasks::answer(tasks, *prompt, *yes),
+            _ => true,
+        });
+    }
+
     /// Zpracuje zpravu, ktera prisla behem prikazu.
     fn incoming(&mut self, m: ClientMsg) {
+        if let ClientMsg::Answer { prompt, yes } = &m
+            && tasks::answer(self.tasks, *prompt, *yes)
+        {
+            return;
+        }
         match m {
             ClientMsg::Interrupt { session } if session == self.session => self.interrupt = true,
             ClientMsg::Detach { session } if session == self.session => *self.attached = false,
@@ -121,12 +297,37 @@ impl Host for SessionHost<'_> {
     }
 
     fn sleep(&mut self, ns: i64) {
-        // Spi po kouscich, aby slo prerusit.
+        // Spi po kouscich, aby slo prerusit; delsi cekani s pruhem prubehu.
         let step = 50_000_000;
         let mut left = ns;
+        let long = ns >= 1_000_000_000;
+        let ms = |v: i64| (v.max(0) / 1_000_000) as u64;
         while left > 0 && !self.interrupted() {
+            if long {
+                self.bar(0, ms(ns - left), ms(ns), "sleep");
+            }
             self.env.sleep(left.min(step));
             left -= step;
+        }
+        if long {
+            self.bar(0, ms(ns), ms(ns), "sleep");
+        }
+    }
+
+    fn progress(&mut self, id: u32, done: u64, total: u64, label: &str) {
+        self.bar(id, done, total, label);
+    }
+
+    fn choose(&mut self, question: &str, choices: &[String]) -> Option<usize> {
+        if !*self.attached || choices.is_empty() {
+            return None;
+        }
+        match self.ask(question, Item::Note(String::new()), choices)? {
+            ClientMsg::Choose { index, .. } if (index as usize) < choices.len() => {
+                self.block.items.push(Item::Note(alloc::format!("{question} -> {}", choices[index as usize])));
+                Some(index as usize)
+            }
+            _ => None,
         }
     }
 
@@ -148,29 +349,13 @@ impl Host for SessionHost<'_> {
             self.push(Item::Note(alloc::format!("{question} - okno neni pripojene, odmitnuto")));
             return false;
         }
-        let id = *self.next_prompt;
-        *self.next_prompt += 1;
-        self.link.send(&ServerMsg::Prompt { prompt: id, question: question.into(), detail: Item::Value(detail.clone()) });
-        loop {
-            match self.link.wait() {
-                Some(ClientMsg::Answer { prompt, yes }) if prompt == id => {
-                    self.block.items.push(Item::Note(alloc::format!(
-                        "{question} -> {}",
-                        if yes { "ano" } else { "ne" }
-                    )));
-                    return yes;
-                }
-                Some(m @ (ClientMsg::Interrupt { .. } | ClientMsg::Detach { .. })) => {
-                    self.incoming(m);
-                    return false;
-                }
-                Some(other) => self.deferred.push(other),
-                None => {
-                    *self.attached = false;
-                    return false;
-                }
-            }
-        }
+        let yes = match self.ask(question, Item::Value(detail.clone()), &[]) {
+            Some(ClientMsg::Answer { yes, .. }) => yes,
+            Some(ClientMsg::Choose { index, .. }) => index == 0,
+            _ => false,
+        };
+        self.block.items.push(Item::Note(alloc::format!("{question} -> {}", if yes { "ano" } else { "ne" })));
+        yes
     }
 
     fn exec(&mut self, name: &str, args: &[(Option<String>, Value)], input: Value, needs: &ExecNeeds)
@@ -180,6 +365,87 @@ impl Host for SessionHost<'_> {
 
     fn home(&self) -> String {
         self.home.into()
+    }
+
+    fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {
+        let notify = self.env.notifier()?;
+        let clock = self.env.clock()?;
+        let wire = match tasks::SpecWire::of(&spec) {
+            Ok(w) => w,
+            Err(e) => return Some(Err(e)),
+        };
+        let id = *self.next_block;
+        let fs = self.env.task_fs(id)?;
+        *self.next_block += 1;
+        let cancel = tasks::register(self.tasks, id, self.env.new_notifier());
+        let (table, n, session, home, budget) =
+            (self.tasks.clone(), notify.clone(), self.session, String::from(self.home), self.task_stack);
+        let job = Box::new(move || tasks::run(table, n, clock, cancel, fs, session, id, id, home, wire, budget));
+        let Some(join) = self.env.spawn(job) else {
+            // Vlakno nejde spustit: uloha probehne na miste.
+            tasks::remove(self.tasks, id);
+            return None;
+        };
+        tasks::set_join(self.tasks, id, join);
+        let mut line = String::from("async ");
+        line.push_str(&spec.label);
+        let m = ServerMsg::BlockStart { session, block: id, line };
+        if *self.attached {
+            self.link.send(&m);
+        }
+        self.log.push(m);
+        Some(Ok(id))
+    }
+
+    fn task_wait(&mut self, ids: &[u64], any: bool, deadline: Option<i64>) -> Result<Vec<TaskDone>, ShError> {
+        let notify = self.env.notifier();
+        loop {
+            self.pump_tasks();
+            if let Some(bad) = ids.iter().find(|i| !tasks::exists(self.tasks, **i)) {
+                return Err(ShError::new(code::ARGS, alloc::format!("uloha {bad} neexistuje")));
+            }
+            let done: Vec<u64> = ids.iter().copied().filter(|i| tasks::is_done(self.tasks, *i)).collect();
+            let failed = !any && done.iter().any(|i| tasks::failed(self.tasks, *i));
+            if (any && !done.is_empty()) || done.len() == ids.len() || failed {
+                let out = done.into_iter().filter_map(|i| tasks::take(self.tasks, i)).collect();
+                // Posledni zpravy vyzvednutych uloh (konec bloku) hned oknu.
+                self.pump_tasks();
+                return Ok(out);
+            }
+            // Termin nejdriv: vyzvednuti bez cekani (volna chvile, `reap`)
+            // nesmi cist zpravy okna - radek nebo Ctrl-C by se odlozil
+            // a zrusil ulohy na pozadi.
+            let now = self.env.now();
+            let mut step = WAIT_STEP;
+            if let Some(d) = deadline {
+                match now {
+                    Some(n) if n < d => step = step.min(d - n),
+                    _ => return Err(ShError::sys(abi::Error::TimedOut, "await: cas vyprsel (ulohy bezi dal)")),
+                }
+            }
+            // Okno kazde kolo (Ctrl-C, odpovedi na vyzvy uloh).
+            if *self.attached {
+                while let Some(m) = self.link.poll() {
+                    self.incoming(m);
+                }
+            }
+            if self.interrupt {
+                for i in ids {
+                    tasks::cancel(self.tasks, *i);
+                }
+                return Err(ShError::new(code::INTERRUPTED, "await prerusen (Ctrl-C), ulohy zruseny"));
+            }
+            match &notify {
+                Some(n) => n.wait(step),
+                None => self.env.sleep(step),
+            }
+        }
+    }
+
+    fn task_cancel(&mut self, id: u64) -> Option<TaskDone> {
+        let d = tasks::cancel(self.tasks, id);
+        self.pump_tasks();
+        d
     }
 }
 
@@ -194,6 +460,107 @@ impl Service {
             keep_blocks: 200,
             deferred: Vec::new(),
             stack_budget: 512 * 1024,
+            task_stack: 160 * 1024,
+            fixed: None,
+        }
+    }
+
+    /// Sluzba jedne relace s cislem `session` (proces relace). Cisla bloku
+    /// a vyzev lezi v rozsahu relace ([`crate::broker::id_base`]), takze je
+    /// prostrednik smeruje bez tabulky.
+    pub fn single(home: &str, session: u64) -> Self {
+        let mut s = Self::new(home);
+        s.fixed = Some(session);
+        s.next_block = crate::broker::id_base(session);
+        s.next_prompt = crate::broker::id_base(session);
+        s
+    }
+
+    /// Volna chvile: klony k zahozeni (po prevzeti radku) opravdu zahodit.
+    fn flush(&mut self, fs: &mut dyn Fs, env: &mut dyn Env) {
+        let task_stack = self.task_stack;
+        let mut next_block = 0;
+        for s in &mut self.sessions {
+            if !s.interp.has_flush() {
+                continue;
+            }
+            let mut block = Block { id: 0, line: String::new(), items: Vec::new(), ok: None, duration: 0 };
+            let mut attached = false;
+            let mut link = NullLink;
+            let mut next_prompt = 0;
+            let mut deferred = Vec::new();
+            let mut host = SessionHost {
+                fs: &mut *fs,
+                link: &mut link,
+                env: &mut *env,
+                session: s.id,
+                block: &mut block,
+                attached: &mut attached,
+                interrupt: false,
+                next_prompt: &mut next_prompt,
+                deferred: &mut deferred,
+                home: &self.home,
+                polls: 0,
+                bars: Vec::new(),
+                tasks: &s.tasks,
+                next_block: &mut next_block,
+                task_stack,
+                log: Vec::new(),
+            };
+            s.interp.flush(&mut host);
+        }
+    }
+
+    /// Ceka nejaka uloha na pozadi (`bg` nebo `async`)?
+    pub fn has_jobs(&self) -> bool {
+        self.sessions.iter().any(|s| {
+            s.interp.jobs.iter().any(|j| j.state == shlang::eval::JobState::Pending) || s.interp.tasks_running() > 0
+        })
+    }
+
+    /// Zpravy uloh do okna a bloku; dobehle ulohy prevezme interpret
+    /// (vysledek pro pozdejsi `await`, undo).
+    fn pump_tasks(&mut self, link: &mut dyn Link, fs: &mut dyn Fs, env: &mut dyn Env) {
+        let keep = self.keep_blocks;
+        let task_stack = self.task_stack;
+        let Service { sessions, next_prompt, next_block, deferred, home, .. } = self;
+        for s in sessions.iter_mut() {
+            let mut log = Vec::new();
+            pump(&s.tasks, next_prompt, s.attached, link, &mut log);
+            for m in log {
+                apply(&mut s.blocks, keep, m);
+            }
+            for undo in tasks::take_late(&s.tasks) {
+                s.interp.undo.adopt(&mut *fs, undo);
+            }
+            if s.interp.tasks_running() == 0 {
+                continue;
+            }
+            let Session { id, interp, attached, tasks, blocks } = s;
+            let mut block = Block { id: 0, line: String::new(), items: Vec::new(), ok: None, duration: 0 };
+            let mut host = SessionHost {
+                fs: &mut *fs,
+                link: &mut *link,
+                env: &mut *env,
+                session: *id,
+                block: &mut block,
+                attached,
+                interrupt: false,
+                next_prompt: &mut *next_prompt,
+                deferred: &mut *deferred,
+                home,
+                polls: 0,
+                bars: Vec::new(),
+                tasks: &*tasks,
+                next_block: &mut *next_block,
+                task_stack,
+                log: Vec::new(),
+            };
+            interp.reap_tasks(&mut host);
+            let log = core::mem::take(&mut host.log);
+            for m in log {
+                apply(blocks, keep, m);
+            }
         }
     }
 
@@ -202,11 +569,11 @@ impl Service {
     }
 
     fn new_session(&mut self) -> u64 {
-        let id = self.next_session;
+        let id = self.fixed.unwrap_or(self.next_session);
         self.next_session += 1;
         let mut interp = Interp::new(Box::new(Builtins), &self.home);
         interp.stack_budget = self.stack_budget;
-        self.sessions.push(Session { id, interp, blocks: Vec::new(), attached: false });
+        self.sessions.push(Session { id, interp, blocks: Vec::new(), attached: false, tasks: tasks::shared() });
         id
     }
 
@@ -223,7 +590,8 @@ impl Service {
         match msg {
             ClientMsg::Hello { .. } => link.send(&ServerMsg::Welcome { version: VERSION }),
             ClientMsg::Attach { session } => {
-                let id = if session == 0 { self.new_session() } else { session };
+                let first = self.fixed.is_some_and(|f| f == session) && self.sessions.is_empty();
+                let id = if session == 0 || first { self.new_session() } else { session };
                 let Some(i) = self.session_index(id) else {
                     link.send(&ServerMsg::Fail { message: alloc::format!("relace {id} neexistuje") });
                     return;
@@ -248,8 +616,16 @@ impl Service {
                 }
             }
             ClientMsg::Run { session, line } => self.run(session, &line, link, fs, env),
-            ClientMsg::Interrupt { .. } | ClientMsg::Answer { .. } => {}
-            ClientMsg::Complete { session, line, cursor } => {
+            ClientMsg::Answer { prompt, yes } => {
+                // Odpoved na vyzvu ulohy (radek uz dobehl, uloha bezi).
+                for s in &self.sessions {
+                    if tasks::answer(&s.tasks, prompt, yes) {
+                        break;
+                    }
+                }
+            }
+            ClientMsg::Interrupt { .. } | ClientMsg::Choose { .. } => {}
+            ClientMsg::Complete { session, line, cursor, seq } => {
                 let Some(i) = self.session_index(session) else {
                     link.send(&ServerMsg::Fail { message: alloc::format!("relace {session} neexistuje") });
                     return;
@@ -265,19 +641,31 @@ impl Service {
                 };
                 let (start, c) = shlang::complete::complete(&line, cursor as usize, &mut ctx);
                 let items = c.into_iter().map(|c| (c.text, c.kind as u8, c.help)).collect();
-                link.send(&ServerMsg::Completions { start: start as u32, items });
+                link.send(&ServerMsg::Completions { seq, start: start as u32, items });
             }
-            ClientMsg::Format { session, line, style } => {
+            ClientMsg::Format { session, line, style, seq } => {
                 let vars = self.session_index(session).map(|i| self.sessions[i].interp.var_names()).unwrap_or_default();
                 let to = if style == 1 { Style::C } else { Style::B };
                 let parsed = shlang::parse(&line, &shlang::Options { style: None, sigs: &Builtins, vars: vars.clone(), script: false });
                 match parsed {
                     Ok(p) => {
                         let text = shlang::fmt::format_line(&p.script, &shlang::fmt::FmtOptions { style: to, sigs: &Builtins, vars });
-                        link.send(&ServerMsg::Formatted { text });
+                        link.send(&ServerMsg::Formatted { seq, text });
                     }
                     Err(e) => link.send(&ServerMsg::Fail { message: e.report(&line) }),
                 }
+            }
+            ClientMsg::Highlight { session, line, seq } => {
+                let Some(i) = self.session_index(session) else {
+                    link.send(&ServerMsg::Fail { message: alloc::format!("relace {session} neexistuje") });
+                    return;
+                };
+                let s = &self.sessions[i];
+                let vars = s.interp.var_names();
+                let commands = s.interp.fn_names();
+                let ctx = shlang::highlight::Ctx { sigs: &*s.interp.sigs, vars: &vars, commands: &commands };
+                let h = shlang::highlight::highlight(&line, Some(&ctx));
+                link.send(&highlighted(seq, &h));
             }
             ClientMsg::Sessions => {
                 let sessions =
@@ -301,9 +689,9 @@ impl Service {
         id
     }
 
-    fn end_block(&mut self, i: usize, ok: bool, duration: i64, link: &mut dyn Link) {
+    fn end_block(&mut self, i: usize, block: u64, ok: bool, duration: i64, link: &mut dyn Link) {
         let s = &mut self.sessions[i];
-        let b = s.blocks.last_mut().unwrap();
+        let Some(b) = s.blocks.iter_mut().rev().find(|b| b.id == block) else { return };
         b.ok = Some(ok);
         b.duration = duration;
         if s.attached {
@@ -319,29 +707,36 @@ impl Service {
         };
         self.start_block(i, line, link);
         let start = env.now();
-        let Service { sessions, next_prompt, deferred, home, .. } = self;
+        let (keep, task_stack) = (self.keep_blocks, self.task_stack);
+        let Service { sessions, next_prompt, next_block, deferred, home, .. } = self;
         let s = &mut sessions[i];
-        let Session { id, interp, blocks, attached } = s;
-        let block = blocks.last_mut().unwrap();
+        let Session { id, interp, blocks, attached, tasks } = s;
+        let mut line_block = blocks.pop().unwrap();
+        let line_id = line_block.id;
         let mut host = SessionHost {
             fs,
             link: &mut *link,
             env,
             session: *id,
-            block,
+            block: &mut line_block,
             attached,
             interrupt: false,
             next_prompt,
             deferred,
             home,
             polls: 0,
+            bars: Vec::new(),
+            tasks: &*tasks,
+            next_block,
+            task_stack,
+            log: Vec::new(),
         };
         let out = interp.run_line(&mut host, line);
         for w in out.warnings {
             host.push(Item::Warning(w.message));
         }
         if !out.diff.is_empty() {
-            host.push(Item::Diff(shlang::vfs::overlay::diff_value(&out.diff)));
+            host.push(Item::Diff(shlang::vfs::diff::diff_value(&out.diff)));
         }
         let ok = out.result.is_ok();
         if let Err(e) = out.result {
@@ -351,12 +746,19 @@ impl Service {
             (Some(a), Some(b)) => b - a,
             _ => 0,
         };
-
-        self.end_block(i, ok, duration, link);
+        // Blok radku zustava pred bloky uloh, ktere spustil.
+        let log = core::mem::take(&mut host.log);
+        blocks.push(line_block);
+        for m in log {
+            apply(blocks, keep, m);
+        }
+        self.end_block(i, line_id, ok, duration, link);
     }
 
     /// Shell je volny: dobehnou ulohy na pozadi (kazda jako blok).
     pub fn idle(&mut self, link: &mut dyn Link, fs: &mut dyn Fs, env: &mut dyn Env) {
+        self.pump_tasks(link, fs, env);
+        self.flush(fs, env);
         for i in 0..self.sessions.len() {
             let pending = self.sessions[i]
                 .interp
@@ -371,22 +773,28 @@ impl Service {
             // Vsechny cekajici ulohy relace dobehnou v jednom bloku.
             let label: Vec<String> = pending.iter().map(|(jid, line)| alloc::format!("[{jid}] {line}")).collect();
             {
-                self.start_block(i, &label.join(", "), link);
-                let Service { sessions, next_prompt, deferred, home, .. } = self;
-                let Session { id, interp, blocks, attached } = &mut sessions[i];
-                let block = blocks.last_mut().unwrap();
+                let bid = self.start_block(i, &label.join(", "), link);
+                let (keep, task_stack) = (self.keep_blocks, self.task_stack);
+                let Service { sessions, next_prompt, next_block, deferred, home, .. } = self;
+                let Session { id, interp, blocks, attached, tasks } = &mut sessions[i];
+                let mut job_block = blocks.pop().unwrap();
                 let mut host = SessionHost {
                     fs: &mut *fs,
                     link: &mut *link,
                     env: &mut *env,
                     session: *id,
-                    block,
+                    block: &mut job_block,
                     attached,
                     interrupt: false,
                     next_prompt,
                     deferred,
                     home,
                     polls: 0,
+                    bars: Vec::new(),
+                    tasks: &*tasks,
+                    next_block,
+                    task_stack,
+                    log: Vec::new(),
                 };
                 let results = interp.run_pending_jobs(&mut host);
                 let mut ok = true;
@@ -403,7 +811,12 @@ impl Service {
                         }
                     }
                 }
-                self.end_block(i, ok, 0, link);
+                let log = core::mem::take(&mut host.log);
+                blocks.push(job_block);
+                for m in log {
+                    apply(blocks, keep, m);
+                }
+                self.end_block(i, bid, ok, 0, link);
             }
         }
     }

@@ -11,7 +11,7 @@
 //! casti roury je prikaz, pokud to neni promenna ani klicove slovo. Podle
 //! rozsahu se rozhoduje i v podmince `where` (pole radku vs promenna).
 
-mod cmd;
+pub(crate) mod cmd;
 mod expr;
 
 pub use cmd::usage;
@@ -115,7 +115,8 @@ const PARSE_STACK: usize = 64 * 1024;
 
 
 const KEYWORDS: &[&str] = &[
-    "let", "fn", "if", "else", "for", "in", "while", "return", "break", "continue", "try", "bg", "true", "false",
+    "let", "fn", "if", "else", "for", "in", "while", "return", "break", "continue", "try", "bg", "async", "await",
+    "true", "false",
     "null", "lang", "needs",
 ];
 
@@ -436,6 +437,32 @@ impl<'a> Parser<'a> {
             match w.as_str() {
                 "let" => {
                     self.next()?;
+                    self.lx.skip_space();
+                    if self.lx.peek_char() == Some('(') {
+                        // `let (a, b) = seznam`
+                        self.lx.bump();
+                        let mut names = Vec::new();
+                        loop {
+                            self.lx.skip_space();
+                            let (n, _) = self.expect_ident()?;
+                            names.push(n);
+                            self.lx.skip_space();
+                            if self.lx.peek_char() == Some(',') {
+                                self.lx.bump();
+                                continue;
+                            }
+                            self.expect_punct(")")?;
+                            break;
+                        }
+                        self.lx.skip_space();
+                        self.expect_punct("=")?;
+                        self.lx.skip_space_nl();
+                        let value = self.chain()?;
+                        for n in &names {
+                            self.declare(n);
+                        }
+                        return Ok(Stmt::LetList { names, value, span: Span::new(start, self.lx.pos) });
+                    }
                     let (name, _) = self.expect_ident()?;
                     self.expect_punct("=")?;
                     self.lx.skip_space_nl();

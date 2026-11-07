@@ -28,13 +28,25 @@ výpadku proudu pro testy FS).
 2. `devmgr`: najde zařízení a spustí ovladače. Hlásí disky (`block`)
    a vstupní zařízení (`input`) a pak `done`, až jsou hotová i zařízení
    USB při startu,
-3. `fsd` nad diskem se souborovým systémem,
+3. `fsd` nad diskem se souborovým systémem; init připraví úložiště
+   kořenových certifikátů `/system/config/certs` (viz
+   [TLS a HTTP](tls-http.md#úložiště-kořenových-certifikátů)),
 4. `inputd`: init mu předá vstupní zařízení, svůj kanál fokusu a kanál
    `secure` a pošle `settled` (zařízení připojená teď jsou důvěryhodná),
-5. `netd` nad první síťovou kartou a `fwd` (firewall, konfigurace na FS),
+5. `netd` nad první síťovou kartou (s kanálem pro `dnsd`), `fwd` (firewall,
+   konfigurace na FS) a `dnsd` (šifrované DNS a DNSSEC, viz
+   [Síť](sit.md#šifrované-dns-a-dnssec-dnsd)),
    oba v jobech podle svých manifestů (viz [Síť](sit.md),
-   [Firewall](firewall.md)),
-6. všechny tyto procesy předá supervisoru k hlídání.
+   [Firewall](firewall.md)), potom `ntpd` (synchronizace času, viz
+   [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd)) a `revocd`
+   (odvolání certifikátů, viz [TLS a HTTP](tls-http.md#odvolání-certifikátů)),
+6. všechny tyto procesy předá supervisoru k hlídání,
+7. v běžném běhu GUI (`compd`, okna `gui-term` a `gui-demo`), bez GUI
+   záložní konzoli (viz [Terminál](#terminál)).
+
+Konfiguraci `fsd` (první zpráva řídicího kanálu) posílá init vždy:
+`debug` v testovacím běhu, jinak `normal`. fsd na ni před připojením
+disku čeká.
 
 ## Supervisor
 
@@ -46,7 +58,10 @@ Smyčka čeká na kanál správce zařízení a na konec hlídaných procesů:
 | `devmgr` pošle `block` | zatím jen zaloguje (disky za běhu přijdou s více disky v `fsd`) |
 | `devmgr` zavře kanál | zaloguje, hotplug přestane fungovat |
 | skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na potvrzení nové služby nečeká blokující: její kanál je další položka smyčky. Když do 5 s neodpoví (nebo odpoví chybou), ukončí ji a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
-| skončila jiná služba (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`) | zaloguje kód. Obnova zatím není (viz níže) |
+| okno terminálu pošle `connect`, `termd` skončí | spustí `termd`, obslouží registr relací (viz [Terminál](#terminál)) |
+| skončil `compd` | zaloguje a spustí záložní konzoli |
+| skončila služba s adaptérem v registru | jako u `timed`, navíc v pořadí závislostí: služby s `Dep::restart` na spadlé službě ukončí a spustí po ní, služby s `Dep::notify` dostanou oznámení; klienti se připojí přes lístky (viz [Obnova služeb](obnova-sluzeb.md)) |
+| skončila jen hlídaná služba (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`, dokud je nezapojí jejich vlákna) | zaloguje kód. Obnova zatím není (viz níže) |
 
 Log při pádu služby:
 
@@ -57,9 +72,9 @@ init: sluzba timed znovu spustena
 init: sluzba timed spadla 6x za 60 s, vzdavam to
 ```
 
-Kód je v `user/init/src/supervisor.rs`. Jedno kolo je
+Kód je v `user/init/src/supervisor/` (`mod.rs` smyčka, `lifecycle.rs` restart a závislosti, `leases.rs` lístky, `service.rs` adaptér). Jedno kolo je
 `Supervisor::step(startup, deadline)`. Vrací, co se stalo
-(`DeviceAdded`, `Exited`, `Restarted`, `GaveUp`, `DevmgrGone`), takže ho
+(`DeviceAdded`, `Exited`, `Restarted`, `GaveUp`, `Stopped`, `Notified`, `Reconnected`, `DevmgrGone`), takže ho
 testy řídí stejně jako běžný běh, jen s termínem. Novou službu
 supervisoru předá `watch(jméno, proces, restart)`, kde `restart` je
 `Restart { start, ready }` (`None` = jen hlídat). `start` spustí nový
@@ -74,23 +89,49 @@ sup.watch("fsd", &fsd_process, None);
 sup.run(&startup); // nikdy se nevrátí
 ```
 
-## Proč se zatím neobnovuje `inputd`, `fsd`, `netd` a `devmgr`
+## Terminál
 
-Spadlá služba zavře kanály ke svým ovladačům a klientům a ti pak skončí.
-Ovladač vstupu při zavření kanálu ke službě skončí. Nová `inputd` by tak
-neměla žádná zařízení a `devmgr` by musel spustit ovladače znovu. U USB by
-navíc musel řadič znovu projít porty. Obnova tedy potřebuje:
+V běžném běhu je terminál okno `gui-term` (GUI) a bez GUI záložní konzole
+`console` nad framebufferem z firmware. Obě kreslí interaktivní terminál
+`term::ui`; shell běží ve službě relací `termd` a relace ve vlastních
+procesech `shsess` (viz [Shell](navrh-shell.md)). Kód je
+v `user/init/src/terminal.rs`.
 
-- ovladače, které při ztrátě služby nekončí a počkají na nové spojení
-  (přes `devmgr`),
-- restart se závislostmi (pád `devmgr` = znovu spustit i služby nad
-  ovladači),
-- u `fsd` připojení stejného disku a obnovu relací klientů,
-- u `netd` nové relace pro programy (každý socket je kanál, s pádem služby
-  zaniknou) a znovu spustit `fwd` s novým kanálem k `netd`.
+```text
+gui-term ──connect──▶ init (supervisor) ──spustí──▶ termd ──▶ shsess (relace)
+    ▲                      │ registr relací okna          │
+    └──── kanál k termd ───┘ (náhradní konce relací) ◀────┘
+```
 
-To je další krok supervisoru. Mechanismus v `watch` / `restart` je na něj
-připravený.
+- Okno dostane od initu **kanál připojení** (druhý handle startovní
+  zprávy, za kanálem okna). Na zprávu `connect` init spustí `termd`
+  (vlastní relace fsd, obraz initfs, kanál registru) a odpoví `ok`
+  s kanálem k němu, nebo `err <KÓD>`.
+- **Pád termd:** okno uvidí zavřený kanál a požádá znovu. Nový `termd` si
+  z registru převezme relace (`shsess` běží dál), takže se okno připojí ke
+  stejné relaci i s historií bloků. Každé okno má vlastní registr, nový
+  termd jednoho okna tak nepřevezme relace jiného. Nejvýš 10 startů termd
+  za 60 s na okno, pak init odmítne (`err NO_RESOURCES`) a okno to zkouší
+  s rostoucí prodlevou (nejvýš 5 s).
+- **Záložní konzole:** když GUI nenaběhne (bez virtio-gpu) nebo kompozitor
+  spadne (supervisor uvidí konec `compd`), init spustí `console`, předá jí
+  framebuffer z firmware (`display`) a fokus od `inputd` (`focus`) a ta se
+  připojí stejně jako okno.
+- **Úvodní nápověda:** nová relace začne blokem s nápovědou (`help`, pár
+  příkladů, klávesy).
+
+⚠️ **Omezení:** po pádu kompozitoru zůstanou okna aplikací pryč (restart
+`compd` zatím není). Jestli je framebuffer z firmware po převzetí obrazu
+ovladačem virtio-gpu ještě vidět, záleží na zařízení (QEMU q35 s VGA ano).
+
+## Obnova `inputd`, `fsd`, `netd`, `compd` a `devmgr`
+
+Společný protokol (registr služeb se závislostmi, lístky, držák konců
+ovladačů, pravidla pro knihovny klientů) popisuje stránka
+[Obnova služeb](obnova-sluzeb.md). Registr (`register(Spec { name, deps,
+service }, proces)`) a lístky jsou v supervisoru hotové; adaptéry
+jednotlivých služeb zapojují jejich vlákna. Do té doby se tyto služby jen
+hlídají přes `watch(jméno, proces, None)`.
 
 ## Testovací běh
 

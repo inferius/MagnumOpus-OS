@@ -1,9 +1,9 @@
 //! Proudy bajtu: spolecne rozhrani pro TCP a vrstvy nad nim.
 //!
-//! [`TcpStream`](crate::TcpStream) implementuje [`Read`] a [`Write`]. TLS
-//! (pozdeji) bude obal `TlsStream<S: Read + Write>`, ktery implementuje
-//! totez, a klient HTTP bude pracovat s libovolnym `Read + Write` - nad
-//! holym TCP i nad TLS stejne. Proto tu nic nezavisi na TCP.
+//! `TcpStream` (feature `client`) implementuje [`Read`] a [`Write`]. TLS
+//! (`libs/tls`, `TlsStream<S: Read + Write>`) implementuje totez a klient
+//! HTTP (`libs/http`) pracuje s libovolnym `Read + Write` - nad holym TCP
+//! i nad TLS stejne. Proto tu nic nezavisi na TCP ani na libos.
 
 use abi::{Error, Result};
 
@@ -35,6 +35,22 @@ pub trait Read {
             }
             out.extend_from_slice(&chunk[..n]);
         }
+    }
+}
+
+impl<T: Read + ?Sized> Read for &mut T {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        (**self).read(buf)
+    }
+}
+
+impl<T: Write + ?Sized> Write for &mut T {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        (**self).write(buf)
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        (**self).flush()
     }
 }
 

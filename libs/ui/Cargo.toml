@@ -7,10 +7,12 @@ description = "Nativni knihovna UI: deklarativni prvky, rozvrzeni, kresleni, vst
 
 [features]
 # Behove prostredi pro aplikace v OS (kanal ke kompozitoru, VMO bufferu).
-os = ["dep:libos"]
+os = ["dep:libos", "dep:svcclient"]
 
 [dependencies]
 guiproto = { path = "../guiproto" }
 gfx = { path = "../gfx" }
 inputproto = { path = "../inputproto" }
 libos = { path = "../libos", optional = true }
+# Obnova okna po padu kompozitoru (listek k supervisoru).
+svcclient = { path = "../svcclient", features = ["client"], optional = true }

@@ -5,8 +5,9 @@
 //! testovacimi daty (`taskview::TestBackend`); pak dostane od initu kanal
 //! na taskd a zdroj se vymeni (protokol `libs/taskproto`).
 //!
-//! Startovni zprava (kind USER): 1. kanal okna ke kompozitoru, 2. volitelne
-//! kanal na taskd, ktery razi init (identita uzivatele, akce jen nad
+//! Startovni zprava (kind USER): 1. kanal okna ke kompozitoru, 2. listek
+//! k supervisoru (obnova okna po padu kompozitoru), 3. volitelne kanal na
+//! taskd, ktery razi init (identita uzivatele, akce jen nad
 //! vlastnimi ulohami). Bez nej bezi nad testovacimi daty.
 
 #![no_std]
@@ -21,8 +22,10 @@ use taskview::{ChannelBackend, TaskManager, TestBackend};
 libos::entry!(main);
 
 fn main(startup: Startup) -> i64 {
+    // Handly: kanal okna, listek (obnova okna po padu kompozitoru), kanal
+    // na taskd (nepovinny).
     let mut handles = startup.handles.into_iter();
-    let Some(h) = handles.next() else {
+    let Some(link) = ui::client::Link::from_handles(&mut handles) else {
         println!("gui-tasks: chybi kanal okna");
         return 1;
     };
@@ -41,11 +44,11 @@ fn main(startup: Startup) -> i64 {
             });
             let _ = taskd.write(&taskproto::Request::Hello { version: taskproto::VERSION }.encode(), alloc::vec::Vec::new());
             let app = TaskManager::new(backend);
-            ui::client::run_with(Channel::from_handle(h), app, Mode::Standard, 560, 620, Some(taskd))
+            ui::client::run_with(link, app, Mode::Standard, 560, 620, Some(taskd))
         }
         None => {
             let app = TaskManager::new(TestBackend::default());
-            ui::client::run(Channel::from_handle(h), app, Mode::Standard, 560, 620)
+            ui::client::run(link, app, Mode::Standard, 560, 620)
         }
     };
     match r {

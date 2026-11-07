@@ -29,17 +29,52 @@ const HEAP_GROW_MIN: u64 = 4 * 1024 * 1024;
 /// skutecne dostane, urcuje rozpocet uzivatelske pameti jobu.
 const HEAP_MAX: u64 = abi::vm::USER_MAX - HEAP_BASE;
 
-struct GrowingHeap(LockedHeap);
+/// Heap: male alokace (do 4 KiB) ve velikostnich tridach (`sizeclass`, O(1)),
+/// velke a kusy pro tridy v `linked_list_allocator` (first-fit). Bez trid
+/// se seznam volnych useku po roztristeni heapu (fsd s velkou cache)
+/// natahl na tisice polozek a kazda alokace stala milisekundy.
+struct GrowingHeap {
+    big: LockedHeap,
+    classes: Spin<sizeclass::Classes>,
+}
+
+/// Jednoduchy spin zamek (alokator nesmi alokovat ani cekat na jadro).
+struct Spin<T> {
+    locked: core::sync::atomic::AtomicBool,
+    value: core::cell::UnsafeCell<T>,
+}
+
+// SAFETY: k hodnote se pristupuje jen pod zamkem (`with`).
+unsafe impl<T: Send> Sync for Spin<T> {}
+
+impl<T> Spin<T> {
+    const fn new(value: T) -> Self {
+        Self { locked: core::sync::atomic::AtomicBool::new(false), value: core::cell::UnsafeCell::new(value) }
+    }
+
+    fn with<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        while self
+            .locked
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        // SAFETY: zamek je nas, nikdo jiny k hodnote nesaha.
+        let r = f(unsafe { &mut *self.value.get() });
+        self.locked.store(false, Ordering::Release);
+        r
+    }
+}
 
 #[global_allocator]
-static HEAP: GrowingHeap = GrowingHeap(LockedHeap::empty());
+static HEAP: GrowingHeap = GrowingHeap { big: LockedHeap::empty(), classes: Spin::new(sizeclass::Classes::new()) };
 
-// SAFETY: alokace i uvolneni jdou pres zamceny `linked_list_allocator::Heap`;
-// pridana pamet je cerstve namapovana, navazuje na konec heapu a nikdo jiny
-// ji nepouziva.
-unsafe impl GlobalAlloc for GrowingHeap {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let mut heap = self.0.lock();
+impl GrowingHeap {
+    /// Velka alokace (a kus pro tridu): first-fit, pri nedostatku heap
+    /// naroste.
+    fn alloc_big(&self, layout: Layout) -> *mut u8 {
+        let mut heap = self.big.lock();
         if let Ok(p) = heap.allocate_first_fit(layout) {
             return p.as_ptr();
         }
@@ -59,11 +94,28 @@ unsafe impl GlobalAlloc for GrowingHeap {
         heap.allocate_first_fit(layout)
             .map_or(core::ptr::null_mut(), |p| p.as_ptr())
     }
+}
+
+// SAFETY: male alokace jdou pres tridy pod zamkem `classes` (kusy dava
+// `alloc_big`), velke pres zamceny `linked_list_allocator::Heap`; trida se
+// urcuje z layoutu stejne pri alokaci i uvolneni. Pridana pamet heapu je
+// cerstve namapovana, navazuje na konec a nikdo jiny ji nepouziva.
+unsafe impl GlobalAlloc for GrowingHeap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        match sizeclass::class_of(layout) {
+            // SAFETY: kus vraci `alloc_big` (null nebo volna pamet podle layoutu).
+            Some(c) => self.classes.with(|cl| unsafe { cl.alloc(c, |l| self.alloc_big(l)) }),
+            None => self.alloc_big(layout),
+        }
+    }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        if let Some(p) = NonNull::new(ptr) {
-            // SAFETY: `ptr` vratila `alloc` s timtez `layout` (smlouva GlobalAlloc).
-            unsafe { self.0.lock().deallocate(p, layout) };
+        let Some(p) = NonNull::new(ptr) else { return };
+        match sizeclass::class_of(layout) {
+            // SAFETY: `ptr` vratila `alloc` pro tutez tridu (stejny layout).
+            Some(c) => self.classes.with(|cl| unsafe { cl.dealloc(c, ptr) }),
+            // SAFETY: `ptr` vratila `alloc_big` s timtez `layout`.
+            None => unsafe { self.big.lock().deallocate(p, layout) },
         }
     }
 }
@@ -93,6 +145,10 @@ pub struct Startup {
     pub process: Process,
     /// Obraz initfs (dostava jen init).
     pub initfs: Option<Vmo>,
+    /// Framebuffer z firmware (`kind::FRAMEBUFFER`: init od jadra, textova
+    /// konzole od initu). Geometrie a prevzeti: [`crate::sys::fb_info`],
+    /// [`crate::sys::fb_claim`].
+    pub framebuffer: Option<Vmo>,
     /// Handly predane rodicem (`kind::USER`), v poradi zpravy.
     pub handles: Vec<Handle>,
     /// Pristup k hardwaru (dostava init, ten ho preda spravci zarizeni).
@@ -155,6 +211,7 @@ struct Received {
     job: Option<u32>,
     flags: u32,
     initfs: Option<u32>,
+    framebuffer: Option<u32>,
     resource: Option<u32>,
     ecam: [(u32, u32); 4],
     ecam_count: usize,
@@ -181,6 +238,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
         job: None,
         flags: 0,
         initfs: None,
+        framebuffer: None,
         resource: None,
         ecam: [(0, 0); 4],
         ecam_count: 0,
@@ -202,6 +260,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             }
             bootstrap::kind::JOB => got.job = Some(handle),
             bootstrap::kind::INITFS => got.initfs = Some(handle),
+            bootstrap::kind::FRAMEBUFFER => got.framebuffer = Some(handle),
             bootstrap::kind::ROOT_RESOURCE => got.resource = Some(handle),
             bootstrap::kind::PCI_ECAM if got.ecam_count < got.ecam.len() => {
                 got.ecam[got.ecam_count] = (handle, arg);
@@ -226,6 +285,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
     let startup = Startup {
         process: Process::from_handle(Handle::from_raw(process)),
         initfs: got.initfs.map(|h| Vmo::from_handle(Handle::from_raw(h))),
+        framebuffer: got.framebuffer.map(|h| Vmo::from_handle(Handle::from_raw(h))),
         handles: got.user[..got.user_count]
             .iter()
             .map(|&h| Handle::from_raw(h))
@@ -252,7 +312,7 @@ fn init_heap(process: u32) {
     // SAFETY: rozsah je prave namapovany pro cteni i zapis, nikdo jiny ho
     // nepouziva a zustane namapovany do konce procesu.
     unsafe {
-        HEAP.0
+        HEAP.big
             .lock()
             .init(HEAP_BASE as *mut u8, HEAP_INITIAL as usize)
     };

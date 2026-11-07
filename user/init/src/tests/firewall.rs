@@ -213,7 +213,52 @@ fn need_ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
     Ok(p)
 }
 
+/// Limit na prepnuti profilu: fwd konfiguraci nejdriv ulozi na FS a pak
+/// posle netd; pod TCG a zatezi (vic QEMU naraz) to trva i sekundy.
+const PROFILE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Poradove cislo, od ktereho prijdou nove zaznamy auditu.
+fn audit_end(root: &netproto::Net) -> Result<u64, String> {
+    let mut from = 0;
+    loop {
+        let (recs, next) = root.audit(from, 256).map_err(|e| fail("AUDIT", e))?;
+        if recs.is_empty() {
+            return Ok(from.max(next));
+        }
+        from = next;
+    }
+}
+
+/// Pocka na udalost prepnuti profilu na `want` v netd (zaznam auditu
+/// PROFILE od `from`) s limitem [`PROFILE_TIMEOUT`]. Kdyz uz profil `want`
+/// byl, zaznam nevznikne - staci aktualni profil.
+fn wait_profile(root: &netproto::Net, mut from: u64, want: &str) -> TestResult {
+    let deadline = time::deadline_after(PROFILE_TIMEOUT);
+    loop {
+        let (recs, next) = root.audit(from, 256).map_err(|e| fail("AUDIT", e))?;
+        if recs.iter().any(|r| r.kind == audit::PROFILE && r.detail == want) {
+            return Ok(());
+        }
+        from = next;
+        let current = root.stats().map_err(|e| fail("STATS", e))?.0;
+        if current == want {
+            return Ok(());
+        }
+        if time::now() > deadline {
+            return Err(format!(
+                "profil se neprepnul na {want} do {} s (je {current})",
+                PROFILE_TIMEOUT.as_secs()
+            ));
+        }
+        time::sleep(Duration::from_millis(20));
+    }
+}
+
 fn classify_network(_: &Startup) -> TestResult {
+    classify()
+}
+
+fn classify() -> TestResult {
     let a = agent()?;
     let root = net()?;
     configured(root)?;
@@ -229,24 +274,31 @@ fn classify_network(_: &Startup) -> TestResult {
     check_eq!(network.len(), 17, "id site = MAC brany");
     let (profile, _) = root.stats().map_err(|e| fail("STATS", e))?;
     check_eq!(profile.as_str(), "public", "neznama sit = verejna");
+    let from = audit_end(root)?;
     let mut w = Writer::op(op::CLASSIFY);
     w.u32(id).str("home");
     a.ch.write(&w.finish(), Vec::new()).map_err(|e| fail("CLASSIFY", e))?;
     // Profil se prepne (fwd posle netd novou konfiguraci).
-    for _ in 0..50 {
-        if root.stats().map_err(|e| fail("STATS", e))?.0 == "home" {
-            let cfg = a.config()?;
-            check!(
-                cfg.tables("networks")
-                    .iter()
-                    .any(|n| n.get_str("id") == Some(network.as_str()) && n.get_str("profile") == Some("home")),
-                "sit se nezapamatovala"
-            );
-            return Ok(());
-        }
-        libos::time::sleep(Duration::from_millis(20));
+    wait_profile(root, from, "home")?;
+    let cfg = a.config()?;
+    check!(
+        cfg.tables("networks")
+            .iter()
+            .any(|n| n.get_str("id") == Some(network.as_str()) && n.get_str("profile") == Some("home")),
+        "sit se nezapamatovala"
+    );
+    Ok(())
+}
+
+/// Sit v profilu `home` (prichozi spojeni na naslouchajici porty). Pro
+/// testy site spustene bez sady firewallu (`--only sit`): odpovi na dotaz
+/// agenta na neznamou sit, kdyz jeste nebyl.
+pub(super) fn ensure_home() -> TestResult {
+    let root = net()?;
+    if root.stats().map_err(|e| fail("STATS", e))?.0 == "home" {
+        return Ok(());
     }
-    Err(String::from("profil se neprepnul na home"))
+    classify()
 }
 
 fn probe_started(s: &Startup) -> TestResult {
@@ -392,7 +444,7 @@ fn blocklists(s: &Startup) -> TestResult {
     block.set("networks", conf::Value::Array(vec![conf::Value::Str(String::from("10.0.2.77/32"))]));
     a.set_config(&cfg)?;
     let server = Some(host(ports.dns));
-    let t = Some(Duration::from_secs(5));
+    let t = Some(super::net::DNS_TIMEOUT);
     // Blokovane jmeno i jeho poddomena, bez dotazu na server.
     check_eq!(
         root.resolve_with("blocked.magnumopus", 4, server, t).err(),
@@ -422,7 +474,9 @@ fn public_inbound(s: &Startup) -> TestResult {
     };
     let a = agent()?;
     let root = net()?;
+    let from = audit_end(root)?;
     a.profile("public")?;
+    wait_profile(root, from, "public")?;
     let result = (|| -> TestResult {
         let listener = root.tcp_listen(ports.forwarded, 2).map_err(|e| fail("naslouchani", e))?;
         let mut ctl = root
@@ -436,10 +490,10 @@ fn public_inbound(s: &Startup) -> TestResult {
         );
         Ok(())
     })();
+    let from = audit_end(root)?;
     a.profile("home")?;
+    wait_profile(root, from, "home").map_err(|e| format!("profil vracen: {e}"))?;
     result?;
-    let (profile, _) = root.stats().map_err(|e| fail("STATS", e))?;
-    check_eq!(profile.as_str(), "home", "profil vracen");
     // Domaci sit spojeni pusti (overuje test naslouchani v sekci sit).
     Ok(())
 }

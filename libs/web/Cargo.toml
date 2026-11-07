@@ -1,0 +1,13 @@
+[package]
+name = "web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Spojeni pro programy: TCP a TLS pres netproto, klient HTTP, korenove CA z uloziste"
+
+[dependencies]
+libos = { path = "../libos" }
+netproto = { path = "../netproto", features = ["client"] }
+fsproto = { path = "../fsproto" }
+tls = { path = "../tls", features = ["libos"] }
+httpc = { path = "../httpc" }

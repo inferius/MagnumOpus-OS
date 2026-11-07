@@ -36,7 +36,7 @@ pub const TESTS: &[Test] = &[
     ("200 socketu najednou (driv limit 63)", many_sockets),
     ("opravneni: prava a omezeni cilu relace", restricted),
     ("opravneni: pravidlo se jmenem hostitele", host_rule),
-    ("NTP: seridi hodiny pres sluzbu casu", ntp),
+    ("DNS: resolver hostitele pres slirp (jen --net-online)", online_dns),
 ];
 
 /// Hostitel ze site slirp.
@@ -45,6 +45,9 @@ pub(super) const HOST: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2));
 const TEST_NAME: &str = "test.magnumopus";
 const TEST_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 2, 77));
 const ECHO_NAME: &str = "echo.magnumopus";
+/// Limit dotazu DNS v testech: s rezervou pro beh pod TCG a zatezi (cela
+/// sada s FS a GUI). Lokalni server odpovida hned, resolver opakuje po 1 s.
+pub(super) const DNS_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(super) fn net() -> Result<&'static Net, String> {
     net_service()
@@ -57,7 +60,6 @@ pub(super) struct Ports {
     pub echo: u16,
     pub udp_echo: u16,
     pub dns: u16,
-    ntp: u16,
     pub closed: u16,
     /// Hlasi slirp odmitnuti spojeni na hostitele (RST)? Na Windows ne.
     refuses: bool,
@@ -69,9 +71,16 @@ pub(super) struct Ports {
 }
 
 pub(super) fn ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
+    let p = ports_quiet(s)?;
+    if p.is_none() {
+        println!("[preskoceno] sit: {test}: chybi pomocne servery (jen `cargo xtask test`)");
+    }
+    Ok(p)
+}
+
+fn ports_quiet(s: &Startup) -> Result<Option<Ports>, String> {
     let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let Some(cfg) = fs.find("net-test") else {
-        println!("[preskoceno] sit: {test}: chybi pomocne servery (jen `cargo xtask test`)");
         return Ok(None);
     };
     let text = core::str::from_utf8(cfg).map_err(|_| String::from("net-test neni UTF-8"))?;
@@ -86,7 +95,6 @@ pub(super) fn ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
         echo: get("echo")?,
         udp_echo: get("udp_echo")?,
         dns: get("dns")?,
-        ntp: get("ntp")?,
         closed: get("closed")?,
         refuses: get("refuses")? != 0,
         reset: get("reset")?,
@@ -99,13 +107,34 @@ pub(super) fn host(port: u16) -> SocketAddr {
     SocketAddr::new(HOST, port)
 }
 
+/// Neovereny systemovy resolver (zaloha za dnsd) na pomocnem serveru DNS
+/// hostitele - v testech se nikdy neptat skutecneho DNS Windows/slirp.
+/// Vola init pri startu testovaciho behu.
+pub fn local_dns(startup: &Startup, root: &Net) {
+    if let Ok(Some(p)) = ports_quiet(startup)
+        && let Err(e) = root.set_dns(&[host(p.dns)])
+    {
+        println!("init: testy: zaloha DNS na pomocny server: {e}");
+    }
+}
+
+/// Docasne servery DNS od DHCP (pro kontrolu), pak zpet na pomocny server.
+fn root_dns_dhcp(net: &Net, check: impl FnOnce() -> TestResult, p: Option<&Ports>) -> TestResult {
+    net.set_dns(&[]).map_err(|e| fail("set_dns DHCP", e))?;
+    let r = check();
+    if let Some(p) = p {
+        net.set_dns(&[host(p.dns)]).map_err(|e| fail("set_dns zpet", e))?;
+    }
+    r
+}
+
 pub(super) fn configured(net: &Net) -> Result<(), String> {
     net.wait_configured(Some(Duration::from_secs(15)))
         .map(|_| ())
         .map_err(|e| fail("DHCP", e))
 }
 
-fn dhcp(_: &Startup) -> TestResult {
+fn dhcp(s: &Startup) -> TestResult {
     let net = net()?;
     let info = net
         .wait_configured(Some(Duration::from_secs(15)))
@@ -119,10 +148,16 @@ fn dhcp(_: &Startup) -> TestResult {
         "adresa od slirp"
     );
     check_eq!(info.gateway, Some(HOST), "brana");
-    check!(
-        info.dns.contains(&IpAddr::V4(Ipv4Addr::new(10, 0, 2, 3))),
-        "server DNS 10.0.2.3 od slirp"
-    );
+    // V testovacim behu jsou servery DNS rucne na pomocnem serveru (viz
+    // `local_dns`): servery od DHCP ukaze az navrat k nim.
+    root_dns_dhcp(net, || {
+        let info = net.info().map_err(|e| fail("info", e))?;
+        check!(
+            info.dns.contains(&IpAddr::V4(Ipv4Addr::new(10, 0, 2, 3))),
+            "server DNS 10.0.2.3 od slirp"
+        );
+        Ok(())
+    }, ports(s, "DHCP DNS")?.as_ref())?;
     check_eq!(info.rights, rights::ALL, "korenova relace ma vsechna prava");
     Ok(())
 }
@@ -153,17 +188,17 @@ fn dns(s: &Startup) -> TestResult {
     configured(net)?;
     let server = Some(host(p.dns));
     let (addrs, ttl) = net
-        .resolve_with(TEST_NAME, 4, server, Some(Duration::from_secs(5)))
+        .resolve_with(TEST_NAME, 4, server, Some(DNS_TIMEOUT))
         .map_err(|e| fail("dotaz", e))?;
     check_eq!(addrs, vec![TEST_ADDR], "adresy");
     check_eq!(ttl, 60, "TTL");
     // Obe rodiny: server ma jen A, AAAA vrati prazdnou odpoved.
     let (addrs, _) = net
-        .resolve_with(TEST_NAME, 0, server, Some(Duration::from_secs(5)))
+        .resolve_with(TEST_NAME, 0, server, Some(DNS_TIMEOUT))
         .map_err(|e| fail("dotaz A + AAAA", e))?;
     check_eq!(addrs, vec![TEST_ADDR], "adresy (A + AAAA)");
     check_eq!(
-        net.resolve_with("neexistuje.magnumopus", 4, server, Some(Duration::from_secs(5)))
+        net.resolve_with("neexistuje.magnumopus", 4, server, Some(DNS_TIMEOUT))
             .err(),
         Some(Error::NotFound),
         "neexistujici jmeno"
@@ -286,7 +321,7 @@ fn dns_large(s: &Startup) -> TestResult {
     let net = net()?;
     configured(net)?;
     let server = Some(host(p.dns));
-    let t = Some(Duration::from_secs(10));
+    let t = Some(DNS_TIMEOUT);
     // 100 adres: odpoved ~1,7 KiB, pres 512 B bez EDNS by se nevesla.
     let (addrs, _) = net
         .resolve_with("many.magnumopus", 4, server, t)
@@ -306,6 +341,9 @@ pub(super) fn tcp_accept(s: &Startup) -> TestResult {
     };
     let net = net()?;
     configured(net)?;
+    // Prichozi spojeni pusti jen profil home (testy firewallu ho nastavi;
+    // s `--only sit` si ho test zajisti sam).
+    super::firewall::ensure_home()?;
     let listener = net
         .tcp_listen(p.forwarded, 2)
         .map_err(|e| fail("naslouchani", e))?;
@@ -347,18 +385,24 @@ fn udp_large(s: &Startup) -> TestResult {
     };
     let net = net()?;
     configured(net)?;
-    let sock = net.udp_bind(0).map_err(|e| fail("bind", e))?;
     let data: Vec<u8> = (0..60_000u32).map(|i| (i % 251) as u8).collect();
     let mut buf = vec![0u8; 65_536];
-    for _ in 0..3 {
+    // Odpoved ma 41 fragmentu; ztrata jednoho = ztrata datagramu. Kazdy
+    // pokus z noveho socketu (novy tok ve slirp, jako resolver).
+    let mut last = None;
+    for _ in 0..5 {
+        let sock = net.udp_bind(0).map_err(|e| fail("bind", e))?;
         sock.send_to(&data, host(p.udp_echo)).map_err(|e| fail("send_to 60 000 B", e))?;
-        if let Ok((n, _)) = sock.recv_from(&mut buf, Some(Duration::from_secs(3))) {
-            check_eq!(n, data.len(), "delka odpovedi");
-            check!(buf[..n] == data[..], "obsah odpovedi");
-            return Ok(());
+        match sock.recv_from(&mut buf, Some(Duration::from_secs(5))) {
+            Ok((n, _)) => {
+                check_eq!(n, data.len(), "delka odpovedi");
+                check!(buf[..n] == data[..], "obsah odpovedi");
+                return Ok(());
+            }
+            Err(e) => last = Some(e),
         }
     }
-    Err(String::from("velky datagram se nevratil"))
+    Err(format!("velky datagram se nevratil ani na 5. pokus: {last:?}"))
 }
 
 fn udp_echo(s: &Startup) -> TestResult {
@@ -372,24 +416,30 @@ fn udp_echo(s: &Startup) -> TestResult {
     check!(local.port() >= 49152, "docasny port");
     check_eq!(local.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 2, 15)), "mistni adresa UDP");
     let mut buf = [0u8; 2048];
+    let mut sock = sock;
     for i in 0..3u8 {
         let msg = pattern(1000 + i as usize * 100);
-        // UDP muze ztratit datagram: az tri pokusy.
-        let mut ok = false;
-        for _ in 0..3 {
+        // UDP muze ztratit datagram (a slirp na Windows obcas tok zasekne):
+        // az 5 pokusu, kazdy dalsi z noveho socketu (novy tok). Pozdni
+        // odpoved na predchozi pokus tak neprijde do noveho socketu.
+        let mut last = None;
+        for attempt in 0..5 {
+            if attempt > 0 {
+                sock = net.udp_bind(0).map_err(|e| fail("bind", e))?;
+            }
             sock.send_to(&msg, host(p.udp_echo)).map_err(|e| fail("send_to", e))?;
-            match sock.recv_from(&mut buf, Some(Duration::from_secs(2))) {
+            match sock.recv_from(&mut buf, Some(Duration::from_secs(3))) {
                 Ok((n, from)) => {
                     check_eq!(from, host(p.udp_echo), "odesilatel");
                     check!(&buf[..n] == msg.as_slice(), "echo vratilo jina data");
-                    ok = true;
+                    last = None;
                     break;
                 }
-                Err(Error::TimedOut) => continue,
+                Err(Error::TimedOut) => last = Some(Error::TimedOut),
                 Err(e) => return Err(fail("recv_from", e)),
             }
         }
-        check!(ok, "UDP echo neodpovedelo");
+        check!(last.is_none(), format!("UDP echo neodpovedelo ani na 5. pokus ({} B)", msg.len()));
     }
     check_eq!(
         sock.recv_from(&mut buf, Some(Duration::from_millis(100))).err(),
@@ -411,17 +461,23 @@ fn many_sockets(s: &Startup) -> TestResult {
     }
     // Posledni i prvni socket funguji (sluzba ceka na vsechny kanaly).
     let mut buf = [0u8; 64];
-    for sock in [socks.last().unwrap(), &socks[0]] {
+    for (which, sock) in [("posledni", socks.last().unwrap()), ("prvni", &socks[0])] {
         let mut ok = false;
-        for _ in 0..3 {
+        let mut last = None;
+        // UDP muze slirp ztratit; tady jde o konkretni socket, takze novy
+        // tok nejde - 8 pokusu po 3 s (vytizeny hostitel, vic QEMU naraz).
+        for _ in 0..8 {
             sock.send_to(b"mnoho", host(p.udp_echo)).map_err(|e| fail("send_to", e))?;
-            if let Ok((n, _)) = sock.recv_from(&mut buf, Some(Duration::from_secs(2))) {
-                check_eq!(&buf[..n], b"mnoho", "echo");
-                ok = true;
-                break;
+            match sock.recv_from(&mut buf, Some(Duration::from_secs(3))) {
+                Ok((n, _)) => {
+                    check_eq!(&buf[..n], b"mnoho", "echo");
+                    ok = true;
+                    break;
+                }
+                Err(e) => last = Some(e),
             }
         }
-        check!(ok, "UDP echo z jednoho z 200 socketu");
+        check!(ok, format!("UDP echo z {which} z 200 socketu: {last:?}"));
     }
     drop(socks);
     // Po zavreni jdou sockety otevrit znovu (sloty a porty se uvolnily).
@@ -508,11 +564,10 @@ fn host_rule(s: &Startup) -> TestResult {
     };
     let root = net()?;
     configured(root)?;
-    // Systemovy resolver docasne na pomocny server hostitele.
+    // Systemovy resolver (zaloha) na pomocnem serveru: init ho tak nastavil
+    // uz pri startu testovaciho behu (`local_dns`).
     root.set_dns(&[host(p.dns)]).map_err(|e| fail("set_dns", e))?;
-    let result = host_rule_inner(root, &p);
-    root.set_dns(&[]).map_err(|e| fail("set_dns zpet", e))?;
-    result
+    host_rule_inner(root, &p)
 }
 
 fn host_rule_inner(root: &Net, p: &Ports) -> TestResult {
@@ -564,22 +619,21 @@ fn host_rule_inner(root: &Net, p: &Ports) -> TestResult {
     Ok(())
 }
 
-fn ntp(s: &Startup) -> TestResult {
-    let Some(p) = ports(s, "NTP")? else {
+/// Skutecny resolver hostitele (slirp 10.0.2.3 -> DNS Windows/Linuxu
+/// a internet). Zavisi na siti hostitele, proto bezi jen s
+/// `cargo xtask test --net-online` (initfs `net-online`).
+fn online_dns(s: &Startup) -> TestResult {
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    if fs.find("net-online").is_none() {
+        println!("[preskoceno] sit: resolver hostitele: jen s --net-online");
         return Ok(());
-    };
+    }
     let net = net()?;
     configured(net)?;
-    let guard = crate::system::TIME.lock();
-    let time = guard.as_ref().ok_or("sluzba casu nebezi")?;
-    let offset = crate::system::sync_time_ntp(net, time, host(p.ntp)).map_err(|e| fail("NTP", e))?;
-    drop(guard);
-    // Hodiny hosta jdou z RTC QEMU = cas hostitele; server NTP je tentyz.
-    check!(
-        offset.abs() < 10_000_000_000,
-        format!("posun {} ms je prilis velky", offset / 1_000_000)
-    );
-    let r = libos::time::wall_reading().map_err(|e| fail("cteni casu", e))?;
-    check_eq!(r.source, libos::time::source::SET, "zdroj casu po NTP");
+    let slirp = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 3)), 53);
+    let (addrs, _) = net
+        .resolve_with("example.com", 0, Some(slirp), Some(DNS_TIMEOUT))
+        .map_err(|e| fail("example.com pres resolver hostitele", e))?;
+    check!(!addrs.is_empty(), "example.com bez adres");
     Ok(())
 }

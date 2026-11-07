@@ -8,4 +8,5 @@ description = "Chytry terminal: nativni protokol, sluzba relaci, adapter VT100, 
 [dependencies]
 abi.workspace = true
 shlang = { path = "../shlang" }
+spin = "0.12"
 noto-sans-mono-bitmap = { version = "0.4", default-features = false, features = ["regular", "size_16", "size_24", "unicode-basic-latin", "unicode-latin-1-supplement", "unicode-latin-extended-a", "unicode-specials"] }

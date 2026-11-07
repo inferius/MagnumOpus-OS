@@ -17,9 +17,9 @@ fn fs_err(what: &str, e: fs::Error) -> Box<dyn std::error::Error> {
     format!("datovy disk: {what}: {e:?}").into()
 }
 
-/// Vytvori `target/data.img` s ukazkovym obsahem; vraci cestu.
-pub fn create(target: &Path) -> Result<PathBuf> {
-    let path = target.join("data.img");
+/// Vytvori datovy disk `path` s ukazkovym obsahem; vraci cestu.
+pub fn create(path: &Path) -> Result<PathBuf> {
+    let path = path.to_path_buf();
     let file = std::fs::File::create(&path)?;
     file.set_len(SIZE)?;
     drop(file);

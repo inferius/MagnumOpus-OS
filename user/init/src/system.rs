@@ -29,6 +29,15 @@ pub static TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
 /// Sluzba site (a firewallu) spustena pri startu.
 pub static NET: spin::Once<NetService> = spin::Once::new();
 
+/// Synchronizace casu (ntpd) spustena po siti.
+pub static NTP: spin::Once<crate::ntp::NtpService> = spin::Once::new();
+/// Sluzba odvolani certifikatu (kanal pro `client`, viz `revocation`).
+pub static REVOCD: spin::Once<crate::revocation::Revocd> = spin::Once::new();
+/// Systemovy resolver (sifrovane DNS, DNSSEC).
+pub static DNSD: spin::Once<crate::dns::Dnsd> = spin::Once::new();
+/// Zamek kanalu k revocd (zprava `client` a odpoved patri k sobe).
+pub static REVOCD_LOCK: spin::Mutex<()> = spin::Mutex::new(());
+
 /// Bezici spravce zarizeni, blokova zarizeni, ktera nasel, a souborovy
 /// system (pokud je na nekterem disku).
 pub struct Devices {
@@ -46,8 +55,8 @@ pub struct Devices {
     pub _rngs: Vec<Channel>,
     /// Kanaly k ovladacum grafiky (dokud je neprevezme kompozitor).
     pub displays: Vec<Channel>,
+    /// Ridici relace initu k `fsd` s listkem (prezije pad sluzby).
     pub fs: Option<FsClient>,
-    pub fsd: Option<(Process, Channel)>,
 }
 
 /// Nejdelsi ticho od spravce zarizeni pri startu (vic nez jeho vlastni
@@ -121,7 +130,6 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         _rngs: rngs,
         displays,
         fs: None,
-        fsd: None,
     })
 }
 
@@ -197,35 +205,34 @@ fn has_fs(b: &BlockClient) -> bool {
 }
 
 /// Spusti sluzbu souboroveho systemu nad prvnim diskem, ktery ho obsahuje.
-pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
+/// Vraci bezici proces a adapter pro supervisor (`None` = zadny disk s FS).
+/// Konec kanalu k disku drzi adapter (`Kept`): po padu `fsd` ho dostane
+/// nova instance.
+pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<Option<(Process, crate::fsd::Fsd)>> {
     let Some(i) = devices.blocks.iter().position(has_fs) else {
         println!("init: zadny disk se souborovym systemem");
-        return Ok(());
+        return Ok(None);
     };
-    let disk = devices.blocks.remove(i);
-    let fs = Initfs::open(startup)?;
-    let image = fs.find("fsd").ok_or(Error::NotFound)?;
-    let (client, server) = Channel::create()?;
-    let handles = vec![
-        StartHandle::user(disk.into_channel().into_handle()),
-        StartHandle::user(server.into_handle()),
-    ];
-    let (process, control) = libos::spawn("fsd", image, handles)?;
+    let disk = crate::supervisor::Kept::new(devices.blocks.remove(i).into_channel());
     // Testy potrebuji simulaci vypadku proudu - jen v testovacim behu, na
     // beznem systemu by ji mohl spustit kterykoli klient.
-    if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
-        control.write(b"debug", Vec::new())?;
+    let debug = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
+    let (process, control, session) = crate::fsd::Fsd::spawn(startup, disk.give()?, debug, None)?;
+    let ok = control.read(Some(time::deadline_after(FSD_START_TIMEOUT)));
+    if !ok.as_ref().is_ok_and(|m| m.data == b"ok") {
+        let _ = process.kill();
+        return Err(ok.err().unwrap_or(Error::IoError));
     }
-    let client = FsClient::new(client);
-    let info = client.info()?;
+    let info = session.info()?;
     println!(
         "init: souborovy system '{}' pripojen (generace {})",
         info.label, info.generation
     );
-    devices.fs = Some(client);
-    devices.fsd = Some((process, control));
-    Ok(())
+    Ok(Some((process, crate::fsd::Fsd::running(disk, debug, control, session))))
 }
+
+/// Jak dlouho ceka init pri startu systemu na pripojeni FS (prehrani logu).
+const FSD_START_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Sluzba casu po restartu, ktera jeste nepotvrdila nastaveni.
 static STARTING_TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
@@ -279,6 +286,8 @@ pub struct NetService {
     /// Kanal agenta uzivatele u `fwd` (dotazy na cile a site). Zatim ho
     /// drzi init (testy); pozdeji ho dostane UI sezeni.
     pub agent: Option<Channel>,
+    /// Konec kanalu netd <-> dnsd pro dnsd (preda se pri jejim startu).
+    pub dnsd_end: Option<Channel>,
 }
 
 /// Cesta konfigurace firewallu na FS (fwd ji vidi jako `/config`).
@@ -291,17 +300,19 @@ pub const FWD_USER: u64 = 900;
 ///
 /// TODO: vic karet (smerovani mezi rozhranimi), nastaveni site z konfigurace
 /// systemu (staticka adresa, servery DNS a NTP).
-pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService> {
+pub fn start_net(startup: &Startup, devices: &mut Devices, sup: &mut crate::supervisor::Supervisor) -> Result<NetService> {
     if devices.nets.is_empty() {
         return Err(Error::NotFound);
     }
     let link = devices.nets.remove(0);
     let (root, server) = Channel::create()?;
     let (fw_netd, fw_fwd) = Channel::create()?;
+    let (dns_netd, dns_dnsd) = Channel::create()?;
     let handles = vec![
         StartHandle::user(link.into_handle()),
         StartHandle::user(server.into_handle()),
         StartHandle::user(fw_netd.into_handle()),
+        StartHandle::user(dns_netd.into_handle()),
     ];
     let app = crate::apps::spawn(startup, "netd", handles)?;
     let (process, control) = (app.process, app.control);
@@ -315,7 +326,7 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
     }
     // Firewall: kdyz nenabehne, netd uvidi zavreny kanal a dotazy odmita
     // (verejny profil, nic dovnitr).
-    let (fwd, agent) = match start_fwd(startup, devices, fw_fwd) {
+    let (fwd, agent) = match start_fwd(startup, devices, fw_fwd, sup) {
         Ok((p, c, a)) => (Some((p, c)), Some(a)),
         Err(e) => {
             println!("init: sluzbu firewallu nelze spustit: {e}");
@@ -328,11 +339,12 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
         root: Net::new(root),
         fwd,
         agent,
+        dnsd_end: Some(dns_dnsd),
     })
 }
 
 /// Prida uctu `who` pravo pruchodu adresarem (ostatni granty zustanou).
-fn grant_traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
+pub(crate) fn grant_traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
     use fsproto::perm::{Grant, grant, rights};
     let mut acl = fs.permissions(path)?.acl.unwrap_or_default();
     if acl.grants.iter().any(|g| g.who == who && g.rights & rights::TRAVERSE != 0) {
@@ -348,7 +360,8 @@ fn grant_traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
 
 /// Relace FS pro fwd: jen adresar konfigurace firewallu jako `/config`.
 /// Adresar patri servisnimu uctu fwd, nadrazene adresare smi jen projit.
-fn firewall_fs(devices: &Devices) -> Result<Channel> {
+/// Vraci kanal relace a listek (fwd ji po padu `fsd` obnovi).
+fn firewall_fs(devices: &Devices, sup: &mut crate::supervisor::Supervisor) -> Result<(Channel, Channel)> {
     use fsproto::kind;
     use fsproto::perm::Mount;
     let fs = devices.fs.as_ref().ok_or(Error::NotFound)?;
@@ -366,13 +379,17 @@ fn firewall_fs(devices: &Devices) -> Result<Channel> {
         }
     }
     fs.set_owner(FIREWALL_DIR, FWD_USER)?;
-    let (_, session) = fs.connect_as(FWD_USER, &[], &[Mount::new("/config", FIREWALL_DIR, 0)])?;
-    Ok(session.into_channel())
+    let recipe = crate::fsd::Recipe::User {
+        user: FWD_USER,
+        groups: Vec::new(),
+        mounts: vec![Mount::new("/config", FIREWALL_DIR, 0)],
+    };
+    sup.session("fsd", recipe.encode())
 }
 
 /// Spusti fwd: kanal k netd, kanal agenta, relace FS a vychozi konfigurace
 /// z initfs. Vraci proces, jeho bootstrap kanal a kanal agenta.
-fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel) -> Result<(Process, Channel, Channel)> {
+fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel, sup: &mut crate::supervisor::Supervisor) -> Result<(Process, Channel, Channel)> {
     let defaults = Initfs::open(startup)?
         .find("firewall.toml")
         .ok_or(Error::NotFound)?
@@ -382,8 +399,11 @@ fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel) -> Result<(Pro
         StartHandle::user(netd.into_handle()),
         StartHandle::user(agent_fwd.into_handle()),
     ];
-    match firewall_fs(devices) {
-        Ok(ch) => handles.push(StartHandle::user(ch.into_handle())),
+    match firewall_fs(devices, sup) {
+        Ok((ch, lease)) => {
+            handles.push(StartHandle::user(ch.into_handle()));
+            handles.push(StartHandle::user(lease.into_handle()));
+        }
         Err(e) => println!("init: firewall bez FS (konfigurace se neulozi): {e}"),
     }
     let app = crate::apps::spawn(startup, "fwd", handles)?;
@@ -399,39 +419,4 @@ fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel) -> Result<(Pro
         return Err(Error::IoError);
     }
     Ok((app.process, app.control, agent))
-}
-
-/// Seridi hodiny podle serveru NTP: dotaz pres sit, nastaveni pres sluzbu
-/// casu (jen ta smi `CLOCK_SET`). Vraci posun hodin pred nastavenim v ns.
-pub fn sync_time_ntp(
-    net: &Net,
-    time_service: &TimeService,
-    server: core::net::SocketAddr,
-) -> Result<i128> {
-    let sync = net.ntp_query(server, Duration::from_secs(5))?;
-    let mut msg = Vec::with_capacity(16);
-    msg.extend_from_slice(b"set");
-    msg.extend_from_slice(&sync.time.secs.to_le_bytes());
-    msg.extend_from_slice(&sync.time.nanos.to_le_bytes());
-    // Do RTC nezapisovat: cas ze site plati jen do restartu, RTC opravi
-    // az nastaveni systemu (TODO: zapis do RTC podle konfigurace).
-    msg.push(0);
-    time_service.channel.write(&msg, Vec::new())?;
-    let reply = time_service
-        .channel
-        .read(Some(time::deadline_after(Duration::from_secs(5))))?;
-    if !reply.data.starts_with(b"ok") {
-        println!(
-            "init: sluzba casu odmitla cas z NTP: {}",
-            core::str::from_utf8(&reply.data).unwrap_or("?")
-        );
-        return Err(Error::IoError);
-    }
-    println!(
-        "init: hodiny serizeny podle NTP {} (posun {} ms, zpozdeni {} ms)",
-        server,
-        sync.offset_ns / 1_000_000,
-        sync.delay_ns / 1_000_000
-    );
-    Ok(sync.offset_ns)
 }

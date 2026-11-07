@@ -177,6 +177,13 @@ pub fn build(t: &Table, profile: &str) -> Res<FwConfig> {
         dns_block,
         user_rules,
         audit_capacity: u32::try_from(audit.clamp(16, 1 << 20)).unwrap_or(4096),
+        // Verejna sit vychozi "never", ostatni "fallback".
+        unauthenticated_fallback: match p.get_str("unauthenticated") {
+            Some("fallback") => true,
+            Some("never") => false,
+            Some(v) => return Err(format!("profiles.{profile}.unauthenticated: nezname {v} (never, fallback)")),
+            None => profile != "public",
+        },
     })
 }
 

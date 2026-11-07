@@ -108,6 +108,8 @@ fn every_syscall_is_documented() {
         "JOB_CREATE",
         "JOB_SET_LIMIT",
         "JOB_INFO",
+        "CLOCK_ADJUST",
+        "FB_CONTROL",
         "VMO_REVOKE",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);

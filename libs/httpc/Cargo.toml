@@ -1,0 +1,18 @@
+[package]
+name = "httpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Klient HTTP/1.1 a HTTP/2 nad libovolnym proudem (bez std)"
+
+[dependencies]
+abi = { workspace = true }
+netproto = { path = "../netproto" }
+
+# Testy na hostiteli: nezavisly server (hyper: HTTP/1.1 i HTTP/2).
+[dev-dependencies]
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time"] }

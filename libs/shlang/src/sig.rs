@@ -121,7 +121,7 @@ fn alias(name: &str) -> Option<&'static str> {
 }
 
 /// Pole zaznamu souboru (vystup `ls`).
-pub const FILE_FIELDS: &[&str] = &["name", "path", "kind", "size", "mtime", "ext"];
+pub const FILE_FIELDS: &[&str] = &["name", "path", "kind", "size", "mtime", "ext", "access", "dataset"];
 
 const fn p(name: &'static str, kind: Kind) -> Param {
     Param { name, kind, optional: false }
@@ -196,7 +196,9 @@ pub const BUILTINS: &[Sig] = &[
         "nahradi vsechny vyskyty"),
     // seznamy a tabulky
     sig!("where", "list-filter", &[p("cond", Kind::Cond)], None, NOFLAGS, IA, IA, "necha radky, ktere splni podminku"),
-    sig!("each", "list-map", &[p("f", Kind::Closure)], None, NOFLAGS, IA, IA, "pouzije funkci na kazdy radek"),
+    sig!("each", "list-map", &[p("f", Kind::Closure)], None,
+        &[Flag { long: "parallel", short: Some('p'), value: Some(Kind::Int), help: "nejvys N radku soubezne (ulohy)" }],
+        IA, IA, "pouzije funkci na kazdy radek"),
     sig!("select", "record-select", NONE, Some(Kind::Str), NOFLAGS, IA, IA, "necha jen vybrane sloupce"),
     sig!("sort", "list-sort", &[opt("by", Kind::Str)], None, &[flag("desc", 'd', "sestupne")], IA, IA,
         "seradi radky (podle sloupce)"),
@@ -226,6 +228,7 @@ pub const BUILTINS: &[Sig] = &[
         "ulohy na pozadi"),
     sig!("wait", "job-wait", &[opt("id", Kind::Int)], None, NOFLAGS, IN, IA, "pocka na ulohu a vrati jeji vysledek"),
     sig!("kill", "job-kill", &[p("id", Kind::Int)], None, NOFLAGS, IN, IN, "ukonci ulohu"),
+    sig!("cancel", "task-cancel", &[p("task", Kind::Any)], None, NOFLAGS, IN, IN, "zrusi ulohu async (nebo seznam uloh)"),
     sig!("history", "history-list", NONE, None, NOFLAGS, IN,
         Io::Records(&["line", "cwd", "ok", "duration", "time"]), "historie prikazu s kontextem"),
     sig!("explain", "error-explain", &[p("code", Kind::Str)], None, NOFLAGS, IA, IT,

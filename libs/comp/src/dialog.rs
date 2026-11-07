@@ -42,6 +42,9 @@ pub struct Dialog {
     pub password: String,
 }
 
+/// Nejvic radku textu dialogu (dialog roste do vysky obrazovky).
+pub const MAX_LINES: usize = 24;
+
 /// Jak dlouho po zobrazeni dialog vstup ignoruje.
 pub const INPUT_DELAY: u64 = 300_000_000;
 
@@ -184,9 +187,27 @@ pub fn wrap(text: &Text, s: &str, px: f32, w: u32) -> Vec<String> {
             } else {
                 line = cand;
             }
+            // Slovo delsi nez radek (cesta): zalomit po znacich, cele.
+            while text.width(&line, px) > w {
+                let mut cut = String::new();
+                let mut rest = String::new();
+                for ch in line.chars() {
+                    if rest.is_empty() && text.width(&alloc::format!("{cut}{ch}"), px) <= w {
+                        cut.push(ch);
+                    } else {
+                        rest.push(ch);
+                    }
+                }
+                if cut.is_empty() {
+                    break;
+                }
+                out.push(cut);
+                line = rest;
+            }
         }
         out.push(line);
-        if out.len() >= 12 {
+        if out.len() >= MAX_LINES {
+            out.truncate(MAX_LINES);
             break;
         }
     }

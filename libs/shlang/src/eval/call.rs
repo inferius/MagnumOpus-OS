@@ -82,22 +82,33 @@ impl Interp {
         let a = self.eval_args(host, self.sigs.get(name).copied().as_ref(), args, span, true)?;
         let mut flat: Vec<(Option<String>, Value)> = a.pos.into_iter().map(|v| (None, v)).collect();
         flat.extend(a.named.into_iter().map(|(n, v)| (Some(n), v)));
-        if self.preview_depth > 0 {
-            return Err(Flow::Err(
-                ShError::new(code::NEEDS, alloc::format!("program '{name}' nejde spustit nanecisto"))
-                    .at(span)
-                    .hint("v preview { } bezi jen vestavene prikazy; program meni soubory primo"),
-            ));
-        }
-        let needs = self.exec_needs();
-        // Program vidi skutecny FS: dosavadni zmeny radku prevzit (se
-        // zamkem nebezpecnych operaci; odmitnuti = program se nespusti).
-        self.commit_overlay(host).map_err(|e| Flow::Err(e.at(span)))?;
+        let mut needs = self.exec_needs();
         // Kam program smi zapisovat; s plnymi pravy cely FS.
         let trees = if needs.all { alloc::vec![String::from("/")] } else { needs.write.clone() };
+        if self.draft.depth() > 0 {
+            // Nahled: program pise do klonu (dalsi vrstva konceptu), ne do FS.
+            // Klony i pro vnorene datasety domova a pracovni slozky (jako
+            // pohledy pro undo mimo nahled).
+            let mut targets = trees.clone();
+            targets.extend(self.exec_datasets(host, &trees));
+            needs.aside = self.draft.exec_map(host.fs(), &targets).map_err(|e| {
+                Flow::Err(
+                    ShError::sys(e, alloc::format!("program '{name}' nejde spustit nanecisto"))
+                        .at(span)
+                        .hint("FS tu neumi klon bokem; spustte program mimo preview"),
+                )
+            })?;
+            return self.exec_result(host.exec(name, &flat, input, &needs), name, span);
+        }
+        // Program vidi skutecny FS: dosavadni zmeny radku prevzit (se
+        // zamkem nebezpecnych operaci; odmitnuti = program se nespusti).
+        self.commit_draft(host).map_err(|e| Flow::Err(e.at(span)))?;
         let guarded = !trees.is_empty();
-        if guarded && !self.undo.before_external(host.fs(), &self.line, &trees) {
-            host.note("varovani: FS nema snapshoty, zmeny programu nepujde vratit");
+        if guarded {
+            let datasets = self.exec_datasets(host, &trees);
+            if !self.undo.before_external(host.fs(), &self.line, &datasets, &trees) {
+                host.note("varovani: FS nema pohledy, zmeny programu nepujde vratit");
+            }
         }
         let r = host.exec(name, &flat, input, &needs);
         if guarded {
@@ -105,6 +116,32 @@ impl Interp {
             // vratilo jeho prazdny zaznam misto predchoziho prikazu).
             self.undo.after_external(host.fs());
         }
+        self.exec_result(r, name, span)
+    }
+
+    /// Datasety, ve kterych program muze menit `trees`. U celeho FS ("/")
+    /// i datasety domova a pracovni slozky (vnorene datasety by pohled
+    /// korene nevidel).
+    fn exec_datasets(&self, host: &mut dyn Host, trees: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut add = |p: &str, out: &mut Vec<String>| {
+            if let Ok(ds) = crate::vfs::draft::dataset_of(host.fs(), p)
+                && !out.iter().any(|d| d.eq_ignore_ascii_case(&ds))
+            {
+                out.push(ds);
+            }
+        };
+        for t in trees {
+            add(t, &mut out);
+        }
+        if trees.iter().any(|t| t == "/") {
+            add(&self.home.clone(), &mut out);
+            add(&self.cwd.clone(), &mut out);
+        }
+        out
+    }
+
+    fn exec_result(&self, r: Option<Result<Value, ShError>>, name: &str, span: Span) -> R<Value> {
         match r {
             Some(r) => r.map_err(|e| Flow::Err(e.at(span))),
             None => {
@@ -125,7 +162,7 @@ impl Interp {
     fn exec_needs(&self) -> ExecNeeds {
         match &self.needs {
             None => ExecNeeds { all: true, net: true, ..Default::default() },
-            Some(n) => ExecNeeds { read: n.read.clone(), write: n.write.clone(), net: n.net, all: false },
+            Some(n) => ExecNeeds { read: n.read.clone(), write: n.write.clone(), net: n.net, all: false, aside: Vec::new() },
         }
     }
 
@@ -201,6 +238,14 @@ impl Interp {
     }
 
     fn call_fn(&mut self, host: &mut dyn Host, name: &str, f: &super::FnDef, a: Args, input: Value) -> R<Value> {
+        // Ulohy funkce neprezivaji jeji volani (strukturovana soubeznost).
+        self.push_task_scope();
+        let r = self.call_fn_inner(host, name, f, a, input);
+        self.pop_task_scope(host);
+        r
+    }
+
+    fn call_fn_inner(&mut self, host: &mut dyn Host, name: &str, f: &super::FnDef, a: Args, input: Value) -> R<Value> {
         let mut frame = BTreeMap::new();
         let mut pos = a.pos.into_iter();
         for p in &f.params {

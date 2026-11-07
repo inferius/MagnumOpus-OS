@@ -18,6 +18,10 @@ mod highlight;
 mod image;
 mod qemu;
 mod nethelper;
+mod dnshelper;
+mod ntshelper;
+mod revhelper;
+mod webhelper;
 mod qmp;
 mod symbolize;
 mod venus;
@@ -52,18 +56,26 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
+                   none; aarch64 smmu (vychozi), none
   --qemu-wsl       (run, test) spustit QEMU ve WSL (QEMU_WSL_DISTRO, vychozi
                    Ubuntu; QEMU_WSL_PREFIX, vychozi ~/venus/prefix) - Venus
   --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi), gl (virgl 3D)
                    nebo venus (Vulkan; QEMU s virglrenderer a render serverem);
-                   gl a venus bez okna pouziji displej egl-headless
-                   none; aarch64 smmu (vychozi), none
+                   gl a venus bez okna pouziji displej egl-headless;
+                   none = bez virtio-gpu (GUI nad framebufferem z firmwaru,
+                   ovladac fbdisplay)
+  --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
+                   carkou, napr. sit,firewall; jmena jako v logu)
+  --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
+  --net-online     (test) i testy proti skutecne siti hostitele (resolver
+                   hostitele pres slirp); bez nej jen lokalni servery
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
   QEMU_X86_64, QEMU_AARCH64   cesta k QEMU (QEMU plati pro x86_64)
   X86_64_FW_CODE, _FW_VARS    firmware UEFI (take OVMF_CODE, OVMF_VARS)
   AARCH64_FW_CODE, _FW_VARS   firmware UEFI pro aarch64 (edk2, AAVMF)
+  OS_KEEP_DATA=1              datovy disk po behu nemazat (rozbor stavu FS)
 ";
 
 pub struct Options {
@@ -75,7 +87,8 @@ pub struct Options {
     /// aarch64 "smmu", "none".
     iommu: String,
     /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
-    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl).
+    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl);
+    /// "none" = bez virtio-gpu (displej `fbdisplay` nad framebufferem GOP).
     gpu: String,
     /// QEMU ve WSL (Linux): `--qemu-wsl` (vychozi distribuce Ubuntu, QEMU
     /// z `~/venus/prefix`, kde je preklad s Venusem). Cesty se prevedou na
@@ -89,6 +102,11 @@ pub struct Options {
     test: bool,
     /// Dalsi soubory do initfs (konfigurace testu site).
     extra_initfs: Vec<(String, Vec<u8>)>,
+    /// `--only` (sady testu userspace) a `--repeat` (kolikrat).
+    test_only: String,
+    test_repeat: u32,
+    /// `--net-online`: i testy proti skutecne siti hostitele.
+    net_online: bool,
     /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
     hostfwd: Option<String>,
     /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
@@ -125,6 +143,9 @@ fn run_cli() -> Result<()> {
         arch: &arch::X86_64,
         test: false,
         extra_initfs: Vec::new(),
+        test_only: String::new(),
+        test_repeat: 1,
+        net_online: false,
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
     };
@@ -137,10 +158,10 @@ fn run_cli() -> Result<()> {
             }
             Some("--qemu-wsl") => opts.qemu_wsl = true,
             Some("--gpu") => {
-                let value = args.next().ok_or("--gpu ocekava 2d, gl nebo venus")?;
+                let value = args.next().ok_or("--gpu ocekava 2d, gl, venus nebo none")?;
                 opts.gpu = value.to_string_lossy().into_owned();
-                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus") {
-                    return Err("--gpu ocekava 2d, gl nebo venus".into());
+                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus" | "none") {
+                    return Err("--gpu ocekava 2d, gl, venus nebo none".into());
                 }
             }
             Some("--arch") => {
@@ -148,6 +169,15 @@ fn run_cli() -> Result<()> {
                 opts.arch = arch::by_name(&value.to_string_lossy())
                     .ok_or("--arch ocekava x86_64 nebo aarch64")?;
             }
+            Some("--only") => {
+                let value = args.next().ok_or("--only ocekava jmena sad oddelena carkou")?;
+                opts.test_only = value.to_string_lossy().into_owned();
+            }
+            Some("--repeat") => {
+                let value = args.next().ok_or("--repeat ocekava pocet")?;
+                opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
+            }
+            Some("--net-online") => opts.net_online = true,
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
             Some("--accel") => {
@@ -195,8 +225,22 @@ fn run_cli() -> Result<()> {
             build_docs()?;
             // Pomocne servery pro testy site bezi, dokud bezi xtask.
             let helper = nethelper::start()?;
+            let web = webhelper::start()?;
+            let config = format!("{}{}", helper.config, web.config);
+            opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
+            if opts.net_online {
+                opts.extra_initfs.push((String::from("net-online"), b"1".to_vec()));
+            }
+            if !opts.test_only.is_empty() || opts.test_repeat > 1 {
+                let filter = format!("suites = {}
+repeat = {}
+", opts.test_only, opts.test_repeat);
+                opts.extra_initfs.push((String::from("test-filter"), filter.into_bytes()));
+            }
             opts.extra_initfs
-                .push((String::from("net-test"), helper.config.clone().into_bytes()));
+                .push((String::from("net-test-ca.pem"), web.ca_pem.into_bytes()));
+            opts.extra_initfs
+                .push((String::from("net-test-dns-anchor"), web.dns_anchor.into_bytes()));
             opts.hostfwd = Some(helper.hostfwd.clone());
             *opts.net_helper.borrow_mut() = Some(helper);
             let artifacts = build(&opts)?;
@@ -244,6 +288,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "shlang",
             "--package",
+            "sizeclass",
+            "--package",
             "term",
             "--package",
             "netproto",
@@ -270,6 +316,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "taskproto",
             "--package",
+            "svcclient",
+            "--package",
             "taskview",
             "--package",
             "gfx",
@@ -278,11 +326,19 @@ fn host_tests() -> Result<()> {
             "--package",
             "vgpu",
             "--package",
+            "fbcopy",
+            "--package",
             "comp",
             "--package",
             "ui",
+            "--package",
+            "tls",
+            "--package",
+            "httpc",
+            "--package",
+            "dns",
             "--features",
-            "initfs/std,fs/std,netproto/std",
+            "initfs/std,fs/std,netproto/std,netproto/nts",
         ])
         .status()?;
     if !status.success() {
@@ -353,6 +409,8 @@ pub struct Artifacts {
 const USER_PROGRAMS: &[&str] = &[
     "init",
     "echo",
+    "svctest",
+    "fsrtest",
     "devmgr",
     "virtio-blk",
     "virtio-input",
@@ -364,9 +422,12 @@ const USER_PROGRAMS: &[&str] = &[
     "fsd",
     "timed",
     "termd",
+    "shsess",
+    "console",
     "virtio-net",
     "virtio-rng",
     "virtio-gpu",
+    "fbdisplay",
     "compd",
     "gui-demo",
     "gui-term",
@@ -374,6 +435,10 @@ const USER_PROGRAMS: &[&str] = &[
     "netd",
     "fwd",
     "netprobe",
+    "ntpd",
+    "fetch",
+    "revocd",
+    "dnsd",
     "vk-probe",
 ];
 
@@ -386,6 +451,13 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("netprobe.manifest.toml", "user/netprobe/netprobe.manifest.toml"),
     ("gui-demo.manifest.toml", "user/gui-demo/gui-demo.manifest.toml"),
     ("gui-term.manifest.toml", "user/gui-term/gui-term.manifest.toml"),
+    ("ntpd.manifest.toml", "user/ntpd/ntpd.manifest.toml"),
+    ("ntpd.toml", "user/ntpd/ntpd.toml"),
+    ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
+    ("revocd.manifest.toml", "user/revocd/revocd.manifest.toml"),
+    ("revocd.toml", "user/revocd/revocd.toml"),
+    ("dnsd.manifest.toml", "user/dnsd/dnsd.manifest.toml"),
+    ("dnsd.toml", "user/dnsd/dnsd.toml"),
     ("gui-tasks.manifest.toml", "user/gui-tasks/gui-tasks.manifest.toml"),
 ];
 
@@ -416,10 +488,17 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
             "-Clink-arg=-T{}",
             workspace_root().join("user").join("user.ld").display()
         );
+        // Kryptografie RustCrypto (libs/tls) jen softwarove: programy bezi
+        // bez SSE/NEON a detekce AES-NI za behu by spustila instrukce SIMD.
         let flags = [
             "-Crelocation-model=static",
             "-Cforce-frame-pointers=yes",
             script.as_str(),
+            "--cfg=aes_force_soft",
+            "--cfg=polyval_force_soft",
+            "--cfg=poly1305_force_soft",
+            "--cfg=chacha20_force_soft",
+            "--cfg=curve25519_dalek_backend=\"serial\"",
         ]
         .join(&separator);
         cmd.env("CARGO_ENCODED_RUSTFLAGS", flags)
@@ -490,6 +569,7 @@ fn build(opts: &Options) -> Result<Artifacts> {
             .map_err(|e| format!("nelze cist {path}: {e}"))?;
         files.push((name.to_string(), data));
     }
+    files.push((String::from("certs.pem"), webhelper::bundle_pem()));
     files.extend(opts.extra_initfs.iter().cloned());
     let refs: Vec<(&str, &[u8])> = files
         .iter()

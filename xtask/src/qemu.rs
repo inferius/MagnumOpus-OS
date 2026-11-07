@@ -9,14 +9,25 @@
 //! maly prazdny pro testy ovladace a datovy s nasim souborovym systemem, vse
 //! jako virtio-blk na PCI Express.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir};
 
 /// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
 const DEVICE_LAYOUT: u32 = 6;
+
+/// Pokusy o start QEMU, kdyz mu port (QMP, hostfwd) mezitim vzal jiny
+/// proces (soubezne behy testu).
+const START_ATTEMPTS: u32 = 3;
+
+/// Jak dlouho po startu se konec QEMU s chybou portu povazuje za nepovedeny
+/// start (pozdeji uz bezi system).
+const START_WINDOW: Duration = Duration::from_secs(15);
 
 fn default_accel() -> &'static str {
     if cfg!(target_os = "linux") && Path::new("/dev/kvm").exists() {
@@ -36,23 +47,78 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     // se posunou, ulozene bootovaci polozky by pak nesedely.
     // Verze rozlozeni zarizeni je v nazvu: po zmene zarizeni PCI by stare
     // bootovaci polozky nesedely a firmware by skoncil ve svem shellu.
-    let fw_vars = target_dir().join(format!("fw-{}-vars-{}-l{DEVICE_LAYOUT}.fd", arch.name, opts.iommu));
+    // Bez virtio-gpu (`--gpu none`) se sloty PCI take posunou.
+    let no_gpu = if opts.gpu == "none" { "-nogpu" } else { "" };
+    let fw_vars = target_dir().join(format!("fw-{}-vars-{}-l{DEVICE_LAYOUT}{no_gpu}.fd", arch.name, opts.iommu));
     if !fw_vars.exists() {
         std::fs::copy(&fw_vars_template, &fw_vars)?;
     }
 
-    let serial_log = target_dir().join(if opts.test {
-        format!("serial-test-{}.log", arch.name)
-    } else {
-        format!("serial-{}.log", arch.name)
-    });
-    // Stary log nesmi obsahovat znacku testu vstupu z minuleho behu.
-    let _ = std::fs::remove_file(&serial_log);
-    let qmp_port = qmp::free_port()?;
+    // Kazdy beh ma vlastni disky a testy i vlastni log: soubezne behy
+    // (vic vlaken na jednom stroji) si jinak prepisovaly datovy disk a QMP
+    // pomocnik cetl znacky testu z cizi seriove linky.
+    let run = RunFiles::new(arch.name, opts.test);
+    let serial_log = run.serial_log.clone();
+    let qmp_port = Arc::new(AtomicU16::new(0));
+    qmp::spawn_injector(serial_log.clone(), qmp_port.clone(), arch.ps2);
+    let mut hostfwd = opts.hostfwd.clone();
+    let mut attempt = 0;
+    let result = loop {
+        attempt += 1;
+        // Stary log nesmi obsahovat znacku testu vstupu z minuleho behu.
+        let _ = std::fs::remove_file(&serial_log);
+        let port = qmp::free_port()?;
+        qmp_port.store(port, Ordering::Relaxed);
+        let mut cmd = command(&qemu, image, artifacts, opts, (&fw_code, &fw_vars), &run, port, hostfwd.as_deref())?;
+        // Port pro hostfwd uvolnit az ted (QEMU ho hned obsadi).
+        if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
+            h.release_forwarded_port();
+        }
+        if opts.qemu_wsl {
+            cmd = wsl_command(&cmd, opts.arch.qemu, opts.headless && opts.gpu != "2d");
+        }
+        println!("xtask: spoustim {}", if opts.qemu_wsl { String::from("QEMU ve WSL") } else { qemu.display().to_string() });
+        if !opts.test {
+            break run_interactive(cmd);
+        }
+        match run_test(cmd, opts) {
+            Err(TestError::PortTaken(e)) if attempt < START_ATTEMPTS => {
+                println!("xtask: QEMU nenastartovalo ({e}), novy pokus s jinymi porty ({attempt}/{START_ATTEMPTS})");
+                if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
+                    hostfwd = Some(h.rearm_forwarded_port()?);
+                }
+            }
+            Err(TestError::PortTaken(e)) => break Err(format!("QEMU nenastartovalo: {e}").into()),
+            Err(TestError::Other(e)) => break Err(e),
+            Ok(()) => break Ok(()),
+        }
+    };
+    // Pri panice nebo fatalni vyjimce prelozit adresy na jmena funkci.
+    if let Err(e) = symbolize::report(&serial_log, &artifacts.kernel) {
+        eprintln!("xtask: preklad adres selhal: {e}");
+    }
+    println!("xtask: vystup seriove linky je v {}", serial_log.display());
+    result
+}
+
+/// Prikaz QEMU s porty `qmp_port` a `hostfwd` (pri opakovanem startu nove).
+#[allow(clippy::too_many_arguments)]
+fn command(
+    qemu: &Path,
+    image: &Path,
+    artifacts: &Artifacts,
+    opts: &Options,
+    fw: (&Path, &Path),
+    run: &RunFiles,
+    qmp_port: u16,
+    hostfwd: Option<&str>,
+) -> Result<Command> {
+    let (fw_code, fw_vars) = fw;
+    let serial_log = &run.serial_log;
     // Ve WSL je KVM (vnorena virtualizace).
     let accel = opts.accel.as_deref().unwrap_or(if opts.qemu_wsl { "kvm" } else { default_accel() });
-    let mut cmd = Command::new(&qemu);
-    let translate_os_disk = match arch.name {
+    let mut cmd = Command::new(qemu);
+    let translate_os_disk = match opts.arch.name {
         "x86_64" => machine_x86_64(&mut cmd, accel, opts),
         _ => machine_aarch64(&mut cmd, accel, opts),
     };
@@ -66,9 +132,9 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         )
     };
     cmd.arg("-drive")
-        .arg(pflash_arg(&fw_code, true))
+        .arg(pflash_arg(fw_code, true))
         .arg("-drive")
-        .arg(pflash_arg(&fw_vars, false))
+        .arg(pflash_arg(fw_vars, false))
         .arg("-drive")
         .arg(format!(
             "if=none,id=osdisk,format=raw,file={}",
@@ -79,14 +145,23 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         .arg("-drive")
         .arg(format!(
             "if=none,id=scratch,format=raw,file={}",
-            scratch_disk()?.display()
+            scratch_disk(&run.scratch)?.display()
         ))
         .args(["-device", &blk("scratch")])
         // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
+        // `cache=unsafe`: flush disku (kazdy commit fsd) nedela fsync
+        // souboru na hostiteli. Disk vznika pri kazdem behu znovu, takze
+        // trvanlivost pri padu hostitele nema cenu; bez toho stal radek
+        // shellu se zapisem (nekolik commitu: klon, prevzeti, zahozeni)
+        // na vytizenem hostiteli sekundy. Vypadek proudu testuje fsd
+        // simulaci, ne flush hostitele.
         .arg("-drive")
         .arg(format!(
-            "if=none,id=data,format=raw,discard=unmap,file={}",
-            datadisk::create(&target_dir())?.display()
+            // V testech bez flushe na hostitele (rychlejsi beh; vypadek
+            // proudu testy simuluji uvnitr fsd), v beznem behu bezpecne.
+            "if=none,id=data,format=raw,discard=unmap{},file={}",
+            if opts.test { ",cache=unsafe" } else { "" },
+            datadisk::create(&run.data)?.display()
         ))
         .args(["-device", &blk("data")])
         .arg("-qmp")
@@ -95,7 +170,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         // brana a hostitel 10.0.2.2, DNS 10.0.2.3). Bez option ROM
         // (`romfile=`), aby firmware nezkousel bootovat ze site.
         .arg("-netdev")
-        .arg(match &opts.hostfwd {
+        .arg(match hostfwd {
             Some(f) => format!("user,id=net0,hostfwd={f}"),
             None => String::from("user,id=net0"),
         })
@@ -117,7 +192,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         // Ve WSL neni uzel DRM pro egl-headless: GTK s OpenGL (EGL) pod
         // xvfb-run; SDL tam kontext OpenGL 3+ pro virgl nevytvori.
         let display = match (opts.gpu.as_str(), opts.qemu_wsl) {
-            ("2d", _) => "none",
+            ("2d" | "none", _) => "none",
             (_, true) => "gtk,gl=on",
             _ => "egl-headless",
         };
@@ -132,27 +207,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         );
     }
     cmd.args(&opts.qemu_args);
-
-    // Port pro hostfwd uvolnit az ted (QEMU ho hned obsadi).
-    if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
-        h.release_forwarded_port();
-    }
-    if opts.qemu_wsl {
-        cmd = wsl_command(&cmd, arch.qemu, opts.headless && opts.gpu != "2d");
-    }
-    println!("xtask: spoustim {}", if opts.qemu_wsl { String::from("QEMU ve WSL") } else { qemu.display().to_string() });
-    qmp::spawn_injector(serial_log.clone(), qmp_port, arch.ps2);
-    let result = if opts.test {
-        run_test(cmd, opts)
-    } else {
-        run_interactive(cmd)
-    };
-    // Pri panice nebo fatalni vyjimce prelozit adresy na jmena funkci.
-    if let Err(e) = symbolize::report(&serial_log, &artifacts.kernel) {
-        eprintln!("xtask: preklad adres selhal: {e}");
-    }
-    println!("xtask: vystup seriove linky je v {}", serial_log.display());
-    result
+    Ok(cmd)
 }
 
 /// Stroj q35 s OVMF. Vraci, zda smi systemovy disk prochazet IOMMU.
@@ -232,9 +287,13 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
 }
 
 /// Grafika virtio-gpu (ovladac `virtio-gpu`, kompozitor `compd`) s prekladem
-/// DMA pres IOMMU. Rezim 2D funguje s kazdym displejem QEMU (i bez okna).
+/// DMA pres IOMMU. Rezim 2D funguje s kazdym displejem QEMU (i bez okna);
+/// `--gpu none` virtio-gpu neprida.
 fn gpu_device(cmd: &mut Command, opts: &Options) {
     match opts.gpu.as_str() {
+        // Bez virtio-gpu: GUI bezi nad framebufferem z firmwaru (`fbdisplay`;
+        // x86_64 VGA, aarch64 ramfb).
+        "none" => {}
         // Venus: Vulkan pres virtio-gpu (blob zdroje v pameti hostitele
         // mapovane pres BAR). Potrebuje displej s OpenGL (`egl-headless`
         // bez okna). Bez IOMMU: blob pamet hostitele preklad DMA nepouziva.
@@ -318,9 +377,49 @@ fn run_interactive(mut cmd: Command) -> Result<()> {
     Ok(())
 }
 
-fn run_test(mut cmd: Command, opts: &Options) -> Result<()> {
-    let timeout = opts.arch.test_timeout;
+enum TestError {
+    /// QEMU skoncilo hned po startu, protoze port nekdo obsadil.
+    PortTaken(String),
+    Other(Box<dyn std::error::Error>),
+}
+
+impl<E: Into<Box<dyn std::error::Error>>> From<E> for TestError {
+    fn from(e: E) -> Self {
+        Self::Other(e.into())
+    }
+}
+
+/// Hlaska QEMU o obsazenem portu (QMP nebo hostfwd), Linux i Windows.
+fn port_error(stderr: &str) -> Option<String> {
+    const SIGNS: [&str; 5] = ["Address already in use", "host forwarding", "Failed to bind", "10048", "10013"];
+    let line = stderr.lines().find(|l| SIGNS.iter().any(|s| l.contains(s)))?;
+    Some(line.trim().to_string())
+}
+
+fn run_test(mut cmd: Command, opts: &Options) -> std::result::Result<(), TestError> {
+    // Opakovany beh (--repeat): kazde dalsi kolo az 60 s navic.
+    let timeout = opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1);
+    // Chybovy vystup QEMU jde dal na terminal a zaroven do bufferu (hlaska
+    // o obsazenem portu => novy pokus).
+    cmd.stderr(Stdio::piped());
     let mut child = cmd.spawn()?;
+    let stderr = Arc::new(Mutex::new(String::new()));
+    let copier = child.stderr.take().map(|mut pipe| {
+        let stderr = stderr.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = pipe.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                let text = String::from_utf8_lossy(&buf[..n]);
+                eprint!("{text}");
+                if let Ok(mut s) = stderr.lock() {
+                    s.push_str(&text);
+                }
+            }
+        })
+    });
     let start = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait()? {
@@ -329,24 +428,72 @@ fn run_test(mut cmd: Command, opts: &Options) -> Result<()> {
         if start.elapsed() > timeout {
             child.kill()?;
             child.wait()?;
-            return Err(format!("testy nedobehly do {} s", timeout.as_secs()).into());
+            return Err(TestError::Other(format!("testy nedobehly do {} s", timeout.as_secs()).into()));
         }
         std::thread::sleep(Duration::from_millis(100));
     };
+    if let Some(t) = copier {
+        let _ = t.join();
+    }
     match status.code() {
         Some(code) if code == opts.arch.test_success => {
             println!("xtask: testy prosly");
             Ok(())
         }
-        code => Err(format!("testy selhaly (navratovy kod QEMU {code:?})").into()),
+        code => {
+            if start.elapsed() < START_WINDOW
+                && let Some(e) = stderr.lock().ok().and_then(|s| port_error(&s))
+            {
+                return Err(TestError::PortTaken(e));
+            }
+            Err(TestError::Other(format!("testy selhaly (navratovy kod QEMU {code:?})").into()))
+        }
     }
 }
 
 /// Prazdny disk 1 MiB pro testy ovladace (pri kazdem behu znovu vynulovany).
-fn scratch_disk() -> Result<PathBuf> {
-    let path = target_dir().join("scratch.img");
-    std::fs::write(&path, vec![0u8; 1024 * 1024])?;
-    Ok(path)
+fn scratch_disk(path: &Path) -> Result<PathBuf> {
+    std::fs::write(path, vec![0u8; 1024 * 1024])?;
+    Ok(path.to_path_buf())
+}
+
+/// Soubory jednoho behu QEMU. Disky jsou jen pro tento beh (cislo procesu
+/// xtask v nazvu) a po skonceni se smazou; log testu take nese cislo
+/// procesu, aby soubezne behy nesdilely znacky pro QMP. Interaktivni beh
+/// pise do `target/serial-<arch>.log` jako dosud.
+struct RunFiles {
+    data: PathBuf,
+    scratch: PathBuf,
+    serial_log: PathBuf,
+}
+
+impl RunFiles {
+    fn new(arch: &str, test: bool) -> Self {
+        let pid = std::process::id();
+        let t = target_dir();
+        Self {
+            data: t.join(format!("data-{pid}.img")),
+            scratch: t.join(format!("scratch-{pid}.img")),
+            serial_log: t.join(if test {
+                format!("serial-test-{arch}-{pid}.log")
+            } else {
+                format!("serial-{arch}.log")
+            }),
+        }
+    }
+}
+
+impl Drop for RunFiles {
+    fn drop(&mut self) {
+        // `OS_KEEP_DATA=1`: datovy disk nechat (rozbor stavu FS po behu,
+        // napr. mereni na hostiteli nad skutecnym obsahem).
+        if std::env::var_os("OS_KEEP_DATA").is_some() {
+            eprintln!("xtask: datovy disk zustava v {}", self.data.display());
+        } else {
+            let _ = std::fs::remove_file(&self.data);
+        }
+        let _ = std::fs::remove_file(&self.scratch);
+    }
 }
 
 fn pflash_arg(path: &Path, readonly: bool) -> String {

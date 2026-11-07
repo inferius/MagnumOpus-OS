@@ -319,6 +319,7 @@ fn display_roundtrip() {
             output: 0,
             rects: vec![Rect::new(0, 0, 10, 10)],
         },
+        Request::Sync { token: u64::MAX - 7 },
         Request::OpenRender,
     ] {
         assert_eq!(Request::decode(&m.encode()), Ok(m));
@@ -334,6 +335,7 @@ fn display_roundtrip() {
         },
         Reply::Attached { output: 0 },
         Reply::Presented { seq: 3, time: 5 },
+        Reply::Synced { token: 9 },
         Reply::Render,
         Reply::Error {
             op: display::op::ATTACH,
@@ -342,6 +344,17 @@ fn display_roundtrip() {
     ] {
         assert_eq!(Reply::decode(&m.encode()), Ok(m));
     }
+}
+
+#[test]
+fn display_sync_marker() {
+    assert!(Reply::Synced { token: 9 }.ends_sync(9));
+    // Znacka predchozi instance (jiny token) synchronizaci nekonci.
+    assert!(!Reply::Synced { token: 8 }.ends_sync(9));
+    assert!(!Reply::Presented { seq: 1, time: 2 }.ends_sync(9));
+    // Ovladac bez SYNC odpovi chybou na op SYNC.
+    assert!(Reply::Error { op: display::op::SYNC, code: Error::NotSupported }.ends_sync(9));
+    assert!(!Reply::Error { op: display::op::PRESENT, code: Error::NotSupported }.ends_sync(9));
 }
 
 #[test]
@@ -537,4 +550,19 @@ fn status_roundtrip() {
     let mut t = String::new();
     s.format(&mut t).unwrap();
     assert_eq!(Status::parse(&t), Some(s));
+}
+
+#[test]
+fn paths_value_roundtrip_and_check() {
+    let v = Value::Paths(vec!["/a".into(), "/b".into()]);
+    let mut w = wire::Writer::new();
+    v.encode(&mut w);
+    let e = w.finish();
+    assert_eq!(Value::decode(&mut wire::Reader::new(&e)), Ok(v.clone()));
+    let mut w = wire::Writer::new();
+    w.u8(6).u32(u32::MAX);
+    assert!(Value::decode(&mut wire::Reader::new(&w.finish())).is_err());
+    let a = action::parse_manifest("[[action]]\nid = \"files.delete\"\n[[action.param]]\nname = \"files\"\ntype = \"paths\"\nrequired = true\n").unwrap();
+    assert!(a[0].check(&[("files".into(), v)]).is_ok());
+    assert!(a[0].check(&[("files".into(), Value::Path("/a".into()))]).is_err());
 }

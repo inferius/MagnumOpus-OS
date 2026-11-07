@@ -32,6 +32,8 @@ pub use log::{INDEX_PER_BLOCK, SpaceMeta, TABLE_PER_BLOCK};
 pub enum Class {
     /// Uzly stromu, logy: od zacatku disku, pohromade.
     Meta,
+    /// Druhe kopie uzlu: od konce disku dolu (daleko od prvnich kopii).
+    MetaHigh,
     /// Data souboru: best-fit, s cilem za predchozim extentem.
     Data,
 }
@@ -280,6 +282,7 @@ impl Space {
         debug_assert!(want > 0);
         let (start, len) = match class {
             Class::Meta => self.pick_meta(want, 1),
+            Class::MetaHigh => self.pick_high(want, 1),
             Class::Data => self.pick_data(want, goal),
         }
         .ok_or(Error::NoSpace)?;
@@ -289,8 +292,13 @@ impl Space {
     /// Alokace metadat aspon `min` bloku v jednom useku (uzly stromu).
     /// `NoSpace`, kdyz takovy usek neni, i kdyz je volnych bloku dost.
     pub fn alloc_min(&mut self, want: u64, min: u64, class: Class, txg: u64) -> Result<(u64, u64)> {
-        debug_assert!(want >= min && min > 0 && matches!(class, Class::Meta));
-        let (start, len) = self.pick_meta(want, min).ok_or(Error::NoSpace)?;
+        debug_assert!(want >= min && min > 0 && !matches!(class, Class::Data));
+        let picked = if matches!(class, Class::MetaHigh) {
+            self.pick_high(want, min)
+        } else {
+            self.pick_meta(want, min)
+        };
+        let (start, len) = picked.ok_or(Error::NoSpace)?;
         self.take_range(start, len, txg)
     }
 
@@ -319,6 +327,18 @@ impl Space {
                     self.meta_cursor = s + len;
                     return Some((s, len));
                 }
+            }
+        }
+        None
+    }
+
+    /// Druhe kopie metadat: nejvyssi volny usek aspon `min` bloku (od posledni
+    /// AG dolu); bere se jeho horni konec.
+    fn pick_high(&self, want: u64, min: u64) -> Option<(u64, u64)> {
+        for a in self.ags.iter().rev() {
+            if let Some((&s, &l)) = a.free.iter().rev().find(|(_, l)| **l >= min) {
+                let len = l.min(want);
+                return Some((s + l - len, len));
             }
         }
         None

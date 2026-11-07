@@ -220,6 +220,16 @@ A record:
 - Levels: `E` error, `W` warning, `I` info, `D` debug, `T` trace.
 - Outputs: serial (everything enabled), framebuffer (up to Info), a 64 KiB
   ring buffer (`log::snapshot`, for a future log service).
+- **Framebuffer for user space:** when the firmware provided one (and its
+  physical address is page aligned), init gets the memory object
+  `bootstrap::kind::FRAMEBUFFER` in its start message (geometry from
+  `BootInfo`, `FB_CONTROL` `INFO`). Init passes it to a single process -
+  the text and rescue console (`user/console`). The takeover is explicit
+  (`FB_CONTROL` `CLAIM`): the kernel then no longer draws the log into the
+  framebuffer, it keeps going to the serial line. `RELEASE` gives it back
+  to the kernel (the screen is cleared); the end (or crash) of the process
+  that took it over does the same. Without a framebuffer the entry is
+  missing.
 - Filter: global level (`log::set_level`), level for a module and its
   submodules (`log::set_target_level("sched", Level::Trace)`). Release builds
   do not compile Trace at all (feature `log-trace` brings it back). A

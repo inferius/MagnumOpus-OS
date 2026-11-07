@@ -44,8 +44,10 @@ pub const X86_64: Arch = Arch {
     iommus: &["intel", "amd", "none"],
     // isa-debug-exit vraci (v << 1) | 1, jadro zapisuje v = 0x10.
     test_success: 33,
-    // Beh s AMD IOMMU, testy site a GUI trva az ~200 s (TCG).
-    test_timeout: Duration::from_secs(300),
+    // Cely beh (USB/vstup, FS faze 2 a 3, sit s TLS a DNSSEC pod TCG, GUI,
+    // shell s padem termd a ulohami async, obnova sluzeb ~25 s) trva
+    // ~230-440 s podle vytizeni; s rezervou (vic behu QEMU najednou).
+    test_timeout: Duration::from_secs(600),
     ps2: true,
 };
 
