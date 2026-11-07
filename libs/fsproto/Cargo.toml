@@ -7,3 +7,4 @@ description = "Protokol souboroveho systemu (klient <-> fsd)"
 
 [dependencies]
 libos = { path = "../libos" }
+wire = { path = "../wire" }

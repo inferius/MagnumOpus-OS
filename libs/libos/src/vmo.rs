@@ -13,7 +13,13 @@ object_type!(Vmo);
 
 impl Vmo {
     pub fn create(size: u64) -> Result<Self> {
-        sys::vmo_create(size).map(|h| Self(Handle::from_raw(h)))
+        sys::vmo_create(size, 0).map(|h| Self(Handle::from_raw(h)))
+    }
+
+    /// Objekt pameti na ucet jobu procesu `process` (rodic tak vytvari
+    /// pamet potomka; potrebuje pravo `WRITE` na proces).
+    pub fn create_for(size: u64, process: &crate::Process) -> Result<Self> {
+        sys::vmo_create(size, process.handle().raw()).map(|h| Self(Handle::from_raw(h)))
     }
 
     /// Precte data objektu (libovolne dlouhy usek; jadro prenese nejvys

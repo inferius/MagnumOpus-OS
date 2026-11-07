@@ -1,0 +1,10 @@
+[package]
+name = "manifest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Manifest aplikace: identita, rozpocet, opravneni k siti"
+
+[dependencies]
+conf = { workspace = true }
+netproto = { path = "../netproto", default-features = false }

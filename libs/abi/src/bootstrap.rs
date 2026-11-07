@@ -52,6 +52,10 @@ pub mod kind {
     /// Fyzicky objekt pameti s oknem ECAM (konfigurace PCI Express);
     /// `arg` = prvni sbernice | posledni sbernice << 8 | segment << 16.
     pub const PCI_ECAM: u32 = 5;
+    /// Job, ve kterem proces bezi (prava bez `WRITE`: proces v nem smi
+    /// spoustet dalsi procesy a zakladat podrizene joby, ale nemeni si
+    /// limity). Init dostane korenovy job se vsemi pravy.
+    pub const JOB: u32 = 6;
 }
 
 pub const HEADER_SIZE: usize = core::mem::size_of::<Header>();

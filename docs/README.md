@@ -48,6 +48,13 @@ site menu.
 |---|---|---|
 | [Shell a terminál](cs/navrh-shell.md) | [Shell and terminal](en/shell-design.md) | jazyk (zápisy B a C, gramatika, sémantika), undo a náhled, služba relací, protokol terminálu, kódy chyb shellu / language (notations B and C, grammar, semantics), undo and preview, session service, terminal protocol, shell error codes |
 
+### Síť / Network
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Síť](cs/sit.md) | [Network](en/network.md) | virtio-net, služba netd, TCP/IP, DNS, NTP, oprávnění, API / virtio-net, netd service, TCP/IP, DNS, NTP, permissions, API |
+| [Firewall](cs/firewall.md) | [Firewall](en/firewall.md) | manifest aplikace, dotazy uživateli, paketový filtr, profily sítí, audit, filtr DNS / application manifest, asking the user, packet filter, network profiles, audit, DNS filter |
+
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).
 

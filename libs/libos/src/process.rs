@@ -13,9 +13,9 @@ pub struct Thread(Handle);
 object_type!(Thread);
 
 impl Process {
-    /// Prazdny proces (bez pameti a vlaken).
-    pub fn create(name: &str) -> Result<Self> {
-        sys::process_create(name).map(|h| Self(Handle::from_raw(h)))
+    /// Prazdny proces (bez pameti a vlaken) v jobu `job`.
+    pub fn create(job: &crate::job::Job, name: &str) -> Result<Self> {
+        sys::process_create(job.handle().raw(), name).map(|h| Self(Handle::from_raw(h)))
     }
 
     /// Namapuje objekt pameti do adresniho prostoru procesu.

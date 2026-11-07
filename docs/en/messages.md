@@ -115,6 +115,12 @@ invariant was broken (a kernel bug).
 | `devmgr: ovladac X pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
 | `virtio-blk BB:DD.F: N MiB, flush ano/ne, discard ano/ne` | The disk is ready. `discard ne` = the device has no TRIM (in QEMU the drive lacks `discard=unmap`); the FS then skips TRIM. |
 | `virtio-blk ...: inicializace selhala: ...` | The device does not follow virtio 1.x, did not finish its reset within a second (`TIMED_OUT`) or resources are missing (MSI-X, DMA memory, `NO_RESOURCES` = the restricted Resource quota is exhausted). |
+| `virtio-net BB:DD.F: MAC xx:..., linka pripojena/odpojena` | The network card is ready ("link up/down"). The MAC comes from the device configuration, otherwise it is locally administered (`02:...`). |
+| `virtio-net ...: inicializace selhala: ...` | As for the disk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
+| `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | The device returned a nonsensical queue index or a buffer it did not own (`CORRUPTED`). The driver resets it (it stops using DMA) and exits; the network does not work until a restart. |
+| `virtio-net ...: zahozeno N prijatych ramcu` | At exit: frames the network service could not receive in time (full channel queue) or invalid ones ("N received frames dropped"). |
+| `virtio-rng BB:DD.F: 256 B entropie predano jadru` | The host randomness source is ready and the kernel got the first data ("256 B of entropy passed to the kernel"). More batches every minute. |
+| `virtio-rng ...: zarizeni neodpovida (...), koncim` | The device did not complete a request within 5 s or returns empty data. The kernel keeps using its other sources. |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | The PS/2 driver found a keyboard, a mouse (kind from the ID: wheel, 5 buttons). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 reads `0xFF` (no controller) or no device was found (PS/2 controller not found). Normal on modern boards without PS/2. |
@@ -177,6 +183,38 @@ invariant was broken (a kernel bug).
 | `fsd: defragmentace: ...` | A defragmentation step failed (typically `CORRUPTED` when reading a damaged block). Defragmentation pauses until further changes; data is not modified. |
 | `fsd: chyba kanalu: ...` | Unexpected error on the client channel; the service commits and exits. |
 | `fsd: chybi handly ve startovni zprave` | Wrong service start (code 1). |
+
+## Network service netd
+
+| Message | Meaning and fix |
+|---|---|
+| `netd: bezim, cekam na DHCP` | The service got `INFO` from the driver and started the DHCP client ("running, waiting for DHCP"). |
+| `netd: DHCP: adresa A/P, brana G, DNS [...]` | The interface is configured (address, gateway, DNS); programs waiting in `wait_configured` continue. |
+| `netd: DHCP: adresa ztracena` | The lease expired or the server removed the address ("address lost"). Connections get `UNREACHABLE` until DHCP renews it. |
+| `netd: VAROVANI: generator jadra neni nasazeny, ...` | The kernel does not have enough entropy yet (no RDRAND and no virtio-rng): DNS query IDs and TCP numbers are predictable ("kernel generator not seeded"). See [Random numbers](syscalls.md#random-numbers). |
+| `netd: nova relace s pravy ...` | Someone with the `RESTRICT` right (init) created a narrower session ("new session with rights"). |
+| `netd: servery DNS nastaveny rucne: [...]` | `SET_DNS` (the `CONFIGURE` right); an empty list = back to the DHCP servers. |
+| `netd: ovladac sitove karty neposlal INFO: ...` | The driver did not answer within 5 s (code 2); `init` then does not start the network. |
+| `netd: ovladac skoncil (zahozeno ramcu: ...)` | The card driver exited (faulty device) and the service exits with it (code 3). |
+| `netd: chybi handly ve startovni zprave` | The service was started incorrectly (code 1). |
+| `init: sluzbu site nelze spustit: ...` | No network card (`NOT_FOUND`) or the service did not answer. |
+| `init: hodiny serizeny podle NTP ...` | The time service set the clock from the NTP server; the offset is how far off the clock was. |
+| `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` did not pass the channel to `fwd` ("without the firewall service"). The public profile applies (nothing inbound), questions of applications with `ask` are denied right away. |
+| `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` exited. The last configuration applies, pending and further questions are denied. |
+| `netd: profil site P` | `fwd` sent a configuration with another network profile (`public`, `home`, ...). See [Network profiles](firewall.md#network-profiles). |
+| `netd: neplatna konfigurace firewallu: ...` | A `CONFIG` message from `fwd` cannot be read; the previous configuration applies. |
+| `fwd: bezim (agent ano\|ne, ukladani na FS\|jen v pameti)` | The firewall service runs. "jen v pameti" (memory only) = no FS session, decisions are lost on restart. |
+| `fwd: vychozi konfigurace ulozena do /config/firewall.toml` | First start: there was no configuration on the FS yet. |
+| `fwd: ... je neplatna (...), pouzivam vychozi` | The file on the FS cannot be read or is invalid (line number in the description). Fix the file, `fwd` takes it on the next start. |
+| `fwd: sit M (brana G), profil P (neznama sit)` | `netd` announced a network (gateway MAC). An unknown network gets `unknown_network` and the agent gets a question. |
+| `fwd: A povolit\|zakazat vzdy: cil` | The user decided permanently (allow / deny always); the rule is in the configuration. |
+| `fwd: dotaz N (A) vyprsel` | The agent did not answer within `ask_timeout`; `ask_default` applies. |
+| `fwd: agent uzivatele skoncil, dotazy maji vychozi odpoved` | The agent channel is closed; further questions get `ask_default`. |
+| `fwd: konfiguraci nejde ulozit: ...` | Writing to the FS failed; the configuration applies in memory. |
+| `init: P (aplikace) v jobu: pamet ..., pamet jadra ...` | The program runs in a job with limits from its manifest. |
+| `init: manifest P: ...` | The program manifest is invalid (error description); the program does not start. |
+| `init: firewall bez FS (konfigurace se neulozi): ...` | An FS session for `fwd` cannot be prepared (no FS or rights). |
+| `init: sluzbu firewallu nelze spustit: ...` | `fwd` did not start; `netd` sees a closed channel and denies questions. |
 
 ## Session service termd
 

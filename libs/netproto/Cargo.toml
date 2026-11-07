@@ -1,0 +1,20 @@
+[package]
+name = "netproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol site (programy <-> netd, netd <-> ovladac sitove karty)"
+
+[features]
+# Klientska knihovna nad kanaly (Net, TcpStream, ...); zapina ji, kdo ji
+# pouziva (programy). Bez ni zustanou jen formaty zprav, opravneni, DNS
+# a NTP - ty jdou testovat na hostiteli a pouziva je i pomocny server
+# v xtask.
+default = []
+client = ["dep:libos"]
+std = []
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }
+libos = { path = "../libos", optional = true }

@@ -32,7 +32,10 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 4. `inputd`: init hands it the input devices, its own focus channel and the
    `secure` channel, and sends `settled` (devices attached now are
    trusted),
-5. all these processes are handed to the supervisor to watch.
+5. `netd` on the first network card and `fwd` (firewall, configuration on
+   the FS), both in jobs by their manifests (see [Network](network.md),
+   [Firewall](firewall.md)),
+6. all these processes are handed to the supervisor to watch.
 
 ## The supervisor
 
@@ -45,7 +48,7 @@ watched processes:
 | `devmgr` sends `block` | only logs it for now (disks at run time come with multiple disks in `fsd`) |
 | `devmgr` closes its channel | logs it, hotplug stops working |
 | a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). It does not block waiting for the new service to confirm: its channel is one more item of the loop. If it does not answer within 5 s (or answers with an error), it kills it and the attempt counts as another crash. More than 5 restarts within 60 s = it gives up and the service stays stopped |
-| another service exits (`devmgr`, `fsd`, `inputd`) | logs the code. No recovery yet (see below) |
+| another service exits (`devmgr`, `fsd`, `inputd`, `netd`, `fwd`) | logs the code. No recovery yet (see below) |
 
 Log when a service crashes:
 
@@ -74,7 +77,7 @@ sup.watch("fsd", &fsd_process, None);
 sup.run(&startup); // never returns
 ```
 
-## Why `inputd`, `fsd` and `devmgr` are not recovered yet
+## Why `inputd`, `fsd`, `netd` and `devmgr` are not recovered yet
 
 A crashed service closes its channels to its drivers and clients, and they
 then exit. An input driver exits when its channel to the service closes.
@@ -86,7 +89,9 @@ its ports again. Recovery therefore needs:
   connection (through `devmgr`),
 - restart with dependencies (a `devmgr` crash = restart the services on
   top of the drivers too),
-- for `fsd`, mounting the same disk again and restoring client sessions.
+- for `fsd`, mounting the same disk again and restoring client sessions,
+- for `netd`, new sessions for programs (every socket is a channel that
+  dies with the service) and restarting `fwd` with a new channel to `netd`.
 
 That is the supervisor's next step. The `watch` / `restart` mechanism is
 ready for it.

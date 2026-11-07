@@ -113,6 +113,12 @@ porušený vnitřní předpoklad (chyba jádra).
 | `devmgr: ovladac X pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
 | `virtio-blk BB:ZZ.F: N MiB, flush ano/ne, discard ano/ne` | Disk je připravený. `discard ne` = zařízení neumí TRIM (v QEMU chybí `discard=unmap` u disku); FS pak TRIM přeskakuje. |
 | `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x, nedokončilo reset do sekundy (`TIMED_OUT`) nebo chybí prostředky (MSI-X, DMA paměť, `NO_RESOURCES` = vyčerpaná kvóta omezeného Resource). |
+| `virtio-net BB:ZZ.F: MAC xx:..., linka pripojena/odpojena` | Síťová karta je připravená. MAC je z konfigurace zařízení, jinak místně spravovaná (`02:...`). |
+| `virtio-net ...: inicializace selhala: ...` | Jako u disku: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA paměť). |
+| `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | Zařízení vrátilo nesmyslný index fronty nebo buffer, který nemělo (`CORRUPTED`). Ovladač ho resetuje (přestane používat DMA) a skončí; síť do restartu nefunguje. |
+| `virtio-net ...: zahozeno N prijatych ramcu` | Při ukončení: rámce, které služba sítě nestíhala přijímat (plná fronta kanálu) nebo byly neplatné. |
+| `virtio-rng BB:ZZ.F: 256 B entropie predano jadru` | Zdroj náhody z hostitele je připravený a jádro dostalo první data. Další dávky každou minutu. |
+| `virtio-rng ...: zarizeni neodpovida (...), koncim` | Zařízení nedokončilo požadavek do 5 s nebo vrací prázdná data. Jádro dál používá ostatní zdroje. |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | Ovladač PS/2 našel klávesnici, myš (druh podle ID: kolečko, 5 tlačítek). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 čte `0xFF` (řadič chybí) nebo nenašel žádné zařízení. Na moderních deskách bez PS/2 normální. |
@@ -175,6 +181,38 @@ porušený vnitřní předpoklad (chyba jádra).
 | `fsd: defragmentace: ...` | Krok defragmentace selhal (typicky `CORRUPTED` při čtení poškozeného bloku). Defragmentace se do dalších změn pozastaví; data se nemění. |
 | `fsd: chyba kanalu: ...` | Neočekávaná chyba kanálu ke klientovi; služba udělá commit a skončí. |
 | `fsd: chybi handly ve startovni zprave` | Chybný start služby (kód 1). |
+
+## Služba sítě netd
+
+| Hláška | Význam a řešení |
+|---|---|
+| `netd: bezim, cekam na DHCP` | Služba dostala `INFO` od ovladače a spustila klienta DHCP. |
+| `netd: DHCP: adresa A/P, brana G, DNS [...]` | Rozhraní je nastavené; programy čekající na `wait_configured` pokračují. |
+| `netd: DHCP: adresa ztracena` | Pronájem vypršel nebo server adresu odebral. Spojení dostávají `UNREACHABLE`, dokud DHCP adresu neobnoví. |
+| `netd: VAROVANI: generator jadra neni nasazeny, ...` | Jádro zatím nemá dost entropie (bez RDRAND a bez virtio-rng): ID dotazů DNS a čísla TCP jsou odhadnutelná. Viz [Náhodná čísla](syscally.md#náhodná-čísla). |
+| `netd: nova relace s pravy ...` | Někdo s právem `RESTRICT` (init) vytvořil uzší relaci. |
+| `netd: servery DNS nastaveny rucne: [...]` | `SET_DNS` (právo `CONFIGURE`); prázdný seznam = zpět servery z DHCP. |
+| `netd: ovladac sitove karty neposlal INFO: ...` | Ovladač do 5 s neodpověděl (kód 2); `init` pak síť nespustí. |
+| `netd: ovladac skoncil (zahozeno ramcu: ...)` | Ovladač karty skončil (vadné zařízení) a služba končí s ním (kód 3). |
+| `netd: chybi handly ve startovni zprave` | Chybný start služby (kód 1). |
+| `init: sluzbu site nelze spustit: ...` | Chybí síťová karta (`NOT_FOUND`) nebo služba neodpověděla. |
+| `init: hodiny serizeny podle NTP ...` | Čas ze serveru NTP předala služba času do hodin; posun = o kolik hodiny šly špatně. |
+| `netd: bez sluzby firewallu (verejny profil, dotazy se odmitaji)` | `init` nepředal kanál k `fwd`. Platí veřejný profil (nic dovnitř), dotazy aplikací s `ask` se rovnou odmítnou. |
+| `netd: sluzba firewallu skoncila, dotazy se odmitaji` | `fwd` skončil. Platí poslední konfigurace, rozpracované a další dotazy se odmítnou. |
+| `netd: profil site P` | `fwd` poslal konfiguraci s jiným profilem sítě (`public`, `home`, ...). Viz [Profily sítí](firewall.md#profily-sítí). |
+| `netd: neplatna konfigurace firewallu: ...` | Zpráva `CONFIG` od `fwd` nejde přečíst; platí předchozí konfigurace. |
+| `fwd: bezim (agent ano\|ne, ukladani na FS\|jen v pameti)` | Služba firewallu běží. „jen v paměti“ = bez relace FS, rozhodnutí se po restartu ztratí. |
+| `fwd: vychozi konfigurace ulozena do /config/firewall.toml` | První start: na FS ještě konfigurace nebyla. |
+| `fwd: ... je neplatna (...), pouzivam vychozi` | Soubor na FS nejde přečíst nebo je neplatný (číslo řádku v popisu). Opravit soubor, `fwd` ho při dalším startu převezme. |
+| `fwd: sit M (brana G), profil P (neznama sit)` | `netd` ohlásil síť (MAC brány). Neznámá síť dostane `unknown_network` a agent dostane dotaz. |
+| `fwd: A povolit\|zakazat vzdy: cil` | Uživatel trvale rozhodl; pravidlo je v konfiguraci. |
+| `fwd: dotaz N (A) vyprsel` | Agent neodpověděl do `ask_timeout`; platí `ask_default`. |
+| `fwd: agent uzivatele skoncil, dotazy maji vychozi odpoved` | Kanál agenta je zavřený; další dotazy dostanou `ask_default`. |
+| `fwd: konfiguraci nejde ulozit: ...` | Zápis na FS selhal; konfigurace platí v paměti. |
+| `init: P (aplikace) v jobu: pamet ..., pamet jadra ...` | Program běží v jobu s limity ze svého manifestu. |
+| `init: manifest P: ...` | Manifest programu je neplatný (popis chyby); program se nespustí. |
+| `init: firewall bez FS (konfigurace se neulozi): ...` | Pro `fwd` nejde připravit relaci FS (chybí FS nebo práva). |
+| `init: sluzbu firewallu nelze spustit: ...` | `fwd` nenaběhl; `netd` uvidí zavřený kanál a dotazy odmítá. |
 
 ## Služba relací termd
 

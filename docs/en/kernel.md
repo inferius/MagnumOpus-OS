@@ -81,6 +81,19 @@ the upper half with the kernel):
   `WAIT`, `SIGNAL`, `MANAGE`) can only be removed when duplicating.
 - **Channels**: messages with data and handles; transferring a handle moves
   it (the sender loses it). Closing an end sets `PEER_CLOSED` on the other.
+- **Ports** (`kernel/src/object/port.rs`): one-shot registrations "when the
+  object's signals intersect the mask, queue a packet with a key". Waiting
+  on any number of objects without the `OBJECT_WAIT_MANY` limit. An object
+  keeps a registration in its waiter list like a thread (`ObjectCore`),
+  with only a weak reference to the port. Room for the packet is reserved
+  in advance, so delivery from an interrupt does not allocate. Lock order:
+  object, port queue, port signals. See [Ports](syscalls.md#ports).
+- **Random numbers** (`kernel/src/random.rs`, crate `libs/csprng`): an
+  entropy pool (BLAKE2s) and a ChaCha20 generator with key erasure after
+  every request. Sources: `arch::hw_random` (x86 RDSEED/RDRAND), counter
+  jitter, interrupt timing (lock-free in `trap::device_irq`) and the
+  virtio-rng driver (`RANDOM_ADD`). See
+  [Random numbers](syscalls.md#random-numbers).
 
 ## Processes and threads
 
@@ -107,8 +120,10 @@ the upper half with the kernel):
   state (FCW 0x037F, MXCSR 0x1F80), so data of another thread cannot leak.
   The kernel itself does not use FPU/SSE (soft-float). AVX is not enabled
   (its instructions fault with #UD).
-- **Limits:** handles, threads, mappings, channel queues and the kernel
-  memory reserve - see [syscalls.md](syscalls.md#resource-limits).
+- **Budgets and limits:** kernel memory and user memory are charged to
+  the budget of the process job (a tree of jobs, limits in bytes), the
+  kernel memory reserve and structural limits - see
+  [syscalls.md](syscalls.md#jobs-resource-budgets).
 
 ## IOMMU (DMA protection)
 

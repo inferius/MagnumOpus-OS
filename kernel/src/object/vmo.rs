@@ -9,16 +9,45 @@
 //!
 //! Objekt nemeni velikost. TODO: lazy alokace pri prvnim pristupu,
 //! copy-on-write klony.
+//!
+//! Stranky (bezne i souvisle) se strhavaji z rozpoctu uzivatelske pameti
+//! jobu, seznam stranek a objekt samotny z rozpoctu jadra - pred alokaci,
+//! takze prilis velky objekt selze hned (`NO_RESOURCES`). Seznam stranek
+//! je dvouurovnove pole (bloky po 64 KiB = 32 MiB pameti objektu), takze
+//! velikost objektu neomezuje nejvetsi souvisly blok heapu.
 
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
+use super::job::{Charge, Job, Pool, object_cost};
 use super::{Error, KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::arch;
 use crate::arch::iommu::IommuDomain;
+use crate::mm::chunked::ChunkedVec;
 use crate::mm::{PhysAddr, phys};
 
 const PAGE: u64 = crate::arch::paging::PAGE_SIZE;
+
+/// Blok seznamu stranek (64 KiB = 8192 stranek).
+const PAGE_LIST_CHUNK: usize = 64 * 1024;
+type PageList = ChunkedVec<PhysAddr, PAGE_LIST_CHUNK>;
+
+/// Strhne rozpocty za objekt s `count` strankami, z toho `user_bytes`
+/// uzivatelske pameti.
+fn charge(job: Option<&Arc<Job>>, count: u64, user_bytes: u64) -> Result<[Charge; 2], Error> {
+    let Some(job) = job else {
+        return Ok([Charge::none(), Charge::none()]);
+    };
+    let kernel = object_cost::<MemoryObject>() + count * core::mem::size_of::<PhysAddr>() as u64;
+    let k = job.charge(Pool::Kernel, kernel)?;
+    let u = job.charge(Pool::User, user_bytes)?;
+    Ok([k, u])
+}
+
+fn page_list(count: u64) -> Result<PageList, Error> {
+    let mut pages = PageList::new();
+    pages.try_reserve(usize::try_from(count).map_err(|_| Error::InvalidArgs)?)?;
+    Ok(pages)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -33,7 +62,7 @@ enum Kind {
 pub struct MemoryObject {
     core: ObjectCore,
     size: u64,
-    pages: Vec<PhysAddr>,
+    pages: PageList,
     kind: Kind,
     /// Domena IOMMU, ve ktere je pamet namapovana pro DMA zarizeni
     /// (odmapuje se pred vracenim stranek alokatoru).
@@ -42,32 +71,32 @@ pub struct MemoryObject {
     /// a jadro pri pristupu pres primou mapu udrzuje cache (na nekoherentni
     /// platforme; na koherentni jsou `arch::dma_sync_*` prazdne).
     for_dma: bool,
+    /// Strzeni z rozpoctu jadra a uzivatelske pameti jobu.
+    _charges: [Charge; 2],
 }
 
 impl MemoryObject {
     /// Novy objekt o velikosti `size` (zaokrouhleno nahoru na stranky),
-    /// vyplneny nulami.
-    pub fn new(size: u64) -> Result<Arc<Self>, Error> {
+    /// vyplneny nulami, strzeny z rozpoctu `job`.
+    pub fn new(size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
         if size == 0 || size > abi::vm::VMO_MAX_SIZE {
             return Err(Error::InvalidArgs);
         }
-        let count = size.div_ceil(PAGE) as usize;
-        let mut pages = Vec::new();
-        pages
-            .try_reserve_exact(count)
-            .map_err(|_| Error::NoMemory)?;
+        let count = size.div_ceil(PAGE);
+        let charges = charge(job, count, count * PAGE)?;
         let mut vmo = Self {
             core: ObjectCore::new(Signals::NONE),
-            size: count as u64 * PAGE,
-            pages,
+            size: count * PAGE,
+            pages: page_list(count)?,
             kind: Kind::Pages,
             dma: None,
             for_dma: false,
+            _charges: charges,
         };
         for _ in 0..count {
             // Pri neuspechu se uz alokovane stranky uvolni v Drop.
             vmo.pages
-                .push(phys::alloc_user_frame_zeroed().ok_or(Error::NoMemory)?);
+                .push(phys::alloc_user_frame_zeroed().ok_or(Error::NoMemory)?)?;
         }
         Ok(Arc::new(vmo))
     }
@@ -77,8 +106,9 @@ impl MemoryObject {
     pub fn new_contiguous_dma(
         size: u64,
         domain: Option<crate::arch::iommu::Domain>,
+        job: Option<&Arc<Job>>,
     ) -> Result<Arc<Self>, Error> {
-        let vmo = Self::new_contiguous(size)?;
+        let vmo = Self::new_contiguous(size, job)?;
         let mut vmo = Arc::try_unwrap(vmo).map_err(|_| Error::BadState)?;
         vmo.for_dma = true;
         // Nuly zapsane pres primou mapu musi byt v pameti driv, nez je uvidi
@@ -92,12 +122,14 @@ impl MemoryObject {
     }
 
     /// Fyzicky souvisly objekt pro DMA (max. 4 MiB), vyplneny nulami.
-    pub fn new_contiguous(size: u64) -> Result<Arc<Self>, Error> {
+    pub fn new_contiguous(size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
         if size == 0 || size > (PAGE << phys::MAX_ORDER) {
             return Err(Error::InvalidArgs);
         }
         let count = size.div_ceil(PAGE);
         let order = count.next_power_of_two().trailing_zeros() as usize;
+        let charges = charge(job, count, PAGE << order)?;
+        let mut pages = page_list(count)?;
         let base = phys::alloc_user_pages(order).ok_or(Error::NoMemory)?;
         // SAFETY: prave alokovany blok 2^order stranek v prime mape.
         unsafe {
@@ -105,9 +137,10 @@ impl MemoryObject {
                 .as_mut_ptr::<u8>()
                 .write_bytes(0, (PAGE << order) as usize)
         };
-        let pages = (0..count)
-            .map(|i| PhysAddr::new(base.as_u64() + i * PAGE))
-            .collect();
+        for i in 0..count {
+            // Misto je rezervovane (`page_list`), push nealokuje.
+            pages.push(PhysAddr::new(base.as_u64() + i * PAGE))?;
+        }
         Ok(Arc::new(Self {
             core: ObjectCore::new(Signals::NONE),
             size: count * PAGE,
@@ -115,19 +148,27 @@ impl MemoryObject {
             kind: Kind::Contiguous { order },
             dma: None,
             for_dma: false,
+            _charges: charges,
         }))
     }
 
     /// Okno na fyzicky rozsah registru zarizeni. Volajici ruci (pres
     /// `platform::is_device_memory`), ze rozsah nelezi v RAM.
-    pub fn new_physical(phys_start: u64, size: u64) -> Result<Arc<Self>, Error> {
+    pub fn new_physical(
+        phys_start: u64,
+        size: u64,
+        job: Option<&Arc<Job>>,
+    ) -> Result<Arc<Self>, Error> {
         if size == 0 || !phys_start.is_multiple_of(PAGE) || size > abi::vm::VMO_MAX_SIZE {
             return Err(Error::InvalidArgs);
         }
         let count = size.div_ceil(PAGE);
-        let pages = (0..count)
-            .map(|i| PhysAddr::new(phys_start + i * PAGE))
-            .collect();
+        // Registry zarizeni nejsou RAM: jen seznam stranek z rozpoctu jadra.
+        let charges = charge(job, count, 0)?;
+        let mut pages = page_list(count)?;
+        for i in 0..count {
+            pages.push(PhysAddr::new(phys_start + i * PAGE))?;
+        }
         Ok(Arc::new(Self {
             core: ObjectCore::new(Signals::NONE),
             size: count * PAGE,
@@ -135,6 +176,7 @@ impl MemoryObject {
             kind: Kind::Physical,
             dma: None,
             for_dma: false,
+            _charges: charges,
         }))
     }
 
@@ -249,7 +291,7 @@ impl Drop for MemoryObject {
         // smi zpet do alokatoru. Fyzicke okno alokatoru nepatri.
         match self.kind {
             Kind::Pages => {
-                for &page in &self.pages {
+                for &page in self.pages.iter() {
                     phys::free_pages(page, 0);
                 }
             }

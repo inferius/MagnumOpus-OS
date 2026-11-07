@@ -1,11 +1,12 @@
 //! Split virtqueue: tabulka deskriptoru, fronta "available" (ovladac ->
 //! zarizeni) a fronta "used" (zarizeni -> ovladac), vse v DMA pameti.
 //!
-//! Dva zpusoby pouziti:
+//! Dva zpusoby pouziti (na jedne fronte se nesmi michat):
 //! - pozadavky (`submit` + `take_used`): jeden retezec s hlavou
 //!   v deskriptoru 0, ovladac ceka na jeho dokonceni (blokove zarizeni),
-//! - prijimaci fronta (`post` + `take_posted`): mnoho samostatnych bufferu,
-//!   zarizeni je plni a vraci v libovolnem poradi (udalosti vstupu).
+//! - samostatne buffery (`post` + `take_posted`): mnoho bufferu najednou,
+//!   kazdy s vlastnim cislem deskriptoru; zarizeni je vraci v libovolnem
+//!   poradi (udalosti vstupu, prijem i odesilani ramcu site).
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;

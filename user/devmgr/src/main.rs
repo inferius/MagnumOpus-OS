@@ -6,8 +6,8 @@
 //! Pro radice USB (xHCI) spusti `xhci` a podle jeho zprav tridni ovladace
 //! (`usb.rs`). Rodici (init) posle po bootstrap kanalu pro kazde zarizeni
 //! zpravu s koncem kanalu ke klientovi ovladace: `block` (disk, protokol
-//! `blockproto`) nebo `input` (klavesnice, mys, protokol
-//! `inputproto::device`), a `done`, az jsou nalezena zarizeni pri startu
+//! `blockproto`), `input` (klavesnice, mys, protokol `inputproto::device`),
+//! `net` (sitova karta, `netproto::link`) nebo `rng` (zdroj nahody), a `done`, az jsou nalezena zarizeni pri startu
 //! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
 //!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
@@ -41,6 +41,10 @@ struct Driver {
     program: &'static str,
     /// Zprava pro init s kanalem ke klientovi ovladace.
     message: &'static [u8],
+    /// Nejvic preruseni a pameti pro DMA (nejmensi prava: ovladac dostane
+    /// jen to, co jeho zarizeni potrebuje).
+    irq_max: u32,
+    dma_max: u64,
 }
 
 const DRIVERS: &[Driver] = &[
@@ -49,6 +53,25 @@ const DRIVERS: &[Driver] = &[
         ids: (0x1042, 0x1001),
         program: "virtio-blk",
         message: b"block",
+        // Fronta 16 + buffer dat az 1 MiB na pozadavek.
+        irq_max: 4,
+        dma_max: 4 << 20,
+    },
+    // Sitova karta (typ 1): 2 fronty po 256 bufferech 2 KiB (1 MiB) + krouzky.
+    Driver {
+        ids: (0x1041, 0x1000),
+        program: "virtio-net",
+        message: b"net",
+        irq_max: 4,
+        dma_max: 2 << 20,
+    },
+    // Zdroj nahody (typ 4): fronta 4 + jedna stranka dat.
+    Driver {
+        ids: (0x1044, 0x1005),
+        program: "virtio-rng",
+        message: b"rng",
+        irq_max: 2,
+        dma_max: 256 << 10,
     },
     // Vstupni zarizeni (typ 18): klavesnice, mys, tablet. Prechodne
     // rozhrani nema.
@@ -56,6 +79,8 @@ const DRIVERS: &[Driver] = &[
         ids: (0x1052, 0x1052),
         program: "virtio-input",
         message: b"input",
+        irq_max: 4,
+        dma_max: 1 << 20,
     },
 ];
 
@@ -200,7 +225,7 @@ fn start_xhci(
     let bar_size = ecam.memory_bar_size(a, 0).ok_or(libos::Error::NotSupported)?;
     let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
     let id = (segment, a.bus, a.device, a.function);
-    let device = resource.restrict_device(&ranges, DRIVER_IRQ_MAX, DRIVER_DMA_MAX, id)?;
+    let device = resource.restrict_device(&ranges, XHCI_IRQ_MAX, XHCI_DMA_MAX, id)?;
     let config = device.device_memory(config_phys, pci::CONFIG_SIZE)?;
     let (mine, theirs) = Channel::create()?;
     let handles = vec![
@@ -219,9 +244,9 @@ fn start_xhci(
     })
 }
 
-/// Nejvic preruseni a DMA pameti pro jeden ovladac.
-const DRIVER_IRQ_MAX: u32 = 8;
-const DRIVER_DMA_MAX: u64 = 4 * 1024 * 1024;
+/// Preruseni a DMA pameti pro ovladac radice xHCI.
+const XHCI_IRQ_MAX: u32 = 8;
+const XHCI_DMA_MAX: u64 = 4 * 1024 * 1024;
 
 /// Prostredky jednoho zarizeni: jeho pametove BARy (zaokrouhlene na
 /// stranky) a stranka jeho konfiguracniho prostoru.
@@ -272,7 +297,7 @@ fn start_driver(
     let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
     let a = f.address;
     let id = (segment, a.bus, a.device, a.function);
-    let device = resource.restrict_device(&ranges, DRIVER_IRQ_MAX, DRIVER_DMA_MAX, id)?;
+    let device = resource.restrict_device(&ranges, driver.irq_max, driver.dma_max, id)?;
     let config = device.device_memory(config_phys, pci::CONFIG_SIZE)?;
     let (client_end, driver_end) = Channel::create()?;
     let handles = vec![
@@ -284,7 +309,7 @@ fn start_driver(
     let config = format!("pci {} {} {}", a.bus, a.device, a.function);
     control.write(config.as_bytes(), Vec::new())?;
     // Konec kanalu ke klientovi patri initu (ten ho preda souborovemu
-    // systemu nebo sluzbe vstupu).
+    // systemu, sluzbe vstupu nebo sluzbe site).
     parent.write(driver.message, vec![client_end.into_handle()])?;
     Ok(process)
 }

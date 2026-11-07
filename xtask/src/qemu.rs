@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir};
 
 /// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
-const DEVICE_LAYOUT: u32 = 4;
+const DEVICE_LAYOUT: u32 = 5;
 
 fn default_accel() -> &'static str {
     if cfg!(target_os = "linux") && Path::new("/dev/kvm").exists() {
@@ -90,8 +90,21 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         .args(["-device", &blk("data")])
         .arg("-qmp")
         .arg(qmp::qemu_arg(qmp_port))
-        // Bez sitove karty, jinak firmware zbytecne zkousi PXE boot.
-        .args(["-nic", "none"])
+        // Sitova karta virtio-net v user-mode siti (slirp: host 10.0.2.15,
+        // brana a hostitel 10.0.2.2, DNS 10.0.2.3). Bez option ROM
+        // (`romfile=`), aby firmware nezkousel bootovat ze site.
+        .arg("-netdev")
+        .arg(match &opts.hostfwd {
+            Some(f) => format!("user,id=net0,hostfwd={f}"),
+            None => String::from("user,id=net0"),
+        })
+        .args([
+            "-device",
+            "virtio-net-pci,netdev=net0,disable-legacy=on,iommu_platform=on,romfile=",
+        ])
+        // Zdroj nahody z hostitele (doplnuje entropii jadra, viz
+        // docs/cs/syscally.md RANDOM_ADD).
+        .args(["-device", "virtio-rng-pci,disable-legacy=on,iommu_platform=on"])
         // Seriova linka do terminalu a zaroven do souboru, aby se dal vystup
         // dohledat i po skonceni behu.
         .arg("-chardev")
@@ -111,6 +124,10 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     }
     cmd.args(&opts.qemu_args);
 
+    // Port pro hostfwd uvolnit az ted (QEMU ho hned obsadi).
+    if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
+        h.release_forwarded_port();
+    }
     println!("xtask: spoustim {}", qemu.display());
     qmp::spawn_injector(serial_log.clone(), qmp_port, arch.ps2);
     let result = if opts.test {

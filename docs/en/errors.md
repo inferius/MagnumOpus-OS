@@ -21,7 +21,7 @@ is documented in this file and in the Czech version.
 | -3 | `WRONG_TYPE` | object has a different type |
 | -4 | `TIMED_OUT` | wait deadline expired |
 | -5 | `NO_MEMORY` | out of memory |
-| -6 | `NO_RESOURCES` | a limit was exhausted |
+| -6 | `NO_RESOURCES` | job budget or a limit exhausted |
 | -7 | `INVALID_ARGS` | invalid argument |
 | -8 | `NOT_FOUND` | the requested thing does not exist |
 | -9 | `NOT_SUPPORTED` | operation not supported |
@@ -44,6 +44,10 @@ is documented in this file and in the Czech version.
 | -26 | `LOCKED` | the object is open or locked by another handle |
 | -27 | `CONFLICT` | the object has changed in the meantime |
 | -28 | `JOURNAL_GAP` | the requested change journal entries are no longer stored |
+| -29 | `CONNECTION_REFUSED` | the other side refused the connection |
+| -30 | `CONNECTION_RESET` | the connection was reset by the other side |
+| -31 | `UNREACHABLE` | the destination is unreachable (network not configured, no route) |
+| -32 | `ADDRESS_IN_USE` | the address or port is already in use |
 
 ## Details
 
@@ -107,15 +111,19 @@ Repeated occurrences mean a leak or too little RAM.
 
 ### `NO_RESOURCES` (-6)
 
-**Meaning:** a limit other than memory was exhausted.
+**Meaning:** the job budget is exhausted (kernel or user memory, see
+[Jobs](syscalls.md#jobs-resource-budgets)), the network session budget
+(sockets, buffers), or a structural limit.
 
-**When:** the process handle table is full (max 1,048,575 handles), a
-channel queue is full (`CHANNEL_MAX_QUEUED` = 1024 messages; writes then
-return `SHOULD_WAIT`), no free virtual address range for `VM_MAP` without
-`MAP_FIXED`.
+**When:** an object, handle, port registration, queued message, mapping,
+thread or memory object would exceed the budget of the process job or of
+an ancestor; a socket would exceed the network session budget; the handle
+table is full (max 1,048,575 handles); no free virtual address range for
+`VM_MAP` without `MAP_FIXED`.
 
-**What to do:** close unneeded handles, drain channel messages, map smaller
-ranges.
+**What to do:** release what the process holds (handles, memory objects,
+sockets). When the budget is not enough, whoever created the job or the
+session enlarges it (application manifest, `JOB_SET_LIMIT`).
 
 ### `INVALID_ARGS` (-7)
 
@@ -354,6 +362,47 @@ are never skipped silently.
 the number of the last entry it contains), walk it and resume the
 subscription from that number + 1. Subscribing more often or a longer
 retention prevents it from happening again.
+### `CONNECTION_REFUSED` (-29)
+
+**Meaning:** the TCP destination answered with a refusal (RST to SYN):
+nothing listens on the port.
+
+**When:** `TcpStream::connect` in the network service `netd`.
+
+**What to do:** check the address and port, or retry later (the service on
+the other side is not running yet).
+
+### `CONNECTION_RESET` (-30)
+
+**Meaning:** an established TCP connection was reset by the other side
+(RST), or the network service dropped it because the other side stopped
+responding.
+
+**When:** reading from and writing to a `TcpStream`, also accepting a
+connection that was reset before `accept`.
+
+**What to do:** close the connection and reconnect if needed. Data sent
+after the last confirmed write may not have arrived.
+
+### `UNREACHABLE` (-31)
+
+**Meaning:** the destination is unreachable: the interface has no address
+(DHCP has not finished yet), there is no route to the destination, or the
+address is not supported (e.g. IPv6 until the network service supports it).
+
+**When:** connecting, sending a UDP datagram, ping, DNS query.
+
+**What to do:** wait for the network configuration
+(`Net::wait_configured`), check the address.
+
+### `ADDRESS_IN_USE` (-32)
+
+**Meaning:** the local port is already used by another socket.
+
+**When:** `TcpListener::bind`, `UdpSocket::bind` with a specific port.
+
+**What to do:** choose another port or port 0 (the service assigns a free
+one).
 
 ## Process exit codes
 

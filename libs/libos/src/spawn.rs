@@ -3,6 +3,10 @@
 //! Jadro o formatu programu nic nevi: libos vytvori prazdny proces,
 //! namapuje do nej segmenty programu a zasobnik a spusti prvni vlakno se
 //! startovni zpravou (`abi::bootstrap`).
+//!
+//! Proces vznika v jobu (`spawn` = stejny job jako rodic, `spawn_in` =
+//! zadany) a pamet programu (segmenty, zasobnik) se strhava z rozpoctu
+//! jobu potomka, ne rodice. Potomek dostane svuj job bez prava `WRITE`.
 
 use alloc::vec::Vec;
 
@@ -10,10 +14,26 @@ use abi::bootstrap::{self, Entry, Header};
 use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE};
 use abi::{Error, Result};
 
+use crate::job::{CHILD_RIGHTS, Job};
 use crate::{Channel, Handle, Process, Thread, Vmo};
 
-/// Velikost zasobniku hlavniho vlakna noveho procesu.
+/// Vychozi velikost zasobniku hlavniho vlakna noveho procesu.
 pub const STACK_SIZE: u64 = 256 * 1024;
+
+/// Volby spusteni.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    /// Zasobnik hlavniho vlakna (zaokrouhli se na stranku potomka).
+    pub stack_size: u64,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            stack_size: STACK_SIZE,
+        }
+    }
+}
 
 /// Handle predavany novemu procesu ve startovni zprave.
 pub struct StartHandle {
@@ -37,12 +57,35 @@ impl StartHandle {
     }
 }
 
-/// Spusti program `image` (ELF) jako proces `name` a preda mu handly
-/// `handles` ve startovni zprave (vlastni proces doplni sam). Vraci proces
-/// a konec bootstrap kanalu rodice (pro dalsi komunikaci s potomkem).
+/// Spusti program `image` (ELF) jako proces `name` ve stejnem jobu jako
+/// volajici a preda mu handly `handles` ve startovni zprave (vlastni proces
+/// a job doplni sam). Vraci proces a konec bootstrap kanalu rodice (pro
+/// dalsi komunikaci s potomkem).
 pub fn spawn(name: &str, image: &[u8], handles: Vec<StartHandle>) -> Result<(Process, Channel)> {
+    let job = crate::job::current()?;
+    spawn_in(&job, name, image, handles)
+}
+
+/// Jako [`spawn`], ale v jobu `job` (napr. podrizenem s limity).
+pub fn spawn_in(
+    job: &Job,
+    name: &str,
+    image: &[u8],
+    handles: Vec<StartHandle>,
+) -> Result<(Process, Channel)> {
+    spawn_with(job, name, image, handles, Options::default())
+}
+
+/// Jako [`spawn_in`] s volbami (velikost zasobniku).
+pub fn spawn_with(
+    job: &Job,
+    name: &str,
+    image: &[u8],
+    handles: Vec<StartHandle>,
+    opts: Options,
+) -> Result<(Process, Channel)> {
     let elf = elf::ElfFile::parse(image).map_err(|_| Error::Corrupted)?;
-    let process = Process::create(name)?;
+    let process = Process::create(job, name)?;
     // Segmenty se zarovnavaji na stranku potomka (muze mit jinou nez my).
     // Segmenty s ruznymi pravy ve stejne strance (program linkovany na
     // mensi stranku) skonci chybou mapovani, ne smichanymi pravy.
@@ -52,7 +95,7 @@ pub fn spawn(name: &str, image: &[u8], handles: Vec<StartHandle>) -> Result<(Pro
         let seg = seg.map_err(|_| Error::Corrupted)?;
         let start = seg.vaddr & !(page - 1);
         let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
-        let vmo = Vmo::create(end - start)?;
+        let vmo = Vmo::create_for(end - start, &process)?;
         vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
         let mut flags = MAP_READ | MAP_FIXED;
         if seg.flags & elf::PF_W != 0 {
@@ -64,15 +107,16 @@ pub fn spawn(name: &str, image: &[u8], handles: Vec<StartHandle>) -> Result<(Pro
         process.map(&vmo, 0, end - start, flags, start)?;
     }
 
-    let stack = Vmo::create(STACK_SIZE)?;
-    let stack_top = process.map(&stack, 0, STACK_SIZE, MAP_READ | MAP_WRITE, 0)? + STACK_SIZE;
+    let stack_size = opts.stack_size.max(page).next_multiple_of(page);
+    let stack = Vmo::create_for(stack_size, &process)?;
+    let stack_top = process.map(&stack, 0, stack_size, MAP_READ | MAP_WRITE, 0)? + stack_size;
 
     let (parent_end, child_end) = Channel::create()?;
     let mut data = Vec::new();
     let header = Header {
         magic: bootstrap::MAGIC,
         version: bootstrap::VERSION,
-        count: 1 + handles.len() as u32,
+        count: 2 + handles.len() as u32,
         _reserved: 0,
     };
     data.extend_from_slice(&header.to_bytes());
@@ -83,8 +127,16 @@ pub fn spawn(name: &str, image: &[u8], handles: Vec<StartHandle>) -> Result<(Pro
         }
         .to_bytes(),
     );
-    let mut all = Vec::with_capacity(1 + handles.len());
+    data.extend_from_slice(
+        &Entry {
+            kind: bootstrap::kind::JOB,
+            arg: 0,
+        }
+        .to_bytes(),
+    );
+    let mut all = Vec::with_capacity(2 + handles.len());
     all.push(process.handle().duplicate(None)?);
+    all.push(job.duplicate(Some(CHILD_RIGHTS))?.into_handle());
     for h in handles {
         data.extend_from_slice(
             &Entry {

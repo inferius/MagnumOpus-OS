@@ -67,7 +67,9 @@ python -m http.server 8765 --directory target/docs
 ```text
 EFI/BOOT/BOOTX64.EFI   UEFI loader
 os/kernel.elf          jádro (ELF s ladicími symboly)
-os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd
+os/initfs.img          initfs: init, echo, devmgr, virtio-blk, virtio-input, inputd, ps2, xhci, usb-hub, usb-hid, fsd, timed, termd,
+                       virtio-net, virtio-rng, netd, fwd, netprobe, manifesty, firewall.toml
+                       (+ net-test u `cargo xtask test`: porty pomocných serverů)
 ```
 
 QEMU dostane emulovanou IOMMU (`intel-iommu`, s `--iommu amd`
@@ -92,6 +94,14 @@ s `iommu_platform=on`, navázané na `display=video0`), druhou grafiku
 (navázanou na `video1`) a server QMP na náhodném portu
 localhostu (`-qmp tcp:127.0.0.1:<port>`). Přes QMP xtask vkládá události
 pro test vstupu, viz [Vstup](vstup.md#testy).
+
+Zdroj náhody `virtio-rng-pci` (data z hostitele) doplňuje entropii jádra.
+Síťová karta je `virtio-net-pci` (moderní režim, `iommu_platform=on`, bez
+option ROM) v user-mode síti QEMU (slirp): host má 10.0.2.15, bránu
+a hostitele vidí jako 10.0.2.2, DNS slirp je 10.0.2.3. `cargo xtask test`
+navíc spustí na hostiteli pomocné servery pro testy sítě (echo, DNS, NTP,
+na `127.0.0.1` a volných portech) a přesměruje jeden port z hostitele do
+hosta (`hostfwd`). Podrobnosti: [sit.md](sit.md#testy).
 
 ## Výstup a dohledání chyb
 
@@ -145,6 +155,12 @@ libs/fs/         souborový systém (no_std; std pro nástroje)
 libs/fsproto/    protokol souborového systému (klient <-> fsd)
 libs/shlang/     jazyk shellu: lexer, parsery B a C, strom, formátovač, interpret
 libs/term/       chytrý terminál: protokol, služba relací, VT100, obrazovka
+libs/csprng/     generátor náhodných čísel jádra (ChaCha20, BLAKE2s)
+libs/wire/       společné kódování zpráv protokolů (fsproto, netproto)
+libs/netproto/   protokol sítě (programy <-> netd <-> ovladač), DNS, NTP, oprávnění
+libs/netfilter/  paketový filtr sítě (profily, toky UDP, omezení rychlosti)
+libs/conf/       čtení a zápis konfigurace TOML
+libs/manifest/   manifest aplikace (identita, rozpočet, síť)
 user/init/       první proces: start služeb a testy userspace
 user/echo/       testovací server pro IPC
 user/devmgr/     správce zařízení (PCI, spouští ovladače)
@@ -158,6 +174,11 @@ user/usb-hid/    ovladač klávesnice a myši USB (boot protokol)
 user/fsd/        služba souborového systému
 user/timed/      služba času (nastavení hodin, pásmo)
 user/termd/      služba relací shellu a terminálu
+user/virtio-net/ ovladač síťové karty
+user/virtio-rng/ ovladač zdroje náhody (entropie pro jádro)
+user/netd/       služba sítě (TCP/IP, DHCP, DNS, firewall)
+user/fwd/        služba firewallu (konfigurace, dotazy uživateli)
+user/netprobe/   testovací aplikace sítě s manifestem
 libs/osfs-proto/ protokol rozšířeného API FS pro Windows (DeviceIoControl) + klient
 tools/osfs/      nástroj pro FS na hostiteli: format, check, mount ve Windows (WinFsp)
 xtask/           build, obraz disku, QEMU, testy

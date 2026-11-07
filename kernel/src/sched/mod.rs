@@ -22,7 +22,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
-pub use percpu::{all_cpus, cpu_count, this_cpu, try_this_cpu};
+pub use percpu::{MAX_CPUS, all_cpus, cpu_count, this_cpu, try_this_cpu};
 pub use thread::{Qos, Thread};
 pub use user::{
     create_user_thread, on_return_to_user, request_kill, start_user_thread, user_fault,

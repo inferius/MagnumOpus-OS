@@ -66,7 +66,8 @@ When the firmware does give a zone, UTC = local − zone. This is the UEFI
 opposite sign.
 
 ⚠️ **Accuracy:** firmware and RTC have a 1 s resolution, so the origin is
-accurate to a second. Refining it from the network comes later. The clock
+accurate to a second. `init` can refine it from the network (NTP) through the time service, see
+[network.md](network.md#ntp-and-the-clock). The clock
 can already be set (`CLOCK_SET`, see below).
 
 ## Setting the clock (`CLOCK_SET`)

@@ -27,3 +27,21 @@ pub fn clock_realtime(a: Args) -> Result<u64> {
     user::write_bytes(&current_process(), a[0], &r.encode())?;
     Ok(0)
 }
+
+/// `RANDOM_GET(buf_ptr, len, flags) -> 1 = nasazeny, 0 = jeste ne`.
+pub fn random_get(a: Args) -> Result<u64> {
+    use abi::syscall::{RANDOM_MAX, random_flags};
+    if a[2] & !random_flags::ALL != 0 {
+        return Err(crate::error::Error::InvalidArgs);
+    }
+    let len = user::check_len(a[1], RANDOM_MAX)?;
+    if a[2] & random_flags::REQUIRE_SEEDED != 0 && !crate::random::is_seeded() {
+        return Err(crate::error::Error::ShouldWait);
+    }
+    let mut buf = user::zeroed(len);
+    let seeded = crate::random::fill(&mut buf);
+    user::write_bytes(&current_process(), a[0], &buf)?;
+    // Kopie v jadre nenechat lezet v pameti.
+    buf.fill(0);
+    Ok(seeded as u64)
+}

@@ -1,0 +1,8 @@
+[package]
+name = "netfilter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Paketovy filtr sluzby netd (profily, toky UDP, omezeni rychlosti)"
+
+[dependencies]

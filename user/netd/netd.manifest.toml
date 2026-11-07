@@ -1,0 +1,12 @@
+# Sluzba site. Rozpocet jobu: buffery socketu a pamet stacku (korenova
+# relace dostane 3/4 uzivatelske pameti, zbytek je pro sluzbu samotnou).
+[app]
+id = "org.magnumopus.netd"
+name = "Sluzba site"
+
+[limits]
+memory = "160M"
+kernel_memory = "48M"
+# Rozhrani smoltcp nese buffery fragmentace a skladani IPv4 (~320 KiB)
+# a vznika na zasobniku.
+stack = "4M"

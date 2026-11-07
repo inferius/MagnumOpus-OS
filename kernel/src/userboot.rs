@@ -4,7 +4,8 @@
 //! userspace (libos) pres syscally, jadro o formatu programu nic nevi.
 //!
 //! `init` dostane bootstrap kanal se zpravou (viz `abi::bootstrap`):
-//! handle na vlastni proces a objekt pameti s obrazem initfs.
+//! handle na vlastni proces, korenovy job (bez limitu, se vsemi pravy)
+//! a objekt pameti s obrazem initfs.
 
 use alloc::sync::Arc;
 use alloc::vec;
@@ -18,6 +19,7 @@ use crate::error::{Error, Result};
 use crate::log;
 use crate::mm::{PhysAddr, phys};
 use crate::object::channel::{Channel, Message};
+use crate::object::job::Job;
 use crate::object::process::Process;
 use crate::object::resource::Resource;
 use crate::object::vmo::MemoryObject;
@@ -46,9 +48,10 @@ pub fn start_init(boot_info: &BootInfo, platform: &Platform) -> Result<Option<Ar
             len,
         )
     };
-    let initfs_vmo = MemoryObject::new(boot_info.initfs_len)?;
+    let root_job = Job::new_root();
+    let initfs_vmo = MemoryObject::new(boot_info.initfs_len, Some(&root_job))?;
     initfs_vmo.write(0, image)?;
-    let result = load_init(image, &initfs_vmo, platform);
+    let result = load_init(image, &initfs_vmo, &root_job, platform);
     // Obraz uz je v objektu pameti a init nahrany: pamet loaderu je volna.
     // SAFETY: BootInfo overeny pri startu.
     let regions = unsafe { boot_info.memory_map() };
@@ -60,6 +63,7 @@ pub fn start_init(boot_info: &BootInfo, platform: &Platform) -> Result<Option<Ar
 fn load_init(
     image: &[u8],
     initfs_vmo: &Arc<MemoryObject>,
+    root_job: &Arc<Job>,
     platform: &Platform,
 ) -> Result<Arc<Process>> {
     let fs = initfs::Initfs::parse(image).map_err(|e| {
@@ -75,7 +79,7 @@ fn load_init(
         Error::Corrupted
     })?;
 
-    let process = Process::new("init")?;
+    let process = Process::new("init", root_job.clone())?;
     load_segments(&process, &elf)?;
     let stack_top = map_stack(&process)?;
 
@@ -84,7 +88,7 @@ fn load_init(
         .handles()
         .insert(init_end.clone(), init_end.default_rights())?;
     drop(init_end);
-    send_bootstrap(&kernel_end, &process, initfs_vmo, platform)?;
+    send_bootstrap(&kernel_end, &process, initfs_vmo, root_job, platform)?;
     drop(kernel_end);
 
     let thread = sched::create_user_thread(&process, "init")?;
@@ -107,7 +111,7 @@ fn load_segments(process: &Process, elf: &elf::ElfFile) -> Result<()> {
         })?;
         let start = seg.vaddr & !(page - 1);
         let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
-        let vmo = MemoryObject::new(end - start)?;
+        let vmo = MemoryObject::new(end - start, Some(process.job()))?;
         vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
         let mut flags = MAP_READ | MAP_FIXED;
         if seg.flags & elf::PF_W != 0 {
@@ -124,7 +128,7 @@ fn load_segments(process: &Process, elf: &elf::ElfFile) -> Result<()> {
 }
 
 fn map_stack(process: &Process) -> Result<u64> {
-    let vmo = MemoryObject::new(STACK_SIZE)?;
+    let vmo = MemoryObject::new(STACK_SIZE, Some(process.job()))?;
     let base = process
         .address_space()
         .map(vmo, 0, STACK_SIZE, MAP_READ | MAP_WRITE, 0)?;
@@ -135,6 +139,7 @@ fn send_bootstrap(
     channel: &Channel,
     process: &Arc<Process>,
     initfs: &Arc<MemoryObject>,
+    root_job: &Arc<Job>,
     platform: &Platform,
 ) -> Result<()> {
     let mut entries: vec::Vec<(u32, u32, Arc<dyn KernelObject>, Rights)> = vec![
@@ -154,6 +159,12 @@ fn send_bootstrap(
             initfs.clone(),
             Rights::BASIC | Rights::READ | Rights::MAP | Rights::EXECUTE,
         ),
+        (
+            bootstrap::kind::JOB,
+            0,
+            root_job.clone(),
+            root_job.default_rights(),
+        ),
     ];
     // Pristup k hardwaru: init ho preda spravci zarizeni.
     let root = Resource::new_root();
@@ -163,7 +174,7 @@ fn send_bootstrap(
         let buses = ecam.bus_end as u64 - ecam.bus_start as u64 + 1;
         // Okno pocina na sbernici bus_start; 1 MiB konfigurace na sbernici.
         let phys = ecam.phys + ecam.bus_start as u64 * (1 << 20);
-        let vmo = MemoryObject::new_physical(phys, buses << 20)?;
+        let vmo = MemoryObject::new_physical(phys, buses << 20, None)?;
         let arg = ecam.bus_start as u32 | (ecam.bus_end as u32) << 8 | (ecam.segment as u32) << 16;
         entries.push((
             bootstrap::kind::PCI_ECAM,
@@ -186,5 +197,5 @@ fn send_bootstrap(
         data.extend_from_slice(&Entry { kind, arg }.to_bytes());
         handles.push((object, rights));
     }
-    channel.write(Message { data, handles })
+    channel.write(Message::new(data, handles))
 }
