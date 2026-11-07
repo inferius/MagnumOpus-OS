@@ -186,7 +186,7 @@ pub fn complete(line: &str, cursor: usize, ctx: &mut Ctx) -> (usize, Vec<Candida
         None => ("", word.as_str()),
     };
     let dir = if dir_part.is_empty() { ctx.cwd.clone() } else { path::resolve(&ctx.cwd, &ctx.home, dir_part) };
-    if let Ok(entries) = ctx.fs.list(&dir) {
+    if let Ok(entries) = ctx.fs.list_names(&dir) {
         let ln = name_part.to_lowercase();
         let mut cands: Vec<Candidate> = entries
             .into_iter()

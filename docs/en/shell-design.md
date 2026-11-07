@@ -544,14 +544,22 @@ for f in (ls ~/Photos | where ext == "jpg") {
   window it is refused.
 - **The `needs` manifest:** `run script` shows what the script wants
   (`read`, `write`, `net`) before it starts and, after confirmation,
-  restricts it: access outside the listed paths is `SH_NEEDS`. A script never
-  gets more than whoever runs it.
+  restricts it: access outside the listed paths is `SH_NEEDS`. A script gets
+  at most the intersection with its caller's rights: writes only where the
+  caller may write, reads where it may read, network only with network.
+  Otherwise `SH_NEEDS` before it starts. A background job (`bg`, `&`)
+  carries the restriction with it, even when it finishes after the script
+  has ended.
 - **Programs** get permissions from their manifest through their own fsd
   session (`CONNECT_AS` with mounted paths, `term::perm::mounts`; write
   overrides read, paths are mounted at the same place). Before a program
   starts, the shell applies the line's changes so far (the program sees the
-  real file system) and snapshots the directories the program may write to.
-  `undo` then syncs them with the snapshot.
+  real file system), **with the same dangerous operation lock** as at the
+  end of a line: rejecting = the program does not start. Then it takes a
+  snapshot and remembers the directories the program may write to (the
+  whole file system with full rights). When the program changed nothing,
+  the undo entry is dropped, so `undo` reverts the previous command.
+  Otherwise `undo` syncs those directories with the snapshot.
 
 ⚠️ **Limits:** the overlay keeps written data in memory until the end of
 the line (large writes cost memory). Programs outside the shell do not see

@@ -53,6 +53,15 @@ impl Fs for FsdFs {
         Ok(self.entries(l, path, None))
     }
 
+    fn list_names(&mut self, path: &str) -> FsResult<Vec<DirEntry>> {
+        Ok(self
+            .client
+            .list(path)?
+            .into_iter()
+            .map(|e| DirEntry { name: e.name, meta: Meta { kind: node(e.kind), size: 0, mtime: None } })
+            .collect())
+    }
+
     fn read(&mut self, path: &str) -> FsResult<Vec<u8>> {
         let st = self.client.stat(path)?;
         if node(st.kind) == NodeKind::Dir {

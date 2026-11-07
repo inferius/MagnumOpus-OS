@@ -79,6 +79,12 @@ impl UndoLog {
     /// Vrati diff (prazdny = nic se nezmenilo, snapshot se nedela).
     pub fn commit(&mut self, base: &mut dyn Fs, overlay: &Overlay, line: &str) -> FsResult<Vec<DiffEntry>> {
         let diff = overlay.changes(base)?;
+        self.commit_diff(base, overlay, diff, line)
+    }
+
+    /// Jako [`commit`](Self::commit) s uz spocitanym diffem prekryvu.
+    pub fn commit_diff(&mut self, base: &mut dyn Fs, overlay: &Overlay, diff: Vec<DiffEntry>, line: &str)
+        -> FsResult<Vec<DiffEntry>> {
         if diff.is_empty() {
             return Ok(diff);
         }
@@ -121,6 +127,18 @@ impl UndoLog {
         };
         self.push(base, entry);
         true
+    }
+
+    /// Po skonceni programu: kdyz se jeho slozky proti snapshotu nezmenily,
+    /// zaznam undo i snapshot zahodi.
+    pub fn after_external(&mut self, base: &mut dyn Fs) {
+        let Some(e) = self.entries.last() else { return };
+        let (Some(snap), false) = (e.snapshot.clone(), e.trees.is_empty()) else { return };
+        let changed = e.trees.clone().iter().any(|t| tree_differs(base, &snap, t).unwrap_or(true));
+        if !changed {
+            self.entries.pop();
+            let _ = base.delete_snapshot(&snap);
+        }
     }
 
     /// Vrati posledni prikaz a vrati jeho zaznam. Kdyz vraceni selze,
@@ -189,6 +207,41 @@ pub fn remove_all(base: &mut dyn Fs, path: &str) -> FsResult<()> {
         }
     }
     base.remove(path)
+}
+
+/// Lisi se `path` od stavu ve snapshotu `snap`? Porovnava druh, velikost
+/// a cas zmeny; obsah cte jen tam, kde FS cas nezna.
+pub fn tree_differs(base: &mut dyn Fs, snap: &str, path: &str) -> FsResult<bool> {
+    let (old, cur) = match (base.snapshot_stat(snap, path), base.stat(path)) {
+        (Err(_), Err(_)) => return Ok(false),
+        (Ok(o), Ok(c)) => (o, c),
+        _ => return Ok(true),
+    };
+    if old.kind != cur.kind {
+        return Ok(true);
+    }
+    if old.kind == NodeKind::Dir {
+        let mut a: Vec<String> = base.snapshot_list(snap, path)?.into_iter().map(|e| e.name.to_lowercase()).collect();
+        let mut b: Vec<String> = base.list(path)?.into_iter().map(|e| e.name.to_lowercase()).collect();
+        a.sort();
+        b.sort();
+        if a != b {
+            return Ok(true);
+        }
+        for n in a {
+            if tree_differs(base, snap, &join(path, &n))? {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
+    }
+    if old.size != cur.size {
+        return Ok(true);
+    }
+    match (old.mtime, cur.mtime) {
+        (Some(a), Some(b)) => Ok(a != b),
+        _ => Ok(base.snapshot_read(snap, path)? != base.read(path)?),
+    }
 }
 
 /// Srovna `path` se stavem ve snapshotu `snap`.

@@ -61,8 +61,8 @@ impl MemFs {
 
     fn meta(n: &Node) -> Meta {
         match n {
-            Node::File(d) => Meta { kind: NodeKind::File, size: d.len() as u64, mtime: Some(0) },
-            Node::Dir => Meta { kind: NodeKind::Dir, size: 0, mtime: Some(0) },
+            Node::File(d) => Meta { kind: NodeKind::File, size: d.len() as u64, mtime: None },
+            Node::Dir => Meta { kind: NodeKind::Dir, size: 0, mtime: None },
         }
     }
 

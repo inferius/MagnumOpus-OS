@@ -118,7 +118,17 @@ impl Overlay {
         base.stat(path)
     }
 
+    /// Obsah slozky s metadaty (velikost, cas) - pro `ls`.
     pub fn list(&self, base: &mut dyn Fs, path: &str) -> FsResult<Vec<DirEntry>> {
+        self.list_with(base, path, true)
+    }
+
+    /// Obsah slozky jen se jmeny a druhy (vzory, mazani, kopirovani).
+    pub fn list_names(&self, base: &mut dyn Fs, path: &str) -> FsResult<Vec<DirEntry>> {
+        self.list_with(base, path, false)
+    }
+
+    fn list_with(&self, base: &mut dyn Fs, path: &str, full: bool) -> FsResult<Vec<DirEntry>> {
         let m = self.stat(base, path)?;
         if m.kind != NodeKind::Dir {
             return Err(Error::NotADirectory);
@@ -126,7 +136,8 @@ impl Overlay {
         let mut out: BTreeMap<String, DirEntry> = BTreeMap::new();
         let in_base = self.own(path).is_none() || matches!(base.stat(path), Ok(m) if m.kind == NodeKind::Dir);
         if in_base && !self.hidden(path) {
-            for e in base.list(path).unwrap_or_default() {
+            let entries = if full { base.list(path) } else { base.list_names(path) };
+            for e in entries.unwrap_or_default() {
                 out.insert(key(&e.name), e);
             }
         }
@@ -198,7 +209,7 @@ impl Overlay {
             return Err(Error::AccessDenied);
         }
         let m = self.stat(base, path)?;
-        if m.kind == NodeKind::Dir && !self.list(base, path)?.is_empty() {
+        if m.kind == NodeKind::Dir && !self.list_names(base, path)?.is_empty() {
             return Err(Error::NotEmpty);
         }
         let in_base = !self.hidden(path) && base.stat(path).is_ok();
@@ -214,7 +225,7 @@ impl Overlay {
     pub fn remove_all(&mut self, base: &mut dyn Fs, path: &str) -> FsResult<()> {
         let m = self.stat(base, path)?;
         if m.kind == NodeKind::Dir {
-            for e in self.list(base, path)? {
+            for e in self.list_names(base, path)? {
                 self.remove_all(base, &join(path, &e.name))?;
             }
         }
@@ -229,7 +240,7 @@ impl Overlay {
         let m = self.stat(base, from)?;
         if m.kind == NodeKind::Dir {
             self.mkdir(base, to)?;
-            for e in self.list(base, from)? {
+            for e in self.list_names(base, from)? {
                 self.copy(base, &join(from, &e.name), &join(to, &e.name))?;
             }
             return Ok(());

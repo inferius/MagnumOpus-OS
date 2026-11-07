@@ -63,7 +63,7 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
             for v in &a.pos {
                 for p in it.paths(v)? {
                     let m = it.fs_stat(host, &p)?;
-                    if m.kind == NodeKind::Dir && !recursive && !it.fs_list(host, &p)?.is_empty() {
+                    if m.kind == NodeKind::Dir && !recursive && !it.fs_list_names(host, &p)?.is_empty() {
                         return Err(Flow::Err(
                             ShError::new(abi::Error::NotEmpty.name(), alloc::format!("{p} je slozka s obsahem"))
                                 .at(a.span)

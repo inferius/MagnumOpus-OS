@@ -186,6 +186,9 @@ fn completion_format_and_jobs() {
     let mut f = fs();
     let mut env = TestEnv(0);
     svc.handle(ClientMsg::Attach { session: 0 }, &mut link, &mut f, &mut env);
+    // Neznama relace: odpoved Fail, ne ticho (okno by cekalo navzdy).
+    svc.handle(ClientMsg::Complete { session: 99, line: "l".into(), cursor: 1 }, &mut link, &mut f, &mut env);
+    assert!(matches!(link.sent.last(), Some(ServerMsg::Fail { .. })));
     svc.handle(ClientMsg::Complete { session: 1, line: "open a".into(), cursor: 6 }, &mut link, &mut f, &mut env);
     assert!(matches!(link.sent.last(), Some(ServerMsg::Completions { start: 5, items }) if items[0].0 == "a.txt"));
     svc.handle(ClientMsg::Format { session: 1, line: "ls ~ -r | where size > 1KB".into(), style: 1 }, &mut link, &mut f, &mut env);

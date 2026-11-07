@@ -82,10 +82,14 @@ impl Host for TestHost {
         _input: Value,
         needs: &ExecNeeds,
     ) -> Option<Result<Value, ShError>> {
-        if name != "tool" {
+        if name != "tool" && name != "ro-tool" {
             return None;
         }
         self.execs.push((name.into(), args.iter().map(|(_, v)| v.to_text()).collect(), needs.clone()));
+        // ro-tool jen cte.
+        if name == "ro-tool" {
+            return Some(Ok(Value::str("jen cteni")));
+        }
         // Program zapise do slozky, kam smi.
         let _ = self.fs.write("/home/tool.out", b"z programu");
         Some(Ok(Value::str("tool ok")))

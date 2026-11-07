@@ -60,6 +60,12 @@ impl Interp {
         self.overlay.list(host.fs(), p).map_err(|e| sys(e, alloc::format!("slozku {p} nejde vypsat")))
     }
 
+    /// Jen jmena a druhy (levnejsi nez `fs_list`).
+    pub(crate) fn fs_list_names(&mut self, host: &mut dyn Host, p: &str) -> R<Vec<DirEntry>> {
+        self.check_read(p)?;
+        self.overlay.list_names(host.fs(), p).map_err(|e| sys(e, alloc::format!("slozku {p} nejde vypsat")))
+    }
+
     pub(crate) fn fs_read(&mut self, host: &mut dyn Host, p: &str) -> R<Vec<u8>> {
         self.check_read(p)?;
         self.overlay.read(host.fs(), p).map_err(|e| sys(e, alloc::format!("{p} nejde precist")))
@@ -127,7 +133,7 @@ impl Interp {
         let abs_dir = self.abs(dir);
         let mut out = Vec::new();
         let show_hidden = name_pat.starts_with('.');
-        for e in self.fs_list(host, &abs_dir)? {
+        for e in self.fs_list_names(host, &abs_dir)? {
             if (!show_hidden && e.name.starts_with('.')) || !path::glob_match(name_pat, &e.name) {
                 continue;
             }

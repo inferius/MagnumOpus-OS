@@ -250,7 +250,10 @@ impl Service {
             ClientMsg::Run { session, line } => self.run(session, &line, link, fs, env),
             ClientMsg::Interrupt { .. } | ClientMsg::Answer { .. } => {}
             ClientMsg::Complete { session, line, cursor } => {
-                let Some(i) = self.session_index(session) else { return };
+                let Some(i) = self.session_index(session) else {
+                    link.send(&ServerMsg::Fail { message: alloc::format!("relace {session} neexistuje") });
+                    return;
+                };
                 let s = &self.sessions[i];
                 let mut ctx = shlang::complete::Ctx {
                     sigs: &*s.interp.sigs,

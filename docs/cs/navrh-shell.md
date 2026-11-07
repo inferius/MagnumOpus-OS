@@ -527,13 +527,20 @@ for f in (ls ~/Fotky | where ext == "jpg") {
   stejný dotaz jako u `preview`. Bez připojeného okna se odmítne.
 - **Manifest `needs`:** `run skript` před spuštěním ukáže, co skript chce
   (`read`, `write`, `net`), a po potvrzení ho omezí: přístup mimo uvedené
-  cesty je `SH_NEEDS`. Skript nedostane víc, než má ten, kdo ho spouští.
+  cesty je `SH_NEEDS`. Skript dostane nejvýš průsečík s právy toho, kdo ho
+  spouští: zápis jen tam, kam volající smí zapisovat, čtení tam, kde smí
+  číst, síť jen se sítí. Jinak `SH_NEEDS` ještě před spuštěním. Úloha na
+  pozadí (`bg`, `&`) si omezení nese s sebou, i když doběhne až po skončení
+  skriptu.
 - **Programy:** dostanou oprávnění z manifestu přes vlastní relaci fsd
   (`CONNECT_AS` s připojenými cestami, `term::perm::mounts`; zápis přebije
   čtení, cesty se připojí na stejné místo). Před spuštěním programu shell
-  převezme dosavadní změny řádku (program vidí skutečný FS) a udělá
-  snapshot složek, kam program smí psát. `undo` je pak srovná se
-  snapshotem.
+  převezme dosavadní změny řádku (program vidí skutečný FS), a to **se
+  stejným zámkem nebezpečných operací** jako na konci řádku: odmítnutí =
+  program se nespustí. Pak udělá snapshot a zapamatuje si složky, kam
+  program smí psát (s plnými právy celý FS). Když program nic nezměnil,
+  záznam undo se zahodí, takže `undo` vrátí předchozí příkaz. Jinak `undo`
+  ty složky srovná se snapshotem.
 
 ⚠️ **Omezení:** překryv drží zapsaná data v paměti až do konce řádku
 (velké zápisy stojí paměť). Programy mimo shell do překryvu nevidí, proto je

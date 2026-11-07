@@ -69,6 +69,9 @@ pub struct Job {
     pub line: String,
     block: Block,
     vars: Vec<(String, Value)>,
+    /// Omezeni `needs` platne pri vytvoreni ulohy (uloha bezi s nimi,
+    /// i kdyz dobehne az po skonceni skriptu).
+    needs: Option<NeedsRt>,
     pub state: JobState,
 }
 
@@ -86,6 +89,28 @@ pub struct NeedsRt {
     pub read: Vec<String>,
     pub write: Vec<String>,
     pub net: bool,
+}
+
+impl NeedsRt {
+    /// Pokryva toto omezeni naroky `inner`? Zapis jen uvnitr cest pro
+    /// zapis, cteni uvnitr cest pro cteni nebo zapis, sit jen se siti.
+    pub fn covers(&self, inner: &NeedsRt) -> Result<(), ShError> {
+        use crate::vfs::path::within;
+        for p in &inner.write {
+            if !self.write.iter().any(|o| within(p, o)) {
+                return Err(ShError::new(code::NEEDS, alloc::format!("skript chce zapisovat do {p}, volajici tam smi nejvys cist")));
+            }
+        }
+        for p in &inner.read {
+            if !self.read.iter().chain(&self.write).any(|o| within(p, o)) {
+                return Err(ShError::new(code::NEEDS, alloc::format!("skript chce cist {p}, to volajici nema")));
+            }
+        }
+        if inner.net && !self.net {
+            return Err(ShError::new(code::NEEDS, "skript chce sit, volajici ji nema"));
+        }
+        Ok(())
+    }
 }
 
 /// Vysledek jednoho radku.
@@ -115,7 +140,7 @@ pub struct Interp {
     needs: Option<NeedsRt>,
     pub jobs: Vec<Job>,
     next_job: u64,
-    depth: usize,
+    /// Nejvys ramcu promennych (vnorena volani funkci a closure).
     pub max_depth: usize,
     /// Kolik bajtu zasobniku smi interpret spotrebovat (od prvniho vyrazu
     /// radku); hostitel ho nastavi podle sveho zasobniku.
@@ -144,7 +169,6 @@ impl Interp {
             needs: None,
             jobs: Vec::new(),
             next_job: 1,
-            depth: 0,
             max_depth: 256,
             stack_budget: 512 * 1024,
             stack_base: 0,
@@ -218,32 +242,38 @@ impl Interp {
         }
     }
 
-    /// Konec radku: prevzeti zmen (zamek nebezpecnych operaci, undo).
+    /// Konec radku: prevzeti zmen.
     fn finish(&mut self, host: &mut dyn Host, r: Result<(), ShError>) -> (Result<(), ShError>, Vec<DiffEntry>) {
-        let overlay = core::mem::take(&mut self.overlay);
-        let confirmed = core::mem::replace(&mut self.confirmed, false);
-        if overlay.is_empty() {
-            return (r, Vec::new());
+        let out = self.commit_overlay(host);
+        self.confirmed = false;
+        match out {
+            Ok(d) => (r, d),
+            Err(e) => (r.and(Err(e)), Vec::new()),
         }
-        let diff = match overlay.changes(host.fs()) {
-            Ok(d) => d,
-            Err(e) => return (r.and(Err(ShError::sys(e, "zmeny nejde spocitat"))), Vec::new()),
-        };
+    }
+
+    /// Prevezme zmeny prekryvu do FS: zamek nebezpecnych operaci (nad limit
+    /// jen po potvrzeni) a line undo. Pouziva ho konec radku i spusteni
+    /// programu, takze zamek nejde obejit. Odmitnuti = nic se nezmeni.
+    pub(crate) fn commit_overlay(&mut self, host: &mut dyn Host) -> Result<Vec<DiffEntry>, ShError> {
+        let overlay = core::mem::take(&mut self.overlay);
+        if overlay.is_empty() {
+            return Ok(Vec::new());
+        }
+        let diff = overlay.changes(host.fs()).map_err(|e| ShError::sys(e, "zmeny nejde spocitat"))?;
         let risky = diff.iter().filter(|d| !crate::vfs::path::within(&d.path, "/tmp")).count();
-        if risky > self.lock_threshold && !confirmed {
+        if risky > self.lock_threshold && !self.confirmed {
             let q = alloc::format!(
                 "Prikaz zmeni {risky} souboru (vic nez {}). Prevzit zmeny?",
                 self.lock_threshold
             );
             if !host.confirm(&q, &crate::vfs::overlay::diff_value(&diff)) {
-                let e = ShError::new(code::REJECTED, "zmeny nebyly prevzaty (nic se nezmenilo)");
-                return (r.and(Err(e)), Vec::new());
+                return Err(ShError::new(code::REJECTED, "zmeny nebyly prevzaty (nic se nezmenilo)"));
             }
         }
-        match self.undo.commit(host.fs(), &overlay, &self.line) {
-            Ok(d) => (r, d),
-            Err(e) => (r.and(Err(ShError::sys(e, "zmeny nejde zapsat"))), diff),
-        }
+        self.undo
+            .commit_diff(host.fs(), &overlay, diff, &self.line)
+            .map_err(|e| ShError::sys(e, "zmeny nejde zapsat"))
     }
 
     /// Spusti skript ze souboru (s hlavickou `lang` a manifestem `needs`).
@@ -263,13 +293,10 @@ impl Interp {
         let saved_needs = self.needs.clone();
         if let Some(n) = &parsed.script.needs {
             let rt = self.needs_rt(n);
-            // Skript nesmi dostat vic nez ten, kdo ho spousti.
+            // Skript nesmi dostat vic nez ten, kdo ho spousti: zapis jen
+            // tam, kam volajici smi zapisovat, cteni tam, kde smi cist.
             if let Some(outer) = &self.needs {
-                for p in rt.read.iter().chain(&rt.write) {
-                    if !outer.read.iter().chain(&outer.write).any(|o| crate::vfs::path::within(p, o)) {
-                        return Err(ShError::new(code::NEEDS, alloc::format!("skript chce {p}, to volajici nema")));
-                    }
-                }
+                outer.covers(&rt)?;
             }
             let detail = Value::record(&[
                 ("read", Value::List(rt.read.iter().cloned().map(Value::Str).collect())),
@@ -327,13 +354,17 @@ impl Interp {
         }
         let block = self.jobs[i].block.clone();
         let vars = self.jobs[i].vars.clone();
+        let job_needs = self.jobs[i].needs.clone();
         let mut frame = BTreeMap::new();
         for (k, v) in vars {
             frame.insert(k, v);
         }
+        // Uloha bezi s pravy, ktera platila pri jejim vytvoreni.
+        let saved_needs = core::mem::replace(&mut self.needs, job_needs);
         self.frames.push(frame);
         let r = self.stmts(host, &block, false);
         self.frames.pop();
+        self.needs = saved_needs;
         let r = match r {
             Ok(v) | Err(Flow::Return(v)) => Ok(v),
             Err(Flow::Err(e)) => Err(e),
@@ -452,7 +483,7 @@ impl Interp {
     }
 
     pub(crate) fn eval(&mut self, host: &mut dyn Host, e: &Expr) -> R<Value> {
-        let here = stack_addr();
+        let here = crate::stack::addr();
         #[cfg(test)]
         STACK_MIN.with(|m| m.set(m.get().min(here)));
         if self.stack_base == 0 {
@@ -465,9 +496,7 @@ impl Interp {
                     .hint("nekonecna rekurze? hloubku omezuje velikost zasobniku shellu"),
             ));
         }
-        self.depth += 1;
         let r = self.eval_inner(host, e);
-        self.depth -= 1;
         r.map_err(|f| at(f, e.span()))
     }
 
@@ -653,7 +682,14 @@ impl Interp {
                 let id = self.next_job;
                 self.next_job += 1;
                 let vars = self.visible_vars();
-                self.jobs.push(Job { id, line: self.line.clone(), block: b.clone(), vars, state: JobState::Pending });
+                self.jobs.push(Job {
+                    id,
+                    line: self.line.clone(),
+                    block: b.clone(),
+                    vars,
+                    needs: self.needs.clone(),
+                    state: JobState::Pending,
+                });
                 host.note(&alloc::format!("[{id}] uloha na pozadi"));
                 Ok(Value::record(&[("job", Value::Int(id as i64))]))
             }
@@ -704,13 +740,6 @@ impl Interp {
         });
         ClosureVal { params: params.into(), body: body.clone(), captured }
     }
-}
-
-/// Adresa na zasobniku (pro hlidani hloubky rekurze).
-#[inline(never)]
-fn stack_addr() -> usize {
-    let x = 0u8;
-    core::hint::black_box(&x) as *const u8 as usize
 }
 
 /// Doplni misto do chyby (jen kdyz ho jeste nema).

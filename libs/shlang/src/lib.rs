@@ -27,6 +27,7 @@ pub mod lex;
 pub mod parse;
 pub mod sig;
 pub mod span;
+pub mod stack;
 pub mod table;
 pub mod value;
 pub mod vfs;

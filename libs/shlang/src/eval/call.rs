@@ -90,18 +90,22 @@ impl Interp {
             ));
         }
         let needs = self.exec_needs();
-        // Program vidi skutecny FS: dosavadni zmeny radku prevzit.
-        if !self.overlay.is_empty() {
-            let overlay = core::mem::take(&mut self.overlay);
-            self.undo.commit(host.fs(), &overlay, &self.line).map_err(|e| ShError::sys(e, "zmeny nejde zapsat"))?;
+        // Program vidi skutecny FS: dosavadni zmeny radku prevzit (se
+        // zamkem nebezpecnych operaci; odmitnuti = program se nespusti).
+        self.commit_overlay(host).map_err(|e| Flow::Err(e.at(span)))?;
+        // Kam program smi zapisovat; s plnymi pravy cely FS.
+        let trees = if needs.all { alloc::vec![String::from("/")] } else { needs.write.clone() };
+        let guarded = !trees.is_empty();
+        if guarded && !self.undo.before_external(host.fs(), &self.line, &trees) {
+            host.note("varovani: FS nema snapshoty, zmeny programu nepujde vratit");
         }
-        if !needs.write.is_empty() || needs.all {
-            let trees = if needs.all { alloc::vec![self.home.clone()] } else { needs.write.clone() };
-            if !self.undo.before_external(host.fs(), &self.line, &trees) {
-                host.note("varovani: FS nema snapshoty, zmeny programu nepujde vratit");
-            }
+        let r = host.exec(name, &flat, input, &needs);
+        if guarded {
+            // Program nic nezmenil: zadny zaznam undo (jinak by `undo`
+            // vratilo jeho prazdny zaznam misto predchoziho prikazu).
+            self.undo.after_external(host.fs());
         }
-        match host.exec(name, &flat, input, &needs) {
+        match r {
             Some(r) => r.map_err(|e| Flow::Err(e.at(span))),
             None => {
                 let mut e = ShError::new(code::UNKNOWN, alloc::format!("neznamy prikaz '{name}'")).at(span);

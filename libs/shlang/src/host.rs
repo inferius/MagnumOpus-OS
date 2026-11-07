@@ -48,6 +48,11 @@ pub struct DirEntry {
 pub trait Fs {
     fn stat(&mut self, path: &str) -> FsResult<Meta>;
     fn list(&mut self, path: &str) -> FsResult<Vec<DirEntry>>;
+    /// Vypis jen se jmeny a druhy (velikost 0, cas neznamy). FS, kde
+    /// metadata stoji dalsi dotaz na kazdou polozku, ho umi levneji.
+    fn list_names(&mut self, path: &str) -> FsResult<Vec<DirEntry>> {
+        self.list(path)
+    }
     fn read(&mut self, path: &str) -> FsResult<Vec<u8>>;
     /// Vytvori nebo prepise soubor (nadrazena slozka musi existovat).
     fn write(&mut self, path: &str, data: &[u8]) -> FsResult<()>;

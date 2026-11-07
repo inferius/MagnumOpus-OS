@@ -112,11 +112,7 @@ const MAX_DEPTH: usize = 128;
 /// Kolik zasobniku smi parser spotrebovat (sluzba relaci ma 256 KB).
 const PARSE_STACK: usize = 64 * 1024;
 
-#[inline(never)]
-fn stack_addr() -> usize {
-    let x = 0u8;
-    core::hint::black_box(&x) as *const u8 as usize
-}
+
 
 const KEYWORDS: &[&str] = &[
     "let", "fn", "if", "else", "for", "in", "while", "return", "break", "continue", "try", "bg", "true", "false",
@@ -140,7 +136,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn enter(&mut self) -> Result<(), ShError> {
         self.depth += 1;
-        let here = stack_addr();
+        let here = crate::stack::addr();
         if self.stack_base == 0 {
             self.stack_base = here;
         }

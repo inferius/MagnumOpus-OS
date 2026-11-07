@@ -104,3 +104,70 @@ fn review_roundtrips() {
     o.result.unwrap();
     assert_eq!(h.out, vec![crate::value::Value::Int(2)]);
 }
+
+// ---- druhe review: needs, zamek a undo u programu ----
+
+#[test]
+fn background_job_keeps_script_needs() {
+    let mut h = TestHost::new();
+    let mut it = interp();
+    h.fs.put("/home/bg.sh", b"lang 1\nneeds {\n    read: [\"~/docs\"]\n}\nbg {\n    rm ~/a.txt\n}\n");
+    it.run_line(&mut h, "run bg.sh").result.unwrap();
+    // Skript skoncil; uloha dobehne az ted, ale stale s jeho omezenim.
+    let done = it.run_pending_jobs(&mut h);
+    assert_eq!(done.len(), 1);
+    assert_eq!(done[0].1.as_ref().unwrap_err().code, code::NEEDS);
+    assert_eq!(h.fs.get("/home/a.txt"), Some(&b"alfa\n"[..]));
+    // Totez pres `wait` v interaktivni relaci.
+    h.fs.put("/home/bg2.sh", b"lang 1\nneeds {\n    read: [\"~/docs\"]\n}\nrm ~/b.txt &\n");
+    it.run_line(&mut h, "run bg2.sh").result.unwrap();
+    assert_eq!(it.run_line(&mut h, "wait 2").result.unwrap_err().code, code::NEEDS);
+    assert!(h.fs.exists("/home/b.txt"));
+}
+
+#[test]
+fn nested_script_gets_at_most_callers_rights() {
+    let mut h = TestHost::new();
+    let mut it = interp();
+    // B chce zapis tam, kde A smi jen cist: odmitnuto.
+    h.fs.put("/home/b.sh", b"lang 1\nneeds {\n    write: [\"~\"]\n}\necho x > ~/a.txt\n");
+    h.fs.put("/home/a.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n}\nrun ~/b.sh\n");
+    assert_eq!(it.run_line(&mut h, "run a.sh").result.unwrap_err().code, code::NEEDS);
+    assert_eq!(h.fs.get("/home/a.txt"), Some(&b"alfa\n"[..]));
+    // B chce sit, A ji nema: odmitnuto.
+    h.fs.put("/home/n.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n    net: [\"example.org\"]\n}\necho x\n");
+    h.fs.put("/home/a2.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n    net: none\n}\nrun ~/n.sh\n");
+    assert_eq!(it.run_line(&mut h, "run a2.sh").result.unwrap_err().code, code::NEEDS);
+    // B chce cist uvnitr cesty, kam A smi zapisovat: povoleno (prusecik).
+    h.fs.put("/home/c.sh", b"lang 1\nneeds {\n    read: [\"/tmp\"]\n}\nls /tmp | count\n");
+    h.fs.put("/home/a3.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n    write: [\"/tmp\"]\n}\nrun ~/c.sh\n");
+    it.run_line(&mut h, "run a3.sh").result.unwrap();
+}
+
+#[test]
+fn danger_lock_applies_before_external_program() {
+    let mut h = TestHost::new();
+    let mut it = interp();
+    it.lock_threshold = 3;
+    h.answer = false;
+    let o = it.run_line(&mut h, "for i in (range 0 5) { echo $i > f{i}.txt }\ntool");
+    assert_eq!(o.result.unwrap_err().code, code::REJECTED);
+    assert!(h.execs.is_empty(), "program se po odmitnuti nespusti");
+    assert!(!h.fs.exists("/home/f0.txt"));
+    assert_eq!(h.asked.len(), 1);
+}
+
+#[test]
+fn undo_after_read_only_program_reverts_previous_command() {
+    let mut h = TestHost::new();
+    let mut it = interp();
+    it.run_line(&mut h, "rm a.txt").result.unwrap();
+    it.run_line(&mut h, "ro-tool").result.unwrap();
+    it.run_line(&mut h, "undo").result.unwrap();
+    assert_eq!(h.fs.get("/home/a.txt"), Some(&b"alfa\n"[..]), "undo vrati rm, ne prazdny zaznam programu");
+    // Program s plnymi pravy, ktery zapise mimo domov, jde vratit take.
+    it.run_line(&mut h, "tool").result.unwrap();
+    assert!(h.fs.exists("/home/tool.out"));
+    it.run_line(&mut h, "undo").result.unwrap();
+    assert!(!h.fs.exists("/home/tool.out"));
+}
