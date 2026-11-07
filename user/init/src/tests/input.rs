@@ -27,12 +27,18 @@ pub const TESTS: &[Test] = &[
     ("mys: pohyb, tlacitka, kolecko", mouse_events),
     ("umely vstup nevyvola bezpecnou zkratku", inject_no_secure),
     ("opakovani drzene klavesy", key_repeat),
+    ("tlacitka mimo mys nejsou klavesy", other_buttons),
+    ("plna fronta klienta: Dropped", full_queue),
     ("neplatne prikazy a zpravy", bad_commands),
 ];
 
 /// Znacka v logu, na kterou xtask posle udalosti pres QMP (viz
 /// `xtask/src/qmp.rs`; text musi sedet).
 pub const QEMU_MARKER: &str = "init: test vstupu: cekam na udalosti z QEMU";
+
+/// Druha znacka: klavesy a mys dorazily, xtask ma poslat Ctrl+Alt+Delete
+/// (`MARKER_SECURE` v `xtask/src/qmp.rs`).
+pub const QEMU_MARKER_SECURE: &str = "init: test vstupu: cekam na zkratku z QEMU";
 
 /// Jak dlouho cekat na udalosti z QEMU (QMP spojeni, TCG muze byt pomaly).
 const QEMU_TIMEOUT: Duration = Duration::from_secs(20);
@@ -66,6 +72,7 @@ fn failr(what: &str, (e, got): (Error, Vec<Record>)) -> String {
             Event::Focus(f) => alloc::format!("F{}", f as u8),
             Event::Injection { active } => alloc::format!("I{active}"),
             Event::Layout(l) => alloc::format!("L{l}"),
+            Event::Dropped { messages } => alloc::format!("D{messages}"),
             Event::Unknown { kind } => alloc::format!("?{kind}"),
         };
         s.push(' ');
@@ -185,7 +192,10 @@ fn qemu_devices_inner() -> TestResult {
         .sum();
     check_eq!(wheel, -1, "kolecko dolu");
 
-    // Ctrl+Alt+Delete: jen kanal `secure`, fokus o nej prijde.
+    // Ctrl+Alt+Delete az ted (xtask ceka na znacku), jen kanal `secure`,
+    // fokus o nej prijde.
+    println!("{QEMU_MARKER_SECURE}");
+    let until = deadline(QEMU_TIMEOUT);
     let secure = read_until(&inp.secure, until, |r| {
         has(r, Event::SecureAttention)
             && r.iter().any(|x| {
@@ -537,5 +547,87 @@ fn bad_commands(_: &Startup) -> TestResult {
         .map_err(|e| fail("zapis", e))?;
     let st = inp.status().map_err(|e| fail("status po nesmyslu", e))?;
     check!(st.injecting >= 1, "zdroj po neplatne zprave zmizel");
+    Ok(())
+}
+
+fn other_buttons(_: &Startup) -> TestResult {
+    let inp = input()?;
+    drain(&inp.focus);
+    let inj = inp.inject().map_err(|e| fail("inject", e))?;
+    // Dotyk tabletu (BTN_TOUCH) drzeny dele nez prodleva opakovani.
+    const BTN_TOUCH: u16 = 0x14a;
+    send(&inj, &[RawEvent::key(BTN_TOUCH, true), RawEvent::syn()])?;
+    libos::time::sleep(Duration::from_millis(700));
+    send(&inj, &[RawEvent::key(BTN_TOUCH, false), RawEvent::syn()])?;
+    let release = Event::Button {
+        button: Button::Other(BTN_TOUCH),
+        action: Action::Release,
+    };
+    let got = read_until(&inp.focus, deadline(TIMEOUT), |r| has(r, release))
+        .map_err(|e| failr("tlacitko", e))?;
+    check!(
+        has(
+            &got,
+            Event::Button {
+                button: Button::Other(BTN_TOUCH),
+                action: Action::Press,
+            }
+        ),
+        "chybi stisk tlacitka"
+    );
+    check!(
+        !got.iter().any(|r| matches!(r.event, Event::Key { .. })),
+        "tlacitko prislo jako klavesa (a opakovalo se)"
+    );
+    Ok(())
+}
+
+fn full_queue(_: &Startup) -> TestResult {
+    let inp = input()?;
+    drain(&inp.focus);
+    let before = inp.status().map_err(|e| fail("status", e))?.dropped;
+    let inj = inp.inject().map_err(|e| fail("inject", e))?;
+    // Vic zprav, nez se vejde do fronty kanalu fokusu; fokus mezitim necteme.
+    let frame = device::encode_events(&[RawEvent::rel(REL_X, 1), RawEvent::syn()]);
+    let total = libos::abi::syscall::CHANNEL_MAX_QUEUED + 50;
+    let mut sent = 0;
+    let until = deadline(TIMEOUT);
+    while sent < total {
+        match inj.write(&frame, Vec::new()) {
+            Ok(()) => sent += 1,
+            // Fronta k inputd je plna: pockat, az ji sluzba vyprazdni.
+            Err(Error::ShouldWait) if time::now() < until => {
+                libos::time::sleep(Duration::from_millis(5))
+            }
+            Err(e) => return Err(fail("zapis umeleho vstupu", e)),
+        }
+    }
+    // Pockat, az sluzba zpracuje vsechny zpravy (pocet zahozenych se
+    // ustali); pak uz do fronty fokusu nic nepribude a vyprazdneni nize
+    // nemuze spolknout zpravu s `Dropped`.
+    let mut dropped = 0;
+    let mut stable = 0;
+    while time::now() < until && stable < 5 {
+        let now = inp.status().map_err(|e| fail("status", e))?.dropped - before;
+        if now == dropped && now >= 50 {
+            stable += 1;
+        } else {
+            stable = 0;
+        }
+        dropped = now;
+        libos::time::sleep(Duration::from_millis(20));
+    }
+    check!(dropped >= 50, "sluzba nezahodila zpravy nad kapacitu fronty");
+    drain(&inp.focus);
+    send(&inj, &[RawEvent::rel(REL_Y, 1), RawEvent::syn()])?;
+    let got = read_until(&inp.focus, deadline(TIMEOUT), |r| {
+        r.iter()
+            .any(|x| matches!(x.event, Event::Motion { dx: 0, dy: 1 }))
+    })
+    .map_err(|e| failr("prvni zprava po zahozeni", e))?;
+    check!(
+        matches!(got.first().map(|r| r.event), Some(Event::Dropped { messages }) if messages >= 50),
+        "prvni zaznam po zahozeni neni Dropped"
+    );
     Ok(())
 }

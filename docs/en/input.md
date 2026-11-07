@@ -114,6 +114,10 @@ Events use the evdev format, and the codes come from Linux
 | Type | Code | Value |
 |---|---|---|
 | `EV_KEY` (1) | key (`KEY_A` = 30, ...) or button (`BTN_LEFT` = 0x110, ...) | 1 press, 0 release (2 = device repeat, ignored) |
+
+Buttons are codes 0x100-0x15F and 0x2C0-0x2E7 (`code::is_button`: mouse,
+joystick, gamepad, tablet touch). They arrive as `Button`, do not go
+through the layout and do not repeat. Every other `EV_KEY` code is a key.
 | `EV_REL` (2) | `REL_X`, `REL_Y`, `REL_WHEEL` (positive is up), `REL_HWHEEL` | delta |
 | `EV_MSC` (4) | `MSC_SCAN` | raw scan code of the next key (PS/2, USB HID) |
 | `EV_SYN` (0) | `SYN_REPORT` | end of frame |
@@ -169,6 +173,7 @@ One message is one frame, made of 32-byte records:
 | 7 `FOCUS` | `Focus(bool)` | 1 gained, 0 lost | | | |
 | 8 `INJECTION` | `Injection { active }` | number of synthetic input sources | | | |
 | 9 `LAYOUT` | `Layout(id)` | 0 `us`, 1 `cz` | | | |
+| 10 `DROPPED` | `Dropped { messages }` | number of messages the client missed | | | |
 
 - `flags`: `SYNTHETIC` (1) means the event comes from synthetic input.
 - `mods`: modifiers after the event. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -194,6 +199,11 @@ Rules:
 - `Injection { active > 0 }`: someone else is controlling input
   (automation, remote desktop, an agent). The client should show this
   visibly.
+- **Full queue:** the service never waits for a client. When a client
+  falls behind and its queue is full, the message is dropped. The next
+  delivered message starts with a `Dropped { messages }` record, and the
+  client should, as after `Focus(false)`, treat every key and button as
+  released, because a release may have been lost.
 
 Example: reading events in the focus owner:
 
@@ -269,8 +279,10 @@ the focus owner and the secure channel see `Injection { active > 0 }`.
    manager) and then sends `release` on the secure channel. The focus
    owner gets `Focus(true)`.
 
-When nobody holds the secure channel, the service only swallows and logs
-the shortcut. Windows works the same way (Ctrl+Alt+Del switches to the
+When nobody holds the secure channel, or its queue is full, the service
+only swallows and logs the shortcut and does **not** enter secure mode.
+Otherwise input would stay with a receiver that does not know about the
+shortcut and would never release it. Windows works the same way (Ctrl+Alt+Del switches to the
 secure desktop). On top of that, synthetic input is guaranteed never to
 fire the shortcut, because it is only recognised on sources other than
 `inject`.
@@ -331,7 +343,7 @@ the device are ignored.
 |---|---|
 | `cargo test -p inputproto` | message format: every record kind, invalid data, status |
 | `cargo test -p keymap` | US, CZ, AltGr, dead keys, Caps Lock, Num Lock, repeat |
-| `cargo xtask test`, suite `vstup` | the service in QEMU: devices, synthetic input, CZ, mouse, shortcut, repeat, invalid commands |
+| `cargo xtask test`, suite `vstup` | the service in QEMU: devices, synthetic input, CZ, mouse, shortcut, repeat, non-mouse buttons, full queue (`Dropped`), invalid commands |
 
 The test **"QEMU: klavesnice a mys az do sluzby"** (keyboard and mouse all
 the way to the service) checks the whole path from the device. Init prints
@@ -339,9 +351,13 @@ the marker `init: test vstupu: cekam na udalosti z QEMU`. Xtask
 (`xtask/src/qmp.rs`) spots it in the serial log and sends
 `input-send-event` commands over QMP (`-qmp tcp:127.0.0.1:<port>`): `a`,
 Shift+`1`, motion (10, −5), the left button, the wheel down and
-Ctrl+Alt+Delete. The test checks the text `a!`, the total motion, the
-wheel, that the shortcut reached only the secure channel, and that focus
-came back after `release`. Xtask does the same in `cargo xtask run`, so
+Ctrl+Alt+Delete. The keyboard and the mouse are two devices, and their events keep no
+order between each other. So once the test has the keys and the mouse
+events, it prints a second marker,
+`init: test vstupu: cekam na zkratku z QEMU`, and xtask sends
+Ctrl+Alt+Delete only after it. The test checks the text `a!`, the total
+motion, the wheel, that the shortcut reached only the secure channel, and
+that focus came back after `release`. Xtask does the same in `cargo xtask run`, so
 the test passes there too.
 
 ## Limits of the first version

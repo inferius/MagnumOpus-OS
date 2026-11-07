@@ -11,8 +11,8 @@ use inputproto::{Action, Button, Event, Record};
 use keymap::{Keyboard, Layout};
 use libos::Channel;
 
-/// Jedna klavesa ze snimku pro sluzbu (rozhoduje o bezpecne zkratce
-/// a opakovani, ktere zavisi na stavu cele sluzby).
+/// Zdroj vstupu a jeho stav: klavesnice (modifikatory, mrtva klavesa),
+/// rozpracovany snimek (pohyb, kolecko) a pohlcene klavesy.
 pub struct Source {
     pub channel: Channel,
     /// Umely vstup (z prikazu `inject`), ne fyzicke zarizeni.
@@ -31,7 +31,8 @@ pub struct Source {
     swallowed: Vec<u16>,
 }
 
-/// Co ma sluzba udelat s udalosti klavesy.
+/// Co ma sluzba udelat s udalosti klavesy (rozhoduje o bezpecne zkratce
+/// a opakovani, ktere zavisi na stavu cele sluzby).
 pub enum KeyVerdict {
     /// Predat dal (zaznamy uz jsou ve snimku).
     Deliver,
@@ -89,11 +90,13 @@ impl Source {
         layout: &Layout,
         time: u64,
         out: &mut Vec<Record>,
-        mut on_key: impl FnMut(&Self, u16, Action) -> KeyVerdict,
+        mut on_key: impl FnMut(&Self, u16, u32, Action) -> KeyVerdict,
     ) -> bool {
         match e.kind {
             EV_MSC if e.code == MSC_SCAN => self.scan = Some(e.value as u32),
-            EV_KEY if is_mouse_button(e.code) => {
+            // Tlacitka (mys, joystick, gamepad, tablet) nejsou klavesy:
+            // nejdou pres rozlozeni a neopakuji se.
+            EV_KEY if is_button(e.code) => {
                 let action = match e.value {
                     0 => Action::Release,
                     1 => Action::Press,
@@ -125,7 +128,7 @@ impl Source {
                     self.swallowed.swap_remove(i);
                     return false;
                 }
-                if let KeyVerdict::SecureAttention = on_key(self, e.code, action) {
+                if let KeyVerdict::SecureAttention = on_key(self, e.code, scancode, action) {
                     self.swallowed.push(e.code);
                     return false;
                 }

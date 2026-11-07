@@ -131,6 +131,8 @@ invariant was broken (a kernel bug).
 | `inputd: zarizeni 'name' pripojeno` / `odpojeno` | A driver introduced itself (`IDEV`) or closed its channel (connected / disconnected). |
 | `inputd: neplatna zprava od zdroje N` | A source sent a message that does not follow the device protocol (unknown tag, wrong length); the message is dropped. |
 | `inputd: bezpecna zkratka, ale nikdo ji neposloucha` | Ctrl+Alt+Delete, but nobody holds the secure channel; the shortcut is only swallowed. |
+| `inputd: bezpecna zkratka neprosla, kanal secure je plny` | The shortcut receiver is not reading; the shortcut is swallowed and secure mode does not start (input stays with the focus owner). |
+| `inputd: bezpecna zkratka, ale kanal secure je zavreny` | The shortcut receiver has exited; the shortcut is swallowed. |
 | `init: sluzba vstupu bezi (N zarizeni)` | Init started `inputd` and connected N drivers. |
 | `init: sluzbu vstupu nelze spustit: ...` | `inputd` is missing from initfs or did not answer a command (`TIMED_OUT`). The input tests then fail (`sluzba vstupu nebezi`). |
 

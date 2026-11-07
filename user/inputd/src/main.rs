@@ -48,11 +48,11 @@ fn main(startup: Startup) -> i64 {
             items.push((s.channel.handle(), wake));
         }
         let secure_at = svc.secure.as_ref().map(|ch| {
-            items.push((ch.handle(), wake));
+            items.push((ch.channel.handle(), wake));
             items.len() - 1
         });
         let focus_at = svc.focus.as_ref().map(|ch| {
-            items.push((ch.handle(), wake));
+            items.push((ch.channel.handle(), wake));
             items.len() - 1
         });
         let observed = match libos::wait_many(&items, svc.next_deadline()) {
@@ -68,16 +68,22 @@ fn main(startup: Startup) -> i64 {
         };
         drop(items);
 
-        if observed[0].intersects(Signals::READABLE) {
-            while let Ok(msg) = control.try_read() {
-                let (reply, handles) = command(&mut svc, &msg.data, msg.handles);
-                if control.write(reply.as_bytes(), handles).is_err() {
-                    break;
-                }
+        // Poradi je dulezite: signaly kanalu fokusu a `secure` patri
+        // kanalum z doby cekani. Zpracuji se driv, nez je prikaz `focus` /
+        // `secure` nize vymeni (jinak by stare PEER_CLOSED zahodilo novy
+        // kanal).
+        if let Some(at) = secure_at {
+            secure_input(&mut svc, observed[at]);
+        }
+        if let Some(at) = focus_at
+            && let Some(ch) = &svc.focus
+        {
+            if observed[at].intersects(Signals::READABLE) {
+                // Klient zatim nic neposila; zpravy zahodit, at fronta neroste.
+                while ch.channel.try_read().is_ok() {}
+            } else if observed[at].intersects(Signals::PEER_CLOSED) {
+                svc.focus = None;
             }
-        } else if observed[0].intersects(Signals::PEER_CLOSED) {
-            // Rodic skoncil: sluzba konci s nim.
-            return 0;
         }
 
         // Zdroje odzadu, aby odebrani nemenilo indexy dosud nezpracovanych.
@@ -96,18 +102,18 @@ fn main(startup: Startup) -> i64 {
             }
         }
 
-        if let Some(at) = secure_at {
-            secure_input(&mut svc, observed[at]);
-        }
-        if let Some(at) = focus_at
-            && let Some(ch) = &svc.focus
-        {
-            if observed[at].intersects(Signals::READABLE) {
-                // Klient zatim nic neposila; zpravy zahodit, at fronta neroste.
-                while ch.try_read().is_ok() {}
-            } else if observed[at].intersects(Signals::PEER_CLOSED) {
-                svc.focus = None;
+        // Prikazy az nakonec: novy zdroj se prida za `n`, novy fokus
+        // a `secure` uz neovlivni signaly z tohoto kola.
+        if observed[0].intersects(Signals::READABLE) {
+            while let Ok(msg) = control.try_read() {
+                let (reply, handles) = command(&mut svc, &msg.data, msg.handles);
+                if control.write(reply.as_bytes(), handles).is_err() {
+                    break;
+                }
             }
+        } else if observed[0].intersects(Signals::PEER_CLOSED) {
+            // Rodic skoncil: sluzba konci s nim.
+            return 0;
         }
         svc.tick();
     }
@@ -119,7 +125,7 @@ fn secure_input(svc: &mut Service, sig: Signals) {
         return;
     };
     let mut release = false;
-    while let Ok(m) = ch.try_read() {
+    while let Ok(m) = ch.channel.try_read() {
         if m.data == control::RELEASE.as_bytes() {
             release = true;
         }
@@ -128,8 +134,7 @@ fn secure_input(svc: &mut Service, sig: Signals) {
         svc.leave_secure_mode();
     }
     if sig.intersects(Signals::PEER_CLOSED) && !sig.intersects(Signals::READABLE) {
-        svc.secure = None;
-        svc.leave_secure_mode();
+        svc.secure_closed();
     }
 }
 
@@ -169,7 +174,7 @@ fn command(svc: &mut Service, data: &[u8], mut handles: Vec<Handle>) -> (String,
         },
         control::SECURE => match channel(&mut handles) {
             Ok(c) => {
-                svc.secure = Some(c);
+                svc.set_secure(c);
                 ok()
             }
             Err(e) => err(e),

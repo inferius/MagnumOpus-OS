@@ -160,3 +160,10 @@ pub const KEY_MAX: u16 = 0x2FF;
 pub const fn is_mouse_button(code: u16) -> bool {
     code >= 0x110 && code < 0x118
 }
+
+/// Je kod tlacitko (mys, joystick, gamepad, tablet, `BTN_TRIGGER_HAPPY`),
+/// ne klavesa? Rozsahy evdev `BTN_MISC`..`BTN_GEAR_UP` (0x100-0x15F)
+/// a `BTN_TRIGGER_HAPPY` (0x2C0-0x2E7).
+pub const fn is_button(code: u16) -> bool {
+    (code >= 0x100 && code < 0x160) || (code >= 0x2C0 && code < 0x2E8)
+}

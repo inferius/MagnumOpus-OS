@@ -28,15 +28,78 @@ pub struct Repeat {
     /// Index zdroje (v `Service::sources`).
     pub source: usize,
     pub code: u16,
+    /// Scan kod ze stisku (opakovani hlasi stejny).
     pub scancode: u32,
     /// Cas pristiho opakovani (ns od startu).
     pub next: u64,
 }
 
+/// Prijemce udalosti (vlastnik fokusu nebo kanal `secure`) a pocet zprav,
+/// ktere mu neprosly (plna fronta). Pri dalsi uspesne zprave dostane
+/// napred `Dropped`, aby vedel, ze stav klaves muze byt jiny.
+pub struct Receiver {
+    pub channel: Channel,
+    lost: u32,
+}
+
+/// Vysledek odeslani.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sent {
+    Delivered,
+    /// Plna fronta prijemce: zprava zahozena.
+    Dropped,
+    /// Prijemce zavrel kanal.
+    Closed,
+}
+
+impl Receiver {
+    pub fn new(channel: Channel) -> Self {
+        Self { channel, lost: 0 }
+    }
+
+    /// Posle zaznamy; plna fronta = zahodit (nikdy neblokovat).
+    fn send(&mut self, records: &[Record], dropped: &mut u32) -> Sent {
+        if records.is_empty() {
+            return Sent::Delivered;
+        }
+        let mut all;
+        let records = if self.lost > 0 {
+            all = Vec::with_capacity(records.len() + 1);
+            all.push(Record::new(
+                Event::Dropped { messages: self.lost },
+                0,
+                0,
+                time::now(),
+            ));
+            all.extend_from_slice(records);
+            &all[..]
+        } else {
+            records
+        };
+        let mut result = Sent::Delivered;
+        for chunk in records.chunks(event::MAX_RECORDS) {
+            match self.channel.write(&event::encode(chunk), Vec::new()) {
+                Ok(()) => {
+                    if result == Sent::Delivered {
+                        self.lost = 0;
+                    }
+                }
+                Err(Error::ShouldWait) => {
+                    self.lost = self.lost.saturating_add(1);
+                    *dropped = dropped.saturating_add(1);
+                    result = Sent::Dropped;
+                }
+                Err(_) => return Sent::Closed,
+            }
+        }
+        result
+    }
+}
+
 pub struct Service {
     pub sources: Vec<Source>,
-    pub focus: Option<Channel>,
-    pub secure: Option<Channel>,
+    pub focus: Option<Receiver>,
+    pub secure: Option<Receiver>,
     /// Po bezpecne zkratce: vse jde na kanal `secure`, dokud jeho vlastnik
     /// neposle `release`.
     pub secure_mode: bool,
@@ -68,22 +131,6 @@ impl Service {
         self.sources.iter().filter(|s| s.synthetic).count() as u32
     }
 
-    /// Posle zaznamy prijemci; plna fronta = zahodit (nikdy neblokovat).
-    /// Vraci `false`, kdyz prijemce kanal zavrel.
-    fn send_to(channel: &Channel, records: &[Record], dropped: &mut u32) -> bool {
-        if records.is_empty() {
-            return true;
-        }
-        for chunk in records.chunks(event::MAX_RECORDS) {
-            match channel.write(&event::encode(chunk), Vec::new()) {
-                Ok(()) => {}
-                Err(Error::ShouldWait) => *dropped = dropped.saturating_add(1),
-                Err(_) => return false,
-            }
-        }
-        true
-    }
-
     /// Doruci zaznamy aktualnimu prijemci: v bezpecnem rezimu kanalu
     /// `secure`, jinak vlastnikovi fokusu.
     pub fn deliver(&mut self, records: &[Record]) {
@@ -92,8 +139,8 @@ impl Service {
         } else {
             &mut self.focus
         };
-        if let Some(ch) = target
-            && !Self::send_to(ch, records, &mut self.dropped)
+        if let Some(r) = target
+            && r.send(records, &mut self.dropped) == Sent::Closed
         {
             *target = None;
             if self.secure_mode {
@@ -105,22 +152,48 @@ impl Service {
     /// Posle jednu udalost vlastnikovi fokusu (bez ohledu na rezim).
     fn notify_focus(&mut self, e: Event) {
         let r = [Record::new(e, 0, 0, time::now())];
-        if let Some(ch) = &self.focus
-            && !Self::send_to(ch, &r, &mut self.dropped)
+        if let Some(f) = &mut self.focus
+            && f.send(&r, &mut self.dropped) == Sent::Closed
         {
             self.focus = None;
         }
+    }
+
+    /// Posle jednu udalost na kanal `secure`.
+    fn notify_secure(&mut self, e: Event) -> Sent {
+        let r = [Record::new(e, 0, 0, time::now())];
+        let Some(s) = &mut self.secure else {
+            return Sent::Closed;
+        };
+        let sent = s.send(&r, &mut self.dropped);
+        if sent == Sent::Closed {
+            self.secure = None;
+        }
+        sent
     }
 
     /// Novy vlastnik fokusu: predchozi dostane `Focus(false)`, novy uvodni
     /// stav (fokus, rozlozeni, umely vstup).
     pub fn set_focus(&mut self, ch: Channel) {
         self.notify_focus(Event::Focus(false));
-        self.focus = Some(ch);
+        self.focus = Some(Receiver::new(ch));
         self.notify_focus(Event::Focus(!self.secure_mode));
         self.notify_focus(Event::Layout(self.layout as u32));
         let active = self.injecting();
         self.notify_focus(Event::Injection { active });
+    }
+
+    /// Novy prijemce bezpecne zkratky; dostane stav umeleho vstupu.
+    pub fn set_secure(&mut self, ch: Channel) {
+        self.secure = Some(Receiver::new(ch));
+        let active = self.injecting();
+        self.notify_secure(Event::Injection { active });
+    }
+
+    /// Kanal `secure` se zavrel: bezpecny rezim konci.
+    pub fn secure_closed(&mut self) {
+        self.secure = None;
+        self.leave_secure_mode();
     }
 
     pub fn set_layout(&mut self, id: LayoutId) {
@@ -144,11 +217,8 @@ impl Service {
     fn injection_changed(&mut self) {
         let active = self.injecting();
         self.notify_focus(Event::Injection { active });
-        if let Some(ch) = &self.secure {
-            let r = [Record::new(Event::Injection { active }, 0, 0, time::now())];
-            if !Self::send_to(ch, &r, &mut self.dropped) {
-                self.secure = None;
-            }
+        if self.secure.is_some() {
+            self.notify_secure(Event::Injection { active });
         }
     }
 
@@ -170,21 +240,29 @@ impl Service {
         }
     }
 
-    /// Bezpecna zkratka: oznameni systemu a bezpecny rezim.
+    /// Bezpecna zkratka: oznameni systemu a bezpecny rezim. Do bezpecneho
+    /// rezimu jen tehdy, kdyz system oznameni opravdu dostal - jinak by
+    /// vstup zustal u prijemce, ktery o nem nevi a nikdy ho neuvolni.
     fn secure_attention(&mut self) {
         self.repeat = None;
-        let Some(ch) = &self.secure else {
+        if self.secure.is_none() {
             println!("inputd: bezpecna zkratka, ale nikdo ji neposloucha");
             return;
-        };
-        let r = [Record::new(Event::SecureAttention, 0, 0, time::now())];
-        if !Self::send_to(ch, &r, &mut self.dropped) {
-            self.secure = None;
-            return;
         }
-        if !self.secure_mode {
-            self.notify_focus(Event::Focus(false));
-            self.secure_mode = true;
+        match self.notify_secure(Event::SecureAttention) {
+            Sent::Delivered => {
+                if !self.secure_mode {
+                    self.notify_focus(Event::Focus(false));
+                    self.secure_mode = true;
+                }
+            }
+            Sent::Dropped => {
+                println!("inputd: bezpecna zkratka neprosla, kanal secure je plny");
+            }
+            Sent::Closed => {
+                println!("inputd: bezpecna zkratka, ale kanal secure je zavreny");
+                self.leave_secure_mode();
+            }
         }
     }
 
@@ -218,7 +296,7 @@ impl Service {
             let mut sak = false;
             let mut repeat = None::<Option<Repeat>>;
             let current = self.repeat.as_ref().map(|r| (r.source, r.code));
-            self.sources[index].raw(e, layout, now, &mut out, |s, code, action| {
+            self.sources[index].raw(e, layout, now, &mut out, |s, code, scancode, action| {
                 // Bezpecnou zkratku umi jen fyzicka klavesnice.
                 if !s.synthetic
                     && code == KEY_DELETE
@@ -233,7 +311,7 @@ impl Service {
                         repeat = Some(Some(Repeat {
                             source: index,
                             code,
-                            scancode: code as u32,
+                            scancode,
                             next: now.saturating_add(REPEAT_DELAY.as_nanos() as u64),
                         }));
                     }

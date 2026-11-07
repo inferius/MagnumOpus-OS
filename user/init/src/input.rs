@@ -53,7 +53,12 @@ pub fn start(startup: &Startup, devices: Vec<Channel>) -> Result<Input> {
 impl Input {
     /// Posle prikaz a vrati odpoved (text za `ok`) s handly; `err KOD`
     /// prevede na chybu.
+    ///
+    /// Odpovedi nemaji cislo pozadavku: zprava, ktera uz ceka pred
+    /// odeslanim, je pozdni odpoved na prikaz, kteremu vyprsel cas, a zahodi
+    /// se (jinak by se odpovedi posunuly o jednu).
     pub fn command(&self, text: &str, handles: Vec<Handle>) -> Result<(String, Vec<Handle>)> {
+        drain(&self.control);
         self.control.write(text.as_bytes(), handles)?;
         let msg = self
             .control

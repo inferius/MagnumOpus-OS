@@ -8,7 +8,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Musi sedet s `QEMU_MARKER` v `user/init/src/tests/input.rs`.
@@ -27,23 +27,34 @@ pub fn qemu_arg(port: u16) -> String {
     format!("tcp:127.0.0.1:{port},server=on,wait=off")
 }
 
+/// Druha znacka: test dostal klavesy i mys a ceka na bezpecnou zkratku.
+/// Musi sedet s `QEMU_MARKER_SECURE` v `user/init/src/tests/input.rs`.
+pub const MARKER_SECURE: &str = "init: test vstupu: cekam na zkratku z QEMU";
+
+/// Pocka, az se v logu objevi `marker`; `false` = nedockal se.
+fn wait_marker(log: &Path, marker: &str, start: Instant) -> bool {
+    loop {
+        if start.elapsed() > WAIT_MAX {
+            return false;
+        }
+        let seen = std::fs::read(log)
+            .map(|b| String::from_utf8_lossy(&b).contains(marker))
+            .unwrap_or(false);
+        if seen {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 /// Spusti vlakno, ktere po objeveni znacky v `log` posle udalosti.
 pub fn spawn_injector(log: PathBuf, port: u16) {
     std::thread::spawn(move || {
         let start = Instant::now();
-        loop {
-            if start.elapsed() > WAIT_MAX {
-                return;
-            }
-            let seen = std::fs::read(&log)
-                .map(|b| String::from_utf8_lossy(&b).contains(MARKER))
-                .unwrap_or(false);
-            if seen {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(200));
+        if !wait_marker(&log, MARKER, start) {
+            return;
         }
-        match inject(port) {
+        match inject(port, &log, start) {
             Ok(()) => println!("xtask: QMP: udalosti vstupu poslany"),
             Err(e) => eprintln!("xtask: QMP: vkladani vstupu selhalo: {e}"),
         }
@@ -69,13 +80,15 @@ fn rel(axis: &str, value: i32) -> String {
 /// snimek), nebo pauza.
 enum Step {
     Send(Vec<String>),
-    Pause(Duration),
+    /// Pockat na znacku v logu seriove linky.
+    WaitFor(&'static str),
 }
 
 /// Posloupnost kroku. Test v `input.rs` ocekava presne tyto udalosti.
-/// Pred bezpecnou zkratkou je pauza: klavesnice a mys jsou ruzna zarizeni
-/// a jejich udalosti si navzajem nedrzi poradi, mys musi dorazit driv, nez
-/// zkratka prepne vstup na kanal `secure`.
+/// Pred bezpecnou zkratkou se ceka na druhou znacku: klavesnice a mys jsou
+/// ruzna zarizeni a jejich udalosti si navzajem nedrzi poradi, mys musi
+/// dorazit driv, nez zkratka prepne vstup na kanal `secure`. Test znacku
+/// vypise, az udalosti mysi dostane (zadne pevne cekani).
 fn script() -> Vec<Step> {
     let mut s: Vec<Step> = Vec::new();
     for (k, d) in [
@@ -93,7 +106,7 @@ fn script() -> Vec<Step> {
     s.push(Step::Send(vec![btn("left", false)]));
     s.push(Step::Send(vec![btn("wheel-down", true)]));
     s.push(Step::Send(vec![btn("wheel-down", false)]));
-    s.push(Step::Pause(Duration::from_secs(1)));
+    s.push(Step::WaitFor(MARKER_SECURE));
     for (k, d) in [
         ("ctrl", true),
         ("alt", true),
@@ -123,7 +136,7 @@ fn reply(reader: &mut impl BufRead) -> Result<(), String> {
     }
 }
 
-fn inject(port: u16) -> Result<(), String> {
+fn inject(port: u16, log: &Path, start: Instant) -> Result<(), String> {
     let stream = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -146,8 +159,10 @@ fn inject(port: u16) -> Result<(), String> {
     for step in script() {
         let events = match step {
             Step::Send(e) => e,
-            Step::Pause(d) => {
-                std::thread::sleep(d);
+            Step::WaitFor(marker) => {
+                if !wait_marker(log, marker, start) {
+                    return Err(format!("znacka '{marker}' se neobjevila"));
+                }
                 continue;
             }
         };

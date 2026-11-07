@@ -75,7 +75,7 @@ fn main(startup: Startup) -> i64 {
     let ecam_vmo = Vmo::from_handle(ecam_vmo);
     let service = Channel::from_handle(service);
 
-    let Some(address) = read_config(&startup.bootstrap) else {
+    let Some(address) = virtio::read_driver_config(&startup.bootstrap) else {
         println!("virtio-input: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
@@ -116,37 +116,19 @@ fn main(startup: Startup) -> i64 {
     }
 }
 
-fn read_config(bootstrap: &Channel) -> Option<Address> {
-    let msg = bootstrap.read(None).ok()?;
-    let text = core::str::from_utf8(&msg.data).ok()?;
-    let mut parts = text.split_whitespace();
-    if parts.next()? != "pci" {
-        return None;
-    }
-    let mut num = || parts.next()?.parse::<u8>().ok();
-    Some(Address {
-        bus: num()?,
-        device: num()?,
-        function: num()?,
-    })
-}
-
 impl InputDevice {
     fn open(ecam: &Ecam, a: Address, resource: &Resource) -> Result<Self> {
-        let device = Device::open(ecam, a, resource)?;
-        device.begin_init()?;
-        device.negotiate(F_VERSION_1 | F_ACCESS_PLATFORM)?;
-
-        let irq = resource.interrupt()?;
-        let msix = MsixTable::open(ecam, a, resource)?;
-        msix.set(0, irq.msi())?;
-        msix.enable(ecam);
         // Fronta 0 = udalosti (zarizeni -> ovladac). Fronta 1 (stav,
         // napr. kontrolky Caps Lock) zatim nepouzivame.
-        let queue = device.setup_queue(0, QUEUE_MAX, 0, resource)?;
+        let virtio::Started {
+            device,
+            queue,
+            irq,
+            msix,
+            ..
+        } = virtio::start(ecam, a, resource, F_VERSION_1 | F_ACCESS_PLATFORM, QUEUE_MAX)?;
         let name = read_name(&device);
         let caps = read_caps(&device);
-        device.driver_ok();
 
         let size = queue.size() as u64 * RawEvent::SIZE as u64;
         let dma = resource.dma_memory(size)?;

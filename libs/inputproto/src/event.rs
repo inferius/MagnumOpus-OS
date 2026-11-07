@@ -37,6 +37,8 @@ pub mod kind {
     pub const INJECTION: u16 = 8;
     /// Zmena rozlozeni: a = id rozlozeni (viz `keymap::LayoutId`).
     pub const LAYOUT: u16 = 9;
+    /// Prijemci neprosly zpravy (plna fronta): a = pocet zprav.
+    pub const DROPPED: u16 = 10;
 }
 
 /// Priznaky zaznamu.
@@ -148,6 +150,11 @@ pub enum Event {
     Injection { active: u32 },
     /// Aktivni rozlozeni klavesnice se zmenilo.
     Layout(u32),
+    /// Klientovi neproslo `messages` zprav (mel plnou frontu). Prijde jako
+    /// prvni zaznam dalsi dorucene zpravy. Klient ma (jako u `Focus(false)`)
+    /// povazovat vsechny klavesy a tlacitka za uvolnene - ztracena mohla byt
+    /// i uvolneni.
+    Dropped { messages: u32 },
     /// Druh, ktery tato verze knihovny nezna.
     Unknown { kind: u16 },
 }
@@ -204,6 +211,7 @@ impl Record {
             Event::Focus(f) => (kind::FOCUS, f as u32, 0, 0, 0),
             Event::Injection { active } => (kind::INJECTION, active, 0, 0, 0),
             Event::Layout(id) => (kind::LAYOUT, id, 0, 0, 0),
+            Event::Dropped { messages } => (kind::DROPPED, messages, 0, 0, 0),
             Event::Unknown { kind } => (kind, 0, 0, 0, 0),
         };
         let mut out = [0u8; Self::SIZE];
@@ -257,6 +265,7 @@ impl Record {
             kind::FOCUS => Event::Focus(a != 0),
             kind::INJECTION => Event::Injection { active: a },
             kind::LAYOUT => Event::Layout(a),
+            kind::DROPPED => Event::Dropped { messages: a },
             other => Event::Unknown { kind: other },
         };
         Some(Self {

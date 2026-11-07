@@ -96,6 +96,7 @@ fn records_roundtrip_all_kinds() {
         Event::Focus(false),
         Event::Injection { active: 2 },
         Event::Layout(1),
+        Event::Dropped { messages: 7 },
     ];
     let records: Vec<Record> = events
         .iter()
@@ -186,4 +187,11 @@ fn button_codes() {
         assert!(is_mouse_button(b.code()));
     }
     assert!(!is_mouse_button(KEY_A));
+    // Tlacitka joysticku, tabletu a gamepadu nejsou klavesy.
+    for c in [0x100, BTN_LEFT, 0x120, 0x130, 0x14a, 0x15f, 0x2c0, 0x2e7] {
+        assert!(is_button(c), "{c:#x}");
+    }
+    for c in [KEY_A, KEY_DELETE, 0x160, 0x2bf, 0x2e8, KEY_MAX] {
+        assert!(!is_button(c), "{c:#x}");
+    }
 }

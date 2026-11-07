@@ -129,6 +129,8 @@ porušený vnitřní předpoklad (chyba jádra).
 | `inputd: zarizeni 'jméno' pripojeno` / `odpojeno` | Ovladač se představil (`IDEV`) nebo zavřel kanál. |
 | `inputd: neplatna zprava od zdroje N` | Zdroj poslal zprávu, která neodpovídá protokolu zařízení (neznámá značka, špatná délka); zpráva se zahodí. |
 | `inputd: bezpecna zkratka, ale nikdo ji neposloucha` | Ctrl+Alt+Delete, ale nikdo nemá kanál `secure`; zkratka se jen pohltí. |
+| `inputd: bezpecna zkratka neprosla, kanal secure je plny` | Příjemce zkratky nečte; zkratka se pohltí a bezpečný režim nezačne (vstup zůstává vlastníkovi fokusu). |
+| `inputd: bezpecna zkratka, ale kanal secure je zavreny` | Příjemce zkratky skončil; zkratka se pohltí. |
 | `init: sluzba vstupu bezi (N zarizeni)` | Init spustil `inputd` a připojil N ovladačů. |
 | `init: sluzbu vstupu nelze spustit: ...` | `inputd` chybí v initfs nebo neodpověděla na příkaz (`TIMED_OUT`). Testy vstupu pak selžou (`sluzba vstupu nebezi`). |
 

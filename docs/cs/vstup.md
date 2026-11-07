@@ -104,6 +104,10 @@ Události mají tvar evdev a kódy se berou z Linuxu (`inputproto::code`):
 | Typ | Kód | Hodnota |
 |---|---|---|
 | `EV_KEY` (1) | klávesa (`KEY_A` = 30, ...) nebo tlačítko (`BTN_LEFT` = 0x110, ...) | 1 stisk, 0 uvolnění (2 = opakování od zařízení se ignoruje) |
+
+Tlačítka jsou kódy 0x100-0x15F a 0x2C0-0x2E7 (`code::is_button`: myš,
+joystick, gamepad, dotyk tabletu). Přijdou jako `Button`, nejdou přes
+rozložení a neopakují se. Ostatní kódy `EV_KEY` jsou klávesy.
 | `EV_REL` (2) | `REL_X`, `REL_Y`, `REL_WHEEL` (kladně nahoru), `REL_HWHEEL` | posun |
 | `EV_MSC` (4) | `MSC_SCAN` | surový scan kód příští klávesy (PS/2, USB HID) |
 | `EV_SYN` (0) | `SYN_REPORT` | konec snímku |
@@ -159,6 +163,7 @@ Jedna zpráva je jeden snímek a skládá se ze záznamů po 32 B:
 | 7 `FOCUS` | `Focus(bool)` | 1 získán, 0 ztracen | | | |
 | 8 `INJECTION` | `Injection { active }` | počet zdrojů umělého vstupu | | | |
 | 9 `LAYOUT` | `Layout(id)` | 0 `us`, 1 `cz` | | | |
+| 10 `DROPPED` | `Dropped { messages }` | počet zpráv, které klientovi neprošly | | | |
 
 - `flags`: `SYNTHETIC` (1) = událost pochází z umělého vstupu.
 - `mods`: modifikátory po události. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -181,6 +186,11 @@ Pravidla:
   uvolněné (přišla bezpečná zkratka nebo jiný vlastník fokusu).
 - `Injection { active > 0 }`: vstup ovládá někdo jiný (automatizace,
   vzdálená plocha, agent). Klient to má viditelně ukázat.
+- **Plná fronta:** služba na klienta nikdy nečeká. Když klient nestíhá
+  a jeho fronta je plná, zpráva se zahodí. První další doručená zpráva
+  začíná záznamem `Dropped { messages }` a klient má, stejně jako po
+  `Focus(false)`, považovat všechny klávesy a tlačítka za uvolněné, protože
+  ztracené mohlo být i uvolnění.
 
 Příklad: čtení událostí ve vlastníkovi fokusu:
 
@@ -254,7 +264,9 @@ fokusu i kanál `secure` mají `Injection { active > 0 }`.
    a pak pošle na kanálu `secure` zprávu `release`. Vlastník fokusu
    dostane `Focus(true)`.
 
-Když nikdo kanál `secure` nemá, služba zkratku jen pohltí a zaloguje.
+Když nikdo kanál `secure` nemá nebo je jeho fronta plná, služba zkratku
+jen pohltí a zaloguje a do bezpečného režimu **nepřejde**. Jinak by vstup
+zůstal u příjemce, který o zkratce neví a nikdy ho neuvolní.
 Takhle to dělá Windows (Ctrl+Alt+Del přepne na zabezpečenou plochu).
 U nás je navíc zaručené, že zkratku nevyvolá ani umělý vstup, protože se
 pozná jen na zdroji, který není `inject`.
@@ -313,15 +325,18 @@ vždy.
 |---|---|
 | `cargo test -p inputproto` | formát zpráv: všechny druhy záznamů, neplatná data, stav |
 | `cargo test -p keymap` | US, CZ, AltGr, mrtvé klávesy, Caps Lock, Num Lock, opakování |
-| `cargo xtask test`, sada `vstup` | služba v QEMU: zařízení, umělý vstup, CZ, myš, zkratka, opakování, neplatné příkazy |
+| `cargo xtask test`, sada `vstup` | služba v QEMU: zařízení, umělý vstup, CZ, myš, zkratka, opakování, tlačítka mimo myš, plná fronta (`Dropped`), neplatné příkazy |
 
 Test **„QEMU: klávesnice a myš až do služby“** prověří celou cestu ze
 zařízení. Init vypíše značku `init: test vstupu: cekam na udalosti z QEMU`.
 Xtask (`xtask/src/qmp.rs`) ji najde v logu sériové linky a přes QMP
 (`-qmp tcp:127.0.0.1:<port>`) pošle příkazy `input-send-event`: `a`,
 Shift+`1`, pohyb (10, −5), levé tlačítko, kolečko dolů a Ctrl+Alt+Delete.
-Test ověří text `a!`, součet pohybu, kolečko, bezpečnou zkratku jen na
-kanálu `secure` a návrat fokusu po `release`. Totéž dělá xtask
+Klávesnice a myš jsou dvě zařízení a jejich události si navzájem nedrží
+pořadí. Proto test po přijetí kláves a myši vypíše druhou značku
+`init: test vstupu: cekam na zkratku z QEMU` a xtask pošle
+Ctrl+Alt+Delete až po ní. Test ověří text `a!`, součet pohybu, kolečko,
+bezpečnou zkratku jen na kanálu `secure` a návrat fokusu po `release`. Totéž dělá xtask
 v `cargo xtask run`, takže test projde i tam.
 
 ## Omezení první verze
