@@ -17,7 +17,7 @@ mod input;
 mod ipc;
 mod jobs;
 mod memory;
-mod net;
+pub mod net;
 mod process;
 mod shell;
 mod supervisor;

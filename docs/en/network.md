@@ -441,6 +441,12 @@ network profile:
 - **A truncated reply** (the TC bit): the resolver asks over TCP on the
   same server and port (RFC 7766, a message with a u16 length). For an
   own server it is enough that the session may send UDP to the server.
+- **A stuck flow:** UDP retries switch to a new local port every 3
+  attempts, and a TCP connection that does not get established within 3 s
+  is dropped and reopened (at most 3 times). Slirp on Windows keeps one host
+  socket per flow; when it breaks, every further attempt from the same port
+  would be lost (message `netd: DNS pres TCP: spojeni se nenavazalo do 3 s,
+  novy pokus (n)` - "connection not established within 3 s, new attempt").
 - **Blocked domains** of the firewall return `ACCESS_DENIED` without a
   query (see [DNS filter](firewall.md#dns-filter)).
 
@@ -588,10 +594,33 @@ host's 127.0.0.1.
 | encrypted DNS | the "sifrovane DNS" suite: validated A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC and NSEC3), NODATA; unsigned and bogus zone; failover from a broken resolver, DoT, cache; the profile rule |
 | NTP | `ntpd` against the host server (the "synchronizace casu" suite, see [time.md](time.md#synchronization-over-the-network-ntpd)) |
 
-DNS through 10.0.2.3 (slirp forwards the queries to the host's DNS) is not
-tested because the test would need the internet. Without the helper
+**DNS in tests is local only:** all queries go to the host helper server
+from `nethelper` or to the test DoH/DoT; in a test run init also points the
+unauthenticated fallback of the system resolver at the helper (`set_dns`),
+so even a `dnsd` outage never reaches the real DNS. DNS query limits in
+tests are 30 s (running under TCG and load). The host resolver (10.0.2.3,
+slirp forwards to the Windows/Linux DNS) is tested only by
+`cargo xtask test --net-online` - it depends on the host network and the
+internet. Without the helper
 servers (`cargo xtask run`) the tests that need them are skipped. The log
 then shows `[preskoceno] sit: ...` ("skipped").
+
+**Helper server ports:** none is fixed or guessable. Every server takes
+an ephemeral port from the host kernel (bind to port 0, up to 20 attempts
+on an error such as Windows 10013), and xtask passes the ports to the guest
+in the initfs (`net-test`). The port for the refusal test (`closed`) is held
+by xtask for the whole run as a socket bound without `listen`: the kernel
+refuses connections to it and no other process can take it meanwhile. The
+`hostfwd` port is held by xtask until QEMU starts. When QEMU exits right
+after start with a message about a taken port (QMP or `hostfwd`, concurrent
+test runs), xtask starts it again with new ports (at most 3 attempts,
+message `xtask: QEMU nenastartovalo (...), novy pokus s jinymi porty` -
+"QEMU did not start, new attempt with other ports").
+
+**Load (several QEMUs at once):** UDP tests send every further attempt from
+a new socket (a new flow in slirp; a late reply to an old attempt does not
+arrive), and `dnsd` waits 5 s for a connection to a resolver (a lost SYN is
+retransmitted).
 
 The host also tests the formats and permissions: `cargo test -p netproto
 --features std` (part of `cargo xtask test`). The firewall tests are

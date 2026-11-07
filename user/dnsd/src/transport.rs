@@ -20,8 +20,10 @@ use netproto::{Net, TcpStream};
 use tls::TlsStream;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-/// Navazani TCP: kratce, at nefunkcni resolver nezdrzi prechod na dalsi.
-const CONNECT: Duration = Duration::from_secs(3);
+/// Navazani TCP: kratce, at nefunkcni resolver nezdrzi prechod na dalsi,
+/// ale s rezervou pro vytizeny hostitel (vic QEMU naraz, ztraceny SYN se
+/// opakuje po ~1 s a ~3 s).
+const CONNECT: Duration = Duration::from_secs(5);
 /// Nejvetsi odpoved DNS (DoT/DoH: az 64 KiB).
 const MAX_MESSAGE: usize = 65_535;
 

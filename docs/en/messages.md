@@ -218,6 +218,7 @@ invariant was broken (a kernel bug).
 | `revocd: OneCRL: neplatny dokument` | The downloaded JSON cannot be read ("invalid document"); the previous list stays, a new attempt after `retry_minutes`. |
 | `revocd: <url>: ...` | Downloading a CRL or OneCRL failed (HTTP status, connection error); the URL is not retried for `retry_minutes`, the revocation status is unknown meanwhile. |
 | `revocd: <url>: neni CRL` | The server returned something other than a CRL ("not a CRL"). |
+| `netd: DNS pres TCP: spojeni se nenavazalo do 3 s, novy pokus (n)` | The TCP connection for a truncated DNS answer got stuck ("not established within 3 s, new attempt"); the resolver tries a new one (at most 3 times). |
 | `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` did not finish the request even after the limit plus margin (a bug or a stuck service). The program got `TIMED_OUT`, the channel is unusable. OP = operation code (`netproto::op`). |
 | `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | The system resolver runs ("resolvers", "anchors"). |
 | `dnsd: <resolver>: ...` | A resolver did not answer (connection, TLS, HTTP); `dnsd` tries the next one. |

@@ -199,7 +199,8 @@ impl Net {
 
     /// Preklad jmena systemovym resolverem (servery z DHCP), IPv4 i IPv6.
     pub fn resolve(&self, name: &str) -> Result<Vec<IpAddr>> {
-        self.resolve_with(name, 0, None, Some(Duration::from_secs(5)))
+        // Systemovy preklad muze overovat DNSSEC (vic dotazu): 15 s.
+        self.resolve_with(name, 0, None, Some(Duration::from_secs(15)))
             .map(|(a, _)| a)
     }
 
