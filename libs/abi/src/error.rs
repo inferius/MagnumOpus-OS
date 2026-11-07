@@ -68,6 +68,9 @@ pub enum Error {
     Locked = -26,
     /// Objekt se mezitim zmenil (podminena operace s ocekavanou revizi).
     Conflict = -27,
+    /// Pozadovane zaznamy zurnalu zmen uz nejsou ulozene (retence):
+    /// odberatel musi nacist novy vychozi stav (`VIEW`).
+    JournalGap = -28,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -99,6 +102,7 @@ pub const ALL: &[Error] = &[
     Error::ReadOnly,
     Error::Locked,
     Error::Conflict,
+    Error::JournalGap,
 ];
 
 impl Error {
@@ -142,6 +146,7 @@ impl Error {
             Self::ReadOnly => "READ_ONLY",
             Self::Locked => "LOCKED",
             Self::Conflict => "CONFLICT",
+            Self::JournalGap => "JOURNAL_GAP",
         }
     }
 
@@ -175,6 +180,7 @@ impl Error {
             Self::ReadOnly => "jen pro cteni",
             Self::Locked => "objekt je otevreny nebo zamceny jinym handlem",
             Self::Conflict => "objekt se mezitim zmenil",
+            Self::JournalGap => "pozadovane zaznamy zurnalu uz nejsou ulozene",
         }
     }
 }

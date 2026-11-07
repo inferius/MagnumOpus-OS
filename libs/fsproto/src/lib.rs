@@ -14,6 +14,7 @@
 extern crate alloc;
 
 mod codec;
+pub mod hist;
 pub mod perm;
 pub mod v2;
 

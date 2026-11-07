@@ -21,6 +21,7 @@ extern crate alloc;
 
 mod blkdev;
 mod serve;
+mod serve_hist;
 mod serve_perm;
 mod serve_v2;
 
@@ -37,6 +38,8 @@ use crate::serve_v2::{MAX_SESSIONS, Session, SessionOp};
 
 /// Jak casto ukladat zmeny commitem.
 const COMMIT_INTERVAL: Duration = Duration::from_secs(5);
+/// Jak casto delat kroky historie (automaticke snapshoty, expirace, kos).
+const HISTORY_INTERVAL: Duration = Duration::from_secs(60);
 /// Kolik bloku prepsat jednim krokem defragmentace v necinnosti.
 const DEFRAG_BUDGET: u64 = 256;
 
@@ -133,13 +136,19 @@ fn main(startup: Startup) -> i64 {
 fn serve(svc: &mut Service, client: Channel) {
     let mut sessions: Vec<Session> = alloc::vec![Session::control(client)];
     let mut next_commit = time::deadline_after(COMMIT_INTERVAL);
+    let mut next_history = time::deadline_after(HISTORY_INTERVAL);
     // Defragmentovat jen po zmenach (jinak by se system prochazel stale dokola).
     let mut idle = false;
     let mut changed = false;
     let mut running = true;
     while running {
         // V necinnosti (po commitu bez novych pozadavku) defragmentovat.
-        let deadline = if idle { time::now() } else { next_commit };
+        let mut deadline = if idle { time::now() } else { next_commit.min(next_history) };
+        for s in &sessions {
+            if let Some(w) = &s.watch {
+                deadline = deadline.min(w.deadline);
+            }
+        }
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
         let items: Vec<(&libos::Handle, Signals)> =
             sessions.iter().map(|s| (s.channel.handle(), mask)).collect();
@@ -174,6 +183,8 @@ fn serve(svc: &mut Service, client: Channel) {
         }
         if running {
             background(svc, &mut next_commit, &mut idle, &mut changed);
+            history(svc, &mut next_history);
+            poll_watches(svc, &mut sessions);
         }
     }
     for mut s in sessions {
@@ -192,10 +203,24 @@ fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Op
             Err(_) => return None,
         };
         did = true;
-        let (reply, handles, new_session, ops) = match svc.handle(&mut sessions[i], &msg.data) {
-            Ok(r) => (fsproto::reply(Ok(r.body)), r.handles, r.new_session, r.session_ops),
-            Err(e) => (fsproto::reply(Err(e)), Vec::new(), None, Vec::new()),
+        // Klient poslal dalsi pozadavek, zatimco cekal na `JOURNAL_WATCH`:
+        // nejdriv odpoved na cekani (ted, i kdyz prazdna) - poradi odpovedi
+        // musi sedet s poradim pozadavku.
+        if let Some(w) = sessions[i].watch.take()
+            && let Some(res) = svc.poll_watch(&sessions[i], &w, true)
+            && let Err(Error::PeerClosed) = sessions[i].channel.write(&fsproto::reply(res), Vec::new())
+        {
+            return None;
+        }
+        let (reply, handles, new_session, ops, watch) = match svc.handle(&mut sessions[i], &msg.data) {
+            Ok(r) => (fsproto::reply(Ok(r.body)), r.handles, r.new_session, r.session_ops, r.watch),
+            Err(e) => (fsproto::reply(Err(e)), Vec::new(), None, Vec::new(), None),
         };
+        if let Some(w) = watch {
+            // Odpoved az po dalsim potvrzeni zmen nebo po limitu.
+            sessions[i].watch = Some(w);
+            return Some(did);
+        }
         // Zmeny jinych relaci (ridici relace: GRANT/REVOKE).
         let mut reply = reply;
         for op in ops {
@@ -238,6 +263,47 @@ fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Op
                 }
             }
         }
+    }
+}
+
+/// Odpovi na odlozena `JOURNAL_WATCH`, kde uz jsou zaznamy nebo uplynul limit.
+fn poll_watches(svc: &mut Service, sessions: &mut [Session]) {
+    let now = time::now();
+    for s in sessions.iter_mut() {
+        let Some(w) = s.watch.take() else { continue };
+        match svc.poll_watch(s, &w, now >= w.deadline) {
+            None => s.watch = Some(w),
+            Some(res) => {
+                // Zavreny kanal: relaci ukonci pristi pruchod smycky.
+                let _ = s.channel.write(&fsproto::reply(res), Vec::new());
+            }
+        }
+    }
+}
+
+/// Kroky historie podle nastaveni datasetu: automaticke snapshoty,
+/// expirace souboru, uklid kose (jako system).
+fn history(svc: &mut Service, next: &mut u64) {
+    if time::now() < *next {
+        return;
+    }
+    *next = time::deadline_after(HISTORY_INTERVAL);
+    let Some(fs) = svc.fs.as_mut() else { return };
+    if fs.info().read_only {
+        return;
+    }
+    let now = crate::serve::fs_now();
+    if let Err(e) = fs.auto_snapshot_tick(now) {
+        println!("fsd: automaticke snapshoty: {e}");
+    }
+    if let Err(e) = fs.expire_tick(now) {
+        println!("fsd: expirace souboru: {e}");
+    }
+    if let Err(e) = fs.trash_tick(now) {
+        println!("fsd: uklid kose: {e}");
+    }
+    if let Err(e) = fs.journal_tick(now) {
+        println!("fsd: retence zurnalu: {e}");
     }
 }
 

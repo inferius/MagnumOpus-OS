@@ -172,7 +172,7 @@ impl<D: BlockDevice> Store<D> {
             ag_blocks,
             uuid: volume_uuid(&opts.label, blocks, opts.uuid),
             features_compat: 0,
-            features_ro_compat: 0,
+            features_ro_compat: crate::layout::feature::RO_COMPAT_HISTORY,
             features_incompat: crate::layout::feature::INCOMPAT_TIME_SECS,
             root: BlockPtr::default(),
             space: BlockPtr::default(),

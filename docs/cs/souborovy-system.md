@@ -14,10 +14,13 @@ zápisy, levný `fsync`) a **nezabírat místo zbytečně** (režie metadat ~0,4
 > kapitol; starý popis je v [archivu v2](fs-v2.md).
 >
 > Formát v3 se zavádí po fázích podle [návrhu FS v3](navrh-fs-v3.md). Hotová
-> je první část fáze 1: uzly 16 KiB, ukazatel, superblok a záznam objektu v3,
-> jména do 1024 znaků, symbolické odkazy a limit velikosti souboru. Svazek
-> formátu v2 se nepřipojí (`NOT_SUPPORTED`); data se zatím nepřevádějí,
-> disky z nástroje `xtask` se vytvářejí znovu.
+> je fáze 1 (formát, datasety a klony, handly, oprávnění, protokol v2) a
+> **fáze 2 - historie**: žurnál změn, koš, vracení operací, verze souborů,
+> automatické snapshoty, commity s logickým ID, větve a merge, „zkusit
+> změny bokem“, rozšířené atributy a expirace - popis v samostatné kapitole
+> [Historie FS](fs-historie.md). Svazek formátu v2 se nepřipojí
+> (`NOT_SUPPORTED`); data se zatím nepřevádějí, disky z nástroje `xtask` se
+> vytvářejí znovu.
 
 ## Co formát obsahuje a co ovladač používá
 
@@ -26,13 +29,14 @@ sporné, co funguje:
 
 | Položka | Ve formátu | Ovladač dnes |
 |---|---|---|
-| UUID svazku, příznaky vlastností | ano | **používá**; definovaný je bit `INCOMPAT_TIME_SECS` ([časy](#časy-objektů)) |
+| UUID svazku, příznaky vlastností | ano | **používá**; definované bity `INCOMPAT_TIME_SECS` ([časy](#časy-objektů)), `RO_COMPAT_ACL`, `RO_COMPAT_HISTORY` ([historie](fs-historie.md#na-disku)) |
 | číslo zařízení v `BlockPtr`, `device_index/count` v superbloku | ano | **jen jedno zařízení**: zařízení musí být 0 a počet 1, jinak `CORRUPTED`; víc disků (zrcadlo, RAID) až po fázi 5 |
 | příznaky `BlockPtr` (komprese, šifrování, sdílení, cloud) | vyhrazené | **nepoužívá**; uzel s příznakem = `NOT_SUPPORTED` |
 | příznaky extentu (předalokace) | vyhrazené | **nepoužívá**; extent s příznakem = `NOT_SUPPORTED` |
 | příznak objektu `INODE_REMOTE` | vyhrazený | **nepoužívá** (fáze 6) |
 | oprávnění (`acl`), vlastník | ano | **používá** ([Oprávnění](#oprávnění-a-identita-relací)) |
-| počet rozšířených atributů v záznamu objektu | ano | **zapisuje 0**, nečte (později) |
+| rozšířené atributy (`XATTR`), počet v záznamu objektu | ano | **používá** ([atributy](fs-historie.md#rozšířené-atributy-a-expirace)) |
+| žurnál změn, koš, metadata snapshotů, commity, větve, index expirace | ano | **používá** ([Historie FS](fs-historie.md)) |
 | čas přístupu (`atime`) | ano | **jen nastavením** (`set_times`); čtení ho nemění |
 | generace objektu, čas vytvoření | ano | **používá** (`Stat`, přehrání logu) |
 | symbolické odkazy, jména do 1024 znaků, limit velikosti | ano | **používá** |
@@ -40,7 +44,6 @@ sporné, co funguje:
 | diff verzí, obnova jako kopie | ano | **používá** ([Rozdíl verzí](#rozdíl-verzí-a-obnova-jako-kopie)) |
 | handly, sirotci, sdílecí režimy, zámky rozsahu | ano | **používá** ([Handly](#otevřené-soubory-handly)) |
 | protokol v2 ve fsd (relace, handly, podmíněné uložení) | ano | **používá** ([Protokol v2](#protokol-v2-relace-handly-podmíněné-uložení)) |
-| oprávnění, vlastník | ne (přijde) | plán: [návrh v3](navrh-fs-v3.md#pořadí-implementace) |
 
 ## Co nabízí
 
@@ -65,7 +68,11 @@ sporné, co funguje:
 | Snapshoty jen pro čtení a jejich mazání (deadlisty) | hotovo | [Snapshoty](#snapshoty) |
 | Datasety (složky s vlastní historií), zapisovatelné klony | hotovo | [Datasety](#datasety-a-klony) |
 | Kontrola konzistence (fsck) a ověření dat (scrub) | hotovo | [Kontrola](#kontrola-konzistence-a-scrub) |
-| Zapisovatelné klony, nativní git, indexy, vyhledávání | plán | [Verzování a git](#verzování-a-git) |
+| Žurnál změn s pořadovými čísly, sledování změn (`JOURNAL_WATCH`), pohled s pozicí | hotovo | [Historie: žurnál](fs-historie.md#žurnál-změn) |
+| Koš, vracení operací, verze souborů, automatické snapshoty | hotovo | [Historie](fs-historie.md#koš) |
+| Commity s logickým ID, větve, trojcestný merge, „zkusit změny bokem“ | hotovo | [Historie: commity](fs-historie.md#commity-a-logické-id) |
+| Rozšířené atributy, expirace souborů | hotovo | [Historie: atributy](fs-historie.md#rozšířené-atributy-a-expirace) |
+| Vrstva pro git, indexy, vyhledávání | plán | [Verzování a git](#verzování-a-git) |
 
 ## Rychlý příklad
 
@@ -678,6 +685,12 @@ součty - poslední potvrzené změny se pak mohou ztratit.
 
 ## fsync a intent log
 
+> **Změna proti v3 (fáze 1):** nové záznamy 14 `Actor` (kdo provedl
+> následující operace), 15 `Trash`, 16 `Restore`, 17 `Purge`, 18
+> `SetXattr`; sloučené záznamy žurnálu `CONTENT` dostanou číslo na konci
+> dávky. **Proč:** žurnál změn musí po přehrání logu vyjít se stejnými
+> čísly i uživateli a koš i atributy musí přežít pád. ([Historie FS](fs-historie.md#na-disku))
+
 > **Změna proti v2:** čekající změny se mažou až po flush, bloky logu se alokují předem, chyba čtení logu není konec řetězu, nový záznam 7 (symlink) a generace u vytvoření. **Proč:** potvrzený `fsync` se nesmí ztratit ani nic nepotvrdit falešně. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
 Commit přepisuje mnoho bloků a dělá dva flush - pro každé uložení editoru
@@ -1042,6 +1055,13 @@ ovladač) a po restartu neplatí; trvalé handly zatím nejsou. Čekání na zá
 
 ## Snapshoty
 
+> **Změna proti v3 (fáze 1):** snapshot má metadata (položka `SNAPMETA`):
+> druh (ruční, automatický, commit, pohled, bokem), čas vzniku a pozici
+> žurnálu; `SnapshotInfo` je vrací. Dočasné pohledy (`VIEW`) ve výpisu
+> nejsou. **Proč:** automatické snapshoty se prořezávají podle času a jen
+> své, vracení operací hledá „poslední snapshot před operací“ podle
+> žurnálu. ([Historie FS](fs-historie.md))
+
 Snapshot je uložený kořen stromu v okamžiku vytvoření - jen pro čtení,
 vytvoření je okamžité (jeden commit), nezabírá místo, dokud se živá data
 nezmění.
@@ -1079,17 +1099,23 @@ přepsání neuvolní, ale zapíše do **deadlistu** (seznam `L` = bloky
 
 ## Verzování a git
 
-**Hotovo:** snapshoty dávají okamžité verze celého svazku a čtení
-libovolného souboru z libovolné verze. Kontrolní součty v ukazatelích tvoří
-Merkleův strom - stejný princip, na kterém stojí git.
+> **Změna proti v3 (fáze 1):** verzované commity s logickým ID, větve jako
+> klony, trojcestný merge, verze souborů a rozšířené atributy jsou hotové.
+> **Proč:** fáze 2 návrhu. ([Historie FS](fs-historie.md))
+
+**Hotovo:** snapshoty a datasety dávají okamžité verze, zapisovatelné klony
+a rozdíl verzí; fáze 2 přidala **commity** (autor, zpráva, rodiče, logické
+ID BLAKE3 nezávislé na rozmístění bloků), **větve**, **merge**, verze
+souborů, vracení operací a žurnál změn - viz [Historie FS](fs-historie.md).
+Kontrolní součty v ukazatelích tvoří Merkleův strom - stejný princip, na
+kterém stojí git.
 
 **Plán** (viz [architektura](architektura.md#obsahově-adresovaný-fs-a-nativní-verzování-návrh)):
 
-- zapisovatelné klony snapshotů (větve) a A/B systémové aktualizace,
+- A/B systémové aktualizace nad klony,
 - rozdíl dvou verzí bez procházení celého stromu (porovnání součtů podstromů),
-- s BLAKE3 obsahové adresování: deduplikace a mapování na objekty gitu
-  (blob/tree) - git repozitář bez duplikace dat v `.git`,
-- programový přístup k historii souboru a rozšířené atributy,
+- vrstva pro git (fáze 5): ID objektů gitu jako rozšířené atributy,
+  import a export repozitáře, push/pull po síti,
 - indexy pro vyhledávání (jméno, typ, čas, velikost).
 
 ## Hodnoty z disku a operace „vše, nebo nic“
@@ -1124,6 +1150,11 @@ rozpracovaného stromu před každou operací; přijde s transakcemi pro
 aplikace (fáze 5).
 
 ## Kontrola konzistence a scrub
+
+> **Změna proti v3 (fáze 1):** kontroluje i struktury historie: souvislou
+> řadu žurnálu a jeho stav, metadata snapshotů, koš (záznam ↔ položka
+> v koši), počet atributů, index expirace proti atributům, paměť logického
+> hashe. **Proč:** každá změna formátu musí jít ověřit. ([Historie FS](fs-historie.md#na-disku))
 
 > **Změna proti v2:** kontroluje uložený stav i při připojení jen pro čtení, pevná paměť (bitové mapy), omezený počet hlášení, kontrola druhů objektů a cílů odkazů. **Proč:** při nejisté obnově je potřeba zjistit stav bez zápisu a velký nebo hodně poškozený svazek nesmí kontrolu zahltit. ([všechny změny](fs-verze.md#přechod-v2---v3))
 
@@ -1345,6 +1376,11 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
   potvrdit s `vynutit`, nebo `REPLACE_ABORT`). `FsClient::save_if` to
   udělá najednou. Kdo měl původní soubor otevřený, čte dál původní obsah.
 
+Operace historie (žurnál a jeho sledování, pohled, koš, vracení operací,
+verze, nastavení datasetu, commity, větve, merge, „bokem“, atributy,
+expirace, vytvoření a smazání datasetu) mají čísla **54-86** - tabulka je
+v [Historii FS](fs-historie.md#protokol-operace-54-86).
+
 ⚠️ **Omezení:** handly platí do restartu služby; po pádu a přehrání intent
 logu může mít soubor jinou revizi (verze obsahu se do logu nepíše) - klient
 pak dostane `CONFLICT` (bezpečný směr). Data se zatím kopírují zprávou (32
@@ -1561,8 +1597,10 @@ Význam kódů popisuje [chyby.md](chyby.md). Kdy je vrací souborový systém:
 | `tests/errors.rs` | chyby zařízení: selhaný zápis dat neztratí data a jde zopakovat, přepsání nenechá díru, po selhaném flush nic dalšího nepotvrdí |
 | `tests/mount.rs` | výběr superbloku: nečitelný slot, přechodná chyba bez návratu, neznámý `incompat` a novější verze = odmítnutí, neznámý `ro_compat` = jen pro čtení bez zápisu, nesmyslné hodnoty = návrat se hlášením, vynulování novějších slotů, zařízení bez záruky trvanlivosti |
 | `tests/objects.rs` | formát v3: záznam objektu, jména do 1024 znaků, zákaz znaků směru textu, symbolické odkazy (i přes intent log), limit velikosti souboru a saturace souhrnů, generace objektu |
+| `tests/journal.rs`, `tests/trash.rs`, `tests/history.rs`, `tests/commits.rs` | historie (fáze 2) - viz [Historie FS](fs-historie.md#testy) |
 | `tests/perf.rs` | výkon a režie (spouští se ručně) |
 | init `tests/fs.rs` | 11 testů v systému přes fsd a skutečný ovladač virtio-blk, včetně souboru zapsaného na hostiteli a simulace výpadku |
+| init `tests/fs_hist.rs` | historie v systému přes fsd: žurnál a `JOURNAL_WATCH`, koš, commit, větev a merge, „bokem“, atributy, fsck |
 
 Počet náhodných případů: `PROPTEST_CASES=150000 cargo test -p fs --features std --release`
 (ověřeno bez chyby).

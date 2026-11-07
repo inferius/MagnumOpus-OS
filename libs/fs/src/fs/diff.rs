@@ -249,21 +249,13 @@ impl<D: BlockDevice> Fs<D> {
         let st = self.snapshot_stat_of(dataset, snapshot, path)?;
         match st.kind {
             Kind::File => {
+                // Pravo cist zdroj (a ze snapshotu je videt) overi tento krok.
+                self.enter_dataset(dataset)?;
+                let root = Child::Disk(self.find_snapshot(snapshot)?.1.root);
+                let src = self.snapshot_object(dataset, &root, path, crate::perm::rights::READ)?;
                 self.create(dest, Kind::File)?;
-                let mut off = 0u64;
-                while off < st.size {
-                    let n = ((st.size - off) as usize).min(256 * BLOCK_SIZE);
-                    let data = self.snapshot_read_of(dataset, snapshot, path, off, n)?;
-                    if data.is_empty() {
-                        break;
-                    }
-                    self.write(dest, off, &data)?;
-                    off += data.len() as u64;
-                }
-                // Ridky konec (dira): velikost jako v originalu.
-                if off < st.size {
-                    self.truncate(dest, st.size)?;
-                }
+                let dst = self.enter(dest)?;
+                self.copy_content(&root, src, dst)?;
                 Ok(st.size)
             }
             Kind::Symlink => {
@@ -287,6 +279,29 @@ impl<D: BlockDevice> Fs<D> {
             }
             Kind::Dataset => Err(Error::InvalidArgs),
         }
+    }
+
+    /// Obsah souboru `src` ze stromu `root` do souboru `dst` aktivniho
+    /// datasetu (prazdny, prave vytvoreny): data po 1 MiB, ridky konec jako
+    /// v originalu, cas zmeny obsahu zachovany. Spolecne pro obnovu ze
+    /// snapshotu a merge.
+    pub(super) fn copy_content(&mut self, root: &Child, src: u64, dst: u64) -> Result<()> {
+        let i = self.inode(root, src)?;
+        let mut off = 0u64;
+        while off < i.size {
+            let n = ((i.size - off) as usize).min(256 * BLOCK_SIZE);
+            let d = self.read_oid(root, src, off, n, false)?;
+            if d.is_empty() {
+                return Err(Error::Corrupted);
+            }
+            let inode = self.live_inode(dst)?;
+            self.write_oid(dst, inode, off, &d)?;
+            off += d.len() as u64;
+        }
+        if off < i.size {
+            self.truncate_oid(dst, i.size)?;
+        }
+        self.set_times_oid(dst, super::SetTimes { mtime: Some(i.mtime), btime: None, atime: None })
     }
 
     /// Cil odkazu ve snapshotu.

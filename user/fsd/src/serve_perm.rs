@@ -77,6 +77,7 @@ impl Service {
                     handles: alloc::vec![theirs.into_handle()],
                     new_session: Some(s),
                     session_ops: Vec::new(),
+                    watch: None,
                 });
             }
             op::GRANT => {

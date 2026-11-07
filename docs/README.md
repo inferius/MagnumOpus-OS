@@ -35,6 +35,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Souborový systém](cs/souborovy-system.md) | [File system](en/file-system.md) | formát, algoritmy, oprávnění, služba fsd, protokol / format, algorithms, permissions, fsd service, protocol |
+| [Historie a verze souborů](cs/fs-historie.md) | [File history](en/fs-history.md) | žurnál změn, koš, verze, commity, větve, merge / change journal, trash, versions, commits, branches, merge |
 | [Verze formátu](cs/fs-verze.md) | [Format versions](en/fs-versions.md) | co se mezi verzemi změnilo a proč / what changed between versions and why |
 | [Nástroj osfs](cs/osfs.md) | [osfs tool](en/osfs.md) | obraz FS, kontrola, připojení ve Windows / FS image, check, mounting on Windows |
 | [API pro Windows](cs/osfs-api.md) | [Windows API](en/osfs-api.md) | rozšířené API FS pro aplikace ve Windows / extended FS API for Windows applications |

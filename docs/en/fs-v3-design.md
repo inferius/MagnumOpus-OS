@@ -778,7 +778,7 @@ Order:
 | Phase | Contents |
 |---|---|
 | 1 - format | 16 KiB nodes, superblock/pointer/record v3, feature flags, datasets and the dataset tree (with case sensitivity), names and symlinks, review fixes, protocol v2 with handles and locks, permissions (capabilities, grants, visibility, profiles, no execution on data) |
-| 2 - versions | commits, branches, clones, diff, merge, change journal, automatic snapshots, trash, version history, undo, change watching, file expiry |
+| 2 - versions (**done**, [FS history](fs-history.md)) | commits, branches, clones, diff, merge, change journal, automatic snapshots, trash, version history, undo, change watching, file expiry |
 | 3 - data | compression, instant copies, deduplication, automatic holes, metadata twice and self-healing, background scrub, preallocation |
 | 4 - protection | encrypted vaults (key protectors, optional TPM), immutable snapshots, quotas also for applications, audit with a hash chain, file origin, ransomware detection and decoys, disk health, verified system |
 | 5 - other | indexes and tags, send/receive, transactions, ARC and prefetching, resize, git layer, memory-mapped files (with the kernel) |

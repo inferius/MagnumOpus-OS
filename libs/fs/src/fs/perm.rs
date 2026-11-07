@@ -206,7 +206,8 @@ impl<D: BlockDevice> Fs<D> {
         inode.acl = new as u32;
         inode.ctime = self.now;
         self.put_inode(oid, &inode)?;
-        self.zil.op(zil::Op::SetAcl { oid, acl: acl.cloned(), time: self.now });
+        self.jlog_attr(oid, crate::records::jattr::ACL)?;
+        self.zil_op(zil::Op::SetAcl { oid, acl: acl.cloned(), time: self.now });
         Ok(())
     }
 
@@ -227,7 +228,8 @@ impl<D: BlockDevice> Fs<D> {
         inode.owner = owner;
         inode.ctime = self.now;
         self.put_inode(oid, &inode)?;
-        self.zil.op(zil::Op::SetOwner { oid, owner, time: self.now });
+        self.jlog_attr(oid, crate::records::jattr::OWNER)?;
+        self.zil_op(zil::Op::SetOwner { oid, owner, time: self.now });
         Ok(())
     }
 

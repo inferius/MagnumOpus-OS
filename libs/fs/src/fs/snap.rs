@@ -25,6 +25,7 @@ use crate::layout::{
     item,
 };
 use crate::names::{fold_name, stored_name, validate_name};
+use crate::records::{SnapMeta, snapkind};
 use crate::node::Child;
 
 fn list_range(list: u64) -> (Key, Key) {
@@ -89,10 +90,23 @@ impl<D: BlockDevice> Fs<D> {
         validate_name(name)?;
         self.require(dataset, crate::perm::rights::MANAGE)?;
         self.enter_dataset(dataset)?;
+        Ok(self.snapshot_internal(name, snapkind::MANUAL)?.0)
+    }
+
+    /// Snapshot aktivniho datasetu daneho druhu (rucni, automaticky,
+    /// pohled, ...). Vraci cislo a ulozena metadata.
+    pub(super) fn snapshot_internal(&mut self, name: &str, kind: u8) -> Result<(u64, SnapMeta)> {
+        self.snapshot_with(name, SnapMeta { kind, ..SnapMeta::default() }, Vec::new())
+    }
+
+    /// Snapshot aktivniho datasetu s metadaty `meta` (cas a pozici
+    /// zurnalu doplni). Dva commity: prvni ulozi stav (koren snapshotu),
+    /// druhy zaznam snapshotu a polozky `extra` (napr. `HEAD` commitu).
+    pub(super) fn snapshot_with(&mut self, name: &str, mut meta: SnapMeta, extra: Vec<(Key, Vec<u8>)>) -> Result<(u64, SnapMeta)> {
         if self
-            .snapshots_active()?
+            .records_active()?
             .iter()
-            .any(|s| fold_name(&s.name) == fold_name(name))
+            .any(|(_, r)| !r.hidden() && fold_name(&r.name) == fold_name(name))
         {
             return Err(Error::AlreadyExists);
         }
@@ -112,9 +126,32 @@ impl<D: BlockDevice> Fs<D> {
         self.s.next_snapshot += 1;
         // Bloky narozene do teto generace odted drzi snapshot.
         self.s.snapshot_generation = self.s.sb.generation;
+        meta.time = self.now;
+        // Po commitu: posledni zaznam zurnalu, ktery koren obsahuje.
+        meta.journal_seq = self.journal_published()?;
         self.put(Key::new(META_OID, item::SNAPSHOT, id), record.encode())?;
+        self.put(Key::new(META_OID, item::SNAPMETA, id), meta.encode())?;
+        for (k, v) in extra {
+            self.put(k, v)?;
+        }
+        self.jappend(crate::records::JournalEntry {
+            op: crate::records::jop::SNAPSHOT,
+            aux: id,
+            name: record.name.clone(),
+            ..Default::default()
+        })?;
         self.commit()?;
-        Ok(id)
+        Ok((id, meta))
+    }
+
+    /// Metadata snapshotu `id` aktivniho datasetu (snapshot z doby pred
+    /// fazi 2 je nema: rucni, cas neznamy).
+    pub(super) fn snap_meta(&mut self, id: u64) -> Result<SnapMeta> {
+        let root = self.s.root;
+        match btree::get(&mut self.s, &root, &Key::new(META_OID, item::SNAPMETA, id))? {
+            Some(raw) => SnapMeta::decode(&raw),
+            None => Ok(SnapMeta::default()),
+        }
     }
 
     /// Snapshoty korenoveho datasetu.
@@ -129,18 +166,28 @@ impl<D: BlockDevice> Fs<D> {
         self.snapshots_active()
     }
 
+    /// Snapshoty aktivniho datasetu (bez skrytych a docasnych pohledu).
     pub(super) fn snapshots_active(&mut self) -> Result<Vec<SnapshotInfo>> {
-        Ok(self
-            .records_active()?
-            .into_iter()
-            .filter(|(_, r)| !r.hidden())
-            .map(|(id, r)| SnapshotInfo {
+        let mut out = Vec::new();
+        for (id, r) in self.records_active()? {
+            if r.hidden() {
+                continue;
+            }
+            let m = self.snap_meta(id)?;
+            if m.kind == snapkind::VIEW {
+                continue;
+            }
+            out.push(SnapshotInfo {
                 id,
                 name: r.name,
                 generation: r.generation,
                 clones: r.clones,
-            })
-            .collect())
+                kind: m.kind,
+                time: m.time,
+                journal_seq: m.journal_seq,
+            });
+        }
+        Ok(out)
     }
 
     pub(super) fn records_active(&mut self) -> Result<Vec<(u64, SnapshotRecord)>> {
@@ -231,6 +278,7 @@ impl<D: BlockDevice> Fs<D> {
             self.put_dead_item(next_list, &entries)?;
         }
         self.del(&Key::new(META_OID, item::SNAPSHOT, id))?;
+        self.del(&Key::new(META_OID, item::SNAPMETA, id))?;
         if next.is_none() {
             // Mazal se posledni snapshot: hranici vlastnictvi posunout zpet.
             self.s.snapshot_generation = prev_gen;

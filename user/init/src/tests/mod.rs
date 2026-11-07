@@ -6,6 +6,7 @@
 mod basic;
 mod drivers;
 mod fs;
+mod fs_hist;
 mod input;
 mod ipc;
 mod memory;
@@ -30,6 +31,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("souborovy system", fs::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
+    ("historie FS", fs_hist::TESTS),
     ("cas", time::TESTS),
     ("supervisor", supervisor::TESTS),
 ];
