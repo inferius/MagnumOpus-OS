@@ -17,6 +17,7 @@ members = [
     "libs/blockproto",
     "libs/inputproto",
     "libs/guiproto",
+    "libs/taskproto",
     "libs/gfx",
     "libs/font",
     "libs/vgpu",

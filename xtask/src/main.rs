@@ -246,6 +246,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "guiproto",
             "--package",
+            "taskproto",
+            "--package",
             "gfx",
             "--package",
             "font",
