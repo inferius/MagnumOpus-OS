@@ -15,7 +15,8 @@ use alloc::vec::Vec;
 
 /// Druh prvku.
 pub enum Kind<M> {
-    Label { text: String, heading: bool },
+    /// `warn` = vyrazne oznaceni (napr. uloha agenta AI).
+    Label { text: String, heading: bool, warn: bool },
     Button { text: String, on_click: Option<M> },
     TextInput { value: String, placeholder: String, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
@@ -51,7 +52,7 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
 }
 
 pub fn label<M>(text: &str) -> Node<M> {
-    node(Kind::Label { text: text.into(), heading: false })
+    node(Kind::Label { text: text.into(), heading: false, warn: false })
 }
 
 pub fn button<M>(text: &str) -> Node<M> {
@@ -119,6 +120,14 @@ impl<M> Node<M> {
 
     pub fn disabled(mut self, d: bool) -> Self {
         self.disabled = d;
+        self
+    }
+
+    /// Vyrazne oznaceny stitek (vystraha, uloha agenta).
+    pub fn warn(mut self) -> Self {
+        if let Kind::Label { warn, .. } = &mut self.kind {
+            *warn = true;
+        }
         self
     }
 

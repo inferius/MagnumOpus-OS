@@ -40,6 +40,9 @@ pub mod color {
     pub const CONTENT: u32 = rgb(0x18, 0x1C, 0x22);
 }
 
+/// Id aplikace spravce uloh (klik na ikonu uloh ji da do popredi).
+pub const TASKS_APP: &str = "org.magnumopus.tasks";
+
 /// Vyska panelu oken u spodniho okraje.
 pub const PANEL_H: u32 = 30;
 /// Velikost pisma systemu.
@@ -71,7 +74,25 @@ const CURSOR: [&str; 19] = [
 pub const CURSOR_W: u32 = 12;
 pub const CURSOR_H: u32 = 19;
 
+/// Text ikony uloh.
+pub fn tasks_label(run: u32, agent: u32) -> String {
+    if agent > 0 { format!("Úlohy: {run} (agent {agent})") } else { format!("Úlohy: {run}") }
+}
+
 impl Comp {
+    /// Obdelnik ikony uloh v panelu (`None` = nic nebezi). Vpravo, vlevo od
+    /// upozorneni na umely vstup.
+    pub fn tasks_icon(&self) -> Option<Rect> {
+        let (run, agent) = self.tasks;
+        if run == 0 {
+            return None;
+        }
+        let p = self.panel_rect();
+        let w = self.text.width(&tasks_label(run, agent), SMALL_PX) + 16;
+        let reserve = if self.input.injecting > 0 { self.text.width("Vstup ovládá automat", SMALL_PX) as i32 + 40 } else { 8 };
+        Some(Rect::new(p.right() as i32 - reserve - w as i32, p.y + 4, w, PANEL_H - 8))
+    }
+
     pub(crate) fn panel_rect(&self) -> Rect {
         Rect::new(0, (self.h - PANEL_H) as i32, self.w, PANEL_H)
     }
@@ -142,6 +163,8 @@ impl Comp {
                 windows: &self.windows,
                 focus: self.focus,
                 injecting: self.input.injecting,
+                tasks: self.tasks,
+                tasks_rect: self.tasks_icon(),
             };
             draw_panel(canvas, &mut self.text, &panel, &panel_items);
             if dialog_active {
@@ -340,6 +363,8 @@ struct Panel<'a> {
     windows: &'a BTreeMap<u32, Window>,
     focus: Option<u32>,
     injecting: u32,
+    tasks: (u32, u32),
+    tasks_rect: Option<Rect>,
 }
 
 fn draw_panel(c: &mut Canvas<'_>, text: &mut Text, comp: &Panel<'_>, items: &[(u32, Rect)]) {
@@ -357,6 +382,15 @@ fn draw_panel(c: &mut Canvas<'_>, text: &mut Text, comp: &Panel<'_>, items: &[(u
         c.set_clip(old.intersect(&Rect::new(r.x + 6, r.y, r.w.saturating_sub(12), r.h)));
         text.draw(c, r.x + 10, r.y + (r.h as i32 - lh as i32) / 2 + base, &w.title, SMALL_PX, color::TITLE_TEXT);
         c.set_clip(old);
+    }
+    // Ikona "bezi N uloh" (oranzova, kdyz bezi uloha agenta AI).
+    if let Some(r) = comp.tasks_rect {
+        let (run, agent) = comp.tasks;
+        let s = tasks_label(run, agent);
+        let warn = agent > 0;
+        c.rounded(r, 5, if warn { color::WARN } else { color::PANEL_ITEM });
+        let fg = if warn { rgb(0x20, 0x16, 0x00) } else { color::TITLE_TEXT };
+        text.draw(c, r.x + 8, p.y + (PANEL_H as i32 - lh as i32) / 2 + base, &s, SMALL_PX, fg);
     }
     if comp.injecting > 0 {
         let s = "Vstup ovládá automat";

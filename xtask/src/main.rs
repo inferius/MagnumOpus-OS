@@ -248,6 +248,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "taskproto",
             "--package",
+            "taskview",
+            "--package",
             "gfx",
             "--package",
             "font",
@@ -346,6 +348,7 @@ const USER_PROGRAMS: &[&str] = &[
     "compd",
     "gui-demo",
     "gui-term",
+    "gui-tasks",
     "netd",
     "fwd",
     "netprobe",
@@ -360,6 +363,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("netprobe.manifest.toml", "user/netprobe/netprobe.manifest.toml"),
     ("gui-demo.manifest.toml", "user/gui-demo/gui-demo.manifest.toml"),
     ("gui-term.manifest.toml", "user/gui-term/gui-term.manifest.toml"),
+    ("gui-tasks.manifest.toml", "user/gui-tasks/gui-tasks.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

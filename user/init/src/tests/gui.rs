@@ -31,6 +31,7 @@ pub const TESTS: &[Test] = &[
     ("compd: systemovy dialog prijme jen fyzicky vstup (QMP)", dialog_physical_only),
     ("compd: bezpecna obrazovka po Ctrl+Alt+Del (QMP)", secure_screen),
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
+    ("compd: spravce uloh a ikona uloh v panelu", task_manager),
 ];
 
 /// Znacky pro xtask (musi sedet s `xtask/src/qmp.rs`, modul `gui`).
@@ -312,6 +313,35 @@ fn terminal_window(startup: &Startup) -> TestResult {
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
         check_eq!(pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?, BADGE, "odznak nad vlastnim titulkem");
+        Ok(())
+    })
+}
+
+fn task_manager(startup: &Startup) -> TestResult {
+    with(|s| {
+        // Ikona "bezi N uloh" v panelu (do pripojeni k taskd ji nastavuje init).
+        s.gui.command(b"tasks 4 1", Vec::new()).map_err(|e| fail("tasks", e))?;
+        check!(s.gui.command(b"tasks x", Vec::new()).is_err(), "neplatny prikaz tasks");
+        s.gui.launch(startup, "gui-tasks").map_err(|e| fail("spusteni gui-tasks", e))?;
+        let w = wait_window(&s.inspect, "org.magnumopus.tasks")?;
+        let t = wait_tree(&s.inspect, w.id, "seznam uloh", |t| t.iter().any(|n| n.role == Role::ListItem))?;
+        // Uloha agenta je vyrazne oznacena a nahore.
+        let first = t.iter().find(|n| n.role == Role::ListItem).unwrap();
+        check!(first.name.starts_with("[AGENT AI]"), "uloha agenta nahore a oznacena");
+        check!(t.iter().any(|n| n.role == Role::Label && n.name.starts_with("Agent AI:")), "stitek agenta v zahlavi");
+        // Systemova uloha bez opravneni: Zrusit neaktivni.
+        let scrub = t.iter().find(|n| n.role == Role::ListItem && n.name.contains("Scrub")).ok_or("uloha Scrub chybi")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: scrub.id, action: actions::ACTIVATE, value: String::new() })?;
+        let t = wait_tree(&s.inspect, w.id, "detail systemove ulohy", |t| t.iter().any(|n| n.role == Role::Label && n.name.contains("chybí oprávnění")))?;
+        let cancel = node(&t, Role::Button, "Zrušit")?;
+        check!(cancel.state & guiproto::a11y::state::DISABLED != 0, "Zrusit bez prava neaktivni");
+        // Uloha agenta: pozastavit pres pristupnost.
+        let agent = t.iter().find(|n| n.role == Role::ListItem && n.name.starts_with("[AGENT AI]")).unwrap();
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: agent.id, action: actions::ACTIVATE, value: String::new() })?;
+        let t = wait_tree(&s.inspect, w.id, "detail ulohy agenta", |t| has(t, Role::Label, "Spustil agent AI (asistent)"))?;
+        let pause = node(&t, Role::Button, "Pozastavit")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: pause.id, action: actions::ACTIVATE, value: String::new() })?;
+        wait_tree(&s.inspect, w.id, "pozastaveni ulohy agenta", |t| t.iter().any(|n| n.role == Role::Label && n.name == "Stav: pozastaveno 15 %"))?;
         Ok(())
     })
 }
