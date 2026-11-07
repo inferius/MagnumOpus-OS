@@ -33,6 +33,9 @@ impl MapFlags {
     /// cache, na nekoherentni bez cache (aarch64: Normal Non-cacheable,
     /// ne Device - jde cist i zapisovat nezarovnane).
     pub const DMA: Self = Self(1 << 5);
+    /// Slucovani zapisu, cteni bez cache (x86_64: PAT WC, aarch64: Normal
+    /// Non-cacheable). Pro fyzicke objekty s typem cache `WRITE_COMBINING`.
+    pub const WRITE_COMBINING: Self = Self(1 << 6);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

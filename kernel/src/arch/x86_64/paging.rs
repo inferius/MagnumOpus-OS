@@ -31,8 +31,15 @@ const fn level(size: PageSize) -> u32 {
     }
 }
 
+/// MSR IA32_PAT a jeho hodnota: vychozi tabulka (WB, WT, UC-, UC, opakovane)
+/// se zmenou polozky 1 z WT na WC (0x01). PWT bez PCD tak znamena WC;
+/// WT jadro nepouziva. Stejna volba jako Linux.
+const MSR_PAT: u32 = 0x277;
+const PAT_VALUE: u64 = 0x0007_0406_0007_0106;
+
 /// Zapne funkce CPU, na kterych strankovani jadra stavi: ochranu zapisu
-/// i pro ring 0 (CR0.WP), globalni stranky (CR4.PGE) a NX (EFER.NXE).
+/// i pro ring 0 (CR0.WP), globalni stranky (CR4.PGE), NX (EFER.NXE) a PAT
+/// s polozkou WC.
 ///
 /// # Safety
 ///
@@ -44,6 +51,9 @@ pub unsafe fn init_cpu() {
     // jsou platne i se zapnutymi funkcemi.
     unsafe {
         cpu::write_cr0(cpu::read_cr0() | cpu::CR0_WP);
+        // PAT ma kazde x86_64 CPU. Zmenena je jen polozka 1 (WT -> WC),
+        // kterou dosud nic nepouzivalo (PWT bez PCD jadro nenastavovalo).
+        cpu::wrmsr(MSR_PAT, PAT_VALUE);
         cpu::write_cr4(cpu::read_cr4() | cpu::CR4_PGE);
         if features.nx {
             cpu::wrmsr(cpu::MSR_EFER, cpu::rdmsr(cpu::MSR_EFER) | cpu::EFER_NXE);
@@ -83,7 +93,11 @@ fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
         bits |= GLOBAL;
     }
     if flags.contains(MapFlags::UNCACHED) {
+        // PAT index 3 (PCD|PWT) = UC.
         bits |= CACHE_DISABLE | WRITE_THROUGH;
+    } else if flags.contains(MapFlags::WRITE_COMBINING) {
+        // PAT index 1 (PWT) = WC, viz `PAT_VALUE`.
+        bits |= WRITE_THROUGH;
     }
     if !flags.contains(MapFlags::EXEC) && NX_ENABLED.load(Ordering::Relaxed) {
         bits |= NO_EXECUTE;

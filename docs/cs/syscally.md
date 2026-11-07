@@ -487,13 +487,27 @@ musí ovladač zajistit bariérami (`libos::barrier`). Chyby: `INVALID_ARGS`
 
 ### `VMO_CREATE_PHYSICAL`
 
-`(resource, phys, size) -> handle`. Okno na registry zařízení (MMIO).
-Rozsah nesmí ležet v RAM ani paměti firmwaru (jinak `ACCESS_DENIED`).
-Mapuje se bez cache; přes `VMO_READ`/`VMO_WRITE` ho číst nejde
-(`NOT_SUPPORTED`, čtení registrů má vedlejší efekty) a jako buffer
-syscallu ho použít nejde (`BAD_ADDRESS`). Omezený prostředek
-(`RESOURCE_CREATE`) smí jen své rozsahy. Chyby: `INVALID_ARGS`
-(nezarovnaná adresa), `ACCESS_DENIED`.
+`(resource, phys, size, cache) -> handle`. Okno na fyzický rozsah mimo RAM
+(registry zařízení, BAR). Rozsah nesmí ležet v RAM ani paměti firmwaru
+(jinak `ACCESS_DENIED`). `cache` (`abi::vm::cache`) určí typ cache všech
+mapování objektu: `UNCACHED` (0, registry), `WRITE_COMBINING` (1, x86_64
+PAT WC, aarch64 Normal Non-cacheable) nebo `CACHED` (2, paměť hostitele
+namapovaná zařízením, např. sdílená paměť virtio-gpu). Přes
+`VMO_READ`/`VMO_WRITE` ho číst nejde (`NOT_SUPPORTED`, čtení registrů má
+vedlejší efekty) a jako buffer syscallu ho použít nejde (`BAD_ADDRESS`).
+Omezený prostředek (`RESOURCE_CREATE`) smí jen své rozsahy. Držitel
+prostředku ho může odvolat (`VMO_REVOKE`). Chyby: `INVALID_ARGS`
+(nezarovnaná adresa, neznámý typ cache), `ACCESS_DENIED`.
+
+### `VMO_REVOKE`
+
+`(resource, vmo)`. Odvolá fyzický objekt paměti: zruší jeho mapování ve
+všech procesech (i v těch, kterým byl handle předán) a další `VM_MAP`
+skončí `ACCESS_DENIED`. Přístup přes staré mapování = výjimka stránky.
+Ovladač tak může klientovi půjčit okno do paměti zařízení a bezpečně ho
+vzít zpět (render uzel virtio-gpu po zničení blobu). Prostředek musí
+rozsah objektu povolovat. Chyby: `NOT_SUPPORTED` (není fyzický objekt),
+`ACCESS_DENIED`.
 
 ### `VMO_PHYS_ADDR`
 

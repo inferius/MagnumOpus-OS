@@ -334,12 +334,16 @@ pub fn vmo_create_contiguous(resource: u32, size: u64) -> Result<u32> {
     .map(|v| v as u32)
 }
 
-pub fn vmo_create_physical(resource: u32, phys: u64, size: u64) -> Result<u32> {
+pub fn vmo_create_physical(resource: u32, phys: u64, size: u64, cache: u64) -> Result<u32> {
     call(
         nr::VMO_CREATE_PHYSICAL,
-        [resource as u64, phys, size, 0, 0, 0],
+        [resource as u64, phys, size, cache, 0, 0],
     )
     .map(|v| v as u32)
+}
+
+pub fn vmo_revoke(resource: u32, vmo: u32) -> Result<()> {
+    call(nr::VMO_REVOKE, [resource as u64, vmo as u64, 0, 0, 0, 0]).map(|_| ())
 }
 
 pub fn vmo_phys_addr(resource: u32, vmo: u32, offset: u64) -> Result<u64> {

@@ -12,10 +12,9 @@
 //! s plotem na ose 0 (osa CPU: plot se splni az po zpracovani proudu)
 //! a po odpovedi ovladace precte odpovedi ze sdilene pameti.
 //!
-//! RIZIKO: sdilena pamet je mapovana bez cache (fyzicka VMO). Na x86_64
-//! s KVM je to v praxi pamet s cache (KVM typ v EPT nevynucuje), na
-//! aarch64 jde o pamet zarizeni: nezarovnane pristupy by spadly a cteni je
-//! pomale. Az bude jadro umet mapovat podle `map_info` (cached/WC), zmenit.
+//! Sdilenou pamet ovladac posila jako fyzickou VMO s typem cache podle
+//! `map_info` zarizeni (QEMU hlasi `CACHED`); po zniceni blobu nebo konci
+//! spojeni ji odvola a pristup pres stare mapovani skonci vyjimkou.
 
 use alloc::vec::Vec;
 use core::time::Duration;

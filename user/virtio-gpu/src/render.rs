@@ -6,11 +6,9 @@
 //! `SHM_ID_HOST_VISIBLE`) a klientovi posle fyzickou VMO tohoto okna.
 //! Zavreni kanalu znici bloby i kontext.
 //!
-//! RIZIKO (bezpecnost): VMO okna BARu nejde odvolat. Klient si ji muze
-//! nechat i po `DESTROY_BLOB` nebo zavreni kanalu; az ovladac stejny
-//! rozsah BARu da jinemu klientovi, puvodni klient uvidi jeho data. Dokud
-//! jadro neumi odvolatelne mapovani, smi render uzel dostat jen duveryhodny
-//! proces (init, kompozitor a jim povolene aplikace).
+//! VMO okna dostane typ cache podle `map_info` zarizeni. Pri `DESTROY_BLOB`
+//! a konci klienta ji ovladac odvola (`VMO_REVOKE`): mapovani zmizi i
+//! v procesu klienta, takze rozsah BARu muze bezpecne dostat jiny klient.
 //!
 //! RIZIKO (odezva): ovladac ceka na odpoved zarizeni synchronne, u
 //! `SUBMIT` s plotem az do zpracovani proudu rendererem (nejvys 30 s).
@@ -21,7 +19,7 @@
 use alloc::vec::Vec;
 
 use gpuproto::{Capset, Reply, Request, flags, mem};
-use libos::{Channel, Error, Handle, Result};
+use libos::{Channel, Error, Handle, Result, Vmo};
 use vgpu::blob;
 
 use crate::device::Gpu;
@@ -31,8 +29,10 @@ const MAX_BLOB: u64 = 256 << 20;
 
 struct Blob {
     resource: u32,
-    /// Offset ve sdilene pameti (namapovany blob).
+    /// Offset a velikost ve sdilene pameti (namapovany blob).
     shm: Option<(u64, u64)>,
+    /// Vlastni handle VMO okna (pro odvolani).
+    vmo: Option<Vmo>,
 }
 
 pub struct Client {
@@ -136,17 +136,20 @@ impl Client {
             }
             return Err(e);
         }
-        let mut b = Blob { resource, shm: None };
+        let mut b = Blob { resource, shm: None, vmo: None };
         let mut handles = Vec::new();
         let mut map_info = 0;
         if let Some(off) = offset {
             let mapped = gpu.map_blob(ctx, resource, off).and_then(|mi| {
                 map_info = mi;
                 b.shm = Some((off, size));
-                gpu.shm_vmo(off, size)
+                gpu.shm_vmo(off, size, mi)
             });
-            match mapped {
-                Ok(vmo) => handles.push(vmo.into_handle()),
+            match mapped.and_then(|vmo| vmo.handle().duplicate(None).map(|h| (vmo, h))) {
+                Ok((vmo, h)) => {
+                    handles.push(h);
+                    b.vmo = Some(vmo);
+                }
                 Err(e) => {
                     if b.shm.is_none()
                         && let Some(a) = gpu.shm_alloc.as_mut()
@@ -173,9 +176,13 @@ impl Client {
 }
 
 fn destroy_blob(gpu: &mut Gpu, ctx: u32, b: &Blob) {
+    // Nejdriv klient ztrati pristup, pak se blob odmapuje v zarizeni a rozsah
+    // se vrati (muze ho dostat jiny klient).
+    // Kdyz odvolani selze, rozsah se uz nikomu neda (karantena).
+    let revoked = b.vmo.as_ref().is_none_or(|v| gpu.revoke(v).is_ok());
     if let Some((off, size)) = b.shm {
         let _ = gpu.simple_cmd(&blob::resource_unmap_blob(ctx, b.resource));
-        if let Some(a) = gpu.shm_alloc.as_mut() {
+        if revoked && let Some(a) = gpu.shm_alloc.as_mut() {
             a.release(off, size);
         }
     }

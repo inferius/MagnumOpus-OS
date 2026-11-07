@@ -274,12 +274,24 @@ impl Gpu {
     }
 
     /// Fyzicka VMO rozsahu sdilene pameti (pro klienta).
-    pub fn shm_vmo(&self, offset: u64, size: u64) -> Result<Vmo> {
+    /// Typ cache podle `map_info` zarizeni (`MAP_CACHE_*`); `NONE` a
+    /// nezname = bez cache.
+    pub fn shm_vmo(&self, offset: u64, size: u64, map_info: u32) -> Result<Vmo> {
         let shm = self.shm.ok_or(Error::NotSupported)?;
         if offset.checked_add(size).is_none_or(|e| e > shm.len) {
             return Err(Error::InvalidArgs);
         }
-        self.resource.device_memory(shm.phys + offset, size)
+        let cache = match map_info & vgpu::blob::MAP_CACHE_MASK {
+            vgpu::blob::MAP_CACHE_CACHED => libos::abi::vm::cache::CACHED,
+            vgpu::blob::MAP_CACHE_WC => libos::abi::vm::cache::WRITE_COMBINING,
+            _ => libos::abi::vm::cache::UNCACHED,
+        };
+        self.resource.device_memory_cached(shm.phys + offset, size, cache)
+    }
+
+    /// Odvola VMO okna sdilene pameti (mapovani zmizi i u klienta).
+    pub fn revoke(&self, vmo: &Vmo) -> Result<()> {
+        self.resource.revoke(vmo)
     }
 
     /// `SUBMIT_3D` proudu `data` v kontextu `ctx`; s `fence` odpoved az po

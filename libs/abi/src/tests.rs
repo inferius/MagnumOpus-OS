@@ -108,6 +108,7 @@ fn every_syscall_is_documented() {
         "JOB_CREATE",
         "JOB_SET_LIMIT",
         "JOB_INFO",
+        "VMO_REVOKE",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
