@@ -287,6 +287,13 @@ impl Interp {
         if c.no_undo {
             host.note("varovani: FS nema pohledy, zmeny nepujde vratit");
         }
+        if !c.conflicts_complete {
+            return Err(ShError::new(
+                code::CONFLICT,
+                alloc::format!("vic nez {} zmen se neprevzalo (soubory se mezitim zmenily jinak)", c.conflicts.len()),
+            )
+            .hint("ostatni zmeny jsou zapsane, ale tento prikaz nejde vratit (undo); zkontrolujte soubory"));
+        }
         if !c.conflicts.is_empty() {
             let list = c.conflicts.join(", ");
             return Err(ShError::new(
@@ -296,6 +303,16 @@ impl Interp {
             .hint("ostatni zmeny jsou zapsane; prikaz zopakujte nad aktualnim stavem"));
         }
         Ok(c.diff)
+    }
+
+    /// Shell je volny: zahodit klony, ktere cekaji (uvolneni bloku trva).
+    pub fn flush(&mut self, host: &mut dyn Host) {
+        self.draft.flush(host.fs());
+    }
+
+    /// Ceka neco na volnou chvili (klony k zahozeni)?
+    pub fn has_flush(&self) -> bool {
+        self.draft.has_trash()
     }
 
     /// Spusti skript ze souboru (s hlavickou `lang` a manifestem `needs`).

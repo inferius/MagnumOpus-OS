@@ -453,16 +453,16 @@ identity relace. Čas na drátě = sekundy i64 + nanosekundy u32.
 | 72 | `MERGE` | cíl, zdroj | zpráva o sloučení |
 | 73 | `MERGE_ABORT` | cíl | - |
 | 74 | `ASIDE_BEGIN` | dataset, cesta klonu | dataset klonu u64 |
-| 75 | `ASIDE_APPLY` | klon, vše u8, počet + cesty | zpráva o sloučení |
+| 75 | `ASIDE_APPLY` | klon, vše u8, počet + cesty | zpráva o sloučení; za konflikty celkový počet konfliktů u32 (seznam může být zkrácený na 1024) |
 | 76 | `ASIDE_DISCARD` | klon | - |
-| 77 | `ASIDE_CHANGES` | klon | počet + (druh u8, cesta, stará cesta, oid, složka u8) |
+| 77 | `ASIDE_CHANGES` | klon, [přeskočit u32] | stránka: celkem u32, počet u32 + (druh u8, cesta, stará cesta, oid, složka u8) |
 | 78-81 | `XATTR_GET` / `SET` / `REMOVE` / `LIST` | cesta, jméno [, hodnota = zbytek zprávy] | hodnota / - / - / jména |
 | 82 / 83 | `SET_EXPIRES` / `EXPIRES` | cesta [, má u8, čas] | má u8, čas |
 | 84 | `HEAD` | dataset | má u8 + commit |
 | 85 | `DATASET_CREATE` | cesta | číslo datasetu u64 (nová složka s vlastní historií; právo `CREATE` v rodiči) |
 | 86 | `DATASET_DELETE` | cesta | - (i se snapshoty; `MANAGE` + `DELETE`; ne s vnořenými datasety a klony) |
 | 87 | `LIST_STAT_PAGE` | cesta, kurzor, nejvýš u32 | výpis s metadaty, popis v [protokolu fsproto](souborovy-system.md#protokol-fsproto) (modul `fsproto::op`) |
-| 88 | `DIFF` | dataset, od snapshot, do u8 (0 = živá verze, 1 = následuje jméno snapshotu) | počet + `Change` jako `ASIDE_CHANGES`; `MANAGE` ke kořeni datasetu; `BUFFER_TOO_SMALL`, když se rozdíl nevejde |
+| 88 | `DIFF` | dataset, od snapshot, do u8 (0 = živá verze, 1 = následuje jméno snapshotu), [přeskočit u32] | stránka jako `ASIDE_CHANGES`; `MANAGE` ke kořeni datasetu |
 | 89 | `DATASET_OF` | cesta | cesta kořene datasetu, ve kterém cesta leží (`/` = kořenový); práva jako `STAT` |
 | 90 | `SNAP_STAT_OF` | dataset, snapshot, cesta uvnitř datasetu | `Stat` |
 | 91 | `SNAP_LIST_OF` | dataset, snapshot, cesta uvnitř datasetu, kurzor, nejvýš u32 | jako `LIST_PAGE` |
@@ -486,9 +486,16 @@ náhled změn, čtení z pohledu):
   a změněno.
 - **`DIFF`** porovná snapshot `od` se snapshotem `do`, nebo se živou verzí
   (i neuložené změny). Snapshot může být i dočasný snapshot pohledu
-  (`VIEW`). Rozdíl se počítá celý: když má víc než 4096 položek nebo se
-  nevejde do 60 KiB, vrátí `BUFFER_TOO_SMALL` (nestránkuje se - stránkování
-  by pro každou stránku počítalo celý rozdíl znovu).
+  (`VIEW`).
+- **Stránky změn** (`DIFF`, `ASIDE_CHANGES`): odpověď nese celkový počet
+  změn a jednu stránku (nejvýš 4096 položek a 60 KiB). Klient pošle stejný
+  požadavek s `přeskočit` = počet už přijatých, dokud nemá všechny
+  (`FsClient::diff`, `aside_changes` to dělají samy). Seznam se nikdy
+  tiše nezkrátí. Každá stránka rozdíl spočítá znovu; cena je úměrná
+  změnám, ne velikosti stromu, takže to stojí málo.
+- **Konflikty v `ASIDE_APPLY`/`MERGE`**: seznam se do odpovědi vejde
+  zkrácený (nejvýš 1024), ale celkový počet jde vždy. Klient tak pozná,
+  že nezná všechny konflikty (shell pak převzetí nedovolí vrátit).
 - **`DATASET_OF`**: služba projde předky cesty od kořene (`STAT` každého)
   a vrátí prvního se stejným datasetem. Cesta, kterou relace nevidí,
   i kořen datasetu mimo připojené cesty relace = `NOT_FOUND` (jako `STAT`).

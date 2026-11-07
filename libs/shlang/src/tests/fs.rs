@@ -92,6 +92,7 @@ fn preview_runs_external_programs_in_a_clone() {
     assert_eq!(h.execs.len(), 1);
     assert!(!h.execs[0].2.aside.is_empty(), "program dostal strom z klonu");
     assert!(!h.fs.exists("/home/tool.out"));
+    it.flush(&mut h);
     assert_eq!(h.fs.asides_open(), 0, "klony se uklidily");
     // Potvrzeni: zmena programu se prevezme a jde vratit.
     h.answer = true;
@@ -101,6 +102,7 @@ fn preview_runs_external_programs_in_a_clone() {
     assert_eq!(o.diff.len(), 1);
     it.run_line(&mut h, "undo").result.unwrap();
     assert!(!h.fs.exists("/home/tool.out"));
+    it.flush(&mut h);
     assert_eq!(h.fs.asides_open(), 0);
 }
 

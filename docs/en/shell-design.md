@@ -603,9 +603,25 @@ undo
   dataset.
 - A view also captures changes of other sessions in the same directories
   while the program runs. `undo` would revert them too.
-- A `DIFF` larger than one message ends with `BUFFER_TOO_SMALL`. Undo of
-  the program then syncs the whole dataset with the view (slower, but
-  correct).
+- When there are more conflicts than the file system lists (over 1024),
+  the line ends with `SH_CONFLICT` and the apply cannot be undone (the
+  shell does not know for sure what was applied).
+
+**Safeguards:**
+
+- `undo` never touches a nested dataset: a view sees only its own
+  dataset, syncing skips nested datasets (even when syncing a whole
+  directory).
+- After a program the shell first commits the changes in the file system
+  (`COMMIT`) and only then asks the journal - the journal shows only
+  committed entries.
+- Reads in a line with a clone do not ask the file system for the
+  dataset: they take the clone above the path and repeat exactly only at
+  the boundary of a nested dataset (`NOT_SUPPORTED`).
+- Discarding a clone (freeing blocks) is deferred until the shell is idle;
+  the result of the command is in the terminal right away.
+- A program in `preview` also gets clones of the nested datasets of home
+  and the working directory.
 
 ## Terminal and session service
 

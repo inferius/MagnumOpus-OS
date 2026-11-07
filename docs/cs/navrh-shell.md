@@ -577,8 +577,21 @@ undo
   složky. Změnu v jiném vnořeném datasetu nevrátí.
 - Pohled zachytí i změny jiných relací ve stejných složkách během běhu
   programu. `undo` by je vrátilo také.
-- `DIFF` větší než jedna zpráva skončí `BUFFER_TOO_SMALL`. Undo programu
-  pak srovná s pohledem celý dataset (pomaleji, ale správně).
+- Když je konfliktů víc, než FS vypíše (přes 1024), řádek skončí
+  `SH_CONFLICT` a převzetí nejde vrátit (shell neví jistě, co se převzalo).
+
+**Pojistky:**
+
+- `undo` se nikdy nedotkne vnořeného datasetu: pohled vidí jen svůj
+  dataset, srovnání vnořené datasety přeskočí (i při srovnání celé složky).
+- Po programu shell nejdřív potvrdí změny ve FS (`COMMIT`) a teprve pak se
+  ptá žurnálu - žurnál ukazuje jen potvrzené záznamy.
+- Čtení v řádku s klonem se FS na dataset neptá: vezme klon nad cestou
+  a jen u hranice vnořeného datasetu (`NOT_SUPPORTED`) to zopakuje přesně.
+- Zahození klonu (uvolnění bloků) se odkládá, až je shell volný; výsledek
+  příkazu je v terminálu hned.
+- Program v `preview` dostane klony i vnořených datasetů domova
+  a pracovní složky.
 
 ## Terminál a služba relací
 

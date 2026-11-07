@@ -177,11 +177,16 @@ fn preview(it: &mut Interp, host: &mut dyn Host, a: &Args) -> R<Value> {
             ShError::new(code::REJECTED, "zmeny nebyly prevzaty (nic se nezmenilo)").at(a.span),
         ));
     }
-    let conflicts = it.draft.apply_top(host.fs()).map_err(|e| Flow::Err(ShError::sys(e, "zmeny nejde prevzit")))?;
-    if !conflicts.is_empty() {
+    let applied = it.draft.apply_top(host.fs()).map_err(|e| Flow::Err(ShError::sys(e, "zmeny nejde prevzit")))?;
+    if !applied.conflicts.is_empty() || !applied.complete {
+        let more = if applied.complete { "" } else { " a dalsi" };
         return Err(Flow::Err(ShError::new(
             code::CONFLICT,
-            alloc::format!("{} zmen nahledu se neprevzalo: {}", conflicts.len(), conflicts.join(", ")),
+            alloc::format!(
+                "{} zmen nahledu se neprevzalo: {}{more}",
+                applied.conflicts.len(),
+                applied.conflicts.join(", ")
+            ),
         )));
     }
     it.confirmed = true;

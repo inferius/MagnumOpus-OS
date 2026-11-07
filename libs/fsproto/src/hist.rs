@@ -436,6 +436,9 @@ pub struct MergeReport {
     pub applied: Vec<String>,
     pub conflicts: Vec<MergeConflict>,
     pub commit: Option<CommitInfo>,
+    /// Kolik konfliktu bylo celkem (u klienta; `conflicts` muze byt zkraceny
+    /// na `MAX_ITEMS / 4`). Pri kodovani se bere `conflicts.len()`.
+    pub conflicts_total: usize,
 }
 
 impl MergeReport {
@@ -451,6 +454,8 @@ impl MergeReport {
         for c in &self.conflicts[..conflicts] {
             w.str(&c.path).u8(c.kind).str(&c.resolved_as);
         }
+        // Celkovy pocet: klient pozna, ze seznam je zkraceny.
+        w.u32(self.conflicts.len().min(u32::MAX as usize) as u32);
         match &self.commit {
             Some(c) => {
                 w.u8(1);
@@ -472,14 +477,15 @@ impl MergeReport {
         if n > MAX_ITEMS {
             return Err(Error::InvalidArgs);
         }
-        let conflicts = (0..n)
+        let conflicts: Vec<MergeConflict> = (0..n)
             .map(|_| Ok(MergeConflict { path: r.str()?, kind: r.u8()?, resolved_as: r.str()? }))
             .collect::<Result<_>>()?;
+        let conflicts_total = (r.u32()? as usize).max(conflicts.len());
         let commit = match r.u8()? {
             0 => None,
             _ => Some(CommitInfo::get(r)?),
         };
-        Ok(Self { applied, conflicts, commit })
+        Ok(Self { applied, conflicts, commit, conflicts_total })
     }
 }
 
@@ -527,7 +533,7 @@ pub fn get_opt_time(r: &mut Reader) -> Result<Option<WallTime>> {
 }
 
 /// Pozadavek `DIFF`.
-pub fn diff_request(dataset: &str, from: &str, to: Option<&str>) -> Writer {
+pub fn diff_request(dataset: &str, from: &str, to: Option<&str>, skip: u32) -> Writer {
     let mut w = FsClient::req(op::DIFF);
     w.str(dataset).str(from);
     match to {
@@ -538,35 +544,66 @@ pub fn diff_request(dataset: &str, from: &str, to: Option<&str>) -> Writer {
             w.u8(0);
         }
     }
+    w.u32(skip);
     w
 }
 
-/// Precte parametry `DIFF` (za kodem operace) -> (dataset, od, do).
-pub fn get_diff_request(r: &mut Reader) -> Result<(String, String, Option<String>)> {
+/// Precte parametry `DIFF` (za kodem operace) -> (dataset, od, do,
+/// preskocit). `skip` chybi = 0.
+pub fn get_diff_request(r: &mut Reader) -> Result<(String, String, Option<String>, usize)> {
     let (ds, from) = (r.str()?, r.str()?);
     let to = match r.u8()? {
         0 => None,
         1 => Some(r.str()?),
         _ => return Err(Error::InvalidArgs),
     };
-    Ok((ds, from, to))
+    Ok((ds, from, to, get_skip(r)?))
 }
 
-/// Zakoduje odpoved `DIFF`; `BUFFER_TOO_SMALL`, kdyz zmen je vic nez
-/// `MAX_ITEMS` nebo se nevejdou do `budget` bajtu.
-pub fn encode_diff(w: &mut Writer, changes: &[Change], budget: usize) -> Result<()> {
-    if changes.len() > MAX_ITEMS {
-        return Err(Error::BufferTooSmall);
+/// Volitelny posun stranky na konci pozadavku (`DIFF`, `ASIDE_CHANGES`).
+pub fn get_skip(r: &mut Reader) -> Result<usize> {
+    if r.is_empty() { Ok(0) } else { Ok(r.u32()? as usize) }
+}
+
+/// Zakoduje stranku zmen (`DIFF`, `ASIDE_CHANGES`) od `skip`: celkem u32,
+/// pocet u32, zmeny - kolik se vejde do `MAX_ITEMS` a `budget` bajtu.
+/// Seznam se nikdy tise nezkrati: klient si vyzada dalsi stranky.
+pub fn encode_changes_page(w: &mut Writer, changes: &[Change], skip: usize, budget: usize) {
+    let rest = changes.get(skip..).unwrap_or(&[]);
+    let (mut size, mut n) = (8usize, 0usize);
+    for c in rest {
+        let one = Change::FIXED + c.path.len() + c.old_path.len();
+        // Aspon jedna polozka na stranku (cesta je vzdy mensi nez zprava).
+        if n >= MAX_ITEMS || (n > 0 && size + one > budget) {
+            break;
+        }
+        size += one;
+        n += 1;
     }
-    let size = 4 + changes.iter().map(|c| Change::FIXED + c.path.len() + c.old_path.len()).sum::<usize>();
-    if size > budget {
-        return Err(Error::BufferTooSmall);
-    }
-    w.u32(changes.len() as u32);
-    for c in changes {
+    w.u32(changes.len().min(u32::MAX as usize) as u32).u32(n as u32);
+    for c in &rest[..n] {
         c.put(w);
     }
-    Ok(())
+}
+
+/// Precte vsechny stranky zmen; `req(skip)` = pozadavek na stranku.
+fn changes_pages(f: &FsClient, mut req: impl FnMut(u32) -> Writer) -> Result<Vec<Change>> {
+    let mut out: Vec<Change> = Vec::new();
+    loop {
+        let body = f.call(req(out.len() as u32))?;
+        let mut r = Reader::new(&body);
+        let total = r.u32()? as usize;
+        let n = r.u32()? as usize;
+        if n > MAX_ITEMS {
+            return Err(Error::InvalidArgs);
+        }
+        for _ in 0..n {
+            out.push(Change::get(&mut r)?);
+        }
+        if out.len() >= total || n == 0 {
+            return Ok(out);
+        }
+    }
 }
 
 fn list<T>(body: &[u8], f: impl Fn(&mut Reader) -> Result<T>) -> Result<Vec<T>> {
@@ -705,14 +742,19 @@ impl FsClient {
         Reader::new(&self.call(w)?).u64()
     }
 
+    /// Vsechny zmeny klonu (po strankach, nikdy zkracene).
     pub fn aside_changes(&self, clone: &str) -> Result<Vec<Change>> {
-        list(&self.path_op(op::ASIDE_CHANGES, clone)?, Change::get)
+        changes_pages(self, |skip| {
+            let mut w = Self::req(op::ASIDE_CHANGES);
+            w.str(clone).u32(skip);
+            w
+        })
     }
 
     /// Rozdil verzi datasetu: ze snapshotu `from` do snapshotu `to`, nebo do
     /// zive verze (`to = None`). Cesty od korene datasetu.
     pub fn diff(&self, dataset: &str, from: &str, to: Option<&str>) -> Result<Vec<Change>> {
-        list(&self.call(diff_request(dataset, from, to))?, Change::get)
+        changes_pages(self, |skip| diff_request(dataset, from, to, skip))
     }
 
     /// `stat` ve snapshotu `snap` datasetu `dataset` (cesta uvnitr datasetu).

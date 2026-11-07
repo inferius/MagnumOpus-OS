@@ -86,7 +86,7 @@ pub trait Fs {
     }
     /// Prevezme zmeny klonu do puvodu (atomicky). Vrati cesty v konfliktu
     /// (puvod se mezitim zmenil i jinak) - ty se neprevzaly.
-    fn aside_apply(&mut self, _aside: &Aside) -> FsResult<Vec<String>> {
+    fn aside_apply(&mut self, _aside: &Aside) -> FsResult<Applied> {
         Err(abi::Error::NotSupported)
     }
     /// Zahodi klon (i po `aside_apply`).
@@ -123,6 +123,16 @@ pub struct Aside {
     pub dataset: String,
     /// Kde klon lezi (absolutni cesta).
     pub root: String,
+}
+
+/// Vysledek prevzeti klonu.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Applied {
+    /// Cesty v konfliktu (neprevzaly se).
+    pub conflicts: Vec<String>,
+    /// `false` = FS seznam konfliktu zkratil (jich je vic): neni jiste,
+    /// co se prevzalo, undo takoveho prevzeti nejde.
+    pub complete: bool,
 }
 
 /// Pohled na dataset.

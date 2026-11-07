@@ -13,6 +13,12 @@
 //!
 //! Data jsou ve FS (na disku), ne v pameti shellu. Vnorene datasety jsou
 //! v klonu hranice; zapis do vnoreneho datasetu dostane vlastni klon.
+//!
+//! Cteni nevola `dataset_of` (dotaz na fsd): vezme klon s nejdelsim
+//! korenem nad cestou. Kdyz cesta lezi ve vnorenem datasetu (v klonu
+//! hranice, FS vrati `NOT_SUPPORTED`), zopakuje se s presnym urcenim
+//! datasetu. Zahozeni klonu (dlouhe uvolneni bloku) se odklada do chvile,
+//! kdy je shell volny ([`Draft::flush`]).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -22,7 +28,7 @@ use abi::Error;
 use super::diff::{ChangeKind, DiffEntry};
 use super::path::{join, key, rebase, within};
 use super::undo::remove_all;
-use crate::host::{Aside, DirEntry, Fs, FsChangeKind, FsResult, Meta, NodeKind};
+use crate::host::{Applied, Aside, DirEntry, Fs, FsChangeKind, FsResult, Meta, NodeKind};
 
 #[derive(Debug, Default)]
 pub struct Draft {
@@ -30,11 +36,18 @@ pub struct Draft {
     /// klony datasetu ve jmennem prostoru vrstvy `i - 1` (vrstva 0 ze
     /// skutecneho FS).
     layers: Vec<Vec<Aside>>,
+    /// Klony k zahozeni (po prevzeti nebo odmitnuti), az bude shell volny.
+    trash: Vec<Aside>,
+    /// Zalozeni klonu selhalo (rada u chyby zapisu).
+    pub aside_failed: bool,
 }
+
+/// Kolik klonu smi cekat na zahozeni (pak se zahodi hned).
+const TRASH_MAX: usize = 16;
 
 impl Draft {
     pub fn new() -> Self {
-        Self { layers: alloc::vec![Vec::new()] }
+        Self { layers: alloc::vec![Vec::new()], trash: Vec::new(), aside_failed: false }
     }
 
     /// Zadny klon (radek zatim nic nezapsal).
@@ -73,7 +86,7 @@ impl Draft {
             let root = match found {
                 Some(r) => r,
                 None if create => {
-                    let a = fs.aside_begin(&ds)?;
+                    let a = fs.aside_begin(&ds).inspect_err(|_| self.aside_failed = true)?;
                     let r = a.root.clone();
                     self.layers[li].push(a);
                     r
@@ -83,6 +96,32 @@ impl Draft {
             cur = rebase(&cur, &ds, &root);
         }
         Ok(cur)
+    }
+
+    /// Cteni: cesta v nejvyssi vrstve bez dotazu na FS (klon s nejdelsim
+    /// korenem nad cestou v kazde vrstve).
+    fn resolve_fast(&self, real: &str) -> String {
+        let mut cur = String::from(real);
+        for layer in &self.layers {
+            if let Some(a) = layer.iter().filter(|a| within(&cur, &a.dataset)).max_by_key(|a| a.dataset.len()) {
+                cur = rebase(&cur, &a.dataset, &a.root);
+            }
+        }
+        cur
+    }
+
+    /// Cteci operace: rychla cesta, pri hranici vnoreneho datasetu presne.
+    fn read_op<T>(&mut self, fs: &mut dyn Fs, path: &str, op: impl Fn(&mut dyn Fs, &str) -> FsResult<T>) -> FsResult<T> {
+        if self.is_empty() {
+            return op(fs, path);
+        }
+        match op(fs, &self.resolve_fast(path)) {
+            Err(Error::NotSupported) => {
+                let p = self.resolve(fs, path, false)?;
+                op(fs, &p)
+            }
+            r => r,
+        }
     }
 
     /// Cesta ve vrstve `layer` -> skutecna cesta.
@@ -102,23 +141,19 @@ impl Draft {
     }
 
     pub fn stat(&mut self, fs: &mut dyn Fs, path: &str) -> FsResult<Meta> {
-        let p = self.resolve(fs, path, false)?;
-        fs.stat(&p)
+        self.read_op(fs, path, |fs, p| fs.stat(p))
     }
 
     pub fn list(&mut self, fs: &mut dyn Fs, path: &str) -> FsResult<Vec<DirEntry>> {
-        let p = self.resolve(fs, path, false)?;
-        fs.list(&p)
+        self.read_op(fs, path, |fs, p| fs.list(p))
     }
 
     pub fn list_names(&mut self, fs: &mut dyn Fs, path: &str) -> FsResult<Vec<DirEntry>> {
-        let p = self.resolve(fs, path, false)?;
-        fs.list_names(&p)
+        self.read_op(fs, path, |fs, p| fs.list_names(p))
     }
 
     pub fn read(&mut self, fs: &mut dyn Fs, path: &str) -> FsResult<Vec<u8>> {
-        let p = self.resolve(fs, path, false)?;
-        fs.read(&p)
+        self.read_op(fs, path, |fs, p| fs.read(p))
     }
 
     pub fn write(&mut self, fs: &mut dyn Fs, path: &str, data: &[u8]) -> FsResult<()> {
@@ -222,37 +257,47 @@ impl Draft {
         Ok(super::diff::normalize(out))
     }
 
-    /// Prevezme nejvyssi vrstvu do vrstvy pod ni (vrstva 0 do FS) a jeji
-    /// klony zahodi. Vrati skutecne cesty v konfliktu (neprevzaly se).
-    pub fn apply_top(&mut self, fs: &mut dyn Fs) -> FsResult<Vec<String>> {
+    /// Prevezme nejvyssi vrstvu do vrstvy pod ni (vrstva 0 do FS); jeji
+    /// klony jdou k zahozeni. Vrati skutecne cesty v konfliktu (neprevzaly
+    /// se) a zda je seznam konfliktu uplny.
+    pub fn apply_top(&mut self, fs: &mut dyn Fs) -> FsResult<Applied> {
         let top = self.layers.len() - 1;
         let clones = core::mem::take(&mut self.layers[top]);
-        let mut conflicts = Vec::new();
+        let mut out = Applied { conflicts: Vec::new(), complete: true };
         let mut err = None;
         for a in &clones {
             if err.is_none() {
                 match fs.aside_apply(a) {
-                    Ok(c) => conflicts.extend(c.iter().map(|p| self.unresolve(top, p))),
+                    Ok(r) => {
+                        out.conflicts.extend(r.conflicts.iter().map(|p| self.unresolve(top, p)));
+                        out.complete &= r.complete;
+                    }
                     Err(e) => err = Some(e),
                 }
             }
-            let _ = fs.aside_discard(a);
         }
+        self.to_trash(fs, clones);
         if top > 0 {
             self.layers.pop();
         }
         match err {
             Some(e) => Err(e),
-            None => Ok(conflicts),
+            None => Ok(out),
+        }
+    }
+
+    fn to_trash(&mut self, fs: &mut dyn Fs, clones: Vec<Aside>) {
+        self.trash.extend(clones);
+        if self.trash.len() > TRASH_MAX {
+            self.flush(fs);
         }
     }
 
     /// Zahodi nejvyssi vrstvu (odmitnuti nahledu nebo zmen radku).
     pub fn discard_top(&mut self, fs: &mut dyn Fs) {
         let top = self.layers.len() - 1;
-        for a in core::mem::take(&mut self.layers[top]) {
-            let _ = fs.aside_discard(&a);
-        }
+        let clones = core::mem::take(&mut self.layers[top]);
+        self.to_trash(fs, clones);
         if top > 0 {
             self.layers.pop();
         }
@@ -264,6 +309,18 @@ impl Draft {
             self.discard_top(fs);
         }
         self.discard_top(fs);
+    }
+
+    /// Opravdu zahodi klony, ktere cekaji (shell je volny).
+    pub fn flush(&mut self, fs: &mut dyn Fs) {
+        for a in core::mem::take(&mut self.trash) {
+            let _ = fs.aside_discard(&a);
+        }
+    }
+
+    /// Ceka nejaky klon na zahozeni?
+    pub fn has_trash(&self) -> bool {
+        !self.trash.is_empty()
     }
 
     /// Program v nahledu: zalozi klony pro datasety, kam smi zapisovat

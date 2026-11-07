@@ -15,7 +15,8 @@ use alloc::vec::Vec;
 
 use fsproto::hist::{
     AutoRule, Branch, Change, CommitInfo, FileVersion, JournalEntry, JournalPage, MergeConflict, MergeReport,
-    Settings, TrashEntry, Undone, conflict, encode_diff, get_diff_request, get_opt_time, op, put_opt_time,
+    Settings, TrashEntry, Undone, conflict, encode_changes_page, get_diff_request, get_opt_time, get_skip, op,
+    put_opt_time,
 };
 use fsproto::{Reader, Writer};
 use libos::{Error, Result, time};
@@ -97,6 +98,7 @@ fn report(r: fs::MergeReport) -> MergeReport {
             })
             .collect(),
         commit: r.commit.map(commit),
+        conflicts_total: 0,
     }
 }
 
@@ -380,16 +382,17 @@ impl Service {
             }
             op::ASIDE_CHANGES => {
                 let clone = sess.map(&r.str()?, false)?;
+                let skip = get_skip(r)?;
                 let list: Vec<Change> = fs.diff_clone(&clone)?.into_iter().map(change).collect();
-                put_list(&mut w, &list, |w, c| c.put(w));
+                encode_changes_page(&mut w, &list, skip, fsproto::MAX_REPLY);
             }
             op::DIFF => {
                 // Jen cteni historie (jako VIEW, ASIDE_CHANGES); MANAGE ke
                 // koreni datasetu overi FS.
-                let (ds, from, to) = get_diff_request(r)?;
+                let (ds, from, to, skip) = get_diff_request(r)?;
                 let ds = sess.map(&ds, false)?;
                 let list: Vec<Change> = fs.diff(&ds, &from, to.as_deref())?.into_iter().map(change).collect();
-                encode_diff(&mut w, &list, fsproto::MAX_REPLY)?;
+                encode_changes_page(&mut w, &list, skip, fsproto::MAX_REPLY);
             }
             op::DATASET_OF => {
                 let path = sess.map(&r.str()?, false)?;

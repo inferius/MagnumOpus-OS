@@ -119,6 +119,29 @@ impl MemFs {
         if hit { Err(Error::NotSupported) } else { Ok(()) }
     }
 
+    /// Cteni uvnitr hranice klonu (ne hranice sama) = `NOT_SUPPORTED`, jako
+    /// pruchod pres polozku datasetu ve fsd.
+    pub(super) fn guard_inside(&self, path: &str) -> FsResult<()> {
+        let hit = self
+            .hist
+            .asides
+            .values()
+            .any(|a| a.boundaries.iter().any(|b| within(path, b) && key(path) != *b));
+        if hit { Err(Error::NotSupported) } else { Ok(()) }
+    }
+
+    /// Pohled vidi jen svuj dataset: cesta uvnitr vnoreneho datasetu (nebo
+    /// vypis jeho korene) = `NOT_SUPPORTED`, jako snapshot datasetu ve fsd.
+    pub(super) fn view_guard(&self, v: &ViewRef, path: &str, list: bool) -> FsResult<()> {
+        let nested = self
+            .hist
+            .datasets
+            .iter()
+            .filter(|d| within(d, &v.dataset) && key(d) != key(&v.dataset))
+            .any(|d| within(path, d) && (list || key(path) != *d));
+        if nested { Err(Error::NotSupported) } else { Ok(()) }
+    }
+
     /// Zaznam do zurnalu datasetu, ve kterem `path` lezi.
     pub(super) fn bump(&mut self, path: &str) {
         let ds = key(&self.dataset_root(path));

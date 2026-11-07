@@ -87,7 +87,11 @@ impl Interp {
         let trees = if needs.all { alloc::vec![String::from("/")] } else { needs.write.clone() };
         if self.draft.depth() > 0 {
             // Nahled: program pise do klonu (dalsi vrstva konceptu), ne do FS.
-            needs.aside = self.draft.exec_map(host.fs(), &trees).map_err(|e| {
+            // Klony i pro vnorene datasety domova a pracovni slozky (jako
+            // pohledy pro undo mimo nahled).
+            let mut targets = trees.clone();
+            targets.extend(self.exec_datasets(host, &trees));
+            needs.aside = self.draft.exec_map(host.fs(), &targets).map_err(|e| {
                 Flow::Err(
                     ShError::sys(e, alloc::format!("program '{name}' nejde spustit nanecisto"))
                         .at(span)

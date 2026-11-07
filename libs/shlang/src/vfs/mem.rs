@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use abi::Error;
 
 use super::path::{file_name, join, key, parent};
-use crate::host::{Aside, DirEntry, Fs, FsChange, FsResult, Meta, NodeKind, ViewRef};
+use crate::host::{Applied, Aside, DirEntry, Fs, FsChange, FsResult, Meta, NodeKind, ViewRef};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Node {
@@ -24,11 +24,15 @@ pub struct MemFs {
     /// Pocet zapisu (testy: kolik se toho opravdu zapsalo).
     pub writes: usize,
     pub total: u64,
+    /// Kolik konfliktu FS vrati (vic = zkraceny seznam, jako fsd).
+    pub conflict_limit: usize,
+    /// Pocet dotazu `dataset_of` (testy: cteni se na dataset nepta).
+    pub dataset_queries: usize,
 }
 
 impl MemFs {
     pub fn new() -> Self {
-        let mut fs = Self { total: 1 << 30, ..Default::default() };
+        let mut fs = Self { total: 1 << 30, conflict_limit: usize::MAX, ..Default::default() };
         fs.nodes.insert("/".into(), ("/".into(), Node::Dir));
         fs
     }
@@ -93,14 +97,17 @@ impl MemFs {
 
 impl Fs for MemFs {
     fn stat(&mut self, path: &str) -> FsResult<Meta> {
+        self.guard_inside(path)?;
         self.nodes.get(&key(path)).map(|(_, n)| Self::meta(n)).ok_or(Error::NotFound)
     }
 
     fn list(&mut self, path: &str) -> FsResult<Vec<DirEntry>> {
+        self.guard(path)?;
         Self::list_in(&self.nodes, path)
     }
 
     fn read(&mut self, path: &str) -> FsResult<Vec<u8>> {
+        self.guard_inside(path)?;
         match self.nodes.get(&key(path)) {
             Some((_, Node::File(d))) => Ok(d.clone()),
             Some(_) => Err(Error::IsADirectory),
@@ -191,6 +198,7 @@ impl Fs for MemFs {
 
     /// Jako fsd: neexistujici cesta = `NOT_FOUND`.
     fn dataset_of(&mut self, path: &str) -> FsResult<String> {
+        self.dataset_queries += 1;
         if !self.exists(path) {
             return Err(Error::NotFound);
         }
@@ -205,8 +213,11 @@ impl Fs for MemFs {
         self.h_aside_changes(aside)
     }
 
-    fn aside_apply(&mut self, aside: &Aside) -> FsResult<Vec<String>> {
-        self.h_aside_apply(aside)
+    fn aside_apply(&mut self, aside: &Aside) -> FsResult<Applied> {
+        let conflicts = self.h_aside_apply(aside)?;
+        let complete = conflicts.len() <= self.conflict_limit;
+        let conflicts = conflicts.into_iter().take(self.conflict_limit).collect();
+        Ok(Applied { conflicts, complete })
     }
 
     fn aside_discard(&mut self, aside: &Aside) -> FsResult<()> {
@@ -226,16 +237,19 @@ impl Fs for MemFs {
     }
 
     fn view_stat(&mut self, view: &ViewRef, path: &str) -> FsResult<Meta> {
+        self.view_guard(view, path, false)?;
         let s = self.hist.views.get(&view.snapshot).ok_or(Error::NotFound)?;
         s.get(&key(path)).map(|(_, n)| Self::meta(n)).ok_or(Error::NotFound)
     }
 
     fn view_list(&mut self, view: &ViewRef, path: &str) -> FsResult<Vec<DirEntry>> {
+        self.view_guard(view, path, true)?;
         let s = self.hist.views.get(&view.snapshot).ok_or(Error::NotFound)?;
         Self::list_in(s, path)
     }
 
     fn view_read(&mut self, view: &ViewRef, path: &str) -> FsResult<Vec<u8>> {
+        self.view_guard(view, path, false)?;
         let s = self.hist.views.get(&view.snapshot).ok_or(Error::NotFound)?;
         match s.get(&key(path)) {
             Some((_, Node::File(d))) => Ok(d.clone()),

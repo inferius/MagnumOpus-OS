@@ -7,7 +7,7 @@ use fsproto::hist::Change;
 use fsproto::{FsClient, Stat, kind};
 use libos::time::WallTime;
 use libos::Error;
-use shlang::host::{Aside, DirEntry, Fs, FsChange, FsChangeKind, FsResult, Meta, NodeKind, ViewRef};
+use shlang::host::{Applied, Aside, DirEntry, Fs, FsChange, FsChangeKind, FsResult, Meta, NodeKind, ViewRef};
 use shlang::vfs::path::{join, rebase};
 
 /// Kde lezi klony bokem (skryta slozka; po padu je uklidi termd pri startu).
@@ -155,9 +155,11 @@ impl Fs for FsdFs {
         Ok(self.client.aside_changes(&a.root)?.into_iter().map(|c| Self::change(&a.dataset, c)).collect())
     }
 
-    fn aside_apply(&mut self, a: &Aside) -> FsResult<Vec<String>> {
+    fn aside_apply(&mut self, a: &Aside) -> FsResult<Applied> {
         let r = self.client.aside_apply(&a.root, None)?;
-        Ok(r.conflicts.into_iter().map(|c| rebase(&c.path, "/", &a.dataset)).collect())
+        let complete = r.conflicts_total <= r.conflicts.len();
+        let conflicts = r.conflicts.into_iter().map(|c| rebase(&c.path, "/", &a.dataset)).collect();
+        Ok(Applied { conflicts, complete })
     }
 
     fn aside_discard(&mut self, a: &Aside) -> FsResult<()> {
@@ -176,6 +178,12 @@ impl Fs for FsdFs {
     /// Zurnal rekne, jestli se neco zmenilo (jedna zprava); jen kdyz ano,
     /// `DIFF` vrati zmenene cesty.
     fn changed_since(&mut self, v: &ViewRef) -> FsResult<Vec<FsChange>> {
+        // Zurnal ukazuje jen potvrzene zaznamy (fsd commituje po intervalu):
+        // zmeny programu, ktery prave skoncil, nejdriv potvrdit.
+        if self.client.commit().is_err() {
+            let changes = self.client.diff(&v.dataset, &v.snapshot, None)?;
+            return Ok(changes.into_iter().map(|c| Self::change(&v.dataset, c)).collect());
+        }
         let last = match self.client.journal_read(&v.dataset, v.seq + 1, 1) {
             Ok(p) => p.last,
             // Zurnal uz nema tak stare zaznamy: radsi spocitat diff.

@@ -476,16 +476,16 @@ session identity. Time on the wire = seconds i64 + nanoseconds u32.
 | 72 | `MERGE` | target, source | merge report |
 | 73 | `MERGE_ABORT` | target | - |
 | 74 | `ASIDE_BEGIN` | dataset, clone path | clone dataset u64 |
-| 75 | `ASIDE_APPLY` | clone, all u8, count + paths | merge report |
+| 75 | `ASIDE_APPLY` | clone, all u8, count + paths | merge report; after the conflicts the total number of conflicts u32 (the list may be cut to 1024) |
 | 76 | `ASIDE_DISCARD` | clone | - |
-| 77 | `ASIDE_CHANGES` | clone | count + (kind u8, path, old path, oid, folder u8) |
+| 77 | `ASIDE_CHANGES` | clone, [skip u32] | page: total u32, count u32 + (kind u8, path, old path, oid, folder u8) |
 | 78-81 | `XATTR_GET` / `SET` / `REMOVE` / `LIST` | path, name [, value = rest of the message] | value / - / - / names |
 | 82 / 83 | `SET_EXPIRES` / `EXPIRES` | path [, has u8, time] | has u8, time |
 | 84 | `HEAD` | dataset | has u8 + commit |
 | 85 | `DATASET_CREATE` | path | dataset number u64 (a new folder with its own history; `CREATE` right in the parent) |
 | 86 | `DATASET_DELETE` | path | - (including snapshots; `MANAGE` + `DELETE`; not with nested datasets or clones) |
 | 87 | `LIST_STAT_PAGE` | path, cursor, at most u32 | listing with metadata, described in the [fsproto protocol](file-system.md#the-fsproto-protocol) (module `fsproto::op`) |
-| 88 | `DIFF` | dataset, from snapshot, to u8 (0 = live version, 1 = a snapshot name follows) | count + `Change` like `ASIDE_CHANGES`; `MANAGE` on the dataset root; `BUFFER_TOO_SMALL` when the difference does not fit |
+| 88 | `DIFF` | dataset, from snapshot, to u8 (0 = live version, 1 = a snapshot name follows), [skip u32] | page like `ASIDE_CHANGES`; `MANAGE` on the dataset root |
 | 89 | `DATASET_OF` | path | path of the root of the dataset the path lies in (`/` = the root one); rights like `STAT` |
 | 90 | `SNAP_STAT_OF` | dataset, snapshot, path inside the dataset | `Stat` |
 | 91 | `SNAP_LIST_OF` | dataset, snapshot, path inside the dataset, cursor, at most u32 | like `LIST_PAGE` |
@@ -509,10 +509,18 @@ shell (`diff`, change preview, reading from a view):
   4 moved, 5 moved and modified.
 - **`DIFF`** compares the snapshot `from` with the snapshot `to`, or with
   the live version (including unsaved changes). The snapshot may also be
-  the temporary snapshot of a view (`VIEW`). The difference is computed
-  whole: when it has more than 4096 items or does not fit into 60 KiB, it
-  returns `BUFFER_TOO_SMALL` (no paging - paging would compute the whole
-  difference again for every page).
+  the temporary snapshot of a view (`VIEW`).
+- **Pages of changes** (`DIFF`, `ASIDE_CHANGES`): the reply carries the
+  total number of changes and one page (at most 4096 items and 60 KiB).
+  The client sends the same request with `skip` = the number already
+  received until it has them all (`FsClient::diff`, `aside_changes` do it
+  themselves). The list is never cut silently. Every page computes the
+  difference again; the cost is proportional to the changes, not to the
+  size of the tree, so it is cheap.
+- **Conflicts in `ASIDE_APPLY`/`MERGE`**: the list fits into the reply cut
+  (at most 1024), but the total number is always sent. The client thus
+  knows it does not know all conflicts (the shell then does not allow
+  undoing that apply).
 - **`DATASET_OF`**: the service walks the ancestors of the path from the
   root (`STAT` of each) and returns the first one with the same dataset.
   A path the session does not see, and a dataset root outside the

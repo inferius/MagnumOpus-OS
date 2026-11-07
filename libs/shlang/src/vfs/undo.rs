@@ -45,13 +45,15 @@ pub struct UndoLog {
 }
 
 /// Vysledek prevzeti konceptu.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Committed {
     pub diff: Vec<DiffEntry>,
     /// Cesty, ktere se neprevzaly (puvod se mezitim zmenil jinak).
     pub conflicts: Vec<String>,
     /// FS neumi pohledy: zmeny jsou zapsane, ale nepujdou vratit.
     pub no_undo: bool,
+    /// `false` = konfliktu je vic, nez FS vypsal.
+    pub conflicts_complete: bool,
 }
 
 fn release(fs: &mut dyn Fs, views: &[ViewRef]) {
@@ -108,16 +110,23 @@ impl UndoLog {
         -> FsResult<Committed> {
         if diff.is_empty() {
             draft.discard_top(fs);
-            return Ok(Committed::default());
+            return Ok(Committed { diff, conflicts: Vec::new(), no_undo: false, conflicts_complete: true });
         }
         let views = views_of(fs, &draft.datasets());
-        let conflicts = match draft.apply_top(fs) {
-            Ok(c) => c,
+        let applied = match draft.apply_top(fs) {
+            Ok(a) => a,
             Err(e) => {
                 release(fs, views.as_deref().unwrap_or(&[]));
                 return Err(e);
             }
         };
+        let conflicts = applied.conflicts;
+        // Zkraceny seznam konfliktu: nevime, co se prevzalo - undo by mohlo
+        // prepsat cizi zmenu. Zaznam se nevytvori.
+        if !applied.complete {
+            release(fs, views.as_deref().unwrap_or(&[]));
+            return Ok(Committed { diff, conflicts, no_undo: true, conflicts_complete: false });
+        }
         // Vratit jde jen to, co se opravdu prevzalo.
         let applied: Vec<DiffEntry> =
             diff.iter().filter(|d| !d.paths().any(|p| conflicts.iter().any(|c| key(c) == key(p)))).cloned().collect();
@@ -130,7 +139,7 @@ impl UndoLog {
             Some(v) => release(fs, &v),
             None => {}
         }
-        Ok(Committed { diff, conflicts, no_undo })
+        Ok(Committed { diff, conflicts, no_undo, conflicts_complete: true })
     }
 
     /// Pred spustenim programu, ktery smi menit `datasets`/`trees`:
@@ -203,9 +212,17 @@ impl UndoLog {
         let mut paths: Vec<&String> = e.diff.iter().flat_map(|d| d.paths()).collect();
         paths.sort_by_key(|p| (p.matches('/').count(), key(p)));
         paths.dedup_by(|a, b| key(a) == key(b));
+        // Slozka se srovna i s obsahem: cesty pod ni uz znovu ne.
+        let mut whole: Vec<&String> = Vec::new();
         for p in paths {
+            if whole.iter().any(|w| within(p, w)) {
+                continue;
+            }
             let v = view_for(&e.views, p).ok_or(Error::NotFound)?;
             sync_from_view(fs, v, p)?;
+            if matches!(fs.stat(p), Ok(m) if m.kind == NodeKind::Dir) {
+                whole.push(p);
+            }
         }
         Ok(())
     }
@@ -222,9 +239,22 @@ pub fn remove_all(fs: &mut dyn Fs, path: &str) -> FsResult<()> {
     fs.remove(path)
 }
 
-/// Srovna `path` se stavem v pohledu `v` (i s obsahem slozky).
+/// Lezi `path` (zive) v datasetu pohledu? Vnoreny dataset ma vlastni
+/// historii a pohled ho nevidi - srovnani se ho nesmi dotknout.
+fn own_dataset(fs: &mut dyn Fs, v: &ViewRef, path: &str) -> FsResult<bool> {
+    Ok(key(&super::draft::dataset_of(fs, path)?) == key(&v.dataset))
+}
+
+/// Srovna `path` se stavem v pohledu `v` (i s obsahem slozky). Vnorene
+/// datasety (v pohledu `NOT_SUPPORTED`, zive jiny dataset) preskoci.
 pub fn sync_from_view(fs: &mut dyn Fs, v: &ViewRef, path: &str) -> FsResult<()> {
-    let old = fs.view_stat(v, path);
+    let old = match fs.view_stat(v, path) {
+        Err(Error::NotSupported) => return Ok(()),
+        r => r,
+    };
+    if old.is_err() && fs.stat(path).is_ok() && !own_dataset(fs, v, path)? {
+        return Ok(());
+    }
     let cur = fs.stat(path);
     match (old, cur) {
         (Err(_), Ok(_)) => remove_all(fs, path),
@@ -245,7 +275,11 @@ pub fn sync_from_view(fs: &mut dyn Fs, v: &ViewRef, path: &str) -> FsResult<()> 
                 }
             }
             for n in names {
-                sync_from_view(fs, v, &join(path, &n))?;
+                let child = join(path, &n);
+                if matches!(fs.stat(&child), Ok(m) if m.kind == NodeKind::Dir) && !own_dataset(fs, v, &child)? {
+                    continue;
+                }
+                sync_from_view(fs, v, &child)?;
             }
             Ok(())
         }

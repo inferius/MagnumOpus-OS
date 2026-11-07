@@ -72,6 +72,19 @@ pub struct Service {
     fixed: Option<u64>,
 }
 
+/// Spojeni bez okna (uklid ve volne chvili nic neposila).
+struct NullLink;
+
+impl Link for NullLink {
+    fn send(&mut self, _msg: &ServerMsg) {}
+    fn poll(&mut self) -> Option<ClientMsg> {
+        None
+    }
+    fn wait(&mut self) -> Option<ClientMsg> {
+        None
+    }
+}
+
 /// Hostitel interpretu pro jeden radek relace.
 struct SessionHost<'a> {
     fs: &'a mut dyn Fs,
@@ -209,6 +222,34 @@ impl Service {
         s.next_block = crate::broker::id_base(session);
         s.next_prompt = crate::broker::id_base(session);
         s
+    }
+
+    /// Volna chvile: klony k zahozeni (po prevzeti radku) opravdu zahodit.
+    fn flush(&mut self, fs: &mut dyn Fs, env: &mut dyn Env) {
+        for s in &mut self.sessions {
+            if !s.interp.has_flush() {
+                continue;
+            }
+            let mut block = Block { id: 0, line: String::new(), items: Vec::new(), ok: None, duration: 0 };
+            let mut attached = false;
+            let mut link = NullLink;
+            let mut next_prompt = 0;
+            let mut deferred = Vec::new();
+            let mut host = SessionHost {
+                fs: &mut *fs,
+                link: &mut link,
+                env: &mut *env,
+                session: s.id,
+                block: &mut block,
+                attached: &mut attached,
+                interrupt: false,
+                next_prompt: &mut next_prompt,
+                deferred: &mut deferred,
+                home: &self.home,
+                polls: 0,
+            };
+            s.interp.flush(&mut host);
+        }
     }
 
     /// Ceka nejaka uloha na pozadi?
@@ -379,6 +420,7 @@ impl Service {
 
     /// Shell je volny: dobehnou ulohy na pozadi (kazda jako blok).
     pub fn idle(&mut self, link: &mut dyn Link, fs: &mut dyn Fs, env: &mut dyn Env) {
+        self.flush(fs, env);
         for i in 0..self.sessions.len() {
             let pending = self.sessions[i]
                 .interp

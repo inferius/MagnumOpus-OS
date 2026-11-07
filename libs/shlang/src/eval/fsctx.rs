@@ -12,12 +12,7 @@ use crate::value::Value;
 use crate::vfs::path::{self, resolve, within};
 
 fn sys(e: abi::Error, what: String) -> Flow {
-    let err = ShError::sys(e, what);
-    Flow::Err(match e {
-        // Klon bokem nejde zalozit, nebo zapis do hranice (vnoreny dataset).
-        abi::Error::NotSupported => err.hint("FS tu neumi zmeny nanecisto (klon bokem); zkuste jiny dataset"),
-        _ => err,
-    })
+    Flow::Err(ShError::sys(e, what))
 }
 
 impl Interp {
@@ -78,12 +73,25 @@ impl Interp {
 
     pub(crate) fn fs_write(&mut self, host: &mut dyn Host, p: &str, data: Vec<u8>) -> R<()> {
         self.check_write(p)?;
-        self.draft.write(host.fs(), p, &data).map_err(|e| sys(e, alloc::format!("do {p} nejde zapsat")))
+        let r = self.draft.write(host.fs(), p, &data);
+        self.write_err(r, alloc::format!("do {p} nejde zapsat"))
+    }
+
+    /// Chyba zapisu; kdyz za ni muze nepovedeny klon bokem, s radou.
+    fn write_err<T>(&mut self, r: crate::host::FsResult<T>, what: String) -> R<T> {
+        let failed = core::mem::take(&mut self.draft.aside_failed);
+        r.map_err(|e| match sys(e, what) {
+            Flow::Err(err) if failed => Flow::Err(
+                err.hint("zmeny nanecisto tu nejdou (FS nezalozil klon bokem, napr. chybi zapisovatelny /tmp)"),
+            ),
+            f => f,
+        })
     }
 
     pub(crate) fn fs_mkdir(&mut self, host: &mut dyn Host, p: &str) -> R<()> {
         self.check_write(p)?;
-        self.draft.mkdir(host.fs(), p).map_err(|e| sys(e, alloc::format!("slozku {p} nejde vytvorit")))
+        let r = self.draft.mkdir(host.fs(), p);
+        self.write_err(r, alloc::format!("slozku {p} nejde vytvorit"))
     }
 
     pub(crate) fn fs_remove(&mut self, host: &mut dyn Host, p: &str, recursive: bool) -> R<()> {
@@ -102,13 +110,15 @@ impl Interp {
     pub(crate) fn fs_copy(&mut self, host: &mut dyn Host, from: &str, to: &str) -> R<()> {
         self.check_read(from)?;
         self.check_write(to)?;
-        self.draft.copy(host.fs(), from, to).map_err(|e| sys(e, alloc::format!("{from} nejde zkopirovat do {to}")))
+        let r = self.draft.copy(host.fs(), from, to);
+        self.write_err(r, alloc::format!("{from} nejde zkopirovat do {to}"))
     }
 
     pub(crate) fn fs_rename(&mut self, host: &mut dyn Host, from: &str, to: &str) -> R<()> {
         self.check_write(from)?;
         self.check_write(to)?;
-        self.draft.rename(host.fs(), from, to).map_err(|e| sys(e, alloc::format!("{from} nejde presunout do {to}")))
+        let r = self.draft.rename(host.fs(), from, to);
+        self.write_err(r, alloc::format!("{from} nejde presunout do {to}"))
     }
 
     /// Zaznam souboru (radek vystupu `ls`).
