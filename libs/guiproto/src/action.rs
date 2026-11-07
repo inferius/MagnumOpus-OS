@@ -10,7 +10,7 @@
 //!
 //! [[action.param]]
 //! name = "title"
-//! type = "text"            # text, int, bool, path, choice
+//! type = "text"            # text, int, bool, path, paths, choice
 //! required = true
 //! ```
 //!
@@ -35,6 +35,8 @@ pub enum ParamType {
     Path,
     /// Jedna z vyctenych hodnot.
     Choice(Vec<String>),
+    /// Seznam cest (hromadna operace: dialog ukaze pocet a nahled).
+    Paths,
 }
 
 impl ParamType {
@@ -45,6 +47,7 @@ impl ParamType {
             ParamType::Bool => 3,
             ParamType::Path => 4,
             ParamType::Choice(_) => 5,
+            ParamType::Paths => 6,
         }
     }
 
@@ -55,6 +58,7 @@ impl ParamType {
             ParamType::Bool => "bool",
             ParamType::Path => "path",
             ParamType::Choice(_) => "choice",
+            ParamType::Paths => "paths",
         }
     }
 }
@@ -67,7 +71,11 @@ pub enum Value {
     Bool(bool),
     Path(String),
     Choice(String),
+    Paths(Vec<String>),
 }
+
+/// Nejvic cest v jednom argumentu `paths`.
+pub const MAX_PATHS: usize = 4096;
 
 impl Value {
     pub fn encode(&self, w: &mut Writer) {
@@ -77,6 +85,13 @@ impl Value {
             Value::Bool(b) => w.u8(3).bool(*b),
             Value::Path(s) => w.u8(4).str(s),
             Value::Choice(s) => w.u8(5).str(s),
+            Value::Paths(list) => {
+                w.u8(6).u32(list.len().min(MAX_PATHS) as u32);
+                for p in list.iter().take(MAX_PATHS) {
+                    w.str(p);
+                }
+                w
+            }
         };
     }
 
@@ -87,6 +102,17 @@ impl Value {
             3 => Value::Bool(r.bool()?),
             4 => Value::Path(r.str()?),
             5 => Value::Choice(r.str()?),
+            6 => {
+                let n = r.u32()? as usize;
+                if n > MAX_PATHS {
+                    return Err(Error::InvalidArgs);
+                }
+                let mut list = Vec::new();
+                for _ in 0..n {
+                    list.push(r.str()?);
+                }
+                Value::Paths(list)
+            }
             _ => return Err(Error::InvalidArgs),
         })
     }
@@ -96,7 +122,8 @@ impl Value {
             (Value::Text(_), ParamType::Text)
             | (Value::Int(_), ParamType::Int)
             | (Value::Bool(_), ParamType::Bool)
-            | (Value::Path(_), ParamType::Path) => true,
+            | (Value::Path(_), ParamType::Path)
+            | (Value::Paths(_), ParamType::Paths) => true,
             (Value::Choice(c), ParamType::Choice(list)) => list.iter().any(|x| x == c),
             _ => false,
         }
@@ -181,6 +208,7 @@ pub fn parse_table(table: &Table) -> core::result::Result<Vec<Action>, ManifestE
                 "int" => ParamType::Int,
                 "bool" => ParamType::Bool,
                 "path" => ParamType::Path,
+                "paths" => ParamType::Paths,
                 "choice" => {
                     let c: Vec<String> =
                         p.get_strs("choices").unwrap_or_default().into_iter().map(String::from).collect();
@@ -261,6 +289,7 @@ impl Action {
                 3 => ParamType::Bool,
                 4 => ParamType::Path,
                 5 => ParamType::Choice(Vec::new()),
+                6 => ParamType::Paths,
                 _ => return Err(Error::InvalidArgs),
             };
             let required = r.bool()?;

@@ -29,6 +29,51 @@ struct Call {
     synthetic: bool,
     /// Uz predano aplikaci (ceka se na `ACTION_RESULT`).
     invoked: bool,
+    /// Zakodovane argumenty, ktere uzivatel videl v dialogu potvrzeni
+    /// (aplikace dostane presne tyto; jine se odmitnou).
+    shown: Option<Vec<u8>>,
+}
+
+/// Zakodovane argumenty: porovnava se cely obsah bajt po bajtu (otisk
+/// typu FNV by sel umyslne zkolidovat).
+pub(crate) fn args_bytes(args: &[Arg]) -> Vec<u8> {
+    let mut w = guiproto::Writer::new();
+    guiproto::action::encode_args(&mut w, args);
+    w.finish()
+}
+
+/// Argument pro cloveka podle typu z manifestu: cesta cela (dialog ji
+/// zalomi), text v uvozovkach, ano/ne, volba.
+pub(crate) fn arg_line(name: &str, v: &Value) -> String {
+    const TEXT_MAX: usize = 300;
+    let cut = |s: &str| -> String {
+        if s.chars().count() > TEXT_MAX {
+            let mut t: String = s.chars().take(TEXT_MAX).collect();
+            t.push_str("...");
+            t
+        } else {
+            String::from(s)
+        }
+    };
+    match v {
+        Value::Path(p) => format!("{name} (cesta): {}", cut(p)),
+        Value::Text(t) => format!("{name}: \"{}\"", cut(t)),
+        Value::Int(i) => format!("{name}: {i}"),
+        Value::Bool(b) => format!("{name}: {}", if *b { "ano" } else { "ne" }),
+        Value::Choice(c) => format!("{name}: {c}"),
+        Value::Paths(list) => {
+            // Hromadna operace: pocet a nahled (prvnich 8 celych cest).
+            const PREVIEW: usize = 8;
+            let mut s = format!("{name}: {} položek", list.len());
+            for p in list.iter().take(PREVIEW) {
+                s.push_str(&format!("\n  {}", cut(p)));
+            }
+            if list.len() > PREVIEW {
+                s.push_str(&format!("\n  ... a dalších {}", list.len() - PREVIEW));
+            }
+            s
+        }
+    }
 }
 
 /// Nejvic rozpracovanych volani.
@@ -50,6 +95,15 @@ fn fail(call: u32, msg: &str) -> CallerReply {
 }
 
 impl Services {
+    /// Test: zmena argumentu rozpracovaneho volani (napodobi utok, ktery
+    /// by argumenty zmenil po zobrazeni dialogu).
+    #[cfg(test)]
+    pub(crate) fn tamper(&mut self, args: Vec<Arg>) {
+        for c in self.calls.values_mut() {
+            c.args = args.clone();
+        }
+    }
+
     pub(crate) fn action_result(&mut self, client: ClientId, id: u32, ok: bool, value: Option<Value>, message: String, out: &mut Vec<Out>) {
         let Some(c) = self.calls.get(&id) else { return };
         if c.client != client || !c.invoked {
@@ -130,9 +184,10 @@ impl Comp {
                         call,
                         client: cid,
                         action,
-                        args,
+                        args: args.clone(),
                         synthetic,
                         invoked: false,
+                        shown: None,
                     },
                 );
                 if confirm {
@@ -140,6 +195,20 @@ impl Comp {
                     let mut text = format!("{who} chce v aplikaci {app_name} provést akci \u{201E}{title}\u{201C}.");
                     if !needs.is_empty() {
                         text.push_str(&format!("\nAkce potřebuje: {needs}."));
+                    }
+                    // Skutecne argumenty (cil, cesta, prijemce): uzivatel
+                    // potvrzuje presne to, co vidi.
+                    if args.is_empty() {
+                        text.push_str("\nBez parametrů.");
+                    } else {
+                        text.push_str("\nParametry:");
+                        for (n, v) in &args {
+                            text.push('\n');
+                            text.push_str(&arg_line(n, v));
+                        }
+                    }
+                    if let Some(c) = self.services.calls.get_mut(&id) {
+                        c.shown = Some(args_bytes(&args));
                     }
                     self.open_dialog(Dialog {
                         owner: Owner::Action(id),
@@ -173,8 +242,14 @@ impl Comp {
     }
 
     pub(crate) fn action_confirmed(&mut self, id: u32, ok: bool) {
-        if ok {
+        // Potvrzeni plati jen pro argumenty, ktere byly v dialogu.
+        let tampered = self.services.calls.get(&id).is_some_and(|c| c.shown.as_deref() != Some(args_bytes(&c.args).as_slice()));
+        if ok && !tampered {
             return self.invoke(id);
+        }
+        if tampered && let Some(c) = self.services.calls.remove(&id) {
+            self.out.push(Out::Caller(c.caller, fail(c.call, "argumenty se po zobrazeni zmenily")));
+            return;
         }
         if let Some(c) = self.services.calls.remove(&id) {
             self.out.push(Out::Caller(c.caller, fail(c.call, "zamitnuto uzivatelem")));

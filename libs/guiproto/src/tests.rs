@@ -549,3 +549,18 @@ fn status_roundtrip() {
     s.format(&mut t).unwrap();
     assert_eq!(Status::parse(&t), Some(s));
 }
+
+#[test]
+fn paths_value_roundtrip_and_check() {
+    let v = Value::Paths(vec!["/a".into(), "/b".into()]);
+    let mut w = wire::Writer::new();
+    v.encode(&mut w);
+    let e = w.finish();
+    assert_eq!(Value::decode(&mut wire::Reader::new(&e)), Ok(v.clone()));
+    let mut w = wire::Writer::new();
+    w.u8(6).u32(u32::MAX);
+    assert!(Value::decode(&mut wire::Reader::new(&w.finish())).is_err());
+    let a = action::parse_manifest("[[action]]\nid = \"files.delete\"\n[[action.param]]\nname = \"files\"\ntype = \"paths\"\nrequired = true\n").unwrap();
+    assert!(a[0].check(&[("files".into(), v)]).is_ok());
+    assert!(a[0].check(&[("files".into(), Value::Path("/a".into()))]).is_err());
+}

@@ -340,6 +340,8 @@ vrstvě nad ztlumenými okny**. Do té vrstvy nesmí kreslit žádná aplikace.
   ignorován.
 - Výsledek `ANSWER { id, choice }` nebo `ANSWER { id, text }` (heslo)
   jde jen žadateli.
+- U potvrzení akce dialog ukazuje skutečné parametry (cestu, příjemce,
+  seznam souborů) a potvrzení se váže přesně na ně (viz [API akcí](#api-akcí)).
 
 Zprávy kanálu `dialog` jsou binární (`guiproto::control`):
 
@@ -376,7 +378,7 @@ confirm = false          # true = potvrdit systémovým dialogem
 
 [[action.param]]
 name = "title"
-type = "text"            # text, int, bool, path, choice
+type = "text"            # text, int, bool, path, paths, choice
 required = true
 
 [[action.param]]
@@ -395,6 +397,32 @@ choices = ["zluta", "modra"]
 
 Akce s `confirm = true` nebo volaná z umělého zdroje (agent) se před
 předáním potvrdí systémovým dialogem. Volající vidí jen akce, ne okna.
+
+**Potvrzuje se to, co je vidět.** Dialog kreslí systém a ukazuje
+**skutečné argumenty** podle jejich typu z manifestu, ne jen název akce:
+
+| Typ | V dialogu |
+|---|---|
+| `path` | celá cesta (dlouhá se zalomí po znacích, nic se neschová) |
+| `paths` | počet položek a náhled prvních 8 celých cest, „... a dalších N“ |
+| `text` | hodnota v uvozovkách (příjemce, cíl v síti, zpráva), nejvýš 300 znaků |
+| `int`, `bool`, `choice` | hodnota (`ano`/`ne` u `bool`) |
+
+Kompozitor si při zobrazení dialogu uloží zakódované argumenty (celé,
+porovnávají se bajt po bajtu - otisk by šel úmyslně zkolidovat) a aplikaci po potvrzení předá **přesně ty argumenty,
+které uživatel viděl**. Když by se mezi zobrazením a potvrzením změnily,
+volání se odmítne („argumenty se po zobrazení změnily“) a aplikace nic
+nedostane. Volající nemá zprávu, kterou by argumenty po potvrzení změnil.
+
+```text
+Systém: potvrzení
+asistent (automat) chce v aplikaci Pošta provést akci „Odeslat přílohu“.
+Akce potřebuje: síť, soubory.
+Parametry:
+recipient: "jana@example.com"
+file (cesta): /home/michal/Dokumenty/rozpocet-2027-final.xlsx
+                                        [Povolit]  [Zamítnout]
+```
 
 ## Řídicí příkazy kompozitoru
 
@@ -649,7 +677,7 @@ skládání kompozitoru.
 | ovladač | vyjedná `VIRGL`, `RESOURCE_BLOB`, `CONTEXT_INIT` a vypíše capsety, např. `virgl(v1) virgl2(v2)` |
 | `vgpu::virgl` | vlastní kodér proudu příkazů virgl (stavové objekty, shadery TGSI, vrcholy, kreslení, scissor) a příkazy 3D virtio-gpu, testy na hostiteli |
 | skládání přes GPU | čeká: na tomto hostiteli (QEMU 11.1 pro Windows) se se zapnutým OpenGL (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) virtuální stroj po startu jádra zastaví |
-| Venus | QEMU pro Windows ho nemá: „Render server support was not enabled in virglrenderer“ |
+| Venus | QEMU pro Windows ho nemá („Render server support was not enabled in virglrenderer“). **Funguje ve WSL2:** `cargo xtask run --qemu-wsl --gpu venus` (QEMU 10.1 a virglrenderer s render serverem přeložené v `~/venus/prefix`, Vulkan hostitele lavapipe, displej GTK pod Xvfb); ovladač hlásí capset `venus(v0)` |
 
 ⚠️ **Kde testovat Venus:** Linux s fyzickou GPU a QEMU + virglrenderer
 s render serverem (nebo crosvm). WSL2 jen s Vulkanem přeloženým přes

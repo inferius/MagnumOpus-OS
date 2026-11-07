@@ -357,6 +357,8 @@ application may draw into that layer.
   input is ignored.
 - The result `ANSWER { id, choice }` or `ANSWER { id, text }` (password)
   goes only to the requester.
+- An action confirmation shows the actual parameters (path, recipient, file
+  list) and the confirmation binds exactly to them (see [Action API](#action-api)).
 
 The `dialog` channel messages are binary (`guiproto::control`):
 
@@ -394,7 +396,7 @@ confirm = false          # true = confirm with a system dialog
 
 [[action.param]]
 name = "title"
-type = "text"            # text, int, bool, path, choice
+type = "text"            # text, int, bool, path, paths, choice
 required = true
 
 [[action.param]]
@@ -414,6 +416,25 @@ choices = ["yellow", "blue"]
 An action with `confirm = true`, or one called from a synthetic source
 (agent), is confirmed with a system dialog before it is passed on. A
 caller sees only actions, not windows.
+
+**What is confirmed is what is shown.** The system draws the dialog and
+shows the **actual arguments** by their manifest type, not just the
+action name:
+
+| Type | In the dialog |
+|---|---|
+| `path` | the whole path (a long one wraps by characters, nothing is hidden) |
+| `paths` | number of items and a preview of the first 8 whole paths, "... and N more" |
+| `text` | the value in quotes (recipient, network target, message), at most 300 characters |
+| `int`, `bool`, `choice` | the value (`ano`/`ne` for `bool`) |
+
+When the dialog is shown, the compositor stores the encoded arguments
+(whole, compared byte by byte - a fingerprint could be collided on
+purpose) and after confirmation hands the
+application **exactly the arguments the user saw**. If they changed
+between showing and confirming, the call is rejected ("arguments changed
+after display") and the application gets nothing. The caller has no
+message to change the arguments after confirmation.
 
 ## Compositor control commands
 
@@ -665,7 +686,7 @@ for compositor composition.
 | driver | negotiates `VIRGL`, `RESOURCE_BLOB`, `CONTEXT_INIT` and logs the capsets, e.g. `virgl(v1) virgl2(v2)` |
 | `vgpu::virgl` | own encoder of the virgl command stream (state objects, TGSI shaders, vertices, draws, scissor) and virtio-gpu 3D commands, host tests |
 | GPU composition | pending: on this host (QEMU 11.1 for Windows) the virtual machine stalls after the kernel starts whenever OpenGL is on (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) |
-| Venus | QEMU for Windows lacks it: "Render server support was not enabled in virglrenderer" |
+| Venus | QEMU for Windows lacks it ("Render server support was not enabled in virglrenderer"). **Works in WSL2:** `cargo xtask run --qemu-wsl --gpu venus` (QEMU 10.1 and virglrenderer with the render server built into `~/venus/prefix`, host Vulkan lavapipe, GTK display under Xvfb); the driver reports capset `venus(v0)` |
 
 ⚠️ **Where to test Venus:** Linux with a physical GPU and QEMU +
 virglrenderer with the render server (or crosvm). WSL2 only with Vulkan
