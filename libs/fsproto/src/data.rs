@@ -13,24 +13,24 @@ use libos::{Error, Result};
 
 use crate::{FsClient, Reader, Writer, get_time, put_time};
 
-/// Kody operaci (navazuji na `hist::op`; 87-89 patri vnorenym datasetum).
+/// Kody operaci (87-92 patri vnorenym datasetum, 100 je SIMULATE_POWER_LOSS; data od 110).
 pub mod op {
     /// zdroj str, cil str -> sdilenych bajtu u64 (soubor, odkaz, slozka)
-    pub const CLONE: u32 = 90;
+    pub const CLONE: u32 = 110;
     /// zdroj str, posun u64, cil str, posun u64, delka u64
-    pub const CLONE_RANGE: u32 = 91;
+    pub const CLONE_RANGE: u32 = 111;
     /// cesta str, posun u64, delka u64, zachovat velikost u8
-    pub const FALLOCATE: u32 = 92;
+    pub const FALLOCATE: u32 = 112;
     /// dataset str -> `DataSettings`
-    pub const DATA_SETTINGS: u32 = 93;
+    pub const DATA_SETTINGS: u32 = 113;
     /// dataset str, `DataSettings`
-    pub const SET_DATA_SETTINGS: u32 = 94;
+    pub const SET_DATA_SETTINGS: u32 = 114;
     /// (nic) - spusti scrub (zastaveny pokracuje)
-    pub const SCRUB_START: u32 = 95;
+    pub const SCRUB_START: u32 = 115;
     /// (nic) - zastavi scrub (pozice zustane)
-    pub const SCRUB_STOP: u32 = 96;
+    pub const SCRUB_STOP: u32 = 116;
     /// (nic) -> `ScrubStatus`
-    pub const SCRUB_STATUS: u32 = 97;
+    pub const SCRUB_STATUS: u32 = 117;
 }
 
 /// Komprese (`DataSettings::compress`).

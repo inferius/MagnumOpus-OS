@@ -116,7 +116,7 @@ Změna uvnitř v3, poznaná příznaky `INCOMPAT_PTR_COPY` (bit 2 incompat,
 | deadlist | 24 B (začátek, délka, birth) | **32 B**: + začátek kopie | kopie se uvolní s první |
 | položky stromu | 1-23 | + 24 `DATAOPT`, 25 `SHARE`, 26 `DEDUP`, 27 `SCRUB`, 28 `SCRUBERR`, 29 `DEDUPPOS` | nastavení dat, tabulka sdílení, index deduplikace, stav a chyby scrubu, pozice deduplikace |
 | intent log | extent: blok, součty | extent v **úplném kódování** (komprese, kopie); zápis do předalokovaných bloků | `fsync` komprimovaných dat a zápisu na místo |
-| protokol v2 | op 54-86 | + **90-97** (`fsproto::data`; 87-89 vnořené datasety) | kopie, předalokace, nastavení dat, scrub |
+| protokol v2 | op 54-86 | + **110-117** (`fsproto::data`; 87-92 vnořené datasety) | kopie, předalokace, nastavení dat, scrub |
 
 **Starší svazek** (bez `INCOMPAT_PTR_COPY`, ukazatel 40 B) ovladač
 **odmítne** (`NOT_SUPPORTED`) - jiný tvar ukazatele ve všech uzlech by

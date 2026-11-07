@@ -1,4 +1,4 @@
-//! Operace dat (protokol v2, op 90-97, faze 3 FS): okamzite kopie,
+//! Operace dat (protokol v2, op 110-117, faze 3 FS): okamzite kopie,
 //! predalokace, nastaveni dat datasetu a scrub.
 //!
 //! Cesty jsou cesty relace (`Session::map`); prava kontroluje FS podle

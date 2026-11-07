@@ -10,7 +10,7 @@ změny formátu shrnuje [Verze formátu](fs-verze.md#fáze-3-data-incompat_ptr_c
 > **Změna proti v3 (fáze 2):** nová kapitola. Ukazatel má 48 B (adresa
 > druhé kopie), extent nese příznaky (nezapsaný, sdílený, kopie)
 > a kompresi, deadlist adresu kopie; nové položky stromu 24-29, příznaky
-> `INCOMPAT_PTR_COPY` a `INCOMPAT_DATA`, operace protokolu 90-97.
+> `INCOMPAT_PTR_COPY` a `INCOMPAT_DATA`, operace protokolu 110-117.
 > **Proč:** odolnost (kopie, samoléčení, scrub) a úspora místa (kopie bez
 > kopírování, deduplikace, díry) musí platit pro každý zápis a přežít
 > pád, takže patří do FS; kdy scrubovat a deduplikovat, rozhoduje služba.
@@ -46,7 +46,7 @@ while !fs.scrub_step(256, now)? {}
 ```
 
 Přes službu fsd totéž dělá `FsClient` (`fsproto::data`), viz
-[Protokol](#protokol-operace-90-97).
+[Protokol](#protokol-operace-110-117).
 
 ## Výchozí stav a cena
 
@@ -372,20 +372,20 @@ fsck (`check`) navíc ověří:
 - index deduplikace odpovídá indexovaným záznamům tabulky (a naopak),
 - se `scrub = true` přečte data všech extentů (komprimované rozbalí).
 
-## Protokol (operace 90-97)
+## Protokol (operace 110-117)
 
-`fsproto::data` (87-89 patří vnořeným datasetům):
+`fsproto::data` (87-92 patří vnořeným datasetům, 100 je `SIMULATE_POWER_LOSS`):
 
 | Op | Jméno | Požadavek | Odpověď | Práva |
 |---|---|---|---|---|
-| 90 | `CLONE` | zdroj, cíl | sdílených bajtů u64 | číst zdroj, vytvořit cíl |
-| 91 | `CLONE_RANGE` | zdroj, posun, cíl, posun, délka | - | číst zdroj, zapsat cíl |
-| 92 | `FALLOCATE` | cesta, posun, délka, zachovat velikost u8 | - | zápis |
-| 93 | `DATA_SETTINGS` | dataset | komprese, kopií, deduplikace | čtení |
-| 94 | `SET_DATA_SETTINGS` | dataset, nastavení | - | `MANAGE` |
-| 95 | `SCRUB_START` | - | - | `MANAGE` na kořeni svazku |
-| 96 | `SCRUB_STOP` | - | - | `MANAGE` na kořeni svazku |
-| 97 | `SCRUB_STATUS` | - | stav, časy, počty, chyby | kdokoli (stav disku, ne obsah) |
+| 110 | `CLONE` | zdroj, cíl | sdílených bajtů u64 | číst zdroj, vytvořit cíl |
+| 111 | `CLONE_RANGE` | zdroj, posun, cíl, posun, délka | - | číst zdroj, zapsat cíl |
+| 112 | `FALLOCATE` | cesta, posun, délka, zachovat velikost u8 | - | zápis |
+| 113 | `DATA_SETTINGS` | dataset | komprese, kopií, deduplikace | čtení |
+| 114 | `SET_DATA_SETTINGS` | dataset, nastavení | - | `MANAGE` |
+| 115 | `SCRUB_START` | - | - | `MANAGE` na kořeni svazku |
+| 116 | `SCRUB_STOP` | - | - | `MANAGE` na kořeni svazku |
+| 117 | `SCRUB_STATUS` | - | stav, časy, počty, chyby | kdokoli (stav disku, ne obsah) |
 
 ## Rizika a follow-upy
 

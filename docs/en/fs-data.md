@@ -12,7 +12,7 @@ scrub** and **preallocation**. The general format is described in
 > address of a second copy), an extent carries flags (unwritten, shared,
 > copy) and compression, a deadlist entry the address of the copy; new
 > tree items 24-29, the feature bits `INCOMPAT_PTR_COPY` and
-> `INCOMPAT_DATA`, protocol operations 90-97.
+> `INCOMPAT_DATA`, protocol operations 110-117.
 > **Why:** resilience (copies, self-healing, scrub) and saving space
 > (copies without copying, deduplication, holes) must hold for every write
 > and survive a crash, so they belong in the FS; when to scrub and
@@ -49,7 +49,7 @@ while !fs.scrub_step(256, now)? {}
 ```
 
 Through the fsd service the same is done by `FsClient` (`fsproto::data`),
-see [Protocol](#protocol-operations-90-97).
+see [Protocol](#protocol-operations-110-117).
 
 ## Defaults and cost
 
@@ -387,20 +387,20 @@ fsck (`check`) additionally verifies:
 - with `scrub = true` it reads the data of all extents (unpacking
   compressed ones).
 
-## Protocol (operations 90-97)
+## Protocol (operations 110-117)
 
-`fsproto::data` (87-89 belong to nested datasets):
+`fsproto::data` (87-92 belong to nested datasets, 100 is `SIMULATE_POWER_LOSS`):
 
 | Op | Name | Request | Reply | Rights |
 |---|---|---|---|---|
-| 90 | `CLONE` | source, destination | shared bytes u64 | read the source, create the destination |
-| 91 | `CLONE_RANGE` | source, offset, destination, offset, length | - | read the source, write the destination |
-| 92 | `FALLOCATE` | path, offset, length, keep size u8 | - | write |
-| 93 | `DATA_SETTINGS` | dataset | compression, copies, deduplication | read |
-| 94 | `SET_DATA_SETTINGS` | dataset, settings | - | `MANAGE` |
-| 95 | `SCRUB_START` | - | - | `MANAGE` on the volume root |
-| 96 | `SCRUB_STOP` | - | - | `MANAGE` on the volume root |
-| 97 | `SCRUB_STATUS` | - | state, times, counts, errors | anyone (disk state, not content) |
+| 110 | `CLONE` | source, destination | shared bytes u64 | read the source, create the destination |
+| 111 | `CLONE_RANGE` | source, offset, destination, offset, length | - | read the source, write the destination |
+| 112 | `FALLOCATE` | path, offset, length, keep size u8 | - | write |
+| 113 | `DATA_SETTINGS` | dataset | compression, copies, deduplication | read |
+| 114 | `SET_DATA_SETTINGS` | dataset, settings | - | `MANAGE` |
+| 115 | `SCRUB_START` | - | - | `MANAGE` on the volume root |
+| 116 | `SCRUB_STOP` | - | - | `MANAGE` on the volume root |
+| 117 | `SCRUB_STATUS` | - | state, times, counts, errors | anyone (disk state, not content) |
 
 ## Risks and follow-ups
 

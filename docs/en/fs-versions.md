@@ -120,7 +120,7 @@ both.
 | deadlist | 24 B (start, length, birth) | **32 B**: + start of the copy | the copy is freed with the first |
 | tree items | 1-23 | + 24 `DATAOPT`, 25 `SHARE`, 26 `DEDUP`, 27 `SCRUB`, 28 `SCRUBERR`, 29 `DEDUPPOS` | data settings, sharing table, deduplication index, scrub state and errors, deduplication position |
 | intent log | extent: block, checksums | extent in **full encoding** (compression, copy); writes into preallocated blocks | `fsync` of compressed data and in-place writes |
-| protocol v2 | op 54-86 | + **90-97** (`fsproto::data`; 87-89 nested datasets) | copies, preallocation, data settings, scrub |
+| protocol v2 | op 54-86 | + **110-117** (`fsproto::data`; 87-92 nested datasets) | copies, preallocation, data settings, scrub |
 
 **An older volume** (without `INCOMPAT_PTR_COPY`, 40 B pointer) is
 **rejected** by the driver (`NOT_SUPPORTED`) - a different pointer layout in
