@@ -40,6 +40,7 @@ velikosti písma a omezení pohybu.
 | `design/start-varianty.html` | tři varianty startovací obrazovky (archiv rozhodnutí) |
 | `design/pad.html` | obrazovka kritického pádu: klidný popis, odpočet, `D` technická zpráva, oznámení po dalším startu |
 | `design/pad-varianty.html` | tři varianty obrazovky pádu (archiv rozhodnutí) |
+| `design/instalace.html` | instalace: uvítání na živém USB, instalátor v 8 krocích (kontrola počítače, disk, náhled změn, účet, zabezpečení), průběh, první spuštění |
 
 ## Rozhodnutí ke stylu (odsouhlaseno)
 
@@ -58,6 +59,7 @@ C Vřelý (hravější, výrazný akcent).
 | 7 | logo | **symbol M + nápis MagnumOpus OS** (vektory od uživatele) | `design/assets/logo/`; fialová `#6b3fd6` na světlém, levandulová `#b79bff` na tmavém, bílá na barevném |
 | 8 | startovací obrazovka | **A (logo s prstencem) + podrobný log z B**, na konci **přechod znaku do avataru** | vybráno ze tří variant v `design/start-varianty.html` |
 | 9 | obrazovka kritického pádu | **A Klid** pro uživatele, **klávesa D přepne na technickou zprávu** (Dílna); ve vývojové verzi rovnou Dílna | vybráno ze tří variant v `design/pad-varianty.html` |
+| 10 | instalace | **vyzkoušet z USB, pak nainstalovat**; instalátor s náhledem změn disku; první spuštění | doporučená varianta (alternativy: jen obraz disku + průvodce, instalace z Windows) |
 
 ## Principy
 
@@ -648,6 +650,50 @@ i na sériovou linku.
   předchozí verzi systému (snapshot FS) nebo záchranný režim.
 - **Přístupnost**: text aspoň 7 : 1, nic nebliká, odpočet jde pozastavit.
 
+### Instalace
+
+Systém se dodává jako **živé USB** (`design/instalace.html`): naběhne
+z USB a dá se vyzkoušet, aniž by se na disku počítače cokoli změnilo
+(změny jdou jen do paměti). Uvítání nabídne **Vyzkoušet** a **Nainstalovat**,
+nahoře je od první obrazovky jazyk, klávesnice a přístupnost (kontrast,
+větší písmo, čtečka). Ve zkušebním režimu je na ploše ikona „Nainstalovat
+MagnumOpus“ a v liště štítek „změny se neukládají“.
+
+**Instalátor** je systémová aplikace (odznak „Systém“) s kroky vlevo:
+
+| Krok | Co dělá |
+|---|---|
+| 1 Jazyk a přístupnost | jazyk, rozložení klávesnice s polem na vyzkoušení, přístupnost (platí i pro nainstalovaný systém) |
+| 2 Kontrola počítače | grafika, disk, paměť, síť, vstup, Secure Boot; výsledek je **ověřený**, protože systém na stroji právě běží |
+| 3 Disk | **vedle Windows** (doporučeno; posuvník velikosti s mezemi: Windows aspoň obsazené místo + rezerva, MagnumOpus aspoň 40 GB), **celý disk**, **vlastní rozdělení**; mapa disku „teď“ |
+| 4 Náhled změn | mapa disku **teď** a **po instalaci**, seznam změn (beze změny, zmenšit, nový, smazat); zatím se nic nezapsalo. Zmenšení Windows chce potvrzení „mám zálohu“, smazání celého disku napsání názvu disku |
+| 5 Účet | jméno, heslo s ukazatelem síly, **bezpečnostní fráze** s ukázkou pruhu „Systém“, ve kterém se bude zobrazovat |
+| 6 Zabezpečení | profil Standardní / Přísný / Volný, **šifrování disku** (výchozí zapnuto) a **klíč pro obnovu** (uložit na USB, vytisknout, QR) |
+| 7 Souhrn | přehled voleb, tlačítko Nainstalovat |
+| 8 Instalace | prstenec průběhu se symbolem (jako na startu), procenta, odhad času, seznam fází; systém jde mezitím dál zkoušet |
+
+Pak obrazovka **Nainstalováno** s návodem k Secure Boot pro daný počítač
+a restart. **První spuštění** nabídne motiv a polohu lišty a třemi kartami
+představí, čím je systém jiný: odznak důvěry, zkusit bokem, označení agenta.
+
+⚠️ **Rizika (řečená předem):**
+
+- **Zmenšení oddílu Windows (NTFS)** je nejrizikovější krok: výpadek proudu
+  během přesunu dat může poškodit Windows. Instalátor oddíl nejdřív ověří,
+  zmenšuje jen volné místo a chce potvrzení zálohy. Implementace NTFS
+  zmenšení je samostatná a velká práce; do té doby jde jen „celý disk“
+  nebo volné místo.
+- **Secure Boot**: běžné počítače ho mají zapnutý a nepodepsaný zavaděč
+  nespustí. Dlouhodobě podepsaný zavaděč (cesta přes shim jako Linux),
+  do té doby návod k vypnutí.
+- **Ovladače na skutečném hardwaru**: živé USB potřebuje USB úložiště,
+  disk (NVMe/AHCI), vstup a obraz aspoň přes framebuffer z firmwaru.
+- **První klávesnice**: ochrana proti BadUSB se při instalaci neuplatní
+  (bez klávesnice nejde nic napsat); ověřování nových zařízení se zapne až
+  po instalaci podle zvoleného profilu.
+- **Aktualizace** systému budou nová verze ve FS (snapshot), takže návrat
+  k předchozí verzi je stejná volba jako po pádu.
+
 ## Přístupnost
 
 Strom přístupnosti je součást protokolu okna (`guiproto::a11y`). Knihovna
@@ -902,3 +948,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1.2 | 7. 11. 2026 | svižnost, plynulost a zotavení jako požadavek s měřitelnými cíli; restart kompozitoru bez ztráty oken; vlákno G5; rozhodnutí k implementaci (C, B, B) |
 | v1.3 | 7. 11. 2026 | logo (vektory od uživatele) v prototypech a v design systému; startovací obrazovka s přechodem do avataru |
 | v1.4 | 7. 11. 2026 | obrazovka kritického pádu (A Klid + technická zpráva na D), oznámení po dalším startu; příručka grafického jazyka |
+| v1.5 | 8. 11. 2026 | instalace: živé USB, instalátor s náhledem změn disku, první spuštění |
