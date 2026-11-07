@@ -1,6 +1,7 @@
 # Návrh: jazyk shellu (k rozhodnutí)
 
-> Stav: **návrh k diskusi**. Odsouhlaseno je zatím jen to, že jde o nový
+> Stav: **zápisy rozhodnuty** (viz [Rozhodnutí](#rozhodnutí-jeden-jazyk-dva-zápisy-b-a-c)),
+> otázky 2-7 dole čekají. Původně **návrh k diskusi**. Odsouhlaseno je zatím jen to, že jde o nový
 > jazyk s typy, chyba je hodnota (`?` jako v Rustu), skript nese manifest
 > oprávnění a POSIX `sh` je zvlášť ([rozhodnutí 6a-6d](architektura.md#rozhodnutí-k-milníkům-6a-6d-odsouhlaseno)).
 > Tady je syntaxe a chování, které je potřeba vybrat.
@@ -90,7 +91,38 @@ ls("~/Dokumenty", recursive: true).filter(|f| f.size > 100.mb && f.mtime < now()
 | hranice text / výraz | nejasná (`$x` vs `x`) | **jasná** (`let`, `if`, `(...)` = výraz) | jen výrazy |
 | doplňování podle typů | ano | ano | ano |
 
-## Doporučení: B s těmito pravidly
+## Rozhodnutí: jeden jazyk, dva zápisy (B a C)
+
+> **Odsouhlaseno:** jazyk má **dva zápisy** - příkazový B (výchozí pro
+> interaktivní psaní) a výrazový C blízký Rustu (pro skripty a logiku).
+> Oba jsou **zápisy téhož jazyka**, ne dva jazyky. To se musí přísně hlídat.
+
+```text
+ls ~/Dok -r | where size > 100MB              # B
+ls("~/Dok", recursive: true).where(|f| f.size > 100MB)   # C, totéž
+ls ~/Dok -r | where (f.size > 100MB && f.ext == "pdf")   # míchání: výraz v ( ) je C
+```
+
+**Pravidla, která to drží pohromadě** (kontroluje je CI, ne jen dohoda):
+
+1. **Jeden strom, jedna sémantika.** Oba parsery vytvoří stejný strom
+   výrazů. Typy, vyhodnocení, roury, chyby a `?`, manifest oprávnění,
+   doplňování i nápověda existují jen jednou, nad stromem. Zápis nesmí mít
+   vlastní chování.
+2. **Každá konstrukce v obou zápisech.** Nová funkce jazyka se přijme jen
+   s tvarem v B i v C. Výjimkou je, když tvar v jednom zápisu nedává smysl;
+   pak se to výslovně zapíše do tabulky výjimek v této kapitole.
+3. **Převod tam a zpět je test.** Formátovač umí `fmt --style b|c`. Testy
+   pro každý příklad z dokumentace a testovací sady ověří:
+   `B -> strom -> C -> strom` dá stejný strom a stejný výsledek, a totéž
+   opačně.
+4. **Dokumentace ukazuje oba tvary** (generované formátovačem, ne psané
+   ručně dvakrát).
+5. **Míchání je povolené** jen na jasné hranici: výraz v `( )` uvnitř
+   příkazu je C, příkaz uvnitř výrazu se volá jako funkce.
+6. **Verze jazyka (`lang 1`) platí pro oba zápisy** najednou.
+
+## Pravidla zápisu B
 
 - **Příkazový režim:** `prikaz arg -p hodnota --dlouhy`. Slovo je text,
   `$x` je hodnota proměnné, `*.txt` rozvine shell podle FS (jen bez
@@ -130,7 +162,7 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 
 | # | Otázka | Varianty | Doporučení |
 |---|---|---|---|
-| 1 | základní styl | A / **B** / C | **B** |
+| 1 | základní styl | A / **B** / C | **rozhodnuto: B i C jako dva zápisy jednoho jazyka** |
 | 2 | názvy příkazů | krátké (`ls`, `cp`) / `sloveso-podstatné` (`file-list`) / obojí (krátký alias) | krátké, plné jméno v nápovědě |
 | 3 | proměnné v příkazu | `$x` / bez znaku (jen ve výrazech) | `$x` v příkazech, bez `$` ve výrazech |
 | 4 | zápis funkce (closure) | `{ \|x\| ... }` / `fn(x) { ... }` / `x => ...` | `{ \|x\| ... }` (krátké v rouře), `fn jméno(x) { }` pro pojmenované |
