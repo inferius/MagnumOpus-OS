@@ -1,4 +1,5 @@
-//! virtio-gpu: ovladac grafiky (virtio 1.x pres PCI, rezim 2D).
+//! virtio-gpu: ovladac grafiky (virtio 1.x pres PCI): displej 2D a render
+//! uzel pro 3D (Venus, protokol `gpuproto`, viz `render.rs`).
 //!
 //! Spousti ho spravce zarizeni. Startovni zprava (kind USER, v tomto poradi):
 //! 1. omezeny Resource tohoto zarizeni,
@@ -13,6 +14,9 @@
 //! bufferu DMA (s IOMMU jedina pamet, kterou zarizeni vidi), posle
 //! `TRANSFER_TO_HOST_2D` a `RESOURCE_FLUSH` a odpovi `PRESENTED` s casem.
 //!
+//! `OPEN_RENDER` vrati novy kanal render uzlu (kontext s capsetem, bloby
+//! ve sdilene pameti, proudy prikazu). Render klientu muze byt vic.
+//!
 //! RIZIKO: kompozitor muze VMO menit i behem kopie - roztrhne to jen
 //! jeden snimek (kompozitor je jediny klient). Bez IOMMU muze zarizeni
 //! pres DMA zapsat kamkoli (jako u ostatnich ovladacu).
@@ -23,6 +27,7 @@
 extern crate alloc;
 
 mod device;
+mod render;
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -34,6 +39,7 @@ use libos::{Channel, Error, Signals, Startup, Vmo, println};
 use pci::Ecam;
 
 use device::Gpu;
+use render::Client;
 
 libos::entry!(main);
 
@@ -65,8 +71,11 @@ fn main(startup: Startup) -> i64 {
             let _ = write!(s, " {}(v{ver}, {size} B)", vgpu::capset_name(*id));
         }
         println!(
-            "virtio-gpu {address}: 3D: virgl={} blob={} context_init={} capsety:{s}",
-            gpu.virgl as u8, gpu.blob as u8, gpu.context_init as u8
+            "virtio-gpu {address}: 3D: virgl={} blob={} context_init={} sdilena pamet={} MiB capsety:{s}",
+            gpu.virgl as u8,
+            gpu.blob as u8,
+            gpu.context_init as u8,
+            gpu.shm.map_or(0, |m| m.len >> 20)
         );
     }
     let outs = gpu.outputs();
@@ -80,26 +89,48 @@ fn main(startup: Startup) -> i64 {
         ),
         None => println!("virtio-gpu {address}: zadny vystup"),
     }
+    let mut renders: Vec<Client> = Vec::new();
     loop {
-        // Ovladac konci, az klient (init, pak kompozitor) zavre kanal.
-        let items = [(client.handle(), Signals::READABLE | Signals::PEER_CLOSED)];
+        // Ovladac konci, az klient displeje (init, pak kompozitor) zavre
+        // kanal. Render klienti se obsluhuji vedle nej.
+        let mut items = alloc::vec![(client.handle(), Signals::READABLE | Signals::PEER_CLOSED)];
+        for r in &renders {
+            items.push((r.ch.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+        }
         let Ok((_, obs)) = libos::wait_many(&items, None) else {
             break;
         };
+        drop(items);
+        // Render klienti (odzadu, zavrene se odebiraji).
+        for i in (0..renders.len()).rev() {
+            let o = obs[i + 1];
+            if o.intersects(Signals::READABLE) {
+                while let Ok(m) = renders[i].ch.try_read() {
+                    let (reply, handles) = renders[i].handle(&mut gpu, &m.data);
+                    let _ = renders[i].ch.write(&reply.encode(), handles);
+                    if gpu.broken {
+                        break;
+                    }
+                }
+            } else if o.intersects(Signals::PEER_CLOSED) {
+                let mut c = renders.remove(i);
+                c.close(&mut gpu);
+            }
+        }
         if obs[0].intersects(Signals::READABLE) {
             while let Ok(m) = client.try_read() {
-                let reply = handle(&mut gpu, &m.data, m.handles);
-                if client.write(&reply.encode(), Vec::new()).is_err() {
+                let (reply, handles) = handle(&mut gpu, &m.data, m.handles, &mut renders);
+                if client.write(&reply.encode(), handles).is_err() {
                     break;
-                }
-                if gpu.broken {
-                    println!("virtio-gpu {address}: zarizeni neodpovida, koncim");
-                    let _ = gpu.reset();
-                    return 4;
                 }
             }
         } else if obs[0].intersects(Signals::PEER_CLOSED) {
             break;
+        }
+        if gpu.broken {
+            println!("virtio-gpu {address}: zarizeni neodpovida, koncim");
+            let _ = gpu.reset();
+            return 4;
         }
     }
     // Zarizeni zastavit (zadne DMA po konci ovladace).
@@ -107,16 +138,50 @@ fn main(startup: Startup) -> i64 {
     0
 }
 
-fn handle(gpu: &mut Gpu, data: &[u8], handles: Vec<libos::Handle>) -> Reply {
+/// Zprava displeje; odpoved a handly k ni.
+fn handle(gpu: &mut Gpu, data: &[u8], handles: Vec<libos::Handle>, renders: &mut Vec<Client>) -> (Reply, Vec<libos::Handle>) {
     let op = guiproto::window::ClientMsg::op_of(data);
-    let err = |code: Error| Reply::Error { op, code };
     let req = match Request::decode(data) {
         Ok(r) => r,
-        Err(e) => return err(e),
+        Err(code) => return (Reply::Error { op, code }, Vec::new()),
     };
+    if req == Request::OpenRender {
+        return match open_render(gpu, renders) {
+            Ok(h) => (Reply::Render, alloc::vec![h]),
+            Err(code) => (Reply::Error { op, code }, Vec::new()),
+        };
+    }
+    (handle_display(gpu, req, handles, op), Vec::new())
+}
+
+/// Ma zarizeni vse pro Venus (capset, bloby, context_init, sdilena pamet)?
+fn has_venus(gpu: &Gpu) -> bool {
+    gpu.virgl && gpu.blob && gpu.context_init && gpu.shm.is_some() && gpu.capsets.iter().any(|c| c.0 == vgpu::CAPSET_VENUS)
+}
+
+/// Novy kanal render uzlu (jen se zarizenim s kontexty 3D).
+fn open_render(gpu: &Gpu, renders: &mut Vec<Client>) -> Result<libos::Handle, Error> {
+    if !gpu.virgl || !gpu.context_init {
+        return Err(Error::NotSupported);
+    }
+    if renders.len() >= MAX_RENDER_CLIENTS {
+        return Err(Error::NoResources);
+    }
+    let (mine, theirs) = Channel::create()?;
+    renders.push(Client::new(mine));
+    Ok(theirs.into_handle())
+}
+
+/// Nejvic soucasnych render klientu.
+const MAX_RENDER_CLIENTS: usize = 16;
+
+fn handle_display(gpu: &mut Gpu, req: Request, handles: Vec<libos::Handle>, op: u32) -> Reply {
+    let err = |code: Error| Reply::Error { op, code };
     match req {
+        Request::OpenRender => err(Error::BadState),
         Request::Info => Reply::Modes {
-            caps: if gpu.virgl { guiproto::display::caps::VIRGL } else { 0 },
+            caps: (if gpu.virgl { guiproto::display::caps::VIRGL } else { 0 })
+                | (if has_venus(gpu) { guiproto::display::caps::VENUS } else { 0 }),
             outputs: gpu
                 .outputs()
                 .iter()

@@ -20,6 +20,7 @@ mod shell;
 mod supervisor;
 mod time;
 mod usb;
+mod vulkan;
 
 use alloc::string::String;
 
@@ -45,6 +46,9 @@ const SUITES: &[(&str, &[Test])] = &[
     ("sit", net::TESTS),
     ("supervisor", supervisor::TESTS),
     ("shell", shell::TESTS),
+    // Vulkan pred GUI: render uzel otevre init pres displej, ktery pak
+    // prevezme kompozitor.
+    ("vulkan", vulkan::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
 ];

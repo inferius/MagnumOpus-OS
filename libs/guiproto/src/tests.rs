@@ -319,6 +319,7 @@ fn display_roundtrip() {
             output: 0,
             rects: vec![Rect::new(0, 0, 10, 10)],
         },
+        Request::OpenRender,
     ] {
         assert_eq!(Request::decode(&m.encode()), Ok(m));
     }
@@ -333,6 +334,7 @@ fn display_roundtrip() {
         },
         Reply::Attached { output: 0 },
         Reply::Presented { seq: 3, time: 5 },
+        Reply::Render,
         Reply::Error {
             op: display::op::ATTACH,
             code: Error::NoMemory,

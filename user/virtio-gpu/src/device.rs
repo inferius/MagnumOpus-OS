@@ -1,4 +1,5 @@
-//! Zarizeni virtio-gpu: fronta prikazu, vystupy a jejich zdroje 2D.
+//! Zarizeni virtio-gpu: fronta prikazu, vystupy a jejich zdroje 2D;
+//! kontexty 3D, bloby a sdilena pamet pro render uzel (`render.rs`).
 
 use alloc::vec::Vec;
 use core::time::Duration;
@@ -15,9 +16,15 @@ use virtio::{Buffer, F_VERSION_1};
 const F_ACCESS_PLATFORM: u64 = 1 << 33;
 /// Jak dlouho cekat na odpoved zarizeni.
 const TIMEOUT: Duration = Duration::from_secs(2);
-/// Stranka pro prikaz (prvni pulka) a odpoved (druha pulka).
-const CMD_PAGE: u64 = 4096;
-const RESP_OFF: u64 = 2048;
+/// Jak dlouho cekat na `SUBMIT_3D` s plotem (renderer muze napr. pri
+/// prvnim vkCreateInstance prekladat shadery LLVM).
+const FENCE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Buffer DMA pro prikaz (do `RESP_OFF`, i proud `SUBMIT_3D` do 60 KiB)
+/// a odpoved (za `RESP_OFF`, i obsah capsetu).
+const CMD_PAGE: u64 = 128 * 1024;
+const RESP_OFF: u64 = 96 * 1024;
+/// Zarovnani blobu ve sdilene pameti (stranka hostitele muze byt 64 KiB).
+const SHM_ALIGN: u64 = 64 * 1024;
 /// Nejvetsi kus souvisle DMA pameti (limit jadra).
 const CHUNK_MAX: u64 = 4 << 20;
 /// Nejvetsi buffer vystupu (16384 x 1024 x 4).
@@ -70,6 +77,11 @@ pub struct Gpu {
     pub capsets: Vec<(u32, u32, u32)>,
     pub blob: bool,
     pub context_init: bool,
+    /// Oblast sdilene pameti pro mapovane bloby (QEMU `hostmem=`).
+    pub shm: Option<virtio::SharedMemory>,
+    pub shm_alloc: Option<vgpu::shm::RangeAlloc>,
+    next_ctx: u32,
+    next_fence: u64,
     /// Zarizeni neodpovedelo nebo vratilo neplatnou frontu: dal ho
     /// nepouzivat.
     pub broken: bool,
@@ -83,11 +95,16 @@ impl Gpu {
         let cmd_phys = resource.phys_addr(&cmd_vmo, 0)?;
         let cmd = Mapping::new(&cmd_vmo, 0, CMD_PAGE, MAP_READ | MAP_WRITE)?;
         let num_scanouts: u32 = s.device.config(vgpu::config::NUM_SCANOUTS);
+        let shm = s.device.shared_memory(vgpu::blob::SHM_ID_HOST_VISIBLE);
         let mut gpu = Self {
             virgl: s.features & vgpu::F_VIRGL != 0,
             capsets: Vec::new(),
             blob: s.features & vgpu::F_RESOURCE_BLOB != 0,
             context_init: s.features & vgpu::F_CONTEXT_INIT != 0,
+            shm,
+            shm_alloc: shm.map(|m| vgpu::shm::RangeAlloc::new(m.len, SHM_ALIGN)),
+            next_ctx: 1,
+            next_fence: 1,
             device: s.device,
             queue: s.queue,
             irq: s.irq,
@@ -134,6 +151,10 @@ impl Gpu {
     /// Posle prikaz a pocka na odpoved (`resp_len` bajtu). Chyba fronty
     /// nebo vyprseni = zarizeni je vadne (`broken`).
     fn command(&mut self, c: &[u8], resp_len: usize) -> Result<Vec<u8>> {
+        self.command_timeout(c, resp_len, TIMEOUT)
+    }
+
+    fn command_timeout(&mut self, c: &[u8], resp_len: usize, timeout: Duration) -> Result<Vec<u8>> {
         if self.broken {
             return Err(Error::IoError);
         }
@@ -155,7 +176,7 @@ impl Gpu {
             },
         ])?;
         self.device.notify(&self.queue);
-        let deadline = libos::time::deadline_after(TIMEOUT);
+        let deadline = libos::time::deadline_after(timeout);
         loop {
             match self.queue.take_used() {
                 Ok(Some(_)) => break,
@@ -178,14 +199,84 @@ impl Gpu {
     /// Prikaz bez dat v odpovedi.
     fn simple(&mut self, c: &[u8]) -> Result<()> {
         let r = self.command(c, vgpu::HEADER_SIZE)?;
-        match vgpu::response_type(&r) {
-            Some(cmd::RESP_OK_NODATA) => Ok(()),
-            Some(cmd::RESP_ERR_OUT_OF_MEMORY) => Err(Error::NoMemory),
-            Some(cmd::RESP_ERR_INVALID_PARAMETER | cmd::RESP_ERR_INVALID_SCANOUT_ID) => Err(Error::InvalidArgs),
-            _ => Err(Error::IoError),
+        resp_result(&r)
+    }
+
+    /// Prikaz bez dat v odpovedi (pro render uzel).
+    pub fn simple_cmd(&mut self, c: &[u8]) -> Result<()> {
+        self.simple(c)
+    }
+
+    pub fn new_resource(&mut self) -> u32 {
+        let r = self.next_resource;
+        self.next_resource += 1;
+        r
+    }
+
+    /// Obsah capsetu (`size` bajtu podle `GET_CAPSET_INFO`).
+    pub fn get_capset(&mut self, id: u32, version: u32, size: u32) -> Result<Vec<u8>> {
+        let r = self.command(&vgpu::blob::get_capset(id, version), vgpu::HEADER_SIZE + size as usize)?;
+        match vgpu::blob::parse_capset(&r) {
+            Some(d) => Ok(d.into()),
+            None => resp_result(&r).and(Err(Error::IoError)),
         }
     }
 
+    /// Novy kontext s capsetem; vraci id kontextu.
+    pub fn create_context(&mut self, capset: u32) -> Result<u32> {
+        let ctx = self.next_ctx;
+        self.next_ctx += 1;
+        self.simple(&vgpu::blob::ctx_create_init(ctx, capset, "render"))?;
+        Ok(ctx)
+    }
+
+    pub fn destroy_context(&mut self, ctx: u32) {
+        let _ = self.simple(&vgpu::blob::ctx_destroy(ctx));
+    }
+
+    /// Namapuje blob na offset sdilene pameti; vraci `map_info`.
+    pub fn map_blob(&mut self, ctx: u32, resource: u32, offset: u64) -> Result<u32> {
+        let r = self.command(&vgpu::blob::resource_map_blob(ctx, resource, offset), vgpu::blob::MAP_INFO_SIZE)?;
+        match vgpu::blob::parse_map_info(&r) {
+            Some(mi) => Ok(mi),
+            None => resp_result(&r).and(Err(Error::IoError)),
+        }
+    }
+
+    /// Fyzicka VMO rozsahu sdilene pameti (pro klienta).
+    pub fn shm_vmo(&self, offset: u64, size: u64) -> Result<Vmo> {
+        let shm = self.shm.ok_or(Error::NotSupported)?;
+        if offset.checked_add(size).is_none_or(|e| e > shm.len) {
+            return Err(Error::InvalidArgs);
+        }
+        self.resource.device_memory(shm.phys + offset, size)
+    }
+
+    /// `SUBMIT_3D` proudu `data` v kontextu `ctx`; s `fence` odpoved az po
+    /// splneni plotu na ose `ring_idx`.
+    pub fn submit(&mut self, ctx: u32, ring_idx: u8, fence: bool, data: &[u8]) -> Result<()> {
+        if !fence {
+            return self.simple(&vgpu::submit_3d(ctx, data));
+        }
+        let id = self.next_fence;
+        self.next_fence += 1;
+        let r = self.command_timeout(&vgpu::blob::submit_3d_fenced(ctx, ring_idx, id, data), vgpu::HEADER_SIZE, FENCE_TIMEOUT)?;
+        resp_result(&r)
+    }
+}
+
+/// Odpoved bez dat -> vysledek.
+fn resp_result(r: &[u8]) -> Result<()> {
+    match vgpu::response_type(r) {
+        Some(cmd::RESP_OK_NODATA) => Ok(()),
+        Some(cmd::RESP_ERR_OUT_OF_MEMORY) => Err(Error::NoMemory),
+        Some(cmd::RESP_ERR_INVALID_PARAMETER | cmd::RESP_ERR_INVALID_SCANOUT_ID) => Err(Error::InvalidArgs),
+        Some(cmd::RESP_ERR_INVALID_CONTEXT_ID | cmd::RESP_ERR_INVALID_RESOURCE_ID) => Err(Error::NotFound),
+        _ => Err(Error::IoError),
+    }
+}
+
+impl Gpu {
     /// Pripoji VMO kompozitoru jako obraz vystupu `output`.
     pub fn attach(&mut self, output: u32, w: u32, h: u32, stride: u32, vmo: Vmo) -> Result<()> {
         if !self.outputs.iter().any(|o| o.id == output) {
@@ -229,8 +320,7 @@ impl Gpu {
             });
             y += rows;
         }
-        let res = self.next_resource;
-        self.next_resource += 1;
+        let res = self.new_resource();
         self.simple(&vgpu::resource_create_2d(res, vgpu::FORMAT_B8G8R8X8_UNORM, w, h))?;
         if let Err(e) = self
             .simple(&vgpu::resource_attach_backing(res, &entries))

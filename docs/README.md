@@ -35,6 +35,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Grafika a okna](cs/gui.md) | [Graphics and windows](en/gui.md) | virtio-gpu, kompozitor, protokol okna, strom vrstev a přístupnosti, snímky a transakce, knihovna UI, písmo, systémové dialogy, API akcí / virtio-gpu, compositor, window protocol, layer and accessibility trees, frames and transactions, UI library, fonts, system dialogs, action API |
+| [Vulkan přes Venus](cs/venus.md) | [Vulkan over Venus](en/venus.md) | vlastní ovladač Venus, render uzel, kódování proudu, generátor z vk.xml / own Venus driver, render node, stream encoding, generator from vk.xml |
 
 ### Souborový systém / File system
 

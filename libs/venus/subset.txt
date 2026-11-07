@@ -1,0 +1,18 @@
+# Podmnozina Vulkanu, pro kterou `cargo xtask venus-gen` generuje kodovani
+# (libs/venus/src/gen). Typy a struktury se doplni samy (uzaver od prikazu).
+#
+#   command <vkPrikaz>    prikaz (vcetne prikazu transportu Venusu *MESA)
+#   chain <VkStruktura>   struktura, ktera smi byt v retezci pNext svych rodicu
+
+# Transport Venusu: kam renderer pise odpovedi.
+command vkSetReplyCommandStreamMESA
+command vkSeekReplyCommandStreamMESA
+
+# Instance a fyzicke zarizeni (krok 1: jmeno zarizeni).
+command vkEnumerateInstanceVersion
+command vkCreateInstance
+command vkDestroyInstance
+command vkEnumeratePhysicalDevices
+command vkGetPhysicalDeviceProperties
+command vkGetPhysicalDeviceQueueFamilyProperties
+command vkGetPhysicalDeviceMemoryProperties

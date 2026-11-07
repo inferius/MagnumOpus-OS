@@ -4,6 +4,10 @@
 //! jen pro cteni) a v `PRESENT` rekne, ktere obdelniky se zmenily.
 //! Ovladac je zkopiruje do svych bufferu DMA, posle je zarizeni a po
 //! dokonceni odpovi `PRESENTED` s casem (nahrada vsync u virtio-gpu 2D).
+//!
+//! `OPEN_RENDER` otevre novy kanal render uzlu (protokol `gpuproto`):
+//! vlastnik displeje (init, pak kompozitor) tak muze dat pristup ke 3D
+//! (Venus) dalsimu procesu, aniz by mu dal displej.
 
 use alloc::vec::Vec;
 
@@ -13,9 +17,11 @@ pub mod op {
     pub const INFO: u32 = 1;
     pub const ATTACH: u32 = 2;
     pub const PRESENT: u32 = 3;
+    pub const OPEN_RENDER: u32 = 4;
     pub const MODES: u32 = 101;
     pub const ATTACHED: u32 = 102;
     pub const PRESENTED: u32 = 103;
+    pub const RENDER: u32 = 104;
     pub const ERROR: u32 = 199;
 }
 
@@ -23,6 +29,8 @@ pub mod op {
 pub mod caps {
     /// Zarizeni umi 3D (virgl).
     pub const VIRGL: u32 = 1 << 0;
+    /// Ovladac ma render uzel s capsetem Venus (Vulkan, `OPEN_RENDER`).
+    pub const VENUS: u32 = 1 << 1;
 }
 
 /// Jeden vystup (scanout).
@@ -42,6 +50,8 @@ pub enum Request {
     /// Handle VMO (B8G8R8A8, `stride * h` bajtu) jde v handlech zpravy.
     Attach { output: u32, w: u32, h: u32, stride: u32 },
     Present { seq: u64, output: u32, rects: Vec<Rect> },
+    /// Novy kanal render uzlu (odpoved `Render`).
+    OpenRender,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +59,8 @@ pub enum Reply {
     Modes { caps: u32, outputs: Vec<Output> },
     Attached { output: u32 },
     Presented { seq: u64, time: u64 },
+    /// Kanal render uzlu jde v handlech zpravy.
+    Render,
     Error { op: u32, code: Error },
 }
 
@@ -68,6 +80,7 @@ impl Request {
                     w.rect(r);
                 }
             }
+            Request::OpenRender => w = Writer::op(op::OPEN_RENDER),
         }
         w.finish()
     }
@@ -92,6 +105,7 @@ impl Request {
                 }
                 Request::Present { seq, output, rects }
             }
+            op::OPEN_RENDER => Request::OpenRender,
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -120,6 +134,7 @@ impl Reply {
                 w = Writer::op(op::PRESENTED);
                 w.u64(*seq).u64(*time);
             }
+            Reply::Render => w = Writer::op(op::RENDER),
             Reply::Error { op: o, code } => {
                 w = Writer::op(op::ERROR);
                 w.u32(*o).i32(code.code());
@@ -149,6 +164,7 @@ impl Reply {
                 seq: r.u64()?,
                 time: r.u64()?,
             },
+            op::RENDER => Reply::Render,
             op::ERROR => Reply::Error {
                 op: r.u32()?,
                 code: Error::from_code(r.i32()? as i64).ok_or(Error::InvalidArgs)?,

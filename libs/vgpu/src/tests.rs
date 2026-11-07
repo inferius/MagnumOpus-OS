@@ -112,3 +112,83 @@ fn quad_vertices_map_pixels_to_ndc() {
     // Druhy: levy dolni roh obdelniku (y = 300 -> NDC 0).
     assert_eq!((fl(12), fl(13)), (-1.0, 0.0));
 }
+
+#[test]
+fn header_carries_ring_idx() {
+    let c = blob::submit_3d_fenced(5, 3, 0x1122_3344_5566_7788, &[1, 2, 3, 4]);
+    let u = |o: usize| u32::from_le_bytes(c[o..o + 4].try_into().unwrap());
+    assert_eq!(u(0), cmd::SUBMIT_3D);
+    assert_eq!(u(4), FLAG_FENCE | FLAG_INFO_RING_IDX);
+    assert_eq!(u64::from_le_bytes(c[8..16].try_into().unwrap()), 0x1122_3344_5566_7788);
+    assert_eq!(u(16), 5);
+    // ring_idx je bajt 20, padding 21..24 nula.
+    assert_eq!(&c[20..24], &[3, 0, 0, 0]);
+    assert_eq!((u(24), u(28)), (4, 0));
+    assert_eq!(&c[32..], &[1, 2, 3, 4]);
+}
+
+#[test]
+fn blob_commands_layout() {
+    // virtio_gpu_ctx_create: hlavicka, nlen, context_init, debug_name[64].
+    let c = blob::ctx_create_init(2, CAPSET_VENUS, "venus");
+    assert_eq!(c.len(), 24 + 8 + 64);
+    let u = |c: &[u8], o: usize| u32::from_le_bytes(c[o..o + 4].try_into().unwrap());
+    assert_eq!((u(&c, 0), u(&c, 16), u(&c, 24), u(&c, 28)), (cmd::CTX_CREATE, 2, 5, 4));
+    assert_eq!(&c[32..37], b"venus");
+    // virtio_gpu_resource_create_blob: 24 + 4*4 + 8 + 8, kusy po 16 B.
+    let info = blob::BlobInfo {
+        resource: 9,
+        mem: blob::BLOB_MEM_HOST3D,
+        flags: blob::BLOB_FLAG_USE_MAPPABLE,
+        blob_id: 0,
+        size: 1 << 20,
+    };
+    let c = blob::resource_create_blob(2, &info, &[]);
+    assert_eq!(c.len(), 56);
+    assert_eq!((u(&c, 0), u(&c, 16)), (cmd::RESOURCE_CREATE_BLOB, 2));
+    assert_eq!((u(&c, 24), u(&c, 28), u(&c, 32), u(&c, 36)), (9, 2, 1, 0));
+    assert_eq!(u64::from_le_bytes(c[48..56].try_into().unwrap()), 1 << 20);
+    let c = blob::resource_create_blob(2, &info, &[(0x1000, 4096)]);
+    assert_eq!((c.len(), u(&c, 36)), (72, 1));
+    // virtio_gpu_resource_map_blob: 24 + id + padding + offset.
+    let c = blob::resource_map_blob(2, 9, 0x20_0000);
+    assert_eq!(c.len(), 40);
+    assert_eq!((u(&c, 0), u(&c, 24)), (cmd::RESOURCE_MAP_BLOB, 9));
+    assert_eq!(u64::from_le_bytes(c[32..40].try_into().unwrap()), 0x20_0000);
+    assert_eq!(blob::resource_unmap_blob(2, 9).len(), 32);
+    assert_eq!(blob::get_capset(CAPSET_VENUS, 0).len(), 32);
+}
+
+#[test]
+fn blob_responses() {
+    let mut b = vec![0u8; blob::MAP_INFO_SIZE];
+    b[0..4].copy_from_slice(&cmd::RESP_OK_MAP_INFO.to_le_bytes());
+    b[24..28].copy_from_slice(&blob::MAP_CACHE_CACHED.to_le_bytes());
+    assert_eq!(blob::parse_map_info(&b), Some(blob::MAP_CACHE_CACHED));
+    assert_eq!(blob::parse_map_info(&b[..26]), None);
+    b[0..4].copy_from_slice(&cmd::RESP_ERR_INVALID_PARAMETER.to_le_bytes());
+    assert_eq!(blob::parse_map_info(&b), None);
+    let mut c = vec![0u8; 24 + 3];
+    c[0..4].copy_from_slice(&cmd::RESP_OK_CAPSET.to_le_bytes());
+    c[24..].copy_from_slice(&[7, 8, 9]);
+    assert_eq!(blob::parse_capset(&c), Some(&[7u8, 8, 9][..]));
+}
+
+#[test]
+fn shm_ranges_alloc_and_merge() {
+    const A: u64 = 64 * 1024;
+    let mut a = shm::RangeAlloc::new(4 * A + 100, A);
+    assert_eq!(a.free_bytes(), 4 * A);
+    let x = a.alloc(1).unwrap();
+    let y = a.alloc(A + 1).unwrap();
+    assert_eq!((x, y), (0, A));
+    assert!(a.alloc(2 * A).is_none());
+    assert_eq!(a.alloc(A), Some(3 * A));
+    a.release(3 * A, A);
+    a.release(x, 1);
+    a.release(y, A + 1);
+    // Po vraceni vseho jeden souvisly rozsah.
+    assert_eq!(a.alloc(4 * A), Some(0));
+    assert!(a.alloc(u64::MAX).is_none());
+    assert!(shm::RangeAlloc::new(100, A).alloc(1).is_none());
+}
