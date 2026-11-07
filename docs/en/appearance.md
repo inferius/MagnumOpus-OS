@@ -39,6 +39,8 @@ reduced motion.
 | `design/varianty-stylu.html` | the three original style variants (decision archive) |
 | `design/start.html` | boot screen: logo with a ring, log on Esc, step delay, boot failure, transition into the avatar |
 | `design/start-varianty.html` | three boot screen variants (decision archive) |
+| `design/pad.html` | critical crash screen: calm description, countdown, `D` technical report, notification after the next boot |
+| `design/pad-varianty.html` | three crash screen variants (decision archive) |
 
 ## Style decisions (agreed)
 
@@ -56,6 +58,7 @@ C Warm (more playful, strong accent).
 | 6 | AI agent marking | **reserved color + icon + word** | coral color only for the agent, always with an icon and the word "agent" (never by color alone) |
 | 7 | logo | **M symbol + MagnumOpus OS wordmark** (vectors from the user) | `design/assets/logo/`; purple `#6b3fd6` on light, lavender `#b79bff` on dark, white on color |
 | 8 | boot screen | **A (logo with a ring) + detailed log from B**, ending with a **transition of the mark into the avatar** | chosen from three variants in `design/start-varianty.html` |
+| 9 | critical crash screen | **A Calm** for users, **the D key switches to the technical report** (Workshop); in a development build Workshop directly | chosen from three variants in `design/pad-varianty.html` |
 
 ## Principles
 
@@ -648,6 +651,37 @@ changed area around the mark is drawn, tens of kB per frame.
 - The variants that were chosen from (A breathing, B steps, C transition
   into the clock) are in `design/start-varianty.html`.
 
+### System crash
+
+The screen for a **critical crash**: a kernel panic or an init crash
+(`design/pad.html`). Crashes of services, drivers and the compositor are
+handled by [recovery](#how-the-gui-recovers) and never show this screen.
+
+It is drawn by **the kernel itself** into the firmware framebuffer (UEFI
+GOP): no compositor, no drivers, no memory allocation. The typeface and the
+symbol are pre-rasterized in the kernel image (`40 kB), colors are fixed
+(dark theme), switching views is instant and the only motion is the
+countdown.
+
+| View | What it shows |
+|---|---|
+| **for users** (default) | dark purple background, the symbol in a ring that fills with the countdown to restart (15 s); "The system had to stop", reassurance that files are safe and work in progress comes back; error code and crash id (`PAGE_FAULT_KERNEL · #MO-7F3A-21C9`); a QR link to the error explanation in the documentation |
+| **Workshop** (key **D**) | on the left a short description and the keys, on the right the technical report: kind of panic, version, CPU, address, thread and job, backtrace with symbols and lines, registers, last 5 log messages, where the report is stored; in a **development build** it is shown directly |
+
+Keys: **Enter** restart now, **D** switch view, **P** pause or resume the
+countdown, **arrows** scroll the technical report. The state is also
+written to the serial line.
+
+- **Report**: the kernel stores it in reserved memory that survives a warm
+  restart; after the next boot init writes it to `/system/pady/` and after
+  sign-in shows a "The system crashed last time" notification (Show
+  report, Save to USB). **Nothing is sent automatically**; the QR code only
+  links to the documentation.
+- **Repeated crash**: 3 crashes during boot in a row = the next boot offers
+  the previous system version (FS snapshot) or recovery mode.
+- **Accessibility**: text at least 7 : 1, nothing flashes, the countdown
+  can be paused.
+
 ## Accessibility
 
 The accessibility tree is part of the window protocol (`guiproto::a11y`).
@@ -912,3 +946,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.1 | 2026-11-07 | implementation plan in 3 phases; assumes the GPU backend (blur, shader shadows), 2D as a fallback path |
 | v1.2 | 2026-11-07 | responsiveness, smoothness and recovery as a requirement with measurable goals; compositor restart without losing windows; thread G5; implementation decisions (C, B, B) |
 | v1.3 | 2026-11-07 | logo (vectors from the user) in the prototypes and the design system; boot screen with the transition into the avatar |
+| v1.4 | 2026-11-07 | critical crash screen (A Calm + technical report on D), notification after the next boot; visual language handbook |

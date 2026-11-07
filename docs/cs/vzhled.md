@@ -38,6 +38,8 @@ velikosti písma a omezení pohybu.
 | `design/varianty-stylu.html` | tři původní varianty stylu (archiv rozhodnutí) |
 | `design/start.html` | startovací obrazovka: logo s prstencem, log na Esc, zdržení kroku, chyba startu, přechod do avataru |
 | `design/start-varianty.html` | tři varianty startovací obrazovky (archiv rozhodnutí) |
+| `design/pad.html` | obrazovka kritického pádu: klidný popis, odpočet, `D` technická zpráva, oznámení po dalším startu |
+| `design/pad-varianty.html` | tři varianty obrazovky pádu (archiv rozhodnutí) |
 
 ## Rozhodnutí ke stylu (odsouhlaseno)
 
@@ -55,6 +57,7 @@ C Vřelý (hravější, výrazný akcent).
 | 6 | označení agenta AI | **vyhrazená barva + ikona + slovo** | korálová barva jen pro agenta, vždy s ikonou a slovem „agent“ (nikdy jen barvou) |
 | 7 | logo | **symbol M + nápis MagnumOpus OS** (vektory od uživatele) | `design/assets/logo/`; fialová `#6b3fd6` na světlém, levandulová `#b79bff` na tmavém, bílá na barevném |
 | 8 | startovací obrazovka | **A (logo s prstencem) + podrobný log z B**, na konci **přechod znaku do avataru** | vybráno ze tří variant v `design/start-varianty.html` |
+| 9 | obrazovka kritického pádu | **A Klid** pro uživatele, **klávesa D přepne na technickou zprávu** (Dílna); ve vývojové verzi rovnou Dílna | vybráno ze tří variant v `design/pad-varianty.html` |
 
 ## Principy
 
@@ -617,6 +620,34 @@ jen změněná oblast kolem znaku, desítky kB za snímek.
 - Varianty, ze kterých se vybíralo (A dech, B kroky, C přechod do hodin),
   jsou v `design/start-varianty.html`.
 
+### Pád systému
+
+Obrazovka pro **kritický pád**: panika jádra nebo pád initu
+(`design/pad.html`). Pády služeb, ovladačů a kompozitoru řeší
+[zotavení](#jak-se-gui-vzpamatuje) a tahle obrazovka se u nich neukáže.
+
+Kreslí ji **jádro samo** do framebufferu z firmwaru (UEFI GOP): bez
+kompozitoru, bez ovladačů, bez alokace paměti. Písmo a symbol jsou
+předrasterizované v obrazu jádra (`40 kB), barvy jsou pevné (tmavý motiv),
+přepnutí pohledu je okamžité a jediný pohyb je odpočet.
+
+| Pohled | Co ukazuje |
+|---|---|
+| **pro uživatele** (výchozí) | tmavě fialové pozadí, symbol v prstenci, který se plní odpočtem do restartu (15 s); „Systém musel zastavit“, ujištění, že soubory jsou v bezpečí a rozpracovaný stav se vrátí; kód chyby a id pádu (`PAGE_FAULT_KERNEL · #MO-7F3A-21C9`); QR odkaz na vysvětlení chyby v dokumentaci |
+| **Dílna** (klávesa **D**) | vlevo stručný popis a klávesy, vpravo technická zpráva: druh paniky, verze, CPU, adresa, vlákno a job, zpětná stopa se symboly a řádky, registry, posledních 5 zpráv logu, kam se hlášení uloží; ve **vývojové verzi** systému se ukáže rovnou |
+
+Klávesy: **Enter** restart hned, **D** přepnout pohled, **P** pozastavit
+nebo obnovit odpočet, **šipky** posun technické zprávy. Stav se zapíše
+i na sériovou linku.
+
+- **Hlášení**: jádro ho uloží do rezervované paměti, která přežije teplý
+  restart; init ho po dalším startu zapíše do `/system/pady/` a po
+  přihlášení ukáže oznámení „Systém minule spadl“ (Zobrazit hlášení, Uložit
+  na USB). **Nic se samo neodesílá**; QR kód jen odkazuje na dokumentaci.
+- **Opakovaný pád**: 3 pády při startu za sebou = další start nabídne
+  předchozí verzi systému (snapshot FS) nebo záchranný režim.
+- **Přístupnost**: text aspoň 7 : 1, nic nebliká, odpočet jde pozastavit.
+
 ## Přístupnost
 
 Strom přístupnosti je součást protokolu okna (`guiproto::a11y`). Knihovna
@@ -870,3 +901,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1.1 | 7. 11. 2026 | plán implementace ve 3 fázích; počítá s GPU backendem (rozmazání, stíny shaderem), 2D jako záložní cesta |
 | v1.2 | 7. 11. 2026 | svižnost, plynulost a zotavení jako požadavek s měřitelnými cíli; restart kompozitoru bez ztráty oken; vlákno G5; rozhodnutí k implementaci (C, B, B) |
 | v1.3 | 7. 11. 2026 | logo (vektory od uživatele) v prototypech a v design systému; startovací obrazovka s přechodem do avataru |
+| v1.4 | 7. 11. 2026 | obrazovka kritického pádu (A Klid + technická zpráva na D), oznámení po dalším startu; příručka grafického jazyka |

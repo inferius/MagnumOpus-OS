@@ -121,7 +121,7 @@
   var PAGES = [
     ['index.html', 'Přehled'], ['prirucka.html', 'Příručka'], ['design-system.html', 'Design systém'], ['okna.html', 'Okna'],
     ['plocha.html', 'Plocha'], ['terminal.html', 'Terminál'], ['soubory.html', 'Soubory'],
-    ['nastaveni.html', 'Nastavení'], ['prihlaseni.html', 'Přihlášení'], ['start.html', 'Start']
+    ['nastaveni.html', 'Nastavení'], ['prihlaseni.html', 'Přihlášení'], ['start.html', 'Start'], ['pad.html', 'Pád']
   ];
   function syncControls() {
     var m = { theme: 'mo-theme-sel', contrast: 'mo-contrast-sel', scale: 'mo-scale-sel', motion: 'mo-motion-sel' };
