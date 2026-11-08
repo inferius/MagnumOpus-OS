@@ -9,8 +9,9 @@ a cenu. Když se rozhodnutí změní, upraví se tady spolu s kódem.
 2. **Žádné ohýbání kvůli kompatibilitě.** Když Windows vrstva potřebuje něco,
    co by nativní systém sám nechtěl, řeší se to ve vrstvě, ne v jádře.
    Do jádra se přidává jen obecný mechanismus, který dává smysl i nativně.
-3. **Capabilities.** Žádný root, žádné ACL. Proces má přístup jen k tomu,
-   na co dostal handle.
+3. **Capabilities.** Žádný root ani uživatel, který smí všechno. Proces má
+   přístup jen k tomu, na co dostal handle. Uvnitř služeb mohou nad tím
+   stát jemnější pravidla (oprávnění ve FS), viz [Bezpečnost](#bezpečnost).
 4. **Asynchronní I/O od základu**, synchronní API je tenká vrstva nad ním.
 5. **Ovladače v userspace.** Pád ovladače neshodí systém.
 6. **Jen moderní platformy:** 64 bit, UEFI / device tree, ACPI, SMP.
@@ -144,11 +145,52 @@ ve Windows nebo vDSO + libc v Linuxu).
 
 ## Bezpečnost
 
-- Init dostane kořenové capabilities a rozdává je službám, každé jen jejich část.
-- Uživatel je pojem userspace: session = sada capabilities.
+> **Změna proti dřívějšímu popisu:** úvod tvrdil „žádné ACL“ a „přístup
+> k souboru = handle na adresář“. Od oprávnění FS (F1d) má souborový systém
+> granty a systémovou identitu. Model níže popisuje vrstvy tak, jak opravdu
+> jsou.
+
+**Tři vrstvy, každá chrání něco jiného:**
+
+1. **Capabilities v jádře** (základ). Proces smí jen to, na co má handle
+   s právy. Jádro nezná uživatele ani ACL, žádný proces nemá „všechno“
+   automaticky.
+2. **Oprávnění uvnitř služeb.** Služba, která spravuje sdílená data, nad
+   kanálem klienta vyhodnocuje vlastní pravidla. Ve FS jsou to vlastník,
+   granty „jen povolit“ s dědičností a `PROTECTED`, skrytí nepřístupného
+   (`NOT_FOUND`) a `NOEXEC` na datasetech, viz
+   [Oprávnění a identita relací](souborovy-system.md#oprávnění-a-identita-relací).
+   Kanál klienta nese identitu: **klient si ji nevymyslí**, dostane ji od
+   toho, kdo relaci založil.
+3. **Systémová identita (uživatel 0).** Kontroly FS se na ni nevztahují.
+   Má ji **jen řídicí relace fsd, kterou drží init** (později správce
+   sezení), a nástroje na hostiteli. Přihlásit se za ni nejde a žádná
+   aplikace ji nedostane. Je to identita systému samotného, ne účet
+   správce.
+
+- Uživatel je pojem userspace: relace = identita + sada capabilities
+  (připojené cesty FS, kanály služeb). Razí ji init (`CONNECT_AS`);
+  přihlášení a účty řeší služba účtů.
 - Aplikace jsou vždy v sandboxu; manifest říká, jaké capabilities potřebují
   (zatím síť a rozpočet, viz [Manifest aplikace](firewall.md#manifest-aplikace)).
-- Přístup k souboru = handle na adresář, ve kterém leží. Žádná ACL.
+  Soubory mimo svůj prostor dostanou jen výběrem uživatele v dialogu
+  (powerbox, `GRANT`).
+- **Správa počítače** bez roota: úkon pro celý počítač potvrdí oprávněný
+  uživatel v systémovém dialogu a vznikne capability jen na ten úkon
+  (návrh služby účtů).
+
+**Kritické součásti (TCB).** Mají velkou autoritu, takže chyba v nich je
+bezpečnostní chyba celého systému. Proto zůstávají malé, testované
+a autoritu dál dělí:
+
+| Součást | Autorita | Jak je omezená |
+|---|---|---|
+| jádro | vše | mikrojádro, ovladače a služby mimo něj |
+| init (supervisor) | kořenové capabilities, řídicí relace fsd, razí identity a kanály | rozdá každé službě jen její část, sám nic neobsluhuje |
+| `devmgr` | kořenový prostředek (PCI, I/O, přerušení) | ovladač dostane jen své zařízení; DMA přes IOMMU |
+| `fsd` | celý disk s FS | práva vyhodnocuje podle identity kanálu, `diskguard` chrání cizí disky |
+| služba účtů | ověření uživatele, žádost o relaci | hesla jen jako hash (Argon2id), relaci razí init, ne ona |
+| ovladače s DMA | paměť, kam zařízení zapisuje | IOMMU; bez IOMMU je ovladač s DMA součástí TCB |
 - **Prostředky:** každý proces běží v jobu s rozpočtem paměti jádra
   a uživatelské paměti v bajtech. Rodič rozdělí svůj rozpočet potomkům,
   potomek si limit nezvýší. Pevné počty (handly, vlákna, ...) nejsou, jen
