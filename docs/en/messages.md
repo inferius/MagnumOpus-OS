@@ -131,6 +131,19 @@ invariant was broken (a kernel bug).
 | `virtio-net ...: inicializace selhala: ...` | As for the disk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | The device returned a nonsensical queue index or a buffer it did not own (`CORRUPTED`). The driver resets it (it stops using DMA) and exits; the network does not work until a restart. |
 | `virtio-net ...: zahozeno N prijatych ramcu` | At exit: frames the network service could not receive in time (full channel queue) or invalid ones ("N received frames dropped"). |
+| `e1000e/igc/r8169 BB:DD.F: <chip> vvvv:dddd, MAC xx:..., MSI, linka ...` | An Intel or Realtek card is ready ([network cards](network-cards.md)): chip model, PCI ID, MAC, interrupt mechanism (MSI, MSI-X) and link state (`pripojena 1000 Mb/s plny duplex` = up, full duplex; `odpojena` = down). |
+| `e1000e ...: linka ...` | A link change (cable, autonegotiation). The driver sends it to `netd` as a `LINK` message. |
+| `e1000e ...: karta nema MAC, pouzita nahodna mistni` | Neither the card's NVM nor its EEPROM holds a valid MAC (card without NVM, empty `RAR0`), so a random local one is used. The `02:...` address changes on every start. |
+| `e1000e ...: PHY probuzen z rezimu nizke spotreby (LANPHYPC)` | I217–I219: the PHY did not respond after a Windows shutdown without a cable; toggling its power woke it up. Informational. |
+| `e1000e ...: PHY neodpovida ...` | I217–I219: the PHY does not respond even after waking, or the ME firmware blocks its reset. The link will probably not come up. A cold start (unplugging power) helps. The driver cannot yet disable ULP through the ME. |
+| `e1000e/igc ...: DMA se pred resetem nezastavilo`, `NVM se po resetu nenacetla`, `LAN_INIT_DONE po resetu neprisel` | The card did not finish an initialization step in time (DMA did not stop, NVM not loaded, LAN_INIT_DONE missing). The driver goes on, as Linux does. If the card then does not work, it is a hardware fault or an unsupported revision. |
+| `e1000e ...: firmware drzi semafor PHY, reset bez nej` | The ME firmware did not release the PHY semaphore within 100 ms. The reset went ahead without it. |
+| `<driver> ...: inicializace selhala: vyprsel cas: ...` | A reset or a queue enable did not finish ("timed out": `reset MAC`, `reset zarizeni`, `reset cipu`, `zapnuti fronty prijmu`). The card is not used. |
+| `<driver> ...: preruseni (MSI/MSI-X) nelze nastavit: ...` | The function has neither MSI nor MSI-X, or the interrupt quota ran out. Userspace drivers do not use legacy INTx lines. |
+| `<driver> ...: karta: zarizeni zmizelo ze sbernice, koncim` | Registers read all ones: the card was removed, powered off, or the PCIe link went down. The driver exits and `netd` sees a closed channel. |
+| `<driver> ...: karta: neplatny stav zarizeni: chyba sbernice (system error), koncim` | Realtek reports `SYSErr` (a DMA error on the bus). The driver resets the card and exits. |
+| `<driver> ...: zahozeno N vadnych prijatych ramcu` | At exit: frames with a CRC or length error, or split over several buffers ("N bad received frames dropped"). |
+| `devmgr: ovladac e1000e/igc/r8169 pro BB:DD.F nelze spustit: ...` | The program is missing from initfs, or the card has no memory BAR (`NOT_SUPPORTED`). |
 | `virtio-rng BB:DD.F: 256 B entropie predano jadru` | The host randomness source is ready and the kernel got the first data ("256 B of entropy passed to the kernel"). More batches every minute. |
 | `virtio-rng ...: zarizeni neodpovida (...), koncim` | The device did not complete a request within 5 s or returns empty data. The kernel keeps using its other sources. |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
@@ -206,6 +219,7 @@ invariant was broken (a kernel bug).
 | Message | Meaning and fix |
 |---|---|
 | `netd: bezim, cekam na DHCP` | The service got `INFO` from the driver and started the DHCP client ("running, waiting for DHCP"). |
+| `netd: linka pripojena/odpojena` | The card driver reported a link change (`LINK`, "link up/down"). After the link comes back, DHCP starts again. |
 | `netd: DHCP: adresa A/P, brana G, DNS [...]` | The interface is configured (address, gateway, DNS); programs waiting in `wait_configured` continue. |
 | `netd: DHCP: adresa ztracena` | The lease expired or the server removed the address ("address lost"). Connections get `UNREACHABLE` until DHCP renews it. |
 | `netd: VAROVANI: generator jadra neni nasazeny, ...` | The kernel does not have enough entropy yet (no RDRAND and no virtio-rng): DNS query IDs and TCP numbers are predictable ("kernel generator not seeded"). See [Random numbers](syscalls.md#random-numbers). |

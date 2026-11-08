@@ -74,6 +74,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Síť](cs/sit.md) | [Network](en/network.md) | virtio-net, služba netd, TCP/IP, DNS, NTP, oprávnění, API / virtio-net, netd service, TCP/IP, DNS, NTP, permissions, API |
+| [Síťové karty](cs/sitove-karty.md) | [Network cards](en/network-cards.md) | ovladače Intel e1000e a igc, Realtek r8169, společná smyčka, DMA a přerušení, testy nad simulovanými registry, co je ověřené / Intel e1000e and igc, Realtek r8169 drivers, shared loop, DMA and interrupts, tests on simulated registers, what is verified |
 | [Firewall](cs/firewall.md) | [Firewall](en/firewall.md) | manifest aplikace, dotazy uživateli, paketový filtr, profily sítí, audit, filtr DNS / application manifest, asking the user, packet filter, network profiles, audit, DNS filter |
 | [TLS a HTTP](cs/tls-http.md) | [TLS and HTTP](en/tls-http.md) | TLS 1.3, kořenové certifikáty, HTTP/1.1 a HTTP/2, program fetch, rizika / TLS 1.3, root certificates, HTTP/1.1 and HTTP/2, the fetch program, risks |
 

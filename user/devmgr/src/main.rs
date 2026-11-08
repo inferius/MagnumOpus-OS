@@ -1,7 +1,8 @@
 //! devmgr: spravce zarizeni.
 //!
 //! Projde sbernice PCI Express, zaloguje nalezena zarizeni a pro znama
-//! zarizeni spusti ovladace z initfs. Na x86 navic spusti ovladac radice
+//! zarizeni spusti ovladace z initfs (virtio; sitove karty Intel
+//! a Realtek podle ID v `nic.rs`). Na x86 navic spusti ovladac radice
 //! PS/2 (`ps2`, zarizeni na desce mimo PCI; kdyz radic chybi, skonci).
 //! Pro radice USB (xHCI) spusti `xhci` a podle jeho zprav tridni ovladace
 //! (`usb.rs`). Pro radice disku NVMe a AHCI (podle tridy PCI) spusti `nvme`
@@ -29,6 +30,7 @@ use libos::spawn::StartHandle;
 use libos::{Channel, Process, Signals, Startup, println};
 use pci::{Ecam, Function};
 
+mod nic;
 mod usb;
 
 libos::entry!(main);
@@ -198,6 +200,8 @@ fn main(startup: Startup) -> i64 {
                 }
             }
         }
+        // Sitove karty az po virtio: prvni karta pro netd zustava virtio-net.
+        nic::start_all(&functions, &fs, resource, vmo, &ecam, (*arg >> 16) as u16, &startup.bootstrap, &mut drivers);
         for f in functions
             .iter()
             .filter(|f| (f.class, f.subclass, f.prog_if) == usb::XHCI_CLASS)

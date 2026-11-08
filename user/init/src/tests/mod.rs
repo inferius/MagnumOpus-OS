@@ -21,6 +21,7 @@ mod ipc;
 mod jobs;
 mod memory;
 pub mod net;
+mod nic;
 mod process;
 mod recovery;
 mod recovery_kit;
@@ -49,6 +50,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("disky", disks::TESTS),
+    ("sitove karty", nic::TESTS),
     ("souborovy system", fs::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
