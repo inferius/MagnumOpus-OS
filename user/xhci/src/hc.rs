@@ -321,7 +321,7 @@ impl Hc {
         if let Some(Some(d)) = self.devices.get(slot as usize)
             && let Some(buf) = d.buffer(dci)
         {
-            buf.map.read_bytes(0, &mut v);
+            buf.map.read_bytes(d.window_offset(dci), &mut v);
         }
         v
     }
@@ -417,18 +417,20 @@ impl Hc {
         Ok(())
     }
 
-    /// Vlozi prenos Normal na endpoint `dci` (interrupt IN/OUT).
+    /// Vlozi prenos Normal na endpoint `dci` (interrupt nebo bulk, IN/OUT;
+    /// data OUT uz musi byt v okne bufferu). Jeden TRB: okno neprekroci
+    /// hranici 64 KiB.
     pub fn submit_normal(&mut self, slot: u8, dci: u8, len: u32, owner: Owner) -> Result<()> {
         if self.pending.iter().any(|p| p.slot == slot && p.dci == dci) {
             return Err(Error::AlreadyExists);
         }
         let dev = self.devices[slot as usize].as_mut().ok_or(Error::NotFound)?;
         let ep = dev.endpoint_mut(dci).ok_or(Error::NotFound)?;
-        if len as u64 > ep.buf.len {
+        if len as u64 > ep.window.1 {
             return Err(Error::InvalidArgs);
         }
         let last = ep.ring.push(Trb {
-            param: ep.buf.phys,
+            param: ep.buf.phys + ep.window.0,
             status: len,
             control: trb::NORMAL << 10 | trb::IOC | trb::ISP,
         });

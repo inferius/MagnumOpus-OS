@@ -3,10 +3,15 @@
 //!
 //! Radic hlasi kazde rozhrani (a svuj virtualni root hub) zpravou
 //! `usb-interface <trida> <podtrida> <protokol> <vid> <pid>` (sestnactkove)
-//! s kanalem rozhrani. Spravce podle tridy spusti `usb-hub` (09) nebo
-//! `usb-hid` (03); tridni ovladace nedostanou zadny Resource, jen kanal
+//! s kanalem rozhrani. Spravce podle tridy spusti `usb-hub` (09),
+//! `usb-hid` (03) nebo `usb-storage` (08/06/50, disk pres Bulk-Only
+//! Transport); tridni ovladace nedostanou zadny Resource, jen kanal
 //! rozhrani (a `usb-hid` kanal ke sluzbe vstupu, jehoz druhy konec jde
 //! initu zpravou `input`, a kanal bezpecnostniho klice - zprava `fido`).
+//! `usb-storage` hlasi disky jako ovladace radicu disku (`block` + kanal,
+//! nakonec `done`); spravce je preda initu.
+
+use core::time::Duration;
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -49,7 +54,7 @@ pub fn handle(
             let Some(ch) = msg.handles.into_iter().next() else {
                 return false;
             };
-            match start_class(fs, class as u8, ch, parent) {
+            match start_class(fs, (class as u8, sub as u8, proto as u8), ch, parent) {
                 Ok(Some(p)) => procs.push(p),
                 Ok(None) => println!(
                     "devmgr: usb {vid:04x}:{pid:04x} rozhrani {class:02x}/{sub:02x}/{proto:02x}: ovladac neni"
@@ -65,9 +70,18 @@ pub fn handle(
     }
 }
 
-/// Spusti tridni ovladac pro rozhrani; `Ok(None)` = trida bez ovladace
-/// (kanal se zavre).
-fn start_class(fs: &Initfs, class: u8, iface: Handle, parent: &Channel) -> Result<Option<Process>> {
+/// Jak dlouho cekat, nez ovladac disku USB nahlasi sve disky (TEST UNIT
+/// READY ceka az 15 s na kazdy LUN).
+const STORAGE_REPORT_TIMEOUT: Duration = Duration::from_secs(40);
+/// Behem cekani posilat initu `busy` (init ceka na zpravu omezene dlouho).
+const BUSY_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Spusti tridni ovladac pro rozhrani (trida, podtrida, protokol);
+/// `Ok(None)` = trida bez ovladace (kanal se zavre).
+fn start_class(fs: &Initfs, (class, sub, proto): (u8, u8, u8), iface: Handle, parent: &Channel) -> Result<Option<Process>> {
+    if usbproto::storage::is_bot_disk(class, sub, proto) {
+        return start_storage(fs, iface, parent).map(Some);
+    }
     match class {
         0x09 => {
             let image = fs.find("usb-hub").ok_or(libos::Error::NotFound)?;
@@ -93,4 +107,33 @@ fn start_class(fs: &Initfs, class: u8, iface: Handle, parent: &Channel) -> Resul
         }
         _ => Ok(None),
     }
+}
+
+/// Spusti `usb-storage` a initu preda kanaly k diskum, ktere nahlasi.
+/// Ceka synchronne: disk pripojeny pri startu musi byt nahlasen pred
+/// `done` (init na nem hleda souborovy system - zive USB).
+fn start_storage(fs: &Initfs, iface: Handle, parent: &Channel) -> Result<Process> {
+    let image = fs.find("usb-storage").ok_or(libos::Error::NotFound)?;
+    let (p, control) = libos::spawn("usb-storage", image, vec![StartHandle::user(iface)])?;
+    let deadline = libos::time::deadline_after(STORAGE_REPORT_TIMEOUT);
+    loop {
+        let slice = libos::time::deadline_after(BUSY_INTERVAL).min(deadline);
+        let msg = match control.read(Some(slice)) {
+            Ok(m) => m,
+            Err(libos::Error::TimedOut) if slice < deadline => {
+                parent.write(b"busy", Vec::new())?;
+                continue;
+            }
+            Err(e) => {
+                println!("devmgr: usb-storage nenahlasil disky: {e}");
+                break;
+            }
+        };
+        match &msg.data[..] {
+            b"block" => parent.write(b"block", msg.handles)?,
+            b"done" => break,
+            other => println!("devmgr: usb-storage: neznama zprava {:?}", other),
+        }
+    }
+    Ok(p)
 }

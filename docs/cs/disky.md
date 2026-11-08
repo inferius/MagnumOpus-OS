@@ -9,6 +9,7 @@ Disky obsluhují tři ovladače v userspace. Všechny mluví s klientem
 | `virtio-blk` | virtuální disk virtio 1.x | QEMU | `devmgr` podle ID zařízení virtio |
 | `nvme` | řadič NVMe (PCI třída 01:08:02) | VMware, skutečné PC, QEMU `-device nvme` | `devmgr` podle třídy PCI |
 | `ahci` | řadič SATA AHCI (PCI třída 01:06:01) | VMware (SATA), skutečné PC, QEMU `-device ahci` / q35 | `devmgr` podle třídy PCI |
+| `usb-storage` | disk USB (třída 08/06/50, SCSI přes BOT) | flashky, externí disky, [živé USB](zive-usb.md), QEMU `-device usb-storage` | `devmgr` podle třídy rozhraní USB ([USB](usb.md#disky-usb-usb-storage)) |
 
 Společná obsluha požadavků je v `blockproto::server`: kontrola rozsahu,
 překlad na náš oddíl GPT a zákaz zápisu na cizí disk jsou na jednom místě

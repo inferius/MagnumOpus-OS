@@ -692,6 +692,7 @@ dependencies = [
  "libos",
  "nic",
  "pci",
+ "usbproto",
  "virtio",
 ]
 
@@ -2799,6 +2800,16 @@ name = "usb-hub"
 version = "0.1.0"
 dependencies = [
  "inputproto",
+ "libos",
+ "usbclient",
+ "usbproto",
+]
+
+[[package]]
+name = "usb-storage"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
  "libos",
  "usbclient",
  "usbproto",

@@ -9,6 +9,7 @@ system, init, tests):
 | `virtio-blk` | virtio 1.x virtual disk | QEMU | `devmgr` by virtio device ID |
 | `nvme` | NVMe controller (PCI class 01:08:02) | VMware, real PC, QEMU `-device nvme` | `devmgr` by PCI class |
 | `ahci` | SATA AHCI controller (PCI class 01:06:01) | VMware (SATA), real PC, QEMU `-device ahci` / q35 | `devmgr` by PCI class |
+| `usb-storage` | USB disk (class 08/06/50, SCSI over BOT) | sticks, external disks, [live USB](live-usb.md), QEMU `-device usb-storage` | `devmgr` by USB interface class ([USB](usb.md#usb-disks-usb-storage)) |
 
 Request handling is shared in `blockproto::server`: range checks,
 translation to our GPT partition and the write ban on foreign disks live in

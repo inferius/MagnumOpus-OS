@@ -10,6 +10,7 @@ site menu.
 |---|---|---|
 | [Sestavení a ladění](cs/sestaveni.md) | [Building and debugging](en/building.md) | nástroje, příkazy, testy, ladění, struktura / tools, commands, tests, debugging, layout |
 | [Architektura](cs/architektura.md) | [Architecture](en/architecture.md) | návrh systému, milníky a důvody / system design, milestones and reasons |
+| [Živé USB](cs/zive-usb.md) | [Live USB](en/live-usb.md) | zkoušení na skutečném PC: obraz, zápis na flashku (xtask, Rufus, dd), start, rizika, co dělat při problému / trying it on a real PC: image, writing the stick (xtask, Rufus, dd), boot, risks, what to do when something goes wrong |
 
 ### Jádro a programy / Kernel and programs
 
@@ -42,7 +43,7 @@ site menu.
 |---|---|---|
 | [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
 | [Disky](cs/disky.md) | [Disks](en/disks.md) | NVMe, AHCI (SATA), virtio-blk, ochrana cizích disků a GPT, VMware a skutečné PC / NVMe, AHCI (SATA), virtio-blk, foreign disk protection and GPT, VMware and real PC |
-| [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
+| [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, disky USB, ověření nového zařízení / xHCI controller, hubs, HID, USB disks, new device verification |
 | [ACPI a napájení](cs/acpi.md) | [ACPI and power](en/acpi.md) | ACPICA v userspace, vypnutí S5, restart, tlačítko napájení, teploty, baterie, příkazy shutdown/reboot / ACPICA in userspace, S5 power-off, reboot, power button, temperatures, batteries, shutdown/reboot commands |
 
 ### Ovladače / Drivers
