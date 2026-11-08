@@ -24,6 +24,8 @@ mod revhelper;
 mod webhelper;
 mod qmp;
 mod symbolize;
+mod testdisks;
+mod venus;
 
 use std::env;
 use std::ffi::OsString;
@@ -45,6 +47,8 @@ prikazy:
            architektury, pak jadro a userspace v QEMU bez okna
   check    jen kontrola prekladu jadra
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
+  venus-gen  serializace Venusu z libs/venus/xml do libs/venus/src/vk
+  venus-check  overi, ze libs/venus/src/vk odpovida vstupum
 
 prepinace:
   --release        release profil
@@ -53,13 +57,21 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
+                   none; aarch64 smmu (vychozi), none
+  --data-disk <r>  (run, test) radic datoveho disku: virtio (vychozi), nvme,
+                   ahci; na NVMe a AHCI ma disk GPT s nasim oddilem
+  --qemu-wsl       (run, test) spustit QEMU ve WSL (QEMU_WSL_DISTRO, vychozi
+                   Ubuntu; QEMU_WSL_PREFIX, vychozi ~/venus/prefix) - Venus
   --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi), gl (virgl 3D)
                    nebo venus (Vulkan; QEMU s virglrenderer a render serverem);
-                   gl a venus bez okna pouziji displej egl-headless
-                   none; aarch64 smmu (vychozi), none
+                   gl a venus bez okna pouziji displej egl-headless;
+                   none = bez virtio-gpu (GUI nad framebufferem z firmwaru,
+                   ovladac fbdisplay)
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
                    carkou, napr. sit,firewall; jmena jako v logu)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
+  --net-online     (test) i testy proti skutecne siti hostitele (resolver
+                   hostitele pres slirp); bez nej jen lokalni servery
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
@@ -77,9 +89,16 @@ pub struct Options {
     /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
     /// aarch64 "smmu", "none".
     iommu: String,
+    /// Radic datoveho disku: "virtio", "nvme", "ahci".
+    data_disk: String,
     /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
-    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl).
+    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl);
+    /// "none" = bez virtio-gpu (displej `fbdisplay` nad framebufferem GOP).
     gpu: String,
+    /// QEMU ve WSL (Linux): `--qemu-wsl` (vychozi distribuce Ubuntu, QEMU
+    /// z `~/venus/prefix`, kde je preklad s Venusem). Cesty se prevedou na
+    /// `/mnt/<disk>/...`.
+    qemu_wsl: bool,
     qemu_args: Vec<OsString>,
     /// Cilova architektura.
     arch: &'static Arch,
@@ -91,6 +110,8 @@ pub struct Options {
     /// `--only` (sady testu userspace) a `--repeat` (kolikrat).
     test_only: String,
     test_repeat: u32,
+    /// `--net-online`: i testy proti skutecne siti hostitele.
+    net_online: bool,
     /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
     hostfwd: Option<String>,
     /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
@@ -121,13 +142,16 @@ fn run_cli() -> Result<()> {
         headless: false,
         accel: None,
         iommu: String::new(),
+        data_disk: String::from("virtio"),
         gpu: String::from("2d"),
+        qemu_wsl: false,
         qemu_args: Vec::new(),
         arch: &arch::X86_64,
         test: false,
         extra_initfs: Vec::new(),
         test_only: String::new(),
         test_repeat: 1,
+        net_online: false,
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
     };
@@ -138,11 +162,20 @@ fn run_cli() -> Result<()> {
                 let value = args.next().ok_or("--iommu ocekava typ IOMMU")?;
                 opts.iommu = value.to_string_lossy().into_owned();
             }
+            Some("--data-disk") => {
+                let value = args.next().ok_or("--data-disk ocekava radic")?;
+                let value = value.to_string_lossy().into_owned();
+                if !["virtio", "nvme", "ahci"].contains(&value.as_str()) {
+                    return Err("--data-disk ocekava virtio, nvme nebo ahci".into());
+                }
+                opts.data_disk = value;
+            }
+            Some("--qemu-wsl") => opts.qemu_wsl = true,
             Some("--gpu") => {
-                let value = args.next().ok_or("--gpu ocekava 2d, gl nebo venus")?;
+                let value = args.next().ok_or("--gpu ocekava 2d, gl, venus nebo none")?;
                 opts.gpu = value.to_string_lossy().into_owned();
-                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus") {
-                    return Err("--gpu ocekava 2d, gl nebo venus".into());
+                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus" | "none") {
+                    return Err("--gpu ocekava 2d, gl, venus nebo none".into());
                 }
             }
             Some("--arch") => {
@@ -158,6 +191,7 @@ fn run_cli() -> Result<()> {
                 let value = args.next().ok_or("--repeat ocekava pocet")?;
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
+            Some("--net-online") => opts.net_online = true,
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
             Some("--accel") => {
@@ -195,6 +229,7 @@ fn run_cli() -> Result<()> {
         Some("test") => {
             opts.test = true;
             opts.headless = true;
+            venus::run(true)?;
             host_tests()?;
             // Jadro se musi prelozit i pro ostatni architektury (rozhrani
             // architektury nesmi zustat jen pro jednu).
@@ -207,6 +242,9 @@ fn run_cli() -> Result<()> {
             let web = webhelper::start()?;
             let config = format!("{}{}", helper.config, web.config);
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
+            if opts.net_online {
+                opts.extra_initfs.push((String::from("net-online"), b"1".to_vec()));
+            }
             if !opts.test_only.is_empty() || opts.test_repeat > 1 {
                 let filter = format!("suites = {}
 repeat = {}
@@ -225,6 +263,8 @@ repeat = {}
         }
         Some("check") => check_kernel(opts.arch, &opts),
         Some("docs") => build_docs().map(|_| ()),
+        Some("venus-gen") => venus::run(false),
+        Some("venus-check") => venus::run(true),
         Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
             Ok(())
@@ -235,7 +275,8 @@ repeat = {}
 
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
 /// chyb a syscallu, casova pasma, protokol vstupu a rozlozeni klavesnice,
-/// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI).
+/// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI,
+/// ochrana cizich disku).
 fn host_tests() -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = Command::new(cargo)
@@ -280,6 +321,14 @@ fn host_tests() -> Result<()> {
             "--package",
             "guiproto",
             "--package",
+            "gpuproto",
+            "--package",
+            "venus",
+            "--package",
+            "spirv",
+            "--package",
+            "vkcomp",
+            "--package",
             "taskproto",
             "--package",
             "taskcore",
@@ -294,6 +343,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "vgpu",
             "--package",
+            "fbcopy",
+            "--package",
             "comp",
             "--package",
             "ui",
@@ -303,6 +354,8 @@ fn host_tests() -> Result<()> {
             "httpc",
             "--package",
             "dns",
+            "--package",
+            "diskguard",
             "--features",
             "initfs/std,fs/std,netproto/std,netproto/nts",
         ])
@@ -376,8 +429,11 @@ const USER_PROGRAMS: &[&str] = &[
     "init",
     "echo",
     "svctest",
+    "fsrtest",
     "devmgr",
     "virtio-blk",
+    "nvme",
+    "ahci",
     "virtio-input",
     "inputd",
     "ps2",
@@ -393,6 +449,7 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-net",
     "virtio-rng",
     "virtio-gpu",
+    "fbdisplay",
     "compd",
     "gui-demo",
     "gui-term",
@@ -404,6 +461,7 @@ const USER_PROGRAMS: &[&str] = &[
     "fetch",
     "revocd",
     "dnsd",
+    "vk-probe",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).

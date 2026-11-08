@@ -58,6 +58,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahci"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
+ "libos",
+ "pci",
+ "virtio",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -165,6 +175,7 @@ dependencies = [
 name = "blockproto"
 version = "0.1.0"
 dependencies = [
+ "diskguard",
  "libos",
 ]
 
@@ -382,15 +393,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc32fast"
-version = "1.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f97d3416d5337d15c4b0d78c8c91df922ca143f57ec20e2d1c188333047ef04"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "crypto-bigint"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -534,6 +536,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "diskguard"
+version = "0.1.0"
+
+[[package]]
 name = "dns"
 version = "0.1.0"
 dependencies = [
@@ -659,6 +665,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fbcopy"
+version = "0.1.0"
+
+[[package]]
+name = "fbdisplay"
+version = "0.1.0"
+dependencies = [
+ "fbcopy",
+ "guiproto",
+ "libos",
+]
+
+[[package]]
 name = "fetch"
 version = "0.1.0"
 dependencies = [
@@ -731,7 +750,17 @@ name = "fsproto"
 version = "0.1.0"
 dependencies = [
  "libos",
+ "spin 0.12.3",
+ "svcclient",
  "wire",
+]
+
+[[package]]
+name = "fsrtest"
+version = "0.1.0"
+dependencies = [
+ "fsproto",
+ "libos",
 ]
 
 [[package]]
@@ -834,6 +863,14 @@ checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
 dependencies = [
  "opaque-debug",
  "polyval",
+]
+
+[[package]]
+name = "gpuproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
 ]
 
 [[package]]
@@ -1377,6 +1414,16 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "nvme"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
+ "libos",
+ "pci",
+ "virtio",
 ]
 
 [[package]]
@@ -2014,6 +2061,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spirv"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2396,6 +2450,7 @@ dependencies = [
  "guiproto",
  "inputproto",
  "libos",
+ "svcclient",
 ]
 
 [[package]]
@@ -2477,6 +2532,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "venus"
+version = "0.1.0"
+dependencies = [
+ "gpuproto",
+ "libos",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2508,6 +2571,7 @@ dependencies = [
 name = "virtio-gpu"
 version = "0.1.0"
 dependencies = [
+ "gpuproto",
  "guiproto",
  "libos",
  "pci",
@@ -2542,6 +2606,28 @@ dependencies = [
  "libos",
  "pci",
  "virtio",
+]
+
+[[package]]
+name = "vk-probe"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "venus",
+ "vkcomp",
+]
+
+[[package]]
+name = "vkcomp"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "spirv",
+ "venus",
 ]
 
 [[package]]
@@ -2807,7 +2893,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "bytes",
- "crc32fast",
+ "diskguard",
  "dns",
  "fatfs",
  "fs",
@@ -2821,6 +2907,7 @@ dependencies = [
  "ring",
  "rustls",
  "shlang",
+ "socket2",
  "term",
  "tls",
  "tokio",

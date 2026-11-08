@@ -17,6 +17,7 @@ mod codec;
 pub mod data;
 pub mod hist;
 pub mod perm;
+mod recover;
 pub mod v2;
 
 use alloc::string::String;
@@ -277,18 +278,53 @@ pub fn reply(result: Result<Writer>) -> Vec<u8> {
 }
 
 /// Klient souboroveho systemu.
+///
+/// Vola sluzbu pres `svcclient::Conn`: s listkem ([`FsClient::with_lease`])
+/// prezije pad `fsd` (relace se obnovi se stejnou identitou, cteni se
+/// zopakuje, operace s ucinkem vrati `SERVICE_RESTARTED`, handly se otevrou
+/// znovu - viz `recover`). Bez listku ([`FsClient::new`]) je ztrata kanalu
+/// `SERVICE_UNAVAILABLE`.
 pub struct FsClient {
-    channel: Channel,
+    conn: svcclient::Conn,
+    handles: spin::Mutex<recover::Table>,
 }
 
 impl FsClient {
     pub fn new(channel: Channel) -> Self {
-        Self { channel }
+        Self::from_conn(svcclient::Conn::new("fsd", channel, None))
     }
 
-    /// Kanal relace (napr. pro predani jine sluzbe).
+    /// Relace s listkem k supervisoru (obnova po padu sluzby).
+    pub fn with_lease(channel: Channel, lease: Channel) -> Self {
+        Self::from_conn(svcclient::Conn::new("fsd", channel, Some(lease)))
+    }
+
+    fn from_conn(conn: svcclient::Conn) -> Self {
+        Self {
+            conn,
+            handles: spin::Mutex::new(recover::Table::default()),
+        }
+    }
+
+    /// Spojeni (cekani na novou instanci, udalosti obnovy, generace).
+    pub fn conn(&self) -> &svcclient::Conn {
+        &self.conn
+    }
+
+    /// Kanal relace (napr. pro predani jine sluzbe). Kdyz relace zanikla
+    /// a neobnovila se, vrati zavreny kanal (prijemce dostane chybu).
     pub fn into_channel(self) -> Channel {
-        self.channel
+        self.into_parts().0
+    }
+
+    /// Kanal relace a listek (predani jinemu procesu i s obnovou).
+    pub fn into_parts(self) -> (Channel, Option<Channel>) {
+        let (ch, lease) = self.conn.into_parts();
+        let ch = ch.unwrap_or_else(|| match Channel::create() {
+            Ok((a, _)) => a,
+            Err(_) => panic!("fsproto: nelze vytvorit kanal"),
+        });
+        (ch, lease)
     }
 
     /// Posle pozadavek, vrati telo odpovedi.
@@ -296,10 +332,21 @@ impl FsClient {
         self.call_with_handles(req).map(|(b, _)| b)
     }
 
-    /// Posle pozadavek, vrati telo odpovedi i predane handly.
+    /// Posle pozadavek (druh podle kodu operace), vrati telo odpovedi
+    /// i predane handly.
     fn call_with_handles(&self, req: Writer) -> Result<(Vec<u8>, Vec<libos::Handle>)> {
-        self.channel.write(&req.finish(), Vec::new())?;
-        let msg = self.channel.read(None)?;
+        let data = req.finish();
+        let op = data.get(..4).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()));
+        self.call_raw(recover::kind_of(op), &data)
+    }
+
+    /// Jako `call`, ale s danym druhem operace.
+    fn call_as(&self, kind: svcclient::Kind, req: Writer) -> Result<Vec<u8>> {
+        self.call_raw(kind, &req.finish()).map(|(b, _)| b)
+    }
+
+    fn call_raw(&self, kind: svcclient::Kind, data: &[u8]) -> Result<(Vec<u8>, Vec<libos::Handle>)> {
+        let msg = self.conn.call(kind, data, Vec::new())?;
         let mut r = Reader::new(&msg.data);
         let status = r.i32()?;
         r.u32()?;

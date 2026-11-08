@@ -6,18 +6,21 @@
 mod basic;
 mod dns;
 mod clock_sync;
+mod disks;
 mod drivers;
 mod events;
 mod firewall;
 mod fs;
 mod fs_data;
 mod fs_hist;
+mod fs_recovery;
 mod gui;
+mod gui_recovery;
 mod input;
 mod ipc;
 mod jobs;
 mod memory;
-mod net;
+pub mod net;
 mod process;
 mod recovery;
 mod recovery_kit;
@@ -28,6 +31,7 @@ mod tasks;
 mod time;
 mod usb;
 mod web;
+mod vulkan;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -45,6 +49,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", process::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
+    ("disky", disks::TESTS),
     ("souborovy system", fs::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
@@ -60,8 +65,14 @@ const SUITES: &[(&str, &[Test])] = &[
     ("obnova sluzeb", recovery::TESTS),
     ("shell", shell::TESTS),
     ("ulohy", tasks::TESTS),
+    // Vulkan pred GUI: render uzel otevre init pres displej, ktery pak
+    // prevezme kompozitor.
+    ("vulkan", vulkan::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
+    // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery
+    // v testovacim behu ridi jen tato sada).
+    ("obnova fsd", fs_recovery::TESTS),
 ];
 
 /// Zarizeni spustena pri startu (pro testy ovladacu a souboroveho systemu).

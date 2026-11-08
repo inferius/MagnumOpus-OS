@@ -55,8 +55,8 @@ pub struct Devices {
     pub _rngs: Vec<Channel>,
     /// Kanaly k ovladacum grafiky (dokud je neprevezme kompozitor).
     pub displays: Vec<Channel>,
+    /// Ridici relace initu k `fsd` s listkem (prezije pad sluzby).
     pub fs: Option<FsClient>,
-    pub fsd: Option<(Process, Channel)>,
 }
 
 /// Nejdelsi ticho od spravce zarizeni pri startu (vic nez jeho vlastni
@@ -130,7 +130,6 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         _rngs: rngs,
         displays,
         fs: None,
-        fsd: None,
     })
 }
 
@@ -206,36 +205,38 @@ fn has_fs(b: &BlockClient) -> bool {
 }
 
 /// Spusti sluzbu souboroveho systemu nad prvnim diskem, ktery ho obsahuje.
-pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<()> {
+/// Vraci bezici proces a adapter pro supervisor (`None` = zadny disk s FS).
+/// Konec kanalu k disku drzi adapter (`Kept`): po padu `fsd` ho dostane
+/// nova instance.
+pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<Option<(Process, crate::fsd::Fsd)>> {
     let Some(i) = devices.blocks.iter().position(has_fs) else {
         println!("init: zadny disk se souborovym systemem");
-        return Ok(());
+        return Ok(None);
     };
-    let disk = devices.blocks.remove(i);
-    let fs = Initfs::open(startup)?;
-    let image = fs.find("fsd").ok_or(Error::NotFound)?;
-    let (client, server) = Channel::create()?;
-    let handles = vec![
-        StartHandle::user(disk.into_channel().into_handle()),
-        StartHandle::user(server.into_handle()),
-    ];
-    let (process, control) = libos::spawn("fsd", image, handles)?;
+    let disk = crate::supervisor::Kept::new(devices.blocks.remove(i).into_channel());
     // Testy potrebuji simulaci vypadku proudu - jen v testovacim behu, na
     // beznem systemu by ji mohl spustit kterykoli klient.
-    // fsd na konfiguraci ceka (prvni zprava ridiciho kanalu), takze ji
-    // init posle vzdy; bez ni by fsd i init cekali navzajem.
-    let config: &[u8] = if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 { b"debug" } else { b"normal" };
-    control.write(config, Vec::new())?;
-    let client = FsClient::new(client);
-    let info = client.info()?;
+    let debug = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
+    let (process, control, session) = crate::fsd::Fsd::spawn(startup, disk.give()?, debug, None)?;
+    let ok = control.read(Some(time::deadline_after(FSD_START_TIMEOUT)));
+    if !ok.as_ref().is_ok_and(|m| m.data == b"ok") {
+        let _ = process.kill();
+        return Err(ok.err().unwrap_or(Error::IoError));
+    }
+    // fsd hlasi scrub a udrzbu do prehledu uloh (taskd uz bezi).
+    if let Err(e) = crate::tasks::give_producer(&control, "fsd") {
+        println!("init: prehled uloh pro fsd: {e}");
+    }
+    let info = session.info()?;
     println!(
         "init: souborovy system '{}' pripojen (generace {})",
         info.label, info.generation
     );
-    devices.fs = Some(client);
-    devices.fsd = Some((process, control));
-    Ok(())
+    Ok(Some((process, crate::fsd::Fsd::running(disk, debug, control, session))))
 }
+
+/// Jak dlouho ceka init pri startu systemu na pripojeni FS (prehrani logu).
+const FSD_START_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Sluzba casu po restartu, ktera jeste nepotvrdila nastaveni.
 static STARTING_TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
@@ -303,7 +304,7 @@ pub const FWD_USER: u64 = 900;
 ///
 /// TODO: vic karet (smerovani mezi rozhranimi), nastaveni site z konfigurace
 /// systemu (staticka adresa, servery DNS a NTP).
-pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService> {
+pub fn start_net(startup: &Startup, devices: &mut Devices, sup: &mut crate::supervisor::Supervisor) -> Result<NetService> {
     if devices.nets.is_empty() {
         return Err(Error::NotFound);
     }
@@ -329,7 +330,7 @@ pub fn start_net(startup: &Startup, devices: &mut Devices) -> Result<NetService>
     }
     // Firewall: kdyz nenabehne, netd uvidi zavreny kanal a dotazy odmita
     // (verejny profil, nic dovnitr).
-    let (fwd, agent) = match start_fwd(startup, devices, fw_fwd) {
+    let (fwd, agent) = match start_fwd(startup, devices, fw_fwd, sup) {
         Ok((p, c, a)) => (Some((p, c)), Some(a)),
         Err(e) => {
             println!("init: sluzbu firewallu nelze spustit: {e}");
@@ -363,7 +364,8 @@ pub(crate) fn grant_traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> 
 
 /// Relace FS pro fwd: jen adresar konfigurace firewallu jako `/config`.
 /// Adresar patri servisnimu uctu fwd, nadrazene adresare smi jen projit.
-fn firewall_fs(devices: &Devices) -> Result<Channel> {
+/// Vraci kanal relace a listek (fwd ji po padu `fsd` obnovi).
+fn firewall_fs(devices: &Devices, sup: &mut crate::supervisor::Supervisor) -> Result<(Channel, Channel)> {
     use fsproto::kind;
     use fsproto::perm::Mount;
     let fs = devices.fs.as_ref().ok_or(Error::NotFound)?;
@@ -381,13 +383,17 @@ fn firewall_fs(devices: &Devices) -> Result<Channel> {
         }
     }
     fs.set_owner(FIREWALL_DIR, FWD_USER)?;
-    let (_, session) = fs.connect_as(FWD_USER, &[], &[Mount::new("/config", FIREWALL_DIR, 0)])?;
-    Ok(session.into_channel())
+    let recipe = crate::fsd::Recipe::User {
+        user: FWD_USER,
+        groups: Vec::new(),
+        mounts: vec![Mount::new("/config", FIREWALL_DIR, 0)],
+    };
+    sup.session("fsd", recipe.encode())
 }
 
 /// Spusti fwd: kanal k netd, kanal agenta, relace FS a vychozi konfigurace
 /// z initfs. Vraci proces, jeho bootstrap kanal a kanal agenta.
-fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel) -> Result<(Process, Channel, Channel)> {
+fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel, sup: &mut crate::supervisor::Supervisor) -> Result<(Process, Channel, Channel)> {
     let defaults = Initfs::open(startup)?
         .find("firewall.toml")
         .ok_or(Error::NotFound)?
@@ -397,8 +403,11 @@ fn start_fwd(startup: &Startup, devices: &Devices, netd: Channel) -> Result<(Pro
         StartHandle::user(netd.into_handle()),
         StartHandle::user(agent_fwd.into_handle()),
     ];
-    match firewall_fs(devices) {
-        Ok(ch) => handles.push(StartHandle::user(ch.into_handle())),
+    match firewall_fs(devices, sup) {
+        Ok((ch, lease)) => {
+            handles.push(StartHandle::user(ch.into_handle()));
+            handles.push(StartHandle::user(lease.into_handle()));
+        }
         Err(e) => println!("init: firewall bez FS (konfigurace se neulozi): {e}"),
     }
     let app = crate::apps::spawn(startup, "fwd", handles)?;

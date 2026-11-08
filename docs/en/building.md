@@ -28,6 +28,7 @@ firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
 | `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)) |
 | `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for the other architectures, documentation, then kernel and userspace in QEMU without a window |
 | `cargo xtask test --only sit --repeat 20` | only the selected userspace test suites (names as in the log, comma separated), n times in a row - for finding flaky tests; every extra round adds 60 s to the run limit. A test longer than 20 s is marked `[pomaly]` ("slow") in the log |
+| `cargo xtask test --net-online` | also the tests against the real host network (host resolver through slirp); skipped without the switch |
 | `cargo xtask check` | only checks that the kernel builds for the given architecture; see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
@@ -35,8 +36,10 @@ Options: `--arch <x86_64|aarch64>` (all commands, default `x86_64`; aarch64
 = QEMU `virt`, see [the aarch64 implementation](architecture.md#the-aarch64-implementation-qemu-virt)),
 `--release`, `--headless` (no window), `--iommu <type>` (emulated IOMMU:
 x86_64 `intel` (default), `amd`, `none`; aarch64 `smmu` (default), `none`; `none` checks running without DMA
-translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" then
-fails as expected),
+translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" and the
+"IOMMU chrani pamet mimo DMA" tests of the `disky` suite then fail as expected),
+`--data-disk <virtio|nvme|ahci>` (data disk controller, default `virtio`; on NVMe
+and AHCI the disk gets a GPT with our partition, see [Disks](disks.md)),
 `--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
 `-- -cpu max,-x2apic`).
 

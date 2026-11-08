@@ -512,6 +512,17 @@ impl Host for SessionHost<'_> {
         }
         let (req, what) = match op {
             TasksOp::List => {
+                // Vlastni prave nahlasene ulohy maji byt videt: chvili pockat
+                // na potvrzeni registrace a udalost (nejvys 1 s).
+                let end = self.env.now().map(|n| n + 1_000_000_000);
+                while !self.board.settled() {
+                    match (end, self.env.now()) {
+                        (Some(e), Some(n)) if n < e => {}
+                        _ => break,
+                    }
+                    self.env.sleep(5_000_000);
+                    self.board.pump(&mut EnvLink(self.env));
+                }
                 let rows = self.board.list.tasks.iter().map(taskboard::record).collect();
                 return Some(Ok(Value::List(rows)));
             }

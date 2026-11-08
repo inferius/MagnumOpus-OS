@@ -963,7 +963,8 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 | Co | Proč | Kdy pryč |
 |---|---|---|
 | sériový ovladač v jádře | ladicí výstup před existencí userspace | zůstává jen jako early console |
-| konzole na framebufferu v jádře | totéž | se zařízením virtio-gpu obraz převezme kompozitor; bez něj (UEFI framebuffer) zůstává, dokud jádro nepředá framebuffer (bootstrap FRAMEBUFFER) |
+| konzole na framebufferu v jádře | totéž | kreslí, dokud obrazovku nepřevezme vlastník (`FB_CONTROL` `CLAIM`): bez virtio-gpu `fbdisplay` pod kompozitorem ([Grafika](gui.md#displeje-virtio-gpu-a-fbdisplay)), jinak záchranná konzole; po `RELEASE` nebo pádu vlastníka kreslí zase, panika vždy |
+| `fbdisplay` (framebuffer GOP) | GUI na strojích bez virtio-gpu (VMware, Hyper-V, VirtualBox, PC) | pevné rozlišení z firmwaru, bez akcelerace a vsync; nahradí ho nativní ovladače GPU |
 
 ## Milníky
 

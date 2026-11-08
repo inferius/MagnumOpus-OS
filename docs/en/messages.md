@@ -74,6 +74,7 @@ The loader writes through the firmware console (screen and serial) as
 | `initfs je poskozeny: ...` | E | The initfs image has the wrong format (`libs/initfs`). Rebuild. |
 | `initfs neobsahuje program init` | E | The `init` file is missing from initfs. |
 | `init neni platny program: ...` | E | `init` is not a static ELF64 for x86_64. |
+| `framebuffer se do userspace nepreda: ...` | W | The framebuffer overlaps RAM used by the allocator, does not start on a page boundary or is smaller than its geometry. The kernel console keeps using it, the GUI does not start without virtio-gpu. |
 | `init: poskozeny segment: ...` | E | An ELF segment lies outside the file. |
 | `init se nepodarilo spustit: ...` | E | Summary with the error code ([errors.md](errors.md)). |
 | `init spusten (proces N), vstup ...` | I | The first process is running. |
@@ -115,6 +116,17 @@ invariant was broken (a kernel bug).
 | `devmgr: ovladac X pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
 | `virtio-blk BB:DD.F: N MiB, flush ano/ne, discard ano/ne` | The disk is ready. `discard ne` = the device has no TRIM (in QEMU the drive lacks `discard=unmap`); the FS then skips TRIM. |
 | `virtio-blk ...: inicializace selhala: ...` | The device does not follow virtio 1.x, did not finish its reset within a second (`TIMED_OUT`) or resources are missing (MSI-X, DMA memory, `NO_RESOURCES` = the restricted Resource quota is exhausted). |
+| `X: disk D: nas oddil GPT, N MiB od sektoru S, zapis povolen` | The disk driver (`virtio-blk`, `nvme`, `ahci`) found our partition; the client sees only that ([Disks](disks.md)). |
+| `X: disk D: cely disk s nasim FS, ..., zapis povolen` | A disk without a partition table holding our FS (the QEMU data disk). |
+| `X: disk D: cizi disk (...), ..., JEN PRO CTENI` | The disk is not ours (foreign GPT, MBR, empty, damaged GPT, invalid partition of ours). Write and TRIM return `READ_ONLY`, the FS is mounted read-only. Intentional protection; create our partition to write to the disk. |
+| `nvme BB:DD.F: nepodporovany radic (CAP ...)` | The controller lacks the NVM command set or the 4 KiB page, or has doorbells outside the BAR. |
+| `nvme: jmenny prostor N ma sektor ... - zatim nepodporovano, vynechan` | The namespace is formatted with a sector other than 512 B or with metadata. Reformat to 512 B (vendor tool, `nvme format`) or wait for 4 KiB support. |
+| `nvme: radic neodpovida spravne (...), dalsi pozadavky odmitnuty` | A command did not finish within 10 s or the controller returned a foreign command ID. The controller is disabled (no DMA); the disk does not work until restart. |
+| `ahci BB:DD.F: MSI nelze zapnout (...), obsluha dotazovanim` | The controller has no MSI (or the message cannot be written); the driver works by polling, at a higher CPU load. |
+| `ahci: port P: disk ... neumi LBA48 / ma logicky sektor ... - vynechan` | A very old disk without LBA48, or a 4Kn disk. Not supported yet. |
+| `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | The port has an ATAPI drive or a port multiplier. |
+| `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | A command did not finish within 20 s; the port is stopped. |
+| `devmgr: ovladac X pro ... nenahlasil disky: ...` | The `nvme`/`ahci` driver did not send `done` within 20 s (slow disk spin-up, stuck controller). Disks reported until then work. |
 | `virtio-net BB:DD.F: MAC xx:..., linka pripojena/odpojena` | The network card is ready ("link up/down"). The MAC comes from the device configuration, otherwise it is locally administered (`02:...`). |
 | `virtio-net ...: inicializace selhala: ...` | As for the disk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | The device returned a nonsensical queue index or a buffer it did not own (`CORRUPTED`). The driver resets it (it stops using DMA) and exits; the network does not work until a restart. |
@@ -124,6 +136,11 @@ invariant was broken (a kernel bug).
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | The PS/2 driver found a keyboard, a mouse (kind from the ID: wheel, 5 buttons). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 reads `0xFF` (no controller) or no device was found (PS/2 controller not found). Normal on modern boards without PS/2. |
+| `init: displej je framebuffer z firmwaru (fbdisplay)` | The device manager found no virtio-gpu, the GUI runs through `fbdisplay` at the fixed firmware resolution (display is the firmware framebuffer). |
+| `fbdisplay: framebuffer WxH (krok S, rgb/bgr)` | The framebuffer driver took over the screen (`FB_CONTROL` `CLAIM`). |
+| `fbdisplay: chybi handly ve startovni zprave` | Init started it without the memory object and channel (an init bug). |
+| `fbdisplay: framebuffer nelze prevzit: ...` | `FB_CONTROL` or the mapping failed: `WRONG_TYPE` (not the kernel's framebuffer object), `NOT_SUPPORTED` (unknown format or size), `NO_RESOURCES` (no room in the address space). |
+| `init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim` | There is no virtio-gpu and the kernel did not hand over a framebuffer (no GOP, unsupported pixel format, see the kernel messages). |
 | `ps2: radic neodpovida spravne: ...` | The controller exists but failed its self-test or did not answer in time (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | The port exists but no device answers on it (nothing connected). |
 | `xhci BB:DD.F: N portu (M USB 3), S slotu, kontext K B` | The USB controller is ready (N ports, M of them USB 3, S slots, K-byte contexts). |
@@ -202,7 +219,7 @@ invariant was broken (a kernel bug).
 | `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | First successful measurement (authenticated NTS or unauthenticated NTP in fallback; "offset", "delay"); `step` = the time was set with a jump (offset over 128 ms), `slew` = smooth adjustment. |
 | `ntpd: NTS-KE <server>: ...` | The NTS key exchange failed (connection, certificate, reply); the server is skipped this round. With an invalid certificate check the clock (RTC). |
 | `ntpd: neoverene servery: Never\|Fallback` | Init changed the rule ("unauthenticated servers") by network profile. |
-| `ntpd: zadny server neodpovedel (..., NTS: ...)` | No reply in this round (network, firewall, server). Next attempt after the interval; the clock keeps running at the last frequency. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | No reply in this round (network, firewall, server). Next attempt after 2, 4, 8, ... s (at most `min_poll`), the same message is not repeated; the clock keeps running at the last frequency. |
 | `ntpd: konfigurace: ...` | The configuration from init is invalid; `ntpd` exits. Fix `ntpd.toml`. |
 | `timed: prvni synchronizace: skok o N ms` | The first correction from `ntpd` was large: the time was set with a jump (the only allowed jump). |
 | `timed: prvni synchronizace: dorovnani o N ms` | The first correction was small: it is applied smoothly. |
@@ -218,6 +235,8 @@ invariant was broken (a kernel bug).
 | `revocd: OneCRL: neplatny dokument` | The downloaded JSON cannot be read ("invalid document"); the previous list stays, a new attempt after `retry_minutes`. |
 | `revocd: <url>: ...` | Downloading a CRL or OneCRL failed (HTTP status, connection error); the URL is not retried for `retry_minutes`, the revocation status is unknown meanwhile. |
 | `revocd: <url>: neni CRL` | The server returned something other than a CRL ("not a CRL"). |
+| `tls: CRL <url> nejde pouzit (...)` | A CRL from a certificate's distribution point cannot be read or verified ("cannot be used": unsupported extension, bad signature, issuer outside the chain); it is skipped, the revocation status from it is unknown and the connection goes on. Once per address. |
+| `netd: DNS pres TCP: spojeni se nenavazalo do 3 s, novy pokus (n)` | The TCP connection for a truncated DNS answer got stuck ("not established within 3 s, new attempt"); the resolver tries a new one (at most 3 times). |
 | `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` did not finish the request even after the limit plus margin (a bug or a stuck service). The program got `TIMED_OUT`, the channel is unusable. OP = operation code (`netproto::op`). |
 | `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | The system resolver runs ("resolvers", "anchors"). |
 | `dnsd: <resolver>: ...` | A resolver did not answer (connection, TLS, HTTP); `dnsd` tries the next one. |

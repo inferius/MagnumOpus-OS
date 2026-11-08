@@ -14,7 +14,8 @@
 //!   pres UDP jen zkracena odpoved - klient se musi zeptat pres TCP);
 //!   ostatni jmena NXDOMAIN.
 //! - `ntp` (UDP): server NTP s casem hostitele.
-//! - `closed` (TCP): port, na kterem nic neposloucha (odmitnuti spojeni).
+//! - `closed` (TCP): vyhrazeny port bez `listen` (odmitnuti spojeni);
+//!   xtask ho drzi po cely beh, takze ho nikdo jiny neotevre.
 //!   `refuses` = 1, kdyz se od slirp ceka odmitnuti (RST, Linux a macOS).
 //!   Slirp na Windows zatim neohlasi nic (SYN zustane bez odpovedi); test
 //!   tam prijme odmitnuti i vyprseni, takze novejsi QEMU ho nerozbije.
@@ -25,6 +26,8 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream, UdpSocket};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -42,35 +45,89 @@ pub struct Helper {
     /// proces (soubezny beh testu). Uvolnit tesne pred startem QEMU
     /// ([`Helper::release_forwarded_port`]), QEMU ho pak hned obsadi.
     hold: Option<TcpListener>,
+    /// Aktualni port `hostfwd` (sdileny s vlaknem `callback`; pri novem
+    /// startu QEMU se zmeni, viz [`Helper::rearm_forwarded_port`]).
+    host_fwd: Arc<AtomicU16>,
+    /// Port pro test odmitnuti spojeni: navazany, ale bez `listen`, po
+    /// celou dobu behu. Spojeni na nej jadro odmitne (RST) a zadny jiny
+    /// proces ho mezitim nemuze obsadit.
+    _closed: socket2::Socket,
 }
 
 impl Helper {
     pub fn release_forwarded_port(&mut self) {
         self.hold = None;
     }
+
+    /// Novy port pro `hostfwd` (QEMU nenastartovalo, port mezitim nekdo
+    /// obsadil); vraci novy argument `hostfwd`.
+    pub fn rearm_forwarded_port(&mut self) -> std::io::Result<String> {
+        let hold = tcp_listener("hostfwd")?;
+        let port = hold.local_addr()?.port();
+        self.host_fwd.store(port, Ordering::Relaxed);
+        self.hold = Some(hold);
+        self.hostfwd = hostfwd_arg(port);
+        Ok(self.hostfwd.clone())
+    }
+}
+
+fn hostfwd_arg(port: u16) -> String {
+    format!("tcp:127.0.0.1:{port}-:{GUEST_FORWARDED}")
 }
 
 fn localhost() -> IpAddr {
     IpAddr::V4(Ipv4Addr::LOCALHOST)
 }
 
-/// Volny port na 127.0.0.1 (zjisteny navazanim a uvolnenim). Port pro
-/// test odmitnuti zustane volny: nahodny docasny port, ktery by jiny proces
-/// behem testu zacal poslouchat, je velmi nepravdepodobny.
-fn free_tcp_port() -> std::io::Result<u16> {
-    Ok(TcpListener::bind((localhost(), 0))?.local_addr()?.port())
+/// Opakovani otevreni socketu pomocneho serveru. Windows obcas odmitne
+/// i dynamicky port (os error 10013 - port ve vyhrazenem rozsahu, napr.
+/// Hyper-V); dalsi pokus dostane jiny.
+const BIND_ATTEMPTS: usize = 20;
+
+fn retry<T>(what: &str, mut f: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut last = None;
+    for _ in 0..BIND_ATTEMPTS {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) => last = Some(e),
+        }
+    }
+    let e = last.unwrap();
+    Err(std::io::Error::new(e.kind(), format!("pomocny server {what}: {e}")))
+}
+
+/// Naslouchani TCP na volnem portu 127.0.0.1 (s opakovanim, viz `retry`).
+pub fn tcp_listener(what: &str) -> std::io::Result<TcpListener> {
+    retry(what, || TcpListener::bind((localhost(), 0)))
+}
+
+/// Socket UDP na volnem portu 127.0.0.1 (s opakovanim).
+pub fn udp_socket(what: &str) -> std::io::Result<UdpSocket> {
+    retry(what, || UdpSocket::bind((localhost(), 0)))
+}
+
+/// Vyhrazeny zavreny port na 127.0.0.1: socket TCP navazany bez `listen`.
+/// Drzi ho `Helper` az do konce behu QEMU.
+fn closed_tcp_port() -> std::io::Result<(socket2::Socket, u16)> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    retry("closed", || {
+        let s = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+        s.bind(&std::net::SocketAddr::new(localhost(), 0).into())?;
+        let port = s.local_addr()?.as_socket().map(|a| a.port()).unwrap_or(0);
+        Ok((s, port))
+    })
 }
 
 pub fn start() -> std::io::Result<Helper> {
-    let echo = TcpListener::bind((localhost(), 0))?;
-    let udp_echo = UdpSocket::bind((localhost(), 0))?;
+    let echo = tcp_listener("echo")?;
+    let udp_echo = udp_socket("udp_echo")?;
     let (dns_sock, dns_tcp) = dns_sockets()?;
-    let ntp_sock = UdpSocket::bind((localhost(), 0))?;
-    let callback = TcpListener::bind((localhost(), 0))?;
-    let reset = TcpListener::bind((localhost(), 0))?;
-    let closed = free_tcp_port()?;
-    let hold = TcpListener::bind((localhost(), 0))?;
-    let host_fwd = hold.local_addr()?.port();
+    let ntp_sock = udp_socket("ntp")?;
+    let callback = tcp_listener("callback")?;
+    let reset = tcp_listener("reset")?;
+    let (closed_sock, closed) = closed_tcp_port()?;
+    let hold = tcp_listener("hostfwd")?;
+    let host_fwd = Arc::new(AtomicU16::new(hold.local_addr()?.port()));
 
     let config = format!(
         "echo = {}\nudp_echo = {}\ndns = {}\nntp = {}\nclosed = {}\nrefuses = {}\nreset = {}\ncallback = {}\nforwarded = {}\n",
@@ -103,16 +160,20 @@ pub fn start() -> std::io::Result<Helper> {
             thread::spawn(move || reset_after_data(conn));
         }
     });
+    let fwd = host_fwd.clone();
     thread::spawn(move || {
         for conn in callback.incoming().flatten() {
-            thread::spawn(move || connect_back(conn, host_fwd));
+            let port = fwd.load(Ordering::Relaxed);
+            thread::spawn(move || connect_back(conn, port));
         }
     });
 
     Ok(Helper {
         config,
-        hostfwd: format!("tcp:127.0.0.1:{host_fwd}-:{GUEST_FORWARDED}"),
+        hostfwd: hostfwd_arg(host_fwd.load(Ordering::Relaxed)),
         hold: Some(hold),
+        host_fwd,
+        _closed: closed_sock,
     })
 }
 
@@ -145,7 +206,15 @@ fn reset_after_data(conn: TcpStream) {
 
 fn udp_loop(sock: UdpSocket, answer: impl Fn(&[u8]) -> Option<Vec<u8>>) {
     let mut buf = vec![0u8; 65536];
-    while let Ok((n, from)) = sock.recv_from(&mut buf) {
+    loop {
+        // Chyba prijmu neukoncuje server: Windows po ICMP "port unreachable"
+        // (odpoved na uz zavreny port hosta) vrati z dalsiho recv_from
+        // WSAECONNRESET. Driv tim server skoncil a dalsi dotazy visely.
+        let Ok((n, from)) = sock.recv_from(&mut buf) else {
+            // Trvala chyba (zavreny socket) nesmi tocit procesor.
+            thread::sleep(Duration::from_millis(1));
+            continue;
+        };
         if let Some(reply) = answer(&buf[..n]) {
             let _ = sock.send_to(&reply, from);
         }
@@ -153,16 +222,27 @@ fn udp_loop(sock: UdpSocket, answer: impl Fn(&[u8]) -> Option<Vec<u8>>) {
 }
 
 /// Port DNS pro UDP i TCP (slirp preklada oboji na stejny port hostitele).
+/// UDP i TCP na stejnem portu (zkracena odpoved -> dotaz pres TCP na tentyz
+/// port). Prvni pokusy: docasny port TCP od jadra (ten se vyhyba vyhrazenym
+/// rozsahum TCP, napr. Hyper-V na Windows) a k nemu UDP. Jadro ale prideluje
+/// docasne porty po sobe, takze kdyz je UDP v bloku obsazenem jinak, dalsi
+/// pokusy se mu nevyhnou - zbyle pokusy proto zkousi nahodne porty
+/// z dynamickeho rozsahu.
 fn dns_sockets() -> std::io::Result<(UdpSocket, TcpListener)> {
-    let mut last = None;
-    for _ in 0..20 {
-        let udp = UdpSocket::bind((localhost(), 0))?;
-        match TcpListener::bind(udp.local_addr()?) {
-            Ok(tcp) => return Ok((udp, tcp)),
-            Err(e) => last = Some(e),
-        }
-    }
-    Err(last.unwrap())
+    let mut attempt = 0u32;
+    retry("dns", || {
+        attempt += 1;
+        let tcp = if attempt <= 5 {
+            TcpListener::bind((localhost(), 0))?
+        } else {
+            let mut b = [0u8; 2];
+            ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b)
+                .map_err(|_| std::io::Error::other("nahodne cislo"))?;
+            TcpListener::bind((localhost(), 49152 + u16::from_le_bytes(b) % 16384))?
+        };
+        let udp = UdpSocket::bind(tcp.local_addr()?)?;
+        Ok((udp, tcp))
+    })
 }
 
 fn dns_answer(req: &[u8], tcp: bool) -> Option<Vec<u8>> {

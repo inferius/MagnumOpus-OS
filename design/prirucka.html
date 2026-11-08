@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grafický jazyk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/tokens.js"></script>
+<script src="assets/mo.js"></script>
+<style>
+/* Prirucka grafickeho jazyka. Dvojjazycna: bloky .cs a .en, prepina atribut
+ * data-ui-lang na <html>. Zive ukazky berou hodnoty z tokens.js. */
+:root:not([data-ui-lang="en"]) .en { display: none !important; }
+:root[data-ui-lang="en"] .cs { display: none !important; }
+.layout { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: 220px 1fr; gap: var(--s8); padding: var(--s7) var(--s5) var(--s11); }
+.toc { position: sticky; top: 64px; align-self: start; max-height: calc(100vh - 80px); overflow: auto; font-size: var(--t-small-size); }
+.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+.toc li { counter-increment: s; }
+.toc a { display: flex; gap: var(--s2); padding: var(--s2) var(--s3); border-radius: var(--r-control); color: var(--c-ink); text-decoration: none; }
+.toc a::before { content: counter(s, decimal-leading-zero); color: var(--c-ink-faint); font-variant-numeric: tabular-nums; }
+.toc a:hover { background: var(--c-surface-3); }
+.toc a.on { background: var(--c-accent-soft); color: var(--c-accent-ink); font-weight: 600; }
+.lang { display: flex; gap: var(--s2); align-items: center; margin-bottom: var(--s4); }
+article { min-width: 0; }
+article > section { padding-top: var(--s6); margin-bottom: var(--s9); scroll-margin-top: 64px; }
+.kicker { font-size: var(--t-caption-size); font-weight: 600; color: var(--c-accent-ink); letter-spacing: .08em; text-transform: uppercase; margin-bottom: var(--s2); }
+article h1 { font-size: 44px; line-height: 52px; font-weight: 700; letter-spacing: -.01em; }
+article h2 { font-size: 30px; line-height: 38px; font-weight: 700; margin-bottom: var(--s4); }
+article h3 { font-size: var(--t-title-size); line-height: var(--t-title-line); margin: var(--s7) 0 var(--s3); }
+article p, article li { max-width: 72ch; }
+.cover { border-radius: var(--r-window); padding: var(--s10) var(--s8); margin-bottom: var(--s6); border: 1px solid var(--c-border);
+  background: radial-gradient(circle at 15% 20%, var(--c-wall-a), transparent 55%), radial-gradient(circle at 85% 80%, var(--c-wall-b), transparent 55%), var(--c-surface); }
+.cover img { height: 84px; margin-bottom: var(--s7); }
+.values { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s4); margin-top: var(--s6); }
+.values .card h3 { margin: var(--s3) 0 var(--s2); }
+.values .card p { font-size: var(--t-small-size); color: var(--c-ink-muted); margin: 0; }
+.values .card .ic { color: var(--c-accent-ink); }
+/* Spravne / spatne */
+.dd { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s4); margin: var(--s4) 0; }
+.do, .dont { border-radius: var(--r-card); border: 1px solid var(--c-border); overflow: hidden; background: var(--c-surface); }
+.do .stage, .dont .stage { min-height: 150px; display: grid; place-items: center; padding: var(--s5); background: var(--c-surface-2); }
+.do .cap, .dont .cap { display: flex; gap: var(--s2); padding: var(--s3) var(--s4); font-size: var(--t-small-size); border-top: 3px solid var(--c-ok); }
+.dont .cap { border-top-color: var(--c-danger); }
+.do .cap b { color: var(--c-ok); } .dont .cap b { color: var(--c-danger); }
+/* Logo */
+.logo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s4); }
+.logo-tile { border-radius: var(--r-card); border: 1px solid var(--c-border); padding: var(--s6); display: grid; place-items: center; min-height: 160px; }
+.logo-tile img { max-width: 100%; height: 64px; }
+.logo-tile.sym img { height: 72px; }
+.clear { position: relative; display: inline-block; padding: 36px; background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--c-accent) 10%, transparent) 0 6px, transparent 6px 12px);
+  outline: 1px dashed var(--c-accent); border-radius: 4px; }
+.clear img { display: block; height: 120px; }
+.clear .lbl { position: absolute; font-size: 11px; color: var(--c-accent-ink); font-weight: 600; }
+/* Barvy */
+.pal { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s3); }
+.sw { border-radius: var(--r-card); overflow: hidden; border: 1px solid var(--c-border); background: var(--c-surface); }
+.sw .c { height: 72px; display: flex; align-items: flex-end; padding: var(--s3); font-size: var(--t-small-size); font-weight: 600; }
+.sw .m { padding: var(--s2) var(--s3); font-size: var(--t-caption-size); line-height: 16px; color: var(--c-ink-muted); }
+.sw .m code { color: var(--c-ink); }
+.ratio { display: flex; height: 56px; border-radius: var(--r-card); overflow: hidden; border: 1px solid var(--c-border); margin: var(--s4) 0; font-size: var(--t-caption-size); font-weight: 600; }
+.ratio span { display: grid; place-items: center; }
+/* Typografie */
+.spec { border-radius: var(--r-card); border: 1px solid var(--c-border); background: var(--c-surface); padding: var(--s6); }
+.spec .big { font-size: 64px; line-height: 1.05; font-weight: 600; letter-spacing: -.02em; }
+.spec .glyphs { font-size: 22px; line-height: 1.5; margin-top: var(--s4); color: var(--c-ink-muted); overflow-wrap: anywhere; }
+.hier .row { display: grid; grid-template-columns: 120px 1fr; gap: var(--s4); padding: var(--s3) 0; border-bottom: 1px solid var(--c-border); align-items: baseline; }
+.hier .k { font-size: var(--t-caption-size); color: var(--c-ink-muted); font-family: var(--font-mono); }
+/* Ikony */
+.icon-build { display: grid; grid-template-columns: auto 1fr; gap: var(--s7); align-items: center; }
+.icon-build svg.grid { width: 216px; height: 216px; }
+.icon-row { display: flex; gap: var(--s5); flex-wrap: wrap; color: var(--c-ink); }
+.icon-row .ic { width: 28px; height: 28px; }
+/* Rozvrzeni */
+.nest { display: inline-block; padding: 12px; border-radius: 22px; background: var(--c-accent-soft); }
+.nest > div { padding: 12px; border-radius: 10px; background: var(--c-surface); border: 1px solid var(--c-border); }
+.elev { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s5); padding: var(--s6); border-radius: var(--r-card); background: var(--c-bg); }
+.elev div { height: 90px; border-radius: var(--r-card); background: var(--c-surface); display: grid; place-items: center; font-size: var(--t-small-size); text-align: center; }
+/* Texty */
+.voice { width: 100%; }
+.voice td { vertical-align: top; }
+.voice td:nth-child(2) { color: var(--c-ok); }
+.voice td:nth-child(3) { color: var(--c-danger); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--c-danger) 50%, transparent); }
+.check { list-style: none; padding: 0; }
+.check li { display: flex; gap: var(--s3); padding: var(--s2) 0; border-bottom: 1px solid var(--c-border); }
+.check li .ic { color: var(--c-ok); margin-top: 2px; }
+.dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s3); }
+.dl a { display: flex; gap: var(--s3); align-items: center; padding: var(--s4); border-radius: var(--r-card); border: 1px solid var(--c-border); background: var(--c-surface); color: var(--c-ink); text-decoration: none; }
+.dl a:hover { border-color: var(--c-accent); }
+.dl small { display: block; color: var(--c-ink-muted); }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .toc { display: none; } .icon-build { grid-template-columns: 1fr; } article h1 { font-size: 34px; line-height: 42px; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main"><span class="cs">Přeskočit na obsah</span><span class="en">Skip to content</span></a>
+<div id="proto"></div>
+<div class="layout">
+  <nav class="toc" aria-label="Obsah příručky">
+    <div class="lang"><div class="seg" role="radiogroup" aria-label="Jazyk / Language" id="lang">
+      <button role="radio" aria-checked="true" data-value="cs" lang="cs">Česky</button><button role="radio" aria-checked="false" data-value="en" lang="en">English</button></div></div>
+    <ol id="toc"></ol>
+  </nav>
+  <article id="main">
+
+  <!-- ===================== 1 UVOD ===================== -->
+  <section id="uvod" data-cs="Úvod" data-en="Introduction">
+    <div class="cover">
+      <img class="lg-light" src="assets/logo/logo-svetle-pozadi.svg" alt="MagnumOpus OS"><img class="lg-dark" src="assets/logo/logo-tmave-pozadi.svg" alt="MagnumOpus OS">
+      <div class="kicker cs">Příručka grafického jazyka &middot; verze 1</div><div class="kicker en">Visual language handbook &middot; version 1</div>
+      <h1 class="cs">Vřelý, důvěryhodný, svižný.</h1><h1 class="en">Warm, trustworthy, swift.</h1>
+      <p class="lead cs" style="margin-top:var(--s4)">Jak MagnumOpus OS vypadá, mluví a pohybuje se. Příručka je pro každého, kdo kreslí okno, píše aplikaci, text hlášky nebo ikonu. Hodnoty nejsou opsané: ukázky se berou přímo z <code>design/tokens.toml</code>.</p>
+      <p class="lead en" style="margin-top:var(--s4)">How MagnumOpus OS looks, speaks and moves. This handbook is for anyone drawing a window, writing an application, a message or an icon. The values are not copied by hand: the samples come straight from <code>design/tokens.toml</code>.</p>
+    </div>
+    <div class="values">
+      <div class="card"><svg class="ic l"><use href="#ic-sun"/></svg><h3 class="cs">Vřelý</h3><h3 class="en">Warm</h3>
+        <p class="cs">Teplé pozadí, měkké tvary, lidské texty. Systém je přívětivý, ne strohý.</p><p class="en">Warm background, soft shapes, human copy. The system is friendly, not stark.</p></div>
+      <div class="card"><svg class="ic l"><use href="#ic-shieldcheck"/></svg><h3 class="cs">Důvěryhodný</h3><h3 class="en">Trustworthy</h3>
+        <p class="cs">Co kreslí systém, je vždy poznat a aplikace to nenapodobí. Agent AI je vždy označený.</p><p class="en">What the system draws is always recognizable and applications cannot imitate it. The AI agent is always marked.</p></div>
+      <div class="card"><svg class="ic l"><use href="#ic-gauge"/></svg><h3 class="cs">Svižný</h3><h3 class="en">Swift</h3>
+        <p class="cs">Krása nikdy nezdrží odezvu. Efekty mají rozpočet snímku, pohyb je krátký a přerušitelný.</p><p class="en">Beauty never delays a response. Effects have a frame budget, motion is short and interruptible.</p></div>
+    </div>
+  </section>
+
+  <!-- ===================== 2 LOGO ===================== -->
+  <section id="logo" data-cs="Logo" data-en="Logo">
+    <div class="kicker">02</div><h2>Logo</h2>
+    <p class="cs">Logo tvoří <b>symbol</b> (písmeno M v oblouku, který ho chrání jako štít) a <b>nápis</b> MagnumOpus OS. Symbol sám stačí všude, kde je málo místa: ikona systému, lišta, start, odznak „Systém“.</p>
+    <p class="en">The logo consists of the <b>symbol</b> (the letter M inside an arch that protects it like a shield) and the <b>wordmark</b> MagnumOpus OS. The symbol alone works wherever space is tight: system icon, bar, boot, "System" badge.</p>
+    <div class="logo-grid">
+      <div class="logo-tile" style="background:#fffdfb"><img src="assets/logo/logo-svetle-pozadi.svg" alt="Logo na světlém pozadí"></div>
+      <div class="logo-tile" style="background:#221a28"><img src="assets/logo/logo-tmave-pozadi.svg" alt="Logo na tmavém pozadí"></div>
+      <div class="logo-tile sym" style="background:#6b3fd6"><img src="assets/logo/symbol-bily.svg" alt="Bílý symbol na fialové"></div>
+    </div>
+    <h3 class="cs">Ochranná zóna a velikost</h3><h3 class="en">Clear space and size</h3>
+    <div class="hstack" style="gap:var(--s7);align-items:flex-start">
+      <div class="clear"><img src="assets/logo/symbol-fialovy.svg" alt=""><span class="lbl" style="left:6px;top:10px">&frac14; S</span><span class="lbl" style="right:6px;bottom:8px">&frac14; S</span></div>
+      <div style="flex:1;min-width:240px">
+        <p class="cs">Kolem loga nech volné místo aspoň <b>čtvrtinu šířky symbolu</b> (S). Nejmenší velikost symbolu je <b>16 px</b>, celého loga s nápisem <b>120 px</b> na šířku. Pod 24 px používej jen symbol.</p>
+        <p class="en">Leave clear space of at least <b>a quarter of the symbol width</b> (S) around the logo. Minimum symbol size is <b>16 px</b>, the full logo with wordmark <b>120 px</b> wide. Below 24 px use the symbol only.</p>
+        <div class="hstack" style="gap:var(--s5);align-items:end"><img src="assets/logo/symbol-fialovy.svg" alt="" style="height:16px"><img src="assets/logo/symbol-fialovy.svg" alt="" style="height:24px"><img src="assets/logo/symbol-fialovy.svg" alt="" style="height:32px"><img src="assets/logo/symbol-fialovy.svg" alt="" style="height:48px"><span class="note" style="margin:0">16 / 24 / 32 / 48 px</span></div>
+      </div>
+    </div>
+    <h3 class="cs">Správně a špatně</h3><h3 class="en">Do and don't</h3>
+    <div class="dd">
+      <div class="do"><div class="stage"><img src="assets/logo/logo-svetle-pozadi.svg" alt="" style="height:44px"></div><div class="cap"><b>&#10003;</b><span class="cs">Originální barvy na klidném pozadí.</span><span class="en">Original colors on a calm background.</span></div></div>
+      <div class="dont"><div class="stage"><img src="assets/logo/logo-svetle-pozadi.svg" alt="" style="height:44px;width:260px;object-fit:fill"></div><div class="cap"><b>&#10007;</b><span class="cs">Nedeformuj poměr stran.</span><span class="en">Do not distort the proportions.</span></div></div>
+      <div class="dont"><div class="stage"><img src="assets/logo/logo-svetle-pozadi.svg" alt="" style="height:44px;filter:hue-rotate(120deg) drop-shadow(0 6px 6px rgba(0,0,0,.5))"></div><div class="cap"><b>&#10007;</b><span class="cs">Nepřebarvuj mimo tokeny a nepřidávej stín ani efekty.</span><span class="en">Do not recolor outside the tokens or add shadows and effects.</span></div></div>
+      <div class="dont"><div class="stage" style="background:repeating-linear-gradient(60deg,#ffb38a 0 18px,#b79bff 18px 36px,#7fdca5 36px 54px)"><img src="assets/logo/logo-svetle-pozadi.svg" alt="" style="height:44px"></div><div class="cap"><b>&#10007;</b><span class="cs">Nedávej logo na rušné pozadí.</span><span class="en">Do not place the logo on a busy background.</span></div></div>
+      <div class="dont"><div class="stage"><img src="assets/logo/symbol-fialovy.svg" alt="" style="height:64px;transform:rotate(-18deg)"></div><div class="cap"><b>&#10007;</b><span class="cs">Neotáčej a neskládej symbol s jinými značkami.</span><span class="en">Do not rotate the symbol or combine it with other marks.</span></div></div>
+    </div>
+  </section>
+
+  <!-- ===================== 3 BARVY ===================== -->
+  <section id="barvy" data-cs="Barvy" data-en="Color">
+    <div class="kicker">03</div><h2 class="cs">Barvy</h2><h2 class="en">Color</h2>
+    <p class="cs">Barvy jsou <b>role</b>, ne odstíny: aplikace řekne „akcent“ nebo „vedlejší text“, ne konkrétní hex. Díky tomu stejný kód funguje ve světlém, tmavém i vysokém kontrastu. Vzorník ukazuje motiv přepnutý v liště nahoře.</p>
+    <p class="en">Colors are <b>roles</b>, not shades: an application says "accent" or "secondary text", not a specific hex. That is why the same code works in light, dark and high contrast. The swatches show the theme selected in the bar at the top.</p>
+    <h3 class="cs">Poměr</h3><h3 class="en">Proportion</h3>
+    <div class="ratio" id="ratio"></div>
+    <p class="note cs">Většinu obrazovky tvoří klidné plochy, text dává strukturu, akcent jen to nejdůležitější: jedna hlavní akce, výběr, fokus. Když je fialové všechno, není důležité nic.</p>
+    <p class="note en">Most of the screen is calm surfaces, text provides structure, the accent marks only what matters most: one primary action, selection, focus. When everything is purple, nothing is important.</p>
+    <h3 class="cs">Základní paleta</h3><h3 class="en">Core palette</h3>
+    <div class="pal" id="pal-core"></div>
+    <h3 class="cs">Stavy</h3><h3 class="en">States</h3>
+    <div class="pal" id="pal-state"></div>
+    <h3 class="cs">Vyhrazené barvy</h3><h3 class="en">Reserved colors</h3>
+    <div class="pal" id="pal-res"></div>
+    <div class="dd">
+      <div class="do"><div class="stage"><span class="chip agent"><svg class="ic s"><use href="#ic-agent"/></svg>agent</span></div><div class="cap"><b>&#10003;</b><span class="cs">Korálová jen pro agenta AI, vždy s ikonou a slovem.</span><span class="en">Coral only for the AI agent, always with the icon and the word.</span></div></div>
+      <div class="dont"><div class="stage"><button class="btn" style="background:var(--c-ai);color:var(--c-on-ai);border-color:var(--c-ai)"><span class="cs">Uložit</span><span class="en">Save</span></button></div><div class="cap"><b>&#10007;</b><span class="cs">Korálová nikdy pro běžné tlačítko nebo zvýraznění.</span><span class="en">Never use coral for an ordinary button or highlight.</span></div></div>
+      <div class="dont"><div class="stage"><span class="trust" style="cursor:default"><svg class="ic s"><use href="#ic-shield"/></svg><span class="cs">Bezpečné</span><span class="en">Secure</span></span></div><div class="cap"><b>&#10007;</b><span class="cs">Barvy odznaku důvěry patří jen systému. Aplikace je nedostane.</span><span class="en">Trust badge colors belong to the system only. Applications do not get them.</span></div></div>
+      <div class="dont"><div class="stage"><span style="color:var(--c-ok);font-weight:600"><span class="cs">Hotovo</span><span class="en">Done</span></span>&nbsp;<span style="color:var(--c-danger);font-weight:600"><span class="cs">Chyba</span><span class="en">Error</span></span></div><div class="cap"><b>&#10007;</b><span class="cs">Stav nikdy jen barvou: přidej ikonu nebo slovo.</span><span class="en">Never state by color alone: add an icon or a word.</span></div></div>
+    </div>
+    <p class="note cs">Každá dvojice popředí a pozadí splňuje WCAG 2.2 (text 4,5 : 1, prvky 3 : 1, vysoký kontrast 7 : 1). Kontrola je automatická: <code>node design/tools/build-tokens.mjs</code>. Úplná tabulka je v <a href="design-system.html#barvy">design systému</a>.</p>
+    <p class="note en">Every foreground and background pair meets WCAG 2.2 (text 4.5 : 1, controls 3 : 1, high contrast 7 : 1). The check is automatic: <code>node design/tools/build-tokens.mjs</code>. The full table is in the <a href="design-system.html#barvy">design system</a>.</p>
+  </section>
+
+  <!-- ===================== 4 TYPOGRAFIE ===================== -->
+  <section id="pismo" data-cs="Typografie" data-en="Typography">
+    <div class="kicker">04</div><h2 class="cs">Typografie</h2><h2 class="en">Typography</h2>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+      <div class="spec"><div class="kicker">Inter</div><div class="big">Aa Žž</div><div class="glyphs">ABCČDĎEÉĚFGHIÍJKLMNŇOÓPQRŘSŠTŤUÚŮVWXYÝZŽ<br>0123456789 &mdash; „“ ? !</div>
+        <p class="note cs" style="margin-top:var(--s4)">Systém, aplikace, nadpisy. Tabulkové číslice v časech a tabulkách.</p><p class="note en" style="margin-top:var(--s4)">System, applications, headings. Tabular figures in times and tables.</p></div>
+      <div class="spec mono"><div class="kicker" style="font-family:var(--font-ui)">JetBrains Mono</div><div class="big" style="font-weight:400">0O 1lI</div><div class="glyphs">ls ~/Fotky | where ext == "jpg"<br>{ } [ ] ( ) -&gt; =&gt; != &lt;=</div>
+        <p class="note cs" style="margin-top:var(--s4);font-family:var(--font-ui)">Terminál, kód, cesty. Bez ligatur: jeden znak, jedna buňka.</p><p class="note en" style="margin-top:var(--s4);font-family:var(--font-ui)">Terminal, code, paths. No ligatures: one character, one cell.</p></div>
+    </div>
+    <h3 class="cs">Hierarchie</h3><h3 class="en">Hierarchy</h3>
+    <div class="hier" id="hier"></div>
+    <h3 class="cs">Pravidla</h3><h3 class="en">Rules</h3>
+    <ul class="cs"><li>Nadpisy a tlačítka velkým písmenem jen na začátku: „Zkusit bokem“, ne „Zkusit Bokem“.</li><li>Řádek textu nejvýš 72 znaků; delší text rozděl do odstavců.</li><li>Na jedné obrazovce nejvýš tři velikosti písma. Hierarchii dělej váhou a barvou, ne další velikostí.</li><li>Nikdy menší než 12 px. Nikdy celé věty tučně ani VERZÁLKAMI.</li></ul>
+    <ul class="en"><li>Headings and buttons in sentence case: "Try aside", not "Try Aside".</li><li>Lines of at most 72 characters; split longer text into paragraphs.</li><li>At most three font sizes per screen. Build hierarchy with weight and color, not another size.</li><li>Never below 12 px. Never whole sentences in bold or ALL CAPS.</li></ul>
+  </section>
+
+  <!-- ===================== 5 IKONY ===================== -->
+  <section id="ikony" data-cs="Ikony" data-en="Icons">
+    <div class="kicker">05</div><h2 class="cs">Ikony</h2><h2 class="en">Icons</h2>
+    <div class="icon-build">
+      <svg class="grid" viewBox="0 0 24 24" aria-label="Konstrukce ikony na mřížce 24 px">
+        <rect x="0" y="0" width="24" height="24" fill="var(--c-surface-2)"/>
+        <g stroke="var(--c-border)" stroke-width=".05">
+          <path d="M1 0v24M2 0v24M3 0v24M4 0v24M5 0v24M6 0v24M7 0v24M8 0v24M9 0v24M10 0v24M11 0v24M12 0v24M13 0v24M14 0v24M15 0v24M16 0v24M17 0v24M18 0v24M19 0v24M20 0v24M21 0v24M22 0v24M23 0v24"/>
+          <path d="M0 1h24M0 2h24M0 3h24M0 4h24M0 5h24M0 6h24M0 7h24M0 8h24M0 9h24M0 10h24M0 11h24M0 12h24M0 13h24M0 14h24M0 15h24M0 16h24M0 17h24M0 18h24M0 19h24M0 20h24M0 21h24M0 22h24M0 23h24"/>
+        </g>
+        <rect x="2" y="2" width="20" height="20" fill="none" stroke="var(--c-accent)" stroke-width=".08" stroke-dasharray=".4 .3"/>
+        <circle cx="12" cy="12" r="10" fill="none" stroke="var(--c-ai)" stroke-width=".06" stroke-dasharray=".4 .3"/>
+        <g fill="none" stroke="var(--c-ink)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z"/></g>
+      </svg>
+      <div>
+        <p class="cs"><b>Linkové a zaoblené.</b> Mřížka 24 px, živá plocha 20 px (2 px okraj, fialový čtverec), kruhové tvary do kružnice 20 px (korálová). Tah 1,75 px, zaoblené konce i spoje, rohy s poloměrem 2,5 px. Barvu dává text, takže ikona sama přejde do každého motivu.</p>
+        <p class="en"><b>Line and rounded.</b> 24 px grid, 20 px live area (2 px padding, purple square), round shapes within a 20 px circle (coral). 1.75 px stroke, round caps and joins, corners with a 2.5 px radius. The color comes from the text, so the icon adapts to every theme by itself.</p>
+        <div class="icon-row" id="icon-row"></div>
+      </div>
+    </div>
+    <div class="dd">
+      <div class="do"><div class="stage"><button class="btn"><svg class="ic s"><use href="#ic-branch"/></svg><span class="cs">Zkusit bokem</span><span class="en">Try aside</span></button></div><div class="cap"><b>&#10003;</b><span class="cs">Ikona s popiskem, nebo aspoň se jménem ve stromu přístupnosti.</span><span class="en">Icon with a label, or at least a name in the accessibility tree.</span></div></div>
+      <div class="dont"><div class="stage"><span class="hstack" style="gap:var(--s4)"><svg class="ic l"><use href="#ic-folder"/></svg><svg viewBox="0 0 24 24" class="ic l" style="fill:currentColor;stroke:none"><path d="M3 8a3 3 0 0 1 3-3h4l2 2h6a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/></svg><svg class="ic l" style="stroke-width:.8"><use href="#ic-settings"/></svg></span></div><div class="cap"><b>&#10007;</b><span class="cs">Nemíchej linkové a plné ikony ani různé tloušťky tahu.</span><span class="en">Do not mix line and filled icons or different stroke weights.</span></div></div>
+    </div>
+  </section>
+
+  <!-- ===================== 6 ROZVRZENI ===================== -->
+  <section id="rozvrzeni" data-cs="Rozvržení" data-en="Layout">
+    <div class="kicker">06</div><h2 class="cs">Rozvržení, tvar a hloubka</h2><h2 class="en">Layout, shape and depth</h2>
+    <p class="cs">Všechno leží na <b>mřížce 4 px</b>. Uvnitř prvku jsou mezery menší než mezi prvky, takže je vidět, co k sobě patří. Cíl kliknutí je vždy aspoň 40 &times; 40 px.</p>
+    <p class="en">Everything sits on a <b>4 px grid</b>. Gaps inside a control are smaller than gaps between controls, so it is clear what belongs together. A click target is always at least 40 &times; 40 px.</p>
+    <h3 class="cs">Vnořené zaoblení</h3><h3 class="en">Nested radii</h3>
+    <div class="hstack" style="gap:var(--s7);align-items:center">
+      <div class="nest"><div><span class="cs">vnitřní 10 px</span><span class="en">inner 10 px</span></div></div>
+      <p style="flex:1;min-width:240px" class="cs">Vnitřní zaoblení = vnější minus odsazení. Okno 18 px s odsazením 8 px má uvnitř prvky s 10 px. Jinak rohy vypadají „nafouknuté“.</p>
+      <p style="flex:1;min-width:240px" class="en">Inner radius = outer radius minus padding. A window of 18 px with 8 px padding holds controls of 10 px. Otherwise the corners look "puffy".</p>
+    </div>
+    <h3 class="cs">Hloubka</h3><h3 class="en">Depth</h3>
+    <div class="elev">
+      <div style="box-shadow:var(--sh-window-inactive)"><span class="cs">neaktivní okno</span><span class="en">inactive window</span></div>
+      <div style="box-shadow:var(--sh-window)"><span class="cs">aktivní okno</span><span class="en">active window</span></div>
+      <div style="box-shadow:var(--sh-popover)"><span class="cs">nabídka</span><span class="en">menu</span></div>
+      <div style="box-shadow:var(--sh-dialog)"><span class="cs">dialog</span><span class="en">dialog</span></div>
+    </div>
+    <p class="note cs">Čím výš, tím větší a měkčí stín. Ve světlém motivu má stín fialový nádech, v tmavém je černý, ve vysokém kontrastu ho nahradí rámeček.</p>
+    <p class="note en">The higher, the larger and softer the shadow. In the light theme the shadow has a purple tint, in the dark one it is black, in high contrast a border replaces it.</p>
+  </section>
+
+  <!-- ===================== 7 KOMPONENTY ===================== -->
+  <section id="komponenty" data-cs="Komponenty" data-en="Components">
+    <div class="kicker">07</div><h2 class="cs">Komponenty</h2><h2 class="en">Components</h2>
+    <p class="cs">Prvky jsou v knihovně UI a vypadají všude stejně. Úplný přehled je v <a href="design-system.html#komponenty">design systému</a>; tady jsou pravidla použití.</p>
+    <p class="en">Controls live in the UI library and look the same everywhere. The full overview is in the <a href="design-system.html#komponenty">design system</a>; here are the usage rules.</p>
+    <div class="dd">
+      <div class="do"><div class="stage"><div class="hstack"><button class="btn ghost"><span class="cs">Zrušit</span><span class="en">Cancel</span></button><button class="btn primary"><span class="cs">Převzít změny</span><span class="en">Apply changes</span></button></div></div><div class="cap"><b>&#10003;</b><span class="cs">Jedna hlavní akce na obrazovce, pojmenovaná slovesem.</span><span class="en">One primary action per screen, named with a verb.</span></div></div>
+      <div class="dont"><div class="stage"><div class="hstack"><button class="btn primary">OK</button><button class="btn primary"><span class="cs">Ano</span><span class="en">Yes</span></button><button class="btn primary"><span class="cs">Použít</span><span class="en">Use</span></button></div></div><div class="cap"><b>&#10007;</b><span class="cs">Tři hlavní tlačítka a „OK“ nikomu neřeknou, co se stane.</span><span class="en">Three primary buttons and "OK" tell nobody what will happen.</span></div></div>
+      <div class="do"><div class="stage" style="width:100%"><label class="field" style="width:100%"><span class="cs">Název složky</span><span class="en">Folder name</span><input class="input" value="Faktury 2026"><span class="hint cs">Bez lomítek</span><span class="hint en">No slashes</span></label></div><div class="cap"><b>&#10003;</b><span class="cs">Popisek nad polem, nápověda pod ním. Popisek nikdy jen jako šedý text uvnitř.</span><span class="en">Label above the field, hint below it. Never a label only as grey text inside.</span></div></div>
+      <div class="dont"><div class="stage"><div class="card" style="padding:var(--s4);max-width:240px"><b class="cs">Systém: Povolit kameru?</b><b class="en">System: Allow camera?</b><div class="hstack" style="margin-top:var(--s3)"><button class="btn small primary"><span class="cs">Povolit</span><span class="en">Allow</span></button></div></div></div><div class="cap"><b>&#10007;</b><span class="cs">Aplikace nikdy nekreslí dialog, který vypadá jako systémový. Oprávnění žádá přes systém.</span><span class="en">An application never draws a dialog that looks like a system one. It requests permissions through the system.</span></div></div>
+    </div>
+  </section>
+
+  <!-- ===================== 8 POHYB ===================== -->
+  <section id="pohyb" data-cs="Pohyb" data-en="Motion">
+    <div class="kicker">08</div><h2 class="cs">Pohyb</h2><h2 class="en">Motion</h2>
+    <p class="cs">Pohyb vysvětluje, odkud věc přišla a kam zmizela. Je krátký, přerušitelný a nikdy nečeká na aplikaci: animuje kompozitor.</p>
+    <p class="en">Motion explains where a thing came from and where it went. It is short, interruptible and never waits for an application: the compositor animates.</p>
+    <div class="grid" id="motion" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))"></div>
+    <ul class="cs" style="margin-top:var(--s5)"><li>Odchod je kratší než příchod.</li><li>Okno při tažení sleduje ukazatel přímo, bez pružení.</li><li>Nic nebliká víc než 3&times; za sekundu.</li><li>S volbou Omezit pohyb jen prolnutí 90 ms.</li></ul>
+    <ul class="en" style="margin-top:var(--s5)"><li>Exit is shorter than entry.</li><li>A dragged window follows the pointer directly, without springiness.</li><li>Nothing flashes more than 3 times per second.</li><li>With Reduce motion only a 90 ms crossfade.</li></ul>
+  </section>
+
+  <!-- ===================== 9 TEXTY ===================== -->
+  <section id="texty" data-cs="Texty" data-en="Voice">
+    <div class="kicker">09</div><h2 class="cs">Hlas a texty</h2><h2 class="en">Voice and copy</h2>
+    <p class="cs">Systém mluví jako ochotný kolega: <b>tyká</b>, mluví krátce a jasně, řekne co se stalo a co dělat. Nestraší, neomlouvá se přehnaně a nepoužívá vykřičníky.</p>
+    <p class="en">The system speaks like a helpful colleague: short and clear, it says what happened and what to do. It does not scare, does not over-apologize and does not use exclamation marks.</p>
+    <div style="overflow-x:auto"><table class="tbl voice">
+      <thead><tr><th class="cs">Situace</th><th class="en">Situation</th><th class="cs">Takhle</th><th class="en">Like this</th><th class="cs">Ne takhle</th><th class="en">Not like this</th></tr></thead>
+      <tbody>
+        <tr><td><span class="cs">tlačítko</span><span class="en">button</span></td><td><span class="cs">Převzít 34 změn</span><span class="en">Apply 34 changes</span></td><td>OK</td></tr>
+        <tr><td><span class="cs">chyba</span><span class="en">error</span></td><td><span class="cs">Složka ~/Projekt neexistuje. Myslel jsi ~/Projekty?</span><span class="en">Folder ~/Projekt does not exist. Did you mean ~/Projekty?</span></td><td><span class="cs">Chyba! Operace selhala.</span><span class="en">Error! Operation failed.</span></td></tr>
+        <tr><td><span class="cs">potvrzení</span><span class="en">confirmation</span></td><td><span class="cs">Smazat 34 souborů? Půjdou do koše.</span><span class="en">Delete 34 files? They will go to the trash.</span></td><td><span class="cs">Opravdu chcete pokračovat?</span><span class="en">Are you sure you want to continue?</span></td></tr>
+        <tr><td><span class="cs">čekání</span><span class="en">waiting</span></td><td><span class="cs">Čeká na: síť (DHCP)</span><span class="en">Waiting for: network (DHCP)</span></td><td><span class="cs">Prosím čekejte...</span><span class="en">Please wait...</span></td></tr>
+        <tr><td><span class="cs">pád systému</span><span class="en">system crash</span></td><td><span class="cs">Systém musel zastavit. Tvoje soubory jsou v bezpečí.</span><span class="en">The system had to stop. Your files are safe.</span></td><td><span class="cs">FATÁLNÍ CHYBA! Systém byl zastaven.</span><span class="en">FATAL ERROR! System halted.</span></td></tr>
+        <tr><td><span class="cs">agent</span><span class="en">agent</span></td><td><span class="cs">Agent navrhuje 14 změn. Zkontroluj rozdíl.</span><span class="en">The agent suggests 14 changes. Review the diff.</span></td><td><span class="cs">AI vše vyřešila za vás.</span><span class="en">AI took care of everything for you.</span></td></tr>
+      </tbody>
+    </table></div>
+    <h3 class="cs">Drobnosti</h3><h3 class="en">Details</h3>
+    <ul class="cs"><li>Uvozovky „takhle“, datum 7. 11. 2026, čas 14:05, mezera mezi číslem a jednotkou: 12 kB, 100 %.</li><li>Tlačítko říká, co se stane (sloveso), ne „Ano / Ne“.</li><li>Chyba vždy: co se stalo, proč (kód) a co dělat. Kód chyby odkazuje na vysvětlení.</li><li>Agent mluví o sobě ve třetí osobě a nikdy neříká, že něco udělal, dokud to uživatel nepřevezme.</li></ul>
+    <ul class="en"><li>Quotes "like this", date 2026-11-07, time 14:05, a space between number and unit: 12 kB, 100 %.</li><li>A button says what will happen (a verb), not "Yes / No".</li><li>An error always states what happened, why (code) and what to do. The error code links to an explanation.</li><li>The agent refers to itself in the third person and never says it did something until the user applies it.</li></ul>
+  </section>
+
+  <!-- ===================== 10 DUVERA ===================== -->
+  <section id="duvera" data-cs="Důvěra a agent" data-en="Trust and agent">
+    <div class="kicker">10</div><h2 class="cs">Důvěra a agent</h2><h2 class="en">Trust and the agent</h2>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+      <div class="card"><div class="hstack" style="margin-bottom:var(--s3)"><span class="trust" style="cursor:default"><svg class="ic s"><use href="#ic-shield"/></svg><span class="cs">Hovory</span><span class="en">Calls</span><span class="perm"><svg class="ic"><use href="#ic-camera"/></svg><i class="live"></i></span></span></div>
+        <p class="cs" style="margin:0">Odznak důvěry je <b>vždy vlevo v titulku</b>, v barvách, které má jen systém. Ukazuje, kdo aplikace je a co právě smí. Červená tečka = zařízení běží.</p>
+        <p class="en" style="margin:0">The trust badge is <b>always on the left of the title bar</b>, in colors only the system has. It shows who the application is and what it may do right now. Red dot = device in use.</p></div>
+      <div class="card"><div class="sys-band" style="border-radius:var(--r-control);margin-bottom:var(--s3)"><svg class="ic s"><use href="#ic-shieldcheck"/></svg><span class="cs">Systém</span><span class="en">System</span><span class="phrase"><svg class="ic s"><use href="#ic-key"/></svg><b class="cs">modrá konvice</b><b class="en">blue kettle</b></span></div>
+        <p class="cs" style="margin:0">Systémový dialog má pruh „Systém“ s <b>bezpečnostní frází</b> uživatele a ztlumí celou obrazovku. Bez fráze je to podvrh.</p>
+        <p class="en" style="margin:0">A system dialog has a "System" strip with the user's <b>security phrase</b> and dims the whole screen. Without the phrase it is a fake.</p></div>
+      <div class="card"><div class="hstack" style="margin-bottom:var(--s3)"><span class="chip agent"><svg class="ic s"><use href="#ic-agent"/></svg>agent</span><div class="progress agent" style="flex:1"><i style="width:46%"></i></div></div>
+        <p class="cs" style="margin:0">Cokoli dělá agent AI, má <b>korálovou barvu, ikonu dvou jisker a slovo „agent“</b>. Agent pracuje bokem a uživatel jeho změny převezme.</p>
+        <p class="en" style="margin:0">Whatever the AI agent does carries the <b>coral color, the two-sparkle icon and the word "agent"</b>. The agent works aside and the user applies its changes.</p></div>
+    </div>
+  </section>
+
+  <!-- ===================== 11 PRISTUPNOST ===================== -->
+  <section id="pristupnost" data-cs="Přístupnost" data-en="Accessibility">
+    <div class="kicker">11</div><h2 class="cs">Přístupnost: kontrolní seznam</h2><h2 class="en">Accessibility checklist</h2>
+    <ul class="check cs">
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Každý prvek má roli a jméno ve stromu přístupnosti (i tlačítko jen s ikonou).</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Vše jde klávesnicí: Tab mezi skupinami, šipky uvnitř, Enter, Esc. Fokus je vždy vidět.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Barvy jen z tokenů; kontrast hlídá generátor.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Při písmu 200 % se nic neořízne ani nepřekryje.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Ve vysokém kontrastu je vše čitelné a hranice prvků jsou vidět.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>S Omezit pohyb nic neposkakuje ani nebliká.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Stav není jen barvou: vždy ikona nebo slovo.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Cíl kliknutí aspoň 40 &times; 40 px.</li>
+    </ul>
+    <ul class="check en">
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Every control has a role and a name in the accessibility tree (even an icon-only button).</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Everything works by keyboard: Tab between groups, arrows inside, Enter, Esc. Focus is always visible.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Colors only from tokens; the generator checks contrast.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>At 200 % text size nothing is clipped or overlapped.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>In high contrast everything is legible and control borders are visible.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>With Reduce motion nothing jumps or flashes.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>State is never color alone: always an icon or a word.</li>
+      <li><svg class="ic s"><use href="#ic-check"/></svg>Click targets at least 40 &times; 40 px.</li>
+    </ul>
+  </section>
+
+  <!-- ===================== 12 ZDROJE ===================== -->
+  <section id="zdroje" data-cs="Zdroje" data-en="Resources">
+    <div class="kicker">12</div><h2 class="cs">Zdroje</h2><h2 class="en">Resources</h2>
+    <div class="dl">
+      <a href="tokens.toml"><svg class="ic l"><use href="#ic-code"/></svg><span><b>tokens.toml</b><small class="cs">barvy, písmo, rozestupy, pohyb jako data</small><small class="en">colors, type, spacing, motion as data</small></span></a>
+      <a href="assets/logo/logo-svetle-pozadi.svg"><svg class="ic l"><use href="#ic-image"/></svg><span><b class="cs">Logo (světlé pozadí)</b><b class="en">Logo (light background)</b><small>SVG</small></span></a>
+      <a href="assets/logo/logo-tmave-pozadi.svg"><svg class="ic l"><use href="#ic-image"/></svg><span><b class="cs">Logo (tmavé pozadí)</b><b class="en">Logo (dark background)</b><small>SVG</small></span></a>
+      <a href="assets/logo/symbol-fialovy.svg"><svg class="ic l"><use href="#ic-image"/></svg><span><b class="cs">Symbol</b><b class="en">Symbol</b><small class="cs">fialový, levandulový, bílý</small><small class="en">purple, lavender, white</small></span></a>
+      <a href="design-system.html"><svg class="ic l"><use href="#ic-palette"/></svg><span><b class="cs">Design systém</b><b class="en">Design system</b><small class="cs">všechny hodnoty a komponenty</small><small class="en">all values and components</small></span></a>
+      <a href="index.html"><svg class="ic l"><use href="#ic-apps"/></svg><span><b class="cs">Prototypy</b><b class="en">Prototypes</b><small class="cs">okna, plocha, aplikace, start</small><small class="en">windows, desktop, applications, boot</small></span></a>
+    </div>
+    <p class="note cs" style="margin-top:var(--s5)">Technický popis návrhu a plán implementace: <code>docs/cs/vzhled.md</code>.</p>
+    <p class="note en" style="margin-top:var(--s5)">Technical design description and implementation plan: <code>docs/en/appearance.md</code>.</p>
+  </section>
+  </article>
+</div>
+<script>
+document.addEventListener('mo-ready', function () {
+  var T = window.MO_TOKENS, root = document.documentElement;
+
+  // ---- Jazyk prirucky (pamatuje si volbu).
+  var lang = 'cs';
+  try { lang = localStorage.getItem('mo.handbook-lang') || (navigator.language || '').slice(0, 2) === 'en' && 'en' || 'cs'; } catch (e) {}
+  function setLang(l) {
+    lang = l; root.setAttribute('data-ui-lang', l); root.setAttribute('lang', l);
+    try { localStorage.setItem('mo.handbook-lang', l); } catch (e) {}
+    document.querySelectorAll('#lang [role=radio]').forEach(function (b) { var on = b.dataset.value === l; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; });
+    buildToc(); paint();
+  }
+  window.MO_SEG(document.getElementById('lang'), setLang);
+
+  // ---- Obsah z <section data-cs data-en>, zvyrazneni aktualni sekce.
+  var secs = Array.prototype.slice.call(document.querySelectorAll('article > section'));
+  function buildToc() {
+    document.getElementById('toc').innerHTML = secs.map(function (s) { return '<li><a href="#' + s.id + '">' + s.dataset[lang] + '</a></li>'; }).join('');
+  }
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (e.isIntersecting) document.querySelectorAll('#toc a').forEach(function (a) { a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id); });
+    });
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  secs.forEach(function (s) { io.observe(s); });
+
+  // ---- Logo podle motivu na titulni strane.
+  function cover() {
+    var dark = root.getAttribute('data-theme') === 'dark' || root.getAttribute('data-contrast') === 'more';
+    document.querySelector('.lg-light').style.display = dark ? 'none' : '';
+    document.querySelector('.lg-dark').style.display = dark ? '' : 'none';
+  }
+
+  // ---- Zive ukazky z tokenu.
+  var NAMES = {
+    cs: { bg: 'pozadí', surface: 'plocha', surface_2: 'zvýšená plocha', ink: 'text', ink_muted: 'vedlejší text', border_strong: 'hranice', accent: 'akcent', accent_soft: 'výběr', focus: 'fokus',
+      ok: 'v pořádku', warn: 'varování', danger: 'nebezpečí', trust_bg: 'důvěra (systém)', trust_ink: 'text důvěry', ai: 'agent AI', ai_soft: 'pozadí agenta' },
+    en: { bg: 'background', surface: 'surface', surface_2: 'raised surface', ink: 'text', ink_muted: 'secondary text', border_strong: 'border', accent: 'accent', accent_soft: 'selection', focus: 'focus',
+      ok: 'success', warn: 'warning', danger: 'danger', trust_bg: 'trust (system)', trust_ink: 'trust text', ai: 'AI agent', ai_soft: 'agent background' }
+  };
+  function col(k) { return getComputedStyle(root).getPropertyValue('--c-' + k.replace(/_/g, '-')).trim(); }
+  function lum(h) { if (!/^#/.test(h)) return 1; var n = parseInt(h.slice(1), 16); return (0.2126 * (n >> 16 & 255) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255; }
+  function pal(id, keys) {
+    document.getElementById(id).innerHTML = keys.map(function (k) {
+      var c = col(k);
+      return '<div class="sw"><div class="c" style="background:' + c + ';color:' + (lum(c) < .45 ? '#fff' : '#1a1a1a') + '">' + NAMES[lang][k] + '</div><div class="m"><code>' + k.replace(/_/g, '-') + '</code><br>' + c + '</div></div>';
+    }).join('');
+  }
+  function paint() {
+    cover();
+    pal('pal-core', ['bg', 'surface', 'surface_2', 'ink', 'ink_muted', 'border_strong', 'accent', 'accent_soft', 'focus']);
+    pal('pal-state', ['ok', 'warn', 'danger']);
+    pal('pal-res', ['trust_bg', 'trust_ink', 'ai', 'ai_soft']);
+    var R = lang === 'cs' ? ['plochy 70 %', 'text 20 %', 'akcent 8 %', 'stavy 2 %'] : ['surfaces 70 %', 'text 20 %', 'accent 8 %', 'states 2 %'];
+    document.getElementById('ratio').innerHTML = '<span style="flex:70;background:' + col('surface_2') + ';color:' + col('ink') + '">' + R[0] + '</span><span style="flex:20;background:' + col('ink') + ';color:' + col('surface') + '">' + R[1] + '</span>' +
+      '<span style="flex:8;background:' + col('accent') + ';color:' + col('on_accent') + '">' + R[2] + '</span><span style="flex:2;background:' + col('ok') + '" title="' + R[3] + '"></span>';
+    var H = { display: lang === 'cs' ? 'Dobré odpoledne' : 'Good afternoon', heading: lang === 'cs' ? 'Zabezpečení' : 'Security', title: lang === 'cs' ? 'Povolit kameru?' : 'Allow the camera?',
+      body: lang === 'cs' ? 'Aplikace chce používat kameru. Kdykoli ji odebereš v odznaku okna.' : 'The application wants to use the camera. You can revoke it in the window badge at any time.',
+      small: lang === 'cs' ? 'Změněno dnes ve 14:02 &middot; 12 kB' : 'Modified today at 14:02 &middot; 12 kB', caption: lang === 'cs' ? 'VEDLEJŠÍ POPISEK' : 'SECONDARY LABEL' };
+    document.getElementById('hier').innerHTML = Object.keys(H).map(function (k) {
+      var ty = T.type[k], key = k.replace(/_/g, '-');
+      return '<div class="row"><div class="k">' + key + '<br>' + ty.size + '/' + ty.line + ' &middot; ' + ty.weight + '</div><div style="font-size:var(--t-' + key + '-size);line-height:var(--t-' + key + '-line);font-weight:' + ty.weight + '">' + H[k] + '</div></div>';
+    }).join('');
+    var M = T.motion, D = lang === 'cs' ? [['fast', 'ease_standard', 'najetí, stisk'], ['base', 'ease_standard', 'nabídka'], ['slow', 'ease_enter', 'okno, dialog']] : [['fast', 'ease_standard', 'hover, press'], ['base', 'ease_standard', 'menu'], ['slow', 'ease_enter', 'window, dialog']];
+    document.getElementById('motion').innerHTML = D.map(function (d, i) {
+      return '<div class="card"><div class="hstack"><b>' + d[2] + '</b><span class="spacer"></span><span class="chip num">' + M[d[0]] + ' ms</span></div>' +
+        '<div style="position:relative;height:40px;border-radius:var(--r-control);background:var(--c-surface-3);margin:var(--s3) 0" id="mt' + i + '"><i style="position:absolute;left:4px;top:4px;width:32px;height:32px;border-radius:16px;background:var(--c-accent);transition:left var(--m-' + d[0] + ') var(--' + d[1].replace(/_/g, '-') + ')"></i></div>' +
+        '<button class="btn small" data-mt="' + i + '">' + (lang === 'cs' ? 'Přehrát' : 'Play') + '</button></div>';
+    }).join('');
+    document.querySelectorAll('[data-mt]').forEach(function (b) {
+      b.addEventListener('click', function () { var d = document.querySelector('#mt' + b.dataset.mt + ' i'); d.style.left = d.style.left === 'calc(100% - 36px)' ? '4px' : 'calc(100% - 36px)'; });
+    });
+  }
+  document.getElementById('icon-row').innerHTML = ['terminal', 'folder', 'settings', 'shield', 'globe', 'camera', 'lock', 'bell', 'tasks', 'agent', 'history', 'branch', 'undo', 'search'].map(function (n) { return window.ic(n); }).join('');
+  document.addEventListener('mo-theme', paint);
+  setLang(lang);
+});
+</script>
+</body>
+</html>

@@ -149,7 +149,7 @@ Pak v jednom vlákně dokola opakuje:
 | navázání spojení bez limitu | vzdá se po 75 s (`TIMED_OUT`) |
 | zavření spojení | FIN, úklid po doběhnutí nebo nejpozději po 30 s |
 | fronta naslouchání | 1 až 4096 spojení (jako `SOMAXCONN`); 16 souběžných navázání mezi dvěma koly služby |
-| dočasné porty | 49152 až 65535, začátek náhodný |
+| dočasné porty | 49152 až 65535, začátek náhodný; posledních 4096 uvolněných se znovu nepřidělí (stará relace v NAT/slirp) |
 | datagram UDP | nejvýš 65 507 B (největší obsah datagramu IPv4; fragmentace a skládání IPv4) a nejvýš velikost fronty socketu (výchozí 64 KiB) |
 | DNS | dotaz A (a AAAA) s EDNS0 (1232 B), zkrácená odpověď přes TCP, opakování po 1 s se střídáním serverů, nejvýš 30 s |
 
@@ -419,6 +419,12 @@ dotazům na vlastní server a jako záloha podle profilu sítě:
 - **Zkrácená odpověď** (bit TC): resolver se zeptá přes TCP na stejný
   server a port (RFC 7766, zpráva s délkou u16). U vlastního serveru
   stačí, že relace smí na server UDP.
+- **Uvázlý tok:** opakování přes UDP jde po každých 3 pokusech z nového
+  místního portu a spojení TCP, které se nenaváže do 3 s, se zahodí
+  a naváže znovu (nejvýš 3×). Slirp na Windows pro tok drží jeden socket
+  hostitele; když se pokazí, ztratil by se každý další pokus ze stejného
+  portu (hláška `netd: DNS pres TCP: spojeni se nenavazalo do 3 s, novy
+  pokus (n)`).
 - **Blokované domény** firewallu vrátí `ACCESS_DENIED` bez dotazu (viz
   [Filtr DNS](firewall.md#filtr-dns)).
 
@@ -564,10 +570,30 @@ překládá adresu 10.0.2.2 na 127.0.0.1 hostitele.
 | šifrované DNS | sada „sifrovane DNS“: ověřené A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC i NSEC3), NODATA; nepodepsaná a podvržená zóna; přechod z nefunkčního resolveru, DoT, mezipaměť; pravidlo profilu |
 | NTP | `ntpd` proti serveru hostitele (sada „synchronizace casu“, viz [cas.md](cas.md#synchronizace-podle-sítě-ntpd)) |
 
-DNS přes 10.0.2.3 (slirp předává dotazy DNS hostitele) se netestuje, protože
-by test potřeboval internet. Bez pomocných serverů (`cargo xtask run`)
+**DNS v testech jen lokálně:** všechny dotazy jdou na pomocný server
+hostitele z `nethelper` nebo na testovací DoH/DoT; init v testovacím běhu
+nastaví i neověřenou zálohu systémového resolveru na pomocný server
+(`set_dns`), takže ani výpadek `dnsd` nespadne na skutečné DNS. Limity
+dotazů DNS v testech jsou 30 s (běh pod TCG a zátěží). Resolver hostitele
+(10.0.2.3, slirp předává dotazy DNS Windows/Linuxu) testuje jen
+`cargo xtask test --net-online` – závisí na síti hostitele a internetu. Bez pomocných serverů (`cargo xtask run`)
 se testy, které je potřebují, přeskočí. V logu je pak
 `[preskoceno] sit: ...`.
+
+**Porty pomocných serverů:** žádný není pevný ani uhodnutelný. Každý
+server si vezme dočasný port od jádra hostitele (bind na port 0, při chybě
+jako Windows 10013 až 20 pokusů) a xtask porty předá hostu v initfs
+(`net-test`). Port pro test odmítnutí (`closed`) xtask drží po celý běh
+jako socket navázaný bez `listen`: spojení na něj jádro odmítne a žádný
+jiný proces ho mezitím neobsadí. Port pro `hostfwd` drží xtask obsazený až
+do startu QEMU. Když QEMU hned po startu skončí s hláškou o obsazeném portu
+(QMP nebo `hostfwd`, souběžné běhy testů), xtask ho spustí znovu s novými
+porty (nejvýš 3 pokusy, hláška `xtask: QEMU nenastartovalo (...), novy
+pokus s jinymi porty`).
+
+**Zátěž (víc QEMU naraz):** UDP testy posílají každý další pokus z nového
+socketu (nový tok ve slirp; pozdní odpověď na starý pokus nepřijde),
+`dnsd` čeká na navázání spojení s resolverem 5 s (ztracený SYN se opakuje).
 
 Formáty a oprávnění testuje i hostitel: `cargo test -p netproto
 --features std` (součást `cargo xtask test`). Testy firewallu popisuje

@@ -62,7 +62,8 @@ pub const THREAD_YIELD: u64 = 24;
 
 /// Fyzicky souvisla pamet pro DMA. `(resource, size) -> handle`
 pub const VMO_CREATE_CONTIGUOUS: u64 = 25;
-/// Okno na registry zarizeni. `(resource, phys, size) -> handle`
+/// Okno na fyzicky rozsah mimo RAM (registry, BAR).
+/// `(resource, phys, size, cache) -> handle`; `cache` z [`crate::vm::cache`]
 pub const VMO_CREATE_PHYSICAL: u64 = 26;
 /// Fyzicka adresa stranky objektu pameti. `(resource, vmo, offset) -> phys`
 pub const VMO_PHYS_ADDR: u64 = 27;
@@ -124,13 +125,18 @@ pub const CLOCK_ADJUST: u64 = 45;
 /// `WRITE`. Jiny objekt pameti = `WRONG_TYPE`.
 pub const FB_CONTROL: u64 = 46;
 
+/// Odvola fyzicky objekt pameti: zrusi jeho mapovani ve vsech procesech
+/// a dalsi `VM_MAP` selze (`ACCESS_DENIED`). Pristup pres stare mapovani
+/// = vyjimka stranky. `(resource, vmo)`; rozsah objektu musi prostredek
+/// povolovat.
+pub const VMO_REVOKE: u64 = 47;
+
 /// Procesy jobu a jeho potomku. `(job, out_ptr, max) -> pocet`; job
 /// potrebuje `READ`, na `out_ptr` zapise nejvys `max` zaznamu
 /// [`crate::job::ProcEntry`] (64 B), vrati celkovy pocet (i nad `max`)
 pub const JOB_PROCESSES: u64 = 48;
 
-/// Pocet definovanych syscallu (pro tabulky a testy). Cislo 47 je
-/// `VMO_REVOKE` (vetev Venus, slucuje se do main).
+/// Pocet definovanych syscallu (pro tabulky a testy).
 pub const COUNT: u64 = 49;
 
 /// Operace `FB_CONTROL`.

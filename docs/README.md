@@ -34,6 +34,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
+| [Disky](cs/disky.md) | [Disks](en/disks.md) | NVMe, AHCI (SATA), virtio-blk, ochrana cizích disků a GPT, VMware a skutečné PC / NVMe, AHCI (SATA), virtio-blk, foreign disk protection and GPT, VMware and real PC |
 | [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
 
 ### Grafika / Graphics
@@ -41,6 +42,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Grafika a okna](cs/gui.md) | [Graphics and windows](en/gui.md) | virtio-gpu, kompozitor, protokol okna, strom vrstev a přístupnosti, snímky a transakce, knihovna UI, písmo, systémové dialogy, API akcí / virtio-gpu, compositor, window protocol, layer and accessibility trees, frames and transactions, UI library, fonts, system dialogs, action API |
+| [Vulkan přes Venus](cs/venus.md) | [Vulkan over Venus](en/venus.md) | vlastní ovladač Venus, render uzel, kódování proudu, generátor z vk.xml / own Venus driver, render node, stream encoding, generator from vk.xml |
 
 ### Souborový systém / File system
 
@@ -65,7 +67,7 @@ site menu.
 
 | Česky | English | Obsah / Contents |
 |---|---|---|
-| [Vzhled a ovládání](cs/vzhled.md) | [Look and feel](en/appearance.md) | design systém a tokeny, okna a odznak důvěry, lišta, systémové dialogy, správce úloh, terminál, soubory, nastavení, přihlášení, přístupnost; prototypy v `design/` / design system and tokens, windows and trust badge, bar, system dialogs, task manager, terminal, files, settings, sign-in, accessibility; prototypes in `design/` |
+| [Vzhled a ovládání](cs/vzhled.md) | [Look and feel](en/appearance.md) | design systém a tokeny, okna a odznak důvěry, lišta, systémové dialogy, správce úloh, terminál, soubory, nastavení, přihlášení, přístupnost; prototypy a příručka grafického jazyka v `design/` / design system and tokens, windows and trust badge, bar, system dialogs, task manager, terminal, files, settings, sign-in, accessibility; prototypes and visual language handbook in `design/` |
 
 ### Síť / Network
 

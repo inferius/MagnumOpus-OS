@@ -4,6 +4,18 @@
 //! jen pro cteni) a v `PRESENT` rekne, ktere obdelniky se zmenily.
 //! Ovladac je zkopiruje do svych bufferu DMA, posle je zarizeni a po
 //! dokonceni odpovi `PRESENTED` s casem (nahrada vsync u virtio-gpu 2D).
+//!
+//! Synchronizace po restartu kompozitoru (`docs/cs/obnova-sluzeb.md`):
+//! konec kanalu k ovladaci drzi supervisor, nova instance dostane tentyz
+//! konec, ve kterem mohou cekat odpovedi stare instance. Nova instance
+//! posle `SYNC` s nahodnym tokenem a zahodi vse, co prijde pred `SYNCED`
+//! se stejnym tokenem (ovladac, ktery `SYNC` nezna, odpovi `ERROR` s `op`
+//! `SYNC` - i to je znacka). Pak znovu `INFO` a `ATTACH` (nova VMO nahradi
+//! starou).
+//!
+//! `OPEN_RENDER` otevre novy kanal render uzlu (protokol `gpuproto`):
+//! vlastnik displeje (init, pak kompozitor) tak muze dat pristup ke 3D
+//! (Venus) dalsimu procesu, aniz by mu dal displej.
 
 use alloc::vec::Vec;
 
@@ -13,9 +25,13 @@ pub mod op {
     pub const INFO: u32 = 1;
     pub const ATTACH: u32 = 2;
     pub const PRESENT: u32 = 3;
+    pub const SYNC: u32 = 4;
     pub const MODES: u32 = 101;
     pub const ATTACHED: u32 = 102;
     pub const PRESENTED: u32 = 103;
+    pub const SYNCED: u32 = 104;
+    pub const OPEN_RENDER: u32 = 5;
+    pub const RENDER: u32 = 105;
     pub const ERROR: u32 = 199;
 }
 
@@ -23,6 +39,8 @@ pub mod op {
 pub mod caps {
     /// Zarizeni umi 3D (virgl).
     pub const VIRGL: u32 = 1 << 0;
+    /// Ovladac ma render uzel s capsetem Venus (Vulkan, `OPEN_RENDER`).
+    pub const VENUS: u32 = 1 << 1;
 }
 
 /// Jeden vystup (scanout).
@@ -42,6 +60,11 @@ pub enum Request {
     /// Handle VMO (B8G8R8A8, `stride * h` bajtu) jde v handlech zpravy.
     Attach { output: u32, w: u32, h: u32, stride: u32 },
     Present { seq: u64, output: u32, rects: Vec<Rect> },
+    /// Znacka v proudu odpovedi: ovladac odpovi `SYNCED` se stejnym
+    /// tokenem (vse pred ni patri predchozi instanci kompozitoru).
+    Sync { token: u64 },
+    /// Novy kanal render uzlu (odpoved `Render`).
+    OpenRender,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +72,22 @@ pub enum Reply {
     Modes { caps: u32, outputs: Vec<Output> },
     Attached { output: u32 },
     Presented { seq: u64, time: u64 },
+    Synced { token: u64 },
+    /// Kanal render uzlu jde v handlech zpravy.
+    Render,
     Error { op: u32, code: Error },
+}
+
+impl Reply {
+    /// Je odpoved znackou synchronizace s tokenem `token`? (`ERROR` na
+    /// `SYNC` = ovladac synchronizaci nezna, ale odpovida po poradi.)
+    pub fn ends_sync(&self, token: u64) -> bool {
+        match self {
+            Reply::Synced { token: t } => *t == token,
+            Reply::Error { op: o, .. } => *o == op::SYNC,
+            _ => false,
+        }
+    }
 }
 
 impl Request {
@@ -68,6 +106,11 @@ impl Request {
                     w.rect(r);
                 }
             }
+            Request::Sync { token } => {
+                w = Writer::op(op::SYNC);
+                w.u64(*token);
+            }
+            Request::OpenRender => w = Writer::op(op::OPEN_RENDER),
         }
         w.finish()
     }
@@ -92,6 +135,8 @@ impl Request {
                 }
                 Request::Present { seq, output, rects }
             }
+            op::SYNC => Request::Sync { token: r.u64()? },
+            op::OPEN_RENDER => Request::OpenRender,
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -120,6 +165,11 @@ impl Reply {
                 w = Writer::op(op::PRESENTED);
                 w.u64(*seq).u64(*time);
             }
+            Reply::Synced { token } => {
+                w = Writer::op(op::SYNCED);
+                w.u64(*token);
+            }
+            Reply::Render => w = Writer::op(op::RENDER),
             Reply::Error { op: o, code } => {
                 w = Writer::op(op::ERROR);
                 w.u32(*o).i32(code.code());
@@ -149,6 +199,8 @@ impl Reply {
                 seq: r.u64()?,
                 time: r.u64()?,
             },
+            op::SYNCED => Reply::Synced { token: r.u64()? },
+            op::RENDER => Reply::Render,
             op::ERROR => Reply::Error {
                 op: r.u32()?,
                 code: Error::from_code(r.i32()? as i64).ok_or(Error::InvalidArgs)?,

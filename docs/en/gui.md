@@ -1,6 +1,6 @@
 # Graphics and windows (GUI)
 
-Milestone 6c. Describes the `virtio-gpu` driver, the `compd` compositor,
+Milestone 6c. Describes the display drivers (`virtio-gpu`, `fbdisplay`), the `compd` compositor,
 the window protocol (`libs/guiproto`), the native UI library (`libs/ui`),
 fonts (`libs/font`), drawing (`libs/gfx`), system dialogs and the action
 API. The agreed decisions are in the [Architecture](architecture.md#decisions-for-milestones-6a-6d-agreed)
@@ -75,6 +75,8 @@ and in the [6c decisions](#6c-decisions-agreed) table below.
 init
  ├─ devmgr ── finds PCI 1af4:1050 (virtio-gpu) ── starts virtio-gpu
  │            sends init the message `display` + channel (displayproto)
+ ├─ fbdisplay ─ only when `display` did not arrive: firmware framebuffer
+ │              (bootstrap FRAMEBUFFER, FB_CONTROL CLAIM), see Displays
  ├─ inputd
  └─ compd ─── init sends it `display` (driver channel), `input`
               (a new focus channel from inputd), `secure` (shortcut channel)
@@ -357,6 +359,8 @@ application may draw into that layer.
   input is ignored.
 - The result `ANSWER { id, choice }` or `ANSWER { id, text }` (password)
   goes only to the requester.
+- An action confirmation shows the actual parameters (path, recipient, file
+  list) and the confirmation binds exactly to them (see [Action API](#action-api)).
 
 The `dialog` channel messages are binary (`guiproto::control`):
 
@@ -394,7 +398,7 @@ confirm = false          # true = confirm with a system dialog
 
 [[action.param]]
 name = "title"
-type = "text"            # text, int, bool, path, choice
+type = "text"            # text, int, bool, path, paths, choice
 required = true
 
 [[action.param]]
@@ -414,6 +418,25 @@ choices = ["yellow", "blue"]
 An action with `confirm = true`, or one called from a synthetic source
 (agent), is confirmed with a system dialog before it is passed on. A
 caller sees only actions, not windows.
+
+**What is confirmed is what is shown.** The system draws the dialog and
+shows the **actual arguments** by their manifest type, not just the
+action name:
+
+| Type | In the dialog |
+|---|---|
+| `path` | the whole path (a long one wraps by characters, nothing is hidden) |
+| `paths` | number of items and a preview of the first 8 whole paths, "... and N more" |
+| `text` | the value in quotes (recipient, network target, message), at most 300 characters |
+| `int`, `bool`, `choice` | the value (`ano`/`ne` for `bool`) |
+
+When the dialog is shown, the compositor stores the encoded arguments
+(whole, compared byte by byte - a fingerprint could be collided on
+purpose) and after confirmation hands the
+application **exactly the arguments the user saw**. If they changed
+between showing and confirming, the call is rejected ("arguments changed
+after display") and the application gets nothing. The caller has no
+message to change the arguments after confirmation.
 
 ## Compositor control commands
 
@@ -510,10 +533,14 @@ the whole image into its VMO and says which rectangles changed.
 | Op | Direction | Fields |
 |---|---|---|
 | `INFO` | compd -> driver | - |
-| `MODES` | driver -> compd | outputs: w, h, enabled; capabilities (`3D`) |
+| `MODES` | driver -> compd | outputs: w, h, enabled; capabilities (`VIRGL`, `VENUS`) |
 | `ATTACH` | compd -> driver | output, w, h, stride (in bytes) + VMO handle (read-only) |
 | `PRESENT` | compd -> driver | seq, rectangles |
 | `PRESENTED` | driver -> compd | seq, time (ns) |
+| `SYNC` | compd -> driver | token (u64) - marker after a compositor restart |
+| `SYNCED` | driver -> compd | token; everything before it belongs to the previous instance ([Recovery](#recovery-after-a-compositor-crash)) |
+| `OPEN_RENDER` | display owner -> driver | - |
+| `RENDER` | driver -> owner | + render node channel handle ([Venus](venus.md#render-node-gpuproto)) |
 
 The driver copies the damaged rectangles into its DMA buffers (with an
 IOMMU the only memory the device may access), sends
@@ -539,6 +566,108 @@ compositor draws the cursor). 2D commands:
 limit and reports the message `display` to init. In QEMU the device is
 `virtio-gpu-pci,iommu_platform=on,xres=1280,yres=800` on both x86_64 and
 aarch64.
+
+## Displays: virtio-gpu and fbdisplay
+
+The compositor draws the whole frame into its VMO and sends the display
+driver only the damaged rectangles (`guiproto::display`). The driver can
+therefore be swapped without changing the compositor. There are two:
+
+| | `virtio-gpu` | `fbdisplay` |
+|---|---|---|
+| where | QEMU (and other hypervisors with virtio-gpu) | anything with UEFI GOP: VMware, Hyper-V gen2, VirtualBox, real PCs; in QEMU `--gpu none` |
+| started by | `devmgr` (PCI `1af4:1050`), message `display` | `init`, when `display` does not arrive |
+| resolution | from `GET_DISPLAY_INFO` (fixed after start for now) | **fixed**: the mode the firmware set (the loader does not change it) |
+| copy | into DMA buffers + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` | direct writes into screen memory (write-combining), row by row |
+| format | `B8G8R8X8_UNORM` (same as the compositor) | RGB or BGR as the firmware says; converted and alpha stripped while copying |
+| acceleration, vsync | virgl/Venus as the next step; `PRESENTED` after flush | **none**; `PRESENTED` right after the copy (no vsync wait) |
+| multiple monitors | several outputs (scanouts) | one (output 0) |
+
+**virtio-gpu wins.** That is why the loader already picks a GOP that is
+not virtio-gpu (`loader/src/pci_id.rs`): VGA on QEMU x86_64, ramfb on
+aarch64. Without a GOP (or with an unsupported format such as
+`PixelBitMask`) there is no framebuffer and without virtio-gpu the GUI
+does not start (`init: grafika (virtio-gpu ani framebuffer) neni`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Choosing the display driver">
+<defs><marker id="fbd1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="200" height="70" rx="6"/><text class="t b" x="110" y="45" text-anchor="middle">loader (UEFI)</text><text class="m" x="110" y="64" text-anchor="middle">picks a GOP that is not virtio-gpu</text><text class="m" x="110" y="80" text-anchor="middle">phys. address, w, h, stride, RGB/BGR</text>
+<rect class="box" x="10" y="130" width="200" height="80" rx="6"/><text class="t b" x="110" y="155" text-anchor="middle">kernel</text><text class="m" x="110" y="174" text-anchor="middle">log on fb until FB_CONTROL CLAIM</text><text class="m" x="110" y="190" text-anchor="middle">bootstrap FRAMEBUFFER to init</text><text class="m" x="110" y="204" text-anchor="middle">(write-combining VMO)</text>
+<path class="ln" d="M110 90 L110 128" marker-end="url(#fbd1)"/>
+<rect class="acc" x="290" y="130" width="200" height="80" rx="6"/><text class="t b" x="390" y="155" text-anchor="middle">init</text><text class="m" x="390" y="174" text-anchor="middle">did devmgr report display?</text><text class="m" x="390" y="190" text-anchor="middle">yes: virtio-gpu</text><text class="m" x="390" y="204" text-anchor="middle">no: starts fbdisplay</text>
+<path class="ln" d="M210 170 L288 170" marker-end="url(#fbd1)"/>
+<rect class="box" x="570" y="20" width="200" height="70" rx="6"/><text class="t b" x="670" y="45" text-anchor="middle">virtio-gpu</text><text class="m" x="670" y="64" text-anchor="middle">DMA + TRANSFER + FLUSH</text><text class="m" x="670" y="80" text-anchor="middle">(preferred)</text>
+<rect class="box" x="570" y="130" width="200" height="80" rx="6"/><text class="t b" x="670" y="155" text-anchor="middle">fbdisplay</text><text class="m" x="670" y="174" text-anchor="middle">copies rectangles into fb</text><text class="m" x="670" y="190" text-anchor="middle">RGB/BGR conversion, no alpha</text><text class="m" x="670" y="204" text-anchor="middle">fixed resolution</text>
+<path class="ln" d="M490 150 L568 70" marker-end="url(#fbd1)"/><text class="m" x="500" y="100">display</text>
+<path class="ln" d="M490 175 L568 175" marker-end="url(#fbd1)"/><text class="m" x="500" y="168">otherwise</text>
+<rect class="ok" x="290" y="240" width="200" height="50" rx="6"/><text class="t b" x="390" y="262" text-anchor="middle">compd</text><text class="m" x="390" y="279" text-anchor="middle">same protocol for both</text>
+<path class="ln" d="M390 210 L390 238" marker-end="url(#fbd1)"/><text class="m" x="398" y="228">display channel (gui::DISPLAY)</text>
+</svg>
+<figcaption>Choosing the display driver. The compositor does not know which one runs.</figcaption>
+</figure>
+
+### Who owns the framebuffer
+
+The kernel gives init the framebuffer in the start message (kind
+`FRAMEBUFFER`, see [System calls](syscalls.md#firmware-framebuffer)) and
+draws the log into it until an owner explicitly takes it over
+([`FB_CONTROL`](syscalls.md#fb_control) `CLAIM`). After `RELEASE` or a
+crash of the owner the kernel clears the screen and keeps drawing the log;
+a kernel panic always draws.
+
+Init decides about the owner in one place (`gui::display`):
+
+| Situation | Framebuffer owner |
+|---|---|
+| virtio-gpu present | nobody from the GUI (the picture goes through virtio-gpu); the framebuffer stays for the rescue console |
+| no virtio-gpu | `fbdisplay` under the compositor (init gives it a duplicate handle) |
+| GUI not running or crashed | the rescue console `user/console` (command `display`), see [Shell](shell-design.md) |
+
+When the compositor ends, `fbdisplay` sees its channel closed and exits;
+the kernel takes the screen back when the process ends (also on a crash),
+but only if it still holds it. `fbdisplay` does not call `RELEASE`
+explicitly: the kernel does not check the caller and after a compositor
+crash the rescue console may already own the screen. Init keeps its `Startup::framebuffer`, so it can hand the screen
+to the console right away.
+
+### The fbdisplay driver
+
+`user/fbdisplay` gets the framebuffer memory object and the display
+channel from init (kind USER). It queries the geometry itself
+(`FB_CONTROL` `INFO`), maps the framebuffer and then takes over the
+screen (`CLAIM`). Protocol:
+
+1. `INFO` -> `MODES` with a single output at the firmware resolution,
+   capabilities 0,
+2. `ATTACH` with the compositor VMO (read-only); a size other than the
+   framebuffer = `NOT_SUPPORTED`, after attaching the whole screen is
+   redrawn,
+3. `PRESENT` -> rectangles are clipped to the screen (`normalize_rects`)
+   and copied row by row (`fbcopy::copy_rect`): for BGR only the alpha is
+   cleared, for RGB R and B are swapped; then a barrier (flushes the
+   write-combining buffers) and `PRESENTED` with the time.
+
+The framebuffer is mapped **write-combining** (x86_64: PAT entry 1, which
+the kernel rewrites from WT to WC; aarch64: Normal Non-cacheable). Writes
+are merged into full bus lines, reads are slow - so the driver never
+reads from the framebuffer.
+
+**Performance and limitations:**
+
+- a full 1920 x 1080 screen = 8 MiB per frame; with write-combining a real
+  PC does that in a few ms (it is bound by the bus to the graphics).
+  An uncached (UC) mapping would be an order of magnitude slower - hence WC.
+- ⚠️ **The resolution is fixed**: GOP does not allow mode changes after
+  `ExitBootServices`. A different resolution only via the firmware setup
+  or (later) the loader before the kernel starts.
+- ⚠️ **No vsync**: a frame may tear (the copy runs while the monitor is
+  scanning out). The firmware provides no frame interrupt.
+- ⚠️ **The framebuffer is also in the kernel's direct map** with the cache
+  type from the firmware MTRRs, while the process has it WC. Two mappings
+  with different types are formally undefined on x86; the kernel does not
+  write through its mapping after `CLAIM` (only on panic), so in practice
+  it does not matter.
 
 ## Native UI library (`libs/ui`)
 
@@ -659,16 +788,84 @@ for compositor composition.
 
 | What | Status |
 |---|---|
-| `cargo xtask run/test --gpu 2d\|gl\|venus` | device choice: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; without a window the `egl-headless` display |
+| `cargo xtask run/test --gpu 2d\|gl\|venus\|none` | device choice: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; without a window the `egl-headless` display; `none` = no virtio-gpu (GUI through `fbdisplay`) |
 | driver | negotiates `VIRGL`, `RESOURCE_BLOB`, `CONTEXT_INIT` and logs the capsets, e.g. `virgl(v1) virgl2(v2)` |
 | `vgpu::virgl` | own encoder of the virgl command stream (state objects, TGSI shaders, vertices, draws, scissor) and virtio-gpu 3D commands, host tests |
 | GPU composition | pending: on this host (QEMU 11.1 for Windows) the virtual machine stalls after the kernel starts whenever OpenGL is on (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) |
-| Venus | QEMU for Windows lacks it: "Render server support was not enabled in virglrenderer" |
+| Venus | QEMU for Windows lacks it ("Render server support was not enabled in virglrenderer"). **Works in WSL2:** `cargo xtask run --qemu-wsl --gpu venus` (QEMU 10.1 and virglrenderer with the render server built into `~/venus/prefix`, host Vulkan lavapipe, GTK display under Xvfb); the driver reports capset `venus(v0)` |
+| own Venus driver | step 1 done: render node in the driver, library `libs/venus` (generated from vk.xml), a test prints the physical device name - see [Vulkan over Venus](venus.md) |
 
 ⚠️ **Where to test Venus:** Linux with a physical GPU and QEMU +
 virglrenderer with the render server (or crosvm). WSL2 only with Vulkan
 translated to D3D12 (uncertain). Not VMware - its SVGA3D is a different
 protocol. On real hardware Vulkan comes with the Mesa port (milestone 7).
+
+## Recovery after a compositor crash
+
+When `compd` crashes, the init supervisor starts it again (shared
+[Service recovery](service-recovery.md) protocol) and **the windows come
+back on their own** with the same identity (trust badge, application id).
+Applications need to do nothing: `ui::client` does the recovery.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Restoring windows after a compositor crash">
+<defs><marker id="gr1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker><marker id="gr1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow-acc" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="210" height="120" rx="6"/><text class="t b" x="115" y="45" text-anchor="middle">application (ui::client)</text><text class="m" x="115" y="66" text-anchor="middle">window state record</text><text class="m" x="115" y="84" text-anchor="middle">(guiproto::replay)</text><text class="m" x="115" y="102" text-anchor="middle">app holds buffer VMOs</text><text class="m" x="115" y="120" text-anchor="middle">window channel + lease</text>
+<rect class="err" x="290" y="20" width="180" height="50" rx="6"/><text class="t b" x="380" y="50" text-anchor="middle">compd gen 1 (crashed)</text>
+<rect class="ok" x="290" y="110" width="180" height="60" rx="6"/><text class="t b" x="380" y="135" text-anchor="middle">compd gen 2</text><text class="m" x="380" y="155" text-anchor="middle">SYNC, ATTACH, focus</text>
+<rect class="acc" x="550" y="20" width="200" height="150" rx="6"/><text class="t b" x="650" y="45" text-anchor="middle">supervisor (init)</text><text class="m" x="650" y="68" text-anchor="middle">CompdService adapter</text><text class="m" x="650" y="86" text-anchor="middle">recipe = ConnectInfo</text><text class="m" x="650" y="104" text-anchor="middle">from the manifest</text><text class="m" x="650" y="122" text-anchor="middle">Kept: driver endpoint</text><text class="m" x="650" y="140" text-anchor="middle">Dep::notify(inputd)</text>
+<rect class="box" x="550" y="220" width="200" height="60" rx="6"/><text class="t b" x="650" y="245" text-anchor="middle">display driver</text><text class="m" x="650" y="264" text-anchor="middle">does not notice</text>
+<path class="ln dash" d="M220 45 L288 45" marker-end="url(#gr1)"/><text class="m" x="225" y="35">1. PEER_CLOSED</text>
+<path class="ln-acc" d="M150 140 C 250 260, 480 250, 548 160" marker-end="url(#gr1a)"/><text class="m" x="230" y="245">2. RECONNECT on the lease</text>
+<path class="ln" d="M548 140 L472 140" marker-end="url(#gr1)"/><text class="m" x="480" y="190">3. connect(recipe)</text>
+<path class="ln-acc" d="M290 150 L222 120" marker-end="url(#gr1a)"/><text class="m" x="225" y="175">4. HELLO + window state</text>
+<path class="ln" d="M650 170 L650 218" marker-end="url(#gr1)"/><text class="m" x="656" y="200">duplicate endpoint</text>
+</svg>
+<figcaption>Compositor crash: the app gets a new session with the same identity over its lease and resends the window state.</figcaption>
+</figure>
+
+| Step | Who | What |
+|---|---|---|
+| 1 | supervisor | the `CompdService` adapter (`user/init/src/gui.rs`) starts a new instance and sends it `display` with a duplicate of the channel endpoint to the display driver (endpoint keeper `Kept`) |
+| 2 | `compd` | sends the driver `SYNC` with a random token and drops everything before `SYNCED` (late replies to the old instance), then `INFO` and `ATTACH` again (the new frame VMO replaces the old one) |
+| 3 | adapter | the reply to `display` confirms the start; then a new focus and `secure` channel from `inputd` (like `take_input`) |
+| 4 | application | `ui::client` sees `PEER_CLOSED` and calls `conn.recover()`: over the lease the supervisor issues a session from the recipe (`ConnectInfo` from the manifest - init gives the identity, not the app) |
+| 5 | application | `HELLO` and the last **committed** window state from the record (`guiproto::replay`): window, buffers (the app holds the VMOs and sends them again read-only), layers with properties, title, regions and the accessibility tree; after `CONFIGURE` a `COMMIT` (same size) or a `Resized` event |
+| 6 | application | event `Restored { generation }`; `run` redraws the window |
+
+An `inputd` restart (`Dep::notify("inputd")`) closes neither the focus
+nor the `secure` channel: init keeps the `inputd`-side endpoints in the
+endpoint keeper and hands them to the new instance. The compositor gets
+`Focus(false)` (ends a drag, forgets the press and sends `Focus(false)` to
+the focused window - the app releases its keys) and then `Focus(true)`.
+Windows stay.
+
+**What is not restored** (recovery rules, agreed):
+
+| In progress | Result |
+|---|---|
+| transaction (messages since the last `COMMIT`) | dropped; the call returns `SERVICE_RESTARTED` and `run` redraws the window (apps drawing on their own, e.g. `gui-term`, do the same) |
+| `COMMIT` | the record applies it: after recovery the window state is the same as if the old instance had accepted it |
+| action reply (`ACTION_RESULT`) | `SERVICE_RESTARTED`: the caller belonged to the old instance and got no reply; the action did run in the app |
+| transaction group (`SYNC_GROUP`), animations | the group token belongs to the old instance; animations end at their target value |
+| system dialog, secure screen | gone with the instance; callers (`dialog`, `actions`) see `PEER_CLOSED` |
+
+**Handle order of an application with a window** (start message, kind
+USER): 0 = window channel, 1 = lease, 2+ = the app's own handles
+(`gui-tasks`: channel to `taskd`). `ui::client::Link::from_handles` takes
+the first two. Without a supervisor (tests) the app gets a lease with no
+other end: a compositor crash ends the window.
+
+**Never hangs**: waiting on the lease has a deadline (`Conn`, default
+10 s), the greeting to the new instance 5 s, at most 3 attempts if the new
+instance crashes too. When the supervisor gives up (more than 5 crashes in
+60 s) the app gets `SERVICE_UNAVAILABLE` and exits.
+
+**Risks**: recovery resends the whole window state (the accessibility tree
+of a large window is tens of kB; buffers are only handles - no pixels are
+copied). After recovery the window shows its last committed content even
+if the app was drawing a new one (a frame older picture). The new
+instance places the window again (the position is not remembered yet).
 
 ## Status and deviations from the design
 
@@ -679,18 +876,20 @@ protocol. On real hardware Vulkan comes with the Mesa port (milestone 7).
 | group opacity | multiplied into children (no intermediate buffer) | overlapping children of a translucent group blend with each other too; the GPU backend will do it properly |
 | vsync | `PRESENTED` time from the driver (end of `RESOURCE_FLUSH`) | virtio-gpu 2D does not report vsync |
 | cursor | drawn by the compositor into the frame | hardware cursor (queue 1) comes with 3D |
-| restoring windows after restart | none | in the design ([Graphics](architecture.md#graphics)) |
-| compositor restart | the supervisor only watches it | windows belong to the compositor; after a crash the apps would have to reconnect |
+| restoring windows after restart | the app resends its last committed state ([Recovery](#recovery-after-a-compositor-crash)) | the window position is not remembered; an unfinished transaction returns `SERVICE_RESTARTED` |
+| compositor restart | the supervisor (`CompdService` adapter, display from the endpoint keeper) | dialogs and transaction groups of the old instance are lost |
 | commit held in a group | applied together with the whole group, even if the client sent another plain commit meanwhile | a client in a group should wait for `PRESENTED`; strict per-client commit order comes with the GPU backend |
 | display driver crash | the compositor keeps running without a picture (windows, dialogs, actions) | no driver restart yet |
+| display without virtio-gpu | `fbdisplay`: fixed firmware resolution, no acceleration and no vsync | native GPU drivers (later milestone) |
 
 ## Tests
 
 - **host** (part of `cargo xtask test`): `cargo test -p guiproto -p gfx
-  -p font -p vgpu -p comp -p ui` - message encoding and robustness against
+  -p font -p vgpu -p fbcopy -p comp -p ui` - message encoding and robustness against
   broken messages, colours and blending, clipping, damaged regions, text,
   rasterizer (exact square coverage, caron above the letter, randomly
-  corrupted font file), virtio-gpu commands, transactions and their
+  corrupted font file), virtio-gpu commands, RGB/BGR conversion and
+  clipped rectangle copies into the framebuffer (`fbcopy`), transactions and their
   atomicity, transaction groups (including the deadline), synchronized
   resize, input routing and focus, moving a window by its title without
   the app, custom title regions, badge above application content,
@@ -707,4 +906,14 @@ protocol. On real hardware Vulkan comes with the Mesa port (milestone 7).
   rejected, `note.add`, an agent action waits for confirmation), a system
   dialog rejects a synthetic Enter and accepts physical keys from QEMU
   (QMP), the secure screen after Ctrl+Alt+Del from QEMU, the terminal
-  window with a custom title bar.
+  window with a custom title bar, **a compositor crash in the middle of
+  work** (last: the compositor under the test's supervisor, `gui-demo` in
+  another process with a lease; after the kill the window comes back with
+  the same identity, badge and state, the app keeps responding, one window
+  and one client).
+- **QEMU without virtio-gpu** (`cargo xtask test --gpu none`, x86_64 and
+  aarch64): the same `gui` suite on top of `fbdisplay` (x86_64 VGA,
+  aarch64 ramfb). Pixels are checked through the compositor inspection,
+  not the driver, so the suite verifies the compositor and the display
+  protocol on top of fbdisplay; the QEMU test does not read the
+  framebuffer contents themselves.

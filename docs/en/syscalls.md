@@ -546,6 +546,27 @@ With an IOMMU the device may moreover DMA only into memory created through
 its resource (see [kernel.md](kernel.md#iommu-dma-protection)); without an
 IOMMU it can write anywhere.
 
+### Firmware framebuffer
+
+Not a system call but a handle kind in init's start message
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7): the physical memory object of
+the GOP framebuffer, rights `READ | WRITE | MAP`. It can be read and
+written only through a mapping (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`,
+as a syscall buffer `BAD_ADDRESS`). Geometry and taking over the screen
+go through [`FB_CONTROL`](#fb_control).
+
+The object is mapped **write-combining** (a physical object with cache
+type `WRITE_COMBINING`, the same as with
+[`VMO_CREATE_PHYSICAL`](#vmo_create_physical); x86_64: PAT entry 1 = WC,
+set by the kernel on every CPU; aarch64: Normal Non-cacheable): writes are
+merged, reads are slow. The kernel does not send the handle when the
+framebuffer overlaps RAM used by the allocator, does not start on a page
+boundary or is smaller than its geometry (a warning in the log, the kernel
+console keeps using it). Init passes it to the owner of the screen: the
+`fbdisplay` driver when there is no virtio-gpu (see
+[GUI](gui.md#displays-virtio-gpu-and-fbdisplay)), otherwise the rescue
+console `user/console`.
+
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. A physically contiguous memory object for DMA
@@ -559,13 +580,28 @@ towards the device with barriers (`libos::barrier`). Errors: `INVALID_ARGS`
 
 ### `VMO_CREATE_PHYSICAL`
 
-`(resource, phys, size) -> handle`. A window onto device registers (MMIO).
-The range must not lie in RAM or firmware memory (otherwise
-`ACCESS_DENIED`). It is mapped uncached; it cannot be read through
-`VMO_READ`/`VMO_WRITE` (`NOT_SUPPORTED`, reading registers has side
-effects) and cannot be used as a syscall buffer (`BAD_ADDRESS`). A
-restricted resource (`RESOURCE_CREATE`) may use only its ranges. Errors:
-`INVALID_ARGS` (unaligned address), `ACCESS_DENIED`.
+`(resource, phys, size, cache) -> handle`. A window onto a physical range
+outside RAM (device registers, BAR). The range must not lie in RAM or
+firmware memory (otherwise `ACCESS_DENIED`). `cache` (`abi::vm::cache`)
+sets the cache type of every mapping of the object: `UNCACHED` (0,
+registers), `WRITE_COMBINING` (1, x86_64 PAT WC, aarch64 Normal
+Non-cacheable) or `CACHED` (2, host memory mapped by the device, e.g. the
+virtio-gpu shared memory). It cannot be read through `VMO_READ`/`VMO_WRITE`
+(`NOT_SUPPORTED`, reading registers has side effects) and cannot be used
+as a syscall buffer (`BAD_ADDRESS`). A restricted resource
+(`RESOURCE_CREATE`) may use only its ranges. The resource holder can
+revoke it (`VMO_REVOKE`). Errors: `INVALID_ARGS` (unaligned address,
+unknown cache type), `ACCESS_DENIED`.
+
+### `VMO_REVOKE`
+
+`(resource, vmo)`. Revokes a physical memory object: removes its mappings
+in all processes (including those it was handed to) and further `VM_MAP`
+calls fail with `ACCESS_DENIED`. Access through an old mapping = page
+fault. A driver can thus lend a client a window into device memory and
+safely take it back (the virtio-gpu render node after a blob is
+destroyed). The resource must allow the object's range. Errors:
+`NOT_SUPPORTED` (not a physical object), `ACCESS_DENIED`.
 
 ### `VMO_PHYS_ADDR`
 

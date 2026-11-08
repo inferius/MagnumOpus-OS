@@ -38,6 +38,9 @@ thread at libos's `_start` symbol with the bootstrap channel handle in
    - `process` - handle to its own process (memory mapping, threads),
    - `initfs` - the initfs image (`init` only),
    - `handles` - further handles from the parent,
+   - `framebuffer` - the firmware framebuffer (`init` from the kernel, the
+     screen owner from init; kind `FRAMEBUFFER`, geometry and take-over via
+     `sys::fb_info` / `sys::fb_claim`, see [System calls](syscalls.md#fb_control)),
    - `bootstrap` - channel to the parent for further communication,
    - `flags` - start flags from the `SELF_PROCESS` argument
      (`abi::bootstrap::flags`; the kernel sets them only for init, e.g. `TEST_RUN`),

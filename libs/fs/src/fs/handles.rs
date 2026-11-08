@@ -191,6 +191,91 @@ impl<D: BlockDevice> Fs<D> {
         Ok(h)
     }
 
+    /// Znovu otevre objekt podle **trvaleho handlu** (dataset, oid, generace)
+    /// po restartu sluzby: klient drzi identitu objektu, nova instance ho
+    /// otevre s pravy overenymi znovu. Objekt s cestou se otevre jako
+    /// `open` (prava podle cesty; jiny objekt na ceste = `NOT_FOUND`).
+    /// Sirotek (smazany, ale otevreny pred padem - uchovany s
+    /// `keep_orphans`) nema cestu: smi ho otevrit jen vlastnik (a system).
+    /// Vraci handle a cestu objektu ve FS (`None` = sirotek). Jina generace
+    /// = objekt mezitim zanikl (`NOT_FOUND`).
+    pub fn reopen(&mut self, dataset: u64, oid: u64, generation: u64, access_bits: u8, share_bits: u8) -> Result<(Handle, Option<alloc::string::String>)> {
+        if !self.all_dataset_ids()?.contains(&dataset) {
+            return Err(Error::NotFound);
+        }
+        self.activate(dataset)?;
+        let root = self.s.root;
+        let Some(raw) = btree::get(&mut self.s, &root, &Key::new(oid, item::INODE, 0))? else {
+            return Err(Error::NotFound);
+        };
+        let inode = Inode::decode(&raw, self.s.time_format())?;
+        if inode.generation != generation {
+            return Err(Error::NotFound);
+        }
+        if let Some(rel) = self.path_of(oid)? {
+            let base = self.dataset_path(dataset)?;
+            let mut full = alloc::string::String::from(base.trim_end_matches('/'));
+            if rel != "/" || full.is_empty() {
+                full.push_str(&rel);
+            }
+            let h = self.open(&full, access_bits, share_bits)?;
+            let same = self.handles.opens.get(&h).is_some_and(|o| o.ds == dataset && o.oid == oid);
+            if !same {
+                self.close(h)?;
+                return Err(Error::NotFound);
+            }
+            return Ok((h, Some(full)));
+        }
+        // Sirotek: rodic 0 a polozka ORPHAN.
+        self.activate(dataset)?;
+        let root = self.s.root;
+        let orphan = btree::get(&mut self.s, &root, &Key::new(META_OID, item::ORPHAN, oid))?.is_some();
+        if inode.parent != 0 || !orphan || inode.kind == KIND_SYMLINK {
+            return Err(Error::NotFound);
+        }
+        if access_bits & !(access::READ | access::WRITE | access::DELETE) != 0 {
+            return Err(Error::InvalidArgs);
+        }
+        let view = if self.checking() {
+            let p = self.principal.clone().unwrap_or_default();
+            if p.user != inode.owner {
+                return Err(Error::AccessDenied);
+            }
+            Some((p, crate::perm::Inherited::default()))
+        } else {
+            None
+        };
+        if access_bits & access::WRITE != 0 {
+            self.s.check_writable()?;
+        }
+        for (_, o) in self.handles.on_object(dataset, oid) {
+            if access_bits & !o.share != 0 || o.access & !share_bits != 0 {
+                return Err(Error::Locked);
+            }
+        }
+        self.handles.next += 1;
+        let h = self.handles.next;
+        self.handles.opens.insert(
+            h,
+            Open {
+                ds: dataset,
+                oid,
+                generation,
+                access: access_bits,
+                share: share_bits,
+                view,
+                rights: crate::perm::rights::READ | crate::perm::rights::WRITE | crate::perm::rights::DELETE,
+            },
+        );
+        Ok((h, None))
+    }
+
+    /// Cisla novych handlu zacnou nad `base` (nova instance sluzby po padu:
+    /// cislo handlu stare instance tak nikdy neukaze na cizi soubor).
+    pub fn set_handle_base(&mut self, base: u64) {
+        self.handles.next = self.handles.next.max(base);
+    }
+
     /// Zavre handle. Se zavrenim posledniho handlu sirotek zmizi (i data)
     /// a provede se smazani pri zavreni.
     pub fn close(&mut self, h: Handle) -> Result<()> {
@@ -405,6 +490,19 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Uklid sirotku po padu (pri pripojeni): nikdo uz je nema otevrene.
     pub(super) fn cleanup_orphans(&mut self) -> Result<()> {
+        self.cleanup_orphans_where(false)
+    }
+
+    /// Uklidi sirotky, ktere nikdo nema otevrene (po restartu sluzby se
+    /// `keep_orphans`: co klienti stihli znovu otevrit, zustane do zavreni).
+    /// Jen system.
+    pub fn cleanup_unopened_orphans(&mut self) -> Result<()> {
+        self.require_system()?;
+        self.s.check_writable()?;
+        self.cleanup_orphans_where(true)
+    }
+
+    fn cleanup_orphans_where(&mut self, skip_open: bool) -> Result<()> {
         let mut found = false;
         let ids = self.all_dataset_ids()?;
         for id in ids {
@@ -417,6 +515,9 @@ impl<D: BlockDevice> Fs<D> {
                 &Key::new(META_OID, item::ORPHAN + 1, 0),
             )?;
             for (k, _) in items {
+                if skip_open && self.handles.on_object(id, k.offset).next().is_some() {
+                    continue;
+                }
                 self.destroy_orphan(k.offset)?;
                 found = true;
             }

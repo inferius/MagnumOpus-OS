@@ -4,7 +4,9 @@
 //! zarizeni spusti ovladace z initfs. Na x86 navic spusti ovladac radice
 //! PS/2 (`ps2`, zarizeni na desce mimo PCI; kdyz radic chybi, skonci).
 //! Pro radice USB (xHCI) spusti `xhci` a podle jeho zprav tridni ovladace
-//! (`usb.rs`). Rodici (init) posle po bootstrap kanalu pro kazde zarizeni
+//! (`usb.rs`). Pro radice disku NVMe a AHCI (podle tridy PCI) spusti `nvme`
+//! a `ahci`; ty samy hlasi nalezene disky (`block`, viz
+//! `blockproto::server::report_disks`). Rodici (init) posle po bootstrap kanalu pro kazde zarizeni
 //! zpravu s koncem kanalu ke klientovi ovladace: `block` (disk, protokol
 //! `blockproto`), `input` (klavesnice, mys, protokol `inputproto::device`),
 //! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody) nebo
@@ -95,6 +97,42 @@ const DRIVERS: &[Driver] = &[
     },
 ];
 
+/// Ovladac radice disku podle tridy PCI. Radic muze mit vic disku (porty
+/// SATA, jmenne prostory NVMe): ovladac kazdy nahlasi zpravou `block`
+/// s kanalem pro klienta a nakonec `done`.
+struct ClassDriver {
+    /// Trida, podtrida, programove rozhrani.
+    class: (u8, u8, u8),
+    program: &'static str,
+    /// BAR s registry radice.
+    bar: u8,
+    irq_max: u32,
+    dma_max: u64,
+}
+
+const CLASS_DRIVERS: &[ClassDriver] = &[
+    // NVMe: fronty + buffer 32 KiB (pod 64 KiB).
+    ClassDriver {
+        class: (0x01, 0x08, 0x02),
+        program: "nvme",
+        bar: 0,
+        irq_max: 2,
+        dma_max: 1 << 20,
+    },
+    // AHCI: az 32 portu po nejvys 64 KiB (seznam prikazu, FIS, buffer).
+    ClassDriver {
+        class: (0x01, 0x06, 0x01),
+        program: "ahci",
+        bar: 5,
+        irq_max: 2,
+        dma_max: 4 << 20,
+    },
+];
+
+/// Jak dlouho cekat, nez ovladac radice disku nahlasi sve disky (reset
+/// radice, navazani linek SATA, roztoceni disku).
+const DISK_REPORT_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(20);
+
 fn main(startup: Startup) -> i64 {
     let Some(resource) = startup.root_resource.as_ref() else {
         println!("devmgr: chybi pristup k hardwaru (ROOT_RESOURCE)");
@@ -137,6 +175,21 @@ fn main(startup: Startup) -> i64 {
                     f,
                     &startup.bootstrap,
                 ) {
+                    Ok(p) => drivers.push(p),
+                    Err(e) => println!(
+                        "devmgr: ovladac {} pro {} nelze spustit: {e}",
+                        driver.program, f.address
+                    ),
+                }
+            }
+        }
+        for driver in CLASS_DRIVERS {
+            for f in functions
+                .iter()
+                .filter(|f| (f.class, f.subclass, f.prog_if) == driver.class)
+            {
+                let segment = (*arg >> 16) as u16;
+                match start_disk_controller(driver, &fs, resource, vmo, &ecam, segment, f, &startup.bootstrap) {
                     Ok(p) => drivers.push(p),
                     Err(e) => println!(
                         "devmgr: ovladac {} pro {} nelze spustit: {e}",
@@ -253,6 +306,53 @@ fn start_xhci(
         ready: false,
         closed: false,
     })
+}
+
+/// Spusti ovladac radice disku a initu preda kanaly k disku, ktere nahlasi.
+#[allow(clippy::too_many_arguments)]
+fn start_disk_controller(
+    driver: &ClassDriver,
+    fs: &Initfs,
+    resource: &libos::hw::Resource,
+    ecam_vmo: &libos::Vmo,
+    ecam: &Ecam,
+    segment: u16,
+    f: &Function,
+    parent: &Channel,
+) -> libos::Result<Process> {
+    let image = fs.find(driver.program).ok_or(libos::Error::NotFound)?;
+    let a = f.address;
+    let bar = ecam.memory_bar(a, driver.bar).ok_or(libos::Error::NotSupported)?;
+    let bar_size = ecam
+        .memory_bar_size(a, driver.bar)
+        .ok_or(libos::Error::NotSupported)?;
+    let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
+    let id = (segment, a.bus, a.device, a.function);
+    let device = resource.restrict_device(&ranges, driver.irq_max, driver.dma_max, id)?;
+    let config = device.device_memory(config_phys, pci::CONFIG_SIZE)?;
+    let handles = vec![
+        StartHandle::user(device.handle().duplicate(None)?),
+        StartHandle::user(config.handle().duplicate(None)?),
+    ];
+    let (process, control) = libos::spawn(driver.program, image, handles)?;
+    control.write(format!("pci {} {} {}", a.bus, a.device, a.function).as_bytes(), Vec::new())?;
+    control.write(format!("bar {} {}", bar.phys, bar_size).as_bytes(), Vec::new())?;
+    let deadline = libos::time::deadline_after(DISK_REPORT_TIMEOUT);
+    loop {
+        let msg = match control.read(Some(deadline)) {
+            Ok(m) => m,
+            Err(e) => {
+                println!("devmgr: ovladac {} pro {} nenahlasil disky: {e}", driver.program, a);
+                break;
+            }
+        };
+        match &msg.data[..] {
+            b"block" => parent.write(b"block", msg.handles)?,
+            b"done" => break,
+            other => println!("devmgr: {}: neznama zprava {:?}", driver.program, other),
+        }
+    }
+    Ok(process)
 }
 
 /// Preruseni a DMA pameti pro ovladac radice xHCI.

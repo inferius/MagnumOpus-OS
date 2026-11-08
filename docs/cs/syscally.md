@@ -532,6 +532,25 @@ Kořenový Resource má navíc právo `SET_CLOCK` (nastavení hodin,
 [`CLOCK_SET`](#clock_set)). Správce zařízení dostane kořen bez něj
 a omezené prostředky ho nemají nikdy.
 
+### Framebuffer z firmwaru
+
+Není to syscall, ale druh handlu ve startovní zprávě initu
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7): fyzický objekt paměti
+framebufferu GOP, práva `READ | WRITE | MAP`. Číst a psát jde jen přes
+mapování (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`, jako buffer syscallu
+`BAD_ADDRESS`). Geometrii a převzetí obrazovky řídí [`FB_CONTROL`](#fb_control).
+
+Objekt se mapuje **write-combining** (fyzický objekt s typem cache
+`WRITE_COMBINING`, stejně jako u [`VMO_CREATE_PHYSICAL`](#vmo_create_physical);
+x86_64: položka PAT 1 = WC, jádro ji nastaví na každém CPU; aarch64: Normal
+Non-cacheable): zápisy se slučují,
+čtení je pomalé. Jádro handle nepošle, když framebuffer překrývá RAM pro
+alokátor, nezačíná na hranici stránky nebo je menší než jeho geometrie
+(varování v logu, konzole jádra ho dál používá). Init ho předá vlastníkovi
+obrazovky: bez virtio-gpu ovladači `fbdisplay` (viz
+[Grafika](gui.md#displeje-virtio-gpu-a-fbdisplay)), jinak záchranné
+konzoli `user/console`.
+
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. Fyzicky souvislý objekt paměti pro DMA
@@ -545,13 +564,27 @@ musí ovladač zajistit bariérami (`libos::barrier`). Chyby: `INVALID_ARGS`
 
 ### `VMO_CREATE_PHYSICAL`
 
-`(resource, phys, size) -> handle`. Okno na registry zařízení (MMIO).
-Rozsah nesmí ležet v RAM ani paměti firmwaru (jinak `ACCESS_DENIED`).
-Mapuje se bez cache; přes `VMO_READ`/`VMO_WRITE` ho číst nejde
-(`NOT_SUPPORTED`, čtení registrů má vedlejší efekty) a jako buffer
-syscallu ho použít nejde (`BAD_ADDRESS`). Omezený prostředek
-(`RESOURCE_CREATE`) smí jen své rozsahy. Chyby: `INVALID_ARGS`
-(nezarovnaná adresa), `ACCESS_DENIED`.
+`(resource, phys, size, cache) -> handle`. Okno na fyzický rozsah mimo RAM
+(registry zařízení, BAR). Rozsah nesmí ležet v RAM ani paměti firmwaru
+(jinak `ACCESS_DENIED`). `cache` (`abi::vm::cache`) určí typ cache všech
+mapování objektu: `UNCACHED` (0, registry), `WRITE_COMBINING` (1, x86_64
+PAT WC, aarch64 Normal Non-cacheable) nebo `CACHED` (2, paměť hostitele
+namapovaná zařízením, např. sdílená paměť virtio-gpu). Přes
+`VMO_READ`/`VMO_WRITE` ho číst nejde (`NOT_SUPPORTED`, čtení registrů má
+vedlejší efekty) a jako buffer syscallu ho použít nejde (`BAD_ADDRESS`).
+Omezený prostředek (`RESOURCE_CREATE`) smí jen své rozsahy. Držitel
+prostředku ho může odvolat (`VMO_REVOKE`). Chyby: `INVALID_ARGS`
+(nezarovnaná adresa, neznámý typ cache), `ACCESS_DENIED`.
+
+### `VMO_REVOKE`
+
+`(resource, vmo)`. Odvolá fyzický objekt paměti: zruší jeho mapování ve
+všech procesech (i v těch, kterým byl handle předán) a další `VM_MAP`
+skončí `ACCESS_DENIED`. Přístup přes staré mapování = výjimka stránky.
+Ovladač tak může klientovi půjčit okno do paměti zařízení a bezpečně ho
+vzít zpět (render uzel virtio-gpu po zničení blobu). Prostředek musí
+rozsah objektu povolovat. Chyby: `NOT_SUPPORTED` (není fyzický objekt),
+`ACCESS_DENIED`.
 
 ### `VMO_PHYS_ADDR`
 

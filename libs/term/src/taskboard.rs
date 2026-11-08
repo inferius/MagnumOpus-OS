@@ -168,6 +168,12 @@ impl Board {
         self.logs.remove(&req)
     }
 
+    /// Jsou vsechny hlasene ulohy relace uz v seznamu (registrace
+    /// potvrzena a udalost dosla)?
+    pub fn settled(&self) -> bool {
+        self.pending.is_empty() && self.ids.values().all(|id| self.list.tasks.iter().any(|t| t.id == *id))
+    }
+
     /// Je prehled uloh dostupny (kanal klienta funguje)?
     pub fn available(&self) -> bool {
         self.subscribed

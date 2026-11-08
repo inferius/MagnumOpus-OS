@@ -77,6 +77,8 @@ pub struct Service {
     pub scrubbing: bool,
     /// Prehled uloh (scrub, deduplikace).
     pub tasks: crate::tasks::FsTasks,
+    /// Po restartu: kdy uklidit sirotky, ktere nikdo znovu neotevrel.
+    pub orphan_cleanup: Option<u64>,
 }
 
 /// Klic rozpracovaneho vypisu: (dataset, snapshot) u vypisu snapshotu

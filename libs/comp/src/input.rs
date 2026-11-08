@@ -226,6 +226,31 @@ impl Comp {
                 self.input.drag = None;
                 self.input.press_target = None;
             }
+            // Kompozitor ztratil fokus vstupu (restart `inputd`, zmena
+            // vlastnika): stisknute klavesy a tlacitka se povazuji za
+            // uvolnene. Ukoncit tazeni a oknu s fokusem (a oknu se
+            // stiskem) poslat `Focus(false)` - aplikace uvolni klavesy.
+            // Po `Focus(true)` znovu `Focus(true)`.
+            Event::Focus(false) => {
+                self.input.drag = None;
+                let pressed = self.input.press_target.take();
+                let target = self.focused_target();
+                if let Some(g) = pressed
+                    && let Some(w) = self.windows.get(&g)
+                    && Some((w.client, w.local)) != target
+                {
+                    let (c, l) = (w.client, w.local);
+                    self.send_input(c, l, InputEvent::Focus(false), mods, false, r.time);
+                }
+                if let Some((c, l)) = target {
+                    self.send_input(c, l, InputEvent::Focus(false), mods, false, r.time);
+                }
+            }
+            Event::Focus(true) => {
+                if let Some((c, l)) = self.focused_target() {
+                    self.send_input(c, l, InputEvent::Focus(true), mods, false, r.time);
+                }
+            }
             Event::SecureAttention => self.secure_attention(now),
             Event::NewDevice { source, state } => self.new_device(source, state),
             _ => {}

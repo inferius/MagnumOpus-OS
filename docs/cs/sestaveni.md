@@ -28,6 +28,7 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 | `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)) |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro ostatní architektury, dokumentace, pak jádro a userspace v QEMU bez okna |
 | `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Test delší než 20 s se v logu označí `[pomaly]` |
+| `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
 | `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 
@@ -35,7 +36,9 @@ Přepínače: `--arch <x86_64|aarch64>` (všechny příkazy, výchozí `x86_64`;
 aarch64 = QEMU `virt`, viz [implementace aarch64](architektura.md#implementace-aarch64-qemu-virt)),
 `--release`, `--headless` (bez okna), `--iommu <typ>` (emulovaná IOMMU:
 x86_64 `intel` (výchozí), `amd`, `none`; aarch64 `smmu` (výchozí), `none`; `none` ověří běh bez překladu DMA - test
-„IOMMU: zarizeni nezapise mimo prideleny DMA“ pak podle očekávání selže), `--gdb` (QEMU čeká na
+„IOMMU: zarizeni nezapise mimo prideleny DMA“ a testy „IOMMU chrani pamet mimo DMA“ sady `disky` pak podle očekávání selžou),
+`--data-disk <virtio|nvme|ahci>` (řadič datového disku, výchozí `virtio`; na NVMe a AHCI dostane disk
+GPT s naším oddílem, viz [Disky](disky.md)), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
 

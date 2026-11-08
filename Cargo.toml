@@ -17,15 +17,21 @@ members = [
     "libs/initfs",
     "libs/manifest",
     "libs/blockproto",
+    "libs/diskguard",
     "libs/inputproto",
     "libs/guiproto",
     "libs/svcclient",
+    "libs/gpuproto",
+    "libs/venus",
+    "libs/spirv",
+    "libs/vkcomp",
     "libs/taskproto",
     "libs/taskcore",
     "libs/taskview",
     "libs/gfx",
     "libs/font",
     "libs/vgpu",
+    "libs/fbcopy",
     "libs/comp",
     "libs/ui",
     "libs/keymap",
@@ -48,6 +54,7 @@ members = [
     "user/devmgr",
     "user/echo",
     "user/svctest",
+    "user/fsrtest",
     "user/fsd",
     "user/fwd",
     "user/netd",
@@ -56,6 +63,7 @@ members = [
     "user/fetch",
     "user/revocd",
     "user/dnsd",
+    "user/vk-probe",
     "user/init",
     "user/ps2",
     "user/shsess",
@@ -64,6 +72,8 @@ members = [
     "user/taskd",
     "user/timed",
     "user/virtio-blk",
+    "user/nvme",
+    "user/ahci",
     "user/virtio-input",
     "user/xhci",
     "user/usb-hub",
@@ -71,6 +81,7 @@ members = [
     "user/virtio-net",
     "user/virtio-rng",
     "user/virtio-gpu",
+    "user/fbdisplay",
     "user/compd",
     "user/gui-demo",
     "user/gui-term",
@@ -98,8 +109,19 @@ fs = { path = "libs/fs" }
 [profile.dev]
 panic = "abort"
 
-# Souborovy system: bez optimalizace trva zapis radku shellu v debug ~5 s
-# a test velkeho adresare kolem 90 s (B+strom, soucty, komprese).
+# Interpret shellu je rekurzivni; bez optimalizace by jedna uroven volani
+# zabrala ~50 KB zasobniku (s optimalizaci ~6 KB). Program ma 256 KB.
+[profile.dev.package.shlang]
+opt-level = 2
+
+[profile.dev.package.term]
+opt-level = 2
+
+# Souborovy system: hashe bloku (XXH3, BLAKE3), komprese a strom CoW. Bez
+# optimalizace je kazdy pozadavek i krok scrubu, defragmentace
+# a deduplikace na pozadi v QEMU (TCG) mnohonasobne pomalejsi; radek
+# shellu se zapisem pak cekal sekundy (klon, diff, zahozeni, krok scrubu
+# mezi pozadavky).
 [profile.dev.package.fs]
 opt-level = 2
 
@@ -109,21 +131,10 @@ opt-level = 2
 [profile.dev.package.fsproto]
 opt-level = 2
 
-[profile.dev.package.blake3]
+[profile.dev.package.xxhash-rust]
 opt-level = 3
 
-# Interpret shellu je rekurzivni; bez optimalizace by jedna uroven volani
-# zabrala ~50 KB zasobniku (s optimalizaci ~6 KB). Program ma 256 KB.
-[profile.dev.package.shlang]
-opt-level = 2
-
-[profile.dev.package.term]
-opt-level = 2
-
-# Dalsi knihovny souboroveho systemu (soucty XXH3, komprese bloku): bez
-# optimalizace kazdy krok scrubu a deduplikace na pozadi v QEMU (TCG)
-# zdrzuje pozadavky klientu.
-[profile.dev.package.xxhash-rust]
+[profile.dev.package.blake3]
 opt-level = 3
 
 [profile.dev.package.lz4_flex]
