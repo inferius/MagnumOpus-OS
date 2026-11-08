@@ -652,6 +652,31 @@ Cíl: každou chybu jde dohledat - co se stalo, kde, na kterém CPU a kdy.
 - Později: služba logu v userspace, strukturované záznamy (klíč = hodnota),
   persistentní log na disku, úrovně z příkazové řádky jádra.
 
+## Text a konce řádků (odsouhlaseno 2026-11-08)
+
+Konec řádku je v celém systému **LF (`
+`)** - výstupy služeb, logy,
+konfigurace, protokoly, zdrojáky. Je to standard Rustu, gitu, webu, JSONu
+a Unixů; CRLF by znamenal převody všude jinde.
+
+1. **Uvnitř systému jen `
+`.** **[navrženo]** jako pravidlo; nové kódy ho
+   dodržují.
+2. **Tolerantní čtení**: nástroje přijmou i `
+` (soubor z Windows,
+   vložený text) jako jeden konec řádku a osamocené `` na konci řádku
+   nezobrazují jako smetí.
+3. **Soubory se nikdy tiše nepřepisují**: editor zachová styl otevřeného
+   souboru; převod jen na požádání (příkaz, volba při uložení).
+4. **Terminál**: `
+` = nový řádek a návrat na začátek (jako moderní
+   terminály); samotné `` vrátí kurzor na začátek řádku (průběžný
+   ukazatel postupu).
+5. **Výměna se světem**: `osfs` (sdílení FS s Windows) ani git konce řádků
+   nepřevádějí; převod je volitelný v nástroji.
+6. **Strukturovaný výstup shellu** (tabulky, záznamy) konce řádků nenese;
+   vznikají až při převodu hodnoty na text pro zobrazení.
+
 ## Konvence kódu
 
 Viz [sestaveni.md](sestaveni.md#konvence-kódu). Komentáře v kódu česky,
