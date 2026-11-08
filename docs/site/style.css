@@ -105,6 +105,12 @@ a:hover { text-decoration: underline; }
 .search-results a small { display: block; color: var(--muted); }
 .search-results a:hover, .search-results a.active { background: var(--accent-soft); text-decoration: none; }
 
+/* Prepinac knih (Prirucka / Pro vyvojare) v zahlavi. */
+.books { display: flex; gap: 2px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.books a { color: var(--muted); padding: 4px 10px; border-radius: 6px; font-size: 14px; white-space: nowrap; text-decoration: none; }
+.books a:hover { color: var(--text); }
+.books a.current { background: var(--accent); color: #fff; }
+
 .top-actions { margin-left: auto; display: flex; gap: 8px; }
 .top-actions a, .top-actions button {
   border: 1px solid var(--border);
@@ -236,6 +242,7 @@ main { padding: 32px 48px 80px; min-width: 0; }
   main { padding: 20px 16px 60px; }
   .topbar { gap: 8px; padding: 0 12px; }
   .brand { display: none; }
+  .books a { padding: 4px 7px; font-size: 13px; }
 }
 
 /* Diagramy (vlozene SVG v markdownu): barvy z promennych motivu. */

@@ -1,7 +1,9 @@
 //! Generator HTML dokumentace: `cargo xtask docs`.
 //!
 //! Zdrojem pravdy zustavaji markdown soubory v `docs/cs` a `docs/en` (ctou
-//! se i v gitu a hlida je test v crate abi). Generator z nich udela web:
+//! se i v gitu a hlida je test v crate abi). Generator z nich udela web
+//! o dvou knihach (`docs_books.rs`: Prirucka a Pro vyvojare; kazda ma
+//! vlastni menu a vyhledavani, v zahlavi je prepinac knih). Kazda kniha:
 //! levy panel se strankami, obsah stranky, prepinac jazyka, vyhledavani,
 //! svetly a tmavy motiv. Seznam stranek a jejich parovani mezi jazyky bere
 //! z tabulky v `docs/README.md`. Styl a skript jsou v `docs/site/`.
@@ -17,6 +19,8 @@
 //! `../../design/` na `../design/` a zkontroluje, ze cilovy soubor existuje.
 //! Varianta s kopii primo do `cs/design/` a `en/design/` by zdvojila data
 //! a varianta s ponechanim `../../design/` by vedla mimo `target/docs`.
+//! Prirucka (`docs/prirucka/cs`) je o uroven hloubeji, v markdownu pouziva
+//! `../../../design/` a na webu `../../design/`.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -28,18 +32,9 @@ use pulldown_cmark::{
 };
 
 use crate::Result;
+use crate::docs_books::{BOOKS, BookDef, PageDef, read_index};
 
 const LANGS: [(&str, &str); 2] = [("cs", "Česky"), ("en", "English")];
-
-/// Jedna stranka v obou jazycich.
-struct PageDef {
-    files: [String; 2],
-    /// Nazev v menu (text odkazu v README).
-    names: [String; 2],
-    descriptions: [String; 2],
-    /// Skupina v menu (nadpis `###` v README).
-    group: [String; 2],
-}
 
 /// Vyrenderovana stranka.
 struct Rendered {
@@ -54,10 +49,17 @@ struct Rendered {
     errors: Vec<String>,
 }
 
+/// Vyrenderovana kniha v jednom jazyce.
+struct Built {
+    book: usize,
+    li: usize,
+    pages: std::rc::Rc<Vec<PageDef>>,
+    rendered: Vec<Rendered>,
+}
+
 /// Vytvori web do `out` a vrati cestu k uvodni strance.
 pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
     let docs = root.join("docs");
-    let pages = read_index(&docs.join("README.md"))?;
     fs::create_dir_all(out.join("assets"))?;
     // Styl webu + barvy shellu z motivu terminalu (jeden zdroj barev).
     let mut css = fs::read_to_string(docs.join("site/style.css"))?;
@@ -65,50 +67,71 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
     fs::write(out.join("assets/style.css"), css)?;
     fs::copy(docs.join("site/site.js"), out.join("assets/site.js"))?;
     copy_design(&root.join("design"), &out.join("design"))?;
+    // Stare vystupy prirucky nesmi zustat (stranka, ktera uz v README neni).
+    for b in BOOKS.iter().filter(|b| !b.out_sub.is_empty()) {
+        let dir = out.join(b.out_sub);
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+    }
 
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
-    let mut h2: [Vec<usize>; 2] = [Vec::new(), Vec::new()];
-    for (li, (lang, _)) in LANGS.iter().enumerate() {
-        let dir = out.join(lang);
-        fs::create_dir_all(&dir)?;
-        let mut rendered = Vec::new();
-        for page in &pages {
-            let md = fs::read_to_string(docs.join(lang).join(&page.files[li]))
-                .map_err(|e| format!("docs/{lang}/{}: {e}", page.files[li]))?;
-            crate::docs_check::page(lang, &page.files[li], &md, &mut errors, &mut warnings);
-            rendered.push(render(&page.files[li], &md));
-        }
-        for r in &rendered {
-            for e in &r.errors {
-                errors.push(format!("{lang}/{}: {e}", r.file));
+    let mut built: Vec<Built> = Vec::new();
+    for (bi, book) in BOOKS.iter().enumerate() {
+        let src = root.join(book.src);
+        let pages = std::rc::Rc::new(read_index(&src.join("README.md"))?);
+        let mut h2: [Vec<usize>; 2] = [Vec::new(), Vec::new()];
+        for (li, (lang, _)) in LANGS.iter().enumerate() {
+            let mut rendered = Vec::new();
+            for page in pages.iter() {
+                let md = fs::read_to_string(src.join(lang).join(&page.files[li]))
+                    .map_err(|e| format!("{}/{lang}/{}: {e}", book.src, page.files[li]))?;
+                crate::docs_check::page(lang, &page.files[li], &md, &mut errors, &mut warnings);
+                rendered.push(render(&page.files[li], &md, book));
             }
+            for r in &rendered {
+                for e in &r.errors {
+                    errors.push(format!("{}/{lang}/{}: {e}", book.id(), r.file));
+                }
+            }
+            h2[li] = rendered.iter().map(|r| r.toc.iter().filter(|t| t.0 == 2).count()).collect();
+            check_design_links(&book.web_dir(lang), &rendered, book, &root.join("design"), &mut errors);
+            built.push(Built { book: bi, li, pages: pages.clone(), rendered });
         }
-        h2[li] = rendered.iter().map(|r| r.toc.iter().filter(|t| t.0 == 2).count()).collect();
-        check_links(lang, &rendered, &mut errors);
-        check_design_links(lang, &rendered, &root.join("design"), &mut errors);
-        let titles: Vec<String> = rendered.iter().map(|r| r.title.clone()).collect();
-        for (pi, r) in rendered.iter().enumerate() {
-            let other = &pages[pi].files[1 - li];
-            let html = page_html(li, &pages, &titles, pi, r, other);
+        for (pi, page) in pages.iter().enumerate() {
+            crate::docs_check::pair(&page.files[0], h2[0][pi], &page.files[1], h2[1][pi], &mut warnings);
+        }
+    }
+
+    // Odkazy se kontroluji az po vyrenderovani vsech knih (odkazy mezi knihami).
+    let known = known_pages(&built);
+    for b in &built {
+        check_links(&BOOKS[b.book].web_dir(LANGS[b.li].0), &b.rendered, &known, &mut errors);
+    }
+
+    for b in &built {
+        let book = &BOOKS[b.book];
+        let lang = LANGS[b.li].0;
+        let dir = out.join(book.web_dir(lang));
+        fs::create_dir_all(&dir)?;
+        let titles: Vec<String> = b.rendered.iter().map(|r| r.title.clone()).collect();
+        for (pi, r) in b.rendered.iter().enumerate() {
+            let other = &b.pages[pi].files[1 - b.li];
+            let html = page_html(b.book, b.li, &b.pages, &titles, pi, r, other);
             fs::write(dir.join(html_name(&r.file)), html)?;
         }
-        fs::write(
-            dir.join("index.html"),
-            index_html(li, &pages, &titles, &rendered),
-        )?;
-        fs::write(
-            out.join(format!("assets/search-{lang}.js")),
-            search_index(&rendered),
-        )?;
+        fs::write(dir.join("index.html"), index_html(b.book, b.li, &b.pages, &titles, &b.rendered))?;
+        fs::write(out.join("assets").join(book.search_file(lang)), search_index(&b.rendered))?;
     }
+    // Vychozi stranka webu je prirucka (cesky).
+    let home = format!("{}/index.html", BOOKS[0].web_dir("cs"));
     fs::write(
         out.join("index.html"),
-        "<!doctype html><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"0; url=cs/index.html\"><title>Dokumentace</title><a href=\"cs/index.html\">Dokumentace</a>\n",
+        format!(
+            "<!doctype html><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"0; url={home}\"><title>Dokumentace</title><a href=\"{home}\">Dokumentace</a>\n"
+        ),
     )?;
-    for (pi, page) in pages.iter().enumerate() {
-        crate::docs_check::pair(&page.files[0], h2[0][pi], &page.files[1], h2[1][pi], &mut warnings);
-    }
     if !warnings.is_empty() {
         println!("xtask: dokumentace: {} varovani (pravidla v docs/cs/dokumentace.md):", warnings.len());
         // Prvnich par cele, zbytek jen pocet podle souboru (stara
@@ -130,48 +153,16 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
     Ok(out.join("index.html"))
 }
 
-/// Precte stranky z docs/README.md: skupiny `### cs / en` a radky
-/// `| [Nazev](cs/x.md) | [Name](en/y.md) | popis cs / popis en |`.
-fn read_index(path: &Path) -> Result<Vec<PageDef>> {
-    let text = fs::read_to_string(path)?;
-    let mut pages = Vec::new();
-    let mut group = [String::new(), String::new()];
-    for line in text.lines() {
-        if let Some(h) = line.strip_prefix("### ") {
-            let (cs, en) = h.split_once(" / ").unwrap_or((h, h));
-            group = [cs.trim().to_string(), en.trim().to_string()];
-            continue;
+/// Vsechny stranky vsech knih: webova cesta (`prirucka/cs/x.html`) -> kotvy.
+fn known_pages(built: &[Built]) -> HashMap<String, &HashSet<String>> {
+    let mut map = HashMap::new();
+    for b in built {
+        let dir = BOOKS[b.book].web_dir(LANGS[b.li].0);
+        for r in &b.rendered {
+            map.insert(format!("{dir}/{}", html_name(&r.file)), &r.anchors);
         }
-        if !line.starts_with("| [") {
-            continue;
-        }
-        let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
-        if cells.len() < 3 {
-            continue;
-        }
-        let target = |cell: &str| -> Option<String> {
-            let start = cell.find("](")? + 2;
-            let end = cell[start..].find(')')? + start;
-            Some(cell[start..end].rsplit('/').next()?.to_string())
-        };
-        let (Some(cs), Some(en)) = (target(cells[0]), target(cells[1])) else {
-            continue;
-        };
-        let name = |cell: &str| -> String {
-            cell.find("](").map_or(String::new(), |e| cell[1..e].trim_start_matches('[').to_string())
-        };
-        let (dcs, den) = cells[2].split_once(" / ").unwrap_or((cells[2], cells[2]));
-        pages.push(PageDef {
-            files: [cs, en],
-            names: [name(cells[0]), name(cells[1])],
-            descriptions: [dcs.to_string(), den.to_string()],
-            group: group.clone(),
-        });
     }
-    if pages.is_empty() {
-        return Err("docs/README.md neobsahuje tabulku stranek".into());
-    }
-    Ok(pages)
+    map
 }
 
 fn html_name(md: &str) -> String {
@@ -197,7 +188,7 @@ fn escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn render(file: &str, md: &str) -> Rendered {
+fn render(file: &str, md: &str, book: &BookDef) -> Rendered {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -261,7 +252,7 @@ fn render(file: &str, md: &str) -> Rendered {
                 title,
                 id,
             }) => {
-                let dest = rewrite_link(&dest_url);
+                let dest = rewrite_link(&dest_url, book);
                 if !dest.starts_with("http") {
                     links.push(dest.clone());
                 }
@@ -280,7 +271,7 @@ fn render(file: &str, md: &str) -> Rendered {
                 title,
                 id,
             }) => {
-                let dest = rewrite_link(&dest_url);
+                let dest = rewrite_link(&dest_url, book);
                 if !dest.starts_with("http") {
                     links.push(dest.clone());
                 }
@@ -397,10 +388,8 @@ fn shell_pair(lang: &str, src: &str) -> std::result::Result<String, String> {
 "))
 }
 
-/// Predpona odkazu do `design/` v markdownu (relativne k `docs/<jazyk>/`).
-const DESIGN_SRC: &str = "../../design/";
-/// Tataz predpona na webu (relativne k `target/docs/<jazyk>/`).
-const DESIGN_WEB: &str = "../design/";
+// Predpony odkazu do `design/` (v markdownu a na webu) jsou u knihy
+// (`BookDef::design_src` a `design_web`): prirucka lezi o uroven hloubeji.
 
 /// Podslozky `design/`, ktere na web nepatri (nastroje pro build tokenu).
 const DESIGN_SKIP: [&str; 1] = ["tools"];
@@ -440,12 +429,12 @@ fn copy_dir(src: &Path, out: &Path, skip: &[&str]) -> Result<()> {
 
 /// `x.md` -> `x.html`, `x.md#a` -> `x.html#a`, `../../design/x` ->
 /// `../design/x`; ostatni beze zmeny.
-fn rewrite_link(dest: &str) -> String {
+fn rewrite_link(dest: &str, book: &BookDef) -> String {
     if dest.starts_with("http") {
         return dest.to_string();
     }
-    if let Some(rest) = dest.strip_prefix(DESIGN_SRC) {
-        return format!("{DESIGN_WEB}{rest}");
+    if let Some(rest) = dest.strip_prefix(book.design_src) {
+        return format!("{}{rest}", book.design_web);
     }
     let (path, frag) = dest
         .split_once('#')
@@ -461,9 +450,11 @@ fn rewrite_link(dest: &str) -> String {
     }
 }
 
-fn check_links(lang: &str, pages: &[Rendered], errors: &mut Vec<String>) {
-    let by_name: HashMap<String, &Rendered> =
-        pages.iter().map(|p| (html_name(&p.file), p)).collect();
+/// Zkontroluje odkazy stranek jedne knihy a jazyka. `dir` je webova slozka
+/// stranek (`cs`, `prirucka/en`); odkazy se rozlozi proti ni, takze funguji
+/// i odkazy mezi knihami (`../../cs/x.md` z prirucky). Odkazy mimo knihy
+/// (napr. `design/`) se tu nekontroluji.
+fn check_links(dir: &str, pages: &[Rendered], known: &HashMap<String, &HashSet<String>>, errors: &mut Vec<String>) {
     for page in pages {
         for link in &page.links {
             if link.starts_with("http") {
@@ -472,19 +463,25 @@ fn check_links(lang: &str, pages: &[Rendered], errors: &mut Vec<String>) {
             let (path, frag) = link
                 .split_once('#')
                 .map_or((link.as_str(), None), |(p, f)| (p, Some(f)));
+            if !path.is_empty() && !path.ends_with(".html") {
+                continue;
+            }
             let target = if path.is_empty() {
-                Some(page)
+                Some(format!("{dir}/{}", html_name(&page.file)))
             } else {
-                by_name.get(path).copied()
+                resolve_web(dir, path)
             };
-            match (target, frag) {
-                (None, _) if path.contains('/') || !path.ends_with(".html") => {}
-                (None, _) => errors.push(format!(
-                    "{lang}/{}: odkaz na neexistujici stranku {link}",
+            let Some(target) = target else {
+                continue;
+            };
+            match (known.get(&target), frag) {
+                (None, _) if target.ends_with("/index.html") => {}
+                (None, _) if is_book_path(&target) => errors.push(format!(
+                    "{dir}/{}: odkaz na neexistujici stranku {link}",
                     page.file
                 )),
-                (Some(t), Some(f)) if !t.anchors.contains(f) => errors.push(format!(
-                    "{lang}/{}: odkaz na neexistujici kotvu {link}",
+                (Some(a), Some(f)) if !a.contains(f) => errors.push(format!(
+                    "{dir}/{}: odkaz na neexistujici kotvu {link}",
                     page.file
                 )),
                 _ => {}
@@ -493,12 +490,34 @@ fn check_links(lang: &str, pages: &[Rendered], errors: &mut Vec<String>) {
     }
 }
 
+/// Spoji relativni odkaz se slozkou a odstrani `.` a `..`; `None`, kdyz
+/// vede nad koren webu.
+fn resolve_web(dir: &str, rel: &str) -> Option<String> {
+    let mut parts: Vec<&str> = dir.split('/').collect();
+    for seg in rel.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// Cesta (relativne ke koreni webu) lezi v nekterem jazyku nektere knihy.
+fn is_book_path(path: &str) -> bool {
+    let first = path.split('/').next().unwrap_or("");
+    LANGS.iter().any(|(l, _)| *l == first) || BOOKS.iter().any(|b| !b.out_sub.is_empty() && b.out_sub == first)
+}
+
 /// Odkazy do `design/` musi vest na existujici soubor (nebo slozku)
 /// ve zdrojove `design/` mimo vynechane podslozky.
-fn check_design_links(lang: &str, pages: &[Rendered], design: &Path, errors: &mut Vec<String>) {
+fn check_design_links(lang: &str, pages: &[Rendered], book: &BookDef, design: &Path, errors: &mut Vec<String>) {
     for page in pages {
         for link in &page.links {
-            let Some(rest) = link.strip_prefix(DESIGN_WEB) else {
+            let Some(rest) = link.strip_prefix(book.design_web) else {
                 continue;
             };
             let path = rest.split(['#', '?']).next().unwrap_or("");
@@ -554,6 +573,7 @@ fn short_title(title: &str) -> &str {
 }
 
 fn shell(
+    bi: usize,
     li: usize,
     title: &str,
     other_lang_href: &str,
@@ -563,24 +583,35 @@ fn shell(
 ) -> String {
     let (lang, _) = LANGS[li];
     let (other, other_name) = LANGS[1 - li];
+    let book = &BOOKS[bi];
+    let root = book.root_prefix();
     let placeholder = if li == 0 { "Hledat (/)" } else { "Search (/)" };
     let theme = if li == 0 { "Motiv" } else { "Theme" };
+    // Prepinac knih: odkaz na uvod kazde knihy ve stejnem jazyce.
+    let mut books = String::from("<nav class=\"books\">");
+    for (j, b) in BOOKS.iter().enumerate() {
+        let cls = if j == bi { " class=\"current\"" } else { "" };
+        let _ = write!(books, "<a href=\"{root}{}/index.html\"{cls}>{}</a>", b.web_dir(lang), b.names[li]);
+    }
+    books.push_str("</nav>");
+    let search = book.search_file(lang);
     format!(
         "<!doctype html>\n<html lang=\"{lang}\">\n<head>\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-<title>{title}</title>\n<link rel=\"stylesheet\" href=\"../assets/style.css\">\n</head>\n<body>\n\
-<header class=\"topbar\"><a class=\"brand\" href=\"index.html\">os <span>docs</span></a>\
+<title>{title}</title>\n<link rel=\"stylesheet\" href=\"{root}assets/style.css\">\n</head>\n<body>\n\
+<header class=\"topbar\"><a class=\"brand\" href=\"index.html\">os <span>docs</span></a>{books}\
 <div class=\"search\"><input id=\"search\" type=\"search\" placeholder=\"{placeholder}\" autocomplete=\"off\">\
 <div id=\"search-results\" class=\"search-results\"></div></div>\
 <div class=\"top-actions\"><a href=\"../{other}/{other_lang_href}\">{other_name}</a>\
 <button id=\"theme-toggle\" type=\"button\">{theme}</button></div></header>\n\
 <div class=\"layout\">{sidebar}<main><article class=\"content\">{main}</article></main>{toc}</div>\n\
-<script src=\"../assets/search-{lang}.js\"></script>\n<script src=\"../assets/site.js\"></script>\n</body>\n</html>\n",
+<script src=\"{root}assets/{search}\"></script>\n<script src=\"{root}assets/site.js\"></script>\n</body>\n</html>\n",
         title = escape(title)
     )
 }
 
 fn page_html(
+    bi: usize,
     li: usize,
     pages: &[PageDef],
     titles: &[String],
@@ -605,18 +636,11 @@ fn page_html(
         }
         toc.push_str("</aside>");
     }
-    let footer = if li == 0 {
-        format!(
-            "<div class=\"page-footer\">Zdroj: <code>docs/cs/{}</code></div>",
-            r.file
-        )
-    } else {
-        format!(
-            "<div class=\"page-footer\">Source: <code>docs/en/{}</code></div>",
-            r.file
-        )
-    };
+    let src = format!("{}/{}", BOOKS[bi].src, LANGS[li].0);
+    let label = if li == 0 { "Zdroj" } else { "Source" };
+    let footer = format!("<div class=\"page-footer\">{label}: <code>{src}/{}</code></div>", r.file);
     shell(
+        bi,
         li,
         &r.title,
         &html_name(other_file),
@@ -626,18 +650,8 @@ fn page_html(
     )
 }
 
-fn index_html(li: usize, pages: &[PageDef], titles: &[String], rendered: &[Rendered]) -> String {
-    let (title, intro) = if li == 0 {
-        (
-            "Dokumentace operačního systému",
-            "Nový operační systém psaný od nuly v Rustu: mikrokernel, capabilities, ovladače a služby v userspace, později Windows aplikace v izolované vrstvě.",
-        )
-    } else {
-        (
-            "Operating system documentation",
-            "A new operating system written from scratch in Rust: a microkernel, capabilities, drivers and services in userspace, later Windows applications in an isolated layer.",
-        )
-    };
+fn index_html(bi: usize, li: usize, pages: &[PageDef], titles: &[String], rendered: &[Rendered]) -> String {
+    let (title, intro) = (BOOKS[bi].titles[li], BOOKS[bi].intros[li]);
     let mut main = format!("<h1>{title}</h1><p>{intro}</p>");
     let mut last_group: Option<&str> = None;
     for (p, r) in pages.iter().zip(rendered) {
@@ -663,6 +677,7 @@ fn index_html(li: usize, pages: &[PageDef], titles: &[String], rendered: &[Rende
         main.push_str("</tbody></table>");
     }
     shell(
+        bi,
         li,
         title,
         "index.html",
