@@ -19,8 +19,7 @@ mark right next to it (in the text or in a table cell):
 
 A mark applies to the nearest claim, not to the whole chapter. When the
 code changes, the mark changes in the same commit. The Czech version uses
-**[navrženo]**, **[implementováno]**, **[ověřeno v QEMU]**, **[ověřeno na
-HW]**.
+`[navrženo]`, `[implementováno]`, `[ověřeno v QEMU]`, `[ověřeno na HW]`.
 
 Example:
 
@@ -76,4 +75,8 @@ Ryzen 7 5800X)". Numbers without conditions are not compared.
 - the owning page is current, summaries only link,
 - new claims have a test, new numbers have conditions,
 - the cs and en versions say the same,
-- `cargo xtask docs` passes.
+- `cargo xtask docs` passes. Besides links and anchors it checks the status
+  marks (an unknown mark is an error) and prints warnings: a measurement
+  without a build revision, cs and en versions with a different number of
+  chapters. The audit after each merge batch gradually removes the
+  warnings left in older pages.
