@@ -804,6 +804,33 @@ fn frame_callback_and_ping() {
     assert!(!t.c.clients[&a].unresponsive);
 }
 
+/// Ping se ztratil (plna fronta kanalu): nereagujici aplikace dostane
+/// dalsi a odpoved na nej ztlumeni zrusi.
+#[test]
+fn lost_ping_is_repeated() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.out();
+    t.now += frame::PING_INTERVAL;
+    t.c.timers(t.now);
+    t.out();
+    t.now += frame::PING_TIMEOUT;
+    t.c.timers(t.now);
+    assert!(t.c.clients[&a].unresponsive);
+    t.out();
+    t.now += frame::PING_INTERVAL;
+    t.c.timers(t.now);
+    let serial = match client_msgs(&t.out(), a).pop() {
+        Some(ServerMsg::Ping { serial }) => serial,
+        o => panic!("dalsi ping chybi: {o:?}"),
+    };
+    t.msg(a, ClientMsg::Pong { serial });
+    assert!(!t.c.clients[&a].unresponsive);
+    // Po odpovedi zase jen bezny interval.
+    assert!(t.c.clients[&a].ping.is_none());
+}
+
 /// Ulozi snimek jako PNG (pro kontrolu okem: `target/comp-*.png`).
 fn save_png(name: &str, px: &[u32], w: u32, h: u32) {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");

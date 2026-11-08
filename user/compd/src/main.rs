@@ -143,6 +143,13 @@ impl Service {
         let foc = if self.focus.is_some() { next(&obs) } else { Signals(0) };
         let sec = if self.secure.is_some() { next(&obs) } else { Signals(0) };
         let disp = if self.screen.is_some() { next(&obs) } else { Signals(0) };
+        // Zdroje stavu (sit, zvuk) cte `read_sources`; jejich signaly
+        // preskocit, jinak by signaly klientu byly posunute (zprava okna
+        // by cekala, az se ozve jiny klient: start okna desitky sekund,
+        // ztracene odpovedi na ping = "nereaguje" navzdy).
+        for _ in [&self.net_src, &self.audio_src].into_iter().flatten() {
+            next(&obs);
+        }
         let peer_obs: Vec<Signals> = obs.get(i..).map(|s| s.to_vec()).unwrap_or_default();
         // 1. Vstup ma prednost.
         if foc.intersects(Signals::READABLE) {

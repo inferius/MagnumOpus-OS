@@ -106,8 +106,19 @@ impl Termd {
         let image = self.image.ok_or(Error::NotFound)?;
         let (keep, give) = Channel::create()?;
         let mut handles: Vec<Handle> = alloc::vec![give.into_handle()];
-        if let Some(f) = &self.fsd {
-            handles.push(f.connect()?.into_channel().into_handle());
+        // FS nejde (sluzba spadla, disk hlasi chybu): relace bezi bez
+        // souboru a okno ukaze proc - terminal nesmi zustat bez shellu.
+        let fs = match self.fsd.as_ref().map(|f| f.connect()) {
+            Some(Ok(c)) => Some(c),
+            Some(Err(e)) => {
+                println!("termd: relace {session} bez FS: {e}");
+                self.to_window(&ServerMsg::Fail { message: alloc::format!("souborový systém nedostupný ({e}), relace běží bez souborů") });
+                None
+            }
+            None => None,
+        };
+        if let Some(c) = fs {
+            handles.push(c.into_channel().into_handle());
             // Brana agenta jen za relaci FS (poradi handlu v shsess).
             if let Some(a) = &self.agent
                 && let Ok(d) = a.handle().duplicate(None)

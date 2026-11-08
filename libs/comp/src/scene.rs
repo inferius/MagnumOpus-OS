@@ -405,7 +405,9 @@ impl Comp {
                 self.send(c, ServerMsg::SyncToken { token });
             }
             ClientMsg::Pong { serial } => {
-                if cl.ping.is_some_and(|(s, _)| s == serial) {
+                // I odpoved na drivejsi ping (nereagujici aplikace jich
+                // dostane vic, starsi odpoved muze prijit pozde).
+                if cl.ping.is_some() && cl.ping_serial.wrapping_sub(serial) < 64 {
                     cl.ping = None;
                     if cl.unresponsive {
                         cl.unresponsive = false;
