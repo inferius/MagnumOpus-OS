@@ -76,6 +76,7 @@ watched processes:
 | Event | What the supervisor does |
 |---|---|
 | `devmgr` sends `input` with a channel | passes it to the input service (`device`). This is how USB devices attached at run time get into the system |
+| `devmgr` sends `dev <name>` with a channel | a manifest driver, new or recovered after a crash: init stores the channel (`Devices::drivers`) and replaces the old one ([Drivers](drivers.md#life-cycle-and-crash-recovery)) |
 | `devmgr` sends `block` | only logs it for now (disks at run time come with multiple disks in `fsd`) |
 | `devmgr` closes its channel | logs it, hotplug stops working |
 | a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). It does not block waiting for the new service to confirm: its channel is one more item of the loop. If it does not answer within 5 s (or answers with an error), it kills it and the attempt counts as another crash. More than 5 restarts within 60 s = it gives up and the service stays stopped |

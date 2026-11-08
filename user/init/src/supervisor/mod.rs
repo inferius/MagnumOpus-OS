@@ -353,18 +353,8 @@ impl Supervisor {
     fn devmgr_messages(&mut self, out: &mut Vec<Happened>) {
         let Some(d) = system::devices() else { return };
         while let Ok(m) = d.control.try_read() {
-            match &m.data[..] {
-                b"input" => {
-                    let Some(input) = &d.input else { continue };
-                    for h in m.handles {
-                        match input.command(inputproto::control::DEVICE, alloc::vec![h]) {
-                            Ok(_) => out.push(Happened::DeviceAdded),
-                            Err(e) => println!("init: zarizeni pro sluzbu vstupu: {e}"),
-                        }
-                    }
-                }
-                b"block" => println!("init: disk pripojeny za behu zatim nepouzivam"),
-                other => println!("init: neznama zprava od devmgr: {:?}", other),
+            for _ in 0..system::devmgr_message(d, m) {
+                out.push(Happened::DeviceAdded);
             }
         }
     }

@@ -562,6 +562,7 @@ dependencies = [
 name = "devmgr"
 version = "0.1.0"
 dependencies = [
+ "driverkit",
  "libos",
  "nic",
  "pci",
@@ -625,6 +626,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "driverkit"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "conf",
+ "libos",
+ "pci",
+]
+
+[[package]]
 name = "e1000e"
 version = "0.1.0"
 dependencies = [
@@ -671,6 +682,14 @@ dependencies = [
  "ed25519",
  "sha2",
  "subtle",
+]
+
+[[package]]
+name = "edu"
+version = "0.1.0"
+dependencies = [
+ "driverkit",
+ "libos",
 ]
 
 [[package]]
@@ -2707,6 +2726,7 @@ dependencies = [
 name = "virtio-input"
 version = "0.1.0"
 dependencies = [
+ "driverkit",
  "inputproto",
  "libos",
  "pci",
@@ -2727,6 +2747,7 @@ dependencies = [
 name = "virtio-rng"
 version = "0.1.0"
 dependencies = [
+ "driverkit",
  "libos",
  "pci",
  "virtio",
@@ -3019,6 +3040,7 @@ dependencies = [
  "bytes",
  "diskguard",
  "dns",
+ "driverkit",
  "fatfs",
  "fs",
  "http-body-util",

@@ -35,6 +35,8 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 | `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Test delší než 20 s se v logu označí `[pomaly]` |
 | `cargo xtask test --only napajeni` | jen zvláštní běhy testu napájení (vypnutí tlačítkem přes ACPI, restart; po hlavním běhu se spouští vždy, vypne je `--no-power`), viz [ACPI](acpi.md#testy) |
 | `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
+| `cargo xtask test --driver edu` | jen jeden ovladač z manifestu: jeho testy na hostiteli (simulace) a v QEMU sada `ovladace z manifestu` jen pro něj; bez kontroly jader ostatních architektur a dokumentace (rychlá smyčka, viz [Ovladače](ovladace.md)) |
+| `cargo xtask new-driver <jméno> --pci <vendor:device>` | kostra ovladače na driverkitu: kód, manifest, model zařízení a test v simulaci, stránka dokumentace cs+en ([Ovladače](ovladace.md#první-ovladač-krok-za-krokem)) |
 | `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 

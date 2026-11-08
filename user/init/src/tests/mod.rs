@@ -9,6 +9,7 @@ mod clock_sync;
 mod disks;
 mod display;
 mod drivers;
+mod driverkit;
 mod events;
 mod firewall;
 mod fs;
@@ -54,6 +55,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", process::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
+    ("ovladace z manifestu", driverkit::TESTS),
     ("disky", disks::TESTS),
     ("sitove karty", nic::TESTS),
     ("acpi", power::TESTS),

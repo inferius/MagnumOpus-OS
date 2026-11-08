@@ -1,0 +1,19 @@
+[package]
+name = "driverkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sada pro autory ovladacu (DDK): typovane registry, DMA, kruhy deskriptoru, udalosti, zivotni cyklus, manifest, simulace hardwaru"
+
+[features]
+default = []
+# Backend nad jadrem (Resource, ECAM, MSI/MSI-X, kanaly). Jen pro cil OS.
+os = ["dep:libos", "dep:pci"]
+# Simulace zarizeni pro testy na hostiteli (registry, preruseni, DMA).
+sim = []
+
+[dependencies]
+abi = { workspace = true }
+conf = { path = "../conf" }
+libos = { path = "../libos", optional = true }
+pci = { path = "../pci", optional = true }

@@ -35,6 +35,8 @@ firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
 | `cargo xtask test --only sit --repeat 20` | only the selected userspace test suites (names as in the log, comma separated), n times in a row - for finding flaky tests; every extra round adds 60 s to the run limit. A test longer than 20 s is marked `[pomaly]` ("slow") in the log |
 | `cargo xtask test --only napajeni` | only the separate power test runs (power-off with the button through ACPI, reboot; they always run after the main run, `--no-power` disables them), see [ACPI](acpi.md#tests) |
 | `cargo xtask test --net-online` | also the tests against the real host network (host resolver through slirp); skipped without the switch |
+| `cargo xtask test --driver edu` | only one manifest driver: its host tests (simulation) and in QEMU the `ovladace z manifestu` suite for it only; without checking the other architectures' kernels and the documentation (a fast loop, see [Drivers](drivers.md)) |
+| `cargo xtask new-driver <name> --pci <vendor:device>` | a driverkit driver skeleton: code, manifest, device model and simulation test, documentation page cs+en ([Drivers](drivers.md#the-first-driver-step-by-step)) |
 | `cargo xtask check` | only checks that the kernel builds for the given architecture; see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 

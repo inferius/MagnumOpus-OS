@@ -6,6 +6,7 @@
 //! - `run`    - image + spusteni v QEMU s UEFI firmwarem
 //! - `test`   - testy na hostiteli, pak jadro a userspace v QEMU
 //! - `check`  - jen kontrola prekladu jadra
+//! - `new-driver` - kostra noveho ovladace (viz `drivers.rs`)
 //!
 //! Prepinace: `--release`, `--arch <x86_64|aarch64>` (vsechny prikazy), pro
 //! `run` navic `--gdb`, `--headless`, `--accel <tcg|kvm|whpx|hvf>` a cokoli
@@ -13,6 +14,7 @@
 
 mod arch;
 mod datadisk;
+mod drivers;
 mod docs;
 mod highlight;
 mod image;
@@ -34,6 +36,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use arch::Arch;
+use driverkit::manifest::Manifest;
 
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
@@ -48,6 +51,9 @@ prikazy:
            architektury, pak jadro a userspace v QEMU bez okna
   check    jen kontrola prekladu jadra
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
+  new-driver <jmeno> --pci <vendor:device>
+           kostra ovladace na driverkitu: kod, manifest, model a test
+           v simulaci, stranka dokumentace cs+en (docs/cs/ovladace.md)
   venus-gen  serializace Venusu z libs/venus/xml do libs/venus/src/vk
   venus-check  overi, ze libs/venus/src/vk odpovida vstupum
 
@@ -73,6 +79,10 @@ prepinace:
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
                    carkou, napr. sit,firewall; jmena jako v logu)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
+  --driver <jmeno> (test) jen jeden ovladac z manifestu: jeho testy na
+                   hostiteli (simulace) a v QEMU sada ovladace z manifestu
+                   jen pro nej; bez kontroly jader ostatnich architektur
+                   a dokumentace (rychla smycka vyvoje ovladace)
   --net-online     (test) i testy proti skutecne siti hostitele (resolver
                    hostitele pres slirp); bez nej jen lokalni servery
   --no-power       (test) bez zvlastnich behu testu napajeni (vypnuti
@@ -118,6 +128,11 @@ pub struct Options {
     test_repeat: u32,
     /// `--net-online`: i testy proti skutecne siti hostitele.
     net_online: bool,
+    /// `--driver`: jen tento ovladac z manifestu (testy).
+    test_driver: Option<String>,
+    /// QEMU ma vyukove zarizeni `edu` (ukazkovy ovladac); zjisti se pred
+    /// buildem (`-device help`).
+    edu: bool,
     /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
     hostfwd: Option<String>,
     /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
@@ -145,6 +160,11 @@ fn run_cli() -> Result<()> {
         eprint!("{USAGE}");
         return Err("chybi prikaz".into());
     };
+    if command == "new-driver" {
+        let rest: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
+        let d = drivers::parse_new_driver(&rest)?;
+        return drivers::new_driver(&workspace_root(), &d);
+    }
 
     let mut opts = Options {
         release: false,
@@ -162,6 +182,8 @@ fn run_cli() -> Result<()> {
         test_only: String::new(),
         test_repeat: 1,
         net_online: false,
+        test_driver: None,
+        edu: false,
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
         power_test: None,
@@ -207,6 +229,10 @@ fn run_cli() -> Result<()> {
             }
             Some("--net-online") => opts.net_online = true,
             Some("--no-power") => no_power = true,
+            Some("--driver") => {
+                let value = args.next().ok_or("--driver ocekava jmeno ovladace")?;
+                opts.test_driver = Some(value.to_string_lossy().into_owned());
+            }
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
             Some("--accel") => {
@@ -246,6 +272,7 @@ fn run_cli() -> Result<()> {
                 opts.gpu = String::from("none");
                 println!("xtask: grafika pres framebuffer firmwaru (virtio-gpu: --gpu 2d, pak v okne QEMU View -> virtio-gpu-pci)");
             }
+            opts.edu = edu_available(&opts);
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             qemu::run(&image, &artifacts, &opts)
@@ -253,14 +280,32 @@ fn run_cli() -> Result<()> {
         Some("test") => {
             opts.test = true;
             opts.headless = true;
-            venus::run(true)?;
-            host_tests()?;
-            // Jadro se musi prelozit i pro ostatni architektury (rozhrani
-            // architektury nesmi zustat jen pro jednu).
-            for other in arch::ALL.iter().filter(|a| a.name != opts.arch.name) {
-                check_kernel(other, &opts)?;
+            let found = drivers::discover(&workspace_root())?;
+            if let Some(d) = &opts.test_driver
+                && !found.iter().any(|f| &f.manifest.name == d)
+            {
+                return Err(format!("--driver {d}: user/{d}/{d}.driver.toml neexistuje").into());
             }
-            build_docs()?;
+            if opts.test_driver.is_none() {
+                venus::run(true)?;
+            }
+            host_tests(&found, opts.test_driver.as_deref())?;
+            if opts.test_driver.is_none() {
+                // Jadro se musi prelozit i pro ostatni architektury (rozhrani
+                // architektury nesmi zustat jen pro jednu).
+                for other in arch::ALL.iter().filter(|a| a.name != opts.arch.name) {
+                    check_kernel(other, &opts)?;
+                }
+                build_docs()?;
+            } else if opts.test_only.is_empty() {
+                opts.test_only = String::from("ovladace z manifestu");
+            }
+            opts.edu = edu_available(&opts);
+            let expect: Vec<&str> = if opts.edu { vec!["edu"] } else { Vec::new() };
+            opts.extra_initfs.push((
+                String::from("driver-test"),
+                drivers::test_plan(&expect, opts.test_driver.as_deref()).into_bytes(),
+            ));
             // Pomocne servery pro testy site bezi, dokud bezi xtask.
             let helper = nethelper::start()?;
             let web = webhelper::start()?;
@@ -307,12 +352,45 @@ repeat = {}
     }
 }
 
+/// Ma QEMU zarizeni `edu` (ukazkovy ovladac)? Ve WSL se nezjistuje (bez
+/// zarizeni test edu jen preskoci).
+fn edu_available(opts: &Options) -> bool {
+    if opts.qemu_wsl {
+        return false;
+    }
+    let ok = opts
+        .arch
+        .find_qemu()
+        .is_ok_and(|q| drivers::qemu_has_device(&q, "edu"));
+    if !ok {
+        println!("xtask: QEMU nema zarizeni edu: test ukazkoveho ovladace se preskoci");
+    }
+    ok
+}
+
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
 /// chyb a syscallu, casova pasma, protokol vstupu a rozlozeni klavesnice,
 /// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI,
-/// ochrana cizich disku).
-fn host_tests() -> Result<()> {
+/// ochrana cizich disku), driverkit se simulaci a ovladace z manifestu
+/// (`found`; s `--driver` jen ten jeden).
+fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    if let Some(d) = only_driver {
+        let status = Command::new(&cargo)
+            .current_dir(workspace_root())
+            .args(["test", "--quiet", "--package", "driverkit", "--package", d])
+            .args(["--features", "driverkit/sim"])
+            .status()?;
+        if !status.success() {
+            return Err(format!("testy ovladace {d} na hostiteli selhaly").into());
+        }
+        println!("xtask: testy ovladace {d} na hostiteli prosly");
+        return Ok(());
+    }
+    let mut drivers_args: Vec<&str> = vec!["--package", "driverkit"];
+    for f in found {
+        drivers_args.extend(["--package", f.manifest.name.as_str()]);
+    }
     let status = Command::new(cargo)
         .current_dir(workspace_root())
         .args([
@@ -399,8 +477,9 @@ fn host_tests() -> Result<()> {
             "--package",
             "diskguard",
             "--features",
-            "initfs/std,fs/std,netproto/std,netproto/nts",
+            "initfs/std,fs/std,netproto/std,netproto/nts,driverkit/sim",
         ])
+        .args(&drivers_args)
         .status()?;
     if !status.success() {
         return Err("testy knihoven na hostiteli selhaly".into());
@@ -623,13 +702,21 @@ fn build(opts: &Options) -> Result<Artifacts> {
     let a = opts.arch;
     cargo_build(&["kernel"], a.kernel_target, opts, false)?;
     cargo_build(&["loader"], a.loader_target, opts, false)?;
-    cargo_build(USER_PROGRAMS, a.user_target, opts, true)?;
+    // Ovladace z manifestu (user/*/<jmeno>.driver.toml) se pridaji samy.
+    let found = drivers::discover(&workspace_root())?;
+    let mut programs: Vec<&str> = USER_PROGRAMS.to_vec();
+    for f in &found {
+        if !programs.contains(&f.manifest.name.as_str()) {
+            programs.push(f.manifest.name.as_str());
+        }
+    }
+    cargo_build(&programs, a.user_target, opts, true)?;
     let target = target_dir();
     let profile = profile_dir(opts);
 
     let user_bin = user_target_dir().join(a.user_target).join(profile);
     let mut files = Vec::new();
-    for name in USER_PROGRAMS {
+    for name in &programs {
         let data = std::fs::read(user_bin.join(name))
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
@@ -638,6 +725,10 @@ fn build(opts: &Options) -> Result<Artifacts> {
         let data = std::fs::read(workspace_root().join(path))
             .map_err(|e| format!("nelze cist {path}: {e}"))?;
         files.push((name.to_string(), data));
+    }
+    for f in &found {
+        let data = std::fs::read(&f.path).map_err(|e| format!("nelze cist {}: {e}", f.path.display()))?;
+        files.push((Manifest::file_name(&f.manifest.name), data));
     }
     files.push((String::from("certs.pem"), webhelper::bundle_pem()));
     files.extend(opts.extra_initfs.iter().cloned());
