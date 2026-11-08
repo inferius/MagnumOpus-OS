@@ -291,7 +291,7 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
             orphans(svc);
             // Scrub jen kdyz klienti chvili nic nechteji (nizka priorita).
             if quiet && time::now() >= last_request.saturating_add(SCRUB_QUIET.as_nanos() as u64) {
-                scrub(svc);
+                as_background(|| scrub(svc));
             }
             poll_watches(svc, &mut sessions);
             control_msgs(svc, &control);
@@ -463,6 +463,18 @@ fn scrub(svc: &mut Service) {
     }
 }
 
+/// Udrzba (scrub, defragmentace, deduplikace) bezi ve tride Background:
+/// pozadavky klientu a ostatni prace ji predbehnou, ale diky zarucenemu
+/// podilu Background nikdy nestoji. Zprava klienta vlakno zase zvedne
+/// (dedeni QoS pres IPC), takze obsluha pozadavku Background neni.
+fn as_background<R>(f: impl FnOnce() -> R) -> R {
+    use libos::sched::{Qos, set_current};
+    let _ = set_current(Qos::Background);
+    let r = f();
+    let _ = set_current(Qos::Normal);
+    r
+}
+
 /// Automaticky commit a defragmentace v necinnosti.
 fn background(svc: &mut Service, next_commit: &mut u64, idle: &mut bool, changed: &mut bool) {
     // Klient prave ulozil vse sam: dalsi automaticky commit az za interval.
@@ -478,11 +490,13 @@ fn background(svc: &mut Service, next_commit: &mut u64, idle: &mut bool, changed
         *idle = *changed;
     } else if *idle {
         // Nejdriv defragmentace, pak deduplikace novych dat.
-        let step = if svc.dedup_phase {
-            fs.dedup_step(DEDUP_BUDGET).map(|r| r.done)
-        } else {
-            fs.defrag_step(DEFRAG_BUDGET).map(|r| r.done)
-        };
+        let step = as_background(|| {
+            if svc.dedup_phase {
+                fs.dedup_step(DEDUP_BUDGET).map(|r| r.done)
+            } else {
+                fs.defrag_step(DEFRAG_BUDGET).map(|r| r.done)
+            }
+        });
         match step {
             Ok(true) if !svc.dedup_phase => svc.dedup_phase = true,
             Ok(true) => {

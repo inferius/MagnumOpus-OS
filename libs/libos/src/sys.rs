@@ -387,6 +387,11 @@ pub fn interrupt_create_line_flags(resource: u32, line: u32, flags: u64) -> Resu
     .map(|h| h as u32)
 }
 
+/// `SCHED_CONTROL` (operace z `abi::sched::op`).
+pub fn sched_control(op: u64, a: u64, b: u64, c: u64, d: u64) -> Result<u64> {
+    call(nr::SCHED_CONTROL, [op, a, b, c, d, 0])
+}
+
 /// Vypnuti / restart pres firmware (`SYSTEM_POWER`); pri uspechu se nevraci.
 pub fn system_power(resource: u32, op: u64) -> Result<()> {
     call(nr::SYSTEM_POWER, [resource as u64, op, 0, 0, 0, 0]).map(|_| ())

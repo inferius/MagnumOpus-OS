@@ -18,6 +18,7 @@ mod job;
 mod misc;
 mod object;
 mod process;
+mod sched_ctl;
 mod user;
 mod vm;
 
@@ -45,8 +46,10 @@ fn current_process() -> Arc<Process> {
 pub fn dispatch(number: u64, a: Args) -> u64 {
     let result = call(number, a);
     if let Err(e) = result {
-        // Ocekavane "chyby" rizeni toku nelogovat (byly by vsude).
-        if !matches!(e, Error::ShouldWait | Error::TimedOut) {
+        // Ocekavane "chyby" rizeni toku nelogovat (byly by vsude a zahltily
+        // by log): cekani, vyprseni a zjisteni velikosti bufferu (volajici
+        // cte znovu s vetsim bufferem).
+        if !matches!(e, Error::ShouldWait | Error::TimedOut | Error::BufferTooSmall) {
             log::debug!("syscall {} ({number}) selhal: {e}", name(number));
         }
     }
@@ -104,6 +107,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::VMO_REVOKE => hw::vmo_revoke(a),
         nr::JOB_PROCESSES => job::processes(a),
         nr::SYSTEM_POWER => hw::system_power(a),
+        nr::SCHED_CONTROL => sched_ctl::control(a),
         nr::LOG_READ => diag::log_read(a),
         nr::CRASH_RECORD => diag::crash_record(a),
         nr::LOG_CONTROL => diag::log_control(a),

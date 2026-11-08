@@ -14,6 +14,7 @@
 //! za `--` se preda primo QEMU.
 
 mod arch;
+mod audio;
 mod crashtest;
 mod datadisk;
 mod drivers;
@@ -89,6 +90,9 @@ prepinace:
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
                    carkou, napr. sit,firewall; jmena jako v logu)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
+  --audio <druh>   (run, test) zvuk QEMU (radic intel-hda, kodek hda-duplex):
+                   test wav (vychozi; soubor se po testu zkontroluje), none;
+                   run none (vychozi), dsound, pa, alsa, sdl, coreaudio
   --driver <jmeno> (test) jen jeden ovladac z manifestu: jeho testy na
                    hostiteli (simulace) a v QEMU sada ovladace z manifestu
                    jen pro nej; bez kontroly jader ostatnich architektur
@@ -139,6 +143,8 @@ pub struct Options {
     test_repeat: u32,
     /// `--net-online`: i testy proti skutecne siti hostitele.
     net_online: bool,
+    /// Backend zvuku QEMU (`--audio`); prazdne = test wav, beh none.
+    audio: String,
     /// `--driver`: jen tento ovladac z manifestu (testy).
     test_driver: Option<String>,
     /// QEMU ma vyukove zarizeni `edu` (ukazkovy ovladac); zjisti se pred
@@ -209,6 +215,7 @@ fn run_cli() -> Result<()> {
         test_only: String::new(),
         test_repeat: 1,
         net_online: false,
+        audio: String::new(),
         test_driver: None,
         edu: false,
         hostfwd: None,
@@ -256,6 +263,10 @@ fn run_cli() -> Result<()> {
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--net-online") => opts.net_online = true,
+            Some("--audio") => {
+                let value = args.next().ok_or("--audio ocekava backend zvuku QEMU")?;
+                opts.audio = value.to_string_lossy().into_owned();
+            }
             Some("--no-power") => no_power = true,
             Some("--driver") => {
                 let value = args.next().ok_or("--driver ocekava jmeno ovladace")?;
@@ -476,6 +487,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "sizeclass",
             "--package",
+            "schedcore",
+            "--package",
             "term",
             "--package",
             "netproto",
@@ -485,6 +498,12 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "csprng",
             "--package",
             "wire",
+            "--package",
+            "audioproto",
+            "--package",
+            "audiomix",
+            "--package",
+            "hdaspec",
             "--package",
             "conf",
             "--package",
@@ -662,6 +681,8 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-rng",
     "virtio-gpu",
     "fbdisplay",
+    "hda",
+    "audiod",
     "bochs-display",
     "intel-display",
     "compd",

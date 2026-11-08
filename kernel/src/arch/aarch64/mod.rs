@@ -118,6 +118,10 @@ impl api::Cpu for Aarch64 {
         mpidr_to_hw_id(mrs!("mpidr_el1"))
     }
 
+    fn core_kind() -> u8 {
+        schedcore::topo::arm_core_kind(mrs!("midr_el1"))
+    }
+
     fn clear_cpu_local() {
         // SAFETY: staticka promenna zije navzdy a jeji prvni slovo je 0.
         unsafe { msr!("tpidr_el1", &raw const EMPTY_CPU_LOCAL as u64) };

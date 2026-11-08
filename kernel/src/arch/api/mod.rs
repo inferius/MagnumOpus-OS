@@ -97,6 +97,12 @@ pub trait Cpu {
     /// afinita z MPIDR_EL1). Stejne cislo pouziva [`Ipi`] a [`Smp`].
     fn hw_id() -> u32;
 
+    /// Typ jadra aktualniho CPU (`abi::sched::core_kind`): x86 CPUID 0x1A,
+    /// aarch64 MIDR_EL1. Vychozi = nezname (homogenni system).
+    fn core_kind() -> u8 {
+        abi::sched::core_kind::UNKNOWN
+    }
+
     /// Nastavi per-CPU ukazatel na prazdna data (prvni slovo = 0, tj.
     /// "CPU jeste neni zaregistrovane"). Volat jako uplne prvni vec pri
     /// startu kazdeho CPU.

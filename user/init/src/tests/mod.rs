@@ -3,6 +3,8 @@
 //! Na rozdil od testu jadra test nepanikuje, ale vraci `Result<(), String>`
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
+mod audio;
+mod audio_recovery;
 mod accounts;
 mod agent;
 mod agent_shell;
@@ -69,6 +71,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ucty", accounts::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
+    ("zvuk", audio::TESTS),
     ("historie FS", fs_hist::TESTS),
     ("data FS", fs_data::TESTS),
     ("cas", time::TESTS),
@@ -89,6 +92,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("agent AI", agent::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
+    // Zvuk po padu: ridi hlavni supervisor (jako obnova fsd, pred ni).
+    ("obnova zvuku", audio_recovery::TESTS),
     // Po vsech testech FS: cena radku shellu na plnem svazku.
     ("vykon FS", fs_perf::TESTS),
     // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery

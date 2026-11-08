@@ -20,6 +20,7 @@ pub mod job;
 pub mod limits;
 pub mod object;
 pub mod process;
+pub mod sched;
 pub mod syscall;
 pub mod time;
 pub mod vm;

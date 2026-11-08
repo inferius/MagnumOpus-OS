@@ -209,6 +209,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "audiod"
+version = "0.1.0"
+dependencies = [
+ "audiomix",
+ "audioproto",
+ "libos",
+ "wire",
+]
+
+[[package]]
+name = "audiomix"
+version = "0.1.0"
+dependencies = [
+ "audioproto",
+]
+
+[[package]]
+name = "audioproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "libos",
+ "svcclient",
+ "wire",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1184,6 +1211,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
+name = "hda"
+version = "0.1.0"
+dependencies = [
+ "audioproto",
+ "hdaspec",
+ "libos",
+ "pci",
+ "wire",
+]
+
+[[package]]
+name = "hdaspec"
+version = "0.1.0"
+
+[[package]]
 name = "heapless"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1360,6 +1402,8 @@ dependencies = [
  "abi",
  "accountproto",
  "agentproto",
+ "audiomix",
+ "audioproto",
  "blockproto",
  "conf",
  "fsproto",
@@ -1455,6 +1499,7 @@ dependencies = [
  "initfs",
  "noto-sans-mono-bitmap",
  "qr",
+ "schedcore",
  "spin 0.12.3",
 ]
 
@@ -2211,6 +2256,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69e4ce4a039f42bf25920b95667e4d789e98749ab11bbb8d2c2936f788421bb5"
 
 [[package]]
+name = "schedcore"
+version = "0.1.0"
+dependencies = [
+ "abi",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2292,6 +2344,8 @@ name = "shlang"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "audiomix",
+ "audioproto",
 ]
 
 [[package]]
@@ -2306,6 +2360,8 @@ version = "0.1.0"
 dependencies = [
  "agentproto",
  "agentsh",
+ "audiomix",
+ "audioproto",
  "fsproto",
  "libos",
  "powerproto",
@@ -2522,6 +2578,7 @@ dependencies = [
 name = "termd"
 version = "0.1.0"
 dependencies = [
+ "audioproto",
  "fsproto",
  "libos",
  "shlang",

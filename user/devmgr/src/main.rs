@@ -10,9 +10,11 @@
 //! `blockproto::server::report_disks`). Rodici (init) posle po bootstrap kanalu pro kazde zarizeni
 //! zpravu s koncem kanalu ke klientovi ovladace: `block` (disk, protokol
 //! `blockproto`), `input` (klavesnice, mys, protokol `inputproto::device`),
-//! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody) nebo
+//! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody),
 //! `display` (grafika, `guiproto::display`), `display-native` (nativni
-//! ovladac displeje, viz `native.rs`), a `done`, az jsou nalezena zarizeni pri startu
+//! ovladac displeje, viz `native.rs`) nebo `audio` (zvukova karta Intel
+//! HDA, `audioproto::device`; po padu ovladace znovu, viz `restart.rs`),
+//! a `done`, az jsou nalezena zarizeni pri startu
 //! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
 //! Kdyz ceka na ovladac disku dlouho (reset radice, roztoceni disku), posila
 //! initu kazdych 5 s `busy`, aby init start zarizeni nevzdal.
@@ -37,6 +39,7 @@ use libos::spawn::StartHandle;
 use libos::{Channel, Process, Signals, Startup, println};
 use pci::{Ecam, Function};
 
+mod restart;
 mod manifest;
 mod nic;
 mod native;
@@ -48,7 +51,7 @@ libos::entry!(main);
 const USB_READY_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(10);
 
 /// Ovladac pro jeden typ zarizeni virtio.
-struct Driver {
+pub struct Driver {
     /// ID zarizeni PCI: moderni (0x1040 + typ virtio) a prechodne.
     ids: (u16, u16),
     /// Program v initfs.
@@ -108,6 +111,16 @@ const DRIVERS: &[Driver] = &[
     },
 ];
 
+/// Zvukova karta Intel HDA (PCI trida 04:03, libovolny vyrobce): radic,
+/// CORB/RIRB a BDL v jedne strance + buffer streamu (max. 256 KiB).
+const HDA_CLASS: (u8, u8) = (0x04, 0x03);
+const HDA: Driver = Driver {
+    ids: (0, 0),
+    program: "hda",
+    message: b"audio",
+    irq_max: 2,
+    dma_max: 1 << 20,
+};
 /// Ovladac radice disku podle tridy PCI. Radic muze mit vic disku (porty
 /// SATA, jmenne prostory NVMe): ovladac kazdy nahlasi zpravou `block`
 /// s kanalem pro klienta a nakonec `done`.
@@ -162,6 +175,8 @@ fn main(startup: Startup) -> i64 {
     };
     let mut drivers: Vec<Process> = Vec::new();
     let mut controllers: Vec<usb::Controller> = Vec::new();
+    // Ovladace, ktere se po padu spousti znovu (vlakno `restart`).
+    let mut watched: Vec<restart::Watched> = Vec::new();
     let mut from_manifest = manifest::Drivers::load(&fs);
     for (window, (vmo, arg)) in startup.pci_ecam.iter().enumerate() {
         let ecam = match Ecam::new(vmo, *arg) {
@@ -197,6 +212,13 @@ fn main(startup: Startup) -> i64 {
                         driver.program, f.address
                     ),
                 }
+            }
+        }
+        for f in functions.iter().filter(|f| (f.class, f.subclass) == HDA_CLASS) {
+            let Some(image) = fs.find(HDA.program) else { continue };
+            match start_driver_image(&HDA, image, resource, vmo, &ecam, (*arg >> 16) as u16, f, &startup.bootstrap) {
+                Ok(process) => watched.push(restart::Watched { driver: &HDA, image, function: *f, window, process }),
+                Err(e) => println!("devmgr: ovladac hda pro {} nelze spustit: {e}", f.address),
             }
         }
         for driver in CLASS_DRIVERS {
@@ -247,6 +269,22 @@ fn main(startup: Startup) -> i64 {
         }
     }
     let _ = startup.bootstrap.write(b"done", Vec::new());
+    // Restart spadlych ovladacu ve vlastnim vlakne (handly jsou duplikaty).
+    let ctx = (|| -> libos::Result<restart::Ctx> {
+        let mut windows = Vec::new();
+        for (v, a) in &startup.pci_ecam {
+            windows.push((libos::Vmo::from_handle(v.handle().duplicate(None)?), *a));
+        }
+        Ok(restart::Ctx {
+            resource: libos::hw::Resource::from_handle(resource.handle().duplicate(None)?),
+            windows,
+            parent: Channel::from_handle(startup.bootstrap.handle().duplicate(None)?),
+        })
+    })();
+    match ctx {
+        Ok(ctx) => restart::spawn(watched, ctx),
+        Err(e) => println!("devmgr: restart ovladacu nebude: {e}"),
+    }
     // Zustat bezet, dokud init drzi spojeni: hotplug USB (pozdeji restart
     // spadlych ovladacu).
     while serve_usb(&fs, &mut controllers, &startup, &mut drivers, &mut from_manifest, None) {}
@@ -450,6 +488,21 @@ fn start_driver(
     parent: &Channel,
 ) -> libos::Result<Process> {
     let image = fs.find(driver.program).ok_or(libos::Error::NotFound)?;
+    start_driver_image(driver, image, resource, ecam_vmo, ecam, segment, f, parent)
+}
+
+/// Spusti ovladac z obrazu `image` (i z vlakna restartu).
+#[allow(clippy::too_many_arguments)]
+pub fn start_driver_image(
+    driver: &Driver,
+    image: &[u8],
+    resource: &libos::hw::Resource,
+    ecam_vmo: &libos::Vmo,
+    ecam: &Ecam,
+    segment: u16,
+    f: &Function,
+    parent: &Channel,
+) -> libos::Result<Process> {
     // Ovladac dostane jen sve zarizeni: BARy, svou konfiguraci, kvoty.
     let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
     let a = f.address;
@@ -462,7 +515,7 @@ fn start_driver(
         StartHandle::user(config.handle().duplicate(None)?),
         StartHandle::user(driver_end.into_handle()),
     ];
-    let (process, control) = libos::spawn(driver.program, image, handles)?;
+    let (process, control) = libos::spawn::service(driver.program, image, handles)?;
     let config = format!("pci {} {} {}", a.bus, a.device, a.function);
     control.write(config.as_bytes(), Vec::new())?;
     // Konec kanalu ke klientovi patri initu (ten ho preda souborovemu
@@ -501,7 +554,7 @@ fn start_ps2(
         StartHandle::user(kbd_driver.into_handle()),
         StartHandle::user(mouse_driver.into_handle()),
     ];
-    let (process, control) = libos::spawn("ps2", image, handles)?;
+    let (process, control) = libos::spawn::service("ps2", image, handles)?;
     let msg = control.read(Some(libos::time::deadline_after(PS2_REPORT_TIMEOUT)))?;
     let report = core::str::from_utf8(&msg.data).unwrap_or("");
     let mut words = report.split_whitespace();

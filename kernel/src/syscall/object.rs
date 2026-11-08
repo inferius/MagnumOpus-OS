@@ -134,6 +134,7 @@ pub fn port_wait(a: Args) -> Result<u64> {
     let port = p.handles().get_as::<Port>(arg_handle(a[0])?, Rights::READ)?;
     loop {
         if let Some(packet) = port.pop() {
+            crate::sched::boost_current(packet.boost);
             let out = abi::object::PortPacket {
                 key: packet.key,
                 signals: packet.signals.0,

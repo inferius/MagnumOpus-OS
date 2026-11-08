@@ -50,13 +50,22 @@ horní polovinu sdílí s jádrem):
 
 ## Plánovač
 
-- Každé CPU má fronty vláken podle tříd QoS (`realtime`, `interactive`,
-  `normal`, `background`): přísná priorita mezi třídami, round-robin s
-  kvantem 10 ms uvnitř.
-- **Tickless**: časovač se nastaví jen na konec kvanta nebo nejbližší
-  probuzení; nečinné CPU spí v `hlt`.
-- **Rozkládání**: nová a probuzená vlákna jdou na nečinné CPU; vystřídané
-  vlákno se přesune na nečinné CPU; nečinné CPU si bere práci z cizích front.
+Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
+
+- Každé CPU má jednu frontu (`libs/schedcore`): nejdřív vlákna `realtime`
+  se zbývajícím rozpočtem (pevný rozpočet v periodě, EDF), pak spravedlivé
+  třídy `interactive`, `normal` a `background` s vahami 15 : 4 : 1 (vážený
+  virtuální čas tříd), uvnitř třídy EEVDF s kvantem podle třídy
+  (3 / 6 / 12 ms). Nic nehladoví: `background` má na vytíženém CPU aspoň
+  1/20 času mimo `realtime`.
+- **Přidělování tříd**: syscall `SCHED_CONTROL`, strop z jobu (aplikace si
+  sama `realtime` nedá); zpráva propůjčí třídu odesílatele vláknu, které
+  ji obslouží (dědění přes IPC).
+- **Tickless**: časovač se nastaví jen na konec kvanta, obnovu rozpočtu
+  `realtime` nebo nejbližší probuzení; nečinné CPU spí v `hlt`.
+- **Rozkládání** podle třídy a kapacity jádra: `interactive` a `realtime`
+  na výkonná jádra, `background` na úsporná (Intel hybrid CPUID 0x1A, ARM
+  MIDR, ACPI PPTT); nečinné CPU si bere práci z cizích front.
 - **Preempce** vlákno nikdy neuspí ani neukončí, jen ho vrátí do fronty -
   vlákno může být přerušeno kdekoli, i uprostřed přípravy na čekání.
 - **Probuzení**: každé čekání má pořadové číslo; probuzení se starým číslem

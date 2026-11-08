@@ -25,12 +25,15 @@ pub const STACK_SIZE: u64 = 256 * 1024;
 pub struct Options {
     /// Zasobnik hlavniho vlakna (zaokrouhli se na stranku potomka).
     pub stack_size: u64,
+    /// Trida planovace vsech vlaken procesu (nastavi se pred startem).
+    pub qos: Option<crate::sched::Qos>,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
             stack_size: STACK_SIZE,
+            qos: None,
         }
     }
 }
@@ -52,6 +55,14 @@ impl StartHandle {
         }
     }
 
+    /// Volitelny handle se stitkem `tag` (nenulovym): program ho najde
+    /// pres `Startup::take_tagged` bez ohledu na poradi a na to, ktere
+    /// jine volitelne handly chybi.
+    pub fn tagged(tag: u32, handle: Handle) -> Self {
+        assert!(tag != 0, "stitek 0 = handle bez stitku");
+        Self { kind: bootstrap::kind::USER, arg: tag, handle }
+    }
+
     pub fn new(kind: u32, arg: u32, handle: Handle) -> Self {
         Self { kind, arg, handle }
     }
@@ -64,6 +75,17 @@ impl StartHandle {
 pub fn spawn(name: &str, image: &[u8], handles: Vec<StartHandle>) -> Result<(Process, Channel)> {
     let job = crate::job::current()?;
     spawn_in(&job, name, image, handles)
+}
+
+/// Jako [`spawn`] s vychozi tridou systemove sluzby podle jmena
+/// ([`crate::sched::service_default`]).
+pub fn service(name: &str, image: &[u8], handles: Vec<StartHandle>) -> Result<(Process, Channel)> {
+    let job = crate::job::current()?;
+    let opts = Options {
+        qos: crate::sched::service_default(name),
+        ..Options::default()
+    };
+    spawn_with(&job, name, image, handles, opts)
 }
 
 /// Jako [`spawn`], ale v jobu `job` (napr. podrizenem s limity).
@@ -86,6 +108,9 @@ pub fn spawn_with(
 ) -> Result<(Process, Channel)> {
     let elf = elf::ElfFile::parse(image).map_err(|_| Error::Corrupted)?;
     let process = Process::create(job, name)?;
+    if let Some(q) = opts.qos {
+        crate::sched::set_process(&process, q)?;
+    }
     // Segmenty se zarovnavaji na stranku potomka (muze mit jinou nez my).
     // Segmenty s ruznymi pravy ve stejne strance (program linkovany na
     // mensi stranku) skonci chybou mapovani, ne smichanymi pravy.

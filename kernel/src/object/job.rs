@@ -13,7 +13,9 @@
 //! chvili ukazuje obe). Opacne to nejde - limit se nikdy neprekroci.
 
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+
+use schedcore::Class;
 
 use abi::job::{JobInfo, PoolInfo, UNLIMITED, pool};
 
@@ -52,6 +54,8 @@ pub struct Job {
     parent: Option<Arc<Job>>,
     limits: [AtomicU64; pool::COUNT],
     used: [AtomicU64; pool::COUNT],
+    /// Vlastni strop tridy QoS (`Class as u8`); plati i strop predku.
+    qos_max: AtomicU8,
     /// Strzeni za tento objekt (z rozpoctu jobu, ktery ho vytvoril).
     _charge: Charge,
 }
@@ -77,6 +81,7 @@ impl Job {
             parent,
             limits: [AtomicU64::new(UNLIMITED), AtomicU64::new(UNLIMITED)],
             used: [AtomicU64::new(0), AtomicU64::new(0)],
+            qos_max: AtomicU8::new(Class::Realtime as u8),
             _charge: charge,
         })
     }
@@ -161,6 +166,30 @@ impl Job {
             user: self.pool_info(Pool::User),
             id: self.id,
         }
+    }
+
+    /// Ucinny strop tridy QoS: nejnizsi z vlastniho a vsech predku.
+    pub fn qos_cap(&self) -> Class {
+        let mut cap = Class::Realtime;
+        let mut node = Some(self);
+        while let Some(j) = node {
+            if let Some(c) = Class::from_raw(j.qos_max.load(Ordering::Acquire)) {
+                cap = cap.min(c);
+            }
+            node = j.parent.as_deref();
+        }
+        cap
+    }
+
+    /// Nastavi strop tridy. Nad strop rodice (vcetne jeho predku) nejde:
+    /// kdo ma handle na podrizeny job, si tak nezvedne vic, nez smi rodic.
+    pub fn set_qos_max(&self, class: Class) -> Result<(), Error> {
+        let parent_cap = self.parent.as_deref().map_or(Class::Realtime, Job::qos_cap);
+        if class.above(parent_cap) {
+            return Err(Error::AccessDenied);
+        }
+        self.qos_max.store(class as u8, Ordering::Release);
+        Ok(())
     }
 
     /// Je job `self` roven `ancestor`, nebo jeho potomek?

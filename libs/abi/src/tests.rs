@@ -113,7 +113,7 @@ fn every_syscall_is_documented() {
         "VMO_REVOKE",
         "JOB_PROCESSES",
         "SYSTEM_POWER",
-        "",
+        "SCHED_CONTROL",
         "LOG_READ",
         "CRASH_RECORD",
         "LOG_CONTROL",
@@ -182,4 +182,13 @@ fn acpi_info_roundtrip() {
         assert!(full.push((i as u64, 1)));
     }
     assert!(!full.push((0, 1)));
+}
+
+#[test]
+fn sched_info_roundtrip() {
+    use crate::sched::{CpuInfo, QosInfo};
+    let q = QosInfo { base: 2, effective: 1, job_max: 0, budget_us: 1000, period_us: 5000, ..Default::default() };
+    assert_eq!(QosInfo::decode(&q.encode()), q);
+    let c = CpuInfo { kind: 1, capacity: 512, cluster: 3, hw_id: 7, run_ns: [1, 2, 3, 4], idle_ns: 9, ..Default::default() };
+    assert_eq!(CpuInfo::decode(&c.encode()), c);
 }

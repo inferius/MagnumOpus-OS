@@ -45,6 +45,8 @@ pub struct Process {
     job: Arc<Job>,
     /// Cas na CPU vsech vlaken (ns; pricita scheduler pri prepnuti).
     pub cpu_ns: AtomicU64,
+    /// Trida QoS novych vlaken a Realtime parametry (ns) z `PROCESS_SET`.
+    qos: SpinLock<(schedcore::Class, Option<(u64, u64)>)>,
 }
 
 /// Vsechny procesy (slabe odkazy) pro `JOB_PROCESSES`. Mrtve se uklidi pri
@@ -81,6 +83,7 @@ impl Process {
             }),
             job,
             cpu_ns: AtomicU64::new(0),
+            qos: SpinLock::new((schedcore::Class::Normal, None)),
         });
         p.core.set_charge(charge);
         {
@@ -92,6 +95,20 @@ impl Process {
         }
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
+    }
+
+    /// Trida QoS pro nova vlakna procesu (a jejich Realtime parametry).
+    pub fn default_qos(&self) -> (schedcore::Class, Option<(u64, u64)>) {
+        *self.qos.lock()
+    }
+
+    pub fn set_default_qos(&self, class: schedcore::Class, rt: Option<(u64, u64)>) {
+        *self.qos.lock() = (class, rt);
+    }
+
+    /// Zive vlakna procesu.
+    pub fn threads(&self) -> Vec<Arc<Thread>> {
+        self.state.lock().threads.iter().filter_map(Weak::upgrade).collect()
     }
 
     pub fn handles(&self) -> SpinLockGuard<'_, HandleTable> {

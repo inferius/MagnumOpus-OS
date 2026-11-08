@@ -289,3 +289,29 @@ impl Ecam {
         );
     }
 }
+
+/// Precte konfiguraci od spravce zarizeni (prvni zprava na bootstrap
+/// kanalu ovladace): `pci <sbernice> <zarizeni> <funkce>` desitkove.
+pub fn read_driver_config(bootstrap: &Channel) -> Option<Address> {
+    let msg = bootstrap.read(None).ok()?;
+    parse_driver_config(core::str::from_utf8(&msg.data).ok()?)
+}
+
+/// Rozebere text `pci <sbernice> <zarizeni> <funkce>`; navic slova
+/// navic nebo hodnoty mimo rozsah = `None`.
+pub fn parse_driver_config(text: &str) -> Option<Address> {
+    let mut parts = text.split_whitespace();
+    if parts.next()? != "pci" {
+        return None;
+    }
+    let mut num = || parts.next()?.parse::<u8>().ok();
+    let a = Address {
+        bus: num()?,
+        device: num()?,
+        function: num()?,
+    };
+    if parts.next().is_some() || a.device > 31 || a.function > 7 {
+        return None;
+    }
+    Some(a)
+}

@@ -1,0 +1,9 @@
+[package]
+name = "audiomix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Zpracovani zvuku bez zavislosti na jadru: prevod formatu, prevod frekvence, mix, ton, WAV"
+
+[dependencies]
+audioproto = { path = "../audioproto" }

@@ -110,6 +110,7 @@ extern "C" fn kernel_main(boot_info: u64) -> ! {
     let platform = PLATFORM.get().unwrap();
 
     sched::init_cpu(0, arch::cpu_hw_id());
+    sched::topo::set_platform(platform);
     let cpus = smp::start_secondary_cpus(platform, boot_info);
     log::info!("bezi {cpus} z {} CPU", platform.cpus.len());
 

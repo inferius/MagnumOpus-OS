@@ -4,7 +4,7 @@
 //! souboroveho systemu (s ulozistem korenovych certifikatu), sluzbu uctu
 //! (`accounts.rs`, spravce sezeni `session.rs`), sluzbu vstupu,
 //! sluzbu site s firewallem a synchronizaci casu a GUI (kompozitor
-//! a ukazkove aplikace, `gui.rs`). Pak bezi
+//! a ukazkove aplikace, `gui.rs`) a zvukovou sluzbu (`audio.rs`). Pak bezi
 //! jako supervisor (`supervisor.rs`: zarizeni pripojena za behu, restart
 //! spadlych sluzeb). V testovacim behu (priznak `TEST_RUN` od jadra) misto
 //! toho spusti testy userspace (`tests/`) a skonci s jejich vysledkem.
@@ -18,6 +18,7 @@ extern crate alloc;
 mod accounts;
 mod agent;
 mod apps;
+mod audio;
 mod certs;
 mod display_native;
 mod dns;
@@ -148,6 +149,11 @@ fn main(startup: Startup) -> i64 {
                     devices.input = Some(i);
                 }
                 Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
+            }
+            // Zvuk: audiod prevezme ovladace zvukovych karet (restart po
+            // padu ridi supervisor, kanaly k ovladacum drzi init).
+            if let Err(e) = audio::start(&startup, core::mem::take(&mut devices.audios), &mut sup) {
+                println!("init: zvukovou sluzbu nelze spustit: {e}");
             }
             // Sit az po FS: firewall uklada konfiguraci na FS. Zvlastni beh
             // testu napajeni sit nepotrebuje (kratsi start).

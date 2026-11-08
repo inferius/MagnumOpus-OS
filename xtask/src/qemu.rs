@@ -5,6 +5,8 @@
 //! - aarch64: stroj virt (GICv3 s ITS, volitelne SMMUv3), firmware edk2,
 //!   konec testu pres semihosting (SYS_EXIT s kodem od jadra, 33 = uspech).
 //!
+//! Zvuk: radic intel-hda s kodekem hda-duplex (viz `audio.rs`).
+//!
 //! Disky jsou na obou stejne: systemovy (ESP s loaderem, jadrem a initfs),
 //! maly pro testy ovladace a datovy s nasim souborovym systemem, vse jako
 //! virtio-blk na PCI Express. Datovy disk muze byt i na NVMe nebo AHCI
@@ -97,7 +99,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
             }
             Err(TestError::PortTaken(e)) => break Err(format!("QEMU nenastartovalo: {e}").into()),
             Err(TestError::Other(e)) => break Err(e),
-            Ok(()) => break Ok(()),
+            Ok(()) => break crate::audio::check(&run.wav, &serial_log, opts),
         }
     };
     // Pri panice nebo fatalni vyjimce prelozit adresy na jmena funkci.
@@ -214,6 +216,9 @@ fn command(
     if opts.edu {
         cmd.args(["-device", crate::drivers::EDU_DEVICE]);
     }
+    // Zvuk: radice Intel HDA (ovladac hda, sluzba audiod); v testu do WAV.
+    // Az za ostatnimi zarizenimi, aby se jejich sloty PCI neposunuly.
+    crate::audio::qemu_args(&mut cmd, opts, &run.wav);
     cmd.args(&opts.qemu_args);
     Ok(cmd)
 }
@@ -544,6 +549,8 @@ struct RunFiles {
     /// Datovy disk s GPT (na NVMe/AHCI).
     data_gpt: PathBuf,
     scratch: PathBuf,
+    /// Zvuk z QEMU (backend wav).
+    wav: PathBuf,
     nvme: PathBuf,
     nvme4k: PathBuf,
     ahci: PathBuf,
@@ -559,6 +566,7 @@ impl RunFiles {
             data: t.join(format!("data-{pid}.img")),
             data_gpt: t.join(format!("data-gpt-{pid}.img")),
             scratch: t.join(format!("scratch-{pid}.img")),
+            wav: t.join(format!("audio-{arch}-{pid}.wav")),
             nvme: t.join(format!("nvme-test-{pid}.img")),
             nvme4k: t.join(format!("nvme4k-test-{pid}.img")),
             ahci: t.join(format!("ahci-test-{pid}.img")),
@@ -582,7 +590,7 @@ impl Drop for RunFiles {
             let _ = std::fs::remove_file(&self.data);
             let _ = std::fs::remove_file(&self.data_gpt);
         }
-        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign] {
+        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign, &self.wav] {
             let _ = std::fs::remove_file(f);
         }
     }
