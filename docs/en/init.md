@@ -27,7 +27,8 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 1. `timed` (the time service, the only one allowed to set the clock),
 2. `devmgr`: finds devices and starts drivers. It reports disks (`block`)
    and input devices (`input`), and then `done` once the USB devices
-   present at boot are ready too,
+   present at boot are ready too; while waiting long for a disk driver it
+   sends `busy` (init waits at most 30 s for each message),
 3. `fsd` on the disk with the file system; init prepares the root
    certificate store `/system/config/certs` (see
    [TLS and HTTP](tls-http.md#root-certificate-store)),

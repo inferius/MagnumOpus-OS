@@ -27,6 +27,8 @@ const GHC_HR: u32 = 1 << 0;
 const GHC_IE: u32 = 1 << 1;
 const GHC_AE: u32 = 1 << 31;
 const CAP_SSS: u32 = 1 << 27;
+/// Radic umi 64bitove adresy DMA (jinak jen pod 4 GiB).
+const CAP_S64A: u32 = 1 << 31;
 const CAP2_BOH: u32 = 1 << 0;
 const BOHC_BOS: u32 = 1 << 0;
 const BOHC_OOS: u32 = 1 << 1;
@@ -41,6 +43,7 @@ const P_CMD: u64 = 0x18;
 const P_TFD: u64 = 0x20;
 const P_SIG: u64 = 0x24;
 const P_SSTS: u64 = 0x28;
+const P_SCTL: u64 = 0x2C;
 const P_SERR: u64 = 0x30;
 const P_CI: u64 = 0x38;
 
@@ -83,6 +86,15 @@ pub struct Hba {
     regs: Mapping,
     off: u64,
     pub irq: Option<Interrupt>,
+    /// Radic umi 64bitove adresy (CAP.S64A). Bez toho musi vsechna DMA
+    /// pamet lezet pod 4 GiB, jinak by radic horni polovinu adresy zahodil
+    /// a psal do cizi pameti.
+    s64a: bool,
+}
+
+/// Lezi usek `addr..addr+len` cely pod 4 GiB?
+fn below_4g(addr: u64, len: u64) -> bool {
+    addr.checked_add(len).is_some_and(|end| end <= 1 << 32)
 }
 
 /// Jeden port s pripojenym diskem.
@@ -131,10 +143,12 @@ impl Hba {
         let off = bar - base;
         let len = (off + size).next_multiple_of(page);
         let regs = Mapping::new(&resource.device_memory(base, len)?, 0, len, MAP_READ | MAP_WRITE)?;
+        let s64a = regs.read::<u32>(off + CAP) & CAP_S64A != 0;
         Ok(Self {
             regs,
             off,
             irq: None,
+            s64a,
         })
     }
 
@@ -178,8 +192,9 @@ impl Hba {
         self.set(GHC, self.reg(GHC) | GHC_IE);
     }
 
-    /// Zastavi zpracovani prikazu a prijem FIS na portu.
-    fn stop(&self, p: u32) -> bool {
+    /// Zastavi zpracovani prikazu a prijem FIS na portu (pak uz port
+    /// nesaha do sve DMA pameti).
+    pub fn stop(&self, p: u32) -> bool {
         let cmd = self.preg(p, P_CMD);
         self.pset(p, P_CMD, cmd & !CMD_ST);
         let a = poll(STOP_TIMEOUT, || self.preg(p, P_CMD) & CMD_CR == 0);
@@ -197,6 +212,10 @@ impl Hba {
         let page = libos::vm::page_size();
         let dma = resource.dma_memory(PORT_DMA.next_multiple_of(page))?;
         let phys = resource.phys_addr(&dma, 0)?;
+        if !self.s64a && !below_4g(phys, PORT_DMA) {
+            libos::println!("ahci: port {p}: radic umi jen 32bitove adresy a DMA pamet je nad 4 GiB - vynechan");
+            return Err(Error::NotSupported);
+        }
         let mem = Mapping::new(&dma, 0, PORT_DMA, MAP_READ | MAP_WRITE)?;
         mem.write_bytes(0, &[0u8; DATA_OFF as usize]);
         let clb = phys + CL_OFF;
@@ -221,18 +240,28 @@ impl Hba {
         })
     }
 
+    /// COMRESET portu (port musi byt zastaveny, ST = 0): po resetu radice
+    /// nekterych cipsetu linka sama nenaskoci. DET = 1 aspon 1 ms, pak 0.
+    pub fn comreset(&self, p: u32) {
+        let sctl = self.preg(p, P_SCTL) & !0xF;
+        self.pset(p, P_SCTL, sctl | 1);
+        libos::time::sleep(core::time::Duration::from_millis(2));
+        self.pset(p, P_SCTL, sctl);
+        self.pset(p, P_SERR, u32::MAX);
+    }
+
     /// Pocka na navazani linky (DET = 3) na portech `ports`, nejvys
     /// `LINK_TIMEOUT` pro vsechny dohromady. Port, na kterem po
     /// `NO_DEVICE_AFTER` stale nic neni (DET = 0), se dal neceka.
     /// Vraci, na kterych portech linka je.
-    pub fn wait_links(&self, ports: &[Port]) -> alloc::vec::Vec<bool> {
+    pub fn wait_links(&self, ports: &[u32]) -> alloc::vec::Vec<bool> {
         let start = libos::time::now();
         let quiet = libos::time::deadline_after(NO_DEVICE_AFTER) - start;
         let mut up = alloc::vec![false; ports.len()];
         poll(LINK_TIMEOUT, || {
             let mut pending = false;
-            for (i, port) in ports.iter().enumerate() {
-                let det = self.preg(port.index, P_SSTS) & 0xF;
+            for (i, &port) in ports.iter().enumerate() {
+                let det = self.preg(port, P_SSTS) & 0xF;
                 up[i] = det == 3;
                 if !up[i] && (det != 0 || libos::time::now() - start < quiet) {
                     pending = true;
@@ -276,6 +305,12 @@ impl Hba {
             return Err(Error::IoError);
         }
         let p = port.index;
+        if let Some(addr) = c.data_phys
+            && !self.s64a
+            && !below_4g(addr, c.bytes as u64)
+        {
+            return Err(Error::NotSupported);
+        }
         let m = &port.mem;
         // Tabulka prikazu: H2D Register FIS (20 B) + jedna polozka PRDT.
         let ct = CT_OFF;
@@ -375,12 +410,5 @@ impl Hba {
         self.pset(p, P_CMD, self.preg(p, P_CMD) | CMD_FRE);
         poll(READY_TIMEOUT, || self.preg(p, P_TFD) & (TFD_BSY | TFD_DRQ) == 0);
         self.pset(p, P_CMD, self.preg(p, P_CMD) | CMD_ST);
-    }
-
-    /// Zastavi vsechny porty (konec ovladace).
-    pub fn shutdown(&self, ports: &[Port]) {
-        for port in ports.iter().filter(|p| !p.failed) {
-            self.stop(port.index);
-        }
     }
 }

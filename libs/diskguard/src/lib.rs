@@ -226,7 +226,10 @@ fn choose(t: &gpt::Table, sectors: u64, ss: usize) -> Decision {
         let overlaps = t
             .entries()
             .enumerate()
-            .any(|(j, o)| j != i && !o.is_empty() && o.first <= e.last && e.first <= o.last);
+            .any(|(j, o)| j != i && !o.is_empty() && o.first <= e.last && e.first <= o.last)
+            // Ani MBR, hlavicky a tabulky GPT (pouzitelna oblast z hlavicky
+            // je jen udaj disku; chybny nastroj ji muze nastavit spatne).
+            || t.reserved.iter().any(|&(a, b)| a <= e.last && e.first <= b);
         if !in_bounds || overlaps {
             continue;
         }

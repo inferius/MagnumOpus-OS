@@ -110,6 +110,8 @@ pub struct Identity {
     pub dsm: bool,
     /// Nejvic bajtu v jednom prenosu (MDTS, nejvys datovy buffer).
     pub max_bytes: u64,
+    /// Nejvyssi cislo jmenneho prostoru (NN).
+    pub max_nsid: u32,
 }
 
 /// Jmenny prostor (disk) z IDENTIFY NAMESPACE.
@@ -398,6 +400,7 @@ impl Controller {
         let mdts = m.read::<u8>(AUX_OFF + 77);
         let oncs = m.read::<u16>(AUX_OFF + 520);
         let vwc = m.read::<u8>(AUX_OFF + 525);
+        let nn = m.read::<u32>(AUX_OFF + 516);
         let max_bytes = if mdts == 0 || mdts > 20 {
             DATA_LEN
         } else {
@@ -411,6 +414,7 @@ impl Controller {
             write_cache: vwc & 1 != 0,
             dsm: oncs & (1 << 2) != 0,
             max_bytes,
+            max_nsid: nn,
         })
     }
 
@@ -418,21 +422,44 @@ impl Controller {
     /// `max_sector` B (typicky 512 B nebo 4 KiB). Jmenne prostory
     /// s metadaty (ochrana dat T10 PI) se zaloguji a vynechaji: prenos by
     /// potreboval druhy buffer nebo jine rozlozeni dat.
-    pub fn namespaces(&mut self, limit: usize, max_sector: u64) -> Result<alloc::vec::Vec<Namespace>> {
-        self.identify(2, 0)?;
+    ///
+    /// Seznam aktivnich jmennych prostoru (IDENTIFY CNS 2) maji radice od
+    /// NVMe 1.1. Starsi radic (NVMe 1.0, napr. virtualni NVMe ve starsich
+    /// verzich VMware) ho odmitne; pak se projdou cisla 1..=NN a neaktivni
+    /// jmenny prostor se pozna podle nulove velikosti.
+    pub fn namespaces(&mut self, id: &Identity, limit: usize) -> Result<alloc::vec::Vec<Namespace>> {
+        let max_sector = id.max_bytes;
         let mut ids = alloc::vec::Vec::new();
-        for i in 0..1024u64 {
-            let id = self.mem.read::<u32>(AUX_OFF + i * 4);
-            if id == 0 {
-                break;
+        let vs = self.reg(VS);
+        let listed = vs >= 0x0001_0100 && self.identify(2, 0).is_ok();
+        if listed {
+            for i in 0..1024u64 {
+                let nsid = self.mem.read::<u32>(AUX_OFF + i * 4);
+                if nsid == 0 || ids.len() >= limit {
+                    break;
+                }
+                ids.push(nsid);
             }
-            ids.push(id);
+        } else if !self.failed {
+            ids.extend(1..=id.max_nsid.min(1024));
         }
         let mut out = alloc::vec::Vec::new();
-        for nsid in ids.into_iter().take(limit) {
-            self.identify(0, nsid)?;
+        for nsid in ids {
+            if out.len() >= limit {
+                break;
+            }
+            if let Err(e) = self.identify(0, nsid) {
+                // Neplatne cislo pri prochazeni 1..=NN neni chyba radice.
+                if listed || self.failed {
+                    return Err(e);
+                }
+                continue;
+            }
             let m = &self.mem;
             let size = m.read::<u64>(AUX_OFF);
+            if size == 0 {
+                continue; // neaktivni jmenny prostor
+            }
             let flbas = m.read::<u8>(AUX_OFF + 26);
             let format = m.read::<u32>(AUX_OFF + 128 + (flbas & 0xF) as u64 * 4);
             let meta = format & 0xFFFF;
@@ -467,6 +494,17 @@ impl Controller {
             _ => self.phys + PRP_LIST_OFF,
         };
         (prp1, prp2)
+    }
+}
+
+impl Drop for Controller {
+    /// Radic vypnout drive, nez se uvolni fronty a buffery (pole se ruseji
+    /// az po tomto tele): i chybova cesta po zapnuti radice ho tak zastavi
+    /// a uz nesaha do uvolnene pameti. Po normalnim vypnuti (`shutdown`)
+    /// je to jen potvrzeni.
+    fn drop(&mut self) {
+        self.set_reg(CC, 0);
+        let _ = self.wait_status(CSTS_RDY, 0, self.timeout_ready);
     }
 }
 

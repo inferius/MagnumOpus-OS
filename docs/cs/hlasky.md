@@ -126,7 +126,9 @@ porušený vnitřní předpoklad (chyba jádra).
 | `ahci: port P: disk ... ma logicky sektor ... B - nepodporovano, vynechan` | Disk hlásí logický sektor, který není mocnina dvou 512 B..32 KiB (chybná odpověď IDENTIFY). Disky 512 B i 4Kn fungují. |
 | `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | Na portu je mechanika ATAPI nebo port multiplier. |
 | `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | Příkaz nedoběhl do 20 s; port je zastavený. |
-| `devmgr: ovladac X pro ... nenahlasil disky: ...` | Ovladač `nvme`/`ahci` neposlal `done` do 20 s (pomalé roztočení disku, zaseknutý řadič). Disky nahlášené do té doby fungují. |
+| `devmgr: ovladac X pro ... nenahlasil disky: ...` | Ovladač `nvme`/`ahci` neposlal `done` do 150 s (zaseknutý řadič). Disky nahlášené do té doby fungují. |
+| `ahci: port P: radic umi jen 32bitove adresy a DMA pamet je nad 4 GiB - vynechan` | Řadič bez 64bitových adres (`CAP.S64A = 0`) a paměť portu leží nad 4 GiB. Port se vynechá, jinak by řadič psal do cizí paměti. |
+| `ahci: port P: ulozeni mezipameti pri ukonceni selhalo: ...` | Při ukončení ovladače disk nepřijal FLUSH CACHE; data z mezipaměti disku se mohla ztratit. |
 | `virtio-net BB:ZZ.F: MAC xx:..., linka pripojena/odpojena` | Síťová karta je připravená. MAC je z konfigurace zařízení, jinak místně spravovaná (`02:...`). |
 | `virtio-net ...: inicializace selhala: ...` | Jako u disku: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA paměť). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | Zařízení vrátilo nesmyslný index fronty nebo buffer, který nemělo (`CORRUPTED`). Ovladač ho resetuje (přestane používat DMA) a skončí; síť do restartu nefunguje. |
