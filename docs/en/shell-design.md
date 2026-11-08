@@ -686,7 +686,15 @@ Binary messages (1 byte kind, little-endian fields, text = length + UTF-8).
 The window sends `Hello`, `Attach` (0 = new session), `Detach`, `Run`,
 `Interrupt`, `Complete`, `Answer`, `Format`, `Sessions` and `Highlight`.
 The service sends `BlockStart`, `Item`, `BlockEnd`, `Prompt`,
-`Completions`, `Formatted`, `Highlighted` and `Fail`.
+`Completions`, `Formatted`, `Highlighted`, `Cwd` (the current directory
+after each block, so the prompt changes right after `cd`) and `Fail`.
+
+The grey suggestion at the end of the line: for the command name from the
+history, for an argument from completion by the argument type (`cd` only
+directories, paths, table fields) - the window requests it itself
+(`Complete` with the `seq` flag 0x8000_0000). Tab: a single match is
+completed at once, several matches open a menu that typing narrows (arrows
+/Tab choose, Enter confirms, Esc closes).
 
 - **Matching replies (version 2):** `Complete` and `Format` carry a request
   number `seq`, which `Completions` and `Formatted` return. Events of other

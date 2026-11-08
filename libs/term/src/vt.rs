@@ -130,7 +130,7 @@ pub fn message(m: &ServerMsg, theme: Option<&Theme>) -> String {
             }
         }
         // Seznam uloh jde do panelu okna; do textu (log) se nezrcadli.
-        ServerMsg::Tasks { .. } => {}
+        ServerMsg::Tasks { .. } | ServerMsg::Cwd { .. } => {}
         ServerMsg::SessionList { sessions } => {
             for (id, n, cwd) in sessions {
                 out.push_str(&alloc::format!("{id}  {n} bloku  {cwd}\n"));

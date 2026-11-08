@@ -90,7 +90,8 @@ impl Look {
             let (r, g, b, _) = theme::unpremul(v);
             Rgb(r as u8, g as u8, b as u8)
         };
-        let mut th = if self.t.mode == ColorMode::Dark { Theme::dark() } else { Theme::light() };
+        // Vysoky kontrast ma tmave pozadi: barvy syntaxe z tmaveho motivu.
+        let mut th = if self.t.mode == ColorMode::Light { Theme::light() } else { Theme::dark() };
         th.ui.bg = rgb(c.term_bg);
         th.ui.fg = rgb(c.term_ink);
         th.ui.muted = rgb(c.term_dim);
@@ -243,6 +244,9 @@ impl Term {
     }
 
     fn render(&mut self) -> Result<(), Error> {
+        // Text bez vlastni barvy (sloupce tabulky, vystup) barvou motivu.
+        let ink = self.app.theme.ui.fg;
+        self.screen.set_ink((ink.0, ink.1, ink.2));
         self.screen.write(&self.app.frame());
         if self.conn.conn.is_none() {
             self.screen.write("\r\n\x1b[31mTerminál nemá službu termd (spusťte ho přes init).\x1b[39m");

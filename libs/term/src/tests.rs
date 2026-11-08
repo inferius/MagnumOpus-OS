@@ -208,7 +208,7 @@ fn completion_format_and_jobs() {
 #[test]
 fn vt_adapter() {
     let t = crate::vt::message(&ServerMsg::Item { session: 1, block: 1, item: Item::Note("pozn".into()) }, Some(&crate::theme::Theme::dark()));
-    assert_eq!(t, "\x1b[0;38;2;124;130;145mpozn\x1b[0m\n", "poznamka barvou muted motivu");
+    assert_eq!(t, "\x1b[0;38;2;154;161;176mpozn\x1b[0m\n", "poznamka barvou muted motivu");
     assert_eq!(crate::vt::strip(&t), "pozn\n");
     let l = crate::vt::item(&Item::Link { text: "a".into(), target: "b".into() }, Some(&crate::theme::Theme::dark()));
     assert_eq!(crate::vt::strip(&l), "a\n");
