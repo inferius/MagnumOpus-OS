@@ -241,6 +241,19 @@ protocol.
   for every held key and button and exits. The input service then removes
   the source.
 
+### FIDO security key
+
+A HID interface with usage page `0xF1D0` in its report descriptor
+(YubiKey, SoloKey, Nitrokey, ...) is not an input device. `usb-hid` does
+not hand it to the input service and only forwards 64 B CTAPHID reports
+(interrupt IN and OUT) over the third channel of its start-up message.
+devmgr creates that channel for every HID interface and sends the other
+end to init with the `fido` message; init gives it to the account service
+(see [User accounts](accounts.md)). A device that is not a key closes the
+channel right away. Descriptor detection: `usbproto::hid::is_fido` (host
+test). QEMU does not emulate a FIDO2 key; verified on the host against the
+simulated key, not yet on a real key.
+
 ## Verifying a new input device (against BadUSB)
 
 A USB device can pretend to be a keyboard and type commands by itself

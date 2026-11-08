@@ -232,6 +232,18 @@ vrátí `None` a ovladač zkusí boot protokol.
 - **Odpojení:** kanál rozhraní se zavře, ovladač pošle uvolnění všech
   držených kláves a tlačítek a skončí. Služba vstupu pak zdroj odebere.
 
+### Bezpečnostní klíč FIDO
+
+Rozhraní HID s usage page `0xF1D0` v deskriptoru reportu (YubiKey,
+SoloKey, Nitrokey, ...) není vstupní zařízení. `usb-hid` ho službě vstupu
+nepředá a jen přenáší hlášení CTAPHID po 64 B (interrupt IN a OUT) po
+třetím kanálu ze startovní zprávy. devmgr ten kanál vytvoří pro každé
+rozhraní HID a druhý konec pošle initu zprávou `fido`; init ho dá službě
+účtů (viz [Uživatelské účty](ucty.md)). Zařízení, které klíč není, kanál
+hned zavře. Rozpoznání deskriptoru: `usbproto::hid::is_fido` (test na
+hostiteli). QEMU klíč FIDO2 neemuluje; ověřené na hostiteli nad
+simulovaným klíčem, na skutečném klíči zatím ne.
+
 ## Ověření nového vstupního zařízení (proti BadUSB)
 
 Zařízení USB se může vydávat za klávesnici a samo psát příkazy (BadUSB,

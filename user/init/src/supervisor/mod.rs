@@ -249,8 +249,10 @@ impl Supervisor {
         println!("init: supervisor bezi");
         loop {
             // Kolo nejdyl 2 s: prehled uloh (stav sluzeb, ikona v liste).
-            self.step(startup, Some(time::deadline_after(core::time::Duration::from_secs(2))));
+            let happened = self.step(startup, Some(time::deadline_after(core::time::Duration::from_secs(2))));
             crate::tasks::sync(self);
+            // Snimek stavu pro systemove nastroje agenta (jen cteni).
+            crate::agent::publish(&self.status(), &happened);
         }
     }
 
@@ -353,18 +355,8 @@ impl Supervisor {
     fn devmgr_messages(&mut self, out: &mut Vec<Happened>) {
         let Some(d) = system::devices() else { return };
         while let Ok(m) = d.control.try_read() {
-            match &m.data[..] {
-                b"input" => {
-                    let Some(input) = &d.input else { continue };
-                    for h in m.handles {
-                        match input.command(inputproto::control::DEVICE, alloc::vec![h]) {
-                            Ok(_) => out.push(Happened::DeviceAdded),
-                            Err(e) => println!("init: zarizeni pro sluzbu vstupu: {e}"),
-                        }
-                    }
-                }
-                b"block" => println!("init: disk pripojeny za behu zatim nepouzivam"),
-                other => println!("init: neznama zprava od devmgr: {:?}", other),
+            for _ in 0..system::devmgr_message(d, m) {
+                out.push(Happened::DeviceAdded);
             }
         }
     }

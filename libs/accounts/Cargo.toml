@@ -1,0 +1,25 @@
+[package]
+name = "accounts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Logika sluzby uctu (accountd): zaznamy, Argon2id, PIN s klicem zarizeni, zpomaleni, bezpecnostni klice, obaly klice domova"
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }
+accountproto = { path = "../accountproto" }
+argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
+blake2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }
+hmac = { version = "0.12", default-features = false }
+hkdf = { version = "0.12", default-features = false }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+subtle = { version = "2.6", default-features = false }
+zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
+rand_core = { version = "0.6", default-features = false }
+# Normalizace hesla NFC (stejne heslo z ruznych metod vstupu).
+unicode-normalization = { version = "0.1", default-features = false }
+
+[dev-dependencies]
+accountproto = { path = "../accountproto", features = ["soft"] }

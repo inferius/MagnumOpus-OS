@@ -37,6 +37,8 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 | `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
 | `cargo xtask usb` | živé USB: obraz `target/usb-<arch>-<profil>.img`; `--list`, `--write <disk>`, `--run`, `--test`, `--size <MiB>`, `--out <soubor>`, viz [Živé USB](zive-usb.md) |
 | `cargo xtask test --only zive-usb` | jen start z obrazu USB jako flash disk (po hlavním běhu se spouští vždy) |
+| `cargo xtask test --driver edu` | jen jeden ovladač z manifestu: jeho testy na hostiteli (simulace) a v QEMU sada `ovladace z manifestu` jen pro něj; bez kontroly jader ostatních architektur a dokumentace (rychlá smyčka, viz [Ovladače](ovladace.md)) |
+| `cargo xtask new-driver <jméno> --pci <vendor:device>` | kostra ovladače na driverkitu: kód, manifest, model zařízení a test v simulaci, stránka dokumentace cs+en ([Ovladače](ovladace.md#první-ovladač-krok-za-krokem)) |
 | `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 

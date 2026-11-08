@@ -1,7 +1,8 @@
 //! init: prvni proces v userspace.
 //!
 //! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
-//! souboroveho systemu (s ulozistem korenovych certifikatu), sluzbu vstupu,
+//! souboroveho systemu (s ulozistem korenovych certifikatu), sluzbu uctu
+//! (`accounts.rs`, spravce sezeni `session.rs`), sluzbu vstupu,
 //! sluzbu site s firewallem a synchronizaci casu a GUI (kompozitor
 //! a ukazkove aplikace, `gui.rs`). Pak bezi
 //! jako supervisor (`supervisor.rs`: zarizeni pripojena za behu, restart
@@ -14,6 +15,8 @@
 
 extern crate alloc;
 
+mod accounts;
+mod agent;
 mod apps;
 mod certs;
 mod display_native;
@@ -24,6 +27,7 @@ mod input;
 mod ntp;
 mod power;
 mod revocation;
+mod session;
 mod supervisor;
 mod system;
 mod tasks;
@@ -94,6 +98,12 @@ fn main(startup: Startup) -> i64 {
                         // Bez uloziste se spojeni TLS nenavazou (zadna duveryhodna CA).
                         println!("init: uloziste certifikatu nelze pripravit: {e}");
                     }
+                    // Ucty hned po FS: vlastni dataset DB a domovy.
+                    if devices.fs.is_some()
+                        && let Err(e) = accounts::start(&startup, &devices, &mut sup)
+                    {
+                        println!("init: sluzbu uctu nelze spustit: {e}");
+                    }
                 }
                 Ok(None) => {}
                 Err(e) => println!("init: souborovy system nelze spustit: {e}"),
@@ -159,6 +169,19 @@ fn main(startup: Startup) -> i64 {
                     }
                 }
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
+            }
+            // Agent AI po siti a FS: sit jen v beznem behu (testy maji
+            // falesny model bez site).
+            let test_run = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
+            if devices.fs.is_some() {
+                match agent::start(&startup, &devices, !test_run) {
+                    Ok(()) => {
+                        if let Some(a) = agent::AGENTD.lock().as_ref() {
+                            sup.watch("agentd", &a.process, None);
+                        }
+                    }
+                    Err(e) => println!("init: agenta AI nelze spustit: {e}"),
+                }
             }
             *gui::DISPLAY.lock() = devices.displays.pop();
             system::DEVICES.call_once(|| devices);
