@@ -371,9 +371,12 @@ pamatuje). Neviditelný okraj `size.resize_edge` vně okna (v oblasti stínu)
 mění velikost na všech čtyřech stranách a v rozích (roh v délce zaoblení);
 tah za levý nebo horní okraj posouvá i polohu, protější okraj zůstává
 (po potvrzení CONFIGURE). Nad okrajem kurzor dvojité šipky (vodorovná,
-svislá, šikmé), nejmenší velikost okna platí. Zóna tlačítek titulku leží
-jen uvnitř titulku, mimo rám má přednost okraj. **[implementováno]**
-(testy `close_button_zone_does_not_cover_edge`,
+svislá, šikmé), nejmenší velikost okna platí. Zóna tlačítek titulku je
+kruh tlačítka a 4 px (`space.s2`), takže zvýraznění odpovídá tomu, co je
+vidět; jen u maximalizovaného okna čtverec `size.hit_min` až k hornímu
+okraji a zavřít až do rohu obrazovky (Fittsův zákon). Mimo rám má přednost
+okraj. **[implementováno]** (testy `close_button_zone_does_not_cover_edge`,
+`close_button_zone_is_round_except_maximized_corner`,
 `resize_from_left_and_top_keeps_opposite_edge` v `libs/comp`)
 Nereagující aplikace: obsah ztlumený a karta „… nereaguje“.
 

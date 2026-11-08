@@ -64,6 +64,7 @@ impl Style {
             border: 1,
             btn: t.size.title_btn,
             btn_hit: t.size.hit_min,
+            btn_slop: t.space[2],
             btn_gap: t.space[1],
             pad: t.space[3],
             badge_h: t.size.badge_h,

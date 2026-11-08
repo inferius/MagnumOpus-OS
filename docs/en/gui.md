@@ -388,9 +388,12 @@ the window (in the shadow area) resizes on all four sides and corners (a
 corner as long as the radius); dragging the left or top edge also moves the
 window, the opposite edge stays (after the CONFIGURE ack). Above the edge
 the cursor is a double arrow (horizontal, vertical, diagonal); the minimum
-window size applies. The title button zone lies only inside the title bar;
-outside the frame the edge wins. **[implemented]** (tests
-`close_button_zone_does_not_cover_edge`,
+window size applies. The title button zone is the button circle plus 4 px
+(`space.s2`), so the highlight matches what one sees; only a maximized
+window uses the `size.hit_min` square up to the top edge and close up to
+the screen corner (Fitts's law). Outside the frame the edge wins.
+**[implemented]** (tests `close_button_zone_does_not_cover_edge`,
+`close_button_zone_is_round_except_maximized_corner`,
 `resize_from_left_and_top_keeps_opposite_edge` in `libs/comp`)
 Unresponsive app: dimmed content and a "... nereaguje" card.
 

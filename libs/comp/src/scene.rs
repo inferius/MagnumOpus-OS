@@ -28,8 +28,11 @@ pub struct Geo {
     pub border: u32,
     /// Viditelne tlacitko okna (`size.title_btn`).
     pub btn: u32,
-    /// Cil kliknuti tlacitka (`size.hit_min`).
+    /// Cil kliknuti tlacitka (`size.hit_min`), ctverec: jen u maximalizovaneho
+    /// okna (roh obrazovky, Fittsuv zakon).
     pub btn_hit: u32,
+    /// Presah kruhove zony tlacitka za jeho viditelny kruh (`space.s2`).
+    pub btn_slop: u32,
     /// Mezera mezi tlacitky.
     pub btn_gap: u32,
     /// Okraj titulku (vlevo, vpravo).
@@ -226,6 +229,35 @@ impl Window {
 
     /// Cile kliknuti tlacitek (`hit_min` x `hit_min` kolem stredu, orez na
     /// titulek). Prekryvaji se; plati nejblizsi stred.
+    /// Tlacitko titulku pod bodem. Bezne okno: kruh tlacitka a `btn_slop`
+    /// (najeti odpovida tomu, co clovek vidi). Maximalizovane: ctverec
+    /// `btn_hit` az k hornimu okraji a zavrit az k pravemu (roh obrazovky).
+    pub fn button_at(&self, x: i32, y: i32) -> Option<usize> {
+        let o = self.outer();
+        let hits = self.button_hits();
+        let near = |i: usize| {
+            let b = self.buttons()[i];
+            let (cx, cy) = (b.x + b.w as i32 / 2, b.y + b.h as i32 / 2);
+            let (dx, dy) = ((x - cx) as i64, (y - cy) as i64);
+            dx * dx + dy * dy
+        };
+        let inside = |i: usize| {
+            if self.restore.is_some() {
+                let mut r = hits[i];
+                // Az k hornimu okraji ramu (a zavrit k pravemu).
+                r = r.union(&Rect::new(r.x, o.y, r.w, 1));
+                if i == 0 && self.side == ButtonSide::Right {
+                    r = r.union(&Rect::new(o.right() as i32 - 1, r.y, 1, r.h));
+                }
+                r.contains(x, y)
+            } else {
+                let rad = (self.geo.btn / 2 + self.geo.btn_slop) as i64;
+                hits[i].w > 0 && near(i) <= rad * rad
+            }
+        };
+        (0..3).filter(|&i| inside(i)).min_by_key(|&i| near(i))
+    }
+
     pub fn button_hits(&self) -> [Rect; 3] {
         let Some(t) = self.title_bar() else {
             return [Rect::default(); 3];

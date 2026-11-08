@@ -182,12 +182,8 @@ impl Comp {
                 ));
             }
             if w.mode.has_frame() {
-                // Cile tlacitek se prekryvaji: plati nejblizsi stred.
-                let hits = w.button_hits();
-                let best = (0..3)
-                    .filter(|&i| hits[i].contains(x, y))
-                    .min_by_key(|&i| (hits[i].x + hits[i].w as i32 / 2 - x).abs());
-                if let Some(i) = best {
+                // Cile tlacitek se muzou prekryvat: plati nejblizsi stred.
+                if let Some(i) = w.button_at(x, y) {
                     return Some((gid, Zone::Button(i)));
                 }
                 let cl = self.clients.get(&w.client)?;
