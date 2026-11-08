@@ -10,6 +10,7 @@ site menu.
 |---|---|---|
 | [Sestavení a ladění](cs/sestaveni.md) | [Building and debugging](en/building.md) | nástroje, příkazy, testy, ladění, struktura / tools, commands, tests, debugging, layout |
 | [Architektura](cs/architektura.md) | [Architecture](en/architecture.md) | návrh systému, milníky a důvody / system design, milestones and reasons |
+| [Vlastní, nebo převzaté](cs/vlastni-prevzate.md) | [Own or adopted](en/own-or-adopted.md) | co psát sami a co převzít hotové, hraniční případy, jak převzít / what to write ourselves and what to adopt, borderline cases, how to adopt |
 | [Živé USB](cs/zive-usb.md) | [Live USB](en/live-usb.md) | zkoušení na skutečném PC: obraz, zápis na flashku (xtask, Rufus, dd), start, rizika, logy, záznamy pádů, příkaz report, co dělat při problému / trying it on a real PC: image, writing the stick (xtask, Rufus, dd), boot, risks, logs, crash records, the report command, what to do when something goes wrong |
 
 ### Jádro a programy / Kernel and programs
