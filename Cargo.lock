@@ -538,6 +538,14 @@ name = "display"
 version = "0.1.0"
 
 [[package]]
+name = "displaydrv"
+version = "0.1.0"
+dependencies = [
+ "fbcopy",
+ "guiproto",
+]
+
+[[package]]
 name = "dns"
 version = "0.1.0"
 dependencies = [

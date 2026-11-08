@@ -19,6 +19,8 @@
 //! velikosti; do te doby vystup ukazuje cerny obraz). Ovladac s
 //! `caps::HOTPLUG` posila bez vyzadani `HOTPLUG` pri zmene konektoru
 //! (pripojeni, odpojeni monitoru) - klient znovu posle `CONNECTORS`.
+//! `RESET` posle nova instance ovladace po padu predchozi (kanal drzi
+//! init): klient znovu vybere vystup a posle `ATTACH`.
 //! S `caps::VSYNC` ovladac kopiruje snimek do zadniho bufferu a prepne
 //! ho ve svislem zatemneni (page flip); `PRESENTED` pak nese cas vsync.
 
@@ -39,6 +41,9 @@ pub mod op {
     pub const MODE_SET: u32 = 107;
     /// Udalost bez pozadavku: zmena konektoru.
     pub const HOTPLUG: u32 = 108;
+    /// Udalost bez pozadavku: ovladac bezi znovu (po padu, v rezimu
+    /// firmwaru) - klient znovu vybere vystup a pripoji snimek.
+    pub const RESET: u32 = 109;
     pub const MODES: u32 = 101;
     pub const ATTACHED: u32 = 102;
     pub const PRESENTED: u32 = 103;
@@ -99,6 +104,8 @@ pub enum Reply {
     ModeSet { output: u32, w: u32, h: u32, refresh_mhz: u32 },
     /// Konektor `output` se zmenil (bez pozadavku).
     Hotplug { output: u32 },
+    /// Ovladac zacal znovu (bez pozadavku); predchozi `ATTACH` neplati.
+    Reset,
     Error { op: u32, code: Error },
 }
 
@@ -106,7 +113,7 @@ impl Reply {
     /// Udalost bez pozadavku (ne odpoved): klient ji pri cekani na
     /// odpoved preskoci a zpracuje zvlast.
     pub fn is_event(&self) -> bool {
-        matches!(self, Reply::Hotplug { .. })
+        matches!(self, Reply::Hotplug { .. } | Reply::Reset)
     }
 
     /// Je odpoved znackou synchronizace s tokenem `token`? (`ERROR` na
@@ -221,6 +228,7 @@ impl Reply {
                 w = Writer::op(op::HOTPLUG);
                 w.u32(*output);
             }
+            Reply::Reset => w = Writer::op(op::RESET),
             Reply::Error { op: o, code } => {
                 w = Writer::op(op::ERROR);
                 w.u32(*o).i32(code.code());
@@ -261,6 +269,7 @@ impl Reply {
                 refresh_mhz: r.u32()?,
             },
             op::HOTPLUG => Reply::Hotplug { output: r.u32()? },
+            op::RESET => Reply::Reset,
             op::ERROR => Reply::Error {
                 op: r.u32()?,
                 code: Error::from_code(r.i32()? as i64).ok_or(Error::InvalidArgs)?,

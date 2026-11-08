@@ -41,6 +41,8 @@ struct Service {
     peers: Peers,
     /// Ovladac hlasil zmenu konektoru (`HOTPLUG`), vyridi se po kole.
     pending_hotplug: bool,
+    /// Ovladac displeje zacal znovu (`RESET`).
+    pending_reset: bool,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -53,6 +55,7 @@ fn main(startup: Startup) -> i64 {
         secure: None,
         peers: Peers::default(),
         pending_hotplug: false,
+        pending_reset: false,
     };
     loop {
         if !s.wait_and_serve() {
@@ -147,7 +150,9 @@ impl Service {
         if let Some(c) = self.comp.as_mut() {
             self.peers.serve(&peer_obs, c, now);
         }
-        if self.pending_hotplug {
+        if self.pending_reset {
+            self.handle_reset();
+        } else if self.pending_hotplug {
             self.handle_hotplug();
         }
         // 4. Tik.
@@ -173,6 +178,7 @@ impl Service {
     fn read_display(&mut self) {
         let Some(sc) = &self.screen else { return };
         let mut hotplug = false;
+        let mut reset = false;
         while let Ok(m) = sc.display.try_read() {
             match Reply::decode(&m.data) {
                 Ok(Reply::Presented { time, .. }) => {
@@ -184,6 +190,7 @@ impl Service {
                     println!("compd: displej: zmena konektoru {output}");
                     hotplug = true;
                 }
+                Ok(Reply::Reset) => reset = true,
                 Ok(Reply::Error { op, code }) => {
                     println!("compd: displej odmitl operaci {op}: {code}");
                     if let Some(c) = self.comp.as_mut() {
@@ -194,6 +201,7 @@ impl Service {
             }
         }
         self.pending_hotplug |= hotplug;
+        self.pending_reset |= reset;
     }
 
     fn maybe_tick(&mut self) {

@@ -1,0 +1,10 @@
+[package]
+name = "displaydrv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Kostra nativniho ovladace displeje: protokol, dvojity buffer s vsync, zaznam stavu firmwaru"
+
+[dependencies]
+guiproto = { path = "../guiproto" }
+fbcopy = { path = "../fbcopy" }

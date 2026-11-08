@@ -49,6 +49,8 @@ impl Screen {
 #[derive(Default)]
 pub struct Pending {
     pub hotplug: bool,
+    /// Ovladac zacal znovu: snimek pripojit znovu.
+    pub reset: bool,
     pub presented: Option<u64>,
 }
 
@@ -58,6 +60,7 @@ pub fn await_reply(ch: &Channel, deadline: u64, p: &mut Pending) -> Result<Reply
         let r = Reply::decode(&ch.read(Some(deadline))?.data)?;
         match r {
             Reply::Hotplug { .. } => p.hotplug = true,
+            Reply::Reset => p.reset = true,
             Reply::Presented { time, .. } => p.presented = Some(time),
             Reply::Error { op: op::PRESENT, .. } => p.presented = Some(libos::time::now()),
             other => return Ok(other),
@@ -142,6 +145,7 @@ impl Service {
         let modeset = if caps & caps::MODESET != 0 { ", zmena rezimu" } else { "" };
         println!("compd: displej {w}x{h} na vystupu {output}{virgl}{modeset}");
         self.pending_hotplug |= p.hotplug;
+        self.pending_reset |= p.reset;
         Ok((format!("{w} {h}"), Vec::new()))
     }
 
@@ -185,6 +189,7 @@ impl Service {
         let mut p = Pending::default();
         let r = await_reply(&screen.display, end, &mut p)?;
         self.pending_hotplug |= p.hotplug;
+        self.pending_reset |= p.reset;
         match r {
             Reply::Attached { .. } => {}
             Reply::Error { code, .. } => return Err(code),
@@ -245,6 +250,40 @@ impl Service {
             c.presented(t);
         }
         self.pending_hotplug |= p.hotplug;
+        self.pending_reset |= p.reset;
+    }
+
+    /// Po `RESET`: nova instance ovladace (po padu) nezna nas snimek -
+    /// znovu vybrat vystup (muze uz umet jen rezim firmwaru) a pripojit.
+    pub fn handle_reset(&mut self) {
+        self.pending_reset = false;
+        self.pending_hotplug = false;
+        let Some(sc) = self.screen.as_ref() else { return };
+        let end = deadline();
+        let mut p = Pending::default();
+        let r = sc.display.write(&Request::Info.encode(), Vec::new()).and_then(|_| await_reply(&sc.display, end, &mut p));
+        let outputs = match r {
+            Ok(Reply::Modes { outputs, caps }) => {
+                if let Some(s) = self.screen.as_mut() {
+                    s.caps = caps;
+                }
+                outputs
+            }
+            _ => Vec::new(),
+        };
+        let Some(sc) = self.screen.as_ref() else { return };
+        let r = choose(&sc.display, &outputs, end, &mut p);
+        self.apply_pending(Pending { hotplug: false, reset: false, ..p });
+        match r {
+            Ok((o, w, h)) => {
+                println!("compd: ovladac displeje bezi znovu: vystup {o}, {w}x{h}");
+                if let Some(s) = self.screen.as_mut() {
+                    s.output = o;
+                }
+                let _ = self.rebuild(w, h, end);
+            }
+            Err(e) => println!("compd: ovladac displeje po restartu: {e}"),
+        }
     }
 
     /// Po `HOTPLUG`: znovu vybrat vystup; jina velikost nebo vystup =
@@ -256,7 +295,7 @@ impl Service {
         let mut p = Pending::default();
         let r = choose(&sc.display, &[], end, &mut p);
         let (cur_out, cw, chh) = (sc.output, sc.w, sc.h);
-        self.apply_pending(Pending { hotplug: false, ..p });
+        self.apply_pending(Pending { hotplug: false, reset: p.reset, ..p });
         match r {
             Ok((o, w, h)) if (o, w, h) != (cur_out, cw, chh) => {
                 println!("compd: zmena monitoru: vystup {o}, {w}x{h}");

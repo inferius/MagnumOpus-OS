@@ -380,6 +380,7 @@ fn display_modes_roundtrip() {
         Reply::Connectors { connectors: vec![off.clone(), dp.clone()] },
         Reply::ModeSet { output: 1, w: 1280, h: 720, refresh_mhz: 50_000 },
         Reply::Hotplug { output: 1 },
+        Reply::Reset,
     ] {
         assert_eq!(Reply::decode(&m.encode()), Ok(m));
     }

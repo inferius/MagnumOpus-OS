@@ -34,6 +34,7 @@ members = [
     "libs/usbclient",
     "libs/csprng",
     "libs/display",
+    "libs/displaydrv",
     "libs/libos",
     "libs/pci",
     "libs/tls",
