@@ -163,6 +163,8 @@ enum Item {
     Terminal(crate::terminal::Wait),
     /// Kanal sluzby napajeni (udalosti tlacitek, `crate::power`).
     Power,
+    /// Zadosti kompozitoru o spusteni aplikace (`crate::gui::LAUNCHER`).
+    Launcher,
 }
 
 impl Default for Supervisor {
@@ -298,6 +300,11 @@ impl Supervisor {
             items.push((h, Signals::READABLE | Signals::PEER_CLOSED));
             what.push(Item::Power);
         }
+        let launcher = crate::gui::LAUNCHER.lock();
+        if let Some(l) = launcher.as_ref() {
+            items.push((l.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+            what.push(Item::Launcher);
+        }
         let wake = [deadline, self.next_due(), self.leases_due()]
             .into_iter()
             .flatten()
@@ -308,7 +315,9 @@ impl Supervisor {
         };
         drop(items);
         drop(power);
+        drop(launcher);
         let mut power_ready = false;
+        let mut launch_ready = false;
         let mut terminals = terminals;
         for (k, item) in what.iter().enumerate() {
             let Some(sig) = observed.get(k).copied() else { break };
@@ -329,6 +338,7 @@ impl Supervisor {
                 Item::Leases if sig.intersects(Signals::READABLE) => self.lease_packets(),
                 Item::Terminal(w) => terminals.on_signal(startup, w, sig, &mut || self.session("audiod", Vec::new()).ok()),
                 Item::Power => power_ready = true,
+                Item::Launcher => launch_ready = sig.intersects(Signals::READABLE | Signals::PEER_CLOSED),
                 Item::Service(_) | Item::Starting(_) | Item::Leases => {}
             }
         }
@@ -343,6 +353,9 @@ impl Supervisor {
         drop(terminals);
         if power_ready {
             crate::power::on_events(self);
+        }
+        if launch_ready {
+            crate::gui::launch_requests(startup, self);
         }
         crate::power::run_pending(self);
         self.start_timeouts();

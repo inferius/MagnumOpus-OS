@@ -57,6 +57,8 @@ struct Service {
     audio_src: Option<status::Source>,
     /// Kanal na logd pro obrazky diagnostickeho snimku (`snapshots`).
     snapshots: Option<Channel>,
+    /// Kanal k initu pro spousteni aplikaci (`launcher`).
+    launcher: Option<Channel>,
 }
 
 impl Service {
@@ -104,6 +106,7 @@ fn main(startup: Startup) -> i64 {
         net_src: None,
         audio_src: None,
         snapshots: None,
+        launcher: None,
     };
     loop {
         if !s.wait_and_serve() {
@@ -230,6 +233,17 @@ impl Service {
         // Zpravy od logd (nastaveni snimku, zadost po padu aplikace).
         if snap.intersects(Signals::READABLE | Signals::PEER_CLOSED) {
             self.read_snapshot_channel(now);
+        }
+        // Spusteni aplikaci z listy: zadost initu (init spousti a hlida).
+        if let Some(c) = self.comp.as_mut() {
+            for id in c.take_launch_requests() {
+                match &self.launcher {
+                    Some(l) => {
+                        let _ = l.write(format!("launch {id}").as_bytes(), Vec::new());
+                    }
+                    None => println!("compd: aplikaci {id} nejde spustit: init nedal kanal launcher"),
+                }
+            }
         }
         // Diagnosticky snimek (zkratka, prikaz, automaticka udalost).
         if let Some(c) = self.comp.as_mut()
@@ -452,6 +466,18 @@ impl Service {
             }
             control::SNAPSHOTS => handles.into_iter().next().ok_or(Error::InvalidArgs).map(|h| {
                 self.snapshots = Some(Channel::from_handle(h));
+                (String::new(), Vec::new())
+            }),
+            control::APPS => match self.comp.as_mut() {
+                Some(c) => {
+                    let apps = text.lines().skip(1).filter_map(|l| l.split_once('\t')).map(|(id, n)| (String::from(id), String::from(n))).collect();
+                    c.set_launchable(apps);
+                    Ok((String::new(), Vec::new()))
+                }
+                None => Err(Error::BadState),
+            },
+            control::LAUNCHER => handles.into_iter().next().ok_or(Error::InvalidArgs).map(|h| {
+                self.launcher = Some(Channel::from_handle(h));
                 (String::new(), Vec::new())
             }),
             control::SNAPSHOT => match self.comp.as_mut() {

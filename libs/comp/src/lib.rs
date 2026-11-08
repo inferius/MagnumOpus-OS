@@ -23,6 +23,7 @@ extern crate alloc;
 pub mod diag;
 pub mod dialog;
 pub mod flyout;
+pub mod launch;
 pub mod frame;
 pub mod gpu;
 pub mod input;
@@ -135,6 +136,10 @@ pub struct Comp {
     pub(crate) last_auto_snapshot: Option<u64>,
     /// Otevreny panel nad listou (`flyout.rs`).
     pub(crate) flyout: Option<flyout::Flyout>,
+    /// Spustitelne aplikace (id, jmeno) od initu (`launch.rs`).
+    pub(crate) launchable: Vec<(alloc::string::String, alloc::string::String)>,
+    /// Zadosti o spusteni aplikace (vyzvedne sluzba, posle initu).
+    pub(crate) launch_requests: Vec<alloc::string::String>,
 }
 
 impl Comp {
@@ -172,6 +177,8 @@ impl Comp {
             snapshot_cfg: diag::Config::default(),
             last_auto_snapshot: None,
             flyout: None,
+            launchable: Vec::new(),
+            launch_requests: Vec::new(),
         };
         c.damage_all();
         c

@@ -496,6 +496,18 @@ okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
 modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
 oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
+### Spouštění aplikací z lišty
+
+Init pošle kompozitoru seznam aplikací plochy (`apps`, id a jméno
+z manifestu: Terminál, Ukázka, Správce úloh) a kanál `launcher`. Aplikace
+bez okna má v liště ztlumenou ikonu bez značky; klik na ni, nebo na řádek
+ve spouštěči (ikona mřížky vlevo), pošle initu `launch <id>`. Init ji
+spustí pod supervisorem se stejnými handly jako při startu plochy (terminál
+kanál k termd, Správce úloh klienta přehledu úloh). Kompozitor sám nic
+nespouští. Běžící aplikaci klik aktivuje (i z minimalizace).
+**[implementováno]** (test `bar_launches_closed_apps_and_activates_running`
+v `libs/comp`; spuštění initem zatím bez testu v QEMU)
+
 ### Panely nad lištou
 
 Klik na ikonu sítě, hlasitosti nebo oznámení v liště otevře nad ikonou
@@ -740,6 +752,8 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `tasks <běží> <agent>` | - | `ok` (ikona úloh v panelu) |
 | `theme light\|dark\|contrast` | - | `ok` (režim barev z tokenů) |
 | `sources [net] [audio]` | relace sítě (`INFO`), kanál zvuku | `ok` (stav v liště) |
+| `apps` + řádky `<id>\t<jméno>` | - | prázdná (spustitelné aplikace v liště) |
+| `launcher` | kanál k initu | prázdná (žádosti `launch <id>`) |
 | `snapshots` | kanál na `logd` | prázdná (obrázky [diagnostického snímku](#diagnostický-snímek-print-screen)) |
 
 **Inspekce** (`inspect`, pro testy, později čtečku obrazovky a lupu):

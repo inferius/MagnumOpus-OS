@@ -112,6 +112,8 @@ pub struct Bar {
     pub launcher: Rect,
     /// Tlacitka oken: (okno, obdelnik).
     pub apps: Vec<(u32, Rect)>,
+    /// Spustitelne aplikace bez okna: (index v `launchable`, obdelnik).
+    pub launch: Vec<(usize, Rect)>,
     pub agent: Option<Rect>,
     pub tasks: Option<Rect>,
     /// Stav site, hlasitost, oznameni (zleva doprava jako v prototypu).
@@ -150,6 +152,8 @@ pub enum Hover {
     Button(u32, usize),
     /// Tlacitko okna v liste.
     BarApp(u32),
+    /// Nespustena aplikace v liste (index v `launchable`).
+    BarLaunch(usize),
     Tasks,
     Launcher,
 }
@@ -284,6 +288,13 @@ impl Comp {
             }
             bar.apps.push((g, Rect::new(x, y, item, item)));
             x += item as i32 + gap;
+        }
+        // Aplikace bez okna (ztlumena ikona, klik spusti).
+        for (i, (id, _)) in self.launchable.iter().enumerate() {
+            if self.app_window(id).is_none() {
+                bar.launch.push((i, Rect::new(x, y, item, item)));
+                x += item as i32 + gap;
+            }
         }
         // Vpravo: hodiny, oddelovac, ulohy, agent.
         let mut right = p.right() as i32 - pad;
@@ -460,6 +471,7 @@ impl Comp {
             clock: self.clock.as_ref(),
             blur: self.bar_blur.as_deref(),
             hover: self.input.hover,
+            launchable: &self.launchable,
         };
         draw_bar(canvas, &mut self.style, bar, &info);
         if !dialog_active {
@@ -820,6 +832,7 @@ struct BarInfo<'a> {
     /// Rozmazane pozadi pod listou (`None` = plna plocha).
     blur: Option<&'a [u32]>,
     hover: Option<Hover>,
+    launchable: &'a [(String, String)],
 }
 
 fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
@@ -863,6 +876,14 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         let (mw, mc) = if active { (s.bar_indicator_active_w, col.accent) } else { (s.bar_indicator_w, col.ink_faint) };
         let mh = s.bar_indicator_h;
         c.round_fill(Rect::new(r.x + (r.w - mw) as i32 / 2, r.bottom() as i32 - mh as i32 - 1, mw, mh), mh, mc);
+    }
+    // Nespustene aplikace: ikona vedlejsi barvou, bez znacky.
+    for (i, r) in &bar.launch {
+        let Some((id, _)) = info.launchable.get(*i) else { continue };
+        if info.hover == Some(Hover::BarLaunch(*i)) {
+            c.round_fill(*r, ctl, col.surface_3);
+        }
+        st.icons.draw(c, app_icon(id), r.x + (r.w - il) as i32 / 2, r.y + (r.h - il) as i32 / 2, il, t.icon_stroke, col.ink_muted);
     }
     for &x in &bar.seps {
         let h = t.space[7];

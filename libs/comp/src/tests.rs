@@ -1422,3 +1422,32 @@ fn frame_period_follows_refresh_rate() {
     t.c.set_refresh(0);
     assert_eq!(t.c.period(), crate::PERIOD, "nezname = vychozi");
 }
+
+#[test]
+fn bar_launches_closed_apps_and_activates_running() {
+    let mut t = T::new();
+    t.c.set_launchable(vec![("org.term".into(), "Terminál".into()), ("org.demo".into(), "Ukázka".into())]);
+    let a = t.client("org.demo");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let bar = t.c.bar_layout();
+    // Ukazka bezi (tlacitko okna), terminal ne (ztlumena ikona).
+    assert_eq!(bar.apps.len(), 1);
+    assert_eq!(bar.launch.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0], "jen nespusteny terminal");
+    let r = bar.launch[0].1;
+    t.click(r.x + 4, r.y + 4);
+    assert_eq!(t.c.take_launch_requests(), vec![alloc::string::String::from("org.term")], "zadost initu");
+    // Spoustec: radek Ukazka aktivuje bezici okno (z minimalizace).
+    let g = t.c.clients[&a].windows[&1];
+    t.c.minimize(g);
+    let l = t.c.bar_layout().launcher;
+    t.click(l.x + 4, l.y + 4);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Apps));
+    let f = t.c.flyout_rect().unwrap();
+    let th = t.c.style.theme.clone();
+    let row1 = f.y + (th.space[4] + th.text.body_strong.line + th.space[2] + th.text.body.line + th.space[2] + 2) as i32;
+    t.click(f.x + 8, row1);
+    assert!(t.c.take_launch_requests().is_empty(), "bezici se nespousti znovu");
+    assert!(!t.c.windows[&g].minimized && t.c.focus == Some(g), "aktivovano");
+    assert_eq!(t.c.flyout, None);
+}
