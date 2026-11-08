@@ -223,21 +223,46 @@ Testy v jádře (`kernel/src/tests/sched*.rs`, běží v QEMU s 4 CPU):
 - **Latence vstup -> snímek** při plné zátěži pozadí: „ovladač" (Interactive)
   probudí „inputd", ten „compd", ten vykreslí snímek; na všech CPU běží
   smyčky Background a Normal. Měří se čas od události po snímek.
-- **Podíl Background** pod zátěží Interactive: na jednom CPU spolu běží
-  Interactive a Background, Background musí dostat aspoň 4 % (záruka 5 %
-  mínus tolerance měření).
-- **Dědění přes IPC**: Normal obsluha zvednutá zprávou od Interactive
-  předběhne Normal zátěž.
+- **Podíl Background** pod zátěží Interactive: na každé CPU připadá jedna
+  smyčka Interactive a jedna Background, Background musí dostat aspoň 4 %
+  (záruka 1/16 při vahách 15 : 1, minus tolerance měření).
+- **Dědění přes IPC**: Normal obsluha probuzená zprávou od Interactive běží
+  jako Interactive; paket portu nese třídu.
+- **Realtime**: přijetí (právě jedno vlákno s 50 % na CPU) a zpoždění
+  periody 2 ms pod zátěží Interactive na všech CPU.
 - **Mikrobenchmark přepnutí kontextu** (ping-pong přes event).
-
-| Měření (QEMU TCG, 4 CPU) | Verze 1 (přísná priorita) | Verze 2 (tento návrh) |
-| --- | --- | --- |
-| přepnutí kontextu (ping-pong, 1 směr) | viz níže | viz níže |
-| latence vstup -> snímek, medián / max | - | viz níže |
-| podíl Background pod Interactive | 0 % (hladoví) | viz níže |
 
 Čísla jsou v sekci Naměřené hodnoty níže.
 
 ### Naměřené hodnoty
 
-Doplní se po implementaci.
+QEMU TCG (emulace bez akcelerace), 4 CPU, x86_64; tři běhy testů v jedné
+sadě `cargo xtask test`. TCG je pomalé a časování nepřesné - čísla slouží
+k porovnání a hlídání regresí, ne jako výkon skutečného hardwaru.
+
+| Měření | Výsledek (3 běhy) |
+| --- | --- |
+| latence vstup -> snímek pod zátěží 12 smyček Normal a Background, medián | 728-969 µs (z toho 200 µs „kreslení“) |
+| tatáž latence, maximum | ~15 ms |
+| podíl Background pod zátěží Interactive (záruka 1/16 = 62 ‰) | 60-61 ‰ |
+| zpoždění periody Realtime 2 ms pod zátěží Interactive, medián / max | 1,0-1,3 ms / 2,7-4,4 ms |
+| přepnutí kontextu (ping-pong přes událost, jedna strana) | 90-110 µs |
+| podíl Background ve verzi 1 (přísná priorita) | 0 ‰ (hladoví) |
+
+Srovnání přepnutí kontextu se starým plánovačem se kvůli úspoře času
+neměřilo (stejný test na verzi 1 je připravený, jde jen spustit); složitost
+výběru je O(n) v počtu vláken jedné třídy na CPU, proti O(1) dřív.
+
+Maximum latence (~15 ms) odpovídá jednomu kvantu Background (12 ms) na
+TCG, kde se IPI a časovač doručují se zpožděním; medián je pod 1 ms.
+
+## Další kroky
+
+- **HFI** (Intel Hardware Feedback Interface): kapacity jader za běhu
+  podle teploty a příkonu - potřebuje obsluhu tepelného přerušení.
+- **Regulátor P-stavů** v `acpid` nad `CPU_INFO` (čas běhu po třídách)
+  a ACPI `_PSS` / CPPC; jádro data připravuje, regulátor zatím není.
+- `acpid` má volat `CPU_HINT` s kapacitou z `_CPC` (zatím odhad z CPUID).
+- Vyvážený strom místo lineárního výběru, pokud budou fronty jednoho CPU
+  mít stovky vláken.
+- Měření na skutečném hybridním hardwaru (dnes jen simulace).

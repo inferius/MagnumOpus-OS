@@ -254,8 +254,37 @@ Kernel tests (`kernel/src/tests/sched_qos.rs`, run in QEMU with 4 CPUs):
   of a 2 ms period under Interactive load on all CPUs.
 - **Context switch micro-benchmark** (ping-pong over an event).
 
-The numbers are in the Measured values section below.
-
 ### Measured values
 
-Filled in after the implementation run.
+QEMU TCG (emulation without acceleration), 4 CPUs, x86_64; three test runs
+within one `cargo xtask test`. TCG is slow and its timing imprecise - the
+numbers are for comparison and regression watching, not real hardware
+performance.
+
+| Measurement | Result (3 runs) |
+| --- | --- |
+| input -> frame latency under 12 Normal and Background loops, median | 728-969 µs (200 µs of it "rendering") |
+| the same latency, maximum | ~15 ms |
+| Background share under Interactive load (guarantee 1/16 = 62 ‰) | 60-61 ‰ |
+| lateness of a 2 ms Realtime period under Interactive load, median / max | 1.0-1.3 ms / 2.7-4.4 ms |
+| context switch (ping-pong over an event, one side) | 90-110 µs |
+| Background share in version 1 (strict priority) | 0 ‰ (starves) |
+
+The context switch was not compared against the old scheduler to save time
+(the same test for version 1 is prepared and only needs a run); the pick is
+O(n) in the threads of one class on a CPU, versus O(1) before.
+
+The latency maximum (~15 ms) matches one Background slice (12 ms) on TCG,
+where IPIs and the timer are delivered late; the median is below 1 ms.
+
+## Next steps
+
+- **HFI** (Intel Hardware Feedback Interface): core capacities at run time
+  by temperature and power - needs thermal interrupt handling.
+- **P-state governor** in `acpid` on top of `CPU_INFO` (run time per class)
+  and ACPI `_PSS` / CPPC; the kernel prepares the data, no governor yet.
+- `acpid` should call `CPU_HINT` with the capacity from `_CPC` (today an
+  estimate from CPUID).
+- A balanced tree instead of the linear pick if one CPU's queues reach
+  hundreds of threads.
+- Measurements on real hybrid hardware (today simulation only).
