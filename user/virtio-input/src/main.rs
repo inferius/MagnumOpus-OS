@@ -26,8 +26,8 @@ use alloc::vec::Vec;
 
 use driverkit::os::{OsDma, OsPlatform};
 use driverkit::{DmaBuffer, Driver, DriverError, IrqId, Platform, Result, Sent};
-use inputproto::code::{EV_KEY, EV_REL, KEY_A};
-use inputproto::device::{self, RawEvent, caps};
+use inputproto::code::{ABS_X, ABS_Y, EV_ABS, EV_KEY, EV_REL, KEY_A};
+use inputproto::device::{self, AxisInfo, RawEvent, caps};
 use libos::Startup;
 use pci::msix::MsixTable;
 use virtio::{Buffer, Device, F_VERSION_1, Virtqueue};
@@ -43,6 +43,7 @@ const CFG_SIZE: u64 = 2;
 const CFG_DATA: u64 = 8;
 const CFG_ID_NAME: u8 = 0x01;
 const CFG_EV_BITS: u8 = 0x11;
+const CFG_ABS_INFO: u8 = 0x12;
 
 /// Nejvic bufferu udalosti ve fronte (kazdy 8 B).
 const QUEUE_MAX: u16 = 64;
@@ -62,6 +63,10 @@ struct InputDevice {
     name: String,
     /// Predstaveni (`IDEV`): pri startu a znovu na `ISYN`.
     hello: Vec<u8>,
+    /// Rozsahy absolutnich os (`IAXS`) u tabletu; bez nich by sluzba
+    /// vstupu pocitala s 0..65535 a ukazatel by se dostal jen do casti
+    /// obrazovky (QEMU tablet ma 0..32767).
+    axes: Option<Vec<u8>>,
     /// Prvni udalosti uz byly zalogovane.
     logged: bool,
     /// Zpravy zahozene, protoze sluzba nestihala.
@@ -82,7 +87,12 @@ impl Driver<OsPlatform> for InputDevice {
             .map_err(DriverError::os("inicializace virtio"))?;
         p.adopt_irq(irq);
         let name = read_name(&device);
-        let caps = read_caps(&device);
+        let mut caps = read_caps(&device);
+        let axes = read_axes(&device);
+        if !axes.is_empty() {
+            caps |= caps::ABSOLUTE;
+        }
+        let axes = (!axes.is_empty()).then(|| device::encode_axes(&axes));
         let buf = p.alloc_dma("udalosti", queue.size() as u64 * RawEvent::SIZE as u64)?;
         let hello = device::encode_hello(caps, &name);
         let mut dev = Self {
@@ -93,6 +103,7 @@ impl Driver<OsPlatform> for InputDevice {
             caps,
             name,
             hello,
+            axes,
             logged: false,
             dropped: 0,
         };
@@ -105,6 +116,7 @@ impl Driver<OsPlatform> for InputDevice {
 
     fn start(&mut self, p: &OsPlatform) -> Result<()> {
         let kind = match (self.caps & caps::KEYBOARD != 0, self.caps & caps::POINTER != 0) {
+            _ if self.axes.is_some() => "tablet",
             (true, true) => "klavesnice a mys",
             (true, false) => "klavesnice",
             (false, true) => "mys",
@@ -112,13 +124,16 @@ impl Driver<OsPlatform> for InputDevice {
         };
         driverkit::log!(p, "'{}' ({kind})", self.name);
         p.send(&self.hello)?;
+        if let Some(axes) = &self.axes {
+            p.send(axes)?;
+        }
         Ok(())
     }
 
     /// Synchronizace nove instance sluzby vstupu (`ISYN`): odpoved
     /// a znovu predstaveni.
     fn message(&mut self, p: &OsPlatform, msg: &[u8]) -> Result<()> {
-        device::answer_sync(msg, &self.hello, None, |b| p.send(b).is_ok_and(|s| s == Sent::Sent));
+        device::answer_sync(msg, &self.hello, self.axes.as_deref(), |b| p.send(b).is_ok_and(|s| s == Sent::Sent));
         Ok(())
     }
 
@@ -197,6 +212,27 @@ fn select(device: &Device, sel: u8, subsel: u8) -> u8 {
 
 /// Jmeno zarizeni (napr. "QEMU Virtio Keyboard"); neplatne UTF-8 se
 /// nahradi.
+/// Rozsahy os `ABS_X` a `ABS_Y` (`VIRTIO_INPUT_CFG_ABS_INFO`: min, max,
+/// fuzz, flat, res jako u32), kdyz je zarizeni hlasi.
+fn read_axes(device: &Device) -> Vec<AxisInfo> {
+    let mut out = Vec::new();
+    if select(device, CFG_EV_BITS, EV_ABS as u8) == 0 {
+        return out;
+    }
+    let bits = device.config::<u8>(CFG_DATA);
+    for code in [ABS_X, ABS_Y] {
+        if bits & (1 << code) == 0 || select(device, CFG_ABS_INFO, code as u8) < 8 {
+            continue;
+        }
+        let min = device.config::<u32>(CFG_DATA) as i32;
+        let max = device.config::<u32>(CFG_DATA + 4) as i32;
+        if max > min {
+            out.push(AxisInfo { code, min, max });
+        }
+    }
+    out
+}
+
 fn read_name(device: &Device) -> String {
     let size = select(device, CFG_ID_NAME, 0);
     let bytes: Vec<u8> = (0..size as u64)
