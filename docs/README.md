@@ -88,6 +88,7 @@ site menu.
 
 | Česky | English | Obsah / Contents |
 |---|---|---|
+| [Příkazy shellu](cs/prikazy-shellu.md) | [Shell commands](en/shell-commands.md) | referenční nápověda všech příkazů (generováno z metadat, totéž co `help <příkaz>`) / reference of all commands (generated from metadata, same as `help <command>`) |
 | [Shell a terminál](cs/navrh-shell.md) | [Shell and terminal](en/shell-design.md) | jazyk (zápisy B a C, gramatika, sémantika), undo a náhled, služba relací, protokol terminálu, kódy chyb shellu / language (notations B and C, grammar, semantics), undo and preview, session service, terminal protocol, shell error codes |
 
 ### Vzhled a ovládání / Look and feel

@@ -427,26 +427,13 @@ own.
 
 ## Built-in commands
 
-Every command has a short name and a full `verb-noun` name (an alias).
-`help` lists them, `help ls` shows usage and flags.
-
-| Short | Full | What it does |
-|---|---|---|
-| `ls` | `file-list` | files as the table `{name, path, kind, size, mtime, ext}`; `-r`, `-a` |
-| `cd`, `pwd` | `dir-change`, `dir-current` | working directory |
-| `open` (`cat`) | `file-read` | a file as bytes |
-| `save` | `file-write` | saves bytes or text; `-a` appends |
-| `rm`, `cp`, `mv`, `mkdir` | `file-remove`, `file-copy`, `file-move`, `dir-create` | `-r`, `-p` |
-| `exists`, `df` | `file-exists`, `fs-info` | |
-| `where`, `each`, `select`, `sort`, `first`, `last`, `count`, `sum`, `group`, `reverse`, `range` | `list-filter`, `list-map`, ... | working with tables and lists |
-| `echo`, `log`, `lines`, `split`, `join`, `trim`, `upper`, `lower`, `contains`, `starts-with`, `ends-with`, `replace` | `text-...` | text |
-| `from`, `to`, `describe` | `data-from`, `data-to`, `value-type` | explicit conversions (`json`, `text`, `lines`) |
-| `now`, `sleep` | `time-now`, `time-sleep` | |
-| `undo`, `preview` | `command-undo`, `command-preview` | see [Files](#files-draft-in-a-clone-undo-preview-and-lock) |
-| `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | background jobs |
-| `tasks` | `task-list` | the system task overview (`taskd`): a table, `tasks cancel/pause/resume/log <id>`; see [Task overview](architecture.md#task-overview-agreed) |
-| `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
-| `shutdown`, `reboot` | `system-shutdown`, `system-reboot` | clean power-off / reboot through init and ACPI; asks first, `-y` without asking (see [ACPI](acpi.md#shell-commands)) |
+Every command has a short name and a full `verb-noun` name (an alias). The
+complete reference of all commands (description, arguments and switches,
+pipeline, examples, errors, related commands) is on the page
+[Shell commands](shell-commands.md). `cargo xtask docs` generates it from
+the metadata in `libs/shlang/src/doc/` - `help <command>` in the terminal
+shows the same data and the examples are tests (`cargo test -p shlang doc`),
+so the help does not go stale.
 
 ## Examples
 

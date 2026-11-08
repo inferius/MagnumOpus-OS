@@ -3,6 +3,7 @@
 
 mod async_tasks;
 mod audio;
+mod doc;
 mod draft;
 mod eval;
 mod fs;

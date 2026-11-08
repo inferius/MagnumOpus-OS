@@ -414,25 +414,12 @@ nová verze; starý skript pak dál běží ve své.
 ## Vestavěné příkazy
 
 Každý příkaz má krátké jméno a plné jméno `sloveso-podstatné` (alias).
-`help` je vypíše, `help ls` ukáže použití a přepínače.
-
-| Krátké | Plné | Co dělá |
-|---|---|---|
-| `ls` | `file-list` | soubory jako tabulka `{name, path, kind, size, mtime, ext}`; `-r`, `-a` |
-| `cd`, `pwd` | `dir-change`, `dir-current` | pracovní složka |
-| `open` (`cat`) | `file-read` | soubor jako bajty |
-| `save` | `file-write` | uloží bajty nebo text; `-a` připojí |
-| `rm`, `cp`, `mv`, `mkdir` | `file-remove`, `file-copy`, `file-move`, `dir-create` | `-r`, `-p` |
-| `exists`, `df` | `file-exists`, `fs-info` | |
-| `where`, `each`, `select`, `sort`, `first`, `last`, `count`, `sum`, `group`, `reverse`, `range` | `list-filter`, `list-map`, ... | práce s tabulkami a seznamy |
-| `echo`, `log`, `lines`, `split`, `join`, `trim`, `upper`, `lower`, `contains`, `starts-with`, `ends-with`, `replace` | `text-...` | text |
-| `from`, `to`, `describe` | `data-from`, `data-to`, `value-type` | výslovné převody (`json`, `text`, `lines`) |
-| `now`, `sleep` | `time-now`, `time-sleep` | |
-| `undo`, `preview` | `command-undo`, `command-preview` | viz [Soubory](#soubory-koncept-v-klonu-undo-náhled-a-zámek) |
-| `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | úlohy na pozadí |
-| `tasks` | `task-list` | přehled úloh systému (`taskd`): tabulka, `tasks cancel/pause/resume/log <id>`; viz [Přehled úloh](architektura.md#přehled-úloh-odsouhlaseno) |
-| `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
-| `shutdown`, `reboot` | `system-shutdown`, `system-reboot` | čisté vypnutí / restart přes init a ACPI; zeptá se, `-y` bez dotazu (viz [ACPI](acpi.md#příkazy-shellu)) |
+Úplná reference všech příkazů (popis, argumenty a přepínače, roura,
+příklady, chyby, související příkazy) je na stránce
+[Příkazy shellu](prikazy-shellu.md). Stránku generuje `cargo xtask docs`
+z metadat v `libs/shlang/src/doc/` - stejná data ukazuje `help <příkaz>`
+v terminálu a příklady jsou testy (`cargo test -p shlang doc`), takže
+nápověda nezastará.
 
 ## Příklady
 

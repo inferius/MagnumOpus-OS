@@ -161,3 +161,14 @@ fn rozlozeni_cesty_odkazu() {
     assert_eq!(resolve_web("cs", "x.html").as_deref(), Some("cs/x.html"));
     assert_eq!(resolve_web("cs", "../../x.html"), None);
 }
+
+/// Stranka "Prikazy shellu" je vygenerovana z metadat a aktualni
+/// (po zmene metadat: `cargo xtask docs`).
+#[test]
+fn stranka_prikazu_odpovida_metadatum() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    for (en, file) in [(false, "docs/cs/prikazy-shellu.md"), (true, "docs/en/shell-commands.md")] {
+        let on_disk = std::fs::read_to_string(root.join(file)).unwrap_or_default().replace("\r\n", "\n");
+        assert!(on_disk == shlang::doc::markdown(en), "{file} je zastarala: spustte cargo xtask docs");
+    }
+}
