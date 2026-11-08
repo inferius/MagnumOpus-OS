@@ -24,8 +24,8 @@
 use alloc::vec::Vec;
 
 use crate::{
-    BUF, Events, Hw, HwError, Layout, LinkState, MAX_FRAME, Nic, RING, Stats, TxRing, copy_tx, local_mac,
-    valid_mac, wait_for, write_addr,
+    BUF, Events, Hw, HwError, Layout, LinkState, MAX_FRAME, Nic, RING, Stats, TxRing, copy_tx,
+    local_mac, valid_mac, wait_for, write_addr,
 };
 
 pub const CTRL: u32 = 0x0000;
@@ -162,7 +162,9 @@ impl<H: Hw> Igc<H> {
         let hw = &self.hw;
         let ctrl = hw.read32(CTRL);
         hw.write32(CTRL, ctrl | CTRL_GIO_MASTER_DISABLE);
-        if !wait_for(hw, 80_000, 100, || hw.read32(STATUS) & STATUS_GIO_MASTER_EN == 0) {
+        if !wait_for(hw, 80_000, 100, || {
+            hw.read32(STATUS) & STATUS_GIO_MASTER_EN == 0
+        }) {
             self.notes.push("DMA se pred resetem nezastavilo");
         }
         self.quiesce();
@@ -273,7 +275,11 @@ impl<H: Hw> Nic for Igc<H> {
         let speed = if !up {
             0
         } else if st & STATUS_SPEED_1000 != 0 {
-            if st & STATUS_SPEED_2500 != 0 { 2500 } else { 1000 }
+            if st & STATUS_SPEED_2500 != 0 {
+                2500
+            } else {
+                1000
+            }
         } else if st & STATUS_SPEED_100 != 0 {
             100
         } else {
@@ -323,7 +329,8 @@ impl<H: Hw> Nic for Igc<H> {
         if done > 0 {
             self.hw.dma_wmb();
             self.hw.mmio_wmb();
-            self.hw.write32(RDT, ((self.rx_next + RING - 1) % RING) as u32);
+            self.hw
+                .write32(RDT, ((self.rx_next + RING - 1) % RING) as u32);
         }
         Ok(())
     }
@@ -348,7 +355,10 @@ impl<H: Hw> Nic for Igc<H> {
         let len = copy_tx(hw, Layout::tx_buf(i), frame) as u32;
         let d = Layout::tx_desc(i);
         hw.dma_write(d, &(hw.dma_addr() + Layout::tx_buf(i) as u64).to_le_bytes());
-        hw.dma_write32(d + 8, len | TXD_DTYP_DATA | TXD_CMD_EOP | TXD_CMD_IFCS | TXD_CMD_RS | TXD_CMD_DEXT);
+        hw.dma_write32(
+            d + 8,
+            len | TXD_DTYP_DATA | TXD_CMD_EOP | TXD_CMD_IFCS | TXD_CMD_RS | TXD_CMD_DEXT,
+        );
         hw.dma_write32(d + 12, len << TXD_PAYLEN_SHIFT);
         self.tx.tail = (i + 1) % RING;
         self.stats.tx_frames += 1;

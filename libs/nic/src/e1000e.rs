@@ -28,8 +28,8 @@ use alloc::vec::Vec;
 
 use crate::ids::E1000eKind;
 use crate::{
-    BUF, Events, Hw, HwError, Layout, LinkState, MAX_FRAME, Nic, RING, Stats, TxRing, copy_tx, local_mac,
-    valid_mac, wait_for, write_addr,
+    BUF, Events, Hw, HwError, Layout, LinkState, MAX_FRAME, Nic, RING, Stats, TxRing, copy_tx,
+    local_mac, valid_mac, wait_for, write_addr,
 };
 
 // Registry (offsety v BAR0).
@@ -172,7 +172,8 @@ impl<H: Hw> E1000e<H> {
     /// Reset a nastaveni karty `device` (ID PCI). `seed` = nahoda pro
     /// mistni MAC, kdyz karta zadnou nema.
     pub fn open(hw: H, device: u16, seed: u64) -> Result<Self, HwError> {
-        let kind = crate::ids::e1000e_kind(device).ok_or(HwError::Corrupted("nezname ID e1000e"))?;
+        let kind =
+            crate::ids::e1000e_kind(device).ok_or(HwError::Corrupted("nezname ID e1000e"))?;
         let mut nic = Self {
             hw,
             kind,
@@ -209,7 +210,9 @@ impl<H: Hw> E1000e<H> {
         // Nejdriv dokoncit rozpracovane DMA, pak reset.
         let ctrl = self.hw.read32(CTRL);
         self.hw.write32(CTRL, ctrl | CTRL_GIO_MASTER_DISABLE);
-        if !wait_for(&self.hw, 80_000, 100, || self.hw.read32(STATUS) & STATUS_GIO_MASTER_EN == 0) {
+        if !wait_for(&self.hw, 80_000, 100, || {
+            self.hw.read32(STATUS) & STATUS_GIO_MASTER_EN == 0
+        }) {
             // Linux pokracuje taky: reset DMA stejne zastavi.
             self.notes.push("DMA se pred resetem nezastavilo");
         }
@@ -221,17 +224,23 @@ impl<H: Hw> E1000e<H> {
         let ctrl = self.hw.read32(CTRL) & !CTRL_PHY_RST;
         self.hw.write32(CTRL, ctrl | CTRL_RST);
         self.hw.sleep_us(20_000);
-        if !wait_for(&self.hw, 100_000, 1_000, || self.hw.read32(CTRL) & CTRL_RST == 0) {
+        if !wait_for(&self.hw, 100_000, 1_000, || {
+            self.hw.read32(CTRL) & CTRL_RST == 0
+        }) {
             return Err(HwError::Timeout("reset MAC"));
         }
         match self.kind {
             E1000eKind::Discrete => {
-                if !wait_for(&self.hw, 10_000, 1_000, || self.hw.read32(EECD) & EECD_AUTO_RD != 0) {
+                if !wait_for(&self.hw, 10_000, 1_000, || {
+                    self.hw.read32(EECD) & EECD_AUTO_RD != 0
+                }) {
                     self.notes.push("NVM se po resetu nenacetla");
                 }
             }
             E1000eKind::Pch => {
-                if wait_for(&self.hw, 15_000, 100, || self.hw.read32(STATUS) & STATUS_LAN_INIT_DONE != 0) {
+                if wait_for(&self.hw, 15_000, 100, || {
+                    self.hw.read32(STATUS) & STATUS_LAN_INIT_DONE != 0
+                }) {
                     let st = self.hw.read32(STATUS);
                     self.hw.write32(STATUS, st & !STATUS_LAN_INIT_DONE);
                 } else {
@@ -247,12 +256,16 @@ impl<H: Hw> E1000e<H> {
     /// Semafor PHY (PCH): pockat, az ho nikdo nedrzi, a vzit si ho.
     fn swflag_acquire(&self) -> bool {
         let hw = &self.hw;
-        if !wait_for(hw, 100_000, 1_000, || hw.read32(EXTCNF_CTRL) & EXTCNF_SWFLAG == 0) {
+        if !wait_for(hw, 100_000, 1_000, || {
+            hw.read32(EXTCNF_CTRL) & EXTCNF_SWFLAG == 0
+        }) {
             return false;
         }
         let v = hw.read32(EXTCNF_CTRL);
         hw.write32(EXTCNF_CTRL, v | EXTCNF_SWFLAG);
-        wait_for(hw, 1_000, 100, || hw.read32(EXTCNF_CTRL) & EXTCNF_SWFLAG != 0)
+        wait_for(hw, 1_000, 100, || {
+            hw.read32(EXTCNF_CTRL) & EXTCNF_SWFLAG != 0
+        })
     }
 
     fn swflag_release(&self) {
@@ -280,9 +293,10 @@ impl<H: Hw> E1000e<H> {
         if !self.swflag_acquire() {
             return false;
         }
-        let ok = PHY_ADDRS
-            .iter()
-            .any(|&a| self.phy_read(a, PHY_ID1).is_some_and(|id| id != 0 && id != 0xFFFF));
+        let ok = PHY_ADDRS.iter().any(|&a| {
+            self.phy_read(a, PHY_ID1)
+                .is_some_and(|id| id != 0 && id != 0xFFFF)
+        });
         self.swflag_release();
         ok
     }
@@ -295,26 +309,34 @@ impl<H: Hw> E1000e<H> {
             return;
         }
         if self.hw.read32(FWSM) & FWSM_RSPCIPHY == 0 {
-            self.notes.push("PHY neodpovida a firmware ME blokuje jeho reset");
+            self.notes
+                .push("PHY neodpovida a firmware ME blokuje jeho reset");
             return;
         }
         let hw = &self.hw;
         let ext = hw.read32(CTRL_EXT);
         hw.write32(CTRL_EXT, ext & !CTRL_EXT_FORCE_SMBUS);
         let f = hw.read32(FEXTNVM3);
-        hw.write32(FEXTNVM3, (f & !FEXTNVM3_PHY_CFG_COUNTER_MASK) | FEXTNVM3_PHY_CFG_COUNTER_50MS);
+        hw.write32(
+            FEXTNVM3,
+            (f & !FEXTNVM3_PHY_CFG_COUNTER_MASK) | FEXTNVM3_PHY_CFG_COUNTER_50MS,
+        );
         let ctrl = (hw.read32(CTRL) | CTRL_LANPHYPC_OVERRIDE) & !CTRL_LANPHYPC_VALUE;
         hw.write32(CTRL, ctrl);
         hw.read32(STATUS);
         hw.sleep_us(10);
         hw.write32(CTRL, ctrl & !CTRL_LANPHYPC_OVERRIDE);
         hw.read32(STATUS);
-        wait_for(hw, 100_000, 5_000, || hw.read32(CTRL_EXT) & CTRL_EXT_LPCD != 0);
+        wait_for(hw, 100_000, 5_000, || {
+            hw.read32(CTRL_EXT) & CTRL_EXT_LPCD != 0
+        });
         hw.sleep_us(30_000);
         if self.phy_accessible() {
-            self.notes.push("PHY probuzen z rezimu nizke spotreby (LANPHYPC)");
+            self.notes
+                .push("PHY probuzen z rezimu nizke spotreby (LANPHYPC)");
         } else {
-            self.notes.push("PHY neodpovida ani po probuzeni (LANPHYPC)");
+            self.notes
+                .push("PHY neodpovida ani po probuzeni (LANPHYPC)");
         }
     }
 

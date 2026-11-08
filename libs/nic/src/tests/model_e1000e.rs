@@ -65,10 +65,19 @@ impl E1000eModel {
         self.regs.set(EXTCNF_CTRL, ext);
         self.regs.set(FWSM, fwsm);
         self.regs.set(EECD, EECD_AUTO_RD);
-        self.regs.set(STATUS, if self.kind == E1000eKind::Pch { STATUS_LAN_INIT_DONE } else { 0 });
+        self.regs.set(
+            STATUS,
+            if self.kind == E1000eKind::Pch {
+                STATUS_LAN_INIT_DONE
+            } else {
+                0
+            },
+        );
         if let Some(m) = self.nvm_mac {
-            self.regs.set(RAL0, u32::from_le_bytes([m[0], m[1], m[2], m[3]]));
-            self.regs.set(RAH0, u32::from(m[4]) | u32::from(m[5]) << 8 | 1 << 31);
+            self.regs
+                .set(RAL0, u32::from_le_bytes([m[0], m[1], m[2], m[3]]));
+            self.regs
+                .set(RAH0, u32::from(m[4]) | u32::from(m[5]) << 8 | 1 << 31);
         }
         self.icr = 0;
         self.resets += 1;
@@ -92,7 +101,10 @@ impl E1000eModel {
             let addr = mem.read64(d);
             let w = mem.read32(d + 8);
             let len = (w & 0xFFFF) as usize;
-            assert!(w & TXD_CMD_EOP != 0 && w & TXD_CMD_IFCS != 0, "deskriptor bez EOP/IFCS");
+            assert!(
+                w & TXD_CMD_EOP != 0 && w & TXD_CMD_IFCS != 0,
+                "deskriptor bez EOP/IFCS"
+            );
             assert!(len >= 60, "kratky ramec nedoplneny ({len} B)");
             self.sent.push(mem.bytes(addr, len));
             if w & TXD_CMD_RS != 0 {
@@ -130,9 +142,9 @@ impl Model for E1000eModel {
                     return v;
                 }
                 let word = (v >> 2) as usize;
-                let data = self
-                    .eeprom_mac
-                    .map_or(0xFFFF, |m| u16::from_le_bytes([m[word * 2], m[word * 2 + 1]]));
+                let data = self.eeprom_mac.map_or(0xFFFF, |m| {
+                    u16::from_le_bytes([m[word * 2], m[word * 2 + 1]])
+                });
                 (v & !EERD_START) | EERD_DONE | u32::from(data) << 16
             }
             MDIC => {

@@ -47,8 +47,10 @@ impl IgcModel {
         self.regs = Regs32::default();
         self.regs.set(EECD, EECD_AUTO_RD);
         if let Some(m) = self.nvm_mac {
-            self.regs.set(RAL0, u32::from_le_bytes([m[0], m[1], m[2], m[3]]));
-            self.regs.set(RAH0, u32::from(m[4]) | u32::from(m[5]) << 8 | 1 << 31);
+            self.regs
+                .set(RAL0, u32::from_le_bytes([m[0], m[1], m[2], m[3]]));
+            self.regs
+                .set(RAH0, u32::from(m[4]) | u32::from(m[5]) << 8 | 1 << 31);
         }
         self.icr = 0;
         self.resets += 1;
@@ -69,9 +71,17 @@ impl IgcModel {
             let cmd = mem.read32(d + 8);
             let olinfo = mem.read32(d + 12);
             let len = (cmd & 0xFFFF) as usize;
-            assert_eq!(cmd & (0xF << 20), TXD_DTYP_DATA, "typ deskriptoru neni datovy");
+            assert_eq!(
+                cmd & (0xF << 20),
+                TXD_DTYP_DATA,
+                "typ deskriptoru neni datovy"
+            );
             assert!(cmd & TXD_CMD_DEXT != 0 && cmd & TXD_CMD_EOP != 0 && cmd & TXD_CMD_IFCS != 0);
-            assert_eq!((olinfo >> TXD_PAYLEN_SHIFT) as usize, len, "PAYLEN neodpovida delce");
+            assert_eq!(
+                (olinfo >> TXD_PAYLEN_SHIFT) as usize,
+                len,
+                "PAYLEN neodpovida delce"
+            );
             self.sent.push(mem.bytes(addr, len));
             if cmd & TXD_CMD_RS != 0 {
                 mem.write32(d + 12, olinfo | TXD_DD);
@@ -170,7 +180,11 @@ impl Control for IgcModel {
         // Zpetny zapis prepise oba qwordy deskriptoru.
         mem.write32(d, 0x1234_5678);
         mem.write32(d + 4, 0);
-        let err = if core::mem::take(&mut self.next_rx_error) { RXD_ERR_RXE } else { 0 };
+        let err = if core::mem::take(&mut self.next_rx_error) {
+            RXD_ERR_RXE
+        } else {
+            0
+        };
         mem.write32(d + 8, RXD_DD | RXD_EOP | err);
         mem.write32(d + 12, frame.len() as u32);
         self.regs.set(RDH, (head + 1) % n);

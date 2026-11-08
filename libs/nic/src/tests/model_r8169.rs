@@ -78,7 +78,10 @@ impl R8169Model {
 
     fn high_dma_ok(&self, addr: u64) {
         if addr >> 32 != 0 {
-            assert!(self.get16(CPLUS_CMD) & CPLUS_PCI_DAC != 0, "adresa nad 4 GiB bez PCIDAC");
+            assert!(
+                self.get16(CPLUS_CMD) & CPLUS_PCI_DAC != 0,
+                "adresa nad 4 GiB bez PCIDAC"
+            );
         }
     }
 
@@ -94,14 +97,21 @@ impl R8169Model {
             if opts1 & DESC_OWN == 0 {
                 break;
             }
-            assert!(opts1 & DESC_FIRST != 0 && opts1 & DESC_LAST != 0, "ramec ve vic deskriptorech");
+            assert!(
+                opts1 & DESC_FIRST != 0 && opts1 & DESC_LAST != 0,
+                "ramec ve vic deskriptorech"
+            );
             let len = (opts1 & LEN_MASK) as usize;
             assert!(len >= 60, "kratky ramec nedoplneny ({len} B)");
             let addr = mem.read64(d + 8);
             self.high_dma_ok(addr);
             self.sent.push(mem.bytes(addr, len));
             mem.write32(d, opts1 & !DESC_OWN);
-            self.tx_idx = if opts1 & DESC_RING_END != 0 { 0 } else { self.tx_idx + 1 };
+            self.tx_idx = if opts1 & DESC_RING_END != 0 {
+                0
+            } else {
+                self.tx_idx + 1
+            };
             assert!(self.tx_idx < 1024, "kruh odesilani bez RingEnd");
             sent_any = true;
         }
@@ -134,7 +144,11 @@ impl R8169Model {
         self.high_dma_ok(addr);
         mem.write(addr, data);
         mem.write32(d, (opts1 & DESC_RING_END) | flags | data.len() as u32);
-        self.rx_idx = if opts1 & DESC_RING_END != 0 { 0 } else { self.rx_idx + 1 };
+        self.rx_idx = if opts1 & DESC_RING_END != 0 {
+            0
+        } else {
+            self.rx_idx + 1
+        };
         assert!(self.rx_idx < 1024, "kruh prijmu bez RingEnd");
         true
     }
@@ -147,7 +161,11 @@ impl Model for R8169Model {
         }
         if reg == PHY_STATUS {
             assert_eq!(width, 1);
-            return if self.link_up { u32::from(PHY_LINK | PHY_1000F | PHY_FULL_DUP) } else { 0 };
+            return if self.link_up {
+                u32::from(PHY_LINK | PHY_1000F | PHY_FULL_DUP)
+            } else {
+                0
+            };
         }
         match width {
             1 => self.regs[reg as usize].into(),
@@ -195,7 +213,11 @@ impl Control for R8169Model {
         // Na drate je ramec i s FCS (4 B); cip ho do bufferu zapise taky.
         let mut wire = frame.to_vec();
         wire.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
-        let err = if core::mem::take(&mut self.next_rx_error) { RX_RES } else { 0 };
+        let err = if core::mem::take(&mut self.next_rx_error) {
+            RX_RES
+        } else {
+            0
+        };
         let ok = if core::mem::take(&mut self.next_split) {
             let (a, b) = wire.split_at(wire.len() / 2);
             self.put_rx(mem, a, DESC_FIRST) && self.put_rx(mem, b, DESC_LAST)

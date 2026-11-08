@@ -56,11 +56,19 @@ fn ids_select_program() {
     assert_eq!(ids::program_for(0x8086, 0x125C), Some("igc"));
     assert_eq!(ids::program_for(0x10EC, 0x8168), Some("r8169"));
     // igb (82576), rtl8139, RTL8125 a virtio nepatri nikomu z nich.
-    for (v, d) in [(0x8086, 0x10C9), (0x10EC, 0x8139), (0x10EC, 0x8125), (0x1AF4, 0x1041)] {
+    for (v, d) in [
+        (0x8086, 0x10C9),
+        (0x10EC, 0x8139),
+        (0x10EC, 0x8125),
+        (0x1AF4, 0x1041),
+    ] {
         assert_eq!(ids::program_for(v, d), None, "{v:04x}:{d:04x}");
     }
     // Zadne ID ve dvou rodinach.
-    let mut all: Vec<(u16, u16)> = ids::FAMILIES.iter().flat_map(|f| f.devices.iter().map(|&d| (f.vendor, d))).collect();
+    let mut all: Vec<(u16, u16)> = ids::FAMILIES
+        .iter()
+        .flat_map(|f| f.devices.iter().map(|&d| (f.vendor, d)))
+        .collect();
     let n = all.len();
     all.sort();
     all.dedup();
@@ -104,9 +112,16 @@ fn e1000e_pch_wakes_phy_from_ulp() {
     m.phy_awake = false;
     let (sim, nic) = e1000e(m, 0x15FA);
     assert_eq!(sim.model.borrow().lanphypc_toggles, 1);
-    assert!(nic.notes().iter().any(|n| n.contains("probuzen")), "{:?}", nic.notes());
+    assert!(
+        nic.notes().iter().any(|n| n.contains("probuzen")),
+        "{:?}",
+        nic.notes()
+    );
     // Semafor PHY po probuzeni uvolneny (firmware ME ho potrebuje).
-    assert_eq!(sim.read32(crate::e1000e::EXTCNF_CTRL) & crate::e1000e::EXTCNF_SWFLAG, 0);
+    assert_eq!(
+        sim.read32(crate::e1000e::EXTCNF_CTRL) & crate::e1000e::EXTCNF_SWFLAG,
+        0
+    );
 }
 
 #[test]
@@ -116,7 +131,11 @@ fn e1000e_pch_respects_me_reset_block() {
     m.phy_reset_blocked = true;
     let (sim, nic) = e1000e(m, 0x15FA);
     assert_eq!(sim.model.borrow().lanphypc_toggles, 0);
-    assert!(nic.notes().iter().any(|n| n.contains("ME")), "{:?}", nic.notes());
+    assert!(
+        nic.notes().iter().any(|n| n.contains("ME")),
+        "{:?}",
+        nic.notes()
+    );
 }
 
 #[test]
@@ -207,7 +226,10 @@ fn r8169_mac_written_under_unlock() {
 fn r8169_low_dma_without_dac() {
     let sim = sim::new(R8169Model::new(), BASE_LOW);
     let mut nic = R8169::open(sim.clone(), 0x8168, SEED).unwrap();
-    assert_eq!(sim.read16(crate::r8169::CPLUS_CMD) & crate::r8169::CPLUS_PCI_DAC, 0);
+    assert_eq!(
+        sim.read16(crate::r8169::CPLUS_CMD) & crate::r8169::CPLUS_PCI_DAC,
+        0
+    );
     nic.send(&frame(1, 64));
     nic.kick();
     assert_eq!(sim.take_sent().len(), 1);

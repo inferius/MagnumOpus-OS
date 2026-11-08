@@ -76,7 +76,12 @@ pub trait Hw {
 
 /// Opakuje `done`, dokud nevrati `true`, nejvys `timeout_us` (po krocich
 /// `step_us`). `false` = vyprselo.
-pub fn wait_for<H: Hw + ?Sized>(hw: &H, timeout_us: u64, step_us: u64, mut done: impl FnMut() -> bool) -> bool {
+pub fn wait_for<H: Hw + ?Sized>(
+    hw: &H,
+    timeout_us: u64,
+    step_us: u64,
+    mut done: impl FnMut() -> bool,
+) -> bool {
     let mut waited = 0;
     loop {
         if done() {
@@ -241,7 +246,10 @@ impl TxRing {
 pub(crate) fn copy_tx<H: Hw + ?Sized>(hw: &H, off: usize, frame: &[u8]) -> usize {
     hw.dma_write(off, frame);
     if frame.len() < MIN_FRAME {
-        hw.dma_write(off + frame.len(), &[0u8; MIN_FRAME][..MIN_FRAME - frame.len()]);
+        hw.dma_write(
+            off + frame.len(),
+            &[0u8; MIN_FRAME][..MIN_FRAME - frame.len()],
+        );
         MIN_FRAME
     } else {
         frame.len()

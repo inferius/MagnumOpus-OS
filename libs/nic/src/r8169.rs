@@ -29,8 +29,8 @@
 use alloc::vec::Vec;
 
 use crate::{
-    BUF, Events, Hw, HwError, Layout, LinkState, MAX_FRAME, Nic, RING, Stats, TxRing, copy_tx, local_mac,
-    valid_mac, wait_for, write_addr,
+    BUF, Events, Hw, HwError, Layout, LinkState, MAX_FRAME, Nic, RING, Stats, TxRing, copy_tx,
+    local_mac, valid_mac, wait_for, write_addr,
 };
 
 pub const MAC0: u32 = 0x00;
@@ -224,7 +224,10 @@ impl<H: Hw> R8169<H> {
         let hw = &self.hw;
         let d = Layout::rx_desc(i);
         hw.dma_write32(d + 4, 0);
-        hw.dma_write(d + 8, &(hw.dma_addr() + Layout::rx_buf(i) as u64).to_le_bytes());
+        hw.dma_write(
+            d + 8,
+            &(hw.dma_addr() + Layout::rx_buf(i) as u64).to_le_bytes(),
+        );
         // Vlastnik az nakonec: karta nesmi videt deskriptor bez adresy.
         hw.dma_wmb();
         hw.dma_write32(d, DESC_OWN | ring_end(i) | BUF as u32);
@@ -330,7 +333,10 @@ impl<H: Hw> Nic for R8169<H> {
         let len = copy_tx(hw, Layout::tx_buf(i), frame) as u32;
         let d = Layout::tx_desc(i);
         hw.dma_write32(d + 4, 0);
-        hw.dma_write(d + 8, &(hw.dma_addr() + Layout::tx_buf(i) as u64).to_le_bytes());
+        hw.dma_write(
+            d + 8,
+            &(hw.dma_addr() + Layout::tx_buf(i) as u64).to_le_bytes(),
+        );
         hw.dma_wmb();
         hw.dma_write32(d, DESC_OWN | ring_end(i) | DESC_FIRST | DESC_LAST | len);
         self.tx.tail = (i + 1) % RING;

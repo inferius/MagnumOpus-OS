@@ -37,12 +37,19 @@ pub fn init_and_link<M: Model + Control>(make: Make<M>) {
     let l = nic.link().unwrap();
     assert!(l.up && l.speed_mbps >= 1000 && l.full_duplex, "{l:?}");
     assert!(crate::valid_mac(&nic.mac()));
-    assert!(sim.take_sent().is_empty(), "karta neco poslala pri inicializaci");
+    assert!(
+        sim.take_sent().is_empty(),
+        "karta neco poslala pri inicializaci"
+    );
 }
 
 pub fn tx_frames<M: Model + Control>(make: Make<M>) {
     let (sim, mut nic) = make();
-    let frames: Vec<Vec<u8>> = [14, 59, 60, 61, 1000, 1514].iter().enumerate().map(|(i, &l)| frame(i as u32, l)).collect();
+    let frames: Vec<Vec<u8>> = [14, 59, 60, 61, 1000, 1514]
+        .iter()
+        .enumerate()
+        .map(|(i, &l)| frame(i as u32, l))
+        .collect();
     for f in &frames {
         nic.send(f);
     }
@@ -62,7 +69,11 @@ pub fn tx_ring_wraps<M: Model + Control>(make: Make<M>) {
     let mut next = 0u32;
     let mut got = Vec::new();
     // Dav ruzne velikosti, aby se konec kruhu trefil do ruznych mist.
-    for batch in [1usize, 7, 255, 100, 3, 254, 300, 80].iter().cycle().take(20) {
+    for batch in [1usize, 7, 255, 100, 3, 254, 300, 80]
+        .iter()
+        .cycle()
+        .take(20)
+    {
         nic.reclaim().unwrap();
         let n = (*batch).min(nic.tx_space());
         assert!(n > 0, "kruh odesilani se neuvolnil");
@@ -99,7 +110,10 @@ pub fn rx_ring_wraps<M: Model + Control>(make: Make<M>) {
     let (sim, mut nic) = make();
     let mut got = Vec::new();
     for i in 0..1000u32 {
-        assert!(sim.deliver(&frame(i, 60 + (i as usize * 7) % 1455)), "karta zahodila ramec {i}");
+        assert!(
+            sim.deliver(&frame(i, 60 + (i as usize * 7) % 1455)),
+            "karta zahodila ramec {i}"
+        );
         if i % 13 == 0 {
             got.extend(rx_all(&mut *nic));
         }

@@ -134,7 +134,10 @@ fn read_config(bootstrap: &Channel) -> Option<(Address, u64, u64)> {
     let deadline = || Some(libos::time::deadline_after(CONFIG_TIMEOUT));
     let pci = bootstrap.read(deadline()).ok()?;
     let regs = bootstrap.read(deadline()).ok()?;
-    parse_config(core::str::from_utf8(&pci.data).ok()?, core::str::from_utf8(&regs.data).ok()?)
+    parse_config(
+        core::str::from_utf8(&pci.data).ok()?,
+        core::str::from_utf8(&regs.data).ok()?,
+    )
 }
 
 fn link_info(s: LinkState) -> (u8, u32) {
@@ -151,7 +154,9 @@ fn link_info(s: LinkState) -> (u8, u32) {
 /// Cely beh ovladace `name`; vraci navratovy kod procesu.
 pub fn run(name: &str, startup: Startup, open: Open) -> i64 {
     let mut handles = startup.handles.into_iter();
-    let (Some(res), Some(ecam_vmo), Some(client)) = (handles.next(), handles.next(), handles.next()) else {
+    let (Some(res), Some(ecam_vmo), Some(client)) =
+        (handles.next(), handles.next(), handles.next())
+    else {
         println!("{name}: chybi handly ve startovni zprave");
         return 1;
     };
@@ -212,7 +217,10 @@ pub fn run(name: &str, startup: Startup, open: Open) -> i64 {
     }
     let s = nic.stats();
     if s.rx_errors > 0 {
-        println!("{name} {address}: zahozeno {} vadnych prijatych ramcu", s.rx_errors);
+        println!(
+            "{name} {address}: zahozeno {} vadnych prijatych ramcu",
+            s.rx_errors
+        );
     }
     match result {
         Ok(()) => 0,
@@ -270,7 +278,13 @@ impl From<Error> for Failure {
     }
 }
 
-fn serve(name: &str, dev: &Device, nic: &mut dyn Nic, irq: &DeviceIrq, client: &Channel) -> Result<(), Failure> {
+fn serve(
+    name: &str,
+    dev: &Device,
+    nic: &mut dyn Nic,
+    irq: &DeviceIrq,
+    client: &Channel,
+) -> Result<(), Failure> {
     let m = nic.mac();
     let mut state = nic.link()?;
     println!(
@@ -311,18 +325,27 @@ fn serve(name: &str, dev: &Device, nic: &mut dyn Nic, irq: &DeviceIrq, client: &
         };
         let deadline = libos::time::deadline_after(LINK_POLL);
         let observed = match wait_many(
-            &[(irq.irq.handle(), Signals::SIGNALED), (client.handle(), client_mask)],
+            &[
+                (irq.irq.handle(), Signals::SIGNALED),
+                (client.handle(), client_mask),
+            ],
             Some(deadline),
         ) {
             Ok((_, o)) => Some(o),
             Err(Error::TimedOut) => None,
             Err(e) => return Err(e.into()),
         };
-        if observed.as_ref().is_some_and(|o| o[1].contains(Signals::PEER_CLOSED)) {
+        if observed
+            .as_ref()
+            .is_some_and(|o| o[1].contains(Signals::PEER_CLOSED))
+        {
             return Ok(());
         }
         let mut link_event = observed.is_none();
-        if observed.as_ref().is_some_and(|o| o[0].contains(Signals::SIGNALED)) {
+        if observed
+            .as_ref()
+            .is_some_and(|o| o[0].contains(Signals::SIGNALED))
+        {
             // Potvrdit pred obsluhou: preruseni behem ni znovu probudi.
             let _ = irq.irq.ack();
             let ev = nic.interrupt()?;
@@ -385,6 +408,10 @@ fn describe(s: LinkState) -> alloc::string::String {
     alloc::format!(
         "pripojena {} Mb/s {}",
         s.speed_mbps,
-        if s.full_duplex { "plny duplex" } else { "polovicni duplex" }
+        if s.full_duplex {
+            "plny duplex"
+        } else {
+            "polovicni duplex"
+        }
     )
 }
