@@ -506,3 +506,33 @@ fn line_endings_follow_system_rule() {
     let r = crate::render::value(&shlang::value::Value::str("prvni\ndruhy"), &theme, None);
     assert_eq!(crate::vt::strip(&r), "prvni\ndruhy\n");
 }
+
+/// Tab: bez shody hlaska, vic shod nabidka s typem polozky (slozka/soubor).
+#[test]
+fn tab_menu_shows_kind_and_empty_result_says_so() {
+    let mut a = App::new(crate::theme::Theme::dark(), 80, 24);
+    a.on_msg(ServerMsg::Attached { session: 7, cwd: "/".into(), blocks: 0 });
+    typ(&mut a, "ls | to json | save /te");
+    a.take_out();
+    a.key(Key::Tab);
+    let seq = a.take_out().iter().find_map(|m| match m {
+        ClientMsg::Complete { seq, .. } => Some(*seq),
+        _ => None,
+    });
+    a.on_msg(ServerMsg::Completions { seq: seq.unwrap(), start: 19, items: vec![] });
+    assert!(a.frame().contains("nic k doplnění"), "{}", a.frame());
+    a.key(Key::Tab);
+    let seq = a.take_out().iter().find_map(|m| match m {
+        ClientMsg::Complete { seq, .. } => Some(*seq),
+        _ => None,
+    });
+    let dir = shlang::complete::CandKind::Dir as u8;
+    let file = shlang::complete::CandKind::File as u8;
+    a.on_msg(ServerMsg::Completions {
+        seq: seq.unwrap(),
+        start: 19,
+        items: vec![("/tests/".into(), dir, String::new()), ("/text.txt".into(), file, String::new())],
+    });
+    let f = crate::vt::strip(&a.frame());
+    assert!(f.contains("/tests/") && f.contains("složka") && f.contains("soubor"), "{f}");
+}

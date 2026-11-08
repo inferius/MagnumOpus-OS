@@ -189,6 +189,18 @@ fn session(s: &Startup) -> TestResult {
     // Zapis do FS a cteni zpet (B i C).
     w.ok(id, "mkdir -p /shell-test && echo ahoj > /shell-test/a.txt")?;
     crate::check_eq!(w.value(id, "open /shell-test/a.txt | from text")?, Value::str("ahoj"), "obsah souboru");
+    // Doplnovani cesty za rourou (absolutni cesta, pak obsah slozky).
+    for (line, want) in [
+        ("ls | select name | to json | save /shell-te", "/shell-test/"),
+        ("ls | to json | save /shell-test/", "/shell-test/a.txt"),
+    ] {
+        w.send(ClientMsg::Complete { session: id, line: line.into(), cursor: line.len() as u32, seq: 77 })?;
+        let items = w.reply(|m| match m {
+            ServerMsg::Completions { seq: 77, items, .. } => Some(items.clone()),
+            _ => None,
+        })?;
+        crate::check!(items.iter().any(|(t, _, _)| t == want), alloc::format!("doplneni '{line}': {items:?}"));
+    }
     crate::check_eq!(
         w.value(id, "ls(\"/shell-test\").where(it => it.ext == \"txt\").count()")?,
         Value::Int(1),

@@ -180,7 +180,11 @@ pub fn complete(line: &str, cursor: usize, ctx: &mut Ctx) -> (usize, Vec<Candida
     if matches!(kind, Some(Kind::Int | Kind::Duration | Kind::Closure | Kind::Block)) {
         return (start, out);
     }
-    // cesta
+    // cesta (i v uvozovkach: jmena s mezerou)
+    let (quote, word) = match word.chars().next() {
+        Some(q @ ('"' | '\'')) => (Some(q), String::from(&word[1..])),
+        _ => (None, word),
+    };
     let (dir_part, name_part) = match word.rfind('/') {
         Some(i) => (&word[..=i], &word[i + 1..]),
         None => ("", word.as_str()),
@@ -199,6 +203,13 @@ pub fn complete(line: &str, cursor: usize, ctx: &mut Ctx) -> (usize, Vec<Candida
                 let mut text = alloc::format!("{dir_part}{}", e.name);
                 if is_dir {
                     text.push('/');
+                }
+                // Jmeno s mezerou nebo zvlastnim znakem: v uvozovkach.
+                // Slozka zustane otevrena (dalsi Tab doplni jeji obsah),
+                // soubor se uzavre.
+                let q = quote.or_else(|| text.contains([' ', '|', ';', '{', '}', '(', ')', '$', '"']).then_some('"'));
+                if let Some(q) = q {
+                    text = if is_dir { alloc::format!("{q}{text}") } else { alloc::format!("{q}{text}{q}") };
                 }
                 Candidate { text, kind: if is_dir { CandKind::Dir } else { CandKind::File }, help: String::new() }
             })

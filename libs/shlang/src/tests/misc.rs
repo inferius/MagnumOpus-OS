@@ -31,6 +31,7 @@ fn ctx_complete(line: &str, vars: &[&str]) -> Vec<String> {
     fs.put("/home/docs/x.txt", b"");
     fs.put("/home/dalsi.txt", b"");
     fs.put("/home/.skryty", b"");
+    fs.put("/home/moje dokumenty/a.txt", b"");
     let mut ctx = Ctx {
         sigs: &Builtins,
         vars: vars.iter().map(|s| s.to_string()).collect(),
@@ -77,4 +78,19 @@ fn every_shell_error_code_is_documented() {
 fn explain_log_message() {
     let t = crate::explain::explain("initfs nenalezen (bla), jadro nespusti zadny proces").unwrap();
     assert!(t.contains("initfs"));
+}
+
+#[test]
+fn path_completion_in_pipeline_absolute_home_and_quotes() {
+    // Za rourou u argumentu typu cesta (save), absolutni cesta.
+    assert_eq!(ctx_complete("ls | select name | to json | save /ho", &[]), vec!["/home/"]);
+    assert_eq!(ctx_complete("ls | to json | save /home/d", &[]), vec!["/home/dalsi.txt", "/home/docs/"]);
+    // Relativni a ~.
+    assert_eq!(ctx_complete("open | x; cp do", &[]), vec!["docs/"]);
+    assert_eq!(ctx_complete("cd ~/do", &[]), vec!["~/docs/"]);
+    // Obsah adresare po doplneni.
+    assert_eq!(ctx_complete("open docs/", &[]), vec!["docs/x.txt"]);
+    // Jmeno s mezerou v uvozovkach (slozka zustane otevrena, soubor se uzavre).
+    assert_eq!(ctx_complete("open mo", &[]), vec!["\"moje dokumenty/"]);
+    assert_eq!(ctx_complete("open \"moje dokumenty/", &[]), vec!["\"moje dokumenty/a.txt\""]);
 }
