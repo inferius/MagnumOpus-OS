@@ -10,14 +10,11 @@ file lists only code stored in the repository itself.
 
 ## ACPICA
 
-| | |
-|---|---|
-| Co / What | ACPI Component Architecture, referenční implementace ACPI (interpret AML, tabulky, události) / reference ACPI implementation (AML interpreter, tables, events) |
-| Kde / Where | `third_party/acpica` (popis verze a zásahů: `third_party/acpica/README.md`) |
-| Verze / Version | 20250404 (tag `R2025_04_04`, commit `8a54b2a8c4bc2a60d1ddaba4a1ffebe38c2a0062`) |
-| Původ / Origin | https://github.com/acpica/acpica |
-| Používá / Used by | `libs/acpica`, služba `user/acpid` |
-| Licence / Licence | **BSD-3-Clause** (zvolená z trojí licence ACPICA: licence Intel / BSD / GPLv2) / chosen from ACPICA's triple licence: Intel licence / BSD / GPLv2 |
+- **Název / Name:** ACPICA (ACPI Component Architecture) - interpret AML, tabulky, události / AML interpreter, tables, events
+- **Verze / Version:** 20250404 (tag `R2025_04_04`, commit `8a54b2a8c4bc2a60d1ddaba4a1ffebe38c2a0062`)
+- **Zdroj / Source:** https://github.com/acpica/acpica
+- **Licence / Licence:** BSD-3-Clause (zvolená z trojí licence Intel / BSD / GPLv2; GPL se nepoužívá / chosen from the triple licence, GPL not used)
+- **Cesta / Path:** `third_party/acpica` (popis verze a zásahů: `third_party/acpica/README.md`); používá / used by `libs/acpica`, `user/acpid`
 
 Hlavičky zdrojových souborů ACPICA nabízejí vedle licence Intel výslovně
 i licenci BSD ("Alternatively, you may choose to be licensed under the terms
@@ -69,8 +66,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Písmo Tuffy / Tuffy font
 
-| | |
-|---|---|
-| Kde / Where | `libs/font/fonts/Tuffy.ttf` (popis: `libs/font/fonts/README.md`) |
-| Autor / Author | Thatcher Ulrich (http://tulrich.com/fonts/) |
-| Licence | public domain |
+- **Název / Name:** Tuffy Regular
+- **Verze / Version:** z testovacích písem crate `fontdb` 0.24 / from the test fonts of the `fontdb` 0.24 crate
+- **Zdroj / Source:** http://tulrich.com/fonts/ (Thatcher Ulrich)
+- **Licence / Licence:** public domain
+- **Cesta / Path:** `libs/font/fonts/Tuffy.ttf` (popis: `libs/font/fonts/README.md`)
