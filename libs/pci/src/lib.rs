@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+pub mod msi;
 pub mod msix;
 
 use alloc::vec::Vec;

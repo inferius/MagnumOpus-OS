@@ -24,6 +24,7 @@ mod revhelper;
 mod webhelper;
 mod qmp;
 mod symbolize;
+mod testdisks;
 
 use std::env;
 use std::ffi::OsString;
@@ -54,6 +55,8 @@ prepinace:
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
                    none; aarch64 smmu (vychozi), none
+  --data-disk <r>  (run, test) radic datoveho disku: virtio (vychozi), nvme,
+                   ahci; na NVMe a AHCI ma disk GPT s nasim oddilem
   --qemu-wsl       (run, test) spustit QEMU ve WSL (QEMU_WSL_DISTRO, vychozi
                    Ubuntu; QEMU_WSL_PREFIX, vychozi ~/venus/prefix) - Venus
   --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi), gl (virgl 3D)
@@ -83,6 +86,8 @@ pub struct Options {
     /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
     /// aarch64 "smmu", "none".
     iommu: String,
+    /// Radic datoveho disku: "virtio", "nvme", "ahci".
+    data_disk: String,
     /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
     /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl);
     /// "none" = bez virtio-gpu (displej `fbdisplay` nad framebufferem GOP).
@@ -134,6 +139,7 @@ fn run_cli() -> Result<()> {
         headless: false,
         accel: None,
         iommu: String::new(),
+        data_disk: String::from("virtio"),
         gpu: String::from("2d"),
         qemu_wsl: false,
         qemu_args: Vec::new(),
@@ -152,6 +158,14 @@ fn run_cli() -> Result<()> {
             Some("--iommu") => {
                 let value = args.next().ok_or("--iommu ocekava typ IOMMU")?;
                 opts.iommu = value.to_string_lossy().into_owned();
+            }
+            Some("--data-disk") => {
+                let value = args.next().ok_or("--data-disk ocekava radic")?;
+                let value = value.to_string_lossy().into_owned();
+                if !["virtio", "nvme", "ahci"].contains(&value.as_str()) {
+                    return Err("--data-disk ocekava virtio, nvme nebo ahci".into());
+                }
+                opts.data_disk = value;
             }
             Some("--qemu-wsl") => opts.qemu_wsl = true,
             Some("--gpu") => {
@@ -255,7 +269,8 @@ repeat = {}
 
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
 /// chyb a syscallu, casova pasma, protokol vstupu a rozlozeni klavesnice,
-/// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI).
+/// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI,
+/// ochrana cizich disku).
 fn host_tests() -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = Command::new(cargo)
@@ -323,6 +338,8 @@ fn host_tests() -> Result<()> {
             "httpc",
             "--package",
             "dns",
+            "--package",
+            "diskguard",
             "--features",
             "initfs/std,fs/std,netproto/std,netproto/nts",
         ])
@@ -399,6 +416,8 @@ const USER_PROGRAMS: &[&str] = &[
     "fsrtest",
     "devmgr",
     "virtio-blk",
+    "nvme",
+    "ahci",
     "virtio-input",
     "inputd",
     "ps2",

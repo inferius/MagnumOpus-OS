@@ -58,6 +58,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahci"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
+ "libos",
+ "pci",
+ "virtio",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -165,6 +175,7 @@ dependencies = [
 name = "blockproto"
 version = "0.1.0"
 dependencies = [
+ "diskguard",
  "libos",
 ]
 
@@ -382,15 +393,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc32fast"
-version = "1.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f97d3416d5337d15c4b0d78c8c91df922ca143f57ec20e2d1c188333047ef04"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "crypto-bigint"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -532,6 +534,10 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
+
+[[package]]
+name = "diskguard"
+version = "0.1.0"
 
 [[package]]
 name = "dns"
@@ -1398,6 +1404,16 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "nvme"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
+ "libos",
+ "pci",
+ "virtio",
 ]
 
 [[package]]
@@ -2810,7 +2826,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "bytes",
- "crc32fast",
+ "diskguard",
  "dns",
  "fatfs",
  "fs",

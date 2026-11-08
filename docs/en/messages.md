@@ -116,6 +116,17 @@ invariant was broken (a kernel bug).
 | `devmgr: ovladac X pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
 | `virtio-blk BB:DD.F: N MiB, flush ano/ne, discard ano/ne` | The disk is ready. `discard ne` = the device has no TRIM (in QEMU the drive lacks `discard=unmap`); the FS then skips TRIM. |
 | `virtio-blk ...: inicializace selhala: ...` | The device does not follow virtio 1.x, did not finish its reset within a second (`TIMED_OUT`) or resources are missing (MSI-X, DMA memory, `NO_RESOURCES` = the restricted Resource quota is exhausted). |
+| `X: disk D: nas oddil GPT, N MiB od sektoru S, zapis povolen` | The disk driver (`virtio-blk`, `nvme`, `ahci`) found our partition; the client sees only that ([Disks](disks.md)). |
+| `X: disk D: cely disk s nasim FS, ..., zapis povolen` | A disk without a partition table holding our FS (the QEMU data disk). |
+| `X: disk D: cizi disk (...), ..., JEN PRO CTENI` | The disk is not ours (foreign GPT, MBR, empty, damaged GPT, invalid partition of ours). Write and TRIM return `READ_ONLY`, the FS is mounted read-only. Intentional protection; create our partition to write to the disk. |
+| `nvme BB:DD.F: nepodporovany radic (CAP ...)` | The controller lacks the NVM command set or the 4 KiB page, or has doorbells outside the BAR. |
+| `nvme: jmenny prostor N ma sektor ... - zatim nepodporovano, vynechan` | The namespace is formatted with a sector other than 512 B or with metadata. Reformat to 512 B (vendor tool, `nvme format`) or wait for 4 KiB support. |
+| `nvme: radic neodpovida spravne (...), dalsi pozadavky odmitnuty` | A command did not finish within 10 s or the controller returned a foreign command ID. The controller is disabled (no DMA); the disk does not work until restart. |
+| `ahci BB:DD.F: MSI nelze zapnout (...), obsluha dotazovanim` | The controller has no MSI (or the message cannot be written); the driver works by polling, at a higher CPU load. |
+| `ahci: port P: disk ... neumi LBA48 / ma logicky sektor ... - vynechan` | A very old disk without LBA48, or a 4Kn disk. Not supported yet. |
+| `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | The port has an ATAPI drive or a port multiplier. |
+| `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | A command did not finish within 20 s; the port is stopped. |
+| `devmgr: ovladac X pro ... nenahlasil disky: ...` | The `nvme`/`ahci` driver did not send `done` within 20 s (slow disk spin-up, stuck controller). Disks reported until then work. |
 | `virtio-net BB:DD.F: MAC xx:..., linka pripojena/odpojena` | The network card is ready ("link up/down"). The MAC comes from the device configuration, otherwise it is locally administered (`02:...`). |
 | `virtio-net ...: inicializace selhala: ...` | As for the disk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | The device returned a nonsensical queue index or a buffer it did not own (`CORRUPTED`). The driver resets it (it stops using DMA) and exits; the network does not work until a restart. |

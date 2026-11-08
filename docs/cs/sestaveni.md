@@ -36,7 +36,9 @@ Přepínače: `--arch <x86_64|aarch64>` (všechny příkazy, výchozí `x86_64`;
 aarch64 = QEMU `virt`, viz [implementace aarch64](architektura.md#implementace-aarch64-qemu-virt)),
 `--release`, `--headless` (bez okna), `--iommu <typ>` (emulovaná IOMMU:
 x86_64 `intel` (výchozí), `amd`, `none`; aarch64 `smmu` (výchozí), `none`; `none` ověří běh bez překladu DMA - test
-„IOMMU: zarizeni nezapise mimo prideleny DMA“ pak podle očekávání selže), `--gdb` (QEMU čeká na
+„IOMMU: zarizeni nezapise mimo prideleny DMA“ a testy „IOMMU chrani pamet mimo DMA“ sady `disky` pak podle očekávání selžou),
+`--data-disk <virtio|nvme|ahci>` (řadič datového disku, výchozí `virtio`; na NVMe a AHCI dostane disk
+GPT s naším oddílem, viz [Disky](disky.md)), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
 

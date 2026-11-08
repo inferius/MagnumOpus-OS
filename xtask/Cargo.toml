@@ -14,7 +14,7 @@ term = { path = "../libs/term" }
 abi = { workspace = true }
 netproto = { path = "../libs/netproto", features = ["std", "nts"] }
 fatfs = "0.3"
-crc32fast = "1.5"
+diskguard = { path = "../libs/diskguard" }
 # Korenove certifikaty pro initfs (sada Mozilla pres CCADB).
 webpki-root-certs = "1"
 # Testovaci servery HTTPS (nezavisle na libs/tls a libs/httpc).

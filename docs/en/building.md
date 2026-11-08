@@ -36,8 +36,10 @@ Options: `--arch <x86_64|aarch64>` (all commands, default `x86_64`; aarch64
 = QEMU `virt`, see [the aarch64 implementation](architecture.md#the-aarch64-implementation-qemu-virt)),
 `--release`, `--headless` (no window), `--iommu <type>` (emulated IOMMU:
 x86_64 `intel` (default), `amd`, `none`; aarch64 `smmu` (default), `none`; `none` checks running without DMA
-translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" then
-fails as expected),
+translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" and the
+"IOMMU chrani pamet mimo DMA" tests of the `disky` suite then fail as expected),
+`--data-disk <virtio|nvme|ahci>` (data disk controller, default `virtio`; on NVMe
+and AHCI the disk gets a GPT with our partition, see [Disks](disks.md)),
 `--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
 `-- -cpu max,-x2apic`).
 

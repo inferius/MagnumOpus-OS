@@ -6,6 +6,7 @@
 mod basic;
 mod dns;
 mod clock_sync;
+mod disks;
 mod drivers;
 mod events;
 mod firewall;
@@ -46,6 +47,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", process::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
+    ("disky", disks::TESTS),
     ("souborovy system", fs::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
