@@ -60,7 +60,13 @@ extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
     // kernel ho nepouziva nijak jinak nez pres konzoli.
     unsafe { console::init(&boot_info.framebuffer) };
     log::set_defaults();
-    log::info!("os kernel {} ({})", env!("CARGO_PKG_VERSION"), arch::NAME);
+    log::info!(
+        "os kernel {} ({}), sestaveni {}",
+        env!("CARGO_PKG_VERSION"),
+        arch::NAME,
+        // Commit a datum doda xtask (`MO_BUILD`); `*` = neulozene zmeny.
+        option_env!("MO_BUILD").unwrap_or("bez xtask")
+    );
 
     // SAFETY: jednou, na bootovacim CPU, preruseni jsou zakazana.
     unsafe { arch::init_boot_cpu() };

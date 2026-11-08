@@ -36,6 +36,7 @@ firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
 | `cargo xtask test --only napajeni` | only the separate power test runs (power-off with the button through ACPI, reboot; they always run after the main run, `--no-power` disables them), see [ACPI](acpi.md#tests) |
 | `cargo xtask test --net-online` | also the tests against the real host network (host resolver through slirp); skipped without the switch |
 | `cargo xtask usb` | live USB: image `target/usb-<arch>-<profile>.img`; `--list`, `--write <disk>`, `--run`, `--test`, `--size <MiB>`, `--out <file>`, see [Live USB](live-usb.md) |
+| `cargo xtask vmware` | live USB image as a VMware Workstation disk: builds, converts to VMDK (`qemu-img`), backs up (last 3) and replaces `<dir>/magnumopus.vmdk`; directory `--dir <dir>` or `MO_VMWARE_DIR`; refuses a running VM (`*.lck` locks). VM: UEFI firmware without Secure Boot, SATA or NVMe disk, `e1000e` network |
 | `cargo xtask test --only release` | only the boot in the release profile (kernel, init, services, ACPI and reboot; always runs after the main run unless the test itself runs with `--release`) - release changes optimisation and timing and shows bugs that debug hides |
 | `cargo xtask test --only zaznam-padu` | only the crash record test: kernel panic, QEMU reboot with the same RAM, the log service saving the record and the developer bundle ([Live USB](live-usb.md#diagnostics)); it always runs after the main run |
 | `cargo xtask symbolize <file>` | addresses in a crash record, bundle or log to function names (kernel and programs) |

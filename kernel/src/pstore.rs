@@ -25,7 +25,12 @@ static REASON_LEN: AtomicUsize = AtomicUsize::new(0);
 static TEST_PANIC: AtomicBool = AtomicBool::new(false);
 
 /// Verze systemu do zaznamu.
-const VERSION: &str = concat!("MagnumOpus ", env!("CARGO_PKG_VERSION"));
+/// Verze s commitem doda xtask (`MO_VERSION`, nejvys 32 znaku pole
+/// zaznamu); bez xtask jen cislo verze.
+const VERSION: &str = match option_env!("MO_VERSION") {
+    Some(v) => v,
+    None => concat!("MagnumOpus ", env!("CARGO_PKG_VERSION")),
+};
 
 /// Prevezme oblast od loaderu a zaloguje, zda v ni je zaznam z minuleho
 /// behu.

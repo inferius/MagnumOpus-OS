@@ -32,6 +32,7 @@ mod qmp;
 mod symbolize;
 mod testdisks;
 mod usb;
+mod vmware;
 mod venus;
 
 use std::env;
@@ -61,6 +62,9 @@ prikazy:
            oddil); --list disky hostitele, --write <disk> zapis na
            flashku (s potvrzenim), --run start v QEMU jako flash disk,
            --test totez bez okna, --size <MiB> (vychozi 1024), --out <soubor>
+  vmware   obraz ziveho USB jako disk VMware: sestavi, prevede na VMDK,
+           zazalohuje a nahradi <slozka>/magnumopus.vmdk; --dir <slozka>
+           nebo MO_VMWARE_DIR; bezici VM odmitne
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
   new-driver <jmeno> --pci <vendor:device>
            kostra ovladace na driverkitu: kod, manifest, model a test
@@ -226,6 +230,7 @@ fn run_cli() -> Result<()> {
         crash_test: false,
     };
     let mut gpu_set = false;
+    let mut vmware_dir: Option<std::path::PathBuf> = None;
     let mut no_power = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -265,6 +270,10 @@ fn run_cli() -> Result<()> {
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--net-online") => opts.net_online = true,
+            Some("--dir") => {
+                let value = args.next().ok_or("--dir ocekava slozku")?;
+                vmware_dir = Some(std::path::PathBuf::from(value));
+            }
             Some("--audio") => {
                 let value = args.next().ok_or("--audio ocekava backend zvuku QEMU")?;
                 opts.audio = value.to_string_lossy().into_owned();
@@ -412,6 +421,7 @@ repeat = {}
         }
         Some("check") => check_kernel(opts.arch, &opts),
         Some("usb") => usb::command(&opts, usb_args.as_ref().unwrap()),
+        Some("vmware") => vmware::command(&opts, vmware_dir),
         Some("symbolize") => {
             let file = symbolize_file.ok_or("symbolize ocekava soubor (zaznam padu, balicek, log)")?;
             let a = opts.arch;
@@ -745,6 +755,12 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
     if opts.test && packages.contains(&"kernel") {
         cmd.args(["--features", "qemu-test"]);
     }
+    if packages.contains(&"kernel") {
+        // Verze a commit do jadra (log pri startu, zaznam padu). Jen jadru:
+        // zmena commitu tak neprekladá znovu cely userspace.
+        let (version, build) = build_info();
+        cmd.env("MO_VERSION", version).env("MO_BUILD", build);
+    }
     if user {
         // Userspace ma jine priznaky nez jadro (bez code-model=kernel
         // z .cargo/config.toml). Vlastni adresar, aby se buildy jadra
@@ -898,4 +914,26 @@ fn console_utf8() {
             SetConsoleOutputCP(65001);
         }
     }
+}
+
+/// Informace o sestaveni z gitu: (kratka verze do zaznamu padu, max 32
+/// znaku, napr. `MagnumOpus 0.1.0 130f2e5*`; uplny popis do logu, napr.
+/// `130f2e5* (2026-11-08, release)`). `*` = neulozene zmeny v kodu.
+/// Bez gitu `?`.
+pub fn build_info() -> (String, String) {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(workspace_root())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let commit = git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| String::from("?"));
+    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
+    let date = git(&["log", "-1", "--format=%cd", "--date=format:%Y-%m-%d"]).unwrap_or_default();
+    let mark = if dirty { "*" } else { "" };
+    let version = format!("MagnumOpus {} {commit}{mark}", env!("CARGO_PKG_VERSION"));
+    (version, format!("{commit}{mark} ({date})"))
 }
