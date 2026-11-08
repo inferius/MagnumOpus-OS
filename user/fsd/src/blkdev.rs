@@ -86,7 +86,9 @@ impl BlockDevice for BlkDev {
         if start + (data.len() / BLOCK_SIZE) as u64 > self.blocks {
             return Err(Error::OutOfRange);
         }
-        self.client.write(start * SECTORS_PER_BLOCK, data)
+        // Bez cekani na odpoved: vybere se pred dalsim ctenim nebo flush
+        // (poradi odpovedi = poradi pozadavku, viz `blockproto`).
+        self.client.write_queued(start * SECTORS_PER_BLOCK, data)
     }
 
     fn durability(&self) -> Durability {
