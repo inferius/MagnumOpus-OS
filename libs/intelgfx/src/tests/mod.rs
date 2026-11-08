@@ -341,7 +341,7 @@ fn ggtt_entries() {
     // Polozka: adresa | platna; LMEM bit 1.
     assert_eq!(s.get(regs::GGTT_OFFSET + 0x100 * 8), 0x8000_0001);
     gtt::map(&mut s, 0, 0x1000, 4096, true);
-    assert_eq!(gtt::read(&mut s, 0).unwrap().local, true);
+    assert!(gtt::read(&mut s, 0).unwrap().local);
 }
 
 #[test]

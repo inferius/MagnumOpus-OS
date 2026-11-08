@@ -132,7 +132,7 @@ impl Caps {
         let mut rates = alloc::vec::Vec::new();
         let mut edp_table = false;
         if let Some(t) = edp_rates {
-            for c in t.chunks_exact(2) {
+            for c in t.as_chunks::<2>().0 {
                 let v = u16::from_le_bytes([c[0], c[1]]) as u32;
                 if v == 0 {
                     break;

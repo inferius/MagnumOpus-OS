@@ -144,7 +144,7 @@ impl Cta {
     fn data_block(&mut self, tag: u8, p: &[u8]) {
         match tag {
             1 => {
-                for s in p.chunks_exact(3) {
+                for s in p.as_chunks::<3>().0 {
                     self.audio.push(Sad {
                         format: (s[0] >> 3) & 0x0F,
                         channels: (s[0] & 7) + 1,

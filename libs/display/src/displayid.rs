@@ -63,8 +63,8 @@ impl DisplayId {
                 return Err(Error::Truncated);
             }
             match tag {
-                0x03 => d.timings.extend(p.chunks_exact(20).filter_map(|t| timing(t, false))),
-                0x22 => d.timings.extend(p.chunks_exact(20).filter_map(|t| timing(t, true))),
+                0x03 => d.timings.extend(p.as_chunks::<20>().0.iter().filter_map(|t| timing(t, false))),
+                0x22 => d.timings.extend(p.as_chunks::<20>().0.iter().filter_map(|t| timing(t, true))),
                 0x00 | 0x20 => d.name = product_name(p),
                 _ => d.skipped_blocks += 1,
             }
