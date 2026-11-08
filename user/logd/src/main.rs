@@ -154,7 +154,8 @@ fn main(startup: Startup) -> i64 {
             Err(_) => {}
         }
         d.pump();
-        if time::now().saturating_sub(d.last_mirror) >= FAT_MIRROR.as_nanos() as u64 {
+        // Prvni kopie hned po startu, pak kazdych FAT_MIRROR.
+        if d.last_mirror == 0 || time::now().saturating_sub(d.last_mirror) >= FAT_MIRROR.as_nanos() as u64 {
             d.mirror();
         }
     }
