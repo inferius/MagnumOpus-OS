@@ -117,6 +117,18 @@
 .priv-app .who { display: flex; align-items: center; gap: 10px; font-weight: 600; }
 .priv-app .what { display: flex; gap: 12px; font-size: 12px; color: var(--c-ink-muted); margin: 6px 0 8px 30px; }
 .priv-app .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-left: 30px; }
+.w .mbtn.open { background: var(--c-accent-soft); color: var(--c-accent-ink); box-shadow: inset 0 0 0 1px var(--c-accent); }
+.dhint { margin-left: 10px; font-size: 11px; color: var(--c-ink-muted); white-space: nowrap; }
+.msearch { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; margin: 2px 2px 6px; border-radius: 8px; background: var(--c-surface-3); color: var(--c-ink-muted); font-size: 12px; }
+.cmdpanel { width: 320px; flex: none; border-left: 1px solid var(--c-border); background: var(--c-surface-2); font-size: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.cph { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--c-border); }
+.cph .sp { flex: 1; }
+.cptree { overflow: hidden; padding: 0 6px 8px; }
+.cpg { display: flex; align-items: center; gap: 6px; padding: 6px; font-weight: 600; }
+.cpi { display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px 4px 26px; border-radius: 6px; }
+.cpi small { display: block; color: var(--c-ink-muted); font-size: 11px; }
+.cpi .k { margin-left: auto; color: var(--c-ink-muted); white-space: nowrap; }
+[data-dmenu] .mi { cursor: pointer; }
 pre.api { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-card); padding: var(--s4); font: 12.5px/1.55 var(--font-mono); overflow-x: auto; }
 @media (max-width: 800px) { .pc { grid-template-columns: 1fr; } }
 </style>
@@ -224,18 +236,40 @@ menu([
 <script>
 document.addEventListener('mo-ready', function () {
   var SCR = { fhd: [[1920, 1080]], nb: [[1366, 768]], '4k': [[2560, 1440], [2560, 1440]] };
-  var state = { scr: 'fhd', sit: 'menu', cGlobal: false };
+  var state = { scr: 'fhd', sit: 'menu', cGlobal: false, dGroup: 1, dPin: false, dPanel: false };
   var MENU = ['Soubor', 'Úpravy', 'Zobrazit', 'Vložit', 'Formát', 'Nástroje', 'Nápověda'];
   function I(n, s) { return '<svg class="ic" style="width:' + (s || 20) + 'px;height:' + (s || 20) + 'px" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
   function wbtns() { return '<span class="wb">' + I('min', 14) + I('max', 14) + I('close', 14) + '</span>'; }
-  function menuPop(x, y) {
-    var it = [['undo', 'Zpět', 'Ctrl+Z'], ['redo', 'Znovu', 'Ctrl+Shift+Z'], '-', ['cut', 'Vyjmout', 'Ctrl+X'], ['copy', 'Kopírovat', 'Ctrl+C', 1], ['paste', 'Vložit', 'Ctrl+V'],
-      ['', 'Vložit jako tabulku', '', 0, 'dis'], '-', ['search', 'Najít&hellip;', 'Ctrl+F'], ['', 'Nahradit&hellip;', 'Ctrl+H'], '-', ['check', 'Zalamovat řádky', '', 0, 'ck'], ['', 'Převést na', '&rsaquo;']];
-    return '<div class="menu-pop" role="menu" aria-label="Úpravy" style="left:' + x + 'px;top:' + y + 'px">' + it.map(function (m) {
+  var GROUPS = [
+    [['file-plus', 'Nový', 'Ctrl+N'], ['folder', 'Otevřít&hellip;', 'Ctrl+O'], ['history', 'Nedávné', '&rsaquo;'], '-', ['save', 'Uložit', 'Ctrl+S'], ['app-pdf', 'Exportovat', '&rsaquo;'], '-', ['close', 'Zavřít', 'Ctrl+W']],
+    [['undo', 'Zpět', 'Ctrl+Z'], ['redo', 'Znovu', 'Ctrl+Shift+Z'], '-', ['cut', 'Vyjmout', 'Ctrl+X'], ['copy', 'Kopírovat', 'Ctrl+C', 1], ['paste', 'Vložit', 'Ctrl+V'],
+      ['', 'Vložit jako tabulku', '', 0, 'dis'], '-', ['search', 'Najít&hellip;', 'Ctrl+F'], ['', 'Nahradit&hellip;', 'Ctrl+H'], '-', ['check', 'Zalamovat řádky', '', 0, 'ck'], ['', 'Převést na', '&rsaquo;']],
+    [['check', 'Zalamovat řádky', '', 0, 'ck'], ['', 'Režim', '&rsaquo;'], '-', ['sidebar', 'Panel Příkazy', 'Ctrl+Shift+P', 0, 'panel'], ['zoom-in', 'Lupa', '&rsaquo;']],
+    [['image', 'Obrázek&hellip;', ''], ['grid', 'Tabulka', ''], ['link', 'Odkaz', 'Ctrl+L']],
+    [['', 'Tučné', 'Ctrl+B'], ['', 'Kurzíva', 'Ctrl+I'], ['', 'Nadpis', '&rsaquo;']],
+    [['check', 'Kontrola pravopisu', 'F7'], ['branch', 'Zkusit úpravy bokem', ''], ['agent', 'Požádat agenta o shrnutí', '']],
+    [['keyboard', 'Klávesové zkratky', ''], ['info', 'O aplikaci', '']]
+  ];
+  // d = varianta D: prvni polozka je hledani v prikazech aplikace, posledni pripnuti menu.
+  function menuPop(x, y, g, d) {
+    var it = GROUPS[g == null ? 1 : g].slice();
+    if (d) { it.push('-'); it.push(['pin', state.dPin ? 'Odepnout menu' : 'Připnout menu', '', 0, 'pin']); }
+    return '<div class="menu-pop' + (d ? ' dpop' : '') + '" role="menu" aria-label="' + MENU[g == null ? 1 : g] + '" style="left:' + x + 'px;top:' + y + 'px">' +
+      (d ? '<div class="msearch">' + I('search', 16) + '<span>Hledat příkaz&hellip;</span><span class="kb" style="margin-left:auto">Ctrl</span><span class="kb">K</span></div>' : '') + it.map(function (m) {
       if (m === '-') return '<hr>';
       var ic = m[4] === 'ck' ? '<span class="ck">' + I('check', 16) + '</span>' : m[0] ? I(m[0], 16) : '<span style="width:16px"></span>';
-      return '<div class="it' + (m[3] ? ' sel' : '') + (m[4] === 'dis' ? ' dis' : '') + '" role="menuitem">' + ic + m[1] + '<span class="k">' + m[2] + '</span></div>';
+      return '<div class="it' + (m[3] ? ' sel' : '') + (m[4] === 'dis' ? ' dis' : '') + '" role="menuitem"' + (m[4] === 'pin' ? ' data-pin' : '') + (m[4] === 'panel' ? ' data-panel' : '') + '>' + ic + m[1] + '<span class="k">' + m[2] + '</span></div>';
     }).join('') + '</div>';
+  }
+  function cmdPanel() {
+    var DESC = { 'Kopírovat': 'zkopíruje výběr do schránky', 'Zkusit úpravy bokem': 'změny v klonu, převezmeš je po kontrole', 'Požádat agenta o shrnutí': 'agent přečte dokument, nic nemění' };
+    return '<aside class="cmdpanel" aria-label="Příkazy"><div class="cph">' + I('sidebar', 16) + '<b>Příkazy</b><span class="sp"></span>' + I('close', 14) + '</div>' +
+      '<div class="msearch" style="margin:8px">' + I('search', 16) + '<span>Hledat v příkazech Editoru</span></div><div class="cptree">' +
+      MENU.slice(0, 6).map(function (m, g) {
+        return '<div class="cpg">' + I(g === state.dGroup ? 'down' : 'right', 14) + m + '</div>' + (g === state.dGroup || g === 5 ? GROUPS[g].filter(function (x) { return x !== '-'; }).map(function (x) {
+          return '<div class="cpi">' + (x[0] ? I(x[0], 14) : '<span style="width:14px"></span>') + '<span>' + x[1] + (DESC[x[1]] ? '<small>' + DESC[x[1]] + '</small>' : '') + '</span><span class="k">' + (x[2] && x[2] !== '&rsaquo;' ? x[2] : '') + '</span></div>';
+        }).join('') : '');
+      }).join('') + '</div></aside>';
   }
   function palette() {
     var rec = [['file-text', 'Exportovat jako PDF', 'Soubor', ['Ctrl', 'Shift', 'E']], ['check', 'Zalamovat řádky', 'Zobrazit', []]];
@@ -252,7 +286,7 @@ document.addEventListener('mo-ready', function () {
   function dTitle(app, menuOpen) {
     var sys = '<span class="badge">' + I('shield', 14) + app + '</span><span class="mbtn' + (menuOpen ? ' open' : '') + '" title="Menu (Alt)">' + I('menu', 18) + '</span>';
     var inner;
-    if (menuOpen) inner = '<span class="dmenu">' + MENU.map(function (m, i) { return '<span class="mi' + (i === 1 ? ' open' : '') + '">' + m + '</span>'; }).join('') + '</span>';
+    if (menuOpen) inner = '<span class="dmenu" data-dmenu>' + MENU.map(function (m, i) { return '<span class="mi' + (i === state.dGroup ? ' open' : '') + '" data-g="' + i + '">' + m + '</span>'; }).join('') + '<span class="dhint"><span class="kb">Esc</span> nebo &equiv; zavře</span></span>';
     else if (app === 'Editor') inner = '<span class="dtab on">' + I('file-text', 14) + 'zprava.md</span><span class="dtab">' + I('file-text', 14) + 'plan.md</span><span class="sp"></span>' + ['undo', 'redo', 'search', 'more'].map(function (n) { return '<span class="dtool">' + I(n, 16) + '</span>'; }).join('');
     else if (app === 'Soubory') inner = '<span class="dtool">' + I('left', 16) + '</span><span class="dtool">' + I('right', 16) + '</span><span class="dcrumb">Domů &rsaquo; <b>Dokumenty</b></span><span class="sp"></span><span class="dsearch">' + I('search', 14) + 'Hledat</span>';
     else inner = '<span class="dtab on">' + I('terminal', 14) + 'Relace 1</span><span class="dtab">build</span><span class="dtool">' + I('plus', 16) + '</span><span class="sp"></span>';
@@ -279,12 +313,12 @@ document.addEventListener('mo-ready', function () {
       var ex = full ? 0 : ax, ey = full ? 0 : ay, ew = full ? w : aw, eh = full ? h : ah;
       html += '<div class="w" style="left:' + ex + 'px;top:' + ey + 'px;width:' + ew + 'px;height:' + eh + 'px;' + (full ? 'border-radius:0;border:0' : '') + '">';
       if (!full) {
-        if (D) html += dTitle('Editor', state.sit === 'menu'); else html += '<div class="t">' + (inTitleMenu ? '<span class="mbtn' + (state.sit === 'menu' ? '' : '') + '" title="Menu">' + I('menu', 18) + '</span>' : '') + '<span class="badge">' + I('shield', 14) + 'Editor</span><span class="nm">zprava.md - Editor</span>' + wbtns() + '</div>';
+        if (D) { html += dTitle('Editor', state.sit === 'menu' && !state.dPin); if (state.dPin) html += '<div class="mrow" data-dmenu>' + MENU.map(function (m, i) { return '<span class="mi' + (state.sit === 'menu' && i === state.dGroup ? ' open' : '') + '" data-g="' + i + '">' + m + '</span>'; }).join('') + '<span class="find" data-pin>' + I('pin', 14) + 'Připnuto &middot; odepnout</span></div>'; } else html += '<div class="t">' + (inTitleMenu ? '<span class="mbtn' + (state.sit === 'menu' ? '' : '') + '" title="Menu">' + I('menu', 18) + '</span>' : '') + '<span class="badge">' + I('shield', 14) + 'Editor</span><span class="nm">zprava.md - Editor</span>' + wbtns() + '</div>';
         if (inTitleMenu) html += '<div class="mrow">' + MENU.map(function (m, i) { return '<span class="mi' + (state.sit === 'menu' && i === 1 ? ' open' : '') + '">' + m + '</span>'; }).join('') + '<span class="find">' + I('search', 14) + 'Hledat akce <span class="kb">Ctrl</span><span class="kb">K</span></span></div>';
       }
-      html += '<div class="body"><h3>Zpráva o vydání 0.6</h3>Kompozitor, okna a odznak důvěry jsou hotové. Následuje přehled oprávnění a systémové dialogy. Ikony mají nový styl s pastelovým přechodem a barvou podle kategorie.<br><br>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</div></div>';
+      html += (D && state.dPanel ? '<div style="display:flex;flex:1;min-height:0">' : '') + '<div class="body"><h3>Zpráva o vydání 0.6</h3>Kompozitor, okna a odznak důvěry jsou hotové. Následuje přehled oprávnění a systémové dialogy. Ikony mají nový styl s pastelovým přechodem a barvou podle kategorie.<br><br>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</div>' + (D && state.dPanel ? cmdPanel() + '</div>' : '') + '</div>';
       if (state.sit === 'menu' && inTitleMenu && !full) html += menuPop(ex + 70, ey + 40 + 32);
-      if (state.sit === 'menu' && D && !full) html += menuPop(ex + 196, ey + 40);
+      if (state.sit === 'menu' && D && !full) html += menuPop(ex + 196, ey + 40 + (state.dPin ? 32 : 0), state.dGroup, true);
     }
     // Horni lista
     if (top && !full && (mon === 0 || nMon === 1 || v === 'B' || v === 'C')) {
@@ -307,7 +341,7 @@ document.addEventListener('mo-ready', function () {
   }
   function metrics(v, w, h) {
     var top = v === 'B' || (v === 'C' && state.cGlobal);
-    var chrome = (top ? 30 : 0) + (v === 'B' ? 76 : 68) + 40 + (top || v === 'D' ? 0 : 32);
+    var chrome = (top ? 30 : 0) + (v === 'B' ? 76 : 68) + 40 + (top || (v === 'D' && !state.dPin) ? 0 : 32);
     var free = h - chrome;
     var menuDist = v === 'D' ? 'k menu: tlačítko vedle odznaku v titulku okna (nebo Alt)' : top ? 'k menu: horní okraj obrazovky (nekonečně vysoký cíl)' : 'k menu: 40 px pod horním okrajem okna';
     return '<div class="metrics"><span class="chip">systémové prvky na výšku: ' + chrome + ' px</span><span class="chip ok">pro obsah okna zbývá ' + free + ' px (' + Math.round(free / h * 100) + ' %)</span><span class="chip">' + menuDist + '</span></div>';
@@ -326,13 +360,19 @@ document.addEventListener('mo-ready', function () {
     var mons = SCR[state.scr];
     document.getElementById('variants').innerHTML = V.map(function (v) {
       return '<section class="variant" aria-labelledby="v' + v.id + '"><h2 id="v' + v.id + '">' + v.name + '</h2>' +
-        (v.id === 'C' ? '<div class="settings-demo">' + I('settings', 18) + 'Nastavení &rsaquo; Vzhled &rsaquo; <b>Globální lišta s menu nahoře</b><button class="switch" role="switch" id="c-sw" aria-checked="' + state.cGlobal + '" aria-label="Globální lišta s menu nahoře"></button></div>' : '') +
+        (v.id === 'D' ? '<div class="hstack" style="gap:var(--s3)"><div class="settings-demo">' + I('pin', 18) + 'Nastavení &rsaquo; Vzhled &rsaquo; <b>Připnout menu</b> (pro aplikaci i globálně)<button class="switch" role="switch" id="d-pin" aria-checked="' + state.dPin + '" aria-label="Připnout menu"></button></div>' +
+    '<div class="settings-demo">' + I('sidebar', 18) + '<b>Panel Příkazy</b> (z menu Zobrazit)<button class="switch" role="switch" id="d-panel" aria-checked="' + state.dPanel + '" aria-label="Panel Příkazy"></button></div></div>' +
+    '<p class="note" style="margin:var(--s2) 0 0">Při otevřeném menu přejeď myší po skupinách (Soubor, Úpravy...), přepínají se jako klasický řádek menu. Alt otevře menu rovnou, Esc nebo druhý klik na &equiv; ho zavře; tlačítko &equiv; zůstává na místě ve stisknutém stavu.</p>' : '') +
+  (v.id === 'C' ? '<div class="settings-demo">' + I('settings', 18) + 'Nastavení &rsaquo; Vzhled &rsaquo; <b>Globální lišta s menu nahoře</b><button class="switch" role="switch" id="c-sw" aria-checked="' + state.cGlobal + '" aria-label="Globální lišta s menu nahoře"></button></div>' : '') +
         metrics(v.id, mons[0][0], mons[0][1]) +
         '<div class="fit" data-w="' + (mons.reduce(function (a, m) { return a + m[0]; }, 0) + 24 * (mons.length - 1)) + '" data-h="' + mons[0][1] + '"><div class="monitors">' +
         mons.map(function (m, i) { return screen(v.id, m[0], m[1], i, mons.length); }).join('') + '</div></div>' +
         '<div class="pc" style="margin-top:var(--s4)"><div class="card"><h3>Výhody</h3><ul>' + v.pro.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>' +
         '<div class="card"><h3>Nevýhody</h3><ul>' + v.con.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div></div></section>';
     }).join('') + '<p class="note" style="margin-top:var(--s6)"><b>Doporučení koordinátora:</b> D (titulek aplikace, systémový odznak, tlačítko menu a tlačítka okna) s paletou Ctrl+K; globální horní lišta jako volba v Nastavení. Vybírá uživatel.</p>';
+    var dp = document.getElementById('d-pin'), dq = document.getElementById('d-panel');
+    if (dp) window.MO_SWITCH(dp, function (on) { state.dPin = on; render(); });
+    if (dq) window.MO_SWITCH(dq, function (on) { state.dPanel = on; render(); });
     var sw = document.getElementById('c-sw');
     if (sw) window.MO_SWITCH(sw, function (on) { state.cGlobal = on; render(); });
     fit();
@@ -342,6 +382,12 @@ document.addEventListener('mo-ready', function () {
     document.querySelectorAll('.fit').forEach(function (f) {
       var s = f.clientWidth / +f.dataset.w, m = f.querySelector('.monitors');
       m.style.transform = 'scale(' + s + ')'; f.style.height = (+f.dataset.h * s) + 'px';
+    });
+    document.querySelectorAll('.dpop').forEach(function (p) {
+      var scr = p.closest('.scr'), mi = scr.querySelector('[data-dmenu] .mi.open');
+      if (!mi) return;
+      var s = scr.getBoundingClientRect().width / scr.offsetWidth, r = mi.getBoundingClientRect(), rs = scr.getBoundingClientRect();
+      p.style.left = ((r.left - rs.left) / s) + 'px'; p.style.top = ((r.bottom - rs.top) / s + 4) + 'px';
     });
     if (state.scr === '4k' && state.sit !== 'full') {
       ['B', 'C'].forEach(function (id) {
@@ -357,6 +403,14 @@ document.addEventListener('mo-ready', function () {
   window.MO_SEG(document.getElementById('g-scr'), function (v) { state.scr = v; render(); });
   window.MO_SEG(document.getElementById('g-sit'), function (v) { state.sit = v; render(); });
   window.addEventListener('resize', fit);
+  document.getElementById('variants').addEventListener('mouseover', function (e) {
+    var mi = e.target.closest('[data-dmenu] .mi');
+    if (mi && +mi.dataset.g !== state.dGroup) { state.dGroup = +mi.dataset.g; state.sit = 'menu'; render(); }
+  });
+  document.getElementById('variants').addEventListener('click', function (e) {
+    if (e.target.closest('[data-pin]')) { state.dPin = !state.dPin; render(); }
+    else if (e.target.closest('[data-panel]')) { state.dPanel = !state.dPanel; render(); }
+  });
   render();
 });
 </script>
