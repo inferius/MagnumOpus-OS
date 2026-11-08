@@ -131,7 +131,7 @@ o režimu); defragmentace přeskakuje sdílené, komprimované a předalokované
 extenty; komprese je ve výchozím stavu **vypnutá** (na NVMe by zpomalila
 dlouhý zápis až několikrát).
 
-### Fáze 4a: šifrované trezory (návrh, `INCOMPAT_VAULT`)
+### Fáze 4a: šifrované trezory (návrh, `INCOMPAT_VAULT`) [navrženo]
 
 > **Změna proti v3 (fáze 3):** návrh, zatím bez kódu. Dataset může být
 > **trezor**: obsah, jména a metadata šifrované (XChaCha20-Poly1305 nebo

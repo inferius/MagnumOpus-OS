@@ -297,6 +297,8 @@ Zásady (odsouhlasené):
 > na Argon2id kvůli jednomu klientovi; prozrazený obnovovací klíč musí jít
 > vyměnit bez přešifrování dat.
 
+**Stav:** [navrženo] - celá kapitola; nic z ní zatím není implementováno.
+
 Trezor = **dataset se šifrováním**: obsah souborů, jména, metadata
 (velikosti, časy, oprávnění, atributy), žurnál, koš i snapshoty a klony.
 Kryptografie je převzatá z RustCrypto (`chacha20poly1305`, `aes-gcm`,
@@ -329,10 +331,22 @@ HKDF(MK, účel) ──> klíč dat, klíč metadat, klíč jmen deduplikace,
 | Druh | KEK | Poznámka |
 |---|---|---|
 | heslo | Argon2id(heslo, sůl, m, t, p) v klientovi | výchozí m = 256 MiB, t = 3, p = 1 (jako accountd); parametry uložené |
-| **obnovovací klíč** | HKDF(256 náhodných bitů) | **povinný**: trezor bez něj nejde vytvořit a poslední nejde odebrat; uživateli se ukáže jen jednou (48 znaků base32 s kontrolními znaky) |
+| **obnovovací klíč** | HKDF(256 náhodných bitů) | **povinný**: trezor bez něj nejde vytvořit a poslední nejde odebrat; uživateli se ukáže jen jednou; formát níže |
 | FIDO2 | hmac-secret(sůl) z bezpečnostního klíče | uloženo id přihlašovacích údajů a sůl; klient obsluhuje klíč přes accountproto/ctap |
 | služba | HKDF(klíč od služby) | domov uživatele: klíč dodá accountd přes init; accountd má vlastní obaly pro každou metodu přihlášení a vlastní obnovovací klíč, proto u trezoru druhu domov FS obnovovací ochránce nevynucuje |
 | TPM | - | zatím jen rozhraní (`NOT_SUPPORTED`); nikdy jediný ochránce |
+
+**Zápis obnovovacího klíče** [navrženo]: 256 náhodných bitů v base32
+(Crockford: číslice a písmena bez I, L, O, U; při zadání se nerozlišuje
+velikost písmen a O/I/L se čtou jako 0/1/1). Base32 nese 5 bitů na znak,
+takže 256 bitů potřebuje ⌈256 / 5⌉ = **52 datových znaků** (260 bitů,
+poslední 4 bity jsou nulová výplň). Za ně **4 kontrolní znaky** = 20 bitů
+kontrolního součtu (prvních 20 bitů BLAKE3 z 32 bajtů klíče): překlep
+odhalí s pravděpodobností 1 - 2^-20 a rozhraní ukáže, ve které skupině
+nejspíš je. Celkem **56 znaků** ve **14 skupinách po 4** oddělených
+pomlčkou = 69 znaků na řádku, např. `7K3M-...-QX2P` (14 skupin).
+Entropie se nezmenšuje: 256 bitů je stejná síla jako hlavní klíč, kratší
+klíč by byl nejslabším místem trezoru.
 
 Ochránce smí přidat, odebrat nebo přejmenovat jen ten, kdo trezor právě
 odemkl (FS zná MK) a má právo *Spravovat* ke kořeni trezoru.

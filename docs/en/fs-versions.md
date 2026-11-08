@@ -135,7 +135,7 @@ only once the mode is decided); defragmentation skips shared, compressed and
 preallocated extents; compression is **off** by default (on NVMe it would
 slow a long write several times).
 
-### Phase 4a: encrypted vaults (design, `INCOMPAT_VAULT`)
+### Phase 4a: encrypted vaults (design, `INCOMPAT_VAULT`) [designed]
 
 > **Change from v3 (phase 3):** a design, no code yet. A dataset can be
 > a **vault**: contents, names and metadata encrypted (XChaCha20-Poly1305

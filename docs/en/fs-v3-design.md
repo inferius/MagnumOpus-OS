@@ -308,6 +308,8 @@ Principles (agreed):
 > Argon2id for one client; a leaked recovery key must be replaceable
 > without re-encrypting the data.
 
+**Status:** [designed] - the whole chapter; none of it is implemented yet.
+
 A vault = **a dataset with encryption**: file contents, names, metadata
 (sizes, times, permissions, attributes), the journal, the trash and its
 snapshots and clones. The cryptography comes from RustCrypto
@@ -343,10 +345,22 @@ HKDF(MK, purpose) ──> data key, metadata key, deduplication key,
 | Kind | KEK | Note |
 |---|---|---|
 | password | Argon2id(password, salt, m, t, p) in the client | default m = 256 MiB, t = 3, p = 1 (like accountd); parameters stored |
-| **recovery key** | HKDF(256 random bits) | **mandatory**: a vault cannot be created without one and the last one cannot be removed; shown to the user only once (48 base32 characters with check characters) |
+| **recovery key** | HKDF(256 random bits) | **mandatory**: a vault cannot be created without one and the last one cannot be removed; shown to the user only once; format below |
 | FIDO2 | hmac-secret(salt) from the security key | the credential id and salt are stored; the client drives the key through accountproto/ctap |
 | service | HKDF(key from the service) | the user's home: accountd supplies the key through init; accountd has its own wraps for every sign-in method and its own recovery key, so for a home vault the FS does not enforce a recovery protector |
 | TPM | - | only an interface for now (`NOT_SUPPORTED`); never the only protector |
+
+**Recovery key notation** [designed]: 256 random bits in base32
+(Crockford: digits and letters without I, L, O, U; input is
+case-insensitive and O/I/L are read as 0/1/1). Base32 carries 5 bits per
+character, so 256 bits need ⌈256 / 5⌉ = **52 data characters** (260 bits,
+the last 4 bits are zero padding). They are followed by **4 check
+characters** = 20 bits of checksum (the first 20 bits of BLAKE3 over the
+32 key bytes): a typo is caught with probability 1 - 2^-20 and the UI shows
+which group it most likely is in. In total **56 characters** in **14
+groups of 4** separated by dashes = 69 characters on a line, e.g.
+`7K3M-...-QX2P` (14 groups). The entropy is not reduced: 256 bits matches
+the master key, a shorter key would be the vault's weakest point.
 
 Only someone who has just unlocked the vault (the FS knows MK) and has
 the *Manage* right to the vault root may add, remove or rename a
