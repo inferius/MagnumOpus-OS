@@ -297,19 +297,255 @@ Principles (agreed):
 
 ## Encrypted vaults
 
-- A vault = **a dataset with encryption**: data, names, metadata and its
-  snapshots (XChaCha20-Poly1305 or AES-256-GCM depending on the CPU; the
-  master key is random and unlocked by "protectors": a password
-  (Argon2id), a mandatory recovery key, optionally FIDO2 or the TPM (see
-  [More safeguards](#more-safeguards); never the TPM alone)).
-- Checksums in pointers cover the encrypted data + the cipher's
-  authentication tag, so scrub and self-healing work without the key.
-- **A locked vault** shows up as a folder with a lock; neither the content
-  nor the number of files is visible. The key is only in memory after
-  unlocking.
-- **Instant secure deletion:** deleting the key = the data is irreversibly
-  unreadable.
-- Order: compression before encryption; deduplication only within the vault.
+> **Change from the v3 design (phase 4, detailed design):** previously only
+> bullet points. Newly decided: without the key **only the pointers** stay
+> readable (block locations and their checksums, like ZFS), **the client
+> derives the key from a password and FIDO2**, the FS only gets a 32-byte
+> wrapping key, **both ciphers right away** (XChaCha20-Poly1305 and
+> AES-256-GCM), **the recovery key is a wrap** of the master key (like
+> BitLocker and LUKS). **Why:** scrub, self-healing, deletion and backups
+> must work for a locked vault too; fsd must not stall for half a second on
+> Argon2id for one client; a leaked recovery key must be replaceable
+> without re-encrypting the data.
+
+**Status:** [designed] - the whole chapter; none of it is implemented yet.
+
+A vault = **a dataset with encryption**: file contents, names, metadata
+(sizes, times, permissions, attributes), the journal, the trash and its
+snapshots and clones. The cryptography comes from RustCrypto
+(`chacha20poly1305`, `aes-gcm`, `hkdf`, `argon2`, `zeroize`), none of our
+own.
+
+### Keys
+
+```text
+protector (password / recovery key / FIDO2 / service / TPM)
+   │ the client derives the wrapping key KEK (32 B): Argon2id, hmac-secret, HKDF
+   ▼
+vault keyring (not encrypted, in the root dataset)
+   │ AEAD(KEK) wrap ──> master key MK (256 bits, random, only in memory)
+   ▼
+HKDF(MK, purpose) ──> data key, metadata key, deduplication key,
+                      intent log key (a separate key per purpose)
+```
+
+- **The master key** is random, created with the vault and never changes
+  (replacing it = a new vault and a copy). Changing protectors does not
+  re-encrypt the data, it only changes the keyring.
+- **The wrapping key (KEK)** comes from the client: the FS never sees the
+  password. The derivation parameters (salt, Argon2id m/t/p, FIDO2
+  credential id) are stored by the FS with the protector so the client
+  knows them on another computer too.
+- **Clones and snapshots of a vault** share the master key (shared blocks
+  must be readable). A clone outside a vault with the same key is not
+  possible.
+
+### Protectors
+
+| Kind | KEK | Note |
+|---|---|---|
+| password | Argon2id(password, salt, m, t, p) in the client | default m = 256 MiB, t = 3, p = 1 (like accountd); parameters stored |
+| **recovery key** | HKDF(256 random bits) | **mandatory**: a vault cannot be created without one and the last one cannot be removed; shown to the user only once; format below |
+| FIDO2 | hmac-secret(salt) from the security key | the credential id and salt are stored; the client drives the key through accountproto/ctap |
+| service | HKDF(key from the service) | the user's home: accountd supplies the key through init; accountd has its own wraps for every sign-in method and its own recovery key, so for a home vault the FS does not enforce a recovery protector |
+| TPM | - | only an interface for now (`NOT_SUPPORTED`); never the only protector |
+
+**Recovery key notation** [designed]: 256 random bits in base32
+(Crockford: digits and letters without I, L, O, U; input is
+case-insensitive and O/I/L are read as 0/1/1). Base32 carries 5 bits per
+character, so 256 bits need ⌈256 / 5⌉ = **52 data characters** (260 bits,
+the last 4 bits are zero padding). They are followed by **4 check
+characters** = 20 bits of checksum (the first 20 bits of BLAKE3 over the
+32 key bytes): a typo is caught with probability 1 - 2^-20 and the UI shows
+which group it most likely is in. In total **56 characters** in **14
+groups of 4** separated by dashes = 69 characters on a line, e.g.
+`7K3M-...-QX2P` (14 groups). The entropy is not reduced: 256 bits matches
+the master key, a shorter key would be the vault's weakest point.
+
+Only someone who has just unlocked the vault (the FS knows MK) and has
+the *Manage* right to the vault root may add, remove or rename a
+protector.
+
+### What is encrypted and what is not
+
+| Visible without the key | Encrypted |
+|---|---|
+| that the dataset is a vault, its name in the parent folder, the protectors (kind, name, parameters) | file and folder names, directory structure |
+| total space used by the vault | sizes, times, permissions, attributes, number of files |
+| block locations, extent lengths and their checksums (for scrub and self-healing) | file contents (also small ones in a leaf), symlinks |
+| number of tree nodes (rough amount of metadata) | change journal, trash, snapshot names and metadata |
+
+⚠️ **Knowingly accepted leak:** extent lengths and the node count reveal
+the rough size distribution of large files and the amount of metadata
+(same as ZFS). Not the names, the contents or the exact number of files.
+Compression before encryption reveals compressibility (the compressed
+length); in a vault compression is therefore off by default like
+everywhere, and turning it on in a vault shows a warning.
+
+### On disk
+
+- **A vault tree node:** the header is not encrypted (magic, level,
+  generation, an "encrypted" flag, nonce, a 16 B authentication tag). An
+  internal node has **only the child pointers** in the clear (location,
+  length, checksum, copy, generation); the child keys (oid, item kind) are
+  encrypted. A leaf has a plaintext **pointer table** (every block it
+  refers to: a data extent with block checksums, a snapshot root, a node
+  of a shared tree) and an encrypted part with the items, which refer to
+  the table by index.
+- **A data extent:** every block is a separate AEAD (reading 4 KiB does
+  not need to decrypt the whole extent). The 16 B tag per block is in the
+  encrypted part of the leaf, the checksum of the encrypted block
+  (XXH3/BLAKE3) in the plaintext table. Overhead 32 B per 4 KiB block =
+  0.8 %.
+- **Checksums cover the encrypted data**, so scrub, self-healing from the
+  copy, moving blocks (defragmentation) and send work without the key. The
+  tag also catches a deliberate change the keyless checksum cannot (an
+  attacker can recompute XXH3): a changed ciphertext = `CORRUPTED`, never
+  forged data.
+- **Binding to the tree:** a node's AEAD takes as additional data (AAD)
+  the plaintext header, the vault id and the **checksums, lengths and
+  generations** from the pointer table (not the location). A subtree
+  therefore cannot be swapped for another or an older one, but a block can
+  be moved (defragmentation, self-healing) without the key - only the
+  location changes. Same for the data block tags: the table with checksums
+  is in the leaf's AAD. ⚠️ Rolling the **whole** vault back to an older
+  valid state (a forged dataset record in the root dataset) cannot be
+  detected without the key - same as ZFS; only the verified system (root
+  signature) prevents that.
+- **Nonces:**
+  - XChaCha20-Poly1305: a random 192-bit base per extent or node, block
+    `i` = base XOR `i` (stateless random nonces, negligible collisions),
+  - AES-256-GCM: 96 bits = **epoch** (32 bits) + an in-memory counter (64
+    bits). The epoch is in the keyring and is increased and saved by a
+    commit on every unlock, **before anything is encrypted**. After a crash
+    the counter does not repeat (a new epoch), so nonce reuse cannot happen
+    even after a power cut. A random 96-bit nonce would not be enough for
+    billions of blocks.
+  - The cipher is chosen when the vault is created: AES-256-GCM when the
+    CPU has hardware AES (AES-NI, ARMv8 Crypto), otherwise
+    XChaCha20-Poly1305; stored in the keyring.
+- **The keyring** (item `KEYRING` in the root dataset + copy
+  `KEYRING_COPY`; with metadata 2x = 4 copies on disk): version, cipher,
+  epoch, MK fingerprint (HKDF, not MK itself), protectors (id, kind, name,
+  parameters, nonce, wrapped MK + tag). Changing protectors = one commit
+  (both items at once): after a crash the whole old or the whole new
+  keyring is valid.
+- **Intent log:** in a vault `fsync` does a **commit** instead of a log
+  write (the log is replayed on mount, when the vault is not unlocked yet).
+  Cost: `fsync` in a vault ~25-50 ms instead of ~5 ms in QEMU.
+- Feature flag `INCOMPAT_VAULT` (an older driver does not mount a volume
+  with a vault - it would write unencrypted).
+
+### A locked vault
+
+- In the parent folder's listing it is an entry of kind `Dataset` with
+  a **locked** flag; `stat` of the root, a listing and opening anything
+  inside return `LOCKED`. The content size and number of files are not
+  reported (the vault's total used space is visible only in disk
+  management).
+- **Locking** (`VAULT_LOCK`, sign-out, sleep depending on the profile):
+  a commit of the vault's changes, dropping decrypted nodes and data from
+  the cache, zeroing MK and the derived keys (`zeroize`). Open handles then
+  return `LOCKED` (clients' persistent handles go through `REOPEN` after an
+  unlock).
+- **An fsd crash** = all vaults locked (the keys were only in memory).
+  accountd unlocks the home again: it keeps the home key for the duration
+  of the session and after an fsd restart (`Happened::Restarted`) sends it
+  through init again. Other vaults must be unlocked by the user.
+- Scrub, self-healing, defragmentation, backups (send) and **deleting the
+  whole vault** work while locked (only through pointers). Deleting a
+  snapshot or a file inside works only when unlocked.
+
+### Instant secure deletion
+
+`VAULT_DESTROY` first deletes the keyring (a commit) - from then on the
+data is unreadable even for someone who knows the password or the
+recovery key - and then frees the blocks by walking the pointers (without
+the key, in the background). ⚠️ Copies of MK may survive in the vault's
+clones (shared key) and in an exported keyring backup; the deletion says
+so explicitly. On an SSD the blocks physically disappear only after TRIM.
+
+### Compression and deduplication
+
+- Compression **before** encryption (encrypted data does not compress).
+- Deduplication **only inside the vault and its clones**: the index uses
+  a keyed hash (HMAC with the deduplication key from MK) instead of the
+  content hash, so the index does not reveal a match with data outside
+  the vault. An instant copy (reflink) between a vault and the outside = an
+  ordinary copy (decrypt and encrypt with another key).
+
+### Protocol (fsproto, new operations)
+
+| Operation | Who | Meaning |
+|---|---|---|
+| `VAULT_CREATE` | *Create* right in the parent | path, cipher (auto), protectors (kind, name, parameters, KEK); without a recovery protector (or a service kind) `INVALID_ARGS`; returns the vault id |
+| `VAULT_UNLOCK` | anyone who can see the vault | protector id, KEK; a wrong KEK = `ACCESS_DENIED` (slowed down after failures); unlocking applies system-wide, access is still governed by permissions |
+| `VAULT_LOCK` | *Manage* or whoever unlocked it | see locking |
+| `VAULT_STATUS` | anyone who can see it | `locked` / `unlocked`, cipher, protectors without wraps (for the client: salt, parameters) |
+| `VAULT_ADD_PROTECTOR` / `VAULT_REMOVE_PROTECTOR` | unlocked + *Manage* | the last recovery protector cannot be removed |
+| `VAULT_EXPORT_KEYRING` | unlocked + *Manage* | the keyring as a file (a backup against a damaged keyring; useless without a protector) |
+| `VAULT_DESTROY` | *Manage* + *Delete* | instant secure deletion |
+
+The user's home (accountd, agreed with the accounts thread):
+
+- the home key = 32 B from a CSPRNG (not derived from the password); the
+  service protector's KEK = HKDF(home key, `"mo-vault-service-v1"` ||
+  dataset id) - bound to the specific vault. accountd keeps the home key
+  wraps for the sign-in methods and the home's recovery key,
+- `ENCRYPT_HOME` (only a new or empty home, otherwise `NOT_SUPPORTED` until
+  conversion exists) or `CREATE_HOME` with a key -> init `VAULT_CREATE`
+  with a service-kind protector,
+- `UNLOCK_HOME { uid, key }` -> init `VAULT_UNLOCK`; init zeroes the key
+  after passing it on,
+- locking the screen does **not** lock the vault (processes keep running);
+  `VAULT_LOCK` only when the user's last session signs out (the strict
+  profile's "lock on sleep" goes the same way + a new authentication),
+- fsd crash: accountd keeps the home key (`Zeroizing`) while the user has
+  at least one session; init sends it the event `FS_RESTARTED`
+  (accountproto op 61) and accountd sends `UNLOCK_HOME` again. If accountd
+  crashed first (keys lost), the home stays locked and the screen asks for
+  a new authentication (without signing out).
+
+### ⚠️ Risk of data loss
+
+| Situation | Consequence | Protection |
+|---|---|---|
+| forgotten password without a recovery key | **the vault's data is lost for good** - nobody can recover it (that is the point of encryption) | the recovery key is mandatory; creation shows it and has it written down and verified (typed back); settings warn about a vault with a single protector besides recovery |
+| damaged keyring | neither the password nor the recovery key helps | the keyring 2x as an item and with metadata 2x = 4 copies; self-healing from a copy; keyring export (`VAULT_EXPORT_KEYRING`) - the backup is worthless without a protector and may go to the cloud |
+| power cut while changing protectors | - | the change is one commit: the whole old or the whole new keyring; a new protector is added before the old one is removed (the UI does not allow the opposite order) |
+| power cut while unlocking (AES-GCM epoch) | - | the epoch is saved by a commit before anything is encrypted |
+| fsd crash, power cut | the vault is locked, unsaved changes as everywhere (since the last commit) | `fsync` in a vault = a commit |
+| key in memory | readable from an fsd memory dump or from swap | keys only in `Zeroizing`, zeroed on lock; there is no swap yet (when there is, it must be encrypted); fsd memory dumps only for administration |
+| deleting a vault by mistake | `VAULT_DESTROY` is irreversible at once | the UI asks for confirmation with the vault's name; immutable snapshots of the parent dataset do not protect the vault (it is a separate dataset), so the file manager first offers a keyring export and a backup |
+
+### Tests
+
+- model: random operations in a vault against a model, locking and
+  unlocking, snapshots and clones, consistency check,
+- power cuts: during creation, protector changes, unlocking (epoch),
+  a commit, locking and vault deletion,
+- wrong key: `ACCESS_DENIED`, no data, slow-down,
+- tampering: flipping a bit in an encrypted block and node with a
+  **correctly recomputed checksum** must end in `CORRUPTED`; so must
+  swapping two blocks or subtrees of the same vault and a subtree from an
+  older snapshot (AAD); moving a block without the key (defragmentation) on
+  the other hand must pass,
+- leaks: a vault file's name or content must not be found in the raw disk
+  image; a locked vault reports neither size nor count,
+- scrub and self-healing of a locked vault, deleting a locked vault frees
+  the space,
+- nonces: all nonces of a test run unique (AES-GCM also after a power cut),
+- QEMU: a vault through fsd, locking with open handles, an fsd crash.
+
+### Implementation order (phase 4a)
+
+1. keyring, protectors, protocol, locked view (data not encrypted yet -
+   only the skeleton and interface tests),
+2. data encryption (extents, small files in a leaf),
+3. metadata encryption (nodes with a pointer table), journal, trash,
+   snapshots,
+4. deduplication in a vault, keyless scrub and deletion, `fsync` = commit,
+5. accountd integration (home), QEMU tests.
 
 ## Indexes, tags, search
 

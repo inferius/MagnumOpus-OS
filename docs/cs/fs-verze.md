@@ -131,6 +131,25 @@ o režimu); defragmentace přeskakuje sdílené, komprimované a předalokované
 extenty; komprese je ve výchozím stavu **vypnutá** (na NVMe by zpomalila
 dlouhý zápis až několikrát).
 
+### Fáze 4a: šifrované trezory (návrh, `INCOMPAT_VAULT`) [navrženo]
+
+> **Změna proti v3 (fáze 3):** návrh, zatím bez kódu. Dataset může být
+> **trezor**: obsah, jména a metadata šifrované (XChaCha20-Poly1305 nebo
+> AES-256-GCM), hlavní klíč odemykaný ochránci (heslo, povinný obnovovací
+> klíč, FIDO2, klíč služby pro domov; TPM jen rozhraní). **Proč:**
+> soukromí dat na ukradeném nebo vyřazeném disku a šifrovaný domov
+> uživatele (služba účtů). Podrobně: [návrh, Šifrované
+> trezory](navrh-fs-v3.md#šifrované-trezory).
+
+| Oblast | Fáze 3 | Fáze 4a (plán) | Proč |
+|---|---|---|---|
+| uzel stromu | celý nešifrovaný | v trezoru: nešifrovaná hlavička a ukazatele, šifrované klíče a položky; nonce a značka v hlavičce | scrub, samoléčení a mazání bez klíče; jména a metadata skrytá |
+| extent | součty bloků | v trezoru: součty nad šifrovanými bloky (nešifrovaná tabulka listu) + značka AEAD na blok (šifrovaná část) | integrita bez klíče, autenticita s klíčem |
+| položky kořenového datasetu | 1-29 | + `KEYRING`, `KEYRING_COPY` (záznam klíčů trezoru) | ochránci musí být čitelní i u zamčeného trezoru; 4 kopie proti ztrátě klíče |
+| záznam datasetu | bez šifrování | + příznak trezoru, id záznamu klíčů | poznat trezor bez klíče |
+| intent log | všechny datasety | trezor ho nepoužívá (`fsync` = commit) | log se přehrává před odemčením |
+| protokol | op 110-118 | + operace `VAULT_*` (čísla při implementaci) | vytvoření, odemčení, zamčení, ochránci, bezpečné smazání |
+
 ### Zbývá ve v3
 
 Fáze 4-6 (ochrana, ostatní, cloud) - pořadí v [návrhu](navrh-fs-v3.md#pořadí-implementace).
