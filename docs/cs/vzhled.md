@@ -260,7 +260,7 @@ i proti výplni):
 V tlačítkách, štítcích, odznaku a dalších ovládacích prvcích jsou ikony
 jednobarevné podle textu a bez výplně (CSS proměnné `--ic-fill`,
 `--ic-ink`). Ve vysokém kontrastu výplň zmizí a kresba má jasnou barvu
-kategorie. Sada má 162 ikon (`design/assets/mo.js`, generuje
+kategorie. Sada má 226 ikon (162 ze zdrojové sady + 64 doplněných; `design/assets/mo.js`, generuje
 `node design/tools/build-icons.mjs <svg/24>` ze zdrojové sady); ID `ic-*`
 se nemění. Překreslené: USB, porovnat změny, konflikt změn, touchpad.
 Broskvová se pro ikony nepoužívá (patří odznaku důvěry).
