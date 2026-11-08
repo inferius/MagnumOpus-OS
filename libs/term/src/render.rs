@@ -182,6 +182,15 @@ pub fn value(v: &Value, t: &Theme, now: Option<i64>) -> String {
             out
         }
         Value::Nothing => String::new(),
+        // Samostatny text (help, explain, vystup prikazu) i s konci radku;
+        // jen bunka tabulky je jednoradkova.
+        Value::Str(s) => {
+            let mut out = s.clone();
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out
+        }
         other => {
             let mut out = String::new();
             styled(&mut out, cell_style("", other, other, t, now), &cell_text(other));
