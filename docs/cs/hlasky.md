@@ -120,6 +120,8 @@ porušený vnitřní předpoklad (chyba jádra).
 | `nvme BB:ZZ.F: nepodporovany radic (CAP ...)` | Řadič neumí sadu příkazů NVM, stránku 4 KiB nebo má doorbelly mimo BAR. |
 | `nvme: jmenny prostor N ma metadata ... B na sektor - nepodporovano, vynechan` | Jmenný prostor je naformátovaný s metadaty (T10 PI). Přeformátovat na formát bez metadat (nástroj výrobce, `nvme format`). |
 | `nvme: jmenny prostor N ma sektor ... B - nepodporovano, vynechan` | Sektor větší než jeden přenos řadiče (`MDTS`) nebo než 32 KiB. Běžné sektory 512 B a 4 KiB fungují. |
+| `nvme: aktivni jmenne prostory: [...]` | Čísla jmenných prostorů, které řadič hlásí (VMware čísluje podle pozice disku, např. `nvme0:1` = 2). |
+| `nvme: I/O prikaz 0x01 (ns N, LBA L, CDW12 C) skoncil stavem SCT s SC c -> ...` | Řadič příkaz odmítl. Opcode 0x01 zápis, 0x02 čtení, 0x00 flush, 0x09 TRIM. SCT 0 = obecná chyba (SC 0x01 neplatný opcode, 0x02 neplatné pole, 0x0B neplatný jmenný prostor, 0x20 ochrana proti zápisu, 0x80 LBA mimo rozsah), SCT 2 = chyba média (SC 0x80 chyba zápisu, 0x81 neopravitelné čtení). `DNR` = opakování nepomůže. Loguje se prvních 8 chyb a pak 16., 32. ... |
 | `nvme: radic neodpovida spravne (...), dalsi pozadavky odmitnuty` | Příkaz nedoběhl do 10 s nebo řadič vrátil cizí číslo příkazu. Řadič je vypnutý (nepoužívá DMA); disk do restartu nefunguje. |
 | `ahci BB:ZZ.F: MSI nelze zapnout (...), obsluha dotazovanim` | Řadič nemá MSI (nebo zpráva nejde zapsat); ovladač funguje dotazováním, jen s vyšší zátěží CPU. |
 | `ahci: port P: disk ... neumi LBA48 - vynechan` | Velmi starý disk bez LBA48. Nepodporováno. |

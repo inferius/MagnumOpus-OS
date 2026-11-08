@@ -122,6 +122,8 @@ invariant was broken (a kernel bug).
 | `nvme BB:DD.F: nepodporovany radic (CAP ...)` | The controller lacks the NVM command set or the 4 KiB page, or has doorbells outside the BAR. |
 | `nvme: jmenny prostor N ma metadata ... B na sektor - nepodporovano, vynechan` | The namespace is formatted with metadata (T10 PI). Reformat to a format without metadata (vendor tool, `nvme format`). |
 | `nvme: jmenny prostor N ma sektor ... B - nepodporovano, vynechan` | The sector is larger than one controller transfer (`MDTS`) or than 32 KiB. Common 512 B and 4 KiB sectors work. |
+| `nvme: aktivni jmenne prostory: [...]` | Namespace IDs the controller reports (VMware numbers them by disk position, e.g. `nvme0:1` = 2). |
+| `nvme: I/O prikaz 0x01 (ns N, LBA L, CDW12 C) skoncil stavem SCT s SC c -> ...` | The controller rejected a command. Opcode 0x01 write, 0x02 read, 0x00 flush, 0x09 TRIM. SCT 0 = generic (SC 0x01 invalid opcode, 0x02 invalid field, 0x0B invalid namespace, 0x20 write protected, 0x80 LBA out of range), SCT 2 = media error (SC 0x80 write fault, 0x81 unrecovered read). `DNR` = retrying will not help. The first 8 errors are logged, then the 16th, 32nd ... |
 | `nvme: radic neodpovida spravne (...), dalsi pozadavky odmitnuty` | A command did not finish within 10 s or the controller returned a foreign command ID. The controller is disabled (no DMA); the disk does not work until restart. |
 | `ahci BB:DD.F: MSI nelze zapnout (...), obsluha dotazovanim` | The controller has no MSI (or the message cannot be written); the driver works by polling, at a higher CPU load. |
 | `ahci: port P: disk ... neumi LBA48 - vynechan` | A very old disk without LBA48. Not supported. |

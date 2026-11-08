@@ -261,9 +261,17 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
         _ => cmd.args(["-device", &blk("data")]),
     };
     if opts.test {
+        // Jako VMware Virtual NVMe: disk jako jmenny prostor 2 (ne 1),
+        // bez mezipameti zapisu (writethrough, write-cache=off). QEMU presto
+        // hlasi VWC = 1; disk s VWC = 0 jako ve VMware v QEMU nasimulovat
+        // nejde.
         cmd.arg("-drive")
-            .arg(drive("nvmetest", &testdisks::nvme(&run.nvme)?))
-            .args(["-device", "nvme,drive=nvmetest,serial=MO-NVME-TEST"])
+            .arg(format!(
+                "if=none,id=nvmetest,format=raw,discard=unmap,cache=writethrough,file={}",
+                testdisks::nvme(&run.nvme)?.display()
+            ))
+            .args(["-device", "nvme,id=nvmet,serial=MO-NVME-TEST"])
+            .args(["-device", "nvme-ns,drive=nvmetest,bus=nvmet,nsid=2,write-cache=off"])
             .arg("-drive")
             .arg(drive("nvme4ktest", &testdisks::nvme4k(&run.nvme4k)?))
             .args([

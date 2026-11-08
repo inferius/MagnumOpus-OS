@@ -139,6 +139,9 @@ pub struct Controller {
     admin: Queue,
     io: Queue,
     next_cid: u16,
+    /// Pocet prikazu, ktere skoncily chybovym stavem (log jen prvnich
+    /// nekolika a pak po mocninach dvou, at chyba nezaplavi log).
+    errors: u64,
     /// Radic neodpovida: dalsi prikazy se neposilaji (radic je vypnuty,
     /// aby uz nesahal do DMA pameti).
     pub failed: bool,
@@ -202,6 +205,7 @@ impl Controller {
             admin: Queue::new(0, ASQ_OFF, ACQ_OFF),
             io: Queue::new(1, IOSQ_OFF, IOCQ_OFF),
             next_cid: 0,
+            errors: 0,
             failed: false,
         };
         c.reset_and_enable()?;
@@ -337,14 +341,35 @@ impl Controller {
         barrier::mmio_wmb();
         self.set_reg(DOORBELLS + (2 * qid as u64) * self.stride, new_tail as u32);
         match self.complete(io, cid) {
-            Ok(r) => r,
+            Ok(Ok(dw0)) => Ok(dw0),
+            Ok(Err((sf, e))) => {
+                self.errors += 1;
+                let n = self.errors;
+                if n <= 8 || n.is_power_of_two() {
+                    // Stav prikazu pro rozbor (SCT/SC podle specifikace NVMe,
+                    // kap. Status Field), cislo jmenneho prostoru a LBA.
+                    println!(
+                        "nvme: {} prikaz {:#04x} (ns {}, LBA {}, CDW12 {:#x}) skoncil stavem SCT {:#x} SC {:#04x}{} -> {e} (chyba c. {n})",
+                        if io { "I/O" } else { "admin" },
+                        cmd.opcode,
+                        cmd.nsid,
+                        cmd.cdw10 as u64 | (cmd.cdw11 as u64) << 32,
+                        cmd.cdw12,
+                        (sf >> 8) & 7,
+                        sf & 0xFF,
+                        if sf & (1 << 14) != 0 { ", DNR" } else { "" },
+                    );
+                }
+                Err(e)
+            }
             Err(e) => Err(self.fail(e)),
         }
     }
 
     /// Ceka na polozku fronty dokoncenych. Vnejsi `Err` = radic se chova
-    /// chybne (vyprsel cas, cizi cislo prikazu); vnitrni = stav prikazu.
-    fn complete(&mut self, io: bool, cid: u16) -> Result<Result<u32>> {
+    /// chybne (vyprsel cas, cizi cislo prikazu); vnitrni = chybovy stav
+    /// prikazu (stavove pole bez bitu faze a chyba pro klienta).
+    fn complete(&mut self, io: bool, cid: u16) -> Result<core::result::Result<u32, (u16, Error)>> {
         let deadline = libos::time::deadline_after(COMMAND_TIMEOUT);
         let entries = self.entries;
         loop {
@@ -365,7 +390,8 @@ impl Controller {
                 if done_cid != cid {
                     return Err(Error::Corrupted);
                 }
-                return Ok(status_result(status >> 1).map(|_| dw0));
+                let sf = status >> 1;
+                return Ok(status_result(sf).map(|_| dw0).map_err(|e| (sf, e)));
             }
             match self.irq.wait(Some(deadline)) {
                 Ok(()) => {}
@@ -442,6 +468,11 @@ impl Controller {
             }
         } else if !self.failed {
             ids.extend(1..=id.max_nsid.min(1024));
+        }
+        if listed {
+            println!("nvme: aktivni jmenne prostory: {:?}", ids);
+        } else {
+            println!("nvme: NVMe 1.0 nebo bez seznamu: prochazim jmenne prostory 1..={}", id.max_nsid.min(1024));
         }
         let mut out = alloc::vec::Vec::new();
         for nsid in ids {
