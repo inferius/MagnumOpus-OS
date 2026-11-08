@@ -496,6 +496,32 @@ okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
 modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
 oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
+### Celá obrazovka a Nerušit
+
+Systémová funkce pro každé okno; aplikace dostane jen `CONFIGURE`
+s velikostí obrazovky a příznakem `FULLSCREEN`, nic nemusí umět.
+**[implementováno]** (testy `fullscreen_toggle_hides_bar_dnd_and_exit_button`,
+`maximize_hover_menu_snaps_and_fullscreens` v `libs/comp`)
+
+- **Spuštění:** zkratka **Super+Shift+F** (F11 patří aplikacím), položka
+  palety „Celá obrazovka“, nebo nabídka po 400 ms nad tlačítkem
+  maximalizace (Maximalizovat / Celá obrazovka / Připnout vlevo / Připnout
+  vpravo; připnutí = polovina pracovní plochy).
+- **Stav:** okno přejde do režimu `FULLSCREEN`; původní režim, obdélník
+  a maximalizace se uloží a při návratu obnoví. Lišta se skryje (její
+  panely se zavřou).
+- **Ukončení:** stejná zkratka, položka palety „Opustit celou obrazovku“,
+  nebo tlačítko **Opustit celou obrazovku** vedle odznaku důvěry, který se
+  ukáže při najetí k hornímu okraji.
+- **Bezpečnost:** odznak důvěry u horního okraje při najetí; bezpečná
+  zkratka a systémové dialogy fungují vždy (kreslí se nad vším).
+- **Nerušit:** při celé obrazovce automaticky zapnuto (schválil
+  uživatel); zvonek v liště je přeškrtnutý a jeho panel to říká. Vypnutí
+  příkazem kompozitoru `dnd-fullscreen off`. **[implementováno]** Systém
+  oznámení zatím není: tiché ukládání oznámení a jejich ukázání po návratu,
+  výjimky (hovory, baterie, bezpečnost) a konfigurační klíč v Nastavení
+  **[navrženo]**.
+
 ### Paleta příkazů (v2)
 
 Systémová zkratka **Ctrl+K** nebo **Super+K** (jen fyzická klávesnice)
@@ -864,6 +890,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `theme light\|dark\|contrast` | - | `ok` (režim barev z tokenů) |
 | `sources [net] [audio]` | relace sítě (`INFO`), kanál zvuku | `ok` (stav v liště) |
 | `apps` + řádky `<id>\t<jméno>` | - | prázdná (spustitelné aplikace v liště) |
+| `dnd-fullscreen on\|off` | - | prázdná (Nerušit při celé obrazovce) |
 | `launcher` | kanál k initu | prázdná (žádosti `launch <id>`) |
 | `snapshots` | kanál na `logd` | prázdná (obrázky [diagnostického snímku](#diagnostický-snímek-print-screen)) |
 

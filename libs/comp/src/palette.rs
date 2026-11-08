@@ -38,6 +38,8 @@ pub enum SysAction {
     Shutdown,
     Reboot,
     Snapshot,
+    /// Cela obrazovka okna s fokusem (prepinac).
+    Fullscreen,
 }
 
 /// Polozka palety.
@@ -183,6 +185,12 @@ impl Comp {
             Item::System(SysAction::Shutdown) => (String::from("Vypnout"), "power", String::new(), None),
             Item::System(SysAction::Reboot) => (String::from("Restartovat"), "restart", String::new(), None),
             Item::System(SysAction::Snapshot) => (String::from("Diagnostický snímek"), "snapshot", String::from("Print Screen"), None),
+            Item::System(SysAction::Fullscreen) => {
+                let on = self.focus.is_some_and(|g| self.is_fullscreen(g));
+                let label = if on { "Opustit celou obrazovku" } else { "Celá obrazovka" };
+                let dis = self.focus.is_none().then(|| String::from("žádné okno"));
+                (String::from(label), "fullscreen", String::from("Super+Shift+F"), dis)
+            }
             Item::AppAction(g, i) => {
                 let Some(f) = self.windows.get(g).and_then(|w| w.menu.get(*i)) else {
                     return (String::new(), "command", String::new(), None);
@@ -235,7 +243,7 @@ impl Comp {
         });
         let windows: Vec<Item> = self.z.iter().rev().filter(|g| self.windows.get(g).is_some_and(|w| w.mapped)).map(|&g| Item::Window(g)).collect();
         let apps: Vec<Item> = self.launchable.iter().map(|(id, n)| Item::App(id.clone(), n.clone())).collect();
-        let system: Vec<Item> = [SysAction::Snapshot, SysAction::Reboot, SysAction::Shutdown].map(Item::System).to_vec();
+        let system: Vec<Item> = [SysAction::Fullscreen, SysAction::Snapshot, SysAction::Reboot, SysAction::Shutdown].map(Item::System).to_vec();
         let app_head = app.as_ref().map(|(_, n, ic)| Row::Header(n.clone(), ic, false));
         let sys_head = Row::Header(String::from("Systém"), "shieldcheck", true);
         // Sekce: (nadpis, polozky).
@@ -434,6 +442,11 @@ impl Comp {
                 self.damage_panel();
             }
             Item::System(SysAction::Snapshot) => self.request_snapshot("paleta"),
+            Item::System(SysAction::Fullscreen) => {
+                if let Some(g) = self.focus {
+                    self.toggle_fullscreen(g, time);
+                }
+            }
             // Nevratne: systemove potvrzeni (pravidlo 6).
             Item::System(SysAction::Shutdown) => self.confirm_power(false),
             Item::System(SysAction::Reboot) => self.confirm_power(true),

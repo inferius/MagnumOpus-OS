@@ -494,6 +494,14 @@ impl Service {
                 self.launcher = Some(Channel::from_handle(h));
                 (String::new(), Vec::new())
             }),
+            control::DND_FULLSCREEN => match (self.comp.as_mut(), words.next()) {
+                (Some(c), Some(v @ ("on" | "off"))) => {
+                    c.set_dnd_fullscreen(v == "on");
+                    Ok((String::new(), Vec::new()))
+                }
+                (None, _) => Err(Error::BadState),
+                _ => Err(Error::InvalidArgs),
+            },
             control::SNAPSHOT => match self.comp.as_mut() {
                 Some(c) => {
                     c.request_snapshot("prikaz");

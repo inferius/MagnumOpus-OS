@@ -292,6 +292,15 @@ impl Comp {
                     }
                     return;
                 }
+                // Cela obrazovka okna s fokusem (jen fyzicka klavesnice).
+                if !syn && Comp::is_fullscreen_shortcut(code, mods) {
+                    if action == Action::Press
+                        && let Some(g) = self.focus
+                    {
+                        self.toggle_fullscreen(g, now);
+                    }
+                    return;
+                }
                 if self.snapshot_cfg.is_shortcut(code, mods) {
                     if !syn && action == Action::Press {
                         self.snapshot_request = Some(alloc::string::String::from("zkratka"));
@@ -446,6 +455,13 @@ impl Comp {
             }
         };
         self.set_hover(h);
+        // Najeti na maximalizaci: nabidka (cela obrazovka, pripnuti).
+        let over = match h {
+            Some(Hover::Button(g, 1)) => Some(g),
+            _ => None,
+        };
+        let now = self.input_now;
+        self.max_hover(over, px, py, now);
         let k = if self.panel_rect().contains(px, py) { Cursor::Arrow } else { hit.map_or(Cursor::Arrow, |(_, z)| z.cursor()) };
         self.set_cursor(k);
     }
@@ -595,6 +611,19 @@ impl Comp {
             } else {
                 self.set_palette(None);
             }
+            return;
+        }
+        // Nabidka u tlacitka maximalizace.
+        if pressed && self.max_menu.is_some() && self.max_menu_click(px, py, now) {
+            return;
+        }
+        // Cela obrazovka: tlacitko navratu vedle odznaku.
+        if pressed
+            && let Some(g) = self.focus
+            && self.fs_exit_rect(g, now).is_some_and(|r| r.contains(px, py))
+        {
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: opustit celou obrazovku"));
+            self.toggle_fullscreen(g, now);
             return;
         }
         // Otevreny panel nad listou: klik do nej nic nedela, klik jinam ho

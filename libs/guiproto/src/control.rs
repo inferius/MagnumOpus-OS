@@ -45,6 +45,9 @@ pub const APPS: &str = "apps";
 /// `launcher`: kanal k initu (handle) pro zadosti `launch <id>` (klik na
 /// nespustenou aplikaci v liste nebo ve spousteci).
 pub const LAUNCHER: &str = "launcher";
+/// `dnd-fullscreen on|off`: Nerusit automaticky pri cele obrazovce
+/// (vychozi zapnuto).
+pub const DND_FULLSCREEN: &str = "dnd-fullscreen";
 /// `snapshot`: udelat diagnosticky snimek hned (prikaz shellu pres init).
 pub const SNAPSHOT: &str = "snapshot";
 pub const INPUT: &str = "input";

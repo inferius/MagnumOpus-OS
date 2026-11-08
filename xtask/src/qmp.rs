@@ -172,6 +172,20 @@ fn gui_steps(s: &mut Vec<Step>) {
     s.push(Step::WaitFor(gui::SNAPSHOT));
     s.push(Step::Send(vec![key("print", true)]));
     s.push(Step::Send(vec![key("print", false)]));
+    // Paleta prikazu (test `palette_keys`): Ctrl+K, hledani, Enter.
+    for (marker, text) in [(gui::PALETTE_SWITCH, "uka"), (gui::PALETTE_ACTION, "pricist")] {
+        s.push(Step::WaitFor(marker));
+        for (k, d) in [("ctrl", true), ("k", true), ("k", false), ("ctrl", false)] {
+            s.push(Step::Send(vec![key(k, d)]));
+        }
+        for ch in text.chars() {
+            let k = ch.to_string();
+            s.push(Step::Send(vec![key(&k, true)]));
+            s.push(Step::Send(vec![key(&k, false)]));
+        }
+        s.push(Step::Send(vec![key("ret", true)]));
+        s.push(Step::Send(vec![key("ret", false)]));
+    }
     // Snimky vzhledu (test `look_shots`): screendump virtio-gpu do PNG.
     let dir = crate::target_dir().join("shots");
     let _ = std::fs::create_dir_all(&dir);
@@ -189,6 +203,8 @@ mod gui {
     pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
     pub const CLICK: &str = "init: test gui: klik mysi na ";
     pub const SNAPSHOT: &str = "init: test gui: diagnosticky snimek ceka na Print Screen";
+    pub const PALETTE_SWITCH: &str = "init: test gui: paleta prepne na Ukazku";
+    pub const PALETTE_ACTION: &str = "init: test gui: paleta pricte v Ukazce";
     pub const SHOT: [&str; 3] = ["init: test gui: snimek light", "init: test gui: snimek dark", "init: test gui: snimek contrast"];
     pub const SHOT_NAMES: [&str; 3] = ["light", "dark", "contrast"];
 }

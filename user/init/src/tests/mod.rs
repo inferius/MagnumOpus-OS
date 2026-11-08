@@ -26,6 +26,7 @@ mod fs_recovery;
 mod gui;
 mod gui_gpu;
 mod gui_recovery;
+mod gui_palette;
 mod gui_snapshot;
 mod input;
 mod input_recovery;
