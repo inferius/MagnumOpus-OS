@@ -1,9 +1,10 @@
 //! Ovladace disku NVMe a AHCI a ochrana cizich disku.
 //!
-//! Testovaci disky pripravi xtask (`xtask/src/testdisks.rs`): NVMe a AHCI
-//! s nasim oddilem GPT (klient vidi jen oddil, prvni sektor oddilu nese
-//! znacku) a cizi disk GPT na AHCI (jen pro cteni). Disky se poznaji podle
-//! velikosti, kterou klient vidi.
+//! Testovaci disky pripravi xtask (`xtask/src/testdisks.rs`): NVMe (sektor
+//! 512 B i 4 KiB) a AHCI s nasim oddilem GPT (klient vidi jen oddil, prvni
+//! sektor oddilu nese znacku) a cizi disk GPT na AHCI (jen pro cteni).
+//! Disky se poznaji podle velikosti, kterou klient vidi (vzdy po 512 B; na
+//! disku 4 KiB jde nezarovnany pristup pres cteni a prepis celeho sektoru).
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -21,6 +22,12 @@ pub const TESTS: &[Test] = &[
     ("NVMe: TRIM", nvme_trim),
     ("NVMe: cteni a zapis za koncem oddilu", nvme_bounds),
     ("NVMe: IOMMU chrani pamet mimo DMA", nvme_dma),
+    ("NVMe 4 KiB: GPT v sektorech 4 KiB, vidi jen nas oddil", nvme4k_partition),
+    ("NVMe 4 KiB: zapis a cteni vcetne nezarovnanych", nvme4k_roundtrip),
+    ("NVMe 4 KiB: flush", nvme4k_flush),
+    ("NVMe 4 KiB: TRIM", nvme4k_trim),
+    ("NVMe 4 KiB: cteni a zapis za koncem oddilu", nvme4k_bounds),
+    ("NVMe 4 KiB: IOMMU chrani pamet mimo DMA", nvme4k_dma),
     ("AHCI: disk nalezen, vidi jen nas oddil", ahci_partition),
     ("AHCI: zapis a cteni", ahci_roundtrip),
     ("AHCI: flush", ahci_flush),
@@ -32,10 +39,12 @@ pub const TESTS: &[Test] = &[
 
 /// Velikosti, ktere klient vidi (musi sedet s xtask/src/testdisks.rs).
 const NVME_SECTORS: u64 = 4096;
+const NVME4K_SECTORS: u64 = 8192;
 const AHCI_SECTORS: u64 = 6144;
 const FOREIGN_SECTORS: u64 = 16384;
 /// Znacky v prvnim sektoru nasich oddilu a v cizim oddilu (sektor 2048).
 const NVME_MARK: &[u8] = b"MagnumOpus test NVMe";
+const NVME4K_MARK: &[u8] = b"MagnumOpus test NVMe 4K";
 const AHCI_MARK: &[u8] = b"MagnumOpus test AHCI";
 const FOREIGN_MARK: &[u8] = b"cizi data - nezapisovat";
 const FOREIGN_PART_START: u64 = 2048;
@@ -50,6 +59,10 @@ fn disk(sectors: u64, what: &str) -> Result<&'static BlockClient, alloc::string:
 
 fn nvme() -> Result<&'static BlockClient, alloc::string::String> {
     disk(NVME_SECTORS, "testovaci disk NVMe")
+}
+
+fn nvme4k() -> Result<&'static BlockClient, alloc::string::String> {
+    disk(NVME4K_SECTORS, "testovaci disk NVMe 4 KiB")
 }
 
 fn ahci() -> Result<&'static BlockClient, alloc::string::String> {
@@ -67,12 +80,30 @@ fn partition(b: &BlockClient, mark: &[u8]) -> TestResult {
 }
 
 fn roundtrip(b: &BlockClient) -> TestResult {
+    // Sousedni sektory (9 a 110) se zapisem nesmi zmenit: na disku 4 KiB
+    // lezi ve stejnem sektoru zarizeni jako zacatek a konec zapisu.
+    let left = vec![0xA1u8; 512];
+    let right = vec![0xB2u8; 512];
+    b.write(9, &left).map_err(|e| fail("zapis souseda vlevo", e))?;
+    b.write(110, &right).map_err(|e| fail("zapis souseda vpravo", e))?;
     // Vic nez jeden pozadavek protokolu (MAX_SECTORS) a nezarovnany zacatek.
     let data: Vec<u8> = (0..100 * 512).map(|i| (i * 13 + i / 512) as u8).collect();
     b.write(10, &data).map_err(|e| fail("zapis", e))?;
     let mut back = vec![0u8; data.len()];
     b.read(10, &mut back).map_err(|e| fail("cteni", e))?;
     check!(back == data, "prectena data se lisi od zapsanych");
+    let mut s = vec![0u8; 512];
+    b.read(9, &mut s).map_err(|e| fail("cteni souseda vlevo", e))?;
+    check!(s == left, "zapis zmenil sousedni sektor vlevo");
+    b.read(110, &mut s).map_err(|e| fail("cteni souseda vpravo", e))?;
+    check!(s == right, "zapis zmenil sousedni sektor vpravo");
+    // Jeden sektor uprostred sektoru zarizeni a nezarovnane cteni pres
+    // hranici.
+    let one = vec![0x6Cu8; 512];
+    b.write(203, &one).map_err(|e| fail("zapis jednoho sektoru", e))?;
+    let mut three = vec![0u8; 3 * 512];
+    b.read(202, &mut three).map_err(|e| fail("cteni tri sektoru", e))?;
+    check!(three[512..1024] == one[..], "jeden sektor uprostred se lisi");
     // Posledni sektor oddilu.
     let last = b.sectors() - 1;
     let one = vec![0x5Au8; 512];
@@ -99,6 +130,16 @@ fn trim(b: &BlockClient) -> TestResult {
     check!(f & feature::DISCARD != 0, "disk nehlasi TRIM");
     b.write(1000, &[0x22u8; 64 * 512]).map_err(|e| fail("zapis", e))?;
     b.discard(1000, 64).map_err(|e| fail("TRIM", e))?;
+    // TRIM jen casti sektoru zarizeni (na disku 4 KiB: sektory 1496..1504
+    // jsou jeden sektor zarizeni) nesmi zahodit okolni data v nem.
+    let keep = [0x44u8; 8 * 512];
+    b.write(1496, &keep).map_err(|e| fail("zapis pred castecnym TRIM", e))?;
+    b.discard(1497, 6).map_err(|e| fail("castecny TRIM", e))?;
+    let mut s = [0u8; 512];
+    for lba in [1496, 1503] {
+        b.read(lba, &mut s).map_err(|e| fail("cteni po castecnem TRIM", e))?;
+        check!(s == keep[..512], "castecny TRIM zahodil sousedni data");
+    }
     // Cely oddil najednou (vic polozek / vic useku v jednom prikazu).
     b.discard(2000, b.sectors() - 2000).map_err(|e| fail("TRIM do konce", e))?;
     check_eq!(
@@ -154,6 +195,24 @@ fn nvme_bounds(_: &Startup) -> TestResult {
 }
 fn nvme_dma(_: &Startup) -> TestResult {
     dma(nvme()?)
+}
+fn nvme4k_partition(_: &Startup) -> TestResult {
+    partition(nvme4k()?, NVME4K_MARK)
+}
+fn nvme4k_roundtrip(_: &Startup) -> TestResult {
+    roundtrip(nvme4k()?)
+}
+fn nvme4k_flush(_: &Startup) -> TestResult {
+    flush(nvme4k()?)
+}
+fn nvme4k_trim(_: &Startup) -> TestResult {
+    trim(nvme4k()?)
+}
+fn nvme4k_bounds(_: &Startup) -> TestResult {
+    bounds(nvme4k()?)
+}
+fn nvme4k_dma(_: &Startup) -> TestResult {
+    dma(nvme4k()?)
 }
 fn ahci_partition(_: &Startup) -> TestResult {
     partition(ahci()?, AHCI_MARK)

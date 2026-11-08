@@ -13,7 +13,8 @@ system, init, tests):
 Request handling is shared in `blockproto::server`: range checks,
 translation to our GPT partition and the write ban on foreign disks live in
 one place for all three drivers. A driver only provides read, write, flush
-and TRIM in device sectors (the `Disks` trait).
+and TRIM in device sectors (the `Disks` trait). Disks with 512 B and
+4 KiB logical sectors work the same (see [Sector size](#sector-size)).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Disk driver start-up and foreign disk protection">
@@ -56,7 +57,7 @@ So **before serving the client** the driver examines the disk
 | disk | client sees | write and TRIM |
 |---|---|---|
 | GPT with **our partition**: type `C123ADA0-51BA-48C5-A536-C2CE6B2B3581` or partition name exactly `MagnumOpus` | only this partition (sector 0 = first sector of the partition) | allowed, only inside the partition; the partition attribute "read-only" (bit 60) forbids it |
-| whole disk with **our FS** and no partition table (`OSFS` superblock in sectors 8..72, sector 0 without an MBR signature) | whole disk | allowed (QEMU data disk, older layout) |
+| whole disk with **our FS** and no partition table (`OSFS` superblock at the start of one of the 4 KiB blocks 1..8, sector 0 without an MBR signature) | whole disk | allowed (QEMU data disk, older layout) |
 | GPT without our partition | whole disk | **forbidden** (`READ_ONLY`) |
 | our partition is invalid (beyond the disk, outside the usable area, **overlapping another partition**) | whole disk | **forbidden** |
 | MBR (no GPT), protective MBR with damaged GPT headers | whole disk | **forbidden** |
@@ -96,9 +97,36 @@ Residual risks (not covered by the protection):
   outside `blockproto::server` (e.g. a wrong LBA in a command) bypasses the
   protection; that is why request handling is shared and drivers only
   translate to commands.
-- Disks with a logical sector other than 512 B (NVMe formatted to 4 KiB,
-  SATA 4Kn) are skipped and logged for now. Their GPT lives in different
-  sectors; without changes the examination would be wrong.
+- NVMe namespaces with metadata (T10 PI data protection) are skipped and
+  logged.
+
+## Sector size
+
+The client (`blockproto`) always addresses in 512 B units. A disk may have
+a larger logical sector: NVMe formatted to 4 KiB, SATA 4Kn, virtio with
+`blk_size`. The driver reports the real sector size
+(`Disks::sector_size`) and the shared server does the rest:
+
+- The **GPT** is read in disk sectors: on a 4 KiB disk the header is at
+  byte 4096 and the 16 KiB table takes 4 sectors. Partition bounds are in
+  disk sectors. Examining a disk with the wrong sector size would not find
+  the GPT and the disk would be read-only (test
+  `wrong_sector_size_never_writable`).
+- **Aligned access** (start and end on a disk sector boundary) goes
+  directly. The FS works in 4 KiB blocks, so its reads and writes are always
+  aligned on a 4 KiB disk.
+- An **unaligned read** reads whole sectors and returns only the requested
+  part.
+- An **unaligned write** reads the edge sectors, changes the requested part
+  and writes whole sectors (read-modify-write). The other data in those
+  sectors stays (neighbouring sector test). Writing one disk sector is
+  atomic for the device, so a power cut in the middle damages no more than
+  the sector that would otherwise be written whole.
+- **TRIM** is limited to whole disk sectors inside the range; the rest is
+  skipped (TRIM is only a hint, data in partially covered sectors stays).
+
+Supported sector: a power of two from 512 B to 32 KiB (the driver buffer
+size). In practice 512 B and 4 KiB.
 
 ## NVMe driver
 
@@ -111,7 +139,9 @@ time), so it needs:
   queue,
 - Set Features "Number of Queues" and one I/O queue pair (16 entries),
 - IDENTIFY of the controller (`MDTS`, `ONCS`, `VWC`) and active namespaces;
-  each namespace with 512 B sectors and no metadata is one disk (up to 16).
+  each namespace without metadata is one disk (up to 16); the sector size
+  comes from the LBA format (`LBADS`, typically 512 B or 4 KiB, at most
+  `MDTS`).
 
 | `blockproto` request | NVMe command |
 |---|---|
@@ -139,7 +169,8 @@ Per Serial ATA AHCI 1.3.1:
    at most 1 s, an empty port is given up after 200 ms), ready disk, SATA
    disk signature (`0x101`; ATAPI is skipped),
 4. IDENTIFY DEVICE: LBA48 capacity, write cache, FLUSH CACHE (EXT),
-   TRIM (word 169), logical sector size (word 106).
+   TRIM (word 169), logical sector size (words 106, 117-118; capacity and
+   sector counts in commands are in logical sectors).
 
 | `blockproto` request | ATA command |
 |---|---|
@@ -177,14 +208,19 @@ reads it with):
 |---|---|---|
 | `scratch` | virtio-blk | our 1 MiB partition (virtio-blk tests) |
 | `nvme-test` | NVMe | our 2 MiB partition, a marker in sector 1 |
+| `nvme4k-test` | NVMe with 4 KiB sectors | GPT in 4 KiB sectors, our 4 MiB partition with a marker |
 | `ahci-test` | AHCI port 0 | our 3 MiB partition, a marker in sector 1 |
 | `foreign` | AHCI port 1 | the whole foreign GPT disk (Linux partition), read-only |
 
 The `disky` suite checks read, write (several requests, last sector of the
-partition), flush, TRIM, partition bounds, the IOMMU and, for the foreign
+partition, unaligned write without changing neighbouring sectors), flush,
+TRIM (including a partial 4 KiB sector), partition bounds, the IOMMU and, for the foreign
 disk, `READ_ONLY` for write and TRIM and unchanged foreign data. The GPT
 examination is tested by `cargo test -p diskguard` (damaged header and
-table, overlap, read-only attribute, MBR, empty disk).
+table, overlap, read-only attribute, MBR, empty disk, 4 KiB and 64 KiB
+sectors, wrong sector size). QEMU supports 4 KiB sectors only for NVMe and
+virtio, not for AHCI (IDE rejects it); SATA 4Kn is therefore covered only by
+the shared server and GPT code.
 
 The data disk on another controller (it gets a GPT with our partition):
 
@@ -194,6 +230,12 @@ cargo xtask run --data-disk nvme
 
 ```bash
 cargo xtask test --data-disk ahci
+```
+
+The whole FS on a disk with 4 KiB sectors:
+
+```bash
+cargo xtask test --data-disk nvme4k
 ```
 
 Your own disk via NVMe (a disk without our partition will be read-only):
