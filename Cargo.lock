@@ -865,6 +865,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpuproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2051,6 +2059,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spirv"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2496,6 +2511,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "venus"
+version = "0.1.0"
+dependencies = [
+ "gpuproto",
+ "libos",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2527,6 +2550,7 @@ dependencies = [
 name = "virtio-gpu"
 version = "0.1.0"
 dependencies = [
+ "gpuproto",
  "guiproto",
  "libos",
  "pci",
@@ -2561,6 +2585,28 @@ dependencies = [
  "libos",
  "pci",
  "virtio",
+]
+
+[[package]]
+name = "vk-probe"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "venus",
+ "vkcomp",
+]
+
+[[package]]
+name = "vkcomp"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "spirv",
+ "venus",
 ]
 
 [[package]]

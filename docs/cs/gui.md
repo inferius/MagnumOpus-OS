@@ -520,12 +520,14 @@ celý obraz do své VMO a říká, které obdélníky se změnily.
 | Op | Směr | Pole |
 |---|---|---|
 | `INFO` | compd -> ovladač | - |
-| `MODES` | ovladač -> compd | výstupy: w, h, zapnutý; schopnosti (`3D`) |
+| `MODES` | ovladač -> compd | výstupy: w, h, zapnutý; schopnosti (`VIRGL`, `VENUS`) |
 | `ATTACH` | compd -> ovladač | výstup, w, h, stride (v bajtech) + handle VMO (jen čtení) |
 | `PRESENT` | compd -> ovladač | seq, obdélníky |
 | `PRESENTED` | ovladač -> compd | seq, čas (ns) |
 | `SYNC` | compd -> ovladač | token (u64) - značka po restartu kompozitoru |
 | `SYNCED` | ovladač -> compd | token; vše před ní patří předchozí instanci ([Obnova](#obnova-po-pádu-kompozitoru)) |
+| `OPEN_RENDER` | vlastník displeje -> ovladač | - |
+| `RENDER` | ovladač -> vlastník | + handle kanálu render uzlu ([Venus](venus.md#render-uzel-gpuproto)) |
 
 Ovladač zkopíruje poškozené obdélníky do svých bufferů DMA (s IOMMU jediná
 paměť, kam smí zařízení zapisovat a číst), pošle `TRANSFER_TO_HOST_2D`
@@ -776,6 +778,7 @@ skládání kompozitoru.
 | `vgpu::virgl` | vlastní kodér proudu příkazů virgl (stavové objekty, shadery TGSI, vrcholy, kreslení, scissor) a příkazy 3D virtio-gpu, testy na hostiteli |
 | skládání přes GPU | čeká: na tomto hostiteli (QEMU 11.1 pro Windows) se se zapnutým OpenGL (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) virtuální stroj po startu jádra zastaví |
 | Venus | QEMU pro Windows ho nemá („Render server support was not enabled in virglrenderer“). **Funguje ve WSL2:** `cargo xtask run --qemu-wsl --gpu venus` (QEMU 10.1 a virglrenderer s render serverem přeložené v `~/venus/prefix`, Vulkan hostitele lavapipe, displej GTK pod Xvfb); ovladač hlásí capset `venus(v0)` |
+| vlastní ovladač Venus | krok 1 hotový: render uzel v ovladači, knihovna `libs/venus` (generovaná z vk.xml), test vypíše jméno fyzického zařízení - viz [Vulkan přes Venus](venus.md) |
 
 ⚠️ **Kde testovat Venus:** Linux s fyzickou GPU a QEMU + virglrenderer
 s render serverem (nebo crosvm). WSL2 jen s Vulkanem přeloženým přes

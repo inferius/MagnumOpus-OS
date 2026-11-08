@@ -1,0 +1,11 @@
+[package]
+name = "spirv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vlastni minimalni assembler SPIR-V a shadery systemu (skladani kompozitoru)"
+
+[dependencies]
+
+[dev-dependencies]
+gfx = { path = "../gfx" }

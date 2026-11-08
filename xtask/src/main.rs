@@ -25,6 +25,7 @@ mod webhelper;
 mod qmp;
 mod symbolize;
 mod testdisks;
+mod venus;
 
 use std::env;
 use std::ffi::OsString;
@@ -46,6 +47,8 @@ prikazy:
            architektury, pak jadro a userspace v QEMU bez okna
   check    jen kontrola prekladu jadra
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
+  venus-gen  serializace Venusu z libs/venus/xml do libs/venus/src/vk
+  venus-check  overi, ze libs/venus/src/vk odpovida vstupum
 
 prepinace:
   --release        release profil
@@ -226,6 +229,7 @@ fn run_cli() -> Result<()> {
         Some("test") => {
             opts.test = true;
             opts.headless = true;
+            venus::run(true)?;
             host_tests()?;
             // Jadro se musi prelozit i pro ostatni architektury (rozhrani
             // architektury nesmi zustat jen pro jednu).
@@ -259,6 +263,8 @@ repeat = {}
         }
         Some("check") => check_kernel(opts.arch, &opts),
         Some("docs") => build_docs().map(|_| ()),
+        Some("venus-gen") => venus::run(false),
+        Some("venus-check") => venus::run(true),
         Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
             Ok(())
@@ -314,6 +320,14 @@ fn host_tests() -> Result<()> {
             "netfilter",
             "--package",
             "guiproto",
+            "--package",
+            "gpuproto",
+            "--package",
+            "venus",
+            "--package",
+            "spirv",
+            "--package",
+            "vkcomp",
             "--package",
             "taskproto",
             "--package",
@@ -444,6 +458,7 @@ const USER_PROGRAMS: &[&str] = &[
     "fetch",
     "revocd",
     "dnsd",
+    "vk-probe",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).

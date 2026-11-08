@@ -95,6 +95,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::JOB_INFO => job::info(a),
         nr::CLOCK_ADJUST => hw::clock_adjust(a),
         nr::FB_CONTROL => hw::fb_control(a),
+        nr::VMO_REVOKE => hw::vmo_revoke(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -153,6 +154,7 @@ pub fn name(number: u64) -> &'static str {
         "JOB_INFO",
         "CLOCK_ADJUST",
         "FB_CONTROL",
+        "VMO_REVOKE",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

@@ -62,7 +62,8 @@ pub const THREAD_YIELD: u64 = 24;
 
 /// Fyzicky souvisla pamet pro DMA. `(resource, size) -> handle`
 pub const VMO_CREATE_CONTIGUOUS: u64 = 25;
-/// Okno na registry zarizeni. `(resource, phys, size) -> handle`
+/// Okno na fyzicky rozsah mimo RAM (registry, BAR).
+/// `(resource, phys, size, cache) -> handle`; `cache` z [`crate::vm::cache`]
 pub const VMO_CREATE_PHYSICAL: u64 = 26;
 /// Fyzicka adresa stranky objektu pameti. `(resource, vmo, offset) -> phys`
 pub const VMO_PHYS_ADDR: u64 = 27;
@@ -125,7 +126,13 @@ pub const CLOCK_ADJUST: u64 = 45;
 pub const FB_CONTROL: u64 = 46;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 47;
+/// Odvola fyzicky objekt pameti: zrusi jeho mapovani ve vsech procesech
+/// a dalsi `VM_MAP` selze (`ACCESS_DENIED`). Pristup pres stare mapovani
+/// = vyjimka stranky. `(resource, vmo)`; rozsah objektu musi prostredek
+/// povolovat.
+pub const VMO_REVOKE: u64 = 47;
+
+pub const COUNT: u64 = 48;
 
 /// Operace `FB_CONTROL`.
 pub mod fb_op {
