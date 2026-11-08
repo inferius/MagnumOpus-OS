@@ -17,6 +17,22 @@ const MARKS: [(&str, &[&str]); 2] = [
 /// Jednotky, podle kterych se pozna cislo z mereni.
 const UNITS: [&str; 9] = ["ms", "µs", "us", "ns", "MB/s", "MiB/s", "GB/s", "GiB/s", "fps"];
 
+/// Znacky stavu v HTML (`<strong>[navrzeno]</strong>`) -> barevny stitek
+/// `<span class="status s-<druh>">`; druh je stejny v obou jazycich.
+pub fn chips(html: &str) -> String {
+    let mut out = html.to_string();
+    for (_, marks) in MARKS {
+        for (i, mark) in marks.iter().enumerate() {
+            let kind = ["designed", "implemented", "qemu", "hw"][i];
+            out = out.replace(
+                &format!("<strong>[{mark}]</strong>"),
+                &format!("<span class=\"status s-{kind}\">{mark}</span>"),
+            );
+        }
+    }
+    out
+}
+
 /// Zkontroluje text jedne stranky.
 pub fn page(lang: &str, file: &str, md: &str, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
     let allowed = MARKS.iter().find(|(l, _)| *l == lang).map_or(&[][..], |(_, m)| *m);

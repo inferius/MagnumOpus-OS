@@ -349,7 +349,7 @@ fn render(file: &str, md: &str) -> Rendered {
     Rendered {
         file: file.to_string(),
         title,
-        html: body,
+        html: crate::docs_check::chips(&body),
         toc,
         anchors,
         links,
