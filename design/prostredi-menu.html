@@ -236,7 +236,7 @@ menu([
 <script>
 document.addEventListener('mo-ready', function () {
   var SCR = { fhd: [[1920, 1080]], nb: [[1366, 768]], '4k': [[2560, 1440], [2560, 1440]] };
-  var state = { scr: 'fhd', sit: 'menu', cGlobal: false, dGroup: 1, dPin: false, dPanel: false };
+  var state = { scr: 'fhd', sit: 'menu', cGlobal: false, dGroup: 1, dPin: false, dPanel: false, dClosed: false };
   var MENU = ['Soubor', 'Úpravy', 'Zobrazit', 'Vložit', 'Formát', 'Nástroje', 'Nápověda'];
   function I(n, s) { return '<svg class="ic" style="width:' + (s || 20) + 'px;height:' + (s || 20) + 'px" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
   function wbtns() { return '<span class="wb">' + I('min', 14) + I('max', 14) + I('close', 14) + '</span>'; }
@@ -283,10 +283,11 @@ document.addEventListener('mo-ready', function () {
   // Varianta D: titulek kresli aplikace (CUSTOM_TITLE); system na pevnem miste
   // kresli jen odznak, tlacitko menu hned vedle nej a tlacitka okna.
   // menuOpen: menu se rozbali primo v titulku pres obsah aplikace.
-  function dTitle(app, menuOpen) {
-    var sys = '<span class="badge">' + I('shield', 14) + app + '</span><span class="mbtn' + (menuOpen ? ' open' : '') + '" title="Menu (Alt)">' + I('menu', 18) + '</span>';
+  function dTitle(app, menuOpen, noBtn) {
+    // Po kliku tlacitko menu zmizi a menu se rozbali presne na jeho miste; u pripnuteho menu neni vubec.
+    var sys = '<span class="badge">' + I('shield', 14) + app + '</span>' + (menuOpen || noBtn ? '' : '<span class="mbtn" title="Menu (Alt)">' + I('menu', 18) + '</span>');
     var inner;
-    if (menuOpen) inner = '<span class="dmenu" data-dmenu>' + MENU.map(function (m, i) { return '<span class="mi' + (i === state.dGroup ? ' open' : '') + '" data-g="' + i + '">' + m + '</span>'; }).join('') + '<span class="dhint"><span class="kb">Esc</span> nebo &equiv; zavře</span></span>';
+    if (menuOpen) inner = '<span class="dmenu" data-dmenu>' + MENU.map(function (m, i) { return '<span class="mi' + (i === state.dGroup ? ' open' : '') + '" data-g="' + i + '">' + m + '</span>'; }).join('') + '<span class="dhint"><span class="kb">Esc</span>, klik mimo nebo na Soubor zavře</span></span>';
     else if (app === 'Editor') inner = '<span class="dtab on">' + I('file-text', 14) + 'zprava.md</span><span class="dtab">' + I('file-text', 14) + 'plan.md</span><span class="sp"></span>' + ['undo', 'redo', 'search', 'more'].map(function (n) { return '<span class="dtool">' + I(n, 16) + '</span>'; }).join('');
     else if (app === 'Soubory') inner = '<span class="dtool">' + I('left', 16) + '</span><span class="dtool">' + I('right', 16) + '</span><span class="dcrumb">Domů &rsaquo; <b>Dokumenty</b></span><span class="sp"></span><span class="dsearch">' + I('search', 14) + 'Hledat</span>';
     else inner = '<span class="dtab on">' + I('terminal', 14) + 'Relace 1</span><span class="dtab">build</span><span class="dtool">' + I('plus', 16) + '</span><span class="sp"></span>';
@@ -313,12 +314,12 @@ document.addEventListener('mo-ready', function () {
       var ex = full ? 0 : ax, ey = full ? 0 : ay, ew = full ? w : aw, eh = full ? h : ah;
       html += '<div class="w" style="left:' + ex + 'px;top:' + ey + 'px;width:' + ew + 'px;height:' + eh + 'px;' + (full ? 'border-radius:0;border:0' : '') + '">';
       if (!full) {
-        if (D) { html += dTitle('Editor', state.sit === 'menu' && !state.dPin); if (state.dPin) html += '<div class="mrow" data-dmenu>' + MENU.map(function (m, i) { return '<span class="mi' + (state.sit === 'menu' && i === state.dGroup ? ' open' : '') + '" data-g="' + i + '">' + m + '</span>'; }).join('') + '<span class="find" data-pin>' + I('pin', 14) + 'Připnuto &middot; odepnout</span></div>'; } else html += '<div class="t">' + (inTitleMenu ? '<span class="mbtn' + (state.sit === 'menu' ? '' : '') + '" title="Menu">' + I('menu', 18) + '</span>' : '') + '<span class="badge">' + I('shield', 14) + 'Editor</span><span class="nm">zprava.md - Editor</span>' + wbtns() + '</div>';
+        if (D) { html += dTitle('Editor', state.sit === 'menu' && !state.dPin && !state.dClosed, state.dPin); if (state.dPin) html += '<div class="mrow" data-dmenu>' + MENU.map(function (m, i) { return '<span class="mi' + (state.sit === 'menu' && i === state.dGroup ? ' open' : '') + '" data-g="' + i + '">' + m + '</span>'; }).join('') + '<span class="find" data-pin>' + I('pin', 14) + 'Připnuto &middot; odepnout</span></div>'; } else html += '<div class="t">' + (inTitleMenu ? '<span class="mbtn' + (state.sit === 'menu' ? '' : '') + '" title="Menu">' + I('menu', 18) + '</span>' : '') + '<span class="badge">' + I('shield', 14) + 'Editor</span><span class="nm">zprava.md - Editor</span>' + wbtns() + '</div>';
         if (inTitleMenu) html += '<div class="mrow">' + MENU.map(function (m, i) { return '<span class="mi' + (state.sit === 'menu' && i === 1 ? ' open' : '') + '">' + m + '</span>'; }).join('') + '<span class="find">' + I('search', 14) + 'Hledat akce <span class="kb">Ctrl</span><span class="kb">K</span></span></div>';
       }
       html += (D && state.dPanel ? '<div style="display:flex;flex:1;min-height:0">' : '') + '<div class="body"><h3>Zpráva o vydání 0.6</h3>Kompozitor, okna a odznak důvěry jsou hotové. Následuje přehled oprávnění a systémové dialogy. Ikony mají nový styl s pastelovým přechodem a barvou podle kategorie.<br><br>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</div>' + (D && state.dPanel ? cmdPanel() + '</div>' : '') + '</div>';
       if (state.sit === 'menu' && inTitleMenu && !full) html += menuPop(ex + 70, ey + 40 + 32);
-      if (state.sit === 'menu' && D && !full) html += menuPop(ex + 196, ey + 40 + (state.dPin ? 32 : 0), state.dGroup, true);
+      if (state.sit === 'menu' && D && !full && !state.dClosed) html += menuPop(ex + 196, ey + 40 + (state.dPin ? 32 : 0), state.dGroup, true);
     }
     // Horni lista
     if (top && !full && (mon === 0 || nMon === 1 || v === 'B' || v === 'C')) {
@@ -362,7 +363,7 @@ document.addEventListener('mo-ready', function () {
       return '<section class="variant" aria-labelledby="v' + v.id + '"><h2 id="v' + v.id + '">' + v.name + '</h2>' +
         (v.id === 'D' ? '<div class="hstack" style="gap:var(--s3)"><div class="settings-demo">' + I('pin', 18) + 'Nastavení &rsaquo; Vzhled &rsaquo; <b>Připnout menu</b> (pro aplikaci i globálně)<button class="switch" role="switch" id="d-pin" aria-checked="' + state.dPin + '" aria-label="Připnout menu"></button></div>' +
     '<div class="settings-demo">' + I('sidebar', 18) + '<b>Panel Příkazy</b> (z menu Zobrazit)<button class="switch" role="switch" id="d-panel" aria-checked="' + state.dPanel + '" aria-label="Panel Příkazy"></button></div></div>' +
-    '<p class="note" style="margin:var(--s2) 0 0">Při otevřeném menu přejeď myší po skupinách (Soubor, Úpravy...), přepínají se jako klasický řádek menu. Alt otevře menu rovnou, Esc nebo druhý klik na &equiv; ho zavře; tlačítko &equiv; zůstává na místě ve stisknutém stavu.</p>' : '') +
+    '<p class="note" style="margin:var(--s2) 0 0">Při otevřeném menu přejeď myší po skupinách (Soubor, Úpravy...), přepínají se jako klasický řádek menu. Klik na &equiv; (nebo Alt) tlačítko skryje a menu se rozbalí přesně na jeho místě; zavře ho Esc, klik mimo, výběr položky nebo klik na první skupinu, pak se &equiv; vrátí. U připnutého menu tlačítko &equiv; není.</p>' : '') +
   (v.id === 'C' ? '<div class="settings-demo">' + I('settings', 18) + 'Nastavení &rsaquo; Vzhled &rsaquo; <b>Globální lišta s menu nahoře</b><button class="switch" role="switch" id="c-sw" aria-checked="' + state.cGlobal + '" aria-label="Globální lišta s menu nahoře"></button></div>' : '') +
         metrics(v.id, mons[0][0], mons[0][1]) +
         '<div class="fit" data-w="' + (mons.reduce(function (a, m) { return a + m[0]; }, 0) + 24 * (mons.length - 1)) + '" data-h="' + mons[0][1] + '"><div class="monitors">' +
@@ -403,12 +404,18 @@ document.addEventListener('mo-ready', function () {
   window.MO_SEG(document.getElementById('g-scr'), function (v) { state.scr = v; render(); });
   window.MO_SEG(document.getElementById('g-sit'), function (v) { state.sit = v; render(); });
   window.addEventListener('resize', fit);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !state.dClosed) { state.dClosed = true; render(); } });
   document.getElementById('variants').addEventListener('mouseover', function (e) {
     var mi = e.target.closest('[data-dmenu] .mi');
     if (mi && +mi.dataset.g !== state.dGroup) { state.dGroup = +mi.dataset.g; state.sit = 'menu'; render(); }
   });
   document.getElementById('variants').addEventListener('click', function (e) {
+    var sec = e.target.closest('section'); var inD = sec && sec.querySelector('#vD');
     if (e.target.closest('[data-pin]')) { state.dPin = !state.dPin; render(); }
+    else if (inD && e.target.closest('.mbtn')) { state.dClosed = false; state.sit = 'menu'; render(); }
+    else if (inD && !state.dPin && e.target.closest('[data-dmenu] .mi[data-g="0"]')) { state.dClosed = true; render(); }
+    else if (inD && e.target.closest('.menu-pop .it')) { state.dClosed = true; render(); }
+    else if (inD && e.target.closest('.scr') && !e.target.closest('[data-dmenu], .menu-pop')) { state.dClosed = true; render(); }
     else if (e.target.closest('[data-panel]')) { state.dPanel = !state.dPanel; render(); }
   });
   render();
