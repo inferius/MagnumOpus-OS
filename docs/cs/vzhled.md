@@ -498,6 +498,29 @@ Filtry Vše / Moje / Agent / Systém. Řádky agenta mají levý pruh `ai`
 a světlé pozadí `ai-soft`. Proces bez registrace je vidět jako „neznámý
 proces v jobu N“. Řádky jdou procházet šipkami.
 
+### Kontextové nabídky a materiál (odsouhlaseno 2026-11-08)
+
+Prototyp: [design/kontextove-nabidky.html](../../design/kontextove-nabidky.html).
+Celé **[navrženo]**.
+
+- **Materiál (b)**: nabídky, paleta, panely z lišty a oznámení mají
+  průsvitné pozadí s rozmazáním toho, co je pod nimi, jemným tónem
+  a ~5 % šumu (proti pruhům). Nejhorší kontrast textu na pestré tapetě
+  8,8:1 (světlý motiv). Za celými okny se živě nerozmazává.
+- **Titulek aktivního okna** má jemný tón z tapety (vzorek se spočítá
+  jednou při změně tapety, ne živé rozmazání).
+- **Plné pozadí** vždy: volba „Omezit průhlednost“ v nastavení, vysoký
+  kontrast, a bez GPU (záložní CPU skládání) automaticky.
+- **Rychlost**: nabídka se otevře do jednoho snímku. Položky jsou data
+  předem; rozšíření jiných aplikací deklarují položky staticky v manifestu
+  (typ souboru, podmínky) a při otevření se nespouští žádný cizí kód.
+- **Dynamické položky** mají v manifestu předem známý počet a místo. Při
+  otevření je na jejich místě skeleton (tlumený pruh s jemnou animací),
+  doručená položka ho nahradí na stejném místě; po termínu zůstane
+  zakázaná s důvodem „nedostupné“. **Obsah otevřené nabídky se nikdy
+  neposouvá a nabídka nemění velikost.**
+- Zkratky vpravo, zakázané položky s důvodem, psaním se nabídka filtruje.
+
 ## Aplikace
 
 ### Terminál

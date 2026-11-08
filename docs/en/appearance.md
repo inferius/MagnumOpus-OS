@@ -521,6 +521,31 @@ Filters All / Mine / Agent / System. Agent rows have a left strip `ai` and a
 light `ai-soft` background. A process without registration is shown as
 "unknown process in job N". Rows can be navigated with the arrows.
 
+### Context menus and material (agreed 2026-11-08)
+
+Prototype: [design/kontextove-nabidky.html](../../design/kontextove-nabidky.html).
+All **[designed]**.
+
+- **Material (b)**: menus, the palette, panels from the bar and
+  notifications have a translucent background blurring what is beneath,
+  a subtle tint and ~5 % noise (against banding). Worst-case text contrast
+  on a colourful wallpaper 8.8:1 (light theme). No live blur behind whole
+  windows.
+- **The active window's title bar** has a subtle tint from the wallpaper
+  (sampled once when the wallpaper changes, not a live blur).
+- **Solid background** always: the "Reduce transparency" setting, high
+  contrast, and without a GPU (fallback CPU compositing) automatically.
+- **Speed**: a menu opens within one frame. Items are data in advance;
+  extensions of other apps declare their items statically in the
+  manifest (file type, conditions) and no foreign code runs on opening.
+- **Dynamic items** have a known count and place in the manifest. On
+  opening a skeleton (a muted bar with a subtle animation) holds their
+  place, a delivered item replaces it in the same place; after the
+  deadline it stays disabled with the reason "unavailable". **The content
+  of an open menu never shifts and the menu never changes size.**
+- Shortcuts on the right, disabled items with a reason, typing filters
+  the menu.
+
 ## Applications
 
 ### Terminal
