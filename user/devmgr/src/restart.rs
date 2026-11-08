@@ -4,7 +4,8 @@
 //! skonci, spusti ho znovu nad stejnou funkci PCI a initu posle novy kanal
 //! (zpravou jako pri startu, napr. `audio`); init ho preda sluzbe.
 //! Nejvic [`MAX_RESTARTS`] za [`WINDOW`], pak to vzda (ovladac, ktery
-//! pada hned po startu, nesmi zahltit system).
+//! pada hned po startu, nesmi zahltit system). Pred restartem vypne
+//! zarizeni bus master: DMA spadleho ovladace se zastavi.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -74,6 +75,14 @@ fn run(mut list: Vec<Watched>, ctx: Ctx) {
                 w.function.address,
                 libos::abi::process::describe_exit(code)
             );
+            // Rozbehnute DMA spadleho ovladace zastavit (bus master vypnout):
+            // radic jinak dal zapisuje do pameti, kterou ovladac uz nema
+            // (bez IOMMU poskozeni pameti). Novy ovladac ho zapne znovu.
+            if let Some(ecam) = ecams[w.window].as_ref() {
+                let a = w.function.address;
+                let cmd = ecam.read16(a, pci::COMMAND);
+                ecam.write16(a, pci::COMMAND, cmd & !pci::COMMAND_BUS_MASTER);
+            }
             let now = time::now();
             starts[i].retain(|&t| now.saturating_sub(t) < WINDOW.as_nanos() as u64);
             let restarted = if starts[i].len() >= MAX_RESTARTS {
