@@ -26,6 +26,7 @@
 //! inicializaci heapu.
 
 mod filter;
+pub mod limit;
 mod line;
 mod ring;
 
@@ -36,9 +37,21 @@ use core::fmt;
     reason = "API pro nastaveni logu (prikazova radka jadra, syscally)"
 )]
 pub use filter::{
-    clear_target_level, console_level, set_console_level, set_level, set_target_level,
+    MAX_TARGET, clear_target_level, console_level, for_each_override, set_console_level, set_defaults, set_level,
+    set_target_level,
 };
-pub use ring::snapshot;
+
+/// Smi se zapsat zaznam urovne `level` pro modul nebo proces `target`?
+pub fn enabled_for(level: Level, target: &str) -> bool {
+    filter::enabled(level, target)
+}
+pub use ring::{read_from, snapshot};
+
+/// Obsah bufferu logu pri pade (bez zamku), viz `ring::with_unlocked`.
+pub fn with_ring_unlocked(f: impl FnOnce(&[u8], &[u8])) {
+    // SAFETY: vola se jen z `pstore::on_fatal` po zastaveni ostatnich CPU.
+    unsafe { ring::with_unlocked(f) }
+}
 
 use crate::{arch, console, sched};
 
@@ -63,7 +76,7 @@ impl Level {
         }
     }
 
-    const fn from_u8(v: u8) -> Option<Self> {
+    pub const fn from_u8(v: u8) -> Option<Self> {
         match v {
             1 => Some(Self::Error),
             2 => Some(Self::Warn),
@@ -110,6 +123,16 @@ pub fn __log(
     let target = target.strip_prefix("kernel::").unwrap_or(target);
     if !filter::enabled(level, target) {
         return;
+    }
+    // Opakovana hlaska ze stejneho mista: nejvys `limit::PER_SECOND` za s.
+    // Radky procesu (`DEBUG_LOG`) omezuje jejich syscall podle textu
+    // (vsechny jdou pres jedno misto), hlaseni self-testu jadra ne.
+    let key = (file.as_ptr() as u64) ^ ((line as u64) << 48);
+    let limited = target != "syscall::misc" && !target.starts_with("tests");
+    match if limited { limit::check(key, arch::now_ns()) } else { limit::Verdict::Log(0) } {
+        limit::Verdict::Drop => return,
+        limit::Verdict::Log(0) => {}
+        limit::Verdict::Log(n) => summary(target, n, format_args!("{}:{line}", SourcePath(file))),
     }
     let mut buf = line::LineBuf::new();
     let ns = arch::now_ns();
@@ -171,6 +194,26 @@ pub(crate) use {debug, error, info, log_at, trace};
 // Makro se nemuze jmenovat primo `warn` (kolize s vestavenym atributem
 // `#[warn]` pri importu), proto alias.
 pub(crate) use warn_ as warn;
+
+/// Souhrn potlacenych opakovani (pred dalsi zaznam z tehoz mista).
+pub fn summary(target: &str, n: u32, site: fmt::Arguments) {
+    let mut buf = line::LineBuf::new();
+    let ns = arch::now_ns();
+    let _ = fmt::write(
+        &mut buf,
+        format_args!(
+            "[{:5}.{:06}] cpu{} W {}: ... predchozi hlaska ({site}) potlacena {n}x (vic nez {}/s)",
+            ns / 1_000_000_000,
+            (ns / 1_000) % 1_000_000,
+            sched::try_current_cpu_index().unwrap_or(0),
+            target,
+            limit::PER_SECOND
+        ),
+    );
+    buf.finish_line();
+    ring::push(buf.as_bytes());
+    console::write(buf.as_str(), false);
+}
 
 /// Vypis pri fatalni chybe: neceka na zamky (zapis jde pres
 /// `console::panic_print`), ale zaznam se ulozi i do bufferu logu.

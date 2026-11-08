@@ -149,8 +149,56 @@ pub const SYSTEM_POWER: u64 = 49;
 /// `(op, ...)`; operace a jejich argumenty v [`crate::sched::op`]
 pub const SCHED_CONTROL: u64 = 50;
 
+
+/// Cteni logu jadra (Resource s pravem `DIAG`). `(resource, cursor,
+/// buf_ptr, buf_len, out_start_ptr) -> bajty`. Log je proud bajtu (radky
+/// UTF-8); `cursor` = pozice v proudu (pocet kdy zapsanych bajtu). Kdyz
+/// starsi data uz kruhovy buffer prepsal, cte se od nejstarsich dostupnych;
+/// skutecny zacatek zapise na `out_start_ptr` (u64), takze ctenar pozna
+/// ztratu. Nova pozice = zacatek + vracena delka. 0 = nic noveho.
+pub const LOG_READ: u64 = 51;
+
+/// Zaznam padu jadra z minuleho behu (pstore, `libs/crashrec`; Resource
+/// s pravem `DIAG`). `(resource, op, buf_ptr, buf_len) -> bajty`; `op`
+/// z [`crash_op`].
+pub const CRASH_RECORD: u64 = 52;
+
+/// Rizeni logu jadra za behu (Resource s pravem `DIAG`). `(resource, op,
+/// buf_ptr, buf_len) -> bajty`; `op` z [`log_op`]. Text v bufferu je ASCII.
+pub const LOG_CONTROL: u64 = 53;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 51;
+pub const COUNT: u64 = 54;
+
+/// Operace `LOG_CONTROL`.
+pub mod log_op {
+    /// Nastavi uroven: buffer `modul=uroven` (modul jadra jako `sched`,
+    /// `arch::x86_64::apic`, nebo jmeno procesu pro jeho `DEBUG_LOG`;
+    /// uroven `error`, `warn`, `info`, `debug`, `trace`).
+    pub const SET: u64 = 0;
+    /// Zrusi prepsani: buffer = modul.
+    pub const CLEAR: u64 = 1;
+    /// Vypis prepsani do bufferu (`modul=uroven` po radcich, posledni radek
+    /// `potlaceno=N` = opakovane hlasky); vraci delku.
+    pub const LIST: u64 = 2;
+}
+
+/// Operace `CRASH_RECORD`.
+pub mod crash_op {
+    /// Zkopiruje zaznam z minuleho behu (cely format `crashrec`, hlavicka
+    /// a text) do bufferu; vraci delku, 0 = zadny zaznam. Maly buffer =
+    /// `BUFFER_TOO_SMALL`.
+    pub const READ: u64 = 0;
+    /// Smaze zaznam (sluzba logu ho ulozila na disk).
+    pub const CLEAR: u64 = 1;
+    /// Jen testovaci jadro (`cargo xtask test`): vyvola paniku jadra; jadro
+    /// zapise zaznam a hned restartuje (test, ze zaznam prezije restart).
+    /// Jinde `NOT_SUPPORTED`.
+    pub const TEST_PANIC: u64 = 2;
+    /// Velikost oblasti zaznamu (horni mez bufferu pro `READ`); 0 = oblast
+    /// neni (loader ji nedostal).
+    pub const CAPACITY: u64 = 3;
+}
 
 /// Operace `SYSTEM_POWER`.
 pub mod power_op {

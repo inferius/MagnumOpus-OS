@@ -111,10 +111,15 @@ pub fn on_return_to_user() {
     }
 }
 
-/// Vyjimka CPU v userspace: zaloguje ji a ukonci proces.
+/// Nejvic ramcu zasobniku procesu ve vypisu pady.
+const USER_FRAMES: usize = 16;
+
+/// Vyjimka CPU v userspace: zaloguje ji (s ukazatelem zasobniku a zpetnou
+/// stopou podle ukazatelu ramcu - programy se prekladaji s
+/// `force-frame-pointers`) a ukonci proces.
 /// `code` = cislo chyby podle ABI (viz `trap::user_fault`), `pc` = adresa
 /// instrukce (v logu pod jmenem registru architektury, `arch::PC_NAME`).
-pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64) -> ! {
+pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64, sp: u64, fp: u64) -> ! {
     let me = super::current();
     let process = me
         .process
@@ -127,6 +132,29 @@ pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64) -> ! {
         me.name,
         arch::PC_NAME
     );
+    // Zpetna stopa: zaznam ramce = (predchozi ramec, navratova adresa) na
+    // obou architekturach. Cteni pres kontrolovane kopirovani z pameti
+    // procesu (vadny ukazatel jen ukonci vypis).
+    log::error!("  proces {} ({}): sp {sp:#x} fp {fp:#x}, zpetna stopa:", process.id, process.name);
+    let mut frame = fp;
+    for _ in 0..USER_FRAMES {
+        if frame == 0 || frame % 8 != 0 {
+            break;
+        }
+        let Ok(rec) = crate::syscall::read_user(&process, frame, 16) else {
+            break;
+        };
+        let next = u64::from_le_bytes(rec[..8].try_into().unwrap());
+        let ret = u64::from_le_bytes(rec[8..].try_into().unwrap());
+        if ret == 0 {
+            break;
+        }
+        log::error!("  proces {} ({}): ramec {ret:#018x}", process.id, process.name);
+        if next <= frame {
+            break;
+        }
+        frame = next;
+    }
     drop(me);
     process.terminate(abi::process::EXIT_FAULT_BASE - code as i64);
     drop(process);

@@ -14,14 +14,17 @@ mod acpi;
 mod arch;
 mod clock;
 mod console;
+mod crashscreen;
 mod error;
 mod fatal;
 mod framebuffer;
 mod log;
 mod mm;
 mod object;
+mod pstore;
 mod random;
 mod sched;
+mod sysinfo;
 mod smp;
 mod sync;
 mod syscall;
@@ -56,6 +59,7 @@ extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
     // SAFETY: framebuffer popsal loader a namapoval ho do prime mapy;
     // kernel ho nepouziva nijak jinak nez pres konzoli.
     unsafe { console::init(&boot_info.framebuffer) };
+    log::set_defaults();
     log::info!("os kernel {} ({})", env!("CARGO_PKG_VERSION"), arch::NAME);
 
     // SAFETY: jednou, na bootovacim CPU, preruseni jsou zakazana.
@@ -63,6 +67,12 @@ extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
 
     // SAFETY: jednou, po init_boot_cpu; BootInfo je overeny.
     unsafe { mm::init(boot_info) };
+    pstore::init(boot_info);
+    if boot_info.boot_flags & boot_info::boot_flags::RESCUE_LOGS != 0 {
+        log::info!("rezim: vytahnout logy nainstalovaneho systemu (volba zavadece)");
+        userboot::RESCUE_LOGS.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
+    sysinfo::log_machine(boot_info);
 
     let platform = PLATFORM.call_once(|| match acpi::parse(boot_info.acpi_rsdp) {
         Ok(p) => p,

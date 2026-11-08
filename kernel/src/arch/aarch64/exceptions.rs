@@ -215,7 +215,7 @@ fn el0_sync(frame: &mut TrapFrame) {
         _ => FAULT_GENERAL,
     };
     let addr = if code == FAULT_PAGE { frame.far } else { 0 };
-    trap::user_fault(code, iss, frame.elr, addr)
+    trap::user_fault(code, iss, frame.elr, addr, frame.sp_el0, frame.x[29])
 }
 
 fn el1_sync(frame: &mut TrapFrame) {
@@ -284,6 +284,13 @@ fn ec_name(ec: u64) -> &'static str {
 
 fn fatal(f: &TrapFrame, kind: u64) -> ! {
     let ec = f.esr >> 26;
+    crate::fatal::set_reason(match ec {
+        EC_DABT_CUR | EC_DABT_LOWER => "DATA_ABORT_KERNEL",
+        EC_IABT_CUR | EC_IABT_LOWER => "INSTRUCTION_ABORT_KERNEL",
+        EC_UNKNOWN => "INVALID_OPCODE",
+        0x2F => "SERROR",
+        _ => "CPU_EXCEPTION",
+    });
     report(format_args!(
         "KERNEL: neosetrena vyjimka {} na cpu{}, druh {kind}, ESR {:#x} (EC {ec:#x})",
         ec_name(ec),

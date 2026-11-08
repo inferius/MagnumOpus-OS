@@ -1,0 +1,17 @@
+[package]
+name = "logrescue"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "logrescue"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+blockproto = { path = "../../libs/blockproto" }
+fs.workspace = true
+fatw = { workspace = true }

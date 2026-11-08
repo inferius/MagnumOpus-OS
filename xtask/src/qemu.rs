@@ -185,8 +185,12 @@ fn command(
         // dohledat i po skonceni behu.
         .arg("-chardev")
         .arg(format!("stdio,id=serial0,logfile={}", serial_log.display()))
-        .args(["-serial", "chardev:serial0"])
-        .arg("-no-reboot");
+        .args(["-serial", "chardev:serial0"]);
+    // Test zaznamu padu: jadro po panice restartuje a QEMU musi nabehnout
+    // znovu (se stejnou RAM).
+    if !opts.crash_test {
+        cmd.arg("-no-reboot");
+    }
     if opts.headless {
         // Venus potrebuje OpenGL i bez okna.
         // Ve WSL neni uzel DRM pro egl-headless: GTK s OpenGL (EGL) pod
@@ -467,6 +471,7 @@ fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result:
     // napajeni je kratky (jen start a vypnuti).
     let timeout = match opts.power_test {
         Some(_) => Duration::from_secs(300),
+        None if opts.crash_test => Duration::from_secs(400),
         None => opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1),
     };
     // Chybovy vystup QEMU jde dal na terminal a zaroven do bufferu (hlaska
@@ -517,6 +522,9 @@ fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result:
         };
     }
     match status.code() {
+        Some(code) if code == opts.arch.test_success && opts.crash_test => {
+            crate::crashtest::check_log(serial_log).map_err(|e| TestError::Other(format!("test zaznamu padu: {e}").into()))
+        }
         Some(code) if code == opts.arch.test_success => {
             println!("xtask: testy prosly");
             Ok(())

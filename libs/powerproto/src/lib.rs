@@ -48,6 +48,14 @@ pub enum Request {
     /// Rizeni frekvence CPU: co firmware nabizi (`_PSS`, `_CPC`). Zatim jen
     /// zjisteni, rizeni neni.
     CpuPerf,
+    /// Jen kanal shell -> init: balicek pro vyvojare (logy, zaznamy padu)
+    /// od sluzby logu; odpoved [`Reply::Text`] (cesta a nahled) nebo
+    /// [`Reply::Failed`].
+    Report,
+    /// Jen kanal shell -> init: uroven logu pro modul jadra nebo proces
+    /// (`target` prazdny = vypis). `level`: `error` ... `trace`, nebo
+    /// `vychozi` (zruseni prepsani). Odpoved [`Reply::Text`].
+    LogLevel { target: String, level: String },
 }
 
 /// Udalost hlasena sluzbou bez pozadavku.
@@ -146,6 +154,8 @@ pub enum Reply {
     Battery(Vec<Battery>),
     CpuPerf(Vec<CpuPerf>),
     Event(Event),
+    /// Textova odpoved (balicek pro vyvojare: cesta a nahled obsahu).
+    Text(String),
 }
 
 mod op {
@@ -155,6 +165,8 @@ mod op {
     pub const THERMAL: u32 = 4;
     pub const BATTERY: u32 = 5;
     pub const CPU_PERF: u32 = 6;
+    pub const REPORT: u32 = 7;
+    pub const LOG_LEVEL: u32 = 8;
 
     pub const R_OK: u32 = 100;
     pub const R_FAILED: u32 = 101;
@@ -163,19 +175,25 @@ mod op {
     pub const R_BATTERY: u32 = 104;
     pub const R_CPU_PERF: u32 = 105;
     pub const R_EVENT: u32 = 106;
+    pub const R_TEXT: u32 = 107;
 }
 
 impl Request {
     pub fn encode(&self) -> Vec<u8> {
-        Writer::op(match self {
+        let mut w = Writer::op(match self {
             Request::Status => op::STATUS,
             Request::Shutdown => op::SHUTDOWN,
             Request::Reboot => op::REBOOT,
             Request::Thermal => op::THERMAL,
             Request::Battery => op::BATTERY,
             Request::CpuPerf => op::CPU_PERF,
-        })
-        .finish()
+            Request::Report => op::REPORT,
+            Request::LogLevel { .. } => op::LOG_LEVEL,
+        });
+        if let Request::LogLevel { target, level } = self {
+            w.str(target).str(level);
+        }
+        w.finish()
     }
 
     pub fn decode(b: &[u8]) -> Result<Self> {
@@ -187,6 +205,8 @@ impl Request {
             op::THERMAL => Request::Thermal,
             op::BATTERY => Request::Battery,
             op::CPU_PERF => Request::CpuPerf,
+            op::REPORT => Request::Report,
+            op::LOG_LEVEL => Request::LogLevel { target: r.str()?, level: r.str()? },
             _ => return Err(Error::InvalidArgs),
         };
         if !r.is_empty() {
@@ -260,6 +280,10 @@ impl Reply {
                     w.str(&c.name).u32(c.pss_states).u32(c.max_mhz).u8(c.cppc as u8);
                 }
             }
+            Reply::Text(t) => {
+                w = Writer::op(op::R_TEXT);
+                w.str(t);
+            }
             Reply::Event(e) => {
                 w = Writer::op(op::R_EVENT);
                 w.u32(match e {
@@ -329,6 +353,7 @@ impl Reply {
                 }
                 Reply::CpuPerf(v)
             }
+            op::R_TEXT => Reply::Text(r.str()?),
             op::R_EVENT => Reply::Event(match r.u32()? {
                 1 => Event::PowerButton,
                 2 => Event::SleepButton,

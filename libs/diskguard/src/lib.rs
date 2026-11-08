@@ -77,6 +77,16 @@ pub const ESP_TYPE: Guid = guid(
 /// Microsoft basic data). Respektuje se i u naseho typu.
 pub const ATTR_READ_ONLY: u64 = 1 << 60;
 
+/// Typ "Microsoft basic data" (FAT/NTFS; Windows ho pripoji).
+pub const BASIC_DATA_TYPE: Guid = guid(
+    0xEBD0_A0A2,
+    0xB9E5,
+    0x4433,
+    [0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7],
+);
+/// Jmeno oddilu pro logy na flashce (FAT32, cte ho Windows).
+pub const LOG_LABEL: &str = "MO-LOGY";
+
 /// Zacatek podpisu superbloku naseho FS (`OSFS\0\0v3`; verze se nekontroluje,
 /// i novejsi format je nas).
 pub const FS_MAGIC_PREFIX: &[u8; 7] = b"OSFS\0\0v";
@@ -103,6 +113,9 @@ pub enum Kind {
     Unknown,
     /// Disk nejde precist.
     Unreadable,
+    /// Oddil pro logy (FAT32 `MO-LOGY`, typ basic data) na disku s nasim
+    /// oddilem - zive USB ([`log_partition`]).
+    LogPartition { index: u32 },
 }
 
 impl Kind {
@@ -117,6 +130,7 @@ impl Kind {
             Kind::DamagedGpt => "cizi disk (poskozena GPT)",
             Kind::Unknown => "cizi nebo prazdny disk (bez tabulky oddilu)",
             Kind::Unreadable => "disk nejde precist",
+            Kind::LogPartition { .. } => "oddil pro logy (FAT32 MO-LOGY)",
         }
     }
 
@@ -203,6 +217,44 @@ fn has_our_fs(sectors: u64, ss: usize, read: &mut impl FnMut(u64, &mut [u8]) -> 
         let off = (byte % ss as u64) as usize;
         read(byte / ss as u64, &mut buf) && buf[off..off + FS_MAGIC_PREFIX.len()] == FS_MAGIC_PREFIX[..]
     })
+}
+
+/// Oddil pro logy na disku s nasim oddilem: typ basic data a jmeno presne
+/// [`LOG_LABEL`], cely v pouzitelne oblasti a bez prekryvu. Zapis do nej
+/// smi jen pres knihovnu `fatw` (vlastni slozka). Disk bez platneho naseho
+/// oddilu = `None` (cizi FAT oddil se jmenem MO-LOGY se nezapisuje).
+pub fn log_partition(sectors: u64, ss: usize, mut read: impl FnMut(u64, &mut [u8]) -> bool) -> Option<Decision> {
+    if !valid_sector_size(ss) {
+        return None;
+    }
+    let gpt::Read::Table(t) = gpt::read_table(sectors, ss, &mut read) else {
+        return None;
+    };
+    if !choose(&t, sectors, ss).kind.is_ours() {
+        return None;
+    }
+    for (i, e) in t.entries().enumerate() {
+        if e.is_empty() || e.type_guid != BASIC_DATA_TYPE || !e.name_is(LOG_LABEL) {
+            continue;
+        }
+        let in_bounds = e.first <= e.last && e.first >= t.first_usable && e.last <= t.last_usable && e.last < sectors;
+        let overlaps = t
+            .entries()
+            .enumerate()
+            .any(|(j, o)| j != i && !o.is_empty() && o.first <= e.last && e.first <= o.last)
+            || t.reserved.iter().any(|&(a, b)| a <= e.last && e.first <= b);
+        if !in_bounds || overlaps {
+            return None;
+        }
+        return Some(Decision {
+            kind: Kind::LogPartition { index: i as u32 },
+            start: e.first,
+            sectors: e.last - e.first + 1,
+            sector_size: ss,
+            writable: e.attrs & ATTR_READ_ONLY == 0,
+        });
+    }
+    None
 }
 
 /// Je oddil nas (typ nebo jmeno)?

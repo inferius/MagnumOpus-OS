@@ -743,6 +743,64 @@ Chyby navíc: `INVALID_ARGS` (neznámá operace, třída, index CPU, parametry
 Realtime), `BAD_HANDLE`, `WRONG_TYPE`, `INVALID_ADDRESS`. Popis chování:
 [Plánovač](planovac.md). V libos modul `sched`.
 
+## Diagnostika
+
+Syscally níže
+vyžadují Resource s právem `DIAG`: má ho jen kořenový prostředek a init ho
+předá jen službě logu (`logd`) jako duplikát `BASIC | DIAG` bez `MANAGE`
+(prostředkem nejde sahat na hardware). Viz [Živé USB](zive-usb.md#diagnostika).
+
+### `LOG_READ`
+
+`(resource, cursor, buf_ptr, buf_len, out_start_ptr) -> bajty`. Čte log
+jádra (v něm jsou i zprávy všech procesů z `DEBUG_LOG`) jako proud bajtů:
+`cursor` je pozice v proudu (kolik bajtů kdy jádro zapsalo). Kruhový buffer
+má 512 KiB; když starší data už přepsal, čte se od nejstarších dostupných
+a skutečný začátek se zapíše na `out_start_ptr` (u64) - čtenář tak pozná
+ztrátu; druhé u64 za ním je celkový počet řádků, které jádro přepsalo
+dřív, než je čtenář přečetl („ztraceno N řádků“). Nová pozice = začátek
++ vrácená délka, 0 = nic nového. Nejvýš 64 KiB na volání. Chyby: `ACCESS_DENIED` (bez `DIAG`), `INVALID_ARGS`
+(`buf_len` nad 64 KiB), `INVALID_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`.
+V libos `Resource::log_read`.
+
+### `CRASH_RECORD`
+
+`(resource, op, buf_ptr, buf_len) -> bajty`. Záznam pádu jádra z minulého
+běhu (pstore, formát `libs/crashrec`). Loader vyhradí 64 KiB RAM na pevné
+adrese (druh `Pstore` v mapě paměti); při panice nebo fatální výjimce do ní
+jádro zapíše hlavičku a konec logu jádra a teplý restart ji nesmaže.
+
+| `op` | význam |
+|---|---|
+| 0 `READ` | zkopíruje platný záznam (hlavička + text) do bufferu, vrátí délku; 0 = žádný; malý buffer = `BUFFER_TOO_SMALL` |
+| 1 `CLEAR` | smaže záznam (služba logu ho uložila na disk) |
+| 2 `TEST_PANIC` | jen testovací jádro (`qemu-test`): vyvolá paniku, jádro zapíše záznam a hned restartuje; jinak `NOT_SUPPORTED` |
+| 3 `CAPACITY` | velikost oblasti (0 = loader ji nedostal) |
+
+Chyby: `ACCESS_DENIED` (bez `DIAG`), `INVALID_ARGS` (neznámá operace),
+`INVALID_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`. V libos
+`Resource::crash_record`.
+
+### `LOG_CONTROL`
+
+`(resource, op, buf_ptr, buf_len) -> bajty`. Úrovně logu jádra za běhu
+(příkaz shellu `loglevel`, soubor `/system/log/urovne.conf`).
+
+| `op` | buffer | význam |
+|---|---|---|
+| 0 `SET` | `modul=úroveň` | úroveň pro modul jádra (`sched`, `arch::x86_64::apic`; platí i pro podmoduly) nebo pro proces (jeho `DEBUG_LOG`); úroveň `error`, `warn`, `info`, `debug`, `trace` |
+| 1 `CLEAR` | `modul` | zruší přepsání (platí globální úroveň) |
+| 2 `LIST` | výstup | `modul=úroveň` po řádcích a `potlaceno=N` (opakované hlášky) |
+
+Výchozí potlačené sekce (jen `info` a výš): `syscall`, `object::process`,
+`smp::clock_sync`. Nezávisle na úrovních jádro z jednoho místa (soubor
+a řádek, u `DEBUG_LOG` proces a text bez číslic) zapíše nejvýš 10 záznamů
+za sekundu; další jen spočítá a s první zprávou v nové sekundě zapíše
+„... předchozí hláška potlačena N×“. Nejvýš 32 přepsání, jméno nejvýš 40 B.
+Chyby: `ACCESS_DENIED` (bez `DIAG`), `INVALID_ARGS` (neznámá úroveň nebo
+operace, dlouhé jméno, plná tabulka), `BUFFER_TOO_SMALL`, `INVALID_ADDRESS`.
+V libos `Resource::log_control`.
+
 ## Náhodná čísla
 
 Jádro má kryptografický generátor (`kernel/src/random.rs`, crate

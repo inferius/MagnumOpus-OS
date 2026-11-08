@@ -12,6 +12,8 @@ bench = false
 [dependencies]
 abi.workspace = true
 boot-info.workspace = true
+crashrec.workspace = true
+qr.workspace = true
 elf.workspace = true
 initfs.workspace = true
 csprng = { path = "../libs/csprng" }

@@ -29,6 +29,12 @@ impl Supervisor {
             e.name,
             libos::abi::process::describe_exit(code)
         );
+        // Pad (vyjimka CPU, panika): vypis s logem procesu do /system/pady.
+        let fault = code == libos::abi::process::EXIT_PANIC
+            || (libos::abi::process::EXIT_FAULT_BASE - 255..=libos::abi::process::EXIT_FAULT_BASE).contains(&code);
+        if fault {
+            crate::logd::proc_crash(e.name, libos::abi::process::describe_exit(code));
+        }
         out.push(Happened::Exited { name: e.name, code });
         let name = e.name;
         if let Some(dep) = e.stopping_for.take() {

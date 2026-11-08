@@ -35,10 +35,30 @@ pub fn fatal_stop() -> ! {
         arch::halt_forever();
     }
     sched::halt_other_cpus();
+    // Zaznam pady do RAM, ktera prezije teply restart, a obrazovka pady.
+    let record = crate::pstore::on_fatal();
+    if crate::pstore::is_test_panic() {
+        // Test zaznamu pady: hned restart (QEMU bez -no-reboot nabehne
+        // znovu se stejnou RAM).
+        let _ = arch::system_power(false);
+        arch::halt_forever();
+    }
     if cfg!(feature = "qemu-test") {
         arch::qemu_exit(false);
     }
+    crate::crashscreen::show(record);
+    // Odpocet a restart: zaznam ceka v RAM na dalsi start.
+    let until = arch::now_ns() + crate::crashscreen::RESTART_AFTER_NS;
+    while arch::now_ns() < until {
+        core::hint::spin_loop();
+    }
+    let _ = arch::system_power(false);
     arch::halt_forever()
+}
+
+/// Kod duvodu pady pro zaznam a obrazovku (napr. `PAGE_FAULT`).
+pub fn set_reason(reason: &'static str) {
+    crate::pstore::set_reason(reason);
 }
 
 #[panic_handler]
@@ -48,6 +68,7 @@ fn panic(info: &PanicInfo) -> ! {
         // Panika behem paniky (nebo na jinem CPU soucasne): jen zastavit.
         arch::halt_forever();
     }
+    set_reason("KERNEL_PANIC");
     report(format_args!(
         "KERNEL PANIC na cpu{}: {info}",
         sched::try_current_cpu_index().unwrap_or(0)

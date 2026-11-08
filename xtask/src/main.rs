@@ -15,6 +15,7 @@
 
 mod arch;
 mod audio;
+mod crashtest;
 mod datadisk;
 mod drivers;
 mod docs;
@@ -53,6 +54,9 @@ prikazy:
   test     testy knihoven na hostiteli, kontrola prekladu jadra pro ostatni
            architektury, pak jadro a userspace v QEMU bez okna
   check    jen kontrola prekladu jadra
+  symbolize <soubor>  adresy v zaznamu padu, balicku nebo logu na jmena
+           funkci (jadro a programy z target/; stejne --arch a --release
+           jako build, ze ktereho system bezel)
   usb      zive USB: target/usb-<arch>-<profil>.img (GPT, ESP, datovy
            oddil); --list disky hostitele, --write <disk> zapis na
            flashku (s potvrzenim), --run start v QEMU jako flash disk,
@@ -154,6 +158,9 @@ pub struct Options {
     /// Zvlastni beh testu napajeni (`powertest`): "button" nebo "reboot".
     /// QEMU ma skoncit samo (vypnuti ACPI) s kodem 0.
     power_test: Option<&'static str>,
+    /// Zvlastni beh testu zaznamu padu (`crashtest`): QEMU bez
+    /// `-no-reboot` (jadro po panice restartuje).
+    crash_test: bool,
 }
 
 fn main() -> ExitCode {
@@ -181,6 +188,9 @@ fn run_cli() -> Result<()> {
     // Prikaz `usb` ma vlastni prepinace; zbytek (--release, --arch) je
     // spolecny.
     let rest: Vec<OsString> = args.collect();
+    // `symbolize <soubor>`: prvni argument je soubor.
+    let mut rest = rest;
+    let symbolize_file = if command == "symbolize" && !rest.is_empty() { Some(PathBuf::from(rest.remove(0))) } else { None };
     let (usb_args, rest) = if command == "usb" {
         let (u, r) = usb::split_args(rest)?;
         (Some(u), r)
@@ -211,6 +221,7 @@ fn run_cli() -> Result<()> {
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
         power_test: None,
+        crash_test: false,
     };
     let mut gpu_set = false;
     let mut no_power = false;
@@ -364,7 +375,7 @@ repeat = {}
             // testu userspace).
             let power_only = opts.test_only == "napajeni";
             let usb_only = opts.test_only == "zive-usb";
-            if !power_only && !usb_only {
+            if !power_only && !usb_only && opts.test_only != "zaznam-padu" {
                 let artifacts = build(&opts)?;
                 let image = image_for(&artifacts, &opts)?;
                 qemu::run(&image, &artifacts, &opts)?;
@@ -373,6 +384,10 @@ repeat = {}
             // behu = vypnuti, nejde to spojit s hlavnim behem testu).
             if !no_power && (opts.test_only.is_empty() || power_only) {
                 powertest::run_all(&mut opts)?;
+            }
+            // Zaznam padu jadra prezije restart (`--only zaznam-padu` jen ten).
+            if opts.test_only.is_empty() || opts.test_only == "zaznam-padu" {
+                crashtest::run(&mut opts)?;
             }
             // Zive USB: obraz s beznym jadrem (ne testovacim) nastartuje
             // z flash disku USB az do GUI s terminalem.
@@ -388,6 +403,14 @@ repeat = {}
         }
         Some("check") => check_kernel(opts.arch, &opts),
         Some("usb") => usb::command(&opts, usb_args.as_ref().unwrap()),
+        Some("symbolize") => {
+            let file = symbolize_file.ok_or("symbolize ocekava soubor (zaznam padu, balicek, log)")?;
+            let a = opts.arch;
+            let profile = profile_dir(&opts);
+            let kernel = target_dir().join(a.kernel_target).join(profile).join("kernel");
+            let user = user_target_dir().join(a.user_target).join(profile);
+            symbolize::file(&file, &kernel, &user)
+        }
         Some("docs") => build_docs().map(|_| ()),
         Some("venus-gen") => venus::run(false),
         Some("venus-check") => venus::run(true),
@@ -536,11 +559,17 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "diskguard",
             "--package",
+            "crashrec",
+            "--package",
+            "qr",
+            "--package",
+            "fatw",
+            "--package",
             "agentproto",
             "--package",
             "agentsh",
             "--features",
-            "initfs/std,fs/std,netproto/std,netproto/nts,driverkit/sim",
+            "initfs/std,fs/std,netproto/std,netproto/nts,driverkit/sim,crashrec/alloc",
         ])
         .args(&drivers_args)
         .status()?;
@@ -637,6 +666,8 @@ const USER_PROGRAMS: &[&str] = &[
     "usb-hub",
     "usb-hid",
     "usb-storage",
+    "logd",
+    "logrescue",
     "fsd",
     "timed",
     "termd",

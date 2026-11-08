@@ -55,6 +55,16 @@ impl<T: ?Sized> SpinLock<T> {
     }
 
     /// Pristup bez zamku, kdyz mame vyhradni referenci (napr. v Drop).
+    /// Obsah bez zamku - jen pro zapis zaznamu pady (ostatni CPU stoji,
+    /// zamek mohl zustat drzeny prerusenym kodem).
+    ///
+    /// # Safety
+    /// Nikdo jiny k obsahu soucasne nepristupuje.
+    pub unsafe fn force_get(&self) -> &T {
+        // SAFETY: podle kontraktu volajiciho.
+        unsafe { &*self.value.get() }
+    }
+
     pub fn get_mut(&mut self) -> &mut T {
         self.value.get_mut()
     }

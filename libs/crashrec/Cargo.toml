@@ -1,0 +1,10 @@
+[package]
+name = "crashrec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Zaznam padu jadra (pstore): format oblasti RAM, ktera prezije teply restart"
+
+[features]
+alloc = []
+

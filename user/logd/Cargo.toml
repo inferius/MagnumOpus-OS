@@ -1,0 +1,19 @@
+[package]
+name = "logd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "logd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+abi = { workspace = true }
+fsproto = { path = "../../libs/fsproto" }
+crashrec = { workspace = true, features = ["alloc"] }
+blockproto = { path = "../../libs/blockproto" }
+fatw = { workspace = true }

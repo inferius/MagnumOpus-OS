@@ -11,6 +11,16 @@ pub fn debug_log(a: Args) -> Result<u64> {
     let len = user::check_len(a[1], abi::syscall::DEBUG_LOG_MAX)?;
     let bytes = user::read_bytes(&p, a[0], len)?;
     let text = alloc::string::String::from_utf8_lossy(&bytes);
+    // Uroven podle jmena procesu (`LOG_CONTROL`, napr. `virtio-blk=warn`)
+    // a omezeni opakovane hlasky procesu.
+    if !log::enabled_for(log::Level::Info, &p.name) {
+        return Ok(0);
+    }
+    match log::limit::check(log::limit::text_key(p.id, &text), crate::arch::now_ns()) {
+        log::limit::Verdict::Drop => return Ok(0),
+        log::limit::Verdict::Log(0) => {}
+        log::limit::Verdict::Log(n) => log::summary(&p.name, n, format_args!("proces {}", p.id)),
+    }
     log::info!("[{} {}] {}", p.name, p.id, text.trim_end());
     Ok(0)
 }
