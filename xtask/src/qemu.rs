@@ -194,6 +194,11 @@ fn command(
         );
     }
     disk_controllers(&mut cmd, opts, run, &blk)?;
+    // Vyukove zarizeni pro ukazkovy ovladac (az za ostatnimi, sloty PCI
+    // drivejsich zarizeni se neposunou).
+    if opts.edu {
+        cmd.args(["-device", crate::drivers::EDU_DEVICE]);
+    }
     cmd.args(&opts.qemu_args);
     Ok(cmd)
 }

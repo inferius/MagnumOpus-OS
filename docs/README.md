@@ -37,6 +37,13 @@ site menu.
 | [Disky](cs/disky.md) | [Disks](en/disks.md) | NVMe, AHCI (SATA), virtio-blk, ochrana cizích disků a GPT, VMware a skutečné PC / NVMe, AHCI (SATA), virtio-blk, foreign disk protection and GPT, VMware and real PC |
 | [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
 
+### Ovladače / Drivers
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Ovladače](cs/ovladace.md) | [Drivers](en/drivers.md) | příručka autora ovladače: architektura, bezpečnost, sada driverkit, první ovladač krok za krokem, manifest, simulace hardwaru, zdroje a licence, Rust nebo převzaté C, ladění, kontrolní seznam / driver author's guide: architecture, security, the driverkit, first driver step by step, manifest, hardware simulation, sources and licences, Rust or adopted C, debugging, checklist |
+| [Ovladač edu](cs/ovladac-edu.md) | [Driver edu](en/driver-edu.md) | ukázkový ovladač pro zařízení QEMU edu / sample driver for the QEMU edu device |
+
 ### Grafika / Graphics
 
 | Česky | English | Obsah / Contents |

@@ -11,6 +11,7 @@ test = false
 bench = false
 
 [dependencies]
+driverkit = { path = "../../libs/driverkit" }
 libos = { path = "../../libs/libos" }
 pci = { path = "../../libs/pci" }
 virtio = { path = "../../libs/virtio" }

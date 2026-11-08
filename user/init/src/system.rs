@@ -55,8 +55,74 @@ pub struct Devices {
     pub _rngs: Vec<Channel>,
     /// Kanaly k ovladacum grafiky (dokud je neprevezme kompozitor).
     pub displays: Vec<Channel>,
+    /// Ovladace z manifestu (`dev <jmeno>` od devmgr, viz
+    /// `docs/cs/ovladace.md`): jmeno, kanal ke klientovi, kolikaty start.
+    /// Po padu ovladace prijde novy kanal a nahradi stary.
+    pub drivers: spin::Mutex<Vec<DriverChannel>>,
     /// Ridici relace initu k `fsd` s listkem (prezije pad sluzby).
     pub fs: Option<FsClient>,
+}
+
+/// Kanal k ovladaci z manifestu.
+pub struct DriverChannel {
+    pub name: String,
+    pub channel: Channel,
+    /// 1 = prvni start, dalsi = obnoveny po padu nebo restartu.
+    pub generation: u32,
+}
+
+/// Zprava `dev <jmeno>` od devmgr: ovladac z manifestu (novy nebo
+/// obnoveny). Vraci jmeno ovladace, kdyz zprava byla `dev`.
+pub fn driver_message(drivers: &spin::Mutex<Vec<DriverChannel>>, msg: libos::Message) -> Option<String> {
+    let name = msg.data.strip_prefix(b"dev ")?;
+    let name = String::from(core::str::from_utf8(name).ok()?);
+    let channel = Channel::from_handle(msg.handles.into_iter().next()?);
+    let mut list = drivers.lock();
+    match list.iter_mut().find(|d| d.name == name) {
+        Some(d) => {
+            d.channel = channel;
+            d.generation += 1;
+            println!("init: ovladac {name} obnoven ({}. start)", d.generation);
+        }
+        None => list.push(DriverChannel {
+            name: name.clone(),
+            channel,
+            generation: 1,
+        }),
+    }
+    Some(name)
+}
+
+/// Zprava spravce zarizeni po startu (zarizeni pripojene za behu,
+/// obnoveny ovladac). Vraci pocet zarizeni predanych sluzbe vstupu.
+/// Pouziva ji supervisor a testy, ktere na zpravy devmgr cekaji samy.
+pub fn devmgr_message(d: &Devices, m: libos::Message) -> usize {
+    // Ovladac z manifestu (novy nebo obnoveny po padu).
+    if m.data.starts_with(b"dev ") {
+        driver_message(&d.drivers, m);
+        return 0;
+    }
+    match &m.data[..] {
+        b"input" => {
+            let Some(input) = &d.input else { return 0 };
+            let mut added = 0;
+            for h in m.handles {
+                match input.command(inputproto::control::DEVICE, vec![h]) {
+                    Ok(_) => added += 1,
+                    Err(e) => println!("init: zarizeni pro sluzbu vstupu: {e}"),
+                }
+            }
+            added
+        }
+        b"block" => {
+            println!("init: disk pripojeny za behu zatim nepouzivam");
+            0
+        }
+        other => {
+            println!("init: neznama zprava od devmgr: {:?}", other);
+            0
+        }
+    }
 }
 
 /// Nejdelsi ticho od spravce zarizeni pri startu (vic nez jeho vlastni
@@ -94,6 +160,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let mut nets = Vec::new();
     let mut rngs = Vec::new();
     let mut displays = Vec::new();
+    let drivers = spin::Mutex::new(Vec::new());
     loop {
         // Spravce muze mlcet dlouho: PS/2 (az 5 s) a pruchod USB (az 10 s).
         let msg = control.read(Some(time::deadline_after(DEVMGR_TIMEOUT)))?;
@@ -111,6 +178,9 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
             b"net" => nets.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"rng" => rngs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"display" => displays.extend(msg.handles.into_iter().map(Channel::from_handle)),
+            m if m.starts_with(b"dev ") => {
+                driver_message(&drivers, msg);
+            }
             other => println!("init: neznama zprava od devmgr: {:?}", other),
         }
     }
@@ -129,6 +199,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         nets,
         _rngs: rngs,
         displays,
+        drivers,
         fs: None,
     })
 }

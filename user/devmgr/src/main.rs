@@ -13,6 +13,10 @@
 //! `display` (grafika, `guiproto::display`), a `done`, az jsou nalezena zarizeni pri startu
 //! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
 //!
+//! Ovladace z manifestu (`<jmeno>.driver.toml` v initfs, `manifest.rs`)
+//! dostanou zarizeni, pro ktera neni vestaveny ovladac; initu se hlasi
+//! zpravou `dev <jmeno>` a po padu je devmgr obnovi.
+//!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
 
 #![no_std]
@@ -29,6 +33,7 @@ use libos::spawn::StartHandle;
 use libos::{Channel, Process, Signals, Startup, println};
 use pci::{Ecam, Function};
 
+mod manifest;
 mod usb;
 
 libos::entry!(main);
@@ -147,7 +152,8 @@ fn main(startup: Startup) -> i64 {
     };
     let mut drivers: Vec<Process> = Vec::new();
     let mut controllers: Vec<usb::Controller> = Vec::new();
-    for (vmo, arg) in &startup.pci_ecam {
+    let mut from_manifest = manifest::Drivers::load(&fs);
+    for (window, (vmo, arg)) in startup.pci_ecam.iter().enumerate() {
         let ecam = match Ecam::new(vmo, *arg) {
             Ok(e) => e,
             Err(e) => {
@@ -207,7 +213,9 @@ fn main(startup: Startup) -> i64 {
                 Err(e) => println!("devmgr: ovladac xhci pro {} nelze spustit: {e}", f.address),
             }
         }
+        from_manifest.claim(&startup, &fs, &ecam, window, &functions, builtin, &startup.bootstrap);
     }
+    from_manifest.report_unused();
     #[cfg(target_arch = "x86_64")]
     match start_ps2(&fs, resource, &startup.bootstrap) {
         Ok(Some(p)) => drivers.push(p),
@@ -217,7 +225,7 @@ fn main(startup: Startup) -> i64 {
     // Zarizeni USB pri startu: pockat, az radice projdou porty.
     let deadline = libos::time::deadline_after(USB_READY_TIMEOUT);
     while controllers.iter().any(|c| !c.ready) {
-        if !serve_usb(&fs, &mut controllers, &startup.bootstrap, &mut drivers, Some(deadline)) {
+        if !serve_usb(&fs, &mut controllers, &startup, &mut drivers, &mut from_manifest, Some(deadline)) {
             println!("devmgr: radic USB nedokoncil pruchod porty");
             break;
         }
@@ -225,20 +233,31 @@ fn main(startup: Startup) -> i64 {
     let _ = startup.bootstrap.write(b"done", Vec::new());
     // Zustat bezet, dokud init drzi spojeni: hotplug USB (pozdeji restart
     // spadlych ovladacu).
-    while serve_usb(&fs, &mut controllers, &startup.bootstrap, &mut drivers, None) {}
+    while serve_usb(&fs, &mut controllers, &startup, &mut drivers, &mut from_manifest, None) {}
     drop(drivers);
     0
 }
 
-/// Jedno kolo cekani na radice USB (a zavreni initu). `false` = konec
-/// (init skoncil nebo vyprsel termin).
+/// Ma funkce vestaveny ovladac (tabulky vyse, xHCI)? Ovladace z manifestu
+/// dostanou jen ostatni.
+fn builtin(f: &Function) -> bool {
+    let class = (f.class, f.subclass, f.prog_if);
+    DRIVERS.iter().any(|d| f.vendor == virtio::VENDOR && (f.device == d.ids.0 || f.device == d.ids.1))
+        || CLASS_DRIVERS.iter().any(|d| d.class == class)
+        || class == usb::XHCI_CLASS
+}
+
+/// Jedno kolo cekani na radice USB, konec ovladacu z manifestu (a zavreni
+/// initu). `false` = konec (init skoncil nebo vyprsel termin).
 fn serve_usb(
     fs: &Initfs,
     controllers: &mut [usb::Controller],
-    parent: &Channel,
+    startup: &Startup,
     procs: &mut Vec<Process>,
+    from_manifest: &mut manifest::Drivers,
     deadline: Option<u64>,
 ) -> bool {
+    let parent = &startup.bootstrap;
     let mut items = vec![(parent.handle(), Signals::PEER_CLOSED)];
     // Zavreny kanal by mel PEER_CLOSED porad nastaveny a cekani by se
     // vracelo okamzite: skoncene radice vynechat.
@@ -246,6 +265,8 @@ fn serve_usb(
     for &i in &open {
         items.push((controllers[i].channel.handle(), Signals::READABLE | Signals::PEER_CLOSED));
     }
+    let first_driver = items.len();
+    items.extend(from_manifest.wait_items());
     let observed = match libos::wait_many(&items, deadline) {
         Ok((_, o)) => o,
         Err(_) => return false,
@@ -254,6 +275,7 @@ fn serve_usb(
     if observed[0].intersects(Signals::PEER_CLOSED) {
         return false;
     }
+    from_manifest.reap(&observed[first_driver..], startup, fs, parent);
     for (k, &i) in open.iter().enumerate() {
         let c = &mut controllers[i];
         let s = observed[k + 1];
