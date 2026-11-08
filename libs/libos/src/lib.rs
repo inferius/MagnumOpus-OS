@@ -40,6 +40,7 @@ mod port;
 mod process;
 pub mod random;
 mod rt;
+pub mod sched;
 pub mod spawn;
 pub mod sys;
 pub mod thread;

@@ -1,21 +1,28 @@
 //! Planovac.
 //!
-//! - Kazde CPU ma vlastni frontu (jedna na tridu QoS) a vlastni casovace.
-//! - Mezi tridami QoS prisna priorita, uvnitr tridy round-robin s kvantem
-//!   `TIME_SLICE_NS`. TODO: ferovejsi algoritmus (EEVDF), aby Background
-//!   nehladovelo.
-//! - Tickless: casovac se nastavuje jen na konec kvanta nebo nejblizsi
-//!   probuzeni; necinne CPU spi v `hlt` bez preruseni casovace.
-//! - Rozkladani zateze: nova a probuzena vlakna jdou prednostne na necinne
-//!   CPU, preempcne vystridane vlakno se presune na necinne CPU, pokud ma
-//!   vlastni CPU dalsi praci, a necinne CPU si praci samo bere (stealing).
+//! - Kazde CPU ma vlastni frontu (`schedcore::RunQueue`): nejdriv Realtime
+//!   vlakna s rozpoctem (EDF), pak spravedlive tridy Interactive, Normal
+//!   a Background s vahami 15 : 4 : 1 (vazeny virtualni cas trid), uvnitr
+//!   tridy EEVDF s kvantem podle tridy. Nic nehladovi: Background ma na
+//!   vytizenem CPU aspon 1/20 casu mimo Realtime. Navrh a srovnani:
+//!   `docs/cs/planovac.md`.
+//! - Ucinna trida vlakna = pozadovana, omezena stropem jobu, docasne
+//!   zvednuta zpravou od vyssi tridy (dedeni pres IPC), viz `qos`.
+//! - Tickless: casovac se nastavuje jen na konec kvanta, obnovu Realtime
+//!   rozpoctu nebo nejblizsi probuzeni; necinne CPU spi bez preruseni.
+//! - Rozkladani zateze podle tridy a kapacity jadra (`balance`, `topo`):
+//!   Interactive a Realtime na vykonna jadra, Background na usporna;
+//!   necinne CPU si praci samo bere (stealing).
 //!
 //! Stavy vlakna viz `thread::state`. Probuzeni pres porovnani `wait_seq`
 //! a CAS na stavu, takze se neztrati ani nezdvoji; planne probuzeni je
 //! mozne a cekajici kod ho musi snest (podminku overi znovu).
 
+mod balance;
 mod percpu;
+mod qos;
 mod thread;
+pub mod topo;
 mod user;
 
 use alloc::boxed::Box;
@@ -23,6 +30,7 @@ use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
 pub use percpu::{MAX_CPUS, all_cpus, cpu_count, this_cpu, try_this_cpu};
+pub use qos::{boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
 pub use thread::{Qos, Thread};
 pub use user::{
     create_user_thread, on_return_to_user, request_kill, start_user_thread, user_fault,
@@ -31,19 +39,18 @@ pub use user::{
 use crate::arch::context::{self, Context, ThreadContext};
 use crate::arch::{self, interrupts};
 use crate::mm::KernelStack;
-use percpu::{PerCpu, TimerEntry};
+use crate::sync::SpinLockGuard;
+use percpu::{IDLE_CLASS, PerCpu, RunQueue, TimerEntry};
 use thread::state;
-
-/// Delka casoveho kvanta.
-pub const TIME_SLICE_NS: u64 = 10_000_000;
 
 /// Zaregistruje aktualni CPU v planovaci; prave bezici kontext se stane
 /// jeho idle vlaknem.
 pub fn init_cpu(index: usize, hw_id: u32) -> &'static PerCpu {
     let name = alloc::format!("idle-{index}");
+    // Idle vlakno nikdy neni ve fronte; trida se nepouzije.
     let idle = Arc::new(Thread::new(
         &name,
-        Qos::Idle,
+        Qos::Background,
         None,
         Context::default(),
         None,
@@ -52,7 +59,9 @@ pub fn init_cpu(index: usize, hw_id: u32) -> &'static PerCpu {
     ));
     idle.set_state(state::RUNNING);
     idle.on_cpu.store(true, Ordering::Relaxed);
-    PerCpu::install(index, hw_id, idle)
+    let cpu = PerCpu::install(index, hw_id, idle);
+    topo::init_this_cpu(cpu);
+    cpu
 }
 
 /// Index aktualniho CPU, pokud uz je CPU zaregistrovane v planovaci.
@@ -68,13 +77,15 @@ pub fn current() -> Arc<Thread> {
     t
 }
 
-/// Vytvori a spusti vlakno jadra.
-pub fn spawn(name: &str, qos: Qos, f: impl FnOnce() + Send + 'static) -> Arc<Thread> {
-    assert!(qos != Qos::Idle);
-    let stack = KernelStack::new().expect("nedostatek pameti pro zasobnik vlakna");
+fn new_kernel_thread(
+    name: &str,
+    qos: Qos,
+    f: impl FnOnce() + Send + 'static,
+) -> Option<Arc<Thread>> {
+    let stack = KernelStack::new()?;
     // SAFETY: zasobnik je novy a patri jen tomuto vlaknu.
     let ctx = unsafe { Context::new(stack.top(), thread_start) };
-    let t = Arc::new(Thread::new(
+    Some(Arc::new(Thread::new(
         name,
         qos,
         Some(stack),
@@ -82,10 +93,30 @@ pub fn spawn(name: &str, qos: Qos, f: impl FnOnce() + Send + 'static) -> Arc<Thr
         Some(Box::new(f)),
         this_cpu().index,
         None,
-    ));
+    )))
+}
+
+/// Vytvori a spusti vlakno jadra.
+pub fn spawn(name: &str, qos: Qos, f: impl FnOnce() + Send + 'static) -> Arc<Thread> {
+    let t = new_kernel_thread(name, qos, f).expect("nedostatek pameti pro zasobnik vlakna");
     t.started.store(true, Ordering::Relaxed);
-    enqueue(t.clone(), true);
+    enqueue(t.clone(), Enq::New);
     t
+}
+
+/// Vytvori a spusti vlakno jadra tridy Realtime s rozpoctem `budget` ns
+/// v kazde `period` ns (testy, ovladace v jadre).
+pub fn spawn_realtime(
+    name: &str,
+    budget: u64,
+    period: u64,
+    f: impl FnOnce() + Send + 'static,
+) -> Result<Arc<Thread>, crate::error::Error> {
+    let t = new_kernel_thread(name, Qos::Normal, f).ok_or(crate::error::Error::NoMemory)?;
+    set_thread_qos(&t, Qos::Realtime, Some((budget, period)))?;
+    t.started.store(true, Ordering::Relaxed);
+    enqueue(t.clone(), Enq::New);
+    Ok(t)
 }
 
 /// Vstupni bod kazdeho noveho vlakna (prvni `switch` sem skoci).
@@ -107,6 +138,7 @@ pub fn exit() -> ! {
     if let Some(process) = &me.process {
         process.thread_exited();
     }
+    qos::on_exit(&me);
     me.set_state(state::DEAD);
     me.mark_terminated();
     drop(me);
@@ -114,7 +146,7 @@ pub fn exit() -> ! {
     unreachable!("mrtve vlakno bylo znovu naplanovano");
 }
 
-/// Dobrovolne prenecha CPU dalsimu vlaknu stejne nebo vyssi tridy.
+/// Dobrovolne prenecha CPU (vlakno se zaradi zpet podle sve tridy).
 pub fn yield_now() {
     schedule();
 }
@@ -139,7 +171,7 @@ pub fn wake(t: &Arc<Thread>, seq: u64) {
             }
             state::BLOCKED => {
                 if t.transition(state::BLOCKED, state::RUNNABLE) {
-                    enqueue(t.clone(), false);
+                    enqueue(t.clone(), Enq::Wake);
                     return;
                 }
             }
@@ -193,50 +225,39 @@ pub fn pending_timers() -> usize {
     all_cpus().map(|c| c.timers.lock().len()).sum()
 }
 
-/// Vybere CPU pro vlakno pripravene k behu: jeho posledni CPU, pokud je
-/// necinne, jinak libovolne necinne, jinak posledni (kvuli cache).
-fn select_cpu(t: &Thread) -> &'static PerCpu {
-    let last = percpu::cpu(t.last_cpu.load(Ordering::Relaxed)).unwrap_or_else(this_cpu);
-    if last.is_idle.load(Ordering::Relaxed) {
-        return last;
-    }
-    all_cpus()
-        .find(|c| c.is_idle.load(Ordering::Relaxed))
-        .unwrap_or(last)
+/// Jak vlakno prichazi do fronty.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Enq {
+    /// Nove vlakno (umisteni podle CPU rodice).
+    New,
+    /// Probuzene ze spanku (bez nasetreneho kreditu, preempce podle tridy).
+    Wake,
 }
 
-fn enqueue(t: Arc<Thread>, new: bool) {
-    let target = if new && !this_cpu().is_idle.load(Ordering::Relaxed) {
-        // Nove vlakno: kdekoli je volno, jinak u rodice.
-        all_cpus()
-            .find(|c| c.is_idle.load(Ordering::Relaxed))
-            .unwrap_or_else(this_cpu)
-    } else {
-        select_cpu(&t)
+fn enqueue(t: Arc<Thread>, how: Enq) {
+    let now = arch::now_ns();
+    let ent = qos::prepare_ent(&t, now);
+    let last = match how {
+        Enq::New => percpu::try_this_cpu().map_or(0, |c| c.index),
+        Enq::Wake => t.last_cpu.load(Ordering::Relaxed),
     };
-    enqueue_on(target, t);
+    let target = balance::select_cpu(ent.class, last);
+    enqueue_on(target, t, ent, now, how == Enq::Wake);
 }
 
-fn enqueue_on(target: &'static PerCpu, t: Arc<Thread>) {
-    let qos = t.qos as u8;
-    target.rq.lock().push(t);
-    // Preempce, pokud cil je necinny nebo bezi neco s nizsi prioritou.
-    if target.is_idle.load(Ordering::Relaxed) || qos < target.current_qos.load(Ordering::Relaxed) {
+fn enqueue_on(target: &'static PerCpu, t: Arc<Thread>, ent: schedcore::Ent, now: u64, wake: bool) {
+    let realtime = ent.class == Qos::Realtime;
+    let preempt = {
+        let mut rq = target.rq.lock();
+        let p = rq.enqueue(t, ent, now, wake);
+        target.sync(&rq);
+        p
+    };
+    // Realtime na cizim CPU: at si prenastavi casovac obnovy rozpoctu.
+    let remote = percpu::try_this_cpu().is_none_or(|c| c.index != target.index);
+    if preempt || (realtime && remote) {
         arch::send_reschedule(target.hw_id);
     }
-}
-
-fn pick_next(cpu: &PerCpu) -> Option<Arc<Thread>> {
-    if let Some(t) = cpu.rq.lock().pop() {
-        return Some(t);
-    }
-    // Stealing: try_lock, aby dve CPU kradouci si navzajem nedeadlockovala.
-    for other in all_cpus().filter(|c| c.index != cpu.index) {
-        if let Some(t) = other.rq.try_lock().and_then(|mut rq| rq.pop()) {
-            return Some(t);
-        }
-    }
-    None
 }
 
 /// Proc se prepina.
@@ -261,42 +282,69 @@ fn switch_away(reason: Reason) {
     let cpu = this_cpu();
     let prev = cpu.current().clone();
     let prev_is_idle = Arc::ptr_eq(&prev, cpu.idle());
+    let now = arch::now_ns();
+    let mut rq = cpu.rq.lock();
 
     match (reason, prev.state()) {
         _ if prev_is_idle => {}
         (_, state::RUNNING) => {
             prev.set_state(state::RUNNABLE);
-            requeue(cpu, prev.clone());
+            if reason == Reason::Voluntary {
+                rq.update_curr(now);
+                rq.yield_curr();
+            }
+            rq = requeue(cpu, rq, prev.clone(), now);
         }
-        (Reason::Preempt, _) => requeue(cpu, prev.clone()),
-        // Mezitim probuzeno (wake prepnul na RUNNING): bezime dal.
-        (Reason::Voluntary, state::BLOCKING)
-            if !prev.transition(state::BLOCKING, state::BLOCKED) =>
-        {
-            interrupts::restore(irq);
-            return;
+        (Reason::Preempt, _) => rq = requeue(cpu, rq, prev.clone(), now),
+        (Reason::Voluntary, state::BLOCKING) => {
+            // Stav fronty ulozit drive, nez vlakno usne: probouzejici CPU
+            // ho hned potrebuje (zbytek Realtime rozpoctu, zpozdeni).
+            qos::store_ent(&prev, rq.take_curr(now));
+            if !prev.transition(state::BLOCKING, state::BLOCKED) {
+                // Mezitim probuzeno (wake prepnul na RUNNING): bezime dal.
+                rq.resume(qos::take_ent(&prev), now);
+                cpu.sync(&rq);
+                drop(rq);
+                interrupts::restore(irq);
+                return;
+            }
         }
-        _ => {} // DEAD, nebo uspesne BLOCKING -> BLOCKED
+        _ => {
+            // DEAD: z fronty pryc.
+            rq.take_curr(now);
+        }
     }
 
-    let next = pick_next(cpu).unwrap_or_else(|| cpu.idle().clone());
+    let mut picked = rq.pick(now);
+    if picked.is_none()
+        && let Some((t, ent)) = balance::steal(cpu)
+    {
+        rq.enqueue(t, ent, now, false);
+        picked = rq.pick(now);
+    }
+    cpu.sync(&rq);
+    let class_now = rq.curr_class();
+    drop(rq);
+    let (next, slice) = picked.unwrap_or_else(|| (cpu.idle().clone(), u64::MAX));
     let next_is_idle = Arc::ptr_eq(&next, cpu.idle());
-    // Cas CPU procesu: od posledniho prepnuti na tomto CPU.
-    let now = arch::now_ns();
+    // Cas CPU procesu (a necinnosti): od posledniho prepnuti na tomto CPU.
     let ran = now.saturating_sub(cpu.run_start.swap(now, Ordering::Relaxed));
-    if !prev_is_idle && let Some(proc) = &prev.process {
+    if prev_is_idle {
+        cpu.idle_ns.fetch_add(ran, Ordering::Relaxed);
+    } else if let Some(proc) = &prev.process {
         proc.cpu_ns.fetch_add(ran, Ordering::Relaxed);
     }
     cpu.slice_end.store(
         if next_is_idle {
             u64::MAX
         } else {
-            arch::now_ns() + TIME_SLICE_NS
+            now.saturating_add(slice)
         },
         Ordering::Relaxed,
     );
     cpu.is_idle.store(next_is_idle, Ordering::Relaxed);
-    cpu.current_qos.store(next.qos as u8, Ordering::Relaxed);
+    cpu.current_qos
+        .store(class_now.map_or(IDLE_CLASS, |c| c as u8), Ordering::Relaxed);
     // Jen RUNNABLE -> RUNNING; preempcne vystridane vlakno si drzi svuj stav
     // (napr. BLOCKING), aby se probuzeni ani konec neztratily.
     next.transition(state::RUNNABLE, state::RUNNING);
@@ -346,19 +394,48 @@ fn switch_away(reason: Reason) {
     interrupts::restore(irq);
 }
 
-/// Vrati preempcne vystridane vlakno do fronty. Pokud ma toto CPU dalsi
-/// praci a nektere jine je necinne, presune ho tam.
-fn requeue(cpu: &'static PerCpu, t: Arc<Thread>) {
-    let mut rq = cpu.rq.lock();
-    if !rq.is_empty() {
-        let idle = all_cpus().find(|c| c.index != cpu.index && c.is_idle.load(Ordering::Relaxed));
-        if let Some(target) = idle {
-            drop(rq);
-            enqueue_on(target, t);
-            return;
-        }
+/// Vrati vystridane vlakno do fronty. Pokud ma toto CPU dalsi praci nebo
+/// je vlakno na spatnem typu jadra a vhodne CPU je necinne, presune ho
+/// tam. Zmenena trida (nastaveni, zvednuti, strop jobu) = nove zarazeni
+/// misto navratu na puvodni misto.
+fn requeue<'a>(
+    cpu: &'static PerCpu,
+    mut rq: SpinLockGuard<'a, RunQueue>,
+    t: Arc<Thread>,
+    now: u64,
+) -> SpinLockGuard<'a, RunQueue> {
+    let class = qos::current_class(&t, now);
+    // Necinne vhodnejsi CPU, jinak mene zatizene (vyvazovani vytizenych).
+    let target = if !rq.is_empty() || balance::misfit(cpu, class) {
+        balance::idle_target(cpu, class).or_else(|| {
+            if rq.is_empty() {
+                None
+            } else {
+                cpu.sync(&rq);
+                balance::push_target(cpu, class)
+            }
+        })
+    } else {
+        None
+    };
+    if let Some(target) = target
+        && let Some(ent) = rq.take_curr(now)
+    {
+        let ent = qos::refresh_ent(&t, ent, now);
+        cpu.sync(&rq);
+        drop(rq);
+        enqueue_on(target, t, ent, now, false);
+        return cpu.rq.lock();
     }
-    rq.push(t);
+    if qos::needs_requeue(&t, rq.curr_requested_class(), now) {
+        if let Some(ent) = rq.take_curr(now) {
+            let ent = qos::refresh_ent(&t, ent, now);
+            rq.enqueue(t, ent, now, false);
+        }
+    } else {
+        rq.put_curr(t, now);
+    }
+    rq
 }
 
 /// Dokonceni prepnuti na novem vlakne: predchozi vlakno uz smi bezet jinde.
@@ -375,13 +452,17 @@ fn finish_switch() {
     }
 }
 
-/// Nastavi casovac CPU na nejblizsi udalost: konec kvanta nebo probuzeni.
-/// `cpu` musi byt aktualni CPU a preruseni musi byt zakazana.
+/// Nastavi casovac CPU na nejblizsi udalost: konec kvanta, obnova
+/// Realtime rozpoctu nebo probuzeni. `cpu` musi byt aktualni CPU
+/// a preruseni musi byt zakazana.
 fn program_timer(cpu: &PerCpu) {
     debug_assert!(!interrupts::are_enabled());
     debug_assert!(core::ptr::eq(cpu, this_cpu()));
     let next_timer = cpu.timers.lock().peek().map(|e| e.deadline);
-    let slice_end = cpu.slice_end.load(Ordering::Relaxed);
+    let slice_end = cpu
+        .slice_end
+        .load(Ordering::Relaxed)
+        .min(cpu.replenish_at.load(Ordering::Relaxed));
     let deadline = match next_timer {
         Some(t) => Some(t.min(slice_end)),
         None if slice_end != u64::MAX => Some(slice_end),
@@ -408,7 +489,13 @@ pub fn on_timer_interrupt() {
             None => break,
         }
     }
-    if now >= cpu.slice_end.load(Ordering::Relaxed) {
+    let tick = {
+        let mut rq = cpu.rq.lock();
+        let t = rq.tick(now);
+        cpu.sync(&rq);
+        t
+    };
+    if now >= cpu.slice_end.load(Ordering::Relaxed) || tick {
         cpu.need_resched.store(true, Ordering::Relaxed);
     }
     program_timer(cpu);
@@ -431,9 +518,7 @@ pub fn idle_loop() -> ! {
     loop {
         interrupts::disable();
         let cpu = this_cpu();
-        let has_work = !cpu.rq.lock().is_empty()
-            || all_cpus()
-                .any(|c| c.index != cpu.index && c.rq.try_lock().is_some_and(|rq| !rq.is_empty()));
+        let has_work = !cpu.rq.lock().is_empty() || balance::stealable(cpu);
         if has_work {
             schedule();
             interrupts::enable();

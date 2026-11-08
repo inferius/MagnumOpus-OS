@@ -118,7 +118,7 @@ pub fn start(startup: &Startup, devices: Vec<Channel>) -> Result<(Input, Process
 fn spawn(startup: &Startup) -> Result<(Process, Channel)> {
     let fs = Initfs::open(startup)?;
     let image = fs.find("inputd").ok_or(Error::NotFound)?;
-    libos::spawn("inputd", image, Vec::new())
+    libos::spawn::service("inputd", image, Vec::new())
 }
 
 /// Posle prikaz a vrati odpoved (text za `ok`) s handly; `err KOD`

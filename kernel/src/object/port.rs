@@ -44,6 +44,8 @@ pub const REGISTRATION_COST: u64 = 64;
 pub struct Packet {
     pub key: u64,
     pub signals: Signals,
+    /// Trida odesilatele zpravy, ktera paket zpusobila (dedeni QoS).
+    pub boost: Option<crate::sched::Qos>,
 }
 
 /// Fronta paketu v blocich. Bloky `chunks[..used]` drzi pakety (posledni
@@ -185,11 +187,11 @@ impl Port {
 
     /// Doruci paket do rezervovaneho mista (vola objekt pod svym zamkem).
     /// Strzeni zustava, dokud program paket nevyzvedne.
-    pub(super) fn deliver(&self, key: u64, signals: Signals) {
+    pub(super) fn deliver(&self, key: u64, signals: Signals, boost: Option<crate::sched::Qos>) {
         let mut q = self.queue.lock();
         q.armed = q.armed.saturating_sub(1);
-        q.packets.push(Packet { key, signals });
-        self.core.update(Signals::NONE, Signals::READABLE);
+        q.packets.push(Packet { key, signals, boost });
+        self.core.update_boost(Signals::NONE, Signals::READABLE, boost);
     }
 
     /// Zrusi rezervaci, ktera se nakonec nepouzila.

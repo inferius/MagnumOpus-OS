@@ -99,6 +99,13 @@ impl api::Cpu for X86_64 {
         apic::id()
     }
 
+    fn core_kind() -> u8 {
+        let max = cpu::cpuid(0, 0).eax;
+        let leaf7 = if max >= 7 { cpu::cpuid(7, 0).edx } else { 0 };
+        let leaf1a = if max >= 0x1A { cpu::cpuid(0x1A, 0).eax } else { 0 };
+        schedcore::topo::x86_core_kind(max, leaf7, leaf1a)
+    }
+
     fn hw_random() -> Option<u64> {
         cpu::hw_random()
     }

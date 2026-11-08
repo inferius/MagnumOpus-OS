@@ -125,6 +125,9 @@ dma_max = "64K"
 [service]
 restart = false
 max_restarts = 3
+qos = "realtime"
+rt_budget_us = 1000
+rt_period_us = 5000
 "#,
     )
     .unwrap();
@@ -133,6 +136,7 @@ max_restarts = 3
     assert_eq!(m.matches[2], Match::Class { class: 0xff, subclass: 0, prog_if: 0 });
     assert_eq!(m.bars, [0, 2]);
     assert_eq!((m.irq_max, m.dma_max, m.restart, m.max_restarts), (2, 65536, false, 3));
+    assert_eq!(m.qos, Some((abi::sched::class::REALTIME, 1000, 5000)));
     assert!(m.matches(0x1234, 0x11e8, 0, 0, 0));
     assert!(m.matches(1, 1, 0xff, 0, 0));
     assert!(!m.matches(0x1234, 0x0001, 1, 0, 0));
@@ -146,6 +150,8 @@ fn manifest_errors_are_readable() {
     assert!(err("[match]\npci = [\"12:34\"]\n").contains("match.pci[0]"));
     assert!(err("[match]\nclass = [\"01.02\"]\n").contains("match.class[0]"));
     assert!(err("[match]\npci = [\"1234:0001\"]\n[resources]\nbars = [6]\n").contains("resources.bars[0]"));
+    assert!(err("[match]\npci = [\"1234:0001\"]\n[service]\nqos = \"fast\"\n").contains("service.qos"));
+    assert!(err("[match]\npci = [\"1234:0001\"]\n[service]\nqos = \"realtime\"\n").contains("rt_budget_us"));
     assert!(err("[match]\npci = [\"1234:0001\"]\n[resources]\ndma_max = \"1G\"\n").contains("dma_max"));
     let e = manifest::parse("[driver]\nname = \"Bad_Name\"\n").unwrap_err();
     assert!(e.contains("mala pismena"), "{e}");

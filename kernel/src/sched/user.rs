@@ -30,6 +30,7 @@ pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thre
     // SAFETY: zasobnik je novy a patri jen tomuto vlaknu.
     let ctx = unsafe { Context::new(stack.top(), thread_start) };
     let cpu = percpu::try_this_cpu().map_or(0, |c| c.index);
+    let (class, rt) = process.default_qos();
     let t = Arc::new(Thread::new(
         name,
         Qos::Normal,
@@ -41,6 +42,14 @@ pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thre
     ));
     crate::object::KernelObject::core(&*t).set_charge(charge);
     process.add_thread(&t)?;
+    // Trida z `PROCESS_SET`. Realtime nad kapacitu: vlakno pobezi jako
+    // Interactive (proces se nezastavi kvuli vycerpanemu Realtime).
+    if class != Qos::Normal
+        && let Err(e) = super::set_thread_qos(&t, class, rt)
+    {
+        log::warn!("proces {} ({}): vlakno {name} nedostalo tridu {class:?} ({e}), bezi jako Interactive", process.id, process.name);
+        let _ = super::set_thread_qos(&t, class.min(Qos::Interactive), None);
+    }
     Ok(t)
 }
 
@@ -76,7 +85,7 @@ pub fn start_user_thread(
         // jeho procesu a nastavil zasobnik jadra pro navrat z userspace.
         unsafe { arch::enter_user(entry, stack, arg0, arg1) }
     }));
-    enqueue(t.clone(), true);
+    enqueue(t.clone(), super::Enq::New);
     Ok(())
 }
 

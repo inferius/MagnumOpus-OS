@@ -16,6 +16,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Jádro](cs/jadro.md) | [Kernel](en/kernel.md) | jak jádro funguje / how the kernel works |
+| [Plánovač](cs/planovac.md) | [Scheduler](en/scheduler.md) | třídy QoS, spravedlivé dělení, hybridní CPU / QoS classes, fair sharing, hybrid CPUs |
 | [Syscally](cs/syscally.md) | [Syscalls](en/syscalls.md) | referenční popis syscallů / syscall reference |
 | [libos](cs/libos.md) | [libos](en/libos.md) | knihovna pro programy / program library |
 | [Reálný čas](cs/cas.md) | [Real time](en/time.md) | zdroje (UEFI, RTC), formát, pásmo / sources (UEFI, RTC), format, zone |

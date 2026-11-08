@@ -81,7 +81,7 @@ fn start_class(fs: &Initfs, class: u8, iface: Handle, parent: &Channel) -> Resul
                 StartHandle::user(iface),
                 StartHandle::user(driver.into_handle()),
             ];
-            let (p, _control) = libos::spawn("usb-hid", image, handles)?;
+            let (p, _control) = libos::spawn::service("usb-hid", image, handles)?;
             parent.write(b"input", vec![client.into_handle()])?;
             Ok(Some(p))
         }

@@ -9,6 +9,7 @@ mod mm;
 mod object;
 mod platform;
 mod sched;
+mod sched_qos;
 mod userspace;
 
 use alloc::sync::Arc;
@@ -28,6 +29,7 @@ const SUITES: &[(&str, Suite)] = &[
     ("platforma", platform::TESTS),
     ("log", log::TESTS),
     ("planovac", sched::TESTS),
+    ("planovac", sched_qos::TESTS),
     ("objekty", object::TESTS),
     ("userspace", userspace::TESTS),
 ];

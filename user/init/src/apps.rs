@@ -38,6 +38,9 @@ pub fn manifest(fs: &Initfs, name: &str) -> Result<Option<Manifest>> {
 /// Podrizeny job s limity z manifestu.
 pub fn job_for(m: Option<&Manifest>) -> Result<Job> {
     let job = Job::create(&libos::job::current()?)?;
+    // Aplikace si samy nedaji vic nez Normal; kompozitor je pri obsluze
+    // vstupu zvedne zpravou (dedeni QoS pres IPC).
+    libos::sched::set_job_max(&job, libos::sched::Qos::Normal)?;
     if let Some(m) = m {
         if let Some(v) = m.limits.memory {
             job.set_limit(pool::USER, v)?;

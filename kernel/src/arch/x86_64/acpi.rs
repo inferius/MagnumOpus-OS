@@ -137,6 +137,7 @@ pub(super) fn parse_madt_entry(kind: u8, e: &[u8], p: &mut Platform) -> Option<(
         // (hotplug) zatim nestartujeme.
         0 if u32_at(e, 4)? & 1 != 0 => p.cpus.push(Cpu {
             hw_id: u8_at(e, 3)? as u32,
+            uid: u8_at(e, 2)? as u32,
         }),
         1 => p.arch.ioapics.push(IoApic {
             id: u8_at(e, 2)?,
@@ -151,6 +152,7 @@ pub(super) fn parse_madt_entry(kind: u8, e: &[u8], p: &mut Platform) -> Option<(
         5 => p.arch.lapic_phys = u64_at(e, 4)?,
         9 if u32_at(e, 8)? & 1 != 0 => p.cpus.push(Cpu {
             hw_id: u32_at(e, 4)?,
+            uid: u32_at(e, 12)?,
         }),
         _ => {}
     }

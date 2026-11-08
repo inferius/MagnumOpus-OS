@@ -19,6 +19,8 @@ use self::read::{checksum_ok, u8_at, u16_at, u32_at, u64_at};
 pub struct Cpu {
     /// Hardwarove ID CPU (x86: x2APIC ID, aarch64: afinita z MPIDR).
     pub hw_id: u32,
+    /// ACPI Processor UID (odkazuje na nej PPTT).
+    pub uid: u32,
 }
 
 /// Informace o platforme z ACPI.
@@ -30,6 +32,8 @@ pub struct Platform {
     pub pci_ecam: Vec<PciEcam>,
     /// Udaje specificke pro architekturu (radice preruseni, casovace, IOMMU).
     pub arch: arch::PlatformArchInfo,
+    /// Procesory z tabulky PPTT (UID a cluster); prazdne bez tabulky.
+    pub pptt: Vec<schedcore::topo::PpttCpu>,
     /// Fyzicka adresa RSDP a jeho kopie (36 B; ACPI 1.0 jen 20 B) pro
     /// sluzbu ACPI: RSDP muze lezet v pameti, kterou jadro po startu
     /// uvolni.
@@ -43,6 +47,7 @@ impl Default for Platform {
             cpus: Vec::new(),
             pci_ecam: Vec::new(),
             arch: Default::default(),
+            pptt: Vec::new(),
             rsdp_phys: 0,
             rsdp: [0; 36],
         }
@@ -162,6 +167,7 @@ pub fn parse(rsdp_phys: u64) -> Result<Platform> {
         let signature: &[u8; 4] = t[0..4].try_into().unwrap();
         match signature {
             b"MCFG" => parse_mcfg(t, &mut platform),
+            b"PPTT" => platform.pptt = schedcore::topo::parse_pptt(t),
             _ => arch::acpi_table(signature, t, &mut platform),
         }
     }
