@@ -694,6 +694,35 @@ napsaná do jiného okna tak nepotvrdí dialog, který právě vyskočil.
 ukáže systémovou obrazovku přes všechno. Zavře ji jen fyzický vstup;
 kompozitor pak pošle `inputd` zprávu `release` a fokus se vrátí.
 
+## Menu aplikací a paleta příkazů (odsouhlaseno 2026-11-08)
+
+Prototyp a porovnání variant: `design/prostredi-menu.html` (varianta D).
+
+- **Jedna spodní lišta** zůstává. Globální horní lišta (styl macOS) se
+  **nedělá**: víc možností vzhledu = víc kombinací k testování, dokumentaci
+  a podpoře, a jednotné prostředí má přednost. Menu jsou data, takže ji jde
+  doplnit později bez změny API, kdyby to bylo potřeba. **[navrženo]**
+- **Titulek patří aplikaci** (`CUSTOM_TITLE`: karty, nástroje, adresa).
+  Systém kreslí na pevném místě jen odznak důvěry (s barevnými kolečky
+  soukromí), tlačítko menu ☰ hned za ním a tlačítka okna; aplikace je
+  nepřekryje ani nenapodobí. **[navrženo]**
+- **Menu**: aplikace ho jen deklaruje (skupiny, položky jako akce z
+  [API akcí](#api-akcí), role Zpět/Kopírovat/Vložit s jednotnými texty
+  a zkratkami, zaškrtnutí, zakázáno, podmenu), kreslí ho systém. Klik na ☰
+  nebo Alt: ☰ zmizí a menu se rozbalí na jeho místě; přejetí myší přepíná
+  nabídky; Esc, klik mimo nebo výběr položky ho zavře. Volba **Připnout
+  menu** (pro aplikaci nebo globálně) ho nechá trvale rozbalené.
+  První položka každé nabídky je „Hledat příkaz…“; volitelný panel
+  **Příkazy** ukáže strom všech akcí. **[navrženo]**
+- **Paleta příkazů je kontextová**: bez psaní sekce Nedávné, Tato
+  aplikace (několik nejčastějších akcí), Systém; při psaní výsledky
+  seskupené pod nadpisy (aktivní aplikace, Okna, Aplikace, Systém), nejvýš
+  ~5 na sekci s „další…“, akce aktivní aplikace mají přednost. Tab
+  přepíná rozsah (vše / tato aplikace / systém). Sekci aplikace kreslí
+  systém s ikonou a jménem aplikace, sekce Systém má štít důvěry - položka
+  aplikace se nemůže vydávat za systémovou. v1 (aplikace, okna, systémové
+  akce, nedávné) **[implementováno]**, akce aplikací (v2) **[navrženo]**.
+
 ## API akcí
 
 Aplikace v manifestu deklaruje **akce** s typovanými parametry

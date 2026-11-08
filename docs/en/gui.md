@@ -727,6 +727,37 @@ that just popped up.
 applications) shows the system screen over everything. Only physical input
 closes it; the compositor then sends `inputd` `release` and focus returns.
 
+## Application menus and the command palette (agreed 2026-11-08)
+
+Prototype and comparison of the variants: `design/prostredi-menu.html`
+(variant D).
+
+- **One bottom bar** stays. A global top bar (macOS style) is **not**
+  made: more layout options = more combinations to test, document and
+  support, and a uniform environment wins. Menus are data, so it can be
+  added later without an API change if needed. **[designed]**
+- **The title bar belongs to the app** (`CUSTOM_TITLE`: tabs, tools,
+  address). The system draws only the trust badge (with the privacy
+  dots), the ☰ menu button right after it and the window buttons at fixed
+  places; the app cannot cover or imitate them. **[designed]**
+- **Menu**: the app only declares it (groups, items as actions from the
+  [Action API](#action-api), Undo/Copy/Paste roles with uniform labels and
+  shortcuts, checked, disabled, submenus), the system draws it. Clicking ☰
+  or Alt: ☰ disappears and the menu expands in its place; moving the
+  pointer switches menus; Esc, clicking outside or choosing an item closes
+  it. The **Pin menu** option (per app or globally) keeps it expanded.
+  The first item of every menu is "Search command…"; an optional
+  **Commands** panel shows a tree of all actions. **[designed]**
+- **The command palette is contextual**: with no input it shows Recent,
+  This app (a few most used actions), System; while typing, results are
+  grouped under headings (active app, Windows, Apps, System), at most ~5
+  per section with "more…", the active app's actions first. Tab switches
+  the scope (all / this app / system). The system draws the app section
+  with the app's icon and name and the System section with the trust
+  shield - an app item cannot pose as a system one. v1 (apps, windows,
+  system actions, recent) **[implemented]**, app actions (v2)
+  **[designed]**.
+
 ## Action API
 
 An application declares **actions** with typed parameters and permissions
