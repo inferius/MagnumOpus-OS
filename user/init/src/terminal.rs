@@ -295,29 +295,63 @@ impl Terminals {
         }
         // Zpravy stareho registru (Park) zpracovat, nez ho zahodime.
         self.registry(i);
-        let fs = crate::system::devices().and_then(|d| d.fs.as_ref()).ok_or(Error::NotFound)?;
+        let fs = crate::system::devices().and_then(|d| d.fs.as_ref());
         // Pred prvni relaci beziciho systemu: vsechny klony jsou zbytky po
         // padu nebo vypnuti (zadna relace jeste nebezi). V testovacim behu
         // ne: relace drivejsich testu (shsess) muzou jeste bezet a disk je
         // pri kazdem behu novy.
         let test_run = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
-        if !self.cleaned && !test_run {
+        // Mazani bezi ve vlakne: kazdy klon je commit FS (na disku bez
+        // mezipameti zapisu desitky sekund) a termd na nej nesmi cekat.
+        // Seznam se vezme ted, pred startem termd: klony nove relace v nem
+        // nejsou (cesta klonu existuje, dokud ji nikdo nesmaze), takze je
+        // vlakno nesmaze.
+        if let Some(fs) = fs
+            && !self.cleaned
+            && !test_run
+        {
             self.cleaned = true;
-            if let Ok(list) = fs.list(ASIDE_DIR) {
-                for e in list {
-                    let _ = fs.aside_discard(&alloc::format!("{ASIDE_DIR}/{}", e.name));
+            match fs.list(ASIDE_DIR) {
+                Ok(list) if !list.is_empty() => {
+                    let names: Vec<String> = list.into_iter().map(|e| alloc::format!("{ASIDE_DIR}/{}", e.name)).collect();
+                    match fs.connect() {
+                        Ok(own) => {
+                            if let Err(e) = libos::thread::spawn("aside-uklid", move || {
+                                for n in &names {
+                                    let _ = own.aside_discard(n);
+                                }
+                                println!("init: {} zbytku klonu po minulem behu smazano", names.len());
+                            }) {
+                                println!("init: uklid klonu nelze spustit: {e}");
+                            }
+                        }
+                        Err(e) => println!("init: uklid klonu: relace FS: {e}"),
+                    }
                 }
+                _ => {}
             }
         }
         let c = &mut self.clients[i];
-        let own = fs.connect()?;
+        // Bez FS (sluzba nebezi, relace nejde) termd presto spustit:
+        // dostane mrtvy kanal, relace pobezi bez souboru a okno ukaze chybu.
+        let own = match fs.map(|f| f.connect()) {
+            Some(Ok(c)) => c.into_channel(),
+            r => {
+                let why = match r {
+                    Some(Err(e)) => e,
+                    _ => Error::NotFound,
+                };
+                println!("init: termd ({}) bez FS: {why}", c.name);
+                Channel::create()?.0
+            }
+        };
         let initfs = Initfs::open(startup)?;
         let image = initfs.find("termd").ok_or(Error::NotFound)?;
         let vmo = startup.initfs.as_ref().ok_or(Error::NotFound)?;
         let (here, there) = Channel::create()?;
         let (power_here, power_there) = Channel::create()?;
         let mut handles = alloc::vec![
-            StartHandle::user(own.into_channel().into_handle()),
+            StartHandle::user(own.into_handle()),
             StartHandle::user(there.into_handle()),
             StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None)?),
             StartHandle::user(power_there.into_handle()),

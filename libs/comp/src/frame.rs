@@ -143,8 +143,8 @@ impl Comp {
         for c in self.clients.values() {
             match c.ping {
                 Some((_, sent)) if !c.unresponsive => at(sent + PING_TIMEOUT),
-                None => at(c.last_ping + PING_INTERVAL),
-                _ => {}
+                // Nereaguje: dalsi ping (predchozi se mohl ztratit).
+                Some(_) | None => at(c.last_ping + PING_INTERVAL),
             }
         }
         if let Some(d) = self.dialogs.next_wakeup() {
@@ -191,6 +191,17 @@ impl Comp {
             let c = self.clients.get_mut(&id).unwrap();
             match c.ping {
                 None if now >= c.last_ping + PING_INTERVAL => {
+                    c.ping_serial = c.ping_serial.wrapping_add(1);
+                    c.ping = Some((c.ping_serial, now));
+                    c.last_ping = now;
+                    let s = c.ping_serial;
+                    self.send(id, ServerMsg::Ping { serial: s });
+                }
+                // Nereagujici aplikace dostava novy ping kazdy interval:
+                // zprava se mohla ztratit (plna fronta kanalu, kdyz aplikace
+                // dlouho necetla) a bez dalsiho pingu by ztlumeni zustalo
+                // navzdy. Odpoved na kterykoli z nich ho zrusi.
+                Some(_) if c.unresponsive && now >= c.last_ping + PING_INTERVAL => {
                     c.ping_serial = c.ping_serial.wrapping_add(1);
                     c.ping = Some((c.ping_serial, now));
                     c.last_ping = now;
