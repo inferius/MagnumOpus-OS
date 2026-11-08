@@ -341,6 +341,16 @@ closing keep working.
 <figcaption>Tokens are data: the compositor, the UI library and the terminal read the same file.</figcaption>
 </figure>
 
+**QEMU screenshots** (the `compd: vzhled podle navrhu` test, `screendump`
+over QMP, 1280x800; compare with `design/plocha.html` and
+`design/okna.html`):
+
+![Light theme: demo, terminal and task manager windows, the bar](../../design/snimky/vzhled-faze1-svetly.png)
+
+![Dark theme: apps recolor via the THEME message, the bar with a blurred backdrop](../../design/snimky/vzhled-faze1-tmavy.png)
+
+![High contrast: no shadows, solid bar](../../design/snimky/vzhled-faze1-kontrast.png)
+
 **Tokens as data.** `libs/theme` reads `design/tokens.toml` through
 `libs/conf` (which now supports decimals, e.g. `frame_ms = 16.7`) and
 gives the values for light, dark and high-contrast modes: colors

@@ -326,6 +326,15 @@ dál.
 <figcaption>Tokeny jsou data: kompozitor, knihovna UI i terminál čtou stejný soubor.</figcaption>
 </figure>
 
+**Snímky z QEMU** (test `compd: vzhled podle navrhu`, `screendump` přes
+QMP, 1280x800; porovnání s `design/plocha.html` a `design/okna.html`):
+
+![Světlý motiv: okna ukázky, terminálu a správce úloh, lišta](../../design/snimky/vzhled-faze1-svetly.png)
+
+![Tmavý motiv: aplikace se přebarví zprávou THEME, lišta s rozmazaným pozadím](../../design/snimky/vzhled-faze1-tmavy.png)
+
+![Vysoký kontrast: bez stínů, plná lišta](../../design/snimky/vzhled-faze1-kontrast.png)
+
 **Tokeny jako data.** `libs/theme` přečte `design/tokens.toml` přes
 `libs/conf` (nově umí desetinná čísla, např. `frame_ms = 16.7`) a dá
 hodnoty pro režim světlý, tmavý a vysoký kontrast: barvy (premultiplied),
