@@ -249,6 +249,10 @@ k porovnání a hlídání regresí, ne jako výkon skutečného hardwaru.
 | přepnutí kontextu (ping-pong přes událost, jedna strana) | 90-110 µs |
 | podíl Background ve verzi 1 (přísná priorita) | 0 ‰ (hladoví) |
 
+aarch64 (`virt`, TCG, 4 CPU, tři běhy): latence medián 930-989 µs, max
+7,7-14 ms; podíl Background 52-63 ‰; zpoždění periody Realtime medián
+1,2-1,8 ms; přepnutí kontextu 84-107 µs.
+
 Srovnání přepnutí kontextu se starým plánovačem se kvůli úspoře času
 neměřilo (stejný test na verzi 1 je připravený, jde jen spustit); složitost
 výběru je O(n) v počtu vláken jedné třídy na CPU, proti O(1) dřív.

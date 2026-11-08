@@ -270,6 +270,10 @@ performance.
 | context switch (ping-pong over an event, one side) | 90-110 µs |
 | Background share in version 1 (strict priority) | 0 ‰ (starves) |
 
+aarch64 (`virt`, TCG, 4 CPUs, three runs): latency median 930-989 µs, max
+7.7-14 ms; Background share 52-63 ‰; Realtime period lateness median
+1.2-1.8 ms; context switch 84-107 µs.
+
 The context switch was not compared against the old scheduler to save time
 (the same test for version 1 is prepared and only needs a run); the pick is
 O(n) in the threads of one class on a CPU, versus O(1) before.
