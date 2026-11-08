@@ -76,7 +76,9 @@ impl Window {
                 ServerMsg::BlockStart { .. }
                 | ServerMsg::Item { .. }
                 | ServerMsg::BlockEnd { .. }
-                | ServerMsg::ItemUpdate { .. } => {}
+                | ServerMsg::ItemUpdate { .. }
+                // Adresar relace po kazdem bloku (vyzva okna).
+                | ServerMsg::Cwd { .. } => {}
                 other => return Err(alloc::format!("necekana zprava: {other:?}")),
             }
         }

@@ -186,11 +186,14 @@ pub fn complete(line: &str, cursor: usize, ctx: &mut Ctx) -> (usize, Vec<Candida
         None => ("", word.as_str()),
     };
     let dir = if dir_part.is_empty() { ctx.cwd.clone() } else { path::resolve(&ctx.cwd, &ctx.home, dir_part) };
+    // `cd` bere jen adresar: soubory nenabizet.
+    let dirs_only = cmd == "cd";
     if let Ok(entries) = ctx.fs.list_names(&dir) {
         let ln = name_part.to_lowercase();
         let mut cands: Vec<Candidate> = entries
             .into_iter()
             .filter(|e| e.name.to_lowercase().starts_with(&ln) && (!e.name.starts_with('.') || name_part.starts_with('.')))
+            .filter(|e| !dirs_only || e.meta.kind == NodeKind::Dir)
             .map(|e| {
                 let is_dir = e.meta.kind == NodeKind::Dir;
                 let mut text = alloc::format!("{dir_part}{}", e.name);

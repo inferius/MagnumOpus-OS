@@ -87,6 +87,8 @@ pub enum ServerMsg {
     /// Ulohy uzivatele z prehledu uloh (`taskd`): cely seznam po kazde
     /// zmene (panel uloh, stavovy radek, upozorneni).
     Tasks { tasks: Vec<taskproto::Task> },
+    /// Aktualni adresar relace (po kazdem bloku: `cd` ho meni).
+    Cwd { session: u64, cwd: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -567,6 +569,11 @@ impl ServerMsg {
                 w.u8(10);
                 w.str(message);
             }
+            ServerMsg::Cwd { session, cwd } => {
+                w.u8(14);
+                w.u64(*session);
+                w.str(cwd);
+            }
             ServerMsg::Tasks { tasks } => {
                 w.u8(13);
                 let snap = taskproto::Reply::Snapshot { req: 0, seq: 0, tasks: tasks.clone(), last: true };
@@ -615,6 +622,7 @@ impl ServerMsg {
                 }
                 ServerMsg::Prompt { prompt, question, detail, choices }
             }
+            14 => ServerMsg::Cwd { session: r.u64()?, cwd: r.str()? },
             13 => match taskproto::Reply::decode(&r.bytes()?) {
                 Ok(taskproto::Reply::Snapshot { tasks, .. }) => ServerMsg::Tasks { tasks },
                 _ => return Err(DecodeError),
