@@ -24,9 +24,8 @@ use alloc::vec::Vec;
 use blockproto::server::{self, Disks};
 use blockproto::feature;
 use ctrl::{AUX_OFF, Command, Controller, DATA_OFF, IO_DSM, IO_FLUSH, IO_READ, IO_WRITE, Namespace};
-use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
-use libos::{Channel, Error, Mapping, Result, Startup, Vmo, println};
+use libos::{Error, Result, Startup, Vmo, println};
 use pci::Ecam;
 
 libos::entry!(main);
@@ -59,7 +58,7 @@ fn main(startup: Startup) -> i64 {
         println!("nvme: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
-    let Some((bar, size)) = read_bar(&startup.bootstrap) else {
+    let Some((bar, size)) = pci::read_bar_message(&startup.bootstrap, "bar") else {
         println!("nvme {address}: chybi adresa registru (bar)");
         return 2;
     };
@@ -98,22 +97,11 @@ fn main(startup: Startup) -> i64 {
     0
 }
 
-/// Zprava `bar <fyzicka adresa> <velikost>`.
-fn read_bar(bootstrap: &Channel) -> Option<(u64, u64)> {
-    let msg = bootstrap.read(None).ok()?;
-    let text = core::str::from_utf8(&msg.data).ok()?;
-    let mut w = text.split_whitespace();
-    if w.next()? != "bar" {
-        return None;
-    }
-    Some((w.next()?.parse().ok()?, w.next()?.parse().ok()?))
-}
-
 impl Nvme {
     fn new(mut c: Controller, resource: Resource) -> Result<Self> {
         let id = c.identify_controller()?;
         // Sektor musi projit jednim prenosem (MDTS) i bufferem ovladace.
-        let namespaces = c.namespaces(MAX_NAMESPACES, id.max_bytes)?;
+        let namespaces = c.namespaces(&id, MAX_NAMESPACES)?;
         Ok(Self {
             c,
             namespaces,
@@ -251,16 +239,9 @@ impl Disks for Nvme {
     /// DMA pamet. 1 = stranka nezmenena (IOMMU zapis zablokovala), 0 =
     /// prepsana. Zapis jde jen do vlastni pameti ovladace.
     fn test_dma_protection(&mut self, d: usize) -> Result<u64> {
-        const PATTERN: u8 = 0xAA;
-        let ss = self.namespaces[d].sector_size;
         // Jeden sektor do jedne stranky (PRP1); vetsi sektor test neumi.
-        if ss > ctrl::PAGE as usize {
-            return Err(Error::NotSupported);
-        }
-        let page = Vmo::create(4096)?;
-        let map = Mapping::new(&page, 0, 4096, MAP_READ | MAP_WRITE)?;
-        map.write_bytes(0, &alloc::vec![PATTERN; ss]);
-        let phys = self.resource.phys_addr(&page, 0)?;
+        let probe = server::DmaProbe::new(&self.resource, self.namespaces[d].sector_size)?;
+        let phys = probe.phys;
         let nsid = self.namespaces[d].nsid;
         // Vysledek prikazu je vedlejsi (radic chybu prenosu hlasi nebo ne).
         let _ = self.c.io_command(Command {
@@ -269,8 +250,6 @@ impl Disks for Nvme {
             prp1: phys,
             ..Default::default()
         });
-        let mut back = alloc::vec![0u8; ss];
-        map.read_bytes(0, &mut back);
-        Ok(back.iter().all(|&b| b == PATTERN) as u64)
+        Ok(probe.untouched())
     }
 }

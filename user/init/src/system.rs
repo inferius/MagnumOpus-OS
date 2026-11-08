@@ -99,6 +99,9 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         let msg = control.read(Some(time::deadline_after(DEVMGR_TIMEOUT)))?;
         match &msg.data[..] {
             b"done" => break,
+            // Spravce zarizeni jeste ceka na ovladac (napr. reset radice
+            // NVMe nebo roztoceni disku); jen prodlouzi cekani.
+            b"busy" => {}
             b"block" => {
                 for h in msg.handles {
                     match BlockClient::new(Channel::from_handle(h)) {

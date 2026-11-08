@@ -73,7 +73,7 @@ fn main(startup: Startup) -> i64 {
         println!("xhci: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
-    let Some((bar, size)) = read_bar(&startup.bootstrap) else {
+    let Some((bar, size)) = pci::read_bar_message(&startup.bootstrap, "bar0") else {
         println!("xhci: chybi adresa registru (bar0)");
         return 2;
     };
@@ -104,16 +104,6 @@ fn main(startup: Startup) -> i64 {
     }
     srv.run();
     0
-}
-
-fn read_bar(bootstrap: &Channel) -> Option<(u64, u64)> {
-    let msg = bootstrap.read(None).ok()?;
-    let text = core::str::from_utf8(&msg.data).ok()?;
-    let mut w = text.split_whitespace();
-    if w.next()? != "bar0" {
-        return None;
-    }
-    Some((w.next()?.parse().ok()?, w.next()?.parse().ok()?))
 }
 
 fn error_reply(id: u32, e: Error) -> Vec<u8> {

@@ -13,6 +13,8 @@
 //! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody) nebo
 //! `display` (grafika, `guiproto::display`), a `done`, az jsou nalezena zarizeni pri startu
 //! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
+//! Kdyz ceka na ovladac disku dlouho (reset radice, roztoceni disku), posila
+//! initu kazdych 5 s `busy`, aby init start zarizeni nevzdal.
 //!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
 
@@ -131,9 +133,13 @@ const CLASS_DRIVERS: &[ClassDriver] = &[
     },
 ];
 
-/// Jak dlouho cekat, nez ovladac radice disku nahlasi sve disky (reset
-/// radice, navazani linek SATA, roztoceni disku).
-const DISK_REPORT_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(20);
+/// Jak dlouho nejvys cekat, nez ovladac radice disku nahlasi sve disky.
+/// Reset radice NVMe smi podle CAP.TO trvat az 127,5 s, roztoceni disku SATA
+/// desitky sekund; zaseknuty ovladac ale nesmi start zdrzet navzdy.
+const DISK_REPORT_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(150);
+/// Behem cekani na ovladac disku posilat initu `busy` po tolika sekundach:
+/// init ceka na kazdou zpravu spravce jen omezene dlouho (DEVMGR_TIMEOUT).
+const BUSY_INTERVAL: core::time::Duration = core::time::Duration::from_secs(5);
 
 fn main(startup: Startup) -> i64 {
     let Some(resource) = startup.root_resource.as_ref() else {
@@ -343,8 +349,14 @@ fn start_disk_controller(
     control.write(format!("bar {} {}", bar.phys, bar_size).as_bytes(), Vec::new())?;
     let deadline = libos::time::deadline_after(DISK_REPORT_TIMEOUT);
     loop {
-        let msg = match control.read(Some(deadline)) {
+        let slice = libos::time::deadline_after(BUSY_INTERVAL).min(deadline);
+        let msg = match control.read(Some(slice)) {
             Ok(m) => m,
+            Err(libos::Error::TimedOut) if slice < deadline => {
+                // Ovladac jeste pracuje: init nesmi start zarizeni vzdat.
+                parent.write(b"busy", Vec::new())?;
+                continue;
+            }
             Err(e) => {
                 println!("devmgr: ovladac {} pro {} nenahlasil disky: {e}", driver.program, a);
                 break;

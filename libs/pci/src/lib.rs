@@ -15,7 +15,7 @@ pub mod msix;
 use alloc::vec::Vec;
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
-use libos::{Error, Mapping, Result, Vmo};
+use libos::{Channel, Error, Mapping, Result, Vmo};
 
 pub const VENDOR_ID: u16 = 0x00;
 pub const COMMAND: u16 = 0x04;
@@ -33,6 +33,24 @@ const STATUS_CAP_LIST: u16 = 1 << 4;
 pub const CAP_MSI: u8 = 0x05;
 pub const CAP_MSIX: u8 = 0x11;
 pub const CAP_VENDOR: u8 = 0x09;
+
+/// Precte od spravce zarizeni zpravu `<klic> <fyzicka adresa> <velikost>`
+/// (desitkove) s registry zarizeni, napr. `bar` (nvme, ahci) nebo `bar0`
+/// (xhci). `None` = jina zprava nebo spatny format.
+pub fn read_bar_message(bootstrap: &Channel, key: &str) -> Option<(u64, u64)> {
+    let msg = bootstrap.read(None).ok()?;
+    parse_bar_message(core::str::from_utf8(&msg.data).ok()?, key)
+}
+
+/// Rozebere text zpravy pro [`read_bar_message`].
+pub fn parse_bar_message(text: &str, key: &str) -> Option<(u64, u64)> {
+    let mut w = text.split_whitespace();
+    if w.next()? != key {
+        return None;
+    }
+    let r = (w.next()?.parse().ok()?, w.next()?.parse().ok()?);
+    w.next().is_none().then_some(r)
+}
 
 /// Adresa funkce na sbernici.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

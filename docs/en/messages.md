@@ -128,7 +128,9 @@ invariant was broken (a kernel bug).
 | `ahci: port P: disk ... ma logicky sektor ... B - nepodporovano, vynechan` | The disk reports a logical sector that is not a power of two 512 B..32 KiB (a faulty IDENTIFY reply). 512 B and 4Kn disks work. |
 | `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | The port has an ATAPI drive or a port multiplier. |
 | `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | A command did not finish within 20 s; the port is stopped. |
-| `devmgr: ovladac X pro ... nenahlasil disky: ...` | The `nvme`/`ahci` driver did not send `done` within 20 s (slow disk spin-up, stuck controller). Disks reported until then work. |
+| `devmgr: ovladac X pro ... nenahlasil disky: ...` | The `nvme`/`ahci` driver did not send `done` within 150 s (stuck controller). Disks reported until then work. |
+| `ahci: port P: radic umi jen 32bitove adresy a DMA pamet je nad 4 GiB - vynechan` | A controller without 64-bit addressing (`CAP.S64A = 0`) and the port memory is above 4 GiB. The port is skipped, otherwise the controller would write into foreign memory. |
+| `ahci: port P: ulozeni mezipameti pri ukonceni selhalo: ...` | When the driver ended, the disk did not accept FLUSH CACHE; data in the disk cache may have been lost. |
 | `virtio-net BB:DD.F: MAC xx:..., linka pripojena/odpojena` | The network card is ready ("link up/down"). The MAC comes from the device configuration, otherwise it is locally administered (`02:...`). |
 | `virtio-net ...: inicializace selhala: ...` | As for the disk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | The device returned a nonsensical queue index or a buffer it did not own (`CORRUPTED`). The driver resets it (it stops using DMA) and exits; the network does not work until a restart. |

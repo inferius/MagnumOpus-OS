@@ -21,7 +21,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use diskguard::Decision;
-use libos::{Channel, Error, Result, Signals, println};
+use libos::abi::vm::{MAP_READ, MAP_WRITE};
+use libos::hw::Resource;
+use libos::{Channel, Error, Mapping, Result, Signals, Vmo, println};
 
 use crate::{MAX_SECTORS, Request, SECTOR, encode_reply, feature, op};
 
@@ -52,6 +54,49 @@ pub trait Disks {
     fn discard(&mut self, d: usize, lba: u64, count: u64) -> Result<()>;
     /// Test ochrany DMA (`op::TEST_DMA_PROTECTION`).
     fn test_dma_protection(&mut self, d: usize) -> Result<u64>;
+}
+
+/// Stranka pro test ochrany DMA (`op::TEST_DMA_PROTECTION`): bezna pamet
+/// ovladace (ne DMA pamet, s IOMMU neni v domene zarizeni) naplnena vzorem.
+/// Ovladac do ni necha zarizeni precist jeden sektor; zapis jde jen do
+/// vlastni pameti ovladace, takze test nic neohrozi.
+pub struct DmaProbe {
+    _vmo: Vmo,
+    map: Mapping,
+    /// Adresa stranky pro zarizeni.
+    pub phys: u64,
+    len: usize,
+}
+
+impl DmaProbe {
+    const PATTERN: u8 = 0xAA;
+    const PAGE: usize = 4096;
+
+    /// Stranka pro prenos `len` bajtu (nejvys 4 KiB: jedna stranka, jeden
+    /// popis prenosu).
+    pub fn new(resource: &Resource, len: usize) -> Result<Self> {
+        if len == 0 || len > Self::PAGE {
+            return Err(Error::NotSupported);
+        }
+        let vmo = Vmo::create(Self::PAGE as u64)?;
+        let map = Mapping::new(&vmo, 0, Self::PAGE as u64, MAP_READ | MAP_WRITE)?;
+        map.write_bytes(0, &vec![Self::PATTERN; len]);
+        let phys = resource.phys_addr(&vmo, 0)?;
+        Ok(Self {
+            _vmo: vmo,
+            map,
+            phys,
+            len,
+        })
+    }
+
+    /// Vysledek testu: 1 = stranka nezmenena (zapis zablokovan), 0 =
+    /// zarizeni ji prepsalo.
+    pub fn untouched(&self) -> u64 {
+        let mut back = vec![0u8; self.len];
+        self.map.read_bytes(0, &mut back);
+        back.iter().all(|&b| b == Self::PATTERN) as u64
+    }
 }
 
 /// Precte souvisly usek sektoru zarizeni po kusech nejvys [`IO_MAX`].

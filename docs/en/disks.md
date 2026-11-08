@@ -59,7 +59,7 @@ So **before serving the client** the driver examines the disk
 | GPT with **our partition**: type `C123ADA0-51BA-48C5-A536-C2CE6B2B3581` or partition name exactly `MagnumOpus` | only this partition (sector 0 = first sector of the partition) | allowed, only inside the partition; the partition attribute "read-only" (bit 60) forbids it |
 | whole disk with **our FS** and no partition table (`OSFS` superblock at the start of one of the 4 KiB blocks 1..8, sector 0 without an MBR signature) | whole disk | allowed (QEMU data disk, older layout) |
 | GPT without our partition | whole disk | **forbidden** (`READ_ONLY`) |
-| our partition is invalid (beyond the disk, outside the usable area, **overlapping another partition**) | whole disk | **forbidden** |
+| our partition is invalid (beyond the disk, outside the usable area, **overlapping another partition** or the MBR, GPT headers or tables) | whole disk | **forbidden** |
 | MBR (no GPT), protective MBR with damaged GPT headers | whole disk | **forbidden** |
 | empty or unknown disk, read error | whole disk | **forbidden** |
 | device reports write protection (NVMe write protect, virtio `RO`) | per the table | **forbidden** |
@@ -71,7 +71,9 @@ Details:
   installing to an empty disk), it must be an explicit user decision for one
   specific disk, not a global option.
 - The whole GPT is verified: signature, header and table CRC, header
-  location, usable area. If the primary header is damaged the backup at the
+  location, usable area. A partition may not cover the MBR or the GPT
+  headers or tables, even if a header (with a valid CRC, e.g. from a buggy
+  tool) claims a usable area over them. If the primary header is damaged the backup at the
   end of the disk is used. If neither passes, the disk is foreign.
 - The **first valid** partition of ours is used (in table order). The
   client does not see further partitions of ours yet (TODO: a channel per
@@ -138,10 +140,12 @@ time), so it needs:
 - one MSI-X interrupt (vector 0) for both the admin and the I/O completion
   queue,
 - Set Features "Number of Queues" and one I/O queue pair (16 entries),
-- IDENTIFY of the controller (`MDTS`, `ONCS`, `VWC`) and active namespaces;
-  each namespace without metadata is one disk (up to 16); the sector size
-  comes from the LBA format (`LBADS`, typically 512 B or 4 KiB, at most
-  `MDTS`).
+- IDENTIFY of the controller (`MDTS`, `ONCS`, `VWC`, `NN`) and active
+  namespaces; each namespace without metadata is one disk (up to 16); the
+  sector size comes from the LBA format (`LBADS`, typically 512 B or 4 KiB,
+  at most `MDTS`). The active namespace list (IDENTIFY CNS 2) exists from
+  NVMe 1.1; on NVMe 1.0 (e.g. the virtual NVMe of older VMware versions) the
+  driver walks IDs 1..`NN` and recognises inactive ones by a zero size.
 
 | `blockproto` request | NVMe command |
 |---|---|
@@ -151,7 +155,9 @@ time), so it needs:
 | `FEATURES` | `FLUSH`, `WRITE_THROUGH` (no VWC), `DISCARD` (ONCS bit 2), `READ_ONLY` (write protect) |
 
 When the driver ends (clients closed their channels) it performs a normal
-shutdown (`CC.SHN`), so the controller saves its cache. When the controller
+shutdown (`CC.SHN`), so the controller saves its cache. On every exit path,
+including an error during start-up, the driver disables the controller
+(`CC.EN = 0`) before freeing its queues and buffers. When the controller
 does not answer within 10 s, or returns an entry with a foreign command ID,
 the driver disables it (`CC.EN = 0`, it stops touching DMA memory) and
 further requests return `IO_ERROR`.
@@ -161,13 +167,19 @@ further requests return `IO_ERROR`.
 Per Serial ATA AHCI 1.3.1:
 
 1. take the controller over from firmware (BIOS/OS handoff, `BOHC`),
-   controller reset (`GHC.HR`) and AHCI mode (`GHC.AE`),
+   controller reset (`GHC.HR`) and AHCI mode (`GHC.AE`); a controller
+   without 64-bit addressing (`CAP.S64A = 0`) only gets DMA memory below
+   4 GiB, a port whose memory is above 4 GiB is skipped (the controller
+   would drop the upper half of the address and write into foreign memory),
 2. MSI interrupt (AHCI controllers usually have no MSI-X); without MSI the
    driver polls the controller,
 3. for each implemented port (`PI`): stop, command list, received FIS
    area, spin-up (`SUD`); then one shared wait for the links (`DET = 3`,
-   at most 1 s, an empty port is given up after 200 ms), ready disk, SATA
-   disk signature (`0x101`; ATAPI is skipped),
+   at most 1 s, an empty port is given up after 200 ms); ports without a
+   link get a COMRESET (`PxSCTL.DET`) and another wait, because after a
+   controller reset the link does not come up by itself on some chipsets;
+   then a ready disk and the SATA disk signature (`0x101`; ATAPI is
+   skipped),
 4. IDENTIFY DEVICE: LBA48 capacity, write cache, FLUSH CACHE (EXT),
    TRIM (word 169), logical sector size (words 106, 117-118; capacity and
    sector counts in commands are in logical sectors).
@@ -181,15 +193,21 @@ Per Serial ATA AHCI 1.3.1:
 A disk with the write cache enabled that cannot FLUSH reports no
 durability guarantee, and the FS is mounted read-only on it. After a command
 error (TFES) the driver restarts the port; a port that does not answer
-within 20 s is stopped.
+within 20 s is stopped. A disk the driver skips (fails IDENTIFY, no LBA48)
+has its port stopped before its memory is freed. When the driver ends (also
+after an error) the disks' write caches are saved (FLUSH CACHE) and the
+ports are stopped.
 
 ## Disk reports and start-up
 
 `devmgr` sends the driver `pci <bus> <device> <function>` and `bar
 <address> <size>` (NVMe BAR0, AHCI BAR5). For each disk the driver works
 out what the client will see, creates a channel and sends `block` with the
-channel end, then `done`. `devmgr` waits at most 20 s and forwards the
-`block` messages to init.
+channel end, then `done`. `devmgr` forwards the `block` messages to init.
+It waits for the driver at most 150 s (an NVMe controller reset may take up
+to 127.5 s per `CAP.TO`, a SATA disk spin-up tens of seconds) and meanwhile
+sends init `busy` every 5 s, so that init (which waits at most 30 s for each
+device manager message) does not give up on device start-up.
 
 Driver resources (least privilege):
 
