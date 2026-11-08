@@ -1,0 +1,9 @@
+[package]
+name = "agentsh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pomocnik agenta v shellu: overeni navrhu prikazu parserem shlang, pokyny rezimu"
+
+[dependencies]
+shlang = { path = "../shlang" }

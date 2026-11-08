@@ -1,0 +1,23 @@
+[package]
+name = "agentd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "agentd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+fsproto = { path = "../../libs/fsproto" }
+netproto = { path = "../../libs/netproto", features = ["client"] }
+tls = { path = "../../libs/tls", features = ["libos"] }
+httpc = { path = "../../libs/httpc" }
+web = { path = "../../libs/web" }
+wire = { path = "../../libs/wire" }
+agentproto = { path = "../../libs/agentproto" }
+agentsh = { path = "../../libs/agentsh" }
+spin = "0.12"

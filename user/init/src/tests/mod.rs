@@ -4,6 +4,8 @@
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
 mod accounts;
+mod agent;
+mod agent_shell;
 mod basic;
 mod dns;
 mod clock_sync;
@@ -82,6 +84,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("vulkan", vulkan::TESTS),
     // Nastaveni obrazu (bochs-display, vlastni compd) pred GUI.
     ("displej", display::TESTS),
+    ("agent AI", agent::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
     // Po vsech testech FS: cena radku shellu na plnem svazku.

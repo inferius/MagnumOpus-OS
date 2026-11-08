@@ -485,6 +485,10 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "dns",
             "--package",
             "diskguard",
+            "--package",
+            "agentproto",
+            "--package",
+            "agentsh",
             "--features",
             "initfs/std,fs/std,netproto/std,netproto/nts,driverkit/sim",
         ])
@@ -599,6 +603,7 @@ const USER_PROGRAMS: &[&str] = &[
     "accountd",
     "dnsd",
     "vk-probe",
+    "agentd",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
@@ -619,6 +624,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("dnsd.manifest.toml", "user/dnsd/dnsd.manifest.toml"),
     ("dnsd.toml", "user/dnsd/dnsd.toml"),
     ("gui-tasks.manifest.toml", "user/gui-tasks/gui-tasks.manifest.toml"),
+    ("agentd.manifest.toml", "user/agentd/agentd.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

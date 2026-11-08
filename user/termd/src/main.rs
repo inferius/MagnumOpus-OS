@@ -48,6 +48,8 @@ struct Termd {
     registry: Option<Channel>,
     /// Kanal k initu pro napajeni relaci.
     power: Option<Channel>,
+    /// Zapisovaci konec brany agenta AI (kazda relace dostane duplikat).
+    agent: Option<Channel>,
     image: Option<&'static [u8]>,
     broker: Broker,
     sessions: Vec<Sess>,
@@ -100,6 +102,12 @@ impl Termd {
         let mut handles: Vec<Handle> = alloc::vec![give.into_handle()];
         if let Some(f) = &self.fsd {
             handles.push(f.connect()?.into_channel().into_handle());
+            // Brana agenta jen za relaci FS (poradi handlu v shsess).
+            if let Some(a) = &self.agent
+                && let Ok(d) = a.handle().duplicate(None)
+            {
+                handles.push(d);
+            }
         }
         let (_proc, chan) = libos::spawn("shsess", image, Vec::new())?;
         let init = SessMsg::Init { session, tag: tag.into(), home: String::from("/") };
@@ -202,6 +210,7 @@ fn main(mut startup: Startup) -> i64 {
     let fsd = hs.next().map(|h| FsClient::new(Channel::from_handle(h)));
     let registry = hs.next().map(Channel::from_handle);
     let power = hs.next().map(Channel::from_handle);
+    let agent = hs.next().map(Channel::from_handle);
     let nonce = time::wall().map(|t| (t.secs as u64) ^ ((t.nanos as u64) << 20)).unwrap_or_else(time::now);
     let mut t = Termd {
         window: startup.bootstrap,
@@ -209,6 +218,7 @@ fn main(mut startup: Startup) -> i64 {
         fsd,
         registry,
         power,
+        agent,
         image,
         broker: Broker::new(nonce),
         sessions: Vec::new(),
