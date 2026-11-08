@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 use comp::Comp;
-use gfx::text::Text;
+use gfx::text::Family;
 use guiproto::display::{Reply, Request, caps, op};
 use guiproto::modes::{self, Connector};
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
@@ -183,7 +183,7 @@ impl Service {
                 c.resize(w, h, now);
                 c
             }
-            None => Comp::new(w, h, Text::system(), Box::new(token)),
+            None => Comp::new(w, h, ui_fonts(), Box::new(token)),
         };
         let mut comp = comp;
         // Prvni snimek slozit hned (ovladac ho pri pripojeni zobrazi).
@@ -320,4 +320,12 @@ impl Service {
             Err(e) => println!("compd: konektory po hotplugu: {e}"),
         }
     }
+}
+
+/// Pismo UI z tokenu: Inter (vlozene rezy) se zapnutymi vlastnostmi
+/// (`font.ui_features`, napr. tabulkove cislice).
+fn ui_fonts() -> Family {
+    let t = theme::Theme::builtin(theme::Mode::Light);
+    let feats: Vec<[u8; 4]> = t.font.ui_features.iter().filter(|f| f.1).map(|f| f.0).collect();
+    Family::new(font::inter(), &feats)
 }

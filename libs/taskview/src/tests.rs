@@ -12,8 +12,8 @@ fn ui_for<B: Backend>(m: &TaskManager<B>) -> ui::Ui<Msg> {
     u
 }
 
-fn gfx_text() -> gfx::text::Text {
-    gfx::text::Text::system()
+fn gfx_text() -> gfx::text::Family {
+    ui::Look::ui_fonts()
 }
 
 fn names(u: &ui::Ui<Msg>, role: Role) -> Vec<String> {

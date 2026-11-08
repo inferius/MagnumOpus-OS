@@ -46,6 +46,8 @@ struct Service {
     pending_reset: bool,
     /// Skladani na GPU (`backend gpu`); `None` = CPU.
     gpu: Option<gpu::GpuBackend>,
+    /// Casove pasmo hodin v liste (od initu s `display`).
+    zone: Option<libos::time::zone::Zone>,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -60,6 +62,7 @@ fn main(startup: Startup) -> i64 {
         pending_hotplug: false,
         pending_reset: false,
         gpu: None,
+        zone: None,
     };
     loop {
         if !s.wait_and_serve() {
@@ -73,12 +76,16 @@ fn main(startup: Startup) -> i64 {
 impl Service {
     fn wait_and_serve(&mut self) -> bool {
         let now = libos::time::now();
+        let next_minute = self.update_clock(now);
         let mut deadline = match (&self.comp, &self.screen) {
             (Some(c), Some(_)) => c.next_wakeup(now),
             // Bez displeje se nesklada; jen casovace (ping, skupiny).
             (Some(_), None) => Some(now + 1_000_000_000),
             _ => None,
         };
+        if let Some(m) = next_minute {
+            deadline = Some(deadline.map_or(m, |d| d.min(m)));
+        }
         if self.peers.has_backlog() {
             // Odlozene zpravy zkusit znovu brzy (kanal nema signal "volno").
             let soon = now + 5_000_000;
@@ -247,6 +254,29 @@ impl Service {
         }
     }
 
+    /// Hodiny v liste: mistni cas v pasmu od initu. Vraci, kdy se zmeni
+    /// minuta (probuzeni), `None` = hodiny se neukazuji.
+    fn update_clock(&mut self, now: u64) -> Option<u64> {
+        let zone = self.zone?;
+        let c = self.comp.as_mut()?;
+        let Some(utc) = libos::time::wall() else {
+            c.set_clock(None);
+            return None;
+        };
+        let l = zone.to_local(utc);
+        let civil = l.civil;
+        // Den v tydnu: 1. 1. 1970 byl ctvrtek.
+        let days = (utc.secs + l.offset.secs as i64).div_euclid(86_400);
+        const DAYS: [&str; 7] = ["čt", "pá", "so", "ne", "po", "út", "st"];
+        let wd = DAYS[days.rem_euclid(7) as usize];
+        c.set_clock(Some((
+            format!("{}:{:02}", civil.hour, civil.minute),
+            format!("{wd} {}. {}.", civil.day, civil.month),
+        )));
+        let left = 60 - civil.second as u64;
+        Some(now + left * 1_000_000_000)
+    }
+
     /// Rozesle zpravy z jadra kompozitoru.
     fn flush(&mut self) {
         self.peers.flush_backlog();
@@ -294,7 +324,28 @@ impl Service {
         let mut words = text.split_whitespace();
         let cmd = words.next().unwrap_or("");
         let r: Result<(String, Vec<Handle>)> = match cmd {
-            control::DISPLAY => self.attach_display(handles),
+            control::DISPLAY => {
+                if let Some(z) = words.next() {
+                    self.zone = libos::time::zone::Zone::by_name(z).or(libos::time::zone::Zone::parse(z));
+                }
+                self.attach_display(handles)
+            }
+            control::THEME => {
+                let mode = match words.next() {
+                    Some("light") => Ok(theme::Mode::Light),
+                    Some("dark") => Ok(theme::Mode::Dark),
+                    Some("contrast") => Ok(theme::Mode::Contrast),
+                    _ => Err(Error::InvalidArgs),
+                };
+                match (mode, self.comp.as_mut()) {
+                    (Ok(m), Some(c)) => {
+                        c.set_mode(m);
+                        Ok((String::new(), Vec::new()))
+                    }
+                    (Ok(_), None) => Err(Error::NotFound),
+                    (Err(e), _) => Err(e),
+                }
+            }
             control::INPUT => handles.into_iter().next().ok_or(Error::InvalidArgs).map(|h| {
                 self.focus = Some(Channel::from_handle(h));
                 (String::new(), Vec::new())

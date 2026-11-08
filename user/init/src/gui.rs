@@ -129,7 +129,9 @@ impl Service for CompdService {
         let (process, control) = libos::spawn("compd", image, Vec::new())?;
         // Odpoved na `display` = potvrzeni startu (compd se synchronizuje
         // s ovladacem a pripoji snimek).
-        control.write(control::DISPLAY.as_bytes(), vec![display.into_handle()])?;
+        // Pasmo pro hodiny v liste ze stejneho nastaveni jako sluzba casu.
+        let zone = libos::time::zone::Settings::parse(crate::system::TIME_SETTINGS).map(|s| s.zone.name).ok().filter(|n| !n.is_empty()).unwrap_or("UTC");
+        control.write(alloc::format!("{} {zone}", control::DISPLAY).as_bytes(), vec![display.into_handle()])?;
         let started = Started {
             process: process.handle().duplicate(None)?,
             ready: Some(control.handle().duplicate(None)?),

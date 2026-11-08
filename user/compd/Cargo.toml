@@ -16,5 +16,8 @@ guiproto = { path = "../../libs/guiproto" }
 inputproto = { path = "../../libs/inputproto" }
 comp = { path = "../../libs/comp" }
 gfx = { path = "../../libs/gfx" }
+theme = { path = "../../libs/theme" }
+# Rezy Interu, ktere kompozitor kresli (titulky, odznak, lista, dialogy).
+font = { path = "../../libs/font", features = ["inter-400", "inter-500", "inter-600", "inter-700"] }
 venus = { path = "../../libs/venus", features = ["os"] }
 vkcomp = { path = "../../libs/vkcomp", features = ["os"] }

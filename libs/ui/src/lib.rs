@@ -16,6 +16,7 @@ extern crate alloc;
 pub mod draw;
 pub mod event;
 pub mod layout;
+pub mod look;
 pub mod node;
 
 #[cfg(feature = "os")]
@@ -28,7 +29,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use gfx::text::Text;
+use gfx::text::Family;
 use guiproto::Rect;
 use guiproto::a11y::{self, Node as A11yNode, Role};
 use guiproto::action::{Arg, Value};
@@ -36,29 +37,7 @@ use guiproto::action::{Arg, Value};
 pub use node::*;
 
 use layout::{ElemKind, Element};
-
-/// Vzhled (tmavy motiv, stejny jako dekorace systemu).
-pub mod theme {
-    use gfx::rgb;
-    pub const PX: f32 = 15.0;
-    pub const HEADING_PX: f32 = 20.0;
-    pub const PAD: u32 = 14;
-    pub const GAP: u32 = 8;
-    pub const ROW_H: u32 = 28;
-    pub const BG: u32 = rgb(0x1E, 0x23, 0x2A);
-    pub const TEXT: u32 = rgb(0xE6, 0xEA, 0xEE);
-    pub const DIM: u32 = rgb(0x8A, 0x94, 0x9E);
-    pub const ACCENT: u32 = rgb(0x4C, 0x8D, 0xF0);
-    pub const BUTTON: u32 = rgb(0x33, 0x3B, 0x47);
-    pub const HOVER: u32 = rgb(0x3D, 0x46, 0x54);
-    pub const PRESSED: u32 = rgb(0x2A, 0x31, 0x3B);
-    pub const INPUT: u32 = rgb(0x14, 0x18, 0x1E);
-    pub const BORDER: u32 = rgb(0x4A, 0x52, 0x60);
-    pub const SELECTED: u32 = rgb(0x2F, 0x5E, 0x96);
-    /// Vyrazne oznaceni (uloha agenta AI, vystraha).
-    pub const WARN: u32 = rgb(0xE8, 0xA8, 0x3A);
-    pub const WARN_TEXT: u32 = rgb(0x20, 0x16, 0x00);
-}
+pub use look::Look;
 
 /// Id vrstev, ktere knihovna pouziva: koren okna a pro posouvany obsah
 /// s indexem prvku `i` skupina `SCROLL_BASE + 2i` a obsah `+ 1`.
@@ -100,7 +79,10 @@ pub trait App {
 
 /// Stav rozhrani jednoho okna.
 pub struct Ui<M> {
-    pub text: Text,
+    /// Vzhled: motiv z tokenu a pisma.
+    pub look: Look,
+    /// Ikony design systemu (zaskrtnuti, ...).
+    pub(crate) icons: gfx::icon::Icons,
     pub w: u32,
     pub h: u32,
     pub(crate) elems: Vec<Element<M>>,
@@ -127,9 +109,10 @@ pub struct ScrollArea {
 }
 
 impl<M: Clone> Ui<M> {
-    pub fn new(text: Text, w: u32, h: u32) -> Self {
+    pub fn new(fonts: Family, w: u32, h: u32) -> Self {
         Self {
-            text,
+            look: Look::new(fonts, theme::Mode::Light),
+            icons: gfx::icon::Icons::new(),
             w,
             h,
             elems: Vec::new(),
@@ -151,9 +134,9 @@ impl<M: Clone> Ui<M> {
 
     /// Znovu rozvrhne rozhrani podle `view` (po kazde zmene stavu aplikace).
     pub fn rebuild(&mut self, title: String, view: Node<M>) {
-        let p = theme::PAD;
+        let p = self.look.pad();
         let area = Rect::new(p as i32, p as i32, self.w.saturating_sub(2 * p), self.h.saturating_sub(2 * p));
-        self.elems = layout::layout(view, area, &self.text);
+        self.elems = layout::layout(view, area, &self.look);
         self.title = title;
         let n = self.elems.len();
         let ok = |i: &usize| *i < n;

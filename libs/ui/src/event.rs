@@ -13,7 +13,7 @@ use inputproto::code::*;
 use inputproto::mods;
 
 use crate::layout::ElemKind;
-use crate::{Ui, node_id, theme};
+use crate::{Ui, node_id};
 
 /// Vysledek udalosti.
 pub struct Response<M> {
@@ -128,8 +128,9 @@ impl<M: Clone> Ui<M> {
     /// Klik do textoveho pole: kurzor na nejblizsi znak.
     fn click_text(&mut self, i: usize, x: i32) {
         if let ElemKind::TextInput { value, .. } = &self.elems[i].kind {
-            let pos = self.text.positions(value, theme::PX);
-            let lx = x - self.elems[i].rect.x - 10;
+            let b = self.look.body();
+            let pos = self.look.face_ref(b).positions(value, b.size);
+            let lx = x - self.elems[i].rect.x - self.look.theme.space[4] as i32;
             let best = (0..pos.len()).min_by_key(|&k| (pos[k] - lx).abs()).unwrap_or(0);
             self.cursor.insert(i, best);
         }

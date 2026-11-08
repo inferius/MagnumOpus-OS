@@ -27,7 +27,12 @@ use crate::a11y::Node;
 use crate::action::{self, Action, Arg, Value};
 use crate::{Error, ReadExt, Reader, Result, WriteExt, Writer, read_count};
 
+/// `display [pasmo]`: kanal displeje (handle); nepovinne casove pasmo
+/// IANA pro hodiny v liste (`display Europe/Prague`).
 pub const DISPLAY: &str = "display";
+/// `theme light|dark|contrast`: rezim barev vzhledu (tokeny
+/// `design/tokens.toml`).
+pub const THEME: &str = "theme";
 pub const INPUT: &str = "input";
 pub const SECURE: &str = "secure";
 pub const CONNECT: &str = "connect";

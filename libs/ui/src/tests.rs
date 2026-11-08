@@ -6,7 +6,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use gfx::Canvas;
-use gfx::text::Text;
 use guiproto::a11y::{Role, actions, state};
 use guiproto::window::InputEvent;
 use inputproto::code::*;
@@ -81,7 +80,7 @@ struct H {
 impl H {
     fn new() -> Self {
         let app = Demo::new();
-        let mut ui = Ui::new(Text::system(), 420, 400);
+        let mut ui = Ui::new(crate::Look::ui_fonts(), 420, 400);
         ui.rebuild(app.title(), app.view());
         Self { app, ui }
     }
@@ -233,7 +232,9 @@ fn wheel_scrolls_without_redraw_and_hit_uses_offset() {
     let y = area.rect.y + 5;
     h.ev(InputEvent::Button { code: BTN_LEFT, pressed: true, x: area.rect.x + 10, y });
     h.ev(InputEvent::Button { code: BTN_LEFT, pressed: false, x: area.rect.x + 10, y });
-    assert_eq!(h.app.selected, Some((40 / theme::ROW_H) as usize));
+    let row = h.ui.look.row_h() as i32;
+    let inset = h.ui.look.theme.space[2] as i32;
+    assert_eq!(h.app.selected, Some(((40 + 5 - inset) / row) as usize));
     // Posun nejvys na konec obsahu.
     for _ in 0..50 {
         h.ev(InputEvent::Scroll { dx: 0, dy: -1 });
@@ -255,16 +256,19 @@ fn render_window_snapshot() {
     let mut c = Canvas::new(&mut px, w, hh, w).unwrap();
     h.ui.draw(&mut c, 0);
     // Pozadi a tlacitko maji barvy motivu.
-    assert_eq!(c.get(2, 2), theme::BG);
+    let col = h.ui.look.theme.color.clone();
+    assert_eq!(c.get(2, 2), col.surface);
     let b = h.node(Role::Button, "Uložit").bounds;
-    assert_eq!(c.get(b.x as u32 + 4, b.y as u32 + b.h / 2), theme::BUTTON);
+    assert_eq!(c.get(b.x as u32 + b.w / 2, b.y as u32 + 2), col.surface);
+    assert_eq!(c.get(b.x as u32 + b.w / 2, b.y as u32), col.border_strong);
     // Obsah posouvane oblasti do vlastniho bufferu.
     let a = h.ui.scroll_areas()[0];
     let mut spx = vec![0u32; (a.rect.w * a.content_h) as usize];
     let mut sc = Canvas::new(&mut spx, a.rect.w, a.content_h, a.rect.w).unwrap();
     h.ui.draw(&mut sc, a.index + 1);
     // Vybrana polozka 2 (index 1) ma barvu vyberu.
-    assert_eq!(sc.get(20, theme::ROW_H + 10), theme::SELECTED);
+    let row = h.ui.look.row_h();
+    assert_eq!(sc.get(14, row + h.ui.look.theme.space[2] + 4), col.accent_soft);
     // Slozeni pro kontrolu okem.
     let mut comp = px.clone();
     let mut cc = Canvas::new(&mut comp, w, hh, w).unwrap();

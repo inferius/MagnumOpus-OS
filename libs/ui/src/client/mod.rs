@@ -25,7 +25,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use gfx::Canvas;
-use gfx::text::Text;
 use guiproto::a11y::Node;
 use guiproto::action::{Arg, Value};
 use guiproto::replay::Replay;
@@ -516,7 +515,7 @@ pub fn run<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u32) ->
 /// aplikace bere data) a predava je [`App::external`].
 pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extra: Option<Channel>) -> Result<()> {
     let mut win = Window::open(link, mode, w, h, &app.title())?;
-    let mut ui: Ui<A::Msg> = Ui::new(Text::system(), win.w, win.h);
+    let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
     let mut dirty = true;
     loop {
         if dirty && !win.frame_pending {
