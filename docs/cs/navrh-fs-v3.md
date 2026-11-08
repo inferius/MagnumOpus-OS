@@ -278,6 +278,26 @@ Celé **[navrženo]**.
   atomické zápisy, trezory). FAT jen tam, kde to vyžaduje firmware (ESP)
   nebo výměna s Windows (MO-LOGY); NTFS a ext4 jen pro data.
 
+## Systém a aktualizace (odsouhlaseno 2026-11-09)
+
+1. **Teď (vývoj)**: systém = jádro + initfs na ESP. Aktualizace přes síť
+   do dvou slotů A/B na ESP, přepnutí při restartu, počítadlo pokusů
+   a návrat na předchozí slot po 3 neúspěšných startech. Zdroj
+   `cargo xtask serve-update` v místní síti, na stroji příkaz `update`.
+   Bez podpisů (vývojový režim, výchozí vypnuto), jen SHA-256 proti
+   poškození. **[navrženo]**
+2. **Až systém přeroste initfs** (aplikace po portu Rust std, knihovny):
+   systém jako **neměnný dataset jen pro čtení s verzemi**. Aktualizace
+   vytvoří novou verzi (stahují a zapisují se jen změněné bloky, stará
+   verze sdílí nezměněné), loader při startu vybere verzi, návrat = start
+   předchozí verze (drží se např. 3). Nastavení, logy a data jsou
+   v samostatných zapisovatelných datasetech - návrat systému je nesmaže;
+   konfigurace má vlastní historii. Na ESP jen loader, jádro a malý initfs,
+   který systémový dataset připojí. **[navrženo]**
+3. **S podpisy**: kořenový hash systémového datasetu (Merkleův strom) je
+   podepsaný; loader a jádro ověří celý systém jedním podpisem (zapečetěný
+   systém), navazuje na Secure Boot vlastními klíči. **[navrženo]**
+
 ## Snapshoty, koš, ochrana proti ransomwaru
 
 - **Automatické snapshoty** podle plánu datasetu (např. hodinové 24 h,

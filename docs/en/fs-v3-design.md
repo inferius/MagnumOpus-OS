@@ -289,6 +289,29 @@ All **[designed]**.
   atomic writes, vaults). FAT only where firmware requires it (ESP) or for
   exchange with Windows (MO-LOGY); NTFS and ext4 for data only.
 
+## System and updates (agreed 2026-11-09)
+
+1. **Now (development)**: the system = kernel + initfs on the ESP.
+   Network updates into two A/B slots on the ESP, switch on restart, a
+   boot attempt counter and a return to the previous slot after 3 failed
+   starts. Source `cargo xtask serve-update` on the local network, the
+   `update` command on the machine. No signatures (development mode, off by
+   default), only SHA-256 against corruption. **[designed]**
+2. **Once the system outgrows the initfs** (apps after the Rust std port,
+   libraries): the system as an **immutable read-only dataset with
+   versions**. An update creates a new version (only changed blocks are
+   downloaded and written, the old version shares the unchanged ones), the
+   loader picks the version at start, rollback = starting the previous
+   version (e.g. 3 kept). Settings, logs and data live in separate
+   writable datasets - a system rollback does not erase them;
+   configuration has its own history. The ESP holds only the loader, the
+   kernel and a small initfs that mounts the system dataset.
+   **[designed]**
+3. **With signatures**: the root hash of the system dataset (Merkle tree)
+   is signed; the loader and kernel verify the whole system with one
+   signature (sealed system), building on Secure Boot with own keys.
+   **[designed]**
+
 ## Snapshots, trash, ransomware protection
 
 - **Automatic snapshots** per the dataset's schedule (e.g. hourly for
