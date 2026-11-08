@@ -220,6 +220,21 @@ pub fn cancel_timer(id: TimerId) {
     }
 }
 
+/// Rozbehnuty (jeste nepripsany) cas CPU procesu `pid` na vsech CPU, kde
+/// prave bezi jeho vlakno. `Process::cpu_ns` se pricita az pri prepnuti;
+/// soucet obou je aktualni cas CPU (odhad bez zamku, muze o par us
+/// zaostavat nebo se zdvojit s prave probihajicim prepnutim).
+pub fn running_ns(pid: u64) -> u64 {
+    if pid == 0 {
+        return 0;
+    }
+    let now = arch::now_ns();
+    all_cpus()
+        .filter(|c| c.current_pid.load(Ordering::Relaxed) == pid)
+        .map(|c| now.saturating_sub(c.run_start.load(Ordering::Relaxed)))
+        .sum()
+}
+
 /// Pocet naplanovanych probuzeni na vsech CPU (pro testy a ladeni).
 pub fn pending_timers() -> usize {
     all_cpus().map(|c| c.timers.lock().len()).sum()
@@ -343,6 +358,8 @@ fn switch_away(reason: Reason) {
         Ordering::Relaxed,
     );
     cpu.is_idle.store(next_is_idle, Ordering::Relaxed);
+    cpu.current_pid
+        .store(next.process.as_ref().map_or(0, |p| p.id), Ordering::Relaxed);
     cpu.current_qos
         .store(class_now.map_or(IDLE_CLASS, |c| c as u8), Ordering::Relaxed);
     // Jen RUNNABLE -> RUNNING; preempcne vystridane vlakno si drzi svuj stav
