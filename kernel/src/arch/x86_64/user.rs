@@ -10,6 +10,7 @@
 //!   pevnem offsetu, aby k nim asembler pristupoval pres `gs:[...]`.
 
 use core::arch::{asm, naked_asm};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use super::cpu;
 use super::gdt::{self, USER_CODE, USER_DATA};
@@ -29,9 +30,14 @@ pub const SYSCALL_VECTOR: u64 = 0x100;
 #[derive(Debug)]
 pub struct CpuLocal {
     /// Vrchol zasobniku jadra aktualniho vlakna (pro vstup syscallu).
-    kernel_rsp: u64,
-    /// Odlozeny ukazatel zasobniku userspace pri vstupu syscallu.
-    user_rsp: u64,
+    /// Atomicky (vnitrni menitelnost): zapisuje se pres sdilenou referenci
+    /// `&CpuLocal` a cte ho asembler pres GS. Obycejny `u64` zapsany pres
+    /// `&` pretypovanou na `*mut` je nedefinovane chovani - release build
+    /// zapis vypustil a syscall pak skocil na zasobnik 0 (double fault).
+    kernel_rsp: AtomicU64,
+    /// Odlozeny ukazatel zasobniku userspace pri vstupu syscallu (zapisuje
+    /// jen asembler).
+    user_rsp: AtomicU64,
     /// Adresa TSS tohoto CPU (RSP0 pro preruseni z userspace).
     tss: u64,
 }
@@ -40,8 +46,8 @@ impl crate::arch::api::CpuLocalData for CpuLocal {
     /// Data pro aktualni CPU (volat po nahrani GDT a TSS).
     fn for_this_cpu() -> Self {
         Self {
-            kernel_rsp: 0,
-            user_rsp: 0,
+            kernel_rsp: AtomicU64::new(0),
+            user_rsp: AtomicU64::new(0),
             tss: gdt::current_tss(),
         }
     }
@@ -93,9 +99,8 @@ pub unsafe fn set_kernel_stack(local: &CpuLocal, top: u64) {
     // tomuto CPU a preruseni jsou zakazana.
     unsafe {
         ((local.tss + 4) as *mut u64).write_unaligned(top);
-        let p = local as *const CpuLocal as *mut CpuLocal;
-        (*p).kernel_rsp = top;
     }
+    local.kernel_rsp.store(top, Ordering::Relaxed);
 }
 
 /// Prvni vstup aktualniho vlakna do userspace. `arg0` a `arg1` dostane
