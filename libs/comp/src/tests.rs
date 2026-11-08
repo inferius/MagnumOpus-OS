@@ -1451,3 +1451,55 @@ fn bar_launches_closed_apps_and_activates_running() {
     assert!(!t.c.windows[&g].minimized && t.c.focus == Some(g), "aktivovano");
     assert_eq!(t.c.flyout, None);
 }
+
+/// Klavesa s modifikatory (fyzicka).
+fn key_mods(t: &mut T, code: u16, m: u16) {
+    let r = Record::new(Event::Key { code, scancode: code as u32, action: Action::Press, ch: None }, m, 0, t.now);
+    t.c.input(&[r], t.now);
+}
+
+fn text(t: &mut T, s: &str) {
+    for ch in s.chars() {
+        let r = Record::new(Event::Text(ch), 0, 0, t.now);
+        t.c.input(&[r], t.now);
+    }
+}
+
+#[test]
+fn command_palette_search_run_and_recent() {
+    use crate::palette::{Item, SysAction};
+    use inputproto::code::{KEY_ENTER, KEY_ESC, KEY_K};
+    let mut t = T::new();
+    t.c.set_launchable(vec![("org.term".into(), "Terminál".into()), ("org.tasks".into(), "Správce úloh".into())]);
+    let a = t.client("org.demo");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    t.c.take_out();
+    // Ctrl+K otevre; aplikace s fokusem klavesu nedostane.
+    key_mods(&mut t, KEY_K, inputproto::mods::CTRL);
+    assert!(t.c.palette_open(), "Ctrl+K");
+    assert!(client_msgs(&t.c.take_out(), a).iter().all(|m| !matches!(m, ServerMsg::Input { .. })), "klavesa nejde aplikaci");
+    let all = t.c.palette_items();
+    assert!(all.contains(&Item::System(SysAction::Shutdown)) && all.iter().any(|i| matches!(i, Item::Window(_))));
+    // Hledani bez diakritiky: "sprav" najde Spravce uloh.
+    text(&mut t, "sprav");
+    assert_eq!(t.c.palette_items(), vec![Item::App("org.tasks".into(), "Správce úloh".into())]);
+    t.key(KEY_ENTER, false);
+    assert!(!t.c.palette_open(), "Enter provede a zavre");
+    assert_eq!(t.c.take_launch_requests(), vec![alloc::string::String::from("org.tasks")]);
+    // Nedavne nahore; Esc zavre bez akce; Super+K otevre take.
+    key_mods(&mut t, KEY_K, inputproto::mods::META);
+    assert_eq!(t.c.palette_items()[0], Item::App("org.tasks".into(), "Správce úloh".into()), "nedavne nahore");
+    t.key(KEY_ESC, false);
+    assert!(!t.c.palette_open());
+    assert!(t.c.take_launch_requests().is_empty());
+    // Mys: klik mimo paletu ji zavre.
+    key_mods(&mut t, KEY_K, inputproto::mods::CTRL);
+    t.click(2, 2);
+    assert!(!t.c.palette_open(), "klik mimo zavre");
+    // Systemova akce: Vypnout jde initu.
+    key_mods(&mut t, KEY_K, inputproto::mods::CTRL);
+    text(&mut t, "vypnout");
+    t.key(KEY_ENTER, false);
+    assert_eq!(t.c.take_system_requests(), vec![crate::palette::SystemRequest::Shutdown]);
+}

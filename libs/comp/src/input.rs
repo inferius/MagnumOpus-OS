@@ -269,6 +269,22 @@ impl Comp {
                     self.input.last_key = now;
                 }
                 // Diagnosticky snimek: jen fyzicka klavesnice, aplikaci nejde.
+                // Paleta prikazu: zkratka (jen fyzicka klavesnice) prepina;
+                // otevrena paleta bere vsechny klavesy.
+                if !syn && self.dialogs.active().is_none() && Comp::is_palette_shortcut(code, mods) {
+                    if action == Action::Press {
+                        let p = if self.palette.is_some() { None } else { Some(crate::palette::Palette::default()) };
+                        self.set_flyout(None);
+                        self.set_palette(p);
+                    }
+                    return;
+                }
+                if self.palette.is_some() && self.dialogs.active().is_none() {
+                    if !syn {
+                        self.palette_key(code, action == Action::Press || action == Action::Repeat, r.time);
+                    }
+                    return;
+                }
                 // Esc zavre panel nad listou (aplikaci nejde).
                 if code == inputproto::code::KEY_ESC && self.flyout.is_some() && !syn {
                     if action == Action::Press {
@@ -295,6 +311,12 @@ impl Comp {
                 }
             }
             Event::Text(ch) => {
+                if self.palette.is_some() && self.dialogs.active().is_none() {
+                    if !syn {
+                        self.palette_text(ch);
+                    }
+                    return;
+                }
                 if self.dialogs.active().is_some() {
                     if !syn {
                         self.dialog_text(ch);
@@ -563,6 +585,15 @@ impl Comp {
                 self.trace(time, format_args!("{button:?} {act} na {px},{py} -> {n} obsah {x},{y} (okno se stiskem)"));
             } else {
                 self.trace(time, format_args!("{button:?} {act} na {px},{py}: zadne okno nedostalo stisk, nic neposlano"));
+            }
+            return;
+        }
+        // Otevrena paleta: klik na radek provede, jinam zavre (dal nejde).
+        if self.palette.is_some() && pressed {
+            if !syn && button == Button::Left {
+                self.palette_click(px, py, time);
+            } else {
+                self.set_palette(None);
             }
             return;
         }

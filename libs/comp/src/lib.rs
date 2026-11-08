@@ -24,6 +24,7 @@ pub mod diag;
 pub mod dialog;
 pub mod flyout;
 pub mod launch;
+pub mod palette;
 pub mod frame;
 pub mod gpu;
 pub mod input;
@@ -140,6 +141,11 @@ pub struct Comp {
     pub(crate) launchable: Vec<(alloc::string::String, alloc::string::String)>,
     /// Zadosti o spusteni aplikace (vyzvedne sluzba, posle initu).
     pub(crate) launch_requests: Vec<alloc::string::String>,
+    /// Otevrena paleta prikazu (`palette.rs`) a nedavne polozky.
+    pub(crate) palette: Option<palette::Palette>,
+    pub(crate) palette_recent: Vec<alloc::string::String>,
+    /// Zadosti palety pro init (vypnout, restartovat).
+    pub(crate) system_requests: Vec<palette::SystemRequest>,
 }
 
 impl Comp {
@@ -179,6 +185,9 @@ impl Comp {
             flyout: None,
             launchable: Vec::new(),
             launch_requests: Vec::new(),
+            palette: None,
+            palette_recent: Vec::new(),
+            system_requests: Vec::new(),
         };
         c.damage_all();
         c

@@ -422,6 +422,7 @@ impl Comp {
         }
         let mut v = alloc::vec![self.panel_visual(), self.cursor_rect()];
         v.extend(self.flyout_rect());
+        v.extend(self.palette_visual());
         if self.tasks_tip_visible() {
             v.extend(self.tasks_tip_rect());
         }
@@ -476,6 +477,7 @@ impl Comp {
         draw_bar(canvas, &mut self.style, bar, &info);
         if !dialog_active {
             self.draw_flyout(canvas);
+            self.draw_palette(canvas);
         }
         if dialog_active {
             // Ztlumeni vseho pod dialogem (jen system kresli nad nim).
