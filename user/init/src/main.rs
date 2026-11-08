@@ -23,6 +23,7 @@ mod ntp;
 mod revocation;
 mod supervisor;
 mod system;
+mod tasks;
 mod terminal;
 mod tests;
 
@@ -102,6 +103,21 @@ fn main(startup: Startup) -> i64 {
             system::DEVICES.call_once(|| devices);
         }
         Err(e) => println!("init: spravce zarizeni nelze spustit: {e}"),
+    }
+    // Prehled uloh pred GUI a terminalem (okna a relace se v nem registruji).
+    match tasks::start(&startup) {
+        Ok(()) => {
+            if let Some(t) = tasks::TASKS.lock().as_ref() {
+                sup.watch("taskd", &t.process, None);
+            }
+            // fsd hlasi scrub a udrzbu v necinnosti.
+            if let Some((_, ctl)) = system::devices().and_then(|d| d.fsd.as_ref())
+                && let Err(e) = tasks::give_producer(ctl, "fsd")
+            {
+                println!("init: prehled uloh pro fsd: {e}");
+            }
+        }
+        Err(e) => println!("init: sluzbu uloh (taskd) nelze spustit: {e}"),
     }
     if startup.flags & libos::abi::bootstrap::flags::TEST_RUN == 0 {
         // GUI: kompozitor prevezme vstup a obrazovku (testy si ho spusti samy).

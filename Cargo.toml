@@ -61,6 +61,7 @@ members = [
     "user/shsess",
     "user/inputd",
     "user/termd",
+    "user/taskd",
     "user/timed",
     "user/virtio-blk",
     "user/virtio-input",

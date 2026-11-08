@@ -248,6 +248,10 @@ fn unknown_process_in_job_appears_and_ends() {
     apply(&mut la, &out, a);
     let unk = la.tasks.iter().find(|t| t.origin == Origin::Unknown).unwrap();
     assert!(unk.state.finished());
+    // Aplikace v jobu 5 skoncila (zadny zivy proces ve sledovanem jobu).
+    let out = core.processes(&[proc(10, 5, "gui-term", 300, true)], &[(5, 0), (9, 0)], 5);
+    apply(&mut la, &out, a);
+    assert!(la.tasks.iter().find(|t| t.id == app).unwrap().state.finished());
     // Producent se nesmi vydavat za neznamy proces.
     let m = Produce::Register { req: 1, parent: 0, name: "x".into(), origin: Origin::Unknown, who: "x".into(), agent: false, job: None, attach: None, actions: 0 };
     let out = core.producer_msg(init, &m.encode(), 5);

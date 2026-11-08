@@ -466,8 +466,8 @@ kontrola), akce aplikací a později agentů AI. Nic neběží „ve vzduchoprá
 | Část | Co dělá | Kdo ji dělá |
 |---|---|---|
 | **joby v jádře** | skupina procesů s rozpočty (paměť, porty, DMA); strom „kdo spustil koho“ | hotovo (síť) |
-| **služba úloh `taskd`** | jeden seznam úloh: lidsky čitelný název, **kdo spustil** (uživatel, skript, aplikace, služba, agent), stav, průběh, odhad, spotřeba z rozpočtu jobu, akce (připojit, pozastavit, zrušit, log); dokončené úlohy chvíli zůstanou i s výsledkem a chybou | vlákno shellu (6b), po async |
-| **příkaz `tasks`** | strukturovaná tabulka (`tasks \| where owner == "agent"`), `attach`, `cancel`; panel úloh v terminálu, upozornění na dokončení nebo chybu | vlákno shellu (6b) |
+| **služba úloh `taskd`** | jeden seznam úloh: lidsky čitelný název, **kdo spustil** (uživatel, skript, aplikace, služba, agent), stav, průběh, odhad, spotřeba z rozpočtu jobu, akce (připojit, pozastavit, zrušit, log); dokončené úlohy chvíli zůstanou i s výsledkem a chybou | hotovo (vlákno shellu 6b) |
+| **příkaz `tasks`** | strukturovaná tabulka (`tasks \| where owner == "agent"`), `attach`, `cancel`; panel úloh v terminálu, upozornění na dokončení nebo chybu | hotovo (vlákno shellu 6b) |
 | **správce úloh v GUI** | okno se stejnými daty, ikona „běží N úloh“ v liště | vlákno GUI (6c) |
 
 - **Registrace:** úlohy se při vzniku registrují samy (shell, supervisor,
@@ -475,6 +475,48 @@ kontrola), akce aplikací a později agentů AI. Nic neběží „ve vzduchoprá
   „neznámý proces v jobu X“ - nic nezůstane skryté.
 - **Oprávnění:** uživatel vidí své úlohy, cizí a systémové jen s právem.
   Úlohy spuštěné agentem AI jsou výrazně označené (viz [AI v systému](#ai-v-systému-návrh)).
+
+### Stav implementace (hotovo)
+
+```text
+shell (shsess) ──producent──▶ taskd ◀──producent── init (služby, aplikace)
+fsd (scrub, údržba) ──▶       │ ▲                   │ watch: joby aplikací
+                              ▼ │ klient            ▼
+             tasks, panel (Ctrl-T) · správce úloh v GUI · ikona v liště
+```
+
+- **Služba `taskd`** (`user/taskd`, jádro `libs/taskcore` s testy na
+  hostiteli, protokol `libs/taskproto`): jeden seznam úloh v paměti.
+  Dokončené úlohy zůstanou s výsledkem nebo chybou: nejvýš 100 posledních
+  a nejdéle 30 minut. Výsledky důležitých operací zůstávají i jinde (blok
+  v terminálu, log služby, žurnál FS), proto taskd hotové úlohy na disk
+  nezapisuje.
+- **Kanály razí jen init** (řídicí kanál taskd): klient s identitou
+  a rozsahem (vlastní úlohy / všechny, smí řídit), producent s identitou
+  (úloha patří identitě producenta), sledovaný job. Relace shellu dostane
+  kanály přes termd a registr relací (`RegMsg::TasksReq`, init je razí
+  s identitou uživatele), fsd zprávou `tasks` na řídicím kanálu.
+- **Odběr:** snímek a události s pořadovým číslem. Změnu úlohy, kterou
+  klient nevidí, dostane jako `Removed(id)` - čísla jdou bez děr
+  a navázání od `since` funguje (posledních 512 změn, jinak nový snímek).
+- **Producenti:** shell (úlohy `async` s blokem a zrušením, `bg`),
+  supervisor (stav služeb: běží, restart, vzdáno, zastaveno), init
+  (aplikace s oknem i s jejich jobem), fsd (scrub s průběhem a výsledkem,
+  defragmentace a deduplikace v nečinnosti). Akci (zrušit) taskd předá
+  producentovi, jen když ji úloha umí a volající smí.
+- **Neznámý proces:** taskd každé 2 s projde procesy sledovaných jobů
+  (syscall `JOB_PROCESSES`, čas CPU a paměť jobu). Proces v jobu, který
+  žádná běžící úloha nehlásí, je úloha původu `unknown`; úloha s jobem
+  bez živých procesů skončí.
+- **Shell:** `tasks` vrátí tabulku (`tasks | where owner == "service"`),
+  `tasks cancel|pause|resume <id>`, `tasks log <id> -n 50`. V okně panel
+  úloh (Ctrl-T: šipky, `c` zrušit, `p` pozastavit, `r` pokračovat), ve
+  stavovém řádku „úlohy N“ a upozornění na dokončení nebo chybu.
+
+⚠️ **Omezení:** pozastavení zatím žádný producent neumí (taskd vrátí
+`NOT_SUPPORTED`); správce úloh v GUI (`gui-tasks`) se v běžném běhu zatím
+nespouští (dostane kanál klienta, až ho init spustí); procesy ve vnořeném
+jobu aplikace jsou neznámé (patří k úloze jen procesy přímo v jejím jobu).
 
 ## AI v systému (návrh)
 

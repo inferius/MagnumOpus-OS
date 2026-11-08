@@ -29,6 +29,7 @@ pub mod proto;
 pub mod render;
 pub mod screen;
 pub mod session;
+pub mod taskboard;
 pub mod tasks;
 pub mod theme;
 pub mod ui;
@@ -40,6 +41,8 @@ mod tests;
 mod tests_broker;
 #[cfg(test)]
 mod tests_render;
+#[cfg(test)]
+mod tests_taskd;
 #[cfg(test)]
 mod tests_tasks;
 #[cfg(test)]

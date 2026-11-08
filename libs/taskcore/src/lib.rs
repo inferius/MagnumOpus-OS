@@ -434,6 +434,18 @@ impl Core {
                 out.extend(self.changed(*tid, false));
             }
         }
+        // Uloha se sledovanym jobem bez zivych procesu skoncila (aplikace
+        // spadla nebo skoncila bez odhlaseni).
+        let watched: Vec<u64> = memory.iter().map(|(j, _)| *j).collect();
+        let empty: Vec<u64> = claimed
+            .iter()
+            .filter(|(job, _)| watched.contains(job))
+            .filter(|(job, _)| !procs.iter().any(|p| p.job == **job && p.flags & proc_flags::FINISHED == 0))
+            .map(|(_, tid)| *tid)
+            .collect();
+        for tid in empty {
+            out.extend(self.set_state(tid, State::Done(String::from("procesy jobu skoncily")), now));
+        }
         // Neznamy proces: nove se objevi, skonceny skonci.
         let live: Vec<&ProcEntry> =
             procs.iter().filter(|p| p.flags & proc_flags::FINISHED == 0 && !claimed.contains_key(&p.job)).collect();

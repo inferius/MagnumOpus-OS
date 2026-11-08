@@ -112,11 +112,13 @@ fn nap(ns: i64) {
     std::thread::sleep(Duration::from_nanos(ns.max(0) as u64));
 }
 
-struct ThreadEnv {
+pub(crate) struct ThreadEnv {
     fs: SharedFs,
     notify: Arc<CondNotify>,
     /// Bez vlaken (ulohy na miste) - stejne vysledky.
     threads: bool,
+    /// Prehled uloh (jadro taskd v testu).
+    pub taskd: Option<crate::tests_taskd::Fake>,
 }
 
 impl Env for ThreadEnv {
@@ -145,22 +147,35 @@ impl Env for ThreadEnv {
     fn clock(&self) -> Option<Clock> {
         Some(Clock { now: wall, sleep: nap })
     }
+    fn task_send(&mut self, to: crate::taskboard::Chan, data: Vec<u8>) -> bool {
+        match &mut self.taskd {
+            Some(t) => t.send(to, &data),
+            None => false,
+        }
+    }
+    fn task_recv(&mut self) -> Vec<(crate::taskboard::Chan, Vec<u8>)> {
+        self.taskd.as_mut().map(|t| core::mem::take(&mut t.inbox)).unwrap_or_default()
+    }
 }
 
-struct Rig {
-    svc: Service,
-    link: TestLink,
+pub(crate) struct Rig {
+    pub svc: Service,
+    pub link: TestLink,
     fs: SharedFs,
-    env: ThreadEnv,
-    session: u64,
+    pub env: ThreadEnv,
+    pub session: u64,
 }
 
 impl Rig {
-    fn new(threads: bool) -> Self {
+    pub fn new(threads: bool) -> Self {
+        Self::with_taskd(threads, None)
+    }
+
+    pub fn with_taskd(threads: bool, taskd: Option<crate::tests_taskd::Fake>) -> Self {
         let mut m = MemFs::new();
         m.put("/home/a.txt", b"alfa");
         let fs = SharedFs(Arc::new(Mutex::new(m)));
-        let env = ThreadEnv { fs: fs.clone(), notify: Arc::default(), threads };
+        let env = ThreadEnv { fs: fs.clone(), notify: Arc::default(), threads, taskd };
         let mut r = Rig { svc: Service::new("/home"), link: TestLink::default(), fs, env, session: 0 };
         r.handle(ClientMsg::Attach { session: 0 });
         r.session = r
@@ -175,12 +190,16 @@ impl Rig {
         r
     }
 
-    fn handle(&mut self, m: ClientMsg) {
+    pub fn idle(&mut self) {
+        self.svc.idle(&mut self.link, &mut self.fs, &mut self.env);
+    }
+
+    pub fn handle(&mut self, m: ClientMsg) {
         self.svc.handle(m, &mut self.link, &mut self.fs, &mut self.env);
     }
 
     /// Spusti radek; vrati polozky jeho bloku a jestli prosel.
-    fn run(&mut self, line: &str) -> (Vec<Item>, bool) {
+    pub fn run(&mut self, line: &str) -> (Vec<Item>, bool) {
         let from = self.link.sent.len();
         self.handle(ClientMsg::Run { session: self.session, line: line.into() });
         let sent = &self.link.sent[from..];
@@ -229,7 +248,7 @@ impl Rig {
     }
 
     /// Volna chvile, dokud `f` neplati (nejvys 5 s).
-    fn idle_until(&mut self, f: impl Fn(&Self) -> bool) {
+    pub fn idle_until(&mut self, f: impl Fn(&Self) -> bool) {
         let t = Instant::now();
         while !f(self) {
             assert!(t.elapsed() < Duration::from_secs(5), "cekani na ulohy vyprselo");
@@ -243,7 +262,7 @@ impl Rig {
     }
 }
 
-fn last_value(items: &[Item]) -> Option<Value> {
+pub(crate) fn last_value(items: &[Item]) -> Option<Value> {
     items.iter().rev().find_map(|i| match i {
         Item::Value(v) => Some(v.clone()),
         _ => None,

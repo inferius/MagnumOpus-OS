@@ -128,6 +128,7 @@ impl Gui {
         let mut handles = vec![StartHandle::user(ch.into_handle())];
         handles.extend(extra);
         let app = apps::spawn(startup, name, handles)?;
+        crate::tasks::app(&info.name, &info.id, &app.job);
         self.apps.push(app);
         Ok(self.apps.len() - 1)
     }

@@ -75,6 +75,8 @@ pub struct Service {
     pub dedup_phase: bool,
     /// Bezi scrub (smycka dela kroky mezi pozadavky).
     pub scrubbing: bool,
+    /// Prehled uloh (scrub, deduplikace).
+    pub tasks: crate::tasks::FsTasks,
 }
 
 /// Klic rozpracovaneho vypisu: (dataset, snapshot) u vypisu snapshotu
