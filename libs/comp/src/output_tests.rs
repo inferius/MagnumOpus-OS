@@ -26,6 +26,7 @@ fn comp(w: u32, h: u32) -> Comp {
 fn window(c: &mut Comp, id: &str, mode: Mode, now: u64) -> ClientId {
     let cl = c.add_client(
         ConnectInfo {
+            system: false,
             id: id.into(),
             name: id.into(),
             perms: Vec::new(),

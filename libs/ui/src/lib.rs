@@ -97,6 +97,8 @@ pub struct Ui<M> {
     pub(crate) pointer: (i32, i32),
     pub(crate) mods: u16,
     pub title: String,
+    /// Okno ma fokus systemu: jen tehdy se kresli ramecek fokusu prvku.
+    pub(crate) active: bool,
 }
 
 /// Posouvana oblast: index prvku, obdelnik v okne, vyska obsahu, posun.
@@ -124,6 +126,7 @@ impl<M: Clone> Ui<M> {
             pointer: (-1, -1),
             mods: 0,
             title: String::new(),
+            active: true,
         }
     }
 
@@ -192,7 +195,7 @@ impl<M: Clone> Ui<M> {
         for (i, e) in self.elems.iter().enumerate() {
             let parent = if e.parent == 0 { WINDOW_NODE } else { node_id(e.parent - 1) };
             let (role, name, value, mut state, actions) = match &e.kind {
-                ElemKind::Label { text, .. } => (Role::Label, text.clone(), String::new(), 0, 0),
+                ElemKind::Label { text, .. } => (Role::Label, if e.agent { alloc::format!("agent: {text}") } else { text.clone() }, String::new(), 0, 0),
                 ElemKind::Button { text, .. } => (Role::Button, text.clone(), String::new(), 0, a11y::actions::ACTIVATE | a11y::actions::FOCUS),
                 ElemKind::TextInput { value, placeholder, .. } => {
                     (Role::TextInput, placeholder.clone(), value.clone(), 0, a11y::actions::SET_VALUE | a11y::actions::FOCUS)
@@ -205,9 +208,10 @@ impl<M: Clone> Ui<M> {
                     a11y::actions::TOGGLE | a11y::actions::ACTIVATE,
                 ),
                 ElemKind::List { .. } => (Role::List, String::new(), String::new(), 0, a11y::actions::FOCUS),
-                ElemKind::ListItem { text, selected, .. } => (
+                ElemKind::ListItem { text, selected, agent, .. } => (
                     Role::ListItem,
-                    text.clone(),
+                    // Agent i pro ctecku obrazovky (ne jen barvou).
+                    if *agent { alloc::format!("agent: {text}") } else { text.clone() },
                     String::new(),
                     if *selected { a11y::state::SELECTED } else { 0 },
                     a11y::actions::ACTIVATE,

@@ -432,14 +432,25 @@ impl Comp {
         self.next_window += 1;
         cl.windows.insert(local, gid);
         let (sw, sh) = (self.w, self.h);
+        // Okno se umisti do pracovni plochy (obrazovka bez listy); pod listu
+        // se dostane jen tazenim.
+        let geo = self.style.geo();
+        let work_h = self.work_area().h as i32;
+        let top = if mode == Mode::Standard { (geo.title_h + geo.border) as i32 } else { geo.border as i32 };
         let (w, h) = if mode == Mode::Fullscreen {
             (sw, sh)
         } else {
-            (w.clamp(16, sw.saturating_sub(40).max(16)), h.clamp(16, sh.saturating_sub(80).max(16)))
+            let max_h = (work_h - top - geo.border as i32).max(16) as u32;
+            (w.clamp(16, sw.saturating_sub(40).max(16)), h.clamp(16, max_h))
         };
-        // Kaskada od leveho horniho rohu.
+        // Kaskada od leveho horniho rohu, spodni okraj nad listou.
         let n = self.windows.len() as i32 % 8;
-        let (x, y) = if mode == Mode::Fullscreen { (0, 0) } else { (60 + n * 36, 70 + n * 30) };
+        let (x, y) = if mode == Mode::Fullscreen {
+            (0, 0)
+        } else {
+            let y = (70 + n * 30).min(work_h - h as i32 - geo.border as i32).max(top);
+            (60 + n * 36, y)
+        };
         let win = Window {
             client: c,
             local,

@@ -20,7 +20,7 @@ pub enum ElemKind<M> {
     TextInput { value: String, placeholder: String, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
-    ListItem { text: String, index: usize, selected: bool, list: usize },
+    ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
     Progress { value: u32 },
     Group,
     Scroll { content_h: u32 },
@@ -35,6 +35,8 @@ pub struct Element<M> {
     /// Rodic pro strom pristupnosti (index + 1, 0 = okno).
     pub parent: usize,
     pub disabled: bool,
+    /// Patri agentovi AI.
+    pub agent: bool,
 }
 
 impl<M> Element<M> {
@@ -55,7 +57,10 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
     let (w, h) = match &n.kind {
         Kind::Label { text, heading, warn } => {
             let s = if *heading { t.heading() } else { t.body() };
-            if *warn {
+            if n.agent {
+                // Stitek agenta: ikona a text v pilulce.
+                (t.width(text, t.chip()) + 2 * sp[4] + th.size.icon_xs + sp[2], s.line + 2 * sp[2])
+            } else if *warn {
                 // Stitek: pilulka s okrajem `s4`.
                 (t.width(text, s) + 2 * sp[4], s.line + 2 * sp[2])
             } else {
@@ -90,8 +95,9 @@ pub fn layout<M>(root: Node<M>, area: Rect, t: &Look) -> Vec<Element<M>> {
 
 fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mut Vec<Element<M>>) {
     let disabled = n.disabled;
+    let agent = n.agent;
     let push = |out: &mut Vec<Element<M>>, kind: ElemKind<M>, rect: Rect| {
-        out.push(Element { kind, rect, space, parent, disabled });
+        out.push(Element { kind, rect, space, parent, disabled, agent });
         out.len()
     };
     match n.kind {
@@ -107,17 +113,18 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mu
         Kind::Checkbox { text, checked, on_toggle } => {
             push(out, ElemKind::Checkbox { text, checked, on_toggle }, r);
         }
-        Kind::List { items, selected, on_select } => {
+        Kind::List { items, selected, on_select, agents } => {
             let id = push(out, ElemKind::List { count: items.len(), on_select }, r);
             let (rh, inset) = (t.row_h(), t.theme.space[2]);
             for (i, text) in items.into_iter().enumerate() {
                 let ir = Rect::new(r.x + inset as i32, r.y + (inset + i as u32 * rh) as i32, r.w.saturating_sub(2 * inset), rh);
                 out.push(Element {
-                    kind: ElemKind::ListItem { text, index: i, selected: selected == Some(i), list: id },
+                    kind: ElemKind::ListItem { text, index: i, selected: selected == Some(i), list: id, agent: agents.get(i).copied().unwrap_or(false) },
                     rect: ir,
                     space,
                     parent: id,
                     disabled,
+                    agent: false,
                 });
             }
         }

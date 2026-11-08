@@ -369,7 +369,19 @@ the muted color. Window buttons are 28 px pills with a design-system
 icon; the click target is 40 px (`size.hit_min`), overlaps go to the
 nearest center. Hover highlights a button (`surface_3`, close
 `danger`). The 26 px trust badge: shield, manifest name and permission
-icons in `trust_*` colors. An invisible 6 px edge outside the window
+icons in `trust_*` colors; a system app (`[app] system = true` in the
+manifest, judged by init, `ConnectInfo.system`) shows "Systém" with a
+check shield. An unfocused window's badge has 0.6 saturation. The frame is
+1 px, 2 px in high contrast. A new window is placed in the work area
+(screen minus the bar); it gets under the bar only by dragging.
+
+**App elements** (`libs/ui`): the AI agent has the reserved `ai_*` colors
+and always the agent icon and the word "agent" (`.agent()` chip, a list
+row with a left stripe and chip, progress in `ai`; in the accessibility
+tree the name starts with "agent:"). A disabled button is the same button
+at `opacity.disabled`. The selected row has an `accent_soft` background
+and regular weight. The focus ring is drawn only in the active window
+(the element remembers focus). An invisible 6 px edge outside the window
 resizes. Unresponsive app: dimmed content and a "... nereaguje" card.
 
 **Bar** (`design/plocha.html`, "bottom, inset"): 52 px, 8 px inset,

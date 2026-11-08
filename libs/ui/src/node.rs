@@ -20,7 +20,8 @@ pub enum Kind<M> {
     Button { text: String, on_click: Option<M> },
     TextInput { value: String, placeholder: String, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
-    List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>> },
+    /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
+    List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
     Progress { value: u32 },
     Column(Vec<Node<M>>),
     Row(Vec<Node<M>>),
@@ -39,6 +40,9 @@ pub struct Node<M> {
     /// Pevna sirka, 0 = prirozena.
     pub width: u32,
     pub disabled: bool,
+    /// Patri agentovi AI: stitek a prubeh v barve `ai` (vyhrazena jen pro
+    /// agenta, vzdy s ikonou a slovem "agent").
+    pub agent: bool,
 }
 
 fn node<M>(kind: Kind<M>) -> Node<M> {
@@ -48,6 +52,7 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
         height: 0,
         width: 0,
         disabled: false,
+        agent: false,
     }
 }
 
@@ -77,6 +82,7 @@ pub fn list<M>(items: impl IntoIterator<Item = String>, selected: Option<usize>)
         items: items.into_iter().collect(),
         selected,
         on_select: None,
+        agents: Vec::new(),
     })
 }
 
@@ -127,6 +133,20 @@ impl<M> Node<M> {
     pub fn warn(mut self) -> Self {
         if let Kind::Label { warn, .. } = &mut self.kind {
             *warn = true;
+        }
+        self
+    }
+
+    /// Patri agentovi AI (stitek, prubeh).
+    pub fn agent(mut self) -> Self {
+        self.agent = true;
+        self
+    }
+
+    /// Radky seznamu, ktere patri agentovi AI.
+    pub fn agent_rows(mut self, rows: Vec<bool>) -> Self {
+        if let Kind::List { agents, .. } = &mut self.kind {
+            *agents = rows;
         }
         self
     }

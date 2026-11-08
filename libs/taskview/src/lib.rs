@@ -81,6 +81,15 @@ pub struct TaskManager<B: Backend> {
 }
 
 /// Lidsky citelny stav.
+/// "1 běžící úloha", "2 běžící úlohy", "5 běžících úloh" (české tvary).
+pub fn running_tasks(n: u32) -> String {
+    match n {
+        1 => String::from("1 běžící úloha"),
+        2..=4 => format!("{n} běžící úlohy"),
+        _ => format!("{n} běžících úloh"),
+    }
+}
+
 pub fn state_text(t: &Task) -> String {
     let base = match &t.state {
         State::Running => String::from("běží"),
@@ -217,8 +226,7 @@ impl<B: Backend> TaskManager<B> {
     }
 
     fn row_text(t: &Task) -> String {
-        let tag = if t.agent { "[AGENT AI] " } else { "" };
-        format!("{tag}{} - {}", t.name, state_text(t))
+        format!("{} - {}", t.name, state_text(t))
     }
 }
 
@@ -235,9 +243,10 @@ impl<B: Backend> App for TaskManager<B> {
         let vis = self.visible();
         let sel = self.selected.and_then(|id| vis.iter().position(|t| t.id == id));
         let rows: Vec<String> = vis.iter().map(|t| Self::row_text(t)).collect();
+        let agents: Vec<bool> = vis.iter().map(|t| t.agent).collect();
         let mut head = vec![label(&format!("Úlohy: běží {run}")).heading(), spacer()];
         if agent > 0 {
-            head.push(label(&format!("Agent AI: {agent} běžících úloh")).warn());
+            head.push(label(&format!("Agent AI: {}", running_tasks(agent as u32))).agent());
         }
         let mut items = vec![
             row(head),
@@ -245,20 +254,21 @@ impl<B: Backend> App for TaskManager<B> {
                 checkbox("Jen úlohy agenta", self.only_agent).on_toggle(Msg::OnlyAgent),
                 checkbox("Zobrazit dokončené", self.show_done).on_toggle(Msg::ShowDone),
             ]),
-            scroll(list(rows, sel).on_select(Msg::Select)).height(190),
+            scroll(list(rows, sel).on_select(Msg::Select).agent_rows(agents)).height(190),
         ];
         match self.selected() {
             None => items.push(label("Vyberte úlohu v seznamu.")),
             Some(t) => {
                 items.push(label(&t.name).heading());
                 if t.agent {
-                    items.push(label(&format!("Spustil agent AI ({})", t.who)).warn());
+                    items.push(label(&format!("Spustil agent AI ({})", t.who)).agent());
                 } else {
                     items.push(label(&format!("Spustil: {} ({})", origin_text(t.origin), t.who)));
                 }
                 items.push(label(&format!("Stav: {}", state_text(t))));
                 if let (Some(p), false) = (t.progress, t.state.finished()) {
-                    items.push(progress(p as u32));
+                    let bar = progress(p as u32);
+                    items.push(if t.agent { bar.agent() } else { bar });
                 }
                 let mem = t.memory.map_or(String::from("-"), bytes);
                 let cpu = t.cpu_ns.map_or(String::from("-"), |n| format!("{} ms", n / 1_000_000));

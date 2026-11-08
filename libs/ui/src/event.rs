@@ -118,6 +118,11 @@ impl<M: Clone> Ui<M> {
             InputEvent::Focus(false) => {
                 self.pressed = None;
                 self.hover = None;
+                self.active = false;
+                r.redraw = true;
+            }
+            InputEvent::Focus(true) => {
+                self.active = true;
                 r.redraw = true;
             }
             _ => {}

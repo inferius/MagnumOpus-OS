@@ -11,6 +11,31 @@ use theme::TextStyle;
 use crate::Ui;
 use crate::layout::ElemKind;
 
+/// Barva `c` s kryti `k`/255 pres pozadi `bg` (nedostupny prvek: cely
+/// prvek s kryti `opacity.disabled`).
+fn fade(c: u32, bg: u32, k: u32) -> u32 {
+    let m = |sh: u32| ((c >> sh & 0xFF) * k + (bg >> sh & 0xFF) * (255 - k)) / 255;
+    0xFF00_0000 | m(16) << 16 | m(8) << 8 | m(0)
+}
+
+/// Stitek agenta: pilulka `ai_soft`, ikona agenta (dve jiskry) a text
+/// `ai_ink`. Vraci sirku.
+#[allow(clippy::too_many_arguments)]
+fn agent_chip(c: &mut Canvas<'_>, look: &mut crate::Look, icons: &mut gfx::icon::Icons, x: i32, y: i32, h: u32, text: &str) -> u32 {
+    let th = look.theme.clone();
+    let (sp, col) = (&th.space, &th.color);
+    let s = look.chip();
+    let is = th.size.icon_xs;
+    let w = sp[3] + is + sp[1] + look.width(text, s) + sp[3];
+    let r = Rect::new(x, y, w, h);
+    c.round_fill_bordered(r, h / 2, col.ai_soft, col.ai, 1);
+    icons.draw(c, "agent", x + sp[3] as i32, y + (h - is) as i32 / 2, is, th.icon_stroke, col.ai_ink);
+    let f = look.face(s);
+    let b = y + f.baseline_in(s.size, h);
+    f.draw(c, x + (sp[3] + is + sp[1]) as i32, b, text, s.size, col.ai_ink);
+    w
+}
+
 /// Ramecek fokusu kolem `r` (vne prvku, zaobleni o odsazeni vetsi).
 fn focus_ring(c: &mut Canvas<'_>, r: Rect, radius: u32, ring: u32, offset: u32, color: u32) {
     let e = ring + offset;
@@ -33,7 +58,8 @@ impl<M: Clone> Ui<M> {
                 continue;
             }
             let r = e.rect;
-            let focused = self.focus == Some(i);
+            // Ramecek fokusu jen v aktivnim okne (prvek si fokus pamatuje).
+            let focused = self.focus == Some(i) && self.active;
             let hover = self.hover == Some(i);
             let pressed = self.pressed == Some(i);
             let dim = e.disabled;
@@ -42,7 +68,10 @@ impl<M: Clone> Ui<M> {
                     let s = if *heading { self.look.heading() } else { self.look.body() };
                     let old = c.clip();
                     c.set_clip(old.intersect(&r));
-                    if *warn {
+                    if e.agent {
+                        let h = r.h.min(s.line + 2 * sp[2]);
+                        agent_chip(c, &mut self.look, &mut self.icons, r.x, r.y + (r.h - h) as i32 / 2, h, text);
+                    } else if *warn {
                         let tw = self.look.width(text, s) + 2 * sp[4];
                         let chip = Rect::new(r.x, r.y, tw.min(r.w), r.h);
                         c.round_fill(chip, chip.h / 2, col.warn_soft);
@@ -57,22 +86,17 @@ impl<M: Clone> Ui<M> {
                     c.set_clip(old);
                 }
                 ElemKind::Button { text, .. } => {
-                    let bg = if dim {
-                        col.surface_2
-                    } else if pressed || hover {
-                        col.surface_3
-                    } else {
-                        col.surface
-                    };
-                    let border = if dim { col.border } else { col.border_strong };
-                    c.round_fill_bordered(r, r.h / 2, bg, border, 1);
+                    let bg = if (pressed || hover) && !dim { col.surface_3 } else { col.surface };
+                    // Nedostupne: stejne tlacitko s kryti `opacity.disabled`.
+                    let k = if dim { th.opacity.disabled } else { 255 };
+                    c.round_fill_bordered(r, r.h / 2, fade(bg, col.surface, k), fade(col.border_strong, col.surface, k), 1);
                     if focused && !dim {
                         focus_ring(c, r, r.h / 2, ring, ring_off, col.focus);
                     }
                     let s = self.look.button();
                     let f = self.look.face(s);
                     let tw = f.width(text, s.size) as i32;
-                    let fg = if dim { col.ink_faint } else { col.ink };
+                    let fg = fade(col.ink, col.surface, k);
                     let b = r.y + f.baseline_in(s.size, r.h);
                     f.draw(c, r.x + (r.w as i32 - tw) / 2, b, text, s.size, fg);
                 }
@@ -123,30 +147,40 @@ impl<M: Clone> Ui<M> {
                         focus_ring(c, r, th.radius.card, ring, ring_off, col.focus);
                     }
                 }
-                ElemKind::ListItem { text, selected, .. } => {
+                ElemKind::ListItem { text, selected, agent, .. } => {
                     let rad = th.radius.control;
-                    let fg = if *selected {
+                    // Vyber: pozadi `accent_soft`, text normalni (tucne jen
+                    // nadpisy). Radek agenta: `ai_soft` na 45 %, levy pruh
+                    // `ai` a stitek "agent".
+                    if *selected {
                         c.round_fill(r, rad, col.accent_soft);
-                        col.accent_ink
-                    } else {
-                        if hover {
-                            c.round_fill(r, rad, col.surface_3);
-                        }
-                        col.ink
-                    };
-                    let s: TextStyle = if *selected { th.text.body_strong } else { self.look.body() };
+                    } else if *agent {
+                        c.round_fill(r, rad, gfx::scale(col.ai_soft, th.opacity.hung_content));
+                    } else if hover {
+                        c.round_fill(r, rad, col.surface_3);
+                    }
                     let old = c.clip();
                     c.set_clip(old.intersect(&r));
+                    let mut x = r.x + sp[4] as i32;
+                    if *agent {
+                        c.fill(Rect::new(r.x, r.y, sp[2], r.h), col.ai);
+                        let h = th.size.badge_h - sp[2];
+                        let w = agent_chip(c, &mut self.look, &mut self.icons, x, r.y + (r.h - h) as i32 / 2, h, "agent");
+                        x += (w + sp[3]) as i32;
+                    }
+                    let s: TextStyle = self.look.body();
                     let f = self.look.face(s);
                     let b = r.y + f.baseline_in(s.size, r.h);
-                    f.draw_ellipsized(c, r.x + sp[4] as i32, b, text, s.size, fg, r.w.saturating_sub(2 * sp[4]));
+                    let room = (r.right() as i32 - sp[4] as i32 - x).max(0) as u32;
+                    f.draw_ellipsized(c, x, b, text, s.size, col.ink, room);
                     c.set_clip(old);
                 }
                 ElemKind::Progress { value } => {
                     c.round_fill(r, r.h / 2, col.surface_3);
                     let w = r.w * (*value).min(100) / 100;
+                    let fill = if e.agent { col.ai } else { col.accent };
                     if w > 0 {
-                        c.round_fill(Rect::new(r.x, r.y, w.max(r.h), r.h), r.h / 2, col.accent);
+                        c.round_fill(Rect::new(r.x, r.y, w.max(r.h), r.h), r.h / 2, fill);
                     }
                 }
                 ElemKind::Group => {}

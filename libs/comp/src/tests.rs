@@ -37,6 +37,7 @@ struct T {
 
 fn info(id: &str, name: &str) -> ConnectInfo {
     ConnectInfo {
+        system: false,
         id: id.into(),
         name: name.into(),
         perms: vec!["síť".into()],

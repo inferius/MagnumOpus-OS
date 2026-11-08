@@ -353,7 +353,19 @@ barvou. Tlačítka okna jsou pilulky 28 px s ikonou z design systému;
 cíl kliknutí 40 px (`size.hit_min`), překryvy rozhoduje nejbližší
 střed. Najetí zvýrazní tlačítko (`surface_3`, zavřít `danger`).
 Odznak důvěry 26 px: štít, jméno z manifestu a ikony oprávnění,
-barvy `trust_*`. Neviditelný okraj 6 px vně okna mění velikost.
+barvy `trust_*`; systémová aplikace (`[app] system = true` v manifestu,
+posoudí init, `ConnectInfo.system`) má odznak „Systém“ se štítem
+s fajfkou. Okno bez fokusu má odznak se sytostí 0,6. Rám je 1 px, ve
+vysokém kontrastu 2 px. Nové okno se umístí do pracovní plochy
+(obrazovka bez lišty); pod lištu se dostane jen tažením.
+
+**Prvky aplikací** (`libs/ui`): agent AI má vyhrazené barvy `ai_*`
+a vždy ikonu agenta a slovo „agent“ (štítek `.agent()`, řádek seznamu
+s levým pruhem a štítkem, průběh v barvě `ai`; ve stromu přístupnosti
+jméno začíná „agent:“). Nedostupné tlačítko je stejné tlačítko s krytím
+`opacity.disabled`. Vybraný řádek má pozadí `accent_soft` a normální
+písmo. Rámeček fokusu se kreslí jen v aktivním okně (prvek si fokus
+pamatuje). Neviditelný okraj 6 px vně okna mění velikost.
 Nereagující aplikace: obsah ztlumený a karta „… nereaguje“.
 
 **Lišta** (`design/plocha.html`, poloha „dole, odsazená“): 52 px,

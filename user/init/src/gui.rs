@@ -277,7 +277,10 @@ pub fn recipe(startup: &Startup, name: &str) -> Result<ConnectInfo> {
     if m.as_ref().is_some_and(|m| m.network.is_some()) {
         perms.push(String::from("síť"));
     }
+    // Systemova aplikace (odznak "Systém"): klic v manifestu v initfs.
+    let system = conf::parse(text).ok().and_then(|t| t.get_bool("app.system")).unwrap_or(false);
     Ok(ConnectInfo {
+        system,
         id: m.as_ref().map_or_else(|| format!("initfs.{name}"), |m| m.id.clone()),
         name: m.as_ref().map_or_else(|| String::from(name), |m| m.name.clone()),
         perms,

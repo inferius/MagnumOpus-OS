@@ -45,10 +45,13 @@ fn agent_tasks_are_marked_and_sorted_first() {
     let u = ui_for(&m);
     assert_eq!(m.title(), "Správce úloh (4 běží)");
     let items = names(&u, Role::ListItem);
-    assert!(items[0].starts_with("[AGENT AI] Refaktorace"), "{items:?}");
+    assert!(items[0].starts_with("agent: Refaktorace"), "{items:?}");
     assert!(items.last().unwrap().contains("hotovo"), "dokoncene dole");
     // Vyrazny stitek v zahlavi.
-    assert!(names(&u, Role::Label).iter().any(|l| l == "Agent AI: 1 běžících úloh"));
+    assert!(names(&u, Role::Label).iter().any(|l| l == "agent: Agent AI: 1 běžící úloha"));
+    assert_eq!(running_tasks(3), "3 běžící úlohy");
+    assert_eq!(running_tasks(5), "5 běžících úloh");
+    assert_eq!(running_tasks(0), "0 běžících úloh");
 }
 
 #[test]
@@ -71,7 +74,7 @@ fn actions_respect_permissions_and_state() {
     assert!(names(&u, Role::Label).iter().any(|l| l.contains("chybí oprávnění")));
     // Uloha agenta: oznaceni v detailu, pozastavit a pokracovat.
     select(&mut m, &mut u, "Refaktorace");
-    assert!(names(&u, Role::Label).iter().any(|l| l == "Spustil agent AI (asistent)"));
+    assert!(names(&u, Role::Label).iter().any(|l| l == "agent: Spustil agent AI (asistent)"));
     assert!(press(&mut m, &mut u, "Pozastavit"));
     assert_eq!(m.selected().unwrap().state, State::Paused);
     assert!(!press(&mut m, &mut u, "Pozastavit"), "pozastavena nejde pozastavit");

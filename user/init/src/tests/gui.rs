@@ -373,8 +373,8 @@ fn task_manager(startup: &Startup) -> TestResult {
         let t = wait_tree(&s.inspect, w.id, "seznam uloh", |t| t.iter().any(|n| n.role == Role::ListItem))?;
         // Uloha agenta je vyrazne oznacena a nahore.
         let first = t.iter().find(|n| n.role == Role::ListItem).unwrap();
-        check!(first.name.starts_with("[AGENT AI]"), "uloha agenta nahore a oznacena");
-        check!(t.iter().any(|n| n.role == Role::Label && n.name.starts_with("Agent AI:")), "stitek agenta v zahlavi");
+        check!(first.name.starts_with("agent: "), "uloha agenta nahore a oznacena");
+        check!(t.iter().any(|n| n.role == Role::Label && n.name.starts_with("agent: Agent AI:")), "stitek agenta v zahlavi");
         // Systemova uloha bez opravneni: Zrusit neaktivni.
         let scrub = t.iter().find(|n| n.role == Role::ListItem && n.name.contains("Scrub")).ok_or("uloha Scrub chybi")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: scrub.id, action: actions::ACTIVATE, value: String::new() })?;
@@ -382,9 +382,9 @@ fn task_manager(startup: &Startup) -> TestResult {
         let cancel = node(&t, Role::Button, "Zrušit")?;
         check!(cancel.state & guiproto::a11y::state::DISABLED != 0, "Zrusit bez prava neaktivni");
         // Uloha agenta: pozastavit pres pristupnost.
-        let agent = t.iter().find(|n| n.role == Role::ListItem && n.name.starts_with("[AGENT AI]")).unwrap();
+        let agent = t.iter().find(|n| n.role == Role::ListItem && n.name.starts_with("agent: ")).unwrap();
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: agent.id, action: actions::ACTIVATE, value: String::new() })?;
-        let t = wait_tree(&s.inspect, w.id, "detail ulohy agenta", |t| has(t, Role::Label, "Spustil agent AI (asistent)"))?;
+        let t = wait_tree(&s.inspect, w.id, "detail ulohy agenta", |t| has(t, Role::Label, "agent: Spustil agent AI (asistent)"))?;
         let pause = node(&t, Role::Button, "Pozastavit")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: pause.id, action: actions::ACTIVATE, value: String::new() })?;
         wait_tree(&s.inspect, w.id, "pozastaveni ulohy agenta", |t| t.iter().any(|n| n.role == Role::Label && n.name == "Stav: pozastaveno 15 %"))?;

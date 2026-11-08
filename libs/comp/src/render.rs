@@ -348,7 +348,7 @@ impl Comp {
     /// Sirka odznaku duvery okna klienta.
     pub(crate) fn badge_width(&self, cl: &Client) -> u32 {
         let t = &self.style.theme;
-        let mut w = t.space[2] + t.size.icon_s + t.space[2] + self.style.width(&cl.info.name, badge_text(t)) + t.space[3];
+        let mut w = t.space[2] + t.size.icon_s + t.space[2] + self.style.width(badge_name(cl), badge_text(t)) + t.space[3];
         if !cl.info.perms.is_empty() {
             let n = cl.info.perms.len() as u32;
             w += t.space[1] + t.space[2] + 1 + n * perm_icon_size(t) + (n - 1) * t.space[1];
@@ -483,6 +483,17 @@ fn badge_text(t: &theme::Theme) -> TextStyle {
     TextStyle { weight: t.text.body_strong.weight, ..t.text.caption }
 }
 
+/// Sirka ramu okna a listy: ve vysokem kontrastu 2 px (prototyp
+/// `[data-contrast="more"] .win { border-width: 2px }`), jinak 1 px.
+fn frame_width(t: &theme::Theme) -> u32 {
+    if t.mode == theme::Mode::Contrast { 2 } else { 1 }
+}
+
+/// Jmeno v odznaku: u systemove aplikace "Systém".
+fn badge_name(cl: &Client) -> &str {
+    if cl.info.system { "Systém" } else { &cl.info.name }
+}
+
 /// Ikona opravneni v odznaku (`size.icon_xs`).
 fn perm_icon_size(t: &theme::Theme) -> u32 {
     t.size.icon_xs
@@ -607,7 +618,7 @@ pub(crate) fn draw_window_above(c: &mut Canvas<'_>, st: &mut Style, w: &Window, 
     }
     if w.mode.has_frame() {
         let col = st.theme.color.border;
-        c.inner_ring(w.outer(), w.radius(), w.geo.border, col);
+        c.inner_ring(w.outer(), w.radius(), frame_width(&st.theme), col);
     }
 }
 
@@ -648,7 +659,8 @@ fn draw_badge(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, focus
         }
     }
     let style = badge_text(&t);
-    let mut bw = t.space[2] + t.size.icon_s + t.space[2] + st.width(&cl.info.name, style) + t.space[3];
+    let name = badge_name(cl);
+    let mut bw = t.space[2] + t.size.icon_s + t.space[2] + st.width(name, style) + t.space[3];
     let n = cl.info.perms.len() as u32;
     let pi = perm_icon_size(&t);
     if n > 0 {
@@ -664,14 +676,15 @@ fn draw_badge(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, focus
     c.set_clip(old.intersect(&inner));
     let is = t.size.icon_s;
     let mut x = inner.x;
-    st.icons.draw(c, "shield", x, r.y + (r.h as i32 - is as i32) / 2, is, t.icon_stroke, col.trust_ink);
+    let shield = if cl.info.system { "shieldcheck" } else { "shield" };
+    st.icons.draw(c, shield, x, r.y + (r.h as i32 - is as i32) / 2, is, t.icon_stroke, col.trust_ink);
     x += (is + t.space[2]) as i32;
     let perms_w = if n > 0 { t.space[1] + t.space[2] + 1 + n * pi + (n - 1) * t.space[1] } else { 0 };
     let room = (inner.right() as i32 - x).max(0) as u32;
-    let fits = st.width(&cl.info.name, style) + perms_w <= room;
+    let fits = st.width(name, style) + perms_w <= room;
     let face = st.face(style);
     let base = r.y + face.baseline_in(style.size, r.h);
-    x = face.draw_ellipsized(c, x, base, &cl.info.name, style.size, col.trust_ink, if fits { room } else { room.saturating_sub(perms_w.min(room / 2)) });
+    x = face.draw_ellipsized(c, x, base, name, style.size, col.trust_ink, if fits { room } else { room.saturating_sub(perms_w.min(room / 2)) });
     if n > 0 && fits {
         x += t.space[1] as i32;
         // Svisla cara oddelujici opravneni.
@@ -812,7 +825,7 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     if let Some(b) = info.blur {
         c.round_image(b, p, t.radius.window);
     }
-    c.round_fill_bordered(p, t.radius.window, scale(col.surface, t.opacity.bar), col.border, 1);
+    c.round_fill_bordered(p, t.radius.window, scale(col.surface, t.opacity.bar), col.border, frame_width(&t));
     let ctl = t.radius.control;
     // Spoustec.
     let il = t.size.icon_l;

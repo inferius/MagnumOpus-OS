@@ -66,6 +66,9 @@ pub struct ConnectInfo {
     pub perms: Vec<String>,
     /// Akce z manifestu.
     pub actions: Vec<Action>,
+    /// Systemova aplikace (`[app] system = true` v manifestu, posoudi init):
+    /// odznak duvery ukaze "Systém" se stitem s fajfkou.
+    pub system: bool,
 }
 
 impl ConnectInfo {
@@ -81,6 +84,7 @@ impl ConnectInfo {
         for a in &self.actions {
             a.encode(&mut w);
         }
+        w.bool(self.system);
         w.finish()
     }
 
@@ -101,10 +105,14 @@ impl ConnectInfo {
         for _ in 0..n.min(action::MAX_ACTIONS + 1) {
             actions.push(Action::decode(&mut r, len)?);
         }
-        if n > action::MAX_ACTIONS || !r.is_empty() {
+        if n > action::MAX_ACTIONS {
             return Err(Error::InvalidArgs);
         }
-        Ok(Self { id, name, perms, actions })
+        let system = r.bool()?;
+        if !r.is_empty() {
+            return Err(Error::InvalidArgs);
+        }
+        Ok(Self { id, name, perms, actions, system })
     }
 }
 

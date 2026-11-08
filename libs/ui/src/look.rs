@@ -44,6 +44,11 @@ impl Look {
         TextStyle { weight: self.theme.text.caption.weight, ..self.theme.text.body }
     }
 
+    /// Text stitku (`caption`, vaha `body_strong`; `.chip` v prototypu).
+    pub fn chip(&self) -> TextStyle {
+        TextStyle { weight: self.theme.text.body_strong.weight, ..self.theme.text.caption }
+    }
+
     pub fn face(&mut self, s: TextStyle) -> &mut Text {
         self.fonts.face(s.weight)
     }
