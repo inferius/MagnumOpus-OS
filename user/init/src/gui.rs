@@ -451,7 +451,9 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
     }
     // Spravce uloh: za oknem a listkem kanal klienta prehledu uloh
     // (identita uzivatele, vlastni ulohy, smi ridit).
-    match crate::tasks::client("uzivatel", false, true) {
+    // Vidi vsechny ulohy (systemove i aplikace spustene initem, stejne jako
+    // ikona v liste), ridit smi jen sve.
+    match crate::tasks::client_view_all("uzivatel") {
         Ok(c) => {
             if let Err(e) = gui.launch_supervised_with(startup, "gui-tasks", sup, vec![StartHandle::user(c.into_handle())]) {
                 println!("init: gui-tasks nelze spustit: {e}");

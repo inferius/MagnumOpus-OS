@@ -7,7 +7,7 @@
 //!
 //! | Prikaz | Handly | Odpoved |
 //! |---|---|---|
-//! | `client <identita> <all 0/1> <control 0/1>` | - | `ok` + kanal klienta (`taskproto::Request`) |
+//! | `client <identita> <all 0/1> <control 0/1/own>` | - | `ok` + kanal klienta (`taskproto::Request`); `own` = ridi jen sve ulohy |
 //! | `producer <identita>` | - | `ok` + kanal producenta (`taskproto::Produce`) |
 //! | `watch` | job (pravo `READ`) | `ok`: procesy jobu se sleduji (neznamy proces) |
 //! | `status` | - | `ok running=N agent=M` |
@@ -98,11 +98,17 @@ impl Taskd {
         let mut w = text.split_whitespace();
         match w.next().unwrap_or("") {
             "client" => {
-                let (Some(identity), all, control) = (w.next(), w.next() == Some("1"), w.next() == Some("1")) else {
+                // control: `1` = ridit vse, co vidi; `own` = jen sve ulohy.
+                let (Some(identity), all, ctl) = (w.next(), w.next() == Some("1"), w.next()) else {
                     return ("err INVALID_ARGS".into(), Vec::new());
                 };
+                let (control, control_others) = match ctl {
+                    Some("1") => (true, true),
+                    Some("own") => (true, false),
+                    _ => (false, false),
+                };
                 let Ok((ours, theirs)) = Channel::create() else { return ("err NO_RESOURCES".into(), Vec::new()) };
-                let id = self.core.add_client(Scope { identity: identity.into(), all, control });
+                let id = self.core.add_client(Scope { identity: identity.into(), all, control, control_others });
                 self.conns.push((Conn::Client(id), ours));
                 ("ok".into(), alloc::vec![theirs.into_handle()])
             }

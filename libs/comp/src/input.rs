@@ -214,6 +214,13 @@ impl Comp {
                     self.input.last_key = now;
                 }
                 // Diagnosticky snimek: jen fyzicka klavesnice, aplikaci nejde.
+                // Esc zavre panel nad listou (aplikaci nejde).
+                if code == inputproto::code::KEY_ESC && self.flyout.is_some() && !syn {
+                    if action == Action::Press {
+                        self.set_flyout(None);
+                    }
+                    return;
+                }
                 if self.snapshot_cfg.is_shortcut(code, mods) {
                     if !syn && action == Action::Press {
                         self.snapshot_request = Some(alloc::string::String::from("zkratka"));
@@ -375,7 +382,14 @@ impl Comp {
                         self.damage(r);
                     }
                 }
-                Hover::BarApp(_) | Hover::Tasks | Hover::Launcher => self.damage_panel(),
+                Hover::Tasks => {
+                    self.damage_panel();
+                    // Popisek nad ikonou uloh.
+                    if let Some(r) = self.tasks_tip_rect() {
+                        self.damage(r);
+                    }
+                }
+                Hover::BarApp(_) | Hover::Launcher => self.damage_panel(),
             }
         }
         self.input.hover = h;
@@ -472,24 +486,53 @@ impl Comp {
             }
             return;
         }
+        // Otevreny panel nad listou: klik do nej nic nedela, klik jinam ho
+        // zavre (a jde dal).
+        if self.flyout_rect().is_some_and(|r| r.contains(px, py)) {
+            let f = self.flyout;
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: panel {f:?}"));
+            return;
+        }
         if self.panel_rect().contains(px, py) {
-            self.trace(time, format_args!("{button:?} {act} na {px},{py}: lista"));
-            if button == Button::Left
-                && let Some((g, _)) = self.panel_items().into_iter().find(|(_, r)| r.contains(px, py))
-            {
+            let bar = self.bar_layout();
+            let icon = [
+                (bar.net, crate::flyout::Flyout::Net),
+                (bar.volume, crate::flyout::Flyout::Volume),
+                (Some(bar.bell), crate::flyout::Flyout::Bell),
+            ]
+            .into_iter()
+            .find(|(r, _)| r.is_some_and(|r| r.contains(px, py)))
+            .map(|(_, f)| f);
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: lista{}", icon.map_or(alloc::string::String::new(), |f| alloc::format!(", ikona {f:?}"))));
+            if button != Button::Left {
+                return;
+            }
+            if let Some(f) = icon {
+                self.toggle_flyout(f);
+            } else if let Some((g, _)) = self.panel_items().into_iter().find(|(_, r)| r.contains(px, py)) {
+                self.set_flyout(None);
                 self.panel_click(g);
-            } else if button == Button::Left && self.tasks_icon().is_some_and(|r| r.contains(px, py)) {
-                // Spravce uloh do popredi (obnovit, kdyz je minimalizovany).
+            } else if self.tasks_icon().is_some_and(|r| r.contains(px, py)) {
+                // Spravce uloh do popredi (obnovit, kdyz je minimalizovany);
+                // kdyz nebezi, panel s poctem uloh.
                 let g = self.windows.iter().find(|(_, w)| self.clients.get(&w.client).is_some_and(|c| c.info.id == crate::render::TASKS_APP)).map(|(&g, _)| g);
                 if let Some(g) = g {
+                    self.set_flyout(None);
                     if let Some(w) = self.windows.get_mut(&g) {
                         w.minimized = false;
                     }
                     self.damage_window(g);
                     self.set_focus(Some(g));
+                } else {
+                    self.toggle_flyout(crate::flyout::Flyout::Tasks);
                 }
+            } else {
+                self.set_flyout(None);
             }
             return;
+        }
+        if self.flyout.is_some() {
+            self.set_flyout(None);
         }
         let Some((g, zone)) = self.hit(px, py) else {
             self.trace(time, format_args!("{button:?} {act} na {px},{py}: mimo okna (plocha)"));

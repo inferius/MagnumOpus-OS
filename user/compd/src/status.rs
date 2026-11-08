@@ -76,7 +76,10 @@ pub fn audio_request() -> Vec<u8> {
 pub fn net_state(data: &[u8]) -> Option<comp::render::NetState> {
     let mut r = netproto::parse_reply(data).ok()?;
     let i = netproto::Info::get(&mut r).ok()?;
-    Some(if !i.link_up {
+    // Bez rozhrani netd hlasi nulovou MAC (karta chybi nebo ji neumime).
+    Some(if i.mac == [0; 6] {
+        comp::render::NetState::NoDevice
+    } else if !i.link_up {
         comp::render::NetState::Offline
     } else if i.configured {
         comp::render::NetState::Online

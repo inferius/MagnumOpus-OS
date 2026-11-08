@@ -8,15 +8,15 @@ use taskproto::{Applied, TaskList};
 use super::*;
 
 fn user() -> Scope {
-    Scope { identity: "uzivatel".into(), all: false, control: true }
+    Scope { identity: "uzivatel".into(), all: false, control: true, control_others: true }
 }
 
 fn admin() -> Scope {
-    Scope { identity: "admin".into(), all: true, control: true }
+    Scope { identity: "admin".into(), all: true, control: true, control_others: true }
 }
 
 fn summary() -> Scope {
-    Scope { identity: "compd".into(), all: true, control: false }
+    Scope { identity: "compd".into(), all: true, control: false, control_others: false }
 }
 
 /// Zpravy klientovi `c` jako odpovedi.

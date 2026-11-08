@@ -129,6 +129,8 @@ pub enum NetState {
     /// Linka je, adresa jeste ne (DHCP).
     Connecting,
     Online,
+    /// Zadne rozhrani (karta chybi nebo ji neumime, napr. e1000 ve VMware).
+    NoDevice,
 }
 
 /// Stav systemu zobrazeny v liste.
@@ -405,7 +407,12 @@ impl Comp {
         if dialog_active {
             return alloc::vec![self.screen()];
         }
-        alloc::vec![self.panel_visual(), Rect::new(self.input.px, self.input.py, CURSOR_W, CURSOR_H)]
+        let mut v = alloc::vec![self.panel_visual(), Rect::new(self.input.px, self.input.py, CURSOR_W, CURSOR_H)];
+        v.extend(self.flyout_rect());
+        if self.tasks_tip_visible() {
+            v.extend(self.tasks_tip_rect());
+        }
+        v
     }
 
     /// Nakresli vrstvu nad okny do mezibufferu a prolne ji do platna.
@@ -453,6 +460,9 @@ impl Comp {
             hover: self.input.hover,
         };
         draw_bar(canvas, &mut self.style, bar, &info);
+        if !dialog_active {
+            self.draw_flyout(canvas);
+        }
         if dialog_active {
             // Ztlumeni vseho pod dialogem (jen system kresli nad nim).
             canvas.blend(self.screen(), self.style.theme.color.scrim);
@@ -885,7 +895,14 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     // vedlejsi barvou s preskrtnutim.
     let im = t.size.icon_m;
     let icons = [
-        (bar.net, "wifi", info.status.net.is_some_and(|n| n != NetState::Online)),
+        // Pevna sit (vsechny podporovane karty jsou zatim pevne; Wi-Fi
+        // ovladac ani typ rozhrani v netproto jeste nejsou), bez karty
+        // ikona site preskrtnuta.
+        (
+            bar.net,
+            if info.status.net == Some(NetState::NoDevice) { "network" } else { "ethernet" },
+            info.status.net.is_some_and(|n| n != NetState::Online),
+        ),
         (bar.volume, "volume", info.status.volume.is_some_and(|(v, m)| m || v == 0)),
         (Some(bar.bell), "bell", false),
     ];

@@ -32,6 +32,8 @@ interval = 60
 # nejvic obrazku v /system/log (starsi se smazou)
 max_souboru = 10
 ";
+/// Kolik poslednich radku trasovani vstupu snimek vypise.
+const TRACE_LINES: usize = 60;
 /// Pocet mist pro obrazky na MO-LOGY.
 pub const FAT_SLOTS: u64 = 8;
 /// Nejvetsi prijaty obrazek (4K obrazovka v BMP je ~25 MiB).
@@ -99,6 +101,13 @@ impl Logd {
                 println!("logd: neznama zprava snimku: {text}");
                 continue;
             };
+            // Trasovani vstupu je jen v pameti a na disku: snimek ho ukaze
+            // i na seriove lince (cela cesta kliku s casy).
+            self.pump();
+            self.dump_trace(id);
+            if len == 0 {
+                continue;
+            }
             let Some(h) = m.handles.into_iter().next().filter(|_| len <= MAX_LEN) else {
                 println!("logd: snimek {id}: chybi obrazek nebo je moc velky ({len} B)");
                 continue;
@@ -131,6 +140,19 @@ impl Logd {
             None => String::from("neni"),
         };
         println!("logd: snimek {id}: obrazek {} B do {fs}, MO-LOGY {fat}", data.len());
+    }
+
+    /// Poslednich [`TRACE_LINES`] radku trasovani vstupu (`vstup:`) jako
+    /// `snimek <id>: trasovani ...` (seriova linka i log).
+    fn dump_trace(&self, id: &str) {
+        let recent: Vec<u8> = self.recent.iter().copied().collect();
+        let text = String::from_utf8_lossy(&recent);
+        let lines: Vec<&str> = text.lines().filter(|l| l.contains("] vstup: ")).collect();
+        let from = lines.len().saturating_sub(TRACE_LINES);
+        println!("snimek {id}: trasovani vstupu, poslednich {} radku:", lines.len() - from);
+        for l in &lines[from..] {
+            println!("snimek {id}:   {l}");
+        }
     }
 
     /// Smaze nejstarsi obrazky nad [`KEEP`].

@@ -84,6 +84,13 @@ pub fn start(startup: &Startup) -> Result<()> {
     Ok(())
 }
 
+/// Klient, ktery vidi vsechny ulohy a ridi jen sve (Spravce uloh v GUI).
+pub fn client_view_all(identity: &str) -> Result<Channel> {
+    let g = TASKS.lock();
+    let t = g.as_ref().ok_or(Error::NotFound)?;
+    one(command(&t.ctl, &format!("client {identity} 1 own"), Vec::new())?)
+}
+
 /// Kanal klienta s identitou `identity`; `all` = i cizi a systemove ulohy,
 /// `control` = smi ridit.
 pub fn client(identity: &str, all: bool, control: bool) -> Result<Channel> {

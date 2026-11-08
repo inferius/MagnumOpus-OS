@@ -484,6 +484,25 @@ coordinates, pointer leave, button with position, wheel and focus; plus
 modifiers, the synthetic flag and time. Motion and button release go to
 the window that got the press, even when the pointer leaves it.
 
+### Panels above the bar
+
+A click on the network, volume or notification icon in the bar opens a card
+with the state above the icon (network: wired connected / waiting for an
+address / cable unplugged / no network; sound: volume or muted;
+notifications: only "Žádná oznámení" so far). The tasks icon switches to
+the Task manager; when it is not running it shows the task count. A second
+click on the same icon, a click elsewhere or Esc closes the card.
+Hovering the tasks icon shows "Úlohy: 20 běží, z toho agent AI 1"; the
+number and the Task manager use the same `taskd` view (all tasks; the Task
+manager controls only the user's tasks: client `own`). **[implemented]**
+(tests `bar_icons_open_flyouts`, `tasks_icon_tooltip` in `libs/comp`)
+
+Network icon: wired (`ethernet`); without a network card (netd reports an
+all-zero MAC, e.g. the VMware e1000 we do not support yet) a crossed
+`network` icon; an unplugged cable a crossed `ethernet`. No Wi-Fi yet:
+`netproto::Info` has no interface type and there is no Wi-Fi driver; the
+`wifi` icon comes with it. **[implemented]**
+
 ### Input tracing (log target `vstup`)
 
 Every mouse button and key press and release goes to the log as lines
@@ -495,8 +514,17 @@ from `inputd`, so one click can be followed along its whole path:
 | `inputd` | button / key, press or release, source, modifiers, number of moves in the batch, destination (focus, `secure`) |
 | `compd` | screen position, window and zone (content, title, button, edge), focus change, or why the event was dropped (modal dialog, untrusted source, outside windows, release without press) |
 | `libs/ui` | element found by the hit test, action (button click, checkbox toggle, row selection) or why there was no activation, number of messages to the app |
+| `libs/ui` (client) | `nakresleno a odeslano kompozitoru +N ms` (drawn and sent) and `kompozitor slozil snimek se zmenou (FRAME) +N ms` (frame composed) since the click (the whole click -> picture path) |
 | `gui-tasks` | request to `taskd` caused by the click |
 | `taskd` | client request and reply kinds (no id: order links them) |
+
+Tracing lines go **only into the kernel's in-memory log buffer** (and from
+there via `logd` to `/system/log` and MO-LOGY), not to the serial line:
+writing there costs about 10 ms per line at 115,200 Bd and would block the
+input path (in VMware the click was delayed by 10-100 ms). The
+[diagnostic snapshot](#diagnostic-snapshot-print-screen) prints them to the
+serial line (the last 60 lines as `snimek <id>:   ... vstup: ...`).
+**[verified in QEMU]** (test `diag_snapshot`)
 
 Key codes and text field values are not logged (passwords). Mouse motion is
 not logged, only counted in the batch with a button. The kernel limits
@@ -564,6 +592,9 @@ time the uptime `t162.345`); it links the log block with the image.
   `MAGNUMOS/SNIMnn.BMP` on the MO-LOGY partition (8 rotating slots, 8.3
   names); the line `logd: snimek <id>: ...` says where the image went.
   **[implemented]**
+- The block ends with the input tracing lines from memory (`logd`, the
+  last 60, also from `inputd` and apps), so the serial line shows the whole
+  click path.
 - The kernel does not limit the block lines (otherwise at most 10 similar
   lines per second per process apply): an exception only for the `compd`
   process and lines starting `snimek `, since snapshots are on request only.

@@ -565,7 +565,9 @@ fsd (scrub, maintenance) ──▶ │ ▲                  │ watch: app jobs
   terminal block, the service log, the FS journal), so taskd does not write
   finished tasks to disk.
 - **Only init mints channels** (the taskd control channel): a client with an
-  identity and a scope (own tasks / all, may control), a producer with an
+  identity and a scope (own tasks / all; control: nothing, everything
+  visible, or only its own - `client <identity> <all> <0|1|own>`), a
+  producer with an
   identity (a task belongs to the producer's identity), a watched job. A
   shell session gets its channels through termd and the session registry
   (`RegMsg::TasksReq`, init mints them with the user's identity), fsd
@@ -585,7 +587,8 @@ fsd (scrub, maintenance) ──▶ │ ▲                  │ watch: app jobs
   job that no running task reports is a task of origin `unknown`; a task
   with a job without live processes finishes.
 - **The GUI task manager** (`gui-tasks`) is started by init in the normal
-  run with a client channel (the user's own tasks, may control).
+  run with a client channel that sees all tasks (like the tasks icon in the
+  bar) and may control only the user's tasks. **[implemented]**
 - **Shell:** `tasks` returns a table (`tasks | where owner == "service"`),
   `tasks cancel|pause|resume <id>`, `tasks log <id> -n 50`. In the window a
   task panel (Ctrl-T: arrows, `c` cancel, `p` pause, `r` resume), "tasks N"

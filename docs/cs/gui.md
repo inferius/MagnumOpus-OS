@@ -464,6 +464,24 @@ okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
 modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
 oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
+### Panely nad lištou
+
+Klik na ikonu sítě, hlasitosti nebo oznámení v liště otevře nad ikonou
+kartu se stavem (síť: pevná síť připojena / čeká na adresu / kabel
+odpojen / bez sítě; zvuk: hlasitost nebo ztlumeno; oznámení: zatím jen
+„Žádná oznámení“). Ikona úloh přepne na Správce úloh; když neběží, ukáže
+počet úloh. Druhý klik na tutéž ikonu, klik jinam nebo Esc kartu zavře.
+Po najetí na ikonu úloh popisek „Úlohy: 20 běží, z toho agent AI 1“; číslo
+i Správce úloh berou stejný pohled `taskd` (všechny úlohy, Správce úloh
+řídí jen úlohy uživatele: klient `own`). **[implementováno]** (testy
+`bar_icons_open_flyouts`, `tasks_icon_tooltip` v `libs/comp`)
+
+Ikona sítě: pevná síť (`ethernet`), bez síťové karty (netd hlásí nulovou
+MAC, např. e1000 ve VMware, kterou zatím neumíme) přeškrtnutá ikona
+`network`, odpojený kabel přeškrtnutý `ethernet`. Wi-Fi zatím není:
+`netproto::Info` nemá typ rozhraní a ovladač Wi-Fi chybí; s ním přibude
+ikona `wifi`. **[implementováno]**
+
 ### Trasování vstupu (cíl logu `vstup`)
 
 Každý stisk a puštění tlačítka myši i klávesy jde do logu jako řádky
@@ -475,8 +493,17 @@ takže jeden klik jde sledovat celou cestou:
 | `inputd` | tlačítko / klávesa, stisk nebo puštění, zdroj, modifikátory, počet pohybů v dávce, kam jde (fokus, `secure`) |
 | `compd` | poloha na obrazovce, okno a zóna (obsah, titulek, tlačítko, okraj), přesun fokusu, nebo proč událost zahodil (modální dialog, neověřený zdroj, mimo okna, puštění bez stisku) |
 | `libs/ui` | prvek z hit testu, akce (klik tlačítka, přepnutí zaškrtávacího pole, výběr řádku) nebo proč aktivace nebyla, počet zpráv aplikaci |
+| `libs/ui` (klient) | `nakresleno a odeslano kompozitoru +N ms` a `kompozitor slozil snimek se zmenou (FRAME) +N ms` od kliku (celá cesta klik -> obraz) |
 | `gui-tasks` | požadavek na `taskd` vyvolaný klikem |
 | `taskd` | požadavek klienta a druhy odpovědí (bez id: spojí je pořadí) |
+
+Řádky trasování jdou **jen do paměťového bufferu logu jádra** (a odtud
+přes `logd` do `/system/log` a na MO-LOGY), ne na sériovou linku: zápis na
+ni stojí při 115 200 Bd asi 10 ms na řádek a blokoval by vstupní cestu
+(ve VMware klik zpožděný o 10-100 ms). Na sériovou linku je vypíše až
+[diagnostický snímek](#diagnostický-snímek-print-screen) (posledních 60
+řádků jako `snimek <id>:   ... vstup: ...`). **[ověřeno v QEMU]** (test
+`diag_snapshot`)
 
 Kód klávesy ani hodnota textového pole se nezapisuje (hesla). Pohyb myši
 se nezapisuje, jen jako počet v dávce s tlačítkem. Řádky stejného tvaru
@@ -541,6 +568,8 @@ od startu `t162.345`), které spojí blok v logu s obrázkem.
   BMP). Na živém USB i kopie `MAGNUMOS/SNIMnn.BMP` na oddílu MO-LOGY (8
   míst dokola, jména 8.3); řádek `logd: snimek <id>: ...` říká, kam obrázek
   šel. **[implementováno]**
+- Blok končí řádky trasování vstupu z paměti (`logd`, posledních 60,
+  i z `inputd` a aplikací), takže na sériové lince je celá cesta kliku.
 - Řádky bloku jádro neomezuje (jinak platí nejvýš 10 podobných řádků za
   sekundu na proces): výjimka jen pro proces `compd` a řádky `snimek `,
   snímek vzniká jen na vyžádání.

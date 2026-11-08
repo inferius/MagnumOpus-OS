@@ -22,6 +22,7 @@ extern crate alloc;
 
 pub mod diag;
 pub mod dialog;
+pub mod flyout;
 pub mod frame;
 pub mod gpu;
 pub mod input;
@@ -130,6 +131,8 @@ pub struct Comp {
     pub(crate) snapshot_cfg: diag::Config,
     /// Cas posledniho automatickeho snimku (limit `interval_s`).
     pub(crate) last_auto_snapshot: Option<u64>,
+    /// Otevreny panel nad listou (`flyout.rs`).
+    pub(crate) flyout: Option<flyout::Flyout>,
 }
 
 impl Comp {
@@ -166,6 +169,7 @@ impl Comp {
             snapshot_request: None,
             snapshot_cfg: diag::Config::default(),
             last_auto_snapshot: None,
+            flyout: None,
         };
         c.damage_all();
         c

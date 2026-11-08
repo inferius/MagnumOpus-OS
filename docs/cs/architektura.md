@@ -536,7 +536,8 @@ fsd (scrub, údržba) ──▶       │ ▲                   │ watch: joby 
   v terminálu, log služby, žurnál FS), proto taskd hotové úlohy na disk
   nezapisuje.
 - **Kanály razí jen init** (řídicí kanál taskd): klient s identitou
-  a rozsahem (vlastní úlohy / všechny, smí řídit), producent s identitou
+  a rozsahem (vlastní úlohy / všechny; řídit: nic, vše viditelné, nebo
+  jen své - `client <identita> <all> <0|1|own>`), producent s identitou
   (úloha patří identitě producenta), sledovaný job. Relace shellu dostane
   kanály přes termd a registr relací (`RegMsg::TasksReq`, init je razí
   s identitou uživatele), fsd zprávou `tasks` na řídicím kanálu.
@@ -553,7 +554,8 @@ fsd (scrub, údržba) ──▶       │ ▲                   │ watch: joby 
   žádná běžící úloha nehlásí, je úloha původu `unknown`; úloha s jobem
   bez živých procesů skončí.
 - **Správce úloh v GUI** (`gui-tasks`) v běžném běhu spouští init
-  s kanálem klienta (vlastní úlohy uživatele, smí řídit).
+  s kanálem klienta, který vidí všechny úlohy (stejně jako ikona úloh
+  v liště) a smí řídit jen úlohy uživatele. **[implementováno]**
 - **Shell:** `tasks` vrátí tabulku (`tasks | where owner == "service"`),
   `tasks cancel|pause|resume <id>`, `tasks log <id> -n 50`. V okně panel
   úloh (Ctrl-T: šipky, `c` zrušit, `p` pozastavit, `r` pokračovat), ve
