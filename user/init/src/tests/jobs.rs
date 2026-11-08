@@ -16,6 +16,7 @@ pub const TESTS: &[Test] = &[
     ("job: limit pameti jadra (zasobnik vlakna)", kernel_limit),
     ("job: potomek si limit nezvedne", child_cannot_raise),
     ("job: program v omezenem jobu", spawned_in_limited_job),
+    ("job: vycet procesu s casem CPU (prehled uloh)", list_processes),
     ("handly: 140 000 handlu v procesu", many_handles),
 ];
 
@@ -160,6 +161,38 @@ fn spawned_in_limited_job(s: &Startup) -> TestResult {
     let info = job.info().map_err(|e| fail("JOB_INFO", e))?;
     check_eq!(info.user.used, 0, "uzivatelska pamet po konci potomka");
     check_eq!(info.kernel.used, 0, "pamet jadra po konci potomka");
+    Ok(())
+}
+
+fn list_processes(s: &Startup) -> TestResult {
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = fs.find("echo").ok_or("echo neni v initfs")?;
+    let job = limited_job(UNLIMITED, UNLIMITED)?;
+    let nested = Job::create(&job).map_err(|e| fail("vnoreny job", e))?;
+    let jid = job.info().map_err(|e| fail("JOB_INFO", e))?.id;
+    let nid = nested.info().map_err(|e| fail("JOB_INFO", e))?.id;
+    check!(jid != 0 && nid != jid, "cisla jobu");
+    check!(job.processes().map_err(|e| fail("JOB_PROCESSES", e))?.is_empty(), "prazdny job");
+    let (p, ch) = libos::spawn_in(&nested, "echo-vycet", image, Vec::new()).map_err(|e| fail("spusteni", e))?;
+    // Trochu prace, aby mel proces cas na CPU.
+    ch.write(b"alloc:65536", Vec::new()).map_err(|e| fail("zapis", e))?;
+    ch.read(deadline()).map_err(|e| fail("odpoved", e))?;
+    // Vycet nadrazeneho jobu obsahuje i proces vnoreneho.
+    let list = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
+    check_eq!(list.len(), 1, "jeden proces v podstromu");
+    let e = list[0];
+    check_eq!(e.name(), "echo-vycet", "jmeno procesu");
+    check_eq!(e.job, nid, "job procesu = vnoreny");
+    check!(e.threads >= 1 && e.flags & libos::abi::job::proc_flags::FINISHED == 0, "zivy proces");
+    check!(e.cpu_ns > 0, "cas na CPU");
+    // Bez prava READ nejde.
+    let blind = job.duplicate(Some(Rights::BASIC)).map_err(|e| fail("dup", e))?;
+    check_eq!(blind.processes().err(), Some(libos::Error::AccessDenied), "bez READ");
+    drop(ch);
+    check_eq!(p.wait_exit(deadline()), Ok(0), "konec potomka");
+    drop(p);
+    let after = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
+    check!(after.iter().all(|e| e.flags & libos::abi::job::proc_flags::FINISHED != 0), "po konci jen skoncene");
     Ok(())
 }
 

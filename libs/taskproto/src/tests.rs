@@ -98,6 +98,7 @@ fn produce_and_control_roundtrip() {
         },
         Produce::Update { id: 9, state: State::Running, progress: Some(55), eta_ms: None },
         Produce::Finish { id: 9, state: State::Done(String::new()) },
+        Produce::LogLine { id: 9, line: "radek vystupu".into() },
     ] {
         let e = m.encode();
         assert_eq!(Produce::decode(&e), Ok(m));

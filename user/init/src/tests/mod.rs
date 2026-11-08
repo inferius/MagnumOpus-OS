@@ -29,6 +29,7 @@ mod recovery_kit;
 mod console;
 mod shell;
 mod supervisor;
+mod tasks;
 mod time;
 mod usb;
 mod web;
@@ -66,6 +67,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("supervisor", supervisor::TESTS),
     ("obnova sluzeb", recovery::TESTS),
     ("shell", shell::TESTS),
+    ("ulohy", tasks::TESTS),
     // Vulkan pred GUI: render uzel otevre init pres displej, ktery pak
     // prevezme kompozitor.
     ("vulkan", vulkan::TESTS),

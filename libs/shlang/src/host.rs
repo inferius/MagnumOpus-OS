@@ -143,6 +143,17 @@ pub trait Fs {
     }
 }
 
+/// Prikaz `tasks`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TasksOp {
+    List,
+    Cancel(u64),
+    Pause(u64),
+    Resume(u64),
+    /// Poslednich N radku vystupu ulohy.
+    Log(u64, u32),
+}
+
 /// Uloha `async` pro hostitele: kod v zapisu B (formatovac), kopie
 /// zachycenych promennych a prava volajiciho.
 #[derive(Debug, Clone, PartialEq)]
@@ -261,6 +272,10 @@ pub trait Host {
     }
     /// Zrusi ulohu. Kdyz uz dobehla, vrati jeji vysledek (a undo).
     fn task_cancel(&mut self, _id: u64) -> Option<TaskDone> {
+        None
+    }
+    /// Prehled uloh systemu (`taskd`). `None` = hostitel ho nema.
+    fn tasks(&mut self, _op: TasksOp) -> Option<Result<Value, ShError>> {
         None
     }
     /// Domovska slozka uzivatele.

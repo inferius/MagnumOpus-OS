@@ -496,8 +496,8 @@ check), application actions and later AI agents. Nothing runs "in a void".
 | Part | What it does | Who does it |
 |---|---|---|
 | **kernel jobs** | a group of processes with budgets (memory, ports, DMA); the "who started whom" tree | done (network) |
-| **task service `taskd`** | one task list: a human-readable name, **who started it** (user, script, application, service, agent), state, progress, estimate, usage from the job budget, actions (attach, pause, cancel, log); finished tasks stay for a while with their result and error | shell thread (6b), after async |
-| **`tasks` command** | a structured table (`tasks \| where owner == "agent"`), `attach`, `cancel`; a task panel in the terminal, notification on completion or failure | shell thread (6b) |
+| **task service `taskd`** | one task list: a human-readable name, **who started it** (user, script, application, service, agent), state, progress, estimate, usage from the job budget, actions (attach, pause, cancel, log); finished tasks stay for a while with their result and error | done (shell thread 6b) |
+| **`tasks` command** | a structured table (`tasks \| where owner == "agent"`), `attach`, `cancel`; a task panel in the terminal, notification on completion or failure | done (shell thread 6b) |
 | **GUI task manager** | a window with the same data, a "N tasks running" icon in the bar | GUI thread (6c) |
 
 - **Registration:** tasks register themselves when created (shell,
@@ -506,6 +506,53 @@ check), application actions and later AI agents. Nothing runs "in a void".
 - **Permissions:** a user sees their own tasks; others' and system tasks only
   with a right. Tasks started by an AI agent are clearly marked (see
   [AI in the system](#ai-in-the-system-proposal)).
+
+### Implementation status (done)
+
+```text
+shell (shsess) ──producer──▶ taskd ◀──producer── init (services, apps)
+fsd (scrub, maintenance) ──▶ │ ▲                  │ watch: app jobs
+                             ▼ │ client           ▼
+          tasks, panel (Ctrl-T) · GUI task manager · bar icon
+```
+
+- **The `taskd` service** (`user/taskd`, core `libs/taskcore` with host
+  tests, protocol `libs/taskproto`): one task list in memory. Finished
+  tasks stay with their result or error: at most the last 100 and at most
+  30 minutes. Results of important operations stay elsewhere too (the
+  terminal block, the service log, the FS journal), so taskd does not write
+  finished tasks to disk.
+- **Only init mints channels** (the taskd control channel): a client with an
+  identity and a scope (own tasks / all, may control), a producer with an
+  identity (a task belongs to the producer's identity), a watched job. A
+  shell session gets its channels through termd and the session registry
+  (`RegMsg::TasksReq`, init mints them with the user's identity), fsd
+  through a `tasks` message on its control channel.
+- **Subscription:** a snapshot and events with a sequence number. A change
+  of a task the client does not see arrives as `Removed(id)` - the numbers
+  have no gaps and resuming from `since` works (the last 512 changes,
+  otherwise a new snapshot).
+- **Producers:** the shell (`async` tasks with their block and
+  cancellation, `bg`), the supervisor (service state: running, restarting,
+  gave up, stopped), init (applications with a window, including their
+  job), fsd (scrub with progress and result, defragmentation and
+  deduplication when idle). taskd forwards an action (cancel) to the
+  producer only when the task supports it and the caller may.
+- **Unknown process:** every 2 s taskd walks the processes of the watched
+  jobs (syscall `JOB_PROCESSES`, CPU time and job memory). A process in a
+  job that no running task reports is a task of origin `unknown`; a task
+  with a job without live processes finishes.
+- **The GUI task manager** (`gui-tasks`) is started by init in the normal
+  run with a client channel (the user's own tasks, may control).
+- **Shell:** `tasks` returns a table (`tasks | where owner == "service"`),
+  `tasks cancel|pause|resume <id>`, `tasks log <id> -n 50`. In the window a
+  task panel (Ctrl-T: arrows, `c` cancel, `p` pause, `r` resume), "tasks N"
+  in the status line and a notice on completion or failure.
+
+⚠️ **Limits:** no producer supports pausing yet (taskd returns
+`NOT_SUPPORTED`); processes in
+a nested job of an application are unknown (only processes directly in its
+job belong to the task).
 
 ## AI in the system (proposal)
 

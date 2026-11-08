@@ -754,6 +754,7 @@ dependencies = [
  "fs",
  "fsproto",
  "libos",
+ "taskproto",
 ]
 
 [[package]]
@@ -1156,6 +1157,7 @@ dependencies = [
  "shlang",
  "spin 0.12.3",
  "svcclient",
+ "taskproto",
  "term",
 ]
 
@@ -2165,6 +2167,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "taskcore"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "taskproto",
+]
+
+[[package]]
+name = "taskd"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "taskcore",
+ "taskproto",
+]
+
+[[package]]
 name = "taskproto"
 version = "0.1.0"
 dependencies = [
@@ -2203,6 +2222,8 @@ dependencies = [
  "noto-sans-mono-bitmap",
  "shlang",
  "spin 0.12.3",
+ "taskcore",
+ "taskproto",
 ]
 
 [[package]]

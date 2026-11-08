@@ -111,7 +111,7 @@ pub const JOB_CREATE: u64 = 42;
 /// `pool` z [`crate::job::pool`], `bytes` = [`crate::job::UNLIMITED`] = bez limitu
 pub const JOB_SET_LIMIT: u64 = 43;
 /// Stav rozpoctu jobu. `(job, out_ptr)`; job potrebuje `READ`, na `out_ptr`
-/// zapise [`crate::job::JobInfo`] (48 B)
+/// zapise [`crate::job::JobInfo`] (56 B)
 pub const JOB_INFO: u64 = 44;
 /// Plynula korekce realneho casu (Resource s pravem `SET_CLOCK`).
 /// `(resource, offset_ns i64, freq_ppb i64, flags, out_ptr)`; `flags`
@@ -125,14 +125,19 @@ pub const CLOCK_ADJUST: u64 = 45;
 /// `WRITE`. Jiny objekt pameti = `WRONG_TYPE`.
 pub const FB_CONTROL: u64 = 46;
 
-/// Pocet definovanych syscallu (pro tabulky a testy).
 /// Odvola fyzicky objekt pameti: zrusi jeho mapovani ve vsech procesech
 /// a dalsi `VM_MAP` selze (`ACCESS_DENIED`). Pristup pres stare mapovani
 /// = vyjimka stranky. `(resource, vmo)`; rozsah objektu musi prostredek
 /// povolovat.
 pub const VMO_REVOKE: u64 = 47;
 
-pub const COUNT: u64 = 48;
+/// Procesy jobu a jeho potomku. `(job, out_ptr, max) -> pocet`; job
+/// potrebuje `READ`, na `out_ptr` zapise nejvys `max` zaznamu
+/// [`crate::job::ProcEntry`] (64 B), vrati celkovy pocet (i nad `max`)
+pub const JOB_PROCESSES: u64 = 48;
+
+/// Pocet definovanych syscallu (pro tabulky a testy).
+pub const COUNT: u64 = 49;
 
 /// Operace `FB_CONTROL`.
 pub mod fb_op {
