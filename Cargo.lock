@@ -324,6 +324,7 @@ dependencies = [
  "gfx",
  "guiproto",
  "inputproto",
+ "vkcomp",
 ]
 
 [[package]]
@@ -335,6 +336,8 @@ dependencies = [
  "guiproto",
  "inputproto",
  "libos",
+ "venus",
+ "vkcomp",
 ]
 
 [[package]]
@@ -520,6 +523,7 @@ version = "0.1.0"
 dependencies = [
  "driverkit",
  "libos",
+ "nic",
  "pci",
  "virtio",
 ]
@@ -575,6 +579,14 @@ dependencies = [
  "conf",
  "libos",
  "pci",
+]
+
+[[package]]
+name = "e1000e"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "nic",
 ]
 
 [[package]]
@@ -761,6 +773,7 @@ dependencies = [
  "fs",
  "fsproto",
  "libos",
+ "taskproto",
 ]
 
 [[package]]
@@ -881,6 +894,14 @@ checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
 dependencies = [
  "opaque-debug",
  "polyval",
+]
+
+[[package]]
+name = "gpuproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
 ]
 
 [[package]]
@@ -1123,6 +1144,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "igc"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "nic",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1147,6 +1176,7 @@ dependencies = [
  "shlang",
  "spin 0.12.3",
  "svcclient",
+ "taskproto",
  "term",
 ]
 
@@ -1354,6 +1384,15 @@ dependencies = [
  "aes-siv",
  "libos",
  "wire",
+]
+
+[[package]]
+name = "nic"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "netproto",
+ "pci",
 ]
 
 [[package]]
@@ -1685,6 +1724,14 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "r8169"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "nic",
+]
 
 [[package]]
 name = "rand"
@@ -2070,6 +2117,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spirv"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2132,6 +2186,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "taskcore"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "taskproto",
+]
+
+[[package]]
+name = "taskd"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "taskcore",
+ "taskproto",
+]
+
+[[package]]
 name = "taskproto"
 version = "0.1.0"
 dependencies = [
@@ -2170,6 +2241,8 @@ dependencies = [
  "noto-sans-mono-bitmap",
  "shlang",
  "spin 0.12.3",
+ "taskcore",
+ "taskproto",
 ]
 
 [[package]]
@@ -2515,6 +2588,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "venus"
+version = "0.1.0"
+dependencies = [
+ "gpuproto",
+ "libos",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2546,6 +2627,7 @@ dependencies = [
 name = "virtio-gpu"
 version = "0.1.0"
 dependencies = [
+ "gpuproto",
  "guiproto",
  "libos",
  "pci",
@@ -2582,6 +2664,28 @@ dependencies = [
  "libos",
  "pci",
  "virtio",
+]
+
+[[package]]
+name = "vk-probe"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "venus",
+ "vkcomp",
+]
+
+[[package]]
+name = "vkcomp"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "spirv",
+ "venus",
 ]
 
 [[package]]

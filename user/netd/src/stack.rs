@@ -170,6 +170,11 @@ impl Stack {
 
     /// Zpracuje prijate ramce, casovace a odeslani; pak udalosti DHCP.
     pub fn poll(&mut self) {
+        if core::mem::take(&mut self.dev.came_up) {
+            // Znovu pripojena linka: adresu si vyzadat znovu (jiny kabel =
+            // jina sit). Udalost Deconfigured zrusi starou adresu.
+            self.sockets.get_mut::<dhcpv4::Socket>(self.dhcp).reset();
+        }
         let now = instant(now_ns());
         self.iface.poll(now, &mut self.dev, &mut self.sockets);
         self.dhcp_events();

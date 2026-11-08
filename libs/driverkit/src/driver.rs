@@ -50,6 +50,14 @@ pub trait Driver<P: Platform>: Sized {
 
     /// Zastavi zarizeni (zadne DMA ani preruseni po navratu).
     fn stop(&mut self, p: &P);
+
+    /// Klient (sluzba) zavrel kanal. `false` (vychozi) = ovladac skonci.
+    /// `true` = bezi dal bez klienta (obnova sluzeb: sluzba po padu
+    /// pokracuje pres adapter supervisoru a ovladac nesmi zmizet, viz
+    /// `docs/cs/obnova-sluzeb.md`); `send` pak vraci [`crate::Sent::NoClient`].
+    fn client_closed(&mut self, _p: &P) -> bool {
+        false
+    }
 }
 
 /// Proc ovladac skoncil.
@@ -107,10 +115,23 @@ impl<D> Runner<D> {
     {
         let ev = match p.wait(self.driver.next_timer()) {
             Ok(ev) => ev,
-            Err(DriverError::ClientClosed) => return Some(Exit::ClientClosed),
+            Err(DriverError::ClientClosed) => return self.client_lost(p),
             Err(err) => return Some(Exit::Failed { probe: false, err }),
         };
         self.handle(p, ev)
+    }
+
+    /// Klient zavrel kanal: konec, nebo beh bez klienta (podle ovladace).
+    fn client_lost<P: Platform>(&mut self, p: &P) -> Option<Exit>
+    where
+        D: Driver<P>,
+    {
+        if self.driver.client_closed(p) {
+            p.detach_client();
+            None
+        } else {
+            Some(Exit::ClientClosed)
+        }
     }
 
     /// Zpracuje udalost `ev` (bez cekani).
@@ -121,13 +142,13 @@ impl<D> Runner<D> {
         let r = match ev {
             Event::Interrupt(irq) => self.driver.interrupt(p, irq),
             Event::Timer => self.driver.timer(p),
-            Event::ClientClosed => return Some(Exit::ClientClosed),
+            Event::ClientClosed => return self.client_lost(p),
             Event::Message(m) if proto::is_reserved(&m) => return reserved(p, &m),
             Event::Message(m) => self.driver.message(p, &m),
         };
         match r {
             Ok(()) => None,
-            Err(DriverError::ClientClosed) => Some(Exit::ClientClosed),
+            Err(DriverError::ClientClosed) => self.client_lost(p),
             Err(err) => Some(Exit::Failed { probe: false, err }),
         }
     }

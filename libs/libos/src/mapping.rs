@@ -45,6 +45,14 @@ impl Mapping {
         Ok(Self { addr, len })
     }
 
+    /// Zrusi mapovani a vrati vysledek (Drop chybu zahodi). Po odvolani
+    /// objektu (`Resource::revoke`) uz mapovani neexistuje: `NOT_FOUND`.
+    pub fn unmap(self) -> Result<()> {
+        let r = sys::vm_unmap(rt::self_process(), self.addr, self.len);
+        core::mem::forget(self);
+        r
+    }
+
     pub fn addr(&self) -> u64 {
         self.addr
     }

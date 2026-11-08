@@ -56,6 +56,10 @@ pub enum Sent {
     /// Fronta klienta je plna (klient nestiha). Ovladac rozhodne, jestli
     /// zpravu zahodit (udalosti vstupu) nebo zkusit pozdeji.
     Full,
+    /// Klient neni: zavrel kanal a ovladac bezi dal bez nej
+    /// ([`Driver::client_closed`](crate::Driver::client_closed) vratil
+    /// `true`). Zprava se zahodila.
+    NoClient,
 }
 
 /// Rozhrani ovladace k systemu.
@@ -95,6 +99,11 @@ pub trait Platform {
 
     /// Posle zpravu klientovi.
     fn send(&self, data: &[u8]) -> Result<Sent>;
+
+    /// Klient zavrel kanal a ovladac bezi dal bez nej: `wait` uz na kanal
+    /// neceka (zavreny kanal by budil porad) a `send` vraci
+    /// [`Sent::NoClient`].
+    fn detach_client(&self);
 
     fn log(&self, args: fmt::Arguments);
 

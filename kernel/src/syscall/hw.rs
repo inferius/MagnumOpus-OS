@@ -83,14 +83,34 @@ pub fn vmo_create_contiguous(a: Args) -> Result<u64> {
     insert(&p, vmo)
 }
 
-/// `VMO_CREATE_PHYSICAL(resource, phys, size) -> handle`: jen mimo RAM.
+/// `VMO_CREATE_PHYSICAL(resource, phys, size, cache) -> handle`: jen mimo
+/// RAM; `cache` z `abi::vm::cache`.
 pub fn vmo_create_physical(a: Args) -> Result<u64> {
     let p = current_process();
     let res = check_resource(&p, a[0])?;
     if !mm::is_device_memory(a[1], a[2]) || !res.allows_range(a[1], a[2]) {
         return Err(Error::AccessDenied);
     }
-    insert(&p, MemoryObject::new_physical(a[1], a[2], Some(p.job()))?)
+    insert(&p, MemoryObject::new_physical(a[1], a[2], a[3], Some(p.job()))?)
+}
+
+/// `VMO_REVOKE(resource, vmo)`: odvola fyzicky objekt (mapovani ve vsech
+/// procesech zmizi, dalsi `VM_MAP` = `ACCESS_DENIED`). Rozsah objektu musi
+/// prostredek povolovat.
+pub fn vmo_revoke(a: Args) -> Result<u64> {
+    let p = current_process();
+    let res = check_resource(&p, a[0])?;
+    let vmo = p
+        .handles()
+        .get_as::<MemoryObject>(arg_handle(a[1])?, Rights::NONE)?;
+    let (start, size) = vmo.physical_range().ok_or(Error::NotSupported)?;
+    if !res.allows_range(start, size) {
+        return Err(Error::AccessDenied);
+    }
+    for proc in vmo.revoke()? {
+        proc.address_space().unmap_vmo(&vmo);
+    }
+    Ok(0)
 }
 
 /// `VMO_PHYS_ADDR(resource, vmo, offset) -> phys`.

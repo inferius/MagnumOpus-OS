@@ -47,7 +47,8 @@ pub const fn scale(c: u32, k: u32) -> u32 {
     rb | ag
 }
 
-/// Slozeni src-over: `s + d * (1 - sa)`.
+/// Slozeni src-over: `s + d * (1 - sa)`. Nad nepruhlednym pixelem zustane
+/// vysledek nepruhledny (celociselne `scale` by alfu dal o 1 mensi).
 #[inline]
 pub const fn over(d: u32, s: u32) -> u32 {
     let sa = s >> 24;
@@ -58,7 +59,8 @@ pub const fn over(d: u32, s: u32) -> u32 {
         return d;
     }
     let inv = 255 - sa;
-    add_sat(s, scale(d, inv))
+    let out = add_sat(s, scale(d, inv));
+    if d >> 24 == 255 { out | 0xFF00_0000 } else { out }
 }
 
 /// Soucet slozek s nasycenim (pro premultiplied barvy nepretece, ale
@@ -135,6 +137,16 @@ impl<'a> Canvas<'a> {
 
     pub fn bounds(&self) -> Rect {
         Rect::new(0, 0, self.w, self.h)
+    }
+
+    /// Pixely platna (cteni, napr. odeslani nakresleneho vyrezu GPU).
+    pub fn pixels(&self) -> &[u32] {
+        self.px
+    }
+
+    /// Krok radku v pixelech.
+    pub fn stride(&self) -> u32 {
+        self.stride
     }
 
     pub fn clip(&self) -> Rect {

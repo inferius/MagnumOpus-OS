@@ -24,6 +24,7 @@ mod ntp;
 mod revocation;
 mod supervisor;
 mod system;
+mod tasks;
 mod terminal;
 mod tests;
 
@@ -40,6 +41,16 @@ fn main(startup: Startup) -> i64 {
             *system::TIME.lock() = Some(t);
         }
         Err(e) => println!("init: sluzbu casu nelze spustit: {e}"),
+    }
+    // Prehled uloh hned po case: FS nepotrebuje a sluzby (fsd, okna,
+    // relace) se v nem pri startu registruji.
+    match tasks::start(&startup) {
+        Ok(()) => {
+            if let Some(t) = tasks::TASKS.lock().as_ref() {
+                sup.watch("taskd", &t.process, None);
+            }
+        }
+        Err(e) => println!("init: sluzbu uloh (taskd) nelze spustit: {e}"),
     }
     match system::start_devices(&startup) {
         Ok(mut devices) => {
@@ -69,13 +80,22 @@ fn main(startup: Startup) -> i64 {
                 Ok(None) => {}
                 Err(e) => println!("init: souborovy system nelze spustit: {e}"),
             }
-            match input::start(&startup, core::mem::take(&mut devices.inputs)) {
-                Ok(i) => devices.input = Some(i),
-                Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
-            }
             sup.watch("devmgr", &devices.devmgr, None);
-            if let Some(i) = &devices.input {
-                sup.watch("inputd", &i.process, None);
+            match input::start(&startup, core::mem::take(&mut devices.inputs)) {
+                Ok((i, p)) => {
+                    // Restart po padu: adapter preda nove instanci ovladace,
+                    // fokus a `secure` znovu (input.rs).
+                    sup.register(
+                        supervisor::Spec {
+                            name: "inputd",
+                            deps: &[],
+                            service: Some(i.service()),
+                        },
+                        Some(&p),
+                    );
+                    devices.input = Some(i);
+                }
+                Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
             // Sit az po FS: firewall uklada konfiguraci na FS.
             match system::start_net(&startup, &mut devices, &mut sup) {

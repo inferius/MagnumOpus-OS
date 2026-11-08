@@ -11,6 +11,9 @@
 //! nebo `ps2 nic`, kdyz radic chybi - pak skonci. Spravce preda sluzbe
 //! vstupu jen kanaly nalezenych zarizeni.
 //!
+//! Na synchronizaci nove instance sluzby vstupu (`ISYN`) odpovi a predstavi
+//! se znovu; zavreny kanal ke sluzbe ho neukonci (`docs/cs/obnova-sluzeb.md`).
+//!
 //! Scan kody (sada 1 s prekladem radice) a pakety mysi dekoduje knihovna
 //! `i8042`, sem patri jen pristup k radici.
 
@@ -283,20 +286,17 @@ fn main(startup: Startup) -> i64 {
         println!("ps2: preruseni nelze nastavit");
         return 2;
     };
-    if found.keyboard {
-        let _ = kbd_ch.write(
-            &device::encode_hello(caps::KEYBOARD, "PS/2 klavesnice"),
-            Vec::new(),
-        );
-    }
-    if let Some(k) = found.mouse {
-        let _ = mouse_ch.write(&device::encode_hello(caps::POINTER, k.name()), Vec::new());
-    }
+    let kbd = found
+        .keyboard
+        .then(|| Service::new(kbd_ch, device::encode_hello(caps::KEYBOARD, "PS/2 klavesnice")));
+    let mouse_svc = found
+        .mouse
+        .map(|k| Service::new(mouse_ch, device::encode_hello(caps::POINTER, k.name())));
     let mut dev = Devices {
         keys: scancode::Decoder::new(),
         mouse: found.mouse.map(mouse::Decoder::new),
-        kbd_ch: found.keyboard.then_some(kbd_ch),
-        mouse_ch: found.mouse.is_some().then_some(mouse_ch),
+        kbd_ch: kbd,
+        mouse_ch: mouse_svc,
     };
     match dev.serve(&ctl, kbd_irq.as_ref(), mouse_irq.as_ref()) {
         Ok(()) => 0,
@@ -307,36 +307,77 @@ fn main(startup: Startup) -> i64 {
     }
 }
 
+/// Kanal ke sluzbe vstupu pro jedno zarizeni a jeho predstaveni
+/// (posila se znovu na synchronizaci nove instance sluzby, `ISYN`).
+struct Service {
+    ch: Channel,
+    hello: Vec<u8>,
+    /// Sluzba kanal zavrela: ovladac nekonci (obnova sluzeb), jen ho
+    /// prestane hlidat.
+    closed: bool,
+}
+
+impl Service {
+    fn new(ch: Channel, hello: Vec<u8>) -> Self {
+        let _ = ch.write(&hello, Vec::new());
+        Self {
+            ch,
+            hello,
+            closed: false,
+        }
+    }
+
+    /// Zpravy od sluzby (synchronizace) nebo jeji zavreni.
+    fn signaled(&mut self, sig: Signals) {
+        if sig.intersects(Signals::READABLE) {
+            while let Ok(m) = self.ch.try_read() {
+                device::answer_sync(&m.data, &self.hello, None, |b| {
+                    self.ch.write(b, Vec::new()).is_ok()
+                });
+            }
+        } else if sig.intersects(Signals::PEER_CLOSED) {
+            println!("ps2: sluzba vstupu zavrela kanal, cekam");
+            self.closed = true;
+        }
+    }
+}
+
 struct Devices {
     keys: scancode::Decoder,
     mouse: Option<mouse::Decoder>,
-    kbd_ch: Option<Channel>,
-    mouse_ch: Option<Channel>,
+    kbd_ch: Option<Service>,
+    mouse_ch: Option<Service>,
 }
 
 impl Devices {
-    /// Obsluha preruseni, dokud sluzba vstupu nezavre kanaly.
+    /// Obsluha preruseni a synchronizace sluzby vstupu (konci jen chybou
+    /// radice; ukonceni ovladace je na spravci zarizeni).
     fn serve(&mut self, c: &Ctl, kbd: Option<&Interrupt>, mouse: Option<&Interrupt>) -> Result<()> {
         loop {
             let mut items = Vec::new();
             for irq in [kbd, mouse].into_iter().flatten() {
                 items.push((irq.handle(), Signals::SIGNALED));
             }
-            for ch in [&self.kbd_ch, &self.mouse_ch].into_iter().flatten() {
-                items.push((ch.handle(), Signals::PEER_CLOSED));
+            let irq_count = items.len();
+            for s in [&self.kbd_ch, &self.mouse_ch].into_iter().flatten() {
+                if !s.closed {
+                    items.push((s.ch.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+                }
             }
             let observed = match libos::wait_many(&items, Some(time::deadline_after(POLL))) {
                 Ok((_, o)) => o,
                 Err(Error::TimedOut) => Vec::new(),
                 Err(e) => return Err(e),
             };
-            let irq_count = kbd.is_some() as usize + mouse.is_some() as usize;
-            if observed
-                .iter()
-                .skip(irq_count)
-                .any(|s| s.intersects(Signals::PEER_CLOSED))
-            {
-                return Ok(());
+            drop(items);
+            let mut k = irq_count;
+            for s in [&mut self.kbd_ch, &mut self.mouse_ch].into_iter().flatten() {
+                if !s.closed {
+                    if let Some(sig) = observed.get(k) {
+                        s.signaled(*sig);
+                    }
+                    k += 1;
+                }
             }
             // Potvrdit driv nez cteni: bajt, ktery prijde behem cteni,
             // preruseni znovu nastavi.
@@ -380,8 +421,8 @@ impl Devices {
 }
 
 /// Posle udalosti sluzbe; plna fronta = zahodit (neblokovat radic).
-fn send(ch: &Option<Channel>, events: &[RawEvent]) -> Result<()> {
-    let Some(ch) = ch else {
+fn send(ch: &Option<Service>, events: &[RawEvent]) -> Result<()> {
+    let Some(Service { ch, closed: false, .. }) = ch else {
         return Ok(());
     };
     for chunk in events.chunks(device::MAX_EVENTS) {

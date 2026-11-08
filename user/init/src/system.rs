@@ -294,6 +294,10 @@ pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<Option<(Proc
         let _ = process.kill();
         return Err(ok.err().unwrap_or(Error::IoError));
     }
+    // fsd hlasi scrub a udrzbu do prehledu uloh (taskd uz bezi).
+    if let Err(e) = crate::tasks::give_producer(&control, "fsd") {
+        println!("init: prehled uloh pro fsd: {e}");
+    }
     let info = session.info()?;
     println!(
         "init: souborovy system '{}' pripojen (generace {})",

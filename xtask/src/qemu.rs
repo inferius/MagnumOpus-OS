@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir, testdisks};
 
 /// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
-const DEVICE_LAYOUT: u32 = 7;
+const DEVICE_LAYOUT: u32 = 8;
 
 /// Pokusy o start QEMU, kdyz mu port (QMP, hostfwd) mezitim vzal jiny
 /// proces (soubezne behy testu).
@@ -168,6 +168,12 @@ fn command(
         // Zdroj nahody z hostitele (doplnuje entropii jadra, viz
         // docs/cs/syscally.md RANDOM_ADD).
         .args(["-device", "virtio-rng-pci,disable-legacy=on,iommu_platform=on"])
+        // Druha sitova karta Intel 82574L (ovladac e1000e) ve vlastni siti
+        // slirp; netd pouziva prvni kartu (virtio-net), test ovladacu tuto.
+        // Posledni zarizeni PCI: sloty ostatnich se nemeni (DEVICE_LAYOUT
+        // zustava). Emulovana karta jde pres IOMMU vzdy (bez prepinace).
+        .args(["-netdev", "user,id=net1"])
+        .args(["-device", "e1000e,netdev=net1,romfile="])
         // Seriova linka do terminalu a zaroven do souboru, aby se dal vystup
         // dohledat i po skonceni behu.
         .arg("-chardev")
@@ -220,7 +226,8 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
     // Na NVMe a AHCI jako na skutecnem pocitaci: GPT s nasim oddilem.
     let data = match opts.data_disk.as_str() {
         "virtio" => raw,
-        _ => testdisks::wrap_data(&raw, &run.data_gpt)?,
+        "nvme4k" => testdisks::wrap_data(&raw, &run.data_gpt, 4096)?,
+        _ => testdisks::wrap_data(&raw, &run.data_gpt, 512)?,
     };
     cmd.arg("-drive").arg(drive("data", &data));
     let ahci = opts.test || opts.data_disk == "ahci";
@@ -229,6 +236,11 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
     }
     match opts.data_disk.as_str() {
         "nvme" => cmd.args(["-device", "nvme,drive=data,serial=MO-DATA"]),
+        // Disk se sektorem 4 KiB (jako NVMe naformatovane na 4 KiB).
+        "nvme4k" => cmd.args([
+            "-device",
+            "nvme,drive=data,serial=MO-DATA,logical_block_size=4096,physical_block_size=4096",
+        ]),
         "ahci" => cmd.args(["-device", "ide-hd,drive=data,bus=ahci0.2"]),
         _ => cmd.args(["-device", &blk("data")]),
     };
@@ -236,6 +248,12 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
         cmd.arg("-drive")
             .arg(drive("nvmetest", &testdisks::nvme(&run.nvme)?))
             .args(["-device", "nvme,drive=nvmetest,serial=MO-NVME-TEST"])
+            .arg("-drive")
+            .arg(drive("nvme4ktest", &testdisks::nvme4k(&run.nvme4k)?))
+            .args([
+                "-device",
+                "nvme,drive=nvme4ktest,serial=MO-NVME-4K,logical_block_size=4096,physical_block_size=4096",
+            ])
             .arg("-drive")
             .arg(drive("ahcitest", &testdisks::ahci(&run.ahci)?))
             .args(["-device", "ide-hd,drive=ahcitest,bus=ahci0.0"])
@@ -497,6 +515,7 @@ struct RunFiles {
     data_gpt: PathBuf,
     scratch: PathBuf,
     nvme: PathBuf,
+    nvme4k: PathBuf,
     ahci: PathBuf,
     foreign: PathBuf,
     serial_log: PathBuf,
@@ -511,6 +530,7 @@ impl RunFiles {
             data_gpt: t.join(format!("data-gpt-{pid}.img")),
             scratch: t.join(format!("scratch-{pid}.img")),
             nvme: t.join(format!("nvme-test-{pid}.img")),
+            nvme4k: t.join(format!("nvme4k-test-{pid}.img")),
             ahci: t.join(format!("ahci-test-{pid}.img")),
             foreign: t.join(format!("foreign-{pid}.img")),
             serial_log: t.join(if test {
@@ -532,7 +552,7 @@ impl Drop for RunFiles {
             let _ = std::fs::remove_file(&self.data);
             let _ = std::fs::remove_file(&self.data_gpt);
         }
-        for f in [&self.scratch, &self.nvme, &self.ahci, &self.foreign] {
+        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign] {
             let _ = std::fs::remove_file(f);
         }
     }

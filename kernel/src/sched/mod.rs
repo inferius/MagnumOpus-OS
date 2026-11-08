@@ -281,6 +281,12 @@ fn switch_away(reason: Reason) {
 
     let next = pick_next(cpu).unwrap_or_else(|| cpu.idle().clone());
     let next_is_idle = Arc::ptr_eq(&next, cpu.idle());
+    // Cas CPU procesu: od posledniho prepnuti na tomto CPU.
+    let now = arch::now_ns();
+    let ran = now.saturating_sub(cpu.run_start.swap(now, Ordering::Relaxed));
+    if !prev_is_idle && let Some(proc) = &prev.process {
+        proc.cpu_ns.fetch_add(ran, Ordering::Relaxed);
+    }
     cpu.slice_end.store(
         if next_is_idle {
             u64::MAX

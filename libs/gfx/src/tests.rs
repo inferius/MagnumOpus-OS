@@ -19,9 +19,13 @@ fn color_math() {
     assert_eq!(over(0xFF11_2233, 0), 0xFF11_2233);
     // Polovicni bila pres cernou = seda.
     assert_eq!(over(0xFF00_0000, 0x8080_8080), 0xFF80_8080);
-    // Vadny vstup (slozka > alfa) nepretece.
+    // Vadny vstup (slozka > alfa) nepretece; nad nepruhlednym pixelem
+    // zustane alfa 255.
     let v = over(0xFFFF_FFFF, 0x10FF_FFFF);
-    assert_eq!(v, 0xFEFF_FFFF, "{v:x}");
+    assert_eq!(v, 0xFFFF_FFFF, "{v:x}");
+    // Text (castecne pokryti) nad nepruhlednou vyplni: alfa 255, ne 254.
+    assert_eq!(over(0xFF31_3740, 0x8040_4040) >> 24, 255);
+    assert_eq!(over(0x8000_0000, 0x4000_0000) >> 24, 0x40 + 0x60);
 }
 
 #[test]

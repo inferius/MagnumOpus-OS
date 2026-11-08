@@ -1,0 +1,16 @@
+[package]
+name = "taskd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "taskd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+taskproto = { path = "../../libs/taskproto" }
+taskcore = { path = "../../libs/taskcore" }

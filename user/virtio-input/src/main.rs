@@ -8,9 +8,11 @@
 //! `inputproto::device`).
 //!
 //! Ovladac posle sluzbe predstaveni (`IDEV`: druh zarizeni a jmeno) a pak
-//! preposila udalosti zarizeni (`IEVT`), dokud sluzba kanal nezavre.
-//! Udalosti virtio-input maji uz tvar evdev, ovladac je jen prenese
-//! z fronty do kanalu.
+//! preposila udalosti zarizeni (`IEVT`). Na synchronizaci nove instance
+//! sluzby (`ISYN`) odpovi a predstavi se znovu; kdyz sluzba kanal zavre,
+//! nekonci (obnova sluzeb, viz `docs/cs/obnova-sluzeb.md`;
+//! `Driver::client_closed`). Udalosti virtio-input maji uz tvar evdev,
+//! ovladac je jen prenese z fronty do kanalu.
 //!
 //! Specifikace: VIRTIO 1.2, kapitola 5.8 (Input Device).
 
@@ -58,6 +60,8 @@ struct InputDevice {
     buf: DmaBuffer<OsDma>,
     caps: u16,
     name: String,
+    /// Predstaveni (`IDEV`): pri startu a znovu na `ISYN`.
+    hello: Vec<u8>,
     /// Prvni udalosti uz byly zalogovane.
     logged: bool,
     /// Zpravy zahozene, protoze sluzba nestihala.
@@ -80,6 +84,7 @@ impl Driver<OsPlatform> for InputDevice {
         let name = read_name(&device);
         let caps = read_caps(&device);
         let buf = p.alloc_dma("udalosti", queue.size() as u64 * RawEvent::SIZE as u64)?;
+        let hello = device::encode_hello(caps, &name);
         let mut dev = Self {
             device,
             queue,
@@ -87,6 +92,7 @@ impl Driver<OsPlatform> for InputDevice {
             buf,
             caps,
             name,
+            hello,
             logged: false,
             dropped: 0,
         };
@@ -105,8 +111,22 @@ impl Driver<OsPlatform> for InputDevice {
             (false, false) => "nezname zarizeni",
         };
         driverkit::log!(p, "'{}' ({kind})", self.name);
-        p.send(&device::encode_hello(self.caps, &self.name))?;
+        p.send(&self.hello)?;
         Ok(())
+    }
+
+    /// Synchronizace nove instance sluzby vstupu (`ISYN`): odpoved
+    /// a znovu predstaveni.
+    fn message(&mut self, p: &OsPlatform, msg: &[u8]) -> Result<()> {
+        device::answer_sync(msg, &self.hello, None, |b| p.send(b).is_ok_and(|s| s == Sent::Sent));
+        Ok(())
+    }
+
+    /// Sluzba vstupu zavrela kanal: ovladac nekonci (obnova sluzeb), dal
+    /// obsluhuje zarizeni a udalosti zahazuje, az ho ukonci spravce.
+    fn client_closed(&mut self, p: &OsPlatform) -> bool {
+        driverkit::log!(p, "sluzba vstupu zavrela kanal, cekam");
+        true
     }
 
     /// Preposle udalosti z fronty sluzbe vstupu.
@@ -128,7 +148,8 @@ impl Driver<OsPlatform> for InputDevice {
             driverkit::log!(p, "prvni udalosti od zarizeni ({})", events.len());
         }
         for chunk in events.chunks(device::MAX_EVENTS) {
-            // Sluzba nestiha: udalosti zahodit, neblokovat zarizeni.
+            // Sluzba nestiha (nebo se restartuje): udalosti zahodit,
+            // neblokovat zarizeni. Bez sluzby (`NoClient`) tise zahodit.
             if p.send(&device::encode_events(chunk))? == Sent::Full {
                 self.dropped += 1;
                 if self.dropped.is_power_of_two() {

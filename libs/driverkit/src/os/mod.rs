@@ -56,6 +56,8 @@ pub struct OsPlatform {
     irqs: RefCell<Vec<Interrupt>>,
     msix: RefCell<Option<MsixTable>>,
     msi: Cell<bool>,
+    /// Klient zavrel kanal a ovladac bezi bez nej.
+    detached: Cell<bool>,
 }
 
 /// Namapovany BAR.
@@ -179,6 +181,7 @@ impl OsPlatform {
             irqs: RefCell::new(Vec::new()),
             msix: RefCell::new(None),
             msi: Cell::new(false),
+            detached: Cell::new(false),
         })
     }
 
@@ -196,9 +199,9 @@ impl OsPlatform {
         &self.resource
     }
 
-    /// Kanal ke klientovi (pro zpravy s handly).
+    /// Kanal ke klientovi (pro zpravy s handly); `None` i po odpojeni.
     pub fn client(&self) -> Option<&Channel> {
-        self.client.as_ref()
+        self.client.as_ref().filter(|_| !self.detached.get())
     }
 
     /// Prevezme preruseni, ktere ovladac zapnul sam (napr. `virtio::start`);
@@ -348,7 +351,7 @@ impl Platform for OsPlatform {
         let irqs = self.irqs.borrow();
         let mut items: Vec<(&libos::Handle, Signals)> =
             irqs.iter().map(|i| (i.handle(), Signals::SIGNALED)).collect();
-        if let Some(c) = &self.client {
+        if let Some(c) = self.client() {
             items.push((c.handle(), Signals::READABLE | Signals::PEER_CLOSED));
         }
         if items.is_empty() {
@@ -374,7 +377,7 @@ impl Platform for OsPlatform {
                 return Ok(Event::Interrupt(IrqId(i as u16)));
             }
         }
-        if let (Some(c), Some(s)) = (&self.client, observed.get(irqs.len())) {
+        if let (Some(c), Some(s)) = (self.client(), observed.get(irqs.len())) {
             if s.intersects(Signals::READABLE) {
                 return match c.try_read() {
                     Ok(m) => Ok(Event::Message(m.data)),
@@ -391,6 +394,9 @@ impl Platform for OsPlatform {
     }
 
     fn send(&self, data: &[u8]) -> Result<Sent> {
+        if self.detached.get() {
+            return Ok(Sent::NoClient);
+        }
         let c = self
             .client
             .as_ref()
@@ -401,6 +407,10 @@ impl Platform for OsPlatform {
             Err(Error::PeerClosed) => Err(DriverError::ClientClosed),
             Err(err) => Err(DriverError::Os { op: "zprava klientovi", err }),
         }
+    }
+
+    fn detach_client(&self) {
+        self.detached.set(true);
     }
 
     fn log(&self, args: fmt::Arguments) {

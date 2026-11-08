@@ -227,6 +227,12 @@ impl<P: Platform> Driver<P> for Edu<P> {
 | `interrupt` | přerušení (už potvrzené) | přečíst stav, potvrdit v zařízení, dokončit práci |
 | `next_timer` / `timer` | termín | periodická práce (virtio-rng: doplnění entropie) |
 | `stop` | vždy při konci | zastavit zařízení: žádné DMA ani přerušení po návratu |
+| `client_closed` | klient zavřel kanál | `false` (výchozí) = konec; `true` = běžet dál bez klienta (`send` vrací `Sent::NoClient`) |
+
+Ovladač zařízení, jehož služba se po pádu obnovuje přes adaptér
+supervisoru (`inputd`, viz [Obnova služeb](obnova-sluzeb.md)), nesmí se
+ztrátou služby skončit: vrátí z `client_closed` `true` a na synchronizaci
+nové instance odpoví v `message` (tak to dělá `virtio-input` s `ISYN`).
 
 Kód, který potřebuje něco jen z jádra (např. knihovnu `virtio` nad `Ecam`),
 implementuje `Driver<OsPlatform>` přímo a použije `p.ecam()`,

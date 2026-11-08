@@ -7,6 +7,8 @@
 //! | Prikaz | Handly | Odpoved |
 //! |---|---|---|
 //! | `device` | kanal ke zdroji vstupu | `ok` |
+//! | `device sync` | kanal ke zdroji, ktery uz mela predchozi instance | `ok`; sluzba zdroji posle `ISYN` a do jeho odpovedi zahazuje stare zpravy |
+//! | `restarted` | - | `ok`; instance po padu predchozi (prvni prikaz) |
 //! | `focus` | kanal k novemu vlastnikovi fokusu | `ok` |
 //! | `secure` | kanal pro bezpecnou zkratku | `ok` |
 //! | `inject` | - | `ok` + kanal pro umely vstup |
@@ -23,6 +25,14 @@
 
 /// Pripoji zdroj vstupu (ovladac). Handle: kanal (protokol [`crate::device`]).
 pub const DEVICE: &str = "device";
+/// Druhe slovo `device`: zdroj byl pripojeny k predchozi instanci
+/// (restart sluzby), nejdriv synchronizace ([`crate::device::TAG_SYNC`]).
+pub const SYNC: &str = "sync";
+/// Instance po padu predchozi: novy vlastnik fokusu dostane nejdriv
+/// `Focus(false)` (klavesy uvolnene) a s kanalem `secure` sluzba zacne
+/// v bezpecnem rezimu (`SecureAttention`), protoze nevi, jestli stara
+/// instance nebyla uprostred zabezpeceneho dialogu.
+pub const RESTARTED: &str = "restarted";
 /// Nastavi vlastnika fokusu (konzole, kompozitor). Predchozi dostane
 /// `Focus(false)` a kanal se mu zavre.
 pub const FOCUS: &str = "focus";

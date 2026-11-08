@@ -25,7 +25,7 @@ firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
 |---|---|
 | `cargo xtask build` | builds the kernel, loader and userspace programs, creates initfs |
 | `cargo xtask image` | build + disk image `target/os-<arch>-<profile>.img` (GPT, FAT32 ESP) |
-| `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)) |
+| `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)). Without `--gpu` the GUI draws through the firmware framebuffer (`--gpu none`, [GUI](gui.md)) so that it shows in the window. xtask switches the Windows console to UTF-8 |
 | `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for the other architectures, documentation, then kernel and userspace in QEMU without a window |
 | `cargo xtask test --only sit --repeat 20` | only the selected userspace test suites (names as in the log, comma separated), n times in a row - for finding flaky tests; every extra round adds 60 s to the run limit. A test longer than 20 s is marked `[pomaly]` ("slow") in the log |
 | `cargo xtask test --net-online` | also the tests against the real host network (host resolver through slirp); skipped without the switch |
@@ -40,7 +40,7 @@ Options: `--arch <x86_64|aarch64>` (all commands, default `x86_64`; aarch64
 x86_64 `intel` (default), `amd`, `none`; aarch64 `smmu` (default), `none`; `none` checks running without DMA
 translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" and the
 "IOMMU chrani pamet mimo DMA" tests of the `disky` suite then fail as expected),
-`--data-disk <virtio|nvme|ahci>` (data disk controller, default `virtio`; on NVMe
+`--data-disk <virtio|nvme|nvme4k|ahci>` (data disk controller, default `virtio`; `nvme4k` = NVMe with 4 KiB sectors; on NVMe
 and AHCI the disk gets a GPT with our partition, see [Disks](disks.md)),
 `--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
 `-- -cpu max,-x2apic`).

@@ -38,16 +38,18 @@ pub struct PoolInfo {
     pub available: u64,
 }
 
-/// Vystup `JOB_INFO` (48 B, little endian: pro jadro a pak uzivatelskou
-/// pamet vzdy `used`, `limit`, `available` jako u64).
+/// Vystup `JOB_INFO` (56 B, little endian: pro jadro a pak uzivatelskou
+/// pamet vzdy `used`, `limit`, `available` jako u64, nakonec cislo jobu).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct JobInfo {
     pub kernel: PoolInfo,
     pub user: PoolInfo,
+    /// Cislo jobu (jedinecne do restartu; stejne jako v [`ProcEntry::job`]).
+    pub id: u64,
 }
 
 impl JobInfo {
-    pub const SIZE: usize = 48;
+    pub const SIZE: usize = 56;
 
     pub fn encode(&self) -> [u8; Self::SIZE] {
         let mut b = [0u8; Self::SIZE];
@@ -58,6 +60,7 @@ impl JobInfo {
             self.user.used,
             self.user.limit,
             self.user.available,
+            self.id,
         ];
         for (i, v) in values.iter().enumerate() {
             b[i * 8..i * 8 + 8].copy_from_slice(&v.to_le_bytes());
@@ -78,6 +81,72 @@ impl JobInfo {
                 limit: v(4),
                 available: v(5),
             },
+            id: v(6),
         }
+    }
+}
+
+/// Jeden proces ve vystupu `JOB_PROCESSES` (64 B, little endian).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcEntry {
+    pub pid: u64,
+    /// Cislo jobu procesu (muze to byt potomek dotazovaneho jobu).
+    pub job: u64,
+    /// Cas na CPU (ns, soucet vlaken).
+    pub cpu_ns: u64,
+    /// Zivych vlaken.
+    pub threads: u32,
+    /// [`proc_flags`].
+    pub flags: u32,
+    /// Jmeno procesu (UTF-8, doplneno nulami, oriznute na 32 B).
+    pub name: [u8; 32],
+}
+
+/// Priznaky [`ProcEntry::flags`].
+pub mod proc_flags {
+    /// Proces uz skoncil (ceka jen na uklid handlu).
+    pub const FINISHED: u32 = 1;
+}
+
+impl ProcEntry {
+    pub const SIZE: usize = 64;
+
+    pub fn encode(&self) -> [u8; Self::SIZE] {
+        let mut b = [0u8; Self::SIZE];
+        b[0..8].copy_from_slice(&self.pid.to_le_bytes());
+        b[8..16].copy_from_slice(&self.job.to_le_bytes());
+        b[16..24].copy_from_slice(&self.cpu_ns.to_le_bytes());
+        b[24..28].copy_from_slice(&self.threads.to_le_bytes());
+        b[28..32].copy_from_slice(&self.flags.to_le_bytes());
+        b[32..64].copy_from_slice(&self.name);
+        b
+    }
+
+    pub fn decode(b: &[u8]) -> Option<Self> {
+        if b.len() < Self::SIZE {
+            return None;
+        }
+        let u = |i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+        let w = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        let mut name = [0u8; 32];
+        name.copy_from_slice(&b[32..64]);
+        Some(Self { pid: u(0), job: u(8), cpu_ns: u(16), threads: w(24), flags: w(28), name })
+    }
+
+    /// Jmeno bez doplnujicich nul.
+    pub fn name(&self) -> &str {
+        let n = self.name.iter().position(|&c| c == 0).unwrap_or(32);
+        core::str::from_utf8(&self.name[..n]).unwrap_or("?")
+    }
+
+    /// Jmeno pro zaznam (oriznute na 32 B na hranici znaku).
+    pub fn name_bytes(s: &str) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        let mut end = s.len().min(32);
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        out[..end].copy_from_slice(&s.as_bytes()[..end]);
+        out
     }
 }

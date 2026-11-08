@@ -13,7 +13,8 @@ Disky obsluhují tři ovladače v userspace. Všechny mluví s klientem
 Společná obsluha požadavků je v `blockproto::server`: kontrola rozsahu,
 překlad na náš oddíl GPT a zákaz zápisu na cizí disk jsou na jednom místě
 pro všechny tři ovladače. Ovladač dodá jen čtení, zápis, flush a TRIM
-v sektorech zařízení (trait `Disks`).
+v sektorech zařízení (trait `Disks`). Disky s logickým sektorem 512 B
+i 4 KiB fungují stejně (viz [Velikost sektoru](#velikost-sektoru)).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spuštění ovladačů disků a ochrana cizích disků">
@@ -56,7 +57,7 @@ a podle výsledku omezí, co klient vidí a smí:
 | disk | klient vidí | zápis a TRIM |
 |---|---|---|
 | GPT s **naším oddílem**: typ `C123ADA0-51BA-48C5-A536-C2CE6B2B3581` nebo jméno oddílu přesně `MagnumOpus` | jen tento oddíl (sektor 0 = první sektor oddílu) | povolen, jen uvnitř oddílu; atribut oddílu „jen pro čtení“ (bit 60) ho zakáže |
-| celý disk s **naším FS** bez tabulky oddílů (superblok `OSFS` v sektorech 8..72, sektor 0 bez podpisu MBR) | celý disk | povolen (datový disk v QEMU, starší rozložení) |
+| celý disk s **naším FS** bez tabulky oddílů (superblok `OSFS` na začátku některého z bloků 1..8 po 4 KiB, sektor 0 bez podpisu MBR) | celý disk | povolen (datový disk v QEMU, starší rozložení) |
 | GPT bez našeho oddílu | celý disk | **zakázán** (`READ_ONLY`) |
 | náš oddíl je neplatný (mimo disk, mimo použitelnou oblast, **překrývá jiný oddíl**) | celý disk | **zakázán** |
 | MBR (bez GPT), ochranný MBR s poškozenými hlavičkami GPT | celý disk | **zakázán** |
@@ -92,9 +93,35 @@ Zbytková rizika (ochrana je nepokrývá):
 - Ovladač samotný posílá příkazy řadiči. Chyba v kódu ovladače mimo
   `blockproto::server` (např. špatné LBA v příkazu) ochranu obejde; proto
   je obsluha požadavků společná a ovladače dělají jen překlad na příkazy.
-- Disky s logickým sektorem jiným než 512 B (NVMe naformátované na 4 KiB,
-  SATA 4Kn) ovladače zatím vynechají a zalogují. Tabulka GPT na nich leží
-  v jiných sektorech; bez úpravy by se rozbor mýlil.
+- Jmenné prostory NVMe s metadaty (ochrana dat T10 PI) ovladač vynechá
+  a zaloguje.
+
+## Velikost sektoru
+
+Klient (`blockproto`) adresuje vždy po 512 B. Disk může mít větší logický
+sektor: NVMe naformátované na 4 KiB, SATA 4Kn, virtio s `blk_size`.
+Ovladač nahlásí skutečnou velikost sektoru (`Disks::sector_size`) a zbytek
+dělá společný server:
+
+- **GPT** se čte v sektorech disku: na disku 4 KiB leží hlavička na bajtu
+  4096 a tabulka 16 KiB zabírá 4 sektory. Hranice oddílů jsou v sektorech
+  disku. Rozbor se špatnou velikostí sektoru by GPT nenašel a disk by byl
+  jen pro čtení (test `wrong_sector_size_never_writable`).
+- **Zarovnaný přístup** (začátek i konec na hranici sektoru disku) jde
+  přímo. FS pracuje po blocích 4 KiB, takže jeho čtení a zápisy jsou na
+  disku 4 KiB vždy zarovnané.
+- **Nezarovnané čtení** přečte celé sektory a vrátí jen požadovanou část.
+- **Nezarovnaný zápis** přečte okrajové sektory, změní v nich požadovanou
+  část a zapíše celé sektory (read-modify-write). Ostatní data v těchto
+  sektorech zůstanou (test sousedních sektorů). Zápis jednoho sektoru disku
+  je pro zařízení atomický, takže výpadek proudu uprostřed nepoškodí víc
+  než ten sektor, který by se jinak zapisoval celý.
+- **TRIM** se omezí na celé sektory disku uvnitř rozsahu; zbytek se
+  přeskočí (TRIM je jen nápověda, data v částečně zasažených sektorech
+  zůstanou).
+
+Podporovaný sektor: mocnina dvou od 512 B do 32 KiB (velikost bufferu
+ovladače). Prakticky 512 B a 4 KiB.
 
 ## Ovladač NVMe
 
@@ -106,8 +133,8 @@ najednou), proto stačí:
 - jedno přerušení MSI-X (vektor 0) pro admin i I/O frontu dokončených,
 - Set Features „Number of Queues“ a jedna dvojice I/O front (16 položek),
 - IDENTIFY řadiče (`MDTS`, `ONCS`, `VWC`) a aktivních jmenných prostorů;
-  každý jmenný prostor se sektorem 512 B bez metadat je jeden disk
-  (nejvýš 16).
+  každý jmenný prostor bez metadat je jeden disk (nejvýš 16); sektor
+  podle formátu LBA (`LBADS`, typicky 512 B nebo 4 KiB, nejvýš `MDTS`).
 
 | požadavek `blockproto` | příkaz NVMe |
 |---|---|
@@ -134,7 +161,8 @@ Podle specifikace Serial ATA AHCI 1.3.1:
    (`DET = 3`, nejvýš 1 s, prázdný port se vzdá po 200 ms), připravený
    disk, podpis disku SATA (`0x101`; ATAPI se vynechá),
 4. IDENTIFY DEVICE: kapacita LBA48, mezipaměť zápisu, FLUSH CACHE (EXT),
-   TRIM (slovo 169), velikost logického sektoru (slovo 106).
+   TRIM (slovo 169), velikost logického sektoru (slova 106, 117-118;
+   kapacita i počty sektorů v příkazech jsou v logických sektorech).
 
 | požadavek `blockproto` | příkaz ATA |
 |---|---|
@@ -170,14 +198,18 @@ ovladač):
 |---|---|---|
 | `scratch` | virtio-blk | náš oddíl 1 MiB (testy virtio-blk) |
 | `nvme-test` | NVMe | náš oddíl 2 MiB, ve 1. sektoru značka |
+| `nvme4k-test` | NVMe se sektorem 4 KiB | GPT v sektorech 4 KiB, náš oddíl 4 MiB se značkou |
 | `ahci-test` | AHCI port 0 | náš oddíl 3 MiB, ve 1. sektoru značka |
 | `foreign` | AHCI port 1 | celý cizí disk GPT (oddíl Linux), jen čtení |
 
-Sada `disky` ověří čtení, zápis (víc požadavků, poslední sektor oddílu),
-flush, TRIM, meze oddílu, IOMMU a u cizího disku `READ_ONLY` pro zápis
+Sada `disky` ověří čtení, zápis (víc požadavků, poslední sektor oddílu,
+nezarovnaný zápis bez změny sousedních sektorů), flush, TRIM (i částečný
+sektor 4 KiB), meze oddílu, IOMMU a u cizího disku `READ_ONLY` pro zápis
 i TRIM a nezměněná cizí data. Rozbor GPT testuje `cargo test -p diskguard`
 (poškozená hlavička a tabulka, překryv, atribut jen pro čtení, MBR,
-prázdný disk).
+prázdný disk, sektor 4 KiB a 64 KiB, špatná velikost sektoru).
+QEMU umí sektor 4 KiB jen u NVMe a virtio, ne u AHCI (IDE ho odmítne);
+SATA 4Kn je proto ověřené jen společným kódem serveru a rozboru GPT.
 
 Datový disk na jiném řadiči (dostane GPT s naším oddílem):
 
@@ -187,6 +219,12 @@ cargo xtask run --data-disk nvme
 
 ```bash
 cargo xtask test --data-disk ahci
+```
+
+Celý FS na disku se sektorem 4 KiB:
+
+```bash
+cargo xtask test --data-disk nvme4k
 ```
 
 Vlastní disk přes NVMe (disk bez našeho oddílu bude jen pro čtení):

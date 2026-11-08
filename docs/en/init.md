@@ -42,7 +42,12 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
    [Real time](time.md#synchronization-over-the-network-ntpd)) and `revocd`
    (certificate revocation, see [TLS and HTTP](tls-http.md#certificate-revocation)),
 6. all these processes are handed to the supervisor to watch,
-7. in the normal run the GUI (`compd`, the windows `gui-term` and
+7. `taskd` (task overview, see [Architecture](architecture.md#task-overview-agreed)):
+   init holds its control channel and is the only one to mint client and
+   producer channels with an identity; fsd gets a producer channel, the
+   supervisor reports service state after every round (at most 2 s),
+   applications with a window are reported together with their job,
+8. in the normal run the GUI (`compd`, the windows `gui-term` and
    `gui-demo`), without a GUI the fallback console (see
    [Terminal](#terminal)).
 

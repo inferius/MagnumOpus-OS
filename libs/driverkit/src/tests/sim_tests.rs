@@ -90,6 +90,9 @@ struct CopyDriver<P: Platform> {
     len: u32,
     /// Chyba v ovladaci pro test: posle zarizeni adresu za koncem bufferu.
     bad_address: bool,
+    /// Po zavreni kanalu klientem bezet dal (obnova sluzeb).
+    keep: bool,
+    sent_without_client: u32,
 }
 
 impl<P: Platform> Driver<P> for CopyDriver<P> {
@@ -106,6 +109,8 @@ impl<P: Platform> Driver<P> for CopyDriver<P> {
             irq,
             len: 0,
             bad_address: false,
+            keep: false,
+            sent_without_client: 0,
         })
     }
 
@@ -115,6 +120,10 @@ impl<P: Platform> Driver<P> for CopyDriver<P> {
     }
 
     fn message(&mut self, p: &P, msg: &[u8]) -> Result<()> {
+        if msg == b"keep" {
+            self.keep = true;
+            return Ok(());
+        }
         if msg == b"bug" {
             self.bad_address = true;
             return Ok(());
@@ -144,13 +153,19 @@ impl<P: Platform> Driver<P> for CopyDriver<P> {
         p.dma_rmb();
         let mut out = alloc::vec![0u8; self.len as usize];
         self.dst.read_bytes(0, &mut out)?;
-        p.send(&out)?;
+        if p.send(&out)? == Sent::NoClient {
+            self.sent_without_client += 1;
+        }
         crate::log!(p, "zkopirovano {} B", self.len);
         Ok(())
     }
 
     fn stop(&mut self, _p: &P) {
         R_CMD.write(&self.regs, 0);
+    }
+
+    fn client_closed(&mut self, _p: &P) -> bool {
+        self.keep
     }
 }
 
@@ -323,4 +338,23 @@ fn dma_buffer_bounds() {
     );
     assert!(b.iova_of(8, 9).is_err());
     assert_eq!(b.iova_of(8, 8).unwrap(), b.iova() + 8);
+}
+
+#[test]
+fn driver_survives_client_loss_when_asked() {
+    let sim = Sim::new("kopirka", info(), Copier::new()).time_limit(50_000_000);
+    let p = sim.platform();
+    let mut r = Runner::<CopyDriver<_>>::new(&p).ok().unwrap();
+    sim.send(b"keep");
+    sim.send(b"data");
+    sim.close();
+    assert_eq!(r.step(&p), None); // keep
+    assert_eq!(r.step(&p), None); // data -> start kopie
+    assert_eq!(r.step(&p), None); // klient zavrel: ovladac bezi dal
+    assert_eq!(r.step(&p), None); // preruseni: odpoved nema komu
+    assert_eq!(r.driver.sent_without_client, 1);
+    assert_eq!(sim.sent_text(), ["hello"]);
+    assert_eq!(p.send(b"x").unwrap(), Sent::NoClient);
+    // Bez klienta a bez preruseni uz nic neprijde: simulace to ukonci.
+    assert!(matches!(r.step(&p), Some(Exit::Failed { .. })));
 }

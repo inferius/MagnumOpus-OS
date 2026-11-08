@@ -234,6 +234,13 @@ impl<P: Platform> Driver<P> for Edu<P> {
 | `interrupt` | an interrupt (already acknowledged) | read the status, ack it in the device, finish the work |
 | `next_timer` / `timer` | a deadline | periodic work (virtio-rng: refilling entropy) |
 | `stop` | always at the end | stop the device: no DMA nor interrupts after returning |
+| `client_closed` | the client closed the channel | `false` (default) = end; `true` = keep running without a client (`send` returns `Sent::NoClient`) |
+
+A driver whose service is recovered after a crash through the
+supervisor's adapter (`inputd`, see [Service recovery](service-recovery.md))
+must not end when it loses the service: it returns `true` from
+`client_closed` and answers the new instance's synchronisation in
+`message` (that is what `virtio-input` does with `ISYN`).
 
 Code that needs something only the kernel has (e.g. the `virtio` library
 over `Ecam`) implements `Driver<OsPlatform>` directly and uses

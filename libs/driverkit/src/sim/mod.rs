@@ -68,6 +68,7 @@ pub(crate) struct State {
     pub pending: VecDeque<u16>,
     inbox: VecDeque<Vec<u8>>,
     client_closed: bool,
+    client_detached: bool,
     client_full: bool,
     outbox: Vec<Vec<u8>>,
     pub logs: Vec<String>,
@@ -132,6 +133,7 @@ impl Sim {
                     pending: VecDeque::new(),
                     inbox: VecDeque::new(),
                     client_closed: false,
+                    client_detached: false,
                     client_full: false,
                     outbox: Vec::new(),
                     logs: Vec::new(),
@@ -461,7 +463,7 @@ impl Platform for SimPlatform {
                 if let Some(m) = s.inbox.pop_front() {
                     return Ok(Event::Message(m));
                 }
-                if s.client_closed {
+                if s.client_closed && !s.client_detached {
                     return Ok(Event::ClientClosed);
                 }
                 if deadline.is_some_and(|d| s.now >= d) {
@@ -491,11 +493,18 @@ impl Platform for SimPlatform {
 
     fn send(&self, data: &[u8]) -> Result<Sent> {
         let mut s = self.inner.state.borrow_mut();
+        if s.client_detached {
+            return Ok(Sent::NoClient);
+        }
         if s.client_full {
             return Ok(Sent::Full);
         }
         s.outbox.push(data.to_vec());
         Ok(Sent::Sent)
+    }
+
+    fn detach_client(&self) {
+        self.inner.state.borrow_mut().client_detached = true;
     }
 
     fn log(&self, args: fmt::Arguments) {

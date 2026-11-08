@@ -33,6 +33,7 @@ pub const TESTS: &[Test] = &[
     ("compd: bezpecna obrazovka po Ctrl+Alt+Del (QMP)", secure_screen),
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
     ("compd: spravce uloh a ikona uloh v panelu", task_manager),
+    ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
 ];
@@ -323,6 +324,14 @@ fn terminal_window(startup: &Startup) -> TestResult {
         wait_tree(&s.inspect, w.id, "vystup prikazu", |t| {
             pump();
             t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "ahoj z GUI"))
+        })?;
+        // Relace hlasi ulohy do prehledu uloh (kanaly razi init pres
+        // registr): `tasks` vidi bezici ulohu `async`.
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "let ulohy = async { sleep 30s }".into() })?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "tasks | where state == \"running\" | count".into() })?;
+        wait_tree(&s.inspect, w.id, "tasks v terminalu", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "1"))
         })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
