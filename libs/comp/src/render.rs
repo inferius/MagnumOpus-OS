@@ -57,11 +57,6 @@ const CURSOR: [&str; 19] = [
 pub const CURSOR_W: u32 = 12;
 pub const CURSOR_H: u32 = 19;
 
-/// Neprusvitnost listy (prototyp: `color-mix(surface 90%)`; na GPU pozdeji
-/// s rozmazanim pozadi).
-const BAR_OPACITY: u32 = 230;
-/// Ztlumeni obsahu aplikace, ktera nereaguje (prototyp: `opacity(.45)`).
-const HUNG_VEIL: u32 = 140;
 
 /// Text ikony uloh (pristupnost, inspekce).
 pub fn tasks_label(run: u32, agent: u32) -> String {
@@ -354,9 +349,9 @@ fn badge_text(t: &theme::Theme) -> TextStyle {
     TextStyle { weight: t.text.body_strong.weight, ..t.text.caption }
 }
 
-/// Ikona opravneni v odznaku: o 2 px mensi nez `icon_s` (14 px).
+/// Ikona opravneni v odznaku (`size.icon_xs`).
 fn perm_icon_size(t: &theme::Theme) -> u32 {
-    t.size.icon_s - t.space[1]
+    t.size.icon_xs
 }
 
 /// Deti vrstev okna: rodic -> (poradi, id) serazene.
@@ -485,7 +480,8 @@ pub(crate) fn draw_window_above(c: &mut Canvas<'_>, st: &mut Style, w: &Window, 
 /// Aplikace nereaguje: ztlumeny obsah a karta uprostred (kresli system).
 fn draw_hung(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client) {
     let t = st.theme.clone();
-    c.blend(w.rect, scale(t.color.surface, HUNG_VEIL));
+    // Obsah na kryti `opacity.hung_content` = plocha s doplnkovym kryti pres nej.
+    c.blend(w.rect, scale(t.color.surface, 255 - t.opacity.hung_content));
     let title = format!("{} nereaguje", cl.info.name);
     let note = format!("{} s bez odpovědi.", t.motion.unresponsive_ms / 1000);
     let (s1, s2) = (t.text.body_strong, t.text.small);
@@ -567,8 +563,8 @@ fn draw_buttons(c: &mut Canvas<'_>, st: &mut Style, w: &Window, hover: Option<us
         } else if w.button_color != 0 {
             c.round_fill(*b, b.w / 2, w.button_color | 0xFF00_0000);
         }
-        let s = b.w / 2;
-        st.icons.draw(c, icons[i], b.x + (b.w - s) as i32 / 2, b.y + (b.h - s) as i32 / 2, s, t.icon_stroke, ink);
+        let s = t.size.icon_xs;
+        st.icons.draw(c, icons[i], b.x + (b.w - s) as i32 / 2, b.y + (b.h - s) as i32 / 2, s, t.size.title_btn_stroke as f32, ink);
     }
 }
 
@@ -660,7 +656,7 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         return;
     }
     st.draw_shadow(c, &shadow, p, t.radius.window, Rect::default());
-    c.round_fill_bordered(p, t.radius.window, scale(col.surface, BAR_OPACITY), col.border, 1);
+    c.round_fill_bordered(p, t.radius.window, scale(col.surface, t.opacity.bar), col.border, 1);
     let ctl = t.radius.control;
     // Okna.
     let il = t.size.icon_l;
@@ -673,9 +669,10 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         let icon = info.clients.get(&w.client).map(|cl| app_icon(&cl.info.id)).unwrap_or("window");
         st.icons.draw(c, icon, r.x + (r.w - il) as i32 / 2, r.y + (r.h - il) as i32 / 2, il, t.icon_stroke, col.ink);
         // Znacka bezici / aktivni (pod ikonou).
-        let (mw, mc) = if active { (t.space[6], col.accent) } else { (t.space[4] + t.space[1], col.ink_faint) };
-        let mh = 3;
-        c.round_fill(Rect::new(r.x + (r.w - mw) as i32 / 2, r.bottom() as i32 - mh as i32 - 1, mw, mh), 2, mc);
+        let s = &t.size;
+        let (mw, mc) = if active { (s.bar_indicator_active_w, col.accent) } else { (s.bar_indicator_w, col.ink_faint) };
+        let mh = s.bar_indicator_h;
+        c.round_fill(Rect::new(r.x + (r.w - mw) as i32 / 2, r.bottom() as i32 - mh as i32 - 1, mw, mh), mh, mc);
     }
     for &x in &bar.seps {
         let h = t.space[7];

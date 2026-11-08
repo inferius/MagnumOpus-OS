@@ -402,10 +402,9 @@ dialog, cursor) goes through a scratch buffer on the CPU too. So the
 - No blur under the bar (2D); shadows from static masks.
 - Apps do not receive the system theme yet (they draw light). Theme
   switching for apps and 200 % text size come with G4.
-- A few values exist only in `mo.css`, not in the tokens (bar opacity
-  90 %, dimming 0.45, dialog width 440, 14 px icons); they are named
-  constants in code referring to the prototype, and the design thread is
-  considering adding them to the tokens.
+- Values that used to exist only in `mo.css` (bar opacity, dimming,
+  dialog width, 14 px icons, the bar mark) are now in the tokens
+  (`[size]`, `[opacity]`) and the code reads them from there.
 
 **CPU frame cost:** `compd` logs the full-screen compose time and, every
 300 frames, the average and maximum (`compd: snimek cele obrazovky ...`).

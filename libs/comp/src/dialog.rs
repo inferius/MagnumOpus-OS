@@ -19,8 +19,6 @@ use theme::{TextStyle, Theme};
 use crate::style::Style;
 use crate::{Comp, Out, PeerId};
 
-/// Sirka dialogu (prototyp `.sysdlg`: `min(440px, 100% - 24px)`).
-const DIALOG_W: u32 = 440;
 /// Upozorneni pod textem dialogu.
 const GUARD: &str = "Systémový dialog přijímá jen fyzický vstup. Bezpečná zkratka Ctrl+Alt+Del ukáže vždy pravý.";
 
@@ -132,7 +130,7 @@ impl Dialogs {
         let d = self.active()?;
         let t = &st.theme;
         let sp = &t.space;
-        let w = DIALOG_W.min(sw.saturating_sub(2 * sp[4]));
+        let w = t.size.dialog_w.min(sw.saturating_sub(2 * sp[4]));
         let inner = w.saturating_sub(2 * sp[6]);
         let body = t.text.body;
         let lines = wrap(st.face_ref(body), &d.text, body.size, inner);

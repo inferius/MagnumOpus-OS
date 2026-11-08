@@ -176,7 +176,43 @@ uints!(
     focus_offset,
     resize_edge,
     scrollbar,
+    icon_xs,
+    title_btn_stroke,
+    live_dot,
+    dialog_w,
+    notification_w,
+    bar_indicator_w,
+    bar_indicator_h,
+    bar_indicator_active_w,
+    switch_w,
+    switch_h,
+    switch_knob,
 );
+
+/// Kryti (0..=255 pro `gfx::scale`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Opacity {
+    /// Pozadi listy (ve vysokem kontrastu vzdy plne).
+    pub bar: u32,
+    /// Obsah nereagujiciho okna.
+    pub hung_content: u32,
+    /// Nedostupny prvek.
+    pub disabled: u32,
+}
+
+impl Opacity {
+    fn parse(t: &Table, mode: Mode) -> Result<Self> {
+        let o = |k: &str| -> Result<u32> {
+            let v = f(t, k)?;
+            if !(0.0..=1.0).contains(&v) {
+                return Err(Error::Invalid(k.into()));
+            }
+            Ok((v * 255.0 + 0.5) as u32)
+        };
+        let bar = o("opacity.bar")?;
+        Ok(Self { bar: if mode == Mode::Contrast { 255 } else { bar }, hung_content: o("opacity.hung_content")?, disabled: o("opacity.disabled")? })
+    }
+}
 uints!(Radii, "Zaobleni (px).", "radius", xs, badge, control, card, window, pill);
 uints!(
     Layers,
@@ -259,6 +295,7 @@ pub struct Theme {
     /// Tloustka tahu ikon (px pri velikosti 24).
     pub icon_stroke: f32,
     pub radius: Radii,
+    pub opacity: Opacity,
     pub motion: Motion,
     pub layer: Layers,
     pub font: Fonts,
@@ -301,6 +338,7 @@ impl Tokens {
             size: Sizes::parse(t)?,
             icon_stroke: f(t, "size.icon_stroke")? as f32,
             radius: Radii::parse(t)?,
+            opacity: Opacity::parse(t, mode)?,
             motion: Motion::parse(t)?,
             layer: Layers::parse(t)?,
             font: Fonts {

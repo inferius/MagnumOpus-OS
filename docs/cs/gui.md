@@ -386,10 +386,9 @@ test `gpu_list_matches_cpu_frame` dál porovnává snímek pixel po pixelu.
 - Bez rozmazání pod lištou (2D); stíny ze statických masek.
 - Aplikace zatím nedostávají motiv systému (kreslí světlý). Přepínání
   motivu aplikací a velikost písma 200 % přijdou s G4.
-- Pár hodnot je jen v `mo.css`, ne v tokenech (krytí lišty 90 %,
-  ztlumení 0,45, šířka dialogu 440, ikony 14 px); jsou v kódu jako
-  pojmenované konstanty s odkazem na prototyp a vlákno návrhu je
-  zvažuje doplnit do tokenů.
+- Hodnoty, které byly jen v `mo.css` (krytí lišty, ztlumení, šířka
+  dialogu, ikony 14 px, značka v liště), jsou nově v tokenech
+  (`[size]`, `[opacity]`) a kód je čte odtud.
 
 **Cena snímku na CPU:** `compd` píše do logu čas skládání celé obrazovky
 a po 300 snímcích průměr a maximum (`compd: snimek cele obrazovky ...`).
