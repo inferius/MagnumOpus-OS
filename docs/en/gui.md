@@ -371,7 +371,9 @@ nearest center. Hover highlights a button (`surface_3`, close
 `danger`). The 26 px trust badge: shield, manifest name and permission
 icons in `trust_*` colors; a system app (`[app] system = true` in the
 manifest, judged by init, `ConnectInfo.system`) shows "Systém" with a
-check shield. An unfocused window's badge has 0.6 saturation. The frame is
+check shield. Init reads the key only from a manifest in initfs (the
+system image); an app from elsewhere cannot pose as the system, that is
+decided by signature and path, not by its own manifest. An unfocused window's badge has 0.6 saturation. The frame is
 1 px, 2 px in high contrast. A new window is placed in the work area
 (screen minus the bar); it gets under the bar only by dragging.
 

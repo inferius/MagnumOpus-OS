@@ -355,7 +355,9 @@ střed. Najetí zvýrazní tlačítko (`surface_3`, zavřít `danger`).
 Odznak důvěry 26 px: štít, jméno z manifestu a ikony oprávnění,
 barvy `trust_*`; systémová aplikace (`[app] system = true` v manifestu,
 posoudí init, `ConnectInfo.system`) má odznak „Systém“ se štítem
-s fajfkou. Okno bez fokusu má odznak se sytostí 0,6. Rám je 1 px, ve
+s fajfkou. Init klíč čte jen z manifestu v initfs (obraz systému);
+aplikace odjinud se za systém vydávat nemůže, o tom rozhodne podpis
+a cesta, ne její manifest. Okno bez fokusu má odznak se sytostí 0,6. Rám je 1 px, ve
 vysokém kontrastu 2 px. Nové okno se umístí do pracovní plochy
 (obrazovka bez lišty); pod lištu se dostane jen tažením.
 

@@ -277,7 +277,11 @@ pub fn recipe(startup: &Startup, name: &str) -> Result<ConnectInfo> {
     if m.as_ref().is_some_and(|m| m.network.is_some()) {
         perms.push(String::from("síť"));
     }
-    // Systemova aplikace (odznak "Systém"): klic v manifestu v initfs.
+    // Systemova aplikace (odznak "Systém"): rozhoduje init, ne aplikace.
+    // Klic `[app] system` se cte jen z manifestu v initfs (soucast obrazu
+    // systemu sestaveneho z repozitare). Aplikace odjinud (disk, sit) tudy
+    // nevedou; az budou, o systemove aplikaci rozhodne podpis a cesta,
+    // ne jejich vlastni manifest.
     let system = conf::parse(text).ok().and_then(|t| t.get_bool("app.system")).unwrap_or(false);
     Ok(ConnectInfo {
         system,
