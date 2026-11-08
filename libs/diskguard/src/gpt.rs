@@ -80,6 +80,11 @@ pub struct Table {
     raw: Vec<u8>,
     /// Tabulka je ze zalozni hlavicky (primarni je poskozena).
     pub from_backup: bool,
+    /// Sektory struktur GPT (vcetne, od-do): MBR a primarni hlavicka,
+    /// primarni tabulka, zalozni tabulka a hlavicka a tabulka podle pouzite
+    /// hlavicky. Do nich nesmi zasahovat zadny oddil, at hlavicka tvrdi
+    /// o pouzitelne oblasti cokoli.
+    pub reserved: Vec<(u64, u64)>,
 }
 
 impl Table {
@@ -191,7 +196,15 @@ pub fn read_table(sectors: u64, ss: usize, read: &mut impl FnMut(u64, &mut [u8])
             None => return Read::Unreadable,
             Some(None) => continue,
             Some(Some(raw)) => {
+                let tsec = (h.count as u64 * h.entry_size as u64).div_ceil(ss as u64);
+                let reserved = vec![
+                    (0, 1),
+                    (2, 1 + tsec),
+                    (h.entries_lba, h.entries_lba + tsec - 1),
+                    (sectors.saturating_sub(1 + tsec), sectors - 1),
+                ];
                 return Read::Table(Table {
+                    reserved,
                     first_usable: h.first_usable,
                     last_usable: h.last_usable,
                     disk_guid: h.disk_guid,

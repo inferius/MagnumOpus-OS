@@ -9,8 +9,9 @@ a cenu. Když se rozhodnutí změní, upraví se tady spolu s kódem.
 2. **Žádné ohýbání kvůli kompatibilitě.** Když Windows vrstva potřebuje něco,
    co by nativní systém sám nechtěl, řeší se to ve vrstvě, ne v jádře.
    Do jádra se přidává jen obecný mechanismus, který dává smysl i nativně.
-3. **Capabilities.** Žádný root, žádné ACL. Proces má přístup jen k tomu,
-   na co dostal handle.
+3. **Capabilities.** Žádný root ani uživatel, který smí všechno. Proces má
+   přístup jen k tomu, na co dostal handle. Uvnitř služeb mohou nad tím
+   stát jemnější pravidla (oprávnění ve FS), viz [Bezpečnost](#bezpečnost).
 4. **Asynchronní I/O od základu**, synchronní API je tenká vrstva nad ním.
 5. **Ovladače v userspace.** Pád ovladače neshodí systém.
 6. **Jen moderní platformy:** 64 bit, UEFI / device tree, ACPI, SMP.
@@ -144,11 +145,52 @@ ve Windows nebo vDSO + libc v Linuxu).
 
 ## Bezpečnost
 
-- Init dostane kořenové capabilities a rozdává je službám, každé jen jejich část.
-- Uživatel je pojem userspace: session = sada capabilities.
+> **Změna proti dřívějšímu popisu:** úvod tvrdil „žádné ACL“ a „přístup
+> k souboru = handle na adresář“. Od oprávnění FS (F1d) má souborový systém
+> granty a systémovou identitu. Model níže popisuje vrstvy tak, jak opravdu
+> jsou.
+
+**Tři vrstvy, každá chrání něco jiného:**
+
+1. **Capabilities v jádře** (základ). Proces smí jen to, na co má handle
+   s právy. Jádro nezná uživatele ani ACL, žádný proces nemá „všechno“
+   automaticky.
+2. **Oprávnění uvnitř služeb.** Služba, která spravuje sdílená data, nad
+   kanálem klienta vyhodnocuje vlastní pravidla. Ve FS jsou to vlastník,
+   granty „jen povolit“ s dědičností a `PROTECTED`, skrytí nepřístupného
+   (`NOT_FOUND`) a `NOEXEC` na datasetech, viz
+   [Oprávnění a identita relací](souborovy-system.md#oprávnění-a-identita-relací).
+   Kanál klienta nese identitu: **klient si ji nevymyslí**, dostane ji od
+   toho, kdo relaci založil.
+3. **Systémová identita (uživatel 0).** Kontroly FS se na ni nevztahují.
+   Má ji **jen řídicí relace fsd, kterou drží init** (později správce
+   sezení), a nástroje na hostiteli. Přihlásit se za ni nejde a žádná
+   aplikace ji nedostane. Je to identita systému samotného, ne účet
+   správce.
+
+- Uživatel je pojem userspace: relace = identita + sada capabilities
+  (připojené cesty FS, kanály služeb). Razí ji init (`CONNECT_AS`);
+  přihlášení a účty řeší služba účtů.
 - Aplikace jsou vždy v sandboxu; manifest říká, jaké capabilities potřebují
   (zatím síť a rozpočet, viz [Manifest aplikace](firewall.md#manifest-aplikace)).
-- Přístup k souboru = handle na adresář, ve kterém leží. Žádná ACL.
+  Soubory mimo svůj prostor dostanou jen výběrem uživatele v dialogu
+  (powerbox, `GRANT`).
+- **Správa počítače** bez roota: úkon pro celý počítač potvrdí oprávněný
+  uživatel v systémovém dialogu a vznikne capability jen na ten úkon
+  (návrh služby účtů).
+
+**Kritické součásti (TCB).** Mají velkou autoritu, takže chyba v nich je
+bezpečnostní chyba celého systému. Proto zůstávají malé, testované
+a autoritu dál dělí:
+
+| Součást | Autorita | Jak je omezená |
+|---|---|---|
+| jádro | vše | mikrojádro, ovladače a služby mimo něj |
+| init (supervisor) | kořenové capabilities, řídicí relace fsd, razí identity a kanály | rozdá každé službě jen její část, sám nic neobsluhuje |
+| `devmgr` | kořenový prostředek (PCI, I/O, přerušení) | ovladač dostane jen své zařízení; DMA přes IOMMU |
+| `fsd` | celý disk s FS | práva vyhodnocuje podle identity kanálu, `diskguard` chrání cizí disky |
+| služba účtů | ověření uživatele, žádost o relaci | hesla jen jako hash (Argon2id), relaci razí init, ne ona |
+| ovladače s DMA | paměť, kam zařízení zapisuje | IOMMU; bez IOMMU je ovladač s DMA součástí TCB |
 - **Prostředky:** každý proces běží v jobu s rozpočtem paměti jádra
   a uživatelské paměti v bajtech. Rodič rozdělí svůj rozpočet potomkům,
   potomek si limit nezvýší. Pevné počty (handly, vlákna, ...) nejsou, jen
@@ -466,8 +508,8 @@ kontrola), akce aplikací a později agentů AI. Nic neběží „ve vzduchoprá
 | Část | Co dělá | Kdo ji dělá |
 |---|---|---|
 | **joby v jádře** | skupina procesů s rozpočty (paměť, porty, DMA); strom „kdo spustil koho“ | hotovo (síť) |
-| **služba úloh `taskd`** | jeden seznam úloh: lidsky čitelný název, **kdo spustil** (uživatel, skript, aplikace, služba, agent), stav, průběh, odhad, spotřeba z rozpočtu jobu, akce (připojit, pozastavit, zrušit, log); dokončené úlohy chvíli zůstanou i s výsledkem a chybou | vlákno shellu (6b), po async |
-| **příkaz `tasks`** | strukturovaná tabulka (`tasks \| where owner == "agent"`), `attach`, `cancel`; panel úloh v terminálu, upozornění na dokončení nebo chybu | vlákno shellu (6b) |
+| **služba úloh `taskd`** | jeden seznam úloh: lidsky čitelný název, **kdo spustil** (uživatel, skript, aplikace, služba, agent), stav, průběh, odhad, spotřeba z rozpočtu jobu, akce (připojit, pozastavit, zrušit, log); dokončené úlohy chvíli zůstanou i s výsledkem a chybou | hotovo (vlákno shellu 6b) |
+| **příkaz `tasks`** | strukturovaná tabulka (`tasks \| where owner == "agent"`), `attach`, `cancel`; panel úloh v terminálu, upozornění na dokončení nebo chybu | hotovo (vlákno shellu 6b) |
 | **správce úloh v GUI** | okno se stejnými daty, ikona „běží N úloh“ v liště | vlákno GUI (6c) |
 
 - **Registrace:** úlohy se při vzniku registrují samy (shell, supervisor,
@@ -475,6 +517,49 @@ kontrola), akce aplikací a později agentů AI. Nic neběží „ve vzduchoprá
   „neznámý proces v jobu X“ - nic nezůstane skryté.
 - **Oprávnění:** uživatel vidí své úlohy, cizí a systémové jen s právem.
   Úlohy spuštěné agentem AI jsou výrazně označené (viz [AI v systému](#ai-v-systému-návrh)).
+
+### Stav implementace (hotovo)
+
+```text
+shell (shsess) ──producent──▶ taskd ◀──producent── init (služby, aplikace)
+fsd (scrub, údržba) ──▶       │ ▲                   │ watch: joby aplikací
+                              ▼ │ klient            ▼
+             tasks, panel (Ctrl-T) · správce úloh v GUI · ikona v liště
+```
+
+- **Služba `taskd`** (`user/taskd`, jádro `libs/taskcore` s testy na
+  hostiteli, protokol `libs/taskproto`): jeden seznam úloh v paměti.
+  Dokončené úlohy zůstanou s výsledkem nebo chybou: nejvýš 100 posledních
+  a nejdéle 30 minut. Výsledky důležitých operací zůstávají i jinde (blok
+  v terminálu, log služby, žurnál FS), proto taskd hotové úlohy na disk
+  nezapisuje.
+- **Kanály razí jen init** (řídicí kanál taskd): klient s identitou
+  a rozsahem (vlastní úlohy / všechny, smí řídit), producent s identitou
+  (úloha patří identitě producenta), sledovaný job. Relace shellu dostane
+  kanály přes termd a registr relací (`RegMsg::TasksReq`, init je razí
+  s identitou uživatele), fsd zprávou `tasks` na řídicím kanálu.
+- **Odběr:** snímek a události s pořadovým číslem. Změnu úlohy, kterou
+  klient nevidí, dostane jako `Removed(id)` - čísla jdou bez děr
+  a navázání od `since` funguje (posledních 512 změn, jinak nový snímek).
+- **Producenti:** shell (úlohy `async` s blokem a zrušením, `bg`),
+  supervisor (stav služeb: běží, restart, vzdáno, zastaveno), init
+  (aplikace s oknem i s jejich jobem), fsd (scrub s průběhem a výsledkem,
+  defragmentace a deduplikace v nečinnosti). Akci (zrušit) taskd předá
+  producentovi, jen když ji úloha umí a volající smí.
+- **Neznámý proces:** taskd každé 2 s projde procesy sledovaných jobů
+  (syscall `JOB_PROCESSES`, čas CPU a paměť jobu). Proces v jobu, který
+  žádná běžící úloha nehlásí, je úloha původu `unknown`; úloha s jobem
+  bez živých procesů skončí.
+- **Správce úloh v GUI** (`gui-tasks`) v běžném běhu spouští init
+  s kanálem klienta (vlastní úlohy uživatele, smí řídit).
+- **Shell:** `tasks` vrátí tabulku (`tasks | where owner == "service"`),
+  `tasks cancel|pause|resume <id>`, `tasks log <id> -n 50`. V okně panel
+  úloh (Ctrl-T: šipky, `c` zrušit, `p` pozastavit, `r` pokračovat), ve
+  stavovém řádku „úlohy N“ a upozornění na dokončení nebo chybu.
+
+⚠️ **Omezení:** pozastavení zatím žádný producent neumí (taskd vrátí
+`NOT_SUPPORTED`); procesy ve vnořeném
+jobu aplikace jsou neznámé (patří k úloze jen procesy přímo v jejím jobu).
 
 ## AI v systému (návrh)
 

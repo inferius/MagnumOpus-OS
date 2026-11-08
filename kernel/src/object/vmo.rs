@@ -189,6 +189,15 @@ impl MemoryObject {
         Self::physical(phys_start, size, None, abi::vm::cache::WRITE_COMBINING)
     }
 
+    /// Okno na pamet firmwaru s tabulkami ACPI (AcpiReclaimable, AcpiNvs):
+    /// RAM, kterou jadro nikdy nedava alokatoru. Vzdy s cache (stejne
+    /// atributy jako v prime mape jadra; jiny typ cache by na ARM znamenal
+    /// nesouhlasne atributy jedne stranky). Volajici ruci (pres
+    /// `mm::is_acpi_memory`), ze rozsah lezi cely v pameti ACPI.
+    pub fn new_firmware(phys_start: u64, size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
+        Self::physical(phys_start, size, job, abi::vm::cache::CACHED)
+    }
+
     fn physical(
         phys_start: u64,
         size: u64,

@@ -222,6 +222,62 @@ pub fn acknowledge() -> Option<u32> {
     (!(1020..=1023).contains(&id)).then_some(id)
 }
 
+/// Prvni a posledni SPI (pevne linky zarizeni na desce, napr. GED ACPI).
+pub const SPI_FIRST: u32 = 32;
+pub const SPI_LAST: u32 = 1019;
+
+const GICD_TYPER: u64 = 0x0004;
+const GICD_IGROUPR: u64 = 0x0080;
+const GICD_ISENABLER: u64 = 0x0100;
+const GICD_ICENABLER: u64 = 0x0180;
+const GICD_ICPENDR: u64 = 0x0280;
+const GICD_IPRIORITYR: u64 = 0x0400;
+const GICD_ICFGR: u64 = 0x0C00;
+const GICD_IROUTER: u64 = 0x6000;
+
+/// Nejvyssi SPI, ktere distributor ma (GICD_TYPER.ITLinesNumber).
+pub fn spi_last_supported() -> u32 {
+    let gicd = GICD.load(Ordering::Acquire);
+    if gicd == 0 {
+        return 0;
+    }
+    let lines = read32(gicd + GICD_TYPER) & 0x1F;
+    (32 * (lines + 1) - 1).min(SPI_LAST)
+}
+
+/// Nastavi SPI `intid`: skupina 1, priorita, spousteni (hrana/uroven),
+/// smerovani na CPU s afinitou `hw_id`. Zustane vypnute (`set_spi_enabled`).
+pub fn configure_spi(intid: u32, edge: bool, hw_id: u32) {
+    let gicd = GICD.load(Ordering::Acquire);
+    let (word, bit) = ((intid / 32) as u64 * 4, 1u32 << (intid % 32));
+    write32(gicd + GICD_ICENABLER + word, bit);
+    wait_rwp(gicd);
+    write32(gicd + GICD_IGROUPR + word, read32(gicd + GICD_IGROUPR + word) | bit);
+    // Priorita: bajtovy registr (GICD_IPRIORITYR je bajtove adresovatelny).
+    let prio = gicd + GICD_IPRIORITYR + intid as u64;
+    // SAFETY: registr distributoru v namapovanem okne (intid <= 1019).
+    unsafe { (prio as *mut u8).write_volatile(PRIORITY) };
+    let cfg = gicd + GICD_ICFGR + (intid / 16) as u64 * 4;
+    let shift = (intid % 16) * 2 + 1;
+    let v = read32(cfg) & !(1 << shift);
+    write32(cfg, v | ((edge as u32) << shift));
+    let aff = hw_id as u64;
+    let route = (aff >> 24 & 0xFF) << 32 | (aff >> 16 & 0xFF) << 16 | (aff >> 8 & 0xFF) << 8 | (aff & 0xFF);
+    write64(gicd + GICD_IROUTER + intid as u64 * 8, route);
+    write32(gicd + GICD_ICPENDR + word, bit);
+    dsb_sy();
+}
+
+/// Zapne / vypne SPI v distributoru.
+pub fn set_spi_enabled(intid: u32, enabled: bool) {
+    let gicd = GICD.load(Ordering::Acquire);
+    let (word, bit) = ((intid / 32) as u64 * 4, 1u32 << (intid % 32));
+    write32(gicd + if enabled { GICD_ISENABLER } else { GICD_ICENABLER } + word, bit);
+    if !enabled {
+        wait_rwp(gicd);
+    }
+}
+
 /// Konec obsluhy (ICC_EOIR1_EL1): snizeni priority i deaktivace.
 pub fn end_of_interrupt(intid: u32) {
     // SAFETY: zapis EOIR pro prave potvrzene preruseni.

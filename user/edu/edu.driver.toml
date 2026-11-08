@@ -1,0 +1,19 @@
+# Manifest ovladace (viz docs/cs/ovladace.md, "Manifest").
+[driver]
+name = "edu"
+description = "QEMU edu: vyukove zarizeni (faktorial, preruseni MSI, DMA)"
+license = "MIT OR Apache-2.0"
+# Vlastni kod; fakta o zarizeni z QEMU docs/specs/edu.rst (GPL: jen fakta).
+origin = "vlastni (specifikace QEMU docs/specs/edu.rst)"
+
+[match]
+pci = ["1234:11e8"]
+
+[resources]
+bars = [0]
+irq_max = 1
+dma_max = "16K"
+
+[service]
+restart = true
+max_restarts = 5

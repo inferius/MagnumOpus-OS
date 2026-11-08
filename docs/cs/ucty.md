@@ -419,6 +419,10 @@ výrobce) je neobnoví - to je smysl šifrování. Obrazovka zapnutí to musí
 říct výslovně a obnovovací klíč nechat opsat; nastavení upozorní, když
 účet s šifrováním má jen jednu metodu.
 
+Šifrování domova staví na **šifrovaných trezorech FS** (fáze 4, viz
+[Šifrované trezory](navrh-fs-v3.md#šifrované-trezory)): domov bude
+trezor a accountd dodá jeho klíč. Zatím je hotové jen rozhraní.
+
 **Co je potřeba od FS** (návrh rozhraní pro krok „šifrování datasetu“):
 
 | Operace (fsproto) | Kdo | Význam |

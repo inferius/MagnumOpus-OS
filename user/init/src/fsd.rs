@@ -197,7 +197,13 @@ impl Service for Fsd {
     fn ready(&mut self) -> Result<bool> {
         let control = self.control.as_ref().ok_or(Error::BadState)?;
         match control.try_read() {
-            Ok(m) if m.data == b"ok" => Ok(true),
+            Ok(m) if m.data == b"ok" => {
+                // Nova instance po padu: znovu kanal prehledu uloh.
+                if let Err(e) = crate::tasks::give_producer(control, "fsd") {
+                    libos::println!("init: prehled uloh pro fsd: {e}");
+                }
+                Ok(true)
+            }
             Ok(_) => Err(Error::IoError),
             Err(Error::ShouldWait) => Ok(false),
             Err(e) => Err(e),

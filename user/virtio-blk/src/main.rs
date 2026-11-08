@@ -276,17 +276,10 @@ impl Disk {
     /// zarizeni prepsalo (bez IOMMU). Zapis jde jen do vlastni pameti
     /// ovladace, takze test nic neohrozi.
     fn test_dma_protection(&mut self, resource: &Resource) -> Result<u64> {
-        const PATTERN: u8 = 0xAA;
-        let len = self.block.max(4096) as u64;
-        let page = Vmo::create(len)?;
-        let map = Mapping::new(&page, 0, len, MAP_READ | MAP_WRITE)?;
-        map.write_bytes(0, &alloc::vec![PATTERN; self.block]);
-        let phys = resource.phys_addr(&page, 0)?;
+        let probe = server::DmaProbe::new(resource, self.block)?;
         // Vysledek pozadavku je vedlejsi (zarizeni muze chybu hlasit i ne).
-        let _ = self.request_at(REQ_IN, 0, self.block as u32, phys);
-        let mut back = alloc::vec![0u8; self.block];
-        map.read_bytes(0, &mut back);
-        Ok(back.iter().all(|&b| b == PATTERN) as u64)
+        let _ = self.request_at(REQ_IN, 0, self.block as u32, probe.phys);
+        Ok(probe.untouched())
     }
 
     /// DISCARD po usecich podle limitu zarizeni. Popis useku (16 B):

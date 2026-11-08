@@ -11,6 +11,7 @@ pub mod draw;
 pub mod editor;
 pub mod progress;
 pub mod table;
+pub mod tasks;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -114,6 +115,11 @@ pub struct App {
     welcomed: bool,
     /// Cislo posledniho pozadavku `Complete`/`Format` (`seq`).
     req: u32,
+    /// Ulohy uzivatele z prehledu uloh (`taskd`).
+    pub tasks: Vec<taskproto::Task>,
+    /// Panel uloh: vybrana uloha (`None` = zavreny).
+    task_sel: Option<usize>,
+    notice: Option<tasks::Notice>,
 }
 
 /// Uvodni napoveda nove relace (blok bez prikazu).
@@ -150,6 +156,9 @@ impl App {
             welcome: false,
             welcomed: false,
             req: 0,
+            tasks: Vec::new(),
+            task_sel: None,
+            notice: None,
         }
     }
 
@@ -321,6 +330,7 @@ impl App {
                 });
             }
             ServerMsg::SessionList { .. } => {}
+            ServerMsg::Tasks { tasks } => self.set_tasks(tasks),
         }
     }
 
@@ -365,6 +375,13 @@ impl App {
     pub fn key(&mut self, k: Key) {
         if self.prompt.is_some() {
             self.key_prompt(k);
+            return;
+        }
+        if self.key_tasks(k) {
+            return;
+        }
+        if k == Key::Ctrl('t') {
+            self.toggle_tasks();
             return;
         }
         match self.focus {
@@ -583,9 +600,12 @@ impl App {
         if let Some(p) = &self.prompt {
             return if p.choices.is_empty() { "a ano · n ne · šipky výběr · Enter potvrdit" } else { "1-9 volba · šipky výběr · Enter potvrdit · Esc zrušit" };
         }
+        if self.tasks_open() {
+            return "šipky úloha · c zrušit · p pozastavit · r pokračovat · Esc zavřít";
+        }
         match self.focus {
             Focus::Editor if self.menu.is_some() => "šipky výběr · Enter/Tab doplnit · Esc zavřít",
-            Focus::Editor => "Tab doplnit · šipka nahoru historie · PgUp tabulka · Ctrl-C přerušit · Ctrl-F převod B/C",
+            Focus::Editor => "Tab doplnit · šipka nahoru historie · PgUp tabulka · Ctrl-C přerušit · Ctrl-F převod B/C · Ctrl-T úlohy",
             Focus::Block(_) => "šipky řádek · s řadit · / filtr · Enter otevřít · c cesta do řádku · d smazat s náhledem · Esc zpět",
             Focus::Filter(_) => "pište filtr · Enter hotovo · Esc zrušit filtr",
         }
@@ -624,6 +644,8 @@ impl App {
                 bottom.push(if i == m.sel { l.fill(t.ui.select) } else { l });
             }
         }
+        // Panel uloh.
+        self.draw_tasks(&mut bottom);
         // Editor.
         bottom.push(self.draw_editor());
         // Napoveda klaves.
@@ -635,6 +657,13 @@ impl App {
             l.push(Some(Style::fg(t.ui.muted)), &alloc::format!(" relace {} · {} ", self.session, self.cwd));
             if running > 0 {
                 l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("· běží {running} {} ", SPIN[self.tick as usize % 4]));
+            }
+            let jobs = self.tasks_running();
+            if jobs > 0 {
+                l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("· úlohy {jobs} "));
+            }
+            if let Some(n) = self.notice() {
+                l.push(Some(Style::fg(if n.error { t.ui.err } else { t.ui.ok })), &alloc::format!("· {} ", n.text));
             }
             if !self.connected {
                 l.push(Some(Style::fg(t.ui.warn)), "· nepřipojeno ");

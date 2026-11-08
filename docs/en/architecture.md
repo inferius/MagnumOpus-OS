@@ -12,8 +12,9 @@ the primary one.)
    the native system would not want on its own, it is solved in the layer,
    not in the kernel. Only general mechanisms that make sense natively go
    into the kernel.
-3. **Capabilities.** No root, no ACLs. A process can access only what it has
-   a handle to.
+3. **Capabilities.** No root and no user who may do everything. A process
+   can access only what it has a handle to. Services may add finer rules on
+   top (FS permissions), see [Security](#security).
 4. **Asynchronous I/O from the ground up**; the synchronous API is a thin
    layer on top.
 5. **Drivers in userspace.** A crashing driver does not take the system down.
@@ -153,12 +154,51 @@ Windows or vDSO + libc on Linux).
 
 ## Security
 
-- Init gets the root capabilities and hands them out to services, each only
-  its own part.
-- A user is a userspace concept: a session = a set of capabilities.
+> **Change from the earlier description:** the introduction said "no ACLs"
+> and "file access = a handle to the directory". Since the FS permissions
+> (F1d) the file system has grants and a system identity. The model below
+> describes the layers as they really are.
+
+**Three layers, each protecting something else:**
+
+1. **Capabilities in the kernel** (the base). A process may do only what it
+   has a handle with rights for. The kernel knows no users and no ACLs; no
+   process has "everything" automatically.
+2. **Permissions inside services.** A service managing shared data
+   evaluates its own rules over the client's channel. In the FS these are
+   the owner, allow-only grants with inheritance and `PROTECTED`, hiding
+   what is inaccessible (`NOT_FOUND`) and `NOEXEC` on datasets, see
+   [Permissions and session identity](file-system.md#permissions-and-session-identity).
+   The client channel carries the identity: **the client cannot make it
+   up**, it gets it from whoever created the session.
+3. **The system identity (user 0).** FS checks do not apply to it. **Only
+   the fsd control session held by init** (later the session manager) and
+   host tools have it. Nobody can log in as it and no application gets it.
+   It is the identity of the system itself, not an administrator account.
+
+- A user is a userspace concept: a session = an identity + a set of
+  capabilities (FS mounts, service channels). Init mints it
+  (`CONNECT_AS`); login and accounts belong to the account service.
 - Applications always run sandboxed; the manifest says which capabilities
   they need (network and budget so far, see [Application manifest](firewall.md#application-manifest)).
-- File access = a handle to the directory it is in. No ACLs.
+  Files outside their space come only from the user's choice in a dialog
+  (powerbox, `GRANT`).
+- **Administering the computer** without root: an action for the whole
+  computer is confirmed by an authorised user in a system dialog, creating
+  a capability for that one action only (account service design).
+
+**Critical components (TCB).** They hold a lot of authority, so a bug in
+them is a security bug of the whole system. That is why they stay small,
+tested, and divide their authority further:
+
+| Component | Authority | How it is limited |
+|---|---|---|
+| kernel | everything | microkernel, drivers and services outside it |
+| init (supervisor) | root capabilities, the fsd control session, mints identities and channels | gives each service only its part, serves nothing itself |
+| `devmgr` | the root resource (PCI, I/O, interrupts) | a driver gets only its device; DMA through the IOMMU |
+| `fsd` | the whole disk with the FS | checks rights by the channel identity, `diskguard` protects foreign disks |
+| account service | user authentication, session requests | passwords only as a hash (Argon2id); init mints the session, not it |
+| drivers with DMA | the memory the device writes to | IOMMU; without an IOMMU a DMA driver is part of the TCB |
 - **Resources:** every process runs in a job with a byte budget of kernel
   memory and user memory. A parent divides its budget among children, a
   child cannot raise its limit. There are no fixed counts (handles,
@@ -496,8 +536,8 @@ check), application actions and later AI agents. Nothing runs "in a void".
 | Part | What it does | Who does it |
 |---|---|---|
 | **kernel jobs** | a group of processes with budgets (memory, ports, DMA); the "who started whom" tree | done (network) |
-| **task service `taskd`** | one task list: a human-readable name, **who started it** (user, script, application, service, agent), state, progress, estimate, usage from the job budget, actions (attach, pause, cancel, log); finished tasks stay for a while with their result and error | shell thread (6b), after async |
-| **`tasks` command** | a structured table (`tasks \| where owner == "agent"`), `attach`, `cancel`; a task panel in the terminal, notification on completion or failure | shell thread (6b) |
+| **task service `taskd`** | one task list: a human-readable name, **who started it** (user, script, application, service, agent), state, progress, estimate, usage from the job budget, actions (attach, pause, cancel, log); finished tasks stay for a while with their result and error | done (shell thread 6b) |
+| **`tasks` command** | a structured table (`tasks \| where owner == "agent"`), `attach`, `cancel`; a task panel in the terminal, notification on completion or failure | done (shell thread 6b) |
 | **GUI task manager** | a window with the same data, a "N tasks running" icon in the bar | GUI thread (6c) |
 
 - **Registration:** tasks register themselves when created (shell,
@@ -506,6 +546,53 @@ check), application actions and later AI agents. Nothing runs "in a void".
 - **Permissions:** a user sees their own tasks; others' and system tasks only
   with a right. Tasks started by an AI agent are clearly marked (see
   [AI in the system](#ai-in-the-system-proposal)).
+
+### Implementation status (done)
+
+```text
+shell (shsess) ──producer──▶ taskd ◀──producer── init (services, apps)
+fsd (scrub, maintenance) ──▶ │ ▲                  │ watch: app jobs
+                             ▼ │ client           ▼
+          tasks, panel (Ctrl-T) · GUI task manager · bar icon
+```
+
+- **The `taskd` service** (`user/taskd`, core `libs/taskcore` with host
+  tests, protocol `libs/taskproto`): one task list in memory. Finished
+  tasks stay with their result or error: at most the last 100 and at most
+  30 minutes. Results of important operations stay elsewhere too (the
+  terminal block, the service log, the FS journal), so taskd does not write
+  finished tasks to disk.
+- **Only init mints channels** (the taskd control channel): a client with an
+  identity and a scope (own tasks / all, may control), a producer with an
+  identity (a task belongs to the producer's identity), a watched job. A
+  shell session gets its channels through termd and the session registry
+  (`RegMsg::TasksReq`, init mints them with the user's identity), fsd
+  through a `tasks` message on its control channel.
+- **Subscription:** a snapshot and events with a sequence number. A change
+  of a task the client does not see arrives as `Removed(id)` - the numbers
+  have no gaps and resuming from `since` works (the last 512 changes,
+  otherwise a new snapshot).
+- **Producers:** the shell (`async` tasks with their block and
+  cancellation, `bg`), the supervisor (service state: running, restarting,
+  gave up, stopped), init (applications with a window, including their
+  job), fsd (scrub with progress and result, defragmentation and
+  deduplication when idle). taskd forwards an action (cancel) to the
+  producer only when the task supports it and the caller may.
+- **Unknown process:** every 2 s taskd walks the processes of the watched
+  jobs (syscall `JOB_PROCESSES`, CPU time and job memory). A process in a
+  job that no running task reports is a task of origin `unknown`; a task
+  with a job without live processes finishes.
+- **The GUI task manager** (`gui-tasks`) is started by init in the normal
+  run with a client channel (the user's own tasks, may control).
+- **Shell:** `tasks` returns a table (`tasks | where owner == "service"`),
+  `tasks cancel|pause|resume <id>`, `tasks log <id> -n 50`. In the window a
+  task panel (Ctrl-T: arrows, `c` cancel, `p` pause, `r` resume), "tasks N"
+  in the status line and a notice on completion or failure.
+
+⚠️ **Limits:** no producer supports pausing yet (taskd returns
+`NOT_SUPPORTED`); processes in
+a nested job of an application are unknown (only processes directly in its
+job belong to the task).
 
 ## AI in the system (proposal)
 

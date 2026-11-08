@@ -22,6 +22,9 @@ conf = { workspace = true }
 spin = "0.12"
 svcclient = { path = "../../libs/svcclient", features = ["client"] }
 shlang = { path = "../../libs/shlang" }
+powerproto = { path = "../../libs/powerproto" }
+abi = { workspace = true }
 term = { path = "../../libs/term" }
 accountproto = { path = "../../libs/accountproto", features = ["client"] }
 zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
+taskproto = { path = "../../libs/taskproto" }

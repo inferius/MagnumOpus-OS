@@ -15,7 +15,9 @@
 //! protokolu - umi tak multimedialni klavesy, tablety (absolutni osy) a mysi
 //! s vic tlacitky. Jinak prepne rozhrani do boot protokolu (klavesnice
 //! a mys bez deskriptoru). Opakovani reportu vypne (`SET_IDLE(0)`, klavesy
-//! opakuje sluzba vstupu) a pak cte reporty z interrupt endpointu.
+//! opakuje sluzba vstupu) a pak cte reporty z interrupt endpointu. Na
+//! synchronizaci nove instance sluzby vstupu (`ISYN`) odpovi a predstavi se
+//! znovu; zavreny kanal ke sluzbe ho neukonci (`docs/cs/obnova-sluzeb.md`).
 
 #![no_std]
 #![no_main]
@@ -222,7 +224,10 @@ fn main(startup: Startup) -> i64 {
         _ => 8,
     };
     let max = (ep.max_packet as u32).max(report_len).clamp(8, 1024);
-    let mut hello = Some(device::encode_hello(caps, &name));
+    let hello = device::encode_hello(caps, &name);
+    let axes = (!axes.is_empty()).then(|| device::encode_axes(&axes));
+    let mut introduced = false;
+    let mut connected = true;
     loop {
         let id = match usb.send(op::INTERRUPT_IN, ep.address as u32, max, &[]) {
             Ok(id) => id,
@@ -230,23 +235,38 @@ fn main(startup: Startup) -> i64 {
         };
         // Predstavit se sluzbe az s prvnim dotazem na data: zarizeni je pak
         // pripravene (QEMU napr. smeruje udalosti mysi az po prvnim dotazu).
-        if let Some(h) = hello.take() {
-            if input.write(&h, Vec::new()).is_err() {
-                return 0;
-            }
-            if !axes.is_empty() {
-                let _ = input.write(&device::encode_axes(&axes), Vec::new());
+        if !introduced {
+            introduced = true;
+            for m in [Some(&hello), axes.as_ref()].into_iter().flatten() {
+                let _ = input.write(m, Vec::new());
             }
         }
-        // Cekat na report, nebo na zavreni sluzby vstupu.
-        let items = [
-            (usb.channel.handle(), Signals::READABLE | Signals::PEER_CLOSED),
-            (input.handle(), Signals::PEER_CLOSED),
-        ];
-        match libos::wait_many(&items, None) {
-            Ok((_, s)) if s[1].intersects(Signals::PEER_CLOSED) => return 0,
-            Ok(_) => {}
-            Err(_) => return 0,
+        // Cekat na report. Mezitim odpovidat na synchronizaci nove instance
+        // sluzby vstupu (`ISYN`); kdyz sluzba kanal zavre, ovladac nekonci
+        // (obnova sluzeb), jen to zaloguje.
+        loop {
+            let items = [
+                (usb.channel.handle(), Signals::READABLE | Signals::PEER_CLOSED),
+                (input.handle(), Signals::READABLE | Signals::PEER_CLOSED),
+            ];
+            let n = if connected { 2 } else { 1 };
+            let s = match libos::wait_many(&items[..n], None) {
+                Ok((_, s)) => s,
+                Err(_) => return 0,
+            };
+            if connected && s[1].intersects(Signals::READABLE) {
+                while let Ok(m) = input.try_read() {
+                    device::answer_sync(&m.data, &hello, axes.as_deref(), |b| {
+                        input.write(b, Vec::new()).is_ok()
+                    });
+                }
+            } else if connected && s[1].intersects(Signals::PEER_CLOSED) {
+                println!("usb-hid: {name}: sluzba vstupu zavrela kanal, cekam");
+                connected = false;
+            }
+            if s[0].intersects(Signals::READABLE | Signals::PEER_CLOSED) {
+                break;
+            }
         }
         let mut events = Vec::new();
         match usb.wait(id, None) {

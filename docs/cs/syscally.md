@@ -455,11 +455,24 @@ bez vlastního limitu. Vyžaduje `WRITE`. Chyby: `INVALID_ARGS` (neznámý
 
 ### `JOB_INFO`
 
-`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (48 B, little endian):
+`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (56 B, little endian):
 pro paměť jádra a pak uživatelskou paměť vždy `used` (strženo z jobu
 včetně potomků), `limit` (vlastní limit) a `available` (kolik ještě jde
 strhnout – nejmenší volné místo přes job a všechny předky; `u64::MAX` =
-nikde limit). Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
+nikde limit), nakonec `id` (číslo jobu, jedinečné do restartu).
+Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
+`WRONG_TYPE`, `BAD_ADDRESS`.
+
+### `JOB_PROCESSES`
+
+`(job, out_ptr, max) -> počet`. Procesy jobu a všech jeho potomků
+(přehled úloh: i proces, který se sám neregistroval). Na `out_ptr` zapíše
+nejvýš `max` (do 4096) záznamů `abi::job::ProcEntry` (64 B, little
+endian): `pid`, `job` (číslo jobu procesu), `cpu_ns` (čas na CPU všech
+vláken, přičítá scheduler při přepnutí), `threads` (živá vlákna), `flags`
+(`proc_flags::FINISHED` = skončil, čeká na úklid), `name` (32 B UTF-8,
+doplněno nulami). Vrátí celkový počet (i nad `max`). Vyžaduje `READ`.
+Chyby: `INVALID_ARGS` (`max` > 4096), `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.
 
 ### `FB_CONTROL`
@@ -563,6 +576,14 @@ Omezený prostředek (`RESOURCE_CREATE`) smí jen své rozsahy. Držitel
 prostředku ho může odvolat (`VMO_REVOKE`). Chyby: `INVALID_ARGS`
 (nezarovnaná adresa, neznámý typ cache), `ACCESS_DENIED`.
 
+
+**Paměť ACPI:** jedinou výjimkou z „mimo RAM“ je paměť firmwaru
+s tabulkami ACPI (oblasti `AcpiReclaimable` a `AcpiNvs` z mapy paměti,
+jádro je nikdy nedá alokátoru): rozsah, který v ní leží **celý**, dostane
+objekt vždy s `CACHED` (stejné atributy jako přímá mapa jádra; `cache` se
+ignoruje) - potřebuje ho služba ACPI (`acpid`, viz [ACPI](acpi.md)).
+Rozsah, který jen zčásti zasahuje do RAM, je vždy `ACCESS_DENIED`.
+
 ### `VMO_REVOKE`
 
 `(resource, vmo)`. Odvolá fyzický objekt paměti: zruší jeho mapování ve
@@ -616,8 +637,10 @@ namapuje. Potomek zdědí zařízení rodiče a jiné zvolit nesmí
 **Porty a linky přerušení.** Horní dva bity začátku rozsahu určují jeho
 druh (`abi::syscall::RANGE_KIND_MASK`): 0 = fyzická paměť (výše),
 `RANGE_IO_PORTS` (`1 << 62`) = I/O porty od `začátek & 0xFFFF`, délka =
-počet portů (konec nejvýš 0x10000), `RANGE_IRQ_LINES` (`2 << 62`) = staré
-linky přerušení (ISA IRQ) od `začátek`, délka = počet (linky 0-31). Porty
+počet portů (konec nejvýš 0x10000), `RANGE_IRQ_LINES` (`2 << 62`) = pevné
+linky přerušení od `začátek`, délka = počet (linky 0 až
+`abi::syscall::IRQ_LINES_MAX - 1` = 1023: x86_64 ISA IRQ, aarch64 čísla
+přerušení GIC SPI 32-1019). Porty
 a linky nemusí být zarovnané. Potomek smí jen porty a linky rodiče. Kořenový
 prostředek smí všechny. Jiný druh = `INVALID_ARGS`. V libos:
 `hw::io_ports(první, počet)` a `hw::irq_lines(první, počet)`. Příklad
@@ -647,10 +670,15 @@ jako `IOPORT_READ`; navíc `INVALID_ARGS`, když `value` nevejde do šířky
 
 ### `INTERRUPT_CREATE_LINE`
 
-`(resource, line) -> handle`. Objekt přerušení na staré lince (ISA IRQ
-0-15 přes IOAPIC; PS/2 klávesnice 1, myš 12). Jádro převede linku na GSI
-podle přepisů z ACPI MADT (polarita, spouštění) a nasměruje ji na volný
-vektor bootovacího CPU. Na přerušení objekt dostane `SIGNALED` jako
+`(resource, line, flags) -> handle`. Objekt přerušení na pevné lince.
+x86_64: ISA IRQ 0-15 přes IOAPIC (PS/2 klávesnice 1, myš 12, SCI ACPI
+obvykle 9); jádro převede linku na GSI podle přepisů z ACPI MADT
+(polarita, spouštění) a nasměruje ji na volný vektor bootovacího CPU,
+`flags` ignoruje. aarch64: SPI 32-1019 přes distributor GIC (zařízení na
+desce bez MSI, např. Generic Event Device ACPI); spouštění určí `flags`
+(`abi::syscall::line_flags::EDGE` = hrana, jinak úroveň; hodnota z `_CRS`
+zařízení), přerušení jde na bootovací CPU. Neznámý bit ve `flags` =
+`INVALID_ARGS`. Na přerušení objekt dostane `SIGNALED` jako
 u `INTERRUPT_CREATE`; potvrzuje se `INTERRUPT_ACK`. Linku spouštěnou
 **úrovní** jádro po přerušení zamaskuje a odmaskuje až potvrzením (jinak by
 se přerušení opakovalo dokola). Linka spouštěná **hranou** se nemaskuje.
@@ -660,14 +688,35 @@ povolovat (`RANGE_IRQ_LINES`) a počítá se do `irq_max`. Jedna linka může
 mít jen jeden objekt (`ALREADY_EXISTS`). Po zavření posledního handlu se
 linka zamaskuje a uvolní. Chyby: `INVALID_ARGS` (linka nad 15),
 `ACCESS_DENIED`, `ALREADY_EXISTS`, `NO_RESOURCES`, `NOT_SUPPORTED`
-(aarch64, platforma bez IOAPIC), `NOT_FOUND` (linka mimo vstupy IOAPIC).
-V libos `Resource::interrupt_line`.
+(platforma bez IOAPIC), `NOT_FOUND` (linka mimo vstupy IOAPIC); na aarch64
+`INVALID_ARGS` i pro číslo mimo SPI, které distributor má. V libos
+`Resource::interrupt_line` a `Resource::interrupt_line_with` (s `flags`). Starší volání bez `flags` (libos posílá 0) se chovají stejně jako dřív.
 
 ### `INTERRUPT_ACK`
 
 `(interrupt) -> 0`. Potvrdí přerušení (smaže `SIGNALED`). Ovladač má
 potvrdit **před** obsluhou zařízení, aby se přerušení, které přijde během
 obsluhy, neztratilo. Vyžaduje `WRITE`.
+
+### `SYSTEM_POWER`
+
+`(resource, op) -> nevrací se`. Vypnutí (`abi::syscall::power_op::OFF` = 0)
+nebo restart (`RESET` = 1) počítače přes firmware. Vyžaduje Resource
+s právem `POWER`: má ho jen kořenový prostředek (omezené prostředky
+z `RESOURCE_CREATE` ho nemají nikdy) a init ho předá jen službě ACPI
+(`acpid`) jako duplikát `BASIC | POWER` bez `MANAGE`. Jádro zapíše do logu,
+který proces o vypnutí požádal.
+
+| Architektura | `OFF` | `RESET` |
+|---|---|---|
+| aarch64 | PSCI `SYSTEM_OFF` | PSCI `SYSTEM_RESET` |
+| x86_64 | `NOT_SUPPORTED` - vypnutí dělá `acpid` zápisem typu spánku S5 do registru PM1 (AML zná jen služba) | registr Reset Control 0xCF9, pak řadič klávesnice (0x64 = 0xFE) |
+
+Normálně se volá až po čistém ukončení služeb (init, viz [ACPI](acpi.md)).
+Při úspěchu se volání nevrátí. Chyby: `ACCESS_DENIED` (bez práva `POWER`),
+`INVALID_ARGS` (neznámá operace; kontroluje se dřív, než se cokoli
+vypne), `NOT_SUPPORTED` (firmware nemá PSCI, nebo x86 vypnutí), `BAD_HANDLE`,
+`WRONG_TYPE`. V libos `Resource::system_power`.
 
 ## Náhodná čísla
 

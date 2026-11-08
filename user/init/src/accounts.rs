@@ -72,7 +72,7 @@ fn layout(fs: &FsClient) -> Result<()> {
     Ok(())
 }
 
-pub fn start(startup: &Startup, devices: &mut Devices, sup: &mut crate::supervisor::Supervisor) -> Result<()> {
+pub fn start(startup: &Startup, devices: &Devices, sup: &mut crate::supervisor::Supervisor) -> Result<()> {
     let fs = devices.fs.as_ref().ok_or(Error::NotFound)?;
     layout(fs)?;
     let recipe = crate::fsd::Recipe::User {
@@ -105,7 +105,7 @@ pub fn start(startup: &Startup, devices: &mut Devices, sup: &mut crate::supervis
     }
     // Bezpecnostni klice nalezene pri startu (a kanaly ostatnich HID
     // zarizeni, ktere jejich ovladac zavre).
-    for k in core::mem::take(&mut devices.keys) {
+    for k in core::mem::take(&mut *devices.keys.lock()) {
         let _ = send_key(&app.control, k);
     }
     sup.watch("accountd", &app.process, None);
@@ -137,10 +137,14 @@ fn send_key(ctl: &Channel, key: Channel) -> Result<()> {
 }
 
 /// Kanal bezpecnostniho klice pripojeneho za behu (zprava `fido` od
-/// devmgr). Bez sluzby uctu se zahodi.
-pub fn add_key(key: Channel) {
-    if let Some(a) = ACCOUNTD.get() {
-        let _ = send_key(&a.control.lock(), key);
+/// devmgr). Bez bezici sluzby uctu ho vrati (init si ho schova).
+pub fn add_key(key: Channel) -> core::result::Result<(), Channel> {
+    match ACCOUNTD.get() {
+        Some(a) => {
+            let _ = send_key(&a.control.lock(), key);
+            Ok(())
+        }
+        None => Err(key),
     }
 }
 

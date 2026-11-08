@@ -128,7 +128,9 @@ invariant was broken (a kernel bug).
 | `ahci: port P: disk ... ma logicky sektor ... B - nepodporovano, vynechan` | The disk reports a logical sector that is not a power of two 512 B..32 KiB (a faulty IDENTIFY reply). 512 B and 4Kn disks work. |
 | `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | The port has an ATAPI drive or a port multiplier. |
 | `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | A command did not finish within 20 s; the port is stopped. |
-| `devmgr: ovladac X pro ... nenahlasil disky: ...` | The `nvme`/`ahci` driver did not send `done` within 20 s (slow disk spin-up, stuck controller). Disks reported until then work. |
+| `devmgr: ovladac X pro ... nenahlasil disky: ...` | The `nvme`/`ahci` driver did not send `done` within 150 s (stuck controller). Disks reported until then work. |
+| `ahci: port P: radic umi jen 32bitove adresy a DMA pamet je nad 4 GiB - vynechan` | A controller without 64-bit addressing (`CAP.S64A = 0`) and the port memory is above 4 GiB. The port is skipped, otherwise the controller would write into foreign memory. |
+| `ahci: port P: ulozeni mezipameti pri ukonceni selhalo: ...` | When the driver ended, the disk did not accept FLUSH CACHE; data in the disk cache may have been lost. |
 | `virtio-net BB:DD.F: MAC xx:..., linka pripojena/odpojena` | The network card is ready ("link up/down"). The MAC comes from the device configuration, otherwise it is locally administered (`02:...`). |
 | `virtio-net ...: inicializace selhala: ...` | As for the disk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA memory). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | The device returned a nonsensical queue index or a buffer it did not own (`CORRUPTED`). The driver resets it (it stops using DMA) and exits; the network does not work until a restart. |
@@ -147,7 +149,17 @@ invariant was broken (a kernel bug).
 | `<driver> ...: zahozeno N vadnych prijatych ramcu` | At exit: frames with a CRC or length error, or split over several buffers ("N bad received frames dropped"). |
 | `devmgr: ovladac e1000e/igc/r8169 pro BB:DD.F nelze spustit: ...` | The program is missing from initfs, or the card has no memory BAR (`NOT_SUPPORTED`). |
 | `virtio-rng BB:DD.F: 256 B entropie predano jadru` | The host randomness source is ready and the kernel got the first data ("256 B of entropy passed to the kernel"). More batches every minute. |
-| `virtio-rng ...: zarizeni neodpovida (...), koncim` | The device did not complete a request within 5 s or returns empty data. The kernel keeps using its other sources. |
+| `virtio-rng ...: vadne zarizeni: zarizeni neodpovida (...)` / `zarizeni vraci prazdne odpovedi` | The device did not complete a request within 5 s or returns empty data ("faulty device: not responding / empty replies"). The driver exits (code 4); the kernel keeps using its other sources. |
+| `devmgr: ovladac X pro BB:DD.F (manifest)` | A manifest driver (`X.driver.toml`) started for a device ([Drivers](drivers.md#manifest)). |
+| `devmgr: ovladac X: zadne zarizeni podle manifestu` | The manifest is fine but no device matches it (not in QEMU, `match` does not fit). Information. |
+| `devmgr: X.driver.toml: ...` | A faulty manifest in the initfs (missing key, wrong format, name differs from the file, program missing); the driver does not start. xtask reports the same errors at build time. |
+| `devmgr: ovladac X pro ... spadl (kod K: popis), obnova N/M` | The driver ended with an error or crashed ("crashed, recovery N/M"); devmgr disabled the device's bus master and starts it again. Code meanings: [Life cycle](drivers.md#life-cycle-and-crash-recovery). |
+| `devmgr: ovladac X pro ... spadl (...), N padu: dal ho nespoustim` | `service.max_restarts` exceeded (or `restart = false`): "not starting it any more"; the device stays without a driver until the system restarts. |
+| `devmgr: ovladac X pro ...: restart na zadost` | The client sent `dk:restart` ("restart on request"); the driver runs again (not counted as a crash). |
+| `init: ovladac X obnoven (N. start)` | Init got the recovered driver's new channel from devmgr ("driver X recovered, Nth start"). |
+| `X BB:DD.F: inicializace selhala: ...` | A driverkit driver failed `probe` ("initialisation failed"); the text says why and what to change (`ovladac nesmi: ...` = a BAR missing from the manifest, `... se nevejde do kvoty` = `dma_max`, `preruseni c. N nelze zapnout` = `irq_max`). See [Readable errors](drivers.md#readable-errors). |
+| `X BB:DD.F: simulovany pad (dk:crash)`, `X ...: restart na zadost` | The driver received `dk:crash` / `dk:restart` (recovery tests). |
+| `edu BB:DD.F: karta edu 1.0 zije` | The sample edu driver found the device and passed the liveness check ("the edu card is alive", [Driver edu](driver-edu.md)). |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | The device did not complete a request within 10 s (`TimedOut`) or returned an invalid queue entry (`Corrupted`). The driver resets the device and further requests return `IO_ERROR` (the device might still be writing the DMA buffer). The client (e.g. fsd) gets an I/O error. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | The PS/2 driver found a keyboard, a mouse (kind from the ID: wheel, 5 buttons). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 reads `0xFF` (no controller) or no device was found (PS/2 controller not found). Normal on modern boards without PS/2. |
@@ -181,8 +193,9 @@ invariant was broken (a kernel bug).
 | `init: blokove zarizeni neodpovida: ...` | The driver did not answer `INFO`; the disk is not used. |
 | `virtio-input BB:DD.F: 'name' (klavesnice/mys)` | An input device is ready; the kind (keyboard/mouse) comes from the supported events. `nezname zarizeni` (unknown device) = it has neither keys nor relative axes (a tablet, not supported yet). |
 | `virtio-input ...: inicializace selhala: ...` | As for virtio-blk: the device does not follow virtio 1.x or resources are missing (MSI-X, DMA). |
-| `virtio-input: prvni udalosti od zarizeni (N)` | The device sent events for the first time (information; confirms that interrupts and the queue work). |
-| `virtio-input: sluzba nestiha, zahozeno N zprav` | The channel queue to the input service is full; the driver drops events so as not to block the device. Reported at 1, 2, 4, 8 ... messages. |
+| `virtio-input BB:DD.F: prvni udalosti od zarizeni (N)` | The device sent events for the first time (information; confirms that interrupts and the queue work). |
+| `virtio-input BB:DD.F: sluzba vstupu zavrela kanal, cekam` | The input service ended (crash, restart) ("closed the channel, waiting"); the driver keeps running and introduces itself again after the service is recovered (`ISYN`, [Service recovery](service-recovery.md)). |
+| `virtio-input BB:DD.F: sluzba nestiha, zahozeno N zprav` | The channel queue to the input service is full; the driver drops events so as not to block the device. Reported at 1, 2, 4, 8 ... messages. |
 | `init: N blokovych a M vstupnich zarizeni` | What the device manager found (N block and M input devices). |
 
 ## Input service (inputd)

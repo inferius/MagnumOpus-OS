@@ -25,9 +25,13 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 ## Start-up
 
 1. `timed` (the time service, the only one allowed to set the clock),
+   right after it `acpid` (ACPI: power, buttons, sensors; the only one with
+   the `POWER` right, see [ACPI](acpi.md)) - ACPICA initialisation runs in
+   parallel with the next steps,
 2. `devmgr`: finds devices and starts drivers. It reports disks (`block`)
    and input devices (`input`), and then `done` once the USB devices
-   present at boot are ready too,
+   present at boot are ready too; while waiting long for a disk driver it
+   sends `busy` (init waits at most 30 s for each message),
 3. `fsd` on the disk with the file system; init prepares the root
    certificate store `/system/config/certs` (see
    [TLS and HTTP](tls-http.md#root-certificate-store)),
@@ -42,13 +46,27 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
    [Real time](time.md#synchronization-over-the-network-ntpd)) and `revocd`
    (certificate revocation, see [TLS and HTTP](tls-http.md#certificate-revocation)),
 6. all these processes are handed to the supervisor to watch,
-7. in the normal run the GUI (`compd`, the windows `gui-term` and
+7. `taskd` (task overview, see [Architecture](architecture.md#task-overview-agreed)):
+   init holds its control channel and is the only one to mint client and
+   producer channels with an identity; fsd gets a producer channel, the
+   supervisor reports service state after every round (at most 2 s),
+   applications with a window are reported together with their job,
+8. in the normal run the GUI (`compd`, the windows `gui-term` and
    `gui-demo`), without a GUI the fallback console (see
    [Terminal](#terminal)).
 
 init always sends the `fsd` configuration (the first message of the control
 channel): `debug` in the test run, `normal` otherwise. fsd waits for it
 before mounting the disk.
+
+## Power-off and reboot
+
+The power button (an event from `acpid`) or the shell command `shutdown` /
+`reboot` = a **clean power-off**: init stops termd and the fallback
+console, then the services in reverse registration order (clients before
+services), `fsd` and finally `devmgr` and `timed` (waiting at most 1.5 s for
+each), and only then asks `acpid` for S5 or a reboot. Details in
+[ACPI](acpi.md#power-off-and-reboot).
 
 ## The supervisor
 
@@ -58,6 +76,7 @@ watched processes:
 | Event | What the supervisor does |
 |---|---|
 | `devmgr` sends `input` with a channel | passes it to the input service (`device`). This is how USB devices attached at run time get into the system |
+| `devmgr` sends `dev <name>` with a channel | a manifest driver, new or recovered after a crash: init stores the channel (`Devices::drivers`) and replaces the old one ([Drivers](drivers.md#life-cycle-and-crash-recovery)) |
 | `devmgr` sends `block` | only logs it for now (disks at run time come with multiple disks in `fsd`) |
 | `devmgr` closes its channel | logs it, hotplug stops working |
 | a service with restart (`timed`) exits | logs the code and starts it again after 100 ms, 200 ms, 400 ms ... (at most 5 s). It does not block waiting for the new service to confirm: its channel is one more item of the loop. If it does not answer within 5 s (or answers with an error), it kills it and the attempt counts as another crash. More than 5 restarts within 60 s = it gives up and the service stays stopped |

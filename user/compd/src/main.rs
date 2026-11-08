@@ -16,40 +16,22 @@ extern crate alloc;
 
 mod gpu;
 mod peers;
+mod screen;
 
-use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use comp::{Comp, Out};
-use gfx::text::Text;
 use guiproto::control::{self, ConnectInfo};
 use guiproto::display::{Reply, Request};
-use libos::abi::vm::{MAP_READ, MAP_WRITE};
-use libos::{Channel, Error, Handle, Mapping, Result, Rights, Signals, Startup, Vmo, println};
+use libos::abi::vm::MAP_READ;
+use libos::{Channel, Error, Handle, Mapping, Result, Signals, Startup, Vmo, println};
 
 use peers::{Peers, VmoPixels};
+use screen::Screen;
 
 libos::entry!(main);
-
-/// Obraz obrazovky (VMO sdilena s ovladacem displeje).
-struct Screen {
-    display: Channel,
-    w: u32,
-    h: u32,
-    _vmo: Vmo,
-    map: Mapping,
-    seq: u64,
-}
-
-impl Screen {
-    fn pixels(&mut self) -> &mut [u32] {
-        // SAFETY: mapovani `w * h` pixelu zije se `Screen`; ovladac ho jen
-        // cte (soubezne cteni muze dat roztrzeny snimek, ne chybu pameti).
-        unsafe { core::slice::from_raw_parts_mut(self.map.addr() as *mut u32, (self.w * self.h) as usize) }
-    }
-}
 
 struct Service {
     control: Channel,
@@ -58,6 +40,10 @@ struct Service {
     focus: Option<Channel>,
     secure: Option<Channel>,
     peers: Peers,
+    /// Ovladac hlasil zmenu konektoru (`HOTPLUG`), vyridi se po kole.
+    pending_hotplug: bool,
+    /// Ovladac displeje zacal znovu (`RESET`).
+    pending_reset: bool,
     /// Skladani na GPU (`backend gpu`); `None` = CPU.
     gpu: Option<gpu::GpuBackend>,
 }
@@ -71,6 +57,8 @@ fn main(startup: Startup) -> i64 {
         focus: None,
         secure: None,
         peers: Peers::default(),
+        pending_hotplug: false,
+        pending_reset: false,
         gpu: None,
     };
     loop {
@@ -166,6 +154,11 @@ impl Service {
         if let Some(c) = self.comp.as_mut() {
             self.peers.serve(&peer_obs, c, now);
         }
+        if self.pending_reset {
+            self.handle_reset();
+        } else if self.pending_hotplug {
+            self.handle_hotplug();
+        }
         // 4. Tik.
         self.maybe_tick();
         self.flush();
@@ -188,6 +181,8 @@ impl Service {
 
     fn read_display(&mut self) {
         let Some(sc) = &self.screen else { return };
+        let mut hotplug = false;
+        let mut reset = false;
         while let Ok(m) = sc.display.try_read() {
             match Reply::decode(&m.data) {
                 Ok(Reply::Presented { time, .. }) => {
@@ -195,6 +190,11 @@ impl Service {
                         c.presented(time);
                     }
                 }
+                Ok(Reply::Hotplug { output }) => {
+                    println!("compd: displej: zmena konektoru {output}");
+                    hotplug = true;
+                }
+                Ok(Reply::Reset) => reset = true,
                 Ok(Reply::Error { op, code }) => {
                     println!("compd: displej odmitl operaci {op}: {code}");
                     if let Some(c) = self.comp.as_mut() {
@@ -204,6 +204,8 @@ impl Service {
                 _ => {}
             }
         }
+        self.pending_hotplug |= hotplug;
+        self.pending_reset |= reset;
     }
 
     fn maybe_tick(&mut self) {
@@ -237,7 +239,7 @@ impl Service {
         };
         if let Some(rects) = composed {
             sc.seq += 1;
-            let req = Request::Present { seq: sc.seq, output: 0, rects };
+            let req = Request::Present { seq: sc.seq, output: sc.output, rects };
             if sc.display.write(&req.encode(), Vec::new()).is_err() {
                 // Displej neodpovida: nedrzet snimek "na ceste".
                 c.presented(now);
@@ -329,6 +331,17 @@ impl Service {
                     _ => Err(Error::InvalidArgs),
                 }
             }
+            control::MODE => {
+                let mut n = || words.next().and_then(|w| w.parse::<u32>().ok());
+                match (n(), n()) {
+                    (Some(w), Some(h)) => {
+                        let hz = n().unwrap_or(0);
+                        self.change_mode(w, h, hz).map(|(w, h, hz)| (format!("{w} {h} {hz}"), Vec::new()))
+                    }
+                    _ => Err(Error::InvalidArgs),
+                }
+            }
+            control::OUTPUTS => self.outputs_text().map(|t| (t, Vec::new())),
             control::BACKEND => self.set_backend(words.next().unwrap_or("")),
             control::STATUS => match &self.comp {
                 Some(c) => {
@@ -375,6 +388,8 @@ impl Service {
                                 c.presented(time);
                             }
                         }
+                        Reply::Hotplug { .. } => self.pending_hotplug = true,
+                        Reply::Reset => self.pending_reset = true,
                         _ => {}
                     }
                 };
@@ -394,70 +409,6 @@ impl Service {
         }
         println!("compd: skladani: {which}");
         Ok((String::new(), Vec::new()))
-    }
-
-    /// `display`: kanal ovladace grafiky. Zjisti vystup, vytvori snimek
-    /// a pripoji ho.
-    fn attach_display(&mut self, handles: Vec<Handle>) -> Result<(String, Vec<Handle>)> {
-        if self.screen.is_some() {
-            return Err(Error::InvalidArgs);
-        }
-        let ch = Channel::from_handle(handles.into_iter().next().ok_or(Error::InvalidArgs)?);
-        let end = libos::time::deadline_after(core::time::Duration::from_secs(5));
-        let deadline = || Some(end);
-        // Konec kanalu mohla drzet predchozi instance (drzak koncu
-        // supervisoru): nejdriv zahodit jeji odpovedi.
-        let sync = token() as u64;
-        ch.write(&Request::Sync { token: sync }.encode(), Vec::new())?;
-        let mut skipped = 0;
-        loop {
-            match Reply::decode(&ch.read(deadline())?.data) {
-                Ok(r) if r.ends_sync(sync) => break,
-                _ => skipped += 1,
-            }
-        }
-        if skipped > 0 {
-            println!("compd: displej: zahozeno {skipped} odpovedi predchozi instance");
-        }
-        ch.write(&Request::Info.encode(), Vec::new())?;
-        let modes = Reply::decode(&ch.read(deadline())?.data)?;
-        let Reply::Modes { outputs, caps } = modes else {
-            return Err(Error::Corrupted);
-        };
-        let out = outputs.first().ok_or(Error::NotFound)?;
-        let (w, h) = (out.w, out.h);
-        let size = w as u64 * h as u64 * 4;
-        let vmo = Vmo::create(size)?;
-        let map = Mapping::new(&vmo, 0, size, MAP_READ | MAP_WRITE)?;
-        // Ovladac dostane snimek jen pro cteni.
-        let ro = vmo.handle().duplicate(Some(Rights::READ | Rights::MAP | Rights::BASIC))?;
-        let mut screen = Screen {
-            display: ch,
-            w,
-            h,
-            _vmo: vmo,
-            map,
-            seq: 0,
-        };
-        let mut comp = Comp::new(w, h, Text::system(), Box::new(token));
-        // Prvni snimek slozit hned (ovladac ho pri pripojeni zobrazi).
-        let now = libos::time::now();
-        let mut canvas = gfx::Canvas::new(screen.pixels(), w, h, w).unwrap();
-        if comp.tick(now, &mut canvas).is_some() {
-            comp.presented(now);
-        }
-        let req = Request::Attach { output: 0, w, h, stride: w * 4 };
-        screen.display.write(&req.encode(), alloc::vec![ro])?;
-        match Reply::decode(&screen.display.read(deadline())?.data)? {
-            Reply::Attached { .. } => {}
-            Reply::Error { code, .. } => return Err(code),
-            _ => return Err(Error::Corrupted),
-        }
-        println!("compd: displej {w}x{h}{}", if caps & guiproto::display::caps::VIRGL != 0 { " (umi virgl)" } else { "" });
-        self.peers.frame = Some((screen.map.addr(), w, h));
-        self.screen = Some(screen);
-        self.comp = Some(comp);
-        Ok((format!("{w} {h}"), Vec::new()))
     }
 }
 

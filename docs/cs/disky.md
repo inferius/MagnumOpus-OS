@@ -59,7 +59,7 @@ a podle výsledku omezí, co klient vidí a smí:
 | GPT s **naším oddílem**: typ `C123ADA0-51BA-48C5-A536-C2CE6B2B3581` nebo jméno oddílu přesně `MagnumOpus` | jen tento oddíl (sektor 0 = první sektor oddílu) | povolen, jen uvnitř oddílu; atribut oddílu „jen pro čtení“ (bit 60) ho zakáže |
 | celý disk s **naším FS** bez tabulky oddílů (superblok `OSFS` na začátku některého z bloků 1..8 po 4 KiB, sektor 0 bez podpisu MBR) | celý disk | povolen (datový disk v QEMU, starší rozložení) |
 | GPT bez našeho oddílu | celý disk | **zakázán** (`READ_ONLY`) |
-| náš oddíl je neplatný (mimo disk, mimo použitelnou oblast, **překrývá jiný oddíl**) | celý disk | **zakázán** |
+| náš oddíl je neplatný (mimo disk, mimo použitelnou oblast, **překrývá jiný oddíl** nebo MBR, hlavičky či tabulky GPT) | celý disk | **zakázán** |
 | MBR (bez GPT), ochranný MBR s poškozenými hlavičkami GPT | celý disk | **zakázán** |
 | prázdný nebo neznámý disk, chyba čtení | celý disk | **zakázán** |
 | zařízení hlásí ochranu proti zápisu (NVMe write protect, virtio `RO`) | podle tabulky | **zakázán** |
@@ -71,7 +71,9 @@ Podrobnosti:
   instalace na prázdný disk), musí jít o výslovné rozhodnutí uživatele pro
   jeden konkrétní disk, ne o globální volbu.
 - GPT se ověřuje celá: podpis, CRC hlavičky i tabulky, poloha hlavičky,
-  rozsah použitelné oblasti. Při poškozené primární hlavičce se použije
+  rozsah použitelné oblasti. Oddíl nesmí zasahovat do MBR, hlaviček ani
+  tabulek GPT, i kdyby hlavička (s platným CRC, např. od chybného
+  nástroje) hlásila použitelnou oblast přes ně. Při poškozené primární hlavičce se použije
   záložní na konci disku. Když neprojde ani jedna, disk je cizí.
 - Vybere se **první platný** náš oddíl (podle pořadí v tabulce). Další
   naše oddíly zatím klient nevidí (TODO: kanál na každý oddíl).
@@ -132,9 +134,12 @@ najednou), proto stačí:
   zapnutí (`CC`: stránka 4 KiB, položky 64/16 B),
 - jedno přerušení MSI-X (vektor 0) pro admin i I/O frontu dokončených,
 - Set Features „Number of Queues“ a jedna dvojice I/O front (16 položek),
-- IDENTIFY řadiče (`MDTS`, `ONCS`, `VWC`) a aktivních jmenných prostorů;
-  každý jmenný prostor bez metadat je jeden disk (nejvýš 16); sektor
-  podle formátu LBA (`LBADS`, typicky 512 B nebo 4 KiB, nejvýš `MDTS`).
+- IDENTIFY řadiče (`MDTS`, `ONCS`, `VWC`, `NN`) a aktivních jmenných
+  prostorů; každý jmenný prostor bez metadat je jeden disk (nejvýš 16);
+  sektor podle formátu LBA (`LBADS`, typicky 512 B nebo 4 KiB, nejvýš
+  `MDTS`). Seznam aktivních jmenných prostorů (IDENTIFY CNS 2) mají řadiče
+  od NVMe 1.1; u NVMe 1.0 (např. virtuální NVMe starších verzí VMware)
+  ovladač projde čísla 1..`NN` a neaktivní pozná podle nulové velikosti.
 
 | požadavek `blockproto` | příkaz NVMe |
 |---|---|
@@ -144,7 +149,9 @@ najednou), proto stačí:
 | `FEATURES` | `FLUSH`, `WRITE_THROUGH` (bez VWC), `DISCARD` (ONCS bit 2), `READ_ONLY` (write protect) |
 
 Při ukončení ovladače (klienti zavřeli kanály) proběhne normální vypnutí
-(`CC.SHN`), takže řadič uloží mezipaměť. Když řadič neodpoví do 10 s,
+(`CC.SHN`), takže řadič uloží mezipaměť. Na každé cestě ukončení, i po
+chybě při startu, ovladač řadič vypne (`CC.EN = 0`) dřív, než uvolní
+fronty a buffery. Když řadič neodpoví do 10 s,
 nebo vrátí položku s cizím číslem příkazu, ovladač ho vypne (`CC.EN = 0`,
 přestane sahat do DMA paměti) a další požadavky vrací `IO_ERROR`.
 
@@ -153,13 +160,18 @@ přestane sahat do DMA paměti) a další požadavky vrací `IO_ERROR`.
 Podle specifikace Serial ATA AHCI 1.3.1:
 
 1. převzetí řadiče od firmwaru (BIOS/OS handoff, `BOHC`), reset řadiče
-   (`GHC.HR`) a režim AHCI (`GHC.AE`),
+   (`GHC.HR`) a režim AHCI (`GHC.AE`); řadič bez 64bitových adres
+   (`CAP.S64A = 0`) dostane jen DMA paměť pod 4 GiB, port s pamětí nad
+   4 GiB se vynechá (řadič by horní polovinu adresy zahodil a psal do
+   cizí paměti),
 2. přerušení MSI (řadiče AHCI obvykle nemají MSI-X); bez MSI ovladač
    obsluhuje řadič dotazováním,
 3. pro každý implementovaný port (`PI`): zastavení, seznam příkazů, oblast
    pro přijaté FIS, roztočení (`SUD`); pak jedno společné čekání na linky
-   (`DET = 3`, nejvýš 1 s, prázdný port se vzdá po 200 ms), připravený
-   disk, podpis disku SATA (`0x101`; ATAPI se vynechá),
+   (`DET = 3`, nejvýš 1 s, prázdný port se vzdá po 200 ms); porty bez
+   linky dostanou COMRESET (`PxSCTL.DET`) a čeká se znovu, protože po
+   resetu řadiče linka na některých čipsetech sama nenaskočí; pak
+   připravený disk a podpis disku SATA (`0x101`; ATAPI se vynechá),
 4. IDENTIFY DEVICE: kapacita LBA48, mezipaměť zápisu, FLUSH CACHE (EXT),
    TRIM (slovo 169), velikost logického sektoru (slova 106, 117-118;
    kapacita i počty sektorů v příkazech jsou v logických sektorech).
@@ -172,14 +184,21 @@ Podle specifikace Serial ATA AHCI 1.3.1:
 
 Disk se zapnutou mezipamětí, který neumí FLUSH, nehlásí žádnou záruku
 trvanlivosti a FS se na něm připojí jen pro čtení. Po chybě příkazu (TFES)
-ovladač port restartuje; port, který neodpoví do 20 s, zastaví.
+ovladač port restartuje; port, který neodpoví do 20 s, zastaví. Disk,
+který ovladač vynechá (neprojde IDENTIFY, neumí LBA48), má port zastavený,
+než se uvolní jeho paměť. Při ukončení ovladače (i po chybě) se mezipaměť
+zápisu disků uloží (FLUSH CACHE) a porty se zastaví.
 
 ## Hlášení disků a spuštění
 
 `devmgr` ovladači pošle `pci <sběrnice> <zařízení> <funkce>` a `bar
 <adresa> <velikost>` (NVMe BAR0, AHCI BAR5). Ovladač pro každý disk
 zjistí, co klient uvidí, vytvoří kanál a pošle `block` s koncem kanálu,
-nakonec `done`. `devmgr` čeká nejvýš 20 s a zprávy `block` předá initu.
+nakonec `done`. `devmgr` zprávy `block` předá initu. Na ovladač čeká
+nejvýš 150 s (reset řadiče NVMe smí podle `CAP.TO` trvat až 127,5 s,
+roztočení disku SATA desítky sekund) a během čekání posílá initu každých
+5 s `busy`, aby init (čeká na každou zprávu správce nejvýš 30 s) start
+zařízení nevzdal.
 
 Prostředky ovladačů (nejmenší práva):
 

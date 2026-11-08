@@ -156,6 +156,9 @@ pub struct Startup {
     /// Okna ECAM (konfigurace PCI Express): objekt pameti a `arg` ze zpravy
     /// (prvni sbernice | posledni << 8 | segment << 16).
     pub pci_ecam: Vec<(Vmo, u32)>,
+    /// Udaje o ACPI od jadra (`kind::ACPI`, [`abi::acpi::Info`]; dostava jen
+    /// init, ten je preda sluzbe ACPI).
+    pub acpi: Option<Vmo>,
     /// Bootstrap kanal: spojeni s rodicem.
     pub bootstrap: Channel,
     /// Priznaky startu (`abi::bootstrap::flags`; nastavuje je jen jadro
@@ -212,6 +215,7 @@ struct Received {
     flags: u32,
     initfs: Option<u32>,
     framebuffer: Option<u32>,
+    acpi: Option<u32>,
     resource: Option<u32>,
     ecam: [(u32, u32); 4],
     ecam_count: usize,
@@ -239,6 +243,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
         flags: 0,
         initfs: None,
         framebuffer: None,
+        acpi: None,
         resource: None,
         ecam: [(0, 0); 4],
         ecam_count: 0,
@@ -261,6 +266,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             bootstrap::kind::JOB => got.job = Some(handle),
             bootstrap::kind::INITFS => got.initfs = Some(handle),
             bootstrap::kind::FRAMEBUFFER => got.framebuffer = Some(handle),
+            bootstrap::kind::ACPI => got.acpi = Some(handle),
             bootstrap::kind::ROOT_RESOURCE => got.resource = Some(handle),
             bootstrap::kind::PCI_ECAM if got.ecam_count < got.ecam.len() => {
                 got.ecam[got.ecam_count] = (handle, arg);
@@ -297,6 +303,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
             .iter()
             .map(|&(h, arg)| (Vmo::from_handle(Handle::from_raw(h)), arg))
             .collect(),
+        acpi: got.acpi.map(|h| Vmo::from_handle(Handle::from_raw(h))),
         bootstrap,
         flags: got.flags,
     };

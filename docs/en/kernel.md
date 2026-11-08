@@ -230,6 +230,14 @@ A record:
   to the kernel (the screen is cleared); the end (or crash) of the process
   that took it over does the same. Without a framebuffer the entry is
   missing.
+- **ACPI data for user space:** init gets the memory object
+  `bootstrap::kind::ACPI` (format `abi::acpi::Info`): the RSDP address and
+  a copy of it (copied at boot - the RSDP may lie in memory the kernel later
+  frees) and the firmware memory regions holding the tables
+  (`AcpiReclaimable`, `AcpiNvs`). Init passes them to the `acpid` service,
+  which may map inside them (`VMO_CREATE_PHYSICAL`, cached) - see
+  [ACPI](acpi.md). The kernel itself reads only MADT, MCFG, HPET and the
+  IOMMU tables.
 - Filter: global level (`log::set_level`), level for a module and its
   submodules (`log::set_target_level("sched", Level::Trace)`). Release builds
   do not compile Trace at all (feature `log-trace` brings it back). A

@@ -325,6 +325,14 @@ fn terminal_window(startup: &Startup) -> TestResult {
             pump();
             t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "ahoj z GUI"))
         })?;
+        // Relace hlasi ulohy do prehledu uloh (kanaly razi init pres
+        // registr): `tasks` vidi bezici ulohu `async`.
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "let ulohy = async { sleep 30s }".into() })?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "tasks | where state == \"running\" | count".into() })?;
+        wait_tree(&s.inspect, w.id, "tasks v terminalu", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "1"))
+        })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
         check_eq!(pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?, BADGE, "odznak nad vlastnim titulkem");

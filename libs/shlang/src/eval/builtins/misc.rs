@@ -68,6 +68,40 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                 Ok(Value::List(out))
             }
         },
+        "tasks" => {
+            use crate::host::TasksOp;
+            let action = match a.pos(0) {
+                None => None,
+                Some(_) => Some(str_arg(&a, 0, "akce")?),
+            };
+            let id = || -> R<u64> {
+                int_arg(&a, 1, "id")?.map(|v| v as u64).ok_or_else(|| a.err(code::ARGS, "tasks: chybi cislo ulohy"))
+            };
+            let op = match action.as_deref() {
+                None | Some("list") => TasksOp::List,
+                Some("cancel") => TasksOp::Cancel(id()?),
+                Some("pause") => TasksOp::Pause(id()?),
+                Some("resume") => TasksOp::Resume(id()?),
+                Some("log") => {
+                    let n = match a.named("lines") {
+                        Some(Value::Int(n)) => (*n).clamp(1, 1000) as u32,
+                        _ => 20,
+                    };
+                    TasksOp::Log(id()?, n)
+                }
+                Some(other) => {
+                    return Err(Flow::Err(
+                        ShError::new(code::ARGS, alloc::format!("tasks: neznama akce '{other}'"))
+                            .at(a.span)
+                            .hint("tasks, tasks cancel|pause|resume|log <id>"),
+                    ));
+                }
+            };
+            match host.tasks(op) {
+                Some(r) => r.map_err(|e| Flow::Err(e.at(a.span))),
+                None => Err(Flow::Err(ShError::sys(abi::Error::NotSupported, "prehled uloh tu neni (sluzba taskd nebezi)").at(a.span))),
+            }
+        }
         "cancel" => {
             let v = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "cancel: chybi uloha"))?;
             it.cancel_value(host, &v, a.span)
@@ -132,6 +166,19 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
         "exit" => {
             it.exit = true;
             Ok(Value::Nothing)
+        }
+        "shutdown" | "reboot" => {
+            let reboot = name == "reboot";
+            let question = if reboot { "Restartovat pocitac?" } else { "Vypnout pocitac?" };
+            if !a.flag("yes") && !host.confirm(question, &Value::Nothing) {
+                return Err(Flow::Err(ShError::new(code::REJECTED, "zruseno, pocitac bezi dal").at(a.span)));
+            }
+            match host.power(reboot) {
+                Ok(()) => Ok(Value::Nothing),
+                Err(e) => Err(Flow::Err(
+                    ShError::sys(e, if reboot { "restart se nepovedl" } else { "vypnuti se nepovedlo" }).at(a.span),
+                )),
+            }
         }
         _ => Err(a.err(code::UNKNOWN, alloc::format!("neznamy prikaz '{name}'"))),
     }

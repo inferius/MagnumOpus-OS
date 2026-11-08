@@ -442,6 +442,10 @@ encryption. The turn-on screen must say so explicitly and have the
 recovery key written down; settings warn when an encrypted account has
 only one method.
 
+Home encryption builds on the **FS encrypted vaults** (phase 4, see
+[Encrypted vaults](fs-v3-design.md#encrypted-vaults)): the home becomes a
+vault and accountd supplies its key. Only the interface exists so far.
+
 **What the FS needs to provide** (proposed interface for the "dataset
 encryption" step):
 

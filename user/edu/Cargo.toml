@@ -1,0 +1,24 @@
+[package]
+name = "edu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Ukazkovy ovladac na driverkitu: vyukove zarizeni QEMU edu (registry, preruseni MSI, DMA)"
+
+[[bin]]
+name = "edu"
+test = false
+bench = false
+
+[dependencies]
+driverkit = { path = "../../libs/driverkit" }
+
+# Program pro jadro OS: backend driverkitu nad jadrem.
+[target.'cfg(target_os = "none")'.dependencies]
+driverkit = { path = "../../libs/driverkit", features = ["os"] }
+libos = { path = "../../libs/libos" }
+
+# Testy na hostiteli: simulace zarizeni.
+[dev-dependencies]
+driverkit = { path = "../../libs/driverkit", features = ["sim"] }

@@ -22,7 +22,7 @@ mod aarch64;
 pub use self::aarch64::Aarch64 as Current;
 
 use api::{
-    Cpu, DebugSerial, DeviceIrq, Diagnostics, Ipi, LegacyIo, Memory, Smp, Threads, Time,
+    Cpu, DebugSerial, DeviceIrq, Diagnostics, Ipi, LegacyIo, Memory, Power, Smp, Threads, Time,
 };
 use boot_info::BootInfo;
 
@@ -387,9 +387,16 @@ pub fn port_write(port: u16, width: u8, value: u32) -> crate::error::Result<()> 
     <Current as LegacyIo>::port_write(port, width, value)
 }
 
-/// Nasmeruje starou linku preruseni (ISA IRQ); vraci, zda je spoustena urovni.
-pub fn line_route(line: u32, irq: u32) -> crate::error::Result<bool> {
-    <Current as LegacyIo>::line_route(line, irq)
+/// Nasmeruje pevnou linku preruseni (x86 ISA IRQ, aarch64 SPI); vraci, zda
+/// je spoustena urovni.
+pub fn line_route(line: u32, irq: u32, edge: bool) -> crate::error::Result<bool> {
+    <Current as LegacyIo>::line_route(line, irq, edge)
+}
+
+/// Vypne (`off`) nebo restartuje pocitac pres firmware; pri uspechu se
+/// nevraci.
+pub fn system_power(off: bool) -> crate::error::Result<()> {
+    <Current as Power>::system_power(off)
 }
 
 /// Zamaskuje / odmaskuje starou linku preruseni.

@@ -1,0 +1,20 @@
+[package]
+name = "acpid"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Sluzba ACPI: ACPICA v userspace (vypnuti, restart, tlacitko napajeni, teploty, baterie)"
+
+[[bin]]
+name = "acpid"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+abi = { workspace = true }
+acpica = { path = "../../libs/acpica" }
+cstd = { path = "../../libs/cstd" }
+powerproto = { path = "../../libs/powerproto" }
+spin = "0.12"
