@@ -64,6 +64,17 @@
   --size-focus-offset: 2px;
   --size-resize-edge: 6px;
   --size-scrollbar: 8px;
+  --size-icon-xs: 14px;
+  --size-title-btn-stroke: 2;
+  --size-live-dot: 6px;
+  --size-dialog-w: 440px;
+  --size-notification-w: 340px;
+  --size-bar-indicator-w: 14px;
+  --size-bar-indicator-h: 3px;
+  --size-bar-indicator-active-w: 20px;
+  --size-switch-w: 44px;
+  --size-switch-h: 26px;
+  --size-switch-knob: 18px;
   --r-xs: 6px;
   --r-badge: 8px;
   --r-control: 10px;
@@ -91,6 +102,9 @@
   --z-scrim: 900;
   --z-system-dialog: 1000;
   --z-secure: 2000;
+  --o-bar: 0.9;
+  --o-hung-content: 0.45;
+  --o-disabled: 0.5;
   --c-bg: #fbf1ea;
   --c-wall-a: #ffd9c7;
   --c-wall-b: #ddd2ff;

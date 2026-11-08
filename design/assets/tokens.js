@@ -104,7 +104,18 @@ window.MO_TOKENS = {
   "focus_ring": 2,
   "focus_offset": 2,
   "resize_edge": 6,
-  "scrollbar": 8
+  "scrollbar": 8,
+  "icon_xs": 14,
+  "title_btn_stroke": 2,
+  "live_dot": 6,
+  "dialog_w": 440,
+  "notification_w": 340,
+  "bar_indicator_w": 14,
+  "bar_indicator_h": 3,
+  "bar_indicator_active_w": 20,
+  "switch_w": 44,
+  "switch_h": 26,
+  "switch_knob": 18
  },
  "radius": {
   "xs": 6,
@@ -315,6 +326,11 @@ window.MO_TOKENS = {
   "unresponsive_ms": 3000,
   "badge_flash_ms": 3000,
   "dialog_guard_ms": 300
+ },
+ "opacity": {
+  "bar": 0.9,
+  "hung_content": 0.45,
+  "disabled": 0.5
  },
  "layer": {
   "desktop": 0,
