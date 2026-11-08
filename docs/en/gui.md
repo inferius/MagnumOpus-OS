@@ -966,7 +966,15 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 **Inspection** (`inspect`, for tests, later a screen reader and
 magnifier): list of windows, the accessibility tree of a window in screen
 coordinates, an action on a node, the colour of a screen pixel, and "wait
-until settled" (everything composed and displayed).
+until settled": the reply comes once everything waiting before the
+request is composed and displayed (the next full frame after the request)
+and no unacknowledged `CONFIGURE`, transaction or group is pending. An app
+that keeps drawing (an animation, a running task in the terminal) does not
+block it; previously it waited for a fully idle compositor and the terminal
+test timed out under load. When settling waits over 5 s, the compositor
+logs what holds it. **[verified in QEMU]** (test
+`settle_answers_even_while_app_redraws_continuously` in `libs/comp`, the GUI
+tests in `cargo xtask test`)
 
 ## Window protocol (`libs/guiproto`)
 

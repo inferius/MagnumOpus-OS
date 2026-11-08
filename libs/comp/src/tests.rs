@@ -1703,3 +1703,32 @@ fn multiple_windows_per_app_and_user_launch_focus() {
     t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Press }, false);
     assert!(t.c.take_launch_requests().is_empty(), "single: prostredni klik nic");
 }
+
+#[test]
+fn settle_answers_even_while_app_redraws_continuously() {
+    use guiproto::control::{InspectReply, InspectRequest};
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    t.c.take_out();
+    // Aplikace kresli kazdy snimek (animace, bezici uloha v terminalu).
+    t.set_color(a, BLUE);
+    t.commit(a, 2, 0, 0, 0);
+    t.c.inspect(7, InspectRequest::Settle);
+    let done = |t: &mut T| t.c.take_out().into_iter().any(|o| matches!(o, Out::Inspect(7, InspectReply::Done)));
+    assert!(!done(&mut t), "poskozeni pred dotazem jeste neni na obrazovce");
+    for (k, c) in [GREEN, RED, BLUE].into_iter().enumerate() {
+        // Tik slozi snimek; pred potvrzenim zobrazeni prijde dalsi obsah.
+        t.now += PERIOD;
+        let mut canvas = Canvas::new(&mut t.frame, W, H, W).unwrap();
+        t.c.tick(t.now, &mut canvas);
+        t.set_color(a, c);
+        t.commit(a, 3 + k as u32, 0, 0, 0);
+        t.c.presented(t.now);
+        if done(&mut t) {
+            return;
+        }
+    }
+    panic!("Settle neodpovedel, i kdyz vse pred dotazem uz bylo zobrazene");
+}
