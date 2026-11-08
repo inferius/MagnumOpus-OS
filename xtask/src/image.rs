@@ -43,7 +43,7 @@ fn random_guid(salt: u64) -> [u8; 16] {
 /// Vytvori obraz disku na `path` a nakopiruje do ESP zadane soubory
 /// (`(cesta na ESP, zdrojovy soubor)`).
 pub fn create_disk_image(path: &Path, files: &[(&str, &Path)]) -> Result<()> {
-    let part_end_lba = diskguard::gpt::last_usable(DISK_SIZE / SECTOR);
+    let part_end_lba = diskguard::gpt::last_usable(DISK_SIZE / SECTOR, SECTOR as usize);
 
     let mut disk = vec![0u8; DISK_SIZE as usize];
 
@@ -56,6 +56,7 @@ pub fn create_disk_image(path: &Path, files: &[(&str, &Path)]) -> Result<()> {
     // ochrana disku v ovladacich) ---
     diskguard::gpt::write(
         &mut disk,
+        SECTOR as usize,
         random_guid(2),
         &[diskguard::gpt::NewPartition {
             type_guid: diskguard::ESP_TYPE,

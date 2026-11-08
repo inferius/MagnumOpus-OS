@@ -22,12 +22,20 @@
 
 #![no_std]
 
+extern crate alloc;
+
 pub mod crc32;
 pub mod gpt;
 
-/// Velikost sektoru, se kterou knihovna pracuje (ovladace jine velikosti
-/// logickeho sektoru zatim odmitaji).
+/// Sektor protokolu klienta (`blockproto`). Disky mohou mit vetsi logicky
+/// sektor (4 KiB); knihovna pracuje v sektorech disku, prepocet na 512 B
+/// dela server ovladace.
 pub const SECTOR: usize = 512;
+
+/// Podporovana velikost logickeho sektoru disku: mocnina dvou 512 B..64 KiB.
+pub const fn valid_sector_size(ss: usize) -> bool {
+    ss.is_power_of_two() && ss >= 512 && ss <= 65536
+}
 
 /// GUID v binarni podobe GPT (prvni tri slozky little-endian).
 pub type Guid = [u8; 16];
@@ -72,9 +80,9 @@ pub const ATTR_READ_ONLY: u64 = 1 << 60;
 /// Zacatek podpisu superbloku naseho FS (`OSFS\0\0v3`; verze se nekontroluje,
 /// i novejsi format je nas).
 pub const FS_MAGIC_PREFIX: &[u8; 7] = b"OSFS\0\0v";
-/// Superbloky FS lezi v blocich 1..=8 po 4 KiB = sektory 8..72.
-pub const FS_SUPER_FIRST: u64 = 8;
-pub const FS_SUPER_SECTORS: u64 = 64;
+/// Superbloky FS lezi na zacatku bloku 1..=8 po 4 KiB (bajty 4096..36864).
+pub const FS_BLOCK: u64 = 4096;
+pub const FS_SUPER_BLOCKS: u64 = 8;
 
 /// Proc je disk (ne)nas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,66 +131,77 @@ pub struct Decision {
     pub kind: Kind,
     /// Prvni sektor zarizeni, ktery klient vidi jako sektor 0.
     pub start: u64,
-    /// Pocet sektoru viditelnych klientem.
+    /// Pocet sektoru zarizeni viditelnych klientem.
     pub sectors: u64,
+    /// Velikost sektoru zarizeni v bajtech (`start` a `sectors` jsou v nich).
+    pub sector_size: usize,
     /// Smi klient zapisovat (a posilat DISCARD)?
     pub writable: bool,
 }
 
 impl Decision {
-    fn whole(kind: Kind, sectors: u64) -> Self {
+    fn whole(kind: Kind, sectors: u64, sector_size: usize) -> Self {
         Self {
             kind,
             start: 0,
             sectors,
+            sector_size,
             writable: kind == Kind::OurWholeDisk,
         }
     }
 
-    /// Preklad rozsahu klienta na sektory zarizeni. `None` = mimo videny
-    /// rozsah (klient dostane `OUT_OF_RANGE`).
+    /// Preklad rozsahu v sektorech zarizeni (relativne k videnemu useku)
+    /// na absolutni sektor zarizeni. `None` = mimo videny rozsah (klient
+    /// dostane `OUT_OF_RANGE`).
     pub fn translate(&self, lba: u64, count: u64) -> Option<u64> {
         let end = lba.checked_add(count)?;
         (end <= self.sectors).then_some(self.start + lba)
     }
 }
 
-/// Rozebere disk o `sectors` sektorech. `read(lba, buf)` precte
-/// `buf.len() / 512` sektoru od `lba` (`false` = chyba).
-pub fn decide(sectors: u64, mut read: impl FnMut(u64, &mut [u8]) -> bool) -> Decision {
-    let mut s0 = [0u8; SECTOR];
+/// Rozebere disk o `sectors` sektorech po `ss` bajtech. `read(lba, buf)`
+/// precte `buf.len() / ss` sektoru od `lba` (`false` = chyba).
+pub fn decide(sectors: u64, ss: usize, mut read: impl FnMut(u64, &mut [u8]) -> bool) -> Decision {
+    if !valid_sector_size(ss) {
+        return Decision::whole(Kind::Unreadable, sectors, ss);
+    }
+    let mut s0 = alloc::vec![0u8; ss];
     if sectors < 2 || !read(0, &mut s0) {
-        return Decision::whole(Kind::Unreadable, sectors);
+        return Decision::whole(Kind::Unreadable, sectors, ss);
     }
     let has_mbr_sig = s0[510] == 0x55 && s0[511] == 0xAA;
     let protective = has_mbr_sig && (0..4).any(|i| s0[446 + i * 16 + 4] == 0xEE);
-    match gpt::read_table(sectors, &mut read) {
-        gpt::Read::Table(t) => return choose(&t, sectors),
-        gpt::Read::Damaged => return Decision::whole(Kind::DamagedGpt, sectors),
-        gpt::Read::Unreadable => return Decision::whole(Kind::Unreadable, sectors),
+    match gpt::read_table(sectors, ss, &mut read) {
+        gpt::Read::Table(t) => return choose(&t, sectors, ss),
+        gpt::Read::Damaged => return Decision::whole(Kind::DamagedGpt, sectors, ss),
+        gpt::Read::Unreadable => return Decision::whole(Kind::Unreadable, sectors, ss),
         gpt::Read::None => {}
     }
     if protective {
-        return Decision::whole(Kind::DamagedGpt, sectors);
+        return Decision::whole(Kind::DamagedGpt, sectors, ss);
     }
     if has_mbr_sig {
-        return Decision::whole(Kind::Mbr, sectors);
+        return Decision::whole(Kind::Mbr, sectors, ss);
     }
-    if has_our_fs(sectors, &mut read) {
-        return Decision::whole(Kind::OurWholeDisk, sectors);
+    if has_our_fs(sectors, ss, &mut read) {
+        return Decision::whole(Kind::OurWholeDisk, sectors, ss);
     }
-    Decision::whole(Kind::Unknown, sectors)
+    Decision::whole(Kind::Unknown, sectors, ss)
 }
 
-/// Superblok naseho FS v sektorech 8..72 (cely disk bez oddilu).
-fn has_our_fs(sectors: u64, read: &mut impl FnMut(u64, &mut [u8]) -> bool) -> bool {
-    if sectors < FS_SUPER_FIRST + FS_SUPER_SECTORS {
+/// Superblok naseho FS na zacatku nektereho z bloku 1..=8 (cely disk bez
+/// oddilu). Pocita s libovolnou velikosti sektoru (blok muze lezet
+/// uprostred sektoru vetsiho nez 4 KiB).
+fn has_our_fs(sectors: u64, ss: usize, read: &mut impl FnMut(u64, &mut [u8]) -> bool) -> bool {
+    let end = (FS_SUPER_BLOCKS + 1) * FS_BLOCK;
+    if sectors.saturating_mul(ss as u64) < end {
         return false;
     }
-    let mut buf = [0u8; SECTOR];
-    // Superblok je na zacatku 4KiB bloku: staci prvni sektor kazdeho bloku.
-    (0..FS_SUPER_SECTORS / 8).any(|b| {
-        read(FS_SUPER_FIRST + b * 8, &mut buf) && buf[..FS_MAGIC_PREFIX.len()] == FS_MAGIC_PREFIX[..]
+    let mut buf = alloc::vec![0u8; ss];
+    (1..=FS_SUPER_BLOCKS).any(|b| {
+        let byte = b * FS_BLOCK;
+        let off = (byte % ss as u64) as usize;
+        read(byte / ss as u64, &mut buf) && buf[off..off + FS_MAGIC_PREFIX.len()] == FS_MAGIC_PREFIX[..]
     })
 }
 
@@ -192,7 +211,7 @@ pub fn is_our_entry(e: &gpt::Entry) -> bool {
 }
 
 /// Vybere prvni platny nas oddil.
-fn choose(t: &gpt::Table, sectors: u64) -> Decision {
+fn choose(t: &gpt::Table, sectors: u64, ss: usize) -> Decision {
     let mut saw_ours = false;
     for (i, e) in t.entries().enumerate() {
         if e.is_empty() || !is_our_entry(&e) {
@@ -215,6 +234,7 @@ fn choose(t: &gpt::Table, sectors: u64) -> Decision {
             kind: Kind::OurPartition { index: i as u32 },
             start: e.first,
             sectors: e.last - e.first + 1,
+            sector_size: ss,
             writable: e.attrs & ATTR_READ_ONLY == 0,
         };
     }
@@ -223,5 +243,5 @@ fn choose(t: &gpt::Table, sectors: u64) -> Decision {
     } else {
         Kind::ForeignGpt
     };
-    Decision::whole(kind, sectors)
+    Decision::whole(kind, sectors, ss)
 }

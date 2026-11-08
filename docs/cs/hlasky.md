@@ -114,14 +114,16 @@ porušený vnitřní předpoklad (chyba jádra).
 | `devmgr: ovladac X pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
 | `virtio-blk BB:ZZ.F: N MiB, flush ano/ne, discard ano/ne` | Disk je připravený. `discard ne` = zařízení neumí TRIM (v QEMU chybí `discard=unmap` u disku); FS pak TRIM přeskakuje. |
 | `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x, nedokončilo reset do sekundy (`TIMED_OUT`) nebo chybí prostředky (MSI-X, DMA paměť, `NO_RESOURCES` = vyčerpaná kvóta omezeného Resource). |
-| `X: disk D: nas oddil GPT, N MiB od sektoru S, zapis povolen` | Ovladač disku (`virtio-blk`, `nvme`, `ahci`) našel náš oddíl; klient vidí jen ten ([Disky](disky.md)). |
+| `X: disk D: nas oddil GPT, N MiB od sektoru S, sektor B B, zapis povolen` | Ovladač disku (`virtio-blk`, `nvme`, `ahci`) našel náš oddíl; klient vidí jen ten ([Disky](disky.md)). |
 | `X: disk D: cely disk s nasim FS, ..., zapis povolen` | Disk bez tabulky oddílů s naším FS (datový disk v QEMU). |
 | `X: disk D: cizi disk (...), ..., JEN PRO CTENI` | Disk nám nepatří (cizí GPT, MBR, prázdný, poškozená GPT, neplatný náš oddíl). Zápis a TRIM vrací `READ_ONLY`, FS se připojí jen pro čtení. Úmyslná ochrana; pro zápis na disk vytvořit náš oddíl. |
 | `nvme BB:ZZ.F: nepodporovany radic (CAP ...)` | Řadič neumí sadu příkazů NVM, stránku 4 KiB nebo má doorbelly mimo BAR. |
-| `nvme: jmenny prostor N ma sektor ... - zatim nepodporovano, vynechan` | Jmenný prostor je naformátovaný na jiný sektor než 512 B nebo s metadaty. Přeformátovat na 512 B (nástroj výrobce, `nvme format`), nebo počkat na podporu 4 KiB. |
+| `nvme: jmenny prostor N ma metadata ... B na sektor - nepodporovano, vynechan` | Jmenný prostor je naformátovaný s metadaty (T10 PI). Přeformátovat na formát bez metadat (nástroj výrobce, `nvme format`). |
+| `nvme: jmenny prostor N ma sektor ... B - nepodporovano, vynechan` | Sektor větší než jeden přenos řadiče (`MDTS`) nebo než 32 KiB. Běžné sektory 512 B a 4 KiB fungují. |
 | `nvme: radic neodpovida spravne (...), dalsi pozadavky odmitnuty` | Příkaz nedoběhl do 10 s nebo řadič vrátil cizí číslo příkazu. Řadič je vypnutý (nepoužívá DMA); disk do restartu nefunguje. |
 | `ahci BB:ZZ.F: MSI nelze zapnout (...), obsluha dotazovanim` | Řadič nemá MSI (nebo zpráva nejde zapsat); ovladač funguje dotazováním, jen s vyšší zátěží CPU. |
-| `ahci: port P: disk ... neumi LBA48 / ma logicky sektor ... - vynechan` | Velmi starý disk bez LBA48, nebo disk 4Kn. Zatím nepodporováno. |
+| `ahci: port P: disk ... neumi LBA48 - vynechan` | Velmi starý disk bez LBA48. Nepodporováno. |
+| `ahci: port P: disk ... ma logicky sektor ... B - nepodporovano, vynechan` | Disk hlásí logický sektor, který není mocnina dvou 512 B..32 KiB (chybná odpověď IDENTIFY). Disky 512 B i 4Kn fungují. |
 | `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | Na portu je mechanika ATAPI nebo port multiplier. |
 | `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | Příkaz nedoběhl do 20 s; port je zastavený. |
 | `devmgr: ovladac X pro ... nenahlasil disky: ...` | Ovladač `nvme`/`ahci` neposlal `done` do 20 s (pomalé roztočení disku, zaseknutý řadič). Disky nahlášené do té doby fungují. |

@@ -59,7 +59,8 @@ prepinace:
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
                    none; aarch64 smmu (vychozi), none
   --data-disk <r>  (run, test) radic datoveho disku: virtio (vychozi), nvme,
-                   ahci; na NVMe a AHCI ma disk GPT s nasim oddilem
+                   nvme4k (sektor 4 KiB), ahci; na NVMe a AHCI ma disk GPT
+                   s nasim oddilem
   --qemu-wsl       (run, test) spustit QEMU ve WSL (QEMU_WSL_DISTRO, vychozi
                    Ubuntu; QEMU_WSL_PREFIX, vychozi ~/venus/prefix) - Venus
   --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi pro test a run
@@ -90,7 +91,7 @@ pub struct Options {
     /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
     /// aarch64 "smmu", "none".
     iommu: String,
-    /// Radic datoveho disku: "virtio", "nvme", "ahci".
+    /// Radic datoveho disku: "virtio", "nvme", "nvme4k" (sektor 4 KiB), "ahci".
     data_disk: String,
     /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
     /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl);
@@ -168,8 +169,8 @@ fn run_cli() -> Result<()> {
             Some("--data-disk") => {
                 let value = args.next().ok_or("--data-disk ocekava radic")?;
                 let value = value.to_string_lossy().into_owned();
-                if !["virtio", "nvme", "ahci"].contains(&value.as_str()) {
-                    return Err("--data-disk ocekava virtio, nvme nebo ahci".into());
+                if !["virtio", "nvme", "nvme4k", "ahci"].contains(&value.as_str()) {
+                    return Err("--data-disk ocekava virtio, nvme, nvme4k nebo ahci".into());
                 }
                 opts.data_disk = value;
             }

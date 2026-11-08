@@ -116,14 +116,16 @@ invariant was broken (a kernel bug).
 | `devmgr: ovladac X pro ... nelze spustit: ...` | The driver is missing from initfs or failed to start (error code). |
 | `virtio-blk BB:DD.F: N MiB, flush ano/ne, discard ano/ne` | The disk is ready. `discard ne` = the device has no TRIM (in QEMU the drive lacks `discard=unmap`); the FS then skips TRIM. |
 | `virtio-blk ...: inicializace selhala: ...` | The device does not follow virtio 1.x, did not finish its reset within a second (`TIMED_OUT`) or resources are missing (MSI-X, DMA memory, `NO_RESOURCES` = the restricted Resource quota is exhausted). |
-| `X: disk D: nas oddil GPT, N MiB od sektoru S, zapis povolen` | The disk driver (`virtio-blk`, `nvme`, `ahci`) found our partition; the client sees only that ([Disks](disks.md)). |
+| `X: disk D: nas oddil GPT, N MiB od sektoru S, sektor B B, zapis povolen` | The disk driver (`virtio-blk`, `nvme`, `ahci`) found our partition; the client sees only that ([Disks](disks.md)). |
 | `X: disk D: cely disk s nasim FS, ..., zapis povolen` | A disk without a partition table holding our FS (the QEMU data disk). |
 | `X: disk D: cizi disk (...), ..., JEN PRO CTENI` | The disk is not ours (foreign GPT, MBR, empty, damaged GPT, invalid partition of ours). Write and TRIM return `READ_ONLY`, the FS is mounted read-only. Intentional protection; create our partition to write to the disk. |
 | `nvme BB:DD.F: nepodporovany radic (CAP ...)` | The controller lacks the NVM command set or the 4 KiB page, or has doorbells outside the BAR. |
-| `nvme: jmenny prostor N ma sektor ... - zatim nepodporovano, vynechan` | The namespace is formatted with a sector other than 512 B or with metadata. Reformat to 512 B (vendor tool, `nvme format`) or wait for 4 KiB support. |
+| `nvme: jmenny prostor N ma metadata ... B na sektor - nepodporovano, vynechan` | The namespace is formatted with metadata (T10 PI). Reformat to a format without metadata (vendor tool, `nvme format`). |
+| `nvme: jmenny prostor N ma sektor ... B - nepodporovano, vynechan` | The sector is larger than one controller transfer (`MDTS`) or than 32 KiB. Common 512 B and 4 KiB sectors work. |
 | `nvme: radic neodpovida spravne (...), dalsi pozadavky odmitnuty` | A command did not finish within 10 s or the controller returned a foreign command ID. The controller is disabled (no DMA); the disk does not work until restart. |
 | `ahci BB:DD.F: MSI nelze zapnout (...), obsluha dotazovanim` | The controller has no MSI (or the message cannot be written); the driver works by polling, at a higher CPU load. |
-| `ahci: port P: disk ... neumi LBA48 / ma logicky sektor ... - vynechan` | A very old disk without LBA48, or a 4Kn disk. Not supported yet. |
+| `ahci: port P: disk ... neumi LBA48 - vynechan` | A very old disk without LBA48. Not supported. |
+| `ahci: port P: disk ... ma logicky sektor ... B - nepodporovano, vynechan` | The disk reports a logical sector that is not a power of two 512 B..32 KiB (a faulty IDENTIFY reply). 512 B and 4Kn disks work. |
 | `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | The port has an ATAPI drive or a port multiplier. |
 | `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | A command did not finish within 20 s; the port is stopped. |
 | `devmgr: ovladac X pro ... nenahlasil disky: ...` | The `nvme`/`ahci` driver did not send `done` within 20 s (slow disk spin-up, stuck controller). Disks reported until then work. |

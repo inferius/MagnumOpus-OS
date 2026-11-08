@@ -108,14 +108,16 @@ pub struct Identity {
     pub write_cache: bool,
     /// Umi Dataset Management (TRIM).
     pub dsm: bool,
-    /// Nejvic sektoru po 512 B v jednom prenosu.
-    pub max_sectors: u32,
+    /// Nejvic bajtu v jednom prenosu (MDTS, nejvys datovy buffer).
+    pub max_bytes: u64,
 }
 
 /// Jmenny prostor (disk) z IDENTIFY NAMESPACE.
 pub struct Namespace {
     pub nsid: u32,
+    /// Velikost v logickych sektorech (`sector_size`).
     pub sectors: u64,
+    pub sector_size: usize,
     pub write_protected: bool,
 }
 
@@ -408,13 +410,15 @@ impl Controller {
         Ok(Identity {
             write_cache: vwc & 1 != 0,
             dsm: oncs & (1 << 2) != 0,
-            max_sectors: (max_bytes / blockproto::SECTOR as u64) as u32,
+            max_bytes,
         })
     }
 
-    /// Aktivni jmenne prostory s logickym sektorem 512 B bez metadat.
-    /// Ostatni se zaloguji a vynechaji (TODO: sektor 4 KiB).
-    pub fn namespaces(&mut self, limit: usize) -> Result<alloc::vec::Vec<Namespace>> {
+    /// Aktivni jmenne prostory bez metadat s logickym sektorem 512 B az
+    /// `max_sector` B (typicky 512 B nebo 4 KiB). Jmenne prostory
+    /// s metadaty (ochrana dat T10 PI) se zaloguji a vynechaji: prenos by
+    /// potreboval druhy buffer nebo jine rozlozeni dat.
+    pub fn namespaces(&mut self, limit: usize, max_sector: u64) -> Result<alloc::vec::Vec<Namespace>> {
         self.identify(2, 0)?;
         let mut ids = alloc::vec::Vec::new();
         for i in 0..1024u64 {
@@ -434,16 +438,19 @@ impl Controller {
             let meta = format & 0xFFFF;
             let lbads = (format >> 16) & 0xFF;
             let wp = m.read::<u8>(AUX_OFF + 99) & 1 != 0;
-            if lbads != 9 || meta != 0 {
-                println!(
-                    "nvme: jmenny prostor {nsid} ma sektor {} B a metadata {meta} B - zatim nepodporovano, vynechan",
-                    1u64 << lbads.min(63)
-                );
+            let sector = 1u64 << lbads.min(63);
+            if meta != 0 {
+                println!("nvme: jmenny prostor {nsid} ma metadata {meta} B na sektor - nepodporovano, vynechan");
+                continue;
+            }
+            if !(9..=63).contains(&lbads) || sector > max_sector {
+                println!("nvme: jmenny prostor {nsid} ma sektor {sector} B - nepodporovano, vynechan");
                 continue;
             }
             out.push(Namespace {
                 nsid,
                 sectors: size,
+                sector_size: sector as usize,
                 write_protected: wp,
             });
         }

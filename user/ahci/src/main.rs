@@ -46,7 +46,10 @@ const TRIM_ENTRY_MAX: u64 = 0xFFFF;
 /// Disk na jednom portu.
 struct Disk {
     port: Port,
+    /// Kapacita v logickych sektorech (`sector_size`).
     sectors: u64,
+    /// Logicky sektor (512 B, u disku 4Kn 4 KiB).
+    sector_size: usize,
     /// Prikaz pro FLUSH (`None` = disk nema zapnutou mezipamet zapisu).
     flush: Option<u8>,
     /// Mezipamet zapisu je zapnuta, ale disk neumi FLUSH: bez zaruky.
@@ -183,8 +186,11 @@ impl Ahci {
         })
     }
 
-    fn rw(&mut self, d: usize, command: u8, lba: u64, sectors: u32, write: bool) -> Result<()> {
+    /// Cteni nebo zapis `bytes` bajtu (cele logicke sektory) pres datovy
+    /// buffer portu.
+    fn rw(&mut self, d: usize, command: u8, lba: u64, bytes: usize, write: bool) -> Result<()> {
         let disk = &mut self.disks[d];
+        let sectors = bytes / disk.sector_size;
         self.hba.command(
             &mut disk.port,
             Ata {
@@ -192,7 +198,7 @@ impl Ahci {
                 lba,
                 count: sectors as u16,
                 write,
-                bytes: sectors * SECTOR as u32,
+                bytes: bytes as u32,
                 ..Default::default()
             },
         )
@@ -226,17 +232,17 @@ fn identify(hba: &Hba, mut port: Port) -> Option<Disk> {
         return None;
     }
     // Slovo 106: platne (bit 14 = 1, bit 15 = 0) a bit 12 = logicky sektor
-    // vetsi nez 512 B (velikost ve slovech 117-118).
+    // vetsi nez 512 B (velikost ve slovech 117-118). Pocty sektoru v prikazech
+    // i kapacita jsou pak v techto sektorech.
     let w106 = word(m, 106);
-    if w106 & 0xC000 == 0x4000 && w106 & (1 << 12) != 0 {
-        let words = word(m, 117) as u32 | (word(m, 118) as u32) << 16;
-        if words != 256 {
-            println!(
-                "ahci: port {p}: disk '{model}' ma logicky sektor {} B - zatim nepodporovano, vynechan",
-                words * 2
-            );
-            return None;
-        }
+    let sector_size = if w106 & 0xC000 == 0x4000 && w106 & (1 << 12) != 0 {
+        2 * (word(m, 117) as usize | (word(m, 118) as usize) << 16)
+    } else {
+        SECTOR
+    };
+    if !sector_size.is_power_of_two() || !(SECTOR..=DATA_LEN as usize).contains(&sector_size) {
+        println!("ahci: port {p}: disk '{model}' ma logicky sektor {sector_size} B - nepodporovano, vynechan");
+        return None;
     }
     let sectors = (0..4).fold(0u64, |acc, i| acc | (word(m, 100 + i) as u64) << (16 * i));
     let cache_supported = word(m, 82) & (1 << 5) != 0;
@@ -258,14 +264,15 @@ fn identify(hba: &Hba, mut port: Port) -> Option<Disk> {
         0
     };
     println!(
-        "ahci: port {p}: '{model}', {} MiB, mezipamet zapisu {}, TRIM {}",
-        sectors * SECTOR as u64 / (1024 * 1024),
+        "ahci: port {p}: '{model}', {} MiB, sektor {sector_size} B, mezipamet zapisu {}, TRIM {}",
+        sectors * sector_size as u64 / (1024 * 1024),
         if cache_enabled { "ano" } else { "ne" },
         if trim { "ano" } else { "ne" }
     );
     Some(Disk {
         port,
         sectors,
+        sector_size,
         flush,
         cache_without_flush: cache_enabled && flush.is_none(),
         trim_blocks,
@@ -279,6 +286,10 @@ impl Disks for Ahci {
 
     fn sectors(&self, d: usize) -> u64 {
         self.disks[d].sectors
+    }
+
+    fn sector_size(&self, d: usize) -> usize {
+        self.disks[d].sector_size
     }
 
     fn features(&self, d: usize) -> u64 {
@@ -298,14 +309,14 @@ impl Disks for Ahci {
     }
 
     fn read(&mut self, d: usize, lba: u64, out: &mut [u8]) -> Result<()> {
-        self.rw(d, ATA_READ_DMA_EXT, lba, (out.len() / SECTOR) as u32, false)?;
+        self.rw(d, ATA_READ_DMA_EXT, lba, out.len(), false)?;
         self.disks[d].port.mem.read_bytes(DATA_OFF, out);
         Ok(())
     }
 
     fn write(&mut self, d: usize, lba: u64, data: &[u8]) -> Result<()> {
         self.disks[d].port.mem.write_bytes(DATA_OFF, data);
-        self.rw(d, ATA_WRITE_DMA_EXT, lba, (data.len() / SECTOR) as u32, true)
+        self.rw(d, ATA_WRITE_DMA_EXT, lba, data.len(), true)
     }
 
     fn flush(&mut self, d: usize) -> Result<()> {
@@ -365,9 +376,14 @@ impl Disks for Ahci {
     /// DMA pamet (viz `nvme`). Zapis jde jen do vlastni pameti ovladace.
     fn test_dma_protection(&mut self, d: usize) -> Result<u64> {
         const PATTERN: u8 = 0xAA;
+        let ss = self.disks[d].sector_size;
+        // Jeden sektor do jedne stranky (jedna polozka PRDT).
+        if ss > 4096 {
+            return Err(Error::NotSupported);
+        }
         let page = Vmo::create(4096)?;
         let map = Mapping::new(&page, 0, 4096, MAP_READ | MAP_WRITE)?;
-        map.write_bytes(0, &[PATTERN; SECTOR]);
+        map.write_bytes(0, &alloc::vec![PATTERN; ss]);
         let phys = self.resource.phys_addr(&page, 0)?;
         let disk = &mut self.disks[d];
         let _ = self.hba.command(
@@ -375,12 +391,12 @@ impl Disks for Ahci {
             Ata {
                 command: ATA_READ_DMA_EXT,
                 count: 1,
-                bytes: SECTOR as u32,
+                bytes: ss as u32,
                 data_phys: Some(phys),
                 ..Default::default()
             },
         );
-        let mut back = [0u8; SECTOR];
+        let mut back = alloc::vec![0u8; ss];
         map.read_bytes(0, &mut back);
         Ok(back.iter().all(|&b| b == PATTERN) as u64)
     }

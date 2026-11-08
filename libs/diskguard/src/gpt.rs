@@ -2,8 +2,10 @@
 //! kontrolnich souctu a zapis (testovaci disky v `xtask`).
 //!
 //! Rozlozeni: LBA 0 ochranny MBR, LBA 1 hlavicka, LBA 2.. tabulka oddilu
-//! (typicky 128 polozek po 128 B = 32 sektoru), na konci disku zalozni
-//! tabulka a zalozni hlavicka v poslednim sektoru.
+//! (typicky 128 polozek po 128 B = 16 KiB), na konci disku zalozni
+//! tabulka a zalozni hlavicka v poslednim sektoru. LBA jsou v logickych
+//! sektorech disku (512 B nebo 4 KiB): na disku se sektorem 4 KiB lezi
+//! hlavicka na bajtu 4096 a tabulka zabira 4 sektory.
 //!
 //! Puvod: napsano podle verejne specifikace, bez prevzateho kodu jinych
 //! projektu (zadny kod z Linuxu ani BSD).
@@ -13,7 +15,7 @@ extern crate alloc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::{Guid, SECTOR, crc32};
+use crate::{Guid, crc32};
 
 const SIGNATURE: &[u8; 8] = b"EFI PART";
 /// Nejvetsi tabulka, kterou cteme (spec. minimum je 16 KiB; vetsi tabulky
@@ -112,17 +114,17 @@ struct Header {
 /// Rozebere hlavicku v sektoru `s`, ktera ma lezet na `expected_lba`.
 /// `None` = bez podpisu, `Some(Err)` = podpis je, ale hlavicka je spatne.
 fn parse_header(s: &[u8], expected_lba: u64, sectors: u64) -> Option<Result<Header, ()>> {
+    let ss = s.len();
     if &s[0..8] != SIGNATURE {
         return None;
     }
     let u32_at = |o: usize| u32::from_le_bytes(s[o..o + 4].try_into().unwrap());
     let u64_at = |o: usize| u64::from_le_bytes(s[o..o + 8].try_into().unwrap());
     let size = u32_at(12) as usize;
-    if !(92..=SECTOR).contains(&size) {
+    if !(92..=ss).contains(&size) {
         return Some(Err(()));
     }
-    let mut copy = [0u8; SECTOR];
-    copy[..size].copy_from_slice(&s[..size]);
+    let mut copy = s[..size].to_vec();
     copy[16..20].fill(0);
     if crc32::hash(&copy[..size]) != u32_at(16) {
         return Some(Err(()));
@@ -138,7 +140,7 @@ fn parse_header(s: &[u8], expected_lba: u64, sectors: u64) -> Option<Result<Head
         entries_crc: u32_at(88),
     };
     let table_bytes = h.count as u64 * h.entry_size as u64;
-    let table_sectors = table_bytes.div_ceil(SECTOR as u64);
+    let table_sectors = table_bytes.div_ceil(ss as u64);
     let sane = h.my_lba == expected_lba
         && h.first_usable <= h.last_usable
         && h.last_usable < sectors
@@ -155,10 +157,11 @@ fn parse_header(s: &[u8], expected_lba: u64, sectors: u64) -> Option<Result<Head
 /// spatny kontrolni soucet.
 fn read_entries(
     h: &Header,
+    ss: usize,
     read: &mut impl FnMut(u64, &mut [u8]) -> bool,
 ) -> Option<Option<Vec<u8>>> {
     let bytes = h.count as usize * h.entry_size as usize;
-    let mut raw = vec![0u8; bytes.next_multiple_of(SECTOR)];
+    let mut raw = vec![0u8; bytes.next_multiple_of(ss)];
     if !read(h.entries_lba, &mut raw) {
         return None;
     }
@@ -166,12 +169,12 @@ fn read_entries(
     Some((crc32::hash(&raw) == h.entries_crc).then_some(raw))
 }
 
-/// Precte GPT disku o `sectors` sektorech: primarni hlavicku, pri jeji
-/// poskozeni zalozni.
-pub fn read_table(sectors: u64, read: &mut impl FnMut(u64, &mut [u8]) -> bool) -> Read {
+/// Precte GPT disku o `sectors` sektorech po `ss` bajtech: primarni
+/// hlavicku, pri jeji poskozeni zalozni.
+pub fn read_table(sectors: u64, ss: usize, read: &mut impl FnMut(u64, &mut [u8]) -> bool) -> Read {
     let mut saw_signature = false;
     for lba in [1, sectors - 1] {
-        let mut s = [0u8; SECTOR];
+        let mut s = vec![0u8; ss];
         if !read(lba, &mut s) {
             return Read::Unreadable;
         }
@@ -184,7 +187,7 @@ pub fn read_table(sectors: u64, read: &mut impl FnMut(u64, &mut [u8]) -> bool) -
             Some(Ok(h)) => h,
         };
         saw_signature = true;
-        match read_entries(&h, read) {
+        match read_entries(&h, ss, read) {
             None => return Read::Unreadable,
             Some(None) => continue,
             Some(Some(raw)) => {
@@ -213,34 +216,44 @@ pub struct NewPartition<'a> {
     pub name: &'a str,
 }
 
-/// Pocet polozek a sektoru tabulky, kterou zapisuje [`write`].
+/// Pocet polozek tabulky, kterou zapisuje [`write`] (16 KiB).
 pub const WRITE_ENTRIES: usize = 128;
 pub const WRITE_ENTRY_SIZE: usize = 128;
-pub const WRITE_TABLE_SECTORS: u64 = (WRITE_ENTRIES * WRITE_ENTRY_SIZE / SECTOR) as u64;
-/// Prvni pouzitelny sektor po [`write`] (MBR + hlavicka + tabulka).
-pub const FIRST_USABLE: u64 = 2 + WRITE_TABLE_SECTORS;
+const WRITE_TABLE_BYTES: usize = WRITE_ENTRIES * WRITE_ENTRY_SIZE;
 
-/// Posledni pouzitelny sektor disku o `sectors` sektorech po [`write`].
-pub const fn last_usable(sectors: u64) -> u64 {
-    sectors - 1 - WRITE_TABLE_SECTORS - 1
+/// Sektory tabulky po [`write`] na disku se sektorem `ss` B.
+pub const fn table_sectors(ss: usize) -> u64 {
+    WRITE_TABLE_BYTES.div_ceil(ss) as u64
 }
 
-/// Zapise do obrazu disku `disk` ochranny MBR, primarni i zalozni GPT
-/// s oddily `parts`. Obsah oddilu nemeni. Chyba = oddil mimo pouzitelnou
-/// oblast nebo prilis mnoho oddilu.
-pub fn write(disk: &mut [u8], disk_guid: Guid, parts: &[NewPartition]) -> Result<(), &'static str> {
-    if !disk.len().is_multiple_of(SECTOR) || parts.len() > WRITE_ENTRIES {
-        return Err("spatna velikost disku nebo prilis mnoho oddilu");
+/// Prvni pouzitelny sektor po [`write`] (MBR + hlavicka + tabulka).
+pub const fn first_usable(ss: usize) -> u64 {
+    2 + table_sectors(ss)
+}
+
+/// Posledni pouzitelny sektor disku o `sectors` sektorech po [`write`].
+pub const fn last_usable(sectors: u64, ss: usize) -> u64 {
+    sectors - 1 - table_sectors(ss) - 1
+}
+
+/// Zapise do obrazu disku `disk` se sektorem `ss` B ochranny MBR, primarni
+/// i zalozni GPT s oddily `parts` (meze v sektorech `ss`). Obsah oddilu
+/// nemeni. Chyba = oddil mimo pouzitelnou oblast nebo prilis mnoho oddilu.
+pub fn write(disk: &mut [u8], ss: usize, disk_guid: Guid, parts: &[NewPartition]) -> Result<(), &'static str> {
+    if !crate::valid_sector_size(ss) || !disk.len().is_multiple_of(ss) || parts.len() > WRITE_ENTRIES {
+        return Err("spatna velikost sektoru nebo disku, nebo prilis mnoho oddilu");
     }
-    let sectors = (disk.len() / SECTOR) as u64;
-    if sectors < FIRST_USABLE + WRITE_TABLE_SECTORS + 2 {
+    let sectors = (disk.len() / ss) as u64;
+    let tsec = table_sectors(ss);
+    if sectors < first_usable(ss) + tsec + 2 {
         return Err("disk je prilis maly pro GPT");
     }
     let last_lba = sectors - 1;
-    let last = last_usable(sectors);
-    let mut entries = vec![0u8; WRITE_ENTRIES * WRITE_ENTRY_SIZE];
+    let first = first_usable(ss);
+    let last = last_usable(sectors, ss);
+    let mut entries = vec![0u8; tsec as usize * ss];
     for (p, e) in parts.iter().zip(entries.as_chunks_mut::<WRITE_ENTRY_SIZE>().0.iter_mut()) {
-        if p.first < FIRST_USABLE || p.last > last || p.first > p.last {
+        if p.first < first || p.last > last || p.first > p.last {
             return Err("oddil mimo pouzitelnou oblast");
         }
         e[0..16].copy_from_slice(&p.type_guid);
@@ -252,11 +265,11 @@ pub fn write(disk: &mut [u8], disk_guid: Guid, parts: &[NewPartition]) -> Result
             e[56 + i * 2..58 + i * 2].copy_from_slice(&unit.to_le_bytes());
         }
     }
-    let entries_crc = crc32::hash(&entries);
+    let entries_crc = crc32::hash(&entries[..WRITE_TABLE_BYTES]);
 
-    // Ochranny MBR: jeden oddil typu 0xEE pres cely disk.
+    // Ochranny MBR (prvnich 512 B sektoru 0): jeden oddil 0xEE pres disk.
     {
-        let mbr = &mut disk[..SECTOR];
+        let mbr = &mut disk[..512];
         mbr[446..510].fill(0);
         let entry = &mut mbr[446..462];
         entry[1..4].copy_from_slice(&[0x00, 0x02, 0x00]);
@@ -270,13 +283,13 @@ pub fn write(disk: &mut [u8], disk_guid: Guid, parts: &[NewPartition]) -> Result
     }
 
     let header = |my_lba: u64, alternate: u64, entries_lba: u64| {
-        let mut h = [0u8; SECTOR];
+        let mut h = vec![0u8; ss];
         h[0..8].copy_from_slice(SIGNATURE);
         h[8..12].copy_from_slice(&0x0001_0000u32.to_le_bytes());
         h[12..16].copy_from_slice(&92u32.to_le_bytes());
         h[24..32].copy_from_slice(&my_lba.to_le_bytes());
         h[32..40].copy_from_slice(&alternate.to_le_bytes());
-        h[40..48].copy_from_slice(&FIRST_USABLE.to_le_bytes());
+        h[40..48].copy_from_slice(&first.to_le_bytes());
         h[48..56].copy_from_slice(&last.to_le_bytes());
         h[56..72].copy_from_slice(&disk_guid);
         h[72..80].copy_from_slice(&entries_lba.to_le_bytes());
@@ -287,10 +300,10 @@ pub fn write(disk: &mut [u8], disk_guid: Guid, parts: &[NewPartition]) -> Result
         h[16..20].copy_from_slice(&crc.to_le_bytes());
         h
     };
-    let at = |lba: u64| lba as usize * SECTOR;
-    let backup_entries = last_lba - WRITE_TABLE_SECTORS;
+    let at = |lba: u64| lba as usize * ss;
+    let backup_entries = last_lba - tsec;
     disk[at(1)..at(2)].copy_from_slice(&header(1, last_lba, 2));
-    disk[at(2)..at(2 + WRITE_TABLE_SECTORS)].copy_from_slice(&entries);
+    disk[at(2)..at(2 + tsec)].copy_from_slice(&entries);
     disk[at(backup_entries)..at(last_lba)].copy_from_slice(&entries);
     disk[at(last_lba)..].copy_from_slice(&header(last_lba, 1, backup_entries));
     Ok(())
