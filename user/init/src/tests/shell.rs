@@ -28,16 +28,16 @@ pub const TESTS: &[Test] = &[
     ("console: displej, fokus, psani a vystup", super::console::console),
 ];
 
-struct Window {
+pub(super) struct Window {
     chan: Channel,
 }
 
 impl Window {
-    fn send(&self, m: ClientMsg) -> TestResult {
+    pub(super) fn send(&self, m: ClientMsg) -> TestResult {
         self.chan.write(&m.encode(), Vec::new()).map_err(|e| fail("zapis do termd", e))
     }
 
-    fn recv(&self) -> Result<ServerMsg, String> {
+    pub(super) fn recv(&self) -> Result<ServerMsg, String> {
         let msg = self
             .chan
             // V plnem behu je fsd po predchozich testech pomaly (radek se
@@ -64,7 +64,7 @@ impl Window {
 
     /// Spusti radek; vrati polozky jeho bloku a vysledek (bloky uloh
     /// `async`, ktere radek spusti, se preskoci).
-    fn run(&self, session: u64, line: &str) -> Result<(Vec<Item>, bool), String> {
+    pub(super) fn run(&self, session: u64, line: &str) -> Result<(Vec<Item>, bool), String> {
         self.send(ClientMsg::Run { session, line: line.into() })?;
         let mut items = Vec::new();
         let mut ours = None;
@@ -82,7 +82,7 @@ impl Window {
         }
     }
 
-    fn ok(&self, session: u64, line: &str) -> Result<Vec<Item>, String> {
+    pub(super) fn ok(&self, session: u64, line: &str) -> Result<Vec<Item>, String> {
         let (items, ok) = self.run(session, line)?;
         if !ok {
             return Err(alloc::format!("'{line}' selhal: {items:?}"));
@@ -91,7 +91,7 @@ impl Window {
     }
 
     /// Hodnota jedineho vystupu radku.
-    fn value(&self, session: u64, line: &str) -> Result<Value, String> {
+    pub(super) fn value(&self, session: u64, line: &str) -> Result<Value, String> {
         let items = self.ok(session, line)?;
         items
             .into_iter()
@@ -105,9 +105,9 @@ impl Window {
 
 /// Registr relaci (roli supervisoru tu hraje test): drzi nahradni konce
 /// kanalu relaci, aby prezily konec termd.
-struct Reg {
-    store: Registry<Handle>,
-    chan: Option<Channel>,
+pub(super) struct Reg {
+    pub(super) store: Registry<Handle>,
+    pub(super) chan: Option<Channel>,
 }
 
 impl Reg {
@@ -144,17 +144,26 @@ impl Reg {
 
 /// Spusti termd s FS, initfs a novym kanalem registru; vrati okno.
 fn start_termd(s: &Startup, reg: &mut Reg) -> Result<(Process, Window), String> {
+    start_termd_with(s, reg, None)
+}
+
+/// Jako `start_termd`, navic s kanalem ke zvukove sluzbe (treti handle).
+pub(super) fn start_termd_with(s: &Startup, reg: &mut Reg, audio: Option<Channel>) -> Result<(Process, Window), String> {
     let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
     let own = fs.connect().map_err(|e| fail("nova relace fsd", e))?;
     let initfs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let image = initfs.find("termd").ok_or("termd neni v initfs")?;
     let vmo = s.initfs.as_ref().ok_or("initfs chybi")?;
     let (here, there) = Channel::create().map_err(|e| fail("kanal registru", e))?;
-    let handles = alloc::vec![
+    let mut handles = alloc::vec![
         StartHandle::user(own.into_channel().into_handle()),
         StartHandle::user(there.into_handle()),
         StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None).map_err(|e| fail("initfs", e))?),
     ];
+    if let Some(a) = audio {
+        // Zvuk je volitelny handle se stitkem (poradi nehraje roli).
+        handles.push(StartHandle::tagged(term::ctl::tag::AUDIO, a.into_handle()));
+    }
     let (proc, chan) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
     reg.chan = Some(here);
     reg.pump(true)?;

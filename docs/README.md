@@ -53,6 +53,12 @@ site menu.
 | [Ovladače](cs/ovladace.md) | [Drivers](en/drivers.md) | příručka autora ovladače: architektura, bezpečnost, sada driverkit, první ovladač krok za krokem, manifest, simulace hardwaru, zdroje a licence, Rust nebo převzaté C, ladění, kontrolní seznam / driver author's guide: architecture, security, the driverkit, first driver step by step, manifest, hardware simulation, sources and licences, Rust or adopted C, debugging, checklist |
 | [Ovladač edu](cs/ovladac-edu.md) | [Driver edu](en/driver-edu.md) | ukázkový ovladač pro zařízení QEMU edu / sample driver for the QEMU edu device |
 
+### Zvuk / Audio
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Zvuk](cs/zvuk.md) | [Audio](en/audio.md) | ovladač Intel HDA, kodeky, cesty k výstupům a vstupu, HDMI, služba audiod, protokol se sdílenými buffery, mix, nahrávání a převod frekvence, latence, obnova po pádu, příkaz `audio` / Intel HDA driver, codecs, output and input paths, HDMI, audiod service, shared-buffer protocol, mixing, recording and rate conversion, latency, crash recovery, the `audio` command |
+
 ### Grafika / Graphics
 
 | Česky | English | Obsah / Contents |

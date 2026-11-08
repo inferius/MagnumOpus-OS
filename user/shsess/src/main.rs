@@ -34,6 +34,7 @@ use term::session::{Env, Link, Service};
 use term::taskboard::Chan;
 use term::tasks::{Clock, Joinable, Notify};
 
+mod audio;
 mod ai;
 mod fs;
 
@@ -55,6 +56,10 @@ struct MainLink<'a> {
 /// Kanal k initu pro `shutdown`/`reboot` (zprava `SessMsg::Power` od termd).
 static POWER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
+/// Relace zvukove sluzby (zprava `SessMsg::Audio` od termd: kanal a listek);
+/// `SysEnv` si ji vezme pri prvnim prikazu `audio`.
+static AUDIO: spin::Mutex<Option<audioproto::conn::AudioClient>> = spin::Mutex::new(None);
+
 impl MainLink<'_> {
     fn client(&mut self, r: Result<libos::Message, Error>) -> Option<ClientMsg> {
         match r {
@@ -67,6 +72,17 @@ impl MainLink<'_> {
                 Ok(SessMsg::Power) => {
                     if let Some(h) = m.handles.into_iter().next() {
                         *POWER.lock() = Some(Channel::from_handle(h));
+                    }
+                    None
+                }
+                Ok(SessMsg::Audio) => {
+                    let mut hs = m.handles.into_iter().map(Channel::from_handle);
+                    if let Some(ch) = hs.next() {
+                        let c = match hs.next() {
+                            Some(lease) => audioproto::conn::AudioClient::with_lease(ch, lease),
+                            None => audioproto::conn::AudioClient::new(ch),
+                        };
+                        *AUDIO.lock() = Some(c);
                     }
                     None
                 }
@@ -144,6 +160,10 @@ struct SysEnv {
     spawner: Option<FsClient>,
     tag: String,
     notify: Option<Arc<EventNotify>>,
+    /// Zvukova sluzba (`None` = relace ji nedostala) a prave prehravany
+    /// stream prikazu `audio`.
+    audio: Option<audioproto::conn::AudioClient>,
+    playing: Option<audioproto::conn::Stream>,
     /// Prikaz `ai` (relace agenta AI).
     ai: ai::Ai,
     home: String,
@@ -162,6 +182,14 @@ impl SysEnv {
 }
 
 impl Env for SysEnv {
+    fn audio(&mut self, req: shlang::host::AudioReq) -> Option<Result<shlang::value::Value, shlang::ShError>> {
+        if self.audio.is_none() {
+            self.audio = AUDIO.lock().take();
+        }
+        let client = self.audio.as_ref()?;
+        Some(audio::handle(client, &mut self.playing, req))
+    }
+
     fn now(&mut self) -> Option<i64> {
         wall_ns()
     }
@@ -293,6 +321,8 @@ fn main(startup: Startup) -> i64 {
         notify: notify.clone(),
         ai: ai::Ai::new(agent_gate),
         home: home.clone(),
+        audio: None,
+        playing: None,
         task_producer: None,
         task_client: None,
     };

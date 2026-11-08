@@ -71,6 +71,11 @@ impl Interp {
         self.draft.read(host.fs(), p).map_err(|e| sys(e, alloc::format!("{p} nejde precist")))
     }
 
+    pub(crate) fn fs_read_range(&mut self, host: &mut dyn Host, p: &str, offset: u64, len: usize) -> R<Vec<u8>> {
+        self.check_read(p)?;
+        self.draft.read_range(host.fs(), p, offset, len).map_err(|e| sys(e, alloc::format!("{p} nejde precist")))
+    }
+
     pub(crate) fn fs_write(&mut self, host: &mut dyn Host, p: &str, data: Vec<u8>) -> R<()> {
         self.check_write(p)?;
         let r = self.draft.write(host.fs(), p, &data);

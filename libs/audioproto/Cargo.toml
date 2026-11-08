@@ -1,0 +1,19 @@
+[package]
+name = "audioproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol zvuku (aplikace <-> audiod, audiod <-> ovladac zvukove karty)"
+
+[features]
+# Klientska knihovna nad kanaly (AudioClient, Stream); zapina ji, kdo ji
+# pouziva (shell, testy, aplikace). Bez ni zustanou jen formaty zprav
+# a sdileny kruhovy buffer - ty jdou testovat na hostiteli.
+default = []
+client = ["dep:libos", "dep:svcclient"]
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }
+libos = { path = "../libos", optional = true }
+svcclient = { path = "../svcclient", features = ["client"], optional = true }

@@ -156,6 +156,10 @@ impl Draft {
         self.read_op(fs, path, |fs, p| fs.read(p))
     }
 
+    pub fn read_range(&mut self, fs: &mut dyn Fs, path: &str, offset: u64, len: usize) -> FsResult<Vec<u8>> {
+        self.read_op(fs, path, |fs, p| fs.read_range(p, offset, len))
+    }
+
     pub fn write(&mut self, fs: &mut dyn Fs, path: &str, data: &[u8]) -> FsResult<()> {
         let p = self.resolve(fs, path, true)?;
         fs.write(&p, data)

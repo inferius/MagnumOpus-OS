@@ -1,0 +1,8 @@
+[package]
+name = "hdaspec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Intel High Definition Audio bez hardwaru: registry, verby, parametry, graf widgetu a hledani cest"
+
+[dependencies]

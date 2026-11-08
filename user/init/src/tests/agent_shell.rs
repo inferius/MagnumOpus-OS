@@ -56,7 +56,8 @@ pub fn ai_command(s: &Startup) -> TestResult {
     let image = initfs.find("termd").ok_or("termd neni v initfs")?;
     let vmo = s.initfs.as_ref().ok_or("initfs chybi")?;
     let (reg, there) = Channel::create().map_err(|e| fail("kanal", e))?;
-    // Poradi handlu termd: FS, registr, (initfs), napajeni, brana agenta.
+    // Poradi handlu termd: FS, registr, (initfs), napajeni; brana agenta
+    // se stitkem.
     // Kanal napajeni test jen drzi (pozadavky relaci nevyrizuje).
     let (_power, power_there) = Channel::create().map_err(|e| fail("kanal", e))?;
     let handles = alloc::vec![
@@ -64,7 +65,7 @@ pub fn ai_command(s: &Startup) -> TestResult {
         StartHandle::user(there.into_handle()),
         StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None).map_err(|e| fail("initfs", e))?),
         StartHandle::user(power_there.into_handle()),
-        StartHandle::user(gate),
+        StartHandle::tagged(term::ctl::tag::AGENT, gate),
     ];
     let (proc, w) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
     // Registr relaci: odpovedet na Claim (zadne relace k prevzeti).

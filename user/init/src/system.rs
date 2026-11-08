@@ -55,6 +55,8 @@ pub struct Devices {
     pub _rngs: Vec<Channel>,
     /// Kanaly k ovladacum grafiky (dokud je neprevezme kompozitor).
     pub displays: Vec<Channel>,
+    /// Kanaly k ovladacum zvukovych karet (dokud je neprevezme audiod).
+    pub audios: Vec<Channel>,
     /// Ovladace z manifestu (`dev <jmeno>` od devmgr, viz
     /// `docs/cs/ovladace.md`): jmeno, kanal ke klientovi, kolikaty start.
     /// Po padu ovladace prijde novy kanal a nahradi stary.
@@ -128,6 +130,14 @@ pub fn devmgr_message(d: &Devices, m: libos::Message) -> usize {
             println!("init: disk pripojeny za behu zatim nepouzivam");
             0
         }
+        // Zvukova karta pripojena nebo jeji ovladac restartovany (devmgr).
+        b"audio" => {
+            let n = m.handles.len();
+            for h in m.handles {
+                crate::audio::driver_added(Channel::from_handle(h));
+            }
+            n
+        }
         other => {
             println!("init: neznama zprava od devmgr: {:?}", other);
             0
@@ -179,6 +189,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let mut nets = Vec::new();
     let mut rngs = Vec::new();
     let mut displays = Vec::new();
+    let mut audios = Vec::new();
     let keys = spin::Mutex::new(Vec::new());
     let drivers = spin::Mutex::new(Vec::new());
     loop {
@@ -201,6 +212,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
             b"net" => nets.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"rng" => rngs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"display" => displays.extend(msg.handles.into_iter().map(Channel::from_handle)),
+            b"audio" => audios.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"fido" => keys.lock().extend(msg.handles.into_iter().map(Channel::from_handle)),
             d if d.starts_with(b"display-native ") => crate::display_native::add(d, msg.handles),
             m if m.starts_with(b"dev ") => {
@@ -224,6 +236,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         nets,
         _rngs: rngs,
         displays,
+        audios,
         drivers,
         keys,
         fs: None,
