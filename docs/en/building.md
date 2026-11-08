@@ -54,7 +54,7 @@ translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" and the
 "IOMMU chrani pamet mimo DMA" tests of the `disky` suite then fail as expected),
 `--data-disk <virtio|nvme|nvme4k|ahci|usb>` (data disk controller, default `virtio`; `nvme4k` = NVMe with 4 KiB sectors; `usb` = a flash
 drive on xHCI; on NVMe, AHCI and USB the disk gets a GPT with our partition, see [Disks](disks.md)),
-`--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
+`--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>` (on Windows `whpx` = Windows Hypervisor Platform, much faster than the default emulation), `--res <WxH>` (x86_64: default resolution, e.g. `--res 1920x1080`; with a window the pointer is a tablet, so it matches even after resizing the window), `-- <QEMU args>` (e.g. `-- -smp 8`,
 `-- -cpu max,-x2apic`).
 
 The file system has its own host tests (fast, no QEMU):

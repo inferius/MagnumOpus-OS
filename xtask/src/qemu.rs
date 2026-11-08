@@ -288,6 +288,16 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
     Ok(())
 }
 
+/// Ukazatel: pri behu s oknem tablet (absolutni poloha, sedi i po
+/// roztazeni okna QEMU), v testech mys (relativni pohyb z QMP).
+fn pointer_device(opts: &Options) -> &'static str {
+    if opts.test {
+        "virtio-mouse-pci,iommu_platform=on,display=video0"
+    } else {
+        "virtio-tablet-pci,iommu_platform=on,display=video0"
+    }
+}
+
 /// Stroj q35 s OVMF. Vraci, zda smi systemovy disk prochazet IOMMU.
 fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     cmd.arg("-machine")
@@ -295,7 +305,13 @@ fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
         .args(["-cpu", "max", "-smp", "4", "-m", "512M"]);
     // Graficka karta s vlastnim id (jinak stejna jako vychozi `-vga std`
     // na 00:01.0): k jeji konzoli se navazi klavesnice a mys virtio, viz nize.
-    cmd.args(["-vga", "none", "-device", "VGA,id=video0"]);
+    // `--res`: preferovany rezim v EDID karty (firmware a ovladac
+    // bochs-display ho vezmou jako vychozi rozliseni).
+    let vga = match opts.res {
+        Some((w, h)) => format!("VGA,id=video0,edid=on,xres={w},yres={h}"),
+        None => String::from("VGA,id=video0"),
+    };
+    cmd.args(["-vga", "none", "-device", &vga]);
     // IOMMU (Intel VT-d nebo AMD-Vi) pred zarizenimi PCI, ktera preklada;
     // preklad preruseni zatim ne (intremap=off).
     match opts.iommu.as_str() {
@@ -315,7 +331,7 @@ fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     // s `device=video0` jdou do nich, udalosti QMP bez zarizeni do
     // PS/2 (radic i8042 ma q35 vzdy). QMP slouzi testu vstupu.
     cmd.args(["-device", "virtio-keyboard-pci,iommu_platform=on,display=video0"])
-        .args(["-device", "virtio-mouse-pci,iommu_platform=on,display=video0"])
+        .args(["-device", pointer_device(opts)])
         // USB: radic xHCI s klavesnici (ovladace xhci, usb-hub, usb-hid),
         // navazanou na konzoli druhe graficke karty, aby ji QMP umelo
         // oslovit zvlast (`device=video1`). Mys USB nema vlastnost
@@ -354,7 +370,7 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     cmd.args(["-device", "ramfb,id=video0"])
         .args(["-device", "bochs-display,id=video1"])
         .args(["-device", "virtio-keyboard-pci,iommu_platform=on,display=video0"])
-        .args(["-device", "virtio-mouse-pci,iommu_platform=on,display=video0"])
+        .args(["-device", pointer_device(opts)])
         .args(["-device", "qemu-xhci,id=xhci"])
         .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"]);
     gpu_device(cmd, opts);
