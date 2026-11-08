@@ -287,17 +287,209 @@ Zásady (odsouhlasené):
 
 ## Šifrované trezory
 
-- Trezor = **dataset se šifrováním**: data, jména, metadata i jeho
-  snapshoty (XChaCha20-Poly1305 nebo AES-256-GCM podle CPU). Hlavní klíč
-  je náhodný a odemykají ho „ochránci“: heslo (Argon2id), povinný
-  obnovovací klíč, volitelně FIDO2 nebo TPM (viz
-  [Další pojistky](#další-pojistky); TPM nikdy jako jediný).
-- Součty v ukazatelích jsou nad zašifrovanými daty + autentizační značka
-  šifry, takže scrub a samoléčení fungují bez klíče.
-- **Zamčený trezor** je vidět jako složka se zámkem; obsah ani počet
-  souborů nejsou vidět. Klíč je jen v paměti po odemčení.
-- **Okamžité bezpečné smazání:** smazání klíče = data nevratně nečitelná.
-- Pořadí: komprese před šifrováním; deduplikace jen uvnitř trezoru.
+> **Změna proti návrhu v3 (fáze 4, podrobný návrh):** dřív jen odrážky.
+> Nově rozhodnuto: bez klíče zůstanou čitelné **jen ukazatele** (poloha
+> bloků a jejich součty, jako ZFS), **odvození klíče z hesla a FIDO2 dělá
+> klient**, FS dostane jen 32bajtový klíč obalu, **obě šifry hned**
+> (XChaCha20-Poly1305 i AES-256-GCM), **obnovovací klíč je obal** hlavního
+> klíče (jako BitLocker a LUKS). **Proč:** scrub, samoléčení, mazání
+> a zálohy musí fungovat i u zamčeného trezoru; fsd nesmí stát půl sekundy
+> na Argon2id kvůli jednomu klientovi; prozrazený obnovovací klíč musí jít
+> vyměnit bez přešifrování dat.
+
+Trezor = **dataset se šifrováním**: obsah souborů, jména, metadata
+(velikosti, časy, oprávnění, atributy), žurnál, koš i snapshoty a klony.
+Kryptografie je převzatá z RustCrypto (`chacha20poly1305`, `aes-gcm`,
+`hkdf`, `argon2`, `zeroize`), žádná vlastní.
+
+### Klíče
+
+```text
+ochránce (heslo / obnovovací klíč / FIDO2 / služba / TPM)
+   │ klient odvodí klíč obalu KEK (32 B): Argon2id, hmac-secret, HKDF
+   ▼
+záznam klíčů trezoru (keyring, nešifrovaný, v kořenovém datasetu)
+   │ AEAD(KEK) obal ──> hlavní klíč MK (256 bitů, náhodný, jen v paměti)
+   ▼
+HKDF(MK, účel) ──> klíč dat, klíč metadat, klíč jmen deduplikace,
+                   klíč intent logu (každý účel vlastní klíč)
+```
+
+- **Hlavní klíč** je náhodný, vznikne při vytvoření trezoru a nikdy se
+  nemění (výměna = nový trezor a kopie). Změna ochránců data
+  nepřešifrovává, mění jen záznam klíčů.
+- **Klíč obalu (KEK)** dodá klient: FS sám heslo nevidí. Parametry
+  odvození (sůl, Argon2id m/t/p, id přihlašovacích údajů FIDO2) ukládá FS
+  u ochránce, aby je klient znal i na jiném počítači.
+- **Klony a snapshoty trezoru** sdílejí hlavní klíč (sdílené bloky musí jít
+  číst). Klon jinam než do trezoru se stejným klíčem nejde.
+
+### Ochránci
+
+| Druh | KEK | Poznámka |
+|---|---|---|
+| heslo | Argon2id(heslo, sůl, m, t, p) v klientovi | výchozí m = 256 MiB, t = 3, p = 1 (jako accountd); parametry uložené |
+| **obnovovací klíč** | HKDF(256 náhodných bitů) | **povinný**: trezor bez něj nejde vytvořit a poslední nejde odebrat; uživateli se ukáže jen jednou (48 znaků base32 s kontrolními znaky) |
+| FIDO2 | hmac-secret(sůl) z bezpečnostního klíče | uloženo id přihlašovacích údajů a sůl; klient obsluhuje klíč přes accountproto/ctap |
+| služba | HKDF(klíč od služby) | domov uživatele: klíč dodá accountd přes init; accountd má vlastní obaly pro každou metodu přihlášení a vlastní obnovovací klíč, proto u trezoru druhu domov FS obnovovací ochránce nevynucuje |
+| TPM | - | zatím jen rozhraní (`NOT_SUPPORTED`); nikdy jediný ochránce |
+
+Ochránce smí přidat, odebrat nebo přejmenovat jen ten, kdo trezor právě
+odemkl (FS zná MK) a má právo *Spravovat* ke kořeni trezoru.
+
+### Co je šifrované a co ne
+
+| Vidět bez klíče | Šifrované |
+|---|---|
+| že dataset je trezor, jeho jméno v nadřazené složce, ochránci (druh, jméno, parametry) | jména souborů a složek, struktura adresářů |
+| obsazené místo trezoru celkem | velikosti, časy, oprávnění, atributy, počet souborů |
+| poloha bloků, délky extentů a jejich součty (pro scrub a samoléčení) | obsah souborů (i malých v listu), symlinky |
+| počet uzlů stromu (přibližný objem metadat) | žurnál změn, koš, jména a metadata snapshotů |
+
+⚠️ **Vědomě přijatý únik:** délky extentů a počet uzlů prozradí přibližné
+rozložení velikostí velkých souborů a objem metadat (stejně jako ZFS).
+Jména, obsah ani přesný počet souborů ne. Komprese před šifrováním
+prozradí stlačitelnost (délku po kompresi); v trezoru je proto komprese ve
+výchozím stavu vypnutá jako všude a zapnutí trezoru ukáže upozornění.
+
+### Na disku
+
+- **Uzel stromu trezoru:** hlavička nešifrovaná (magic, úroveň, generace,
+  příznak „šifrováno“, nonce, autentizační značka 16 B). Vnitřní uzel má
+  nešifrované **jen ukazatele na potomky** (poloha, délka, součet, kopie,
+  generace); klíče potomků (oid, druh položky) jsou šifrované. List má
+  nešifrovanou **tabulku ukazatelů** (každý blok, na který odkazuje:
+  extent dat se součty bloků, kořen snapshotu, uzel sdíleného stromu)
+  a šifrovanou část s položkami, které se na tabulku odkazují indexem.
+- **Extent dat:** každý blok zvlášť AEAD (čtení 4 KiB nemusí dešifrovat
+  celý extent). Značka 16 B na blok je v šifrované části listu, součet
+  šifrovaného bloku (XXH3/BLAKE3) v nešifrované tabulce. Režie 32 B na
+  blok 4 KiB = 0,8 %.
+- **Součty jsou nad šifrovanými daty**, takže scrub, samoléčení z kopie,
+  přesun bloků (defragmentace) a send fungují bez klíče. Značka navíc
+  odhalí úmyslnou změnu, kterou součet bez klíče nepozná (útočník umí
+  přepočítat XXH3): změněný ciphertext = `CORRUPTED`, nikdy podvržená data.
+- **Vazba na strom:** AEAD uzlu má jako přidaná data (AAD) nešifrovanou
+  hlavičku, id trezoru a **součty, délky a generace** z tabulky ukazatelů
+  (ne polohu). Podstrom tak nejde vyměnit za jiný nebo starší, ale
+  přesunout blok (defragmentace, samoléčení) jde bez klíče - změní se jen
+  poloha. Totéž značky bloků dat: tabulka se součty je v AAD listu.
+  ⚠️ Návrat **celého** trezoru ke staršímu platnému stavu (podvržený
+  záznam datasetu v kořenovém datasetu) bez klíče nejde odhalit - stejně
+  jako u ZFS; brání tomu až ověřený systém (podpis kořene).
+- **Nonce:**
+  - XChaCha20-Poly1305: náhodný 192bitový základ na extent nebo uzel,
+    blok `i` = základ XOR `i` (náhodná nonce bez stavu, kolize zanedbatelná),
+  - AES-256-GCM: 96 bitů = **epocha** (32 bitů) + čítač v paměti (64 bitů).
+    Epocha je v záznamu klíčů a zvýší se a uloží commitem při každém
+    odemčení, **dřív než se cokoli zašifruje**. Po pádu se čítač neopakuje
+    (nová epocha), takže dvojí použití nonce nehrozí ani po výpadku proudu.
+    Náhodná 96bitová nonce by u miliard bloků nestačila.
+  - Šifra se volí při vytvoření trezoru: AES-256-GCM, když CPU má AES
+    v hardwaru (AES-NI, ARMv8 Crypto), jinak XChaCha20-Poly1305; uložená
+    v záznamu klíčů.
+- **Záznam klíčů** (položka `KEYRING` v kořenovém datasetu + kopie
+  `KEYRING_COPY`; s metadaty 2x = 4 kopie na disku): verze, šifra, epocha,
+  otisk MK (HKDF, ne MK sám), ochránci (id, druh, jméno, parametry, nonce,
+  obalený MK + značka). Změna ochránců = jeden commit (obě položky
+  najednou): po pádu platí celý starý, nebo celý nový záznam.
+- **Intent log:** v trezoru `fsync` dělá **commit** místo zápisu do logu
+  (log se přehrává při připojení, kdy trezor ještě není odemčený).
+  Cena: `fsync` v trezoru ~25-50 ms místo ~5 ms v QEMU.
+- Příznak vlastnosti `INCOMPAT_VAULT` (starší ovladač svazek s trezorem
+  nepřipojí - zapisoval by nešifrovaně).
+
+### Zamčený trezor
+
+- Ve výpisu nadřazené složky je to položka druhu `Dataset` s příznakem
+  **zamčeno**; `stat` kořene, výpis a otevření čehokoli uvnitř vrátí
+  `LOCKED`. Velikost obsahu a počet souborů se nehlásí (obsazené místo
+  trezoru celkem je vidět jen ve správě disku).
+- **Zamčení** (`VAULT_LOCK`, odhlášení, uspání podle profilu): commit
+  změn trezoru, vyhození dešifrovaných uzlů a dat z mezipaměti, vynulování
+  MK a odvozených klíčů (`zeroize`). Otevřené handly pak vrací `LOCKED`
+  (trvalé handly klientů po odemčení projdou `REOPEN`).
+- **Pád fsd** = všechny trezory zamčené (klíče byly jen v paměti). Domov
+  odemkne znovu accountd: klíč domova drží po dobu relace a po restartu fsd
+  (`Happened::Restarted`) ho pošle přes init znovu. Ostatní trezory musí
+  odemknout uživatel.
+- Scrub, samoléčení, defragmentace, zálohy (send) a **smazání celého
+  trezoru** fungují i zamčené (jen přes ukazatele). Smazat snapshot nebo
+  soubor uvnitř jde jen odemčené.
+
+### Okamžité bezpečné smazání
+
+`VAULT_DESTROY` nejdřív smaže záznam klíčů (commit) - od té chvíle jsou
+data nečitelná i pro toho, kdo zná heslo nebo obnovovací klíč - a pak
+uvolní bloky průchodem ukazatelů (bez klíče, na pozadí). ⚠️ Kopie MK
+mohou přežít v klonech trezoru (sdílí klíč) a v exportované záloze
+záznamu klíčů; smazání to řekne výslovně. Bloky na SSD fyzicky zmizí až
+po TRIM.
+
+### Komprese a deduplikace
+
+- Komprese **před** šifrováním (šifrovaná data se nezkomprimují).
+- Deduplikace **jen uvnitř trezoru a jeho klonů**: index používá klíčovaný
+  hash (HMAC s klíčem deduplikace z MK) místo hashe obsahu, takže z indexu
+  nejde poznat shodu s daty mimo trezor. Okamžitá kopie (reflink) mezi
+  trezorem a okolím = obyčejná kopie (dešifrovat a zašifrovat jiným
+  klíčem).
+
+### Protokol (fsproto, nové operace)
+
+| Operace | Kdo | Význam |
+|---|---|---|
+| `VAULT_CREATE` | právo *Vytvořit* v rodiči | cesta, šifra (auto), ochránci (druh, jméno, parametry, KEK); bez obnovovacího ochránce (nebo druhu služba) `INVALID_ARGS`; vrátí id trezoru |
+| `VAULT_UNLOCK` | kdokoli s viditelností trezoru | id ochránce, KEK; špatný KEK = `ACCESS_DENIED` (zpomalení po chybách); odemčení platí pro celý systém, přístup dál řídí oprávnění |
+| `VAULT_LOCK` | *Spravovat* nebo ten, kdo odemkl | viz zamčení |
+| `VAULT_STATUS` | s viditelností | `locked` / `unlocked`, šifra, ochránci bez obalů (pro klienta: sůl, parametry) |
+| `VAULT_ADD_PROTECTOR` / `VAULT_REMOVE_PROTECTOR` | odemčený + *Spravovat* | poslední obnovovací ochránce nejde odebrat |
+| `VAULT_EXPORT_KEYRING` | odemčený + *Spravovat* | záznam klíčů jako soubor (záloha proti poškození záznamu; bez ochránce je k ničemu) |
+| `VAULT_DESTROY` | *Spravovat* + *Smazat* | okamžité bezpečné smazání |
+
+Domov uživatele (accountd): `ENCRYPT_HOME` -> accountd vytvoří klíč domova
+a své obaly -> init `VAULT_CREATE` s ochráncem druhu služba;
+`UNLOCK_HOME { uid, key }` -> init `VAULT_UNLOCK`; odhlášení -> `VAULT_LOCK`.
+Klíč domova se v initu po předání vynuluje.
+
+### ⚠️ Riziko ztráty dat
+
+| Situace | Následek | Ochrana |
+|---|---|---|
+| zapomenuté heslo bez obnovovacího klíče | **data trezoru natrvalo ztracená** - nikdo je neobnoví (to je smysl šifrování) | obnovovací klíč povinný; vytvoření ho ukáže a nechá opsat a ověřit (zadat zpět); nastavení upozorní na trezor s jediným ochráncem kromě obnovy |
+| poškozený záznam klíčů | heslo ani obnovovací klíč nepomůžou | záznam 2x jako položka a s metadaty 2x = 4 kopie; samoléčení z kopie; export záznamu (`VAULT_EXPORT_KEYRING`) - záloha je bez ochránce bezcenná, smí do cloudu |
+| výpadek proudu při změně ochránců | - | změna je jeden commit: celý starý, nebo celý nový záznam; nový ochránce se přidá dřív, než se starý odebere (rozhraní nedovolí opačné pořadí) |
+| výpadek proudu při odemčení (epocha AES-GCM) | - | epocha se uloží commitem dřív, než se cokoli zašifruje |
+| pád fsd, výpadek proudu | trezor zamčený, neuložené změny jako všude (od posledního commitu) | `fsync` v trezoru = commit |
+| klíč v paměti | čitelný z výpisu paměti fsd nebo ze swapu | klíče jen v `Zeroizing`, vynulované při zamčení; swap zatím není (až bude, musí být šifrovaný); výpis paměti fsd jen pro správu |
+| smazání trezoru omylem | `VAULT_DESTROY` je okamžitě nevratné | rozhraní chce potvrzení jménem trezoru; neměnné snapshoty nadřazeného datasetu trezor nechrání (je to samostatný dataset), proto průzkumník nabídne nejdřív export záznamu klíčů a zálohu |
+
+### Testy
+
+- model: náhodné operace v trezoru proti modelu, zamykání a odemykání,
+  snapshoty a klony, kontrola konzistence,
+- výpadky proudu: při vytvoření, změně ochránců, odemčení (epocha),
+  commitu, zamčení a smazání trezoru,
+- špatný klíč: `ACCESS_DENIED`, žádná data, zpomalení,
+- manipulace: změna bitu v šifrovaném bloku i uzlu se **správně
+  přepočítaným součtem** musí skončit `CORRUPTED`; také výměna dvou bloků
+  nebo podstromů téhož trezoru a podstrom ze staršího snapshotu (AAD),
+  přesun bloku bez klíče (defragmentace) naopak musí projít,
+- únik: v surovém obrazu disku se nesmí najít jméno ani obsah souboru
+  z trezoru; zamčený trezor nehlásí velikost ani počet,
+- scrub a samoléčení zamčeného trezoru, smazání zamčeného trezoru uvolní
+  místo,
+- nonce: všechny nonce za běh testu jedinečné (AES-GCM i po výpadku),
+- QEMU: trezor přes fsd, zamčení s otevřenými handly, pád fsd.
+
+### Pořadí implementace (fáze 4a)
+
+1. záznam klíčů, ochránci, protokol, zamčený pohled (data ještě
+   nešifrovaná - jen kostra a testy rozhraní),
+2. šifrování dat (extenty, malé soubory v listu),
+3. šifrování metadat (uzly s tabulkou ukazatelů), žurnál, koš, snapshoty,
+4. deduplikace v trezoru, scrub a smazání bez klíče, `fsync` = commit,
+5. napojení accountd (domov), testy v QEMU.
 
 ## Indexy, štítky, vyhledávání
 

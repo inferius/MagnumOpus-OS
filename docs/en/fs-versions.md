@@ -135,6 +135,25 @@ only once the mode is decided); defragmentation skips shared, compressed and
 preallocated extents; compression is **off** by default (on NVMe it would
 slow a long write several times).
 
+### Phase 4a: encrypted vaults (design, `INCOMPAT_VAULT`)
+
+> **Change from v3 (phase 3):** a design, no code yet. A dataset can be
+> a **vault**: contents, names and metadata encrypted (XChaCha20-Poly1305
+> or AES-256-GCM), the master key unlocked by protectors (password,
+> mandatory recovery key, FIDO2, a service key for the home; TPM only an
+> interface). **Why:** privacy of data on a stolen or retired disk and an
+> encrypted user home (accounts service). Details: [design, Encrypted
+> vaults](fs-v3-design.md#encrypted-vaults).
+
+| Area | Phase 3 | Phase 4a (plan) | Why |
+|---|---|---|---|
+| tree node | entirely plaintext | in a vault: plaintext header and pointers, encrypted keys and items; nonce and tag in the header | scrub, self-healing and deletion without the key; names and metadata hidden |
+| extent | block checksums | in a vault: checksums over the encrypted blocks (plaintext table of the leaf) + an AEAD tag per block (encrypted part) | integrity without the key, authenticity with it |
+| root dataset items | 1-29 | + `KEYRING`, `KEYRING_COPY` (the vault keyring) | protectors must be readable for a locked vault too; 4 copies against key loss |
+| dataset record | no encryption | + vault flag, keyring id | recognise a vault without the key |
+| intent log | all datasets | not used by a vault (`fsync` = commit) | the log is replayed before unlocking |
+| protocol | ops 110-118 | + `VAULT_*` operations (numbers at implementation) | create, unlock, lock, protectors, secure deletion |
+
 ### Remaining in v3
 
 Phases 4-6 (protection, other, cloud) - order in the [design](fs-v3-design.md#implementation-order).
