@@ -186,6 +186,7 @@ značkou:
 | `IDEV` | verze u16 (1), schopnosti u16 (`KEYBOARD` 1, `POINTER` 2, `ABSOLUTE` 4, `MEDIA` 8 = jen multimediální klávesy), jméno UTF-8 (nejvýš 128 B) |
 | `IEVT` | události po 8 B: typ u16, kód u16, hodnota i32 (nejvýš 1024 v jedné zprávě) |
 | `IAXS` | rozsahy absolutních os po 12 B: kód u16, rezerva u16, min i32, max i32 (zdroj se schopností `ABSOLUTE` 4, po představení) |
+| `ISYN` | synchronizace: číslo u32. Jediná zpráva služba -> zdroj: nová instance po restartu se ptá, zdroj odpoví stejnou zprávou a pak znovu `IDEV` (a `IAXS`). Viz [Obnova po pádu](#obnova-po-pádu) |
 
 Události mají tvar evdev a kódy se berou z Linuxu (`inputproto::code`):
 
@@ -314,6 +315,8 @@ je jméno z [chyb](chyby.md), např. `err NOT_FOUND`.
 | Příkaz | Handly | Odpověď |
 |---|---|---|
 | `device` | kanál ke zdroji | `ok`; nad 32 zdrojů `err NO_RESOURCES` |
+| `device sync` | kanál ke zdroji, který měla předchozí instance | `ok`; služba zdroji pošle `ISYN` a do odpovědi zahazuje jeho zprávy |
+| `restarted` | - | `ok`; instance po pádu předchozí: nový vlastník fokusu dostane nejdřív `Focus(false)`, s kanálem `secure` začne v bezpečném režimu |
 | `focus` | kanál nového vlastníka fokusu | `ok`; předchozí dostane `Focus(false)`, nový `Focus`, `Layout`, `Injection` |
 | `secure` | kanál pro bezpečnou zkratku | `ok` |
 | `inject` | - | `ok` + kanál nového zdroje umělého vstupu |
@@ -415,6 +418,56 @@ vždy.
 500 ms a pak 30× za sekundu, stejně pro všechna zařízení. Opakuje se
 `Key` s akcí `Repeat` a jeho `Text`. Opakování od zařízení se ignoruje.
 
+## Obnova po pádu
+
+Když `inputd` spadne, supervisor initu ji spustí znovu (adaptér
+`InputdService` v `user/init/src/input.rs`, společný protokol
+[Obnova služeb](obnova-sluzeb.md)). Ovladače ani vlastník fokusu nic
+nedělají:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Obnova inputd po padu">
+<defs><marker id="vo1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="160" height="60" rx="6"/><text class="t b" x="90" y="45" text-anchor="middle">ovladač</text><text class="m" x="90" y="64" text-anchor="middle">nic nepozná</text>
+<rect class="acc" x="300" y="20" width="160" height="60" rx="6"/><text class="t b" x="380" y="45" text-anchor="middle">init (Kept)</text><text class="m" x="380" y="64" text-anchor="middle">drží konce, pamatuje stav</text>
+<rect class="ok" x="590" y="20" width="160" height="60" rx="6"/><text class="t b" x="670" y="45" text-anchor="middle">inputd gen 2</text><text class="m" x="670" y="64" text-anchor="middle">nová instance</text>
+<path class="ln" d="M460 105 L668 105" marker-end="url(#vo1)"/><text class="m" x="470" y="98">1. restarted, policy, layout, device sync, focus, secure, settled</text>
+<path class="ln" d="M670 140 L92 140" marker-end="url(#vo1)"/><text class="m" x="200" y="133">2. ISYN n (stejný konec kanálu, duplikát z Kept)</text>
+<path class="ln" d="M90 175 L668 175" marker-end="url(#vo1)"/><text class="m" x="200" y="168">3. staré zprávy (zahodí), ISYN n, IDEV, IAXS</text>
+<path class="ln" d="M670 210 L382 210" marker-end="url(#vo1)"/><text class="m" x="430" y="203">4. fokus: Focus(false); secure: SecureAttention</text>
+<rect class="box" x="10" y="235" width="740" height="55" rx="6"/><text class="m" x="20" y="256">Uvolnění klávesy, jejíž stisk viděla stará instance, se zahodí. Vlastník fokusu už dostal Focus(false).</text><text class="m" x="20" y="276">Systém ukončí bezpečný režim zprávou release (stará instance mohla být uprostřed zadávání hesla).</text>
+</svg>
+<figcaption>Obnova <code>inputd</code>: init předá nové instanci vše znovu, ovladače se synchronizují.</figcaption>
+</figure>
+
+- **Init si pamatuje vše, co služba dostala:** konce kanálů k ovladačům,
+  fokus a `secure` drží v držáku konců (`Kept`, službě jde duplikát), dál
+  rozložení, volbu ověření a `settled`. Nová instance dostane totéž ve
+  stejném pořadí: nejdřív `restarted`, zařízení ze startu, `focus`,
+  `secure`, `settled`, pak zařízení připojená za běhu (s volbou ověření
+  čekají na ověření znovu). Konce odpojených zařízení init zahodí.
+- **Synchronizace ovladače** (`ISYN`, viz protokol zařízení): zařízení,
+  které měla stará instance, přijde jako `device sync`. Služba ovladači
+  pošle `ISYN n` a zahazuje jeho zprávy až do odpovědi; ovladač se pak
+  představí znovu. Bez odpovědi pošle po 200 ms nový `ISYN` (nejvýš 25x,
+  pak zdroj odpojí).
+- **Klávesy stisknuté při pádu se považují za uvolněné:** vlastník fokusu
+  dostane `Focus(false)`. Uvolnění klávesy, jejíž stisk nová instance
+  neviděla, se zahodí.
+- **Bezpečný režim po restartu:** s kanálem `secure` začne nová instance
+  v bezpečném režimu a pošle `SecureAttention`. Nevíme, jestli stará
+  instance nebyla uprostřed zabezpečeného dialogu; heslo by jinak šlo
+  aplikaci. Systém režim ukončí `release` jako po Ctrl+Alt+Delete.
+- **Ovladače při ztrátě služby nekončí:** zavřený kanál ke službě jen
+  zalogují a dál obsluhují zařízení, dokud je neukončí správce zařízení.
+- **Co se neobnoví:** umělý vstup (`inject`) - kanál vytvořila služba,
+  zdroj dostane `PEER_CLOSED` a musí požádat o nový. Rozhodnutí o ověření
+  zařízení připojených za běhu (s volbou ověření se ptá znovu).
+- **Během restartu** příkazy klienta `Input` vrátí `SERVICE_UNAVAILABLE`;
+  zapamatované (`device`, `focus`, `secure`) init uloží a předá nové
+  instanci. Zařízení připojené za běhu (`input` od správce zařízení) tak
+  dostane i instance, která právě startuje.
+
 ## Testy
 
 | Kde | Co |
@@ -422,7 +475,7 @@ vždy.
 | `cargo test -p inputproto` | formát zpráv: všechny druhy záznamů, neplatná data, stav |
 | `cargo test -p keymap` | US, CZ, AltGr, mrtvé klávesy, Caps Lock, Num Lock, opakování |
 | `cargo test -p i8042` | scan kódy (E0, E1, falešné Shifty, Print Screen), pakety myši (synchronizace, přetečení, kolečko, 5 tlačítek) |
-| `cargo xtask test`, sada `vstup` | služba v QEMU: zařízení, umělý vstup, CZ, myš, zkratka, opakování, tlačítka mimo myš, scan kód jen pro klávesu hned za ním, plná fronta (`Dropped`), neplatné příkazy |
+| `cargo xtask test`, sada `vstup` | služba v QEMU: zařízení, umělý vstup, CZ, myš, zkratka, opakování, tlačítka mimo myš, scan kód jen pro klávesu hned za ním, plná fronta (`Dropped`), neplatné příkazy, zabití `inputd` uprostřed práce |
 
 Test **„QEMU: klávesnice a myš až do služby“** prověří celou cestu ze
 zařízení. Init vypíše značku `init: test vstupu: cekam na udalosti z QEMU`.
@@ -443,6 +496,8 @@ Delete, pohyb (7, 3), pravé tlačítko a kolečko nahoru. Test ověří text
 `b@`, scan kód `0xE053` u Delete, součet pohybu, kolečko a to, že všechny
 události přišly ze zdrojů „PS/2 ...“ (pole `source`). Test virtio naopak
 ověří, že jeho události přišly ze zdrojů virtio.
+
+Test **„zabij inputd uprostřed práce“** (poslední v sadě, `tests/input_recovery.rs`) hraje ovladač i vlastníka fokusu: drží klávesu A, zabije `inputd`, pošle starou zprávu (C) a řídí hlavní supervisor, dokud ji neobnoví (generace +1). Pak odpoví na `ISYN` a ověří `Focus(false)`, bezpečný režim a `Focus(true)` po `release`, že uvolnění A a stará C nepřišly a B ano, a že se skutečné ovladače synchronizovaly samy (stejná jména zdrojů). Sady `usb` a `gui` pak běží nad novou instancí.
 
 Stroj virt (aarch64) řadič PS/2 nemá: test PS/2 se tam přeskočí a značku
 nevypíše, proto xtask kroky PS/2 vynechá (`Arch::ps2`) a pokračuje rovnou

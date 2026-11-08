@@ -368,8 +368,9 @@ impl api::Memory for Aarch64 {
     }
 }
 
-/// aarch64 nema I/O porty ani linky ISA (zarizeni na desce jsou MMIO
-/// a preruseni SPI pres GIC - pripadne pozdeji vlastni cesta).
+/// aarch64 nema I/O porty. Pevne linky jsou SPI pres GIC (zarizeni na
+/// desce bez MSI, napr. Generic Event Device z ACPI): jadro si pamatuje,
+/// ktere cislo preruseni objektu (z rozsahu zarizeni) k SPI patri.
 impl api::LegacyIo for Aarch64 {
     fn port_read(_port: u16, _width: u8) -> Result<u32, Error> {
         Err(Error::NotSupported)
@@ -379,13 +380,52 @@ impl api::LegacyIo for Aarch64 {
         Err(Error::NotSupported)
     }
 
-    fn line_route(_line: u32, _irq: u32) -> Result<bool, Error> {
-        Err(Error::NotSupported)
+    fn line_route(line: u32, irq: u32, edge: bool) -> Result<bool, Error> {
+        if !(gic::SPI_FIRST..=gic::spi_last_supported()).contains(&line) {
+            return Err(Error::InvalidArgs);
+        }
+        let slot = &SPI_IRQ[line as usize];
+        if slot.compare_exchange(0, irq, Ordering::AcqRel, Ordering::Acquire).is_err() {
+            return Err(Error::AlreadyExists);
+        }
+        gic::configure_spi(line, edge, crate::trap::irq_target_hw_id());
+        gic::set_spi_enabled(line, true);
+        Ok(!edge)
     }
 
-    fn line_mask(_line: u32, _masked: bool) {}
+    fn line_mask(line: u32, masked: bool) {
+        if (gic::SPI_FIRST..=gic::SPI_LAST).contains(&line) {
+            gic::set_spi_enabled(line, !masked);
+        }
+    }
 
-    fn line_release(_line: u32) {}
+    fn line_release(line: u32) {
+        if (gic::SPI_FIRST..=gic::SPI_LAST).contains(&line) {
+            gic::set_spi_enabled(line, false);
+            SPI_IRQ[line as usize].store(0, Ordering::Release);
+        }
+    }
+}
+
+/// Cislo preruseni objektu (z rozsahu zarizeni) pro kazde SPI; 0 = linka
+/// nema objekt.
+static SPI_IRQ: [core::sync::atomic::AtomicU32; gic::SPI_LAST as usize + 1] =
+    [const { core::sync::atomic::AtomicU32::new(0) }; gic::SPI_LAST as usize + 1];
+
+/// Cislo preruseni objektu pro SPI `intid` (obsluha preruseni).
+pub(crate) fn spi_irq(intid: u32) -> Option<u32> {
+    SPI_IRQ.get(intid as usize).map(|a| a.load(Ordering::Acquire)).filter(|&n| n != 0)
+}
+
+/// Vypnuti a restart pres PSCI (SYSTEM_OFF, SYSTEM_RESET).
+impl api::Power for Aarch64 {
+    fn system_power(off: bool) -> Result<(), Error> {
+        if !PSCI_PRESENT.load(Ordering::Relaxed) {
+            return Err(Error::NotSupported);
+        }
+        smp::psci_system(PSCI_HVC.load(Ordering::Relaxed), off);
+        Err(Error::NotSupported)
+    }
 }
 
 impl api::DeviceIrq for Aarch64 {

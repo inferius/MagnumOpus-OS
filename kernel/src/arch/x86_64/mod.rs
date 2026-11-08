@@ -393,7 +393,7 @@ impl api::LegacyIo for X86_64 {
     }
 
     /// Cil = stejne CPU jako u MSI (bootovaci).
-    fn line_route(line: u32, irq: u32) -> Result<bool, Error> {
+    fn line_route(line: u32, irq: u32, _edge: bool) -> Result<bool, Error> {
         let vector = u8::try_from(irq).map_err(|_| Error::InvalidArgs)?;
         ioapic::route(line, vector, crate::trap::irq_target_hw_id())
     }
@@ -404,6 +404,33 @@ impl api::LegacyIo for X86_64 {
 
     fn line_release(line: u32) {
         ioapic::release(line)
+    }
+}
+
+impl api::Power for X86_64 {
+    /// Vypnuti potrebuje AML (S5 pres sluzbu ACPI). Restart: registr
+    /// Reset Control (0xCF9, cipove sady Intel a QEMU q35), pak radic
+    /// klavesnice (0x64 <- 0xFE). Kdyz ani jedno nezabere, `NotSupported`
+    /// (sluzba ACPI pouzije registr reset z FADT, ktery zkousi napred).
+    fn system_power(off: bool) -> Result<(), Error> {
+        if off {
+            return Err(Error::NotSupported);
+        }
+        // SAFETY: zapis do resetovacich registru desky; proces s pravem
+        // POWER pocitac restartovat smi.
+        unsafe {
+            cpu::outb(0xCF9, 0x02);
+            cpu::outb(0xCF9, 0x06);
+        }
+        for _ in 0..1_000_000 {
+            core::hint::spin_loop();
+        }
+        // SAFETY: dtto, pulz reset pres radic 8042.
+        unsafe { cpu::outb(0x64, 0xFE) };
+        for _ in 0..1_000_000 {
+            core::hint::spin_loop();
+        }
+        Err(Error::NotSupported)
     }
 }
 

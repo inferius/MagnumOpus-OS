@@ -336,6 +336,8 @@ impl Driver {
             s.close(&self.ctrl);
         }
         self.ctrl.shutdown();
-        pci::msi::disable(&self.ecam, self.address);
+        if let Ok(m) = pci::msi::Msi::find(&self.ecam, self.address) {
+            m.disable(&self.ecam);
+        }
     }
 }

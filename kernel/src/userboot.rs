@@ -189,11 +189,18 @@ fn send_bootstrap(
             Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP,
         ));
     }
+    // Udaje pro sluzbu ACPI (init je preda `acpid`): RSDP a pamet tabulek.
+    if platform.rsdp_phys != 0 {
+        match acpi_info_vmo(platform) {
+            Ok(vmo) => entries.push((bootstrap::kind::ACPI, 0, vmo, Rights::BASIC | Rights::READ | Rights::MAP)),
+            Err(e) => log::warn!("udaje ACPI pro userspace nelze pripravit: {e:?}"),
+        }
+    }
     for ecam in &platform.pci_ecam {
         let buses = ecam.bus_end as u64 - ecam.bus_start as u64 + 1;
         // Okno pocina na sbernici bus_start; 1 MiB konfigurace na sbernici.
         let phys = ecam.phys + ecam.bus_start as u64 * (1 << 20);
-        let vmo = MemoryObject::new_physical(phys, buses << 20, None)?;
+        let vmo = MemoryObject::new_physical(phys, buses << 20, abi::vm::cache::UNCACHED, None)?;
         let arg = ecam.bus_start as u32 | (ecam.bus_end as u32) << 8 | (ecam.segment as u32) << 16;
         entries.push((
             bootstrap::kind::PCI_ECAM,
@@ -217,6 +224,24 @@ fn send_bootstrap(
         handles.push((object, rights));
     }
     channel.write(Message::new(data, handles))
+}
+
+/// Objekt pameti s [`abi::acpi::Info`]: RSDP a oblasti pameti ACPI.
+fn acpi_info_vmo(platform: &Platform) -> Result<Arc<MemoryObject>> {
+    use abi::acpi::{Info, alloc_free::Ranges};
+    let mut ranges = Ranges::new();
+    for r in crate::mm::acpi_ranges() {
+        if !ranges.push(r) {
+            log::warn!("vic oblasti pameti ACPI nez {}, zbytek se sluzbe ACPI nepreda", abi::acpi::MAX_RANGES);
+            break;
+        }
+    }
+    let info = Info { rsdp_phys: platform.rsdp_phys, rsdp: platform.rsdp, ranges };
+    let mut buf = vec![0u8; info.encoded_len()];
+    info.encode(&mut buf);
+    let vmo = MemoryObject::new(buf.len() as u64, None)?;
+    vmo.write(0, &buf)?;
+    Ok(vmo)
 }
 
 /// Framebuffer z firmwaru jako objekt pameti pro init (mapuje se

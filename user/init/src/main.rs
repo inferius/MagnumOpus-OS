@@ -17,18 +17,21 @@ extern crate alloc;
 mod apps;
 mod audio;
 mod certs;
+mod display_native;
 mod dns;
 mod fsd;
 mod gui;
 mod input;
 mod ntp;
+mod power;
 mod revocation;
 mod supervisor;
 mod system;
+mod tasks;
 mod terminal;
 mod tests;
 
-use libos::{Startup, println};
+use libos::{Error, Startup, println};
 
 libos::entry!(main);
 
@@ -42,6 +45,32 @@ fn main(startup: Startup) -> i64 {
         }
         Err(e) => println!("init: sluzbu casu nelze spustit: {e}"),
     }
+    // Prehled uloh hned po case: FS nepotrebuje a sluzby (fsd, okna,
+    // relace) se v nem pri startu registruji.
+    match tasks::start(&startup) {
+        Ok(()) => {
+            if let Some(t) = tasks::TASKS.lock().as_ref() {
+                sup.watch("taskd", &t.process, None);
+            }
+        }
+        Err(e) => println!("init: sluzbu uloh (taskd) nelze spustit: {e}"),
+    }
+    // Sluzba ACPI (napajeni, tlacitka): co nejdriv, inicializace ACPICA
+    // bezi soubezne se startem ostatnich sluzeb.
+    match power::start(&startup) {
+        Ok(()) => {
+            if let Some(p) = power::POWER.lock().as_ref() {
+                sup.watch("acpid", &p.process, None);
+            }
+        }
+        Err(Error::NotFound) => println!("init: ACPI neni (jadro nepredalo udaje), napajeni jen pres firmware"),
+        Err(e) => println!("init: sluzbu ACPI nelze spustit: {e}"),
+    }
+    let power_test = if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
+        tests::power::mode(&startup)
+    } else {
+        None
+    };
     match system::start_devices(&startup) {
         Ok(mut devices) => {
             match system::start_fs(&startup, &mut devices) {
@@ -70,21 +99,31 @@ fn main(startup: Startup) -> i64 {
                 Ok(None) => {}
                 Err(e) => println!("init: souborovy system nelze spustit: {e}"),
             }
+            sup.watch("devmgr", &devices.devmgr, None);
             match input::start(&startup, core::mem::take(&mut devices.inputs)) {
-                Ok(i) => devices.input = Some(i),
+                Ok((i, p)) => {
+                    // Restart po padu: adapter preda nove instanci ovladace,
+                    // fokus a `secure` znovu (input.rs).
+                    sup.register(
+                        supervisor::Spec {
+                            name: "inputd",
+                            deps: &[],
+                            service: Some(i.service()),
+                        },
+                        Some(&p),
+                    );
+                    devices.input = Some(i);
+                }
                 Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
-            sup.watch("devmgr", &devices.devmgr, None);
             // Zvuk: audiod prevezme ovladace zvukovych karet (restart po
             // padu ridi supervisor, kanaly k ovladacum drzi init).
             if let Err(e) = audio::start(&startup, core::mem::take(&mut devices.audios), &mut sup) {
                 println!("init: zvukovou sluzbu nelze spustit: {e}");
             }
-            if let Some(i) = &devices.input {
-                sup.watch("inputd", &i.process, None);
-            }
-            // Sit az po FS: firewall uklada konfiguraci na FS.
-            match system::start_net(&startup, &mut devices, &mut sup) {
+            // Sit az po FS: firewall uklada konfiguraci na FS. Zvlastni beh
+            // testu napajeni sit nepotrebuje (kratsi start).
+            match if power_test.is_some() { Err(Error::NotSupported) } else { system::start_net(&startup, &mut devices, &mut sup) } {
                 Ok(mut n) => {
                     let dnsd_end = n.dnsd_end.take();
                     // Restart zatim neni (jako u fsd): netd drzi kanaly
@@ -146,12 +185,18 @@ fn main(startup: Startup) -> i64 {
         if let Some(p) = gui::FBDISPLAY.lock().as_ref() {
             sup.watch("fbdisplay", p, None);
         }
+        // Nativni ovladac displeje: po padu obnova obrazu firmwaru.
+        display_native::supervise(&mut sup);
         // Bezny beh: init je supervisor a nekonci.
         sup.run(&startup);
     }
     // Testovaci beh (jadro s qemu-test): testy userspace, pak konec
     // s vysledkem (jadro ukonci QEMU). Testy supervisor ridi samy.
     drop(sup);
+    if let Some(mode) = power_test {
+        // Zvlastni beh: vypnuti nebo restart (QEMU skonci samo).
+        return tests::power::scenario(&startup, &mode);
+    }
     let failed = tests::run_all(&startup);
     if failed == 0 {
         println!("init: vsechny testy userspace prosly");

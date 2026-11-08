@@ -117,6 +117,12 @@ pub unsafe fn init(boot_info: &BootInfo) {
         .filter(|r| r.kind != MemoryKind::Mmio && r.kind != MemoryKind::Reserved)
         .map(|r| (r.start, r.end()))
         .collect();
+    *ACPI_RANGES.lock() = merged(
+        regions
+            .iter()
+            .filter(|r| matches!(r.kind, MemoryKind::AcpiReclaimable | MemoryKind::AcpiNvs))
+            .map(|r| (r.start, r.end())),
+    );
 
     let mut space = PageTable::new().expect("nedostatek pameti pro tabulky stranek jadra");
     space
@@ -146,6 +152,39 @@ pub fn is_device_memory(start: u64, len: u64) -> bool {
         return false;
     };
     !RAM_RANGES.lock().iter().any(|&(s, e)| start < e && s < end)
+}
+
+/// Oblasti pameti firmwaru s tabulkami ACPI (AcpiReclaimable a AcpiNvs,
+/// sousedni spojene). Jadro je alokatoru nikdy nepreda; sluzba ACPI
+/// (`user/acpid`) je smi mapovat (`VMO_CREATE_PHYSICAL`, viz
+/// [`is_acpi_memory`]).
+static ACPI_RANGES: SpinLock<Vec<(u64, u64)>> = SpinLock::new(Vec::new());
+
+/// Spoji sousedni nebo prekryvajici se rozsahy (zacatek, konec).
+fn merged(it: impl Iterator<Item = (u64, u64)>) -> Vec<(u64, u64)> {
+    let mut v: Vec<(u64, u64)> = it.collect();
+    v.sort_unstable();
+    let mut out: Vec<(u64, u64)> = Vec::new();
+    for (s, e) in v {
+        match out.last_mut() {
+            Some(last) if s <= last.1 => last.1 = last.1.max(e),
+            _ => out.push((s, e)),
+        }
+    }
+    out
+}
+
+/// Lezi rozsah cely v pameti firmwaru s tabulkami ACPI?
+pub fn is_acpi_memory(start: u64, len: u64) -> bool {
+    let Some(end) = start.checked_add(len) else {
+        return false;
+    };
+    len > 0 && ACPI_RANGES.lock().iter().any(|&(s, e)| s <= start && end <= e)
+}
+
+/// Oblasti pameti ACPI (zacatek, delka) pro bootstrap initu.
+pub fn acpi_ranges() -> Vec<(u64, u64)> {
+    ACPI_RANGES.lock().iter().map(|&(s, e)| (s, e - s)).collect()
 }
 
 /// Vrati alokatoru pamet loaderu a boot services. Volat az kdyz z ni jadro

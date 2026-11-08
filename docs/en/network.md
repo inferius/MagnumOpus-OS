@@ -3,6 +3,8 @@
 The first part of milestone 6 ("network"). These parts are done:
 
 - the **virtio-net** card driver in userspace,
+- drivers for **Intel e1000e, igc and Realtek r8169** cards (see
+  [Network cards](network-cards.md)),
 - the network service **`netd`** with a TCP/IP stack (ARP, IPv4, ICMP,
   UDP, TCP), a DHCP client and a DNS resolver,
 - the **`netproto`** protocol with access through a capability and
@@ -107,12 +109,25 @@ unchanged.
 
 | Type | Direction | Content |
 |---|---|---|
-| `INFO` (1) | driver → netd, first message | MAC (6 B), MTU u16, flags u8 (bit 0 = link up) |
+| `INFO` (1) | driver → netd, first message | MAC (6 B), MTU u16, flags u8, speed u32 (Mb/s, 0 = unknown) |
 | `FRAME` (2) | both | Ethernet frame without FCS (14 to 1514 B) |
-| `LINK` (3) | driver → netd | flags u8 when the link state changes |
+| `LINK` (3) | driver → netd | flags u8, speed u32 when the link state changes |
 
-A frame that does not fit in the other side's queue is dropped, as on a
-real network. TCP takes care of reliability.
+Flags: bit 0 = link up, bit 1 = full duplex. A frame that does not fit in
+the other side's queue is dropped, as on a real network. TCP takes care
+of reliability. When the link comes up again (`LINK` with bit 0), `netd`
+starts DHCP again: there may be a different network behind the cable.
+
+> **Change from the first version:** `INFO` and `LINK` had no speed and
+> duplex, and `netd` did not repeat DHCP after the link came back.
+> **Why:** drivers of real cards ([network cards](network-cards.md))
+> report the link, and a cable can be moved. The shorter messages
+> (`INFO` 10 B, `LINK` 2 B) are still read. The protocol deliberately
+> carries no offloads: smoltcp verifies checksums for the whole device,
+> not for a single frame.
+
+The Intel e1000e and igc and Realtek r8169 card drivers talk to `netd`
+with the same protocol, see [Network cards](network-cards.md).
 
 ⚠️ **DMA without an IOMMU:** the driver uses buffers only from the
 device's domain memory. On a machine without an IOMMU, however, the card

@@ -158,27 +158,32 @@ impl Comp {
                 let focused = self.focus == Some(*gid);
                 draw_window(canvas, &mut self.text, w, cl, kids, focused, now);
             }
-            let panel = Panel {
-                rect: self.panel_rect(),
-                windows: &self.windows,
-                focus: self.focus,
-                injecting: self.input.injecting,
-                tasks: self.tasks,
-                tasks_rect: self.tasks_icon(),
-            };
-            draw_panel(canvas, &mut self.text, &panel, &panel_items);
-            if dialog_active {
-                // Ztlumeni vseho pod dialogem (jen system kresli nad nim).
-                canvas.blend(self.screen(), rgba(0, 0, 0, 150));
-                self.dialogs.draw(canvas, &mut self.text, self.w, self.h);
-            }
-            draw_cursor(canvas, self.input.px, self.input.py);
+            self.draw_top(canvas, &panel_items, dialog_active);
         }
         canvas.reset_clip();
     }
+
+    /// Vse nad okny: panel, ztlumeni a systemovy dialog, kurzor.
+    pub(crate) fn draw_top(&mut self, canvas: &mut Canvas<'_>, panel_items: &[(u32, Rect)], dialog_active: bool) {
+        let panel = Panel {
+            rect: self.panel_rect(),
+            windows: &self.windows,
+            focus: self.focus,
+            injecting: self.input.injecting,
+            tasks: self.tasks,
+            tasks_rect: self.tasks_icon(),
+        };
+        draw_panel(canvas, &mut self.text, &panel, panel_items);
+        if dialog_active {
+            // Ztlumeni vseho pod dialogem (jen system kresli nad nim).
+            canvas.blend(self.screen(), rgba(0, 0, 0, 150));
+            self.dialogs.draw(canvas, &mut self.text, self.w, self.h);
+        }
+        draw_cursor(canvas, self.input.px, self.input.py);
+    }
 }
 
-fn desktop(c: &mut Canvas<'_>, h: u32) {
+pub(crate) fn desktop(c: &mut Canvas<'_>, h: u32) {
     let clip = c.clip();
     // Svisly prechod po pruzich 8 px (jen v orezu).
     let (t, b) = (color::DESKTOP_TOP, color::DESKTOP_BOTTOM);
@@ -193,9 +198,9 @@ fn desktop(c: &mut Canvas<'_>, h: u32) {
 }
 
 /// Deti vrstev okna: rodic -> (poradi, id) serazene.
-type Kids = BTreeMap<u32, Vec<(i32, u32)>>;
+pub(crate) type Kids = BTreeMap<u32, Vec<(i32, u32)>>;
 
-fn children(cl: &Client, window: u32) -> Kids {
+pub(crate) fn children(cl: &Client, window: u32) -> Kids {
     let mut kids: Kids = BTreeMap::new();
     for (&id, l) in &cl.layers {
         if l.window == window {
@@ -209,9 +214,24 @@ fn children(cl: &Client, window: u32) -> Kids {
 }
 
 fn draw_window(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client, kids: &Kids, focused: bool, now: u64) {
+    let clip = c.clip();
+    draw_window_below(c, text, w, cl, focused);
+    // Obsah: vrstvy aplikace.
+    let content_clip = clip.intersect(&w.rect);
+    if !content_clip.is_empty() {
+        draw_children(c, cl, kids, 0, (w.rect.x, w.rect.y), content_clip, 255, 0);
+        c.set_clip(clip);
+    }
+    draw_window_above(c, text, w, cl, now);
+}
+
+/// Cast okna pod obsahem aplikace: stin, ram, titulek (pozadi, text,
+/// tlacitka, odznak) a pozadi obsahu. Titulek obsah neprekryva, takze
+/// poradi vuci vrstvam aplikace nehraje roli (GPU backend kresli tuto cast
+/// zvlast, `gpu.rs`).
+pub(crate) fn draw_window_below(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client, focused: bool) {
     let outer = w.outer();
     let clip = c.clip();
-    // Ram a stin.
     if w.mode.has_frame() {
         c.blend(Rect::new(outer.x + 3, outer.y + 3, outer.w, outer.h), rgba(0, 0, 0, 70));
         c.fill(outer, if focused { color::BORDER_FOCUSED } else { color::BORDER });
@@ -220,41 +240,48 @@ fn draw_window(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client, kid
         let t = w.title_bar().unwrap();
         c.fill(t, if focused { color::TITLE_FOCUSED } else { color::TITLE });
     }
-    // Obsah: pozadi a vrstvy aplikace.
     c.fill(w.rect, color::CONTENT);
-    let content_clip = clip.intersect(&w.rect);
-    if !content_clip.is_empty() {
-        draw_children(c, cl, kids, 0, (w.rect.x, w.rect.y), content_clip, 255, 0);
-        c.set_clip(clip);
-    }
-    // Systemove prvky nad obsahem.
-    if w.mode.has_frame() {
-        if w.mode == Mode::Standard {
-            let t = w.title_bar().unwrap();
-            let badge_w = Comp::badge_width(text, &Comp::badge_text(cl));
-            let (lh, base) = text.line(UI_PX);
-            let tx = t.x + badge_w as i32 + 14;
-            let ty = t.y + ((TITLE_H as i32 - lh as i32) / 2) + base;
-            let col = if focused { color::TITLE_TEXT } else { color::TITLE_TEXT_DIM };
-            // Titulek konci pred tlacitky.
-            let tclip = clip.intersect(&Rect::new(tx, t.y, (t.right() as i32 - tx - 110).max(0) as u32, TITLE_H));
-            if !tclip.is_empty() {
-                c.set_clip(tclip);
-                text.draw(c, tx, ty, &w.title, UI_PX, col);
-                c.set_clip(clip);
-            }
+    if w.mode == Mode::Standard {
+        let t = w.title_bar().unwrap();
+        let badge_w = Comp::badge_width(text, &Comp::badge_text(cl));
+        let (lh, base) = text.line(UI_PX);
+        let tx = t.x + badge_w as i32 + 14;
+        let ty = t.y + ((TITLE_H as i32 - lh as i32) / 2) + base;
+        let col = if focused { color::TITLE_TEXT } else { color::TITLE_TEXT_DIM };
+        // Titulek konci pred tlacitky.
+        let tclip = clip.intersect(&Rect::new(tx, t.y, (t.right() as i32 - tx - 110).max(0) as u32, TITLE_H));
+        if !tclip.is_empty() {
+            c.set_clip(tclip);
+            text.draw(c, tx, ty, &w.title, UI_PX, col);
+            c.set_clip(clip);
         }
         draw_buttons(c, text, w);
         draw_badge(c, text, w, cl);
+    }
+}
+
+/// Systemove prvky nad obsahem: tlacitka a odznak oken bez titulku
+/// (vlastni titulek, bez ramu) a ztlumeni neodpovidajici aplikace.
+pub(crate) fn draw_window_above(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client, now: u64) {
+    if w.mode.has_frame() {
+        if w.mode != Mode::Standard {
+            draw_buttons(c, text, w);
+            draw_badge(c, text, w, cl);
+        }
     } else if w.badge_until > now {
         draw_badge(c, text, w, cl);
     }
     if cl.unresponsive {
-        c.blend(outer, rgba(0, 0, 0, 120));
+        c.blend(w.outer(), rgba(0, 0, 0, 120));
         let (_, base) = text.line(UI_PX);
         text.draw(c, w.rect.x + 12, w.rect.y + 40 + base, "Aplikace nereaguje", UI_PX, color::WARN);
     }
     let _ = BORDER;
+}
+
+/// Ma okno neco nad obsahem (pro GPU backend: povrch se neposila zbytecne)?
+pub(crate) fn has_above(w: &Window, cl: &Client, now: u64) -> bool {
+    (w.mode.has_frame() && w.mode != Mode::Standard) || (!w.mode.has_frame() && w.badge_until > now) || cl.unresponsive
 }
 
 #[allow(clippy::too_many_arguments)]

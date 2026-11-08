@@ -27,6 +27,9 @@ const CFG_COMMON: u8 = 1;
 const CFG_NOTIFY: u8 = 2;
 const CFG_ISR: u8 = 3;
 const CFG_DEVICE: u8 = 4;
+/// Oblast sdilene pameti (`VIRTIO_PCI_CAP_SHARED_MEMORY_CFG`,
+/// `struct virtio_pci_cap64`: offset a delka 64bitove).
+const CFG_SHARED_MEMORY: u8 = 8;
 
 /// Stavove bity zarizeni.
 pub const STATUS_ACKNOWLEDGE: u8 = 1;
@@ -113,6 +116,17 @@ impl Window {
     }
 }
 
+/// Oblast sdilene pameti zarizeni (virtio 1.2, kap. 4.1.4.7): souvisly
+/// rozsah v BARu, ktery zarizeni plni pameti hostitele (u virtio-gpu
+/// mapovane bloby). Vyznam `id` urcuje typ zarizeni.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SharedMemory {
+    pub id: u8,
+    /// Fyzicka adresa zacatku oblasti (BAR + offset).
+    pub phys: u64,
+    pub len: u64,
+}
+
 /// Zarizeni virtio na PCI.
 pub struct Device {
     common: Window,
@@ -120,17 +134,25 @@ pub struct Device {
     notify_multiplier: u32,
     device_cfg: Window,
     _isr: Window,
+    shared: Vec<SharedMemory>,
 }
 
 impl Device {
     /// Najde capability virtio a namapuje jejich registry.
     pub fn open(ecam: &Ecam, a: Address, resource: &Resource) -> Result<Self> {
         let mut found: [Option<(u8, u32, u32, u16)>; 5] = [None; 5];
+        let mut shared = Vec::new();
         for (off, id) in ecam.capabilities(a) {
             if id != CAP_VENDOR {
                 continue;
             }
             let cfg_type = ecam.read8(a, off + 3);
+            if cfg_type == CFG_SHARED_MEMORY {
+                if let Some(s) = shared_memory_cap(ecam, a, off) {
+                    shared.push(s);
+                }
+                continue;
+            }
             if (1..=4).contains(&cfg_type) && found[cfg_type as usize].is_none() {
                 let bar = ecam.read8(a, off + 4);
                 let offset = ecam.read32(a, off + 8);
@@ -151,7 +173,14 @@ impl Device {
             notify_multiplier,
             device_cfg: Window::open(ecam, a, resource, db, dof, dl)?,
             _isr: Window::open(ecam, a, resource, ib, io, il)?,
+            shared,
         })
+    }
+
+    /// Oblast sdilene pameti s id `id` (prvni s timto id), pokud ji
+    /// zarizeni ma. Mapuje se pres `Resource::device_memory` po strankach.
+    pub fn shared_memory(&self, id: u8) -> Option<SharedMemory> {
+        self.shared.iter().copied().find(|s| s.id == id)
     }
 
     pub fn status(&self) -> u8 {
@@ -276,6 +305,26 @@ impl Device {
     pub fn config_len(&self) -> u64 {
         self.device_cfg.len
     }
+}
+
+/// Precte `virtio_pci_cap64` na offsetu `off`: bar (+4), id (+5), offset
+/// (+8, horni pulka +16), delka (+12, horni pulka +20). Kratka capability,
+/// I/O BAR nebo rozsah pres konec adresniho prostoru = `None`.
+fn shared_memory_cap(ecam: &Ecam, a: Address, off: u16) -> Option<SharedMemory> {
+    if ecam.read8(a, off + 2) < 24 {
+        return None;
+    }
+    let bar = ecam.read8(a, off + 4);
+    if bar > 5 {
+        return None;
+    }
+    let id = ecam.read8(a, off + 5);
+    let offset = ecam.read32(a, off + 8) as u64 | (ecam.read32(a, off + 16) as u64) << 32;
+    let len = ecam.read32(a, off + 12) as u64 | (ecam.read32(a, off + 20) as u64) << 32;
+    let base = ecam.memory_bar(a, bar)?.phys;
+    let phys = base.checked_add(offset)?;
+    phys.checked_add(len)?;
+    (len > 0).then_some(SharedMemory { id, phys, len })
 }
 
 /// Zarizeni po spolecne inicializaci ovladace s jednou frontou (viz

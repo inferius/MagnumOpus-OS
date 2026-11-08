@@ -152,6 +152,17 @@ pub trait Fs {
     }
 }
 
+/// Prikaz `tasks`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TasksOp {
+    List,
+    Cancel(u64),
+    Pause(u64),
+    Resume(u64),
+    /// Poslednich N radku vystupu ulohy.
+    Log(u64, u32),
+}
+
 /// Uloha `async` pro hostitele: kod v zapisu B (formatovac), kopie
 /// zachycenych promennych a prava volajiciho.
 #[derive(Debug, Clone, PartialEq)]
@@ -302,6 +313,17 @@ pub trait Host {
     /// Zvuk (prikaz `audio`). `None` = hostitel zvuk nema.
     fn audio(&mut self, _req: AudioReq) -> Option<Result<Value, ShError>> {
         None
+    }
+    /// Prehled uloh systemu (`taskd`). `None` = hostitel ho nema.
+    fn tasks(&mut self, _op: TasksOp) -> Option<Result<Value, ShError>> {
+        None
+    }
+    /// Vypnuti (`reboot = false`) nebo restart systemu (`shutdown`,
+    /// `reboot`). Pri uspechu se pocitac vypne a volani se nevrati (nebo
+    /// vrati `Ok` tesne pred vypnutim); `NOT_SUPPORTED` = hostitel napajeni
+    /// nema (testy, relace bez prava).
+    fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
+        Err(abi::Error::NotSupported)
     }
     /// Domovska slozka uzivatele.
     fn home(&self) -> String {

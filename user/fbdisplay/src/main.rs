@@ -236,6 +236,13 @@ fn handle(d: &mut Display, data: &[u8], handles: Vec<libos::Handle>) -> Reply {
         // Znacka pro novou instanci kompozitoru po jeho padu (zahodi
         // odpovedi stare instance), stejne jako ovladac virtio-gpu.
         Request::Sync { token } => Reply::Synced { token },
+        // Framebuffer firmwaru nema 3D (render uzel ma jen virtio-gpu).
+        Request::OpenRender => err(Error::NotSupported),
+        // Jediny rezim z firmwaru.
+        ref r @ (Request::Connectors | Request::SetMode { .. }) => {
+            let sizes = [(d.geo.width, d.geo.height)];
+            guiproto::modes::fixed_reply(r, &sizes, guiproto::modes::kind::FIRMWARE).unwrap_or_else(|| err(Error::NotSupported))
+        }
         Request::Present { seq, output, rects } => {
             let rects: Vec<Rect> = if rects.is_empty() { vec![Rect::new(0, 0, u32::MAX, u32::MAX)] } else { rects };
             match d.present(output, &rects) {

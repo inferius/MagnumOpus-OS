@@ -7,6 +7,9 @@
 //! nejvyse `MAX_SECTORS` sektoru (data se vejdou do zpravy kanalu); vyjimkou
 //! je `DISCARD`, ktery nenese data a `count` muze byt libovolny.
 //!
+//! Zapis a DISCARD na disk, ktery neni nas, vraci `READ_ONLY` (ochrana
+//! cizich disku, `server` a knihovna `diskguard`).
+//!
 //! Verze 1 je synchronni a kopiruje data zpravou. TODO: sdilena pamet
 //! a fronty pozadavku (asynchronni I/O podle navrhu).
 
@@ -18,6 +21,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use libos::{Channel, Error, Result};
+
+pub mod server;
 
 pub const SECTOR: usize = 512;
 /// Jak dlouho klient ceka na odpoved ovladace (pak `TIMED_OUT`).

@@ -40,6 +40,8 @@ Jádro (u `init`) nebo rodič (u ostatních) spustí první vlákno na symbolu
    - `framebuffer` - framebuffer z firmwaru (`init` od jádra, vlastník
      obrazovky od initu; druh `FRAMEBUFFER`, geometrie a převzetí
      `sys::fb_info` / `sys::fb_claim`, viz [Syscally](syscally.md#fb_control)),
+   - `acpi` - údaje o ACPI od jádra (jen `init`, druh `ACPI`,
+     `abi::acpi::Info`; init je předá službě `acpid`),
    - `bootstrap` - kanál k rodiči pro další komunikaci,
    - `flags` - příznaky startu z argumentu `SELF_PROCESS`
      (`abi::bootstrap::flags`; jádro nastavuje jen initu, např. `TEST_RUN`),

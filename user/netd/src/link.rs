@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::net::Ipv4Addr;
 
-use libos::{Channel, Error};
+use libos::{Channel, Error, println};
 use netproto::link;
 use smoltcp::phy::{self, DeviceCapabilities, Medium};
 use smoltcp::time::Instant;
@@ -66,6 +66,9 @@ pub struct Link {
     pub icmp_errors: VecDeque<IcmpError>,
     pub rx_dropped: u64,
     pub tx_dropped: u64,
+    /// Linka se znovu pripojila (zprava `LINK`): DHCP zacne znovu, sit za
+    /// kabelem muze byt jina.
+    pub came_up: bool,
 }
 
 impl Link {
@@ -77,6 +80,7 @@ impl Link {
             icmp_errors: VecDeque::new(),
             rx_dropped: 0,
             tx_dropped: 0,
+            came_up: false,
         }
     }
 
@@ -115,7 +119,23 @@ impl Link {
                         self.rx.push_back(d);
                     }
                 }
-                Some(&link::LINK) if msg.data.len() >= 2 => self.info.flags = msg.data[1],
+                Some(&link::LINK) => {
+                    if let Ok(st) = link::Status::decode(&msg.data) {
+                        let was_up = self.info.flags & link::FLAG_UP != 0;
+                        let up = st.flags & link::FLAG_UP != 0;
+                        if up && !was_up {
+                            self.came_up = true;
+                        }
+                        if up != was_up {
+                            println!(
+                                "netd: linka {}",
+                                if up { "pripojena" } else { "odpojena" }
+                            );
+                        }
+                        self.info.flags = st.flags;
+                        self.info.speed_mbps = st.speed_mbps;
+                    }
+                }
                 _ => {}
             }
         }

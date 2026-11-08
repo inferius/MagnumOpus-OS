@@ -1,0 +1,77 @@
+# Podmnozina Vulkanu, pro kterou `cargo xtask venus-gen` generuje kodovani
+# (libs/venus/src/gen). Typy a struktury se doplni samy (uzaver od prikazu).
+#
+#   command <vkPrikaz>    prikaz (vcetne prikazu transportu Venusu *MESA)
+#   chain <VkStruktura>   struktura, ktera smi byt v retezci pNext svych rodicu
+
+# Transport Venusu: kam renderer pise odpovedi.
+command vkSetReplyCommandStreamMESA
+command vkSeekReplyCommandStreamMESA
+
+# Instance a fyzicke zarizeni (krok 1: jmeno zarizeni).
+command vkEnumerateInstanceVersion
+command vkCreateInstance
+command vkDestroyInstance
+command vkEnumeratePhysicalDevices
+command vkGetPhysicalDeviceProperties
+command vkGetPhysicalDeviceQueueFamilyProperties
+command vkGetPhysicalDeviceMemoryProperties
+
+# Krok 2: logicke zarizeni, fronta, pamet (blob z VkDeviceMemory).
+command vkGetPhysicalDeviceFormatProperties
+command vkCreateDevice
+command vkDestroyDevice
+command vkGetDeviceQueue2
+command vkDeviceWaitIdle
+command vkAllocateMemory
+command vkFreeMemory
+
+# Krok 3: buffer, obrazek, command buffer, odeslani a cekani.
+command vkCreateBuffer
+command vkDestroyBuffer
+command vkGetBufferMemoryRequirements
+command vkBindBufferMemory
+command vkCreateImage
+command vkDestroyImage
+command vkGetImageMemoryRequirements
+command vkBindImageMemory
+command vkCreateCommandPool
+command vkDestroyCommandPool
+command vkAllocateCommandBuffers
+command vkFreeCommandBuffers
+command vkBeginCommandBuffer
+command vkEndCommandBuffer
+command vkCmdPipelineBarrier
+command vkCmdClearColorImage
+command vkCmdCopyImageToBuffer
+command vkCmdCopyBufferToImage
+command vkQueueSubmit
+command vkCreateFence
+command vkDestroyFence
+command vkResetFences
+command vkGetFenceStatus
+command vkWaitForFences
+
+# Fronta musi mit casovou osu (ring_idx >= 1), jinak renderer vkGetDeviceQueue2 odmitne.
+chain VkDeviceQueueTimelineInfoMESA
+
+# Krok 4: vypocetni pipeline skladani kompozitoru (libs/vkcomp).
+command vkCreateShaderModule
+command vkDestroyShaderModule
+command vkCreateDescriptorSetLayout
+command vkDestroyDescriptorSetLayout
+command vkCreatePipelineLayout
+command vkDestroyPipelineLayout
+command vkCreateComputePipelines
+command vkDestroyPipeline
+command vkCreateDescriptorPool
+command vkDestroyDescriptorPool
+command vkAllocateDescriptorSets
+command vkUpdateDescriptorSets
+command vkCmdBindPipeline
+command vkCmdBindDescriptorSets
+command vkCmdPushConstants
+command vkCmdDispatch
+command vkCmdCopyBuffer
+command vkResetCommandBuffer
+command vkFreeDescriptorSets

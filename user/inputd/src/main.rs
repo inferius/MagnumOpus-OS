@@ -171,10 +171,27 @@ fn command(svc: &mut Service, data: &[u8], mut handles: Vec<Handle>) -> (String,
         }
     };
     match name {
-        control::DEVICE => match channel(&mut handles).and_then(|c| svc.add_source(c, false)) {
-            Ok(()) => ok(),
-            Err(e) => err(e),
-        },
+        control::DEVICE => {
+            let sync = match words.next() {
+                None => false,
+                Some(control::SYNC) => true,
+                Some(_) => return err(Error::InvalidArgs),
+            };
+            match channel(&mut handles).and_then(|c| svc.add_source(c, false)) {
+                Ok(()) => {
+                    if sync {
+                        svc.start_sync(svc.sources.len() - 1, 1);
+                    }
+                    ok()
+                }
+                Err(e) => err(e),
+            }
+        }
+        control::RESTARTED => {
+            println!("inputd: instance po restartu");
+            svc.set_restarted();
+            ok()
+        }
         control::FOCUS => match channel(&mut handles) {
             Ok(c) => {
                 svc.set_focus(c);

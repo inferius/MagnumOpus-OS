@@ -56,8 +56,8 @@ sup.register(Spec {
     **až po** novém startu `x` (pořadí podle závislostí). Pro služby, které
     drží kanál přímo k instanci `x` bez lístku (`fwd` a `dnsd` ke `netd`),
   - `Dep::notify(x)`: služba běží dál; po novém startu `x` supervisor zavolá
-    její `dependency_restarted(x, generace)` (např. `compd` dostane nový
-    fokus vstupu po restartu `inputd`),
+    její `dependency_restarted(x, generace)` (např. obnoví stav, který závislost
+    po restartu zapomněla),
 - `service`: adaptér (`trait Service`):
 
 ```rust
@@ -231,7 +231,7 @@ let odpověď = conn.call(Kind::Idempotent, &požadavek, Vec::new())?;
    vede na obnovu nebo chybu. Čekání na odpověď lístku má termín.
 4. **Události pro UI**: `Restarting` (zobrazit „služba se restartuje“),
    `Restored { generation }`, `Unavailable(chyba)`.
-5. **Proudy a push kanály** (okno `compd`, fokus `inputd`, socket `netd`):
+5. **Proudy a push kanály** (okno `compd`, socket `netd`; fokus `inputd` ne, ten drží držák konců):
    knihovna čeká na svém kanálu; při `PEER_CLOSED` zavolá
    `conn.recover()` a pak stav obnoví sama (okno pošle znovu strom vrstev).
 6. **Odvozené relace pro děti** jen přes `conn.narrow(zúžení)` (lístek
@@ -244,7 +244,7 @@ let odpověď = conn.call(Kind::Idempotent, &požadavek, Vec::new())?;
 | Služba | Co se obnoví | Co vrátí chybu | Vlastník zapojení |
 |---|---|---|---|
 | `fsd` | relace (identita, připojené cesty) z receptu; otevřené handly podle trvalého handlu (dataset, oid, generace, práva) - knihovna je otevře znovu (`REOPEN`), práva se ověří znovu. Po restartu (ne po startu systému) `fsd` 30 s neuklidí sirotky (smazané, ale otevřené soubory), aby je klienti stihli znovu otevřít | zámky, rozepsané podmíněné uložení, zápis bez potvrzení: `SERVICE_RESTARTED`, klient zopakuje | vlákno FS |
-| `inputd` | ovladače (držák konců + synchronizace), fokus a kanál `secure` předá supervisor znovu (`compd` přes `Dep::notify`), rozložení klávesnice | stisknuté klávesy se považují za uvolněné | vlákno vstupu |
+| `inputd` | ovladače (držák konců + synchronizace `ISYN`), fokus a kanál `secure` (také v držáku konců: `compd` nic nedělá, kanál se mu nezavře), rozložení, volba ověření, `settled`; zařízení připojená za běhu | stisknuté klávesy se považují za uvolněné (`Focus(false)`); po restartu bezpečný režim, systém ho ukončí `release`; umělý vstup (`inject`) dostane `PEER_CLOSED` | vlákno vstupu |
 | `netd` | relace programů (pravidla sítě) z receptu, adresy (DHCP znovu), DNS, firewall (`fwd` a `dnsd` s `Dep::restart`) | sockety: `CONNECTION_RESET` (spojení ztraceno), naslouchající sockety je třeba otevřít znovu | vlákno sítě |
 | `compd` | okna: aplikace se připojí přes lístek (recept = identita z manifestu) a pošle znovu strom vrstev; displej z držáku konců; fokus od `inputd` | rozpracovaná transakce okna | vlákno GUI |
 | `devmgr` | ovladače a všechny služby nad nimi (viz pořadí výše) | jako u jednotlivých služeb | koordinátor obnovy (init) |
@@ -305,7 +305,8 @@ Box::new(MůjAdaptér))`, klient je vlastní testovací program služby
 | držák konců (`Kept`) | hotovo v supervisoru; používají ho adaptéry služeb |
 | `fsd` | hotovo: adaptér (`user/init/src/fsd.rs`, recept a zúžení v [souborovém systému](souborovy-system.md#obnova-po-pádu-fsd)), `FsClient` přes `Conn` (`with_lease`), trvalé handly a `REOPEN`, šetření sirotků 30 s, synchronizace disku `SYNC`; lístek má init a `fwd`. Test `obnova fsd`. Zbývá: lístky pro `dnsd`, `ntpd`, `revocd` (vlákno sítě) |
 | `compd` (okna, displej z `Kept` + `SYNC`, fokus po restartu `inputd` zůstává, `Focus(false)` pustí klávesy) | hotovo ([GUI: obnova](gui.md#obnova-po-pádu-kompozitoru)), test `compd: pad kompozitoru uprostred prace` v sadě `gui` |
-| `inputd`, `netd` + `fwd`/`dnsd`, `termd`/`taskd` | zapojí vlákna služeb podle této stránky |
+| `inputd` + ovladače vstupu (virtio-input, PS/2, USB HID) | hotovo: adaptér `InputdService` (`input.rs`), synchronizace `ISYN`, ovladače při ztrátě služby nekončí; test „zabij inputd uprostřed práce“ v sadě `vstup`, viz [Vstup](vstup.md#obnova-po-pádu) |
+| `netd` + `fwd`/`dnsd`, `termd`/`taskd` | zapojí vlákna služeb podle této stránky |
 | restart `devmgr` (zpráva `driver`, ukončení ovladačů) | další krok po zapojení služeb: bez nich by restart `devmgr` jen odpojil zařízení |
 | přehled úloh (`taskproto` producent) | po spuštění `taskd` (vlákno shellu) |
 
