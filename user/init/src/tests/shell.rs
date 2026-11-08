@@ -161,11 +161,8 @@ pub(super) fn start_termd_with(s: &Startup, reg: &mut Reg, audio: Option<Channel
         StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None).map_err(|e| fail("initfs", e))?),
     ];
     if let Some(a) = audio {
-        // Handly termd jsou podle poradi: 3. je kanal napajeni (tady bez
-        // initu, druhy konec se zahodi), 4. zvuk.
-        let (_, power) = Channel::create().map_err(|e| fail("kanal napajeni", e))?;
-        handles.push(StartHandle::user(power.into_handle()));
-        handles.push(StartHandle::user(a.into_handle()));
+        // Zvuk je volitelny handle se stitkem (poradi nehraje roli).
+        handles.push(StartHandle::tagged(term::ctl::tag::AUDIO, a.into_handle()));
     }
     let (proc, chan) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
     reg.chan = Some(here);

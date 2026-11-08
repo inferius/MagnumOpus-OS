@@ -1,14 +1,15 @@
 //! termd: prostrednik terminalu (milnik 6b). Interpret v nem neni.
 //!
 //! Start: bootstrap kanal = spojeni s oknem terminalu (nativni protokol
-//! `term::proto`); handly `kind::USER` = [kanal sluzby fsd, kanal registru
-//! relaci, kanal napajeni, kanal ke zvukove sluzbe, jeho listek] (vse
-//! volitelne; napajeni: pro kazdou relaci termd vytvori kanal, jeden konec
-//! posle initu zpravou `session`, druhy relaci `SessMsg::Power` - prikazy
-//! `shutdown`/`reboot`; zvuk dostane relace jen s fsd - handly `Init` jsou
-//! podle poradi; s listkem dostane kazda relace vlastni relaci zvuku
-//! s listkem, ktera prezije restart `audiod`, bez nej jen kanal); `kind::INITFS` = obraz initfs (odtud se spousti
-//! `shsess`).
+//! `term::proto`); handly `kind::USER` podle poradi = [kanal sluzby fsd,
+//! kanal registru relaci, kanal napajeni] (napajeni: pro kazdou relaci
+//! termd vytvori kanal, jeden konec posle initu zpravou `session`, druhy
+//! relaci `SessMsg::Power` - prikazy `shutdown`/`reboot`); volitelne
+//! handly se stitkem (`term::ctl::tag`, `StartHandle::tagged`): brana
+//! agenta AI, relace zvukove sluzby a jeji listek (kazda relace shellu
+//! dostane vlastni relaci zvuku zpravou `SessMsg::Audio`, s listkem
+//! prezije restart `audiod`); `kind::INITFS` = obraz initfs (odtud se
+//! spousti `shsess`).
 //!
 //! Kazda relace bezi ve vlastnim procesu `shsess` (`term::broker`). termd
 //! jen smeruje zpravy, takze pad relace neshodi ostatni ani termd. Nahradni
@@ -53,6 +54,8 @@ struct Termd {
     audio: Option<audioproto::conn::AudioClient>,
     /// Kanal k initu pro napajeni relaci.
     power: Option<Channel>,
+    /// Zapisovaci konec brany agenta AI (kazda relace dostane duplikat).
+    agent: Option<Channel>,
     image: Option<&'static [u8]>,
     broker: Broker,
     sessions: Vec<Sess>,
@@ -105,21 +108,27 @@ impl Termd {
         let mut handles: Vec<Handle> = alloc::vec![give.into_handle()];
         if let Some(f) = &self.fsd {
             handles.push(f.connect()?.into_channel().into_handle());
-            // Zvuk je volitelny: kdyz sluzba neodpovi, relace bezi bez nej.
-            if let Some(a) = &self.audio {
-                if a.conn().has_lease() {
-                    if let Ok((ch, lease)) = a.narrow() {
-                        handles.push(ch.into_handle());
-                        handles.push(lease.into_handle());
-                    }
-                } else if let Ok(ch) = a.connect() {
-                    handles.push(ch.into_handle());
-                }
+            // Brana agenta jen za relaci FS (poradi handlu v shsess).
+            if let Some(a) = &self.agent
+                && let Ok(d) = a.handle().duplicate(None)
+            {
+                handles.push(d);
             }
         }
         let (_proc, chan) = libos::spawn("shsess", image, Vec::new())?;
         let init = SessMsg::Init { session, tag: tag.into(), home: String::from("/") };
         chan.write(&init.encode(), handles)?;
+        // Zvuk je volitelny: kdyz sluzba neodpovi, relace bezi bez nej.
+        if let Some(a) = &self.audio {
+            let hs = if a.conn().has_lease() {
+                a.narrow().map(|(ch, lease)| alloc::vec![ch.into_handle(), lease.into_handle()])
+            } else {
+                a.connect().map(|ch| alloc::vec![ch.into_handle()])
+            };
+            if let Ok(hs) = hs {
+                let _ = chan.write(&SessMsg::Audio.encode(), hs);
+            }
+        }
         if let Some(p) = &self.power
             && let Ok((ours, theirs)) = Channel::create()
             && p.write(b"session", alloc::vec![ours.into_handle()]).is_ok()
@@ -218,9 +227,12 @@ fn main(mut startup: Startup) -> i64 {
     let fsd = hs.next().map(|h| FsClient::new(Channel::from_handle(h)));
     let registry = hs.next().map(Channel::from_handle);
     let power = hs.next().map(Channel::from_handle);
-    let audio = hs.next().map(Channel::from_handle).map(|ch| match hs.next() {
-        Some(lease) => audioproto::conn::AudioClient::with_lease(ch, Channel::from_handle(lease)),
-        None => audioproto::conn::AudioClient::new(ch),
+    let agent = startup.take_tagged(term::ctl::tag::AGENT).map(Channel::from_handle);
+    let audio = startup.take_tagged(term::ctl::tag::AUDIO).map(Channel::from_handle).map(|ch| {
+        match startup.take_tagged(term::ctl::tag::AUDIO_LEASE) {
+            Some(lease) => audioproto::conn::AudioClient::with_lease(ch, Channel::from_handle(lease)),
+            None => audioproto::conn::AudioClient::new(ch),
+        }
     });
     let nonce = time::wall().map(|t| (t.secs as u64) ^ ((t.nanos as u64) << 20)).unwrap_or_else(time::now);
     let mut t = Termd {
@@ -230,6 +242,7 @@ fn main(mut startup: Startup) -> i64 {
         registry,
         audio,
         power,
+        agent,
         image,
         broker: Broker::new(nonce),
         sessions: Vec::new(),

@@ -283,6 +283,10 @@ fn run_cli() -> Result<()> {
                 opts.gpu = String::from("none");
                 println!("xtask: grafika pres framebuffer firmwaru (virtio-gpu: --gpu 2d, pak v okne QEMU View -> virtio-gpu-pci)");
             }
+            // Ucty: rychly profil Argon2id pro QEMU a vyvojove automaticke
+            // prihlaseni (jen `run`; `image` pro uzivatele je nema).
+            opts.extra_initfs.push((String::from("accounts-qemu"), b"1".to_vec()));
+            opts.extra_initfs.push((String::from("accounts-dev"), b"1".to_vec()));
             opts.edu = edu_available(&opts);
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
@@ -322,6 +326,7 @@ fn run_cli() -> Result<()> {
             let web = webhelper::start()?;
             let config = format!("{}{}", helper.config, web.config);
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
+            opts.extra_initfs.push((String::from("accounts-qemu"), b"1".to_vec()));
             if opts.net_online {
                 opts.extra_initfs.push((String::from("net-online"), b"1".to_vec()));
             }
@@ -462,6 +467,10 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "taskproto",
             "--package",
+            "accountproto",
+            "--package",
+            "accounts",
+            "--package",
             "taskcore",
             "--package",
             "svcclient",
@@ -493,6 +502,10 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "dns",
             "--package",
             "diskguard",
+            "--package",
+            "agentproto",
+            "--package",
+            "agentsh",
             "--features",
             "initfs/std,fs/std,netproto/std,netproto/nts,driverkit/sim",
         ])
@@ -606,8 +619,10 @@ const USER_PROGRAMS: &[&str] = &[
     "ntpd",
     "fetch",
     "revocd",
+    "accountd",
     "dnsd",
     "vk-probe",
+    "agentd",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
@@ -624,9 +639,11 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
     ("revocd.manifest.toml", "user/revocd/revocd.manifest.toml"),
     ("revocd.toml", "user/revocd/revocd.toml"),
+    ("accountd.manifest.toml", "user/accountd/accountd.manifest.toml"),
     ("dnsd.manifest.toml", "user/dnsd/dnsd.manifest.toml"),
     ("dnsd.toml", "user/dnsd/dnsd.toml"),
     ("gui-tasks.manifest.toml", "user/gui-tasks/gui-tasks.manifest.toml"),
+    ("agentd.manifest.toml", "user/agentd/agentd.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

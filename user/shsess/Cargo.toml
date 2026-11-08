@@ -17,5 +17,8 @@ shlang = { path = "../../libs/shlang" }
 term = { path = "../../libs/term" }
 audioproto = { path = "../../libs/audioproto", features = ["client"] }
 audiomix = { path = "../../libs/audiomix" }
+agentproto = { path = "../../libs/agentproto" }
+agentsh = { path = "../../libs/agentsh" }
+wire = { path = "../../libs/wire" }
 powerproto = { path = "../../libs/powerproto" }
 spin = "0.12"

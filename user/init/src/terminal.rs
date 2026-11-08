@@ -325,8 +325,12 @@ impl Terminals {
         // Zvuk pro relace (prikaz `audio`): relace s listkem, prezije
         // restart audiod. Bez sluzby terminal bezi dal.
         if let Some((ch, lease)) = audio() {
-            handles.push(StartHandle::user(ch.into_handle()));
-            handles.push(StartHandle::user(lease.into_handle()));
+            handles.push(StartHandle::tagged(term::ctl::tag::AUDIO, ch.into_handle()));
+            handles.push(StartHandle::tagged(term::ctl::tag::AUDIO_LEASE, lease.into_handle()));
+        }
+        // Brana agenta AI (jen zapis zadosti o relaci).
+        if let Some(h) = crate::agent::terminal_gate() {
+            handles.push(StartHandle::tagged(term::ctl::tag::AGENT, h));
         }
         let (proc, win) = libos::spawn("termd", image, handles)?;
         c.starts.push(now);

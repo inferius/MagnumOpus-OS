@@ -1,0 +1,30 @@
+[package]
+name = "accountproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol sluzby uctu accountd a CTAP2 (FIDO2) pro bezpecnostni klice"
+
+[features]
+default = []
+# Klientska knihovna nad kanaly (Login, SelfService); zapina ji, kdo ji
+# pouziva (init, testy v QEMU, pozdeji obrazovka prihlaseni).
+client = ["dep:libos"]
+# Simulovany bezpecnostni klic (testy na hostiteli a v accountd).
+soft = []
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }
+libos = { path = "../libos", optional = true }
+zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
+subtle = { version = "2.6", default-features = false }
+# Kryptografie CTAP2 (RustCrypto, softwarove bez SIMD - viz xtask).
+sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }
+hmac = { version = "0.12", default-features = false }
+hkdf = { version = "0.12", default-features = false }
+aes = { version = "0.8", default-features = false }
+cbc = { version = "0.1", default-features = false, features = ["block-padding"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "ecdh", "arithmetic"] }
+ed25519-dalek = { version = "2", default-features = false }
+rand_core = { version = "0.6", default-features = false }

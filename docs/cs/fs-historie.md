@@ -390,6 +390,56 @@ fs.aside_discard("/projekt-zkouska")?;              // klon i snapshot jedním k
   `clone_snapshot` a `branch`; klon navíc nedědí starší snapshoty
   originálu.
 
+### Výkon řádku shellu (undo bez `VIEW`)
+
+> **Změna proti dřívějšku (výkon FS):** řádek shellu se zápisem stál
+> v QEMU 2-4 s, po plné sadě testů víc. **Proč:** každý commit poslal
+> ovladači disku 5-15 zpráv a na odpověď každé čekal (cesta tam a zpět
+> fsd ↔ `virtio-blk` asi 3-5 ms, samotné zařízení 0,4 ms); řádek dělal
+> 7-8 commitů. **Co se změnilo:** (1) zápisy jdou ovladači bez čekání na
+> odpověď (`BlockClient::write_queued`, odpovědi se vyberou před dalším
+> čtením nebo `flush`), (2) dočasné snapshoty (`VIEW`, začátek „bokem“)
+> stojí jeden commit místo dvou, `ASIDE_BEGIN` celkem dva místo tří,
+> (3) undo shellu může místo `VIEW` použít snapshot `ASIDE_BEGIN`
+> (`KEEP_VIEW`), (4) commit prochází jen datasety se změnami. Formát na
+> disku beze změny.
+
+| Krok (QEMU, x86_64) | Dřív | Teď |
+|---|---|---|
+| commit s malou změnou | 88 ms | 23-50 ms |
+| `ASIDE_BEGIN` | 264 ms | 60-90 ms |
+| `ASIDE_APPLY` | 248 ms | 70-130 ms |
+| `VIEW` | 2 commity | ~5 ms (jen commit stavu, často prázdný) |
+| celý řádek (medián) | 666 ms (čerstvý disk), 2-4 s po testech | 160-280 ms (po sadě testů s alokátorem po velikostních třídách: x86_64 174 ms, aarch64 313 ms) |
+
+```
+ASIDE_BEGIN ──> snapshot aside-N (stav před řádkem) ──> klon /tmp/.aside/...
+zápisy v klonu, ASIDE_CHANGES (z paměti, bez commitu)
+ASIDE_APPLY + KEEP_VIEW ──> převzetí; aside-N se změní na pohled (VIEW)
+undo čte z aside-N ── VIEW_RELEASE ho uvolní (ASIDE_DISCARD ho nesmaže)
+```
+
+- Pohled ze snapshotu `ASIDE_BEGIN` je pro undo rovnocenný pohledu těsně
+  před převzetím: cesty, které se převzaly bez konfliktu, měl originál
+  v obou okamžicích stejné (jinak by šly do konfliktu).
+- `VIEW_RELEASE` a `ASIDE_DISCARD` jdou v libovolném pořadí; uvolněný
+  pohled s živým klonem se skryje a zanikne s klonem.
+- Po pádu se pohledy při připojení mažou jako dřív (undo po restartu
+  `fsd` nejde).
+- Záznam dočasného snapshotu uloží až další commit. Pád mezi tím = snapshot
+  nevznikl (stav na disku je konzistentní, dočasné snapshoty se po pádu
+  stejně mažou). `ASIDE_BEGIN` uloží záznam snapshotu i klon jedním
+  commitem: po pádu jsou oba, nebo nic. Obsazený cíl klonu se pozná
+  předem (`ALREADY_EXISTS`, dřív se po něm svazek zablokoval).
+- **Riziko:** chyba zápisu na disk se ohlásí až u další operace s diskem
+  (čtení, `flush`), ne u zápisu samotného. Commit vždy volá `flush` před
+  zápisem superbloku, takže neúspěšný zápis commit zastaví jako dřív;
+  čtení po chybném zápisu ale vrátí chybu toho zápisu.
+- Hlídají to testy: `libs/fs/src/tests/perf_shell.rs` (počet zápisů
+  a `flush` na řádek nezávisí na počtu načtených datasetů, 2 proti 300)
+  a QEMU sada `vykon FS` (`user/init/src/tests/fs_perf.rs`, po všech
+  testech FS: commit pod 80 ms, řádek pod 500 ms).
+
 ## Na disku
 
 | Druh | Klíč | Hodnota |
@@ -452,9 +502,9 @@ identity relace. Čas na drátě = sekundy i64 + nanosekundy u32.
 | 71 | `DELETE_BRANCH` | dataset, jméno | - |
 | 72 | `MERGE` | cíl, zdroj | zpráva o sloučení |
 | 73 | `MERGE_ABORT` | cíl | - |
-| 74 | `ASIDE_BEGIN` | dataset, cesta klonu | dataset klonu u64 |
-| 75 | `ASIDE_APPLY` | klon, vše u8, počet + cesty | zpráva o sloučení; za konflikty celkový počet konfliktů u32 (seznam může být zkrácený na 1024) |
-| 76 | `ASIDE_DISCARD` | klon | - |
+| 74 | `ASIDE_BEGIN` | dataset, cesta klonu | dataset klonu u64, snapshot původu str, žurnál seq u64 (jako `VIEW`) |
+| 75 | `ASIDE_APPLY` | klon, vše u8, počet + cesty, [příznaky u8: 1 = `KEEP_VIEW`] | zpráva o sloučení; za konflikty celkový počet konfliktů u32 (seznam může být zkrácený na 1024). S `KEEP_VIEW` zůstane snapshot původu jako pohled (uvolní `VIEW_RELEASE`) |
+| 76 | `ASIDE_DISCARD` | klon | - (snapshot původu smaže, jen když není pohledem) |
 | 77 | `ASIDE_CHANGES` | klon, [přeskočit u32] | stránka: celkem u32, počet u32 + (druh u8, cesta, stará cesta, oid, složka u8) |
 | 78-81 | `XATTR_GET` / `SET` / `REMOVE` / `LIST` | cesta, jméno [, hodnota = zbytek zprávy] | hodnota / - / - / jména |
 | 82 / 83 | `SET_EXPIRES` / `EXPIRES` | cesta [, má u8, čas] | má u8, čas |

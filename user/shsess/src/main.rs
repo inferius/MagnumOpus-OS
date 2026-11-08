@@ -35,6 +35,7 @@ use term::taskboard::Chan;
 use term::tasks::{Clock, Joinable, Notify};
 
 mod audio;
+mod ai;
 mod fs;
 
 libos::entry!(main);
@@ -55,6 +56,10 @@ struct MainLink<'a> {
 /// Kanal k initu pro `shutdown`/`reboot` (zprava `SessMsg::Power` od termd).
 static POWER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
+/// Relace zvukove sluzby (zprava `SessMsg::Audio` od termd: kanal a listek);
+/// `SysEnv` si ji vezme pri prvnim prikazu `audio`.
+static AUDIO: spin::Mutex<Option<audioproto::conn::AudioClient>> = spin::Mutex::new(None);
+
 impl MainLink<'_> {
     fn client(&mut self, r: Result<libos::Message, Error>) -> Option<ClientMsg> {
         match r {
@@ -67,6 +72,17 @@ impl MainLink<'_> {
                 Ok(SessMsg::Power) => {
                     if let Some(h) = m.handles.into_iter().next() {
                         *POWER.lock() = Some(Channel::from_handle(h));
+                    }
+                    None
+                }
+                Ok(SessMsg::Audio) => {
+                    let mut hs = m.handles.into_iter().map(Channel::from_handle);
+                    if let Some(ch) = hs.next() {
+                        let c = match hs.next() {
+                            Some(lease) => audioproto::conn::AudioClient::with_lease(ch, lease),
+                            None => audioproto::conn::AudioClient::new(ch),
+                        };
+                        *AUDIO.lock() = Some(c);
                     }
                     None
                 }
@@ -148,6 +164,9 @@ struct SysEnv {
     /// stream prikazu `audio`.
     audio: Option<audioproto::conn::AudioClient>,
     playing: Option<audioproto::conn::Stream>,
+    /// Prikaz `ai` (relace agenta AI).
+    ai: ai::Ai,
+    home: String,
     /// Prehled uloh (`taskd`): kanal producenta a klienta.
     task_producer: Option<Channel>,
     task_client: Option<Channel>,
@@ -164,6 +183,9 @@ impl SysEnv {
 
 impl Env for SysEnv {
     fn audio(&mut self, req: shlang::host::AudioReq) -> Option<Result<shlang::value::Value, shlang::ShError>> {
+        if self.audio.is_none() {
+            self.audio = AUDIO.lock().take();
+        }
         let client = self.audio.as_ref()?;
         Some(audio::handle(client, &mut self.playing, req))
     }
@@ -174,6 +196,20 @@ impl Env for SysEnv {
 
     fn sleep(&mut self, ns: i64) {
         sleep_ns(ns)
+    }
+
+    fn exec(&mut self, name: &str, args: &[(Option<String>, shlang::Value)], _input: shlang::Value, _needs: &shlang::host::ExecNeeds)
+        -> Option<Result<shlang::Value, shlang::ShError>> {
+        if name != "ai" {
+            return None;
+        }
+        let c = self.spawner.as_ref().and_then(|s| s.connect().ok());
+        let mut f: Box<dyn Fs> = match c {
+            Some(c) => Box::new(fs::FsdFs::new(c, alloc::format!("{}-ai", self.tag))),
+            None => Box::new(fs::NoFs),
+        };
+        let home = self.home.clone();
+        Some(self.ai.run(args, f.as_mut(), &home))
     }
 
     fn spawn(&mut self, job: Box<dyn FnOnce() + Send>) -> Option<Box<dyn Joinable>> {
@@ -272,17 +308,24 @@ fn main(startup: Startup) -> i64 {
     let mut hs = first.handles.into_iter();
     let mut spare = hs.next().map(Channel::from_handle);
     let mut fsd = hs.next().map(|h| fs::FsdFs::new(FsClient::new(Channel::from_handle(h)), tag.clone()));
-    let audio = hs.next().map(Channel::from_handle).map(|ch| match hs.next() {
-        Some(lease) => audioproto::conn::AudioClient::with_lease(ch, Channel::from_handle(lease)),
-        None => audioproto::conn::AudioClient::new(ch),
-    });
+    let agent_gate = hs.next().map(Channel::from_handle);
     let mut nofs = fs::NoFs;
     let mut svc = Service::single(&home, session);
     svc.stack_budget = STACK_BUDGET;
     svc.task_stack = TASK_STACK_BUDGET;
     let notify = Event::create().ok().map(|e| Arc::new(EventNotify(e)));
     let spawner = fsd.as_ref().and_then(|f| f.client.connect().ok());
-    let mut env = SysEnv { spawner, tag: tag.clone(), notify: notify.clone(), audio, playing: None, task_producer: None, task_client: None };
+    let mut env = SysEnv {
+        spawner,
+        tag: tag.clone(),
+        notify: notify.clone(),
+        ai: ai::Ai::new(agent_gate),
+        home: home.clone(),
+        audio: None,
+        playing: None,
+        task_producer: None,
+        task_client: None,
+    };
     println!("shsess {session}: bezim ({tag})");
 
     loop {

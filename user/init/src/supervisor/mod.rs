@@ -249,8 +249,10 @@ impl Supervisor {
         println!("init: supervisor bezi");
         loop {
             // Kolo nejdyl 2 s: prehled uloh (stav sluzeb, ikona v liste).
-            self.step(startup, Some(time::deadline_after(core::time::Duration::from_secs(2))));
+            let happened = self.step(startup, Some(time::deadline_after(core::time::Duration::from_secs(2))));
             crate::tasks::sync(self);
+            // Snimek stavu pro systemove nastroje agenta (jen cteni).
+            crate::agent::publish(&self.status(), &happened);
         }
     }
 

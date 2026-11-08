@@ -836,16 +836,39 @@ impl<D: BlockDevice> Fs<D> {
     /// zapisovatelny klon na ceste `path` (pracovni kopie - aplikace dostane
     /// capability jen k ni). Vraci cislo datasetu klonu. Vyzaduje `MANAGE`.
     pub fn aside_begin(&mut self, dataset: &str, path: &str) -> Result<u64> {
+        Ok(self.aside_begin_ex(dataset, path)?.dataset)
+    }
+
+    /// Jako `aside_begin`, navic jmeno snapshotu puvodu a posledni zaznam
+    /// zurnalu, ktery obsahuje (shell z nej dela undo misto `view`, viz
+    /// `aside_apply_with`).
+    pub fn aside_begin_ex(&mut self, dataset: &str, path: &str) -> Result<AsideBegun> {
         self.require(dataset, rights::MANAGE)?;
+        // Obsazeny cil predem: selhani az uprostred vytvareni klonu by po
+        // zmenach (snapshot, pocet klonu) system zablokovalo (`guarded`).
+        match self.enter(path) {
+            Err(Error::NotFound) => {}
+            Ok(_) | Err(Error::NotSupported) => return Err(Error::AlreadyExists),
+            Err(e) => return Err(e),
+        }
+        // Dva commity: stav (koren snapshotu) a pak zaznam snapshotu
+        // spolu s klonem (commit klonu). Pad mezi nimi = nic nevzniklo.
         let name = self.guarded(|fs| {
             // Vnorene datasety (i jine klony "bokem" uvnitr originalu) jsou
             // v klonu hranice: videt, ale nejde do nich (`dataset.rs`).
             fs.enter_dataset(dataset)?;
             let name = alloc::format!("aside-{}", fs.s.next_snapshot);
-            fs.snapshot_internal(&name, snapkind::ASIDE)?;
-            Ok(name)
+            let (_, meta) = fs.snapshot_temporary(&name, snapkind::ASIDE)?;
+            Ok((name, meta.journal_seq))
         })?;
-        self.clone_snapshot(dataset, &name, path)
+        let (name, seq) = name;
+        self.clone_snapshot(dataset, &name, path).map(|id| AsideBegun { dataset: id, snapshot: name.clone(), seq }).inspect_err(|_| {
+            // Klon nevznikl (cil existuje, malo mista): snapshot by jinak
+            // drzel bloky az do uklidu pri pripojeni.
+            if !self.s.poisoned && self.enter_dataset(dataset).is_ok() {
+                let _ = self.guarded(|fs| fs.delete_snapshot_active(&name));
+            }
+        })
     }
 
     /// Puvod klonu `clone` "bokem": (dataset puvodu, snapshot) a cesta puvodu.
@@ -857,7 +880,8 @@ impl<D: BlockDevice> Fs<D> {
             return Err(Error::InvalidArgs);
         }
         self.activate(ods)?;
-        if self.snap_meta(osnap)?.kind != snapkind::ASIDE {
+        // VIEW: snapshot po prevzeti ponechany jako pohled (`keep_view`).
+        if !matches!(self.snap_meta(osnap)?.kind, snapkind::ASIDE | snapkind::VIEW) {
             return Err(Error::InvalidArgs);
         }
         let path = self.dataset_path(ods)?;
@@ -877,6 +901,16 @@ impl<D: BlockDevice> Fs<D> {
     /// zmenilo i v originalu, se neprevezme a vrati jako konflikt.
     /// Prevzeti je atomicke (commit). Vyzaduje `MANAGE` k obema.
     pub fn aside_apply(&mut self, clone: &str, select: Option<&[String]>) -> Result<MergeReport> {
+        self.aside_apply_with(clone, select, false)
+    }
+
+    /// Jako `aside_apply`; `keep_view` = snapshot puvodu (stav pred
+    /// radkem) po prevzeti zustane jako pohled (`view`) pro undo: uvolni
+    /// ho `release_view`, `aside_discard` ho uz nesmaze. Pro cesty, ktere se
+    /// prevzaly bez konfliktu, je stav ve snapshotu stejny jako v originalu
+    /// tesne pred prevzetim (jinak by sly do konfliktu) - pohled navic
+    /// (dalsi commit na radek) neni potreba.
+    pub fn aside_apply_with(&mut self, clone: &str, select: Option<&[String]>, keep_view: bool) -> Result<MergeReport> {
         let (ods, osnap, _) = self.aside_origin(clone)?;
         self.enter_dataset(clone)?;
         let cds = self.cur_ds;
@@ -888,6 +922,12 @@ impl<D: BlockDevice> Fs<D> {
             let base = fs.snapshot_root_at(ods, osnap)?;
             fs.activate(ods)?;
             let report = fs.merge_trees(&base, &theirs, Mode::Aside, "bokem", select)?;
+            if keep_view {
+                fs.activate(ods)?;
+                let mut meta = fs.snap_meta(osnap)?;
+                meta.kind = snapkind::VIEW;
+                fs.put(Key::new(META_OID, item::SNAPMETA, osnap), meta.encode())?;
+            }
             fs.commit()?;
             Ok(report)
         })
@@ -926,16 +966,32 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Zahodi klon "bokem" i jeho vychozi snapshot (jednim krokem).
+    /// Snapshot ponechany jako pohled (`aside_apply_with`) zustane do
+    /// `release_view` (uz uvolneny, skryty zanikne s klonem).
     pub fn aside_discard(&mut self, clone: &str) -> Result<()> {
         let (_, osnap, path) = self.aside_origin(clone)?;
         let root = self.s.root;
         let raw = btree::get(&mut self.s, &root, &Key::new(META_OID, item::SNAPSHOT, osnap))?.ok_or(Error::Corrupted)?;
         let name = crate::layout::SnapshotRecord::decode(&raw)?.name;
+        let aside = self.snap_meta(osnap)?.kind == snapkind::ASIDE;
         self.delete_dataset(clone)?;
-        self.delete_snapshot_of(&path, &name)?;
+        if aside {
+            self.delete_snapshot_of(&path, &name)?;
+        }
         self.commit()
     }
 
+}
+
+/// Zacatek "bokem" (`aside_begin_ex`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsideBegun {
+    /// Cislo datasetu klonu.
+    pub dataset: u64,
+    /// Snapshot puvodu (v puvodnim datasetu).
+    pub snapshot: String,
+    /// Posledni zaznam zurnalu, ktery snapshot obsahuje (jako `View::seq`).
+    pub seq: u64,
 }
 
 /// Jmeno kopie konfliktu: "stem (konflikt label).ext".
