@@ -371,12 +371,25 @@ pub fn interrupt_create(resource: u32) -> Result<(u32, abi::object::MsiMessage)>
     Ok((h as u32, msi))
 }
 
+/// Objekt preruseni na pevne lince (spousteni podle platformy: x86 MADT,
+/// aarch64 uroven). Stejne jako drive; priznaky viz
+/// [`interrupt_create_line_flags`].
 pub fn interrupt_create_line(resource: u32, line: u32) -> Result<u32> {
+    interrupt_create_line_flags(resource, line, 0)
+}
+
+/// Jako [`interrupt_create_line`] s priznaky `abi::syscall::line_flags`.
+pub fn interrupt_create_line_flags(resource: u32, line: u32, flags: u64) -> Result<u32> {
     call(
         nr::INTERRUPT_CREATE_LINE,
-        [resource as u64, line as u64, 0, 0, 0, 0],
+        [resource as u64, line as u64, flags, 0, 0, 0],
     )
     .map(|h| h as u32)
+}
+
+/// Vypnuti / restart pres firmware (`SYSTEM_POWER`); pri uspechu se nevraci.
+pub fn system_power(resource: u32, op: u64) -> Result<()> {
+    call(nr::SYSTEM_POWER, [resource as u64, op, 0, 0, 0, 0]).map(|_| ())
 }
 
 pub fn ioport_read(resource: u32, port: u16, width: u8) -> Result<u32> {

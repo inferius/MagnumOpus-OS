@@ -51,6 +51,9 @@ struct MainLink<'a> {
     tasks: Option<Vec<libos::Handle>>,
 }
 
+/// Kanal k initu pro `shutdown`/`reboot` (zprava `SessMsg::Power` od termd).
+static POWER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
+
 impl MainLink<'_> {
     fn client(&mut self, r: Result<libos::Message, Error>) -> Option<ClientMsg> {
         match r {
@@ -58,6 +61,12 @@ impl MainLink<'_> {
                 Ok(SessMsg::Client(c)) => Some(c),
                 Ok(SessMsg::Tasks) => {
                     self.tasks = Some(m.handles);
+                    None
+                }
+                Ok(SessMsg::Power) => {
+                    if let Some(h) = m.handles.into_iter().next() {
+                        *POWER.lock() = Some(Channel::from_handle(h));
+                    }
                     None
                 }
                 _ => None,
@@ -211,6 +220,25 @@ impl Env for SysEnv {
             }
         }
         out
+    }
+
+    /// `shutdown`/`reboot`: pozadavek initu (ten ukonci sluzby a pozada
+    /// acpid). Uspech = pocitac se vypne; odpoved prijde jen pri chybe.
+    fn power(&mut self, reboot: bool) -> Result<(), Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        let req = if reboot { powerproto::Request::Reboot } else { powerproto::Request::Shutdown };
+        chan.write(&req.encode(), Vec::new())?;
+        match chan.read(Some(time::deadline_after(Duration::from_secs(60)))) {
+            Ok(m) => match powerproto::Reply::decode(&m.data) {
+                Ok(powerproto::Reply::Failed(e)) => Err(e),
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            },
+            // Init ukoncuje system (kanal zavren): vypnuti probiha.
+            Err(Error::PeerClosed) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 }
 

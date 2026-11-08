@@ -22,6 +22,7 @@ mod dnshelper;
 mod ntshelper;
 mod revhelper;
 mod webhelper;
+mod powertest;
 mod qmp;
 mod symbolize;
 mod testdisks;
@@ -74,6 +75,9 @@ prepinace:
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
   --net-online     (test) i testy proti skutecne siti hostitele (resolver
                    hostitele pres slirp); bez nej jen lokalni servery
+  --no-power       (test) bez zvlastnich behu testu napajeni (vypnuti
+                   tlacitkem pres ACPI, restart); s --only se vynechaji take,
+                   --only napajeni = jen tyto behy
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
@@ -119,6 +123,9 @@ pub struct Options {
     /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
     /// startem QEMU).
     net_helper: std::cell::RefCell<Option<nethelper::Helper>>,
+    /// Zvlastni beh testu napajeni (`powertest`): "button" nebo "reboot".
+    /// QEMU ma skoncit samo (vypnuti ACPI) s kodem 0.
+    power_test: Option<&'static str>,
 }
 
 fn main() -> ExitCode {
@@ -157,8 +164,10 @@ fn run_cli() -> Result<()> {
         net_online: false,
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
+        power_test: None,
     };
     let mut gpu_set = false;
+    let mut no_power = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
@@ -197,6 +206,7 @@ fn run_cli() -> Result<()> {
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--net-online") => opts.net_online = true,
+            Some("--no-power") => no_power = true,
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
             Some("--accel") => {
@@ -271,9 +281,19 @@ repeat = {}
                 .push((String::from("net-test-dns-anchor"), web.dns_anchor.into_bytes()));
             opts.hostfwd = Some(helper.hostfwd.clone());
             *opts.net_helper.borrow_mut() = Some(helper);
-            let artifacts = build(&opts)?;
-            let image = image_for(&artifacts, &opts)?;
-            qemu::run(&image, &artifacts, &opts)
+            // `--only napajeni`: jen zvlastni behy testu napajeni.
+            let power_only = opts.test_only == "napajeni";
+            if !power_only {
+                let artifacts = build(&opts)?;
+                let image = image_for(&artifacts, &opts)?;
+                qemu::run(&image, &artifacts, &opts)?;
+            }
+            // Vypnuti a restart pres ACPI: vlastni kratke behy QEMU (konec
+            // behu = vypnuti, nejde to spojit s hlavnim behem testu).
+            if no_power || (!opts.test_only.is_empty() && !power_only) {
+                return Ok(());
+            }
+            powertest::run_all(&mut opts)
         }
         Some("check") => check_kernel(opts.arch, &opts),
         Some("docs") => build_docs().map(|_| ()),
@@ -453,6 +473,7 @@ const USER_PROGRAMS: &[&str] = &[
     "svctest",
     "fsrtest",
     "devmgr",
+    "acpid",
     "virtio-blk",
     "nvme",
     "ahci",

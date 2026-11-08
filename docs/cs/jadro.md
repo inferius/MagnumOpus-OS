@@ -221,6 +221,13 @@ Záznam:
   log do framebufferu nekreslí, na sériovou linku jde dál. `RELEASE` ho
   jádru vrátí (obrazovka se smaže); totéž udělá konec (i pád) procesu,
   který ho převzal. Bez framebufferu položka chybí.
+- **Údaje ACPI pro userspace:** init dostane objekt paměti
+  `bootstrap::kind::ACPI` (formát `abi::acpi::Info`): adresu a kopii RSDP
+  (zkopírovanou při startu - RSDP může ležet v paměti, kterou jádro pak
+  uvolní) a oblasti paměti firmwaru s tabulkami (`AcpiReclaimable`,
+  `AcpiNvs`). Init je předá službě `acpid`, která v nich smí mapovat
+  (`VMO_CREATE_PHYSICAL` s cache) - viz [ACPI](acpi.md). Jádro samo čte jen
+  MADT, MCFG, HPET a tabulky IOMMU.
 - Filtr: globální úroveň (`log::set_level`), úroveň pro modul a jeho
   podmoduly (`log::set_target_level("sched", Level::Trace)`). Release build
   vůbec nepřeloží Trace (feature `log-trace` ho vrátí). Vypnutá úroveň stojí

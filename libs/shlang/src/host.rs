@@ -278,6 +278,13 @@ pub trait Host {
     fn tasks(&mut self, _op: TasksOp) -> Option<Result<Value, ShError>> {
         None
     }
+    /// Vypnuti (`reboot = false`) nebo restart systemu (`shutdown`,
+    /// `reboot`). Pri uspechu se pocitac vypne a volani se nevrati (nebo
+    /// vrati `Ok` tesne pred vypnutim); `NOT_SUPPORTED` = hostitel napajeni
+    /// nema (testy, relace bez prava).
+    fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Domovska slozka uzivatele.
     fn home(&self) -> String {
         String::from("/home")

@@ -73,6 +73,11 @@ pub trait Env {
     fn clock(&self) -> Option<Clock> {
         None
     }
+    /// Vypnuti / restart systemu (prikazy `shutdown`, `reboot`); vychozi =
+    /// relace napajeni nema.
+    fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
 }
 
 /// Kanaly prehledu uloh pres `Env`.
@@ -423,6 +428,10 @@ impl Host for SessionHost<'_> {
 
     fn home(&self) -> String {
         self.home.into()
+    }
+
+    fn power(&mut self, reboot: bool) -> Result<(), abi::Error> {
+        self.env.power(reboot)
     }
 
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {

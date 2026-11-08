@@ -22,5 +22,7 @@ conf = { workspace = true }
 spin = "0.12"
 svcclient = { path = "../../libs/svcclient", features = ["client"] }
 shlang = { path = "../../libs/shlang" }
+powerproto = { path = "../../libs/powerproto" }
+abi = { workspace = true }
 term = { path = "../../libs/term" }
 taskproto = { path = "../../libs/taskproto" }

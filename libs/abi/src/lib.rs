@@ -13,6 +13,7 @@
 
 #![cfg_attr(not(test), no_std)]
 
+pub mod acpi;
 pub mod bootstrap;
 pub mod error;
 pub mod job;

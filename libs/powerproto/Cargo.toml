@@ -1,0 +1,11 @@
+[package]
+name = "powerproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Protokol sluzby napajeni acpid: vypnuti, restart, udalosti tlacitek, teploty, baterie"
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }

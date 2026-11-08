@@ -432,6 +432,7 @@ Každý příkaz má krátké jméno a plné jméno `sloveso-podstatné` (alias)
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | úlohy na pozadí |
 | `tasks` | `task-list` | přehled úloh systému (`taskd`): tabulka, `tasks cancel/pause/resume/log <id>`; viz [Přehled úloh](architektura.md#přehled-úloh-odsouhlaseno) |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
+| `shutdown`, `reboot` | `system-shutdown`, `system-reboot` | čisté vypnutí / restart přes init a ACPI; zeptá se, `-y` bez dotazu (viz [ACPI](acpi.md#příkazy-shellu)) |
 
 ## Příklady
 

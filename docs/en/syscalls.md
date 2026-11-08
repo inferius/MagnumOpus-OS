@@ -593,6 +593,15 @@ as a syscall buffer (`BAD_ADDRESS`). A restricted resource
 revoke it (`VMO_REVOKE`). Errors: `INVALID_ARGS` (unaligned address,
 unknown cache type), `ACCESS_DENIED`.
 
+
+**ACPI memory:** the only exception to "outside RAM" is the firmware
+memory holding the ACPI tables (`AcpiReclaimable` and `AcpiNvs` regions of
+the memory map, which the kernel never hands to the allocator): a range
+lying **entirely** inside it always gets a `CACHED` object (the same
+attributes as the kernel's direct map; `cache` is ignored) - the ACPI
+service needs it (`acpid`, see [ACPI](acpi.md)). A range only partly
+overlapping RAM is always `ACCESS_DENIED`.
+
 ### `VMO_REVOKE`
 
 `(resource, vmo)`. Revokes a physical memory object: removes its mappings
@@ -650,7 +659,9 @@ recorded.
 kind (`abi::syscall::RANGE_KIND_MASK`): 0 = physical memory (above),
 `RANGE_IO_PORTS` (`1 << 62`) = I/O ports from `start & 0xFFFF`, length =
 number of ports (the end at most 0x10000), `RANGE_IRQ_LINES` (`2 << 62`) =
-legacy interrupt lines (ISA IRQ) from `start`, length = count (lines 0-31).
+fixed interrupt lines from `start`, length = count (lines 0 to
+`abi::syscall::IRQ_LINES_MAX - 1` = 1023: x86_64 ISA IRQs, aarch64 GIC SPI
+interrupt numbers 32-1019).
 Ports and lines need no alignment. A child may only have its parent's ports
 and lines. The root resource may use all of them. Any other kind is
 `INVALID_ARGS`. In libos: `hw::io_ports(first, count)` and
@@ -681,10 +692,15 @@ the width (e.g. 0x100 for 1 byte). In libos `Resource::port_write8`.
 
 ### `INTERRUPT_CREATE_LINE`
 
-`(resource, line) -> handle`. An interrupt object on a legacy line (ISA
-IRQ 0-15 through the IOAPIC; PS/2 keyboard 1, mouse 12). The kernel maps
-the line to a GSI using the ACPI MADT overrides (polarity, trigger mode)
-and routes it to a free vector on the boot CPU. On an interrupt the object
+`(resource, line, flags) -> handle`. An interrupt object on a fixed line.
+x86_64: ISA IRQ 0-15 through the IOAPIC (PS/2 keyboard 1, mouse 12, ACPI
+SCI usually 9); the kernel maps the line to a GSI using the ACPI MADT
+overrides (polarity, trigger mode), routes it to a free vector on the boot
+CPU and ignores `flags`. aarch64: SPI 32-1019 through the GIC distributor
+(on-board devices without MSI, e.g. the ACPI Generic Event Device); the
+trigger mode comes from `flags` (`abi::syscall::line_flags::EDGE` = edge,
+otherwise level; the value from the device's `_CRS`), and the interrupt
+goes to the boot CPU. An unknown bit in `flags` = `INVALID_ARGS`. On an interrupt the object
 gets `SIGNALED` as with `INTERRUPT_CREATE`, and it is acknowledged with
 `INTERRUPT_ACK`. The kernel masks a **level**-triggered line after the
 interrupt and unmasks it on acknowledgement (otherwise the interrupt would
@@ -695,15 +711,38 @@ allow the line (`RANGE_IRQ_LINES`), and the object counts towards
 `irq_max`. A line can have only one object (`ALREADY_EXISTS`). When the
 last handle closes, the line is masked and released. Errors:
 `INVALID_ARGS` (line above 15), `ACCESS_DENIED`, `ALREADY_EXISTS`,
-`NO_RESOURCES`, `NOT_SUPPORTED` (aarch64, a platform without an IOAPIC),
-`NOT_FOUND` (the line is not an IOAPIC input). In libos
-`Resource::interrupt_line`.
+`NO_RESOURCES`, `NOT_SUPPORTED` (a platform without an IOAPIC),
+`NOT_FOUND` (the line is not an IOAPIC input); on aarch64 also
+`INVALID_ARGS` for a number outside the SPIs the distributor has. In libos
+`Resource::interrupt_line` and `Resource::interrupt_line_with` (with
+`flags`). Older calls without `flags` (libos passes 0) behave as before.
 
 ### `INTERRUPT_ACK`
 
 `(interrupt) -> 0`. Acknowledges the interrupt (clears `SIGNALED`). A
 driver should acknowledge **before** servicing the device so an interrupt
 arriving during servicing is not lost. Requires `WRITE`.
+
+### `SYSTEM_POWER`
+
+`(resource, op) -> does not return`. Powers the computer off
+(`abi::syscall::power_op::OFF` = 0) or resets it (`RESET` = 1) through the
+firmware. Requires a Resource with the `POWER` right: only the root
+resource has it (restricted resources from `RESOURCE_CREATE` never do),
+and init hands it only to the ACPI service (`acpid`) as a `BASIC | POWER`
+duplicate without `MANAGE`. The kernel logs which process asked.
+
+| Architecture | `OFF` | `RESET` |
+|---|---|---|
+| aarch64 | PSCI `SYSTEM_OFF` | PSCI `SYSTEM_RESET` |
+| x86_64 | `NOT_SUPPORTED` - `acpid` powers off by writing the S5 sleep type into the PM1 register (only the service knows AML) | Reset Control register 0xCF9, then the keyboard controller (0x64 = 0xFE) |
+
+It is normally called only after the services have stopped cleanly (init,
+see [ACPI](acpi.md)). On success the call does not return. Errors:
+`ACCESS_DENIED` (no `POWER` right), `INVALID_ARGS` (unknown operation;
+checked before anything is powered off), `NOT_SUPPORTED` (no PSCI in the
+firmware, or power-off on x86), `BAD_HANDLE`, `WRONG_TYPE`. In libos
+`Resource::system_power`.
 
 ## Random numbers
 

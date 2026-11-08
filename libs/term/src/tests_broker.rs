@@ -13,6 +13,7 @@ fn control_messages_roundtrip() {
     for m in [
         SessMsg::Init { session: 7, tag: "ab-7".into(), home: "/home".into() },
         SessMsg::Adopt,
+        SessMsg::Power,
         SessMsg::Client(ClientMsg::Run { session: 7, line: "ls".into() }),
     ] {
         assert_eq!(SessMsg::decode(&m.encode()), Ok(m));

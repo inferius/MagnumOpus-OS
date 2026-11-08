@@ -243,4 +243,8 @@ pub const BUILTINS: &[Sig] = &[
     sig!("error", "error-raise", &[p("message", Kind::Str)], None,
         &[Flag { long: "code", short: None, value: Some(Kind::Str), help: "kod chyby" }], IN, IN, "vyvola chybu"),
     sig!("exit", "session-exit", NONE, None, NOFLAGS, IN, IN, "ukonci relaci"),
+    sig!("shutdown", "system-shutdown", NONE, None, &[flag("yes", 'y', "vypnout bez dotazu")], IN, IN,
+        "cisto vypne pocitac (ukonci sluzby, pak ACPI S5)"),
+    sig!("reboot", "system-reboot", NONE, None, &[flag("yes", 'y', "restartovat bez dotazu")], IN, IN,
+        "cisto restartuje pocitac"),
 ];

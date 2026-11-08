@@ -1,0 +1,16 @@
+[package]
+name = "acpica"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "ACPICA (Intel, licence BSD-3) prelozena clangem a rozhrani pro Rust"
+build = "build.rs"
+links = "acpica"
+
+[dependencies]
+cstd = { path = "../cstd" }
+abi = { workspace = true }
+
+[build-dependencies]
+cbuild = { path = "../cbuild" }

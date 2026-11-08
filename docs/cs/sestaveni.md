@@ -12,6 +12,11 @@
   - Fedora: `dnf install qemu-system-x86 edk2-ovmf qemu-system-aarch64 edk2-aarch64`
   - Arch: `pacman -S qemu-desktop edk2-ovmf edk2-aarch64`
   - macOS: `brew install qemu`
+- **clang a llvm-ar** (LLVM 17+) pro převzatý kód v C (ACPICA, viz
+  [Překlad C](preklad-c.md)): Windows `winget install LLVM.LLVM`,
+  Debian/Ubuntu `apt install clang llvm`, Fedora `dnf install clang llvm`,
+  Arch `pacman -S clang llvm`, macOS `brew install llvm`. Jiné místo:
+  proměnná `CLANG`.
 - Volitelně **GDB** pro ladění.
 
 xtask hledá QEMU v `PATH` a na obvyklých místech, firmware vedle QEMU nebo
@@ -28,6 +33,7 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 | `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)). Bez `--gpu` GUI kreslí přes framebuffer firmwaru (`--gpu none`, [GUI](gui.md)), aby bylo vidět v okně. Konzoli Windows xtask přepne na UTF-8 |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro ostatní architektury, dokumentace, pak jádro a userspace v QEMU bez okna |
 | `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Test delší než 20 s se v logu označí `[pomaly]` |
+| `cargo xtask test --only napajeni` | jen zvláštní běhy testu napájení (vypnutí tlačítkem přes ACPI, restart; po hlavním běhu se spouští vždy, vypne je `--no-power`), viz [ACPI](acpi.md#testy) |
 | `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
 | `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |

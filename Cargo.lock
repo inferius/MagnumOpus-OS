@@ -7,6 +7,27 @@ name = "abi"
 version = "0.1.0"
 
 [[package]]
+name = "acpica"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "cbuild",
+ "cstd",
+]
+
+[[package]]
+name = "acpid"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "acpica",
+ "cstd",
+ "libos",
+ "powerproto",
+ "spin 0.12.3",
+]
+
+[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -238,6 +259,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cbuild"
+version = "0.1.0"
+
+[[package]]
 name = "cc"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -432,6 +457,10 @@ dependencies = [
 
 [[package]]
 name = "csprng"
+version = "0.1.0"
+
+[[package]]
+name = "cstd"
 version = "0.1.0"
 
 [[package]]
@@ -1171,6 +1200,7 @@ dependencies = [
 name = "init"
 version = "0.1.0"
 dependencies = [
+ "abi",
  "blockproto",
  "conf",
  "fsproto",
@@ -1179,6 +1209,7 @@ dependencies = [
  "libos",
  "manifest",
  "netproto",
+ "powerproto",
  "shlang",
  "spin 0.12.3",
  "svcclient",
@@ -1629,6 +1660,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a6394b9e965e73d0a289ee54f589087e2c676aedf60885baf52c76b771e4958"
 
 [[package]]
+name = "powerproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2065,7 +2104,9 @@ version = "0.1.0"
 dependencies = [
  "fsproto",
  "libos",
+ "powerproto",
  "shlang",
+ "spin 0.12.3",
  "term",
 ]
 

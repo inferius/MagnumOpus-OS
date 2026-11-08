@@ -446,6 +446,7 @@ Every command has a short name and a full `verb-noun` name (an alias).
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | background jobs |
 | `tasks` | `task-list` | the system task overview (`taskd`): a table, `tasks cancel/pause/resume/log <id>`; see [Task overview](architecture.md#task-overview-agreed) |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
+| `shutdown`, `reboot` | `system-shutdown`, `system-reboot` | clean power-off / reboot through init and ACPI; asks first, `-y` without asking (see [ACPI](acpi.md#shell-commands)) |
 
 ## Examples
 

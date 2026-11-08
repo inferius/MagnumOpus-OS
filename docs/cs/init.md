@@ -24,7 +24,9 @@ výpadku proudu pro testy FS).
 
 ## Start
 
-1. `timed` (služba času, jediná s právem nastavovat hodiny),
+1. `timed` (služba času, jediná s právem nastavovat hodiny), hned po ní
+   `acpid` (ACPI: napájení, tlačítka, čidla; jediná s právem `POWER`, viz
+   [ACPI](acpi.md)) - inicializace ACPICA běží souběžně s dalšími kroky,
 2. `devmgr`: najde zařízení a spustí ovladače. Hlásí disky (`block`)
    a vstupní zařízení (`input`) a pak `done`, až jsou hotová i zařízení
    USB při startu; při dlouhém čekání na ovladač disku posílá `busy`
@@ -53,6 +55,14 @@ výpadku proudu pro testy FS).
 Konfiguraci `fsd` (první zpráva řídicího kanálu) posílá init vždy:
 `debug` v testovacím běhu, jinak `normal`. fsd na ni před připojením
 disku čeká.
+
+## Vypnutí a restart
+
+Tlačítko napájení (událost od `acpid`) nebo příkaz shellu `shutdown` /
+`reboot` = **čisté vypnutí**: init ukončí termd a záložní konzoli, pak
+služby v opačném pořadí registrace (klienti před službami), `fsd` a nakonec
+`devmgr` a `timed` (na každou čeká nejvýš 1,5 s) a teprve potom požádá
+`acpid` o S5 nebo restart. Podrobně v [ACPI](acpi.md#vypnutí-a-restart).
 
 ## Supervisor
 

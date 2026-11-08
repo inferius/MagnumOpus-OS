@@ -11,6 +11,15 @@ One line per source, same format for all threads: name, version, source,
 licence, path in the repository, how it is used (copied / translated to
 Rust / facts only). GPL code is never translated.
 
+Kód převzatý celý do repozitáře (vendored, např. ACPICA) má vlastní sekci
+s plným textem licence, pokud ho licence vyžaduje v binární distribuci.
+Závislosti z crates.io mají licence ve svých balíčcích (`cargo metadata`).
+
+Code vendored whole into the repository (e.g. ACPICA) has its own section
+with the full licence text when the licence requires it in binary
+distributions. Dependencies from crates.io carry their licences in their
+packages (`cargo metadata`).
+
 ## Nastavení obrazu / Display configuration
 
 | Název / Name | Verze / Version | Zdroj / Source | Licence / License | Cesta / Path | Jak použito / How used |
@@ -35,3 +44,67 @@ Rust / facts only). GPL code is never translated.
 | linuxhw/EDID (AOC 2243W `07E32DADDF83`, LG Display LGD0217 `925C880E8A08`) | master, 2026-11-08 | https://github.com/linuxhw/EDID | CC-BY-4.0 | `libs/display/src/tests/data.rs`, `libs/intelgfx/src/tests/data.rs` | data (dumpy EDID pro testy), beze změny |
 | Intel Graphics PRM (Skylake až Lunar Lake) | veřejné svazky (Intel, "Graphics for Linux" developer reference) | intel.com | dokumentace | `libs/intelgfx` | fakta (popis registrů); hodnoty v kódu ověřeny proti hlavičkám i915 výše |
 | VESA CVT 1.2, DMT 1.0 r13, E-EDID 1.4, DisplayID 1.3/2.0, DisplayPort 1.4a; CTA-861-G; HDMI 1.4b/2.0 | specifikace | VESA, CTA, HDMI Forum | specifikace | `libs/display` | fakta (formáty, vzorce, tabulky) |
+
+## ACPICA
+
+- **Název / Name:** ACPICA (ACPI Component Architecture) - interpret AML, tabulky, události / AML interpreter, tables, events
+- **Verze / Version:** 20250404 (tag `R2025_04_04`, commit `8a54b2a8c4bc2a60d1ddaba4a1ffebe38c2a0062`)
+- **Zdroj / Source:** https://github.com/acpica/acpica
+- **Licence / Licence:** BSD-3-Clause (zvolená z trojí licence Intel / BSD / GPLv2; GPL se nepoužívá / chosen from the triple licence, GPL not used)
+- **Cesta / Path:** `third_party/acpica` (popis verze a zásahů: `third_party/acpica/README.md`); používá / used by `libs/acpica`, `user/acpid`
+
+Hlavičky zdrojových souborů ACPICA nabízejí vedle licence Intel výslovně
+i licenci BSD ("Alternatively, you may choose to be licensed under the terms
+of the following license") a GPLv2. Systém používá **licenci BSD** (je
+slučitelná s licencí MIT/Apache-2.0 zbytku systému); plné znění všech tří
+je v `third_party/acpica/LICENSE`. Podmínka licence BSD pro binární
+distribuci: přiložit upozornění "NO WARRANTY" níže.
+
+The ACPICA source headers explicitly offer, besides the Intel licence, the
+BSD licence ("Alternatively, you may choose to be licensed under the terms
+of the following license") and GPLv2. The system uses the **BSD licence**
+(compatible with the MIT/Apache-2.0 licence of the rest of the system); the
+full text of all three is in `third_party/acpica/LICENSE`. The BSD
+condition for binary redistribution: include the "NO WARRANTY" disclaimer
+below.
+
+```text
+Copyright (c) 1999 - 2025, Intel Corp.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions, and the following disclaimer,
+   without modification.
+2. Redistributions in binary form must reproduce at minimum a disclaimer
+   substantially similar to the "NO WARRANTY" disclaimer below
+   ("Disclaimer") and any redistribution must be conditioned upon
+   including a substantially similar Disclaimer requirement for further
+   binary redistribution.
+3. Neither the names of the above-listed copyright holders nor the names
+   of any contributors may be used to endorse or promote products derived
+   from this software without specific prior written permission.
+
+NO WARRANTY
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+## Písmo Tuffy / Tuffy font
+
+- **Název / Name:** Tuffy Regular
+- **Verze / Version:** z testovacích písem crate `fontdb` 0.24 / from the test fonts of the `fontdb` 0.24 crate
+- **Zdroj / Source:** http://tulrich.com/fonts/ (Thatcher Ulrich)
+- **Licence / Licence:** public domain
+- **Cesta / Path:** `libs/font/fonts/Tuffy.ttf` (popis: `libs/font/fonts/README.md`)

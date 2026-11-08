@@ -22,6 +22,7 @@ mod fsd;
 mod gui;
 mod input;
 mod ntp;
+mod power;
 mod revocation;
 mod supervisor;
 mod system;
@@ -29,7 +30,7 @@ mod tasks;
 mod terminal;
 mod tests;
 
-use libos::{Startup, println};
+use libos::{Error, Startup, println};
 
 libos::entry!(main);
 
@@ -53,6 +54,22 @@ fn main(startup: Startup) -> i64 {
         }
         Err(e) => println!("init: sluzbu uloh (taskd) nelze spustit: {e}"),
     }
+    // Sluzba ACPI (napajeni, tlacitka): co nejdriv, inicializace ACPICA
+    // bezi soubezne se startem ostatnich sluzeb.
+    match power::start(&startup) {
+        Ok(()) => {
+            if let Some(p) = power::POWER.lock().as_ref() {
+                sup.watch("acpid", &p.process, None);
+            }
+        }
+        Err(Error::NotFound) => println!("init: ACPI neni (jadro nepredalo udaje), napajeni jen pres firmware"),
+        Err(e) => println!("init: sluzbu ACPI nelze spustit: {e}"),
+    }
+    let power_test = if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
+        tests::power::mode(&startup)
+    } else {
+        None
+    };
     match system::start_devices(&startup) {
         Ok(mut devices) => {
             match system::start_fs(&startup, &mut devices) {
@@ -98,8 +115,9 @@ fn main(startup: Startup) -> i64 {
                 }
                 Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
-            // Sit az po FS: firewall uklada konfiguraci na FS.
-            match system::start_net(&startup, &mut devices, &mut sup) {
+            // Sit az po FS: firewall uklada konfiguraci na FS. Zvlastni beh
+            // testu napajeni sit nepotrebuje (kratsi start).
+            match if power_test.is_some() { Err(Error::NotSupported) } else { system::start_net(&startup, &mut devices, &mut sup) } {
                 Ok(mut n) => {
                     let dnsd_end = n.dnsd_end.take();
                     // Restart zatim neni (jako u fsd): netd drzi kanaly
@@ -169,6 +187,10 @@ fn main(startup: Startup) -> i64 {
     // Testovaci beh (jadro s qemu-test): testy userspace, pak konec
     // s vysledkem (jadro ukonci QEMU). Testy supervisor ridi samy.
     drop(sup);
+    if let Some(mode) = power_test {
+        // Zvlastni beh: vypnuti nebo restart (QEMU skonci samo).
+        return tests::power::scenario(&startup, &mode);
+    }
     let failed = tests::run_all(&startup);
     if failed == 0 {
         println!("init: vsechny testy userspace prosly");

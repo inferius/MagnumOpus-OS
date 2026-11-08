@@ -167,6 +167,19 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
             it.exit = true;
             Ok(Value::Nothing)
         }
+        "shutdown" | "reboot" => {
+            let reboot = name == "reboot";
+            let question = if reboot { "Restartovat pocitac?" } else { "Vypnout pocitac?" };
+            if !a.flag("yes") && !host.confirm(question, &Value::Nothing) {
+                return Err(Flow::Err(ShError::new(code::REJECTED, "zruseno, pocitac bezi dal").at(a.span)));
+            }
+            match host.power(reboot) {
+                Ok(()) => Ok(Value::Nothing),
+                Err(e) => Err(Flow::Err(
+                    ShError::sys(e, if reboot { "restart se nepovedl" } else { "vypnuti se nepovedlo" }).at(a.span),
+                )),
+            }
+        }
         _ => Err(a.err(code::UNKNOWN, alloc::format!("neznamy prikaz '{name}'"))),
     }
 }

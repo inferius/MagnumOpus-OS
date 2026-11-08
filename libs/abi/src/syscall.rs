@@ -86,8 +86,10 @@ pub const CLOCK_SET: u64 = 33;
 pub const IOPORT_READ: u64 = 34;
 /// Zapise I/O port (x86). `(resource, port, width, value)`
 pub const IOPORT_WRITE: u64 = 35;
-/// Objekt preruseni na stare lince (ISA IRQ 0-15 pres IOAPIC).
-/// `(resource, line) -> handle`
+/// Objekt preruseni na pevne lince: x86_64 ISA IRQ 0-15 pres IOAPIC
+/// (spousteni a polarita z MADT), aarch64 SPI 32-1019 pres GIC.
+/// `(resource, line, flags) -> handle`; `flags` z [`line_flags`] (x86_64
+/// je ignoruje, plati MADT)
 pub const INTERRUPT_CREATE_LINE: u64 = 36;
 
 /// Nahodne bajty z generatoru jadra. `(buf_ptr, len, flags) -> 1 = nasazeny`;
@@ -136,8 +138,28 @@ pub const VMO_REVOKE: u64 = 47;
 /// [`crate::job::ProcEntry`] (64 B), vrati celkovy pocet (i nad `max`)
 pub const JOB_PROCESSES: u64 = 48;
 
+/// Vypnuti nebo restart pocitace pres firmware (Resource s pravem `POWER`).
+/// `(resource, op)`; `op` z [`power_op`]. aarch64: PSCI `SYSTEM_OFF`
+/// a `SYSTEM_RESET`. x86_64: jen `RESET` (registr 0xCF9, pak radic
+/// klavesnice); vypnuti na x86 dela sluzba ACPI zapisem do registru spanku
+/// (S5), jadro AML nezna = `NOT_SUPPORTED`. Pri uspechu se nevraci.
+pub const SYSTEM_POWER: u64 = 49;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 49;
+pub const COUNT: u64 = 50;
+
+/// Operace `SYSTEM_POWER`.
+pub mod power_op {
+    /// Vypnout (PSCI SYSTEM_OFF).
+    pub const OFF: u64 = 0;
+    /// Restartovat (PSCI SYSTEM_RESET, x86 reset CPU).
+    pub const RESET: u64 = 1;
+}
+
+/// Nejvyssi cislo linky preruseni v `RESOURCE_CREATE` a
+/// `INTERRUPT_CREATE_LINE` (vyhradne): x86_64 ISA IRQ 0-15, aarch64 cisla
+/// preruseni GIC (SPI 32-1019).
+pub const IRQ_LINES_MAX: u32 = 1024;
 
 /// Operace `FB_CONTROL`.
 pub mod fb_op {
@@ -179,6 +201,14 @@ impl FbInfo {
         let v = |i: usize| u32::from_le_bytes([b[i * 4], b[i * 4 + 1], b[i * 4 + 2], b[i * 4 + 3]]);
         Self { width: v(0), height: v(1), stride: v(2), format: v(3) }
     }
+}
+
+/// Priznaky `INTERRUPT_CREATE_LINE` (spousteni linky; na x86_64 rozhoduje
+/// MADT a priznaky se ignoruji).
+pub mod line_flags {
+    /// Spousteni hranou (bez priznaku urovni).
+    pub const EDGE: u64 = 1;
+    pub const ALL: u64 = EDGE;
 }
 
 /// Nejvic bajtu v jednom `RANDOM_GET` / `RANDOM_ADD` (jedno volani = jedna
