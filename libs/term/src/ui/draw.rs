@@ -139,8 +139,40 @@ fn take_visible(t: &str, n: usize) -> (String, usize) {
 
 /// Usek ANSI textu (z `render`) rozdeleny na radky jako [`Line`] bez
 /// dalsiho stylu (styl je uz v textu).
+///
+/// Konce radku podle pravidla systemu (architektura, Text a konce
+/// radku): `\n` i `\r\n` je jeden konec radku, osamocene `\r` na konci se
+/// nezobrazuje, `\r` uvnitr radku vraci na jeho zacatek (dalsi text
+/// prepise drivejsi, jako ukazatel postupu).
 pub fn lines_of(ansi: &str) -> Vec<String> {
-    ansi.lines().map(String::from).collect()
+    ansi.lines().map(carriage).collect()
+}
+
+/// Radek s `\r` uvnitr: vysledek prepisovani od zacatku.
+fn carriage(line: &str) -> String {
+    let line = line.trim_end_matches('\r');
+    if !line.contains('\r') {
+        return line.into();
+    }
+    if line.contains('\x1b') {
+        // Se styly: jen posledni usek (prepis po znacich by rozbil escape).
+        return line.rsplit('\r').next().unwrap_or("").into();
+    }
+    let mut cells: Vec<char> = Vec::new();
+    let mut x = 0;
+    for c in line.chars() {
+        if c == '\r' {
+            x = 0;
+            continue;
+        }
+        if x < cells.len() {
+            cells[x] = c;
+        } else {
+            cells.push(c);
+        }
+        x += 1;
+    }
+    cells.into_iter().collect()
 }
 
 /// Odsazeni pokracovani zalomeneho radku: u radku tabulky (sloupce
