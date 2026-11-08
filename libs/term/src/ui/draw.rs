@@ -143,10 +143,56 @@ pub fn lines_of(ansi: &str) -> Vec<String> {
     ansi.lines().map(String::from).collect()
 }
 
+/// Odsazeni pokracovani zalomeneho radku: u radku tabulky (sloupce
+/// oddelene aspon dvema mezerami) pod posledni bunku, jinak pod zacatek
+/// textu. Nejvys polovina sirky (jinak by na popis nezbylo misto).
+fn hang(visible: &str, cols: usize) -> usize {
+    let chars: Vec<char> = visible.chars().collect();
+    let lead = chars.iter().take_while(|c| **c == ' ').count();
+    let mut col = lead;
+    let mut i = lead;
+    while i + 1 < chars.len() {
+        if chars[i] == ' ' && chars[i + 1] == ' ' {
+            let mut j = i;
+            while j < chars.len() && chars[j] == ' ' {
+                j += 1;
+            }
+            if j < chars.len() {
+                col = j;
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    if col * 2 > cols { lead.min(cols / 2) } else { col }
+}
+
 /// Zalomi ANSI text na radky nejvys `cols` viditelnych znaku (radeji
-/// v mezere). Posledni styl (SGR) se na dalsim radku zopakuje.
+/// v mezere). Posledni styl (SGR) se na dalsim radku zopakuje;
+/// pokracovani je odsazene (u tabulky pod bunku popisu, viz [`hang`]).
 pub fn wrap(s: &str, cols: usize) -> Vec<String> {
     let cols = cols.max(1);
+    let visible: String = {
+        let (t, _) = take_visible(s, usize::MAX);
+        let mut v = String::new();
+        let mut it = t.chars().peekable();
+        while let Some(c) = it.next() {
+            if c == '\x1b' {
+                if it.peek() == Some(&'[') {
+                    for d in it.by_ref() {
+                        if ('@'..='~').contains(&d) && d != '[' {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                v.push(c);
+            }
+        }
+        v
+    };
+    let indent = " ".repeat(hang(&visible, cols));
     // Tokeny: (escape?, text).
     let mut toks: Vec<(bool, String)> = Vec::new();
     let mut it = s.chars().peekable();
@@ -181,15 +227,16 @@ pub fn wrap(s: &str, cols: usize) -> Vec<String> {
             continue;
         }
         if n == cols {
+            let ind = indent.chars().count();
             let (rest, rest_n) = match space.take() {
-                Some((at, k, st)) if k < cols => (alloc::format!("{st}{}", line.split_off(at + 1)), k),
-                _ => (sgr.clone(), 0),
+                Some((at, k, st)) if k + ind < cols => (alloc::format!("{indent}{st}{}", line.split_off(at + 1)), ind + k),
+                _ => (alloc::format!("{indent}{sgr}"), ind),
             };
             line.push_str(RESET);
             out.push(core::mem::take(&mut line));
             line = rest;
             n = rest_n;
-            if t == " " && n == 0 {
+            if t == " " && n == indent.chars().count() {
                 continue;
             }
         }

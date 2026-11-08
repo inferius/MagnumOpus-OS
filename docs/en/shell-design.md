@@ -694,7 +694,11 @@ history, for an argument from completion by the argument type (`cd` only
 directories, paths, table fields) - the window requests it itself
 (`Complete` with the `seq` flag 0x8000_0000). Tab: a single match is
 completed at once, several matches open a menu that typing narrows (arrows
-/Tab choose, Enter confirms, Esc closes).
+/Tab choose, Enter confirms, Esc closes). The output scrolls with the wheel
+and Shift+PgUp/PgDn (plain PgUp is the table); when not at the bottom a
+"N lines below" bar shows it, a new block or typing returns to the bottom.
+`help` is an overview by groups (name and description), details in
+`help <command>`; a table row wraps only within the description cell.
 
 - **Matching replies (version 2):** `Complete` and `Format` carry a request
   number `seq`, which `Completions` and `Formatted` return. Events of other
