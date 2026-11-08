@@ -142,7 +142,7 @@ pwd
 
 reads a file as bytes
 
-Reads a file as bytes. `from text` turns them into text (no hidden conversion), `from json` into values.
+Reads a file as bytes. `from text` turns them into text (no hidden conversion), `from json` into values. The terminal does not show a large file whole: it prints a summary (the kind by content, e.g. a BMP image 1920×1080, the size and a few hex lines); the pipeline gets all the data.
 
 ```shell
 open path
@@ -1590,7 +1590,7 @@ exit
 
 help for a command
 
-Without an argument an overview of commands by group, with a command its full help: usage, arguments, pipeline, examples, errors and related commands.
+Without an argument an overview of commands by group, with a command its full help: usage, arguments, pipeline, examples, errors and related commands. Ctrl+C interrupts a running command; what you type meanwhile waits in a queue and runs after it (Esc clears the queue).
 
 ```shell
 help [command]

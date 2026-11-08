@@ -882,6 +882,27 @@ v běžném běhu rozdělí supervisor spolu s GUI 6c.
 | kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
 | spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
 
+### Ukazatel činnosti a průběh
+
+Příkazy činnost nekreslí samy znaky: hlásí ji strukturovaně (běžící blok,
+položka `Progress { done, total }`) a okno ji vykreslí jedním společným
+modulem `libs/term/src/activity.rs`. Tím jdou všechny příkazy (`cp`,
+stahování, scrub...) stejně.
+
+| Kam se kreslí | Činnost | Průběh | Stav |
+|---|---|---|---|
+| okno terminálu (`gui-term`) a záložní konzole | kroužek s otáčejícím se obloukem v barvě akcentu (1 buňka, ~16 snímků/s) | vyhlazený pruh s dílčími buňkami po 1/8, procenta, rychlost, odhad času | **[implementováno]** |
+| cizí terminál, znaková záloha | braillovy tečky `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, nejvýš 10 snímků/s | pruh z `▏▎▍▌▋▊▉█` | **[implementováno]** |
+| „Omezit pohyb“ | statický `◌` (běží) / `●` (hotovo) | jen celé buňky | **[navrženo]** (režim je, systémový přepínač zatím ne) |
+| výstup, který není terminál (soubor, skript) | žádná animace | jen konečný stav | **[implementováno]** |
+| průběh od cizích programů přes OSC 9;4 | | jako výše | **[navrženo]** |
+
+Okno a konzole kreslí kroužek i dílčí buňky samy, protože písma tyto znaky
+nemají. Na drátě jsou to znaky ze soukromé oblasti Unicode (U+F0000
+kroužek, U+F0100 dílčí buňka pruhu) a stejné krytí pixelů počítá
+`activity::coverage` pro obě. Kroužek se překresluje jen tehdy, když něco
+běží.
+
 ## Souběžnost: async a await
 
 > **Hotovo (varianta A):** úloha `async { }`, čekání `await` (v C i

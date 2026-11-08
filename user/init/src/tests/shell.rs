@@ -189,6 +189,15 @@ fn session(s: &Startup) -> TestResult {
     // Zapis do FS a cteni zpet (B i C).
     w.ok(id, "mkdir -p /shell-test && echo ahoj > /shell-test/a.txt")?;
     crate::check_eq!(w.value(id, "open /shell-test/a.txt | from text")?, Value::str("ahoj"), "obsah souboru");
+    // Velky soubor (> 64 KiB zpravy kanalu): `open` vrati oknu souhrn,
+    // relace zustane pripojena a odpovida dal (driv se odpojila a blok
+    // "bezel" navzdy).
+    w.ok(id, "range 0 30000 | to json | save /shell-test/velky.json")?;
+    let (items, ok) = w.run(id, "open /shell-test/velky.json")?;
+    crate::check!(ok, "open velkeho souboru");
+    let summary = items.iter().any(|i| matches!(i, Item::Value(v) if v.field("size").is_some() && v.field("preview").is_some()));
+    crate::check!(summary, alloc::format!("souhrn binarnich dat: {items:?}"));
+    crate::check_eq!(w.value(id, "1 + 1")?, Value::Int(2), "relace odpovida i po velkem vystupu");
     // Doplnovani cesty za rourou (absolutni cesta, pak obsah slozky).
     for (line, want) in [
         ("ls | select name | to json | save /shell-te", "/shell-test/"),

@@ -50,8 +50,8 @@ pub const DOCS: &[Doc] = &[
     Doc {
         name: "open",
         short_en: "reads a file as bytes",
-        long_cs: "Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`.",
-        long_en: "Reads a file as bytes. `from text` turns them into text (no hidden conversion), `from json` into values.",
+        long_cs: "Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`. Velký soubor terminál neukazuje celý: vypíše souhrn (druh podle obsahu, např. obrázek BMP 1920×1080, velikost a pár řádků hexa), roura dostane celá data.",
+        long_en: "Reads a file as bytes. `from text` turns them into text (no hidden conversion), `from json` into values. The terminal does not show a large file whole: it prints a summary (the kind by content, e.g. a BMP image 1920×1080, the size and a few hex lines); the pipeline gets all the data.",
         args: &[Arg { name: "path", default: "", cs: "soubor ke čtení", en: "file to read" }],
         examples: &[
             Ex { code: "open a.txt | from text", cs: "Obsah souboru jako text.", en: "The file content as text.", check: Out("alfa") },

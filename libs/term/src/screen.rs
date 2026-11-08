@@ -307,6 +307,18 @@ pub fn paint_rows(screen: &Screen, s: &mut Surface, rows: &[usize], clear: bool)
             if c.ch == ' ' {
                 continue;
             }
+            // Krouzek cinnosti a dilci bunka pruhu (pismo je nema).
+            if let Some(d) = crate::activity::drawn(c.ch) {
+                for dy in 0..ch {
+                    for dx in 0..cw {
+                        let a = crate::activity::coverage(d, cw as u32, ch as u32, dx as u32, dy as u32);
+                        if a > 0 {
+                            s.put(ox + dx, oy + dy, s.encode(blend(c.fg, cbg, a)));
+                        }
+                    }
+                }
+                continue;
+            }
             let weight = FontWeight::Regular;
             let Some(r) = get_raster(c.ch, weight, font).or_else(|| get_raster('?', weight, font)) else { continue };
             let fg = c.fg;

@@ -114,6 +114,12 @@ V běžném běhu je terminál okno `gui-term` (GUI) a bez GUI záložní konzol
 procesech `shsess` (viz [Shell](navrh-shell.md)). Kód je
 v `user/init/src/terminal.rs`.
 
+Běžící příkaz ukáže po 1 s pod sebou „běží 12 s · Ctrl+C přerušit“ a Ctrl+C
+ho přeruší. Co napíšete během běhu, čeká viditelně ve frontě
+(„ve frontě: …“, Esc frontu zruší, šipka nahoru vrátí poslední řádek
+k úpravě) a spustí se po něm. **[implementováno]** Přesun běžícího příkazu
+na pozadí (Ctrl+Z, `fg`, `bg`) **[navrženo]**.
+
 ```text
 gui-term ──connect──▶ init (supervisor) ──spustí──▶ termd ──▶ shsess (relace)
     ▲                      │ registr relací okna          │

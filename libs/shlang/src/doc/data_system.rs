@@ -153,8 +153,8 @@ pub const DOCS: &[Doc] = &[
     Doc {
         name: "help",
         short_en: "help for a command",
-        long_cs: "Bez argumentu přehled příkazů po skupinách, s příkazem jeho úplná nápověda: použití, argumenty, roura, příklady, chyby a související příkazy.",
-        long_en: "Without an argument an overview of commands by group, with a command its full help: usage, arguments, pipeline, examples, errors and related commands.",
+        long_cs: "Bez argumentu přehled příkazů po skupinách, s příkazem jeho úplná nápověda: použití, argumenty, roura, příklady, chyby a související příkazy. Běžící příkaz přeruší Ctrl+C; co napíšete během běhu, čeká ve frontě a spustí se po něm (Esc frontu zruší).",
+        long_en: "Without an argument an overview of commands by group, with a command its full help: usage, arguments, pipeline, examples, errors and related commands. Ctrl+C interrupts a running command; what you type meanwhile waits in a queue and runs after it (Esc clears the queue).",
         args: &[Arg { name: "command", default: "", cs: "příkaz", en: "command" }],
         examples: &[Ex { code: "help ls", cs: "Nápověda k `ls`.", en: "Help for `ls`.", check: Runs }],
         related: &["explain"],
