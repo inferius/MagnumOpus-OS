@@ -134,6 +134,24 @@ impl Style {
     }
 }
 
+/// Kod rezimu ve zprave `THEME`.
+pub fn mode_code(m: Mode) -> u8 {
+    match m {
+        Mode::Light => 0,
+        Mode::Dark => 1,
+        Mode::Contrast => 2,
+    }
+}
+
+/// Rezim ze zpravy `THEME` (neznamy kod = svetly).
+pub fn mode_from_code(c: u8) -> Mode {
+    match c {
+        1 => Mode::Dark,
+        2 => Mode::Contrast,
+        _ => Mode::Light,
+    }
+}
+
 impl Comp {
     /// Prepne rezim barev a prekresli vse.
     pub fn set_mode(&mut self, mode: Mode) {
@@ -141,6 +159,11 @@ impl Comp {
         let g = self.style.geo();
         for w in self.windows.values_mut() {
             w.geo = g;
+        }
+        // Aplikace kresli stejnym motivem.
+        let ids: Vec<crate::ClientId> = self.clients.iter().filter(|(_, c)| c.hello).map(|(&id, _)| id).collect();
+        for id in ids {
+            self.send(id, guiproto::window::ServerMsg::Theme { mode: mode_code(mode) });
         }
         self.damage_all();
     }

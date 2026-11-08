@@ -399,10 +399,18 @@ fn look_shots(_: &Startup) -> TestResult {
     with(|s| {
         s.gui.command(b"tasks 4 1", Vec::new()).map_err(|e| fail("tasks", e))?;
         for name in SHOTS {
+            let before = s.gui.status().map_err(|e| fail("status", e))?.presented;
             s.gui.command(alloc::format!("theme {name}").as_bytes(), Vec::new()).map_err(|e| fail("theme", e))?;
             // Ne `settle`: terminal s bezici ulohou animuje a kompozitor
-            // neni nikdy uplne v klidu. Pockat na prekresleni cele obrazovky.
-            time::sleep(Duration::from_millis(2500));
+            // neni nikdy uplne v klidu. Pockat na zobrazeni snimku po
+            // zmene (prekresleni cele obrazovky) a na prekresleni aplikaci
+            // (dostaly zpravu o motivu).
+            let end = time::deadline_after(TIMEOUT);
+            while s.gui.status().map_err(|e| fail("status", e))?.presented < before + 3 {
+                check!(time::now() < end, "snimek po zmene motivu");
+                time::sleep(Duration::from_millis(100));
+            }
+            time::sleep(Duration::from_millis(1000));
             println!("{QEMU_SHOT}{name}");
             // xtask porizuje snimek; pockat, nez skonci.
             time::sleep(Duration::from_millis(1500));

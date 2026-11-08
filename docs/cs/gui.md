@@ -348,11 +348,22 @@ barvy `trust_*`. Neviditelný okraj 6 px vně okna mění velikost.
 Nereagující aplikace: obsah ztlumený a karta „… nereaguje“.
 
 **Lišta** (`design/plocha.html`, poloha „dole, odsazená“): 52 px,
-odsazení 8 px, zaoblení 18 px, plocha `surface` s krytím 90 % (blur
-jen na GPU, ve 2D chybí), stín `shadow.bar`. Vlevo tlačítka oken
-(ikona podle aplikace, značka běží / aktivní), vpravo úlohy se štítkem
-agenta, pilulka „Vstup ovládá automat“ a hodiny (čas a datum v pásmu,
-které init pošle s příkazem `display`).
+odsazení 8 px, zaoblení 18 px, pod ní **rozmazané pozadí** (`blur(16px)`
+jako v prototypu) a přes něj `surface` s krytím `opacity.bar`, stín
+`shadow.bar`. Rozmazání se počítá v polovičním rozlišení a jen když se
+pod lištou něco změní (pohyb okna, obsah, motiv), jinak se bere
+z mezipaměti; najetí myší, hodiny ani kurzor ho nepřepočítají. Vlevo
+spouštěč, oddělovač a tlačítka oken (ikona podle aplikace, značka
+běží / aktivní), vpravo pilulka „Vstup ovládá automat“, úlohy se
+štítkem agenta, **síť a hlasitost ze skutečného stavu** (`netd`: linka
+a adresa, `audiod`: hlasitost a ztlumení; bez spojení nebo ztlumeno
+přeškrtnutá ikona), zvonek oznámení (zatím zástupná ikona) a hodiny
+(čas a datum v pásmu, které init pošle s příkazem `display`).
+
+Stav pro lištu dává init příkazem `sources net audio` s handly: relace
+sítě jen s právem `INFO` (bez spojení kamkoli) a kanál ke zvukové službě.
+Kompozitor se ptá každé 2 s a odpověď čte bez blokování (zaseknutá
+služba lištu nezdrží).
 
 **Plocha:** barva `bg` a dva měkké radiální přechody `wall_a`,
 `wall_b` jako `.desk` v prototypu; spočítá se jednou pro velikost
@@ -383,15 +394,26 @@ test `gpu_list_matches_cpu_frame` dál porovnává snímek pixel po pixelu.
 - Písma jsou vložená do programů (každý jen řezy, které kreslí): `compd`
   +1,7 MB, aplikace s `libs/ui` +1,25 MB, `gui-term` +0,55 MB. Sdílená
   paměť s písmy od kompozitoru je úkol G5.
-- Bez rozmazání pod lištou (2D); stíny ze statických masek.
-- Aplikace zatím nedostávají motiv systému (kreslí světlý). Přepínání
-  motivu aplikací a velikost písma 200 % přijdou s G4.
+- Rozmazání pod lištou počítá CPU i v GPU backendu (stejné pixely).
+  Navazující krok pro Venus: rozmazání shaderem ve `vkcomp`.
+- Stíny ze statických masek.
+- Velikost písma 200 % (Přístupnost) přijde s G4; motiv systému
+  aplikace dostávají zprávou `THEME` (knihovna UI i terminál se
+  přebarví).
 - Hodnoty, které byly jen v `mo.css` (krytí lišty, ztlumení, šířka
   dialogu, ikony 14 px, značka v liště), jsou nově v tokenech
   (`[size]`, `[opacity]`) a kód je čte odtud.
 
 **Cena snímku na CPU:** `compd` píše do logu čas skládání celé obrazovky
 a po 300 snímcích průměr a maximum (`compd: snimek cele obrazovky ...`).
+
+| Kde | Celá obrazovka | Poznámka |
+|---|---|---|
+| hostitel, 800x600 (test `look_snapshots`) | 3,5 ms, první 11 ms | první s výpočtem plochy, stínů a rozmazání |
+| QEMU na Windows (emulace CPU), 1280x800 | 0,5-1,8 s | emulace bez akcelerace je ~100x pomalejší; běžné snímky jsou jen poškozené oblasti |
+
+Kompozitor se proto při připojení displeje nejdřív ukáže jen barvou
+pozadí a celý snímek složí v dalším taktu (start nečeká na skládání).
 
 ## Vstup v oknech
 
@@ -523,7 +545,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 
 | Příkaz | Handly | Odpověď |
 |---|---|---|
-| `display` | kanál ovladače grafiky | `ok <w> <h>` |
+| `display [pásmo]` | kanál ovladače grafiky | `ok <w> <h>`; pásmo IANA pro hodiny v liště |
 | `input` | kanál fokusu od `inputd` | `ok` |
 | `secure` | kanál bezpečné zkratky od `inputd` | `ok` |
 | `connect` + identita aplikace (binárně) | - | `ok` + kanál okna |
@@ -532,6 +554,8 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `inspect` | - | `ok` + kanál inspekce |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
 | `tasks <běží> <agent>` | - | `ok` (ikona úloh v panelu) |
+| `theme light\|dark\|contrast` | - | `ok` (režim barev z tokenů) |
+| `sources [net] [audio]` | relace sítě (`INFO`), kanál zvuku | `ok` (stav v liště) |
 
 **Inspekce** (`inspect`, pro testy, později čtečku obrazovky a lupu):
 seznam oken, strom přístupnosti okna v souřadnicích obrazovky, akce přes
@@ -585,6 +609,7 @@ Kompozitor -> aplikace:
 | 110 | `A11Y_ACTION` | uzel, akce, hodnota |
 | 111 | `ACTION_INVOKE` | volání, akce, argumenty |
 | 112 | `ERROR` | op, kód |
+| 113 | `THEME` | režim barev u8 (0 světlý, 1 tmavý, 2 vysoký kontrast); po `WELCOME` a při změně |
 
 Příklad (okno s jedním bufferem):
 

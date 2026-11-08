@@ -52,6 +52,8 @@ pub enum Event {
     /// s poslednim potvrzenym obsahem. Rozpracovana zmena se ztratila:
     /// aplikace, ktera kresli sama, at okno nakresli znovu.
     Restored { generation: u64 },
+    /// Rezim barev systemu (prekreslit stejnym motivem).
+    Theme(theme::Mode),
 }
 
 /// Kanal okna a listek k jeho obnove ze startovni zpravy aplikace.
@@ -308,6 +310,11 @@ impl Window {
                 first
             }
             ServerMsg::Close { .. } => Some(Event::Close),
+            ServerMsg::Theme { mode } => Some(Event::Theme(match mode {
+                1 => theme::Mode::Dark,
+                2 => theme::Mode::Contrast,
+                _ => theme::Mode::Light,
+            })),
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
             ServerMsg::ActionInvoke { call, action, args, caller, synthetic } => Some(Event::Action { call, id: action, args, caller, synthetic }),
             _ => None,
@@ -611,6 +618,11 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
         }
         // Obnovene okno ma posledni potvrzeny obsah; nakreslit aktualni.
         Event::Restored { .. } => *dirty = true,
+        Event::Theme(m) => {
+            ui.look.set_mode(m);
+            ui.rebuild(app.title(), app.view());
+            *dirty = true;
+        }
         Event::Frame => {}
     }
     Ok(true)

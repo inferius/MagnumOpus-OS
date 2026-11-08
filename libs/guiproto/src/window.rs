@@ -46,6 +46,8 @@ pub mod op {
     pub const A11Y_ACTION: u32 = 110;
     pub const ACTION_INVOKE: u32 = 111;
     pub const ERROR: u32 = 112;
+    /// Rezim barev systemu (0 svetly, 1 tmavy, 2 vysoky kontrast).
+    pub const THEME: u32 = 113;
 }
 
 /// Rezim okna (kdo kresli dekorace).
@@ -514,6 +516,9 @@ pub enum ServerMsg {
     A11yAction { window: u32, node: u32, action: u32, value: String },
     ActionInvoke { call: u32, action: String, args: Vec<Arg>, caller: String, synthetic: bool },
     Error { op: u32, code: Error },
+    /// Rezim barev systemu: aplikace kresli stejnym motivem (tokeny
+    /// `design/tokens.toml`). Prijde po `WELCOME` a pri kazde zmene.
+    Theme { mode: u8 },
 }
 
 fn u128w(w: &mut Writer, v: u128) {
@@ -845,6 +850,10 @@ impl ServerMsg {
                 w = Writer::op(op::ERROR);
                 w.u32(*o).i32(code.code());
             }
+            Theme { mode } => {
+                w = Writer::op(op::THEME);
+                w.u8(*mode);
+            }
         }
         w.finish()
     }
@@ -915,6 +924,7 @@ impl ServerMsg {
                 op: r.u32()?,
                 code: crate::Error::from_code(r.i32()? as i64).ok_or(crate::Error::InvalidArgs)?,
             },
+            op::THEME => Theme { mode: r.u8()? },
             _ => return Err(crate::Error::NotSupported),
         };
         if !r.is_empty() {

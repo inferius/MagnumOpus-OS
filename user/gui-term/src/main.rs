@@ -285,6 +285,11 @@ impl Term {
             Event::Close => return None,
             // Kompozitor spadl a okno je obnovene: nakreslit znovu.
             Event::Restored { .. } => true,
+            Event::Theme(m) => {
+                self.look.t = theme::Theme::builtin(m);
+                self.app.theme = self.look.term_theme();
+                true
+            }
             Event::A11yAction { action, value, .. } if action & actions::SET_VALUE != 0 => {
                 // Ctecka obrazovky nebo test "napise" radek a odesle ho.
                 self.app.run_line(&value);

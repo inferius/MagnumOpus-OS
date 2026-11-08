@@ -363,11 +363,22 @@ icons in `trust_*` colors. An invisible 6 px edge outside the window
 resizes. Unresponsive app: dimmed content and a "... nereaguje" card.
 
 **Bar** (`design/plocha.html`, "bottom, inset"): 52 px, 8 px inset,
-18 px radius, `surface` at 90 % opacity (blur only on the GPU, missing
-in 2D), `shadow.bar`. Window buttons on the left (icon per app,
-running / active mark), on the right tasks with the agent chip, the
-"Vstup ovládá automat" pill and the clock (time and date in the zone
-init sends with the `display` command).
+18 px radius, a **blurred backdrop** under it (`blur(16px)` as in the
+prototype) with `surface` at `opacity.bar` on top, `shadow.bar`. The blur
+is computed at half resolution and only when something under the bar
+changes (window move, content, theme); otherwise it comes from a cache;
+hover, the clock and the cursor do not recompute it. On the left the
+launcher, a separator and window buttons (icon per app, running / active
+mark), on the right the "Vstup ovládá automat" pill, tasks with the agent
+chip, **network and volume from the real state** (`netd`: link and
+address, `audiod`: volume and mute; a struck-through icon when offline or
+muted), the notification bell (a placeholder icon for now) and the clock
+(time and date in the zone init sends with the `display` command).
+
+Init provides the bar state with `sources net audio` and handles: a
+network session with only the `INFO` right (no connections anywhere) and
+a channel to the audio service. The compositor asks every 2 s and reads
+replies without blocking (a stuck service does not hold up the bar).
 
 **Desktop:** `bg` plus two soft radial gradients `wall_a`, `wall_b` like
 `.desk` in the prototype; computed once per screen size, with fine
@@ -399,15 +410,27 @@ dialog, cursor) goes through a scratch buffer on the CPU too. So the
 - Fonts are embedded in programs (each only the faces it draws): `compd`
   +1.7 MB, apps with `libs/ui` +1.25 MB, `gui-term` +0.55 MB. Shared font
   memory from the compositor is a G5 task.
-- No blur under the bar (2D); shadows from static masks.
-- Apps do not receive the system theme yet (they draw light). Theme
-  switching for apps and 200 % text size come with G4.
+- The CPU computes the bar blur also in the GPU backend (same pixels).
+  Follow-up for Venus: blur as a shader in `vkcomp`.
+- Shadows from static masks.
+- 200 % text size (Accessibility) comes with G4; apps receive the
+  system theme with the `THEME` message (the UI library and the terminal
+  recolor).
 - Values that used to exist only in `mo.css` (bar opacity, dimming,
   dialog width, 14 px icons, the bar mark) are now in the tokens
   (`[size]`, `[opacity]`) and the code reads them from there.
 
 **CPU frame cost:** `compd` logs the full-screen compose time and, every
 300 frames, the average and maximum (`compd: snimek cele obrazovky ...`).
+
+| Where | Full screen | Note |
+|---|---|---|
+| host, 800x600 (`look_snapshots` test) | 3.5 ms, first 11 ms | the first one computes the desktop, shadows and blur |
+| QEMU on Windows (CPU emulation), 1280x800 | 0.5-1.8 s | emulation without acceleration is ~100x slower; regular frames are only damaged areas |
+
+So on display attach the compositor first shows just the background
+color and composes the full frame on the next tick (start does not wait
+for composition).
 
 ## Input in windows
 
@@ -537,7 +560,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 
 | Command | Handles | Reply |
 |---|---|---|
-| `display` | graphics driver channel | `ok <w> <h>` |
+| `display [zone]` | graphics driver channel | `ok <w> <h>` ; IANA zone for the bar clock |
 | `input` | focus channel from `inputd` | `ok` |
 | `secure` | secure shortcut channel from `inputd` | `ok` |
 | `connect` + application identity (binary) | - | `ok` + window channel |
@@ -546,6 +569,8 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `inspect` | - | `ok` + inspection channel |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
 | `tasks <running> <agent>` | - | `ok` (task icon in the panel) |
+| `theme light\|dark\|contrast` | - | `ok` (color mode from the tokens) |
+| `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
 
 **Inspection** (`inspect`, for tests, later a screen reader and
 magnifier): list of windows, the accessibility tree of a window in screen
@@ -600,6 +625,7 @@ Compositor -> application:
 | 110 | `A11Y_ACTION` | node, action, value |
 | 111 | `ACTION_INVOKE` | call, action, arguments |
 | 112 | `ERROR` | op, code |
+| 113 | `THEME` | color mode u8 (0 light, 1 dark, 2 high contrast); after `WELCOME` and on change |
 
 Example (a window with one buffer):
 
