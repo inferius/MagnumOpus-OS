@@ -3,7 +3,7 @@
 //! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
 //! souboroveho systemu (s ulozistem korenovych certifikatu), sluzbu vstupu,
 //! sluzbu site s firewallem a synchronizaci casu a GUI (kompozitor
-//! a ukazkove aplikace, `gui.rs`). Pak bezi
+//! a ukazkove aplikace, `gui.rs`) a zvukovou sluzbu (`audio.rs`). Pak bezi
 //! jako supervisor (`supervisor.rs`: zarizeni pripojena za behu, restart
 //! spadlych sluzeb). V testovacim behu (priznak `TEST_RUN` od jadra) misto
 //! toho spusti testy userspace (`tests/`) a skonci s jejich vysledkem.
@@ -15,6 +15,7 @@
 extern crate alloc;
 
 mod apps;
+mod audio;
 mod certs;
 mod dns;
 mod fsd;
@@ -74,6 +75,14 @@ fn main(startup: Startup) -> i64 {
                 Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
             sup.watch("devmgr", &devices.devmgr, None);
+            // Zvuk: audiod prevezme ovladace zvukovych karet.
+            match audio::start(&startup, core::mem::take(&mut devices.audios)) {
+                Ok(a) => {
+                    sup.watch("audiod", &a.process, None);
+                    audio::AUDIO.call_once(|| a);
+                }
+                Err(e) => println!("init: zvukovou sluzbu nelze spustit: {e}"),
+            }
             if let Some(i) = &devices.input {
                 sup.watch("inputd", &i.process, None);
             }

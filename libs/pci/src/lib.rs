@@ -8,12 +8,13 @@
 
 extern crate alloc;
 
+pub mod msi;
 pub mod msix;
 
 use alloc::vec::Vec;
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
-use libos::{Error, Mapping, Result, Vmo};
+use libos::{Channel, Error, Mapping, Result, Vmo};
 
 pub const VENDOR_ID: u16 = 0x00;
 pub const COMMAND: u16 = 0x04;
@@ -267,4 +268,30 @@ impl Ecam {
             cmd | COMMAND_MEMORY | COMMAND_BUS_MASTER | COMMAND_INTX_DISABLE,
         );
     }
+}
+
+/// Precte konfiguraci od spravce zarizeni (prvni zprava na bootstrap
+/// kanalu ovladace): `pci <sbernice> <zarizeni> <funkce>` desitkove.
+pub fn read_driver_config(bootstrap: &Channel) -> Option<Address> {
+    let msg = bootstrap.read(None).ok()?;
+    parse_driver_config(core::str::from_utf8(&msg.data).ok()?)
+}
+
+/// Rozebere text `pci <sbernice> <zarizeni> <funkce>`; navic slova
+/// navic nebo hodnoty mimo rozsah = `None`.
+pub fn parse_driver_config(text: &str) -> Option<Address> {
+    let mut parts = text.split_whitespace();
+    if parts.next()? != "pci" {
+        return None;
+    }
+    let mut num = || parts.next()?.parse::<u8>().ok();
+    let a = Address {
+        bus: num()?,
+        device: num()?,
+        function: num()?,
+    };
+    if parts.next().is_some() || a.device > 31 || a.function > 7 {
+        return None;
+    }
+    Some(a)
 }

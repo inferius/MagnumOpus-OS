@@ -15,3 +15,5 @@ libos = { path = "../../libs/libos" }
 fsproto = { path = "../../libs/fsproto" }
 shlang = { path = "../../libs/shlang" }
 term = { path = "../../libs/term" }
+audioproto = { path = "../../libs/audioproto", features = ["client"] }
+audiomix = { path = "../../libs/audiomix" }

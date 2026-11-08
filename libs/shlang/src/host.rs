@@ -219,6 +219,20 @@ pub struct FsChange {
     pub is_dir: bool,
 }
 
+/// Pozadavek prikazu `audio` na zvukovou sluzbu (v systemu `audiod`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioReq {
+    /// Testovaci ton: frekvence (Hz), delka (ms), uroven (% plneho rozsahu).
+    Tone { freq: u32, ms: u32, level: u8 },
+    /// Prehrat obsah souboru WAV.
+    Play { wav: Vec<u8> },
+    /// Hlavni hlasitost v % (`None` = jen zjistit).
+    Volume(Option<u8>),
+    Mute(bool),
+    /// Stav zarizeni a sluzby.
+    Status,
+}
+
 /// Prostredi interpretu.
 pub trait Host {
     fn fs(&mut self) -> &mut dyn Fs;
@@ -261,6 +275,10 @@ pub trait Host {
     }
     /// Zrusi ulohu. Kdyz uz dobehla, vrati jeji vysledek (a undo).
     fn task_cancel(&mut self, _id: u64) -> Option<TaskDone> {
+        None
+    }
+    /// Zvuk (prikaz `audio`). `None` = hostitel zvuk nema.
+    fn audio(&mut self, _req: AudioReq) -> Option<Result<Value, ShError>> {
         None
     }
     /// Domovska slozka uzivatele.

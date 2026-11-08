@@ -36,6 +36,12 @@ site menu.
 | [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
 | [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
 
+### Zvuk / Audio
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Zvuk](cs/zvuk.md) | [Audio](en/audio.md) | ovladač Intel HDA, kodeky a cesty k výstupům, služba audiod, protokol se sdílenými buffery, mix a převod frekvence, latence, příkaz `audio` / Intel HDA driver, codecs and output paths, audiod service, shared-buffer protocol, mixing and rate conversion, latency, the `audio` command |
+
 ### Grafika / Graphics
 
 | Česky | English | Obsah / Contents |

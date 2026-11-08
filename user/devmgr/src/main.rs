@@ -7,8 +7,9 @@
 //! (`usb.rs`). Rodici (init) posle po bootstrap kanalu pro kazde zarizeni
 //! zpravu s koncem kanalu ke klientovi ovladace: `block` (disk, protokol
 //! `blockproto`), `input` (klavesnice, mys, protokol `inputproto::device`),
-//! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody) nebo
-//! `display` (grafika, `guiproto::display`), a `done`, az jsou nalezena zarizeni pri startu
+//! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody),
+//! `display` (grafika, `guiproto::display`) nebo `audio` (zvukova karta
+//! Intel HDA, `audioproto::device`), a `done`, az jsou nalezena zarizeni pri startu
 //! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
 //!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
@@ -95,6 +96,17 @@ const DRIVERS: &[Driver] = &[
     },
 ];
 
+/// Zvukova karta Intel HDA (PCI trida 04:03, libovolny vyrobce): radic,
+/// CORB/RIRB a BDL v jedne strance + buffer streamu (max. 256 KiB).
+const HDA_CLASS: (u8, u8) = (0x04, 0x03);
+const HDA: Driver = Driver {
+    ids: (0, 0),
+    program: "hda",
+    message: b"audio",
+    irq_max: 2,
+    dma_max: 1 << 20,
+};
+
 fn main(startup: Startup) -> i64 {
     let Some(resource) = startup.root_resource.as_ref() else {
         println!("devmgr: chybi pristup k hardwaru (ROOT_RESOURCE)");
@@ -143,6 +155,12 @@ fn main(startup: Startup) -> i64 {
                         driver.program, f.address
                     ),
                 }
+            }
+        }
+        for f in functions.iter().filter(|f| (f.class, f.subclass) == HDA_CLASS) {
+            match start_driver(&HDA, &fs, resource, vmo, &ecam, (*arg >> 16) as u16, f, &startup.bootstrap) {
+                Ok(p) => drivers.push(p),
+                Err(e) => println!("devmgr: ovladac hda pro {} nelze spustit: {e}", f.address),
             }
         }
         for f in functions

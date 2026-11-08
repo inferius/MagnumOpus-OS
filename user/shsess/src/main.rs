@@ -33,6 +33,7 @@ use term::proto::{ClientMsg, ServerMsg};
 use term::session::{Env, Link, Service};
 use term::tasks::{Clock, Joinable, Notify};
 
+mod audio;
 mod fs;
 
 libos::entry!(main);
@@ -127,9 +128,15 @@ struct SysEnv {
     spawner: Option<FsClient>,
     tag: String,
     notify: Option<Arc<EventNotify>>,
+    /// Zvukova sluzba (`None` = relace ji nedostala).
+    audio: Option<audioproto::conn::AudioClient>,
 }
 
 impl Env for SysEnv {
+    fn audio(&mut self, req: shlang::host::AudioReq) -> Option<Result<shlang::value::Value, shlang::ShError>> {
+        Some(audio::handle(self.audio.as_ref()?, req))
+    }
+
     fn now(&mut self) -> Option<i64> {
         wall_ns()
     }
@@ -186,13 +193,14 @@ fn main(startup: Startup) -> i64 {
     let mut hs = first.handles.into_iter();
     let mut spare = hs.next().map(Channel::from_handle);
     let mut fsd = hs.next().map(|h| fs::FsdFs::new(FsClient::new(Channel::from_handle(h)), tag.clone()));
+    let audio = hs.next().map(|h| audioproto::conn::AudioClient::new(Channel::from_handle(h)));
     let mut nofs = fs::NoFs;
     let mut svc = Service::single(&home, session);
     svc.stack_budget = STACK_BUDGET;
     svc.task_stack = TASK_STACK_BUDGET;
     let notify = Event::create().ok().map(|e| Arc::new(EventNotify(e)));
     let spawner = fsd.as_ref().and_then(|f| f.client.connect().ok());
-    let mut env = SysEnv { spawner, tag: tag.clone(), notify: notify.clone() };
+    let mut env = SysEnv { spawner, tag: tag.clone(), notify: notify.clone(), audio };
     println!("shsess {session}: bezim ({tag})");
 
     loop {

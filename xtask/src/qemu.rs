@@ -5,6 +5,8 @@
 //! - aarch64: stroj virt (GICv3 s ITS, volitelne SMMUv3), firmware edk2,
 //!   konec testu pres semihosting (SYS_EXIT s kodem od jadra, 33 = uspech).
 //!
+//! Zvuk: radic intel-hda s kodekem hda-duplex (viz `audio.rs`).
+//!
 //! Disky jsou na obou stejne: systemovy (ESP s loaderem, jadrem a initfs),
 //! maly prazdny pro testy ovladace a datovy s nasim souborovym systemem, vse
 //! jako virtio-blk na PCI Express.
@@ -90,7 +92,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
             }
             Err(TestError::PortTaken(e)) => break Err(format!("QEMU nenastartovalo: {e}").into()),
             Err(TestError::Other(e)) => break Err(e),
-            Ok(()) => break Ok(()),
+            Ok(()) => break crate::audio::check(&run.wav, &serial_log, opts),
         }
     };
     // Pri panice nebo fatalni vyjimce prelozit adresy na jmena funkci.
@@ -187,6 +189,8 @@ fn command(
         .arg(format!("stdio,id=serial0,logfile={}", serial_log.display()))
         .args(["-serial", "chardev:serial0"])
         .arg("-no-reboot");
+    // Zvuk: radic Intel HDA (ovladac hda, sluzba audiod); v testu do WAV.
+    crate::audio::qemu_args(&mut cmd, opts, &run.wav);
     if opts.headless {
         // Venus potrebuje OpenGL i bez okna.
         // Ve WSL neni uzel DRM pro egl-headless: GTK s OpenGL (EGL) pod
@@ -464,6 +468,8 @@ fn scratch_disk(path: &Path) -> Result<PathBuf> {
 struct RunFiles {
     data: PathBuf,
     scratch: PathBuf,
+    /// Zvuk z QEMU (backend wav).
+    wav: PathBuf,
     serial_log: PathBuf,
 }
 
@@ -474,6 +480,7 @@ impl RunFiles {
         Self {
             data: t.join(format!("data-{pid}.img")),
             scratch: t.join(format!("scratch-{pid}.img")),
+            wav: t.join(format!("audio-{arch}-{pid}.wav")),
             serial_log: t.join(if test {
                 format!("serial-test-{arch}-{pid}.log")
             } else {
@@ -493,6 +500,7 @@ impl Drop for RunFiles {
             let _ = std::fs::remove_file(&self.data);
         }
         let _ = std::fs::remove_file(&self.scratch);
+        let _ = std::fs::remove_file(&self.wav);
     }
 }
 

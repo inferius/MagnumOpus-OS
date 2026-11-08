@@ -23,3 +23,5 @@ spin = "0.12"
 svcclient = { path = "../../libs/svcclient", features = ["client"] }
 shlang = { path = "../../libs/shlang" }
 term = { path = "../../libs/term" }
+audioproto = { path = "../../libs/audioproto", features = ["client"] }
+audiomix = { path = "../../libs/audiomix" }

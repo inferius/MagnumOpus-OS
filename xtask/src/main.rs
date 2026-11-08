@@ -12,6 +12,7 @@
 //! za `--` se preda primo QEMU.
 
 mod arch;
+mod audio;
 mod datadisk;
 mod docs;
 mod highlight;
@@ -64,6 +65,9 @@ prepinace:
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
                    carkou, napr. sit,firewall; jmena jako v logu)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
+  --audio <druh>   (run, test) zvuk QEMU (radic intel-hda, kodek hda-duplex):
+                   test wav (vychozi; soubor se po testu zkontroluje), none;
+                   run none (vychozi), dsound, pa, alsa, sdl, coreaudio
   --net-online     (test) i testy proti skutecne siti hostitele (resolver
                    hostitele pres slirp); bez nej jen lokalni servery
   -- <args>        (run) dalsi argumenty pro QEMU
@@ -104,6 +108,8 @@ pub struct Options {
     test_repeat: u32,
     /// `--net-online`: i testy proti skutecne siti hostitele.
     net_online: bool,
+    /// Backend zvuku QEMU (`--audio`); prazdne = test wav, beh none.
+    audio: String,
     /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
     hostfwd: Option<String>,
     /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
@@ -143,6 +149,7 @@ fn run_cli() -> Result<()> {
         test_only: String::new(),
         test_repeat: 1,
         net_online: false,
+        audio: String::new(),
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
     };
@@ -175,6 +182,10 @@ fn run_cli() -> Result<()> {
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--net-online") => opts.net_online = true,
+            Some("--audio") => {
+                let value = args.next().ok_or("--audio ocekava backend zvuku QEMU")?;
+                opts.audio = value.to_string_lossy().into_owned();
+            }
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
             Some("--accel") => {
@@ -291,6 +302,12 @@ fn host_tests() -> Result<()> {
             "csprng",
             "--package",
             "wire",
+            "--package",
+            "audioproto",
+            "--package",
+            "audiomix",
+            "--package",
+            "hdaspec",
             "--package",
             "conf",
             "--package",
@@ -414,6 +431,8 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-rng",
     "virtio-gpu",
     "fbdisplay",
+    "hda",
+    "audiod",
     "compd",
     "gui-demo",
     "gui-term",

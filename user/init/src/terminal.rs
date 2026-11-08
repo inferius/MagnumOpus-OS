@@ -225,11 +225,15 @@ impl Terminals {
         let image = initfs.find("termd").ok_or(Error::NotFound)?;
         let vmo = startup.initfs.as_ref().ok_or(Error::NotFound)?;
         let (here, there) = Channel::create()?;
-        let handles = alloc::vec![
+        let mut handles = alloc::vec![
             StartHandle::user(own.into_channel().into_handle()),
             StartHandle::user(there.into_handle()),
             StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None)?),
         ];
+        // Zvuk pro relace (prikaz `audio`); bez sluzby terminal bezi dal.
+        if let Ok(a) = crate::audio::connect() {
+            handles.push(StartHandle::user(a.into_handle()));
+        }
         let (proc, win) = libos::spawn("termd", image, handles)?;
         c.starts.push(now);
         c.termd = Some(proc);

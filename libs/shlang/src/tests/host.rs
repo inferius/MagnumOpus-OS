@@ -2,7 +2,7 @@
 
 use crate::ShError;
 use crate::eval::{Interp, Outcome};
-use crate::host::{ExecNeeds, Fs, Host};
+use crate::host::{AudioReq, ExecNeeds, Fs, Host};
 use crate::sig::Builtins;
 use crate::value::Value;
 use crate::vfs::mem::MemFs;
@@ -22,6 +22,8 @@ pub struct TestHost {
     pub execs: Vec<(String, Vec<String>, ExecNeeds)>,
     /// Pri dotazu zapsat do FS (jina relace meni soubor behem dotazu).
     pub write_on_confirm: Option<(String, Vec<u8>)>,
+    /// Pozadavky prikazu `audio`.
+    pub audio: Vec<AudioReq>,
 }
 
 impl TestHost {
@@ -45,6 +47,7 @@ impl TestHost {
             time: 1_700_000_000_000_000_000,
             execs: Vec::new(),
             write_on_confirm: None,
+            audio: Vec::new(),
         }
     }
 
@@ -103,6 +106,14 @@ impl Host for TestHost {
         }
         let _ = self.fs.write(&target, b"z programu");
         Some(Ok(Value::str("tool ok")))
+    }
+    fn audio(&mut self, req: AudioReq) -> Option<Result<Value, ShError>> {
+        let out = match &req {
+            AudioReq::Volume(None) => Value::Int(70),
+            _ => Value::Nothing,
+        };
+        self.audio.push(req);
+        Some(Ok(out))
     }
     fn home(&self) -> String {
         "/home".into()
