@@ -431,6 +431,7 @@ Každý příkaz má krátké jméno a plné jméno `sloveso-podstatné` (alias)
 | `undo`, `preview` | `command-undo`, `command-preview` | viz [Soubory](#soubory-koncept-v-klonu-undo-náhled-a-zámek) |
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | úlohy na pozadí |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
+| `shutdown`, `reboot` | `system-shutdown`, `system-reboot` | čisté vypnutí / restart přes init a ACPI; zeptá se, `-y` bez dotazu (viz [ACPI](acpi.md#příkazy-shellu)) |
 
 ## Příklady
 

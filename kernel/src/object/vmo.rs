@@ -61,6 +61,11 @@ enum Kind {
     Physical,
     /// Fyzicky rozsah framebufferu (mapuje se write-combining).
     Framebuffer,
+    /// Pamet firmwaru s tabulkami ACPI (AcpiReclaimable, AcpiNvs): RAM,
+    /// kterou jadro nikdy nedava alokatoru. Mapuje se s cache (normalni
+    /// pamet - stejne atributy jako v prime mape jadra), stranky se pri
+    /// zruseni nevraci.
+    Firmware,
 }
 
 pub struct MemoryObject {
@@ -172,6 +177,12 @@ impl MemoryObject {
         Self::physical(phys_start, size, None, Kind::Framebuffer)
     }
 
+    /// Okno na pamet firmwaru s tabulkami ACPI (mapuje se s cache). Volajici
+    /// ruci (pres `mm::is_acpi_memory`), ze rozsah lezi cely v pameti ACPI.
+    pub fn new_firmware(phys_start: u64, size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
+        Self::physical(phys_start, size, job, Kind::Firmware)
+    }
+
     fn physical(
         phys_start: u64,
         size: u64,
@@ -225,7 +236,7 @@ impl MemoryObject {
     /// Pamet mimo alokator RAM (registry, framebuffer): neni v prime mape
     /// pro syscally a nejde pouzit jako buffer syscallu.
     pub fn is_device(&self) -> bool {
-        matches!(self.kind, Kind::Physical | Kind::Framebuffer)
+        matches!(self.kind, Kind::Physical | Kind::Framebuffer | Kind::Firmware)
     }
 
     /// Pamet pro DMA (mapuje se s `MapFlags::DMA`)?
@@ -326,7 +337,7 @@ impl Drop for MemoryObject {
                 }
             }
             Kind::Contiguous { order } => phys::free_pages(self.pages[0], order),
-            Kind::Physical | Kind::Framebuffer => {}
+            Kind::Physical | Kind::Framebuffer | Kind::Firmware => {}
         }
     }
 }

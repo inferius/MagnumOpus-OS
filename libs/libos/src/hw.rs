@@ -79,8 +79,30 @@ impl Resource {
     /// Prostredek musi linku povolovat ([`irq_lines`]). Zprava MSI je
     /// u takoveho objektu prazdna.
     pub fn interrupt_line(&self, line: u32) -> Result<Interrupt> {
-        let h = sys::interrupt_create_line(self.0.raw(), line)?;
+        self.interrupt_line_with(line, 0)
+    }
+
+    /// Jako [`Resource::interrupt_line`] s priznaky spousteni
+    /// (`abi::syscall::line_flags`; aarch64 SPI: hrana/uroven z ACPI _CRS).
+    pub fn interrupt_line_with(&self, line: u32, flags: u64) -> Result<Interrupt> {
+        let h = sys::interrupt_create_line(self.0.raw(), line, flags)?;
         Ok(Interrupt(Handle::from_raw(h), MsiMessage::default()))
+    }
+
+    /// Precte I/O port sirky 1, 2 nebo 4 bajty.
+    pub fn port_read(&self, port: u16, width: u8) -> Result<u32> {
+        sys::ioport_read(self.0.raw(), port, width)
+    }
+
+    /// Zapise I/O port sirky 1, 2 nebo 4 bajty.
+    pub fn port_write(&self, port: u16, width: u8, value: u32) -> Result<()> {
+        sys::ioport_write(self.0.raw(), port, width, value)
+    }
+
+    /// Vypne (`abi::syscall::power_op::OFF`) nebo restartuje pocitac pres
+    /// firmware (pravo `POWER`). Pri uspechu se nevraci.
+    pub fn system_power(&self, op: u64) -> Result<()> {
+        sys::system_power(self.0.raw(), op)
     }
 
     /// Precte bajt z I/O portu (x86; prostredek musi port povolovat,

@@ -12,6 +12,11 @@
   - Fedora: `dnf install qemu-system-x86 edk2-ovmf qemu-system-aarch64 edk2-aarch64`
   - Arch: `pacman -S qemu-desktop edk2-ovmf edk2-aarch64`
   - macOS: `brew install qemu`
+- **clang and llvm-ar** (LLVM 17+) for vendored C code (ACPICA, see
+  [Building C code](c-build.md)): Windows `winget install LLVM.LLVM`,
+  Debian/Ubuntu `apt install clang llvm`, Fedora `dnf install clang llvm`,
+  Arch `pacman -S clang llvm`, macOS `brew install llvm`. Elsewhere: the
+  `CLANG` variable.
 - Optionally **GDB** for debugging.
 
 xtask looks for QEMU in `PATH` and common install locations, and for the
@@ -28,6 +33,7 @@ firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
 | `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)) |
 | `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for the other architectures, documentation, then kernel and userspace in QEMU without a window |
 | `cargo xtask test --only sit --repeat 20` | only the selected userspace test suites (names as in the log, comma separated), n times in a row - for finding flaky tests; every extra round adds 60 s to the run limit. A test longer than 20 s is marked `[pomaly]` ("slow") in the log |
+| `cargo xtask test --only napajeni` | only the separate power test runs (power-off with the button through ACPI, reboot; they always run after the main run, `--no-power` disables them), see [ACPI](acpi.md#tests) |
 | `cargo xtask test --net-online` | also the tests against the real host network (host resolver through slirp); skipped without the switch |
 | `cargo xtask check` | only checks that the kernel builds for the given architecture; see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |

@@ -15,3 +15,5 @@ libos = { path = "../../libs/libos" }
 fsproto = { path = "../../libs/fsproto" }
 shlang = { path = "../../libs/shlang" }
 term = { path = "../../libs/term" }
+powerproto = { path = "../../libs/powerproto" }
+spin = "0.12"

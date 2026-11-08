@@ -59,13 +59,13 @@ impl Interrupt {
     /// Novy objekt na stare lince `line` (ISA IRQ) s volnym cislem
     /// preruseni. Linka uz pouzita = `ALREADY_EXISTS`; architektura bez
     /// linek = `NOT_SUPPORTED`.
-    pub fn new_line(line: u32) -> Result<Arc<Self>, Error> {
+    pub fn new_line(line: u32, edge: bool) -> Result<Arc<Self>, Error> {
         let mut table = TABLE.lock();
         let slot = free_slot(&table).ok_or(Error::NoResources)?;
         let number = FIRST + slot as u32;
         // Tabulka je zamcena (i preruseni na tomto CPU): preruseni, ktere
         // by prislo hned po nasmerovani, pocka, az bude objekt v tabulce.
-        let level = arch::line_route(line, number)?;
+        let level = arch::line_route(line, number, edge)?;
         let irq = Arc::new(Self {
             core: ObjectCore::new(Signals::NONE),
             irq: number,

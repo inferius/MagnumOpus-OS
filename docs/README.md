@@ -22,6 +22,7 @@ site menu.
 | [Kódy chyb](cs/chyby.md) | [Error codes](en/errors.md) | kódy chyb a návratové kódy procesů / error and exit codes |
 | [Init a supervisor](cs/init.md) | [Init and supervisor](en/init.md) | start služeb, zařízení za běhu, restart spadlých služeb, testovací běh / service start-up, run-time devices, restarting crashed services, test run |
 | [Hlášky v logu](cs/hlasky.md) | [Log messages](en/messages.md) | co znamenají a co dělat / what they mean and what to do |
+| [Překlad C](cs/preklad-c.md) | [Building C code](en/c-build.md) | clang z build.rs (cbuild), knihovna C cstd, příznaky a ochrany, převzatý kód / clang from build.rs (cbuild), the cstd C library, flags and protections, vendored code |
 
 ### Spolehlivost / Reliability
 
@@ -35,6 +36,7 @@ site menu.
 |---|---|---|
 | [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
 | [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
+| [ACPI a napájení](cs/acpi.md) | [ACPI and power](en/acpi.md) | ACPICA v userspace, vypnutí S5, restart, tlačítko napájení, teploty, baterie, příkazy shutdown/reboot / ACPICA in userspace, S5 power-off, reboot, power button, temperatures, batteries, shutdown/reboot commands |
 
 ### Grafika / Graphics
 

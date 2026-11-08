@@ -21,6 +21,7 @@ use crate::proto::{ClientMsg, DecodeError, R, W};
 const S_CLIENT: u8 = 0;
 const S_INIT: u8 = 1;
 const S_ADOPT: u8 = 2;
+const S_POWER: u8 = 3;
 
 /// termd -> relace.
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +33,9 @@ pub enum SessMsg {
     Adopt,
     /// Zprava okna pro tuto relaci.
     Client(ClientMsg),
+    /// Hned po `Init` (kdyz termd ma spojeni na napajeni od initu); handly:
+    /// [kanal k initu pro `shutdown`/`reboot`, protokol `powerproto`].
+    Power,
 }
 
 impl SessMsg {
@@ -45,6 +49,7 @@ impl SessMsg {
                 w.str(home);
             }
             SessMsg::Adopt => w.u8(S_ADOPT),
+            SessMsg::Power => w.u8(S_POWER),
             SessMsg::Client(m) => {
                 w.u8(S_CLIENT);
                 w.0.extend_from_slice(&m.encode());
@@ -64,6 +69,7 @@ impl SessMsg {
                 Ok(m)
             }
             S_ADOPT if rest.is_empty() => Ok(SessMsg::Adopt),
+            S_POWER if rest.is_empty() => Ok(SessMsg::Power),
             _ => Err(DecodeError),
         }
     }

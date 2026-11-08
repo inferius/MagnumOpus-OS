@@ -445,6 +445,7 @@ Every command has a short name and a full `verb-noun` name (an alias).
 | `undo`, `preview` | `command-undo`, `command-preview` | see [Files](#files-draft-in-a-clone-undo-preview-and-lock) |
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | background jobs |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
+| `shutdown`, `reboot` | `system-shutdown`, `system-reboot` | clean power-off / reboot through init and ACPI; asks first, `-y` without asking (see [ACPI](acpi.md#shell-commands)) |
 
 ## Examples
 

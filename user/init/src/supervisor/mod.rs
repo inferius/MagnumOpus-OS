@@ -161,6 +161,8 @@ enum Item {
     Starting(usize),
     Leases,
     Terminal(crate::terminal::Wait),
+    /// Kanal sluzby napajeni (udalosti tlacitek, `crate::power`).
+    Power,
 }
 
 impl Default for Supervisor {
@@ -287,6 +289,11 @@ impl Supervisor {
         let mut term_what = Vec::new();
         terminals.wait_items(&mut items, &mut term_what);
         what.extend(term_what.into_iter().map(Item::Terminal));
+        let power = crate::power::POWER.lock();
+        if let Some(h) = power.as_ref().map(|p| p.channel().handle()) {
+            items.push((h, Signals::READABLE | Signals::PEER_CLOSED));
+            what.push(Item::Power);
+        }
         let wake = [deadline, self.next_due(), self.leases_due()]
             .into_iter()
             .flatten()
@@ -296,6 +303,8 @@ impl Supervisor {
             Err(_) => Vec::new(),
         };
         drop(items);
+        drop(power);
+        let mut power_ready = false;
         let mut terminals = terminals;
         for (k, item) in what.iter().enumerate() {
             let Some(sig) = observed.get(k).copied() else { break };
@@ -315,6 +324,7 @@ impl Supervisor {
                 }
                 Item::Leases if sig.intersects(Signals::READABLE) => self.lease_packets(),
                 Item::Terminal(w) => terminals.on_signal(startup, w, sig),
+                Item::Power => power_ready = true,
                 Item::Service(_) | Item::Starting(_) | Item::Leases => {}
             }
         }
@@ -327,6 +337,10 @@ impl Supervisor {
             println!("init: zalozni konzoli nelze spustit: {e}");
         }
         drop(terminals);
+        if power_ready {
+            crate::power::on_events(self);
+        }
+        crate::power::run_pending(self);
         self.start_timeouts();
         self.restart_due(startup, &mut out);
         self.serve_pending(&mut out);
@@ -349,6 +363,39 @@ impl Supervisor {
                 }
                 b"block" => println!("init: disk pripojeny za behu zatim nepouzivam"),
                 other => println!("init: neznama zprava od devmgr: {:?}", other),
+            }
+        }
+    }
+
+    /// Ukonci vsechny sluzby pred vypnutim: nejdriv vse krome FS, disku
+    /// a casu (v opacnem poradi registrace: klienti pred sluzbami), pak
+    /// `fsd`, nakonec spravce zarizeni (ovladace disku) a sluzbu casu.
+    /// Na kazdou instanci ceka nejvys `wait`. Restarty se uz nedelaji.
+    /// Sluzba napajeni (`acpid`) bezi dal: ta pocitac nakonec vypne.
+    pub fn stop_all(&mut self, wait: Duration) {
+        const LAST: [&str; 3] = ["fsd", "devmgr", "timed"];
+        const KEEP: &str = "acpid";
+        let mut order: Vec<usize> = (0..self.entries.len())
+            .rev()
+            .filter(|&i| !LAST.contains(&self.entries[i].name) && self.entries[i].name != KEEP)
+            .collect();
+        for name in LAST {
+            if let Some(i) = self.find(name) {
+                order.push(i);
+            }
+        }
+        for i in order {
+            let e = &mut self.entries[i];
+            e.phase = Phase::Stopped;
+            e.service = None;
+            if let Some(p) = e.process.take() {
+                let _ = libos::sys::process_kill(p.raw());
+                let deadline = libos::time::deadline_after(wait);
+                if libos::wait_one(&p, Signals::TERMINATED, Some(deadline)).is_err() {
+                    println!("init: sluzba {} neskoncila do {} ms", e.name, wait.as_millis());
+                } else {
+                    println!("init: sluzba {} ukoncena", e.name);
+                }
             }
         }
     }

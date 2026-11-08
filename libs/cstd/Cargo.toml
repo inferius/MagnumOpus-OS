@@ -1,0 +1,13 @@
+[package]
+name = "cstd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Zaklad vlastni knihovny C: retezce, pamet, ctype, printf do logu, ochrana zasobniku"
+
+[lib]
+# Testy formatovani a retezcu bezi na hostiteli (`cargo test -p cstd`).
+test = true
+
+[dependencies]

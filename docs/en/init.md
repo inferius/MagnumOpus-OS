@@ -25,6 +25,9 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 ## Start-up
 
 1. `timed` (the time service, the only one allowed to set the clock),
+   right after it `acpid` (ACPI: power, buttons, sensors; the only one with
+   the `POWER` right, see [ACPI](acpi.md)) - ACPICA initialisation runs in
+   parallel with the next steps,
 2. `devmgr`: finds devices and starts drivers. It reports disks (`block`)
    and input devices (`input`), and then `done` once the USB devices
    present at boot are ready too,
@@ -49,6 +52,15 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 init always sends the `fsd` configuration (the first message of the control
 channel): `debug` in the test run, `normal` otherwise. fsd waits for it
 before mounting the disk.
+
+## Power-off and reboot
+
+The power button (an event from `acpid`) or the shell command `shutdown` /
+`reboot` = a **clean power-off**: init stops termd and the fallback
+console, then the services in reverse registration order (clients before
+services), `fsd` and finally `devmgr` and `timed` (waiting at most 1.5 s for
+each), and only then asks `acpid` for S5 or a reboot. Details in
+[ACPI](acpi.md#power-off-and-reboot).
 
 ## The supervisor
 

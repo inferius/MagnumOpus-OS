@@ -60,7 +60,12 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     let run = RunFiles::new(arch.name, opts.test);
     let serial_log = run.serial_log.clone();
     let qmp_port = Arc::new(AtomicU16::new(0));
-    qmp::spawn_injector(serial_log.clone(), qmp_port.clone(), arch.ps2);
+    match opts.power_test {
+        // Beh testu napajeni: misto vstupu tlacitko napajeni pres QMP.
+        Some("button") => crate::powertest::spawn_button(serial_log.clone(), qmp_port.clone()),
+        Some(_) => {}
+        None => qmp::spawn_injector(serial_log.clone(), qmp_port.clone(), arch.ps2),
+    }
     let mut hostfwd = opts.hostfwd.clone();
     let mut attempt = 0;
     let result = loop {
@@ -81,7 +86,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         if !opts.test {
             break run_interactive(cmd);
         }
-        match run_test(cmd, opts) {
+        match run_test(cmd, opts, &serial_log) {
             Err(TestError::PortTaken(e)) if attempt < START_ATTEMPTS => {
                 println!("xtask: QEMU nenastartovalo ({e}), novy pokus s jinymi porty ({attempt}/{START_ATTEMPTS})");
                 if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
@@ -396,9 +401,13 @@ fn port_error(stderr: &str) -> Option<String> {
     Some(line.trim().to_string())
 }
 
-fn run_test(mut cmd: Command, opts: &Options) -> std::result::Result<(), TestError> {
-    // Opakovany beh (--repeat): kazde dalsi kolo az 60 s navic.
-    let timeout = opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1);
+fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result::Result<(), TestError> {
+    // Opakovany beh (--repeat): kazde dalsi kolo az 60 s navic. Beh testu
+    // napajeni je kratky (jen start a vypnuti).
+    let timeout = match opts.power_test {
+        Some(_) => Duration::from_secs(300),
+        None => opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1),
+    };
     // Chybovy vystup QEMU jde dal na terminal a zaroven do bufferu (hlaska
     // o obsazenem portu => novy pokus).
     cmd.stderr(Stdio::piped());
@@ -434,6 +443,17 @@ fn run_test(mut cmd: Command, opts: &Options) -> std::result::Result<(), TestErr
     };
     if let Some(t) = copier {
         let _ = t.join();
+    }
+    if let Some(mode) = opts.power_test {
+        // Uspech = QEMU skoncilo samo (vypnuti/restart ACPI), kod 0, a log
+        // ma znacky celeho postupu.
+        return match (status.code(), crate::powertest::check_log(serial_log, mode)) {
+            (Some(0), Ok(())) => Ok(()),
+            (Some(0), Err(e)) => Err(TestError::Other(format!("test napajeni ({mode}): {e}").into())),
+            (code, _) => Err(TestError::Other(
+                format!("test napajeni ({mode}): QEMU skoncilo s kodem {code:?} (ocekavano 0 po vypnuti ACPI)").into(),
+            )),
+        };
     }
     match status.code() {
         Some(code) if code == opts.arch.test_success => {
