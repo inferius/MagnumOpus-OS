@@ -39,6 +39,12 @@ pub static DISPLAY: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 /// Bezici GUI (bezny beh).
 pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
 
+/// Kanal od kompozitoru se zadostmi `launch <id>` (lista, spoustec).
+pub static LAUNCHER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
+
+/// Aplikace plochy, ktere lze spustit z listy (programy v initfs).
+const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks"];
+
 /// Jmeno kompozitoru v registru supervisoru.
 pub const NAME: &str = "compd";
 /// Zavislosti kompozitoru: o restartu `inputd` se jen dozvi (fokus zustava).
@@ -350,13 +356,8 @@ impl Gui {
         self.launch_with(startup, name, ch, lease, extra)
     }
 
-    /// Spusti aplikaci s oknem, ktere prezije pad kompozitoru: relace
-    /// a listek od supervisoru `sup` (recept = identita z manifestu).
-    pub fn launch_supervised(&mut self, startup: &Startup, name: &str, sup: &mut Supervisor) -> Result<usize> {
-        self.launch_supervised_with(startup, name, sup, Vec::new())
-    }
-
-    /// Jako [`Gui::launch_supervised`], s dalsimi handly aplikace za
+    /// Spusti aplikaci s oknem, ktere prezije pad kompozitoru (relace
+    /// a listek od supervisoru `sup`), s dalsimi handly aplikace za
     /// listkem (napr. kanal terminalu).
     pub fn launch_supervised_with(&mut self, startup: &Startup, name: &str, sup: &mut Supervisor, extra: Vec<StartHandle>) -> Result<usize> {
         let info = recipe(startup, name)?;
@@ -434,32 +435,73 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
         println!("init: stav pro listu: {e}");
     }
     connect_snapshots(&gui);
-    // Terminal: za oknem a listkem kanal pripojeni k termd (init ho spousti
-    // a hlida, viz `terminal.rs`).
-    let term = match crate::terminal::TERMINALS.lock().client("gui-term") {
-        Ok(c) => vec![StartHandle::user(c.into_handle())],
-        Err(e) => {
-            println!("init: kanal terminalu: {e}");
-            Vec::new()
+    for app in DESKTOP_APPS {
+        if let Err(e) = launch_app(&mut gui, startup, sup, app) {
+            println!("init: {app} nelze spustit: {e}");
         }
-    };
-    if let Err(e) = gui.launch_supervised_with(startup, "gui-term", sup, term) {
-        println!("init: gui-term nelze spustit: {e}");
     }
-    if let Err(e) = gui.launch_supervised(startup, "gui-demo", sup) {
-        println!("init: gui-demo nelze spustit: {e}");
-    }
-    // Spravce uloh: za oknem a listkem kanal klienta prehledu uloh
-    // (identita uzivatele, vlastni ulohy, smi ridit).
-    // Vidi vsechny ulohy (systemove i aplikace spustene initem, stejne jako
-    // ikona v liste), ridit smi jen sve.
-    match crate::tasks::client_view_all("uzivatel") {
-        Ok(c) => {
-            if let Err(e) = gui.launch_supervised_with(startup, "gui-tasks", sup, vec![StartHandle::user(c.into_handle())]) {
-                println!("init: gui-tasks nelze spustit: {e}");
-            }
-        }
-        Err(e) => println!("init: kanal prehledu uloh pro gui-tasks: {e}"),
-    }
+    connect_launcher(&gui, startup);
     *GUI.lock() = Some(gui);
+}
+
+/// Spusti aplikaci plochy pod supervisorem s handly, ktere potrebuje
+/// (terminal: kanal k termd; Spravce uloh: klient prehledu uloh).
+fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, program: &str) -> Result<usize> {
+    let extra = match program {
+        // Terminal: za oknem a listkem kanal pripojeni k termd (init ho
+        // spousti a hlida, viz `terminal.rs`).
+        "gui-term" => vec![StartHandle::user(crate::terminal::TERMINALS.lock().client("gui-term")?.into_handle())],
+        // Spravce uloh: vidi vsechny ulohy (systemove i aplikace spustene
+        // initem, stejne jako ikona v liste), ridit smi jen sve.
+        "gui-tasks" => vec![StartHandle::user(crate::tasks::client_view_all("uzivatel")?.into_handle())],
+        _ => Vec::new(),
+    };
+    gui.launch_supervised_with(startup, program, sup, extra)
+}
+
+/// Seznam aplikaci pro listu a kanal pro zadosti o spusteni.
+fn connect_launcher(gui: &Gui, startup: &Startup) {
+    let mut list = String::from(control::APPS);
+    for p in DESKTOP_APPS {
+        if let Ok(info) = recipe(startup, p) {
+            list.push_str(&format!("\n{}\t{}", info.id, info.name));
+        }
+    }
+    if let Err(e) = gui.command(list.as_bytes(), Vec::new()) {
+        println!("init: seznam aplikaci pro listu: {e}");
+    }
+    let r = Channel::create().and_then(|(mine, theirs)| {
+        gui.command(control::LAUNCHER.as_bytes(), vec![theirs.into_handle()])?;
+        *LAUNCHER.lock() = Some(mine);
+        Ok(())
+    });
+    if let Err(e) = r {
+        println!("init: kanal spousteni aplikaci: {e}");
+    }
+}
+
+/// Zadosti kompozitoru `launch <id>`: aplikace podle id z manifestu.
+pub fn launch_requests(startup: &Startup, sup: &mut Supervisor) {
+    loop {
+        let m = match LAUNCHER.lock().as_ref().map(|l| l.try_read()) {
+            Some(Ok(m)) => m,
+            Some(Err(Error::ShouldWait)) | None => return,
+            Some(Err(_)) => {
+                *LAUNCHER.lock() = None;
+                return;
+            }
+        };
+        let text = String::from_utf8_lossy(&m.data).into_owned();
+        let Some(id) = text.strip_prefix("launch ") else { continue };
+        let Some(program) = DESKTOP_APPS.iter().find(|p| recipe(startup, p).is_ok_and(|i| i.id == id)) else {
+            println!("init: kompozitor chce spustit neznamou aplikaci {id}");
+            continue;
+        };
+        let mut g = GUI.lock();
+        let Some(gui) = g.as_mut() else { return };
+        match launch_app(gui, startup, sup, program) {
+            Ok(_) => println!("init: {program} spusten z listy"),
+            Err(e) => println!("init: {program} z listy nelze spustit: {e}"),
+        }
+    }
 }

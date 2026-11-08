@@ -21,6 +21,8 @@ pub enum Flyout {
     Net,
     Volume,
     Bell,
+    /// Spoustec (ikona mrizky): radek = aplikace, klik spusti / aktivuje.
+    Apps,
 }
 
 /// Ceske tvary "uloha".
@@ -82,6 +84,14 @@ impl Comp {
                 (String::from("Zvuk"), vec![line])
             }
             Flyout::Bell => (String::from("Oznámení"), vec![String::from("Žádná oznámení")]),
+            Flyout::Apps => {
+                let rows = self
+                    .launchable
+                    .iter()
+                    .map(|(id, name)| if self.app_window(id).is_some() { format!("{name} (běží)") } else { name.clone() })
+                    .collect();
+                (String::from("Aplikace"), rows)
+            }
             Flyout::Tasks => {
                 let (run, agent) = self.tasks;
                 let mut l = vec![format!("Běží {run} {}", tasks_word(run))];
@@ -102,6 +112,7 @@ impl Comp {
             Flyout::Net => bar.net,
             Flyout::Volume => bar.volume,
             Flyout::Bell => Some(bar.bell),
+            Flyout::Apps => Some(bar.launcher),
         }
     }
 
@@ -117,8 +128,18 @@ impl Comp {
         let w = (tw + 2 * pad).min(self.w);
         let h = hs.line + lines.len() as u32 * (bs.line + t.space[2]) + 2 * pad;
         let bottom = self.panel_rect().y - t.space[3] as i32;
-        let x = (a.right() as i32 - w as i32).clamp(0, (self.w - w) as i32);
+        // Spoustec vlevo: karta zarovnana k leve strane ikony.
+        let x = if f == Flyout::Apps { a.x } else { a.right() as i32 - w as i32 }.clamp(0, (self.w - w) as i32);
         Some(Rect::new(x, bottom - h as i32, w, h))
+    }
+
+    /// Radek panelu (bez nadpisu) na vysce `y`.
+    pub(crate) fn flyout_row_at(&self, y: i32) -> Option<usize> {
+        let r = self.flyout_rect()?;
+        let t = &self.style.theme;
+        let top = r.y + t.space[4] as i32 + (t.text.body_strong.line + t.space[2]) as i32;
+        let row = (t.text.body.line + t.space[2]) as i32;
+        (y >= top).then(|| ((y - top) / row) as usize)
     }
 
     /// Otevre nebo zavre panel `f` (druhy klik na tutez ikonu zavira).

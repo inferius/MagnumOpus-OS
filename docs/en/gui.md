@@ -519,6 +519,19 @@ coordinates, pointer leave, button with position, wheel and focus; plus
 modifiers, the synthetic flag and time. Motion and button release go to
 the window that got the press, even when the pointer leaves it.
 
+### Launching apps from the bar
+
+Init sends the compositor the list of desktop apps (`apps`, id and name
+from the manifest: Terminal, Demo, Task manager) and a `launcher` channel.
+An app without a window has a dimmed icon without a marker in the bar; a
+click on it, or on a row in the launcher (the grid icon on the left),
+sends init `launch <id>`. Init starts it under the supervisor with the same
+handles as at desktop start (the terminal a channel to termd, the Task
+manager a task overview client). The compositor starts nothing itself. A
+click on a running app activates it (also from minimized).
+**[implemented]** (test `bar_launches_closed_apps_and_activates_running`
+in `libs/comp`; the init start has no QEMU test yet)
+
 ### Panels above the bar
 
 A click on the network, volume or notification icon in the bar opens a card
@@ -766,6 +779,8 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `tasks <running> <agent>` | - | `ok` (task icon in the panel) |
 | `theme light\|dark\|contrast` | - | `ok` (color mode from the tokens) |
 | `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
+| `apps` + lines `<id>\t<name>` | - | empty (launchable apps in the bar) |
+| `launcher` | channel to init | empty (`launch <id>` requests) |
 | `snapshots` | channel to `logd` | empty (images of the [diagnostic snapshot](#diagnostic-snapshot-print-screen)) |
 
 **Inspection** (`inspect`, for tests, later a screen reader and

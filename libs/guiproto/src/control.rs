@@ -39,6 +39,12 @@ pub const SOURCES: &str = "sources";
 /// `snapshots`: kanal na logd pro obrazky diagnostickeho snimku (handle;
 /// zprava `snimek <id> <delka>` + VMO s BMP).
 pub const SNAPSHOTS: &str = "snapshots";
+/// `apps` a za nim radky `<id>	<jmeno>`: spustitelne aplikace pro listu
+/// a spoustec (poradi = poradi v liste).
+pub const APPS: &str = "apps";
+/// `launcher`: kanal k initu (handle) pro zadosti `launch <id>` (klik na
+/// nespustenou aplikaci v liste nebo ve spousteci).
+pub const LAUNCHER: &str = "launcher";
 /// `snapshot`: udelat diagnosticky snimek hned (prikaz shellu pres init).
 pub const SNAPSHOT: &str = "snapshot";
 pub const INPUT: &str = "input";

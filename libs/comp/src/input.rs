@@ -410,6 +410,8 @@ impl Comp {
                 Some(Hover::Launcher)
             } else if let Some((g, _)) = bar.apps.iter().find(|(_, r)| r.contains(px, py)) {
                 Some(Hover::BarApp(*g))
+            } else if let Some((i, _)) = bar.launch.iter().find(|(_, r)| r.contains(px, py)) {
+                Some(Hover::BarLaunch(*i))
             } else if bar.tasks.is_some_and(|r| r.contains(px, py)) {
                 Some(Hover::Tasks)
             } else {
@@ -446,7 +448,7 @@ impl Comp {
                         self.damage(r);
                     }
                 }
-                Hover::BarApp(_) | Hover::Launcher => self.damage_panel(),
+                Hover::BarApp(_) | Hover::BarLaunch(_) | Hover::Launcher => self.damage_panel(),
             }
         }
         self.input.hover = h;
@@ -569,6 +571,15 @@ impl Comp {
         if self.flyout_rect().is_some_and(|r| r.contains(px, py)) {
             let f = self.flyout;
             self.trace(time, format_args!("{button:?} {act} na {px},{py}: panel {f:?}"));
+            // Spoustec: radek = aplikace.
+            if f == Some(crate::flyout::Flyout::Apps)
+                && button == Button::Left
+                && let Some(i) = self.flyout_row_at(py)
+                && let Some((id, _)) = self.launchable.get(i).cloned()
+            {
+                self.set_flyout(None);
+                self.launch_or_activate(&id, time);
+            }
             return;
         }
         if self.panel_rect().contains(px, py) {
@@ -587,6 +598,13 @@ impl Comp {
             }
             if let Some(f) = icon {
                 self.toggle_flyout(f);
+            } else if bar.launcher.contains(px, py) {
+                self.toggle_flyout(crate::flyout::Flyout::Apps);
+            } else if let Some((i, _)) = bar.launch.iter().find(|(_, r)| r.contains(px, py)) {
+                self.set_flyout(None);
+                if let Some((id, _)) = self.launchable.get(*i).cloned() {
+                    self.launch_or_activate(&id, time);
+                }
             } else if let Some((g, _)) = self.panel_items().into_iter().find(|(_, r)| r.contains(px, py)) {
                 self.set_flyout(None);
                 self.panel_click(g);
