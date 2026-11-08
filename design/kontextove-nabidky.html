@@ -43,6 +43,11 @@
 .cm .ic { width: 16px; height: 16px; flex: none; }
 .cm hr { border: 0; border-top: 1px solid var(--c-border); margin: 4px 6px; }
 .cm .sec { padding: 6px 10px 2px; font-size: 11px; color: var(--c-ink-muted); font-weight: 600; }
+.cm .it.skel { gap: 10px; }
+.sk { display: inline-block; height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--c-surface-3) 0%, color-mix(in srgb, var(--c-surface-3) 40%, var(--c-surface)) 50%, var(--c-surface-3) 100%);
+  background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+.sk.sk-ic { width: 16px; height: 16px; border-radius: 5px; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .cm .q { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; margin-bottom: 4px; border-radius: 8px; background: var(--c-surface-3); color: var(--c-ink-muted); font-size: 12px; }
 .contrast-chip { margin-top: var(--s2); }
 /* Titulek mica */
@@ -71,6 +76,12 @@
     <span class="hstack"><button class="switch" role="switch" aria-checked="false" id="sw-solid" aria-label="Omezit průhlednost"></button>Omezit průhlednost</span>
     <span class="note" style="margin:0">Hledání: <span id="qv" class="kbd">nic</span> (Backspace maže)</span>
   </div>
+  <div class="ctlbar" style="position:static" role="group" aria-label="Dynamické položky">
+    <span><b>Otevřít v (dynamické položky)</b><span class="seg" role="radiogroup" aria-label="Stav" id="g-dyn">
+      <button role="radio" aria-checked="true" data-value="0">Skeleton</button><button role="radio" aria-checked="false" data-value="800">Načteno 2 ze 3</button><button role="radio" aria-checked="false" data-value="1300">Termín vypršel</button></span></span>
+    <button class="btn small" id="b-dyn">Přehrát se zpožděním</button>
+    <span class="note" style="margin:0">čas od otevření: <b id="dyn-t">0</b> ms, termín 1200 ms</span>
+  </div>
   <div class="cols" id="cols"></div>
 
   <h2>Titulek okna: jemné tónování z tapety (mica)</h2>
@@ -85,18 +96,29 @@
     <div class="card"><h3>Rozmazání (b) ano</h3><ul><li>kontextové a rozbalovací nabídky</li><li>paleta příkazů</li><li>panely z lišty (spouštěč, oznámení, přehled soukromí)</li><li>oznámení</li></ul><p class="note" style="margin:var(--s2) 0 0">Krátce žijící malé plochy: rozmazání stojí GPU čas úměrný ploše a počítá se jen při otevření a při změně pod nabídkou.</p></div>
     <div class="card"><h3>Rozmazání ne</h3><ul><li>okna a jejich obsah (velká plocha, žije dlouho)</li><li>systémové dialogy (musí být jednoznačné, vždy plné)</li><li>text na celé obrazovce, terminál</li><li>záložní 2D cesta, vysoký kontrast, „Omezit průhlednost“: vždy plné pozadí (a)</li></ul></div>
     <div class="card"><h3>Čitelnost</h3><ul><li>Text v nabídce musí mít 4,5 : 1 i na nejhorším pozadí: kontrola počítá s nejtmavší i nejsvětlejší barvou tapety pod nabídkou (viz čísla u sloupců).</li><li>Krytí materiálu (b) je 72 %, (c) 88 %; při kontrastu pod limitem kompozitor krytí zvýší.</li><li>Šum 5 % proti pruhům v přechodu.</li></ul></div>
-    <div class="card"><h3>Pravidlo rychlosti</h3><ul><li>Nabídka se otevře do jednoho snímku.</li><li>Položky jsou data připravená předem; rozšíření jiných aplikací deklarují své položky staticky v manifestu (typ souboru, podmínky). Při otevření nabídky se nespouští žádný cizí kód.</li><li>Dynamické položky (např. „Otevřít v“ podle nainstalovaných aplikací, stav sdílení) se doplní asynchronně s termínem; nabídka na ně nikdy nečeká, doplní se do otevřené nabídky nebo se vynechají.</li></ul></div>
+    <div class="card"><h3>Pravidlo rychlosti</h3><ul><li>Nabídka se otevře do jednoho snímku.</li><li><b>Žádný posun obsahu otevřené nabídky:</b> dynamické položky mají v manifestu předem známý počet a místo („až N položek, výška řádku“). Při otevření je na jejich místě skeleton (tlumený pruh s jemnou animací, ne točící se kolečko), doručený text ho nahradí na stejném místě. Nabídka nikdy neskáče ani nemění velikost, dokud je otevřená. Po termínu zůstane položka jako zakázaná s důvodem „nedostupné“; skrýt ji jde až při dalším otevření.</li><li>Položky jsou data připravená předem; rozšíření jiných aplikací deklarují své položky staticky v manifestu (typ souboru, podmínky). Při otevření nabídky se nespouští žádný cizí kód.</li><li>Dynamické položky (např. „Otevřít v“ podle nainstalovaných aplikací, stav sdílení) se doplní asynchronně s termínem; nabídka na ně nikdy nečeká, doplní se do otevřené nabídky nebo se vynechají.</li></ul></div>
   </div>
 </main>
 <script>
 document.addEventListener('mo-ready', function () {
   var T = window.MO_TOKENS;
-  var st = { scene: 'file', bg: 'wall', solid: false, q: '' };
+  var st = { scene: 'file', bg: 'wall', solid: false, q: '', t: 0 };
+  // Dynamicke polozky "Otevrit v": pocet a misto jsou dane manifestem (az 3 polozky, radek 30 px).
+  // Kazda ma zpozdeni doruceni; termin 1200 ms. Treti nedorazi vcas -> zakazana s duvodem.
+  var DEADLINE = 1200;
+  var DYN = [['app-browser', 'Prohlížeč', 350], ['app-editor', 'Editor', 650], ['app-pdf', 'Prohlížeč PDF', 99999]];
+  function dynRows() {
+    return DYN.map(function (d) {
+      if (st.t >= d[2]) return '<div class="it">' + I(d[0]) + '<span>' + d[1] + '</span></div>';
+      if (st.t >= DEADLINE) return '<div class="it dis" aria-disabled="true" title="Nedostupné: aplikace neodpověděla včas">' + I(d[0]) + '<span>' + d[1] + '</span><span class="why">nedostupné</span></div>';
+      return '<div class="it skel" aria-busy="true" aria-label="Načítá se"><span class="sk sk-ic"></span><span class="sk" style="width:' + (60 + d[1].length * 4) + 'px"></span></div>';
+    }).join('') + '<hr><div class="it"><span style="width:16px"></span><span>Vybrat aplikaci&hellip;</span></div>';
+  }
   function I(n) { return '<svg class="ic" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
   // Polozka: [ikona, text, zkratka, volby]; volby: dis = duvod zakazani, sub = podnabidka, ext = rozsireni (aplikace), sel = vybrana.
   var SCENES = {
     file: { target: ['file-text', 'smlouva.pdf'], items: [
-      ['app-pdf', 'Otevřít', 'Enter', { sel: 1 }], ['', 'Otevřít v', '', { sub: [['app-browser', 'Prohlížeč'], ['app-editor', 'Editor'], ['', 'Vybrat aplikaci&hellip;']] }], ['share', 'Sdílet', ''], '-',
+      ['app-pdf', 'Otevřít', 'Enter', { sel: 1 }], ['', 'Otevřít v', '', { sub: 'DYN' }], ['share', 'Sdílet', ''], '-',
       ['copy', 'Kopírovat', 'Ctrl+C'], ['cut', 'Vyjmout', 'Ctrl+X'], ['rename', 'Přejmenovat', 'F2'], ['trash', 'Přesunout do koše', 'Del'], '-',
       ['history', 'Verze a historie', ''], ['branch', 'Zkusit úpravy bokem', ''], ['snapshot', 'Obnovit z verze', '', { dis: 'soubor ještě nemá starší verzi' }], '-',
       ['archive', 'Komprimovat', '', { ext: 'Archivátor' }], ['agent', 'Shrnout dokument', '', { ext: 'Asistent' }], '-', ['info', 'Vlastnosti', 'Alt+Enter']] },
@@ -133,7 +155,7 @@ document.addEventListener('mo-ready', function () {
       var idx = items.findIndex(function (m) { return m !== '-' && !m.sec && m[1] === subOpen.label; });
       var yy = y + 6 + idx * 30 - 6;
       html += '<div class="cm m-' + mat + '" role="menu" aria-label="' + subOpen.label + '" style="left:' + (x + 245) + 'px;top:' + yy + 'px;min-width:180px">' +
-        subOpen.items.map(function (s) { return '<div class="it">' + (s[0] ? I(s[0]) : '<span style="width:16px"></span>') + s[1] + '</div>'; }).join('') + '</div>';
+        (subOpen.items === 'DYN' ? dynRows() : subOpen.items.map(function (s) { return '<div class="it">' + (s[0] ? I(s[0]) : '<span style="width:16px"></span>') + s[1] + '</div>'; }).join('')) + '</div>';
     }
     return html;
   }
@@ -165,6 +187,13 @@ document.addEventListener('mo-ready', function () {
   }
   window.MO_SEG(document.getElementById('g-scene'), function (v) { st.scene = v; st.q = ''; render(); });
   window.MO_SEG(document.getElementById('g-bg'), function (v) { st.bg = v; render(); });
+  var dynTimer = null;
+  function setT(v) { st.t = v; document.getElementById('dyn-t').textContent = Math.min(v, 1500); render(); }
+  window.MO_SEG(document.getElementById('g-dyn'), function (v) { clearInterval(dynTimer); st.scene = 'file'; setT(+v); });
+  document.getElementById('b-dyn').addEventListener('click', function () {
+    clearInterval(dynTimer); st.scene = 'file'; st.q = ''; var t0 = Date.now(); setT(0);
+    dynTimer = setInterval(function () { var v = Date.now() - t0; setT(v); if (v > 1500) clearInterval(dynTimer); }, 100);
+  });
   window.MO_SWITCH(document.getElementById('sw-solid'), function (v) { st.solid = v; render(); });
   document.addEventListener('keydown', function (e) {
     if ((e.target.closest && e.target.closest('input, select, textarea')) || e.ctrlKey || e.altKey || e.metaKey) return;
