@@ -43,6 +43,17 @@ pub struct Process {
     /// Job, do ktereho proces patri: z jeho rozpoctu se strhava vse, co
     /// proces stoji (objekty, handly, mapovani, vlakna, pamet).
     job: Arc<Job>,
+    /// Cas na CPU vsech vlaken (ns; pricita scheduler pri prepnuti).
+    pub cpu_ns: AtomicU64,
+}
+
+/// Vsechny procesy (slabe odkazy) pro `JOB_PROCESSES`. Mrtve se uklidi pri
+/// rustu pole (amortizovane O(1)).
+static REGISTRY: SpinLock<Vec<Weak<Process>>> = SpinLock::new(Vec::new());
+
+/// Zivi procesy (pro vycet jobu).
+pub fn live_processes() -> Vec<Arc<Process>> {
+    REGISTRY.lock().iter().filter_map(|w| w.upgrade()).collect()
 }
 
 /// Pamet jadra za proces mimo jeho objekty: struktura a korenova tabulka
@@ -69,14 +80,28 @@ impl Process {
                 finished: false,
             }),
             job,
+            cpu_ns: AtomicU64::new(0),
         });
         p.core.set_charge(charge);
+        {
+            let mut r = REGISTRY.lock();
+            if r.len() == r.capacity() {
+                r.retain(|w| w.strong_count() > 0);
+            }
+            r.push(Arc::downgrade(&p));
+        }
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
     }
 
     pub fn handles(&self) -> SpinLockGuard<'_, HandleTable> {
         self.handles.lock()
+    }
+
+    /// Zivych vlaken a zda proces skoncil (vycet `JOB_PROCESSES`).
+    pub fn thread_stats(&self) -> (u32, bool) {
+        let st = self.state.lock();
+        (st.live as u32, st.finished || st.exit_code.is_some())
     }
 
     /// Job procesu (rozpocet pro vse, co proces vytvori).

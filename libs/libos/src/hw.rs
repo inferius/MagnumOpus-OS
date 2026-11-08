@@ -34,10 +34,24 @@ impl Resource {
             .map(|h| Vmo::from_handle(Handle::from_raw(h)))
     }
 
-    /// Okno na registry zarizeni (jen mimo RAM).
+    /// Okno na registry zarizeni (jen mimo RAM), bez cache.
     pub fn device_memory(&self, phys: u64, size: u64) -> Result<Vmo> {
-        sys::vmo_create_physical(self.0.raw(), phys, size)
+        self.device_memory_cached(phys, size, abi::vm::cache::UNCACHED)
+    }
+
+    /// Okno na fyzicky rozsah mimo RAM s typem cache `cache`
+    /// (`abi::vm::cache`): napr. sdilena pamet zarizeni s pameti hostitele.
+    /// Kazde mapovani objektu typ zdedi.
+    pub fn device_memory_cached(&self, phys: u64, size: u64, cache: u64) -> Result<Vmo> {
+        sys::vmo_create_physical(self.0.raw(), phys, size, cache)
             .map(|h| Vmo::from_handle(Handle::from_raw(h)))
+    }
+
+    /// Odvola fyzicky objekt `vmo` (okno z `device_memory*`): jeho mapovani
+    /// zmizi ve vsech procesech (i u tech, kterym byl predan) a dalsi
+    /// mapovani selze. Pristup pres stare mapovani = vyjimka stranky.
+    pub fn revoke(&self, vmo: &Vmo) -> Result<()> {
+        sys::vmo_revoke(self.0.raw(), vmo.handle().raw())
     }
 
     /// Fyzicka adresa bajtu `offset` objektu pameti (pro DMA).
@@ -85,7 +99,7 @@ impl Resource {
     /// Jako [`Resource::interrupt_line`] s priznaky spousteni
     /// (`abi::syscall::line_flags`; aarch64 SPI: hrana/uroven z ACPI _CRS).
     pub fn interrupt_line_with(&self, line: u32, flags: u64) -> Result<Interrupt> {
-        let h = sys::interrupt_create_line(self.0.raw(), line, flags)?;
+        let h = sys::interrupt_create_line_flags(self.0.raw(), line, flags)?;
         Ok(Interrupt(Handle::from_raw(h), MsiMessage::default()))
     }
 

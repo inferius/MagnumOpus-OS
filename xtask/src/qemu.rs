@@ -6,8 +6,10 @@
 //!   konec testu pres semihosting (SYS_EXIT s kodem od jadra, 33 = uspech).
 //!
 //! Disky jsou na obou stejne: systemovy (ESP s loaderem, jadrem a initfs),
-//! maly prazdny pro testy ovladace a datovy s nasim souborovym systemem, vse
-//! jako virtio-blk na PCI Express.
+//! maly pro testy ovladace a datovy s nasim souborovym systemem, vse jako
+//! virtio-blk na PCI Express. Datovy disk muze byt i na NVMe nebo AHCI
+//! (`--data-disk`). V testech navic radic NVMe a AHCI s testovacimi disky
+//! (`testdisks.rs`).
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -16,10 +18,10 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir};
+use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir, testdisks};
 
 /// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
-const DEVICE_LAYOUT: u32 = 6;
+const DEVICE_LAYOUT: u32 = 8;
 
 /// Pokusy o start QEMU, kdyz mu port (QMP, hostfwd) mezitim vzal jiny
 /// proces (soubezne behy testu).
@@ -146,29 +148,14 @@ fn command(
             image.display()
         ))
         .args(["-device", &blk("osdisk")])
-        // Maly prazdny disk jen pro test ovladace (testy do nej zapisuji).
+        // Maly disk pro test ovladace (GPT s nasim oddilem 1 MiB, testy do
+        // nej zapisuji).
         .arg("-drive")
         .arg(format!(
             "if=none,id=scratch,format=raw,file={}",
-            scratch_disk(&run.scratch)?.display()
+            testdisks::scratch(&run.scratch)?.display()
         ))
         .args(["-device", &blk("scratch")])
-        // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
-        // `cache=unsafe`: flush disku (kazdy commit fsd) nedela fsync
-        // souboru na hostiteli. Disk vznika pri kazdem behu znovu, takze
-        // trvanlivost pri padu hostitele nema cenu; bez toho stal radek
-        // shellu se zapisem (nekolik commitu: klon, prevzeti, zahozeni)
-        // na vytizenem hostiteli sekundy. Vypadek proudu testuje fsd
-        // simulaci, ne flush hostitele.
-        .arg("-drive")
-        .arg(format!(
-            // V testech bez flushe na hostitele (rychlejsi beh; vypadek
-            // proudu testy simuluji uvnitr fsd), v beznem behu bezpecne.
-            "if=none,id=data,format=raw,discard=unmap{},file={}",
-            if opts.test { ",cache=unsafe" } else { "" },
-            datadisk::create(&run.data)?.display()
-        ))
-        .args(["-device", &blk("data")])
         .arg("-qmp")
         .arg(qmp::qemu_arg(qmp_port))
         // Sitova karta virtio-net v user-mode siti (slirp: host 10.0.2.15,
@@ -186,6 +173,12 @@ fn command(
         // Zdroj nahody z hostitele (doplnuje entropii jadra, viz
         // docs/cs/syscally.md RANDOM_ADD).
         .args(["-device", "virtio-rng-pci,disable-legacy=on,iommu_platform=on"])
+        // Druha sitova karta Intel 82574L (ovladac e1000e) ve vlastni siti
+        // slirp; netd pouziva prvni kartu (virtio-net), test ovladacu tuto.
+        // Posledni zarizeni PCI: sloty ostatnich se nemeni (DEVICE_LAYOUT
+        // zustava). Emulovana karta jde pres IOMMU vzdy (bez prepinace).
+        .args(["-netdev", "user,id=net1"])
+        .args(["-device", "e1000e,netdev=net1,romfile="])
         // Seriova linka do terminalu a zaroven do souboru, aby se dal vystup
         // dohledat i po skonceni behu.
         .arg("-chardev")
@@ -211,8 +204,64 @@ fn command(
             artifacts.kernel.display()
         );
     }
+    disk_controllers(&mut cmd, opts, run, &blk)?;
     cmd.args(&opts.qemu_args);
     Ok(cmd)
+}
+
+/// Datovy disk (na zvolenem radici) a v testech radice NVMe a AHCI
+/// s testovacimi disky. Zarizeni jsou az za ostatnimi, aby se jejich sloty
+/// PCI neposunuly.
+fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn Fn(&str) -> String) -> Result<()> {
+    // Datovy disk s nasim souborovym systemem (sluzba fsd); TRIM povolen.
+    // `cache=unsafe`: flush disku (kazdy commit fsd) nedela fsync
+    // souboru na hostiteli. Disk vznika pri kazdem behu znovu, takze
+    // trvanlivost pri padu hostitele nema cenu; bez toho stal radek
+    // shellu se zapisem (nekolik commitu: klon, prevzeti, zahozeni)
+    // na vytizenem hostiteli sekundy. Vypadek proudu testuje fsd
+    // simulaci, ne flush hostitele. V beznem behu bezpecne.
+    let cache = if opts.test { ",cache=unsafe" } else { "" };
+    let drive = |id: &str, path: &Path| format!("if=none,id={id},format=raw,discard=unmap{cache},file={}", path.display());
+    let raw = datadisk::create(&run.data)?;
+    // Na NVMe a AHCI jako na skutecnem pocitaci: GPT s nasim oddilem.
+    let data = match opts.data_disk.as_str() {
+        "virtio" => raw,
+        "nvme4k" => testdisks::wrap_data(&raw, &run.data_gpt, 4096)?,
+        _ => testdisks::wrap_data(&raw, &run.data_gpt, 512)?,
+    };
+    cmd.arg("-drive").arg(drive("data", &data));
+    let ahci = opts.test || opts.data_disk == "ahci";
+    if ahci {
+        cmd.args(["-device", "ahci,id=ahci0"]);
+    }
+    match opts.data_disk.as_str() {
+        "nvme" => cmd.args(["-device", "nvme,drive=data,serial=MO-DATA"]),
+        // Disk se sektorem 4 KiB (jako NVMe naformatovane na 4 KiB).
+        "nvme4k" => cmd.args([
+            "-device",
+            "nvme,drive=data,serial=MO-DATA,logical_block_size=4096,physical_block_size=4096",
+        ]),
+        "ahci" => cmd.args(["-device", "ide-hd,drive=data,bus=ahci0.2"]),
+        _ => cmd.args(["-device", &blk("data")]),
+    };
+    if opts.test {
+        cmd.arg("-drive")
+            .arg(drive("nvmetest", &testdisks::nvme(&run.nvme)?))
+            .args(["-device", "nvme,drive=nvmetest,serial=MO-NVME-TEST"])
+            .arg("-drive")
+            .arg(drive("nvme4ktest", &testdisks::nvme4k(&run.nvme4k)?))
+            .args([
+                "-device",
+                "nvme,drive=nvme4ktest,serial=MO-NVME-4K,logical_block_size=4096,physical_block_size=4096",
+            ])
+            .arg("-drive")
+            .arg(drive("ahcitest", &testdisks::ahci(&run.ahci)?))
+            .args(["-device", "ide-hd,drive=ahcitest,bus=ahci0.0"])
+            .arg("-drive")
+            .arg(drive("foreign", &testdisks::foreign(&run.foreign)?))
+            .args(["-device", "ide-hd,drive=foreign,bus=ahci0.1"]);
+    }
+    Ok(())
 }
 
 /// Stroj q35 s OVMF. Vraci, zda smi systemovy disk prochazet IOMMU.
@@ -471,19 +520,19 @@ fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result:
     }
 }
 
-/// Prazdny disk 1 MiB pro testy ovladace (pri kazdem behu znovu vynulovany).
-fn scratch_disk(path: &Path) -> Result<PathBuf> {
-    std::fs::write(path, vec![0u8; 1024 * 1024])?;
-    Ok(path.to_path_buf())
-}
-
 /// Soubory jednoho behu QEMU. Disky jsou jen pro tento beh (cislo procesu
 /// xtask v nazvu) a po skonceni se smazou; log testu take nese cislo
 /// procesu, aby soubezne behy nesdilely znacky pro QMP. Interaktivni beh
 /// pise do `target/serial-<arch>.log` jako dosud.
 struct RunFiles {
     data: PathBuf,
+    /// Datovy disk s GPT (na NVMe/AHCI).
+    data_gpt: PathBuf,
     scratch: PathBuf,
+    nvme: PathBuf,
+    nvme4k: PathBuf,
+    ahci: PathBuf,
+    foreign: PathBuf,
     serial_log: PathBuf,
 }
 
@@ -493,7 +542,12 @@ impl RunFiles {
         let t = target_dir();
         Self {
             data: t.join(format!("data-{pid}.img")),
+            data_gpt: t.join(format!("data-gpt-{pid}.img")),
             scratch: t.join(format!("scratch-{pid}.img")),
+            nvme: t.join(format!("nvme-test-{pid}.img")),
+            nvme4k: t.join(format!("nvme4k-test-{pid}.img")),
+            ahci: t.join(format!("ahci-test-{pid}.img")),
+            foreign: t.join(format!("foreign-{pid}.img")),
             serial_log: t.join(if test {
                 format!("serial-test-{arch}-{pid}.log")
             } else {
@@ -508,11 +562,14 @@ impl Drop for RunFiles {
         // `OS_KEEP_DATA=1`: datovy disk nechat (rozbor stavu FS po behu,
         // napr. mereni na hostiteli nad skutecnym obsahem).
         if std::env::var_os("OS_KEEP_DATA").is_some() {
-            eprintln!("xtask: datovy disk zustava v {}", self.data.display());
+            eprintln!("xtask: datovy disk zustava v {} ({})", self.data.display(), self.data_gpt.display());
         } else {
             let _ = std::fs::remove_file(&self.data);
+            let _ = std::fs::remove_file(&self.data_gpt);
         }
-        let _ = std::fs::remove_file(&self.scratch);
+        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign] {
+            let _ = std::fs::remove_file(f);
+        }
     }
 }
 

@@ -455,11 +455,24 @@ bez vlastního limitu. Vyžaduje `WRITE`. Chyby: `INVALID_ARGS` (neznámý
 
 ### `JOB_INFO`
 
-`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (48 B, little endian):
+`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (56 B, little endian):
 pro paměť jádra a pak uživatelskou paměť vždy `used` (strženo z jobu
 včetně potomků), `limit` (vlastní limit) a `available` (kolik ještě jde
 strhnout – nejmenší volné místo přes job a všechny předky; `u64::MAX` =
-nikde limit). Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
+nikde limit), nakonec `id` (číslo jobu, jedinečné do restartu).
+Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
+`WRONG_TYPE`, `BAD_ADDRESS`.
+
+### `JOB_PROCESSES`
+
+`(job, out_ptr, max) -> počet`. Procesy jobu a všech jeho potomků
+(přehled úloh: i proces, který se sám neregistroval). Na `out_ptr` zapíše
+nejvýš `max` (do 4096) záznamů `abi::job::ProcEntry` (64 B, little
+endian): `pid`, `job` (číslo jobu procesu), `cpu_ns` (čas na CPU všech
+vláken, přičítá scheduler při přepnutí), `threads` (živá vlákna), `flags`
+(`proc_flags::FINISHED` = skončil, čeká na úklid), `name` (32 B UTF-8,
+doplněno nulami). Vrátí celkový počet (i nad `max`). Vyžaduje `READ`.
+Chyby: `INVALID_ARGS` (`max` > 4096), `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.
 
 ### `FB_CONTROL`
@@ -527,8 +540,10 @@ framebufferu GOP, práva `READ | WRITE | MAP`. Číst a psát jde jen přes
 mapování (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`, jako buffer syscallu
 `BAD_ADDRESS`). Geometrii a převzetí obrazovky řídí [`FB_CONTROL`](#fb_control).
 
-Objekt se mapuje **write-combining** (x86_64: položka PAT 1 = WC, jádro ji
-nastaví na každém CPU; aarch64: Normal Non-cacheable): zápisy se slučují,
+Objekt se mapuje **write-combining** (fyzický objekt s typem cache
+`WRITE_COMBINING`, stejně jako u [`VMO_CREATE_PHYSICAL`](#vmo_create_physical);
+x86_64: položka PAT 1 = WC, jádro ji nastaví na každém CPU; aarch64: Normal
+Non-cacheable): zápisy se slučují,
 čtení je pomalé. Jádro handle nepošle, když framebuffer překrývá RAM pro
 alokátor, nezačíná na hranici stránky nebo je menší než jeho geometrie
 (varování v logu, konzole jádra ho dál používá). Init ho předá vlastníkovi
@@ -549,18 +564,35 @@ musí ovladač zajistit bariérami (`libos::barrier`). Chyby: `INVALID_ARGS`
 
 ### `VMO_CREATE_PHYSICAL`
 
-`(resource, phys, size) -> handle`. Okno na registry zařízení (MMIO).
-Rozsah nesmí ležet v RAM ani paměti firmwaru (jinak `ACCESS_DENIED`).
-Jedinou výjimkou je paměť firmwaru s tabulkami ACPI (oblasti
-`AcpiReclaimable` a `AcpiNvs` z mapy paměti, jádro je nikdy nedá
-alokátoru): rozsah, který v ní leží **celý**, dostane objekt mapovaný
-s cache (normální paměť jako v přímé mapě jádra) - potřebuje ho služba
-ACPI (`acpid`, viz [ACPI](acpi.md)). Rozsah, který jen zčásti zasahuje do
-RAM, je vždy `ACCESS_DENIED`. Registry zařízení se mapují bez cache; přes `VMO_READ`/`VMO_WRITE` ho číst nejde
-(`NOT_SUPPORTED`, čtení registrů má vedlejší efekty) a jako buffer
-syscallu ho použít nejde (`BAD_ADDRESS`). Omezený prostředek
-(`RESOURCE_CREATE`) smí jen své rozsahy. Chyby: `INVALID_ARGS`
-(nezarovnaná adresa), `ACCESS_DENIED`.
+`(resource, phys, size, cache) -> handle`. Okno na fyzický rozsah mimo RAM
+(registry zařízení, BAR). Rozsah nesmí ležet v RAM ani paměti firmwaru
+(jinak `ACCESS_DENIED`). `cache` (`abi::vm::cache`) určí typ cache všech
+mapování objektu: `UNCACHED` (0, registry), `WRITE_COMBINING` (1, x86_64
+PAT WC, aarch64 Normal Non-cacheable) nebo `CACHED` (2, paměť hostitele
+namapovaná zařízením, např. sdílená paměť virtio-gpu). Přes
+`VMO_READ`/`VMO_WRITE` ho číst nejde (`NOT_SUPPORTED`, čtení registrů má
+vedlejší efekty) a jako buffer syscallu ho použít nejde (`BAD_ADDRESS`).
+Omezený prostředek (`RESOURCE_CREATE`) smí jen své rozsahy. Držitel
+prostředku ho může odvolat (`VMO_REVOKE`). Chyby: `INVALID_ARGS`
+(nezarovnaná adresa, neznámý typ cache), `ACCESS_DENIED`.
+
+
+**Paměť ACPI:** jedinou výjimkou z „mimo RAM“ je paměť firmwaru
+s tabulkami ACPI (oblasti `AcpiReclaimable` a `AcpiNvs` z mapy paměti,
+jádro je nikdy nedá alokátoru): rozsah, který v ní leží **celý**, dostane
+objekt vždy s `CACHED` (stejné atributy jako přímá mapa jádra; `cache` se
+ignoruje) - potřebuje ho služba ACPI (`acpid`, viz [ACPI](acpi.md)).
+Rozsah, který jen zčásti zasahuje do RAM, je vždy `ACCESS_DENIED`.
+
+### `VMO_REVOKE`
+
+`(resource, vmo)`. Odvolá fyzický objekt paměti: zruší jeho mapování ve
+všech procesech (i v těch, kterým byl handle předán) a další `VM_MAP`
+skončí `ACCESS_DENIED`. Přístup přes staré mapování = výjimka stránky.
+Ovladač tak může klientovi půjčit okno do paměti zařízení a bezpečně ho
+vzít zpět (render uzel virtio-gpu po zničení blobu). Prostředek musí
+rozsah objektu povolovat. Chyby: `NOT_SUPPORTED` (není fyzický objekt),
+`ACCESS_DENIED`.
 
 ### `VMO_PHYS_ADDR`
 
@@ -658,7 +690,7 @@ linka zamaskuje a uvolní. Chyby: `INVALID_ARGS` (linka nad 15),
 `ACCESS_DENIED`, `ALREADY_EXISTS`, `NO_RESOURCES`, `NOT_SUPPORTED`
 (platforma bez IOAPIC), `NOT_FOUND` (linka mimo vstupy IOAPIC); na aarch64
 `INVALID_ARGS` i pro číslo mimo SPI, které distributor má. V libos
-`Resource::interrupt_line` a `Resource::interrupt_line_with` (s `flags`).
+`Resource::interrupt_line` a `Resource::interrupt_line_with` (s `flags`). Starší volání bez `flags` (libos posílá 0) se chovají stejně jako dřív.
 
 ### `INTERRUPT_ACK`
 

@@ -30,7 +30,7 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 |---|---|
 | `cargo xtask build` | přeloží jádro, loader a programy userspace, sestaví initfs |
 | `cargo xtask image` | build + obraz disku `target/os-<arch>-<profil>.img` (GPT, ESP FAT32) |
-| `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)) |
+| `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)). Bez `--gpu` GUI kreslí přes framebuffer firmwaru (`--gpu none`, [GUI](gui.md)), aby bylo vidět v okně. Konzoli Windows xtask přepne na UTF-8 |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro ostatní architektury, dokumentace, pak jádro a userspace v QEMU bez okna |
 | `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Test delší než 20 s se v logu označí `[pomaly]` |
 | `cargo xtask test --only napajeni` | jen zvláštní běhy testu napájení (vypnutí tlačítkem přes ACPI, restart; po hlavním běhu se spouští vždy, vypne je `--no-power`), viz [ACPI](acpi.md#testy) |
@@ -42,7 +42,9 @@ Přepínače: `--arch <x86_64|aarch64>` (všechny příkazy, výchozí `x86_64`;
 aarch64 = QEMU `virt`, viz [implementace aarch64](architektura.md#implementace-aarch64-qemu-virt)),
 `--release`, `--headless` (bez okna), `--iommu <typ>` (emulovaná IOMMU:
 x86_64 `intel` (výchozí), `amd`, `none`; aarch64 `smmu` (výchozí), `none`; `none` ověří běh bez překladu DMA - test
-„IOMMU: zarizeni nezapise mimo prideleny DMA“ pak podle očekávání selže), `--gdb` (QEMU čeká na
+„IOMMU: zarizeni nezapise mimo prideleny DMA“ a testy „IOMMU chrani pamet mimo DMA“ sady `disky` pak podle očekávání selžou),
+`--data-disk <virtio|nvme|nvme4k|ahci>` (řadič datového disku, výchozí `virtio`; `nvme4k` = NVMe se sektorem 4 KiB; na NVMe a AHCI dostane disk
+GPT s naším oddílem, viz [Disky](disky.md)), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
 

@@ -4,10 +4,11 @@
 //! Druhy objektu:
 //! - bezny: stranky RAM alokovane a vynulovane hned pri vytvoreni,
 //! - souvisly: fyzicky souvisla RAM pro DMA (ovladace zjisti fyzickou adresu),
-//! - fyzicky: okno na registry zarizeni (MMIO); stranky nepatri alokatoru
-//!   a mapuji se bez cache,
-//! - framebuffer: fyzicky rozsah obrazovky z firmwaru; jako fyzicky, ale
-//!   mapuje se write-combining.
+//! - fyzicky: okno na fyzicky rozsah mimo RAM (registry zarizeni, BAR,
+//!   framebuffer z firmwaru); stranky nepatri alokatoru. Typ cache (bez
+//!   cache, WC, s cache) urci drzitel prostredku pri vytvoreni (framebuffer
+//!   = WC) a kazde mapovani ho zdedi. Drzitel prostredku ho muze odvolat
+//!   (`revoke`): mapovani ve vsech procesech zmizi a dalsi mapovani selze.
 //!
 //! Objekt nemeni velikost. TODO: lazy alokace pri prvnim pristupu,
 //! copy-on-write klony.
@@ -18,7 +19,9 @@
 //! je dvouurovnove pole (bloky po 64 KiB = 32 MiB pameti objektu), takze
 //! velikost objektu neomezuje nejvetsi souvisly blok heapu.
 
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use super::job::{Charge, Job, Pool, object_cost};
 use super::{Error, KernelObject, ObjectCore, ObjectType, Rights, Signals};
@@ -26,6 +29,8 @@ use crate::arch;
 use crate::arch::iommu::IommuDomain;
 use crate::mm::chunked::ChunkedVec;
 use crate::mm::{PhysAddr, phys};
+use crate::object::process::Process;
+use crate::sync::SpinLock;
 
 const PAGE: u64 = crate::arch::paging::PAGE_SIZE;
 
@@ -57,15 +62,16 @@ enum Kind {
     Pages,
     /// Jeden souvisly blok z alokatoru (2^order stranek).
     Contiguous { order: usize },
-    /// Fyzicky rozsah mimo RAM (registry zarizeni).
-    Physical,
-    /// Fyzicky rozsah framebufferu (mapuje se write-combining).
-    Framebuffer,
-    /// Pamet firmwaru s tabulkami ACPI (AcpiReclaimable, AcpiNvs): RAM,
-    /// kterou jadro nikdy nedava alokatoru. Mapuje se s cache (normalni
-    /// pamet - stejne atributy jako v prime mape jadra), stranky se pri
-    /// zruseni nevraci.
-    Firmware,
+    /// Fyzicky rozsah mimo RAM (registry zarizeni, BAR) s typem cache
+    /// (`abi::vm::cache`).
+    Physical { cache: u64 },
+}
+
+/// Odvolani fyzickeho objektu: priznak a procesy, ktere ho mapuji.
+struct Revocation {
+    revoked: AtomicBool,
+    /// Procesy s mapovanim objektu (slabe odkazy, mrtve se uklidi).
+    mappers: SpinLock<Vec<Weak<Process>>>,
 }
 
 pub struct MemoryObject {
@@ -80,6 +86,8 @@ pub struct MemoryObject {
     /// a jadro pri pristupu pres primou mapu udrzuje cache (na nekoherentni
     /// platforme; na koherentni jsou `arch::dma_sync_*` prazdne).
     for_dma: bool,
+    /// Jen fyzicke objekty: odvolani (`revoke`).
+    revocation: Option<Revocation>,
     /// Strzeni z rozpoctu jadra a uzivatelske pameti jobu.
     _charges: [Charge; 2],
 }
@@ -100,6 +108,7 @@ impl MemoryObject {
             kind: Kind::Pages,
             dma: None,
             for_dma: false,
+            revocation: None,
             _charges: charges,
         };
         for _ in 0..count {
@@ -157,39 +166,48 @@ impl MemoryObject {
             kind: Kind::Contiguous { order },
             dma: None,
             for_dma: false,
+            revocation: None,
             _charges: charges,
         }))
     }
 
-    /// Okno na fyzicky rozsah registru zarizeni. Volajici ruci (pres
-    /// `platform::is_device_memory`), ze rozsah nelezi v RAM.
+    /// Okno na fyzicky rozsah mimo RAM s typem cache `cache`
+    /// (`abi::vm::cache`). Volajici ruci (pres `platform::is_device_memory`),
+    /// ze rozsah nelezi v RAM.
     pub fn new_physical(
         phys_start: u64,
         size: u64,
+        cache: u64,
         job: Option<&Arc<Job>>,
     ) -> Result<Arc<Self>, Error> {
-        Self::physical(phys_start, size, job, Kind::Physical)
+        Self::physical(phys_start, size, job, cache)
     }
 
-    /// Okno na framebuffer z firmwaru (mapuje se write-combining). Volajici
-    /// ruci, ze rozsah nepatri alokatoru RAM.
+    /// Okno na framebuffer z firmwaru: fyzicky objekt s typem cache
+    /// `WRITE_COMBINING`. Volajici ruci, ze rozsah nepatri alokatoru RAM.
     pub fn new_framebuffer(phys_start: u64, size: u64) -> Result<Arc<Self>, Error> {
-        Self::physical(phys_start, size, None, Kind::Framebuffer)
+        Self::physical(phys_start, size, None, abi::vm::cache::WRITE_COMBINING)
     }
 
-    /// Okno na pamet firmwaru s tabulkami ACPI (mapuje se s cache). Volajici
-    /// ruci (pres `mm::is_acpi_memory`), ze rozsah lezi cely v pameti ACPI.
+    /// Okno na pamet firmwaru s tabulkami ACPI (AcpiReclaimable, AcpiNvs):
+    /// RAM, kterou jadro nikdy nedava alokatoru. Vzdy s cache (stejne
+    /// atributy jako v prime mape jadra; jiny typ cache by na ARM znamenal
+    /// nesouhlasne atributy jedne stranky). Volajici ruci (pres
+    /// `mm::is_acpi_memory`), ze rozsah lezi cely v pameti ACPI.
     pub fn new_firmware(phys_start: u64, size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
-        Self::physical(phys_start, size, job, Kind::Firmware)
+        Self::physical(phys_start, size, job, abi::vm::cache::CACHED)
     }
 
     fn physical(
         phys_start: u64,
         size: u64,
         job: Option<&Arc<Job>>,
-        kind: Kind,
+        cache: u64,
     ) -> Result<Arc<Self>, Error> {
         if size == 0 || !phys_start.is_multiple_of(PAGE) || size > abi::vm::VMO_MAX_SIZE {
+            return Err(Error::InvalidArgs);
+        }
+        if cache > abi::vm::cache::CACHED {
             return Err(Error::InvalidArgs);
         }
         let count = size.div_ceil(PAGE);
@@ -203,9 +221,13 @@ impl MemoryObject {
             core: ObjectCore::new(Signals::NONE),
             size: count * PAGE,
             pages,
-            kind,
+            kind: Kind::Physical { cache },
             dma: None,
             for_dma: false,
+            revocation: Some(Revocation {
+                revoked: AtomicBool::new(false),
+                mappers: SpinLock::new(Vec::new()),
+            }),
             _charges: charges,
         }))
     }
@@ -223,20 +245,58 @@ impl MemoryObject {
         self.size
     }
 
-    /// Mapovat bez cache (registry zarizeni)?
-    pub fn is_uncached(&self) -> bool {
-        self.kind == Kind::Physical
+    /// Fyzicky rozsah mimo RAM (neni v prime mape, jadro do nej nepristupuje)?
+    pub fn is_physical(&self) -> bool {
+        matches!(self.kind, Kind::Physical { .. })
     }
 
-    /// Mapovat write-combining (framebuffer)?
-    pub fn is_write_combine(&self) -> bool {
-        self.kind == Kind::Framebuffer
+    /// Priznaky typu cache pro mapovani (`READ` = zadne, bezna pamet s cache).
+    pub fn cache_flags(&self) -> arch::paging::MapFlags {
+        use arch::paging::MapFlags;
+        match self.kind {
+            Kind::Physical { cache: abi::vm::cache::UNCACHED } => MapFlags::UNCACHED,
+            Kind::Physical { cache: abi::vm::cache::WRITE_COMBINING } => MapFlags::WRITE_COMBINE,
+            _ => MapFlags::READ,
+        }
     }
 
-    /// Pamet mimo alokator RAM (registry, framebuffer): neni v prime mape
-    /// pro syscally a nejde pouzit jako buffer syscallu.
-    pub fn is_device(&self) -> bool {
-        matches!(self.kind, Kind::Physical | Kind::Framebuffer | Kind::Firmware)
+    /// Fyzicky rozsah objektu (jen fyzicke objekty, pro kontrolu prostredku).
+    pub fn physical_range(&self) -> Option<(u64, u64)> {
+        self.is_physical().then(|| (self.pages[0].as_u64(), self.size))
+    }
+
+    /// Je objekt odvolany?
+    pub fn is_revoked(&self) -> bool {
+        self.revocation.as_ref().is_some_and(|r| r.revoked.load(Ordering::Acquire))
+    }
+
+    /// Zaznamena proces, ktery objekt prave namapoval. Odvolany objekt =
+    /// `AccessDenied` (volajici mapovani vrati). Priznak a seznam jsou pod
+    /// jednim zamkem: mapovani soubezne s `revoke` bud revoke uvidi, nebo
+    /// samo uvidi priznak.
+    pub fn register_mapper(&self, p: &Arc<Process>) -> Result<(), Error> {
+        let Some(r) = &self.revocation else { return Ok(()) };
+        let mut m = r.mappers.lock();
+        if r.revoked.load(Ordering::Acquire) {
+            return Err(Error::AccessDenied);
+        }
+        if m.len() == m.capacity() {
+            m.retain(|w| w.strong_count() > 0);
+        }
+        if !m.iter().any(|w| core::ptr::eq(w.as_ptr(), Arc::as_ptr(p))) {
+            m.try_reserve(1).map_err(|_| Error::NoMemory)?;
+            m.push(Arc::downgrade(p));
+        }
+        Ok(())
+    }
+
+    /// Odvola objekt: dalsi mapovani selze. Vraci procesy, ve kterych je
+    /// objekt namapovany (volajici jim mapovani zrusi). Jen fyzicke objekty.
+    pub fn revoke(&self) -> Result<Vec<Arc<Process>>, Error> {
+        let r = self.revocation.as_ref().ok_or(Error::NotSupported)?;
+        let mut m = r.mappers.lock();
+        r.revoked.store(true, Ordering::Release);
+        Ok(core::mem::take(&mut *m).into_iter().filter_map(|w| w.upgrade()).collect())
     }
 
     /// Pamet pro DMA (mapuje se s `MapFlags::DMA`)?
@@ -252,7 +312,7 @@ impl MemoryObject {
     /// Registry zarizeni nejsou v prime mape a cteni by mohlo mit vedlejsi
     /// efekty: jde jen mapovat, ne cist a zapisovat pres jadro.
     fn check_access(&self) -> Result<(), Error> {
-        if self.is_device() {
+        if self.is_physical() {
             Err(Error::NotSupported)
         } else {
             Ok(())
@@ -337,7 +397,7 @@ impl Drop for MemoryObject {
                 }
             }
             Kind::Contiguous { order } => phys::free_pages(self.pages[0], order),
-            Kind::Physical | Kind::Framebuffer | Kind::Firmware => {}
+            Kind::Physical { .. } => {}
         }
     }
 }

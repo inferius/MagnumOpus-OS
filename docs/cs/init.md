@@ -43,7 +43,12 @@ výpadku proudu pro testy FS).
    [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd)) a `revocd`
    (odvolání certifikátů, viz [TLS a HTTP](tls-http.md#odvolání-certifikátů)),
 6. všechny tyto procesy předá supervisoru k hlídání,
-7. v běžném běhu GUI (`compd`, okna `gui-term` a `gui-demo`), bez GUI
+7. `taskd` (přehled úloh, viz [Architektura](architektura.md#přehled-úloh-odsouhlaseno)):
+   init drží jeho řídicí kanál a jako jediný razí kanály klientů
+   a producentů s identitou; fsd dostane kanál producenta, supervisor
+   hlásí stav služeb po každém kole (nejdéle 2 s), aplikace s oknem se
+   hlásí i se svým jobem,
+8. v běžném běhu GUI (`compd`, okna `gui-term` a `gui-demo`), bez GUI
    záložní konzoli (viz [Terminál](#terminál)).
 
 Konfiguraci `fsd` (první zpráva řídicího kanálu) posílá init vždy:

@@ -200,7 +200,7 @@ fn send_bootstrap(
         let buses = ecam.bus_end as u64 - ecam.bus_start as u64 + 1;
         // Okno pocina na sbernici bus_start; 1 MiB konfigurace na sbernici.
         let phys = ecam.phys + ecam.bus_start as u64 * (1 << 20);
-        let vmo = MemoryObject::new_physical(phys, buses << 20, None)?;
+        let vmo = MemoryObject::new_physical(phys, buses << 20, abi::vm::cache::UNCACHED, None)?;
         let arg = ecam.bus_start as u32 | (ecam.bus_end as u32) << 8 | (ecam.segment as u32) << 16;
         entries.push((
             bootstrap::kind::PCI_ECAM,

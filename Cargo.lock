@@ -79,6 +79,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahci"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
+ "libos",
+ "pci",
+ "virtio",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -186,6 +196,7 @@ dependencies = [
 name = "blockproto"
 version = "0.1.0"
 dependencies = [
+ "diskguard",
  "libos",
 ]
 
@@ -338,6 +349,7 @@ dependencies = [
  "gfx",
  "guiproto",
  "inputproto",
+ "vkcomp",
 ]
 
 [[package]]
@@ -349,6 +361,8 @@ dependencies = [
  "guiproto",
  "inputproto",
  "libos",
+ "venus",
+ "vkcomp",
 ]
 
 [[package]]
@@ -404,15 +418,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "crc32fast"
-version = "1.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f97d3416d5337d15c4b0d78c8c91df922ca143f57ec20e2d1c188333047ef04"
-dependencies = [
- "cfg-if",
 ]
 
 [[package]]
@@ -546,6 +551,7 @@ name = "devmgr"
 version = "0.1.0"
 dependencies = [
  "libos",
+ "nic",
  "pci",
  "virtio",
 ]
@@ -561,6 +567,10 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
+
+[[package]]
+name = "diskguard"
+version = "0.1.0"
 
 [[package]]
 name = "dns"
@@ -587,6 +597,14 @@ dependencies = [
  "netproto",
  "tls",
  "web",
+]
+
+[[package]]
+name = "e1000e"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "nic",
 ]
 
 [[package]]
@@ -765,6 +783,7 @@ dependencies = [
  "fs",
  "fsproto",
  "libos",
+ "taskproto",
 ]
 
 [[package]]
@@ -885,6 +904,14 @@ checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
 dependencies = [
  "opaque-debug",
  "polyval",
+]
+
+[[package]]
+name = "gpuproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
 ]
 
 [[package]]
@@ -1127,6 +1154,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "igc"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "nic",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1153,6 +1188,7 @@ dependencies = [
  "shlang",
  "spin 0.12.3",
  "svcclient",
+ "taskproto",
  "term",
 ]
 
@@ -1363,6 +1399,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nic"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "netproto",
+ "pci",
+]
+
+[[package]]
 name = "noto-sans-mono-bitmap"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1429,6 +1474,16 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "nvme"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
+ "libos",
+ "pci",
+ "virtio",
 ]
 
 [[package]]
@@ -1689,6 +1744,14 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "r8169"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "nic",
+]
 
 [[package]]
 name = "rand"
@@ -2076,6 +2139,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spirv"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2138,6 +2208,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "taskcore"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "taskproto",
+]
+
+[[package]]
+name = "taskd"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "taskcore",
+ "taskproto",
+]
+
+[[package]]
 name = "taskproto"
 version = "0.1.0"
 dependencies = [
@@ -2176,6 +2263,8 @@ dependencies = [
  "noto-sans-mono-bitmap",
  "shlang",
  "spin 0.12.3",
+ "taskcore",
+ "taskproto",
 ]
 
 [[package]]
@@ -2521,6 +2610,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "venus"
+version = "0.1.0"
+dependencies = [
+ "gpuproto",
+ "libos",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2552,6 +2649,7 @@ dependencies = [
 name = "virtio-gpu"
 version = "0.1.0"
 dependencies = [
+ "gpuproto",
  "guiproto",
  "libos",
  "pci",
@@ -2586,6 +2684,28 @@ dependencies = [
  "libos",
  "pci",
  "virtio",
+]
+
+[[package]]
+name = "vk-probe"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "venus",
+ "vkcomp",
+]
+
+[[package]]
+name = "vkcomp"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "spirv",
+ "venus",
 ]
 
 [[package]]
@@ -2851,7 +2971,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "bytes",
- "crc32fast",
+ "diskguard",
  "dns",
  "fatfs",
  "fs",

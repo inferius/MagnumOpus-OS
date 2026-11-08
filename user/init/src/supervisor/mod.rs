@@ -35,7 +35,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use libos::{Handle, Port, Signals, Startup, println};
+use libos::{Handle, Port, Signals, Startup, println, time};
 
 // DepMode a Kept pouzivaji adaptery sluzeb (zapojuji vlakna sluzeb).
 #[allow(unused_imports)]
@@ -248,7 +248,9 @@ impl Supervisor {
     pub fn run(&mut self, startup: &Startup) -> ! {
         println!("init: supervisor bezi");
         loop {
-            self.step(startup, None);
+            // Kolo nejdyl 2 s: prehled uloh (stav sluzeb, ikona v liste).
+            self.step(startup, Some(time::deadline_after(core::time::Duration::from_secs(2))));
+            crate::tasks::sync(self);
         }
     }
 

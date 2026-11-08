@@ -127,7 +127,7 @@ fn lines(s: &Startup) -> TestResult {
     check_eq!(child.restrict(&[irq_lines(39, 2)], 1, 0).err(), Some(Error::AccessDenied), "potomek s linkou navic");
     check_eq!(child.interrupt_line(44).err(), Some(Error::AccessDenied), "linka mimo prostredek");
     check_eq!(
-        libos::sys::interrupt_create_line(root.handle().raw(), 9, 1 << 7).err(),
+        libos::sys::interrupt_create_line_flags(root.handle().raw(), 9, 1 << 7).err(),
         Some(Error::InvalidArgs),
         "neznamy priznak linky"
     );

@@ -430,6 +430,7 @@ Každý příkaz má krátké jméno a plné jméno `sloveso-podstatné` (alias)
 | `now`, `sleep` | `time-now`, `time-sleep` | |
 | `undo`, `preview` | `command-undo`, `command-preview` | viz [Soubory](#soubory-koncept-v-klonu-undo-náhled-a-zámek) |
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | úlohy na pozadí |
+| `tasks` | `task-list` | přehled úloh systému (`taskd`): tabulka, `tasks cancel/pause/resume/log <id>`; viz [Přehled úloh](architektura.md#přehled-úloh-odsouhlaseno) |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
 | `shutdown`, `reboot` | `system-shutdown`, `system-reboot` | čisté vypnutí / restart přes init a ACPI; zeptá se, `-y` bez dotazu (viz [ACPI](acpi.md#příkazy-shellu)) |
 
@@ -827,6 +828,9 @@ třídy) je navazující návrh.
   šedá nápověda z historie (šipka doprava nebo End ji přijme); historie
   šipkami; Ctrl-W slovo, Ctrl-U řádek, Ctrl-F převod B/C; Tab doplňování
   (jedna možnost se doplní rovnou, víc = nabídka).
+- **Panel úloh:** Ctrl-T otevře seznam úloh (šipky, `c` zrušit, `p`
+  pozastavit, `r` pokračovat, Esc zavřít); stavový řádek ukazuje počet
+  běžících úloh a upozornění na dokončení nebo chybu.
 - **Bloky:** každý příkaz s barevnou značkou stavu (běží, hotovo, chyba),
   dobou běhu a točícím se znakem u běžícího. Ctrl-L sbalí všechny,
   mezera sbalí vybraný.

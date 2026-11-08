@@ -112,7 +112,31 @@ impl Termd {
         }
         self.park(session, tag, keep);
         self.sessions.push(Sess { id: session, chan });
+        // Kanaly prehledu uloh razi init: pozadat, odpoved prijde pozdeji
+        // (`registry_msg`), relace mezitim bezi bez nich.
+        if let Some(reg) = &self.registry {
+            let _ = reg.write(&RegMsg::TasksReq { session }.encode(), Vec::new());
+        }
         Ok(())
+    }
+
+    /// Zpravy registru po startu: kanaly uloh pro relace. `false` =
+    /// registr zavrel kanal.
+    fn registry_msg(&mut self) -> bool {
+        let Some(reg) = &self.registry else { return true };
+        loop {
+            match reg.try_read() {
+                Ok(m) => {
+                    if let Ok(RegMsg::Tasks { session }) = RegMsg::decode(&m.data)
+                        && let Some(s) = self.sessions.iter().find(|s| s.id == session)
+                    {
+                        let _ = s.chan.write(&SessMsg::Tasks.encode(), m.handles);
+                    }
+                }
+                Err(Error::ShouldWait) => return true,
+                Err(_) => return false,
+            }
+        }
     }
 
     /// Po startu: osirele relace z registru prevzit.
@@ -201,12 +225,18 @@ fn main(mut startup: Startup) -> i64 {
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
         let mut items: Vec<(&Handle, Signals)> = alloc::vec![(t.window.handle(), mask)];
         items.extend(t.sessions.iter().map(|s| (s.chan.handle(), mask)));
+        if let Some(r) = &t.registry {
+            items.push((r.handle(), mask));
+        }
         match libos::wait_many(&items, None) {
             Ok(_) => {}
             Err(e) => {
                 println!("termd: chyba cekani: {e}");
                 return 1;
             }
+        }
+        if !t.registry_msg() {
+            t.registry = None;
         }
         let mut i = 0;
         while i < t.sessions.len() {

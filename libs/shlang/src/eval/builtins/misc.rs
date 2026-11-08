@@ -68,6 +68,40 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                 Ok(Value::List(out))
             }
         },
+        "tasks" => {
+            use crate::host::TasksOp;
+            let action = match a.pos(0) {
+                None => None,
+                Some(_) => Some(str_arg(&a, 0, "akce")?),
+            };
+            let id = || -> R<u64> {
+                int_arg(&a, 1, "id")?.map(|v| v as u64).ok_or_else(|| a.err(code::ARGS, "tasks: chybi cislo ulohy"))
+            };
+            let op = match action.as_deref() {
+                None | Some("list") => TasksOp::List,
+                Some("cancel") => TasksOp::Cancel(id()?),
+                Some("pause") => TasksOp::Pause(id()?),
+                Some("resume") => TasksOp::Resume(id()?),
+                Some("log") => {
+                    let n = match a.named("lines") {
+                        Some(Value::Int(n)) => (*n).clamp(1, 1000) as u32,
+                        _ => 20,
+                    };
+                    TasksOp::Log(id()?, n)
+                }
+                Some(other) => {
+                    return Err(Flow::Err(
+                        ShError::new(code::ARGS, alloc::format!("tasks: neznama akce '{other}'"))
+                            .at(a.span)
+                            .hint("tasks, tasks cancel|pause|resume|log <id>"),
+                    ));
+                }
+            };
+            match host.tasks(op) {
+                Some(r) => r.map_err(|e| Flow::Err(e.at(a.span))),
+                None => Err(Flow::Err(ShError::sys(abi::Error::NotSupported, "prehled uloh tu neni (sluzba taskd nebezi)").at(a.span))),
+            }
+        }
         "cancel" => {
             let v = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "cancel: chybi uloha"))?;
             it.cancel_value(host, &v, a.span)

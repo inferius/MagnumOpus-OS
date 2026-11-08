@@ -67,6 +67,10 @@ pub struct Terminals {
     cleaned: bool,
 }
 
+/// Identita uzivatele terminalu v prehledu uloh (system je zatim pro
+/// jednoho uzivatele).
+const USER: &str = "uzivatel";
+
 /// Kde lezi klony bokem relaci shellu (viz `shsess`).
 const ASIDE_DIR: &str = "/tmp/.aside";
 
@@ -249,6 +253,16 @@ impl Terminals {
             match chan.try_read() {
                 Ok(m) => {
                     let Ok(msg) = RegMsg::decode(&m.data) else { continue };
+                    // Kanaly prehledu uloh pro relaci: razi je init (identita
+                    // uzivatele, jen vlastni ulohy).
+                    if let RegMsg::TasksReq { session } = msg {
+                        let hs = match (crate::tasks::producer(USER), crate::tasks::client(USER, false, true)) {
+                            (Ok(p), Ok(cl)) => alloc::vec![p.into_handle(), cl.into_handle()],
+                            _ => Vec::new(),
+                        };
+                        let _ = chan.write(&RegMsg::Tasks { session }.encode(), hs);
+                        continue;
+                    }
                     if let Some((reply, hs)) = c.store.handle(msg, m.handles) {
                         let _ = chan.write(&reply.encode(), hs);
                     }

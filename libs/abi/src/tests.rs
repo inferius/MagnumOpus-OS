@@ -110,9 +110,8 @@ fn every_syscall_is_documented() {
         "JOB_INFO",
         "CLOCK_ADJUST",
         "FB_CONTROL",
-        // 47 vyhrazeno pro VMO_REVOKE (vetev Venus), 48 pro JOB_PROCESSES (6b).
-        "",
-        "",
+        "VMO_REVOKE",
+        "JOB_PROCESSES",
         "SYSTEM_POWER",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
@@ -141,8 +140,16 @@ fn job_info_roundtrip() {
             limit: 5,
             available: 1,
         },
+        id: 77,
     };
     assert_eq!(JobInfo::decode(&info.encode()), info);
+    use crate::job::ProcEntry;
+    let e = ProcEntry { pid: 9, job: 77, cpu_ns: 123, threads: 2, flags: 1, name: ProcEntry::name_bytes("fsd") };
+    assert_eq!(ProcEntry::decode(&e.encode()), Some(e));
+    assert_eq!(e.name(), "fsd");
+    // Oriznuti na hranici znaku (vicebajtove znaky).
+    let long = ProcEntry::name_bytes(&"ž".repeat(20));
+    assert!(core::str::from_utf8(&long[..long.iter().position(|&c| c == 0).unwrap_or(32)]).is_ok());
 }
 
 #[test]

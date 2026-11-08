@@ -36,7 +36,8 @@ const fn level(size: PageSize) -> u32 {
 }
 
 /// Zapne funkce CPU, na kterych strankovani jadra stavi: ochranu zapisu
-/// i pro ring 0 (CR0.WP), globalni stranky (CR4.PGE) a NX (EFER.NXE).
+/// i pro ring 0 (CR0.WP), globalni stranky (CR4.PGE), NX (EFER.NXE) a PAT
+/// s polozkou WC.
 ///
 /// # Safety
 ///
@@ -93,6 +94,7 @@ fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
         bits |= GLOBAL;
     }
     if flags.contains(MapFlags::UNCACHED) {
+        // PAT index 3 (PCD|PWT) = UC.
         bits |= CACHE_DISABLE | WRITE_THROUGH;
     } else if flags.contains(MapFlags::WRITE_COMBINE) {
         // PAT polozka 1 = WC (viz `init_cpu`); bit PAT (7 / 12) je 0.

@@ -3,6 +3,8 @@
 První část milníku 6 („síť“). Hotové jsou tyto části:
 
 - ovladač karty **virtio-net** v userspace,
+- ovladače karet **Intel e1000e, igc a Realtek r8169** (viz
+  [Síťové karty](sitove-karty.md)),
 - služba sítě **`netd`** se stackem TCP/IP (ARP, IPv4, ICMP, UDP, TCP),
   klientem DHCP a resolverem DNS,
 - protokol **`netproto`** s přístupem přes capability a omezením cílů,
@@ -102,12 +104,24 @@ Synchronní režim disku (`submit` + `take_used`) se nezměnil.
 
 | Typ | Směr | Obsah |
 |---|---|---|
-| `INFO` (1) | ovladač → netd, první zpráva | MAC (6 B), MTU u16, příznaky u8 (bit 0 = linka připojena) |
+| `INFO` (1) | ovladač → netd, první zpráva | MAC (6 B), MTU u16, příznaky u8, rychlost u32 (Mb/s, 0 = neznámá) |
 | `FRAME` (2) | oba směry | rámec Ethernetu bez FCS (14 až 1514 B) |
-| `LINK` (3) | ovladač → netd | příznaky u8 při změně stavu linky |
+| `LINK` (3) | ovladač → netd | příznaky u8, rychlost u32 při změně stavu linky |
 
-Rámec, který se nevejde do fronty druhé strany, se zahodí jako na
-skutečné síti. Spolehlivost řeší TCP.
+Příznaky: bit 0 = linka připojena, bit 1 = plný duplex. Rámec, který se
+nevejde do fronty druhé strany, se zahodí jako na skutečné síti.
+Spolehlivost řeší TCP. Když se linka znovu připojí (`LINK` s bitem 0),
+`netd` začne DHCP znovu: za kabelem může být jiná síť.
+
+> **Změna proti první verzi:** `INFO` a `LINK` neměly rychlost a duplex
+> a `netd` po znovupřipojení linky DHCP neopakoval. **Proč:** ovladače
+> skutečných karet ([síťové karty](sitove-karty.md)) linku hlásí a kabel
+> se dá přepojit. Kratší zprávy (`INFO` 10 B, `LINK` 2 B) se čtou dál.
+> Offloady protokol záměrně nenese: smoltcp ověřuje součty pro celé
+> zařízení, ne pro jednotlivý rámec.
+
+Ovladače karet Intel e1000e a igc a Realtek r8169 mluví s `netd` stejným
+protokolem, viz [Síťové karty](sitove-karty.md).
 
 ⚠️ **DMA bez IOMMU:** ovladač dostává buffery jen z paměti domény
 zařízení. Na stroji bez IOMMU ale karta přes DMA zapíše **kamkoli do

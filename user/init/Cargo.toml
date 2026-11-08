@@ -25,3 +25,4 @@ shlang = { path = "../../libs/shlang" }
 powerproto = { path = "../../libs/powerproto" }
 abi = { workspace = true }
 term = { path = "../../libs/term" }
+taskproto = { path = "../../libs/taskproto" }

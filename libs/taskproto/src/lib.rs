@@ -1,5 +1,5 @@
-//! Protokol sluzby uloh `taskd` (verze 1, NAVRH k odsouhlaseni vlaknem
-//! shellu 6b, ktere taskd implementuje).
+//! Protokol sluzby uloh `taskd` (verze 1; sluzba v `user/taskd`, jadro
+//! v `libs/taskd`).
 //!
 //! Vsechno, co bezi na pozadi, je v jednom seznamu (viz
 //! `docs/cs/architektura.md`, kapitola "Prehled uloh"). Dve strany:
@@ -301,6 +301,7 @@ pub mod op {
     pub const REGISTER: u32 = 20;
     pub const UPDATE: u32 = 21;
     pub const FINISH: u32 = 22;
+    pub const LOG_LINE: u32 = 23;
     // taskd -> klient / producent.
     pub const SNAPSHOT: u32 = 100;
     pub const EVENT: u32 = 101;
@@ -356,6 +357,9 @@ pub enum Produce {
     Register { req: u32, parent: u64, name: String, origin: Origin, who: String, agent: bool, job: Option<u64>, attach: Option<(u64, u64)>, actions: u32 },
     Update { id: u64, state: State, progress: Option<u8>, eta_ms: Option<u64> },
     Finish { id: u64, state: State },
+    /// Radek vystupu ulohy (taskd drzi poslednich [`MAX_LOG_LINES`] pro
+    /// `Request::Log`).
+    LogLine { id: u64, line: String },
 }
 
 /// Pozadavek taskd na producenta.
@@ -560,6 +564,10 @@ impl Produce {
                 w.u64(*id);
                 state.encode(&mut w);
             }
+            Produce::LogLine { id, line } => {
+                w = Writer::op(op::LOG_LINE);
+                w.u64(*id).str(line);
+            }
         }
         w.finish()
     }
@@ -593,6 +601,7 @@ impl Produce {
                 Produce::Update { id, state, progress, eta_ms: read_opt_u64(&mut r)? }
             }
             op::FINISH => Produce::Finish { id: r.u64()?, state: State::decode(&mut r)? },
+            op::LOG_LINE => Produce::LogLine { id: r.u64()?, line: r.str()? },
             _ => return Err(Error::NotSupported),
         };
         finish(&r)?;
