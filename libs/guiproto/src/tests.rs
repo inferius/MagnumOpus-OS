@@ -367,6 +367,41 @@ fn normalize_rects_clips_and_merges() {
     assert_eq!(r, vec![Rect::new(0, 0, 100, 100)]);
 }
 
+#[test]
+fn display_modes_roundtrip() {
+    use crate::modes::{self, Connector, Mode, kind, mode_flags};
+    let mut dp = Connector::fixed(1, kind::DISPLAYPORT, 1920, 1080);
+    dp.monitor = "2243W".into();
+    dp.size_mm = (477, 268);
+    dp.modes.push(Mode { w: 1280, h: 720, refresh_mhz: 50_000, clock_khz: 74_250, flags: 0 });
+    let off = Connector { output: 0, kind: kind::EDP, connected: false, monitor: String::new(), size_mm: (0, 0), modes: vec![] };
+    for m in [Request::Connectors, Request::SetMode { output: 1, w: 1280, h: 720, refresh_mhz: 0 }] {
+        assert_eq!(Request::decode(&m.encode()), Ok(m));
+    }
+    for m in [
+        Reply::Connectors { connectors: vec![off.clone(), dp.clone()] },
+        Reply::ModeSet { output: 1, w: 1280, h: 720, refresh_mhz: 50_000 },
+        Reply::Hotplug { output: 1 },
+        Reply::Reset,
+    ] {
+        assert_eq!(Reply::decode(&m.encode()), Ok(m));
+    }
+    assert!(Reply::Hotplug { output: 0 }.is_event());
+    assert!(!Reply::Attached { output: 0 }.is_event());
+    // Vyber vystupu: odpojeny panel se preskoci; vyber rezimu.
+    let cs = vec![off, dp];
+    let p = modes::primary(&cs).unwrap();
+    assert_eq!(p.output, 1);
+    assert_eq!(p.current().unwrap().w, 1920);
+    assert!(p.preferred().unwrap().flags & mode_flags::PREFERRED != 0);
+    assert_eq!(modes::find_mode(p, 1280, 720, 60_000).unwrap().refresh_mhz, 50_000);
+    assert!(modes::find_mode(p, 800, 600, 0).is_none());
+    // Pocet konektoru pres limit = chyba (nevyrabet obri alokace).
+    let mut w = crate::Writer::op(display::op::CONNECTORS_REPLY);
+    w.u32(1000);
+    assert!(Reply::decode(&w.finish()).is_err());
+}
+
 const MANIFEST: &str = r#"
 [app]
 id = "org.magnumopus.demo"

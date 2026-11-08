@@ -234,6 +234,11 @@ fn handle_display(gpu: &mut Gpu, req: Request, handles: Vec<libos::Handle>, op: 
         }
         // Znacka pro novou instanci kompozitoru (zahodi odpovedi stare).
         Request::Sync { token } => Reply::Synced { token },
+        // Rezim urcuje hostitel (xres/yres); zmena za behu zatim ne.
+        ref r @ (Request::Connectors | Request::SetMode { .. }) => {
+            let sizes: Vec<(u32, u32)> = gpu.outputs().iter().map(|o| (o.w, o.h)).collect();
+            guiproto::modes::fixed_reply(r, &sizes, guiproto::modes::kind::VIRTUAL).unwrap_or_else(|| err(Error::NotSupported))
+        }
         Request::Present { seq, output, rects } => {
             let rects: Vec<Rect> = if rects.is_empty() { vec![Rect::new(0, 0, u32::MAX, u32::MAX)] } else { rects };
             match gpu.present(output, &rects) {

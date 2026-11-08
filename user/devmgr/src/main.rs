@@ -11,7 +11,8 @@
 //! zpravu s koncem kanalu ke klientovi ovladace: `block` (disk, protokol
 //! `blockproto`), `input` (klavesnice, mys, protokol `inputproto::device`),
 //! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody) nebo
-//! `display` (grafika, `guiproto::display`), a `done`, az jsou nalezena zarizeni pri startu
+//! `display` (grafika, `guiproto::display`), `display-native` (nativni
+//! ovladac displeje, viz `native.rs`), a `done`, az jsou nalezena zarizeni pri startu
 //! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
 //! Kdyz ceka na ovladac disku dlouho (reset radice, roztoceni disku), posila
 //! initu kazdych 5 s `busy`, aby init start zarizeni nevzdal.
@@ -33,6 +34,7 @@ use libos::{Channel, Process, Signals, Startup, println};
 use pci::{Ecam, Function};
 
 mod nic;
+mod native;
 mod usb;
 
 libos::entry!(main);
@@ -208,6 +210,10 @@ fn main(startup: Startup) -> i64 {
         }
         // Sitove karty az po virtio: prvni karta pro netd zustava virtio-net.
         nic::start_all(&functions, &fs, resource, vmo, &ecam, (*arg >> 16) as u16, &startup.bootstrap, &mut drivers);
+        // Nativni ovladace displeje (nastaveni obrazu nad framebufferem firmwaru).
+        for f in &functions {
+            native::start(&fs, resource, vmo, &ecam, (*arg >> 16) as u16, f, &startup.bootstrap, &mut drivers);
+        }
         for f in functions
             .iter()
             .filter(|f| (f.class, f.subclass, f.prog_if) == usb::XHCI_CLASS)
@@ -377,7 +383,7 @@ const XHCI_DMA_MAX: u64 = 4 * 1024 * 1024;
 
 /// Prostredky jednoho zarizeni: jeho pametove BARy (zaokrouhlene na
 /// stranky) a stranka jeho konfiguracniho prostoru.
-fn device_ranges(
+pub(crate) fn device_ranges(
     ecam: &Ecam,
     ecam_vmo: &libos::Vmo,
     resource: &libos::hw::Resource,

@@ -7,6 +7,7 @@ mod basic;
 mod dns;
 mod clock_sync;
 mod disks;
+mod display;
 mod drivers;
 mod events;
 mod firewall;
@@ -72,6 +73,8 @@ const SUITES: &[(&str, &[Test])] = &[
     // Vulkan pred GUI: render uzel otevre init pres displej, ktery pak
     // prevezme kompozitor.
     ("vulkan", vulkan::TESTS),
+    // Nastaveni obrazu (bochs-display, vlastni compd) pred GUI.
+    ("displej", display::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
     // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery

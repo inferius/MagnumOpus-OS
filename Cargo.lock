@@ -180,6 +180,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bochs-display"
+version = "0.1.0"
+dependencies = [
+ "display",
+ "displaydrv",
+ "fbcopy",
+ "guiproto",
+ "libos",
+ "pci",
+]
+
+[[package]]
 name = "boot-info"
 version = "0.1.0"
 
@@ -542,6 +554,19 @@ dependencies = [
 [[package]]
 name = "diskguard"
 version = "0.1.0"
+
+[[package]]
+name = "display"
+version = "0.1.0"
+
+[[package]]
+name = "displaydrv"
+version = "0.1.0"
+dependencies = [
+ "fbcopy",
+ "guiproto",
+ "libos",
+]
 
 [[package]]
 name = "dns"
@@ -1186,6 +1211,27 @@ dependencies = [
 [[package]]
 name = "inputproto"
 version = "0.1.0"
+
+[[package]]
+name = "intel-display"
+version = "0.1.0"
+dependencies = [
+ "displaydrv",
+ "guiproto",
+ "intelgfx",
+ "libos",
+ "pci",
+]
+
+[[package]]
+name = "intelgfx"
+version = "0.1.0"
+dependencies = [
+ "display",
+ "displaydrv",
+ "fbcopy",
+ "guiproto",
+]
 
 [[package]]
 name = "itoa"

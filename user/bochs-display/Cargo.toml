@@ -1,0 +1,19 @@
+[package]
+name = "bochs-display"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "bochs-display"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+guiproto = { path = "../../libs/guiproto" }
+fbcopy = { path = "../../libs/fbcopy" }
+pci = { path = "../../libs/pci" }
+display = { path = "../../libs/display" }
+displaydrv = { path = "../../libs/displaydrv", features = ["os"] }

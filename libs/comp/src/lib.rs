@@ -12,6 +12,7 @@
 //! - [`services`]: akce aplikaci a inspekce.
 //! - [`frame`]: takt snimku, animace, skupiny transakci, ping.
 //! - [`gpu`]: seznam operaci pro GPU backend (`compd` + `libs/vkcomp`).
+//! - [`output`]: zmena velikosti obrazovky (rezim displeje).
 
 #![cfg_attr(not(test), no_std)]
 
@@ -21,12 +22,15 @@ pub mod dialog;
 pub mod frame;
 pub mod gpu;
 pub mod input;
+pub mod output;
 pub mod render;
 pub mod scene;
 pub mod services;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod output_tests;
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;

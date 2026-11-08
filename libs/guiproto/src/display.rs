@@ -16,9 +16,20 @@
 //! `OPEN_RENDER` otevre novy kanal render uzlu (protokol `gpuproto`):
 //! vlastnik displeje (init, pak kompozitor) tak muze dat pristup ke 3D
 //! (Venus) dalsimu procesu, aniz by mu dal displej.
+//! **Nastaveni obrazu** (`docs/cs/displej.md`): `CONNECTORS` vrati
+//! konektory, monitory a jejich rezimy ([`crate::modes`]), `SET_MODE`
+//! zmeni rezim vystupu (pak kompozitor posle nove `ATTACH` s novou
+//! velikosti; do te doby vystup ukazuje cerny obraz). Ovladac s
+//! `caps::HOTPLUG` posila bez vyzadani `HOTPLUG` pri zmene konektoru
+//! (pripojeni, odpojeni monitoru) - klient znovu posle `CONNECTORS`.
+//! `RESET` posle nova instance ovladace po padu predchozi (kanal drzi
+//! init): klient znovu vybere vystup a posle `ATTACH`.
+//! S `caps::VSYNC` ovladac kopiruje snimek do zadniho bufferu a prepne
+//! ho ve svislem zatemneni (page flip); `PRESENTED` pak nese cas vsync.
 
 use alloc::vec::Vec;
 
+use crate::modes::{self, Connector};
 use crate::{Error, ReadExt, Reader, Rect, Result, WriteExt, Writer, read_count};
 
 pub mod op {
@@ -26,6 +37,16 @@ pub mod op {
     pub const ATTACH: u32 = 2;
     pub const PRESENT: u32 = 3;
     pub const SYNC: u32 = 4;
+    // 6..=15 a 106..=115: nastaveni obrazu (konektory, rezimy, hotplug).
+    pub const CONNECTORS: u32 = 6;
+    pub const SET_MODE: u32 = 7;
+    pub const CONNECTORS_REPLY: u32 = 106;
+    pub const MODE_SET: u32 = 107;
+    /// Udalost bez pozadavku: zmena konektoru.
+    pub const HOTPLUG: u32 = 108;
+    /// Udalost bez pozadavku: ovladac bezi znovu (po padu, v rezimu
+    /// firmwaru) - klient znovu vybere vystup a pripoji snimek.
+    pub const RESET: u32 = 109;
     pub const MODES: u32 = 101;
     pub const ATTACHED: u32 = 102;
     pub const PRESENTED: u32 = 103;
@@ -41,6 +62,16 @@ pub mod caps {
     pub const VIRGL: u32 = 1 << 0;
     /// Ovladac ma render uzel s capsetem Venus (Vulkan, `OPEN_RENDER`).
     pub const VENUS: u32 = 1 << 1;
+    // Bity 2..=7: nastaveni obrazu.
+    /// Ovladac umi `SET_MODE` (vic nez jeden rezim).
+    pub const MODESET: u32 = 1 << 2;
+    /// Ovladac posila udalost `HOTPLUG`.
+    pub const HOTPLUG: u32 = 1 << 3;
+    /// `PRESENT` se zobrazi celym snimkem ve vsync (page flip), `PRESENTED`
+    /// nese cas vsync.
+    pub const VSYNC: u32 = 1 << 4;
+    /// Vic vystupu (monitoru).
+    pub const MULTI: u32 = 1 << 5;
 }
 
 /// Jeden vystup (scanout).
@@ -65,6 +96,10 @@ pub enum Request {
     Sync { token: u64 },
     /// Novy kanal render uzlu (odpoved `Render`).
     OpenRender,
+    /// Vycet konektoru a rezimu (odpoved `Connectors`).
+    Connectors,
+    /// Nastavi rezim vystupu; `refresh_mhz` 0 = nejvyssi obnova pro rozmery.
+    SetMode { output: u32, w: u32, h: u32, refresh_mhz: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,10 +110,23 @@ pub enum Reply {
     Synced { token: u64 },
     /// Kanal render uzlu jde v handlech zpravy.
     Render,
+    Connectors { connectors: Vec<Connector> },
+    /// Rezim nastaven (skutecna obnova); nasleduje `ATTACH` nove velikosti.
+    ModeSet { output: u32, w: u32, h: u32, refresh_mhz: u32 },
+    /// Konektor `output` se zmenil (bez pozadavku).
+    Hotplug { output: u32 },
+    /// Ovladac zacal znovu (bez pozadavku); predchozi `ATTACH` neplati.
+    Reset,
     Error { op: u32, code: Error },
 }
 
 impl Reply {
+    /// Udalost bez pozadavku (ne odpoved): klient ji pri cekani na
+    /// odpoved preskoci a zpracuje zvlast.
+    pub fn is_event(&self) -> bool {
+        matches!(self, Reply::Hotplug { .. } | Reply::Reset)
+    }
+
     /// Je odpoved znackou synchronizace s tokenem `token`? (`ERROR` na
     /// `SYNC` = ovladac synchronizaci nezna, ale odpovida po poradi.)
     pub fn ends_sync(&self, token: u64) -> bool {
@@ -111,6 +159,11 @@ impl Request {
                 w.u64(*token);
             }
             Request::OpenRender => w = Writer::op(op::OPEN_RENDER),
+            Request::Connectors => w = Writer::op(op::CONNECTORS),
+            Request::SetMode { output, w: mw, h, refresh_mhz } => {
+                w = Writer::op(op::SET_MODE);
+                w.u32(*output).u32(*mw).u32(*h).u32(*refresh_mhz);
+            }
         }
         w.finish()
     }
@@ -137,6 +190,13 @@ impl Request {
             }
             op::SYNC => Request::Sync { token: r.u64()? },
             op::OPEN_RENDER => Request::OpenRender,
+            op::CONNECTORS => Request::Connectors,
+            op::SET_MODE => Request::SetMode {
+                output: r.u32()?,
+                w: r.u32()?,
+                h: r.u32()?,
+                refresh_mhz: r.u32()?,
+            },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -170,6 +230,19 @@ impl Reply {
                 w.u64(*token);
             }
             Reply::Render => w = Writer::op(op::RENDER),
+            Reply::Connectors { connectors } => {
+                w = Writer::op(op::CONNECTORS_REPLY);
+                modes::encode_connectors(&mut w, connectors);
+            }
+            Reply::ModeSet { output, w: mw, h, refresh_mhz } => {
+                w = Writer::op(op::MODE_SET);
+                w.u32(*output).u32(*mw).u32(*h).u32(*refresh_mhz);
+            }
+            Reply::Hotplug { output } => {
+                w = Writer::op(op::HOTPLUG);
+                w.u32(*output);
+            }
+            Reply::Reset => w = Writer::op(op::RESET),
             Reply::Error { op: o, code } => {
                 w = Writer::op(op::ERROR);
                 w.u32(*o).i32(code.code());
@@ -201,6 +274,17 @@ impl Reply {
             },
             op::SYNCED => Reply::Synced { token: r.u64()? },
             op::RENDER => Reply::Render,
+            op::CONNECTORS_REPLY => Reply::Connectors {
+                connectors: modes::decode_connectors(&mut r, data.len())?,
+            },
+            op::MODE_SET => Reply::ModeSet {
+                output: r.u32()?,
+                w: r.u32()?,
+                h: r.u32()?,
+                refresh_mhz: r.u32()?,
+            },
+            op::HOTPLUG => Reply::Hotplug { output: r.u32()? },
+            op::RESET => Reply::Reset,
             op::ERROR => Reply::Error {
                 op: r.u32()?,
                 code: Error::from_code(r.i32()? as i64).ok_or(Error::InvalidArgs)?,
