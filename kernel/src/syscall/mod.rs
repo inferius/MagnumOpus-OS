@@ -6,6 +6,12 @@
 //! [`user`] (kopie s kontrolou mapovani), nikdy primym ukazatelem.
 
 mod channel;
+
+/// Precte `len` bajtu z pameti procesu (vypis pady procesu).
+pub fn read_user(p: &crate::object::process::Process, addr: u64, len: usize) -> crate::error::Result<alloc::vec::Vec<u8>> {
+    user::read_bytes(p, addr, len)
+}
+mod diag;
 mod handle;
 mod hw;
 mod job;
@@ -98,6 +104,8 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::VMO_REVOKE => hw::vmo_revoke(a),
         nr::JOB_PROCESSES => job::processes(a),
         nr::SYSTEM_POWER => hw::system_power(a),
+        nr::LOG_READ => diag::log_read(a),
+        nr::CRASH_RECORD => diag::crash_record(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -159,6 +167,9 @@ pub fn name(number: u64) -> &'static str {
         "VMO_REVOKE",
         "JOB_PROCESSES",
         "SYSTEM_POWER",
+        "SCHED_CONTROL",
+        "LOG_READ",
+        "CRASH_RECORD",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

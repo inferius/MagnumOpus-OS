@@ -559,6 +559,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "crashrec"
+version = "0.1.0"
+
+[[package]]
 name = "crypto-bigint"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1438,10 +1442,12 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "boot-info",
+ "crashrec",
  "csprng",
  "elf",
  "initfs",
  "noto-sans-mono-bitmap",
+ "qr",
  "spin 0.12.3",
 ]
 
@@ -1506,6 +1512,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "boot-info",
+ "crashrec",
  "elf",
  "log",
  "uefi",
@@ -1525,6 +1532,16 @@ name = "log"
 version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
+
+[[package]]
+name = "logd"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "crashrec",
+ "fsproto",
+ "libos",
+]
 
 [[package]]
 name = "lz4_flex"
@@ -1931,6 +1948,10 @@ name = "pulldown-cmark-escape"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
+
+[[package]]
+name = "qr"
+version = "0.1.0"
 
 [[package]]
 name = "quick-error"

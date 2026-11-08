@@ -180,6 +180,10 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                 )),
             }
         }
+        "report" => match host.report() {
+            Ok(text) => Ok(Value::Str(text)),
+            Err(e) => Err(Flow::Err(ShError::sys(e, "balicek pro vyvojare se nepovedl").at(a.span))),
+        },
         _ => Err(a.err(code::UNKNOWN, alloc::format!("neznamy prikaz '{name}'"))),
     }
 }

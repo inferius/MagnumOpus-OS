@@ -78,6 +78,11 @@ pub trait Env {
     fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Balicek pro vyvojare (prikaz `report`); vychozi = relace sluzbu
+    /// logu nema.
+    fn report(&mut self) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
 }
 
 /// Kanaly prehledu uloh pres `Env`.
@@ -432,6 +437,10 @@ impl Host for SessionHost<'_> {
 
     fn power(&mut self, reboot: bool) -> Result<(), abi::Error> {
         self.env.power(reboot)
+    }
+
+    fn report(&mut self) -> Result<String, abi::Error> {
+        self.env.report()
     }
 
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {

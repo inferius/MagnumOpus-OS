@@ -10,7 +10,7 @@ site menu.
 |---|---|---|
 | [Sestavení a ladění](cs/sestaveni.md) | [Building and debugging](en/building.md) | nástroje, příkazy, testy, ladění, struktura / tools, commands, tests, debugging, layout |
 | [Architektura](cs/architektura.md) | [Architecture](en/architecture.md) | návrh systému, milníky a důvody / system design, milestones and reasons |
-| [Živé USB](cs/zive-usb.md) | [Live USB](en/live-usb.md) | zkoušení na skutečném PC: obraz, zápis na flashku (xtask, Rufus, dd), start, rizika, co dělat při problému / trying it on a real PC: image, writing the stick (xtask, Rufus, dd), boot, risks, what to do when something goes wrong |
+| [Živé USB](cs/zive-usb.md) | [Live USB](en/live-usb.md) | zkoušení na skutečném PC: obraz, zápis na flashku (xtask, Rufus, dd), start, rizika, logy, záznamy pádů, příkaz report, co dělat při problému / trying it on a real PC: image, writing the stick (xtask, Rufus, dd), boot, risks, logs, crash records, the report command, what to do when something goes wrong |
 
 ### Jádro a programy / Kernel and programs
 

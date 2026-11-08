@@ -38,7 +38,13 @@ use core::fmt;
 pub use filter::{
     clear_target_level, console_level, set_console_level, set_level, set_target_level,
 };
-pub use ring::snapshot;
+pub use ring::{read_from, snapshot};
+
+/// Obsah bufferu logu pri pade (bez zamku), viz `ring::with_unlocked`.
+pub fn with_ring_unlocked(f: impl FnOnce(&[u8], &[u8])) {
+    // SAFETY: vola se jen z `pstore::on_fatal` po zastaveni ostatnich CPU.
+    unsafe { ring::with_unlocked(f) }
+}
 
 use crate::{arch, console, sched};
 

@@ -285,6 +285,11 @@ pub trait Host {
     fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Balicek pro vyvojare (`report`): text s cestou a nahledem obsahu.
+    /// `NOT_SUPPORTED` = hostitel sluzbu logu nema.
+    fn report(&mut self) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Domovska slozka uzivatele.
     fn home(&self) -> String {
         String::from("/home")

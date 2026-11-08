@@ -258,6 +258,19 @@ impl Env for SysEnv {
             Err(e) => Err(e),
         }
     }
+
+    /// `report`: balicek pro vyvojare sestavi sluzba logu (pres init).
+    fn report(&mut self) -> Result<String, Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        chan.write(&powerproto::Request::Report.encode(), Vec::new())?;
+        let m = chan.read(Some(time::deadline_after(Duration::from_secs(90))))?;
+        match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Text(t) => Ok(alloc::format!("balicek pro vyvojare: {t}")),
+            powerproto::Reply::Failed(e) => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
 }
 
 fn tick() -> Option<u64> {

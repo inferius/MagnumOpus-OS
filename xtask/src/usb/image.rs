@@ -168,7 +168,7 @@ fn format_data(file: &File, (offset, len): (u64, u64), uuid: [u8; 16]) -> Result
     let mut fs = Fs::mount(dev).map_err(|e| fs_err("pripojeni", e))?;
     fs.set_time(now());
     let readme: &[u8] = b"Datovy oddil ziveho USB MagnumOpus.\n\
-        Logy a zaznamy padu jsou v /system/log a /system/crash.\n";
+        Logy jsou v /system/log, zaznamy padu v /system/pady.\n";
     fs.create("/vitejte.txt", Kind::File).map_err(|e| fs_err("soubor", e))?;
     fs.write("/vitejte.txt", 0, readme).map_err(|e| fs_err("soubor", e))?;
     fs.commit().map_err(|e| fs_err("commit", e))?;

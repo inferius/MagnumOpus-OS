@@ -25,6 +25,10 @@ pub struct FbConsole {
     char_width: usize,
     x: usize,
     y: usize,
+    /// Prava hranice textu (obrazovka pady: vpravo je kod QR).
+    right: usize,
+    /// Bez posouvani: text pod spodnim okrajem se zahodi (obrazovka pady).
+    clip: bool,
 }
 
 // SAFETY: FbConsole je jediny vlastnik framebufferu a pristup k nemu je
@@ -52,12 +56,34 @@ impl FbConsole {
             char_width: get_raster_width(FontWeight::Regular, font_height),
             x: MARGIN,
             y: MARGIN,
+            right: fb.width as usize,
+            clip: false,
         };
         console.clear();
         console
     }
 
-    fn line_height(&self) -> usize {
+    /// Rezim obrazovky pady: text jen do `right` a bez posouvani.
+    pub fn set_crash_layout(&mut self, right: usize) {
+        self.right = right.min(self.width);
+        self.clip = true;
+    }
+
+    pub fn size(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
+
+    /// Vyplni obdelnik barvou.
+    pub fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, rgb: (u8, u8, u8)) {
+        let c = self.encode(rgb);
+        for yy in y..(y + h).min(self.height) {
+            for xx in x..(x + w).min(self.width) {
+                self.put_pixel(xx, yy, c);
+            }
+        }
+    }
+
+    pub fn line_height(&self) -> usize {
         self.font_height.val() + LINE_SPACING
     }
 
@@ -95,7 +121,7 @@ impl FbConsole {
     fn newline(&mut self) {
         self.x = MARGIN;
         self.y += self.line_height();
-        if self.y + self.line_height() > self.height - MARGIN {
+        if self.y + self.line_height() > self.height - MARGIN && !self.clip {
             self.scroll();
         }
     }
@@ -126,8 +152,11 @@ impl FbConsole {
             }
             _ => {}
         }
-        if self.x + self.char_width > self.width - MARGIN {
+        if self.x + self.char_width > self.right - MARGIN {
             self.newline();
+        }
+        if self.clip && self.y + self.line_height() > self.height {
+            return;
         }
         let raster = get_raster(c, FontWeight::Regular, self.font_height)
             .or_else(|| get_raster('?', FontWeight::Regular, self.font_height))

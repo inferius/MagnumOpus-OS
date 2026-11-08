@@ -145,8 +145,40 @@ pub const JOB_PROCESSES: u64 = 48;
 /// (S5), jadro AML nezna = `NOT_SUPPORTED`. Pri uspechu se nevraci.
 pub const SYSTEM_POWER: u64 = 49;
 
+// 50 = SCHED_CONTROL (planovac, jina vetev).
+
+/// Cteni logu jadra (Resource s pravem `DIAG`). `(resource, cursor,
+/// buf_ptr, buf_len, out_start_ptr) -> bajty`. Log je proud bajtu (radky
+/// UTF-8); `cursor` = pozice v proudu (pocet kdy zapsanych bajtu). Kdyz
+/// starsi data uz kruhovy buffer prepsal, cte se od nejstarsich dostupnych;
+/// skutecny zacatek zapise na `out_start_ptr` (u64), takze ctenar pozna
+/// ztratu. Nova pozice = zacatek + vracena delka. 0 = nic noveho.
+pub const LOG_READ: u64 = 51;
+
+/// Zaznam padu jadra z minuleho behu (pstore, `libs/crashrec`; Resource
+/// s pravem `DIAG`). `(resource, op, buf_ptr, buf_len) -> bajty`; `op`
+/// z [`crash_op`].
+pub const CRASH_RECORD: u64 = 52;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 50;
+pub const COUNT: u64 = 53;
+
+/// Operace `CRASH_RECORD`.
+pub mod crash_op {
+    /// Zkopiruje zaznam z minuleho behu (cely format `crashrec`, hlavicka
+    /// a text) do bufferu; vraci delku, 0 = zadny zaznam. Maly buffer =
+    /// `BUFFER_TOO_SMALL`.
+    pub const READ: u64 = 0;
+    /// Smaze zaznam (sluzba logu ho ulozila na disk).
+    pub const CLEAR: u64 = 1;
+    /// Jen testovaci jadro (`cargo xtask test`): vyvola paniku jadra; jadro
+    /// zapise zaznam a hned restartuje (test, ze zaznam prezije restart).
+    /// Jinde `NOT_SUPPORTED`.
+    pub const TEST_PANIC: u64 = 2;
+    /// Velikost oblasti zaznamu (horni mez bufferu pro `READ`); 0 = oblast
+    /// neni (loader ji nedostal).
+    pub const CAPACITY: u64 = 3;
+}
 
 /// Operace `SYSTEM_POWER`.
 pub mod power_op {

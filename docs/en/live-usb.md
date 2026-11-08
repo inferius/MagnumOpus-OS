@@ -12,7 +12,8 @@ Step-by-step guide:
 2. [Creating the image](#creating-the-image)
 3. [Writing the stick](#writing-the-stick) (xtask, Rufus, dd)
 4. [Booting from the stick](#booting-from-the-stick)
-5. [When something goes wrong](#when-something-goes-wrong)
+5. [Diagnostics](#diagnostics): logs, crash records, the developer bundle
+6. [When something goes wrong](#when-something-goes-wrong)
 
 ## What you need
 
@@ -156,6 +157,67 @@ the stick on an xHCI controller, USB keyboard and tablet, an Intel card, no
 virtio, no IOMMU). Not verified on real hardware yet - hence this guide and
 the diagnostics.
 
+## Diagnostics
+
+The system itself stores everything a developer needs:
+
+| what | where (data partition) | who |
+|---|---|---|
+| kernel and service log, each boot separately | `/system/log/boot-000042.log` | the `logd` service (last 20 boots, each at most 32 MiB) |
+| kernel crash record | `/system/pady/000041-jadro-MO-7F3A-21C9.crash` | the kernel into reserved RAM, `logd` to disk on the next boot |
+| service crash (CPU exception, panic) | `/system/pady/000042-fsd-1.txt` | init's supervisor, `logd` |
+| machine information | in the boot log: `stroj:` lines (CPU, memory map, GOP), `acpi:` (tables), `devmgr: pci` (PCI devices), disk, network and USB drivers | kernel, services |
+| developer bundle | `/system/log/report-000042-1.txt` | the `report` command |
+
+(`pady` = crashes, `jadro` = kernel, `stroj` = machine.)
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Path of the log and the crash record">
+<defs><marker id="lu1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="150" height="70" rx="6"/><text class="t b" x="85" y="44" text-anchor="middle">kernel and services</text><text class="m" x="85" y="62" text-anchor="middle">log -&gt; ring buffer</text><text class="m" x="85" y="78" text-anchor="middle">512 KiB in the kernel</text>
+<rect class="acc" x="230" y="20" width="160" height="70" rx="6"/><text class="t b" x="310" y="44" text-anchor="middle">logd</text><text class="m" x="310" y="62" text-anchor="middle">LOG_READ every 1 s</text><text class="m" x="310" y="78" text-anchor="middle">queue in RAM (4 MiB)</text>
+<rect class="ok" x="460" y="20" width="160" height="70" rx="6"/><text class="t b" x="540" y="44" text-anchor="middle">data partition</text><text class="m" x="540" y="62" text-anchor="middle">/system/log</text><text class="m" x="540" y="78" text-anchor="middle">/system/pady</text>
+<path class="ln" d="M160 55 L228 55" marker-end="url(#lu1)"/><path class="ln" d="M390 55 L458 55" marker-end="url(#lu1)"/>
+<rect class="warn" x="10" y="130" width="150" height="70" rx="6"/><text class="t b" x="85" y="154" text-anchor="middle">kernel crash</text><text class="m" x="85" y="172" text-anchor="middle">record into RAM (pstore)</text><text class="m" x="85" y="188" text-anchor="middle">screen, reboot in 60 s</text>
+<rect class="box" x="230" y="130" width="160" height="70" rx="6"/><text class="t b" x="310" y="154" text-anchor="middle">next boot</text><text class="m" x="310" y="172" text-anchor="middle">CRASH_RECORD READ</text><text class="m" x="310" y="188" text-anchor="middle">save, then CLEAR</text>
+<path class="ln" d="M160 165 L228 165" marker-end="url(#lu1)"/><path class="ln" d="M390 165 L540 92" marker-end="url(#lu1)"/>
+<text class="m" x="640" y="150">When the FS is down (fsd</text><text class="m" x="640" y="166">crashed), logd keeps the</text><text class="m" x="640" y="182">log in RAM and writes it later.</text>
+</svg>
+<figcaption>Path of the log and the crash record to the data partition.</figcaption>
+</figure>
+
+**Kernel crash.** The screen shows a code (e.g. `KERNEL_PANIC ·
+#MO-7F3A-21C9`), a QR code with a summary, the end of the log with
+registers and the stack, and reboots after 60 s. The record sits in
+reserved RAM (64 KiB at a fixed address) that a warm reset does not erase;
+on the next boot `logd` writes it to `/system/pady`. **Photograph the
+screen and the QR code with a phone** - after a power-off (not a reboot)
+the record in RAM is gone. A computer with a native graphics driver
+(Intel, virtio-gpu) may no longer show the firmware image; the record is
+then stored only in RAM and on the serial line.
+
+**Developer bundle.** Type `report` in the terminal. It prints the path
+and a preview of the contents:
+
+```text
+balicek pro vyvojare: /system/log/report-000042-1.txt
+  zaznam padu 000041-jadro-MO-7F3A-21C9.crash (21044 B)
+  log tohoto bootu boot-000042.log (180312 B)
+  konec logu minuleho bootu (262144 B)
+  celkem 463900 B
+```
+
+The bundle contains only system logs and crash records (process and device
+names, addresses, service messages). Your file contents and passwords do
+not go into the log. For now the file lives on the stick's data partition
+(Windows cannot read it directly); on a computer with the repository the
+[osfs](osfs.md) tool reads it. A simpler way to get it off the stick (a
+copy on the ESP readable in Windows) is yet to be decided.
+
+**For developers:** `cargo xtask symbolize <file>` translates addresses in
+the crash record and in the bundle to function names (with the same
+`--arch` and `--release` as the build the system ran).
+
 ## When something goes wrong
 
 | symptom | what to try |
@@ -169,7 +231,13 @@ the diagnostics.
 the serial port COM1 (port 0x3F8, 115200 Bd, 8N1). Connect a computer with
 a COM connector (or a board with a COM header) to another computer with a
 null-modem cable and capture the log (PuTTY,
-`picocom -b 115200 /dev/ttyUSB0`).
+`picocom -b 115200 /dev/ttyUSB0`). A USB-serial adapter (CDC-ACM, FTDI) in
+the computer running MagnumOpus does not work yet: the kernel log could go
+out only after the USB drivers start, i.e. not for crashes early in boot.
+It will come later as a log mirror from the log service. A backup of the
+crash record in a UEFI variable (it would survive a power-off) is not there
+yet either: the kernel would have to call UEFI runtime services from the
+crash handler.
 
 ## For developers
 

@@ -45,6 +45,24 @@ const MEM_BOOT_DATA: MemoryType = MemoryType::custom(0x8000_0002);
 const INITFS_PATH: &CStr16 = cstr16!("\\os\\initfs.img");
 
 const MEM_INITFS: MemoryType = MemoryType::custom(0x8000_0003);
+/// Zaznam padu jadra (pstore), viz [`alloc_pstore`].
+const MEM_PSTORE: MemoryType = MemoryType::custom(0x8000_0004);
+/// Velikost oblasti pro zaznam padu.
+const PSTORE_LEN: u64 = 64 * 1024;
+/// Pevne adresy oblasti zaznamu padu (v poradi): stejna adresa pri kazdem
+/// startu = zaznam z minuleho behu je po teplem restartu tam, kam ho jadro
+/// zapsalo. x86 PC maji RAM od 0 (64 MiB, 128 MiB ...), aarch64 virt
+/// a vetsina desek od 1 GiB nebo 2 GiB.
+const PSTORE_CANDIDATES: &[u64] = &[
+    0x0400_0000,
+    0x0800_0000,
+    0x1000_0000,
+    0x4400_0000,
+    0x4800_0000,
+    0x8400_0000,
+    0x8800_0000,
+    0x1_0400_0000,
+];
 
 /// Rezerva polozek mapy pameti navic: mezi zjistenim velikosti a ukoncenim
 /// boot services se mapa jeste muze rozdelit (alokace firmwaru i nase).
@@ -90,6 +108,7 @@ fn main() -> Status {
     // zarizeni, aby jadro mohlo psat hned od startu).
     let debug_serial = arch::debug_serial(acpi_rsdp, &mut tables);
     let (initfs_phys, initfs_len) = load_initfs();
+    let (pstore_phys, pstore_len) = alloc_pstore();
 
     let (kernel_phys_start, kernel_phys_len) = load_kernel(&elf, &mut tables);
     // aarch64: kod jadra zapsany pres datovou cache musi byt videt
@@ -146,6 +165,8 @@ fn main() -> Status {
         firmware_time,
         device_tree,
         debug_serial,
+        pstore_phys,
+        pstore_len,
     };
     // SAFETY: `boot_info_phys` je cela stranka alokovana pro BootInfo,
     // zarovnana na 4 KiB (vic nez zarovnani BootInfo).
@@ -162,6 +183,44 @@ fn main() -> Status {
             PHYS_MAP_BASE + boot_info_phys,
         )
     }
+}
+
+/// Oblast pro zaznam padu: prvni kandidat z [`PSTORE_CANDIDATES`], ktery
+/// je cely volna RAM (a uz nese platny zaznam), jinak prvni volny. Cteni
+/// kandidata pred alokaci je bezpecne: lezi v konvencni pameti z mapy.
+/// `(0, 0)` = zadny kandidat neni volny (jadro pak zaznam pady neulozi).
+fn alloc_pstore() -> (u64, u64) {
+    let free = |addr: u64| -> bool {
+        let Ok(map) = boot::memory_map(MemoryType::LOADER_DATA) else {
+            return false;
+        };
+        map.entries().any(|d| {
+            d.ty == MemoryType::CONVENTIONAL
+                && d.phys_start <= addr
+                && addr + PSTORE_LEN <= d.phys_start + d.page_count * SIZE_4K
+        })
+    };
+    let has_record = |addr: u64| {
+        // SAFETY: `addr..addr+PSTORE_LEN` je volna konvencni RAM
+        // identicky namapovana firmwarem; jen cteni.
+        let area = unsafe { core::slice::from_raw_parts(addr as *const u8, PSTORE_LEN as usize) };
+        crashrec::parse(area).is_some()
+    };
+    let take = |addr: u64| {
+        boot::allocate_pages(AllocateType::Address(addr), MEM_PSTORE, (PSTORE_LEN / SIZE_4K) as usize).is_ok()
+    };
+    let with_record = PSTORE_CANDIDATES.iter().copied().find(|&a| free(a) && has_record(a));
+    for addr in with_record.into_iter().chain(PSTORE_CANDIDATES.iter().copied()) {
+        if free(addr) && take(addr) {
+            log::info!(
+                "zaznam padu na {addr:#x}{}",
+                if with_record == Some(addr) { " (je v nem zaznam z minuleho behu)" } else { "" }
+            );
+            return (addr, PSTORE_LEN);
+        }
+    }
+    log::warn!("pro zaznam padu neni volna zadna pevna adresa");
+    (0, 0)
 }
 
 fn boot_fs() -> uefi::fs::FileSystem {
@@ -440,6 +499,7 @@ fn memory_kind(ty: MemoryType) -> MemoryKind {
         MEM_KERNEL => MemoryKind::Kernel,
         MEM_BOOT_DATA => MemoryKind::BootData,
         MEM_INITFS => MemoryKind::Initfs,
+        MEM_PSTORE => MemoryKind::Pstore,
         MemoryType::ACPI_RECLAIM => MemoryKind::AcpiReclaimable,
         MemoryType::ACPI_NON_VOLATILE => MemoryKind::AcpiNvs,
         MemoryType::RUNTIME_SERVICES_CODE | MemoryType::RUNTIME_SERVICES_DATA => {

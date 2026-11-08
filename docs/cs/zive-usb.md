@@ -11,7 +11,8 @@ Návod krok za krokem:
 2. [Vytvoření obrazu](#vytvoření-obrazu)
 3. [Zápis na flashku](#zápis-na-flashku) (xtask, Rufus, dd)
 4. [Start z flashky](#start-z-flashky)
-5. [Co dělat při problému](#co-dělat-při-problému)
+5. [Diagnostika](#diagnostika): logy, záznamy pádů, balíček pro vývojáře
+6. [Co dělat při problému](#co-dělat-při-problému)
 
 ## Co je potřeba
 
@@ -148,6 +149,63 @@ bez okna; obojí stroj co nejbližší skutečnému PC: flashka na řadiči xHCI
 klávesnice a tablet USB, karta Intel, žádné virtio, bez IOMMU). Na
 skutečném hardwaru zatím ověřeno není – proto tato příručka a diagnostika.
 
+## Diagnostika
+
+Systém sám ukládá všechno, co vývojář potřebuje:
+
+| co | kde (datový oddíl) | kdo |
+|---|---|---|
+| log jádra a všech služeb, každý start zvlášť | `/system/log/boot-000042.log` | služba `logd` (posledních 20 startů, každý nejvýš 32 MiB) |
+| záznam pádu jádra | `/system/pady/000041-jadro-MO-7F3A-21C9.crash` | jádro do vyhrazené RAM, `logd` při dalším startu na disk |
+| pád služby (výjimka CPU, panika) | `/system/pady/000042-fsd-1.txt` | supervisor initu, `logd` |
+| informace o stroji | v logu startu: řádky `stroj:` (CPU, mapa paměti, GOP), `acpi:` (tabulky), `devmgr: pci` (zařízení PCI), ovladače disků, sítě a USB | jádro, služby |
+| balíček pro vývojáře | `/system/log/report-000042-1.txt` | příkaz `report` |
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cesta logu a záznamu pádu">
+<defs><marker id="zu1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="150" height="70" rx="6"/><text class="t b" x="85" y="44" text-anchor="middle">jádro a služby</text><text class="m" x="85" y="62" text-anchor="middle">log -&gt; kruhový buffer</text><text class="m" x="85" y="78" text-anchor="middle">512 KiB v jádře</text>
+<rect class="acc" x="230" y="20" width="160" height="70" rx="6"/><text class="t b" x="310" y="44" text-anchor="middle">logd</text><text class="m" x="310" y="62" text-anchor="middle">LOG_READ každou 1 s</text><text class="m" x="310" y="78" text-anchor="middle">fronta v RAM (4 MiB)</text>
+<rect class="ok" x="460" y="20" width="160" height="70" rx="6"/><text class="t b" x="540" y="44" text-anchor="middle">datový oddíl</text><text class="m" x="540" y="62" text-anchor="middle">/system/log</text><text class="m" x="540" y="78" text-anchor="middle">/system/pady</text>
+<path class="ln" d="M160 55 L228 55" marker-end="url(#zu1)"/><path class="ln" d="M390 55 L458 55" marker-end="url(#zu1)"/>
+<rect class="warn" x="10" y="130" width="150" height="70" rx="6"/><text class="t b" x="85" y="154" text-anchor="middle">pád jádra</text><text class="m" x="85" y="172" text-anchor="middle">záznam do RAM (pstore)</text><text class="m" x="85" y="188" text-anchor="middle">obrazovka, restart 60 s</text>
+<rect class="box" x="230" y="130" width="160" height="70" rx="6"/><text class="t b" x="310" y="154" text-anchor="middle">další start</text><text class="m" x="310" y="172" text-anchor="middle">CRASH_RECORD READ</text><text class="m" x="310" y="188" text-anchor="middle">uložit, pak CLEAR</text>
+<path class="ln" d="M160 165 L228 165" marker-end="url(#zu1)"/><path class="ln" d="M390 165 L540 92" marker-end="url(#zu1)"/>
+<text class="m" x="640" y="150">Když FS nejde (pád fsd),</text><text class="m" x="640" y="166">logd drží log v RAM</text><text class="m" x="640" y="182">a zapíše ho později.</text>
+</svg>
+<figcaption>Cesta logu a záznamu pádu na datový oddíl.</figcaption>
+</figure>
+
+**Pád jádra.** Obrazovka ukáže kód (např. `KERNEL_PANIC · #MO-7F3A-21C9`),
+kód QR se souhrnem, konec logu s registry a zásobníkem a po 60 s počítač
+restartuje. Záznam leží ve vyhrazené RAM (64 KiB na pevné adrese), kterou
+teplý restart nesmaže; při dalším startu ho `logd` zapíše do `/system/pady`.
+**Vyfoťte obrazovku i QR telefonem** - po vypnutí napájení (ne restartu)
+záznam v RAM zmizí. Počítač s nativním ovladačem grafiky (Intel, virtio-gpu)
+už obraz firmwaru nemusí ukazovat; záznam se pak uloží jen do RAM a na
+sériovou linku.
+
+**Balíček pro vývojáře.** V terminálu napište `report`. Vypíše cestu
+a náhled obsahu:
+
+```text
+balicek pro vyvojare: /system/log/report-000042-1.txt
+  zaznam padu 000041-jadro-MO-7F3A-21C9.crash (21044 B)
+  log tohoto bootu boot-000042.log (180312 B)
+  konec logu minuleho bootu (262144 B)
+  celkem 463900 B
+```
+
+Balíček obsahuje jen logy systému a záznamy pádů (jména procesů a zařízení,
+adresy, hlášení služeb). Obsah vašich souborů ani hesla do logu nejdou.
+Soubor zatím leží na datovém oddílu flashky (Windows ho přímo nepřečte);
+na počítači s repozitářem ho přečte nástroj [osfs](osfs.md). Jak ho dostat
+z flashky jednodušeji (kopie na ESP čitelnou ve Windows), se rozhodne.
+
+**Pro vývojáře:** adresy v záznamu pádu i v balíčku přeloží na jména funkcí
+`cargo xtask symbolize <soubor>` (se stejným `--arch` a `--release` jako
+build, ze kterého systém běžel).
+
 ## Co dělat při problému
 
 | příznak | co zkusit |
@@ -161,6 +219,11 @@ skutečném hardwaru zatím ověřeno není – proto tato příručka a diagnos
 sériovou linku COM1 (port 0x3F8, 115200 Bd, 8N1). Počítač s konektorem COM
 (nebo deskou s hlavičkou COM) připojte nulmodemovým kabelem k jinému
 počítači a log zachyťte (PuTTY, `picocom -b 115200 /dev/ttyUSB0`).
+Převodník USB-sériová linka (CDC-ACM, FTDI) v počítači s MagnumOpus zatím
+nefunguje: log z jádra by šel ven až po startu ovladačů USB, tedy právě ne
+při pádech v začátku startu. Přidá se později jako zrcadlo logu ze služby
+logu. Záloha záznamu pádu do proměnné UEFI (přežije i vypnutí) také zatím
+není: jádro by muselo volat běhové služby UEFI z obsluhy pádu.
 
 ## Pro vývojáře
 

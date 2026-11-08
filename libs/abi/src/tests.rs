@@ -113,6 +113,9 @@ fn every_syscall_is_documented() {
         "VMO_REVOKE",
         "JOB_PROCESSES",
         "SYSTEM_POWER",
+        "",
+        "LOG_READ",
+        "CRASH_RECORD",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

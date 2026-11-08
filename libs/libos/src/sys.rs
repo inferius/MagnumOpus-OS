@@ -392,6 +392,22 @@ pub fn system_power(resource: u32, op: u64) -> Result<()> {
     call(nr::SYSTEM_POWER, [resource as u64, op, 0, 0, 0, 0]).map(|_| ())
 }
 
+/// Cteni logu jadra od pozice `cursor` (`LOG_READ`): (skutecny zacatek,
+/// pocet bajtu v `buf`).
+pub fn log_read(resource: u32, cursor: u64, buf: &mut [u8]) -> Result<(u64, usize)> {
+    let mut start = 0u64;
+    let n = call(
+        nr::LOG_READ,
+        [resource as u64, cursor, buf.as_mut_ptr() as u64, buf.len() as u64, &mut start as *mut u64 as u64, 0],
+    )?;
+    Ok((start, n as usize))
+}
+
+/// Zaznam padu jadra (`CRASH_RECORD`), `op` z `abi::syscall::crash_op`.
+pub fn crash_record(resource: u32, op: u64, buf: &mut [u8]) -> Result<usize> {
+    call(nr::CRASH_RECORD, [resource as u64, op, buf.as_mut_ptr() as u64, buf.len() as u64, 0, 0]).map(|n| n as usize)
+}
+
 pub fn ioport_read(resource: u32, port: u16, width: u8) -> Result<u32> {
     call(
         nr::IOPORT_READ,

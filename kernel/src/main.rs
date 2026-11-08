@@ -14,14 +14,17 @@ mod acpi;
 mod arch;
 mod clock;
 mod console;
+mod crashscreen;
 mod error;
 mod fatal;
 mod framebuffer;
 mod log;
 mod mm;
 mod object;
+mod pstore;
 mod random;
 mod sched;
+mod sysinfo;
 mod smp;
 mod sync;
 mod syscall;
@@ -63,6 +66,8 @@ extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
 
     // SAFETY: jednou, po init_boot_cpu; BootInfo je overeny.
     unsafe { mm::init(boot_info) };
+    pstore::init(boot_info);
+    sysinfo::log_machine(boot_info);
 
     let platform = PLATFORM.call_once(|| match acpi::parse(boot_info.acpi_rsdp) {
         Ok(p) => p,
