@@ -381,6 +381,22 @@ impl Gui {
 
 /// Bezny beh: kompozitor (hlida a obnovuje ho supervisor), vstup
 /// a ukazkove aplikace.
+/// Diagnosticky snimek hned (prikaz shellu `diag snap`).
+pub fn snapshot() -> Result<()> {
+    let g = GUI.lock();
+    let gui = g.as_ref().ok_or(Error::NotFound)?;
+    gui.command(control::SNAPSHOT.as_bytes(), Vec::new()).map(|_| ())
+}
+
+/// Diagnosticky snimek: kanal z kompozitoru do logd pro obrazky obrazovky
+/// (bez logd se do logu zapise jen stav).
+pub fn connect_snapshots(gui: &Gui) {
+    let r = crate::logd::snapshot_channel().and_then(|c| gui.command(control::SNAPSHOTS.as_bytes(), vec![c.into_handle()]).map(|_| ()));
+    if let Err(e) = r {
+        println!("init: kanal snimku obrazovky do logd: {e}");
+    }
+}
+
 pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervisor) {
     let mut gui = match start(startup) {
         Ok(g) => g,
@@ -417,6 +433,7 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
     {
         println!("init: stav pro listu: {e}");
     }
+    connect_snapshots(&gui);
     // Terminal: za oknem a listkem kanal pripojeni k termd (init ho spousti
     // a hlida, viz `terminal.rs`).
     let term = match crate::terminal::TERMINALS.lock().client("gui-term") {

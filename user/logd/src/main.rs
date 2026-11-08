@@ -35,6 +35,7 @@ extern crate alloc;
 
 mod fatlog;
 mod report;
+mod shots;
 
 use alloc::collections::VecDeque;
 use alloc::format;
@@ -92,6 +93,14 @@ pub struct Logd {
     repeats: u32,
     /// Ztracene radky podle jadra (uz ohlasene).
     lost_lines: u64,
+    /// Kanal od kompozitoru s obrazky diagnostickeho snimku (`shots.rs`).
+    shots: Option<Channel>,
+    /// Revize sestaveni z logu jadra (jmena obrazku snimku).
+    build: String,
+    /// Dalsi misto obrazku na MO-LOGY.
+    shot_slot: u64,
+    /// Nejvic obrazku v `/log` (`snimek.conf`).
+    shot_keep: usize,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -118,6 +127,10 @@ fn main(startup: Startup) -> i64 {
         last_key: Vec::new(),
         repeats: 0,
         lost_lines: 0,
+        shots: None,
+        build: String::new(),
+        shot_slot: 0,
+        shot_keep: 10,
     };
     // Cekat na `start` od initu (az ma pripravene slozky).
     match ctl.read(Some(time::deadline_after(Duration::from_secs(30)))) {
@@ -143,6 +156,12 @@ fn main(startup: Startup) -> i64 {
     println!("logd: log bootu {} do /system/log/{}", d.boot, d.log_name());
     loop {
         match ctl.read(Some(time::deadline_after(TICK))) {
+            // Kanal pro obrazky diagnostickeho snimku (init, viz `shots.rs`).
+            Ok(m) if m.data == b"snapshots" => {
+                if let Some(h) = m.handles.into_iter().next() {
+                    d.set_shots(Channel::from_handle(h));
+                }
+            }
             Ok(m) => d.message(&ctl, &m.data),
             Err(Error::TimedOut) | Err(Error::ShouldWait) => {}
             Err(Error::PeerClosed) => {
@@ -154,6 +173,7 @@ fn main(startup: Startup) -> i64 {
             Err(_) => {}
         }
         d.pump();
+        d.poll_shots();
         // Prvni kopie hned po startu, pak kazdych FAT_MIRROR.
         if d.last_mirror == 0 || time::now().saturating_sub(d.last_mirror) >= FAT_MIRROR.as_nanos() as u64 {
             d.mirror();
@@ -281,6 +301,7 @@ impl Logd {
                 // Nejdriv dotahnout posledni log (vypis pady jadrem).
                 self.pump();
                 self.save_proc_crash(name, why);
+                self.shots_crash(name);
             }
             Some("report") => {
                 self.pump();
@@ -370,6 +391,11 @@ impl Logd {
         let Some(end) = self.partial.iter().rposition(|&c| c == b'\n') else { return };
         let whole: Vec<u8> = self.partial.drain(..=end).collect();
         for line in whole.split_inclusive(|&c| c == b'\n') {
+            if self.build.is_empty()
+                && let Some(b) = shots::build_from_line(line)
+            {
+                self.build = b;
+            }
             let key = line_key(line);
             if key == self.last_key.as_slice() {
                 self.repeats += 1;

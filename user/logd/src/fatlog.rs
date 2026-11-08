@@ -96,6 +96,13 @@ impl FatLog {
         self.write(&format!("PAD{slot:02}.TXT"), data.as_bytes());
     }
 
+    /// Obrazek diagnostickeho snimku na misto `slot`; vraci jmeno souboru.
+    pub fn snapshot(&mut self, slot: u64, data: &[u8]) -> String {
+        let name = format!("SNIM{:02}.BMP", slot % crate::shots::FAT_SLOTS);
+        self.write(&name, data);
+        format!("{DIR}/{name}")
+    }
+
     pub fn report(&mut self, text: &[u8]) {
         self.write("REPORT.TXT", text);
     }

@@ -10,7 +10,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use guiproto::Rect;
 use guiproto::action::{Arg, Value};
 use guiproto::control::{CallerMsg, CallerReply, DialogKind, InspectReply, InspectRequest, WindowInfo};
 use guiproto::window::ServerMsg;
@@ -286,28 +285,9 @@ impl Comp {
                     })
                     .collect(),
             ),
-            InspectRequest::Tree { window } => match self.windows.get(&window) {
+            InspectRequest::Tree { window } => match self.screen_tree(window) {
                 None => InspectReply::Error(guiproto::Error::NotFound),
-                Some(w) => {
-                    let (c, origin) = (w.client, (w.rect.x, w.rect.y));
-                    let nodes = w
-                        .a11y
-                        .nodes()
-                        .map(|n| {
-                            let mut n = n.clone();
-                            let (lx, ly) = if n.layer == 0 { (0, 0) } else { self.layer_origin(c, n.layer).unwrap_or((0, 0)) };
-                            n.bounds = Rect::new(
-                                origin.0.saturating_add(lx).saturating_add(n.bounds.x),
-                                origin.1.saturating_add(ly).saturating_add(n.bounds.y),
-                                n.bounds.w,
-                                n.bounds.h,
-                            );
-                            n.layer = 0;
-                            n
-                        })
-                        .collect();
-                    InspectReply::Tree(nodes)
-                }
+                Some(nodes) => InspectReply::Tree(nodes),
             },
             InspectRequest::Act { window, node, action, value } => match self.windows.get(&window) {
                 Some(w) if w.a11y.get(node).is_some_and(|n| n.actions & action != 0) => {

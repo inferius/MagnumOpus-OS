@@ -33,6 +33,7 @@ pub const TESTS: &[Test] = &[
     ("compd: bezpecna obrazovka po Ctrl+Alt+Del (QMP)", secure_screen),
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
     ("compd: spravce uloh a ikona uloh v panelu", task_manager),
+    ("compd: diagnosticky snimek po Print Screen (QMP)", super::gui_snapshot::diag_snapshot),
     ("compd: vzhled podle navrhu, snimky obrazovky (QMP)", look_shots),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.
@@ -170,6 +171,7 @@ fn window_and_a11y(startup: &Startup) -> TestResult {
     check!(gui.size.0 >= 640 && gui.size.1 >= 400, "maly displej");
     let input = devices().and_then(|d| d.input.as_ref()).ok_or("sluzba vstupu nebezi")?;
     gui.take_input(input).map_err(|e| fail("predani vstupu", e))?;
+    gui::connect_snapshots(&gui);
     let inspect = gui.channel(INSPECT.as_bytes()).map_err(|e| fail("inspect", e))?;
     gui.launch(startup, "gui-demo").map_err(|e| fail("spusteni gui-demo", e))?;
     let w = wait_window(&inspect, "org.magnumopus.demo")?;

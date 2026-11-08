@@ -492,6 +492,78 @@ VMware posílá polohu i stisk v jednom hlášení, takže se kliky na malé prv
 (zaškrtávací pole Správce úloh) ztrácely. Test `task_manager` to ověřuje
 fyzickým klikem z QMP (pohyb a stisk v jednom snímku).
 
+### Diagnostický snímek (Print Screen)
+
+Snímek vzniká **jen na vyžádání**, nikdy průběžně. Spouštěče:
+
+| spouštěč | výchozí stav |
+|---|---|
+| zkratka **Print Screen** a záložní **Ctrl+Alt+Shift+S** (přes VMware a vzdálenou plochu Print Screen často neprojde); jen fyzická klávesnice, aplikaci nejde, umělý vstup ji nespustí | zapnuto **[ověřeno v QEMU]** (test `diag_snapshot`, Print Screen) |
+| příkaz `snapshot` kompozitoru: init ho pošle na žádost `powerproto::Request::Snapshot` z relace shellu (příkaz `diag snap`) | init a kompozitor **[ověřeno v QEMU]** (test `diag_snapshot`); příkaz shellu **[navrženo]**, doplní vlákno shellu (`libs/shlang`, `user/shsess`) |
+| automaticky, když aplikace přestane odpovídat (ztlumené okno „nereaguje“) | **vypnuto** **[implementováno]** |
+| automaticky po pádu procesu (`logd` dostane `proc-crash` od supervisoru a požádá kompozitor) | **vypnuto** **[implementováno]** |
+
+Nastavení je v `/system/log/snimek.conf` (`klíč = hodnota`, `#` komentář;
+chybí-li, `logd` ho vytvoří s výchozími hodnotami a vysvětlením). Načte ho
+`logd` při spojení s kompozitorem a pošle mu ho:
+
+| klíč | hodnoty | výchozí |
+|---|---|---|
+| `zkratka` | `obe`, `print`, `ctrl+alt+shift+s`, `vypnuto` | `obe` |
+| `auto_nereaguje` | `0`/`1` | `0` |
+| `auto_pad` | `0`/`1` | `0` |
+| `interval` | nejmenší odstup automatických snímků v sekundách | `60` |
+| `max_souboru` | nejvíc obrázků v `/system/log` (starší se smažou) | `10` |
+
+Snímek má id z data a času UTC (`20261108-171502`, bez reálného času čas
+od startu `t162.345`), které spojí blok v logu s obrázkem.
+
+- **Blok stavu v logu** (sériová linka i `logd`): řádky `snimek <id>: ...`
+  od `zacatek` po `konec`. Obsahuje polohu ukazatele, okno s drženým
+  tlačítkem a tažení, fokus, modální dialog (druh, aplikace, text, volby),
+  okna shora dolů (id, aplikace, titulek, obdélník, z-pořadí, režim, stav)
+  a pro každé okno strom přístupnosti s obdélníky v souřadnicích obrazovky
+  (role, jméno, stav `checked`/`disabled`/`focused`/`selected`/`hover`/
+  `pressed`, akce). U okna: obdélník obsahu i s rámem, fokus, `v popredi`,
+  minimalizované/maximalizované, `nereaguje` a čím je zakryté (okno
+  a procento plochy). U každého prvku viditelnost: `viditelny`, `orezany
+  na ...` (rodičem nebo scrollem), `mimo pohled`, `castecne zakryty
+  (okno ..., N %)`, `zakryty (okno ...)`. U každé posuvné oblasti (vrstva
+  s ořezem a obsahem: seznam, terminál, posuvná skupina) `scroll
+  340/1200, vyrez 400` (posun, výška obsahu, výška výřezu). Na konci je
+  posledních 20 kroků [trasování vstupu](#trasování-vstupu-cíl-logu-vstup)
+  z `compd` s id. **[ověřeno v QEMU]** (test `diag_snapshot`)
+- **Obrázek obrazovky** (BMP 24 bitů, otevře ho i Windows): `compd` ho
+  pošle `logd` kanálem, který propojí init (příkaz `snapshots`), a `logd`
+  ho uloží do `/system/log/snimek-<boot>-<id>-<revize>.bmp` (nejvýš 10
+  souborů, starší smaže). Revize je commit z řádku jádra `sestaveni`.
+  **[ověřeno v QEMU]** (test `diag_snapshot`, kontroluje soubor a hlavičku
+  BMP). Na živém USB i kopie `MAGNUMOS/SNIMnn.BMP` na oddílu MO-LOGY (8
+  míst dokola, jména 8.3); řádek `logd: snimek <id>: ...` říká, kam obrázek
+  šel. **[implementováno]**
+- Řádky bloku jádro neomezuje (jinak platí nejvýš 10 podobných řádků za
+  sekundu na proces): výjimka jen pro proces `compd` a řádky `snimek `,
+  snímek vzniká jen na vyžádání.
+- Při skládání na GPU obrazovka v `compd` namapovaná není: zapíše se jen
+  blok stavu a řádek, proč obrázek chybí. **[implementováno]**
+- Po pádu a restartu `compd` kanál do `logd` chybí (init ho posílá jen při
+  startu plochy, stejně jako zdroje stavu lišty): dál se zapisuje jen blok
+  stavu. **[implementováno]**
+- **Cena snímku** (revize `ec7f710*`, x86_64 v QEMU bez KVM na hostiteli
+  s Windows, obrazovka 1280x800, 3 okna, test `diag_snapshot`): sestavení
+  stavu 5,9 ms, zápis bloku 57 řádků (8 064 B) do logu 1 027 ms, obrázek
+  BMP 3 072 054 B do VMO 595 ms; `logd` ho uloží do souboru zhruba za
+  1,5 s. Kompozitor po dobu snímku (~1,6 s) nekreslí; skoro celý čas je
+  zápis řádků přes `DEBUG_LOG` (sériová linka v emulaci) a převod pixelů.
+  Na skutečném stroji neměřeno.
+
+⚠️ **Soukromí:** snímek ukládá obsah oken všech aplikací (obrázek, jména
+uzlů stromu přístupnosti, texty dialogů) do **místního** logu systému
+(`/system/log`, MO-LOGY), nikam se neposílá. Zkratka je jen systémová,
+aplikace ji nespustí ani nezachytí. Hodnoty textových polí a heslo
+v dialogu se do bloku nezapisují. Balíček pro vývojáře (`report`) z logu
+bere i tyto řádky, proto ho před sdílením projděte.
+
 ## Systémové dialogy
 
 Dialog (oprávnění, heslo, potvrzení akce) kreslí kompozitor ve **zvláštní
@@ -607,6 +679,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `tasks <běží> <agent>` | - | `ok` (ikona úloh v panelu) |
 | `theme light\|dark\|contrast` | - | `ok` (režim barev z tokenů) |
 | `sources [net] [audio]` | relace sítě (`INFO`), kanál zvuku | `ok` (stav v liště) |
+| `snapshots` | kanál na `logd` | prázdná (obrázky [diagnostického snímku](#diagnostický-snímek-print-screen)) |
 
 **Inspekce** (`inspect`, pro testy, později čtečku obrazovky a lupu):
 seznam oken, strom přístupnosti okna v souřadnicích obrazovky, akce přes

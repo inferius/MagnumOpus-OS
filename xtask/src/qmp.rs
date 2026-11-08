@@ -168,6 +168,10 @@ fn gui_steps(s: &mut Vec<Step>) {
     s.push(Step::Send(vec![key("ret", false)]));
     // Spravce uloh: fyzicky klik na zaskrtavaci pole (test `task_manager`).
     s.push(Step::ClickAt(gui::CLICK));
+    // Diagnosticky snimek (test `diag_snapshot`): Print Screen.
+    s.push(Step::WaitFor(gui::SNAPSHOT));
+    s.push(Step::Send(vec![key("print", true)]));
+    s.push(Step::Send(vec![key("print", false)]));
     // Snimky vzhledu (test `look_shots`): screendump virtio-gpu do PNG.
     let dir = crate::target_dir().join("shots");
     let _ = std::fs::create_dir_all(&dir);
@@ -184,6 +188,7 @@ mod gui {
     pub const SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
     pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
     pub const CLICK: &str = "init: test gui: klik mysi na ";
+    pub const SNAPSHOT: &str = "init: test gui: diagnosticky snimek ceka na Print Screen";
     pub const SHOT: [&str; 3] = ["init: test gui: snimek light", "init: test gui: snimek dark", "init: test gui: snimek contrast"];
     pub const SHOT_NAMES: [&str; 3] = ["light", "dark", "contrast"];
 }

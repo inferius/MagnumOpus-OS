@@ -513,6 +513,82 @@ so clicks on small elements (Task manager checkboxes) were lost. The
 `task_manager` test checks this with a physical QMP click (motion and press
 in one frame).
 
+### Diagnostic snapshot (Print Screen)
+
+A snapshot is taken **only on request**, never continuously. Triggers:
+
+| trigger | default |
+|---|---|
+| shortcut **Print Screen** and fallback **Ctrl+Alt+Shift+S** (Print Screen often does not get through VMware or remote desktop); physical keyboard only, not passed to the app, synthetic input cannot trigger it | on **[verified in QEMU]** (test `diag_snapshot`, Print Screen) |
+| compositor command `snapshot`: init sends it on a `powerproto::Request::Snapshot` from the shell session (command `diag snap`) | init and compositor **[verified in QEMU]** (test `diag_snapshot`); the shell command **[designed]**, to be added by the shell thread (`libs/shlang`, `user/shsess`) |
+| automatically when an app stops responding (dimmed "not responding" window) | **off** **[implemented]** |
+| automatically after a process crash (`logd` gets `proc-crash` from the supervisor and asks the compositor) | **off** **[implemented]** |
+
+Settings live in `/system/log/snimek.conf` (`key = value`, `#` comment;
+if missing, `logd` creates it with defaults and explanations). `logd` reads
+it when it connects to the compositor and sends it over:
+
+| key | values | default |
+|---|---|---|
+| `zkratka` | `obe`, `print`, `ctrl+alt+shift+s`, `vypnuto` | `obe` |
+| `auto_nereaguje` | `0`/`1` | `0` |
+| `auto_pad` | `0`/`1` | `0` |
+| `interval` | minimum gap between automatic snapshots in seconds | `60` |
+| `max_souboru` | most images kept in `/system/log` (older are deleted) | `10` |
+
+The snapshot id is the UTC date and time (`20261108-171502`, without real
+time the uptime `t162.345`); it links the log block with the image.
+
+- **State block in the log** (serial and `logd`): lines `snimek <id>: ...`
+  from `zacatek` to `konec`. It holds the pointer position, the window with
+  the held button and dragging, focus, the modal dialog (kind, app, text,
+  options), windows top to bottom (id, app, title, rectangle, z-order, mode,
+  state) and for each window the accessibility tree with rectangles in
+  screen coordinates (role, name, state `checked`/`disabled`/`focused`/
+  `selected`/`hover`/`pressed`, actions). Per window: content rectangle and
+  with frame, focus, `v popredi` (foreground), minimized/maximized,
+  `nereaguje` and what covers it (window and percent of area). Per element
+  visibility: `viditelny` (visible), `orezany na ...` (clipped by parent or
+  scroll), `mimo pohled` (out of view), `castecne zakryty (okno ..., N %)`
+  (partly covered), `zakryty (okno ...)` (covered). Per scroll area (a layer
+  with clipping and content: list, terminal, scroll group) `scroll 340/1200,
+  vyrez 400` (offset, content height, viewport height). The last 20 [input tracing](#input-tracing-log-target-vstup)
+  steps from `compd` with ids close the block. **[verified in QEMU]** (test
+  `diag_snapshot`)
+- **Screen image** (24-bit BMP, opens in Windows): `compd` sends it to
+  `logd` over a channel that init connects (command `snapshots`), and `logd`
+  stores it as `/system/log/snimek-<boot>-<id>-<revision>.bmp` (at most 10
+  files, older ones are deleted). The revision is the commit from the
+  kernel line `sestaveni`. **[verified in QEMU]** (test `diag_snapshot`,
+  checks the file and the BMP header). On a live USB also a copy
+  `MAGNUMOS/SNIMnn.BMP` on the MO-LOGY partition (8 rotating slots, 8.3
+  names); the line `logd: snimek <id>: ...` says where the image went.
+  **[implemented]**
+- The kernel does not limit the block lines (otherwise at most 10 similar
+  lines per second per process apply): an exception only for the `compd`
+  process and lines starting `snimek `, since snapshots are on request only.
+- With GPU composition the screen is not mapped in `compd`: only the state
+  block and a line saying why the image is missing are written.
+  **[implemented]**
+- After a `compd` crash and restart the channel to `logd` is missing (init
+  sends it only when the desktop starts, like the bar status sources): only
+  the state block is written. **[implemented]**
+- **Snapshot cost** (revision `ec7f710*`, x86_64 in QEMU without KVM on
+  a Windows host, 1280x800 screen, 3 windows, test `diag_snapshot`):
+  building the state 5.9 ms, writing the 57-line block (8,064 B) to the log
+  1,027 ms, the 3,072,054 B BMP image into a VMO 595 ms; `logd` stores it to
+  the file in about 1.5 s. The compositor does not draw during the
+  snapshot (~1.6 s); almost all of it is writing lines through `DEBUG_LOG`
+  (the emulated serial line) and converting pixels. Not measured on real
+  hardware.
+
+⚠️ **Privacy:** the snapshot stores the contents of all apps' windows (the
+image, accessibility node names, dialog texts) in the **local** system log
+(`/system/log`, MO-LOGY); it is not sent anywhere. The shortcut is
+system-only, apps can neither trigger nor intercept it. Text field values
+and the dialog password are not written to the block. The developer bundle
+(`report`) takes these lines from the log too, so review it before sharing.
+
 ## System dialogs
 
 A dialog (permission, password, action confirmation) is drawn by the
@@ -624,6 +700,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `tasks <running> <agent>` | - | `ok` (task icon in the panel) |
 | `theme light\|dark\|contrast` | - | `ok` (color mode from the tokens) |
 | `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
+| `snapshots` | channel to `logd` | empty (images of the [diagnostic snapshot](#diagnostic-snapshot-print-screen)) |
 
 **Inspection** (`inspect`, for tests, later a screen reader and
 magnifier): list of windows, the accessibility tree of a window in screen

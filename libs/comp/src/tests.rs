@@ -1220,3 +1220,16 @@ fn maximize_damages_old_place() {
     let area: u64 = rects.iter().map(|d| { let i = d.intersect(&big); i.w as u64 * i.h as u64 }).sum();
     assert!(area >= big.w as u64 * big.h as u64, "plocha po zmenseni: {rects:?}");
 }
+
+#[test]
+fn snapshot_config_and_shortcut() {
+    use crate::diag::{Config, Shortcut};
+    use inputproto::code::{KEY_S, KEY_SYSRQ};
+    use inputproto::mods::{ALT, CTRL, SHIFT};
+    let d = Config::default();
+    assert_eq!((d.shortcut, d.auto_hung, d.auto_crash), (Shortcut::Both, false, false), "auto vychozi vypnuto");
+    assert!(d.is_shortcut(KEY_SYSRQ, 0) && d.is_shortcut(KEY_S, CTRL | ALT | SHIFT) && !d.is_shortcut(KEY_S, CTRL | ALT));
+    let c = Config::parse("zkratka=vypnuto auto_nereaguje=1 interval=5 nevim=x");
+    assert!(!c.is_shortcut(KEY_SYSRQ, 0) && c.auto_hung && !c.auto_crash && c.interval_s == 5);
+    assert_eq!(Config::parse("zkratka=print").is_shortcut(KEY_S, CTRL | ALT | SHIFT), false);
+}
