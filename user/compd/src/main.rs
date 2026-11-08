@@ -236,12 +236,20 @@ impl Service {
         }
         // Spusteni aplikaci z listy: zadost initu (init spousti a hlida).
         if let Some(c) = self.comp.as_mut() {
-            for id in c.take_launch_requests() {
+            let mut msgs: Vec<String> = c.take_launch_requests().into_iter().map(|id| format!("launch {id}")).collect();
+            // Paleta: vypnout a restartovat provede init (napajeni).
+            for r in c.take_system_requests() {
+                msgs.push(String::from(match r {
+                    comp::palette::SystemRequest::Shutdown => "system shutdown",
+                    comp::palette::SystemRequest::Reboot => "system reboot",
+                }));
+            }
+            for m in msgs {
                 match &self.launcher {
                     Some(l) => {
-                        let _ = l.write(format!("launch {id}").as_bytes(), Vec::new());
+                        let _ = l.write(m.as_bytes(), Vec::new());
                     }
-                    None => println!("compd: aplikaci {id} nejde spustit: init nedal kanal launcher"),
+                    None => println!("compd: '{m}' nejde: init nedal kanal launcher"),
                 }
             }
         }

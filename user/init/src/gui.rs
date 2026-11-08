@@ -492,6 +492,18 @@ pub fn launch_requests(startup: &Startup, sup: &mut Supervisor) {
             }
         };
         let text = String::from_utf8_lossy(&m.data).into_owned();
+        // Paleta prikazu: vypnout / restartovat (jako prikaz shellu).
+        if let Some(what) = text.strip_prefix("system ") {
+            let reboot = match what {
+                "shutdown" => false,
+                "reboot" => true,
+                _ => continue,
+            };
+            println!("init: paleta prikazu zada {}", if reboot { "restart" } else { "vypnuti" });
+            let e = crate::power::shutdown(sup, reboot);
+            println!("init: vypnuti z palety selhalo: {e}");
+            continue;
+        }
         let Some(id) = text.strip_prefix("launch ") else { continue };
         let Some(program) = DESKTOP_APPS.iter().find(|p| recipe(startup, p).is_ok_and(|i| i.id == id)) else {
             println!("init: kompozitor chce spustit neznamou aplikaci {id}");

@@ -519,6 +519,28 @@ coordinates, pointer leave, button with position, wheel and focus; plus
 modifiers, the synthetic flag and time. Motion and button release go to
 the window that got the press, even when the pointer leaves it.
 
+### Command palette (v1)
+
+The system shortcut **Ctrl+K** or **Super+K** (physical keyboard only)
+opens the palette at the top centre of the screen per
+`design/prostredi-menu.html`. The compositor draws it above all windows:
+an app cannot cover it and gets no key while it is open. Typing searches
+(lower case without diacritics, "sprav" finds "Správce úloh"), arrows move
+the selection, Enter runs, Esc or a click outside closes, a click on a row
+runs it. **[implemented]** (test `command_palette_search_run_and_recent`
+in `libs/comp`)
+
+| group | v1 items | does |
+|---|---|---|
+| recent | the last 8 used, on top | like the original item |
+| Window | open windows (top to bottom) | switch (also from minimized) |
+| App | desktop apps from the `apps` list | start via init / activate |
+| System | Diagnostic snapshot, Restart, Shut down | snapshot in the compositor; restart and shutdown via init (`system reboot\|shutdown` on the `launcher` channel, like the shell command) |
+
+App actions (menus through the action API) come in v2: the structure has
+an `AppAction` item for them (window, action id, label). **[designed]**
+Lock and fullscreen are added once they exist in the system. **[designed]**
+
 ### Launching apps from the bar
 
 Init sends the compositor the list of desktop apps (`apps`, id and name

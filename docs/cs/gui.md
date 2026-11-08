@@ -496,6 +496,28 @@ okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
 modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
 oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
+### Paleta příkazů (v1)
+
+Systémová zkratka **Ctrl+K** nebo **Super+K** (jen fyzická klávesnice)
+otevře nahoře uprostřed obrazovky paletu podle `design/prostredi-menu.html`.
+Kreslí ji kompozitor nad všemi okny: aplikace ji nepřekryje a dokud je
+otevřená, nedostane žádnou klávesu. Psaním se hledá (malá písmena bez
+diakritiky, „sprav“ najde „Správce úloh“), šipky mění výběr, Enter
+provede, Esc nebo klik mimo zavře, klik na řádek provede.
+**[implementováno]** (test `command_palette_search_run_and_recent`
+v `libs/comp`)
+
+| skupina | položky v1 | provede |
+|---|---|---|
+| nedávné | posledních 8 použitých, nahoře | jako původní položka |
+| Okno | otevřená okna (shora dolů) | přepnutí (i z minimalizace) |
+| Aplikace | aplikace plochy ze seznamu `apps` | spuštění initem / aktivace |
+| Systém | Diagnostický snímek, Restartovat, Vypnout | snímek v kompozitoru; restart a vypnutí initem (`system reboot\|shutdown` na kanálu `launcher`, jako příkaz shellu) |
+
+Akce aplikací (menu přes API akcí) přijdou ve v2: struktura má pro ně
+položku `AppAction` (okno, id akce, popisek). **[navrženo]** Zamknutí
+a celá obrazovka přibudou, až budou v systému. **[navrženo]**
+
 ### Spouštění aplikací z lišty
 
 Init pošle kompozitoru seznam aplikací plochy (`apps`, id a jméno
