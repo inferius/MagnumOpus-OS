@@ -181,6 +181,12 @@ fn command(
         // Zdroj nahody z hostitele (doplnuje entropii jadra, viz
         // docs/cs/syscally.md RANDOM_ADD).
         .args(["-device", "virtio-rng-pci,disable-legacy=on,iommu_platform=on"])
+        // Druha sitova karta Intel 82574L (ovladac e1000e) ve vlastni siti
+        // slirp; netd pouziva prvni kartu (virtio-net), test ovladacu tuto.
+        // Posledni zarizeni PCI: sloty ostatnich se nemeni (DEVICE_LAYOUT
+        // zustava). Emulovana karta jde pres IOMMU vzdy (bez prepinace).
+        .args(["-netdev", "user,id=net1"])
+        .args(["-device", "e1000e,netdev=net1,romfile="])
         // Seriova linka do terminalu a zaroven do souboru, aby se dal vystup
         // dohledat i po skonceni behu.
         .arg("-chardev")

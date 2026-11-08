@@ -1,0 +1,55 @@
+thread 'coordinator' panicked at /rustc-dev/2d20b42b883dcfc014f3c2c56081eeb6091c2179/compiler/rustc_codegen_ssa\src\back\write.rs:1913:10:
+failed to spawn work thread: Os { code: 1455, kind: Uncategorized, message: "K dokončení požadované služby je stránkovací soubor příliš malý." }
+stack backtrace:
+   0:     0x7fffde29bb4f - std::backtrace::Backtrace::create
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\backtrace.rs:331
+   1:     0x7fffde29ba9a - std::backtrace::Backtrace::force_capture
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\backtrace.rs:312
+   2:     0x7fffdff70d8b - strncpy
+   3:     0x7fffde2b0174 - std::panicking::panic_with_hook
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\panicking.rs:819
+   4:     0x7fffde292d9e - std::panicking::panic_handler::closure$0
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\panicking.rs:685
+   5:     0x7fffde29055f - std::sys::backtrace::__rust_end_short_backtrace<std::panicking::panic_handler::closure_env$0,never$>
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\sys\backtrace.rs:182
+   6:     0x7fffde29388e - std::panicking::panic_handler
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\panicking.rs:676
+   7:     0x7fffe263145d - core::panicking::panic_fmt
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/core\src\panicking.rs:80
+   8:     0x7fffe2631977 - core::result::unwrap_failed::unwrap_failed_inner
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/core\src\result.rs:1874
+   9:     0x7fffe0146b3d - strncpy
+  10:     0x7fffdaa44166 - _LNan_C
+  11:     0x7fffde393034 - std::`dynamic initializer for 'initlocks''
+  12:     0x7fffdaa4a5dd - _LNan_C
+  13:     0x7fffdaa570fd - _LNan_C
+  14:     0x7fffde2bbd7f - std::sys::thread::windows::impl$0::new::thread_start
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\sys\thread\windows.rs:58
+  15:     0x7ffa5bd6dda7 - BaseThreadInitThunk
+  16:     0x7ffa5c57ee4c - RtlUserThreadStart
+
+
+rustc version: 1.101.0-nightly (2d20b42b8 2026-11-04)
+platform: x86_64-pc-windows-msvcthread 'rustc' panicked at /rustc-dev/2d20b42b883dcfc014f3c2c56081eeb6091c2179/compiler/rustc_codegen_ssa\src\back\write.rs:2131:17:
+panic during codegen/LLVM phase
+stack backtrace:
+   0:     0x7fffde29bb4f - std::backtrace::Backtrace::create
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\backtrace.rs:331
+   1:     0x7fffde29ba9a - std::backtrace::Backtrace::force_capture
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\backtrace.rs:312
+   2:     0x7fffdff70d8b - strncpy
+   3:     0x7fffde2b0174 - std::panicking::panic_with_hook
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\panicking.rs:819
+   4:     0x7fffe25db17c - strncpy
+   5:     0x7fffe25d9119 - strncpy
+   6:     0x7fffe25d90f3 - strncpy
+   7:     0x7fffe25e4d90 - strncpy
+   8:     0x7fffdaa9bef1 - _LNan_C
+   9:     0x7fffdaa1aef7 - _LNan_C
+  10:     0x7fffda9edb23 - _LNan_C
+  11:     0x7fffda9e7905 - _LNan_C
+  12:     0x7fffda9f2cf7 - _LNan_C
+  13:     0x7fffde2bbd7f - std::sys::thread::windows::impl$0::new::thread_start
+                               at /rustc/2d20b42b883dcfc014f3c2c56081eeb6091c2179/library/std\src\sys\thread\windows.rs:58
+  14:     0x7ffa5bd6dda7 - BaseThreadInitThunk
+  15:     0x7ffa5c57ee4c - RtlUserThreadStart

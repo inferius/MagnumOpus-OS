@@ -195,6 +195,8 @@ impl Nic {
                 mac,
                 mtu: 1500,
                 flags: if up { link::FLAG_UP } else { 0 },
+                // Rychlost virtualni karta nehlasi (bez VIRTIO_NET_F_SPEED_DUPLEX).
+                speed_mbps: 0,
             },
             dropped_rx: 0,
         })
