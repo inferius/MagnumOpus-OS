@@ -23,6 +23,8 @@ pub struct Response<M> {
     /// Zmeneny posun posouvanych oblasti (index prvku, posun): jen
     /// vlastnost vrstvy v kompozitoru, bez prekresleni.
     pub scrolls: Vec<(usize, i32)>,
+    /// Kroky trasovani vstupu (klient je vypise s id udalosti).
+    pub trace: Vec<String>,
 }
 
 impl<M> Default for Response<M> {
@@ -31,6 +33,7 @@ impl<M> Default for Response<M> {
             msgs: Vec::new(),
             redraw: false,
             scrolls: Vec::new(),
+            trace: Vec::new(),
         }
     }
 }
@@ -81,6 +84,8 @@ impl<M: Clone> Ui<M> {
             InputEvent::Button { code, pressed, x, y } if code == BTN_LEFT => {
                 self.pointer = (x, y);
                 let h = self.hit(x, y);
+                let act = if pressed { "stisk" } else { "pusteni" };
+                r.trace.push(alloc::format!("{act} na {x},{y}: prvek {}", self.describe(h)));
                 if pressed {
                     self.pressed = h;
                     self.pressed_rect = h.map(|i| (self.elems[i].space, self.elems[i].rect));
@@ -108,6 +113,9 @@ impl<M: Clone> Ui<M> {
                         && !self.elems[i].disabled
                     {
                         self.activate(i, &mut r);
+                    } else {
+                        let why = if p.is_none() { "stisk nedosel nebo byl zrusen" } else if h.is_some_and(|i| self.elems[i].disabled) { "prvek je nedostupny" } else { "stisk byl na jinem prvku" };
+                        r.trace.push(alloc::format!("bez aktivace: {why} (stisk {})", self.describe(p)));
                     }
                     r.redraw = true;
                 }
@@ -155,15 +163,23 @@ impl<M: Clone> Ui<M> {
         if self.elems[i].disabled {
             return;
         }
+        let d = self.describe(Some(i));
         match &self.elems[i].kind {
-            ElemKind::Button { on_click: Some(m), .. } => r.msgs.push(m.clone()),
-            ElemKind::Checkbox { checked, on_toggle: Some(f), .. } => r.msgs.push(f(!*checked)),
+            ElemKind::Button { on_click: Some(m), .. } => {
+                r.trace.push(alloc::format!("klik tlacitka {d}"));
+                r.msgs.push(m.clone());
+            }
+            ElemKind::Checkbox { checked, on_toggle: Some(f), .. } => {
+                r.trace.push(alloc::format!("prepnuti {d} na {}", if *checked { "nezaskrtnuto" } else { "zaskrtnuto" }));
+                r.msgs.push(f(!*checked));
+            }
             ElemKind::ListItem { index, list, .. } => {
                 if let ElemKind::List { on_select: Some(f), .. } = &self.elems[*list - 1].kind {
+                    r.trace.push(alloc::format!("vyber {d}"));
                     r.msgs.push(f(*index));
                 }
             }
-            _ => {}
+            _ => r.trace.push(alloc::format!("{d}: bez akce")),
         }
     }
 
@@ -255,6 +271,21 @@ impl<M: Clone> Ui<M> {
             self.cursor.insert(f, cur + 1);
             r.redraw = true;
         }
+    }
+
+    /// Popis prvku pro trasovani (druh a text, ne hodnota pole: muze byt
+    /// heslo).
+    fn describe(&self, i: Option<usize>) -> String {
+        let Some(i) = i.filter(|&i| i < self.elems.len()) else { return String::from("zadny") };
+        let (k, t) = match &self.elems[i].kind {
+            ElemKind::Button { text, .. } => ("tlacitko", text.as_str()),
+            ElemKind::Checkbox { text, .. } => ("zaskrtavaci pole", text.as_str()),
+            ElemKind::ListItem { text, .. } => ("radek", text.as_str()),
+            ElemKind::TextInput { .. } => ("textove pole", ""),
+            ElemKind::List { .. } => ("seznam", ""),
+            _ => ("jiny", ""),
+        };
+        alloc::format!("{i} {k} '{t}'")
     }
 
     /// Akce pristupnosti na uzlu (ctecka obrazovky, test, agent).

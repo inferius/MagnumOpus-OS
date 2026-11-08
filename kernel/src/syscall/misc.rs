@@ -5,6 +5,9 @@ use crate::arch;
 use crate::error::Result;
 use crate::log;
 
+/// Predpona radku trasovani vstupu (`docs/cs/gui.md`, Trasovani vstupu).
+const VSTUP: &str = "vstup:";
+
 /// `DEBUG_LOG(ptr, len)`: zapise text procesu do logu jadra.
 pub fn debug_log(a: Args) -> Result<u64> {
     let p = current_process();
@@ -14,6 +17,11 @@ pub fn debug_log(a: Args) -> Result<u64> {
     // Uroven podle jmena procesu (`LOG_CONTROL`, napr. `virtio-blk=warn`)
     // a omezeni opakovane hlasky procesu.
     if !log::enabled_for(log::Level::Info, &p.name) {
+        return Ok(0);
+    }
+    // Trasovani vstupu ("vstup: ...", inputd -> compd -> aplikace -> sluzba):
+    // vlastni cil `vstup`, vypina se jednim prepsanim (`loglevel vstup warn`).
+    if text.starts_with(VSTUP) && !log::enabled_for(log::Level::Info, "vstup") {
         return Ok(0);
     }
     match log::limit::check(log::limit::text_key(p.id, &text), crate::arch::now_ns()) {

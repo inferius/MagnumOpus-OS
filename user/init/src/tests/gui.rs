@@ -395,9 +395,9 @@ fn task_manager(startup: &Startup) -> TestResult {
         // Fyzicky klik mysi na filtr "Jen úlohy agenta": seznam ukaze jen
         // ulohy agenta (klik dojde tam, kde je ukazatel, i kdyz pohyb
         // a stisk prijdou v jednom hlaseni zarizeni).
-        let w = wait_window(&s.inspect, "org.magnumopus.tasks")?;
         let only = node(&t, Role::Checkbox, "Jen úlohy agenta")?;
-        let (x, y) = (w.rect.x + only.bounds.x + 8, w.rect.y + only.bounds.y + only.bounds.h as i32 / 2);
+        // Meze z inspekce jsou uz v souradnicich obrazovky.
+        let (x, y) = (only.bounds.x + 8, only.bounds.y + only.bounds.h as i32 / 2);
         println!("{QEMU_CLICK}{x} {y}");
         let t = wait_tree(&s.inspect, w.id, "filtr po kliku mysi", |t| {
             let rows: Vec<&Node> = t.iter().filter(|n| n.role == Role::ListItem).collect();

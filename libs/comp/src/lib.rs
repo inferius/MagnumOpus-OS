@@ -120,6 +120,8 @@ pub struct Comp {
     pub(crate) input_now: u64,
     /// Bezici ulohy a z toho ulohy agenta AI (ikona v panelu).
     pub(crate) tasks: (u32, u32),
+    /// Radky trasovani vstupu (sluzba je vypise, `take_trace`).
+    pub(crate) trace: Vec<alloc::string::String>,
 }
 
 impl Comp {
@@ -151,9 +153,31 @@ impl Comp {
             token_source,
             input_now: 0,
             tasks: (0, 0),
+            trace: Vec::new(),
         };
         c.damage_all();
         c
+    }
+
+    /// Radky trasovani vstupu od posledniho volani ("vstup: id=..."; cil
+    /// logu `vstup`, `docs/cs/gui.md`).
+    pub fn take_trace(&mut self) -> Vec<alloc::string::String> {
+        core::mem::take(&mut self.trace)
+    }
+
+    /// Zapise krok trasovani kliku `time` (cas zaznamu z `inputd` = id).
+    pub(crate) fn trace(&mut self, time: u64, text: core::fmt::Arguments<'_>) {
+        // Bez odberu (testy) jen posledni radky.
+        if self.trace.len() >= 64 {
+            self.trace.remove(0);
+        }
+        self.trace.push(alloc::format!("vstup: id={} compd {text}", time / 1000));
+    }
+
+    /// Popis okna pro trasovani: aplikace a id.
+    pub(crate) fn window_name(&self, g: u32) -> alloc::string::String {
+        let app = self.windows.get(&g).and_then(|w| self.clients.get(&w.client)).map_or("?", |c| c.info.id.as_str());
+        alloc::format!("okno {g} ({app})")
     }
 
     pub fn screen(&self) -> Rect {

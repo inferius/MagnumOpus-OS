@@ -40,6 +40,14 @@ fn main(startup: Startup) -> i64 {
                 }
             };
             let backend = ChannelBackend::new(move |data| {
+                // Trasovani vstupu: pozadavek vyvolany klikem (filtry
+                // seznamu jsou mistni, do taskd nejdou).
+                let id = ui::client::input_id();
+                if id != 0
+                    && let Ok(r) = taskproto::Request::decode(&data)
+                {
+                    println!("vstup: id={id} gui-tasks -> taskd {r:?}");
+                }
                 let _ = writer.write(&data, alloc::vec::Vec::new());
             });
             let _ = taskd.write(&taskproto::Request::Hello { version: taskproto::VERSION }.encode(), alloc::vec::Vec::new());

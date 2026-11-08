@@ -178,6 +178,7 @@ impl Service {
     /// Doruci zaznamy aktualnimu prijemci: v bezpecnem rezimu kanalu
     /// `secure`, jinak vlastnikovi fokusu.
     pub fn deliver(&mut self, records: &[Record]) {
+        self.trace(records);
         let target = if self.secure_mode {
             &mut self.secure
         } else {
@@ -190,6 +191,23 @@ impl Service {
             if self.secure_mode {
                 self.leave_secure_mode();
             }
+        }
+    }
+
+    /// Trasovani vstupu (cil logu `vstup`): stisk a pusteni tlacitek
+    /// a klaves, kam jdou. Pohyb ukazatele jen jako pocet v davce. Kod
+    /// klavesy se nepise (hesla by skoncila v logu), jen ze stisk byl.
+    fn trace(&self, records: &[Record]) {
+        let kam = if self.secure_mode { "secure" } else if self.focus.is_some() { "fokus" } else { "nikam (bez fokusu)" };
+        let moves = records.iter().filter(|r| matches!(r.event, Event::Motion { .. } | Event::Absolute { .. })).count();
+        for r in records {
+            let (co, a) = match r.event {
+                Event::Button { button, action } => (alloc::format!("tlacitko {button:?}"), action),
+                Event::Key { action, .. } if action != Action::Repeat => (alloc::string::String::from("klavesa"), action),
+                _ => continue,
+            };
+            let a = if a == Action::Press { "stisk" } else { "pusteni" };
+            println!("vstup: id={} inputd {co} {a} zdroj={} mods={:#x} pohybu v davce {moves} -> {kam}", r.time / 1000, r.source, r.mods);
         }
     }
 

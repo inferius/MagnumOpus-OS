@@ -201,6 +201,10 @@ impl Service {
         }
         if let Some(c) = self.comp.as_mut() {
             c.input(&recs, now);
+            // Trasovani vstupu (cil logu `vstup`).
+            for l in c.take_trace() {
+                println!("{l}");
+            }
         }
     }
 

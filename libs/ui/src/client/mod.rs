@@ -570,15 +570,34 @@ pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h
     }
 }
 
+/// Id udalosti vstupu, kterou aplikace prave zpracovava (0 = zadna):
+/// aplikace ho pripoji k trasovani pozadavku na sluzby ("vstup: id=...").
+static INPUT_ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Id zpracovavane udalosti vstupu pro trasovani (0 = zadna).
+pub fn input_id() -> u64 {
+    INPUT_ID.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 /// Udalost okna v [`run_with`]; `Ok(false)` = zavrit.
 fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: Event, dirty: &mut bool) -> Result<bool> {
     match ev {
         Event::Input(r) => {
             let resp = ui.event(r.event, r.mods);
             let changed = !resp.msgs.is_empty();
+            // Trasovani vstupu (cil logu `vstup`): id = cas zaznamu z inputd.
+            let id = r.time / 1000;
+            INPUT_ID.store(id, core::sync::atomic::Ordering::Relaxed);
+            for l in &resp.trace {
+                libos::println!("vstup: id={id} ui {l}");
+            }
+            if changed {
+                libos::println!("vstup: id={id} aplikace zpracuje {} zprav", resp.msgs.len());
+            }
             for m in resp.msgs {
                 app.update(m);
             }
+            INPUT_ID.store(0, core::sync::atomic::Ordering::Relaxed);
             // Dalsi udalost (rychle psani pred snimkem) musi videt novy
             // stav: rozvrhnout hned, kreslit az na snimek.
             if changed {
