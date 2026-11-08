@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prostředí a menu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+/* Rozvrzeni prostredi a menu aplikaci: varianty A, B, C pod sebou na stejne
+ * scene. Obrazovka ma logicke rozmery (1920x1080, 1366x768, 2x 2560x1440 =
+ * 4K pri 150 %) a zmensi se na sirku stranky; listy a titulky maji skutecne px. */
+.page { max-width: 1500px; }
+.ctlbar { position: sticky; top: 56px; z-index: 50; display: flex; flex-wrap: wrap; gap: var(--s4); align-items: center; padding: var(--s3) var(--s4);
+  background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-card); margin: var(--s4) 0; }
+.ctlbar b { font-size: var(--t-caption-size); color: var(--c-ink-muted); margin-right: var(--s2); }
+.variant { margin-top: var(--s8); }
+.variant h2 { margin-bottom: var(--s2); }
+.fit { width: 100%; overflow: hidden; border-radius: var(--r-card); border: 1px solid var(--c-border); background: #111; }
+.monitors { display: flex; gap: 24px; transform-origin: 0 0; }
+.scr { position: relative; overflow: hidden; flex: none; font-size: 14px;
+  background: radial-gradient(circle at 18% 22%, var(--c-wall-a), transparent 52%), radial-gradient(circle at 82% 72%, var(--c-wall-b), transparent 56%), var(--c-bg); }
+.scr .tag { position: absolute; right: 16px; top: 50%; font-size: 48px; font-weight: 700; color: var(--c-ink-faint); opacity: .35; }
+/* Lista dole (A, C) */
+.lbar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 52px; display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 18px;
+  background: color-mix(in srgb, var(--c-surface) 90%, transparent); border: 1px solid var(--c-border); box-shadow: var(--sh-bar); z-index: 20; }
+.lbar .b, .tbar .b, .dock .b { height: 40px; min-width: 40px; display: inline-grid; place-items: center; border-radius: 10px; }
+.lbar .b.on { background: var(--c-accent-soft); }
+.lbar .sp, .tbar .sp { flex: 1; }
+.clock { font-size: 13px; font-weight: 600; padding: 0 8px; font-variant-numeric: tabular-nums; }
+/* Horni lista (B, C s globalni listou) */
+.tbar { position: absolute; left: 0; right: 0; top: 0; height: 30px; display: flex; align-items: center; gap: 2px; padding: 0 10px; z-index: 20;
+  background: color-mix(in srgb, var(--c-surface) 88%, transparent); border-bottom: 1px solid var(--c-border); font-size: 13px; }
+.tbar .b { height: 26px; min-width: 26px; }
+.tbar .ic { width: 16px; height: 16px; }
+.tbar .app { font-weight: 700; padding: 0 10px; }
+.tbar .mi, .mrow .mi { padding: 3px 10px; border-radius: 6px; cursor: default; }
+.tbar .mi.open, .mrow .mi.open { background: var(--c-accent-soft); color: var(--c-accent-ink); }
+.dock { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); height: 60px; display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-radius: 20px;
+  background: color-mix(in srgb, var(--c-surface) 90%, transparent); border: 1px solid var(--c-border); box-shadow: var(--sh-bar); z-index: 20; }
+.dock .b { height: 44px; min-width: 44px; } .dock .ic { width: 28px; height: 28px; }
+/* Okna */
+.w { position: absolute; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 18px; box-shadow: var(--sh-window); overflow: hidden; display: flex; flex-direction: column; }
+.w.in { box-shadow: var(--sh-window-inactive); }
+.w .t { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--c-surface-2); flex: none; font-size: 13px; font-weight: 600; }
+.w.in .t { background: var(--c-surface); color: var(--c-ink-muted); font-weight: 500; }
+.w .t .nm { flex: 1; text-align: center; }
+.w .badge { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px 0 6px; border-radius: 8px; background: var(--c-trust-bg); color: var(--c-trust-ink); border: 1px solid var(--c-trust-border); font-size: 11px; }
+.w .badge .ic { width: 14px; height: 14px; --ic-fill: none; --ic-ink: currentColor; }
+.w .wb { display: flex; gap: 2px; color: var(--c-ink-muted); }
+.w .wb .ic { width: 14px; height: 14px; }
+.w .mbtn { height: 28px; width: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--c-ink); }
+.w .mbtn.open { background: var(--c-accent-soft); }
+.mrow { height: 32px; display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--c-border); font-size: 13px; background: var(--c-surface-2); flex: none; }
+.mrow .find { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--c-ink-muted); font-size: 12px; padding: 2px 8px; border-radius: 8px; background: var(--c-surface-3); }
+.w .body { flex: 1; padding: 16px 20px; font-size: 13px; color: var(--c-ink-muted); line-height: 1.7; overflow: hidden; }
+.w .body.mono { font-family: var(--font-mono); background: var(--c-term-bg); color: var(--c-term-ink); }
+.w .body h3 { color: var(--c-ink); font-size: 20px; margin: 0 0 8px; }
+/* Menu a paleta */
+.menu-pop { position: absolute; z-index: 60; min-width: 260px; padding: 6px; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 14px; box-shadow: var(--sh-popover); font-size: 13px; }
+.menu-pop .it { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 8px; }
+.menu-pop .it.sel { background: var(--c-accent-soft); }
+.menu-pop .it.dis { color: var(--c-ink-faint); }
+.menu-pop .it .k { margin-left: auto; color: var(--c-ink-muted); font-size: 12px; }
+.menu-pop .it .ck { width: 16px; color: var(--c-accent-ink); }
+.menu-pop hr { border: 0; border-top: 1px solid var(--c-border); margin: 4px 6px; }
+.pal { position: absolute; z-index: 70; left: 50%; top: 14%; transform: translateX(-50%); width: 620px; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 18px; box-shadow: var(--sh-dialog); overflow: hidden; font-size: 13px; }
+.pal .q { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; border-bottom: 1px solid var(--c-border); font-size: 16px; }
+.pal .q .muted { font-size: 12px; margin-left: auto; }
+.pal .sec { padding: 8px 16px 2px; font-size: 11px; font-weight: 600; color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; }
+.pal .it { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 16px; }
+.pal .it.sel { background: var(--c-accent-soft); }
+.pal .it .path { color: var(--c-ink-muted); font-size: 12px; }
+.pal .it .k { margin-left: auto; display: flex; gap: 4px; }
+.pal .foot { padding: 8px 16px; border-top: 1px solid var(--c-border); font-size: 12px; color: var(--c-ink-muted); display: flex; gap: 14px; }
+.kb { display: inline-block; min-width: 20px; padding: 0 5px; border: 1px solid var(--c-border-strong); border-bottom-width: 2px; border-radius: 5px; font-size: 11px; line-height: 18px; text-align: center; color: var(--c-ink); background: var(--c-surface); }
+.edge-hint { position: absolute; left: 50%; top: 0; transform: translateX(-50%); z-index: 30; padding: 6px 14px; border-radius: 0 0 14px 14px; background: var(--c-surface); border: 1px solid var(--c-border); border-top: 0; font-size: 12px; color: var(--c-ink-muted); box-shadow: var(--sh-popover); }
+.dist { position: absolute; z-index: 80; height: 0; border-top: 3px dashed var(--c-ai); transform-origin: 0 0; }
+.dist span { position: absolute; left: 50%; top: -34px; transform: translateX(-50%); white-space: nowrap; background: var(--c-ai); color: var(--c-on-ai); font-size: 22px; font-weight: 700; padding: 2px 10px; border-radius: 10px; }
+.metrics { display: flex; flex-wrap: wrap; gap: var(--s3); margin: var(--s3) 0; }
+.metrics .chip { height: 28px; font-size: var(--t-small-size); }
+.pc { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); font-size: var(--t-small-size); }
+.pc .card h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); }
+.pc ul { margin: 0; padding-left: 18px; }
+.settings-demo { display: inline-flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s4); border-radius: var(--r-card); background: var(--c-surface); border: 1px solid var(--c-border); font-size: var(--t-small-size); }
+pre.api { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-card); padding: var(--s4); font: 12.5px/1.55 var(--font-mono); overflow-x: auto; }
+@media (max-width: 800px) { .pc { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Prostředí a menu aplikací</h1>
+    <p class="lead">Tři rozvržení na stejné scéně: editor s bohatým menu (aktivní), Soubory a Terminál (neaktivní). Přepni obrazovku a situaci nahoře; všechny tři varianty se překreslí. Lišty a titulky mají skutečnou velikost v logických px, obrazovka se jen zmenší na šířku stránky.</p>
+  </header>
+  <div class="ctlbar" role="group" aria-label="Ovládání ukázky">
+    <span><b>Obrazovka</b><span class="seg" role="radiogroup" aria-label="Obrazovka" id="g-scr">
+      <button role="radio" aria-checked="true" data-value="fhd">1920 &times; 1080</button><button role="radio" aria-checked="false" data-value="nb">Notebook 1366 &times; 768</button><button role="radio" aria-checked="false" data-value="4k">2&times; 4K (150 %)</button></span></span>
+    <span><b>Situace</b><span class="seg" role="radiogroup" aria-label="Situace" id="g-sit">
+      <button role="radio" aria-checked="true" data-value="menu">Otevřené menu</button><button role="radio" aria-checked="false" data-value="palette">Paleta příkazů</button><button role="radio" aria-checked="false" data-value="full">Celá obrazovka</button></span></span>
+  </div>
+  <div id="variants"></div>
+
+  <section class="variant">
+    <h2>Jak by to vypadalo v API</h2>
+    <p class="note">Ve všech variantách aplikace menu jen <b>deklaruje</b> jako data a systém ho kreslí (v titulku, v horní liště, v paletě, ve čtečce obrazovky). Položka menu je akce z API akcí, takže stejnou věc zavolá klik v menu, zkratka, paleta, shell i agent AI (agent jen s oprávněním a viditelně).</p>
+<pre class="api">// Rust (libs/ui), menu je soucast popisu okna; posila se kompozitoru jako data.
+menu([
+  group("Soubor", [
+    item("file.new").label("Nový").shortcut("Ctrl+N").icon("file-plus"),
+    item("file.open").label("Otevřít...").shortcut("Ctrl+O"),
+    recent("file.recent"),                        // systém plní nedávné soubory
+    separator(),
+    item("file.export").label("Exportovat").submenu([
+      item("file.export.pdf").label("PDF").icon("app-pdf"),
+      item("file.export.html").label("HTML"),
+    ]),
+  ]),
+  group("Úpravy", [
+    role(Role::Undo), role(Role::Redo),           // jednotné texty, zkratky a ikony v celém systému
+    separator(),
+    role(Role::Cut), role(Role::Copy), role(Role::Paste),
+    item("edit.paste_table").label("Vložit jako tabulku").enabled(self.clip_is_table),
+    separator(),
+    item("view.wrap").label("Zalamovat řádky").checked(self.wrap),   // zaškrtávací
+    radio_group("view.mode", ["Psaní", "Náhled", "Rozdělit"], self.mode),
+  ]),
+]).primary(["file", "edit", "view"])               // co se vejde do řádku menu; zbytek v tlačítku menu
+
+// Role (Undo, Redo, Cut, Copy, Paste, SelectAll, Find, Replace, Preferences, Close, Quit, About):
+// systém dodá text v jazyce uživatele, zkratku podle rozložení a ikonu; aplikace jen řekne, že roli umí.
+// Stav (enabled, checked, label) se mění zprávou MENU_UPDATE, ne překreslením celého menu.
+// Zkratky: systém hlídá kolize se systémovými zkratkami a ukáže je v paletě.</pre>
+  </section>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var SCR = { fhd: [[1920, 1080]], nb: [[1366, 768]], '4k': [[2560, 1440], [2560, 1440]] };
+  var state = { scr: 'fhd', sit: 'menu', cGlobal: false };
+  var MENU = ['Soubor', 'Úpravy', 'Zobrazit', 'Vložit', 'Formát', 'Nástroje', 'Nápověda'];
+  function I(n, s) { return '<svg class="ic" style="width:' + (s || 20) + 'px;height:' + (s || 20) + 'px" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
+  function wbtns() { return '<span class="wb">' + I('min', 14) + I('max', 14) + I('close', 14) + '</span>'; }
+  function menuPop(x, y) {
+    var it = [['undo', 'Zpět', 'Ctrl+Z'], ['redo', 'Znovu', 'Ctrl+Shift+Z'], '-', ['cut', 'Vyjmout', 'Ctrl+X'], ['copy', 'Kopírovat', 'Ctrl+C', 1], ['paste', 'Vložit', 'Ctrl+V'],
+      ['', 'Vložit jako tabulku', '', 0, 'dis'], '-', ['search', 'Najít&hellip;', 'Ctrl+F'], ['', 'Nahradit&hellip;', 'Ctrl+H'], '-', ['check', 'Zalamovat řádky', '', 0, 'ck'], ['', 'Převést na', '&rsaquo;']];
+    return '<div class="menu-pop" role="menu" aria-label="Úpravy" style="left:' + x + 'px;top:' + y + 'px">' + it.map(function (m) {
+      if (m === '-') return '<hr>';
+      var ic = m[4] === 'ck' ? '<span class="ck">' + I('check', 16) + '</span>' : m[0] ? I(m[0], 16) : '<span style="width:16px"></span>';
+      return '<div class="it' + (m[3] ? ' sel' : '') + (m[4] === 'dis' ? ' dis' : '') + '" role="menuitem">' + ic + m[1] + '<span class="k">' + m[2] + '</span></div>';
+    }).join('') + '</div>';
+  }
+  function palette() {
+    var rec = [['file-text', 'Exportovat jako PDF', 'Soubor', ['Ctrl', 'Shift', 'E']], ['check', 'Zalamovat řádky', 'Zobrazit', []]];
+    var res = [['copy', 'Kopírovat', 'Úpravy', ['Ctrl', 'C']], ['search', 'Najít v dokumentu', 'Úpravy', ['Ctrl', 'F']], ['history', 'Historie verzí souboru', 'Soubor', []], ['branch', 'Zkusit úpravy bokem', 'Nástroje', []], ['agent', 'Požádat agenta o shrnutí', 'Nástroje', []]];
+    function row(r, i) { return '<div class="it' + (i === 0 ? ' sel' : '') + '">' + I(r[0], 18) + r[1] + ' <span class="path">' + r[2] + '</span><span class="k">' + r[3].map(function (k) { return '<span class="kb">' + k + '</span>'; }).join('') + '</span></div>'; }
+    return '<div class="pal" role="dialog" aria-label="Paleta příkazů"><div class="q">' + I('search', 20) + '<span>ko</span><span class="muted">akce v Editoru &middot; Ctrl+K</span></div>' +
+      '<div class="sec">Nedávné</div>' + rec.map(row).join('') + '<div class="sec">Akce</div>' + res.map(function (r, i) { return row(r, i === 0 ? 0 : 1); }).join('') +
+      '<div class="foot"><span><span class="kb">&uarr;</span><span class="kb">&darr;</span> vybrat</span><span><span class="kb">Enter</span> spustit</span><span><span class="kb">Tab</span> i akce systému</span></div></div>';
+  }
+  // Jedna obrazovka; v = A|B|C, mon = index monitoru (u 2x 4K je editor na druhem).
+  function screen(v, w, h, mon, nMon) {
+    var top = v === 'B' || (v === 'C' && state.cGlobal);
+    var bottom = v !== 'B';
+    var full = state.sit === 'full';
+    var hasEditor = nMon === 1 || mon === 1;
+    var topH = top && !full ? 30 : 0, botH = full ? 0 : (bottom ? 68 : 76);
+    var html = '<div class="scr" style="width:' + w + 'px;height:' + h + 'px">';
+    var inTitleMenu = !top;   // A a C bez globalni listy: menu v titulku okna
+    // Okna
+    var ax = Math.round(w * .07), ay = topH + 24, aw = Math.round(w * .55), ah = h - topH - botH - 48;
+    if (!full) {
+      if (mon === 0 || nMon === 1) {
+        html += '<div class="w in" style="left:' + Math.round(w * .5) + 'px;top:' + (topH + 60) + 'px;width:' + Math.round(w * .42) + 'px;height:' + Math.round(h * .5) + 'px"><div class="t"><span class="badge">' + I('shield', 14) + 'Terminál</span><span class="nm">~/projekt</span>' + wbtns() + '</div><div class="body mono">~/projekt &rsaquo; cargo xtask test<br>&#10003; 140/140</div></div>';
+        html += '<div class="w in" style="left:' + Math.round(w * .38) + 'px;top:' + Math.round(topH + h * .32) + 'px;width:' + Math.round(w * .44) + 'px;height:' + Math.round(h * .42) + 'px"><div class="t"><span class="badge">' + I('shield', 14) + 'Soubory</span><span class="nm">Dokumenty</span>' + wbtns() + '</div><div class="body">' + ['folder', 'folder', 'file-text', 'image'].map(function (n, i) { return I(n, 18) + ' ' + ['Projekty', 'Faktury', 'smlouva.pdf', 'dovolena.jpg'][i]; }).join('<br>') + '</div></div>';
+      }
+    }
+    if (hasEditor) {
+      var ex = full ? 0 : ax, ey = full ? 0 : ay, ew = full ? w : aw, eh = full ? h : ah;
+      html += '<div class="w" style="left:' + ex + 'px;top:' + ey + 'px;width:' + ew + 'px;height:' + eh + 'px;' + (full ? 'border-radius:0;border:0' : '') + '">';
+      if (!full) {
+        html += '<div class="t">' + (inTitleMenu ? '<span class="mbtn' + (state.sit === 'menu' ? '' : '') + '" title="Menu">' + I('menu', 18) + '</span>' : '') + '<span class="badge">' + I('shield', 14) + 'Editor</span><span class="nm">zprava.md - Editor</span>' + wbtns() + '</div>';
+        if (inTitleMenu) html += '<div class="mrow">' + MENU.map(function (m, i) { return '<span class="mi' + (state.sit === 'menu' && i === 1 ? ' open' : '') + '">' + m + '</span>'; }).join('') + '<span class="find">' + I('search', 14) + 'Hledat akce <span class="kb">Ctrl</span><span class="kb">K</span></span></div>';
+      }
+      html += '<div class="body"><h3>Zpráva o vydání 0.6</h3>Kompozitor, okna a odznak důvěry jsou hotové. Následuje přehled oprávnění a systémové dialogy. Ikony mají nový styl s pastelovým přechodem a barvou podle kategorie.<br><br>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</div></div>';
+      if (state.sit === 'menu' && inTitleMenu && !full) html += menuPop(ex + 70, ey + 40 + 32);
+    }
+    // Horni lista
+    if (top && !full && (mon === 0 || nMon === 1 || v === 'B' || v === 'C')) {
+      // Globalni menu aktivni aplikace je na hlavnim monitoru (1), i kdyz okno je na druhem.
+      var active = nMon === 1 ? hasEditor : mon === 0;
+      html += '<div class="tbar">' + '<span class="b">' + I('apps', 16) + '</span><span class="app">' + (active ? 'Editor' : '&nbsp;') + '</span>' +
+        (active ? MENU.map(function (m, i) { return '<span class="mi' + (state.sit === 'menu' && i === 1 ? ' open' : '') + '">' + m + '</span>'; }).join('') : '<span class="muted" style="font-size:12px">menu aktivní aplikace je na hlavním monitoru</span>') +
+        '<span class="sp"></span>' + (v === 'B' ? ['tasks', 'wifi', 'volume', 'battery', 'bell'].map(function (n) { return '<span class="b">' + I(n, 16) + '</span>'; }).join('') + '<span class="clock">14:05</span>' : '') + '</div>';
+      if (state.sit === 'menu' && active) html += menuPop(10 + 26 + 64 + 64, 30);
+    }
+    if (full) html += '<div class="edge-hint">Najeď k hornímu okraji: ' + (top ? 'lišta s menu sjede dolů' : 'titulek s menu sjede dolů') + ' &middot; Esc 1 s ukončí</div>';
+    // Spodni lista nebo dok
+    if (!full && (mon === 0 || nMon === 1 || true)) {
+      if (bottom) html += '<div class="lbar"><span class="b">' + I('apps', 22) + '</span><span class="b on">' + I('app-editor', 22) + '</span><span class="b">' + I('folder', 22) + '</span><span class="b">' + I('terminal', 22) + '</span><span class="sp"></span>' +
+        (v === 'C' && state.cGlobal ? '' : ['tasks', 'wifi', 'volume', 'battery', 'bell'].map(function (n) { return '<span class="b">' + I(n, 20) + '</span>'; }).join('') + '<span class="clock">14:05</span>') + '</div>';
+      else html += '<div class="dock">' + ['apps', 'app-editor', 'folder', 'terminal', 'settings', 'app-browser'].map(function (n) { return '<span class="b">' + I(n, 28) + '</span>'; }).join('') + '</div>';
+    }
+    if (state.sit === 'palette' && hasEditor) html += palette();
+    return html + '<span class="tag">' + (nMon > 1 ? 'monitor ' + (mon + 1) : '') + '</span></div>';
+  }
+  function metrics(v, w, h) {
+    var top = v === 'B' || (v === 'C' && state.cGlobal);
+    var chrome = (top ? 30 : 0) + (v === 'B' ? 76 : 68) + 40 + (top ? 0 : 32);
+    var free = h - chrome;
+    var menuDist = top ? 'k menu: horní okraj obrazovky (nekonečně vysoký cíl)' : 'k menu: 40 px pod horním okrajem okna';
+    return '<div class="metrics"><span class="chip">systémové prvky na výšku: ' + chrome + ' px</span><span class="chip ok">pro obsah okna zbývá ' + free + ' px (' + Math.round(free / h * 100) + ' %)</span><span class="chip">' + menuDist + '</span></div>';
+  }
+  var V = [
+    { id: 'A', name: 'A - Lišta dole + hybridní menu + paleta příkazů', pro: ['Menu je u okna, ke kterému patří: na 4K a více monitorech žádné cestování myší přes obrazovku.', 'Jednoduché aplikace mají jen tlačítko &equiv; v titulku, složité řádek menu: titulek se nezvětší zbytečně.', 'Paleta (Ctrl+K) najde každou akci podle názvu, ukáže zkratku a nedávné nahoře; nejrychlejší cesta z klávesnice i pro začátečníky.', 'Agent AI pracuje se stejným seznamem akcí, jaký vidí uživatel v paletě (žádné skryté funkce).'],
+      con: ['Řádek menu zabere u složitých aplikací 32 px výšky v každém okně.', 'Cíl menu není u okraje obrazovky, takže podle Fittse je o něco pomalejší než horní lišta.', 'Každé okno ukazuje vlastní menu: víc vizuálního šumu než jedna globální lišta.'] },
+    { id: 'B', name: 'B - Horní lišta s globálním menu + dok', pro: ['Menu u horního okraje = nekonečně vysoký cíl (Fitts), rychlé „vyhození“ myši nahoru.', 'Okna nemají řádek menu: čistší titulky.', 'Uživatelům macOS známé.'],
+      con: ['Na 4K a dvou monitorech je menu daleko od okna (viz čárkovaná vzdálenost), u druhého monitoru až na jiném displeji.', 'Menu patří „aktivní aplikaci“, ne oknu: matoucí, když jsou vedle sebe dvě okna různých aplikací.', 'Horní lišta + dok berou výšku na každé obrazovce, i když aplikace menu nemá.', 'Blíží se vzhledu macOS, od kterého se chceme odlišit.'] },
+    { id: 'C', name: 'C - A s volitelnou globální horní lištou', pro: ['Výchozí je A; kdo chce globální menu, zapne ho v Nastavení > Vzhled (stejná data menu, jen jinde).', 'Žádná práce navíc pro aplikace: deklarace menu je jedna.', 'Hodí se pro malý notebook (víc výšky v oknech, když je okno maximalizované) i pro zvyk z macOS.'],
+      con: ['Dvě podoby menu = dvakrát testovat a dokumentovat.', 'S globální lištou platí nevýhody B na velkých a více monitorech.', 'Stavová část se musí rozhodnout, kde je (nahoře, nebo dole): v ukázce se přesune nahoru.'] }
+  ];
+  function render() {
+    var mons = SCR[state.scr];
+    document.getElementById('variants').innerHTML = V.map(function (v) {
+      return '<section class="variant" aria-labelledby="v' + v.id + '"><h2 id="v' + v.id + '">' + v.name + '</h2>' +
+        (v.id === 'C' ? '<div class="settings-demo">' + I('settings', 18) + 'Nastavení &rsaquo; Vzhled &rsaquo; <b>Globální lišta s menu nahoře</b><button class="switch" role="switch" id="c-sw" aria-checked="' + state.cGlobal + '" aria-label="Globální lišta s menu nahoře"></button></div>' : '') +
+        metrics(v.id, mons[0][0], mons[0][1]) +
+        '<div class="fit" data-w="' + (mons.reduce(function (a, m) { return a + m[0]; }, 0) + 24 * (mons.length - 1)) + '" data-h="' + mons[0][1] + '"><div class="monitors">' +
+        mons.map(function (m, i) { return screen(v.id, m[0], m[1], i, mons.length); }).join('') + '</div></div>' +
+        '<div class="pc" style="margin-top:var(--s4)"><div class="card"><h3>Výhody</h3><ul>' + v.pro.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>' +
+        '<div class="card"><h3>Nevýhody</h3><ul>' + v.con.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div></div></section>';
+    }).join('') + '<p class="note" style="margin-top:var(--s6)"><b>Doporučení koordinátora:</b> A s paletou příkazů jako výchozí, C (globální lišta) jako volba v Nastavení. Vybírá uživatel.</p>';
+    var sw = document.getElementById('c-sw');
+    if (sw) window.MO_SWITCH(sw, function (on) { state.cGlobal = on; render(); });
+    fit();
+  }
+  // Zmenseni na sirku stranky + vzdalenost menu od okna na 2x 4K (varianta B).
+  function fit() {
+    document.querySelectorAll('.fit').forEach(function (f) {
+      var s = f.clientWidth / +f.dataset.w, m = f.querySelector('.monitors');
+      m.style.transform = 'scale(' + s + ')'; f.style.height = (+f.dataset.h * s) + 'px';
+    });
+    if (state.scr === '4k' && state.sit !== 'full') {
+      ['B', 'C'].forEach(function (id) {
+        if (id === 'C' && !state.cGlobal) return;
+        var sec = document.getElementById('v' + id).parentElement, mons = sec.querySelector('.monitors');
+        // Titulek editoru je na druhem monitoru (x = 2560 + 24 + 7 %), menu na prvnim nahore.
+        var x1 = 200, y1 = 15, x2 = 2560 + 24 + Math.round(2560 * .07) + 200, y2 = 30 + 24 + 20;
+        var len = Math.round(Math.hypot(x2 - x1, y2 - y1)), ang = Math.atan2(y2 - y1, x2 - x1);
+        mons.insertAdjacentHTML('beforeend', '<div class="dist" style="left:' + x1 + 'px;top:' + y1 + 'px;width:' + len + 'px;transform:rotate(' + ang + 'rad)"><span>' + len + ' px od okna k menu</span></div>');
+      });
+    }
+  }
+  window.MO_SEG(document.getElementById('g-scr'), function (v) { state.scr = v; render(); });
+  window.MO_SEG(document.getElementById('g-sit'), function (v) { state.sit = v; render(); });
+  window.addEventListener('resize', fit);
+  render();
+});
+</script>
+</body>
+</html>
