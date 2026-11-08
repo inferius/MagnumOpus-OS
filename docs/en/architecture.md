@@ -66,7 +66,7 @@ through a handle (an index into its handle table). A handle carries rights
 |---|---|
 | `Process` | address space + handle table |
 | `Thread` | thread |
-| `MemoryObject` | memory pages, lazy allocation, copy-on-write clones |
+| `MemoryObject` | memory pages **[implemented]**; lazy allocation and copy-on-write clones **[designed]** |
 | `AddressRegion` | part of an address space, mappings |
 | `Channel` | bidirectional message queue (bytes + handles) |
 | `Port` | completion and event queue |
@@ -100,7 +100,9 @@ libos = submit a request and wait for completion.
 - Physical memory: buddy allocator over the loader's memory map.
 - Virtual: 4-level paging, kernel in the upper half, direct map of physical
   memory at `0xFFFF_8000_0000_0000`, kernel at `0xFFFF_FFFF_8000_0000`.
-- `MemoryObject`: lazy allocation, copy-on-write clones.
+- `MemoryObject`: pages are allocated up front at creation **[implemented]**;
+  lazy allocation on first access and copy-on-write clones **[designed]**
+  (memory management is queued, see [Current deviations from the design](#current-deviations-from-the-design)).
 - Kernel heap: slab for fixed-size objects + general heap.
 
 ### Scheduler

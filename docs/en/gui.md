@@ -418,7 +418,7 @@ note, pill buttons with a 2 px focus ring.
 |---|---|
 | `shape.rs` | rounded rectangle and frame from a distance field (same formula as a shader), window corner patches |
 | `shadow.rs` | Gaussian shadow precomputed into a 9-slice mask (3 box passes); drawing only reads the table |
-| `icon.rs` | 64 icons straight from `design/assets/mo.js` (SVG subset: `path` incl. arcs, `rect`, `circle`), distance-field strokes |
+| `icon.rs` | the icon set (226) straight from `design/assets/mo.js` (SVG subset: `path` incl. arcs, `rect`, `circle`), distance-field strokes |
 | `backdrop.rs` | desktop radial gradients |
 | `text.rs` | a face family (CSS-style weight matching), 1/4 px subpixel positioning, dark-text gamma |
 
@@ -1048,18 +1048,20 @@ instance places the window again (the position is not remembered yet).
 
 ## Status and deviations from the design
 
+The table only summarizes; the page of each part always has the details and the current status (link in the third column). Status marks: see [Writing documentation](documentation.md).
+
 | What | Now | Why it is fine / when it changes |
 |---|---|---|
-| rendering | software compositing on virtio-gpu 2D | 3D (virgl) is the next step, see risks |
-| QoS `interactive` for the compositor | the kernel has no thread class API yet | input priority is in the compositor loop; the scheduler adds QoS |
+| rendering | default software compositing (CPU) over the display driver **[verified in QEMU]**; GPU compositing through Venus (`libs/vkcomp`) **[verified in QEMU]**, optional for now | details in [Vulkan over Venus](venus.md#compositor-on-the-gpu-step-4) |
+| QoS `interactive` for the compositor | `Interactive` class by service name (`libs/libos/src/sched.rs`) **[implemented]** | details in [Scheduler](scheduler.md) |
 | group opacity | multiplied into children (no intermediate buffer) | overlapping children of a translucent group blend with each other too; the GPU backend will do it properly |
 | vsync | `PRESENTED` time from the driver (end of `RESOURCE_FLUSH`) | virtio-gpu 2D does not report vsync |
 | cursor | drawn by the compositor into the frame | hardware cursor (queue 1) comes with 3D |
 | restoring windows after restart | the app resends its last committed state ([Recovery](#recovery-after-a-compositor-crash)) | the window position is not remembered; an unfinished transaction returns `SERVICE_RESTARTED` |
 | compositor restart | the supervisor (`CompdService` adapter, display from the endpoint keeper) | dialogs and transaction groups of the old instance are lost |
 | commit held in a group | applied together with the whole group, even if the client sent another plain commit meanwhile | a client in a group should wait for `PRESENTED`; strict per-client commit order comes with the GPU backend |
-| display driver crash | the compositor keeps running without a picture (windows, dialogs, actions) | no driver restart yet |
-| display without virtio-gpu | `fbdisplay`: fixed firmware resolution, no acceleration and no vsync | native GPU drivers (later milestone) |
+| display driver crash | the compositor keeps running (windows, dialogs, actions); init's supervisor restarts the driver | details in [Display configuration](display.md) |
+| display without virtio-gpu | native `bochs-display` **[verified in QEMU]** and `intel-display` (Gen9 to Xe2) **[implemented]**; otherwise `fbdisplay` with the fixed firmware resolution | details in [Display configuration](display.md) |
 
 ## Tests
 

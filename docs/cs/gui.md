@@ -402,7 +402,7 @@ vstup“, tlačítka jako pilulky s rámečkem fokusu 2 px.
 |---|---|
 | `shape.rs` | zaoblený obdélník a rám ze vzdálenostního pole (stejný vzorec jako shader), rohové záplaty okna |
 | `shadow.rs` | Gaussův stín předpočítaný do masky z 9 dílů (3 krabičkové průchody), kreslení jen čte tabulku |
-| `icon.rs` | 64 ikon přímo z `design/assets/mo.js` (podmnožina SVG: `path` včetně oblouků, `rect`, `circle`), tah vzdálenostním polem |
+| `icon.rs` | sada ikon (226) přímo z `design/assets/mo.js` (podmnožina SVG: `path` včetně oblouků, `rect`, `circle`), tah vzdálenostním polem |
 | `backdrop.rs` | radiální přechody plochy |
 | `text.rs` | rodina řezů (výběr váhy jako v CSS), jemné umístění po 1/4 px, gama tmavého textu |
 
@@ -1025,18 +1025,20 @@ znovu (poloha se zatím nepamatuje).
 
 ## Stav a odchylky od návrhu
 
+Tabulka jen shrnuje; podrobnosti a aktuální stav má vždy stránka dané části (odkaz ve třetím sloupci). Značky stavu viz [Psaní dokumentace](dokumentace.md).
+
 | Co | Teď | Proč to nevadí / kdy jinak |
 |---|---|---|
-| vykreslování | softwarové skládání nad virtio-gpu 2D | 3D (virgl) je další krok, viz rizika |
-| QoS `interactive` pro kompozitor | jádro zatím nemá API pro třídu vlákna | priorita vstupu je ve smyčce kompozitoru; QoS doplní plánovač |
+| vykreslování | výchozí softwarové skládání (CPU) nad ovladačem displeje **[ověřeno v QEMU]**; skládání na GPU přes Venus (`libs/vkcomp`) **[ověřeno v QEMU]**, zatím volitelné | podrobně v [Vulkan přes Venus](venus.md#kompozitor-na-gpu-krok-4) |
+| QoS `interactive` pro kompozitor | třída `Interactive` podle jména služby (`libs/libos/src/sched.rs`) **[implementováno]** | podrobně v [Plánovač](planovac.md) |
 | průhlednost skupiny | násobí se do dětí (bez mezibufferu) | překrývající se děti poloprůhledné skupiny se prolnou i mezi sebou; GPU backend to udělá správně |
 | vsync | čas `PRESENTED` od ovladače (konec `RESOURCE_FLUSH`) | virtio-gpu 2D vsync nehlásí |
 | kurzor | kreslí ho kompozitor do snímku | hardwarový kurzor (fronta 1) přijde s 3D |
 | obnova oken po restartu | aplikace pošle znovu poslední potvrzený stav ([Obnova](#obnova-po-pádu-kompozitoru)) | poloha okna se nepamatuje; rozpracovaná transakce vrátí `SERVICE_RESTARTED` |
 | restart kompozitoru | supervisor (adaptér `CompdService`, displej z držáku konců) | dialogy a skupiny transakcí staré instance zaniknou |
 | commit držený ve skupině | uplatní se až s celou skupinou, i když klient mezitím poslal další běžný commit | klient ve skupině má čekat na `PRESENTED`; přísné pořadí commitů jednoho klienta přijde s GPU backendem |
-| pád ovladače displeje | kompozitor běží dál bez obrazu (okna, dialogy, akce) | restart ovladače zatím není |
-| displej bez virtio-gpu | `fbdisplay`: pevné rozlišení z firmwaru, bez akcelerace a vsync | nativní ovladače GPU (pozdější milník) |
+| pád ovladače displeje | kompozitor běží dál (okna, dialogy, akce); ovladač restartuje supervisor initu | podrobně v [Nastavení obrazu](displej.md) |
+| displej bez virtio-gpu | nativní `bochs-display` **[ověřeno v QEMU]** a `intel-display` (Gen9 až Xe2) **[implementováno]**; jinak `fbdisplay` s pevným rozlišením z firmwaru | podrobně v [Nastavení obrazu](displej.md) |
 
 ## Testy
 

@@ -61,7 +61,7 @@ Při duplikaci lze práva jen ubírat.
 |---|---|
 | `Process` | adresní prostor + handle tabulka |
 | `Thread` | vlákno |
-| `MemoryObject` | stránky paměti, lazy alokace, copy-on-write klony |
+| `MemoryObject` | stránky paměti **[implementováno]**; lazy alokace a copy-on-write klony **[navrženo]** |
 | `AddressRegion` | část adresního prostoru, mapování |
 | `Channel` | obousměrná fronta zpráv (bajty + handly) |
 | `Port` | fronta dokončení a událostí |
@@ -93,7 +93,9 @@ funkce v libos = vložit požadavek a počkat na dokončení.
 - Fyzická paměť: buddy alokátor nad mapou paměti od loaderu.
 - Virtuální: 4úrovňové stránkování, kernel v horní polovině, přímá mapa
   fyzické paměti od `0xFFFF_8000_0000_0000`, kernel od `0xFFFF_FFFF_8000_0000`.
-- `MemoryObject`: lazy alokace, copy-on-write klony.
+- `MemoryObject`: stránky se alokují hned při vytvoření **[implementováno]**;
+  lazy alokace při prvním přístupu a copy-on-write klony **[navrženo]**
+  (správa paměti ve frontě, viz [Aktuální odchylky od návrhu](#aktuální-odchylky-od-návrhu)).
 - Kernel heap: slab pro objekty pevné velikosti + obecný heap.
 
 ### Plánovač
