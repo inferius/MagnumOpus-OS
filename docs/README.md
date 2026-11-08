@@ -30,6 +30,12 @@ site menu.
 |---|---|---|
 | [Obnova služeb](cs/obnova-sluzeb.md) | [Service recovery](en/service-recovery.md) | restart po pádu, registr služeb se závislostmi, lístky, knihovna svcclient, pravidla pro klienty, testy „zabij službu“ / restart after a crash, service registry with dependencies, leases, the svcclient library, rules for clients, "kill the service" tests |
 
+### Uživatelé a zabezpečení / Users and security
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Uživatelské účty](cs/ucty.md) | [User accounts](en/accounts.md) | služba accountd, heslo Argon2id, PIN, bezpečnostní klíč FIDO2, relace, správa počítače bez roota, šifrování domova / accountd service, Argon2id password, PIN, FIDO2 security key, sessions, administration without root, home encryption |
+
 ### Vstup a zařízení / Input and devices
 
 | Česky | English | Obsah / Contents |

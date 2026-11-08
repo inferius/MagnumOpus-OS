@@ -59,6 +59,10 @@ pub struct Devices {
     /// `docs/cs/ovladace.md`): jmeno, kanal ke klientovi, kolikaty start.
     /// Po padu ovladace prijde novy kanal a nahradi stary.
     pub drivers: spin::Mutex<Vec<DriverChannel>>,
+    /// Kanaly bezpecnostnich klicu od `usb-hid` (zprava `fido`), dokud je
+    /// neprevezme sluzba uctu; ovladac zarizeni, ktere klic neni, kanal
+    /// zavre.
+    pub keys: spin::Mutex<Vec<Channel>>,
     /// Ridici relace initu k `fsd` s listkem (prezije pad sluzby).
     pub fs: Option<FsClient>,
 }
@@ -114,6 +118,12 @@ pub fn devmgr_message(d: &Devices, m: libos::Message) -> usize {
             }
             added
         }
+        b"fido" => {
+            for h in m.handles {
+                fido(d, Channel::from_handle(h));
+            }
+            0
+        }
         b"block" => {
             println!("init: disk pripojeny za behu zatim nepouzivam");
             0
@@ -122,6 +132,15 @@ pub fn devmgr_message(d: &Devices, m: libos::Message) -> usize {
             println!("init: neznama zprava od devmgr: {:?}", other);
             0
         }
+    }
+}
+
+/// Kanal bezpecnostniho klice: sluzbe uctu, nebo do zasoby, dokud
+/// nebezi (preda ji `accounts::start`).
+fn fido(d: &Devices, key: Channel) {
+    match crate::accounts::add_key(key) {
+        Ok(()) => {}
+        Err(k) => d.keys.lock().push(k),
     }
 }
 
@@ -160,6 +179,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let mut nets = Vec::new();
     let mut rngs = Vec::new();
     let mut displays = Vec::new();
+    let keys = spin::Mutex::new(Vec::new());
     let drivers = spin::Mutex::new(Vec::new());
     loop {
         // Spravce muze mlcet dlouho: PS/2 (az 5 s) a pruchod USB (az 10 s).
@@ -181,6 +201,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
             b"net" => nets.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"rng" => rngs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"display" => displays.extend(msg.handles.into_iter().map(Channel::from_handle)),
+            b"fido" => keys.lock().extend(msg.handles.into_iter().map(Channel::from_handle)),
             d if d.starts_with(b"display-native ") => crate::display_native::add(d, msg.handles),
             m if m.starts_with(b"dev ") => {
                 driver_message(&drivers, msg);
@@ -204,6 +225,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         _rngs: rngs,
         displays,
         drivers,
+        keys,
         fs: None,
     })
 }

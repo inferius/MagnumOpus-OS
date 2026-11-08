@@ -3,6 +3,7 @@
 //! Na rozdil od testu jadra test nepanikuje, ale vraci `Result<(), String>`
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
+mod accounts;
 mod basic;
 mod dns;
 mod clock_sync;
@@ -60,6 +61,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("sitove karty", nic::TESTS),
     ("acpi", power::TESTS),
     ("souborovy system", fs::TESTS),
+    ("ucty", accounts::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
     ("historie FS", fs_hist::TESTS),
