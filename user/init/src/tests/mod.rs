@@ -3,6 +3,8 @@
 //! Na rozdil od testu jadra test nepanikuje, ale vraci `Result<(), String>`
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
+mod agent;
+mod agent_shell;
 mod basic;
 mod dns;
 mod clock_sync;
@@ -62,6 +64,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("supervisor", supervisor::TESTS),
     ("obnova sluzeb", recovery::TESTS),
     ("shell", shell::TESTS),
+    ("agent AI", agent::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
     // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery

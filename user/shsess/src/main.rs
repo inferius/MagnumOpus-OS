@@ -33,6 +33,7 @@ use term::proto::{ClientMsg, ServerMsg};
 use term::session::{Env, Link, Service};
 use term::tasks::{Clock, Joinable, Notify};
 
+mod ai;
 mod fs;
 
 libos::entry!(main);
@@ -127,6 +128,9 @@ struct SysEnv {
     spawner: Option<FsClient>,
     tag: String,
     notify: Option<Arc<EventNotify>>,
+    /// Prikaz `ai` (relace agenta AI).
+    ai: ai::Ai,
+    home: String,
 }
 
 impl Env for SysEnv {
@@ -136,6 +140,20 @@ impl Env for SysEnv {
 
     fn sleep(&mut self, ns: i64) {
         sleep_ns(ns)
+    }
+
+    fn exec(&mut self, name: &str, args: &[(Option<String>, shlang::Value)], _input: shlang::Value, _needs: &shlang::host::ExecNeeds)
+        -> Option<Result<shlang::Value, shlang::ShError>> {
+        if name != "ai" {
+            return None;
+        }
+        let c = self.spawner.as_ref().and_then(|s| s.connect().ok());
+        let mut f: Box<dyn Fs> = match c {
+            Some(c) => Box::new(fs::FsdFs::new(c, alloc::format!("{}-ai", self.tag))),
+            None => Box::new(fs::NoFs),
+        };
+        let home = self.home.clone();
+        Some(self.ai.run(args, f.as_mut(), &home))
     }
 
     fn spawn(&mut self, job: Box<dyn FnOnce() + Send>) -> Option<Box<dyn Joinable>> {
@@ -186,13 +204,20 @@ fn main(startup: Startup) -> i64 {
     let mut hs = first.handles.into_iter();
     let mut spare = hs.next().map(Channel::from_handle);
     let mut fsd = hs.next().map(|h| fs::FsdFs::new(FsClient::new(Channel::from_handle(h)), tag.clone()));
+    let agent_gate = hs.next().map(Channel::from_handle);
     let mut nofs = fs::NoFs;
     let mut svc = Service::single(&home, session);
     svc.stack_budget = STACK_BUDGET;
     svc.task_stack = TASK_STACK_BUDGET;
     let notify = Event::create().ok().map(|e| Arc::new(EventNotify(e)));
     let spawner = fsd.as_ref().and_then(|f| f.client.connect().ok());
-    let mut env = SysEnv { spawner, tag: tag.clone(), notify: notify.clone() };
+    let mut env = SysEnv {
+        spawner,
+        tag: tag.clone(),
+        notify: notify.clone(),
+        ai: ai::Ai::new(agent_gate),
+        home: home.clone(),
+    };
     println!("shsess {session}: bezim ({tag})");
 
     loop {

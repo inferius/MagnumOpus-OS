@@ -14,6 +14,7 @@
 
 extern crate alloc;
 
+mod agent;
 mod apps;
 mod certs;
 mod dns;
@@ -120,6 +121,19 @@ fn main(startup: Startup) -> i64 {
                     }
                 }
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
+            }
+            // Agent AI po siti a FS: sit jen v beznem behu (testy maji
+            // falesny model bez site).
+            let test_run = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
+            if devices.fs.is_some() {
+                match agent::start(&startup, &devices, !test_run) {
+                    Ok(()) => {
+                        if let Some(a) = agent::AGENTD.lock().as_ref() {
+                            sup.watch("agentd", &a.process, None);
+                        }
+                    }
+                    Err(e) => println!("init: agenta AI nelze spustit: {e}"),
+                }
             }
             *gui::DISPLAY.lock() = devices.displays.pop();
             system::DEVICES.call_once(|| devices);

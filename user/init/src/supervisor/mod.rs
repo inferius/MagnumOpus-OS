@@ -246,7 +246,9 @@ impl Supervisor {
     pub fn run(&mut self, startup: &Startup) -> ! {
         println!("init: supervisor bezi");
         loop {
-            self.step(startup, None);
+            let happened = self.step(startup, None);
+            // Snimek stavu pro systemove nastroje agenta (jen cteni).
+            crate::agent::publish(&self.status(), &happened);
         }
     }
 

@@ -58,6 +58,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentd"
+version = "0.1.0"
+dependencies = [
+ "agentproto",
+ "agentsh",
+ "fsproto",
+ "httpc",
+ "libos",
+ "netproto",
+ "spin 0.12.3",
+ "tls",
+ "web",
+ "wire",
+]
+
+[[package]]
+name = "agentproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "chacha20poly1305",
+ "hmac",
+ "sha2",
+ "wire",
+]
+
+[[package]]
+name = "agentsh"
+version = "0.1.0"
+dependencies = [
+ "shlang",
+]
+
+[[package]]
 name = "ahci"
 version = "0.1.0"
 dependencies = [
@@ -1117,6 +1151,7 @@ dependencies = [
 name = "init"
 version = "0.1.0"
 dependencies = [
+ "agentproto",
  "blockproto",
  "conf",
  "fsproto",
@@ -1129,6 +1164,7 @@ dependencies = [
  "spin 0.12.3",
  "svcclient",
  "term",
+ "wire",
 ]
 
 [[package]]
@@ -1970,10 +2006,13 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 name = "shsess"
 version = "0.1.0"
 dependencies = [
+ "agentproto",
+ "agentsh",
  "fsproto",
  "libos",
  "shlang",
  "term",
+ "wire",
 ]
 
 [[package]]

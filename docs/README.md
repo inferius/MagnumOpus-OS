@@ -76,6 +76,12 @@ site menu.
 | [Firewall](cs/firewall.md) | [Firewall](en/firewall.md) | manifest aplikace, dotazy uživateli, paketový filtr, profily sítí, audit, filtr DNS / application manifest, asking the user, packet filter, network profiles, audit, DNS filter |
 | [TLS a HTTP](cs/tls-http.md) | [TLS and HTTP](en/tls-http.md) | TLS 1.3, kořenové certifikáty, HTTP/1.1 a HTTP/2, program fetch, rizika / TLS 1.3, root certificates, HTTP/1.1 and HTTP/2, the fetch program, risks |
 
+### Agent AI / AI agent
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Agent AI v systému](cs/agent.md) | [AI agent in the system](en/agent.md) | rozhraní modelu, nástroje služeb, práva a pracovní prostor, pomocník v shellu, diagnostika, bezpečnost a limity útraty / model interface, service tools, rights and workspace, shell helper, diagnostics, security and spending limits |
+
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).
 
