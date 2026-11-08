@@ -83,6 +83,7 @@ impl<M: Clone> Ui<M> {
                 let h = self.hit(x, y);
                 if pressed {
                     self.pressed = h;
+                    self.pressed_rect = h.map(|i| (self.elems[i].space, self.elems[i].rect));
                     if let Some(i) = h
                         && !self.elems[i].disabled
                     {
@@ -96,9 +97,17 @@ impl<M: Clone> Ui<M> {
                     }
                     r.redraw = true;
                 } else {
+                    // Stisk a pusteni se paruji podle mista prvku: mezi nimi se
+                    // rozhrani muze znovu rozvrhnout (data ze sluzby) a indexy
+                    // prvku se posunou; klik se nesmi ztratit.
                     let p = self.pressed.take();
-                    if p.is_some() && p == h {
-                        self.activate(p.unwrap(), &mut r);
+                    let at = self.pressed_rect.take();
+                    let same = h.is_some_and(|i| at == Some((self.elems[i].space, self.elems[i].rect)));
+                    if p.is_some() && (p == h || same)
+                        && let Some(i) = h
+                        && !self.elems[i].disabled
+                    {
+                        self.activate(i, &mut r);
                     }
                     r.redraw = true;
                 }

@@ -535,6 +535,8 @@ impl Comp {
         }
         let b = w.geo.border;
         let top = if w.mode == Mode::Standard { w.geo.title_h } else { 0 };
+        // Poskodit puvodni misto (i se stinem), nove se poskodi po zmene.
+        let before = w.visual();
         let (nw, nh) = match w.restore.take() {
             Some(r) => {
                 w.rect.x = r.x;
@@ -548,6 +550,7 @@ impl Comp {
                 (sw - 2 * b, sh - reserve - top - 2 * b)
             }
         };
+        self.damage(before);
         self.damage_window(g);
         self.configure(g, nw, nh, now);
     }
