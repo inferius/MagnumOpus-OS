@@ -43,6 +43,10 @@ pub const TESTS: &[Test] = &[
 pub const QEMU_DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
 pub const QEMU_SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
 pub const QEMU_SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
+/// Fyzicky klik (QMP): za znackou poloha na obrazovce "x y". xtask
+/// prisune ukazatel do rohu a pak posle pohyb a stisk v jednom snimku
+/// (jako tablet VMware), pusteni zvlast.
+pub const QEMU_CLICK: &str = "init: test gui: klik mysi na ";
 /// Snimek obrazovky: za znackou jmeno (`light`, `dark`, `contrast`);
 /// xtask porizuje `screendump` do `target/shots/`.
 pub const QEMU_SHOT: &str = "init: test gui: snimek ";
@@ -388,6 +392,21 @@ fn task_manager(startup: &Startup) -> TestResult {
         let pause = node(&t, Role::Button, "Pozastavit")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: pause.id, action: actions::ACTIVATE, value: String::new() })?;
         wait_tree(&s.inspect, w.id, "pozastaveni ulohy agenta", |t| t.iter().any(|n| n.role == Role::Label && n.name == "Stav: pozastaveno 15 %"))?;
+        // Fyzicky klik mysi na filtr "Jen úlohy agenta": seznam ukaze jen
+        // ulohy agenta (klik dojde tam, kde je ukazatel, i kdyz pohyb
+        // a stisk prijdou v jednom hlaseni zarizeni).
+        let w = wait_window(&s.inspect, "org.magnumopus.tasks")?;
+        let only = node(&t, Role::Checkbox, "Jen úlohy agenta")?;
+        let (x, y) = (w.rect.x + only.bounds.x + 8, w.rect.y + only.bounds.y + only.bounds.h as i32 / 2);
+        println!("{QEMU_CLICK}{x} {y}");
+        let t = wait_tree(&s.inspect, w.id, "filtr po kliku mysi", |t| {
+            let rows: Vec<&Node> = t.iter().filter(|n| n.role == Role::ListItem).collect();
+            !rows.is_empty() && rows.iter().all(|n| n.name.starts_with("agent: "))
+        })?;
+        // Zpet vsechny ulohy (snimky vzhledu).
+        let only = node(&t, Role::Checkbox, "Jen úlohy agenta")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: only.id, action: actions::TOGGLE, value: String::new() })?;
+        wait_tree(&s.inspect, w.id, "filtr zpet", |t| t.iter().any(|n| n.role == Role::ListItem && !n.name.starts_with("agent: ")))?;
         Ok(())
     })
 }

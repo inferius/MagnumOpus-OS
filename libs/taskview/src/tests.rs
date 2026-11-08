@@ -124,3 +124,29 @@ fn channel_backend_sends_requests_and_applies_replies() {
     assert_eq!(m.status, "Odmítnuto: ACCESS_DENIED");
     assert!(!m.external(b"nesmysl"));
 }
+
+/// Klik mysi (stisk a pusteni) do stredu zaskrtavaciho pole `name`.
+fn click_checkbox<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, name: &str) {
+    use guiproto::window::InputEvent;
+    let b = u.a11y().into_iter().find(|n| n.role == Role::Checkbox && n.name == name).unwrap().bounds;
+    let (x, y) = (b.x + b.w as i32 / 2, b.y + b.h as i32 / 2);
+    for pressed in [true, false] {
+        let r = u.event(InputEvent::Button { code: 0x110, pressed, x, y }, 0);
+        for msg in r.msgs {
+            m.update(msg);
+        }
+        u.rebuild(m.title(), m.view());
+    }
+}
+
+#[test]
+fn checkbox_click_changes_list() {
+    let mut m = TaskManager::new(TestBackend::default());
+    let mut u = ui_for(&m);
+    let all = names(&u, Role::ListItem).len();
+    click_checkbox(&mut m, &mut u, "Jen úlohy agenta");
+    let only = names(&u, Role::ListItem);
+    assert!(only.len() < all && only.iter().all(|n| n.starts_with("agent: ")), "{only:?}");
+    click_checkbox(&mut m, &mut u, "Jen úlohy agenta");
+    assert_eq!(names(&u, Role::ListItem).len(), all);
+}
