@@ -111,6 +111,26 @@ impl fmt::Display for SourcePath<'_> {
     }
 }
 
+/// Radek procesu jen do kruhoveho bufferu, bez seriove linky a obrazovky
+/// (trasovani vstupu: zapis na seriovou linku stoji ~10 ms na radek pri
+/// 115200 Bd a blokoval by vstupni cestu). Kopii na disk udela `logd`.
+pub fn info_ring_only(args: fmt::Arguments) {
+    let mut buf = line::LineBuf::new();
+    let ns = arch::now_ns();
+    let _ = fmt::write(
+        &mut buf,
+        format_args!(
+            "[{:5}.{:06}] cpu{} I syscall::misc: ",
+            ns / 1_000_000_000,
+            (ns / 1_000) % 1_000_000,
+            sched::try_current_cpu_index().unwrap_or(0)
+        ),
+    );
+    let _ = fmt::write(&mut buf, args);
+    buf.finish_line();
+    ring::push(buf.as_bytes());
+}
+
 /// Vstup maker. Nevolat primo.
 #[doc(hidden)]
 pub fn __log(

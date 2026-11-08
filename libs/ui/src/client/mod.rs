@@ -524,11 +524,21 @@ pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h
     let mut win = Window::open(link, mode, w, h, &app.title())?;
     let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
     let mut dirty = true;
+    // Trasovani vstupu: klik, ktery zmenil rozhrani, ceka na nakresleni
+    // a na snimek kompozitoru (cela cesta klik -> obraz).
+    let mut drawn: Option<u64> = None;
     loop {
         if dirty && !win.frame_pending {
             ui.rebuild(app.title(), app.view());
             match render(&mut win, &mut ui) {
-                Ok(()) => dirty = false,
+                Ok(()) => {
+                    dirty = false;
+                    let id = CHANGED_ID.swap(0, core::sync::atomic::Ordering::Relaxed);
+                    if id != 0 {
+                        libos::println!("vstup: id={id} ui nakresleno a odeslano kompozitoru +{} ms", since_ms(id));
+                        drawn = Some(id);
+                    }
+                }
                 // Kompozitor spadl uprostred snimku: okno je obnovene,
                 // nakreslit ho znovu.
                 Err(Error::ServiceRestarted) => continue,
@@ -559,6 +569,11 @@ pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h
             Err(Error::PeerClosed) => return Ok(()),
             Err(e) => return Err(e),
         };
+        if matches!(ev, Event::Frame)
+            && let Some(id) = drawn.take()
+        {
+            libos::println!("vstup: id={id} ui kompozitor slozil snimek se zmenou (FRAME) +{} ms", since_ms(id));
+        }
         let r = handle_event(&mut win, &mut ui, &mut app, ev, &mut dirty);
         match r {
             Ok(true) => {}
@@ -573,6 +588,14 @@ pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h
 /// Id udalosti vstupu, kterou aplikace prave zpracovava (0 = zadna):
 /// aplikace ho pripoji k trasovani pozadavku na sluzby ("vstup: id=...").
 static INPUT_ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Posledni udalost vstupu, ktera zmenila rozhrani (ceka na nakresleni).
+static CHANGED_ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Milisekundy od udalosti `id` (cas z inputd v us, stejne hodiny).
+fn since_ms(id: u64) -> u64 {
+    (libos::time::now() / 1000).saturating_sub(id) / 1000
+}
 
 /// Id zpracovavane udalosti vstupu pro trasovani (0 = zadna).
 pub fn input_id() -> u64 {
@@ -598,6 +621,9 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
                 app.update(m);
             }
             INPUT_ID.store(0, core::sync::atomic::Ordering::Relaxed);
+            if changed {
+                CHANGED_ID.store(id, core::sync::atomic::Ordering::Relaxed);
+            }
             // Dalsi udalost (rychle psani pred snimkem) musi videt novy
             // stav: rozvrhnout hned, kreslit az na snimek.
             if changed {

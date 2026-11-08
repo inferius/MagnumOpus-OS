@@ -56,6 +56,9 @@ pub struct Scope {
     pub all: bool,
     /// Smi ridit (zrusit, pozastavit, pokracovat) ulohy, ktere vidi.
     pub control: bool,
+    /// S `control` smi ridit i cizi a systemove ulohy (spravce). Bez nej
+    /// jen sve (Spravce uloh v GUI vidi vse, ridi jen ulohy uzivatele).
+    pub control_others: bool,
 }
 
 /// Zprava k odeslani.
@@ -161,7 +164,7 @@ impl Core {
     fn view(scope: &Scope, e: &Entry) -> Task {
         let mut t = e.task.clone();
         let mut allowed = actions::LOG | actions::ATTACH;
-        if scope.control {
+        if scope.control && (scope.control_others || e.owner == scope.identity) {
             allowed |= actions::CANCEL | actions::PAUSE | actions::RESUME;
         }
         t.actions &= allowed;
@@ -272,7 +275,7 @@ impl Core {
             None => Err(Error::NotFound),
             Some(e) if !Self::visible(&cl.scope, e) => Err(Error::NotFound),
             Some(e) if Self::view(&cl.scope, e).actions & bit == 0 => {
-                if !cl.scope.control || (e.owner != cl.scope.identity && !cl.scope.all) {
+                if !cl.scope.control || (e.owner != cl.scope.identity && (!cl.scope.all || !cl.scope.control_others)) {
                     Err(Error::AccessDenied)
                 } else {
                     Err(Error::NotSupported)

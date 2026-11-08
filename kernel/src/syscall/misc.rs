@@ -26,11 +26,17 @@ pub fn debug_log(a: Args) -> Result<u64> {
     }
     // Blok diagnostickeho snimku od kompozitoru (jen na vyzadani, radky si
     // bez cislic byvaji podobne): bez omezeni opakovani, jinak by se ztratil.
-    let snapshot = &*p.name == "compd" && text.starts_with("snimek ");
+    let snapshot = (p.name == "compd" || p.name == "logd") && text.starts_with("snimek ");
     match if snapshot { log::limit::Verdict::Log(0) } else { log::limit::check(log::limit::text_key(p.id, &text), crate::arch::now_ns()) } {
         log::limit::Verdict::Drop => return Ok(0),
         log::limit::Verdict::Log(0) => {}
         log::limit::Verdict::Log(n) => log::summary(&p.name, n, format_args!("proces {}", p.id)),
+    }
+    // Trasovani vstupu jen do pameti (seriova linka by zdrzela klik); na
+    // seriovou linku ho vypise diagnosticky snimek (`logd`).
+    if text.starts_with(VSTUP) {
+        log::info_ring_only(format_args!("[{} {}] {}", p.name, p.id, text.trim_end()));
+        return Ok(0);
     }
     log::info!("[{} {}] {}", p.name, p.id, text.trim_end());
     Ok(0)

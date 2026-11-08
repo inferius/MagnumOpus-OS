@@ -27,7 +27,7 @@ impl Fake {
     pub fn new() -> Self {
         let mut core = Core::new();
         let producer = core.add_producer("uzivatel");
-        let client = core.add_client(Scope { identity: "uzivatel".into(), all: false, control: true });
+        let client = core.add_client(Scope { identity: "uzivatel".into(), all: false, control: true, control_others: true });
         Self { core, client, producer, inbox: Vec::new() }
     }
 

@@ -1233,3 +1233,36 @@ fn snapshot_config_and_shortcut() {
     assert!(!c.is_shortcut(KEY_SYSRQ, 0) && c.auto_hung && !c.auto_crash && c.interval_s == 5);
     assert_eq!(Config::parse("zkratka=print").is_shortcut(KEY_S, CTRL | ALT | SHIFT), false);
 }
+
+#[test]
+fn bar_icons_open_flyouts() {
+    let mut t = T::new();
+    t.c.status.net = Some(crate::render::NetState::NoDevice);
+    t.frame();
+    let bar = t.c.bar_layout();
+    let (bell, net) = (bar.bell, bar.net.expect("ikona site"));
+    t.click(bell.x + 4, bell.y + 4);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Bell), "klik na zvonek otevre panel");
+    let r = t.c.flyout_rect().unwrap();
+    assert!(r.bottom() <= t.c.panel_rect().y as i64, "panel nad listou");
+    t.click(net.x + 4, net.y + 4);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Net), "jina ikona prepne panel");
+    t.click(net.x + 4, net.y + 4);
+    assert_eq!(t.c.flyout, None, "druhy klik zavre");
+    t.click(bell.x + 4, bell.y + 4);
+    t.key(inputproto::code::KEY_ESC, false);
+    assert_eq!(t.c.flyout, None, "Esc zavre");
+}
+
+#[test]
+fn tasks_icon_tooltip() {
+    let mut t = T::new();
+    t.c.tasks = (20, 1);
+    t.frame();
+    let r = t.c.bar_layout().tasks.expect("ikona uloh");
+    t.move_to(r.x + 4, r.y + 4);
+    assert!(t.c.tasks_tip_visible(), "popisek po najeti");
+    assert_eq!(t.c.tasks_tip(), "Úlohy: 20 běží, z toho agent AI 1");
+    t.move_to(5, 5);
+    assert!(!t.c.tasks_tip_visible());
+}

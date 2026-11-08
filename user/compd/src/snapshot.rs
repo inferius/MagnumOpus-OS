@@ -76,7 +76,12 @@ pub fn take(comp: &Comp, why: &str, frame: Option<(u64, u32, u32)>, logd: Option
     }
     let t2 = time::now();
     let note = match (frame, logd) {
-        (None, _) => String::from("obrazek nejde: obrazovka neni namapovana (skladani na GPU)"),
+        (None, Some(ch)) => {
+            // Bez obrazku: logd aspon vypise trasovani vstupu.
+            let _ = ch.write(format!("snimek {id} 0").as_bytes(), vec![]);
+            String::from("obrazek nejde: obrazovka neni namapovana (skladani na GPU)")
+        }
+        (None, None) => String::from("obrazek nejde: obrazovka neni namapovana (skladani na GPU)"),
         (_, None) => String::from("obrazek nejde: chybi kanal na logd"),
         (Some((addr, w, h)), Some(ch)) => match bmp(addr, w, h) {
             Ok((vmo, len)) => match ch.write(format!("snimek {id} {len}").as_bytes(), vec![vmo.into_handle()]) {

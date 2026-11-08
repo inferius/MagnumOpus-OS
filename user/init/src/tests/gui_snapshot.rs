@@ -62,7 +62,9 @@ pub fn diag_snapshot(_: &Startup) -> TestResult {
         let data = fs.read(&log, from, (size - from) as usize).map_err(|e| fail("cteni logu", e))?;
         let text = String::from_utf8_lossy(&data);
         let tag = format!("snimek {id}:");
-        if text.contains(&format!("{tag} konec")) {
+        // Blok kompozitoru a za nim trasovani vstupu z pameti (logd).
+        if text.contains(&format!("{tag} konec")) && text.contains(&format!("{tag} trasovani vstupu")) {
+            check!(text.contains(&format!("{tag}   ")) && text.contains("] vstup: id="), "trasovani vstupu v bloku snimku");
             check!(text.contains(&format!("{tag} okno z=0")), "okna v bloku snimku");
             check!(text.contains(&format!("{tag}   uzel")) && text.contains("checkbox 'Jen úlohy agenta'"), "strom pristupnosti v bloku snimku");
             check!(text.contains(&format!("{tag} fokus okno")), "fokus v bloku snimku");
