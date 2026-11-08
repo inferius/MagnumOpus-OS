@@ -12,9 +12,19 @@
 //! se stejnym tokenem (ovladac, ktery `SYNC` nezna, odpovi `ERROR` s `op`
 //! `SYNC` - i to je znacka). Pak znovu `INFO` a `ATTACH` (nova VMO nahradi
 //! starou).
+//!
+//! **Nastaveni obrazu** (`docs/cs/displej.md`): `CONNECTORS` vrati
+//! konektory, monitory a jejich rezimy ([`crate::modes`]), `SET_MODE`
+//! zmeni rezim vystupu (pak kompozitor posle nove `ATTACH` s novou
+//! velikosti; do te doby vystup ukazuje cerny obraz). Ovladac s
+//! `caps::HOTPLUG` posila bez vyzadani `HOTPLUG` pri zmene konektoru
+//! (pripojeni, odpojeni monitoru) - klient znovu posle `CONNECTORS`.
+//! S `caps::VSYNC` ovladac kopiruje snimek do zadniho bufferu a prepne
+//! ho ve svislem zatemneni (page flip); `PRESENTED` pak nese cas vsync.
 
 use alloc::vec::Vec;
 
+use crate::modes::{self, Connector};
 use crate::{Error, ReadExt, Reader, Rect, Result, WriteExt, Writer, read_count};
 
 pub mod op {
@@ -22,6 +32,13 @@ pub mod op {
     pub const ATTACH: u32 = 2;
     pub const PRESENT: u32 = 3;
     pub const SYNC: u32 = 4;
+    // 6..=15 a 106..=115: nastaveni obrazu (konektory, rezimy, hotplug).
+    pub const CONNECTORS: u32 = 6;
+    pub const SET_MODE: u32 = 7;
+    pub const CONNECTORS_REPLY: u32 = 106;
+    pub const MODE_SET: u32 = 107;
+    /// Udalost bez pozadavku: zmena konektoru.
+    pub const HOTPLUG: u32 = 108;
     pub const MODES: u32 = 101;
     pub const ATTACHED: u32 = 102;
     pub const PRESENTED: u32 = 103;
@@ -33,6 +50,16 @@ pub mod op {
 pub mod caps {
     /// Zarizeni umi 3D (virgl).
     pub const VIRGL: u32 = 1 << 0;
+    // Bity 2..=7: nastaveni obrazu.
+    /// Ovladac umi `SET_MODE` (vic nez jeden rezim).
+    pub const MODESET: u32 = 1 << 2;
+    /// Ovladac posila udalost `HOTPLUG`.
+    pub const HOTPLUG: u32 = 1 << 3;
+    /// `PRESENT` se zobrazi celym snimkem ve vsync (page flip), `PRESENTED`
+    /// nese cas vsync.
+    pub const VSYNC: u32 = 1 << 4;
+    /// Vic vystupu (monitoru).
+    pub const MULTI: u32 = 1 << 5;
 }
 
 /// Jeden vystup (scanout).
@@ -55,6 +82,10 @@ pub enum Request {
     /// Znacka v proudu odpovedi: ovladac odpovi `SYNCED` se stejnym
     /// tokenem (vse pred ni patri predchozi instanci kompozitoru).
     Sync { token: u64 },
+    /// Vycet konektoru a rezimu (odpoved `Connectors`).
+    Connectors,
+    /// Nastavi rezim vystupu; `refresh_mhz` 0 = nejvyssi obnova pro rozmery.
+    SetMode { output: u32, w: u32, h: u32, refresh_mhz: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,10 +94,21 @@ pub enum Reply {
     Attached { output: u32 },
     Presented { seq: u64, time: u64 },
     Synced { token: u64 },
+    Connectors { connectors: Vec<Connector> },
+    /// Rezim nastaven (skutecna obnova); nasleduje `ATTACH` nove velikosti.
+    ModeSet { output: u32, w: u32, h: u32, refresh_mhz: u32 },
+    /// Konektor `output` se zmenil (bez pozadavku).
+    Hotplug { output: u32 },
     Error { op: u32, code: Error },
 }
 
 impl Reply {
+    /// Udalost bez pozadavku (ne odpoved): klient ji pri cekani na
+    /// odpoved preskoci a zpracuje zvlast.
+    pub fn is_event(&self) -> bool {
+        matches!(self, Reply::Hotplug { .. })
+    }
+
     /// Je odpoved znackou synchronizace s tokenem `token`? (`ERROR` na
     /// `SYNC` = ovladac synchronizaci nezna, ale odpovida po poradi.)
     pub fn ends_sync(&self, token: u64) -> bool {
@@ -98,6 +140,11 @@ impl Request {
                 w = Writer::op(op::SYNC);
                 w.u64(*token);
             }
+            Request::Connectors => w = Writer::op(op::CONNECTORS),
+            Request::SetMode { output, w: mw, h, refresh_mhz } => {
+                w = Writer::op(op::SET_MODE);
+                w.u32(*output).u32(*mw).u32(*h).u32(*refresh_mhz);
+            }
         }
         w.finish()
     }
@@ -123,6 +170,13 @@ impl Request {
                 Request::Present { seq, output, rects }
             }
             op::SYNC => Request::Sync { token: r.u64()? },
+            op::CONNECTORS => Request::Connectors,
+            op::SET_MODE => Request::SetMode {
+                output: r.u32()?,
+                w: r.u32()?,
+                h: r.u32()?,
+                refresh_mhz: r.u32()?,
+            },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -155,6 +209,18 @@ impl Reply {
                 w = Writer::op(op::SYNCED);
                 w.u64(*token);
             }
+            Reply::Connectors { connectors } => {
+                w = Writer::op(op::CONNECTORS_REPLY);
+                modes::encode_connectors(&mut w, connectors);
+            }
+            Reply::ModeSet { output, w: mw, h, refresh_mhz } => {
+                w = Writer::op(op::MODE_SET);
+                w.u32(*output).u32(*mw).u32(*h).u32(*refresh_mhz);
+            }
+            Reply::Hotplug { output } => {
+                w = Writer::op(op::HOTPLUG);
+                w.u32(*output);
+            }
             Reply::Error { op: o, code } => {
                 w = Writer::op(op::ERROR);
                 w.u32(*o).i32(code.code());
@@ -185,6 +251,16 @@ impl Reply {
                 time: r.u64()?,
             },
             op::SYNCED => Reply::Synced { token: r.u64()? },
+            op::CONNECTORS_REPLY => Reply::Connectors {
+                connectors: modes::decode_connectors(&mut r, data.len())?,
+            },
+            op::MODE_SET => Reply::ModeSet {
+                output: r.u32()?,
+                w: r.u32()?,
+                h: r.u32()?,
+                refresh_mhz: r.u32()?,
+            },
+            op::HOTPLUG => Reply::Hotplug { output: r.u32()? },
             op::ERROR => Reply::Error {
                 op: r.u32()?,
                 code: Error::from_code(r.i32()? as i64).ok_or(Error::InvalidArgs)?,

@@ -17,6 +17,8 @@
 //! | `inspect` | - | `ok` + kanal inspekce ([`InspectRequest`]) |
 //! | `status` | - | `ok` + [`Status`] v textu |
 //! | `tasks <bezi> <agent>` | - | `ok` (ikona uloh v panelu) |
+//! | `mode <w> <h> [mHz]` | - | `ok <w> <h> <mHz>` (zmena rezimu displeje) |
+//! | `outputs` | - | `ok` + radek na konektor: `<vystup> <typ> <pripojen 0/1> <WxH@mHz> <rezimu> <monitor>` |
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -36,6 +38,10 @@ pub const STATUS: &str = "status";
 /// `tasks <bezi> <z toho agent>`: pocet uloh pro ikonu v panelu (do
 /// pripojeni kompozitoru k taskd ho posila init nebo test).
 pub const TASKS: &str = "tasks";
+/// `mode <w> <h> [obnova mHz]`: zmena rezimu displeje (`SET_MODE`).
+pub const MODE: &str = "mode";
+/// `outputs`: konektory a rezimy displeje (`CONNECTORS`) jako text.
+pub const OUTPUTS: &str = "outputs";
 
 /// Identita aplikace pri `connect`: posila ji init (duveryhodny), ne
 /// aplikace. Odznak duvery ukazuje `name` a `perms`.

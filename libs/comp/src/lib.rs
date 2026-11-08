@@ -11,6 +11,7 @@
 //! - [`dialog`]: systemove dialogy a bezpecna obrazovka.
 //! - [`services`]: akce aplikaci a inspekce.
 //! - [`frame`]: takt snimku, animace, skupiny transakci, ping.
+//! - [`output`]: zmena velikosti obrazovky (rezim displeje).
 
 #![cfg_attr(not(test), no_std)]
 
@@ -19,12 +20,15 @@ extern crate alloc;
 pub mod dialog;
 pub mod frame;
 pub mod input;
+pub mod output;
 pub mod render;
 pub mod scene;
 pub mod services;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod output_tests;
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
