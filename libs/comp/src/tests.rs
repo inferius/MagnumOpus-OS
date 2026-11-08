@@ -1146,3 +1146,21 @@ fn startup_cost() {
     let t5 = t0.elapsed();
     std::println!("parse {t1:?} theme {t2:?} fonts {t3:?} comp {t4:?} first frame {t5:?}");
 }
+
+/// Zmena pod listou prekresli celou listu (rozmazane pozadi je jedno).
+#[test]
+fn bar_blur_redraws_whole_bar() {
+    let mut t = T::new();
+    t.frame();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    // Okno kousek nad listou: posun dolu poskodi jen jeho oblast.
+    let bar = t.c.panel_rect();
+    t.c.windows.get_mut(&g).unwrap().rect.y = bar.y - 60;
+    t.c.damage_window(g);
+    let rects = t.frame().unwrap();
+    let covered: u64 = rects.iter().map(|r| r.intersect(&bar).w as u64 * r.intersect(&bar).h as u64).sum();
+    assert!(covered >= bar.w as u64 * bar.h as u64, "lista prekreslena cela: {rects:?}");
+}

@@ -410,7 +410,8 @@ fn look_shots(_: &Startup) -> TestResult {
                 check!(time::now() < end, "snimek po zmene motivu");
                 time::sleep(Duration::from_millis(100));
             }
-            time::sleep(Duration::from_millis(1000));
+            // Aplikace prekresluji samy (velke okno je v emulaci pomale).
+            time::sleep(Duration::from_millis(3500));
             println!("{QEMU_SHOT}{name}");
             // xtask porizuje snimek; pockat, nez skonci.
             time::sleep(Duration::from_millis(1500));

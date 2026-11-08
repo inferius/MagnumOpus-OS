@@ -163,7 +163,11 @@ impl Comp {
     pub(crate) fn damage(&mut self, r: Rect) {
         let s = self.screen();
         if !r.intersect(&self.blur_source()).is_empty() {
+            // Rozmazane pozadi se spocita znovu: prekreslit celou listu,
+            // jinak by zbytek listy mel stare pozadi.
             self.bar_blur_dirty = true;
+            let p = self.panel_visual();
+            self.dirty.add(p, s);
         }
         self.dirty.add(r, s);
     }
