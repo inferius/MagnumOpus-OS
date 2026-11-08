@@ -536,3 +536,43 @@ fn tab_menu_shows_kind_and_empty_result_says_so() {
     let f = crate::vt::strip(&a.frame());
     assert!(f.contains("/tests/") && f.contains("složka") && f.contains("soubor"), "{f}");
 }
+
+/// Ukazatel cinnosti a pruh: znakova zaloha (braille, osminy, nejvys
+/// 10 snimku/s), kreslene prvky okna, staticky rezim.
+#[test]
+fn activity_glyphs_for_every_output() {
+    use crate::activity::{Drawn, Glyphs, bar, drawn, spinner};
+    assert_eq!(spinner(Glyphs::Text, 0), '⠋');
+    assert_eq!(spinner(Glyphs::Text, 99), '⠋', "nejvys 10 snimku/s");
+    assert_eq!(spinner(Glyphs::Text, 100), '⠙');
+    assert_eq!(spinner(Glyphs::Static, 12345), '◌');
+    assert_eq!(drawn(spinner(Glyphs::Drawn, 480)), Some(Drawn::Spinner(8)), "polovina otacky");
+    assert_eq!(bar(Glyphs::Text, 4, 0.5), "██  ");
+    assert_eq!(bar(Glyphs::Text, 4, 0.5625), "██▎ ", "18 osmin = 2 bunky a 2/8");
+    assert_eq!(bar(Glyphs::Static, 4, 0.5625), "██  ");
+    assert_eq!(bar(Glyphs::Text, 3, 1.0), "███");
+    let d: Vec<_> = bar(Glyphs::Drawn, 2, 0.75).chars().map(drawn).collect();
+    assert_eq!(d, vec![Some(Drawn::Bar(8)), Some(Drawn::Bar(4))]);
+    // V okne: pruh prubehu ze spolecneho modulu.
+    let mut a = App::new(crate::theme::Theme::dark(), 80, 24);
+    a.on_msg(ServerMsg::Attached { session: 7, cwd: "/".into(), blocks: 0 });
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 1, line: "cp".into() });
+    a.on_msg(ServerMsg::Item { session: 7, block: 1, item: Item::Progress { done: 1, total: 2, label: "pol.".into() } });
+    let f = crate::vt::strip(&a.frame());
+    assert!(f.contains("██") && f.contains("50 %"), "{f}");
+}
+
+/// Kresleny krouzek: oblouk plne, kolej slabe, stred prazdny; dilci
+/// bunka pruhu zleva (pismo konzole znaky nema, kresli se stejne).
+#[test]
+fn drawn_activity_coverage() {
+    use crate::activity::{Drawn, coverage};
+    let (w, h) = (10, 20);
+    assert_eq!(coverage(Drawn::Spinner(0), w, h, 5, 10), 0, "stred");
+    // Snimek 0: oblouk nahore (12 hodin), kolej dole.
+    let top = coverage(Drawn::Spinner(0), w, h, 4, 6);
+    let bottom = coverage(Drawn::Spinner(0), w, h, 4, 13);
+    assert!(top > 200 && bottom > 0 && bottom < 120, "oblouk {top}, kolej {bottom}");
+    assert_eq!(coverage(Drawn::Bar(4), w, h, 4, 10), 255);
+    assert_eq!(coverage(Drawn::Bar(4), w, h, 5, 10), 0);
+}

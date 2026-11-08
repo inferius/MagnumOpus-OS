@@ -110,6 +110,9 @@ pub struct App {
     out: Vec<ClientMsg>,
     /// Aktualni cas (ns od 1970) pro rychlosti, odhady a stari.
     pub now: Option<i64>,
+    /// Jak kreslit ukazatel cinnosti a pruh ([`crate::activity`]): okno
+    /// GUI vlastnim prvkem, konzole znaky, "Omezit pohyb" staticky.
+    pub glyphs: crate::activity::Glyphs,
     /// Pocitadlo snimku (tocici se znak u bezicich bloku).
     tick: u32,
     /// Posun vystupu nahoru (radky od konce; 0 = dole, novy vystup a psani
@@ -147,7 +150,8 @@ pub const WELCOME: &[&str] = &[
 const KEEP_BLOCKS: usize = 100;
 /// Nejvic radku tabulky v bloku mimo navigaci.
 const TABLE_ROWS: usize = 8;
-const SPIN: [char; 4] = ['|', '/', '-', '\\'];
+/// Delka tiku okna (ms) pro ukazatel cinnosti bez znameho casu.
+const TICK_MS: i64 = 150;
 
 impl App {
     pub fn new(theme: Theme, cols: usize, rows: usize) -> App {
@@ -164,6 +168,7 @@ impl App {
             prompt: None,
             out: Vec::new(),
             now: None,
+            glyphs: crate::activity::Glyphs::Text,
             tick: 0,
             scroll: 0,
             max_scroll: core::cell::Cell::new(0),
@@ -484,6 +489,12 @@ impl App {
         }
     }
 
+    /// Znak ukazatele cinnosti (cas z okna, jinak z tiku).
+    fn spinner(&self) -> char {
+        let ms = self.now.map_or(self.tick as i64 * TICK_MS, |n| n / 1_000_000);
+        crate::activity::spinner(self.glyphs, ms)
+    }
+
     fn scroll_by(&mut self, d: isize) {
         let max = self.max_scroll.get();
         self.scroll = (self.scroll as isize + d).clamp(0, max as isize) as usize;
@@ -800,7 +811,7 @@ impl App {
             let mut l = Line::new();
             l.push(Some(Style::fg(t.ui.muted)), &alloc::format!(" relace {} · {} ", self.session, self.cwd));
             if running > 0 {
-                l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("· běží {running} {} ", SPIN[self.tick as usize % 4]));
+                l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("· běží {running} {} ", self.spinner()));
             }
             let jobs = self.tasks_running();
             if jobs > 0 {
@@ -936,7 +947,7 @@ impl App {
             }
             l.push(None, &b.line[at..]);
             match b.ok {
-                None => l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("  {}", SPIN[self.tick as usize % 4])),
+                None => l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("  {}", self.spinner())),
                 Some(ok) if b.duration > 0 || !ok => l.push(
                     Some(Style::fg(if ok { t.ui.muted } else { t.ui.err })),
                     &alloc::format!(
@@ -1036,20 +1047,12 @@ impl App {
         l.push(None, "  ");
         let width = (self.cols / 3).clamp(10, 40);
         if total == 0 && running {
-            // Neznamy celek: putujici usek.
-            let pos = self.tick as usize % width;
-            for i in 0..width {
-                if (i + width - pos) % width < 4 {
-                    l.push_bg(None, t.ui.accent, " ");
-                } else {
-                    l.push_bg(None, t.ui.select, " ");
-                }
-            }
-            l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("  {done} {label}"));
+            // Neznamy celek: ukazatel cinnosti a pocet hotovych.
+            l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("{} ", self.spinner()));
+            l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("{done} {label}"));
             return l;
         }
         let pct = (done.min(total) * 100 / total) as usize;
-        let full = width * pct / 100;
         // Blok skoncil pred 100 % (break, chyba, preruseni): zastaveny pruh.
         let color = if pct >= 100 {
             t.ui.ok
@@ -1058,8 +1061,9 @@ impl App {
         } else {
             t.ui.muted
         };
-        l.push_bg(None, color, &" ".repeat(full));
-        l.push_bg(None, t.ui.select, &" ".repeat(width - full));
+        // Vyhlazeny pruh (osminy bunky) ze spolecneho modulu.
+        let frac = done.min(total) as f64 / total as f64;
+        l.push_bg(Some(Style::fg(color)), t.ui.select, &crate::activity::bar(self.glyphs, width, frac));
         l.push(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &alloc::format!("  {pct} %"));
         let mut info = alloc::format!("  {done} / {total} {label}");
         if !running && pct < 100 {

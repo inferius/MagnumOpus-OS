@@ -253,6 +253,8 @@ fn main(mut startup: Startup) -> i64 {
         dirty: true,
     };
     c.app.welcome = true;
+    // Krouzek a pruh kresli obrazovka sama (pismo braille ani bloky nema).
+    c.app.glyphs = term::activity::Glyphs::Drawn;
     // Bez cekani: init konzoli hned po spusteni posila `display`.
     c.conn.start();
     println!("console: bezim (ceka na displej a fokus)");

@@ -22,6 +22,7 @@
 
 extern crate alloc;
 
+pub mod activity;
 pub mod broker;
 pub mod ctl;
 pub mod perm;

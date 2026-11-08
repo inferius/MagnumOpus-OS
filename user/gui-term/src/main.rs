@@ -104,7 +104,10 @@ impl Look {
     }
 }
 /// Animace pruhu a tociciho znaku (jen kdyz neco bezi).
+/// Tik okna (pruh, odhad, delka hlasek).
 const TICK: Duration = Duration::from_millis(150);
+/// Snimek krouzku cinnosti (~16 snimku/s, jen kdyz neco bezi).
+const ANIM: Duration = Duration::from_millis(60);
 
 struct Term {
     win: Window,
@@ -134,11 +137,14 @@ impl Term {
         let look = Look::new();
         let (c, r) = grid(&look, win.w, win.h);
         let th = look.term_theme();
+        let mut app = App::new(th, c, r);
+        // Krouzek a dilci bunky pruhu kresli okno samo (term::activity).
+        app.glyphs = term::activity::Glyphs::Drawn;
         let mut t = Self {
             win,
             look,
             screen: Screen::new(c, r),
-            app: App::new(th, c, r),
+            app,
             conn: connect::Connector::new(conn, "gui-term"),
             termd: None,
         };
@@ -348,11 +354,14 @@ fn main(startup: Startup) -> i64 {
         return 3;
     }
     let mut next_tick = time::deadline_after(TICK);
+    let mut next_anim = time::deadline_after(ANIM);
     loop {
         // Cekat na okno, termd nebo termin (animace, nove pripojeni).
         if !t.win.has_queued() {
             let animate = t.app.busy() || t.app.prompt.is_some();
-            let deadline = [animate.then_some(next_tick), t.conn.deadline()].into_iter().flatten().min();
+            let spin = t.app.busy() && t.app.glyphs == term::activity::Glyphs::Drawn;
+            let deadline =
+                [animate.then_some(next_tick), spin.then_some(next_anim), t.conn.deadline()].into_iter().flatten().min();
             let rd = Signals::READABLE | Signals::PEER_CLOSED;
             let termd = &t.termd;
             let conn = &t.conn;
@@ -395,6 +404,12 @@ fn main(startup: Startup) -> i64 {
             if t.app.busy() {
                 redraw = true;
             }
+        }
+        // Plynuly krouzek: jen cas pro animaci, bez tiku okna.
+        if t.app.busy() && time::now() >= next_anim {
+            next_anim = time::deadline_after(ANIM);
+            t.app.now = now();
+            redraw = true;
         }
         if redraw && t.render().is_err() {
             return 4;
@@ -446,6 +461,11 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str) {
             if cell.ch == ' ' {
                 continue;
             }
+            // Vlastni prvky (ukazatel cinnosti, dilci bunka pruhu).
+            if let Some(d) = term::activity::drawn(cell.ch) {
+                draw_activity(c, Rect::new(ox, oy, cw, ch), d, px(cell.fg));
+                continue;
+            }
             let weight = if cell.bold { t.text.body_strong.weight } else { ms.weight };
             let f = look.mono.face(weight);
             let base = oy + f.baseline_in(ms.size, ch);
@@ -460,5 +480,24 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str) {
     if screen.x < screen.cols && screen.y < screen.rows {
         let (ox, oy) = (pad + (screen.x as u32 * cw) as i32, th as i32 + pad + (screen.y as u32 * ch) as i32);
         c.blend(Rect::new(ox, oy + 2, 2, ch - 4), col.accent);
+    }
+}
+
+/// Barva (premultiplied) s kryti `a` / 255.
+fn alpha(c: u32, a: u32) -> u32 {
+    let ch = |s: u32| ((c >> s & 0xFF) * a / 255) << s;
+    ch(24) | ch(16) | ch(8) | ch(0)
+}
+
+/// Krouzek cinnosti nebo dilci bunka pruhu: vlastni kresleni misto znaku
+/// (krytí pixelu ze spolecneho [`term::activity::coverage`]).
+fn draw_activity(c: &mut Canvas<'_>, cell: Rect, d: term::activity::Drawn, color: u32) {
+    for y in 0..cell.h {
+        for x in 0..cell.w {
+            let a = term::activity::coverage(d, cell.w, cell.h, x, y) as u32;
+            if a > 0 {
+                c.blend(Rect::new(cell.x + x as i32, cell.y + y as i32, 1, 1), alpha(color, a));
+            }
+        }
     }
 }

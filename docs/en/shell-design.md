@@ -934,6 +934,28 @@ together with GUI 6c.
 | drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
 | starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
+### Activity indicator and progress
+
+Commands do not draw activity with characters themselves: they report it
+in a structured way (a running block, a `Progress { done, total }` item)
+and the window draws it with one shared module
+`libs/term/src/activity.rs`. So all commands (`cp`, downloads, scrub...)
+behave the same.
+
+| Where it is drawn | Activity | Progress | Status |
+|---|---|---|---|
+| terminal window (`gui-term`) and the fallback console | a ring with a rotating arc in the accent color (1 cell, ~16 frames/s) | a smooth bar with partial cells in 1/8 steps, percent, rate, time estimate | **[implemented]** |
+| foreign terminal, text fallback | braille dots `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, at most 10 frames/s | a bar of `▏▎▍▌▋▊▉█` | **[implemented]** |
+| "Reduce motion" | a static `◌` (running) / `●` (done) | whole cells only | **[designed]** (the mode exists, the system switch does not yet) |
+| output that is not a terminal (file, script) | no animation | only the final state | **[implemented]** |
+| progress from foreign programs via OSC 9;4 | | as above | **[designed]** |
+
+The window and the console draw the ring and the partial cells
+themselves, because the fonts lack these characters. On the wire they are
+characters from the Unicode private use area (U+F0000 ring, U+F0100
+partial bar cell) and `activity::coverage` computes the same pixel coverage
+for both. The ring is redrawn only while something runs.
+
 ## Concurrency: async and await
 
 > **Done (variant A):** a task `async { }`, waiting `await` (in C also
