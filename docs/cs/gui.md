@@ -773,7 +773,7 @@ skládání kompozitoru.
 
 | Co | Stav |
 |---|---|
-| `cargo xtask run/test --gpu 2d\|gl\|venus\|none` | volba zařízení: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; bez okna displej `egl-headless`; `none` = bez virtio-gpu (GUI přes `fbdisplay`) |
+| `cargo xtask run/test --gpu 2d\|gl\|venus\|none` | volba zařízení: `virtio-gpu-pci`, `virtio-gpu-gl-pci` (virgl), `virtio-gpu-gl-pci,venus=on,blob=on,hostmem=256M`; bez okna displej `egl-headless`; `none` = bez virtio-gpu (GUI přes `fbdisplay`). **`run` s oknem bez `--gpu` = `none`:** okno QEMU ukazuje první kartu (VGA) a na ni je navázaný vstup; s virtio-gpu by kompozitor kreslil na druhou konzoli (v okně QEMU View → virtio-gpu-pci) |
 | ovladač | vyjedná `VIRGL`, `RESOURCE_BLOB`, `CONTEXT_INIT` a vypíše capsety, např. `virgl(v1) virgl2(v2)` |
 | `vgpu::virgl` | vlastní kodér proudu příkazů virgl (stavové objekty, shadery TGSI, vrcholy, kreslení, scissor) a příkazy 3D virtio-gpu, testy na hostiteli |
 | skládání přes GPU | čeká: na tomto hostiteli (QEMU 11.1 pro Windows) se se zapnutým OpenGL (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) virtuální stroj po startu jádra zastaví |
