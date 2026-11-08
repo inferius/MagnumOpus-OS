@@ -33,6 +33,8 @@ pub enum Owner {
     Secure,
     /// Nove vstupni zarizeni ceka na overeni (id zdroje v `inputd`).
     Device(u16),
+    /// Vypnuti (`false`) nebo restart (`true`) z palety prikazu.
+    Power(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -434,7 +436,26 @@ impl Comp {
                 self.input.untrusted.retain(|&s| s != source);
                 self.out.push(Out::Device { source, trust: choice == 0 });
             }
+            Owner::Power(reboot) if choice == 0 => {
+                self.system_requests.push(if reboot { crate::palette::SystemRequest::Reboot } else { crate::palette::SystemRequest::Shutdown })
+            }
+            Owner::Power(_) => {}
         }
+    }
+
+    /// Nevratna systemova akce z palety: nejdriv systemove potvrzeni.
+    pub(crate) fn confirm_power(&mut self, reboot: bool) {
+        let (what, button) = if reboot { ("restartovat", "Restartovat") } else { ("vypnout", "Vypnout") };
+        self.open_dialog(Dialog {
+            owner: Owner::Power(reboot),
+            id: 0,
+            kind: DialogKind::Confirm,
+            app: String::from("Systém"),
+            text: alloc::format!("Opravdu {what} počítač? Neuložená práce v aplikacích se může ztratit."),
+            options: alloc::vec![String::from(button), String::from("Zrušit")],
+            sel: 1,
+            password: String::new(),
+        });
     }
 
     /// Nova klavesnice nebo mys ceka na overeni (proti BadUSB): jeji

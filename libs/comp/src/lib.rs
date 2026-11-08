@@ -24,6 +24,7 @@ pub mod diag;
 pub mod dialog;
 pub mod flyout;
 pub mod launch;
+pub mod menu;
 pub mod palette;
 pub mod frame;
 pub mod gpu;
@@ -144,6 +145,8 @@ pub struct Comp {
     /// Otevrena paleta prikazu (`palette.rs`) a nedavne polozky.
     pub(crate) palette: Option<palette::Palette>,
     pub(crate) palette_recent: Vec<alloc::string::String>,
+    /// Cetnost pouziti polozek palety (razeni "Tato aplikace").
+    pub(crate) palette_usage: palette::Usage,
     /// Zadosti palety pro init (vypnout, restartovat).
     pub(crate) system_requests: Vec<palette::SystemRequest>,
 }
@@ -187,6 +190,7 @@ impl Comp {
             launch_requests: Vec::new(),
             palette: None,
             palette_recent: Vec::new(),
+            palette_usage: Default::default(),
             system_requests: Vec::new(),
         };
         c.damage_all();

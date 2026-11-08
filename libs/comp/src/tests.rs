@@ -1479,8 +1479,10 @@ fn command_palette_search_run_and_recent() {
     key_mods(&mut t, KEY_K, inputproto::mods::CTRL);
     assert!(t.c.palette_open(), "Ctrl+K");
     assert!(client_msgs(&t.c.take_out(), a).iter().all(|m| !matches!(m, ServerMsg::Input { .. })), "klavesa nejde aplikaci");
-    let all = t.c.palette_items();
-    assert!(all.contains(&Item::System(SysAction::Shutdown)) && all.iter().any(|i| matches!(i, Item::Window(_))));
+    assert!(t.c.palette_items().contains(&Item::System(SysAction::Shutdown)), "bez psani sekce System");
+    text(&mut t, "o");
+    assert!(t.c.palette_items().iter().any(|i| matches!(i, Item::Window(_))), "pri psani i okna");
+    t.key(inputproto::code::KEY_BACKSPACE, false);
     // Hledani bez diakritiky: "sprav" najde Spravce uloh.
     text(&mut t, "sprav");
     assert_eq!(t.c.palette_items(), vec![Item::App("org.tasks".into(), "Správce úloh".into())]);
@@ -1501,5 +1503,73 @@ fn command_palette_search_run_and_recent() {
     key_mods(&mut t, KEY_K, inputproto::mods::CTRL);
     text(&mut t, "vypnout");
     t.key(KEY_ENTER, false);
+    // Nevratne: nejdriv systemove potvrzeni (vychozi volba Zrusit).
+    assert!(t.c.take_system_requests().is_empty(), "bez potvrzeni nic");
+    assert!(t.c.dialogs.active().is_some(), "dialog potvrzeni");
+    t.key(inputproto::code::KEY_TAB, false);
+    t.key(KEY_ENTER, false);
     assert_eq!(t.c.take_system_requests(), vec![crate::palette::SystemRequest::Shutdown]);
+}
+
+#[test]
+fn command_palette_v2_app_menu_actions() {
+    use crate::palette::{Item, Row};
+    use guiproto::action::{Action, Param, ParamType, Value};
+    use guiproto::menu::MenuItem;
+    use inputproto::code::{KEY_ENTER, KEY_K, KEY_TAB};
+    let mut t = T::new();
+    let mut ci = info("org.demo", "Ukázka");
+    let act = |id: &str, confirm: bool, by: bool| Action {
+        id: id.into(),
+        title: id.into(),
+        needs: Vec::new(),
+        confirm,
+        params: if by { vec![Param { name: "by".into(), ty: ParamType::Int, required: true }] } else { Vec::new() },
+    };
+    ci.actions = vec![act("counter.add", false, true), act("notes.clear", true, false), act("tab.new", false, false)];
+    let a = t.c.add_client(ci, t.now);
+    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let item = |label: &str, action: &str| MenuItem { label: label.into(), action: action.into(), ..Default::default() };
+    let mut add = item("Přičíst 1", "counter.add");
+    add.args = vec![("by".into(), Value::Int(1))];
+    let mut clear = item("Smazat poznámky", "notes.clear");
+    clear.disabled = "žádné poznámky".into();
+    let menu = vec![MenuItem {
+        label: "Soubor".into(),
+        children: vec![add, item("Nová záložka", "tab.new"), clear, item("Vypnout", "tab.new"), item("Cizí", "neni.v.manifestu")],
+        ..Default::default()
+    }];
+    t.msg(a, ClientMsg::MenuUpdate { window: 1, items: menu });
+    let g = t.c.clients[&a].windows[&1];
+    assert_eq!(t.c.windows[&g].menu.len(), 3, "vyhrazeny nazev a akce mimo manifest zahozeny");
+    key_mods(&mut t, KEY_K, inputproto::mods::CTRL);
+    // Bez psani: sekce aplikace s jmenem a ikonou, System se stitem.
+    let rows = t.c.palette_rows();
+    assert!(rows.contains(&Row::Header("Ukázka".into(), "window", false)));
+    assert!(rows.iter().any(|r| matches!(r, Row::Header(_, _, true))), "System se stitem");
+    // Zkratka zacatku slov: "nz" = Nova zalozka; akce aplikace prvni.
+    text(&mut t, "nz");
+    assert_eq!(t.c.palette_items()[0], Item::AppAction(g, 1));
+    // Predpona `>`: jen akce aplikace.
+    t.key(inputproto::code::KEY_BACKSPACE, false);
+    t.key(inputproto::code::KEY_BACKSPACE, false);
+    text(&mut t, ">pri");
+    assert_eq!(t.c.palette_items(), vec![Item::AppAction(g, 0)]);
+    t.c.take_out();
+    t.key(KEY_ENTER, false);
+    let invoked = client_msgs(&t.c.take_out(), a)
+        .into_iter()
+        .any(|m| matches!(m, ServerMsg::ActionInvoke { action, args, .. } if action == "counter.add" && args == vec![("by".into(), Value::Int(1))]));
+    assert!(invoked, "akce pres API akci s pevnymi argumenty");
+    // Zakazana polozka se nespusti; Tab prepina rozsah na aplikaci.
+    key_mods(&mut t, KEY_K, inputproto::mods::CTRL);
+    t.key(KEY_TAB, false);
+    assert!(t.c.palette_items().iter().all(|i| matches!(i, Item::AppAction(..))), "rozsah tato aplikace");
+    text(&mut t, "smazat");
+    t.c.take_out();
+    t.key(KEY_ENTER, false);
+    assert!(t.c.palette_open(), "zakazana akce paletu nezavre");
+    assert!(client_msgs(&t.c.take_out(), a).iter().all(|m| !matches!(m, ServerMsg::ActionInvoke { .. })));
 }

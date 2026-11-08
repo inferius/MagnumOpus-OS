@@ -261,6 +261,12 @@ impl Service {
         }
         // 4. Tik.
         self.maybe_tick();
+        // Ustaleni (inspekce `Settle`) ceka prilis dlouho: proc.
+        if let Some(c) = self.comp.as_mut()
+            && let Some(l) = c.settle_report(now)
+        {
+            println!("{l}");
+        }
         self.flush();
         true
     }

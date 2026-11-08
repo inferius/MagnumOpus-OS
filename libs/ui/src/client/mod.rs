@@ -127,6 +127,8 @@ pub struct Window {
     pub frame_pending: bool,
     /// Titulek, ktery kompozitor zna (zmenu posle `render` s commitem).
     title: String,
+    /// Posledni poslane menu okna (`MENU_UPDATE` jen pri zmene).
+    pub(crate) menu: Vec<guiproto::menu::MenuItem>,
     a11y_ids: alloc::collections::BTreeSet<u32>,
     groups: BTreeMap<u32, Rect>,
     /// Platny stav okna pro obnovu po padu kompozitoru.
@@ -204,6 +206,7 @@ impl Window {
             txn: 0,
             frame_pending: false,
             title: title.into(),
+            menu: Vec::new(),
             a11y_ids: Default::default(),
             groups: BTreeMap::new(),
             replay,
@@ -536,6 +539,14 @@ pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h
             match render(&mut win, &mut ui) {
                 Ok(()) => {
                     dirty = false;
+                    // Menu aplikace (paleta prikazu): jen pri zmene.
+                    let menu = app.menu();
+                    if menu != win.menu {
+                        match win.send(ClientMsg::MenuUpdate { window: 1, items: menu.clone() }) {
+                            Ok(()) => win.menu = menu,
+                            Err(e) => libos::println!("ui: menu okna: {e}"),
+                        }
+                    }
                     let id = CHANGED_ID.swap(0, core::sync::atomic::Ordering::Relaxed);
                     if id != 0 {
                         libos::println!("vstup: id={id} ui nakresleno a odeslano kompozitoru +{} ms", since_ms(id));

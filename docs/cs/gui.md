@@ -496,7 +496,7 @@ okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
 modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
 oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
-### Paleta příkazů (v1)
+### Paleta příkazů (v2)
 
 Systémová zkratka **Ctrl+K** nebo **Super+K** (jen fyzická klávesnice)
 otevře nahoře uprostřed obrazovky paletu podle `design/prostredi-menu.html`.
@@ -514,9 +514,16 @@ v `libs/comp`)
 | Aplikace | aplikace plochy ze seznamu `apps` | spuštění initem / aktivace |
 | Systém | Diagnostický snímek, Restartovat, Vypnout | snímek v kompozitoru; restart a vypnutí initem (`system reboot\|shutdown` na kanálu `launcher`, jako příkaz shellu) |
 
-Akce aplikací (menu přes API akcí) přijdou ve v2: struktura má pro ně
-položku `AppAction` (okno, id akce, popisek). **[navrženo]** Zamknutí
-a celá obrazovka přibudou, až budou v systému. **[navrženo]**
+**Akce aplikace (v2)**: aplikace pošle menu zprávou `MENU_UPDATE`
+(`guiproto::menu`: nabídky, položky s id akce z manifestu a pevnými
+argumenty, role Zpět/Kopírovat/Vložit... se systémovým textem a zkratkou,
+zaškrtnutí, zakázáno s důvodem, zkratka, klíčová slova, podmenu do hloubky
+3, nejvýš 256 položek). V `libs/ui` metoda `App::menu()`, posílá se jen
+při změně; Ukázka má nabídky Počítadlo a Poznámky. Spuštění jde stejnou
+cestou jako volání `actions` (ověření argumentů, potvrzení u `confirm`).
+Sekce, rozsah a pravidla viz [Pravidla palety příkazů](#pravidla-palety-příkazů).
+**[implementováno]** Zamknutí a celá obrazovka přibudou, až budou
+v systému. **[navrženo]**
 
 ### Spouštění aplikací z lišty
 
@@ -721,43 +728,53 @@ Prototyp a porovnání variant: `design/prostredi-menu.html` (varianta D).
   přepíná rozsah (vše / tato aplikace / systém). Sekci aplikace kreslí
   systém s ikonou a jménem aplikace, sekce Systém má štít důvěry - položka
   aplikace se nemůže vydávat za systémovou. v1 (aplikace, okna, systémové
-  akce, nedávné) **[implementováno]**, akce aplikací (v2) **[navrženo]**.
+  akce, nedávné) i akce aplikací z jejich menu (v2) **[implementováno]**; menu v titulku (☰) a kolečka soukromí v odznaku **[navrženo]**.
 
 ### Pravidla palety příkazů
 
-Všechna **[navrženo]**, pokud není řečeno jinak.
+Stav je u každého pravidla. Testy: `command_palette_search_run_and_recent`, `command_palette_v2_app_menu_actions` (`libs/comp`), `menu_update_roundtrip_and_limits` (`libs/guiproto`).
 
 1. **Otevření**: Ctrl+K a Super, z jakéhokoli okna; nad vším kromě
    systémových dialogů. Esc zavře, fokus se vrátí do původního okna.
+   **[implementováno]** (paleta fokus nemění)
 2. **Rozsah**: výchozí *vše*; Tab přepíná *vše / tato aplikace /
    systém*; předpona `>` = jen akce aktivní aplikace. Rozsah se ukazuje
-   v poli hledání.
+   v poli hledání. **[implementováno]**
 3. **Sekce a pořadí**: bez psaní Nedávné (nejvýš 5), Tato aplikace (5
    nejčastějších), Systém. Při psaní sekce aktivní aplikace, Okna,
    Aplikace, Systém; nejvýš 5 v sekci a „další…“. Uvnitř sekce podle
-   shody, pak podle četnosti použití.
+   shody, pak podle četnosti použití. **[implementováno]** (četnost jen
+   v paměti kompozitoru)
 4. **Hledání**: bez ohledu na velikost písmen a **diakritiku** („ulozit“
    najde „Uložit“), shoda začátků slov a zkratek („nzk“ = „Nová záložka“),
    klíčová slova a synonyma z deklarace akce (aplikace je smí přidat).
+   **[implementováno]**
 5. **Položka** ukazuje: ikonu, název, zkratku vpravo, u akcí aplikace
    jméno aplikace. Zakázaná akce je šedá s důvodem (z deklarace), nespouští
-   se.
+   se. **[implementováno]** (jméno aplikace je v nadpisu sekce)
 6. **Bezpečnost**: sekce aplikace kreslí systém s ikonou a jménem
    aplikace, sekce Systém se štítem důvěry. Aplikace nesmí přidat položku
    do sekce Systém ani použít vyhrazené názvy (Vypnout, Restartovat,
    Odhlásit, Zamknout, Oprávnění...). Nevratné akce (vypnutí, smazání)
-   vyžadují potvrzení stejně jako z menu.
+   vyžadují potvrzení stejně jako z menu. **[implementováno]**: položka
+   menu smí odkazovat jen na akci z manifestu (jinak se zahodí), vyhrazené
+   názvy se zahodí, akce s `confirm` i Vypnout a Restartovat se potvrzují
+   systémovým dialogem.
 7. **Soukromí**: napsaný text se nikam neposílá ani neloguje; historie
-   Nedávné je per uživatel, jde smazat a vypnout.
+   Nedávné je per uživatel, jde smazat a vypnout. Text se neposílá ani
+   neloguje **[implementováno]**; historie je zatím jen v paměti
+   kompozitoru, smazání a vypnutí **[navrženo]**.
 8. **Výkon**: výsledky v rámci jednoho snímku výstupu (rozpočet podle
    obnovovací frekvence); seznam akcí aplikace se drží v kompozitoru
    (aplikace ho pošle při změně, `MENU_UPDATE`), hledání se aplikace
-   neptá.
+   neptá. Menu v kompozitoru **[implementováno]**; čas výsledků neměřen.
 9. **Agenti AI** používají stejná data (seznam akcí s popisem a stavem)
-   přes API akcí, ne simulované klikání do palety.
+   přes API akcí, ne simulované klikání do palety. **[navrženo]** (seznam
+   menu agentům zatím API akcí nedává)
 10. **Přístupnost**: celá paleta je ve stromu přístupnosti (role,
     názvy, počet výsledků), ovládá se jen klávesnicí, čtečka obrazovky
-    hlásí vybranou položku.
+    hlásí vybranou položku. Klávesnice **[implementováno]**, strom
+    přístupnosti palety **[navrženo]**.
 
 ### Zásada: málo voleb
 

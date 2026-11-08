@@ -602,3 +602,33 @@ fn paths_value_roundtrip_and_check() {
     assert!(a[0].check(&[("files".into(), v)]).is_ok());
     assert!(a[0].check(&[("files".into(), Value::Path("/a".into()))]).is_err());
 }
+
+#[test]
+fn menu_update_roundtrip_and_limits() {
+    use crate::menu::{MAX_DEPTH, MenuItem, Role, flatten};
+    use crate::window::ClientMsg;
+    let leaf = MenuItem {
+        label: "Kopírovat".into(),
+        action: "edit.copy".into(),
+        role: Role::Copy,
+        checked: Some(true),
+        disabled: "nic nevybráno".into(),
+        shortcut: "Ctrl+C".into(),
+        keywords: vec!["schránka".into()],
+        args: vec![("n".into(), crate::action::Value::Int(1))],
+        ..Default::default()
+    };
+    let m = ClientMsg::MenuUpdate { window: 1, items: vec![MenuItem { label: "Úpravy".into(), children: vec![leaf], ..Default::default() }] };
+    let back = ClientMsg::decode(&m.encode()).unwrap();
+    assert_eq!(back, m);
+    let ClientMsg::MenuUpdate { items, .. } = back else { unreachable!() };
+    let f = flatten(&items);
+    assert_eq!(f.len(), 1);
+    assert_eq!(f[0].path, "Úpravy › Kopírovat", "role ma systemovy text");
+    // Prilis hluboky strom se odmitne.
+    let mut deep = MenuItem { label: "x".into(), ..Default::default() };
+    for _ in 0..=MAX_DEPTH {
+        deep = MenuItem { label: "x".into(), children: vec![deep], ..Default::default() };
+    }
+    assert!(ClientMsg::decode(&ClientMsg::MenuUpdate { window: 1, items: vec![deep] }.encode()).is_err());
+}
