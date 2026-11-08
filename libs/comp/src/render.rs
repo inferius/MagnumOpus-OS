@@ -102,6 +102,8 @@ pub fn perm_icon(p: &str) -> &'static str {
 #[derive(Debug, Clone, Default)]
 pub struct Bar {
     pub rect: Rect,
+    /// Spoustec aplikaci (ikona `apps`; nabidku dodela shell plochy A1).
+    pub launcher: Rect,
     /// Tlacitka oken: (okno, obdelnik).
     pub apps: Vec<(u32, Rect)>,
     pub agent: Option<Rect>,
@@ -119,6 +121,7 @@ pub enum Hover {
     /// Tlacitko okna v liste.
     BarApp(u32),
     Tasks,
+    Launcher,
 }
 
 impl Comp {
@@ -171,8 +174,12 @@ impl Comp {
         let gap = t.space[1] as i32;
         let y = p.y + (p.h as i32 - item as i32) / 2;
         let mut bar = Bar { rect: p, ..Default::default() };
-        // Vlevo okna.
+        // Vlevo spoustec, oddelovac a okna.
         let mut x = p.x + pad;
+        bar.launcher = Rect::new(x, y, item, item);
+        x += item as i32 + gap;
+        bar.seps.push(x);
+        x += 1 + gap;
         for (&g, w) in &self.windows {
             if !w.mapped {
                 continue;
@@ -270,10 +277,24 @@ impl Comp {
                 draw_window(canvas, &mut self.style, w, cl, kids, focused, now, hover.and_then(|h| button_of(h, *gid)));
             }
             // Vse nad okny pres mezibuffer (stejne jako GPU backend: jedno
-            // prolnuti kazdeho pixelu).
-            self.top_via_scratch(canvas, *r, &bar, dialog_active);
+            // prolnuti kazdeho pixelu); jen tam, kde vrstva neco kresli.
+            for t in self.top_regions(dialog_active) {
+                let part = r.intersect(&t);
+                if !part.is_empty() {
+                    self.top_via_scratch(canvas, part, &bar, dialog_active);
+                }
+            }
         }
         canvas.reset_clip();
+    }
+
+    /// Kde vrstva nad okny kresli: lista se stinem, kurzor, pri dialogu cela
+    /// obrazovka.
+    pub(crate) fn top_regions(&self, dialog_active: bool) -> Vec<Rect> {
+        if dialog_active {
+            return alloc::vec![self.screen()];
+        }
+        alloc::vec![self.panel_visual(), Rect::new(self.input.px, self.input.py, CURSOR_W, CURSOR_H)]
     }
 
     /// Nakresli vrstvu nad okny do mezibufferu a prolne ji do platna.
@@ -412,7 +433,7 @@ pub(crate) fn draw_window_body(c: &mut Canvas<'_>, st: &mut Style, w: &Window, c
         draw_children(c, cl, kids, 0, (w.rect.x, w.rect.y), content_clip, 255, 0);
         c.set_clip(clip);
     }
-    draw_window_above(c, st, w, cl, now, hover);
+    draw_window_above(c, st, w, cl, now, hover, focused);
 }
 
 /// Cast okna pod obsahem aplikace: telo, titulek (pozadi, odznak, text,
@@ -432,7 +453,7 @@ pub(crate) fn draw_window_below(c: &mut Canvas<'_>, st: &mut Style, w: &Window, 
     // Titulek pres celou sirku okna (az k ramu).
     let bar = Rect::new(o.x, o.y, o.w, t.bottom() as u32 - o.y as u32);
     c.fill(bar, if focused { col.surface_2 } else { col.surface });
-    let badge = draw_badge(c, st, w, cl);
+    let badge = draw_badge(c, st, w, cl, focused);
     draw_buttons(c, st, w, hover);
     // Jmeno: na stred mezi odznakem a tlacitky, zkracene.
     let th = &st.theme;
@@ -459,14 +480,14 @@ pub(crate) fn draw_window_below(c: &mut Canvas<'_>, st: &mut Style, w: &Window, 
 
 /// Prvky nad obsahem: tlacitka a odznak oken bez titulku (vlastni titulek,
 /// bez ramu), ztlumeni neodpovidajici aplikace, ram okna.
-pub(crate) fn draw_window_above(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, now: u64, hover: Option<usize>) {
+pub(crate) fn draw_window_above(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, now: u64, hover: Option<usize>, focused: bool) {
     if w.mode.has_frame() {
         if w.mode != Mode::Standard {
             draw_buttons(c, st, w, hover);
-            draw_badge(c, st, w, cl);
+            draw_badge(c, st, w, cl, focused);
         }
     } else if w.badge_until > now {
-        draw_badge(c, st, w, cl);
+        draw_badge(c, st, w, cl, focused);
     }
     if cl.unresponsive {
         draw_hung(c, st, w, cl);
@@ -504,8 +525,15 @@ fn draw_hung(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client) {
 
 /// Odznak duvery: stit, jmeno z manifestu (od initu), ikony opravneni.
 /// Vraci jeho obdelnik.
-fn draw_badge(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client) -> Rect {
-    let t = st.theme.clone();
+fn draw_badge(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, focused: bool) -> Rect {
+    let mut t = st.theme.clone();
+    if !focused {
+        // Neaktivni okno: odznak s nizsi sytosti (prototyp `saturate(.6)`),
+        // porad citelny.
+        for c in [&mut t.color.trust_bg, &mut t.color.trust_ink, &mut t.color.trust_border] {
+            *c = saturate(*c, 153);
+        }
+    }
     let style = badge_text(&t);
     let mut bw = t.space[2] + t.size.icon_s + t.space[2] + st.width(&cl.info.name, style) + t.space[3];
     let n = cl.info.perms.len() as u32;
@@ -543,6 +571,15 @@ fn draw_badge(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client) -> Re
     }
     c.set_clip(old);
     r
+}
+
+/// Sytost barvy `k`/255 (0 = sede podle jasu, 255 = beze zmeny).
+fn saturate(c: u32, k: u32) -> u32 {
+    let (r, g, b) = (c >> 16 & 0xFF, c >> 8 & 0xFF, c & 0xFF);
+    // Jas podle Rec. 709 (jako CSS filtr saturate).
+    let l = (r * 54 + g * 183 + b * 19) >> 8;
+    let m = |v: u32| (l * (255 - k) + v * k) / 255;
+    (c & 0xFF00_0000) | m(r) << 16 | m(g) << 8 | m(b)
 }
 
 /// Tlacitka okna: minimalizovat, maximalizovat, zavrit (pilulky, ikona
@@ -658,8 +695,14 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     st.draw_shadow(c, &shadow, p, t.radius.window, Rect::default());
     c.round_fill_bordered(p, t.radius.window, scale(col.surface, t.opacity.bar), col.border, 1);
     let ctl = t.radius.control;
-    // Okna.
+    // Spoustec.
     let il = t.size.icon_l;
+    let l = bar.launcher;
+    if info.hover == Some(Hover::Launcher) {
+        c.round_fill(l, ctl, col.surface_3);
+    }
+    st.icons.draw(c, "apps", l.x + (l.w - il) as i32 / 2, l.y + (l.h - il) as i32 / 2, il, t.icon_stroke, col.ink);
+    // Okna.
     for (g, r) in &bar.apps {
         let Some(w) = info.windows.get(g) else { continue };
         let active = info.focus == Some(*g) && !w.minimized;

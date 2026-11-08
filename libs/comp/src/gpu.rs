@@ -158,7 +158,7 @@ impl Comp {
                     for k in core {
                         canvas.set_clip(reg.intersect(&k));
                         if !canvas.clip().is_empty() {
-                            draw_window_above(canvas, &mut self.style, w, cl, now, hov);
+                            draw_window_above(canvas, &mut self.style, w, cl, now, hov, focused);
                         }
                     }
                     if rad > 0 {
@@ -175,11 +175,17 @@ impl Comp {
                     sink.draw(GpuDraw { src: Src::Above(*gid), src_rect: local(reg, b), dst: reg, clip: r, opacity: 255, opaque: false });
                 }
             }
-            canvas.set_clip(r);
-            canvas.fill(r, 0);
-            self.draw_top(canvas, &bar, dialog_active);
-            sink.upload(Src::Top, screen, r, canvas.pixels(), stride);
-            sink.draw(GpuDraw { src: Src::Top, src_rect: r, dst: r, clip: r, opacity: 255, opaque: false });
+            for t in self.top_regions(dialog_active) {
+                let part = r.intersect(&t);
+                if part.is_empty() {
+                    continue;
+                }
+                canvas.set_clip(part);
+                canvas.fill(part, 0);
+                self.draw_top(canvas, &bar, dialog_active);
+                sink.upload(Src::Top, screen, part, canvas.pixels(), stride);
+                sink.draw(GpuDraw { src: Src::Top, src_rect: part, dst: part, clip: part, opacity: 255, opaque: false });
+            }
         }
         canvas.reset_clip();
     }

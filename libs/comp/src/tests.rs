@@ -861,7 +861,13 @@ fn look_snapshots() {
         t.c.set_tasks(4, 1);
         t.c.set_clock(Some(("14:05".into(), "so 7. 11.".into())));
         t.c.damage_all();
+        let t0 = std::time::Instant::now();
         t.frame();
+        let first = t0.elapsed();
+        t.c.damage_all();
+        let t1 = std::time::Instant::now();
+        t.frame();
+        std::println!("cela obrazovka {W}x{H}: prvni {first:?} (s plochou), dalsi {:?}", t1.elapsed());
         save_png(file, &t.frame, W, H);
     }
 }

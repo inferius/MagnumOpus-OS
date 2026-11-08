@@ -389,15 +389,16 @@ fn look_shots(_: &Startup) -> TestResult {
         s.gui.command(b"tasks 4 1", Vec::new()).map_err(|e| fail("tasks", e))?;
         for name in SHOTS {
             s.gui.command(alloc::format!("theme {name}").as_bytes(), Vec::new()).map_err(|e| fail("theme", e))?;
-            settle(&s.inspect)?;
-            time::sleep(Duration::from_millis(300));
+            // Ne `settle`: terminal s bezici ulohou animuje a kompozitor
+            // neni nikdy uplne v klidu. Pockat na prekresleni cele obrazovky.
+            time::sleep(Duration::from_millis(2500));
             println!("{QEMU_SHOT}{name}");
             // xtask porizuje snimek; pockat, nez skonci.
             time::sleep(Duration::from_millis(1500));
         }
         s.gui.command(b"theme light", Vec::new()).map_err(|e| fail("theme", e))?;
         check!(s.gui.command(b"theme fialova", Vec::new()).is_err(), "neplatny motiv");
-        settle(&s.inspect)?;
+        time::sleep(Duration::from_millis(2500));
         Ok(())
     })
 }

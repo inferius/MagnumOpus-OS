@@ -323,7 +323,9 @@ impl Comp {
     fn update_hover(&mut self, px: i32, py: i32, hit: Option<(u32, Zone)>) {
         let h = if self.panel_rect().contains(px, py) {
             let bar = self.bar_layout();
-            if let Some((g, _)) = bar.apps.iter().find(|(_, r)| r.contains(px, py)) {
+            if bar.launcher.contains(px, py) {
+                Some(Hover::Launcher)
+            } else if let Some((g, _)) = bar.apps.iter().find(|(_, r)| r.contains(px, py)) {
                 Some(Hover::BarApp(*g))
             } else if bar.tasks.is_some_and(|r| r.contains(px, py)) {
                 Some(Hover::Tasks)
@@ -352,7 +354,7 @@ impl Comp {
                         self.damage(r);
                     }
                 }
-                Hover::BarApp(_) | Hover::Tasks => self.damage_panel(),
+                Hover::BarApp(_) | Hover::Tasks | Hover::Launcher => self.damage_panel(),
             }
         }
         self.input.hover = h;
