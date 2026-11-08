@@ -400,9 +400,10 @@ impl Server {
                 self.start_interfaces(new)?;
                 Ok(Some(ok_reply(r.id, new as u32, &[])))
             }
-            op::INTERRUPT_IN | op::INTERRUPT_OUT => {
+            op::INTERRUPT_IN | op::INTERRUPT_OUT | op::BULK_IN | op::BULK_OUT => {
                 let addr = u8::try_from(r.a).map_err(|_| Error::InvalidArgs)?;
-                let in_dir = r.op == op::INTERRUPT_IN;
+                let in_dir = r.op == op::INTERRUPT_IN || r.op == op::BULK_IN;
+                let want_bulk = r.op == op::BULK_IN || r.op == op::BULK_OUT;
                 if (addr & 0x80 != 0) != in_dir {
                     return Err(Error::InvalidArgs);
                 }
@@ -411,13 +412,22 @@ impl Server {
                     return Err(Error::AccessDenied);
                 }
                 let len = if in_dir { r.b } else { r.data.len() as u32 };
-                if !in_dir {
+                {
                     let dev = self.hc.devices[slot as usize].as_ref().ok_or(Error::PeerClosed)?;
                     let ep = dev.endpoint(d).ok_or(Error::NotFound)?;
-                    if r.data.len() as u64 > ep.buf.len {
+                    // Druh prenosu musi sedet s endpointem (bulk okno je
+                    // vetsi nez stranka interrupt endpointu).
+                    if (ep.window.1 > 4096) != want_bulk || len as u64 > ep.window.1 {
                         return Err(Error::InvalidArgs);
                     }
-                    ep.buf.map.write_bytes(0, r.data);
+                    // Endpoint s rozpracovanym prenosem: data OUT by
+                    // prepsala jeho buffer.
+                    if self.hc.pending.iter().any(|p| p.slot == slot && p.dci == d) {
+                        return Err(Error::AlreadyExists);
+                    }
+                    if !in_dir {
+                        ep.buf.map.write_bytes(ep.window.0, r.data);
+                    }
                 }
                 self.hc.submit_normal(slot, d, len, Owner::Client(idx, r.id))?;
                 Ok(None)

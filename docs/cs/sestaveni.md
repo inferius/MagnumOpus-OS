@@ -35,6 +35,8 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 | `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Test delší než 20 s se v logu označí `[pomaly]` |
 | `cargo xtask test --only napajeni` | jen zvláštní běhy testu napájení (vypnutí tlačítkem přes ACPI, restart; po hlavním běhu se spouští vždy, vypne je `--no-power`), viz [ACPI](acpi.md#testy) |
 | `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
+| `cargo xtask usb` | živé USB: obraz `target/usb-<arch>-<profil>.img`; `--list`, `--write <disk>`, `--run`, `--test`, `--size <MiB>`, `--out <soubor>`, viz [Živé USB](zive-usb.md) |
+| `cargo xtask test --only zive-usb` | jen start z obrazu USB jako flash disk (po hlavním běhu se spouští vždy) |
 | `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 
@@ -43,8 +45,8 @@ aarch64 = QEMU `virt`, viz [implementace aarch64](architektura.md#implementace-a
 `--release`, `--headless` (bez okna), `--iommu <typ>` (emulovaná IOMMU:
 x86_64 `intel` (výchozí), `amd`, `none`; aarch64 `smmu` (výchozí), `none`; `none` ověří běh bez překladu DMA - test
 „IOMMU: zarizeni nezapise mimo prideleny DMA“ a testy „IOMMU chrani pamet mimo DMA“ sady `disky` pak podle očekávání selžou),
-`--data-disk <virtio|nvme|nvme4k|ahci>` (řadič datového disku, výchozí `virtio`; `nvme4k` = NVMe se sektorem 4 KiB; na NVMe a AHCI dostane disk
-GPT s naším oddílem, viz [Disky](disky.md)), `--gdb` (QEMU čeká na
+`--data-disk <virtio|nvme|nvme4k|ahci|usb>` (řadič datového disku, výchozí `virtio`; `nvme4k` = NVMe se sektorem 4 KiB; `usb` = flash disk
+na xHCI; na NVMe, AHCI a USB dostane disk GPT s naším oddílem, viz [Disky](disky.md)), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
 

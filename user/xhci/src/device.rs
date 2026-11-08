@@ -14,8 +14,32 @@ use crate::ring::{Dma, Ring, Trb, trb};
 pub struct Endpoint {
     pub dci: u8,
     pub ring: Ring,
-    /// Buffer pro data (jedna stranka).
+    /// Buffer pro data: interrupt jedna stranka, bulk 32 KiB, z nich se
+    /// pouziva okno [`Endpoint::window`].
     pub buf: Dma,
+    /// Okno v `buf` pro jeden prenos: (offset, delka). Jeden TRB nesmi
+    /// prekrocit hranici 64 KiB (xHCI 4.11.7.1), proto bulk okno 16 KiB
+    /// lezi v bufferu 32 KiB tak, aby hranici neprekrocilo.
+    pub window: (u64, u64),
+}
+
+/// Velikost bufferu bulk endpointu (dvojnasobek okna).
+pub const BULK_BUF: u64 = 2 * usbproto::msg::MAX_DATA as u64;
+
+/// Okno `len` bajtu v souvislem bufferu od fyzicke adresy `phys` o delce
+/// `2 * len`, ktere neprekroci hranici 64 KiB (`len` <= 32 KiB). Vraci
+/// offset okna v bufferu.
+pub fn window_offset(phys: u64, len: u64) -> u64 {
+    const B: u64 = 64 * 1024;
+    // Vzdalenost k prvni hranici za zacatkem bufferu.
+    let gap = (phys / B + 1) * B - phys;
+    if gap >= len {
+        0
+    } else {
+        // Hranice lezi v prvni polovine: okno zacne na ni (za ni je
+        // aspon `len` bajtu, protoze `gap < len`).
+        gap
+    }
 }
 
 /// Kde zarizeni visi: cesta, route string a transakcni prekladac (TT).
@@ -89,6 +113,11 @@ impl Device {
         } else {
             self.endpoint(dci).map(|e| &e.buf)
         }
+    }
+
+    /// Offset okna dat endpointu v jeho bufferu (EP0 a interrupt 0).
+    pub fn window_offset(&self, dci: u8) -> u64 {
+        self.endpoint(dci).map_or(0, |e| e.window.0)
     }
 
     /// Rozhrani v pouzivanem nastaveni (u hubu s TT na kazdy port
@@ -373,8 +402,8 @@ impl Hc {
         }
     }
 
-    /// Configure Endpoint pro interrupt endpointy vsech rozhrani (bulk
-    /// a isochronni zatim ne - tridy, ktere je potrebuji, prijdou pozdeji).
+    /// Configure Endpoint pro interrupt a bulk endpointy vsech rozhrani
+    /// (isochronni zatim ne - zvuk USB prijde pozdeji).
     /// Lze volat znovu (zmena alternativy): drive nastavene endpointy se
     /// zrusi (drop) a nahradi novymi. `None` = endpointy beze zmeny, jen
     /// novy kontext slotu (udaje hubu).
@@ -383,7 +412,7 @@ impl Hc {
         let mut eps = Vec::new();
         for i in config.map_or(&[][..], |c| &c.interfaces) {
             for e in &i.endpoints {
-                if e.transfer == Transfer::Interrupt {
+                if matches!(e.transfer, Transfer::Interrupt | Transfer::Bulk) {
                     eps.push(*e);
                 }
             }
@@ -409,20 +438,37 @@ impl Hc {
         for e in &eps {
             let d = dci(e.address);
             let ring = Ring::new(&self.res)?;
-            let buf = Dma::new(&self.res, 4096)?;
+            let bulk = e.transfer == Transfer::Bulk;
+            let (buf, window) = if bulk {
+                let buf = Dma::new(&self.res, BULK_BUF)?;
+                let len = usbproto::msg::MAX_DATA as u64;
+                let off = window_offset(buf.phys, len);
+                (buf, (off, len))
+            } else {
+                (Dma::new(&self.res, 4096)?, (0, 4096))
+            };
             let off = self.in_off(1 + d as u64);
-            let ep_type = if e.is_in() { 7 } else { 3 };
+            // Typ endpointu (xHCI 6.2.3): 2/6 bulk OUT/IN, 3/7 interrupt.
+            let ep_type = match (bulk, e.is_in()) {
+                (true, false) => 2,
+                (true, true) => 6,
+                (false, false) => 3,
+                (false, true) => 7,
+            };
             let mps = e.max_packet as u32;
             let dev = self.devices[slot as usize].as_ref().unwrap();
             let m = &dev.in_ctx.map;
-            m.write::<u32>(off, interval(speed, e.transfer, e.interval) << 16);
+            // Bulk: interval 0, prumerna delka TRB 3 KiB (doporuceni xHCI
+            // 4.14.1.1), bez payloadu za interval. Interrupt: interval
+            // a payload = velikost paketu.
+            let ival = if bulk { 0 } else { interval(speed, e.transfer, e.interval) };
+            m.write::<u32>(off, ival << 16);
             m.write::<u32>(off + 4, 3 << 1 | ep_type << 3 | mps << 16);
             m.write::<u64>(off + 8, ring.start());
-            // Prumerna delka TRB a max. payload za interval = velikost paketu.
-            m.write::<u32>(off + 16, mps | mps << 16);
+            m.write::<u32>(off + 16, if bulk { 3072 } else { mps | mps << 16 });
             add |= 1 << d;
             max_dci = max_dci.max(d as u32);
-            new_eps.push(Endpoint { dci: d, ring, buf });
+            new_eps.push(Endpoint { dci: d, ring, buf, window });
         }
         let phys = {
             let dev = self.devices[slot as usize].as_mut().unwrap();

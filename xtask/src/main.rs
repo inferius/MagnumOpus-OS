@@ -5,6 +5,7 @@
 //! - `image`  - build + bootovatelny obraz disku (GPT + ESP s FAT32)
 //! - `run`    - image + spusteni v QEMU s UEFI firmwarem
 //! - `test`   - testy na hostiteli, pak jadro a userspace v QEMU
+//! - `usb`    - zive USB (obraz, zapis na flashku, start v QEMU), `usb/`
 //! - `check`  - jen kontrola prekladu jadra
 //!
 //! Prepinace: `--release`, `--arch <x86_64|aarch64>` (vsechny prikazy), pro
@@ -26,6 +27,7 @@ mod powertest;
 mod qmp;
 mod symbolize;
 mod testdisks;
+mod usb;
 mod venus;
 
 use std::env;
@@ -47,6 +49,10 @@ prikazy:
   test     testy knihoven na hostiteli, kontrola prekladu jadra pro ostatni
            architektury, pak jadro a userspace v QEMU bez okna
   check    jen kontrola prekladu jadra
+  usb      zive USB: target/usb-<arch>-<profil>.img (GPT, ESP, datovy
+           oddil); --list disky hostitele, --write <disk> zapis na
+           flashku (s potvrzenim), --run start v QEMU jako flash disk,
+           --test totez bez okna, --size <MiB> (vychozi 1024), --out <soubor>
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
   venus-gen  serializace Venusu z libs/venus/xml do libs/venus/src/vk
   venus-check  overi, ze libs/venus/src/vk odpovida vstupum
@@ -60,8 +66,8 @@ prepinace:
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
                    none; aarch64 smmu (vychozi), none
   --data-disk <r>  (run, test) radic datoveho disku: virtio (vychozi), nvme,
-                   nvme4k (sektor 4 KiB), ahci; na NVMe a AHCI ma disk GPT
-                   s nasim oddilem
+                   nvme4k (sektor 4 KiB), ahci, usb (flash disk na xHCI);
+                   na NVMe, AHCI a USB ma disk GPT s nasim oddilem
   --qemu-wsl       (run, test) spustit QEMU ve WSL (QEMU_WSL_DISTRO, vychozi
                    Ubuntu; QEMU_WSL_PREFIX, vychozi ~/venus/prefix) - Venus
   --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi pro test a run
@@ -95,7 +101,8 @@ pub struct Options {
     /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
     /// aarch64 "smmu", "none".
     iommu: String,
-    /// Radic datoveho disku: "virtio", "nvme", "nvme4k" (sektor 4 KiB), "ahci".
+    /// Radic datoveho disku: "virtio", "nvme", "nvme4k" (sektor 4 KiB), "ahci",
+    /// "usb" (flash disk usb-storage na radici xHCI).
     data_disk: String,
     /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
     /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl);
@@ -145,6 +152,16 @@ fn run_cli() -> Result<()> {
         eprint!("{USAGE}");
         return Err("chybi prikaz".into());
     };
+    // Prikaz `usb` ma vlastni prepinace; zbytek (--release, --arch) je
+    // spolecny.
+    let rest: Vec<OsString> = args.collect();
+    let (usb_args, rest) = if command == "usb" {
+        let (u, r) = usb::split_args(rest)?;
+        (Some(u), r)
+    } else {
+        (None, rest)
+    };
+    let mut args = rest.into_iter();
 
     let mut opts = Options {
         release: false,
@@ -178,8 +195,8 @@ fn run_cli() -> Result<()> {
             Some("--data-disk") => {
                 let value = args.next().ok_or("--data-disk ocekava radic")?;
                 let value = value.to_string_lossy().into_owned();
-                if !["virtio", "nvme", "nvme4k", "ahci"].contains(&value.as_str()) {
-                    return Err("--data-disk ocekava virtio, nvme, nvme4k nebo ahci".into());
+                if !["virtio", "nvme", "nvme4k", "ahci", "usb"].contains(&value.as_str()) {
+                    return Err("--data-disk ocekava virtio, nvme, nvme4k, ahci nebo usb".into());
                 }
                 opts.data_disk = value;
             }
@@ -281,21 +298,35 @@ repeat = {}
                 .push((String::from("net-test-dns-anchor"), web.dns_anchor.into_bytes()));
             opts.hostfwd = Some(helper.hostfwd.clone());
             *opts.net_helper.borrow_mut() = Some(helper);
-            // `--only napajeni`: jen zvlastni behy testu napajeni.
+            // `--only napajeni`: jen zvlastni behy testu napajeni,
+            // `--only zive-usb`: jen start z flash disku USB (`usb` je sada
+            // testu userspace).
             let power_only = opts.test_only == "napajeni";
-            if !power_only {
+            let usb_only = opts.test_only == "zive-usb";
+            if !power_only && !usb_only {
                 let artifacts = build(&opts)?;
                 let image = image_for(&artifacts, &opts)?;
                 qemu::run(&image, &artifacts, &opts)?;
             }
             // Vypnuti a restart pres ACPI: vlastni kratke behy QEMU (konec
             // behu = vypnuti, nejde to spojit s hlavnim behem testu).
-            if no_power || (!opts.test_only.is_empty() && !power_only) {
-                return Ok(());
+            if !no_power && (opts.test_only.is_empty() || power_only) {
+                powertest::run_all(&mut opts)?;
             }
-            powertest::run_all(&mut opts)
+            // Zive USB: obraz s beznym jadrem (ne testovacim) nastartuje
+            // z flash disku USB az do GUI s terminalem.
+            if opts.test_only.is_empty() || usb_only {
+                opts.test = false;
+                let extra = std::mem::take(&mut opts.extra_initfs);
+                let r = usb::test_run(&opts);
+                opts.extra_initfs = extra;
+                opts.test = true;
+                r?;
+            }
+            Ok(())
         }
         Some("check") => check_kernel(opts.arch, &opts),
+        Some("usb") => usb::command(&opts, usb_args.as_ref().unwrap()),
         Some("docs") => build_docs().map(|_| ()),
         Some("venus-gen") => venus::run(false),
         Some("venus-check") => venus::run(true),
@@ -405,6 +436,17 @@ fn host_tests() -> Result<()> {
     if !status.success() {
         return Err("testy knihoven na hostiteli selhaly".into());
     }
+    // Testy xtasku samotneho (dokumentace, zive USB: pravidla zapisu na
+    // disk, rozlozeni obrazu). Prelozi se zvlastni testovaci binarka, bezici
+    // xtask se neprepisuje.
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let status = Command::new(cargo)
+        .current_dir(workspace_root())
+        .args(["test", "--quiet", "--package", "xtask"])
+        .status()?;
+    if !status.success() {
+        return Err("testy xtasku selhaly".into());
+    }
     println!("xtask: testy knihoven na hostiteli prosly");
     Ok(())
 }
@@ -483,6 +525,7 @@ const USER_PROGRAMS: &[&str] = &[
     "xhci",
     "usb-hub",
     "usb-hid",
+    "usb-storage",
     "fsd",
     "timed",
     "termd",

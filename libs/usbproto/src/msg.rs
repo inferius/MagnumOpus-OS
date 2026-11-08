@@ -26,6 +26,12 @@ pub mod op {
     pub const INTERRUPT_IN: u32 = 3;
     /// Interrupt OUT: `a` = adresa endpointu, data = obsah.
     pub const INTERRUPT_OUT: u32 = 4;
+    /// Bulk IN: `a` = adresa endpointu (napr. 0x81), `b` = nejvic bajtu
+    /// (nejvys [`MAX_DATA`](super::MAX_DATA)). Odpoved = prectena data
+    /// (kratsi pri kratkem paketu).
+    pub const BULK_IN: u32 = 5;
+    /// Bulk OUT: `a` = adresa endpointu, data = obsah.
+    pub const BULK_OUT: u32 = 6;
     /// Jen kanal hubu: na port `a` se pripojilo zarizeni rychlosti `b`
     /// ([`crate::Speed::to_u8`]); port je po resetu povoleny. `xhci`
     /// zarizeni nastavi a spusti ovladace jeho rozhrani. Odpoved: `actual`

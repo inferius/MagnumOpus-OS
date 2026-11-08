@@ -1,0 +1,173 @@
+# Živé USB: zkoušení na skutečném počítači
+
+MagnumOpus jde spustit z flashky na skutečném počítači bez instalace.
+Systém z flashky nastartuje do GUI s terminálem; svá data (a později logy
+a záznamy pádů) ukládá na **datový oddíl flashky**. Disky počítače vidí,
+ale **jen pro čtení** (viz [Disky](disky.md#riziko-a-ochrana-cizích-disků)).
+
+Návod krok za krokem:
+
+1. [Co je potřeba](#co-je-potřeba)
+2. [Vytvoření obrazu](#vytvoření-obrazu)
+3. [Zápis na flashku](#zápis-na-flashku) (xtask, Rufus, dd)
+4. [Start z flashky](#start-z-flashky)
+5. [Co dělat při problému](#co-dělat-při-problému)
+
+## Co je potřeba
+
+- Počítač s **UEFI** (x86_64; aarch64 s UEFI, např. dev kit). Starý BIOS
+  bez UEFI nejde.
+- **Secure Boot vypnutý** (zavaděč zatím není podepsaný).
+- Flashka aspoň **2 GB**. Celý její obsah se smaže.
+- Na počítači, kde obraz vytváříte: repozitář a nástroje podle
+  [Sestavení](sestaveni.md).
+
+> **Rizika na skutečném počítači – přečtěte si před prvním startem.**
+>
+> - **Zápis na flashku přepíše celou flashku.** Splést si disk je nejčastější
+>   způsob, jak přijít o data. `cargo xtask usb --write` proto zapíše jen na
+>   vyjímatelný disk (USB, SD), nikdy na systémový disk a jen po opsání
+>   potvrzení. Rufus a `dd` takovou kontrolu nemají.
+> - **Disky počítače** (Windows, Linux, zálohy) systém vidí jen pro čtení
+>   (`diskguard`). Zapisuje jen na oddíl s naším typem GPT – na flashce.
+> - **DMA bez IOMMU.** Většina počítačů má IOMMU (Intel VT-d, AMD-Vi)
+>   v nastavení firmwaru vypnutou. Bez ní může chyba v ovladači zařízení
+>   (síť, USB, grafika) přepsat libovolnou paměť počítače – systém spadne,
+>   v horším případě poškodí data, která právě zapisuje. Disky počítače to
+>   neohrozí přímo (zápis na ně odmítá ovladač disku), ale **zapněte VT-d /
+>   AMD-Vi (IOMMU) ve firmwaru**, pokud to jde. Bez IOMMU zapíše jádro při
+>   startu do logu varování `IOMMU neni: zarizeni smi pres DMA zapisovat
+>   kamkoli do pameti`.
+> - Systém je ve vývoji: počítejte s pádem. Pád nepoškodí disky počítače
+>   (jsou jen pro čtení), nanejvýš datový oddíl flashky.
+
+## Vytvoření obrazu
+
+```bash
+cargo xtask usb --release
+```
+
+Vznikne `target/usb-x86_64-release.img` (1 GiB). Pro aarch64
+`--arch aarch64`, jinou velikost `--size <MiB>` (nejméně 194 MiB), jinou
+cestu `--out <soubor>`. Ladicí build (bez `--release`) je větší a pomalejší,
+ale má přesnější výpisy zásobníku.
+
+Obsah obrazu:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Rozložení obrazu živého USB">
+<rect class="box" x="10" y="30" width="70" height="80" rx="4"/><text class="t b" x="45" y="62" text-anchor="middle">GPT</text><text class="m" x="45" y="80" text-anchor="middle">MBR,</text><text class="m" x="45" y="95" text-anchor="middle">tabulka</text>
+<rect class="acc" x="80" y="30" width="230" height="80" rx="4"/><text class="t b" x="195" y="55" text-anchor="middle">ESP (FAT32), 128 MiB</text><text class="mono m" x="195" y="74" text-anchor="middle">EFI/BOOT/BOOTX64.EFI</text><text class="mono m" x="195" y="89" text-anchor="middle">os/kernel.elf, os/initfs.img</text><text class="mono m" x="195" y="104" text-anchor="middle">CTI-MNE.txt</text>
+<rect class="ok" x="310" y="30" width="380" height="80" rx="4"/><text class="t b" x="500" y="55" text-anchor="middle">datový oddíl „MagnumOpus“</text><text class="m" x="500" y="74" text-anchor="middle">typ C123ADA0-51BA-48C5-A536-C2CE6B2B3581</text><text class="m" x="500" y="91" text-anchor="middle">náš souborový systém (fsd), do konce obrazu</text>
+<rect class="box" x="690" y="30" width="60" height="80" rx="4"/><text class="t b" x="720" y="62" text-anchor="middle">GPT</text><text class="m" x="720" y="80" text-anchor="middle">záloha</text>
+<text class="m" x="10" y="20">0</text><text class="m" x="80" y="20">1 MiB</text><text class="m" x="310" y="20">129 MiB</text><text class="m" x="690" y="20">konec obrazu</text>
+<text class="m" x="10" y="140">Firmware najde zavaděč na ESP, zavaděč načte jádro a initfs (soubory přes UEFI).</text>
+<text class="m" x="10" y="160">Po startu ovladač usb-storage zpřístupní flashku; diskguard pustí ke čtení i zápisu jen datový oddíl.</text>
+<text class="m" x="10" y="180">Init na něm najde souborový systém a spustí fsd. ESP systém za běhu nemění.</text>
+<text class="m" x="10" y="200">Windows po zasunutí flashky ukáže jen ESP (soubor CTI-MNE.txt); datový oddíl nepřečte.</text>
+<text class="m" x="10" y="220">Zbytek větší flashky zůstane nevyužitý (zvětšení oddílu zatím není).</text>
+</svg>
+<figcaption>Rozložení obrazu živého USB (sektor 512 B).</figcaption>
+</figure>
+
+## Zápis na flashku
+
+### A. xtask (Windows i Linux, doporučeno)
+
+```bash
+cargo xtask usb --list
+```
+
+vypíše disky počítače, např.:
+
+```text
+disky tohoto pocitace (zapsat jde jen na vyjimatelny, ne systemovy):
+  0          Samsung SSD 980                   931.5 GiB  NVMe   SYSTEMOVY  pripojeno: C:
+  2          SanDisk Ultra                      28.6 GiB  USB    vyjimatelny  pripojeno: E:
+```
+
+Pak zápis (Windows: **terminál spuštěný jako správce**; Linux: `sudo` nebo
+právo zápisu do `/dev/sdX`):
+
+```bash
+cargo xtask usb --release --write 2
+```
+
+Na Linuxu je disk cesta, např. `--write /dev/sdb`. xtask disk zkontroluje
+**před** i **po** sestavení obrazu, ukáže model, velikost a sběrnici
+a čeká na opsání textu `ANO 2`. Odmítne:
+
+| případ | proč |
+|---|---|
+| systémový nebo zaváděcí disk (Windows `IsSystem`/`IsBoot`; Linux připojené `/`, `/boot`, `/boot/efi`, `/usr`, `/var`, `/home`, swap – i přes LVM) | zničil by běžící systém |
+| disk mimo USB, SD a MMC (a na Linuxu bez příznaku `removable`) | interní disky xtask nepřepisuje (instalace na interní disk přijde jako instalátor v systému) |
+| disk menší než obraz | obraz by se nevešel |
+| Linux: disk s připojeným oddílem | nejdřív `umount` |
+
+Zápis: Windows nejdřív odstraní oddíly flashky (`Clear-Disk`, jinak Windows
+zápis do připojeného svazku zablokuje). Pak xtask smaže poslední MiB
+flashky (stará záložní tabulka GPT by zmátla firmware), zapíše obraz po
+1 MiB a **první MiB (tabulku oddílů) až nakonec**: přerušený zápis
+nenechá flashku, která vypadá jako platný systém.
+
+### B. Rufus (Windows)
+
+1. Spusťte [Rufus](https://rufus.ie), vyberte flashku v poli *Zařízení*.
+2. *Výběr spouštění* → *VYBRAT* → soubor `target/usb-x86_64-release.img`.
+3. Rufus se zeptá na režim zápisu: zvolte **zápis v režimu obrazu DD**
+   (ne ISO).
+4. *START*. Pozor: Rufus nekontroluje, jestli jste vybrali správný disk.
+
+Podobně funguje balenaEtcher nebo Win32 Disk Imager.
+
+### C. dd (Linux, macOS)
+
+```bash
+lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS   # najděte flashku, např. sdb
+sudo umount /dev/sdb?*                       # odpojte její oddíly
+sudo dd if=target/usb-x86_64-release.img of=/dev/sdb bs=4M conv=fsync status=progress
+```
+
+`of=` musí být **celý disk** (`/dev/sdb`), ne oddíl (`/dev/sdb1`). Chyba
+v písmenu zničí jiný disk. Na macOS je disk `/dev/rdiskN` (`diskutil list`,
+`diskutil unmountDisk`).
+
+## Start z flashky
+
+1. Zasuňte flashku a zapněte počítač.
+2. Otevřete **nabídku zavádění** firmwaru (podle výrobce F12, F11, F8, F10
+   nebo Esc; na Macu Option). Vyberte flashku s označením **UEFI**.
+3. Když se nic nestane: ve firmwaru vypněte **Secure Boot** (a CSM /
+   Legacy, je-li zapnutý jen legacy start z USB).
+4. Systém nastartuje do GUI s terminálem. Klávesnice a myš USB fungují
+   hned (i PS/2 na x86). Síť funguje na kartách Intel (e1000e, igc)
+   a Realtek (r8169) – viz [Síťové karty](sitove-karty.md).
+
+Ověřené v QEMU (`cargo xtask usb --run` s oknem, `cargo xtask usb --test`
+bez okna; obojí stroj co nejbližší skutečnému PC: flashka na řadiči xHCI,
+klávesnice a tablet USB, karta Intel, žádné virtio, bez IOMMU). Na
+skutečném hardwaru zatím ověřeno není – proto tato příručka a diagnostika.
+
+## Co dělat při problému
+
+| příznak | co zkusit |
+|---|---|
+| flashka v nabídce zavádění chybí | jiný port USB (USB 2 místo USB 3), zapnout podporu startu z USB ve firmwaru, ověřit zápis (`--write` znovu) |
+| hned po výběru se vrátí do nabídky | Secure Boot vypnout; počítač bez UEFI (jen BIOS) nepodporujeme |
+| černá obrazovka | počkat 30 s (start ovladačů USB a disků); jinak fotka obrazovky a sériová konzole (viz níže) |
+| systém spadne | vyfotit obrazovku (kód a výpis); více v [Hlášky v logu](hlasky.md) |
+
+**Sériová konzole.** Na x86_64 jde log jádra a služeb od startu na
+sériovou linku COM1 (port 0x3F8, 115200 Bd, 8N1). Počítač s konektorem COM
+(nebo deskou s hlavičkou COM) připojte nulmodemovým kabelem k jinému
+počítači a log zachyťte (PuTTY, `picocom -b 115200 /dev/ttyUSB0`).
+
+## Pro vývojáře
+
+- Disk USB obsluhuje ovladač `usb-storage` (SCSI přes Bulk-Only
+  Transport), viz [USB](usb.md#disky-usb-usb-storage).
+- `cargo xtask test` spouští po hlavním běhu i start z USB;
+  `--only zive-usb` jen tento běh. Testy FS nad flashkou:
+  `cargo xtask test --data-disk usb --only "souborovy system,data FS"`.
+- Zdrojáky: `xtask/src/usb/` (obraz, výpis a zápis disků, start v QEMU),
+  `user/usb-storage/`, `libs/usbproto/src/storage.rs`.

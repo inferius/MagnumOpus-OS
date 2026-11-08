@@ -50,7 +50,7 @@ pub fn create_disk_image(path: &Path, files: &[(&str, &Path)]) -> Result<()> {
     // --- ESP (FAT32) ---
     let part_range =
         (PARTITION_START_LBA * SECTOR) as usize..((part_end_lba + 1) * SECTOR) as usize;
-    write_fat_partition(&mut disk[part_range], files)?;
+    write_fat_partition(&mut disk[part_range], files, *b"OS ESP     ")?;
 
     // --- Ochranny MBR, primarni a zalozni GPT (stejny kod, jakym GPT cte
     // ochrana disku v ovladacich) ---
@@ -73,10 +73,12 @@ pub fn create_disk_image(path: &Path, files: &[(&str, &Path)]) -> Result<()> {
     Ok(())
 }
 
-fn write_fat_partition(partition: &mut [u8], files: &[(&str, &Path)]) -> Result<()> {
+/// Naformatuje `partition` na FAT32 se jmenovkou `label` a nakopiruje do
+/// ni soubory (`(cesta v oddilu, zdrojovy soubor)`).
+pub fn write_fat_partition(partition: &mut [u8], files: &[(&str, &Path)], label: [u8; 11]) -> Result<()> {
     let options = fatfs::FormatVolumeOptions::new()
         .fat_type(fatfs::FatType::Fat32)
-        .volume_label(*b"OS ESP     ");
+        .volume_label(label);
     fatfs::format_volume(Cursor::new(&mut *partition), options)?;
 
     let fs = fatfs::FileSystem::new(Cursor::new(&mut *partition), fatfs::FsOptions::new())?;

@@ -1,0 +1,182 @@
+# Live USB: trying the system on a real computer
+
+MagnumOpus can run from a USB stick on a real computer without
+installation. The system boots from the stick into the GUI with a
+terminal; it stores its data (and later logs and crash records) on the
+**stick's data partition**. It sees the computer's disks, but **read-only**
+(see [Disks](disks.md#risk-and-foreign-disk-protection)).
+
+Step-by-step guide:
+
+1. [What you need](#what-you-need)
+2. [Creating the image](#creating-the-image)
+3. [Writing the stick](#writing-the-stick) (xtask, Rufus, dd)
+4. [Booting from the stick](#booting-from-the-stick)
+5. [When something goes wrong](#when-something-goes-wrong)
+
+## What you need
+
+- A computer with **UEFI** (x86_64; aarch64 with UEFI, e.g. a dev kit). An
+  old BIOS without UEFI does not work.
+- **Secure Boot off** (the loader is not signed yet).
+- A USB stick of at least **2 GB**. All of its contents are erased.
+- On the computer where you create the image: the repository and tools
+  as in [Building](building.md).
+
+> **Risks on a real computer - read before the first boot.**
+>
+> - **Writing the stick overwrites the whole stick.** Picking the wrong
+>   disk is the most common way to lose data. `cargo xtask usb --write`
+>   therefore writes only to a removable disk (USB, SD), never to the
+>   system disk, and only after you type a confirmation. Rufus and `dd`
+>   have no such check.
+> - The system sees the **computer's disks** (Windows, Linux, backups)
+>   read-only (`diskguard`). It writes only to a partition with our GPT
+>   type - on the stick.
+> - **DMA without an IOMMU.** Most computers have the IOMMU (Intel VT-d,
+>   AMD-Vi) turned off in the firmware settings. Without it, a bug in a
+>   device driver (network, USB, graphics) can overwrite any memory of the
+>   computer - the system crashes, in the worse case it corrupts data it is
+>   writing at that moment. The computer's disks are not directly at risk
+>   (the disk driver refuses writes to them), but **turn on VT-d / AMD-Vi
+>   (IOMMU) in the firmware** if you can. Without an IOMMU the kernel logs
+>   the warning `IOMMU neni: zarizeni smi pres DMA zapisovat kamkoli do
+>   pameti` at boot.
+> - The system is under development: expect crashes. A crash does not
+>   damage the computer's disks (they are read-only), at most the stick's
+>   data partition.
+
+## Creating the image
+
+```bash
+cargo xtask usb --release
+```
+
+This creates `target/usb-x86_64-release.img` (1 GiB). For aarch64 use
+`--arch aarch64`, a different size `--size <MiB>` (at least 194 MiB), a
+different path `--out <file>`. A debug build (without `--release`) is
+larger and slower but has more precise stack traces.
+
+Image contents:
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layout of the live USB image">
+<rect class="box" x="10" y="30" width="70" height="80" rx="4"/><text class="t b" x="45" y="62" text-anchor="middle">GPT</text><text class="m" x="45" y="80" text-anchor="middle">MBR,</text><text class="m" x="45" y="95" text-anchor="middle">table</text>
+<rect class="acc" x="80" y="30" width="230" height="80" rx="4"/><text class="t b" x="195" y="55" text-anchor="middle">ESP (FAT32), 128 MiB</text><text class="mono m" x="195" y="74" text-anchor="middle">EFI/BOOT/BOOTX64.EFI</text><text class="mono m" x="195" y="89" text-anchor="middle">os/kernel.elf, os/initfs.img</text><text class="mono m" x="195" y="104" text-anchor="middle">CTI-MNE.txt</text>
+<rect class="ok" x="310" y="30" width="380" height="80" rx="4"/><text class="t b" x="500" y="55" text-anchor="middle">data partition "MagnumOpus"</text><text class="m" x="500" y="74" text-anchor="middle">type C123ADA0-51BA-48C5-A536-C2CE6B2B3581</text><text class="m" x="500" y="91" text-anchor="middle">our file system (fsd), to the end of the image</text>
+<rect class="box" x="690" y="30" width="60" height="80" rx="4"/><text class="t b" x="720" y="62" text-anchor="middle">GPT</text><text class="m" x="720" y="80" text-anchor="middle">backup</text>
+<text class="m" x="10" y="20">0</text><text class="m" x="80" y="20">1 MiB</text><text class="m" x="310" y="20">129 MiB</text><text class="m" x="690" y="20">end of image</text>
+<text class="m" x="10" y="140">The firmware finds the loader on the ESP; the loader loads the kernel and initfs (files through UEFI).</text>
+<text class="m" x="10" y="160">After boot the usb-storage driver exposes the stick; diskguard allows reads and writes only to the data partition.</text>
+<text class="m" x="10" y="180">Init finds the file system there and starts fsd. The system does not change the ESP while running.</text>
+<text class="m" x="10" y="200">Windows shows only the ESP when the stick is plugged in (file CTI-MNE.txt); it cannot read the data partition.</text>
+<text class="m" x="10" y="220">The rest of a larger stick stays unused (growing the partition is not there yet).</text>
+</svg>
+<figcaption>Layout of the live USB image (512 B sectors).</figcaption>
+</figure>
+
+## Writing the stick
+
+### A. xtask (Windows and Linux, recommended)
+
+```bash
+cargo xtask usb --list
+```
+
+lists the computer's disks, for example:
+
+```text
+disky tohoto pocitace (zapsat jde jen na vyjimatelny, ne systemovy):
+  0          Samsung SSD 980                   931.5 GiB  NVMe   SYSTEMOVY  pripojeno: C:
+  2          SanDisk Ultra                      28.6 GiB  USB    vyjimatelny  pripojeno: E:
+```
+
+(`SYSTEMOVY` = system disk, `vyjimatelny` = removable, `pripojeno` =
+mounted.) Then write (Windows: **a terminal started as administrator**;
+Linux: `sudo` or write access to `/dev/sdX`):
+
+```bash
+cargo xtask usb --release --write 2
+```
+
+On Linux the disk is a path, e.g. `--write /dev/sdb`. xtask checks the disk
+**before** and **after** building the image, shows the model, size and bus
+and waits for you to type `ANO 2` ("ANO" = yes). It refuses:
+
+| case | why |
+|---|---|
+| the system or boot disk (Windows `IsSystem`/`IsBoot`; Linux mounted `/`, `/boot`, `/boot/efi`, `/usr`, `/var`, `/home`, swap - also through LVM) | it would destroy the running system |
+| a disk outside USB, SD and MMC (and on Linux without the `removable` flag) | xtask does not overwrite internal disks (installing to an internal disk will come as an installer in the system) |
+| a disk smaller than the image | the image would not fit |
+| Linux: a disk with a mounted partition | `umount` first |
+
+The write: on Windows the stick's partitions are removed first
+(`Clear-Disk`, otherwise Windows blocks writes into a mounted volume).
+Then xtask clears the stick's last MiB (an old backup GPT would confuse
+the firmware), writes the image in 1 MiB chunks and **the first MiB (the
+partition table) last**: an interrupted write does not leave a stick that
+looks like a valid system.
+
+### B. Rufus (Windows)
+
+1. Start [Rufus](https://rufus.ie), select the stick under *Device*.
+2. *Boot selection* -> *SELECT* -> the file `target/usb-x86_64-release.img`.
+3. Rufus asks for the write mode: choose **write in DD image mode** (not
+   ISO).
+4. *START*. Careful: Rufus does not check that you picked the right disk.
+
+balenaEtcher or Win32 Disk Imager work similarly.
+
+### C. dd (Linux, macOS)
+
+```bash
+lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS   # find the stick, e.g. sdb
+sudo umount /dev/sdb?*                       # unmount its partitions
+sudo dd if=target/usb-x86_64-release.img of=/dev/sdb bs=4M conv=fsync status=progress
+```
+
+`of=` must be the **whole disk** (`/dev/sdb`), not a partition
+(`/dev/sdb1`). A wrong letter destroys another disk. On macOS the disk is
+`/dev/rdiskN` (`diskutil list`, `diskutil unmountDisk`).
+
+## Booting from the stick
+
+1. Plug in the stick and turn on the computer.
+2. Open the firmware **boot menu** (depending on the vendor F12, F11, F8,
+   F10 or Esc; on a Mac Option). Pick the stick marked **UEFI**.
+3. If nothing happens: turn off **Secure Boot** in the firmware (and CSM /
+   Legacy if only legacy USB boot is enabled).
+4. The system boots into the GUI with a terminal. USB keyboard and mouse
+   work right away (PS/2 too on x86). The network works on Intel (e1000e,
+   igc) and Realtek (r8169) cards - see [Network cards](network-cards.md).
+
+Verified in QEMU (`cargo xtask usb --run` with a window, `cargo xtask usb
+--test` without one; both use a machine as close to a real PC as possible:
+the stick on an xHCI controller, USB keyboard and tablet, an Intel card, no
+virtio, no IOMMU). Not verified on real hardware yet - hence this guide and
+the diagnostics.
+
+## When something goes wrong
+
+| symptom | what to try |
+|---|---|
+| the stick is missing from the boot menu | another USB port (USB 2 instead of USB 3), enable USB boot in the firmware, check the write (`--write` again) |
+| it returns to the menu right after selecting it | turn Secure Boot off; computers without UEFI (BIOS only) are not supported |
+| black screen | wait 30 s (USB and disk drivers start); otherwise take a photo of the screen and use the serial console (below) |
+| the system crashes | photograph the screen (code and trace); more in [Log messages](messages.md) |
+
+**Serial console.** On x86_64 the kernel and service log goes from boot to
+the serial port COM1 (port 0x3F8, 115200 Bd, 8N1). Connect a computer with
+a COM connector (or a board with a COM header) to another computer with a
+null-modem cable and capture the log (PuTTY,
+`picocom -b 115200 /dev/ttyUSB0`).
+
+## For developers
+
+- The USB disk is handled by the `usb-storage` driver (SCSI over Bulk-Only
+  Transport), see [USB](usb.md#usb-disks-usb-storage).
+- `cargo xtask test` also runs the USB boot after the main run;
+  `--only zive-usb` runs only that. FS tests on the stick:
+  `cargo xtask test --data-disk usb --only "souborovy system,data FS"`.
+- Sources: `xtask/src/usb/` (image, listing and writing disks, boot in
+  QEMU), `user/usb-storage/`, `libs/usbproto/src/storage.rs`.

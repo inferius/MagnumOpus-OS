@@ -1,6 +1,6 @@
 # USB
 
-USB is handled by three kinds of processes that talk over channels:
+USB is handled by four kinds of processes that talk over channels:
 
 - **`xhci`**: the xHCI controller driver and the USB core. It sets up
   devices (address, descriptors, configuration, endpoints) and performs
@@ -9,6 +9,9 @@ USB is handled by three kinds of processes that talk over channels:
   ports (a virtual root hub) as well as external hubs.
 - **`usb-hid`**: the keyboard and mouse driver. It sends events to the
   [input service](input.md) the same way virtio-input and PS/2 do.
+- **`usb-storage`**: the USB disk driver (flash drives, external disks,
+  card readers). It offers the disk over `blockproto` just like NVMe or
+  AHCI ([Disks](disks.md)), see [USB disks](#usb-disks-usb-storage).
 
 Class drivers have no Resource at all. They get only the channel of their
 interface and see neither the controller, nor memory, nor other devices. A
@@ -112,6 +115,8 @@ may wait on one endpoint, otherwise `ALREADY_EXISTS`.
 | 2 `CONTROL` | all | control transfer on EP0: data = 8-byte setup + OUT data; reply = IN data. `SET_ADDRESS` and `SET_CONFIGURATION` = `ACCESS_DENIED` (the controller handles them) |
 | 3 `INTERRUPT_IN` | all | `a` = endpoint (e.g. 0x81), `b` = byte limit; the reply comes when data arrives. Only endpoints of the caller's own interface, otherwise `ACCESS_DENIED` |
 | 4 `INTERRUPT_OUT` | all | `a` = endpoint, data = payload |
+| 5 `BULK_IN` | all | `a` = bulk endpoint, `b` = at most bytes (16 KiB); reply = data read (shorter on a short packet) |
+| 6 `BULK_OUT` | all | `a` = bulk endpoint, data = payload (at most 16 KiB) |
 | 16 `ATTACH` | hub | a device was attached to port `a` (the port is enabled after reset); reply `actual` = slot |
 | 17 `DETACH` | hub | the device on port `a` is gone: the controller closes its interface channels and releases the slot |
 | 18 `SCAN_DONE` | hub | the first pass over the ports is complete |
@@ -127,6 +132,51 @@ let info = usb.info()?;
 usb.control(hid::set_boot_protocol(info.interface), &[])?;
 let report = usb.call(op::INTERRUPT_IN, 0x81, 8, &[], None)?;
 ```
+
+## USB disks (`usb-storage`)
+
+For an interface of class 08 (mass storage), subclass 06 (SCSI) and
+protocol 50 (Bulk-Only Transport, BOT) `devmgr` starts the `usb-storage`
+driver. It reports its disks just like a disk controller driver (`block`
++ channel, finally `done`), and `devmgr` waits for it: a stick plugged in
+at boot is in the disk list before init looks for the file system (live
+USB, [Live USB](live-usb.md)).
+
+**Bulk transfers in `xhci`.** A bulk endpoint has a 32 KiB buffer and one
+transfer uses a 16 KiB window that does not cross a 64 KiB boundary (one
+TRB must not cross it, xHCI 4.11.7.1). Endpoint type 2 (OUT) and 6 (IN),
+interval 0, average TRB length 3 KiB.
+
+**One BOT command** (`libs/usbproto/src/storage.rs`, `user/usb-storage/src/bot.rs`):
+
+1. CBW (31 B, signature `USBC`, tag, data length, direction, LUN, SCSI command) on bulk OUT,
+2. data in pieces of at most 16 KiB on bulk IN or OUT; a short packet or a
+   STALL ends the phase (STALL: `CLEAR_FEATURE(ENDPOINT_HALT)`),
+3. CSW (13 B, `USBS`, the same tag, residue, status) on bulk IN; one more
+   attempt after a STALL.
+
+An invalid CSW, a phase error or a transfer error = **Reset Recovery**
+(interface reset, clearing both endpoints) and the command is retried (at
+most 3 times).
+
+**Start-up:** Get Max LUN (STALL = one LUN), INQUIRY for each LUN (only
+direct-access disks, type 0), TEST UNIT READY retried for up to 15 s (a
+missing medium in a card reader = the LUN is skipped), READ CAPACITY (10),
+above 2 TiB (16), MODE SENSE (6) for write protection.
+
+| `blockproto` operation | SCSI command |
+|---|---|
+| read, write | READ (10) / WRITE (10), above 2 TiB or 65535 sectors (16) |
+| FLUSH | SYNCHRONIZE CACHE (10); a device that does not know it (ILLEGAL REQUEST) has no cache, and a write is durable after the CSW |
+| DISCARD | none (USB flash drives almost never support UNMAP) |
+| FEATURES | `FLUSH`, or `READ_ONLY` with write protection |
+
+Errors: DATA PROTECT = `READ_ONLY`, NOT READY / UNIT ATTENTION = retry,
+anything else = `IO_ERROR`. Foreign disk protection applies here too: a
+foreign stick (without our partition) is read-only.
+
+UAS (USB Attached SCSI, protocol 0x62) is not there yet; UAS devices
+almost always also have a basic BOT setting.
 
 ## HID: keyboard, mouse, tablet, multimedia keys
 
@@ -255,7 +305,9 @@ mechanism is done in `inputd`. The dialog with the code comes with the GUI
 
 | Where | What |
 |---|---|
-| `cargo test -p usbproto` | descriptors (configuration, alternate settings, broken lengths), setup packets, messages, hub (descriptor, port status, speed, route string and its limits), HID boot (report differencing, rollover, usage table, mouse), report parser (the QEMU keyboard, mouse and tablet descriptors, multimedia with a report id, signed values, broken descriptors) |
+| `cargo test -p usbproto` | descriptors (configuration, alternate settings, broken lengths), setup packets, messages, hub (descriptor, port status, speed, route string and its limits), HID boot (report differencing, rollover, usage table, mouse), report parser (the QEMU keyboard, mouse and tablet descriptors, multimedia with a report id, signed values, broken descriptors), mass storage (CBW, CSW, READ/WRITE 10 and 16, capacity, INQUIRY, sense) |
+| `cargo xtask test --data-disk usb` | the data disk as a `usb-storage` flash drive: all FS tests on the `usb-storage` driver |
+| `cargo xtask test` (live USB run) | boot from the USB image as `usb-storage` up to the GUI with a terminal ([Live USB](live-usb.md)) |
 | `cargo xtask test`, suite `usb` | the USB keyboard from boot is trusted; keys from QEMU all the way to the service (source, HID scan code); mouse hotplug (attach, motion, wheel, detach); a new keyboard and a new mouse wait for verification (input only on `secure`, after `trust` to the focus owner); an external hub with a keyboard behind it; a tablet (absolute position through the report protocol) |
 
 QEMU has `qemu-xhci` with a `usb-kbd` keyboard bound to the console of a
@@ -274,6 +326,7 @@ PS/2.
 | 3 | done | external hubs: route string, hub flag, port count, MTT (Configure Endpoint with the endpoints of alternate setting 1, then SET_INTERFACE; a hub that rejects it stays single-TT) and TT think time in the slot context, the TT for low/full speed behind a high-speed hub; detaching a hub detaches everything behind it (at most 5 hub tiers; a hub port above 15 cannot be addressed: `usb-hub` does not reset it and `ATTACH` would return `NOT_SUPPORTED`; after a failed `ATTACH` the hub driver disables the port so that an unconfigured device does not answer at address 0) |
 | 4 | done | HID report descriptor parser: multimedia keys, mice with more buttons and a horizontal wheel, tablets and pens (`EV_ABS`, the `Absolute` event) |
 | 5 | plan | I2C-HID (laptop touchpads: needs AML and an I2C driver) |
+| 6 | done | bulk transfers, USB disks (`usb-storage`, BOT, SCSI) |
 
 Other limits of the first version:
 
@@ -281,7 +334,12 @@ Other limits of the first version:
   USB 3 device works only on a root port of a USB 3 controller,
 - no multi-touch (the Finger collection) or gestures yet, only one pen or
   one point,
-- no bulk or isochronous endpoints yet (disks, audio), one interrupter,
+- no isochronous endpoints yet (audio, cameras), one interrupter,
+- bulk: one transfer at most 16 KiB, on USB 3 without bursts (MaxBurst 0) -
+  a USB 3 disk is therefore slower than it could be,
+- cancelling a hanging transfer (the Stop Endpoint command) is not there
+  yet: a USB disk that does not answer a transfer within 20 s stays
+  unusable until it is unplugged,
 - 4 KiB pages only, interrupts target the boot CPU,
 - the USB keyboard LEDs (`SET_REPORT`) stay off for now,
 - devices attached at run time are passed to the input service by the init

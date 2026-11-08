@@ -242,6 +242,8 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
             "nvme,drive=data,serial=MO-DATA,logical_block_size=4096,physical_block_size=4096",
         ]),
         "ahci" => cmd.args(["-device", "ide-hd,drive=data,bus=ahci0.2"]),
+        // Flash disk USB (ovladac usb-storage) na radici xHCI s klavesnici.
+        "usb" => cmd.args(["-device", "usb-storage,bus=xhci.0,drive=data"]),
         _ => cmd.args(["-device", &blk("data")]),
     };
     if opts.test {
@@ -573,7 +575,7 @@ impl Drop for RunFiles {
     }
 }
 
-fn pflash_arg(path: &Path, readonly: bool) -> String {
+pub(crate) fn pflash_arg(path: &Path, readonly: bool) -> String {
     let ro = if readonly { ",readonly=on" } else { "" };
     format!("if=pflash,format=raw{ro},file={}", path.display())
 }

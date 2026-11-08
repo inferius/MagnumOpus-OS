@@ -87,6 +87,7 @@ members = [
     "user/xhci",
     "user/usb-hub",
     "user/usb-hid",
+    "user/usb-storage",
     "user/virtio-net",
     "user/e1000e",
     "user/igc",
