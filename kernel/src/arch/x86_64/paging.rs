@@ -19,6 +19,10 @@ const GLOBAL: u64 = 1 << 8;
 const NO_EXECUTE: u64 = 1 << 63;
 const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 
+const MSR_PAT: u32 = 0x277;
+/// Vychozi PAT (WB, WT, UC-, UC dvakrat) s polozkou 1 = WC (0x01).
+const PAT_VALUE: u64 = 0x0007_0406_0007_0106;
+
 static NX_ENABLED: AtomicBool = AtomicBool::new(false);
 static HUGE_1G: AtomicBool = AtomicBool::new(false);
 
@@ -32,7 +36,8 @@ const fn level(size: PageSize) -> u32 {
 }
 
 /// Zapne funkce CPU, na kterych strankovani jadra stavi: ochranu zapisu
-/// i pro ring 0 (CR0.WP), globalni stranky (CR4.PGE) a NX (EFER.NXE).
+/// i pro ring 0 (CR0.WP), globalni stranky (CR4.PGE), NX (EFER.NXE) a PAT
+/// s polozkou WC.
 ///
 /// # Safety
 ///
@@ -60,6 +65,12 @@ pub unsafe fn init_cpu() {
             cr4 |= cpu::CR4_SMAP;
         }
         cpu::write_cr4(cr4);
+        // PAT: polozka 1 (PWT bez PCD) misto Write-Through na
+        // Write-Combining pro framebuffer (`MapFlags::WRITE_COMBINE`).
+        // Ostatni polozky zustavaji vychozi (WB, UC-, UC); PWT bez PCD
+        // nikdo jiny nepouziva, takze zmena nema vliv na existujici
+        // mapovani. PAT ma kazde x86_64 CPU.
+        cpu::wrmsr(MSR_PAT, PAT_VALUE);
     }
     NX_ENABLED.store(features.nx, Ordering::Relaxed);
     HUGE_1G.store(features.huge_1g, Ordering::Relaxed);
@@ -83,7 +94,11 @@ fn leaf_bits(flags: MapFlags, size: PageSize) -> u64 {
         bits |= GLOBAL;
     }
     if flags.contains(MapFlags::UNCACHED) {
+        // PAT index 3 (PCD|PWT) = UC.
         bits |= CACHE_DISABLE | WRITE_THROUGH;
+    } else if flags.contains(MapFlags::WRITE_COMBINE) {
+        // PAT polozka 1 = WC (viz `init_cpu`); bit PAT (7 / 12) je 0.
+        bits |= WRITE_THROUGH;
     }
     if !flags.contains(MapFlags::EXEC) && NX_ENABLED.load(Ordering::Relaxed) {
         bits |= NO_EXECUTE;

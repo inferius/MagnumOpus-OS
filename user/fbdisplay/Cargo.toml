@@ -1,0 +1,16 @@
+[package]
+name = "fbdisplay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "fbdisplay"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+guiproto = { path = "../../libs/guiproto" }
+fbcopy = { path = "../../libs/fbcopy" }

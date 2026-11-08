@@ -42,8 +42,13 @@ pub const fn object_cost<T>() -> u64 {
     (core::mem::size_of::<T>() + 16).next_power_of_two() as u64
 }
 
+/// Cislovani jobu (od 1).
+static NEXT_JOB_ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
+
 pub struct Job {
     core: ObjectCore,
+    /// Cislo jobu (vystup `JOB_INFO`, `JOB_PROCESSES`).
+    pub id: u64,
     parent: Option<Arc<Job>>,
     limits: [AtomicU64; pool::COUNT],
     used: [AtomicU64; pool::COUNT],
@@ -67,6 +72,7 @@ impl Job {
 
     fn make(parent: Option<Arc<Job>>, charge: Charge) -> Arc<Self> {
         Arc::new(Self {
+            id: NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed),
             core: ObjectCore::new(Signals::NONE),
             parent,
             limits: [AtomicU64::new(UNLIMITED), AtomicU64::new(UNLIMITED)],
@@ -153,7 +159,20 @@ impl Job {
         JobInfo {
             kernel: self.pool_info(Pool::Kernel),
             user: self.pool_info(Pool::User),
+            id: self.id,
         }
+    }
+
+    /// Je job `self` roven `ancestor`, nebo jeho potomek?
+    pub fn within(&self, ancestor: &Job) -> bool {
+        let mut node = Some(self);
+        while let Some(j) = node {
+            if core::ptr::eq(j, ancestor) {
+                return true;
+            }
+            node = j.parent.as_deref();
+        }
+        false
     }
 }
 

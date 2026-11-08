@@ -57,7 +57,33 @@ fn flow_result(r: R<Value>) -> Result<Value, ShError> {
     }
 }
 
+/// Kolik hotovych uloh si relace pamatuje (vysledek pro pozdejsi
+/// `await`); starsi se zahodi (`await` na ne = `uloha N neexistuje`).
+pub(crate) const KEEP_DONE: usize = 256;
+
 impl Interp {
+    /// Hotove ulohy nedrzet donekonecna: rozsahy potrebuji jen bezici
+    /// (ruseni na konci bloku), z hotovych zustane poslednich `KEEP_DONE`.
+    fn prune_tasks(&mut self) {
+        let tasks = &self.tasks;
+        for scope in &mut self.task_scopes {
+            scope.retain(|id| matches!(tasks.get(id), Some(TaskSlot::Running)));
+        }
+        let done = self.tasks.values().filter(|s| matches!(s, TaskSlot::Done(_))).count();
+        if done > KEEP_DONE {
+            let old: Vec<u64> = self
+                .tasks
+                .iter()
+                .filter(|(_, s)| matches!(s, TaskSlot::Done(_)))
+                .map(|(id, _)| *id)
+                .take(done - KEEP_DONE)
+                .collect();
+            for id in old {
+                self.tasks.remove(&id);
+            }
+        }
+    }
+
     /// Kod ulohy (zapis B) pro spusteni v jinem interpretu.
     fn task_code(&self, body: &Block, vars: &[(String, Value)]) -> String {
         let script = Script { lang: None, needs: None, body: body.clone() };
@@ -75,6 +101,7 @@ impl Interp {
 
     /// Spusti ulohu; bez soubeznosti hostitele probehne hned.
     fn spawn_task(&mut self, host: &mut dyn Host, body: &Block, vars: Vec<(String, Value)>, label: String) -> R<u64> {
+        self.prune_tasks();
         let spec = TaskSpec {
             code: self.task_code(body, &vars),
             vars: vars.clone(),
@@ -311,39 +338,63 @@ impl Interp {
         let n = n.max(1);
         let body = Block { stmts: alloc::vec![Stmt::Expr(f.body.clone())] };
         let param = f.params.first().cloned().unwrap_or_else(|| String::from(crate::ast::ROW));
-        let mut ids: Vec<u64> = Vec::with_capacity(items.len());
-        let mut running: Vec<u64> = Vec::new();
+        // Vysledky si vyzvedava prubezne (radku muze byt vic nez
+        // `KEEP_DONE`, hotove ulohy se prorezavaji).
+        let mut results: Vec<Option<Value>> = Vec::with_capacity(items.len());
+        let mut running: Vec<(u64, usize)> = Vec::new();
         for (i, x) in items.into_iter().enumerate() {
             if running.len() >= n {
-                let done = self.wait_tasks(host, &running, true, None, span)?;
-                running.retain(|r| !done.contains(r));
+                let ids: Vec<u64> = running.iter().map(|(id, _)| *id).collect();
+                self.wait_tasks(host, &ids, true, None, span)?;
+                self.collect_each(host, &mut running, &mut results, span)?;
             }
             let mut vars = f.captured.clone();
             vars.retain(|(k, _)| *k != param);
             vars.push((param.clone(), x));
             let label = alloc::format!("each {}: {}", i + 1, self.task_code(&body, &vars));
             let id = self.spawn_task(host, &body, vars, label)?;
-            if matches!(self.tasks.get(&id), Some(TaskSlot::Running)) {
-                running.push(id);
-            }
-            ids.push(id);
+            results.push(None);
+            running.push((id, i));
+            self.collect_each(host, &mut running, &mut results, span)?;
         }
-        if !running.is_empty() {
-            self.wait_tasks(host, &running, false, None, span)?;
+        while !running.is_empty() {
+            let ids: Vec<u64> = running.iter().map(|(id, _)| *id).collect();
+            self.wait_tasks(host, &ids, true, None, span)?;
+            self.collect_each(host, &mut running, &mut results, span)?;
         }
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            match self.tasks.get(&id) {
-                Some(TaskSlot::Done(Ok(v))) => {
-                    if !matches!(v, Value::Nothing) {
-                        out.push(v.clone());
+        Ok(Value::List(results.into_iter().flatten().filter(|v| !matches!(v, Value::Nothing)).collect()))
+    }
+
+    /// Hotove ulohy `each --parallel`: vysledek na misto radku, slot pryc.
+    /// Chyba jedne = ostatni zrusit a chybu vratit (jako `await all`).
+    fn collect_each(
+        &mut self,
+        host: &mut dyn Host,
+        running: &mut Vec<(u64, usize)>,
+        results: &mut [Option<Value>],
+        span: Span,
+    ) -> R<()> {
+        let mut err = None;
+        running.retain(|(id, idx)| match self.tasks.get(id) {
+            Some(TaskSlot::Running) => true,
+            _ => {
+                match self.tasks.remove(id) {
+                    Some(TaskSlot::Done(Ok(v))) => results[*idx] = Some(v),
+                    Some(TaskSlot::Done(Err(e))) => {
+                        err.get_or_insert(e);
                     }
+                    _ => {}
                 }
-                Some(TaskSlot::Done(Err(e))) => return Err(Flow::Err(e.clone())),
-                _ => {}
+                false
             }
+        });
+        if let Some(e) = err {
+            for (id, _) in core::mem::take(running) {
+                self.cancel_task(host, id);
+            }
+            return Err(Flow::Err(e.at(span)));
         }
-        Ok(Value::List(out))
+        Ok(())
     }
 
     /// Detsky interpret ulohy (ve vlakne sluzby): spusti kod se
@@ -372,7 +423,12 @@ impl Interp {
             }
             Err(e) => Err(e),
         };
-        // Zrusena nebo chybna uloha: koncept zahodit (nic se nezmeni).
+        // Zrusena (i po dobehnuti tela) nebo chybna uloha: koncept zahodit
+        // (nic se nezmeni).
+        let r = match r {
+            Ok(_) if host.interrupted() => Err(ShError::new(code::INTERRUPTED, "uloha byla zrusena")),
+            r => r,
+        };
         if r.is_err() {
             self.draft.discard_all(host.fs());
         }

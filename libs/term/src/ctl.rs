@@ -21,6 +21,8 @@ use crate::proto::{ClientMsg, DecodeError, R, W};
 const S_CLIENT: u8 = 0;
 const S_INIT: u8 = 1;
 const S_ADOPT: u8 = 2;
+const S_TASKS: u8 = 3;
+const S_POWER: u8 = 4;
 
 /// termd -> relace.
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +34,12 @@ pub enum SessMsg {
     Adopt,
     /// Zprava okna pro tuto relaci.
     Client(ClientMsg),
+    /// Kanaly prehledu uloh od initu (pres registr); handly: [producent,
+    /// klient] (zadny = taskd nebezi).
+    Tasks,
+    /// Hned po `Init` (kdyz termd ma spojeni na napajeni od initu); handly:
+    /// [kanal k initu pro `shutdown`/`reboot`, protokol `powerproto`].
+    Power,
 }
 
 impl SessMsg {
@@ -45,6 +53,8 @@ impl SessMsg {
                 w.str(home);
             }
             SessMsg::Adopt => w.u8(S_ADOPT),
+            SessMsg::Tasks => w.u8(S_TASKS),
+            SessMsg::Power => w.u8(S_POWER),
             SessMsg::Client(m) => {
                 w.u8(S_CLIENT);
                 w.0.extend_from_slice(&m.encode());
@@ -64,6 +74,8 @@ impl SessMsg {
                 Ok(m)
             }
             S_ADOPT if rest.is_empty() => Ok(SessMsg::Adopt),
+            S_TASKS if rest.is_empty() => Ok(SessMsg::Tasks),
+            S_POWER if rest.is_empty() => Ok(SessMsg::Power),
             _ => Err(DecodeError),
         }
     }
@@ -73,6 +85,8 @@ const G_PARK: u8 = 1;
 const G_UNPARK: u8 = 2;
 const G_CLAIM: u8 = 3;
 const G_PARKED: u8 = 4;
+const G_TASKS_REQ: u8 = 5;
+const G_TASKS: u8 = 6;
 
 /// Zpravy registru relaci.
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +99,11 @@ pub enum RegMsg {
     Claim,
     /// registr -> termd: (relace, znacka); handly ve stejnem poradi.
     Parked { sessions: Vec<(u64, String)> },
+    /// termd -> registr: kanaly prehledu uloh pro relaci (razi je init).
+    TasksReq { session: u64 },
+    /// registr -> termd: handly [producent, klient], nebo zadne (taskd
+    /// nebezi, registr kanaly razit neumi).
+    Tasks { session: u64 },
 }
 
 /// Nejvic relaci v jedne odpovedi `Parked`.
@@ -104,6 +123,14 @@ impl RegMsg {
                 w.u64(*session);
             }
             RegMsg::Claim => w.u8(G_CLAIM),
+            RegMsg::TasksReq { session } => {
+                w.u8(G_TASKS_REQ);
+                w.u64(*session);
+            }
+            RegMsg::Tasks { session } => {
+                w.u8(G_TASKS);
+                w.u64(*session);
+            }
             RegMsg::Parked { sessions } => {
                 w.u8(G_PARKED);
                 w.u32(sessions.len() as u32);
@@ -122,6 +149,8 @@ impl RegMsg {
             G_PARK => RegMsg::Park { session: r.u64()?, tag: r.str()? },
             G_UNPARK => RegMsg::Unpark { session: r.u64()? },
             G_CLAIM => RegMsg::Claim,
+            G_TASKS_REQ => RegMsg::TasksReq { session: r.u64()? },
+            G_TASKS => RegMsg::Tasks { session: r.u64()? },
             G_PARKED => {
                 let n = r.u32()? as usize;
                 if n > MAX_PARKED {
@@ -188,7 +217,10 @@ impl<H> Registry<H> {
                 }
                 Some((RegMsg::Parked { sessions }, hs))
             }
-            RegMsg::Parked { .. } => None,
+            // Kanaly uloh razi init sam (`terminal.rs`); obycejny registr
+            // odpovi bez nich, aby termd necekal.
+            RegMsg::TasksReq { session } => Some((RegMsg::Tasks { session }, Vec::new())),
+            RegMsg::Parked { .. } | RegMsg::Tasks { .. } => None,
         }
     }
 }

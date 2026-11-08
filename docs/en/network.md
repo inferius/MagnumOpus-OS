@@ -3,6 +3,8 @@
 The first part of milestone 6 ("network"). These parts are done:
 
 - the **virtio-net** card driver in userspace,
+- drivers for **Intel e1000e, igc and Realtek r8169** cards (see
+  [Network cards](network-cards.md)),
 - the network service **`netd`** with a TCP/IP stack (ARP, IPv4, ICMP,
   UDP, TCP), a DHCP client and a DNS resolver,
 - the **`netproto`** protocol with access through a capability and
@@ -107,12 +109,25 @@ unchanged.
 
 | Type | Direction | Content |
 |---|---|---|
-| `INFO` (1) | driver → netd, first message | MAC (6 B), MTU u16, flags u8 (bit 0 = link up) |
+| `INFO` (1) | driver → netd, first message | MAC (6 B), MTU u16, flags u8, speed u32 (Mb/s, 0 = unknown) |
 | `FRAME` (2) | both | Ethernet frame without FCS (14 to 1514 B) |
-| `LINK` (3) | driver → netd | flags u8 when the link state changes |
+| `LINK` (3) | driver → netd | flags u8, speed u32 when the link state changes |
 
-A frame that does not fit in the other side's queue is dropped, as on a
-real network. TCP takes care of reliability.
+Flags: bit 0 = link up, bit 1 = full duplex. A frame that does not fit in
+the other side's queue is dropped, as on a real network. TCP takes care
+of reliability. When the link comes up again (`LINK` with bit 0), `netd`
+starts DHCP again: there may be a different network behind the cable.
+
+> **Change from the first version:** `INFO` and `LINK` had no speed and
+> duplex, and `netd` did not repeat DHCP after the link came back.
+> **Why:** drivers of real cards ([network cards](network-cards.md))
+> report the link, and a cable can be moved. The shorter messages
+> (`INFO` 10 B, `LINK` 2 B) are still read. The protocol deliberately
+> carries no offloads: smoltcp verifies checksums for the whole device,
+> not for a single frame.
+
+The Intel e1000e and igc and Realtek r8169 card drivers talk to `netd`
+with the same protocol, see [Network cards](network-cards.md).
 
 ⚠️ **DMA without an IOMMU:** the driver uses buffers only from the
 device's domain memory. On a machine without an IOMMU, however, the card
@@ -155,7 +170,7 @@ and starts DHCP. Then a single thread repeats:
 | connect without a limit | gives up after 75 s (`TIMED_OUT`) |
 | closing a connection | FIN, cleanup when finished or after 30 s at the latest |
 | listen backlog | 1 to 4096 connections (like `SOMAXCONN`); 16 concurrent handshakes between two rounds of the service |
-| ephemeral ports | 49152 to 65535, random start |
+| ephemeral ports | 49152 to 65535, random start; the last 4096 released ones are not handed out again (an old session in NAT/slirp) |
 | UDP datagram | at most 65,507 B (the largest IPv4 datagram payload; IPv4 fragmentation and reassembly) and at most the socket queue size (default 64 KiB) |
 | DNS | A (and AAAA) query with EDNS0 (1232 B), a truncated reply over TCP, retry after 1 s alternating servers, at most 30 s |
 
@@ -441,6 +456,12 @@ network profile:
 - **A truncated reply** (the TC bit): the resolver asks over TCP on the
   same server and port (RFC 7766, a message with a u16 length). For an
   own server it is enough that the session may send UDP to the server.
+- **A stuck flow:** UDP retries switch to a new local port every 3
+  attempts, and a TCP connection that does not get established within 3 s
+  is dropped and reopened (at most 3 times). Slirp on Windows keeps one host
+  socket per flow; when it breaks, every further attempt from the same port
+  would be lost (message `netd: DNS pres TCP: spojeni se nenavazalo do 3 s,
+  novy pokus (n)` - "connection not established within 3 s, new attempt").
 - **Blocked domains** of the firewall return `ACCESS_DENIED` without a
   query (see [DNS filter](firewall.md#dns-filter)).
 
@@ -588,10 +609,33 @@ host's 127.0.0.1.
 | encrypted DNS | the "sifrovane DNS" suite: validated A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC and NSEC3), NODATA; unsigned and bogus zone; failover from a broken resolver, DoT, cache; the profile rule |
 | NTP | `ntpd` against the host server (the "synchronizace casu" suite, see [time.md](time.md#synchronization-over-the-network-ntpd)) |
 
-DNS through 10.0.2.3 (slirp forwards the queries to the host's DNS) is not
-tested because the test would need the internet. Without the helper
+**DNS in tests is local only:** all queries go to the host helper server
+from `nethelper` or to the test DoH/DoT; in a test run init also points the
+unauthenticated fallback of the system resolver at the helper (`set_dns`),
+so even a `dnsd` outage never reaches the real DNS. DNS query limits in
+tests are 30 s (running under TCG and load). The host resolver (10.0.2.3,
+slirp forwards to the Windows/Linux DNS) is tested only by
+`cargo xtask test --net-online` - it depends on the host network and the
+internet. Without the helper
 servers (`cargo xtask run`) the tests that need them are skipped. The log
 then shows `[preskoceno] sit: ...` ("skipped").
+
+**Helper server ports:** none is fixed or guessable. Every server takes
+an ephemeral port from the host kernel (bind to port 0, up to 20 attempts
+on an error such as Windows 10013), and xtask passes the ports to the guest
+in the initfs (`net-test`). The port for the refusal test (`closed`) is held
+by xtask for the whole run as a socket bound without `listen`: the kernel
+refuses connections to it and no other process can take it meanwhile. The
+`hostfwd` port is held by xtask until QEMU starts. When QEMU exits right
+after start with a message about a taken port (QMP or `hostfwd`, concurrent
+test runs), xtask starts it again with new ports (at most 3 attempts,
+message `xtask: QEMU nenastartovalo (...), novy pokus s jinymi porty` -
+"QEMU did not start, new attempt with other ports").
+
+**Load (several QEMUs at once):** UDP tests send every further attempt from
+a new socket (a new flow in slirp; a late reply to an old attempt does not
+arrive), and `dnsd` waits 5 s for a connection to a resolver (a lost SYN is
+retransmitted).
 
 The host also tests the formats and permissions: `cargo test -p netproto
 --features std` (part of `cargo xtask test`). The firewall tests are

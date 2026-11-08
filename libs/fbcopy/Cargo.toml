@@ -1,0 +1,8 @@
+[package]
+name = "fbcopy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Kopie obdelniku z plochy kompozitoru (B8G8R8A8) do framebufferu firmwaru (RGB/BGR) s orezem"
+
+[dependencies]

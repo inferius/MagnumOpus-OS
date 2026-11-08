@@ -13,6 +13,8 @@ mod builtins;
 mod call;
 mod fsctx;
 mod tasks;
+#[cfg(test)]
+pub(crate) use tasks::KEEP_DONE as KEEP_DONE_FOR_TESTS;
 pub mod ops;
 
 use alloc::boxed::Box;

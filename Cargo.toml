@@ -4,7 +4,10 @@ members = [
     "loader",
     "kernel",
     "libs/abi",
+    "libs/acpica",
     "libs/boot-info",
+    "libs/cbuild",
+    "libs/cstd",
     "libs/conf",
     "libs/dns",
     "libs/elf",
@@ -12,19 +15,28 @@ members = [
     "libs/fsproto",
     "libs/netfilter",
     "libs/netproto",
+    "libs/nic",
     "libs/osfs-proto",
     "libs/httpc",
     "libs/initfs",
     "libs/manifest",
     "libs/blockproto",
+    "libs/diskguard",
+    "libs/driverkit",
     "libs/inputproto",
     "libs/guiproto",
     "libs/svcclient",
+    "libs/gpuproto",
+    "libs/venus",
+    "libs/spirv",
+    "libs/vkcomp",
     "libs/taskproto",
+    "libs/taskcore",
     "libs/taskview",
     "libs/gfx",
     "libs/font",
     "libs/vgpu",
+    "libs/fbcopy",
     "libs/comp",
     "libs/ui",
     "libs/keymap",
@@ -32,16 +44,22 @@ members = [
     "libs/usbproto",
     "libs/usbclient",
     "libs/csprng",
+    "libs/display",
+    "libs/displaydrv",
+    "libs/intelgfx",
     "libs/libos",
     "libs/pci",
+    "libs/powerproto",
     "libs/tls",
     "libs/tz",
     "libs/shlang",
+    "libs/sizeclass",
     "libs/term",
     "libs/virtio",
     "libs/web",
     "libs/wire",
     "tools/osfs",
+    "user/acpid",
     "user/console",
     "user/devmgr",
     "user/echo",
@@ -55,20 +73,31 @@ members = [
     "user/fetch",
     "user/revocd",
     "user/dnsd",
+    "user/vk-probe",
     "user/init",
     "user/ps2",
     "user/shsess",
     "user/inputd",
     "user/termd",
+    "user/taskd",
     "user/timed",
     "user/virtio-blk",
+    "user/nvme",
+    "user/ahci",
     "user/virtio-input",
     "user/xhci",
     "user/usb-hub",
     "user/usb-hid",
     "user/virtio-net",
+    "user/e1000e",
+    "user/igc",
+    "user/r8169",
     "user/virtio-rng",
+    "user/edu",
     "user/virtio-gpu",
+    "user/fbdisplay",
+    "user/bochs-display",
+    "user/intel-display",
     "user/compd",
     "user/gui-demo",
     "user/gui-term",
@@ -98,8 +127,17 @@ panic = "abort"
 
 # Interpret shellu je rekurzivni; bez optimalizace by jedna uroven volani
 # zabrala ~50 KB zasobniku (s optimalizaci ~6 KB). Program ma 256 KB.
-# Souborovy system: bez optimalizace trva zapis radku shellu v debug ~5 s
-# a test velkeho adresare kolem 90 s (B+strom, soucty, komprese).
+[profile.dev.package.shlang]
+opt-level = 2
+
+[profile.dev.package.term]
+opt-level = 2
+
+# Souborovy system: hashe bloku (XXH3, BLAKE3), komprese a strom CoW. Bez
+# optimalizace je kazdy pozadavek i krok scrubu, defragmentace
+# a deduplikace na pozadi v QEMU (TCG) mnohonasobne pomalejsi; radek
+# shellu se zapisem pak cekal sekundy (klon, diff, zahozeni, krok scrubu
+# mezi pozadavky).
 [profile.dev.package.fs]
 opt-level = 2
 
@@ -115,14 +153,17 @@ opt-level = 2
 [profile.dev.package.virtio]
 opt-level = 2
 
+[profile.dev.package.xxhash-rust]
+opt-level = 3
+
 [profile.dev.package.blake3]
 opt-level = 3
 
-[profile.dev.package.shlang]
-opt-level = 2
+[profile.dev.package.lz4_flex]
+opt-level = 3
 
-[profile.dev.package.term]
-opt-level = 2
+[profile.dev.package.ruzstd]
+opt-level = 3
 
 # Skladani a rasterizace bez optimalizace by byly desetkrat pomalejsi
 # (pixelove smycky); kompozitor by nestihal takt snimku.

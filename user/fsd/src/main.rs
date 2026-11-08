@@ -27,6 +27,7 @@ mod serve_data;
 mod serve_hist;
 mod serve_perm;
 mod serve_v2;
+mod tasks;
 
 use alloc::vec::Vec;
 use core::time::Duration;
@@ -158,6 +159,7 @@ fn main(startup: Startup) -> i64 {
         dedup_phase: false,
         // Scrub mohl bezet pred restartem: prvni krok to zjisti.
         scrubbing: true,
+        tasks: tasks::FsTasks::default(),
         orphan_cleanup: restart.map(|_| time::deadline_after(ORPHAN_GRACE)),
     };
     if let Some(g) = restart {
@@ -165,7 +167,7 @@ fn main(startup: Startup) -> i64 {
     }
     // Start potvrdit (init/supervisor ceka na `ok`).
     let _ = startup.bootstrap.write(b"ok", Vec::new());
-    serve(&mut svc, client);
+    serve(&mut svc, client, startup.bootstrap);
     if let Some(fs) = svc.fs.as_mut()
         && let Err(e) = fs.commit()
     {
@@ -177,7 +179,43 @@ fn main(startup: Startup) -> i64 {
 
 /// Obsluha relaci: prvni (ze startovni zpravy) je hlavni - jeji zavreni
 /// sluzbu ukonci; dalsi vznikaji pres `CONNECT`.
-fn serve(svc: &mut Service, client: Channel) {
+/// Ridici kanal od initu po konfiguraci: `tasks` + kanal producenta
+/// prehledu uloh.
+fn control_msgs(svc: &mut Service, control: &Channel) {
+    while let Ok(m) = control.try_read() {
+        if &m.data[..] == b"tasks"
+            && let Some(h) = m.handles.into_iter().next()
+        {
+            svc.tasks.chan = Some(Channel::from_handle(h));
+            let _ = control.write(b"ok", Vec::new());
+        } else {
+            let _ = control.write(b"err INVALID_ARGS", Vec::new());
+        }
+    }
+}
+
+/// Prehled uloh: odpovedi taskd, stav scrubu a prace v necinnosti.
+fn report_tasks(svc: &mut Service, idle: bool) {
+    svc.tasks.pump();
+    if core::mem::take(&mut svc.tasks.cancel_scrub)
+        && let Some(fs) = svc.fs.as_mut()
+    {
+        if let Err(e) = fs.scrub_stop() {
+            println!("fsd: zastaveni scrubu: {e}");
+        }
+        svc.scrubbing = false;
+    }
+    svc.tasks.optimize(idle);
+    if let Some(fs) = svc.fs.as_mut() {
+        let i = fs.info();
+        let used = i.block_count.saturating_sub(i.free_blocks);
+        if let Ok(st) = fs.scrub_status() {
+            svc.tasks.scrub(&st.state, used);
+        }
+    }
+}
+
+fn serve(svc: &mut Service, client: Channel, control: Channel) {
     let mut sessions: Vec<Session> = alloc::vec![Session::control(client)];
     let mut next_commit = time::deadline_after(COMMIT_INTERVAL);
     let mut next_history = time::deadline_after(HISTORY_INTERVAL);
@@ -208,8 +246,14 @@ fn serve(svc: &mut Service, client: Channel) {
             }
         }
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
-        let items: Vec<(&libos::Handle, Signals)> =
+        let mut items: Vec<(&libos::Handle, Signals)> =
             sessions.iter().map(|s| (s.channel.handle(), mask)).collect();
+        // Ridici kanal az za relacemi (indexy relaci se nemeni); zavreny
+        // (init skoncil) se neceka.
+        items.push((control.handle(), Signals::READABLE));
+        if let Some(t) = &svc.tasks.chan {
+            items.push((t.handle(), Signals::READABLE));
+        }
         let mut quiet = false;
         match libos::wait_many(&items, Some(deadline)) {
             Ok(_) => {
@@ -250,6 +294,10 @@ fn serve(svc: &mut Service, client: Channel) {
                 scrub(svc);
             }
             poll_watches(svc, &mut sessions);
+            control_msgs(svc, &control);
+            if svc.tasks.chan.is_some() && svc.tasks.due() {
+                report_tasks(svc, idle);
+            }
         }
     }
     for mut s in sessions {

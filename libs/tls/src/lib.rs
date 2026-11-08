@@ -29,6 +29,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod crl;
 mod exporter;
 pub mod ocsp;
 pub mod provider;

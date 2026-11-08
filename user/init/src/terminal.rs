@@ -17,6 +17,11 @@
 //! (bez virtio-gpu) nebo kompozitor spadne, init spusti `console` nad
 //! framebufferem z firmware a preda ji displej a fokus od `inputd`.
 //!
+//! Napajeni z shellu (`shutdown`, `reboot`): termd dostane kanal napajeni;
+//! pro kazdou relaci posle initu zpravou `session` jeden konec noveho
+//! kanalu (druhy dostane relace). Pozadavek `powerproto::Request` na nem
+//! init preda vypinani ([`crate::power::request_from_shell`]).
+//!
 //! Smycku obsluhuje supervisor ([`crate::supervisor`]): handly z
 //! [`Terminals::wait_items`] jsou soucasti jeho cekani.
 
@@ -47,6 +52,10 @@ struct Client {
     starts: Vec<u64>,
     /// Okno skoncilo (odebere se v `cleanup`).
     closed: bool,
+    /// Kanal napajeni k beziciemu termd (zpravy `session`).
+    power: Option<Channel>,
+    /// Kanaly napajeni relaci shellu (`None` = zavreny, odebere `cleanup`).
+    power_sessions: Vec<Option<Channel>>,
 }
 
 #[derive(Default)]
@@ -57,6 +66,10 @@ pub struct Terminals {
     /// Zbytky klonu bokem po minulem behu uz jsou uklizene.
     cleaned: bool,
 }
+
+/// Identita uzivatele terminalu v prehledu uloh (system je zatim pro
+/// jednoho uzivatele).
+const USER: &str = "uzivatel";
 
 /// Kde lezi klony bokem relaci shellu (viz `shsess`).
 const ASIDE_DIR: &str = "/tmp/.aside";
@@ -70,13 +83,25 @@ pub enum Wait {
     Conn(usize),
     Reg(usize),
     Termd(usize),
+    Power(usize),
+    PowerSession(usize, usize),
 }
 
 impl Terminals {
     /// Novy klient (okno); vrati konec kanalu pripojeni pro okno.
     pub fn client(&mut self, name: &'static str) -> Result<Channel> {
         let (ours, theirs) = Channel::create()?;
-        self.clients.push(Client { name, conn: ours, store: Registry::default(), reg: None, termd: None, starts: Vec::new(), closed: false });
+        self.clients.push(Client {
+            name,
+            conn: ours,
+            store: Registry::default(),
+            reg: None,
+            termd: None,
+            starts: Vec::new(),
+            closed: false,
+            power: None,
+            power_sessions: Vec::new(),
+        });
         Ok(theirs)
     }
 
@@ -97,6 +122,16 @@ impl Terminals {
                 items.push((p.handle(), Signals::TERMINATED));
                 what.push(Wait::Termd(i));
             }
+            if let Some(p) = &c.power {
+                items.push((p.handle(), rd));
+                what.push(Wait::Power(i));
+            }
+            for (k, s) in c.power_sessions.iter().enumerate() {
+                if let Some(s) = s {
+                    items.push((s.handle(), rd));
+                    what.push(Wait::PowerSession(i, k));
+                }
+            }
         }
     }
 
@@ -114,12 +149,55 @@ impl Terminals {
                 // Zbyle zpravy registru (Park pred koncem) jeste zpracovat.
                 self.registry(i);
             }
+            Wait::Power(i) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => {
+                let c = &mut self.clients[i];
+                while let Some(p) = &c.power {
+                    match p.try_read() {
+                        Ok(m) if &m.data[..] == b"session" => {
+                            c.power_sessions.extend(m.handles.into_iter().map(|h| Some(Channel::from_handle(h))));
+                        }
+                        Ok(_) => {}
+                        Err(Error::ShouldWait) => break,
+                        Err(_) => c.power = None,
+                    }
+                }
+            }
+            Wait::PowerSession(i, k) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => {
+                let slot = &mut self.clients[i].power_sessions[k];
+                if let Some(chan) = slot.take() {
+                    match chan.try_read() {
+                        // Pozadavek: init si kanal vezme (odpoved pri chybe),
+                        // nebo ho vrati.
+                        Ok(m) => *slot = crate::power::request_from_shell(&m.data, chan),
+                        Err(Error::ShouldWait) => *slot = Some(chan),
+                        // Relace skoncila: kanal zahodit.
+                        Err(_) => {}
+                    }
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// Pred vypnutim: ukonci termd a zalozni konzoli (relace shellu skonci
+    /// samy, kdyz nikdo nedrzi jejich registr).
+    pub fn stop_all(&mut self) {
+        for c in &mut self.clients {
+            if let Some(p) = c.termd.take() {
+                let _ = p.kill();
+            }
+            c.closed = true;
+        }
+        if let Some((p, _)) = self.console.take() {
+            let _ = p.kill();
         }
     }
 
     /// Po zpracovani: zavrene klienty odebrat (indexy `Wait` uz neplati).
     pub fn cleanup(&mut self) {
+        for c in &mut self.clients {
+            c.power_sessions.retain(Option::is_some);
+        }
         self.clients.retain(|c| !c.closed);
     }
 
@@ -175,6 +253,16 @@ impl Terminals {
             match chan.try_read() {
                 Ok(m) => {
                     let Ok(msg) = RegMsg::decode(&m.data) else { continue };
+                    // Kanaly prehledu uloh pro relaci: razi je init (identita
+                    // uzivatele, jen vlastni ulohy).
+                    if let RegMsg::TasksReq { session } = msg {
+                        let hs = match (crate::tasks::producer(USER), crate::tasks::client(USER, false, true)) {
+                            (Ok(p), Ok(cl)) => alloc::vec![p.into_handle(), cl.into_handle()],
+                            _ => Vec::new(),
+                        };
+                        let _ = chan.write(&RegMsg::Tasks { session }.encode(), hs);
+                        continue;
+                    }
                     if let Some((reply, hs)) = c.store.handle(msg, m.handles) {
                         let _ = chan.write(&reply.encode(), hs);
                     }
@@ -206,9 +294,12 @@ impl Terminals {
         // Zpravy stareho registru (Park) zpracovat, nez ho zahodime.
         self.registry(i);
         let fs = crate::system::devices().and_then(|d| d.fs.as_ref()).ok_or(Error::NotFound)?;
-        if !self.cleaned {
-            // Pred prvni relaci tohoto behu: vsechny klony jsou zbytky po
-            // padu nebo vypnuti (zadna relace jeste nebezi).
+        // Pred prvni relaci beziciho systemu: vsechny klony jsou zbytky po
+        // padu nebo vypnuti (zadna relace jeste nebezi). V testovacim behu
+        // ne: relace drivejsich testu (shsess) muzou jeste bezet a disk je
+        // pri kazdem behu novy.
+        let test_run = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
+        if !self.cleaned && !test_run {
             self.cleaned = true;
             if let Ok(list) = fs.list(ASIDE_DIR) {
                 for e in list {
@@ -222,15 +313,18 @@ impl Terminals {
         let image = initfs.find("termd").ok_or(Error::NotFound)?;
         let vmo = startup.initfs.as_ref().ok_or(Error::NotFound)?;
         let (here, there) = Channel::create()?;
+        let (power_here, power_there) = Channel::create()?;
         let handles = alloc::vec![
             StartHandle::user(own.into_channel().into_handle()),
             StartHandle::user(there.into_handle()),
             StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None)?),
+            StartHandle::user(power_there.into_handle()),
         ];
         let (proc, win) = libos::spawn("termd", image, handles)?;
         c.starts.push(now);
         c.termd = Some(proc);
         c.reg = Some(here);
+        c.power = Some(power_here);
         println!("init: termd ({}) spusten", c.name);
         Ok(win)
     }

@@ -8,7 +8,7 @@
 //! Pozadavek s neplatnou cookie dostane NTSN ("kiss of death").
 
 use std::io::{Read, Write};
-use std::net::{IpAddr, Ipv4Addr, TcpListener, UdpSocket};
+use std::net::UdpSocket;
 use std::sync::Arc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -125,8 +125,8 @@ fn uid(data: &[u8]) -> Vec<u8> {
 
 pub fn start(tls: Arc<rustls::ServerConfig>) -> std::io::Result<NtsHelper> {
     let master: [u8; 32] = random();
-    let ke = TcpListener::bind((IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
-    let udp = UdpSocket::bind((IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
+    let ke = crate::nethelper::tcp_listener("nts_ke")?;
+    let udp = crate::nethelper::udp_socket("nts_ntp")?;
     let ntp_port = udp.local_addr()?.port();
     let config = format!("nts_ke = {}\nnts_ntp = {ntp_port}\n", ke.local_addr()?.port());
     thread::spawn(move || ntp_loop(udp, master));

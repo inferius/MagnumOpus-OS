@@ -57,10 +57,15 @@ pub mod kind {
     /// limity). Init dostane korenovy job se vsemi pravy.
     pub const JOB: u32 = 6;
     /// Fyzicky objekt pameti s linearnim framebufferem z firmware (jen kdyz
-    /// je). Geometrie: syscall `FB_CONTROL` (`fb_op::INFO`). Init ho preda
-    /// jedinemu procesu (textova konzole); jadro dal kresli log do
-    /// framebufferu, dokud ho vlastnik neprevezme (`fb_op::CLAIM`).
+    /// je; mapuje se write-combining). Geometrie: syscall `FB_CONTROL`
+    /// (`fb_op::INFO`). Init ho preda vlastnikovi obrazovky (`fbdisplay`
+    /// nebo textova konzole); jadro dal kresli log do framebufferu, dokud
+    /// ho vlastnik neprevezme (`fb_op::CLAIM`).
     pub const FRAMEBUFFER: u32 = 7;
+    /// Objekt pameti (jen pro cteni) s udaji o ACPI pro sluzbu ACPI: adresa
+    /// a kopie RSDP, oblasti pameti firmwaru s tabulkami ([`crate::acpi`]).
+    /// Init ho preda `acpid`.
+    pub const ACPI: u32 = 8;
 }
 
 pub const HEADER_SIZE: usize = core::mem::size_of::<Header>();

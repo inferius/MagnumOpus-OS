@@ -83,14 +83,42 @@ pub fn vmo_create_contiguous(a: Args) -> Result<u64> {
     insert(&p, vmo)
 }
 
-/// `VMO_CREATE_PHYSICAL(resource, phys, size) -> handle`: jen mimo RAM.
+/// `VMO_CREATE_PHYSICAL(resource, phys, size, cache) -> handle`: registry
+/// zarizeni (mimo RAM; `cache` z `abi::vm::cache`) nebo pamet firmwaru
+/// s tabulkami ACPI (cela v AcpiReclaimable/AcpiNvs; vzdy s cache, `cache`
+/// se ignoruje). Jina RAM nikdy.
 pub fn vmo_create_physical(a: Args) -> Result<u64> {
     let p = current_process();
     let res = check_resource(&p, a[0])?;
-    if !mm::is_device_memory(a[1], a[2]) || !res.allows_range(a[1], a[2]) {
+    if !res.allows_range(a[1], a[2]) {
         return Err(Error::AccessDenied);
     }
-    insert(&p, MemoryObject::new_physical(a[1], a[2], Some(p.job()))?)
+    if mm::is_device_memory(a[1], a[2]) {
+        insert(&p, MemoryObject::new_physical(a[1], a[2], a[3], Some(p.job()))?)
+    } else if mm::is_acpi_memory(a[1], a[2]) {
+        insert(&p, MemoryObject::new_firmware(a[1], a[2], Some(p.job()))?)
+    } else {
+        Err(Error::AccessDenied)
+    }
+}
+
+/// `VMO_REVOKE(resource, vmo)`: odvola fyzicky objekt (mapovani ve vsech
+/// procesech zmizi, dalsi `VM_MAP` = `ACCESS_DENIED`). Rozsah objektu musi
+/// prostredek povolovat.
+pub fn vmo_revoke(a: Args) -> Result<u64> {
+    let p = current_process();
+    let res = check_resource(&p, a[0])?;
+    let vmo = p
+        .handles()
+        .get_as::<MemoryObject>(arg_handle(a[1])?, Rights::NONE)?;
+    let (start, size) = vmo.physical_range().ok_or(Error::NotSupported)?;
+    if !res.allows_range(start, size) {
+        return Err(Error::AccessDenied);
+    }
+    for proc in vmo.revoke()? {
+        proc.address_space().unmap_vmo(&vmo);
+    }
+    Ok(0)
 }
 
 /// `VMO_PHYS_ADDR(resource, vmo, offset) -> phys`.
@@ -164,19 +192,45 @@ pub fn interrupt_create(a: Args) -> Result<u64> {
     insert(&p, irq)
 }
 
-/// `INTERRUPT_CREATE_LINE(resource, line) -> handle`: preruseni na stare
-/// lince (ISA IRQ). Linku musi prostredek povolovat; jedna linka = jeden
-/// objekt.
+/// `INTERRUPT_CREATE_LINE(resource, line, flags) -> handle`: preruseni na
+/// pevne lince (x86 ISA IRQ, aarch64 SPI). Linku musi prostredek povolovat;
+/// jedna linka = jeden objekt.
 pub fn interrupt_create_line(a: Args) -> Result<u64> {
+    use abi::syscall::line_flags;
     let p = current_process();
     let res = check_resource(&p, a[0])?;
     let line = u32::try_from(a[1]).map_err(|_| Error::InvalidArgs)?;
+    if a[2] & !line_flags::ALL != 0 {
+        return Err(Error::InvalidArgs);
+    }
     if !res.allows_line(line) {
         return Err(Error::AccessDenied);
     }
     res.charge_irq()?;
-    let irq = Interrupt::new_line(line).inspect_err(|_| res.refund_irq())?;
+    let edge = a[2] & line_flags::EDGE != 0;
+    let irq = Interrupt::new_line(line, edge).inspect_err(|_| res.refund_irq())?;
     insert(&p, irq)
+}
+
+/// `SYSTEM_POWER(resource, op)`: vypnuti nebo restart pres firmware
+/// (pravo `POWER`). Pri uspechu se nevraci.
+pub fn system_power(a: Args) -> Result<u64> {
+    use abi::syscall::power_op;
+    let p = current_process();
+    p.handles()
+        .get_as::<Resource>(arg_handle(a[0])?, Rights::POWER)?;
+    let off = match a[1] {
+        power_op::OFF => true,
+        power_op::RESET => false,
+        _ => return Err(Error::InvalidArgs),
+    };
+    crate::log::info!(
+        "{} na zadost procesu {} {}",
+        if off { "vypinam pocitac" } else { "restartuji pocitac" },
+        p.name,
+        p.id
+    );
+    crate::arch::system_power(off).map(|_| 0)
 }
 
 /// Port a sirka z argumentu, overene proti prostredku.

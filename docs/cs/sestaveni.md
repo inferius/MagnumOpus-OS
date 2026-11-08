@@ -12,6 +12,11 @@
   - Fedora: `dnf install qemu-system-x86 edk2-ovmf qemu-system-aarch64 edk2-aarch64`
   - Arch: `pacman -S qemu-desktop edk2-ovmf edk2-aarch64`
   - macOS: `brew install qemu`
+- **clang a llvm-ar** (LLVM 17+) pro převzatý kód v C (ACPICA, viz
+  [Překlad C](preklad-c.md)): Windows `winget install LLVM.LLVM`,
+  Debian/Ubuntu `apt install clang llvm`, Fedora `dnf install clang llvm`,
+  Arch `pacman -S clang llvm`, macOS `brew install llvm`. Jiné místo:
+  proměnná `CLANG`.
 - Volitelně **GDB** pro ladění.
 
 xtask hledá QEMU v `PATH` a na obvyklých místech, firmware vedle QEMU nebo
@@ -25,9 +30,13 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 |---|---|
 | `cargo xtask build` | přeloží jádro, loader a programy userspace, sestaví initfs |
 | `cargo xtask image` | build + obraz disku `target/os-<arch>-<profil>.img` (GPT, ESP FAT32) |
-| `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)) |
+| `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)). Bez `--gpu` GUI kreslí přes framebuffer firmwaru (`--gpu none`, [GUI](gui.md)), aby bylo vidět v okně. Konzoli Windows xtask přepne na UTF-8 |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro ostatní architektury, dokumentace, pak jádro a userspace v QEMU bez okna |
 | `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Test delší než 20 s se v logu označí `[pomaly]` |
+| `cargo xtask test --only napajeni` | jen zvláštní běhy testu napájení (vypnutí tlačítkem přes ACPI, restart; po hlavním běhu se spouští vždy, vypne je `--no-power`), viz [ACPI](acpi.md#testy) |
+| `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
+| `cargo xtask test --driver edu` | jen jeden ovladač z manifestu: jeho testy na hostiteli (simulace) a v QEMU sada `ovladace z manifestu` jen pro něj; bez kontroly jader ostatních architektur a dokumentace (rychlá smyčka, viz [Ovladače](ovladace.md)) |
+| `cargo xtask new-driver <jméno> --pci <vendor:device>` | kostra ovladače na driverkitu: kód, manifest, model zařízení a test v simulaci, stránka dokumentace cs+en ([Ovladače](ovladace.md#první-ovladač-krok-za-krokem)) |
 | `cargo xtask check` | jen kontrola, že se jádro přeloží pro danou architekturu; viz [rozhraní architektury](architektura.md#rozhraní-architektury) |
 | `cargo xtask docs` | HTML dokumentace z `docs/` do `target/docs` (viz níže) |
 
@@ -35,7 +44,9 @@ Přepínače: `--arch <x86_64|aarch64>` (všechny příkazy, výchozí `x86_64`;
 aarch64 = QEMU `virt`, viz [implementace aarch64](architektura.md#implementace-aarch64-qemu-virt)),
 `--release`, `--headless` (bez okna), `--iommu <typ>` (emulovaná IOMMU:
 x86_64 `intel` (výchozí), `amd`, `none`; aarch64 `smmu` (výchozí), `none`; `none` ověří běh bez překladu DMA - test
-„IOMMU: zarizeni nezapise mimo prideleny DMA“ pak podle očekávání selže), `--gdb` (QEMU čeká na
+„IOMMU: zarizeni nezapise mimo prideleny DMA“ a testy „IOMMU chrani pamet mimo DMA“ sady `disky` pak podle očekávání selžou),
+`--data-disk <virtio|nvme|nvme4k|ahci>` (řadič datového disku, výchozí `virtio`; `nvme4k` = NVMe se sektorem 4 KiB; na NVMe a AHCI dostane disk
+GPT s naším oddílem, viz [Disky](disky.md)), `--gdb` (QEMU čeká na
 GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
 

@@ -49,10 +49,13 @@ impl Rights {
     /// Nastavovat realny cas (`CLOCK_SET`). Ma ho jen korenovy Resource;
     /// init ho preda jen sluzbe casu (prostredky ovladacu ho nemaji).
     pub const SET_CLOCK: Self = Self(1 << 9);
+    /// Vypnout nebo restartovat pocitac pres firmware (`SYSTEM_POWER`). Ma
+    /// ho jen korenovy Resource; init ho preda jen sluzbe ACPI.
+    pub const POWER: Self = Self(1 << 10);
 
     pub const BASIC: Self = Self(Self::DUPLICATE.0 | Self::TRANSFER.0 | Self::WAIT.0);
     /// Vsechna prava (jen jako horni mez, napr. "zachovat prava" pri duplikaci).
-    pub const ALL: Self = Self((1 << 10) - 1);
+    pub const ALL: Self = Self((1 << 11) - 1);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

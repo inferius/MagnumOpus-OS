@@ -82,3 +82,23 @@ fn async_and_await_are_keywords_in_highlight() {
     let classes: Vec<&str> = h.spans.iter().map(|s| s.class.name()).collect();
     assert!(classes.iter().filter(|c| **c == "kw").count() >= 3, "{classes:?}");
 }
+
+#[test]
+fn many_tasks_do_not_accumulate_and_each_parallel_keeps_all_rows() {
+    // Vic radku nez si relace pamatuje hotovych uloh: vsechny vysledky.
+    let out = ok("range 0 600 | each --parallel 8 x => x * 2");
+    let Value::List(rows) = &out[0] else { panic!("{out:?}") };
+    assert_eq!(rows.len(), 600);
+    assert_eq!(rows[599], Value::Int(1198));
+    // Hotove ulohy relace se prorezavaji (rozsah relace drzi jen bezici).
+    let mut h = TestHost::new();
+    let mut it = interp();
+    for _ in 0..(crate::eval::KEEP_DONE_FOR_TESTS + 50) {
+        it.run_line(&mut h, "let a = async { 1 }").result.unwrap();
+    }
+    assert!(it.tasks.len() <= crate::eval::KEEP_DONE_FOR_TESTS + 1, "{}", it.tasks.len());
+    assert!(it.task_scopes.iter().all(|s| s.len() <= 1));
+    // Posledni uloha jde pockat.
+    it.run_line(&mut h, "await a").result.unwrap();
+    assert_eq!(h.out.last(), Some(&Value::Int(1)));
+}

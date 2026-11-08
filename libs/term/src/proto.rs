@@ -12,7 +12,9 @@ use alloc::vec::Vec;
 
 use shlang::value::Value;
 
-pub const VERSION: u32 = 1;
+/// Verze 2: `seq` v `Complete`/`Completions` a `Format`/`Formatted`.
+/// Verze 3: prehled uloh (`Tasks`, `TaskAction`).
+pub const VERSION: u32 = 3;
 
 /// Polozka vystupu v bloku.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,16 +45,20 @@ pub enum ClientMsg {
     Detach { session: u64 },
     Run { session: u64, line: String },
     Interrupt { session: u64 },
-    Complete { session: u64, line: String, cursor: u32 },
+    /// Doplneni; `seq` = cislo pozadavku (vrati se v `Completions`).
+    Complete { session: u64, line: String, cursor: u32, seq: u32 },
     Answer { prompt: u64, yes: bool },
     /// Prevod radku do druheho zapisu (0 = B, 1 = C).
-    Format { session: u64, line: String, style: u8 },
+    Format { session: u64, line: String, style: u8, seq: u32 },
     Sessions,
     /// Odpoved na vyzvu s volbami (`index` do `Prompt::choices`).
     Choose { prompt: u64, index: u32 },
     /// Vyznamove zvyrazneni rozepsaneho radku (okno ho posila pri psani;
     /// `seq` = poradi, okno zahodi starsi odpovedi).
     Highlight { session: u64, line: String, seq: u32 },
+    /// Akce nad ulohou z panelu uloh (`action`: 0 zrusit, 1 pozastavit,
+    /// 2 pokracovat).
+    TaskAction { session: u64, task: u64, action: u8 },
 }
 
 /// Sluzba -> terminal.
@@ -68,13 +74,19 @@ pub enum ServerMsg {
     /// Zmena polozky bloku na miste (pruh prubehu, stav): `index` = poradi
     /// polozky v bloku.
     ItemUpdate { session: u64, block: u64, index: u32, item: Item },
-    Completions { start: u32, items: Vec<(String, u8, String)> },
+    /// Odpoved na `Complete` se stejnym `seq` (okno ji sparuje i kdyz
+    /// mezitim prisly udalosti bloku).
+    Completions { seq: u32, start: u32, items: Vec<(String, u8, String)> },
     SessionList { sessions: Vec<(u64, u32, String)> },
-    Formatted { text: String },
+    /// Odpoved na `Format` se stejnym `seq`.
+    Formatted { seq: u32, text: String },
     Fail { message: String },
     /// Odpoved na `Highlight`: useky (zacatek, delka v bajtech, trida
     /// `shlang::highlight::Class`) a misto chyby parseru.
     Highlighted { seq: u32, spans: Vec<(u32, u32, u8)>, error: Option<(u32, u32, String)> },
+    /// Ulohy uzivatele z prehledu uloh (`taskd`): cely seznam po kazde
+    /// zmene (panel uloh, stavovy radek, upozorneni).
+    Tasks { tasks: Vec<taskproto::Task> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -413,22 +425,24 @@ impl ClientMsg {
                 w.u8(5);
                 w.u64(*session);
             }
-            ClientMsg::Complete { session, line, cursor } => {
+            ClientMsg::Complete { session, line, cursor, seq } => {
                 w.u8(6);
                 w.u64(*session);
                 w.str(line);
                 w.u32(*cursor);
+                w.u32(*seq);
             }
             ClientMsg::Answer { prompt, yes } => {
                 w.u8(7);
                 w.u64(*prompt);
                 w.u8(*yes as u8);
             }
-            ClientMsg::Format { session, line, style } => {
+            ClientMsg::Format { session, line, style, seq } => {
                 w.u8(8);
                 w.u64(*session);
                 w.str(line);
                 w.u8(*style);
+                w.u32(*seq);
             }
             ClientMsg::Sessions => w.u8(9),
             ClientMsg::Choose { prompt, index } => {
@@ -442,6 +456,12 @@ impl ClientMsg {
                 w.str(line);
                 w.u32(*seq);
             }
+            ClientMsg::TaskAction { session, task, action } => {
+                w.u8(12);
+                w.u64(*session);
+                w.u64(*task);
+                w.u8(*action);
+            }
         }
         w.0
     }
@@ -454,12 +474,13 @@ impl ClientMsg {
             3 => ClientMsg::Detach { session: r.u64()? },
             4 => ClientMsg::Run { session: r.u64()?, line: r.str()? },
             5 => ClientMsg::Interrupt { session: r.u64()? },
-            6 => ClientMsg::Complete { session: r.u64()?, line: r.str()?, cursor: r.u32()? },
+            6 => ClientMsg::Complete { session: r.u64()?, line: r.str()?, cursor: r.u32()?, seq: r.u32()? },
             7 => ClientMsg::Answer { prompt: r.u64()?, yes: r.u8()? != 0 },
-            8 => ClientMsg::Format { session: r.u64()?, line: r.str()?, style: r.u8()? },
+            8 => ClientMsg::Format { session: r.u64()?, line: r.str()?, style: r.u8()?, seq: r.u32()? },
             9 => ClientMsg::Sessions,
             10 => ClientMsg::Highlight { session: r.u64()?, line: r.str()?, seq: r.u32()? },
             11 => ClientMsg::Choose { prompt: r.u64()?, index: r.u32()? },
+            12 => ClientMsg::TaskAction { session: r.u64()?, task: r.u64()?, action: r.u8()? },
             _ => return Err(DecodeError),
         };
         r.done()?;
@@ -517,8 +538,9 @@ impl ServerMsg {
                 w.u32(*index);
                 put_item(&mut w, item);
             }
-            ServerMsg::Completions { start, items } => {
+            ServerMsg::Completions { seq, start, items } => {
                 w.u8(7);
+                w.u32(*seq);
                 w.u32(*start);
                 w.u32(items.len() as u32);
                 for (t, k, h) in items {
@@ -536,13 +558,19 @@ impl ServerMsg {
                     w.str(cwd);
                 }
             }
-            ServerMsg::Formatted { text } => {
+            ServerMsg::Formatted { seq, text } => {
                 w.u8(9);
+                w.u32(*seq);
                 w.str(text);
             }
             ServerMsg::Fail { message } => {
                 w.u8(10);
                 w.str(message);
+            }
+            ServerMsg::Tasks { tasks } => {
+                w.u8(13);
+                let snap = taskproto::Reply::Snapshot { req: 0, seq: 0, tasks: tasks.clone(), last: true };
+                w.bytes(&snap.encode());
             }
             ServerMsg::Highlighted { seq, spans, error } => {
                 w.u8(11);
@@ -587,8 +615,13 @@ impl ServerMsg {
                 }
                 ServerMsg::Prompt { prompt, question, detail, choices }
             }
+            13 => match taskproto::Reply::decode(&r.bytes()?) {
+                Ok(taskproto::Reply::Snapshot { tasks, .. }) => ServerMsg::Tasks { tasks },
+                _ => return Err(DecodeError),
+            },
             12 => ServerMsg::ItemUpdate { session: r.u64()?, block: r.u64()?, index: r.u32()?, item: get_item(&mut r)? },
             7 => {
+                let seq = r.u32()?;
                 let start = r.u32()?;
                 let n = r.u32()? as usize;
                 if n > MAX_ITEMS {
@@ -598,7 +631,7 @@ impl ServerMsg {
                 for _ in 0..n {
                     items.push((r.str()?, r.u8()?, r.str()?));
                 }
-                ServerMsg::Completions { start, items }
+                ServerMsg::Completions { seq, start, items }
             }
             8 => {
                 let n = r.u32()? as usize;
@@ -611,7 +644,7 @@ impl ServerMsg {
                 }
                 ServerMsg::SessionList { sessions }
             }
-            9 => ServerMsg::Formatted { text: r.str()? },
+            9 => ServerMsg::Formatted { seq: r.u32()?, text: r.str()? },
             10 => ServerMsg::Fail { message: r.str()? },
             11 => {
                 let seq = r.u32()?;

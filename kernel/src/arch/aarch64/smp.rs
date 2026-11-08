@@ -156,6 +156,15 @@ fn psci_call(hvc: bool, func: u64, a1: u64, a2: u64, a3: u64) -> i64 {
     ret as i64
 }
 
+/// PSCI SYSTEM_OFF / SYSTEM_RESET (32bitove ID funkci). Pri uspechu se
+/// nevraci; navrat = firmware funkci neumi.
+pub fn psci_system(hvc: bool, off: bool) {
+    const SYSTEM_OFF: u64 = 0x8400_0008;
+    const SYSTEM_RESET: u64 = 0x8400_0009;
+    let r = psci_call(hvc, if off { SYSTEM_OFF } else { SYSTEM_RESET }, 0, 0, 0);
+    crate::log::warn!("PSCI {} selhalo: {r}", if off { "SYSTEM_OFF" } else { "SYSTEM_RESET" });
+}
+
 impl CpuStarter for Psci {
     fn start(
         &self,

@@ -214,6 +214,11 @@ impl Comp {
     /// Vraci obdelniky, ktere je treba poslat displeji (`None` = nic se
     /// neslozilo; pak sluzba nema cekat na `PRESENTED`).
     pub fn tick(&mut self, now: u64, canvas: &mut gfx::Canvas<'_>) -> Option<Vec<Rect>> {
+        self.tick_with(now, |c, rects| c.compose(canvas, rects, now))
+    }
+
+    /// Spolecny tik obou backendu: `compose` slozi poskozene obdelniky.
+    pub(crate) fn tick_with(&mut self, now: u64, compose: impl FnOnce(&mut Self, &[Rect])) -> Option<Vec<Rect>> {
         self.timers(now);
         if self.frame.in_flight {
             return None;
@@ -224,7 +229,7 @@ impl Comp {
             None
         } else {
             let rects = self.dirty.take();
-            self.compose(canvas, &rects, now);
+            compose(self, &rects);
             self.frame.frames += 1;
             Some(rects)
         };

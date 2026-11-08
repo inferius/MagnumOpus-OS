@@ -153,8 +153,12 @@ fn completion_menu_from_service() {
     typ(&mut a, "open d");
     a.take_out();
     a.key(Key::Tab);
-    assert!(matches!(a.take_out().last(), Some(ClientMsg::Complete { cursor: 6, .. })));
+    assert!(matches!(a.take_out().last(), Some(ClientMsg::Complete { cursor: 6, seq: 1, .. })));
+    // Odpoved na starsi pozadavek se zahodi.
+    a.on_msg(ServerMsg::Completions { seq: 0, start: 5, items: vec![("x".into(), 0, String::new()), ("y".into(), 0, String::new())] });
+    assert!(a.menu.is_none());
     a.on_msg(ServerMsg::Completions {
+        seq: 1,
         start: 5,
         items: vec![("data.json".into(), 0, "soubor".into()), ("docs/".into(), 1, "slozka".into())],
     });
@@ -165,7 +169,7 @@ fn completion_menu_from_service() {
     assert_eq!(a.editor.text, "open docs/");
     assert!(a.menu.is_none());
     // Jedina moznost se doplni rovnou.
-    a.on_msg(ServerMsg::Completions { start: 5, items: vec![("docs/a.txt".into(), 0, String::new())] });
+    a.on_msg(ServerMsg::Completions { seq: 1, start: 5, items: vec![("docs/a.txt".into(), 0, String::new())] });
     assert_eq!(a.editor.text, "open docs/a.txt");
 }
 

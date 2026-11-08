@@ -6,7 +6,10 @@
 //!   v deskriptoru 0, ovladac ceka na jeho dokonceni (blokove zarizeni),
 //! - samostatne buffery (`post` + `take_posted`): mnoho bufferu najednou,
 //!   kazdy s vlastnim cislem deskriptoru; zarizeni je vraci v libovolnem
-//!   poradi (udalosti vstupu, prijem i odesilani ramcu site).
+//!   poradi (udalosti vstupu, prijem i odesilani ramcu site),
+//! - vic soubeznych pozadavku (`submit_at` + `take_posted`): kazdy retezec
+//!   ma vlastni rozsah deskriptoru s hlavou `head` (napr. sloty ovladace
+//!   GPU: prikaz + odpoved, dokonceni v libovolnem poradi).
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
@@ -108,6 +111,35 @@ impl Virtqueue {
         self.map.write::<u16>(self.avail_off + 2, self.avail_idx);
         // Index driv nez cokoli dalsiho (upozorneni zarizeni dela `notify`
         // s vlastni barierou).
+        libos::barrier::dma_wmb();
+        Ok(())
+    }
+
+    /// Vlozi retezec bufferu do deskriptoru `head..head+n` (hlava `head`).
+    /// Rozsah nesmi patrit jinemu pozadavku, ktery jeste neni dokonceny;
+    /// dokonceni vraci `take_posted` s id `head`.
+    pub fn submit_at(&mut self, head: u16, chain: &[Buffer]) -> Result<()> {
+        let end = head as usize + chain.len();
+        if chain.is_empty() || end > self.size as usize {
+            return Err(Error::InvalidArgs);
+        }
+        for (i, b) in chain.iter().enumerate() {
+            let id = head as u64 + i as u64;
+            let d = id * DESC_SIZE;
+            let mut flags = if b.device_writes { DESC_F_WRITE } else { 0 };
+            if i + 1 < chain.len() {
+                flags |= DESC_F_NEXT;
+            }
+            self.map.write::<u64>(d, b.phys);
+            self.map.write::<u32>(d + 8, b.len);
+            self.map.write::<u16>(d + 12, flags);
+            self.map.write::<u16>(d + 14, (id + 1) as u16);
+        }
+        let slot = self.avail_off + 4 + 2 * (self.avail_idx % self.size) as u64;
+        self.map.write::<u16>(slot, head);
+        libos::barrier::dma_wmb();
+        self.avail_idx = self.avail_idx.wrapping_add(1);
+        self.map.write::<u16>(self.avail_off + 2, self.avail_idx);
         libos::barrier::dma_wmb();
         Ok(())
     }

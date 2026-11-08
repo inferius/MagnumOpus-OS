@@ -218,7 +218,11 @@ it after the network service:
   crystal drift. It proposes half of the error so measurement noise does
   not make the loop oscillate (`netproto::ntp::Discipline`).
 - **The interval** starts at `min_poll` and doubles up to `max_poll` while
-  the clock is in sync (offset under 2 ms).
+  the clock is in sync (offset under 2 ms). A round without a
+  measurement (at start the network or DNS is not up yet, a server did
+  not reply) is repeated after 2, 4, 8, ... s, at most after `min_poll`:
+  the clock is set a few seconds after the network comes up, not only
+  after `min_poll` (64 s).
 
 ```toml
 # ntpd.toml (initfs)

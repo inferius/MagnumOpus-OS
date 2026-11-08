@@ -6,6 +6,7 @@
 //! - `run`    - image + spusteni v QEMU s UEFI firmwarem
 //! - `test`   - testy na hostiteli, pak jadro a userspace v QEMU
 //! - `check`  - jen kontrola prekladu jadra
+//! - `new-driver` - kostra noveho ovladace (viz `drivers.rs`)
 //!
 //! Prepinace: `--release`, `--arch <x86_64|aarch64>` (vsechny prikazy), pro
 //! `run` navic `--gdb`, `--headless`, `--accel <tcg|kvm|whpx|hvf>` a cokoli
@@ -13,6 +14,7 @@
 
 mod arch;
 mod datadisk;
+mod drivers;
 mod docs;
 mod highlight;
 mod image;
@@ -22,8 +24,11 @@ mod dnshelper;
 mod ntshelper;
 mod revhelper;
 mod webhelper;
+mod powertest;
 mod qmp;
 mod symbolize;
+mod testdisks;
+mod venus;
 
 use std::env;
 use std::ffi::OsString;
@@ -31,6 +36,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use arch::Arch;
+use driverkit::manifest::Manifest;
 
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
@@ -45,6 +51,11 @@ prikazy:
            architektury, pak jadro a userspace v QEMU bez okna
   check    jen kontrola prekladu jadra
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
+  new-driver <jmeno> --pci <vendor:device>
+           kostra ovladace na driverkitu: kod, manifest, model a test
+           v simulaci, stranka dokumentace cs+en (docs/cs/ovladace.md)
+  venus-gen  serializace Venusu z libs/venus/xml do libs/venus/src/vk
+  venus-check  overi, ze libs/venus/src/vk odpovida vstupum
 
 prepinace:
   --release        release profil
@@ -53,21 +64,37 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
+                   none; aarch64 smmu (vychozi), none
+  --data-disk <r>  (run, test) radic datoveho disku: virtio (vychozi), nvme,
+                   nvme4k (sektor 4 KiB), ahci; na NVMe a AHCI ma disk GPT
+                   s nasim oddilem
   --qemu-wsl       (run, test) spustit QEMU ve WSL (QEMU_WSL_DISTRO, vychozi
                    Ubuntu; QEMU_WSL_PREFIX, vychozi ~/venus/prefix) - Venus
-  --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi), gl (virgl 3D)
+  --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi pro test a run
+                   --headless), gl (virgl 3D)
                    nebo venus (Vulkan; QEMU s virglrenderer a render serverem);
-                   gl a venus bez okna pouziji displej egl-headless
-                   none; aarch64 smmu (vychozi), none
+                   gl a venus bez okna pouziji displej egl-headless;
+                   none = bez virtio-gpu (GUI nad framebufferem z firmwaru,
+                   ovladac fbdisplay; vychozi pro run s oknem)
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
                    carkou, napr. sit,firewall; jmena jako v logu)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
+  --driver <jmeno> (test) jen jeden ovladac z manifestu: jeho testy na
+                   hostiteli (simulace) a v QEMU sada ovladace z manifestu
+                   jen pro nej; bez kontroly jader ostatnich architektur
+                   a dokumentace (rychla smycka vyvoje ovladace)
+  --net-online     (test) i testy proti skutecne siti hostitele (resolver
+                   hostitele pres slirp); bez nej jen lokalni servery
+  --no-power       (test) bez zvlastnich behu testu napajeni (vypnuti
+                   tlacitkem pres ACPI, restart); s --only se vynechaji take,
+                   --only napajeni = jen tyto behy
   -- <args>        (run) dalsi argumenty pro QEMU
 
 promenne prostredi:
   QEMU_X86_64, QEMU_AARCH64   cesta k QEMU (QEMU plati pro x86_64)
   X86_64_FW_CODE, _FW_VARS    firmware UEFI (take OVMF_CODE, OVMF_VARS)
   AARCH64_FW_CODE, _FW_VARS   firmware UEFI pro aarch64 (edk2, AAVMF)
+  OS_KEEP_DATA=1              datovy disk po behu nemazat (rozbor stavu FS)
 ";
 
 pub struct Options {
@@ -78,8 +105,11 @@ pub struct Options {
     /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
     /// aarch64 "smmu", "none".
     iommu: String,
+    /// Radic datoveho disku: "virtio", "nvme", "nvme4k" (sektor 4 KiB), "ahci".
+    data_disk: String,
     /// Grafika virtio-gpu: "2d" (vychozi), "gl" (virgl 3D), "venus" (Vulkan
-    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl).
+    /// pres virtio-gpu); "gl" a "venus" potrebuji displej s OpenGL (egl);
+    /// "none" = bez virtio-gpu (displej `fbdisplay` nad framebufferem GOP).
     gpu: String,
     /// QEMU ve WSL (Linux): `--qemu-wsl` (vychozi distribuce Ubuntu, QEMU
     /// z `~/venus/prefix`, kde je preklad s Venusem). Cesty se prevedou na
@@ -96,14 +126,25 @@ pub struct Options {
     /// `--only` (sady testu userspace) a `--repeat` (kolikrat).
     test_only: String,
     test_repeat: u32,
+    /// `--net-online`: i testy proti skutecne siti hostitele.
+    net_online: bool,
+    /// `--driver`: jen tento ovladac z manifestu (testy).
+    test_driver: Option<String>,
+    /// QEMU ma vyukove zarizeni `edu` (ukazkovy ovladac); zjisti se pred
+    /// buildem (`-device help`).
+    edu: bool,
     /// Presmerovani portu z hostitele do hosta (`hostfwd` user-mode site).
     hostfwd: Option<String>,
     /// Pomocne servery testu site (port `hostfwd` se uvolni tesne pred
     /// startem QEMU).
     net_helper: std::cell::RefCell<Option<nethelper::Helper>>,
+    /// Zvlastni beh testu napajeni (`powertest`): "button" nebo "reboot".
+    /// QEMU ma skoncit samo (vypnuti ACPI) s kodem 0.
+    power_test: Option<&'static str>,
 }
 
 fn main() -> ExitCode {
+    console_utf8();
     match run_cli() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -119,6 +160,11 @@ fn run_cli() -> Result<()> {
         eprint!("{USAGE}");
         return Err("chybi prikaz".into());
     };
+    if command == "new-driver" {
+        let rest: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
+        let d = drivers::parse_new_driver(&rest)?;
+        return drivers::new_driver(&workspace_root(), &d);
+    }
 
     let mut opts = Options {
         release: false,
@@ -126,6 +172,7 @@ fn run_cli() -> Result<()> {
         headless: false,
         accel: None,
         iommu: String::new(),
+        data_disk: String::from("virtio"),
         gpu: String::from("2d"),
         qemu_wsl: false,
         qemu_args: Vec::new(),
@@ -134,9 +181,15 @@ fn run_cli() -> Result<()> {
         extra_initfs: Vec::new(),
         test_only: String::new(),
         test_repeat: 1,
+        net_online: false,
+        test_driver: None,
+        edu: false,
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
+        power_test: None,
     };
+    let mut gpu_set = false;
+    let mut no_power = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
@@ -144,12 +197,21 @@ fn run_cli() -> Result<()> {
                 let value = args.next().ok_or("--iommu ocekava typ IOMMU")?;
                 opts.iommu = value.to_string_lossy().into_owned();
             }
+            Some("--data-disk") => {
+                let value = args.next().ok_or("--data-disk ocekava radic")?;
+                let value = value.to_string_lossy().into_owned();
+                if !["virtio", "nvme", "nvme4k", "ahci"].contains(&value.as_str()) {
+                    return Err("--data-disk ocekava virtio, nvme, nvme4k nebo ahci".into());
+                }
+                opts.data_disk = value;
+            }
             Some("--qemu-wsl") => opts.qemu_wsl = true,
             Some("--gpu") => {
-                let value = args.next().ok_or("--gpu ocekava 2d, gl nebo venus")?;
+                gpu_set = true;
+                let value = args.next().ok_or("--gpu ocekava 2d, gl, venus nebo none")?;
                 opts.gpu = value.to_string_lossy().into_owned();
-                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus") {
-                    return Err("--gpu ocekava 2d, gl nebo venus".into());
+                if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus" | "none") {
+                    return Err("--gpu ocekava 2d, gl, venus nebo none".into());
                 }
             }
             Some("--arch") => {
@@ -164,6 +226,12 @@ fn run_cli() -> Result<()> {
             Some("--repeat") => {
                 let value = args.next().ok_or("--repeat ocekava pocet")?;
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
+            }
+            Some("--net-online") => opts.net_online = true,
+            Some("--no-power") => no_power = true,
+            Some("--driver") => {
+                let value = args.next().ok_or("--driver ocekava jmeno ovladace")?;
+                opts.test_driver = Some(value.to_string_lossy().into_owned());
             }
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
@@ -195,6 +263,16 @@ fn run_cli() -> Result<()> {
         Some("build") => build(&opts).map(|_| ()),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
+            // Okno QEMU ukazuje prvni grafickou kartu (VGA, framebuffer
+            // z firmwaru) a na ni jsou navazane klavesnice a mys virtio.
+            // S virtio-gpu by kompozitor kreslil na druhou konzoli QEMU,
+            // kterou okno neukazuje (obraz by "zamrzl" na startu). Bez
+            // `--gpu` proto beh s oknem GUI kresli pres fbdisplay na VGA.
+            if !gpu_set && !opts.headless {
+                opts.gpu = String::from("none");
+                println!("xtask: grafika pres framebuffer firmwaru (virtio-gpu: --gpu 2d, pak v okne QEMU View -> virtio-gpu-pci)");
+            }
+            opts.edu = edu_available(&opts);
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             qemu::run(&image, &artifacts, &opts)
@@ -202,18 +280,40 @@ fn run_cli() -> Result<()> {
         Some("test") => {
             opts.test = true;
             opts.headless = true;
-            host_tests()?;
-            // Jadro se musi prelozit i pro ostatni architektury (rozhrani
-            // architektury nesmi zustat jen pro jednu).
-            for other in arch::ALL.iter().filter(|a| a.name != opts.arch.name) {
-                check_kernel(other, &opts)?;
+            let found = drivers::discover(&workspace_root())?;
+            if let Some(d) = &opts.test_driver
+                && !found.iter().any(|f| &f.manifest.name == d)
+            {
+                return Err(format!("--driver {d}: user/{d}/{d}.driver.toml neexistuje").into());
             }
-            build_docs()?;
+            if opts.test_driver.is_none() {
+                venus::run(true)?;
+            }
+            host_tests(&found, opts.test_driver.as_deref())?;
+            if opts.test_driver.is_none() {
+                // Jadro se musi prelozit i pro ostatni architektury (rozhrani
+                // architektury nesmi zustat jen pro jednu).
+                for other in arch::ALL.iter().filter(|a| a.name != opts.arch.name) {
+                    check_kernel(other, &opts)?;
+                }
+                build_docs()?;
+            } else if opts.test_only.is_empty() {
+                opts.test_only = String::from("ovladace z manifestu");
+            }
+            opts.edu = edu_available(&opts);
+            let expect: Vec<&str> = if opts.edu { vec!["edu"] } else { Vec::new() };
+            opts.extra_initfs.push((
+                String::from("driver-test"),
+                drivers::test_plan(&expect, opts.test_driver.as_deref()).into_bytes(),
+            ));
             // Pomocne servery pro testy site bezi, dokud bezi xtask.
             let helper = nethelper::start()?;
             let web = webhelper::start()?;
             let config = format!("{}{}", helper.config, web.config);
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
+            if opts.net_online {
+                opts.extra_initfs.push((String::from("net-online"), b"1".to_vec()));
+            }
             if !opts.test_only.is_empty() || opts.test_repeat > 1 {
                 let filter = format!("suites = {}
 repeat = {}
@@ -226,12 +326,24 @@ repeat = {}
                 .push((String::from("net-test-dns-anchor"), web.dns_anchor.into_bytes()));
             opts.hostfwd = Some(helper.hostfwd.clone());
             *opts.net_helper.borrow_mut() = Some(helper);
-            let artifacts = build(&opts)?;
-            let image = image_for(&artifacts, &opts)?;
-            qemu::run(&image, &artifacts, &opts)
+            // `--only napajeni`: jen zvlastni behy testu napajeni.
+            let power_only = opts.test_only == "napajeni";
+            if !power_only {
+                let artifacts = build(&opts)?;
+                let image = image_for(&artifacts, &opts)?;
+                qemu::run(&image, &artifacts, &opts)?;
+            }
+            // Vypnuti a restart pres ACPI: vlastni kratke behy QEMU (konec
+            // behu = vypnuti, nejde to spojit s hlavnim behem testu).
+            if no_power || (!opts.test_only.is_empty() && !power_only) {
+                return Ok(());
+            }
+            powertest::run_all(&mut opts)
         }
         Some("check") => check_kernel(opts.arch, &opts),
         Some("docs") => build_docs().map(|_| ()),
+        Some("venus-gen") => venus::run(false),
+        Some("venus-check") => venus::run(true),
         Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
             Ok(())
@@ -240,11 +352,45 @@ repeat = {}
     }
 }
 
+/// Ma QEMU zarizeni `edu` (ukazkovy ovladac)? Ve WSL se nezjistuje (bez
+/// zarizeni test edu jen preskoci).
+fn edu_available(opts: &Options) -> bool {
+    if opts.qemu_wsl {
+        return false;
+    }
+    let ok = opts
+        .arch
+        .find_qemu()
+        .is_ok_and(|q| drivers::qemu_has_device(&q, "edu"));
+    if !ok {
+        println!("xtask: QEMU nema zarizeni edu: test ukazkoveho ovladace se preskoci");
+    }
+    ok
+}
+
 /// Testy sdilenych knihoven na hostiteli (format initfs, ABI, dokumentace
 /// chyb a syscallu, casova pasma, protokol vstupu a rozlozeni klavesnice,
-/// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI).
-fn host_tests() -> Result<()> {
+/// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI,
+/// ochrana cizich disku), driverkit se simulaci a ovladace z manifestu
+/// (`found`; s `--driver` jen ten jeden).
+fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    if let Some(d) = only_driver {
+        let status = Command::new(&cargo)
+            .current_dir(workspace_root())
+            .args(["test", "--quiet", "--package", "driverkit", "--package", d])
+            .args(["--features", "driverkit/sim"])
+            .status()?;
+        if !status.success() {
+            return Err(format!("testy ovladace {d} na hostiteli selhaly").into());
+        }
+        println!("xtask: testy ovladace {d} na hostiteli prosly");
+        return Ok(());
+    }
+    let mut drivers_args: Vec<&str> = vec!["--package", "driverkit"];
+    for f in found {
+        drivers_args.extend(["--package", f.manifest.name.as_str()]);
+    }
     let status = Command::new(cargo)
         .current_dir(workspace_root())
         .args([
@@ -269,9 +415,13 @@ fn host_tests() -> Result<()> {
             "--package",
             "shlang",
             "--package",
+            "sizeclass",
+            "--package",
             "term",
             "--package",
             "netproto",
+            "--package",
+            "nic",
             "--package",
             "csprng",
             "--package",
@@ -285,7 +435,17 @@ fn host_tests() -> Result<()> {
             "--package",
             "guiproto",
             "--package",
+            "gpuproto",
+            "--package",
+            "venus",
+            "--package",
+            "spirv",
+            "--package",
+            "vkcomp",
+            "--package",
             "taskproto",
+            "--package",
+            "taskcore",
             "--package",
             "svcclient",
             "--package",
@@ -297,6 +457,14 @@ fn host_tests() -> Result<()> {
             "--package",
             "vgpu",
             "--package",
+            "fbcopy",
+            "--package",
+            "display",
+            "--package",
+            "displaydrv",
+            "--package",
+            "intelgfx",
+            "--package",
             "comp",
             "--package",
             "ui",
@@ -306,9 +474,12 @@ fn host_tests() -> Result<()> {
             "httpc",
             "--package",
             "dns",
+            "--package",
+            "diskguard",
             "--features",
-            "initfs/std,fs/std,netproto/std,netproto/nts",
+            "initfs/std,fs/std,netproto/std,netproto/nts,driverkit/sim",
         ])
+        .args(&drivers_args)
         .status()?;
     if !status.success() {
         return Err("testy knihoven na hostiteli selhaly".into());
@@ -381,7 +552,10 @@ const USER_PROGRAMS: &[&str] = &[
     "svctest",
     "fsrtest",
     "devmgr",
+    "acpid",
     "virtio-blk",
+    "nvme",
+    "ahci",
     "virtio-input",
     "inputd",
     "ps2",
@@ -392,10 +566,17 @@ const USER_PROGRAMS: &[&str] = &[
     "timed",
     "termd",
     "shsess",
+    "taskd",
     "console",
     "virtio-net",
+    "e1000e",
+    "igc",
+    "r8169",
     "virtio-rng",
     "virtio-gpu",
+    "fbdisplay",
+    "bochs-display",
+    "intel-display",
     "compd",
     "gui-demo",
     "gui-term",
@@ -407,6 +588,7 @@ const USER_PROGRAMS: &[&str] = &[
     "fetch",
     "revocd",
     "dnsd",
+    "vk-probe",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
@@ -520,13 +702,21 @@ fn build(opts: &Options) -> Result<Artifacts> {
     let a = opts.arch;
     cargo_build(&["kernel"], a.kernel_target, opts, false)?;
     cargo_build(&["loader"], a.loader_target, opts, false)?;
-    cargo_build(USER_PROGRAMS, a.user_target, opts, true)?;
+    // Ovladace z manifestu (user/*/<jmeno>.driver.toml) se pridaji samy.
+    let found = drivers::discover(&workspace_root())?;
+    let mut programs: Vec<&str> = USER_PROGRAMS.to_vec();
+    for f in &found {
+        if !programs.contains(&f.manifest.name.as_str()) {
+            programs.push(f.manifest.name.as_str());
+        }
+    }
+    cargo_build(&programs, a.user_target, opts, true)?;
     let target = target_dir();
     let profile = profile_dir(opts);
 
     let user_bin = user_target_dir().join(a.user_target).join(profile);
     let mut files = Vec::new();
-    for name in USER_PROGRAMS {
+    for name in &programs {
         let data = std::fs::read(user_bin.join(name))
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
@@ -535,6 +725,10 @@ fn build(opts: &Options) -> Result<Artifacts> {
         let data = std::fs::read(workspace_root().join(path))
             .map_err(|e| format!("nelze cist {path}: {e}"))?;
         files.push((name.to_string(), data));
+    }
+    for f in &found {
+        let data = std::fs::read(&f.path).map_err(|e| format!("nelze cist {}: {e}", f.path.display()))?;
+        files.push((Manifest::file_name(&f.manifest.name), data));
     }
     files.push((String::from("certs.pem"), webhelper::bundle_pem()));
     files.extend(opts.extra_initfs.iter().cloned());
@@ -567,4 +761,20 @@ fn image_for(artifacts: &Artifacts, opts: &Options) -> Result<PathBuf> {
     image::create_disk_image(&path, &files)?;
     println!("xtask: obraz disku {}", path.display());
     Ok(path)
+}
+
+/// Konzole Windows v UTF-8: vystup seriove linky (cesky text, ramecky)
+/// je v UTF-8, konzole ve vychozi kodove strance (852, 437) by z nej
+/// udelala "┼ż". Na ostatnich systemech nic.
+fn console_utf8() {
+    #[cfg(windows)]
+    {
+        unsafe extern "system" {
+            fn SetConsoleOutputCP(code_page: u32) -> i32;
+        }
+        // SAFETY: volani bez ukazatelu; selhani (zadna konzole) nevadi.
+        unsafe {
+            SetConsoleOutputCP(65001);
+        }
+    }
 }

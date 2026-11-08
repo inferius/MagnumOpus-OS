@@ -63,9 +63,42 @@ struct DoneWire {
     undo: Vec<UndoEntry>,
 }
 
+/// Rizeni ulohy z hlavniho vlakna: zruseni a probuzeni (odpoved na
+/// vyzvu, zruseni). Uloha ceka na udalost, ne v kratkych spankach.
+pub struct Control {
+    cancel: AtomicBool,
+    /// Vlastni probouzeni ulohy (`None` = prostredi ho nema: spanek).
+    wake: Option<Arc<dyn Notify>>,
+}
+
+impl Control {
+    fn cancel(&self) {
+        self.cancel.store(true, Ordering::Release);
+        self.wake();
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Acquire)
+    }
+
+    fn wake(&self) {
+        if let Some(w) = &self.wake {
+            w.notify();
+        }
+    }
+
+    /// Pocka nejvys `ns` (drive pri probuzeni).
+    fn wait(&self, ns: i64, clock: &Clock) {
+        match &self.wake {
+            Some(w) => w.wait(ns),
+            None => (clock.sleep)(ns.min(20_000_000)),
+        }
+    }
+}
+
 struct Entry {
     id: u64,
-    cancel: Arc<AtomicBool>,
+    control: Arc<Control>,
     outbox: Vec<Vec<u8>>,
     prompt: Option<PromptWire>,
     done: Option<DoneWire>,
@@ -77,6 +110,9 @@ struct Entry {
 #[derive(Default)]
 pub struct Table {
     entries: Vec<Entry>,
+    /// Zpravy vyzvednutych uloh, ktere jeste nesly oknu (uloha posle konec
+    /// bloku a hned nastavi vysledek - vyzvednuti nesmi zpravy ztratit).
+    orphans: Vec<Vec<u8>>,
 }
 
 /// Sdilena tabulka uloh relace.
@@ -131,18 +167,18 @@ impl SpecWire {
 }
 
 /// Zaregistruje ulohu (pred spustenim vlakna).
-pub fn register(t: &Shared, id: u64) -> Arc<AtomicBool> {
-    let cancel = Arc::new(AtomicBool::new(false));
+pub fn register(t: &Shared, id: u64, wake: Option<Arc<dyn Notify>>) -> Arc<Control> {
+    let control = Arc::new(Control { cancel: AtomicBool::new(false), wake });
     t.lock().entries.push(Entry {
         id,
-        cancel: cancel.clone(),
+        control: control.clone(),
         outbox: Vec::new(),
         prompt: None,
         done: None,
         join: None,
         abandoned: false,
     });
-    cancel
+    control
 }
 
 pub fn set_join(t: &Shared, id: u64, j: Box<dyn Joinable>) {
@@ -160,6 +196,11 @@ pub fn remove(t: &Shared, id: u64) {
 pub fn drain(t: &Shared, next_prompt: &mut u64) -> Vec<ServerMsg> {
     let mut out = Vec::new();
     let mut tab = t.lock();
+    for m in core::mem::take(&mut tab.orphans) {
+        if let Ok(sm) = ServerMsg::decode(&m) {
+            out.push(sm);
+        }
+    }
     for e in &mut tab.entries {
         for m in core::mem::take(&mut e.outbox) {
             if let Ok(sm) = ServerMsg::decode(&m) {
@@ -176,10 +217,11 @@ pub fn drain(t: &Shared, next_prompt: &mut u64) -> Vec<ServerMsg> {
             out.push(ServerMsg::Prompt { prompt: id, question: p.question.clone(), detail, choices: Vec::new() });
         }
     }
-    // Zrusene a dobehle: uklidit.
+    // Zrusene a dobehle bez zmen souboru: uklidit. Se zmenami (dobehla
+    // tesne pred zrusenim) zustanou pro `take_late` - undo se nesmi ztratit.
     let mut joins = Vec::new();
     tab.entries.retain_mut(|e| {
-        if e.abandoned && e.done.is_some() {
+        if e.abandoned && e.done.as_ref().is_some_and(|d| d.undo.is_empty()) {
             if let Some(j) = e.join.take() {
                 joins.push(j);
             }
@@ -203,6 +245,7 @@ pub fn answer(t: &Shared, prompt: u64, yes: bool) -> bool {
             && p.sent == Some(prompt)
         {
             p.answer = Some(yes);
+            e.control.wake();
             return true;
         }
     }
@@ -228,6 +271,8 @@ pub fn take(t: &Shared, id: u64) -> Option<TaskDone> {
         let mut tab = t.lock();
         let i = tab.entries.iter().position(|e| e.id == id && e.done.is_some())?;
         let mut e = tab.entries.remove(i);
+        let rest = core::mem::take(&mut e.outbox);
+        tab.orphans.extend(rest);
         (e.done.take()?, e.join.take())
     };
     if let Some(j) = join {
@@ -236,23 +281,68 @@ pub fn take(t: &Shared, id: u64) -> Option<TaskDone> {
     Some(TaskDone { id, result: done.result.map(|b| decode_value(&b)), undo: done.undo })
 }
 
-/// Zrusit: priznak pro interpret ulohy; hotova se vyzvedne.
+/// Zrusit: priznak pro interpret ulohy; hotova se vyzvedne. Kontrola
+/// i zruseni pod jednim zamkem (uloha nesmi dobehnout mezi nimi).
 pub fn cancel(t: &Shared, id: u64) -> Option<TaskDone> {
-    if is_done(t, id) {
-        return take(t, id);
+    let (done, join) = {
+        let mut tab = t.lock();
+        let i = tab.entries.iter().position(|e| e.id == id)?;
+        if tab.entries[i].done.is_none() {
+            let e = &mut tab.entries[i];
+            e.control.cancel();
+            e.abandoned = true;
+            return None;
+        }
+        let mut e = tab.entries.remove(i);
+        let rest = core::mem::take(&mut e.outbox);
+        tab.orphans.extend(rest);
+        (e.done.take()?, e.join.take())
+    };
+    if let Some(j) = join {
+        j.join();
     }
+    Some(TaskDone { id, result: done.result.map(|b| decode_value(&b)), undo: done.undo })
+}
+
+/// Pozadat ulohu o zruseni (prehled uloh, panel): jen priznak - vysledek
+/// (`SH_INTERRUPTED`) si vyzvedne interpret jako u kazde jine ulohy.
+pub fn request_cancel(t: &Shared, id: u64) {
+    if let Some(e) = t.lock().entries.iter().find(|e| e.id == id && e.done.is_none()) {
+        e.control.cancel();
+    }
+}
+
+/// Zrusene ulohy, ktere presto stihly prevzit zmeny souboru (dobehly tesne
+/// pred zrusenim): jejich undo prevezme relace.
+pub fn take_late(t: &Shared) -> Vec<Vec<UndoEntry>> {
+    let mut late = Vec::new();
+    let mut joins = Vec::new();
+    let mut orphans = Vec::new();
     let mut tab = t.lock();
-    if let Some(e) = tab.entries.iter_mut().find(|e| e.id == id) {
-        e.cancel.store(true, Ordering::Release);
-        e.abandoned = true;
+    tab.entries.retain_mut(|e| {
+        if e.abandoned && let Some(d) = e.done.as_mut() {
+            late.push(core::mem::take(&mut d.undo));
+            orphans.extend(core::mem::take(&mut e.outbox));
+            if let Some(j) = e.join.take() {
+                joins.push(j);
+            }
+            false
+        } else {
+            true
+        }
+    });
+    tab.orphans.extend(orphans);
+    drop(tab);
+    for j in joins {
+        j.join();
     }
-    None
+    late
 }
 
 /// Zrusit vse (konec relace).
 pub fn cancel_all(t: &Shared) {
     for e in &mut t.lock().entries {
-        e.cancel.store(true, Ordering::Release);
+        e.control.cancel();
         e.abandoned = true;
     }
 }
@@ -263,7 +353,7 @@ struct TaskHost {
     table: Shared,
     notify: Arc<dyn Notify>,
     clock: Clock,
-    cancel: Arc<AtomicBool>,
+    control: Arc<Control>,
     id: u64,
     session: u64,
     block: u64,
@@ -302,15 +392,22 @@ impl Host for TaskHost {
         (self.clock.now)()
     }
     fn sleep(&mut self, ns: i64) {
-        let step = 50_000_000;
-        let mut left = ns;
-        while left > 0 && !self.interrupted() {
-            (self.clock.sleep)(left.min(step));
-            left -= step;
+        // Zruseni ulohu probudi hned (bez udalosti po kouscich).
+        let Some(start) = (self.clock.now)() else {
+            (self.clock.sleep)(ns);
+            return;
+        };
+        let end = start.saturating_add(ns);
+        while !self.interrupted() {
+            let Some(now) = (self.clock.now)() else { return };
+            if now >= end {
+                return;
+            }
+            self.control.wait((end - now).min(500_000_000), &self.clock);
         }
     }
     fn interrupted(&mut self) -> bool {
-        self.cancel.load(Ordering::Acquire)
+        self.control.cancelled()
     }
     fn confirm(&mut self, question: &str, detail: &Value) -> bool {
         if let Some(e) = self.table.lock().entries.iter_mut().find(|e| e.id == self.id) {
@@ -336,7 +433,8 @@ impl Host for TaskHost {
                 self.push(Item::Note(alloc::format!("{question} -> {}", if a { "ano" } else { "ne" })));
                 return a;
             }
-            (self.clock.sleep)(20_000_000);
+            // Ceka na odpoved nebo zruseni (probudi `answer`/`cancel`).
+            self.control.wait(1_000_000_000, &self.clock);
         }
     }
     fn progress(&mut self, id: u32, done: u64, total: u64, label: &str) {
@@ -362,7 +460,7 @@ pub fn run(
     table: Shared,
     notify: Arc<dyn Notify>,
     clock: Clock,
-    cancel: Arc<AtomicBool>,
+    control: Arc<Control>,
     fs: Box<dyn Fs + Send>,
     session: u64,
     id: u64,
@@ -386,7 +484,7 @@ pub fn run(
         table: table.clone(),
         notify: notify.clone(),
         clock,
-        cancel,
+        control,
         id,
         session,
         block,

@@ -467,12 +467,25 @@ own limit. Requires `WRITE`. Errors: `INVALID_ARGS` (unknown `pool`),
 
 ### `JOB_INFO`
 
-`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (48 B, little endian):
+`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (56 B, little endian):
 for kernel memory and then user memory always `used` (charged to the job
 including descendants), `limit` (own limit) and `available` (how much
 can still be charged - the smallest free room over the job and all
-ancestors; `u64::MAX` = no limit anywhere). Requires `READ`. Errors:
+ancestors; `u64::MAX` = no limit anywhere), finally `id` (the job number,
+unique until reboot). Requires `READ`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
+
+### `JOB_PROCESSES`
+
+`(job, out_ptr, max) -> count`. Processes of the job and all its
+descendants (task overview: also a process that did not register itself).
+Writes at most `max` (up to 4096) `abi::job::ProcEntry` records (64 B,
+little endian) to `out_ptr`: `pid`, `job` (the process's job number),
+`cpu_ns` (CPU time of all threads, added by the scheduler on a switch),
+`threads` (live threads), `flags` (`proc_flags::FINISHED` = exited,
+waiting for cleanup), `name` (32 B UTF-8, zero padded). Returns the total
+count (also above `max`). Requires `READ`. Errors: `INVALID_ARGS` (`max`
+> 4096), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
 ### `FB_CONTROL`
 
@@ -533,6 +546,27 @@ With an IOMMU the device may moreover DMA only into memory created through
 its resource (see [kernel.md](kernel.md#iommu-dma-protection)); without an
 IOMMU it can write anywhere.
 
+### Firmware framebuffer
+
+Not a system call but a handle kind in init's start message
+(`abi::bootstrap::kind::FRAMEBUFFER` = 7): the physical memory object of
+the GOP framebuffer, rights `READ | WRITE | MAP`. It can be read and
+written only through a mapping (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`,
+as a syscall buffer `BAD_ADDRESS`). Geometry and taking over the screen
+go through [`FB_CONTROL`](#fb_control).
+
+The object is mapped **write-combining** (a physical object with cache
+type `WRITE_COMBINING`, the same as with
+[`VMO_CREATE_PHYSICAL`](#vmo_create_physical); x86_64: PAT entry 1 = WC,
+set by the kernel on every CPU; aarch64: Normal Non-cacheable): writes are
+merged, reads are slow. The kernel does not send the handle when the
+framebuffer overlaps RAM used by the allocator, does not start on a page
+boundary or is smaller than its geometry (a warning in the log, the kernel
+console keeps using it). Init passes it to the owner of the screen: the
+`fbdisplay` driver when there is no virtio-gpu (see
+[GUI](gui.md#displays-virtio-gpu-and-fbdisplay)), otherwise the rescue
+console `user/console`.
+
 ### `VMO_CREATE_CONTIGUOUS`
 
 `(resource, size) -> handle`. A physically contiguous memory object for DMA
@@ -546,13 +580,37 @@ towards the device with barriers (`libos::barrier`). Errors: `INVALID_ARGS`
 
 ### `VMO_CREATE_PHYSICAL`
 
-`(resource, phys, size) -> handle`. A window onto device registers (MMIO).
-The range must not lie in RAM or firmware memory (otherwise
-`ACCESS_DENIED`). It is mapped uncached; it cannot be read through
-`VMO_READ`/`VMO_WRITE` (`NOT_SUPPORTED`, reading registers has side
-effects) and cannot be used as a syscall buffer (`BAD_ADDRESS`). A
-restricted resource (`RESOURCE_CREATE`) may use only its ranges. Errors:
-`INVALID_ARGS` (unaligned address), `ACCESS_DENIED`.
+`(resource, phys, size, cache) -> handle`. A window onto a physical range
+outside RAM (device registers, BAR). The range must not lie in RAM or
+firmware memory (otherwise `ACCESS_DENIED`). `cache` (`abi::vm::cache`)
+sets the cache type of every mapping of the object: `UNCACHED` (0,
+registers), `WRITE_COMBINING` (1, x86_64 PAT WC, aarch64 Normal
+Non-cacheable) or `CACHED` (2, host memory mapped by the device, e.g. the
+virtio-gpu shared memory). It cannot be read through `VMO_READ`/`VMO_WRITE`
+(`NOT_SUPPORTED`, reading registers has side effects) and cannot be used
+as a syscall buffer (`BAD_ADDRESS`). A restricted resource
+(`RESOURCE_CREATE`) may use only its ranges. The resource holder can
+revoke it (`VMO_REVOKE`). Errors: `INVALID_ARGS` (unaligned address,
+unknown cache type), `ACCESS_DENIED`.
+
+
+**ACPI memory:** the only exception to "outside RAM" is the firmware
+memory holding the ACPI tables (`AcpiReclaimable` and `AcpiNvs` regions of
+the memory map, which the kernel never hands to the allocator): a range
+lying **entirely** inside it always gets a `CACHED` object (the same
+attributes as the kernel's direct map; `cache` is ignored) - the ACPI
+service needs it (`acpid`, see [ACPI](acpi.md)). A range only partly
+overlapping RAM is always `ACCESS_DENIED`.
+
+### `VMO_REVOKE`
+
+`(resource, vmo)`. Revokes a physical memory object: removes its mappings
+in all processes (including those it was handed to) and further `VM_MAP`
+calls fail with `ACCESS_DENIED`. Access through an old mapping = page
+fault. A driver can thus lend a client a window into device memory and
+safely take it back (the virtio-gpu render node after a blob is
+destroyed). The resource must allow the object's range. Errors:
+`NOT_SUPPORTED` (not a physical object), `ACCESS_DENIED`.
 
 ### `VMO_PHYS_ADDR`
 
@@ -601,7 +659,9 @@ recorded.
 kind (`abi::syscall::RANGE_KIND_MASK`): 0 = physical memory (above),
 `RANGE_IO_PORTS` (`1 << 62`) = I/O ports from `start & 0xFFFF`, length =
 number of ports (the end at most 0x10000), `RANGE_IRQ_LINES` (`2 << 62`) =
-legacy interrupt lines (ISA IRQ) from `start`, length = count (lines 0-31).
+fixed interrupt lines from `start`, length = count (lines 0 to
+`abi::syscall::IRQ_LINES_MAX - 1` = 1023: x86_64 ISA IRQs, aarch64 GIC SPI
+interrupt numbers 32-1019).
 Ports and lines need no alignment. A child may only have its parent's ports
 and lines. The root resource may use all of them. Any other kind is
 `INVALID_ARGS`. In libos: `hw::io_ports(first, count)` and
@@ -632,10 +692,15 @@ the width (e.g. 0x100 for 1 byte). In libos `Resource::port_write8`.
 
 ### `INTERRUPT_CREATE_LINE`
 
-`(resource, line) -> handle`. An interrupt object on a legacy line (ISA
-IRQ 0-15 through the IOAPIC; PS/2 keyboard 1, mouse 12). The kernel maps
-the line to a GSI using the ACPI MADT overrides (polarity, trigger mode)
-and routes it to a free vector on the boot CPU. On an interrupt the object
+`(resource, line, flags) -> handle`. An interrupt object on a fixed line.
+x86_64: ISA IRQ 0-15 through the IOAPIC (PS/2 keyboard 1, mouse 12, ACPI
+SCI usually 9); the kernel maps the line to a GSI using the ACPI MADT
+overrides (polarity, trigger mode), routes it to a free vector on the boot
+CPU and ignores `flags`. aarch64: SPI 32-1019 through the GIC distributor
+(on-board devices without MSI, e.g. the ACPI Generic Event Device); the
+trigger mode comes from `flags` (`abi::syscall::line_flags::EDGE` = edge,
+otherwise level; the value from the device's `_CRS`), and the interrupt
+goes to the boot CPU. An unknown bit in `flags` = `INVALID_ARGS`. On an interrupt the object
 gets `SIGNALED` as with `INTERRUPT_CREATE`, and it is acknowledged with
 `INTERRUPT_ACK`. The kernel masks a **level**-triggered line after the
 interrupt and unmasks it on acknowledgement (otherwise the interrupt would
@@ -646,15 +711,38 @@ allow the line (`RANGE_IRQ_LINES`), and the object counts towards
 `irq_max`. A line can have only one object (`ALREADY_EXISTS`). When the
 last handle closes, the line is masked and released. Errors:
 `INVALID_ARGS` (line above 15), `ACCESS_DENIED`, `ALREADY_EXISTS`,
-`NO_RESOURCES`, `NOT_SUPPORTED` (aarch64, a platform without an IOAPIC),
-`NOT_FOUND` (the line is not an IOAPIC input). In libos
-`Resource::interrupt_line`.
+`NO_RESOURCES`, `NOT_SUPPORTED` (a platform without an IOAPIC),
+`NOT_FOUND` (the line is not an IOAPIC input); on aarch64 also
+`INVALID_ARGS` for a number outside the SPIs the distributor has. In libos
+`Resource::interrupt_line` and `Resource::interrupt_line_with` (with
+`flags`). Older calls without `flags` (libos passes 0) behave as before.
 
 ### `INTERRUPT_ACK`
 
 `(interrupt) -> 0`. Acknowledges the interrupt (clears `SIGNALED`). A
 driver should acknowledge **before** servicing the device so an interrupt
 arriving during servicing is not lost. Requires `WRITE`.
+
+### `SYSTEM_POWER`
+
+`(resource, op) -> does not return`. Powers the computer off
+(`abi::syscall::power_op::OFF` = 0) or resets it (`RESET` = 1) through the
+firmware. Requires a Resource with the `POWER` right: only the root
+resource has it (restricted resources from `RESOURCE_CREATE` never do),
+and init hands it only to the ACPI service (`acpid`) as a `BASIC | POWER`
+duplicate without `MANAGE`. The kernel logs which process asked.
+
+| Architecture | `OFF` | `RESET` |
+|---|---|---|
+| aarch64 | PSCI `SYSTEM_OFF` | PSCI `SYSTEM_RESET` |
+| x86_64 | `NOT_SUPPORTED` - `acpid` powers off by writing the S5 sleep type into the PM1 register (only the service knows AML) | Reset Control register 0xCF9, then the keyboard controller (0x64 = 0xFE) |
+
+It is normally called only after the services have stopped cleanly (init,
+see [ACPI](acpi.md)). On success the call does not return. Errors:
+`ACCESS_DENIED` (no `POWER` right), `INVALID_ARGS` (unknown operation;
+checked before anything is powered off), `NOT_SUPPORTED` (no PSCI in the
+firmware, or power-off on x86), `BAD_HANDLE`, `WRONG_TYPE`. In libos
+`Resource::system_power`.
 
 ## Random numbers
 

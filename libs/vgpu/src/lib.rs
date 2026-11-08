@@ -9,6 +9,8 @@
 
 extern crate alloc;
 
+pub mod blob;
+pub mod shm;
 pub mod virgl;
 
 #[cfg(test)]
@@ -48,6 +50,10 @@ pub mod cmd {
     pub const RESOURCE_DETACH_BACKING: u32 = 0x0107;
     pub const GET_CAPSET_INFO: u32 = 0x0108;
     pub const GET_CAPSET: u32 = 0x0109;
+    pub const GET_EDID: u32 = 0x010A;
+    pub const RESOURCE_ASSIGN_UUID: u32 = 0x010B;
+    pub const RESOURCE_CREATE_BLOB: u32 = 0x010C;
+    pub const SET_SCANOUT_BLOB: u32 = 0x010D;
     pub const CTX_CREATE: u32 = 0x0200;
     pub const CTX_DESTROY: u32 = 0x0201;
     pub const CTX_ATTACH_RESOURCE: u32 = 0x0202;
@@ -56,6 +62,8 @@ pub mod cmd {
     pub const TRANSFER_TO_HOST_3D: u32 = 0x0205;
     pub const TRANSFER_FROM_HOST_3D: u32 = 0x0206;
     pub const SUBMIT_3D: u32 = 0x0207;
+    pub const RESOURCE_MAP_BLOB: u32 = 0x0208;
+    pub const RESOURCE_UNMAP_BLOB: u32 = 0x0209;
     pub const UPDATE_CURSOR: u32 = 0x0300;
     pub const MOVE_CURSOR: u32 = 0x0301;
 
@@ -63,6 +71,9 @@ pub mod cmd {
     pub const RESP_OK_DISPLAY_INFO: u32 = 0x1101;
     pub const RESP_OK_CAPSET_INFO: u32 = 0x1102;
     pub const RESP_OK_CAPSET: u32 = 0x1103;
+    pub const RESP_OK_EDID: u32 = 0x1104;
+    pub const RESP_OK_RESOURCE_UUID: u32 = 0x1105;
+    pub const RESP_OK_MAP_INFO: u32 = 0x1106;
     pub const RESP_ERR_UNSPEC: u32 = 0x1200;
     pub const RESP_ERR_OUT_OF_MEMORY: u32 = 0x1201;
     pub const RESP_ERR_INVALID_SCANOUT_ID: u32 = 0x1202;
@@ -78,6 +89,10 @@ pub const FORMAT_B8G8R8X8_UNORM: u32 = 2;
 /// Priznak hlavicky: pozadavek nese plot (`fence_id`), odpoved prijde
 /// az po dokonceni prace GPU.
 pub const FLAG_FENCE: u32 = 1 << 0;
+/// Priznak hlavicky: plot patri casove ose `ring_idx` kontextu (jen
+/// s vlastnosti `F_CONTEXT_INIT`). U Venusu je osa 0 osa CPU: plot se
+/// splni, az renderer prikazy pred nim zpracuje.
+pub const FLAG_INFO_RING_IDX: u32 = 1 << 1;
 
 /// Nejvic vystupu.
 pub const MAX_SCANOUTS: usize = 16;
@@ -91,6 +106,8 @@ pub struct Header {
     pub flags: u32,
     pub fence: u64,
     pub ctx: u32,
+    /// Casova osa plotu (s `FLAG_INFO_RING_IDX`).
+    pub ring_idx: u8,
 }
 
 /// Obdelnik zarizeni (bez znamenka).
@@ -112,7 +129,7 @@ impl Cmd {
 
     pub fn with(h: Header) -> Self {
         let mut c = Cmd(Vec::with_capacity(64));
-        c.u32(h.ty).u32(h.flags).u64(h.fence).u32(h.ctx).u32(0);
+        c.u32(h.ty).u32(h.flags).u64(h.fence).u32(h.ctx).u32(h.ring_idx as u32);
         c
     }
 
@@ -206,7 +223,7 @@ pub struct Scanout {
     pub enabled: bool,
 }
 
-fn le32(b: &[u8], off: usize) -> Option<u32> {
+pub(crate) fn le32(b: &[u8], off: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(off..off + 4)?.try_into().ok()?))
 }
 
@@ -280,7 +297,7 @@ pub fn capset_name(id: u32) -> &'static str {
     }
 }
 
-fn with_ctx(ty: u32, ctx: u32) -> Cmd {
+pub(crate) fn with_ctx(ty: u32, ctx: u32) -> Cmd {
     Cmd::with(Header { ty, ctx, ..Default::default() })
 }
 

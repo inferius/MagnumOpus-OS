@@ -247,7 +247,7 @@ where
 }
 
 fn listen() -> std::io::Result<std::net::TcpListener> {
-    let l = std::net::TcpListener::bind((IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
+    let l = crate::nethelper::tcp_listener("https")?;
     l.set_nonblocking(true)?;
     Ok(l)
 }

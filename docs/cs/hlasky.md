@@ -72,6 +72,7 @@ Loader píše přes konzoli firmware (obrazovka i sériová linka) ve formátu
 | `initfs je poskozeny: ...` | E | Obraz initfs nemá správný formát (`libs/initfs`). Znovu sestavit. |
 | `initfs neobsahuje program init` | E | V initfs chybí soubor `init`. |
 | `init neni platny program: ...` | E | `init` není statický ELF64 pro x86_64. |
+| `framebuffer se do userspace nepreda: ...` | W | Framebuffer překrývá RAM pro alokátor, nezačíná na hranici stránky nebo je menší než jeho geometrie. Konzole jádra ho dál používá, GUI bez virtio-gpu nenaběhne. |
 | `init: poskozeny segment: ...` | E | Segment ELF leží mimo soubor. |
 | `init se nepodarilo spustit: ...` | E | Souhrnná hláška s kódem chyby ([chyby.md](chyby.md)). |
 | `init spusten (proces N), vstup ...` | I | První proces běží. |
@@ -113,15 +114,58 @@ porušený vnitřní předpoklad (chyba jádra).
 | `devmgr: ovladac X pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
 | `virtio-blk BB:ZZ.F: N MiB, flush ano/ne, discard ano/ne` | Disk je připravený. `discard ne` = zařízení neumí TRIM (v QEMU chybí `discard=unmap` u disku); FS pak TRIM přeskakuje. |
 | `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x, nedokončilo reset do sekundy (`TIMED_OUT`) nebo chybí prostředky (MSI-X, DMA paměť, `NO_RESOURCES` = vyčerpaná kvóta omezeného Resource). |
+| `X: disk D: nas oddil GPT, N MiB od sektoru S, sektor B B, zapis povolen` | Ovladač disku (`virtio-blk`, `nvme`, `ahci`) našel náš oddíl; klient vidí jen ten ([Disky](disky.md)). |
+| `X: disk D: cely disk s nasim FS, ..., zapis povolen` | Disk bez tabulky oddílů s naším FS (datový disk v QEMU). |
+| `X: disk D: cizi disk (...), ..., JEN PRO CTENI` | Disk nám nepatří (cizí GPT, MBR, prázdný, poškozená GPT, neplatný náš oddíl). Zápis a TRIM vrací `READ_ONLY`, FS se připojí jen pro čtení. Úmyslná ochrana; pro zápis na disk vytvořit náš oddíl. |
+| `nvme BB:ZZ.F: nepodporovany radic (CAP ...)` | Řadič neumí sadu příkazů NVM, stránku 4 KiB nebo má doorbelly mimo BAR. |
+| `nvme: jmenny prostor N ma metadata ... B na sektor - nepodporovano, vynechan` | Jmenný prostor je naformátovaný s metadaty (T10 PI). Přeformátovat na formát bez metadat (nástroj výrobce, `nvme format`). |
+| `nvme: jmenny prostor N ma sektor ... B - nepodporovano, vynechan` | Sektor větší než jeden přenos řadiče (`MDTS`) nebo než 32 KiB. Běžné sektory 512 B a 4 KiB fungují. |
+| `nvme: radic neodpovida spravne (...), dalsi pozadavky odmitnuty` | Příkaz nedoběhl do 10 s nebo řadič vrátil cizí číslo příkazu. Řadič je vypnutý (nepoužívá DMA); disk do restartu nefunguje. |
+| `ahci BB:ZZ.F: MSI nelze zapnout (...), obsluha dotazovanim` | Řadič nemá MSI (nebo zpráva nejde zapsat); ovladač funguje dotazováním, jen s vyšší zátěží CPU. |
+| `ahci: port P: disk ... neumi LBA48 - vynechan` | Velmi starý disk bez LBA48. Nepodporováno. |
+| `ahci: port P: disk ... ma logicky sektor ... B - nepodporovano, vynechan` | Disk hlásí logický sektor, který není mocnina dvou 512 B..32 KiB (chybná odpověď IDENTIFY). Disky 512 B i 4Kn fungují. |
+| `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | Na portu je mechanika ATAPI nebo port multiplier. |
+| `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | Příkaz nedoběhl do 20 s; port je zastavený. |
+| `devmgr: ovladac X pro ... nenahlasil disky: ...` | Ovladač `nvme`/`ahci` neposlal `done` do 150 s (zaseknutý řadič). Disky nahlášené do té doby fungují. |
+| `ahci: port P: radic umi jen 32bitove adresy a DMA pamet je nad 4 GiB - vynechan` | Řadič bez 64bitových adres (`CAP.S64A = 0`) a paměť portu leží nad 4 GiB. Port se vynechá, jinak by řadič psal do cizí paměti. |
+| `ahci: port P: ulozeni mezipameti pri ukonceni selhalo: ...` | Při ukončení ovladače disk nepřijal FLUSH CACHE; data z mezipaměti disku se mohla ztratit. |
 | `virtio-net BB:ZZ.F: MAC xx:..., linka pripojena/odpojena` | Síťová karta je připravená. MAC je z konfigurace zařízení, jinak místně spravovaná (`02:...`). |
 | `virtio-net ...: inicializace selhala: ...` | Jako u disku: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA paměť). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | Zařízení vrátilo nesmyslný index fronty nebo buffer, který nemělo (`CORRUPTED`). Ovladač ho resetuje (přestane používat DMA) a skončí; síť do restartu nefunguje. |
 | `virtio-net ...: zahozeno N prijatych ramcu` | Při ukončení: rámce, které služba sítě nestíhala přijímat (plná fronta kanálu) nebo byly neplatné. |
+| `e1000e/igc/r8169 BB:ZZ.F: <cip> vvvv:dddd, MAC xx:..., MSI, linka ...` | Karta Intel nebo Realtek je připravená ([síťové karty](sitove-karty.md)): model čipu, ID PCI, MAC, mechanismus přerušení (MSI, MSI-X) a stav linky (`pripojena 1000 Mb/s plny duplex`, `odpojena`). |
+| `e1000e ...: linka ...` | Změna linky (kabel, autonegociace). Ovladač ji pošle `netd` zprávou `LINK`. |
+| `e1000e ...: karta nema MAC, pouzita nahodna mistni` | V NVM ani EEPROM karty není platná MAC (karta bez NVM, prázdné `RAR0`). Adresa `02:...` se změní s každým startem. |
+| `e1000e ...: PHY probuzen z rezimu nizke spotreby (LANPHYPC)` | I217–I219: PHY po vypnutí z Windows bez kabelu neodpovídal, přepnutí napájení ho probudilo. Informativní. |
+| `e1000e ...: PHY neodpovida ...` | I217–I219: PHY neodpovídá ani po probuzení, nebo jeho reset blokuje firmware ME. Linka nejspíš nenaběhne. Pomůže studený start (vytažení napájení). Ovladač zatím neumí vypnout ULP přes ME. |
+| `e1000e/igc ...: DMA se pred resetem nezastavilo`, `NVM se po resetu nenacetla`, `LAN_INIT_DONE po resetu neprisel` | Karta nedokončila krok inicializace v limitu. Ovladač pokračuje jako Linux. Když karta potom nefunguje, jde o chybu hardwaru nebo nepodporovanou revizi. |
+| `e1000e ...: firmware drzi semafor PHY, reset bez nej` | Firmware ME nepustil semafor PHY do 100 ms. Reset proběhl i bez něj. |
+| `<ovladac> ...: inicializace selhala: vyprsel cas: ...` | Reset nebo zapnutí fronty se nedokončilo (`reset MAC`, `reset zarizeni`, `reset cipu`, `zapnuti fronty prijmu`). Karta se nepoužije. |
+| `<ovladac> ...: preruseni (MSI/MSI-X) nelze nastavit: ...` | Funkce nemá MSI ani MSI-X, nebo došla kvóta přerušení. Staré linky INTx ovladače v userspace nepoužívají. |
+| `<ovladac> ...: karta: zarizeni zmizelo ze sbernice, koncim` | Registry čtou samé jedničky: karta vyjmuta, vypnutá nebo spadla linka PCIe. Ovladač skončí a `netd` uvidí zavřený kanál. |
+| `<ovladac> ...: karta: neplatny stav zarizeni: chyba sbernice (system error), koncim` | Realtek hlásí `SYSErr` (chyba DMA na sběrnici). Ovladač kartu resetuje a skončí. |
+| `<ovladac> ...: zahozeno N vadnych prijatych ramcu` | Při ukončení: rámce s chybou CRC, délky nebo rozdělené do více bufferů. |
+| `devmgr: ovladac e1000e/igc/r8169 pro BB:ZZ.F nelze spustit: ...` | Program chybí v initfs, nebo karta nemá paměťový BAR (`NOT_SUPPORTED`). |
 | `virtio-rng BB:ZZ.F: 256 B entropie predano jadru` | Zdroj náhody z hostitele je připravený a jádro dostalo první data. Další dávky každou minutu. |
-| `virtio-rng ...: zarizeni neodpovida (...), koncim` | Zařízení nedokončilo požadavek do 5 s nebo vrací prázdná data. Jádro dál používá ostatní zdroje. |
+| `virtio-rng ...: vadne zarizeni: zarizeni neodpovida (...)` / `zarizeni vraci prazdne odpovedi` | Zařízení nedokončilo požadavek do 5 s nebo vrací prázdná data. Ovladač skončí (kód 4); jádro dál používá ostatní zdroje. |
+| `devmgr: ovladac X pro BB:ZZ.F (manifest)` | Ovladač z manifestu (`X.driver.toml`) spuštěný pro zařízení ([Ovladače](ovladace.md#manifest)). |
+| `devmgr: ovladac X: zadne zarizeni podle manifestu` | Manifest je v pořádku, ale žádné zařízení mu neodpovídá (v QEMU není, `match` neodpovídá). Informace. |
+| `devmgr: X.driver.toml: ...` | Vadný manifest v initfs (chybí klíč, špatný formát, jméno se liší od souboru, program chybí); ovladač se nespustí. xtask stejné chyby hlásí už při buildu. |
+| `devmgr: ovladac X pro ... spadl (kod K: popis), obnova N/M` | Ovladač skončil chybou nebo pádem; devmgr vypnul zařízení bus master a spouští ho znovu. Popis kódu: [Životní cyklus](ovladace.md#životní-cyklus-a-obnova-po-pádu). |
+| `devmgr: ovladac X pro ... spadl (...), N padu: dal ho nespoustim` | Překročen `service.max_restarts` (nebo `restart = false`); zařízení zůstane bez ovladače do restartu systému. |
+| `devmgr: ovladac X pro ...: restart na zadost` | Klient poslal `dk:restart`; ovladač běží znovu (nepočítá se jako pád). |
+| `init: ovladac X obnoven (N. start)` | Init dostal od devmgr nový kanál obnoveného ovladače. |
+| `X BB:ZZ.F: inicializace selhala: ...` | Ovladač na driverkitu neprošel `probe`; text říká proč a co změnit (`ovladac nesmi: ...` = chybí BAR v manifestu, `... se nevejde do kvoty` = `dma_max`, `preruseni c. N nelze zapnout` = `irq_max`). Viz [Čitelné chyby](ovladace.md#čitelné-chyby). |
+| `X BB:ZZ.F: simulovany pad (dk:crash)`, `X ...: restart na zadost` | Ovladač dostal `dk:crash` / `dk:restart` (testy obnovy). |
+| `edu BB:ZZ.F: karta edu 1.0 zije` | Ukázkový ovladač edu našel zařízení a prošel kontrolou života ([Ovladač edu](ovladac-edu.md)). |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | Ovladač PS/2 našel klávesnici, myš (druh podle ID: kolečko, 5 tlačítek). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 čte `0xFF` (řadič chybí) nebo nenašel žádné zařízení. Na moderních deskách bez PS/2 normální. |
+| `init: displej je framebuffer z firmwaru (fbdisplay)` | Správce zařízení nenašel virtio-gpu, GUI poběží přes `fbdisplay` s pevným rozlišením firmwaru. |
+| `fbdisplay: framebuffer WxH (krok K, rgb/bgr)` | Ovladač framebufferu převzal obrazovku (`FB_CONTROL` `CLAIM`). |
+| `fbdisplay: chybi handly ve startovni zprave` | Init ho spustil bez objektu paměti a kanálu (chyba initu). |
+| `fbdisplay: framebuffer nelze prevzit: ...` | `FB_CONTROL` nebo mapování selhalo: `WRONG_TYPE` (objekt není framebuffer z jádra), `NOT_SUPPORTED` (neznámý formát nebo rozměry), `NO_RESOURCES` (není místo v adresním prostoru). |
+| `init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim` | Není virtio-gpu a jádro nepředalo framebuffer (bez GOP, nepodporovaný formát pixelu, viz hlášky jádra). |
 | `ps2: radic neodpovida spravne: ...` | Řadič je, ale neprošel self-testem nebo neodpovídá včas (`TIMED_OUT`). |
 | `ps2: klavesnice neodpovida na reset`, `ps2: mys neodpovida (...)` | Port je, ale zařízení na něm nereaguje (nepřipojené). |
 | `xhci BB:ZZ.F: N portu (M USB 3), S slotu, kontext K B` | Řadič USB je připravený. |
@@ -147,8 +191,9 @@ porušený vnitřní předpoklad (chyba jádra).
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
 | `virtio-input BB:ZZ.F: 'jméno' (klavesnice/mys)` | Vstupní zařízení je připravené; druh podle podporovaných událostí. `nezname zarizeni` = nemá klávesy ani relativní osy (tablet, zatím nepodporovaný). |
 | `virtio-input ...: inicializace selhala: ...` | Jako u virtio-blk: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA). |
-| `virtio-input: prvni udalosti od zarizeni (N)` | Zařízení poprvé poslalo události (informace; potvrzuje, že fungují přerušení a fronta). |
-| `virtio-input: sluzba nestiha, zahozeno N zprav` | Fronta kanálu ke službě vstupu je plná; ovladač události zahazuje, aby neblokoval zařízení. Hlásí se při 1, 2, 4, 8 ... zprávách. |
+| `virtio-input BB:ZZ.F: prvni udalosti od zarizeni (N)` | Zařízení poprvé poslalo události (informace; potvrzuje, že fungují přerušení a fronta). |
+| `virtio-input BB:ZZ.F: sluzba vstupu zavrela kanal, cekam` | Služba vstupu skončila (pád, restart); ovladač běží dál a po obnově služby se znovu představí (`ISYN`, [Obnova služeb](obnova-sluzeb.md)). |
+| `virtio-input BB:ZZ.F: sluzba nestiha, zahozeno N zprav` | Fronta kanálu ke službě vstupu je plná; ovladač události zahazuje, aby neblokoval zařízení. Hlásí se při 1, 2, 4, 8 ... zprávách. |
 | `init: N blokovych a M vstupnich zarizeni` | Co správce zařízení našel. |
 
 ## Služba vstupu (inputd)
@@ -187,6 +232,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | Hláška | Význam a řešení |
 |---|---|
 | `netd: bezim, cekam na DHCP` | Služba dostala `INFO` od ovladače a spustila klienta DHCP. |
+| `netd: linka pripojena/odpojena` | Ovladač karty ohlásil změnu linky (`LINK`). Po znovupřipojení začne DHCP znovu. |
 | `netd: DHCP: adresa A/P, brana G, DNS [...]` | Rozhraní je nastavené; programy čekající na `wait_configured` pokračují. |
 | `netd: DHCP: adresa ztracena` | Pronájem vypršel nebo server adresu odebral. Spojení dostávají `UNREACHABLE`, dokud DHCP adresu neobnoví. |
 | `netd: VAROVANI: generator jadra neni nasazeny, ...` | Jádro zatím nemá dost entropie (bez RDRAND a bez virtio-rng): ID dotazů DNS a čísla TCP jsou odhadnutelná. Viz [Náhodná čísla](syscally.md#náhodná-čísla). |
@@ -200,7 +246,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | `ntpd: prvni mereni (NTS\|neoverene): posun X ms, zpozdeni Y ms, timed ok:step\|ok:slew` | První úspěšné měření (ověřené NTS, nebo neověřené NTP v záloze); `step` = čas se nastavil skokem (posun nad 128 ms), `slew` = plynulé dorovnání. |
 | `ntpd: NTS-KE <server>: ...` | Výměna klíčů NTS selhala (spojení, certifikát, odpověď); server se v kole přeskočí. Při neplatném certifikátu zkontrolovat hodiny (RTC). |
 | `ntpd: neoverene servery: Never\|Fallback` | Init změnil pravidlo podle profilu sítě. |
-| `ntpd: zadny server neodpovedel (..., NTS: ...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za interval; hodiny běží dál podle poslední frekvence. |
+| `ntpd: zadny server neodpovedel (..., NTS: ...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za 2, 4, 8, … s (nejvýš `min_poll`), stejná hláška se znovu nevypíše; hodiny běží dál podle poslední frekvence. |
 | `ntpd: konfigurace: ...` | Konfigurace od init je neplatná; `ntpd` skončí. Opravit `ntpd.toml`. |
 | `timed: prvni synchronizace: skok o N ms` | První korekce od `ntpd` byla velká: čas se nastavil skokem (jediný povolený skok). |
 | `timed: prvni synchronizace: dorovnani o N ms` | První korekce byla malá: dorovná se plynule. |
@@ -216,6 +262,8 @@ porušený vnitřní předpoklad (chyba jádra).
 | `revocd: OneCRL: neplatny dokument` | Stažený JSON nejde přečíst; platí předchozí seznam, nový pokus za `retry_minutes`. |
 | `revocd: <url>: ...` | Stažení CRL nebo OneCRL selhalo (stav HTTP, chyba spojení); adresa se `retry_minutes` nezkouší, stav odvolání je zatím neznámý. |
 | `revocd: <url>: neni CRL` | Server vrátil něco jiného než CRL. |
+| `tls: CRL <url> nejde pouzit (...)` | CRL z distribučního bodu certifikátu nejde přečíst ani ověřit (nepodporované rozšíření, špatný podpis, vydavatel mimo řetěz); přeskočí se, stav odvolání z ní je neznámý a spojení pokračuje. Jednou pro adresu. |
+| `netd: DNS pres TCP: spojeni se nenavazalo do 3 s, novy pokus (n)` | Spojení TCP pro zkrácenou odpověď DNS uvázlo; resolver zkouší nové (nejvýš 3×). |
 | `netproto: sluzba site neodpovedela na pozadavek OP do N s (...)` | `netd` požadavek nedokončil ani po limitu + rezervě (chyba nebo zaseknutí služby). Program dostal `TIMED_OUT`, kanál už nejde použít. OP = kód operace (`netproto::op`). |
 | `dnsd: bezim, resolvery [...], DNSSEC ano\|ne, kotvy N, CA M` | Systémový resolver běží. |
 | `dnsd: <resolver>: ...` | Resolver neodpověděl (spojení, TLS, HTTP); `dnsd` zkusí další. |

@@ -112,11 +112,13 @@ fn nap(ns: i64) {
     std::thread::sleep(Duration::from_nanos(ns.max(0) as u64));
 }
 
-struct ThreadEnv {
+pub(crate) struct ThreadEnv {
     fs: SharedFs,
     notify: Arc<CondNotify>,
     /// Bez vlaken (ulohy na miste) - stejne vysledky.
     threads: bool,
+    /// Prehled uloh (jadro taskd v testu).
+    pub taskd: Option<crate::tests_taskd::Fake>,
 }
 
 impl Env for ThreadEnv {
@@ -139,25 +141,41 @@ impl Env for ThreadEnv {
     fn notifier(&mut self) -> Option<Arc<dyn Notify>> {
         Some(self.notify.clone())
     }
+    fn new_notifier(&mut self) -> Option<Arc<dyn Notify>> {
+        Some(Arc::new(CondNotify::default()))
+    }
     fn clock(&self) -> Option<Clock> {
         Some(Clock { now: wall, sleep: nap })
     }
+    fn task_send(&mut self, to: crate::taskboard::Chan, data: Vec<u8>) -> bool {
+        match &mut self.taskd {
+            Some(t) => t.send(to, &data),
+            None => false,
+        }
+    }
+    fn task_recv(&mut self) -> Vec<(crate::taskboard::Chan, Vec<u8>)> {
+        self.taskd.as_mut().map(|t| core::mem::take(&mut t.inbox)).unwrap_or_default()
+    }
 }
 
-struct Rig {
-    svc: Service,
-    link: TestLink,
+pub(crate) struct Rig {
+    pub svc: Service,
+    pub link: TestLink,
     fs: SharedFs,
-    env: ThreadEnv,
-    session: u64,
+    pub env: ThreadEnv,
+    pub session: u64,
 }
 
 impl Rig {
-    fn new(threads: bool) -> Self {
+    pub fn new(threads: bool) -> Self {
+        Self::with_taskd(threads, None)
+    }
+
+    pub fn with_taskd(threads: bool, taskd: Option<crate::tests_taskd::Fake>) -> Self {
         let mut m = MemFs::new();
         m.put("/home/a.txt", b"alfa");
         let fs = SharedFs(Arc::new(Mutex::new(m)));
-        let env = ThreadEnv { fs: fs.clone(), notify: Arc::default(), threads };
+        let env = ThreadEnv { fs: fs.clone(), notify: Arc::default(), threads, taskd };
         let mut r = Rig { svc: Service::new("/home"), link: TestLink::default(), fs, env, session: 0 };
         r.handle(ClientMsg::Attach { session: 0 });
         r.session = r
@@ -172,12 +190,16 @@ impl Rig {
         r
     }
 
-    fn handle(&mut self, m: ClientMsg) {
+    pub fn idle(&mut self) {
+        self.svc.idle(&mut self.link, &mut self.fs, &mut self.env);
+    }
+
+    pub fn handle(&mut self, m: ClientMsg) {
         self.svc.handle(m, &mut self.link, &mut self.fs, &mut self.env);
     }
 
     /// Spusti radek; vrati polozky jeho bloku a jestli prosel.
-    fn run(&mut self, line: &str) -> (Vec<Item>, bool) {
+    pub fn run(&mut self, line: &str) -> (Vec<Item>, bool) {
         let from = self.link.sent.len();
         self.handle(ClientMsg::Run { session: self.session, line: line.into() });
         let sent = &self.link.sent[from..];
@@ -226,7 +248,7 @@ impl Rig {
     }
 
     /// Volna chvile, dokud `f` neplati (nejvys 5 s).
-    fn idle_until(&mut self, f: impl Fn(&Self) -> bool) {
+    pub fn idle_until(&mut self, f: impl Fn(&Self) -> bool) {
         let t = Instant::now();
         while !f(self) {
             assert!(t.elapsed() < Duration::from_secs(5), "cekani na ulohy vyprselo");
@@ -240,7 +262,7 @@ impl Rig {
     }
 }
 
-fn last_value(items: &[Item]) -> Option<Value> {
+pub(crate) fn last_value(items: &[Item]) -> Option<Value> {
     items.iter().rev().find_map(|i| match i {
         Item::Value(v) => Some(v.clone()),
         _ => None,
@@ -361,4 +383,48 @@ fn task_prompt_is_routed_and_refused_without_window() {
     let s = r.session;
     r.handle(ClientMsg::Run { session: s, line: "let w = async { echo q > q.txt }\nawait w".into() });
     assert_eq!(r.file("/home/q.txt"), None);
+}
+
+#[test]
+fn idle_reap_leaves_window_messages_alone() {
+    let mut r = Rig::new(true);
+    let (_, ok) = r.run("let t = async { sleep 2s; 1 }");
+    assert!(ok);
+    // Uzivatel pise dalsi radek (a omylem Ctrl-C), zatimco uloha bezi:
+    // volna chvile je nesmi precist ani zrusit ulohu.
+    let s = r.session;
+    r.link.incoming.push_back(ClientMsg::Interrupt { session: s });
+    r.link.incoming.push_back(ClientMsg::Run { session: s, line: "echo dal".into() });
+    r.svc.idle(&mut r.link, &mut r.fs, &mut r.env);
+    assert_eq!(r.link.incoming.len(), 2, "volna chvile precetla zpravy okna");
+    r.link.incoming.clear();
+    let (items, ok) = r.run("await t");
+    assert!(ok, "{items:?}");
+    assert_eq!(last_value(&items), Some(Value::Int(1)));
+}
+
+#[test]
+fn prompt_answer_wakes_task_without_polling() {
+    let mut r = Rig::new(true);
+    r.svc.sessions[0].interp.lock_threshold = 0;
+    // Odpoved prijde az po vyzve: uloha ji dostane hned (probuzeni), ne az
+    // po spanku.
+    let s = r.session;
+    r.handle(ClientMsg::Run { session: s, line: "let w = async { echo p > w.txt }".into() });
+    let t = Instant::now();
+    let prompt = loop {
+        r.svc.idle(&mut r.link, &mut r.fs, &mut r.env);
+        if let Some(p) = r.link.sent.iter().find_map(|m| match m {
+            ServerMsg::Prompt { prompt, .. } => Some(*prompt),
+            _ => None,
+        }) {
+            break p;
+        }
+        assert!(t.elapsed() < Duration::from_secs(5), "vyzva neprisla");
+        nap(5_000_000);
+    };
+    r.handle(ClientMsg::Answer { prompt, yes: true });
+    let (items, ok) = r.run("await w");
+    assert!(ok, "{items:?}");
+    assert_eq!(r.file("/home/w.txt").as_deref(), Some(&b"p"[..]));
 }

@@ -12,6 +12,11 @@
   - Fedora: `dnf install qemu-system-x86 edk2-ovmf qemu-system-aarch64 edk2-aarch64`
   - Arch: `pacman -S qemu-desktop edk2-ovmf edk2-aarch64`
   - macOS: `brew install qemu`
+- **clang and llvm-ar** (LLVM 17+) for vendored C code (ACPICA, see
+  [Building C code](c-build.md)): Windows `winget install LLVM.LLVM`,
+  Debian/Ubuntu `apt install clang llvm`, Fedora `dnf install clang llvm`,
+  Arch `pacman -S clang llvm`, macOS `brew install llvm`. Elsewhere: the
+  `CLANG` variable.
 - Optionally **GDB** for debugging.
 
 xtask looks for QEMU in `PATH` and common install locations, and for the
@@ -25,9 +30,13 @@ firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
 |---|---|
 | `cargo xtask build` | builds the kernel, loader and userspace programs, creates initfs |
 | `cargo xtask image` | build + disk image `target/os-<arch>-<profile>.img` (GPT, FAT32 ESP) |
-| `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)) |
+| `cargo xtask run` | image + QEMU with a window; serial output in the terminal. Init does not run the tests and runs as the supervisor ([Init](init.md)). Without `--gpu` the GUI draws through the firmware framebuffer (`--gpu none`, [GUI](gui.md)) so that it shows in the window. xtask switches the Windows console to UTF-8 |
 | `cargo xtask test` | host library tests (`abi`, `initfs`, `fs`), kernel build check for the other architectures, documentation, then kernel and userspace in QEMU without a window |
 | `cargo xtask test --only sit --repeat 20` | only the selected userspace test suites (names as in the log, comma separated), n times in a row - for finding flaky tests; every extra round adds 60 s to the run limit. A test longer than 20 s is marked `[pomaly]` ("slow") in the log |
+| `cargo xtask test --only napajeni` | only the separate power test runs (power-off with the button through ACPI, reboot; they always run after the main run, `--no-power` disables them), see [ACPI](acpi.md#tests) |
+| `cargo xtask test --net-online` | also the tests against the real host network (host resolver through slirp); skipped without the switch |
+| `cargo xtask test --driver edu` | only one manifest driver: its host tests (simulation) and in QEMU the `ovladace z manifestu` suite for it only; without checking the other architectures' kernels and the documentation (a fast loop, see [Drivers](drivers.md)) |
+| `cargo xtask new-driver <name> --pci <vendor:device>` | a driverkit driver skeleton: code, manifest, device model and simulation test, documentation page cs+en ([Drivers](drivers.md#the-first-driver-step-by-step)) |
 | `cargo xtask check` | only checks that the kernel builds for the given architecture; see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
@@ -35,8 +44,10 @@ Options: `--arch <x86_64|aarch64>` (all commands, default `x86_64`; aarch64
 = QEMU `virt`, see [the aarch64 implementation](architecture.md#the-aarch64-implementation-qemu-virt)),
 `--release`, `--headless` (no window), `--iommu <type>` (emulated IOMMU:
 x86_64 `intel` (default), `amd`, `none`; aarch64 `smmu` (default), `none`; `none` checks running without DMA
-translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" then
-fails as expected),
+translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" and the
+"IOMMU chrani pamet mimo DMA" tests of the `disky` suite then fail as expected),
+`--data-disk <virtio|nvme|nvme4k|ahci>` (data disk controller, default `virtio`; `nvme4k` = NVMe with 4 KiB sectors; on NVMe
+and AHCI the disk gets a GPT with our partition, see [Disks](disks.md)),
 `--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
 `-- -cpu max,-x2apic`).
 

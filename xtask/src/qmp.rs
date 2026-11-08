@@ -9,6 +9,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
 
 /// Musi sedet s `QEMU_MARKER` v `user/init/src/tests/input.rs`.
@@ -54,13 +56,15 @@ fn wait_marker(log: &Path, marker: &str, start: Instant) -> bool {
 /// Spusti vlakno, ktere po objeveni znacky v `log` posle udalosti. `ps2`
 /// = stroj ma radic PS/2; bez nej test PS/2 svou znacku nevypise a kroky
 /// PS/2 se preskoci (jinak by vlakno na znacku cekalo a k USB se nedostalo).
-pub fn spawn_injector(log: PathBuf, port: u16, ps2: bool) {
+/// `port` cte az pri vkladani: opakovany start QEMU (souboj o port) ho
+/// zmeni.
+pub fn spawn_injector(log: PathBuf, port: Arc<AtomicU16>, ps2: bool) {
     std::thread::spawn(move || {
         let start = Instant::now();
         if !wait_marker(&log, MARKER, start) {
             return;
         }
-        match inject(port, &log, start, ps2) {
+        match inject(port.load(Ordering::Relaxed), &log, start, ps2) {
             Ok(()) => println!("xtask: QMP: udalosti vstupu poslany"),
             Err(e) => eprintln!("xtask: QMP: vkladani vstupu selhalo: {e}"),
         }
@@ -352,6 +356,27 @@ fn inject(port: u16, log: &Path, start: Instant, ps2: bool) -> Result<(), String
             events.join(",")
         );
         send(cmd, &mut reader)?;
+    }
+    Ok(())
+}
+
+/// Posle jeden prikaz QMP (napr. `system_powerdown`) a pocka na odpoved.
+pub fn command(port: u16, cmd: &str) -> Result<(), String> {
+    let stream = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .map_err(|e| e.to_string())?;
+    let mut writer = stream.try_clone().map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(stream);
+    let mut greeting = String::new();
+    reader.read_line(&mut greeting).map_err(|e| e.to_string())?;
+    for c in [r#"{"execute":"qmp_capabilities"}"#, cmd] {
+        writer
+            .write_all(c.as_bytes())
+            .and_then(|_| writer.write_all(b"
+"))
+            .map_err(|e| e.to_string())?;
+        reply(&mut reader)?;
     }
     Ok(())
 }

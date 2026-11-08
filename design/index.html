@@ -12,6 +12,8 @@
 <style>
 .hero { padding: var(--s9) var(--s7); border-radius: var(--r-window); margin-bottom: var(--s8);
   background: radial-gradient(circle at 15% 20%, var(--c-wall-a), transparent 55%), radial-gradient(circle at 85% 80%, var(--c-wall-b), transparent 55%), var(--c-surface); border: 1px solid var(--c-border); }
+.brandlogo { height: 72px; width: auto; display: block; margin-bottom: var(--s6); }
+:root[data-theme="dark"] .brandlogo.light, :root[data-contrast="more"] .brandlogo.light, :root:not([data-theme="dark"]):not([data-contrast="more"]) .brandlogo.dark { display: none; }
 .hero h1 { font-size: 40px; line-height: 48px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: var(--s4); }
 .cards a { display: block; text-decoration: none; color: inherit; padding: var(--s5); border-radius: var(--r-card); background: var(--c-surface); border: 1px solid var(--c-border);
@@ -28,10 +30,12 @@
 <div id="proto"></div>
 <main id="main" class="page">
   <div class="hero">
+    <img class="brandlogo light" src="assets/logo/logo-svetle-pozadi.svg" alt="MagnumOpus OS"><img class="brandlogo dark" src="assets/logo/logo-tmave-pozadi.svg" alt="MagnumOpus OS">
     <h1>Vzhled a ovládání</h1>
     <p class="lead" style="margin-top:var(--s3)">Prototypy GUI systému MagnumOpus-OS v charakteru <b>Vřelý</b>. Každá stránka má nahoře přepínač motivu (podle denní doby, světlý, tmavý), vysoký kontrast, velikost písma a omezení pohybu. Prototypy nejsou kód systému: ukazují vzhled a chování pro knihovnu UI a kompozitor.</p>
   </div>
   <div class="cards">
+    <a href="prirucka.html" style="grid-column:1/-1;background:var(--c-accent-soft);border-color:var(--c-accent)"><div class="ci" style="background:var(--c-accent);color:var(--c-on-accent)"><svg class="ic l"><use href="#ic-star"/></svg></div><h2>Příručka grafického jazyka</h2><p>Hodnoty, logo, barvy, písmo, ikony, rozvržení, komponenty, pohyb, hlas a texty, důvěra a agent, přístupnost. Česky i anglicky, s příklady správně a špatně.</p></a>
     <a href="design-system.html"><div class="ci"><svg class="ic l"><use href="#ic-palette"/></svg></div><h2>Design systém</h2><p>Barvy s kontrolou kontrastu WCAG, typografie, mřížka, zaoblení, stíny, ikony, pohyb, komponenty.</p></a>
     <a href="okna.html"><div class="ci"><svg class="ic l"><use href="#ic-window"/></svg></div><h2>Okna</h2><p>Anatomie, odznak důvěry s odebíráním oprávnění, režimy (vlastní titulek, bez rámu, celá obrazovka), stavy.</p></a>
     <a href="plocha.html"><div class="ci"><svg class="ic l"><use href="#ic-monitor"/></svg></div><h2>Plocha</h2><p>Nastavitelná lišta, přepínání oken, oznámení, systémové dialogy, výběr souboru (powerbox), bezpečná obrazovka, správce úloh.</p></a>
@@ -39,6 +43,9 @@
     <a href="soubory.html"><div class="ci"><svg class="ic l"><use href="#ic-folder"/></svg></div><h2>Soubory</h2><p>Časová osa verzí a obnova, „zkusit bokem“ v klonu, převzetí vybraných změn, konflikty, agent pracující bokem.</p></a>
     <a href="nastaveni.html"><div class="ci"><svg class="ic l"><use href="#ic-settings"/></svg></div><h2>Nastavení</h2><p>Profily zabezpečení Standardní / Přísný / Volný, samostatné volby (ověření klávesnice proti BadUSB), vzhled, přístupnost.</p></a>
     <a href="prihlaseni.html"><div class="ci"><svg class="ic l"><use href="#ic-lock"/></svg></div><h2>Přihlášení</h2><p>Zamčená obrazovka, výběr účtu, bezpečnostní fráze, režim s bezpečnou zkratkou.</p></a>
+    <a href="start.html"><div class="ci"><svg class="ic l"><use href="#ic-power"/></svg></div><h2>Start systému</h2><p>Logo s prstencem průběhu, log na Esc, zdržení kroku a přechod znaku do avataru přihlášení.</p></a>
+    <a href="pad.html"><div class="ci"><svg class="ic l"><use href="#ic-alert"/></svg></div><h2>Pád systému</h2><p>Obrazovka kritického pádu: klidný popis s odpočtem restartu, klávesa D přepne na technickou zprávu, oznámení po dalším startu.</p></a>
+    <a href="instalace.html"><div class="ci"><svg class="ic l"><use href="#ic-download"/></svg></div><h2>Instalace</h2><p>Vyzkoušet z USB bez změny disku, instalátor s náhledem změn disku, šifrování a klíč pro obnovu, první spuštění.</p></a>
     <a href="varianty-stylu.html"><div class="ci"><svg class="ic l"><use href="#ic-star"/></svg></div><h2>Varianty stylu (archiv)</h2><p>Tři původní varianty A / B / C, ze kterých uživatel vybral C. Zůstává pro historii rozhodnutí.</p></a>
   </div>
 
@@ -51,6 +58,8 @@
       <tr><td>Ikony</td><td><b>linkové, zaoblené</b></td><td>tah 1,75 px na mřížce 24 px, barva z textu</td></tr>
       <tr><td>Písmo</td><td><b>Inter + JetBrains Mono</b></td><td>obě pod OFL; Tuffy a Noto Sans Mono zůstanou jako záloha</td></tr>
       <tr><td>Výchozí motiv</td><td><b>podle denní doby</b></td><td>světlý ve dne, tmavý po západu slunce; přechod prolnutím, ne během psaní</td></tr>
+      <tr><td>Startovací obrazovka</td><td><b>A + log z B</b>, přechod do avataru</td><td>logo s prstencem, Esc = log, při zdržení „čeká na: &hellip;“, na konci znak vjede do avataru</td></tr>
+      <tr><td>Logo</td><td><b>symbol M + nápis MagnumOpus OS</b></td><td>vektory v <code>assets/logo/</code>; fialová #6b3fd6 na světlém, levandulová #b79bff na tmavém</td></tr>
       <tr><td>Označení agenta AI</td><td><b>vyhrazená barva + ikona + slovo</b></td><td>korálová jen pro agenta, vždy s ikonou a slovem „agent“</td></tr>
     </tbody>
   </table></div>

@@ -24,10 +24,13 @@ výpadku proudu pro testy FS).
 
 ## Start
 
-1. `timed` (služba času, jediná s právem nastavovat hodiny),
+1. `timed` (služba času, jediná s právem nastavovat hodiny), hned po ní
+   `acpid` (ACPI: napájení, tlačítka, čidla; jediná s právem `POWER`, viz
+   [ACPI](acpi.md)) - inicializace ACPICA běží souběžně s dalšími kroky,
 2. `devmgr`: najde zařízení a spustí ovladače. Hlásí disky (`block`)
    a vstupní zařízení (`input`) a pak `done`, až jsou hotová i zařízení
-   USB při startu,
+   USB při startu; při dlouhém čekání na ovladač disku posílá `busy`
+   (init čeká na každou zprávu nejvýš 30 s),
 3. `fsd` nad diskem se souborovým systémem; init připraví úložiště
    kořenových certifikátů `/system/config/certs` (viz
    [TLS a HTTP](tls-http.md#úložiště-kořenových-certifikátů)),
@@ -41,12 +44,25 @@ výpadku proudu pro testy FS).
    [Reálný čas](cas.md#synchronizace-podle-sítě-ntpd)) a `revocd`
    (odvolání certifikátů, viz [TLS a HTTP](tls-http.md#odvolání-certifikátů)),
 6. všechny tyto procesy předá supervisoru k hlídání,
-7. v běžném běhu GUI (`compd`, okna `gui-term` a `gui-demo`), bez GUI
+7. `taskd` (přehled úloh, viz [Architektura](architektura.md#přehled-úloh-odsouhlaseno)):
+   init drží jeho řídicí kanál a jako jediný razí kanály klientů
+   a producentů s identitou; fsd dostane kanál producenta, supervisor
+   hlásí stav služeb po každém kole (nejdéle 2 s), aplikace s oknem se
+   hlásí i se svým jobem,
+8. v běžném běhu GUI (`compd`, okna `gui-term` a `gui-demo`), bez GUI
    záložní konzoli (viz [Terminál](#terminál)).
 
 Konfiguraci `fsd` (první zpráva řídicího kanálu) posílá init vždy:
 `debug` v testovacím běhu, jinak `normal`. fsd na ni před připojením
 disku čeká.
+
+## Vypnutí a restart
+
+Tlačítko napájení (událost od `acpid`) nebo příkaz shellu `shutdown` /
+`reboot` = **čisté vypnutí**: init ukončí termd a záložní konzoli, pak
+služby v opačném pořadí registrace (klienti před službami), `fsd` a nakonec
+`devmgr` a `timed` (na každou čeká nejvýš 1,5 s) a teprve potom požádá
+`acpid` o S5 nebo restart. Podrobně v [ACPI](acpi.md#vypnutí-a-restart).
 
 ## Supervisor
 
@@ -55,6 +71,7 @@ Smyčka čeká na kanál správce zařízení a na konec hlídaných procesů:
 | Událost | Co supervisor udělá |
 |---|---|
 | `devmgr` pošle `input` s kanálem | předá ho službě vstupu (`device`). Takhle se do systému dostanou zařízení USB připojená za běhu |
+| `devmgr` pošle `dev <jméno>` s kanálem | ovladač z manifestu, nový nebo obnovený po pádu: init kanál uloží (`Devices::drivers`) a starý nahradí ([Ovladače](ovladace.md#životní-cyklus-a-obnova-po-pádu)) |
 | `devmgr` pošle `block` | zatím jen zaloguje (disky za běhu přijdou s více disky v `fsd`) |
 | `devmgr` zavře kanál | zaloguje, hotplug přestane fungovat |
 | skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na potvrzení nové služby nečeká blokující: její kanál je další položka smyčky. Když do 5 s neodpoví (nebo odpoví chybou), ukončí ji a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |

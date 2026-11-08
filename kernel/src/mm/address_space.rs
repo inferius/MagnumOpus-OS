@@ -169,10 +169,10 @@ impl AddressSpace {
             inner.find_free(len, addr).ok_or(Error::NoResources)?
         };
 
-        let mut map_flags = MapFlags::USER;
-        if vmo.is_uncached() {
-            map_flags = map_flags | MapFlags::UNCACHED;
+        if vmo.is_revoked() {
+            return Err(Error::AccessDenied);
         }
+        let mut map_flags = MapFlags::USER | vmo.cache_flags();
         if vmo.is_dma() {
             map_flags = map_flags | MapFlags::DMA;
         }
@@ -252,6 +252,35 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// Zrusi vsechna mapovani objektu `vmo` (odvolani objektu). Vraci jejich
+    /// pocet.
+    pub fn unmap_vmo(&self, vmo: &Arc<MemoryObject>) -> usize {
+        let mut inner = self.inner.lock();
+        let starts: Vec<u64> = inner
+            .mappings
+            .iter()
+            .filter(|(_, m)| Arc::ptr_eq(&m.vmo, vmo))
+            .map(|(&s, _)| s)
+            .collect();
+        let mut removed = Vec::new();
+        for s in starts {
+            let m = inner.mappings.remove(&s).unwrap();
+            let table = inner.table.as_mut().expect("adresni prostor je zruseny");
+            for off in (0..m.len).step_by(PAGE_SIZE as usize) {
+                table.unmap_4k(VirtAddr::new(s + off));
+            }
+            removed.push(m);
+        }
+        drop(inner);
+        let n = removed.len();
+        if n > 0 {
+            // Stranky smi pryc az kdyz je zadne CPU nema v TLB.
+            tlb::shootdown();
+        }
+        drop(removed);
+        n
+    }
+
     /// Prelozi rozsah userspace na kousky fyzicke pameti a zavola na ne `f`
     /// (adresa v prime mape, offset v rozsahu, delka). Overi, ze je cely
     /// rozsah namapovany s pozadovanymi pravy; jinak `BadAddress`.
@@ -276,7 +305,7 @@ impl AddressSpace {
             let (start, m) = inner.mapping_at(pos).ok_or(Error::BadAddress)?;
             // Registry zarizeni nejsou v prime mape: jako buffer syscallu
             // je nelze pouzit.
-            if (write && m.flags & MAP_WRITE == 0) || m.vmo.is_uncached() {
+            if (write && m.flags & MAP_WRITE == 0) || m.vmo.is_physical() {
                 return Err(Error::BadAddress);
             }
             pos = start + m.len;

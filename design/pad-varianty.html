@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pád systému: varianty</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+/* Obrazovka kritickeho padu (panika jadra). Kresli ji jadro samo do
+ * framebufferu z firmwaru: bez kompozitoru, bez GPU, bez alokace. Proto jen
+ * plne barvy, predrasterizovane pismo a symbol, zadne animace krome odpoctu. */
+.page { max-width: 1400px; }
+.vars { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: var(--s5); }
+.var h2 { margin: 0 0 var(--s1); font-size: var(--t-title-size); }
+.var > p { font-size: var(--t-small-size); color: var(--c-ink-muted); margin: 0 0 var(--s3); min-height: 54px; }
+.scr { position: relative; aspect-ratio: 16 / 10; border-radius: var(--r-card); overflow: hidden; border: 1px solid var(--c-border); font-family: var(--font-ui); container-type: inline-size; }
+.ctl { display: flex; gap: var(--s2); margin-top: var(--s3); flex-wrap: wrap; }
+.sym { display: inline-block; }
+.sym svg { display: block; }
+/* Velikosti v ukazkach skaluji s sirkou obrazovky (cqw). */
+.A { background: #1b1222; color: #f3eaf6; }
+.A .wrap { position: absolute; inset: 0; padding: 7cqw 8cqw; display: grid; grid-template-columns: auto 1fr; gap: 5cqw; align-content: center; }
+.A .mark { position: relative; width: 15cqw; height: 15cqw; }
+.A .mark svg.r { position: absolute; inset: 0; transform: rotate(-90deg); }
+.A .mark .s { position: absolute; inset: 22%; }
+.A h3 { font-size: 4.4cqw; line-height: 1.15; font-weight: 600; margin: 0 0 1.6cqw; }
+.A p { font-size: 1.75cqw; line-height: 1.5; margin: 0 0 1.4cqw; color: #cdbfd6; max-width: 60ch; }
+.A .code { display: inline-flex; gap: 1cqw; align-items: center; font: 600 1.6cqw/1 var(--font-mono); padding: .9cqw 1.4cqw; border-radius: 1cqw; background: #2c2036; color: #ffd2bf; margin-bottom: 2cqw; }
+.A .keys { display: flex; gap: 2.4cqw; font-size: 1.5cqw; color: #b9a8c2; flex-wrap: wrap; }
+.A .keys b { display: inline-block; min-width: 2.4cqw; padding: .2cqw .7cqw; border: 1px solid #6d5a78; border-bottom-width: 2px; border-radius: .5cqw; color: #f3eaf6; text-align: center; margin-right: .6cqw; font-weight: 600; }
+.A .qr { position: absolute; right: 6cqw; bottom: 6cqw; display: flex; gap: 1.4cqw; align-items: center; font-size: 1.3cqw; color: #b9a8c2; max-width: 26cqw; }
+.A .qr svg { width: 8cqw; height: 8cqw; background: #fff; border-radius: .6cqw; padding: .5cqw; flex: none; }
+.B { background: #0e0b12; color: #e6dcea; }
+.B .wrap { position: absolute; inset: 0; display: grid; grid-template-columns: 40% 60%; }
+.B .left { padding: 6cqw 4cqw 4cqw 6cqw; display: flex; flex-direction: column; gap: 1.6cqw; }
+.B .left h3 { font-size: 3.4cqw; line-height: 1.15; margin: 1.6cqw 0 0; font-weight: 600; }
+.B .left p { font-size: 1.55cqw; line-height: 1.5; margin: 0; color: #b9a8c2; }
+.B .right { background: #17111c; border-left: 1px solid #2e2438; padding: 4cqw 3.4cqw; font: 1.35cqw/1.55 var(--font-mono); color: #cfc3d6; overflow: hidden; white-space: pre; }
+.B .right .h { color: #ff8a9b; font-weight: 600; } .B .right .d { color: #8f8199; } .B .right .y { color: #f2c46b; } .B .right .g { color: #7fdca5; }
+.B .bar { position: absolute; left: 0; right: 0; bottom: 0; height: .7cqw; background: #2e2438; }
+.B .bar i { display: block; height: 100%; background: #b79bff; width: 0; }
+.C { background: #fbf1ea; color: #2a1f2d; }
+.C .wrap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 6cqw; gap: 1.6cqw; }
+.C .band { position: absolute; left: 0; right: 0; top: 0; height: 1.4cqw; background: repeating-linear-gradient(-45deg, #c3264d 0 2cqw, #6b3fd6 2cqw 4cqw); }
+.C h3 { font-size: 4.2cqw; line-height: 1.15; margin: 1.6cqw 0 0; font-weight: 650; }
+.C p { font-size: 1.8cqw; line-height: 1.5; margin: 0; color: #665569; max-width: 52ch; }
+.C .pill { display: inline-flex; align-items: center; gap: 1.4cqw; padding: 1.2cqw 2.4cqw; border-radius: 99cqw; background: #6b3fd6; color: #fff; font-size: 1.7cqw; font-weight: 600; margin-top: 1cqw; }
+.C .small { font: 1.35cqw/1.4 var(--font-mono); color: #665569; }
+.cmp { margin-top: var(--s8); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header style="margin-bottom:var(--s5)">
+    <h1>Pád systému: varianty</h1>
+    <p class="lead">Obrazovka pro kritický pád (panika jádra nebo pád initu). Pády služeb a kompozitoru řeší zotavení bez této obrazovky. Kreslí ji jádro samo do framebufferu z firmwaru, takže jen plné barvy, předrasterizované písmo a symbol a jediná animace: odpočet restartu.</p>
+  </header>
+  <div class="vars">
+    <section class="var">
+      <h2>A - Klid</h2>
+      <p>Tmavě fialová, symbol v přerušeném prstenci, který se plní odpočtem do restartu. Lidský text nahoře, kód chyby a QR odkaz na vysvětlení dole. Podrobnosti na klávesu D.</p>
+      <div class="scr A" role="img" aria-label="Varianta A">
+        <div class="wrap">
+          <div class="mark"><svg class="r" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="none" stroke="#3a2b45" stroke-width="3"/><circle class="cd" cx="50" cy="50" r="46" fill="none" stroke="#b79bff" stroke-width="3" stroke-linecap="round" stroke-dasharray="289" stroke-dashoffset="289"/></svg><span class="s symslot" data-fill="#b79bff"></span></div>
+          <div>
+            <h3>Systém musel zastavit</h3>
+            <p>Jádro narazilo na chybu, ze které se nedokázalo bezpečně zotavit. Tvoje soubory jsou v bezpečí: souborový systém má žurnál a rozpracovaný stav aplikací se po startu vrátí.</p>
+            <p>Hlášení o chybě je uložené. Za <b class="sec">15</b> s se počítač restartuje.</p>
+            <div class="code">PAGE_FAULT_KERNEL &middot; #MO-7F3A-21C9</div>
+            <div class="keys"><span><b>Enter</b>restartovat hned</span><span><b>D</b>podrobnosti</span><span><b>P</b>pozastavit odpočet</span></div>
+          </div>
+        </div>
+        <div class="qr"><svg viewBox="0 0 29 29" class="qrsvg"></svg><span>Co to znamená a co dělat: naskenuj telefonem</span></div>
+      </div>
+      <div class="ctl"><button class="btn small" data-play="A">Spustit odpočet</button></div>
+    </section>
+
+    <section class="var">
+      <h2>B - Dílna</h2>
+      <p>Rozdělená: vlevo lidský popis, vpravo rovnou technická zpráva (panika, CPU, adresa, zpětná stopa se symboly). Pro vývojovou fázi systému nejužitečnější; běžný uživatel vidí hlavně levou půlku.</p>
+      <div class="scr B" role="img" aria-label="Varianta B">
+        <div class="wrap">
+          <div class="left"><span class="symslot" data-fill="#b79bff" data-size="7cqw"></span>
+            <h3>Systém musel zastavit</h3>
+            <p>Soubory jsou v bezpečí, rozpracovaný stav se po startu vrátí. Hlášení je uložené pro další start.</p>
+            <p style="color:#e6dcea">Restart za <b class="sec">15</b> s &middot; Enter hned &middot; P pozastavit</p></div>
+          <div class="right"><span class="h">KERNEL PANIC: page fault v jádře</span>
+<span class="d">id</span>     #MO-7F3A-21C9   <span class="d">verze</span> 0.6.0 (a1b2c3d)
+<span class="d">cpu</span>    2 / 4           <span class="d">čas</span>   12 min 04 s od startu
+<span class="d">adresa</span> <span class="y">0xffff_8000_0012_3f40</span> (zápis, nemapováno)
+<span class="d">vlákno</span> fsd/worker-3   <span class="d">job</span> 7
+
+<span class="d">zpětná stopa:</span>
+  0 kernel::mm::vmo::commit_page     <span class="d">vmo.rs:412</span>
+  1 kernel::mm::fault::handle        <span class="d">fault.rs:88</span>
+  2 kernel::arch::x86_64::trap::pf   <span class="d">trap.rs:203</span>
+  3 &lt;přerušení z uživatelského režimu&gt;
+
+<span class="g">hlášení uloženo</span> do rezervované paměti,
+po startu: /system/pady/2026-11-07-1405.crash</div>
+        </div>
+        <div class="bar"><i class="cdbar"></i></div>
+      </div>
+      <div class="ctl"><button class="btn small" data-play="B">Spustit odpočet</button></div>
+    </section>
+
+    <section class="var">
+      <h2>C - Výstraha</h2>
+      <p>Světlá a teplá, s výstražným pruhem nahoře v barvách systému. Střed jako dialog: co se stalo, že data jsou v pořádku, velké tlačítko restartu s odpočtem. Nejvýraznější, nejméně „strašidelná“ na první pohled.</p>
+      <div class="scr C" role="img" aria-label="Varianta C">
+        <div class="band"></div>
+        <div class="wrap"><span class="symslot" data-fill="#6b3fd6" data-size="9cqw"></span>
+          <h3>Systém musel zastavit</h3>
+          <p>Narazil na chybu, ze které se nedokázal bezpečně zotavit. Soubory jsou v bezpečí a rozpracovaný stav se po startu vrátí.</p>
+          <span class="pill">Restartovat (<span class="sec">15</span> s)</span>
+          <span class="small">PAGE_FAULT_KERNEL &middot; #MO-7F3A-21C9 &middot; D podrobnosti</span></div>
+      </div>
+      <div class="ctl"><button class="btn small" data-play="C">Spustit odpočet</button></div>
+    </section>
+  </div>
+  <section class="cmp">
+    <h2>Společné pro všechny varianty</h2>
+    <ul class="note">
+      <li><b>Kdy:</b> jen panika jádra a pád initu. Pád kompozitoru, ovladače nebo služby řeší zotavení (restart bez ztráty oken), tuhle obrazovku nikdo neuvidí.</li>
+      <li><b>Kdo kreslí:</b> jádro, do framebufferu z firmwaru (UEFI GOP), bez alokace paměti a bez ovladačů. Písmo a symbol jsou předrasterizované v obrazu jádra (~40 kB).</li>
+      <li><b>Hlášení:</b> uloží se do rezervované paměti, která přežije teplý restart; init ho po startu zapíše na disk a ukáže oznámení „Systém minule spadl“ s volbou zobrazit nebo uložit.</li>
+      <li><b>Bez sítě:</b> nic se samo neodesílá. QR kód jen odkazuje na vysvětlení chyby v dokumentaci.</li>
+      <li><b>Opakovaný pád:</b> 3 pády při startu za sebou = další start nabídne předchozí verzi systému (snapshot) nebo záchranný režim.</li>
+      <li><b>Přístupnost:</b> text 7 : 1, žádné blikání, odpočet jde pozastavit (P); stav se zapíše i na sériovou linku.</li>
+    </ul>
+  </section>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  // Symbol MagnumOpus do kazde varianty (barva a velikost podle data atributu).
+  document.querySelectorAll('.symslot').forEach(function (s) {
+    var size = s.dataset.size;
+    s.outerHTML = '<span class="sym"' + (size ? ' style="width:' + size + ';height:' + size + '"' : ' style="width:100%;height:100%"') + '><svg viewBox="-8 -12 400 400" style="width:100%;height:100%"><g fill="' + s.dataset.fill + '">' + window.MO_SYMBOL + '</g></svg></span>';
+  });
+  // Ukazkovy vzor QR (jen vzhled; skutecny kod generuje jadro z id padu).
+  var q = '', seed = 7;
+  function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+  function finder(x, y) { return '<rect x="' + x + '" y="' + y + '" width="7" height="7" fill="#1b1222"/><rect x="' + (x + 1) + '" y="' + (y + 1) + '" width="5" height="5" fill="#fff"/><rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="3" height="3" fill="#1b1222"/>'; }
+  for (var y = 0; y < 29; y++) for (var x = 0; x < 29; x++) {
+    var inF = (x < 8 && y < 8) || (x > 20 && y < 8) || (x < 8 && y > 20);
+    if (!inF && rnd() > .55) q += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="#1b1222"/>';
+  }
+  q += finder(0, 0) + finder(22, 0) + finder(0, 22);
+  document.querySelectorAll('.qrsvg').forEach(function (s) { s.innerHTML = q; });
+
+  var timers = {};
+  function play(v) {
+    clearInterval(timers[v]);
+    var el = document.querySelector('.scr.' + v), left = 15;
+    var sec = el.querySelectorAll('.sec'), ring = el.querySelector('.cd'), bar = el.querySelector('.cdbar');
+    function draw() {
+      sec.forEach(function (s) { s.textContent = left; });
+      if (ring) ring.setAttribute('stroke-dashoffset', 289 * left / 15);
+      if (bar) bar.style.width = ((15 - left) / 15 * 100) + '%';
+    }
+    draw();
+    timers[v] = setInterval(function () { left--; draw(); if (left <= 0) { clearInterval(timers[v]); left = 15; setTimeout(draw, 800); } }, 1000);
+  }
+  document.querySelectorAll('[data-play]').forEach(function (b) { b.addEventListener('click', function () { play(b.dataset.play); }); });
+  ['A', 'B', 'C'].forEach(play);
+});
+</script>
+</body>
+</html>

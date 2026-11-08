@@ -11,6 +11,7 @@ test = false
 bench = false
 
 [dependencies]
+taskproto = { path = "../../libs/taskproto" }
 libos = { path = "../../libs/libos" }
 blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }

@@ -444,7 +444,9 @@ Every command has a short name and a full `verb-noun` name (an alias).
 | `now`, `sleep` | `time-now`, `time-sleep` | |
 | `undo`, `preview` | `command-undo`, `command-preview` | see [Files](#files-draft-in-a-clone-undo-preview-and-lock) |
 | `jobs`, `wait`, `kill` | `job-list`, `job-wait`, `job-kill` | background jobs |
+| `tasks` | `task-list` | the system task overview (`taskd`): a table, `tasks cancel/pause/resume/log <id>`; see [Task overview](architecture.md#task-overview-agreed) |
 | `history`, `explain`, `help`, `run`, `error`, `exit` | `history-list`, `error-explain`, `help-show`, `script-run`, `error-raise`, `session-exit` | |
+| `shutdown`, `reboot` | `system-shutdown`, `system-reboot` | clean power-off / reboot through init and ACPI; asks first, `-y` without asking (see [ACPI](acpi.md#shell-commands)) |
 
 ## Examples
 
@@ -686,6 +688,12 @@ The window sends `Hello`, `Attach` (0 = new session), `Detach`, `Run`,
 The service sends `BlockStart`, `Item`, `BlockEnd`, `Prompt`,
 `Completions`, `Formatted`, `Highlighted` and `Fail`.
 
+- **Matching replies (version 2):** `Complete` and `Format` carry a request
+  number `seq`, which `Completions` and `Formatted` return. Events of other
+  blocks (`async` tasks, `bg`, the late end of a cancelled task) may arrive
+  between a request and its reply. The window therefore matches replies by
+  `seq` and drops a reply to an older request. `seq` of `Highlight` works
+  the same way.
 - **Block items:** a typed value, a note, a warning, an error (code,
   description, report with the location), a diff, progress, a link.
 - **Values are sent typed.** A list of records with the same columns goes
@@ -867,6 +875,9 @@ is a follow-up proposal.
   history with the arrows; Ctrl-W word, Ctrl-U line, Ctrl-F convert B/C;
   Tab completion (a single option is completed right away, several = a
   menu).
+- **Task panel:** Ctrl-T opens the task list (arrows, `c` cancel, `p`
+  pause, `r` resume, Esc close); the status line shows the number of
+  running tasks and a notice on completion or failure.
 - **Blocks:** every command with a colored state mark (running, done,
   error), its run time and a spinner while running. Ctrl-L collapses all,
   space collapses the selected one.

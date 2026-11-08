@@ -391,6 +391,12 @@ impl<D: BlockDevice> Fs<D> {
         Ok(fs)
     }
 
+    /// Zarizeni (testy: statistika `MemDevice`).
+    #[cfg(test)]
+    pub(crate) fn device(&self) -> &D {
+        &self.s.dev
+    }
+
     /// Odpoji system bez commitu a vrati zarizeni (testy, nastroje).
     pub fn into_device(self) -> D {
         self.s.dev
