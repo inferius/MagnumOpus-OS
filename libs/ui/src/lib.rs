@@ -99,6 +99,8 @@ pub struct Ui<M> {
     pub title: String,
     /// Okno ma fokus systemu: jen tehdy se kresli ramecek fokusu prvku.
     pub(crate) active: bool,
+    /// Misto stisknuteho prvku (prostor, obdelnik) pro parovani s pustenim.
+    pub(crate) pressed_rect: Option<(usize, Rect)>,
 }
 
 /// Posouvana oblast: index prvku, obdelnik v okne, vyska obsahu, posun.
@@ -127,6 +129,7 @@ impl<M: Clone> Ui<M> {
             mods: 0,
             title: String::new(),
             active: true,
+            pressed_rect: None,
         }
     }
 

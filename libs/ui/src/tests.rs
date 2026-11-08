@@ -277,3 +277,24 @@ fn render_window_snapshot() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
     let _ = std::fs::write(dir.join("ui-window.png"), gfx::png::encode(&comp, w, hh, w));
 }
+
+/// Data ze sluzby mezi stiskem a pustenim zmeni pocet radku seznamu
+/// (indexy prvku za nim se posunou), tlacitko zustane na miste: klik se
+/// neztrati (spravce uloh nad taskd).
+#[test]
+fn click_survives_relayout_between_press_and_release() {
+    let view = |rows: usize| -> Node<Msg> {
+        column([
+            scroll(list((0..rows).map(|i| alloc::format!("radek {i}")), None)).height(120),
+            button("Pozastavit").on_click(Msg::Inc),
+        ])
+    };
+    let mut ui: Ui<Msg> = Ui::new(crate::Look::ui_fonts(), 400, 300);
+    ui.rebuild("t".into(), view(3));
+    let b = ui.a11y().into_iter().find(|n| n.role == Role::Button).unwrap().bounds;
+    let (x, y) = (b.x + 5, b.y + 5);
+    ui.event(InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, 0);
+    ui.rebuild("t".into(), view(5));
+    let r = ui.event(InputEvent::Button { code: BTN_LEFT, pressed: false, x, y }, 0);
+    assert_eq!(r.msgs.len(), 1, "klik po prerozvrzeni");
+}

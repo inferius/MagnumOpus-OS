@@ -510,11 +510,15 @@ impl Comp {
                     && let Some((s, nw, nh, _)) = w.configure
                     && s == serial
                 {
-                    let old = w.outer();
+                    // Stara i nova plocha vcetne stinu (zmensene okno
+                    // odkryje, co bylo pod nim).
+                    let old = w.visual();
                     w.rect.w = nw;
                     w.rect.h = nh;
                     w.configure = None;
-                    self.dirty.add(old, Rect::new(0, 0, self.w, self.h));
+                    let new = w.visual();
+                    self.damage(old);
+                    self.damage(new);
                 }
             }
             if became_mapped {

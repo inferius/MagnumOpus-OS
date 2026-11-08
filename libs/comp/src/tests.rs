@@ -1165,3 +1165,31 @@ fn bar_blur_redraws_whole_bar() {
     let covered: u64 = rects.iter().map(|r| r.intersect(&bar).w as u64 * r.intersect(&bar).h as u64).sum();
     assert!(covered >= bar.w as u64 * bar.h as u64, "lista prekreslena cela: {rects:?}");
 }
+
+/// Maximalizace a zmena velikosti po `CONFIGURE` poskodi stare misto okna
+/// i se stinem (jinak zustanou artefakty).
+#[test]
+fn maximize_damages_old_place() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let old = t.c.windows[&g].visual();
+    t.c.toggle_maximize(g, t.now);
+    let rects = t.frame().unwrap();
+    let covers = |r: Rect| rects.iter().any(|d| d.intersect(&r) == r) || {
+        let area: u64 = rects.iter().map(|d| { let i = d.intersect(&r); i.w as u64 * i.h as u64 }).sum();
+        area >= r.w as u64 * r.h as u64
+    };
+    assert!(covers(old.intersect(&t.c.screen())), "stare misto: {rects:?} {old:?}");
+    // Zpet z maximalizace: po potvrzeni CONFIGURE mensi okno, odkryta
+    // plocha se prekresli.
+    let big = t.c.windows[&g].visual().intersect(&t.c.screen());
+    t.c.toggle_maximize(g, t.now);
+    let serial = t.c.windows[&g].configure.unwrap().0;
+    t.commit(a, 2, guiproto::window::commit::ACK_CONFIGURE, serial, 0);
+    let rects = t.frame().unwrap();
+    let area: u64 = rects.iter().map(|d| { let i = d.intersect(&big); i.w as u64 * i.h as u64 }).sum();
+    assert!(area >= big.w as u64 * big.h as u64, "plocha po zmenseni: {rects:?}");
+}
