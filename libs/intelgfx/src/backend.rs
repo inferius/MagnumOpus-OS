@@ -126,6 +126,14 @@ pub fn probe<M: Mmio + ?Sized, C: Clock + ?Sized>(m: &mut M, c: &mut C, p: &Plat
     })
 }
 
+/// Zapise registry zaznamu v jeho poradi (bez backendu: nova instance po
+/// padu to dela driv, nez cte stav).
+pub fn restore_regs<M: Mmio + ?Sized>(m: &mut M, s: &Snapshot) {
+    for &(r, v) in &s.regs {
+        m.write32(r, v);
+    }
+}
+
 /// Obnova podle citace snimku za 100 ms (0 = citac stoji).
 pub fn measure_refresh<M: Mmio + ?Sized, C: Clock + ?Sized>(m: &mut M, c: &mut C, pipe: regs::Pipe) -> u32 {
     let reg = Trans::ALL[pipe as usize].pipe_offset() + regs::FRMCOUNT;
@@ -221,9 +229,7 @@ impl<M: Mmio, C: Clock> Intel<M, C> {
 
     /// Zapise zaznam firmwaru zpet (obnova po padu, cisty konec).
     pub fn restore(&mut self, s: &Snapshot) {
-        for &(r, v) in &s.regs {
-            self.mmio.write32(r, v);
-        }
+        restore_regs(&mut self.mmio, s);
         self.cur = (s.w, s.h);
         self.flip = None;
     }

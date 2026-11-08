@@ -1177,6 +1177,17 @@ name = "inputproto"
 version = "0.1.0"
 
 [[package]]
+name = "intel-display"
+version = "0.1.0"
+dependencies = [
+ "displaydrv",
+ "guiproto",
+ "intelgfx",
+ "libos",
+ "pci",
+]
+
+[[package]]
 name = "intelgfx"
 version = "0.1.0"
 dependencies = [

@@ -51,6 +51,8 @@ const QEMU_EXT: usize = 0x600;
 const EDID_SIZE: usize = 0x400;
 /// Poradi bajtu framebufferu little-endian (rozsireni QEMU).
 const FB_LE: u32 = 0x1e1e_1e1e;
+/// Nejvetsi rozmer bez GETCAPS (limit Bochs VBE).
+const MAX_DIM: u32 = 8192;
 
 /// Seznam rezimu bez EDID (QEMU s `edid=off`).
 const FALLBACK: [(u32, u32); 6] = [(640, 480), (800, 600), (1024, 768), (1280, 720), (1280, 800), (1920, 1080)];
@@ -98,6 +100,11 @@ impl Bochs {
         b.write(reg::ENABLE, en | enable::GETCAPS);
         b.max = (b.read(reg::XRES) as u32, b.read(reg::YRES) as u32);
         b.write(reg::ENABLE, en);
+        // `-device bochs-display` GETCAPS neumi (vraci aktualni hodnoty,
+        // u vypnuteho vystupu 0): pak omezuje jen velikost VRAM.
+        if b.max.0 < 640 || b.max.1 < 480 {
+            b.max = (MAX_DIM, MAX_DIM);
+        }
         if en & enable::ENABLED != 0 {
             let (w, h) = (b.read(reg::XRES) as u32, b.read(reg::YRES) as u32);
             b.mode = Some((w, h, 60_000));

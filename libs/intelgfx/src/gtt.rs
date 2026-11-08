@@ -56,7 +56,10 @@ pub fn contiguous<M: Mmio + ?Sized>(m: &mut M, ggtt: u32, len: u64) -> Option<(u
 pub fn map<M: Mmio + ?Sized>(m: &mut M, ggtt: u32, phys: u64, len: u64, local: bool) {
     for i in 0..len.div_ceil(PAGE) {
         let v = ((phys + i * PAGE) & PTE_ADDR_MASK) | PTE_PRESENT | if local { PTE_LM } else { 0 };
-        m.write64(reg(ggtt + (i * PAGE) as u32), v);
+        // Horni polovinu driv: polozka se stane platnou (bit 0) az s celou adresou.
+        let r = reg(ggtt + (i * PAGE) as u32);
+        m.write32(r + 4, (v >> 32) as u32);
+        m.write32(r, v as u32);
     }
 }
 

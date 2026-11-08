@@ -1,0 +1,18 @@
+[package]
+name = "intel-display"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "intel-display"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+guiproto = { path = "../../libs/guiproto" }
+pci = { path = "../../libs/pci" }
+intelgfx = { path = "../../libs/intelgfx" }
+displaydrv = { path = "../../libs/displaydrv", features = ["os"] }
