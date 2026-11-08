@@ -18,6 +18,9 @@ pub struct Message {
     pub handles: Vec<Handle>,
 }
 
+/// Pocatecni velikost bufferu pro cteni zpravy.
+const READ_BUFFER: usize = 4096;
+
 impl Channel {
     /// Dvojice propojenych koncu.
     pub fn create() -> Result<(Self, Self)> {
@@ -33,13 +36,20 @@ impl Channel {
 
     /// Precte zpravu, pokud nejaka ceka (jinak `ShouldWait`).
     pub fn try_read(&self) -> Result<Message> {
-        let mut data = vec![0u8; 256];
+        // 4 KiB pokryje vetsinu zprav (GUI, terminal) na jedno cteni;
+        // s 256 B se kazda vetsi zprava cetla dvakrat (BUFFER_TOO_SMALL).
+        let mut data = vec![0u8; READ_BUFFER];
         let mut handles = vec![0u32; 4];
         loop {
             let (r, (dlen, hlen)) = sys::channel_read(self.0.raw(), &mut data, &mut handles);
             match r {
                 Ok(()) => {
                     data.truncate(dlen);
+                    // Mala zprava nedrzi zbytecne 4 KiB (zpravy se ukladaji
+                    // do front).
+                    if data.capacity() > 2 * dlen.max(64) {
+                        data.shrink_to_fit();
+                    }
                     handles.truncate(hlen);
                     return Ok(Message {
                         data,

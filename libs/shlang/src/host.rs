@@ -81,6 +81,15 @@ pub trait Fs {
         self.list(path)
     }
     fn read(&mut self, path: &str) -> FsResult<Vec<u8>>;
+    /// Cast souboru: nejvys `len` bajtu od `offset` (za koncem prazdne).
+    /// Vychozi implementace cte cely soubor; FS, ktery umi cist po
+    /// castech, ji prepise (velke soubory, napr. `audio play`).
+    fn read_range(&mut self, path: &str, offset: u64, len: usize) -> FsResult<Vec<u8>> {
+        let all = self.read(path)?;
+        let start = (offset.min(all.len() as u64)) as usize;
+        let end = start.saturating_add(len).min(all.len());
+        Ok(all[start..end].to_vec())
+    }
     /// Vytvori nebo prepise soubor (nadrazena slozka musi existovat).
     fn write(&mut self, path: &str, data: &[u8]) -> FsResult<()>;
     fn mkdir(&mut self, path: &str) -> FsResult<()>;
@@ -230,6 +239,33 @@ pub struct FsChange {
     pub is_dir: bool,
 }
 
+/// Pozadavek prikazu `audio` na zvukovou sluzbu (v systemu `audiod`).
+///
+/// Prehravani jde po kouscich: `Open`, nekolik `Write` (kazdy ceka na
+/// misto v bufferu, nejvys desetiny sekundy), `Finish` (pocka na dohrani)
+/// nebo `Abort` (Ctrl-C). Interpret mezi kousky kontroluje preruseni.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioReq {
+    /// Novy prehravany stream: frekvence, kanaly, typ vzorku
+    /// (`audioproto::Sample` jako cislo).
+    Open { rate: u32, channels: u8, sample: u8 },
+    /// Dalsi data (cele snimky formatu z `Open`).
+    Write { data: Vec<u8> },
+    /// Dohrat a zavrit; vysledek = zaznam s delkou a podtecenimi.
+    Finish,
+    /// Zastavit hned a zavrit (preruseni).
+    Abort,
+    /// Hlavni hlasitost v % (`None` = jen zjistit).
+    Volume(Option<u8>),
+    Mute(bool),
+    /// Stav zarizeni a sluzby.
+    Status,
+    /// Seznam zvukovych zarizeni.
+    Devices,
+    /// Vybrat zarizeni (index ze seznamu).
+    Select(u8),
+}
+
 /// Prostredi interpretu.
 pub trait Host {
     fn fs(&mut self) -> &mut dyn Fs;
@@ -272,6 +308,10 @@ pub trait Host {
     }
     /// Zrusi ulohu. Kdyz uz dobehla, vrati jeji vysledek (a undo).
     fn task_cancel(&mut self, _id: u64) -> Option<TaskDone> {
+        None
+    }
+    /// Zvuk (prikaz `audio`). `None` = hostitel zvuk nema.
+    fn audio(&mut self, _req: AudioReq) -> Option<Result<Value, ShError>> {
         None
     }
     /// Prehled uloh systemu (`taskd`). `None` = hostitel ho nema.

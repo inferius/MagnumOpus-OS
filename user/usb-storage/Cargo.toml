@@ -1,0 +1,17 @@
+[package]
+name = "usb-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "usb-storage"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+usbproto = { path = "../../libs/usbproto" }
+usbclient = { path = "../../libs/usbclient" }
+blockproto = { path = "../../libs/blockproto" }

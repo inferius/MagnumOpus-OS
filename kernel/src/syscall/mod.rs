@@ -40,8 +40,10 @@ fn current_process() -> Arc<Process> {
 pub fn dispatch(number: u64, a: Args) -> u64 {
     let result = call(number, a);
     if let Err(e) = result {
-        // Ocekavane "chyby" rizeni toku nelogovat (byly by vsude).
-        if !matches!(e, Error::ShouldWait | Error::TimedOut) {
+        // Ocekavane "chyby" rizeni toku nelogovat (byly by vsude a zahltily
+        // by log): cekani, vyprseni a zjisteni velikosti bufferu (volajici
+        // cte znovu s vetsim bufferem).
+        if !matches!(e, Error::ShouldWait | Error::TimedOut | Error::BufferTooSmall) {
             log::debug!("syscall {} ({number}) selhal: {e}", name(number));
         }
     }

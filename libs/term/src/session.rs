@@ -13,7 +13,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use shlang::eval::Interp;
-use shlang::host::{ExecNeeds, Fs, Host, TaskDone, TaskSpec};
+use shlang::host::{AudioReq, ExecNeeds, Fs, Host, TaskDone, TaskSpec};
 use shlang::sig::Builtins;
 use shlang::value::Value;
 use shlang::{ShError, Style, error::code};
@@ -71,6 +71,10 @@ pub trait Env {
         Vec::new()
     }
     fn clock(&self) -> Option<Clock> {
+        None
+    }
+    /// Zvuk (prikaz `audio`); `None` = relace zvukovou sluzbu nema.
+    fn audio(&mut self, _req: AudioReq) -> Option<Result<Value, ShError>> {
         None
     }
     /// Vypnuti / restart systemu (prikazy `shutdown`, `reboot`); vychozi =
@@ -428,6 +432,10 @@ impl Host for SessionHost<'_> {
 
     fn home(&self) -> String {
         self.home.into()
+    }
+
+    fn audio(&mut self, req: AudioReq) -> Option<Result<Value, ShError>> {
+        self.env.audio(req)
     }
 
     fn power(&mut self, reboot: bool) -> Result<(), abi::Error> {

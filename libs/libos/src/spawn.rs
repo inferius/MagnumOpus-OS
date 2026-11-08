@@ -55,6 +55,14 @@ impl StartHandle {
         }
     }
 
+    /// Volitelny handle se stitkem `tag` (nenulovym): program ho najde
+    /// pres `Startup::take_tagged` bez ohledu na poradi a na to, ktere
+    /// jine volitelne handly chybi.
+    pub fn tagged(tag: u32, handle: Handle) -> Self {
+        assert!(tag != 0, "stitek 0 = handle bez stitku");
+        Self { kind: bootstrap::kind::USER, arg: tag, handle }
+    }
+
     pub fn new(kind: u32, arg: u32, handle: Handle) -> Self {
         Self { kind, arg, handle }
     }

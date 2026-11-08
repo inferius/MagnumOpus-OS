@@ -327,7 +327,7 @@ impl Supervisor {
                     self.started(i, &mut out)
                 }
                 Item::Leases if sig.intersects(Signals::READABLE) => self.lease_packets(),
-                Item::Terminal(w) => terminals.on_signal(startup, w, sig),
+                Item::Terminal(w) => terminals.on_signal(startup, w, sig, &mut || self.session("audiod", Vec::new()).ok()),
                 Item::Power => power_ready = true,
                 Item::Service(_) | Item::Starting(_) | Item::Leases => {}
             }

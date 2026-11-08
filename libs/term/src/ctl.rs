@@ -23,6 +23,18 @@ const S_INIT: u8 = 1;
 const S_ADOPT: u8 = 2;
 const S_TASKS: u8 = 3;
 const S_POWER: u8 = 4;
+const S_AUDIO: u8 = 5;
+
+/// Stitky volitelnych startovnich handlu termd (`StartHandle::tagged`):
+/// hledaji se podle stitku, takze chybejici jeden neposune ostatni.
+/// Povinne handly (FS, registr, napajeni) zustavaji podle poradi.
+pub mod tag {
+    /// Brana agenta AI (jen zadosti o relaci).
+    pub const AGENT: u32 = 1;
+    /// Relace zvukove sluzby `audiod` a jeji listek.
+    pub const AUDIO: u32 = 2;
+    pub const AUDIO_LEASE: u32 = 3;
+}
 
 /// termd -> relace.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +52,8 @@ pub enum SessMsg {
     /// Hned po `Init` (kdyz termd ma spojeni na napajeni od initu); handly:
     /// [kanal k initu pro `shutdown`/`reboot`, protokol `powerproto`].
     Power,
+    /// Zvuk pro relaci; handly: [kanal k `audiod`, listek (volitelny)].
+    Audio,
 }
 
 impl SessMsg {
@@ -55,6 +69,7 @@ impl SessMsg {
             SessMsg::Adopt => w.u8(S_ADOPT),
             SessMsg::Tasks => w.u8(S_TASKS),
             SessMsg::Power => w.u8(S_POWER),
+            SessMsg::Audio => w.u8(S_AUDIO),
             SessMsg::Client(m) => {
                 w.u8(S_CLIENT);
                 w.0.extend_from_slice(&m.encode());
@@ -76,6 +91,7 @@ impl SessMsg {
             S_ADOPT if rest.is_empty() => Ok(SessMsg::Adopt),
             S_TASKS if rest.is_empty() => Ok(SessMsg::Tasks),
             S_POWER if rest.is_empty() => Ok(SessMsg::Power),
+            S_AUDIO if rest.is_empty() => Ok(SessMsg::Audio),
             _ => Err(DecodeError),
         }
     }

@@ -10,6 +10,7 @@ site menu.
 |---|---|---|
 | [Sestavení a ladění](cs/sestaveni.md) | [Building and debugging](en/building.md) | nástroje, příkazy, testy, ladění, struktura / tools, commands, tests, debugging, layout |
 | [Architektura](cs/architektura.md) | [Architecture](en/architecture.md) | návrh systému, milníky a důvody / system design, milestones and reasons |
+| [Živé USB](cs/zive-usb.md) | [Live USB](en/live-usb.md) | zkoušení na skutečném PC: obraz, zápis na flashku (xtask, Rufus, dd), start, rizika, co dělat při problému / trying it on a real PC: image, writing the stick (xtask, Rufus, dd), boot, risks, what to do when something goes wrong |
 
 ### Jádro a programy / Kernel and programs
 
@@ -43,7 +44,7 @@ site menu.
 |---|---|---|
 | [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
 | [Disky](cs/disky.md) | [Disks](en/disks.md) | NVMe, AHCI (SATA), virtio-blk, ochrana cizích disků a GPT, VMware a skutečné PC / NVMe, AHCI (SATA), virtio-blk, foreign disk protection and GPT, VMware and real PC |
-| [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
+| [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, disky USB, ověření nového zařízení / xHCI controller, hubs, HID, USB disks, new device verification |
 | [ACPI a napájení](cs/acpi.md) | [ACPI and power](en/acpi.md) | ACPICA v userspace, vypnutí S5, restart, tlačítko napájení, teploty, baterie, příkazy shutdown/reboot / ACPICA in userspace, S5 power-off, reboot, power button, temperatures, batteries, shutdown/reboot commands |
 
 ### Ovladače / Drivers
@@ -52,6 +53,12 @@ site menu.
 |---|---|---|
 | [Ovladače](cs/ovladace.md) | [Drivers](en/drivers.md) | příručka autora ovladače: architektura, bezpečnost, sada driverkit, první ovladač krok za krokem, manifest, simulace hardwaru, zdroje a licence, Rust nebo převzaté C, ladění, kontrolní seznam / driver author's guide: architecture, security, the driverkit, first driver step by step, manifest, hardware simulation, sources and licences, Rust or adopted C, debugging, checklist |
 | [Ovladač edu](cs/ovladac-edu.md) | [Driver edu](en/driver-edu.md) | ukázkový ovladač pro zařízení QEMU edu / sample driver for the QEMU edu device |
+
+### Zvuk / Audio
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Zvuk](cs/zvuk.md) | [Audio](en/audio.md) | ovladač Intel HDA, kodeky, cesty k výstupům a vstupu, HDMI, služba audiod, protokol se sdílenými buffery, mix, nahrávání a převod frekvence, latence, obnova po pádu, příkaz `audio` / Intel HDA driver, codecs, output and input paths, HDMI, audiod service, shared-buffer protocol, mixing, recording and rate conversion, latency, crash recovery, the `audio` command |
 
 ### Grafika / Graphics
 

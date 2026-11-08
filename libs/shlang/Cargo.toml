@@ -7,3 +7,5 @@ description = "Jazyk shellu: lexer, parsery zapisu B a C, spolecny strom, format
 
 [dependencies]
 abi.workspace = true
+audiomix = { path = "../audiomix" }
+audioproto = { path = "../audioproto" }
