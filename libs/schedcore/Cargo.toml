@@ -1,0 +1,9 @@
+[package]
+name = "schedcore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Logika planovace: tridy QoS, EEVDF, Realtime rozpocet, topologie a umisteni na hybridnich CPU"
+
+[dependencies]
+abi = { workspace = true }

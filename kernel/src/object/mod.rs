@@ -106,6 +106,13 @@ impl ObjectCore {
     /// Zmeni signaly, probudi vlakna a doruci pakety registracim portu,
     /// na jejichz masku nova hodnota sedi.
     pub fn update(&self, clear: Signals, set: Signals) {
+        self.update_boost(clear, set, None);
+    }
+
+    /// Jako [`Self::update`]; `boost` = trida odesilatele zpravy, ktera
+    /// zmenu zpusobila: probouzena vlakna se na ni docasne zvednou a port
+    /// si ji zapamatuje u paketu (dedeni QoS pres IPC).
+    pub fn update_boost(&self, clear: Signals, set: Signals, boost: Option<sched::Qos>) {
         let mut inner = self.inner.lock();
         let signals = (inner.signals & !clear) | set;
         inner.signals = signals;
@@ -115,12 +122,19 @@ impl ObjectCore {
                 return !matches!(&o.waiter, Waiter::Port { port, .. } if port.strong_count() == 0);
             }
             match &mut o.waiter {
-                Waiter::Thread { thread, seq } => sched::wake(thread, *seq),
+                Waiter::Thread { thread, seq } => {
+                    if let Some(b) = boost
+                        && thread.wait_seq_is(*seq)
+                    {
+                        sched::boost(thread, b);
+                    }
+                    sched::wake(thread, *seq)
+                }
                 Waiter::Port { port, key } => {
                     // Doruceno: rezervace se spotrebuje (Drop ji uz nevraci).
                     let port = core::mem::take(port);
                     if let Some(p) = port.upgrade() {
-                        p.deliver(*key, signals);
+                        p.deliver(*key, signals, boost);
                     }
                 }
             }
@@ -135,7 +149,7 @@ impl ObjectCore {
         port.reserve()?;
         let mut inner = self.inner.lock();
         if inner.signals.intersects(mask) {
-            port.deliver(key, inner.signals);
+            port.deliver(key, inner.signals, None);
             return Ok(());
         }
         if inner.observers.try_reserve(1).is_err() {

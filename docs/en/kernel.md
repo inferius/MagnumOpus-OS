@@ -52,13 +52,22 @@ the upper half with the kernel):
 
 ## Scheduler
 
-- Each CPU has thread queues per QoS class (`realtime`, `interactive`,
-  `normal`, `background`): strict priority between classes, round-robin with
-  a 10 ms quantum within a class.
-- **Tickless**: the timer is set only to the end of the quantum or the next
-  wake-up; an idle CPU sleeps in `hlt`.
-- **Load balancing**: new and woken threads go to idle CPUs; a preempted
-  thread moves to an idle CPU; an idle CPU steals work from other queues.
+Details, design comparison and measurements: [Scheduler](scheduler.md).
+
+- Each CPU has one run queue (`libs/schedcore`): first `realtime` threads
+  with budget left (fixed budget per period, EDF), then the fair classes
+  `interactive`, `normal` and `background` weighted 15 : 4 : 1 (weighted
+  class virtual time), EEVDF inside a class with a per-class quantum
+  (3 / 6 / 12 ms). Nothing starves: `background` keeps at least 1/20 of a
+  busy CPU outside `realtime`.
+- **Class assignment**: syscall `SCHED_CONTROL`, ceiling from the job (an
+  application cannot make itself `realtime`); a message inherits the
+  sender's class to the receiving thread (QoS propagation over IPC).
+- **Tickless**: the timer is set only to the end of the quantum, a
+  `realtime` budget refill or the next wake-up; an idle CPU sleeps in `hlt`.
+- **Load balancing** by class and core capacity: `interactive` and
+  `realtime` to performance cores, `background` to efficiency cores
+  (Intel hybrid CPUID 0x1A, ARM MIDR, ACPI PPTT); an idle CPU steals work.
 - **Preemption** never puts a thread to sleep or ends it, it only requeues
   it - a thread can be interrupted anywhere, even while preparing to wait.
 - **Wake-ups**: each wait has a sequence number; a wake-up with an old

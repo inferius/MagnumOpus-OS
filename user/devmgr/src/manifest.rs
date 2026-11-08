@@ -257,7 +257,16 @@ fn spawn(m: &Manifest, inst: &Instance, startup: &Startup, fs: &Initfs, parent: 
         StartHandle::user(config.handle().duplicate(None)?),
         StartHandle::user(driver_end.into_handle()),
     ];
-    let (process, control) = libos::spawn(&m.name, image, handles)?;
+    // Trida z manifestu (`service.qos`), jinak vychozi podle jmena.
+    let job = libos::job::current()?;
+    let opts = libos::spawn::Options {
+        qos: m
+            .qos
+            .and_then(|(c, b, p)| libos::sched::from_raw(c, b, p))
+            .or_else(|| libos::sched::service_default(&m.name)),
+        ..Default::default()
+    };
+    let (process, control) = libos::spawn::spawn_with(&job, &m.name, image, handles, opts)?;
     let cfg = DriverConfig {
         bus: a.bus,
         device: a.device,

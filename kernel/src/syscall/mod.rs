@@ -12,6 +12,7 @@ mod job;
 mod misc;
 mod object;
 mod process;
+mod sched_ctl;
 mod user;
 mod vm;
 
@@ -100,6 +101,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::VMO_REVOKE => hw::vmo_revoke(a),
         nr::JOB_PROCESSES => job::processes(a),
         nr::SYSTEM_POWER => hw::system_power(a),
+        nr::SCHED_CONTROL => sched_ctl::control(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -161,6 +163,7 @@ pub fn name(number: u64) -> &'static str {
         "VMO_REVOKE",
         "JOB_PROCESSES",
         "SYSTEM_POWER",
+        "SCHED_CONTROL",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

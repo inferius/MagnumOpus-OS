@@ -464,6 +464,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "sizeclass",
             "--package",
+            "schedcore",
+            "--package",
             "term",
             "--package",
             "netproto",

@@ -23,6 +23,10 @@
 //! [service]
 //! restart = true                     # po padu spustit znovu
 //! max_restarts = 5                   # nejvys tolikrat za beh systemu
+//! qos = "interactive"                # trida planovace (vychozi normal):
+//!                                    # realtime, interactive, normal, background
+//! rt_budget_us = 1000                # jen realtime: rozpocet v periode
+//! rt_period_us = 5000                # jen realtime: perioda
 //! ```
 //!
 //! Chyby nesou cestu klice a radu (`match.pci[0]: ocekavano "vvvv:dddd"`).
@@ -30,6 +34,8 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+
+use abi::sched::class as abi_class;
 
 /// Pravidlo, pro ktere zarizeni ovladac je.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +57,9 @@ pub struct Manifest {
     pub dma_max: u64,
     pub restart: bool,
     pub max_restarts: u32,
+    /// Trida planovace (`abi::sched::class`) a u Realtime rozpocet
+    /// a perioda (us); `None` = vychozi Normal.
+    pub qos: Option<(u8, u32, u32)>,
 }
 
 /// Nejvys DMA pameti pro jeden ovladac (ochrana pred preklepem v manifestu).
@@ -161,6 +170,24 @@ pub fn parse(text: &str) -> Result<Manifest, String> {
         Some(n) if (0..=1000).contains(&n) => n as u32,
         Some(n) => return Err(format!("service.max_restarts = {n}: povoleno 0-1000")),
     };
+    let qos = match t.get_str("service.qos") {
+        None => None,
+        Some("realtime") => {
+            let us = |k: &str| t.get_int(k).and_then(|v| u32::try_from(v).ok());
+            match (us("service.rt_budget_us"), us("service.rt_period_us")) {
+                (Some(b), Some(p)) if b > 0 && b * 2 <= p => Some((abi_class::REALTIME, b, p)),
+                _ => {
+                    return Err("service.qos = \"realtime\" potrebuje rt_budget_us a rt_period_us (rozpocet nejvys polovina periody)".into());
+                }
+            }
+        }
+        Some("interactive") => Some((abi_class::INTERACTIVE, 0, 0)),
+        Some("normal") => Some((abi_class::NORMAL, 0, 0)),
+        Some("background") => Some((abi_class::BACKGROUND, 0, 0)),
+        Some(other) => {
+            return Err(format!("service.qos = \"{other}\": povoleno realtime, interactive, normal, background"));
+        }
+    };
     let text = |k: &str| t.get_str(k).unwrap_or("").to_string();
     let m = Manifest {
         name: name.to_string(),
@@ -173,6 +200,7 @@ pub fn parse(text: &str) -> Result<Manifest, String> {
         dma_max,
         restart: t.get_bool("service.restart").unwrap_or(true),
         max_restarts,
+        qos,
     };
     if m.license.is_empty() || m.origin.is_empty() {
         return Err("driver.license a driver.origin jsou povinne (pravidla zdroju ovladacu)".into());

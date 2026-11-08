@@ -100,7 +100,7 @@ fn start_class(fs: &Initfs, (class, sub, proto): (u8, u8, u8), iface: Handle, pa
                 StartHandle::user(driver.into_handle()),
                 StartHandle::user(key_driver.into_handle()),
             ];
-            let (p, _control) = libos::spawn("usb-hid", image, handles)?;
+            let (p, _control) = libos::spawn::service("usb-hid", image, handles)?;
             parent.write(b"input", vec![client.into_handle()])?;
             parent.write(b"fido", vec![key_client.into_handle()])?;
             Ok(Some(p))

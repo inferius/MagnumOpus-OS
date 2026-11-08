@@ -96,6 +96,7 @@ pub fn write(a: Args) -> Result<u64> {
     channel.write(Message {
         data,
         handles,
+        qos: crate::sched::ipc_class(),
         charge,
     })?;
     Ok(0)
@@ -120,6 +121,8 @@ pub fn read(a: Args) -> Result<u64> {
         }
         Err(e) => return Err(e),
     };
+    // Dedeni QoS: obsluha zpravy bezi aspon ve tride odesilatele.
+    crate::sched::boost_current(msg.qos);
     // Data se kopiruji pred vlozenim handlu: pri chybe kopirovani se zprava
     // zahodi i s handly (objekty se uvolni), nic nezustane napul.
     user::write_bytes(&p, a[1], &msg.data)?;

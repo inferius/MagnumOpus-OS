@@ -61,6 +61,7 @@ members = [
     "libs/tz",
     "libs/shlang",
     "libs/sizeclass",
+    "libs/schedcore",
     "libs/term",
     "libs/virtio",
     "libs/web",

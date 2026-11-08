@@ -514,7 +514,7 @@ pub fn start_driver_image(
         StartHandle::user(config.handle().duplicate(None)?),
         StartHandle::user(driver_end.into_handle()),
     ];
-    let (process, control) = libos::spawn(driver.program, image, handles)?;
+    let (process, control) = libos::spawn::service(driver.program, image, handles)?;
     let config = format!("pci {} {} {}", a.bus, a.device, a.function);
     control.write(config.as_bytes(), Vec::new())?;
     // Konec kanalu ke klientovi patri initu (ten ho preda souborovemu
@@ -553,7 +553,7 @@ fn start_ps2(
         StartHandle::user(kbd_driver.into_handle()),
         StartHandle::user(mouse_driver.into_handle()),
     ];
-    let (process, control) = libos::spawn("ps2", image, handles)?;
+    let (process, control) = libos::spawn::service("ps2", image, handles)?;
     let msg = control.read(Some(libos::time::deadline_after(PS2_REPORT_TIMEOUT)))?;
     let report = core::str::from_utf8(&msg.data).unwrap_or("");
     let mut words = report.split_whitespace();

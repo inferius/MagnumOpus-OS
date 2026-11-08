@@ -27,6 +27,9 @@ use crate::sync::SpinLock;
 pub struct Message {
     pub data: Vec<u8>,
     pub handles: Vec<(Arc<dyn KernelObject>, Rights)>,
+    /// Trida odesilatele (`None` = jadro): prijemce se na ni docasne
+    /// zvedne (dedeni QoS pres IPC).
+    pub qos: Option<crate::sched::Qos>,
     /// Strzeni za zpravu z rozpoctu odesilatele (vrati se se zanikem zpravy).
     #[expect(dead_code, reason = "drzi strzeni, cte se jen v Drop")]
     pub charge: Charge,
@@ -38,6 +41,7 @@ impl Message {
         Self {
             data,
             handles,
+            qos: None,
             charge: Charge::none(),
         }
     }
@@ -100,8 +104,9 @@ impl Channel {
             return Err(Error::ShouldWait);
         }
         queue.bytes += msg.data.len();
+        let qos = msg.qos;
         queue.msgs.push_back(msg);
-        peer.core.update(Signals::NONE, Signals::READABLE);
+        peer.core.update_boost(Signals::NONE, Signals::READABLE, qos);
         Ok(())
     }
 

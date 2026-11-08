@@ -718,6 +718,31 @@ Při úspěchu se volání nevrátí. Chyby: `ACCESS_DENIED` (bez práva `POWER`
 vypne), `NOT_SUPPORTED` (firmware nemá PSCI, nebo x86 vypnutí), `BAD_HANDLE`,
 `WRONG_TYPE`. V libos `Resource::system_power`.
 
+### `SCHED_CONTROL`
+
+`(op, ...) -> výsledek`. Plánování: třída QoS vláken, strop jobu,
+Realtime rozpočet a údaje o CPU. Operace (`abi::sched::op`):
+
+| Operace | Argumenty | Právo | Výsledek |
+|---|---|---|---|
+| `THREAD_SET` (0) | `thread, class, budget_us, period_us` | `MANAGE` na vlákně (0 = vlastní vlákno) | 0 |
+| `PROCESS_SET` (1) | `process, class, budget_us, period_us` | `MANAGE` na procesu | 0 |
+| `JOB_SET_MAX` (2) | `job, class` | `WRITE` na jobu | 0 |
+| `THREAD_GET` (3) | `thread, out_ptr` | `READ` (0 = vlastní) | `QosInfo` (16 B) na `out_ptr` |
+| `CPU_INFO` (4) | `cpu_index, out_ptr` | - | počet CPU; `CpuInfo` (64 B) na `out_ptr` |
+| `CPU_HINT` (5) | `resource, cpu_index, capacity` | Resource s `POWER` | 0 |
+
+Třída (`abi::sched::class`): `REALTIME` 0, `INTERACTIVE` 1, `NORMAL` 2,
+`BACKGROUND` 3. Žádost nad strop jobu (včetně předků) = `ACCESS_DENIED`;
+snížit třídu jde vždy. Realtime: `budget_us` a `period_us` (0 = výchozí
+1 ms / 10 ms), perioda 500 µs až 1 s, rozpočet aspoň 50 µs a nejvýš
+polovina periody; všechna Realtime vlákna dohromady nejvýš 50 % kapacity
+CPU, jinak `NO_RESOURCES`. Strop jobu nejde nastavit nad strop rodiče
+(`ACCESS_DENIED`). `CPU_HINT` s kapacitou 0 vrátí odhad z CPUID/MIDR.
+Chyby navíc: `INVALID_ARGS` (neznámá operace, třída, index CPU, parametry
+Realtime), `BAD_HANDLE`, `WRONG_TYPE`, `INVALID_ADDRESS`. Popis chování:
+[Plánovač](planovac.md). V libos modul `sched`.
+
 ## Náhodná čísla
 
 Jádro má kryptografický generátor (`kernel/src/random.rs`, crate

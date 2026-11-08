@@ -126,7 +126,7 @@ impl Service for CompdService {
         let image = fs.find("compd").ok_or(Error::NotFound)?;
         let mut s = self.shared.lock();
         let display = s.display.give()?;
-        let (process, control) = libos::spawn("compd", image, Vec::new())?;
+        let (process, control) = libos::spawn::service("compd", image, Vec::new())?;
         // Odpoved na `display` = potvrzeni startu (compd se synchronizuje
         // s ovladacem a pripoji snimek).
         control.write(control::DISPLAY.as_bytes(), vec![display.into_handle()])?;
