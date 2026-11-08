@@ -35,6 +35,7 @@ members = [
     "libs/csprng",
     "libs/display",
     "libs/displaydrv",
+    "libs/intelgfx",
     "libs/libos",
     "libs/pci",
     "libs/tls",

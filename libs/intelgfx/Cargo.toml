@@ -1,0 +1,12 @@
+[package]
+name = "intelgfx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Obrazova cast grafiky Intel (Gen9 az Xe2): stav firmwaru, EDID, AUX, GMBUS, flip, scaler"
+
+[dependencies]
+display = { path = "../display" }
+displaydrv = { path = "../displaydrv" }
+guiproto = { path = "../guiproto" }
+fbcopy = { path = "../fbcopy" }

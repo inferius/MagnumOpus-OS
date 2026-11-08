@@ -1177,6 +1177,16 @@ name = "inputproto"
 version = "0.1.0"
 
 [[package]]
+name = "intelgfx"
+version = "0.1.0"
+dependencies = [
+ "display",
+ "displaydrv",
+ "fbcopy",
+ "guiproto",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
