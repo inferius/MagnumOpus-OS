@@ -8,3 +8,7 @@ description = "Kostra nativniho ovladace displeje: protokol, dvojity buffer s vs
 [dependencies]
 guiproto = { path = "../guiproto" }
 fbcopy = { path = "../fbcopy" }
+libos = { path = "../libos", optional = true }
+
+[features]
+os = ["dep:libos"]

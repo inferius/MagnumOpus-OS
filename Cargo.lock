@@ -169,6 +169,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bochs-display"
+version = "0.1.0"
+dependencies = [
+ "display",
+ "displaydrv",
+ "fbcopy",
+ "guiproto",
+ "libos",
+ "pci",
+]
+
+[[package]]
 name = "boot-info"
 version = "0.1.0"
 
@@ -543,6 +555,7 @@ version = "0.1.0"
 dependencies = [
  "fbcopy",
  "guiproto",
+ "libos",
 ]
 
 [[package]]

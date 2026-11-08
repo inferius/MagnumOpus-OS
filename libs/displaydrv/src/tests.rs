@@ -263,3 +263,13 @@ fn snapshot_roundtrip() {
     // Prilis maly objekt pameti.
     assert!(!snap.write(&mut [0u8; 16]));
 }
+
+#[test]
+fn config_message() {
+    use crate::{Config, parse_config};
+    assert_eq!(parse_config("pci 0 3 0"), Some(Config { bus: 0, device: 3, function: 0, restore: false }));
+    assert_eq!(parse_config("pci 1 2 3 restore").map(|c| c.restore), Some(true));
+    assert_eq!(parse_config("pci 0 32 0"), None);
+    assert_eq!(parse_config("pci 0 1 0 navic"), None);
+    assert_eq!(parse_config("usb 0 1 0"), None);
+}

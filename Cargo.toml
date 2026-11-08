@@ -74,6 +74,7 @@ members = [
     "user/virtio-rng",
     "user/virtio-gpu",
     "user/fbdisplay",
+    "user/bochs-display",
     "user/compd",
     "user/gui-demo",
     "user/gui-term",

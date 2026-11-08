@@ -19,6 +19,8 @@
 extern crate alloc;
 
 pub mod snapshot;
+#[cfg(feature = "os")]
+pub mod runtime;
 
 #[cfg(test)]
 mod tests;
@@ -335,4 +337,32 @@ impl VblankClock {
         let k = (t - self.start).div_ceil(self.period_ns);
         self.start + k * self.period_ns
     }
+}
+
+/// Konfigurace od spravce zarizeni nebo initu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {
+    pub bus: u8,
+    pub device: u8,
+    pub function: u8,
+    pub restore: bool,
+}
+
+/// `pci <b> <d> <f> [restore]`.
+pub fn parse_config(text: &str) -> Option<Config> {
+    let mut w = text.split_whitespace();
+    if w.next()? != "pci" {
+        return None;
+    }
+    let mut n = || w.next()?.parse::<u8>().ok();
+    let (bus, device, function) = (n()?, n()?, n()?);
+    if device > 31 || function > 7 {
+        return None;
+    }
+    let restore = match w.next() {
+        None => false,
+        Some("restore") => true,
+        Some(_) => return None,
+    };
+    Some(Config { bus, device, function, restore })
 }
