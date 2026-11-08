@@ -33,6 +33,7 @@ pub const TESTS: &[Test] = &[
     ("compd: bezpecna obrazovka po Ctrl+Alt+Del (QMP)", secure_screen),
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
     ("compd: spravce uloh a ikona uloh v panelu", task_manager),
+    ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
 ];

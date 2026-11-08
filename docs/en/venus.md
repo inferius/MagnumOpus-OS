@@ -7,7 +7,7 @@ stream following the venus-protocol format; the renderer on the host
 real Vulkan (software **lavapipe** in WSL, the GPU driver on Linux with
 a GPU).
 
-Status: **steps 1-3 done** - a QEMU test prints the name of the host's
+Status: **steps 1-4 done** (step 4: the compositor can compose on the GPU, the default stays CPU) - a QEMU test prints the name of the host's
 Vulkan physical device, creates a logical device, fills an image with a
 color (`vkCmdClearColorImage`) and reads the pixels back through a blob
 of a `VkDeviceMemory`. Next steps: see [Plan](#plan).
@@ -233,7 +233,7 @@ is 3.3 MB (a fraction of that compressed in git).
 3. ✅ Image and command buffer: `vkCreateImage`, `vkCmdClearColorImage`
    (unions in the generator), `vkCmdCopyImageToBuffer`, `vkQueueSubmit`,
    a fence, reading pixels back from the blob.
-4. Compositor composition over Vulkan.
+4. ✅ Compositor composition over Vulkan - see [Compositor on the GPU](#compositor-on-the-gpu-step-4).
 
 ### Experiment: zero-copy scanout (`SET_SCANOUT_BLOB`)
 
@@ -254,3 +254,69 @@ Conclusion: the zero-copy path is right on the system side but cannot be
 verified on screen in WSL. The compositor over Vulkan will therefore have
 both paths: zero-copy (Linux with a real GPU) and reading the frame back
 into a buffer plus today's 2D path (WSL and everywhere else).
+
+## Compositor on the GPU (step 4)
+
+The compositor can compose the frame on the GPU: the control command
+`backend gpu` (`backend cpu` switches back; **the default stays CPU**,
+also without Venus or with `--gpu 2d`). Without Venus `backend gpu`
+returns `NOT_SUPPORTED`.
+
+| Part | What it does |
+|---|---|
+| `libs/spirv` | own SPIR-V assembler (`Builder`: types, constants, variables, instructions, sections in the order the specification requires) and the composition compute shader `blend` |
+| `libs/vkcomp` | `plan` (turning an operation into shader parameters, host tests) and `gpu` (device, compute pipeline, surfaces as buffers in host-visible memory with a blob, composition with barriers and a fence) |
+| `libs/comp/src/gpu.rs` | instead of drawing into the frame, a list of operations over surfaces (`GpuSink`) |
+| `user/compd/src/gpu.rs` | GPU surfaces, uploads, composition, copying finished rectangles into the frame VMO; on a GPU error it falls back to CPU |
+
+**The `blend` shader** (8x8 workgroup, one invocation = one pixel of the
+clip): bindings 0 (frame) and 1 (source) as `u32` arrays, 15 push
+constants (destination, clip, row pitches, source rectangle for
+nearest-neighbour scaling, opacity, copy/blend). The formulas are exactly
+those of `gfx::Canvas::draw_image`: `scale(c, k)` = channel
+`(c * k + 128) >> 8`, `over(d, s)` = `s + scale(d, 255 - sa)` with
+saturation; over an opaque pixel the alpha stays 255. The output passes
+`spirv-val` (in WSL `spirv-val target/spirv-blend.spv`).
+
+**The operation list** (bottom to top for every damaged rectangle):
+
+| Surface | Contents | How it is drawn |
+|---|---|---|
+| `Desktop` | desktop background | CPU, copy |
+| `Below(window)` | shadow, frame, title with text and buttons, content background | CPU; copy inside the frame, the shadow blends |
+| `Buffer(client, buffer)` | application layer (buffer) | client pixels, blending, scaling |
+| `Color(color)` | solid layer | a 1x1 surface stretched over the layer |
+| `Above(window)` | buttons and badge without a title bar, "application not responding" | CPU, blending |
+| `Top` | panel, dimming and dialog, cursor | CPU; panel copy, the rest blends |
+
+The CPU-drawn parts are made by the same functions as the CPU path
+(`render.rs`: `draw_window_below`, `draw_window_above`, `draw_top`) in a
+transparent scratch canvas and uploaded into the surface right away. The
+result is pixel-identical to the CPU path (RGB; the frame alpha is not
+displayed), except for overlays where one CPU part draws several
+semi-transparent things on top of each other (the dimming of a window that
+does not respond, with text; semi-transparent dialog edges over the
+dimming) - there the rounding differs by a few levels of a channel.
+
+**Tests:**
+
+- host: `cargo test -p spirv` (shader reference = `gfx` on 20,000 random
+  pixels, module structure), `-p vkcomp` (plan = `gfx` on 3,000 random
+  operations), `-p comp` (the operation list executed by the reference
+  shader gives the same frame as the CPU path, also after moving a window),
+- QEMU in WSL: `vulkan: venus: skladani vrstev na GPU shodne s gfx`
+  (vkcomp against `gfx`, all pixels) and `gui: compd: skladani na GPU
+  (Venus) dava stejne pixely jako CPU` (63 screen points with the CPU and
+  GPU backends).
+
+⚠️ **Performance in WSL:** Vulkan here is lavapipe (on the CPU), application
+buffers live in guest memory the GPU cannot see (every used buffer is
+copied into a surface every frame) and the finished frame is copied back.
+GPU composition is therefore **slower** than the CPU path in WSL. A
+speed-up comes with a physical GPU (Linux with a real card), importing
+guest memory (`GUEST` blobs) and zero-copy scanout (`SET_SCANOUT_BLOB`, see
+the experiment above).
+
+**Output without a display:** in WSL the GTK display under Xvfb reports no
+enabled output. The driver then uses output 0 (1280x800), so the compositor
+runs (frames, inspection and tests work, the image is just not visible).

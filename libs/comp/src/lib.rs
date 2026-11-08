@@ -11,6 +11,7 @@
 //! - [`dialog`]: systemove dialogy a bezpecna obrazovka.
 //! - [`services`]: akce aplikaci a inspekce.
 //! - [`frame`]: takt snimku, animace, skupiny transakci, ping.
+//! - [`gpu`]: seznam operaci pro GPU backend (`compd` + `libs/vkcomp`).
 
 #![cfg_attr(not(test), no_std)]
 
@@ -18,6 +19,7 @@ extern crate alloc;
 
 pub mod dialog;
 pub mod frame;
+pub mod gpu;
 pub mod input;
 pub mod render;
 pub mod scene;
@@ -147,6 +149,11 @@ impl Comp {
     /// Zpravy k odeslani (vyprazdni frontu).
     pub fn take_out(&mut self) -> Vec<Out> {
         core::mem::take(&mut self.out)
+    }
+
+    /// Prekreslit celou obrazovku (napr. po zmene backendu skladani).
+    pub fn redraw_all(&mut self) {
+        self.damage_all();
     }
 
     /// Pocet bezicich uloh pro ikonu v panelu (od sluzby uloh).

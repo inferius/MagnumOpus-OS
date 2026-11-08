@@ -6,7 +6,7 @@ podle protokolu venus-protocol; renderer na hostiteli (virglrenderer
 s render serverem) je dekóduje a volá skutečný Vulkan hostitele
 (ve WSL softwarový **lavapipe**, na Linuxu s GPU ovladač GPU).
 
-Stav: **kroky 1-3 hotové** - test v QEMU vypíše jméno fyzického zařízení
+Stav: **kroky 1-4 hotové** (krok 4: kompozitor umí skládat na GPU, výchozí zůstává CPU) - test v QEMU vypíše jméno fyzického zařízení
 Vulkan od hostitele, vytvoří logické zařízení, obrázek vyplní barvou
 (`vkCmdClearColorImage`) a pixely přečte zpět přes blob z `VkDeviceMemory`.
 Další kroky viz [Plán](#plán).
@@ -224,7 +224,7 @@ Bez KVM nebo s TCG (aarch64 ve WSL) Venus netestujeme; `vk.xml` má
 3. ✅ Obrázek a command buffer: `vkCreateImage`, `vkCmdClearColorImage`
    (unie v generátoru), `vkCmdCopyImageToBuffer`, `vkQueueSubmit`, plot,
    zpětné čtení pixelů z bloba.
-4. Skládání kompozitoru přes Vulkan.
+4. ✅ Skládání kompozitoru přes Vulkan - viz [Kompozitor na GPU](#kompozitor-na-gpu-krok-4).
 
 ### Pokus: zobrazení bez kopie (`SET_SCANOUT_BLOB`)
 
@@ -245,3 +245,65 @@ Závěr: cesta bez kopie je správně na straně systému, ale ve WSL ji nejde
 ověřit na obrazovce. Kompozitor přes Vulkan proto bude mít obě cesty:
 bez kopie (Linux se skutečnou GPU) a se zpětným čtením snímku do bufferu
 a dnešní 2D cestou (WSL a všude jinde).
+
+## Kompozitor na GPU (krok 4)
+
+Kompozitor umí skládat snímek na GPU: řídicí příkaz `backend gpu`
+(`backend cpu` vrátí CPU; **výchozí zůstává CPU**, i bez Venusu nebo
+s `--gpu 2d`). Bez Venusu `backend gpu` vrátí `NOT_SUPPORTED`.
+
+| Část | Co dělá |
+|---|---|
+| `libs/spirv` | vlastní assembler SPIR-V (`Builder`: typy, konstanty, proměnné, instrukce, části v pořadí podle specifikace) a výpočetní shader skládání `blend` |
+| `libs/vkcomp` | `plan` (převod operace na parametry shaderu, testy na hostiteli) a `gpu` (zařízení, výpočetní pipeline, povrchy jako buffery v paměti viditelné z hosta s blobem, skládání s bariérami a plotem) |
+| `libs/comp/src/gpu.rs` | místo kreslení do snímku seznam operací nad povrchy (`GpuSink`) |
+| `user/compd/src/gpu.rs` | povrchy na GPU, nahrávání, skládání, kopie hotových obdélníků do VMO snímku; při chybě GPU automaticky zpět na CPU |
+
+**Shader `blend`** (skupina 8x8, jedno vlákno = jeden pixel ořezu): vazby 0
+(snímek) a 1 (zdroj) jako pole `u32`, 15 push constants (cíl, ořez, krok
+řádků, výřez zdroje pro zvětšení nejbližším sousedem, průhlednost,
+kopie/prolínání). Vzorce jsou přesně jako `gfx::Canvas::draw_image`:
+`scale(c, k)` = složka `(c * k + 128) >> 8`, `over(d, s)` = `s + scale(d,
+255 - sa)` s nasycením; nad neprůhledným pixelem zůstane alfa 255.
+Výstup prochází `spirv-val` (ve WSL `spirv-val target/spirv-blend.spv`).
+
+**Seznam operací** (zdola nahoru pro každý poškozený obdélník):
+
+| Povrch | Obsah | Jak se kreslí |
+|---|---|---|
+| `Desktop` | pozadí plochy | CPU, kopie |
+| `Below(okno)` | stín, rám, titulek s textem a tlačítky, pozadí obsahu | CPU; uvnitř rámu kopie, stín prolínání |
+| `Buffer(klient, buffer)` | vrstva aplikace (buffer) | pixely klienta, prolínání, zvětšení |
+| `Color(barva)` | barevná vrstva | povrch 1x1 roztažený na vrstvu |
+| `Above(okno)` | tlačítka a odznak bez titulku, „Aplikace nereaguje“ | CPU, prolínání |
+| `Top` | panel, ztlumení a dialog, kurzor | CPU; panel kopie, zbytek prolínání |
+
+Části kreslené CPU vznikají stejnými funkcemi jako CPU cesta
+(`render.rs`: `draw_window_below`, `draw_window_above`, `draw_top`)
+v průhledném odkládacím plátně a hned se nahrají do povrchu. Výsledek je
+pixel po pixelu stejný jako CPU (RGB; alfa snímku se nezobrazuje), kromě
+překryvů, kde se v jedné CPU části kreslí víc poloprůhledných věcí nad
+sebe (ztlumení okna, které nereaguje, s textem; poloprůhledné okraje
+dialogu nad ztlumením) - tam se liší zaokrouhlení o pár úrovní složky.
+
+**Testy:**
+
+- hostitel: `cargo test -p spirv` (reference shaderu = `gfx` na 20 000
+  náhodných pixelech, struktura modulu), `-p vkcomp` (plán = `gfx` na 3000
+  náhodných operacích), `-p comp` (seznam operací provedený referenčním
+  shaderem dá stejný snímek jako CPU, i po přesunu okna),
+- QEMU ve WSL: `vulkan: venus: skladani vrstev na GPU shodne s gfx`
+  (vkcomp proti `gfx`, všechny pixely) a `gui: compd: skladani na GPU
+  (Venus) dava stejne pixely jako CPU` (63 bodů obrazovky s backendem CPU
+  a GPU).
+
+⚠️ **Výkon ve WSL:** Vulkan je tu lavapipe (na procesoru), buffery
+aplikací jsou v paměti hosta, kterou GPU nevidí (každý použitý buffer se
+každý snímek kopíruje do povrchu), a hotový snímek se kopíruje zpět.
+Skládání na GPU je proto ve WSL **pomalejší** než CPU cesta. Zrychlení
+přinese fyzická GPU (Linux se skutečnou kartou), import paměti hosta
+(blob `GUEST`) a zobrazení bez kopie (`SET_SCANOUT_BLOB`, viz pokus výše).
+
+**Výstup bez displeje:** ve WSL displej GTK pod Xvfb nehlásí zapnutý
+výstup. Ovladač pak použije výstup 0 (1280x800), takže kompozitor běží
+(snímky, inspekce a testy fungují, obraz jen není vidět).

@@ -14,6 +14,7 @@
 
 extern crate alloc;
 
+mod gpu;
 mod peers;
 
 use alloc::boxed::Box;
@@ -57,6 +58,8 @@ struct Service {
     focus: Option<Channel>,
     secure: Option<Channel>,
     peers: Peers,
+    /// Skladani na GPU (`backend gpu`); `None` = CPU.
+    gpu: Option<gpu::GpuBackend>,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -68,6 +71,7 @@ fn main(startup: Startup) -> i64 {
         focus: None,
         secure: None,
         peers: Peers::default(),
+        gpu: None,
     };
     loop {
         if !s.wait_and_serve() {
@@ -213,8 +217,25 @@ impl Service {
             return;
         }
         let (w, h) = (sc.w, sc.h);
-        let mut canvas = gfx::Canvas::new(sc.pixels(), w, h, w).expect("snimek ma spravnou velikost");
-        if let Some(rects) = c.tick(now, &mut canvas) {
+        let composed = match self.gpu.as_mut() {
+            Some(g) => match g.tick(c, now, sc.pixels()) {
+                Ok(r) => r,
+                Err(e) => {
+                    // GPU selhalo: zpet na CPU, prekreslit vse.
+                    println!("compd: skladani na GPU selhalo ({e:?}), zpet na CPU");
+                    if let Some(g) = self.gpu.take() {
+                        g.destroy();
+                    }
+                    c.redraw_all();
+                    None
+                }
+            },
+            None => {
+                let mut canvas = gfx::Canvas::new(sc.pixels(), w, h, w).expect("snimek ma spravnou velikost");
+                c.tick(now, &mut canvas)
+            }
+        };
+        if let Some(rects) = composed {
             sc.seq += 1;
             let req = Request::Present { seq: sc.seq, output: 0, rects };
             if sc.display.write(&req.encode(), Vec::new()).is_err() {
@@ -308,6 +329,7 @@ impl Service {
                     _ => Err(Error::InvalidArgs),
                 }
             }
+            control::BACKEND => self.set_backend(words.next().unwrap_or("")),
             control::STATUS => match &self.comp {
                 Some(c) => {
                     let mut s = String::new();
@@ -323,6 +345,55 @@ impl Service {
             Ok((t, h)) => self.reply(&format!("ok {t}"), h),
             Err(e) => self.reply(&format!("err {}", e.name()), Vec::new()),
         }
+    }
+
+    /// `backend gpu|cpu`: prepnuti skladani (viz `gpu.rs`).
+    fn set_backend(&mut self, which: &str) -> Result<(String, Vec<Handle>)> {
+        match which {
+            "cpu" => {
+                if let Some(g) = self.gpu.take() {
+                    g.destroy();
+                }
+            }
+            "gpu" => {
+                if self.gpu.is_some() {
+                    return Ok((String::new(), Vec::new()));
+                }
+                let sc = self.screen.as_ref().ok_or(Error::NotFound)?;
+                let (w, h) = (sc.w, sc.h);
+                // Render uzel z kanalu displeje; odpovedi PRESENTED, ktere
+                // mezitim prijdou, se zpracuji hned.
+                sc.display.write(&Request::OpenRender.encode(), Vec::new())?;
+                let end = libos::time::deadline_after(core::time::Duration::from_secs(5));
+                let render = loop {
+                    let m = sc.display.read(Some(end))?;
+                    match Reply::decode(&m.data)? {
+                        Reply::Render => break m.handles.into_iter().next().ok_or(Error::Corrupted)?,
+                        Reply::Error { op: guiproto::display::op::OPEN_RENDER, code } => return Err(code),
+                        Reply::Presented { time, .. } => {
+                            if let Some(c) = self.comp.as_mut() {
+                                c.presented(time);
+                            }
+                        }
+                        _ => {}
+                    }
+                };
+                let g = gpu::GpuBackend::new(Channel::from_handle(render), w, h).map_err(|e| {
+                    println!("compd: GPU backend nejde: {e:?}");
+                    match e {
+                        venus::client::Error::Os(code) => code,
+                        _ => Error::NotSupported,
+                    }
+                })?;
+                self.gpu = Some(g);
+            }
+            _ => return Err(Error::InvalidArgs),
+        }
+        if let Some(c) = self.comp.as_mut() {
+            c.redraw_all();
+        }
+        println!("compd: skladani: {which}");
+        Ok((String::new(), Vec::new()))
     }
 
     /// `display`: kanal ovladace grafiky. Zjisti vystup, vytvori snimek
