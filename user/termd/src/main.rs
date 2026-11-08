@@ -2,7 +2,9 @@
 //!
 //! Start: bootstrap kanal = spojeni s oknem terminalu (nativni protokol
 //! `term::proto`); handly `kind::USER` = [kanal sluzby fsd, kanal registru
-//! relaci] (oba volitelne); `kind::INITFS` = obraz initfs (odtud se spousti
+//! relaci, kanal napajeni] (vse volitelne; napajeni: pro kazdou relaci
+//! termd vytvori kanal, jeden konec posle initu zpravou `session`, druhy
+//! relaci `SessMsg::Power` - prikazy `shutdown`/`reboot`); `kind::INITFS` = obraz initfs (odtud se spousti
 //! `shsess`).
 //!
 //! Kazda relace bezi ve vlastnim procesu `shsess` (`term::broker`). termd
@@ -44,6 +46,8 @@ struct Termd {
     window_open: bool,
     fsd: Option<FsClient>,
     registry: Option<Channel>,
+    /// Kanal k initu pro napajeni relaci.
+    power: Option<Channel>,
     /// Zapisovaci konec brany agenta AI (kazda relace dostane duplikat).
     agent: Option<Channel>,
     image: Option<&'static [u8]>,
@@ -108,9 +112,39 @@ impl Termd {
         let (_proc, chan) = libos::spawn("shsess", image, Vec::new())?;
         let init = SessMsg::Init { session, tag: tag.into(), home: String::from("/") };
         chan.write(&init.encode(), handles)?;
+        if let Some(p) = &self.power
+            && let Ok((ours, theirs)) = Channel::create()
+            && p.write(b"session", alloc::vec![ours.into_handle()]).is_ok()
+        {
+            let _ = chan.write(&SessMsg::Power.encode(), alloc::vec![theirs.into_handle()]);
+        }
         self.park(session, tag, keep);
         self.sessions.push(Sess { id: session, chan });
+        // Kanaly prehledu uloh razi init: pozadat, odpoved prijde pozdeji
+        // (`registry_msg`), relace mezitim bezi bez nich.
+        if let Some(reg) = &self.registry {
+            let _ = reg.write(&RegMsg::TasksReq { session }.encode(), Vec::new());
+        }
         Ok(())
+    }
+
+    /// Zpravy registru po startu: kanaly uloh pro relace. `false` =
+    /// registr zavrel kanal.
+    fn registry_msg(&mut self) -> bool {
+        let Some(reg) = &self.registry else { return true };
+        loop {
+            match reg.try_read() {
+                Ok(m) => {
+                    if let Ok(RegMsg::Tasks { session }) = RegMsg::decode(&m.data)
+                        && let Some(s) = self.sessions.iter().find(|s| s.id == session)
+                    {
+                        let _ = s.chan.write(&SessMsg::Tasks.encode(), m.handles);
+                    }
+                }
+                Err(Error::ShouldWait) => return true,
+                Err(_) => return false,
+            }
+        }
     }
 
     /// Po startu: osirele relace z registru prevzit.
@@ -175,6 +209,7 @@ fn main(mut startup: Startup) -> i64 {
     let mut hs = core::mem::take(&mut startup.handles).into_iter();
     let fsd = hs.next().map(|h| FsClient::new(Channel::from_handle(h)));
     let registry = hs.next().map(Channel::from_handle);
+    let power = hs.next().map(Channel::from_handle);
     let agent = hs.next().map(Channel::from_handle);
     let nonce = time::wall().map(|t| (t.secs as u64) ^ ((t.nanos as u64) << 20)).unwrap_or_else(time::now);
     let mut t = Termd {
@@ -182,6 +217,7 @@ fn main(mut startup: Startup) -> i64 {
         window_open: true,
         fsd,
         registry,
+        power,
         agent,
         image,
         broker: Broker::new(nonce),
@@ -199,12 +235,18 @@ fn main(mut startup: Startup) -> i64 {
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
         let mut items: Vec<(&Handle, Signals)> = alloc::vec![(t.window.handle(), mask)];
         items.extend(t.sessions.iter().map(|s| (s.chan.handle(), mask)));
+        if let Some(r) = &t.registry {
+            items.push((r.handle(), mask));
+        }
         match libos::wait_many(&items, None) {
             Ok(_) => {}
             Err(e) => {
                 println!("termd: chyba cekani: {e}");
                 return 1;
             }
+        }
+        if !t.registry_msg() {
+            t.registry = None;
         }
         let mut i = 0;
         while i < t.sessions.len() {

@@ -52,6 +52,7 @@ pub trait Architecture:
     + Memory
     + DeviceIrq
     + LegacyIo
+    + Power
     + Iommu
     + Smp
     + PlatformInfo
@@ -334,17 +335,25 @@ pub trait LegacyIo {
     /// Zapise I/O port o sirce `width` (1, 2 nebo 4 B).
     fn port_write(port: u16, width: u8, value: u32) -> Result<(), Error>;
 
-    /// Nasmeruje starou linku (ISA IRQ `line`) na cislo preruseni `irq`
-    /// (z rozsahu zarizeni). Vraci, zda je linka spoustena urovni: takovou
-    /// jadro po kazdem preruseni zamaskuje a odmaskuje az pri potvrzeni.
-    /// Pouzita linka = `AlreadyExists`.
-    fn line_route(line: u32, irq: u32) -> Result<bool, Error>;
+    /// Nasmeruje pevnou linku (x86: ISA IRQ, aarch64: SPI GIC) na cislo
+    /// preruseni `irq` (z rozsahu zarizeni). `edge` = spousteni hranou (jen
+    /// kde ho neurcuje firmware; x86 bere spousteni z MADT). Vraci, zda je
+    /// linka spoustena urovni: takovou jadro po kazdem preruseni zamaskuje
+    /// a odmaskuje az pri potvrzeni. Pouzita linka = `AlreadyExists`.
+    fn line_route(line: u32, irq: u32, edge: bool) -> Result<bool, Error>;
 
     /// Zamaskuje / odmaskuje linku.
     fn line_mask(line: u32, masked: bool);
 
     /// Uvolni linku (zamaskuje ji).
     fn line_release(line: u32);
+}
+
+/// Napajeni pres firmware: vypnuti a restart (syscall `SYSTEM_POWER`).
+/// Pri uspechu se nevraci. Architektura, ktera dany krok neumi bez AML
+/// (x86 vypnuti = S5 pres sluzbu ACPI), vraci `NotSupported`.
+pub trait Power {
+    fn system_power(off: bool) -> Result<(), Error>;
 }
 
 /// IOMMU: preklad DMA zarizeni (x86: VT-d, AMD-Vi; aarch64: SMMUv3).

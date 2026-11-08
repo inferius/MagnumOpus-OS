@@ -402,6 +402,10 @@ fn sys_and_provider(_: &Startup) -> TestResult {
     let msgs = ask(&ch, "jak je na tom system", None)?;
     check_eq!(decisions(&msgs), vec![String::from("allow")], "systemove nastroje jen cteni");
     check!(text_of(&msgs).contains("fsd stav="), "stav sluzeb ze supervisoru");
+    // Prehled uloh z taskd (identita uzivatele relace, jen cteni).
+    let ch = open(spec(Mode::Diag, "tool sys.tasks {}\n---\nsay ulohy: {result}", false), true)?;
+    let t = text_of(&ask(&ch, "jake ulohy bezi", None)?);
+    check!(t.starts_with("ulohy: ") && !t.contains("taskd") && !t.contains("nebezi"), &format!("prehled uloh: {t}"));
     let (ours, theirs) = Channel::create().map_err(|e| fail("kanal", e))?;
     libos::thread::spawn("agent-test-echo", move || echo_provider(theirs)).map_err(|e| fail("vlakno", e))?;
     crate::agent::register_provider("test", ours).map_err(|e| fail("registrace", e))?;

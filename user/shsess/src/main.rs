@@ -31,6 +31,7 @@ use shlang::host::Fs;
 use term::ctl::SessMsg;
 use term::proto::{ClientMsg, ServerMsg};
 use term::session::{Env, Link, Service};
+use term::taskboard::Chan;
 use term::tasks::{Clock, Joinable, Notify};
 
 mod ai;
@@ -47,13 +48,28 @@ const TASK_STACK_BUDGET: usize = 160 * 1024;
 struct MainLink<'a> {
     chan: &'a Channel,
     open: bool,
+    /// Kanaly prehledu uloh (`SessMsg::Tasks`), predaji se `SysEnv`.
+    tasks: Option<Vec<libos::Handle>>,
 }
+
+/// Kanal k initu pro `shutdown`/`reboot` (zprava `SessMsg::Power` od termd).
+static POWER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 impl MainLink<'_> {
     fn client(&mut self, r: Result<libos::Message, Error>) -> Option<ClientMsg> {
         match r {
             Ok(m) => match SessMsg::decode(&m.data) {
                 Ok(SessMsg::Client(c)) => Some(c),
+                Ok(SessMsg::Tasks) => {
+                    self.tasks = Some(m.handles);
+                    None
+                }
+                Ok(SessMsg::Power) => {
+                    if let Some(h) = m.handles.into_iter().next() {
+                        *POWER.lock() = Some(Channel::from_handle(h));
+                    }
+                    None
+                }
                 _ => None,
             },
             Err(Error::ShouldWait) | Err(Error::TimedOut) => None,
@@ -131,6 +147,18 @@ struct SysEnv {
     /// Prikaz `ai` (relace agenta AI).
     ai: ai::Ai,
     home: String,
+    /// Prehled uloh (`taskd`): kanal producenta a klienta.
+    task_producer: Option<Channel>,
+    task_client: Option<Channel>,
+}
+
+impl SysEnv {
+    fn task_chan(&self, c: Chan) -> Option<&Channel> {
+        match c {
+            Chan::Producer => self.task_producer.as_ref(),
+            Chan::Client => self.task_client.as_ref(),
+        }
+    }
 }
 
 impl Env for SysEnv {
@@ -182,6 +210,54 @@ impl Env for SysEnv {
     fn clock(&self) -> Option<Clock> {
         Some(Clock { now: wall_ns, sleep: sleep_ns })
     }
+
+    fn task_send(&mut self, to: Chan, data: Vec<u8>) -> bool {
+        match self.task_chan(to) {
+            Some(c) => c.write(&data, Vec::new()).is_ok(),
+            None => false,
+        }
+    }
+
+    fn task_recv(&mut self) -> Vec<(Chan, Vec<u8>)> {
+        let mut out = Vec::new();
+        for c in [Chan::Producer, Chan::Client] {
+            let Some(ch) = self.task_chan(c) else { continue };
+            loop {
+                match ch.try_read() {
+                    Ok(m) => out.push((c, m.data)),
+                    Err(Error::ShouldWait) => break,
+                    Err(_) => {
+                        // taskd skoncil: bez prehledu uloh dal.
+                        match c {
+                            Chan::Producer => self.task_producer = None,
+                            Chan::Client => self.task_client = None,
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// `shutdown`/`reboot`: pozadavek initu (ten ukonci sluzby a pozada
+    /// acpid). Uspech = pocitac se vypne; odpoved prijde jen pri chybe.
+    fn power(&mut self, reboot: bool) -> Result<(), Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        let req = if reboot { powerproto::Request::Reboot } else { powerproto::Request::Shutdown };
+        chan.write(&req.encode(), Vec::new())?;
+        match chan.read(Some(time::deadline_after(Duration::from_secs(60)))) {
+            Ok(m) => match powerproto::Reply::decode(&m.data) {
+                Ok(powerproto::Reply::Failed(e)) => Err(e),
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            },
+            // Init ukoncuje system (kanal zavren): vypnuti probiha.
+            Err(Error::PeerClosed) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 fn tick() -> Option<u64> {
@@ -217,21 +293,33 @@ fn main(startup: Startup) -> i64 {
         notify: notify.clone(),
         ai: ai::Ai::new(agent_gate),
         home: home.clone(),
+        task_producer: None,
+        task_client: None,
     };
     println!("shsess {session}: bezim ({tag})");
 
     loop {
         // Hlavni smycka: zpravy okna pres termd.
-        let mut link = MainLink { chan: &main_chan, open: true };
+        let mut link = MainLink { chan: &main_chan, open: true, tasks: None };
         while link.open {
-            // Zprava okna, nebo uloha neco poslala (udalost), nebo tik.
+            // Kanaly prehledu uloh prisly (termd je pozadal u initu).
+            if let Some(hs) = link.tasks.take() {
+                let mut hs = hs.into_iter().map(Channel::from_handle);
+                env.task_producer = hs.next();
+                env.task_client = hs.next();
+            }
+            // Zprava okna, uloha neco poslala (udalost), zprava prehledu
+            // uloh, nebo tik.
             if let Some(n) = notify.as_ref() {
-                let items = [
-                    (main_chan.handle(), Signals::READABLE | Signals::PEER_CLOSED),
-                    (n.0.handle(), Signals::SIGNALED),
-                ];
+                let rd = Signals::READABLE | Signals::PEER_CLOSED;
+                let mut items: Vec<(&libos::Handle, Signals)> =
+                    alloc::vec![(main_chan.handle(), rd), (n.0.handle(), Signals::SIGNALED)];
+                for c in [env.task_producer.as_ref(), env.task_client.as_ref()].into_iter().flatten() {
+                    items.push((c.handle(), rd));
+                }
                 let woke = libos::wait_many(&items, tick());
-                if matches!(woke, Ok((1, _)) | Err(Error::TimedOut)) {
+                drop(items);
+                if matches!(woke, Ok((i, _)) if i >= 1) || matches!(woke, Err(Error::TimedOut)) {
                     let _ = n.0.reset();
                     let fs: &mut dyn shlang::host::Fs = match fsd.as_mut() {
                         Some(f) => f,
@@ -265,7 +353,7 @@ fn main(startup: Startup) -> i64 {
                 Some(f) => f,
                 None => &mut nofs,
             };
-            let mut dead = MainLink { chan: &main_chan, open: false };
+            let mut dead = MainLink { chan: &main_chan, open: false, tasks: None };
             svc.idle(&mut dead, fs, &mut env);
             let Some(sp) = spare.as_ref() else {
                 if svc.has_jobs() {

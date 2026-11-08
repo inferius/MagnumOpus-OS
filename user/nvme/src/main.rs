@@ -22,11 +22,10 @@ mod ctrl;
 use alloc::vec::Vec;
 
 use blockproto::server::{self, Disks};
-use blockproto::{SECTOR, feature};
+use blockproto::feature;
 use ctrl::{AUX_OFF, Command, Controller, DATA_OFF, IO_DSM, IO_FLUSH, IO_READ, IO_WRITE, Namespace};
-use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
-use libos::{Channel, Error, Mapping, Result, Startup, Vmo, println};
+use libos::{Error, Result, Startup, Vmo, println};
 use pci::Ecam;
 
 libos::entry!(main);
@@ -42,7 +41,8 @@ struct Nvme {
     namespaces: Vec<Namespace>,
     write_cache: bool,
     dsm: bool,
-    max_sectors: u32,
+    /// Nejvic bajtu v jednom prikazu (MDTS).
+    max_bytes: u64,
     resource: Resource,
 }
 
@@ -58,7 +58,7 @@ fn main(startup: Startup) -> i64 {
         println!("nvme: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
-    let Some((bar, size)) = read_bar(&startup.bootstrap) else {
+    let Some((bar, size)) = pci::read_bar_message(&startup.bootstrap, "bar") else {
         println!("nvme {address}: chybi adresa registru (bar)");
         return 2;
     };
@@ -75,9 +75,10 @@ fn main(startup: Startup) -> i64 {
     };
     for ns in &nvme.namespaces {
         println!(
-            "nvme {address}: jmenny prostor {}: {} MiB, mezipamet zapisu {}, TRIM {}{}",
+            "nvme {address}: jmenny prostor {}: {} MiB, sektor {} B, mezipamet zapisu {}, TRIM {}{}",
             ns.nsid,
-            ns.sectors * SECTOR as u64 / (1024 * 1024),
+            ns.sectors * ns.sector_size as u64 / (1024 * 1024),
+            ns.sector_size,
             if nvme.write_cache { "ano" } else { "ne" },
             if nvme.dsm { "ano" } else { "ne" },
             if ns.write_protected { ", chranen proti zapisu" } else { "" },
@@ -96,27 +97,17 @@ fn main(startup: Startup) -> i64 {
     0
 }
 
-/// Zprava `bar <fyzicka adresa> <velikost>`.
-fn read_bar(bootstrap: &Channel) -> Option<(u64, u64)> {
-    let msg = bootstrap.read(None).ok()?;
-    let text = core::str::from_utf8(&msg.data).ok()?;
-    let mut w = text.split_whitespace();
-    if w.next()? != "bar" {
-        return None;
-    }
-    Some((w.next()?.parse().ok()?, w.next()?.parse().ok()?))
-}
-
 impl Nvme {
     fn new(mut c: Controller, resource: Resource) -> Result<Self> {
         let id = c.identify_controller()?;
-        let namespaces = c.namespaces(MAX_NAMESPACES)?;
+        // Sektor musi projit jednim prenosem (MDTS) i bufferem ovladace.
+        let namespaces = c.namespaces(&id, MAX_NAMESPACES)?;
         Ok(Self {
             c,
             namespaces,
             write_cache: id.write_cache,
             dsm: id.dsm,
-            max_sectors: id.max_sectors,
+            max_bytes: id.max_bytes,
             resource,
         })
     }
@@ -124,7 +115,8 @@ impl Nvme {
     /// Cteni nebo zapis `count` sektoru pres datovy buffer (jeden prikaz).
     fn rw(&mut self, d: usize, opcode: u8, lba: u64, count: u32) -> Result<()> {
         let nsid = self.namespaces[d].nsid;
-        let (prp1, prp2) = self.c.data_prps(count as u64 * SECTOR as u64);
+        let ss = self.namespaces[d].sector_size as u64;
+        let (prp1, prp2) = self.c.data_prps(count as u64 * ss);
         self.c
             .io_command(Command {
                 opcode,
@@ -139,6 +131,14 @@ impl Nvme {
     }
 }
 
+impl Nvme {
+    /// Velikost sektoru a nejvetsi prenos jednoho prikazu (cele sektory).
+    fn step(&self, d: usize) -> (usize, usize) {
+        let ss = self.namespaces[d].sector_size;
+        (ss, (self.max_bytes as usize / ss).max(1) * ss)
+    }
+}
+
 impl Disks for Nvme {
     fn count(&self) -> usize {
         self.namespaces.len()
@@ -147,6 +147,11 @@ impl Disks for Nvme {
     fn sectors(&self, d: usize) -> u64 {
         self.namespaces[d].sectors
     }
+
+    fn sector_size(&self, d: usize) -> usize {
+        self.namespaces[d].sector_size
+    }
+
 
     fn features(&self, d: usize) -> u64 {
         // Bez volatilni mezipameti je dokonceny zapis trvaly.
@@ -165,21 +170,21 @@ impl Disks for Nvme {
     }
 
     fn read(&mut self, d: usize, lba: u64, out: &mut [u8]) -> Result<()> {
-        let step = self.max_sectors as usize * SECTOR;
+        let (ss, step) = self.step(d);
         for (i, chunk) in out.chunks_mut(step).enumerate() {
-            let at = lba + (i * self.max_sectors as usize) as u64;
-            self.rw(d, IO_READ, at, (chunk.len() / SECTOR) as u32)?;
+            let at = lba + (i * step / ss) as u64;
+            self.rw(d, IO_READ, at, (chunk.len() / ss) as u32)?;
             self.c.mem.read_bytes(DATA_OFF, chunk);
         }
         Ok(())
     }
 
     fn write(&mut self, d: usize, lba: u64, data: &[u8]) -> Result<()> {
-        let step = self.max_sectors as usize * SECTOR;
+        let (ss, step) = self.step(d);
         for (i, chunk) in data.chunks(step).enumerate() {
-            let at = lba + (i * self.max_sectors as usize) as u64;
+            let at = lba + (i * step / ss) as u64;
             self.c.mem.write_bytes(DATA_OFF, chunk);
-            self.rw(d, IO_WRITE, at, (chunk.len() / SECTOR) as u32)?;
+            self.rw(d, IO_WRITE, at, (chunk.len() / ss) as u32)?;
         }
         Ok(())
     }
@@ -234,11 +239,9 @@ impl Disks for Nvme {
     /// DMA pamet. 1 = stranka nezmenena (IOMMU zapis zablokovala), 0 =
     /// prepsana. Zapis jde jen do vlastni pameti ovladace.
     fn test_dma_protection(&mut self, d: usize) -> Result<u64> {
-        const PATTERN: u8 = 0xAA;
-        let page = Vmo::create(4096)?;
-        let map = Mapping::new(&page, 0, 4096, MAP_READ | MAP_WRITE)?;
-        map.write_bytes(0, &[PATTERN; SECTOR]);
-        let phys = self.resource.phys_addr(&page, 0)?;
+        // Jeden sektor do jedne stranky (PRP1); vetsi sektor test neumi.
+        let probe = server::DmaProbe::new(&self.resource, self.namespaces[d].sector_size)?;
+        let phys = probe.phys;
         let nsid = self.namespaces[d].nsid;
         // Vysledek prikazu je vedlejsi (radic chybu prenosu hlasi nebo ne).
         let _ = self.c.io_command(Command {
@@ -247,8 +250,6 @@ impl Disks for Nvme {
             prp1: phys,
             ..Default::default()
         });
-        let mut back = [0u8; SECTOR];
-        map.read_bytes(0, &mut back);
-        Ok(back.iter().all(|&b| b == PATTERN) as u64)
+        Ok(probe.untouched())
     }
 }

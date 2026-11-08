@@ -9,4 +9,8 @@ description = "Chytry terminal: nativni protokol, sluzba relaci, adapter VT100, 
 abi.workspace = true
 shlang = { path = "../shlang" }
 spin = "0.12"
+taskproto = { path = "../taskproto" }
 noto-sans-mono-bitmap = { version = "0.4", default-features = false, features = ["regular", "size_16", "size_24", "unicode-basic-latin", "unicode-latin-1-supplement", "unicode-latin-extended-a", "unicode-specials"] }
+
+[dev-dependencies]
+taskcore = { path = "../taskcore" }

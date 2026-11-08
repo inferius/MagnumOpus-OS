@@ -10,7 +10,9 @@
 //!   Klient dostane druhy konec. `agentd` si o prava nemuze rict sam.
 //! - **Systemove nastroje** (`sys.services`, `sys.crashes`, `sys.log`,
 //!   `sys.net`): vlakno initu odpovida ze snimku stavu supervisoru
-//!   ([`publish`]); jen cteni.
+//!   ([`publish`]); `sys.tasks` a `sys.task_log` cte z `taskd` pres kanal
+//!   klienta s identitou uzivatele relace (vidi jen jeho ulohy, nic neridi).
+//!   Jen cteni.
 
 use alloc::collections::VecDeque;
 use alloc::format;
@@ -201,7 +203,9 @@ pub fn open(user: u64, groups: &[u64], mut spec: OpenSpec, sys_tools: bool) -> R
     spec.has_sys = sys_tools;
     if sys_tools {
         let (ours, theirs) = Channel::create()?;
-        libos::thread::spawn("agent-sys", move || serve_sys(ours))?;
+        // Prehled uloh: klient jen pro cteni s identitou uzivatele relace.
+        let tasks = crate::tasks::client(&task_identity(user), false, false).ok();
+        libos::thread::spawn("agent-sys", move || serve_sys(ours, tasks))?;
         handles.push(theirs.into_handle());
     }
     let id = gate_call(&GateMsg::Open(spec), handles)?;
@@ -213,6 +217,71 @@ pub fn register_provider(name: &str, chan: Channel) -> Result<()> {
     gate_call(&GateMsg::Provider { name: String::from(name) }, vec![chan.into_handle()]).map(|_| ())
 }
 
+/// Identita uzivatele v `taskd` (terminal pouziva "uzivatel").
+fn task_identity(user: u64) -> String {
+    if user == TERMINAL_USER { String::from("uzivatel") } else { format!("uzivatel-{user}") }
+}
+
+fn task_line(t: &taskproto::Task) -> String {
+    let state = match &t.state {
+        taskproto::State::Running => String::from("bezi"),
+        taskproto::State::Paused => String::from("pozastaveno"),
+        taskproto::State::Waiting(w) => format!("ceka: {w}"),
+        taskproto::State::Cancelling => String::from("rusi se"),
+        taskproto::State::Done(d) => format!("hotovo: {d}"),
+        taskproto::State::Failed { code, message } => format!("chyba {code}: {message}"),
+        taskproto::State::Cancelled => String::from("zruseno"),
+    };
+    format!(
+        "{} {} [{:?}{}] kdo={} stav={} prubeh={}",
+        t.id,
+        t.name,
+        t.origin,
+        if t.agent { ", agent" } else { "" },
+        t.who,
+        state,
+        t.progress.map_or(String::from("-"), |p| format!("{p} %"))
+    )
+}
+
+/// Seznam uloh z taskd (snimek odberu, pak odhlaseni).
+fn tasks_list(ch: &Channel) -> core::result::Result<String, String> {
+    use taskproto::{Reply, Request};
+    while ch.try_read().is_ok() {}
+    ch.write(&Request::Subscribe { req: 1, since: None }.encode(), Vec::new()).map_err(|e| format!("taskd: {e}"))?;
+    let mut out = Vec::new();
+    loop {
+        let m = ch.read(Some(time::deadline_after(REPLY_WAIT))).map_err(|e| format!("taskd: {e}"))?;
+        match Reply::decode(&m.data) {
+            Ok(Reply::Snapshot { tasks, last, .. }) => {
+                out.extend(tasks.iter().map(task_line));
+                if last {
+                    break;
+                }
+            }
+            Ok(Reply::Result { result: Err(e), .. }) => return Err(format!("taskd: {}", e.name())),
+            _ => {}
+        }
+    }
+    let _ = ch.write(&Request::Unsubscribe { req: 1 }.encode(), Vec::new());
+    Ok(if out.is_empty() { String::from("zadne ulohy") } else { out.join("\n") })
+}
+
+/// Posledni radky vystupu ulohy.
+fn task_log(ch: &Channel, id: u64, lines: u32) -> core::result::Result<String, String> {
+    use taskproto::{Reply, Request};
+    while ch.try_read().is_ok() {}
+    ch.write(&Request::Log { req: 2, id, lines }.encode(), Vec::new()).map_err(|e| format!("taskd: {e}"))?;
+    loop {
+        let m = ch.read(Some(time::deadline_after(REPLY_WAIT))).map_err(|e| format!("taskd: {e}"))?;
+        match Reply::decode(&m.data) {
+            Ok(Reply::LogLines { req: 2, lines }) => return Ok(lines.join("\n")),
+            Ok(Reply::Result { req: 2, result: Err(e) }) => return Err(format!("taskd: {}", e.name())),
+            _ => {}
+        }
+    }
+}
+
 fn sys_tools() -> Vec<ToolSpec> {
     let none = || Schema::object().build();
     vec![
@@ -221,11 +290,27 @@ fn sys_tools() -> Vec<ToolSpec> {
         ToolSpec::new("sys.log", "Posledni udalosti supervisoru (pady, restarty, obnovy relaci).", Effect::Read,
             Schema::object().integer("max", "nejvic udalosti (vychozi 50)", false).build()),
         ToolSpec::new("sys.net", "Stav site: adresa, brana, DNS, linka.", Effect::Read, none()),
+        ToolSpec::new("sys.tasks", "Ulohy uzivatele z prehledu uloh (taskd): nazev, puvod, stav, prubeh.", Effect::Read, none()),
+        ToolSpec::new("sys.task_log", "Posledni radky vystupu ulohy (taskd).", Effect::Read,
+            Schema::object().integer("id", "cislo ulohy", true).integer("lines", "kolik radku (vychozi 50)", false).build()),
     ]
 }
 
-fn sys_call(tool: &str, input: &agentproto::json::Value) -> (String, bool) {
+fn sys_call(tool: &str, input: &agentproto::json::Value, tasks: Option<&Channel>) -> (String, bool) {
     match tool {
+        "sys.tasks" | "sys.task_log" => {
+            let Some(ch) = tasks else { return (String::from("prehled uloh (taskd) nebezi"), true) };
+            let r = if tool == "sys.tasks" {
+                tasks_list(ch)
+            } else {
+                let lines = input.u64_of("lines");
+                task_log(ch, input.u64_of("id"), if lines == 0 { 50 } else { lines.min(500) as u32 })
+            };
+            match r {
+                Ok(t) => (t, false),
+                Err(e) => (e, true),
+            }
+        }
         "sys.services" => (STATUS.lock().join("\n"), false),
         "sys.crashes" => {
             let lines: Vec<String> = STATUS
@@ -264,7 +349,7 @@ fn sys_call(tool: &str, input: &agentproto::json::Value) -> (String, bool) {
 }
 
 /// Vlakno systemovych nastroju jedne relace (konec kanalu = konec).
-fn serve_sys(ch: Channel) {
+fn serve_sys(ch: Channel, tasks: Option<Channel>) {
     if ch.write(&ProviderMsg::Register { tools: sys_tools() }.encode(), Vec::new()).is_err() {
         return;
     }
@@ -272,7 +357,7 @@ fn serve_sys(ch: Channel) {
         let reply = match ProviderMsg::decode(&m.data) {
             Ok(ProviderMsg::Call { id, tool, input }) => {
                 let v = agentproto::json::parse(&input).unwrap_or_else(|_| agentproto::json::Value::object());
-                let (content, is_error) = sys_call(&tool, &v);
+                let (content, is_error) = sys_call(&tool, &v, tasks.as_ref());
                 ProviderMsg::Result { id, is_error, content }
             }
             _ => continue,

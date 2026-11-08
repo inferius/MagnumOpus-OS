@@ -25,10 +25,44 @@ pub fn set_limit(a: Args) -> Result<u64> {
     Ok(0)
 }
 
-/// `JOB_INFO(job, out_ptr)`: zapise `abi::job::JobInfo` (48 B).
+/// `JOB_INFO(job, out_ptr)`: zapise `abi::job::JobInfo` (56 B).
 pub fn info(a: Args) -> Result<u64> {
     let p = current_process();
     let job = p.handles().get_as::<Job>(arg_handle(a[0])?, Rights::READ)?;
     user::write_bytes(&p, a[1], &job.info().encode())?;
     Ok(0)
+}
+
+/// `JOB_PROCESSES(job, out_ptr, max) -> pocet`: procesy jobu a jeho
+/// potomku (`abi::job::ProcEntry`, 64 B kazdy). Vrati celkovy pocet
+/// (zapise nejvys `max`). Pravo `READ`.
+pub fn processes(a: Args) -> Result<u64> {
+    let p = current_process();
+    let job = p.handles().get_as::<Job>(arg_handle(a[0])?, Rights::READ)?;
+    let max = a[2] as usize;
+    if max > 4096 {
+        return Err(Error::InvalidArgs);
+    }
+    let mut n = 0u64;
+    let mut off = 0u64;
+    for proc in crate::object::process::live_processes() {
+        if !proc.job().within(&job) {
+            continue;
+        }
+        if (n as usize) < max {
+            let (threads, finished) = proc.thread_stats();
+            let e = abi::job::ProcEntry {
+                pid: proc.id,
+                job: proc.job().id,
+                cpu_ns: proc.cpu_ns.load(core::sync::atomic::Ordering::Relaxed),
+                threads,
+                flags: if finished { abi::job::proc_flags::FINISHED } else { 0 },
+                name: abi::job::ProcEntry::name_bytes(&proc.name),
+            };
+            user::write_bytes(&p, a[1] + off, &e.encode())?;
+            off += abi::job::ProcEntry::SIZE as u64;
+        }
+        n += 1;
+    }
+    Ok(n)
 }

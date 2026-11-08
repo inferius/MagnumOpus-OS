@@ -25,9 +25,8 @@ use alloc::vec::Vec;
 use blockproto::server::{self, Disks};
 use blockproto::{SECTOR, feature};
 use hba::{AUX_OFF, Ata, DATA_LEN, DATA_OFF, Hba, Port};
-use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
-use libos::{Channel, Error, Mapping, Result, Startup, Vmo, println};
+use libos::{Error, Mapping, Result, Startup, Vmo, println};
 use pci::Ecam;
 
 libos::entry!(main);
@@ -46,7 +45,15 @@ const TRIM_ENTRY_MAX: u64 = 0xFFFF;
 /// Disk na jednom portu.
 struct Disk {
     port: Port,
+    info: Info,
+}
+
+/// Vlastnosti disku z IDENTIFY DEVICE.
+struct Info {
+    /// Kapacita v logickych sektorech (`sector_size`).
     sectors: u64,
+    /// Logicky sektor (512 B, u disku 4Kn 4 KiB).
+    sector_size: usize,
     /// Prikaz pro FLUSH (`None` = disk nema zapnutou mezipamet zapisu).
     flush: Option<u8>,
     /// Mezipamet zapisu je zapnuta, ale disk neumi FLUSH: bez zaruky.
@@ -73,7 +80,7 @@ fn main(startup: Startup) -> i64 {
         println!("ahci: neplatna konfigurace od spravce zarizeni");
         return 2;
     };
-    let Some((bar, size)) = read_bar(&startup.bootstrap) else {
+    let Some((bar, size)) = pci::read_bar_message(&startup.bootstrap, "bar") else {
         println!("ahci {address}: chybi adresa registru (bar)");
         return 2;
     };
@@ -93,20 +100,8 @@ fn main(startup: Startup) -> i64 {
         }
     };
     server::serve("ahci", &mut ahci, clients);
-    let ports: Vec<Port> = ahci.disks.into_iter().map(|d| d.port).collect();
-    ahci.hba.shutdown(&ports);
+    // Konec: mezipamet disku a zastaveni portu ve `Drop` (i pri chybe vyse).
     0
-}
-
-/// Zprava `bar <fyzicka adresa> <velikost>`.
-fn read_bar(bootstrap: &Channel) -> Option<(u64, u64)> {
-    let msg = bootstrap.read(None).ok()?;
-    let text = core::str::from_utf8(&msg.data).ok()?;
-    let mut w = text.split_whitespace();
-    if w.next()? != "bar" {
-        return None;
-    }
-    Some((w.next()?.parse().ok()?, w.next()?.parse().ok()?))
 }
 
 /// Slovo `i` vysledku IDENTIFY DEVICE.
@@ -159,7 +154,19 @@ impl Ahci {
                 Err(e) => println!("ahci {a}: port {p}: inicializace selhala: {e}"),
             }
         }
-        let up = hba.wait_links(&prepared);
+        let indices: Vec<u32> = prepared.iter().map(|p| p.index).collect();
+        let mut up = hba.wait_links(&indices);
+        // Porty bez linky: COMRESET a jeste jedno (spolecne) cekani.
+        let retry: Vec<usize> = (0..indices.len()).filter(|&i| !up[i]).collect();
+        if !retry.is_empty() {
+            for &i in &retry {
+                hba.comreset(indices[i]);
+            }
+            let again = hba.wait_links(&retry.iter().map(|&i| indices[i]).collect::<Vec<_>>());
+            for (&i, ok) in retry.iter().zip(again) {
+                up[i] = ok;
+            }
+        }
         let mut disks = Vec::new();
         for (port, up) in prepared.into_iter().zip(up) {
             if !up {
@@ -183,8 +190,11 @@ impl Ahci {
         })
     }
 
-    fn rw(&mut self, d: usize, command: u8, lba: u64, sectors: u32, write: bool) -> Result<()> {
+    /// Cteni nebo zapis `bytes` bajtu (cele logicke sektory) pres datovy
+    /// buffer portu.
+    fn rw(&mut self, d: usize, command: u8, lba: u64, bytes: usize, write: bool) -> Result<()> {
         let disk = &mut self.disks[d];
+        let sectors = bytes / disk.info.sector_size;
         self.hba.command(
             &mut disk.port,
             Ata {
@@ -192,19 +202,30 @@ impl Ahci {
                 lba,
                 count: sectors as u16,
                 write,
-                bytes: sectors * SECTOR as u32,
+                bytes: bytes as u32,
                 ..Default::default()
             },
         )
     }
 }
 
-/// IDENTIFY DEVICE a vlastnosti disku; `None` = disk nepouzitelny.
+/// IDENTIFY DEVICE a vlastnosti disku; `None` = disk nepouzitelny (port je
+/// pak zastaveny, aby do sve uvolnene pameti uz nesahal).
 fn identify(hba: &Hba, mut port: Port) -> Option<Disk> {
+    match probe(hba, &mut port) {
+        Some(info) => Some(Disk { port, info }),
+        None => {
+            hba.release_port(port);
+            None
+        }
+    }
+}
+
+fn probe(hba: &Hba, port: &mut Port) -> Option<Info> {
     let p = port.index;
     let aux = port.phys + AUX_OFF;
     let r = hba.command(
-        &mut port,
+        port,
         Ata {
             command: ATA_IDENTIFY,
             bytes: 512,
@@ -226,17 +247,17 @@ fn identify(hba: &Hba, mut port: Port) -> Option<Disk> {
         return None;
     }
     // Slovo 106: platne (bit 14 = 1, bit 15 = 0) a bit 12 = logicky sektor
-    // vetsi nez 512 B (velikost ve slovech 117-118).
+    // vetsi nez 512 B (velikost ve slovech 117-118). Pocty sektoru v prikazech
+    // i kapacita jsou pak v techto sektorech.
     let w106 = word(m, 106);
-    if w106 & 0xC000 == 0x4000 && w106 & (1 << 12) != 0 {
-        let words = word(m, 117) as u32 | (word(m, 118) as u32) << 16;
-        if words != 256 {
-            println!(
-                "ahci: port {p}: disk '{model}' ma logicky sektor {} B - zatim nepodporovano, vynechan",
-                words * 2
-            );
-            return None;
-        }
+    let sector_size = if w106 & 0xC000 == 0x4000 && w106 & (1 << 12) != 0 {
+        2 * (word(m, 117) as usize | (word(m, 118) as usize) << 16)
+    } else {
+        SECTOR
+    };
+    if !sector_size.is_power_of_two() || !(SECTOR..=DATA_LEN as usize).contains(&sector_size) {
+        println!("ahci: port {p}: disk '{model}' ma logicky sektor {sector_size} B - nepodporovano, vynechan");
+        return None;
     }
     let sectors = (0..4).fold(0u64, |acc, i| acc | (word(m, 100 + i) as u64) << (16 * i));
     let cache_supported = word(m, 82) & (1 << 5) != 0;
@@ -258,14 +279,14 @@ fn identify(hba: &Hba, mut port: Port) -> Option<Disk> {
         0
     };
     println!(
-        "ahci: port {p}: '{model}', {} MiB, mezipamet zapisu {}, TRIM {}",
-        sectors * SECTOR as u64 / (1024 * 1024),
+        "ahci: port {p}: '{model}', {} MiB, sektor {sector_size} B, mezipamet zapisu {}, TRIM {}",
+        sectors * sector_size as u64 / (1024 * 1024),
         if cache_enabled { "ano" } else { "ne" },
         if trim { "ano" } else { "ne" }
     );
-    Some(Disk {
-        port,
+    Some(Info {
         sectors,
+        sector_size,
         flush,
         cache_without_flush: cache_enabled && flush.is_none(),
         trim_blocks,
@@ -278,39 +299,43 @@ impl Disks for Ahci {
     }
 
     fn sectors(&self, d: usize) -> u64 {
-        self.disks[d].sectors
+        self.disks[d].info.sectors
+    }
+
+    fn sector_size(&self, d: usize) -> usize {
+        self.disks[d].info.sector_size
     }
 
     fn features(&self, d: usize) -> u64 {
         let disk = &self.disks[d];
-        let mut f = if disk.flush.is_some() {
+        let mut f = if disk.info.flush.is_some() {
             feature::FLUSH
-        } else if disk.cache_without_flush {
+        } else if disk.info.cache_without_flush {
             // Mezipamet bez moznosti ulozeni: zadna zaruka trvanlivosti.
             0
         } else {
             feature::WRITE_THROUGH | feature::FLUSH
         };
-        if disk.trim_blocks > 0 {
+        if disk.info.trim_blocks > 0 {
             f |= feature::DISCARD;
         }
         f
     }
 
     fn read(&mut self, d: usize, lba: u64, out: &mut [u8]) -> Result<()> {
-        self.rw(d, ATA_READ_DMA_EXT, lba, (out.len() / SECTOR) as u32, false)?;
+        self.rw(d, ATA_READ_DMA_EXT, lba, out.len(), false)?;
         self.disks[d].port.mem.read_bytes(DATA_OFF, out);
         Ok(())
     }
 
     fn write(&mut self, d: usize, lba: u64, data: &[u8]) -> Result<()> {
         self.disks[d].port.mem.write_bytes(DATA_OFF, data);
-        self.rw(d, ATA_WRITE_DMA_EXT, lba, (data.len() / SECTOR) as u32, true)
+        self.rw(d, ATA_WRITE_DMA_EXT, lba, data.len(), true)
     }
 
     fn flush(&mut self, d: usize) -> Result<()> {
         let disk = &mut self.disks[d];
-        match disk.flush {
+        match disk.info.flush {
             Some(command) => self.hba.command(
                 &mut disk.port,
                 Ata {
@@ -319,17 +344,17 @@ impl Disks for Ahci {
                 },
             ),
             // Mezipamet je vypnuta: zapis je trvaly po dokonceni.
-            None if !disk.cache_without_flush => Ok(()),
+            None if !disk.info.cache_without_flush => Ok(()),
             None => Err(Error::NotSupported),
         }
     }
 
     fn discard(&mut self, d: usize, lba: u64, count: u64) -> Result<()> {
         let disk = &mut self.disks[d];
-        if disk.trim_blocks == 0 {
+        if disk.info.trim_blocks == 0 {
             return Err(Error::NotSupported);
         }
-        let per_cmd = disk.trim_blocks as u64 * 64;
+        let per_cmd = disk.info.trim_blocks as u64 * 64;
         let mut done = 0;
         while done < count {
             // Popis useku: 8 B (LBA 48 bitu, pocet 16 bitu), 64 v bloku 512 B.
@@ -364,24 +389,40 @@ impl Disks for Ahci {
     /// Necha disk precist sektor 0 do bezne stranky ovladace, ktera neni
     /// DMA pamet (viz `nvme`). Zapis jde jen do vlastni pameti ovladace.
     fn test_dma_protection(&mut self, d: usize) -> Result<u64> {
-        const PATTERN: u8 = 0xAA;
-        let page = Vmo::create(4096)?;
-        let map = Mapping::new(&page, 0, 4096, MAP_READ | MAP_WRITE)?;
-        map.write_bytes(0, &[PATTERN; SECTOR]);
-        let phys = self.resource.phys_addr(&page, 0)?;
+        let ss = self.disks[d].info.sector_size;
+        let probe = server::DmaProbe::new(&self.resource, ss)?;
+        let phys = probe.phys;
         let disk = &mut self.disks[d];
         let _ = self.hba.command(
             &mut disk.port,
             Ata {
                 command: ATA_READ_DMA_EXT,
                 count: 1,
-                bytes: SECTOR as u32,
+                bytes: ss as u32,
                 data_phys: Some(phys),
                 ..Default::default()
             },
         );
-        let mut back = [0u8; SECTOR];
-        map.read_bytes(0, &mut back);
-        Ok(back.iter().all(|&b| b == PATTERN) as u64)
+        Ok(probe.untouched())
+    }
+}
+
+impl Drop for Ahci {
+    /// Konec ovladace (i po chybe): ulozit mezipamet zapisu disku (jako
+    /// normalni vypnuti NVMe) a zastavit porty, nez se uvolni jejich DMA
+    /// pamet.
+    fn drop(&mut self) {
+        for d in 0..self.disks.len() {
+            let disk = &self.disks[d];
+            if disk.port.failed {
+                continue;
+            }
+            if disk.info.flush.is_some()
+                && let Err(e) = Disks::flush(self, d)
+            {
+                println!("ahci: port {}: ulozeni mezipameti pri ukonceni selhalo: {e}", self.disks[d].port.index);
+            }
+            self.hba.stop(self.disks[d].port.index);
+        }
     }
 }

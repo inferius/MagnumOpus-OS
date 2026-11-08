@@ -48,6 +48,29 @@ impl Job {
         sys::job_info(self.0.raw())
     }
 
+    /// Procesy jobu a jeho potomku (jmeno, cislo, job, cas CPU, vlakna).
+    pub fn processes(&self) -> Result<alloc::vec::Vec<abi::job::ProcEntry>> {
+        let mut cap = 64usize;
+        loop {
+            let mut buf = alloc::vec![0u8; cap * abi::job::ProcEntry::SIZE];
+            let n = sys::job_processes(self.0.raw(), &mut buf)?;
+            if n <= cap {
+                return Ok(buf
+                    .chunks(abi::job::ProcEntry::SIZE)
+                    .take(n)
+                    .filter_map(abi::job::ProcEntry::decode)
+                    .collect());
+            }
+            cap = n.min(4096);
+            if n > 4096 {
+                // Vic nez limit syscallu: prvnich 4096.
+                let mut buf = alloc::vec![0u8; 4096 * abi::job::ProcEntry::SIZE];
+                sys::job_processes(self.0.raw(), &mut buf)?;
+                return Ok(buf.chunks(abi::job::ProcEntry::SIZE).filter_map(abi::job::ProcEntry::decode).collect());
+            }
+        }
+    }
+
     /// Novy handle na stejny job; `None` = stejna prava.
     pub fn duplicate(&self, rights: Option<Rights>) -> Result<Self> {
         self.0.duplicate(rights).map(Self)

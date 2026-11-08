@@ -128,8 +128,12 @@ zavolá** - neplatný vstup se vrátí modelu jako chyba nástroje.
 | `sys.crashes` | read | init | pády: kód konce, restarty, důvod vzdání |
 | `sys.log` | read | init | poslední události supervisoru |
 | `sys.net` | read | init | stav sítě (adresa, brána, DNS) |
+| `sys.tasks` | read | init + `taskd` | úlohy uživatele relace (název, původ, stav, průběh) |
+| `sys.task_log` | read | init + `taskd` | poslední řádky výstupu úlohy |
 
-Úlohy (`taskd`) a nastavení se přidají stejně, až jejich služby poběží:
+Úlohy čte brána z `taskd` kanálem klienta s identitou uživatele relace
+(jen jeho úlohy, bez řízení). Nastavení se přidá stejně, až jeho služba
+poběží:
 služba pošle `agentd` zprávu `Register` se seznamem `ToolSpec` (protokol
 `agentproto::registry`), podobně jako server MCP. Volání nese
 **capability relace** (nové spojení FS se stejnou identitou a připojenými
@@ -461,8 +465,9 @@ Jen ručně, s klíčem uživatele:
 - `httpc` vrací celé tělo, proto se odpověď Claude nestreamuje po síti.
 - Logy jádra nejdou ze služby číst (chybí syscall); `sys.log` vrací
   události supervisoru. Služba logů je samostatný úkol.
-- Úlohy (`taskd`) a nastavení nemají vlastní nástroje, dokud jejich služby
-  nejsou ve větvi `main`.
+- Nastavení nemá vlastní nástroje, dokud jeho služba není ve větvi `main`.
+  Identitu uživatele (`uzivatel-<číslo>` v `taskd`, uživatel 1000 v bráně
+  terminálu) převezme agent od služby účtů, až bude.
 - Terminál nemá skrytý vstup hesla, proto se klíč zadává souborem.
 - Prostor musí být dataset (viz výše).
 - Volání poskytovatele z různých relací jdou přes jeden zámek (po jednom).

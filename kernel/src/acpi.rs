@@ -22,7 +22,7 @@ pub struct Cpu {
 }
 
 /// Informace o platforme z ACPI.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Platform {
     /// Povolena CPU (plni architektura z MADT).
     pub cpus: Vec<Cpu>,
@@ -30,6 +30,23 @@ pub struct Platform {
     pub pci_ecam: Vec<PciEcam>,
     /// Udaje specificke pro architekturu (radice preruseni, casovace, IOMMU).
     pub arch: arch::PlatformArchInfo,
+    /// Fyzicka adresa RSDP a jeho kopie (36 B; ACPI 1.0 jen 20 B) pro
+    /// sluzbu ACPI: RSDP muze lezet v pameti, kterou jadro po startu
+    /// uvolni.
+    pub rsdp_phys: u64,
+    pub rsdp: [u8; 36],
+}
+
+impl Default for Platform {
+    fn default() -> Self {
+        Self {
+            cpus: Vec::new(),
+            pci_ecam: Vec::new(),
+            arch: Default::default(),
+            rsdp_phys: 0,
+            rsdp: [0; 36],
+        }
+    }
 }
 
 /// Jedno okno ECAM: konfigurace sbernic `bus_start..=bus_end` segmentu.
@@ -116,7 +133,9 @@ pub fn parse(rsdp_phys: u64) -> Result<Platform> {
     };
     let root = table(root_phys).warn_context("korenova ACPI tabulka (XSDT/RSDT)")?;
 
-    let mut platform = Platform::default();
+    let mut platform = Platform { rsdp_phys, ..Platform::default() };
+    let rsdp_len = if xsdt { 36 } else { 20 };
+    platform.rsdp[..rsdp_len].copy_from_slice(&rsdp[..rsdp_len]);
     let mut off = HEADER_LEN;
     while off + entry_size <= root.len() {
         let phys = if entry_size == 8 {

@@ -110,11 +110,14 @@ fn every_syscall_is_documented() {
         "JOB_INFO",
         "CLOCK_ADJUST",
         "FB_CONTROL",
+        "VMO_REVOKE",
+        "JOB_PROCESSES",
+        "SYSTEM_POWER",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
         let text = std::fs::read_to_string(root.join(doc)).unwrap_or_else(|e| panic!("{doc}: {e}"));
-        for name in names {
+        for name in names.iter().filter(|n| !n.is_empty()) {
             assert!(
                 text.contains(&format!("### `{name}`")),
                 "{doc}: chybi syscall {name}"
@@ -137,6 +140,42 @@ fn job_info_roundtrip() {
             limit: 5,
             available: 1,
         },
+        id: 77,
     };
     assert_eq!(JobInfo::decode(&info.encode()), info);
+    use crate::job::ProcEntry;
+    let e = ProcEntry { pid: 9, job: 77, cpu_ns: 123, threads: 2, flags: 1, name: ProcEntry::name_bytes("fsd") };
+    assert_eq!(ProcEntry::decode(&e.encode()), Some(e));
+    assert_eq!(e.name(), "fsd");
+    // Oriznuti na hranici znaku (vicebajtove znaky).
+    let long = ProcEntry::name_bytes(&"ž".repeat(20));
+    assert!(core::str::from_utf8(&long[..long.iter().position(|&c| c == 0).unwrap_or(32)]).is_ok());
+}
+
+#[test]
+fn acpi_info_roundtrip() {
+    use crate::acpi::{Info, MAX_RANGES, alloc_free::Ranges};
+    let mut rsdp = [0u8; 36];
+    rsdp[..8].copy_from_slice(b"RSD PTR ");
+    let mut ranges = Ranges::new();
+    assert!(ranges.push((0x7F00_0000, 0x2000)));
+    assert!(ranges.push((0x7FF0_0000, 0x1000)));
+    let info = Info { rsdp_phys: 0x7F00_1000, rsdp, ranges };
+    let mut buf = [0u8; 4096];
+    let n = info.encode(&mut buf).unwrap();
+    assert_eq!(n, 56 + 32);
+    assert_eq!(Info::decode(&buf[..n]), Some(info.clone()));
+    // Kratky buffer, spatny magic, prilis mnoho oblasti.
+    assert_eq!(info.encode(&mut buf[..10]), None);
+    let mut bad = buf;
+    bad[0] = b'X';
+    assert_eq!(Info::decode(&bad[..n]), None);
+    let mut many = buf;
+    many[52..56].copy_from_slice(&((MAX_RANGES + 1) as u32).to_le_bytes());
+    assert_eq!(Info::decode(&many), None);
+    let mut full = Ranges::new();
+    for i in 0..MAX_RANGES {
+        assert!(full.push((i as u64, 1)));
+    }
+    assert!(!full.push((0, 1)));
 }

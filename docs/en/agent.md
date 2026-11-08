@@ -135,9 +135,12 @@ model as a tool error.
 | `sys.crashes` | read | init | crashes: exit code, restarts, reason for giving up |
 | `sys.log` | read | init | recent supervisor events |
 | `sys.net` | read | init | network state (address, gateway, DNS) |
+| `sys.tasks` | read | init + `taskd` | tasks of the session user (name, origin, state, progress) |
+| `sys.task_log` | read | init + `taskd` | last lines of a task's output |
 
-Tasks (`taskd`) and settings are added the same way once their services
-run: a service sends `agentd` a `Register` message with a list of
+The gate reads tasks from `taskd` through a client channel with the
+session user's identity (only their tasks, no control). Settings are added
+the same way once their service runs: a service sends `agentd` a `Register` message with a list of
 `ToolSpec` (protocol `agentproto::registry`), similar to an MCP server. A
 call carries the **session capability** (a new FS connection with the same
 identity and mounts), so the service performs the operation with the
@@ -487,8 +490,9 @@ Manual only, with the user's key:
   over the network.
 - Kernel logs cannot be read from a service (no syscall); `sys.log` returns
   supervisor events. A log service is a separate task.
-- Tasks (`taskd`) and settings have no tools of their own until their
-  services are on `main`.
+- Settings have no tools of their own until their service is on `main`.
+  The agent will take the user identity (`uzivatel-<number>` in `taskd`,
+  user 1000 in the terminal gate) from the accounts service once it exists.
 - The terminal has no hidden password input, so the key is entered via a
   file.
 - The workspace must be a dataset (see above).

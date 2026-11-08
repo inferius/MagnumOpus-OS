@@ -34,10 +34,24 @@ impl Resource {
             .map(|h| Vmo::from_handle(Handle::from_raw(h)))
     }
 
-    /// Okno na registry zarizeni (jen mimo RAM).
+    /// Okno na registry zarizeni (jen mimo RAM), bez cache.
     pub fn device_memory(&self, phys: u64, size: u64) -> Result<Vmo> {
-        sys::vmo_create_physical(self.0.raw(), phys, size)
+        self.device_memory_cached(phys, size, abi::vm::cache::UNCACHED)
+    }
+
+    /// Okno na fyzicky rozsah mimo RAM s typem cache `cache`
+    /// (`abi::vm::cache`): napr. sdilena pamet zarizeni s pameti hostitele.
+    /// Kazde mapovani objektu typ zdedi.
+    pub fn device_memory_cached(&self, phys: u64, size: u64, cache: u64) -> Result<Vmo> {
+        sys::vmo_create_physical(self.0.raw(), phys, size, cache)
             .map(|h| Vmo::from_handle(Handle::from_raw(h)))
+    }
+
+    /// Odvola fyzicky objekt `vmo` (okno z `device_memory*`): jeho mapovani
+    /// zmizi ve vsech procesech (i u tech, kterym byl predan) a dalsi
+    /// mapovani selze. Pristup pres stare mapovani = vyjimka stranky.
+    pub fn revoke(&self, vmo: &Vmo) -> Result<()> {
+        sys::vmo_revoke(self.0.raw(), vmo.handle().raw())
     }
 
     /// Fyzicka adresa bajtu `offset` objektu pameti (pro DMA).
@@ -79,8 +93,30 @@ impl Resource {
     /// Prostredek musi linku povolovat ([`irq_lines`]). Zprava MSI je
     /// u takoveho objektu prazdna.
     pub fn interrupt_line(&self, line: u32) -> Result<Interrupt> {
-        let h = sys::interrupt_create_line(self.0.raw(), line)?;
+        self.interrupt_line_with(line, 0)
+    }
+
+    /// Jako [`Resource::interrupt_line`] s priznaky spousteni
+    /// (`abi::syscall::line_flags`; aarch64 SPI: hrana/uroven z ACPI _CRS).
+    pub fn interrupt_line_with(&self, line: u32, flags: u64) -> Result<Interrupt> {
+        let h = sys::interrupt_create_line_flags(self.0.raw(), line, flags)?;
         Ok(Interrupt(Handle::from_raw(h), MsiMessage::default()))
+    }
+
+    /// Precte I/O port sirky 1, 2 nebo 4 bajty.
+    pub fn port_read(&self, port: u16, width: u8) -> Result<u32> {
+        sys::ioport_read(self.0.raw(), port, width)
+    }
+
+    /// Zapise I/O port sirky 1, 2 nebo 4 bajty.
+    pub fn port_write(&self, port: u16, width: u8, value: u32) -> Result<()> {
+        sys::ioport_write(self.0.raw(), port, width, value)
+    }
+
+    /// Vypne (`abi::syscall::power_op::OFF`) nebo restartuje pocitac pres
+    /// firmware (pravo `POWER`). Pri uspechu se nevraci.
+    pub fn system_power(&self, op: u64) -> Result<()> {
+        sys::system_power(self.0.raw(), op)
     }
 
     /// Precte bajt z I/O portu (x86; prostredek musi port povolovat,

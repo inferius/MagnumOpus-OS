@@ -16,3 +16,5 @@ guiproto = { path = "../../libs/guiproto" }
 inputproto = { path = "../../libs/inputproto" }
 comp = { path = "../../libs/comp" }
 gfx = { path = "../../libs/gfx" }
+venus = { path = "../../libs/venus", features = ["os"] }
+vkcomp = { path = "../../libs/vkcomp", features = ["os"] }

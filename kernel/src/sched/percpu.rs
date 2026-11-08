@@ -86,6 +86,8 @@ pub struct PerCpu {
     pub is_idle: AtomicBool,
     pub current_qos: AtomicU8,
     pub slice_end: AtomicU64,
+    /// Kdy zacalo bezet aktualni vlakno (ns; cas CPU procesu).
+    pub run_start: AtomicU64,
 }
 
 // SAFETY: pole v UnsafeCell (`current`, `idle`, `prev`) cte a zapisuje jen
@@ -123,6 +125,7 @@ impl PerCpu {
             is_idle: AtomicBool::new(true),
             current_qos: AtomicU8::new(Qos::Idle as u8),
             slice_end: AtomicU64::new(u64::MAX),
+            run_start: AtomicU64::new(0),
         }));
         cpu.self_ptr = cpu as *const PerCpu as u64;
         // SAFETY: struktura je leaknuta (zije navzdy) a jeji prvni slovo

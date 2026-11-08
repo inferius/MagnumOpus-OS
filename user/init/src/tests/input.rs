@@ -32,6 +32,8 @@ pub const TESTS: &[Test] = &[
     ("scan kod plati jen pro klavesu hned za nim", scan_codes),
     ("plna fronta klienta: Dropped", full_queue),
     ("neplatne prikazy a zpravy", bad_commands),
+    // Posledni: dalsi sady (USB, GUI) bezi uz nad novou instanci.
+    ("zabij inputd uprostred prace", super::input_recovery::kill_inputd),
 ];
 
 /// Znacka v logu, na kterou xtask posle udalosti pres QMP (viz

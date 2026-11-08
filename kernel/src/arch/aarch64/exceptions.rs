@@ -250,6 +250,15 @@ fn irq() {
             gic::end_of_interrupt(intid);
             trap::device_irq(id);
         }
+        id if (gic::SPI_FIRST..=gic::SPI_LAST).contains(&id) => {
+            // Linku spoustenou urovni zamaskuje `dispatch` (do potvrzeni
+            // ovladacem) - az pak EOI, aby se preruseni hned neopakovalo.
+            match super::spi_irq(id) {
+                Some(irq) => trap::device_irq(irq),
+                None => log::warn!("SPI {id} bez objektu preruseni"),
+            }
+            gic::end_of_interrupt(intid);
+        }
         id => {
             gic::end_of_interrupt(intid);
             log::warn!("necekane preruseni, INTID {id}");

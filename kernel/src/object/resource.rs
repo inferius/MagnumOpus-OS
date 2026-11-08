@@ -12,7 +12,8 @@
 //!
 //! Pravo `SET_CLOCK` (nastaveni realneho casu, `CLOCK_SET`) ma jen korenovy
 //! prostredek. init ho preda sluzbe casu (handle bez `MANAGE`) a spravci
-//! zarizeni da koren bez `SET_CLOCK`.
+//! zarizeni da koren bez `SET_CLOCK`. Stejne pravo `POWER` (vypnuti
+//! a restart pres firmware, `SYSTEM_POWER`): init ho preda jen sluzbe ACPI.
 //!
 //! Krome pameti muze omezeny prostredek povolit I/O porty a stare linky
 //! preruseni (ISA IRQ) - rozsahy oznacene horni dvojici bitu zacatku
@@ -36,8 +37,9 @@ struct Limits {
     ranges: Vec<(u64, u64)>,
     /// Povolene I/O porty (zacatek, pocet).
     ports: Vec<(u64, u64)>,
-    /// Povolene linky preruseni (bit = ISA IRQ).
-    lines: u32,
+    /// Povolene linky preruseni (zacatek, pocet): x86 ISA IRQ, aarch64
+    /// cislo preruseni GIC (SPI).
+    lines: Vec<(u64, u64)>,
     irq_max: u32,
     irqs: AtomicU32,
     dma_max: u64,
@@ -119,7 +121,7 @@ impl Resource {
         if ranges.len() > MAX_RANGES {
             return Err(Error::InvalidArgs);
         }
-        let (mut memory, mut ports, mut lines) = (Vec::new(), Vec::new(), 0u32);
+        let (mut memory, mut ports, mut lines) = (Vec::new(), Vec::new(), Vec::new());
         for (start, len) in ranges {
             let base = start & !abi::syscall::RANGE_KIND_MASK;
             match start & abi::syscall::RANGE_KIND_MASK {
@@ -131,12 +133,11 @@ impl Resource {
                     ports.push((base, len));
                 }
                 abi::syscall::RANGE_IRQ_LINES => {
-                    if len == 0 || base.checked_add(len).is_none_or(|e| e > 32) {
+                    let max = abi::syscall::IRQ_LINES_MAX as u64;
+                    if len == 0 || base.checked_add(len).is_none_or(|e| e > max) {
                         return Err(Error::InvalidArgs);
                     }
-                    for line in base..base + len {
-                        lines |= 1 << line;
-                    }
+                    lines.push((base, len));
                 }
                 _ => return Err(Error::InvalidArgs),
             }
@@ -147,7 +148,7 @@ impl Resource {
         if let Some(p) = &self.limits {
             let inside = memory.iter().all(|&(s, l)| contains(&p.ranges, s, l))
                 && ports.iter().all(|&(s, l)| contains(&p.ports, s, l))
-                && lines & !p.lines == 0;
+                && lines.iter().all(|&(s, l)| contains(&p.lines, s, l));
             if !inside || irq_max > p.irq_max || dma_max > p.dma_max {
                 return Err(Error::AccessDenied);
             }
@@ -203,13 +204,14 @@ impl Resource {
             .is_none_or(|l| contains(&l.ports, port as u64, width as u64))
     }
 
-    /// Smi prostredek vytvorit preruseni na lince `line` (ISA IRQ)?
+    /// Smi prostredek vytvorit preruseni na lince `line` (x86 ISA IRQ,
+    /// aarch64 SPI)?
     pub fn allows_line(&self, line: u32) -> bool {
-        line < 32
+        line < abi::syscall::IRQ_LINES_MAX
             && self
                 .limits
                 .as_ref()
-                .is_none_or(|l| l.lines & (1 << line) != 0)
+                .is_none_or(|l| contains(&l.lines, line as u64, 1))
     }
 
     /// Zarizeni, ke kteremu prostredek patri (segment, sbernice,
@@ -274,10 +276,10 @@ impl KernelObject for Resource {
     }
 
     fn default_rights(&self) -> Rights {
-        // Nastaveni hodin jen pro korenovy prostredek: omezene prostredky
-        // ovladacu (`restrict`) ho nedostanou nikdy.
+        // Nastaveni hodin a napajeni jen pro korenovy prostredek: omezene
+        // prostredky ovladacu (`restrict`) je nedostanou nikdy.
         if self.limits.is_none() {
-            Rights::BASIC | Rights::MANAGE | Rights::SET_CLOCK
+            Rights::BASIC | Rights::MANAGE | Rights::SET_CLOCK | Rights::POWER
         } else {
             Rights::BASIC | Rights::MANAGE
         }

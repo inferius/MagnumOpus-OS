@@ -1,0 +1,10 @@
+[package]
+name = "gpuproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol render uzlu: klient <-> ovladac GPU (kontext s capsetem, bloby, proudy prikazu)"
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }

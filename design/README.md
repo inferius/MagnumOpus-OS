@@ -9,6 +9,7 @@ Clickable GUI prototypes and design-system tokens. Design description:
 |---|---|
 | `start.html`, `start-varianty.html` | startovací obrazovka a její varianty (archiv) / boot screen and its variants (archive) |
 | `pad.html`, `pad-varianty.html` | obrazovka kritického pádu a její varianty (archiv) / critical crash screen and its variants (archive) |
+| `instalace.html` | živé USB, instalátor, první spuštění / live USB, installer, first run |
 | `assets/logo/` | logo (vektory) / logo (vectors) |
 | `prirucka.html` | příručka grafického jazyka (cs / en) / visual language handbook (cs / en) |
 | `index.html` | rozcestník a rozhodnutí ke stylu / index and style decisions |

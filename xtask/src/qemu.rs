@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir, testdisks};
 
 /// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
-const DEVICE_LAYOUT: u32 = 7;
+const DEVICE_LAYOUT: u32 = 8;
 
 /// Pokusy o start QEMU, kdyz mu port (QMP, hostfwd) mezitim vzal jiny
 /// proces (soubezne behy testu).
@@ -62,7 +62,12 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     let run = RunFiles::new(arch.name, opts.test);
     let serial_log = run.serial_log.clone();
     let qmp_port = Arc::new(AtomicU16::new(0));
-    qmp::spawn_injector(serial_log.clone(), qmp_port.clone(), arch.ps2);
+    match opts.power_test {
+        // Beh testu napajeni: misto vstupu tlacitko napajeni pres QMP.
+        Some("button") => crate::powertest::spawn_button(serial_log.clone(), qmp_port.clone()),
+        Some(_) => {}
+        None => qmp::spawn_injector(serial_log.clone(), qmp_port.clone(), arch.ps2),
+    }
     let mut hostfwd = opts.hostfwd.clone();
     let mut attempt = 0;
     let result = loop {
@@ -83,7 +88,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
         if !opts.test {
             break run_interactive(cmd);
         }
-        match run_test(cmd, opts) {
+        match run_test(cmd, opts, &serial_log) {
             Err(TestError::PortTaken(e)) if attempt < START_ATTEMPTS => {
                 println!("xtask: QEMU nenastartovalo ({e}), novy pokus s jinymi porty ({attempt}/{START_ATTEMPTS})");
                 if let Some(h) = opts.net_helper.borrow_mut().as_mut() {
@@ -168,6 +173,12 @@ fn command(
         // Zdroj nahody z hostitele (doplnuje entropii jadra, viz
         // docs/cs/syscally.md RANDOM_ADD).
         .args(["-device", "virtio-rng-pci,disable-legacy=on,iommu_platform=on"])
+        // Druha sitova karta Intel 82574L (ovladac e1000e) ve vlastni siti
+        // slirp; netd pouziva prvni kartu (virtio-net), test ovladacu tuto.
+        // Posledni zarizeni PCI: sloty ostatnich se nemeni (DEVICE_LAYOUT
+        // zustava). Emulovana karta jde pres IOMMU vzdy (bez prepinace).
+        .args(["-netdev", "user,id=net1"])
+        .args(["-device", "e1000e,netdev=net1,romfile="])
         // Seriova linka do terminalu a zaroven do souboru, aby se dal vystup
         // dohledat i po skonceni behu.
         .arg("-chardev")
@@ -194,6 +205,11 @@ fn command(
         );
     }
     disk_controllers(&mut cmd, opts, run, &blk)?;
+    // Vyukove zarizeni pro ukazkovy ovladac (az za ostatnimi, sloty PCI
+    // drivejsich zarizeni se neposunou).
+    if opts.edu {
+        cmd.args(["-device", crate::drivers::EDU_DEVICE]);
+    }
     cmd.args(&opts.qemu_args);
     Ok(cmd)
 }
@@ -215,7 +231,8 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
     // Na NVMe a AHCI jako na skutecnem pocitaci: GPT s nasim oddilem.
     let data = match opts.data_disk.as_str() {
         "virtio" => raw,
-        _ => testdisks::wrap_data(&raw, &run.data_gpt)?,
+        "nvme4k" => testdisks::wrap_data(&raw, &run.data_gpt, 4096)?,
+        _ => testdisks::wrap_data(&raw, &run.data_gpt, 512)?,
     };
     cmd.arg("-drive").arg(drive("data", &data));
     let ahci = opts.test || opts.data_disk == "ahci";
@@ -224,6 +241,11 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
     }
     match opts.data_disk.as_str() {
         "nvme" => cmd.args(["-device", "nvme,drive=data,serial=MO-DATA"]),
+        // Disk se sektorem 4 KiB (jako NVMe naformatovane na 4 KiB).
+        "nvme4k" => cmd.args([
+            "-device",
+            "nvme,drive=data,serial=MO-DATA,logical_block_size=4096,physical_block_size=4096",
+        ]),
         "ahci" => cmd.args(["-device", "ide-hd,drive=data,bus=ahci0.2"]),
         _ => cmd.args(["-device", &blk("data")]),
     };
@@ -231,6 +253,12 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
         cmd.arg("-drive")
             .arg(drive("nvmetest", &testdisks::nvme(&run.nvme)?))
             .args(["-device", "nvme,drive=nvmetest,serial=MO-NVME-TEST"])
+            .arg("-drive")
+            .arg(drive("nvme4ktest", &testdisks::nvme4k(&run.nvme4k)?))
+            .args([
+                "-device",
+                "nvme,drive=nvme4ktest,serial=MO-NVME-4K,logical_block_size=4096,physical_block_size=4096",
+            ])
             .arg("-drive")
             .arg(drive("ahcitest", &testdisks::ahci(&run.ahci)?))
             .args(["-device", "ide-hd,drive=ahcitest,bus=ahci0.0"])
@@ -427,9 +455,13 @@ fn port_error(stderr: &str) -> Option<String> {
     Some(line.trim().to_string())
 }
 
-fn run_test(mut cmd: Command, opts: &Options) -> std::result::Result<(), TestError> {
-    // Opakovany beh (--repeat): kazde dalsi kolo az 60 s navic.
-    let timeout = opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1);
+fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result::Result<(), TestError> {
+    // Opakovany beh (--repeat): kazde dalsi kolo az 60 s navic. Beh testu
+    // napajeni je kratky (jen start a vypnuti).
+    let timeout = match opts.power_test {
+        Some(_) => Duration::from_secs(300),
+        None => opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1),
+    };
     // Chybovy vystup QEMU jde dal na terminal a zaroven do bufferu (hlaska
     // o obsazenem portu => novy pokus).
     cmd.stderr(Stdio::piped());
@@ -466,6 +498,17 @@ fn run_test(mut cmd: Command, opts: &Options) -> std::result::Result<(), TestErr
     if let Some(t) = copier {
         let _ = t.join();
     }
+    if let Some(mode) = opts.power_test {
+        // Uspech = QEMU skoncilo samo (vypnuti/restart ACPI), kod 0, a log
+        // ma znacky celeho postupu.
+        return match (status.code(), crate::powertest::check_log(serial_log, mode)) {
+            (Some(0), Ok(())) => Ok(()),
+            (Some(0), Err(e)) => Err(TestError::Other(format!("test napajeni ({mode}): {e}").into())),
+            (code, _) => Err(TestError::Other(
+                format!("test napajeni ({mode}): QEMU skoncilo s kodem {code:?} (ocekavano 0 po vypnuti ACPI)").into(),
+            )),
+        };
+    }
     match status.code() {
         Some(code) if code == opts.arch.test_success => {
             println!("xtask: testy prosly");
@@ -492,6 +535,7 @@ struct RunFiles {
     data_gpt: PathBuf,
     scratch: PathBuf,
     nvme: PathBuf,
+    nvme4k: PathBuf,
     ahci: PathBuf,
     foreign: PathBuf,
     serial_log: PathBuf,
@@ -506,6 +550,7 @@ impl RunFiles {
             data_gpt: t.join(format!("data-gpt-{pid}.img")),
             scratch: t.join(format!("scratch-{pid}.img")),
             nvme: t.join(format!("nvme-test-{pid}.img")),
+            nvme4k: t.join(format!("nvme4k-test-{pid}.img")),
             ahci: t.join(format!("ahci-test-{pid}.img")),
             foreign: t.join(format!("foreign-{pid}.img")),
             serial_log: t.join(if test {
@@ -527,7 +572,7 @@ impl Drop for RunFiles {
             let _ = std::fs::remove_file(&self.data);
             let _ = std::fs::remove_file(&self.data_gpt);
         }
-        for f in [&self.scratch, &self.nvme, &self.ahci, &self.foreign] {
+        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign] {
             let _ = std::fs::remove_file(f);
         }
     }

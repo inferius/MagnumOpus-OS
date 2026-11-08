@@ -1,17 +1,18 @@
 //! virtio-input: ovladac klavesnice, mysi a dalsich vstupnich zarizeni
 //! virtio 1.x pres PCI (v QEMU `virtio-keyboard-pci`, `virtio-mouse-pci`).
 //!
-//! Spousti ho spravce zarizeni. Startovni zprava (kind USER, v tomto poradi):
-//! 1. omezeny Resource (jen BARy a konfigurace tohoto zarizeni, kvoty
-//!    preruseni a DMA),
-//! 2. stranka konfiguracniho prostoru PCI teto funkce,
-//! 3. kanal ke sluzbe vstupu (protokol `inputproto::device`).
+//! Spousti ho spravce zarizeni; start, smycku udalosti a zastaveni
+//! zarizeni pri konci dela driverkit (`driverkit::os`). Startovni zprava:
+//! Resource zarizeni (jen jeho BARy a konfigurace, kvoty preruseni a DMA),
+//! stranka konfigurace PCI a kanal ke sluzbe vstupu (protokol
+//! `inputproto::device`).
 //!
-//! Prvni zprava na bootstrap kanalu od spravce: `pci <sbernice> <zarizeni>
-//! <funkce>` (desitkove). Ovladac posle sluzbe predstaveni (`IDEV`: druh
-//! zarizeni a jmeno) a pak preposila udalosti zarizeni (`IEVT`), dokud
-//! sluzba kanal nezavre. Udalosti virtio-input maji uz tvar evdev, ovladac
-//! je jen prenese z fronty do kanalu.
+//! Ovladac posle sluzbe predstaveni (`IDEV`: druh zarizeni a jmeno) a pak
+//! preposila udalosti zarizeni (`IEVT`). Na synchronizaci nove instance
+//! sluzby (`ISYN`) odpovi a predstavi se znovu; kdyz sluzba kanal zavre,
+//! nekonci (obnova sluzeb, viz `docs/cs/obnova-sluzeb.md`;
+//! `Driver::client_closed`). Udalosti virtio-input maji uz tvar evdev,
+//! ovladac je jen prenese z fronty do kanalu.
 //!
 //! Specifikace: VIRTIO 1.2, kapitola 5.8 (Input Device).
 
@@ -23,13 +24,12 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use driverkit::os::{OsDma, OsPlatform};
+use driverkit::{DmaBuffer, Driver, DriverError, IrqId, Platform, Result, Sent};
 use inputproto::code::{EV_KEY, EV_REL, KEY_A};
 use inputproto::device::{self, RawEvent, caps};
-use libos::abi::vm::{MAP_READ, MAP_WRITE};
-use libos::hw::{Interrupt, Resource};
-use libos::{Channel, Error, Mapping, Result, Signals, Startup, Vmo, println};
+use libos::Startup;
 use pci::msix::MsixTable;
-use pci::{Address, Ecam};
 use virtio::{Buffer, Device, F_VERSION_1, Virtqueue};
 
 /// Vlastnost: DMA pres preklad platformy (IOMMU), viz virtio-blk.
@@ -49,75 +49,27 @@ const QUEUE_MAX: u16 = 64;
 
 libos::entry!(main);
 
+fn main(startup: Startup) -> i64 {
+    driverkit::os::main::<InputDevice>(startup, "virtio-input")
+}
+
 struct InputDevice {
     device: Device,
     queue: Virtqueue,
-    irq: Interrupt,
     _msix: MsixTable,
-    _dma: Vmo,
-    buf: Mapping,
-    buf_phys: u64,
+    buf: DmaBuffer<OsDma>,
     caps: u16,
     name: String,
+    /// Predstaveni (`IDEV`): pri startu a znovu na `ISYN`.
+    hello: Vec<u8>,
     /// Prvni udalosti uz byly zalogovane.
     logged: bool,
+    /// Zpravy zahozene, protoze sluzba nestihala.
+    dropped: u64,
 }
 
-fn main(startup: Startup) -> i64 {
-    let mut handles = startup.handles.into_iter();
-    let (Some(res), Some(ecam_vmo), Some(service)) =
-        (handles.next(), handles.next(), handles.next())
-    else {
-        println!("virtio-input: chybi handly ve startovni zprave");
-        return 1;
-    };
-    let resource = Resource::from_handle(res);
-    let ecam_vmo = Vmo::from_handle(ecam_vmo);
-    let service = Channel::from_handle(service);
-
-    let Some(address) = virtio::read_driver_config(&startup.bootstrap) else {
-        println!("virtio-input: neplatna konfigurace od spravce zarizeni");
-        return 2;
-    };
-    let dev = Ecam::single(&ecam_vmo, address)
-        .and_then(|ecam| InputDevice::open(&ecam, address, &resource));
-    let mut dev = match dev {
-        Ok(d) => d,
-        Err(e) => {
-            println!("virtio-input {address}: inicializace selhala: {e}");
-            return 3;
-        }
-    };
-    println!(
-        "virtio-input {address}: '{}' ({})",
-        dev.name,
-        match (dev.caps & caps::KEYBOARD != 0, dev.caps & caps::POINTER != 0) {
-            (true, true) => "klavesnice a mys",
-            (true, false) => "klavesnice",
-            (false, true) => "mys",
-            (false, false) => "nezname zarizeni",
-        }
-    );
-    if service
-        .write(&device::encode_hello(dev.caps, &dev.name), Vec::new())
-        .is_err()
-    {
-        return 0;
-    }
-    let r = dev.serve(&service);
-    // Zarizeni zastavit, aby uz nepouzivalo DMA buffery.
-    let _ = dev.device.reset();
-    match r {
-        Ok(()) => 0,
-        Err(e) => {
-            println!("virtio-input {address}: {e}");
-            4
-        }
-    }
-}
-
-impl InputDevice {
-    fn open(ecam: &Ecam, a: Address, resource: &Resource) -> Result<Self> {
+impl Driver<OsPlatform> for InputDevice {
+    fn probe(p: &OsPlatform) -> Result<Self> {
         // Fronta 0 = udalosti (zarizeni -> ovladac). Fronta 1 (stav,
         // napr. kontrolky Caps Lock) zatim nepouzivame.
         let virtio::Started {
@@ -126,25 +78,23 @@ impl InputDevice {
             irq,
             msix,
             ..
-        } = virtio::start(ecam, a, resource, F_VERSION_1 | F_ACCESS_PLATFORM, QUEUE_MAX)?;
+        } = virtio::start(p.ecam(), p.address(), p.resource(), F_VERSION_1 | F_ACCESS_PLATFORM, QUEUE_MAX)
+            .map_err(DriverError::os("inicializace virtio"))?;
+        p.adopt_irq(irq);
         let name = read_name(&device);
         let caps = read_caps(&device);
-
-        let size = queue.size() as u64 * RawEvent::SIZE as u64;
-        let dma = resource.dma_memory(size)?;
-        let buf_phys = resource.phys_addr(&dma, 0)?;
-        let buf = Mapping::new(&dma, 0, size, MAP_READ | MAP_WRITE)?;
+        let buf = p.alloc_dma("udalosti", queue.size() as u64 * RawEvent::SIZE as u64)?;
+        let hello = device::encode_hello(caps, &name);
         let mut dev = Self {
             device,
             queue,
-            irq,
             _msix: msix,
-            _dma: dma,
             buf,
-            buf_phys,
             caps,
             name,
+            hello,
             logged: false,
+            dropped: 0,
         };
         for id in 0..dev.queue.size() {
             dev.post(id)?;
@@ -153,65 +103,88 @@ impl InputDevice {
         Ok(dev)
     }
 
-    /// Vrati buffer `id` zarizeni k naplneni.
-    fn post(&mut self, id: u16) -> Result<()> {
-        self.queue.post(
-            id,
-            Buffer {
-                phys: self.buf_phys + id as u64 * RawEvent::SIZE as u64,
-                len: RawEvent::SIZE as u32,
-                device_writes: true,
-            },
-        )
+    fn start(&mut self, p: &OsPlatform) -> Result<()> {
+        let kind = match (self.caps & caps::KEYBOARD != 0, self.caps & caps::POINTER != 0) {
+            (true, true) => "klavesnice a mys",
+            (true, false) => "klavesnice",
+            (false, true) => "mys",
+            (false, false) => "nezname zarizeni",
+        };
+        driverkit::log!(p, "'{}' ({kind})", self.name);
+        p.send(&self.hello)?;
+        Ok(())
     }
 
-    /// Preposila udalosti, dokud sluzba vstupu nezavre kanal.
-    fn serve(&mut self, service: &Channel) -> Result<()> {
-        let mut dropped = 0u64;
-        loop {
-            let items = [
-                (self.irq.handle(), Signals::SIGNALED),
-                (service.handle(), Signals::PEER_CLOSED),
-            ];
-            let (_, observed) = libos::wait_many(&items, None)?;
-            if observed[1].intersects(Signals::PEER_CLOSED) {
-                return Ok(());
-            }
-            // Potvrdit driv nez vyber fronty: preruseni behem vyberu se
-            // neztrati.
-            self.irq.ack()?;
-            let mut events = Vec::new();
-            while let Some((id, len)) = self.queue.take_posted()? {
-                if len as usize >= RawEvent::SIZE {
-                    let mut b = [0u8; RawEvent::SIZE];
-                    self.buf
-                        .read_bytes(id as u64 * RawEvent::SIZE as u64, &mut b);
-                    if let Some(e) = RawEvent::from_bytes(&b) {
-                        events.push(e);
-                    }
+    /// Synchronizace nove instance sluzby vstupu (`ISYN`): odpoved
+    /// a znovu predstaveni.
+    fn message(&mut self, p: &OsPlatform, msg: &[u8]) -> Result<()> {
+        device::answer_sync(msg, &self.hello, None, |b| p.send(b).is_ok_and(|s| s == Sent::Sent));
+        Ok(())
+    }
+
+    /// Sluzba vstupu zavrela kanal: ovladac nekonci (obnova sluzeb), dal
+    /// obsluhuje zarizeni a udalosti zahazuje, az ho ukonci spravce.
+    fn client_closed(&mut self, p: &OsPlatform) -> bool {
+        driverkit::log!(p, "sluzba vstupu zavrela kanal, cekam");
+        true
+    }
+
+    /// Preposle udalosti z fronty sluzbe vstupu.
+    fn interrupt(&mut self, p: &OsPlatform, _irq: IrqId) -> Result<()> {
+        let mut events = Vec::new();
+        while let Some((id, len)) = self.queue.take_posted().map_err(corrupted)? {
+            if len as usize >= RawEvent::SIZE {
+                let mut b = [0u8; RawEvent::SIZE];
+                self.buf.read_bytes(id as u64 * RawEvent::SIZE as u64, &mut b)?;
+                if let Some(e) = RawEvent::from_bytes(&b) {
+                    events.push(e);
                 }
-                self.post(id)?;
             }
-            self.device.notify(&self.queue);
-            if !events.is_empty() && !self.logged {
-                self.logged = true;
-                println!("virtio-input: prvni udalosti od zarizeni ({})", events.len());
-            }
-            for chunk in events.chunks(device::MAX_EVENTS) {
-                match service.write(&device::encode_events(chunk), Vec::new()) {
-                    Ok(()) => {}
-                    // Sluzba nestiha: udalosti zahodit, neblokovat zarizeni.
-                    Err(Error::ShouldWait) => {
-                        dropped += 1;
-                        if dropped.is_power_of_two() {
-                            println!("virtio-input: sluzba nestiha, zahozeno {dropped} zprav");
-                        }
-                    }
-                    Err(Error::PeerClosed) => return Ok(()),
-                    Err(e) => return Err(e),
+            self.post(id)?;
+        }
+        self.device.notify(&self.queue);
+        if !events.is_empty() && !self.logged {
+            self.logged = true;
+            driverkit::log!(p, "prvni udalosti od zarizeni ({})", events.len());
+        }
+        for chunk in events.chunks(device::MAX_EVENTS) {
+            // Sluzba nestiha (nebo se restartuje): udalosti zahodit,
+            // neblokovat zarizeni. Bez sluzby (`NoClient`) tise zahodit.
+            if p.send(&device::encode_events(chunk))? == Sent::Full {
+                self.dropped += 1;
+                if self.dropped.is_power_of_two() {
+                    driverkit::log!(p, "sluzba nestiha, zahozeno {} zprav", self.dropped);
                 }
             }
         }
+        Ok(())
+    }
+
+    fn stop(&mut self, _p: &OsPlatform) {
+        // Zarizeni zastavit, aby uz nepouzivalo DMA buffery.
+        let _ = self.device.reset();
+    }
+}
+
+fn corrupted(e: libos::Error) -> DriverError {
+    DriverError::Device(alloc::format!("fronta udalosti: {e}"))
+}
+
+impl InputDevice {
+    /// Vrati buffer `id` zarizeni k naplneni.
+    fn post(&mut self, id: u16) -> Result<()> {
+        let size = RawEvent::SIZE as u64;
+        let phys = self.buf.iova_of(id as u64 * size, size)?;
+        self.queue
+            .post(
+                id,
+                Buffer {
+                    phys,
+                    len: RawEvent::SIZE as u32,
+                    device_writes: true,
+                },
+            )
+            .map_err(corrupted)
     }
 }
 

@@ -30,6 +30,8 @@ use virtio::{Buffer, Device, F_VERSION_1, Virtqueue};
 
 /// Vlastnost: zarizeni je jen pro cteni.
 const F_RO: u64 = 1 << 5;
+/// Vlastnost: zarizeni hlasi velikost logickeho bloku (`blk_size`).
+const F_BLK_SIZE: u64 = 1 << 6;
 /// Vlastnost: zarizeni podporuje FLUSH.
 const F_FLUSH: u64 = 1 << 9;
 /// Vlastnost: zarizeni podporuje DISCARD (TRIM).
@@ -43,6 +45,8 @@ const REQ_OUT: u32 = 1;
 const REQ_FLUSH: u32 = 4;
 const REQ_DISCARD: u32 = 11;
 
+/// Offset `blk_size` v konfiguraci virtio-blk.
+const CFG_BLK_SIZE: u64 = 20;
 /// Offset `max_discard_sectors` v konfiguraci virtio-blk.
 const CFG_MAX_DISCARD_SECTORS: u64 = 36;
 
@@ -62,7 +66,11 @@ struct Disk {
     _dma: Vmo,
     buf: Mapping,
     buf_phys: u64,
+    /// Kapacita v sektorech po 512 B (adresovani virtio je vzdy po 512 B).
     capacity: u64,
+    /// Logicky blok zarizeni (512 B, nebo vic u disku 4Kn); pozadavky
+    /// musi byt na nej zarovnane.
+    block: usize,
     flush: bool,
     /// Zarizeni je jen pro cteni (F_RO).
     read_only: bool,
@@ -105,8 +113,9 @@ fn main(startup: Startup) -> i64 {
         }
     };
     println!(
-        "virtio-blk {address}: {} MiB, flush {}, discard {}",
+        "virtio-blk {address}: {} MiB, blok {} B, flush {}, discard {}",
         disk.capacity * SECTOR as u64 / (1024 * 1024),
+        disk.block,
         if disk.flush { "ano" } else { "ne" },
         if disk.max_discard > 0 { "ano" } else { "ne" }
     );
@@ -136,7 +145,7 @@ impl Disk {
             ecam,
             a,
             resource,
-            F_VERSION_1 | F_RO | F_FLUSH | F_DISCARD | F_ACCESS_PLATFORM,
+            F_VERSION_1 | F_RO | F_BLK_SIZE | F_FLUSH | F_DISCARD | F_ACCESS_PLATFORM,
             16,
         )?;
 
@@ -145,6 +154,18 @@ impl Disk {
         let buf = Mapping::new(&dma, 0, DMA_SIZE, MAP_READ | MAP_WRITE)?;
         // Kapacita v sektorech po 512 B je na zacatku konfigurace zarizeni.
         let capacity: u64 = device.config(0);
+        let block = if features & F_BLK_SIZE != 0 {
+            device.config::<u32>(CFG_BLK_SIZE) as usize
+        } else {
+            SECTOR
+        };
+        // Neplatna nebo prilis velka hodnota: zarizeni nepouzit (zarovnani
+        // pozadavku by nesedelo a zapisy by mohly selhavat napul).
+        if !block_ok(block) {
+            println!("virtio-blk {a}: nepodporovany logicky blok {block} B");
+            let _ = device.reset();
+            return Err(Error::NotSupported);
+        }
         // Pole max_discard_sectors (u32 na offsetu 36) musi zarizeni hlasit.
         let max_discard: u32 =
             if features & F_DISCARD != 0 && device.config_len() >= CFG_MAX_DISCARD_SECTORS + 4 {
@@ -161,6 +182,7 @@ impl Disk {
             buf,
             buf_phys,
             capacity,
+            block,
             flush: features & F_FLUSH != 0,
             read_only: features & F_RO != 0,
             max_discard,
@@ -254,16 +276,10 @@ impl Disk {
     /// zarizeni prepsalo (bez IOMMU). Zapis jde jen do vlastni pameti
     /// ovladace, takze test nic neohrozi.
     fn test_dma_protection(&mut self, resource: &Resource) -> Result<u64> {
-        const PATTERN: u8 = 0xAA;
-        let page = Vmo::create(4096)?;
-        let map = Mapping::new(&page, 0, 4096, MAP_READ | MAP_WRITE)?;
-        map.write_bytes(0, &[PATTERN; 512]);
-        let phys = resource.phys_addr(&page, 0)?;
+        let probe = server::DmaProbe::new(resource, self.block)?;
         // Vysledek pozadavku je vedlejsi (zarizeni muze chybu hlasit i ne).
-        let _ = self.request_at(REQ_IN, 0, SECTOR as u32, phys);
-        let mut back = [0u8; 512];
-        map.read_bytes(0, &mut back);
-        Ok(back.iter().all(|&b| b == PATTERN) as u64)
+        let _ = self.request_at(REQ_IN, 0, self.block as u32, probe.phys);
+        Ok(probe.untouched())
     }
 
     /// DISCARD po usecich podle limitu zarizeni. Popis useku (16 B):
@@ -282,13 +298,29 @@ impl Disk {
     }
 }
 
+/// Logicky blok, ktery ovladac umi: mocnina dvou 512 B..=32 KiB (buffer).
+fn block_ok(block: usize) -> bool {
+    block.is_power_of_two() && (SECTOR..=blockproto::server::IO_MAX).contains(&block)
+}
+
+impl Disk {
+    /// Sektoru virtio (512 B) v jednom logickem bloku.
+    fn ratio(&self) -> u64 {
+        (self.block / SECTOR) as u64
+    }
+}
+
 impl Disks for Disk {
     fn count(&self) -> usize {
         1
     }
 
     fn sectors(&self, _: usize) -> u64 {
-        self.capacity
+        self.capacity / self.ratio()
+    }
+
+    fn sector_size(&self, _: usize) -> usize {
+        self.block
     }
 
     fn features(&self, _: usize) -> u64 {
@@ -296,14 +328,14 @@ impl Disks for Disk {
     }
 
     fn read(&mut self, _: usize, lba: u64, out: &mut [u8]) -> Result<()> {
-        self.request(REQ_IN, lba, out.len() as u32)?;
+        self.request(REQ_IN, lba * self.ratio(), out.len() as u32)?;
         self.buf.read_bytes(DATA_OFF, out);
         Ok(())
     }
 
     fn write(&mut self, _: usize, lba: u64, data: &[u8]) -> Result<()> {
         self.buf.write_bytes(DATA_OFF, data);
-        self.request(REQ_OUT, lba, data.len() as u32)
+        self.request(REQ_OUT, lba * self.ratio(), data.len() as u32)
     }
 
     fn flush(&mut self, _: usize) -> Result<()> {
@@ -318,7 +350,8 @@ impl Disks for Disk {
         if self.max_discard == 0 {
             return Err(Error::NotSupported);
         }
-        self.discard_range(lba, count)
+        let r = self.ratio();
+        self.discard_range(lba * r, count * r)
     }
 
     fn test_dma_protection(&mut self, _: usize) -> Result<u64> {

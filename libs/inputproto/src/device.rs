@@ -7,6 +7,16 @@
 //! | `IDEV` | predstaveni: verze u16, schopnosti u16 ([`caps`]), jmeno v UTF-8 |
 //! | `IEVT` | surove udalosti, kazda 8 B: typ u16, kod u16, hodnota i32 |
 //! | `IAXS` | rozsahy absolutnich os, kazdy 12 B: kod u16, rezerva u16, min i32, max i32 |
+//! | `ISYN` | synchronizace: cislo u32 (obema smery) |
+//!
+//! **Synchronizace po restartu sluzby** (`docs/cs/obnova-sluzeb.md`): konec
+//! kanalu u sluzby drzi supervisor, takze kdyz `inputd` spadne, ovladac nic
+//! nepozna a nova instance dostane stejny konec. Ve fronte jsou stare
+//! zpravy (predstaveni uz precetla stara instance). Nova instance posle
+//! zdroji `ISYN n` a zahazuje vse az do odpovedi `ISYN n`; za ni zdroj posle
+//! znovu `IDEV` (a `IAXS`). Kdyz odpoved neprijde, sluzba posle po chvili
+//! `ISYN` s novym cislem (plna fronta ovladace); plati jen odpoved na
+//! posledni. Ovladac odpovi na kazdy `ISYN` (viz [`answer_sync`]).
 //!
 //! Vse little-endian. Udalosti jsou ve tvaru evdev (stejne jako
 //! `virtio_input_event`), skupinu zakoncuje `EV_SYN`/`SYN_REPORT`. Jedna
@@ -21,6 +31,37 @@ pub const VERSION: u16 = 1;
 pub const TAG_HELLO: &[u8; 4] = b"IDEV";
 pub const TAG_EVENTS: &[u8; 4] = b"IEVT";
 pub const TAG_AXES: &[u8; 4] = b"IAXS";
+pub const TAG_SYNC: &[u8; 4] = b"ISYN";
+
+/// Zprava `ISYN` (sluzba -> zdroj pozadavek, zdroj -> sluzba odpoved).
+pub fn encode_sync(token: u32) -> Vec<u8> {
+    let mut v = Vec::with_capacity(8);
+    v.extend_from_slice(TAG_SYNC);
+    v.extend_from_slice(&token.to_le_bytes());
+    v
+}
+
+/// Strana zdroje: kdyz je `data` pozadavek `ISYN`, odpovi na nem pres
+/// `write` (`ISYN`, `hello`, pripadne `axes`) a vrati `true`. `write` vraci
+/// `false` pri chybe zapisu; zbytek se pak neposle (sluzba pozadavek
+/// zopakuje).
+pub fn answer_sync(
+    data: &[u8],
+    hello: &[u8],
+    axes: Option<&[u8]>,
+    mut write: impl FnMut(&[u8]) -> bool,
+) -> bool {
+    let Some(DeviceMessage::Sync(token)) = decode(data) else {
+        return false;
+    };
+    let sync = encode_sync(token);
+    for m in [Some(&sync[..]), Some(hello), axes].into_iter().flatten() {
+        if !write(m) {
+            break;
+        }
+    }
+    true
+}
 
 /// Nejvic absolutnich os v `IAXS`.
 pub const MAX_AXES: usize = 16;
@@ -123,6 +164,7 @@ pub enum DeviceMessage<'a> {
     },
     Events(Vec<RawEvent>),
     Axes(Vec<AxisInfo>),
+    Sync(u32),
 }
 
 /// Zprava `IDEV`. Jmeno delsi nez [`MAX_NAME`] se zkrati (na hranici znaku).
@@ -181,6 +223,9 @@ pub fn decode(data: &[u8]) -> Option<DeviceMessage<'_>> {
             })
             .collect();
         Some(DeviceMessage::Axes(axes))
+    } else if tag == TAG_SYNC {
+        let token: [u8; 4] = rest.try_into().ok()?;
+        Some(DeviceMessage::Sync(u32::from_le_bytes(token)))
     } else if tag == TAG_EVENTS {
         if rest.len() % RawEvent::SIZE != 0 || rest.len() / RawEvent::SIZE > MAX_EVENTS {
             return None;

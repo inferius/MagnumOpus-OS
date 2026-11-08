@@ -8,5 +8,6 @@ mod fs;
 mod highlight;
 mod host;
 mod misc;
+mod power;
 mod regress;
 mod roundtrip;
