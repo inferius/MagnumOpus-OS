@@ -152,6 +152,11 @@ Goal: **never end up with a black screen.**
   serves **only the firmware mode** (no `MODESET`, one buffer). The
   compositor re-attaches.
 - **Clean exit** (shutdown) restores the firmware image as well.
+- **Kernel log**: the driver chosen for the GUI gets the firmware
+  framebuffer from init and claims it (`FB_CONTROL CLAIM`, like
+  `fbdisplay`), so the kernel stops drawing its log into memory the GUI
+  shows. Init replaces devmgr's instance with its own for that (the first
+  one has not changed any display register yet).
 
 Not covered (risks):
 

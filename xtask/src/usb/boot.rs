@@ -3,8 +3,11 @@
 //! a mys USB, sitova karta Intel). Firmware bootuje z flash disku, system
 //! najde datovy oddil pres ovladac `usb-storage`.
 //!
-//! Test (`cargo xtask test`, `cargo xtask usb --test`) ceka v logu seriove
-//! linky na [`MARKERS`] a QEMU pak ukonci.
+//! Testy (`cargo xtask test`, `cargo xtask usb --test`):
+//! - [`test`]: start do GUI s terminalem ([`MARKERS`]) a kopie logu na FAT
+//!   oddil MO-LOGY (overeno na hostiteli crate `fatfs`),
+//! - [`test_rescue`]: rezim "vytahni logy" (klavesa L pres QMP), logy
+//!   "nainstalovaneho systemu" z disku NVMe na MO-LOGY, disk NVMe beze zmeny.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -26,8 +29,9 @@ pub const MARKERS: &[&str] = &[
 /// Jak dlouho smi start trvat (aarch64 v emulaci TCG).
 const TIMEOUT: Duration = Duration::from_secs(420);
 
-/// Argumenty QEMU pro stroj s flash diskem `image`.
-fn command(arch: &Arch, image: &Path, vars: &Path, serial: Option<&Path>, headless: bool) -> Result<Command> {
+/// Argumenty QEMU pro stroj s flash diskem `image` (`extra` = dalsi
+/// argumenty, napr. interni disk).
+fn command(arch: &Arch, image: &Path, vars: &Path, serial: Option<&Path>, headless: bool, extra: &[String]) -> Result<Command> {
     let qemu = arch.find_qemu()?;
     let (code, template) = arch.find_firmware(&qemu)?;
     // Cerstve promenne firmwaru: bez starych bootovacich polozek bootuje
@@ -63,43 +67,122 @@ fn command(arch: &Arch, image: &Path, vars: &Path, serial: Option<&Path>, headle
     if headless {
         cmd.args(["-display", "none"]);
     }
+    cmd.args(extra);
     Ok(cmd)
 }
 
 /// Interaktivni start (okno QEMU, seriova linka v terminalu).
 pub fn run(arch: &Arch, image: &Path) -> Result<()> {
     let vars = target_dir().join(format!("fw-{}-vars-usb.fd", arch.name));
-    let status = command(arch, image, &vars, None, false)?.status()?;
+    let status = command(arch, image, &vars, None, false, &[])?.status()?;
     if !status.success() {
         return Err(format!("QEMU skoncilo s {status}").into());
     }
     Ok(())
 }
 
-/// Test: start z flash disku az do GUI s terminalem.
+/// Test: start z flash disku az do GUI s terminalem; logd zkopiruje log
+/// na FAT oddil MO-LOGY.
 pub fn test(arch: &Arch, image: &Path) -> Result<()> {
+    let log = boot_until(arch, image, &[], false, "start", |t| {
+        let mut m = missing_markers(t);
+        if !t.contains("logd: kopie logu na oddil MO-LOGY") {
+            m.push("logd: kopie logu na oddil MO-LOGY");
+        }
+        m
+    })?;
+    let fat = read_logy(image)?;
+    let ok = fat_read(&fat, "MAGNUMOS/LOG01.TXT").is_some_and(|t| t.starts_with("MagnumOpus: log startu 1"));
+    if !ok {
+        return Err(format!("na oddilu MO-LOGY chybi MAGNUMOS/LOG01.TXT (log {})", log.display()).into());
+    }
+    println!("xtask: kopie logu na FAT oddilu flashky je");
+    Ok(())
+}
+
+/// Test rezimu "vytahni logy": klavesa L v zavadeci (QMP), "nainstalovany"
+/// system na disku NVMe s logy; po behu jsou jeho logy na oddilu MO-LOGY
+/// a disk NVMe je bajt po bajtu stejny (jen cteni).
+pub fn test_rescue(arch: &Arch, image: &Path) -> Result<()> {
+    let inst = target_dir().join(format!("usb-installed-{}.img", std::process::id()));
+    super::installed_disk(&inst)?;
+    let before = std::fs::read(&inst)?;
+    let extra = [
+        String::from("-drive"),
+        format!("if=none,id=inst,format=raw,file={}", inst.display()),
+        String::from("-device"),
+        String::from("nvme,drive=inst,serial=MO-INSTALLED"),
+    ];
+    let r = boot_until(arch, image, &extra, true, "vytazeni logu", |t| {
+        ["rezim: vytahnout logy", "init: HOTOVO: logy a zaznamy padu"]
+            .into_iter()
+            .filter(|m| !t.contains(m))
+            .collect()
+    });
+    let after = std::fs::read(&inst)?;
+    let _ = std::fs::remove_file(&inst);
+    r?;
+    if before != after {
+        return Err("rezim vytazeni logu ZMENIL disk nainstalovaneho systemu".into());
+    }
+    let fat = read_logy(image)?;
+    let list = fat_read(&fat, "ZACHRANA/SEZNAM.TXT").ok_or("na oddilu MO-LOGY chybi ZACHRANA/SEZNAM.TXT")?;
+    for want in ["/system/log/boot-000007.log", "/system/pady/000006-jadro-MO-1234-5678.crash"] {
+        if !list.contains(want) {
+            return Err(format!("SEZNAM.TXT neobsahuje {want}:\n{list}").into());
+        }
+    }
+    println!("xtask: vytazeni logu prosel (disk nainstalovaneho systemu beze zmeny)");
+    Ok(())
+}
+
+/// QMP prikaz: klavesa L.
+const KEY_L: &str = r#"{"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"l"}]}}"#;
+
+/// Spusti stroj a ceka, az `missing(log)` bude prazdne. `keys` = posilat
+/// klavesu L pres QMP (nabidka zavadece). Vraci cestu logu.
+fn boot_until(
+    arch: &Arch,
+    image: &Path,
+    extra: &[String],
+    keys: bool,
+    what: &str,
+    missing: impl Fn(&str) -> Vec<&'static str>,
+) -> Result<PathBuf> {
     let pid = std::process::id();
     let vars = target_dir().join(format!("fw-{}-vars-usb-{pid}.fd", arch.name));
     let log = target_dir().join(format!("serial-usb-{}-{pid}.log", arch.name));
     let _ = std::fs::remove_file(&log);
-    let mut cmd = command(arch, image, &vars, Some(&log), true)?;
-    println!("xtask: start z USB v QEMU ({}), log {}", arch.name, log.display());
+    let mut extra = extra.to_vec();
+    let port = crate::qmp::free_port()?;
+    if keys {
+        extra.push(String::from("-qmp"));
+        extra.push(crate::qmp::qemu_arg(port));
+    }
+    let mut cmd = command(arch, image, &vars, Some(&log), true, &extra)?;
+    println!("xtask: {what} z USB v QEMU ({}), log {}", arch.name, log.display());
     let mut child = cmd.stdin(Stdio::null()).spawn()?;
     let start = Instant::now();
     let result = loop {
         let text = std::fs::read(&log).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-        let missing = missing_markers(&text);
-        if missing.is_empty() {
+        // Klavesa L, dokud zavadec volbu nepotvrdi.
+        if keys && !text.contains("rezim: vytahnout logy") && start.elapsed() > Duration::from_secs(1) {
+            let _ = crate::qmp::command(port, KEY_L);
+        }
+        let m = missing(&text);
+        if m.is_empty() {
+            // Chvile na posledni zapisy.
+            std::thread::sleep(Duration::from_secs(3));
             break Ok(());
         }
         if let Some(status) = child.try_wait()? {
-            break Err(format!("QEMU skoncilo ({status}) pred startem GUI; v logu chybi: {}", missing.join("; ")));
+            break Err(format!("QEMU skoncilo ({status}); v logu chybi: {}", m.join("; ")));
         }
         if text.contains("KERNEL PANIC") {
             break Err(String::from("jadro spadlo (KERNEL PANIC)"));
         }
         if start.elapsed() > TIMEOUT {
-            break Err(format!("start z USB nedobehl do {} s; v logu chybi: {}", TIMEOUT.as_secs(), missing.join("; ")));
+            break Err(format!("{what} nedobehl do {} s; v logu chybi: {}", TIMEOUT.as_secs(), m.join("; ")));
         }
         std::thread::sleep(Duration::from_millis(500));
     };
@@ -108,11 +191,33 @@ pub fn test(arch: &Arch, image: &Path) -> Result<()> {
     let _ = std::fs::remove_file(&vars);
     match result {
         Ok(()) => {
-            println!("xtask: start z USB prosel za {} s (log {})", start.elapsed().as_secs(), log.display());
-            Ok(())
+            println!("xtask: {what} z USB prosel za {} s (log {})", start.elapsed().as_secs(), log.display());
+            Ok(log)
         }
         Err(e) => Err(format!("{e} (log: {})", log.display()).into()),
     }
+}
+
+/// Oddil MO-LOGY z obrazu (do pameti).
+fn read_logy(image: &Path) -> Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let (at, len) = super::image::logy_range();
+    let mut f = std::fs::File::open(image)?;
+    f.seek(SeekFrom::Start(at))?;
+    let mut buf = vec![0u8; len as usize];
+    f.read_exact(&mut buf)?;
+    Ok(buf)
+}
+
+/// Soubor z FAT obrazu (nezavisla implementace `fatfs`).
+fn fat_read(fat: &[u8], path: &str) -> Option<String> {
+    use std::io::Read;
+    let mut copy = fat.to_vec();
+    let fs = fatfs::FileSystem::new(std::io::Cursor::new(&mut copy[..]), fatfs::FsOptions::new()).ok()?;
+    let mut f = fs.root_dir().open_file(path).ok()?;
+    let mut v = Vec::new();
+    f.read_to_end(&mut v).ok()?;
+    Some(String::from_utf8_lossy(&v).into_owned())
 }
 
 /// Znacky, ktere v logu chybi (terminal: radek s `termd (` a `spusten`).

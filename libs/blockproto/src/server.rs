@@ -154,6 +154,18 @@ pub fn guard(name: &str, disks: &mut impl Disks, d: usize) -> Decision {
     decision
 }
 
+/// Oddil pro logy na disku `d` (`diskguard::log_partition`).
+fn log_view(disks: &mut impl Disks, d: usize) -> Option<Decision> {
+    let sectors = disks.sectors(d);
+    let ss = disks.sector_size(d);
+    if ss > IO_MAX || !diskguard::valid_sector_size(ss) || disks.features(d) & feature::READ_ONLY != 0 {
+        return None;
+    }
+    diskguard::log_partition(sectors, ss, |lba, buf| {
+        lba.checked_add((buf.len() / ss) as u64).is_some_and(|end| end <= sectors) && read_dev(disks, d, lba, buf).is_ok()
+    })
+}
+
 /// Klient jednoho disku.
 pub struct Client {
     pub disk: usize,
@@ -174,6 +186,17 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
             view,
             channel: mine,
         });
+        // Zive USB: oddil pro logy (FAT32 MO-LOGY) jako dalsi klient.
+        if let Some(log) = log_view(disks, d) {
+            println!("{name}: disk {d}: oddil pro logy MO-LOGY, {} MiB", log.sectors * log.sector_size as u64 >> 20);
+            let (mine, theirs) = Channel::create()?;
+            bootstrap.write(b"block-logy", vec![theirs.into_handle()])?;
+            clients.push(Client {
+                disk: d,
+                view: log,
+                channel: mine,
+            });
+        }
     }
     bootstrap.write(b"done", Vec::new())?;
     Ok(clients)

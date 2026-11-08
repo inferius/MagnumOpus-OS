@@ -252,4 +252,8 @@ pub const BUILTINS: &[Sig] = &[
         "cisto vypne pocitac (ukonci sluzby, pak ACPI S5)"),
     sig!("reboot", "system-reboot", NONE, None, &[flag("yes", 'y', "restartovat bez dotazu")], IN, IN,
         "cisto restartuje pocitac"),
+    sig!("loglevel", "system-log-level", NONE, None, NOFLAGS, IN, IN,
+        "uroven logu: bez argumentu vypis, `loglevel <modul|proces> <error|warn|info|debug|trace|vychozi>`"),
+    sig!("report", "system-report", NONE, None, NOFLAGS, IN, IN,
+        "balicek pro vyvojare: logy, zaznamy padu a informace o stroji do jednoho souboru (vypise cestu a obsah)"),
 ];

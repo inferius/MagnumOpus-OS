@@ -119,6 +119,26 @@ impl Resource {
         sys::system_power(self.0.raw(), op)
     }
 
+    /// Cte log jadra od pozice `cursor` (pravo `DIAG`): (skutecny zacatek,
+    /// pocet bajtu, celkem ztracenych radku). Zacatek za `cursor` = starsi
+    /// data uz prepsana.
+    pub fn log_read(&self, cursor: u64, buf: &mut [u8]) -> Result<(u64, usize, u64)> {
+        sys::log_read(self.0.raw(), cursor, buf)
+    }
+
+    /// Uroven logu jadra pro modul nebo proces (pravo `DIAG`): `modul=uroven`
+    /// (`set`), zruseni prepsani (`clear`), vypis (`list`), viz
+    /// `abi::syscall::log_op`.
+    pub fn log_control(&self, op: u64, buf: &mut [u8]) -> Result<usize> {
+        sys::log_control(self.0.raw(), op, buf)
+    }
+
+    /// Zaznam padu jadra z minuleho behu (pravo `DIAG`), viz
+    /// `abi::syscall::crash_op`.
+    pub fn crash_record(&self, op: u64, buf: &mut [u8]) -> Result<usize> {
+        sys::crash_record(self.0.raw(), op, buf)
+    }
+
     /// Precte bajt z I/O portu (x86; prostredek musi port povolovat,
     /// [`io_ports`]).
     pub fn port_read8(&self, port: u16) -> Result<u8> {

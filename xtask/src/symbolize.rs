@@ -94,3 +94,45 @@ pub fn report(log: &Path, kernel_elf: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+/// `cargo xtask symbolize <soubor>`: zaznam padu (`.crash`), vypis pady
+/// procesu nebo log s adresami prelozenymi na jmena funkci. Adresy jadra
+/// (horni polovina) podle `kernel_elf`, adresy procesu (radky s `(jmeno)`)
+/// podle programu v `user_dir`. Vypise kazdy radek s adresou a pod nim
+/// prelozene adresy.
+pub fn file(path: &Path, kernel_elf: &Path, user_dir: &Path) -> Result<()> {
+    let text = String::from_utf8_lossy(&std::fs::read(path)?).into_owned();
+    let kernel = load_symbols(kernel_elf)?;
+    let mut users: std::collections::HashMap<String, Vec<(u64, String)>> = Default::default();
+    for line in text.lines() {
+        let addrs: Vec<u64> = line
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter_map(|w| w.strip_prefix("0x"))
+            .filter(|h| h.len() >= 6)
+            .filter_map(|h| u64::from_str_radix(h, 16).ok())
+            .collect();
+        if addrs.is_empty() {
+            continue;
+        }
+        println!("{line}");
+        // Program z "(jmeno)" v radku (vypis pady procesu jadrem).
+        let prog = line.split('(').nth(1).and_then(|r| r.split(')').next()).filter(|p| !p.contains(' '));
+        for a in addrs {
+            let found = if a >= 0xFFFF_8000_0000_0000 {
+                lookup(&kernel, a).map(|(n, o)| format!("{n} + {o:#x}"))
+            } else if let Some(p) = prog {
+                if !users.contains_key(p) {
+                    let syms = load_symbols(&user_dir.join(p)).unwrap_or_default();
+                    users.insert(p.to_string(), syms);
+                }
+                lookup(&users[p], a).map(|(n, o)| format!("{p}: {n} + {o:#x}"))
+            } else {
+                None
+            };
+            if let Some(f) = found {
+                println!("        {a:#018x}  {f}");
+            }
+        }
+    }
+    Ok(())
+}

@@ -18,9 +18,42 @@ static CONSOLE_LEVEL: AtomicU8 = AtomicU8::new(Level::Info as u8);
 static OVERRIDE_MAX: AtomicU8 = AtomicU8::new(0);
 static HAS_OVERRIDES: AtomicBool = AtomicBool::new(false);
 
-const MAX_OVERRIDES: usize = 16;
-static OVERRIDES: SpinLock<[Option<(&'static str, Level)>; MAX_OVERRIDES]> =
-    SpinLock::new([None; MAX_OVERRIDES]);
+const MAX_OVERRIDES: usize = 32;
+/// Nejdelsi jmeno modulu nebo procesu v prepsani.
+pub const MAX_TARGET: usize = 40;
+
+/// Prepsani urovne pro modul jadra nebo proces (jmeno ulozene v poli:
+/// nastavuje se i za behu ze userspace, `LOG_CONTROL`).
+#[derive(Clone, Copy)]
+struct Override {
+    name: [u8; MAX_TARGET],
+    len: u8,
+    level: Level,
+}
+
+impl Override {
+    fn name(&self) -> &str {
+        core::str::from_utf8(&self.name[..self.len as usize]).unwrap_or("")
+    }
+}
+
+static OVERRIDES: SpinLock<[Option<Override>; MAX_OVERRIDES]> = SpinLock::new([None; MAX_OVERRIDES]);
+
+/// Vychozi potlacene sekce: ladici hlasky, ktere pri behu chodi stovkami
+/// a vytlacily by z bufferu dulezite zpravy (nastaveni pres `LOG_CONTROL`
+/// je prepise).
+pub fn set_defaults() {
+    for t in ["syscall", "object::process", "smp::clock_sync"] {
+        set_target_level(t, Level::Info);
+    }
+}
+
+/// Aktualni prepsani: (jmeno, uroven) do `f`.
+pub fn for_each_override(mut f: impl FnMut(&str, Level)) {
+    for o in OVERRIDES.lock().iter().flatten() {
+        f(o.name(), o.level);
+    }
+}
 
 /// Globalni uroven logovani.
 #[allow(
@@ -33,37 +66,38 @@ pub fn set_level(level: Level) {
 
 /// Uroven pro modul `target` a jeho podmoduly (bez prefixu `kernel::`,
 /// napr. `"sched"` nebo `"arch::x86_64::apic"`). Ma prednost pred globalni.
-pub fn set_target_level(target: &'static str, level: Level) {
+pub fn set_target_level(target: &str, level: Level) -> bool {
+    if target.is_empty() || target.len() > MAX_TARGET {
+        return false;
+    }
     let mut overrides = OVERRIDES.lock();
     let slot = overrides
         .iter()
-        .position(|o| o.is_some_and(|(t, _)| t == target))
+        .position(|o| o.is_some_and(|o| o.name() == target))
         .or_else(|| overrides.iter().position(Option::is_none));
-    if let Some(i) = slot {
-        overrides[i] = Some((target, level));
-    } else {
+    let Some(i) = slot else {
+        drop(overrides);
         super::warn!("prilis mnoho prepsani urovne logu, {target} ignorovan");
-        return;
-    }
-    let max = overrides
-        .iter()
-        .flatten()
-        .map(|&(_, l)| l as u8)
-        .max()
-        .unwrap_or(0);
+        return false;
+    };
+    let mut name = [0u8; MAX_TARGET];
+    name[..target.len()].copy_from_slice(target.as_bytes());
+    overrides[i] = Some(Override { name, len: target.len() as u8, level });
+    let max = overrides.iter().flatten().map(|o| o.level as u8).max().unwrap_or(0);
     OVERRIDE_MAX.store(max, Ordering::Relaxed);
     HAS_OVERRIDES.store(true, Ordering::Release);
+    true
 }
 
 /// Zrusi prepsani urovne pro modul `target`.
 pub fn clear_target_level(target: &str) {
     let mut overrides = OVERRIDES.lock();
     for o in overrides.iter_mut() {
-        if o.is_some_and(|(t, _)| t == target) {
+        if o.is_some_and(|o| o.name() == target) {
             *o = None;
         }
     }
-    let max = overrides.iter().flatten().map(|&(_, l)| l as u8).max();
+    let max = overrides.iter().flatten().map(|o| o.level as u8).max();
     OVERRIDE_MAX.store(max.unwrap_or(0), Ordering::Relaxed);
     HAS_OVERRIDES.store(max.is_some(), Ordering::Release);
 }
@@ -104,10 +138,10 @@ pub(super) fn enabled(level: Level, target: &str) -> bool {
     let specific = overrides
         .iter()
         .flatten()
-        .filter(|(prefix, _)| matches(target, prefix))
-        .max_by_key(|(prefix, _)| prefix.len());
+        .filter(|o| matches(target, o.name()))
+        .max_by_key(|o| o.len);
     match specific {
-        Some(&(_, l)) => level <= l,
+        Some(o) => level <= o.level,
         None => level as u8 <= global,
     }
 }

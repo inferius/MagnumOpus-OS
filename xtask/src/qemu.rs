@@ -185,8 +185,12 @@ fn command(
         // dohledat i po skonceni behu.
         .arg("-chardev")
         .arg(format!("stdio,id=serial0,logfile={}", serial_log.display()))
-        .args(["-serial", "chardev:serial0"])
-        .arg("-no-reboot");
+        .args(["-serial", "chardev:serial0"]);
+    // Test zaznamu padu: jadro po panice restartuje a QEMU musi nabehnout
+    // znovu (se stejnou RAM).
+    if !opts.crash_test {
+        cmd.arg("-no-reboot");
+    }
     if opts.headless {
         // Venus potrebuje OpenGL i bez okna.
         // Ve WSL neni uzel DRM pro egl-headless: GTK s OpenGL (EGL) pod
@@ -257,9 +261,17 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
         _ => cmd.args(["-device", &blk("data")]),
     };
     if opts.test {
+        // Jako VMware Virtual NVMe: disk jako jmenny prostor 2 (ne 1),
+        // bez mezipameti zapisu (writethrough, write-cache=off). QEMU presto
+        // hlasi VWC = 1; disk s VWC = 0 jako ve VMware v QEMU nasimulovat
+        // nejde.
         cmd.arg("-drive")
-            .arg(drive("nvmetest", &testdisks::nvme(&run.nvme)?))
-            .args(["-device", "nvme,drive=nvmetest,serial=MO-NVME-TEST"])
+            .arg(format!(
+                "if=none,id=nvmetest,format=raw,discard=unmap,cache=writethrough,file={}",
+                testdisks::nvme(&run.nvme)?.display()
+            ))
+            .args(["-device", "nvme,id=nvmet,serial=MO-NVME-TEST"])
+            .args(["-device", "nvme-ns,drive=nvmetest,bus=nvmet,nsid=2,write-cache=off"])
             .arg("-drive")
             .arg(drive("nvme4ktest", &testdisks::nvme4k(&run.nvme4k)?))
             .args([
@@ -467,6 +479,7 @@ fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result:
     // napajeni je kratky (jen start a vypnuti).
     let timeout = match opts.power_test {
         Some(_) => Duration::from_secs(300),
+        None if opts.crash_test => Duration::from_secs(400),
         None => opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1),
     };
     // Chybovy vystup QEMU jde dal na terminal a zaroven do bufferu (hlaska
@@ -517,6 +530,9 @@ fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result:
         };
     }
     match status.code() {
+        Some(code) if code == opts.arch.test_success && opts.crash_test => {
+            crate::crashtest::check_log(serial_log).map_err(|e| TestError::Other(format!("test zaznamu padu: {e}").into()))
+        }
         Some(code) if code == opts.arch.test_success => {
             println!("xtask: testy prosly");
             Ok(())

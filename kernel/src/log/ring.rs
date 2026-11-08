@@ -5,17 +5,26 @@
 
 use crate::sync::SpinLock;
 
-const CAPACITY: usize = 64 * 1024;
+/// 512 KiB: cely start systemu (stovky radku) se vejde i s ladicim
+/// vystupem, nez ho sluzba logu ulozi na disk.
+const CAPACITY: usize = 512 * 1024;
+const NEWLINE: u8 = 10;
 
 struct Ring {
     data: [u8; CAPACITY],
     /// Celkovy pocet kdy zapsanych bajtu (pozice dalsiho zapisu).
     written: u64,
+    /// Kam az cetla sluzba logu (`LOG_READ`).
+    read_pos: u64,
+    /// Radky prepsane drive, nez je sluzba logu precetla.
+    lost_lines: u64,
 }
 
 static RING: SpinLock<Ring> = SpinLock::new(Ring {
     data: [0; CAPACITY],
     written: 0,
+    read_pos: 0,
+    lost_lines: 0,
 });
 
 pub fn push(bytes: &[u8]) {
@@ -26,8 +35,45 @@ pub fn push(bytes: &[u8]) {
     };
     for &b in bytes {
         let pos = (ring.written % CAPACITY as u64) as usize;
+        // Prepis neprecteneho konce radku = ztraceny radek.
+        let unread = ring.written >= CAPACITY as u64 && ring.written - CAPACITY as u64 >= ring.read_pos;
+        if unread && ring.data[pos] == NEWLINE {
+            ring.lost_lines += 1;
+        }
         ring.data[pos] = b;
         ring.written += 1;
+    }
+}
+
+/// Zkopiruje do `out` data od pozice `cursor` (celkovy pocet zapsanych
+/// bajtu). Starsi data, ktera uz buffer prepsal, preskoci: vraci skutecny
+/// zacatek, pocet zkopirovanych bajtu a kolik radku se celkem ztratilo
+/// (prepsano pred prectenim).
+pub fn read_from(cursor: u64, out: &mut [u8]) -> (u64, usize, u64) {
+    let mut ring = RING.lock();
+    let written = ring.written;
+    let start = cursor.clamp(written.saturating_sub(CAPACITY as u64), written);
+    let n = ((written - start) as usize).min(out.len());
+    for (i, o) in out[..n].iter_mut().enumerate() {
+        *o = ring.data[((start + i as u64) % CAPACITY as u64) as usize];
+    }
+    ring.read_pos = ring.read_pos.max(start + n as u64);
+    (start, n, ring.lost_lines)
+}
+
+/// Obsah bufferu pri pade (bez zamku): `f(starsi usek, novejsi usek)`.
+///
+/// # Safety
+/// Ostatni CPU stoji (fatal_stop); zamek mohl drzet preruseny kod.
+pub unsafe fn with_unlocked(f: impl FnOnce(&[u8], &[u8])) {
+    // SAFETY: podle kontraktu volajiciho.
+    let ring = unsafe { RING.force_get() };
+    let written = ring.written;
+    if written <= CAPACITY as u64 {
+        f(&ring.data[..written as usize], &[]);
+    } else {
+        let start = (written % CAPACITY as u64) as usize;
+        f(&ring.data[start..], &ring.data[..start]);
     }
 }
 

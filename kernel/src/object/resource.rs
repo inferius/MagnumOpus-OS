@@ -276,10 +276,10 @@ impl KernelObject for Resource {
     }
 
     fn default_rights(&self) -> Rights {
-        // Nastaveni hodin a napajeni jen pro korenovy prostredek: omezene
+        // Nastaveni hodin, napajeni a diagnostika jen pro korenovy prostredek: omezene
         // prostredky ovladacu (`restrict`) je nedostanou nikdy.
         if self.limits.is_none() {
-            Rights::BASIC | Rights::MANAGE | Rights::SET_CLOCK | Rights::POWER
+            Rights::BASIC | Rights::MANAGE | Rights::SET_CLOCK | Rights::POWER | Rights::DIAG
         } else {
             Rights::BASIC | Rights::MANAGE
         }

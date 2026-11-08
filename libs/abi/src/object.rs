@@ -52,10 +52,14 @@ impl Rights {
     /// Vypnout nebo restartovat pocitac pres firmware (`SYSTEM_POWER`). Ma
     /// ho jen korenovy Resource; init ho preda jen sluzbe ACPI.
     pub const POWER: Self = Self(1 << 10);
+    /// Diagnostika: cist log jadra (`LOG_READ`) a zaznam padu
+    /// (`CRASH_RECORD`). Ma ho jen korenovy Resource; init ho preda jen
+    /// sluzbe logu.
+    pub const DIAG: Self = Self(1 << 11);
 
     pub const BASIC: Self = Self(Self::DUPLICATE.0 | Self::TRANSFER.0 | Self::WAIT.0);
     /// Vsechna prava (jen jako horni mez, napr. "zachovat prava" pri duplikaci).
-    pub const ALL: Self = Self((1 << 11) - 1);
+    pub const ALL: Self = Self((1 << 12) - 1);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

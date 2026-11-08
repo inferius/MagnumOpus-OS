@@ -770,6 +770,67 @@ A job ceiling cannot be set above the parent's (`ACCESS_DENIED`).
 `BAD_HANDLE`, `WRONG_TYPE`, `INVALID_ADDRESS`. Behaviour:
 [Scheduler](scheduler.md). In libos: module `sched`.
 
+## Diagnostics
+
+The syscalls below require a Resource with the `DIAG` right: only the root
+resource has it and init hands it only to the log service (`logd`) as a
+`BASIC | DIAG` duplicate without `MANAGE` (the resource cannot touch
+hardware). See [Live USB](live-usb.md#diagnostics).
+
+### `LOG_READ`
+
+`(resource, cursor, buf_ptr, buf_len, out_start_ptr) -> bytes`. Reads the
+kernel log (it also holds all process messages from `DEBUG_LOG`) as a byte
+stream: `cursor` is the position in the stream (how many bytes the kernel
+ever wrote). The ring buffer has 512 KiB; when older data has been
+overwritten, reading starts at the oldest available byte and the real start
+is written to `out_start_ptr` (u64) - so the reader sees the loss. New
+the second u64 after it is the total number of lines the kernel
+overwrote before the reader read them ("N lines lost"). New position =
+start + returned length, 0 = nothing new. At most 64 KiB per call. Errors: `ACCESS_DENIED` (no `DIAG`), `INVALID_ARGS` (`buf_len` over
+64 KiB), `INVALID_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`. In libos
+`Resource::log_read`.
+
+### `CRASH_RECORD`
+
+`(resource, op, buf_ptr, buf_len) -> bytes`. The kernel crash record from
+the previous run (pstore, format `libs/crashrec`). The loader reserves
+64 KiB of RAM at a fixed address (kind `Pstore` in the memory map); on a
+panic or fatal exception the kernel writes a header and the end of the
+kernel log there, and a warm reset does not erase it.
+
+| `op` | meaning |
+|---|---|
+| 0 `READ` | copies a valid record (header + text) into the buffer, returns the length; 0 = none; a small buffer = `BUFFER_TOO_SMALL` |
+| 1 `CLEAR` | erases the record (the log service saved it to disk) |
+| 2 `TEST_PANIC` | test kernel only (`qemu-test`): causes a panic, the kernel writes the record and reboots right away; otherwise `NOT_SUPPORTED` |
+| 3 `CAPACITY` | size of the area (0 = the loader did not get one) |
+
+Errors: `ACCESS_DENIED` (no `DIAG`), `INVALID_ARGS` (unknown operation),
+`INVALID_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`. In libos
+`Resource::crash_record`.
+
+### `LOG_CONTROL`
+
+`(resource, op, buf_ptr, buf_len) -> bytes`. Kernel log levels at run
+time (shell command `loglevel`, file `/system/log/urovne.conf`).
+
+| `op` | buffer | meaning |
+|---|---|---|
+| 0 `SET` | `module=level` | level for a kernel module (`sched`, `arch::x86_64::apic`; applies to submodules too) or for a process (its `DEBUG_LOG`); level `error`, `warn`, `info`, `debug`, `trace` |
+| 1 `CLEAR` | `module` | removes the override (the global level applies) |
+| 2 `LIST` | output | `module=level` per line and `potlaceno=N` (suppressed repeats) |
+
+Default suppressed sections (only `info` and above): `syscall`,
+`object::process`, `smp::clock_sync`. Independently of the levels, the
+kernel writes at most 10 records per second from one place (file and line,
+for `DEBUG_LOG` the process and the text without digits); further ones are
+only counted and the first message in a new second is preceded by "...
+previous message suppressed N times". At most 32 overrides, a name at most
+40 B. Errors: `ACCESS_DENIED` (no `DIAG`), `INVALID_ARGS` (unknown level or
+operation, long name, full table), `BUFFER_TOO_SMALL`, `INVALID_ADDRESS`.
+In libos `Resource::log_control`.
+
 ## Random numbers
 
 The kernel has a cryptographic generator (`kernel/src/random.rs`, crate

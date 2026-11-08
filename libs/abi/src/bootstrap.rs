@@ -36,6 +36,10 @@ pub mod flags {
     /// userspace a skonci s jejich vysledkem. Bez priznaku bezi init jako
     /// supervisor stale.
     pub const TEST_RUN: u32 = 1 << 0;
+    /// Rezim "vytahni logy" (volba v zavadeci zive flashky): init najde
+    /// nainstalovany system na jinem disku, jen pro cteni zkopiruje jeho
+    /// logy a zaznamy padu na oddil MO-LOGY flashky a ukaze hotovo.
+    pub const RESCUE_LOGS: u32 = 1 << 1;
 }
 
 /// Co znamena predany handle.

@@ -7,7 +7,8 @@
 //! |---------------|---------|----------------------|------------------------------------|
 //! | MBR + GPT     | 0       | 34 sektoru           | ochranny MBR, hlavicka, tabulka    |
 //! | ESP           | 1 MiB   | [`ESP_MIB`] MiB      | FAT32: EFI/BOOT/BOOT*.EFI, os/...   |
-//! | data          | za ESP  | do konce obrazu      | nas FS (oddil "MagnumOpus")        |
+//! | MO-LOGY       | za ESP  | [`LOGY_MIB`] MiB     | FAT32 pro logy (cte ho Windows)    |
+//! | data          | za logy | do konce obrazu      | nas FS (oddil "MagnumOpus")        |
 //! | zalozni GPT   | konec   | 33 sektoru           | tabulka a hlavicka                 |
 //!
 //! Obraz se pise po castech primo do souboru (zadny buffer velikosti
@@ -30,10 +31,18 @@ const ESP_START: u64 = MIB;
 /// Velikost ESP. Ladici initfs ma ~35 MiB, rezerva na budouci soubory
 /// (zalozni zavadec, aktualizace).
 pub const ESP_MIB: u64 = 128;
-/// Nejmensi obraz: ESP + 64 MiB dat + GPT.
-pub const MIN_MIB: u64 = ESP_MIB + 64 + 2;
+/// Oddil pro logy (FAT32 `MO-LOGY`, typ basic data): system do nej kopiruje
+/// logy, zaznamy padu a balicek pro vyvojare (`user/logd/src/fatlog.rs`).
+pub const LOGY_MIB: u64 = 64;
+/// Nejmensi obraz: ESP + logy + 64 MiB dat + GPT.
+pub const MIN_MIB: u64 = ESP_MIB + LOGY_MIB + 64 + 2;
 /// Jmenovka datoveho FS.
 pub const DATA_LABEL: &str = "MagnumOpus";
+
+/// Oddil MO-LOGY v obrazu (bajty: od, delka).
+pub fn logy_range() -> (u64, u64) {
+    (ESP_START + ESP_MIB * MIB, LOGY_MIB * MIB)
+}
 
 /// Udaje o vytvorenem obrazu.
 pub struct Layout {
@@ -52,7 +61,9 @@ pub fn create(path: &Path, size_mib: u64, esp_files: &[(&str, &Path)]) -> Result
     let sectors = size / SECTOR;
     let esp_first = ESP_START / SECTOR;
     let esp_last = esp_first + ESP_MIB * MIB / SECTOR - 1;
-    let data_first = esp_last + 1;
+    let logy_first = esp_last + 1;
+    let logy_last = logy_first + LOGY_MIB * MIB / SECTOR - 1;
+    let data_first = logy_last + 1;
     // Datovy oddil konci na hranici 1 MiB pred zalozni tabulkou (cele bloky
     // FS po 4 KiB).
     let data_last = (gpt::last_usable(sectors, SECTOR as usize) + 1) / (MIB / SECTOR) * (MIB / SECTOR) - 1;
@@ -70,6 +81,15 @@ pub fn create(path: &Path, size_mib: u64, esp_files: &[(&str, &Path)]) -> Result
     file.seek(SeekFrom::Start(ESP_START))?;
     file.write_all(&esp)?;
     drop(esp);
+
+    // Oddil pro logy: prazdny FAT32 s navodem.
+    let mut logy = vec![0u8; (LOGY_MIB * MIB) as usize];
+    let readme = crate::target_dir().join("usb-logy-readme.txt");
+    std::fs::write(&readme, LOGY_README)?;
+    crate::image::write_fat_partition(&mut logy, &[("CTI-MNE.TXT", readme.as_path())], *b"MO-LOGY    ")?;
+    file.seek(SeekFrom::Start(logy_first * SECTOR))?;
+    file.write_all(&logy)?;
+    drop(logy);
 
     // Datovy FS primo v souboru na offsetu oddilu.
     format_data(&file, data, random_uuid())?;
@@ -89,6 +109,14 @@ pub fn create(path: &Path, size_mib: u64, esp_files: &[(&str, &Path)]) -> Result
                 name: "EFI System",
             },
             NewPartition {
+                type_guid: diskguard::BASIC_DATA_TYPE,
+                guid: random_uuid(),
+                first: logy_first,
+                last: logy_last,
+                attrs: 0,
+                name: diskguard::LOG_LABEL,
+            },
+            NewPartition {
                 type_guid: diskguard::OUR_TYPE,
                 guid: random_uuid(),
                 first: data_first,
@@ -105,6 +133,9 @@ pub fn create(path: &Path, size_mib: u64, esp_files: &[(&str, &Path)]) -> Result
     file.sync_all()?;
     Ok(Layout { size, data })
 }
+
+const LOGY_README: &str = "MagnumOpus - logy a zaznamy padu\r\n\r\n\
+System sem kopiruje logy (slozka MAGNUMOS). Soubor REPORT.TXT posilejte vyvojari.\r\n";
 
 /// Blokove zarizeni FS nad casti souboru (oddil v obrazu).
 struct PartDevice<'a> {
@@ -168,7 +199,7 @@ fn format_data(file: &File, (offset, len): (u64, u64), uuid: [u8; 16]) -> Result
     let mut fs = Fs::mount(dev).map_err(|e| fs_err("pripojeni", e))?;
     fs.set_time(now());
     let readme: &[u8] = b"Datovy oddil ziveho USB MagnumOpus.\n\
-        Logy a zaznamy padu jsou v /system/log a /system/crash.\n";
+        Logy jsou v /system/log, zaznamy padu v /system/pady.\n";
     fs.create("/vitejte.txt", Kind::File).map_err(|e| fs_err("soubor", e))?;
     fs.write("/vitejte.txt", 0, readme).map_err(|e| fs_err("soubor", e))?;
     fs.commit().map_err(|e| fs_err("commit", e))?;

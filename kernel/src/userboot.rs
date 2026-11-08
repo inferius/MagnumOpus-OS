@@ -7,6 +7,10 @@
 //! handle na vlastni proces, korenovy job (bez limitu, se vsemi pravy)
 //! a objekt pameti s obrazem initfs.
 
+
+/// Rezim "vytahni logy" z nabidky zavadece (`BootInfo::boot_flags`).
+pub static RESCUE_LOGS: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 use alloc::sync::Arc;
 use alloc::vec;
 
@@ -154,6 +158,10 @@ fn send_bootstrap(
             bootstrap::kind::SELF_PROCESS,
             if cfg!(feature = "qemu-test") {
                 bootstrap::flags::TEST_RUN
+            } else {
+                0
+            } | if RESCUE_LOGS.load(core::sync::atomic::Ordering::Relaxed) {
+                bootstrap::flags::RESCUE_LOGS
             } else {
                 0
             },

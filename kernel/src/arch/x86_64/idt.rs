@@ -240,7 +240,7 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
             } else {
                 0
             };
-            trap::user_fault(v as u8, frame.error_code, frame.rip, addr)
+            trap::user_fault(v as u8, frame.error_code, frame.rip, addr, frame.rsp, frame.rbp)
         }
         VEC_BREAKPOINT => {
             log::info!("breakpoint na {:#x}", frame.rip);
@@ -283,6 +283,14 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
 
 fn fatal_exception(f: &TrapFrame) -> ! {
     let name = EXCEPTION_NAMES[f.vector as usize];
+    crate::fatal::set_reason(match f.vector {
+        VEC_PAGE_FAULT => "PAGE_FAULT_KERNEL",
+        8 => "DOUBLE_FAULT",
+        13 => "GENERAL_PROTECTION",
+        6 => "INVALID_OPCODE",
+        0 => "DIVIDE_ERROR",
+        _ => "CPU_EXCEPTION",
+    });
     report(format_args!(
         "KERNEL: neosetrena vyjimka {name} na cpu{}, vektor {}, chybovy kod {:#x}",
         trap::current_cpu_index(),

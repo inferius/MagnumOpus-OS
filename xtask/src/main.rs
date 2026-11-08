@@ -15,6 +15,7 @@
 
 mod arch;
 mod audio;
+mod crashtest;
 mod datadisk;
 mod drivers;
 mod docs;
@@ -31,6 +32,7 @@ mod qmp;
 mod symbolize;
 mod testdisks;
 mod usb;
+mod vmware;
 mod venus;
 
 use std::env;
@@ -53,10 +55,16 @@ prikazy:
   test     testy knihoven na hostiteli, kontrola prekladu jadra pro ostatni
            architektury, pak jadro a userspace v QEMU bez okna
   check    jen kontrola prekladu jadra
+  symbolize <soubor>  adresy v zaznamu padu, balicku nebo logu na jmena
+           funkci (jadro a programy z target/; stejne --arch a --release
+           jako build, ze ktereho system bezel)
   usb      zive USB: target/usb-<arch>-<profil>.img (GPT, ESP, datovy
            oddil); --list disky hostitele, --write <disk> zapis na
            flashku (s potvrzenim), --run start v QEMU jako flash disk,
            --test totez bez okna, --size <MiB> (vychozi 1024), --out <soubor>
+  vmware   obraz ziveho USB jako disk VMware: sestavi, prevede na VMDK,
+           zazalohuje a nahradi <slozka>/magnumopus.vmdk; --dir <slozka>
+           nebo MO_VMWARE_DIR; bezici VM odmitne
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
   new-driver <jmeno> --pci <vendor:device>
            kostra ovladace na driverkitu: kod, manifest, model a test
@@ -84,7 +92,9 @@ prepinace:
                    none = bez virtio-gpu (GUI nad framebufferem z firmwaru,
                    ovladac fbdisplay; vychozi pro run s oknem)
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
-                   carkou, napr. sit,firewall; jmena jako v logu)
+                   carkou, napr. sit,firewall; jmena jako v logu);
+                   --only release = jen start v release profilu (test
+                   po hlavnim behu, hlida chyby, ktere debug neukaze)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
   --audio <druh>   (run, test) zvuk QEMU (radic intel-hda, kodek hda-duplex):
                    test wav (vychozi; soubor se po testu zkontroluje), none;
@@ -154,6 +164,9 @@ pub struct Options {
     /// Zvlastni beh testu napajeni (`powertest`): "button" nebo "reboot".
     /// QEMU ma skoncit samo (vypnuti ACPI) s kodem 0.
     power_test: Option<&'static str>,
+    /// Zvlastni beh testu zaznamu padu (`crashtest`): QEMU bez
+    /// `-no-reboot` (jadro po panice restartuje).
+    crash_test: bool,
 }
 
 fn main() -> ExitCode {
@@ -181,6 +194,9 @@ fn run_cli() -> Result<()> {
     // Prikaz `usb` ma vlastni prepinace; zbytek (--release, --arch) je
     // spolecny.
     let rest: Vec<OsString> = args.collect();
+    // `symbolize <soubor>`: prvni argument je soubor.
+    let mut rest = rest;
+    let symbolize_file = if command == "symbolize" && !rest.is_empty() { Some(PathBuf::from(rest.remove(0))) } else { None };
     let (usb_args, rest) = if command == "usb" {
         let (u, r) = usb::split_args(rest)?;
         (Some(u), r)
@@ -211,8 +227,10 @@ fn run_cli() -> Result<()> {
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
         power_test: None,
+        crash_test: false,
     };
     let mut gpu_set = false;
+    let mut vmware_dir: Option<std::path::PathBuf> = None;
     let mut no_power = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -252,6 +270,10 @@ fn run_cli() -> Result<()> {
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--net-online") => opts.net_online = true,
+            Some("--dir") => {
+                let value = args.next().ok_or("--dir ocekava slozku")?;
+                vmware_dir = Some(std::path::PathBuf::from(value));
+            }
             Some("--audio") => {
                 let value = args.next().ok_or("--audio ocekava backend zvuku QEMU")?;
                 opts.audio = value.to_string_lossy().into_owned();
@@ -364,7 +386,8 @@ repeat = {}
             // testu userspace).
             let power_only = opts.test_only == "napajeni";
             let usb_only = opts.test_only == "zive-usb";
-            if !power_only && !usb_only {
+            let release_only = opts.test_only == "release";
+            if !power_only && !usb_only && !release_only && opts.test_only != "zaznam-padu" {
                 let artifacts = build(&opts)?;
                 let image = image_for(&artifacts, &opts)?;
                 qemu::run(&image, &artifacts, &opts)?;
@@ -373,6 +396,16 @@ repeat = {}
             // behu = vypnuti, nejde to spojit s hlavnim behem testu).
             if !no_power && (opts.test_only.is_empty() || power_only) {
                 powertest::run_all(&mut opts)?;
+            }
+            // Start v release profilu (jine optimalizace a casovani nez
+            // debug): jadro, init, sluzby a ACPI az po restart. Hlida chyby,
+            // ktere se v debug neprojevi (`--only release` jen tento beh).
+            if !opts.release && (opts.test_only.is_empty() || release_only) {
+                powertest::run_release(&mut opts)?;
+            }
+            // Zaznam padu jadra prezije restart (`--only zaznam-padu` jen ten).
+            if opts.test_only.is_empty() || opts.test_only == "zaznam-padu" {
+                crashtest::run(&mut opts)?;
             }
             // Zive USB: obraz s beznym jadrem (ne testovacim) nastartuje
             // z flash disku USB az do GUI s terminalem.
@@ -388,6 +421,15 @@ repeat = {}
         }
         Some("check") => check_kernel(opts.arch, &opts),
         Some("usb") => usb::command(&opts, usb_args.as_ref().unwrap()),
+        Some("vmware") => vmware::command(&opts, vmware_dir),
+        Some("symbolize") => {
+            let file = symbolize_file.ok_or("symbolize ocekava soubor (zaznam padu, balicek, log)")?;
+            let a = opts.arch;
+            let profile = profile_dir(&opts);
+            let kernel = target_dir().join(a.kernel_target).join(profile).join("kernel");
+            let user = user_target_dir().join(a.user_target).join(profile);
+            symbolize::file(&file, &kernel, &user)
+        }
         Some("docs") => build_docs().map(|_| ()),
         Some("venus-gen") => venus::run(false),
         Some("venus-check") => venus::run(true),
@@ -536,11 +578,17 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "diskguard",
             "--package",
+            "crashrec",
+            "--package",
+            "qr",
+            "--package",
+            "fatw",
+            "--package",
             "agentproto",
             "--package",
             "agentsh",
             "--features",
-            "initfs/std,fs/std,netproto/std,netproto/nts,driverkit/sim",
+            "initfs/std,fs/std,netproto/std,netproto/nts,driverkit/sim,crashrec/alloc",
         ])
         .args(&drivers_args)
         .status()?;
@@ -637,6 +685,8 @@ const USER_PROGRAMS: &[&str] = &[
     "usb-hub",
     "usb-hid",
     "usb-storage",
+    "logd",
+    "logrescue",
     "fsd",
     "timed",
     "termd",
@@ -704,6 +754,12 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
     }
     if opts.test && packages.contains(&"kernel") {
         cmd.args(["--features", "qemu-test"]);
+    }
+    if packages.contains(&"kernel") {
+        // Verze a commit do jadra (log pri startu, zaznam padu). Jen jadru:
+        // zmena commitu tak neprekladá znovu cely userspace.
+        let (version, build) = build_info();
+        cmd.env("MO_VERSION", version).env("MO_BUILD", build);
     }
     if user {
         // Userspace ma jine priznaky nez jadro (bez code-model=kernel
@@ -858,4 +914,26 @@ fn console_utf8() {
             SetConsoleOutputCP(65001);
         }
     }
+}
+
+/// Informace o sestaveni z gitu: (kratka verze do zaznamu padu, max 32
+/// znaku, napr. `MagnumOpus 0.1.0 130f2e5*`; uplny popis do logu, napr.
+/// `130f2e5* (2026-11-08, release)`). `*` = neulozene zmeny v kodu.
+/// Bez gitu `?`.
+pub fn build_info() -> (String, String) {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(workspace_root())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let commit = git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| String::from("?"));
+    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
+    let date = git(&["log", "-1", "--format=%cd", "--date=format:%Y-%m-%d"]).unwrap_or_default();
+    let mark = if dirty { "*" } else { "" };
+    let version = format!("MagnumOpus {} {commit}{mark}", env!("CARGO_PKG_VERSION"));
+    (version, format!("{commit}{mark} ({date})"))
 }

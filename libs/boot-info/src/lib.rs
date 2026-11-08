@@ -18,7 +18,7 @@
 pub const BOOT_INFO_MAGIC: u64 = u64::from_le_bytes(*b"OSBOOTIF");
 
 /// Verze rozhrani. Zvysit pri kazde nekompatibilni zmene struktur.
-pub const BOOT_INFO_VERSION: u32 = 4;
+pub const BOOT_INFO_VERSION: u32 = 5;
 
 /// Zacatek prime mapy fyzicke pameti (zacatek horni poloviny adresniho prostoru).
 pub const PHYS_MAP_BASE: u64 = 0xFFFF_8000_0000_0000;
@@ -63,6 +63,20 @@ pub struct BootInfo {
     pub device_tree: u64,
     /// Ladici seriova linka, kterou jadro smi pouzit od prvni instrukce.
     pub debug_serial: DebugSerial,
+    /// Oblast pro zaznam padu (pstore, `libs/crashrec`): fyzicka adresa
+    /// a delka, 0 = loader ji nedostal. Lezi na stejne adrese pri kazdem
+    /// startu (kdyz je volna), takze zaznam z minuleho behu prezije teply
+    /// restart. Druh v mape pameti [`MemoryKind::Pstore`].
+    pub pstore_phys: u64,
+    pub pstore_len: u64,
+    /// Volby startu z nabidky zavadece ([`boot_flags`]).
+    pub boot_flags: u64,
+}
+
+/// Volby startu (`BootInfo::boot_flags`).
+pub mod boot_flags {
+    /// Rezim "vytahni logy" (klavesa L pri startu z flashky).
+    pub const RESCUE_LOGS: u64 = 1 << 0;
 }
 
 /// Ladici seriova linka zjistena loaderem (aarch64: z ACPI SPCR).
@@ -244,6 +258,9 @@ pub enum MemoryKind {
     Reserved = 9,
     /// Obraz initfs od loaderu; po prevzeti jadrem lze uvolnit.
     Initfs = 10,
+    /// Zaznam padu (pstore): RAM, kterou jadro nealokuje, jen do ni pise
+    /// pri padu a cte ji pri startu.
+    Pstore = 11,
 }
 
 /// Format jednoho pixelu (vzdy 32 bitu na pixel).

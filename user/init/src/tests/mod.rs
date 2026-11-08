@@ -9,6 +9,7 @@ mod accounts;
 mod agent;
 mod agent_shell;
 mod basic;
+pub mod diag;
 mod dns;
 mod clock_sync;
 mod disks;
@@ -65,6 +66,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("disky", disks::TESTS),
     ("sitove karty", nic::TESTS),
     ("acpi", power::TESTS),
+    ("diagnostika", diag::TESTS),
     ("souborovy system", fs::TESTS),
     ("ucty", accounts::TESTS),
     ("vstup", input::TESTS),

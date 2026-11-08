@@ -54,7 +54,8 @@ pub fn processes(a: Args) -> Result<u64> {
             let e = abi::job::ProcEntry {
                 pid: proc.id,
                 job: proc.job().id,
-                cpu_ns: proc.cpu_ns.load(core::sync::atomic::Ordering::Relaxed),
+                cpu_ns: proc.cpu_ns.load(core::sync::atomic::Ordering::Relaxed)
+                    + crate::sched::running_ns(proc.id),
                 threads,
                 flags: if finished { abi::job::proc_flags::FINISHED } else { 0 },
                 name: abi::job::ProcEntry::name_bytes(&proc.name),

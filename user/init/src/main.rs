@@ -25,8 +25,10 @@ mod dns;
 mod fsd;
 mod gui;
 mod input;
+mod logd;
 mod ntp;
 mod power;
+mod rescue;
 mod revocation;
 mod session;
 mod supervisor;
@@ -42,6 +44,11 @@ libos::entry!(main);
 fn main(startup: Startup) -> i64 {
     println!("init: bezim v userspace");
     let mut sup = supervisor::SUPERVISOR.lock();
+    if let Some(r) = startup.root_resource.as_ref()
+        && let Ok(h) = r.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::DIAG))
+    {
+        system::ROOT.call_once(|| libos::hw::Resource::from_handle(h));
+    }
     match system::start_time(&startup) {
         Ok(t) => {
             sup.watch("timed", &t.process, Some(system::TIME_RESTART));
@@ -70,6 +77,7 @@ fn main(startup: Startup) -> i64 {
         Err(Error::NotFound) => println!("init: ACPI neni (jadro nepredalo udaje), napajeni jen pres firmware"),
         Err(e) => println!("init: sluzbu ACPI nelze spustit: {e}"),
     }
+    let crash_test = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 && tests::diag::crash_mode(&startup);
     let power_test = if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
         tests::power::mode(&startup)
     } else {
@@ -93,14 +101,24 @@ fn main(startup: Startup) -> i64 {
                         Ok((ch, lease)) => devices.fs = Some(fsproto::FsClient::with_lease(ch, lease)),
                         Err(e) => println!("init: relace FS nelze vytvorit: {e}"),
                     }
+                    // Trvaly log a zaznamy padu co nejdriv po FS.
+                    if devices.fs.is_some() {
+                        match logd::start(&startup, &devices, &mut sup) {
+                            Ok(boot) => println!("init: logd bezi, boot cislo {boot}"),
+                            Err(e) => println!("init: sluzbu logu (logd) nelze spustit: {e}"),
+                        }
+                    }
                     if devices.fs.is_some()
                         && let Err(e) = certs::seed(&startup, &devices)
                     {
                         // Bez uloziste se spojeni TLS nenavazou (zadna duveryhodna CA).
                         println!("init: uloziste certifikatu nelze pripravit: {e}");
                     }
-                    // Ucty hned po FS: vlastni dataset DB a domovy.
+                    // Ucty hned po FS: vlastni dataset DB a domovy. Test
+                    // zaznamu padu je nepotrebuje (druhy start nad stejnym
+                    // diskem zatim konci IO_ERROR v accountd - nahlaseno).
                     if devices.fs.is_some()
+                        && !crash_test
                         && let Err(e) = accounts::start(&startup, &devices, &mut sup)
                     {
                         println!("init: sluzbu uctu nelze spustit: {e}");
@@ -110,6 +128,12 @@ fn main(startup: Startup) -> i64 {
                 Err(e) => println!("init: souborovy system nelze spustit: {e}"),
             }
             sup.watch("devmgr", &devices.devmgr, None);
+            if startup.flags & libos::abi::bootstrap::flags::RESCUE_LOGS != 0 {
+                // Rezim "vytahni logy": jen kopie, bez GUI a site.
+                rescue::run(&startup, &mut devices);
+                system::DEVICES.call_once(|| devices);
+                sup.run(&startup);
+            }
             match input::start(&startup, core::mem::take(&mut devices.inputs)) {
                 Ok((i, p)) => {
                     // Restart po padu: adapter preda nove instanci ovladace,
@@ -133,7 +157,7 @@ fn main(startup: Startup) -> i64 {
             }
             // Sit az po FS: firewall uklada konfiguraci na FS. Zvlastni beh
             // testu napajeni sit nepotrebuje (kratsi start).
-            match if power_test.is_some() { Err(Error::NotSupported) } else { system::start_net(&startup, &mut devices, &mut sup) } {
+            match if power_test.is_some() || crash_test { Err(Error::NotSupported) } else { system::start_net(&startup, &mut devices, &mut sup) } {
                 Ok(mut n) => {
                     let dnsd_end = n.dnsd_end.take();
                     // Restart zatim neni (jako u fsd): netd drzi kanaly
@@ -179,7 +203,7 @@ fn main(startup: Startup) -> i64 {
             // Agent AI po siti a FS: sit jen v beznem behu (testy maji
             // falesny model bez site).
             let test_run = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
-            if devices.fs.is_some() {
+            if devices.fs.is_some() && !crash_test {
                 match agent::start(&startup, &devices, !test_run) {
                     Ok(()) => {
                         if let Some(a) = agent::AGENTD.lock().as_ref() {
@@ -219,6 +243,10 @@ fn main(startup: Startup) -> i64 {
     if let Some(mode) = power_test {
         // Zvlastni beh: vypnuti nebo restart (QEMU skonci samo).
         return tests::power::scenario(&startup, &mode);
+    }
+    if crash_test {
+        // Zvlastni beh: zaznam padu jadra prezije restart.
+        return tests::diag::scenario(&startup);
     }
     let failed = tests::run_all(&startup);
     if failed == 0 {

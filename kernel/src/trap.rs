@@ -69,8 +69,8 @@ pub fn syscall(number: u64, args: [u64; 6]) -> u64 {
 /// a ostatni architektury na ne sve vyjimky mapuji. `pc` = adresa
 /// instrukce, `addr` = adresa pristupu (u vypadku stranky, jinak 0).
 #[inline]
-pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64) -> ! {
-    sched::user_fault(code, error_code, pc, addr)
+pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64, sp: u64, fp: u64) -> ! {
+    sched::user_fault(code, error_code, pc, addr, sp, fp)
 }
 
 /// Index aktualniho CPU pro vypis fatalni chyby (0, pokud jeste neni

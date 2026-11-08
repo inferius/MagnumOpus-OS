@@ -133,6 +133,16 @@ pub fn request_from_shell(data: &[u8], chan: Channel) -> Option<Channel> {
             *PENDING.lock() = Some((reboot, chan));
             return None;
         }
+        // Balicek pro vyvojare sestavi sluzba logu.
+        Ok(Request::Report) => match crate::logd::report() {
+            Ok((path, preview)) => Reply::Text(alloc::format!("{path}
+{preview}")),
+            Err(e) => Reply::Failed(e),
+        },
+        Ok(Request::LogLevel { target, level }) => match crate::logd::log_level(&target, &level) {
+            Ok(text) => Reply::Text(text),
+            Err(e) => Reply::Failed(e),
+        },
         // Dotazy (stav, cidla) preposlat acpid.
         Ok(r) => request(&r, Duration::from_secs(10)).unwrap_or_else(Reply::Failed),
         Err(e) => Reply::Failed(e),

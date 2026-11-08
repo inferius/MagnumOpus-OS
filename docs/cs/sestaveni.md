@@ -36,6 +36,10 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 | `cargo xtask test --only napajeni` | jen zvláštní běhy testu napájení (vypnutí tlačítkem přes ACPI, restart; po hlavním běhu se spouští vždy, vypne je `--no-power`), viz [ACPI](acpi.md#testy) |
 | `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
 | `cargo xtask usb` | živé USB: obraz `target/usb-<arch>-<profil>.img`; `--list`, `--write <disk>`, `--run`, `--test`, `--size <MiB>`, `--out <soubor>`, viz [Živé USB](zive-usb.md) |
+| `cargo xtask vmware` | obraz živého USB jako disk VMware Workstation: sestaví, převede na VMDK (`qemu-img`), zazálohuje (poslední 3) a nahradí `<složka>/magnumopus.vmdk`; složka `--dir <složka>` nebo proměnná `MO_VMWARE_DIR`; běžící VM (zámky `*.lck`) odmítne. VM: firmware UEFI bez Secure Boot, disk SATA nebo NVMe, síť `e1000e` |
+| `cargo xtask test --only release` | jen start v release profilu (jádro, init, služby, ACPI a restart; po hlavním běhu se spouští vždy, pokud test sám neběží s `--release`) – release mění optimalizace a časování a ukáže chyby, které debug skryje |
+| `cargo xtask test --only zaznam-padu` | jen test záznamu pádu: panika jádra, restart QEMU se stejnou RAM, uložení záznamu službou logu a balíček pro vývojáře ([Živé USB](zive-usb.md#diagnostika)); po hlavním běhu se spouští vždy |
+| `cargo xtask symbolize <soubor>` | adresy v záznamu pádu, balíčku nebo logu na jména funkcí (jádro i programy) |
 | `cargo xtask test --only zive-usb` | jen start z obrazu USB jako flash disk (po hlavním běhu se spouští vždy) |
 | `cargo xtask test --driver edu` | jen jeden ovladač z manifestu: jeho testy na hostiteli (simulace) a v QEMU sada `ovladace z manifestu` jen pro něj; bez kontroly jader ostatních architektur a dokumentace (rychlá smyčka, viz [Ovladače](ovladace.md)) |
 | `cargo xtask new-driver <jméno> --pci <vendor:device>` | kostra ovladače na driverkitu: kód, manifest, model zařízení a test v simulaci, stránka dokumentace cs+en ([Ovladače](ovladace.md#první-ovladač-krok-za-krokem)) |
