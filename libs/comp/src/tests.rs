@@ -17,6 +17,8 @@ use inputproto::{Action, Button, Event, Record};
 
 use crate::*;
 
+mod gpu;
+
 const W: u32 = 800;
 const H: u32 = 600;
 

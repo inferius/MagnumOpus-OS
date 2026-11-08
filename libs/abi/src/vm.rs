@@ -24,6 +24,18 @@ pub const MAP_EXECUTE: u32 = 1 << 2;
 /// vyber jadra).
 pub const MAP_FIXED: u32 = 1 << 3;
 
+/// Typ cache fyzickeho objektu pameti (`VMO_CREATE_PHYSICAL`). Urcuje ho
+/// drzitel prostredku pri vytvoreni; kazde mapovani objektu ho zdedi.
+pub mod cache {
+    /// Bez cache (registry zarizeni). Vychozi.
+    pub const UNCACHED: u64 = 0;
+    /// Zapisy se slucuji, cteni bez cache (framebuffer, pamet GPU).
+    pub const WRITE_COMBINING: u64 = 1;
+    /// Bezna pamet s cache (pamet hostitele namapovana zarizenim, napr.
+    /// sdilena pamet virtio-gpu s `MAP_CACHE_CACHED`).
+    pub const CACHED: u64 = 2;
+}
+
 /// Zacatek pameti procesu, kterou smi mapovat (pod ni zustava nenamapovany
 /// prostor, aby dereference nuloveho ukazatele vzdy skoncila chybou).
 pub const USER_MIN: u64 = 0x0000_0000_0001_0000;

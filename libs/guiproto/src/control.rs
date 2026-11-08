@@ -36,6 +36,9 @@ pub const STATUS: &str = "status";
 /// `tasks <bezi> <z toho agent>`: pocet uloh pro ikonu v panelu (do
 /// pripojeni kompozitoru k taskd ho posila init nebo test).
 pub const TASKS: &str = "tasks";
+/// `backend gpu|cpu`: skladani na GPU (Venus, render uzel ovladace)
+/// nebo na CPU (vychozi). Bez Venusu `backend gpu` = `NOT_SUPPORTED`.
+pub const BACKEND: &str = "backend";
 
 /// Identita aplikace pri `connect`: posila ji init (duveryhodny), ne
 /// aplikace. Odznak duvery ukazuje `name` a `perms`.

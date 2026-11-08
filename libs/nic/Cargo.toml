@@ -1,0 +1,18 @@
+[package]
+name = "nic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ovladace sitovych karet Intel e1000e a igc a Realtek r8169 nad netproto::link"
+
+[features]
+# Beh v systemu: registry a DMA pres libos, smycka ovladace (programy
+# e1000e, igc, r8169). Bez ni jen logika cipu nad rozhranim `Hw` - ta jde
+# testovat na hostiteli nad simulovanymi registry.
+default = []
+libos = ["dep:libos", "dep:pci", "dep:netproto"]
+
+[dependencies]
+libos = { path = "../libos", optional = true }
+pci = { path = "../pci", optional = true }
+netproto = { path = "../netproto", optional = true }

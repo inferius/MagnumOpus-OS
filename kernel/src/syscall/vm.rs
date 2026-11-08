@@ -79,7 +79,14 @@ pub fn map(a: Args) -> Result<u64> {
             table.get_as::<MemoryObject>(arg_handle(a[1])?, needed)?,
         )
     };
-    target.address_space().map(vmo, a[2], a[3], flags, a[5])
+    let addr = target.address_space().map(vmo.clone(), a[2], a[3], flags, a[5])?;
+    // Fyzicky objekt si pamatuje, kde je namapovany (odvolani); kdyz byl
+    // mezitim odvolan, mapovani se vrati.
+    if let Err(e) = vmo.register_mapper(&target) {
+        let _ = target.address_space().unmap(addr, a[3]);
+        return Err(e);
+    }
+    Ok(addr)
 }
 
 /// `VM_UNMAP(process, addr, len)`.

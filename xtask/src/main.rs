@@ -25,6 +25,7 @@ mod webhelper;
 mod qmp;
 mod symbolize;
 mod testdisks;
+mod venus;
 
 use std::env;
 use std::ffi::OsString;
@@ -46,6 +47,8 @@ prikazy:
            architektury, pak jadro a userspace v QEMU bez okna
   check    jen kontrola prekladu jadra
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
+  venus-gen  serializace Venusu z libs/venus/xml do libs/venus/src/vk
+  venus-check  overi, ze libs/venus/src/vk odpovida vstupum
 
 prepinace:
   --release        release profil
@@ -60,11 +63,12 @@ prepinace:
                    s nasim oddilem
   --qemu-wsl       (run, test) spustit QEMU ve WSL (QEMU_WSL_DISTRO, vychozi
                    Ubuntu; QEMU_WSL_PREFIX, vychozi ~/venus/prefix) - Venus
-  --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi), gl (virgl 3D)
+  --gpu <druh>     (run, test) grafika virtio-gpu: 2d (vychozi pro test a run
+                   --headless), gl (virgl 3D)
                    nebo venus (Vulkan; QEMU s virglrenderer a render serverem);
                    gl a venus bez okna pouziji displej egl-headless;
                    none = bez virtio-gpu (GUI nad framebufferem z firmwaru,
-                   ovladac fbdisplay)
+                   ovladac fbdisplay; vychozi pro run s oknem)
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
                    carkou, napr. sit,firewall; jmena jako v logu)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
@@ -118,6 +122,7 @@ pub struct Options {
 }
 
 fn main() -> ExitCode {
+    console_utf8();
     match run_cli() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -153,6 +158,7 @@ fn run_cli() -> Result<()> {
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
     };
+    let mut gpu_set = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
@@ -170,6 +176,7 @@ fn run_cli() -> Result<()> {
             }
             Some("--qemu-wsl") => opts.qemu_wsl = true,
             Some("--gpu") => {
+                gpu_set = true;
                 let value = args.next().ok_or("--gpu ocekava 2d, gl, venus nebo none")?;
                 opts.gpu = value.to_string_lossy().into_owned();
                 if !matches!(opts.gpu.as_str(), "2d" | "gl" | "venus" | "none") {
@@ -220,6 +227,15 @@ fn run_cli() -> Result<()> {
         Some("build") => build(&opts).map(|_| ()),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
+            // Okno QEMU ukazuje prvni grafickou kartu (VGA, framebuffer
+            // z firmwaru) a na ni jsou navazane klavesnice a mys virtio.
+            // S virtio-gpu by kompozitor kreslil na druhou konzoli QEMU,
+            // kterou okno neukazuje (obraz by "zamrzl" na startu). Bez
+            // `--gpu` proto beh s oknem GUI kresli pres fbdisplay na VGA.
+            if !gpu_set && !opts.headless {
+                opts.gpu = String::from("none");
+                println!("xtask: grafika pres framebuffer firmwaru (virtio-gpu: --gpu 2d, pak v okne QEMU View -> virtio-gpu-pci)");
+            }
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             qemu::run(&image, &artifacts, &opts)
@@ -227,6 +243,7 @@ fn run_cli() -> Result<()> {
         Some("test") => {
             opts.test = true;
             opts.headless = true;
+            venus::run(true)?;
             host_tests()?;
             // Jadro se musi prelozit i pro ostatni architektury (rozhrani
             // architektury nesmi zustat jen pro jednu).
@@ -260,6 +277,8 @@ repeat = {}
         }
         Some("check") => check_kernel(opts.arch, &opts),
         Some("docs") => build_docs().map(|_| ()),
+        Some("venus-gen") => venus::run(false),
+        Some("venus-check") => venus::run(true),
         Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
             Ok(())
@@ -304,6 +323,8 @@ fn host_tests() -> Result<()> {
             "--package",
             "netproto",
             "--package",
+            "nic",
+            "--package",
             "csprng",
             "--package",
             "wire",
@@ -315,6 +336,14 @@ fn host_tests() -> Result<()> {
             "netfilter",
             "--package",
             "guiproto",
+            "--package",
+            "gpuproto",
+            "--package",
+            "venus",
+            "--package",
+            "spirv",
+            "--package",
+            "vkcomp",
             "--package",
             "taskproto",
             "--package",
@@ -431,6 +460,9 @@ const USER_PROGRAMS: &[&str] = &[
     "shsess",
     "console",
     "virtio-net",
+    "e1000e",
+    "igc",
+    "r8169",
     "virtio-rng",
     "virtio-gpu",
     "fbdisplay",
@@ -445,6 +477,7 @@ const USER_PROGRAMS: &[&str] = &[
     "fetch",
     "revocd",
     "dnsd",
+    "vk-probe",
 ];
 
 /// Dalsi soubory initfs ze zdrojaku: (jmeno v initfs, cesta v repozitari).
@@ -605,4 +638,20 @@ fn image_for(artifacts: &Artifacts, opts: &Options) -> Result<PathBuf> {
     image::create_disk_image(&path, &files)?;
     println!("xtask: obraz disku {}", path.display());
     Ok(path)
+}
+
+/// Konzole Windows v UTF-8: vystup seriove linky (cesky text, ramecky)
+/// je v UTF-8, konzole ve vychozi kodove strance (852, 437) by z nej
+/// udelala "┼ż". Na ostatnich systemech nic.
+fn console_utf8() {
+    #[cfg(windows)]
+    {
+        unsafe extern "system" {
+            fn SetConsoleOutputCP(code_page: u32) -> i32;
+        }
+        // SAFETY: volani bez ukazatelu; selhani (zadna konzole) nevadi.
+        unsafe {
+            SetConsoleOutputCP(65001);
+        }
+    }
 }

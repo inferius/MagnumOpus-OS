@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+pub mod irq;
 pub mod msi;
 pub mod msix;
 
@@ -29,6 +30,7 @@ pub const COMMAND_BUS_MASTER: u16 = 1 << 2;
 pub const COMMAND_INTX_DISABLE: u16 = 1 << 10;
 const STATUS_CAP_LIST: u16 = 1 << 4;
 
+pub const CAP_MSI: u8 = 0x05;
 pub const CAP_MSIX: u8 = 0x11;
 pub const CAP_VENDOR: u8 = 0x09;
 

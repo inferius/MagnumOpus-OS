@@ -110,6 +110,7 @@ fn every_syscall_is_documented() {
         "JOB_INFO",
         "CLOCK_ADJUST",
         "FB_CONTROL",
+        "VMO_REVOKE",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
