@@ -33,6 +33,7 @@ members = [
     "libs/usbproto",
     "libs/usbclient",
     "libs/csprng",
+    "libs/display",
     "libs/libos",
     "libs/pci",
     "libs/tls",

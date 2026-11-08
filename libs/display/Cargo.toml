@@ -1,0 +1,8 @@
+[package]
+name = "display"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Spolecna cast ovladacu displeje: EDID, DisplayID, casovani (CVT, DMT), DisplayPort, HDMI"
+
+[dependencies]
