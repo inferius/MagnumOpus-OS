@@ -88,7 +88,9 @@ prepinace:
                    none = bez virtio-gpu (GUI nad framebufferem z firmwaru,
                    ovladac fbdisplay; vychozi pro run s oknem)
   --only <sady>    (test) jen tyto sady testu userspace (jmena oddelena
-                   carkou, napr. sit,firewall; jmena jako v logu)
+                   carkou, napr. sit,firewall; jmena jako v logu);
+                   --only release = jen start v release profilu (test
+                   po hlavnim behu, hlida chyby, ktere debug neukaze)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
   --audio <druh>   (run, test) zvuk QEMU (radic intel-hda, kodek hda-duplex):
                    test wav (vychozi; soubor se po testu zkontroluje), none;
@@ -375,7 +377,8 @@ repeat = {}
             // testu userspace).
             let power_only = opts.test_only == "napajeni";
             let usb_only = opts.test_only == "zive-usb";
-            if !power_only && !usb_only && opts.test_only != "zaznam-padu" {
+            let release_only = opts.test_only == "release";
+            if !power_only && !usb_only && !release_only && opts.test_only != "zaznam-padu" {
                 let artifacts = build(&opts)?;
                 let image = image_for(&artifacts, &opts)?;
                 qemu::run(&image, &artifacts, &opts)?;
@@ -384,6 +387,12 @@ repeat = {}
             // behu = vypnuti, nejde to spojit s hlavnim behem testu).
             if !no_power && (opts.test_only.is_empty() || power_only) {
                 powertest::run_all(&mut opts)?;
+            }
+            // Start v release profilu (jine optimalizace a casovani nez
+            // debug): jadro, init, sluzby a ACPI az po restart. Hlida chyby,
+            // ktere se v debug neprojevi (`--only release` jen tento beh).
+            if !opts.release && (opts.test_only.is_empty() || release_only) {
+                powertest::run_release(&mut opts)?;
             }
             // Zaznam padu jadra prezije restart (`--only zaznam-padu` jen ten).
             if opts.test_only.is_empty() || opts.test_only == "zaznam-padu" {

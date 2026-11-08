@@ -54,6 +54,28 @@ pub fn run_all(opts: &mut Options) -> Result<()> {
     Ok(())
 }
 
+/// Start v release profilu: stejny beh jako rezim "reboot" (jadro, init,
+/// supervisor, sluzby, ACPI a restart), jen prelozeny s optimalizacemi.
+/// Release meni inlining i casovani - chyby jako nedefinovane chovani nebo
+/// zavody, ktere se v debug neprojevi, by jinak nasel az uzivatel.
+pub fn run_release(opts: &mut Options) -> Result<()> {
+    println!("xtask: start v release na {}", opts.arch.name);
+    opts.release = true;
+    opts.extra_initfs.retain(|(n, _)| n != "power-test");
+    opts.extra_initfs.push((String::from("power-test"), b"reboot".to_vec()));
+    opts.power_test = Some("reboot");
+    let r = build(opts).and_then(|a| {
+        let image = image_for(&a, opts)?;
+        qemu::run(&image, &a, opts)
+    });
+    opts.power_test = None;
+    opts.release = false;
+    opts.extra_initfs.retain(|(n, _)| n != "power-test");
+    r?;
+    println!("xtask: start v release prosel");
+    Ok(())
+}
+
 /// Vlakno, ktere po znacce v logu posle QMP `system_powerdown`.
 pub fn spawn_button(log: std::path::PathBuf, port: Arc<AtomicU16>) {
     std::thread::spawn(move || {
