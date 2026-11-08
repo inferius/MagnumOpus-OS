@@ -236,6 +236,10 @@ fn run_cli() -> Result<()> {
                 opts.gpu = String::from("none");
                 println!("xtask: grafika pres framebuffer firmwaru (virtio-gpu: --gpu 2d, pak v okne QEMU View -> virtio-gpu-pci)");
             }
+            // Ucty: rychly profil Argon2id pro QEMU a vyvojove automaticke
+            // prihlaseni (jen `run`; `image` pro uzivatele je nema).
+            opts.extra_initfs.push((String::from("accounts-qemu"), b"1".to_vec()));
+            opts.extra_initfs.push((String::from("accounts-dev"), b"1".to_vec()));
             let artifacts = build(&opts)?;
             let image = image_for(&artifacts, &opts)?;
             qemu::run(&image, &artifacts, &opts)
@@ -256,6 +260,7 @@ fn run_cli() -> Result<()> {
             let web = webhelper::start()?;
             let config = format!("{}{}", helper.config, web.config);
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
+            opts.extra_initfs.push((String::from("accounts-qemu"), b"1".to_vec()));
             if opts.net_online {
                 opts.extra_initfs.push((String::from("net-online"), b"1".to_vec()));
             }
@@ -346,6 +351,10 @@ fn host_tests() -> Result<()> {
             "vkcomp",
             "--package",
             "taskproto",
+            "--package",
+            "accountproto",
+            "--package",
+            "accounts",
             "--package",
             "svcclient",
             "--package",
@@ -476,6 +485,7 @@ const USER_PROGRAMS: &[&str] = &[
     "ntpd",
     "fetch",
     "revocd",
+    "accountd",
     "dnsd",
     "vk-probe",
 ];
@@ -494,6 +504,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
     ("revocd.manifest.toml", "user/revocd/revocd.manifest.toml"),
     ("revocd.toml", "user/revocd/revocd.toml"),
+    ("accountd.manifest.toml", "user/accountd/accountd.manifest.toml"),
     ("dnsd.manifest.toml", "user/dnsd/dnsd.manifest.toml"),
     ("dnsd.toml", "user/dnsd/dnsd.toml"),
     ("gui-tasks.manifest.toml", "user/gui-tasks/gui-tasks.manifest.toml"),

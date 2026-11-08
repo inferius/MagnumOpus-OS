@@ -1,0 +1,21 @@
+[package]
+name = "accountd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "accountd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+fsproto = { path = "../../libs/fsproto" }
+conf = { workspace = true }
+wire = { path = "../../libs/wire" }
+accountproto = { path = "../../libs/accountproto" }
+accounts = { path = "../../libs/accounts" }
+rand_core = { version = "0.6", default-features = false }
+zeroize = { version = "1.8", default-features = false, features = ["alloc"] }

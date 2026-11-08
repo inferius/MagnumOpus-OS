@@ -2,7 +2,13 @@
 //! multimedialni klavesy; HID 1.11).
 //!
 //! Startovni zprava (kind USER, v tomto poradi): kanal rozhrani
-//! (`usbproto::msg`) a kanal ke sluzbe vstupu (`inputproto::device`).
+//! (`usbproto::msg`), kanal ke sluzbe vstupu (`inputproto::device`)
+//! a volitelne kanal bezpecnostniho klice (`fido`).
+//!
+//! Bezpecnostni klic FIDO (usage page 0xF1D0 v deskriptoru reportu) neni
+//! vstupni zarizeni: ovladac jen predava hlaseni CTAPHID po 64 B mezi
+//! klicem a kanalem `fido` (jedna zprava = jedno hlaseni; druhy konec ma
+//! sluzba uctu). U ostatnich zarizeni kanal `fido` zavre.
 //!
 //! Ovladac precte deskriptor reportu a kdyz mu rozumi
 //! (`usbproto::report`, `usbproto::hid_report`), cte reporty v report
@@ -38,9 +44,8 @@ enum Kind {
 /// Nejdelsi deskriptor reportu, ktery ovladac cte.
 const MAX_REPORT_DESC: u16 = 4096;
 
-/// Precte a rozebere deskriptor reportu rozhrani; `None` = neni, nejde
-/// precist, nebo nema nic, cemu dekoder rozumi.
-fn report_decoder(usb: &mut UsbClient, iface: &Interface) -> Option<Decoder> {
+/// Surovy deskriptor reportu rozhrani (`None` = neni nebo nejde precist).
+fn report_descriptor(usb: &mut UsbClient, iface: &Interface) -> Option<Vec<u8>> {
     if iface.hid_report_len == 0 {
         return None;
     }
@@ -51,14 +56,78 @@ fn report_decoder(usb: &mut UsbClient, iface: &Interface) -> Option<Decoder> {
         index: iface.number as u16,
         length: iface.hid_report_len.min(MAX_REPORT_DESC),
     };
-    let raw = usb.control(setup, &[]).ok()?;
-    let dec = Decoder::new(usbproto::report::parse(&raw)?);
+    usb.control(setup, &[]).ok()
+}
+
+/// Rozebere deskriptor reportu; `None` = nema nic, cemu dekoder rozumi.
+fn report_decoder(raw: &[u8]) -> Option<Decoder> {
+    let dec = Decoder::new(usbproto::report::parse(raw)?);
     (dec.caps() != 0).then_some(dec)
+}
+
+/// Bezpecnostni klic: hlaseni IN -> kanal `fido`, zpravy kanalu -> OUT.
+fn fido_loop(usb: &mut UsbClient, iface: &Interface, ep_in: u8, fido: Channel) -> i64 {
+    let Some(ep_out) = iface.endpoints.iter().find(|e| !e.is_in() && e.transfer == Transfer::Interrupt).copied() else {
+        println!("usb-hid: klic FIDO bez interrupt endpointu OUT");
+        return 0;
+    };
+    let Ok(mut in_id) = usb.send(op::INTERRUPT_IN, ep_in as u32, 64, &[]) else { return 0 };
+    loop {
+        let items = [
+            (usb.channel.handle(), Signals::READABLE | Signals::PEER_CLOSED),
+            (fido.handle(), Signals::READABLE | Signals::PEER_CLOSED),
+        ];
+        let s = match libos::wait_many(&items, None) {
+            Ok((_, s)) => s,
+            Err(_) => return 0,
+        };
+        // Od sluzby uctu ke klici.
+        loop {
+            match fido.try_read() {
+                Ok(m) if m.data.len() == 64 => {
+                    if usb.send(op::INTERRUPT_OUT, ep_out.address as u32, 64, &m.data).is_err() {
+                        return 0;
+                    }
+                }
+                Ok(_) => {}
+                Err(Error::ShouldWait) => break,
+                Err(_) => {
+                    // Sluzba uctu kanal zavrela (napr. restart): klic ne.
+                    println!("usb-hid: kanal klice FIDO zavren");
+                    return 0;
+                }
+            }
+        }
+        // Od klice ke sluzbe uctu (odpovedi OUT se jen zahodi).
+        loop {
+            let m = match usb.channel.try_read() {
+                Ok(m) => m,
+                Err(Error::ShouldWait) => break,
+                Err(_) => return 0,
+            };
+            let Some(r) = usbproto::msg::Reply::decode(&m.data) else { continue };
+            if r.id != in_id {
+                continue;
+            }
+            if r.status == 0 && r.data.len() == 64 {
+                let _ = fido.write(r.data, Vec::new());
+            } else if r.status == Error::PeerClosed.code() {
+                return 0;
+            }
+            match usb.send(op::INTERRUPT_IN, ep_in as u32, 64, &[]) {
+                Ok(id) => in_id = id,
+                Err(_) => return 0,
+            }
+        }
+        if s[0].contains(Signals::PEER_CLOSED) && !s[0].contains(Signals::READABLE) {
+            return 0;
+        }
+    }
 }
 
 fn main(startup: Startup) -> i64 {
     let mut handles = startup.handles.into_iter();
-    let (Some(usb), Some(input)) = (handles.next(), handles.next()) else {
+    let (Some(usb), Some(input), fido) = (handles.next(), handles.next(), handles.next()) else {
         println!("usb-hid: chybi handly ve startovni zprave");
         return 1;
     };
@@ -87,8 +156,23 @@ fn main(startup: Startup) -> i64 {
         return 0;
     };
     let boot = iface.class == class::HID && iface.subclass == hid::SUBCLASS_BOOT;
+    let raw_desc = report_descriptor(&mut usb, &iface);
+    if raw_desc.as_deref().is_some_and(hid::is_fido) {
+        println!(
+            "usb-hid: bezpecnostni klic FIDO {:04x}:{:04x} (port {:?})",
+            info.device.vendor, info.device.product, info.path
+        );
+        // Vstup klic nedostane (zavrenim kanalu ho sluzba vstupu zapomene).
+        drop(input);
+        return match fido {
+            Some(f) => fido_loop(&mut usb, &iface, ep.address, Channel::from_handle(f)),
+            None => 0,
+        };
+    }
+    // Neni klic: kanal klice zavrit (sluzba uctu ho zahodi).
+    drop(fido);
     let mut axes = Vec::new();
-    let (mut kind, caps, mut setups) = if let Some(dec) = report_decoder(&mut usb, &iface) {
+    let (mut kind, caps, mut setups) = if let Some(dec) = raw_desc.as_deref().and_then(report_decoder) {
         let c = dec.caps();
         axes = dec.axes();
         // Report protokol je vychozi po resetu zarizeni.

@@ -1,7 +1,8 @@
 //! init: prvni proces v userspace.
 //!
 //! Spusti sluzbu casu, spravce zarizeni (ten spusti ovladace), sluzbu
-//! souboroveho systemu (s ulozistem korenovych certifikatu), sluzbu vstupu,
+//! souboroveho systemu (s ulozistem korenovych certifikatu), sluzbu uctu
+//! (`accounts.rs`, spravce sezeni `session.rs`), sluzbu vstupu,
 //! sluzbu site s firewallem a synchronizaci casu a GUI (kompozitor
 //! a ukazkove aplikace, `gui.rs`). Pak bezi
 //! jako supervisor (`supervisor.rs`: zarizeni pripojena za behu, restart
@@ -14,6 +15,7 @@
 
 extern crate alloc;
 
+mod accounts;
 mod apps;
 mod certs;
 mod dns;
@@ -22,6 +24,7 @@ mod gui;
 mod input;
 mod ntp;
 mod revocation;
+mod session;
 mod supervisor;
 mod system;
 mod terminal;
@@ -64,6 +67,12 @@ fn main(startup: Startup) -> i64 {
                     {
                         // Bez uloziste se spojeni TLS nenavazou (zadna duveryhodna CA).
                         println!("init: uloziste certifikatu nelze pripravit: {e}");
+                    }
+                    // Ucty hned po FS: vlastni dataset DB a domovy.
+                    if devices.fs.is_some()
+                        && let Err(e) = accounts::start(&startup, &mut devices, &mut sup)
+                    {
+                        println!("init: sluzbu uctu nelze spustit: {e}");
                     }
                 }
                 Ok(None) => {}

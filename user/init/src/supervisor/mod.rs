@@ -347,6 +347,11 @@ impl Supervisor {
                         }
                     }
                 }
+                b"fido" => {
+                    for h in m.handles {
+                        crate::accounts::add_key(libos::Channel::from_handle(h));
+                    }
+                }
                 b"block" => println!("init: disk pripojeny za behu zatim nepouzivam"),
                 other => println!("init: neznama zprava od devmgr: {:?}", other),
             }

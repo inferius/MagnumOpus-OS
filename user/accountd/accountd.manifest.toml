@@ -1,0 +1,9 @@
+# Sluzba uzivatelskych uctu. Argon2id si pri prihlaseni vezme pamet podle
+# profilu (`hw` 64 MiB, `qemu` 8 MiB); overeni bezi jedno po druhem.
+[app]
+id = "org.magnumopus.accountd"
+name = "Ucty"
+
+[limits]
+memory = "96M"
+kernel_memory = "4M"
