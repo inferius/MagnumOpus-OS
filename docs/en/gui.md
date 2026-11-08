@@ -519,7 +519,7 @@ coordinates, pointer leave, button with position, wheel and focus; plus
 modifiers, the synthetic flag and time. Motion and button release go to
 the window that got the press, even when the pointer leaves it.
 
-### Command palette (v1)
+### Command palette (v2)
 
 The system shortcut **Ctrl+K** or **Super+K** (physical keyboard only)
 opens the palette at the top centre of the screen per
@@ -537,9 +537,16 @@ in `libs/comp`)
 | App | desktop apps from the `apps` list | start via init / activate |
 | System | Diagnostic snapshot, Restart, Shut down | snapshot in the compositor; restart and shutdown via init (`system reboot\|shutdown` on the `launcher` channel, like the shell command) |
 
-App actions (menus through the action API) come in v2: the structure has
-an `AppAction` item for them (window, action id, label). **[designed]**
-Lock and fullscreen are added once they exist in the system. **[designed]**
+**App actions (v2)**: the app sends its menu with `MENU_UPDATE`
+(`guiproto::menu`: menus, items with an action id from the manifest and
+fixed arguments, roles Undo/Copy/Paste... with the system text and
+shortcut, checked, disabled with a reason, shortcut, keywords, submenus up
+to depth 3, at most 256 items). In `libs/ui` the `App::menu()` method, sent
+only on change; Demo has the Počítadlo and Poznámky menus. Running goes the
+same way as an `actions` call (argument check, confirmation for
+`confirm`). Sections, scope and rules: see
+[Command palette rules](#command-palette-rules). **[implemented]** Lock and
+fullscreen are added once they exist in the system. **[designed]**
 
 ### Launching apps from the bar
 
@@ -755,43 +762,56 @@ Prototype and comparison of the variants: `design/prostredi-menu.html`
   the scope (all / this app / system). The system draws the app section
   with the app's icon and name and the System section with the trust
   shield - an app item cannot pose as a system one. v1 (apps, windows,
-  system actions, recent) **[implemented]**, app actions (v2)
+  system actions, recent) and app actions from their menus (v2)
+  **[implemented]**; the title-bar menu (☰) and privacy dots in the badge
   **[designed]**.
 
 ### Command palette rules
 
-All **[designed]** unless stated otherwise.
+The status is at each rule. Tests: `command_palette_search_run_and_recent`, `command_palette_v2_app_menu_actions` (`libs/comp`), `menu_update_roundtrip_and_limits` (`libs/guiproto`).
 
 1. **Opening**: Ctrl+K and Super, from any window; above everything except
    system dialogs. Esc closes it, focus returns to the original window.
+   **[implemented]** (the palette does not change focus)
 2. **Scope**: default *all*; Tab switches *all / this app / system*; the
    `>` prefix = only the active app's actions. The scope shows in the
-   search field.
+   search field. **[implemented]**
 3. **Sections and order**: with no input Recent (at most 5), This app (5
    most used), System. While typing: the active app, Windows, Apps,
    System; at most 5 per section and "more…". Inside a section by match,
-   then by use frequency.
+   then by use frequency. **[implemented]** (frequency only in the
+   compositor's memory)
 4. **Search**: case and **diacritics** insensitive ("ulozit" finds
    "Uložit"), word-start and abbreviation matches ("nzk" = "Nová záložka"),
    keywords and synonyms from the action declaration (apps may add them).
+   **[implemented]**
 5. **An item** shows: icon, name, shortcut on the right, the app name for
    app actions. A disabled action is grey with a reason (from the
-   declaration) and does not run.
+   declaration) and does not run. **[implemented]** (the app name is in the
+   section header)
 6. **Security**: the system draws the app section with the app's icon and
    name, the System section with the trust shield. An app may not add an
    item to the System section nor use reserved names (Shut down, Restart,
    Sign out, Lock, Permissions...). Irreversible actions (shut down,
-   delete) need confirmation just like from the menu.
+   delete) need confirmation just like from the menu. **[implemented]**: a
+   menu item may only refer to an action from the manifest (otherwise it
+   is dropped), reserved names are dropped, `confirm` actions and Shut down
+   and Restart are confirmed by a system dialog.
 7. **Privacy**: typed text is not sent anywhere nor logged; the Recent
-   history is per user and can be cleared and turned off.
+   history is per user and can be cleared and turned off. Text is not
+   sent or logged **[implemented]**; the history lives only in the
+   compositor's memory so far, clearing and turning off **[designed]**.
 8. **Performance**: results within one output frame (budget by refresh
    rate); the app's action list lives in the compositor (the app sends it
-   on change, `MENU_UPDATE`), search does not ask the app.
+   on change, `MENU_UPDATE`), search does not ask the app. The menu in the
+   compositor **[implemented]**; result time not measured.
 9. **AI agents** use the same data (the action list with descriptions and
    state) through the Action API, not simulated clicks into the palette.
+   **[designed]** (the Action API does not give agents the menu list yet)
 10. **Accessibility**: the whole palette is in the accessibility tree
     (roles, names, result count), fully keyboard operable, a screen reader
-    announces the selected item.
+    announces the selected item. Keyboard **[implemented]**, the palette's
+    accessibility tree **[designed]**.
 
 ### Principle: few options
 

@@ -1503,6 +1503,11 @@ fn command_palette_search_run_and_recent() {
     key_mods(&mut t, KEY_K, inputproto::mods::CTRL);
     text(&mut t, "vypnout");
     t.key(KEY_ENTER, false);
+    // Nevratne: nejdriv systemove potvrzeni (vychozi volba Zrusit).
+    assert!(t.c.take_system_requests().is_empty(), "bez potvrzeni nic");
+    assert!(t.c.dialogs.active().is_some(), "dialog potvrzeni");
+    t.key(inputproto::code::KEY_TAB, false);
+    t.key(KEY_ENTER, false);
     assert_eq!(t.c.take_system_requests(), vec![crate::palette::SystemRequest::Shutdown]);
 }
 

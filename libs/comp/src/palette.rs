@@ -434,8 +434,9 @@ impl Comp {
                 self.damage_panel();
             }
             Item::System(SysAction::Snapshot) => self.request_snapshot("paleta"),
-            Item::System(SysAction::Shutdown) => self.system_requests.push(SystemRequest::Shutdown),
-            Item::System(SysAction::Reboot) => self.system_requests.push(SystemRequest::Reboot),
+            // Nevratne: systemove potvrzeni (pravidlo 6).
+            Item::System(SysAction::Shutdown) => self.confirm_power(false),
+            Item::System(SysAction::Reboot) => self.confirm_power(true),
             Item::AppAction(g, i) => {
                 let Some(w) = self.windows.get(&g) else { return };
                 let (Some(cl), Some(f)) = (self.clients.get(&w.client), w.menu.get(i)) else { return };
