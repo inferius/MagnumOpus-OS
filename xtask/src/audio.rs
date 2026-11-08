@@ -1,8 +1,8 @@
-//! Zvuk v QEMU: radic Intel HDA s kodekem hda-duplex a kontrola zapsaneho
-//! zvuku po testu.
+//! Zvuk v QEMU: radice Intel HDA s kodeky hda-output a hda-duplex
+//! a kontrola zapsaneho zvuku po testu.
 //!
-//! V testu jde vystup do souboru WAV (`-audiodev wav`, 48 kHz, 16 bitu,
-//! stereo). Test userspace `zvuk: ton 1 kHz do WAV` prehraje ton 1 kHz;
+//! V testu jde vystup prvniho kodeku do souboru WAV (`-audiodev wav`,
+//! 48 kHz, 16 bitu, stereo). Test userspace `zvuk: ton 1 kHz do WAV` prehraje ton 1 kHz;
 //! po konci QEMU se v souboru hleda (Goertzel po oknech 50 ms). Bez
 //! okna: `--audio none`; interaktivne napr. `--audio dsound` (Windows),
 //! `pa` nebo `alsa` (Linux), `coreaudio` (macOS).
@@ -31,25 +31,34 @@ pub fn backend(opts: &Options) -> &str {
     }
 }
 
-/// Prida radic HDA a kodek. `wav` = soubor pro backend wav.
+/// Prida radic HDA a kodeky. `wav` = soubor pro backend wav.
 ///
-/// Backend wav umi jen vystup: QEMU pri startu vypise `Can not open
-/// `adc' (no host audio driver)` pro vstup kodeku hda-duplex. Je to
-/// neskodne (nahravani se nepouziva); vypinac na to QEMU nema.
+/// Test (wav): dva radice - prvni s `hda-output` do souboru WAV, druhy
+/// s `hda-duplex` a backendem `none`, ktery umi i vstup (backend wav
+/// nahravat neumi). Overi se tak vic zvukovych karet, vyber zarizeni
+/// a nahravani z jine karty nez vystup. Dva kodeky na jedne lince QEMU
+/// neumi spravne: kazdy kodek si z DMA bere vlastni data (na skutecnem
+/// hardwaru se stream vysila vsem), takze by kazdy dostal jen kousky.
+/// Interaktivne jeden radic s `hda-duplex` a zvolenym backendem.
 pub fn qemu_args(cmd: &mut Command, opts: &Options, wav: &Path) {
-    if backend(opts) == "wav" {
-        println!("xtask: zvuk do {} (hlaska QEMU o `adc' je ocekavana: wav nema vstup)", wav.display());
+    cmd.args(["-device", "intel-hda,id=hda0"]);
+    match backend(opts) {
+        "wav" => {
+            let out = format!(
+                "wav,id=snd0,path={},out.frequency=48000,out.channels=2,out.format=s16",
+                wav.display()
+            );
+            cmd.args(["-audiodev", &out])
+                .args(["-audiodev", "none,id=snd1"])
+                .args(["-device", "hda-output,bus=hda0.0,audiodev=snd0"])
+                .args(["-device", "intel-hda,id=hda1"])
+                .args(["-device", "hda-duplex,bus=hda1.0,audiodev=snd1"]);
+        }
+        other => {
+            cmd.args(["-audiodev", &format!("{other},id=snd0")])
+                .args(["-device", "hda-duplex,bus=hda0.0,audiodev=snd0"]);
+        }
     }
-    let dev = match backend(opts) {
-        "wav" => format!(
-            "wav,id=snd0,path={},out.frequency=48000,out.channels=2,out.format=s16",
-            wav.display()
-        ),
-        other => format!("{other},id=snd0"),
-    };
-    cmd.args(["-audiodev", &dev])
-        .args(["-device", "intel-hda,id=hda0"])
-        .args(["-device", "hda-duplex,bus=hda0.0,audiodev=snd0"]);
 }
 
 /// Data za kouskem `data` (QEMU pri konci pres isa-debug-exit nemusi

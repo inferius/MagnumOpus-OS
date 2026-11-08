@@ -50,12 +50,27 @@ fn sample_conversion() {
 fn channel_mapping() {
     let mono = Format::new(48_000, 1, Sample::S16);
     assert_eq!(frame_to_stereo(&mono, &100i16.to_le_bytes()), [100 << 8, 100 << 8]);
+    // 5.1: jen levy predni -> levy s vahou 1 / (1 + 0,707 + 0,707).
     let six = Format::new(48_000, 6, Sample::S16);
     let mut b = Vec::new();
-    for v in [300i16, 30, 600, 60, 0, 0] {
+    for v in [1000i16, 0, 0, 0, 0, 0] {
         b.extend_from_slice(&v.to_le_bytes());
     }
-    assert_eq!(frame_to_stereo(&six, &b), [300 << 8, 30 << 8]);
+    let [l, r] = frame_to_stereo(&six, &b);
+    assert_eq!(r, 0);
+    assert!((l - (1000 << 8) * 1000 / 2414).abs() < 300, "{l}");
+    // Stred jde do obou stejne, LFE nikam.
+    let mut b = Vec::new();
+    for v in [0i16, 0, 1000, 30000, 0, 0] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    let [l, r] = frame_to_stereo(&six, &b);
+    assert_eq!(l, r);
+    assert!(l < 1000 << 8);
+    // Plny signal ve vsech kanalech se neorizne.
+    let full: Vec<u8> = (0..8).flat_map(|_| i16::MAX.to_le_bytes()).collect();
+    let [l, _] = frame_to_stereo(&Format::new(48_000, 8, Sample::S16), &full);
+    assert!(l <= 32767 << 8);
 }
 
 #[test]
@@ -205,4 +220,60 @@ fn wav_skips_unknown_chunks() {
     let w = wav::parse(&file).unwrap();
     assert_eq!(w.format.rate, 8_000);
     assert_eq!(w.data, &[5, 0]);
+}
+
+#[test]
+fn downsampling_filters_aliases() {
+    // 96 -> 48 kHz: ton 30 kHz (nad novou Nyquistovou 24 kHz) by se bez
+    // filtru slozil na 18 kHz; s filtrem musi byt aspon o 40 dB slabsi.
+    let mut tone = Tone::new(30_000, 96_000, 50);
+    let mut r = Resampler::new(96_000, 48_000);
+    let mut out = vec![[0; 2]; 9_600];
+    r.process(&mut out, || Some(tone.next_frame()));
+    let x: Vec<i32> = out[200..].iter().map(|f| f[0]).collect();
+    let amp = Q23_MAX as f64 * 0.5;
+    let alias = goertzel(&x, 18_000.0, 48_000.0);
+    assert!(alias < amp * 0.01, "alias {alias} (amplituda {amp})");
+    // 1 kHz projde (do 1 dB).
+    let mut tone = Tone::new(1_000, 96_000, 50);
+    let mut r = Resampler::new(96_000, 48_000);
+    r.process(&mut out, || Some(tone.next_frame()));
+    let x: Vec<i32> = out[200..].iter().map(|f| f[0]).collect();
+    let pass = goertzel(&x, 1_000.0, 48_000.0);
+    assert!(pass > amp * 0.89 && pass < amp * 1.12, "propust {pass}");
+    assert_eq!(r.flush_frames(), 2 + crate::filter::TAPS as u32 / 2);
+    assert_eq!(Resampler::new(44_100, 48_000).flush_frames(), 2);
+}
+
+#[test]
+fn output_conversion_for_recording() {
+    use crate::convert::{q23_to_sample, stereo_to_frame};
+    let mut b = [0u8; 4];
+    q23_to_sample(Sample::S16, 1 << 22, &mut b);
+    assert_eq!(i16::from_le_bytes([b[0], b[1]]), 16_384);
+    q23_to_sample(Sample::S32, Q23_MAX, &mut b);
+    assert_eq!(i32::from_le_bytes(b), Q23_MAX << 8);
+    q23_to_sample(Sample::U8, 0, &mut b);
+    assert_eq!(b[0], 128);
+    q23_to_sample(Sample::F32, 1 << 22, &mut b);
+    assert_eq!(f32::from_le_bytes(b), 0.5);
+    // Prevod tam a zpet je presny (s16).
+    let f = Format::new(48_000, 2, Sample::S16);
+    let mut out = [0u8; 4];
+    stereo_to_frame(&f, [256 * 123, -256 * 77], &mut out);
+    assert_eq!(frame_to_stereo(&f, &out), [256 * 123, -256 * 77]);
+    let mono = Format::new(48_000, 1, Sample::S16);
+    let mut m = [0u8; 2];
+    stereo_to_frame(&mono, [1000 << 8, 3000 << 8], &mut m);
+    assert_eq!(i16::from_le_bytes(m), 2000);
+}
+
+#[test]
+fn mixer_24bit() {
+    let mut m = Mixer::new(1);
+    m.add(&[[1 << 20, -(1 << 20)]], 65_536);
+    let mut out = [0u8; 8];
+    assert_eq!(m.finish(Sample::S32, 65_536, &mut out), 0);
+    assert_eq!(i32::from_le_bytes(out[0..4].try_into().unwrap()), (1 << 20) << 8);
+    assert_eq!(i32::from_le_bytes(out[4..8].try_into().unwrap()), -(1 << 20) << 8);
 }

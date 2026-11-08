@@ -52,4 +52,30 @@ impl Mixer {
         }
         clipped
     }
+
+    /// Jako [`Mixer::finish_s16`], ale 24 bitu v 32bitovem slove zarovnane
+    /// nahoru (format HDA pro 20 a 24 bitu, 8 bajtu na snimek).
+    pub fn finish_s32(&self, gain: u32, out: &mut [u8]) -> u32 {
+        let g = gain as i64;
+        let mut clipped = 0;
+        for (a, o) in self.acc.iter().zip(out.chunks_exact_mut(8)) {
+            for c in 0..2 {
+                let v = a[c] * g >> 16;
+                let s = v.clamp(crate::Q23_MIN as i64, crate::Q23_MAX as i64);
+                if s != v {
+                    clipped += 1;
+                }
+                o[c * 4..c * 4 + 4].copy_from_slice(&((s as i32) << 8).to_le_bytes());
+            }
+        }
+        clipped
+    }
+
+    /// Vysledek ve formatu zarizeni (`S16`, nebo `S32` = 24 bitu nahore).
+    pub fn finish(&self, sample: audioproto::Sample, gain: u32, out: &mut [u8]) -> u32 {
+        match sample {
+            audioproto::Sample::S32 | audioproto::Sample::S24 => self.finish_s32(gain, out),
+            _ => self.finish_s16(gain, out),
+        }
+    }
 }

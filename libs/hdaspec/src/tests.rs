@@ -280,3 +280,93 @@ fn fallback_when_bios_hides_outputs() {
     assert_eq!(plan.analog.len(), 1);
     assert_eq!(plan.analog[0].kind, OutKind::LineOut);
 }
+
+fn adc(nid: u16, conns: &[u16]) -> Widget {
+    Widget { caps: wcaps(1, true, false, false), conns: conns.to_vec(), ..mixer(nid, &[]) }
+}
+
+#[test]
+fn input_path_prefers_mic_jack() {
+    use crate::input::{self, InKind};
+    // ADC 0x08 <- selektor 0x23 <- [mikrofon v konektoru 0x18, linkovy 0x1A,
+    // vestaveny mikrofon 0x12]; ADC 0x09 primo na vestaveny mikrofon.
+    let g = Graph {
+        widgets: vec![
+            adc(0x08, &[0x23]),
+            adc(0x09, &[0x12]),
+            selector(0x23, &[0x1A, 0x18, 0x12]),
+            pin(0x18, &[], 0xA, 0, 2, 0, 1 << 5 | 1 << 10 | PRESENCE),
+            pin(0x1A, &[], 0x8, 0, 3, 0, 1 << 5),
+            pin(0x12, &[], 0xA, 2, 4, 0, 1 << 5),
+        ],
+    };
+    let pins = input::input_pins(&g);
+    assert_eq!(pins, vec![(0x18, InKind::MicJack), (0x12, InKind::MicInternal), (0x1A, InKind::LineIn)]);
+    let p = input::plan_input(&g).unwrap();
+    assert_eq!((p.adc, p.pin, p.kind, p.vref80), (0x08, 0x18, InKind::MicJack, true));
+    assert_eq!(p.steps.len(), 3);
+    assert_eq!(p.steps[0].input, Some(0)); // ADC -> selektor
+    assert_eq!(p.steps[1].input, Some(1)); // selektor -> mikrofon
+    // QEMU hda-duplex: ADC 4 <- pin 5 (linkovy vstup).
+    let q = qemu_duplex();
+    let p = input::plan_input(&q).unwrap();
+    assert_eq!((p.adc, p.pin, p.kind), (4, 5, InKind::LineIn));
+    // Bez vstupnich pinu nic.
+    assert!(input::plan_input(&realtek_no_inputs()).is_none());
+}
+
+fn realtek_no_inputs() -> Graph {
+    let mut g = realtek();
+    g.widgets.retain(|w| w.nid != 0x18);
+    g
+}
+
+#[test]
+fn eld_and_infoframe() {
+    use crate::hdmi;
+    // ELD v2: jmeno "DELL", 1 SAD (LPCM, 2 kanaly), HDMI.
+    let mut eld = vec![2 << 3, 0, 5, 0, 4, 1 << 4, 0, 0];
+    eld.resize(20, 0);
+    eld.extend_from_slice(b"DELL");
+    eld.extend_from_slice(&[1 << 3 | 1, 0x07, 0x07]);
+    let e = hdmi::parse_eld(&eld).unwrap();
+    assert_eq!(e.monitor, "DELL");
+    assert_eq!((e.dp, e.lpcm_channels), (false, 2));
+    eld[5] |= 1 << 2;
+    assert!(hdmi::parse_eld(&eld).unwrap().dp);
+    assert!(hdmi::parse_eld(&eld[..10]).is_none());
+    assert!(hdmi::parse_eld(&[0u8; 32]).is_none());
+    // Infoframe HDMI: soucet vsech bajtu = 0 (mod 256).
+    let f = hdmi::audio_infoframe(2, false);
+    assert_eq!(f.len(), 14);
+    assert_eq!(&f[..3], &[0x84, 0x01, 0x0A]);
+    assert_eq!(f[4], 1);
+    assert_eq!(f.iter().map(|&b| b as u32).sum::<u32>() % 256, 0);
+    let d = hdmi::audio_infoframe(8, true);
+    assert_eq!(&d[..4], &[0x84, 0x1B, 0x44, 7]);
+}
+
+#[test]
+fn fixup_table_lookup_and_pins() {
+    use crate::fixup::{self, Fixup, Gpio};
+    static T: &[Fixup] = &[Fixup {
+        name: "test",
+        codec: 0x10EC_0269,
+        subsystem: 0x103C_0000,
+        subsystem_mask: 0xFFFF_0000,
+        pins: &[(0x14, 0x9017_0110)],
+        gpio: Some(Gpio { mask: 1, dir: 1, data: 1 }),
+        coefs: &[],
+    }];
+    assert!(fixup::find(T, 0x10EC_0269, 0x103C_8A2E).is_some());
+    assert!(fixup::find(T, 0x10EC_0269, 0x1028_0000).is_none());
+    assert!(fixup::find(T, 0x10EC_0255, 0x103C_8A2E).is_none());
+    let mut g = realtek();
+    fixup::apply_pins(&mut g, &T[0]);
+    let cfg = g.get(0x14).unwrap().pin_config.unwrap();
+    assert_eq!(cfg.device, DefaultDevice::Speaker);
+    assert_eq!(cfg.connectivity, Connectivity::Fixed);
+    assert!(fixup::generic_eapd(0x10EC_0887) && !fixup::generic_eapd(0x1AF4_0022));
+    assert!(fixup::FIXUPS.is_empty());
+    assert_eq!(verb::unsol_tag(0x0C00_0000), 3);
+}

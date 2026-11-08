@@ -47,6 +47,11 @@ pub struct Ctrl {
     /// Neuspesne prikazy kodeku v rade; po [`DEAD_AFTER`] se kodek vynechava.
     fails: [u8; 16],
     pub codecs: u16,
+    /// Nevyzadane odpovedi (odpoved, adresa kodeku) zachycene behem
+    /// prikazu; vyzvedne je [`Ctrl::take_unsol`].
+    unsol: alloc::vec::Vec<(u32, u8)>,
+    /// Nevyzadane odpovedi zapnute (GCTL.UNSOL a preruseni RIRB).
+    pub unsol_on: bool,
 }
 
 /// Aktivne cekat (s terminem), az `done()` plati.
@@ -86,6 +91,8 @@ impl Ctrl {
             immediate: false,
             fails: [0; 16],
             codecs: 0,
+            unsol: alloc::vec::Vec::new(),
+            unsol_on: false,
         };
         c.reset()?;
         if let Err(e) = c.start_rings() {
@@ -226,7 +233,9 @@ impl Ctrl {
                 // Potvrdit (QEMU jinak po RINTCNT odpovedich zastavi CORB).
                 self.w8(regs::RIRBSTS, 0x05);
                 if ex & RESP_UNSOL != 0 {
-                    continue; // nevyzadana odpoved (konektor), neni nase
+                    // Nevyzadana odpoved (konektor): schovat, neni nase.
+                    self.unsol.push((resp, (ex & 0xF) as u8));
+                    continue;
                 }
                 return Ok(resp);
             }
@@ -258,6 +267,46 @@ impl Ctrl {
             return Err(Error::TimedOut);
         }
         Ok(self.r32(regs::ICII))
+    }
+
+    /// Zapne nevyzadane odpovedi: GCTL.UNSOL a preruseni po kazde odpovedi
+    /// RIRB (s MSI). Volat po vyctu kodeku (behem nej by preruseni jen
+    /// zbytecne budila smycku).
+    pub fn enable_unsol(&mut self, irq: bool) {
+        if self.immediate {
+            return; // okamzite rozhrani nevyzadane odpovedi nedorucuje
+        }
+        let g = self.r32(regs::GCTL);
+        self.w32(regs::GCTL, g | regs::GCTL_UNSOL);
+        if irq {
+            self.w16(regs::RINTCNT, 1);
+            self.w8(regs::RIRBCTL, regs::RIRBCTL_DMAEN | regs::RIRBCTL_RINTCTL);
+            let i = self.r32(regs::INTCTL);
+            self.w32(regs::INTCTL, i | regs::INTCTL_GIE | regs::INTCTL_CIE);
+        }
+        self.unsol_on = true;
+    }
+
+    /// Nevyzadane odpovedi, ktere prisly (v RIRB i zachycene behem prikazu).
+    pub fn take_unsol(&mut self) -> alloc::vec::Vec<(u32, u8)> {
+        if !self.immediate && self.rirb_n != 0 {
+            loop {
+                let hw = self.r16(regs::RIRBWP) as u32 % self.rirb_n;
+                if hw == self.rirb_rp {
+                    break;
+                }
+                barrier::dma_rmb();
+                self.rirb_rp = (self.rirb_rp + 1) % self.rirb_n;
+                let off = RIRB_OFF + self.rirb_rp as u64 * 8;
+                let resp = self.mem.read::<u32>(off);
+                let ex = self.mem.read::<u32>(off + 4);
+                if ex & RESP_UNSOL != 0 {
+                    self.unsol.push((resp, (ex & 0xF) as u8));
+                }
+            }
+            self.w8(regs::RIRBSTS, 0x05);
+        }
+        core::mem::take(&mut self.unsol)
     }
 
     /// GET_PARAMETER.

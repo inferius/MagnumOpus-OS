@@ -223,7 +223,7 @@ pub const BUILTINS: &[Sig] = &[
     sig!("audio", "audio-control", &[p("action", Kind::Str)], Some(Kind::Any),
         &[Flag { long: "duration", short: Some('d'), value: Some(Kind::Duration), help: "delka tonu (vychozi 1s)" },
           Flag { long: "level", short: Some('l'), value: Some(Kind::Int), help: "uroven tonu v % (vychozi 50)" }],
-        IN, IA, "zvuk: tone [Hz], play soubor.wav, volume [%], mute, unmute, status"),
+        IN, IA, "zvuk: tone [Hz], play soubor.wav, volume [%], mute, unmute, status, devices, device N"),
     // relace, ulohy, bezpecnost
     sig!("undo", "command-undo", NONE, None, NOFLAGS, IN, IA, "vrati zmeny posledniho prikazu"),
     sig!("preview", "command-preview", &[p("body", Kind::Block)], None,

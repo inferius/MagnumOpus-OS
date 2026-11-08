@@ -2,12 +2,12 @@
 //!
 //! Kubicka interpolace Hermite (Catmull-Rom) ze 4 sousednich vzorku,
 //! faze v pevne radove carce Q32. Pri stejne frekvenci je vystup presne
-//! vstup (posunuty o jeden snimek). Proti linearni interpolaci ma mene
-//! zkresleni na vyskach; pri snizovani frekvence (napr. 96 -> 48 kHz)
-//! ale nefiltruje pasmo nad novou Nyquistovou frekvenci, takze se
-//! obsah nad 24 kHz muze slozit zpet (aliasing). Bezne zdroje (44,1 a
-//! 48 kHz) to nepostihuje. Kvalitnejsi polyfazovy filtr je TODO.
+//! vstup (posunuty o jeden snimek). Pri snizovani frekvence (napr.
+//! 96 -> 48 kHz) jde vstup nejdriv pres dolni propust
+//! ([`crate::filter::Lowpass`]), jinak by se obsah nad novou Nyquistovou
+//! frekvenci slozil zpet (aliasing).
 
+use crate::filter::Lowpass;
 use crate::{Frame, Q23_MAX, Q23_MIN};
 
 const ONE: u64 = 1 << 32;
@@ -19,12 +19,21 @@ pub struct Resampler {
     acc: u64,
     /// Posledni ctyri vstupni snimky (y0..y3); vystup lezi mezi y1 a y2.
     hist: [Frame; 4],
+    /// Dolni propust pri snizovani frekvence.
+    lowpass: Option<alloc::boxed::Box<Lowpass>>,
 }
 
 impl Resampler {
     pub fn new(in_rate: u32, out_rate: u32) -> Self {
         // Prvni vystup az po trech vstupech: y1 = prvni skutecny vzorek.
-        Self { step: ((in_rate as u64) << 32) / out_rate as u64, acc: 3 * ONE, hist: [[0; 2]; 4] }
+        let lowpass = (in_rate > out_rate).then(|| alloc::boxed::Box::new(Lowpass::new(in_rate, out_rate)));
+        Self { step: ((in_rate as u64) << 32) / out_rate as u64, acc: 3 * ONE, hist: [[0; 2]; 4], lowpass }
+    }
+
+    /// Kolik vstupnich snimku ticha je potreba, aby vysel posledni
+    /// skutecny vstup (historie interpolace a zpozdeni filtru).
+    pub fn flush_frames(&self) -> u32 {
+        2 + if self.lowpass.is_some() { Lowpass::delay() as u32 } else { 0 }
     }
 
     /// Kolik vstupnich snimku je potreba na `out` vystupnich (horni odhad).
@@ -42,7 +51,10 @@ impl Resampler {
     pub fn process(&mut self, out: &mut [Frame], mut input: impl FnMut() -> Option<Frame>) -> usize {
         for (i, o) in out.iter_mut().enumerate() {
             while self.acc >= ONE {
-                let Some(f) = input() else { return i };
+                let Some(mut f) = input() else { return i };
+                if let Some(lp) = self.lowpass.as_mut() {
+                    f = lp.push(f);
+                }
                 self.hist = [self.hist[1], self.hist[2], self.hist[3], f];
                 self.acc -= ONE;
             }
@@ -57,6 +69,9 @@ impl Resampler {
     pub fn reset(&mut self) {
         self.acc = 3 * ONE;
         self.hist = [[0; 2]; 4];
+        if let Some(lp) = self.lowpass.as_mut() {
+            lp.reset();
+        }
     }
 }
 

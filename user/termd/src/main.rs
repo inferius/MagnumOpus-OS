@@ -2,8 +2,10 @@
 //!
 //! Start: bootstrap kanal = spojeni s oknem terminalu (nativni protokol
 //! `term::proto`); handly `kind::USER` = [kanal sluzby fsd, kanal registru
-//! relaci, kanal ke zvukove sluzbe] (vse volitelne; zvuk dostane relace
-//! jen s fsd - handly `Init` jsou podle poradi); `kind::INITFS` = obraz initfs (odtud se spousti
+//! relaci, kanal ke zvukove sluzbe, jeho listek] (vse volitelne; zvuk
+//! dostane relace jen s fsd - handly `Init` jsou podle poradi). S listkem
+//! dostane kazda relace vlastni relaci zvuku s listkem (prezije restart
+//! `audiod`), bez nej jen kanal; `kind::INITFS` = obraz initfs (odtud se spousti
 //! `shsess`).
 //!
 //! Kazda relace bezi ve vlastnim procesu `shsess` (`term::broker`). termd
@@ -100,10 +102,15 @@ impl Termd {
         if let Some(f) = &self.fsd {
             handles.push(f.connect()?.into_channel().into_handle());
             // Zvuk je volitelny: kdyz sluzba neodpovi, relace bezi bez nej.
-            if let Some(a) = &self.audio
-                && let Ok(ch) = a.connect()
-            {
-                handles.push(ch.into_handle());
+            if let Some(a) = &self.audio {
+                if a.conn().has_lease() {
+                    if let Ok((ch, lease)) = a.narrow() {
+                        handles.push(ch.into_handle());
+                        handles.push(lease.into_handle());
+                    }
+                } else if let Ok(ch) = a.connect() {
+                    handles.push(ch.into_handle());
+                }
             }
         }
         let (_proc, chan) = libos::spawn("shsess", image, Vec::new())?;
@@ -176,7 +183,10 @@ fn main(mut startup: Startup) -> i64 {
     let mut hs = core::mem::take(&mut startup.handles).into_iter();
     let fsd = hs.next().map(|h| FsClient::new(Channel::from_handle(h)));
     let registry = hs.next().map(Channel::from_handle);
-    let audio = hs.next().map(|h| audioproto::conn::AudioClient::new(Channel::from_handle(h)));
+    let audio = hs.next().map(Channel::from_handle).map(|ch| match hs.next() {
+        Some(lease) => audioproto::conn::AudioClient::with_lease(ch, Channel::from_handle(lease)),
+        None => audioproto::conn::AudioClient::new(ch),
+    });
     let nonce = time::wall().map(|t| (t.secs as u64) ^ ((t.nanos as u64) << 20)).unwrap_or_else(time::now);
     let mut t = Termd {
         window: startup.bootstrap,

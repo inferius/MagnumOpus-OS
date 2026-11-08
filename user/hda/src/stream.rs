@@ -1,5 +1,5 @@
-//! Vystupni stream: DMA buffer z period, seznam bufferu (BDL), start,
-//! stop a pozice.
+//! Stream DMA (vystupni i vstupni, registry jsou stejne): buffer
+//! z period, seznam bufferu (BDL), start, stop a pozice.
 //!
 //! Buffer je kruh `periods` period; kazda perioda je jedna polozka BDL
 //! s priznakem IOC, takze radic po kazde periode vyvola preruseni.
@@ -16,11 +16,10 @@ use libos::{Error, Event, Mapping, Result, Vmo, time};
 
 use crate::ctrl::Ctrl;
 
-pub struct OutStream {
+pub struct DmaStream {
     /// Index deskriptoru (bit v INTCTL).
     pub index: u32,
     off: u64,
-    pub tag: u8,
     pub fmt: u16,
     pub req: OpenStream,
     pub buf: Vmo,
@@ -62,7 +61,7 @@ fn wait_bit(c: &Ctrl, off: u64, mask: u8, set: bool) -> bool {
     }
 }
 
-impl OutStream {
+impl DmaStream {
     /// Pripravi stream `index` s cislem `tag` a formatem `fmt` (kodovani
     /// HDA). Zarizeni ho jeste nespousti.
     pub fn open(c: &Ctrl, res: &Resource, index: u32, tag: u8, fmt: u16, want: OpenStream) -> Result<Self> {
@@ -91,7 +90,7 @@ impl OutStream {
         }
         let status_vmo = Vmo::create(audioproto::device::STATUS_SIZE as u64)?;
         let status_map = Mapping::new(&status_vmo, 0, audioproto::device::STATUS_SIZE as u64, MAP_READ | MAP_WRITE)?;
-        // SAFETY: mapovani ma STATUS_SIZE bajtu a zije v `OutStream`.
+        // SAFETY: mapovani ma STATUS_SIZE bajtu a zije v `DmaStream`.
         let status = unsafe { StatusPage::new(status_map.addr() as *mut u8) };
         status.init(cbl / fb);
         let off = regs::sd_offset(index);
@@ -115,7 +114,6 @@ impl OutStream {
         Ok(Self {
             index,
             off,
-            tag,
             fmt,
             req,
             buf,

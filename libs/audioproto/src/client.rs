@@ -36,6 +36,8 @@ pub mod op {
     /// Novy kanal ke sluzbe (napr. termd ho preda kazde relaci shellu).
     pub const CONNECT: u32 = 10;
     pub const STREAM_INFO: u32 = 11;
+    pub const DEVICES: u32 = 12;
+    pub const SELECT: u32 = 13;
 }
 
 /// Nejmensi a nejvetsi pozadovana latence bufferu klienta (us).
@@ -59,6 +61,10 @@ pub enum Request {
     Status,
     Connect,
     StreamInfo { stream: u32 },
+    /// Seznam zvukovych zarizeni ([`DeviceEntry`]).
+    Devices,
+    /// Prepnout na zarizeni `index` (bezici streamy hraji dal na novem).
+    Select { index: u8 },
 }
 
 impl Request {
@@ -90,6 +96,11 @@ impl Request {
             }
             Request::Status => w = Writer::op(op::STATUS),
             Request::Connect => w = Writer::op(op::CONNECT),
+            Request::Devices => w = Writer::op(op::DEVICES),
+            Request::Select { index } => {
+                w = Writer::op(op::SELECT);
+                w.u8(*index);
+            }
         }
         w.finish()
     }
@@ -112,6 +123,8 @@ impl Request {
             op::MUTE => Request::Mute { on: r.u8()? != 0 },
             op::STATUS => Request::Status,
             op::CONNECT => Request::Connect,
+            op::DEVICES => Request::Devices,
+            op::SELECT => Request::Select { index: r.u8()? },
             _ => return Err(Error::NotSupported),
         };
         Ok(req)
@@ -188,6 +201,10 @@ pub struct Status {
     pub latency_us: u32,
     /// Perioda zarizeni (snimky).
     pub period: u32,
+    /// Umi aktivni zarizeni nahravat?
+    pub input: bool,
+    /// Index aktivniho zarizeni (`DEVICES`).
+    pub device_index: u8,
 }
 
 impl Status {
@@ -197,6 +214,7 @@ impl Status {
         self.format.encode(&mut w);
         w.u8(self.master).u8(self.muted as u8).u32(self.streams).u32(self.running);
         w.u64(self.hw_pos).u64(self.irqs).u64(self.device_underruns).u32(self.latency_us).u32(self.period);
+        w.u8(self.input as u8).u8(self.device_index);
         w.finish()
     }
 
@@ -215,6 +233,8 @@ impl Status {
             device_underruns: r.u64()?,
             latency_us: r.u32()?,
             period: r.u32()?,
+            input: r.u8()? != 0,
+            device_index: r.u8()?,
         })
     }
 }
@@ -239,5 +259,44 @@ impl StreamInfo {
     pub fn decode(m: &[u8]) -> Result<Self> {
         let mut r = Reader::new(m);
         Ok(Self { running: r.u8()? != 0, played: r.u64()?, underruns: r.u64()?, volume: r.u8()? })
+    }
+}
+
+/// Polozka seznamu zarizeni (`DEVICES`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceEntry {
+    pub index: u8,
+    pub name: String,
+    /// Aktivni vystupy (`line-out,headphone`), prazdne = zadny.
+    pub outputs: String,
+    pub input: bool,
+    /// Prave pouzivane zarizeni.
+    pub active: bool,
+}
+
+impl DeviceEntry {
+    pub fn encode_list(list: &[DeviceEntry]) -> Vec<u8> {
+        let mut w = Writer::new();
+        w.u8(list.len().min(255) as u8);
+        for d in list.iter().take(255) {
+            w.u8(d.index).str(&d.name).str(&d.outputs).u8(d.input as u8).u8(d.active as u8);
+        }
+        w.finish()
+    }
+
+    pub fn decode_list(m: &[u8]) -> Result<Vec<DeviceEntry>> {
+        let mut r = Reader::new(m);
+        let n = r.u8()?;
+        let mut v = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            v.push(DeviceEntry {
+                index: r.u8()?,
+                name: r.str()?,
+                outputs: r.str()?,
+                input: r.u8()? != 0,
+                active: r.u8()? != 0,
+            });
+        }
+        Ok(v)
     }
 }

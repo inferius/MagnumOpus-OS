@@ -5,14 +5,16 @@ Zvuk obsluhují dva procesy a jedna knihovna protokolu:
 - **`hda`**: ovladač řadiče Intel High Definition Audio (PCI třída
   04:03). Resetuje řadič, najde kodeky a cestu k výstupu, spouští DMA.
   Jako jediný má přístup k řadiči.
-- **`audiod`**: zvuková služba. Míchá streamy aplikací, převádí formáty
-  a vzorkovací frekvence, řídí hlavní hlasitost a ztlumení.
+- **`audiod`**: zvuková služba. Míchá streamy aplikací, rozvádí
+  nahrávaný zvuk, převádí formáty a vzorkovací frekvence, řídí hlavní
+  hlasitost, ztlumení a výběr zvukové karty.
 - **`libs/audioproto`**: protokol mezi aplikacemi, službou a ovladačem.
   Vzorky nejdou přes kanál, ale přes sdílenou paměť (VMO).
 
 Logika bez hardwaru je v knihovnách testovaných na hostiteli:
-`libs/hdaspec` (registry, verby, graf widgetů, hledání cest) a
-`libs/audiomix` (převod formátů, převod frekvence, mix, tón, WAV).
+`libs/hdaspec` (registry, verby, graf widgetů, cesty k výstupům i ke
+vstupu, HDMI, opravy desek) a `libs/audiomix` (převod formátů, převod
+frekvence s antialiasingovým filtrem, mix, tón, WAV).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cesta zvuku">
@@ -42,11 +44,32 @@ Logika bez hardwaru je v knihovnách testovaných na hostiteli:
    AMD, VMware, QEMU) a spustí `hda` s omezeným Resource (BARy,
    konfigurace, 2 přerušení, 1 MiB DMA). Initu pošle zprávu `audio`
    s kanálem k ovladači.
-2. init spustí `audiod` a předá mu kanály všech ovladačů. Služba se
-   každého zeptá na zařízení (`INFO`) a použije první s analogovým
-   výstupem; ostatní (např. HDMI zvuk grafické karty) přeskočí.
-3. Bootstrap kanál služby si nechá init; další klienti vznikají zprávou
-   `CONNECT` (termd ho pošle pro každou relaci shellu, testy pro sebe).
+2. init spustí `audiod` pod supervisorem a předá mu kanály všech
+   ovladačů. Služba se každého zeptá na zařízení (`INFO`) a jako aktivní
+   použije první s analogovým výstupem; ostatní (např. HDMI zvuk grafické
+   karty) jsou v seznamu (`DEVICES`) a dají se vybrat (`SELECT`).
+   Nahrává se z aktivní karty, když má vstup, jinak z první jiné karty
+   se vstupem (otevře se zvlášť, její výstup se nespouští).
+3. Bootstrap kanál služby si nechá init (jen přes něj jde přidat ovladač
+   za běhu). Klienti dostávají relace přes `CONNECT`: termd s lístkem od
+   supervisoru (`session("audiod")`) a každá relace shellu vlastní relaci
+   s lístkem (`narrow`), testy bez lístku.
+
+### Obnova po pádu
+
+- **Pád `audiod`:** supervisor ho spustí znovu. Kanály k ovladačům drží
+  init (`Kept`), takže ovladače nic nepoznají a nová instance je dostane
+  hned; stream u ovladače si otevře znovu. Klienti s lístkem
+  (`svcclient::Conn`) se při dalším volání připojí sami; otevřené streamy
+  restart nepřežijí (volání vrátí `SERVICE_RESTARTED` nebo `NOT_FOUND`,
+  program otevře nový).
+- **Pád `hda`:** devmgr ho ve vlastním vlákně spustí znovu (nejvýš 5×
+  za minutu) a pošle initu novou zprávu `audio`. Init kanál uschová
+  a předá běžící službě (`device`); služba starý ovladač vyřadí (vidí
+  zavřený kanál) a přejde na nový.
+
+Obojí ověřují testy „zabij audiod“ a „zabij ovladač hda“ (sada
+`obnova zvuku`).
 
 ## Protokol (`libs/audioproto`)
 
@@ -55,7 +78,9 @@ Logika bez hardwaru je v knihovnách testovaných na hostiteli:
 Formát PCM = vzorkovací frekvence (8-192 kHz), počet kanálů (1-8)
 a typ vzorku: `u8`, `s16`, `s24` (24 bitů v 32bitovém slově), `s32`,
 `f32`. Vzorky kanálů jsou prokládané. Zařízení hraje 48 kHz (nebo
-44,1 kHz, když kodek 48 kHz neumí), 16 bitů, stereo; převod dělá služba.
+44,1 kHz, když kodek 48 kHz neumí), stereo, 16 bitů, nebo 24 bitů ve
+32bitovém slově, když to umí všechny kodeky s výstupem. Nahrává 48 kHz,
+stereo, 16 bitů. Převod na formát klienta dělá služba.
 
 ### Sdílený kruhový buffer
 
@@ -94,13 +119,18 @@ a jedno čekání na periodu, žádná zpráva na blok dat.
 | `MUTE` | ztlumení celého výstupu |
 | `STATUS`, `STREAM_INFO` | stav zařízení a služby, stav streamu |
 | `CONNECT` | nový kanál ke službě |
+| `DEVICES`, `SELECT` | seznam zvukových karet, přepnutí (streamy hrají dál na nové) |
 
 Hlasitost 50 % je asi -18 dB, 10 % -60 dB (kubická křivka se blíží
 vnímání hlasitosti lépe než lineární).
 
-**Nahrávání** (`Direction::Input`) má v protokolu stejný tvar
-s opačnými rolemi: služba píše, klient čte, událost znamená "nová data".
-Ovladač ho zatím neumí; `OPEN` se směrem `Input` vrací `NOT_SUPPORTED`.
+**Nahrávání** (`Direction::Input`) má stejný tvar s opačnými rolemi:
+služba píše, klient čte, událost znamená "nová data". Když klient
+nestíhá číst, služba zbytek zahodí a počítá přetečení. Zařízení bez
+vstupu vrací `NOT_SUPPORTED`.
+
+Klient `audioproto::conn::AudioClient` stojí na `svcclient::Conn`:
+s lístkem přežije restart služby, bez něj vrátí `SERVICE_UNAVAILABLE`.
 
 ### Protokol ovladače
 
@@ -108,8 +138,11 @@ Ovladač ho zatím neumí; `OPEN` se směrem `Input` vrací `NOT_SUPPORTED`.
 a dostane tři handly: **DMA buffer** (služba do něj míchá přímo, žádná
 další kopie), **stránku stavu** (pozice DMA v snímcích, počet přerušení,
 chyby) a **událost periody**. BDL, CORB, RIRB ani registry řadiče služba
-nevidí. `START` a `STOP` spouští a zastavují DMA, `OPEN_INPUT` je
-připravený pro nahrávání.
+nevidí. `START` a `STOP` spouští a zastavují DMA. Nahrávání má
+`OPEN_INPUT`, `START_INPUT`, `STOP_INPUT`, `CLOSE_INPUT`; pozice ve
+stránce stavu jsou snímky, které zařízení do bufferu už zapsalo.
+`TEST_EXIT` ukončí ovladač jako po pádu (posílá ho jen `audiod` na
+pokyn initu v testu obnovy).
 
 ## Ovladač `hda`
 
@@ -131,7 +164,8 @@ připravený pro nahrávání.
 
 ### Kodeky a cesty
 
-Ovladač přečte z každé audio funkční skupiny všechny widgety:
+Ovladač přečte z každého kodeku na lince (všechny adresy, které se
+ohlásily) všechny widgety audio funkční skupiny:
 schopnosti, seznam spojení (krátký i dlouhý tvar, rozsahy), u pinů
 schopnosti a **výchozí konfiguraci** (jak konektor zapojil výrobce desky:
 linkový výstup, reproduktor, sluchátka, HDMI; asociace a pořadí).
@@ -161,10 +195,11 @@ Rozhodování je v `hdaspec::graph`:
    -> DAC, nejvýš 6 uzlů): nejdřív k volnému DAC, jinak ke DAC už
    použitému. Selektor smí mít jen jeden výběr, takže cesta, která by
    změnila výběr jiné cesty, se odmítne.
-3. Všechny DAC dostanou stejný stream: linkový výstup, sluchátka
-   i reproduktor hrají současně. **Auto-mute:** když detekce zásunutí
-   hlásí sluchátka, reproduktory se vypnou (pin bez `OUT`). Detekce se čte
-   každých 500 ms (nevyžádané odpovědi zatím ne).
+3. Všechny DAC všech kodeků dostanou stejný stream: linkový výstup,
+   sluchátka i reproduktor hrají současně. **Auto-mute:** když detekce
+   zásunutí hlásí sluchátka, reproduktory se vypnou (pin bez `OUT`).
+   Konektory hlásí změnu **nevyžádanou odpovědí** (značka podle pinu,
+   přerušení RIRB); záloha je čtení každé 3 s (bez MSI každých 500 ms).
 4. Nastavení cesty: napájení D0, výběry selektorů a pinů, zesilovače na
    0 dB (hlasitost řeší služba softwarově), u mixerů jen vstup z cesty
    (ostatní, např. smyčka z mikrofonu, se ztlumí), řízení pinu
@@ -173,9 +208,34 @@ Rozhodování je v `hdaspec::graph`:
    vyplněný BIOS), ovladač zkusí všechny piny s výstupem jako linkový
    výstup.
 
-**HDMI/DP** se jen najde a nahlásí (`INFO`: výstup `hdmi`, neaktivní).
-Chybí čtení ELD (co umí monitor), infoframe a nastavení digitálního
-převodníku; to je další krok.
+**HDMI/DP** (`hdaspec::hdmi`): ovladač připraví digitální cestu
+(napájení, pin `OUT`, digitální převodník, 2 kanály, sloty) a čte
+připojení monitoru. Když je monitor připojený a ELD platné (verb
+`GET_HDMI_ELDD` po bajtech: jméno monitoru, HDMI nebo DP, kolik kanálů
+LPCM umí), zapíše audio infoframe (HDMI typ 0x84 se součtem, DP
+sekundární paket) a převodník dostane stejný stream jako analogové
+výstupy. Odpojení monitoru převodník odpojí. Vícekanálový zvuk,
+mapování kanálů a DP MST zatím nejsou.
+
+### Nahrávání
+
+`hdaspec::input` najde cestu od převodníku A/D (ADC) proti proudu ke
+vstupnímu pinu v pořadí: mikrofon v konektoru, vestavěný mikrofon,
+linkový vstup, aux. Nastaví výběry, vstupní zesilovače na 0 dB (u mixeru
+jen vstup z cesty), pin jako vstup a u mikrofonu napájení 80 %, když ho
+pin umí. Vstupní stream je první vstupní deskriptor (číslo streamu 2).
+
+### Opravy desek
+
+Některé desky mají chybnou výchozí konfiguraci pinů, nebo potřebují
+GPIO (zesilovač reproduktorů notebooku) či koeficienty kodeku.
+`hdaspec::fixup` má tabulku podle ID kodeku a ID subsystému (výrobce
+desky, verb `GET_SUBSYSTEM_ID`): přepis konfigurace pinů před plánováním
+cest, GPIO a koeficienty po nastavení. Údaje jsou fakta o hardwaru
+(převzít je smíme i z veřejných tabulek oprav, ne jejich kód). **Tabulka
+je zatím prázdná**: položka se přidá, až se ověří na skutečném počítači.
+Obecná oprava bez tabulky: u kodeků Realtek se zapne EAPD na všech
+pinech, které ho mají.
 
 ### Stream a DMA
 
@@ -210,16 +270,28 @@ a jedna rezerva, kterou zařízení právě čte. Služba se probouzí 187krát
 za sekundu; mix jedné periody pro dva streamy je desítky mikrosekund.
 Když 2 s nehraje žádný stream, služba DMA zastaví (zařízení nehraje
 ticho do nekonečna) a při dalším `START` buffer vynuluje a spustí znovu.
+Vstup se zastaví hned, jak nebeží žádný nahrávací stream.
+
+Nahrávání: po každé periodě vstupu služba přečte nová data z DMA
+bufferu, převede je na stereo Q23 a každému nahrávacímu streamu přes
+jeho převodník frekvence zapíše do bufferu v jeho formátu (s hlasitostí
+streamu).
 
 ### Převod formátu a frekvence
 
 Vzorky každého streamu se převedou na vnitřní stereo Q23 (24 bitů
-v i32): mono do obou kanálů, víc kanálů = průměr sudých do levého
-a lichých do pravého. Převod frekvence je **kubická interpolace
-Catmull-Rom** s fází v Q32 (při stejné frekvenci přesně vstup). Mix
-sčítá v i64 se zesílením streamu, pak hlavní hlasitost a ořez na 16 bitů
-(ořezává se až součet, takže dva hlasité streamy v protifázi
-nezkreslí). Vše v celých číslech: programy na aarch64 běží bez FPU.
+v i32): mono do obou kanálů, víc kanálů **downmix** podle rozložení
+WAV/HDA (3 až 8 kanálů: přední plně, střed a zadní/boční -3 dB, LFE se
+vynechá, váhy normované, takže nic neořízne). Převod frekvence je
+**kubická interpolace Catmull-Rom** s fází v Q32 (při stejné frekvenci
+přesně vstup). Při **snižování** frekvence jde vstup nejdřív přes FIR
+dolní propust (47 koeficientů, okénkovaný sinc s Hannovým oknem, mez
+0,45 × nová frekvence): obsah nad novou Nyquistovou frekvencí je
+potlačený aspoň o 40 dB. Na konci `DRAIN` se historie převodníku
+vytlačí tichem, takže zazní i poslední vzorky. Mix sčítá v i64 se
+zesílením streamu, pak hlavní hlasitost a ořez na 16 nebo 24 bitů
+(ořezává se až součet). Vše v celých číslech (koeficienty filtru se
+spočítají jednou při otevření): programy na aarch64 běží bez FPU.
 
 ## Příkaz shellu `audio`
 
@@ -229,28 +301,42 @@ audio play /hudba/ukazka.wav
 audio volume 60
 audio mute
 audio status
+audio devices
+audio device 1
 ```
 
-`audio volume` bez čísla vrátí hlasitost, `audio unmute` zruší ztlumení.
+`audio volume` bez čísla vrátí hlasitost, `audio unmute` zruší ztlumení,
+`audio devices` vypíše zvukové karty a `audio device N` přepne.
 `tone` a `play` vrátí záznam s délkou přehrání a počtem podtečení.
-Soubor WAV čte interpret přes FS relace (stejná práva jako `open`):
-PCM 8/16/32 bitů, 24 bitů ve 32bitovém slově a float 32, libovolná
-frekvence a počet kanálů. Příkaz čeká, než zvuk dohraje.
+Zvuk jde do relace po kouscích 100 ms: soubor WAV čte interpret po
+částech přes FS relace (stejná práva jako `open`, velikost
+neomezená), mezi kousky kontroluje **Ctrl-C** (pak stream zastaví a vrátí
+`SH_INTERRUPTED`). Formáty WAV: PCM 8/16/32 bitů, 24 bitů ve 32bitovém
+slově a float 32, libovolná frekvence a počet kanálů.
 
 ## Testy
 
 - **Na hostiteli** (`cargo xtask test`): `audioproto` (zprávy, buffer
-  i se zlými pozicemi), `audiomix` (převody, Goertzel na tónu po převodu
-  44,1 -> 48 kHz, mix, WAV), `hdaspec` (verby, formáty, seznamy spojení,
-  grafy QEMU hda-duplex, Realtek ALC, selektor, HDMI, cykly), příkaz
-  `audio` v `shlang`, detekce tónu v xtask.
+  i se zlými pozicemi), `audiomix` (převody tam i zpět, downmix, Goertzel
+  na tónu po převodu 44,1 -> 48 kHz, potlačení aliasu 96 -> 48 kHz, mix
+  16 i 24 bitů, WAV), `hdaspec` (verby, formáty, seznamy spojení, grafy
+  QEMU hda-duplex, Realtek ALC, selektor, HDMI, cykly, cesta ke vstupu,
+  ELD a infoframe, tabulka oprav), příkaz `audio` v `shlang` (kousky,
+  čtení po částech, Ctrl-C), detekce tónu v xtask.
 - **V QEMU** sada `zvuk`: zařízení a výstup, stream běží a DMA posouvá
-  pozici (aspoň o přehraná data), přerušení chodí, mix dvou klientů
-  (48 a 22,05 kHz), hlasitost a ztlumení, neplatné požadavky,
-  `audio tone`/`volume`/`status` přes termd a relaci.
-- **Zapsaný zvuk:** QEMU má `-device intel-hda -device hda-duplex`
-  s `-audiodev wav` (48 kHz, s16, stereo). Test `ton 1 kHz do WAV`
-  přehraje 1,5 s tónu 1 kHz (mono 44,1 kHz, tedy přes převod
+  pozici, přerušení chodí, mix dvou klientů (48 a 22,05 kHz), hlasitost
+  a ztlumení, neplatné požadavky, `audio tone`/`volume`/`status` přes
+  termd a relaci, nahrávání (16 kHz mono přes převod dolů) z druhé
+  karty, seznam dvou karet a přepnutí výstupu. Sada `obnova zvuku`: „zabij
+  audiod“ (nová instance má hned zařízení, klient s lístkem se připojí
+  sám) a „zabij ovladač hda“ (devmgr ho spustí znovu, služba přejde na
+  nový).
+- **Zapsaný zvuk:** QEMU má dva řadiče `intel-hda`: první s kodekem
+  `hda-output` do `-audiodev wav` (48 kHz, s16, stereo), druhý
+  s `hda-duplex` a backendem `none` (umí i vstup pro test nahrávání;
+  backend wav nahrávat neumí). Dva kodeky na jedné lince QEMU nemodeluje
+  správně (každý kodek si z DMA bere vlastní data, na skutečném hardwaru
+  se stream vysílá všem), proto dva řadiče. Test `ton 1 kHz do WAV` přehraje 1,5 s tónu 1 kHz (mono 44,1 kHz, tedy přes převod
   frekvence); po konci QEMU xtask v souboru hledá okna 50 ms s čistým
   tónem 1 kHz a vyžaduje aspoň 500 ms.
 
@@ -264,15 +350,19 @@ Se zvukem interaktivně: `cargo xtask run --audio dsound` (Windows),
   skutečné desky.
 - **Desky Intel a AMD** s analogovým kodekem (Realtek, Conexant, VIA)
   by měly hrát, ale **na skutečném hardwaru to zatím ověřené není.**
-  Některé kodeky potřebují úpravy specifické pro výrobce (koeficienty
-  Realtek, GPIO pro zesilovač u notebooků), které Linux má v tabulkách
-  oprav; ty tu nejsou. Výsledkem může být ticho na reproduktorech
-  notebooku, zatímco linkový výstup hraje.
+  Tabulka oprav desek je prázdná: notebook, který potřebuje GPIO nebo
+  koeficienty pro zesilovač, může mít tiché reproduktory, zatímco
+  linkový výstup hraje. Položka se přidá po ověření na daném počítači.
 - **Notebooky Intel s DSP (SOF, digitální mikrofony)** mají zvuk za DSP
   a v režimu HDA ho nemusí ukázat vůbec. Nepodporováno.
-- **HDMI/DP**: jen připraveno (viz výše).
-- Převod frekvence při **snižování** (např. 96 -> 48 kHz) nefiltruje
-  pásmo nad novou Nyquistovou frekvencí: obsah nad 24 kHz se může složit
-  zpět (aliasing). Běžné zdroje (44,1 a 48 kHz) to nepostihuje.
-- Bez nevyžádaných odpovědí trvá přepnutí na sluchátka až 500 ms.
-- `audio play` a `audio tone` zatím nejde přerušit Ctrl-C.
+- **HDMI/DP** je napsané podle specifikace, ale QEMU kodek HDMI nemá,
+  takže to v testech neprochází: ověřit na skutečné grafické kartě.
+  Jen stereo; DP MST (víc monitorů na jednom konektoru) chybí.
+- **24 bitů** se použije, jen když ho hlásí všechny kodeky s výstupem;
+  QEMU umí jen 16 bitů, takže 24bitová cesta je ověřená jen testy na
+  hostiteli.
+- Nahrávání bere jediný vstup (aktivní karta, když ho má, jinak první
+  jiná se vstupem; na kartě první vstup podle pořadí); ruční výběr vstupu
+  zatím není.
+- Víc kodeků s výstupem na jednom řadiči hraje tentýž stream; v QEMU to
+  ověřit nejde (viz Testy), jen vyčet obou kodeků.

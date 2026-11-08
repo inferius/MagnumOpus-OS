@@ -2,7 +2,8 @@
 //! testuje se na hostiteli.
 //!
 //! - [`convert`]: vzorky libovolneho formatu -> vnitrni stereo Q23,
-//! - [`src`]: prevod vzorkovaci frekvence (kubicka interpolace Hermite),
+//! - [`src`]: prevod vzorkovaci frekvence (kubicka interpolace Hermite,
+//!   pred snizenim frekvence antialiasingovy filtr [`filter`]),
 //! - [`mix`]: scitani streamu se zesilenim a orezanim do 16 bitu,
 //! - [`tone`]: sinusovy ton v celych cislech (testy, `audio tone`),
 //! - [`wav`]: cteni a zapis souboru WAV (RIFF).
@@ -18,6 +19,7 @@ extern crate alloc;
 mod tests;
 
 pub mod convert;
+pub mod filter;
 pub mod mix;
 pub mod src;
 pub mod tone;

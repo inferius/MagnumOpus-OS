@@ -28,6 +28,7 @@ use libos::spawn::StartHandle;
 use libos::{Channel, Process, Signals, Startup, println};
 use pci::{Ecam, Function};
 
+mod restart;
 mod usb;
 
 libos::entry!(main);
@@ -36,7 +37,7 @@ libos::entry!(main);
 const USB_READY_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(10);
 
 /// Ovladac pro jeden typ zarizeni virtio.
-struct Driver {
+pub struct Driver {
     /// ID zarizeni PCI: moderni (0x1040 + typ virtio) a prechodne.
     ids: (u16, u16),
     /// Program v initfs.
@@ -121,7 +122,9 @@ fn main(startup: Startup) -> i64 {
     };
     let mut drivers: Vec<Process> = Vec::new();
     let mut controllers: Vec<usb::Controller> = Vec::new();
-    for (vmo, arg) in &startup.pci_ecam {
+    // Ovladace, ktere se po padu spousti znovu (vlakno `restart`).
+    let mut watched: Vec<restart::Watched> = Vec::new();
+    for (window, (vmo, arg)) in startup.pci_ecam.iter().enumerate() {
         let ecam = match Ecam::new(vmo, *arg) {
             Ok(e) => e,
             Err(e) => {
@@ -158,8 +161,9 @@ fn main(startup: Startup) -> i64 {
             }
         }
         for f in functions.iter().filter(|f| (f.class, f.subclass) == HDA_CLASS) {
-            match start_driver(&HDA, &fs, resource, vmo, &ecam, (*arg >> 16) as u16, f, &startup.bootstrap) {
-                Ok(p) => drivers.push(p),
+            let Some(image) = fs.find(HDA.program) else { continue };
+            match start_driver_image(&HDA, image, resource, vmo, &ecam, (*arg >> 16) as u16, f, &startup.bootstrap) {
+                Ok(process) => watched.push(restart::Watched { driver: &HDA, image, function: *f, window, process }),
                 Err(e) => println!("devmgr: ovladac hda pro {} nelze spustit: {e}", f.address),
             }
         }
@@ -188,6 +192,22 @@ fn main(startup: Startup) -> i64 {
         }
     }
     let _ = startup.bootstrap.write(b"done", Vec::new());
+    // Restart spadlych ovladacu ve vlastnim vlakne (handly jsou duplikaty).
+    let ctx = (|| -> libos::Result<restart::Ctx> {
+        let mut windows = Vec::new();
+        for (v, a) in &startup.pci_ecam {
+            windows.push((libos::Vmo::from_handle(v.handle().duplicate(None)?), *a));
+        }
+        Ok(restart::Ctx {
+            resource: libos::hw::Resource::from_handle(resource.handle().duplicate(None)?),
+            windows,
+            parent: Channel::from_handle(startup.bootstrap.handle().duplicate(None)?),
+        })
+    })();
+    match ctx {
+        Ok(ctx) => restart::spawn(watched, ctx),
+        Err(e) => println!("devmgr: restart ovladacu nebude: {e}"),
+    }
     // Zustat bezet, dokud init drzi spojeni: hotplug USB (pozdeji restart
     // spadlych ovladacu).
     while serve_usb(&fs, &mut controllers, &startup.bootstrap, &mut drivers, None) {}
@@ -322,6 +342,21 @@ fn start_driver(
     parent: &Channel,
 ) -> libos::Result<Process> {
     let image = fs.find(driver.program).ok_or(libos::Error::NotFound)?;
+    start_driver_image(driver, image, resource, ecam_vmo, ecam, segment, f, parent)
+}
+
+/// Spusti ovladac z obrazu `image` (i z vlakna restartu).
+#[allow(clippy::too_many_arguments)]
+pub fn start_driver_image(
+    driver: &Driver,
+    image: &[u8],
+    resource: &libos::hw::Resource,
+    ecam_vmo: &libos::Vmo,
+    ecam: &Ecam,
+    segment: u16,
+    f: &Function,
+    parent: &Channel,
+) -> libos::Result<Process> {
     // Ovladac dostane jen sve zarizeni: BARy, svou konfiguraci, kvoty.
     let (ranges, config_phys) = device_ranges(ecam, ecam_vmo, resource, f)?;
     let a = f.address;

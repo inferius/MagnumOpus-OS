@@ -133,6 +133,10 @@ impl Fs for FsdFs {
         self.client.read(path, 0, st.size as usize)
     }
 
+    fn read_range(&mut self, path: &str, offset: u64, len: usize) -> FsResult<Vec<u8>> {
+        self.client.read(path, offset, len)
+    }
+
     /// Zapis je atomicky: data do docasneho souboru vedle, pak
     /// `REPLACE_COMMIT`. Pri chybe zustane puvodni soubor cely.
     fn write(&mut self, path: &str, data: &[u8]) -> FsResult<()> {

@@ -4,6 +4,7 @@
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
 mod audio;
+mod audio_recovery;
 mod basic;
 mod dns;
 mod clock_sync;
@@ -64,6 +65,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("shell", shell::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
+    // Zvuk po padu: ridi hlavni supervisor (jako obnova fsd, pred ni).
+    ("obnova zvuku", audio_recovery::TESTS),
     // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery
     // v testovacim behu ridi jen tato sada).
     ("obnova fsd", fs_recovery::TESTS),

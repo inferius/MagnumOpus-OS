@@ -1,9 +1,9 @@
 //! Prevod vzorku formatu klienta na vnitrni stereo Q23 a zpet.
 //!
-//! Mono jde do obou kanalu. Vic nez dva kanaly: levy = prumer sudych
-//! kanalu, pravy = prumer lichych (5.1 v poradi FL FR C LFE RL RR da
-//! L = (FL + C + RL) / 3, R = (FR + LFE + RR) / 3) - jednoduchy downmix,
-//! hlasitost se nezvysi a nic se neorizne.
+//! Mono jde do obou kanalu. Vic kanalu: downmix podle obvykleho rozlozeni
+//! (poradi kanalu WAV/HDA, [`DOWNMIX`]): stred a zadni/bocni kanaly
+//! s vahou 0,707 (-3 dB), LFE se vynecha (reproduktory ho obvykle
+//! nehraji). Vahy se normuji na soucet 1, takze se nic neorizne.
 
 use audioproto::{Format, Sample};
 
@@ -51,19 +51,67 @@ pub fn frame_to_stereo(f: &Format, b: &[u8]) -> Frame {
         }
         2 => [sample_to_q23(f.sample, b), sample_to_q23(f.sample, &b[sb..])],
         _ => {
-            let (mut l, mut r, mut nl, mut nr) = (0i64, 0i64, 0i64, 0i64);
-            for c in 0..ch {
+            let w = DOWNMIX[ch.min(8)];
+            let (mut l, mut r, mut sl, mut sr) = (0i64, 0i64, 0i64, 0i64);
+            for (c, &(wl, wr)) in w.iter().enumerate().take(ch) {
                 let v = sample_to_q23(f.sample, &b[c * sb..]) as i64;
-                if c % 2 == 0 {
-                    l += v;
-                    nl += 1;
-                } else {
-                    r += v;
-                    nr += 1;
-                }
+                l += v * wl as i64;
+                r += v * wr as i64;
+                sl += wl as i64;
+                sr += wr as i64;
             }
-            [(l / nl) as i32, (r / nr.max(1)) as i32]
+            [(l / sl.max(1)) as i32, (r / sr.max(1)) as i32]
         }
+    }
+}
+
+/// Vaha (L, R) v Q15 pro kanaly v poradi WAV: FL FR FC LFE BL BR SL SR.
+const FL: (i32, i32) = (32_768, 0);
+const FR: (i32, i32) = (0, 32_768);
+const FC: (i32, i32) = (23_170, 23_170);
+const LFE: (i32, i32) = (0, 0);
+const BL: (i32, i32) = (23_170, 0);
+const BR: (i32, i32) = (0, 23_170);
+const BC: (i32, i32) = (16_384, 16_384);
+
+/// Rozlozeni podle poctu kanalu: 3 = FL FR FC, 4 = kvadro, 5 = 5.0,
+/// 6 = 5.1, 7 = 6.1, 8 = 7.1.
+pub const DOWNMIX: [&[(i32, i32)]; 9] = [
+    &[],
+    &[FC],
+    &[FL, FR],
+    &[FL, FR, FC],
+    &[FL, FR, BL, BR],
+    &[FL, FR, FC, BL, BR],
+    &[FL, FR, FC, LFE, BL, BR],
+    &[FL, FR, FC, LFE, BC, BL, BR],
+    &[FL, FR, FC, LFE, BL, BR, BL, BR],
+];
+
+/// Q23 -> jeden vzorek formatu `s` (s orezanim).
+pub fn q23_to_sample(s: Sample, v: i32, out: &mut [u8]) {
+    let v = v.clamp(Q23_MIN, Q23_MAX);
+    match s {
+        Sample::U8 => out[0] = ((v >> 16) + 128) as u8,
+        Sample::S16 => out[..2].copy_from_slice(&((v >> 8) as i16).to_le_bytes()),
+        Sample::S24 => out[..4].copy_from_slice(&v.to_le_bytes()),
+        Sample::S32 => out[..4].copy_from_slice(&(v << 8).to_le_bytes()),
+        Sample::F32 => out[..4].copy_from_slice(&(v as f32 / 8_388_608.0).to_le_bytes()),
+    }
+}
+
+/// Stereo -> snimek formatu `f` (nahravani): mono = prumer, vic kanalu =
+/// L a R do prvnich dvou, ostatni ticho.
+pub fn stereo_to_frame(f: &Format, fr: Frame, out: &mut [u8]) {
+    let sb = f.sample.bytes() as usize;
+    if f.channels == 1 {
+        q23_to_sample(f.sample, ((fr[0] as i64 + fr[1] as i64) / 2) as i32, out);
+        return;
+    }
+    q23_to_sample(f.sample, fr[0], out);
+    q23_to_sample(f.sample, fr[1], &mut out[sb..]);
+    for c in 2..f.channels as usize {
+        q23_to_sample(f.sample, 0, &mut out[c * sb..]);
     }
 }
 

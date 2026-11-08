@@ -75,13 +75,10 @@ fn main(startup: Startup) -> i64 {
                 Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
             sup.watch("devmgr", &devices.devmgr, None);
-            // Zvuk: audiod prevezme ovladace zvukovych karet.
-            match audio::start(&startup, core::mem::take(&mut devices.audios)) {
-                Ok(a) => {
-                    sup.watch("audiod", &a.process, None);
-                    audio::AUDIO.call_once(|| a);
-                }
-                Err(e) => println!("init: zvukovou sluzbu nelze spustit: {e}"),
+            // Zvuk: audiod prevezme ovladace zvukovych karet (restart po
+            // padu ridi supervisor, kanaly k ovladacum drzi init).
+            if let Err(e) = audio::start(&startup, core::mem::take(&mut devices.audios), &mut sup) {
+                println!("init: zvukovou sluzbu nelze spustit: {e}");
             }
             if let Some(i) = &devices.input {
                 sup.watch("inputd", &i.process, None);

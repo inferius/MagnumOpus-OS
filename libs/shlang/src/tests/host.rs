@@ -112,7 +112,12 @@ impl Host for TestHost {
             AudioReq::Volume(None) => Value::Int(70),
             _ => Value::Nothing,
         };
-        self.audio.push(req);
+        // Kousky dat se slouci (testy porovnavaji celkova data).
+        if let (AudioReq::Write { data }, Some(AudioReq::Write { data: prev })) = (&req, self.audio.last_mut()) {
+            prev.extend_from_slice(data);
+        } else {
+            self.audio.push(req);
+        }
         Some(Ok(out))
     }
     fn home(&self) -> String {

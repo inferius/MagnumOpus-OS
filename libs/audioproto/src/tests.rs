@@ -50,6 +50,8 @@ fn requests_roundtrip() {
         Request::Status,
         Request::Connect,
         Request::StreamInfo { stream: 9 },
+        Request::Devices,
+        Request::Select { index: 2 },
     ];
     for r in all {
         assert_eq!(Request::decode(&r.encode()), Ok(r.clone()), "{r:?}");
@@ -92,8 +94,15 @@ fn replies_roundtrip() {
         device_underruns: 1,
         latency_us: 10_666,
         period: 256,
+        input: true,
+        device_index: 1,
     };
     assert_eq!(Status::decode(&s.encode()), Ok(s));
+    let list = vec![
+        crate::client::DeviceEntry { index: 0, name: "HDA a".into(), outputs: "line-out".into(), input: true, active: true },
+        crate::client::DeviceEntry { index: 1, name: "HDA b".into(), outputs: "".into(), input: false, active: false },
+    ];
+    assert_eq!(crate::client::DeviceEntry::decode_list(&crate::client::DeviceEntry::encode_list(&list)), Ok(list));
     let i = StreamInfo { running: true, played: 99, underruns: 0, volume: 100 };
     assert_eq!(StreamInfo::decode(&i.encode()), Ok(i));
     let r = encode_reply(Ok(vec![1, 2, 3]));

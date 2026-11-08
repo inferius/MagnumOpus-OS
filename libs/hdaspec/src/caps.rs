@@ -84,6 +84,8 @@ pub struct PinCaps {
     pub hdmi: bool,
     pub eapd: bool,
     pub dp: bool,
+    /// Pin umi napajeni mikrofonu 80 % (VREF, bity 15:8, bit 2 = 80 %).
+    pub vref80: bool,
 }
 
 impl PinCaps {
@@ -97,6 +99,7 @@ impl PinCaps {
             hdmi: v & 1 << 7 != 0,
             eapd: v & 1 << 16 != 0,
             dp: v & 1 << 24 != 0,
+            vref80: v & 1 << 10 != 0,
         }
     }
 }

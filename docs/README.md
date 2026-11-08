@@ -40,7 +40,7 @@ site menu.
 
 | Česky | English | Obsah / Contents |
 |---|---|---|
-| [Zvuk](cs/zvuk.md) | [Audio](en/audio.md) | ovladač Intel HDA, kodeky a cesty k výstupům, služba audiod, protokol se sdílenými buffery, mix a převod frekvence, latence, příkaz `audio` / Intel HDA driver, codecs and output paths, audiod service, shared-buffer protocol, mixing and rate conversion, latency, the `audio` command |
+| [Zvuk](cs/zvuk.md) | [Audio](en/audio.md) | ovladač Intel HDA, kodeky, cesty k výstupům a vstupu, HDMI, služba audiod, protokol se sdílenými buffery, mix, nahrávání a převod frekvence, latence, obnova po pádu, příkaz `audio` / Intel HDA driver, codecs, output and input paths, HDMI, audiod service, shared-buffer protocol, mixing, recording and rate conversion, latency, crash recovery, the `audio` command |
 
 ### Grafika / Graphics
 

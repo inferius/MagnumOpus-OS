@@ -8,8 +8,10 @@
 //!
 //! `OPEN_OUTPUT` -> [`OpenStream`] (skutecne hodnoty), handly [DMA buffer, stranka stavu,
 //! udalost periody]. `START`/`STOP` stream spusti a zastavi (pri `STOP`
-//! se pozice nenuluje). `OPEN_INPUT` je v protokolu pro nahravani;
-//! ovladac ho zatim muze odmitnout (`NOT_SUPPORTED`).
+//! se pozice nenuluje). Nahravani je stejne: `OPEN_INPUT`,
+//! `START_INPUT`, `STOP_INPUT`, `CLOSE_INPUT`; pozice ve strance stavu
+//! = snimky, ktere zarizeni do bufferu uz zapsalo. Zarizeni bez vstupu
+//! (`Info::input = false`) vraci `NOT_SUPPORTED`.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -26,6 +28,12 @@ pub mod op {
     pub const STOP: u32 = 4;
     pub const CLOSE: u32 = 5;
     pub const OPEN_INPUT: u32 = 6;
+    pub const START_INPUT: u32 = 7;
+    pub const STOP_INPUT: u32 = 8;
+    pub const CLOSE_INPUT: u32 = 9;
+    /// Test obnovy: ovladac skonci, jako by spadl (posila ho jen audiod na
+    /// pokyn initu, viz `audiod` zprava `crash-driver`).
+    pub const TEST_EXIT: u32 = 0x7E57;
 }
 
 /// Druh vystupu (podle vychozi konfigurace pinu).

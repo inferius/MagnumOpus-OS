@@ -7,7 +7,10 @@
 //!   vychozi konfigurace pinu, seznam spojeni),
 //! - [`format`]: format streamu (registr SDnFMT a verb SET_CONVERTER_FORMAT),
 //! - [`graph`]: graf widgetu jedne audio funkcni skupiny a hledani cest
-//!   od pinu k prevodniku (DAC).
+//!   od pinu k prevodniku (DAC),
+//! - [`input`]: cesta pro nahravani (ADC -> mikrofon, linkovy vstup),
+//! - [`hdmi`]: ELD monitoru a audio infoframe pro HDMI/DP,
+//! - [`fixup`]: opravy pro konkretni kodeky a desky.
 //!
 //! Ovladac (`user/hda`) jen posila verby a cte registry; rozhodovani
 //! (kterou cestu, ktery pin, jake zesileni) je zde.
@@ -20,7 +23,10 @@ extern crate alloc;
 mod tests;
 
 pub mod caps;
+pub mod fixup;
 pub mod format;
 pub mod graph;
+pub mod hdmi;
+pub mod input;
 pub mod regs;
 pub mod verb;

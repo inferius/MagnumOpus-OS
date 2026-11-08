@@ -71,6 +71,15 @@ pub const PIN_HP: u8 = 1 << 7;
 pub const EAPD: u8 = 1 << 1;
 /// Stav napajeni D0 (plny provoz).
 pub const POWER_D0: u8 = 0;
+/// Rizeni pinu: napajeni mikrofonu 80 % (bity 2:0).
+pub const PIN_VREF80: u8 = 4;
+/// Nevyzadane odpovedi (SET_UNSOL): zapnout + znacka v bitech 5:0.
+pub const UNSOL_ENABLE: u8 = 1 << 7;
+
+/// Znacka nevyzadane odpovedi (bity 31:26 odpovedi).
+pub const fn unsol_tag(resp: u32) -> u8 {
+    (resp >> 26) as u8
+}
 
 /// Data pro SET_AMP_GAIN_MUTE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

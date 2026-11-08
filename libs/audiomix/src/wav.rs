@@ -38,6 +38,22 @@ fn u32_at(b: &[u8], o: usize) -> Option<u32> {
 }
 
 pub fn parse(b: &[u8]) -> Result<Wav<'_>, WavError> {
+    let h = parse_header(b, b.len() as u64)?;
+    let end = (h.data_offset + h.data_len) as usize;
+    Ok(Wav { format: h.format, data: &b[h.data_offset as usize..end] })
+}
+
+/// Hlavicka souboru: format a kde lezi data (cele snimky).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Header {
+    pub format: Format,
+    pub data_offset: u64,
+    pub data_len: u64,
+}
+
+/// Rozebere hlavicku ze zacatku souboru `b` (staci prvnich par KiB);
+/// `file_len` = skutecna delka souboru (delka dat se na ni omezi).
+pub fn parse_header(b: &[u8], file_len: u64) -> Result<Header, WavError> {
     if b.len() < 12 || &b[0..4] != b"RIFF" || &b[8..12] != b"WAVE" {
         return Err(WavError::NotRiff);
     }
@@ -47,14 +63,14 @@ pub fn parse(b: &[u8]) -> Result<Wav<'_>, WavError> {
         let id = &b[pos..pos + 4];
         let len = u32_at(b, pos + 4).ok_or(WavError::Missing)? as usize;
         let body = pos + 8;
-        let end = body.saturating_add(len).min(b.len());
         if id == b"fmt " {
+            let end = body.saturating_add(len).min(b.len());
             fmt = Some(parse_fmt(&b[body..end])?);
         } else if id == b"data" {
             let f = fmt.ok_or(WavError::Missing)?;
-            let data = &b[body..end];
-            let whole = data.len() / f.frame_bytes() as usize * f.frame_bytes() as usize;
-            return Ok(Wav { format: f, data: &data[..whole] });
+            let avail = file_len.saturating_sub(body as u64).min(len as u64);
+            let fb = f.frame_bytes() as u64;
+            return Ok(Header { format: f, data_offset: body as u64, data_len: avail / fb * fb });
         }
         // Kusy maji sudou delku (vypln).
         pos = body.saturating_add(len).saturating_add(len & 1);

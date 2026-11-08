@@ -314,7 +314,7 @@ impl Supervisor {
                     self.started(i, &mut out)
                 }
                 Item::Leases if sig.intersects(Signals::READABLE) => self.lease_packets(),
-                Item::Terminal(w) => terminals.on_signal(startup, w, sig),
+                Item::Terminal(w) => terminals.on_signal(startup, w, sig, &mut || self.session("audiod", Vec::new()).ok()),
                 Item::Service(_) | Item::Starting(_) | Item::Leases => {}
             }
         }
@@ -348,6 +348,13 @@ impl Supervisor {
                     }
                 }
                 b"block" => println!("init: disk pripojeny za behu zatim nepouzivam"),
+                // Zvukova karta pripojena nebo jeji ovladac restartovany.
+                b"audio" => {
+                    for h in m.handles {
+                        crate::audio::driver_added(libos::Channel::from_handle(h));
+                        out.push(Happened::DeviceAdded);
+                    }
+                }
                 other => println!("init: neznama zprava od devmgr: {:?}", other),
             }
         }

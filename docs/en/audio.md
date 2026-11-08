@@ -7,15 +7,16 @@ Audio is handled by two processes and one protocol library:
   output, and runs DMA. It is the only process with access to the
   controller.
 - **`audiod`**: the audio service. It mixes application streams,
-  converts formats and sample rates, and controls master volume and mute.
+  distributes recorded audio, converts formats and sample rates, and
+  controls master volume, mute and sound card selection.
 - **`libs/audioproto`**: the protocol between applications, the service
   and the driver. Samples do not travel over a channel but through shared
   memory (VMO).
 
 The hardware-free logic lives in libraries tested on the host:
-`libs/hdaspec` (registers, verbs, widget graph, path search) and
-`libs/audiomix` (format conversion, sample rate conversion, mixing,
-tone, WAV).
+`libs/hdaspec` (registers, verbs, widget graph, output and input paths,
+HDMI, board fixups) and `libs/audiomix` (format conversion, sample rate
+conversion with an anti-aliasing filter, mixing, tone, WAV).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Audio path">
@@ -45,12 +46,34 @@ tone, WAV).
    VMware, QEMU) and starts `hda` with a restricted Resource (BARs,
    configuration, 2 interrupts, 1 MiB DMA). It sends init an `audio`
    message with the channel to the driver.
-2. init starts `audiod` and hands it the channels of all drivers. The
-   service asks each for its device (`INFO`) and uses the first one with
-   an analog output; others (e.g. graphics card HDMI audio) are skipped.
-3. init keeps the service's bootstrap channel; further clients are
-   created with `CONNECT` (termd sends it for each shell session, tests
-   for themselves).
+2. init starts `audiod` under the supervisor and hands it the channels
+   of all drivers. The service asks each for its device (`INFO`) and makes
+   the first one with an analog output active; others (e.g. graphics card
+   HDMI audio) are in the list (`DEVICES`) and can be selected (`SELECT`).
+   Recording uses the active card if it has an input, otherwise the first
+   other card with an input (opened separately, its output is not
+   started).
+3. init keeps the service's bootstrap channel (the only way to add a
+   driver at run time). Clients get sessions via `CONNECT`: termd with a
+   lease from the supervisor (`session("audiod")`) and each shell session
+   its own leased session (`narrow`), tests without a lease.
+
+### Recovery after a crash
+
+- **`audiod` crashes:** the supervisor starts it again. init holds the
+  channels to the drivers (`Kept`), so the drivers notice nothing and the
+  new instance gets them right away; it reopens the stream at the
+  driver. Clients with a lease (`svcclient::Conn`) reconnect on their next
+  call; open streams do not survive the restart (calls return
+  `SERVICE_RESTARTED` or `NOT_FOUND`, the program opens a new one).
+- **`hda` crashes:** devmgr restarts it in its own thread (at most 5
+  times a minute) and sends init a new `audio` message. init keeps the
+  channel and hands it to the running service (`device`); the service
+  drops the old driver (it sees a closed channel) and switches to the new
+  one.
+
+Both are covered by the tests "zabij audiod" and "zabij ovladac hda"
+(suite `obnova zvuku`).
 
 ## Protocol (`libs/audioproto`)
 
@@ -59,7 +82,9 @@ tone, WAV).
 A PCM format = sample rate (8-192 kHz), channel count (1-8) and sample
 type: `u8`, `s16`, `s24` (24 bits in a 32-bit word), `s32`, `f32`.
 Channel samples are interleaved. The device plays 48 kHz (or 44.1 kHz
-if the codec lacks 48 kHz), 16-bit stereo; the service converts.
+if the codec lacks 48 kHz), stereo, 16-bit, or 24-bit in a 32-bit word
+when every output codec supports it. It records 48 kHz, stereo, 16-bit.
+The service converts to the client's format.
 
 ### Shared ring buffer
 
@@ -99,14 +124,19 @@ into the buffer and one wait per period, no message per block of data.
 | `MUTE` | mutes the whole output |
 | `STATUS`, `STREAM_INFO` | device and service state, stream state |
 | `CONNECT` | new channel to the service |
+| `DEVICES`, `SELECT` | list of sound cards, switching (streams keep playing on the new one) |
 
 Volume 50 % is about -18 dB, 10 % -60 dB (a cubic curve follows perceived
 loudness better than a linear one).
 
-**Recording** (`Direction::Input`) has the same shape in the protocol
-with roles swapped: the service writes, the client reads, the event means
-"new data". The driver cannot record yet; `OPEN` with direction `Input`
-returns `NOT_SUPPORTED`.
+**Recording** (`Direction::Input`) has the same shape with roles
+swapped: the service writes, the client reads, the event means "new
+data". When the client does not read in time, the service drops the rest
+and counts an overrun. A device without input returns `NOT_SUPPORTED`.
+
+The client `audioproto::conn::AudioClient` is built on `svcclient::Conn`:
+with a lease it survives a service restart, without one it returns
+`SERVICE_UNAVAILABLE`.
 
 ### Driver protocol
 
@@ -115,7 +145,11 @@ periods) and gets three handles: the **DMA buffer** (the service mixes
 directly into it, no extra copy), the **status page** (DMA position in
 frames, interrupt count, errors) and the **period event**. The service
 never sees the BDL, CORB, RIRB or controller registers. `START` and
-`STOP` start and stop DMA; `OPEN_INPUT` is reserved for recording.
+`STOP` start and stop DMA. Recording has `OPEN_INPUT`, `START_INPUT`,
+`STOP_INPUT`, `CLOSE_INPUT`; positions in the status page are the frames
+the device has already written into the buffer. `TEST_EXIT` ends the
+driver as if it crashed (only `audiod` sends it, on init's request in the
+recovery test).
 
 ## The `hda` driver
 
@@ -138,7 +172,8 @@ never sees the BDL, CORB, RIRB or controller registers. `START` and
 
 ### Codecs and paths
 
-The driver reads all widgets of each audio function group:
+The driver reads, from every codec on the link (all addresses that
+announced themselves), all widgets of the audio function group:
 capabilities, connection lists (short and long form, ranges), and for
 pins their capabilities and **default configuration** (how the board
 vendor wired the jack: line out, speaker, headphones, HDMI; association
@@ -169,10 +204,12 @@ and sequence). The decisions live in `hdaspec::graph`:
    DAC, at most 6 nodes): a free DAC first, otherwise a DAC already in
    use. A selector can have only one selection, so a path that would
    change another path's selection is rejected.
-3. All DACs get the same stream: line out, headphones and speaker play at
-   the same time. **Auto-mute:** when jack detection reports headphones,
-   the speakers are switched off (pin without `OUT`). Detection is read
-   every 500 ms (no unsolicited responses yet).
+3. All DACs of all codecs get the same stream: line out, headphones and
+   speaker play at the same time. **Auto-mute:** when jack detection
+   reports headphones, the speakers are switched off (pin without `OUT`).
+   Jacks report changes with **unsolicited responses** (tag per pin, RIRB
+   interrupt); the fallback is reading every 3 s (every 500 ms without
+   MSI).
 4. Path setup: power D0, selector and pin selections, amplifiers at 0 dB
    (the service does volume in software), mixers pass only the path's
    input (others, e.g. a microphone loopback, are muted), pin control
@@ -180,9 +217,36 @@ and sequence). The decisions live in `hdaspec::graph`:
 5. If the default configuration lists no analog output (a badly filled
    BIOS), the driver tries every output-capable pin as a line out.
 
-**HDMI/DP** is only found and reported (`INFO`: output `hdmi`, inactive).
-Reading the ELD (what the monitor supports), infoframes and digital
-converter setup are missing; that is the next step.
+**HDMI/DP** (`hdaspec::hdmi`): the driver prepares the digital path
+(power, pin `OUT`, digital converter, 2 channels, slots) and reads the
+monitor connection. When a monitor is connected and the ELD is valid
+(verb `GET_HDMI_ELDD` byte by byte: monitor name, HDMI or DP, how many
+LPCM channels it accepts), it writes the audio infoframe (HDMI type 0x84
+with checksum, DP secondary packet) and the converter gets the same
+stream as the analog outputs. Unplugging the monitor disconnects the
+converter. Multichannel audio, channel mapping and DP MST are not there
+yet.
+
+### Recording
+
+`hdaspec::input` finds the path from an A/D converter (ADC) upstream to an
+input pin in this order: microphone jack, built-in microphone, line in,
+aux. It sets selections, input amplifiers at 0 dB (for a mixer only the
+path's input), the pin as input and, for a microphone, 80 % bias when the
+pin supports it. The input stream is the first input descriptor (stream
+tag 2).
+
+### Board fixups
+
+Some boards have a wrong default pin configuration, or need GPIO (laptop
+speaker amplifier) or codec coefficients. `hdaspec::fixup` has a table
+keyed by codec ID and subsystem ID (the board vendor, verb
+`GET_SUBSYSTEM_ID`): pin configuration overrides before path planning,
+GPIO and coefficients after setup. The data are hardware facts (they may
+be taken from public fixup tables, not their code). **The table is empty
+for now**: an entry is added once verified on a real machine. A generic
+fixup without the table: Realtek codecs get EAPD enabled on every pin
+that has it.
 
 ### Stream and DMA
 
@@ -217,17 +281,28 @@ and one spare that the device is reading. The service wakes 187 times a
 second; mixing one period for two streams takes tens of microseconds.
 When no stream has played for 2 s the service stops DMA (the device does
 not play silence forever) and on the next `START` zeroes the buffer and
-starts again.
+starts again. Input stops as soon as no recording stream runs.
+
+Recording: after each input period the service reads the new data from
+the DMA buffer, converts it to stereo Q23 and, through each recording
+stream's rate converter, writes it into that stream's buffer in its
+format (with the stream volume).
 
 ### Format and rate conversion
 
 Each stream's samples are converted to internal stereo Q23 (24 bits in
-i32): mono to both channels, more channels = average of even ones to the
-left and odd ones to the right. Sample rate conversion is **cubic
-Catmull-Rom interpolation** with a Q32 phase (exactly the input at equal
-rates). Mixing sums in i64 with the stream gain, then master volume and
-clipping to 16 bits (only the sum is clipped, so two loud streams in
-opposite phase do not distort). Everything is integer: programs on
+i32): mono to both channels, more channels are **downmixed** by the
+WAV/HDA layout (3 to 8 channels: front at full level, centre and
+rear/side at -3 dB, LFE dropped, weights normalised so nothing clips).
+Sample rate conversion is **cubic Catmull-Rom interpolation** with a Q32
+phase (exactly the input at equal rates). When **downsampling**, input
+first goes through a FIR low-pass (47 taps, Hann-windowed sinc, cutoff
+0.45 × the new rate): content above the new Nyquist frequency is
+suppressed by at least 40 dB. At the end of `DRAIN` the converter's
+history is flushed with silence, so the last samples play too. Mixing
+sums in i64 with the stream gain, then master volume and clipping to 16
+or 24 bits (only the sum is clipped). Everything is integer (filter
+coefficients are computed once when the stream opens): programs on
 aarch64 run without an FPU.
 
 ## Shell command `audio`
@@ -238,32 +313,48 @@ audio play /music/sample.wav
 audio volume 60
 audio mute
 audio status
+audio devices
+audio device 1
 ```
 
 `audio volume` without a number returns the volume, `audio unmute`
-unmutes. `tone` and `play` return a record with the played duration and
-the underrun count. The WAV file is read by the interpreter through the
-session FS (same rights as `open`): PCM 8/16/32-bit, 24-bit in a 32-bit
-word and float 32, any rate and channel count. The command waits until
-the sound has played.
+unmutes, `audio devices` lists sound cards and `audio device N`
+switches. `tone` and `play` return a record with the played duration and
+the underrun count. Audio goes to the session in 100 ms chunks: the
+interpreter reads the WAV file in parts through the session FS (same
+rights as `open`, any size) and checks **Ctrl-C** between chunks (then it
+stops the stream and returns `SH_INTERRUPTED`). WAV formats: PCM
+8/16/32-bit, 24-bit in a 32-bit word and float 32, any rate and channel
+count.
 
 ## Tests
 
 - **On the host** (`cargo xtask test`): `audioproto` (messages, the
-  buffer including hostile positions), `audiomix` (conversions, Goertzel
-  on a tone after 44.1 -> 48 kHz conversion, mixing, WAV), `hdaspec`
+  buffer including hostile positions), `audiomix` (conversions both ways,
+  downmix, Goertzel on a tone after 44.1 -> 48 kHz conversion, alias
+  suppression 96 -> 48 kHz, 16- and 24-bit mixing, WAV), `hdaspec`
   (verbs, formats, connection lists, QEMU hda-duplex, Realtek ALC,
-  selector, HDMI and cycle graphs), the `audio` command in `shlang`,
-  tone detection in xtask.
+  selector, HDMI and cycle graphs, input path, ELD and infoframe, fixup
+  table), the `audio` command in `shlang` (chunks, partial reads,
+  Ctrl-C), tone detection in xtask.
 - **In QEMU**, suite `zvuk`: device and output, the stream runs and DMA
-  advances the position (at least by the played data), interrupts
-  arrive, two clients mixed (48 and 22.05 kHz), volume and mute, invalid
-  requests, `audio tone`/`volume`/`status` through termd and a session.
-- **Recorded sound:** QEMU has `-device intel-hda -device hda-duplex`
-  with `-audiodev wav` (48 kHz, s16, stereo). The test `ton 1 kHz do WAV`
-  plays 1.5 s of a 1 kHz tone (mono 44.1 kHz, i.e. through rate
-  conversion); after QEMU exits, xtask looks for 50 ms windows with a
-  clean 1 kHz tone in the file and requires at least 500 ms.
+  advances the position, interrupts arrive, two clients mixed (48 and
+  22.05 kHz), volume and mute, invalid requests, `audio
+  tone`/`volume`/`status` through termd and a session, recording (16 kHz
+  mono through downsampling) from the second card, a list of two cards
+  and switching the output. Suite `obnova zvuku`: "zabij audiod" (the new instance has
+  the device at once, a leased client reconnects by itself) and "zabij
+  ovladac hda" (devmgr restarts it, the service switches to it).
+- **Recorded sound:** QEMU has two `intel-hda` controllers: the first
+  with the `hda-output` codec into `-audiodev wav` (48 kHz, s16, stereo),
+  the second with `hda-duplex` and the `none` backend (which also
+  provides input for the recording test; the wav backend cannot record).
+  QEMU does not model two codecs on one link correctly (each codec takes
+  its own data from DMA, while real hardware broadcasts the stream), hence
+  two controllers. The test `ton 1 kHz do WAV` plays 1.5 s of a 1 kHz
+  tone (mono 44.1 kHz, i.e. through rate conversion); after QEMU exits,
+  xtask looks for 50 ms windows with a clean 1 kHz tone in the file and
+  requires at least 500 ms.
 
 With sound interactively: `cargo xtask run --audio dsound` (Windows),
 `--audio pa` or `alsa` (Linux), `coreaudio` (macOS).
@@ -275,17 +366,20 @@ With sound interactively: `cargo xtask run --audio dsound` (Windows),
   paths as real boards.
 - **Intel and AMD boards** with an analog codec (Realtek, Conexant, VIA)
   should play, but **this has not been verified on real hardware yet.**
-  Some codecs need vendor-specific fixups (Realtek coefficients, GPIO
-  for the amplifier on laptops) that Linux keeps in fixup tables; they
-  are not here. The result can be silent laptop speakers while line out
-  plays.
+  The board fixup table is empty: a laptop that needs GPIO or
+  coefficients for its amplifier may have silent speakers while line out
+  plays. An entry is added once verified on that machine.
 - **Intel laptops with a DSP (SOF, digital microphones)** route audio
   through the DSP and may not show it in HDA mode at all. Unsupported.
-- **HDMI/DP**: only prepared (see above).
-- Rate conversion when **downsampling** (e.g. 96 -> 48 kHz) does not
-  filter the band above the new Nyquist frequency: content above 24 kHz
-  can fold back (aliasing). Common sources (44.1 and 48 kHz) are not
-  affected.
-- Without unsolicited responses, switching to headphones takes up to
-  500 ms.
-- `audio play` and `audio tone` cannot be interrupted with Ctrl-C yet.
+- **HDMI/DP** is written to the specification, but QEMU has no HDMI
+  codec, so tests do not exercise it: verify on a real graphics card.
+  Stereo only; DP MST (several monitors on one connector) is missing.
+- **24-bit** is used only when every output codec reports it; QEMU
+  supports only 16 bits, so the 24-bit path is verified only by host
+  tests.
+- Recording uses a single input (the active card if it has one,
+  otherwise the first other card with input; on the card the first input
+  by priority); manual input selection is not there yet.
+- Several output codecs on one controller play the same stream; this
+  cannot be verified in QEMU (see Tests), only the enumeration of both
+  codecs.

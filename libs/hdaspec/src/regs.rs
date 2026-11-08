@@ -42,6 +42,7 @@ pub const RINTCNT: u64 = 0x5A;
 /// Rizeni RIRB (u8): bit 0 RINTCTL, bit 1 DMAEN, bit 2 ORUN preruseni.
 pub const RIRBCTL: u64 = 0x5C;
 pub const RIRBCTL_DMAEN: u8 = 1 << 1;
+pub const RIRBCTL_RINTCTL: u8 = 1 << 0;
 pub const RIRBSTS: u64 = 0x5D;
 pub const RIRBSIZE: u64 = 0x5E;
 

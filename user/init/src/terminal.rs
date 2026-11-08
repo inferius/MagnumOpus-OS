@@ -101,9 +101,11 @@ impl Terminals {
     }
 
     /// Zpracuje, co prislo (`sig` = pozorovane signaly polozky `w`).
-    pub fn on_signal(&mut self, startup: &Startup, w: Wait, sig: Signals) {
+    /// `audio` = relace zvukove sluzby s listkem pro noveho termd (kanal,
+    /// listek), vola se jen pri jeho startu.
+    pub fn on_signal(&mut self, startup: &Startup, w: Wait, sig: Signals, audio: &mut dyn FnMut() -> Option<(Channel, Channel)>) {
         match w {
-            Wait::Conn(i) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => self.conn_messages(startup, i),
+            Wait::Conn(i) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => self.conn_messages(startup, i, audio),
             Wait::Reg(i) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => self.registry(i),
             Wait::Termd(i) if sig.intersects(Signals::TERMINATED) => {
                 let c = &mut self.clients[i];
@@ -123,7 +125,7 @@ impl Terminals {
         self.clients.retain(|c| !c.closed);
     }
 
-    fn conn_messages(&mut self, startup: &Startup, i: usize) {
+    fn conn_messages(&mut self, startup: &Startup, i: usize, audio: &mut dyn FnMut() -> Option<(Channel, Channel)>) {
         // Vsechny cekajici zpravy najednou: vic `connect` za sebou (okno to
         // zkusilo znovu, nez init odpovedel) = jen posledni spusti termd,
         // drivejsi dostanou `err CANCELED` (jinak by kazdy dalsi ukoncil
@@ -156,7 +158,7 @@ impl Terminals {
         if connects == 0 {
             return;
         }
-        let reply = match self.spawn_termd(startup, i) {
+        let reply = match self.spawn_termd(startup, i, audio) {
             Ok(win) => self.clients[i].conn.write(b"ok", alloc::vec![win.into_handle()]),
             Err(e) => {
                 println!("init: termd ({}) nelze spustit: {e}", self.clients[i].name);
@@ -190,7 +192,7 @@ impl Terminals {
     }
 
     /// Spusti termd klienta `i`; vrati kanal okna k nemu.
-    fn spawn_termd(&mut self, startup: &Startup, i: usize) -> Result<Channel> {
+    fn spawn_termd(&mut self, startup: &Startup, i: usize, audio: &mut dyn FnMut() -> Option<(Channel, Channel)>) -> Result<Channel> {
         let c = &mut self.clients[i];
         let now = time::now();
         let window = RESTART_WINDOW.as_nanos() as u64;
@@ -230,9 +232,11 @@ impl Terminals {
             StartHandle::user(there.into_handle()),
             StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None)?),
         ];
-        // Zvuk pro relace (prikaz `audio`); bez sluzby terminal bezi dal.
-        if let Ok(a) = crate::audio::connect() {
-            handles.push(StartHandle::user(a.into_handle()));
+        // Zvuk pro relace (prikaz `audio`): relace s listkem, prezije
+        // restart audiod. Bez sluzby terminal bezi dal.
+        if let Some((ch, lease)) = audio() {
+            handles.push(StartHandle::user(ch.into_handle()));
+            handles.push(StartHandle::user(lease.into_handle()));
         }
         let (proc, win) = libos::spawn("termd", image, handles)?;
         c.starts.push(now);
@@ -247,7 +251,7 @@ impl Terminals {
     pub fn poll(&mut self, startup: &Startup) {
         for i in 0..self.clients.len() {
             if !self.clients[i].closed {
-                self.conn_messages(startup, i);
+                self.conn_messages(startup, i, &mut || None);
                 self.registry(i);
             }
         }

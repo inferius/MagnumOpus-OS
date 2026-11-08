@@ -128,13 +128,16 @@ struct SysEnv {
     spawner: Option<FsClient>,
     tag: String,
     notify: Option<Arc<EventNotify>>,
-    /// Zvukova sluzba (`None` = relace ji nedostala).
+    /// Zvukova sluzba (`None` = relace ji nedostala) a prave prehravany
+    /// stream prikazu `audio`.
     audio: Option<audioproto::conn::AudioClient>,
+    playing: Option<audioproto::conn::Stream>,
 }
 
 impl Env for SysEnv {
     fn audio(&mut self, req: shlang::host::AudioReq) -> Option<Result<shlang::value::Value, shlang::ShError>> {
-        Some(audio::handle(self.audio.as_ref()?, req))
+        let client = self.audio.as_ref()?;
+        Some(audio::handle(client, &mut self.playing, req))
     }
 
     fn now(&mut self) -> Option<i64> {
@@ -193,14 +196,17 @@ fn main(startup: Startup) -> i64 {
     let mut hs = first.handles.into_iter();
     let mut spare = hs.next().map(Channel::from_handle);
     let mut fsd = hs.next().map(|h| fs::FsdFs::new(FsClient::new(Channel::from_handle(h)), tag.clone()));
-    let audio = hs.next().map(|h| audioproto::conn::AudioClient::new(Channel::from_handle(h)));
+    let audio = hs.next().map(Channel::from_handle).map(|ch| match hs.next() {
+        Some(lease) => audioproto::conn::AudioClient::with_lease(ch, Channel::from_handle(lease)),
+        None => audioproto::conn::AudioClient::new(ch),
+    });
     let mut nofs = fs::NoFs;
     let mut svc = Service::single(&home, session);
     svc.stack_budget = STACK_BUDGET;
     svc.task_stack = TASK_STACK_BUDGET;
     let notify = Event::create().ok().map(|e| Arc::new(EventNotify(e)));
     let spawner = fsd.as_ref().and_then(|f| f.client.connect().ok());
-    let mut env = SysEnv { spawner, tag: tag.clone(), notify: notify.clone(), audio };
+    let mut env = SysEnv { spawner, tag: tag.clone(), notify: notify.clone(), audio, playing: None };
     println!("shsess {session}: bezim ({tag})");
 
     loop {
