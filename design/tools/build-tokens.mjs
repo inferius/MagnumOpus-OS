@@ -122,13 +122,14 @@ for (const [name, ty] of Object.entries(t.type)) {
   lines.push(`  --t-${kebab(name)}-weight: ${ty.weight};`);
 }
 for (const [k, v] of Object.entries(t.space)) lines.push(`  --${k}: ${v}px;`);
-for (const [k, v] of Object.entries(t.size)) lines.push(`  --size-${kebab(k)}: ${v}${k === 'icon_stroke' ? '' : 'px'};`);
+for (const [k, v] of Object.entries(t.size)) lines.push(`  --size-${kebab(k)}: ${v}${k.endsWith('_stroke') ? '' : 'px'};`);
 for (const [k, v] of Object.entries(t.radius)) lines.push(`  --r-${kebab(k)}: ${v}px;`);
 for (const [k, v] of Object.entries(t.motion)) {
   if (k.startsWith('ease_')) lines.push(`  --${kebab(k)}: cubic-bezier(${v.split(/\s+/).join(', ')});`);
   else lines.push(`  --m-${kebab(k)}: ${v}ms;`);
 }
 for (const [k, v] of Object.entries(t.layer)) lines.push(`  --z-${kebab(k)}: ${v};`);
+for (const [k, v] of Object.entries(t.opacity || {})) lines.push(`  --o-${kebab(k)}: ${v};`);
 lines.push(colorBlock('light'));
 lines.push(shadowBlock('light'));
 lines.push('  color-scheme: light;');

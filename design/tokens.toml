@@ -117,6 +117,23 @@ focus_ring = 2
 focus_offset = 2
 resize_edge = 6
 scrollbar = 8
+# Ikony uvnitr odznaku duvery, tlacitek okna a stitku (mensi nez icon_s).
+icon_xs = 14
+# Tah ikon v tlacitkach okna (minimalizovat, maximalizovat, zavrit).
+title_btn_stroke = 2
+# Cervena tecka "zarizeni bezi" v odznaku.
+live_dot = 6
+# Systemovy dialog a oznameni: sirka (na uzsi obrazovce o 24 px mene nez displej).
+dialog_w = 440
+notification_w = 340
+# Znacka bezici aplikace v liste: sirka x vyska, aktivni sirka.
+bar_indicator_w = 14
+bar_indicator_h = 3
+bar_indicator_active_w = 20
+# Prepinac (switch): sirka x vyska, prumer jezdce.
+switch_w = 44
+switch_h = 26
+switch_knob = 18
 
 [radius]
 xs = 6
@@ -353,6 +370,16 @@ unresponsive_ms = 3000
 badge_flash_ms = 3000
 # Systemovy dialog ignoruje vstup tak dlouho po zobrazeni (viz gui.md).
 dialog_guard_ms = 300
+
+# Kryti (0-1). Pruhlednost jen tam, kde nesnizi kontrast textu pod limit;
+# ve vysokem kontrastu je lista vzdy plna (1).
+[opacity]
+# Pozadi listy pres plochu (plocha surface s timto krytim; na GPU navic rozmazani).
+bar = 0.9
+# Obsah nereagujiciho okna (plus odstiny sedi).
+hung_content = 0.45
+# Nedostupny prvek (tlacitko, pole).
+disabled = 0.5
 
 # Vrstvy kompozitoru (poradi skladani). Do "system_dialog" a "secure" smi
 # kreslit jen kompozitor.
