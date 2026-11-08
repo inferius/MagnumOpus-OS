@@ -111,6 +111,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
             b"net" => nets.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"rng" => rngs.extend(msg.handles.into_iter().map(Channel::from_handle)),
             b"display" => displays.extend(msg.handles.into_iter().map(Channel::from_handle)),
+            d if d.starts_with(b"display-native ") => crate::display_native::add(d, msg.handles),
             other => println!("init: neznama zprava od devmgr: {:?}", other),
         }
     }

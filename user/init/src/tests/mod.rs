@@ -6,6 +6,7 @@
 mod basic;
 mod dns;
 mod clock_sync;
+mod display;
 mod drivers;
 mod events;
 mod firewall;
@@ -60,6 +61,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("supervisor", supervisor::TESTS),
     ("obnova sluzeb", recovery::TESTS),
     ("shell", shell::TESTS),
+    // Nastaveni obrazu (bochs-display, vlastni compd) pred GUI.
+    ("displej", display::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
     // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery

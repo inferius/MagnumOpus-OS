@@ -37,10 +37,14 @@ pub struct Start {
     pub snapshot: Mapping,
     _snapshot_vmo: Vmo,
     pub config: Config,
+    /// Handle vlastniho procesu: libos ho potrebuje k mapovani pameti,
+    /// proto musi zit po celou dobu behu.
+    _process: libos::Process,
 }
 
 impl Start {
     pub fn take(startup: Startup, name: &str) -> Option<Self> {
+        let process = startup.process;
         let mut h = startup.handles.into_iter();
         let (Some(res), Some(cfg), Some(client), Some(snap)) = (h.next(), h.next(), h.next(), h.next()) else {
             println!("{name}: chybi handly ve startovni zprave");
@@ -66,6 +70,7 @@ impl Start {
             snapshot,
             _snapshot_vmo: snapshot_vmo,
             config,
+            _process: process,
         })
     }
 

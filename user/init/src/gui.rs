@@ -192,11 +192,16 @@ pub struct Gui {
 
 /// Displej pro kompozitor - jedine misto, kde init rozhoduje, kdo
 /// kresli na obrazovku: kanal virtio-gpu od spravce zarizeni (ma
-/// prednost), jinak ovladac `fbdisplay` nad framebufferem z firmwaru
+/// prednost), pak nativni ovladac (`crate::display_native`), jinak
+/// ovladac `fbdisplay` nad framebufferem z firmwaru
 /// (bootstrap `FRAMEBUFFER`, init preda duplikat handlu, takze
 /// `Startup::framebuffer` zustava pro zachrannou konzoli).
 pub fn display(startup: &Startup) -> Result<Channel> {
     if let Some(ch) = DISPLAY.lock().take() {
+        return Ok(ch);
+    }
+    // Nativni ovladac (nastaveni obrazu), kdyz odpovi a vidi monitor.
+    if let Some(ch) = crate::display_native::choose() {
         return Ok(ch);
     }
     let fb = startup.framebuffer.as_ref().ok_or(Error::NotFound)?;

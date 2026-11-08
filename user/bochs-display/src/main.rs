@@ -83,20 +83,24 @@ fn main(startup: libos::Startup) -> i64 {
 }
 
 fn open(st: &Start, a: Address) -> libos::Result<Bochs> {
-    let ecam = Ecam::single(&st.config_vmo, a)?;
+    let step = |what: &'static str| move |e: libos::Error| {
+        println!("{NAME} {a}: {what}: {e}");
+        e
+    };
+    let ecam = Ecam::single(&st.config_vmo, a).map_err(step("konfigurace PCI"))?;
     ecam.enable(a);
     let bar = |i: u8| -> libos::Result<(u64, u64)> {
         let b = ecam.memory_bar(a, i).ok_or(libos::Error::NotSupported)?;
         let s = ecam.memory_bar_size(a, i).ok_or(libos::Error::NotSupported)?;
         Ok((b.phys, s))
     };
-    let (vram_phys, vram_size) = bar(0)?;
-    let (mmio_phys, mmio_size) = bar(2)?;
+    let (vram_phys, vram_size) = bar(0).map_err(step("BAR0"))?;
+    let (mmio_phys, mmio_size) = bar(2).map_err(step("BAR2"))?;
     let page = libos::vm::page_size();
-    let vram_vmo = st.resource.device_memory(vram_phys, vram_size)?;
-    let vram = Mapping::new(&vram_vmo, 0, vram_size, MAP_READ | MAP_WRITE)?;
+    let vram_vmo = st.resource.device_memory(vram_phys, vram_size).map_err(step("VRAM"))?;
+    let vram = Mapping::new(&vram_vmo, 0, vram_size, MAP_READ | MAP_WRITE).map_err(step("mapovani VRAM"))?;
     let mmio_len = mmio_size.max(page).next_multiple_of(page);
-    let regs_vmo = st.resource.device_memory(mmio_phys, mmio_len)?;
-    let regs = Mapping::new(&regs_vmo, 0, mmio_len, MAP_READ | MAP_WRITE)?;
+    let regs_vmo = st.resource.device_memory(mmio_phys, mmio_len).map_err(step("MMIO"))?;
+    let regs = Mapping::new(&regs_vmo, 0, mmio_len, MAP_READ | MAP_WRITE).map_err(step("mapovani MMIO"))?;
     Bochs::new(regs, vram, vram_size, st.config.restore).map_err(|_| libos::Error::NotSupported)
 }

@@ -16,6 +16,7 @@ extern crate alloc;
 
 mod apps;
 mod certs;
+mod display_native;
 mod dns;
 mod fsd;
 mod gui;
@@ -140,6 +141,8 @@ fn main(startup: Startup) -> i64 {
         if let Some(p) = gui::FBDISPLAY.lock().as_ref() {
             sup.watch("fbdisplay", p, None);
         }
+        // Nativni ovladac displeje: po padu obnova obrazu firmwaru.
+        display_native::supervise(&mut sup);
         // Bezny beh: init je supervisor a nekonci.
         sup.run(&startup);
     }

@@ -8,7 +8,8 @@
 //! zpravu s koncem kanalu ke klientovi ovladace: `block` (disk, protokol
 //! `blockproto`), `input` (klavesnice, mys, protokol `inputproto::device`),
 //! `net` (sitova karta, `netproto::link`), `rng` (zdroj nahody) nebo
-//! `display` (grafika, `guiproto::display`), a `done`, az jsou nalezena zarizeni pri startu
+//! `display` (grafika, `guiproto::display`), `display-native` (nativni
+//! ovladac displeje, viz `native.rs`), a `done`, az jsou nalezena zarizeni pri startu
 //! (vcetne USB). Pozdeji pripojena zarizeni USB hlasi dalsimi `input`.
 //!
 //! Startovni zprava: ROOT_RESOURCE, PCI_ECAM (jedno nebo vic oken), INITFS.
@@ -27,6 +28,7 @@ use libos::spawn::StartHandle;
 use libos::{Channel, Process, Signals, Startup, println};
 use pci::{Ecam, Function};
 
+mod native;
 mod usb;
 
 libos::entry!(main);
@@ -145,6 +147,10 @@ fn main(startup: Startup) -> i64 {
                 }
             }
         }
+        // Nativni ovladace displeje (nastaveni obrazu nad framebufferem firmwaru).
+        for f in &functions {
+            native::start(&fs, resource, vmo, &ecam, (*arg >> 16) as u16, f, &startup.bootstrap, &mut drivers);
+        }
         for f in functions
             .iter()
             .filter(|f| (f.class, f.subclass, f.prog_if) == usb::XHCI_CLASS)
@@ -261,7 +267,7 @@ const XHCI_DMA_MAX: u64 = 4 * 1024 * 1024;
 
 /// Prostredky jednoho zarizeni: jeho pametove BARy (zaokrouhlene na
 /// stranky) a stranka jeho konfiguracniho prostoru.
-fn device_ranges(
+pub(crate) fn device_ranges(
     ecam: &Ecam,
     ecam_vmo: &libos::Vmo,
     resource: &libos::hw::Resource,
