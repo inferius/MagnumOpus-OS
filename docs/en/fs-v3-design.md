@@ -472,10 +472,25 @@ so explicitly. On an SSD the blocks physically disappear only after TRIM.
 | `VAULT_EXPORT_KEYRING` | unlocked + *Manage* | the keyring as a file (a backup against a damaged keyring; useless without a protector) |
 | `VAULT_DESTROY` | *Manage* + *Delete* | instant secure deletion |
 
-The user's home (accountd): `ENCRYPT_HOME` -> accountd creates the home key
-and its wraps -> init `VAULT_CREATE` with a service-kind protector;
-`UNLOCK_HOME { uid, key }` -> init `VAULT_UNLOCK`; sign-out -> `VAULT_LOCK`.
-Init zeroes the home key after passing it on.
+The user's home (accountd, agreed with the accounts thread):
+
+- the home key = 32 B from a CSPRNG (not derived from the password); the
+  service protector's KEK = HKDF(home key, `"mo-vault-service-v1"` ||
+  dataset id) - bound to the specific vault. accountd keeps the home key
+  wraps for the sign-in methods and the home's recovery key,
+- `ENCRYPT_HOME` (only a new or empty home, otherwise `NOT_SUPPORTED` until
+  conversion exists) or `CREATE_HOME` with a key -> init `VAULT_CREATE`
+  with a service-kind protector,
+- `UNLOCK_HOME { uid, key }` -> init `VAULT_UNLOCK`; init zeroes the key
+  after passing it on,
+- locking the screen does **not** lock the vault (processes keep running);
+  `VAULT_LOCK` only when the user's last session signs out (the strict
+  profile's "lock on sleep" goes the same way + a new authentication),
+- fsd crash: accountd keeps the home key (`Zeroizing`) while the user has
+  at least one session; init sends it the event `FS_RESTARTED`
+  (accountproto op 61) and accountd sends `UNLOCK_HOME` again. If accountd
+  crashed first (keys lost), the home stays locked and the screen asks for
+  a new authentication (without signing out).
 
 ### ⚠️ Risk of data loss
 

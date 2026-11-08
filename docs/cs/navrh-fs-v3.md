@@ -447,10 +447,25 @@ po TRIM.
 | `VAULT_EXPORT_KEYRING` | odemčený + *Spravovat* | záznam klíčů jako soubor (záloha proti poškození záznamu; bez ochránce je k ničemu) |
 | `VAULT_DESTROY` | *Spravovat* + *Smazat* | okamžité bezpečné smazání |
 
-Domov uživatele (accountd): `ENCRYPT_HOME` -> accountd vytvoří klíč domova
-a své obaly -> init `VAULT_CREATE` s ochráncem druhu služba;
-`UNLOCK_HOME { uid, key }` -> init `VAULT_UNLOCK`; odhlášení -> `VAULT_LOCK`.
-Klíč domova se v initu po předání vynuluje.
+Domov uživatele (accountd, odsouhlaseno s vláknem účtů):
+
+- klíč domova = 32 B z CSPRNG (ne odvozený z hesla); KEK ochránce služby
+  = HKDF(klíč domova, `"mo-vault-service-v1"` || id datasetu) - vázaný na
+  konkrétní trezor. Obaly klíče domova pro metody přihlášení a obnovovací
+  klíč domova drží accountd,
+- `ENCRYPT_HOME` (jen nový nebo prázdný domov, jinak `NOT_SUPPORTED` do
+  převodu) nebo `CREATE_HOME` s klíčem -> init `VAULT_CREATE` s ochráncem
+  druhu služba,
+- `UNLOCK_HOME { uid, key }` -> init `VAULT_UNLOCK`; init klíč po předání
+  vynuluje,
+- zamčení obrazovky trezor **nezamyká** (procesy běží dál); `VAULT_LOCK`
+  až při odhlášení poslední relace uživatele (přísný profil „zamykat při
+  uspání“ stejnou cestou + nové ověření),
+- pád fsd: accountd drží klíč domova (`Zeroizing`), dokud má uživatel
+  aspoň jednu relaci; init mu pošle událost `FS_RESTARTED` (accountproto
+  op 61) a accountd pošle `UNLOCK_HOME` znovu. Spadne-li dřív accountd
+  (klíče ztracené), domov zůstane zamčený a obrazovka si vyžádá nové
+  ověření (bez odhlášení).
 
 ### ⚠️ Riziko ztráty dat
 
