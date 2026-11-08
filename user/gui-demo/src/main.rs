@@ -55,7 +55,14 @@ impl App for Demo {
     type Msg = Msg;
 
     fn title(&self) -> String {
-        format!("Ukázka ({} poznámek)", self.notes.len())
+        // Ceske tvary: 1 poznamka, 2-4 poznamky, 0 a 5+ poznamek.
+        let n = self.notes.len();
+        let word = match n {
+            1 => "poznámka",
+            2..=4 => "poznámky",
+            _ => "poznámek",
+        };
+        format!("Ukázka ({n} {word})")
     }
 
     fn view(&self) -> Node<Msg> {

@@ -195,11 +195,9 @@ Typografická škála (velikost / řádek v px, váha):
 
 ⚠️ **Rizika písma (řečená předem):**
 
-- `libs/font` čte kerning jen z tabulky `kern` (formát 0). Inter
-  a JetBrains Mono mají kerning v `GPOS`; bez podpory `GPOS` bude text
-  bez kerningu (u Interu je to vidět u dvojic jako „Te“, „Vo“). Řešení:
-  doplnit čtení `GPOS` párového kerningu (typ 2), nebo při sestavení
-  převést kerning do tabulky `kern`.
+- ~~`libs/font` čte kerning jen z tabulky `kern`~~ vyřešeno ve v1.6:
+  `libs/font` čte párový kerning z `GPOS` („Te“ −160, „Vo“ −104 jednotek
+  u Interu).
 - Inter je hlavně proměnné písmo; přibalit se mají **statické řezy**
   (400, 500, 600, 700) ve formátu TTF s obrysy `glyf`, které rasterizér
   umí. Velikost: ~300 kB na řez, celkem ~1,5 MB s JetBrains Mono.
@@ -872,6 +870,11 @@ stejný strom vrstev, jen bez rozmazání (lišta má pak plné pozadí
 
 ### Fáze 1: základ (souběžně)
 
+> **Změna proti v1.5:** fáze 1 je v systému hotová v 2D cestě a ve
+> skládání na GPU se stejnými pixely (bez rozmazání). Stíny jsou
+> předpočítané masky, atlas glyfů je zatím mezipaměť na CPU. Popis
+> a odchylky: [GUI: Vzhled podle návrhu](gui.md#vzhled-podle-návrhu-fáze-1).
+
 | Vlákno | Obsah | Kde | Hotovo, když |
 |---|---|---|---|
 | **G1 vykreslování na GPU** | zaoblené obdélníky a rámečky jako shader (vzdálenostní pole, vyhlazené hrany v jednom průchodu); stíny jako rozmazaný tvar (dvouprůchodový Gauss nebo dual Kawase) s mezipamětí podle velikosti; **rozmazání pozadí** pro lištu, nabídky a ztlumení (jen pod oblastí, v poloviční velikosti); přechody; průhlednost skupin přes mezibuffer; **časová osa animací** v `compd` (křivky a délky z tokenů, přerušitelné, vynechání snímku místo zpoždění vstupu); načtení tokenů a přepínání motivu | `compd`, `libs/comp`, backend virgl | snímek s 10 okny, stíny a rozmazanou lištou do 4 ms GPU času v QEMU; animace otevření okna bez vynechaného snímku; záložní 2D cesta vykreslí totéž bez rozmazání |
@@ -950,3 +953,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1.3 | 7. 11. 2026 | logo (vektory od uživatele) v prototypech a v design systému; startovací obrazovka s přechodem do avataru |
 | v1.4 | 7. 11. 2026 | obrazovka kritického pádu (A Klid + technická zpráva na D), oznámení po dalším startu; příručka grafického jazyka |
 | v1.5 | 8. 11. 2026 | instalace: živé USB, instalátor s náhledem změn disku, první spuštění |
+| v1.6 | 8. 11. 2026 | **implementace fáze 1** v systému: tokeny jako data (`libs/theme`), Inter a JetBrains Mono s kerningem `GPOS`, okna, odznak, lišta, plocha, dialog a terminál podle prototypů; odchylky v [GUI: Vzhled podle návrhu](gui.md#vzhled-podle-návrhu-fáze-1) |

@@ -6,3 +6,16 @@ license.workspace = true
 description = "Cteni pisem TrueType a rasterizer s plosnym vyhlazenim (bez hintingu)"
 
 [dependencies]
+
+[features]
+# Rezy pisem vlozene do programu (kazdy program si zapne jen ty, ktere kresli;
+# jeden rez ~0,4 MB, viz fonts/README.md).
+inter-300 = []
+inter-400 = []
+inter-500 = []
+inter-600 = []
+inter-700 = []
+inter = ["inter-300", "inter-400", "inter-500", "inter-600", "inter-700"]
+mono-400 = []
+mono-600 = []
+mono = ["mono-400", "mono-600"]

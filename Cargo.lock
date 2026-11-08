@@ -511,9 +511,11 @@ dependencies = [
 name = "comp"
 version = "0.1.0"
 dependencies = [
+ "font",
  "gfx",
  "guiproto",
  "inputproto",
+ "theme",
  "vkcomp",
 ]
 
@@ -521,11 +523,15 @@ dependencies = [
 name = "compd"
 version = "0.1.0"
 dependencies = [
+ "audioproto",
  "comp",
+ "font",
  "gfx",
  "guiproto",
  "inputproto",
  "libos",
+ "netproto",
+ "theme",
  "venus",
  "vkcomp",
 ]
@@ -1148,11 +1154,13 @@ dependencies = [
 name = "gui-term"
 version = "0.1.0"
 dependencies = [
+ "font",
  "gfx",
  "guiproto",
  "inputproto",
  "libos",
  "term",
+ "theme",
  "ui",
 ]
 
@@ -1407,6 +1415,7 @@ dependencies = [
  "svcclient",
  "taskproto",
  "term",
+ "theme",
  "wire",
  "zeroize",
 ]
@@ -2546,6 +2555,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "theme"
+version = "0.1.0"
+dependencies = [
+ "conf",
+]
+
+[[package]]
 name = "thiserror"
 version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2792,11 +2808,13 @@ checksum = "0c8352f8c05e47892e7eaf13b34abd76a7f4aeaf817b716e88789381927f199c"
 name = "ui"
 version = "0.1.0"
 dependencies = [
+ "font",
  "gfx",
  "guiproto",
  "inputproto",
  "libos",
  "svcclient",
+ "theme",
 ]
 
 [[package]]

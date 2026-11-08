@@ -476,6 +476,7 @@ fn manifest_actions_parse_and_check() {
 #[test]
 fn connect_and_capability_protocols_roundtrip() {
     let info = ConnectInfo {
+        system: false,
         id: "org.magnumopus.demo".into(),
         name: "Ukázka".into(),
         perms: vec!["síť".into()],

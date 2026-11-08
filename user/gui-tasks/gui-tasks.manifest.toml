@@ -3,6 +3,8 @@
 [app]
 id = "org.magnumopus.tasks"
 name = "Správce úloh"
+# Systemova aplikace: odznak duvery "Systém" (kresli kompozitor).
+system = true
 
 [limits]
 memory = "64M"

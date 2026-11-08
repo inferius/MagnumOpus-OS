@@ -6,7 +6,9 @@
 //! testovat na hostiteli (`cargo test -p comp`).
 //!
 //! - [`scene`]: klienti, okna, buffery, vrstvy, transakce.
-//! - [`render`]: skladani do snimku (dekorace, odznak, panel, kurzor).
+//! - [`render`]: skladani do snimku (dekorace, odznak, lista, kurzor).
+//! - [`style`]: vzhled z tokenu (`design/tokens.toml`): motiv, pisma,
+//!   ikony, stiny, plocha.
 //! - [`input`]: rozdeleni vstupu oknum, presun a zmena velikosti.
 //! - [`dialog`]: systemove dialogy a bezpecna obrazovka.
 //! - [`services`]: akce aplikaci a inspekce.
@@ -26,6 +28,7 @@ pub mod output;
 pub mod render;
 pub mod scene;
 pub mod services;
+pub mod style;
 
 #[cfg(test)]
 mod tests;
@@ -37,7 +40,9 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use gfx::damage::Damage;
-use gfx::text::Text;
+use alloc::string::String;
+
+use gfx::text::Family;
 use guiproto::control::{CallerReply, DialogReply, InspectReply, Status};
 use guiproto::window::ServerMsg;
 use guiproto::Rect;
@@ -84,7 +89,18 @@ pub enum Out {
 pub struct Comp {
     pub w: u32,
     pub h: u32,
-    pub(crate) text: Text,
+    /// Vzhled: motiv z tokenu, pisma, ikony, mezipameti.
+    pub(crate) style: style::Style,
+    /// Hodiny v liste (cas, datum).
+    pub(crate) clock: Option<(String, String)>,
+    /// Sit a hlasitost v liste.
+    pub(crate) status: render::BarStatus,
+    /// Mezibuffer vrstvy nad okny (CPU cesta sklada stejne jako GPU).
+    pub(crate) top_scratch: Vec<u32>,
+    /// Rozmazane pozadi pod listou (mezipamet) a zda se pod ni neco zmenilo.
+    pub(crate) bar_blur: Option<Vec<u32>>,
+    pub(crate) bar_blur_dirty: bool,
+    pub(crate) blur_scratch: Vec<u32>,
     pub(crate) clients: BTreeMap<ClientId, scene::Client>,
     pub(crate) windows: BTreeMap<u32, scene::Window>,
     /// Poradi oken zdola nahoru (globalni id).
@@ -107,11 +123,19 @@ pub struct Comp {
 }
 
 impl Comp {
-    pub fn new(w: u32, h: u32, text: Text, token_source: Box<dyn FnMut() -> u128>) -> Self {
+    /// Kompozitor obrazovky `w x h`; `fonts` = rezy pisma UI (Inter z
+    /// `libs/font`, v testech zalozni pismo). Vychozi rezim je svetly.
+    pub fn new(w: u32, h: u32, fonts: Family, token_source: Box<dyn FnMut() -> u128>) -> Self {
         let mut c = Self {
             w,
             h,
-            text,
+            style: style::Style::new(fonts, theme::Mode::Light),
+            clock: None,
+            status: render::BarStatus::default(),
+            top_scratch: Vec::new(),
+            bar_blur: None,
+            bar_blur_dirty: true,
+            blur_scratch: Vec::new(),
             clients: BTreeMap::new(),
             windows: BTreeMap::new(),
             z: Vec::new(),
@@ -138,6 +162,20 @@ impl Comp {
 
     pub(crate) fn damage(&mut self, r: Rect) {
         let s = self.screen();
+        if !r.intersect(&self.blur_source()).is_empty() {
+            // Rozmazane pozadi se spocita znovu: prekreslit celou listu,
+            // jinak by zbytek listy mel stare pozadi.
+            self.bar_blur_dirty = true;
+            let p = self.panel_visual();
+            self.dirty.add(p, s);
+        }
+        self.dirty.add(r, s);
+    }
+
+    /// Poskozeni jen vrstvy nad okny (lista, kurzor): pozadi pod listou se
+    /// nemeni, rozmazani se nepocita znovu.
+    pub(crate) fn damage_top(&mut self, r: Rect) {
+        let s = self.screen();
         self.dirty.add(r, s);
     }
 
@@ -153,6 +191,11 @@ impl Comp {
     /// Zpravy k odeslani (vyprazdni frontu).
     pub fn take_out(&mut self) -> Vec<Out> {
         core::mem::take(&mut self.out)
+    }
+
+    /// Barva pozadi plochy (prvni snimek pri pripojeni displeje).
+    pub fn background(&self) -> u32 {
+        self.style.theme.color.bg
     }
 
     /// Prekreslit celou obrazovku (napr. po zmene backendu skladani).

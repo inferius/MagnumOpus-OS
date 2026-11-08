@@ -6,10 +6,11 @@
 //! - komentare `#`, tabulky `[a.b]`, pole tabulek `[[a.b]]`,
 //! - klice holé (`A-Z a-z 0-9 _ -`) i v uvozovkach, teckovane `a.b = 1`,
 //! - hodnoty: retezec (`"..."` s escape `\" \\ \n \t \r \uXXXX`, `'...'`
-//!   doslovne), cele cislo (i `_`, `0x`), `true`/`false`, pole `[...]`
-//!   (i pres vic radku), inline tabulka `{ a = 1 }`.
+//!   doslovne), cele cislo (i `_`, `0x`), desetinne cislo (`16.7`, `1e3`),
+//!   `true`/`false`, pole `[...]` (i pres vic radku), inline tabulka
+//!   `{ a = 1 }`.
 //!
-//! Neumi: datumy a casy, desetinna cisla, viceradkove retezce `"""`.
+//! Neumi: datumy a casy, `inf`/`nan`, viceradkove retezce `"""`.
 //! Chyba nese cislo radku. Zapis ([`Table::to_toml`]) vytvori text, ktery
 //! jde znovu precist; poradi klicu se zachovava.
 //!
@@ -39,10 +40,23 @@ pub use parse::parse;
 pub enum Value {
     Str(String),
     Int(i64),
+    Float(Float),
     Bool(bool),
     Array(Vec<Value>),
     Table(Table),
 }
+
+/// Desetinne cislo (porovnani podle bitu, aby slo odvodit `Eq`).
+#[derive(Debug, Clone, Copy)]
+pub struct Float(pub f64);
+
+impl PartialEq for Float {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for Float {}
 
 /// Tabulka: dvojice klic - hodnota v poradi zapisu.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -75,6 +89,15 @@ impl Value {
     pub fn as_int(&self) -> Option<i64> {
         match self {
             Self::Int(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Cislo jako `f64` (cele i desetinne).
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Self::Float(v) => Some(v.0),
+            Self::Int(v) => Some(*v as f64),
             _ => None,
         }
     }
@@ -135,6 +158,11 @@ impl Table {
 
     pub fn get_int(&self, path: &str) -> Option<i64> {
         self.get(path)?.as_int()
+    }
+
+    /// Cislo (cele i desetinne) jako `f64`.
+    pub fn get_f64(&self, path: &str) -> Option<f64> {
+        self.get(path).and_then(Value::as_f64)
     }
 
     pub fn get_bool(&self, path: &str) -> Option<bool> {

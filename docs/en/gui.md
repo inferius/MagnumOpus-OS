@@ -317,6 +317,143 @@ deferred messages is disconnected.
 within 3 s it dims the window and shows a warning. Moving, minimizing and
 closing keep working.
 
+## Look per the design (phase 1)
+
+> **Change from the previous state:** decorations, the bar, dialogs, UI
+> elements and the terminal had fixed dark colors and sizes in code and
+> the Tuffy font. Now everything comes from the `design/tokens.toml`
+> tokens and is drawn with Inter and JetBrains Mono following the
+> prototypes in `design/` ([Appearance](appearance.md)). Reason: one
+> source of truth for prototypes and the system; changing a color or
+> spacing needs no code change.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Token flow into the system">
+<defs><marker id="vf1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="70" width="160" height="60" rx="6"/><text class="t b" x="90" y="96" text-anchor="middle">design/tokens.toml</text><text class="m" x="90" y="114" text-anchor="middle">embedded at build</text>
+<path class="ln" d="M170 100 L218 100" marker-end="url(#vf1)"/>
+<rect class="box" x="220" y="70" width="150" height="60" rx="6"/><text class="t b" x="295" y="96" text-anchor="middle">libs/theme</text><text class="m" x="295" y="114" text-anchor="middle">libs/conf, contrast</text>
+<path class="ln" d="M370 85 L438 40" marker-end="url(#vf1)"/><path class="ln" d="M370 100 L438 100" marker-end="url(#vf1)"/><path class="ln" d="M370 115 L438 160" marker-end="url(#vf1)"/>
+<rect class="ok" x="440" y="15" width="310" height="50" rx="6"/><text class="t b" x="595" y="37" text-anchor="middle">compd: windows, bar, dialogs</text><text class="m" x="595" y="54" text-anchor="middle">libs/comp/style.rs, render.rs</text>
+<rect class="ok" x="440" y="75" width="310" height="50" rx="6"/><text class="t b" x="595" y="97" text-anchor="middle">libs/ui: application elements</text><text class="m" x="595" y="114" text-anchor="middle">look.rs (no trust_*, ai_*)</text>
+<rect class="ok" x="440" y="135" width="310" height="50" rx="6"/><text class="t b" x="595" y="157" text-anchor="middle">gui-term: term_* colors, JetBrains Mono</text><text class="m" x="595" y="174" text-anchor="middle">grid from type.mono</text>
+</svg>
+<figcaption>Tokens are data: the compositor, the UI library and the terminal read the same file.</figcaption>
+</figure>
+
+**QEMU screenshots** (the `compd: vzhled podle navrhu` test, `screendump`
+over QMP, 1280x800; compare with `design/plocha.html` and
+`design/okna.html`):
+
+![Light theme: demo, terminal and task manager windows, the bar](../../design/snimky/vzhled-faze1-svetly.png)
+
+![Dark theme: apps recolor via the THEME message, the bar with a blurred backdrop](../../design/snimky/vzhled-faze1-tmavy.png)
+
+![High contrast: no shadows, solid bar](../../design/snimky/vzhled-faze1-kontrast.png)
+
+**Tokens as data.** `libs/theme` reads `design/tokens.toml` through
+`libs/conf` (which now supports decimals, e.g. `frame_ms = 16.7`) and
+gives the values for light, dark and high-contrast modes: colors
+(premultiplied), the type scale, spacing, sizes, radii, shadows, motion
+(`cubic-bezier` curves) and layers. The `contrast_pairs_pass` test checks
+every required contrast pair from `[contrast]` exactly like
+`design/tools/build-tokens.mjs`. The default theme is embedded at build
+time; `Tokens::parse` reads any other text (user themes later). The
+compositor switches modes with `theme light|dark|contrast`.
+
+**Windows** (`design/okna.html`): 40 px title (`size.title_h`), 18 px
+radius (`radius.window`), 1 px `border` frame, a shadow by state
+(`shadow.window` / `window_inactive`, two layers), active title
+`surface_2` with a weight-600 name, inactive `surface` and weight 500 in
+the muted color. Window buttons are 28 px pills with a design-system
+icon; the click target is 40 px (`size.hit_min`), overlaps go to the
+nearest center. Hover highlights a button (`surface_3`, close
+`danger`). The 26 px trust badge: shield, manifest name and permission
+icons in `trust_*` colors; a system app (`[app] system = true` in the
+manifest, judged by init, `ConnectInfo.system`) shows "Systém" with a
+check shield. An unfocused window's badge has 0.6 saturation. The frame is
+1 px, 2 px in high contrast. A new window is placed in the work area
+(screen minus the bar); it gets under the bar only by dragging.
+
+**App elements** (`libs/ui`): the AI agent has the reserved `ai_*` colors
+and always the agent icon and the word "agent" (`.agent()` chip, a list
+row with a left stripe and chip, progress in `ai`; in the accessibility
+tree the name starts with "agent:"). A disabled button is the same button
+at `opacity.disabled`. The selected row has an `accent_soft` background
+and regular weight. The focus ring is drawn only in the active window
+(the element remembers focus). An invisible 6 px edge outside the window
+resizes. Unresponsive app: dimmed content and a "... nereaguje" card.
+
+**Bar** (`design/plocha.html`, "bottom, inset"): 52 px, 8 px inset,
+18 px radius, a **blurred backdrop** under it (`blur(16px)` as in the
+prototype) with `surface` at `opacity.bar` on top, `shadow.bar`. The blur
+is computed at half resolution and only when something under the bar
+changes (window move, content, theme); otherwise it comes from a cache;
+hover, the clock and the cursor do not recompute it. On the left the
+launcher, a separator and window buttons (icon per app, running / active
+mark), on the right the "Vstup ovládá automat" pill, tasks with the agent
+chip, **network and volume from the real state** (`netd`: link and
+address, `audiod`: volume and mute; a struck-through icon when offline or
+muted), the notification bell (a placeholder icon for now) and the clock
+(time and date in the zone init sends with the `display` command).
+
+Init provides the bar state with `sources net audio` and handles: a
+network session with only the `INFO` right (no connections anywhere) and
+a channel to the audio service. The compositor asks every 2 s and reads
+replies without blocking (a stuck service does not hold up the bar).
+
+**Desktop:** `bg` plus two soft radial gradients `wall_a`, `wall_b` like
+`.desk` in the prototype; computed once per screen size, with fine
+dithering against banding.
+
+**System dialog:** 440 px wide, 2 px `trust_border` frame, a "Systém"
+band with the phrase, heading, app block, the "physical input only"
+note, pill buttons with a 2 px focus ring.
+
+**Drawing (`libs/gfx`):**
+
+| Module | What |
+|---|---|
+| `shape.rs` | rounded rectangle and frame from a distance field (same formula as a shader), window corner patches |
+| `shadow.rs` | Gaussian shadow precomputed into a 9-slice mask (3 box passes); drawing only reads the table |
+| `icon.rs` | 64 icons straight from `design/assets/mo.js` (SVG subset: `path` incl. arcs, `rect`, `circle`), distance-field strokes |
+| `backdrop.rs` | desktop radial gradients |
+| `text.rs` | a face family (CSS-style weight matching), 1/4 px subpixel positioning, dark-text gamma |
+
+**Same pixels on CPU and GPU:** a window is drawn as a square and its
+corners are recomputed as a "patch" (the window over the saved
+background with the rounded-shape coverage); a multi-layer shadow is
+composed into one color and blended once; the layer above windows (bar,
+dialog, cursor) goes through a scratch buffer on the CPU too. So the
+`gpu_list_matches_cpu_frame` test still compares frames pixel by pixel.
+
+⚠️ **Risks and deviations (stated up front):**
+
+- Fonts are embedded in programs (each only the faces it draws): `compd`
+  +1.7 MB, apps with `libs/ui` +1.25 MB, `gui-term` +0.55 MB. Shared font
+  memory from the compositor is a G5 task.
+- The CPU computes the bar blur also in the GPU backend (same pixels).
+  Follow-up for Venus: blur as a shader in `vkcomp`.
+- Shadows from static masks.
+- 200 % text size (Accessibility) comes with G4; apps receive the
+  system theme with the `THEME` message (the UI library and the terminal
+  recolor).
+- Values that used to exist only in `mo.css` (bar opacity, dimming,
+  dialog width, 14 px icons, the bar mark) are now in the tokens
+  (`[size]`, `[opacity]`) and the code reads them from there.
+
+**CPU frame cost:** `compd` logs the full-screen compose time and, every
+300 frames, the average and maximum (`compd: snimek cele obrazovky ...`).
+
+| Where | Full screen | Note |
+|---|---|---|
+| host, 800x600 (`look_snapshots` test) | 3.5 ms, first 11 ms | the first one computes the desktop, shadows and blur |
+| QEMU on Windows (CPU emulation), 1280x800 | 0.5-1.8 s | emulation without acceleration is ~100x slower; regular frames are only damaged areas |
+
+So on display attach the compositor first shows just the background
+color and composes the full frame on the next tick (start does not wait
+for composition).
+
 ## Input in windows
 
 The compositor receives events from `inputd` ([Input](input.md)) - from the
@@ -445,7 +582,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 
 | Command | Handles | Reply |
 |---|---|---|
-| `display` | graphics driver channel | `ok <w> <h>` |
+| `display [zone]` | graphics driver channel | `ok <w> <h>` ; IANA zone for the bar clock |
 | `input` | focus channel from `inputd` | `ok` |
 | `secure` | secure shortcut channel from `inputd` | `ok` |
 | `connect` + application identity (binary) | - | `ok` + window channel |
@@ -454,6 +591,8 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `inspect` | - | `ok` + inspection channel |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
 | `tasks <running> <agent>` | - | `ok` (task icon in the panel) |
+| `theme light\|dark\|contrast` | - | `ok` (color mode from the tokens) |
+| `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
 
 **Inspection** (`inspect`, for tests, later a screen reader and
 magnifier): list of windows, the accessibility tree of a window in screen
@@ -508,6 +647,7 @@ Compositor -> application:
 | 110 | `A11Y_ACTION` | node, action, value |
 | 111 | `ACTION_INVOKE` | call, action, arguments |
 | 112 | `ERROR` | op, code |
+| 113 | `THEME` | color mode u8 (0 light, 1 dark, 2 high contrast); after `WELCOME` and on change |
 
 Example (a window with one buffer):
 
@@ -725,7 +865,9 @@ draw on their own (the terminal window).
 
 Own TrueType (`.ttf`) reader: tables `head`, `hhea`, `maxp`, `cmap`
 (formats 4 and 12), `loca`, `glyf` (simple and composite glyphs), `hmtx`,
-`kern` (format 0). The rasterizer flattens quadratic curves into lines and
+`kern` (format 0), pair kerning from `GPOS` (lookup type 2, formats 1
+and 2, also inside extension type 9) and single substitutions from
+`GSUB` for enabled features (`tnum` tabular figures, `cv11`). The rasterizer flattens quadratic curves into lines and
 computes **pixel area coverage** (anti-aliasing without hinting). Glyphs
 are cached per size (`gfx::text`).
 
@@ -733,8 +875,13 @@ A font file is untrusted input: every read checks bounds, a broken glyph
 is an empty glyph, never a panic (a test overwrites random bytes of the
 file). No shaping (Arabic, Indic scripts) and no hinting.
 
-The system font is **Tuffy** (Thatcher Ulrich, public domain): it covers
-Latin including Czech and is bundled in `libs/font/fonts/`.
+System fonts (`libs/font/fonts/`, licenses in `THIRD-PARTY.md`):
+**Inter** 300-700 (SIL OFL 1.1) for the UI, **JetBrains Mono** 400 and 600
+(SIL OFL 1.1) for the terminal and **Tuffy** (public domain) as a
+fallback. A program embeds only the faces it draws via the `inter-*`,
+`mono-*` cargo features. A token weight maps to a face like CSS does
+(650 -> 700). Static faces (not the variable font), because the
+rasterizer reads `glyf`.
 
 ## Terminal window
 
@@ -742,7 +889,8 @@ The 6b terminal is the `gui-term` window in the GUI on top of its native
 protocol: a **custom title bar** (the app draws the session tab
 "Session N" and declares a `DRAG` region with
 a `NO_DRAG` exception for the tab; the badge and buttons are drawn by the
-system), the content is a `term::screen` character grid (Noto Sans Mono,
+system), the content is a `term::screen` character grid (JetBrains Mono, `term_*` colors from the tokens, 40 px title with the
+session tab;
 the same as on the console), and the accessibility tree has a `terminal`
 node with the visible text. A line can be entered from the keyboard, with
 the accessibility action `set-value` or with the action `terminal.run`

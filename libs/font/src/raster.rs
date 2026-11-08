@@ -130,8 +130,9 @@ impl Rasterizer {
     }
 }
 
-/// Vykresli obrys (jednotky pisma, y nahoru) ve skale `s` (px na jednotku).
-pub fn render(segs: &[Segment], s: f32) -> Glyph {
+/// Vykresli obrys (jednotky pisma, y nahoru) ve skale `s` (px na jednotku)
+/// posunuty o `dx` pixelu doprava (zlomek pixelu pro jemne umisteni).
+pub fn render(segs: &[Segment], s: f32, dx: f32) -> Glyph {
     let mut minx = f32::MAX;
     let mut miny = f32::MAX;
     let mut maxx = f32::MIN;
@@ -159,15 +160,15 @@ pub fn render(segs: &[Segment], s: f32) -> Glyph {
         return Glyph::default();
     }
     // Obdelnik masky v pixelech (y dolu): x0..x1, y0..y1.
-    let x0 = floor(minx * s);
-    let x1 = ceil(maxx * s);
+    let x0 = floor(minx * s + dx);
+    let x1 = ceil(maxx * s + dx);
     let y0 = floor(-maxy * s);
     let y1 = ceil(-miny * s);
     let w = ((x1 - x0) as u32 + 1).min(MAX_DIM);
     let h = ((y1 - y0) as u32).clamp(1, MAX_DIM);
     let mut r = Rasterizer::new(w, h);
     let tr = |p: &Point| Point {
-        x: p.x * s - x0,
+        x: p.x * s + dx - x0,
         y: -p.y * s - y0,
     };
     for seg in segs {

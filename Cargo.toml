@@ -14,6 +14,7 @@ members = [
     "libs/cbuild",
     "libs/cstd",
     "libs/conf",
+    "libs/theme",
     "libs/dns",
     "libs/elf",
     "libs/fs",

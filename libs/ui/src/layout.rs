@@ -8,11 +8,10 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use gfx::text::Text;
 use guiproto::Rect;
 
+use crate::look::Look;
 use crate::node::{Kind, Node};
-use crate::theme;
 
 /// Prvek po rozvrzeni.
 pub enum ElemKind<M> {
@@ -21,7 +20,7 @@ pub enum ElemKind<M> {
     TextInput { value: String, placeholder: String, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
-    ListItem { text: String, index: usize, selected: bool, list: usize },
+    ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
     Progress { value: u32 },
     Group,
     Scroll { content_h: u32 },
@@ -36,6 +35,8 @@ pub struct Element<M> {
     /// Rodic pro strom pristupnosti (index + 1, 0 = okno).
     pub parent: usize,
     pub disabled: bool,
+    /// Patri agentovi AI.
+    pub agent: bool,
 }
 
 impl<M> Element<M> {
@@ -48,48 +49,55 @@ impl<M> Element<M> {
     }
 }
 
-fn px(heading: bool) -> f32 {
-    if heading { theme::HEADING_PX } else { theme::PX }
-}
-
-/// Prirozena velikost uzlu.
-fn measure<M>(n: &Node<M>, t: &Text) -> (u32, u32) {
-    let (lh, _) = t.line(theme::PX);
+/// Prirozena velikost uzlu (rozmery z tokenu).
+fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
+    let th = &t.theme;
+    let sp = &th.space;
+    let ctl = t.control_h();
     let (w, h) = match &n.kind {
         Kind::Label { text, heading, warn } => {
-            let pad = if *warn { 16 } else { 0 };
-            (t.width(text, px(*heading)) + pad, t.line(px(*heading)).0 + pad / 2)
+            let s = if *heading { t.heading() } else { t.body() };
+            if n.agent {
+                // Stitek agenta: ikona a text v pilulce.
+                (t.width(text, t.chip()) + 2 * sp[4] + th.size.icon_xs + sp[2], s.line + 2 * sp[2])
+            } else if *warn {
+                // Stitek: pilulka s okrajem `s4`.
+                (t.width(text, s) + 2 * sp[4], s.line + 2 * sp[2])
+            } else {
+                (t.width(text, s), s.line)
+            }
         }
-        Kind::Button { text, .. } => ((t.width(text, theme::PX) + 28).max(80), lh + 14),
-        Kind::TextInput { .. } => (220, lh + 14),
-        Kind::Checkbox { text, .. } => (18 + 8 + t.width(text, theme::PX), lh.max(18) + 4),
-        Kind::List { items, .. } => (160, items.len() as u32 * theme::ROW_H),
-        Kind::Progress { .. } => (160, 10),
+        Kind::Button { text, .. } => ((t.width(text, t.button()) + 2 * sp[5]).max(th.size.hit_min * 2), ctl),
+        Kind::TextInput { .. } => (th.size.hit_min * 6, ctl),
+        Kind::Checkbox { text, .. } => (th.size.icon_m + sp[3] + t.width(text, t.body()), ctl.min(th.size.hit_min)),
+        Kind::List { items, .. } => (th.size.hit_min * 4, items.len() as u32 * t.row_h() + 2 * sp[2]),
+        Kind::Progress { .. } => (th.size.hit_min * 4, sp[3]),
         Kind::Column(ch) => ch.iter().fold((0, 0), |(w, h), c| {
             let (cw, chh) = measure(c, t);
-            (w.max(cw), h + chh + if h > 0 { theme::GAP } else { 0 })
+            (w.max(cw), h + chh + if h > 0 { t.gap() } else { 0 })
         }),
         Kind::Row(ch) => ch.iter().fold((0, 0), |(w, h), c| {
             let (cw, chh) = measure(c, t);
-            (w + cw + if w > 0 { theme::GAP } else { 0 }, h.max(chh))
+            (w + cw + if w > 0 { t.gap() } else { 0 }, h.max(chh))
         }),
-        Kind::Scroll(c) => (measure(c, t).0, 160),
+        Kind::Scroll(c) => (measure(c, t).0, th.size.hit_min * 4),
         Kind::Spacer => (0, 0),
     };
     (if n.width > 0 { n.width } else { w }, if n.height > 0 { n.height } else { h })
 }
 
 /// Rozvrhne strom do obdelniku `area` (souradnice okna).
-pub fn layout<M>(root: Node<M>, area: Rect, t: &Text) -> Vec<Element<M>> {
+pub fn layout<M>(root: Node<M>, area: Rect, t: &Look) -> Vec<Element<M>> {
     let mut out = Vec::new();
     place(root, area, 0, 0, t, &mut out);
     out
 }
 
-fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Text, out: &mut Vec<Element<M>>) {
+fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mut Vec<Element<M>>) {
     let disabled = n.disabled;
+    let agent = n.agent;
     let push = |out: &mut Vec<Element<M>>, kind: ElemKind<M>, rect: Rect| {
-        out.push(Element { kind, rect, space, parent, disabled });
+        out.push(Element { kind, rect, space, parent, disabled, agent });
         out.len()
     };
     match n.kind {
@@ -105,16 +113,18 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Text, out: &mu
         Kind::Checkbox { text, checked, on_toggle } => {
             push(out, ElemKind::Checkbox { text, checked, on_toggle }, r);
         }
-        Kind::List { items, selected, on_select } => {
+        Kind::List { items, selected, on_select, agents } => {
             let id = push(out, ElemKind::List { count: items.len(), on_select }, r);
+            let (rh, inset) = (t.row_h(), t.theme.space[2]);
             for (i, text) in items.into_iter().enumerate() {
-                let ir = Rect::new(r.x, r.y + (i as u32 * theme::ROW_H) as i32, r.w, theme::ROW_H);
+                let ir = Rect::new(r.x + inset as i32, r.y + (inset + i as u32 * rh) as i32, r.w.saturating_sub(2 * inset), rh);
                 out.push(Element {
-                    kind: ElemKind::ListItem { text, index: i, selected: selected == Some(i), list: id },
+                    kind: ElemKind::ListItem { text, index: i, selected: selected == Some(i), list: id, agent: agents.get(i).copied().unwrap_or(false) },
                     rect: ir,
                     space,
                     parent: id,
                     disabled,
+                    agent: false,
                 });
             }
         }
@@ -125,20 +135,20 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Text, out: &mu
         Kind::Column(children) => {
             let id = push(out, ElemKind::Group, r);
             let sizes: Vec<(u32, u32)> = children.iter().map(|c| measure(c, t)).collect();
-            let fixed: u32 = sizes.iter().map(|s| s.1).sum::<u32>() + theme::GAP * children.len().saturating_sub(1) as u32;
+            let fixed: u32 = sizes.iter().map(|s| s.1).sum::<u32>() + t.gap() * children.len().saturating_sub(1) as u32;
             let grow = children.iter().filter(|c| c.grow).count() as u32;
             let extra = r.h.saturating_sub(fixed);
             let mut y = r.y;
             for (c, (_, h)) in children.into_iter().zip(sizes) {
                 let h = if c.grow && grow > 0 { h + extra / grow } else { h };
                 place(c, Rect::new(r.x, y, r.w, h), space, id, t, out);
-                y += (h + theme::GAP) as i32;
+                y += (h + t.gap()) as i32;
             }
         }
         Kind::Row(children) => {
             let id = push(out, ElemKind::Group, r);
             let sizes: Vec<(u32, u32)> = children.iter().map(|c| measure(c, t)).collect();
-            let fixed: u32 = sizes.iter().map(|s| s.0).sum::<u32>() + theme::GAP * children.len().saturating_sub(1) as u32;
+            let fixed: u32 = sizes.iter().map(|s| s.0).sum::<u32>() + t.gap() * children.len().saturating_sub(1) as u32;
             let grow = children.iter().filter(|c| c.grow).count() as u32;
             let extra = r.w.saturating_sub(fixed);
             let mut x = r.x;
@@ -147,7 +157,7 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Text, out: &mu
                 // Svisle na stred radku.
                 let y = r.y + (r.h.saturating_sub(h) / 2) as i32;
                 place(c, Rect::new(x, y, w, h.min(r.h)), space, id, t, out);
-                x += (w + theme::GAP) as i32;
+                x += (w + t.gap()) as i32;
             }
         }
         Kind::Scroll(child) => {

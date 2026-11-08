@@ -66,6 +66,9 @@ pub struct Tables<'a> {
     hmtx: Data<'a>,
     /// Dvojice kerningu (format 0): data par a jejich pocet.
     kern: Option<(Data<'a>, usize)>,
+    /// Tabulky OpenType rozvrzeni (nepovinne).
+    pub gpos: Option<Data<'a>>,
+    pub gsub: Option<Data<'a>>,
 }
 
 fn c<T>(v: Option<T>) -> Result<T, FontError> {
@@ -133,6 +136,8 @@ impl<'a> Tables<'a> {
             glyf,
             hmtx,
             kern,
+            gpos: find(b"GPOS"),
+            gsub: find(b"GSUB"),
         })
     }
 
@@ -256,6 +261,10 @@ impl<'a> Tables<'a> {
     pub fn advance(&self, gid: u16) -> u16 {
         let i = gid.min(self.num_hmetrics - 1) as usize;
         self.hmtx.u16(i * 4).unwrap_or(0)
+    }
+
+    pub fn has_kern_table(&self) -> bool {
+        self.kern.is_some()
     }
 
     pub fn kern(&self, left: u16, right: u16) -> i16 {

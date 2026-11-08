@@ -162,3 +162,135 @@ fn text_draws_and_measures() {
     assert_eq!(pos.len(), 3);
     assert!(pos[0] == 0 && pos[1] > 0 && pos[2] > pos[1]);
 }
+
+// ---- Vzhled (tvary, stin, ikony, plocha, pisma) ----
+
+fn canvas_buf(w: u32, h: u32, c: u32) -> alloc::vec::Vec<u32> {
+    alloc::vec![c; (w * h) as usize]
+}
+
+#[test]
+fn round_fill_corners_are_smooth() {
+    let mut buf = canvas_buf(40, 40, 0xFF00_0000);
+    let mut c = Canvas::new(&mut buf, 40, 40, 40).unwrap();
+    c.round_fill(Rect::new(0, 0, 40, 40), 18, 0xFFFF_FFFF);
+    // Stred plny, roh prazdny, na hrane mezihodnota.
+    assert_eq!(c.get(20, 20), 0xFFFF_FFFF);
+    assert_eq!(c.get(0, 0), 0xFF00_0000);
+    let edge: alloc::vec::Vec<u32> = (0..18).map(|x| c.get(x, 5) & 0xFF).collect();
+    assert!(edge.iter().any(|&v| v > 10 && v < 245), "{edge:?}");
+    // Symetrie.
+    assert_eq!(c.get(3, 7), c.get(36, 7));
+    assert_eq!(c.get(3, 7), c.get(3, 32));
+}
+
+#[test]
+fn round_stroke_is_ring() {
+    let mut buf = canvas_buf(50, 50, 0);
+    let mut c = Canvas::new(&mut buf, 50, 50, 50).unwrap();
+    c.round_stroke(Rect::new(5, 5, 40, 40), 10, 1, 0xFFFF_FFFF);
+    assert_eq!(c.get(25, 25), 0, "stred prazdny");
+    assert_eq!(c.get(25, 5), 0xFFFF_FFFF, "horni hrana");
+    assert_eq!(c.get(25, 6), 0);
+}
+
+#[test]
+fn corners_restore_rounds_content() {
+    let mut buf = canvas_buf(60, 60, 0xFF11_2233);
+    let mut c = Canvas::new(&mut buf, 60, 60, 60).unwrap();
+    let r = Rect::new(10, 10, 40, 40);
+    let saved = c.save_corners(r, 12);
+    c.fill(r, 0xFFFF_FFFF);
+    c.restore_corners(r, 12, &saved);
+    assert_eq!(c.get(10, 10), 0xFF11_2233, "roh je zase pozadi");
+    assert_eq!(c.get(30, 30), 0xFFFF_FFFF);
+    assert_eq!(c.get(10, 30), 0xFFFF_FFFF, "rovna hrana zustane");
+}
+
+#[test]
+fn shadow_mask_is_soft_and_symmetric() {
+    let m = shadow::ShadowMask::new(18, 32);
+    let mut buf = canvas_buf(400, 300, 0xFFFF_FFFF);
+    let mut c = Canvas::new(&mut buf, 400, 300, 400).unwrap();
+    let shape = Rect::new(100, 80, 200, 140);
+    c.shadow(&m, shape, 0xFF00_0000, Rect::default());
+    let v = |x, y| 255 - (c.get(x, y) & 0xFF);
+    // Pod tvarem tma, daleko svetlo, mezi tim prechod.
+    assert!(v(200, 150) > 200);
+    assert_eq!(v(10, 10), 0);
+    let mid = v(200, 80 - 10);
+    assert!(mid > 5 && mid < 200, "{mid}");
+    assert_eq!(v(100 - 8, 150), v(300 + 7, 150));
+    // Monotonni pokles smerem ven.
+    let mut prev = 256;
+    for x in (60..100).rev() {
+        let a = v(x, 150);
+        assert!(a <= prev);
+        prev = a;
+    }
+}
+
+#[test]
+fn icons_from_prototype() {
+    let set = icon::parse_set(icon::SOURCE);
+    assert!(set.len() >= 60, "{}", set.len());
+    for name in ["close", "min", "max", "shield", "apps", "tasks", "terminal", "folder", "agent", "bell", "wifi", "volume"] {
+        let i = set.iter().find(|i| i.name == name).unwrap_or_else(|| panic!("{name}"));
+        let m = i.render(24, 1.75);
+        let ink: u32 = m.coverage.iter().map(|&v| v as u32).sum();
+        assert!(ink > 255 * 10, "{name}: {ink}");
+    }
+    // Kazda ikona jde vykreslit ve 4 velikostech.
+    for i in &set {
+        for s in [16, 20, 24, 32] {
+            let m = i.render(s, 1.75);
+            assert_eq!(m.coverage.len(), (s * s) as usize);
+            assert!(m.coverage.iter().any(|&v| v > 128), "{} {s}", i.name);
+        }
+    }
+    // Krizek: uhlopricky, stred plny, roh prazdny.
+    let close = set.iter().find(|i| i.name == "close").unwrap().render(24, 2.0);
+    assert!(close.coverage[12 * 24 + 12] > 200);
+    assert_eq!(close.coverage[0], 0);
+    // Poskozena cesta nespadne.
+    for bad in ["<path d=\"M1 2 L\"/>", "<path d=\"Q 1 2 3\"/>", "<path d=\"A 1 1 0 2 1 3 3\"/>", "<rect/>", "<path d=\"Z Z M\"/>"] {
+        let p = icon::parse_svg(bad);
+        let _ = icon::Icon { name: "x".into(), parts: p }.render(16, 1.75);
+    }
+}
+
+#[test]
+fn backdrop_gradients() {
+    let img = backdrop::render(
+        100,
+        80,
+        0xFF00_0000,
+        &[backdrop::Radial { cx: 0.2, cy: 0.2, stop: 0.5, color: 0xFFFF_0000 }],
+    );
+    let red = |x: u32, y: u32| img[(y * 100 + x) as usize] >> 16 & 0xFF;
+    assert!(red(20, 16) > 240);
+    assert_eq!(red(99, 79), 0);
+    assert!(img.iter().all(|p| p >> 24 == 0xFF));
+}
+
+#[test]
+fn family_picks_weights_and_subpixel_text() {
+    let mut f = text::Family::new(
+        &[(400, include_bytes!("../../font/fonts/Inter-Regular.ttf")), (600, include_bytes!("../../font/fonts/Inter-SemiBold.ttf"))],
+        &[*b"tnum"],
+    );
+    assert_eq!(f.weights(), alloc::vec![400, 600]);
+    let w400 = f.face(400).width("Okna a plocha", 14.0);
+    let w600 = f.face(650).width("Okna a plocha", 14.0);
+    assert!(w600 > w400, "{w400} {w600}");
+    // Kerning z GPOS se projevi i v sirce pres Text.
+    assert!(f.face(400).width("Te", 28.0) < f.face(400).width("T", 28.0) + f.face(400).width("e", 28.0));
+    let mut buf = canvas_buf(200, 40, 0xFFFF_FFFF);
+    let mut c = Canvas::new(&mut buf, 200, 40, 200).unwrap();
+    let end = f.face(400).draw_ellipsized(&mut c, 2, 28, "Velmi dlouhy titulek okna, ktery se nevejde", 14.0, 0xFF2A_1F2D, 120);
+    assert!(end <= 2 + 120 + 1, "{end}");
+    assert!(c.get(10, 22) != 0xFFFF_FFFF || c.get(11, 22) != 0xFFFF_FFFF || c.get(12, 22) != 0xFFFF_FFFF);
+    // Bez rezu zalozni pismo.
+    let mut e = text::Family::new(&[], &[]);
+    assert!(e.face(700).width("a", 14.0) > 0);
+}

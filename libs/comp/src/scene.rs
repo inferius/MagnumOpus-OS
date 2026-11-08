@@ -18,9 +18,30 @@ use guiproto::{Error, MAX_DIM, Rect};
 
 use crate::{ClientId, Comp, Pixels};
 
-/// Vyska titulku a sirka ramu.
-pub const TITLE_H: u32 = 32;
-pub const BORDER: u32 = 1;
+/// Rozmery okna z tokenu (`style::Style::geo`). Kopie je v kazdem okne,
+/// aby geometrie nepotrebovala pristup ke kompozitoru.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Geo {
+    /// Vyska titulku (`size.title_h`).
+    pub title_h: u32,
+    /// Sirka ramu.
+    pub border: u32,
+    /// Viditelne tlacitko okna (`size.title_btn`).
+    pub btn: u32,
+    /// Cil kliknuti tlacitka (`size.hit_min`).
+    pub btn_hit: u32,
+    /// Mezera mezi tlacitky.
+    pub btn_gap: u32,
+    /// Okraj titulku (vlevo, vpravo).
+    pub pad: u32,
+    pub badge_h: u32,
+    /// Zaobleni okna (`radius.window`).
+    pub radius: u32,
+    /// Neviditelny okraj pro zmenu velikosti (vne okna).
+    pub edge: u32,
+    /// Presah stinu: vlevo, nahore, vpravo, dole.
+    pub shadow: [u32; 4],
+}
 /// Nejvic rozpracovanych zprav do `COMMIT` a vrstev, bufferu a oken klienta.
 pub const MAX_STAGED: usize = 16384;
 pub const MAX_LAYERS: usize = 8192;
@@ -117,71 +138,106 @@ pub struct Window {
     pub serial: u32,
     /// Do kdy ukazovat odznak u bezramoveho okna.
     pub badge_until: u64,
+    pub geo: Geo,
 }
 
 impl Window {
     /// Obdelnik vcetne ramu a titulku (co okno zabira na obrazovce).
     pub fn outer(&self) -> Rect {
+        let (t, b) = (self.geo.title_h, self.geo.border);
         match self.mode {
-            Mode::Standard => Rect::new(
-                self.rect.x - BORDER as i32,
-                self.rect.y - (TITLE_H + BORDER) as i32,
-                self.rect.w + 2 * BORDER,
-                self.rect.h + TITLE_H + 2 * BORDER,
-            ),
-            Mode::CustomTitle => Rect::new(
-                self.rect.x - BORDER as i32,
-                self.rect.y - BORDER as i32,
-                self.rect.w + 2 * BORDER,
-                self.rect.h + 2 * BORDER,
-            ),
+            Mode::Standard => Rect::new(self.rect.x - b as i32, self.rect.y - (t + b) as i32, self.rect.w + 2 * b, self.rect.h + t + 2 * b),
+            Mode::CustomTitle => Rect::new(self.rect.x - b as i32, self.rect.y - b as i32, self.rect.w + 2 * b, self.rect.h + 2 * b),
             Mode::Frameless | Mode::Fullscreen => self.rect,
         }
+    }
+
+    /// Co okno zabira vcetne stinu (poskozeni pri zmene).
+    pub fn visual(&self) -> Rect {
+        let o = self.outer();
+        if !self.mode.has_frame() {
+            return o;
+        }
+        let [l, t, r, b] = self.geo.shadow;
+        Rect::new(o.x - l as i32, o.y - t as i32, o.w + l + r, o.h + t + b)
+    }
+
+    /// Oblast pro zmenu velikosti tazenim (okno a neviditelny okraj kolem).
+    pub fn grab(&self) -> Rect {
+        let o = self.outer();
+        if !self.mode.has_frame() {
+            return o;
+        }
+        let e = self.geo.edge;
+        Rect::new(o.x - e as i32, o.y - e as i32, o.w + 2 * e, o.h + 2 * e)
+    }
+
+    /// Zaobleni rohu okna (bez ramu 0).
+    pub fn radius(&self) -> u32 {
+        if self.mode.has_frame() { self.geo.radius } else { 0 }
     }
 
     /// Pruh titulku na obrazovce (u vlastniho titulku je to horni cast
     /// obsahu, kterou kresli aplikace).
     pub fn title_bar(&self) -> Option<Rect> {
         match self.mode {
-            Mode::Standard => Some(Rect::new(self.rect.x, self.rect.y - TITLE_H as i32, self.rect.w, TITLE_H)),
-            Mode::CustomTitle => Some(Rect::new(self.rect.x, self.rect.y, self.rect.w, TITLE_H)),
+            Mode::Standard => Some(Rect::new(self.rect.x, self.rect.y - self.geo.title_h as i32, self.rect.w, self.geo.title_h)),
+            Mode::CustomTitle => Some(Rect::new(self.rect.x, self.rect.y, self.rect.w, self.geo.title_h)),
             _ => None,
         }
     }
 
-    /// Systemova tlacitka okna (zavrit, maximalizovat, minimalizovat).
+    /// Systemova tlacitka okna (zavrit, maximalizovat, minimalizovat),
+    /// viditelna velikost. Zavrit je nejbliz okraji.
     pub fn buttons(&self) -> [Rect; 3] {
         let Some(t) = self.title_bar() else {
             return [Rect::default(); 3];
         };
-        let (bw, bh) = (30u32, 24u32);
-        let y = t.y + ((TITLE_H - bh) / 2) as i32;
+        let g = &self.geo;
+        let b = g.btn;
+        let y = t.y + (g.title_h.saturating_sub(b) / 2) as i32;
         let mut r = [Rect::default(); 3];
         for (i, slot) in r.iter_mut().enumerate() {
-            let off = 4 + i as i32 * (bw as i32 + 2);
+            let off = g.pad as i32 + i as i32 * (b + g.btn_gap) as i32;
             let x = match self.side {
-                ButtonSide::Right => (t.right() as i32) - off - bw as i32,
+                ButtonSide::Right => (t.right() as i32) - off - b as i32,
                 ButtonSide::Left => t.x + off,
             };
-            *slot = Rect::new(x, y, bw, bh);
+            *slot = Rect::new(x, y, b, b);
         }
         r
+    }
+
+    /// Cile kliknuti tlacitek (`hit_min` x `hit_min` kolem stredu, orez na
+    /// titulek). Prekryvaji se; plati nejblizsi stred.
+    pub fn button_hits(&self) -> [Rect; 3] {
+        let Some(t) = self.title_bar() else {
+            return [Rect::default(); 3];
+        };
+        let h = self.geo.btn_hit;
+        self.buttons().map(|b| {
+            let (cx, cy) = (b.x + b.w as i32 / 2, b.y + b.h as i32 / 2);
+            Rect::new(cx - h as i32 / 2, cy - h as i32 / 2, h, h).intersect(&t)
+        })
     }
 
     /// Odznak duvery: pevne misto vlevo v titulku (u leve strany tlacitek
     /// vpravo). U bezramoveho okna u horniho okraje.
     pub fn badge(&self, width: u32) -> Rect {
+        let g = &self.geo;
         // Nikdy pres systemova tlacitka.
-        let width = width.min(self.rect.w.saturating_sub(116)).max(24);
+        let buttons = g.pad + 3 * g.btn + 2 * g.btn_gap + g.pad;
+        let width = width.min(self.rect.w.saturating_sub(buttons + g.pad)).max(g.badge_h);
+        let dy = (g.title_h.saturating_sub(g.badge_h) / 2) as i32;
         match self.title_bar() {
             Some(t) => {
                 let x = match self.side {
-                    ButtonSide::Right => t.x + 6,
-                    ButtonSide::Left => t.right() as i32 - 6 - width as i32,
+                    ButtonSide::Right => t.x + g.pad as i32,
+                    ButtonSide::Left => t.right() as i32 - g.pad as i32 - width as i32,
                 };
-                Rect::new(x, t.y + 5, width, TITLE_H - 10)
+                Rect::new(x, t.y + dy, width, g.badge_h)
             }
-            None => Rect::new(self.rect.x + 6, self.rect.y + 6, width, TITLE_H - 10),
+            None => Rect::new(self.rect.x + g.pad as i32, self.rect.y + g.pad as i32, width, g.badge_h),
         }
     }
 
@@ -308,6 +364,8 @@ impl Comp {
                         app,
                     },
                 );
+                let mode = crate::style::mode_code(self.style.mode());
+                self.send(c, ServerMsg::Theme { mode });
             }
             ClientMsg::WindowCreate { window, mode, w, h, title } => self.window_create(c, window, mode, w, h, clip_title(title)),
             ClientMsg::WindowDestroy { window } => {
@@ -374,14 +432,25 @@ impl Comp {
         self.next_window += 1;
         cl.windows.insert(local, gid);
         let (sw, sh) = (self.w, self.h);
+        // Okno se umisti do pracovni plochy (obrazovka bez listy); pod listu
+        // se dostane jen tazenim.
+        let geo = self.style.geo();
+        let work_h = self.work_area().h as i32;
+        let top = if mode == Mode::Standard { (geo.title_h + geo.border) as i32 } else { geo.border as i32 };
         let (w, h) = if mode == Mode::Fullscreen {
             (sw, sh)
         } else {
-            (w.clamp(16, sw.saturating_sub(40).max(16)), h.clamp(16, sh.saturating_sub(80).max(16)))
+            let max_h = (work_h - top - geo.border as i32).max(16) as u32;
+            (w.clamp(16, sw.saturating_sub(40).max(16)), h.clamp(16, max_h))
         };
-        // Kaskada od leveho horniho rohu.
+        // Kaskada od leveho horniho rohu, spodni okraj nad listou.
         let n = self.windows.len() as i32 % 8;
-        let (x, y) = if mode == Mode::Fullscreen { (0, 0) } else { (60 + n * 36, 70 + n * 30) };
+        let (x, y) = if mode == Mode::Fullscreen {
+            (0, 0)
+        } else {
+            let y = (70 + n * 30).min(work_h - h as i32 - geo.border as i32).max(top);
+            (60 + n * 36, y)
+        };
         let win = Window {
             client: c,
             local,
@@ -399,6 +468,7 @@ impl Comp {
             configure: None,
             serial: 1,
             badge_until: 0,
+            geo: self.style.geo(),
         };
         self.windows.insert(gid, win);
         self.z.push(gid);
@@ -594,9 +664,8 @@ impl Comp {
 
     pub(crate) fn damage_window(&mut self, gid: u32) {
         if let Some(w) = self.windows.get(&gid) {
-            let mut r = w.outer();
-            // Odznak bezramoveho okna presahuje jen dovnitr; stin 2 px.
-            r = Rect::new(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
+            // Vcetne stinu (odznak bezramoveho okna presahuje jen dovnitr).
+            let r = w.visual();
             self.damage(r);
         }
     }

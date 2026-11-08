@@ -129,7 +129,9 @@ impl Service for CompdService {
         let (process, control) = libos::spawn::service("compd", image, Vec::new())?;
         // Odpoved na `display` = potvrzeni startu (compd se synchronizuje
         // s ovladacem a pripoji snimek).
-        control.write(control::DISPLAY.as_bytes(), vec![display.into_handle()])?;
+        // Pasmo pro hodiny v liste ze stejneho nastaveni jako sluzba casu.
+        let zone = libos::time::zone::Settings::parse(crate::system::TIME_SETTINGS).map(|s| s.zone.name).ok().filter(|n| !n.is_empty()).unwrap_or("UTC");
+        control.write(alloc::format!("{} {zone}", control::DISPLAY).as_bytes(), vec![display.into_handle()])?;
         let started = Started {
             process: process.handle().duplicate(None)?,
             ready: Some(control.handle().duplicate(None)?),
@@ -275,7 +277,10 @@ pub fn recipe(startup: &Startup, name: &str) -> Result<ConnectInfo> {
     if m.as_ref().is_some_and(|m| m.network.is_some()) {
         perms.push(String::from("síť"));
     }
+    // Systemova aplikace (odznak "Systém"): klic v manifestu v initfs.
+    let system = conf::parse(text).ok().and_then(|t| t.get_bool("app.system")).unwrap_or(false);
     Ok(ConnectInfo {
+        system,
         id: m.as_ref().map_or_else(|| format!("initfs.{name}"), |m| m.id.clone()),
         name: m.as_ref().map_or_else(|| String::from(name), |m| m.name.clone()),
         perms,
@@ -390,6 +395,24 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
         println!("init: vstup pro kompozitor: {e}");
     }
     gui.register(sup);
+    // Stav v liste: relace site jen se stavem rozhrani a kanal ke zvuku.
+    let mut names = Vec::new();
+    let mut hs = Vec::new();
+    if let Some(n) = crate::system::NET.get()
+        && let Ok(s) = n.root.restrict(netproto::policy::rights::INFO, &netproto::policy::Policy::only(Vec::new()))
+    {
+        names.push("net");
+        hs.push(s.into_channel().into_handle());
+    }
+    if let Ok(a) = crate::audio::connect() {
+        names.push("audio");
+        hs.push(a.into_handle());
+    }
+    if !hs.is_empty()
+        && let Err(e) = gui.command(format!("{} {}", control::SOURCES, names.join(" ")).as_bytes(), hs)
+    {
+        println!("init: stav pro listu: {e}");
+    }
     // Terminal: za oknem a listkem kanal pripojeni k termd (init ho spousti
     // a hlida, viz `terminal.rs`).
     let term = match crate::terminal::TERMINALS.lock().client("gui-term") {

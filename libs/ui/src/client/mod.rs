@@ -25,7 +25,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use gfx::Canvas;
-use gfx::text::Text;
 use guiproto::a11y::Node;
 use guiproto::action::{Arg, Value};
 use guiproto::replay::Replay;
@@ -53,6 +52,8 @@ pub enum Event {
     /// s poslednim potvrzenym obsahem. Rozpracovana zmena se ztratila:
     /// aplikace, ktera kresli sama, at okno nakresli znovu.
     Restored { generation: u64 },
+    /// Rezim barev systemu (prekreslit stejnym motivem).
+    Theme(theme::Mode),
 }
 
 /// Kanal okna a listek k jeho obnove ze startovni zpravy aplikace.
@@ -309,6 +310,11 @@ impl Window {
                 first
             }
             ServerMsg::Close { .. } => Some(Event::Close),
+            ServerMsg::Theme { mode } => Some(Event::Theme(match mode {
+                1 => theme::Mode::Dark,
+                2 => theme::Mode::Contrast,
+                _ => theme::Mode::Light,
+            })),
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
             ServerMsg::ActionInvoke { call, action, args, caller, synthetic } => Some(Event::Action { call, id: action, args, caller, synthetic }),
             _ => None,
@@ -516,7 +522,7 @@ pub fn run<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u32) ->
 /// aplikace bere data) a predava je [`App::external`].
 pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extra: Option<Channel>) -> Result<()> {
     let mut win = Window::open(link, mode, w, h, &app.title())?;
-    let mut ui: Ui<A::Msg> = Ui::new(Text::system(), win.w, win.h);
+    let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
     let mut dirty = true;
     loop {
         if dirty && !win.frame_pending {
@@ -612,6 +618,11 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
         }
         // Obnovene okno ma posledni potvrzeny obsah; nakreslit aktualni.
         Event::Restored { .. } => *dirty = true,
+        Event::Theme(m) => {
+            ui.look.set_mode(m);
+            ui.rebuild(app.title(), app.view());
+            *dirty = true;
+        }
         Event::Frame => {}
     }
     Ok(true)

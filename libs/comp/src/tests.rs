@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use gfx::Canvas;
-use gfx::text::Text;
+use gfx::text::Family;
 use guiproto::Rect;
 use guiproto::a11y::{Node, Role, actions};
 use guiproto::action;
@@ -22,6 +22,13 @@ mod gpu;
 const W: u32 = 800;
 const H: u32 = 600;
 
+/// Pismo UI jako v systemu (Inter s vlastnostmi z tokenu).
+pub(crate) fn fonts() -> Family {
+    let t = theme::Theme::builtin(theme::Mode::Light);
+    let feats: Vec<[u8; 4]> = t.font.ui_features.iter().filter(|f| f.1).map(|f| f.0).collect();
+    Family::new(font::inter(), &feats)
+}
+
 struct T {
     c: Comp,
     frame: Vec<u32>,
@@ -30,6 +37,7 @@ struct T {
 
 fn info(id: &str, name: &str) -> ConnectInfo {
     ConnectInfo {
+        system: false,
         id: id.into(),
         name: name.into(),
         perms: vec!["síť".into()],
@@ -43,7 +51,7 @@ impl T {
         let c = Comp::new(
             W,
             H,
-            Text::system(),
+            fonts(),
             Box::new(move || {
                 n += 0x1234_5678_9abc;
                 n
@@ -143,6 +151,13 @@ impl T {
         self.c.take_out()
     }
 
+    /// Odznak duvery okna klienta.
+    fn badge_rect(&self, cl: ClientId) -> Rect {
+        let g = self.c.clients[&cl].windows[&1];
+        let w = &self.c.windows[&g];
+        w.badge(self.c.badge_width(&self.c.clients[&cl]))
+    }
+
     fn input(&mut self, e: Event, synthetic: bool) {
         let r = Record::new(e, 0, if synthetic { flags::SYNTHETIC } else { 0 }, self.now);
         self.c.input(&[r], self.now);
@@ -215,7 +230,7 @@ fn hello_window_commit_compose_present() {
     let r = t.rect_of(cl);
     assert_eq!(t.px(r.x + 10, r.y + 10), RED);
     // Titulek systemu nad obsahem (barva titulku okna s fokusem).
-    assert_eq!(t.px(r.x + 150, r.y - 4), render::color::TITLE_FOCUSED);
+    assert_eq!(t.px(r.x + 150, r.y - 4), t.c.style.theme.color.surface_2);
     let out = t.out();
     assert!(client_msgs(&out, cl).contains(&ServerMsg::Presented { txn: 1, time: t.now }));
     // Nic se nemeni: zadny dalsi tik.
@@ -375,7 +390,7 @@ fn custom_title_regions_and_system_buttons() {
         a,
         ClientMsg::Regions {
             window: 1,
-            regions: vec![(Rect::new(0, 0, 200, 32), RegionKind::Drag), (Rect::new(0, 0, 60, 32), RegionKind::NoDrag)],
+            regions: vec![(Rect::new(0, 0, 200, 32), RegionKind::Drag), (Rect::new(85, 0, 12, 32), RegionKind::NoDrag)],
         },
     );
     t.commit(a, 2, 0, 0, 0);
@@ -385,13 +400,19 @@ fn custom_title_regions_and_system_buttons() {
     let g = t.c.clients[&a].windows[&1];
     // Tlacitka kresli system: zavrit vpravo v titulku.
     let close = t.c.windows[&g].buttons()[0];
-    assert_eq!(t.px(close.x + 2, close.y + 12), render::color::CLOSE);
+    assert_ne!(t.px(close.x + 2, close.y + 14), t.c.style.theme.color.danger);
+    // Cil kliknuti je vetsi nez viditelne tlacitko.
+    assert_eq!(t.c.hit(close.x + 14, close.y - 4), Some((g, input::Zone::Button(0))));
     assert_eq!(t.c.hit(close.x + 2, close.y + 2), Some((g, input::Zone::Button(0))));
+    // Najeti: zavrit cervene.
+    t.move_to(close.x + 14, close.y + 14);
+    t.frame();
+    assert_eq!(t.px(close.x + 2, close.y + 14), t.c.style.theme.color.danger);
     // Odznak duvery na pevnem miste vlevo: badge nad obsahem aplikace.
     assert_eq!(t.c.hit(r.x + 10, r.y + 12), Some((g, input::Zone::Badge)));
     // NoDrag uvnitr Drag = obsah (karta aplikace).
-    assert!(matches!(t.c.hit(r.x + 50, r.y + 30), Some((_, input::Zone::Content(50, 30)))));
-    assert_eq!(t.c.hit(r.x + 100, r.y + 10), Some((g, input::Zone::Title)));
+    assert!(matches!(t.c.hit(r.x + 90, r.y + 20), Some((_, input::Zone::Content(90, 20)))));
+    assert_eq!(t.c.hit(r.x + 79, r.y + 10), Some((g, input::Zone::Title)));
     // Zavrit = zadost aplikaci (rozhodne ona).
     t.click(close.x + 5, close.y + 5);
     assert!(client_msgs(&t.out(), a).contains(&ServerMsg::Close { window: 1 }));
@@ -404,9 +425,10 @@ fn badge_is_drawn_over_app_content() {
     t.window(a, Mode::CustomTitle, RED);
     t.frame();
     let r = t.rect_of(a);
-    // Aplikace kresli cervenou az do titulku, odznak je presto zeleny.
+    // Aplikace kresli cervenou az do titulku, odznak je presto videt.
     assert_eq!(t.px(r.x + 2, r.y + 50), RED);
-    assert_eq!(t.px(r.x + 8, r.y + 16), render::color::BADGE);
+    let b = t.badge_rect(a);
+    assert_eq!(t.px(b.x + 2, b.y + b.h as i32 / 2), t.c.style.theme.color.trust_bg);
 }
 
 #[test]
@@ -416,13 +438,15 @@ fn frameless_badge_on_hover_and_minimize_restore() {
     t.window(a, Mode::Frameless, RED);
     t.frame();
     let r = t.rect_of(a);
-    assert_eq!(t.px(r.x + 8, r.y + 16), RED);
+    let b = t.badge_rect(a);
+    let p = (b.x + 2, b.y + b.h as i32 / 2);
+    assert_eq!(t.px(p.0, p.1), RED);
     t.move_to(r.x + 40, r.y + 2);
     t.frame();
-    assert_eq!(t.px(r.x + 8, r.y + 16), render::color::BADGE, "odznak pri najeti k okraji");
+    assert_eq!(t.px(p.0, p.1), t.c.style.theme.color.trust_bg, "odznak pri najeti k okraji");
     t.now += input::BADGE_SHOW + 1;
     t.frame();
-    assert_eq!(t.px(r.x + 8, r.y + 16), RED);
+    assert_eq!(t.px(p.0, p.1), RED);
     // Panel: klik na polozku okno minimalizuje (ma fokus) a dalsi obnovi.
     let item = t.c.panel_items()[0].1;
     t.click(item.x + 5, item.y + 5);
@@ -735,7 +759,7 @@ fn buffer_layer_scroll_and_clip() {
     t.frame();
     let r = t.rect_of(a);
     assert_eq!(t.px(r.x + 2, r.y + 2), RED);
-    assert_eq!(t.px(r.x + 2, r.y + 25), render::color::CONTENT, "orez skupiny");
+    assert_eq!(t.px(r.x + 2, r.y + 25), t.c.style.theme.color.surface, "orez skupiny");
     // Scroll dela kompozitor: posun obsahu o 20 = zelena.
     t.msg(a, ClientMsg::LayerSet { layer: 1, props: LayerProps { mask: prop::SCROLL, scroll: (0, 20), ..Default::default() } });
     t.commit(a, 2, 0, 0, 0);
@@ -809,6 +833,46 @@ fn render_scene_snapshot() {
     t.c.damage_all();
     t.frame();
     save_png("comp-scene.png", &t.frame, W, H);
+}
+
+/// Okno `w x h` s titulkem a obsahem barvy `color` na pozici (`x`, `y`).
+fn look_window(t: &mut T, id: &str, name: &str, title: &str, (x, y, w, h): (i32, i32, u32, u32), color: u32) -> ClientId {
+    let cl = t.client(id);
+    t.c.clients.get_mut(&cl).unwrap().info.name = name.into();
+    t.msg(cl, ClientMsg::WindowCreate { window: 1, mode: Mode::Standard, w, h, title: title.into() });
+    t.msg(cl, ClientMsg::LayerCreate { layer: 1, window: 1, parent: 0, kind: LayerKind::Solid });
+    t.msg(cl, ClientMsg::LayerSet { layer: 1, props: LayerProps { mask: prop::RECT | prop::COLOR, rect: Rect::new(0, 0, w, h), color, ..Default::default() } });
+    t.commit(cl, 1, 0, 0, 0);
+    let g = t.c.clients[&cl].windows[&1];
+    t.c.windows.get_mut(&g).unwrap().rect = Rect::new(x, y, w, h);
+    cl
+}
+
+/// Snimky vzhledu podle `design/okna.html` a `design/plocha.html`
+/// (`target/look-light.png`, `target/look-dark.png`).
+#[test]
+fn look_snapshots() {
+    for (mode, file) in [(theme::Mode::Light, "look-light.png"), (theme::Mode::Dark, "look-dark.png")] {
+        let mut t = T::new();
+        t.c.set_mode(mode);
+        let surface = t.c.style.theme.color.surface;
+        let term = t.c.style.theme.color.term_bg;
+        look_window(&mut t, "org.magnumopus.files", "Soubory", "Dokumenty", (60, 90, 360, 220), surface);
+        look_window(&mut t, "org.magnumopus.term", "Terminál", "~/Projekty - Terminál", (300, 260, 420, 280), term);
+        t.c.set_net(Some(render::NetState::Online));
+        t.c.set_volume(Some((60, false)));
+        t.c.set_tasks(4, 1);
+        t.c.set_clock(Some(("14:05".into(), "so 7. 11.".into())));
+        t.c.damage_all();
+        let t0 = std::time::Instant::now();
+        t.frame();
+        let first = t0.elapsed();
+        t.c.damage_all();
+        let t1 = std::time::Instant::now();
+        t.frame();
+        std::println!("cela obrazovka {W}x{H}: prvni {first:?} (s plochou), dalsi {:?}", t1.elapsed());
+        save_png(file, &t.frame, W, H);
+    }
 }
 
 #[test]
@@ -934,8 +998,9 @@ fn tasks_icon_shows_count_and_focuses_task_manager() {
     t.c.set_tasks(3, 1);
     t.frame();
     let r = t.c.tasks_icon().unwrap();
-    // Uloha agenta: oranzova ikona.
-    assert_eq!(t.px(r.x + 2, r.y + r.h as i32 / 2), render::color::WARN);
+    // Uloha agenta: stitek v barve agenta.
+    let ai = t.c.style.theme.color.ai_soft;
+    assert!((r.x..r.right() as i32).any(|x| t.px(x, r.y + r.h as i32 / 2) == ai), "stitek agenta");
     let ga = t.c.clients[&a].windows[&1];
     t.c.minimize(ga);
     t.click(r.x + 4, r.y + 4);
@@ -1063,4 +1128,40 @@ fn same_length_different_arguments_are_rejected() {
     let out = t.out();
     assert!(client_msgs(&out, a).is_empty());
     assert!(out.iter().any(|o| matches!(o, Out::Caller(5, CallerReply::Result { ok: false, .. }))));
+}
+
+#[test]
+fn startup_cost() {
+    let t0 = std::time::Instant::now();
+    let tok = theme::Tokens::builtin();
+    let t1 = t0.elapsed();
+    let _ = tok.theme(theme::Mode::Light).unwrap();
+    let t2 = t0.elapsed();
+    let f = fonts();
+    let t3 = t0.elapsed();
+    let mut c = Comp::new(1280, 800, f, Box::new(|| 1));
+    let t4 = t0.elapsed();
+    let mut px = vec![0u32; 1280 * 800];
+    let mut canvas = Canvas::new(&mut px, 1280, 800, 1280).unwrap();
+    c.tick(1, &mut canvas);
+    let t5 = t0.elapsed();
+    std::println!("parse {t1:?} theme {t2:?} fonts {t3:?} comp {t4:?} first frame {t5:?}");
+}
+
+/// Zmena pod listou prekresli celou listu (rozmazane pozadi je jedno).
+#[test]
+fn bar_blur_redraws_whole_bar() {
+    let mut t = T::new();
+    t.frame();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    // Okno kousek nad listou: posun dolu poskodi jen jeho oblast.
+    let bar = t.c.panel_rect();
+    t.c.windows.get_mut(&g).unwrap().rect.y = bar.y - 60;
+    t.c.damage_window(g);
+    let rects = t.frame().unwrap();
+    let covered: u64 = rects.iter().map(|r| r.intersect(&bar).w as u64 * r.intersect(&bar).h as u64).sum();
+    assert!(covered >= bar.w as u64 * bar.h as u64, "lista prekreslena cela: {rects:?}");
 }

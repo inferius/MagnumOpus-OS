@@ -100,6 +100,12 @@ fn inline(v: &Value) -> String {
     match v {
         Value::Str(s) => quote(s),
         Value::Int(n) => alloc::format!("{n}"),
+        Value::Float(f) => {
+            // Vzdy s teckou nebo exponentem, aby se cislo precetlo zpet
+            // jako desetinne.
+            let s = alloc::format!("{:?}", f.0);
+            if s.contains(['.', 'e', 'E']) { s } else { alloc::format!("{s}.0") }
+        }
         Value::Bool(b) => String::from(if *b { "true" } else { "false" }),
         Value::Array(a) => {
             let items: Vec<String> = a.iter().map(inline).collect();

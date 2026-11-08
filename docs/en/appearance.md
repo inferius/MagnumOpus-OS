@@ -918,6 +918,11 @@ background at 90 % opacity) and with shadows from precomputed textures.
 
 ### Phase 1: foundation (in parallel)
 
+> **Change from v1.5:** phase 1 is done in the system on the 2D path
+> and in GPU composition with identical pixels (no blur). Shadows are
+> precomputed masks; the glyph atlas is a CPU cache for now. Details and
+> deviations: [GUI: Look per the design](gui.md#look-per-the-design-phase-1).
+
 | Thread | Content | Where | Done when |
 |---|---|---|---|
 | **G1 GPU rendering** | rounded rectangles and borders as a shader (distance field, anti-aliased edges in one pass); shadows as a blurred shape (two-pass Gaussian or dual Kawase) cached per size; **background blur** for the bar, menus and dimming (only under the region, at half size); gradients; group opacity through an intermediate buffer; **animation timeline** in `compd` (curves and durations from tokens, interruptible, drop a frame instead of delaying input); token loading and theme switching | `compd`, `libs/comp`, virgl backend | a frame with 10 windows, shadows and a blurred bar within 4 ms of GPU time in QEMU; window-open animation without a dropped frame; the 2D fallback draws the same without blur |
@@ -998,3 +1003,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.3 | 2026-11-07 | logo (vectors from the user) in the prototypes and the design system; boot screen with the transition into the avatar |
 | v1.4 | 2026-11-07 | critical crash screen (A Calm + technical report on D), notification after the next boot; visual language handbook |
 | v1.5 | 2026-11-08 | installation: live USB, installer with a disk change preview, first run |
+| v1.6 | 2026-11-08 | **phase 1 implemented** in the system: tokens as data (`libs/theme`), Inter and JetBrains Mono with `GPOS` kerning, windows, badge, bar, desktop, dialog and terminal following the prototypes; deviations in [GUI: Look per the design](gui.md#look-per-the-design-phase-1) |

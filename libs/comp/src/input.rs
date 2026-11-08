@@ -9,12 +9,9 @@ use guiproto::Rect;
 use guiproto::window::{InputEvent, InputRecord, Mode, RegionKind, ServerMsg};
 use inputproto::{Action, Button, Event, Record};
 
-use crate::render::{CURSOR_H, CURSOR_W, PANEL_H};
-use crate::scene::TITLE_H;
+use crate::render::{CURSOR_H, CURSOR_W, Hover};
 use crate::{ClientId, Comp, SYNC_TIMEOUT};
 
-/// Sirka okraje pro zmenu velikosti.
-const EDGE: i32 = 6;
 /// Nove okno jine aplikace dostane fokus jen tehdy, kdyz uzivatel aspon
 /// tak dlouho nepsal.
 pub const FOCUS_GRACE: u64 = 1_500_000_000;
@@ -51,6 +48,8 @@ pub struct InputState {
     pub untrusted: alloc::vec::Vec<u16>,
     /// Cas posledni klavesy (fokus novych oken).
     pub last_key: u64,
+    /// Zvyrazneni pri najeti (tlacitko okna, polozka listy).
+    pub hover: Option<Hover>,
 }
 
 impl InputState {
@@ -64,6 +63,7 @@ impl InputState {
             injecting: 0,
             untrusted: alloc::vec::Vec::new(),
             last_key: 0,
+            hover: None,
         }
     }
 
@@ -104,18 +104,28 @@ impl Comp {
     pub fn hit(&self, x: i32, y: i32) -> Option<(u32, Zone)> {
         for &gid in self.z.iter().rev() {
             let w = self.windows.get(&gid)?;
-            if !w.mapped || w.minimized || !w.outer().contains(x, y) {
+            if !w.mapped || w.minimized || !w.grab().contains(x, y) {
                 continue;
             }
+            // Neviditelny okraj vne okna: zmena velikosti.
+            if !w.outer().contains(x, y) {
+                let o = w.outer();
+                return Some((
+                    gid,
+                    Zone::Edge { right: x as i64 >= o.right() - w.geo.radius as i64, bottom: y as i64 >= o.bottom() - w.geo.radius as i64 },
+                ));
+            }
             if w.mode.has_frame() {
-                for (i, b) in w.buttons().iter().enumerate() {
-                    if b.contains(x, y) {
-                        return Some((gid, Zone::Button(i)));
-                    }
+                // Cile tlacitek se prekryvaji: plati nejblizsi stred.
+                let hits = w.button_hits();
+                let best = (0..3)
+                    .filter(|&i| hits[i].contains(x, y))
+                    .min_by_key(|&i| (hits[i].x + hits[i].w as i32 / 2 - x).abs());
+                if let Some(i) = best {
+                    return Some((gid, Zone::Button(i)));
                 }
                 let cl = self.clients.get(&w.client)?;
-                let bw = Comp::badge_width(&self.text, &Comp::badge_text(cl));
-                if w.badge(bw).contains(x, y) {
+                if w.badge(self.badge_width(cl)).contains(x, y) {
                     return Some((gid, Zone::Badge));
                 }
             }
@@ -144,13 +154,8 @@ impl Comp {
             }
             if w.mode != Mode::Fullscreen {
                 let o = w.outer();
-                return Some((
-                    gid,
-                    Zone::Edge {
-                        right: x as i64 >= o.right() - EDGE as i64,
-                        bottom: y as i64 >= o.bottom() - EDGE as i64,
-                    },
-                ));
+                let e = w.geo.edge as i64;
+                return Some((gid, Zone::Edge { right: x as i64 >= o.right() - e, bottom: y as i64 >= o.bottom() - e }));
             }
         }
         None
@@ -270,16 +275,17 @@ impl Comp {
         self.input.px = x.clamp(0, self.w as i32 - 1);
         self.input.py = y.clamp(0, self.h as i32 - 1);
         let new = self.cursor_rect();
-        self.damage(old);
-        self.damage(new);
+        self.damage_top(old);
+        self.damage_top(new);
         let (px, py) = (self.input.px, self.input.py);
         if let Some(d) = self.input.drag {
             return self.drag_to(d, px, py, now);
         }
         if self.dialogs.active().is_some() {
-            return;
+            return self.set_hover(None);
         }
         let hit = self.hit(px, py);
+        self.update_hover(px, py, hit);
         let target = match hit {
             Some((g, Zone::Content(..))) => Some(g),
             _ => None,
@@ -314,16 +320,57 @@ impl Comp {
         }
     }
 
+    fn update_hover(&mut self, px: i32, py: i32, hit: Option<(u32, Zone)>) {
+        let h = if self.panel_rect().contains(px, py) {
+            let bar = self.bar_layout();
+            if bar.launcher.contains(px, py) {
+                Some(Hover::Launcher)
+            } else if let Some((g, _)) = bar.apps.iter().find(|(_, r)| r.contains(px, py)) {
+                Some(Hover::BarApp(*g))
+            } else if bar.tasks.is_some_and(|r| r.contains(px, py)) {
+                Some(Hover::Tasks)
+            } else {
+                None
+            }
+        } else {
+            match hit {
+                Some((g, Zone::Button(i))) => Some(Hover::Button(g, i)),
+                _ => None,
+            }
+        };
+        self.set_hover(h);
+    }
+
+    /// Zmena zvyrazneni: poskodit puvodni i nove misto.
+    pub(crate) fn set_hover(&mut self, h: Option<Hover>) {
+        if self.input.hover == h {
+            return;
+        }
+        for x in [self.input.hover, h].into_iter().flatten() {
+            match x {
+                Hover::Button(g, i) => {
+                    if let Some(w) = self.windows.get(&g) {
+                        let r = w.button_hits()[i];
+                        self.damage(r);
+                    }
+                }
+                Hover::BarApp(_) | Hover::Tasks | Hover::Launcher => self.damage_panel(),
+            }
+        }
+        self.input.hover = h;
+    }
+
     fn drag_to(&mut self, d: Drag, px: i32, py: i32, now: u64) {
         match d {
             Drag::Move { window, dx, dy } => {
                 let (sw, sh) = (self.w as i32, self.h as i32);
+                let reserve = self.bar_reserve() as i32;
                 self.damage_window(window);
                 if let Some(w) = self.windows.get_mut(&window) {
                     // Titulek nesmi zmizet z obrazovky.
                     w.rect.x = (px - dx).clamp(-(w.rect.w as i32) + 80, sw - 80);
-                    let top = if w.mode == Mode::Standard { TITLE_H as i32 } else { 0 };
-                    w.rect.y = (py - dy).clamp(top, sh - PANEL_H as i32 - 20);
+                    let top = if w.mode == Mode::Standard { (w.geo.title_h + w.geo.border) as i32 } else { 0 };
+                    w.rect.y = (py - dy).clamp(top, sh - reserve - top.max(20));
                 }
                 self.damage_window(window);
             }
@@ -481,11 +528,13 @@ impl Comp {
 
     pub(crate) fn toggle_maximize(&mut self, g: u32, now: u64) {
         let (sw, sh) = (self.w, self.h);
+        let reserve = self.bar_reserve();
         let Some(w) = self.windows.get_mut(&g) else { return };
         if w.mode == Mode::Fullscreen {
             return;
         }
-        let top = if w.mode == Mode::Standard { TITLE_H } else { 0 };
+        let b = w.geo.border;
+        let top = if w.mode == Mode::Standard { w.geo.title_h } else { 0 };
         let (nw, nh) = match w.restore.take() {
             Some(r) => {
                 w.rect.x = r.x;
@@ -494,9 +543,9 @@ impl Comp {
             }
             None => {
                 w.restore = Some(w.rect);
-                w.rect.x = 1;
-                w.rect.y = top as i32 + 1;
-                (sw - 2, sh - PANEL_H - top - 2)
+                w.rect.x = b as i32;
+                w.rect.y = (top + b) as i32;
+                (sw - 2 * b, sh - reserve - top - 2 * b)
             }
         };
         self.damage_window(g);

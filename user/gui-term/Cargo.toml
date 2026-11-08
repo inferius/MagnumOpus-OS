@@ -16,4 +16,7 @@ guiproto = { path = "../../libs/guiproto" }
 gfx = { path = "../../libs/gfx" }
 ui = { path = "../../libs/ui", features = ["os"] }
 term = { path = "../../libs/term" }
+theme = { path = "../../libs/theme" }
+# Pismo terminalu (tokeny `font.mono`): JetBrains Mono 400 a 600 (tucne).
+font = { path = "../../libs/font", features = ["mono-400", "mono-600"] }
 inputproto = { path = "../../libs/inputproto" }

@@ -27,7 +27,15 @@ use crate::a11y::Node;
 use crate::action::{self, Action, Arg, Value};
 use crate::{Error, ReadExt, Reader, Result, WriteExt, Writer, read_count};
 
+/// `display [pasmo]`: kanal displeje (handle); nepovinne casove pasmo
+/// IANA pro hodiny v liste (`display Europe/Prague`).
 pub const DISPLAY: &str = "display";
+/// `theme light|dark|contrast`: rezim barev vzhledu (tokeny
+/// `design/tokens.toml`).
+pub const THEME: &str = "theme";
+/// `sources [net] [audio]`: kanaly pro stav v liste (handly ve stejnem
+/// poradi): relace site jen s pravem `INFO`, kanal zvukove sluzby.
+pub const SOURCES: &str = "sources";
 pub const INPUT: &str = "input";
 pub const SECURE: &str = "secure";
 pub const CONNECT: &str = "connect";
@@ -58,6 +66,9 @@ pub struct ConnectInfo {
     pub perms: Vec<String>,
     /// Akce z manifestu.
     pub actions: Vec<Action>,
+    /// Systemova aplikace (`[app] system = true` v manifestu, posoudi init):
+    /// odznak duvery ukaze "Systém" se stitem s fajfkou.
+    pub system: bool,
 }
 
 impl ConnectInfo {
@@ -73,6 +84,7 @@ impl ConnectInfo {
         for a in &self.actions {
             a.encode(&mut w);
         }
+        w.bool(self.system);
         w.finish()
     }
 
@@ -93,10 +105,14 @@ impl ConnectInfo {
         for _ in 0..n.min(action::MAX_ACTIONS + 1) {
             actions.push(Action::decode(&mut r, len)?);
         }
-        if n > action::MAX_ACTIONS || !r.is_empty() {
+        if n > action::MAX_ACTIONS {
             return Err(Error::InvalidArgs);
         }
-        Ok(Self { id, name, perms, actions })
+        let system = r.bool()?;
+        if !r.is_empty() {
+            return Err(Error::InvalidArgs);
+        }
+        Ok(Self { id, name, perms, actions, system })
     }
 }
 

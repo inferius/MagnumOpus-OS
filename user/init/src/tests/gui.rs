@@ -33,6 +33,7 @@ pub const TESTS: &[Test] = &[
     ("compd: bezpecna obrazovka po Ctrl+Alt+Del (QMP)", secure_screen),
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
     ("compd: spravce uloh a ikona uloh v panelu", task_manager),
+    ("compd: vzhled podle navrhu, snimky obrazovky (QMP)", look_shots),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
@@ -42,12 +43,33 @@ pub const TESTS: &[Test] = &[
 pub const QEMU_DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
 pub const QEMU_SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
 pub const QEMU_SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
+/// Snimek obrazovky: za znackou jmeno (`light`, `dark`, `contrast`);
+/// xtask porizuje `screendump` do `target/shots/`.
+pub const QEMU_SHOT: &str = "init: test gui: snimek ";
+/// Poradi snimku a rezim motivu (musi sedet s `xtask/src/qmp.rs`).
+pub const SHOTS: &[&str] = &["light", "dark", "contrast"];
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Barvy, ktere test ocekava na obrazovce (`libs/ui` a `libs/comp`).
-pub(super) const UI_BG: u32 = 0xFF1E_232A;
-pub(super) const BADGE: u32 = 0xFF1F_6F4E;
+/// Pozadi okna aplikace a odznak duvery (tokeny, svetly motiv).
+pub(super) fn ui_bg() -> u32 {
+    theme::Theme::builtin(theme::Mode::Light).color.surface
+}
+
+pub(super) fn badge() -> u32 {
+    theme::Theme::builtin(theme::Mode::Light).color.trust_bg
+}
+
+/// Odznak okna bez fokusu: nizsi sytost (jako `saturate(.6)` v prototypu,
+/// stejny vzorec jako kompozitor).
+pub(super) fn badge_inactive() -> u32 {
+    let c = badge();
+    let (r, g, b) = (c >> 16 & 0xFF, c >> 8 & 0xFF, c & 0xFF);
+    let l = (r * 54 + g * 183 + b * 19) >> 8;
+    let m = |v: u32| (l * 102 + v * 153) / 255;
+    (c & 0xFF00_0000) | m(r) << 16 | m(g) << 8 | m(b)
+}
 
 pub(super) struct State {
     pub(super) gui: Gui,
@@ -157,10 +179,10 @@ fn window_and_a11y(startup: &Startup) -> TestResult {
     wait_tree(&inspect, w.id, "pocitadlo po kliku", |t| has(t, Role::Label, "Počítadlo: 1"))?;
     // Obraz: pozadi okna aplikace a odznak duvery systemu nad titulkem.
     settle(&inspect)?;
-    let bg = pixel(&inspect, w.rect.x + 3, w.rect.y + w.rect.h as i32 - 4)?;
-    check_eq!(bg, UI_BG, "pozadi okna aplikace na obrazovce");
-    let badge = pixel(&inspect, w.rect.x + 9, w.rect.y - 16)?;
-    check_eq!(badge, BADGE, "odznak duvery v titulku");
+    let bg = pixel(&inspect, w.rect.x + w.rect.w as i32 / 2, w.rect.y + w.rect.h as i32 - 4)?;
+    check_eq!(bg, ui_bg(), "pozadi okna aplikace na obrazovce");
+    let px = pixel(&inspect, w.rect.x + 9, w.rect.y - 16)?;
+    check_eq!(px, badge(), "odznak duvery v titulku");
     let st = gui.status().map_err(|e| fail("status", e))?;
     check!(st.clients == 1 && st.windows == 1 && st.presented > 0, "stav kompozitoru");
     println!("init: test gui: okno {}x{} na {},{}", w.rect.w, w.rect.h, w.rect.x, w.rect.y);
@@ -291,7 +313,7 @@ fn secure_screen(_: &Startup) -> TestResult {
         // uz nema svou barvu pozadi.
         settle(&s.inspect)?;
         let w = windows(&s.inspect)?.into_iter().find(|w| w.id == s.demo).ok_or("okno ukazky zmizelo")?;
-        check!(pixel(&s.inspect, w.rect.x + 3, w.rect.y + w.rect.h as i32 - 4)? != UI_BG, "pod bezpecnou obrazovkou je ztlumeno");
+        check!(pixel(&s.inspect, w.rect.x + w.rect.w as i32 / 2, w.rect.y + w.rect.h as i32 - 4)? != ui_bg(), "pod bezpecnou obrazovkou je ztlumeno");
         // Dialog prijima vstup az chvili po zobrazeni.
         time::sleep(Duration::from_millis(400));
         println!("{QEMU_SECURE_ENTER}");
@@ -335,7 +357,8 @@ fn terminal_window(startup: &Startup) -> TestResult {
         })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
-        check_eq!(pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?, BADGE, "odznak nad vlastnim titulkem");
+        let px = pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?;
+        check!(px == badge() || px == badge_inactive(), alloc::format!("odznak nad vlastnim titulkem: {px:#x}"));
         Ok(())
     })
 }
@@ -350,8 +373,8 @@ fn task_manager(startup: &Startup) -> TestResult {
         let t = wait_tree(&s.inspect, w.id, "seznam uloh", |t| t.iter().any(|n| n.role == Role::ListItem))?;
         // Uloha agenta je vyrazne oznacena a nahore.
         let first = t.iter().find(|n| n.role == Role::ListItem).unwrap();
-        check!(first.name.starts_with("[AGENT AI]"), "uloha agenta nahore a oznacena");
-        check!(t.iter().any(|n| n.role == Role::Label && n.name.starts_with("Agent AI:")), "stitek agenta v zahlavi");
+        check!(first.name.starts_with("agent: "), "uloha agenta nahore a oznacena");
+        check!(t.iter().any(|n| n.role == Role::Label && n.name.starts_with("agent: Agent AI:")), "stitek agenta v zahlavi");
         // Systemova uloha bez opravneni: Zrusit neaktivni.
         let scrub = t.iter().find(|n| n.role == Role::ListItem && n.name.contains("Scrub")).ok_or("uloha Scrub chybi")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: scrub.id, action: actions::ACTIVATE, value: String::new() })?;
@@ -359,12 +382,43 @@ fn task_manager(startup: &Startup) -> TestResult {
         let cancel = node(&t, Role::Button, "Zrušit")?;
         check!(cancel.state & guiproto::a11y::state::DISABLED != 0, "Zrusit bez prava neaktivni");
         // Uloha agenta: pozastavit pres pristupnost.
-        let agent = t.iter().find(|n| n.role == Role::ListItem && n.name.starts_with("[AGENT AI]")).unwrap();
+        let agent = t.iter().find(|n| n.role == Role::ListItem && n.name.starts_with("agent: ")).unwrap();
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: agent.id, action: actions::ACTIVATE, value: String::new() })?;
-        let t = wait_tree(&s.inspect, w.id, "detail ulohy agenta", |t| has(t, Role::Label, "Spustil agent AI (asistent)"))?;
+        let t = wait_tree(&s.inspect, w.id, "detail ulohy agenta", |t| has(t, Role::Label, "agent: Spustil agent AI (asistent)"))?;
         let pause = node(&t, Role::Button, "Pozastavit")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: pause.id, action: actions::ACTIVATE, value: String::new() })?;
         wait_tree(&s.inspect, w.id, "pozastaveni ulohy agenta", |t| t.iter().any(|n| n.role == Role::Label && n.name == "Stav: pozastaveno 15 %"))?;
+        Ok(())
+    })
+}
+
+/// Snimky vzhledu pro kontrolu proti prototypum (`design/`): okna ukazky,
+/// terminalu a spravce uloh s listou ve svetlem, tmavem a kontrastnim
+/// motivu. Snimek porizuje xtask pres QMP po znacce.
+fn look_shots(_: &Startup) -> TestResult {
+    with(|s| {
+        s.gui.command(b"tasks 4 1", Vec::new()).map_err(|e| fail("tasks", e))?;
+        for name in SHOTS {
+            let before = s.gui.status().map_err(|e| fail("status", e))?.presented;
+            s.gui.command(alloc::format!("theme {name}").as_bytes(), Vec::new()).map_err(|e| fail("theme", e))?;
+            // Ne `settle`: terminal s bezici ulohou animuje a kompozitor
+            // neni nikdy uplne v klidu. Pockat na zobrazeni snimku po
+            // zmene (prekresleni cele obrazovky) a na prekresleni aplikaci
+            // (dostaly zpravu o motivu).
+            let end = time::deadline_after(TIMEOUT);
+            while s.gui.status().map_err(|e| fail("status", e))?.presented < before + 3 {
+                check!(time::now() < end, "snimek po zmene motivu");
+                time::sleep(Duration::from_millis(100));
+            }
+            // Aplikace prekresluji samy (velke okno je v emulaci pomale).
+            time::sleep(Duration::from_millis(3500));
+            println!("{QEMU_SHOT}{name}");
+            // xtask porizuje snimek; pockat, nez skonci.
+            time::sleep(Duration::from_millis(1500));
+        }
+        s.gui.command(b"theme light", Vec::new()).map_err(|e| fail("theme", e))?;
+        check!(s.gui.command(b"theme fialova", Vec::new()).is_err(), "neplatny motiv");
+        time::sleep(Duration::from_millis(2500));
         Ok(())
     })
 }

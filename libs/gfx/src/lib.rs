@@ -12,14 +12,40 @@
 
 extern crate alloc;
 
+pub mod backdrop;
+pub mod blur;
 pub mod damage;
+pub mod icon;
 pub mod png;
+pub mod shadow;
+pub mod shape;
 pub mod text;
 
 #[cfg(test)]
 mod tests;
 
 pub use guiproto::Rect;
+
+/// Odmocnina bez `std` (Newtonova metoda z odhadu podle exponentu).
+pub fn sqrtf(x: f32) -> f32 {
+    if !(x > 0.0) || !x.is_finite() {
+        return 0.0;
+    }
+    let mut y = f32::from_bits((x.to_bits() >> 1) + 0x1FC0_0000);
+    for _ in 0..4 {
+        y = 0.5 * (y + x / y);
+    }
+    y
+}
+
+/// Dolni cela cast bez `std`.
+pub fn floorf(x: f32) -> f32 {
+    if !x.is_finite() || x.abs() >= 8_388_608.0 {
+        return x;
+    }
+    let i = x as i32 as f32;
+    if i > x { i - 1.0 } else { i }
+}
 
 /// Barva z RGB (nepruhledna).
 pub const fn rgb(r: u8, g: u8, b: u8) -> u32 {
@@ -66,7 +92,7 @@ pub const fn over(d: u32, s: u32) -> u32 {
 /// Soucet slozek s nasycenim (pro premultiplied barvy nepretece, ale
 /// vadny vstup aplikace muze mit slozku vetsi nez alfu).
 #[inline]
-const fn add_sat(a: u32, b: u32) -> u32 {
+pub(crate) const fn add_sat(a: u32, b: u32) -> u32 {
     let mut out = 0;
     let mut sh = 0;
     while sh < 32 {
@@ -175,7 +201,7 @@ impl<'a> Canvas<'a> {
         self.as_image().get(x, y)
     }
 
-    fn rows(&mut self, r: Rect, mut f: impl FnMut(&mut [u32], i32, i32)) {
+    pub(crate) fn rows(&mut self, r: Rect, mut f: impl FnMut(&mut [u32], i32, i32)) {
         let r = r.intersect(&self.clip);
         if r.is_empty() {
             return;
@@ -245,6 +271,13 @@ impl<'a> Canvas<'a> {
     /// Prolne masku pokryti (napr. glyf: 0 = nic, 255 = plne) barvou `c`;
     /// leva horni rohova pozice masky je `(x, y)`.
     pub fn mask(&mut self, x: i32, y: i32, mw: u32, mh: u32, mask: &[u8], c: u32) {
+        self.mask_lut(x, y, mw, mh, mask, c, None);
+    }
+
+    /// Jako [`Canvas::mask`], pokryti nejdriv projde tabulkou `lut`
+    /// (gama textu).
+    #[allow(clippy::too_many_arguments)]
+    pub fn mask_lut(&mut self, x: i32, y: i32, mw: u32, mh: u32, mask: &[u8], c: u32, lut: Option<&[u8; 256]>) {
         if mask.len() < (mw * mh) as usize {
             return;
         }
@@ -252,9 +285,12 @@ impl<'a> Canvas<'a> {
             let my = (ry - y) as u32;
             for (i, p) in row.iter_mut().enumerate() {
                 let mx = (rx - x) as u32 + i as u32;
-                let k = mask[(my * mw + mx) as usize] as u32;
+                let mut k = mask[(my * mw + mx) as usize];
+                if let Some(l) = lut {
+                    k = l[k as usize];
+                }
                 if k > 0 {
-                    *p = over(*p, scale(c, k));
+                    *p = over(*p, scale(c, k as u32));
                 }
             }
         });

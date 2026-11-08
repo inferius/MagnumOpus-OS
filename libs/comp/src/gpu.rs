@@ -25,8 +25,16 @@ use gfx::Canvas;
 use guiproto::Rect;
 use guiproto::window::LayerKind;
 
-use crate::render::{Kids, children, desktop, draw_window_above, draw_window_below, has_above};
+use gfx::shape::corner_rects;
+
+use crate::render::{Hover, Kids, children, draw_window_above, draw_window_below, draw_window_body, draw_window_shadow, window_core};
 use crate::scene::{Client, Layer, Window};
+
+/// Ma bezramove okno neco nad obsahem (odznak, ztlumeni)? Okna s ramem
+/// maji vzdy ram a rohy.
+fn has_above(w: &Window, cl: &Client, now: u64) -> bool {
+    w.mode.has_frame() || w.badge_until > now || cl.unresponsive
+}
 use crate::{ClientId, Comp};
 
 /// Zdrojovy povrch operace.
@@ -69,8 +77,7 @@ pub trait GpuSink {
 
 /// Oblast povrchu `Below`/`Above` okna ve snimku (s okrajem stinu).
 pub fn window_bounds(w: &Window) -> Rect {
-    let o = w.outer();
-    if w.mode.has_frame() { Rect::new(o.x, o.y, o.w + 3, o.h + 3) } else { o }
+    w.visual()
 }
 
 fn local(r: Rect, b: Rect) -> Rect {
@@ -85,14 +92,18 @@ impl Comp {
     }
 
     pub(crate) fn compose_gpu(&mut self, canvas: &mut Canvas<'_>, sink: &mut dyn GpuSink, rects: &[Rect], now: u64) {
-        let panel_items = self.panel_items();
+        let bar = self.bar_layout();
         let dialog_active = self.dialogs.active().is_some();
         let screen = self.screen();
+        let hover = self.input.hover;
+        if rects.iter().any(|r| !r.intersect(&self.panel_visual()).is_empty()) {
+            self.ensure_bar_blur(now);
+        }
         let mut trees: Vec<(u32, Kids)> = Vec::new();
         for &gid in &self.z {
             let Some(w) = self.windows.get(&gid) else { continue };
-            // Stejny vyber jako CPU cesta (podle `outer`, bez stinu).
-            if !w.mapped || w.minimized || !rects.iter().any(|r| !w.outer().intersect(r).is_empty()) {
+            // Stejny vyber jako CPU cesta (vcetne stinu).
+            if !w.mapped || w.minimized || !rects.iter().any(|r| !w.visual().intersect(r).is_empty()) {
                 continue;
             }
             let Some(cl) = self.clients.get(&w.client) else { continue };
@@ -105,58 +116,78 @@ impl Comp {
                 continue;
             }
             canvas.set_clip(r);
-            desktop(canvas, self.h);
+            self.desktop(canvas);
             sink.upload(Src::Desktop, screen, r, canvas.pixels(), stride);
             sink.draw(GpuDraw { src: Src::Desktop, src_rect: r, dst: r, clip: r, opacity: 255, opaque: true });
             for (gid, kids) in &trees {
                 let w = &self.windows[gid];
-                if w.outer().intersect(&r).is_empty() {
+                if w.visual().intersect(&r).is_empty() {
                     continue;
                 }
                 let b = window_bounds(w);
                 let reg = b.intersect(&r);
                 let cl = &self.clients[&w.client];
                 let focused = self.focus == Some(*gid);
+                let hov = hover.and_then(|h| match h {
+                    Hover::Button(g, i) if g == *gid => Some(i),
+                    _ => None,
+                });
+                let core = window_core(w);
+                // Pod obsahem: stin vsude, telo a titulek mimo rohove ctverce.
                 canvas.set_clip(reg);
                 canvas.fill(reg, 0);
-                draw_window_below(canvas, &mut self.text, w, cl, focused);
-                sink.upload(Src::Below(*gid), b, reg, canvas.pixels(), stride);
-                // Uvnitr `outer` je vse nejdriv nepruhledne vyplnene: kopie
-                // (prolinani by alfu 254 od textu nad vyplni zmenilo). Stin
-                // mimo `outer` se prolina.
-                let o = w.outer();
-                let shadow = [Rect::new(o.right() as i32, o.y + 3, 3, o.h), Rect::new(o.x + 3, o.bottom() as i32, o.w.saturating_sub(3), 3)];
-                for (part, opaque) in [(o, true), (shadow[0], false), (shadow[1], false)] {
-                    let p = part.intersect(&reg);
-                    if !p.is_empty() && (opaque || w.mode.has_frame()) {
-                        sink.draw(GpuDraw { src: Src::Below(*gid), src_rect: local(p, b), dst: p, clip: r, opacity: 255, opaque });
+                draw_window_shadow(canvas, &mut self.style, w, focused);
+                for k in core {
+                    canvas.set_clip(reg.intersect(&k));
+                    if !canvas.clip().is_empty() {
+                        draw_window_below(canvas, &mut self.style, w, cl, focused, hov);
                     }
                 }
-                let content = r.intersect(&w.rect);
-                if !content.is_empty() {
-                    gpu_children(sink, w.client, cl, kids, 0, (w.rect.x, w.rect.y), content, 255, 0);
+                sink.upload(Src::Below(*gid), b, reg, canvas.pixels(), stride);
+                sink.draw(GpuDraw { src: Src::Below(*gid), src_rect: local(reg, b), dst: reg, clip: r, opacity: 255, opaque: false });
+                // Obsah aplikace (mimo rohove ctverce).
+                for k in core {
+                    let content = r.intersect(&w.rect).intersect(&k);
+                    if !content.is_empty() {
+                        gpu_children(sink, w.client, cl, kids, 0, (w.rect.x, w.rect.y), content, 255, 0);
+                    }
                 }
-                if has_above(w, cl, now) {
+                // Nad obsahem: prvky systemu a ram mimo rohy, v rozich cele
+                // okno (i obsah, kresleny CPU) vynasobene zaoblenym tvarem.
+                let rad = w.radius();
+                if rad > 0 || has_above(w, cl, now) {
                     canvas.set_clip(reg);
                     canvas.fill(reg, 0);
-                    draw_window_above(canvas, &mut self.text, w, cl, now);
+                    for k in core {
+                        canvas.set_clip(reg.intersect(&k));
+                        if !canvas.clip().is_empty() {
+                            draw_window_above(canvas, &mut self.style, w, cl, now, hov, focused);
+                        }
+                    }
+                    if rad > 0 {
+                        for k in corner_rects(w.outer(), rad) {
+                            canvas.set_clip(reg.intersect(&k));
+                            if !canvas.clip().is_empty() {
+                                draw_window_body(canvas, &mut self.style, w, cl, kids, focused, now, hov);
+                                canvas.set_clip(reg.intersect(&k));
+                                canvas.round_corner_patch(w.outer(), rad);
+                            }
+                        }
+                    }
                     sink.upload(Src::Above(*gid), b, reg, canvas.pixels(), stride);
                     sink.draw(GpuDraw { src: Src::Above(*gid), src_rect: local(reg, b), dst: reg, clip: r, opacity: 255, opaque: false });
                 }
             }
-            canvas.set_clip(r);
-            canvas.fill(r, 0);
-            self.draw_top(canvas, &panel_items, dialog_active);
-            sink.upload(Src::Top, screen, r, canvas.pixels(), stride);
-            // Panel je cely vyplneny (kopie), zbytek (kurzor, ztlumeni,
-            // dialog) se prolina.
-            let panel = self.panel_rect();
-            let above = Rect::new(0, 0, self.w, panel.y.max(0) as u32);
-            for (part, opaque) in [(above, false), (panel, true)] {
-                let p = part.intersect(&r);
-                if !p.is_empty() {
-                    sink.draw(GpuDraw { src: Src::Top, src_rect: p, dst: p, clip: r, opacity: 255, opaque });
+            for t in self.top_regions(dialog_active) {
+                let part = r.intersect(&t);
+                if part.is_empty() {
+                    continue;
                 }
+                canvas.set_clip(part);
+                canvas.fill(part, 0);
+                self.draw_top(canvas, &bar, dialog_active);
+                sink.upload(Src::Top, screen, part, canvas.pixels(), stride);
+                sink.draw(GpuDraw { src: Src::Top, src_rect: part, dst: part, clip: part, opacity: 255, opaque: false });
             }
         }
         canvas.reset_clip();
