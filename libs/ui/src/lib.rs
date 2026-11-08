@@ -69,6 +69,13 @@ pub trait App {
         Err(String::from("akce neni implementovana"))
     }
 
+    /// Menu aplikace (nabidky s akcemi z manifestu, `guiproto::menu`):
+    /// kresli ho system (paleta prikazu Ctrl+K, menu v titulku). Posila se
+    /// pri zmene (zaskrtnuti, zakazano s duvodem).
+    fn menu(&self) -> Vec<guiproto::menu::MenuItem> {
+        Vec::new()
+    }
+
     /// Zprava z dalsiho kanalu aplikace (napr. sluzba uloh), viz
     /// `client::run_with`. Vraci, zda se zmenil stav (prekreslit).
     fn external(&mut self, data: &[u8]) -> bool {

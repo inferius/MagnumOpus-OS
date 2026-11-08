@@ -18,6 +18,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use guiproto::action::{Arg, Value};
+use guiproto::menu::MenuItem;
 use guiproto::window::Mode;
 use libos::{Startup, println};
 use ui::{App, Node, button, checkbox, column, label, list, progress, row, scroll, spacer, text_input};
@@ -63,6 +64,29 @@ impl App for Demo {
             _ => "poznámek",
         };
         format!("Ukázka ({n} {word})")
+    }
+
+    /// Menu pro paletu prikazu (a pozdeji titulek): akce z manifestu.
+    fn menu(&self) -> Vec<MenuItem> {
+        let item = |label: &str, action: &str, args: Vec<Arg>| MenuItem { label: label.into(), action: action.into(), args, ..Default::default() };
+        let group = |label: &str, children: Vec<MenuItem>| MenuItem { label: label.into(), children, ..Default::default() };
+        let mut add = item("Přičíst 1", "counter.add", alloc::vec![(String::from("by"), Value::Int(1))]);
+        add.shortcut = String::from("Ctrl+=");
+        add.keywords = alloc::vec![String::from("plus"), String::from("zvýšit")];
+        let mut clear = item("Smazat všechny poznámky", "notes.clear", Vec::new());
+        if self.notes.is_empty() {
+            clear.disabled = String::from("žádné poznámky");
+        }
+        alloc::vec![
+            group("Počítadlo", alloc::vec![add, item("Přičíst 10", "counter.add", alloc::vec![(String::from("by"), Value::Int(10))])]),
+            group(
+                "Poznámky",
+                alloc::vec![
+                    item("Přidat ukázkovou poznámku", "note.add", alloc::vec![(String::from("text"), Value::Text(String::from("Z palety příkazů")))]),
+                    clear,
+                ],
+            ),
+        ]
     }
 
     fn view(&self) -> Node<Msg> {

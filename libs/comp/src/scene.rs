@@ -136,6 +136,8 @@ pub struct Window {
     pub minimized: bool,
     /// Obdelnik pred maximalizaci.
     pub restore: Option<Rect>,
+    /// Menu okna (rozbalene, jen overene polozky; `palette.rs`).
+    pub menu: Vec<guiproto::menu::Flat>,
     /// Zmena velikosti tahem za levy / horni okraj: pravy / dolni okraj
     /// (obrazovka), ktery zustava na miste, az aplikace potvrdi velikost.
     pub anchor: (Option<i32>, Option<i32>),
@@ -474,6 +476,7 @@ impl Comp {
             ClientMsg::ActionResult { call, ok, value, message } => {
                 self.services.action_result(c, call, ok, value, message, &mut self.out);
             }
+            ClientMsg::MenuUpdate { window, items } => self.menu_update(c, window, &items),
             _ => {}
         }
     }
@@ -520,6 +523,7 @@ impl Comp {
             mapped: false,
             minimized: false,
             restore: None,
+            menu: Vec::new(),
             anchor: (None, None),
             pending_size: None,
             configure: None,
@@ -818,5 +822,6 @@ pub(crate) fn op_of(m: &ClientMsg) -> u32 {
         ClientMsg::SyncGroup { .. } => op::SYNC_GROUP,
         ClientMsg::Pong { .. } => op::PONG,
         ClientMsg::ActionResult { .. } => op::ACTION_RESULT,
+        ClientMsg::MenuUpdate { .. } => op::MENU_UPDATE,
     }
 }

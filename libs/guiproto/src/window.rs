@@ -32,6 +32,8 @@ pub mod op {
     pub const SYNC_GROUP: u32 = 16;
     pub const PONG: u32 = 17;
     pub const ACTION_RESULT: u32 = 18;
+    /// Deklarace menu okna (`crate::menu`).
+    pub const MENU_UPDATE: u32 = 19;
     // Kompozitor -> aplikace.
     pub const WELCOME: u32 = 100;
     pub const CONFIGURE: u32 = 101;
@@ -496,6 +498,8 @@ pub enum ClientMsg {
     SyncGroup { count: u32 },
     Pong { serial: u32 },
     ActionResult { call: u32, ok: bool, value: Option<action::Value>, message: String },
+    /// Menu okna (cely strom; posila se pri zmene, kompozitor ho drzi).
+    MenuUpdate { window: u32, items: Vec<crate::menu::MenuItem> },
 }
 
 /// Zprava kompozitor -> aplikace.
@@ -642,6 +646,11 @@ impl ClientMsg {
                     v.encode(&mut w);
                 }
             }
+            MenuUpdate { window, items } => {
+                w = Writer::op(op::MENU_UPDATE);
+                w.u32(*window);
+                crate::menu::encode_menu(&mut w, items);
+            }
         }
         w.finish()
     }
@@ -741,6 +750,7 @@ impl ClientMsg {
                 let value = if r.bool()? { Some(action::Value::decode(&mut r)?) } else { None };
                 ActionResult { call, ok, value, message }
             }
+            op::MENU_UPDATE => MenuUpdate { window: r.u32()?, items: crate::menu::decode_menu(&mut r, len)? },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {

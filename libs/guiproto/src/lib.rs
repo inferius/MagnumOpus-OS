@@ -24,6 +24,7 @@ pub mod a11y;
 pub mod action;
 pub mod control;
 pub mod display;
+pub mod menu;
 pub mod modes;
 pub mod replay;
 pub mod window;
