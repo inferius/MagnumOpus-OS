@@ -17,7 +17,7 @@ fn tokens_builtin() {
     assert_eq!(l.text.heading.weight, 650);
     assert_eq!(l.size.title_h, 40);
     assert_eq!(l.size.bar_h, 52);
-    assert_eq!(l.icon_stroke, 1.75);
+    assert_eq!(l.icon_stroke, 2.0);
     assert_eq!(l.space[5], 16);
     assert_eq!(l.radius.pill, 999);
     assert_eq!(l.motion.frame_ms, 16.7);

@@ -98,7 +98,8 @@ colors!(
     bg, wall_a, wall_b, surface, surface_2, surface_3, border, border_strong, ink, ink_muted, ink_faint, accent,
     on_accent, accent_soft, accent_ink, focus, trust_bg, trust_ink, trust_border, ai, on_ai, ai_soft, ai_ink, ok,
     ok_soft, warn, warn_soft, danger, on_danger, danger_soft, scrim, term_bg, term_ink, term_dim, term_red,
-    term_green, term_yellow, term_blue, term_magenta, term_cyan,
+    term_green, term_yellow, term_blue, term_magenta, term_cyan, icon_files_bg, icon_files, icon_system_bg,
+    icon_system, icon_network_bg, icon_network, icon_devices_bg, icon_devices, icon_time_bg, icon_time,
 );
 
 /// Jeden radek typograficke skaly.
