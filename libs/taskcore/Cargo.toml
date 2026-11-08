@@ -1,0 +1,10 @@
+[package]
+name = "taskcore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Jadro sluzby uloh taskd: seznam uloh, prava, odber zmen, neznamy proces v jobu"
+
+[dependencies]
+abi = { workspace = true }
+taskproto = { path = "../taskproto" }

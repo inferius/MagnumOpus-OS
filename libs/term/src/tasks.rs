@@ -304,6 +304,14 @@ pub fn cancel(t: &Shared, id: u64) -> Option<TaskDone> {
     Some(TaskDone { id, result: done.result.map(|b| decode_value(&b)), undo: done.undo })
 }
 
+/// Pozadat ulohu o zruseni (prehled uloh, panel): jen priznak - vysledek
+/// (`SH_INTERRUPTED`) si vyzvedne interpret jako u kazde jine ulohy.
+pub fn request_cancel(t: &Shared, id: u64) {
+    if let Some(e) = t.lock().entries.iter().find(|e| e.id == id && e.done.is_none()) {
+        e.control.cancel();
+    }
+}
+
 /// Zrusene ulohy, ktere presto stihly prevzit zmeny souboru (dobehly tesne
 /// pred zrusenim): jejich undo prevezme relace.
 pub fn take_late(t: &Shared) -> Vec<Vec<UndoEntry>> {

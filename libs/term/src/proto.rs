@@ -13,7 +13,8 @@ use alloc::vec::Vec;
 use shlang::value::Value;
 
 /// Verze 2: `seq` v `Complete`/`Completions` a `Format`/`Formatted`.
-pub const VERSION: u32 = 2;
+/// Verze 3: prehled uloh (`Tasks`, `TaskAction`).
+pub const VERSION: u32 = 3;
 
 /// Polozka vystupu v bloku.
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +56,9 @@ pub enum ClientMsg {
     /// Vyznamove zvyrazneni rozepsaneho radku (okno ho posila pri psani;
     /// `seq` = poradi, okno zahodi starsi odpovedi).
     Highlight { session: u64, line: String, seq: u32 },
+    /// Akce nad ulohou z panelu uloh (`action`: 0 zrusit, 1 pozastavit,
+    /// 2 pokracovat).
+    TaskAction { session: u64, task: u64, action: u8 },
 }
 
 /// Sluzba -> terminal.
@@ -80,6 +84,9 @@ pub enum ServerMsg {
     /// Odpoved na `Highlight`: useky (zacatek, delka v bajtech, trida
     /// `shlang::highlight::Class`) a misto chyby parseru.
     Highlighted { seq: u32, spans: Vec<(u32, u32, u8)>, error: Option<(u32, u32, String)> },
+    /// Ulohy uzivatele z prehledu uloh (`taskd`): cely seznam po kazde
+    /// zmene (panel uloh, stavovy radek, upozorneni).
+    Tasks { tasks: Vec<taskproto::Task> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -449,6 +456,12 @@ impl ClientMsg {
                 w.str(line);
                 w.u32(*seq);
             }
+            ClientMsg::TaskAction { session, task, action } => {
+                w.u8(12);
+                w.u64(*session);
+                w.u64(*task);
+                w.u8(*action);
+            }
         }
         w.0
     }
@@ -467,6 +480,7 @@ impl ClientMsg {
             9 => ClientMsg::Sessions,
             10 => ClientMsg::Highlight { session: r.u64()?, line: r.str()?, seq: r.u32()? },
             11 => ClientMsg::Choose { prompt: r.u64()?, index: r.u32()? },
+            12 => ClientMsg::TaskAction { session: r.u64()?, task: r.u64()?, action: r.u8()? },
             _ => return Err(DecodeError),
         };
         r.done()?;
@@ -553,6 +567,11 @@ impl ServerMsg {
                 w.u8(10);
                 w.str(message);
             }
+            ServerMsg::Tasks { tasks } => {
+                w.u8(13);
+                let snap = taskproto::Reply::Snapshot { req: 0, seq: 0, tasks: tasks.clone(), last: true };
+                w.bytes(&snap.encode());
+            }
             ServerMsg::Highlighted { seq, spans, error } => {
                 w.u8(11);
                 w.u32(*seq);
@@ -596,6 +615,10 @@ impl ServerMsg {
                 }
                 ServerMsg::Prompt { prompt, question, detail, choices }
             }
+            13 => match taskproto::Reply::decode(&r.bytes()?) {
+                Ok(taskproto::Reply::Snapshot { tasks, .. }) => ServerMsg::Tasks { tasks },
+                _ => return Err(DecodeError),
+            },
             12 => ServerMsg::ItemUpdate { session: r.u64()?, block: r.u64()?, index: r.u32()?, item: get_item(&mut r)? },
             7 => {
                 let seq = r.u32()?;

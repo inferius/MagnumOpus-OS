@@ -6,6 +6,7 @@
 mod basic;
 mod dns;
 mod clock_sync;
+mod disks;
 mod display;
 mod drivers;
 mod events;
@@ -15,21 +16,25 @@ mod fs_data;
 mod fs_hist;
 mod fs_recovery;
 mod gui;
+mod gui_gpu;
 mod gui_recovery;
 mod input;
 mod ipc;
 mod jobs;
 mod memory;
 pub mod net;
+mod nic;
 mod process;
 mod recovery;
 mod recovery_kit;
 mod console;
 mod shell;
 mod supervisor;
+mod tasks;
 mod time;
 mod usb;
 mod web;
+mod vulkan;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -47,6 +52,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", process::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
+    ("disky", disks::TESTS),
+    ("sitove karty", nic::TESTS),
     ("souborovy system", fs::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
@@ -61,6 +68,10 @@ const SUITES: &[(&str, &[Test])] = &[
     ("supervisor", supervisor::TESTS),
     ("obnova sluzeb", recovery::TESTS),
     ("shell", shell::TESTS),
+    ("ulohy", tasks::TESTS),
+    // Vulkan pred GUI: render uzel otevre init pres displej, ktery pak
+    // prevezme kompozitor.
+    ("vulkan", vulkan::TESTS),
     // Nastaveni obrazu (bochs-display, vlastni compd) pred GUI.
     ("displej", display::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.

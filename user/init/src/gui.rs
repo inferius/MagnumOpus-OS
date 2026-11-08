@@ -360,6 +360,11 @@ impl Gui {
         let mut handles = vec![StartHandle::user(window.into_handle()), StartHandle::user(lease.into_handle())];
         handles.extend(extra);
         let app = apps::spawn(startup, name, handles)?;
+        // Prehled uloh: aplikace i se svym jobem (jmeno a identita z manifestu).
+        match recipe(startup, name) {
+            Ok(info) => crate::tasks::app(&info.name, &info.id, &app.job),
+            Err(_) => crate::tasks::app(name, name, &app.job),
+        }
         self.apps.push(app);
         Ok(self.apps.len() - 1)
     }
@@ -399,6 +404,16 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
     }
     if let Err(e) = gui.launch_supervised(startup, "gui-demo", sup) {
         println!("init: gui-demo nelze spustit: {e}");
+    }
+    // Spravce uloh: za oknem a listkem kanal klienta prehledu uloh
+    // (identita uzivatele, vlastni ulohy, smi ridit).
+    match crate::tasks::client("uzivatel", false, true) {
+        Ok(c) => {
+            if let Err(e) = gui.launch_supervised_with(startup, "gui-tasks", sup, vec![StartHandle::user(c.into_handle())]) {
+                println!("init: gui-tasks nelze spustit: {e}");
+            }
+        }
+        Err(e) => println!("init: kanal prehledu uloh pro gui-tasks: {e}"),
     }
     *GUI.lock() = Some(gui);
 }

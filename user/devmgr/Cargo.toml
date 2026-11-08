@@ -13,4 +13,6 @@ bench = false
 [dependencies]
 libos = { path = "../../libs/libos" }
 pci = { path = "../../libs/pci" }
+# Jen tabulka ID karet (bez feature libos).
+nic = { path = "../../libs/nic" }
 virtio = { path = "../../libs/virtio" }

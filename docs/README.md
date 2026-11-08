@@ -34,6 +34,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Vstup](cs/vstup.md) | [Input](en/input.md) | virtio-input, PS/2, služba inputd, protokol událostí, rozložení, bezpečná zkratka / virtio-input, PS/2, inputd service, event protocol, layouts, secure attention shortcut |
+| [Disky](cs/disky.md) | [Disks](en/disks.md) | NVMe, AHCI (SATA), virtio-blk, ochrana cizích disků a GPT, VMware a skutečné PC / NVMe, AHCI (SATA), virtio-blk, foreign disk protection and GPT, VMware and real PC |
 | [USB](cs/usb.md) | [USB](en/usb.md) | řadič xHCI, huby, HID, ověření nového zařízení / xHCI controller, hubs, HID, new device verification |
 
 ### Grafika / Graphics
@@ -41,6 +42,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Grafika a okna](cs/gui.md) | [Graphics and windows](en/gui.md) | virtio-gpu, kompozitor, protokol okna, strom vrstev a přístupnosti, snímky a transakce, knihovna UI, písmo, systémové dialogy, API akcí / virtio-gpu, compositor, window protocol, layer and accessibility trees, frames and transactions, UI library, fonts, system dialogs, action API |
+| [Vulkan přes Venus](cs/venus.md) | [Vulkan over Venus](en/venus.md) | vlastní ovladač Venus, render uzel, kódování proudu, generátor z vk.xml / own Venus driver, render node, stream encoding, generator from vk.xml |
 | [Nastavení obrazu](cs/displej.md) | [Display configuration](en/display.md) | EDID a DisplayID, režimy a časování, DisplayPort a HDMI, protokol displeje, změna rozlišení, hotplug, page flip, bochs-display, Intel Gen9 až Xe2, bezpečný návrat na obraz firmwaru / EDID and DisplayID, modes and timings, DisplayPort and HDMI, display protocol, resolution changes, hotplug, page flips, bochs-display, Intel Gen9 to Xe2, safe return to the firmware image |
 
 ### Souborový systém / File system
@@ -73,6 +75,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Síť](cs/sit.md) | [Network](en/network.md) | virtio-net, služba netd, TCP/IP, DNS, NTP, oprávnění, API / virtio-net, netd service, TCP/IP, DNS, NTP, permissions, API |
+| [Síťové karty](cs/sitove-karty.md) | [Network cards](en/network-cards.md) | ovladače Intel e1000e a igc, Realtek r8169, společná smyčka, DMA a přerušení, testy nad simulovanými registry, co je ověřené / Intel e1000e and igc, Realtek r8169 drivers, shared loop, DMA and interrupts, tests on simulated registers, what is verified |
 | [Firewall](cs/firewall.md) | [Firewall](en/firewall.md) | manifest aplikace, dotazy uživateli, paketový filtr, profily sítí, audit, filtr DNS / application manifest, asking the user, packet filter, network profiles, audit, DNS filter |
 | [TLS a HTTP](cs/tls-http.md) | [TLS and HTTP](en/tls-http.md) | TLS 1.3, kořenové certifikáty, HTTP/1.1 a HTTP/2, program fetch, rizika / TLS 1.3, root certificates, HTTP/1.1 and HTTP/2, the fetch program, risks |
 

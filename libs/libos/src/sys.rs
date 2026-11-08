@@ -345,12 +345,16 @@ pub fn vmo_create_contiguous(resource: u32, size: u64) -> Result<u32> {
     .map(|v| v as u32)
 }
 
-pub fn vmo_create_physical(resource: u32, phys: u64, size: u64) -> Result<u32> {
+pub fn vmo_create_physical(resource: u32, phys: u64, size: u64, cache: u64) -> Result<u32> {
     call(
         nr::VMO_CREATE_PHYSICAL,
-        [resource as u64, phys, size, 0, 0, 0],
+        [resource as u64, phys, size, cache, 0, 0],
     )
     .map(|v| v as u32)
+}
+
+pub fn vmo_revoke(resource: u32, vmo: u32) -> Result<()> {
+    call(nr::VMO_REVOKE, [resource as u64, vmo as u64, 0, 0, 0, 0]).map(|_| ())
 }
 
 pub fn vmo_phys_addr(resource: u32, vmo: u32, offset: u64) -> Result<u64> {
@@ -492,6 +496,13 @@ pub fn fb_info(vmo: u32) -> Result<abi::syscall::FbInfo> {
 pub fn fb_claim(vmo: u32, claim: bool) -> Result<()> {
     let op = if claim { abi::syscall::fb_op::CLAIM } else { abi::syscall::fb_op::RELEASE };
     call(nr::FB_CONTROL, [vmo as u64, op, 0, 0, 0, 0]).map(|_| ())
+}
+
+/// Procesy jobu a jeho potomku (`JOB_PROCESSES`); `buf` = misto pro zaznamy
+/// (nasobek 64 B). Vrati celkovy pocet (i nad kapacitu `buf`).
+pub fn job_processes(job: u32, buf: &mut [u8]) -> Result<usize> {
+    let max = buf.len() / abi::job::ProcEntry::SIZE;
+    call(nr::JOB_PROCESSES, [job as u64, buf.as_mut_ptr() as u64, max as u64, 0, 0, 0]).map(|n| n as usize)
 }
 
 pub fn job_info(job: u32) -> Result<abi::job::JobInfo> {

@@ -19,6 +19,7 @@ use shlang::value::Value;
 use shlang::{ShError, Style, error::code};
 
 use crate::proto::{ClientMsg, Item, ServerMsg, VERSION};
+use crate::taskboard::{self, Board, Chan, Local};
 use crate::tasks::{self, Clock, Joinable, Notify};
 
 /// Nejdelsi cekani v `await` mezi kontrolami okna (Ctrl-C).
@@ -61,8 +62,62 @@ pub trait Env {
     fn new_notifier(&mut self) -> Option<Arc<dyn Notify>> {
         None
     }
+    /// Zprava do prehledu uloh (`taskd`); `false` = kanal neni.
+    fn task_send(&mut self, _to: Chan, _data: Vec<u8>) -> bool {
+        false
+    }
+    /// Prijate zpravy prehledu uloh (bez cekani).
+    fn task_recv(&mut self) -> Vec<(Chan, Vec<u8>)> {
+        Vec::new()
+    }
     fn clock(&self) -> Option<Clock> {
         None
+    }
+}
+
+/// Kanaly prehledu uloh pres `Env`.
+struct EnvLink<'a>(&'a mut dyn Env);
+
+impl taskboard::Link for EnvLink<'_> {
+    fn send(&mut self, to: Chan, data: Vec<u8>) -> bool {
+        self.0.task_send(to, data)
+    }
+    fn recv(&mut self) -> Vec<(Chan, Vec<u8>)> {
+        self.0.task_recv()
+    }
+}
+
+/// Konce bloku uloh `async` z `log` do prehledu uloh (hotovo, chyba,
+/// zruseno podle polozek bloku).
+fn end_tasks(board: &mut Board, env: &mut dyn Env, log: &[ServerMsg]) {
+    for m in log {
+        let ServerMsg::BlockEnd { block, ok, .. } = m else { continue };
+        let local = Local::Async(*block);
+        if !board.known(local) {
+            continue;
+        }
+        let err = log.iter().rev().find_map(|x| match x {
+            ServerMsg::Item { block: b, item: Item::Error { code: c, message, .. }, .. } if b == block => {
+                Some((c.clone(), message.clone()))
+            }
+            _ => None,
+        });
+        let state = match (ok, err) {
+            (true, _) => taskproto::State::Done(String::new()),
+            (false, Some((c, _))) if c == code::INTERRUPTED => taskproto::State::Cancelled,
+            (false, Some((_, m))) => taskproto::State::Failed { code: 0, message: m },
+            (false, None) => taskproto::State::Failed { code: 0, message: String::from("chyba") },
+        };
+        board.finish(&mut EnvLink(env), local, state);
+    }
+}
+
+/// Pozadavky taskd na ulohy relace (zrusit): priznak ulohy `async`.
+fn apply_controls(board: &mut Board, table: &tasks::Shared) {
+    for (local, c) in core::mem::take(&mut board.controls) {
+        if let (Local::Async(b), taskproto::Control::Cancel(_)) = (local, c) {
+            tasks::request_cancel(table, b);
+        }
     }
 }
 
@@ -158,6 +213,8 @@ pub struct Service {
     pub task_stack: usize,
     /// Proces jedne relace (`shsess`): jedine povolene cislo relace.
     fixed: Option<u64>,
+    /// Prehled uloh (`taskd`): hlasene ulohy a seznam pro okno.
+    pub board: Board,
 }
 
 /// Zvyrazneni jako zprava protokolu.
@@ -200,6 +257,7 @@ struct SessionHost<'a> {
     task_stack: usize,
     /// Zpravy uloh pro bloky relace (zapisou se po radku).
     log: Vec<ServerMsg>,
+    board: &'a mut Board,
 }
 
 impl SessionHost<'_> {
@@ -389,6 +447,7 @@ impl Host for SessionHost<'_> {
         tasks::set_join(self.tasks, id, join);
         let mut line = String::from("async ");
         line.push_str(&spec.label);
+        self.board.register(&mut EnvLink(self.env), Local::Async(id), &line, Some((session, id)), true);
         let m = ServerMsg::BlockStart { session, block: id, line };
         if *self.attached {
             self.link.send(&m);
@@ -401,6 +460,9 @@ impl Host for SessionHost<'_> {
         let notify = self.env.notifier();
         loop {
             self.pump_tasks();
+            // Zruseni z prehledu uloh (panel, GUI) i behem cekani.
+            self.board.pump(&mut EnvLink(self.env));
+            apply_controls(self.board, self.tasks);
             if let Some(bad) = ids.iter().find(|i| !tasks::exists(self.tasks, **i)) {
                 return Err(ShError::new(code::ARGS, alloc::format!("uloha {bad} neexistuje")));
             }
@@ -442,6 +504,61 @@ impl Host for SessionHost<'_> {
         }
     }
 
+    fn tasks(&mut self, op: shlang::host::TasksOp) -> Option<Result<Value, ShError>> {
+        use shlang::host::TasksOp;
+        self.board.pump(&mut EnvLink(self.env));
+        if !self.board.available() {
+            return None;
+        }
+        let (req, what) = match op {
+            TasksOp::List => {
+                // Vlastni prave nahlasene ulohy maji byt videt: chvili pockat
+                // na potvrzeni registrace a udalost (nejvys 1 s).
+                let end = self.env.now().map(|n| n + 1_000_000_000);
+                while !self.board.settled() {
+                    match (end, self.env.now()) {
+                        (Some(e), Some(n)) if n < e => {}
+                        _ => break,
+                    }
+                    self.env.sleep(5_000_000);
+                    self.board.pump(&mut EnvLink(self.env));
+                }
+                let rows = self.board.list.tasks.iter().map(taskboard::record).collect();
+                return Some(Ok(Value::List(rows)));
+            }
+            TasksOp::Cancel(id) => (self.board.action(&mut EnvLink(self.env), id, taskboard::Action::Cancel), "zruseni"),
+            TasksOp::Pause(id) => (self.board.action(&mut EnvLink(self.env), id, taskboard::Action::Pause), "pozastaveni"),
+            TasksOp::Resume(id) => (self.board.action(&mut EnvLink(self.env), id, taskboard::Action::Resume), "pokracovani"),
+            TasksOp::Log(id, n) => (self.board.log(&mut EnvLink(self.env), id, n), "vystup"),
+        };
+        let req = req?;
+        // Odpoved taskd (kratke cekani; o pravech rozhoduje taskd).
+        let end = self.env.now().map(|n| n + 3_000_000_000);
+        loop {
+            self.board.pump(&mut EnvLink(self.env));
+            if let Some(r) = self.board.result(req) {
+                return Some(match r {
+                    Ok(()) => Ok(Value::Nothing),
+                    Err(e) => Err(ShError::sys(e, alloc::format!("tasks: {what} ulohy"))),
+                });
+            }
+            if let Some(lines) = self.board.log_lines(req) {
+                return Some(Ok(Value::List(lines.into_iter().map(Value::Str).collect())));
+            }
+            if self.interrupted() {
+                return Some(Err(ShError::new(code::INTERRUPTED, "tasks prerusen (Ctrl-C)")));
+            }
+            match (end, self.env.now()) {
+                (Some(e), Some(n)) if n >= e => {
+                    return Some(Err(ShError::sys(abi::Error::TimedOut, "tasks: taskd neodpovedel")));
+                }
+                (None, _) | (_, None) => return Some(Err(ShError::sys(abi::Error::TimedOut, "tasks: bez hodin"))),
+                _ => {}
+            }
+            self.env.sleep(10_000_000);
+        }
+    }
+
     fn task_cancel(&mut self, id: u64) -> Option<TaskDone> {
         let d = tasks::cancel(self.tasks, id);
         self.pump_tasks();
@@ -462,6 +579,7 @@ impl Service {
             stack_budget: 512 * 1024,
             task_stack: 160 * 1024,
             fixed: None,
+            board: Board::default(),
         }
     }
 
@@ -506,6 +624,7 @@ impl Service {
                 next_block: &mut next_block,
                 task_stack,
                 log: Vec::new(),
+                board: &mut self.board,
             };
             s.interp.flush(&mut host);
         }
@@ -523,10 +642,17 @@ impl Service {
     fn pump_tasks(&mut self, link: &mut dyn Link, fs: &mut dyn Fs, env: &mut dyn Env) {
         let keep = self.keep_blocks;
         let task_stack = self.task_stack;
-        let Service { sessions, next_prompt, next_block, deferred, home, .. } = self;
+        let Service { sessions, next_prompt, next_block, deferred, home, board, .. } = self;
+        board.pump(&mut EnvLink(&mut *env));
+        // Zmeneny seznam uloh pripojenym oknum (panel, stavovy radek).
+        if core::mem::take(&mut board.changed) && sessions.iter().any(|s| s.attached) {
+            link.send(&ServerMsg::Tasks { tasks: board.list.tasks.clone() });
+        }
         for s in sessions.iter_mut() {
+            apply_controls(board, &s.tasks);
             let mut log = Vec::new();
             pump(&s.tasks, next_prompt, s.attached, link, &mut log);
+            end_tasks(board, &mut *env, &log);
             for m in log {
                 apply(&mut s.blocks, keep, m);
             }
@@ -555,9 +681,11 @@ impl Service {
                 next_block: &mut *next_block,
                 task_stack,
                 log: Vec::new(),
+                board: &mut *board,
             };
             interp.reap_tasks(&mut host);
             let log = core::mem::take(&mut host.log);
+            end_tasks(host.board, host.env, &log);
             for m in log {
                 apply(blocks, keep, m);
             }
@@ -608,6 +736,10 @@ impl Service {
                         link.send(&ServerMsg::BlockEnd { session: id, block: b.id, ok, duration: b.duration });
                     }
                 }
+                // Seznam uloh (jen s prehledem uloh) pred `Attached`.
+                if self.board.available() {
+                    link.send(&ServerMsg::Tasks { tasks: self.board.list.tasks.clone() });
+                }
                 link.send(&ServerMsg::Attached { session: id, cwd: s.interp.cwd.clone(), blocks: s.blocks.len() as u32 });
             }
             ClientMsg::Detach { session } => {
@@ -622,6 +754,13 @@ impl Service {
                     if tasks::answer(&s.tasks, prompt, yes) {
                         break;
                     }
+                }
+            }
+            ClientMsg::TaskAction { task, action, .. } => {
+                // Vysledek (napr. ACCESS_DENIED) okno uvidi jako zmenu stavu
+                // ulohy, nebo ji nevidi; taskd o pravech rozhoduje sam.
+                if let Some(a) = taskboard::Action::from_u8(action) {
+                    self.board.action(&mut EnvLink(env), task, a);
                 }
             }
             ClientMsg::Interrupt { .. } | ClientMsg::Choose { .. } => {}
@@ -708,7 +847,7 @@ impl Service {
         self.start_block(i, line, link);
         let start = env.now();
         let (keep, task_stack) = (self.keep_blocks, self.task_stack);
-        let Service { sessions, next_prompt, next_block, deferred, home, .. } = self;
+        let Service { sessions, next_prompt, next_block, deferred, home, board, .. } = self;
         let s = &mut sessions[i];
         let Session { id, interp, blocks, attached, tasks } = s;
         let mut line_block = blocks.pop().unwrap();
@@ -730,6 +869,7 @@ impl Service {
             next_block,
             task_stack,
             log: Vec::new(),
+            board: &mut *board,
         };
         let out = interp.run_line(&mut host, line);
         for w in out.warnings {
@@ -748,6 +888,7 @@ impl Service {
         };
         // Blok radku zustava pred bloky uloh, ktere spustil.
         let log = core::mem::take(&mut host.log);
+        end_tasks(host.board, host.env, &log);
         blocks.push(line_block);
         for m in log {
             apply(blocks, keep, m);
@@ -774,8 +915,13 @@ impl Service {
             let label: Vec<String> = pending.iter().map(|(jid, line)| alloc::format!("[{jid}] {line}")).collect();
             {
                 let bid = self.start_block(i, &label.join(", "), link);
+                let sid = self.sessions[i].id;
+                for (jid, line) in &pending {
+                    let name = alloc::format!("bg [{jid}] {line}");
+                    self.board.register(&mut EnvLink(&mut *env), Local::Bg(*jid), &name, Some((sid, bid)), false);
+                }
                 let (keep, task_stack) = (self.keep_blocks, self.task_stack);
-                let Service { sessions, next_prompt, next_block, deferred, home, .. } = self;
+                let Service { sessions, next_prompt, next_block, deferred, home, board, .. } = self;
                 let Session { id, interp, blocks, attached, tasks } = &mut sessions[i];
                 let mut job_block = blocks.pop().unwrap();
                 let mut host = SessionHost {
@@ -795,9 +941,18 @@ impl Service {
                     next_block,
                     task_stack,
                     log: Vec::new(),
+                    board: &mut *board,
                 };
                 let results = interp.run_pending_jobs(&mut host);
                 let mut ok = true;
+                for (jid, r) in &results {
+                    let st = match r {
+                        Ok(_) => taskproto::State::Done(String::new()),
+                        Err(e) if e.code == code::INTERRUPTED => taskproto::State::Cancelled,
+                        Err(e) => taskproto::State::Failed { code: 0, message: e.message.clone() },
+                    };
+                    host.board.finish(&mut EnvLink(&mut *host.env), Local::Bg(*jid), st);
+                }
                 for (_, r) in results {
                     match r {
                         Ok(v) => {

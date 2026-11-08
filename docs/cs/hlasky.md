@@ -114,10 +114,36 @@ porušený vnitřní předpoklad (chyba jádra).
 | `devmgr: ovladac X pro ... nelze spustit: ...` | Ovladač chybí v initfs nebo se nespustil (kód chyby). |
 | `virtio-blk BB:ZZ.F: N MiB, flush ano/ne, discard ano/ne` | Disk je připravený. `discard ne` = zařízení neumí TRIM (v QEMU chybí `discard=unmap` u disku); FS pak TRIM přeskakuje. |
 | `virtio-blk ...: inicializace selhala: ...` | Zařízení neodpovídá specifikaci virtio 1.x, nedokončilo reset do sekundy (`TIMED_OUT`) nebo chybí prostředky (MSI-X, DMA paměť, `NO_RESOURCES` = vyčerpaná kvóta omezeného Resource). |
+| `X: disk D: nas oddil GPT, N MiB od sektoru S, sektor B B, zapis povolen` | Ovladač disku (`virtio-blk`, `nvme`, `ahci`) našel náš oddíl; klient vidí jen ten ([Disky](disky.md)). |
+| `X: disk D: cely disk s nasim FS, ..., zapis povolen` | Disk bez tabulky oddílů s naším FS (datový disk v QEMU). |
+| `X: disk D: cizi disk (...), ..., JEN PRO CTENI` | Disk nám nepatří (cizí GPT, MBR, prázdný, poškozená GPT, neplatný náš oddíl). Zápis a TRIM vrací `READ_ONLY`, FS se připojí jen pro čtení. Úmyslná ochrana; pro zápis na disk vytvořit náš oddíl. |
+| `nvme BB:ZZ.F: nepodporovany radic (CAP ...)` | Řadič neumí sadu příkazů NVM, stránku 4 KiB nebo má doorbelly mimo BAR. |
+| `nvme: jmenny prostor N ma metadata ... B na sektor - nepodporovano, vynechan` | Jmenný prostor je naformátovaný s metadaty (T10 PI). Přeformátovat na formát bez metadat (nástroj výrobce, `nvme format`). |
+| `nvme: jmenny prostor N ma sektor ... B - nepodporovano, vynechan` | Sektor větší než jeden přenos řadiče (`MDTS`) nebo než 32 KiB. Běžné sektory 512 B a 4 KiB fungují. |
+| `nvme: radic neodpovida spravne (...), dalsi pozadavky odmitnuty` | Příkaz nedoběhl do 10 s nebo řadič vrátil cizí číslo příkazu. Řadič je vypnutý (nepoužívá DMA); disk do restartu nefunguje. |
+| `ahci BB:ZZ.F: MSI nelze zapnout (...), obsluha dotazovanim` | Řadič nemá MSI (nebo zpráva nejde zapsat); ovladač funguje dotazováním, jen s vyšší zátěží CPU. |
+| `ahci: port P: disk ... neumi LBA48 - vynechan` | Velmi starý disk bez LBA48. Nepodporováno. |
+| `ahci: port P: disk ... ma logicky sektor ... B - nepodporovano, vynechan` | Disk hlásí logický sektor, který není mocnina dvou 512 B..32 KiB (chybná odpověď IDENTIFY). Disky 512 B i 4Kn fungují. |
+| `ahci: port P: zarizeni s podpisem ... (ne disk SATA) vynechano` | Na portu je mechanika ATAPI nebo port multiplier. |
+| `ahci: port P: neodpovida (...), dalsi pozadavky odmitnuty` | Příkaz nedoběhl do 20 s; port je zastavený. |
+| `devmgr: ovladac X pro ... nenahlasil disky: ...` | Ovladač `nvme`/`ahci` neposlal `done` do 20 s (pomalé roztočení disku, zaseknutý řadič). Disky nahlášené do té doby fungují. |
 | `virtio-net BB:ZZ.F: MAC xx:..., linka pripojena/odpojena` | Síťová karta je připravená. MAC je z konfigurace zařízení, jinak místně spravovaná (`02:...`). |
 | `virtio-net ...: inicializace selhala: ...` | Jako u disku: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA paměť). |
 | `virtio-net ...: zarizeni neodpovida spravne (...), koncim` | Zařízení vrátilo nesmyslný index fronty nebo buffer, který nemělo (`CORRUPTED`). Ovladač ho resetuje (přestane používat DMA) a skončí; síť do restartu nefunguje. |
 | `virtio-net ...: zahozeno N prijatych ramcu` | Při ukončení: rámce, které služba sítě nestíhala přijímat (plná fronta kanálu) nebo byly neplatné. |
+| `e1000e/igc/r8169 BB:ZZ.F: <cip> vvvv:dddd, MAC xx:..., MSI, linka ...` | Karta Intel nebo Realtek je připravená ([síťové karty](sitove-karty.md)): model čipu, ID PCI, MAC, mechanismus přerušení (MSI, MSI-X) a stav linky (`pripojena 1000 Mb/s plny duplex`, `odpojena`). |
+| `e1000e ...: linka ...` | Změna linky (kabel, autonegociace). Ovladač ji pošle `netd` zprávou `LINK`. |
+| `e1000e ...: karta nema MAC, pouzita nahodna mistni` | V NVM ani EEPROM karty není platná MAC (karta bez NVM, prázdné `RAR0`). Adresa `02:...` se změní s každým startem. |
+| `e1000e ...: PHY probuzen z rezimu nizke spotreby (LANPHYPC)` | I217–I219: PHY po vypnutí z Windows bez kabelu neodpovídal, přepnutí napájení ho probudilo. Informativní. |
+| `e1000e ...: PHY neodpovida ...` | I217–I219: PHY neodpovídá ani po probuzení, nebo jeho reset blokuje firmware ME. Linka nejspíš nenaběhne. Pomůže studený start (vytažení napájení). Ovladač zatím neumí vypnout ULP přes ME. |
+| `e1000e/igc ...: DMA se pred resetem nezastavilo`, `NVM se po resetu nenacetla`, `LAN_INIT_DONE po resetu neprisel` | Karta nedokončila krok inicializace v limitu. Ovladač pokračuje jako Linux. Když karta potom nefunguje, jde o chybu hardwaru nebo nepodporovanou revizi. |
+| `e1000e ...: firmware drzi semafor PHY, reset bez nej` | Firmware ME nepustil semafor PHY do 100 ms. Reset proběhl i bez něj. |
+| `<ovladac> ...: inicializace selhala: vyprsel cas: ...` | Reset nebo zapnutí fronty se nedokončilo (`reset MAC`, `reset zarizeni`, `reset cipu`, `zapnuti fronty prijmu`). Karta se nepoužije. |
+| `<ovladac> ...: preruseni (MSI/MSI-X) nelze nastavit: ...` | Funkce nemá MSI ani MSI-X, nebo došla kvóta přerušení. Staré linky INTx ovladače v userspace nepoužívají. |
+| `<ovladac> ...: karta: zarizeni zmizelo ze sbernice, koncim` | Registry čtou samé jedničky: karta vyjmuta, vypnutá nebo spadla linka PCIe. Ovladač skončí a `netd` uvidí zavřený kanál. |
+| `<ovladac> ...: karta: neplatny stav zarizeni: chyba sbernice (system error), koncim` | Realtek hlásí `SYSErr` (chyba DMA na sběrnici). Ovladač kartu resetuje a skončí. |
+| `<ovladac> ...: zahozeno N vadnych prijatych ramcu` | Při ukončení: rámce s chybou CRC, délky nebo rozdělené do více bufferů. |
+| `devmgr: ovladac e1000e/igc/r8169 pro BB:ZZ.F nelze spustit: ...` | Program chybí v initfs, nebo karta nemá paměťový BAR (`NOT_SUPPORTED`). |
 | `virtio-rng BB:ZZ.F: 256 B entropie predano jadru` | Zdroj náhody z hostitele je připravený a jádro dostalo první data. Další dávky každou minutu. |
 | `virtio-rng ...: zarizeni neodpovida (...), koncim` | Zařízení nedokončilo požadavek do 5 s nebo vrací prázdná data. Jádro dál používá ostatní zdroje. |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
@@ -193,6 +219,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | Hláška | Význam a řešení |
 |---|---|
 | `netd: bezim, cekam na DHCP` | Služba dostala `INFO` od ovladače a spustila klienta DHCP. |
+| `netd: linka pripojena/odpojena` | Ovladač karty ohlásil změnu linky (`LINK`). Po znovupřipojení začne DHCP znovu. |
 | `netd: DHCP: adresa A/P, brana G, DNS [...]` | Rozhraní je nastavené; programy čekající na `wait_configured` pokračují. |
 | `netd: DHCP: adresa ztracena` | Pronájem vypršel nebo server adresu odebral. Spojení dostávají `UNREACHABLE`, dokud DHCP adresu neobnoví. |
 | `netd: VAROVANI: generator jadra neni nasazeny, ...` | Jádro zatím nemá dost entropie (bez RDRAND a bez virtio-rng): ID dotazů DNS a čísla TCP jsou odhadnutelná. Viz [Náhodná čísla](syscally.md#náhodná-čísla). |

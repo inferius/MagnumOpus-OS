@@ -584,10 +584,28 @@ fn link_info_roundtrip() {
     let i = link::Info {
         mac: [2, 0, 0, 0, 0, 1],
         mtu: 1500,
-        flags: link::FLAG_UP,
+        flags: link::FLAG_UP | link::FLAG_FULL_DUPLEX,
+        speed_mbps: 2500,
     };
     assert_eq!(link::Info::decode(&i.encode()).unwrap(), i);
     assert!(link::Info::decode(&[link::FRAME; 10]).is_err());
+    // Starsi zprava bez rychlosti (10 B): rychlost neznama.
+    let old = link::Info::decode(&i.encode()[..10]).unwrap();
+    assert_eq!(old, link::Info { speed_mbps: 0, ..i });
+}
+
+#[test]
+fn link_status_roundtrip() {
+    let s = link::Status {
+        flags: link::FLAG_UP,
+        speed_mbps: 1000,
+    };
+    assert_eq!(link::Status::decode(&s.encode()).unwrap(), s);
+    // Starsi zprava jen s priznaky.
+    let old = link::Status::decode(&[link::LINK, 0]).unwrap();
+    assert_eq!(old, link::Status { flags: 0, speed_mbps: 0 });
+    assert!(link::Status::decode(&[link::INFO, 1]).is_err());
+    assert!(link::Status::decode(&[link::LINK]).is_err());
 }
 
 #[test]

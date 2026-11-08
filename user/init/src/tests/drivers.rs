@@ -18,6 +18,7 @@ pub const TESTS: &[Test] = &[
         dma_protection,
     ),
     ("Resource: I/O porty a linky preruseni", ports_and_lines),
+    ("fyzicka VMO: typ cache a odvolani", physical_cache_and_revoke),
 ];
 
 /// Testovaci disk ma presne 1 MiB (viz xtask).
@@ -266,5 +267,41 @@ fn ports_and_lines(s: &Startup) -> TestResult {
         Some(Error::AlreadyExists),
         "linka klavesnice PS/2 je obsazena"
     );
+    Ok(())
+}
+
+/// Typ cache fyzickeho objektu (bez cache, WC, s cache) a odvolani
+/// (`VMO_REVOKE`): mapovani zmizi a dalsi mapovani selze.
+fn physical_cache_and_revoke(s: &Startup) -> TestResult {
+    use libos::Mapping;
+    use libos::abi::vm::{MAP_READ, cache};
+    let page = libos::vm::page_size();
+    let root = s.root_resource.as_ref().ok_or("chybi korenovy Resource")?;
+    let (ecam, _) = s.pci_ecam.first().ok_or("chybi okno ECAM")?;
+    let base = root.phys_addr(ecam, 0).map_err(|e| fail("fyzicka adresa ECAM", e))?;
+    // Konfiguracni prostor 00:00.0 pres vsechny typy cache: stejne ID.
+    let mut ids = alloc::vec::Vec::new();
+    for c in [cache::UNCACHED, cache::WRITE_COMBINING, cache::CACHED] {
+        let vmo = root.device_memory_cached(base, page, c).map_err(|e| fail("okno s typem cache", e))?;
+        let m = Mapping::new(&vmo, 0, page, MAP_READ).map_err(|e| fail("mapovani okna", e))?;
+        ids.push(m.read::<u32>(0));
+    }
+    check!(ids[0] != 0 && ids[0] != u32::MAX, "ID zarizeni 00:00.0");
+    check!(ids.iter().all(|&v| v == ids[0]), "stejne ID pres vsechny typy cache");
+    check_eq!(root.device_memory_cached(base, page, 3).err(), Some(Error::InvalidArgs), "neznamy typ cache");
+    // Odvolani: mapovani zmizi (unmap ho uz nenajde), nove selze.
+    let vmo = root.device_memory(base, page).map_err(|e| fail("okno", e))?;
+    let m = Mapping::new(&vmo, 0, page, MAP_READ).map_err(|e| fail("mapovani", e))?;
+    // Prostredek, ktery rozsah nepovoluje, odvolat nesmi.
+    let other = root
+        .restrict(&[(base + page, page)], 0, 0)
+        .map_err(|e| fail("omezeny prostredek", e))?;
+    check_eq!(other.revoke(&vmo).err(), Some(Error::AccessDenied), "odvolani cizim prostredkem");
+    root.revoke(&vmo).map_err(|e| fail("odvolani", e))?;
+    check_eq!(m.unmap().err(), Some(Error::NotFound), "mapovani po odvolani zmizelo");
+    check_eq!(Mapping::new(&vmo, 0, page, MAP_READ).err(), Some(Error::AccessDenied), "mapovani odvolaneho");
+    // Bezna VMO odvolat nejde.
+    let plain = libos::Vmo::create(page).map_err(|e| fail("bezna VMO", e))?;
+    check_eq!(root.revoke(&plain).err(), Some(Error::NotSupported), "odvolani bezne VMO");
     Ok(())
 }

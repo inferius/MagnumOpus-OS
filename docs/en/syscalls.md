@@ -467,12 +467,25 @@ own limit. Requires `WRITE`. Errors: `INVALID_ARGS` (unknown `pool`),
 
 ### `JOB_INFO`
 
-`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (48 B, little endian):
+`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (56 B, little endian):
 for kernel memory and then user memory always `used` (charged to the job
 including descendants), `limit` (own limit) and `available` (how much
 can still be charged - the smallest free room over the job and all
-ancestors; `u64::MAX` = no limit anywhere). Requires `READ`. Errors:
+ancestors; `u64::MAX` = no limit anywhere), finally `id` (the job number,
+unique until reboot). Requires `READ`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
+
+### `JOB_PROCESSES`
+
+`(job, out_ptr, max) -> count`. Processes of the job and all its
+descendants (task overview: also a process that did not register itself).
+Writes at most `max` (up to 4096) `abi::job::ProcEntry` records (64 B,
+little endian) to `out_ptr`: `pid`, `job` (the process's job number),
+`cpu_ns` (CPU time of all threads, added by the scheduler on a switch),
+`threads` (live threads), `flags` (`proc_flags::FINISHED` = exited,
+waiting for cleanup), `name` (32 B UTF-8, zero padded). Returns the total
+count (also above `max`). Requires `READ`. Errors: `INVALID_ARGS` (`max`
+> 4096), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
 ### `FB_CONTROL`
 
@@ -542,8 +555,10 @@ written only through a mapping (`VMO_READ`/`VMO_WRITE` = `NOT_SUPPORTED`,
 as a syscall buffer `BAD_ADDRESS`). Geometry and taking over the screen
 go through [`FB_CONTROL`](#fb_control).
 
-The object is mapped **write-combining** (x86_64: PAT entry 1 = WC, set by
-the kernel on every CPU; aarch64: Normal Non-cacheable): writes are
+The object is mapped **write-combining** (a physical object with cache
+type `WRITE_COMBINING`, the same as with
+[`VMO_CREATE_PHYSICAL`](#vmo_create_physical); x86_64: PAT entry 1 = WC,
+set by the kernel on every CPU; aarch64: Normal Non-cacheable): writes are
 merged, reads are slow. The kernel does not send the handle when the
 framebuffer overlaps RAM used by the allocator, does not start on a page
 boundary or is smaller than its geometry (a warning in the log, the kernel
@@ -565,13 +580,28 @@ towards the device with barriers (`libos::barrier`). Errors: `INVALID_ARGS`
 
 ### `VMO_CREATE_PHYSICAL`
 
-`(resource, phys, size) -> handle`. A window onto device registers (MMIO).
-The range must not lie in RAM or firmware memory (otherwise
-`ACCESS_DENIED`). It is mapped uncached; it cannot be read through
-`VMO_READ`/`VMO_WRITE` (`NOT_SUPPORTED`, reading registers has side
-effects) and cannot be used as a syscall buffer (`BAD_ADDRESS`). A
-restricted resource (`RESOURCE_CREATE`) may use only its ranges. Errors:
-`INVALID_ARGS` (unaligned address), `ACCESS_DENIED`.
+`(resource, phys, size, cache) -> handle`. A window onto a physical range
+outside RAM (device registers, BAR). The range must not lie in RAM or
+firmware memory (otherwise `ACCESS_DENIED`). `cache` (`abi::vm::cache`)
+sets the cache type of every mapping of the object: `UNCACHED` (0,
+registers), `WRITE_COMBINING` (1, x86_64 PAT WC, aarch64 Normal
+Non-cacheable) or `CACHED` (2, host memory mapped by the device, e.g. the
+virtio-gpu shared memory). It cannot be read through `VMO_READ`/`VMO_WRITE`
+(`NOT_SUPPORTED`, reading registers has side effects) and cannot be used
+as a syscall buffer (`BAD_ADDRESS`). A restricted resource
+(`RESOURCE_CREATE`) may use only its ranges. The resource holder can
+revoke it (`VMO_REVOKE`). Errors: `INVALID_ARGS` (unaligned address,
+unknown cache type), `ACCESS_DENIED`.
+
+### `VMO_REVOKE`
+
+`(resource, vmo)`. Revokes a physical memory object: removes its mappings
+in all processes (including those it was handed to) and further `VM_MAP`
+calls fail with `ACCESS_DENIED`. Access through an old mapping = page
+fault. A driver can thus lend a client a window into device memory and
+safely take it back (the virtio-gpu render node after a blob is
+destroyed). The resource must allow the object's range. Errors:
+`NOT_SUPPORTED` (not a physical object), `ACCESS_DENIED`.
 
 ### `VMO_PHYS_ADDR`
 

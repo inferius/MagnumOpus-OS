@@ -9,3 +9,6 @@ description = "Jadro kompozitoru: okna, strom vrstev, transakce, takt snimku, sk
 guiproto = { path = "../guiproto" }
 inputproto = { path = "../inputproto" }
 gfx = { path = "../gfx" }
+
+[dev-dependencies]
+vkcomp = { path = "../vkcomp" }

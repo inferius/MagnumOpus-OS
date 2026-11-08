@@ -25,6 +25,7 @@ mod ntp;
 mod revocation;
 mod supervisor;
 mod system;
+mod tasks;
 mod terminal;
 mod tests;
 
@@ -41,6 +42,16 @@ fn main(startup: Startup) -> i64 {
             *system::TIME.lock() = Some(t);
         }
         Err(e) => println!("init: sluzbu casu nelze spustit: {e}"),
+    }
+    // Prehled uloh hned po case: FS nepotrebuje a sluzby (fsd, okna,
+    // relace) se v nem pri startu registruji.
+    match tasks::start(&startup) {
+        Ok(()) => {
+            if let Some(t) = tasks::TASKS.lock().as_ref() {
+                sup.watch("taskd", &t.process, None);
+            }
+        }
+        Err(e) => println!("init: sluzbu uloh (taskd) nelze spustit: {e}"),
     }
     match system::start_devices(&startup) {
         Ok(mut devices) => {

@@ -108,7 +108,8 @@ impl Broker {
             | ClientMsg::Interrupt { session }
             | ClientMsg::Complete { session, .. }
             | ClientMsg::Format { session, .. }
-            | ClientMsg::Highlight { session, .. } => self.route_to(session, m),
+            | ClientMsg::Highlight { session, .. }
+            | ClientMsg::TaskAction { session, .. } => self.route_to(session, m),
             ClientMsg::Answer { prompt, .. } | ClientMsg::Choose { prompt, .. } => self.route_to(owner(prompt), m),
             ClientMsg::Sessions => {
                 let sessions = self.routes.iter().map(|r| (r.id, r.blocks, r.cwd.clone())).collect();
