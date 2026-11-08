@@ -484,8 +484,10 @@ impl Service {
             }),
             control::APPS => match self.comp.as_mut() {
                 Some(c) => {
-                    let apps = text.lines().skip(1).filter_map(|l| l.split_once('\t')).map(|(id, n)| (String::from(id), String::from(n))).collect();
-                    c.set_launchable(apps);
+                    // Radky `<id>\t<jmeno>[\t<single|multi>]`.
+                    let rows: Vec<Vec<&str>> = text.lines().skip(1).map(|l| l.split('\t').collect()).filter(|v: &Vec<&str>| v.len() >= 2).collect();
+                    c.set_launchable(rows.iter().map(|v| (String::from(v[0]), String::from(v[1]))).collect());
+                    c.set_multi(rows.iter().filter(|v| v.get(2) == Some(&"multi")).map(|v| String::from(v[0])).collect());
                     Ok((String::new(), Vec::new()))
                 }
                 None => Err(Error::BadState),

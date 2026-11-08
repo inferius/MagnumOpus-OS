@@ -110,8 +110,10 @@ pub struct Bar {
     pub rect: Rect,
     /// Spoustec aplikaci (ikona `apps`; nabidku dodela shell plochy A1).
     pub launcher: Rect,
-    /// Tlacitka oken: (okno, obdelnik).
+    /// Tlacitka aplikaci s okny: (okno zastupce - s fokusem nebo nahore,
+    /// obdelnik); `groups` = vsechna okna te aplikace shora dolu.
     pub apps: Vec<(u32, Rect)>,
+    pub groups: Vec<Vec<u32>>,
     /// Spustitelne aplikace bez okna: (index v `launchable`, obdelnik).
     pub launch: Vec<(usize, Rect)>,
     pub agent: Option<Rect>,
@@ -284,11 +286,21 @@ impl Comp {
         x += item as i32 + gap;
         bar.seps.push(x);
         x += 1 + gap;
-        for (&g, w) in &self.windows {
-            if !w.mapped {
-                continue;
+        // Jedno tlacitko na aplikaci (poradi podle prvniho okna).
+        let mut ids: Vec<String> = Vec::new();
+        for w in self.windows.values() {
+            if let (true, Some(c)) = (w.mapped, self.clients.get(&w.client))
+                && !ids.contains(&c.info.id)
+            {
+                ids.push(c.info.id.clone());
             }
-            bar.apps.push((g, Rect::new(x, y, item, item)));
+        }
+        for id in ids {
+            let group = self.app_windows(&id);
+            let Some(&top) = group.first() else { continue };
+            let rep = group.iter().copied().find(|g| self.focus == Some(*g)).unwrap_or(top);
+            bar.apps.push((rep, Rect::new(x, y, item, item)));
+            bar.groups.push(group);
             x += item as i32 + gap;
         }
         // Aplikace bez okna (ztlumena ikona, klik spusti).
@@ -884,9 +896,11 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     }
     st.icons.draw(c, "apps", l.x + (l.w - il) as i32 / 2, l.y + (l.h - il) as i32 / 2, il, t.icon_stroke, col.ink);
     // Okna.
-    for (g, r) in &bar.apps {
+    for (k, (g, r)) in bar.apps.iter().enumerate() {
         let Some(w) = info.windows.get(g) else { continue };
+        let group = bar.groups.get(k).map_or(&[][..], |v| v.as_slice());
         let active = info.focus == Some(*g) && !w.minimized;
+        let attention = group.iter().any(|x| info.windows.get(x).is_some_and(|w| w.attention));
         if info.hover == Some(Hover::BarApp(*g)) {
             c.round_fill(*r, ctl, col.surface_3);
         }
@@ -896,7 +910,20 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         let s = &t.size;
         let (mw, mc) = if active { (s.bar_indicator_active_w, col.accent) } else { (s.bar_indicator_w, col.ink_faint) };
         let mh = s.bar_indicator_h;
+        // Okno otevrene na pozadi: znacka v barve zvyrazneni a siroka.
+        let (mw, mc) = if attention && !active { (s.bar_indicator_active_w, col.warn) } else { (mw, mc) };
         c.round_fill(Rect::new(r.x + (r.w - mw) as i32 / 2, r.bottom() as i32 - mh as i32 - 1, mw, mh), mh, mc);
+        // Vic oken: pocet vpravo nahore.
+        if group.len() > 1 {
+            let cs = t.text.caption;
+            let n = format!("{}", group.len());
+            let face = st.face(cs);
+            let tw = face.width(&n, cs.size) as i32;
+            let d = Rect::new(r.right() as i32 - tw - t.space[2] as i32 - 2, r.y + 1, tw as u32 + t.space[2] + 2, cs.line);
+            c.round_fill(d, d.h / 2, col.accent);
+            let base = d.y + face.baseline_in(cs.size, d.h);
+            face.draw(c, d.x + (t.space[2] / 2 + 1) as i32, base, &n, cs.size, col.on_accent);
+        }
     }
     // Nespustene aplikace: ikona vedlejsi barvou, bez znacky.
     for (i, r) in &bar.launch {
