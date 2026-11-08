@@ -19,6 +19,7 @@ mod crashtest;
 mod datadisk;
 mod drivers;
 mod docs;
+mod docs_books;
 mod docs_check;
 mod highlight;
 mod image;
