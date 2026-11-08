@@ -240,6 +240,40 @@ Principles (agreed):
   is confirmed; after an uncertain write the instance confirms nothing more
   until recovery runs.
 
+## Multiple disks and union folders (agreed 2026-11-09)
+
+All **[designed]**.
+
+- **Every disk is a separate volume** (default). Another disk with our FS,
+  a foreign FS (NTFS, FAT, ext4 - dual boot) and a removable disk appear
+  under **`/svazky/<name>`** and in the file manager sidebar under Devices.
+  Foreign FS: read right away, write only explicitly (`diskguard`).
+  Nothing joins by itself; there are no drive letters.
+- **A pool is a deliberate action on a disk, not a setting**: "Mirror the
+  system disk" (the same data twice) or "Extend" (more space; with a
+  warning that losing one disk loses the data of the whole pool and that
+  fast and slow disks get mixed). The format is ready for it (device
+  number in pointers).
+- **Union folder** (like Plan 9 union directories or Windows libraries):
+  one folder, e.g. `~/Hudba`, with folders from several disks pinned into
+  it. The listing shows the content of all sources together, but each file
+  physically stays on its disk - losing a disk loses only its files, not
+  the whole folder.
+  - **Where a new file goes**: to the primary source or (without a
+    primary) automatically to the source with the most free space. Move
+    and delete work on the real source.
+  - **The same name in two sources**: both entries visible with a disk
+    tag; opening without qualification takes the primary source.
+  - **A disconnected disk**: its entries stay greyed out with a "disk
+    disconnected" tag (from the index) and cannot be opened.
+  - The file manager shows that a folder is a union and, for each entry,
+    which disk it lives on; sources can be added and removed.
+  - Implemented by the namespace service (a process's view of the tree),
+    not the on-disk format; the FS of each disk does not change.
+- **The system installs only on our FS** (versions, journal, permissions,
+  atomic writes, vaults). FAT only where firmware requires it (ESP) or for
+  exchange with Windows (MO-LOGY); NTFS and ext4 for data only.
+
 ## Snapshots, trash, ransomware protection
 
 - **Automatic snapshots** per the dataset's schedule (e.g. hourly for

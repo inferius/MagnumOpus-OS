@@ -230,6 +230,40 @@ Zásady (odsouhlasené):
   zápisu; po nejistém zápisu instance nic dalšího nepotvrdí, dokud neproběhne
   obnova.
 
+## Víc disků a sjednocené složky (odsouhlaseno 2026-11-09)
+
+Celé **[navrženo]**.
+
+- **Každý disk je samostatný svazek** (výchozí). Další disk s naším FS,
+  cizí FS (NTFS, FAT, ext4 - dualboot) i vyměnitelný disk se ukáže pod
+  **`/svazky/<jméno>`** a ve Správci souborů v postranním panelu Zařízení.
+  Cizí FS: čtení hned, zápis jen výslovně (`diskguard`). Nic se samo
+  nespojuje; písmena jednotek nejsou.
+- **Fond je vědomá akce u disku, ne nastavení**: „Zrcadlit systémový
+  disk“ (stejná data dvakrát) nebo „Rozšířit“ (víc místa; s varováním, že
+  ztráta jednoho disku znamená ztrátu dat celého fondu a že se míchají
+  rychlé a pomalé disky). Formát je na to připravený (číslo zařízení
+  v ukazateli).
+- **Sjednocená složka** (union, jako sjednocené adresáře Plan 9 nebo
+  knihovny Windows): jedna složka, např. `~/Hudba`, do které jsou
+  připnuté složky z několika disků. Výpis ukazuje obsah všech zdrojů
+  dohromady, každý soubor ale fyzicky zůstává na svém disku - ztráta disku
+  znamená ztrátu jen jeho souborů, ne celé složky.
+  - **Kam jde nový soubor**: na primární zdroj, nebo (bez primárního)
+    automaticky na zdroj s nejvíc volného místa. Přesun a mazání pracují
+    se skutečným zdrojem.
+  - **Stejné jméno ve dvou zdrojích**: viditelné obě položky se štítkem
+    disku; otevření bez upřesnění bere primární zdroj.
+  - **Odpojený disk**: jeho položky zůstanou šedě se štítkem „disk
+    odpojen“ (z indexu), nejde je otevřít.
+  - Ve Správci souborů je u složky vidět, že je sjednocená, a u každé
+    položky, na kterém disku leží; zdroje jde přidat a odebrat.
+  - Realizuje to služba namespace (pohled procesu na strom), ne formát
+    disku; FS jednotlivých disků se nemění.
+- **Systém se instaluje jen na náš FS** (verze, žurnál, oprávnění,
+  atomické zápisy, trezory). FAT jen tam, kde to vyžaduje firmware (ESP)
+  nebo výměna s Windows (MO-LOGY); NTFS a ext4 jen pro data.
+
 ## Snapshoty, koš, ochrana proti ransomwaru
 
 - **Automatické snapshoty** podle plánu datasetu (např. hodinové 24 h,
