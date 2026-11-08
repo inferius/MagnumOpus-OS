@@ -1,4 +1,4 @@
-//! Ikony design systemu: linkove, mrizka 24 px, tah 1,75 px se zaoblenymi
+//! Ikony design systemu: linkove, mrizka 24 px, tah 2 px se zaoblenymi
 //! konci a spoji.
 //!
 //! Zdrojem je primo sada z prototypu (`design/assets/mo.js`, objekt
@@ -43,22 +43,67 @@ pub struct IconMask {
     pub coverage: Vec<u8>,
 }
 
-/// Precte sadu ikon ze zdroje prototypu (radky `jmeno: '<...>',` mezi
-/// `var ICONS = {` a `};`).
+/// Precte sadu ikon ze zdroje prototypu: JSON objekt za `var ICONS = `
+/// ve tvaru `{"jmeno":{"c":"kategorie","f":"<vypln>","l":"<linka>"},...}`
+/// (generuje `design/tools/build-icons.mjs`). Kresli se linka `l`; mekka
+/// vypln `f` s prechodem barev kategorie prijde s vektorovym rasterizerem.
 pub fn parse_set(src: &str) -> Vec<Icon> {
     let mut out = Vec::new();
     let Some(start) = src.find("var ICONS = {") else { return out };
-    for line in src[start..].lines().skip(1) {
-        let line = line.trim();
-        if line.starts_with("};") {
+    let mut s = &src[start + "var ICONS = {".len()..];
+    loop {
+        s = s.trim_start_matches([' ', '\n', '\r', '\t', ',']);
+        if !s.starts_with('"') {
             break;
         }
-        let Some((name, rest)) = line.split_once(':') else { continue };
-        let body = rest.trim().trim_end_matches(',').trim();
-        let Some(body) = body.strip_prefix('\'').and_then(|b| b.strip_suffix('\'')) else { continue };
-        out.push(Icon { name: name.trim().into(), parts: parse_svg(body) });
+        let Some((name, rest)) = json_str(s) else { break };
+        let Some(rest) = rest.trim_start().strip_prefix(':').map(str::trim_start) else { break };
+        let Some(mut rest) = rest.strip_prefix('{') else { break };
+        let mut line = String::new();
+        loop {
+            rest = rest.trim_start_matches([' ', ',']);
+            if let Some(r) = rest.strip_prefix('}') {
+                rest = r;
+                break;
+            }
+            let Some((key, r)) = json_str(rest) else { return out };
+            let Some(r) = r.trim_start().strip_prefix(':').map(str::trim_start) else { return out };
+            let Some((val, r)) = json_str(r) else { return out };
+            if key == "l" {
+                line = val;
+            }
+            rest = r;
+        }
+        out.push(Icon { name, parts: parse_svg(&line) });
+        s = rest;
     }
     out
+}
+
+/// Retezec JSON na zacatku `s` (vcetne uvozovek) -> (hodnota, zbytek).
+fn json_str(s: &str) -> Option<(String, &str)> {
+    let body = s.strip_prefix('"')?;
+    let mut out = String::new();
+    let mut chars = body.char_indices();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '"' => return Some((out, &body[i + 1..])),
+            '\\' => match chars.next()?.1 {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                'u' => {
+                    let mut v = 0u32;
+                    for _ in 0..4 {
+                        v = v * 16 + chars.next()?.1.to_digit(16)?;
+                    }
+                    out.push(char::from_u32(v).unwrap_or('?'));
+                }
+                e => out.push(e),
+            },
+            c => out.push(c),
+        }
+    }
+    None
 }
 
 /// Prvky SVG -> casti (lomene cary).
