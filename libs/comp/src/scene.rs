@@ -133,6 +133,9 @@ pub struct Window {
     pub minimized: bool,
     /// Obdelnik pred maximalizaci.
     pub restore: Option<Rect>,
+    /// Zmena velikosti tahem za levy / horni okraj: pravy / dolni okraj
+    /// (obrazovka), ktery zustava na miste, az aplikace potvrdi velikost.
+    pub anchor: (Option<i32>, Option<i32>),
     /// Cekajici `CONFIGURE`: serial, rozmery, termin.
     pub configure: Option<(u32, u32, u32, u64)>,
     pub serial: u32,
@@ -163,6 +166,19 @@ impl Window {
     }
 
     /// Oblast pro zmenu velikosti tazenim (okno a neviditelny okraj kolem).
+    /// Nova velikost obsahu (po potvrzeni CONFIGURE); s `anchor` zustane
+    /// pravy / dolni okraj na miste.
+    pub(crate) fn set_size(&mut self, w: u32, h: u32) {
+        self.rect.w = w;
+        self.rect.h = h;
+        if let Some(r) = self.anchor.0 {
+            self.rect.x = r - w as i32;
+        }
+        if let Some(b) = self.anchor.1 {
+            self.rect.y = b - h as i32;
+        }
+    }
+
     pub fn grab(&self) -> Rect {
         let o = self.outer();
         if !self.mode.has_frame() {
@@ -300,7 +316,8 @@ impl Comp {
 
     pub(crate) fn drop_window(&mut self, gid: u32) {
         if let Some(w) = self.windows.remove(&gid) {
-            let r = w.outer();
+            // Cele misto okna vcetne stinu (aktivni okno ma vetsi stin).
+            let r = w.visual();
             self.damage(r);
         }
         self.z.retain(|&g| g != gid);
@@ -467,6 +484,7 @@ impl Comp {
             mapped: false,
             minimized: false,
             restore: None,
+            anchor: (None, None),
             configure: None,
             serial: 1,
             badge_until: 0,
@@ -515,8 +533,7 @@ impl Comp {
                     // Stara i nova plocha vcetne stinu (zmensene okno
                     // odkryje, co bylo pod nim).
                     let old = w.visual();
-                    w.rect.w = nw;
-                    w.rect.h = nh;
+                    w.set_size(nw, nh);
                     w.configure = None;
                     let new = w.visual();
                     self.damage(old);

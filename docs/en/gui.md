@@ -383,8 +383,16 @@ row with a left stripe and chip, progress in `ai`; in the accessibility
 tree the name starts with "agent:"). A disabled button is the same button
 at `opacity.disabled`. The selected row has an `accent_soft` background
 and regular weight. The focus ring is drawn only in the active window
-(the element remembers focus). An invisible 6 px edge outside the window
-resizes. Unresponsive app: dimmed content and a "... nereaguje" card.
+(the element remembers focus). An invisible `size.resize_edge` edge outside
+the window (in the shadow area) resizes on all four sides and corners (a
+corner as long as the radius); dragging the left or top edge also moves the
+window, the opposite edge stays (after the CONFIGURE ack). Above the edge
+the cursor is a double arrow (horizontal, vertical, diagonal); the minimum
+window size applies. The title button zone lies only inside the title bar;
+outside the frame the edge wins. **[implemented]** (tests
+`close_button_zone_does_not_cover_edge`,
+`resize_from_left_and_top_keeps_opposite_edge` in `libs/comp`)
+Unresponsive app: dimmed content and a "... nereaguje" card.
 
 **Bar** (`design/plocha.html`, "bottom, inset"): 52 px, 8 px inset,
 18 px radius, a **blurred backdrop** under it (`blur(16px)` as in the

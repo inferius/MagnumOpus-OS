@@ -125,6 +125,8 @@ pub struct Window {
     txn: u32,
     /// Commit s FRAME odeslan, FRAME jeste neprisel.
     pub frame_pending: bool,
+    /// Titulek, ktery kompozitor zna (zmenu posle `render` s commitem).
+    title: String,
     a11y_ids: alloc::collections::BTreeSet<u32>,
     groups: BTreeMap<u32, Rect>,
     /// Platny stav okna pro obnovu po padu kompozitoru.
@@ -201,6 +203,7 @@ impl Window {
             ack: Some(serial),
             txn: 0,
             frame_pending: false,
+            title: title.into(),
             a11y_ids: Default::default(),
             groups: BTreeMap::new(),
             replay,
@@ -685,5 +688,19 @@ fn render<M: Clone>(win: &mut Window, ui: &mut Ui<M>) -> Result<()> {
     }
     win.retain_scrolls(&areas.iter().map(|a| a.index).collect::<Vec<_>>())?;
     win.set_a11y(&ui.a11y())?;
+    // Titulek podle stavu aplikace ("Správce úloh (20 běží)"): v teze
+    // transakci jako obsah. Ostatni vlastnosti okna vychozi (jako po
+    // `WindowCreate`).
+    if ui.title != win.title {
+        win.send(ClientMsg::WindowSet {
+            window: 1,
+            title: ui.title.clone(),
+            min_w: 64,
+            min_h: 32,
+            side: guiproto::window::ButtonSide::Right,
+            button_color: 0,
+        })?;
+        win.title = ui.title.clone();
+    }
     win.commit_redrawn(true)
 }
