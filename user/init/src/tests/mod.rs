@@ -18,6 +18,7 @@ mod gui;
 mod gui_gpu;
 mod gui_recovery;
 mod input;
+mod input_recovery;
 mod ipc;
 mod jobs;
 mod memory;
