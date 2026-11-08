@@ -86,6 +86,37 @@
 .pc .card h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); }
 .pc ul { margin: 0; padding-left: 18px; }
 .settings-demo { display: inline-flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s4); border-radius: var(--r-card); background: var(--c-surface); border: 1px solid var(--c-border); font-size: var(--t-small-size); }
+/* D: titulek aplikace s pevnymi systemovymi prvky */
+.w .t.dt { gap: 6px; background: var(--c-surface); }
+.dapp { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; height: 100%; overflow: hidden; }
+.dapp .sp { flex: 1; }
+.dtab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 10px; font-weight: 500; color: var(--c-ink-muted); white-space: nowrap; }
+.dtab.on { background: var(--c-surface-3); color: var(--c-ink); font-weight: 600; }
+.dtool { height: 30px; width: 30px; display: inline-grid; place-items: center; border-radius: 8px; }
+.dcrumb { font-weight: 500; padding: 0 8px; white-space: nowrap; }
+.dsearch { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; background: var(--c-surface-3); color: var(--c-ink-muted); font-weight: 400; }
+.dmenu { display: flex; align-items: center; gap: 2px; height: 32px; padding: 0 6px; border-radius: 10px; background: var(--c-surface-2); box-shadow: inset 0 0 0 1px var(--c-border); font-weight: 500; }
+/* Prohlizec a soukromi (staticke ukazky) */
+.demo-wrap { overflow-x: auto; padding: var(--s5); border-radius: var(--r-card); border: 1px solid var(--c-border);
+  background: radial-gradient(circle at 18% 22%, var(--c-wall-a), transparent 52%), radial-gradient(circle at 82% 72%, var(--c-wall-b), transparent 56%), var(--c-bg); }
+.bw { position: relative; width: 1100px; height: 230px; margin-bottom: var(--s5); }
+.bw:last-child { margin-bottom: 0; }
+.zone-sys { outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 10px; }
+.zone-app { outline: 2px dashed var(--c-ink-faint); outline-offset: 1px; border-radius: 12px; }
+.addr { flex: 1; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; background: var(--c-surface-3); font-weight: 400; color: var(--c-ink); min-width: 0; }
+.addr .site { color: var(--c-ink-muted); }
+.legend2 { display: flex; gap: var(--s5); flex-wrap: wrap; font-size: var(--t-small-size); margin-top: var(--s3); }
+.legend2 i { display: inline-block; width: 22px; height: 12px; margin-right: 6px; vertical-align: -1px; border-radius: 3px; }
+.pdot { display: inline-block; width: 8px; height: 8px; border-radius: 4px; }
+.pd-cam { background: #1b7543; } .pd-mic { background: #c27700; } .pd-loc { background: #2350c4; } .pd-scr { background: var(--c-danger); }
+:root[data-theme="dark"] .pd-cam { background: #7fdca5; } :root[data-theme="dark"] .pd-mic { background: #f2b54f; } :root[data-theme="dark"] .pd-loc { background: #9bbcff; }
+.priv-pill { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border-radius: 15px; background: var(--c-surface-3); border: 1px solid var(--c-border-strong); }
+.priv-panel { width: 460px; padding: 0; }
+.priv-panel header { padding: 14px 16px 8px; font-weight: 700; }
+.priv-app { padding: 10px 16px; border-top: 1px solid var(--c-border); }
+.priv-app .who { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.priv-app .what { display: flex; gap: 12px; font-size: 12px; color: var(--c-ink-muted); margin: 6px 0 8px 30px; }
+.priv-app .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-left: 30px; }
 pre.api { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-card); padding: var(--s4); font: 12.5px/1.55 var(--font-mono); overflow-x: auto; }
 @media (max-width: 800px) { .pc { grid-template-columns: 1fr; } }
 </style>
@@ -105,6 +136,58 @@ pre.api { background: var(--c-surface-2); border: 1px solid var(--c-border); bor
       <button role="radio" aria-checked="true" data-value="menu">Otevřené menu</button><button role="radio" aria-checked="false" data-value="palette">Paleta příkazů</button><button role="radio" aria-checked="false" data-value="full">Celá obrazovka</button></span></span>
   </div>
   <div id="variants"></div>
+
+  <section class="variant" aria-labelledby="hBr">
+    <h2 id="hBr">Prohlížeč ve variantě D</h2>
+    <p class="note">Úsporný titulek jako v moderních prohlížečích, ale s pravidly systému: <b>odznak, tlačítko menu a tlačítka okna</b> (plný rámeček) kreslí systém na pevném místě a aplikace je nepřekryje. Vše v čárkovaném rámečku kreslí prohlížeč. Adresní pole nesmí použít barvy důvěry, štít ani text „Systém“, aby nenapodobilo odznak; stav zabezpečení stránky ukazuje vlastní neutrální ikonou.</p>
+    <div class="demo-wrap">
+      <div class="bw"><div class="w" style="inset:0"><div class="t dt" style="height:44px">
+        <span class="zone-sys" style="display:inline-flex;gap:6px"><span class="badge"><svg class="ic" style="width:14px;height:14px"><use href="#ic-shield"/></svg>Prohlížeč<span class="pdot pd-cam" style="margin-left:2px"></span></span><span class="mbtn"><svg class="ic" style="width:18px;height:18px"><use href="#ic-menu"/></svg></span></span>
+        <span class="dapp zone-app" style="height:36px;padding:0 4px">
+          <span class="dtab on" title="Svislé karty">  <svg class="ic" style="width:16px;height:16px"><use href="#ic-sidebar"/></svg>5</span>
+          <span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-left"/></svg></span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-right"/></svg></span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-refresh"/></svg></span>
+          <span class="addr"><svg class="ic" style="width:14px;height:14px;--ic-fill:none;--ic-ink:var(--c-ink-muted)"><use href="#ic-lock"/></svg><span class="site">priklad.cz</span>/clanky/vzhled-systemu</span>
+          <span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-package"/></svg></span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-star"/></svg></span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-user"/></svg></span>
+        </span>
+        <span class="zone-sys"><span class="wb"><svg class="ic" style="width:14px;height:14px"><use href="#ic-min"/></svg><svg class="ic" style="width:14px;height:14px"><use href="#ic-max"/></svg><svg class="ic" style="width:14px;height:14px"><use href="#ic-close"/></svg></span></span>
+      </div><div class="body"><h3>Kompaktní: jeden řádek 44 px</h3>Karty jsou svisle v panelu (tlačítko s počtem 5), navigace, adresa, rozšíření a profil v jednom řádku. Nejvíc místa pro stránku; vhodné pro notebook.</div></div></div>
+
+      <div class="bw" style="height:250px"><div class="w" style="inset:0"><div class="t dt" style="height:44px">
+        <span class="zone-sys" style="display:inline-flex;gap:6px"><span class="badge"><svg class="ic" style="width:14px;height:14px"><use href="#ic-shield"/></svg>Prohlížeč</span><span class="mbtn"><svg class="ic" style="width:18px;height:18px"><use href="#ic-menu"/></svg></span></span>
+        <span class="dapp zone-app" style="height:36px;padding:0 4px"><span class="dtab on"><svg class="ic" style="width:14px;height:14px"><use href="#ic-globe"/></svg>Vzhled systému</span><span class="dtab"><svg class="ic" style="width:14px;height:14px"><use href="#ic-globe"/></svg>Dokumentace</span><span class="dtab"><svg class="ic" style="width:14px;height:14px"><use href="#ic-globe"/></svg>Mapy</span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-plus"/></svg></span><span class="sp" style="flex:1"></span></span>
+        <span class="zone-sys"><span class="wb"><svg class="ic" style="width:14px;height:14px"><use href="#ic-min"/></svg><svg class="ic" style="width:14px;height:14px"><use href="#ic-max"/></svg><svg class="ic" style="width:14px;height:14px"><use href="#ic-close"/></svg></span></span>
+      </div>
+      <div class="zone-app" style="display:flex;align-items:center;gap:4px;height:40px;padding:0 10px;margin:4px 8px;border-bottom:1px solid var(--c-border)"><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-left"/></svg></span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-right"/></svg></span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-refresh"/></svg></span>
+        <span class="addr"><svg class="ic" style="width:14px;height:14px;--ic-fill:none;--ic-ink:var(--c-ink-muted)"><use href="#ic-lock"/></svg><span class="site">priklad.cz</span>/clanky/vzhled-systemu</span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-package"/></svg></span><span class="dtool"><svg class="ic" style="width:16px;height:16px"><use href="#ic-user"/></svg></span></div>
+      <div class="body"><h3>Klasický: karty v titulku, adresa pod nimi (44 + 40 px)</h3>Známé rozložení; karty mají v titulku deklarovanou oblast NO_DRAG, prázdné místo za nimi je DRAG.</div></div></div>
+    </div>
+    <div class="legend2"><span><i style="outline:2px solid var(--c-accent)"></i>kreslí systém, pevné místo, nelze překrýt</span><span><i style="outline:2px dashed var(--c-ink-faint)"></i>kreslí aplikace (deklarované oblasti DRAG / NO_DRAG)</span></div>
+  </section>
+
+  <section class="variant" aria-labelledby="hPriv">
+    <h2 id="hPriv">Indikátory soukromí</h2>
+    <p class="note">Barevná kolečka podle druhu zařízení: <span class="pdot pd-cam"></span> kamera, <span class="pdot pd-mic"></span> mikrofon, <span class="pdot pd-loc"></span> poloha, <span class="pdot pd-scr"></span> sdílení obrazovky. Jsou v odznaku důvěry každého okna, které zařízení právě používá, a navíc v jednom systémovém indikátoru v liště. Kolečko nikdy není jediný signál: indikátor má popisek pro čtečku a panel vypíše zařízení slovy.</p>
+    <div class="demo-wrap" style="position:relative;min-height:470px">
+      <div class="hstack" style="gap:var(--s4);margin-bottom:var(--s4)">
+        <span class="badge" style="display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px 0 6px;border-radius:8px;background:var(--c-trust-bg);color:var(--c-trust-ink);border:1px solid var(--c-trust-border);font-size:11px"><svg class="ic" style="width:14px;height:14px;--ic-fill:none;--ic-ink:currentColor"><use href="#ic-shield"/></svg>Hovory <span class="pdot pd-cam"></span><span class="pdot pd-mic"></span></span>
+        <span class="badge" style="display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px 0 6px;border-radius:8px;background:var(--c-trust-bg);color:var(--c-trust-ink);border:1px solid var(--c-trust-border);font-size:11px"><svg class="ic" style="width:14px;height:14px;--ic-fill:none;--ic-ink:currentColor"><use href="#ic-shield"/></svg>Mapy <span class="pdot pd-loc"></span></span>
+        <span class="note" style="margin:0">odznaky oken</span>
+      </div>
+      <div class="popover priv-panel" role="dialog" aria-label="Co právě používá zařízení" style="position:absolute;right:24px;bottom:84px">
+        <header>Právě se používá</header>
+        <div class="priv-app"><div class="who"><svg class="ic" style="width:20px;height:20px"><use href="#ic-camera"/></svg>Hovory &middot; videohovor</div>
+          <div class="what"><span><span class="pdot pd-cam"></span> kamera od 14:02</span><span><span class="pdot pd-mic"></span> mikrofon od 14:02</span></div>
+          <div class="acts"><button class="btn small">Ztlumit</button><button class="btn small">Odpojit teď</button><button class="btn small ghost">Odebrat oprávnění natrvalo</button></div></div>
+        <div class="priv-app"><div class="who"><svg class="ic" style="width:20px;height:20px"><use href="#ic-globe"/></svg>Mapy</div>
+          <div class="what"><span><span class="pdot pd-loc"></span> poloha (přesná) od 13:40</span></div>
+          <div class="acts"><button class="btn small">Ztlumit</button><button class="btn small">Odpojit teď</button><button class="btn small ghost">Odebrat oprávnění natrvalo</button></div></div>
+        <div class="priv-app" style="font-size:12px;color:var(--c-ink-muted)"><b style="color:var(--c-ink)">Ztlumit</b> = aplikace dostává prázdný obraz / ticho, přístup trvá. <b style="color:var(--c-ink)">Odpojit teď</b> = přístup skončí, aplikace požádá znovu. <a href="nastaveni.html">Nastavení soukromí</a></div>
+      </div>
+      <div class="lbar" style="position:absolute"><span class="b"><svg class="ic" style="width:22px;height:22px"><use href="#ic-apps"/></svg></span><span class="b on"><svg class="ic" style="width:22px;height:22px"><use href="#ic-camera"/></svg></span><span class="b"><svg class="ic" style="width:22px;height:22px"><use href="#ic-globe"/></svg></span><span class="sp"></span>
+        <span class="priv-pill" role="button" aria-label="Soukromí: kamera a mikrofon (Hovory), poloha (Mapy). Otevřít přehled."><span class="pdot pd-cam"></span><span class="pdot pd-mic"></span><span class="pdot pd-loc"></span></span>
+        <span class="b"><svg class="ic" style="width:20px;height:20px"><use href="#ic-wifi"/></svg></span><span class="b"><svg class="ic" style="width:20px;height:20px"><use href="#ic-bell"/></svg></span><span class="clock">14:05</span></div>
+    </div>
+  </section>
 
   <section class="variant">
     <h2>Jak by to vypadalo v API</h2>
@@ -163,6 +246,18 @@ document.addEventListener('mo-ready', function () {
       '<div class="foot"><span><span class="kb">&uarr;</span><span class="kb">&darr;</span> vybrat</span><span><span class="kb">Enter</span> spustit</span><span><span class="kb">Tab</span> i akce systému</span></div></div>';
   }
   // Jedna obrazovka; v = A|B|C, mon = index monitoru (u 2x 4K je editor na druhem).
+  // Varianta D: titulek kresli aplikace (CUSTOM_TITLE); system na pevnem miste
+  // kresli jen odznak, tlacitko menu hned vedle nej a tlacitka okna.
+  // menuOpen: menu se rozbali primo v titulku pres obsah aplikace.
+  function dTitle(app, menuOpen) {
+    var sys = '<span class="badge">' + I('shield', 14) + app + '</span><span class="mbtn' + (menuOpen ? ' open' : '') + '" title="Menu (Alt)">' + I('menu', 18) + '</span>';
+    var inner;
+    if (menuOpen) inner = '<span class="dmenu">' + MENU.map(function (m, i) { return '<span class="mi' + (i === 1 ? ' open' : '') + '">' + m + '</span>'; }).join('') + '</span>';
+    else if (app === 'Editor') inner = '<span class="dtab on">' + I('file-text', 14) + 'zprava.md</span><span class="dtab">' + I('file-text', 14) + 'plan.md</span><span class="sp"></span>' + ['undo', 'redo', 'search', 'more'].map(function (n) { return '<span class="dtool">' + I(n, 16) + '</span>'; }).join('');
+    else if (app === 'Soubory') inner = '<span class="dtool">' + I('left', 16) + '</span><span class="dtool">' + I('right', 16) + '</span><span class="dcrumb">Domů &rsaquo; <b>Dokumenty</b></span><span class="sp"></span><span class="dsearch">' + I('search', 14) + 'Hledat</span>';
+    else inner = '<span class="dtab on">' + I('terminal', 14) + 'Relace 1</span><span class="dtab">build</span><span class="dtool">' + I('plus', 16) + '</span><span class="sp"></span>';
+    return '<div class="t dt">' + sys + '<span class="dapp">' + inner + '</span>' + wbtns() + '</div>';
+  }
   function screen(v, w, h, mon, nMon) {
     var top = v === 'B' || (v === 'C' && state.cGlobal);
     var bottom = v !== 'B';
@@ -170,24 +265,26 @@ document.addEventListener('mo-ready', function () {
     var hasEditor = nMon === 1 || mon === 1;
     var topH = top && !full ? 30 : 0, botH = full ? 0 : (bottom ? 68 : 76);
     var html = '<div class="scr" style="width:' + w + 'px;height:' + h + 'px">';
-    var inTitleMenu = !top;   // A a C bez globalni listy: menu v titulku okna
+    var inTitleMenu = !top && v !== 'D';   // A a C bez globalni listy: menu v titulku okna
+    var D = v === 'D';
     // Okna
     var ax = Math.round(w * .07), ay = topH + 24, aw = Math.round(w * .55), ah = h - topH - botH - 48;
     if (!full) {
       if (mon === 0 || nMon === 1) {
-        html += '<div class="w in" style="left:' + Math.round(w * .5) + 'px;top:' + (topH + 60) + 'px;width:' + Math.round(w * .42) + 'px;height:' + Math.round(h * .5) + 'px"><div class="t"><span class="badge">' + I('shield', 14) + 'Terminál</span><span class="nm">~/projekt</span>' + wbtns() + '</div><div class="body mono">~/projekt &rsaquo; cargo xtask test<br>&#10003; 140/140</div></div>';
-        html += '<div class="w in" style="left:' + Math.round(w * .38) + 'px;top:' + Math.round(topH + h * .32) + 'px;width:' + Math.round(w * .44) + 'px;height:' + Math.round(h * .42) + 'px"><div class="t"><span class="badge">' + I('shield', 14) + 'Soubory</span><span class="nm">Dokumenty</span>' + wbtns() + '</div><div class="body">' + ['folder', 'folder', 'file-text', 'image'].map(function (n, i) { return I(n, 18) + ' ' + ['Projekty', 'Faktury', 'smlouva.pdf', 'dovolena.jpg'][i]; }).join('<br>') + '</div></div>';
+        html += '<div class="w in" style="left:' + Math.round(w * .5) + 'px;top:' + (topH + 60) + 'px;width:' + Math.round(w * .42) + 'px;height:' + Math.round(h * .5) + 'px">' + (D ? dTitle('Terminál') : '<div class="t"><span class="badge">' + I('shield', 14) + 'Terminál</span><span class="nm">~/projekt</span>' + wbtns() + '</div>') + '<div class="body mono">~/projekt &rsaquo; cargo xtask test<br>&#10003; 140/140</div></div>';
+        html += '<div class="w in" style="left:' + Math.round(w * .38) + 'px;top:' + Math.round(topH + h * .32) + 'px;width:' + Math.round(w * .44) + 'px;height:' + Math.round(h * .42) + 'px">' + (D ? dTitle('Soubory') : '<div class="t"><span class="badge">' + I('shield', 14) + 'Soubory</span><span class="nm">Dokumenty</span>' + wbtns() + '</div>') + '<div class="body">' + ['folder', 'folder', 'file-text', 'image'].map(function (n, i) { return I(n, 18) + ' ' + ['Projekty', 'Faktury', 'smlouva.pdf', 'dovolena.jpg'][i]; }).join('<br>') + '</div></div>';
       }
     }
     if (hasEditor) {
       var ex = full ? 0 : ax, ey = full ? 0 : ay, ew = full ? w : aw, eh = full ? h : ah;
       html += '<div class="w" style="left:' + ex + 'px;top:' + ey + 'px;width:' + ew + 'px;height:' + eh + 'px;' + (full ? 'border-radius:0;border:0' : '') + '">';
       if (!full) {
-        html += '<div class="t">' + (inTitleMenu ? '<span class="mbtn' + (state.sit === 'menu' ? '' : '') + '" title="Menu">' + I('menu', 18) + '</span>' : '') + '<span class="badge">' + I('shield', 14) + 'Editor</span><span class="nm">zprava.md - Editor</span>' + wbtns() + '</div>';
+        if (D) html += dTitle('Editor', state.sit === 'menu'); else html += '<div class="t">' + (inTitleMenu ? '<span class="mbtn' + (state.sit === 'menu' ? '' : '') + '" title="Menu">' + I('menu', 18) + '</span>' : '') + '<span class="badge">' + I('shield', 14) + 'Editor</span><span class="nm">zprava.md - Editor</span>' + wbtns() + '</div>';
         if (inTitleMenu) html += '<div class="mrow">' + MENU.map(function (m, i) { return '<span class="mi' + (state.sit === 'menu' && i === 1 ? ' open' : '') + '">' + m + '</span>'; }).join('') + '<span class="find">' + I('search', 14) + 'Hledat akce <span class="kb">Ctrl</span><span class="kb">K</span></span></div>';
       }
       html += '<div class="body"><h3>Zpráva o vydání 0.6</h3>Kompozitor, okna a odznak důvěry jsou hotové. Následuje přehled oprávnění a systémové dialogy. Ikony mají nový styl s pastelovým přechodem a barvou podle kategorie.<br><br>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</div></div>';
       if (state.sit === 'menu' && inTitleMenu && !full) html += menuPop(ex + 70, ey + 40 + 32);
+      if (state.sit === 'menu' && D && !full) html += menuPop(ex + 196, ey + 40);
     }
     // Horni lista
     if (top && !full && (mon === 0 || nMon === 1 || v === 'B' || v === 'C')) {
@@ -210,9 +307,9 @@ document.addEventListener('mo-ready', function () {
   }
   function metrics(v, w, h) {
     var top = v === 'B' || (v === 'C' && state.cGlobal);
-    var chrome = (top ? 30 : 0) + (v === 'B' ? 76 : 68) + 40 + (top ? 0 : 32);
+    var chrome = (top ? 30 : 0) + (v === 'B' ? 76 : 68) + 40 + (top || v === 'D' ? 0 : 32);
     var free = h - chrome;
-    var menuDist = top ? 'k menu: horní okraj obrazovky (nekonečně vysoký cíl)' : 'k menu: 40 px pod horním okrajem okna';
+    var menuDist = v === 'D' ? 'k menu: tlačítko vedle odznaku v titulku okna (nebo Alt)' : top ? 'k menu: horní okraj obrazovky (nekonečně vysoký cíl)' : 'k menu: 40 px pod horním okrajem okna';
     return '<div class="metrics"><span class="chip">systémové prvky na výšku: ' + chrome + ' px</span><span class="chip ok">pro obsah okna zbývá ' + free + ' px (' + Math.round(free / h * 100) + ' %)</span><span class="chip">' + menuDist + '</span></div>';
   }
   var V = [
@@ -221,7 +318,9 @@ document.addEventListener('mo-ready', function () {
     { id: 'B', name: 'B - Horní lišta s globálním menu + dok', pro: ['Menu u horního okraje = nekonečně vysoký cíl (Fitts), rychlé „vyhození“ myši nahoru.', 'Okna nemají řádek menu: čistší titulky.', 'Uživatelům macOS známé.'],
       con: ['Na 4K a dvou monitorech je menu daleko od okna (viz čárkovaná vzdálenost), u druhého monitoru až na jiném displeji.', 'Menu patří „aktivní aplikaci“, ne oknu: matoucí, když jsou vedle sebe dvě okna různých aplikací.', 'Horní lišta + dok berou výšku na každé obrazovce, i když aplikace menu nemá.', 'Blíží se vzhledu macOS, od kterého se chceme odlišit.'] },
     { id: 'C', name: 'C - A s volitelnou globální horní lištou', pro: ['Výchozí je A; kdo chce globální menu, zapne ho v Nastavení > Vzhled (stejná data menu, jen jinde).', 'Žádná práce navíc pro aplikace: deklarace menu je jedna.', 'Hodí se pro malý notebook (víc výšky v oknech, když je okno maximalizované) i pro zvyk z macOS.'],
-      con: ['Dvě podoby menu = dvakrát testovat a dokumentovat.', 'S globální lištou platí nevýhody B na velkých a více monitorech.', 'Stavová část se musí rozhodnout, kde je (nahoře, nebo dole): v ukázce se přesune nahoru.'] }
+      con: ['Dvě podoby menu = dvakrát testovat a dokumentovat.', 'S globální lištou platí nevýhody B na velkých a více monitorech.', 'Stavová část se musí rozhodnout, kde je (nahoře, nebo dole): v ukázce se přesune nahoru.'] },
+    { id: 'D', name: 'D - Titulek patří aplikaci, systém drží odznak, menu a tlačítka (doporučení koordinátora)', pro: ['Žádný řádek menu navíc: titulek nese karty a nástroje aplikace, na obsah zbývá nejvíc místa ze všech variant.', 'Menu je pořád jedno tlačítko na pevném místě vedle odznaku (a Alt), u každého okna stejně; rozbalí se přímo v titulku a po výběru se sbalí.', 'Odznak, tlačítko menu a tlačítka okna kreslí systém a aplikace je nepřekreslí, takže pravidla důvěry platí i u bohatých titulků (prohlížeč, IDE).', 'Paleta Ctrl+K a globální horní lišta (jako volba) používají stejná data menu.'],
+      con: ['Menu je o jeden klik dál než v A (nejdřív tlačítko, pak skupina).', 'Aplikace musí dobře navrhnout svůj titulek; špatná aplikace ho přeplní. Systém hlídá jen deklarované oblasti a pevné prvky.', 'Rozbalené menu dočasně zakryje karty a nástroje aplikace.'] }
   ];
   function render() {
     var mons = SCR[state.scr];
@@ -233,7 +332,7 @@ document.addEventListener('mo-ready', function () {
         mons.map(function (m, i) { return screen(v.id, m[0], m[1], i, mons.length); }).join('') + '</div></div>' +
         '<div class="pc" style="margin-top:var(--s4)"><div class="card"><h3>Výhody</h3><ul>' + v.pro.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>' +
         '<div class="card"><h3>Nevýhody</h3><ul>' + v.con.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div></div></section>';
-    }).join('') + '<p class="note" style="margin-top:var(--s6)"><b>Doporučení koordinátora:</b> A s paletou příkazů jako výchozí, C (globální lišta) jako volba v Nastavení. Vybírá uživatel.</p>';
+    }).join('') + '<p class="note" style="margin-top:var(--s6)"><b>Doporučení koordinátora:</b> D (titulek aplikace, systémový odznak, tlačítko menu a tlačítka okna) s paletou Ctrl+K; globální horní lišta jako volba v Nastavení. Vybírá uživatel.</p>';
     var sw = document.getElementById('c-sw');
     if (sw) window.MO_SWITCH(sw, function (on) { state.cGlobal = on; render(); });
     fit();
