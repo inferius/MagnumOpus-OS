@@ -280,6 +280,7 @@ impl Comp {
                     return;
                 }
                 if self.palette.is_some() && self.dialogs.active().is_none() {
+                    self.palette_ctrl = mods & inputproto::mods::CTRL != 0;
                     if !syn {
                         self.palette_key(code, action == Action::Press || action == Action::Repeat, r.time);
                     }
@@ -289,6 +290,19 @@ impl Comp {
                 if code == inputproto::code::KEY_ESC && self.flyout.is_some() && !syn {
                     if action == Action::Press {
                         self.set_flyout(None);
+                    }
+                    return;
+                }
+                // Nove okno aplikace s fokusem: Ctrl+Shift+N (aplikace
+                // spustitelne z listy; jinak klavesa jde aplikaci).
+                if !syn
+                    && code == inputproto::code::KEY_N
+                    && mods & (inputproto::mods::CTRL | inputproto::mods::SHIFT) == (inputproto::mods::CTRL | inputproto::mods::SHIFT)
+                    && let Some(id) = self.focus.and_then(|g| self.app_of(g))
+                    && self.is_launchable(&id)
+                {
+                    if action == Action::Press {
+                        self.launch_new(&id, r.time);
                     }
                     return;
                 }
@@ -631,6 +645,21 @@ impl Comp {
         if self.flyout_rect().is_some_and(|r| r.contains(px, py)) {
             let f = self.flyout;
             self.trace(time, format_args!("{button:?} {act} na {px},{py}: panel {f:?}"));
+            // Okna aplikace: radek = okno, posledni = nove okno.
+            if let Some(crate::flyout::Flyout::AppWindows(g)) = f
+                && button == Button::Left
+                && let Some(i) = self.flyout_row_at(py)
+            {
+                let id = self.app_of(g).unwrap_or_default();
+                let wins = self.app_windows(&id);
+                self.set_flyout(None);
+                match wins.get(i) {
+                    Some(&w) => self.activate_window(w),
+                    None if i == wins.len() => self.launch_new(&id, time),
+                    None => {}
+                }
+                return;
+            }
             // Spoustec: radek = aplikace.
             if f == Some(crate::flyout::Flyout::Apps)
                 && button == Button::Left
@@ -653,6 +682,25 @@ impl Comp {
             .find(|(r, _)| r.is_some_and(|r| r.contains(px, py)))
             .map(|(_, f)| f);
             self.trace(time, format_args!("{button:?} {act} na {px},{py}: lista{}", icon.map_or(alloc::string::String::new(), |f| alloc::format!(", ikona {f:?}"))));
+            // Aplikace s okny: prostredni klik / Shift+klik = nove okno,
+            // pravy = seznam oken a "Nove okno", levy pri vic oknech seznam.
+            if let Some(k) = bar.apps.iter().position(|(_, r)| r.contains(px, py)) {
+                let (rep, n) = (bar.apps[k].0, bar.groups.get(k).map_or(1, |v| v.len()));
+                let id = self.app_of(rep).unwrap_or_default();
+                let shift = mods & inputproto::mods::SHIFT != 0;
+                match button {
+                    Button::Middle => self.launch_new(&id, time),
+                    Button::Left if shift => self.launch_new(&id, time),
+                    Button::Right => self.toggle_flyout(crate::flyout::Flyout::AppWindows(rep)),
+                    Button::Left if n > 1 => self.toggle_flyout(crate::flyout::Flyout::AppWindows(rep)),
+                    Button::Left => {
+                        self.set_flyout(None);
+                        self.panel_click(rep);
+                    }
+                    _ => {}
+                }
+                return;
+            }
             if button != Button::Left {
                 return;
             }
@@ -734,6 +782,16 @@ impl Comp {
             }
             _ => {}
         }
+    }
+
+    /// Okno do popredi (i z minimalizace), fokus.
+    pub(crate) fn activate_window(&mut self, g: u32) {
+        if let Some(w) = self.windows.get_mut(&g) {
+            w.minimized = false;
+        }
+        self.damage_window(g);
+        self.set_focus(Some(g));
+        self.damage_panel();
     }
 
     fn panel_click(&mut self, g: u32) {

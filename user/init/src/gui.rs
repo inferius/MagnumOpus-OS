@@ -462,9 +462,13 @@ fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, program: &
 /// Seznam aplikaci pro listu a kanal pro zadosti o spusteni.
 fn connect_launcher(gui: &Gui, startup: &Startup) {
     let mut list = String::from(control::APPS);
+    let fs = Initfs::open(startup).ok();
     for p in DESKTOP_APPS {
         if let Ok(info) = recipe(startup, p) {
-            list.push_str(&format!("\n{}\t{}", info.id, info.name));
+            // `[window] instances = "multi"`: vic oken (vychozi single).
+            let text = fs.as_ref().and_then(|f| f.find(&format!("{p}.manifest.toml"))).and_then(|t| core::str::from_utf8(t).ok()).unwrap_or("");
+            let multi = conf::parse(text).ok().and_then(|t| t.get_str("window.instances").map(|s| s == "multi")).unwrap_or(false);
+            list.push_str(&format!("\n{}\t{}\t{}", info.id, info.name, if multi { "multi" } else { "single" }));
         }
     }
     if let Err(e) = gui.command(list.as_bytes(), Vec::new()) {

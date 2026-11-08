@@ -7,6 +7,10 @@ name = "Terminál"
 [limits]
 memory = "64M"
 
+# Vic oken (kazde = nova relace): nove okno jen vyslovnou akci.
+[window]
+instances = "multi"
+
 [[action]]
 id = "terminal.run"
 title = "Spustit příkaz v terminálu"

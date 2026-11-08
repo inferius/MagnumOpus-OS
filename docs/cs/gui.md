@@ -522,7 +522,41 @@ s velikostí obrazovky a příznakem `FULLSCREEN`, nic nemusí umět.
   výjimky (hovory, baterie, bezpečnost) a konfigurační klíč v Nastavení
   **[navrženo]**.
 
+### Víc oken jedné aplikace a fokus nových oken
+
+- **Manifest:** `[window] instances = "single" | "multi"` (výchozí
+  `single`). Single (Správce úloh, Ukázka, později Nastavení): spuštění =
+  vždy jen fokus existujícího okna, „Nové okno“ se nenabízí. Multi
+  (Terminál, později Soubory, editor): nové okno jen výslovnou akcí. Init
+  pošle příznak kompozitoru ve třetím sloupci seznamu `apps`.
+- **Lišta** má jedno tlačítko na aplikaci, víc oken = počet vpravo nahoře.
+  Klik: žádné okno = spustit; jedno okno = fokus (když už ho má,
+  minimalizovat); víc oken = seznam oken nad ikonou (titulky) a na konci
+  „+ Nové okno“ (jen multi). Pravý klik ukáže tentýž seznam.
+- **Nové okno** (jen multi): prostřední klik nebo Shift+klik na ikonu,
+  „+ Nové okno“ v seznamu, v paletě Ctrl+Enter na řádku aplikace nebo klik
+  na „+ nové okno“ vpravo, zkratka **Ctrl+Shift+N** v okně aplikace (u
+  single jde klávesa aplikaci). Kompozitor požádá init (`launch <id>`),
+  ten spustí další instanci; terminál = nová relace (vlastní termd).
+- **Paleta:** řádek aplikace, Enter = přepnout na otevřené okno (nebo
+  spustit, když neběží); pod ním její otevřená okna jako podřádky.
+- **Fokus:** okno spuštěné uživatelem (lišta, spouštěč, paleta, zkratka;
+  do 30 s od žádosti) dostane fokus hned. Okno, které se otevře samo na
+  pozadí, fokus jinému oknu neukradne (ochrana při psaní) - jen se
+  zvýrazní značka jeho ikony v liště, dokud ho uživatel nevybere; když
+  žádné okno fokus nemá, fokus dostane.
+
+**[implementováno]** (testy `multiple_windows_per_app_and_user_launch_focus`,
+`pointer_keyboard_routing_and_focus` v `libs/comp`)
+
 ### Paleta příkazů (v2)
+
+**Vzhled je prozatímní**, cílový podle `design/prostredi-menu.html`
+(varianta D: ikony aplikací ve stylu F, sekce s ikonou a jménem aplikace,
+štít u Systém, zkratky jako „klávesy“, tlačítko ⊕ Nové okno, materiál B
+s rozmazáním až s blur shaderem, typografie a rozestupy z tokenů).
+Sladění vzhledu přijde po kontextových nabídkách a menu ☰ jedním průchodem
+pro paletu, kontextové nabídky i menu (stejné komponenty). **[navrženo]**
 
 Systémová zkratka **Ctrl+K** nebo **Super+K** (jen fyzická klávesnice)
 otevře nahoře uprostřed obrazovky paletu podle `design/prostredi-menu.html`.
@@ -889,7 +923,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `tasks <běží> <agent>` | - | `ok` (ikona úloh v panelu) |
 | `theme light\|dark\|contrast` | - | `ok` (režim barev z tokenů) |
 | `sources [net] [audio]` | relace sítě (`INFO`), kanál zvuku | `ok` (stav v liště) |
-| `apps` + řádky `<id>\t<jméno>` | - | prázdná (spustitelné aplikace v liště) |
+| `apps` + řádky `<id>\t<jméno>\t<single\|multi>` | - | prázdná (spustitelné aplikace v liště) |
 | `dnd-fullscreen on\|off` | - | prázdná (Nerušit při celé obrazovce) |
 | `launcher` | kanál k initu | prázdná (žádosti `launch <id>`) |
 | `snapshots` | kanál na `logd` | prázdná (obrázky [diagnostického snímku](#diagnostický-snímek-print-screen)) |
