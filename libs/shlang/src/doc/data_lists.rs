@@ -38,7 +38,7 @@ pub const DOCS: &[Doc] = &[
         long_cs: "Nechá v tabulce jen vybrané sloupce (v uvedeném pořadí).",
         long_en: "Keeps only the chosen columns of a table (in the given order).",
         args: &[Arg { name: "...", default: "", cs: "jména sloupců", en: "column names" }],
-        examples: &[Ex { code: "ls | select name size", cs: "Jméno a velikost.", en: "Name and size.", check: Out("name       size\n---------  ----\na.txt       5 B\nb.txt      10 B\ndata.json  49 B\ndocs        0 B") }],
+        examples: &[Ex { code: "ls | select name size", cs: "Jméno a velikost (u složky součet podstromu).", en: "Name and size (for a folder the subtree sum).", check: Out("name       size\n---------  ------\na.txt         5 B\nb.txt        10 B\ndata.json    49 B\ndocs       3.0 KB") }],
         related: &["where", "sort"],
         errors: &["SH_TYPE"],
         needs_cs: "",

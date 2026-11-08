@@ -39,12 +39,15 @@ pub struct Meta {
     pub access: Option<u8>,
     /// Slozka je koren vnoreneho datasetu (vlastni historie).
     pub dataset: bool,
+    /// U slozky obsah podstromu (soubory, slozky bez sebe), kdyz ho FS
+    /// zna; `size` je pak logicka velikost podstromu (soucet souboru).
+    pub tree: Option<(u64, u64)>,
 }
 
 impl Meta {
     /// Polozka jen s druhem a velikosti (bez casu a prav).
     pub const fn basic(kind: NodeKind, size: u64) -> Self {
-        Self { kind, size, mtime: None, access: None, dataset: false }
+        Self { kind, size, mtime: None, access: None, dataset: false, tree: None }
     }
 }
 

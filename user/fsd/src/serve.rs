@@ -250,6 +250,9 @@ impl Service {
                                 size: st.size,
                                 mtime: st.mtime,
                                 rights: st.rights,
+                                tree_bytes: st.tree_bytes,
+                                tree_files: st.tree_files,
+                                tree_dirs: st.tree_dirs,
                             })
                         })
                         .collect::<Result<Vec<_>>>()?;

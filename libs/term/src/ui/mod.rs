@@ -336,7 +336,10 @@ impl App {
             // Odpoved na starsi pozadavek (mezitim novy): zahodit.
             ServerMsg::Completions { seq, .. } | ServerMsg::Formatted { seq, .. } if seq != self.req => {}
             ServerMsg::Completions { start, items, .. } => {
-                if items.len() == 1 {
+                if items.is_empty() {
+                    // Tab neco udelal: rict, ze neni co doplnit.
+                    self.notice = Some(tasks::Notice::new("nic k doplnění", false, self.tick));
+                } else if items.len() == 1 {
                     // Jedina moznost: doplnit rovnou.
                     self.apply_completion(start as usize, &items[0].0);
                 } else if !items.is_empty() {
@@ -761,11 +764,28 @@ impl App {
         }
         // Nabidka doplnovani.
         if let Some(m) = &self.menu {
-            for (i, (text, _, help)) in m.items.iter().enumerate().take(6) {
+            // Okno kolem vyberu (dlouhy seznam se posouva se sipkami).
+            let first = m.sel.saturating_sub(5);
+            let w = m.items.iter().map(|(t, _, _)| t.chars().count()).max().unwrap_or(0).min(40);
+            for (i, (text, kind, help)) in m.items.iter().enumerate().skip(first).take(6) {
                 let mut l = Line::new();
-                l.push(Some(Style::fg(t.syntax(shlang::highlight::Class::Command).fg)), &alloc::format!("  {text}"));
+                // Typ polozky: znacka a popis (slozka, soubor, prikaz...).
+                let (mark, what, col) = match *kind {
+                    k if k == shlang::complete::CandKind::Dir as u8 => ("\u{25B8} ", "složka", t.ui.accent),
+                    k if k == shlang::complete::CandKind::File as u8 => ("\u{2022} ", "soubor", t.ui.fg),
+                    k if k == shlang::complete::CandKind::Command as u8 => ("  ", "příkaz", t.syntax(shlang::highlight::Class::Command).fg),
+                    k if k == shlang::complete::CandKind::Flag as u8 => ("  ", "přepínač", t.ui.fg),
+                    k if k == shlang::complete::CandKind::Var as u8 => ("  ", "proměnná", t.ui.fg),
+                    _ => ("  ", "sloupec", t.ui.fg),
+                };
+                l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("  {mark}"));
+                l.push(Some(Style::fg(col)), &alloc::format!("{text:<w$}"));
+                let help = if help.is_empty() { what } else { help.as_str() };
                 l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("  {help}"));
                 bottom.push(if i == m.sel { l.fill(t.ui.select) } else { l });
+            }
+            if m.items.len() > 6 {
+                bottom.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("    {} z {} · pište pro zúžení", m.sel + 1, m.items.len())));
             }
         }
         // Panel uloh.

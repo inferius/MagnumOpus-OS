@@ -19,19 +19,34 @@
 
 lists files in a folder as a table
 
-Lists a folder as a table with name, path, kind, size and modification time. The output is a table, so it can be filtered and sorted further in a pipeline. Hidden files (name starting with a dot) appear only with `-a`.
+Lists a folder as a table with name, path, kind, size and modification time. The output is a table, so it can be filtered and sorted further in a pipeline. Hidden files (name starting with a dot) appear only with `-a`. For a folder `size` is the logical size (the sum of files in the subtree, known to the FS at once without walking it) and `items` its content (`files` and `dirs` separately); the space really used (shared blocks, deduplication, compression) will be shown by the upcoming `disk` / `fs info` command. Without the right to manage the folder the summary is missing.
 
 ```shell
 ls [path] [-r] [-a]
 ```
 
-Full name `file-list` · input: nothing · output: table (name, path, kind, size, mtime, ext, access, dataset)
+Full name `file-list` · input: nothing · output: table (name, path, kind, size, mtime, ext, access, dataset, items, files, dirs)
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `[path]` | path | pracovní složka | folder to list (default: working folder) |
 | `-r, --recursive` | switch |  | include subfolders |
 | `-a, --all` | switch |  | include hidden files (starting with a dot) |
+
+Name, size and the content of a folder.
+
+```shell
+ls | select name size items
+```
+
+```text
+name       size    items
+---------  ------  ---------
+a.txt         5 B
+b.txt        10 B
+data.json    49 B
+docs       3.0 KB  2 soubory
+```
 
 Names of files in the working folder.
 
@@ -850,7 +865,7 @@ Full name `record-select` · input: any value · output: any value
 |---|---|---|---|
 | `...` | text |  | column names |
 
-Name and size.
+Name and size (for a folder the subtree sum).
 
 ```shell
 ls | select name size
@@ -858,11 +873,11 @@ ls | select name size
 
 ```text
 name       size
----------  ----
-a.txt       5 B
-b.txt      10 B
-data.json  49 B
-docs        0 B
+---------  ------
+a.txt         5 B
+b.txt        10 B
+data.json    49 B
+docs       3.0 KB
 ```
 
 **Errors:** `SH_TYPE`

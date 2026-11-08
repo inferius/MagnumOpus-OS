@@ -29,6 +29,13 @@ pub struct Notice {
     until: u32,
 }
 
+impl Notice {
+    /// Kratke upozorneni ve stavovem radku (od snimku `tick`).
+    pub fn new(text: &str, error: bool, tick: u32) -> Self {
+        Self { text: text.into(), error, until: tick.wrapping_add(NOTICE_TICKS) }
+    }
+}
+
 fn state_text(s: &State) -> String {
     match s {
         State::Running => String::from("běží"),

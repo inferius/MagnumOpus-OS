@@ -100,7 +100,7 @@ fn review_roundtrips() {
     let p = parse("let y = 1\n.config/run", &opts()).unwrap();
     assert_eq!(p.script.body.stmts.len(), 2);
     // `where (f => ...)` je jedna closure
-    let (h, _, o) = run_lines(&["ls | where (f => f.size > 5B) | count"]);
+    let (h, _, o) = run_lines(&["ls | where (f => f.kind == \"file\" && f.size > 5B) | count"]);
     o.result.unwrap();
     assert_eq!(h.out, vec![crate::value::Value::Int(2)]);
 }

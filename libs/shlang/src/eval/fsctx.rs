@@ -126,7 +126,8 @@ impl Interp {
         self.write_err(r, alloc::format!("{from} nejde presunout do {to}"))
     }
 
-    /// Zaznam souboru (radek vystupu `ls`).
+    /// Zaznam souboru (radek vystupu `ls`). U slozky je `size` logicka
+    /// velikost podstromu (soucet souboru, ne zabrane misto).
     pub(crate) fn file_record(full: &str, name: &str, m: &Meta) -> Value {
         Value::record(&[
             ("name", Value::str(name)),
@@ -139,6 +140,10 @@ impl Interp {
             ("access", Value::str(m.access.map(crate::host::access::text).unwrap_or_default())),
             // Koren vnoreneho datasetu (vlastni historie); `kind` zustava "dir".
             ("dataset", Value::Bool(m.dataset)),
+            // Obsah slozky (podstrom): lidsky a cisla zvlast.
+            ("items", Value::str(m.tree.map(|(f, d)| items_text(f, d)).unwrap_or_default())),
+            ("files", m.tree.map_or(Value::Null, |(f, _)| Value::Int(f as i64))),
+            ("dirs", m.tree.map_or(Value::Null, |(_, d)| Value::Int(d as i64))),
         ])
     }
 
@@ -194,4 +199,21 @@ impl Interp {
             ))),
         }
     }
+}
+
+/// "12 souborů, 3 složky" (české tvary podle počtu).
+pub(crate) fn items_text(files: u64, dirs: u64) -> String {
+    fn form(n: u64, one: &str, few: &str, many: &str) -> String {
+        let w = match n {
+            1 => one,
+            2..=4 => few,
+            _ => many,
+        };
+        alloc::format!("{n} {w}")
+    }
+    let f = form(files, "soubor", "soubory", "souborů");
+    if dirs == 0 {
+        return f;
+    }
+    alloc::format!("{f}, {}", form(dirs, "složka", "složky", "složek"))
 }
