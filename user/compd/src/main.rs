@@ -15,6 +15,7 @@
 extern crate alloc;
 
 mod gpu;
+mod status;
 mod peers;
 mod screen;
 
@@ -50,6 +51,9 @@ struct Service {
     zone: Option<libos::time::zone::Zone>,
     /// Pocet snimku, soucet a maximum casu skladani (ns).
     frame_stats: (u64, u64, u64),
+    /// Zdroje stavu v liste: sit a zvuk.
+    net_src: Option<status::Source>,
+    audio_src: Option<status::Source>,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -66,6 +70,8 @@ fn main(startup: Startup) -> i64 {
         gpu: None,
         zone: None,
         frame_stats: (0, 0, 0),
+        net_src: None,
+        audio_src: None,
     };
     loop {
         if !s.wait_and_serve() {
@@ -80,6 +86,7 @@ impl Service {
     fn wait_and_serve(&mut self) -> bool {
         let now = libos::time::now();
         let next_minute = self.update_clock(now);
+        self.read_sources();
         let mut deadline = match (&self.comp, &self.screen) {
             (Some(c), Some(_)) => c.next_wakeup(now),
             // Bez displeje se nesklada; jen casovace (ping, skupiny).
@@ -88,6 +95,11 @@ impl Service {
         };
         if let Some(m) = next_minute {
             deadline = Some(deadline.map_or(m, |d| d.min(m)));
+        }
+        for src in [&mut self.net_src, &mut self.audio_src].into_iter().flatten() {
+            if let Some(t) = src.poll(now) {
+                deadline = Some(deadline.map_or(t, |d| d.min(t)));
+            }
         }
         if self.peers.has_backlog() {
             // Odlozene zpravy zkusit znovu brzy (kanal nema signal "volno").
@@ -105,6 +117,9 @@ impl Service {
         }
         if let Some(sc) = &self.screen {
             items.push((sc.display.handle(), rd));
+        }
+        for src in [&self.net_src, &self.audio_src].into_iter().flatten() {
+            items.push((src.ch.handle(), rd));
         }
         self.peers.wait_items(&mut items);
         let r = libos::wait_many(&items, deadline);
@@ -276,6 +291,32 @@ impl Service {
         }
     }
 
+    /// Odpovedi zdroju stavu (sit, zvuk) -> ikony v liste. Zdroj, jehoz
+    /// sluzba skoncila, se zahodi (ikona zmizi).
+    fn read_sources(&mut self) {
+        let Some(c) = self.comp.as_mut() else { return };
+        if let Some(s) = self.net_src.as_mut() {
+            match s.read(status::net_state) {
+                Ok(Some(v)) => c.set_net(Some(v)),
+                Ok(None) => {}
+                Err(()) => {
+                    self.net_src = None;
+                    c.set_net(None);
+                }
+            }
+        }
+        if let Some(s) = self.audio_src.as_mut() {
+            match s.read(status::volume) {
+                Ok(Some(v)) => c.set_volume(Some(v)),
+                Ok(None) => {}
+                Err(()) => {
+                    self.audio_src = None;
+                    c.set_volume(None);
+                }
+            }
+        }
+    }
+
     /// Hodiny v liste: mistni cas v pasmu od initu. Vraci, kdy se zmeni
     /// minuta (probuzeni), `None` = hodiny se neukazuji.
     fn update_clock(&mut self, now: u64) -> Option<u64> {
@@ -351,6 +392,19 @@ impl Service {
                     self.zone = libos::time::zone::Zone::by_name(z).or(libos::time::zone::Zone::parse(z));
                 }
                 self.attach_display(handles)
+            }
+            control::SOURCES => {
+                let mut hs = handles.into_iter();
+                for w in words.by_ref() {
+                    let Some(h) = hs.next() else { break };
+                    let ch = Channel::from_handle(h);
+                    match w {
+                        "net" => self.net_src = Some(status::Source::new(ch, status::net_request())),
+                        "audio" => self.audio_src = Some(status::Source::new(ch, status::audio_request())),
+                        _ => {}
+                    }
+                }
+                Ok((String::new(), Vec::new()))
             }
             control::THEME => {
                 let mode = match words.next() {
@@ -497,4 +551,9 @@ impl VmoPixels {
         let map = Mapping::new(&vmo, 0, px.checked_mul(4).ok_or(Error::InvalidArgs)?, MAP_READ)?;
         Ok(Self { _vmo: vmo, map, len: px as usize })
     }
+}
+
+/// Monotonni cas (pro moduly bez primeho `libos::time`).
+pub(crate) fn compd_now() -> u64 {
+    libos::time::now()
 }

@@ -83,6 +83,26 @@ impl Canvas<'_> {
         });
     }
 
+    /// Obraz `img` (`r.w x r.h` pixelu) do obdelniku `r` jen uvnitr
+    /// zaobleneho tvaru (vyhlazene hrany), src-over.
+    pub fn round_image(&mut self, img: &[u32], r: Rect, radius: u32) {
+        if img.len() < (r.w * r.h) as usize {
+            return;
+        }
+        let rad = radius.min(r.w / 2).min(r.h / 2) as f32;
+        self.rows(r, |row, rx, y| {
+            let ly = (y - r.y) as u32;
+            for (i, p) in row.iter_mut().enumerate() {
+                let x = rx + i as i32;
+                let k = coverage(round_rect_distance(x as f32 + 0.5, y as f32 + 0.5, r, rad));
+                if k > 0 {
+                    let s = img[(ly * r.w + (x - r.x) as u32) as usize];
+                    *p = over(*p, scale(s, k));
+                }
+            }
+        });
+    }
+
     /// Ram zaobleneho obdelniku sirky `width` dovnitr od hrany `r`.
     pub fn round_stroke(&mut self, r: Rect, radius: u32, width: u32, c: u32) {
         if r.is_empty() || width == 0 {

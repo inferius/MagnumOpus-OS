@@ -392,6 +392,24 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
         println!("init: vstup pro kompozitor: {e}");
     }
     gui.register(sup);
+    // Stav v liste: relace site jen se stavem rozhrani a kanal ke zvuku.
+    let mut names = Vec::new();
+    let mut hs = Vec::new();
+    if let Some(n) = crate::system::NET.get()
+        && let Ok(s) = n.root.restrict(netproto::policy::rights::INFO, &netproto::policy::Policy::only(Vec::new()))
+    {
+        names.push("net");
+        hs.push(s.into_channel().into_handle());
+    }
+    if let Ok(a) = crate::audio::connect() {
+        names.push("audio");
+        hs.push(a.into_handle());
+    }
+    if !hs.is_empty()
+        && let Err(e) = gui.command(format!("{} {}", control::SOURCES, names.join(" ")).as_bytes(), hs)
+    {
+        println!("init: stav pro listu: {e}");
+    }
     // Terminal: za oknem a listkem kanal pripojeni k termd (init ho spousti
     // a hlida, viz `terminal.rs`).
     let term = match crate::terminal::TERMINALS.lock().client("gui-term") {

@@ -61,6 +61,16 @@ pub(super) fn badge() -> u32 {
     theme::Theme::builtin(theme::Mode::Light).color.trust_bg
 }
 
+/// Odznak okna bez fokusu: nizsi sytost (jako `saturate(.6)` v prototypu,
+/// stejny vzorec jako kompozitor).
+pub(super) fn badge_inactive() -> u32 {
+    let c = badge();
+    let (r, g, b) = (c >> 16 & 0xFF, c >> 8 & 0xFF, c & 0xFF);
+    let l = (r * 54 + g * 183 + b * 19) >> 8;
+    let m = |v: u32| (l * 102 + v * 153) / 255;
+    (c & 0xFF00_0000) | m(r) << 16 | m(g) << 8 | m(b)
+}
+
 pub(super) struct State {
     pub(super) gui: Gui,
     pub(super) inspect: Channel,
@@ -347,7 +357,8 @@ fn terminal_window(startup: &Startup) -> TestResult {
         })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
-        check_eq!(pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?, badge(), "odznak nad vlastnim titulkem");
+        let px = pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?;
+        check!(px == badge() || px == badge_inactive(), alloc::format!("odznak nad vlastnim titulkem: {px:#x}"));
         Ok(())
     })
 }

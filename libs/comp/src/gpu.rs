@@ -96,6 +96,9 @@ impl Comp {
         let dialog_active = self.dialogs.active().is_some();
         let screen = self.screen();
         let hover = self.input.hover;
+        if rects.iter().any(|r| !r.intersect(&self.panel_visual()).is_empty()) {
+            self.ensure_bar_blur(now);
+        }
         let mut trees: Vec<(u32, Kids)> = Vec::new();
         for &gid in &self.z {
             let Some(w) = self.windows.get(&gid) else { continue };

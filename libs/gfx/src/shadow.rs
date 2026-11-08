@@ -79,7 +79,7 @@ impl ShadowMask {
 
 /// Sirky tri krabickovych filtru pro Gauss se smerodatnou odchylkou
 /// `sigma` (W. Jarosz, "Fast Image Convolutions").
-fn box_sizes(sigma: f32) -> [u32; 3] {
+pub(crate) fn box_sizes(sigma: f32) -> [u32; 3] {
     let n = 3.0;
     let w_ideal = crate::sqrtf(12.0 * sigma * sigma / n + 1.0);
     let mut wl = w_ideal as u32;

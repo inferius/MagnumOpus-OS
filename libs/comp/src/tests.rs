@@ -857,7 +857,9 @@ fn look_snapshots() {
         let surface = t.c.style.theme.color.surface;
         let term = t.c.style.theme.color.term_bg;
         look_window(&mut t, "org.magnumopus.files", "Soubory", "Dokumenty", (60, 90, 360, 220), surface);
-        look_window(&mut t, "org.magnumopus.term", "Terminál", "~/Projekty - Terminál", (300, 200, 420, 240), term);
+        look_window(&mut t, "org.magnumopus.term", "Terminál", "~/Projekty - Terminál", (300, 260, 420, 280), term);
+        t.c.set_net(Some(render::NetState::Online));
+        t.c.set_volume(Some((60, false)));
         t.c.set_tasks(4, 1);
         t.c.set_clock(Some(("14:05".into(), "so 7. 11.".into())));
         t.c.damage_all();
@@ -1125,4 +1127,22 @@ fn same_length_different_arguments_are_rejected() {
     let out = t.out();
     assert!(client_msgs(&out, a).is_empty());
     assert!(out.iter().any(|o| matches!(o, Out::Caller(5, CallerReply::Result { ok: false, .. }))));
+}
+
+#[test]
+fn startup_cost() {
+    let t0 = std::time::Instant::now();
+    let tok = theme::Tokens::builtin();
+    let t1 = t0.elapsed();
+    let _ = tok.theme(theme::Mode::Light).unwrap();
+    let t2 = t0.elapsed();
+    let f = fonts();
+    let t3 = t0.elapsed();
+    let mut c = Comp::new(1280, 800, f, Box::new(|| 1));
+    let t4 = t0.elapsed();
+    let mut px = vec![0u32; 1280 * 800];
+    let mut canvas = Canvas::new(&mut px, 1280, 800, 1280).unwrap();
+    c.tick(1, &mut canvas);
+    let t5 = t0.elapsed();
+    std::println!("parse {t1:?} theme {t2:?} fonts {t3:?} comp {t4:?} first frame {t5:?}");
 }

@@ -186,11 +186,12 @@ impl Service {
             None => Comp::new(w, h, ui_fonts(), Box::new(token)),
         };
         let mut comp = comp;
-        // Prvni snimek slozit hned (ovladac ho pri pripojeni zobrazi).
+        // Pri pripojeni jen plna barva pozadi (rychly start i v emulaci;
+        // hlidac sluzeb ceka na pripojeni). Cely snimek slozi dalsi takt,
+        // obrazovka je cela poskozena.
         let mut canvas = gfx::Canvas::new(screen.pixels(), w, h, w).ok_or(Error::NoMemory)?;
-        if comp.tick(now, &mut canvas).is_some() {
-            comp.presented(now);
-        }
+        canvas.fill(canvas.bounds(), comp.background());
+        comp.redraw_all();
         self.comp = Some(comp);
         let req = Request::Attach { output, w, h, stride: w * 4 };
         screen.display.write(&req.encode(), alloc::vec![ro])?;

@@ -275,8 +275,8 @@ impl Comp {
         self.input.px = x.clamp(0, self.w as i32 - 1);
         self.input.py = y.clamp(0, self.h as i32 - 1);
         let new = self.cursor_rect();
-        self.damage(old);
-        self.damage(new);
+        self.damage_top(old);
+        self.damage_top(new);
         let (px, py) = (self.input.px, self.input.py);
         if let Some(d) = self.input.drag {
             return self.drag_to(d, px, py, now);

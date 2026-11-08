@@ -93,8 +93,14 @@ pub struct Comp {
     pub(crate) style: style::Style,
     /// Hodiny v liste (cas, datum).
     pub(crate) clock: Option<(String, String)>,
+    /// Sit a hlasitost v liste.
+    pub(crate) status: render::BarStatus,
     /// Mezibuffer vrstvy nad okny (CPU cesta sklada stejne jako GPU).
     pub(crate) top_scratch: Vec<u32>,
+    /// Rozmazane pozadi pod listou (mezipamet) a zda se pod ni neco zmenilo.
+    pub(crate) bar_blur: Option<Vec<u32>>,
+    pub(crate) bar_blur_dirty: bool,
+    pub(crate) blur_scratch: Vec<u32>,
     pub(crate) clients: BTreeMap<ClientId, scene::Client>,
     pub(crate) windows: BTreeMap<u32, scene::Window>,
     /// Poradi oken zdola nahoru (globalni id).
@@ -125,7 +131,11 @@ impl Comp {
             h,
             style: style::Style::new(fonts, theme::Mode::Light),
             clock: None,
+            status: render::BarStatus::default(),
             top_scratch: Vec::new(),
+            bar_blur: None,
+            bar_blur_dirty: true,
+            blur_scratch: Vec::new(),
             clients: BTreeMap::new(),
             windows: BTreeMap::new(),
             z: Vec::new(),
@@ -152,6 +162,16 @@ impl Comp {
 
     pub(crate) fn damage(&mut self, r: Rect) {
         let s = self.screen();
+        if !r.intersect(&self.blur_source()).is_empty() {
+            self.bar_blur_dirty = true;
+        }
+        self.dirty.add(r, s);
+    }
+
+    /// Poskozeni jen vrstvy nad okny (lista, kurzor): pozadi pod listou se
+    /// nemeni, rozmazani se nepocita znovu.
+    pub(crate) fn damage_top(&mut self, r: Rect) {
+        let s = self.screen();
         self.dirty.add(r, s);
     }
 
@@ -167,6 +187,11 @@ impl Comp {
     /// Zpravy k odeslani (vyprazdni frontu).
     pub fn take_out(&mut self) -> Vec<Out> {
         core::mem::take(&mut self.out)
+    }
+
+    /// Barva pozadi plochy (prvni snimek pri pripojeni displeje).
+    pub fn background(&self) -> u32 {
+        self.style.theme.color.bg
     }
 
     /// Prekreslit celou obrazovku (napr. po zmene backendu skladani).

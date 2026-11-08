@@ -33,6 +33,9 @@ pub const DISPLAY: &str = "display";
 /// `theme light|dark|contrast`: rezim barev vzhledu (tokeny
 /// `design/tokens.toml`).
 pub const THEME: &str = "theme";
+/// `sources [net] [audio]`: kanaly pro stav v liste (handly ve stejnem
+/// poradi): relace site jen s pravem `INFO`, kanal zvukove sluzby.
+pub const SOURCES: &str = "sources";
 pub const INPUT: &str = "input";
 pub const SECURE: &str = "secure";
 pub const CONNECT: &str = "connect";

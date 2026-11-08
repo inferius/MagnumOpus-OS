@@ -58,6 +58,10 @@ pub const CURSOR_W: u32 = 12;
 pub const CURSOR_H: u32 = 19;
 
 
+/// Rozmazani pozadi listy (prototyp `.bar`: `backdrop-filter: blur(16px)`,
+/// smerodatna odchylka v px).
+pub const BAR_BLUR: u32 = 16;
+
 /// Text ikony uloh (pristupnost, inspekce).
 pub fn tasks_label(run: u32, agent: u32) -> String {
     if agent > 0 { format!("Úlohy: {run} (agent {agent})") } else { format!("Úlohy: {run}") }
@@ -108,9 +112,31 @@ pub struct Bar {
     pub apps: Vec<(u32, Rect)>,
     pub agent: Option<Rect>,
     pub tasks: Option<Rect>,
+    /// Stav site, hlasitost, oznameni (zleva doprava jako v prototypu).
+    pub net: Option<Rect>,
+    pub volume: Option<Rect>,
+    pub bell: Rect,
     pub clock: Option<Rect>,
     /// Oddelovace (x).
     pub seps: Vec<i32>,
+}
+
+/// Stav site v liste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetState {
+    /// Bez linky.
+    Offline,
+    /// Linka je, adresa jeste ne (DHCP).
+    Connecting,
+    Online,
+}
+
+/// Stav systemu zobrazeny v liste.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BarStatus {
+    pub net: Option<NetState>,
+    /// Hlasitost v procentech a ztlumeni.
+    pub volume: Option<(u8, bool)>,
 }
 
 /// Na co ukazuje mys (zvyrazneni pri najeti).
@@ -154,7 +180,75 @@ impl Comp {
 
     pub(crate) fn damage_panel(&mut self) {
         let r = self.panel_visual();
-        self.damage(r);
+        self.damage_top(r);
+    }
+
+    /// Odkud se bere rozmazane pozadi listy: lista a okraj 3 sigma (dal
+    /// Gaussovo jadro nesaha).
+    pub(crate) fn blur_source(&self) -> Rect {
+        let p = self.panel_rect();
+        let e = 3 * BAR_BLUR;
+        Rect::new(p.x - e as i32, p.y - e as i32, p.w + 2 * e, p.h + 2 * e).intersect(&self.screen())
+    }
+
+    /// Rozmazane pozadi listy: prepocita se, jen kdyz se pod listou neco
+    /// zmenilo (pohyb okna, obsah, motiv). Scena se pro oblast pod listou
+    /// vykresli znovu do mezibufferu (stejne na CPU i GPU, proto stejne
+    /// pixely), rozmaze a orizne na listu.
+    pub(crate) fn ensure_bar_blur(&mut self, now: u64) {
+        if self.style.theme.opacity.bar >= 255 {
+            self.bar_blur = None;
+            return;
+        }
+        if !self.bar_blur_dirty && self.bar_blur.is_some() {
+            return;
+        }
+        let src = self.blur_source();
+        let (w, h) = (self.w, self.h);
+        let mut scratch = core::mem::take(&mut self.blur_scratch);
+        scratch.resize((w * h) as usize, 0);
+        {
+            let mut c = Canvas::new(&mut scratch, w, h, w).unwrap();
+            c.set_clip(src);
+            self.desktop(&mut c);
+            for &gid in &self.z {
+                let Some(win) = self.windows.get(&gid) else { continue };
+                if !win.mapped || win.minimized || win.visual().intersect(&src).is_empty() {
+                    continue;
+                }
+                let Some(cl) = self.clients.get(&win.client) else { continue };
+                let kids = children(cl, win.local);
+                let focused = self.focus == Some(gid);
+                draw_window(&mut c, &mut self.style, win, cl, &kids, focused, now, None);
+                c.set_clip(src);
+            }
+        }
+        let blurred = gfx::blur::blurred_region(&scratch, w, src, BAR_BLUR as f32);
+        let p = self.panel_rect();
+        let mut band = Vec::with_capacity((p.w * p.h) as usize);
+        for y in 0..p.h {
+            let row = ((p.y - src.y) as u32 + y) * src.w + (p.x - src.x) as u32;
+            band.extend_from_slice(&blurred[row as usize..(row + p.w) as usize]);
+        }
+        self.bar_blur = Some(band);
+        self.bar_blur_dirty = false;
+        self.blur_scratch = scratch;
+    }
+
+    /// Stav site pro ikonu v liste (`None` = sluzba site neni).
+    pub fn set_net(&mut self, net: Option<NetState>) {
+        if self.status.net != net {
+            self.status.net = net;
+            self.damage_panel();
+        }
+    }
+
+    /// Hlasitost a ztlumeni pro ikonu v liste (`None` = zvuk neni).
+    pub fn set_volume(&mut self, volume: Option<(u8, bool)>) {
+        if self.status.volume != volume {
+            self.status.volume = volume;
+            self.damage_panel();
+        }
     }
 
     /// Hodiny v liste (cas a datum; `None` = nezobrazovat).
@@ -196,6 +290,20 @@ impl Comp {
             right -= gap;
             bar.seps.push(right);
             right -= gap + 1;
+        }
+        // Oznameni (zatim zastupna ikona), hlasitost, sit.
+        right -= item as i32;
+        bar.bell = Rect::new(right, y, item, item);
+        right -= gap;
+        if self.status.volume.is_some() {
+            right -= item as i32;
+            bar.volume = Some(Rect::new(right, y, item, item));
+            right -= gap;
+        }
+        if self.status.net.is_some() {
+            right -= item as i32;
+            bar.net = Some(Rect::new(right, y, item, item));
+            right -= gap;
         }
         let (run, agent) = self.tasks;
         if run > 0 {
@@ -264,6 +372,9 @@ impl Comp {
             trees.push((gid, children(cl, w.local)));
         }
         let hover = self.input.hover;
+        if rects.iter().any(|r| !r.intersect(&self.panel_visual()).is_empty()) {
+            self.ensure_bar_blur(now);
+        }
         for r in rects {
             canvas.set_clip(*r);
             self.desktop(canvas);
@@ -336,7 +447,9 @@ impl Comp {
             clients: &self.clients,
             focus: self.focus,
             tasks: self.tasks,
+            status: &self.status,
             clock: self.clock.as_ref(),
+            blur: self.bar_blur.as_deref(),
             hover: self.input.hover,
         };
         draw_bar(canvas, &mut self.style, bar, &info);
@@ -674,7 +787,10 @@ struct BarInfo<'a> {
     clients: &'a BTreeMap<crate::ClientId, Client>,
     focus: Option<u32>,
     tasks: (u32, u32),
+    status: &'a BarStatus,
     clock: Option<&'a (String, String)>,
+    /// Rozmazane pozadi pod listou (`None` = plna plocha).
+    blur: Option<&'a [u32]>,
     hover: Option<Hover>,
 }
 
@@ -693,6 +809,9 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         return;
     }
     st.draw_shadow(c, &shadow, p, t.radius.window, Rect::default());
+    if let Some(b) = info.blur {
+        c.round_image(b, p, t.radius.window);
+    }
     c.round_fill_bordered(p, t.radius.window, scale(col.surface, t.opacity.bar), col.border, 1);
     let ctl = t.radius.control;
     // Spoustec.
@@ -747,6 +866,27 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
             let face = st.face(cs);
             let base = chip.y + face.baseline_in(cs.size, chip.h);
             face.draw(c, chip.x + (t.space[3] + is + t.space[1]) as i32, base, &format!("{agent}"), cs.size, col.ai_ink);
+        }
+    }
+    // Sit, hlasitost, oznameni: ikona 20 px; bez spojeni nebo ztlumeno
+    // vedlejsi barvou s preskrtnutim.
+    let im = t.size.icon_m;
+    let icons = [
+        (bar.net, "wifi", info.status.net.is_some_and(|n| n != NetState::Online)),
+        (bar.volume, "volume", info.status.volume.is_some_and(|(v, m)| m || v == 0)),
+        (Some(bar.bell), "bell", false),
+    ];
+    for (r, name, off) in icons {
+        let Some(r) = r else { continue };
+        let ink = if off { col.ink_faint } else { col.ink };
+        let (x, y) = (r.x + (r.w - im) as i32 / 2, r.y + (r.h - im) as i32 / 2);
+        st.icons.draw(c, name, x, y, im, t.icon_stroke, ink);
+        if off {
+            // Preskrtnuti (stav nese i barva, ne jen barva).
+            for d in 0..im as i32 {
+                let k = t.size.focus_ring;
+                c.fill(Rect::new(x + d, y + d, k, k), col.ink_muted);
+            }
         }
     }
     // Umely vstup: pilulka agenta (barva jen pro agenta, vzdy s ikonou
