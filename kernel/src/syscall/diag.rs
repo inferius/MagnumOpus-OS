@@ -18,15 +18,17 @@ fn check_diag(a0: u64) -> Result<()> {
         .map(|_| ())
 }
 
-/// `LOG_READ(resource, cursor, buf_ptr, buf_len, out_start_ptr) -> bajty`.
+/// `LOG_READ(resource, cursor, buf_ptr, buf_len, out_ptr) -> bajty`;
+/// na `out_ptr` zapise (zacatek u64, ztracene radky u64).
 pub fn log_read(a: Args) -> Result<u64> {
     check_diag(a[0])?;
     let p = current_process();
     let len = user::check_len(a[3], LOG_READ_MAX)?;
     let mut buf = user::zeroed(len);
-    let (start, n) = crate::log::read_from(a[1], &mut buf);
+    let (start, n, lost) = crate::log::read_from(a[1], &mut buf);
     user::write_bytes(&p, a[2], &buf[..n])?;
     user::write_u64(&p, a[4], start)?;
+    user::write_u64(&p, a[4] + 8, lost)?;
     Ok(n as u64)
 }
 
@@ -57,6 +59,62 @@ pub fn crash_record(a: Args) -> Result<u64> {
             panic!("test zaznamu padu: panika vyvolana pres CRASH_RECORD TEST_PANIC");
         }
         crash_op::TEST_PANIC => Err(Error::NotSupported),
+        _ => Err(Error::InvalidArgs),
+    }
+}
+
+/// Uroven z textu.
+fn parse_level(s: &str) -> Option<crate::log::Level> {
+    use crate::log::Level;
+    Some(match s {
+        "error" => Level::Error,
+        "warn" => Level::Warn,
+        "info" => Level::Info,
+        "debug" => Level::Debug,
+        "trace" => Level::Trace,
+        _ => return None,
+    })
+}
+
+/// `LOG_CONTROL(resource, op, buf_ptr, buf_len) -> bajty`.
+pub fn log_control(a: Args) -> Result<u64> {
+    use abi::syscall::log_op;
+    check_diag(a[0])?;
+    let p = current_process();
+    match a[1] {
+        log_op::SET | log_op::CLEAR => {
+            let len = user::check_len(a[3], crate::log::MAX_TARGET + 8)?;
+            let raw = user::read_bytes(&p, a[2], len)?;
+            let text = core::str::from_utf8(&raw).map_err(|_| Error::InvalidArgs)?.trim();
+            if a[1] == log_op::CLEAR {
+                crate::log::clear_target_level(text);
+                crate::log::info!("uroven logu pro {text}: vychozi (proces {})", p.name);
+                return Ok(0);
+            }
+            let (target, level) = text.split_once('=').ok_or(Error::InvalidArgs)?;
+            let (target, level) = (target.trim(), level.trim());
+            let level = parse_level(level).ok_or(Error::InvalidArgs)?;
+            if !crate::log::set_target_level(target, level) {
+                return Err(Error::InvalidArgs);
+            }
+            crate::log::info!("uroven logu pro {target}: {level:?} (proces {})", p.name);
+            Ok(0)
+        }
+        log_op::LIST => {
+            let mut out = alloc::string::String::new();
+            crate::log::for_each_override(|t, l| {
+                out.push_str(&alloc::format!("{t}={}\n", alloc::format!("{l:?}").to_lowercase()));
+            });
+            out.push_str(&alloc::format!(
+                "potlaceno={}\n",
+                crate::log::limit::SUPPRESSED.load(core::sync::atomic::Ordering::Relaxed)
+            ));
+            if (a[3] as usize) < out.len() {
+                return Err(Error::BufferTooSmall);
+            }
+            user::write_bytes(&p, a[2], out.as_bytes())?;
+            Ok(out.len() as u64)
+        }
         _ => Err(Error::InvalidArgs),
     }
 }

@@ -116,6 +116,7 @@ fn every_syscall_is_documented() {
         "",
         "LOG_READ",
         "CRASH_RECORD",
+        "LOG_CONTROL",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

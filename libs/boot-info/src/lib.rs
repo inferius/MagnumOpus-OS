@@ -69,6 +69,14 @@ pub struct BootInfo {
     /// restart. Druh v mape pameti [`MemoryKind::Pstore`].
     pub pstore_phys: u64,
     pub pstore_len: u64,
+    /// Volby startu z nabidky zavadece ([`boot_flags`]).
+    pub boot_flags: u64,
+}
+
+/// Volby startu (`BootInfo::boot_flags`).
+pub mod boot_flags {
+    /// Rezim "vytahni logy" (klavesa L pri startu z flashky).
+    pub const RESCUE_LOGS: u64 = 1 << 0;
 }
 
 /// Ladici seriova linka zjistena loaderem (aarch64: z ACPI SPCR).

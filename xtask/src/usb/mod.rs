@@ -32,7 +32,7 @@ use crate::{Artifacts, Options, Result, target_dir};
 /// flashky zustane nevyuzity, dokud system neumi oddil zvetsit).
 pub const DEFAULT_MIB: u64 = 1024;
 /// Velikost obrazu pro test v QEMU.
-pub const TEST_MIB: u64 = 256;
+pub const TEST_MIB: u64 = 320;
 
 /// Prepinace prikazu `usb`.
 #[derive(Debug, Default)]
@@ -149,9 +149,47 @@ pub fn test_run(opts: &Options) -> Result<()> {
     let artifacts = crate::build(opts)?;
     let path = boot::test_image_path(opts.arch);
     create_image(opts, &artifacts, &path, TEST_MIB)?;
-    let r = boot::test(opts.arch, &path);
+    // Start do GUI (s kopii logu na FAT), pak na novem obrazu rezim
+    // "vytahni logy".
+    let r = boot::test(opts.arch, &path).and_then(|()| {
+        create_image(opts, &artifacts, &path, TEST_MIB)?;
+        boot::test_rescue(opts.arch, &path)
+    });
     let _ = std::fs::remove_file(&path);
     r
+}
+
+/// Disk "nainstalovaneho systemu" pro test vytazeni logu: cely disk s nasim
+/// FS a logy v /system/log a /system/pady.
+pub fn installed_disk(path: &Path) -> Result<()> {
+    use fs::{Algo, FileDevice, FormatOptions, Fs, Kind};
+    let file = std::fs::File::create(path)?;
+    file.set_len(64 << 20)?;
+    drop(file);
+    let e = |what: &str, err: fs::Error| -> Box<dyn std::error::Error> { format!("disk instalace: {what}: {err:?}").into() };
+    let dev = FileDevice::open(path)?;
+    let opts = FormatOptions {
+        label: "instalace".into(),
+        algo: Algo::Xxh3,
+        ag_blocks: None,
+        uuid: Some(image::random_uuid()),
+        time: fs::Timestamp::UNIX_EPOCH,
+    };
+    let dev = Fs::format(dev, &opts).map_err(|x| e("format", x))?;
+    let mut f = Fs::mount(dev).map_err(|x| e("mount", x))?;
+    for d in ["/system", "/system/log", "/system/pady"] {
+        f.create(d, Kind::Dir).map_err(|x| e(d, x))?;
+    }
+    let files: [(&str, &[u8]); 2] = [
+        ("/system/log/boot-000007.log", b"[    0.000000] cpu0 I kernel: os kernel (nainstalovany system)\n"),
+        ("/system/pady/000006-jadro-MO-1234-5678.crash", b"MagnumOpus: zaznam padu jadra\nduvod:   KERNEL_PANIC\n"),
+    ];
+    for (p, data) in files {
+        f.create(p, Kind::File).map_err(|x| e(p, x))?;
+        f.write(p, 0, data).map_err(|x| e(p, x))?;
+    }
+    f.commit().map_err(|x| e("commit", x))?;
+    Ok(())
 }
 
 fn print_disks() -> Result<()> {

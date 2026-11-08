@@ -83,6 +83,10 @@ pub trait Env {
     fn report(&mut self) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Uroven logu (prikaz `loglevel`); vychozi = relace ji nema.
+    fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
 }
 
 /// Kanaly prehledu uloh pres `Env`.
@@ -441,6 +445,10 @@ impl Host for SessionHost<'_> {
 
     fn report(&mut self) -> Result<String, abi::Error> {
         self.env.report()
+    }
+
+    fn log_level(&mut self, target: &str, level: &str) -> Result<String, abi::Error> {
+        self.env.log_level(target, level)
     }
 
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {

@@ -1,0 +1,9 @@
+[package]
+name = "fatw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Minimalni zapis do FAT32 (slozka v korenu, vytvoreni a prepis souboru)"
+
+[dev-dependencies]
+fatfs = "0.3"

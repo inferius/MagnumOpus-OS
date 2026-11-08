@@ -10,6 +10,7 @@ members = [
     "libs/boot-info",
     "libs/crashrec",
     "libs/qr",
+    "libs/fatw",
     "libs/cbuild",
     "libs/cstd",
     "libs/conf",
@@ -98,6 +99,7 @@ members = [
     "user/usb-hid",
     "user/usb-storage",
     "user/logd",
+    "user/logrescue",
     "user/virtio-net",
     "user/e1000e",
     "user/igc",
@@ -128,6 +130,7 @@ abi = { path = "libs/abi" }
 boot-info = { path = "libs/boot-info" }
 crashrec = { path = "libs/crashrec" }
 qr = { path = "libs/qr" }
+fatw = { path = "libs/fatw" }
 conf = { path = "libs/conf" }
 elf = { path = "libs/elf" }
 initfs = { path = "libs/initfs" }

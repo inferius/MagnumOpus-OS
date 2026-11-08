@@ -120,9 +120,17 @@ impl Resource {
     }
 
     /// Cte log jadra od pozice `cursor` (pravo `DIAG`): (skutecny zacatek,
-    /// pocet bajtu). Zacatek za `cursor` = starsi data uz prepsana.
-    pub fn log_read(&self, cursor: u64, buf: &mut [u8]) -> Result<(u64, usize)> {
+    /// pocet bajtu, celkem ztracenych radku). Zacatek za `cursor` = starsi
+    /// data uz prepsana.
+    pub fn log_read(&self, cursor: u64, buf: &mut [u8]) -> Result<(u64, usize, u64)> {
         sys::log_read(self.0.raw(), cursor, buf)
+    }
+
+    /// Uroven logu jadra pro modul nebo proces (pravo `DIAG`): `modul=uroven`
+    /// (`set`), zruseni prepsani (`clear`), vypis (`list`), viz
+    /// `abi::syscall::log_op`.
+    pub fn log_control(&self, op: u64, buf: &mut [u8]) -> Result<usize> {
+        sys::log_control(self.0.raw(), op, buf)
     }
 
     /// Zaznam padu jadra z minuleho behu (pravo `DIAG`), viz

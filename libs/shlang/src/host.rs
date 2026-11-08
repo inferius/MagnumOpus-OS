@@ -290,6 +290,10 @@ pub trait Host {
     fn report(&mut self) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Uroven logu jadra (`loglevel`): `target` prazdny = vypis.
+    fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Domovska slozka uzivatele.
     fn home(&self) -> String {
         String::from("/home")

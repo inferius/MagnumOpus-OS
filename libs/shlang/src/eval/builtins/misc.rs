@@ -180,6 +180,22 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                 )),
             }
         }
+        "loglevel" => {
+            let target = match a.pos(0) {
+                Some(Value::Str(s)) => s.clone(),
+                None => String::new(),
+                Some(_) => return Err(a.err(code::ARGS, "loglevel: modul je text")),
+            };
+            let level = match a.pos(1) {
+                Some(Value::Str(s)) => s.clone(),
+                None if target.is_empty() => String::new(),
+                _ => return Err(a.err(code::ARGS, "loglevel: chybi uroven (error, warn, info, debug, trace, vychozi)")),
+            };
+            match host.log_level(&target, &level) {
+                Ok(text) => Ok(Value::Str(text)),
+                Err(e) => Err(Flow::Err(ShError::sys(e, "nastaveni urovne logu se nepovedlo").at(a.span))),
+            }
+        }
         "report" => match host.report() {
             Ok(text) => Ok(Value::Str(text)),
             Err(e) => Err(Flow::Err(ShError::sys(e, "balicek pro vyvojare se nepovedl").at(a.span))),

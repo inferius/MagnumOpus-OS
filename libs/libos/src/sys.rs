@@ -393,14 +393,19 @@ pub fn system_power(resource: u32, op: u64) -> Result<()> {
 }
 
 /// Cteni logu jadra od pozice `cursor` (`LOG_READ`): (skutecny zacatek,
-/// pocet bajtu v `buf`).
-pub fn log_read(resource: u32, cursor: u64, buf: &mut [u8]) -> Result<(u64, usize)> {
-    let mut start = 0u64;
+/// pocet bajtu v `buf`, celkem ztracenych radku).
+pub fn log_read(resource: u32, cursor: u64, buf: &mut [u8]) -> Result<(u64, usize, u64)> {
+    let mut out = [0u64; 2];
     let n = call(
         nr::LOG_READ,
-        [resource as u64, cursor, buf.as_mut_ptr() as u64, buf.len() as u64, &mut start as *mut u64 as u64, 0],
+        [resource as u64, cursor, buf.as_mut_ptr() as u64, buf.len() as u64, out.as_mut_ptr() as u64, 0],
     )?;
-    Ok((start, n as usize))
+    Ok((out[0], n as usize, out[1]))
+}
+
+/// Rizeni logu jadra (`LOG_CONTROL`), `op` z `abi::syscall::log_op`.
+pub fn log_control(resource: u32, op: u64, buf: &mut [u8]) -> Result<usize> {
+    call(nr::LOG_CONTROL, [resource as u64, op, buf.as_mut_ptr() as u64, buf.len() as u64, 0, 0]).map(|n| n as usize)
 }
 
 /// Zaznam padu jadra (`CRASH_RECORD`), `op` z `abi::syscall::crash_op`.

@@ -70,6 +70,11 @@ pub fn build(d: &mut Logd) -> Result<(String, String)> {
         n += 1;
     };
     write_file(&d.fs, &path, out.as_bytes())?;
+    if let Some(f) = d.fat.as_mut() {
+        f.report(out.as_bytes());
+    }
+    d.mirror();
+    preview.push_str(&crate::fatlog::note(&d.fat));
     let shown = format!("/system{path}");
     libos::println!("logd: balicek pro vyvojare {shown} ({} B)", out.len());
     Ok((shown, format!("{preview}  celkem {} B", out.len())))

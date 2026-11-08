@@ -160,8 +160,25 @@ pub const LOG_READ: u64 = 51;
 /// z [`crash_op`].
 pub const CRASH_RECORD: u64 = 52;
 
+/// Rizeni logu jadra za behu (Resource s pravem `DIAG`). `(resource, op,
+/// buf_ptr, buf_len) -> bajty`; `op` z [`log_op`]. Text v bufferu je ASCII.
+pub const LOG_CONTROL: u64 = 53;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 53;
+pub const COUNT: u64 = 54;
+
+/// Operace `LOG_CONTROL`.
+pub mod log_op {
+    /// Nastavi uroven: buffer `modul=uroven` (modul jadra jako `sched`,
+    /// `arch::x86_64::apic`, nebo jmeno procesu pro jeho `DEBUG_LOG`;
+    /// uroven `error`, `warn`, `info`, `debug`, `trace`).
+    pub const SET: u64 = 0;
+    /// Zrusi prepsani: buffer = modul.
+    pub const CLEAR: u64 = 1;
+    /// Vypis prepsani do bufferu (`modul=uroven` po radcich, posledni radek
+    /// `potlaceno=N` = opakovane hlasky); vraci delku.
+    pub const LIST: u64 = 2;
+}
 
 /// Operace `CRASH_RECORD`.
 pub mod crash_op {

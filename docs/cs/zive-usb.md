@@ -49,7 +49,7 @@ cargo xtask usb --release
 ```
 
 Vznikne `target/usb-x86_64-release.img` (1 GiB). Pro aarch64
-`--arch aarch64`, jinou velikost `--size <MiB>` (nejméně 194 MiB), jinou
+`--arch aarch64`, jinou velikost `--size <MiB>` (nejméně 258 MiB), jinou
 cestu `--out <soubor>`. Ladicí build (bez `--release`) je větší a pomalejší,
 ale má přesnější výpisy zásobníku.
 
@@ -59,13 +59,13 @@ Obsah obrazu:
 <svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Rozložení obrazu živého USB">
 <rect class="box" x="10" y="30" width="70" height="80" rx="4"/><text class="t b" x="45" y="62" text-anchor="middle">GPT</text><text class="m" x="45" y="80" text-anchor="middle">MBR,</text><text class="m" x="45" y="95" text-anchor="middle">tabulka</text>
 <rect class="acc" x="80" y="30" width="230" height="80" rx="4"/><text class="t b" x="195" y="55" text-anchor="middle">ESP (FAT32), 128 MiB</text><text class="mono m" x="195" y="74" text-anchor="middle">EFI/BOOT/BOOTX64.EFI</text><text class="mono m" x="195" y="89" text-anchor="middle">os/kernel.elf, os/initfs.img</text><text class="mono m" x="195" y="104" text-anchor="middle">CTI-MNE.txt</text>
-<rect class="ok" x="310" y="30" width="380" height="80" rx="4"/><text class="t b" x="500" y="55" text-anchor="middle">datový oddíl „MagnumOpus“</text><text class="m" x="500" y="74" text-anchor="middle">typ C123ADA0-51BA-48C5-A536-C2CE6B2B3581</text><text class="m" x="500" y="91" text-anchor="middle">náš souborový systém (fsd), do konce obrazu</text>
+<rect class="warn" x="310" y="30" width="110" height="80" rx="4"/><text class="t b" x="365" y="55" text-anchor="middle">MO-LOGY</text><text class="m" x="365" y="74" text-anchor="middle">FAT32, 64 MiB</text><text class="m" x="365" y="91" text-anchor="middle">logy pro Windows</text><rect class="ok" x="420" y="30" width="270" height="80" rx="4"/><text class="t b" x="555" y="55" text-anchor="middle">datový oddíl „MagnumOpus“</text><text class="m" x="555" y="74" text-anchor="middle">typ C123ADA0-...-C2CE6B2B3581</text><text class="m" x="555" y="91" text-anchor="middle">náš FS (fsd), do konce obrazu</text>
 <rect class="box" x="690" y="30" width="60" height="80" rx="4"/><text class="t b" x="720" y="62" text-anchor="middle">GPT</text><text class="m" x="720" y="80" text-anchor="middle">záloha</text>
-<text class="m" x="10" y="20">0</text><text class="m" x="80" y="20">1 MiB</text><text class="m" x="310" y="20">129 MiB</text><text class="m" x="690" y="20">konec obrazu</text>
+<text class="m" x="10" y="20">0</text><text class="m" x="80" y="20">1 MiB</text><text class="m" x="310" y="20">129 MiB</text><text class="m" x="420" y="20">193 MiB</text><text class="m" x="690" y="20">konec obrazu</text>
 <text class="m" x="10" y="140">Firmware najde zavaděč na ESP, zavaděč načte jádro a initfs (soubory přes UEFI).</text>
 <text class="m" x="10" y="160">Po startu ovladač usb-storage zpřístupní flashku; diskguard pustí ke čtení i zápisu jen datový oddíl.</text>
 <text class="m" x="10" y="180">Init na něm najde souborový systém a spustí fsd. ESP systém za běhu nemění.</text>
-<text class="m" x="10" y="200">Windows po zasunutí flashky ukáže jen ESP (soubor CTI-MNE.txt); datový oddíl nepřečte.</text>
+<text class="m" x="10" y="200">Windows ukáže ESP a MO-LOGY (logy, záznamy pádů, balíček); datový oddíl nepřečte.</text>
 <text class="m" x="10" y="220">Zbytek větší flashky zůstane nevyužitý (zvětšení oddílu zatím není).</text>
 </svg>
 <figcaption>Rozložení obrazu živého USB (sektor 512 B).</figcaption>
@@ -198,13 +198,52 @@ balicek pro vyvojare: /system/log/report-000042-1.txt
 
 Balíček obsahuje jen logy systému a záznamy pádů (jména procesů a zařízení,
 adresy, hlášení služeb). Obsah vašich souborů ani hesla do logu nejdou.
-Soubor zatím leží na datovém oddílu flashky (Windows ho přímo nepřečte);
-na počítači s repozitářem ho přečte nástroj [osfs](osfs.md). Jak ho dostat
-z flashky jednodušeji (kopie na ESP čitelnou ve Windows), se rozhodne.
+Na flashce je kopie i na oddílu MO-LOGY (`MAGNUMOS\REPORT.TXT`), který
+Windows přečte bez dalších nástrojů.
 
 **Pro vývojáře:** adresy v záznamu pádu i v balíčku přeloží na jména funkcí
 `cargo xtask symbolize <soubor>` (se stejným `--arch` a `--release` jako
 build, ze kterého systém běžel).
+
+**Kopie na flashce pro Windows.** Při běhu z flashky služba logu kopíruje
+logy, záznamy pádů a balíček i na malý oddíl **MO-LOGY** (FAT32), který
+Windows ukáže jako běžný disk: složka `MAGNUMOS` – `LOGxx.TXT` (log startu,
+posledních 16 startů dokola, každý nejvýš 2 MiB, kopie každých 30 s),
+`PADxx.TXT` (záznamy pádů), `REPORT.TXT` (poslední balíček). **Vývojáři
+stačí poslat `REPORT.TXT`** (nebo celou složku). Systém do oddílu zapisuje
+jen do své složky (vytvoření a přepsání souborů, žádné mazání) a jen na
+flashce s naším oddílem: cizí FAT oddíl jménem MO-LOGY na jiném disku
+zůstane jen pro čtení.
+
+**Režim „vytáhni logy“** – když nainstalovaný systém na tomto počítači
+nenastartuje (nebo jen chcete jeho logy):
+
+1. Zasuňte flashku a nabootujte z ní (nabídka zavádění firmwaru).
+2. Když zavaděč napíše „Stiskni L = vytáhnout logy…“, stiskněte do 2 s **L**.
+3. Systém nespustí grafiku: najde disky s naším souborovým systémem mimo
+   flashku, připojí je **jen pro čtení** (zápis odmítne i blokové zařízení),
+   zkopíruje `/system/log` a `/system/pady` do složky `ZACHRANA` na oddíle
+   MO-LOGY a napíše **HOTOVO** a počet souborů.
+4. Vypněte počítač a flashku zasuňte do počítače s Windows: `ZACHRANA\SEZNAM.TXT`
+   říká, který soubor je který.
+
+**Úrovně logu a zahlcení.** Jádro z jednoho místa (soubor a řádek, u služeb
+proces a text bez číslic) zapíše nejvýš 10 záznamů za sekundu; další jen
+spočítá a pak zapíše „… předchozí hláška potlačena N×“. Služba logu navíc
+stejné řádky za sebou (bez času) zapíše nejvýš třikrát a pak
+„… předchozí řádek opakován ještě N×“. Když přesto přeteče kruhový buffer
+jádra (512 KiB), objeví se v logu „ztraceno N řádků“. Úrovně za běhu:
+
+```text
+loglevel                      # výpis přepsání a počtu potlačených hlášek
+loglevel virtio-blk warn      # služba: jen varování a chyby
+loglevel sched debug          # modul jádra: i ladicí hlášky
+loglevel sched vychozi        # zrušit přepsání
+```
+
+Trvale v souboru `/system/log/urovne.conf` (`modul = úroveň`, služba logu
+ho načte při startu). Výchozí potlačené sekce (jen `info` a výš):
+`syscall`, `object::process`, `smp::clock_sync`.
 
 ## Co dělat při problému
 

@@ -109,6 +109,7 @@ fn main() -> Status {
     let debug_serial = arch::debug_serial(acpi_rsdp, &mut tables);
     let (initfs_phys, initfs_len) = load_initfs();
     let (pstore_phys, pstore_len) = alloc_pstore();
+    let boot_flags = ask_boot_mode();
 
     let (kernel_phys_start, kernel_phys_len) = load_kernel(&elf, &mut tables);
     // aarch64: kod jadra zapsany pres datovou cache musi byt videt
@@ -167,6 +168,7 @@ fn main() -> Status {
         debug_serial,
         pstore_phys,
         pstore_len,
+        boot_flags,
     };
     // SAFETY: `boot_info_phys` je cela stranka alokovana pro BootInfo,
     // zarovnana na 4 KiB (vic nez zarovnani BootInfo).
@@ -221,6 +223,24 @@ fn alloc_pstore() -> (u64, u64) {
     }
     log::warn!("pro zaznam padu neni volna zadna pevna adresa");
     (0, 0)
+}
+
+/// Nabidka pri startu: 2 s na klavesu L = rezim "vytahni logy" (zive USB:
+/// zkopiruje logy nainstalovaneho systemu na flashku). Jinak bezny start.
+fn ask_boot_mode() -> u64 {
+    use uefi::proto::console::text::Key;
+    log::info!("Stiskni L = vytahnout logy a zaznamy padu nainstalovaneho systemu na flashku (2 s)");
+    for _ in 0..40 {
+        let key = uefi::system::with_stdin(|stdin| stdin.read_key());
+        if let Ok(Some(Key::Printable(c))) = key
+            && matches!(char::from(c), 'l' | 'L')
+        {
+            log::info!("rezim: vytahnout logy");
+            return boot_info::boot_flags::RESCUE_LOGS;
+        }
+        boot::stall(core::time::Duration::from_millis(50));
+    }
+    0
 }
 
 fn boot_fs() -> uefi::fs::FileSystem {

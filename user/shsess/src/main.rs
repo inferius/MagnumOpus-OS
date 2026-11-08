@@ -259,6 +259,20 @@ impl Env for SysEnv {
         }
     }
 
+    /// `loglevel`: uroven logu jadra (pres init, ten ma pravo DIAG).
+    fn log_level(&mut self, target: &str, level: &str) -> Result<String, Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        let req = powerproto::Request::LogLevel { target: String::from(target), level: String::from(level) };
+        chan.write(&req.encode(), Vec::new())?;
+        let m = chan.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Text(t) => Ok(t),
+            powerproto::Reply::Failed(e) => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
+
     /// `report`: balicek pro vyvojare sestavi sluzba logu (pres init).
     fn report(&mut self) -> Result<String, Error> {
         let guard = POWER.lock();

@@ -15,3 +15,5 @@ libos = { path = "../../libs/libos" }
 abi = { workspace = true }
 fsproto = { path = "../../libs/fsproto" }
 crashrec = { workspace = true, features = ["alloc"] }
+blockproto = { path = "../../libs/blockproto" }
+fatw = { workspace = true }

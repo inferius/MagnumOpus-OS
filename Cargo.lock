@@ -881,6 +881,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fatw"
+version = "0.1.0"
+dependencies = [
+ "fatfs",
+]
+
+[[package]]
 name = "fbcopy"
 version = "0.1.0"
 
@@ -1538,8 +1545,20 @@ name = "logd"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "blockproto",
  "crashrec",
+ "fatw",
  "fsproto",
+ "libos",
+]
+
+[[package]]
+name = "logrescue"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
+ "fatw",
+ "fs",
  "libos",
 ]
 

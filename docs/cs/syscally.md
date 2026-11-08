@@ -732,8 +732,9 @@ jádra (v něm jsou i zprávy všech procesů z `DEBUG_LOG`) jako proud bajtů:
 `cursor` je pozice v proudu (kolik bajtů kdy jádro zapsalo). Kruhový buffer
 má 512 KiB; když starší data už přepsal, čte se od nejstarších dostupných
 a skutečný začátek se zapíše na `out_start_ptr` (u64) - čtenář tak pozná
-ztrátu. Nová pozice = začátek + vrácená délka, 0 = nic nového. Nejvýš
-64 KiB na volání. Chyby: `ACCESS_DENIED` (bez `DIAG`), `INVALID_ARGS`
+ztrátu; druhé u64 za ním je celkový počet řádků, které jádro přepsalo
+dřív, než je čtenář přečetl („ztraceno N řádků“). Nová pozice = začátek
++ vrácená délka, 0 = nic nového. Nejvýš 64 KiB na volání. Chyby: `ACCESS_DENIED` (bez `DIAG`), `INVALID_ARGS`
 (`buf_len` nad 64 KiB), `INVALID_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`.
 V libos `Resource::log_read`.
 
@@ -754,6 +755,26 @@ jádro zapíše hlavičku a konec logu jádra a teplý restart ji nesmaže.
 Chyby: `ACCESS_DENIED` (bez `DIAG`), `INVALID_ARGS` (neznámá operace),
 `INVALID_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`. V libos
 `Resource::crash_record`.
+
+### `LOG_CONTROL`
+
+`(resource, op, buf_ptr, buf_len) -> bajty`. Úrovně logu jádra za běhu
+(příkaz shellu `loglevel`, soubor `/system/log/urovne.conf`).
+
+| `op` | buffer | význam |
+|---|---|---|
+| 0 `SET` | `modul=úroveň` | úroveň pro modul jádra (`sched`, `arch::x86_64::apic`; platí i pro podmoduly) nebo pro proces (jeho `DEBUG_LOG`); úroveň `error`, `warn`, `info`, `debug`, `trace` |
+| 1 `CLEAR` | `modul` | zruší přepsání (platí globální úroveň) |
+| 2 `LIST` | výstup | `modul=úroveň` po řádcích a `potlaceno=N` (opakované hlášky) |
+
+Výchozí potlačené sekce (jen `info` a výš): `syscall`, `object::process`,
+`smp::clock_sync`. Nezávisle na úrovních jádro z jednoho místa (soubor
+a řádek, u `DEBUG_LOG` proces a text bez číslic) zapíše nejvýš 10 záznamů
+za sekundu; další jen spočítá a s první zprávou v nové sekundě zapíše
+„... předchozí hláška potlačena N×“. Nejvýš 32 přepsání, jméno nejvýš 40 B.
+Chyby: `ACCESS_DENIED` (bez `DIAG`), `INVALID_ARGS` (neznámá úroveň nebo
+operace, dlouhé jméno, plná tabulka), `BUFFER_TOO_SMALL`, `INVALID_ADDRESS`.
+V libos `Resource::log_control`.
 
 ## Náhodná čísla
 

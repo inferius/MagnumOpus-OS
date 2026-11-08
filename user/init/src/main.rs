@@ -27,6 +27,7 @@ mod input;
 mod logd;
 mod ntp;
 mod power;
+mod rescue;
 mod revocation;
 mod session;
 mod supervisor;
@@ -42,6 +43,11 @@ libos::entry!(main);
 fn main(startup: Startup) -> i64 {
     println!("init: bezim v userspace");
     let mut sup = supervisor::SUPERVISOR.lock();
+    if let Some(r) = startup.root_resource.as_ref()
+        && let Ok(h) = r.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::DIAG))
+    {
+        system::ROOT.call_once(|| libos::hw::Resource::from_handle(h));
+    }
     match system::start_time(&startup) {
         Ok(t) => {
             sup.watch("timed", &t.process, Some(system::TIME_RESTART));
@@ -121,6 +127,12 @@ fn main(startup: Startup) -> i64 {
                 Err(e) => println!("init: souborovy system nelze spustit: {e}"),
             }
             sup.watch("devmgr", &devices.devmgr, None);
+            if startup.flags & libos::abi::bootstrap::flags::RESCUE_LOGS != 0 {
+                // Rezim "vytahni logy": jen kopie, bez GUI a site.
+                rescue::run(&startup, &mut devices);
+                system::DEVICES.call_once(|| devices);
+                sup.run(&startup);
+            }
             match input::start(&startup, core::mem::take(&mut devices.inputs)) {
                 Ok((i, p)) => {
                     // Restart po padu: adapter preda nove instanci ovladace,

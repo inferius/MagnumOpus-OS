@@ -24,9 +24,8 @@ pub const MARKER_OK: &str = "init: test padu: zaznam prezil restart";
 fn log_read_right(s: &Startup) -> TestResult {
     let root = s.root_resource.as_ref().ok_or("chybi korenovy Resource")?;
     let mut buf = vec![0u8; 4096];
-    let (start, n) = root.log_read(0, &mut buf).map_err(|e| fail("LOG_READ", e))?;
+    let (_start, n, _lost) = root.log_read(0, &mut buf).map_err(|e| fail("LOG_READ", e))?;
     check!(n > 0, "log jadra je prazdny");
-    let _ = start;
     // Prostredek bez DIAG: ACCESS_DENIED.
     let weak = root
         .handle()

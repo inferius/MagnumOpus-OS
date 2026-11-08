@@ -62,11 +62,16 @@ pub fn start(startup: &Startup, devices: &Devices, sup: &mut crate::supervisor::
     let diag = root.handle().duplicate(Some(Rights::BASIC | Rights::DIAG))?;
     let initfs = Initfs::open(startup)?;
     let image = initfs.find("logd").ok_or(Error::NotFound)?;
-    let handles = vec![
+    let mut handles = vec![
         StartHandle::user(diag),
         StartHandle::user(session.into_handle()),
         StartHandle::user(lease.into_handle()),
     ];
+    // Zive USB: oddil MO-LOGY na flashce (kopie logu citelne ve Windows).
+    let rescue = startup.flags & libos::abi::bootstrap::flags::RESCUE_LOGS != 0;
+    if let Some(ch) = (!rescue).then(|| devices.logy.lock().take()).flatten() {
+        handles.push(StartHandle::user(ch.into_handle()));
+    }
     let (process, control) = libos::spawn("logd", image, handles)?;
     control.write(b"start", Vec::new())?;
     let msg = control.read(Some(time::deadline_after(Duration::from_secs(20))))?;
@@ -107,4 +112,21 @@ pub fn report() -> Result<(String, String)> {
             Err(Error::IoError)
         }
     }
+}
+
+/// `loglevel`: uroven logu jadra pro modul nebo proces (init ma korenovy
+/// Resource s pravem `DIAG`). Prazdny `target` = vypis prepsani.
+pub fn log_level(target: &str, level: &str) -> Result<String> {
+    use libos::abi::syscall::log_op;
+    let root = crate::system::ROOT.get().ok_or(Error::NotFound)?;
+    if !target.is_empty() {
+        if level == "vychozi" {
+            root.log_control(log_op::CLEAR, &mut String::from(target).into_bytes())?;
+        } else {
+            root.log_control(log_op::SET, &mut format!("{target}={level}").into_bytes())?;
+        }
+    }
+    let mut buf = vec![0u8; 8192];
+    let n = root.log_control(log_op::LIST, &mut buf)?;
+    Ok(String::from_utf8_lossy(&buf[..n]).into_owned())
 }

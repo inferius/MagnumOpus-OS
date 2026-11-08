@@ -52,6 +52,10 @@ pub enum Request {
     /// od sluzby logu; odpoved [`Reply::Text`] (cesta a nahled) nebo
     /// [`Reply::Failed`].
     Report,
+    /// Jen kanal shell -> init: uroven logu pro modul jadra nebo proces
+    /// (`target` prazdny = vypis). `level`: `error` ... `trace`, nebo
+    /// `vychozi` (zruseni prepsani). Odpoved [`Reply::Text`].
+    LogLevel { target: String, level: String },
 }
 
 /// Udalost hlasena sluzbou bez pozadavku.
@@ -162,6 +166,7 @@ mod op {
     pub const BATTERY: u32 = 5;
     pub const CPU_PERF: u32 = 6;
     pub const REPORT: u32 = 7;
+    pub const LOG_LEVEL: u32 = 8;
 
     pub const R_OK: u32 = 100;
     pub const R_FAILED: u32 = 101;
@@ -175,7 +180,7 @@ mod op {
 
 impl Request {
     pub fn encode(&self) -> Vec<u8> {
-        Writer::op(match self {
+        let mut w = Writer::op(match self {
             Request::Status => op::STATUS,
             Request::Shutdown => op::SHUTDOWN,
             Request::Reboot => op::REBOOT,
@@ -183,8 +188,12 @@ impl Request {
             Request::Battery => op::BATTERY,
             Request::CpuPerf => op::CPU_PERF,
             Request::Report => op::REPORT,
-        })
-        .finish()
+            Request::LogLevel { .. } => op::LOG_LEVEL,
+        });
+        if let Request::LogLevel { target, level } = self {
+            w.str(target).str(level);
+        }
+        w.finish()
     }
 
     pub fn decode(b: &[u8]) -> Result<Self> {
@@ -197,6 +206,7 @@ impl Request {
             op::BATTERY => Request::Battery,
             op::CPU_PERF => Request::CpuPerf,
             op::REPORT => Request::Report,
+            op::LOG_LEVEL => Request::LogLevel { target: r.str()?, level: r.str()? },
             _ => return Err(Error::InvalidArgs),
         };
         if !r.is_empty() {

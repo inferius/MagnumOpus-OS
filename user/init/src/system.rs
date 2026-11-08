@@ -23,6 +23,10 @@ pub fn devices() -> Option<&'static Devices> {
     DEVICES.get()
 }
 
+/// Duplikat korenoveho prostredku jen s pravem `DIAG` (rizeni logu jadra
+/// z prikazu `loglevel`).
+pub static ROOT: spin::Once<libos::hw::Resource> = spin::Once::new();
+
 /// Sluzba casu; supervisor ji po padu vymeni za novou.
 pub static TIME: spin::Mutex<Option<TimeService>> = spin::Mutex::new(None);
 
@@ -65,6 +69,12 @@ pub struct Devices {
     pub keys: spin::Mutex<Vec<Channel>>,
     /// Ridici relace initu k `fsd` s listkem (prezije pad sluzby).
     pub fs: Option<FsClient>,
+    /// Oddil pro logy na flashce (FAT32 `MO-LOGY`), dostane ho logd
+    /// (v rezimu "vytahni logy" logrescue).
+    pub logy: spin::Mutex<Option<Channel>>,
+    /// Index disku zive flashky v `blocks` (disk, za kterym ovladac nahlasil
+    /// oddil MO-LOGY). Zive USB pouziva FS jen z ni, ne z internich disku.
+    pub stick: Option<usize>,
 }
 
 /// Kanal k ovladaci z manifestu.
@@ -181,6 +191,8 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let mut displays = Vec::new();
     let keys = spin::Mutex::new(Vec::new());
     let drivers = spin::Mutex::new(Vec::new());
+    let logy = spin::Mutex::new(None);
+    let mut stick = None;
     loop {
         // Spravce muze mlcet dlouho: PS/2 (az 5 s) a pruchod USB (az 10 s).
         let msg = control.read(Some(time::deadline_after(DEVMGR_TIMEOUT)))?;
@@ -195,6 +207,14 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
                         Ok(b) => blocks.push(b),
                         Err(e) => println!("init: blokove zarizeni neodpovida: {e}"),
                     }
+                }
+            }
+            b"block-logy" => {
+                if let Some(h) = msg.handles.into_iter().next() {
+                    *logy.lock() = Some(Channel::from_handle(h));
+                    // Ovladac hlasi oddil logu hned za hlavnim pohledem
+                    // tehoz disku: posledni pridany disk je flashka.
+                    stick = blocks.len().checked_sub(1);
                 }
             }
             b"input" => inputs.extend(msg.handles.into_iter().map(Channel::from_handle)),
@@ -227,6 +247,8 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         drivers,
         keys,
         fs: None,
+        logy,
+        stick,
     })
 }
 
@@ -293,7 +315,7 @@ const FS_MAGIC: &[u8; 8] = b"OSFS\0\0v3";
 
 /// Ma disk nas souborovy system? Superbloky lezi v blocich 1..=8
 /// (bloky po 4 KiB = sektory 8..72).
-fn has_fs(b: &BlockClient) -> bool {
+pub(crate) fn has_fs(b: &BlockClient) -> bool {
     let mut buf = vec![0u8; 8 * 4096];
     if b.sectors() < 72 || b.read(8, &mut buf).is_err() {
         return false;
@@ -306,9 +328,21 @@ fn has_fs(b: &BlockClient) -> bool {
 /// Konec kanalu k disku drzi adapter (`Kept`): po padu `fsd` ho dostane
 /// nova instance.
 pub fn start_fs(startup: &Startup, devices: &mut Devices) -> Result<Option<(Process, crate::fsd::Fsd)>> {
-    let Some(i) = devices.blocks.iter().position(has_fs) else {
-        println!("init: zadny disk se souborovym systemem");
-        return Ok(None);
+    // Zive USB: jen FS z flashky (interni disky s jinym systemem se
+    // nepripojuji zapisovatelne).
+    let i = match devices.stick {
+        Some(s) if devices.blocks.get(s).is_some_and(has_fs) => s,
+        Some(_) => {
+            println!("init: flashka nema souborovy system");
+            return Ok(None);
+        }
+        None => match devices.blocks.iter().position(has_fs) {
+            Some(i) => i,
+            None => {
+                println!("init: zadny disk se souborovym systemem");
+                return Ok(None);
+            }
+        },
     };
     let disk = crate::supervisor::Kept::new(devices.blocks.remove(i).into_channel());
     // Testy potrebuji simulaci vypadku proudu - jen v testovacim behu, na

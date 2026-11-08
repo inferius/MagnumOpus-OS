@@ -760,8 +760,9 @@ stream: `cursor` is the position in the stream (how many bytes the kernel
 ever wrote). The ring buffer has 512 KiB; when older data has been
 overwritten, reading starts at the oldest available byte and the real start
 is written to `out_start_ptr` (u64) - so the reader sees the loss. New
-position = start + returned length, 0 = nothing new. At most 64 KiB per
-call. Errors: `ACCESS_DENIED` (no `DIAG`), `INVALID_ARGS` (`buf_len` over
+the second u64 after it is the total number of lines the kernel
+overwrote before the reader read them ("N lines lost"). New position =
+start + returned length, 0 = nothing new. At most 64 KiB per call. Errors: `ACCESS_DENIED` (no `DIAG`), `INVALID_ARGS` (`buf_len` over
 64 KiB), `INVALID_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`. In libos
 `Resource::log_read`.
 
@@ -783,6 +784,27 @@ kernel log there, and a warm reset does not erase it.
 Errors: `ACCESS_DENIED` (no `DIAG`), `INVALID_ARGS` (unknown operation),
 `INVALID_ADDRESS`, `BAD_HANDLE`, `WRONG_TYPE`. In libos
 `Resource::crash_record`.
+
+### `LOG_CONTROL`
+
+`(resource, op, buf_ptr, buf_len) -> bytes`. Kernel log levels at run
+time (shell command `loglevel`, file `/system/log/urovne.conf`).
+
+| `op` | buffer | meaning |
+|---|---|---|
+| 0 `SET` | `module=level` | level for a kernel module (`sched`, `arch::x86_64::apic`; applies to submodules too) or for a process (its `DEBUG_LOG`); level `error`, `warn`, `info`, `debug`, `trace` |
+| 1 `CLEAR` | `module` | removes the override (the global level applies) |
+| 2 `LIST` | output | `module=level` per line and `potlaceno=N` (suppressed repeats) |
+
+Default suppressed sections (only `info` and above): `syscall`,
+`object::process`, `smp::clock_sync`. Independently of the levels, the
+kernel writes at most 10 records per second from one place (file and line,
+for `DEBUG_LOG` the process and the text without digits); further ones are
+only counted and the first message in a new second is preceded by "...
+previous message suppressed N times". At most 32 overrides, a name at most
+40 B. Errors: `ACCESS_DENIED` (no `DIAG`), `INVALID_ARGS` (unknown level or
+operation, long name, full table), `BUFFER_TOO_SMALL`, `INVALID_ADDRESS`.
+In libos `Resource::log_control`.
 
 ## Random numbers
 
