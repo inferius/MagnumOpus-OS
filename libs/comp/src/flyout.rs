@@ -23,6 +23,9 @@ pub enum Flyout {
     Bell,
     /// Spoustec (ikona mrizky): radek = aplikace, klik spusti / aktivuje.
     Apps,
+    /// Okna jedne aplikace (zastupce v liste): radek = okno, posledni
+    /// "Nove okno".
+    AppWindows(u32),
 }
 
 /// Ceske tvary "uloha".
@@ -84,6 +87,15 @@ impl Comp {
                 (String::from("Zvuk"), vec![line])
             }
             Flyout::Bell => (String::from("Oznámení"), self.dnd_lines()),
+            Flyout::AppWindows(g) => {
+                let id = self.app_of(g).unwrap_or_default();
+                let mut rows: Vec<String> = self.app_windows(&id).iter().filter_map(|w| self.windows.get(w)).map(|w| w.title.clone()).collect();
+                if self.is_launchable(&id) {
+                    rows.push(String::from("+ Nové okno"));
+                }
+                let name = self.windows.get(&g).and_then(|w| self.clients.get(&w.client)).map_or(String::new(), |c| c.info.name.clone());
+                (name, rows)
+            }
             Flyout::Apps => {
                 let rows = self
                     .launchable
@@ -113,6 +125,7 @@ impl Comp {
             Flyout::Volume => bar.volume,
             Flyout::Bell => Some(bar.bell),
             Flyout::Apps => Some(bar.launcher),
+            Flyout::AppWindows(g) => bar.apps.iter().find(|(x, _)| *x == g).map(|(_, r)| *r),
         }
     }
 
@@ -129,7 +142,7 @@ impl Comp {
         let h = hs.line + lines.len() as u32 * (bs.line + t.space[2]) + 2 * pad;
         let bottom = self.panel_rect().y - t.space[3] as i32;
         // Spoustec vlevo: karta zarovnana k leve strane ikony.
-        let x = if f == Flyout::Apps { a.x } else { a.right() as i32 - w as i32 }.clamp(0, (self.w - w) as i32);
+        let x = if matches!(f, Flyout::Apps | Flyout::AppWindows(_)) { a.x } else { a.right() as i32 - w as i32 }.clamp(0, (self.w - w) as i32);
         Some(Rect::new(x, bottom - h as i32, w, h))
     }
 

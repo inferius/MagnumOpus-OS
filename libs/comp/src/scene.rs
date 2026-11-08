@@ -138,6 +138,9 @@ pub struct Window {
     pub restore: Option<Rect>,
     /// Menu okna (rozbalene, jen overene polozky; `palette.rs`).
     pub menu: Vec<guiproto::menu::Flat>,
+    /// Okno se otevrelo na pozadi (bez akce uzivatele): zvyraznena ikona
+    /// v liste, dokud nedostane fokus.
+    pub attention: bool,
     /// Systemova cela obrazovka: stav pred ni (`fullscreen.rs`).
     pub fs_saved: Option<crate::fullscreen::Saved>,
     /// Zmena velikosti tahem za levy / horni okraj: pravy / dolni okraj
@@ -527,6 +530,7 @@ impl Comp {
             restore: None,
             menu: Vec::new(),
             fs_saved: None,
+            attention: false,
             anchor: (None, None),
             pending_size: None,
             configure: None,
@@ -597,14 +601,9 @@ impl Comp {
                 }
             }
             if became_mapped {
-                // Nove okno nesmi ukrast fokus, kdyz uzivatel prave pise do
-                // jine aplikace (klavesy by sly jinam, napr. heslo).
-                let other = self.focus.and_then(|f| self.windows.get(&f)).is_some_and(|w| w.client != c);
-                let typing = self.input.last_key != 0 && now.saturating_sub(self.input.last_key) <= crate::input::FOCUS_GRACE;
-                if !other || !typing {
-                    self.set_focus(Some(gid));
-                }
-                self.damage_panel();
+                // Fokus jen okno spustene uzivatelem (nebo kdyz zadne jine
+                // fokus nema); jinak zvyrazneni ikony (`launch.rs`).
+                self.new_window_focus(gid, now);
             }
         }
         touched.sort_unstable();
@@ -781,8 +780,9 @@ impl Comp {
         }
         self.focus = gid;
         if let Some(g) = gid
-            && let Some(w) = self.windows.get(&g)
+            && let Some(w) = self.windows.get_mut(&g)
         {
+            w.attention = false;
             let (c, l) = (w.client, w.local);
             self.send_input(c, l, guiproto::window::InputEvent::Focus(true), 0, false, 0);
             // Nahoru v poradi.

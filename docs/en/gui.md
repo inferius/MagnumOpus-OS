@@ -545,7 +545,45 @@ the screen size and the `FULLSCREEN` flag and needs to support nothing.
   notifications and showing them on return, the exceptions (calls,
   battery, security) and a config key in Settings **[designed]**.
 
+### Several windows of one app and focus of new windows
+
+- **Manifest:** `[window] instances = "single" | "multi"` (default
+  `single`). Single (Task manager, Demo, later Settings): launching = only
+  focusing the existing window, "Nové okno" is never offered. Multi
+  (Terminal, later Files, an editor): a new window only by an explicit
+  action. Init passes the flag to the compositor in the third column of the
+  `apps` list.
+- **The bar** has one button per app, several windows = a count at the top
+  right. Click: no window = start; one window = focus (minimize when it
+  already has focus); several windows = a list of windows above the icon
+  (titles) ending with "+ Nové okno" (multi only). A right click shows the
+  same list.
+- **New window** (multi only): middle click or Shift+click on the icon,
+  "+ Nové okno" in the list, Ctrl+Enter on the app row in the palette or a
+  click on "+ nové okno" on its right, the **Ctrl+Shift+N** shortcut in the
+  app's window (for single apps the key goes to the app). The compositor
+  asks init (`launch <id>`), which starts another instance; a terminal = a
+  new session (its own termd).
+- **Palette:** the app row, Enter = switch to the open window (or start it
+  when not running); its open windows below it as sub-rows.
+- **Focus:** a window started by the user (bar, launcher, palette,
+  shortcut; within 30 s of the request) gets focus at once. A window that
+  opens on its own in the background does not steal focus from another
+  window (protection while typing) - only its bar icon marker is
+  highlighted until the user picks it; when no window has focus it gets it.
+
+**[implemented]** (tests `multiple_windows_per_app_and_user_launch_focus`,
+`pointer_keyboard_routing_and_focus` in `libs/comp`)
+
 ### Command palette (v2)
+
+**The look is provisional**; the target is `design/prostredi-menu.html`
+(variant D: app icons in style F, sections with the app icon and name, a
+shield at System, shortcuts as "keys", a ⊕ New window button, material B
+with blur once there is a blur shader, typography and spacing from tokens).
+Aligning the look comes after context menus and the ☰ menu, in one pass
+for the palette, context menus and the menu (shared components).
+**[designed]**
 
 The system shortcut **Ctrl+K** or **Super+K** (physical keyboard only)
 opens the palette at the top centre of the screen per
@@ -927,7 +965,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `tasks <running> <agent>` | - | `ok` (task icon in the panel) |
 | `theme light\|dark\|contrast` | - | `ok` (color mode from the tokens) |
 | `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
-| `apps` + lines `<id>\t<name>` | - | empty (launchable apps in the bar) |
+| `apps` + lines `<id>\t<name>\t<single\|multi>` | - | empty (launchable apps in the bar) |
 | `dnd-fullscreen on\|off` | - | empty (Do not disturb in fullscreen) |
 | `launcher` | channel to init | empty (`launch <id>` requests) |
 | `snapshots` | channel to `logd` | empty (images of the [diagnostic snapshot](#diagnostic-snapshot-print-screen)) |

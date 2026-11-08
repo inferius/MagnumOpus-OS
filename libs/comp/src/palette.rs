@@ -52,6 +52,8 @@ pub enum Item {
     System(SysAction),
     /// Akce aplikace z menu okna: okno, index v `Window::menu`.
     AppAction(u32, usize),
+    /// Dalsi okno bezici aplikace: id, jmeno.
+    NewWindow(String, String),
 }
 
 /// Radek palety: nadpis sekce, polozka, nebo pocet dalsich.
@@ -137,6 +139,7 @@ impl Item {
     fn key(&self, c: &Comp) -> String {
         match self {
             Item::App(id, _) => format!("app:{id}"),
+            Item::NewWindow(id, _) => format!("new:{id}"),
             Item::Window(g) => format!("win:{g}"),
             Item::System(a) => format!("sys:{a:?}"),
             Item::AppAction(g, i) => {
@@ -173,9 +176,19 @@ impl Comp {
     fn item_view(&self, it: &Item) -> (String, &'static str, String, Option<String>) {
         match it {
             Item::App(id, name) => {
-                let what = if self.app_window(id).is_some() { "běží" } else { "" };
-                (name.clone(), crate::render::app_icon(id), String::from(what), None)
+                let n = self.app_windows(id).len();
+                let mut what = match n {
+                    0 => String::new(),
+                    1 => String::from("běží"),
+                    n => format!("{n} okna"),
+                };
+                // Multi: tlacitko nove okno vpravo (Ctrl+Enter).
+                if self.is_launchable(id) {
+                    what = if what.is_empty() { String::from("+ nové okno (Ctrl+Enter)") } else { format!("{what}, + nové okno (Ctrl+Enter)") };
+                }
+                (name.clone(), crate::render::app_icon(id), what, None)
             }
+            Item::NewWindow(id, name) => (format!("Nové okno: {name}"), crate::render::app_icon(id), String::from("Ctrl+Shift+N"), None),
             Item::Window(g) => {
                 let w = self.windows.get(g);
                 let title = w.map_or(String::new(), |w| w.title.clone());
@@ -211,6 +224,7 @@ impl Comp {
         match it {
             Item::AppAction(g, i) => self.windows.get(g).and_then(|w| w.menu.get(*i)).map_or(Vec::new(), |f| f.item.keywords.clone()),
             Item::System(SysAction::Shutdown) => alloc::vec![String::from("vypnuti"), String::from("power")],
+            Item::NewWindow(..) => alloc::vec![String::from("nový"), String::from("instance")],
             Item::System(SysAction::Snapshot) => alloc::vec![String::from("diagnostika"), String::from("screenshot")],
             _ => Vec::new(),
         }
@@ -243,6 +257,19 @@ impl Comp {
         });
         let windows: Vec<Item> = self.z.iter().rev().filter(|g| self.windows.get(g).is_some_and(|w| w.mapped)).map(|&g| Item::Window(g)).collect();
         let apps: Vec<Item> = self.launchable.iter().map(|(id, n)| Item::App(id.clone(), n.clone())).collect();
+        // Pod aplikaci jeji otevrena okna (podradky, pri vic oknech).
+        let with_windows = |list: Vec<Item>| -> Vec<Item> {
+            let mut out = Vec::new();
+            for it in list {
+                let wins = match &it {
+                    Item::App(id, _) if self.app_windows(id).len() > 1 => self.app_windows(id),
+                    _ => Vec::new(),
+                };
+                out.push(it);
+                out.extend(wins.into_iter().map(Item::Window));
+            }
+            out
+        };
         let system: Vec<Item> = [SysAction::Fullscreen, SysAction::Snapshot, SysAction::Reboot, SysAction::Shutdown].map(Item::System).to_vec();
         let app_head = app.as_ref().map(|(_, n, ic)| Row::Header(n.clone(), ic, false));
         let sys_head = Row::Header(String::from("Systém"), "shieldcheck", true);
@@ -290,7 +317,7 @@ impl Comp {
             }
             if scope == Scope::All {
                 sections.push((Row::Header(String::from("Okna"), "window", false), ranked(windows)));
-                sections.push((Row::Header(String::from("Aplikace"), "apps", false), ranked(apps)));
+                sections.push((Row::Header(String::from("Aplikace"), "apps", false), with_windows(ranked(apps))));
             }
             if scope != Scope::App {
                 sections.push((sys_head, ranked(system)));
@@ -371,7 +398,14 @@ impl Comp {
         match code {
             KEY_ESC => return self.set_palette(None),
             KEY_ENTER | KEY_KPENTER => {
-                if let Some(it) = self.palette_items().get(p.sel).cloned() {
+                // Ctrl+Enter na aplikaci (multi) = nove okno.
+                let it = self.palette_items().get(p.sel).cloned();
+                if self.palette_ctrl
+                    && let Some(Item::App(id, n)) = &it
+                    && self.is_launchable(id)
+                {
+                    self.palette_run(Item::NewWindow(id.clone(), n.clone()), time);
+                } else if let Some(it) = it {
                     self.palette_run(it, time);
                 }
                 return;
@@ -416,7 +450,12 @@ impl Comp {
         if let Some(i) = self.palette_row_at(y)
             && let Some(Row::Item(it)) = self.palette_rows().get(i).cloned()
         {
-            self.palette_run(it, time);
+            // Tlacitko nove okno vpravo na radku aplikace (multi).
+            let plus = self.palette_rect().is_some_and(|r| x >= r.right() as i32 - 3 * self.style.theme.size.control_h as i32);
+            match &it {
+                Item::App(id, n) if plus && self.is_launchable(id) => self.palette_run(Item::NewWindow(id.clone(), n.clone()), time),
+                _ => self.palette_run(it, time),
+            }
         }
     }
 
@@ -433,6 +472,7 @@ impl Comp {
         *self.palette_usage.entry(key).or_insert(0) += 1;
         match it {
             Item::App(id, _) => self.launch_or_activate(&id, time),
+            Item::NewWindow(id, _) => self.launch_new(&id, time),
             Item::Window(g) => {
                 if let Some(w) = self.windows.get_mut(&g) {
                     w.minimized = false;

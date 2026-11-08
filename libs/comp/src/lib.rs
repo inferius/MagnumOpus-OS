@@ -155,6 +155,13 @@ pub struct Comp {
     /// Nabidka u tlacitka maximalizace (okno) a od kdy je nad nim ukazatel.
     pub(crate) max_menu: Option<u32>,
     pub(crate) max_hover_since: Option<(u32, u64)>,
+    /// Aplikace spustene uzivatelem (id, cas): jejich nove okno dostane
+    /// fokus (`launch.rs`).
+    pub(crate) expect_focus: Vec<(alloc::string::String, u64)>,
+    /// Aplikace s vice okny (`multi` z manifestu).
+    pub(crate) multi: Vec<alloc::string::String>,
+    /// Drzeny Ctrl pri otevrene palete (Ctrl+Enter).
+    pub(crate) palette_ctrl: bool,
 }
 
 impl Comp {
@@ -201,6 +208,9 @@ impl Comp {
             dnd_fullscreen: true,
             max_menu: None,
             max_hover_since: None,
+            expect_focus: Vec::new(),
+            multi: Vec::new(),
+            palette_ctrl: false,
         };
         c.damage_all();
         c

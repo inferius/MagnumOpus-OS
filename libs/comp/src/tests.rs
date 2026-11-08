@@ -331,6 +331,11 @@ fn pointer_keyboard_routing_and_focus() {
     t.window(a, Mode::Standard, RED);
     let b = t.client("b");
     t.window(b, Mode::Standard, BLUE);
+    // Okno b se otevrelo samo (bez akce uzivatele): fokus neukradlo.
+    let gb = t.c.clients[&b].windows[&1];
+    assert_ne!(t.c.focus, Some(gb), "okno na pozadi fokus neukradne");
+    assert!(t.c.windows[&gb].attention, "jen zvyraznena ikona");
+    t.c.set_focus(Some(gb));
     t.frame();
     t.out();
     let ra = t.rect_of(a);
@@ -1636,4 +1641,65 @@ fn maximize_hover_menu_snaps_and_fullscreens() {
     let (_, nw, _, _) = t.c.windows[&g].configure.expect("CONFIGURE");
     assert_eq!(nw, W / 2 - 2 * t.c.windows[&g].geo.border, "polovina obrazovky");
     assert_eq!(t.c.max_menu, None);
+}
+
+#[test]
+fn multiple_windows_per_app_and_user_launch_focus() {
+    let mut t = T::new();
+    t.c.set_launchable(vec![("org.term".into(), "Terminál".into()), ("org.other".into(), "Jiná".into())]);
+    t.c.set_multi(vec!["org.term".into()]);
+    let a = t.client("org.term");
+    t.window(a, Mode::Standard, RED);
+    let o = t.client("org.other");
+    t.window(o, Mode::Standard, BLUE);
+    t.frame();
+    let ga = t.c.clients[&a].windows[&1];
+    assert_eq!(t.c.focus, Some(ga), "prvni okno fokus (zadne jine nebylo)");
+    // Prostredni klik na ikonu terminalu: zadost o dalsi instanci.
+    let r = t.c.bar_layout().apps.iter().find(|(g, _)| *g == ga).unwrap().1;
+    t.move_to(r.x + 4, r.y + 4);
+    t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Press }, false);
+    assert_eq!(t.c.take_launch_requests(), vec![alloc::string::String::from("org.term")]);
+    // Druha instance (spustil ji uzivatel) dostane fokus i pres jine okno.
+    let gother = t.c.clients[&o].windows[&1];
+    t.c.set_focus(Some(gother));
+    let a2 = t.client("org.term");
+    t.window(a2, Mode::Standard, GREEN);
+    let ga2 = t.c.clients[&a2].windows[&1];
+    assert_eq!(t.c.focus, Some(ga2), "okno spustene uzivatelem ma fokus");
+    t.frame();
+    // Lista: jedna ikona terminalu se dvema okny; klik nabidne seznam.
+    let bar = t.c.bar_layout();
+    let k = bar.apps.iter().position(|(g, _)| *g == ga2 || *g == ga).unwrap();
+    assert_eq!(bar.groups[k].len(), 2, "pocet oken aplikace");
+    assert_eq!(bar.apps.len(), 2, "terminal a druha aplikace");
+    let r = bar.apps[k].1;
+    t.click(r.x + 4, r.y + 4);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::AppWindows(bar.apps[k].0)));
+    // Ctrl+Shift+N v aplikaci: dalsi okno.
+    t.c.set_flyout(None);
+    key_mods(&mut t, inputproto::code::KEY_N, inputproto::mods::CTRL | inputproto::mods::SHIFT);
+    assert_eq!(t.c.take_launch_requests(), vec![alloc::string::String::from("org.term")]);
+    // Paleta: radek aplikace, pod nim jeji okna; Ctrl+Enter = nove okno.
+    key_mods(&mut t, inputproto::code::KEY_K, inputproto::mods::CTRL);
+    text(&mut t, "termin");
+    let items = t.c.palette_items();
+    assert!(items.contains(&crate::palette::Item::App("org.term".into(), "Terminál".into())));
+    assert!(items.contains(&crate::palette::Item::Window(ga2)), "okna pod aplikaci");
+    let sel = items.iter().position(|i| matches!(i, crate::palette::Item::App(..))).unwrap();
+    for _ in 0..sel {
+        t.key(inputproto::code::KEY_DOWN, false);
+    }
+    key_mods(&mut t, inputproto::code::KEY_ENTER, inputproto::mods::CTRL);
+    assert_eq!(t.c.take_launch_requests(), vec![alloc::string::String::from("org.term")], "Ctrl+Enter");
+    // Single aplikace: zadne nove okno, Ctrl+Shift+N jde aplikaci.
+    t.c.set_focus(Some(gother));
+    t.c.take_out();
+    key_mods(&mut t, inputproto::code::KEY_N, inputproto::mods::CTRL | inputproto::mods::SHIFT);
+    assert!(t.c.take_launch_requests().is_empty(), "single: zadna druha instance");
+    assert!(client_msgs(&t.c.take_out(), o).iter().any(|m| matches!(m, ServerMsg::Input { .. })), "klavesa jde aplikaci");
+    let ro = t.c.bar_layout().apps.iter().find(|(g, _)| *g == gother).unwrap().1;
+    t.move_to(ro.x + 4, ro.y + 4);
+    t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Press }, false);
+    assert!(t.c.take_launch_requests().is_empty(), "single: prostredni klik nic");
 }
