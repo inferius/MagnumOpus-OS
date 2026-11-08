@@ -1573,3 +1573,67 @@ fn command_palette_v2_app_menu_actions() {
     assert!(t.c.palette_open(), "zakazana akce paletu nezavre");
     assert!(client_msgs(&t.c.take_out(), a).iter().all(|m| !matches!(m, ServerMsg::ActionInvoke { .. })));
 }
+
+#[test]
+fn fullscreen_toggle_hides_bar_dnd_and_exit_button() {
+    use inputproto::code::KEY_F;
+    use inputproto::mods::{META, SHIFT};
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let r0 = t.c.windows[&g].rect;
+    t.c.take_out();
+    // Super+Shift+F: aplikace dostane jen CONFIGURE s velikosti obrazovky.
+    key_mods(&mut t, KEY_F, META | SHIFT);
+    let cfg: Vec<(u32, u32, u32)> = client_msgs(&t.c.take_out(), a)
+        .into_iter()
+        .filter_map(|m| match m {
+            ServerMsg::Configure { w, h, state, .. } => Some((w, h, state)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!((cfg[0].0, cfg[0].1), (W, H), "CONFIGURE na celou obrazovku");
+    assert!(cfg[0].2 & guiproto::window::wstate::FULLSCREEN != 0);
+    let serial = t.c.windows[&g].configure.unwrap().0;
+    t.commit(a, 2, guiproto::window::commit::ACK_CONFIGURE, serial, 0);
+    assert!(t.c.fullscreen_active() && t.c.do_not_disturb(), "cela obrazovka, nerusit");
+    assert!(!t.c.screen().contains(t.c.panel_rect().x, t.c.panel_rect().y), "lista skryta");
+    // Najeti k hornimu okraji: odznak a tlacitko navratu; klik vrati okno.
+    t.move_to(W as i32 / 2, 1);
+    let exit = t.c.fs_exit_rect(g, t.now).expect("tlacitko Opustit celou obrazovku");
+    t.click(exit.x + 4, exit.y + 4);
+    assert!(!t.c.is_fullscreen(g));
+    let serial = t.c.windows[&g].configure.unwrap().0;
+    t.commit(a, 3, guiproto::window::commit::ACK_CONFIGURE, serial, 0);
+    assert_eq!(t.c.windows[&g].rect, r0, "puvodni obdelnik a rezim");
+    assert_eq!(t.c.windows[&g].mode, Mode::Standard);
+    assert!(!t.c.do_not_disturb());
+    // Nerusit jde vypnout.
+    t.c.set_dnd_fullscreen(false);
+    key_mods(&mut t, KEY_F, META | SHIFT);
+    assert!(!t.c.do_not_disturb());
+}
+
+#[test]
+fn maximize_hover_menu_snaps_and_fullscreens() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let b = t.c.windows[&g].buttons()[1];
+    t.move_to(b.x + b.w as i32 / 2, b.y + b.h as i32 / 2);
+    assert_eq!(t.c.max_menu, None, "nabidka az po prodleve");
+    t.now += crate::fullscreen::MAX_MENU_DELAY + 1;
+    t.c.timers(t.now);
+    let m = t.c.max_menu_rect().expect("nabidka u maximalizace");
+    let th = t.c.style.theme.clone();
+    // Treti radek: pripnout vlevo.
+    let y = m.y + (th.space[2] + 2 * th.size.control_h + 4) as i32;
+    t.click(m.x + 8, y);
+    let (_, nw, _, _) = t.c.windows[&g].configure.expect("CONFIGURE");
+    assert_eq!(nw, W / 2 - 2 * t.c.windows[&g].geo.border, "polovina obrazovky");
+    assert_eq!(t.c.max_menu, None);
+}

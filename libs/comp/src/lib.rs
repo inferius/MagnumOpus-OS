@@ -23,6 +23,7 @@ extern crate alloc;
 pub mod diag;
 pub mod dialog;
 pub mod flyout;
+pub mod fullscreen;
 pub mod launch;
 pub mod menu;
 pub mod palette;
@@ -149,6 +150,11 @@ pub struct Comp {
     pub(crate) palette_usage: palette::Usage,
     /// Zadosti palety pro init (vypnout, restartovat).
     pub(crate) system_requests: Vec<palette::SystemRequest>,
+    /// Nerusit automaticky pri cele obrazovce (`fullscreen.rs`).
+    pub(crate) dnd_fullscreen: bool,
+    /// Nabidka u tlacitka maximalizace (okno) a od kdy je nad nim ukazatel.
+    pub(crate) max_menu: Option<u32>,
+    pub(crate) max_hover_since: Option<(u32, u64)>,
 }
 
 impl Comp {
@@ -192,6 +198,9 @@ impl Comp {
             palette_recent: Vec::new(),
             palette_usage: Default::default(),
             system_requests: Vec::new(),
+            dnd_fullscreen: true,
+            max_menu: None,
+            max_hover_since: None,
         };
         c.damage_all();
         c

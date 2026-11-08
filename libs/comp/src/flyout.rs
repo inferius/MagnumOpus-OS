@@ -83,7 +83,7 @@ impl Comp {
                 };
                 (String::from("Zvuk"), vec![line])
             }
-            Flyout::Bell => (String::from("Oznámení"), vec![String::from("Žádná oznámení")]),
+            Flyout::Bell => (String::from("Oznámení"), self.dnd_lines()),
             Flyout::Apps => {
                 let rows = self
                     .launchable

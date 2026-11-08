@@ -172,7 +172,9 @@ impl Comp {
 
     pub(crate) fn panel_rect(&self) -> Rect {
         let s = &self.style.theme.size;
-        Rect::new(s.bar_inset as i32, (self.h - s.bar_h - s.bar_inset) as i32, self.w.saturating_sub(2 * s.bar_inset), s.bar_h)
+        // Cela obrazovka: lista skryta (mimo obrazovku, nic ji nezasahne).
+        let y = if self.fullscreen_active() { self.h as i32 + 64 } else { (self.h - s.bar_h - s.bar_inset) as i32 };
+        Rect::new(s.bar_inset as i32, y, self.w.saturating_sub(2 * s.bar_inset), s.bar_h)
     }
 
     /// Lista vcetne stinu (poskozeni).
@@ -423,6 +425,8 @@ impl Comp {
         let mut v = alloc::vec![self.panel_visual(), self.cursor_rect()];
         v.extend(self.flyout_rect());
         v.extend(self.palette_visual());
+        // Nabidka u maximalizace i se stinem.
+        v.extend(self.max_menu_rect().map(|r| Rect::new(r.x - 24, r.y - 24, r.w + 48, r.h + 48)));
         if self.tasks_tip_visible() {
             v.extend(self.tasks_tip_rect());
         }
@@ -473,10 +477,12 @@ impl Comp {
             blur: self.bar_blur.as_deref(),
             hover: self.input.hover,
             launchable: &self.launchable,
+            dnd: self.do_not_disturb(),
         };
         draw_bar(canvas, &mut self.style, bar, &info);
         if !dialog_active {
             self.draw_flyout(canvas);
+            self.draw_max_menu(canvas);
             self.draw_palette(canvas);
         }
         if dialog_active {
@@ -640,7 +646,18 @@ pub(crate) fn draw_window_above(c: &mut Canvas<'_>, st: &mut Style, w: &Window, 
             draw_badge(c, st, w, cl, focused);
         }
     } else if w.badge_until > now {
-        draw_badge(c, st, w, cl, focused);
+        let b = draw_badge(c, st, w, cl, focused);
+        // Systemova cela obrazovka: tlacitko navratu vedle odznaku.
+        if w.fs_saved.is_some() {
+            let t = st.theme.clone();
+            let s = t.text.small;
+            let bw = st.width(crate::fullscreen::EXIT_LABEL, s) + 2 * t.space[4];
+            let r = Rect::new(b.right() as i32 + t.space[3] as i32, b.y, bw, b.h);
+            c.round_fill_bordered(r, r.h / 2, t.color.surface, t.color.border_strong, 1);
+            let face = st.face(s);
+            let base = r.y + face.baseline_in(s.size, r.h);
+            face.draw(c, r.x + t.space[4] as i32, base, crate::fullscreen::EXIT_LABEL, s.size, t.color.ink);
+        }
     }
     if cl.unresponsive {
         draw_hung(c, st, w, cl);
@@ -835,6 +852,8 @@ struct BarInfo<'a> {
     blur: Option<&'a [u32]>,
     hover: Option<Hover>,
     launchable: &'a [(String, String)],
+    /// Nerusit (zvonek preskrtnuty).
+    dnd: bool,
 }
 
 fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
@@ -932,7 +951,7 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
             info.status.net.is_some_and(|n| n != NetState::Online),
         ),
         (bar.volume, "volume", info.status.volume.is_some_and(|(v, m)| m || v == 0)),
-        (Some(bar.bell), "bell", false),
+        (Some(bar.bell), if info.dnd { "bell-off" } else { "bell" }, false),
     ];
     for (r, name, off) in icons {
         let Some(r) = r else { continue };

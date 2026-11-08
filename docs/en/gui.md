@@ -519,6 +519,32 @@ coordinates, pointer leave, button with position, wheel and focus; plus
 modifiers, the synthetic flag and time. Motion and button release go to
 the window that got the press, even when the pointer leaves it.
 
+### Fullscreen and Do not disturb
+
+A system function for every window; the app only gets a `CONFIGURE` with
+the screen size and the `FULLSCREEN` flag and needs to support nothing.
+**[implemented]** (tests `fullscreen_toggle_hides_bar_dnd_and_exit_button`,
+`maximize_hover_menu_snaps_and_fullscreens` in `libs/comp`)
+
+- **Enter:** the **Super+Shift+F** shortcut (F11 belongs to apps), the
+  palette item "Celá obrazovka", or the menu after 400 ms above the
+  maximize button (Maximize / Fullscreen / Snap left / Snap right; a snap
+  = half of the work area).
+- **State:** the window switches to `FULLSCREEN` mode; the original mode,
+  rectangle and maximization are saved and restored on return. The bar is
+  hidden (its panels close).
+- **Leave:** the same shortcut, the palette item "Opustit celou
+  obrazovku", or the **Opustit celou obrazovku** button next to the trust
+  badge that appears when the pointer reaches the top edge.
+- **Security:** the trust badge at the top edge on hover; the secure
+  shortcut and system dialogs always work (drawn above everything).
+- **Do not disturb:** turned on automatically in fullscreen (approved by
+  the user); the bell in the bar is crossed out and its panel says so.
+  Turned off by the compositor command `dnd-fullscreen off`.
+  **[implemented]** There is no notification system yet: silently queuing
+  notifications and showing them on return, the exceptions (calls,
+  battery, security) and a config key in Settings **[designed]**.
+
 ### Command palette (v2)
 
 The system shortcut **Ctrl+K** or **Super+K** (physical keyboard only)
@@ -895,6 +921,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `theme light\|dark\|contrast` | - | `ok` (color mode from the tokens) |
 | `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
 | `apps` + lines `<id>\t<name>` | - | empty (launchable apps in the bar) |
+| `dnd-fullscreen on\|off` | - | empty (Do not disturb in fullscreen) |
 | `launcher` | channel to init | empty (`launch <id>` requests) |
 | `snapshots` | channel to `logd` | empty (images of the [diagnostic snapshot](#diagnostic-snapshot-print-screen)) |
 

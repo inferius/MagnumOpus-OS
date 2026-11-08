@@ -34,6 +34,7 @@ pub const TESTS: &[Test] = &[
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
     ("compd: spravce uloh a ikona uloh v panelu", task_manager),
     ("compd: diagnosticky snimek po Print Screen (QMP)", super::gui_snapshot::diag_snapshot),
+    ("compd: paleta prikazu z klavesnice: okno a akce aplikace (QMP)", super::gui_palette::palette_keys),
     ("compd: vzhled podle navrhu, snimky obrazovky (QMP)", look_shots),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.

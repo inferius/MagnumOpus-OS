@@ -138,6 +138,8 @@ pub struct Window {
     pub restore: Option<Rect>,
     /// Menu okna (rozbalene, jen overene polozky; `palette.rs`).
     pub menu: Vec<guiproto::menu::Flat>,
+    /// Systemova cela obrazovka: stav pred ni (`fullscreen.rs`).
+    pub fs_saved: Option<crate::fullscreen::Saved>,
     /// Zmena velikosti tahem za levy / horni okraj: pravy / dolni okraj
     /// (obrazovka), ktery zustava na miste, az aplikace potvrdi velikost.
     pub anchor: (Option<i32>, Option<i32>),
@@ -524,6 +526,7 @@ impl Comp {
             minimized: false,
             restore: None,
             menu: Vec::new(),
+            fs_saved: None,
             anchor: (None, None),
             pending_size: None,
             configure: None,
