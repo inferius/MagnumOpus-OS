@@ -205,6 +205,7 @@ fn main(startup: libos::Startup) -> i64 {
         1 + h.scaled.len(),
         intel.buffers.count
     );
+    st.claim_framebuffer(NAME);
     let mut server = Server::new(intel);
     if c.restore {
         server.announce_reset();

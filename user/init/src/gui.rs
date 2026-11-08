@@ -201,7 +201,7 @@ pub fn display(startup: &Startup) -> Result<Channel> {
         return Ok(ch);
     }
     // Nativni ovladac (nastaveni obrazu), kdyz odpovi a vidi monitor.
-    if let Some(ch) = crate::display_native::choose() {
+    if let Some(ch) = crate::display_native::choose(startup) {
         return Ok(ch);
     }
     let fb = startup.framebuffer.as_ref().ok_or(Error::NotFound)?;

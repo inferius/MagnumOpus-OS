@@ -70,6 +70,7 @@ fn main(startup: libos::Startup) -> i64 {
         Some((w, h)) => println!("{NAME} {a}: bezi, rezim {w}x{h}, {edid}"),
         None => println!("{NAME} {a}: bezi, vystup vypnuty, {edid}"),
     }
+    st.claim_framebuffer(NAME);
     let mut server = Server::new(bochs);
     if c.restore {
         server.announce_reset();
