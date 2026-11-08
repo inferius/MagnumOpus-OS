@@ -53,7 +53,7 @@ C Vřelý (hravější, výrazný akcent).
 |---|---|---|---|
 | 1 | celkový charakter | **C, Vřelý** | fialový akcent, teplé pozadí, zaoblení 18 px u oken a 10 px u prvků, tlačítka jako pilulky, barevné měkké stíny |
 | 2 | umístění lišty | **nastavitelné**, výchozí **odsazený pruh dole** | 6 poloh: dole odsazená, plovoucí dok, dole přes šířku, vlevo, vpravo, nahoře |
-| 3 | styl ikon | **linkové, zaoblené** | tah 1,75 px, mřížka 24 px, barva z textu |
+| 3 | styl ikon | **pastelový přechod (F)**, změněno 8. 11. 2026 z linkových | měkké tvary, tah 2 px, výplň přechodem dvou pastelů a kresba v sytém odstínu podle kategorie; vybráno ze směrů v `design/ikony-smery.html` a `design/ikony-smery-2.html` |
 | 4 | písmo | **Inter + JetBrains Mono** | obě pod SIL OFL 1.1; Tuffy a Noto Sans Mono zůstanou jako záloha |
 | 5 | výchozí motiv | **podle denní doby** | světlý ve dne, tmavý po západu slunce v nastaveném pásmu |
 | 6 | označení agenta AI | **vyhrazená barva + ikona + slovo** | korálová barva jen pro agenta, vždy s ikonou a slovem „agent“ (nikdy jen barvou) |
@@ -239,10 +239,30 @@ vysokém kontrastu stíny nahradí rámeček 2 px.
 
 ### Ikony
 
-Linkové a zaoblené: mřížka 24 px, tah 1,75 px, zaoblené konce a spoje,
-okraj 2 px. Velikosti 16, 20, 24 a 32 px. Barvu dává text (`currentColor`),
-takže ikony samy přejdou do tmavého i kontrastního motivu. Sada má 64 ikon
-(`design/assets/mo.js`, objekt `ICONS`); ikona agenta jsou dvě jiskry.
+**Pastelový přechod (směr F):** měkké tvary na mřížce 24 px, tah 2 px,
+zaoblené konce a spoje. Část tvaru má výplň jemným přechodem dvou
+pastelů, kresba je v sytém odstínu téže barvy (ne černá). Barvu určuje
+**kategorie** ikony a je v tokenech (`icon_<kategorie>_bg` pro výplň,
+`icon_<kategorie>` pro kresbu; kresba má kontrast aspoň 3 : 1 proti ploše
+i proti výplni):
+
+| Kategorie | Barva | Příklady |
+|---|---|---|
+| `files` | máslová | složka, soubor, disk, koš, záloha |
+| `system` | levandulová | nastavení, terminál, štít, zámek, uživatel |
+| `network` | nebeská | síť, wifi, oznámení, hledat, úlohy |
+| `devices` | mátová | zvuk, baterie, kamera, klávesnice, USB |
+| `time` | tyrkysová | historie, hodiny, zkusit bokem, porovnat, konflikt |
+| `agent` | korálová (vyhrazená) | agent |
+| `ui` | barva textu, bez výplně | šipky, zavřít, plus, zaškrtnutí |
+
+V tlačítkách, štítcích, odznaku a dalších ovládacích prvcích jsou ikony
+jednobarevné podle textu a bez výplně (CSS proměnné `--ic-fill`,
+`--ic-ink`). Ve vysokém kontrastu výplň zmizí a kresba má jasnou barvu
+kategorie. Sada má 226 ikon (162 ze zdrojové sady + 64 doplněných; `design/assets/mo.js`, generuje
+`node design/tools/build-icons.mjs <svg/24>` ze zdrojové sady); ID `ic-*`
+se nemění. Překreslené: USB, porovnat změny, konflikt změn, touchpad.
+Broskvová se pro ikony nepoužívá (patří odznaku důvěry).
 
 Ikona nikdy nenese význam sama: v liště má popisek nebo tooltip, ve stromu
 přístupnosti jméno.

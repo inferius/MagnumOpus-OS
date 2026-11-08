@@ -295,3 +295,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .proto { padding: var(--s3); }
   .proto nav { order: 3; flex-basis: 100%; overflow-x: auto; flex-wrap: nowrap; }
 }
+
+/* Ikony smeru F: v tlacitkach, stitcich, odznaku a dalsich ovladacich prvcich
+ * jednobarevne podle textu a bez vyplne (barevna ikona tam rusi). */
+.btn .ic, .wbtn .ic, .chip .ic, .trust .ic, .sys-band .ic, .seg .ic, .tab .ic, .kbd .ic,
+.menu .ic, .count .ic, .notif .ico .ic, .ic.mono { --ic-fill: none; --ic-ink: currentColor; }

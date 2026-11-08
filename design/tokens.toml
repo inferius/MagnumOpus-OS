@@ -112,7 +112,7 @@ icon_s = 16
 icon_m = 20
 icon_l = 24
 icon_xl = 32
-icon_stroke = 1.75
+icon_stroke = 2
 focus_ring = 2
 focus_offset = 2
 resize_edge = 6
@@ -193,6 +193,18 @@ term_blue = "#2350c4"
 term_magenta = "#8435b5"
 term_cyan = "#0b6878"
 
+# Ikony (smer F, pastelovy prechod): pastel = vypln (_bg), syta = kresba. Kategorie viz docs.
+icon_files_bg = "#ffe9a8"
+icon_files = "#8a5000"
+icon_system_bg = "#e4daff"
+icon_system = "#5027bd"
+icon_network_bg = "#d3e5ff"
+icon_network = "#2350c4"
+icon_devices_bg = "#ccefdc"
+icon_devices = "#1b7543"
+icon_time_bg = "#c8eef1"
+icon_time = "#0b6878"
+
 [color.dark]
 bg = "#17111c"
 wall_a = "#4a2a22"
@@ -234,6 +246,18 @@ term_yellow = "#f2c46b"
 term_blue = "#9bbcff"
 term_magenta = "#d9a8ff"
 term_cyan = "#6fd6e3"
+
+# Ikony (smer F, pastelovy prechod): pastel = vypln (_bg), syta = kresba. Kategorie viz docs.
+icon_files_bg = "#4a3a12"
+icon_files = "#f2c46b"
+icon_system_bg = "#3a2d5c"
+icon_system = "#d8c9ff"
+icon_network_bg = "#1d3358"
+icon_network = "#9bbcff"
+icon_devices_bg = "#173826"
+icon_devices = "#7fdca5"
+icon_time_bg = "#123c42"
+icon_time = "#6fd6e3"
 
 # Vysoky kontrast (zapina se v Pristupnosti, prebiji svetly i tmavy).
 # Cil: text 7:1 (WCAG AAA), hranice prvku 4.5:1.
@@ -279,6 +303,18 @@ term_blue = "#9fc2ff"
 term_magenta = "#e6b0ff"
 term_cyan = "#66f0ff"
 
+# Ikony (smer F, pastelovy prechod): pastel = vypln (_bg), syta = kresba. Kategorie viz docs.
+icon_files_bg = "#000000"
+icon_files = "#ffe14d"
+icon_system_bg = "#000000"
+icon_system = "#e6b0ff"
+icon_network_bg = "#000000"
+icon_network = "#9fc2ff"
+icon_devices_bg = "#000000"
+icon_devices = "#7dff9e"
+icon_time_bg = "#000000"
+icon_time = "#66f0ff"
+
 # Povinne dvojice kontrastu: "popredi pozadi minimum". Kontroluje se pro
 # svetly a tmavy motiv; pro vysoky kontrast se minimum 4.5 zvysuje na 7.
 # 4.5 = text (WCAG 1.4.3), 3 = hranice prvku, ikony, fokus (WCAG 1.4.11).
@@ -317,6 +353,17 @@ term_yellow = "term_yellow term_bg 4.5"
 term_blue = "term_blue term_bg 4.5"
 term_magenta = "term_magenta term_bg 4.5"
 term_cyan = "term_cyan term_bg 4.5"
+# Kresba ikon: proti plose (3 : 1, WCAG 1.4.11) i proti vlastni pastelove vyplni.
+icon_files = "icon_files surface 3"
+icon_files_on_bg = "icon_files icon_files_bg 3"
+icon_system = "icon_system surface 3"
+icon_system_on_bg = "icon_system icon_system_bg 3"
+icon_network = "icon_network surface 3"
+icon_network_on_bg = "icon_network icon_network_bg 3"
+icon_devices = "icon_devices surface 3"
+icon_devices_on_bg = "icon_devices icon_devices_bg 3"
+icon_time = "icon_time surface 3"
+icon_time_on_bg = "icon_time icon_time_bg 3"
 
 # ---------------------------------------------------------------------------
 # Stiny. Na GPU je kompozitor kresli shaderem a pamatuje si je podle velikosti
