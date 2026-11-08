@@ -99,8 +99,30 @@ impl MainLink<'_> {
 
 impl Link for MainLink<'_> {
     fn send(&mut self, msg: &ServerMsg) {
-        if self.open && self.chan.write(&msg.encode(), Vec::new()).is_err() {
-            self.open = false;
+        if !self.open {
+            return;
+        }
+        let mut data = msg.encode();
+        // Prilis velka zprava (obri vystup): misto ni chyba, spojeni s oknem
+        // zustava (driv se relace odpojila a blok "bezel" navzdy).
+        if data.len() > libos::abi::syscall::CHANNEL_MAX_DATA {
+            let note = alloc::format!("výstup je příliš velký pro okno ({} B); uložte ho: ... | save soubor", data.len());
+            data = ServerMsg::Fail { message: note }.encode();
+        }
+        // Plna fronta (okno nestiha): chvili zkouset, zpravu (treba konec
+        // bloku) neztratit. Odpojit jen kdyz okno opravdu zmizelo.
+        let end = libos::time::deadline_after(core::time::Duration::from_secs(2));
+        loop {
+            match self.chan.write(&data, Vec::new()) {
+                Err(libos::Error::ShouldWait | libos::Error::NoResources) if libos::time::now() < end => {
+                    libos::time::sleep(core::time::Duration::from_millis(2));
+                }
+                Err(libos::Error::PeerClosed) => {
+                    self.open = false;
+                    return;
+                }
+                _ => return,
+            }
         }
     }
 

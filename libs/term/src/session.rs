@@ -324,6 +324,11 @@ impl SessionHost<'_> {
         }
     }
     fn push(&mut self, item: Item) {
+        // Velka binarni data jen jako souhrn (zprava kanalu ma nejvys 64 KiB).
+        let item = match item {
+            Item::Value(v) => Item::Value(crate::binary::for_window(v)),
+            other => other,
+        };
         if *self.attached {
             self.link.send(&ServerMsg::Item { session: self.session, block: self.block.id, item: item.clone() });
         }

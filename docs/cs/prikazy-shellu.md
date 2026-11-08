@@ -142,7 +142,7 @@ pwd
 
 přečte soubor jako bajty
 
-Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`.
+Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`. Velký soubor terminál neukazuje celý: vypíše souhrn (druh podle obsahu, např. obrázek BMP 1920×1080, velikost a pár řádků hexa), roura dostane celá data.
 
 ```shell
 open path
@@ -1590,7 +1590,7 @@ exit
 
 nápověda k příkazu
 
-Bez argumentu přehled příkazů po skupinách, s příkazem jeho úplná nápověda: použití, argumenty, roura, příklady, chyby a související příkazy.
+Bez argumentu přehled příkazů po skupinách, s příkazem jeho úplná nápověda: použití, argumenty, roura, příklady, chyby a související příkazy. Běžící příkaz přeruší Ctrl+C; co napíšete během běhu, čeká ve frontě a spustí se po něm (Esc frontu zruší).
 
 ```shell
 help [command]

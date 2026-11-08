@@ -120,6 +120,12 @@ the interactive terminal `term::ui`; the shell runs in the session service
 `termd` and sessions in their own `shsess` processes (see
 [Shell](shell-design.md)). The code is in `user/init/src/terminal.rs`.
 
+After 1 s a running command shows "running 12 s · Ctrl+C to interrupt"
+below it and Ctrl+C interrupts it. What you type meanwhile waits visibly in
+a queue ("queued: ...", Esc clears the queue, the up arrow brings the last
+line back for editing) and runs after it. **[implemented]** Moving a running
+command to the background (Ctrl+Z, `fg`, `bg`) **[designed]**.
+
 ```text
 gui-term ──connect──▶ init (supervisor) ──starts──▶ termd ──▶ shsess (session)
     ▲                      │ the window's session registry │

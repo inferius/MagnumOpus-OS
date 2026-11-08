@@ -576,3 +576,50 @@ fn drawn_activity_coverage() {
     assert_eq!(coverage(Drawn::Bar(4), w, h, 4, 10), 255);
     assert_eq!(coverage(Drawn::Bar(4), w, h, 5, 10), 0);
 }
+
+/// Velka binarni data: oknu jen souhrn (druh, velikost, nahled hexa).
+#[test]
+fn big_binary_value_becomes_summary() {
+    let mut bmp = vec![0u8; 3000];
+    bmp[..2].copy_from_slice(b"BM");
+    bmp[18..22].copy_from_slice(&1920u32.to_le_bytes());
+    bmp[22..26].copy_from_slice(&1080u32.to_le_bytes());
+    let v = crate::binary::for_window(Value::Bytes(bmp));
+    assert_eq!(v.field("data"), Some(Value::str("obrázek BMP 1920×1080")));
+    assert_eq!(v.field("size"), Some(Value::Size(3000)));
+    let enc = ServerMsg::Item { session: 1, block: 1, item: Item::Value(crate::binary::for_window(Value::Bytes(vec![7; 3_000_000]))) }.encode();
+    assert!(enc.len() < 2000, "souhrn misto 3 MB: {} B", enc.len());
+    // Kratka data zustanou cela.
+    assert_eq!(crate::binary::for_window(Value::Bytes(b"ahoj".to_vec())), Value::Bytes(b"ahoj".to_vec()));
+}
+
+/// Behem prikazu: cas behu s napovedou Ctrl+C, psani do viditelne fronty,
+/// po konci bloku dalsi radek; Esc frontu zrusi.
+#[test]
+fn running_line_shows_time_and_queues_input() {
+    let mut a = App::new(crate::theme::Theme::dark(), 80, 24);
+    a.on_msg(ServerMsg::Attached { session: 7, cwd: "/".into(), blocks: 0 });
+    a.now = Some(1_000_000_000_000);
+    typ(&mut a, "open velky.bmp");
+    a.key(Key::Enter);
+    a.take_out();
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 5, line: "open velky.bmp".into() });
+    a.now = Some(1_000_000_000_000 + 12_000_000_000);
+    let f = crate::vt::strip(&a.frame());
+    assert!(f.contains("běží 12 s · Ctrl+C přerušit"), "{f}");
+    typ(&mut a, "ls");
+    a.key(Key::Enter);
+    assert!(!a.take_out().iter().any(|m| matches!(m, ClientMsg::Run { .. })), "radek ceka ve fronte");
+    assert!(crate::vt::strip(&a.frame()).contains("ve frontě: ls"));
+    a.key(Key::Ctrl('c'));
+    assert!(a.take_out().iter().any(|m| matches!(m, ClientMsg::Interrupt { .. })), "Ctrl+C preruseni");
+    a.on_msg(ServerMsg::BlockEnd { session: 7, block: 5, ok: false, duration: 1 });
+    assert!(a.take_out().iter().any(|m| matches!(m, ClientMsg::Run { line, .. } if line == "ls")), "dalsi z fronty");
+    // Esc zrusi frontu.
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 6, line: "ls".into() });
+    typ(&mut a, "x");
+    a.key(Key::Enter);
+    assert_eq!(a.queued, vec![String::from("x")]);
+    a.key(Key::Esc);
+    assert!(a.queued.is_empty());
+}

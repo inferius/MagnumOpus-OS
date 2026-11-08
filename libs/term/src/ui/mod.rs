@@ -68,6 +68,8 @@ pub struct UiBlock {
     table_item: Option<usize>,
     /// Rychlost a odhad pruhu (index polozky -> stopa).
     tracks: Vec<(usize, Track)>,
+    /// Cas zacatku (ns, cas okna) - delka behu pod prikazem.
+    started: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +117,12 @@ pub struct App {
     pub glyphs: crate::activity::Glyphs,
     /// Pocitadlo snimku (tocici se znak u bezicich bloku).
     tick: u32,
+    /// Radky napsane behem behu prikazu (pobezi po nem, v poradi).
+    pub queued: Vec<String>,
+    /// Blok prave beziciho radku z okna; `expect_start` = radek odeslan,
+    /// jeho blok jeste nezacal.
+    fg: Option<u64>,
+    expect_start: bool,
     /// Posun vystupu nahoru (radky od konce; 0 = dole, novy vystup a psani
     /// vraci dolu). Nejvetsi mozny posun spocita posledni snimek.
     pub scroll: usize,
@@ -171,6 +179,9 @@ impl App {
             glyphs: crate::activity::Glyphs::Text,
             tick: 0,
             scroll: 0,
+            queued: Vec::new(),
+            fg: None,
+            expect_start: false,
             max_scroll: core::cell::Cell::new(0),
             connected: false,
             pending: Vec::new(),
@@ -249,6 +260,7 @@ impl App {
                         table: None,
                         table_item: None,
                         tracks: Vec::new(),
+                        started: None,
                     });
                 }
                 for line in core::mem::take(&mut self.pending) {
@@ -269,7 +281,13 @@ impl App {
                     table: None,
                     table_item: None,
                     tracks: Vec::new(),
+                    started: self.now,
                 });
+                // Blok radku, ktery okno poslalo (ne uloha async uvnitr).
+                if self.expect_start {
+                    self.expect_start = false;
+                    self.fg = Some(block);
+                }
                 if self.blocks.len() > KEEP_BLOCKS {
                     self.blocks.remove(0);
                     if let Focus::Block(i) | Focus::Filter(i) = self.focus {
@@ -320,6 +338,7 @@ impl App {
                     b.ok = Some(ok);
                     b.duration = duration;
                 }
+                self.block_ended(block);
             }
             ServerMsg::Prompt { prompt, question, detail, choices } => {
                 self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0 });
@@ -369,6 +388,7 @@ impl App {
                     table: None,
                     table_item: None,
                     tracks: Vec::new(),
+                    started: None,
                 });
             }
             ServerMsg::SessionList { .. } => {}
@@ -449,8 +469,31 @@ impl App {
         if self.session == 0 {
             // Relace jeste neni (sluzba ji zaklada): radek pockat.
             self.pending.push(line);
+        } else if self.fg_busy() {
+            // Bezi prikaz: radek do viditelne fronty (Esc ji zrusi, sipka
+            // nahoru vrati posledni k uprave).
+            self.queued.push(line);
         } else {
+            self.expect_start = true;
             self.out.push(ClientMsg::Run { session: self.session, line });
+        }
+    }
+
+    /// Bezi radek odeslany z okna (popredi)? Jen kdyz jeho blok opravdu
+    /// zacal: neodpovi-li sluzba, fronta se nezasekne (sluzba radky
+    /// stejne provadi po sobe).
+    pub fn fg_busy(&self) -> bool {
+        self.fg.is_some()
+    }
+
+    /// Konec bloku: skoncil-li radek popredi, spustit dalsi z fronty.
+    fn block_ended(&mut self, block: u64) {
+        if self.fg == Some(block) {
+            self.fg = None;
+            if !self.queued.is_empty() {
+                let next = self.queued.remove(0);
+                self.run(next);
+            }
         }
     }
 
@@ -560,6 +603,22 @@ impl App {
             }
         }
         let before = self.editor.seq;
+        if !self.queued.is_empty() && self.editor.text.is_empty() {
+            match k {
+                Key::Esc => {
+                    self.queued.clear();
+                    self.notice = Some(tasks::Notice::new("fronta příkazů zrušena", false, self.tick));
+                    return;
+                }
+                Key::Up => {
+                    let l = self.queued.pop().unwrap();
+                    self.editor.set(&l);
+                    self.highlight_request();
+                    return;
+                }
+                _ => {}
+            }
+        }
         match k {
             Key::Char(c) => {
                 let mut b = [0u8; 4];
@@ -799,6 +858,13 @@ impl App {
                 bottom.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("    {} z {} · pište pro zúžení", m.sel + 1, m.items.len())));
             }
         }
+        // Fronta radku (pobezi po aktualnim prikazu).
+        for q in &self.queued {
+            bottom.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("  ve frontě: {q}")));
+        }
+        if !self.queued.is_empty() {
+            bottom.push(Line::new().text(Some(Style::fg(t.ui.muted)), "  Esc zrušit frontu · šipka nahoru upravit"));
+        }
         // Panel uloh.
         self.draw_tasks(&mut bottom);
         // Editor.
@@ -985,6 +1051,21 @@ impl App {
                     }
                 }
             }
+        }
+        // Bezici radek popredi dele nez 1 s: cas a jak dal.
+        if b.ok.is_none()
+            && self.fg == Some(b.id)
+            && let (Some(s), Some(n)) = (b.started, self.now)
+            && n - s >= 1_000_000_000
+        {
+            let secs = (n - s) / 1_000_000_000;
+            let mut l = Line::new();
+            l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("  {} ", self.spinner()));
+            l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("běží {} · Ctrl+C přerušit", progress::human_eta(secs * 1_000_000_000)));
+            if !self.queued.is_empty() {
+                l.push(Some(Style::fg(t.ui.muted)), &alloc::format!(" · ve frontě {}", self.queued.len()));
+            }
+            out.push(l);
         }
         out
     }
