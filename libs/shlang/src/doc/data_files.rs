@@ -6,14 +6,15 @@ pub const DOCS: &[Doc] = &[
     Doc {
         name: "ls",
         short_en: "lists files in a folder as a table",
-        long_cs: "Vypíše obsah složky jako tabulku se sloupci jméno, cesta, druh, velikost a čas změny. Výstup je tabulka, takže ho jde dál filtrovat a řadit v rouře. Skryté soubory (jméno začíná tečkou) ukáže jen s `-a`.",
-        long_en: "Lists a folder as a table with name, path, kind, size and modification time. The output is a table, so it can be filtered and sorted further in a pipeline. Hidden files (name starting with a dot) appear only with `-a`.",
+        long_cs: "Vypíše obsah složky jako tabulku se sloupci jméno, cesta, druh, velikost a čas změny. Výstup je tabulka, takže ho jde dál filtrovat a řadit v rouře. Skryté soubory (jméno začíná tečkou) ukáže jen s `-a`. U složky je `size` logická velikost (součet souborů v podstromu, FS ho zná hned bez procházení) a `items` její obsah (`files` a `dirs` zvlášť); skutečně zabrané místo (sdílené bloky, deduplikace, komprese) ukáže připravovaný příkaz `disk` / `fs info`. Bez práva správy složky souhrn chybí.",
+        long_en: "Lists a folder as a table with name, path, kind, size and modification time. The output is a table, so it can be filtered and sorted further in a pipeline. Hidden files (name starting with a dot) appear only with `-a`. For a folder `size` is the logical size (the sum of files in the subtree, known to the FS at once without walking it) and `items` its content (`files` and `dirs` separately); the space really used (shared blocks, deduplication, compression) will be shown by the upcoming `disk` / `fs info` command. Without the right to manage the folder the summary is missing.",
         args: &[
             Arg { name: "path", default: "pracovní složka", cs: "složka k vypsání", en: "folder to list (default: working folder)" },
             Arg { name: "recursive", default: "", cs: "i podsložky", en: "include subfolders" },
             Arg { name: "all", default: "", cs: "i skryté soubory (začínající tečkou)", en: "include hidden files (starting with a dot)" },
         ],
         examples: &[
+            Ex { code: "ls | select name size items", cs: "Jméno, velikost a u složky obsah.", en: "Name, size and the content of a folder.", check: Out("name       size    items\n---------  ------  ---------\na.txt         5 B\nb.txt        10 B\ndata.json    49 B\ndocs       3.0 KB  2 soubory") },
             Ex { code: "ls | select name", cs: "Jména souborů v pracovní složce.", en: "Names of files in the working folder.", check: Out("name\n---------\na.txt\nb.txt\ndata.json\ndocs") },
             Ex { code: "ls docs | where size > 1KB | select name", cs: "Jen velké soubory ve složce docs.", en: "Only large files in the docs folder.", check: Out("name\n-------\nbig.pdf") },
         ],

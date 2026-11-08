@@ -55,7 +55,8 @@ fn bare_word_variable_hint() {
 
 #[test]
 fn pipelines_over_files() {
-    let out = ok("ls | where size > 5B | select name size");
+    // Slozka ma velikost podstromu (docs = 3001 B): jen soubory.
+    let out = ok("ls | where kind == \"file\" && size > 5B | select name size");
     let names: Vec<String> = match &out[0] {
         Value::List(v) => v.iter().map(|r| r.field("name").unwrap().to_text()).collect(),
         other => panic!("{other:?}"),
@@ -67,13 +68,17 @@ fn pipelines_over_files() {
     assert_eq!(one("(ls docs | sort size -d | first).name"), Value::str("big.pdf"));
     assert_eq!(one("ls *.txt | count"), Value::Int(2));
     assert_eq!(one("ls().where(it => it.kind == \"dir\").count()"), Value::Int(1));
+    // Slozka: logicka velikost podstromu a obsah (soubory, slozky).
+    assert_eq!(one("(ls | where name == \"docs\" | first).size"), Value::Size(3001));
+    assert_eq!(one("(ls | where name == \"docs\" | first).items"), Value::str("2 soubory"));
+    assert_eq!(one("(ls | where name == \"docs\" | first).files"), Value::Int(2));
     // sloupec ze seznamu zaznamu
     assert_eq!(one("(ls *.txt).name"), Value::List(vec![Value::str("a.txt"), Value::str("b.txt")]));
 }
 
 #[test]
 fn where_with_outer_variable() {
-    let (h, _, o) = run_lines(&["let limit = 5B", "ls | where size > limit | count"]);
+    let (h, _, o) = run_lines(&["let limit = 5B", "ls | where kind == \"file\" && size > limit | count"]);
     o.result.unwrap();
     assert_eq!(h.out, vec![Value::Int(2)]);
 }

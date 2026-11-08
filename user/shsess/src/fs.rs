@@ -52,13 +52,25 @@ fn access(rights: u8) -> u8 {
     a
 }
 
+/// Velikost a obsah: u slozky souhrn podstromu (FS ho drzi hned, bez
+/// prochazeni; bez prava MANAGE ho neposle).
+fn sized(kind_raw: u8, size: u64, bytes: u64, files: u64, dirs: u64) -> (u64, Option<(u64, u64)>) {
+    if node(kind_raw) == NodeKind::Dir && (bytes | files | dirs) != 0 {
+        (bytes, Some((files, dirs)))
+    } else {
+        (size, None)
+    }
+}
+
 fn meta(s: &Stat) -> Meta {
+    let (size, tree) = sized(s.kind, s.size, s.tree_bytes, s.tree_files, s.tree_dirs);
     Meta {
         kind: node(s.kind),
-        size: s.size,
+        size,
         mtime: Some(ns(s.mtime)),
         access: Some(access(s.rights)),
         dataset: s.kind == kind::DATASET,
+        tree,
     }
 }
 
@@ -103,15 +115,19 @@ impl Fs for FsdFs {
             .client
             .list_stat(path)?
             .into_iter()
-            .map(|e| DirEntry {
-                name: e.name,
-                meta: Meta {
-                    kind: node(e.kind),
-                    size: e.size,
-                    mtime: Some(ns(e.mtime)),
-                    access: Some(access(e.rights)),
-                    dataset: e.kind == kind::DATASET,
-                },
+            .map(|e| {
+                let (size, tree) = sized(e.kind, e.size, e.tree_bytes, e.tree_files, e.tree_dirs);
+                DirEntry {
+                    name: e.name,
+                    meta: Meta {
+                        kind: node(e.kind),
+                        size,
+                        mtime: Some(ns(e.mtime)),
+                        access: Some(access(e.rights)),
+                        dataset: e.kind == kind::DATASET,
+                        tree,
+                    },
+                }
             })
             .collect())
     }

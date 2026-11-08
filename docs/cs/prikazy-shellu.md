@@ -19,19 +19,34 @@
 
 vypíše soubory ve složce jako tabulku
 
-Vypíše obsah složky jako tabulku se sloupci jméno, cesta, druh, velikost a čas změny. Výstup je tabulka, takže ho jde dál filtrovat a řadit v rouře. Skryté soubory (jméno začíná tečkou) ukáže jen s `-a`.
+Vypíše obsah složky jako tabulku se sloupci jméno, cesta, druh, velikost a čas změny. Výstup je tabulka, takže ho jde dál filtrovat a řadit v rouře. Skryté soubory (jméno začíná tečkou) ukáže jen s `-a`. U složky je `size` logická velikost (součet souborů v podstromu, FS ho zná hned bez procházení) a `items` její obsah (`files` a `dirs` zvlášť); skutečně zabrané místo (sdílené bloky, deduplikace, komprese) ukáže připravovaný příkaz `disk` / `fs info`. Bez práva správy složky souhrn chybí.
 
 ```shell
 ls [path] [-r] [-a]
 ```
 
-Plné jméno `file-list` · vstup: nic · výstup: tabulka (name, path, kind, size, mtime, ext, access, dataset)
+Plné jméno `file-list` · vstup: nic · výstup: tabulka (name, path, kind, size, mtime, ext, access, dataset, items, files, dirs)
 
 | Argument | Typ | Výchozí | Popis |
 |---|---|---|---|
 | `[path]` | cesta | pracovní složka | složka k vypsání |
 | `-r, --recursive` | přepínač |  | i podsložky |
 | `-a, --all` | přepínač |  | i skryté soubory (začínající tečkou) |
+
+Jméno, velikost a u složky obsah.
+
+```shell
+ls | select name size items
+```
+
+```text
+name       size    items
+---------  ------  ---------
+a.txt         5 B
+b.txt        10 B
+data.json    49 B
+docs       3.0 KB  2 soubory
+```
 
 Jména souborů v pracovní složce.
 
@@ -850,7 +865,7 @@ Plné jméno `record-select` · vstup: libovolná hodnota · výstup: libovolná
 |---|---|---|---|
 | `...` | text |  | jména sloupců |
 
-Jméno a velikost.
+Jméno a velikost (u složky součet podstromu).
 
 ```shell
 ls | select name size
@@ -858,11 +873,11 @@ ls | select name size
 
 ```text
 name       size
----------  ----
-a.txt       5 B
-b.txt      10 B
-data.json  49 B
-docs        0 B
+---------  ------
+a.txt         5 B
+b.txt        10 B
+data.json    49 B
+docs       3.0 KB
 ```
 
 **Chyby:** `SH_TYPE`

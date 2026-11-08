@@ -121,7 +121,7 @@ fn alias(name: &str) -> Option<&'static str> {
 }
 
 /// Pole zaznamu souboru (vystup `ls`).
-pub const FILE_FIELDS: &[&str] = &["name", "path", "kind", "size", "mtime", "ext", "access", "dataset"];
+pub const FILE_FIELDS: &[&str] = &["name", "path", "kind", "size", "mtime", "ext", "access", "dataset", "items", "files", "dirs"];
 
 const fn p(name: &'static str, kind: Kind) -> Param {
     Param { name, kind, optional: false }

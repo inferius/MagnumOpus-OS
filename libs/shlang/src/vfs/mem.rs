@@ -64,6 +64,30 @@ impl MemFs {
         self.nodes.contains_key(&key(path))
     }
 
+    /// Metadata se souhrnem podstromu u slozky (jako fsd).
+    pub(super) fn meta_in(nodes: &BTreeMap<String, (String, Node)>, k: &str, n: &Node) -> Meta {
+        let mut m = Self::meta(n);
+        if matches!(n, Node::Dir) {
+            let pre = alloc::format!("{}/", k.trim_end_matches('/'));
+            let (mut bytes, mut files, mut dirs) = (0u64, 0u64, 0u64);
+            for (sub, (_, x)) in nodes.range(pre.clone()..) {
+                if !sub.starts_with(&pre) {
+                    break;
+                }
+                match x {
+                    Node::File(d) => {
+                        bytes += d.len() as u64;
+                        files += 1;
+                    }
+                    Node::Dir => dirs += 1,
+                }
+            }
+            m.size = bytes;
+            m.tree = Some((files, dirs));
+        }
+        m
+    }
+
     pub(super) fn meta(n: &Node) -> Meta {
         match n {
             Node::File(d) => Meta::basic(NodeKind::File, d.len() as u64),
@@ -81,7 +105,7 @@ impl MemFs {
         Ok(nodes
             .iter()
             .filter(|(nk, _)| nk.as_str() != "/" && parent(nk) == Some(k.as_str()))
-            .map(|(_, (orig, n))| DirEntry { name: file_name(orig).into(), meta: Self::meta(n) })
+            .map(|(nk, (orig, n))| DirEntry { name: file_name(orig).into(), meta: Self::meta_in(nodes, nk, n) })
             .collect())
     }
 
@@ -98,7 +122,8 @@ impl MemFs {
 impl Fs for MemFs {
     fn stat(&mut self, path: &str) -> FsResult<Meta> {
         self.guard_inside(path)?;
-        self.nodes.get(&key(path)).map(|(_, n)| Self::meta(n)).ok_or(Error::NotFound)
+        let k = key(path);
+        self.nodes.get(&k).map(|(_, n)| Self::meta_in(&self.nodes, &k, n)).ok_or(Error::NotFound)
     }
 
     fn list(&mut self, path: &str) -> FsResult<Vec<DirEntry>> {
@@ -239,7 +264,8 @@ impl Fs for MemFs {
     fn view_stat(&mut self, view: &ViewRef, path: &str) -> FsResult<Meta> {
         self.view_guard(view, path, false)?;
         let s = self.hist.views.get(&view.snapshot).ok_or(Error::NotFound)?;
-        s.get(&key(path)).map(|(_, n)| Self::meta(n)).ok_or(Error::NotFound)
+        let k = key(path);
+        s.get(&k).map(|(_, n)| Self::meta_in(s, &k, n)).ok_or(Error::NotFound)
     }
 
     fn view_list(&mut self, view: &ViewRef, path: &str) -> FsResult<Vec<DirEntry>> {

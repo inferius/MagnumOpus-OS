@@ -142,17 +142,22 @@ pub struct StatEntry {
     pub mtime: WallTime,
     /// Prava relace k polozce (jako `Stat::rights`).
     pub rights: u8,
+    /// U adresare souhrn podstromu (bajty, soubory, adresare bez sebe);
+    /// bez prava `MANAGE` nuly (jako `Stat`).
+    pub tree_bytes: u64,
+    pub tree_files: u64,
+    pub tree_dirs: u64,
 }
 
 impl StatEntry {
     /// Velikost polozky na drate bez jmena (delka jmena u16, druh, oid,
-    /// velikost, mtime, prava).
-    pub const FIXED: usize = 2 + 1 + 8 + 8 + 12 + 1;
+    /// velikost, mtime, prava, souhrn podstromu).
+    pub const FIXED: usize = 2 + 1 + 8 + 8 + 12 + 1 + 24;
 
     pub fn put(&self, w: &mut Writer) {
         w.str(&self.name).u8(self.kind).u64(self.oid).u64(self.size);
         put_time(w, self.mtime);
-        w.u8(self.rights);
+        w.u8(self.rights).u64(self.tree_bytes).u64(self.tree_files).u64(self.tree_dirs);
     }
 
     pub fn get(r: &mut Reader) -> Result<Self> {
@@ -163,6 +168,9 @@ impl StatEntry {
             size: r.u64()?,
             mtime: get_time(r)?,
             rights: r.u8()?,
+            tree_bytes: r.u64()?,
+            tree_files: r.u64()?,
+            tree_dirs: r.u64()?,
         })
     }
 }
