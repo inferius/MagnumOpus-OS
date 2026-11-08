@@ -155,6 +155,7 @@ pub fn name(number: u64) -> &'static str {
         "CLOCK_ADJUST",
         "FB_CONTROL",
         "?",
+        "?",
         "SYSTEM_POWER",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")

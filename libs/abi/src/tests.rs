@@ -110,7 +110,8 @@ fn every_syscall_is_documented() {
         "JOB_INFO",
         "CLOCK_ADJUST",
         "FB_CONTROL",
-        // 47 vyhrazeno pro VMO_REVOKE (vetev Venus).
+        // 47 vyhrazeno pro VMO_REVOKE (vetev Venus), 48 pro JOB_PROCESSES (6b).
+        "",
         "",
         "SYSTEM_POWER",
     ];

@@ -126,17 +126,18 @@ pub const CLOCK_ADJUST: u64 = 45;
 /// `WRITE`. Jiny objekt pameti = `WRONG_TYPE`.
 pub const FB_CONTROL: u64 = 46;
 
-// 47 je vyhrazeno pro `VMO_REVOKE` (vetev Venus).
+// 47 je vyhrazeno pro `VMO_REVOKE` (vetev Venus), 48 pro `JOB_PROCESSES`
+// (vetev 6b).
 
 /// Vypnuti nebo restart pocitace pres firmware (Resource s pravem `POWER`).
 /// `(resource, op)`; `op` z [`power_op`]. aarch64: PSCI `SYSTEM_OFF`
 /// a `SYSTEM_RESET`. x86_64: jen `RESET` (registr 0xCF9, pak radic
 /// klavesnice); vypnuti na x86 dela sluzba ACPI zapisem do registru spanku
 /// (S5), jadro AML nezna = `NOT_SUPPORTED`. Pri uspechu se nevraci.
-pub const SYSTEM_POWER: u64 = 48;
+pub const SYSTEM_POWER: u64 = 49;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 49;
+pub const COUNT: u64 = 50;
 
 /// Operace `SYSTEM_POWER`.
 pub mod power_op {
