@@ -174,8 +174,9 @@ ovladače):
   sníží. Bez další zprávy zvednutí vyprší - vlákno se vrátí na svou třídu.
 - Zvednutí nikdy nesnižuje a strop jobu se na něj **nevztahuje** - je to
   půjčka od odesílatele, ne vlastní nárok (jinak by aplikace s Normal
-  stropem obsluhující kompozitor zdržovala snímek). Zneužít nejde:
-  zvednutí přijde jen od vlákna, které tu třídu skutečně má.
+  stropem obsluhující kompozitor zdržovala snímek). Zvednutí přijde jen od
+  vlákna, které tu třídu skutečně má - **ale** i zděděnou (viz
+  [Známé problémy](#známé-problémy), bod 1).
 - Realtime se přes IPC propaguje jako **Interactive** (rozpočet je vlastnost
   konkrétního vlákna, nedá se půjčit).
 
@@ -264,6 +265,34 @@ výběru je O(n) v počtu vláken jedné třídy na CPU, proti O(1) dřív.
 Maximum latence (~15 ms) odpovídá jednomu kvantu Background (12 ms) na
 TCG, kde se IPI a časovač doručují se zpožděním; medián je pod 1 ms.
 
+## Známé problémy
+
+Z kontroly návrhu (2026-11-08), k opravě v tomto pořadí:
+
+1. **Řetězení zvednutí bez konce** (chyba, ověřeno v kódu). Zpráva nese
+   účinnou třídu odesílatele *včetně* zvednutí (`ipc_class()` ->
+   `effective()` v `kernel/src/sched/qos.rs`) a přijetí obnoví okno 50 ms.
+   Dva procesy se stropem Normal si tak po jediné zprávě od Interactive
+   udrží zvednutí přeposíláním zpráv napořád. Oprava: půjčka nese původní
+   expiraci (zpráva = třída + platnost do), přeposlání ji předá, ale
+   neprodlouží. Test: ping-pong dvou procesů po jedné zprávě od Interactive
+   -> po 50 ms oba zpět na Normal. **[navrženo]**
+2. **Férovost mezi joby uvnitř třídy.** Čas třídy se dnes dělí po
+   vláknech, aplikace s mnoha vlákny dostane větší podíl. Pro souběžné
+   agenty a výpočty: dvoustupňové dělení (mezi joby, pak mezi vlákny
+   jobu). **[navrženo]**
+3. **Vyčerpaný rozpočet Realtime** omezí jen přednost, ne spotřebu:
+   vlákno dál běží jako Interactive a bere čas ze férové části (váha 15).
+   Je to záměr (zvuk nepraská), jen to musí být vidět v měření.
+4. **Realtime je soft realtime.** Přijetí hlídá součet přes všechna CPU
+   (50 %), ne skutečné rozmístění; na hybridním CPU mohou být výkonná
+   jádra přetížená, zatímco úsporná jsou volná. Tvrdší záruky by
+   potřebovaly přijetí podle kapacity jednotlivých CPU a pevné umístění.
+5. **Lineární výběr** nepřepisovat na strom bez měření: nejdřív růst
+   režie a nejhorší latence s počtem vláken (s revizí a podmínkami, viz
+   [Psaní dokumentace](dokumentace.md#měření)); syntetické testy v QEMU
+   hlídají regrese, odezvu GUI ukáže až měření na hardwaru.
+
 ## Další kroky
 
 - **HFI** (Intel Hardware Feedback Interface): kapacity jader za běhu
@@ -271,6 +300,6 @@ TCG, kde se IPI a časovač doručují se zpožděním; medián je pod 1 ms.
 - **Regulátor P-stavů** v `acpid` nad `CPU_INFO` (čas běhu po třídách)
   a ACPI `_PSS` / CPPC; jádro data připravuje, regulátor zatím není.
 - `acpid` má volat `CPU_HINT` s kapacitou z `_CPC` (zatím odhad z CPUID).
-- Vyvážený strom místo lineárního výběru, pokud budou fronty jednoho CPU
-  mít stovky vláken.
+- Vyvážený strom místo lineárního výběru, jen když měření ukáže potřebu
+  (viz Známé problémy, bod 5).
 - Měření na skutečném hybridním hardwaru (dnes jen simulace).
