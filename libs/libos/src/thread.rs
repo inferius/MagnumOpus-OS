@@ -55,8 +55,21 @@ pub fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle
     r
 }
 
+/// Jako [`spawn`], ale se zasobnikem `stack` bajtu (napr. kryptografie TLS
+/// ve vlakne potrebuje vic nez [`STACK_SIZE`]).
+pub fn spawn_sized(name: &str, stack: u64, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle> {
+    let me = Process::from_handle(crate::Handle::from_raw(rt::self_process()));
+    let r = spawn_stack(&me, name, stack, f);
+    core::mem::forget(me);
+    r
+}
+
 fn spawn_in(me: &Process, name: &str, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle> {
-    let len = STACK_SIZE.next_multiple_of(crate::vm::page_size());
+    spawn_stack(me, name, STACK_SIZE, f)
+}
+
+fn spawn_stack(me: &Process, name: &str, stack: u64, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle> {
+    let len = stack.max(STACK_SIZE).next_multiple_of(crate::vm::page_size());
     let stack = Vmo::create(len)?;
     let addr = me.map(&stack, 0, len, MAP_READ | MAP_WRITE, 0)?;
     let thread = match Thread::create(me, name) {

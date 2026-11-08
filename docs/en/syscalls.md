@@ -744,6 +744,32 @@ checked before anything is powered off), `NOT_SUPPORTED` (no PSCI in the
 firmware, or power-off on x86), `BAD_HANDLE`, `WRONG_TYPE`. In libos
 `Resource::system_power`.
 
+### `SCHED_CONTROL`
+
+`(op, ...) -> result`. Scheduling: thread QoS class, job ceiling, Realtime
+budget and CPU information. Operations (`abi::sched::op`):
+
+| Operation | Arguments | Right | Result |
+|---|---|---|---|
+| `THREAD_SET` (0) | `thread, class, budget_us, period_us` | `MANAGE` on the thread (0 = calling thread) | 0 |
+| `PROCESS_SET` (1) | `process, class, budget_us, period_us` | `MANAGE` on the process | 0 |
+| `JOB_SET_MAX` (2) | `job, class` | `WRITE` on the job | 0 |
+| `THREAD_GET` (3) | `thread, out_ptr` | `READ` (0 = self) | `QosInfo` (16 B) at `out_ptr` |
+| `CPU_INFO` (4) | `cpu_index, out_ptr` | - | CPU count; `CpuInfo` (64 B) at `out_ptr` |
+| `CPU_HINT` (5) | `resource, cpu_index, capacity` | Resource with `POWER` | 0 |
+
+Class (`abi::sched::class`): `REALTIME` 0, `INTERACTIVE` 1, `NORMAL` 2,
+`BACKGROUND` 3. Asking above the job ceiling (including ancestors) =
+`ACCESS_DENIED`; lowering the class is always allowed. Realtime:
+`budget_us` and `period_us` (0 = default 1 ms / 10 ms), period 500 µs to
+1 s, budget at least 50 µs and at most half the period; all Realtime
+threads together at most 50 % of CPU capacity, otherwise `NO_RESOURCES`.
+A job ceiling cannot be set above the parent's (`ACCESS_DENIED`).
+`CPU_HINT` with capacity 0 restores the CPUID/MIDR estimate. Other errors:
+`INVALID_ARGS` (unknown operation, class, CPU index, Realtime parameters),
+`BAD_HANDLE`, `WRONG_TYPE`, `INVALID_ADDRESS`. Behaviour:
+[Scheduler](scheduler.md). In libos: module `sched`.
+
 ## Random numbers
 
 The kernel has a cryptographic generator (`kernel/src/random.rs`, crate

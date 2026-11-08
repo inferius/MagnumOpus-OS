@@ -149,8 +149,12 @@ pub struct Startup {
     /// konzole od initu). Geometrie a prevzeti: [`crate::sys::fb_info`],
     /// [`crate::sys::fb_claim`].
     pub framebuffer: Option<Vmo>,
-    /// Handly predane rodicem (`kind::USER`), v poradi zpravy.
+    /// Handly predane rodicem (`kind::USER` bez stitku), v poradi zpravy.
     pub handles: Vec<Handle>,
+    /// Handly se stitkem (`kind::USER` s nenulovym `arg`,
+    /// [`crate::spawn::StartHandle::tagged`]): volitelne handly, ktere se
+    /// hledaji podle stitku, ne podle poradi ([`Startup::take_tagged`]).
+    pub tagged: Vec<(u32, Handle)>,
     /// Pristup k hardwaru (dostava init, ten ho preda spravci zarizeni).
     pub root_resource: Option<Resource>,
     /// Okna ECAM (konfigurace PCI Express): objekt pameti a `arg` ze zpravy
@@ -164,6 +168,15 @@ pub struct Startup {
     /// Priznaky startu (`abi::bootstrap::flags`; nastavuje je jen jadro
     /// initu, napr. testovaci beh).
     pub flags: u32,
+}
+
+impl Startup {
+    /// Vezme handle se stitkem `tag` (prvni takovy); `None` = rodic ho
+    /// neposlal.
+    pub fn take_tagged(&mut self, tag: u32) -> Option<Handle> {
+        let i = self.tagged.iter().position(|(t, _)| *t == tag)?;
+        Some(self.tagged.remove(i).1)
+    }
 }
 
 unsafe extern "Rust" {
@@ -219,7 +232,7 @@ struct Received {
     resource: Option<u32>,
     ecam: [(u32, u32); 4],
     ecam_count: usize,
-    user: [u32; MAX_START_HANDLES],
+    user: [(u32, u32); MAX_START_HANDLES],
     user_count: usize,
 }
 
@@ -247,7 +260,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
         resource: None,
         ecam: [(0, 0); 4],
         ecam_count: 0,
-        user: [0; MAX_START_HANDLES],
+        user: [(0, 0); MAX_START_HANDLES],
         user_count: 0,
     };
     let count = (header.count as usize).min(hlen);
@@ -273,7 +286,7 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
                 got.ecam_count += 1;
             }
             _ if got.user_count < got.user.len() => {
-                got.user[got.user_count] = handle;
+                got.user[got.user_count] = (handle, arg);
                 got.user_count += 1;
             }
             _ => {}
@@ -294,7 +307,13 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
         framebuffer: got.framebuffer.map(|h| Vmo::from_handle(Handle::from_raw(h))),
         handles: got.user[..got.user_count]
             .iter()
-            .map(|&h| Handle::from_raw(h))
+            .filter(|&&(_, tag)| tag == 0)
+            .map(|&(h, _)| Handle::from_raw(h))
+            .collect(),
+        tagged: got.user[..got.user_count]
+            .iter()
+            .filter(|&&(_, tag)| tag != 0)
+            .map(|&(h, tag)| (tag, Handle::from_raw(h)))
             .collect(),
         root_resource: got
             .resource

@@ -147,7 +147,17 @@ porušený vnitřní předpoklad (chyba jádra).
 | `<ovladac> ...: zahozeno N vadnych prijatych ramcu` | Při ukončení: rámce s chybou CRC, délky nebo rozdělené do více bufferů. |
 | `devmgr: ovladac e1000e/igc/r8169 pro BB:ZZ.F nelze spustit: ...` | Program chybí v initfs, nebo karta nemá paměťový BAR (`NOT_SUPPORTED`). |
 | `virtio-rng BB:ZZ.F: 256 B entropie predano jadru` | Zdroj náhody z hostitele je připravený a jádro dostalo první data. Další dávky každou minutu. |
-| `virtio-rng ...: zarizeni neodpovida (...), koncim` | Zařízení nedokončilo požadavek do 5 s nebo vrací prázdná data. Jádro dál používá ostatní zdroje. |
+| `virtio-rng ...: vadne zarizeni: zarizeni neodpovida (...)` / `zarizeni vraci prazdne odpovedi` | Zařízení nedokončilo požadavek do 5 s nebo vrací prázdná data. Ovladač skončí (kód 4); jádro dál používá ostatní zdroje. |
+| `devmgr: ovladac X pro BB:ZZ.F (manifest)` | Ovladač z manifestu (`X.driver.toml`) spuštěný pro zařízení ([Ovladače](ovladace.md#manifest)). |
+| `devmgr: ovladac X: zadne zarizeni podle manifestu` | Manifest je v pořádku, ale žádné zařízení mu neodpovídá (v QEMU není, `match` neodpovídá). Informace. |
+| `devmgr: X.driver.toml: ...` | Vadný manifest v initfs (chybí klíč, špatný formát, jméno se liší od souboru, program chybí); ovladač se nespustí. xtask stejné chyby hlásí už při buildu. |
+| `devmgr: ovladac X pro ... spadl (kod K: popis), obnova N/M` | Ovladač skončil chybou nebo pádem; devmgr vypnul zařízení bus master a spouští ho znovu. Popis kódu: [Životní cyklus](ovladace.md#životní-cyklus-a-obnova-po-pádu). |
+| `devmgr: ovladac X pro ... spadl (...), N padu: dal ho nespoustim` | Překročen `service.max_restarts` (nebo `restart = false`); zařízení zůstane bez ovladače do restartu systému. |
+| `devmgr: ovladac X pro ...: restart na zadost` | Klient poslal `dk:restart`; ovladač běží znovu (nepočítá se jako pád). |
+| `init: ovladac X obnoven (N. start)` | Init dostal od devmgr nový kanál obnoveného ovladače. |
+| `X BB:ZZ.F: inicializace selhala: ...` | Ovladač na driverkitu neprošel `probe`; text říká proč a co změnit (`ovladac nesmi: ...` = chybí BAR v manifestu, `... se nevejde do kvoty` = `dma_max`, `preruseni c. N nelze zapnout` = `irq_max`). Viz [Čitelné chyby](ovladace.md#čitelné-chyby). |
+| `X BB:ZZ.F: simulovany pad (dk:crash)`, `X ...: restart na zadost` | Ovladač dostal `dk:crash` / `dk:restart` (testy obnovy). |
+| `edu BB:ZZ.F: karta edu 1.0 zije` | Ukázkový ovladač edu našel zařízení a prošel kontrolou života ([Ovladač edu](ovladac-edu.md)). |
 | `virtio-blk: zarizeni neodpovida spravne (...), dalsi pozadavky odmitnuty` | Zařízení nedokončilo požadavek do 10 s (`TimedOut`) nebo vrátilo neplatnou položku fronty (`Corrupted`). Ovladač zařízení resetuje a další požadavky vrací `IO_ERROR` (DMA buffer by zařízení mohlo ještě přepisovat). Klient (např. fsd) dostane chybu I/O. |
 | `ps2: klavesnice`, `ps2: PS/2 mys ...` | Ovladač PS/2 našel klávesnici, myš (druh podle ID: kolečko, 5 tlačítek). |
 | `devmgr: radic PS/2 nenalezen` | Port 0x64 čte `0xFF` (řadič chybí) nebo nenašel žádné zařízení. Na moderních deskách bez PS/2 normální. |
@@ -181,8 +191,9 @@ porušený vnitřní předpoklad (chyba jádra).
 | `init: blokove zarizeni neodpovida: ...` | Ovladač neodpověděl na `INFO`; disk se nepoužije. |
 | `virtio-input BB:ZZ.F: 'jméno' (klavesnice/mys)` | Vstupní zařízení je připravené; druh podle podporovaných událostí. `nezname zarizeni` = nemá klávesy ani relativní osy (tablet, zatím nepodporovaný). |
 | `virtio-input ...: inicializace selhala: ...` | Jako u virtio-blk: zařízení neodpovídá virtio 1.x nebo chybí prostředky (MSI-X, DMA). |
-| `virtio-input: prvni udalosti od zarizeni (N)` | Zařízení poprvé poslalo události (informace; potvrzuje, že fungují přerušení a fronta). |
-| `virtio-input: sluzba nestiha, zahozeno N zprav` | Fronta kanálu ke službě vstupu je plná; ovladač události zahazuje, aby neblokoval zařízení. Hlásí se při 1, 2, 4, 8 ... zprávách. |
+| `virtio-input BB:ZZ.F: prvni udalosti od zarizeni (N)` | Zařízení poprvé poslalo události (informace; potvrzuje, že fungují přerušení a fronta). |
+| `virtio-input BB:ZZ.F: sluzba vstupu zavrela kanal, cekam` | Služba vstupu skončila (pád, restart); ovladač běží dál a po obnově služby se znovu představí (`ISYN`, [Obnova služeb](obnova-sluzeb.md)). |
+| `virtio-input BB:ZZ.F: sluzba nestiha, zahozeno N zprav` | Fronta kanálu ke službě vstupu je plná; ovladač události zahazuje, aby neblokoval zařízení. Hlásí se při 1, 2, 4, 8 ... zprávách. |
 | `init: N blokovych a M vstupnich zarizeni` | Co správce zařízení našel. |
 
 ## Služba vstupu (inputd)

@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::{Interrupt, Resource};
-use libos::{Channel, Error, Mapping, Result};
+use libos::{Error, Mapping, Result};
 use pci::msix::MsixTable;
 use pci::{Address, CAP_VENDOR, Ecam};
 
@@ -369,31 +369,8 @@ pub fn start(
     })
 }
 
-/// Precte konfiguraci od spravce zarizeni (prvni zprava na bootstrap
-/// kanalu ovladace): `pci <sbernice> <zarizeni> <funkce>` desitkove.
-pub fn read_driver_config(bootstrap: &Channel) -> Option<Address> {
-    let msg = bootstrap.read(None).ok()?;
-    parse_driver_config(core::str::from_utf8(&msg.data).ok()?)
-}
-
-/// Rozebere text `pci <sbernice> <zarizeni> <funkce>`; navic slova
-/// navic nebo hodnoty mimo rozsah = `None`.
-pub fn parse_driver_config(text: &str) -> Option<Address> {
-    let mut parts = text.split_whitespace();
-    if parts.next()? != "pci" {
-        return None;
-    }
-    let mut num = || parts.next()?.parse::<u8>().ok();
-    let a = Address {
-        bus: num()?,
-        device: num()?,
-        function: num()?,
-    };
-    if parts.next().is_some() || a.device > 31 || a.function > 7 {
-        return None;
-    }
-    Some(a)
-}
+// Konfigurace ovladace od spravce zarizeni je spolecna vsem ovladacum PCI.
+pub use pci::{parse_driver_config, read_driver_config};
 
 /// Seznam funkci, ktere jsou zarizeni virtio daneho typu (ID zarizeni
 /// moderniho `0x1040 + typ` nebo prechodneho rozhrani).

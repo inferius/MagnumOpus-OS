@@ -41,6 +41,7 @@ reduced motion.
 | `design/start-varianty.html` | three boot screen variants (decision archive) |
 | `design/pad.html` | critical crash screen: calm description, countdown, `D` technical report, notification after the next boot |
 | `design/pad-varianty.html` | three crash screen variants (decision archive) |
+| `design/instalace.html` | installation: welcome on the live USB, an 8-step installer (computer check, disk, change preview, account, security), progress, first run |
 
 ## Style decisions (agreed)
 
@@ -59,6 +60,7 @@ C Warm (more playful, strong accent).
 | 7 | logo | **M symbol + MagnumOpus OS wordmark** (vectors from the user) | `design/assets/logo/`; purple `#6b3fd6` on light, lavender `#b79bff` on dark, white on color |
 | 8 | boot screen | **A (logo with a ring) + detailed log from B**, ending with a **transition of the mark into the avatar** | chosen from three variants in `design/start-varianty.html` |
 | 9 | critical crash screen | **A Calm** for users, **the D key switches to the technical report** (Workshop); in a development build Workshop directly | chosen from three variants in `design/pad-varianty.html` |
+| 10 | installation | **try from USB, then install**; installer with a disk change preview; first run | recommended option (alternatives: disk image + first-run wizard only, installing from Windows) |
 
 ## Principles
 
@@ -682,6 +684,54 @@ written to the serial line.
 - **Accessibility**: text at least 7 : 1, nothing flashes, the countdown
   can be paused.
 
+### Installation
+
+The system ships as a **live USB** (`design/instalace.html`): it boots from
+the USB and can be tried without changing anything on the computer's disk
+(changes go to memory only). The welcome screen offers **Try** and
+**Install**; language, keyboard and accessibility (contrast, larger text,
+screen reader) are at the top from the very first screen. In try mode the
+desktop has an "Install MagnumOpus" icon and the bar a "changes are not
+saved" label.
+
+The **installer** is a system application ("System" badge) with the steps
+on the left:
+
+| Step | What it does |
+|---|---|
+| 1 Language and accessibility | language, keyboard layout with a field to try it, accessibility (also applies to the installed system) |
+| 2 Computer check | graphics, disk, memory, network, input, Secure Boot; the result is **verified** because the system is running on the machine right now |
+| 3 Disk | **next to Windows** (recommended; a size slider with limits: Windows at least the used space + reserve, MagnumOpus at least 40 GB), **whole disk**, **custom layout**; disk map "now" |
+| 4 Change preview | disk map **now** and **after installation**, a list of changes (unchanged, shrink, new, delete); nothing has been written yet. Shrinking Windows requires confirming "I have a backup", erasing the whole disk requires typing the disk name |
+| 5 Account | name, password with a strength meter, **security phrase** with a preview of the "System" strip it will appear in |
+| 6 Security | profile Standard / Strict / Relaxed, **disk encryption** (on by default) and a **recovery key** (save to USB, print, QR) |
+| 7 Summary | overview of the choices, Install button |
+| 8 Installation | progress ring with the symbol (as at boot), percent, time estimate, list of phases; the system can still be tried meanwhile |
+
+Then an **Installed** screen with Secure Boot instructions for the given
+computer and a restart. The **first run** offers the theme and the bar
+position and introduces in three cards what is different about the system:
+the trust badge, try aside, agent marking.
+
+⚠️ **Risks (stated up front):**
+
+- **Shrinking the Windows partition (NTFS)** is the riskiest step: a power
+  loss while moving data can damage Windows. The installer checks the
+  partition first, shrinks only free space and asks for a backup
+  confirmation. Implementing NTFS shrinking is a separate, large piece of
+  work; until then only "whole disk" or free space is possible.
+- **Secure Boot**: common computers have it on and will not start an
+  unsigned boot loader. Long term a signed boot loader (via shim like
+  Linux), until then instructions to disable it.
+- **Drivers on real hardware**: the live USB needs USB storage, the disk
+  (NVMe/AHCI), input and a picture at least through the firmware
+  framebuffer.
+- **First keyboard**: BadUSB protection does not apply during installation
+  (nothing could be typed without a keyboard); verification of new devices
+  is enabled after installation according to the chosen profile.
+- **Updates** of the system will be a new version in the FS (snapshot), so
+  going back to the previous version is the same choice as after a crash.
+
 ## Accessibility
 
 The accessibility tree is part of the window protocol (`guiproto::a11y`).
@@ -868,7 +918,7 @@ background at 90 % opacity) and with shadows from precomputed textures.
 
 ### Phase 1: foundation (in parallel)
 
-> **Change from v1.4:** phase 1 is done in the system on the 2D path
+> **Change from v1.5:** phase 1 is done in the system on the 2D path
 > and in GPU composition with identical pixels (no blur). Shadows are
 > precomputed masks; the glyph atlas is a CPU cache for now. Details and
 > deviations: [GUI: Look per the design](gui.md#look-per-the-design-phase-1).
@@ -952,4 +1002,5 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.2 | 2026-11-07 | responsiveness, smoothness and recovery as a requirement with measurable goals; compositor restart without losing windows; thread G5; implementation decisions (C, B, B) |
 | v1.3 | 2026-11-07 | logo (vectors from the user) in the prototypes and the design system; boot screen with the transition into the avatar |
 | v1.4 | 2026-11-07 | critical crash screen (A Calm + technical report on D), notification after the next boot; visual language handbook |
-| v1.5 | 2026-11-08 | **phase 1 implemented** in the system: tokens as data (`libs/theme`), Inter and JetBrains Mono with `GPOS` kerning, windows, badge, bar, desktop, dialog and terminal following the prototypes; deviations in [GUI: Look per the design](gui.md#look-per-the-design-phase-1) |
+| v1.5 | 2026-11-08 | installation: live USB, installer with a disk change preview, first run |
+| v1.6 | 2026-11-08 | **phase 1 implemented** in the system: tokens as data (`libs/theme`), Inter and JetBrains Mono with `GPOS` kerning, windows, badge, bar, desktop, dialog and terminal following the prototypes; deviations in [GUI: Look per the design](gui.md#look-per-the-design-phase-1) |

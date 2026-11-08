@@ -5,6 +5,7 @@
 
 mod aside_crash;
 mod aside_nested;
+mod aside_view;
 mod basic;
 mod commits;
 mod crash;
@@ -23,6 +24,7 @@ mod mount;
 mod objects;
 mod ondisk;
 mod perf;
+mod perf_shell;
 mod perm;
 mod scrub;
 mod sharing;

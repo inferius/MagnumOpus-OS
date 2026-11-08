@@ -1,0 +1,201 @@
+//! `cargo xtask usb`: zive USB pro zkouseni na skutecnem pocitaci.
+//!
+//! - `cargo xtask usb` - obraz `target/usb-<arch>-<profil>.img` (GPT, ESP
+//!   se zavadecem, jadrem a initfs, datovy oddil s nasim FS),
+//! - `--list` - disky hostitele (ktere jsou vyjimatelne, ktery je
+//!   systemovy),
+//! - `--write <disk>` - obraz zapise na vyjimatelny disk po vyslovnem
+//!   potvrzeni (`hostdisk.rs`: pravidla bezpecnosti),
+//! - `--run` - start obrazu v QEMU jako flash disk USB (okno),
+//! - `--test` - totez bez okna, ceka na start GUI s terminalem,
+//! - `--size <MiB>` - velikost obrazu (vychozi [`DEFAULT_MIB`]),
+//! - `--out <soubor>` - jina cesta obrazu.
+//!
+//! Navod pro uzivatele: `docs/cs/zive-usb.md`, `docs/en/live-usb.md`.
+
+pub mod boot;
+pub mod hostdisk;
+mod image;
+pub mod platform;
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
+
+use std::ffi::OsString;
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
+
+use crate::{Artifacts, Options, Result, target_dir};
+
+/// Vychozi velikost obrazu (vejde se na kazdou flashku od 2 GB; zbytek
+/// flashky zustane nevyuzity, dokud system neumi oddil zvetsit).
+pub const DEFAULT_MIB: u64 = 1024;
+/// Velikost obrazu pro test v QEMU.
+pub const TEST_MIB: u64 = 256;
+
+/// Prepinace prikazu `usb`.
+#[derive(Debug, Default)]
+pub struct UsbArgs {
+    pub list: bool,
+    pub write: Option<String>,
+    pub run: bool,
+    pub test: bool,
+    pub size_mib: Option<u64>,
+    pub out: Option<PathBuf>,
+}
+
+/// Oddeli prepinace prikazu `usb` od spolecnych (`--release`, `--arch`).
+pub fn split_args(args: Vec<OsString>) -> Result<(UsbArgs, Vec<OsString>)> {
+    let mut u = UsbArgs::default();
+    let mut rest = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        match a.to_str() {
+            Some("--list") => u.list = true,
+            Some("--run") => u.run = true,
+            Some("--test") => u.test = true,
+            Some("--write") => {
+                let v = it.next().ok_or("--write ocekava disk (cislo na Windows, /dev/sdX na Linuxu)")?;
+                u.write = Some(v.to_string_lossy().into_owned());
+            }
+            Some("--size") => {
+                let v = it.next().ok_or("--size ocekava velikost v MiB")?;
+                let n: u64 = v.to_string_lossy().parse().map_err(|_| "--size ocekava cislo (MiB)")?;
+                u.size_mib = Some(n);
+            }
+            Some("--out") => {
+                let v = it.next().ok_or("--out ocekava cestu k souboru")?;
+                u.out = Some(PathBuf::from(v));
+            }
+            _ => rest.push(a),
+        }
+    }
+    Ok((u, rest))
+}
+
+/// Soubory ESP: zavadec, jadro, initfs a kratky navod pro uzivatele
+/// (videt ve Windows po zasunuti flashky).
+fn esp_files<'a>(opts: &Options, a: &'a Artifacts, readme: &'a Path) -> Vec<(&'static str, &'a Path)> {
+    vec![
+        (opts.arch.boot_file, a.loader.as_path()),
+        ("os/kernel.elf", a.kernel.as_path()),
+        ("os/initfs.img", a.initfs.as_path()),
+        ("CTI-MNE.txt", readme),
+    ]
+}
+
+const README: &str = "MagnumOpus - zive USB\r\n\
+\r\n\
+Start: v nabidce zavadeni firmwaru (F12, F11, F8 nebo Esc podle vyrobce)\r\n\
+vyberte tuto flashku (UEFI). Secure Boot musi byt vypnuty.\r\n\
+\r\n\
+Navod: docs/cs/zive-usb.md v repozitari (anglicky docs/en/live-usb.md).\r\n\
+\r\n\
+MagnumOpus - live USB. Boot it from the firmware boot menu (UEFI,\r\n\
+Secure Boot off). Guide: docs/en/live-usb.md in the repository.\r\n";
+
+/// Vytvori obraz USB; vraci cestu.
+pub fn create_image(opts: &Options, artifacts: &Artifacts, path: &Path, size_mib: u64) -> Result<PathBuf> {
+    let readme = target_dir().join("usb-readme.txt");
+    std::fs::write(&readme, README)?;
+    let files = esp_files(opts, artifacts, &readme);
+    let layout = image::create(path, size_mib, &files)?;
+    println!(
+        "xtask: obraz USB {} ({} MiB, datovy oddil {} MiB od {} MiB)",
+        path.display(),
+        layout.size >> 20,
+        layout.data.1 >> 20,
+        layout.data.0 >> 20
+    );
+    Ok(path.to_path_buf())
+}
+
+/// Prikaz `cargo xtask usb`.
+pub fn command(opts: &Options, u: &UsbArgs) -> Result<()> {
+    if u.list {
+        print_disks()?;
+        if u.write.is_none() && !u.run && !u.test {
+            return Ok(());
+        }
+    }
+    let size = u.size_mib.unwrap_or(if u.test { TEST_MIB } else { DEFAULT_MIB });
+    // Disk pro zapis zkontrolovat pred dlouhym buildem.
+    if let Some(id) = &u.write {
+        let disks = platform::list()?;
+        hostdisk::check(&disks, id, size << 20).map_err(|e| format!("zapis na disk {id}: {e}"))?;
+    }
+    let artifacts = crate::build(opts)?;
+    let profile = if opts.release { "release" } else { "debug" };
+    let path = u
+        .out
+        .clone()
+        .unwrap_or_else(|| target_dir().join(format!("usb-{}-{profile}.img", opts.arch.name)));
+    create_image(opts, &artifacts, &path, size)?;
+    if let Some(id) = &u.write {
+        write_to_disk(&path, id)?;
+    }
+    if u.test {
+        boot::test(opts.arch, &path)?;
+    }
+    if u.run {
+        boot::run(opts.arch, &path)?;
+    }
+    Ok(())
+}
+
+/// Obraz USB pro `cargo xtask test`: maly, smaze se po testu.
+pub fn test_run(opts: &Options) -> Result<()> {
+    let artifacts = crate::build(opts)?;
+    let path = boot::test_image_path(opts.arch);
+    create_image(opts, &artifacts, &path, TEST_MIB)?;
+    let r = boot::test(opts.arch, &path);
+    let _ = std::fs::remove_file(&path);
+    r
+}
+
+fn print_disks() -> Result<()> {
+    let disks = platform::list()?;
+    println!("disky tohoto pocitace (zapsat jde jen na vyjimatelny, ne systemovy):");
+    for d in &disks {
+        println!("  {}", hostdisk::describe(d));
+    }
+    Ok(())
+}
+
+/// Zapis obrazu na disk `id` po potvrzeni uzivatelem.
+fn write_to_disk(image: &Path, id: &str) -> Result<()> {
+    let size = std::fs::metadata(image)?.len();
+    // Seznam znovu: mezi buildem a zapisem mohl uzivatel flashku vymenit.
+    let disks = platform::list()?;
+    let d = hostdisk::check(&disks, id, size).map_err(|e| format!("zapis na disk {id}: {e}"))?;
+    let expected = hostdisk::confirmation(d);
+    println!();
+    println!("POZOR: cely disk se prepise, vsechna data na nem se ztrati:");
+    println!("  {}", hostdisk::describe(d));
+    println!("  cesta {}", d.path);
+    println!("Pro potvrzeni napis presne: {expected}");
+    print!("> ");
+    std::io::stdout().flush()?;
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    if line.trim() != expected {
+        return Err("zapis zrusen (potvrzeni nesouhlasi)".into());
+    }
+    let mut target = platform::open_for_write(d)?;
+    let mut last = 0;
+    hostdisk::write_image(image, &mut target, d.size, |done, total| {
+        let pct = done * 100 / total;
+        if pct >= last + 5 || done == total {
+            last = pct;
+            print!("\rxtask: zapisuji {pct:>3} %");
+            let _ = std::io::stdout().flush();
+        }
+    })?;
+    target.sync_all()?;
+    drop(target);
+    println!();
+    platform::rescan(d);
+    println!("xtask: obraz zapsan na {} ({}); flashku bezpecne odeberte", d.path, d.model);
+    Ok(())
+}

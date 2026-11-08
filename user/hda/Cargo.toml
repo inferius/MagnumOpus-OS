@@ -1,0 +1,18 @@
+[package]
+name = "hda"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "hda"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+pci = { path = "../../libs/pci" }
+hdaspec = { path = "../../libs/hdaspec" }
+audioproto = { path = "../../libs/audioproto" }
+wire = { path = "../../libs/wire" }

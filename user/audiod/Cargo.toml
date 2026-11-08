@@ -1,0 +1,17 @@
+[package]
+name = "audiod"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "audiod"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+audioproto = { path = "../../libs/audioproto" }
+audiomix = { path = "../../libs/audiomix" }
+wire = { path = "../../libs/wire" }

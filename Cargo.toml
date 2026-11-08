@@ -4,6 +4,11 @@ members = [
     "loader",
     "kernel",
     "libs/abi",
+    "libs/audioproto",
+    "libs/audiomix",
+    "libs/hdaspec",
+    "libs/agentproto",
+    "libs/agentsh",
     "libs/acpica",
     "libs/boot-info",
     "libs/cbuild",
@@ -23,6 +28,7 @@ members = [
     "libs/manifest",
     "libs/blockproto",
     "libs/diskguard",
+    "libs/driverkit",
     "libs/inputproto",
     "libs/guiproto",
     "libs/svcclient",
@@ -31,6 +37,8 @@ members = [
     "libs/spirv",
     "libs/vkcomp",
     "libs/taskproto",
+    "libs/accountproto",
+    "libs/accounts",
     "libs/taskcore",
     "libs/taskview",
     "libs/gfx",
@@ -54,6 +62,7 @@ members = [
     "libs/tz",
     "libs/shlang",
     "libs/sizeclass",
+    "libs/schedcore",
     "libs/term",
     "libs/virtio",
     "libs/web",
@@ -63,6 +72,7 @@ members = [
     "user/console",
     "user/devmgr",
     "user/echo",
+    "user/agentd",
     "user/svctest",
     "user/fsrtest",
     "user/fsd",
@@ -72,6 +82,7 @@ members = [
     "user/ntpd",
     "user/fetch",
     "user/revocd",
+    "user/accountd",
     "user/dnsd",
     "user/vk-probe",
     "user/init",
@@ -88,13 +99,17 @@ members = [
     "user/xhci",
     "user/usb-hub",
     "user/usb-hid",
+    "user/usb-storage",
     "user/virtio-net",
     "user/e1000e",
     "user/igc",
     "user/r8169",
     "user/virtio-rng",
+    "user/edu",
     "user/virtio-gpu",
     "user/fbdisplay",
+    "user/hda",
+    "user/audiod",
     "user/bochs-display",
     "user/intel-display",
     "user/compd",
@@ -144,6 +159,12 @@ opt-level = 2
 opt-level = 2
 
 [profile.dev.package.fsproto]
+opt-level = 2
+[profile.dev.package.blockproto]
+opt-level = 2
+[profile.dev.package."virtio-blk"]
+opt-level = 2
+[profile.dev.package.virtio]
 opt-level = 2
 
 [profile.dev.package.xxhash-rust]
@@ -209,6 +230,17 @@ opt-level = 3
 
 [profile.dev.package.poly1305]
 opt-level = 3
+
+# Ucty: Argon2id (BLAKE2b) bez optimalizace by v QEMU
+# (TCG) zdrzely kazde prihlaseni o sekundy.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.dev.package.accounts]
+opt-level = 2
 
 [profile.dev.package.chacha20poly1305]
 opt-level = 3

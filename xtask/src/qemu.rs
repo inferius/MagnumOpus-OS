@@ -5,6 +5,8 @@
 //! - aarch64: stroj virt (GICv3 s ITS, volitelne SMMUv3), firmware edk2,
 //!   konec testu pres semihosting (SYS_EXIT s kodem od jadra, 33 = uspech).
 //!
+//! Zvuk: radic intel-hda s kodekem hda-duplex (viz `audio.rs`).
+//!
 //! Disky jsou na obou stejne: systemovy (ESP s loaderem, jadrem a initfs),
 //! maly pro testy ovladace a datovy s nasim souborovym systemem, vse jako
 //! virtio-blk na PCI Express. Datovy disk muze byt i na NVMe nebo AHCI
@@ -97,7 +99,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
             }
             Err(TestError::PortTaken(e)) => break Err(format!("QEMU nenastartovalo: {e}").into()),
             Err(TestError::Other(e)) => break Err(e),
-            Ok(()) => break Ok(()),
+            Ok(()) => break crate::audio::check(&run.wav, &serial_log, opts),
         }
     };
     // Pri panice nebo fatalni vyjimce prelozit adresy na jmena funkci.
@@ -205,6 +207,14 @@ fn command(
         );
     }
     disk_controllers(&mut cmd, opts, run, &blk)?;
+    // Vyukove zarizeni pro ukazkovy ovladac (az za ostatnimi, sloty PCI
+    // drivejsich zarizeni se neposunou).
+    if opts.edu {
+        cmd.args(["-device", crate::drivers::EDU_DEVICE]);
+    }
+    // Zvuk: radice Intel HDA (ovladac hda, sluzba audiod); v testu do WAV.
+    // Az za ostatnimi zarizenimi, aby se jejich sloty PCI neposunuly.
+    crate::audio::qemu_args(&mut cmd, opts, &run.wav);
     cmd.args(&opts.qemu_args);
     Ok(cmd)
 }
@@ -242,6 +252,8 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
             "nvme,drive=data,serial=MO-DATA,logical_block_size=4096,physical_block_size=4096",
         ]),
         "ahci" => cmd.args(["-device", "ide-hd,drive=data,bus=ahci0.2"]),
+        // Flash disk USB (ovladac usb-storage) na radici xHCI s klavesnici.
+        "usb" => cmd.args(["-device", "usb-storage,bus=xhci.0,drive=data"]),
         _ => cmd.args(["-device", &blk("data")]),
     };
     if opts.test {
@@ -529,6 +541,8 @@ struct RunFiles {
     /// Datovy disk s GPT (na NVMe/AHCI).
     data_gpt: PathBuf,
     scratch: PathBuf,
+    /// Zvuk z QEMU (backend wav).
+    wav: PathBuf,
     nvme: PathBuf,
     nvme4k: PathBuf,
     ahci: PathBuf,
@@ -544,6 +558,7 @@ impl RunFiles {
             data: t.join(format!("data-{pid}.img")),
             data_gpt: t.join(format!("data-gpt-{pid}.img")),
             scratch: t.join(format!("scratch-{pid}.img")),
+            wav: t.join(format!("audio-{arch}-{pid}.wav")),
             nvme: t.join(format!("nvme-test-{pid}.img")),
             nvme4k: t.join(format!("nvme4k-test-{pid}.img")),
             ahci: t.join(format!("ahci-test-{pid}.img")),
@@ -567,13 +582,13 @@ impl Drop for RunFiles {
             let _ = std::fs::remove_file(&self.data);
             let _ = std::fs::remove_file(&self.data_gpt);
         }
-        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign] {
+        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign, &self.wav] {
             let _ = std::fs::remove_file(f);
         }
     }
 }
 
-fn pflash_arg(path: &Path, readonly: bool) -> String {
+pub(crate) fn pflash_arg(path: &Path, readonly: bool) -> String {
     let ro = if readonly { ",readonly=on" } else { "" };
     format!("if=pflash,format=raw{ro},file={}", path.display())
 }

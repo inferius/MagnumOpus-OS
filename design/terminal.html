@@ -60,12 +60,14 @@
 .prompt-row { display: flex; align-items: center; gap: var(--s3); }
 .cwd { display: inline-flex; align-items: center; gap: var(--s1); height: 28px; padding: 0 var(--s3); border-radius: var(--r-pill); background: var(--c-accent-soft);
   color: var(--c-accent-ink); font-family: var(--font-ui); font-size: var(--t-small-size); font-weight: 600; white-space: nowrap; }
-#line { flex: 1 1 auto; min-width: 0; height: 36px; border: 0; background: transparent; font-family: var(--font-mono); font-size: var(--t-body-size); color: var(--c-term-ink);
+#line { flex: 1 1 auto; min-width: 0; height: 36px; padding: 0; margin: 0; border: 0; background: transparent; font-family: var(--font-mono); font-size: var(--t-body-size); color: var(--c-term-ink);
   font-feature-settings: "calt" 0, "liga" 0; }
 #line:focus-visible { outline: none; }
 .input-wrap:focus-within { box-shadow: inset 0 2px 0 var(--c-focus); }
 .hintbar { display: flex; gap: var(--s4); flex-wrap: wrap; margin-top: var(--s2); font-size: var(--t-caption-size); color: var(--c-term-dim); align-items: center; }
-.ghost { position: absolute; pointer-events: none; color: var(--c-term-dim); font-family: var(--font-mono); font-size: var(--t-body-size); white-space: pre; }
+/* Seda napoveda z historie (pozor: ne .ghost, to je varianta tlacitka v mo.css). */
+.suggest { position: absolute; pointer-events: none; overflow: hidden; color: var(--c-term-dim); font-family: var(--font-mono); font-size: var(--t-body-size);
+  font-feature-settings: "calt" 0, "liga" 0; line-height: 36px; white-space: pre; }
 #compl { position: absolute; bottom: calc(100% - 4px); left: 120px; width: 380px; max-height: 260px; overflow: auto; padding: var(--s2); z-index: 50; font-size: var(--t-small-size); }
 #compl [role="option"] { display: grid; grid-template-columns: 20px 1fr auto; gap: var(--s3); align-items: center; min-height: 32px; padding: 0 var(--s3); border-radius: var(--r-xs); cursor: pointer; }
 #compl [role="option"][aria-selected="true"] { background: var(--c-accent-soft); }
@@ -84,6 +86,10 @@
 .task .progress { flex: 1; }
 .player { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
 .scen { display: flex; gap: var(--s1); flex-wrap: wrap; }
+/* Bez zmenseni pri stisku: tlacitko po kliknuti hned preda fokus radku a Chromium
+ * jinak nechava rozmazany meziobraz textu (zdvojeny text). */
+.scen button { transition: background var(--m-fast) var(--ease-standard); }
+.scen button:active { transform: none; }
 .scen button[aria-current="true"] { background: var(--c-accent-soft); color: var(--c-accent-ink); border-color: var(--c-accent); }
 @media (max-width: 900px) { .tbody { grid-template-columns: 1fr; } .tasks-panel { display: none; } }
 </style>
@@ -128,7 +134,7 @@
               <div class="prompt-row">
                 <span class="cwd"><svg class="ic s"><use href="#ic-folder"/></svg><span id="cwd">~/projekt</span></span>
                 <input id="line" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="compl-list" aria-label="Příkaz" autocomplete="off" spellcheck="false">
-                <span class="ghost" id="ghost" aria-hidden="true"></span>
+                <span class="suggest" id="ghost" aria-hidden="true"></span>
               </div>
               <div class="hintbar" id="hintbar">
                 <span><span class="kbd">Tab</span> doplnit</span><span><span class="kbd">&uarr;</span> historie</span><span><span class="kbd">Ctrl</span> <span class="kbd">C</span> přerušit</span>
@@ -340,8 +346,13 @@ document.addEventListener('mo-ready', function () {
   function ghost() {
     var v = line.value, s = '';
     if (v) for (var i = history.length - 1; i >= 0; i--) if (history[i].indexOf(v) === 0 && history[i] !== v) { s = history[i].slice(v.length); break; }
-    var cv = document.createElement('canvas').getContext('2d'); cv.font = getComputedStyle(line).font;
-    gh.style.left = (line.offsetLeft + cv.measureText(v).width) + 'px'; gh.style.top = (line.offsetTop + 8) + 'px'; gh.textContent = s;
+    // Kdyz je text delsi nez pole (posunuty), napovedu neukazovat.
+    if (line.scrollLeft > 0) s = '';
+    // Zrcadlo pres pole: napsany text neviditelne (stejne pismo jako pole),
+    // za nim seda napoveda. Sirku tak meri sam prohlizec, ne odhad.
+    gh.style.left = line.offsetLeft + 'px'; gh.style.top = line.offsetTop + 'px';
+    gh.style.width = line.offsetWidth + 'px'; gh.style.height = line.offsetHeight + 'px';
+    gh.innerHTML = s ? '<span style="visibility:hidden">' + esc(v) + '</span>' + esc(s) : '';
     gh.dataset.rest = s;
   }
   line.addEventListener('input', function () { ghost(); if (!compl.hidden) openCompl(); });

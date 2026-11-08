@@ -236,3 +236,21 @@ fn boot_mouse() {
     m.report(&[0x01], &mut out);
     assert!(out.is_empty());
 }
+
+#[test]
+fn fido_rozpoznani() {
+    // Deskriptor reportu YubiKey (CTAPHID): Usage Page (FIDO) 06 D0 F1,
+    // Usage (CTAPHID) 09 01, kolekce, vstup a vystup po 64 B.
+    let fido = [
+        0x06, 0xD0, 0xF1, 0x09, 0x01, 0xA1, 0x01, 0x09, 0x20, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40,
+        0x81, 0x02, 0x09, 0x21, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40, 0x91, 0x02, 0xC0,
+    ];
+    assert!(crate::hid::is_fido(&fido));
+    // Klavesnice (Usage Page Generic Desktop 05 01) neni klic.
+    let kbd = [0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x05, 0x07, 0x19, 0xE0, 0xC0];
+    assert!(!crate::hid::is_fido(&kbd));
+    // Useknuty deskriptor ani prazdny nespadne.
+    assert!(!crate::hid::is_fido(&fido[..1]));
+    assert!(!crate::hid::is_fido(&[]));
+    assert!(!crate::hid::is_fido(&[0xFE]));
+}

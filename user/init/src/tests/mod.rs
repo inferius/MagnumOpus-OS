@@ -3,17 +3,24 @@
 //! Na rozdil od testu jadra test nepanikuje, ale vraci `Result<(), String>`
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
+mod audio;
+mod audio_recovery;
+mod accounts;
+mod agent;
+mod agent_shell;
 mod basic;
 mod dns;
 mod clock_sync;
 mod disks;
 mod display;
 mod drivers;
+mod driverkit;
 mod events;
 mod firewall;
 mod fs;
 mod fs_data;
 mod fs_hist;
+mod fs_perf;
 mod fs_recovery;
 mod gui;
 mod gui_gpu;
@@ -54,12 +61,15 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", process::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
+    ("ovladace z manifestu", driverkit::TESTS),
     ("disky", disks::TESTS),
     ("sitove karty", nic::TESTS),
     ("acpi", power::TESTS),
     ("souborovy system", fs::TESTS),
+    ("ucty", accounts::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
+    ("zvuk", audio::TESTS),
     ("historie FS", fs_hist::TESTS),
     ("data FS", fs_data::TESTS),
     ("cas", time::TESTS),
@@ -77,8 +87,13 @@ const SUITES: &[(&str, &[Test])] = &[
     ("vulkan", vulkan::TESTS),
     // Nastaveni obrazu (bochs-display, vlastni compd) pred GUI.
     ("displej", display::TESTS),
+    ("agent AI", agent::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
+    // Zvuk po padu: ridi hlavni supervisor (jako obnova fsd, pred ni).
+    ("obnova zvuku", audio_recovery::TESTS),
+    // Po vsech testech FS: cena radku shellu na plnem svazku.
+    ("vykon FS", fs_perf::TESTS),
     // Posledni: zabije hlavni fsd (relace s listkem obnovi hlavni supervisor, ktery
     // v testovacim behu ridi jen tato sada).
     ("obnova fsd", fs_recovery::TESTS),

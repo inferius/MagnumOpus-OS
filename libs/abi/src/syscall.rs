@@ -145,8 +145,12 @@ pub const JOB_PROCESSES: u64 = 48;
 /// (S5), jadro AML nezna = `NOT_SUPPORTED`. Pri uspechu se nevraci.
 pub const SYSTEM_POWER: u64 = 49;
 
+/// Planovani: tridy QoS, strop jobu, Realtime rozpocet, udaje o CPU.
+/// `(op, ...)`; operace a jejich argumenty v [`crate::sched::op`]
+pub const SCHED_CONTROL: u64 = 50;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 50;
+pub const COUNT: u64 = 51;
 
 /// Operace `SYSTEM_POWER`.
 pub mod power_op {

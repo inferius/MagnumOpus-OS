@@ -251,12 +251,40 @@ pub const fn last_usable(sectors: u64, ss: usize) -> u64 {
 
 /// Zapise do obrazu disku `disk` se sektorem `ss` B ochranny MBR, primarni
 /// i zalozni GPT s oddily `parts` (meze v sektorech `ss`). Obsah oddilu
-/// nemeni. Chyba = oddil mimo pouzitelnou oblast nebo prilis mnoho oddilu.
+/// nemeni (ani zavadeci kod v sektoru 0 pred tabulkou MBR). Chyba = oddil
+/// mimo pouzitelnou oblast nebo prilis mnoho oddilu.
 pub fn write(disk: &mut [u8], ss: usize, disk_guid: Guid, parts: &[NewPartition]) -> Result<(), &'static str> {
-    if !crate::valid_sector_size(ss) || !disk.len().is_multiple_of(ss) || parts.len() > WRITE_ENTRIES {
+    if !crate::valid_sector_size(ss) || !disk.len().is_multiple_of(ss) {
         return Err("spatna velikost sektoru nebo disku, nebo prilis mnoho oddilu");
     }
     let sectors = (disk.len() / ss) as u64;
+    let ends = build(sectors, ss, disk_guid, parts)?;
+    // Ze sektoru 0 jen tabulka MBR a podpis (446..512).
+    disk[446..512].copy_from_slice(&ends.head[446..512]);
+    disk[ss..ends.head.len()].copy_from_slice(&ends.head[ss..]);
+    let tail_at = disk.len() - ends.tail.len();
+    disk[tail_at..].copy_from_slice(&ends.tail);
+    Ok(())
+}
+
+/// Zacatek a konec disku s novou tabulkou GPT ([`build`]).
+pub struct Ends {
+    /// Sektory `0..first_usable(ss)`: ochranny MBR (zbytek sektoru 0
+    /// nulovy), primarni hlavicka a tabulka.
+    pub head: Vec<u8>,
+    /// Poslednich `table_sectors(ss) + 1` sektoru: zalozni tabulka
+    /// a hlavicka.
+    pub tail: Vec<u8>,
+}
+
+/// Ochranny MBR, primarni a zalozni GPT pro disk o `sectors` sektorech
+/// po `ss` B, bez potreby mit cely disk v pameti (velke obrazy, zapis na
+/// skutecny disk). Hlavicka a tabulka se zapisi na zacatek
+/// ([`Ends::head`]) a konec disku ([`Ends::tail`]).
+pub fn build(sectors: u64, ss: usize, disk_guid: Guid, parts: &[NewPartition]) -> Result<Ends, &'static str> {
+    if !crate::valid_sector_size(ss) || parts.len() > WRITE_ENTRIES {
+        return Err("spatna velikost sektoru nebo disku, nebo prilis mnoho oddilu");
+    }
     let tsec = table_sectors(ss);
     if sectors < first_usable(ss) + tsec + 2 {
         return Err("disk je prilis maly pro GPT");
@@ -280,10 +308,10 @@ pub fn write(disk: &mut [u8], ss: usize, disk_guid: Guid, parts: &[NewPartition]
     }
     let entries_crc = crc32::hash(&entries[..WRITE_TABLE_BYTES]);
 
+    let mut head = vec![0u8; first as usize * ss];
     // Ochranny MBR (prvnich 512 B sektoru 0): jeden oddil 0xEE pres disk.
     {
-        let mbr = &mut disk[..512];
-        mbr[446..510].fill(0);
+        let mbr = &mut head[..512];
         let entry = &mut mbr[446..462];
         entry[1..4].copy_from_slice(&[0x00, 0x02, 0x00]);
         entry[4] = 0xEE;
@@ -313,11 +341,10 @@ pub fn write(disk: &mut [u8], ss: usize, disk_guid: Guid, parts: &[NewPartition]
         h[16..20].copy_from_slice(&crc.to_le_bytes());
         h
     };
-    let at = |lba: u64| lba as usize * ss;
+    head[ss..2 * ss].copy_from_slice(&header(1, last_lba, 2));
+    head[2 * ss..].copy_from_slice(&entries);
     let backup_entries = last_lba - tsec;
-    disk[at(1)..at(2)].copy_from_slice(&header(1, last_lba, 2));
-    disk[at(2)..at(2 + tsec)].copy_from_slice(&entries);
-    disk[at(backup_entries)..at(last_lba)].copy_from_slice(&entries);
-    disk[at(last_lba)..].copy_from_slice(&header(last_lba, 1, backup_entries));
-    Ok(())
+    let mut tail = entries;
+    tail.extend_from_slice(&header(last_lba, 1, backup_entries));
+    Ok(Ends { head, tail })
 }

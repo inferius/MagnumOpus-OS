@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instalace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+/* Instalace: zive USB (vyzkouset bez zmeny disku) -> instalator -> prvni spusteni. */
+.page { max-width: 1300px; }
+#idesk { height: 760px; margin-top: var(--s4); }
+.welcome { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: var(--s4); padding: var(--s6); }
+.welcome .logo-big { height: 76px; }
+.welcome h2 { font-size: var(--t-display-size); line-height: var(--t-display-line); }
+.choices { display: grid; grid-template-columns: repeat(2, minmax(220px, 300px)); gap: var(--s4); margin-top: var(--s4); }
+.choice { text-align: left; padding: var(--s6); border-radius: var(--r-window); border: 2px solid var(--c-border); background: color-mix(in srgb, var(--c-surface) 92%, transparent); cursor: pointer; box-shadow: var(--sh-popover);
+  transition: transform var(--m-fast) var(--ease-standard), border-color var(--m-fast); }
+.choice:hover, .choice:focus-visible { transform: translateY(-2px); border-color: var(--c-accent); }
+.choice .ci { width: 48px; height: 48px; border-radius: var(--r-card); display: grid; place-items: center; background: var(--c-accent-soft); color: var(--c-accent-ink); margin-bottom: var(--s4); }
+.choice.primary .ci { background: var(--c-accent); color: var(--c-on-accent); }
+.choice b { font-size: var(--t-title-size); display: block; margin-bottom: var(--s2); }
+.choice span { font-size: var(--t-small-size); color: var(--c-ink-muted); }
+.topbar { position: absolute; top: var(--s4); left: var(--s4); right: var(--s4); display: flex; gap: var(--s2); align-items: center; z-index: 5; }
+.topbar .pill { display: inline-flex; align-items: center; gap: var(--s2); height: 36px; padding: 0 var(--s4); border-radius: var(--r-pill); border: 1px solid var(--c-border); background: color-mix(in srgb, var(--c-surface) 85%, transparent); font-size: var(--t-small-size); cursor: pointer; }
+.live-badge { display: inline-flex; gap: var(--s2); align-items: center; height: 32px; padding: 0 var(--s4); border-radius: var(--r-pill); background: var(--c-warn-soft); color: var(--c-warn); font-size: var(--t-small-size); font-weight: 600; }
+/* Okno instalatoru */
+#iwin { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(980px, calc(100% - 32px)); height: min(640px, calc(100% - 32px)); }
+.ix { display: grid; grid-template-columns: 230px 1fr; height: 100%; }
+.steps { background: var(--c-surface-2); padding: var(--s5) var(--s3); border-right: 1px solid var(--c-border); }
+.steps ol { list-style: none; margin: 0; padding: 0; }
+.steps li { display: flex; align-items: center; gap: var(--s3); min-height: 40px; padding: 0 var(--s3); border-radius: var(--r-control); font-size: var(--t-small-size); color: var(--c-ink-muted); }
+.steps li .n { width: 24px; height: 24px; border-radius: 12px; display: grid; place-items: center; font-size: 12px; font-weight: 700; border: 2px solid var(--c-border-strong); flex: none; }
+.steps li.done { color: var(--c-ink); } .steps li.done .n { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+.steps li.cur { background: var(--c-accent-soft); color: var(--c-accent-ink); font-weight: 600; } .steps li.cur .n { border-color: var(--c-accent); background: var(--c-accent); color: var(--c-on-accent); }
+.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.pane .body { flex: 1; overflow: auto; padding: var(--s7) var(--s8) var(--s5); }
+.pane .body h2 { font-size: var(--t-heading-size); line-height: var(--t-heading-line); margin-bottom: var(--s2); }
+.pane .body > p.sub { color: var(--c-ink-muted); margin-bottom: var(--s6); }
+.pane .foot { display: flex; gap: var(--s3); align-items: center; padding: var(--s4) var(--s8); border-top: 1px solid var(--c-border); }
+.opts { display: grid; gap: var(--s3); }
+.opt { display: grid; grid-template-columns: 40px 1fr auto; gap: var(--s4); align-items: center; text-align: left; padding: var(--s4); border: 2px solid var(--c-border); border-radius: var(--r-card); background: var(--c-surface); cursor: pointer; }
+.opt[aria-checked="true"] { border-color: var(--c-accent); background: var(--c-accent-soft); }
+.opt .oi { width: 40px; height: 40px; border-radius: var(--r-control); display: grid; place-items: center; background: var(--c-surface-3); color: var(--c-accent-ink); }
+.opt small { display: block; color: var(--c-ink-muted); font-size: var(--t-small-size); }
+.checks { display: grid; gap: var(--s2); }
+.chk { display: grid; grid-template-columns: 28px 1fr auto; gap: var(--s3); align-items: center; padding: var(--s3) var(--s4); border-radius: var(--r-control); background: var(--c-surface-2); }
+.chk .st.ok { color: var(--c-ok); } .chk .st.warn { color: var(--c-warn); }
+.chk small { display: block; color: var(--c-ink-muted); }
+.warnbox { border: 1px solid color-mix(in srgb, var(--c-warn) 50%, transparent); background: var(--c-warn-soft); border-radius: var(--r-card); padding: var(--s4); margin-top: var(--s4); font-size: var(--t-small-size); }
+/* Mapa disku */
+.diskmap { margin: var(--s3) 0 var(--s2); }
+.diskmap .lbl { display: flex; justify-content: space-between; font-size: var(--t-small-size); margin-bottom: var(--s2); }
+.dbar { display: flex; height: 44px; border-radius: var(--r-control); overflow: hidden; border: 1px solid var(--c-border-strong); }
+.dbar span { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; transition: flex-grow var(--m-base) var(--ease-standard); padding: 0 4px; }
+.p-efi { background: #8f7a87; color: #fff; } .p-win { background: #2350c4; color: #fff; } .p-rec { background: #5a6b85; color: #fff; }
+.p-free { background: repeating-linear-gradient(45deg, var(--c-surface-3) 0 6px, var(--c-surface) 6px 12px); color: var(--c-ink-muted); }
+.p-mo { background: var(--c-accent); color: var(--c-on-accent); }
+.legend { display: flex; gap: var(--s4); flex-wrap: wrap; font-size: var(--t-caption-size); color: var(--c-ink-muted); margin-top: var(--s2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.slider { width: 100%; accent-color: var(--c-accent); }
+.changes { list-style: none; padding: 0; margin: var(--s3) 0; border: 1px solid var(--c-border); border-radius: var(--r-card); overflow: hidden; }
+.changes li { display: grid; grid-template-columns: 110px 1fr; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--c-border); font-size: var(--t-small-size); }
+.changes li:last-child { border-bottom: 0; }
+.k-keep { color: var(--c-ink-muted); } .k-shrink { color: var(--c-warn); font-weight: 700; } .k-new { color: var(--c-ok); font-weight: 700; } .k-del { color: var(--c-danger); font-weight: 700; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); }
+.meter { height: 6px; border-radius: 3px; background: var(--c-surface-3); overflow: hidden; margin-top: var(--s2); }
+.meter i { display: block; height: 100%; width: 0; transition: width var(--m-base); }
+.prof { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
+.prof button { text-align: left; padding: var(--s4); border-radius: var(--r-card); border: 2px solid var(--c-border); background: var(--c-surface); cursor: pointer; font-size: var(--t-small-size); }
+.prof button b { display: block; font-size: var(--t-body-lg-size); margin-bottom: var(--s1); }
+.prof button[aria-checked="true"] { border-color: var(--c-accent); background: var(--c-accent-soft); }
+.rk { font: 600 15px/1.6 var(--font-mono); letter-spacing: .06em; padding: var(--s3) var(--s4); border-radius: var(--r-control); background: var(--c-surface-2); border: 1px dashed var(--c-border-strong); }
+.sumtab td:first-child { color: var(--c-ink-muted); width: 34%; }
+/* Prubeh instalace */
+.inst { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--s4); padding-top: var(--s5); }
+.inst .ringwrap { position: relative; width: 148px; height: 148px; }
+.inst .ringwrap svg.r { position: absolute; inset: 0; transform: rotate(-90deg); }
+.inst .ringwrap .s { position: absolute; inset: 28%; }
+.inst .pct { font-size: var(--t-heading-size); font-weight: 650; font-variant-numeric: tabular-nums; }
+.inst ul { list-style: none; padding: 0; margin: 0; text-align: left; font-size: var(--t-small-size); width: min(420px, 100%); }
+.inst li { display: flex; gap: var(--s3); align-items: center; padding: var(--s1) 0; color: var(--c-ink-muted); }
+.inst li.on { color: var(--c-ink); font-weight: 600; } .inst li.done { color: var(--c-ok); }
+/* Prvni spusteni */
+.tour { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); }
+.tour .card { font-size: var(--t-small-size); }
+.tour .card .vis { height: 70px; display: grid; place-items: center; border-radius: var(--r-control); background: var(--c-surface-2); margin-bottom: var(--s3); }
+.tour .card b { display: block; font-size: var(--t-body-size); margin-bottom: var(--s1); }
+.ctl { display: flex; gap: var(--s2); flex-wrap: wrap; margin-top: var(--s3); }
+@media (max-width: 860px) { .ix { grid-template-columns: 1fr; } .steps { display: none; } .grid2, .prof, .tour, .choices { grid-template-columns: 1fr; } .pane .body { padding: var(--s5); } }
+</style>
+</head>
+<body>
+<a class="skip" href="#idesk">Přeskočit na ukázku</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Instalace</h1>
+    <p class="lead">Systém naběhne z USB a dá se vyzkoušet bez jakékoli změny disku. Instalátor pak v sedmi krocích zkontroluje počítač, ukáže přesně, co se s diskem stane, a nainstaluje. První spuštění dokončí vzhled a krátce představí, čím je systém jiný.</p>
+  </header>
+  <div class="ctl" aria-label="Skok na obrazovku">
+    <button class="btn small" data-go="welcome">Uvítání (živé USB)</button>
+    <button class="btn small" data-go="1">Instalátor</button>
+    <button class="btn small" data-go="disk-side">Disk vedle Windows</button>
+    <button class="btn small" data-go="7">Průběh instalace</button>
+    <button class="btn small" data-go="first">První spuštění</button>
+  </div>
+
+  <div class="desk" id="idesk">
+    <div id="screen"></div>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var screen = document.getElementById('screen');
+  var STEPS = ['Jazyk a přístupnost', 'Kontrola počítače', 'Disk', 'Náhled změn', 'Účet', 'Zabezpečení', 'Souhrn', 'Instalace'];
+  var st = { step: 1, disk: 'whole', moSize: 120, user: '', phrase: '', profile: 0, encrypt: true, backup: false, lang: 'cs' };
+  var DISK = 512; // GB, NVMe 512 GB s Windows
+  var timer = null;
+
+  function sym(fill) { return '<svg viewBox="-8 -12 400 400" style="width:100%;height:100%" aria-hidden="true"><g fill="' + (fill || 'var(--c-accent)') + '">' + window.MO_SYMBOL + '</g></svg>'; }
+  function a11yBar(extra) {
+    return '<div class="topbar"><button class="pill" aria-label="Jazyk: čeština">' + ic('globe', 's') + 'Čeština</button><button class="pill" aria-label="Klávesnice: česká">' + ic('keyboard', 's') + 'CZ</button>' +
+      '<button class="pill" id="hc" aria-label="Vysoký kontrast">' + ic('contrast', 's') + 'Kontrast</button><button class="pill" id="big" aria-label="Velké písmo">' + ic('textsize', 's') + 'Větší písmo</button>' +
+      '<button class="pill" aria-label="Čtečka obrazovky, Ctrl+Alt+S">' + ic('accessibility', 's') + 'Čtečka</button><span class="spacer"></span>' + (extra || '') + '</div>';
+  }
+  function wireA11y() {
+    var hc = document.getElementById('hc'), big = document.getElementById('big');
+    if (hc) hc.onclick = function () { window.MO_SET('contrast', window.MO_STATE.contrast === 'more' ? 'normal' : 'more'); };
+    if (big) big.onclick = function () { window.MO_SET('scale', window.MO_STATE.scale === '1' ? '1.25' : '1'); };
+  }
+
+  // ---- Uvitani na zivem USB -------------------------------------------------
+  function welcome() {
+    clearInterval(timer);
+    screen.innerHTML = a11yBar('<span class="live-badge">' + ic('usb', 's') + 'Běží z USB &middot; disk se nemění</span>') +
+      '<div class="welcome"><img class="logo-big" src="assets/logo/logo-svetle-pozadi.svg" alt="MagnumOpus OS" id="wlogo">' +
+      '<h2>Vítej</h2><p class="lead" style="max-width:52ch">MagnumOpus teď běží z USB. Můžeš ho vyzkoušet: nic na disku počítače se nezmění a všechno, co uděláš, zmizí po vypnutí.</p>' +
+      '<div class="choices"><button class="choice" id="c-try"><div class="ci">' + ic('eye', 'l') + '</div><b>Vyzkoušet</b><span>Plocha, terminál, soubory. Instalaci spustíš kdykoli ikonou na ploše.</span></button>' +
+      '<button class="choice primary" id="c-inst"><div class="ci">' + ic('download', 'l') + '</div><b>Nainstalovat</b><span>Asi 10 minut. Před každou změnou disku uvidíš přesný náhled.</span></button></div></div>';
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark' || window.MO_STATE.contrast === 'more';
+    document.getElementById('wlogo').src = dark ? 'assets/logo/logo-tmave-pozadi.svg' : 'assets/logo/logo-svetle-pozadi.svg';
+    wireA11y();
+    document.getElementById('c-inst').onclick = function () { st.step = 1; installer(); };
+    document.getElementById('c-try').onclick = tryDesk;
+    document.getElementById('c-inst').focus();
+  }
+  function tryDesk() {
+    screen.innerHTML = '<span class="live-badge" style="position:absolute;left:16px;top:16px">' + ic('usb', 's') + 'Zkušební režim z USB</span>' +
+      '<button class="choice primary" id="d-inst" style="position:absolute;left:24px;top:70px;width:150px;padding:var(--s4);text-align:center"><div class="ci" style="margin:0 auto var(--s2)">' + ic('download', 'l') + '</div><b style="font-size:var(--t-body-size)">Nainstalovat MagnumOpus</b></button>' +
+      '<nav class="bar" data-pos="bottom-inset" aria-label="Lišta"><button class="bar-btn" aria-label="Aplikace">' + ic('apps', 'l') + '</button><span class="bar-sep"></span><button class="bar-btn bar-app" aria-label="Terminál">' + ic('terminal', 'l') + '</button><button class="bar-btn bar-app" aria-label="Soubory">' + ic('folder', 'l') + '</button>' +
+      '<span class="spacer"></span><span class="chip warn">' + ic('usb', 's') + 'změny se neukládají</span><span class="bar-sep"></span><div class="bar-clock">14:05<small>ne 8. 11.</small></div></nav>';
+    document.getElementById('d-inst').onclick = function () { st.step = 1; installer(); };
+  }
+
+  // ---- Instalator -----------------------------------------------------------
+  function shell(inner, opts) {
+    opts = opts || {};
+    var list = STEPS.map(function (s, i) {
+      var n = i + 1, cls = n < st.step ? 'done' : n === st.step ? 'cur' : '';
+      return '<li class="' + cls + '"' + (n === st.step ? ' aria-current="step"' : '') + '><span class="n">' + (n < st.step ? '&#10003;' : n) + '</span>' + s + '</li>';
+    }).join('');
+    var foot = opts.noFoot ? '' : '<div class="foot">' + (st.step > 1 && !opts.noBack ? '<button class="btn ghost" id="back">' + ic('left', 's') + 'Zpět</button>' : '') + '<span class="spacer"></span>' +
+      (opts.note ? '<span class="note" style="margin:0">' + opts.note + '</span>' : '') +
+      '<button class="btn ' + (opts.danger ? 'danger' : 'primary') + '" id="next"' + (opts.disabled ? ' disabled' : '') + '>' + (opts.next || 'Pokračovat') + ic('right', 's') + '</button></div>';
+    screen.innerHTML = a11yBar('<span class="live-badge">' + ic('usb', 's') + 'Běží z USB</span>') +
+      '<section class="win" id="iwin" role="dialog" aria-label="Instalace MagnumOpus"><div class="win-title"><span class="trust">' + ic('shieldcheck', 's') + 'Systém</span><span class="name">Instalace MagnumOpus</span>' +
+      '<div class="wbtns"><button class="wbtn close" aria-label="Zavřít instalátor" id="iclose">' + ic('close') + '</button></div></div>' +
+      '<div class="win-body"><div class="ix"><nav class="steps" aria-label="Kroky instalace"><ol>' + list + '</ol></nav><div class="pane"><div class="body" id="ibody">' + inner + '</div>' + foot + '</div></div></div></section>';
+    wireA11y();
+    document.getElementById('iclose').onclick = welcome;
+    var b = document.getElementById('back'); if (b) b.onclick = function () { st.step--; installer(); };
+    var n = document.getElementById('next'); if (n && opts.onNext) n.onclick = opts.onNext; else if (n) n.onclick = function () { st.step++; installer(); };
+    var h = screen.querySelector('#ibody h2'); if (h) { h.tabIndex = -1; h.focus(); }
+  }
+  function radios(id, cb) { window.MO_SEG(document.getElementById(id), cb); }
+
+  function installer() {
+    clearInterval(timer);
+    var s = st.step;
+    if (s === 1) {
+      shell('<h2>Jazyk a přístupnost</h2><p class="sub">Přístupnost jde zapnout hned teď a platí i pro nainstalovaný systém.</p>' +
+        '<div class="grid2"><label class="field"><span>Jazyk systému</span><select class="input"><option>Čeština</option><option>English</option><option>Deutsch</option><option>Slovenčina</option></select></label>' +
+        '<label class="field"><span>Klávesnice</span><select class="input"><option>Česká (QWERTZ)</option><option>Česká (QWERTY)</option><option>Anglická (US)</option></select></label></div>' +
+        '<label class="field" style="margin-top:var(--s4)"><span>Vyzkoušej klávesnici</span><input class="input" placeholder="Příliš žluťoučký kůň úpěl ďábelské ódy"></label>' +
+        '<h3 style="margin:var(--s6) 0 var(--s3);font-size:var(--t-body-lg-size)">Přístupnost</h3><div class="opts">' +
+        a11yRow('textsize', 'Větší písmo', 'Zvětší celé rozhraní na 125-200 %', 'a-big') + a11yRow('contrast', 'Vysoký kontrast', 'Černé pozadí, bílý text, žlutý akcent', 'a-hc') +
+        a11yRow('eye', 'Čtečka obrazovky', 'Čte vše nahlas; zapne se i zkratkou Ctrl+Alt+S', 'a-sr') + a11yRow('gauge', 'Omezit pohyb', 'Místo animací krátké prolnutí', 'a-rm') + '</div>');
+      [['a-big', function (v) { window.MO_SET('scale', v ? '1.25' : '1'); }], ['a-hc', function (v) { window.MO_SET('contrast', v ? 'more' : 'normal'); }], ['a-sr'], ['a-rm', function (v) { window.MO_SET('motion', v ? 'reduce' : 'system'); }]]
+        .forEach(function (p) { window.MO_SWITCH(document.getElementById(p[0]), p[1]); });
+    } else if (s === 2) {
+      var C = [['ok', 'monitor', 'Grafika', 'virtio-gpu, 1280 &times; 800, GPU (virgl)'], ['ok', 'disk', 'Disk', 'NVMe Samsung 980, 512 GB'], ['ok', 'gauge', 'Paměť', '16 GB (potřeba aspoň 4 GB)'],
+        ['ok', 'wifi', 'Síť', 'Ethernet připojen'], ['ok', 'keyboard', 'Vstup', 'klávesnice, myš, touchpad'], ['warn', 'lock', 'Secure Boot', 'zapnutý; zavaděč MagnumOpus zatím není podepsaný']];
+      shell('<h2>Kontrola počítače</h2><p class="sub">Co z tohoto počítače systém umí používat. Zkoušíš ho právě teď, takže výsledek je ověřený, ne odhadnutý.</p>' +
+        '<div class="checks">' + C.map(function (c) { return '<div class="chk"><span class="st ' + c[0] + '">' + ic(c[0] === 'ok' ? 'check' : 'alert') + '</span><div><b>' + c[2] + '</b><small>' + c[3] + '</small></div>' + ic(c[1]) + '</div>'; }).join('') + '</div>' +
+        '<div class="warnbox"><b>Secure Boot:</b> po instalaci by počítač systém nespustil. Instalátor nastaví zavaděč tak, aby šlo Secure Boot ve firmwaru vypnout, a ukáže postup pro tento počítač (klávesa F2 při startu, sekce Security). Windows poběží dál i bez něj. <a href="#" onclick="return false">Proč to tak je</a></div>',
+        { note: 'Secure Boot vyřešíš po instalaci' });
+    } else if (s === 3) {
+      shell('<h2>Kam nainstalovat</h2><p class="sub">Na disku <b>NVMe Samsung 980, 512 GB</b> jsou teď Windows.</p>' +
+        '<div class="diskmap"><div class="lbl"><span>Teď</span><span class="muted">512 GB</span></div>' + barNow() + '</div>' +
+        '<div class="opts" role="radiogroup" aria-label="Způsob instalace" id="dk" style="margin-top:var(--s5)">' +
+        optRow('side', 'sidebar', 'Vedle Windows', 'Zmenší oddíl Windows a vedle něj vytvoří MagnumOpus. Při startu si vybereš systém.') +
+        optRow('whole', 'disk', 'Celý disk', 'Smaže všechno na disku včetně Windows a nainstaluje jen MagnumOpus.') +
+        optRow('custom', 'settings', 'Vlastní rozdělení', 'Pro pokročilé: oddíly a svazky nastavíš ručně.') + '</div>' +
+        '<div id="sideCfg"></div>');
+      radios('dk', function (v) { st.disk = v; sideCfg(); });
+      sideCfg();
+    } else if (s === 4) {
+      var side = st.disk === 'side';
+      var ch = side
+        ? [['beze změny', 'k-keep', 'EFI (500 MB) - přidá se zavaděč MagnumOpus vedle Windows'], ['zmenšit', 'k-shrink', 'Windows C: z 480 GB na ' + (480 - st.moSize) + ' GB (obsazeno 214 GB, data zůstanou)'], ['beze změny', 'k-keep', 'Obnova Windows (1 GB)'], ['nový', 'k-new', 'MagnumOpus ' + st.moSize + ' GB, šifrovaný' + (st.encrypt ? '' : ' (vypnuto)')]]
+        : [['smazat', 'k-del', 'Windows C: (480 GB) a všechna data na něm'], ['smazat', 'k-del', 'Obnova Windows (1 GB)'], ['přepsat', 'k-shrink', 'EFI (500 MB) - jen zavaděč MagnumOpus'], ['nový', 'k-new', 'MagnumOpus 511 GB, šifrovaný' + (st.encrypt ? '' : ' (vypnuto)')]];
+      shell('<h2>Co se s diskem stane</h2><p class="sub">Zatím se nic nezměnilo. Změny se zapíšou až po kliknutí na tlačítko dole.</p>' +
+        '<div class="diskmap"><div class="lbl"><span>Teď</span></div>' + barNow() + '</div>' +
+        '<div class="diskmap"><div class="lbl"><span>Po instalaci</span></div>' + (side ? barSide() : barWhole()) + '</div>' + legend() +
+        '<ul class="changes" aria-label="Seznam změn">' + ch.map(function (c) { return '<li><span class="' + c[1] + '">' + c[0] + '</span><span>' + c[2] + '</span></li>'; }).join('') + '</ul>' +
+        (side ? '<div class="warnbox"><b>Zmenšení oddílu Windows je nejrizikovější krok.</b> Při výpadku proudu může poškodit data ve Windows. Instalátor předtím ověří oddíl (stejně jako chkdsk) a zmenšuje jen volné místo.' +
+          '<label class="hstack" style="margin-top:var(--s3)"><input type="checkbox" id="bk"' + (st.backup ? ' checked' : '') + '> Mám zálohu důležitých dat z Windows</label></div>'
+          : '<div class="warnbox" style="background:var(--c-danger-soft);border-color:color-mix(in srgb,var(--c-danger) 50%,transparent)"><b>Všechno na disku se smaže, včetně Windows.</b> Napiš název disku pro potvrzení: <input class="input" id="cf" style="margin-top:var(--s2)" placeholder="Samsung 980"></div>'),
+        { next: side ? 'Zapsat změny disku' : 'Smazat disk a pokračovat', danger: !side, disabled: true });
+      var nx = document.getElementById('next');
+      if (side) { document.getElementById('bk').onchange = function (e) { st.backup = e.target.checked; nx.disabled = !st.backup; }; nx.disabled = !st.backup; }
+      else document.getElementById('cf').oninput = function (e) { nx.disabled = e.target.value.trim().toLowerCase() !== 'samsung 980'; };
+    } else if (s === 5) {
+      shell('<h2>Tvůj účet</h2><p class="sub">Účet je jen na tomto počítači. Nic se neposílá na internet.</p>' +
+        '<div class="grid2"><label class="field"><span>Jméno</span><input class="input" id="u" value="' + st.user + '" placeholder="Michal" autocomplete="name"></label>' +
+        '<label class="field"><span>Heslo</span><input class="input" type="password" id="pw" autocomplete="new-password"><div class="meter"><i id="pm"></i></div><span class="hint" id="ph">Aspoň 10 znaků nebo 4 slova</span></label></div>' +
+        '<h3 style="margin:var(--s6) 0 var(--s2);font-size:var(--t-body-lg-size)">Bezpečnostní fráze</h3>' +
+        '<p class="note" style="margin:0 0 var(--s3)">Krátká fráze, kterou ukazují jen opravdové systémové dialogy (oprávnění, heslo, přihlášení). Když ji v dialogu neuvidíš, je to podvrh.</p>' +
+        '<div class="hstack"><input class="input" id="phr" style="flex:1" value="' + (st.phrase || 'modrá konvice') + '"><button class="btn" id="gen">' + ic('refresh', 's') + 'Navrhnout jinou</button></div>' +
+        '<div class="sys-band" style="border-radius:var(--r-control);margin-top:var(--s3)">' + ic('shieldcheck', 's') + 'Systém<span class="phrase">' + ic('key', 's') + 'tvá fráze: <b id="phv">' + (st.phrase || 'modrá konvice') + '</b></span></div>',
+        { disabled: true });
+      var u = document.getElementById('u'), pw = document.getElementById('pw'), nx2 = document.getElementById('next');
+      function chk() {
+        var l = pw.value.length, sc = Math.min(100, l * 8), col = sc < 50 ? 'var(--c-danger)' : sc < 80 ? 'var(--c-warn)' : 'var(--c-ok)';
+        var m = document.getElementById('pm'); m.style.width = sc + '%'; m.style.background = col;
+        document.getElementById('ph').textContent = l === 0 ? 'Aspoň 10 znaků nebo 4 slova' : sc < 80 ? 'Ještě trochu delší' : 'Silné heslo';
+        st.user = u.value; nx2.disabled = !(u.value.trim() && l >= 10);
+      }
+      u.oninput = chk; pw.oninput = chk;
+      var P = ['modrá konvice', 'tichý maják', 'zelený kompas', 'teplá lucerna', 'malý vlak'], pi = 0;
+      document.getElementById('gen').onclick = function () { pi = (pi + 1) % P.length; document.getElementById('phr').value = P[pi]; document.getElementById('phv').textContent = P[pi]; st.phrase = P[pi]; };
+      document.getElementById('phr').oninput = function (e) { document.getElementById('phv').textContent = e.target.value; st.phrase = e.target.value; };
+    } else if (s === 6) {
+      var PR = [['Standardní', 'Doporučeno. Bezpečné, ale neobtěžuje.'], ['Přísný', 'Citlivá data, sdílený počítač.'], ['Volný', 'Vývoj a testování.']];
+      shell('<h2>Zabezpečení</h2><p class="sub">Profil jde kdykoli změnit v Nastavení.</p>' +
+        '<div class="prof" role="radiogroup" aria-label="Profil zabezpečení" id="pf">' + PR.map(function (p, i) { return '<button role="radio" aria-checked="' + (i === st.profile) + '" data-value="' + i + '"><b>' + p[0] + '</b>' + p[1] + '</button>'; }).join('') + '</div>' +
+        '<div class="opt" style="margin-top:var(--s5);cursor:default"><span class="oi">' + ic('lock') + '</span><div><b>Šifrovat disk</b><small>Bez hesla se data z disku nepřečtou ani po vyndání z počítače. Zpomalení pod 3 % (šifrování v procesoru).</small></div><button class="switch" role="switch" id="enc" aria-checked="' + st.encrypt + '" aria-label="Šifrovat disk"></button></div>' +
+        '<div id="rkbox"></div>');
+      radios('pf', function (v) { st.profile = +v; });
+      function rk() {
+        document.getElementById('rkbox').innerHTML = st.encrypt ? '<h3 style="margin:var(--s5) 0 var(--s2);font-size:var(--t-body-size)">Klíč pro obnovu</h3><p class="note" style="margin:0 0 var(--s2)">Když zapomeneš heslo, data odemkne jen tento klíč. Ulož ho mimo tento počítač.</p>' +
+          '<div class="rk">4K7Q-M2XD-9PLA-R6TV-WB3H-ZC8E</div><div class="hstack" style="margin-top:var(--s3)"><button class="btn small">' + ic('usb', 's') + 'Uložit na USB</button><button class="btn small">' + ic('printer', 's') + 'Vytisknout</button><button class="btn small ghost">' + ic('copy', 's') + 'Zobrazit QR</button></div>' : '';
+      }
+      window.MO_SWITCH(document.getElementById('enc'), function (v) { st.encrypt = v; rk(); });
+      rk();
+    } else if (s === 7) {
+      var PRN = ['Standardní', 'Přísný', 'Volný'][st.profile];
+      shell('<h2>Souhrn</h2><p class="sub">Zkontroluj, co se nainstaluje. Změny disku jsou už potvrzené v kroku Náhled změn.</p>' +
+        '<table class="tbl sumtab"><tbody>' +
+        [['Jazyk a klávesnice', 'čeština, česká QWERTZ'], ['Disk', st.disk === 'side' ? 'vedle Windows, ' + st.moSize + ' GB' : 'celý disk, 511 GB'], ['Šifrování', st.encrypt ? 'zapnuto, klíč pro obnovu uložen' : 'vypnuto'],
+          ['Účet', (st.user || 'Michal') + ', bezpečnostní fráze nastavena'], ['Zabezpečení', 'profil ' + PRN], ['Síť a čas', 'Ethernet, Europe/Prague (z firmwaru a sítě)'], ['Po instalaci', 'restart; Secure Boot vypnout podle návodu']]
+          .map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('') + '</tbody></table>',
+        { next: 'Nainstalovat', onNext: function () { st.step = 8; progress(); } });
+    } else if (s === 8) progress();
+  }
+  function a11yRow(icn, t, d, id) { return '<div class="opt" style="cursor:default"><span class="oi">' + ic(icn) + '</span><div><b id="l' + id + '">' + t + '</b><small>' + d + '</small></div><button class="switch" role="switch" aria-checked="false" id="' + id + '" aria-labelledby="l' + id + '"></button></div>'; }
+  function optRow(v, icn, t, d) { return '<button class="opt" role="radio" aria-checked="' + (st.disk === v) + '" data-value="' + v + '"><span class="oi">' + ic(icn) + '</span><span><b>' + t + '</b><small>' + d + '</small></span>' + (v === 'side' ? '<span class="chip accent">doporučeno</span>' : '<span></span>') + '</button>'; }
+  function seg(cls, gb, label) { return '<span class="' + cls + '" style="flex:' + gb + '" title="' + label + '">' + (gb >= 40 ? label : '') + '</span>'; }
+  function barNow() { return '<div class="dbar">' + seg('p-efi', 6, 'EFI') + seg('p-win', 480, 'Windows C: 480 GB (obsazeno 214 GB)') + seg('p-rec', 6, 'Obnova') + seg('p-free', 20, '') + '</div>'; }
+  function barSide() { return '<div class="dbar">' + seg('p-efi', 6, 'EFI') + seg('p-win', 480 - st.moSize, 'Windows ' + (480 - st.moSize) + ' GB') + seg('p-rec', 6, 'Obnova') + seg('p-mo', st.moSize + 20, 'MagnumOpus ' + st.moSize + ' GB') + '</div>'; }
+  function barWhole() { return '<div class="dbar">' + seg('p-efi', 6, 'EFI') + seg('p-mo', 506, 'MagnumOpus 511 GB') + '</div>'; }
+  function legend() { return '<div class="legend"><span><i class="p-efi"></i>EFI</span><span><i class="p-win"></i>Windows</span><span><i class="p-rec"></i>obnova Windows</span><span><i class="p-mo"></i>MagnumOpus</span><span><i class="p-free"></i>volné</span></div>'; }
+  function sideCfg() {
+    var el = document.getElementById('sideCfg'); if (!el) return;
+    el.innerHTML = st.disk === 'side'
+      ? '<div class="diskmap" style="margin-top:var(--s5)"><div class="lbl"><span>Rozdělení</span><span class="num"><b id="szl">' + st.moSize + ' GB</b> pro MagnumOpus</span></div>' + '<div id="sbar">' + barSide() + '</div>' +
+        '<label class="sr-only" for="sz">Velikost pro MagnumOpus</label><input type="range" class="slider" id="sz" min="40" max="260" step="10" value="' + st.moSize + '" style="margin-top:var(--s3)">' +
+        '<div class="legend"><span>Windows potřebuje aspoň 230 GB (obsazeno 214 GB + rezerva)</span><span>MagnumOpus aspoň 40 GB</span></div></div>'
+      : st.disk === 'whole' ? '<div class="warnbox" style="margin-top:var(--s5)">' + ic('alert', 's') + ' Tahle volba smaže Windows i všechna data na disku. Ještě se nic neděje: v dalším kroku uvidíš náhled.</div>' : '<p class="note" style="margin-top:var(--s5)">Vlastní rozdělení otevře editor oddílů (v prototypu není).</p>';
+    var sz = document.getElementById('sz');
+    if (sz) sz.oninput = function (e) { st.moSize = +e.target.value; document.getElementById('szl').textContent = st.moSize + ' GB'; document.getElementById('sbar').innerHTML = barSide(); };
+  }
+
+  // ---- Prubeh instalace -----------------------------------------------------
+  function progress() {
+    st.step = 8;
+    var PH = [['Ověřuji oddíl Windows', 8], ['Zmenšuji oddíl Windows', 14], ['Vytvářím šifrovaný svazek', 10], ['Kopíruji systém', 40], ['Nastavuji zavaděč', 8], ['Vytvářím účet a první verzi systému (snapshot)', 12], ['Hotovo', 8]];
+    if (st.disk !== 'side') PH.splice(0, 2, ['Mažu disk', 10]);
+    shell('<div class="inst"><div class="ringwrap"><svg class="r" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46" fill="none" stroke="var(--c-accent-soft)" stroke-width="4"/>' +
+      '<circle id="ir" cx="50" cy="50" r="46" fill="none" stroke="var(--c-accent)" stroke-width="4" stroke-linecap="round" stroke-dasharray="289" stroke-dashoffset="289" style="transition:stroke-dashoffset 600ms var(--ease-standard)"/></svg><span class="s">' + sym() + '</span></div>' +
+      '<div class="pct" id="ip" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Průběh instalace">0 %</div><div class="note" id="ieta" style="margin:0">zbývá asi 9 minut</div>' +
+      '<ul id="iph">' + PH.map(function (p) { return '<li>' + ic('right', 's') + p[0] + '</li>'; }).join('') + '</ul>' +
+      '<p class="note" style="max-width:48ch">Mezitím můžeš systém dál zkoušet. Kdyby instalace selhala, Windows zůstanou funkční a instalátor ukáže, kde přestal.</p></div>',
+      { noFoot: true });
+    var pct = 0, total = PH.reduce(function (a, p) { return a + p[1]; }, 0);
+    timer = setInterval(function () {
+      pct = Math.min(100, pct + 2);
+      var acc = 0, cur = 0;
+      for (var i = 0; i < PH.length; i++) { acc += PH[i][1] / total * 100; if (pct < acc) { cur = i; break; } cur = i; }
+      document.querySelectorAll('#iph li').forEach(function (li, i) { li.className = i < cur || pct >= 100 ? 'done' : i === cur ? 'on' : ''; li.querySelector('svg use').setAttribute('href', '#ic-' + (i < cur || pct >= 100 ? 'check' : 'right')); });
+      document.getElementById('ir').setAttribute('stroke-dashoffset', 289 * (1 - pct / 100));
+      var ip = document.getElementById('ip'); ip.textContent = pct + ' %'; ip.setAttribute('aria-valuenow', pct);
+      document.getElementById('ieta').textContent = pct >= 100 ? 'hotovo' : 'zbývá asi ' + Math.max(1, Math.round((100 - pct) / 11)) + ' min';
+      if (pct >= 100) { clearInterval(timer); setTimeout(done, 700); }
+    }, 120);
+  }
+  function done() {
+    shell('<div class="inst"><div class="ringwrap" style="width:120px;height:120px"><span class="s" style="inset:0">' + sym() + '</span></div><h2>Nainstalováno</h2>' +
+      '<p class="sub" style="max-width:52ch">Po restartu vyndej USB. ' + (st.disk === 'side' ? 'Při startu si vybereš mezi MagnumOpus a Windows (výchozí je poslední použitý). ' : '') + 'Než počítač naběhne, vypni ve firmwaru Secure Boot podle návodu.</p>' +
+      '<div class="warnbox" style="text-align:left;max-width:520px">' + ic('info', 's') + ' <b>Návod pro tento počítač:</b> při startu drž F2 &rarr; Security &rarr; Secure Boot &rarr; Disabled &rarr; F10 uložit.</div></div>',
+      { next: 'Restartovat', noBack: true, onNext: first });
+  }
+
+  // ---- Prvni spusteni ---------------------------------------------------------
+  function first() {
+    clearInterval(timer);
+    var themes = [['auto', 'Podle denní doby'], ['light', 'Světlý'], ['dark', 'Tmavý']];
+    screen.innerHTML = '<section class="win" id="iwin" role="dialog" aria-label="Vítej v MagnumOpus" style="height:min(600px,calc(100% - 32px))"><div class="win-title"><span class="trust">' + ic('shieldcheck', 's') + 'Systém</span><span class="name">Vítej v MagnumOpus</span><div class="wbtns"></div></div>' +
+      '<div class="win-body" style="padding:var(--s7) var(--s8)"><h2 style="font-size:var(--t-heading-size)">Ještě dvě volby a tři věci, které jsou tu jinak</h2>' +
+      '<div class="grid2" style="margin:var(--s5) 0"><div><b>Motiv</b><div class="seg" role="radiogroup" aria-label="Motiv" id="fth" style="margin-top:var(--s2)">' + themes.map(function (t) { return '<button role="radio" aria-checked="' + (window.MO_STATE.theme === t[0]) + '" data-value="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div></div>' +
+      '<div><b>Lišta</b><div class="seg" role="radiogroup" aria-label="Poloha lišty" id="fbar" style="margin-top:var(--s2)"><button role="radio" aria-checked="true" data-value="bottom-inset">Dole</button><button role="radio" aria-checked="false" data-value="left">Vlevo</button><button role="radio" aria-checked="false" data-value="top">Nahoře</button></div></div></div>' +
+      '<div class="tour">' +
+      '<div class="card"><div class="vis"><span class="trust" style="cursor:default">' + ic('shield', 's') + 'Poznámky<span class="perm">' + ic('folder') + '</span></span></div><b>Odznak důvěry</b>Vlevo v titulku každého okna: kdo aplikace je a co smí. Klikni a oprávnění odebereš.</div>' +
+      '<div class="card"><div class="vis">' + ic('branch', 'xl') + '</div><b>Zkusit bokem</b>Rizikové změny souborů nejdřív v kopii. Převezmeš jen to, co chceš; všechno jde vrátit.</div>' +
+      '<div class="card"><div class="vis"><span class="chip agent">' + ic('agent', 's') + 'agent</span></div><b>Agent je vždy vidět</b>Co dělá asistent AI, má korálovou barvu a slovo agent. Pracuje jen bokem.</div></div>' +
+      '<div class="hstack" style="margin-top:var(--s6)"><span class="spacer"></span><button class="btn primary" id="fgo">Začít používat' + ic('right', 's') + '</button></div></div></section>';
+    radios('fth', function (v) { window.MO_SET('theme', v); });
+    radios('fbar', function (v) { try { localStorage.setItem('mo.barpos', v); } catch (e) {} });
+    document.getElementById('fgo').onclick = function () { location.href = 'plocha.html'; };
+    document.getElementById('fgo').focus();
+  }
+
+  document.querySelectorAll('[data-go]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var g = b.dataset.go;
+      if (g === 'welcome') welcome(); else if (g === 'first') first();
+      else if (g === 'disk-side') { st.disk = 'side'; st.step = 3; installer(); }
+      else { st.step = +g; installer(); }
+    });
+  });
+  document.addEventListener('mo-theme', function () { var l = document.getElementById('wlogo'); if (l) welcome(); });
+  welcome();
+});
+</script>
+</body>
+</html>

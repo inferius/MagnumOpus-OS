@@ -200,6 +200,12 @@ pub fn cpu_hw_id() -> u32 {
     <Current as Cpu>::hw_id()
 }
 
+/// Typ jadra aktualniho CPU (`abi::sched::core_kind`).
+#[inline]
+pub fn core_kind() -> u8 {
+    <Current as Cpu>::core_kind()
+}
+
 /// Nastavi per-CPU ukazatel na prazdna data (prvni vec pri startu CPU).
 #[inline]
 pub fn clear_cpu_local() {

@@ -147,6 +147,7 @@ pub(super) fn parse_madt_entry(kind: u8, e: &[u8], p: &mut Platform) -> Option<(
             if flags & 1 != 0 {
                 p.cpus.push(Cpu {
                     hw_id: mpidr_to_hw_id(mpidr),
+                    uid: u32_at(e, 8)?,
                 });
                 if gicr != 0 {
                     p.arch.gicc_gicr.push(gicr);

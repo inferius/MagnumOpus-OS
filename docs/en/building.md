@@ -35,6 +35,10 @@ firmware next to QEMU or in `/usr/share/...`. Otherwise set `QEMU_X86_64`
 | `cargo xtask test --only sit --repeat 20` | only the selected userspace test suites (names as in the log, comma separated), n times in a row - for finding flaky tests; every extra round adds 60 s to the run limit. A test longer than 20 s is marked `[pomaly]` ("slow") in the log |
 | `cargo xtask test --only napajeni` | only the separate power test runs (power-off with the button through ACPI, reboot; they always run after the main run, `--no-power` disables them), see [ACPI](acpi.md#tests) |
 | `cargo xtask test --net-online` | also the tests against the real host network (host resolver through slirp); skipped without the switch |
+| `cargo xtask usb` | live USB: image `target/usb-<arch>-<profile>.img`; `--list`, `--write <disk>`, `--run`, `--test`, `--size <MiB>`, `--out <file>`, see [Live USB](live-usb.md) |
+| `cargo xtask test --only zive-usb` | only the boot from the USB image as a flash drive (it always runs after the main run) |
+| `cargo xtask test --driver edu` | only one manifest driver: its host tests (simulation) and in QEMU the `ovladace z manifestu` suite for it only; without checking the other architectures' kernels and the documentation (a fast loop, see [Drivers](drivers.md)) |
+| `cargo xtask new-driver <name> --pci <vendor:device>` | a driverkit driver skeleton: code, manifest, device model and simulation test, documentation page cs+en ([Drivers](drivers.md#the-first-driver-step-by-step)) |
 | `cargo xtask check` | only checks that the kernel builds for the given architecture; see [architecture interface](architecture.md#architecture-interface) |
 | `cargo xtask docs` | HTML documentation from `docs/` into `target/docs` (see below) |
 
@@ -44,8 +48,8 @@ Options: `--arch <x86_64|aarch64>` (all commands, default `x86_64`; aarch64
 x86_64 `intel` (default), `amd`, `none`; aarch64 `smmu` (default), `none`; `none` checks running without DMA
 translation - the test "IOMMU: zarizeni nezapise mimo prideleny DMA" and the
 "IOMMU chrani pamet mimo DMA" tests of the `disky` suite then fail as expected),
-`--data-disk <virtio|nvme|nvme4k|ahci>` (data disk controller, default `virtio`; `nvme4k` = NVMe with 4 KiB sectors; on NVMe
-and AHCI the disk gets a GPT with our partition, see [Disks](disks.md)),
+`--data-disk <virtio|nvme|nvme4k|ahci|usb>` (data disk controller, default `virtio`; `nvme4k` = NVMe with 4 KiB sectors; `usb` = a flash
+drive on xHCI; on NVMe, AHCI and USB the disk gets a GPT with our partition, see [Disks](disks.md)),
 `--gdb` (QEMU waits for GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <QEMU args>` (e.g. `-- -smp 8`,
 `-- -cpu max,-x2apic`).
 

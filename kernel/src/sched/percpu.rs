@@ -1,13 +1,13 @@
 //! Data jednotlivych CPU.
 
 use alloc::boxed::Box;
-use alloc::collections::{BinaryHeap, VecDeque};
+use alloc::collections::BinaryHeap;
 use alloc::sync::Arc;
 use core::cell::UnsafeCell;
 use core::cmp::Ordering as CmpOrdering;
-use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use super::thread::{QOS_CLASSES, Qos, Thread};
+use super::thread::Thread;
 use crate::arch::{self, CpuLocalData as _};
 use crate::sync::SpinLock;
 
@@ -15,25 +15,11 @@ use crate::sync::SpinLock;
 /// pres 500 logickych CPU; dalsi CPU nad mez se nespusti (zaloguje se).
 pub const MAX_CPUS: usize = 4096;
 
-/// Fronty vlaken pripravenych k behu, jedna na tridu QoS.
-#[derive(Default)]
-pub struct RunQueue {
-    pub queues: [VecDeque<Arc<Thread>>; QOS_CLASSES],
-}
+/// Fronta vlaken pripravenych k behu (logika v `schedcore`).
+pub type RunQueue = schedcore::RunQueue<Arc<Thread>>;
 
-impl RunQueue {
-    pub fn push(&mut self, t: Arc<Thread>) {
-        self.queues[t.qos as usize].push_back(t);
-    }
-
-    pub fn pop(&mut self) -> Option<Arc<Thread>> {
-        self.queues.iter_mut().find_map(|q| q.pop_front())
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.queues.iter().all(|q| q.is_empty())
-    }
-}
+/// `current_qos` necinneho CPU.
+pub const IDLE_CLASS: u8 = 4;
 
 /// Probuzeni vlakna v case `deadline` (ns od startu).
 pub struct TimerEntry {
@@ -84,10 +70,24 @@ pub struct PerCpu {
     prev: UnsafeCell<Option<Arc<Thread>>>,
     pub need_resched: AtomicBool,
     pub is_idle: AtomicBool,
+    /// Trida bezicicho vlakna (`Qos as u8`, [`IDLE_CLASS`] = necinne).
     pub current_qos: AtomicU8,
     pub slice_end: AtomicU64,
     /// Kdy zacalo bezet aktualni vlakno (ns; cas CPU procesu).
     pub run_start: AtomicU64,
+    /// Cas necinnosti (ns).
+    pub idle_ns: AtomicU64,
+    /// Pocet cekajicich ve fronte (kopie pro rozhodovani bez zamku).
+    pub queued: AtomicUsize,
+    /// Zatez vazena tridami (`RunQueue::weighted_load`, kopie).
+    pub load: AtomicU64,
+    /// Nejblizsi obnova Realtime rozpoctu ve fronte (pro casovac).
+    pub replenish_at: AtomicU64,
+    /// Typ jadra (`abi::sched::core_kind`), kapacita (1024 = nejvykonnejsi)
+    /// a cluster (sdilena cache) - viz `topo`.
+    pub kind: AtomicU8,
+    pub capacity: AtomicU32,
+    pub cluster: AtomicU32,
 }
 
 // SAFETY: pole v UnsafeCell (`current`, `idle`, `prev`) cte a zapisuje jen
@@ -116,16 +116,23 @@ impl PerCpu {
             tlb_done: AtomicU64::new(0),
             index,
             hw_id,
-            rq: SpinLock::new(RunQueue::default()),
+            rq: SpinLock::new(RunQueue::new()),
             timers: SpinLock::new(BinaryHeap::new()),
             current: UnsafeCell::new(Some(idle.clone())),
             idle: UnsafeCell::new(Some(idle)),
             prev: UnsafeCell::new(None),
             need_resched: AtomicBool::new(false),
             is_idle: AtomicBool::new(true),
-            current_qos: AtomicU8::new(Qos::Idle as u8),
+            current_qos: AtomicU8::new(IDLE_CLASS),
             slice_end: AtomicU64::new(u64::MAX),
             run_start: AtomicU64::new(0),
+            idle_ns: AtomicU64::new(0),
+            queued: AtomicUsize::new(0),
+            load: AtomicU64::new(0),
+            replenish_at: AtomicU64::new(u64::MAX),
+            kind: AtomicU8::new(abi::sched::core_kind::UNKNOWN),
+            capacity: AtomicU32::new(abi::sched::CAPACITY_MAX),
+            cluster: AtomicU32::new(0),
         }));
         cpu.self_ptr = cpu as *const PerCpu as u64;
         // SAFETY: struktura je leaknuta (zije navzdy) a jeji prvni slovo
@@ -134,6 +141,14 @@ impl PerCpu {
         CPUS[index].store(cpu, Ordering::Release);
         CPU_COUNT.fetch_max(index + 1, Ordering::AcqRel);
         cpu
+    }
+
+    /// Opise stav fronty do atomickych kopii (volat po kazde zmene fronty).
+    pub fn sync(&self, rq: &RunQueue) {
+        self.queued.store(rq.len(), Ordering::Relaxed);
+        self.load.store(rq.weighted_load(), Ordering::Relaxed);
+        self.replenish_at
+            .store(rq.next_replenish().unwrap_or(u64::MAX), Ordering::Relaxed);
     }
 
     /// Aktualni vlakno. Volat se zakazanymi prerusenimi.

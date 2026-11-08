@@ -23,6 +23,7 @@ pub mod hid_report;
 pub mod hub;
 pub mod msg;
 pub mod report;
+pub mod storage;
 
 /// Rychlost zarizeni.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,5 +79,7 @@ impl Speed {
 
 #[cfg(test)]
 mod report_tests;
+#[cfg(test)]
+mod storage_tests;
 #[cfg(test)]
 mod tests;

@@ -7,6 +7,58 @@ name = "abi"
 version = "0.1.0"
 
 [[package]]
+name = "accountd"
+version = "0.1.0"
+dependencies = [
+ "accountproto",
+ "accounts",
+ "conf",
+ "fsproto",
+ "libos",
+ "rand_core 0.6.4",
+ "wire",
+ "zeroize",
+]
+
+[[package]]
+name = "accountproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "aes",
+ "cbc",
+ "ed25519-dalek",
+ "hkdf",
+ "hmac",
+ "libos",
+ "p256",
+ "rand_core 0.6.4",
+ "sha2",
+ "subtle",
+ "wire",
+ "zeroize",
+]
+
+[[package]]
+name = "accounts"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "accountproto",
+ "argon2",
+ "blake2",
+ "chacha20poly1305",
+ "hkdf",
+ "hmac",
+ "rand_core 0.6.4",
+ "sha2",
+ "subtle",
+ "unicode-normalization",
+ "wire",
+ "zeroize",
+]
+
+[[package]]
 name = "acpica"
 version = "0.1.0"
 dependencies = [
@@ -79,6 +131,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentd"
+version = "0.1.0"
+dependencies = [
+ "agentproto",
+ "agentsh",
+ "fsproto",
+ "httpc",
+ "libos",
+ "netproto",
+ "spin 0.12.3",
+ "tls",
+ "web",
+ "wire",
+]
+
+[[package]]
+name = "agentproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "chacha20poly1305",
+ "hmac",
+ "sha2",
+ "wire",
+]
+
+[[package]]
+name = "agentsh"
+version = "0.1.0"
+dependencies = [
+ "shlang",
+]
+
+[[package]]
 name = "ahci"
 version = "0.1.0"
 dependencies = [
@@ -98,6 +184,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "argon2"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072"
+dependencies = [
+ "base64ct",
+ "blake2",
+ "cpufeatures 0.2.17",
+ "password-hash",
+ "zeroize",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -108,6 +207,33 @@ name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
+name = "audiod"
+version = "0.1.0"
+dependencies = [
+ "audiomix",
+ "audioproto",
+ "libos",
+ "wire",
+]
+
+[[package]]
+name = "audiomix"
+version = "0.1.0"
+dependencies = [
+ "audioproto",
+]
+
+[[package]]
+name = "audioproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "libos",
+ "svcclient",
+ "wire",
+]
 
 [[package]]
 name = "autocfg"
@@ -171,6 +297,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
+name = "blake2"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
+dependencies = [
+ "digest",
+]
+
+[[package]]
 name = "blake3"
 version = "1.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,6 +323,15 @@ name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+dependencies = [
+ "generic-array",
+]
+
+[[package]]
+name = "block-padding"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
 dependencies = [
  "generic-array",
 ]
@@ -257,6 +401,15 @@ name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+
+[[package]]
+name = "cbc"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26b52a9543ae338f279b96b0b9fed9c8093744685043739079ce85cd58f289a6"
+dependencies = [
+ "cipher",
+]
 
 [[package]]
 name = "cbuild"
@@ -566,9 +719,11 @@ dependencies = [
 name = "devmgr"
 version = "0.1.0"
 dependencies = [
+ "driverkit",
  "libos",
  "nic",
  "pci",
+ "usbproto",
  "virtio",
 ]
 
@@ -629,6 +784,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "driverkit"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "conf",
+ "libos",
+ "pci",
+]
+
+[[package]]
 name = "e1000e"
 version = "0.1.0"
 dependencies = [
@@ -675,6 +840,14 @@ dependencies = [
  "ed25519",
  "sha2",
  "subtle",
+]
+
+[[package]]
+name = "edu"
+version = "0.1.0"
+dependencies = [
+ "driverkit",
+ "libos",
 ]
 
 [[package]]
@@ -1033,6 +1206,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
+name = "hda"
+version = "0.1.0"
+dependencies = [
+ "audioproto",
+ "hdaspec",
+ "libos",
+ "pci",
+ "wire",
+]
+
+[[package]]
+name = "hdaspec"
+version = "0.1.0"
+
+[[package]]
 name = "heapless"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1207,6 +1395,10 @@ name = "init"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "accountproto",
+ "agentproto",
+ "audiomix",
+ "audioproto",
  "blockproto",
  "conf",
  "fsproto",
@@ -1222,6 +1414,8 @@ dependencies = [
  "taskproto",
  "term",
  "theme",
+ "wire",
+ "zeroize",
 ]
 
 [[package]]
@@ -1234,6 +1428,7 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
+ "block-padding",
  "generic-array",
 ]
 
@@ -1298,6 +1493,7 @@ dependencies = [
  "elf",
  "initfs",
  "noto-sans-mono-bitmap",
+ "schedcore",
  "spin 0.12.3",
 ]
 
@@ -1591,6 +1787,17 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2",
+]
+
+[[package]]
+name = "password-hash"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
+dependencies = [
+ "base64ct",
+ "rand_core 0.6.4",
+ "subtle",
 ]
 
 [[package]]
@@ -2016,6 +2223,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69e4ce4a039f42bf25920b95667e4d789e98749ab11bbb8d2c2936f788421bb5"
 
 [[package]]
+name = "schedcore"
+version = "0.1.0"
+dependencies = [
+ "abi",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2097,6 +2311,8 @@ name = "shlang"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "audiomix",
+ "audioproto",
 ]
 
 [[package]]
@@ -2109,12 +2325,17 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 name = "shsess"
 version = "0.1.0"
 dependencies = [
+ "agentproto",
+ "agentsh",
+ "audiomix",
+ "audioproto",
  "fsproto",
  "libos",
  "powerproto",
  "shlang",
  "spin 0.12.3",
  "term",
+ "wire",
 ]
 
 [[package]]
@@ -2324,6 +2545,7 @@ dependencies = [
 name = "termd"
 version = "0.1.0"
 dependencies = [
+ "audioproto",
  "fsproto",
  "libos",
  "shlang",
@@ -2657,6 +2879,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "usb-storage"
+version = "0.1.0"
+dependencies = [
+ "blockproto",
+ "libos",
+ "usbclient",
+ "usbproto",
+]
+
+[[package]]
 name = "usbclient"
 version = "0.1.0"
 dependencies = [
@@ -2723,6 +2955,7 @@ dependencies = [
 name = "virtio-input"
 version = "0.1.0"
 dependencies = [
+ "driverkit",
  "inputproto",
  "libos",
  "pci",
@@ -2743,6 +2976,7 @@ dependencies = [
 name = "virtio-rng"
 version = "0.1.0"
 dependencies = [
+ "driverkit",
  "libos",
  "pci",
  "virtio",
@@ -3035,6 +3269,7 @@ dependencies = [
  "bytes",
  "diskguard",
  "dns",
+ "driverkit",
  "fatfs",
  "fs",
  "http-body-util",

@@ -1,6 +1,6 @@
 # USB
 
-USB obsluhují tři druhy procesů, které spolu mluví kanály:
+USB obsluhují čtyři druhy procesů, které spolu mluví kanály:
 
 - **`xhci`**: ovladač řadiče xHCI a jádro USB. Nastavuje zařízení
   (adresa, deskriptory, konfigurace, endpointy) a provádí přenosy.
@@ -9,6 +9,9 @@ USB obsluhují tři druhy procesů, které spolu mluví kanály:
   (virtuální root hub) i externí huby.
 - **`usb-hid`**: ovladač klávesnice a myši. Posílá události do
   [služby vstupu](vstup.md) stejně jako virtio-input nebo PS/2.
+- **`usb-storage`**: ovladač disků USB (flash disky, externí disky,
+  čtečky karet). Nabízí disk protokolem `blockproto` stejně jako NVMe
+  nebo AHCI ([Disky](disky.md)), viz [Disky USB](#disky-usb-usb-storage).
 
 Třídní ovladače nemají žádný Resource. Dostanou jen kanál svého rozhraní
 a nevidí řadič, paměť ani jiná zařízení. Chyba nebo zlý úmysl v ovladači
@@ -108,6 +111,8 @@ jeden požadavek, jinak `ALREADY_EXISTS`.
 | 2 `CONTROL` | všichni | kontrolní přenos na EP0: data = setup 8 B + data OUT; odpověď = data IN. `SET_ADDRESS` a `SET_CONFIGURATION` = `ACCESS_DENIED` (řídí je řadič) |
 | 3 `INTERRUPT_IN` | všichni | `a` = endpoint (např. 0x81), `b` = nejvýš bajtů; odpověď až přijdou data. Jen endpointy vlastního rozhraní, jinak `ACCESS_DENIED` |
 | 4 `INTERRUPT_OUT` | všichni | `a` = endpoint, data = obsah |
+| 5 `BULK_IN` | všichni | `a` = bulk endpoint, `b` = nejvýš bajtů (16 KiB); odpověď = přečtená data (kratší při krátkém paketu) |
+| 6 `BULK_OUT` | všichni | `a` = bulk endpoint, data = obsah (nejvýš 16 KiB) |
 | 16 `ATTACH` | hub | na port `a` se připojilo zařízení (port je po resetu povolený); odpověď `actual` = slot |
 | 17 `DETACH` | hub | zařízení z portu `a` zmizelo: řadič zavře kanály jeho rozhraní a zruší slot |
 | 18 `SCAN_DONE` | hub | první průchod porty dokončen |
@@ -123,6 +128,50 @@ let info = usb.info()?;
 usb.control(hid::set_boot_protocol(info.interface), &[])?;
 let report = usb.call(op::INTERRUPT_IN, 0x81, 8, &[], None)?;
 ```
+
+## Disky USB (`usb-storage`)
+
+Rozhraní třídy 08 (mass storage), podtřídy 06 (SCSI) a protokolu 50
+(Bulk-Only Transport, BOT) spustí `devmgr` ovladač `usb-storage`. Ten
+nahlásí disky stejně jako ovladač řadiče disků (`block` + kanál, nakonec
+`done`) a `devmgr` čeká, než to udělá: flashka zasunutá při startu je
+v seznamu disků dřív, než init hledá souborový systém (živé USB,
+[Živé USB](zive-usb.md)).
+
+**Bulk přenosy v `xhci`.** Bulk endpoint má buffer 32 KiB a jeden přenos
+používá okno 16 KiB, které neleží přes hranici 64 KiB (jeden TRB ji
+nesmí překročit, xHCI 4.11.7.1). Typ endpointu 2 (OUT) a 6 (IN),
+interval 0, průměrná délka TRB 3 KiB.
+
+**Jeden příkaz BOT** (`libs/usbproto/src/storage.rs`, `user/usb-storage/src/bot.rs`):
+
+1. CBW (31 B, podpis `USBC`, tag, délka dat, směr, LUN, příkaz SCSI) na bulk OUT,
+2. data po kusech nejvýš 16 KiB na bulk IN nebo OUT; krátký paket nebo
+   STALL fázi ukončí (STALL: `CLEAR_FEATURE(ENDPOINT_HALT)`),
+3. CSW (13 B, `USBS`, stejný tag, residue, stav) na bulk IN; po STALL
+   ještě jeden pokus.
+
+Neplatné CSW, chyba fáze nebo chyba přenosu = **Reset Recovery** (reset
+rozhraní, uvolnění obou endpointů) a příkaz se zopakuje (nejvýš 3x).
+
+**Start:** Get Max LUN (STALL = jeden LUN), pro každý LUN INQUIRY (jen
+disky s přímým přístupem, typ 0), TEST UNIT READY s opakováním až 15 s
+(chybějící médium ve čtečce = LUN přeskočí), READ CAPACITY (10), nad
+2 TiB (16), MODE SENSE (6) kvůli ochraně proti zápisu.
+
+| operace `blockproto` | příkaz SCSI |
+|---|---|
+| čtení, zápis | READ (10) / WRITE (10), nad 2 TiB nebo 65535 sektorů (16) |
+| FLUSH | SYNCHRONIZE CACHE (10); zařízení, které ho nezná (ILLEGAL REQUEST), nemá mezipaměť a zápis je trvalý už po CSW |
+| DISCARD | není (UNMAP flash disky USB skoro neumí) |
+| FEATURES | `FLUSH`, nebo `READ_ONLY` při ochraně proti zápisu |
+
+Chyby: DATA PROTECT = `READ_ONLY`, NOT READY / UNIT ATTENTION = nový
+pokus, ostatní = `IO_ERROR`. Ochrana cizích disků platí i tady: cizí
+flashka (bez našeho oddílu) je jen pro čtení.
+
+UAS (USB Attached SCSI, protokol 0x62) zatím není; zařízení UAS mají
+skoro vždy i základní nastavení BOT.
 
 ## HID: klávesnice, myš, tablet, multimediální klávesy
 
@@ -182,6 +231,18 @@ vrátí `None` a ovladač zkusí boot protokol.
   použitelný deskriptor.
 - **Odpojení:** kanál rozhraní se zavře, ovladač pošle uvolnění všech
   držených kláves a tlačítek a skončí. Služba vstupu pak zdroj odebere.
+
+### Bezpečnostní klíč FIDO
+
+Rozhraní HID s usage page `0xF1D0` v deskriptoru reportu (YubiKey,
+SoloKey, Nitrokey, ...) není vstupní zařízení. `usb-hid` ho službě vstupu
+nepředá a jen přenáší hlášení CTAPHID po 64 B (interrupt IN a OUT) po
+třetím kanálu ze startovní zprávy. devmgr ten kanál vytvoří pro každé
+rozhraní HID a druhý konec pošle initu zprávou `fido`; init ho dá službě
+účtů (viz [Uživatelské účty](ucty.md)). Zařízení, které klíč není, kanál
+hned zavře. Rozpoznání deskriptoru: `usbproto::hid::is_fido` (test na
+hostiteli). QEMU klíč FIDO2 neemuluje; ověřené na hostiteli nad
+simulovaným klíčem, na skutečném klíči zatím ne.
 
 ## Ověření nového vstupního zařízení (proti BadUSB)
 
@@ -246,7 +307,9 @@ přímo zprávou `trust`.
 
 | Kde | Co |
 |---|---|
-| `cargo test -p usbproto` | deskriptory (konfigurace, alternativní nastavení, poškozené délky), setup pakety, zprávy, hub (deskriptor, stav portu, rychlost, route string a jeho meze), HID boot (rozdíl reportů, rollover, tabulka usage, myš), parser reportu (deskriptory QEMU klávesnice, myši a tabletu, multimédia s id reportu, hodnoty se znaménkem, poškozené deskriptory) |
+| `cargo test -p usbproto` | deskriptory (konfigurace, alternativní nastavení, poškozené délky), setup pakety, zprávy, hub (deskriptor, stav portu, rychlost, route string a jeho meze), HID boot (rozdíl reportů, rollover, tabulka usage, myš), parser reportu (deskriptory QEMU klávesnice, myši a tabletu, multimédia s id reportu, hodnoty se znaménkem, poškozené deskriptory), mass storage (CBW, CSW, READ/WRITE 10 a 16, kapacita, INQUIRY, sense) |
+| `cargo xtask test --data-disk usb` | datový disk jako flash disk `usb-storage`: všechny testy FS nad ovladačem `usb-storage` |
+| `cargo xtask test` (běh živého USB) | start z obrazu USB jako `usb-storage` až do GUI s terminálem ([Živé USB](zive-usb.md)) |
 | `cargo xtask test`, sada `usb` | klávesnice USB ze startu je důvěryhodná; klávesy z QEMU až do služby (zdroj, scan kód HID); hotplug myši (připojení, pohyb, kolečko, odpojení); nová klávesnice a nová myš čekají na ověření (vstup jen na `secure`, po `trust` vlastníkovi fokusu); externí hub s klávesnicí za ním; tablet (absolutní poloha přes report protokol) |
 
 V QEMU je `qemu-xhci` s klávesnicí `usb-kbd` navázanou na konzoli druhé
@@ -264,6 +327,7 @@ a brala by si události, které má dostat PS/2.
 | 3 | hotovo | externí huby: route string, příznak hubu, počet portů, MTT (Configure Endpoint s endpointy alternativy 1 a pak SET_INTERFACE; hub, který ji odmítne, zůstane s jedním TT) a TT think time v kontextu slotu, TT pro low/full speed za high-speed hubem; odpojení hubu odpojí i zařízení za ním (nejvýš 5 úrovní hubů; port hubu nad 15 nejde adresovat: `usb-hub` ho neresetuje a `ATTACH` by vrátil `NOT_SUPPORTED`; po neúspěšném `ATTACH` ovladač hubu port vypne, aby nenastavené zařízení neodpovídalo na adrese 0) |
 | 4 | hotovo | parser deskriptoru reportu HID: multimediální klávesy, myši s více tlačítky a vodorovným kolečkem, tablety a pera (`EV_ABS`, událost `Absolute`) |
 | 5 | plán | I2C-HID (touchpady notebooků: potřebuje AML a ovladač I2C) |
+| 6 | hotovo | bulk přenosy, disky USB (`usb-storage`, BOT, SCSI) |
 
 Další omezení první verze:
 
@@ -271,7 +335,11 @@ Další omezení první verze:
   řadičem USB 3 funguje zařízení USB 3 jen na kořenovém portu,
 - dotyk více prsty (Multi-touch, kolekce Finger) a gesta zatím ne, jen
   jedno pero nebo jeden bod,
-- bulk a izochronní endpointy zatím ne (disky, zvuk), jeden interrupter,
+- izochronní endpointy zatím ne (zvuk, kamery), jeden interrupter,
+- bulk: jeden přenos nejvýš 16 KiB, u USB 3 bez burstu (MaxBurst 0) - disk
+  USB 3 je proto pomalejší, než by mohl,
+- zrušení visícího přenosu (příkaz Stop Endpoint) zatím není: disk USB,
+  který na přenos neodpoví do 20 s, zůstane nepoužitelný až do odpojení,
 - jen stránky 4 KiB, cíl přerušení je bootovací CPU,
 - kontrolky klávesnice USB (`SET_REPORT`) zatím nesvítí,
 - zařízení připojená za běhu předává službě vstupu supervisor initu

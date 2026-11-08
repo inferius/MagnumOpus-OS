@@ -215,3 +215,39 @@ impl BootMouse {
         self.report(&[0, 0, 0], out);
     }
 }
+
+/// Usage page FIDO Alliance (bezpecnostni klice CTAPHID).
+pub const USAGE_PAGE_FIDO: u32 = 0xF1D0;
+
+/// Je rozhrani bezpecnostni klic FIDO? Hleda v deskriptoru reportu
+/// polozku Usage Page s hodnotou [`USAGE_PAGE_FIDO`] (HID 1.11, 6.2.2.7).
+/// Neplatny deskriptor = ne.
+pub fn is_fido(desc: &[u8]) -> bool {
+    let mut i = 0;
+    while i < desc.len() {
+        let prefix = desc[i];
+        if prefix == 0xFE {
+            // Dlouha polozka: delka v dalsim bajtu.
+            let Some(&n) = desc.get(i + 1) else { return false };
+            i += 3 + n as usize;
+            continue;
+        }
+        let size = match prefix & 3 {
+            3 => 4,
+            s => s as usize,
+        };
+        let Some(data) = desc.get(i + 1..i + 1 + size) else { return false };
+        // Globalni polozka Usage Page: tag 0, typ 1 (bajt 0b0000_01ss).
+        if prefix & 0xFC == 0x04 {
+            let mut v = 0u32;
+            for (k, b) in data.iter().enumerate() {
+                v |= (*b as u32) << (8 * k);
+            }
+            if v == USAGE_PAGE_FIDO {
+                return true;
+            }
+        }
+        i += 1 + size;
+    }
+    false
+}

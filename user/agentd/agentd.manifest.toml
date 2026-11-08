@@ -1,0 +1,23 @@
+# Sluzba agentu AI. Sit jen k poskytovateli modelu (Claude API pres
+# HTTPS) a DNS; jiny cil se odmitne bez dotazu (agent nesmi data poslat
+# jinam). Viz docs/cs/agent.md, kapitola Bezpecnost.
+[app]
+id = "org.magnumopus.agentd"
+name = "Agent AI"
+
+[limits]
+# Konverzace relaci, kryptografie TLS, odpovedi modelu (az 4 MiB).
+memory = "96M"
+kernel_memory = "8M"
+stack = "1M"
+
+[network]
+rights = ["tcp", "dns"]
+ask = false
+sockets = 16
+buffers = "4M"
+
+[[network.connect]]
+proto = ["tcp"]
+to = "api.anthropic.com"
+ports = "443"

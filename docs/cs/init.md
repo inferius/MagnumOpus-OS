@@ -71,6 +71,7 @@ Smyčka čeká na kanál správce zařízení a na konec hlídaných procesů:
 | Událost | Co supervisor udělá |
 |---|---|
 | `devmgr` pošle `input` s kanálem | předá ho službě vstupu (`device`). Takhle se do systému dostanou zařízení USB připojená za běhu |
+| `devmgr` pošle `dev <jméno>` s kanálem | ovladač z manifestu, nový nebo obnovený po pádu: init kanál uloží (`Devices::drivers`) a starý nahradí ([Ovladače](ovladace.md#životní-cyklus-a-obnova-po-pádu)) |
 | `devmgr` pošle `block` | zatím jen zaloguje (disky za běhu přijdou s více disky v `fsd`) |
 | `devmgr` zavře kanál | zaloguje, hotplug přestane fungovat |
 | skončila služba s restartem (`timed`) | zaloguje kód a spustí ji znovu po 100 ms, 200 ms, 400 ms ... (nejvýš 5 s). Na potvrzení nové služby nečeká blokující: její kanál je další položka smyčky. Když do 5 s neodpoví (nebo odpoví chybou), ukončí ji a pokus se počítá jako další pád. Víc než 5 restartů za 60 s = vzdá to a služba zůstane zastavená |
