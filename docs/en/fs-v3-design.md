@@ -249,6 +249,21 @@ All **[designed]**.
   under **`/svazky/<name>`** and in the file manager sidebar under Devices.
   Foreign FS: read right away, write only explicitly (`diskguard`).
   Nothing joins by itself; there are no drive letters.
+- **Volume name, description and identity**: every volume has
+  - a **short name** for paths and the terminal (`/svazky/data`): lower
+    case letters, digits, `-`, no spaces, unique; the default is derived
+    from the description or the disk model and can be changed;
+  - a **description** for people ("4 TB data disk in the drawer") and a
+    free-form **note**;
+  - automatic **details**: model, size, type (NVMe, SATA SSD, HDD, USB,
+    SD), connection, FS, serial number, health;
+  - a stable **identity (UUID)**: pinned folders, union folder sources
+    and settings bind to it, so renaming the short name breaks nothing and
+    the disk is recognized in another port.
+  The terminal uses the short name and shows the description as a hint in
+  completion; `ls /svazky` has columns name, description, type, size,
+  free; the file manager shows mainly the description with the short name
+  in smaller type.
 - **A pool is a deliberate action on a disk, not a setting**: "Mirror the
   system disk" (the same data twice) or "Extend" (more space; with a
   warning that losing one disk loses the data of the whole pool and that

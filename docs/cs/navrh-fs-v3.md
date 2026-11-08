@@ -239,6 +239,20 @@ Celé **[navrženo]**.
   **`/svazky/<jméno>`** a ve Správci souborů v postranním panelu Zařízení.
   Cizí FS: čtení hned, zápis jen výslovně (`diskguard`). Nic se samo
   nespojuje; písmena jednotek nejsou.
+- **Jméno, popis a identita svazku**: každý svazek má
+  - **krátké jméno** pro cesty a terminál (`/svazky/data`): malá písmena,
+    číslice, `-`, bez mezer, jedinečné; výchozí se odvodí z popisu nebo
+    modelu disku, jde změnit;
+  - **popis** pro lidi („Datový disk 4 TB v šuplíku“) a volnou
+    **poznámku**;
+  - automatické **údaje**: model, velikost, typ (NVMe, SATA SSD, HDD, USB,
+    SD), připojení, FS, sériové číslo, stav zdraví;
+  - stálou **identitu (UUID)**: připnuté složky, zdroje sjednocených
+    složek a nastavení se vážou na ni, takže přejmenování krátkého jména
+    nic nerozbije a disk se pozná i v jiném portu.
+  Terminál pracuje s krátkým jménem a v doplňování ukazuje popis jako
+  nápovědu; `ls /svazky` má sloupce jméno, popis, typ, velikost, volno;
+  Správce souborů ukazuje hlavně popis a krátké jméno menším písmem.
 - **Fond je vědomá akce u disku, ne nastavení**: „Zrcadlit systémový
   disk“ (stejná data dvakrát) nebo „Rozšířit“ (víc místa; s varováním, že
   ztráta jednoho disku znamená ztrátu dat celého fondu a že se míchají
