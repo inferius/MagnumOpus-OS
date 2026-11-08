@@ -43,8 +43,9 @@ pub struct FrameState {
     /// Snimek odeslany displeji, cekame na `PRESENTED`.
     pub in_flight: bool,
     pub(crate) groups: Vec<Group>,
-    /// Kdo ceka na ustaleni (inspekce `Settle`).
-    pub(crate) settle: Vec<crate::PeerId>,
+    /// Kdo ceka na ustaleni (inspekce `Settle`) a od kolikateho
+    /// zobrazeneho snimku je jeho pozadavek na obrazovce.
+    pub(crate) settle: Vec<(crate::PeerId, u64)>,
     /// Perioda snimku z obnovovaci frekvence vystupu (0 = vychozi 60 Hz).
     pub(crate) period: u64,
     /// Od kdy nekdo ceka na ustaleni, a uz ohlaseno, proc ne.
@@ -322,11 +323,26 @@ impl Comp {
                 self.send(id, ServerMsg::Presented { txn, time });
             }
         }
-        if self.is_settled() {
-            for p in core::mem::take(&mut self.frame.settle) {
-                self.out.push(crate::Out::Inspect(p, guiproto::control::InspectReply::Done));
-            }
+        // Ustaleno pro cekajici: vse, co bylo pred dotazem, je zobrazene
+        // (dalsi cely snimek po dotazu) a nic nepotvrzeneho neceka. Prubezne
+        // kreslici aplikace (animace, bezici uloha v terminalu) uz ustaleni
+        // neblokuje.
+        let pending = !self.frame.groups.is_empty()
+            || self.windows.values().any(|w| w.configure.is_some())
+            || self.clients.values().any(|c| !c.staged.is_empty());
+        let (settled, presented) = (self.is_settled(), self.frame.presented);
+        let (done, wait): (Vec<_>, Vec<_>) = core::mem::take(&mut self.frame.settle).into_iter().partition(|&(_, target)| settled || (!pending && presented >= target));
+        self.frame.settle = wait;
+        for (p, _) in done {
+            self.out.push(crate::Out::Inspect(p, guiproto::control::InspectReply::Done));
         }
+    }
+
+    /// Ceka na ustaleni (inspekce `Settle`): odpoved az po dalsim celem
+    /// snimku (snimek na ceste mohl zacit pred dotazem).
+    pub(crate) fn settle_wait(&mut self, peer: crate::PeerId) {
+        let target = self.frame.presented + if self.frame.in_flight { 2 } else { 1 };
+        self.frame.settle.push((peer, target));
     }
 
     /// Ceka-li nekdo na ustaleni dele nez 5 s: jednou radek, co ho drzi

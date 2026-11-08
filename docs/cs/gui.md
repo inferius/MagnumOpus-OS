@@ -937,8 +937,14 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 
 **Inspekce** (`inspect`, pro testy, později čtečku obrazovky a lupu):
 seznam oken, strom přístupnosti okna v souřadnicích obrazovky, akce přes
-uzel, barva pixelu obrazovky a „počkej na ustálení“ (vše složeno
-a zobrazeno).
+uzel, barva pixelu obrazovky a „počkej na ustálení“: odpověď, až je vše,
+co čekalo před dotazem, složené a zobrazené (další celý snímek po dotazu)
+a nečeká nepotvrzený `CONFIGURE`, transakce ani skupina. Průběžně kreslící
+aplikace (animace, běžící úloha v terminálu) ustálení neblokuje; dřív se
+čekalo na úplně nečinný kompozitor a test terminálu pod zátěží vypršel.
+Když ustálení čeká přes 5 s, kompozitor zapíše, co ho drží.
+**[ověřeno v QEMU]** (test `settle_answers_even_while_app_redraws_continuously`
+v `libs/comp`, testy GUI v `cargo xtask test`)
 
 ## Protokol okna (`libs/guiproto`)
 

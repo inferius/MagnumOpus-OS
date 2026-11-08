@@ -301,7 +301,7 @@ impl Comp {
                 if self.is_settled() {
                     InspectReply::Done
                 } else {
-                    self.frame.settle.push(peer);
+                    self.settle_wait(peer);
                     return;
                 }
             }
