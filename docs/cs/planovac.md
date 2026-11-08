@@ -222,10 +222,14 @@ Testy v jádře (`kernel/src/tests/sched*.rs`, běží v QEMU s 4 CPU):
 
 - **Latence vstup -> snímek** při plné zátěži pozadí: „ovladač" (Interactive)
   probudí „inputd", ten „compd", ten vykreslí snímek; na všech CPU běží
-  smyčky Background a Normal. Měří se čas od události po snímek.
+  smyčky Background a Normal. Měří se čas od události po snímek a porovná
+  s referenčním během bez zátěže ve stejném testu (pod TCG závisí absolutní
+  čas na hostiteli; test hlídá hrubou chybu, čísla se logují).
 - **Podíl Background** pod zátěží Interactive: na každé CPU připadá jedna
-  smyčka Interactive a jedna Background, Background musí dostat aspoň 4 %
-  (záruka 1/16 při vahách 15 : 1, minus tolerance měření).
+  smyčka Interactive a jedna Background. Záruka je 1/16 (62 ‰) při vahách
+  15 : 1; pod TCG se běh smyček měří jen přibližně (vytížený hostitel
+  přerušuje vCPU), takže test hlídá hladovění (aspoň 15 ‰, starý plánovač
+  0 ‰) a opačný extrém (nejvýš 400 ‰), přesné číslo loguje.
 - **Dědění přes IPC**: Normal obsluha probuzená zprávou od Interactive běží
   jako Interactive; paket portu nese třídu.
 - **Realtime**: přijetí (právě jedno vlákno s 50 % na CPU) a zpoždění
