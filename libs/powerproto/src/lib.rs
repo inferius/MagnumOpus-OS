@@ -56,6 +56,10 @@ pub enum Request {
     /// (`target` prazdny = vypis). `level`: `error` ... `trace`, nebo
     /// `vychozi` (zruseni prepsani). Odpoved [`Reply::Text`].
     LogLevel { target: String, level: String },
+    /// Jen kanal shell -> init: diagnosticky snimek GUI hned (prikaz
+    /// `diag snap`, `docs/cs/gui.md`); odpoved [`Reply::Text`] nebo
+    /// [`Reply::Failed`] (GUI nebezi).
+    Snapshot,
 }
 
 /// Udalost hlasena sluzbou bez pozadavku.
@@ -167,6 +171,7 @@ mod op {
     pub const CPU_PERF: u32 = 6;
     pub const REPORT: u32 = 7;
     pub const LOG_LEVEL: u32 = 8;
+    pub const SNAPSHOT: u32 = 9;
 
     pub const R_OK: u32 = 100;
     pub const R_FAILED: u32 = 101;
@@ -189,6 +194,7 @@ impl Request {
             Request::CpuPerf => op::CPU_PERF,
             Request::Report => op::REPORT,
             Request::LogLevel { .. } => op::LOG_LEVEL,
+            Request::Snapshot => op::SNAPSHOT,
         });
         if let Request::LogLevel { target, level } = self {
             w.str(target).str(level);
@@ -207,6 +213,7 @@ impl Request {
             op::CPU_PERF => Request::CpuPerf,
             op::REPORT => Request::Report,
             op::LOG_LEVEL => Request::LogLevel { target: r.str()?, level: r.str()? },
+            op::SNAPSHOT => Request::Snapshot,
             _ => return Err(Error::InvalidArgs),
         };
         if !r.is_empty() {

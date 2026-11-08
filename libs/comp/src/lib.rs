@@ -20,6 +20,7 @@
 
 extern crate alloc;
 
+pub mod diag;
 pub mod dialog;
 pub mod frame;
 pub mod gpu;
@@ -122,6 +123,13 @@ pub struct Comp {
     pub(crate) tasks: (u32, u32),
     /// Radky trasovani vstupu (sluzba je vypise, `take_trace`).
     pub(crate) trace: Vec<alloc::string::String>,
+    /// Poslednich [`diag::RECENT`] kroku trasovani (diagnosticky snimek).
+    pub(crate) recent_input: alloc::collections::VecDeque<alloc::string::String>,
+    /// Zadost o diagnosticky snimek s duvodem (vyzvedne sluzba).
+    pub(crate) snapshot_request: Option<alloc::string::String>,
+    pub(crate) snapshot_cfg: diag::Config,
+    /// Cas posledniho automatickeho snimku (limit `interval_s`).
+    pub(crate) last_auto_snapshot: Option<u64>,
 }
 
 impl Comp {
@@ -154,6 +162,10 @@ impl Comp {
             input_now: 0,
             tasks: (0, 0),
             trace: Vec::new(),
+            recent_input: alloc::collections::VecDeque::new(),
+            snapshot_request: None,
+            snapshot_cfg: diag::Config::default(),
+            last_auto_snapshot: None,
         };
         c.damage_all();
         c
@@ -171,7 +183,9 @@ impl Comp {
         if self.trace.len() >= 64 {
             self.trace.remove(0);
         }
-        self.trace.push(alloc::format!("vstup: id={} compd {text}", time / 1000));
+        let line = alloc::format!("vstup: id={} compd {text}", time / 1000);
+        diag::remember(&mut self.recent_input, &line);
+        self.trace.push(line);
     }
 
     /// Popis okna pro trasovani: aplikace a id.

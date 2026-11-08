@@ -143,6 +143,11 @@ pub fn request_from_shell(data: &[u8], chan: Channel) -> Option<Channel> {
             Ok(text) => Reply::Text(text),
             Err(e) => Reply::Failed(e),
         },
+        // Diagnosticky snimek: kompozitor (blok v logu, obrazek pres logd).
+        Ok(Request::Snapshot) => match crate::gui::snapshot() {
+            Ok(()) => Reply::Text(alloc::string::String::from("snimek: blok stavu v logu, obrazek v /system/log/snimek-*.bmp")),
+            Err(e) => Reply::Failed(e),
+        },
         // Dotazy (stav, cidla) preposlat acpid.
         Ok(r) => request(&r, Duration::from_secs(10)).unwrap_or_else(Reply::Failed),
         Err(e) => Reply::Failed(e),

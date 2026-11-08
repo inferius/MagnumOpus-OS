@@ -24,7 +24,10 @@ pub fn debug_log(a: Args) -> Result<u64> {
     if text.starts_with(VSTUP) && !log::enabled_for(log::Level::Info, "vstup") {
         return Ok(0);
     }
-    match log::limit::check(log::limit::text_key(p.id, &text), crate::arch::now_ns()) {
+    // Blok diagnostickeho snimku od kompozitoru (jen na vyzadani, radky si
+    // bez cislic byvaji podobne): bez omezeni opakovani, jinak by se ztratil.
+    let snapshot = &*p.name == "compd" && text.starts_with("snimek ");
+    match if snapshot { log::limit::Verdict::Log(0) } else { log::limit::check(log::limit::text_key(p.id, &text), crate::arch::now_ns()) } {
         log::limit::Verdict::Drop => return Ok(0),
         log::limit::Verdict::Log(0) => {}
         log::limit::Verdict::Log(n) => log::summary(&p.name, n, format_args!("proces {}", p.id)),

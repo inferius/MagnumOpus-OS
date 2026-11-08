@@ -100,6 +100,16 @@ impl Comp {
         Rect::new(self.input.px, self.input.py, CURSOR_W, CURSOR_H)
     }
 
+    /// Stisk a tazeni pro diagnosticky snimek.
+    pub(crate) fn input_summary(&self) -> alloc::string::String {
+        let press = self.input.press_target.map_or(alloc::string::String::from("zadne"), |g| self.window_name(g));
+        alloc::format!(
+            "tlacitko drzene nad {press}, tazeni {}, zdroju umeleho vstupu {}",
+            if self.input.drag.is_some() { "ano" } else { "ne" },
+            self.input.injecting
+        )
+    }
+
     /// Okno a zona pod bodem (odshora).
     pub fn hit(&self, x: i32, y: i32) -> Option<(u32, Zone)> {
         for &gid in self.z.iter().rev() {
@@ -202,6 +212,14 @@ impl Comp {
             Event::Key { code, action, ch, .. } => {
                 if !syn {
                     self.input.last_key = now;
+                }
+                // Diagnosticky snimek: jen fyzicka klavesnice, aplikaci nejde.
+                if self.snapshot_cfg.is_shortcut(code, mods) {
+                    if !syn && action == Action::Press {
+                        self.snapshot_request = Some(alloc::string::String::from("zkratka"));
+                        self.trace(r.time, format_args!("zkratka diagnostickeho snimku"));
+                    }
+                    return;
                 }
                 if self.dialogs.active().is_some() {
                     if !syn {

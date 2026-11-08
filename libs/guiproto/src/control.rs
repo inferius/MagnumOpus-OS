@@ -36,6 +36,11 @@ pub const THEME: &str = "theme";
 /// `sources [net] [audio]`: kanaly pro stav v liste (handly ve stejnem
 /// poradi): relace site jen s pravem `INFO`, kanal zvukove sluzby.
 pub const SOURCES: &str = "sources";
+/// `snapshots`: kanal na logd pro obrazky diagnostickeho snimku (handle;
+/// zprava `snimek <id> <delka>` + VMO s BMP).
+pub const SNAPSHOTS: &str = "snapshots";
+/// `snapshot`: udelat diagnosticky snimek hned (prikaz shellu pres init).
+pub const SNAPSHOT: &str = "snapshot";
 pub const INPUT: &str = "input";
 pub const SECURE: &str = "secure";
 pub const CONNECT: &str = "connect";

@@ -91,6 +91,10 @@ pub mod state {
     pub const SELECTED: u32 = 1 << 3;
     pub const EXPANDED: u32 = 1 << 4;
     pub const BUSY: u32 = 1 << 5;
+    /// Ukazatel je nad prvkem.
+    pub const HOVER: u32 = 1 << 6;
+    /// Tlacitko mysi stisknute na prvku (jeste nepustene).
+    pub const PRESSED: u32 = 1 << 7;
 }
 
 /// Bity akci, ktere uzel podporuje (a kody v `A11Y_ACTION`).

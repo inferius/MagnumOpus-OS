@@ -18,6 +18,7 @@ mod gpu;
 mod status;
 mod peers;
 mod screen;
+mod snapshot;
 
 use alloc::format;
 use alloc::string::String;
@@ -54,6 +55,36 @@ struct Service {
     /// Zdroje stavu v liste: sit a zvuk.
     net_src: Option<status::Source>,
     audio_src: Option<status::Source>,
+    /// Kanal na logd pro obrazky diagnostickeho snimku (`snapshots`).
+    snapshots: Option<Channel>,
+}
+
+impl Service {
+    /// Kanal od logd: `nastaveni <klic=hodnota ...>` (soubor
+    /// `/system/log/snimek.conf`) a `pad <aplikace>` (automaticky snimek po
+    /// padu, kdyz je zapnuty).
+    fn read_snapshot_channel(&mut self, now: u64) {
+        let Some(ch) = &self.snapshots else { return };
+        loop {
+            match ch.try_read() {
+                Ok(m) => {
+                    let text = String::from_utf8_lossy(&m.data);
+                    let Some(c) = self.comp.as_mut() else { continue };
+                    if let Some(cfg) = text.strip_prefix("nastaveni ") {
+                        c.set_snapshot_config(comp::diag::Config::parse(cfg));
+                        println!("compd: nastaveni snimku {:?}", c.snapshot_config());
+                    } else if let Some(app) = text.strip_prefix("pad ") {
+                        c.request_auto_snapshot(true, &format!("pad {app}"), now);
+                    }
+                }
+                Err(Error::ShouldWait) => return,
+                Err(_) => {
+                    self.snapshots = None;
+                    return;
+                }
+            }
+        }
+    }
 }
 
 fn main(startup: Startup) -> i64 {
@@ -72,6 +103,7 @@ fn main(startup: Startup) -> i64 {
         frame_stats: (0, 0, 0),
         net_src: None,
         audio_src: None,
+        snapshots: None,
     };
     loop {
         if !s.wait_and_serve() {
@@ -121,6 +153,9 @@ impl Service {
         for src in [&self.net_src, &self.audio_src].into_iter().flatten() {
             items.push((src.ch.handle(), rd));
         }
+        if let Some(s) = &self.snapshots {
+            items.push((s.handle(), rd));
+        }
         self.peers.wait_items(&mut items);
         let r = libos::wait_many(&items, deadline);
         drop(items);
@@ -150,6 +185,7 @@ impl Service {
         for _ in [&self.net_src, &self.audio_src].into_iter().flatten() {
             next(&obs);
         }
+        let snap = if self.snapshots.is_some() { next(&obs) } else { Signals(0) };
         let peer_obs: Vec<Signals> = obs.get(i..).map(|s| s.to_vec()).unwrap_or_default();
         // 1. Vstup ma prednost.
         if foc.intersects(Signals::READABLE) {
@@ -190,6 +226,16 @@ impl Service {
             self.handle_reset();
         } else if self.pending_hotplug {
             self.handle_hotplug();
+        }
+        // Zpravy od logd (nastaveni snimku, zadost po padu aplikace).
+        if snap.intersects(Signals::READABLE | Signals::PEER_CLOSED) {
+            self.read_snapshot_channel(now);
+        }
+        // Diagnosticky snimek (zkratka, prikaz, automaticka udalost).
+        if let Some(c) = self.comp.as_mut()
+            && let Some(why) = c.take_snapshot_request()
+        {
+            snapshot::take(c, &why, self.peers.frame, self.snapshots.as_ref());
         }
         // 4. Tik.
         self.maybe_tick();
@@ -404,6 +450,17 @@ impl Service {
                 }
                 self.attach_display(handles)
             }
+            control::SNAPSHOTS => handles.into_iter().next().ok_or(Error::InvalidArgs).map(|h| {
+                self.snapshots = Some(Channel::from_handle(h));
+                (String::new(), Vec::new())
+            }),
+            control::SNAPSHOT => match self.comp.as_mut() {
+                Some(c) => {
+                    c.request_snapshot("prikaz");
+                    Ok((String::new(), Vec::new()))
+                }
+                None => Err(Error::BadState),
+            },
             control::SOURCES => {
                 let mut hs = handles.into_iter();
                 for w in words.by_ref() {

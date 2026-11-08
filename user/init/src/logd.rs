@@ -95,6 +95,15 @@ pub fn proc_crash(name: &str, why: &str) {
     }
 }
 
+/// Kanal pro obrazky diagnostickeho snimku: jeden konec dostane logd
+/// (zprava `snapshots`), druhy se vrati pro kompozitor.
+pub fn snapshot_channel() -> Result<Channel> {
+    let l = LOGD.get().ok_or(Error::NotFound)?;
+    let (mine, theirs) = Channel::create()?;
+    l.control.lock().write(b"snapshots", vec![theirs.into_handle()])?;
+    Ok(mine)
+}
+
 /// Balicek pro vyvojare: (cesta, nahled obsahu).
 pub fn report() -> Result<(String, String)> {
     let l = LOGD.get().ok_or(Error::NotFound)?;

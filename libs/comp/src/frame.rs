@@ -210,10 +210,12 @@ impl Comp {
                 }
                 Some((_, sent)) if !c.unresponsive && now >= sent + PING_TIMEOUT => {
                     c.unresponsive = true;
+                    let name = c.info.id.clone();
                     let wins: Vec<u32> = c.windows.values().copied().collect();
                     for g in wins {
                         self.damage_window(g);
                     }
+                    self.request_auto_snapshot(false, &alloc::format!("{name} nereaguje"), now);
                 }
                 _ => {}
             }

@@ -229,6 +229,12 @@ impl<M: Clone> Ui<M> {
             if e.disabled {
                 state |= a11y::state::DISABLED;
             }
+            if self.hover == Some(i) {
+                state |= a11y::state::HOVER;
+            }
+            if self.pressed == Some(i) {
+                state |= a11y::state::PRESSED;
+            }
             let layer = if e.space == 0 { ROOT_LAYER } else { scroll_layers(e.space - 1).1 };
             out.push(A11yNode {
                 id: node_id(i),
