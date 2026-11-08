@@ -134,7 +134,7 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
             Some(_) => {
                 let n = str_arg(&a, 0, "prikaz")?;
                 match builtin(&n) {
-                    Some(s) => help_for(s),
+                    Some(s) => crate::doc::help_text(s),
                     None => return Err(a.err(code::UNKNOWN, alloc::format!("prikaz '{n}' neznam"))),
                 }
             }
@@ -223,17 +223,6 @@ pub fn help_overview() -> String {
     }
     s.push_str("\nZápis C (volání funkcí): fmt --style c.\n");
     s
-}
-
-/// Napoveda k prikazu: popis, obe jmena, pouziti, prepinace, vstup/vystup.
-pub fn help_for(s: &crate::sig::Sig) -> String {
-    let mut out = alloc::format!("{} (plné jméno {}): {}\n  použití: {}\n", s.name, s.full, s.help, crate::parse::usage(s));
-    for f in s.flags {
-        let short = f.short.map(|c| alloc::format!("-{c}, ")).unwrap_or_default();
-        out.push_str(&alloc::format!("  {short}--{}: {}\n", f.long, f.help));
-    }
-    out.push_str(&alloc::format!("  zápis C: {}(...)\n", s.name.replace('-', "_")));
-    out
 }
 
 /// `preview { ... }`: blok nanecisto (dalsi vrstva klonu), diff,

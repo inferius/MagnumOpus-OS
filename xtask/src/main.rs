@@ -652,7 +652,18 @@ fn check_kernel(arch: &Arch, opts: &Options) -> Result<()> {
 
 /// Vygeneruje HTML dokumentaci a overi odkazy.
 fn build_docs() -> Result<PathBuf> {
-    let index = docs::build(&workspace_root(), &target_dir().join("docs"))?;
+    // Stranka "Prikazy shellu" z metadat prikazu (jeden zdroj pravdy:
+    // libs/shlang/src/doc); zapise se jen pri zmene.
+    let root = workspace_root();
+    for (en, file) in [(false, "docs/cs/prikazy-shellu.md"), (true, "docs/en/shell-commands.md")] {
+        let md = shlang::doc::markdown(en);
+        let path = root.join(file);
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(md.as_str()) {
+            std::fs::write(&path, md)?;
+            println!("xtask: {file} vygenerovano z metadat prikazu");
+        }
+    }
+    let index = docs::build(&root, &target_dir().join("docs"))?;
     println!("xtask: dokumentace {}", index.display());
     Ok(index)
 }
