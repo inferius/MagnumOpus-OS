@@ -149,6 +149,10 @@ Cíl: **nikdy nezůstat s černou obrazovkou.**
   zapíše záznam zpět, pošle `RESET` a dál slouží **jen režim firmwaru**
   (bez `MODESET`, jeden buffer). Kompozitor se znovu připojí.
 - **Čistý konec** (vypnutí) obraz firmwaru také vrátí.
+- **Log jádra**: ovladač vybraný pro GUI dostane od initu framebuffer
+  firmwaru a převezme ho (`FB_CONTROL CLAIM`, jako `fbdisplay`) – jádro pak
+  nekreslí log do paměti, kterou ukazuje GUI. Init kvůli tomu instanci od
+  devmgr nahradí svou (ta první registry obrazu ještě neměnila).
 
 Co pokryté není (rizika):
 

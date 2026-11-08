@@ -45,8 +45,11 @@ pub struct Kit {
     device: Handle,
     config: Handle,
     snapshot: Handle,
-    /// Prvni instance (spustil ji spravce zarizeni).
+    /// Bezici instance (prvni spustil spravce zarizeni).
     pub process: Option<Process>,
+    /// Ovladac kresli GUI: dostava framebuffer firmwaru a prevezme ho
+    /// (`FB_CONTROL CLAIM`), aby do nej jadro dal nekreslilo log.
+    pub gui: bool,
 }
 
 /// Ovladace nahlasene spravcem zarizeni (vyber si je bere).
@@ -76,6 +79,7 @@ pub fn add(text: &[u8], handles: Vec<Handle>) {
         config,
         snapshot,
         process: Some(Process::from_handle(process)),
+        gui: false,
     });
 }
 
@@ -104,7 +108,12 @@ pub fn probe(ch: &Channel) -> Result<modes::Connector> {
 
 /// Vybere nativni ovladac pro GUI: prvni, ktery projde [`probe`]
 /// (poradi PCI: na x86 je karta firmwaru prvni). Vraci konec klienta.
-pub fn choose() -> Option<Channel> {
+///
+/// Instanci od spravce zarizeni nahradi vlastni s framebufferem firmwaru:
+/// ovladac ho pak prevezme jako `fbdisplay` a jadro prestane kreslit log
+/// do pameti, kterou ukazuje GUI. Prvni instance do te doby registry
+/// obrazu nezmenila (jen zaznam firmwaru, ktery nova zapise znovu).
+pub fn choose(startup: &libos::Startup) -> Option<Channel> {
     let mut list = NATIVES.lock();
     let mut i = 0;
     while i < list.len() {
@@ -112,6 +121,18 @@ pub fn choose() -> Option<Channel> {
         match ok {
             Some(Ok(c)) => {
                 let mut kit = list.remove(i);
+                kit.gui = true;
+                if let Some(old) = kit.process.take() {
+                    let _ = old.kill();
+                    let _ = old.wait_exit(Some(time::deadline_after(PROBE_TIMEOUT)));
+                }
+                match kit.spawn(startup, false) {
+                    Ok(p) => kit.process = Some(p),
+                    Err(e) => {
+                        println!("init: nativni displej {} nelze spustit znovu: {e}", kit.program);
+                        continue;
+                    }
+                }
                 println!("init: displej je nativni ovladac {} ({}, {} {})", kit.program, kit.pci, modes::kind::name(c.kind), c.monitor);
                 let ch = kit.client.take();
                 *CHOSEN.lock() = Some(kit);
@@ -136,6 +157,10 @@ impl Kit {
             StartHandle::user(self.driver_end.give()?.into_handle()),
             StartHandle::user(self.snapshot.duplicate(None)?),
         ];
+        let mut handles = handles;
+        if self.gui && let Some(fb) = startup.framebuffer.as_ref() {
+            handles.push(StartHandle::user(fb.handle().duplicate(None)?));
+        }
         let (p, control) = libos::spawn(&self.program, image, handles)?;
         let flag = if restore { " restore" } else { "" };
         control.write(format!("pci {}{flag}", self.pci).as_bytes(), Vec::new())?;

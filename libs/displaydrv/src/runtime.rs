@@ -6,7 +6,10 @@
 //! 2. konfiguracni prostor PCI,
 //! 3. konec kanalu ke klientovi (kompozitor; konec drzi init, takze
 //!    prezije pad ovladace),
-//! 4. objekt pameti pro zaznam stavu firmwaru ([`crate::snapshot`]).
+//! 4. objekt pameti pro zaznam stavu firmwaru ([`crate::snapshot`]),
+//! 5. volitelne framebuffer firmwaru: ovladac vybrany pro GUI ho prevezme
+//!    (`FB_CONTROL CLAIM`, jako `fbdisplay`), aby jadro nekreslilo log do
+//!    pameti, kterou ukazuje GUI. Pri konci procesu ho jadro vrati samo.
 //!
 //! Bootstrap zprava: `pci <sbernice> <zarizeni> <funkce> [restore]`;
 //! `restore` = nova instance po padu predchozi: vratit stav firmwaru
@@ -37,6 +40,8 @@ pub struct Start {
     pub snapshot: Mapping,
     _snapshot_vmo: Vmo,
     pub config: Config,
+    /// Framebuffer firmwaru (jen ovladac vybrany pro GUI).
+    pub framebuffer: Option<Vmo>,
     /// Handle vlastniho procesu: libos ho potrebuje k mapovani pameti,
     /// proto musi zit po celou dobu behu.
     _process: libos::Process,
@@ -50,6 +55,7 @@ impl Start {
             println!("{name}: chybi handly ve startovni zprave");
             return None;
         };
+        let framebuffer = h.next().map(Vmo::from_handle);
         let text = startup.bootstrap.read(None).ok()?;
         let Some(config) = core::str::from_utf8(&text.data).ok().and_then(parse_config) else {
             println!("{name}: neplatna konfigurace");
@@ -70,8 +76,19 @@ impl Start {
             snapshot,
             _snapshot_vmo: snapshot_vmo,
             config,
+            framebuffer,
             _process: process,
         })
+    }
+
+    /// Prevezme framebuffer firmwaru od jadra (kdyz ho ovladac dostal).
+    pub fn claim_framebuffer(&self, name: &str) {
+        if let Some(fb) = &self.framebuffer {
+            match libos::sys::fb_claim(fb.handle().raw(), true) {
+                Ok(()) => println!("{name}: framebuffer firmwaru prevzat (jadro do nej nekresli)"),
+                Err(e) => println!("{name}: framebuffer firmwaru nelze prevzit: {e}"),
+            }
+        }
     }
 
     /// Pamet zaznamu firmwaru.
