@@ -542,14 +542,15 @@ fsd (scrub, maintenance) ──▶ │ ▲                  │ watch: app jobs
   jobs (syscall `JOB_PROCESSES`, CPU time and job memory). A process in a
   job that no running task reports is a task of origin `unknown`; a task
   with a job without live processes finishes.
+- **The GUI task manager** (`gui-tasks`) is started by init in the normal
+  run with a client channel (the user's own tasks, may control).
 - **Shell:** `tasks` returns a table (`tasks | where owner == "service"`),
   `tasks cancel|pause|resume <id>`, `tasks log <id> -n 50`. In the window a
   task panel (Ctrl-T: arrows, `c` cancel, `p` pause, `r` resume), "tasks N"
   in the status line and a notice on completion or failure.
 
 ⚠️ **Limits:** no producer supports pausing yet (taskd returns
-`NOT_SUPPORTED`); the GUI task manager (`gui-tasks`) is not started in the
-normal run yet (it gets a client channel once init starts it); processes in
+`NOT_SUPPORTED`); processes in
 a nested job of an application are unknown (only processes directly in its
 job belong to the task).
 

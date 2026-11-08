@@ -127,10 +127,11 @@ pub const FB_CONTROL: u64 = 46;
 /// Procesy jobu a jeho potomku. `(job, out_ptr, max) -> pocet`; job
 /// potrebuje `READ`, na `out_ptr` zapise nejvys `max` zaznamu
 /// [`crate::job::ProcEntry`] (64 B), vrati celkovy pocet (i nad `max`)
-pub const JOB_PROCESSES: u64 = 47;
+pub const JOB_PROCESSES: u64 = 48;
 
-/// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 48;
+/// Pocet definovanych syscallu (pro tabulky a testy). Cislo 47 je
+/// `VMO_REVOKE` (vetev Venus, slucuje se do main).
+pub const COUNT: u64 = 49;
 
 /// Operace `FB_CONTROL`.
 pub mod fb_op {

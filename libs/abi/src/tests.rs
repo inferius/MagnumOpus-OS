@@ -112,7 +112,10 @@ fn every_syscall_is_documented() {
         "FB_CONTROL",
         "JOB_PROCESSES",
     ];
-    assert_eq!(names.len() as u64, crate::syscall::COUNT);
+    // Cislo 47 je rezervovane pro VMO_REVOKE (vetev Venus, slucuje se do
+    // main); po slouceni pribude do seznamu a rezerva zmizi.
+    const RESERVED: u64 = 1;
+    assert_eq!(names.len() as u64 + RESERVED, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
         let text = std::fs::read_to_string(root.join(doc)).unwrap_or_else(|e| panic!("{doc}: {e}"));
         for name in names {

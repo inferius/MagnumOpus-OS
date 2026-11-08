@@ -508,14 +508,15 @@ fsd (scrub, údržba) ──▶       │ ▲                   │ watch: joby 
   (syscall `JOB_PROCESSES`, čas CPU a paměť jobu). Proces v jobu, který
   žádná běžící úloha nehlásí, je úloha původu `unknown`; úloha s jobem
   bez živých procesů skončí.
+- **Správce úloh v GUI** (`gui-tasks`) v běžném běhu spouští init
+  s kanálem klienta (vlastní úlohy uživatele, smí řídit).
 - **Shell:** `tasks` vrátí tabulku (`tasks | where owner == "service"`),
   `tasks cancel|pause|resume <id>`, `tasks log <id> -n 50`. V okně panel
   úloh (Ctrl-T: šipky, `c` zrušit, `p` pozastavit, `r` pokračovat), ve
   stavovém řádku „úlohy N“ a upozornění na dokončení nebo chybu.
 
 ⚠️ **Omezení:** pozastavení zatím žádný producent neumí (taskd vrátí
-`NOT_SUPPORTED`); správce úloh v GUI (`gui-tasks`) se v běžném běhu zatím
-nespouští (dostane kanál klienta, až ho init spustí); procesy ve vnořeném
+`NOT_SUPPORTED`); procesy ve vnořeném
 jobu aplikace jsou neznámé (patří k úloze jen procesy přímo v jejím jobu).
 
 ## AI v systému (návrh)

@@ -154,6 +154,8 @@ pub fn name(number: u64) -> &'static str {
         "JOB_INFO",
         "CLOCK_ADJUST",
         "FB_CONTROL",
+        // 47 = VMO_REVOKE (vetev Venus; doplni se pri slouceni).
+        "?",
         "JOB_PROCESSES",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")

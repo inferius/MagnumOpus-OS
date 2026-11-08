@@ -167,5 +167,15 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>) {
     if let Err(e) = gui.launch(startup, "gui-demo") {
         println!("init: gui-demo nelze spustit: {e}");
     }
+    // Spravce uloh: druhy handle = kanal klienta prehledu uloh (identita
+    // uzivatele, vlastni ulohy, smi ridit).
+    match crate::tasks::client("uzivatel", false, true) {
+        Ok(c) => {
+            if let Err(e) = gui.launch_with(startup, "gui-tasks", vec![StartHandle::user(c.into_handle())]) {
+                println!("init: gui-tasks nelze spustit: {e}");
+            }
+        }
+        Err(e) => println!("init: kanal prehledu uloh pro gui-tasks: {e}"),
+    }
     *GUI.lock() = Some(gui);
 }
