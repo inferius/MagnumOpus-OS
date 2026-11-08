@@ -3,8 +3,9 @@
 //! Okno s vlastnim titulkem: aplikace kresli plochu titulku (kartu
 //! relace) a deklaruje oblasti pro presun; odznak duvery a tlacitka okna
 //! kresli system. Obsah je interaktivni terminal `term::ui` (editor se
-//! zvyraznenim, bloky vystupu, tabulky, prubehy, vyzvy) kresleny do
-//! mrizky `term::screen` - stejne jako zalozni konzole.
+//! zvyraznenim, bloky vystupu, tabulky, prubehy, vyzvy) v mrizce
+//! `term::screen`; bunky kresli okno pismem JetBrains Mono a barvami
+//! `term_*` z tokenu (`design/terminal.html`).
 //!
 //! Startovni zprava (kind USER): [kanal okna ke kompozitoru, kanal
 //! pripojeni k termd od initu]. Na `connect` init spusti termd a vrati
@@ -26,29 +27,87 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use gfx::text::Text;
-use gfx::{Canvas, Image, Rect, rgb};
+use gfx::text::Family;
+use gfx::{Canvas, Rect};
 use guiproto::a11y::{Node, Role, actions};
 use guiproto::action::Value;
 use guiproto::window::{ClientMsg, Mode, RegionKind};
 use libos::{Channel, Error, Handle, Signals, Startup, println, time};
 use term::proto::ServerMsg;
-use term::screen::{self, Screen, Surface};
-use term::theme::Theme;
+use term::screen::Screen;
+use term::theme::{Rgb, Theme};
+use theme::Mode as ColorMode;
 use term::ui::App;
 use ui::client::{Event, Link, Window};
 
 libos::entry!(main);
 
-const TITLE_H: u32 = 32;
-/// Karta relace v titulku (vpravo od odznaku systemu).
-const TAB: Rect = Rect::new(240, 4, 150, 28);
+/// Vzhled z tokenu (`design/tokens.toml`): titulek, mrizka, barvy.
+struct Look {
+    t: theme::Theme,
+    mono: Family,
+    ui: Family,
+}
+
+impl Look {
+    fn new() -> Self {
+        let t = theme::Theme::builtin(ColorMode::Light);
+        // Terminal bez ligatur (`font.mono_features` je vypina); zapnute
+        // vlastnosti zadne.
+        let mono = Family::new(font::mono(), &[]);
+        Self { t, mono, ui: ui::Look::ui_fonts() }
+    }
+
+    fn title_h(&self) -> u32 {
+        self.t.size.title_h
+    }
+
+    /// Okraj mrizky (`s4`).
+    fn pad(&self) -> u32 {
+        self.t.space[4]
+    }
+
+    /// Bunka mrizky: sirka znaku a vyska radku (`type.mono`).
+    fn cell(&self) -> (u32, u32) {
+        let s = self.t.text.mono;
+        let f = self.mono.face_ref(s.weight);
+        let w = f.font().advance(f.font().glyph_index('0'), s.size);
+        ((w + 0.5) as u32, s.line)
+    }
+
+    /// Karta relace v titulku: za odznakem systemu (misto podle
+    /// `design/terminal.html`).
+    fn tab(&self) -> Rect {
+        let sp = &self.t.space;
+        let h = self.t.size.control_h_compact + sp[2];
+        Rect::new((self.t.size.hit_min * 4) as i32, (self.title_h() - h) as i32, self.t.size.hit_min * 4, h)
+    }
+
+    /// Motiv `term::ui` s barvami `term_*` z tokenu.
+    fn term_theme(&self) -> Theme {
+        let c = &self.t.color;
+        let rgb = |v: u32| {
+            let (r, g, b, _) = theme::unpremul(v);
+            Rgb(r as u8, g as u8, b as u8)
+        };
+        let mut th = if self.t.mode == ColorMode::Dark { Theme::dark() } else { Theme::light() };
+        th.ui.bg = rgb(c.term_bg);
+        th.ui.fg = rgb(c.term_ink);
+        th.ui.muted = rgb(c.term_dim);
+        th.ui.accent = rgb(c.accent);
+        th.ui.ok = rgb(c.term_green);
+        th.ui.warn = rgb(c.term_yellow);
+        th.ui.err = rgb(c.term_red);
+        th.ui.select = rgb(c.accent_soft);
+        th
+    }
+}
 /// Animace pruhu a tociciho znaku (jen kdyz neco bezi).
 const TICK: Duration = Duration::from_millis(150);
 
 struct Term {
     win: Window,
-    text: Text,
+    look: Look,
     screen: Screen,
     app: App,
     /// Pripojeni k termd pres init (`conn: None` = terminal bez sluzby).
@@ -56,8 +115,12 @@ struct Term {
     termd: Option<Channel>,
 }
 
-fn grid(w: u32, h: u32) -> (usize, usize) {
-    screen::grid_for(w as usize, h.saturating_sub(TITLE_H) as usize)
+fn grid(look: &Look, w: u32, h: u32) -> (usize, usize) {
+    let (cw, ch) = look.cell();
+    let p = 2 * look.pad();
+    let cols = (w.saturating_sub(p) / cw.max(1)).max(1);
+    let rows = (h.saturating_sub(look.title_h() + p) / ch.max(1)).max(1);
+    (cols as usize, rows as usize)
 }
 
 fn now() -> Option<i64> {
@@ -67,12 +130,14 @@ fn now() -> Option<i64> {
 
 impl Term {
     fn new(win: Window, conn: Option<Channel>) -> Self {
-        let (c, r) = grid(win.w, win.h);
+        let look = Look::new();
+        let (c, r) = grid(&look, win.w, win.h);
+        let th = look.term_theme();
         let mut t = Self {
             win,
-            text: Text::system(),
+            look,
             screen: Screen::new(c, r),
-            app: App::new(Theme::dark(), c, r),
+            app: App::new(th, c, r),
             conn: connect::Connector::new(conn, "gui-term"),
             termd: None,
         };
@@ -132,7 +197,7 @@ impl Term {
     }
 
     fn resize(&mut self) {
-        let (c, r) = grid(self.win.w, self.win.h);
+        let (c, r) = grid(&self.look, self.win.w, self.win.h);
         self.screen = Screen::new(c, r);
         self.app.resize(c, r);
     }
@@ -153,12 +218,13 @@ impl Term {
         let mut win = Node::new(1, 0, Role::Window, "Terminál");
         win.bounds = Rect::new(0, 0, self.win.w, self.win.h);
         let mut bar = Node::new(2, 1, Role::Titlebar, "Terminál");
-        bar.bounds = Rect::new(0, 0, self.win.w, TITLE_H);
+        bar.bounds = Rect::new(0, 0, self.win.w, self.look.title_h());
         let mut tab = Node::new(3, 2, Role::Button, &self.status());
-        tab.bounds = TAB;
+        tab.bounds = self.look.tab();
         tab.actions = actions::ACTIVATE;
         let mut t = Node::new(4, 1, Role::Terminal, "Výstup");
-        t.bounds = Rect::new(0, TITLE_H as i32, self.win.w, self.win.h.saturating_sub(TITLE_H));
+        let th = self.look.title_h();
+        t.bounds = Rect::new(0, th as i32, self.win.w, self.win.h.saturating_sub(th));
         let mut v = String::new();
         for y in 0..self.screen.rows {
             let l = self.screen.line(y);
@@ -183,33 +249,10 @@ impl Term {
         } else if self.termd.is_none() {
             self.screen.write("\r\n\x1b[33mSlužba termd není připojená, připojuji znovu...\x1b[39m");
         }
-        let (w, h) = (self.win.w, self.win.h);
-        let gh = h.saturating_sub(TITLE_H);
-        // Mrizka do pomocneho bufferu (term::screen kresli do linearniho fb).
-        let mut grid = vec![0u32; (w * gh) as usize];
-        let mut s = Surface {
-            buf: &mut grid,
-            width: w as usize,
-            height: gh as usize,
-            stride: w as usize,
-            format: screen::PixelFormat::Bgr,
-        };
-        screen::paint(&self.screen, &mut s);
-        for p in &mut grid {
-            *p |= 0xFF00_0000;
-        }
         let label = self.status();
-        let text = &mut self.text;
-        self.win.draw(|c: &mut Canvas<'_>| {
-            // Plochu titulku kresli aplikace (vlastni titulek).
-            c.fill(Rect::new(0, 0, w, TITLE_H), rgb(0x22, 0x27, 0x30));
-            c.rounded(TAB, 6, rgb(0x10, 0x18, 0x20));
-            let (lh, base) = text.line(13.0);
-            text.draw(c, TAB.x + 12, TAB.y + (TAB.h as i32 - lh as i32) / 2 + base, &label, 13.0, rgb(0xE6, 0xEA, 0xEE));
-            if let Some(img) = Image::new(&grid, w, gh, w) {
-                c.draw_image(&img, Rect::new(0, 0, w, gh), Rect::new(0, TITLE_H as i32, w, gh), 255, true);
-            }
-        })?;
+        let screen = &self.screen;
+        let look = &mut self.look;
+        self.win.draw(|c: &mut Canvas<'_>| paint(c, look, screen, &label))?;
         self.win.set_a11y(&self.a11y())?;
         self.win.commit_redrawn(false)
     }
@@ -219,7 +262,7 @@ impl Term {
     fn regions(&mut self) -> Result<(), Error> {
         let msg = ClientMsg::Regions {
             window: 1,
-            regions: vec![(Rect::new(0, 0, self.win.w, TITLE_H), RegionKind::Drag), (TAB, RegionKind::NoDrag)],
+            regions: vec![(Rect::new(0, 0, self.win.w, self.look.title_h()), RegionKind::Drag), (self.look.tab(), RegionKind::NoDrag)],
         };
         self.win.send(msg)
     }
@@ -347,5 +390,66 @@ fn main(startup: Startup) -> i64 {
         if redraw && t.render().is_err() {
             return 4;
         }
+    }
+}
+
+/// Premultiplied barva z RGB bunky.
+fn px((r, g, b): (u8, u8, u8)) -> u32 {
+    0xFF00_0000 | (r as u32) << 16 | (g as u32) << 8 | b as u32
+}
+
+/// Okno terminalu: titulek s kartou relace (odznak a tlacitka okna kresli
+/// system pres nej) a mrizka bunek pismem JetBrains Mono.
+fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str) {
+    let t = look.t.clone();
+    let col = &t.color;
+    let (w, h) = (c.w, c.h);
+    let th = look.title_h();
+    // Titulek (rezim vlastni titulek: plocha `surface`, karta `surface_2`).
+    c.fill(Rect::new(0, 0, w, th), col.surface);
+    let tab = look.tab();
+    let rad = t.radius.control;
+    let old = c.clip();
+    c.set_clip(old.intersect(&tab));
+    c.round_fill(Rect::new(tab.x, tab.y, tab.w, tab.h + rad), rad, col.surface_2);
+    c.set_clip(old);
+    let s = t.text.small;
+    let strong = theme::TextStyle { weight: t.text.body_strong.weight, ..s };
+    let is = t.size.icon_s;
+    let f = look.ui.face(strong.weight);
+    let tw = f.width(label, strong.size).min(tab.w.saturating_sub(2 * t.space[4] + is + t.space[2]));
+    let x = tab.x + t.space[4] as i32;
+    let base = tab.y + f.baseline_in(strong.size, tab.h);
+    f.draw_ellipsized(c, x, base, label, strong.size, col.ink, tw);
+    // Mrizka.
+    let body = Rect::new(0, th as i32, w, h.saturating_sub(th));
+    c.fill(body, col.term_bg);
+    let (cw, ch) = look.cell();
+    let pad = look.pad() as i32;
+    let ms = t.text.mono;
+    for row in 0..screen.rows {
+        for colm in 0..screen.cols {
+            let cell = screen.cell(colm, row);
+            let (ox, oy) = (pad + (colm as u32 * cw) as i32, th as i32 + pad + (row as u32 * ch) as i32);
+            if let Some(b) = cell.bg {
+                c.fill(Rect::new(ox, oy, cw, ch), px(b));
+            }
+            if cell.ch == ' ' {
+                continue;
+            }
+            let weight = if cell.bold { t.text.body_strong.weight } else { ms.weight };
+            let f = look.mono.face(weight);
+            let base = oy + f.baseline_in(ms.size, ch);
+            let mut pen = gfx::text::Pen::at(ox);
+            f.draw_char(c, &mut pen, base, cell.ch, ms.size, px(cell.fg));
+            if cell.underline {
+                c.fill(Rect::new(ox, oy + ch as i32 - 3, cw, 1), px(cell.fg));
+            }
+        }
+    }
+    // Kurzor (blok, barva akcentu, text pod nim zustane citelny).
+    if screen.x < screen.cols && screen.y < screen.rows {
+        let (ox, oy) = (pad + (screen.x as u32 * cw) as i32, th as i32 + pad + (screen.y as u32 * ch) as i32);
+        c.blend(Rect::new(ox, oy + 2, 2, ch - 4), col.accent);
     }
 }

@@ -11,6 +11,8 @@ test = false
 bench = false
 
 [dependencies]
+# Barvy vzhledu v testech GUI (stejne tokeny jako kompozitor).
+theme = { path = "../../libs/theme" }
 libos = { path = "../../libs/libos" }
 blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }

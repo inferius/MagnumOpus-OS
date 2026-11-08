@@ -18,7 +18,7 @@ use guiproto::a11y::{Node, Role, actions};
 use guiproto::control::{INSPECT, InspectReply, InspectRequest, WindowInfo};
 use libos::{Channel, Signals, Startup, println, time};
 
-use super::gui::{BADGE, STATE, UI_BG, ask, node, pixel, settle, tree, windows};
+use super::gui::{STATE, ask, badge, node, pixel, settle, tree, ui_bg, windows};
 use super::recovery_kit::{Harness, TIMEOUT};
 use super::{TestResult, fail};
 use crate::gui::{self, CompdService, Gui};
@@ -121,8 +121,8 @@ fn run(h: &mut Harness, g: &Gui) -> TestResult {
     check_eq!(w2.app, String::from(DEMO), "stejna identita");
     // Odznak duvery a obsah okna na obrazovce.
     settle(&inspect)?;
-    check_eq!(pixel(&inspect, w2.rect.x + 9, w2.rect.y - 16)?, BADGE, "odznak duvery po obnove");
-    check_eq!(pixel(&inspect, w2.rect.x + 3, w2.rect.y + w2.rect.h as i32 - 4)?, UI_BG, "obsah okna po obnove");
+    check_eq!(pixel(&inspect, w2.rect.x + 9, w2.rect.y - 16)?, badge(), "odznak duvery po obnove");
+    check_eq!(pixel(&inspect, w2.rect.x + w2.rect.w as i32 / 2, w2.rect.y + w2.rect.h as i32 - 4)?, ui_bg(), "obsah okna po obnove");
     // Jedno okno, jeden klient: nic navic, nic nevisi.
     let st = g.status().map_err(|e| fail("status", e))?;
     check!(st.clients == 1 && st.windows == 1, "stav po obnove: {st:?}");

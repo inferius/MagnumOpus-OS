@@ -33,6 +33,7 @@ pub const TESTS: &[Test] = &[
     ("compd: bezpecna obrazovka po Ctrl+Alt+Del (QMP)", secure_screen),
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
     ("compd: spravce uloh a ikona uloh v panelu", task_manager),
+    ("compd: vzhled podle navrhu, snimky obrazovky (QMP)", look_shots),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
@@ -42,12 +43,23 @@ pub const TESTS: &[Test] = &[
 pub const QEMU_DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
 pub const QEMU_SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
 pub const QEMU_SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
+/// Snimek obrazovky: za znackou jmeno (`light`, `dark`, `contrast`);
+/// xtask porizuje `screendump` do `target/shots/`.
+pub const QEMU_SHOT: &str = "init: test gui: snimek ";
+/// Poradi snimku a rezim motivu (musi sedet s `xtask/src/qmp.rs`).
+pub const SHOTS: &[&str] = &["light", "dark", "contrast"];
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Barvy, ktere test ocekava na obrazovce (`libs/ui` a `libs/comp`).
-pub(super) const UI_BG: u32 = 0xFF1E_232A;
-pub(super) const BADGE: u32 = 0xFF1F_6F4E;
+/// Pozadi okna aplikace a odznak duvery (tokeny, svetly motiv).
+pub(super) fn ui_bg() -> u32 {
+    theme::Theme::builtin(theme::Mode::Light).color.surface
+}
+
+pub(super) fn badge() -> u32 {
+    theme::Theme::builtin(theme::Mode::Light).color.trust_bg
+}
 
 pub(super) struct State {
     pub(super) gui: Gui,
@@ -157,10 +169,10 @@ fn window_and_a11y(startup: &Startup) -> TestResult {
     wait_tree(&inspect, w.id, "pocitadlo po kliku", |t| has(t, Role::Label, "Počítadlo: 1"))?;
     // Obraz: pozadi okna aplikace a odznak duvery systemu nad titulkem.
     settle(&inspect)?;
-    let bg = pixel(&inspect, w.rect.x + 3, w.rect.y + w.rect.h as i32 - 4)?;
-    check_eq!(bg, UI_BG, "pozadi okna aplikace na obrazovce");
-    let badge = pixel(&inspect, w.rect.x + 9, w.rect.y - 16)?;
-    check_eq!(badge, BADGE, "odznak duvery v titulku");
+    let bg = pixel(&inspect, w.rect.x + w.rect.w as i32 / 2, w.rect.y + w.rect.h as i32 - 4)?;
+    check_eq!(bg, ui_bg(), "pozadi okna aplikace na obrazovce");
+    let px = pixel(&inspect, w.rect.x + 9, w.rect.y - 16)?;
+    check_eq!(px, badge(), "odznak duvery v titulku");
     let st = gui.status().map_err(|e| fail("status", e))?;
     check!(st.clients == 1 && st.windows == 1 && st.presented > 0, "stav kompozitoru");
     println!("init: test gui: okno {}x{} na {},{}", w.rect.w, w.rect.h, w.rect.x, w.rect.y);
@@ -291,7 +303,7 @@ fn secure_screen(_: &Startup) -> TestResult {
         // uz nema svou barvu pozadi.
         settle(&s.inspect)?;
         let w = windows(&s.inspect)?.into_iter().find(|w| w.id == s.demo).ok_or("okno ukazky zmizelo")?;
-        check!(pixel(&s.inspect, w.rect.x + 3, w.rect.y + w.rect.h as i32 - 4)? != UI_BG, "pod bezpecnou obrazovkou je ztlumeno");
+        check!(pixel(&s.inspect, w.rect.x + w.rect.w as i32 / 2, w.rect.y + w.rect.h as i32 - 4)? != ui_bg(), "pod bezpecnou obrazovkou je ztlumeno");
         // Dialog prijima vstup az chvili po zobrazeni.
         time::sleep(Duration::from_millis(400));
         println!("{QEMU_SECURE_ENTER}");
@@ -335,7 +347,7 @@ fn terminal_window(startup: &Startup) -> TestResult {
         })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
-        check_eq!(pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?, BADGE, "odznak nad vlastnim titulkem");
+        check_eq!(pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?, badge(), "odznak nad vlastnim titulkem");
         Ok(())
     })
 }
@@ -365,6 +377,27 @@ fn task_manager(startup: &Startup) -> TestResult {
         let pause = node(&t, Role::Button, "Pozastavit")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: pause.id, action: actions::ACTIVATE, value: String::new() })?;
         wait_tree(&s.inspect, w.id, "pozastaveni ulohy agenta", |t| t.iter().any(|n| n.role == Role::Label && n.name == "Stav: pozastaveno 15 %"))?;
+        Ok(())
+    })
+}
+
+/// Snimky vzhledu pro kontrolu proti prototypum (`design/`): okna ukazky,
+/// terminalu a spravce uloh s listou ve svetlem, tmavem a kontrastnim
+/// motivu. Snimek porizuje xtask pres QMP po znacce.
+fn look_shots(_: &Startup) -> TestResult {
+    with(|s| {
+        s.gui.command(b"tasks 4 1", Vec::new()).map_err(|e| fail("tasks", e))?;
+        for name in SHOTS {
+            s.gui.command(alloc::format!("theme {name}").as_bytes(), Vec::new()).map_err(|e| fail("theme", e))?;
+            settle(&s.inspect)?;
+            time::sleep(Duration::from_millis(300));
+            println!("{QEMU_SHOT}{name}");
+            // xtask porizuje snimek; pockat, nez skonci.
+            time::sleep(Duration::from_millis(1500));
+        }
+        s.gui.command(b"theme light", Vec::new()).map_err(|e| fail("theme", e))?;
+        check!(s.gui.command(b"theme fialova", Vec::new()).is_err(), "neplatny motiv");
+        settle(&s.inspect)?;
         Ok(())
     })
 }

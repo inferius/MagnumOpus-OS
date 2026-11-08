@@ -48,6 +48,8 @@ struct Service {
     gpu: Option<gpu::GpuBackend>,
     /// Casove pasmo hodin v liste (od initu s `display`).
     zone: Option<libos::time::zone::Zone>,
+    /// Pocet snimku, soucet a maximum casu skladani (ns).
+    frame_stats: (u64, u64, u64),
 }
 
 fn main(startup: Startup) -> i64 {
@@ -63,6 +65,7 @@ fn main(startup: Startup) -> i64 {
         pending_reset: false,
         gpu: None,
         zone: None,
+        frame_stats: (0, 0, 0),
     };
     loop {
         if !s.wait_and_serve() {
@@ -244,6 +247,25 @@ impl Service {
                 c.tick(now, &mut canvas)
             }
         };
+        // Mereni casu skladani (rozpocet snimku): plne prekresleni hned,
+        // ostatni snimky prumer a maximum po 300 snimcich do logu.
+        let took = libos::time::now().saturating_sub(now);
+        if let Some(rects) = &composed {
+            let px: u64 = rects.iter().map(|r| r.w as u64 * r.h as u64).sum();
+            let full = px >= w as u64 * h as u64;
+            let st = &mut self.frame_stats;
+            if full {
+                println!("compd: snimek cele obrazovky {w}x{h}: {} us ({})", took / 1000, if self.gpu.is_some() { "gpu" } else { "cpu" });
+            } else {
+                st.0 += 1;
+                st.1 += took;
+                st.2 = st.2.max(took);
+                if st.0 >= 300 {
+                    println!("compd: 300 snimku: prumer {} us, nejvic {} us", st.1 / st.0 / 1000, st.2 / 1000);
+                    *st = (0, 0, 0);
+                }
+            }
+        }
         if let Some(rects) = composed {
             sc.seq += 1;
             let req = Request::Present { seq: sc.seq, output: sc.output, rects };

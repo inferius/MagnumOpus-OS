@@ -979,11 +979,13 @@ dependencies = [
 name = "gui-term"
 version = "0.1.0"
 dependencies = [
+ "font",
  "gfx",
  "guiproto",
  "inputproto",
  "libos",
  "term",
+ "theme",
  "ui",
 ]
 
@@ -1219,6 +1221,7 @@ dependencies = [
  "svcclient",
  "taskproto",
  "term",
+ "theme",
 ]
 
 [[package]]

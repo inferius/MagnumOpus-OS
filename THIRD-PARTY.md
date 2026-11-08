@@ -108,3 +108,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - **Zdroj / Source:** http://tulrich.com/fonts/ (Thatcher Ulrich)
 - **Licence / Licence:** public domain
 - **Cesta / Path:** `libs/font/fonts/Tuffy.ttf` (popis: `libs/font/fonts/README.md`)
+
+## Písmo Inter / Inter font
+
+- **Název / Name:** Inter (statické řezy / static faces Light, Regular, Medium, SemiBold, Bold)
+- **Verze / Version:** 4.1
+- **Zdroj / Source:** https://github.com/rsms/inter/releases/tag/v4.1 (`Inter-4.1.zip`, `extras/ttf/`)
+- **Licence / Licence:** SIL Open Font License 1.1, plný text / full text: `libs/font/fonts/Inter-OFL.txt`
+- **Cesta / Path:** `libs/font/fonts/Inter-*.ttf`
+
+## Písmo JetBrains Mono / JetBrains Mono font
+
+- **Název / Name:** JetBrains Mono (Regular, SemiBold)
+- **Verze / Version:** 2.304
+- **Zdroj / Source:** https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304 (`fonts/ttf/`)
+- **Licence / Licence:** SIL Open Font License 1.1, plný text / full text: `libs/font/fonts/JetBrainsMono-OFL.txt`
+- **Cesta / Path:** `libs/font/fonts/JetBrainsMono-*.ttf`

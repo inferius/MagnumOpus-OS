@@ -163,6 +163,14 @@ fn gui_steps(s: &mut Vec<Step>) {
     s.push(Step::WaitFor(gui::SECURE_ENTER));
     s.push(Step::Send(vec![key("ret", true)]));
     s.push(Step::Send(vec![key("ret", false)]));
+    // Snimky vzhledu (test `look_shots`): screendump virtio-gpu do PNG.
+    let dir = crate::target_dir().join("shots");
+    let _ = std::fs::create_dir_all(&dir);
+    for (marker, name) in gui::SHOT.iter().zip(gui::SHOT_NAMES) {
+        s.push(Step::WaitFor(marker));
+        let file = dir.join(format!("{name}.png")).display().to_string().replace('\\', "/");
+        s.push(Step::Qmp(format!(r#"{{"execute":"screendump","arguments":{{"filename":"{file}","device":"gpu0","format":"png"}}}}"#)));
+    }
 }
 
 /// Znacky testu GUI (musi sedet s `user/init/src/tests/gui.rs`).
@@ -170,6 +178,8 @@ mod gui {
     pub const DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
     pub const SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
     pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
+    pub const SHOT: [&str; 3] = ["init: test gui: snimek light", "init: test gui: snimek dark", "init: test gui: snimek contrast"];
+    pub const SHOT_NAMES: [&str; 3] = ["light", "dark", "contrast"];
 }
 
 fn ps2_steps(s: &mut Vec<Step>) {

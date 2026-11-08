@@ -449,7 +449,7 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn target_dir() -> PathBuf {
+pub(crate) fn target_dir() -> PathBuf {
     env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace_root().join("target"))

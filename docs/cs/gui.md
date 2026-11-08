@@ -303,6 +303,97 @@ odložených zpráv, je odpojen.
 ztlumí okno a nabídne zavření. Přesun, minimalizace a zavření fungují
 dál.
 
+## Vzhled podle návrhu (fáze 1)
+
+> **Změna proti předchozímu stavu:** dekorace, lišta, dialogy, prvky UI
+> a terminál měly pevné tmavé barvy a rozměry v kódu a písmo Tuffy.
+> Teď berou vše z tokenů `design/tokens.toml` a kreslí Interem
+> a JetBrains Mono podle prototypů v `design/` ([Vzhled](vzhled.md)).
+> Důvod: jeden zdroj pravdy pro prototypy i systém; změna barvy nebo
+> rozestupu nevyžaduje zásah do kódu.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tok tokenu do systemu">
+<defs><marker id="vf1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="acc" x="10" y="70" width="160" height="60" rx="6"/><text class="t b" x="90" y="96" text-anchor="middle">design/tokens.toml</text><text class="m" x="90" y="114" text-anchor="middle">vložený při překladu</text>
+<path class="ln" d="M170 100 L218 100" marker-end="url(#vf1)"/>
+<rect class="box" x="220" y="70" width="150" height="60" rx="6"/><text class="t b" x="295" y="96" text-anchor="middle">libs/theme</text><text class="m" x="295" y="114" text-anchor="middle">libs/conf, kontrast</text>
+<path class="ln" d="M370 85 L438 40" marker-end="url(#vf1)"/><path class="ln" d="M370 100 L438 100" marker-end="url(#vf1)"/><path class="ln" d="M370 115 L438 160" marker-end="url(#vf1)"/>
+<rect class="ok" x="440" y="15" width="310" height="50" rx="6"/><text class="t b" x="595" y="37" text-anchor="middle">compd: okna, lišta, dialogy</text><text class="m" x="595" y="54" text-anchor="middle">libs/comp/style.rs, render.rs</text>
+<rect class="ok" x="440" y="75" width="310" height="50" rx="6"/><text class="t b" x="595" y="97" text-anchor="middle">libs/ui: prvky aplikací</text><text class="m" x="595" y="114" text-anchor="middle">look.rs (trust_*, ai_* nenabízí)</text>
+<rect class="ok" x="440" y="135" width="310" height="50" rx="6"/><text class="t b" x="595" y="157" text-anchor="middle">gui-term: barvy term_*, JetBrains Mono</text><text class="m" x="595" y="174" text-anchor="middle">mřížka z type.mono</text>
+</svg>
+<figcaption>Tokeny jsou data: kompozitor, knihovna UI i terminál čtou stejný soubor.</figcaption>
+</figure>
+
+**Tokeny jako data.** `libs/theme` přečte `design/tokens.toml` přes
+`libs/conf` (nově umí desetinná čísla, např. `frame_ms = 16.7`) a dá
+hodnoty pro režim světlý, tmavý a vysoký kontrast: barvy (premultiplied),
+typografickou škálu, rozestupy, rozměry, zaobleni, stíny, pohyb
+(křivky `cubic-bezier`) a vrstvy. Test `contrast_pairs_pass` ověří
+všechny povinné dvojice kontrastu ze sekce `[contrast]` stejně jako
+`design/tools/build-tokens.mjs`. Výchozí motiv je vložený při překladu;
+`Tokens::parse` přečte i jiný text (uživatelské motivy později).
+Kompozitor přepíná režim příkazem `theme light|dark|contrast`.
+
+**Okna** (`design/okna.html`): titulek 40 px (`size.title_h`), zaoblení
+18 px (`radius.window`), rám 1 px `border`, stín podle stavu
+(`shadow.window` / `window_inactive`, dvě vrstvy), aktivní titulek
+`surface_2` a jméno váhy 600, neaktivní `surface` a váha 500 vedlejší
+barvou. Tlačítka okna jsou pilulky 28 px s ikonou z design systému;
+cíl kliknutí 40 px (`size.hit_min`), překryvy rozhoduje nejbližší
+střed. Najetí zvýrazní tlačítko (`surface_3`, zavřít `danger`).
+Odznak důvěry 26 px: štít, jméno z manifestu a ikony oprávnění,
+barvy `trust_*`. Neviditelný okraj 6 px vně okna mění velikost.
+Nereagující aplikace: obsah ztlumený a karta „… nereaguje“.
+
+**Lišta** (`design/plocha.html`, poloha „dole, odsazená“): 52 px,
+odsazení 8 px, zaoblení 18 px, plocha `surface` s krytím 90 % (blur
+jen na GPU, ve 2D chybí), stín `shadow.bar`. Vlevo tlačítka oken
+(ikona podle aplikace, značka běží / aktivní), vpravo úlohy se štítkem
+agenta, pilulka „Vstup ovládá automat“ a hodiny (čas a datum v pásmu,
+které init pošle s příkazem `display`).
+
+**Plocha:** barva `bg` a dva měkké radiální přechody `wall_a`,
+`wall_b` jako `.desk` v prototypu; spočítá se jednou pro velikost
+obrazovky, s jemným rozptylem proti pruhům.
+
+**Systémový dialog:** šířka 440 px, rám 2 px `trust_border`, pruh
+„Systém“ s frází, nadpis, blok aplikace, upozornění „jen fyzický
+vstup“, tlačítka jako pilulky s rámečkem fokusu 2 px.
+
+**Kreslení (`libs/gfx`):**
+
+| Modul | Co |
+|---|---|
+| `shape.rs` | zaoblený obdélník a rám ze vzdálenostního pole (stejný vzorec jako shader), rohové záplaty okna |
+| `shadow.rs` | Gaussův stín předpočítaný do masky z 9 dílů (3 krabičkové průchody), kreslení jen čte tabulku |
+| `icon.rs` | 64 ikon přímo z `design/assets/mo.js` (podmnožina SVG: `path` včetně oblouků, `rect`, `circle`), tah vzdálenostním polem |
+| `backdrop.rs` | radiální přechody plochy |
+| `text.rs` | rodina řezů (výběr váhy jako v CSS), jemné umístění po 1/4 px, gama tmavého textu |
+
+**Stejné pixely na CPU i GPU:** okno se kreslí jako čtverec, rohy se
+dopočítají „záplatou“ (okno přes uložené pozadí s pokrytím zaobleného
+tvaru); vícevrstvý stín se složí do jedné barvy a prolne jednou; vrstva
+nad okny (lišta, dialog, kurzor) jde i na CPU přes mezibuffer. Proto
+test `gpu_list_matches_cpu_frame` dál porovnává snímek pixel po pixelu.
+
+⚠️ **Rizika a odchylky (řečená předem):**
+
+- Písma jsou vložená do programů (každý jen řezy, které kreslí): `compd`
+  +1,7 MB, aplikace s `libs/ui` +1,25 MB, `gui-term` +0,55 MB. Sdílená
+  paměť s písmy od kompozitoru je úkol G5.
+- Bez rozmazání pod lištou (2D); stíny ze statických masek.
+- Aplikace zatím nedostávají motiv systému (kreslí světlý). Přepínání
+  motivu aplikací a velikost písma 200 % přijdou s G4.
+- Pár hodnot je jen v `mo.css`, ne v tokenech (krytí lišty 90 %,
+  ztlumení 0,45, šířka dialogu 440, ikony 14 px); jsou v kódu jako
+  pojmenované konstanty s odkazem na prototyp a vlákno návrhu je
+  zvažuje doplnit do tokenů.
+
+**Cena snímku na CPU:** `compd` píše do logu čas skládání celé obrazovky
+a po 300 snímcích průměr a maximum (`compd: snimek cele obrazovky ...`).
+
 ## Vstup v oknech
 
 Kompozitor dostává události od `inputd` ([Vstup](vstup.md)) - z kanálu
@@ -704,7 +795,9 @@ s potvrzením `CONFIGURE`, odpovědi na `PING` a akce. Nižší vrstva
 
 Vlastní čtení TrueType (`.ttf`): tabulky `head`, `hhea`, `maxp`, `cmap`
 (formáty 4 a 12), `loca`, `glyf` (jednoduché i složené glyfy), `hmtx`,
-`kern` (formát 0). Rasterizér převede kvadratické křivky na úsečky
+`kern` (formát 0), párový kerning z `GPOS` (lookup typu 2, formáty 1 a 2,
+i v rozšíření typu 9) a jednoduché záměny z `GSUB` pro zapnuté vlastnosti
+(`tnum` tabulkové číslice, `cv11`). Rasterizér převede kvadratické křivky na úsečky
 a spočítá **plošné pokrytí pixelu** (vyhlazení bez hintingu). Glyfy se
 ukládají do mezipaměti podle velikosti (`gfx::text`).
 
@@ -712,15 +805,20 @@ Soubor písma je nedůvěryhodný vstup: každé čtení kontroluje meze, vadný
 glyf je prázdný glyf, nikdy panika (test přepisuje náhodné bajty souboru).
 Bez shapingu (arabština, indická písma) a bez hintingu.
 
-Systémové písmo je **Tuffy** (Thatcher Ulrich, public domain): pokrývá
-latinku včetně češtiny a je přibalené v `libs/font/fonts/`.
+Písma systému (`libs/font/fonts/`, licence v `THIRD-PARTY.md`):
+**Inter** 300-700 (SIL OFL 1.1) pro UI, **JetBrains Mono** 400 a 600
+(SIL OFL 1.1) pro terminál a **Tuffy** (public domain) jako záloha.
+Program si cargo vlastnostmi `inter-*`, `mono-*` vloží jen řezy, které
+kreslí. Váha z tokenů se mapuje na řez jako v CSS (650 -> 700).
+Statické řezy (ne proměnné písmo), protože rasterizér čte `glyf`.
 
 ## Okno terminálu
 
 Terminál 6b je v GUI oknem `gui-term` nad svým nativním protokolem:
 **vlastní titulek** (aplikace kreslí kartu relace „Relace N“ a deklaruje oblast `DRAG` s výjimkou `NO_DRAG` pro kartu,
 odznak a tlačítka kreslí systém), obsah je mřížka znaků `term::screen`
-(písmo Noto Sans Mono, stejné jako v konzoli) a strom přístupnosti má
+(písmo JetBrains Mono, barvy `term_*` z tokenů, titulek 40 px s kartou
+relace) a strom přístupnosti má
 uzel `terminal` s viditelným textem. Řádek jde zadat klávesnicí, akcí
 přístupnosti `set-value` nebo akcí `terminal.run` (vyžaduje potvrzení).
 
