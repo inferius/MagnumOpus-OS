@@ -778,7 +778,7 @@ skládání kompozitoru.
 | `vgpu::virgl` | vlastní kodér proudu příkazů virgl (stavové objekty, shadery TGSI, vrcholy, kreslení, scissor) a příkazy 3D virtio-gpu, testy na hostiteli |
 | skládání přes GPU | čeká: na tomto hostiteli (QEMU 11.1 pro Windows) se se zapnutým OpenGL (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) virtuální stroj po startu jádra zastaví |
 | Venus | QEMU pro Windows ho nemá („Render server support was not enabled in virglrenderer“). **Funguje ve WSL2:** `cargo xtask run --qemu-wsl --gpu venus` (QEMU 10.1 a virglrenderer s render serverem přeložené v `~/venus/prefix`, Vulkan hostitele lavapipe, displej GTK pod Xvfb); ovladač hlásí capset `venus(v0)` |
-| vlastní ovladač Venus | krok 1 hotový: render uzel v ovladači, knihovna `libs/venus` (generovaná z vk.xml), test vypíše jméno fyzického zařízení - viz [Vulkan přes Venus](venus.md) |
+| vlastní ovladač Venus | kroky 1-4 hotové (skládání kompozitoru na GPU: `backend gpu`); dřív krok 1: render uzel v ovladači, knihovna `libs/venus` (generovaná z vk.xml), test vypíše jméno fyzického zařízení - viz [Vulkan přes Venus](venus.md) |
 
 ⚠️ **Kde testovat Venus:** Linux s fyzickou GPU a QEMU + virglrenderer
 s render serverem (nebo crosvm). WSL2 jen s Vulkanem přeloženým přes

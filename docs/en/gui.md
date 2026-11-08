@@ -793,7 +793,7 @@ for compositor composition.
 | `vgpu::virgl` | own encoder of the virgl command stream (state objects, TGSI shaders, vertices, draws, scissor) and virtio-gpu 3D commands, host tests |
 | GPU composition | pending: on this host (QEMU 11.1 for Windows) the virtual machine stalls after the kernel starts whenever OpenGL is on (`egl-headless`, `gtk,gl=on`, `sdl,gl=es`) |
 | Venus | QEMU for Windows lacks it ("Render server support was not enabled in virglrenderer"). **Works in WSL2:** `cargo xtask run --qemu-wsl --gpu venus` (QEMU 10.1 and virglrenderer with the render server built into `~/venus/prefix`, host Vulkan lavapipe, GTK display under Xvfb); the driver reports capset `venus(v0)` |
-| own Venus driver | step 1 done: render node in the driver, library `libs/venus` (generated from vk.xml), a test prints the physical device name - see [Vulkan over Venus](venus.md) |
+| own Venus driver | steps 1-4 done (compositor composition on the GPU: `backend gpu`); earlier step 1: render node in the driver, library `libs/venus` (generated from vk.xml), a test prints the physical device name - see [Vulkan over Venus](venus.md) |
 
 ⚠️ **Where to test Venus:** Linux with a physical GPU and QEMU +
 virglrenderer with the render server (or crosvm). WSL2 only with Vulkan

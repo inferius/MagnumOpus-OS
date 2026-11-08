@@ -18,6 +18,9 @@ use crate::cmdq::{CmdQueue, Completion};
 const F_ACCESS_PLATFORM: u64 = 1 << 33;
 /// Jak dlouho cekat na odpoved zarizeni.
 const TIMEOUT: Duration = Duration::from_secs(2);
+/// Velikost vystupu 0, kdyz ho zarizeni nehlasi zapnuty (QEMU `xres`, `yres`).
+const FALLBACK_W: u32 = 1280;
+const FALLBACK_H: u32 = 800;
 /// Velikost fronty prikazu (2 deskriptory na slot).
 const QUEUE_SIZE: u16 = 64;
 /// Zarovnani blobu ve sdilene pameti (stranka hostitele muze byt 64 KiB).
@@ -75,6 +78,8 @@ pub struct Gpu {
     pub shm_alloc: Option<vgpu::shm::RangeAlloc>,
     next_ctx: u32,
     next_fence: u64,
+    /// Vystup 0 pouzity bez hlaseni zarizeni (`open`).
+    pub fallback_output: bool,
 }
 
 impl Gpu {
@@ -92,6 +97,7 @@ impl Gpu {
             shm_alloc: shm.map(|m| vgpu::shm::RangeAlloc::new(m.len, SHM_ALIGN)),
             next_ctx: 1,
             next_fence: 1,
+            fallback_output: false,
             q: CmdQueue::new(s.device, s.queue, s.irq, &resource)?,
             _msix: s.msix,
             resource,
@@ -117,6 +123,15 @@ impl Gpu {
                     h: so.rect.h.min(guiproto::MAX_DIM),
                 });
             }
+        }
+        // Zadny zapnuty vystup (napr. QEMU ve WSL: displej GTK pod Xvfb bez
+        // funkcniho OpenGL vystup nezapne): pouzit vystup 0, at kompozitor
+        // bezi (obraz neni videt, ale snimky, inspekce a testy funguji).
+        if gpu.outputs.is_empty() && num_scanouts > 0 {
+            let r = scanouts.first().map(|s| s.rect).unwrap_or_default();
+            let (w, h) = if r.w > 0 && r.h > 0 { (r.w, r.h) } else { (FALLBACK_W, FALLBACK_H) };
+            gpu.outputs.push(Out { id: 0, w: w.min(guiproto::MAX_DIM), h: h.min(guiproto::MAX_DIM) });
+            gpu.fallback_output = true;
         }
         Ok(gpu)
     }

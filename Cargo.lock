@@ -313,6 +313,7 @@ dependencies = [
  "gfx",
  "guiproto",
  "inputproto",
+ "vkcomp",
 ]
 
 [[package]]
@@ -324,6 +325,8 @@ dependencies = [
  "guiproto",
  "inputproto",
  "libos",
+ "venus",
+ "vkcomp",
 ]
 
 [[package]]

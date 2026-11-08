@@ -90,6 +90,9 @@ fn main(startup: Startup) -> i64 {
         ),
         None => println!("virtio-gpu {address}: zadny vystup"),
     }
+    if gpu.fallback_output {
+        println!("virtio-gpu {address}: zarizeni nehlasi zapnuty vystup, pouzivam vystup 0");
+    }
     let mut renders: Vec<Client> = Vec::new();
     let mut next_client = 1u64;
     loop {

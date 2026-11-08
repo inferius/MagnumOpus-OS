@@ -5,7 +5,8 @@
 //! `s = scale(src, opacity)`, pak `copy` = `s`, jinak `over(dst, s)`:
 //! - `scale(c, k)` = kazda slozka `(c * k + 128) >> 8`, pro `k >= 255` `c`,
 //! - `over(d, s)` = `s` pro `sa == 255`, `d` pro `s == 0`, jinak
-//!   `s + scale(d, 255 - sa)` po slozkach s nasycenim na 255.
+//!   `s + scale(d, 255 - sa)` po slozkach s nasycenim na 255; nad
+//!   nepruhlednym `d` je alfa vysledku 255.
 //!
 //! Zdroj se skaluje nejblizsim sousedem (`sx = lx * sw / dw`). Jedno
 //! vlakno = jeden pixel orezu; skupina 8 x 8.
@@ -255,6 +256,12 @@ pub fn shader() -> Vec<u32> {
     let inv = f.bin(I_SUB, full, sa);
     let sd = f.scale(d, inv);
     let sum = f.add_sat(sk, sd);
+    // Nad nepruhlednym cilem zustane alfa 255.
+    let da = f.bin(SHIFT_RIGHT_LOGICAL, d, e);
+    let d_opaque = f.cmp(I_EQUAL, da, full);
+    let amask = f.c(0xFF00_0000);
+    let sum_a = f.bin(BITWISE_OR, sum, amask);
+    let sum = f.select(d_opaque, sum_a, sum);
     let opaque = f.cmp(I_EQUAL, sa, full);
     let empty = f.cmp(I_EQUAL, sk, zero);
     let t = f.select(empty, d, sum);
@@ -300,5 +307,5 @@ pub fn reference(d: u32, s: u32, opacity: u32, copy: bool) -> u32 {
     for sh in [0, 8, 16, 24] {
         out |= (((sk >> sh) & 255) + ((sd >> sh) & 255)).min(255) << sh;
     }
-    out
+    if d >> 24 == 255 { out | 0xFF00_0000 } else { out }
 }
