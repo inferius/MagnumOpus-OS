@@ -75,6 +75,14 @@ pub fn render(v: &Value) -> String {
             out
         }
         Value::Nothing => String::new(),
+        // Samostatny text i s konci radku (bunka tabulky je jednoradkova).
+        Value::Str(s) => {
+            let mut out = s.clone();
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out
+        }
         other => {
             let mut s = cell(other);
             s.push('\n');

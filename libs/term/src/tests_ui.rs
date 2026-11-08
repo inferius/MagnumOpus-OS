@@ -494,3 +494,15 @@ fn output_scrolls_up_and_typing_returns_down() {
     a.key(Key::Char('x'));
     assert_eq!(a.scroll, 0, "psani vraci dolu");
 }
+
+/// Konce radku: `\r\n` jako `\n`, `\r` na konci se nezobrazi, `\r` uvnitr
+/// vrati na zacatek radku (prepis); samostatny text si radky necha.
+#[test]
+fn line_endings_follow_system_rule() {
+    let l = crate::ui::draw::lines_of("a\r\nb\r\nprubeh 10%\rprubeh 80%\nkonec\r");
+    assert_eq!(l, vec!["a", "b", "prubeh 80%", "konec"]);
+    assert_eq!(crate::ui::draw::lines_of("dlouhy text\rkratky"), vec!["kratky text"]);
+    let theme = crate::theme::Theme::dark();
+    let r = crate::render::value(&shlang::value::Value::str("prvni\ndruhy"), &theme, None);
+    assert_eq!(crate::vt::strip(&r), "prvni\ndruhy\n");
+}
