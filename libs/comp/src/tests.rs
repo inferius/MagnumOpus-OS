@@ -1353,3 +1353,72 @@ fn resize_from_left_and_top_keeps_opposite_edge() {
     let (_, nw, _, _) = t.c.windows[&g].configure.expect("CONFIGURE");
     assert_eq!(nw, t.c.windows[&g].min.0, "nejmensi sirka");
 }
+
+#[test]
+fn close_button_zone_is_round_except_maximized_corner() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let w = &t.c.windows[&g];
+    let sq = w.button_hits()[0];
+    // Roh ctvercove zony je mimo kruh tlacitka: nezvyrazni se.
+    assert_ne!(t.c.hit(sq.right() as i32 - 1, sq.bottom() as i32 - 1), Some((g, crate::input::Zone::Button(0))));
+    let b = w.buttons()[0];
+    let r = (b.w / 2 + w.geo.btn_slop) as i32 - 1;
+    assert_eq!(t.c.hit(b.x + b.w as i32 / 2 + r, b.y + b.h as i32 / 2), Some((g, crate::input::Zone::Button(0))), "kruh + okraj");
+    // Maximalizovane okno: roh obrazovky vpravo nahore je zavrit (Fitts).
+    t.c.toggle_maximize(g, t.now);
+    let serial = t.c.windows[&g].configure.unwrap().0;
+    t.commit(a, 2, guiproto::window::commit::ACK_CONFIGURE, serial, 0);
+    let o = t.c.windows[&g].outer();
+    assert_eq!(t.c.hit(o.right() as i32 - 1, o.y), Some((g, crate::input::Zone::Button(0))), "roh obrazovky {o:?}");
+}
+
+#[test]
+fn resize_drag_coalesces_configures() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let (o, r0) = (t.c.windows[&g].outer(), t.c.windows[&g].rect);
+    let (x, y) = (o.right() as i32 + 2, o.y + o.h as i32 / 2);
+    t.move_to(x, y);
+    left(&mut t, true);
+    t.c.take_out();
+    // Deset pohybu pred potvrzenim: aplikace dostane jen prvni velikost.
+    for k in 1..=10 {
+        t.move_to(x + 3 * k, y);
+    }
+    let sizes = |t: &mut T| -> Vec<(u32, u32, u32)> {
+        t.c.take_out()
+            .into_iter()
+            .filter_map(|o| match o {
+                Out::Client(c, ServerMsg::Configure { w, h, serial, .. }) if c == a => Some((w, h, serial)),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = sizes(&mut t);
+    assert_eq!(first.len(), 1, "jeden CONFIGURE za nepotvrzenou zadost: {first:?}");
+    assert_eq!(first[0].0, r0.w + 3);
+    // Po potvrzeni hned posledni poloha (slouceno).
+    t.commit(a, 2, guiproto::window::commit::ACK_CONFIGURE, first[0].2, 0);
+    let next = sizes(&mut t);
+    assert_eq!(next.iter().map(|s| s.0).collect::<Vec<_>>(), vec![r0.w + 30], "posledni velikost");
+    left(&mut t, false);
+}
+
+#[test]
+fn frame_period_follows_refresh_rate() {
+    let mut t = T::new();
+    assert_eq!(t.c.period(), crate::PERIOD, "vychozi 60 Hz");
+    t.c.set_refresh(120_000);
+    assert_eq!(t.c.period(), 8_333_333, "120 Hz");
+    t.c.set_refresh(240_000);
+    assert_eq!(t.c.period(), 4_166_666, "240 Hz");
+    t.c.set_refresh(0);
+    assert_eq!(t.c.period(), crate::PERIOD, "nezname = vychozi");
+}

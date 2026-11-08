@@ -34,7 +34,7 @@ and in the [6c decisions](#6c-decisions-agreed) table below.
 |---|---|---|
 | 1 | rendering | **software compositing on virtio-gpu 2D** as the compatibility layer everywhere (x86_64 and aarch64); right after that **virgl 3D** as a second compositor backend (same layer tree) |
 | 2 | buffers | **shared memory object (VMO)**: allocated by the application (its job pays), the compositor gets a handle with only `READ`, `MAP`, `WAIT`, `DUPLICATE`, `TRANSFER`; drawing without copies |
-| 3 | frames | **compositor clock + transactions**: 60 Hz frame deadline, an application gets `Frame` only on request; transactions are atomic even across windows and applications (synchronized resize) |
+| 3 | frames | **compositor clock + transactions**: frame deadline from the output's refresh rate, an application gets `Frame` only on request; transactions are atomic even across windows and applications (synchronized resize) |
 | 4 | font | **own TrueType parser and rasterizer** (`libs/font`): cmap, glyf, hmtx, kern, area anti-aliasing, no hinting or shaping |
 
 ⚠️ **Risks (stated up front):**
@@ -52,7 +52,12 @@ and in the [6c decisions](#6c-decisions-agreed) table below.
   bounded by the VMO).
 - **Software compositing** costs CPU: at 1280x800 and 60 Hz that is
   ~250 MB/s of writes. Therefore only damaged regions are composed and
-  nothing is drawn when nothing changes.
+  nothing is drawn when nothing changes. **4K at 120 Hz and above** (a full
+  4K screen = 33 MB per frame, 120 Hz = 4 GB/s) works on the CPU only with
+  small damaged regions (cursor, text, a small window). Full-screen effects
+  and full redraws belong on the GPU (`vkcomp`, Venus); on a machine with a
+  GPU, GPU composition should be the default path. **[designed]** (today
+  the GPU is switched on by the `backend gpu` command)
 - **Kernel console and firmware GOP (solved in the loader):** the firmware
   (edk2/OVMF) has the `VirtioGpuDxe` driver and turns virtio-gpu into a GOP
   as well. Its framebuffer is plain RAM pushed to the screen by virtio
@@ -226,10 +231,18 @@ limit is 64 KiB).
 <path class="ln" d="M604 64 L680 156" marker-end="url(#g4)"/><text class="m" x="650" y="100">PRESENTED txn</text>
 <text class="m" x="20" y="282">Input is delivered immediately (not on the clock); composing waits only for the deadline, never for a slow app.</text>
 </svg>
-<figcaption>60 Hz clock: the app draws after FRAME, the compositor composes on the tick, the driver confirms the display.</figcaption>
+<figcaption>Clock (here 60 Hz): the app draws after FRAME, the compositor composes on the tick, the driver confirms the display.</figcaption>
 </figure>
 
-- **Clock:** period 16.67 ms. The compositor ticks only when something is
+- **Clock:** period = 1 / the output's refresh rate from the driver's mode
+  (60 Hz = 16.67 ms, 120 Hz = 8.33 ms, 240 Hz = 4.17 ms); 60 Hz when
+  unknown. The composition reserve before the end of the period is a
+  quarter of the period (at most 4 ms); `FRAME` carries the deadline and
+  the period. **[implemented]** (test `frame_period_follows_refresh_rate`
+  in `libs/comp`) Deviation: one clock for the whole compositor (it
+  composes one output so far); a clock per output and VRR (variable rate:
+  a frame right after a change, at most at the maximum rate)
+  **[designed]**. The compositor ticks only when something is
   waiting (damaged region, animation, frame request). Nothing changes =
   no wake-ups.
 - **Frame request:** `COMMIT` with the `FRAME` flag says "tell me when to
@@ -250,6 +263,17 @@ redraws and acknowledges `serial` in `COMMIT`. The window frame
 application does not acknowledge within 200 ms, the compositor shows the
 old content in the new frame (clipped or padded with background), so the
 window never "runs away" from its frame.
+
+While dragging an edge there is at most one unacknowledged request: moves
+in between are merged and after the ack (or the deadline) the application
+gets the last size right away. It never draws outdated sizes and gets at
+most one `CONFIGURE` per frame (maximize and screen changes go at once).
+**[implemented]** (test `resize_drag_coalesces_configures` in `libs/comp`)
+Input tracing records the step cost: `velikost okna <id> <w>x<h>
+potvrzena aplikaci za N ms` (from the first request to the ack). Numbers
+from QEMU and real hardware are not measured yet. **[designed]**: show the
+old content at the fixed corner at once (without waiting for the ack) and
+damage only the changed band of the window and shadow.
 
 ### Transactions across windows and applications
 
@@ -388,9 +412,12 @@ the window (in the shadow area) resizes on all four sides and corners (a
 corner as long as the radius); dragging the left or top edge also moves the
 window, the opposite edge stays (after the CONFIGURE ack). Above the edge
 the cursor is a double arrow (horizontal, vertical, diagonal); the minimum
-window size applies. The title button zone lies only inside the title bar;
-outside the frame the edge wins. **[implemented]** (tests
-`close_button_zone_does_not_cover_edge`,
+window size applies. The title button zone is the button circle plus 4 px
+(`space.s2`), so the highlight matches what one sees; only a maximized
+window uses the `size.hit_min` square up to the top edge and close up to
+the screen corner (Fitts's law). Outside the frame the edge wins.
+**[implemented]** (tests `close_button_zone_does_not_cover_edge`,
+`close_button_zone_is_round_except_maximized_corner`,
 `resize_from_left_and_top_keeps_opposite_edge` in `libs/comp`)
 Unresponsive app: dimmed content and a "... nereaguje" card.
 

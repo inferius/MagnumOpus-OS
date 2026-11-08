@@ -182,12 +182,8 @@ impl Comp {
                 ));
             }
             if w.mode.has_frame() {
-                // Cile tlacitek se prekryvaji: plati nejblizsi stred.
-                let hits = w.button_hits();
-                let best = (0..3)
-                    .filter(|&i| hits[i].contains(x, y))
-                    .min_by_key(|&i| (hits[i].x + hits[i].w as i32 / 2 - x).abs());
-                if let Some(i) = best {
+                // Cile tlacitek se muzou prekryvat: plati nejblizsi stred.
+                if let Some(i) = w.button_at(x, y) {
                     return Some((gid, Zone::Button(i)));
                 }
                 let cl = self.clients.get(&w.client)?;
@@ -502,10 +498,18 @@ impl Comp {
     /// se ukazou zaroven po potvrzeni, nejpozdeji po `SYNC_TIMEOUT`).
     pub(crate) fn configure(&mut self, gid: u32, nw: u32, nh: u32, now: u64) {
         let focused = self.focus == Some(gid);
+        let dragging = matches!(self.input.drag, Some(Drag::Resize { window, .. }) if window == gid);
         let Some(w) = self.windows.get_mut(&gid) else { return };
         // Kotvu nastavi jen tah za levy / horni okraj (po tomto volani).
         w.anchor = (None, None);
         if w.configure.is_some_and(|(_, cw, ch, _)| cw == nw && ch == nh) || (w.configure.is_none() && w.rect.w == nw && w.rect.h == nh) {
+            w.pending_size = None;
+            return;
+        }
+        // Tazeni okraje s nepotvrzenou zadosti: dalsi az po potvrzeni
+        // (slouceni pohybu). Maximalizace a zmena obrazovky hned.
+        if dragging && w.configure.is_some() {
+            w.pending_size = Some((nw, nh));
             return;
         }
         w.serial = w.serial.wrapping_add(1);
