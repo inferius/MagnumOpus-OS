@@ -110,7 +110,24 @@ impl<D: BlockDevice> Fs<D> {
     /// Snapshot aktivniho datasetu s metadaty `meta` (cas a pozici
     /// zurnalu doplni). Dva commity: prvni ulozi stav (koren snapshotu),
     /// druhy zaznam snapshotu a polozky `extra` (napr. `HEAD` commitu).
-    pub(super) fn snapshot_with(&mut self, name: &str, mut meta: SnapMeta, extra: Vec<(Key, Vec<u8>)>) -> Result<(u64, SnapMeta)> {
+    pub(super) fn snapshot_with(&mut self, name: &str, meta: SnapMeta, extra: Vec<(Key, Vec<u8>)>) -> Result<(u64, SnapMeta)> {
+        let r = self.snapshot_pending(name, meta, extra)?;
+        self.commit()?;
+        Ok(r)
+    }
+
+    /// Docasny snapshot (pohled, zacatek "bokem"): jen prvni commit (koren
+    /// na disku), zaznam ulozi az pristi commit. Po padu pred nim zaznam
+    /// neni - docasne snapshoty se po padu stejne mazou (`cleanup_views`,
+    /// `cleanup_asides`) a stav na disku je konzistentni (snapshot, ktery
+    /// nevznikl). Usetri commit (dva flush disku) na kazdy pohled a radek
+    /// shellu se zapisem.
+    pub(super) fn snapshot_temporary(&mut self, name: &str, kind: u8) -> Result<(u64, SnapMeta)> {
+        self.snapshot_pending(name, SnapMeta { kind, ..SnapMeta::default() }, Vec::new())
+    }
+
+    /// Spolecna cast: commit stavu a zaznam snapshotu v pameti.
+    fn snapshot_pending(&mut self, name: &str, mut meta: SnapMeta, extra: Vec<(Key, Vec<u8>)>) -> Result<(u64, SnapMeta)> {
         if self
             .records_active()?
             .iter()
@@ -148,7 +165,6 @@ impl<D: BlockDevice> Fs<D> {
             name: record.name.clone(),
             ..Default::default()
         })?;
-        self.commit()?;
         Ok((id, meta))
     }
 

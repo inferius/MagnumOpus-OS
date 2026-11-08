@@ -6,7 +6,7 @@
 //! s kanalem rozhrani. Spravce podle tridy spusti `usb-hub` (09) nebo
 //! `usb-hid` (03); tridni ovladace nedostanou zadny Resource, jen kanal
 //! rozhrani (a `usb-hid` kanal ke sluzbe vstupu, jehoz druhy konec jde
-//! initu zpravou `input`).
+//! initu zpravou `input`, a kanal bezpecnostniho klice - zprava `fido`).
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -77,12 +77,18 @@ fn start_class(fs: &Initfs, class: u8, iface: Handle, parent: &Channel) -> Resul
         0x03 => {
             let image = fs.find("usb-hid").ok_or(libos::Error::NotFound)?;
             let (client, driver) = Channel::create()?;
+            // Kanal bezpecnostniho klice: ovladac ho pouzije jen u klice
+            // FIDO (usage page 0xF1D0), jinak ho zavre. Druhy konec jde
+            // initu (`fido`) a od nej sluzbe uctu.
+            let (key_client, key_driver) = Channel::create()?;
             let handles = vec![
                 StartHandle::user(iface),
                 StartHandle::user(driver.into_handle()),
+                StartHandle::user(key_driver.into_handle()),
             ];
             let (p, _control) = libos::spawn::service("usb-hid", image, handles)?;
             parent.write(b"input", vec![client.into_handle()])?;
+            parent.write(b"fido", vec![key_client.into_handle()])?;
             Ok(Some(p))
         }
         _ => Ok(None),

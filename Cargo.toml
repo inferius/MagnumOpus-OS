@@ -4,6 +4,8 @@ members = [
     "loader",
     "kernel",
     "libs/abi",
+    "libs/agentproto",
+    "libs/agentsh",
     "libs/acpica",
     "libs/boot-info",
     "libs/cbuild",
@@ -31,6 +33,8 @@ members = [
     "libs/spirv",
     "libs/vkcomp",
     "libs/taskproto",
+    "libs/accountproto",
+    "libs/accounts",
     "libs/taskcore",
     "libs/taskview",
     "libs/gfx",
@@ -64,6 +68,7 @@ members = [
     "user/console",
     "user/devmgr",
     "user/echo",
+    "user/agentd",
     "user/svctest",
     "user/fsrtest",
     "user/fsd",
@@ -73,6 +78,7 @@ members = [
     "user/ntpd",
     "user/fetch",
     "user/revocd",
+    "user/accountd",
     "user/dnsd",
     "user/vk-probe",
     "user/init",
@@ -147,6 +153,12 @@ opt-level = 2
 
 [profile.dev.package.fsproto]
 opt-level = 2
+[profile.dev.package.blockproto]
+opt-level = 2
+[profile.dev.package."virtio-blk"]
+opt-level = 2
+[profile.dev.package.virtio]
+opt-level = 2
 
 [profile.dev.package.xxhash-rust]
 opt-level = 3
@@ -211,6 +223,17 @@ opt-level = 3
 
 [profile.dev.package.poly1305]
 opt-level = 3
+
+# Ucty: Argon2id (BLAKE2b) bez optimalizace by v QEMU
+# (TCG) zdrzely kazde prihlaseni o sekundy.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.dev.package.accounts]
+opt-level = 2
 
 [profile.dev.package.chacha20poly1305]
 opt-level = 3

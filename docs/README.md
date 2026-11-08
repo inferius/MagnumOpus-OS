@@ -31,6 +31,12 @@ site menu.
 |---|---|---|
 | [Obnova služeb](cs/obnova-sluzeb.md) | [Service recovery](en/service-recovery.md) | restart po pádu, registr služeb se závislostmi, lístky, knihovna svcclient, pravidla pro klienty, testy „zabij službu“ / restart after a crash, service registry with dependencies, leases, the svcclient library, rules for clients, "kill the service" tests |
 
+### Uživatelé a zabezpečení / Users and security
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Uživatelské účty](cs/ucty.md) | [User accounts](en/accounts.md) | služba accountd, heslo Argon2id, PIN, bezpečnostní klíč FIDO2, relace, správa počítače bez roota, šifrování domova / accountd service, Argon2id password, PIN, FIDO2 security key, sessions, administration without root, home encryption |
+
 ### Vstup a zařízení / Input and devices
 
 | Česky | English | Obsah / Contents |
@@ -88,6 +94,12 @@ site menu.
 | [Síťové karty](cs/sitove-karty.md) | [Network cards](en/network-cards.md) | ovladače Intel e1000e a igc, Realtek r8169, společná smyčka, DMA a přerušení, testy nad simulovanými registry, co je ověřené / Intel e1000e and igc, Realtek r8169 drivers, shared loop, DMA and interrupts, tests on simulated registers, what is verified |
 | [Firewall](cs/firewall.md) | [Firewall](en/firewall.md) | manifest aplikace, dotazy uživateli, paketový filtr, profily sítí, audit, filtr DNS / application manifest, asking the user, packet filter, network profiles, audit, DNS filter |
 | [TLS a HTTP](cs/tls-http.md) | [TLS and HTTP](en/tls-http.md) | TLS 1.3, kořenové certifikáty, HTTP/1.1 a HTTP/2, program fetch, rizika / TLS 1.3, root certificates, HTTP/1.1 and HTTP/2, the fetch program, risks |
+
+### Agent AI / AI agent
+
+| Česky | English | Obsah / Contents |
+|---|---|---|
+| [Agent AI v systému](cs/agent.md) | [AI agent in the system](en/agent.md) | rozhraní modelu, nástroje služeb, práva a pracovní prostor, pomocník v shellu, diagnostika, bezpečnost a limity útraty / model interface, service tools, rights and workspace, shell helper, diagnostics, security and spending limits |
 
 Česká verze je primární; anglická ji překládá. Úplnost popisu chyb
 a syscallů v obou jazycích hlídá test (`cargo test -p abi`).

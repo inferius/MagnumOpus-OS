@@ -400,7 +400,7 @@ impl<D: BlockDevice> Fs<D> {
         self.guarded(|fs| {
             fs.enter_dataset(dataset)?;
             let name = alloc::format!("view-{}", fs.s.next_snapshot);
-            let (id, meta) = fs.snapshot_internal(&name, snapkind::VIEW)?;
+            let (id, meta) = fs.snapshot_temporary(&name, snapkind::VIEW)?;
             Ok(View { snapshot: name, id, seq: meta.journal_seq })
         })
     }

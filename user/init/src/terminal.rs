@@ -314,12 +314,16 @@ impl Terminals {
         let vmo = startup.initfs.as_ref().ok_or(Error::NotFound)?;
         let (here, there) = Channel::create()?;
         let (power_here, power_there) = Channel::create()?;
-        let handles = alloc::vec![
+        let mut handles = alloc::vec![
             StartHandle::user(own.into_channel().into_handle()),
             StartHandle::user(there.into_handle()),
             StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None)?),
             StartHandle::user(power_there.into_handle()),
         ];
+        // Brana agenta AI (jen zapis zadosti o relaci).
+        if let Some(h) = crate::agent::terminal_gate() {
+            handles.push(StartHandle::user(h));
+        }
         let (proc, win) = libos::spawn("termd", image, handles)?;
         c.starts.push(now);
         c.termd = Some(proc);
