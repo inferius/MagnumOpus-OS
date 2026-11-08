@@ -1375,3 +1375,38 @@ fn close_button_zone_is_round_except_maximized_corner() {
     let o = t.c.windows[&g].outer();
     assert_eq!(t.c.hit(o.right() as i32 - 1, o.y), Some((g, crate::input::Zone::Button(0))), "roh obrazovky {o:?}");
 }
+
+#[test]
+fn resize_drag_coalesces_configures() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let (o, r0) = (t.c.windows[&g].outer(), t.c.windows[&g].rect);
+    let (x, y) = (o.right() as i32 + 2, o.y + o.h as i32 / 2);
+    t.move_to(x, y);
+    left(&mut t, true);
+    t.c.take_out();
+    // Deset pohybu pred potvrzenim: aplikace dostane jen prvni velikost.
+    for k in 1..=10 {
+        t.move_to(x + 3 * k, y);
+    }
+    let sizes = |t: &mut T| -> Vec<(u32, u32, u32)> {
+        t.c.take_out()
+            .into_iter()
+            .filter_map(|o| match o {
+                Out::Client(c, ServerMsg::Configure { w, h, serial, .. }) if c == a => Some((w, h, serial)),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = sizes(&mut t);
+    assert_eq!(first.len(), 1, "jeden CONFIGURE za nepotvrzenou zadost: {first:?}");
+    assert_eq!(first[0].0, r0.w + 3);
+    // Po potvrzeni hned posledni poloha (slouceno).
+    t.commit(a, 2, guiproto::window::commit::ACK_CONFIGURE, first[0].2, 0);
+    let next = sizes(&mut t);
+    assert_eq!(next.iter().map(|s| s.0).collect::<Vec<_>>(), vec![r0.w + 30], "posledni velikost");
+    left(&mut t, false);
+}

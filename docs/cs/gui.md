@@ -242,6 +242,17 @@ a v `COMMIT` potvrdí `serial`. Rám okna (dekorace) a nový obsah se ukážou
 ukáže starý obsah v novém rámu (ořezaný nebo doplněný pozadím), takže
 okno nikdy „neuteče“ z rámu.
 
+Při tažení okraje je nejvýš jedna nepotvrzená žádost: pohyby mezi tím se
+sloučí a po potvrzení (nebo termínu) dostane aplikace hned poslední
+velikost. Aplikace tak nekreslí zastaralé velikosti a za snímek dostane
+nejvýš jeden `CONFIGURE` (maximalizace a změna obrazovky jdou hned).
+**[implementováno]** (test `resize_drag_coalesces_configures` v `libs/comp`)
+Cenu kroku zapisuje trasování vstupu: `velikost okna <id> <w>x<h>
+potvrzena aplikaci za N ms` (od první žádosti po potvrzení). Čísla z QEMU
+a skutečného stroje zatím nejsou změřená. **[navrženo]**: ukázat starý
+obsah u pevného rohu hned (bez čekání na potvrzení) a poškozovat jen
+změněný pás okna a stínu.
+
 ### Transakce přes víc oken a aplikací
 
 Pro změny, které se musí ukázat zároveň v různých oknech (okno terminálu

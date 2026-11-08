@@ -251,6 +251,17 @@ application does not acknowledge within 200 ms, the compositor shows the
 old content in the new frame (clipped or padded with background), so the
 window never "runs away" from its frame.
 
+While dragging an edge there is at most one unacknowledged request: moves
+in between are merged and after the ack (or the deadline) the application
+gets the last size right away. It never draws outdated sizes and gets at
+most one `CONFIGURE` per frame (maximize and screen changes go at once).
+**[implemented]** (test `resize_drag_coalesces_configures` in `libs/comp`)
+Input tracing records the step cost: `velikost okna <id> <w>x<h>
+potvrzena aplikaci za N ms` (from the first request to the ack). Numbers
+from QEMU and real hardware are not measured yet. **[designed]**: show the
+old content at the fixed corner at once (without waiting for the ack) and
+damage only the changed band of the window and shadow.
+
 ### Transactions across windows and applications
 
 For changes that must appear together in different windows (a terminal

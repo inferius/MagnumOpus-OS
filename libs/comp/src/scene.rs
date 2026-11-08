@@ -139,6 +139,10 @@ pub struct Window {
     /// Zmena velikosti tahem za levy / horni okraj: pravy / dolni okraj
     /// (obrazovka), ktery zustava na miste, az aplikace potvrdi velikost.
     pub anchor: (Option<i32>, Option<i32>),
+    /// Velikost pozadovana behem nepotvrzeneho CONFIGURE (tazeni okraje):
+    /// posle se az po potvrzeni nebo terminu. Aplikace tak kresli jen
+    /// posledni velikost a nikdy vic nez jednu za snimek.
+    pub pending_size: Option<(u32, u32)>,
     /// Cekajici `CONFIGURE`: serial, rozmery, termin.
     pub configure: Option<(u32, u32, u32, u64)>,
     pub serial: u32,
@@ -517,6 +521,7 @@ impl Comp {
             minimized: false,
             restore: None,
             anchor: (None, None),
+            pending_size: None,
             configure: None,
             serial: 1,
             badge_until: 0,
@@ -559,7 +564,7 @@ impl Comp {
                     became_mapped = true;
                 }
                 if flags & commit::ACK_CONFIGURE != 0
-                    && let Some((s, nw, nh, _)) = w.configure
+                    && let Some((s, nw, nh, d)) = w.configure
                     && s == serial
                 {
                     // Stara i nova plocha vcetne stinu (zmensene okno
@@ -568,8 +573,20 @@ impl Comp {
                     w.set_size(nw, nh);
                     w.configure = None;
                     let new = w.visual();
+                    let pending = w.pending_size.take();
+                    let anchor = w.anchor;
                     self.damage(old);
                     self.damage(new);
+                    // Cena kroku zmeny velikosti (trasovani vstupu).
+                    let ms = (now.saturating_sub(d.saturating_sub(crate::SYNC_TIMEOUT))) / 1_000_000;
+                    self.trace(now, format_args!("velikost okna {gid} {nw}x{nh} potvrzena aplikaci za {ms} ms"));
+                    // Mezitim tazeni dal: posledni velikost hned.
+                    if let Some((pw, ph)) = pending {
+                        self.configure(gid, pw, ph, now);
+                        if let Some(w) = self.windows.get_mut(&gid) {
+                            w.anchor = anchor;
+                        }
+                    }
                 }
             }
             if became_mapped {

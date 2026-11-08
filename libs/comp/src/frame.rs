@@ -178,7 +178,14 @@ impl Comp {
             let w = self.windows.get_mut(&g).unwrap();
             let (_, nw, nh, _) = w.configure.take().unwrap();
             w.set_size(nw, nh);
+            let (pending, anchor) = (w.pending_size.take(), w.anchor);
             self.damage_window(g);
+            if let Some((pw, ph)) = pending {
+                self.configure(g, pw, ph, now);
+                if let Some(w) = self.windows.get_mut(&g) {
+                    w.anchor = anchor;
+                }
+            }
         }
         let badges: Vec<u32> = self.windows.iter().filter(|(_, w)| w.badge_until != 0 && w.badge_until <= now).map(|(&g, _)| g).collect();
         for g in badges {
