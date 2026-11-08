@@ -80,7 +80,7 @@ fn errors_have_lines() {
         ("a = 1\na = 2\n", 2),
         ("[t]\n[t]\n", 2),
         ("a = 1 b\n", 1),
-        ("a = 1.5\n", 1),
+        ("a = 1.5.0\n", 1),
         ("[t\n", 1),
         ("a = \"\\q\"\n", 1),
         ("a = [1 2]\n", 1),
@@ -145,4 +145,20 @@ fn sizes() {
     assert_eq!(parse_size(&Value::Str(String::from("2G"))), Some(2 << 30));
     assert_eq!(parse_size(&Value::Str(String::from("x"))), None);
     assert_eq!(parse_size(&Value::Int(-1)), None);
+}
+
+#[test]
+fn floats() {
+    let t = parse("a = 16.7\nb = -1.75\nc = 1e3\nd = 3\n[s]\nx = 0.5\n").unwrap();
+    assert_eq!(t.get_f64("a"), Some(16.7));
+    assert_eq!(t.get_f64("b"), Some(-1.75));
+    assert_eq!(t.get_f64("c"), Some(1000.0));
+    // Cele cislo jde cist i jako f64, desetinne ne jako cele.
+    assert_eq!(t.get_f64("d"), Some(3.0));
+    assert_eq!(t.get_int("a"), None);
+    assert_eq!(t.get_f64("s.x"), Some(0.5));
+    assert_eq!(parse(&t.to_toml()).unwrap(), t);
+    for bad in ["a = 1.2.3", "a = .5", "a = 1.5x", "a = inf", "a = 1e"] {
+        assert!(parse(bad).is_err(), "{bad}");
+    }
 }

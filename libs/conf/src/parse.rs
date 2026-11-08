@@ -336,7 +336,7 @@ impl P<'_> {
 
     fn integer(&mut self) -> Result<Value, Error> {
         let start = self.i;
-        while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'+')
+        while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'+' | b'.'))
         {
             self.i += 1;
         }
@@ -350,6 +350,16 @@ impl P<'_> {
             Some(b'+') => (false, &raw[1..]),
             _ => (false, &raw[..]),
         };
+        if !body.starts_with("0x") && body.bytes().any(|b| matches!(b, b'.' | b'e' | b'E')) {
+            // Desetinne cislo: jen cislice, tecka a exponent (zadne `inf`, `nan`).
+            let ok = body.as_bytes().first().is_some_and(u8::is_ascii_digit)
+                && body.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'e' | b'E' | b'-' | b'+'));
+            let v: f64 = match body.parse() {
+                Ok(v) if ok => v,
+                _ => return Err(self.err("neplatne cislo")),
+            };
+            return Ok(Value::Float(crate::Float(if neg { -v } else { v })));
+        }
         let v = if let Some(hex) = body.strip_prefix("0x") {
             i64::from_str_radix(hex, 16)
         } else {

@@ -9,6 +9,9 @@ description = "Jadro kompozitoru: okna, strom vrstev, transakce, takt snimku, sk
 guiproto = { path = "../guiproto" }
 inputproto = { path = "../inputproto" }
 gfx = { path = "../gfx" }
+theme = { path = "../theme" }
 
 [dev-dependencies]
+# Testy kresli skutecnym Interem (snimky pro porovnani s prototypem).
+font = { path = "../font", features = ["inter-400", "inter-500", "inter-600", "inter-700"] }
 vkcomp = { path = "../vkcomp" }

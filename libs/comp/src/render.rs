@@ -1,53 +1,36 @@
-//! Skladani snimku: plocha, okna (ram, titulek, vrstvy), odznak duvery,
-//! tlacitka, panel oken, ztlumeni a systemovy dialog, kurzor.
+//! Skladani snimku: plocha, okna (stin, ram, titulek, vrstvy), odznak
+//! duvery, tlacitka, lista, ztlumeni a systemovy dialog, kurzor.
+//!
+//! Vzhled podle `design/okna.html` a `design/plocha.html`; barvy, rozmery,
+//! zaobleni, stiny a pisma jsou z tokenu (`style.rs`), ne z kodu.
 //!
 //! Kresli se jen do poskozenych obdelniku (orez platna). Pruhlednost
 //! skupiny se nasobi do deti (bez mezibufferu: prekryvajici se deti
 //! poloprusvitne skupiny se prolnou i mezi sebou - zjednoduseni 2D cesty).
+//!
+//! Poradi kresleni okna (CPU i GPU dava stejny vysledek, `gpu.rs`):
+//! 1. stin (vrstvy slozene do jedne barvy, jedno prolnuti),
+//! 2. ulozit pixely rohu pod oknem,
+//! 3. telo, titulek, obsah aplikace, prvky nad obsahem, ram (ctverec),
+//! 4. rohy: okno pres ulozene pozadi s pokrytim zaobleneho tvaru.
 
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use gfx::text::Text;
-use gfx::{Canvas, Image, rgb, rgba, scale};
+use gfx::shape::core_rects;
+use gfx::{Canvas, Image, scale};
 use guiproto::Rect;
 use guiproto::window::{LayerKind, Mode};
+use theme::TextStyle;
 
-use crate::scene::{BORDER, Client, Layer, TITLE_H, Window};
 use crate::Comp;
-
-/// Barvy systemu (tmavy motiv).
-pub mod color {
-    use gfx::rgb;
-    pub const DESKTOP_TOP: u32 = rgb(0x1C, 0x2A, 0x3A);
-    pub const DESKTOP_BOTTOM: u32 = rgb(0x0E, 0x14, 0x1C);
-    pub const TITLE: u32 = rgb(0x2B, 0x30, 0x38);
-    pub const TITLE_FOCUSED: u32 = rgb(0x33, 0x3D, 0x4C);
-    pub const TITLE_TEXT: u32 = rgb(0xE6, 0xEA, 0xEE);
-    pub const TITLE_TEXT_DIM: u32 = rgb(0x9A, 0xA4, 0xAE);
-    pub const BORDER: u32 = rgb(0x44, 0x4C, 0x56);
-    pub const BORDER_FOCUSED: u32 = rgb(0x5A, 0x9B, 0xE8);
-    pub const BUTTON: u32 = rgb(0x3E, 0x46, 0x52);
-    pub const CLOSE: u32 = rgb(0xC8, 0x4B, 0x4B);
-    pub const BADGE: u32 = rgb(0x1F, 0x6F, 0x4E);
-    pub const BADGE_TEXT: u32 = rgb(0xEA, 0xFF, 0xF4);
-    pub const PANEL: u32 = rgb(0x12, 0x18, 0x20);
-    pub const PANEL_ITEM: u32 = rgb(0x26, 0x2E, 0x38);
-    pub const PANEL_ACTIVE: u32 = rgb(0x2F, 0x5E, 0x96);
-    pub const WARN: u32 = rgb(0xE8, 0xA8, 0x3A);
-    pub const CONTENT: u32 = rgb(0x18, 0x1C, 0x22);
-}
+use crate::scene::{Client, Layer, Window};
+use crate::style::Style;
 
 /// Id aplikace spravce uloh (klik na ikonu uloh ji da do popredi).
 pub const TASKS_APP: &str = "org.magnumopus.tasks";
-
-/// Vyska panelu oken u spodniho okraje.
-pub const PANEL_H: u32 = 30;
-/// Velikost pisma systemu.
-pub const UI_PX: f32 = 14.0;
-pub const SMALL_PX: f32 = 12.0;
 
 /// Kurzor: 12 x 19, 0 pruhledne, 1 obrys, 2 vypln.
 const CURSOR: [&str; 19] = [
@@ -74,127 +57,306 @@ const CURSOR: [&str; 19] = [
 pub const CURSOR_W: u32 = 12;
 pub const CURSOR_H: u32 = 19;
 
-/// Text ikony uloh.
+/// Neprusvitnost listy (prototyp: `color-mix(surface 90%)`; na GPU pozdeji
+/// s rozmazanim pozadi).
+const BAR_OPACITY: u32 = 230;
+/// Ztlumeni obsahu aplikace, ktera nereaguje (prototyp: `opacity(.45)`).
+const HUNG_VEIL: u32 = 140;
+
+/// Text ikony uloh (pristupnost, inspekce).
 pub fn tasks_label(run: u32, agent: u32) -> String {
     if agent > 0 { format!("Úlohy: {run} (agent {agent})") } else { format!("Úlohy: {run}") }
 }
 
+/// Text upozorneni na umely vstup v liste.
+pub const INJECT_LABEL: &str = "Vstup ovládá automat";
+
+/// Ikona aplikace v liste podle id (bez vlastnich ikon aplikaci zatim
+/// obecna sada).
+pub fn app_icon(id: &str) -> &'static str {
+    if id.contains("term") {
+        "terminal"
+    } else if id.contains("tasks") {
+        "tasks"
+    } else if id.contains("files") || id.contains("soubory") {
+        "folder"
+    } else if id.contains("settings") || id.contains("nastaveni") {
+        "settings"
+    } else {
+        "window"
+    }
+}
+
+/// Ikona opravneni v odznaku.
+pub fn perm_icon(p: &str) -> &'static str {
+    let p = p.to_lowercase();
+    if p.contains("síť") || p.contains("net") {
+        "globe"
+    } else if p.contains("soub") || p.contains("fs") || p.contains("slož") {
+        "folder"
+    } else if p.contains("kamer") {
+        "camera"
+    } else if p.contains("mikro") {
+        "mic"
+    } else {
+        "key"
+    }
+}
+
+/// Rozlozeni listy.
+#[derive(Debug, Clone, Default)]
+pub struct Bar {
+    pub rect: Rect,
+    /// Tlacitka oken: (okno, obdelnik).
+    pub apps: Vec<(u32, Rect)>,
+    pub agent: Option<Rect>,
+    pub tasks: Option<Rect>,
+    pub clock: Option<Rect>,
+    /// Oddelovace (x).
+    pub seps: Vec<i32>,
+}
+
+/// Na co ukazuje mys (zvyrazneni pri najeti).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hover {
+    /// Tlacitko okna (okno, index: 0 zavrit, 1 maximalizovat, 2 minimalizovat).
+    Button(u32, usize),
+    /// Tlacitko okna v liste.
+    BarApp(u32),
+    Tasks,
+}
+
 impl Comp {
-    /// Obdelnik ikony uloh v panelu (`None` = nic nebezi). Vpravo, vlevo od
-    /// upozorneni na umely vstup.
-    pub fn tasks_icon(&self) -> Option<Rect> {
-        let (run, agent) = self.tasks;
-        if run == 0 {
-            return None;
-        }
-        let p = self.panel_rect();
-        let w = self.text.width(&tasks_label(run, agent), SMALL_PX) + 16;
-        let reserve = if self.input.injecting > 0 { self.text.width("Vstup ovládá automat", SMALL_PX) as i32 + 40 } else { 8 };
-        Some(Rect::new(p.right() as i32 - reserve - w as i32, p.y + 4, w, PANEL_H - 8))
+    /// Kolik mista zabira lista u spodniho okraje (vcetne odsazeni).
+    pub fn bar_reserve(&self) -> u32 {
+        let s = &self.style.theme.size;
+        s.bar_h + 2 * s.bar_inset
+    }
+
+    /// Plocha pro okna (obrazovka bez listy).
+    pub fn work_area(&self) -> Rect {
+        Rect::new(0, 0, self.w, self.h.saturating_sub(self.bar_reserve()))
     }
 
     pub(crate) fn panel_rect(&self) -> Rect {
-        Rect::new(0, (self.h - PANEL_H) as i32, self.w, PANEL_H)
+        let s = &self.style.theme.size;
+        Rect::new(s.bar_inset as i32, (self.h - s.bar_h - s.bar_inset) as i32, self.w.saturating_sub(2 * s.bar_inset), s.bar_h)
+    }
+
+    /// Lista vcetne stinu (poskozeni).
+    pub(crate) fn panel_visual(&self) -> Rect {
+        let p = self.panel_rect();
+        let mut v = p;
+        for s in &self.style.theme.shadow.bar {
+            let e = s.blur as i32 + s.spread;
+            v = v.union(&Rect::new(p.x + s.x - e, p.y + s.y - e, p.w + 2 * e as u32, p.h + 2 * e as u32));
+        }
+        v
     }
 
     pub(crate) fn damage_panel(&mut self) {
-        let r = self.panel_rect();
+        let r = self.panel_visual();
         self.damage(r);
     }
 
-    /// Text odznaku: jmeno aplikace a co smi.
-    pub(crate) fn badge_text(c: &Client) -> String {
-        if c.info.perms.is_empty() {
-            c.info.name.clone()
-        } else {
-            format!("{} \u{00B7} {}", c.info.name, c.info.perms.join(", "))
+    /// Hodiny v liste (cas a datum; `None` = nezobrazovat).
+    pub fn set_clock(&mut self, clock: Option<(String, String)>) {
+        if self.clock != clock {
+            self.clock = clock;
+            self.damage_panel();
         }
     }
 
-    pub(crate) fn badge_width(text: &Text, s: &str) -> u32 {
-        (text.width(s, SMALL_PX) + 16).min(260)
-    }
-
-    /// Polozky panelu: (okno, obdelnik).
-    pub(crate) fn panel_items(&self) -> Vec<(u32, Rect)> {
+    /// Rozlozeni listy (`design/plocha.html`, poloha "dole, odsazena").
+    pub fn bar_layout(&self) -> Bar {
+        let t = &self.style.theme;
         let p = self.panel_rect();
-        let mut x = 8;
-        let mut out = Vec::new();
+        let item = t.size.bar_icon;
+        let pad = t.space[2] as i32;
+        let gap = t.space[1] as i32;
+        let y = p.y + (p.h as i32 - item as i32) / 2;
+        let mut bar = Bar { rect: p, ..Default::default() };
+        // Vlevo okna.
+        let mut x = p.x + pad;
         for (&g, w) in &self.windows {
             if !w.mapped {
                 continue;
             }
-            let tw = self.text.width(&w.title, SMALL_PX).clamp(40, 160) + 20;
-            out.push((g, Rect::new(x, p.y + 4, tw, PANEL_H - 8)));
-            x += tw as i32 + 6;
+            bar.apps.push((g, Rect::new(x, y, item, item)));
+            x += item as i32 + gap;
         }
-        out
+        // Vpravo: hodiny, oddelovac, ulohy, agent.
+        let mut right = p.right() as i32 - pad;
+        if let Some((time, date)) = &self.clock {
+            let w = self.style.width(time, clock_time(t)).max(self.style.width(date, t.text.caption)) + t.space[3];
+            right -= w as i32;
+            bar.clock = Some(Rect::new(right, y, w, item));
+            right -= gap;
+            bar.seps.push(right);
+            right -= gap + 1;
+        }
+        let (run, agent) = self.tasks;
+        if run > 0 {
+            let w = self.tasks_width(run, agent);
+            right -= w as i32;
+            bar.tasks = Some(Rect::new(right, y, w, item));
+            right -= gap;
+        }
+        if self.input.injecting > 0 {
+            let h = t.size.control_h.min(item);
+            let w = t.space[4] + t.size.icon_s + t.space[2] + self.style.width(INJECT_LABEL, small_strong(t)) + t.space[4];
+            right -= w as i32;
+            bar.agent = Some(Rect::new(right, p.y + (p.h as i32 - h as i32) / 2, w, h));
+        }
+        bar
+    }
+
+    fn tasks_width(&self, run: u32, agent: u32) -> u32 {
+        let t = &self.style.theme;
+        let mut w = t.space[4] + t.size.icon_m + t.space[2] + self.style.width(&format!("{run}"), small_strong(t)) + t.space[4];
+        if agent > 0 {
+            w += t.space[2] + self.agent_chip_width(agent);
+        }
+        w
+    }
+
+    fn agent_chip_width(&self, agent: u32) -> u32 {
+        let t = &self.style.theme;
+        t.space[3] + t.size.icon_s - 2 + t.space[1] + self.style.width(&format!("{agent}"), t.text.caption) + t.space[3]
+    }
+
+    /// Obdelnik ikony uloh v liste (`None` = nic nebezi).
+    pub fn tasks_icon(&self) -> Option<Rect> {
+        self.bar_layout().tasks
+    }
+
+    /// Polozky listy: (okno, obdelnik).
+    pub(crate) fn panel_items(&self) -> Vec<(u32, Rect)> {
+        self.bar_layout().apps
+    }
+
+    /// Sirka odznaku duvery okna klienta.
+    pub(crate) fn badge_width(&self, cl: &Client) -> u32 {
+        let t = &self.style.theme;
+        let mut w = t.space[2] + t.size.icon_s + t.space[2] + self.style.width(&cl.info.name, badge_text(t)) + t.space[3];
+        if !cl.info.perms.is_empty() {
+            let n = cl.info.perms.len() as u32;
+            w += t.space[1] + t.space[2] + 1 + n * perm_icon_size(t) + (n - 1) * t.space[1];
+        }
+        w
     }
 
     /// Slozi obdelniky `rects` do platna.
     pub(crate) fn compose(&mut self, canvas: &mut Canvas<'_>, rects: &[Rect], now: u64) {
-        let panel_items = self.panel_items();
+        let bar = self.bar_layout();
         let dialog_active = self.dialogs.active().is_some();
         // Deti vrstev kazdeho viditelneho okna jednou za snimek (ne pro
         // kazdy poskozeny obdelnik).
         let mut trees: Vec<(u32, Kids)> = Vec::new();
         for &gid in &self.z {
             let Some(w) = self.windows.get(&gid) else { continue };
-            if !w.mapped || w.minimized || !rects.iter().any(|r| !w.outer().intersect(r).is_empty()) {
+            if !w.mapped || w.minimized || !rects.iter().any(|r| !w.visual().intersect(r).is_empty()) {
                 continue;
             }
             let Some(cl) = self.clients.get(&w.client) else { continue };
             trees.push((gid, children(cl, w.local)));
         }
+        let hover = self.input.hover;
         for r in rects {
             canvas.set_clip(*r);
-            desktop(canvas, self.h);
+            self.desktop(canvas);
             for (gid, kids) in &trees {
                 let w = &self.windows[gid];
-                if w.outer().intersect(r).is_empty() {
+                if w.visual().intersect(r).is_empty() {
                     continue;
                 }
                 let cl = &self.clients[&w.client];
                 let focused = self.focus == Some(*gid);
-                draw_window(canvas, &mut self.text, w, cl, kids, focused, now);
+                draw_window(canvas, &mut self.style, w, cl, kids, focused, now, hover.and_then(|h| button_of(h, *gid)));
             }
-            self.draw_top(canvas, &panel_items, dialog_active);
+            // Vse nad okny pres mezibuffer (stejne jako GPU backend: jedno
+            // prolnuti kazdeho pixelu).
+            self.top_via_scratch(canvas, *r, &bar, dialog_active);
         }
         canvas.reset_clip();
     }
 
-    /// Vse nad okny: panel, ztlumeni a systemovy dialog, kurzor.
-    pub(crate) fn draw_top(&mut self, canvas: &mut Canvas<'_>, panel_items: &[(u32, Rect)], dialog_active: bool) {
-        let panel = Panel {
-            rect: self.panel_rect(),
+    /// Nakresli vrstvu nad okny do mezibufferu a prolne ji do platna.
+    fn top_via_scratch(&mut self, canvas: &mut Canvas<'_>, r: Rect, bar: &Bar, dialog_active: bool) {
+        let r = r.intersect(&canvas.bounds());
+        if r.is_empty() {
+            return;
+        }
+        let (w, h) = (canvas.w, canvas.h);
+        let mut scratch = core::mem::take(&mut self.top_scratch);
+        scratch.resize((w * h) as usize, 0);
+        {
+            let mut tc = Canvas::new(&mut scratch, w, h, w).unwrap();
+            tc.set_clip(r);
+            tc.fill(r, 0);
+            self.draw_top(&mut tc, bar, dialog_active);
+        }
+        if let Some(img) = Image::new(&scratch, w, h, w) {
+            canvas.set_clip(r);
+            canvas.draw_image(&img, r, r, 255, false);
+        }
+        self.top_scratch = scratch;
+    }
+
+    /// Plocha (obraz z tokenu, spocitany jednou pro velikost).
+    pub(crate) fn desktop(&mut self, c: &mut Canvas<'_>) {
+        let (w, h) = (self.w, self.h);
+        let img = self.style.backdrop(w, h);
+        if let Some(img) = Image::new(img, w, h, w) {
+            let clip = c.clip();
+            c.draw_image(&img, clip, clip, 255, true);
+        }
+    }
+
+    /// Vse nad okny: lista, ztlumeni a systemovy dialog, kurzor.
+    pub(crate) fn draw_top(&mut self, canvas: &mut Canvas<'_>, bar: &Bar, dialog_active: bool) {
+        let info = BarInfo {
             windows: &self.windows,
+            clients: &self.clients,
             focus: self.focus,
-            injecting: self.input.injecting,
             tasks: self.tasks,
-            tasks_rect: self.tasks_icon(),
+            clock: self.clock.as_ref(),
+            hover: self.input.hover,
         };
-        draw_panel(canvas, &mut self.text, &panel, panel_items);
+        draw_bar(canvas, &mut self.style, bar, &info);
         if dialog_active {
             // Ztlumeni vseho pod dialogem (jen system kresli nad nim).
-            canvas.blend(self.screen(), rgba(0, 0, 0, 150));
-            self.dialogs.draw(canvas, &mut self.text, self.w, self.h);
+            canvas.blend(self.screen(), self.style.theme.color.scrim);
+            self.dialogs.draw(canvas, &mut self.style, self.w, self.h);
         }
         draw_cursor(canvas, self.input.px, self.input.py);
     }
 }
 
-pub(crate) fn desktop(c: &mut Canvas<'_>, h: u32) {
-    let clip = c.clip();
-    // Svisly prechod po pruzich 8 px (jen v orezu).
-    let (t, b) = (color::DESKTOP_TOP, color::DESKTOP_BOTTOM);
-    let mut y = clip.y - clip.y.rem_euclid(8);
-    while (y as i64) < clip.bottom() {
-        let k = (y.max(0) as u32 * 255 / h.max(1)).min(255);
-        let mix = |sh: u32| ((t >> sh & 0xFF) * (255 - k) + (b >> sh & 0xFF) * k) / 255;
-        let col = 0xFF00_0000 | mix(16) << 16 | mix(8) << 8 | mix(0);
-        c.fill(Rect::new(clip.x, y, clip.w, 8), col);
-        y += 8;
+fn button_of(h: Hover, gid: u32) -> Option<usize> {
+    match h {
+        Hover::Button(g, i) if g == gid => Some(i),
+        _ => None,
     }
+}
+
+/// Styl casu v hodinach listy (`small` s vahou `body_strong`).
+fn clock_time(t: &theme::Theme) -> TextStyle {
+    TextStyle { weight: t.text.body_strong.weight, ..t.text.small }
+}
+
+fn small_strong(t: &theme::Theme) -> TextStyle {
+    TextStyle { weight: t.text.body_strong.weight, ..t.text.small }
+}
+
+/// Text odznaku: `caption` s vahou `body_strong` (`.trust` v prototypu).
+fn badge_text(t: &theme::Theme) -> TextStyle {
+    TextStyle { weight: t.text.body_strong.weight, ..t.text.caption }
+}
+
+/// Ikona opravneni v odznaku: o 2 px mensi nez `icon_s` (14 px).
+fn perm_icon_size(t: &theme::Theme) -> u32 {
+    t.size.icon_s - t.space[1]
 }
 
 /// Deti vrstev okna: rodic -> (poradi, id) serazene.
@@ -213,79 +375,205 @@ pub(crate) fn children(cl: &Client, window: u32) -> Kids {
     kids
 }
 
-fn draw_window(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client, kids: &Kids, focused: bool, now: u64) {
+/// Prostredni pas okna, ktery stin nemusi kreslit (prekryje ho telo).
+pub(crate) fn shadow_skip(w: &Window) -> Rect {
+    let o = w.outer();
+    let r = w.radius();
+    Rect::new(o.x, o.y + r as i32, o.w, o.h.saturating_sub(2 * r))
+}
+
+/// Stin okna podle stavu.
+pub(crate) fn draw_window_shadow(c: &mut Canvas<'_>, st: &mut Style, w: &Window, focused: bool) {
+    if !w.mode.has_frame() {
+        return;
+    }
+    let sh = if focused { st.theme.shadow.window.clone() } else { st.theme.shadow.window_inactive.clone() };
+    st.draw_shadow(c, &sh, w.outer(), w.radius(), shadow_skip(w));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_window(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, kids: &Kids, focused: bool, now: u64, hover: Option<usize>) {
     let clip = c.clip();
-    draw_window_below(c, text, w, cl, focused);
-    // Obsah: vrstvy aplikace.
+    draw_window_shadow(c, st, w, focused);
+    let o = w.outer();
+    let rad = w.radius();
+    let under = if rad > 0 { c.save_corners(o, rad) } else { Vec::new() };
+    draw_window_body(c, st, w, cl, kids, focused, now, hover);
+    c.set_clip(clip);
+    if rad > 0 {
+        c.restore_corners(o, rad, &under);
+    }
+}
+
+/// Cele okno bez stinu jako ctverec (telo, titulek, obsah, prvky nad
+/// obsahem, ram). Rohy zaobli volajici (CPU: `restore_corners`, GPU:
+/// rohova zaplata).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_window_body(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, kids: &Kids, focused: bool, now: u64, hover: Option<usize>) {
+    let clip = c.clip();
+    draw_window_below(c, st, w, cl, focused, hover);
     let content_clip = clip.intersect(&w.rect);
     if !content_clip.is_empty() {
         draw_children(c, cl, kids, 0, (w.rect.x, w.rect.y), content_clip, 255, 0);
         c.set_clip(clip);
     }
-    draw_window_above(c, text, w, cl, now);
+    draw_window_above(c, st, w, cl, now, hover);
 }
 
-/// Cast okna pod obsahem aplikace: stin, ram, titulek (pozadi, text,
-/// tlacitka, odznak) a pozadi obsahu. Titulek obsah neprekryva, takze
-/// poradi vuci vrstvam aplikace nehraje roli (GPU backend kresli tuto cast
-/// zvlast, `gpu.rs`).
-pub(crate) fn draw_window_below(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client, focused: bool) {
-    let outer = w.outer();
-    let clip = c.clip();
+/// Cast okna pod obsahem aplikace: telo, titulek (pozadi, odznak, text,
+/// tlacitka). Kresli se jako ctverec (bez stinu a zaobleni).
+pub(crate) fn draw_window_below(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, focused: bool, hover: Option<usize>) {
+    let col = st.theme.color.clone();
     if w.mode.has_frame() {
-        c.blend(Rect::new(outer.x + 3, outer.y + 3, outer.w, outer.h), rgba(0, 0, 0, 70));
-        c.fill(outer, if focused { color::BORDER_FOCUSED } else { color::BORDER });
+        c.fill(w.outer(), col.surface);
+    } else {
+        c.fill(w.rect, col.surface);
     }
-    if w.mode == Mode::Standard {
-        let t = w.title_bar().unwrap();
-        c.fill(t, if focused { color::TITLE_FOCUSED } else { color::TITLE });
+    if w.mode != Mode::Standard {
+        return;
     }
-    c.fill(w.rect, color::CONTENT);
-    if w.mode == Mode::Standard {
-        let t = w.title_bar().unwrap();
-        let badge_w = Comp::badge_width(text, &Comp::badge_text(cl));
-        let (lh, base) = text.line(UI_PX);
-        let tx = t.x + badge_w as i32 + 14;
-        let ty = t.y + ((TITLE_H as i32 - lh as i32) / 2) + base;
-        let col = if focused { color::TITLE_TEXT } else { color::TITLE_TEXT_DIM };
-        // Titulek konci pred tlacitky.
-        let tclip = clip.intersect(&Rect::new(tx, t.y, (t.right() as i32 - tx - 110).max(0) as u32, TITLE_H));
-        if !tclip.is_empty() {
-            c.set_clip(tclip);
-            text.draw(c, tx, ty, &w.title, UI_PX, col);
-            c.set_clip(clip);
-        }
-        draw_buttons(c, text, w);
-        draw_badge(c, text, w, cl);
+    let t = w.title_bar().unwrap();
+    let o = w.outer();
+    // Titulek pres celou sirku okna (az k ramu).
+    let bar = Rect::new(o.x, o.y, o.w, t.bottom() as u32 - o.y as u32);
+    c.fill(bar, if focused { col.surface_2 } else { col.surface });
+    let badge = draw_badge(c, st, w, cl);
+    draw_buttons(c, st, w, hover);
+    // Jmeno: na stred mezi odznakem a tlacitky, zkracene.
+    let th = &st.theme;
+    let style = if focused { th.text.body_strong } else { TextStyle { weight: th.text.caption.weight, ..th.text.body_strong } };
+    let gap = th.space[3] as i32;
+    let b = w.buttons();
+    let (left, right) = match w.side {
+        guiproto::window::ButtonSide::Right => (badge.right() as i32 + gap, b[2].x - gap),
+        guiproto::window::ButtonSide::Left => (b[2].right() as i32 + gap, badge.x - gap),
+    };
+    if right > left {
+        let room = (right - left) as u32;
+        let ink = if focused { col.ink } else { col.ink_muted };
+        let face = st.face(style);
+        let tw = face.width(&w.title, style.size).min(room);
+        let x = left + (room - tw) as i32 / 2;
+        let base = t.y + face.baseline_in(style.size, t.h);
+        let old = c.clip();
+        c.set_clip(old.intersect(&Rect::new(left, t.y, room, t.h)));
+        face.draw_ellipsized(c, x, base, &w.title, style.size, ink, room);
+        c.set_clip(old);
     }
 }
 
-/// Systemove prvky nad obsahem: tlacitka a odznak oken bez titulku
-/// (vlastni titulek, bez ramu) a ztlumeni neodpovidajici aplikace.
-pub(crate) fn draw_window_above(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client, now: u64) {
+/// Prvky nad obsahem: tlacitka a odznak oken bez titulku (vlastni titulek,
+/// bez ramu), ztlumeni neodpovidajici aplikace, ram okna.
+pub(crate) fn draw_window_above(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, now: u64, hover: Option<usize>) {
     if w.mode.has_frame() {
         if w.mode != Mode::Standard {
-            draw_buttons(c, text, w);
-            draw_badge(c, text, w, cl);
+            draw_buttons(c, st, w, hover);
+            draw_badge(c, st, w, cl);
         }
     } else if w.badge_until > now {
-        draw_badge(c, text, w, cl);
+        draw_badge(c, st, w, cl);
     }
     if cl.unresponsive {
-        c.blend(w.outer(), rgba(0, 0, 0, 120));
-        let (_, base) = text.line(UI_PX);
-        text.draw(c, w.rect.x + 12, w.rect.y + 40 + base, "Aplikace nereaguje", UI_PX, color::WARN);
+        draw_hung(c, st, w, cl);
     }
-    let _ = BORDER;
+    if w.mode.has_frame() {
+        let col = st.theme.color.border;
+        c.inner_ring(w.outer(), w.radius(), w.geo.border, col);
+    }
 }
 
-/// Ma okno neco nad obsahem (pro GPU backend: povrch se neposila zbytecne)?
-pub(crate) fn has_above(w: &Window, cl: &Client, now: u64) -> bool {
-    (w.mode.has_frame() && w.mode != Mode::Standard) || (!w.mode.has_frame() && w.badge_until > now) || cl.unresponsive
+/// Aplikace nereaguje: ztlumeny obsah a karta uprostred (kresli system).
+fn draw_hung(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client) {
+    let t = st.theme.clone();
+    c.blend(w.rect, scale(t.color.surface, HUNG_VEIL));
+    let title = format!("{} nereaguje", cl.info.name);
+    let note = format!("{} s bez odpovědi.", t.motion.unresponsive_ms / 1000);
+    let (s1, s2) = (t.text.body_strong, t.text.small);
+    let pad = t.space[5];
+    let cw = (st.width(&title, s1).max(st.width(&note, s2)) + 2 * pad).min(w.rect.w);
+    let ch = (s1.line + t.space[2] + s2.line + 2 * pad).min(w.rect.h);
+    let card = Rect::new(w.rect.x + (w.rect.w as i32 - cw as i32) / 2, w.rect.y + (w.rect.h as i32 - ch as i32) / 2, cw, ch);
+    let pop = t.shadow.popover.clone();
+    st.draw_shadow(c, &pop, card, t.radius.card, Rect::default());
+    c.round_fill_bordered(card, t.radius.card, t.color.surface, t.color.border_strong, 1);
+    let mut y = card.y + pad as i32;
+    for (s, style, ink) in [(&title, s1, t.color.ink), (&note, s2, t.color.ink_muted)] {
+        let face = st.face(style);
+        let tw = face.width(s, style.size) as i32;
+        let base = y + face.baseline_in(style.size, style.line);
+        face.draw(c, card.x + (card.w as i32 - tw) / 2, base, s, style.size, ink);
+        y += style.line as i32 + t.space[2] as i32;
+    }
+}
+
+/// Odznak duvery: stit, jmeno z manifestu (od initu), ikony opravneni.
+/// Vraci jeho obdelnik.
+fn draw_badge(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client) -> Rect {
+    let t = st.theme.clone();
+    let style = badge_text(&t);
+    let mut bw = t.space[2] + t.size.icon_s + t.space[2] + st.width(&cl.info.name, style) + t.space[3];
+    let n = cl.info.perms.len() as u32;
+    let pi = perm_icon_size(&t);
+    if n > 0 {
+        bw += t.space[1] + t.space[2] + 1 + n * pi + (n - 1) * t.space[1];
+    }
+    let r = w.badge(bw);
+    let col = &t.color;
+    c.round_fill_bordered(r, t.radius.badge, col.trust_bg, col.trust_border, 1);
+    // Obsah jen uvnitr (mimo vyhlazene rohy): v uzkem okne se jmeno zkrati
+    // a ikony opravneni vynechaji.
+    let old = c.clip();
+    let inner = Rect::new(r.x + t.space[2] as i32, r.y, r.w.saturating_sub(t.space[2] + t.space[3]), r.h);
+    c.set_clip(old.intersect(&inner));
+    let is = t.size.icon_s;
+    let mut x = inner.x;
+    st.icons.draw(c, "shield", x, r.y + (r.h as i32 - is as i32) / 2, is, t.icon_stroke, col.trust_ink);
+    x += (is + t.space[2]) as i32;
+    let perms_w = if n > 0 { t.space[1] + t.space[2] + 1 + n * pi + (n - 1) * t.space[1] } else { 0 };
+    let room = (inner.right() as i32 - x).max(0) as u32;
+    let fits = st.width(&cl.info.name, style) + perms_w <= room;
+    let face = st.face(style);
+    let base = r.y + face.baseline_in(style.size, r.h);
+    x = face.draw_ellipsized(c, x, base, &cl.info.name, style.size, col.trust_ink, if fits { room } else { room.saturating_sub(perms_w.min(room / 2)) });
+    if n > 0 && fits {
+        x += t.space[1] as i32;
+        // Svisla cara oddelujici opravneni.
+        c.fill(Rect::new(x, r.y + 5, 1, r.h.saturating_sub(10)), col.trust_border);
+        x += 1 + t.space[2] as i32;
+        for p in &cl.info.perms {
+            st.icons.draw(c, perm_icon(p), x, r.y + (r.h as i32 - pi as i32) / 2, pi, t.icon_stroke, col.trust_ink);
+            x += (pi + t.space[1]) as i32;
+        }
+    }
+    c.set_clip(old);
+    r
+}
+
+/// Tlacitka okna: minimalizovat, maximalizovat, zavrit (pilulky, ikona
+/// vedlejsi barvou; pri najeti zvyraznene, zavrit cervene).
+fn draw_buttons(c: &mut Canvas<'_>, st: &mut Style, w: &Window, hover: Option<usize>) {
+    let t = st.theme.clone();
+    let col = &t.color;
+    let icons = ["close", if w.restore.is_some() { "restore" } else { "max" }, "min"];
+    for (i, b) in w.buttons().iter().enumerate() {
+        let hot = hover == Some(i);
+        let (bg, ink) = match (hot, i) {
+            (true, 0) => (Some(col.danger), col.on_danger),
+            (true, _) => (Some(col.surface_3), col.ink),
+            _ => (None, col.ink_muted),
+        };
+        if let Some(bg) = bg {
+            c.round_fill(*b, b.w / 2, bg);
+        } else if w.button_color != 0 {
+            c.round_fill(*b, b.w / 2, w.button_color | 0xFF00_0000);
+        }
+        let s = b.w / 2;
+        st.icons.draw(c, icons[i], b.x + (b.w - s) as i32 / 2, b.y + (b.h - s) as i32 / 2, s, t.icon_stroke, ink);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_children(
+pub(crate) fn draw_children(
     c: &mut Canvas<'_>,
     cl: &Client,
     kids: &BTreeMap<u32, Vec<(i32, u32)>>,
@@ -347,84 +635,107 @@ fn draw_layer(
     draw_children(c, cl, kids, id, (r.x.saturating_sub(p.scroll.0), r.y.saturating_sub(p.scroll.1)), child_clip, op, depth + 1);
 }
 
-fn draw_buttons(c: &mut Canvas<'_>, text: &mut Text, w: &Window) {
-    let b = w.buttons();
-    let base_col = if w.button_color != 0 { w.button_color | 0xFF00_0000 } else { color::BUTTON };
-    for (i, r) in b.iter().enumerate() {
-        let col = if i == 0 { color::CLOSE } else { base_col };
-        c.rounded(*r, 4, col);
-        let cx = r.x + r.w as i32 / 2;
-        let cy = r.y + r.h as i32 / 2;
-        match i {
-            0 => {
-                // Krizek ze dvou uhlopricek.
-                for d in -4..=4 {
-                    c.fill(Rect::new(cx + d, cy + d, 2, 2), color::TITLE_TEXT);
-                    c.fill(Rect::new(cx + d, cy - d, 2, 2), color::TITLE_TEXT);
-                }
-            }
-            1 => c.outline(Rect::new(cx - 5, cy - 5, 11, 10), 2, color::TITLE_TEXT),
-            _ => c.fill(Rect::new(cx - 5, cy + 3, 11, 2), color::TITLE_TEXT),
-        }
-    }
-    let _ = text;
-}
-
-fn draw_badge(c: &mut Canvas<'_>, text: &mut Text, w: &Window, cl: &Client) {
-    let s = Comp::badge_text(cl);
-    let bw = Comp::badge_width(text, &s);
-    let r = w.badge(bw);
-    c.rounded(r, 6, color::BADGE);
-    // Stit (system): zelena ctverecek se svislou carkou.
-    c.fill(Rect::new(r.x + 6, r.y + 6, 2, r.h.saturating_sub(12)), color::BADGE_TEXT);
-    let (lh, base) = text.line(SMALL_PX);
-    let ty = r.y + (r.h as i32 - lh as i32) / 2 + base;
-    let old = c.clip();
-    c.set_clip(old.intersect(&Rect::new(r.x, r.y, r.w.saturating_sub(4), r.h)));
-    text.draw(c, r.x + 12, ty, &s, SMALL_PX, color::BADGE_TEXT);
-    c.set_clip(old);
-}
-
-struct Panel<'a> {
-    rect: Rect,
+/// Co lista potrebuje vedet o scene.
+struct BarInfo<'a> {
     windows: &'a BTreeMap<u32, Window>,
+    clients: &'a BTreeMap<crate::ClientId, Client>,
     focus: Option<u32>,
-    injecting: u32,
     tasks: (u32, u32),
-    tasks_rect: Option<Rect>,
+    clock: Option<&'a (String, String)>,
+    hover: Option<Hover>,
 }
 
-fn draw_panel(c: &mut Canvas<'_>, text: &mut Text, comp: &Panel<'_>, items: &[(u32, Rect)]) {
-    let p = comp.rect;
-    if c.clip().intersect(&p).is_empty() {
+fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
+    let t = st.theme.clone();
+    let col = &t.color;
+    let p = bar.rect;
+    let vis = c.clip();
+    let shadow = t.shadow.bar.clone();
+    let mut area = p;
+    for s in &shadow {
+        let e = s.blur as i32 + s.spread;
+        area = area.union(&Rect::new(p.x + s.x - e, p.y + s.y - e, p.w + 2 * e as u32, p.h + 2 * e as u32));
+    }
+    if vis.intersect(&area).is_empty() {
         return;
     }
-    c.fill(p, color::PANEL);
-    let (lh, base) = text.line(SMALL_PX);
-    for (g, r) in items {
-        let Some(w) = comp.windows.get(g) else { continue };
-        let active = comp.focus == Some(*g) && !w.minimized;
-        c.rounded(*r, 5, if active { color::PANEL_ACTIVE } else { color::PANEL_ITEM });
-        let old = c.clip();
-        c.set_clip(old.intersect(&Rect::new(r.x + 6, r.y, r.w.saturating_sub(12), r.h)));
-        text.draw(c, r.x + 10, r.y + (r.h as i32 - lh as i32) / 2 + base, &w.title, SMALL_PX, color::TITLE_TEXT);
-        c.set_clip(old);
+    st.draw_shadow(c, &shadow, p, t.radius.window, Rect::default());
+    c.round_fill_bordered(p, t.radius.window, scale(col.surface, BAR_OPACITY), col.border, 1);
+    let ctl = t.radius.control;
+    // Okna.
+    let il = t.size.icon_l;
+    for (g, r) in &bar.apps {
+        let Some(w) = info.windows.get(g) else { continue };
+        let active = info.focus == Some(*g) && !w.minimized;
+        if info.hover == Some(Hover::BarApp(*g)) {
+            c.round_fill(*r, ctl, col.surface_3);
+        }
+        let icon = info.clients.get(&w.client).map(|cl| app_icon(&cl.info.id)).unwrap_or("window");
+        st.icons.draw(c, icon, r.x + (r.w - il) as i32 / 2, r.y + (r.h - il) as i32 / 2, il, t.icon_stroke, col.ink);
+        // Znacka bezici / aktivni (pod ikonou).
+        let (mw, mc) = if active { (t.space[6], col.accent) } else { (t.space[4] + t.space[1], col.ink_faint) };
+        let mh = 3;
+        c.round_fill(Rect::new(r.x + (r.w - mw) as i32 / 2, r.bottom() as i32 - mh as i32 - 1, mw, mh), 2, mc);
     }
-    // Ikona "bezi N uloh" (oranzova, kdyz bezi uloha agenta AI).
-    if let Some(r) = comp.tasks_rect {
-        let (run, agent) = comp.tasks;
-        let s = tasks_label(run, agent);
-        let warn = agent > 0;
-        c.rounded(r, 5, if warn { color::WARN } else { color::PANEL_ITEM });
-        let fg = if warn { rgb(0x20, 0x16, 0x00) } else { color::TITLE_TEXT };
-        text.draw(c, r.x + 8, p.y + (PANEL_H as i32 - lh as i32) / 2 + base, &s, SMALL_PX, fg);
+    for &x in &bar.seps {
+        let h = t.space[7];
+        c.fill(Rect::new(x, p.y + (p.h - h) as i32 / 2, 1, h), col.border);
     }
-    if comp.injecting > 0 {
-        let s = "Vstup ovládá automat";
-        let tw = text.width(s, SMALL_PX) as i32;
-        let x = p.right() as i32 - tw - 16;
-        c.rounded(Rect::new(x - 8, p.y + 4, tw as u32 + 16, PANEL_H - 8), 5, color::WARN);
-        text.draw(c, x, p.y + (PANEL_H as i32 - lh as i32) / 2 + base, s, SMALL_PX, rgb(0x20, 0x16, 0x00));
+    // Ulohy: ikona, pocet, stitek agenta.
+    if let Some(r) = bar.tasks {
+        let (run, agent) = info.tasks;
+        if info.hover == Some(Hover::Tasks) {
+            c.round_fill(r, ctl, col.surface_3);
+        }
+        let im = t.size.icon_m;
+        let mut x = r.x + t.space[4] as i32;
+        st.icons.draw(c, "tasks", x, r.y + (r.h - im) as i32 / 2, im, t.icon_stroke, col.ink);
+        x += (im + t.space[2]) as i32;
+        let s = small_strong(&t);
+        let face = st.face(s);
+        let base = r.y + face.baseline_in(s.size, r.h);
+        x = face.draw(c, x, base, &format!("{run}"), s.size, col.ink);
+        if agent > 0 {
+            x += t.space[2] as i32;
+            let cw = t.space[3] + t.size.icon_s - 2 + t.space[1] + st.width(&format!("{agent}"), t.text.caption) + t.space[3];
+            let chip_h = t.space[7] - 2;
+            let chip = Rect::new(x, r.y + (r.h - chip_h) as i32 / 2, cw, chip_h);
+            c.round_fill_bordered(chip, chip_h / 2, col.ai_soft, col.ai, 1);
+            let is = t.size.icon_s - 2;
+            st.icons.draw(c, "agent", chip.x + t.space[3] as i32, chip.y + (chip.h - is) as i32 / 2, is, t.icon_stroke, col.ai_ink);
+            let cs = t.text.caption;
+            let face = st.face(cs);
+            let base = chip.y + face.baseline_in(cs.size, chip.h);
+            face.draw(c, chip.x + (t.space[3] + is + t.space[1]) as i32, base, &format!("{agent}"), cs.size, col.ai_ink);
+        }
+    }
+    // Umely vstup: pilulka agenta (barva jen pro agenta, vzdy s ikonou
+    // a textem).
+    if let Some(r) = bar.agent {
+        c.round_fill_bordered(r, r.h / 2, col.ai_soft, col.ai, 1);
+        let is = t.size.icon_s;
+        st.icons.draw(c, "agent", r.x + t.space[4] as i32, r.y + (r.h - is) as i32 / 2, is, t.icon_stroke, col.ai_ink);
+        let s = small_strong(&t);
+        let face = st.face(s);
+        let base = r.y + face.baseline_in(s.size, r.h);
+        face.draw(c, r.x + (t.space[4] + is + t.space[2]) as i32, base, INJECT_LABEL, s.size, col.ai_ink);
+    }
+    // Hodiny: cas a pod nim datum, zarovnane vpravo.
+    if let (Some(r), Some((time, date))) = (bar.clock, info.clock) {
+        let (ts, ds) = (clock_time(&t), t.text.caption);
+        // Dva radky s vyskou 1,15 x velikost (prototyp `.bar-clock`).
+        let l1 = ts.size as i32 * 115 / 100;
+        let l2 = ds.size as i32 * 115 / 100;
+        let top = r.y + (r.h as i32 - l1 - l2) / 2;
+        let right = r.right() as i32;
+        let face = st.face(ts);
+        let tw = face.width(time, ts.size) as i32;
+        let b1 = top + face.baseline_in(ts.size, l1 as u32);
+        face.draw(c, right - tw, b1, time, ts.size, col.ink);
+        let face = st.face(ds);
+        let dw = face.width(date, ds.size) as i32;
+        let b2 = top + l1 + face.baseline_in(ds.size, l2 as u32);
+        face.draw(c, right - dw, b2, date, ds.size, col.ink_muted);
     }
 }
 
@@ -432,11 +743,16 @@ fn draw_cursor(c: &mut Canvas<'_>, x: i32, y: i32) {
     for (row, line) in CURSOR.iter().enumerate() {
         for (col, ch) in line.bytes().enumerate() {
             let p = match ch {
-                b'1' => rgb(0, 0, 0),
-                b'2' => rgb(255, 255, 255),
+                b'1' => gfx::rgb(0, 0, 0),
+                b'2' => gfx::rgb(255, 255, 255),
                 _ => continue,
             };
             c.fill(Rect::new(x + col as i32, y + row as i32, 1, 1), p);
         }
     }
+}
+
+/// Pasy okna bez rohovych ctvercu (GPU backend kresli obsah jen do nich).
+pub(crate) fn window_core(w: &Window) -> [Rect; 3] {
+    core_rects(w.outer(), w.radius())
 }

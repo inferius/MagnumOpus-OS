@@ -5,7 +5,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use gfx::Canvas;
-use gfx::text::Text;
 use guiproto::control::ConnectInfo;
 use guiproto::window::{ClientMsg, Mode, ServerMsg};
 
@@ -16,7 +15,7 @@ fn comp(w: u32, h: u32) -> Comp {
     Comp::new(
         w,
         h,
-        Text::system(),
+        crate::tests::fonts(),
         Box::new(move || {
             n += 1;
             n
@@ -101,6 +100,7 @@ fn resize_keeps_maximized_maximized() {
     c.take_out();
     c.resize(1920, 1080, now);
     let got = configures(&mut c, cl);
-    assert_eq!(got, vec![(1918, 1080 - crate::render::PANEL_H - crate::scene::TITLE_H - 2)]);
+    let g = c.style.geo();
+    assert_eq!(got, vec![(1920 - 2 * g.border, 1080 - c.bar_reserve() - g.title_h - 2 * g.border)]);
     assert!(c.windows[&gid].restore.is_some());
 }

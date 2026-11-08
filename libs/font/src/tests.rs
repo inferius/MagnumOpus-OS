@@ -159,3 +159,97 @@ fn garbage_never_panics() {
         }
     }
 }
+
+static INTER: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
+static MONO: &[u8] = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
+
+fn kern_of(f: &Font<'_>, a: char, b: char) -> i16 {
+    f.kern_units(f.glyph_index(a), f.glyph_index(b))
+}
+
+/// Inter nema tabulku `kern`, kerning je v `GPOS` (parovy lookup typu 2,
+/// cast zabalena v rozsireni typu 9). Hodnoty overene nastrojem fontTools.
+#[test]
+fn inter_gpos_kerning() {
+    let f = Font::parse(INTER).unwrap();
+    assert_eq!(f.units_per_em(), 2048);
+    assert_eq!(kern_of(&f, 'T', 'e'), -160);
+    assert_eq!(kern_of(&f, 'V', 'o'), -104);
+    assert_eq!(kern_of(&f, 'L', 'T'), -197);
+    assert_eq!(kern_of(&f, 'a', 'v'), -30);
+    assert_eq!(kern_of(&f, 'o', 'o'), 0);
+    // Sirka "Te" je mensi nez soucet sirek.
+    assert!(f.text_width("Te", 32.0) < f.text_width("T", 32.0) + f.text_width("e", 32.0));
+    // Cestina: vsechny znaky maji glyf.
+    for ch in "Příliš žluťoučký kůň úpěl ďábelské ódy ĚŠČŘŽÝÁÍÉÚŮŤĎŇ".chars() {
+        assert!(ch == ' ' || f.has_glyph(ch), "{ch}");
+    }
+}
+
+/// `tnum`: tabulkove cislice maji stejnou sirku; `cv11` zameni `a`.
+#[test]
+fn gsub_single_features() {
+    let plain = Font::parse(INTER).unwrap();
+    let f = Font::parse(INTER).unwrap().with_features(&[*b"tnum", *b"cv11"]);
+    let w = |f: &Font<'_>, c: char| f.advance_units(f.glyph_index(c));
+    assert_ne!(w(&plain, '1'), w(&plain, '0'));
+    let digits: alloc::vec::Vec<u16> = "0123456789".chars().map(|c| w(&f, c)).collect();
+    assert!(digits.iter().all(|&d| d == digits[0]), "{digits:?}");
+    assert_ne!(plain.glyph_index('a'), f.glyph_index('a'));
+    assert_eq!(plain.glyph_index('b'), f.glyph_index('b'));
+    // Vlastnost, kterou pismo nema, nic nezmeni.
+    let g = Font::parse(INTER).unwrap().with_features(&[*b"zzzz"]);
+    assert_eq!(g.glyph_index('1'), plain.glyph_index('1'));
+}
+
+#[test]
+fn mono_cells_and_weights() {
+    let f = Font::parse(MONO).unwrap().with_features(&[]);
+    let a = f.advance_units(f.glyph_index('i'));
+    for ch in "WMil0O1ěš".chars() {
+        assert_eq!(f.advance_units(f.glyph_index(ch)), a, "{ch}");
+    }
+    // Vyber rezu podle CSS: 650 -> 700, 450 -> 500, 300 -> 300.
+    let have = [300, 400, 500, 600, 700];
+    assert_eq!(pick_weight(&have, 650), Some(4));
+    assert_eq!(pick_weight(&have, 450), Some(2));
+    assert_eq!(pick_weight(&have, 300), Some(0));
+    assert_eq!(pick_weight(&[400, 600], 500), Some(0));
+    assert_eq!(pick_weight(&[400, 600], 300), Some(0));
+    assert_eq!(pick_weight(&[], 400), None);
+}
+
+/// Jemne umisteni: posun o pul pixelu posune teziste masky.
+#[test]
+fn subpixel_offset_moves_ink() {
+    let f = Font::parse(INTER).unwrap();
+    let g0 = f.rasterize_at(f.glyph_index('l'), 14.0, 0.0);
+    let g1 = f.rasterize_at(f.glyph_index('l'), 14.0, 0.5);
+    let cx = |g: &Glyph| {
+        let (mut s, mut n) = (0f32, 0f32);
+        for (i, &c) in g.coverage.iter().enumerate() {
+            s += (g.left as f32 + (i as u32 % g.w) as f32) * c as f32;
+            n += c as f32;
+        }
+        s / n
+    };
+    let d = cx(&g1) - cx(&g0);
+    assert!((d - 0.5).abs() < 0.1, "{d}");
+}
+
+/// Poskozene tabulky GPOS a GSUB: zadna panika, zadna nekonecna smycka.
+#[test]
+fn garbage_layout_never_panics() {
+    let mut seed = 7u64;
+    for _ in 0..40 {
+        let mut d = INTER.to_vec();
+        for _ in 0..400 {
+            let i = lcg(&mut seed) as usize % d.len();
+            d[i] = lcg(&mut seed) as u8;
+        }
+        if let Ok(f) = Font::parse(&d) {
+            let f = f.with_features(&[*b"tnum", *b"cv11"]);
+            let _ = f.text_width("Te Vo AV LT 0123 ač", 14.0);
+        }
+    }
+}

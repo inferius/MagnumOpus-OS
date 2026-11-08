@@ -7,15 +7,22 @@ use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use gfx::Canvas;
 use gfx::text::Text;
-use gfx::{Canvas, rgb};
 use guiproto::Rect;
 use guiproto::control::{DialogKind, DialogReply, DialogRequest};
 use inputproto::Action;
 use inputproto::code::*;
 
-use crate::render::{SMALL_PX, UI_PX, color};
+use theme::{TextStyle, Theme};
+
+use crate::style::Style;
 use crate::{Comp, Out, PeerId};
+
+/// Sirka dialogu (prototyp `.sysdlg`: `min(440px, 100% - 24px)`).
+const DIALOG_W: u32 = 440;
+/// Upozorneni pod textem dialogu.
+const GUARD: &str = "Systémový dialog přijímá jen fyzický vstup. Bezpečná zkratka Ctrl+Alt+Del ukáže vždy pravý.";
 
 /// Kdo dialog vyvolal (komu patri odpoved).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +75,28 @@ pub struct Layout {
     pub buttons: Vec<Rect>,
     pub field: Option<Rect>,
     pub lines: Vec<String>,
+    /// Pruh "Systém" s frazi.
+    band: Rect,
+    /// Nadpis (zakladna), blok aplikace, prvni radek textu, upozorneni.
+    title_y: i32,
+    who: Option<Rect>,
+    text_y: i32,
+    guard: Vec<String>,
+    guard_y: i32,
+}
+
+fn heading(d: &Dialog) -> &'static str {
+    match (d.owner, d.kind) {
+        (Owner::Secure, _) => "Bezpečná obrazovka systému",
+        (_, DialogKind::Permission) => "Povolit oprávnění?",
+        (_, DialogKind::Confirm) => "Potvrzení",
+        (_, DialogKind::Password) => "Potvrď heslem",
+    }
+}
+
+/// Styl popisku pruhu (`small`, tucne).
+fn band_style(t: &Theme) -> TextStyle {
+    TextStyle { weight: t.text.body_strong.weight, ..t.text.small }
 }
 
 impl Dialogs {
@@ -98,78 +127,165 @@ impl Dialogs {
         None
     }
 
-    /// Rozvrzeni aktivniho dialogu.
-    pub fn layout(&self, text: &Text, sw: u32, sh: u32) -> Option<Layout> {
+    /// Rozvrzeni aktivniho dialogu (`design/plocha.html`, `.sysdlg`).
+    pub fn layout(&self, st: &Style, sw: u32, sh: u32) -> Option<Layout> {
         let d = self.active()?;
-        let w = 520u32.min(sw.saturating_sub(20));
-        let lines = wrap(text, &d.text, UI_PX, w - 40);
-        let (lh, _) = text.line(UI_PX);
-        let mut h = 44 + 26 + lines.len() as u32 * (lh + 2) + 16 + 24 + 52;
-        if d.kind == DialogKind::Password {
-            h += 44;
-        }
+        let t = &st.theme;
+        let sp = &t.space;
+        let w = DIALOG_W.min(sw.saturating_sub(2 * sp[4]));
+        let inner = w.saturating_sub(2 * sp[6]);
+        let body = t.text.body;
+        let lines = wrap(st.face_ref(body), &d.text, body.size, inner);
+        let guard = wrap(st.face_ref(t.text.caption), GUARD, t.text.caption.size, inner.saturating_sub(t.size.icon_s + sp[2]));
+        let band_h = 2 * sp[3] + t.text.small.line + 1;
+        // Svisle: pruh, obsah (nadpis, aplikace, text, pole), upozorneni, tlacitka.
+        let mut y = band_h + sp[6];
+        let title_y = y as i32;
+        y += t.text.title.line + sp[3];
+        let who_y = if d.app.is_empty() {
+            None
+        } else {
+            y += sp[4];
+            let at = y;
+            y += t.size.bar_icon + 2 * sp[3] + sp[4];
+            Some(at)
+        };
+        let text_y = y as i32;
+        y += lines.len() as u32 * body.line;
+        let field_y = if d.kind == DialogKind::Password {
+            y += sp[4];
+            let at = y;
+            y += t.size.control_h;
+            Some(at)
+        } else {
+            None
+        };
+        y += sp[5];
+        let guard_y = y as i32;
+        y += guard.len() as u32 * t.text.caption.line + sp[4];
+        let buttons_y = y;
+        y += t.size.control_h + sp[6];
+        let h = y.min(sh);
         let x = (sw as i32 - w as i32) / 2;
-        let y = (sh as i32 - h as i32) / 2;
-        let frame = Rect::new(x, y, w, h);
-        let field = (d.kind == DialogKind::Password).then(|| Rect::new(x + 20, y + h as i32 - 52 - 24 - 44, w - 40, 32));
+        let top = (sh as i32 - h as i32) / 2;
+        let frame = Rect::new(x, top, w, h);
         let mut buttons = Vec::new();
-        let mut bx = x + w as i32 - 20;
+        let mut bx = x + w as i32 - sp[6] as i32;
         for o in d.options.iter().rev() {
-            let bw = (text.width(o, UI_PX) + 28).max(90);
+            let bw = st.width(o, t.text.body) + 2 * sp[5];
             bx -= bw as i32;
-            buttons.push(Rect::new(bx, y + h as i32 - 46, bw, 32));
-            bx -= 10;
+            buttons.push(Rect::new(bx, top + buttons_y as i32, bw, t.size.control_h));
+            bx -= sp[3] as i32;
         }
         buttons.reverse();
-        Some(Layout { frame, buttons, field, lines })
+        let field = field_y.map(|fy| Rect::new(x + sp[6] as i32, top + fy as i32, inner, t.size.control_h));
+        let who = who_y.map(|wy| Rect::new(x + sp[6] as i32, top + wy as i32, inner, t.size.bar_icon + 2 * sp[3]));
+        Some(Layout {
+            frame,
+            buttons,
+            field,
+            lines,
+            band: Rect::new(x, top, w, band_h),
+            title_y: top + title_y,
+            who,
+            text_y: top + text_y,
+            guard,
+            guard_y: top + guard_y,
+        })
     }
 
-    pub fn draw(&self, c: &mut Canvas<'_>, text: &mut Text, sw: u32, sh: u32) {
-        let Some(l) = self.layout(text, sw, sh) else { return };
+    pub fn draw(&self, c: &mut Canvas<'_>, st: &mut Style, sw: u32, sh: u32) {
+        let Some(l) = self.layout(st, sw, sh) else { return };
         let d = self.active().unwrap();
+        let t = st.theme.clone();
+        let col = &t.color;
+        let sp = &t.space;
         let f = l.frame;
-        c.rounded(Rect::new(f.x + 4, f.y + 6, f.w, f.h), 10, gfx::rgba(0, 0, 0, 120));
-        c.rounded(f, 10, rgb(0x22, 0x28, 0x31));
-        c.outline(f, 1, color::BADGE);
-        // Systemovy pruh: stit, nazev a bezpecnostni fraze.
-        let bar = Rect::new(f.x, f.y, f.w, 36);
-        c.rounded(bar, 10, color::BADGE);
-        c.fill(Rect::new(f.x, f.y + 26, f.w, 10), color::BADGE);
-        let (lh, base) = text.line(UI_PX);
-        let title = match (d.owner, d.kind) {
-            (Owner::Secure, _) => "Bezpečná obrazovka systému",
-            (_, DialogKind::Permission) => "Systém: oprávnění",
-            (_, DialogKind::Confirm) => "Systém: potvrzení",
-            (_, DialogKind::Password) => "Systém: heslo",
-        };
-        text.draw(c, f.x + 16, f.y + (36 - lh as i32) / 2 + base, title, UI_PX, color::BADGE_TEXT);
-        let mut y = f.y + 44;
-        let (slh, sbase) = text.line(SMALL_PX);
-        if !d.app.is_empty() {
-            text.draw(c, f.x + 20, y + sbase, &d.app, SMALL_PX, color::TITLE_TEXT_DIM);
+        let rad = t.radius.window;
+        let shadow = t.shadow.dialog.clone();
+        st.draw_shadow(c, &shadow, f, rad, Rect::default());
+        // Ram 2 px barvou duvery: jen system smi tuto barvu pouzit.
+        c.round_fill_bordered(f, rad, col.surface, col.trust_border, 2);
+        let old = c.clip();
+        // Pruh "Systém": zaobleny jen nahore (dolni cast orezana).
+        let band = Rect::new(f.x + 2, f.y + 2, f.w - 4, l.band.h - 2);
+        c.set_clip(old.intersect(&band));
+        c.round_fill(Rect::new(band.x, band.y, band.w, band.h + rad), rad - 2, col.trust_bg);
+        c.set_clip(old);
+        c.fill(Rect::new(band.x, band.bottom() as i32 - 1, band.w, 1), col.trust_border);
+        let bs = band_style(&t);
+        let is = t.size.icon_s;
+        let icon_y = band.y + (band.h as i32 - 1 - is as i32) / 2;
+        let mut x = band.x + sp[5] as i32;
+        st.icons.draw(c, "shieldcheck", x, icon_y, is, t.icon_stroke, col.trust_ink);
+        x += (is + sp[3]) as i32;
+        let face = st.face(bs);
+        let base = band.y + face.baseline_in(bs.size, band.h - 1);
+        face.draw(c, x, base, "Systém", bs.size, col.trust_ink);
+        // Fraze vpravo: zna ji jen system a uzivatel.
+        let label = "tvá fráze: ";
+        let phrase = if self.phrase.is_empty() { String::from("(nenastavena)") } else { self.phrase.clone() };
+        let ps = TextStyle { weight: t.text.caption.weight, ..t.text.small };
+        let pb = TextStyle { weight: t.text.display.weight, ..t.text.small };
+        let pw = st.width(label, ps) + st.width(&phrase, pb);
+        let mut px = band.right() as i32 - sp[5] as i32 - pw as i32;
+        st.icons.draw(c, "key", px - (is + sp[2]) as i32, icon_y, is, t.icon_stroke, col.trust_ink);
+        px = st.face(ps).draw(c, px, base, label, ps.size, col.trust_ink);
+        st.face(pb).draw(c, px, base, &phrase, pb.size, col.trust_ink);
+        // Nadpis.
+        let ts = t.text.title;
+        let face = st.face(ts);
+        let base = l.title_y + face.baseline_in(ts.size, ts.line);
+        face.draw(c, f.x + sp[6] as i32, base, heading(d), ts.size, col.ink);
+        // Aplikace, ktera se pta.
+        if let Some(w) = l.who {
+            c.round_fill(w, t.radius.control, col.surface_2);
+            let tile = Rect::new(w.x + sp[3] as i32, w.y + sp[3] as i32, t.size.bar_icon, t.size.bar_icon);
+            c.round_fill(tile, t.radius.control, col.accent_soft);
+            let il = t.size.icon_l;
+            st.icons.draw(c, "window", tile.x + (tile.w - il) as i32 / 2, tile.y + (tile.h - il) as i32 / 2, il, t.icon_stroke, col.accent_ink);
+            let s = t.text.body_strong;
+            let face = st.face(s);
+            let base = w.y + face.baseline_in(s.size, w.h);
+            let room = w.w.saturating_sub(tile.w + 3 * sp[3]);
+            face.draw_ellipsized(c, tile.right() as i32 + sp[3] as i32, base, &d.app, s.size, col.ink, room);
         }
-        y += 26;
+        // Text.
+        let bs = t.text.body;
+        let face = st.face(bs);
+        let mut y = l.text_y;
         for line in &l.lines {
-            text.draw(c, f.x + 20, y + base, line, UI_PX, color::TITLE_TEXT);
-            y += lh as i32 + 2;
+            face.draw(c, f.x + sp[6] as i32, y + face.baseline_in(bs.size, bs.line), line, bs.size, col.ink);
+            y += bs.line as i32;
         }
         if let Some(fr) = l.field {
-            c.rounded(fr, 6, rgb(0x14, 0x18, 0x1E));
-            c.outline(fr, 1, color::BORDER_FOCUSED);
+            c.round_fill_bordered(fr, t.radius.control, col.surface, col.border_strong, 1);
             let dots: String = d.password.chars().map(|_| '\u{2022}').collect();
-            text.draw(c, fr.x + 10, fr.y + (32 - lh as i32) / 2 + base, &dots, UI_PX, color::TITLE_TEXT);
+            let face = st.face(bs);
+            face.draw(c, fr.x + sp[4] as i32, fr.y + face.baseline_in(bs.size, fr.h), &dots, bs.size, col.ink);
+            c.round_stroke(Rect::new(fr.x - 2, fr.y - 2, fr.w + 4, fr.h + 4), t.radius.control + 2, t.size.focus_ring, col.focus);
         }
-        let phrase = if self.phrase.is_empty() { String::from("Fráze: (nenastavena)") } else { alloc::format!("Fráze: {}", self.phrase) };
-        let py = f.y + f.h as i32 - 46 - 4 - slh as i32;
-        text.draw(c, f.x + 20, py + sbase, &phrase, SMALL_PX, color::BADGE_TEXT);
+        // Upozorneni: jen fyzicky vstup.
+        let cs = t.text.caption;
+        let mut y = l.guard_y;
+        st.icons.draw(c, "info", f.x + sp[6] as i32, y, is, t.icon_stroke, col.ink_muted);
+        let face = st.face(cs);
+        for g in &l.guard {
+            face.draw(c, f.x + (sp[6] + is + sp[2]) as i32, y + face.baseline_in(cs.size, cs.line), g, cs.size, col.ink_muted);
+            y += cs.line as i32;
+        }
+        // Tlacitka: pilulky; vybrane ma ramecek fokusu.
         for (i, (b, o)) in l.buttons.iter().zip(&d.options).enumerate() {
-            let sel = i == d.sel;
-            c.rounded(*b, 6, if sel { color::PANEL_ACTIVE } else { color::BUTTON });
-            if sel {
-                c.outline(*b, 1, color::TITLE_TEXT);
+            c.round_fill_bordered(*b, b.h / 2, col.surface, col.border_strong, 1);
+            if i == d.sel {
+                let (fr, off) = (t.size.focus_ring, t.size.focus_offset);
+                let ring = Rect::new(b.x - (fr + off) as i32, b.y - (fr + off) as i32, b.w + 2 * (fr + off), b.h + 2 * (fr + off));
+                c.round_stroke(ring, ring.h / 2, fr, col.focus);
             }
-            let tw = text.width(o, UI_PX) as i32;
-            text.draw(c, b.x + (b.w as i32 - tw) / 2, b.y + (32 - lh as i32) / 2 + base, o, UI_PX, color::TITLE_TEXT);
+            let s = t.text.body;
+            let face = st.face(s);
+            let tw = face.width(o, s.size) as i32;
+            face.draw(c, b.x + (b.w as i32 - tw) / 2, b.y + face.baseline_in(s.size, b.h), o, s.size, col.ink);
         }
     }
 }
@@ -391,7 +507,7 @@ impl Comp {
         if now < self.dialogs.since + INPUT_DELAY {
             return;
         }
-        let Some(l) = self.dialogs.layout(&self.text, self.w, self.h) else { return };
+        let Some(l) = self.dialogs.layout(&self.style, self.w, self.h) else { return };
         if let Some(i) = l.buttons.iter().position(|b| b.contains(x, y)) {
             self.answer(i);
         }
@@ -401,6 +517,6 @@ impl Comp {
 
     /// Rozvrzeni aktivniho dialogu (testy, inspekce).
     pub fn dialog_layout(&self) -> Option<Layout> {
-        self.dialogs.layout(&self.text, self.w, self.h)
+        self.dialogs.layout(&self.style, self.w, self.h)
     }
 }

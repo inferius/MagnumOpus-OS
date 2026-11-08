@@ -358,9 +358,11 @@ dependencies = [
 name = "comp"
 version = "0.1.0"
 dependencies = [
+ "font",
  "gfx",
  "guiproto",
  "inputproto",
+ "theme",
  "vkcomp",
 ]
 
@@ -2321,6 +2323,13 @@ dependencies = [
  "libos",
  "shlang",
  "term",
+]
+
+[[package]]
+name = "theme"
+version = "0.1.0"
+dependencies = [
+ "conf",
 ]
 
 [[package]]

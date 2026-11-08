@@ -1,0 +1,9 @@
+[package]
+name = "theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Motiv vzhledu: tokeny design systemu (design/tokens.toml) jako data - barvy, pisma, rozestupy, zaobleni, stiny, pohyb"
+
+[dependencies]
+conf = { path = "../conf" }
