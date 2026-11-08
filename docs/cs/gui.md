@@ -758,6 +758,13 @@ Prototyp a porovnání variant: `design/prostredi-menu.html` (varianta D).
 
 ### Pravidla palety příkazů
 
+**Paleta je brána do systému**: jedno místo, odkud jde spustit aplikaci,
+přepnout okno, provést akci aplikace i systému, otevřít nastavení a najít
+soubor - bez znalosti, kde co je. Každá nová funkce systému proto má mít
+akci, kterou paleta najde; co v paletě není, uživatel nenajde. Stejná
+data používají agenti AI.
+
+
 Stav je u každého pravidla. Testy: `command_palette_search_run_and_recent`, `command_palette_v2_app_menu_actions` (`libs/comp`), `menu_update_roundtrip_and_limits` (`libs/guiproto`).
 
 1. **Otevření**: Ctrl+K a Super, z jakéhokoli okna; nad vším kromě

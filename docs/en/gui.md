@@ -794,6 +794,13 @@ Prototype and comparison of the variants: `design/prostredi-menu.html`
 
 ### Command palette rules
 
+**The palette is the gateway to the system**: one place to launch an app,
+switch a window, run an app or system action, open settings and find a
+file - without knowing where things are. Every new system feature should
+therefore have an action the palette finds; what is not in the palette,
+the user will not find. AI agents use the same data.
+
+
 The status is at each rule. Tests: `command_palette_search_run_and_recent`, `command_palette_v2_app_menu_actions` (`libs/comp`), `menu_update_roundtrip_and_limits` (`libs/guiproto`).
 
 1. **Opening**: Ctrl+K and Super, from any window; above everything except
