@@ -171,6 +171,9 @@ impl Comp {
 
     fn input_one(&mut self, r: &Record, now: u64) {
         if r.source != 0 && self.input.untrusted.contains(&r.source) {
+            if let Event::Button { button, .. } = r.event {
+                self.trace(r.time, format_args!("tlacitko {button:?} zahozeno: neovereny zdroj {}", r.source));
+            }
             return;
         }
         let syn = r.is_synthetic();
@@ -419,7 +422,10 @@ impl Comp {
 
     fn button(&mut self, button: Button, pressed: bool, mods: u16, syn: bool, time: u64, now: u64) {
         let (px, py) = (self.input.px, self.input.py);
+        let act = if pressed { "stisk" } else { "pusteni" };
         if self.dialogs.active().is_some() && pressed {
+            let why = if syn { "zahozen (umely vstup)" } else { "do systemoveho dialogu" };
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: modalni dialog, {why}"));
             if !syn && button == Button::Left {
                 self.dialog_click(px, py, now);
             }
@@ -433,17 +439,23 @@ impl Comp {
                 && let Some(w) = self.windows.get(&g)
             {
                 let (c, l) = (w.client, w.local);
+                let (x, y) = (px - w.rect.x, py - w.rect.y);
                 let ev = InputEvent::Button {
                     code: button.code(),
                     pressed: false,
-                    x: px - w.rect.x,
-                    y: py - w.rect.y,
+                    x,
+                    y,
                 };
                 self.send_input(c, l, ev, mods, syn, time);
+                let n = self.window_name(g);
+                self.trace(time, format_args!("{button:?} {act} na {px},{py} -> {n} obsah {x},{y} (okno se stiskem)"));
+            } else {
+                self.trace(time, format_args!("{button:?} {act} na {px},{py}: zadne okno nedostalo stisk, nic neposlano"));
             }
             return;
         }
         if self.panel_rect().contains(px, py) {
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: lista"));
             if button == Button::Left
                 && let Some((g, _)) = self.panel_items().into_iter().find(|(_, r)| r.contains(px, py))
             {
@@ -461,7 +473,12 @@ impl Comp {
             }
             return;
         }
-        let Some((g, zone)) = self.hit(px, py) else { return };
+        let Some((g, zone)) = self.hit(px, py) else {
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: mimo okna (plocha)"));
+            return;
+        };
+        let n = self.window_name(g);
+        self.trace(time, format_args!("{button:?} {act} na {px},{py} -> {n} zona {zone:?}{}", if self.focus == Some(g) { "" } else { ", fokus na okno" }));
         self.set_focus(Some(g));
         let w = &self.windows[&g];
         let (c, l, rect) = (w.client, w.local, w.rect);

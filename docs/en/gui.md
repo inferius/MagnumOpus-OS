@@ -484,6 +484,35 @@ coordinates, pointer leave, button with position, wheel and focus; plus
 modifiers, the synthetic flag and time. Motion and button release go to
 the window that got the press, even when the pointer leaves it.
 
+### Input tracing (log target `vstup`)
+
+Every mouse button and key press and release goes to the log as lines
+`vstup: id=<time in µs> ...` across services. The id is the record time
+from `inputd`, so one click can be followed along its whole path:
+
+| step | what it logs |
+|---|---|
+| `inputd` | button / key, press or release, source, modifiers, number of moves in the batch, destination (focus, `secure`) |
+| `compd` | screen position, window and zone (content, title, button, edge), focus change, or why the event was dropped (modal dialog, untrusted source, outside windows, release without press) |
+| `libs/ui` | element found by the hit test, action (button click, checkbox toggle, row selection) or why there was no activation, number of messages to the app |
+| `gui-tasks` | request to `taskd` caused by the click |
+| `taskd` | client request and reply kinds (no id: order links them) |
+
+Key codes and text field values are not logged (passwords). Mouse motion is
+not logged, only counted in the batch with a button. The kernel limits
+lines of the same shape to 10 per second per process. Tracing is **on** by
+default; `loglevel vstup warn` turns it off (`LOG_CONTROL`, target `vstup`
+for all processes, see [Syscalls](syscalls.md)), `loglevel vstup vychozi`
+turns it back on.
+
+Order within one device report: `inputd` sends buttons after the motion and
+position from the same report (everything up to `SYN_REPORT` happens at
+once). Previously the button went first and the click landed at the previous
+pointer position; the VMware tablet sends position and press in one report,
+so clicks on small elements (Task manager checkboxes) were lost. The
+`task_manager` test checks this with a physical QMP click (motion and press
+in one frame).
+
 ## System dialogs
 
 A dialog (permission, password, action confirmation) is drawn by the

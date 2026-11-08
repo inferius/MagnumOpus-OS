@@ -150,6 +150,25 @@ impl Taskd {
     }
 }
 
+/// Trasovani vstupu (cil logu `vstup`): pozadavek klienta a druhy odpovedi
+/// jemu (bez obsahu, seznamy uloh jsou dlouhe). Klient pise svou stranu se
+/// stejnym id kliku ("vstup: id=..."), poradi radku je spoji.
+fn trace_client(c: ClientId, data: &[u8], out: &[Out]) {
+    let Ok(req) = taskproto::Request::decode(data) else { return };
+    let kinds: Vec<String> = out
+        .iter()
+        .filter_map(|o| match o {
+            Out::Client(x, d) if *x == c => taskproto::Reply::decode(d).ok(),
+            _ => None,
+        })
+        .map(|r| {
+            let s = format!("{r:?}");
+            String::from(s.split([' ', '(', '{']).next().unwrap_or(""))
+        })
+        .collect();
+    println!("vstup: taskd klient {c}: {req:?} -> odpovedi {kinds:?}");
+}
+
 fn main(startup: Startup) -> i64 {
     let control = startup.bootstrap;
     let mut d = Taskd { core: Core::new(), conns: Vec::new(), watched: Vec::new(), dead: Vec::new() };
@@ -194,7 +213,11 @@ fn main(startup: Startup) -> i64 {
                     Ok(m) => {
                         let t = now();
                         let out = match d.conns[i].0 {
-                            Conn::Client(c) => d.core.client_msg(c, &m.data, t),
+                            Conn::Client(c) => {
+                                let out = d.core.client_msg(c, &m.data, t);
+                                trace_client(c, &m.data, &out);
+                                out
+                            }
                             Conn::Producer(p) => d.core.producer_msg(p, &m.data, t),
                         };
                         d.send(out);

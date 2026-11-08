@@ -39,6 +39,11 @@ pub struct Source {
     /// Posledni absolutni hodnoty X a Y (snimek muze nest jen jednu osu).
     abs: [i32; 2],
     abs_dirty: bool,
+    /// Tlacitka ukazatele z rozpracovaneho snimku. Vse do `SYN_REPORT`
+    /// plati zaroven: tlacitko jde ven az za pohybem a polohou ze stejneho
+    /// snimku, jinak by klik dopadl na predchozi misto ukazatele (tablet
+    /// VMware posila polohu i stisk v jednom hlaseni).
+    buttons: Vec<(u16, Action)>,
     /// Ceka na odpoved synchronizace (zdroj prevzaty po restartu sluzby).
     pub sync: Option<SyncWait>,
     /// Po synchronizaci: klavesy a tlacitka stisknute od ni. Uvolneni
@@ -96,6 +101,7 @@ impl Source {
             axes: [(0, 65535); 2],
             abs: [0; 2],
             abs_dirty: false,
+            buttons: Vec::new(),
             sync: None,
             pressed: None,
         }
@@ -192,16 +198,7 @@ impl Source {
                 if self.stale_release(e.code, action) {
                     return false;
                 }
-                let mods = self.keyboard.mods(layout);
-                out.push(Record::new(
-                    Event::Button {
-                        button: Button::from_code(e.code),
-                        action,
-                    },
-                    mods,
-                    self.flags(),
-                    time,
-                ));
+                self.buttons.push((e.code, action));
             }
             EV_KEY if e.code <= KEY_MAX => {
                 // Opakovani od zarizeni ignorujeme: opakuje sluzba sama
@@ -295,6 +292,18 @@ impl Source {
                 Event::Absolute {
                     x: normalize(self.abs[0], self.axes[0]),
                     y: normalize(self.abs[1], self.axes[1]),
+                },
+                mods,
+                self.flags(),
+                time,
+            ));
+        }
+        // Tlacitka az za polohou (viz `buttons`).
+        for (code, action) in core::mem::take(&mut self.buttons) {
+            out.push(Record::new(
+                Event::Button {
+                    button: Button::from_code(code),
+                    action,
                 },
                 mods,
                 self.flags(),

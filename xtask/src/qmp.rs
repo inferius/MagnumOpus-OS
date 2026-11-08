@@ -104,6 +104,9 @@ enum Step {
     Qmp(String),
     /// Pockat na znacku v logu seriove linky.
     WaitFor(&'static str),
+    /// Klik levym tlacitkem na polohu z logu (za znackou "x y"): ukazatel
+    /// do rohu, pak pohyb a stisk v jednom snimku, pusteni zvlast.
+    ClickAt(&'static str),
 }
 
 /// Posloupnost kroku. Test v `input.rs` ocekava presne tyto udalosti.
@@ -163,6 +166,8 @@ fn gui_steps(s: &mut Vec<Step>) {
     s.push(Step::WaitFor(gui::SECURE_ENTER));
     s.push(Step::Send(vec![key("ret", true)]));
     s.push(Step::Send(vec![key("ret", false)]));
+    // Spravce uloh: fyzicky klik na zaskrtavaci pole (test `task_manager`).
+    s.push(Step::ClickAt(gui::CLICK));
     // Snimky vzhledu (test `look_shots`): screendump virtio-gpu do PNG.
     let dir = crate::target_dir().join("shots");
     let _ = std::fs::create_dir_all(&dir);
@@ -178,6 +183,7 @@ mod gui {
     pub const DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
     pub const SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
     pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
+    pub const CLICK: &str = "init: test gui: klik mysi na ";
     pub const SHOT: [&str; 3] = ["init: test gui: snimek light", "init: test gui: snimek dark", "init: test gui: snimek contrast"];
     pub const SHOT_NAMES: [&str; 3] = ["light", "dark", "contrast"];
 }
@@ -359,6 +365,21 @@ fn inject(port: u16, log: &Path, start: Instant, ps2: bool) -> Result<(), String
                 }
                 continue;
             }
+            Step::ClickAt(marker) => {
+                if !wait_marker(log, marker, start) {
+                    return Err(format!("znacka '{marker}' se neobjevila"));
+                }
+                let (x, y) = marker_point(log, marker).ok_or_else(|| format!("poloha za znackou '{marker}'"))?;
+                for events in [
+                    vec![rel("x", -30000), rel("y", -30000)],
+                    vec![rel("x", x), rel("y", y), btn("left", true)],
+                    vec![btn("left", false)],
+                ] {
+                    let cmd = format!(r#"{{"execute":"input-send-event","arguments":{{"device":"video0","events":[{}]}}}}"#, events.join(","));
+                    send(cmd, &mut reader)?;
+                }
+                continue;
+            }
         };
         let cmd = format!(
             r#"{{"execute":"input-send-event","arguments":{{{}"events":[{}]}}}}"#,
@@ -368,6 +389,15 @@ fn inject(port: u16, log: &Path, start: Instant, ps2: bool) -> Result<(), String
         send(cmd, &mut reader)?;
     }
     Ok(())
+}
+
+/// Dve cisla "x y" za znackou v logu.
+fn marker_point(log: &Path, marker: &str) -> Option<(i32, i32)> {
+    let b = std::fs::read(log).ok()?;
+    let text = String::from_utf8_lossy(&b);
+    let rest = &text[text.find(marker)? + marker.len()..];
+    let mut it = rest.lines().next()?.split_whitespace().map(|v| v.parse::<i32>());
+    Some((it.next()?.ok()?, it.next()?.ok()?))
 }
 
 /// Posle jeden prikaz QMP (napr. `system_powerdown`) a pocka na odpoved.

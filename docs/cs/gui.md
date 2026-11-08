@@ -464,6 +464,34 @@ okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
 modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
 oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
+### Trasování vstupu (cíl logu `vstup`)
+
+Každý stisk a puštění tlačítka myši i klávesy jde do logu jako řádky
+`vstup: id=<čas v µs> ...` napříč službami. Id je čas záznamu z `inputd`,
+takže jeden klik jde sledovat celou cestou:
+
+| krok | co zapíše |
+|---|---|
+| `inputd` | tlačítko / klávesa, stisk nebo puštění, zdroj, modifikátory, počet pohybů v dávce, kam jde (fokus, `secure`) |
+| `compd` | poloha na obrazovce, okno a zóna (obsah, titulek, tlačítko, okraj), přesun fokusu, nebo proč událost zahodil (modální dialog, neověřený zdroj, mimo okna, puštění bez stisku) |
+| `libs/ui` | prvek z hit testu, akce (klik tlačítka, přepnutí zaškrtávacího pole, výběr řádku) nebo proč aktivace nebyla, počet zpráv aplikaci |
+| `gui-tasks` | požadavek na `taskd` vyvolaný klikem |
+| `taskd` | požadavek klienta a druhy odpovědí (bez id: spojí je pořadí) |
+
+Kód klávesy ani hodnota textového pole se nezapisuje (hesla). Pohyb myši
+se nezapisuje, jen jako počet v dávce s tlačítkem. Řádky stejného tvaru
+omezí jádro na 10 za sekundu na proces. Ve výchozím stavu je trasování
+**zapnuté**; vypne ho `loglevel vstup warn` (`LOG_CONTROL`, cíl `vstup`
+pro všechny procesy, viz [Syscally](syscally.md)), zapne `loglevel vstup vychozi`
+zpět.
+
+Pořadí v rámci jednoho hlášení zařízení: `inputd` pošle tlačítka až za
+pohybem a polohou ze stejného hlášení (do `SYN_REPORT` platí vše zároveň).
+Dřív šlo tlačítko první a klik dopadl na předchozí místo ukazatele; tablet
+VMware posílá polohu i stisk v jednom hlášení, takže se kliky na malé prvky
+(zaškrtávací pole Správce úloh) ztrácely. Test `task_manager` to ověřuje
+fyzickým klikem z QMP (pohyb a stisk v jednom snímku).
+
 ## Systémové dialogy
 
 Dialog (oprávnění, heslo, potvrzení akce) kreslí kompozitor ve **zvláštní
