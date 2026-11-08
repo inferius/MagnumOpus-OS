@@ -26,14 +26,45 @@ pub enum Zone {
     Badge,
     /// Tazenim se presouva okno.
     Title,
-    /// Okraj: zmena velikosti (vpravo, dole).
-    Edge { right: bool, bottom: bool },
+    /// Okraj nebo roh: zmena velikosti. Tah za levy nebo horni okraj
+    /// posouva i polohu (protejsi okraj zustava).
+    Edge { left: bool, top: bool, right: bool, bottom: bool },
+}
+
+impl Zone {
+    /// Kurzor nad zonou.
+    pub fn cursor(&self) -> Cursor {
+        match *self {
+            Zone::Edge { left, top, right, bottom } => match (left || right, top || bottom) {
+                (true, false) => Cursor::Horizontal,
+                (false, true) => Cursor::Vertical,
+                (true, true) if (left && top) || (right && bottom) => Cursor::DiagDown,
+                (true, true) => Cursor::DiagUp,
+                (false, false) => Cursor::Arrow,
+            },
+            _ => Cursor::Arrow,
+        }
+    }
+}
+
+/// Tvar kurzoru (kresli kompozitor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cursor {
+    Arrow,
+    /// Zmena sirky.
+    Horizontal,
+    /// Zmena vysky.
+    Vertical,
+    /// Roh vlevo nahore / vpravo dole.
+    DiagDown,
+    /// Roh vpravo nahore / vlevo dole.
+    DiagUp,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum Drag {
     Move { window: u32, dx: i32, dy: i32 },
-    Resize { window: u32, right: bool, bottom: bool, start: Rect, px: i32, py: i32 },
+    Resize { window: u32, left: bool, top: bool, right: bool, bottom: bool, start: Rect, px: i32, py: i32 },
 }
 
 pub struct InputState {
@@ -50,6 +81,8 @@ pub struct InputState {
     pub last_key: u64,
     /// Zvyrazneni pri najeti (tlacitko okna, polozka listy).
     pub hover: Option<Hover>,
+    /// Tvar kurzoru (okraj okna: zmena velikosti).
+    pub cursor: Cursor,
 }
 
 impl InputState {
@@ -60,6 +93,7 @@ impl InputState {
             drag: None,
             pointer_window: None,
             press_target: None,
+            cursor: Cursor::Arrow,
             injecting: 0,
             untrusted: alloc::vec::Vec::new(),
             last_key: 0,
@@ -96,8 +130,27 @@ impl Comp {
         );
     }
 
-    fn cursor_rect(&self) -> Rect {
-        Rect::new(self.input.px, self.input.py, CURSOR_W, CURSOR_H)
+    pub(crate) fn cursor_rect(&self) -> Rect {
+        match self.input.cursor {
+            Cursor::Arrow => Rect::new(self.input.px, self.input.py, CURSOR_W, CURSOR_H),
+            // Kurzory zmeny velikosti maji aktivni bod uprostred.
+            _ => {
+                let e = crate::render::RESIZE_CURSOR as i32;
+                Rect::new(self.input.px - e, self.input.py - e, 2 * e as u32 + 1, 2 * e as u32 + 1)
+            }
+        }
+    }
+
+    /// Zmena tvaru kurzoru: poskodit stare i nove misto.
+    fn set_cursor(&mut self, k: Cursor) {
+        if self.input.cursor == k {
+            return;
+        }
+        let old = self.cursor_rect();
+        self.input.cursor = k;
+        let new = self.cursor_rect();
+        self.damage_top(old);
+        self.damage_top(new);
     }
 
     /// Stisk a tazeni pro diagnosticky snimek.
@@ -120,9 +173,12 @@ impl Comp {
             // Neviditelny okraj vne okna: zmena velikosti.
             if !w.outer().contains(x, y) {
                 let o = w.outer();
+                // Rohy: v delce zaobleni od rohu.
+                let c = w.geo.radius.max(w.geo.edge) as i64;
+                let (x, y) = (x as i64, y as i64);
                 return Some((
                     gid,
-                    Zone::Edge { right: x as i64 >= o.right() - w.geo.radius as i64, bottom: y as i64 >= o.bottom() - w.geo.radius as i64 },
+                    Zone::Edge { left: x < o.x as i64 + c, top: y < o.y as i64 + c, right: x >= o.right() - c, bottom: y >= o.bottom() - c },
                 ));
             }
             if w.mode.has_frame() {
@@ -149,6 +205,8 @@ impl Comp {
                     return Some((
                         gid,
                         Zone::Edge {
+                            left: lx < w.rect.w as i32 / 2,
+                            top: ly < w.rect.h as i32 / 2,
                             right: lx >= w.rect.w as i32 / 2,
                             bottom: ly >= w.rect.h as i32 / 2,
                         },
@@ -165,7 +223,8 @@ impl Comp {
             if w.mode != Mode::Fullscreen {
                 let o = w.outer();
                 let e = w.geo.edge as i64;
-                return Some((gid, Zone::Edge { right: x as i64 >= o.right() - e, bottom: y as i64 >= o.bottom() - e }));
+                let (x, y) = (x as i64, y as i64);
+                return Some((gid, Zone::Edge { left: x < o.x as i64 + e, top: y < o.y as i64 + e, right: x >= o.right() - e, bottom: y >= o.bottom() - e }));
             }
         }
         None
@@ -367,6 +426,8 @@ impl Comp {
             }
         };
         self.set_hover(h);
+        let k = if self.panel_rect().contains(px, py) { Cursor::Arrow } else { hit.map_or(Cursor::Arrow, |(_, z)| z.cursor()) };
+        self.set_cursor(k);
     }
 
     /// Zmena zvyrazneni: poskodit puvodni i nove misto.
@@ -411,17 +472,28 @@ impl Comp {
             }
             Drag::Resize {
                 window,
+                left,
+                top,
                 right,
                 bottom,
                 start,
                 px: sx,
                 py: sy,
             } => {
-                let Some(w) = self.windows.get_mut(&window) else { return };
-                let nw = if right { (start.w as i32 + px - sx).max(w.min.0 as i32) as u32 } else { start.w };
-                let nh = if bottom { (start.h as i32 + py - sy).max(w.min.1 as i32) as u32 } else { start.h };
-                let (nw, nh) = (nw.min(guiproto::MAX_DIM), nh.min(guiproto::MAX_DIM));
+                let Some(w) = self.windows.get(&window) else { return };
+                let (dx, dy) = (px - sx, py - sy);
+                let nw = if right { start.w as i32 + dx } else if left { start.w as i32 - dx } else { start.w as i32 };
+                let nh = if bottom { start.h as i32 + dy } else if top { start.h as i32 - dy } else { start.h as i32 };
+                // Titulek nesmi odjet nad obrazovku (tah za horni okraj).
+                let title = if w.mode == Mode::Standard { (w.geo.title_h + w.geo.border) as i32 } else { 0 };
+                let nh = if top { nh.min(start.bottom() as i32 - title) } else { nh };
+                let nw = (nw.max(w.min.0 as i32) as u32).min(guiproto::MAX_DIM);
+                let nh = (nh.max(w.min.1 as i32) as u32).min(guiproto::MAX_DIM);
                 self.configure(window, nw, nh, now);
+                // Levy a horni okraj: protejsi okraj zustava na miste.
+                if let Some(w) = self.windows.get_mut(&window) {
+                    w.anchor = (left.then_some(start.right() as i32), top.then_some(start.bottom() as i32));
+                }
             }
         }
     }
@@ -431,6 +503,8 @@ impl Comp {
     pub(crate) fn configure(&mut self, gid: u32, nw: u32, nh: u32, now: u64) {
         let focused = self.focus == Some(gid);
         let Some(w) = self.windows.get_mut(&gid) else { return };
+        // Kotvu nastavi jen tah za levy / horni okraj (po tomto volani).
+        w.anchor = (None, None);
         if w.configure.is_some_and(|(_, cw, ch, _)| cw == nw && ch == nh) || (w.configure.is_none() && w.rect.w == nw && w.rect.h == nh) {
             return;
         }
@@ -564,9 +638,11 @@ impl Comp {
                     dy: py - rect.y,
                 });
             }
-            Zone::Edge { right, bottom } if button == Button::Left && (right || bottom) => {
+            Zone::Edge { left, top, right, bottom } if button == Button::Left && (left || top || right || bottom) => {
                 self.input.drag = Some(Drag::Resize {
                     window: g,
+                    left,
+                    top,
                     right,
                     bottom,
                     start: rect,

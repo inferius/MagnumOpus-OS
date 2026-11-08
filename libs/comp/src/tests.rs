@@ -1266,3 +1266,90 @@ fn tasks_icon_tooltip() {
     t.move_to(5, 5);
     assert!(!t.c.tasks_tip_visible());
 }
+
+#[test]
+fn closing_focused_window_repaints_shadow() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    assert_eq!(t.c.focus, Some(g), "okno ma fokus (vetsi stin)");
+    let area = t.c.windows[&g].visual().intersect(&t.c.screen());
+    // Plocha bez okna (stejny stav, okno nikdy nebylo).
+    let mut r = T::new();
+    r.frame();
+    t.msg(a, ClientMsg::WindowDestroy { window: 1 });
+    t.frame();
+    for y in (area.y..area.y + area.h as i32).step_by(3) {
+        for x in (area.x..area.x + area.w as i32).step_by(3) {
+            assert_eq!(t.px(x, y), r.px(x, y), "duch okna na {x},{y} (oblast {area:?})");
+        }
+    }
+}
+
+/// Stisk / pusteni leveho tlacitka v miste ukazatele.
+fn left(t: &mut T, press: bool) {
+    let action = if press { Action::Press } else { Action::Release };
+    t.input(Event::Button { button: inputproto::Button::Left, action }, false);
+}
+
+#[test]
+fn close_button_zone_does_not_cover_edge() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let w = &t.c.windows[&g];
+    let (o, close) = (w.outer(), w.buttons()[0]);
+    let cy = close.y + close.h as i32 / 2;
+    // Primo na tlacitku: zavrit (najeti i klik stejna zona).
+    assert_eq!(t.c.hit(close.x + 2, cy), Some((g, crate::input::Zone::Button(0))));
+    t.move_to(close.x + 2, cy);
+    assert_eq!(t.c.input.hover, Some(crate::render::Hover::Button(g, 0)));
+    // Vpravo za ramem (stin, zona okraje): zmena velikosti, ne zavrit.
+    let x = o.right() as i32 + 2;
+    for y in [cy, cy + 6] {
+        match t.c.hit(x, y) {
+            Some((_, crate::input::Zone::Edge { right: true, .. })) => {}
+            z => panic!("mimo ram na {x},{y}: {z:?}"),
+        }
+        t.move_to(x, y);
+        assert_eq!(t.c.input.hover, None, "zavrit se nezvyrazni mimo okno");
+        assert_ne!(t.c.input.cursor, crate::input::Cursor::Arrow, "kurzor zmeny velikosti");
+    }
+}
+
+#[test]
+fn resize_from_left_and_top_keeps_opposite_edge() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let (o, r0) = (t.c.windows[&g].outer(), t.c.windows[&g].rect);
+    // Roh vlevo nahore (za ramem): kurzor sikmy, tah o 20 px doleva a nahoru.
+    let (x, y) = (o.x - 2, o.y - 2);
+    t.move_to(x, y);
+    assert_eq!(t.c.input.cursor, crate::input::Cursor::DiagDown);
+    left(&mut t, true);
+    t.move_to(x - 20, y - 20);
+    left(&mut t, false);
+    let (serial, nw, nh, _) = t.c.windows[&g].configure.expect("CONFIGURE");
+    assert_eq!((nw, nh), (r0.w + 20, r0.h + 20));
+    t.commit(a, 2, guiproto::window::commit::ACK_CONFIGURE, serial, 0);
+    let r = t.c.windows[&g].rect;
+    assert_eq!((r.right(), r.bottom()), (r0.right(), r0.bottom()), "pravy a dolni okraj na miste");
+    assert_eq!((r.x, r.y), (r0.x - 20, r0.y - 20), "poloha posunuta");
+    // Minimalni velikost: tah za levy okraj daleko doprava.
+    let o = t.c.windows[&g].outer();
+    let (x, y) = (o.x - 2, o.y + o.h as i32 / 2);
+    t.move_to(x, y);
+    assert_eq!(t.c.input.cursor, crate::input::Cursor::Horizontal);
+    left(&mut t, true);
+    t.move_to(x + 2000, y);
+    left(&mut t, false);
+    let (_, nw, _, _) = t.c.windows[&g].configure.expect("CONFIGURE");
+    assert_eq!(nw, t.c.windows[&g].min.0, "nejmensi sirka");
+}

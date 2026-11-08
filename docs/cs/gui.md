@@ -367,7 +367,14 @@ s levým pruhem a štítkem, průběh v barvě `ai`; ve stromu přístupnosti
 jméno začíná „agent:“). Nedostupné tlačítko je stejné tlačítko s krytím
 `opacity.disabled`. Vybraný řádek má pozadí `accent_soft` a normální
 písmo. Rámeček fokusu se kreslí jen v aktivním okně (prvek si fokus
-pamatuje). Neviditelný okraj 6 px vně okna mění velikost.
+pamatuje). Neviditelný okraj `size.resize_edge` vně okna (v oblasti stínu)
+mění velikost na všech čtyřech stranách a v rozích (roh v délce zaoblení);
+tah za levý nebo horní okraj posouvá i polohu, protější okraj zůstává
+(po potvrzení CONFIGURE). Nad okrajem kurzor dvojité šipky (vodorovná,
+svislá, šikmé), nejmenší velikost okna platí. Zóna tlačítek titulku leží
+jen uvnitř titulku, mimo rám má přednost okraj. **[implementováno]**
+(testy `close_button_zone_does_not_cover_edge`,
+`resize_from_left_and_top_keeps_opposite_edge` v `libs/comp`)
 Nereagující aplikace: obsah ztlumený a karta „… nereaguje“.
 
 **Lišta** (`design/plocha.html`, poloha „dole, odsazená“): 52 px,

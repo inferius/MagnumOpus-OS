@@ -177,8 +177,7 @@ impl Comp {
             self.damage_window(g);
             let w = self.windows.get_mut(&g).unwrap();
             let (_, nw, nh, _) = w.configure.take().unwrap();
-            w.rect.w = nw;
-            w.rect.h = nh;
+            w.set_size(nw, nh);
             self.damage_window(g);
         }
         let badges: Vec<u32> = self.windows.iter().filter(|(_, w)| w.badge_until != 0 && w.badge_until <= now).map(|(&g, _)| g).collect();
