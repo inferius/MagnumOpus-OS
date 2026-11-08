@@ -41,6 +41,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Grafika a okna](cs/gui.md) | [Graphics and windows](en/gui.md) | virtio-gpu, kompozitor, protokol okna, strom vrstev a přístupnosti, snímky a transakce, knihovna UI, písmo, systémové dialogy, API akcí / virtio-gpu, compositor, window protocol, layer and accessibility trees, frames and transactions, UI library, fonts, system dialogs, action API |
+| [Nastavení obrazu](cs/displej.md) | [Display configuration](en/display.md) | EDID a DisplayID, režimy a časování, DisplayPort a HDMI, protokol displeje, změna rozlišení, hotplug, page flip, bochs-display, Intel Gen9 až Xe2, bezpečný návrat na obraz firmwaru / EDID and DisplayID, modes and timings, DisplayPort and HDMI, display protocol, resolution changes, hotplug, page flips, bochs-display, Intel Gen9 to Xe2, safe return to the firmware image |
 
 ### Souborový systém / File system
 

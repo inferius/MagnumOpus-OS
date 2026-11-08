@@ -34,9 +34,12 @@ fn none(_: &Ecam, _: pci::Address) -> Vec<(u64, u64)> {
     Vec::new()
 }
 
-/// Stolen pamet integrovane grafiky Intel (BDSM 0x5C, velikost z GGC
-/// 0x50 bity 15:8 - kodovani Gen9+, `i915_gem_stolen.c`). MTL+ ma stolen
-/// pamet jinde: prazdne (ovladac pak jen jeden buffer v aperture/BAR).
+/// Stolen pamet integrovane grafiky Intel: zakladna z BDSM (konfigurace
+/// PCI 0x5C), velikost z GGC (0x50) bity 15:8 (GMS): < 0xF0 = GMS x 32 MiB,
+/// 0xF0..0xFE = (GMS - 0xF0 + 1) x 4 MiB. Jen fakta: vzorec je v Linuxu
+/// v `arch/x86/kernel/early-quirks.c` (GPL - kod neprevzat) a stejne
+/// kodovani pro MTL v `i915_gem_stolen.c` (MIT). Na MTL+ ovladac stolen
+/// pamet pro druhy buffer nepouziva.
 fn intel_dsm(ecam: &Ecam, a: pci::Address) -> Vec<(u64, u64)> {
     let base = (ecam.read32(a, 0x5C) & 0xFFF0_0000) as u64;
     let gms = (ecam.read16(a, 0x50) >> 8) as u64;

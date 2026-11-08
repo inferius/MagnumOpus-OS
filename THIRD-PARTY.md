@@ -1,0 +1,37 @@
+# Kód a data třetích stran / Third-party code and data
+
+Jednotný formát pro všechna vlákna: jeden řádek na zdroj. Sloupce:
+**Název**, **Verze** (tag, commit nebo datum stažení), **Zdroj** (URL),
+**Licence** (SPDX, u souborů bez SPDX text hlavičky), **Cesta** (kde je to
+v repozitáři), **Jak použito** (převzato / přeloženo do Rustu / jen fakta).
+Kód pod GPL se nepřekládá; z GPL zdrojů jen fakta (hodnoty registrů,
+pořadí kroků z dokumentace).
+
+One line per source, same format for all threads: name, version, source,
+licence, path in the repository, how it is used (copied / translated to
+Rust / facts only). GPL code is never translated.
+
+## Nastavení obrazu / Display configuration
+
+| Název / Name | Verze / Version | Zdroj / Source | Licence / License | Cesta / Path | Jak použito / How used |
+|---|---|---|---|---|---|
+| Linux `drivers/gpu/drm/drm_edid.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (text "Permission is hereby granted, free of charge") | `libs/display/src/edid.rs`, `cta.rs`, `modes.rs` | postupy (pořadí zdrojů režimů, HF-SCDB), napsáno znovu |
+| Linux `drivers/gpu/drm/drm_displayid.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (SPDX) | `libs/display/src/displayid.rs` | fakta (jednotky clock typu I/VII), napsáno znovu |
+| Linux `drivers/gpu/drm/drm_modes.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (text "Permission is hereby granted, free of charge") | `libs/display/src/cvt.rs` | ověření vzorců CVT, napsáno znovu z VESA CVT 1.2 |
+| Linux `drivers/gpu/drm/display/drm_dp_helper.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT-like (Keith Packard: "Permission to use, copy, modify, distribute, and sell ... without fee") | `libs/display/src/dp/auxch.rs`, `train.rs` | postupy AUX (DEFER, I2C přes AUX), napsáno znovu |
+| Linux `drivers/gpu/drm/display/drm_dp_mst_topology.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT-like (Red Hat: "Permission to use, copy, modify, distribute, and sell ... without fee") | `libs/display/src/dp/mst.rs` | algoritmus CRC4/CRC8 sideband zpráv, přeloženo do Rustu |
+| Linux `include/drm/display/drm_dp.h` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT-like (Keith Packard) | `libs/display/src/dp/mod.rs` | fakta (adresy DPCD) |
+| Linux `drivers/gpu/drm/display/drm_hdmi_helper.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (SPDX) | `libs/display/src/hdmi.rs` | fakta (SCDC, scrambling), napsáno znovu |
+| Linux `drivers/gpu/drm/i915/display/intel_dp_link_training.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (text "Permission is hereby granted, free of charge") | `libs/display/src/dp/train.rs` | postup (počty kol, společné buzení), napsáno znovu |
+| Linux `drivers/gpu/drm/i915/display/intel_dp_aux.c`, `intel_dp_aux_regs.h` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (SPDX) | `libs/intelgfx/src/dpaux.rs`, `regs.rs` | fakta (registry, bity, postup), napsáno znovu |
+| Linux `drivers/gpu/drm/i915/display/intel_gmbus.c`, `intel_gmbus.h`, `intel_gmbus_regs.h` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (text "Permission is hereby granted"; `intel_gmbus.h` SPDX MIT) | `libs/intelgfx/src/gmbus.rs`, `regs.rs` | fakta (registry, piny), napsáno znovu |
+| Linux `drivers/gpu/drm/i915/display/intel_display_regs.h`, `intel_display_reg_defs.h`, `skl_universal_plane_regs.h` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (SPDX) | `libs/intelgfx/src/regs.rs` | fakta (offsety a bity registrů) |
+| Linux `drivers/gpu/drm/i915/display/intel_display_device.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (SPDX) | `libs/intelgfx/src/regs.rs` | fakta (offsety pipe a transcoderů) |
+| Linux `drivers/gpu/drm/i915/display/intel_ddi.c`, `intel_display.c`, `intel_dpll_mgr.c`, `intel_hdmi.c`, `skl_universal_plane.c`, `intel_vblank.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (SPDX nebo text "Permission is hereby granted") | `libs/intelgfx/src/phy.rs`, `backend.rs` | postupy (tabulka úrovní buzení, flip přes PLANE_SURF), napsáno znovu |
+| Linux `drivers/gpu/drm/i915/gt/intel_ggtt.c`, `intel_gtt.h` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (SPDX) | `libs/intelgfx/src/gtt.rs` | fakta (umístění GGTT, bity položky) |
+| Linux `include/drm/intel/pciids.h` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (text "Permission is hereby granted, free of charge") | `libs/intelgfx/src/platform.rs` | fakta (PCI ID) |
+| Linux `drivers/gpu/drm/i915/i915_reg.h`, `gem/i915_gem_stolen.c` | master, 2026-11-08 | https://github.com/torvalds/linux | MIT (text "Permission is hereby granted"; `i915_gem_stolen.c` SPDX MIT) | `user/devmgr/src/native.rs`, `user/intel-display/src/main.rs` | fakta (kodovani GMS) |
+| Linux `arch/x86/kernel/early-quirks.c` | master, 2026-11-08 | https://github.com/torvalds/linux | GPL-2.0 | `user/devmgr/src/native.rs` | **jen fakta** (velikost stolen paměti Gen9 z GGC), kód nepřevzat |
+| linuxhw/EDID (AOC 2243W `07E32DADDF83`, LG Display LGD0217 `925C880E8A08`) | master, 2026-11-08 | https://github.com/linuxhw/EDID | CC-BY-4.0 | `libs/display/src/tests/data.rs`, `libs/intelgfx/src/tests/data.rs` | data (dumpy EDID pro testy), beze změny |
+| Intel Graphics PRM (Skylake až Lunar Lake) | veřejné svazky (Intel, "Graphics for Linux" developer reference) | intel.com | dokumentace | `libs/intelgfx` | fakta (popis registrů); hodnoty v kódu ověřeny proti hlavičkám i915 výše |
+| VESA CVT 1.2, DMT 1.0 r13, E-EDID 1.4, DisplayID 1.3/2.0, DisplayPort 1.4a; CTA-861-G; HDMI 1.4b/2.0 | specifikace | VESA, CTA, HDMI Forum | specifikace | `libs/display` | fakta (formáty, vzorce, tabulky) |
