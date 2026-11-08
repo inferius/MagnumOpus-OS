@@ -244,10 +244,15 @@ Kernel tests (`kernel/src/tests/sched_qos.rs`, run in QEMU with 4 CPUs):
 - **Input -> frame latency** under full background load: a "driver"
   (Interactive) wakes "inputd", which wakes "compd", which renders a frame
   (200 µs); Background and Normal loops run on all CPUs. Time from the
-  event to the frame.
+  event to the frame, compared with a reference run without load in the
+  same test (under TCG the absolute time depends on the host; the test
+  catches gross errors, the numbers are logged).
 - **Background share** under Interactive load: one Interactive and one
-  Background loop per CPU; Background must get at least 4 % (guarantee
-  1/16 at weights 15 : 1, minus measurement tolerance).
+  Background loop per CPU. The guarantee is 1/16 (62 ‰) at weights 15 : 1;
+  under TCG the loops measure their run time only approximately (a busy
+  host interrupts the vCPUs), so the test catches starvation (at least
+  15 ‰, the old scheduler gave 0 ‰) and the opposite extreme (at most
+  400 ‰) and logs the exact number.
 - **IPC inheritance**: a Normal server woken by a message from Interactive
   runs as Interactive; a port packet carries the class.
 - **Realtime**: admission (exactly one 50 % thread per CPU) and the lateness
