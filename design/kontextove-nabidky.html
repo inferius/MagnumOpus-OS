@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontextové nabídky</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/tokens.js"></script>
+<script src="assets/mo.js"></script>
+<style>
+/* Kontextove nabidky: pet scen a tri materialy pozadi vedle sebe
+ * (a plne, b rozmazani + ton + sum, c jen pruhlednost). */
+.page { max-width: 1500px; }
+.ctlbar { display: flex; flex-wrap: wrap; gap: var(--s4); align-items: center; padding: var(--s3) var(--s4); margin: var(--s4) 0; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-card); position: sticky; top: 56px; z-index: 50; }
+.ctlbar b { font-size: var(--t-caption-size); color: var(--c-ink-muted); margin-right: var(--s2); }
+.cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); }
+.col h3 { margin: 0 0 var(--s2); font-size: var(--t-body-lg-size); }
+.stage { position: relative; height: 520px; border-radius: var(--r-card); overflow: hidden; border: 1px solid var(--c-border); }
+.bg-wall { background: radial-gradient(circle at 20% 25%, #ff9a5c, transparent 45%), radial-gradient(circle at 80% 30%, #6b3fd6, transparent 50%), radial-gradient(circle at 50% 85%, #2b8a99, transparent 55%), linear-gradient(135deg, #3a1d5c, #ffd166); }
+.bg-doc { background: #fff; color: #222; padding: 24px 28px; font-size: 14px; line-height: 1.7; }
+:root[data-theme="dark"] .bg-doc { background: #1c1521; color: #e6dde9; }
+.stage .target { position: absolute; left: 24px; top: 24px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: var(--c-accent-soft); font-size: 13px; font-weight: 600; color: var(--c-ink); }
+/* Nabidka */
+.cm { position: absolute; z-index: 10; min-width: 250px; padding: 6px; border-radius: 14px; font-size: 13px; color: var(--c-ink); border: 1px solid var(--c-border); box-shadow: var(--sh-popover); }
+.cm.m-a { background: var(--c-surface); }
+.cm.m-b { background: color-mix(in srgb, var(--c-surface) 72%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4); }
+.cm.m-b::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: .05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+.cm.m-c { background: color-mix(in srgb, var(--c-surface) 88%, transparent); }
+.solid .cm, :root[data-contrast="more"] .cm { background: var(--c-surface) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+.solid .cm::before, :root[data-contrast="more"] .cm::before { display: none; }
+:root[data-contrast="more"] .cm { border: 2px solid #fff; }
+.cm .it { position: relative; display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 8px; white-space: nowrap; }
+.cm .it.sel { background: color-mix(in srgb, var(--c-accent) 18%, transparent); }
+.cm .it.dis { color: var(--c-ink-faint); }
+.cm .it .k { margin-left: auto; padding-left: 20px; color: var(--c-ink-muted); font-size: 12px; }
+.cm .it .why { margin-left: auto; padding-left: 12px; font-size: 11px; color: var(--c-ink-muted); }
+.cm .it .ext { margin-left: auto; padding-left: 12px; font-size: 11px; color: var(--c-ink-muted); }
+.cm .it mark { background: color-mix(in srgb, var(--c-accent) 30%, transparent); color: inherit; border-radius: 3px; }
+.cm .ic { width: 16px; height: 16px; flex: none; }
+.cm hr { border: 0; border-top: 1px solid var(--c-border); margin: 4px 6px; }
+.cm .sec { padding: 6px 10px 2px; font-size: 11px; color: var(--c-ink-muted); font-weight: 600; }
+.cm .q { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; margin-bottom: 4px; border-radius: 8px; background: var(--c-surface-3); color: var(--c-ink-muted); font-size: 12px; }
+.contrast-chip { margin-top: var(--s2); }
+/* Titulek mica */
+.mica-demo { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); }
+.mw { border-radius: 18px; overflow: hidden; border: 1px solid var(--c-border); background: var(--c-surface); box-shadow: var(--sh-window); }
+.mw .t { height: 40px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; }
+.mw .b { height: 90px; padding: 12px 16px; font-size: 12px; color: var(--c-ink-muted); }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--s4); font-size: var(--t-small-size); }
+.rules ul { margin: 0; padding-left: 18px; }
+@media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Kontextové nabídky</h1>
+    <p class="lead">Pravý klik na soubor, text, plochu, ikonu v liště a kartu prohlížeče. Stejná nabídka ve třech materiálech vedle sebe. Zkus psát písmena: nabídka se filtruje (hledání v dlouhé nabídce psaním). Zakázané položky ukazují důvod.</p>
+  </header>
+  <div class="ctlbar" role="group" aria-label="Ovládání ukázky">
+    <span><b>Scéna</b><span class="seg" role="radiogroup" aria-label="Scéna" id="g-scene">
+      <button role="radio" aria-checked="true" data-value="file">Soubor</button><button role="radio" aria-checked="false" data-value="text">Text v editoru</button><button role="radio" aria-checked="false" data-value="desk">Plocha</button><button role="radio" aria-checked="false" data-value="bar">Ikona v liště</button><button role="radio" aria-checked="false" data-value="tab">Karta prohlížeče</button></span></span>
+    <span><b>Pod nabídkou</b><span class="seg" role="radiogroup" aria-label="Pozadí" id="g-bg">
+      <button role="radio" aria-checked="true" data-value="wall">Pestrá tapeta</button><button role="radio" aria-checked="false" data-value="doc">Bílý dokument</button></span></span>
+    <span class="hstack"><button class="switch" role="switch" aria-checked="false" id="sw-solid" aria-label="Omezit průhlednost"></button>Omezit průhlednost</span>
+    <span class="note" style="margin:0">Hledání: <span id="qv" class="kbd">nic</span> (Backspace maže)</span>
+  </div>
+  <div class="cols" id="cols"></div>
+
+  <h2>Titulek okna: jemné tónování z tapety (mica)</h2>
+  <p class="note">Jen u aktivního okna: titulek dostane jemný tón ze vzorku tapety pod oknem. Vzorek se spočítá jednou (při přesunu okna a změně tapety), ne živé rozmazání za každý snímek. Neaktivní okno má neutrální titulek. Ve vysokém kontrastu a s „Omezit průhlednost“ vypnuto.</p>
+  <div class="mica-demo">
+    <div class="stage bg-wall" style="height:220px;padding:28px"><div class="mw"><div class="t" style="background:color-mix(in srgb, var(--c-surface-2) 82%, #6b3fd6)">Aktivní okno (mica)</div><div class="b">Tón z tapety pod oknem, 18 % míchání do surface_2; kontrast textu titulku zůstává nad 4,5 : 1.</div></div></div>
+    <div class="stage bg-wall" style="height:220px;padding:28px"><div class="mw" style="box-shadow:var(--sh-window-inactive)"><div class="t" style="background:var(--c-surface);color:var(--c-ink-muted);font-weight:500">Neaktivní okno</div><div class="b">Neutrální titulek: aktivní okno se tak pozná na první pohled.</div></div></div>
+  </div>
+
+  <h2>Doporučení</h2>
+  <div class="rules">
+    <div class="card"><h3>Rozmazání (b) ano</h3><ul><li>kontextové a rozbalovací nabídky</li><li>paleta příkazů</li><li>panely z lišty (spouštěč, oznámení, přehled soukromí)</li><li>oznámení</li></ul><p class="note" style="margin:var(--s2) 0 0">Krátce žijící malé plochy: rozmazání stojí GPU čas úměrný ploše a počítá se jen při otevření a při změně pod nabídkou.</p></div>
+    <div class="card"><h3>Rozmazání ne</h3><ul><li>okna a jejich obsah (velká plocha, žije dlouho)</li><li>systémové dialogy (musí být jednoznačné, vždy plné)</li><li>text na celé obrazovce, terminál</li><li>záložní 2D cesta, vysoký kontrast, „Omezit průhlednost“: vždy plné pozadí (a)</li></ul></div>
+    <div class="card"><h3>Čitelnost</h3><ul><li>Text v nabídce musí mít 4,5 : 1 i na nejhorším pozadí: kontrola počítá s nejtmavší i nejsvětlejší barvou tapety pod nabídkou (viz čísla u sloupců).</li><li>Krytí materiálu (b) je 72 %, (c) 88 %; při kontrastu pod limitem kompozitor krytí zvýší.</li><li>Šum 5 % proti pruhům v přechodu.</li></ul></div>
+    <div class="card"><h3>Pravidlo rychlosti</h3><ul><li>Nabídka se otevře do jednoho snímku.</li><li>Položky jsou data připravená předem; rozšíření jiných aplikací deklarují své položky staticky v manifestu (typ souboru, podmínky). Při otevření nabídky se nespouští žádný cizí kód.</li><li>Dynamické položky (např. „Otevřít v“ podle nainstalovaných aplikací, stav sdílení) se doplní asynchronně s termínem; nabídka na ně nikdy nečeká, doplní se do otevřené nabídky nebo se vynechají.</li></ul></div>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var T = window.MO_TOKENS;
+  var st = { scene: 'file', bg: 'wall', solid: false, q: '' };
+  function I(n) { return '<svg class="ic" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
+  // Polozka: [ikona, text, zkratka, volby]; volby: dis = duvod zakazani, sub = podnabidka, ext = rozsireni (aplikace), sel = vybrana.
+  var SCENES = {
+    file: { target: ['file-text', 'smlouva.pdf'], items: [
+      ['app-pdf', 'Otevřít', 'Enter', { sel: 1 }], ['', 'Otevřít v', '', { sub: [['app-browser', 'Prohlížeč'], ['app-editor', 'Editor'], ['', 'Vybrat aplikaci&hellip;']] }], ['share', 'Sdílet', ''], '-',
+      ['copy', 'Kopírovat', 'Ctrl+C'], ['cut', 'Vyjmout', 'Ctrl+X'], ['rename', 'Přejmenovat', 'F2'], ['trash', 'Přesunout do koše', 'Del'], '-',
+      ['history', 'Verze a historie', ''], ['branch', 'Zkusit úpravy bokem', ''], ['snapshot', 'Obnovit z verze', '', { dis: 'soubor ještě nemá starší verzi' }], '-',
+      ['archive', 'Komprimovat', '', { ext: 'Archivátor' }], ['agent', 'Shrnout dokument', '', { ext: 'Asistent' }], '-', ['info', 'Vlastnosti', 'Alt+Enter']] },
+    text: { target: ['file-text', 'vybraný text'], items: [
+      ['undo', 'Zpět', 'Ctrl+Z'], '-', ['cut', 'Vyjmout', 'Ctrl+X'], ['copy', 'Kopírovat', 'Ctrl+C', { sel: 1 }], ['paste', 'Vložit', 'Ctrl+V', { dis: 'schránka je prázdná' }], ['select-all', 'Vybrat vše', 'Ctrl+A'], '-',
+      ['search', 'Hledat „systém“', 'Ctrl+F'], ['globe', 'Hledat na webu', ''], '-', ['', 'Formát', '', { sub: [['', 'Tučné'], ['', 'Kurzíva'], ['', 'Odkaz&hellip;']] }], ['agent', 'Přepsat jinak', '', { ext: 'Asistent' }]] },
+    desk: { target: ['desktop', 'plocha'], items: [
+      ['folder-plus', 'Nová složka', 'Ctrl+Shift+N'], ['', 'Nový', '', { sub: [['file-text', 'Textový dokument'], ['folder', 'Složka']] }], '-', ['grid', 'Seřadit ikony', ''], ['refresh', 'Obnovit', 'F5'], '-',
+      ['palette', 'Změnit tapetu', ''], ['monitor', 'Nastavení displeje', ''], ['settings', 'Přizpůsobit plochu', '']] },
+    bar: { target: ['app-editor', 'Editor (lišta)'], items: [
+      { sec: 'Okna' }, ['file-text', 'zprava.md', '', { sel: 1 }], ['file-text', 'plan.md', ''], '-', ['plus', 'Nové okno', 'Ctrl+N'], ['pin', 'Připnout na lištu', ''], '-', ['close', 'Zavřít všechna okna', ''], ['power', 'Ukončit aplikaci', '']] },
+    tab: { target: ['globe', 'Vzhled systému (karta)'], items: [
+      ['refresh', 'Znovu načíst', 'F5'], ['copy', 'Duplikovat kartu', ''], ['pin', 'Připnout kartu', ''], ['volume-off', 'Ztlumit web', ''], '-', ['', 'Přesunout do', '', { sub: [['window', 'Nového okna'], ['', 'Skupiny „Práce“']] }], '-',
+      ['close', 'Zavřít kartu', 'Ctrl+W', { sel: 1 }], ['', 'Zavřít ostatní karty', ''], ['', 'Zavřít karty vpravo', '', { dis: 'vpravo nejsou další karty' }], ['history', 'Znovu otevřít zavřenou', 'Ctrl+Shift+T']] }
+  };
+  function hl(text) {
+    if (!st.q) return text;
+    var i = text.toLowerCase().indexOf(st.q.toLowerCase());
+    return i < 0 ? text : text.slice(0, i) + '<mark>' + text.slice(i, i + st.q.length) + '</mark>' + text.slice(i + st.q.length);
+  }
+  function menu(mat, items, x, y) {
+    var list = st.q ? items.filter(function (m) { return m !== '-' && !m.sec && m[1].toLowerCase().indexOf(st.q.toLowerCase()) >= 0; }) : items;
+    var subOpen = null;
+    var html = '<div class="cm m-' + mat + '" role="menu" style="left:' + x + 'px;top:' + y + 'px">' + (st.q ? '<div class="q">' + I('search') + 'Hledám: <b style="color:var(--c-ink)">' + st.q + '</b></div>' : '') +
+      list.map(function (m) {
+        if (m === '-') return '<hr>';
+        if (m.sec) return '<div class="sec">' + m.sec + '</div>';
+        var o = m[3] || {};
+        if (o.sub && !subOpen && !st.q) subOpen = { items: o.sub, label: m[1] };
+        var right = o.dis ? '<span class="why">' + o.dis + '</span>' : o.ext ? '<span class="ext">' + o.ext + '</span>' : o.sub ? '<span class="k">&rsaquo;</span>' : '<span class="k">' + m[2] + '</span>';
+        return '<div class="it' + (o.sel && !st.q ? ' sel' : '') + (o.dis ? ' dis' : '') + '" role="menuitem"' + (o.dis ? ' aria-disabled="true" title="Nedostupné: ' + o.dis + '"' : '') + (o.sub ? ' aria-haspopup="menu"' : '') + '>' + (m[0] ? I(m[0]) : '<span style="width:16px"></span>') + '<span>' + hl(m[1]) + '</span>' + right + '</div>';
+      }).join('') + (st.q && !list.length ? '<div class="it dis">nic nenalezeno</div>' : '') + '</div>';
+    if (subOpen) {
+      var idx = items.findIndex(function (m) { return m !== '-' && !m.sec && m[1] === subOpen.label; });
+      var yy = y + 6 + idx * 30 - 6;
+      html += '<div class="cm m-' + mat + '" role="menu" aria-label="' + subOpen.label + '" style="left:' + (x + 245) + 'px;top:' + yy + 'px;min-width:180px">' +
+        subOpen.items.map(function (s) { return '<div class="it">' + (s[0] ? I(s[0]) : '<span style="width:16px"></span>') + s[1] + '</div>'; }).join('') + '</div>';
+    }
+    return html;
+  }
+  // Nejhorsi kontrast textu: barva nabidky (krytí a) smichana s nejtmavsi a nejsvetlejsi barvou pozadi.
+  function hex(h) { var n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+  function lum(c) { return c.map(function (v) { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }).reduce(function (a, v, i) { return a + v * [.2126, .7152, .0722][i]; }, 0); }
+  function worst(alpha) {
+    var th = document.documentElement.getAttribute('data-contrast') === 'more' ? 'contrast' : (document.documentElement.getAttribute('data-theme') || 'light');
+    var surf = hex(T.color[th].surface), ink = lum(hex(T.color[th].ink));
+    var bgs = st.bg === 'wall' ? ['#3a1d5c', '#ffd166', '#ff9a5c', '#2b8a99'] : [th === 'dark' ? '#1c1521' : '#ffffff', th === 'dark' ? '#e6dde9' : '#222222'];
+    var min = 99;
+    bgs.forEach(function (b) {
+      var c = hex(b).map(function (v, i) { return surf[i] * alpha + v * (1 - alpha); }), l = lum(c);
+      var r = (Math.max(l, ink) + .05) / (Math.min(l, ink) + .05); if (r < min) min = r;
+    });
+    return min;
+  }
+  function render() {
+    var sc = SCENES[st.scene];
+    var M = [['a', '(a) Plné pozadí', 1], ['b', '(b) Rozmazání + tón + šum', .72], ['c', '(c) Jen průhlednost', .88]];
+    document.getElementById('cols').className = 'cols' + (st.solid ? ' solid' : '');
+    document.getElementById('cols').innerHTML = M.map(function (m) {
+      var a = st.solid || document.documentElement.getAttribute('data-contrast') === 'more' ? 1 : m[2], r = worst(a);
+      var stage = st.bg === 'wall' ? '<div class="stage bg-wall">' : '<div class="stage bg-doc"><b>Zpráva o vydání 0.6</b><br>Kompozitor, okna a odznak důvěry jsou hotové. Následuje přehled oprávnění a systémové dialogy. Ikony mají nový styl s pastelovým přechodem a barvou podle kategorie. Kontextové nabídky se otevírají do jednoho snímku a nečekají na žádný cizí kód. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.';
+      return '<div class="col"><h3>' + m[1] + '</h3>' + stage + '<span class="target">' + I(sc.target[0]) + sc.target[1] + '</span>' + menu(m[0], sc.items, 40, 64) + '</div>' +
+        '<div class="chip contrast-chip ' + (r >= 4.5 ? 'ok' : 'danger') + '">nejhorší kontrast textu: ' + r.toFixed(1) + ' : 1' + (a === 1 && m[0] !== 'a' ? ' (plné pozadí)' : '') + '</div></div>';
+    }).join('');
+    document.getElementById('qv').textContent = st.q || 'nic';
+  }
+  window.MO_SEG(document.getElementById('g-scene'), function (v) { st.scene = v; st.q = ''; render(); });
+  window.MO_SEG(document.getElementById('g-bg'), function (v) { st.bg = v; render(); });
+  window.MO_SWITCH(document.getElementById('sw-solid'), function (v) { st.solid = v; render(); });
+  document.addEventListener('keydown', function (e) {
+    if ((e.target.closest && e.target.closest('input, select, textarea')) || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === 'Backspace') { st.q = st.q.slice(0, -1); render(); e.preventDefault(); }
+    else if (e.key === 'Escape') { st.q = ''; render(); }
+    else if (e.key.length === 1 && /[\p{L}\p{N} ]/u.test(e.key)) { st.q += e.key; render(); e.preventDefault(); }
+  });
+  document.addEventListener('mo-theme', render);
+  render();
+});
+</script>
+</body>
+</html>
