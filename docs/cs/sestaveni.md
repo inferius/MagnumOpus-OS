@@ -66,7 +66,9 @@ cargo test -p fs --features std --release -- --ignored --nocapture perf   # výk
 
 ## Dokumentace jako web
 
-`cargo xtask docs` (a také `cargo xtask test`) převede `docs/cs` a `docs/en`
+`cargo xtask docs` (a také `cargo xtask test`) vytvoří web se dvěma knihami: **Příručka**
+pro uživatele (`docs/prirucka`, rozcestník `docs/prirucka/README.md`, výchozí stránka)
+a **Pro vývojáře** (níže). Vývojářská kniha převede `docs/cs` a `docs/en`
 na statický web v `target/docs`: navigace podle tabulky v `docs/README.md`,
 obsah stránky, fulltextové hledání, přepínání jazyka, světlý a tmavý motiv,
 diagramy (vložené SVG) a zvýraznění syntaxe bloků kódu s jazykem `rust`,

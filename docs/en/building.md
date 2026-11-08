@@ -67,7 +67,9 @@ cargo test -p fs --features std --release -- --ignored --nocapture perf   # perf
 
 ## Documentation as a website
 
-`cargo xtask docs` (and also `cargo xtask test`) converts `docs/cs` and
+`cargo xtask docs` (and also `cargo xtask test`) builds a site with two books: the
+**User guide** (`docs/prirucka`, index `docs/prirucka/README.md`, the default page)
+and **For developers** (below). The developer book converts `docs/cs` and
 `docs/en` into a static website in `target/docs`: navigation according to
 the table in `docs/README.md`, page contents, full-text search, language
 switch, light and dark themes, diagrams (inline SVG) and syntax
