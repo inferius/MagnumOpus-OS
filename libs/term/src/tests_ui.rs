@@ -460,3 +460,37 @@ fn long_lines_wrap_and_bars_end_with_ellipsis() {
     assert_eq!(crate::ui::short_path("/home/u", 20), "~");
     assert_eq!(crate::ui::short_path("/a/bbbbbbbb/cccccccc/dddd", 15), "\u{2026}/cccccccc/dddd");
 }
+
+/// Radek tabulky (help) se lame jen v bunce popisu, pokracovani pod ni.
+#[test]
+fn table_line_wraps_under_description() {
+    let parts = crate::ui::draw::wrap("  ls     vypise soubory ve slozce jako tabulku", 30);
+    let plain: Vec<String> = parts.iter().map(|p| crate::vt::strip(p)).collect();
+    assert_eq!(plain[0], "  ls     vypise soubory ve ");
+    assert!(plain[1].starts_with("         slozce"), "{plain:?}");
+}
+
+/// Posun vystupu: Shift+PgUp/kolecko nahoru s ukazatelem, psani dolu.
+#[test]
+fn output_scrolls_up_and_typing_returns_down() {
+    let mut a = App::new(crate::theme::Theme::dark(), 60, 12);
+    a.on_msg(ServerMsg::Attached { session: 7, cwd: "/".into(), blocks: 0 });
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 1, line: "seq".into() });
+    for i in 0..40 {
+        a.on_msg(ServerMsg::Item { session: 7, block: 1, item: Item::Note(alloc::format!("radek {i}")) });
+    }
+    a.on_msg(ServerMsg::BlockEnd { session: 7, block: 1, ok: true, duration: 0 });
+    let bottom = a.frame();
+    assert!(bottom.contains("radek 39"));
+    a.key(Key::ScrollPageUp);
+    let up = a.frame();
+    assert!(a.scroll > 0);
+    assert!(!up.contains("radek 39"), "{up}");
+    assert!(up.contains("níže"), "ukazatel posunu: {up}");
+    a.key(Key::Wheel(-100));
+    assert_eq!(a.scroll, 0, "kolecko dolu az na konec");
+    a.key(Key::Wheel(2));
+    a.frame();
+    a.key(Key::Char('x'));
+    assert_eq!(a.scroll, 0, "psani vraci dolu");
+}

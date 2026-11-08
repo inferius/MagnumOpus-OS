@@ -44,6 +44,12 @@ pub enum Key {
     Tab,
     BackTab,
     Esc,
+    /// Posun vystupu o stranku (Shift+PgUp / Shift+PgDn; samotne PgUp je
+    /// navigace v tabulce).
+    ScrollPageUp,
+    ScrollPageDown,
+    /// Kolecko mysi: kroky, kladne nahoru.
+    Wheel(i32),
     /// Ctrl + pismeno (malym).
     Ctrl(char),
 }
@@ -106,6 +112,10 @@ pub struct App {
     pub now: Option<i64>,
     /// Pocitadlo snimku (tocici se znak u bezicich bloku).
     tick: u32,
+    /// Posun vystupu nahoru (radky od konce; 0 = dole, novy vystup a psani
+    /// vraci dolu). Nejvetsi mozny posun spocita posledni snimek.
+    pub scroll: usize,
+    max_scroll: core::cell::Cell<usize>,
     pub connected: bool,
     /// Radky zadane pred pripojenim k relaci (odeslou se po `Attached`).
     pending: Vec<String>,
@@ -155,6 +165,8 @@ impl App {
             out: Vec::new(),
             now: None,
             tick: 0,
+            scroll: 0,
+            max_scroll: core::cell::Cell::new(0),
             connected: false,
             pending: Vec::new(),
             welcome: false,
@@ -239,6 +251,8 @@ impl App {
                 }
             }
             ServerMsg::BlockStart { block, line, .. } => {
+                // Novy blok: zpet dolu (vystup je videt).
+                self.scroll = 0;
                 self.blocks.retain(|b| b.id != block);
                 self.blocks.push(UiBlock {
                     id: block,
@@ -439,6 +453,16 @@ impl App {
 
     /// Klavesa.
     pub fn key(&mut self, k: Key) {
+        // Posun vystupu funguje vzdy (i s nabidkou nebo v tabulce).
+        let page = self.rows.saturating_sub(6).max(1);
+        match k {
+            Key::ScrollPageUp => return self.scroll_by(page as isize),
+            Key::ScrollPageDown => return self.scroll_by(-(page as isize)),
+            Key::Wheel(d) => return self.scroll_by(d as isize * 3),
+            // Psani (a dalsi klavesy editoru) vraci dolu.
+            _ if self.focus == Focus::Editor => self.scroll = 0,
+            _ => {}
+        }
         if self.prompt.is_some() {
             self.key_prompt(k);
             return;
@@ -455,6 +479,11 @@ impl App {
             Focus::Block(i) => self.key_block(i, k),
             Focus::Filter(i) => self.key_filter(i, k),
         }
+    }
+
+    fn scroll_by(&mut self, d: isize) {
+        let max = self.max_scroll.get();
+        self.scroll = (self.scroll as isize + d).clamp(0, max as isize) as usize;
     }
 
     fn key_prompt(&mut self, k: Key) {
@@ -698,8 +727,9 @@ impl App {
             return "šipky úloha · c zrušit · p pozastavit · r pokračovat · Esc zavřít";
         }
         match self.focus {
+            _ if self.scroll > 0 => "Shift+PgUp/PgDn posun výstupu · kolečko · psaní dolů",
             Focus::Editor if self.menu.is_some() => "šipky výběr · Enter/Tab doplnit · Esc zavřít",
-            Focus::Editor => "Tab doplnit · šipka nahoru historie · PgUp tabulka · Ctrl-C přerušit · Ctrl-F převod B/C · Ctrl-T úlohy",
+            Focus::Editor => "Tab doplnit · šipka nahoru historie · PgUp tabulka · Shift+PgUp výstup · Ctrl-C přerušit · Ctrl-F převod B/C · Ctrl-T úlohy",
             Focus::Block(_) => "šipky řádek · s řadit · / filtr · Enter otevřít · c cesta do řádku · d smazat s náhledem · Esc zpět",
             Focus::Filter(_) => "pište filtr · Enter hotovo · Esc zrušit filtr",
         }
@@ -766,12 +796,14 @@ impl App {
         };
 
         let area = self.rows.saturating_sub(bottom.len() + 1);
-        // Bloky od konce, kolik se vejde.
+        // Bloky od konce, kolik se vejde (s posunem nahoru o `scroll`;
+        // historie nejvys SCROLL_MAX radku).
+        let want = area + SCROLL_MAX;
         let mut body: Vec<Line> = Vec::new();
         for (bi, b) in self.blocks.iter().enumerate().rev() {
             let mut lines = self.draw_block(bi, b);
             lines.push(Line::new());
-            let room = area.saturating_sub(body.len());
+            let room = (want + 1).saturating_sub(body.len());
             if room == 0 {
                 break;
             }
@@ -782,6 +814,24 @@ impl App {
             }
             lines.append(&mut body);
             body = lines;
+        }
+        // Posun: zahodit spodnich `scroll` radku; nahore nic navic neni.
+        let max = body.len().saturating_sub(area);
+        self.max_scroll.set(max);
+        let scroll = self.scroll.min(max);
+        if scroll > 0 {
+            body.truncate(body.len() - scroll);
+            let start = body.len().saturating_sub(area);
+            body.drain(..start);
+            // Ukazatel: nejsem dole (posledni radek oblasti).
+            if let Some(last) = body.last_mut() {
+                *last = Line::new()
+                    .text(Some(Style { bold: true, ..Style::fg(t.ui.accent) }), &alloc::format!(" \u{2193} níže {scroll} řádků výstupu · Shift+PgDn, kolečko nebo psaní dolů "))
+                    .fill(t.ui.select);
+            }
+        } else if body.len() > area {
+            let start = body.len() - area;
+            body.drain(..start);
         }
         let mut out = alloc::vec![status];
         while body.len() < area {
@@ -1084,6 +1134,10 @@ pub fn quote(p: &str) -> String {
     out.push('"');
     out
 }
+
+/// Kolik radku vystupu jde posunout nahoru (starsi bloky se stejne
+/// nekresli, okno je jen nahled poslednich bloku).
+const SCROLL_MAX: usize = 2000;
 
 /// Priznak `seq` automatickeho pozadavku na sedy navrh (Tab a format
 /// pouzivaji cisla bez nej).
