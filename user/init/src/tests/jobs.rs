@@ -177,8 +177,15 @@ fn list_processes(s: &Startup) -> TestResult {
     // Trochu prace, aby mel proces cas na CPU.
     ch.write(b"alloc:65536", Vec::new()).map_err(|e| fail("zapis", e))?;
     ch.read(deadline()).map_err(|e| fail("odpoved", e))?;
-    // Vycet nadrazeneho jobu obsahuje i proces vnoreneho.
-    let list = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
+    // Vycet nadrazeneho jobu obsahuje i proces vnoreneho. Cas CPU jadro
+    // pripise az pri prepnuti vlakna: potomek muze po odpovedi jeste
+    // bezet (nebo cekat na prepnuti), proto chvili pockat, nez se ukaze.
+    let until = libos::time::deadline_after(core::time::Duration::from_secs(1));
+    let mut list = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
+    while list.first().is_some_and(|e| e.cpu_ns == 0) && libos::time::now() < until {
+        libos::time::sleep(core::time::Duration::from_millis(5));
+        list = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
+    }
     check_eq!(list.len(), 1, "jeden proces v podstromu");
     let e = list[0];
     check_eq!(e.name(), "echo-vycet", "jmeno procesu");
