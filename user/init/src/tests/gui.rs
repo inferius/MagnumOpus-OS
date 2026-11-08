@@ -90,6 +90,11 @@ pub(super) fn deadline() -> Option<u64> {
 }
 
 pub(super) fn ask(ch: &Channel, r: InspectRequest) -> Result<InspectReply, String> {
+    // Opozdena odpoved na drivejsi dotaz (ten skoncil TIMED_OUT) by se
+    // sparovala s timto dotazem a selhal by i dalsi test: zahodit ji.
+    while let Ok(stale) = ch.try_read() {
+        println!("init: test gui: zahozena opozdena odpoved inspekce ({} B)", stale.data.len());
+    }
     ch.write(&r.encode(), Vec::new()).map_err(|e| fail("inspekce: zapis", e))?;
     let m = ch.read(deadline()).map_err(|e| fail("inspekce: odpoved", e))?;
     InspectReply::decode(&m.data).map_err(|e| fail("inspekce: zprava", e))

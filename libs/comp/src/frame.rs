@@ -47,6 +47,9 @@ pub struct FrameState {
     pub(crate) settle: Vec<crate::PeerId>,
     /// Perioda snimku z obnovovaci frekvence vystupu (0 = vychozi 60 Hz).
     pub(crate) period: u64,
+    /// Od kdy nekdo ceka na ustaleni, a uz ohlaseno, proc ne.
+    pub(crate) settle_since: Option<u64>,
+    pub(crate) settle_reported: bool,
 }
 
 /// Nejvic soucasnych skupin a clenu skupiny.
@@ -320,6 +323,31 @@ impl Comp {
                 self.out.push(crate::Out::Inspect(p, guiproto::control::InspectReply::Done));
             }
         }
+    }
+
+    /// Ceka-li nekdo na ustaleni dele nez 5 s: jednou radek, co ho drzi
+    /// (diagnostika testu a zaseknutych snimku; sluzba ho vypise).
+    pub fn settle_report(&mut self, now: u64) -> Option<alloc::string::String> {
+        if self.frame.settle.is_empty() {
+            self.frame.settle_since = None;
+            self.frame.settle_reported = false;
+            return None;
+        }
+        let since = *self.frame.settle_since.get_or_insert(now);
+        if self.frame.settle_reported || now < since + 5_000_000_000 {
+            return None;
+        }
+        self.frame.settle_reported = true;
+        let cfg: Vec<u32> = self.windows.iter().filter(|(_, w)| w.configure.is_some()).map(|(&g, _)| g).collect();
+        let staged: Vec<_> = self.clients.iter().filter(|(_, c)| !c.staged.is_empty()).map(|(&i, c)| (i, c.staged.len())).collect();
+        let anim: Vec<_> = self.clients.iter().filter(|(_, c)| c.layers.values().any(|l| !l.anim.is_empty())).map(|(&i, _)| i).collect();
+        Some(alloc::format!(
+            "compd: ustaleni ceka {} ms: poskozeno {:?}, snimek na ceste {}, skupiny {}, CONFIGURE bez potvrzeni okna {cfg:?}, rozpracovane zpravy klientu {staged:?}, animace klientu {anim:?}",
+            (now - since) / 1_000_000,
+            self.dirty.rects(),
+            self.frame.in_flight,
+            self.frame.groups.len()
+        ))
     }
 
     pub(crate) fn is_settled(&self) -> bool {
