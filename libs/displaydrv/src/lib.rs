@@ -252,6 +252,9 @@ impl<B: Backend> Server<B> {
             // se orizne na obe plochy.
             unsafe { fbcopy::copy_rect(&src, &dst.surface, fbcopy::Rect::new(r.x, r.y, r.w, r.h), dst.format) };
         }
+        // Buffery jsou mapovane write-combining: vyprazdnit zapisy driv,
+        // nez flip ukaze buffer zarizeni.
+        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
         self.backend.flip(output, back, now)?;
         let o = &mut self.outs[output as usize];
         o.front = back;

@@ -97,7 +97,9 @@ fn open(st: &Start, a: Address) -> libos::Result<Bochs> {
     let (vram_phys, vram_size) = bar(0).map_err(step("BAR0"))?;
     let (mmio_phys, mmio_size) = bar(2).map_err(step("BAR2"))?;
     let page = libos::vm::page_size();
-    let vram_vmo = st.resource.device_memory(vram_phys, vram_size).map_err(step("VRAM"))?;
+    // VRAM write-combining: kompozitor ji jen plni (radove rychlejsi
+    // zapisy nez bez cache); registry v BAR2 zustavaji bez cache.
+    let vram_vmo = st.resource.device_memory_cached(vram_phys, vram_size, libos::abi::vm::cache::WRITE_COMBINING).map_err(step("VRAM"))?;
     let vram = Mapping::new(&vram_vmo, 0, vram_size, MAP_READ | MAP_WRITE).map_err(step("mapovani VRAM"))?;
     let mmio_len = mmio_size.max(page).next_multiple_of(page);
     let regs_vmo = st.resource.device_memory(mmio_phys, mmio_len).map_err(step("MMIO"))?;

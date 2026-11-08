@@ -148,7 +148,7 @@ fn main(startup: libos::Startup) -> i64 {
         // Diskretni karta: pamet karty pres BAR2 (LMEMBAR).
         map_bar(&st, &ecam, a, 2).ok().filter(|(_, len)| fb_phys + fb_len <= *len).map(|(m, _)| (m, fb_phys))
     } else {
-        st.resource.device_memory(fb_phys, fb_len.next_multiple_of(4096)).ok().and_then(|v| Mapping::new(&v, 0, fb_len.next_multiple_of(4096), MAP_READ | MAP_WRITE).ok().map(|m| (m, 0)))
+        st.resource.device_memory_cached(fb_phys, fb_len.next_multiple_of(4096), libos::abi::vm::cache::WRITE_COMBINING).ok().and_then(|v| Mapping::new(&v, 0, fb_len.next_multiple_of(4096), MAP_READ | MAP_WRITE).ok().map(|m| (m, 0)))
     };
     let Some((fb_map, fb_off)) = fb_cpu else {
         println!("{NAME} {a}: framebuffer firmwaru nelze namapovat");
@@ -171,7 +171,7 @@ fn main(startup: libos::Startup) -> i64 {
         let fits = bdsm != 0 && fb_phys >= bdsm && own_phys + fb_len <= bdsm + dsm_size;
         if fits && gtt::is_free(&mut mmio, OWN_GGTT, fb_len) {
             let len = fb_len.next_multiple_of(4096);
-            if let Ok(v) = st.resource.device_memory(own_phys, len)
+            if let Ok(v) = st.resource.device_memory_cached(own_phys, len, libos::abi::vm::cache::WRITE_COMBINING)
                 && let Ok(m) = Mapping::new(&v, 0, len, MAP_READ | MAP_WRITE)
             {
                 gtt::map(&mut mmio, OWN_GGTT, own_phys, len, false);
@@ -218,11 +218,13 @@ fn main(startup: libos::Startup) -> i64 {
     0
 }
 
-/// Namapuje pametovy BAR `i` cely.
+/// Namapuje pametovy BAR `i` cely (BAR0 registry bez cache, BAR2 pamet
+/// karty write-combining).
 fn map_bar(st: &Start, ecam: &Ecam, a: Address, i: u8) -> libos::Result<(Mapping, u64)> {
     let b = ecam.memory_bar(a, i).ok_or(libos::Error::NotSupported)?;
     let size = ecam.memory_bar_size(a, i).ok_or(libos::Error::NotSupported)?;
-    let vmo = st.resource.device_memory(b.phys, size)?;
+    let cache = if i == 0 { libos::abi::vm::cache::UNCACHED } else { libos::abi::vm::cache::WRITE_COMBINING };
+    let vmo = st.resource.device_memory_cached(b.phys, size, cache)?;
     let map = Mapping::new(&vmo, 0, size, MAP_READ | MAP_WRITE)?;
     Ok((map, size))
 }
