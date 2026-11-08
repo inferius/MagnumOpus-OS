@@ -24,8 +24,24 @@ struct Native {
     program: &'static str,
     matches: fn(&Function) -> bool,
     irq_max: u32,
-    /// Pamet pro buffery obrazu (Intel: 2 x 3840x2160x4 + rezerva).
     dma_max: u64,
+    /// Dalsi fyzicke rozsahy mimo BARy (Intel: stolen pamet s
+    /// framebufferem firmwaru a druhym bufferem).
+    extra: fn(&Ecam, pci::Address) -> Vec<(u64, u64)>,
+}
+
+fn none(_: &Ecam, _: pci::Address) -> Vec<(u64, u64)> {
+    Vec::new()
+}
+
+/// Stolen pamet integrovane grafiky Intel (BDSM 0x5C, velikost z GGC
+/// 0x50 bity 15:8 - kodovani Gen9+, `i915_gem_stolen.c`). MTL+ ma stolen
+/// pamet jinde: prazdne (ovladac pak jen jeden buffer v aperture/BAR).
+fn intel_dsm(ecam: &Ecam, a: pci::Address) -> Vec<(u64, u64)> {
+    let base = (ecam.read32(a, 0x5C) & 0xFFF0_0000) as u64;
+    let gms = (ecam.read16(a, 0x50) >> 8) as u64;
+    let size = if gms < 0xF0 { gms * (32 << 20) } else { (gms - 0xF0 + 1) * (4 << 20) };
+    if base == 0 || size == 0 { Vec::new() } else { vec![(base, size)] }
 }
 
 const NATIVE: &[Native] = &[
@@ -35,13 +51,16 @@ const NATIVE: &[Native] = &[
         matches: |f| f.vendor == 0x1234 && f.device == 0x1111,
         irq_max: 0,
         dma_max: 0,
+        extra: none,
     },
     // Integrovana grafika Intel (trida 03); generaci overi ovladac sam.
     Native {
         program: "intel-display",
         matches: |f| f.vendor == 0x8086 && f.class == 0x03,
-        irq_max: 2,
-        dma_max: 72 << 20,
+        // Bez preruseni a DMA: buffery jsou ve stolen pameti / pameti karty.
+        irq_max: 0,
+        dma_max: 0,
+        extra: intel_dsm,
     },
 ];
 
@@ -75,8 +94,9 @@ fn spawn(
     parent: &Channel,
 ) -> libos::Result<Process> {
     let image = fs.find(n.program).ok_or(libos::Error::NotFound)?;
-    let (ranges, config_phys) = crate::device_ranges(ecam, ecam_vmo, resource, f)?;
+    let (mut ranges, config_phys) = crate::device_ranges(ecam, ecam_vmo, resource, f)?;
     let a = f.address;
+    ranges.extend((n.extra)(ecam, a));
     let device = resource.restrict_device(&ranges, n.irq_max, n.dma_max, (segment, a.bus, a.device, a.function))?;
     let config = device.device_memory(config_phys, pci::CONFIG_SIZE)?;
     let snapshot = Vmo::create(SNAPSHOT_SIZE)?;

@@ -161,14 +161,17 @@ fn crash_restores_firmware(startup: &Startup) -> TestResult {
         let end = time::deadline_after(Duration::from_secs(5));
         let mut lines = command(ctl, control::OUTPUTS, Vec::new())?;
         let modes_of = |l: &str| l.lines().next().and_then(|l| l.split_whitespace().nth(4)).map(String::from).unwrap_or_default();
-        while modes_of(&lines) != "1" && time::now() < end {
+        // Firmware vystup zapnul (x86 OVMF) -> jediny rezim; nechal ho
+        // vypnuty (aarch64) -> zadny rezim.
+        let want = if fw == "-" { "0" } else { "1" };
+        while modes_of(&lines) != want && time::now() < end {
             time::sleep(Duration::from_millis(100));
             lines = command(ctl, control::OUTPUTS, Vec::new())?;
         }
         let n = modes_of(&lines);
-        check_eq!(n.as_str(), "1", "pocet rezimu po obnove (jen rezim firmwaru)");
+        check_eq!(n.as_str(), want, "pocet rezimu po obnove (jen rezim firmwaru)");
         let cur = current(ctl)?;
-        check!(cur.starts_with(&fw) || (fw == "-" && cur == "-"), "rezim po obnove neni rezim firmwaru");
+        check!(if fw == "-" { cur == "-" } else { cur.starts_with(&fw) }, "rezim po obnove neni rezim firmwaru");
         check!(command(ctl, "mode 800 600", Vec::new()).is_err(), "po obnove slo zmenit rezim");
         let caps_line = command(ctl, control::OUTPUTS, Vec::new())?;
         println!("init: test displej: po obnove: {}", caps_line.trim());
