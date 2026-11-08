@@ -193,8 +193,9 @@ rt_period_us = 5000
 - A boost never lowers, and the job ceiling **does not apply** to it - it
   is a loan from the sender, not the thread's own entitlement (otherwise an
   application with a Normal ceiling serving the compositor would delay the
-  frame). It cannot be abused: a boost only comes from a thread that really
-  has that class.
+  frame). A boost only comes from a thread that really has that class -
+  **but** also an inherited one (see [Known issues](#known-issues),
+  item 1).
 - Realtime propagates over IPC as **Interactive** (the budget belongs to
   a particular thread and cannot be lent).
 
@@ -286,6 +287,37 @@ O(n) in the threads of one class on a CPU, versus O(1) before.
 The latency maximum (~15 ms) matches one Background slice (12 ms) on TCG,
 where IPIs and the timer are delivered late; the median is below 1 ms.
 
+## Known issues
+
+From the design review (2026-11-08), to be fixed in this order:
+
+1. **Unbounded boost chaining** (bug, verified in the code). A message
+   carries the sender's effective class *including* the boost
+   (`ipc_class()` -> `effective()` in `kernel/src/sched/qos.rs`) and
+   receiving it renews the 50 ms window. Two processes with a Normal
+   ceiling can therefore keep the boost forever by passing messages after a
+   single message from Interactive. Fix: the loan carries its original
+   expiry (message = class + valid until); forwarding passes it on but does
+   not extend it. Test: ping-pong of two processes after one message from
+   Interactive -> both back to Normal after 50 ms. **[designed]**
+2. **Fairness between jobs inside a class.** A class's time is split per
+   thread today, so an application with many threads gets a larger share.
+   For concurrent agents and computations: two-level sharing (between jobs,
+   then between the job's threads). **[designed]**
+3. **An exhausted Realtime budget** limits only the precedence, not the
+   consumption: the thread keeps running as Interactive and takes time from
+   the fair part (weight 15). This is intended (audio does not crackle), it
+   just has to be visible in measurements.
+4. **Realtime is soft realtime.** Admission checks the sum over all CPUs
+   (50 %), not the actual placement; on a hybrid CPU the performance cores
+   can be overloaded while the efficient ones are free. Stronger guarantees
+   would need per-CPU capacity admission and fixed placement.
+5. **Do not replace the linear pick** with a tree without measuring: first
+   the growth of overhead and worst-case latency with the number of threads
+   (with revision and conditions, see
+   [Writing documentation](documentation.md#measurements)); synthetic QEMU
+   tests guard regressions, GUI responsiveness only shows on hardware.
+
 ## Next steps
 
 - **HFI** (Intel Hardware Feedback Interface): core capacities at run time
@@ -294,6 +326,6 @@ where IPIs and the timer are delivered late; the median is below 1 ms.
   and ACPI `_PSS` / CPPC; the kernel prepares the data, no governor yet.
 - `acpid` should call `CPU_HINT` with the capacity from `_CPC` (today an
   estimate from CPUID).
-- A balanced tree instead of the linear pick if one CPU's queues reach
-  hundreds of threads.
+- A balanced tree instead of the linear pick, only when measurements show
+  the need (see Known issues, item 5).
 - Measurements on real hybrid hardware (today simulation only).

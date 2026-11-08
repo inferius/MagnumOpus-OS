@@ -18,8 +18,7 @@ přímo u sebe (v textu nebo v buňce tabulky):
 
 Značka platí pro nejbližší tvrzení, ne pro celou kapitolu. Když se mění
 kód, mění se i značka ve stejném commitu. Anglická verze používá
-**[designed]**, **[implemented]**, **[verified in QEMU]**, **[verified on
-HW]**.
+`[designed]`, `[implemented]`, `[verified in QEMU]`, `[verified on HW]`.
 
 Příklad:
 
@@ -74,4 +73,7 @@ Ryzen 7 5800X)“. Čísla bez podmínek se neporovnávají.
 - vlastnická stránka je aktuální, souhrny jen odkazují,
 - nová tvrzení mají test, nová čísla podmínky,
 - cs a en verze říkají totéž,
-- `cargo xtask docs` projde.
+- `cargo xtask docs` projde. Kromě odkazů a kotev kontroluje značky stavu
+  (neznámá značka je chyba) a vypíše varování: měření bez revize
+  sestavení, cs a en verze s jiným počtem kapitol. Varování ze staré
+  dokumentace postupně odstraňuje audit po dávkách sloučení.

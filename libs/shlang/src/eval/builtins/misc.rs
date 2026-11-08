@@ -138,14 +138,7 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                     None => return Err(a.err(code::UNKNOWN, alloc::format!("prikaz '{n}' neznam"))),
                 }
             }
-            None => {
-                let mut s = String::from("Prikazy (kratke jmeno / plne jmeno):\n");
-                for b in BUILTINS {
-                    s.push_str(&alloc::format!("  {:<12} {:<18} {}\n", b.name, b.full, b.help));
-                }
-                s.push_str("\nPodrobne: help <prikaz>. Zapis C: fmt --style c.\n");
-                s
-            }
+            None => help_overview(),
         })),
         "run" => {
             let v = a.pos(0).ok_or_else(|| a.err(code::ARGS, "chybi skript"))?;
@@ -204,14 +197,42 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
     }
 }
 
+/// Prehled `help`: prikazy po skupinach, na radek jmeno a kratky popis
+/// v zarovnanem sloupci (dlouhy popis okno zalomi s odsazenim pod
+/// popisem). Plne jmeno a prepinace az v `help <prikaz>`.
+pub fn help_overview() -> String {
+    let w = BUILTINS.iter().map(|b| b.name.chars().count()).max().unwrap_or(8);
+    let mut s = String::from("Příkazy podle skupin (podrobně: help <příkaz>):\n");
+    let mut seen: Vec<&str> = Vec::new();
+    for (title, names) in crate::sig::GROUPS {
+        s.push_str(&alloc::format!("\n{title}\n"));
+        for n in *names {
+            if let Some(b) = builtin(n) {
+                seen.push(b.name);
+                s.push_str(&alloc::format!("  {:<w$}  {}\n", b.name, b.help));
+            }
+        }
+    }
+    // Prikaz bez skupiny (pridany pozdeji) nesmi zmizet.
+    let rest: Vec<_> = BUILTINS.iter().filter(|b| !seen.contains(&b.name)).collect();
+    if !rest.is_empty() {
+        s.push_str("\nOstatní\n");
+        for b in rest {
+            s.push_str(&alloc::format!("  {:<w$}  {}\n", b.name, b.help));
+        }
+    }
+    s.push_str("\nZápis C (volání funkcí): fmt --style c.\n");
+    s
+}
+
 /// Napoveda k prikazu: popis, obe jmena, pouziti, prepinace, vstup/vystup.
 pub fn help_for(s: &crate::sig::Sig) -> String {
-    let mut out = alloc::format!("{} ({}): {}\n  pouziti: {}\n", s.name, s.full, s.help, crate::parse::usage(s));
+    let mut out = alloc::format!("{} (plné jméno {}): {}\n  použití: {}\n", s.name, s.full, s.help, crate::parse::usage(s));
     for f in s.flags {
         let short = f.short.map(|c| alloc::format!("-{c}, ")).unwrap_or_default();
         out.push_str(&alloc::format!("  {short}--{}: {}\n", f.long, f.help));
     }
-    out.push_str(&alloc::format!("  zapis C: {}(...)\n", s.name.replace('-', "_")));
+    out.push_str(&alloc::format!("  zápis C: {}(...)\n", s.name.replace('-', "_")));
     out
 }
 

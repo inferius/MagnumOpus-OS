@@ -19,6 +19,7 @@ mod crashtest;
 mod datadisk;
 mod drivers;
 mod docs;
+mod docs_check;
 mod highlight;
 mod image;
 mod qemu;
@@ -78,6 +79,7 @@ prepinace:
   --gdb            (run) QEMU ceka na GDB na localhost:1234
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
+  --res <SxV>      (run, x86_64) vychozi rozliseni, napr. 1920x1080
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
                    none; aarch64 smmu (vychozi), none
   --data-disk <r>  (run, test) radic datoveho disku: virtio (vychozi), nvme,
@@ -125,6 +127,8 @@ pub struct Options {
     /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
     /// aarch64 "smmu", "none".
     iommu: String,
+    /// `--res SxV`: vychozi rozliseni grafiky v QEMU (x86_64).
+    res: Option<(u32, u32)>,
     /// Radic datoveho disku: "virtio", "nvme", "nvme4k" (sektor 4 KiB), "ahci",
     /// "usb" (flash disk usb-storage na radici xHCI).
     data_disk: String,
@@ -211,6 +215,7 @@ fn run_cli() -> Result<()> {
         headless: false,
         accel: None,
         iommu: String::new(),
+        res: None,
         data_disk: String::from("virtio"),
         gpu: String::from("2d"),
         qemu_wsl: false,
@@ -235,6 +240,15 @@ fn run_cli() -> Result<()> {
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
+            Some("--res") => {
+                let value = args.next().ok_or("--res ocekava SxV, napr. 1920x1080")?;
+                let value = value.to_string_lossy().into_owned();
+                let parsed = value
+                    .split_once('x')
+                    .and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)))
+                    .filter(|&(w, h)| (320..=7680).contains(&w) && (200..=4320).contains(&h));
+                opts.res = Some(parsed.ok_or("--res ocekava SxV, napr. 1920x1080")?);
+            }
             Some("--iommu") => {
                 let value = args.next().ok_or("--iommu ocekava typ IOMMU")?;
                 opts.iommu = value.to_string_lossy().into_owned();

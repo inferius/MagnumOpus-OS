@@ -55,6 +55,7 @@ site menu.
 |---|---|---|
 | [Ovladače](cs/ovladace.md) | [Drivers](en/drivers.md) | příručka autora ovladače: architektura, bezpečnost, sada driverkit, první ovladač krok za krokem, manifest, simulace hardwaru, zdroje a licence, Rust nebo převzaté C, ladění, kontrolní seznam / driver author's guide: architecture, security, the driverkit, first driver step by step, manifest, hardware simulation, sources and licences, Rust or adopted C, debugging, checklist |
 | [Ovladač edu](cs/ovladac-edu.md) | [Driver edu](en/driver-edu.md) | ukázkový ovladač pro zařízení QEMU edu / sample driver for the QEMU edu device |
+| [Jednotná rozhraní](cs/rozhrani-zarizeni.md) | [Unified interfaces](en/device-interfaces.md) | návrh: model ovladačů podle tříd, displej bez kopie, systémové služby pro aplikace (kamera, hovory, poloha...) / design: class-based driver model, display without a copy, system services for apps (camera, calls, location...) |
 
 ### Zvuk / Audio
 

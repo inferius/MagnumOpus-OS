@@ -28,6 +28,8 @@ pub fn key(r: &Record) -> Option<Key> {
                 KEY_DOWN => Key::Down,
                 KEY_HOME => Key::Home,
                 KEY_END => Key::End,
+                KEY_PAGEUP if shift => Key::ScrollPageUp,
+                KEY_PAGEDOWN if shift => Key::ScrollPageDown,
                 KEY_PAGEUP => Key::PageUp,
                 KEY_PAGEDOWN => Key::PageDown,
                 _ => return None,

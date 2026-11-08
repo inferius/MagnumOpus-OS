@@ -694,6 +694,78 @@ napsaná do jiného okna tak nepotvrdí dialog, který právě vyskočil.
 ukáže systémovou obrazovku přes všechno. Zavře ji jen fyzický vstup;
 kompozitor pak pošle `inputd` zprávu `release` a fokus se vrátí.
 
+## Menu aplikací a paleta příkazů (odsouhlaseno 2026-11-08)
+
+Prototyp a porovnání variant: `design/prostredi-menu.html` (varianta D).
+
+- **Jedna spodní lišta** zůstává. Globální horní lišta (styl macOS) se
+  **nedělá**: víc možností vzhledu = víc kombinací k testování, dokumentaci
+  a podpoře, a jednotné prostředí má přednost. Menu jsou data, takže ji jde
+  doplnit později bez změny API, kdyby to bylo potřeba. **[navrženo]**
+- **Titulek patří aplikaci** (`CUSTOM_TITLE`: karty, nástroje, adresa).
+  Systém kreslí na pevném místě jen odznak důvěry (s barevnými kolečky
+  soukromí), tlačítko menu ☰ hned za ním a tlačítka okna; aplikace je
+  nepřekryje ani nenapodobí. **[navrženo]**
+- **Menu**: aplikace ho jen deklaruje (skupiny, položky jako akce z
+  [API akcí](#api-akcí), role Zpět/Kopírovat/Vložit s jednotnými texty
+  a zkratkami, zaškrtnutí, zakázáno, podmenu), kreslí ho systém. Klik na ☰
+  nebo Alt: ☰ zmizí a menu se rozbalí na jeho místě; přejetí myší přepíná
+  nabídky; Esc, klik mimo nebo výběr položky ho zavře. Volba **Připnout
+  menu** (pro aplikaci nebo globálně) ho nechá trvale rozbalené.
+  První položka každé nabídky je „Hledat příkaz…“; volitelný panel
+  **Příkazy** ukáže strom všech akcí. **[navrženo]**
+- **Paleta příkazů je kontextová**: bez psaní sekce Nedávné, Tato
+  aplikace (několik nejčastějších akcí), Systém; při psaní výsledky
+  seskupené pod nadpisy (aktivní aplikace, Okna, Aplikace, Systém), nejvýš
+  ~5 na sekci s „další…“, akce aktivní aplikace mají přednost. Tab
+  přepíná rozsah (vše / tato aplikace / systém). Sekci aplikace kreslí
+  systém s ikonou a jménem aplikace, sekce Systém má štít důvěry - položka
+  aplikace se nemůže vydávat za systémovou. v1 (aplikace, okna, systémové
+  akce, nedávné) **[implementováno]**, akce aplikací (v2) **[navrženo]**.
+
+### Pravidla palety příkazů
+
+Všechna **[navrženo]**, pokud není řečeno jinak.
+
+1. **Otevření**: Ctrl+K a Super, z jakéhokoli okna; nad vším kromě
+   systémových dialogů. Esc zavře, fokus se vrátí do původního okna.
+2. **Rozsah**: výchozí *vše*; Tab přepíná *vše / tato aplikace /
+   systém*; předpona `>` = jen akce aktivní aplikace. Rozsah se ukazuje
+   v poli hledání.
+3. **Sekce a pořadí**: bez psaní Nedávné (nejvýš 5), Tato aplikace (5
+   nejčastějších), Systém. Při psaní sekce aktivní aplikace, Okna,
+   Aplikace, Systém; nejvýš 5 v sekci a „další…“. Uvnitř sekce podle
+   shody, pak podle četnosti použití.
+4. **Hledání**: bez ohledu na velikost písmen a **diakritiku** („ulozit“
+   najde „Uložit“), shoda začátků slov a zkratek („nzk“ = „Nová záložka“),
+   klíčová slova a synonyma z deklarace akce (aplikace je smí přidat).
+5. **Položka** ukazuje: ikonu, název, zkratku vpravo, u akcí aplikace
+   jméno aplikace. Zakázaná akce je šedá s důvodem (z deklarace), nespouští
+   se.
+6. **Bezpečnost**: sekce aplikace kreslí systém s ikonou a jménem
+   aplikace, sekce Systém se štítem důvěry. Aplikace nesmí přidat položku
+   do sekce Systém ani použít vyhrazené názvy (Vypnout, Restartovat,
+   Odhlásit, Zamknout, Oprávnění...). Nevratné akce (vypnutí, smazání)
+   vyžadují potvrzení stejně jako z menu.
+7. **Soukromí**: napsaný text se nikam neposílá ani neloguje; historie
+   Nedávné je per uživatel, jde smazat a vypnout.
+8. **Výkon**: výsledky v rámci jednoho snímku výstupu (rozpočet podle
+   obnovovací frekvence); seznam akcí aplikace se drží v kompozitoru
+   (aplikace ho pošle při změně, `MENU_UPDATE`), hledání se aplikace
+   neptá.
+9. **Agenti AI** používají stejná data (seznam akcí s popisem a stavem)
+   přes API akcí, ne simulované klikání do palety.
+10. **Přístupnost**: celá paleta je ve stromu přístupnosti (role,
+    názvy, počet výsledků), ovládá se jen klávesnicí, čtečka obrazovky
+    hlásí vybranou položku.
+
+### Zásada: málo voleb
+
+Jedno dobře promyšlené výchozí chování a málo voleb. Volby jsou hlavně pro
+přístupnost (velikost písma, kontrast, omezení animací), motiv a drobnosti
+jako připnutí menu - ne alternativní rozložení prostředí. Každá volba
+vzhledu násobí testy, dokumentaci a podporu.
+
 ## API akcí
 
 Aplikace v manifestu deklaruje **akce** s typovanými parametry

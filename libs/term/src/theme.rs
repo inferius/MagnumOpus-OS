@@ -143,8 +143,8 @@ pub struct Ui {
 pub struct Theme {
     pub name: String,
     pub ui: Ui,
-    syntax: Vec<Style>,
-    files: Vec<Style>,
+    pub(crate) syntax: Vec<Style>,
+    pub(crate) files: Vec<Style>,
     /// Skala 0 (male/nove) .. 3 (obri/stare).
     pub scale: [Rgb; 4],
     /// Pripony k druhum souboru: (druh, pripona malymi pismeny).
@@ -178,7 +178,7 @@ impl Theme {
     pub fn dark() -> Theme {
         let syntax = [
             "#d8dae0", "#7ee2a8", "#ff8a80 underline", "#ff9ac1", "#e0b46c", "#c7a6ff", "#a5d6ff", "#ffcf70", "#79d0c8",
-            "#6b7280 italic", "#9aa3b5", "#9aa3b5 bold", "#e6c1ff", "#9ccbff",
+            "#8f97a6 italic", "#9aa3b5", "#9aa3b5 bold", "#e6c1ff", "#9ccbff",
         ];
         let files = [
             "#d8dae0", "#7fb4ff bold", "#5fd7d7 bold", "#79d0c8 italic", "#7ee2a8 bold", "#f59ac9", "#f0b45a", "#d8dae0",
@@ -189,7 +189,7 @@ impl Theme {
             ui: Ui {
                 bg: Rgb(0x15, 0x17, 0x1c),
                 fg: Rgb(0xd8, 0xda, 0xe0),
-                muted: Rgb(0x7c, 0x82, 0x91),
+                muted: Rgb(0x9a, 0xa1, 0xb0),
                 accent: Rgb(0x7f, 0xb4, 0xff),
                 ok: Rgb(0x7e, 0xe2, 0xa8),
                 warn: Rgb(0xf0, 0xb4, 0x5a),
@@ -207,27 +207,27 @@ impl Theme {
     pub fn light() -> Theme {
         let syntax = [
             "#24262b", "#1f7a4a", "#c0392b underline", "#b5246b", "#9a5b00", "#6b3fc9", "#1f5fa8", "#a8590a", "#0f6e66",
-            "#8a8f9a italic", "#5f6672", "#5f6672 bold", "#7a3fa8", "#1f5fa8",
+            "#646a76 italic", "#5f6672", "#5f6672 bold", "#7a3fa8", "#1f5fa8",
         ];
         let files = [
             "#24262b", "#1f5fa8 bold", "#0f6e66 bold", "#0f6e66 italic", "#1f7a4a bold", "#a8326e", "#8a5200", "#24262b",
-            "#6b3fc9", "#8a8f9a", "#c0392b",
+            "#6b3fc9", "#646a76", "#c0392b",
         ];
         Theme {
             name: "light".into(),
             ui: Ui {
                 bg: Rgb(0xfb, 0xfb, 0xf9),
                 fg: Rgb(0x24, 0x26, 0x2b),
-                muted: Rgb(0x6b, 0x70, 0x80),
+                muted: Rgb(0x58, 0x5d, 0x6b),
                 accent: Rgb(0x1f, 0x5f, 0xa8),
-                ok: Rgb(0x1f, 0x7a, 0x4a),
+                ok: Rgb(0x1a, 0x6b, 0x40),
                 warn: Rgb(0x9a, 0x5b, 0x00),
                 err: Rgb(0xc0, 0x39, 0x2b),
                 select: Rgb(0xe3, 0xec, 0xf9),
             },
             syntax: syntax.iter().map(|s| st(s)).collect(),
             files: files.iter().map(|s| st(s)).collect(),
-            scale: [Rgb(0x8a, 0x8f, 0x9a), Rgb(0x0f, 0x6e, 0x66), Rgb(0x9a, 0x5b, 0x00), Rgb(0xc0, 0x39, 0x2b)],
+            scale: [Rgb(0x64, 0x6a, 0x76), Rgb(0x0f, 0x6e, 0x66), Rgb(0x9a, 0x5b, 0x00), Rgb(0xc0, 0x39, 0x2b)],
             ext: ext_list(),
         }
     }

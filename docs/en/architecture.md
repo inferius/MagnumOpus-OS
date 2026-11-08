@@ -689,6 +689,32 @@ Goal: every error can be traced - what happened, where, on which CPU and when.
 - Later: a userspace log service, structured records (key = value),
   persistent on-disk log, levels from the kernel command line.
 
+## Text and line endings (agreed 2026-11-08)
+
+The line ending in the whole system is **LF (`
+`)** - service output,
+logs, configuration, protocols, sources. It is the standard of Rust, git,
+the web, JSON and Unixes; CRLF would mean conversions everywhere else.
+
+1. **Only `
+` inside the system.** **[designed]** as a rule; new code
+   follows it.
+2. **Tolerant reading**: tools accept `
+` too (a file from Windows,
+   pasted text) as one line ending and do not show a lone `` at the end
+   of a line as garbage.
+3. **Files are never rewritten silently**: the editor keeps the style of
+   the opened file; conversion only on request (a command, an option when
+   saving).
+4. **Terminal**: `
+` = new line and return to the start (like modern
+   terminals); a lone `` returns the cursor to the line start (progress
+   indicators).
+5. **Exchange with the world**: `osfs` (sharing the FS with Windows) and
+   git do not convert line endings; conversion is optional in a tool.
+6. **Structured shell output** (tables, records) carries no line endings;
+   they appear only when a value is turned into text for display.
+
 ## Code conventions
 
 See [building.md](building.md#code-conventions). Code comments are in Czech,

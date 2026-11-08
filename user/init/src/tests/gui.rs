@@ -358,6 +358,20 @@ fn terminal_window(startup: &Startup) -> TestResult {
             pump();
             t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "ahoj z GUI"))
         })?;
+        // `help`: nadpis skupiny i kazdy prikaz na vlastnim radku (text
+        // s konci radku se nesmi spojit do odstavce). Vidi se konec vypisu.
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "help".into() })?;
+        wait_tree(&s.inspect, w.id, "help po radcich", |t| {
+            pump();
+            t.iter().any(|n| {
+                n.role == Role::Terminal && {
+                    let l: Vec<&str> = n.value.lines().map(str::trim).collect();
+                    l.contains(&"Systém")
+                        && l.iter().any(|x| x.starts_with("shutdown "))
+                        && l.iter().any(|x| x.starts_with("reboot "))
+                }
+            })
+        })?;
         // Relace hlasi ulohy do prehledu uloh (kanaly razi init pres
         // registr): `tasks` vidi bezici ulohu `async`.
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "let ulohy = async { sleep 30s }".into() })?;

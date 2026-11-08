@@ -869,6 +869,8 @@ impl Service {
         b.duration = duration;
         if s.attached {
             link.send(&ServerMsg::BlockEnd { session: s.id, block: b.id, ok, duration });
+            // `cd` v bloku: vyzva v okne hned s novym adresarem.
+            link.send(&ServerMsg::Cwd { session: s.id, cwd: s.interp.cwd.clone() });
         }
     }
 

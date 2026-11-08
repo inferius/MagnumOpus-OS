@@ -35,6 +35,9 @@ pub struct Screen {
     pub x: usize,
     pub y: usize,
     fg: (u8, u8, u8),
+    /// Vychozi barva textu (po SGR 0/39): z motivu okna, jinak paleta
+    /// konzole.
+    ink: (u8, u8, u8),
     bold: bool,
     underline: bool,
     bg: Option<(u8, u8, u8)>,
@@ -53,12 +56,20 @@ impl Screen {
             x: 0,
             y: 0,
             fg: PALETTE[1],
+            ink: PALETTE[1],
             bold: false,
             underline: false,
             bg: None,
             reverse: false,
             esc: None,
         }
+    }
+
+    /// Vychozi barva textu podle motivu (svetle pozadi okna: paleta
+    /// konzole by byla temer neviditelna).
+    pub fn set_ink(&mut self, ink: (u8, u8, u8)) {
+        self.ink = ink;
+        self.fg = ink;
     }
 
     /// Bunka se znakem a aktualnim stylem (obracene = prohozene barvy).
@@ -102,7 +113,7 @@ impl Screen {
         while i < ps.len() {
             match ps[i] {
                 "" | "0" => {
-                    self.fg = PALETTE[1];
+                    self.fg = self.ink;
                     self.bold = false;
                     self.underline = false;
                     self.bg = None;
@@ -125,7 +136,7 @@ impl Screen {
                 "31" => self.fg = PALETTE[3],
                 "33" => self.fg = PALETTE[4],
                 "36" => self.fg = PALETTE[5],
-                "39" => self.fg = PALETTE[1],
+                "39" => self.fg = self.ink,
                 // 24bitova barva textu.
                 "38" if ps.get(i + 1) == Some(&"2") && i + 4 < ps.len() => {
                     let c = |k: usize| ps[i + k].parse::<u8>().unwrap_or(0);

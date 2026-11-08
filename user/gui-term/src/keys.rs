@@ -31,11 +31,15 @@ pub fn key(r: &InputRecord) -> Option<Key> {
                 KEY_DOWN => Key::Down,
                 KEY_HOME => Key::Home,
                 KEY_END => Key::End,
+                KEY_PAGEUP if shift => Key::ScrollPageUp,
+                KEY_PAGEDOWN if shift => Key::ScrollPageDown,
                 KEY_PAGEUP => Key::PageUp,
                 KEY_PAGEDOWN => Key::PageDown,
                 _ => return None,
             })
         }
+        // Kolecko: posun vystupu.
+        InputEvent::Scroll { dy, .. } if dy != 0 => Some(Key::Wheel(dy)),
         _ => None,
     }
 }

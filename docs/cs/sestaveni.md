@@ -53,7 +53,7 @@ x86_64 `intel` (výchozí), `amd`, `none`; aarch64 `smmu` (výchozí), `none`; `
 „IOMMU: zarizeni nezapise mimo prideleny DMA“ a testy „IOMMU chrani pamet mimo DMA“ sady `disky` pak podle očekávání selžou),
 `--data-disk <virtio|nvme|nvme4k|ahci|usb>` (řadič datového disku, výchozí `virtio`; `nvme4k` = NVMe se sektorem 4 KiB; `usb` = flash disk
 na xHCI; na NVMe, AHCI a USB dostane disk GPT s naším oddílem, viz [Disky](disky.md)), `--gdb` (QEMU čeká na
-GDB), `--accel <tcg|kvm|whpx|hvf>`, `-- <argumenty QEMU>` (např.
+GDB), `--accel <tcg|kvm|whpx|hvf>` (na Windows `whpx` = Platforma hypervisoru Windows, výrazně rychlejší než výchozí emulace), `--res <SxV>` (x86_64: výchozí rozlišení, např. `--res 1920x1080`; ukazatel je při běhu s oknem tablet, takže sedí i po roztažení okna), `-- <argumenty QEMU>` (např.
 `-- -smp 8`, `-- -cpu max,-x2apic`).
 
 Souborový systém má vlastní testy na hostiteli (rychlé, bez QEMU):

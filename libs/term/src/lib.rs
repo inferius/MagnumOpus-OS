@@ -40,6 +40,8 @@ mod tests;
 #[cfg(test)]
 mod tests_broker;
 #[cfg(test)]
+mod tests_contrast;
+#[cfg(test)]
 mod tests_render;
 #[cfg(test)]
 mod tests_taskd;

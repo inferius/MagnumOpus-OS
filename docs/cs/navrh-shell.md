@@ -652,7 +652,18 @@ Binární zprávy (1 B druh, pole little-endian, text = délka + UTF-8). Okno
 posílá `Hello`, `Attach` (0 = nová relace), `Detach`, `Run`, `Interrupt`,
 `Complete`, `Answer`, `Format`, `Sessions` a `Highlight`. Služba posílá
 `BlockStart`, `Item`, `BlockEnd`, `Prompt`, `Completions`, `Formatted`,
-`Highlighted` a `Fail`.
+`Highlighted`, `Cwd` (aktuální adresář po každém bloku, výzva se po `cd`
+změní hned) a `Fail`.
+
+Šedý návrh na konci řádku: u jména příkazu z historie, u argumentu
+z doplňování podle typu argumentu (`cd` jen adresáře, cesty, pole tabulky)
+- okno si ho samo vyžádá (`Complete` s příznakem `seq` 0x8000_0000).
+Tab: jedna shoda se doplní rovnou, víc shod otevře nabídku, kterou psaní
+zužuje (šipky/Tab výběr, Enter potvrdí, Esc zavře). Výstup se posouvá
+kolečkem a Shift+PgUp/PgDn (samotné PgUp je tabulka); když nejsem dole,
+ukazuje to pruh „níže N řádků“, nový blok nebo psaní vrátí dolů. `help`
+je přehled po skupinách (jméno a popis), podrobnosti v `help <příkaz>`;
+řádek tabulky se láme jen v buňce popisu.
 
 - **Párování odpovědí (verze 2):** `Complete` a `Format` nesou číslo
   požadavku `seq`, `Completions` a `Formatted` ho vrací. Mezi požadavkem

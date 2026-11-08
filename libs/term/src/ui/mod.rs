@@ -44,6 +44,12 @@ pub enum Key {
     Tab,
     BackTab,
     Esc,
+    /// Posun vystupu o stranku (Shift+PgUp / Shift+PgDn; samotne PgUp je
+    /// navigace v tabulce).
+    ScrollPageUp,
+    ScrollPageDown,
+    /// Kolecko mysi: kroky, kladne nahoru.
+    Wheel(i32),
     /// Ctrl + pismeno (malym).
     Ctrl(char),
 }
@@ -106,6 +112,10 @@ pub struct App {
     pub now: Option<i64>,
     /// Pocitadlo snimku (tocici se znak u bezicich bloku).
     tick: u32,
+    /// Posun vystupu nahoru (radky od konce; 0 = dole, novy vystup a psani
+    /// vraci dolu). Nejvetsi mozny posun spocita posledni snimek.
+    pub scroll: usize,
+    max_scroll: core::cell::Cell<usize>,
     pub connected: bool,
     /// Radky zadane pred pripojenim k relaci (odeslou se po `Attached`).
     pending: Vec<String>,
@@ -115,6 +125,10 @@ pub struct App {
     welcomed: bool,
     /// Cislo posledniho pozadavku `Complete`/`Format` (`seq`).
     req: u32,
+    /// Sedy navrh argumentu z doplnovani: (seq pozadavku, seq textu
+    /// editoru, zbytek k doplneni).
+    hint_req: u32,
+    hint: Option<(u32, String)>,
     /// Ulohy uzivatele z prehledu uloh (`taskd`).
     pub tasks: Vec<taskproto::Task>,
     /// Panel uloh: vybrana uloha (`None` = zavreny).
@@ -151,11 +165,15 @@ impl App {
             out: Vec::new(),
             now: None,
             tick: 0,
+            scroll: 0,
+            max_scroll: core::cell::Cell::new(0),
             connected: false,
             pending: Vec::new(),
             welcome: false,
             welcomed: false,
             req: 0,
+            hint_req: HINT_SEQ,
+            hint: None,
             tasks: Vec::new(),
             task_sel: None,
             notice: None,
@@ -233,6 +251,8 @@ impl App {
                 }
             }
             ServerMsg::BlockStart { block, line, .. } => {
+                // Novy blok: zpet dolu (vystup je videt).
+                self.scroll = 0;
                 self.blocks.retain(|b| b.id != block);
                 self.blocks.push(UiBlock {
                     id: block,
@@ -299,6 +319,20 @@ impl App {
             ServerMsg::Prompt { prompt, question, detail, choices } => {
                 self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0 });
             }
+            // Sedy navrh argumentu (automaticky pozadavek, ne Tab).
+            ServerMsg::Completions { seq, start, items } if seq & HINT_SEQ != 0 => {
+                if seq == self.hint_req
+                    && let Some((text, _, _)) = items.first()
+                {
+                    let start = (start as usize).min(self.editor.cursor);
+                    let word = &self.editor.text[start..self.editor.cursor];
+                    if let Some(rest) = text.strip_prefix(word)
+                        && !rest.is_empty()
+                    {
+                        self.hint = Some((self.editor.seq, rest.into()));
+                    }
+                }
+            }
             // Odpoved na starsi pozadavek (mezitim novy): zahodit.
             ServerMsg::Completions { seq, .. } | ServerMsg::Formatted { seq, .. } if seq != self.req => {}
             ServerMsg::Completions { start, items, .. } => {
@@ -330,6 +364,11 @@ impl App {
                 });
             }
             ServerMsg::SessionList { .. } => {}
+            ServerMsg::Cwd { session, cwd } => {
+                if session == self.session {
+                    self.cwd = cwd;
+                }
+            }
             ServerMsg::Tasks { tasks } => self.set_tasks(tasks),
         }
     }
@@ -351,6 +390,47 @@ impl App {
                 line: self.editor.text.clone(),
                 seq: self.editor.seq,
             });
+            // Na pozici argumentu sedy navrh podle typu argumentu (cd =
+            // adresare, jinak cesty, pole tabulky...) z doplnovani.
+            self.hint = None;
+            if self.arg_position() && self.editor.cursor == self.editor.text.len() {
+                self.hint_req = HINT_SEQ | (self.hint_req.wrapping_add(1) & !HINT_SEQ);
+                self.out.push(ClientMsg::Complete {
+                    session: self.session,
+                    line: self.editor.text.clone(),
+                    cursor: self.editor.cursor as u32,
+                    seq: self.hint_req,
+                });
+            }
+        }
+    }
+
+    /// Kurzor je za jmenem prikazu (pise se argument)?
+    fn arg_position(&self) -> bool {
+        let before = &self.editor.text[..self.editor.cursor];
+        let stage = before.rsplit(['|', ';']).next().unwrap_or("");
+        stage.trim_start().contains(char::is_whitespace)
+    }
+
+    /// Sedy navrh na konci radku: u argumentu z doplnovani (podle typu),
+    /// u jmena prikazu z historie.
+    pub fn suggestion(&self) -> Option<&str> {
+        if self.editor.cursor != self.editor.text.len() {
+            return None;
+        }
+        if self.arg_position() {
+            return self.hint.as_ref().filter(|(s, _)| *s == self.editor.seq).map(|(_, h)| h.as_str());
+        }
+        self.editor.suggestion()
+    }
+
+    fn accept_suggestion(&mut self) -> bool {
+        match self.suggestion().map(String::from) {
+            Some(s) => {
+                self.editor.insert(&s);
+                true
+            }
+            None => false,
         }
     }
 
@@ -373,6 +453,16 @@ impl App {
 
     /// Klavesa.
     pub fn key(&mut self, k: Key) {
+        // Posun vystupu funguje vzdy (i s nabidkou nebo v tabulce).
+        let page = self.rows.saturating_sub(6).max(1);
+        match k {
+            Key::ScrollPageUp => return self.scroll_by(page as isize),
+            Key::ScrollPageDown => return self.scroll_by(-(page as isize)),
+            Key::Wheel(d) => return self.scroll_by(d as isize * 3),
+            // Psani (a dalsi klavesy editoru) vraci dolu.
+            _ if self.focus == Focus::Editor => self.scroll = 0,
+            _ => {}
+        }
         if self.prompt.is_some() {
             self.key_prompt(k);
             return;
@@ -389,6 +479,11 @@ impl App {
             Focus::Block(i) => self.key_block(i, k),
             Focus::Filter(i) => self.key_filter(i, k),
         }
+    }
+
+    fn scroll_by(&mut self, d: isize) {
+        let max = self.max_scroll.get();
+        self.scroll = (self.scroll as isize + d).clamp(0, max as isize) as usize;
     }
 
     fn key_prompt(&mut self, k: Key) {
@@ -445,6 +540,8 @@ impl App {
                     self.menu = None;
                     return;
                 }
+                // Psani a mazani nabidku zuzi podle napsaneho.
+                Key::Char(_) | Key::Backspace => {}
                 _ => self.menu = None,
             }
         }
@@ -461,9 +558,17 @@ impl App {
             Key::Backspace => self.editor.backspace(),
             Key::Delete => self.editor.delete(),
             Key::Left => self.editor.left(),
+            Key::Right if self.editor.cursor == self.editor.text.len() => {
+                self.accept_suggestion();
+            }
             Key::Right => self.editor.right(),
             Key::Home | Key::Ctrl('a') => self.editor.home(),
-            Key::End | Key::Ctrl('e') => self.editor.end(),
+            Key::End | Key::Ctrl('e') => {
+                if self.editor.cursor == self.editor.text.len() {
+                    self.accept_suggestion();
+                }
+                self.editor.cursor = self.editor.text.len();
+            }
             Key::Up => self.editor.history_prev(),
             Key::Down => self.editor.history_next(),
             Key::Ctrl('w') => self.editor.kill_word(),
@@ -508,7 +613,25 @@ impl App {
             _ => {}
         }
         if self.editor.seq != before {
+            self.filter_menu();
             self.highlight_request();
+        }
+    }
+
+    /// Nabidka doplnovani jen s polozkami, ktere zacinaji napsanym slovem
+    /// (bez ohledu na velikost pismen); zadna = zavrit.
+    fn filter_menu(&mut self) {
+        let Some(m) = self.menu.as_mut() else { return };
+        if self.editor.cursor < m.start {
+            self.menu = None;
+            return;
+        }
+        let word = self.editor.text[m.start..self.editor.cursor].to_lowercase();
+        m.items.retain(|(t, _, _)| t.to_lowercase().starts_with(&word));
+        if m.items.is_empty() {
+            self.menu = None;
+        } else {
+            m.sel = m.sel.min(m.items.len() - 1);
         }
     }
 
@@ -604,8 +727,9 @@ impl App {
             return "šipky úloha · c zrušit · p pozastavit · r pokračovat · Esc zavřít";
         }
         match self.focus {
+            _ if self.scroll > 0 => "Shift+PgUp/PgDn posun výstupu · kolečko · psaní dolů",
             Focus::Editor if self.menu.is_some() => "šipky výběr · Enter/Tab doplnit · Esc zavřít",
-            Focus::Editor => "Tab doplnit · šipka nahoru historie · PgUp tabulka · Ctrl-C přerušit · Ctrl-F převod B/C · Ctrl-T úlohy",
+            Focus::Editor => "Tab doplnit · šipka nahoru historie · PgUp tabulka · Shift+PgUp výstup · Ctrl-C přerušit · Ctrl-F převod B/C · Ctrl-T úlohy",
             Focus::Block(_) => "šipky řádek · s řadit · / filtr · Enter otevřít · c cesta do řádku · d smazat s náhledem · Esc zpět",
             Focus::Filter(_) => "pište filtr · Enter hotovo · Esc zrušit filtr",
         }
@@ -672,12 +796,14 @@ impl App {
         };
 
         let area = self.rows.saturating_sub(bottom.len() + 1);
-        // Bloky od konce, kolik se vejde.
+        // Bloky od konce, kolik se vejde (s posunem nahoru o `scroll`;
+        // historie nejvys SCROLL_MAX radku).
+        let want = area + SCROLL_MAX;
         let mut body: Vec<Line> = Vec::new();
         for (bi, b) in self.blocks.iter().enumerate().rev() {
             let mut lines = self.draw_block(bi, b);
             lines.push(Line::new());
-            let room = area.saturating_sub(body.len());
+            let room = (want + 1).saturating_sub(body.len());
             if room == 0 {
                 break;
             }
@@ -688,6 +814,24 @@ impl App {
             }
             lines.append(&mut body);
             body = lines;
+        }
+        // Posun: zahodit spodnich `scroll` radku; nahore nic navic neni.
+        let max = body.len().saturating_sub(area);
+        self.max_scroll.set(max);
+        let scroll = self.scroll.min(max);
+        if scroll > 0 {
+            body.truncate(body.len() - scroll);
+            let start = body.len().saturating_sub(area);
+            body.drain(..start);
+            // Ukazatel: nejsem dole (posledni radek oblasti).
+            if let Some(last) = body.last_mut() {
+                *last = Line::new()
+                    .text(Some(Style { bold: true, ..Style::fg(t.ui.accent) }), &alloc::format!(" \u{2193} níže {scroll} řádků výstupu · Shift+PgDn, kolečko nebo psaní dolů "))
+                    .fill(t.ui.select);
+            }
+        } else if body.len() > area {
+            let start = body.len() - area;
+            body.drain(..start);
         }
         let mut out = alloc::vec![status];
         while body.len() < area {
@@ -701,8 +845,9 @@ impl App {
     fn draw_editor(&self) -> Line {
         let t = &self.theme;
         let mut l = Line::new();
-        l.push(Some(Style::fg(t.ui.accent)), &self.cwd_short());
-        l.push(Some(Style::fg(t.ui.muted)), " > ");
+        // Vyzva: kde jsem (tucne, zvyraznene), pak oddelovac.
+        l.push(Some(Style { bold: true, ..Style::fg(t.ui.accent) }), &self.cwd_short());
+        l.push(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), " \u{276F} ");
         let text = &self.editor.text;
         let h = self.editor.highlight();
         let cursor = self.editor.cursor;
@@ -729,7 +874,7 @@ impl App {
             i = p + c.len_utf8();
         }
         let _ = i;
-        if let Some(s) = self.editor.suggestion() {
+        if let Some(s) = self.suggestion() {
             let mut chars = s.chars();
             if cursor == text.len() && self.focus == Focus::Editor && let Some(first) = chars.next() {
                 l.push_bg(Some(Style::fg(t.ui.bg)), t.ui.muted, first.encode_utf8(&mut [0u8; 4]));
@@ -747,12 +892,7 @@ impl App {
     }
 
     fn cwd_short(&self) -> String {
-        if self.cwd.chars().count() > 24 {
-            let tail: String = self.cwd.chars().rev().take(22).collect::<Vec<_>>().into_iter().rev().collect();
-            alloc::format!("...{tail}")
-        } else {
-            self.cwd.clone()
-        }
+        short_path(&self.cwd, (self.cols / 3).max(12))
     }
 
     fn draw_block(&self, bi: usize, b: &UiBlock) -> Vec<Line> {
@@ -806,8 +946,11 @@ impl App {
                 }
                 other => {
                     let text = crate::vt::item_at(other, Some(t), self.now);
+                    // Dlouhe radky (uvitani, hlaseni) zalomit do sirky okna.
                     for line in draw::lines_of(&text) {
-                        out.push(Line::new().text(None, &alloc::format!("  {}", draw::clip(&line, self.cols.saturating_sub(2)))));
+                        for part in draw::wrap(&line, self.cols.saturating_sub(2)) {
+                            out.push(Line::new().text(None, &alloc::format!("  {part}")));
+                        }
                     }
                 }
             }
@@ -990,6 +1133,38 @@ pub fn quote(p: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// Kolik radku vystupu jde posunout nahoru (starsi bloky se stejne
+/// nekresli, okno je jen nahled poslednich bloku).
+const SCROLL_MAX: usize = 2000;
+
+/// Priznak `seq` automatickeho pozadavku na sedy navrh (Tab a format
+/// pouzivaji cisla bez nej).
+const HINT_SEQ: u32 = 0x8000_0000;
+
+/// Cesta pro vyzvu: domov `/home/<jmeno>` jako `~`, dlouha cesta jen
+/// s poslednimi slozkami (`.../a/b`) do `max` znaku.
+pub fn short_path(cwd: &str, max: usize) -> String {
+    let mut p = String::from(cwd);
+    if let Some(rest) = cwd.strip_prefix("/home/") {
+        let (_, tail) = rest.split_once('/').unwrap_or((rest, ""));
+        p = if tail.is_empty() { "~".into() } else { alloc::format!("~/{tail}") };
+    }
+    if p.chars().count() <= max {
+        return p;
+    }
+    // Od konce cele slozky, dokud se vejdou.
+    let parts: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
+    let mut out = String::new();
+    for part in parts.iter().rev() {
+        let next = if out.is_empty() { String::from(*part) } else { alloc::format!("{part}/{out}") };
+        if next.chars().count() + 2 > max && !out.is_empty() {
+            break;
+        }
+        out = next;
+    }
+    alloc::format!("\u{2026}/{out}")
 }
 
 /// Prikaz akce nad radkem (spusti se jako bezny radek - vidi ho historie

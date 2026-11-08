@@ -60,7 +60,7 @@ fn typing_highlights_now_and_semantic_later() {
     // Odpoved k aktualnimu textu se pouzije.
     a.on_msg(ServerMsg::Highlighted { seq: seqs[2], spans: vec![(0, 3, Class::Unknown as u8)], error: None });
     assert_eq!(a.editor.highlight().spans[0].class, Class::Unknown);
-    assert!(plain(&a).contains("/home > lss"));
+    assert!(plain(&a).contains("/home \u{276F} lss"));
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn frame_draws_on_screen_with_colors() {
     s.write(&a.frame());
     let lines: Vec<String> = (0..30).map(|y| s.line(y)).collect();
     assert!(lines[0].contains("relace 7"), "{:?}", lines[0]);
-    assert!(lines.iter().any(|l| l.contains("/home > echo ahoj")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.contains("/home \u{276F} echo ahoj")), "{lines:?}");
     assert!(lines.iter().any(|l| l.contains("foto")));
     // Stavovy radek ma pozadi, jmeno slozky barvu slozek.
     assert!(s.cell(0, 0).bg.is_some());
@@ -407,4 +407,102 @@ fn welcome_shows_once_for_a_new_session_and_reconnect_keeps_session() {
     // run_line jako akce okna.
     a.run_line("ls");
     assert!(a.take_out().iter().any(|m| matches!(m, ClientMsg::Run { line, .. } if line == "ls")));
+}
+
+/// Sedy navrh u argumentu z doplnovani (ne z historie), `cd` jen
+/// adresare; Tab s vic shodami: nabidka zuzena psanim; vyzva po `cd`.
+#[test]
+fn argument_hint_menu_filter_and_cwd() {
+    let mut a = App::new(crate::theme::Theme::dark(), 80, 24);
+    a.on_msg(ServerMsg::Attached { session: 7, cwd: "/".into(), blocks: 0 });
+    // Historie s radkem "cd name" se u argumentu nenabizi.
+    typ(&mut a, "cd name");
+    a.key(Key::Enter);
+    a.take_out();
+    typ(&mut a, "cd ");
+    assert_eq!(a.suggestion(), None, "navrh z historie u argumentu");
+    let seq = a.take_out().iter().rev().find_map(|m| match m {
+        ClientMsg::Complete { seq, .. } => Some(*seq),
+        _ => None,
+    });
+    let seq = seq.expect("automaticky pozadavek na navrh");
+    a.on_msg(ServerMsg::Completions { seq, start: 3, items: vec![("home/".into(), 0, String::new())] });
+    assert_eq!(a.suggestion(), Some("home/"));
+    a.key(Key::Right);
+    assert_eq!(a.editor.text, "cd home/");
+    // Tab: vic shod = nabidka, psani ji zuzi.
+    a.editor.clear();
+    typ(&mut a, "cd s");
+    a.key(Key::Tab);
+    let seq = a.take_out().iter().rev().find_map(|m| match m {
+        ClientMsg::Complete { seq, .. } => Some(*seq),
+        _ => None,
+    });
+    a.on_msg(ServerMsg::Completions {
+        seq: seq.unwrap(),
+        start: 3,
+        items: vec![("src/".into(), 0, String::new()), ("system/".into(), 0, String::new())],
+    });
+    assert_eq!(a.menu.as_ref().map(|m| m.items.len()), Some(2));
+    a.key(Key::Char('y'));
+    assert_eq!(a.menu.as_ref().map(|m| m.items.len()), Some(1), "nabidka zuzena psanim");
+    // Po bloku prijde novy adresar a vyzva ho ukaze hned.
+    a.on_msg(ServerMsg::Cwd { session: 7, cwd: "/home/uzivatel/projekty".into() });
+    assert!(plain(&a).contains("~/projekty \u{276F} "), "{}", plain(&a));
+}
+
+#[test]
+fn long_lines_wrap_and_bars_end_with_ellipsis() {
+    let parts = crate::ui::draw::wrap("aaa bbb ccc ddd", 8);
+    assert_eq!(parts.iter().map(|p| crate::vt::strip(p)).collect::<Vec<_>>(), vec!["aaa bbb ", "ccc ddd"]);
+    let l = crate::ui::draw::Line::new().text(None, "0123456789");
+    assert_eq!(crate::vt::strip(&l.ansi(5)), "0123\u{2026}");
+    assert_eq!(crate::ui::short_path("/home/u", 20), "~");
+    assert_eq!(crate::ui::short_path("/a/bbbbbbbb/cccccccc/dddd", 15), "\u{2026}/cccccccc/dddd");
+}
+
+/// Radek tabulky (help) se lame jen v bunce popisu, pokracovani pod ni.
+#[test]
+fn table_line_wraps_under_description() {
+    let parts = crate::ui::draw::wrap("  ls     vypise soubory ve slozce jako tabulku", 30);
+    let plain: Vec<String> = parts.iter().map(|p| crate::vt::strip(p)).collect();
+    assert_eq!(plain[0], "  ls     vypise soubory ve ");
+    assert!(plain[1].starts_with("         slozce"), "{plain:?}");
+}
+
+/// Posun vystupu: Shift+PgUp/kolecko nahoru s ukazatelem, psani dolu.
+#[test]
+fn output_scrolls_up_and_typing_returns_down() {
+    let mut a = App::new(crate::theme::Theme::dark(), 60, 12);
+    a.on_msg(ServerMsg::Attached { session: 7, cwd: "/".into(), blocks: 0 });
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 1, line: "seq".into() });
+    for i in 0..40 {
+        a.on_msg(ServerMsg::Item { session: 7, block: 1, item: Item::Note(alloc::format!("radek {i}")) });
+    }
+    a.on_msg(ServerMsg::BlockEnd { session: 7, block: 1, ok: true, duration: 0 });
+    let bottom = a.frame();
+    assert!(bottom.contains("radek 39"));
+    a.key(Key::ScrollPageUp);
+    let up = a.frame();
+    assert!(a.scroll > 0);
+    assert!(!up.contains("radek 39"), "{up}");
+    assert!(up.contains("níže"), "ukazatel posunu: {up}");
+    a.key(Key::Wheel(-100));
+    assert_eq!(a.scroll, 0, "kolecko dolu az na konec");
+    a.key(Key::Wheel(2));
+    a.frame();
+    a.key(Key::Char('x'));
+    assert_eq!(a.scroll, 0, "psani vraci dolu");
+}
+
+/// Konce radku: `\r\n` jako `\n`, `\r` na konci se nezobrazi, `\r` uvnitr
+/// vrati na zacatek radku (prepis); samostatny text si radky necha.
+#[test]
+fn line_endings_follow_system_rule() {
+    let l = crate::ui::draw::lines_of("a\r\nb\r\nprubeh 10%\rprubeh 80%\nkonec\r");
+    assert_eq!(l, vec!["a", "b", "prubeh 80%", "konec"]);
+    assert_eq!(crate::ui::draw::lines_of("dlouhy text\rkratky"), vec!["kratky text"]);
+    let theme = crate::theme::Theme::dark();
+    let r = crate::render::value(&shlang::value::Value::str("prvni\ndruhy"), &theme, None);
+    assert_eq!(crate::vt::strip(&r), "prvni\ndruhy\n");
 }

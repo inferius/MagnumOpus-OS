@@ -67,6 +67,8 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
     copy_design(&root.join("design"), &out.join("design"))?;
 
     let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    let mut h2: [Vec<usize>; 2] = [Vec::new(), Vec::new()];
     for (li, (lang, _)) in LANGS.iter().enumerate() {
         let dir = out.join(lang);
         fs::create_dir_all(&dir)?;
@@ -74,6 +76,7 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
         for page in &pages {
             let md = fs::read_to_string(docs.join(lang).join(&page.files[li]))
                 .map_err(|e| format!("docs/{lang}/{}: {e}", page.files[li]))?;
+            crate::docs_check::page(lang, &page.files[li], &md, &mut errors, &mut warnings);
             rendered.push(render(&page.files[li], &md));
         }
         for r in &rendered {
@@ -81,6 +84,7 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
                 errors.push(format!("{lang}/{}: {e}", r.file));
             }
         }
+        h2[li] = rendered.iter().map(|r| r.toc.iter().filter(|t| t.0 == 2).count()).collect();
         check_links(lang, &rendered, &mut errors);
         check_design_links(lang, &rendered, &root.join("design"), &mut errors);
         let titles: Vec<String> = rendered.iter().map(|r| r.title.clone()).collect();
@@ -102,6 +106,24 @@ pub fn build(root: &Path, out: &Path) -> Result<PathBuf> {
         out.join("index.html"),
         "<!doctype html><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"0; url=cs/index.html\"><title>Dokumentace</title><a href=\"cs/index.html\">Dokumentace</a>\n",
     )?;
+    for (pi, page) in pages.iter().enumerate() {
+        crate::docs_check::pair(&page.files[0], h2[0][pi], &page.files[1], h2[1][pi], &mut warnings);
+    }
+    if !warnings.is_empty() {
+        println!("xtask: dokumentace: {} varovani (pravidla v docs/cs/dokumentace.md):", warnings.len());
+        // Prvnich par cele, zbytek jen pocet podle souboru (stara
+        // dokumentace jich ma stovky; audit je postupne odstrani).
+        for w in warnings.iter().take(10) {
+            println!("  {w}");
+        }
+        let mut per_file: std::collections::BTreeMap<&str, usize> = Default::default();
+        for w in warnings.iter().skip(10) {
+            *per_file.entry(w.split(':').next().unwrap_or("")).or_default() += 1;
+        }
+        for (f, n) in per_file {
+            println!("  {f}: {n} dalsich");
+        }
+    }
     if !errors.is_empty() {
         return Err(format!("chyby v dokumentaci:\n  {}", errors.join("\n  ")).into());
     }
@@ -327,7 +349,7 @@ fn render(file: &str, md: &str) -> Rendered {
     Rendered {
         file: file.to_string(),
         title,
-        html: body,
+        html: crate::docs_check::chips(&body),
         toc,
         anchors,
         links,
