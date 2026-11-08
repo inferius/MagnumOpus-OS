@@ -758,6 +758,48 @@ Prototype and comparison of the variants: `design/prostredi-menu.html`
   system actions, recent) **[implemented]**, app actions (v2)
   **[designed]**.
 
+### Command palette rules
+
+All **[designed]** unless stated otherwise.
+
+1. **Opening**: Ctrl+K and Super, from any window; above everything except
+   system dialogs. Esc closes it, focus returns to the original window.
+2. **Scope**: default *all*; Tab switches *all / this app / system*; the
+   `>` prefix = only the active app's actions. The scope shows in the
+   search field.
+3. **Sections and order**: with no input Recent (at most 5), This app (5
+   most used), System. While typing: the active app, Windows, Apps,
+   System; at most 5 per section and "more…". Inside a section by match,
+   then by use frequency.
+4. **Search**: case and **diacritics** insensitive ("ulozit" finds
+   "Uložit"), word-start and abbreviation matches ("nzk" = "Nová záložka"),
+   keywords and synonyms from the action declaration (apps may add them).
+5. **An item** shows: icon, name, shortcut on the right, the app name for
+   app actions. A disabled action is grey with a reason (from the
+   declaration) and does not run.
+6. **Security**: the system draws the app section with the app's icon and
+   name, the System section with the trust shield. An app may not add an
+   item to the System section nor use reserved names (Shut down, Restart,
+   Sign out, Lock, Permissions...). Irreversible actions (shut down,
+   delete) need confirmation just like from the menu.
+7. **Privacy**: typed text is not sent anywhere nor logged; the Recent
+   history is per user and can be cleared and turned off.
+8. **Performance**: results within one output frame (budget by refresh
+   rate); the app's action list lives in the compositor (the app sends it
+   on change, `MENU_UPDATE`), search does not ask the app.
+9. **AI agents** use the same data (the action list with descriptions and
+   state) through the Action API, not simulated clicks into the palette.
+10. **Accessibility**: the whole palette is in the accessibility tree
+    (roles, names, result count), fully keyboard operable, a screen reader
+    announces the selected item.
+
+### Principle: few options
+
+One well thought-out default and few options. Options are mainly for
+accessibility (font size, contrast, reduced motion), the theme and small
+things like pinning the menu - not alternative environment layouts. Every
+layout option multiplies tests, documentation and support.
+
 ## Action API
 
 An application declares **actions** with typed parameters and permissions
