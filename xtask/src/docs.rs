@@ -250,6 +250,25 @@ fn render(file: &str, md: &str) -> Rendered {
                     id,
                 })
             }
+            // Obrazky (snimky v `design/snimky/`): stejny prepis cesty
+            // a kontrola existence jako u odkazu.
+            Event::Start(Tag::Image {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) => {
+                let dest = rewrite_link(&dest_url);
+                if !dest.starts_with("http") {
+                    links.push(dest.clone());
+                }
+                Event::Start(Tag::Image {
+                    link_type,
+                    dest_url: CowStr::from(dest),
+                    title,
+                    id,
+                })
+            }
             other => other,
         };
         match (&mut heading, ev) {

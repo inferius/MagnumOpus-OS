@@ -523,12 +523,14 @@ dependencies = [
 name = "compd"
 version = "0.1.0"
 dependencies = [
+ "audioproto",
  "comp",
  "font",
  "gfx",
  "guiproto",
  "inputproto",
  "libos",
+ "netproto",
  "theme",
  "venus",
  "vkcomp",
