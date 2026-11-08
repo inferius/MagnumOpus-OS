@@ -1410,3 +1410,15 @@ fn resize_drag_coalesces_configures() {
     assert_eq!(next.iter().map(|s| s.0).collect::<Vec<_>>(), vec![r0.w + 30], "posledni velikost");
     left(&mut t, false);
 }
+
+#[test]
+fn frame_period_follows_refresh_rate() {
+    let mut t = T::new();
+    assert_eq!(t.c.period(), crate::PERIOD, "vychozi 60 Hz");
+    t.c.set_refresh(120_000);
+    assert_eq!(t.c.period(), 8_333_333, "120 Hz");
+    t.c.set_refresh(240_000);
+    assert_eq!(t.c.period(), 4_166_666, "240 Hz");
+    t.c.set_refresh(0);
+    assert_eq!(t.c.period(), crate::PERIOD, "nezname = vychozi");
+}

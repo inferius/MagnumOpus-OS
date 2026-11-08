@@ -34,7 +34,7 @@ a v tabulce [Rozhodnutí 6c](#rozhodnutí-6c-odsouhlaseno) níže.
 |---|---|---|
 | 1 | vykreslování | **softwarové skládání nad virtio-gpu 2D** jako kompatibilní vrstva všude (x86_64 i aarch64); hned potom **virgl 3D** jako druhý backend kompozitoru (stejný strom vrstev) |
 | 2 | buffery | **sdílený objekt paměti (VMO)**: alokuje ho aplikace (platí její job), kompozitoru předá handle jen s právy `READ`, `MAP`, `WAIT`, `DUPLICATE`, `TRANSFER`; kreslení bez kopírování |
-| 3 | snímky | **takt kompozitoru + transakce**: termín snímku 60 Hz, aplikace dostane `Frame` jen na požádání; transakce jsou atomické i přes více oken a aplikací (synchronizovaná změna velikosti) |
+| 3 | snímky | **takt kompozitoru + transakce**: termín snímku podle obnovovací frekvence výstupu, aplikace dostane `Frame` jen na požádání; transakce jsou atomické i přes více oken a aplikací (synchronizovaná změna velikosti) |
 | 4 | písmo | **vlastní parser a rasterizér TrueType** (`libs/font`): cmap, glyf, hmtx, kern, plošné vyhlazení, bez hintingu a shapingu |
 
 ⚠️ **Rizika (řečená předem):**
@@ -52,7 +52,11 @@ a v tabulce [Rozhodnutí 6c](#rozhodnutí-6c-odsouhlaseno) níže.
   nevěří (rozměry kontroluje při vytvoření, čtení je omezené na VMO).
 - **Softwarové skládání** stojí CPU: při 1280x800 a 60 Hz je to ~250 MB/s
   zápisu. Proto se skládají jen poškozené oblasti a nic se nekreslí, když
-  se nic nemění.
+  se nic nemění. **4K při 120 Hz a víc** (celá obrazovka 4K = 33 MB na
+  snímek, 120 Hz = 4 GB/s) jde na CPU jen s malými poškozenými oblastmi
+  (kurzor, text, malé okno). Celoplošné efekty a plné překreslení patří na
+  GPU (`vkcomp`, Venus); na stroji s GPU má být skládání na GPU výchozí
+  cesta. **[navrženo]** (dnes se GPU zapíná příkazem `backend gpu`)
 - **Konzole jádra a GOP firmwaru (vyřešeno v loaderu):** firmware
   (edk2/OVMF) má ovladač `VirtioGpuDxe` a z virtio-gpu udělá také GOP. Jeho
   framebuffer je obyčejná RAM, kterou na obrazovku posílají příkazy virtio -
@@ -220,10 +224,17 @@ zpráv (limit zprávy kanálu je 64 KiB).
 <path class="ln" d="M604 64 L680 156" marker-end="url(#g4)"/><text class="m" x="650" y="100">PRESENTED txn</text>
 <text class="m" x="20" y="282">Vstup se doručuje hned (ne s taktem); skládání čeká jen na termín, ne na pomalou aplikaci.</text>
 </svg>
-<figcaption>Takt 60 Hz: aplikace kreslí po FRAME, kompozitor skládá na tiku, ovladač potvrdí zobrazení.</figcaption>
+<figcaption>Takt (zde 60 Hz): aplikace kreslí po FRAME, kompozitor skládá na tiku, ovladač potvrdí zobrazení.</figcaption>
 </figure>
 
-- **Takt:** perioda 16,67 ms. Kompozitor tiká jen tehdy, když něco čeká
+- **Takt:** perioda = 1 / obnovovací frekvence výstupu z režimu ovladače
+  (60 Hz = 16,67 ms, 120 Hz = 8,33 ms, 240 Hz = 4,17 ms); bez údaje 60 Hz.
+  Rezerva na skládání před koncem periody je čtvrtina periody (nejvýš
+  4 ms), `FRAME` nese termín a periodu. **[implementováno]** (test
+  `frame_period_follows_refresh_rate` v `libs/comp`) Odchylka: takt je
+  jeden pro celý kompozitor (zatím skládá jeden výstup); takt pro každý
+  výstup zvlášť a VRR (proměnná frekvence: snímek hned po změně, nejvýš
+  maximální frekvencí) **[navrženo]**. Kompozitor tiká jen tehdy, když něco čeká
   (poškozená oblast, animace, žádost o snímek). Nic se nemění = žádné
   probuzení.
 - **Žádost o snímek:** `COMMIT` s příznakem `FRAME` řekne „chci vědět, kdy

@@ -52,6 +52,9 @@ pub struct Pending {
     /// Ovladac zacal znovu: snimek pripojit znovu.
     pub reset: bool,
     pub presented: Option<u64>,
+    /// Obnovovaci frekvence vybraneho rezimu v mHz (0 = nevi): takt
+    /// kompozitoru.
+    pub refresh_mhz: u32,
 }
 
 /// Dalsi odpoved ovladace; udalosti a potvrzeni snimku si poznamena.
@@ -99,10 +102,12 @@ pub fn choose(ch: &Channel, outputs: &[guiproto::display::Output], deadline: u64
     };
     let c = modes::primary(&cs).ok_or(Error::NotFound)?;
     if let Some(m) = c.current() {
+        p.refresh_mhz = m.refresh_mhz;
         return Ok((c.output, m.w, m.h));
     }
     let m = c.preferred().or(c.modes.first()).ok_or(Error::NotFound)?;
-    let (w, h, _) = set_mode(ch, c.output, m.w, m.h, m.refresh_mhz, deadline, p)?;
+    let (w, h, hz) = set_mode(ch, c.output, m.w, m.h, m.refresh_mhz, deadline, p)?;
+    p.refresh_mhz = hz;
     Ok((c.output, w, h))
 }
 
@@ -141,6 +146,7 @@ impl Service {
         };
         let (output, w, h) = choose(&ch, &outputs, end, &mut p)?;
         self.install(ch, caps, output, w, h, end)?;
+        self.set_refresh(p.refresh_mhz);
         let virgl = if caps & caps::VIRGL != 0 { " (umi virgl)" } else { "" };
         let modeset = if caps & caps::MODESET != 0 { ", zmena rezimu" } else { "" };
         println!("compd: displej {w}x{h} na vystupu {output}{virgl}{modeset}");
@@ -212,6 +218,16 @@ impl Service {
         Ok(())
     }
 
+    /// Takt kompozitoru podle obnovovaci frekvence vystupu.
+    fn set_refresh(&mut self, mhz: u32) {
+        if let Some(c) = self.comp.as_mut() {
+            c.set_refresh(mhz);
+        }
+        if mhz > 0 {
+            println!("compd: takt snimku {}.{:03} Hz", mhz / 1000, mhz % 1000);
+        }
+    }
+
     /// `mode <w> <h> [mHz]`: zmena rezimu vystupu.
     pub fn change_mode(&mut self, w: u32, h: u32, refresh_mhz: u32) -> Result<(u32, u32, u32)> {
         let sc = self.screen.as_ref().ok_or(Error::NotFound)?;
@@ -221,6 +237,7 @@ impl Service {
         self.apply_pending(p);
         let (nw, nh, hz) = r?;
         self.rebuild(nw, nh, end)?;
+        self.set_refresh(hz);
         println!("compd: rezim {nw}x{nh} @ {}.{:03} Hz", hz / 1000, hz % 1000);
         Ok((nw, nh, hz))
     }
@@ -285,6 +302,7 @@ impl Service {
         };
         let Some(sc) = self.screen.as_ref() else { return };
         let r = choose(&sc.display, &outputs, end, &mut p);
+        self.set_refresh(p.refresh_mhz);
         self.apply_pending(Pending { hotplug: false, reset: false, ..p });
         match r {
             Ok((o, w, h)) => {
@@ -307,6 +325,7 @@ impl Service {
         let mut p = Pending::default();
         let r = choose(&sc.display, &[], end, &mut p);
         let (cur_out, cw, chh) = (sc.output, sc.w, sc.h);
+        self.set_refresh(p.refresh_mhz);
         self.apply_pending(Pending { hotplug: false, reset: p.reset, ..p });
         match r {
             Ok((o, w, h)) if (o, w, h) != (cur_out, cw, chh) => {

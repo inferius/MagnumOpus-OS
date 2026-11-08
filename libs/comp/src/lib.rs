@@ -53,9 +53,11 @@ pub type ClientId = u32;
 /// Id vlastnika kanalu `dialog`, `actions` nebo `inspect` (prideluje sluzba).
 pub type PeerId = u32;
 
-/// Perioda snimku (60 Hz) v ns.
+/// Vychozi perioda snimku (60 Hz) v ns, dokud ovladac nehlasi obnovovaci
+/// frekvenci vystupu (`Comp::set_refresh`).
 pub const PERIOD: u64 = 16_666_667;
-/// Rezerva pred koncem periody pro skladani (termin pro aplikace).
+/// Rezerva pred koncem periody pro skladani (termin pro aplikace) pri
+/// 60 Hz; jinak ctvrtina periody.
 pub const COMPOSE_BUDGET: u64 = 4_000_000;
 /// Jak dlouho cekat na potvrzeni `CONFIGURE` nebo na skupinu transakci.
 pub const SYNC_TIMEOUT: u64 = 200_000_000;

@@ -45,6 +45,8 @@ pub struct FrameState {
     pub(crate) groups: Vec<Group>,
     /// Kdo ceka na ustaleni (inspekce `Settle`).
     pub(crate) settle: Vec<crate::PeerId>,
+    /// Perioda snimku z obnovovaci frekvence vystupu (0 = vychozi 60 Hz).
+    pub(crate) period: u64,
 }
 
 /// Nejvic soucasnych skupin a clenu skupiny.
@@ -153,8 +155,24 @@ impl Comp {
         t.map(|v| v.max(now))
     }
 
+    /// Perioda snimku vystupu (120 Hz = 8,3 ms, 240 Hz = 4,2 ms).
+    pub fn period(&self) -> u64 {
+        if self.frame.period == 0 { PERIOD } else { self.frame.period }
+    }
+
+    /// Obnovovaci frekvence vystupu v mHz (od ovladace displeje); 0 = nevi.
+    pub fn set_refresh(&mut self, mhz: u32) {
+        // 1 s = 10^12 ns * mHz / 1000; rozumny rozsah 24-500 Hz.
+        self.frame.period = if (24_000..=500_000).contains(&mhz) { 1_000_000_000_000 / mhz as u64 } else { 0 };
+    }
+
+    /// Rezerva na skladani pred koncem periody.
+    fn compose_budget(&self) -> u64 {
+        (self.period() / 4).min(COMPOSE_BUDGET)
+    }
+
     fn next_tick_time(&self, now: u64) -> u64 {
-        let next = self.frame.last_tick + PERIOD;
+        let next = self.frame.last_tick + self.period();
         if self.frame.last_tick == 0 || next <= now { now } else { next }
     }
 
@@ -260,14 +278,15 @@ impl Comp {
         self.frame.seq += 1;
         let seq = self.frame.seq;
         let ids: Vec<ClientId> = self.clients.iter().filter(|(_, c)| c.frame_wanted).map(|(&i, _)| i).collect();
+        let (period, budget) = (self.period(), self.compose_budget());
         for id in ids {
             self.clients.get_mut(&id).unwrap().frame_wanted = false;
             self.send(
                 id,
                 ServerMsg::Frame {
                     seq,
-                    deadline: now + PERIOD - COMPOSE_BUDGET,
-                    period: PERIOD,
+                    deadline: now + period - budget,
+                    period,
                 },
             );
         }
