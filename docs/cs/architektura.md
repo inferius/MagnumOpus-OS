@@ -412,6 +412,11 @@ s capability); liší se pravidla.
   v kompozitoru pro kompatibilitu s běžnými klienty; (3) vlastní
   efektivní protokol (strom vrstev, kódování videa na GPU, přizpůsobení
   lince), případně RDP.
+- **Rozlišení**: vzdálená práce běží v samostatné relaci na virtuálním
+  výstupu, jehož rozlišení, měřítko a frekvence **řídí klient** (připojení
+  ze 4K monitoru = relace ve 4K; změna velikosti okna klienta = změna
+  rozlišení za běhu). Místní monitor tím není dotčen. Asistence sdílí
+  místní relaci, takže má místní rozlišení a klient obraz jen škáluje.
 - Agenti AI vzdálený obraz nepotřebují - používají API akcí.
 
 ## Grafika

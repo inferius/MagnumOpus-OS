@@ -432,6 +432,12 @@ with a capability); the rules differ.
   the compositor for compatibility with common clients; (3) an own
   efficient protocol (layer tree, GPU video encoding, link adaptation),
   possibly RDP.
+- **Resolution**: remote work runs in a separate session on a virtual
+  output whose resolution, scale and refresh rate **the client controls**
+  (connecting from a 4K monitor = a 4K session; resizing the client window
+  = a resolution change at run time). The local monitor is unaffected.
+  Assistance shares the local session, so it has the local resolution and
+  the client only scales the image.
 - AI agents do not need the remote image - they use the Action API.
 
 ## Graphics
