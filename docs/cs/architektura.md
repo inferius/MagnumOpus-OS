@@ -386,6 +386,34 @@ Doplněno 2026-11-09 (odsouhlaseno, **[navrženo]**):
   nevznikají; vlastní kodeky si přibalí jen aplikace, které je opravdu
   potřebují (např. střih videa).
 
+## Vzdálený přístup (odsouhlaseno 2026-11-09)
+
+Celé **[navrženo]**. Přenos obrazu a vstupu je pro oba režimy stejný
+(kompozitor posílá poškozené oblasti, vstup jde jako umělý vstup
+s capability); liší se pravidla.
+
+- **Asistence (servis)** - někdo pomáhá v **běžící relaci**: pokaždé ji
+  povolí člověk u počítače (jednorázový kód / pozvánka, časový limit);
+  výchozí jen sledování, ovládání zvlášť; trvalý indikátor „Obrazovku
+  sleduje / ovládá: …“ s okamžitým ukončením; bezpečná zkratka asistenci
+  vždy ukončí; systémové dialogy (zvýšení oprávnění, hesla) vzdáleně
+  ovládat nejde, pokud to výslovně nepovolí.
+- **Vzdálená práce** - majitel účtu na svém počítači odjinud: místo
+  souhlasu na místě **přihlášení** (heslo + druhý faktor: FIDO2 nebo
+  spárované zařízení); obrazovka u počítače je zamčená s textem „Počítač je
+  používán vzdáleně“ **bez obsahu**; převzít jde jen přihlášením (stejný
+  účet = vzdálená relace se odpojí); povolení v nastavení účtu (které účty,
+  zařízení, časy; výchozí vypnuto); audit (kdy, odkud, jak dlouho - nikdy
+  obsah) vidí majitel účtu a správce. Pracuje-li u počítače jiný uživatel,
+  běží vzdálená relace odděleně a on vidí jen to, že je připojený vzdálený
+  uživatel.
+- **Etapy**: (1) vzdálený terminál - relace shellu přes TLS (jako SSH),
+  hned užitečné pro vývoj na skutečném HW; (2) server VNC (RFB)
+  v kompozitoru pro kompatibilitu s běžnými klienty; (3) vlastní
+  efektivní protokol (strom vrstev, kódování videa na GPU, přizpůsobení
+  lince), případně RDP.
+- Agenti AI vzdálený obraz nepotřebují - používají API akcí.
+
 ## Grafika
 
 > Podrobný návrh a stav: [Grafika a okna (GUI)](gui.md).

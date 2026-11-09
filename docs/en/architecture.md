@@ -404,6 +404,36 @@ Added 2026-11-09 (agreed, **[designed]**):
   not arise; only apps that really need their own codecs (e.g. video
   editing) bundle them.
 
+## Remote access (agreed 2026-11-09)
+
+All **[designed]**. Image and input transport is the same for both modes
+(the compositor sends damaged regions, input arrives as synthetic input
+with a capability); the rules differ.
+
+- **Assistance (support)** - someone helps in the **running session**:
+  every time it is allowed by the person at the computer (one-time code /
+  invitation, time limit); view only by default, control separately; a
+  permanent indicator "Screen viewed / controlled by: …" with immediate
+  termination; the secure attention shortcut always ends assistance;
+  system dialogs (elevation, passwords) cannot be controlled remotely
+  unless explicitly allowed.
+- **Remote work** - the account owner on their own computer from
+  elsewhere: instead of on-site consent, **sign-in** (password + second
+  factor: FIDO2 or a paired device); the local screen is locked with "This
+  computer is being used remotely" **without content**; taking over only by
+  signing in (same account = the remote session disconnects); enabled in
+  account settings (which accounts, devices, times; off by default); the
+  audit (when, from where, how long - never content) is visible to the
+  account owner and the administrator. If another user works at the
+  computer, the remote session runs separately and they only see that a
+  remote user is connected.
+- **Stages**: (1) remote terminal - a shell session over TLS (like SSH),
+  immediately useful for development on real HW; (2) a VNC (RFB) server in
+  the compositor for compatibility with common clients; (3) an own
+  efficient protocol (layer tree, GPU video encoding, link adaptation),
+  possibly RDP.
+- AI agents do not need the remote image - they use the Action API.
+
 ## Graphics
 
 > Detailed design and status: [Graphics and windows (GUI)](gui.md).
