@@ -186,9 +186,11 @@ fn command(
         .arg("-chardev")
         .arg(format!("stdio,id=serial0,logfile={}", serial_log.display()))
         .args(["-serial", "chardev:serial0"]);
-    // Test zaznamu padu: jadro po panice restartuje a QEMU musi nabehnout
-    // znovu (se stejnou RAM).
-    if !opts.crash_test {
+    // Testy: restart = konec QEMU (test napajeni to tak pozna). Vyjimka je
+    // test zaznamu padu: jadro po panice restartuje a QEMU musi nabehnout
+    // znovu (se stejnou RAM). Bezny beh (`run`) restartuje jako skutecny
+    // pocitac; beh bez okna (napr. test USB) zustava s `-no-reboot`.
+    if (opts.test || opts.headless) && !opts.crash_test {
         cmd.arg("-no-reboot");
     }
     if opts.headless {
