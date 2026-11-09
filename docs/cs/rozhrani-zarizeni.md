@@ -50,17 +50,27 @@ Navazuje na `driverkit`; nový framework nevzniká, rozšiřuje se stávající.
    `inputproto` a protokol displeje existují **[implementováno]**, každý
    ale jinak.
 3. **Asynchronní požadavky a události** se společnou hlavičkou: id
-   požadavku, třída, verze, výsledek. Protokol určuje chování při timeoutu,
-   odpojení zařízení a restartu ovladače (nevyřízené požadavky dostanou
-   `SERVICE_RESTARTED` nebo se zopakují, podle druhu).
+   požadavku, **generace spojení** (zvýší se s každým restartem ovladače),
+   třída, verze, výsledek. Výsledek rozlišuje **dokončeno**, **neprovedeno**
+   a **výsledek neznámý** (ovladač mohl operaci provést a spadnout před
+   potvrzením). Každá operace v protokolu třídy určuje, zda je **bezpečně
+   opakovatelná** (idempotentní, např. čtení bloku) a zda jde **její
+   výsledek dohledat** (např. stav zápisu podle ID). Klient po restartu
+   (nová generace) opakuje jen opakovatelné operace, ostatní dohledá,
+   a co dohledat nejde, vrátí volajícímu jako „výsledek neznámý“ - nikdy
+   tiché opakování s rizikem dvojího účinku.
 4. **Vyjednání schopností a verzí**: ovladač ohlásí funkce, formáty
    a limity. Rozšíření mají vlastní ID a verzi; nepodporované rozšíření
    má jednoznačný výsledek (`NOT_SUPPORTED`), ne tiché ignorování.
    Dnes: jen bity schopností displeje (`VSYNC`, `HOTPLUG`, `MULTI`).
 5. **Datová cesta bez zbytečných kopií**: velká data přes sdílené buffery
-   a handly. Rozhraní definuje vlastnictví bufferu, synchronizaci (ploty,
-   pořadí) a okamžik opětovného použití. Dnes: disky kopírují data
-   zprávou kanálu (zapsaná odchylka od návrhu).
+   a handly. Rozhraní definuje **celý životní cyklus bufferu**: kdo ho
+   přiděluje (a z jaké paměti), kdo do něj smí zapisovat a kdy, jak se
+   označí dokončení zápisu (plot), kdy ho smí převzít zařízení (displej,
+   disk), kdy je bezpečné ho znovu použít (plot uvolnění), a jeho formát,
+   rozložení v paměti (řádek, zarovnání, dlaždice) a kompatibilitu mezi
+   zařízením, které kreslí, a zařízením, které zobrazuje. Dnes: disky
+   kopírují data zprávou kanálu (zapsaná odchylka od návrhu).
 6. **Připojení manifestem**: běžný ovladač = kód + manifest + testy, bez
    úprav jádra a bez zvláštních větví ve službách. Dnes: manifest
    **[implementováno]**, ale devmgr má vestavěnou tabulku ovladačů a init
@@ -90,8 +100,18 @@ Proto podle druhu paměti:
 | Kde je obraz | Cesta | Kopie |
 |---|---|---|
 | systémová RAM, kterou karta umí zobrazit (Intel integrovaná přes GGTT, virtio-gpu `SET_SCANOUT_BLOB`) | kompozitor kreslí přímo do bufferu ovladače, `PRESENT` = přepnutí | žádná |
-| paměť karty (bochs-display, Intel DG2, `fbdisplay`) | skládání v RAM, kopie poškozených obdélníků | jedna; ovladač hlásí stáří bufferu (buffer age), odpadne kopie z minulého snímku |
-| skládání na GPU (`libs/vkcomp`) | GPU kreslí rovnou do zobrazovaného obrázku | žádná |
+| paměť karty (bochs-display, Intel DG2, `fbdisplay`) | skládání v RAM, kopie poškozených obdélníků | jedna kopie; viz stáří bufferu níže |
+| skládání na GPU (`libs/vkcomp`) | GPU kreslí do bufferu způsobilého k zobrazení, který displej právě nečte; po plotu dokončení se přepne | žádná |
+
+**Stáří bufferu (buffer age)** samo opravu staršího obsahu neodstraní:
+při střídání dvou bufferů obsahuje právě získaný zadní buffer obraz starý
+dva snímky. Musí se do něj promítnout **všechny oblasti změněné od jeho
+posledního použití** (sjednocení poškození posledních N snímků, kde N je
+stáří) - překreslením nebo kopií. Příklad: snímek 1 změní levou část,
+snímek 2 pravou; do bufferu pro snímek 2 musí jít levá i pravá, jinak se
+levá vrátí do starého stavu. Stáří jen určuje, kolik snímků poškození
+sjednotit (neznámé stáří = celý buffer); úspora je v tom, že se
+nekopíruje nic, co se nezměnilo.
 
 Ovladač nabídne kompozitoru seznam svých bufferů s druhem paměti
 a kompozitor zvolí cestu. Rozhraní displeje tím zůstane jedno pro CPU
@@ -99,8 +119,13 @@ i GPU skládání.
 
 ## Vrstva 2: systémové služby pro aplikace
 
-Aplikace nikdy nedostane capability k ovladači. Dostane jen kanál ke
-službě, a to podle oprávnění v manifestu a souhlasu uživatele. Služba:
+Aplikace nikdy nedostane capability k ovladači (registry, neomezené DMA).
+Dostane kanál ke službě podle oprávnění v manifestu a souhlasu uživatele.
+**Služba nesmí být úzké hrdlo**: ověří oprávnění a pak aplikaci předá
+**omezenou relaci** - sdílené buffery a frontu příkazů s pevnými mezemi
+(formát, velikost, rychlost) - a datová cesta jde bez kopírování přes
+službu (grafika, video, zvuk). Služba drží jen řízení (otevření, změna
+parametrů, odebrání oprávnění = zneplatnění relace). Služba:
 
 - **rozhoduje o povolení** (jednou, vždy, jen teď) a ukazuje **indikátor**
   (svítí kamera, běží mikrofon, poloha),

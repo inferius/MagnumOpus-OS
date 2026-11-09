@@ -51,19 +51,30 @@ Builds on `driverkit`; no new framework, the existing one is extended.
    `inputproto` and the display protocol exist **[implemented]**, but each
    is different.
 3. **Asynchronous requests and events** with a common header: request id,
-   class, version, result. The protocol defines the behaviour on timeout,
-   device detach and driver restart (pending requests get
-   `SERVICE_RESTARTED` or are retried, depending on the kind).
+   **connection generation** (incremented with every driver restart),
+   class, version, result. The result distinguishes **completed**, **not
+   performed** and **outcome unknown** (the driver may have performed the
+   operation and crashed before acknowledging). Every operation in the
+   class protocol states whether it is **safely retryable** (idempotent,
+   e.g. reading a block) and whether **its outcome can be looked up**
+   (e.g. the state of a write by ID). After a restart (new generation) the
+   client retries only retryable operations, looks up the others, and what
+   cannot be looked up is returned to the caller as "outcome unknown" -
+   never a silent retry risking a double effect.
 4. **Capability and version negotiation**: the driver announces features,
    formats and limits. Extensions have their own id and version; an
    unsupported extension has a clear result (`NOT_SUPPORTED`), not silent
    ignoring. Today: only the display capability bits (`VSYNC`, `HOTPLUG`,
    `MULTI`).
 5. **A data path without needless copies**: large data through shared
-   buffers and handles. The interface defines buffer ownership,
-   synchronization (fences, ordering) and when a buffer may be reused.
-   Today: disks copy data in channel messages (a recorded deviation from
-   the design).
+   buffers and handles. The interface defines **the whole buffer life
+   cycle**: who allocates it (and from which memory), who may write to it
+   and when, how completion of writing is signalled (a fence), when the
+   device (display, disk) may take it over, when it is safe to reuse
+   (release fence), and its format, memory layout (stride, alignment,
+   tiling) and compatibility between the rendering and the displaying
+   device. Today: disks copy data in channel messages (a recorded
+   deviation from the design).
 6. **Attach by manifest**: an ordinary driver = code + manifest + tests,
    without kernel changes or special branches in services. Today: the
    manifest **[implemented]**, but devmgr has a built-in driver table and
@@ -94,8 +105,18 @@ two orders of magnitude slower than RAM. So by memory kind:
 | Where the image lives | Path | Copies |
 |---|---|---|
 | system RAM the card can scan out (Intel integrated through the GGTT, virtio-gpu `SET_SCANOUT_BLOB`) | the compositor draws directly into the driver's buffer, `PRESENT` = flip | none |
-| video memory (bochs-display, Intel DG2, `fbdisplay`) | compose in RAM, copy the damaged rectangles | one; the driver reports the buffer age, removing the copy of the previous frame |
-| GPU compositing (`libs/vkcomp`) | the GPU draws straight into the scanout image | none |
+| video memory (bochs-display, Intel DG2, `fbdisplay`) | compose in RAM, copy the damaged rectangles | one copy; see buffer age below |
+| GPU compositing (`libs/vkcomp`) | the GPU draws into a scanout-capable buffer the display is not currently reading; it is flipped after the completion fence | none |
+
+**Buffer age** alone does not remove the need to repair older content:
+when alternating two buffers, the back buffer just acquired holds an
+image two frames old. **All regions changed since its last use** must be
+brought into it (the union of the damage of the last N frames, N being
+the age) - by redrawing or copying. Example: frame 1 changes the left
+part, frame 2 the right; the buffer for frame 2 must get both left and
+right, otherwise the left reverts to the old state. The age only says
+how many frames of damage to unite (unknown age = the whole buffer); the
+saving is that nothing unchanged is copied.
 
 The driver offers the compositor a list of its buffers with their memory
 kind and the compositor picks the path. The display interface stays one
@@ -103,9 +124,15 @@ for CPU and GPU compositing.
 
 ## Layer 2: system services for applications
 
-An application never gets a capability to a driver. It only gets a
-channel to a service, according to the permission in its manifest and the
-user's consent. The service:
+An application never gets a capability to a driver (registers,
+unrestricted DMA). It gets a channel to a service according to the
+permission in its manifest and the user's consent. **The service must not
+become a bottleneck**: it checks the permission and then hands the app a
+**restricted session** - shared buffers and a command queue with fixed
+limits (format, size, rate) - and the data path does not copy through the
+service (graphics, video, audio). The service keeps only control (open,
+parameter changes, revoking permission = invalidating the session). The
+service:
 
 - **decides on permission** (once, always, only now) and shows an
   **indicator** (camera on, microphone active, location),
