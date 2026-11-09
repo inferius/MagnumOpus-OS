@@ -353,6 +353,39 @@ mobilu, bez závislostního pekla linuxových balíčkovačů.
 - Windows aplikace dostanou totéž: instalace do vlastního adresáře s
   virtuálním `C:`, odinstalace = smazání.
 
+
+Doplněno 2026-11-09 (odsouhlaseno, **[navrženo]**):
+
+- **Žádné instalační skripty.** Při instalaci se nespouští žádný kód
+  aplikace. Vše je deklarace v manifestu a zaregistruje ji systém: ikona
+  v liště a spouštěči, přípony souborů, akce do palety a menu, položky
+  kontextových nabídek, `window.instances`.
+- **Víc vstupních bodů v jednom balíčku**: okna (GUI), **příkazy
+  terminálu** a služby na pozadí. Příkazy terminálu mají stejná metadata
+  jako vestavěné příkazy shellu (popis, argumenty, příklady), takže
+  fungují `help`, doplňování Tabem i paleta; v terminálu se objeví samy
+  (žádné ruční `PATH` ani `sudo`), s ikonou aplikace v nápovědě.
+  Oprávnění jsou společná pro balíček, nebo zúžená pro jednotlivý vstupní
+  bod.
+- **Data aplikace**: zapisovatelná data uživatele v
+  `/home/<uživatel>/apps/<id>/`, mezipaměť zvlášť (systém ji smí kdykoli
+  smazat), sdílená data pro všechny uživatele jen s oprávněním. Při
+  aktualizaci aplikace FS udělá snímek jejích dat; návrat aplikace vrátí
+  program i data do stejného bodu (žádná nová data ve starém programu).
+  Převod formátu dat na novou verzi dělá aplikace sama.
+- **Běhová prostředí (runtime)** pro velké společné části (Wine, sady
+  knihoven): verzované podle **hlavní verze** (např. `wine 10`),
+  aplikace žádá kompatibilní rozsah. Systém drží jen poslední opravnou
+  verzi každé hlavní verze, bezpečnostní opravy dostanou všechny aplikace
+  najednou, nepoužívaná hlavní verze se smaže. Bloky, které si aplikace
+  přibalí, FS deduplikuje.
+- **Multimédia jako systémová služba**: FFmpeg je součást systému
+  (izolovaný proces za službou přehrávání a dekódování, viz
+  [Jednotná rozhraní](rozhrani-zarizeni.md)), aplikace ho nelinkují
+  a používají stabilní API služby. Různé verze FFmpegu u aplikací tak
+  nevznikají; vlastní kodeky si přibalí jen aplikace, které je opravdu
+  potřebují (např. střih videa).
+
 ## Grafika
 
 > Podrobný návrh a stav: [Grafika a okna (GUI)](gui.md).

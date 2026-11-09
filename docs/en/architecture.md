@@ -372,6 +372,38 @@ sandbox, without the dependency hell of Linux package managers.
 - Windows applications get the same: installed into their own directory
   with a virtual `C:`, uninstall = delete.
 
+
+Added 2026-11-09 (agreed, **[designed]**):
+
+- **No install scripts.** No app code runs during installation.
+  Everything is a declaration in the manifest that the system registers:
+  the icon in the bar and launcher, file types, palette and menu actions,
+  context menu items, `window.instances`.
+- **Several entry points in one package**: windows (GUI), **terminal
+  commands** and background services. Terminal commands have the same
+  metadata as the shell's built-in commands (description, arguments,
+  examples), so `help`, Tab completion and the palette work; they appear
+  in the terminal by themselves (no manual `PATH` or `sudo`), with the app
+  icon in help. Permissions are shared by the package or narrowed per
+  entry point.
+- **App data**: the user's writable data in `/home/<user>/apps/<id>/`,
+  the cache separately (the system may delete it any time), data shared
+  by all users only with a permission. On an app update the FS snapshots
+  its data; rolling back the app returns both program and data to the same
+  point (no new data in the old program). Converting the data format to a
+  new version is the app's job.
+- **Runtimes** for big shared parts (Wine, library sets): versioned by
+  **major version** (e.g. `wine 10`), an app asks for a compatible range.
+  The system keeps only the latest patch release of each major version,
+  security fixes reach all apps at once, an unused major version is
+  removed. Blocks that apps bundle are deduplicated by the FS.
+- **Multimedia as a system service**: FFmpeg is part of the system (an
+  isolated process behind the playback and decoding service, see
+  [Unified interfaces](device-interfaces.md)), apps do not link it and use
+  the service's stable API. Different FFmpeg versions per app therefore do
+  not arise; only apps that really need their own codecs (e.g. video
+  editing) bundle them.
+
 ## Graphics
 
 > Detailed design and status: [Graphics and windows (GUI)](gui.md).
