@@ -783,6 +783,19 @@ the web, JSON and Unixes; CRLF would mean conversions everywhere else.
 6. **Structured shell output** (tables, records) carries no line endings;
    they appear only when a value is turned into text for display.
 
+### Text encoding
+
+The text encoding of the whole system is **UTF-8 without a BOM** (Rust,
+file names - normalized to NFC, protocols, logs, configuration, terminal).
+**[implemented]** for names and internal text, reading rules
+**[designed]**:
+
+- **Tolerant reading**: a BOM at the start of UTF-8 is skipped; UTF-16 (by
+  BOM, e.g. files from Windows) is converted when read; invalid bytes are
+  shown as the replacement character `U+FFFD`, nothing crashes.
+- **Files are never converted silently**: the editor keeps the encoding of
+  the opened file; conversion only on request (`convert`).
+
 ## Code conventions
 
 See [building.md](building.md#code-conventions). Code comments are in Czech,

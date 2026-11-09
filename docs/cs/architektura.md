@@ -743,6 +743,19 @@ a Unixů; CRLF by znamenal převody všude jinde.
 6. **Strukturovaný výstup shellu** (tabulky, záznamy) konce řádků nenese;
    vznikají až při převodu hodnoty na text pro zobrazení.
 
+### Kódování textu
+
+Kódování textu v celém systému je **UTF-8 bez BOM** (Rust, jména souborů -
+normalizovaná na NFC, protokoly, logy, konfigurace, terminál).
+**[implementováno]** pro jména a vnitřní text, pravidla čtení
+**[navrženo]**:
+
+- **Tolerantní čtení**: BOM na začátku UTF-8 se přeskočí; UTF-16 (podle
+  BOM, např. soubory z Windows) se při čtení převede; neplatné bajty se
+  zobrazí náhradním znakem `U+FFFD`, nic nespadne.
+- **Soubory se nikdy tiše nepřevádějí**: editor zachová kódování
+  otevřeného souboru; převod jen na požádání (`convert`).
+
 ## Konvence kódu
 
 Viz [sestaveni.md](sestaveni.md#konvence-kódu). Komentáře v kódu česky,
