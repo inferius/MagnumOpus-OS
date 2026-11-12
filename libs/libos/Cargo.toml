@@ -5,10 +5,26 @@ edition.workspace = true
 license.workspace = true
 description = "Knihovna pro programy v userspace: syscally, objekty, start procesu"
 
+[features]
+# Vlastni behove prostredi (vstupni bod `_start`, heap, panic handler) pro
+# programy no_std. Aplikace se std ho nemaji (dodava ho std pres osrt):
+# knihovny proto zavisi na libos s `default-features = false`.
+default = ["rt"]
+rt = ["dep:sizeclass", "dep:linked_list_allocator"]
+rustc-dep-of-std = ["dep:core", "dep:alloc", "abi/rustc-dep-of-std", "elf/rustc-dep-of-std", "initfs/rustc-dep-of-std", "tz/rustc-dep-of-std"]
+
 [dependencies]
+# Preklad jako zavislost std (cil magnumopus, viz docs/cs/rust-std.md).
+core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
+alloc = { version = "1.0.0", optional = true, package = "rustc-std-workspace-alloc" }
 abi.workspace = true
 elf.workspace = true
 initfs.workspace = true
 tz.workspace = true
-sizeclass = { path = "../sizeclass" }
-linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"] }
+# Heap vlastniho runtime (feature `rt`).
+sizeclass = { path = "../sizeclass", optional = true }
+linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"], optional = true }
+
+[lints.rust]
+# Cil aplikaci se std (third_party/rust-std/targets).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

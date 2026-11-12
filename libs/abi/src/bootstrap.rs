@@ -70,6 +70,9 @@ pub mod kind {
     /// a kopie RSDP, oblasti pameti firmwaru s tabulkami ([`crate::acpi`]).
     /// Init ho preda `acpid`.
     pub const ACPI: u32 = 8;
+    /// Objekt pameti (jen pro cteni) s blokem parametru procesu
+    /// ([`crate::params`]: argumenty, prostredi, pracovni adresar).
+    pub const PARAMS: u32 = 9;
 }
 
 pub const HEADER_SIZE: usize = core::mem::size_of::<Header>();

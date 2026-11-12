@@ -19,6 +19,7 @@ pub mod error;
 pub mod job;
 pub mod limits;
 pub mod object;
+pub mod params;
 pub mod process;
 pub mod sched;
 pub mod syscall;
@@ -30,5 +31,7 @@ pub use object::{Handle, ObjectType, Rights, Signals};
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod params_tests;
 #[cfg(test)]
 mod time_tests;

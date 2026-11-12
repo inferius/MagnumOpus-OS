@@ -47,7 +47,7 @@ struct Inner {
 /// Spojeni se sluzbou, ktere prezije jeji restart.
 pub struct Conn {
     name: &'static str,
-    inner: spin::Mutex<Inner>,
+    inner: libos::sync::Mutex<Inner>,
 }
 
 impl Conn {
@@ -56,7 +56,7 @@ impl Conn {
     pub fn new(name: &'static str, channel: Channel, lease: Option<Channel>) -> Self {
         Self {
             name,
-            inner: spin::Mutex::new(Inner {
+            inner: libos::sync::Mutex::new(Inner {
                 channel: Some(channel),
                 lease,
                 generation: 0,

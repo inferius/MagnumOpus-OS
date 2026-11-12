@@ -39,9 +39,13 @@ mod mapping;
 mod port;
 mod process;
 pub mod random;
-mod rt;
+pub mod params;
+pub mod rt;
+#[cfg(feature = "rt")]
+mod rt_own;
 pub mod sched;
 pub mod spawn;
+pub mod sync;
 pub mod sys;
 pub mod thread;
 pub mod time;
@@ -65,7 +69,9 @@ pub use vmo::Vmo;
 pub use wait::{wait_many, wait_one};
 
 /// Definuje vstupni funkci programu: `fn main(startup: Startup) -> i64`.
-/// Navratova hodnota je navratovy kod procesu (0 = uspech).
+/// Navratova hodnota je navratovy kod procesu (0 = uspech). Jen pro
+/// programy `no_std` (na cili magnumopus je vstupni bod v `std`).
+#[cfg(feature = "rt")]
 #[macro_export]
 macro_rules! entry {
     ($main:path) => {
