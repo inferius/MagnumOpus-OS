@@ -164,14 +164,13 @@ fn create_home(fs: &FsClient, uid: u64, name: &str) -> Result<()> {
     }
     let path = format!("{HOME_DIR}/{name}");
     // Existujici domov (opakovane zalozeni po vypadku) jen kdyz uz patri
-    // tomuto uzivateli. Nejdriv `stat`: `create_dataset` na existujici
-    // ceste fsd nechava rozpracovanou transakci (pristi commit pak vraci
-    // IO_ERROR; nahlaseno vlaknu FS).
-    match fs.stat(&path) {
-        Ok(st) if st.owner != uid => return Err(Error::AlreadyExists),
+    // tomuto uzivateli.
+    match fs.create_dataset(&path) {
         Ok(_) => {}
-        Err(Error::NotFound) => {
-            fs.create_dataset(&path)?;
+        Err(Error::AlreadyExists) => {
+            if fs.stat(&path)?.owner != uid {
+                return Err(Error::AlreadyExists);
+            }
         }
         Err(e) => return Err(e),
     }
