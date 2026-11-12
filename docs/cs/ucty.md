@@ -137,9 +137,9 @@ přihlášení se hodnota se slabšími parametry přepočítá.
 
 | Profil | Paměť `m` | Průchody `t` | Vlákna `p` | Čas (změřeno) | Kdy |
 |---|---|---|---|---|---|
-| `qemu` | 8 MiB | 2 | 1 | hostitel 5 ms (nativně); celé přihlášení v QEMU TCG (x86_64 i aarch64, vč. dvou zápisů DB s `fsync`) 0,1-0,3 s | `cargo xtask run`, `cargo xtask test` |
-| `hw` (výchozí) | 64 MiB | 3 | 1 | hostitel 70 ms (Ryzen/Core 2024, nativně) | skutečné PC |
-| `hw` po kalibraci (plán) | 64 MiB | 3-10 | 1 | cíl 250-500 ms | instalace změří a zvýší `t` |
+| `qemu` | 8 MiB | 2 | 1 | hostitel 5 ms (release, `52d2ebe`); celé přihlášení v QEMU TCG (debug, `52d2ebe`, x86_64 i aarch64, vč. dvou zápisů DB s `fsync`) 0,1-0,3 s | `cargo xtask run`, `cargo xtask test` |
+| `hw` (výchozí) | 64 MiB | 3 | 1 | hostitel 70 ms (release, `52d2ebe`, PC z roku 2024) | skutečné PC |
+| `hw` po kalibraci (plán) | 64 MiB | 3-10 | 1 | cíl čtvrt až půl sekundy | instalace změří a zvýší `t` |
 
 Srovnání: OWASP doporučuje nejméně 19 MiB a `t=2`, RFC 9106 druhou
 volbu 64 MiB a `t=3`. Paměť je hlavní ochrana proti hádání na grafických
@@ -149,7 +149,8 @@ ověření proto běží **jedno po druhém** (frontou), aby se paměť nezdvoji
 
 Implementace: crate `argon2` (RustCrypto), žádná vlastní kryptografie.
 V ladicím buildu se `argon2`, `blake2` a `accounts` překládají
-s optimalizací (`Cargo.toml`): bez ní trvalo přihlášení v QEMU ~2 s.
+s optimalizací (`Cargo.toml`): bez ní trvalo přihlášení v QEMU ~2 s
+(debug, `52d2ebe`, TCG).
 
 ### PIN vázaný na zařízení
 
@@ -284,22 +285,81 @@ dohromady, PIN navíc svých 5 pokusů):
      1 000 000) - relaci systému ani servisního účtu nevyrazí, ani když
      o ni accountd požádá,
   2. vyrazí relaci FS `CONNECT_AS(uid, groups, profil.user_mounts())`,
-  3. uloží si kanál self relace (dostane ho nastavení v relaci).
-  - *Další krok* (s plochou a taskd): **job relace** se všemi procesy
-    uživatele (termd, plocha, aplikace) s touto identitou, aplikace
-    s užšími relacemi podle manifestu (`app_mounts`), kanály taskd a GUI
-    se stejnou identitou a recept relace v lístku (obnova po pádu fsd).
-    Terminál dnes dostává relaci FS initu (systém) - přepnutí na relaci
-    přihlášeného uživatele patří ke stejnému kroku.
-- **Odhlášení** (`LOGOUT`): init zahodí relaci FS a kanál self (s jobem
-  relace ukončí i procesy uživatele - teprve to zavře i kanály, které si
-  procesy relace samy otevřely přes `CONNECT`). Šifrovaný
-  domov se zamkne (`UNLOAD_KEY`).
-- **Zamčení obrazovky** (`LOCK`, nebo Ctrl+Alt+Delete -> Zamknout):
-  procesy běží dál, kompozitor ukáže zamykací obrazovku v systémové vrstvě
-  a vstup jde jen do ní. Odemknout jde **jen stejný účet** (`UNLOCK`
-  s ověřením) nebo odhlášení. Při zamčení se klíč domova z paměti
-  nemaže (procesy s domovem pracují dál).
+  3. uloží si kanál self relace (dostane ho nastavení v relaci),
+  4. založí **job relace** a pošle událost „otevřena“ smyčce supervisoru
+     (`session::EVENTS`). **[implementováno]**
+- **Plocha až po přihlášení** **[implementováno]** (`user/init/src/desktop.rs`):
+  aplikace plochy (terminál, správce úloh, ukázka) init spustí teprve pro
+  přihlášenou relaci, v jejím jobu. Okno terminálu relace dostane termd
+  s **relací FS přihlášeného uživatele** (dřív relace initu = systém)
+  a termd i jeho `shsess` běží v jobu relace. Lišta spouští aplikace do
+  aktivní (nejnovější odemčené) relace; bez přihlášení nespustí nic.
+  Kompozitor dostává `session open|lock|unlock|close` (skryje nebo ukáže
+  přihlašovací obrazovku).
+- **Základní práva lidí na FS:** skupina `uzivatele` smí vypsat kořen
+  (vidí jen položky, ke kterým má právo), `/home` jen projít a v `/tmp`
+  a `/tmp/.aside` (klony shellu) zakládat; grant platí jen pro adresář
+  a nedědí se, takže cizí soubory v `/tmp` nevidí.
+- Recept relace v lístku (obnova po pádu fsd), aplikace s užšími relacemi
+  podle manifestu (`app_mounts`) a kanál taskd s identitou relace
+  **[navrženo]**.
+- **Odhlášení** (`LOGOUT`): init zahodí relaci FS a kanál self, ukončí
+  aplikace a termd relace a kompozitor ukáže přihlášení. Šifrovaný domov
+  se zamkne (`UNLOAD_KEY`). ⚠️ Procesy, které si relace spustila sama
+  (`shsess` od termd, aplikace spuštěné aplikací), ukončí až syscall
+  `JOB_KILL` (zabije celý job relace) **[navrženo]**; do té doby je init
+  ukončí jen u procesů, které spustil on.
+- **Zamčení obrazovky** **[implementováno]** (`LOCK` z relace, nebo
+  Ctrl+Alt+Delete -> Zamknout = `LOGIN_LOCK` na kanálu login): procesy
+  běží dál, kompozitor ukáže zamykací obrazovku a vstup jde jen do ní.
+  Odemknout jde **jen stejný účet** (`UNLOCK` s ověřením) nebo odhlášení.
+  Při zamčení se klíč domova z paměti nemaže (procesy s domovem pracují
+  dál).
+
+### Přihlašovací a zamykací obrazovka
+
+**[implementováno]** Podle `design/prihlaseni.html`. Kreslí ji kompozitor
+(`libs/comp/src/greeter.rs`) přes celou obrazovku: okna pod ní se vůbec
+nekreslí (ani v GPU cestě), lišta také ne. Bere jen **fyzický vstup**
+(umělý vstup, např. od agenta, se zahodí) a prvních 0,3 sekundy po zobrazení
+vstup ignoruje.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Prihlasovaci obrazovka a jeji kanaly">
+<defs><marker id="uc5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="160" height="60" rx="6"/><text class="t b" x="90" y="45" text-anchor="middle">klávesnice, myš</text><text class="m" x="90" y="64" text-anchor="middle">jen fyzický vstup</text>
+<rect class="acc" x="240" y="20" width="220" height="110" rx="6"/><text class="t b" x="350" y="45" text-anchor="middle">compd: obrazovka</text><text class="m" x="350" y="66" text-anchor="middle">výběr účtu, metoda,</text><text class="m" x="350" y="82" text-anchor="middle">fráze, zpomalení s odpočtem</text><text class="m" x="350" y="98" text-anchor="middle">okna pod ní se nekreslí</text><text class="m" x="350" y="114" text-anchor="middle">asynchronně (snímek nečeká)</text>
+<rect class="box" x="560" y="20" width="190" height="60" rx="6"/><text class="t b" x="655" y="45" text-anchor="middle">accountd</text><text class="m" x="655" y="64" text-anchor="middle">kanál login</text>
+<rect class="ok" x="560" y="150" width="190" height="70" rx="6"/><text class="t b" x="655" y="175" text-anchor="middle">init</text><text class="m" x="655" y="194" text-anchor="middle">relace, job, plocha</text><text class="m" x="655" y="210" text-anchor="middle">session open|lock|close</text>
+<path class="ln" d="M170 50 L238 50" marker-end="url(#uc5)"/>
+<path class="ln" d="M460 45 L558 45" marker-end="url(#uc5)"/><text class="m" x="509" y="38" text-anchor="middle">AUTH, UNLOCK</text>
+<path class="ln" d="M655 80 L655 148" marker-end="url(#uc5)"/><text class="m" x="700" y="118">OPEN_SESSION</text>
+<path class="ln" d="M558 190 L350 190 L350 132" marker-end="url(#uc5)"/><text class="m" x="455" y="183" text-anchor="middle">session ... (skrýt, zamknout)</text>
+</svg>
+<figcaption>Obrazovka jen sbírá tajemství; o přihlášení rozhoduje accountd a o tom, co je vidět, init.</figcaption>
+</figure>
+
+- Kompozitor dostane od initu kanál **`login`** ke službě účtů
+  (`guiproto::control::LOGIN`) a stav relací (`session open <id> <uid>
+  <jméno>`, `session lock|unlock|close <id>`). Obrazovka je vidět, když
+  není žádná odemčená relace: bez relace přihlášení, se zamčenou relací
+  zamykací obrazovka (hodiny, datum, jen účet relace).
+- Metody podle účtu: **PIN** (výchozí, má-li ho účet; jen číslice),
+  **heslo**, **bezpečnostní klíč** (pole = PIN klíče; „Dotkni se
+  bezpečnostního klíče“), **zapomenuté heslo** = obnovovací klíč. Tab
+  přepíná metodu, šipky účet, Enter ověří, Esc smaže pole.
+- Bezpečnostní fráze účtu se ukáže až po jeho výběru (podvržená obrazovka
+  ji nezná). Odpověď na chybu: „Nesprávné heslo“, zbývající pokusy PINu,
+  zablokovaný PIN, odpočet zpomalení („Další pokus za 30 s“).
+- compd posílá požadavky **asynchronně** (`user/compd/src/login.rs`):
+  Argon2id ani dotek klíče nezdrží snímek. Heslo se po zakódování ve
+  zprávě vynuluje.
+- Testy na hostiteli: `cargo test -p comp greeter` (přihlášení PINem,
+  umělý vstup, výběr účtu a metody, zpomalení, zamčení a odemčení jen
+  stejným účtem, okna pod obrazovkou se nekreslí, odhlášení); snímky
+  `target/comp-greeter.png` a `target/comp-greeter-zamceno.png`.
+- ⚠️ První start bez účtu: obrazovka nemá koho nabídnout; založení
+  prvního účtu (kanál `setup`) patří instalátoru **[navrženo]**.
 - Více současných relací (rychlé přepnutí uživatele) protokol umí (číslo
   relace); obrazovka přepnutí přijde s plochou.
 - Pád accountd: relace běží dál (drží je init). Supervisor accountd
@@ -358,6 +418,26 @@ malware v relaci nemůže měnit celý počítač.
 - První účet z instalace má roli; může ji dát jiným a odebrat (ne
   poslední). Do auditu (`/db/audit`) se zapíše každý úkon: kdo žádal,
   kdo potvrdil, co, zda v režimu správy.
+
+**Zavedení** **[implementováno]** (`user/accountd/src/admin.rs`,
+dialog `DialogKind::Elevate` v `libs/comp`): kompozitor dá službě účtů
+kanál `dialog` (init ho předá i nové instanci po pádu kompozitoru).
+`ELEVATE` z relace pošle frázi potvrzujícího a dialog s nadpisem
+„<aplikace> chce změnit systém“, skutečnými parametry úkonu a řádkem
+„Potvrzuje: <jméno> (smí spravovat tento počítač)“; pole přijme heslo
+nebo PIN (PIN, jsou-li to jen číslice a účet PIN má). Ověření běží
+stejně jako přihlášení (zpomalení, počítadlo). Úkony účtů (1-4) provede
+accountd hned a odpoví výsledkem (u `ACCOUNT_CREATE` uid); úkony jiných
+služeb (5-15) dostanou **grant**: token 16 B, 60 s, jednou, jen na tytéž
+parametry (porovnání bajt po bajtu), který služba ověří a spotřebuje
+operací `CHECK_GRANT` na kanálu **`grants`**. Zrušení = `CANCELED`,
+špatné heslo = `ACCESS_DENIED`, bez kompozitoru (testy, konzole) =
+`NOT_SUPPORTED`. Smazat přihlášený účet nejde (`BAD_STATE`).
+
+Omezení první verze: potvrzuje přihlášený, má-li roli, jinak **první**
+účet s rolí (výběr z více účtů v dialogu **[navrženo]**); žadatel je
+v dialogu „Aplikace uživatele <jméno>“, dokud kanál self nedostane
+nastavení se svou identitou z manifestu **[navrženo]**.
 
 | Úkon (`ELEVATE`) | Parametry |
 |---|---|
@@ -450,6 +530,7 @@ použití vynulují. Kanály jsou různé capability:
 | `login` | přihlašovací obrazovka (systémová vrstva), testy initu | výpis účtů pro výběr, ověření, odemčení |
 | `self` | relace uživatele (nastavení) | vlastní účet: metody, fráze, šifrování, zamčení, odhlášení, žádost o úkon správy |
 | `setup` | instalátor, jen dokud neexistuje žádný účet | založení prvního účtu s rolí |
+| `grants` | služby úkonů správy (devmgr, fwd, aktualizace, ...) | ověřit a spotřebovat grant |
 | `init` | init (soukromý) | relace, domovy, klíče domovů |
 
 | Op | Kanál | Jméno | Pole | Odpověď |
@@ -458,6 +539,7 @@ použití vynulují. Kanály jsou různé capability:
 | 2 | login | `PHRASE` | uid | fráze (ukáže se po výběru účtu) |
 | 3 | login | `AUTH` | uid, metoda u8, secret | `OK` relace u64 / `DENIED` čekání ms, zbývá PIN / `LOCKED_OUT` ms |
 | 4 | login | `UNLOCK` | relace, metoda, secret | jako `AUTH` |
+| 5 | login | `LOGIN_LOCK` | relace | - (zamknout z obrazovky; odemknout jen ověřením) |
 | 10 | self | `WHOAMI` | - | záznam účtu bez tajemství |
 | 11 | self | `SET_PASSWORD` | staré secret, nové secret | - |
 | 12 | self | `SET_PIN` | heslo secret, PIN secret (prázdný = smazat) | - |
@@ -467,9 +549,10 @@ použití vynulují. Kanály jsou různé capability:
 | 16 | self | `ENCRYPT_HOME` | heslo secret | obnovovací klíč (jen jednou) / `NOT_SUPPORTED` |
 | 17 | self | `LOCK` | - | - |
 | 18 | self | `LOGOUT` | - | - |
-| 19 | self | `ELEVATE` | úkon u32, parametry | capability (viz [Správa](#správa-počítače)); do dialogu kompozitoru `NOT_SUPPORTED` |
+| 19 | self | `ELEVATE` | úkon u32, parametry (`accountproto::elevate::Params`) | po dialogu: výsledek úkonu účtu nebo token grantu; `CANCELED`, `ACCESS_DENIED`, bez kompozitoru `NOT_SUPPORTED` |
 | 20 | self | `SET_KEY_PIN` | PIN secret | - (klíč, který PIN ještě nemá) |
 | 30 | setup | `CREATE_FIRST` | jméno, zobrazované, heslo secret | uid |
+| 40 | grants | `CHECK_GRANT` | token (blob 16 B), úkon u32, parametry (blob) | - nebo `ACCESS_DENIED`; token se spotřebuje |
 | 50 | init | `OPEN_SESSION` (accountd -> init, + handle kanálu self) | uid, skupiny, domov | relace u64 |
 | 51 | init | `CLOSE_SESSION` | relace | - |
 | 52, 53 | init | `LOCK_SESSION`, `UNLOCK_SESSION` | relace | - |
@@ -549,6 +632,8 @@ i aarch64):
 | relace vidí jen svůj domov | cizí domov i soubory v něm `NOT_FOUND`, `/home` nejde vypsat, DB účtů `NOT_FOUND` |
 | init nevyrazí systémovou identitu | `OPEN_SESSION` pro 0, 902, 999 a skupinu 0 odmítnut, domov pro systém ne |
 | zamčení a odhlášení | zamčení, odemčení špatným a správným heslem, po odhlášení relace i její FS zmizí |
+| události a job relace | události otevřena/zamčena/odemčena/skončila, jméno a aktivní relace, proces v jobu relace, job po odhlášení zmizí |
+| zvýšení práv dialogem | test hraje kompozitor: text dialogu, špatné heslo, zrušení, povolení s režimem správy (účet vznikne), další úkon v režimu bez dialogu, grant jen jednou a jen na stejné parametry |
 | špatné heslo a zpomalení | neznámý účet, 3. chyba = 30 s, v čekání neprojde ani správné heslo |
 
 ## Rizika a omezení
@@ -570,19 +655,25 @@ i aarch64):
 - Přihlašovací obrazovka a dialog správy jsou jen tak bezpečné jako
   systémová vrstva kompozitoru (aplikace do ní nekreslí, vstup jde jen do
   ní) a bezpečná zkratka `inputd`.
-- Dokud není job relace, odhlášení zavře kanály relace u initu, ale ne
-  relace FS, které si proces sám otevřel přes `CONNECT`.
+- ⚠️ Dokud není `JOB_KILL`, odhlášení ukončí jen procesy, které spustil
+  init (aplikace plochy, termd); `shsess` a procesy spuštěné aplikacemi
+  doběhnou samy a jejich relace FS (`CONNECT`) platí dál.
+- ⚠️ Záložní konzole (bez GUI) zatím nemá přihlášení: terminál v ní běží
+  jako systém, jako dřív.
+- Testy GUI přes QMP (5) selhávají i na čistém `main` 77ac8ee; nejsou
+  způsobené účty.
 
 ## Stav zavedení
 
 | Část | Stav |
 |---|---|
-| návrh (tato stránka) | hotovo |
-| model správy | schváleno; role, první účet s rolí a ochrana poslední role hotové (`libs/accounts`), `ELEVATE` s dialogem po přihlašovací obrazovce (vlákno GUI) |
-| `libs/accountproto` (zprávy, klient, CTAP2: CBOR, CTAPHID, COSE, protokoly PIN 1 a 2, simulovaný klíč) | hotovo, testy na hostiteli |
-| `libs/accounts` (záznamy, Argon2id, PIN s klíčem zařízení, zpomalení, klíče, obaly, obnovovací klíč) | hotovo, testy na hostiteli |
-| `user/accountd` (DB na FS, kanály login/self/setup, vývojové přihlášení) | hotovo, testy v QEMU |
-| správce sezení v initu (domovy, relace FS, zamčení, odhlášení) | hotovo; job relace s procesy uživatele a přepnutí terminálu na identitu uživatele = další krok |
-| přenos CTAPHID v `usb-hid` (usage page `0xF1D0`), devmgr a init (`fido` -> `key`) | hotovo; QEMU klíč FIDO2 neemuluje, na skutečném klíči zatím neověřeno |
-| šifrování domova | obaly a obnovovací klíč hotové; šifrování datasetu = krok FS (do té doby `NOT_SUPPORTED`) |
-| přihlašovací obrazovka, nastavení účtu | vlákno GUI |
+| návrh (tato stránka) | **[implementováno]** |
+| model správy | schváleno; **[implementováno]** role, první účet s rolí, ochrana poslední role, `ELEVATE` s dialogem, úkony účtů, granty, režim správy, audit; výběr potvrzujícího z více účtů **[navrženo]** |
+| `libs/accountproto` (zprávy, klient, CTAP2, simulovaný klíč, úkony správy) | **[implementováno]**, testy na hostiteli |
+| `libs/accounts` (záznamy, Argon2id, PIN, zpomalení, klíče, obaly, obnovovací klíč, reset hesla správou) | **[implementováno]**, testy na hostiteli |
+| `user/accountd` (DB na FS, kanály login/self/setup/grants, dialog správy, vývojové přihlášení) | **[implementováno]**, testy v QEMU |
+| správce sezení a job relace v initu, plocha až po přihlášení, terminál s identitou uživatele | **[implementováno]**; `JOB_KILL` pro procesy spuštěné relací **[navrženo]** (číslo syscallu od koordinátora) |
+| přihlašovací a zamykací obrazovka v kompozitoru | **[implementováno]**, testy na hostiteli; instalátor prvního účtu **[navrženo]** |
+| přenos CTAPHID v `usb-hid`, devmgr a init (`fido` -> `key`) | **[implementováno]**; QEMU klíč FIDO2 neemuluje, na skutečném klíči zatím neověřeno |
+| šifrování domova | obaly a obnovovací klíč **[implementováno]**; trezory FS **[navrženo]** (fáze 4 FS) |
+| nastavení účtu v GUI | **[navrženo]** (aplikace Nastavení) |
