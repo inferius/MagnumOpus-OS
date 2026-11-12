@@ -80,6 +80,10 @@ pub struct Thread {
     kill: AtomicBool,
     /// Vlakno uz bylo spusteno (vlakna procesu se vytvari a spousti zvlast).
     pub(super) started: AtomicBool,
+    /// Registr ukazatele vlakna userspace (aarch64 TPIDR_EL0), ulozeny pri
+    /// prepnuti pryc; planovac ho nahraje pri prepnuti na vlakno. Nove
+    /// vlakno zacina s 0.
+    pub(super) user_tp: AtomicU64,
 }
 
 // SAFETY: `context` cte a zapisuje jen planovac na CPU, ktere vlakno prave
@@ -121,6 +125,7 @@ impl Thread {
             process,
             kill: AtomicBool::new(false),
             started: AtomicBool::new(false),
+            user_tp: AtomicU64::new(0),
         }
     }
 

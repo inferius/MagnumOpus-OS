@@ -117,6 +117,12 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
   procesu (`USER_MIN`..`USER_MAX`); poslední stránka spodní poloviny
   adresního prostoru je vždy nenamapovaná, takže návrat ze syscallu nikdy
   nemíří na nekanonickou adresu (ta by vyvolala výjimku ještě v jádře).
+- **Registr ukazatele vlákna** (aarch64 `TPIDR_EL0`, který si program
+  smí zapsat sám): plánovač ho při přepnutí uloží do odcházejícího vlákna
+  a nahraje hodnotu nového; nové vlákno začíná s 0. Hodnota jednoho
+  procesu tak nikdy není vidět v jiném **[ověřeno v QEMU]** (test
+  `procesy: TPIDR_EL0 neprosakuje mezi procesy`, aarch64). Na x86_64 si
+  program `FS_BASE` sám nastavit nemůže.
 - **Stav FPU/SSE:** každé vlákno má vlastní 512B oblast FXSAVE; přepnutí
   kontextu ji vždy uloží a obnoví. Nové vlákno začíná s výchozím stavem
   (FCW 0x037F, MXCSR 0x1F80), takže data jiného vlákna nemohou uniknout.

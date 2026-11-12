@@ -207,6 +207,12 @@ impl api::Threads for X86_64 {
         unsafe { user::set_kernel_stack(local, top) }
     }
 
+    /// Program `FS_BASE` sam zmenit nemuze (CR4.FSGSBASE je vypnute;
+    /// nacteni selektoru FS bazi jen vynuluje) a jadro ho zatim nenastavuje:
+    /// neni co ukladat ani nahravat.
+    #[inline]
+    unsafe fn switch_thread_pointer(_save: &core::sync::atomic::AtomicU64, _next: u64) {}
+
     unsafe fn enter_user(entry: u64, stack: u64, arg0: u64, arg1: u64) -> ! {
         // SAFETY: predano volajicim.
         unsafe { user::enter_user(entry, stack, arg0, arg1) }

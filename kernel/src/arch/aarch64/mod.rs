@@ -236,6 +236,18 @@ impl api::Threads for Aarch64 {
         local.kernel_sp.store(top, Ordering::Relaxed);
     }
 
+    /// TPIDR_EL0 smi program zapsat sam (`msr tpidr_el0`), proto se pred
+    /// prepnutim ulozi do odchazejiciho vlakna a nahraje se hodnota noveho
+    /// (nove vlakno ma 0). Bez toho hodnota jednoho procesu zustala v CPU
+    /// a videl ji dalsi proces (skryty kanal mezi procesy). Jadro registr
+    /// nepouziva (per-CPU data jsou v TPIDR_EL1).
+    #[inline]
+    unsafe fn switch_thread_pointer(save: &core::sync::atomic::AtomicU64, next: u64) {
+        save.store(mrs!("tpidr_el0"), Ordering::Relaxed);
+        // SAFETY: TPIDR_EL0 je jen registr pro program, jadro ho necte.
+        unsafe { msr!("tpidr_el0", next) };
+    }
+
     unsafe fn enter_user(entry: u64, stack: u64, arg0: u64, arg1: u64) -> ! {
         let local = <Self as api::Cpu>::cpu_local() + <Self as api::Cpu>::CPU_LOCAL_OFFSET as u64;
         // SAFETY: per-CPU data aktualniho CPU (kontrakt `set_cpu_local`).

@@ -187,6 +187,18 @@ pub trait Threads: Cpu {
     /// tohoto CPU.
     unsafe fn set_kernel_stack(local: &Self::CpuLocal, top: u64);
 
+    /// Prepnuti registru ukazatele vlakna userspace (TLS: x86_64 `FS_BASE`,
+    /// aarch64 `TPIDR_EL0`): ulozi hodnotu odchazejiciho vlakna do `save`
+    /// (jen kde ji program smi zmenit sam, aarch64) a nahraje `next`.
+    /// Vola se pri kazdem prepnuti, takze hodnota jednoho vlakna nikdy
+    /// neprosakuje do jineho (ani do jineho procesu).
+    ///
+    /// # Safety
+    ///
+    /// Volat na vlastnim CPU se zakazanymi prerusenimi; `next` je adresa
+    /// v userspace (kanonicka) nebo 0.
+    unsafe fn switch_thread_pointer(save: &core::sync::atomic::AtomicU64, next: u64);
+
     /// Prvni vstup aktualniho vlakna do userspace: `entry(arg0, arg1)` se
     /// zasobnikem `stack`, preruseni povolena.
     ///

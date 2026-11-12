@@ -24,6 +24,7 @@ pub const TESTS: &[Test] = &[
         thread_bad_entry,
     ),
     ("stav SSE je oddeleny mezi vlakny", sse_isolated),
+    ("TPIDR_EL0 neprosakuje mezi procesy", tpidr_isolated),
 ];
 
 fn deadline() -> Option<u64> {
@@ -244,5 +245,62 @@ fn sse_isolated(s: &Startup) -> TestResult {
         0x1234_5678_9ABC_DEF0,
         "XMM0 po prepnuti vlaken"
     );
+    Ok(())
+}
+
+/// Precte odpoved `tp:<hex>` od echo.
+fn echo_tp(ch: &Channel) -> Result<Option<u64>, alloc::string::String> {
+    ch.write(b"tp-get", Vec::new()).map_err(|e| fail("tp-get", e))?;
+    let reply = ch.read(deadline()).map_err(|e| fail("odpoved tp-get", e))?;
+    let text = core::str::from_utf8(&reply.data).unwrap_or("");
+    if text == "err:NOT_SUPPORTED" {
+        return Ok(None);
+    }
+    let hex = text.strip_prefix("tp:").ok_or_else(|| alloc::format!("odpoved {text:?}"))?;
+    u64::from_str_radix(hex, 16).map(Some).map_err(|_| alloc::format!("odpoved {text:?}"))
+}
+
+/// Proces A zapise do TPIDR_EL0 (aarch64 ho program smi zapsat sam),
+/// proces B ho nesmi videt a A si hodnotu musi udrzet, i kdyz se oba
+/// stridaji na CPU a stehuji mezi nimi. Pred opravou jadro registr pri
+/// prepnuti neukladalo ani nenulovalo: hodnota zustala v CPU pro dalsi
+/// proces (skryty kanal) a vlastnik ji po presunu na jine CPU ztratil.
+fn tpidr_isolated(s: &Startup) -> TestResult {
+    let (pa, a) = spawn_echo(s)?;
+    let (pb, b) = spawn_echo(s)?;
+    const MAGIC: u64 = 0x5EC2_E7C0_FFEE_0042;
+    a.write(alloc::format!("tp-set:{MAGIC:x}").as_bytes(), Vec::new())
+        .map_err(|e| fail("tp-set", e))?;
+    let reply = a.read(deadline()).map_err(|e| fail("odpoved tp-set", e))?;
+    if reply.data == b"err:NOT_SUPPORTED" {
+        // x86_64: FS_BASE program sam nastavit nemuze, neni co overit.
+        drop((a, b));
+        let _ = (pa.wait_exit(deadline()), pb.wait_exit(deadline()));
+        return Ok(());
+    }
+    check_eq!(&reply.data[..], b"ok", "tp-set");
+    for i in 0..300 {
+        check_eq!(echo_tp(&a)?, Some(MAGIC), alloc::format!("A po {i} prepnutich"));
+        check_eq!(echo_tp(&b)?, Some(0), alloc::format!("B po {i} prepnutich"));
+        // Vlastni TPIDR_EL0 initu (nikdy ho nezapsal) taky musi byt 0.
+        let own: u64;
+        #[cfg(target_arch = "aarch64")]
+        // SAFETY: cteni TPIDR_EL0 z EL0 je povolene.
+        unsafe {
+            core::arch::asm!("mrs {}, tpidr_el0", out(reg) own, options(nomem, nostack, preserves_flags));
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            own = 0;
+        }
+        check_eq!(own, 0, alloc::format!("init po {i} prepnutich"));
+        if i % 10 == 0 {
+            // Spani = jine CPU po probuzeni (stehovani vlaken).
+            time::sleep(Duration::from_millis(1));
+        }
+    }
+    drop((a, b));
+    check_eq!(pa.wait_exit(deadline()), Ok(0), "konec A");
+    check_eq!(pb.wait_exit(deadline()), Ok(0), "konec B");
     Ok(())
 }
