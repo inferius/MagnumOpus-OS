@@ -158,3 +158,45 @@ fn snimek_obrazovky() {
     t.frame();
     save_png("comp-greeter-zamceno.png", &t.frame, W, H);
 }
+
+#[test]
+fn dialog_zvyseni_prav() {
+    let mut t = T::new();
+    t.c.dialog_request(1, DialogRequest::Phrase { text: "modrá konvice".into() }, t.now);
+    t.c.dialog_request(
+        1,
+        DialogRequest::Ask {
+            id: 9,
+            kind: DialogKind::Elevate,
+            app: "Nastavení".into(),
+            text: "Přidat účet bob (Bob)\nPotvrzuje: Alice (smí spravovat tento počítač)".into(),
+            options: vec!["Povolit změnu".into(), "Zrušit".into()],
+        },
+        t.now,
+    );
+    t.frame();
+    save_png("comp-elevate.png", &t.frame, W, H);
+    t.now += dialog::INPUT_DELAY;
+    text(&mut t, "heslo");
+    // Zaskrtavatko je za tlacitky (Tab dvakrat), Enter ho prepne.
+    t.key(KEY_TAB, false);
+    t.key(KEY_TAB, false);
+    t.key(KEY_ENTER, false);
+    // Zpet na "Povolit změnu" a potvrdit.
+    t.key(KEY_TAB, false);
+    t.key(KEY_ENTER, false);
+    let out = t.out();
+    assert!(out.contains(&Out::Dialog(1, DialogReply::Answer { id: 9, choice: 2, text: "heslo".into() })), "{out:?}");
+}
+
+#[test]
+fn dialog_zvyseni_prav_esc_zrusi() {
+    let mut t = T::new();
+    t.c.dialog_request(
+        1,
+        DialogRequest::Ask { id: 4, kind: DialogKind::Elevate, app: "X".into(), text: "?".into(), options: vec!["Povolit změnu".into(), "Zrušit".into()] },
+        t.now,
+    );
+    t.key(KEY_ESC, false);
+    assert!(t.out().contains(&Out::Dialog(1, DialogReply::Answer { id: 4, choice: 1, text: String::new() })));
+}

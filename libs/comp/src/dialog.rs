@@ -50,6 +50,8 @@ pub struct Dialog {
     pub options: Vec<String>,
     pub sel: usize,
     pub password: String,
+    /// Zaskrtavatko (jen `Elevate`: dalsich 5 minut nepotvrzovat).
+    pub flag: Option<bool>,
 }
 
 /// Nejvic radku textu dialogu (dialog roste do vysky obrazovky).
@@ -77,6 +79,8 @@ pub struct Layout {
     pub frame: Rect,
     pub buttons: Vec<Rect>,
     pub field: Option<Rect>,
+    /// Zaskrtavatko (jen `Elevate`).
+    pub check: Option<Rect>,
     pub lines: Vec<String>,
     /// Pruh "Systém" s frazi.
     band: Rect,
@@ -88,13 +92,23 @@ pub struct Layout {
     guard_y: i32,
 }
 
-fn heading(d: &Dialog) -> &'static str {
-    match (d.owner, d.kind) {
+fn heading(d: &Dialog) -> String {
+    String::from(match (d.owner, d.kind) {
         (Owner::Secure, _) => "Bezpečná obrazovka systému",
         (_, DialogKind::Permission) => "Povolit oprávnění?",
         (_, DialogKind::Confirm) => "Potvrzení",
         (_, DialogKind::Password) => "Potvrď heslem",
-    }
+        (_, DialogKind::Elevate) if d.app.is_empty() => "Změna systému",
+        (_, DialogKind::Elevate) => return alloc::format!("{} chce změnit systém", d.app),
+    })
+}
+
+/// Popisek zaskrtavatka rezimu spravy.
+const ADMIN_MODE: &str = "Dalších 5 minut úkony správy nepotvrzovat";
+
+/// Ma dialog pole pro tajemstvi?
+fn has_field(k: DialogKind) -> bool {
+    matches!(k, DialogKind::Password | DialogKind::Elevate)
 }
 
 /// Styl popisku pruhu (`small`, tucne).
@@ -155,10 +169,18 @@ impl Dialogs {
         };
         let text_y = y as i32;
         y += lines.len() as u32 * body.line;
-        let field_y = if d.kind == DialogKind::Password {
+        let field_y = if has_field(d.kind) {
             y += sp[4];
             let at = y;
             y += t.size.control_h;
+            Some(at)
+        } else {
+            None
+        };
+        let check_y = if d.flag.is_some() {
+            y += sp[3];
+            let at = y;
+            y += t.size.icon_m.max(t.text.body.line);
             Some(at)
         } else {
             None
@@ -182,11 +204,13 @@ impl Dialogs {
         }
         buttons.reverse();
         let field = field_y.map(|fy| Rect::new(x + sp[6] as i32, top + fy as i32, inner, t.size.control_h));
+        let check = check_y.map(|cy| Rect::new(x + sp[6] as i32, top + cy as i32, inner, t.size.icon_m.max(t.text.body.line)));
         let who = who_y.map(|wy| Rect::new(x + sp[6] as i32, top + wy as i32, inner, t.size.bar_icon + 2 * sp[3]));
         Some(Layout {
             frame,
             buttons,
             field,
+            check,
             lines,
             band: Rect::new(x, top, w, band_h),
             title_y: top + title_y,
@@ -239,7 +263,7 @@ impl Dialogs {
         let ts = t.text.title;
         let face = st.face(ts);
         let base = l.title_y + face.baseline_in(ts.size, ts.line);
-        face.draw(c, f.x + sp[6] as i32, base, heading(d), ts.size, col.ink);
+        face.draw(c, f.x + sp[6] as i32, base, &heading(d), ts.size, col.ink);
         // Aplikace, ktera se pta.
         if let Some(w) = l.who {
             c.round_fill(w, t.radius.control, col.surface_2);
@@ -266,7 +290,27 @@ impl Dialogs {
             let dots: String = d.password.chars().map(|_| '\u{2022}').collect();
             let face = st.face(bs);
             face.draw(c, fr.x + sp[4] as i32, fr.y + face.baseline_in(bs.size, fr.h), &dots, bs.size, col.ink);
-            c.round_stroke(Rect::new(fr.x - 2, fr.y - 2, fr.w + 4, fr.h + 4), t.radius.control + 2, t.size.focus_ring, col.focus);
+            if d.password.is_empty() && d.kind == DialogKind::Elevate {
+                face.draw(c, fr.x + sp[4] as i32, fr.y + face.baseline_in(bs.size, fr.h), "Heslo nebo PIN", bs.size, col.ink_faint);
+            }
+            if d.sel < d.options.len() {
+                c.round_stroke(Rect::new(fr.x - 2, fr.y - 2, fr.w + 4, fr.h + 4), t.radius.control + 2, t.size.focus_ring, col.focus);
+            }
+        }
+        if let (Some(cr), Some(on)) = (l.check, d.flag) {
+            let bx = t.size.icon_m;
+            let b = Rect::new(cr.x, cr.y + (cr.h as i32 - bx as i32) / 2, bx, bx);
+            if on {
+                c.round_fill(b, t.radius.control, col.accent);
+                st.icons.draw(c, "check", b.x, b.y, bx, t.icon_stroke, col.on_accent);
+            } else {
+                c.round_fill_bordered(b, t.radius.control, col.surface, col.border_strong, 1);
+            }
+            if d.sel == d.options.len() {
+                c.round_stroke(Rect::new(b.x - 3, b.y - 3, b.w + 6, b.h + 6), t.radius.control + 3, t.size.focus_ring, col.focus);
+            }
+            let face = st.face(bs);
+            face.draw(c, b.right() as i32 + sp[3] as i32, cr.y + face.baseline_in(bs.size, cr.h), ADMIN_MODE, bs.size, col.ink);
         }
         // Upozorneni: jen fyzicky vstup.
         let cs = t.text.caption;
@@ -355,6 +399,7 @@ impl Comp {
                     kind,
                     app,
                     text,
+                    flag: (kind == DialogKind::Elevate).then_some(false),
                     options,
                     sel: 0,
                     password: String::new(),
@@ -422,6 +467,7 @@ impl Comp {
             },
             sel: 0,
             password: String::new(),
+            flag: None,
         });
     }
 
@@ -434,7 +480,8 @@ impl Comp {
                 p,
                 DialogReply::Answer {
                     id: d.id,
-                    choice: choice as u32,
+                    // Elevate: povolit se zaskrtnutym rezimem spravy = 2.
+                    choice: if choice == 0 && d.flag == Some(true) { 2 } else { choice as u32 },
                     text: d.password,
                 },
             )),
@@ -468,6 +515,7 @@ impl Comp {
             options: alloc::vec![String::from(button), String::from("Zrušit")],
             sel: 1,
             password: String::new(),
+            flag: None,
         });
     }
 
@@ -492,6 +540,7 @@ impl Comp {
                     options: alloc::vec![String::from("Povolit zařízení"), String::from("Odmítnout")],
                     sel: 1,
                     password: String::new(),
+                    flag: None,
                 });
             }
             Trusted | Rejected => {
@@ -510,13 +559,20 @@ impl Comp {
             return;
         }
         let Some(d) = self.dialogs.queue.front_mut() else { return };
-        let n = d.options.len().max(1);
+        // Zaskrtavatko je v poradi Tab za tlacitky.
+        let n = d.options.len().max(1) + d.flag.is_some() as usize;
         match code {
+            KEY_ENTER | KEY_KPENTER if d.flag.is_some() && d.sel == d.options.len() => {
+                d.flag = d.flag.map(|f| !f);
+            }
             KEY_ENTER | KEY_KPENTER => {
                 let s = d.sel;
                 return self.answer(s);
             }
-            KEY_ESC => return self.answer(n - 1),
+            KEY_ESC => {
+                let last = d.options.len().max(1) - 1;
+                return self.answer(last);
+            }
             KEY_TAB | KEY_RIGHT => d.sel = (d.sel + 1) % n,
             KEY_LEFT => d.sel = (d.sel + n - 1) % n,
             KEY_BACKSPACE => {
@@ -529,7 +585,7 @@ impl Comp {
 
     pub(crate) fn dialog_text(&mut self, ch: char) {
         let Some(d) = self.dialogs.queue.front_mut() else { return };
-        if d.kind == DialogKind::Password && d.password.chars().count() < MAX_PASSWORD {
+        if has_field(d.kind) && d.password.chars().count() < MAX_PASSWORD {
             d.password.push(ch);
             self.damage_all();
         }
@@ -542,6 +598,11 @@ impl Comp {
         let Some(l) = self.dialogs.layout(&self.style, self.w, self.h) else { return };
         if let Some(i) = l.buttons.iter().position(|b| b.contains(x, y)) {
             self.answer(i);
+        } else if l.check.is_some_and(|r| r.contains(x, y))
+            && let Some(d) = self.dialogs.queue.front_mut()
+        {
+            d.flag = d.flag.map(|f| !f);
+            self.damage_all();
         }
     }
 
