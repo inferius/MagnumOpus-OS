@@ -20,13 +20,13 @@ use super::{Test, TestResult, devices, fail};
 use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
-    ("futex: wait, wake, vyprseni", futex),
+    ("futex: wait, wake, vyprseni, neznama operace", futex),
     ("registr vlakna: vlastni hodnota kazdeho vlakna", thread_pointer),
     ("hello-std: argumenty, vlakna, TLS, soubory", hello_std),
 ];
 
 /// Hodnota se nezmenila -> spani do terminu; jina hodnota -> hned zpet;
-/// FUTEX_WAKE probudi cekajici vlakno.
+/// `FUTEX` `WAKE` probudi cekajici vlakno.
 fn futex(_: &Startup) -> TestResult {
     static WORD: AtomicU32 = AtomicU32::new(0);
     let start = time::now();
@@ -51,8 +51,11 @@ fn futex(_: &Startup) -> TestResult {
     // AtomicU32 by byla v Rustu nedefinovana).
     let addr = WORD.as_ptr() as u64 + 1;
     // SAFETY: jadro adresu jen zkontroluje a odmitne, nic necte ani nepise.
-    let r = unsafe { sys::raw(libos::abi::syscall::FUTEX_WAIT, addr, 0, 0, 0, 0, 0) };
+    let r = unsafe { sys::raw(libos::abi::syscall::FUTEX, libos::abi::syscall::futex_op::WAIT, addr, 0, 0, 0, 0) };
     check_eq!(libos::abi::error::decode(r).err(), Some(Error::InvalidArgs), "nezarovnana adresa");
+    // SAFETY: neznama operace; jadro ji odmitne bez pristupu do pameti.
+    let r = unsafe { sys::raw(libos::abi::syscall::FUTEX, 7, WORD.as_ptr() as u64, 0, 0, 0, 0) };
+    check_eq!(libos::abi::error::decode(r).err(), Some(Error::InvalidArgs), "neznama operace");
     Ok(())
 }
 

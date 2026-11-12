@@ -1,4 +1,4 @@
-//! Zamek nad futexem jadra (`FUTEX_WAIT`/`FUTEX_WAKE`).
+//! Zamek nad futexem jadra (`FUTEX`, operace `WAIT`/`WAKE`).
 //!
 //! Na rozdil od spin zamku cekajici vlakno spi a nebere CPU vlaknu, ktere
 //! zamek drzi. Stav (jako futex mutex v `std`): 0 = volno, 1 = zamceno,

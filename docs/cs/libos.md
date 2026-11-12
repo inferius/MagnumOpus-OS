@@ -168,7 +168,7 @@ každá zpráva = kus bajtů, zavření kanálu = konec proudu.
 ## Zámek nad futexem
 
 `libos::sync::Mutex` (API jako `spin::Mutex`: `lock` vrací strážce bez
-chyby) čeká v jádře přes `FUTEX_WAIT`, takže čekající vlákno nebere CPU
+chyby) čeká v jádře přes `FUTEX` (`WAIT`), takže čekající vlákno nebere CPU
 držiteli zámku. Krátce se nejdřív točí (100 pokusů). Používají ho
 `fsproto` a `svcclient` **[ověřeno v QEMU]** (sady `souborovy system`,
 `obnova sluzeb`, `shell`).

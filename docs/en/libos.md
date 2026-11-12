@@ -172,7 +172,7 @@ every message = a chunk of bytes, closing the channel = end of stream.
 ## Futex-based lock
 
 `libos::sync::Mutex` (API like `spin::Mutex`: `lock` returns a guard
-without an error) waits in the kernel via `FUTEX_WAIT`, so a waiting thread
+without an error) waits in the kernel via `FUTEX` (`WAIT`), so a waiting thread
 does not take CPU from the lock holder. It spins briefly first (100
 tries). Used by `fsproto` and `svcclient` **[verified in QEMU]** (suites
 `souborovy system`, `obnova sluzeb`, `shell`).

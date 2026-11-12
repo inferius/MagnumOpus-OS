@@ -258,11 +258,11 @@ a shell je práce vlákna terminálu **[navrženo]**.
 ## Co přidalo jádro
 
 1. **Futex** **[ověřeno v QEMU]** (test `std: futex: wait, wake,
-   vyprseni`): `FUTEX_WAIT(adresa, očekávaná hodnota, deadline)`
-   a `FUTEX_WAKE(adresa, počet)`, fronta per proces (klíč = virtuální
+   vyprseni, neznama operace`): syscall `FUTEX` (55) s operacemi `WAIT(adresa, očekávaná hodnota,
+   deadline)` a `WAKE(adresa, počet)`, fronta per proces (klíč = virtuální
    adresa), viz [Syscally](syscally.md#futex).
 2. **Registr vlákna pro TLS** **[ověřeno v QEMU]** (test `std: registr
-   vlakna: vlastni hodnota kazdeho vlakna`): `THREAD_SET_POINTER`, jádro
+   vlakna: vlastni hodnota kazdeho vlakna`): `THREAD_SET_POINTER` (56), jádro
    ukládá `FS_BASE` / `TPIDR_EL0` ve vlákně a nahrává ho při každém
    přepnutí. Tím je opravený i únik `TPIDR_EL0` mezi procesy na aarch64
    (program si ho mohl zapsat a jádro ho při přepnutí nenulovalo).

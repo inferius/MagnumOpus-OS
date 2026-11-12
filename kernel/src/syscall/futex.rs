@@ -3,7 +3,7 @@
 //! Futex je fronta vlaken cekajicich na zmenu u32 v pameti procesu. Klic je
 //! virtualni adresa ve vlastnim procesu (sdileni mezi procesy zatim neni).
 //! Kontrola hodnoty a zarazeni do fronty probehnou pod zamkem fronty, ktery
-//! bere i `FUTEX_WAKE`: probuzeni mezi kontrolou a usnutim se neztrati.
+//! bere i probuzeni (`WAKE`): probuzeni mezi kontrolou a usnutim se neztrati.
 
 use alloc::collections::VecDeque;
 
@@ -19,11 +19,19 @@ fn futex_addr(addr: u64) -> Result<u64> {
     Ok(addr)
 }
 
-/// `FUTEX_WAIT(addr, expected, deadline)`.
-pub fn wait(a: Args) -> Result<u64> {
-    let addr = futex_addr(a[0])?;
-    let expected = a[1] as u32;
-    let deadline = (a[2] != abi::syscall::DEADLINE_INFINITE).then_some(a[2]);
+/// `FUTEX(op, addr, value, deadline)`.
+pub fn call(a: Args) -> Result<u64> {
+    match a[0] {
+        abi::syscall::futex_op::WAIT => wait(a[1], a[2] as u32, a[3]),
+        abi::syscall::futex_op::WAKE => wake(a[1], a[2]),
+        _ => Err(Error::InvalidArgs),
+    }
+}
+
+/// `FUTEX(WAIT, addr, expected, deadline)`.
+fn wait(addr: u64, expected: u32, deadline: u64) -> Result<u64> {
+    let addr = futex_addr(addr)?;
+    let deadline = (deadline != abi::syscall::DEADLINE_INFINITE).then_some(deadline);
     let p = current_process();
     let me = sched::current();
     if me.kill_requested() {
@@ -48,7 +56,7 @@ pub fn wait(a: Args) -> Result<u64> {
     if let Some(timer) = timer {
         sched::cancel_timer(timer);
     }
-    // Zaznam ve fronte zustal = nikdo nas neprobudil pres FUTEX_WAKE
+    // Zaznam ve fronte zustal = nikdo nas neprobudil pres WAKE
     // (vyprseni, kill nebo planne probuzeni): uklidit.
     let still_queued = {
         let mut table = p.futex.lock();
@@ -76,10 +84,10 @@ pub fn wait(a: Args) -> Result<u64> {
     Ok(0)
 }
 
-/// `FUTEX_WAKE(addr, count) -> pocet probuzenych`.
-pub fn wake(a: Args) -> Result<u64> {
-    let addr = futex_addr(a[0])?;
-    let count = a[1].min(u64::from(u32::MAX)) as usize;
+/// `FUTEX(WAKE, addr, count) -> pocet probuzenych`.
+fn wake(addr: u64, count: u64) -> Result<u64> {
+    let addr = futex_addr(addr)?;
+    let count = count.min(u64::from(u32::MAX)) as usize;
     let p = current_process();
     let mut woken = 0usize;
     let mut table = p.futex.lock();

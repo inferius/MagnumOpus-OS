@@ -269,11 +269,11 @@ with termd and the shell is work for the terminal thread **[designed]**.
 ## What the kernel added
 
 1. **Futex** **[verified in QEMU]** (test `std: futex: wait, wake,
-   vyprseni`): `FUTEX_WAIT(address, expected value, deadline)` and
-   `FUTEX_WAKE(address, count)`, a per-process queue (key = virtual
+   vyprseni, neznama operace`): the `FUTEX` syscall (55) with operations `WAIT(address, expected value,
+   deadline)` and `WAKE(address, count)`, a per-process queue (key = virtual
    address), see [Syscalls](syscalls.md#futex).
 2. **Thread register for TLS** **[verified in QEMU]** (test `std: registr
-   vlakna: vlastni hodnota kazdeho vlakna`): `THREAD_SET_POINTER`; the
+   vlakna: vlastni hodnota kazdeho vlakna`): `THREAD_SET_POINTER` (56); the
    kernel stores `FS_BASE` / `TPIDR_EL0` in the thread and loads it on
    every switch. This also fixes the `TPIDR_EL0` leak between processes on
    aarch64 (a program could write it and the kernel did not clear it on a

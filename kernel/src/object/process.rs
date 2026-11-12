@@ -48,7 +48,7 @@ pub struct Process {
     pub cpu_ns: AtomicU64,
     /// Trida QoS novych vlaken a Realtime parametry (ns) z `PROCESS_SET`.
     qos: SpinLock<(schedcore::Class, Option<(u64, u64)>)>,
-    /// Fronty futexu (`FUTEX_WAIT`/`FUTEX_WAKE`): virtualni adresa ->
+    /// Fronty futexu (`FUTEX`): virtualni adresa ->
     /// cekajici vlakna (vlakno, poradove cislo cekani) v poradi prichodu.
     /// Polozek je nejvys tolik, kolik ma proces vlaken.
     pub futex: SpinLock<BTreeMap<u64, VecDeque<(Arc<Thread>, u64)>>>,

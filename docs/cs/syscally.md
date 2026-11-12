@@ -396,7 +396,7 @@ proces (kód -1 000 002, pokud předtím nevolal `PROCESS_EXIT`).
 
 ### `THREAD_SET_POINTER`
 
-`(value) -> 0`. Nastaví registr ukazatele vlákna aktuálního vlákna pro
+`(value) -> 0`, číslo 56. Nastaví registr ukazatele vlákna aktuálního vlákna pro
 TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`). Jádro hodnotu ukládá ve
 vlákně a nahraje ji při každém přepnutí; nové vlákno začíná s 0, takže
 hodnota nikdy nepřeteče do jiného vlákna ani procesu (na aarch64 si
@@ -410,23 +410,22 @@ ukládá). Chyby: `INVALID_ARGS` (`value` mimo userspace). V libos
 proměnných v userspace (`std::sync`, `libos::sync::Mutex`). Klíč je
 virtuální adresa ve vlastním procesu; sdílení mezi procesy zatím není.
 Kontrola hodnoty a zařazení do fronty proběhnou pod zámkem fronty
-procesu, který bere i `FUTEX_WAKE`, takže se probuzení mezi kontrolou
+procesu, který bere i `WAKE`, takže se probuzení mezi kontrolou
 a usnutím neztratí.
 
-### `FUTEX_WAIT`
+### `FUTEX`
 
-`(addr, expected, deadline) -> 0`. Když `u32` na `addr` (zarovnané na
-4 B) je rovné `expected`, vlákno usne, dokud ho nevzbudí `FUTEX_WAKE`
-na stejné adrese nebo nevyprší `deadline` (ns od startu,
-`DEADLINE_INFINITE` = bez limitu). Jiná hodnota = hned 0. Plané
-probuzení je možné, volající podmínku ověří znovu. Chyby: `TIMED_OUT`,
-`INVALID_ARGS` (nezarovnaná adresa, adresa mimo userspace),
-`INVALID_ADDRESS` (nenamapovaná), `CANCELED` (ukončení procesu).
+`(op, addr, value, deadline) -> výsledek`. Číslo 55.
 
-### `FUTEX_WAKE`
+| `op` | `value` | význam |
+|---|---|---|
+| 0 `WAIT` | očekávaná hodnota | když `u32` na `addr` (zarovnané na 4 B) je rovné `value`, vlákno usne, dokud ho nevzbudí `WAKE` na stejné adrese nebo nevyprší `deadline` (ns od startu, `DEADLINE_INFINITE` = bez limitu); jiná hodnota = hned 0; plané probuzení je možné, volající podmínku ověří znovu; vrací 0 |
+| 1 `WAKE` | nejvýš probuzených (`u32::MAX` = všechna) | probudí čekající vlákna na `addr` v pořadí příchodu, vrací počet probuzených; `deadline` se nepoužívá |
 
-`(addr, count) -> počet probuzených`. Probudí až `count` vláken čekajících
-na `addr` v pořadí příchodu (`u32::MAX` = všechna). Chyby: `INVALID_ARGS`.
+Chyby: `TIMED_OUT` (`WAIT`), `INVALID_ARGS` (neznámá operace,
+nezarovnaná adresa, adresa mimo userspace), `INVALID_ADDRESS`
+(nenamapovaná), `CANCELED` (ukončení procesu). V libos
+`sys::futex_wait`, `sys::futex_wake`.
 
 ## Joby (rozpočty prostředků)
 

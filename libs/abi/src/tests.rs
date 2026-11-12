@@ -118,8 +118,7 @@ fn every_syscall_is_documented() {
         "CRASH_RECORD",
         "LOG_CONTROL",
         "JOB_KILL",
-        "FUTEX_WAIT",
-        "FUTEX_WAKE",
+        "FUTEX",
         "THREAD_SET_POINTER",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);

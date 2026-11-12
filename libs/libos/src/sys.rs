@@ -336,12 +336,12 @@ pub fn thread_yield() {
 /// stejne adrese, nejdele do `deadline` (ns od startu, `u64::MAX` = navzdy).
 /// Vyprseni = `Err(TimedOut)`. Planne probuzeni je mozne.
 pub fn futex_wait(addr: &core::sync::atomic::AtomicU32, expected: u32, deadline: u64) -> Result<()> {
-    call(nr::FUTEX_WAIT, [addr.as_ptr() as u64, u64::from(expected), deadline, 0, 0, 0]).map(|_| ())
+    call(nr::FUTEX, [nr::futex_op::WAIT, addr.as_ptr() as u64, u64::from(expected), deadline, 0, 0]).map(|_| ())
 }
 
 /// Probudi az `count` vlaken cekajicich na `addr`; vraci pocet probuzenych.
 pub fn futex_wake(addr: &core::sync::atomic::AtomicU32, count: u32) -> u32 {
-    call(nr::FUTEX_WAKE, [addr.as_ptr() as u64, u64::from(count), 0, 0, 0, 0]).map_or(0, |n| n as u32)
+    call(nr::FUTEX, [nr::futex_op::WAKE, addr.as_ptr() as u64, u64::from(count), 0, 0, 0]).map_or(0, |n| n as u32)
 }
 
 /// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.

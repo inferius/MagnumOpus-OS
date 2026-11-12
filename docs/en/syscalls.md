@@ -405,7 +405,7 @@ class.
 
 ### `THREAD_SET_POINTER`
 
-`(value) -> 0`. Sets the thread pointer register of the current thread for
+`(value) -> 0`, number 56. Sets the thread pointer register of the current thread for
 TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`). The kernel stores the value in
 the thread and loads it on every switch; a new thread starts with 0, so the
 value never leaks into another thread or process (on aarch64 a program may
@@ -419,23 +419,22 @@ Waiting for a change of a `u32` in process memory, the base of locks and
 condition variables in user space (`std::sync`, `libos::sync::Mutex`). The
 key is a virtual address in the own process; sharing between processes is
 not supported yet. Checking the value and queueing happen under the
-process queue lock, which `FUTEX_WAKE` takes too, so a wake-up between the
+process queue lock, which `WAKE` takes too, so a wake-up between the
 check and going to sleep is never lost.
 
-### `FUTEX_WAIT`
+### `FUTEX`
 
-`(addr, expected, deadline) -> 0`. If the `u32` at `addr` (4-byte aligned)
-equals `expected`, the thread sleeps until `FUTEX_WAKE` on the same address
-wakes it or `deadline` passes (ns since boot, `DEADLINE_INFINITE` = no
-limit). A different value = 0 right away. Spurious wake-ups are possible;
-the caller re-checks its condition. Errors: `TIMED_OUT`, `INVALID_ARGS`
-(unaligned address, address outside user space), `INVALID_ADDRESS` (not
-mapped), `CANCELED` (process termination).
+`(op, addr, value, deadline) -> result`. Number 55.
 
-### `FUTEX_WAKE`
+| `op` | `value` | meaning |
+|---|---|---|
+| 0 `WAIT` | expected value | if the `u32` at `addr` (4-byte aligned) equals `value`, the thread sleeps until `WAKE` on the same address wakes it or `deadline` passes (ns since boot, `DEADLINE_INFINITE` = no limit); a different value = 0 right away; spurious wake-ups are possible, the caller re-checks its condition; returns 0 |
+| 1 `WAKE` | most threads to wake (`u32::MAX` = all) | wakes threads waiting on `addr` in arrival order, returns the number woken; `deadline` is unused |
 
-`(addr, count) -> number woken`. Wakes up to `count` threads waiting on
-`addr` in arrival order (`u32::MAX` = all). Errors: `INVALID_ARGS`.
+Errors: `TIMED_OUT` (`WAIT`), `INVALID_ARGS` (unknown operation, unaligned
+address, address outside user space), `INVALID_ADDRESS` (not mapped),
+`CANCELED` (process termination). In libos `sys::futex_wait`,
+`sys::futex_wake`.
 
 ## Jobs (resource budgets)
 
