@@ -303,12 +303,12 @@ dohromady, PIN navíc svých 5 pokusů):
 - Recept relace v lístku (obnova po pádu fsd), aplikace s užšími relacemi
   podle manifestu (`app_mounts`) a kanál taskd s identitou relace
   **[navrženo]**.
-- **Odhlášení** (`LOGOUT`): init zahodí relaci FS a kanál self, ukončí
-  aplikace a termd relace a kompozitor ukáže přihlášení. Šifrovaný domov
-  se zamkne (`UNLOAD_KEY`). ⚠️ Procesy, které si relace spustila sama
-  (`shsess` od termd, aplikace spuštěné aplikací), ukončí až syscall
-  `JOB_KILL` (zabije celý job relace) **[navrženo]**; do té doby je init
-  ukončí jen u procesů, které spustil on.
+- **Odhlášení** (`LOGOUT`) **[implementováno]**: init zahodí relaci FS
+  a kanál self a syscallem [`JOB_KILL`](syscally.md#job_kill) ukončí
+  **všechny** procesy relace (i `shsess` od termd a aplikace spuštěné
+  aplikacemi) a job uzavře, takže v něm už nic nevznikne; kompozitor ukáže
+  přihlášení. Šifrovaný domov se zamkne (`UNLOAD_KEY`). Test `ucty:
+  udalosti a job relace` (x86_64 i aarch64).
 - **Zamčení obrazovky** **[implementováno]** (`LOCK` z relace, nebo
   Ctrl+Alt+Delete -> Zamknout = `LOGIN_LOCK` na kanálu login): procesy
   běží dál, kompozitor ukáže zamykací obrazovku a vstup jde jen do ní.
@@ -665,13 +665,8 @@ i aarch64):
 - Přihlašovací obrazovka a dialog správy jsou jen tak bezpečné jako
   systémová vrstva kompozitoru (aplikace do ní nekreslí, vstup jde jen do
   ní) a bezpečná zkratka `inputd`.
-- ⚠️ Dokud není `JOB_KILL`, odhlášení ukončí jen procesy, které spustil
-  init (aplikace plochy, termd); `shsess` a procesy spuštěné aplikacemi
-  doběhnou samy a jejich relace FS (`CONNECT`) platí dál.
 - ⚠️ Záložní konzole (bez GUI) zatím nemá přihlášení: terminál v ní běží
   jako systém, jako dřív.
-- Testy GUI přes QMP (5) selhávají i na čistém `main` 77ac8ee; nejsou
-  způsobené účty.
 
 ## Stav zavedení
 
@@ -682,7 +677,7 @@ i aarch64):
 | `libs/accountproto` (zprávy, klient, CTAP2, simulovaný klíč, úkony správy) | **[implementováno]**, testy na hostiteli |
 | `libs/accounts` (záznamy, Argon2id, PIN, zpomalení, klíče, obaly, obnovovací klíč, reset hesla správou) | **[implementováno]**, testy na hostiteli |
 | `user/accountd` (DB na FS, kanály login/self/setup/grants, dialog správy, vývojové přihlášení) | **[implementováno]**, testy v QEMU |
-| správce sezení a job relace v initu, plocha až po přihlášení, terminál s identitou uživatele | **[implementováno]**; `JOB_KILL` pro procesy spuštěné relací **[navrženo]** (číslo syscallu od koordinátora) |
+| správce sezení a job relace v initu, plocha až po přihlášení, terminál s identitou uživatele, odhlášení přes `JOB_KILL` | **[implementováno]** |
 | přihlašovací a zamykací obrazovka v kompozitoru | **[implementováno]**, testy na hostiteli; instalátor prvního účtu **[navrženo]** |
 | přenos CTAPHID v `usb-hid`, devmgr a init (`fido` -> `key`) | **[implementováno]**; QEMU klíč FIDO2 neemuluje, na skutečném klíči zatím neověřeno |
 | šifrování domova | obaly a obnovovací klíč **[implementováno]**; trezory FS **[navrženo]** (fáze 4 FS) |

@@ -33,6 +33,28 @@ pub fn info(a: Args) -> Result<u64> {
     Ok(0)
 }
 
+/// `JOB_KILL(job, code)`: ukonci vsechny procesy jobu a jeho potomku
+/// a job uzavre (novy proces ani podjob uz nevznikne). Pravo `MANAGE`.
+/// Volajici v zabijenem jobu skonci take (pozadavek na ukonceni jeho
+/// vlaken se vyridi pri navratu do userspace; syscall vrati 0).
+pub fn kill(a: Args) -> Result<u64> {
+    let p = current_process();
+    let job = p.handles().get_as::<Job>(arg_handle(a[0])?, Rights::MANAGE)?;
+    // Nejdriv priznak (novy proces se uz nezaregistruje bez kontroly),
+    // pak registr: proces vznikly mezi tim ukonci jeho vlastni kontrola.
+    job.mark_killed();
+    let code = a[1] as i64;
+    let mut n = 0u64;
+    for proc in crate::object::process::live_processes() {
+        if proc.job().within(&job) {
+            proc.terminate(code);
+            n += 1;
+        }
+    }
+    crate::log::info!("job {} ukoncen ({n} procesu)", job.id);
+    Ok(0)
+}
+
 /// `JOB_PROCESSES(job, out_ptr, max) -> pocet`: procesy jobu a jeho
 /// potomku (`abi::job::ProcEntry`, 64 B kazdy). Vrati celkovy pocet
 /// (zapise nejvys `max`). Pravo `READ`.

@@ -216,7 +216,7 @@ fn session_events(startup: &Startup) -> TestResult {
     // Procesy relace bezi v jejim jobu.
     let job = crate::session::job(session).map_err(|e| fail("job relace", e))?;
     let app = crate::apps::spawn_in(startup, "echo", alloc::vec::Vec::new(), Some(&job)).map_err(|e| fail("proces v jobu relace", e))?;
-    drop(app);
+    app.control.write(b"sleep", alloc::vec::Vec::new()).map_err(|e| fail("sleep", e))?;
     let me = SelfService(crate::session::take_self(session).ok_or_else(|| String::from("kanal self"))?);
     me.lock().map_err(|e| fail("zamceni", e))?;
     check_eq!(crate::session::active(), None, "zamcena relace neni aktivni");
@@ -224,6 +224,10 @@ fn session_events(startup: &Startup) -> TestResult {
     me.logout().map_err(|e| fail("odhlaseni", e))?;
     check_eq!(drain_events(), alloc::vec![Event::Locked(session), Event::Unlocked(session), Event::Closed(session)], "udalosti relace");
     check_eq!(crate::session::job(session).err(), Some(Error::NotFound), "job po odhlaseni");
+    // Odhlaseni ukonci i procesy, ktere init nesleduje (JOB_KILL).
+    let code = app.process.wait_exit(Some(libos::time::deadline_after(core::time::Duration::from_secs(5))));
+    check_eq!(code, Ok(libos::abi::process::EXIT_KILLED), "proces relace po odhlaseni");
+    check_eq!(crate::apps::spawn_in(startup, "echo", alloc::vec::Vec::new(), Some(&job)).err(), Some(Error::BadState), "job relace uzavreny");
     Ok(())
 }
 

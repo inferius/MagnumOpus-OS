@@ -17,6 +17,9 @@ pub const TESTS: &[Test] = &[
     ("job: potomek si limit nezvedne", child_cannot_raise),
     ("job: program v omezenem jobu", spawned_in_limited_job),
     ("job: vycet procesu s casem CPU (prehled uloh)", list_processes),
+    ("job: JOB_KILL ukonci podstrom a job uzavre", kill_subtree),
+    ("job: JOB_KILL vlastniho jobu ukonci i volajiciho", kill_own_job),
+    ("job: JOB_KILL behem spousteni nic neproklouzne", kill_races_spawn),
     ("handly: 140 000 handlu v procesu", many_handles),
 ];
 
@@ -200,6 +203,111 @@ fn list_processes(s: &Startup) -> TestResult {
     drop(p);
     let after = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
     check!(after.iter().all(|e| e.flags & libos::abi::job::proc_flags::FINISHED != 0), "po konci jen skoncene");
+    Ok(())
+}
+
+/// Proces `echo` v jobu `job`, ktery ceka navzdy.
+fn sleeper(s: &Startup, job: &Job, name: &str) -> Result<(Process, libos::Channel), alloc::string::String> {
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = fs.find("echo").ok_or("echo neni v initfs")?;
+    let (p, ch) = libos::spawn_in(job, name, image, Vec::new()).map_err(|e| fail("spusteni", e))?;
+    ch.write(b"sleep", Vec::new()).map_err(|e| fail("sleep", e))?;
+    Ok((p, ch))
+}
+
+fn kill_subtree(s: &Startup) -> TestResult {
+    let job = limited_job(UNLIMITED, UNLIMITED)?;
+    let nested = Job::create(&job).map_err(|e| fail("vnoreny job", e))?;
+    let (a, _ca) = sleeper(s, &job, "kill-a")?;
+    let (b, _cb) = sleeper(s, &nested, "kill-b")?;
+    // Bez prava MANAGE nejde.
+    let weak = job.duplicate(Some(Rights::BASIC | Rights::READ)).map_err(|e| fail("dup", e))?;
+    check_eq!(weak.kill(1).err(), Some(Error::AccessDenied), "JOB_KILL bez MANAGE");
+    job.kill(77).map_err(|e| fail("JOB_KILL", e))?;
+    check_eq!(a.wait_exit(deadline()), Ok(77), "proces jobu");
+    check_eq!(b.wait_exit(deadline()), Ok(77), "proces vnoreneho jobu");
+    // Job je uzavreny: novy proces ani podjob, ani ve vnorenem.
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = fs.find("echo").ok_or("echo neni v initfs")?;
+    check_eq!(libos::spawn_in(&job, "pozde", image, Vec::new()).err(), Some(Error::BadState), "proces po JOB_KILL");
+    check_eq!(libos::spawn_in(&nested, "pozde2", image, Vec::new()).err(), Some(Error::BadState), "proces ve vnorenem po JOB_KILL");
+    check_eq!(Job::create(&job).err(), Some(Error::BadState), "podjob po JOB_KILL");
+    check_eq!(Job::create(&nested).err(), Some(Error::BadState), "podjob vnoreneho po JOB_KILL");
+    // Sourozenec (jiny job pod stejnym rodicem) zustava.
+    let other = limited_job(UNLIMITED, UNLIMITED)?;
+    let (c, cc) = sleeper(s, &other, "kill-c")?;
+    check_eq!(c.wait_exit(Some(time::deadline_after(Duration::from_millis(100)))).err(), Some(Error::TimedOut), "jiny job bezi");
+    drop(cc);
+    c.kill().map_err(|e| fail("uklid", e))?;
+    Ok(())
+}
+
+fn kill_own_job(s: &Startup) -> TestResult {
+    // Definice: volajici uvnitr zabijeneho jobu skonci jako ostatni
+    // (syscall se mu vrati, vlakno skonci pri navratu do userspace).
+    let job = limited_job(UNLIMITED, UNLIMITED)?;
+    let (peer, _pc) = sleeper(s, &job, "kill-soused")?;
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = fs.find("echo").ok_or("echo neni v initfs")?;
+    let (p, ch) = libos::spawn_in(&job, "kill-sam", image, Vec::new()).map_err(|e| fail("spusteni", e))?;
+    ch.write(b"killjob:9", Vec::new()).map_err(|e| fail("killjob", e))?;
+    check_eq!(p.wait_exit(deadline()), Ok(9), "volajici skoncil s kodem");
+    check_eq!(peer.wait_exit(deadline()), Ok(9), "soused v jobu");
+    check!(!matches!(ch.read(Some(time::deadline_after(Duration::from_millis(50)))), Ok(m) if m.data == b"prezil"), "volajici neprezil");
+    Ok(())
+}
+
+fn kill_races_spawn(s: &Startup) -> TestResult {
+    use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use alloc::sync::Arc;
+    let job = limited_job(UNLIMITED, UNLIMITED)?;
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image: Vec<u8> = fs.find("echo").ok_or("echo neni v initfs")?.to_vec();
+    let spawned = Arc::new(spin::Mutex::new(Vec::<Process>::new()));
+    let stop = Arc::new(AtomicBool::new(false));
+    let refused = Arc::new(AtomicU32::new(0));
+    // Vlakno spousti procesy a podjoby co nejrychleji, dokud ho job
+    // neodmitne; hlavni vlakno mezitim job zabije.
+    let spawner = {
+        let job = job.duplicate(None).map_err(|e| fail("dup", e))?;
+        let (spawned, stop, refused) = (spawned.clone(), stop.clone(), refused.clone());
+        libos::thread::spawn("spoustec", move || {
+            let mut n = 0u32;
+            while !stop.load(Ordering::Relaxed) && n < 200 {
+                n += 1;
+                let target = if n % 2 == 0 { Job::create(&job).ok() } else { None };
+                let r = libos::spawn_in(target.as_ref().unwrap_or(&job), "zavod", &image, Vec::new());
+                match r {
+                    Ok((p, ch)) => {
+                        let _ = ch.write(b"sleep", Vec::new());
+                        core::mem::forget(ch);
+                        spawned.lock().push(p);
+                    }
+                    Err(_) => {
+                        refused.fetch_add(1, Ordering::Relaxed);
+                        break;
+                    }
+                }
+            }
+        })
+        .map_err(|e| fail("vlakno", e))?
+    };
+    // Pockat, az bezi aspon par procesu, pak zabit.
+    let until = time::deadline_after(Duration::from_secs(5));
+    while spawned.lock().len() < 3 && time::now() < until {
+        time::sleep(Duration::from_millis(2));
+    }
+    job.kill(55).map_err(|e| fail("JOB_KILL", e))?;
+    let _ = spawner.join(Some(time::deadline_after(Duration::from_secs(10))));
+    stop.store(true, Ordering::Relaxed);
+    check!(refused.load(Ordering::Relaxed) >= 1 || spawned.lock().len() >= 200, "spoustec narazil na uzavreny job");
+    // Kazdy proces, ktery vznikl, skoncil (zadny neproklouzl).
+    for p in spawned.lock().iter() {
+        check_eq!(p.wait_exit(deadline()), Ok(55), "proces vznikly pred nebo behem JOB_KILL");
+    }
+    let left = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
+    check!(left.iter().all(|e| e.flags & libos::abi::job::proc_flags::FINISHED != 0), "v jobu nic nebezi");
+    check_eq!(Job::create(&job).err(), Some(Error::BadState), "podjob po JOB_KILL");
     Ok(())
 }
 

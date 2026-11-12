@@ -475,6 +475,32 @@ doplněno nulami). Vrátí celkový počet (i nad `max`). Vyžaduje `READ`.
 Chyby: `INVALID_ARGS` (`max` > 4096), `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.
 
+### `JOB_KILL`
+
+`(job, code) -> 0`. **[implementováno]** Ukončí všechny procesy jobu
+a všech jeho potomků s návratovým kódem `code` a job **uzavře**: nový
+proces (`PROCESS_CREATE`) ani podjob (`JOB_CREATE`) v něm ani v jeho
+potomcích už nevznikne (`BAD_STATE`). Vyžaduje `MANAGE`. Používá ho init
+při odhlášení (job relace, viz [Uživatelské účty](ucty.md#relace)).
+
+- **Volající uvnitř zabíjeného jobu** skončí jako ostatní: syscall se mu
+  vrátí 0, jeho vlákna dostanou požadavek na ukončení a skončí při
+  návratu do userspace (kód `code`).
+- **Souběh se vznikem procesu nebo podjobu:** jádro nejdřív nastaví
+  příznak jobu, pak projde registr procesů. Nový proces se nejdřív
+  zaregistruje a pak zkontroluje příznak svého jobu a předků (obojí
+  `SeqCst`): buď ho `JOB_KILL` v registru uvidí a ukončí, nebo ho jeho
+  vlastní kontrola odmítne. Podjob se po vytvoření kontroluje stejně.
+  Žádný proces tak neproklouzne; nespuštěný proces ukončený během
+  zavádění neprojde `PROCESS_START` (`BAD_STATE`).
+- Procesy skončí asynchronně (jako po `PROCESS_KILL`): na konec čekejte
+  přes `TERMINATED` handlu procesu nebo `JOB_PROCESSES` (`FINISHED`).
+
+Chyby: `BAD_HANDLE`, `ACCESS_DENIED` (bez `MANAGE`), `WRONG_TYPE`. V libos
+`Job::kill`. Testy v sadě `joby`: `job: JOB_KILL ukonci podstrom a job
+uzavre`, `job: JOB_KILL vlastniho jobu ukonci i volajiciho`, `job:
+JOB_KILL behem spousteni nic neproklouzne`.
+
 ### `FB_CONTROL`
 
 `(vmo, op, out_ptr) -> 0`. Framebuffer z firmware: `vmo` musí být právě

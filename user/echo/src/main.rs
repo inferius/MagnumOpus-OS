@@ -6,6 +6,8 @@
 //! - `exit:<cislo>` -> ukonci proces s timto kodem
 //! - `crash` -> zapis na adresu 0 (test ukonceni procesu pri vyjimce)
 //! - `sleep` -> ceka navzdy (test PROCESS_KILL)
+//! - `killjob:<kod>` -> `JOB_KILL` na vlastni job (test: volajici skonci
+//!   take); kdyby prezil, odpovi `prezil`
 //! - `alloc:<bajty>` -> vytvori objekt pameti, odpovi `ok` nebo
 //!   `err:<JMENO_CHYBY>` (test rozpoctu jobu)
 //!
@@ -61,6 +63,13 @@ fn main(startup: Startup) -> i64 {
             if channel.write(reply.as_bytes(), Vec::new()).is_err() {
                 return 4;
             }
+        } else if let Some(code) = text.strip_prefix("killjob:") {
+            let code = code.parse::<i64>().unwrap_or(1);
+            if let Ok(job) = libos::job::current() {
+                let _ = job.kill(code);
+            }
+            // Sem se vlakno nedostane: konci pri navratu ze syscallu.
+            let _ = channel.write(b"prezil", Vec::new());
         } else if text == "sleep" {
             libos::time::sleep(core::time::Duration::from_secs(3600));
         } else {

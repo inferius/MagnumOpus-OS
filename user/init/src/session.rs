@@ -225,6 +225,11 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             // init bude spoustet) se ukonci zde.
             let u = s.remove(i);
             drop(s);
+            // Vsechny procesy relace (i ty, ktere si spustila sama) a job
+            // uzavrit: nic dalsiho v nem uz nevznikne.
+            if let Err(e) = u.job.kill(libos::abi::process::EXIT_KILLED) {
+                println!("init: job relace {}: {e}", u.id);
+            }
             println!("init: relace {} uzivatele {} skoncila", u.id, u.uid);
             notify(Event::Closed(u.id));
             Ok(Vec::new())

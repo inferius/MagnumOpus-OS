@@ -318,13 +318,13 @@ methods; the PIN additionally has its own 5 attempts):
 - The session recipe in a lease (recovery after an fsd crash),
   applications with narrower sessions by manifest (`app_mounts`) and a
   taskd channel with the session identity **[designed]**.
-- **Sign-out** (`LOGOUT`): init drops the FS session and the self channel,
-  ends the session's applications and termd, and the compositor shows the
-  sign-in screen. An encrypted home is locked (`UNLOAD_KEY`). ⚠️ Processes
-  the session started itself (`shsess` from termd, applications started by
-  applications) end only with the `JOB_KILL` syscall (kills the whole
-  session job) **[designed]**; until then init ends only the processes it
-  started.
+- **Sign-out** (`LOGOUT`) **[implemented]**: init drops the FS session
+  and the self channel and with the [`JOB_KILL`](syscalls.md#job_kill)
+  syscall ends **all** the session's processes (also `shsess` from termd
+  and applications started by applications) and closes the job, so nothing
+  new can start in it; the compositor shows the sign-in screen. An
+  encrypted home is locked (`UNLOAD_KEY`). Test `ucty: udalosti a job
+  relace` (x86_64 and aarch64).
 - **Screen lock** **[implemented]** (`LOCK` from the session, or
   Ctrl+Alt+Delete -> Lock = `LOGIN_LOCK` on the login channel): processes
   keep running, the compositor shows the lock screen and input goes only
@@ -704,14 +704,8 @@ aarch64):
 - The sign-in screen and the administration dialog are only as secure as
   the compositor's system layer (applications do not draw into it, input
   goes only there) and the `inputd` secure attention shortcut.
-- ⚠️ Until `JOB_KILL` exists, sign-out ends only the processes init
-  started (desktop applications, termd); `shsess` and processes started
-  by applications run to completion and their FS sessions (`CONNECT`)
-  stay valid.
 - ⚠️ The fallback console (no GUI) has no sign-in yet: its terminal runs
   as the system, as before.
-- The GUI tests over QMP (5) fail on a clean `main` 77ac8ee too; they are
-  not caused by accounts.
 
 ## Rollout status
 
@@ -722,7 +716,7 @@ aarch64):
 | `libs/accountproto` (messages, client, CTAP2, simulated key, administration actions) | **[implemented]**, host tests |
 | `libs/accounts` (records, Argon2id, PIN, slow-down, keys, wraps, recovery key, password reset by administration) | **[implemented]**, host tests |
 | `user/accountd` (DB on the FS, login/self/setup/grants channels, administration dialog, development sign-in) | **[implemented]**, QEMU tests |
-| session manager and session job in init, desktop only after sign-in, terminal with the user identity | **[implemented]**; `JOB_KILL` for processes started by the session **[designed]** (syscall number from the coordinator) |
+| session manager and session job in init, desktop only after sign-in, terminal with the user identity, sign-out via `JOB_KILL` | **[implemented]** |
 | sign-in and lock screen in the compositor | **[implemented]**, host tests; installer of the first account **[designed]** |
 | CTAPHID transport in `usb-hid`, devmgr and init (`fido` -> `key`) | **[implemented]**; QEMU does not emulate a FIDO2 key, not yet verified on a real key |
 | home encryption | wraps and recovery key **[implemented]**; FS vaults **[designed]** (FS phase 4) |
