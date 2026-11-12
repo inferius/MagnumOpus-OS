@@ -515,7 +515,9 @@ objekt z bootstrapu `kind::FRAMEBUFFER` (jiný objekt paměti =
   `BAD_STATE`. Nový vlastník ji dostane, až ji starý vrátí (`RELEASE`)
   nebo skončí (jádro ji pak vrátí samo). Předání řídí vlastník displeje
   (supervisor initu: záložní konzole po pádu GUI).
-- `RELEASE` (2): vrácení - jádro obrazovku smaže a kreslí log dál. Smí jen vlastník (proces, který naposledy zavolal `CLAIM`), jinak `BAD_STATE`: pozdní vrácení předchozího vlastníka tak nesmaže obraz nového (konzole po pádu GUI).
+- `RELEASE` (2): vrácení - jádro obrazovku smaže a kreslí log dál (se
+  startovní obrazovkou, `bootstrap::flags::SPLASH`, obraz nechá beze změny
+  pro dalšího vlastníka, viz [Startovní obrazovka](start.md)). Smí jen vlastník (proces, který naposledy zavolal `CLAIM`), jinak `BAD_STATE`: pozdní vrácení předchozího vlastníka tak nesmaže obraz nového (konzole po pádu GUI).
   Vyžaduje `WRITE`. Konec procesu, který framebuffer převzal, ho vrátí
   sám.
 
