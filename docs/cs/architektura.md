@@ -1086,7 +1086,8 @@ Co vyřešit nejde nebo je to vědomé rozhodnutí:
 Dohodnutý postup (2026-11-06):
 
 1. **Rust:** vlastní cíl `x86_64-unknown-magnumopus` a port `std` nad
-   libos (vlákna, TLS, synchronizace, soubory, procesy, čas).
+   libos (vlákna, TLS, synchronizace, soubory, procesy, čas);
+   návrh v [Rust std](rust-std.md) **[navrženo]**.
 2. **C:** vlastní libc nad libos (pod naší kontrolou, bez POSIX dědictví,
    kde není potřeba); překlad clangem na hostiteli.
 3. **C++:** libc++, libc++abi a libunwind nad naší libc, překlad clangem.
