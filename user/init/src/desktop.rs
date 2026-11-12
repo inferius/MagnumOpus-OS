@@ -11,6 +11,8 @@
 //! Pred prihlasenim zadne aplikace uzivatele nebezi. Vyvojove automaticke
 //! prihlaseni (`cargo xtask run`) otevre relaci hned pri startu.
 
+use alloc::format;
+
 use libos::{Startup, println};
 
 use crate::gui::{DESKTOP_APPS, GUI, launch_app};
@@ -25,15 +27,24 @@ pub fn on_events(startup: &Startup, sup: &mut Supervisor) {
         match e {
             Event::Opened(s) => opened(startup, sup, s),
             Event::Closed(s) => closed(s),
-            Event::Locked(s) => println!("init: relace {s} zamcena"),
-            Event::Unlocked(s) => println!("init: relace {s} odemcena"),
+            Event::Locked(s) => {
+                println!("init: relace {s} zamcena");
+                crate::gui::session_event(&format!("lock {s}"));
+            }
+            Event::Unlocked(s) => {
+                println!("init: relace {s} odemcena");
+                crate::gui::session_event(&format!("unlock {s}"));
+            }
         }
     }
 }
 
 fn opened(startup: &Startup, sup: &mut Supervisor, session: u64) {
     let who = crate::session::name(session).unwrap_or_default();
+    let uid = crate::session::uid(session).unwrap_or(0);
     println!("init: plocha relace {session} ({who})");
+    // Kompozitor skryje prihlasovaci obrazovku.
+    crate::gui::session_event(&format!("open {session} {uid} {who}"));
     let mut g = GUI.lock();
     let Some(gui) = g.as_mut() else {
         println!("init: relace {session} bez GUI (plocha se nespousti)");
@@ -52,4 +63,5 @@ fn closed(session: u64) {
     }
     crate::terminal::TERMINALS.lock().close_session(session);
     println!("init: procesy relace {session} ukonceny");
+    crate::gui::session_event(&format!("close {session}"));
 }

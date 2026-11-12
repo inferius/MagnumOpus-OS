@@ -22,6 +22,9 @@ use crate::{Comp, Out, PeerId};
 /// Upozorneni pod textem dialogu.
 const GUARD: &str = "Systémový dialog přijímá jen fyzický vstup. Bezpečná zkratka Ctrl+Alt+Del ukáže vždy pravý.";
 
+/// Volba bezpecne obrazovky: zamknout relaci.
+const LOCK: &str = "Zamknout";
+
 /// Kdo dialog vyvolal (komu patri odpoved).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Owner {
@@ -411,7 +414,12 @@ impl Comp {
             kind: DialogKind::Confirm,
             app: String::new(),
             text: String::from("Systém převzal klávesnici a myš. Tuto obrazovku nemůže žádná aplikace napodobit ani zavřít."),
-            options: alloc::vec![String::from("Zpět")],
+            // S prihlasenym uzivatelem i zamceni obrazovky.
+            options: if self.has_active_session() {
+                alloc::vec![String::from("Zpět"), String::from(LOCK)]
+            } else {
+                alloc::vec![String::from("Zpět")]
+            },
             sel: 0,
             password: String::new(),
         });
@@ -431,7 +439,12 @@ impl Comp {
                 },
             )),
             Owner::Action(call) => self.action_confirmed(call, choice == 0),
-            Owner::Secure => self.out.push(Out::SecureRelease),
+            Owner::Secure => {
+                if d.options.get(choice).is_some_and(|o| o == LOCK) {
+                    self.lock_session();
+                }
+                self.out.push(Out::SecureRelease)
+            }
             Owner::Device(source) => {
                 self.input.untrusted.retain(|&s| s != source);
                 self.out.push(Out::Device { source, trust: choice == 0 });

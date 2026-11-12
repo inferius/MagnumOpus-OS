@@ -54,6 +54,11 @@ pub const INPUT: &str = "input";
 pub const SECURE: &str = "secure";
 pub const CONNECT: &str = "connect";
 pub const DIALOG: &str = "dialog";
+/// Kanal `login` ke sluzbe uctu (handle): prihlasovaci obrazovka.
+pub const LOGIN: &str = "login";
+/// Relace od initu: `session open <id> <uid> <jmeno>`,
+/// `session lock|unlock|close <id>`.
+pub const SESSION: &str = "session";
 pub const ACTIONS: &str = "actions";
 pub const INSPECT: &str = "inspect";
 pub const STATUS: &str = "status";

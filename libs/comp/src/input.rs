@@ -253,9 +253,20 @@ impl Comp {
                 let y = (y as i64 * self.h as i64 / 65536) as i32;
                 self.pointer_to(x, y, mods, syn, r.time, now);
             }
-            Event::Button { button, action } => self.button(button, action == Action::Press, mods, syn, r.time, now),
+            Event::Button { button, action } => {
+                // Prihlasovaci obrazovka bere klik (jen fyzicky; dialog nad
+                // ni ma prednost).
+                if self.greeter_visible() && self.dialogs.active().is_none() {
+                    if !syn && button == Button::Left && action == Action::Press {
+                        let (x, y) = (self.input.px, self.input.py);
+                        self.greeter_click(x, y, now);
+                    }
+                    return;
+                }
+                self.button(button, action == Action::Press, mods, syn, r.time, now)
+            }
             Event::Scroll { dx, dy } => {
-                if self.dialogs.active().is_some() {
+                if self.dialogs.active().is_some() || self.greeter_visible() {
                     return;
                 }
                 if let Some((g, Zone::Content(..))) = self.hit(self.input.px, self.input.py) {
@@ -267,6 +278,12 @@ impl Comp {
             Event::Key { code, action, ch, .. } => {
                 if !syn {
                     self.input.last_key = now;
+                }
+                if self.greeter_visible() && self.dialogs.active().is_none() {
+                    if !syn {
+                        self.greeter_key(code, action, now);
+                    }
+                    return;
                 }
                 // Diagnosticky snimek: jen fyzicka klavesnice, aplikaci nejde.
                 // Paleta prikazu: zkratka (jen fyzicka klavesnice) prepina;
@@ -334,6 +351,12 @@ impl Comp {
                 }
             }
             Event::Text(ch) => {
+                if self.greeter_visible() && self.dialogs.active().is_none() {
+                    if !syn {
+                        self.greeter_text(ch, now);
+                    }
+                    return;
+                }
                 if self.palette.is_some() && self.dialogs.active().is_none() {
                     if !syn {
                         self.palette_text(ch);

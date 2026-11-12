@@ -15,6 +15,7 @@
 extern crate alloc;
 
 mod gpu;
+mod login;
 mod status;
 mod peers;
 mod screen;
@@ -59,6 +60,8 @@ struct Service {
     snapshots: Option<Channel>,
     /// Kanal k initu pro spousteni aplikaci (`launcher`).
     launcher: Option<Channel>,
+    /// Kanal `login` ke sluzbe uctu (prihlasovaci obrazovka).
+    login: Option<login::Login>,
 }
 
 impl Service {
@@ -107,6 +110,7 @@ fn main(startup: Startup) -> i64 {
         audio_src: None,
         snapshots: None,
         launcher: None,
+        login: None,
     };
     loop {
         if !s.wait_and_serve() {
@@ -156,6 +160,9 @@ impl Service {
         for src in [&self.net_src, &self.audio_src].into_iter().flatten() {
             items.push((src.ch.handle(), rd));
         }
+        if let Some(l) = &self.login {
+            items.push((l.handle(), rd));
+        }
         if let Some(s) = &self.snapshots {
             items.push((s.handle(), rd));
         }
@@ -188,6 +195,7 @@ impl Service {
         for _ in [&self.net_src, &self.audio_src].into_iter().flatten() {
             next(&obs);
         }
+        let login = if self.login.is_some() { next(&obs) } else { Signals(0) };
         let snap = if self.snapshots.is_some() { next(&obs) } else { Signals(0) };
         let peer_obs: Vec<Signals> = obs.get(i..).map(|s| s.to_vec()).unwrap_or_default();
         // 1. Vstup ma prednost.
@@ -200,6 +208,14 @@ impl Service {
             self.read_input(true, now);
         } else if sec.intersects(Signals::PEER_CLOSED) {
             self.secure = None;
+        }
+        // Odpovedi sluzby uctu (prihlasovaci obrazovka).
+        if let (Some(l), Some(c)) = (self.login.as_mut(), self.comp.as_mut())
+            && l.read(login, c, now).is_err()
+        {
+            println!("compd: sluzba uctu zavrela kanal login");
+            self.login = None;
+            c.set_login(false, now);
         }
         // 2. Displej (potvrzeni snimku).
         if disp.intersects(Signals::READABLE) {
@@ -258,6 +274,20 @@ impl Service {
             && let Some(why) = c.take_snapshot_request()
         {
             snapshot::take(c, &why, self.peers.frame, self.snapshots.as_ref());
+        }
+        // Pozadavky prihlasovaci obrazovky na sluzbu uctu.
+        if let Some(c) = self.comp.as_mut() {
+            let reqs = c.take_login_requests();
+            if !reqs.is_empty() {
+                match self.login.as_mut() {
+                    Some(l) => {
+                        if let Err(e) = l.send(reqs) {
+                            println!("compd: kanal login: {e}");
+                        }
+                    }
+                    None => println!("compd: prihlasovaci obrazovka bez kanalu login"),
+                }
+            }
         }
         // 4. Tik.
         self.maybe_tick();
@@ -548,6 +578,38 @@ impl Service {
                 self.secure = Some(Channel::from_handle(h));
                 (String::new(), Vec::new())
             }),
+            // Kanal login ke sluzbe uctu: prihlasovaci obrazovka, kdyz nikdo
+            // neni prihlaseny.
+            control::LOGIN => handles.into_iter().next().ok_or(Error::InvalidArgs).map(|h| {
+                self.login = Some(login::Login::new(Channel::from_handle(h)));
+                if let Some(c) = self.comp.as_mut() {
+                    c.set_login(true, now);
+                }
+                (String::new(), Vec::new())
+            }),
+            // Relace od initu: `session open <id> <uid> <jmeno>`,
+            // `session lock|unlock|close <id>`.
+            control::SESSION => {
+                let what = words.next();
+                let id = words.next().and_then(|v| v.parse::<u64>().ok());
+                match (self.comp.as_mut(), what, id) {
+                    (Some(c), Some("open"), Some(id)) => {
+                        let uid = words.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                        c.session_opened(id, uid, words.next().unwrap_or(""), now);
+                        Ok((String::new(), Vec::new()))
+                    }
+                    (Some(c), Some(w @ ("lock" | "unlock")), Some(id)) => {
+                        c.session_locked(id, w == "lock", now);
+                        Ok((String::new(), Vec::new()))
+                    }
+                    (Some(c), Some("close"), Some(id)) => {
+                        c.session_closed(id, now);
+                        Ok((String::new(), Vec::new()))
+                    }
+                    (None, _, _) => Err(Error::NotFound),
+                    _ => Err(Error::InvalidArgs),
+                }
+            }
             control::DIALOG => Channel::create().map(|(mine, theirs)| {
                 self.peers.add_dialog(mine);
                 (String::new(), alloc::vec![theirs.into_handle()])

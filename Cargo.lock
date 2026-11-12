@@ -523,6 +523,7 @@ dependencies = [
 name = "compd"
 version = "0.1.0"
 dependencies = [
+ "accountproto",
  "audioproto",
  "comp",
  "font",
@@ -534,6 +535,7 @@ dependencies = [
  "theme",
  "venus",
  "vkcomp",
+ "wire",
 ]
 
 [[package]]

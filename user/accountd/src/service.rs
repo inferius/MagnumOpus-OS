@@ -167,9 +167,19 @@ impl Service {
                 Err(e) => Err(e),
             },
             Request::Unlock { session, method, secret } => self.unlock(session, method, &secret),
+            Request::LockSession { session } => self.lock(session),
             _ => Err(Error::AccessDenied),
         };
         reply(r)
+    }
+
+    /// Zamknout relaci z obrazovky (bezpecna zkratka). Zamknout smi
+    /// kanal login kazdou relaci; odemknout jen overeni stejneho uctu.
+    fn lock(&mut self, session: u64) -> Result<Vec<u8>> {
+        let i = self.sessions.iter().position(|s| s.id == session).ok_or(Error::NotFound)?;
+        self.to_init(&ToInit::LockSession { session }, Vec::new())?;
+        self.sessions[i].locked = true;
+        Ok(Vec::new())
     }
 
     fn unlock(&mut self, session: u64, method: Method, secret: &Secret) -> Result<Vec<u8>> {

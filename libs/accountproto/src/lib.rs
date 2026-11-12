@@ -63,6 +63,8 @@ pub mod op {
     pub const PHRASE: u32 = 2;
     pub const AUTH: u32 = 3;
     pub const UNLOCK: u32 = 4;
+    /// Zamknout relaci (zamykaci obrazovka; odemknout jde jen overenim).
+    pub const LOGIN_LOCK: u32 = 5;
     // self
     pub const WHOAMI: u32 = 10;
     pub const SET_PASSWORD: u32 = 11;

@@ -100,7 +100,8 @@ impl Comp {
             self.ensure_bar_blur(now);
         }
         let mut trees: Vec<(u32, Kids)> = Vec::new();
-        for &gid in &self.z {
+        let hidden = self.greeter_visible();
+        for &gid in self.z.iter().filter(|_| !hidden) {
             let Some(w) = self.windows.get(&gid) else { continue };
             // Stejny vyber jako CPU cesta (vcetne stinu).
             if !w.mapped || w.minimized || !rects.iter().any(|r| !w.visual().intersect(r).is_empty()) {

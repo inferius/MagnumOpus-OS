@@ -117,6 +117,11 @@ pub fn job(session: u64) -> Result<Job> {
     s.iter().find(|u| u.id == session).ok_or(Error::NotFound)?.job.duplicate(None)
 }
 
+/// Uzivatel relace.
+pub fn uid(session: u64) -> Option<u64> {
+    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.uid)
+}
+
 /// Jmeno uzivatele relace.
 pub fn name(session: u64) -> Option<String> {
     SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.name.clone())

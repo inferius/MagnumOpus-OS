@@ -161,6 +161,8 @@ impl Service for CompdService {
         println!("init: kompozitor bezi ({}x{})", s.size.0, s.size.1);
         if self.give_input {
             s.input_from_inputd();
+            // Nova instance: relace a prihlasovaci obrazovka znovu.
+            give_accounts(&s);
         }
         Ok(true)
     }
@@ -188,6 +190,43 @@ impl Service for CompdService {
         let mut s = self.shared.lock();
         s.process = None;
         s.control = None;
+    }
+}
+
+/// Kompozitoru: bezici relace (`session open ...`) a kanal `login` ke
+/// sluzbe uctu (prihlasovaci obrazovka, kdyz nikdo neni prihlaseny).
+fn give_accounts(s: &Compd) {
+    // Jen bezny beh (plocha od `start_desktop`); testy GUI si kompozitor
+    // ridi samy a prihlasovaci obrazovka by jim zakryla okna.
+    if !ACCOUNTS_UI.load(core::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let list: Vec<(u64, u64, String, bool)> = crate::session::SESSIONS.lock().iter().map(|u| (u.id, u.uid, u.name.clone(), u.locked)).collect();
+    for (id, uid, name, locked) in list {
+        let _ = s.command(alloc::format!("{} open {id} {uid} {name}", control::SESSION).as_bytes(), Vec::new(), REPLY_TIMEOUT);
+        if locked {
+            let _ = s.command(alloc::format!("{} lock {id}", control::SESSION).as_bytes(), Vec::new(), REPLY_TIMEOUT);
+        }
+    }
+    match crate::accounts::channel("login") {
+        Ok(ch) => {
+            if let Err(e) = s.command(control::LOGIN.as_bytes(), vec![ch.into_handle()], REPLY_TIMEOUT) {
+                println!("init: kanal login pro kompozitor: {e}");
+            }
+        }
+        Err(e) => println!("init: prihlasovaci obrazovka bez sluzby uctu: {e}"),
+    }
+}
+
+/// Plocha s ucty bezi (bezny beh): kompozitor dostava relace a `login`.
+static ACCOUNTS_UI: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Oznami kompozitoru zmenu relace (`session open|lock|unlock|close`).
+pub fn session_event(text: &str) {
+    if let Some(g) = GUI.lock().as_ref()
+        && let Err(e) = g.command(alloc::format!("{} {text}", control::SESSION).as_bytes(), Vec::new())
+    {
+        println!("init: relace pro kompozitor: {e}");
     }
 }
 
@@ -458,6 +497,9 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
     // Aplikace plochy se spousti az pro prihlasenou relaci (udalost
     // relace, `crate::desktop`), v jejim jobu a s identitou uzivatele.
     connect_launcher(&gui, startup);
+    // Relace uz otevrene (vyvojove prihlaseni) a prihlasovaci obrazovka.
+    ACCOUNTS_UI.store(true, core::sync::atomic::Ordering::Relaxed);
+    give_accounts(&gui.shared.lock());
     *GUI.lock() = Some(gui);
 }
 

@@ -30,6 +30,7 @@ fn pozadavky_tam_a_zpet() {
     roundtrip(Request::Phrase { uid: 1000 });
     roundtrip(Request::Auth { uid: 1000, method: Method::Password, secret: Secret::from("heslo") });
     roundtrip(Request::Unlock { session: 7, method: Method::Pin, secret: Secret::from("1234") });
+    roundtrip(Request::LockSession { session: 3 });
     roundtrip(Request::WhoAmI);
     roundtrip(Request::SetPassword { old: Secret::from("a"), new: Secret::from("b") });
     roundtrip(Request::SetPin { password: Secret::from("a"), pin: Secret::default() });

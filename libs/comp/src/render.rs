@@ -390,9 +390,10 @@ impl Comp {
         let bar = self.bar_layout();
         let dialog_active = self.dialogs.active().is_some();
         // Deti vrstev kazdeho viditelneho okna jednou za snimek (ne pro
-        // kazdy poskozeny obdelnik).
+        // kazdy poskozeny obdelnik). Pod prihlasovaci obrazovkou zadna okna.
         let mut trees: Vec<(u32, Kids)> = Vec::new();
-        for &gid in &self.z {
+        let hidden = self.greeter_visible();
+        for &gid in self.z.iter().filter(|_| !hidden) {
             let Some(w) = self.windows.get(&gid) else { continue };
             if !w.mapped || w.minimized || !rects.iter().any(|r| !w.visual().intersect(r).is_empty()) {
                 continue;
@@ -431,7 +432,7 @@ impl Comp {
     /// Kde vrstva nad okny kresli: lista se stinem, kurzor, pri dialogu cela
     /// obrazovka.
     pub(crate) fn top_regions(&self, dialog_active: bool) -> Vec<Rect> {
-        if dialog_active {
+        if dialog_active || self.greeter_visible() {
             return alloc::vec![self.screen()];
         }
         let mut v = alloc::vec![self.panel_visual(), self.cursor_rect()];
@@ -479,6 +480,17 @@ impl Comp {
 
     /// Vse nad okny: lista, ztlumeni a systemovy dialog, kurzor.
     pub(crate) fn draw_top(&mut self, canvas: &mut Canvas<'_>, bar: &Bar, dialog_active: bool) {
+        // Prihlaseni / zamceno: jen obrazovka systemu (bez listy), pripadny
+        // dialog nad ni a kurzor.
+        if self.greeter_visible() {
+            let now = self.input_now;
+            self.draw_greeter(canvas, now);
+            if dialog_active {
+                self.dialogs.draw(canvas, &mut self.style, self.w, self.h);
+            }
+            draw_cursor(canvas, self.input.px, self.input.py);
+            return;
+        }
         let info = BarInfo {
             windows: &self.windows,
             clients: &self.clients,
