@@ -218,3 +218,30 @@ fn power_loss_during_dataset_deletion() {
     fs.delete_snapshot_of("/p", "S").unwrap();
     assert_clean(&mut fs);
 }
+
+/// Zalozeni datasetu nebo klonu na jmeno, ktere uz existuje, vrati
+/// `ALREADY_EXISTS` a svazek zustane zapisovatelny. Driv chyba prisla az po
+/// zmene stavu a svazek presel do stavu chyby: sluzba uctu zaklada
+/// `/system/accounts` pri kazdem startu, takze od druheho startu systemu
+/// vracel kazdy zapis `IO_ERROR` (nahlaseno z VMware).
+#[test]
+fn existing_dataset_name_keeps_volume_writable() {
+    let mut fs = new_fs(8192);
+    fs.create_dataset("/p").unwrap();
+    fs.create("/soubor", Kind::File).unwrap();
+    assert_eq!(fs.create_dataset("/p").err(), Some(Error::AlreadyExists));
+    assert_eq!(fs.create_dataset("/soubor").err(), Some(Error::AlreadyExists));
+    fs.create("/p/f", Kind::File).unwrap();
+    fs.write("/p/f", 0, b"po kolizi").unwrap();
+    fs.commit().unwrap();
+    fs.snapshot_of("/p", "S").unwrap();
+    assert_eq!(fs.clone_snapshot("/p", "S", "/p").err(), Some(Error::AlreadyExists));
+    assert_eq!(fs.clone_snapshot("/p", "S", "/soubor").err(), Some(Error::AlreadyExists));
+    fs.write("/soubor", 0, b"stale zapisovatelny").unwrap();
+    fs.commit().unwrap();
+    // Klon pak jde na volne jmeno a snapshot nema navic zapocteny klon.
+    fs.clone_snapshot("/p", "S", "/k").unwrap();
+    fs.delete_dataset("/k").unwrap();
+    fs.delete_snapshot_of("/p", "S").unwrap();
+    assert_clean(&mut fs);
+}

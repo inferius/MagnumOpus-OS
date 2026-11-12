@@ -19,8 +19,26 @@ pub const TESTS: &[Test] = &[
     ("vypis s metadaty (LIST_STAT_PAGE)", list_stat),
     ("rozdil verzi po pohledu (DIFF) a dataset cesty", diff_dataset_of),
     ("vypis s metadaty a dataset cesty s omezenou relaci", restricted_session),
+    ("dataset na existujici jmeno: svazek zustane zapisovatelny", dataset_again),
     ("kontrola konzistence po historii", check_clean),
 ];
+
+/// Druhy start sluzby uctu: dataset uz existuje (`ALREADY_EXISTS`) a dalsi
+/// zapisy musi projit. Driv chyba svazek prepnula do stavu chyby a od
+/// druheho startu systemu (VMware) vracel kazdy zapis `IO_ERROR`; testy
+/// s novym datovym diskem pri kazdem behu na to neprisly.
+fn dataset_again(_: &Startup) -> TestResult {
+    let f = fs()?;
+    match f.create_dataset("/f2-znovu") {
+        Ok(_) | Err(Error::AlreadyExists) => {}
+        Err(e) => return Err(fail("create_dataset", e)),
+    }
+    check_eq!(f.create_dataset("/f2-znovu").err(), Some(Error::AlreadyExists), "druhe zalozeni");
+    let _ = f.create("/f2-znovu/po.txt", kind::FILE);
+    f.write("/f2-znovu/po.txt", 0, b"po kolizi").map_err(|e| fail("zapis po kolizi", e))?;
+    f.commit().map_err(|e| fail("commit po kolizi", e))?;
+    Ok(())
+}
 
 fn fs() -> Result<&'static FsClient, alloc::string::String> {
     devices()

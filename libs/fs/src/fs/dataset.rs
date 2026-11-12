@@ -381,6 +381,19 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Vlozi polozku datasetu `id` do adresare `path` (rodic musi byt
     /// aktivni a jmeno volne).
+    /// Jmeno `name` ve slozce `parent` je volne, jinak `ALREADY_EXISTS`.
+    /// Volat pred prvni zmenou stavu: chyba po zmene (`guarded`) by
+    /// prepnula svazek do stavu chyby a kazdy dalsi zapis by vracel
+    /// `IO_ERROR` (napr. sluzba uctu pri kazdem startu zaklada svuj dataset
+    /// znovu a spoleha na `ALREADY_EXISTS`).
+    fn ensure_name_free(&mut self, parent: u64, name: &str) -> Result<()> {
+        let root = self.s.root;
+        if self.lookup_child(&root, parent, name)?.is_some() {
+            return Err(Error::AlreadyExists);
+        }
+        Ok(())
+    }
+
     fn link_dataset(&mut self, parent: u64, name: &str, id: u64) -> Result<()> {
         let root = self.s.root;
         if self.lookup_child(&root, parent, name)?.is_some() {
@@ -465,6 +478,7 @@ impl<D: BlockDevice> Fs<D> {
             let (parent_path, name) = split_parent(path)?;
             validate_name(name)?;
             let parent = fs.dir_of(parent_path)?;
+            fs.ensure_name_free(parent, name)?;
             fs.ensure_room(8)?;
             let id = fs.next_dataset_id()?;
             let mut root_dir = Inode::new(KIND_DIR, 0, fs.now, fs.s.txg);
@@ -503,6 +517,10 @@ impl<D: BlockDevice> Fs<D> {
         self.guarded(|fs| {
             let (parent_path, name) = split_parent(path)?;
             validate_name(name)?;
+            // Kolize jmena pred prvni zmenou (pocet klonu snapshotu).
+            // `dir_of` niz se vola znovu: `enter_dataset` prepne kontext.
+            let target = fs.dir_of(parent_path)?;
+            fs.ensure_name_free(target, name)?;
             fs.ensure_room(8)?;
             let origin = fs.enter_dataset(dataset)?;
             let (snap_id, mut rec) = fs.find_snapshot(snapshot)?;
