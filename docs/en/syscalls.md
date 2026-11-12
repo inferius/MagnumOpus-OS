@@ -403,6 +403,40 @@ the process ends (code -1,000,002 unless `PROCESS_EXIT` was called before).
 `() -> 0`. Gives the CPU to the next ready thread of the same or higher
 class.
 
+### `THREAD_SET_POINTER`
+
+`(value) -> 0`. Sets the thread pointer register of the current thread for
+TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`). The kernel stores the value in
+the thread and loads it on every switch; a new thread starts with 0, so the
+value never leaks into another thread or process (on aarch64 a program may
+write `TPIDR_EL0` itself, so the kernel saves it on a switch). Errors:
+`INVALID_ARGS` (`value` outside user space). In libos
+`sys::thread_set_pointer`; used by the `std` runtime ([Rust std](rust-std.md)).
+
+## Futex
+
+Waiting for a change of a `u32` in process memory, the base of locks and
+condition variables in user space (`std::sync`, `libos::sync::Mutex`). The
+key is a virtual address in the own process; sharing between processes is
+not supported yet. Checking the value and queueing happen under the
+process queue lock, which `FUTEX_WAKE` takes too, so a wake-up between the
+check and going to sleep is never lost.
+
+### `FUTEX_WAIT`
+
+`(addr, expected, deadline) -> 0`. If the `u32` at `addr` (4-byte aligned)
+equals `expected`, the thread sleeps until `FUTEX_WAKE` on the same address
+wakes it or `deadline` passes (ns since boot, `DEADLINE_INFINITE` = no
+limit). A different value = 0 right away. Spurious wake-ups are possible;
+the caller re-checks its condition. Errors: `TIMED_OUT`, `INVALID_ARGS`
+(unaligned address, address outside user space), `INVALID_ADDRESS` (not
+mapped), `CANCELED` (process termination).
+
+### `FUTEX_WAKE`
+
+`(addr, count) -> number woken`. Wakes up to `count` threads waiting on
+`addr` in arrival order (`u32::MAX` = all). Errors: `INVALID_ARGS`.
+
 ## Jobs (resource budgets)
 
 Every process belongs to one **job**. Jobs form a tree: init gets the

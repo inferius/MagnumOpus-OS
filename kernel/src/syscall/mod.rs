@@ -12,6 +12,7 @@ pub fn read_user(p: &crate::object::process::Process, addr: u64, len: usize) -> 
     user::read_bytes(p, addr, len)
 }
 mod diag;
+mod futex;
 mod handle;
 mod hw;
 mod job;
@@ -112,6 +113,9 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::CRASH_RECORD => diag::crash_record(a),
         nr::LOG_CONTROL => diag::log_control(a),
         nr::JOB_KILL => job::kill(a),
+        nr::FUTEX_WAIT => futex::wait(a),
+        nr::FUTEX_WAKE => futex::wake(a),
+        nr::THREAD_SET_POINTER => futex::set_thread_pointer(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -178,6 +182,9 @@ pub fn name(number: u64) -> &'static str {
         "CRASH_RECORD",
         "LOG_CONTROL",
         "JOB_KILL",
+        "FUTEX_WAIT",
+        "FUTEX_WAKE",
+        "THREAD_SET_POINTER",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

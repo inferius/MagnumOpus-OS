@@ -394,6 +394,40 @@ proces (kód -1 000 002, pokud předtím nevolal `PROCESS_EXIT`).
 
 `() -> 0`. Přenechá CPU dalšímu připravenému vláknu stejné nebo vyšší třídy.
 
+### `THREAD_SET_POINTER`
+
+`(value) -> 0`. Nastaví registr ukazatele vlákna aktuálního vlákna pro
+TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`). Jádro hodnotu ukládá ve
+vlákně a nahraje ji při každém přepnutí; nové vlákno začíná s 0, takže
+hodnota nikdy nepřeteče do jiného vlákna ani procesu (na aarch64 si
+program `TPIDR_EL0` může zapsat i sám, jádro ho proto při přepnutí
+ukládá). Chyby: `INVALID_ARGS` (`value` mimo userspace). V libos
+`sys::thread_set_pointer`; používá ho runtime `std` ([Rust std](rust-std.md)).
+
+## Futex
+
+Čekání na změnu `u32` v paměti procesu, základ zámků a podmínkových
+proměnných v userspace (`std::sync`, `libos::sync::Mutex`). Klíč je
+virtuální adresa ve vlastním procesu; sdílení mezi procesy zatím není.
+Kontrola hodnoty a zařazení do fronty proběhnou pod zámkem fronty
+procesu, který bere i `FUTEX_WAKE`, takže se probuzení mezi kontrolou
+a usnutím neztratí.
+
+### `FUTEX_WAIT`
+
+`(addr, expected, deadline) -> 0`. Když `u32` na `addr` (zarovnané na
+4 B) je rovné `expected`, vlákno usne, dokud ho nevzbudí `FUTEX_WAKE`
+na stejné adrese nebo nevyprší `deadline` (ns od startu,
+`DEADLINE_INFINITE` = bez limitu). Jiná hodnota = hned 0. Plané
+probuzení je možné, volající podmínku ověří znovu. Chyby: `TIMED_OUT`,
+`INVALID_ARGS` (nezarovnaná adresa, adresa mimo userspace),
+`INVALID_ADDRESS` (nenamapovaná), `CANCELED` (ukončení procesu).
+
+### `FUTEX_WAKE`
+
+`(addr, count) -> počet probuzených`. Probudí až `count` vláken čekajících
+na `addr` v pořadí příchodu (`u32::MAX` = všechna). Chyby: `INVALID_ARGS`.
+
 ## Joby (rozpočty prostředků)
 
 Každý proces patří do jednoho **jobu**. Joby tvoří strom: kořen dostane

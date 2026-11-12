@@ -208,10 +208,19 @@ impl api::Threads for X86_64 {
     }
 
     /// Program `FS_BASE` sam zmenit nemuze (CR4.FSGSBASE je vypnute;
-    /// nacteni selektoru FS bazi jen vynuluje) a jadro ho zatim nenastavuje:
-    /// neni co ukladat ani nahravat.
+    /// nacteni selektoru FS bazi jen vynuluje), proto se neuklada - plati
+    /// hodnota z `THREAD_SET_POINTER` ulozena ve vlaknu.
     #[inline]
-    unsafe fn switch_thread_pointer(_save: &core::sync::atomic::AtomicU64, _next: u64) {}
+    unsafe fn switch_thread_pointer(_save: &core::sync::atomic::AtomicU64, next: u64) {
+        // SAFETY: predano volajicim (kanonicka adresa userspace).
+        unsafe { cpu::wrmsr(cpu::MSR_FS_BASE, next) }
+    }
+
+    #[inline]
+    unsafe fn set_thread_pointer(value: u64) {
+        // SAFETY: predano volajicim.
+        unsafe { cpu::wrmsr(cpu::MSR_FS_BASE, value) }
+    }
 
     unsafe fn enter_user(entry: u64, stack: u64, arg0: u64, arg1: u64) -> ! {
         // SAFETY: predano volajicim.

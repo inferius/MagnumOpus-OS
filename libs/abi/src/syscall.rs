@@ -173,8 +173,26 @@ pub const LOG_CONTROL: u64 = 53;
 /// uvnitr zabijeneho jobu skonci take (pri navratu ze syscallu).
 pub const JOB_KILL: u64 = 54;
 
+/// Futex: `(addr, expected, deadline) -> 0`. Kdyz u32 na adrese `addr`
+/// (zarovnane na 4 B, vlastni proces) je rovne `expected`, vlakno usne, dokud
+/// ho neprobudi [`FUTEX_WAKE`] na stejne adrese nebo nevyprsi `deadline`
+/// (ns od startu, [`DEADLINE_INFINITE`] = bez limitu; vyprseni = `TIMED_OUT`).
+/// Jina hodnota = hned 0. Planne probuzeni je mozne (volajici overi
+/// podminku znovu). Fronta je per proces (klic = virtualni adresa).
+pub const FUTEX_WAIT: u64 = 55;
+
+/// Futex: `(addr, count) -> pocet probuzenych`. Probudi az `count` vlaken
+/// cekajicich na `addr` ve vlastnim procesu (`u32::MAX` = vsechna).
+pub const FUTEX_WAKE: u64 = 56;
+
+/// Ukazatel vlakna pro TLS: `(value) -> 0`. Nastavi registr ukazatele
+/// vlakna aktualniho vlakna (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`); jadro
+/// ho uklada a obnovuje pri kazdem prepnuti. Nove vlakno zacina s 0.
+/// Na x86_64 musi byt `value` kanonicka adresa userspace.
+pub const THREAD_SET_POINTER: u64 = 57;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 55;
+pub const COUNT: u64 = 58;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {
