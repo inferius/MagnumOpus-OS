@@ -37,8 +37,8 @@ const HOLD: u64 = 200;
 const WORD_OUT: u64 = 200;
 /// Prumer avataru prihlasovaci obrazovky v logickych px (`.av`).
 const AVATAR: f32 = 88.0;
-/// Takt prechodu.
-const FRAME_NS: u64 = 16_000_000;
+/// Takt prechodu (30 fps: kompozitor mezitim obsluhuje klienty).
+const FRAME_NS: u64 = 33_000_000;
 
 /// Faze prechodu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,10 +174,17 @@ impl Service {
     }
 
     /// Pri pripojeni displeje (`install`): prvni snimek je startovni obraz.
-    pub fn splash_first_frame(&mut self, px: &mut [u32], w: u32, h: u32) -> bool {
+    /// Pozadi (svetly motiv) je stejne jako plocha kompozitoru `comp`: vezme
+    /// se od nej (pocita se jednou, kompozitor ho stejne potrebuje).
+    pub fn splash_first_frame(&mut self, comp: &mut comp::Comp, px: &mut [u32], w: u32, h: u32) -> bool {
         let Some(p) = self.splash_pending.take() else { return false };
+        let t = libos::time::now();
         let mut ho = Handoff::new(w, h, p);
+        if comp.background() == theme::Theme::builtin(theme::Mode::Light).color.bg {
+            ho.splash.set_backdrop(comp.backdrop().to_vec());
+        }
         ho.first_frame(px, libos::time::now());
+        println!("compd: navazuji na startovni obraz (prstenec {p} promile), prvni snimek {} us", (libos::time::now() - t) / 1000);
         self.splash = Some(ho);
         true
     }

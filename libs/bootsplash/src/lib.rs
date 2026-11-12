@@ -22,6 +22,7 @@
 extern crate alloc;
 
 pub mod art;
+mod cache;
 mod geom;
 
 #[cfg(test)]
@@ -213,6 +214,8 @@ pub struct Splash {
     word: Mask,
     word_x: i32,
     rgb: bool,
+    /// Znak v klidove poloze celociselne (`cache.rs`).
+    cache: Option<cache::MarkCache>,
 }
 
 impl Splash {
@@ -228,7 +231,7 @@ impl Splash {
         let wh = (size::WORD_H * s + 0.5) as u32;
         let word = art::render(&wm, ww, wh, x0 - 4.0, y0 - 4.0, k);
         let word_x = (layout.cx - ww as f32 / 2.0) as i32;
-        Self { layout, pal: Palette::light(), bg: None, symbol: art::symbol(), logo: (0, Mask::default()), word, word_x, rgb: false }
+        Self { layout, pal: Palette::light(), bg: None, symbol: art::symbol(), logo: (0, Mask::default()), word, word_x, rgb: false, cache: None }
     }
 
     /// Framebuffer s poradim R, G, B v pameti (prohodit kanaly).
@@ -247,6 +250,14 @@ impl Splash {
             self.bg = Some(gfx::backdrop::render(w, h, self.pal.bg, &layers));
         }
         self.bg.as_deref().unwrap()
+    }
+
+    /// Pozadi spocitane jinde (kompozitor ma stejny obraz plochy pro
+    /// svetly motiv): ushetri vypocet. Jina velikost se ignoruje.
+    pub fn set_backdrop(&mut self, bg: Vec<u32>) {
+        if bg.len() == (self.layout.w * self.layout.h) as usize {
+            self.bg = Some(bg);
+        }
     }
 
     fn logo_mask(&mut self, px: u32) {
@@ -289,40 +300,59 @@ impl Splash {
         let mo = st.mark_opacity.clamp(0.0, 1.0);
         let logo_x0 = mcx - logo_px as f32 / 2.0;
         let logo_y0 = mcy - logo_px as f32 / 2.0;
+        // Klidova poloha: znak z celociselne tabulky (krome okoli koncu
+        // oblouku, ty se kresli presne).
+        let still = st.mark_scale == 1.0 && st.mark_dx == 0.0 && st.mark_dy == 0.0 && mo >= 1.0;
+        if still && self.cache.is_none() {
+            self.cache = Some(cache::MarkCache::build(&l, &self.logo.1, logo_x0, logo_y0));
+        }
+        let fi = cache::MarkCache::frame(&l, st.glow, st.glow_scale, st.progress, pal.accent);
+        let cache = if still { self.cache.as_ref() } else { None };
+        let cap_r = hw + 1.5;
+        let near_cap = |x: i32, y: i32| {
+            p > 0.0 && p < 1.0 && caps.iter().any(|&(ex, ey)| (x as f32 + 0.5 - ex).abs() <= cap_r && (y as f32 + 0.5 - ey).abs() <= cap_r)
+        };
         let bg = self.bg.as_deref();
         let rgb = self.rgb;
         let logo = &self.logo.1;
         let word = &self.word;
 
-        // Rychla cesta: pozadi kryje vse (cerna, rozsvicene nebo
-        // rozsvecovane teple) = radek se jen zkopiruje nebo celociselne
-        // ztlumi, pocitaji se jen pixely znaku a nazvu.
-        let fast = back >= 1.0 && (wall <= 0.0 || bg.is_some());
+        // 1. Podklad po radcich celociselne: cerna nebo (ztlumene) teple
+        //    pozadi, pri `backdrop < 1` prolnute s tim, co uz je ve vystupu.
+        // 2. Znak a nazev jen v jejich obdelnicich (float), nad podkladem.
         let dim = (wall * 256.0 + 0.5) as u32;
+        let keep = 256 - (back * 256.0 + 0.5) as u32;
         let word_on = st.word > 0.0 && !word_r.is_empty();
         let mark_on = mo > 0.0 && !mark.is_empty();
-        for y in area.y..area.y + area.h as i32 {
+        for y in area.y..area.bottom() {
             let row = y as usize * stride;
-            if fast {
-                let dst = &mut out[row + area.x as usize..row + area.right() as usize];
-                match bg {
-                    Some(b) if wall > 0.0 => {
-                        let src = &b[(y as u32 * l.w + area.x as u32) as usize..][..dst.len()];
-                        for (d, &c) in dst.iter_mut().zip(src) {
-                            let c = if dim >= 256 { c } else { geom::dim(c, dim) };
-                            *d = geom::swap(c, rgb);
-                        }
+            let dst = &mut out[row + area.x as usize..row + area.right() as usize];
+            let src = match bg {
+                Some(b) if wall > 0.0 => Some(&b[(y as u32 * l.w + area.x as u32) as usize..][..dst.len()]),
+                _ => None,
+            };
+            match (src, keep) {
+                (None, 0) => dst.fill(geom::swap(0xFF00_0000, rgb)),
+                (Some(src), 0) if dim >= 256 => {
+                    for (d, &c) in dst.iter_mut().zip(src) {
+                        *d = geom::swap(c, rgb);
                     }
-                    _ => dst.fill(0xFF00_0000),
+                }
+                _ => {
+                    for (k, d) in dst.iter_mut().enumerate() {
+                        let base = match src {
+                            Some(src) if dim >= 256 => src[k],
+                            Some(src) => geom::dim(src[k], dim),
+                            None => 0xFF00_0000,
+                        };
+                        *d = geom::swap(if keep == 0 { base } else { geom::lerp(base, geom::unswap(*d, rgb), keep) }, rgb);
+                    }
                 }
             }
-            let spans: [(i32, i32); 2] = if !fast {
-                [(area.x, area.right()), (0, 0)]
-            } else {
-                let m = if mark_on && y >= mark.y && y < mark.bottom() { (mark.x, mark.right()) } else { (0, 0) };
-                let w = if word_on && y >= word_r.y && y < word_r.bottom() { (word_r.x, word_r.right()) } else { (0, 0) };
-                [m, w]
-            };
+            let spans = [
+                if mark_on && y >= mark.y && y < mark.bottom() { (mark.x, mark.right()) } else { (0, 0) },
+                if word_on && y >= word_r.y && y < word_r.bottom() { (word_r.x, word_r.right()) } else { (0, 0) },
+            ];
             for (k, &(x0, x1)) in spans.iter().enumerate() {
                 for x in x0..x1 {
                     // Prekryv znaku a nazvu: pixel uz spocitany.
@@ -330,15 +360,22 @@ impl Splash {
                         continue;
                     }
                     let i = row + x as usize;
-                    // Podklad: cerna nebo teple pozadi, pres to, co uz je.
-                    let mut c = match bg {
-                        Some(b) if wall > 0.0 => geom::scale_rgb(b[(y as u32 * l.w + x as u32) as usize], wall),
-                        _ => [0.0; 3],
-                    };
-                    if back < 1.0 {
-                        let under = geom::rgbf(geom::unswap(out[i], rgb));
-                        c = geom::mix(under, c, back);
+                    if let Some(mc) = cache
+                        && mark.contains(x, y)
+                        && mc.rect.contains(x, y)
+                        && !near_cap(x, y)
+                    {
+                        let mut v = mc.shade(x, y, geom::unswap(out[i], rgb), &fi);
+                        if word_on && word_r.contains(x, y) {
+                            let wc = word.get(x - self.word_x, y - l.word_top as i32) as u32;
+                            if wc > 0 {
+                                v = geom::lerp(v, pal.ink, (wc * (st.word * 256.0) as u32 + 127) / 255);
+                            }
+                        }
+                        out[i] = geom::swap(v, rgb);
+                        continue;
                     }
+                    let mut c = geom::rgbf(geom::unswap(out[i], rgb));
                     if mark.contains(x, y) && mo > 0.0 {
                         let (px, py) = (x as f32 + 0.5 - mcx, y as f32 + 0.5 - mcy);
                         let d = geom::sqrt(px * px + py * py);
@@ -370,7 +407,7 @@ impl Splash {
                             c = geom::mix(c, accent, lc as f32 / 255.0 * mo);
                         }
                     }
-                    if st.word > 0.0 && word_r.contains(x, y) {
+                    if word_on && word_r.contains(x, y) {
                         let wc = word.get(x - self.word_x, y - l.word_top as i32);
                         if wc > 0 {
                             c = geom::mix(c, ink, wc as f32 / 255.0 * st.word);

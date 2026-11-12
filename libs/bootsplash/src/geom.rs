@@ -75,8 +75,15 @@ pub fn round(x: f32) -> f32 {
     floor(x + 0.5)
 }
 
+/// Odmocnina: odhad z exponentu a dva kroky Newtonovy metody (relativni
+/// chyba pod 1e-6 - na pixely staci, `gfx::sqrtf` dela ctyri kroky).
 pub fn sqrt(x: f32) -> f32 {
-    gfx::sqrtf(x)
+    if !(x > 0.0) || !x.is_finite() {
+        return 0.0;
+    }
+    let mut y = f32::from_bits((x.to_bits() >> 1) + 0x1FBB_4F2E);
+    y = 0.5 * (y + x / y);
+    0.5 * (y + x / y)
 }
 
 pub fn sin(x: f32) -> f32 {
@@ -159,11 +166,6 @@ pub fn rgbf(c: u32) -> [f32; 3] {
     [(c >> 16 & 0xFF) as f32, (c >> 8 & 0xFF) as f32, (c & 0xFF) as f32]
 }
 
-pub fn scale_rgb(c: u32, k: f32) -> [f32; 3] {
-    let v = rgbf(c);
-    [v[0] * k, v[1] * k, v[2] * k]
-}
-
 /// `a` prelnute k `b` s krytim `t`.
 pub fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
@@ -178,6 +180,14 @@ pub fn pack(c: [f32; 3]) -> u32 {
 pub fn dim(c: u32, k: u32) -> u32 {
     let rb = ((c & 0x00FF_00FF) * k >> 8) & 0x00FF_00FF;
     let g = ((c & 0x0000_FF00) * k >> 8) & 0x0000_FF00;
+    0xFF00_0000 | rb | g
+}
+
+/// Prolnuti `a` a `b`: `kb` 0..=256 je podil `b`.
+pub fn lerp(a: u32, b: u32, kb: u32) -> u32 {
+    let ka = 256 - kb;
+    let rb = (((a & 0x00FF_00FF) * ka + (b & 0x00FF_00FF) * kb) >> 8) & 0x00FF_00FF;
+    let g = (((a & 0x0000_FF00) * ka + (b & 0x0000_FF00) * kb) >> 8) & 0x0000_FF00;
     0xFF00_0000 | rb | g
 }
 

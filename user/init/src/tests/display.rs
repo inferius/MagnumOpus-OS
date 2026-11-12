@@ -23,7 +23,7 @@ use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
     ("bochs-display: konektory a rezimy z EDID", connectors),
-    ("bochs-display: compd nastavi rezim, zmena rozliseni za behu", compd_mode_change),
+    ("bochs-display: compd navaze na startovni obraz, nastavi rezim, zmena rozliseni za behu", compd_mode_change),
     ("bochs-display: pad ovladace, obnova stavu firmwaru, RESET", crash_restores_firmware),
 ];
 
@@ -102,7 +102,9 @@ fn start_compd(startup: &Startup, display: Channel) -> Result<(Process, Channel,
     let fs = Initfs::open(startup).map_err(|e| fail("initfs", e))?;
     let image = fs.find("compd").ok_or("compd chybi v initfs")?;
     let (p, ctl) = libos::spawn("compd", image, Vec::new()).map_err(|e| fail("spawn compd", e))?;
-    let size = command(&ctl, control::DISPLAY, alloc::vec![display.into_handle()])?;
+    // Jako prvni start systemu: na obrazovce je startovni obraz (prstenec
+    // na 60 %), kompozitor na nej navaze a prejde do plochy.
+    let size = command(&ctl, &format!("{} UTC {}600", control::DISPLAY, control::SPLASH_ARG), alloc::vec![display.into_handle()])?;
     Ok((p, ctl, size))
 }
 
@@ -118,6 +120,11 @@ fn compd_mode_change(startup: &Startup) -> TestResult {
         let ch = s.kit.client.take().ok_or("kanal klienta chybi")?;
         let (p, ctl, size) = start_compd(startup, ch)?;
         println!("init: test displej: compd nad bochs-display {size}");
+        // Prechod ze startovniho obrazu (~1,6 s): kompozitor mezitim odpovida
+        // a plochu sklada dal (do bufferu), po nem bezne snimky.
+        let st = command(&ctl, control::STATUS, Vec::new())?;
+        check!(control::Status::parse(&st).is_some(), "status behem prechodu");
+        time::sleep(Duration::from_millis(1900));
         // Vystup byl vypnuty: kompozitor nastavil preferovany rezim.
         let cur = current(&ctl)?;
         check!(cur.starts_with(&size.replace(' ', "x")), "aktualni rezim nesedi s velikosti kompozitoru");

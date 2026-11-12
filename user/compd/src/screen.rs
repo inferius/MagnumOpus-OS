@@ -196,7 +196,7 @@ impl Service {
         // hlidac sluzeb ceka na pripojeni). Cely snimek slozi dalsi takt,
         // obrazovka je cela poskozena.
         // Po startovni obrazovce je prvni snimek tentyz obraz (`splash.rs`).
-        if !self.splash_first_frame(screen.pixels(), w, h) {
+        if !self.splash_first_frame(&mut comp, screen.pixels(), w, h) {
             let mut canvas = gfx::Canvas::new(screen.pixels(), w, h, w).ok_or(Error::NoMemory)?;
             canvas.fill(canvas.bounds(), comp.background());
         }

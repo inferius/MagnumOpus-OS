@@ -175,6 +175,15 @@ fn transformed_mark_moves() {
 }
 
 #[test]
+fn sqrt_is_precise() {
+    for &x in &[1e-4f32, 0.5, 1.0, 2.0, 9.0, 1234.5, 3.0e6] {
+        let r = geom::sqrt(x);
+        assert!((r * r - x).abs() <= x * 1e-5, "{x}: {r}");
+    }
+    assert_eq!(geom::sqrt(0.0), 0.0);
+}
+
+#[test]
 fn fast_path_matches_generic() {
     let mut s = Splash::new(640, 400);
     let mut a = vec![0u32; 640 * 400];
@@ -208,11 +217,31 @@ fn perf_numbers() {
     let t = std::time::Instant::now();
     s.paint_all(&fade, &mut out, w as usize);
     let fading = t.elapsed();
+    let mut under = out.clone();
+    let t = std::time::Instant::now();
+    s.paint_all(&State { backdrop: 0.5, mark_opacity: 0.5, ..st }, &mut under, w as usize);
+    let blend = t.elapsed();
     let r = s.layout.mark_rect(1.0, 0.0, 0.0);
     let t = std::time::Instant::now();
     for _ in 0..100 {
         s.paint(&st, &mut out, w as usize, r);
     }
     let mark = t.elapsed() / 100;
-    println!("1920x1080: new {new:?}, prvni snimek {first:?}, pozadi {bg:?}, cely snimek {lit:?}, rozsviceni {fading:?}, znak {mark:?} ({}x{})", r.w, r.h);
+    println!("1920x1080: new {new:?}, prvni snimek {first:?}, pozadi {bg:?}, cely snimek {lit:?}, rozsviceni {fading:?}, rozplynuti {blend:?}, znak {mark:?} ({}x{})", r.w, r.h);
+}
+
+#[test]
+fn integer_mark_matches_float() {
+    // Klidovy znak (tabulka) proti presunutemu o 0 px pres float cestu:
+    // posun 1e-6 vynuti float, vysledek se lisi nejvys o 2 urovne.
+    for p in [0.0f32, 0.37, 1.0] {
+        let mut s = Splash::new(1280, 800);
+        let mut a = vec![0u32; 1280 * 800];
+        let mut b = vec![0u32; 1280 * 800];
+        let st = State { glow: 0.6, glow_scale: 1.02, ..State::lit(p) };
+        s.paint_all(&st, &mut a, 1280);
+        s.paint_all(&State { mark_dx: 1e-6, ..st }, &mut b, 1280);
+        let bad = a.iter().zip(&b).filter(|(x, y)| !close(**x, **y, 2)).count();
+        assert_eq!(bad, 0, "progress {p}: {bad} pixelu se lisi");
+    }
 }
