@@ -4,7 +4,7 @@
 //! najde datovy oddil pres ovladac `usb-storage`.
 //!
 //! Testy (`cargo xtask test`, `cargo xtask usb --test`):
-//! - [`test`]: start do GUI s terminalem ([`MARKERS`]) a kopie logu na FAT
+//! - [`test`]: start do GUI s prihlasovaci obrazovkou ([`MARKERS`]) a kopie logu na FAT
 //!   oddil MO-LOGY (overeno na hostiteli crate `fatfs`),
 //! - [`test_rescue`]: rezim "vytahni logy" (klavesa L pres QMP), logy
 //!   "nainstalovaneho systemu" z disku NVMe na MO-LOGY, disk NVMe beze zmeny.
@@ -17,13 +17,16 @@ use crate::arch::Arch;
 use crate::{Result, target_dir};
 
 /// Znacky uspesneho startu z USB (ovladac disku USB, FS z datoveho oddilu
-/// flash disku, kompozitor a terminal v GUI).
+/// flash disku, sluzba uctu, kompozitor a prihlasovaci obrazovka v GUI).
+/// Obraz USB nema vyvojove autoprihlaseni ani ucet: plocha s terminalem
+/// se spousti az pro prihlasenou relaci (`docs/cs/ucty.md`).
 pub const MARKERS: &[&str] = &[
     "usb-storage: LUN 0:",
     "usb-storage: disk 0: nas oddil",
     "fsd: pripojeno 'MagnumOpus'",
+    "accountd: bezim",
     "init: kompozitor bezi",
-    "init: termd (",
+    "compd: prihlasovaci obrazovka:",
 ];
 
 /// Jak dlouho smi start trvat (aarch64 v emulaci TCG).
@@ -81,8 +84,8 @@ pub fn run(arch: &Arch, image: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Test: start z flash disku az do GUI s terminalem; logd zkopiruje log
-/// na FAT oddil MO-LOGY.
+/// Test: start z flash disku az do GUI s prihlasovaci obrazovkou; logd
+/// zkopiruje log na FAT oddil MO-LOGY.
 pub fn test(arch: &Arch, image: &Path) -> Result<()> {
     let log = boot_until(arch, image, &[], false, "start", |t| {
         let mut m = missing_markers(t);
@@ -220,19 +223,9 @@ fn fat_read(fat: &[u8], path: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&v).into_owned())
 }
 
-/// Znacky, ktere v logu chybi (terminal: radek s `termd (` a `spusten`).
+/// Znacky, ktere v logu chybi.
 pub fn missing_markers(text: &str) -> Vec<&'static str> {
-    MARKERS
-        .iter()
-        .copied()
-        .filter(|m| {
-            if *m == "init: termd (" {
-                !text.lines().any(|l| l.contains(m) && l.contains("spusten"))
-            } else {
-                !text.contains(m)
-            }
-        })
-        .collect()
+    MARKERS.iter().copied().filter(|m| !text.contains(m)).collect()
 }
 
 /// Obraz USB pro test (mensi nez vychozi: rychlejsi tvorba).

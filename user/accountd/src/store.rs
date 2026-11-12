@@ -69,15 +69,56 @@ impl FsStore {
         Ok(FsStore { fs })
     }
 
-    /// Klic zarizeni; pri prvnim startu ho vytvori z `fresh`.
-    pub fn device_key(&self, fresh: [u8; 32]) -> Result<[u8; 32]> {
-        if let Some(mut b) = load(&self.fs, DEVICE_KEY)? {
-            let r = <[u8; 32]>::try_from(b.as_slice()).map_err(|_| Error::Corrupted);
-            zeroize::Zeroize::zeroize(&mut b);
-            return r;
-        }
-        save(&self.fs, DEVICE_KEY, &fresh)?;
-        Ok(fresh)
+    /// Klic zarizeni s vlastni relaci FS (vytvori se az pri prvnim pouziti).
+    pub fn lazy_key(&self) -> Result<LazyKey> {
+        Ok(LazyKey { fs: self.fs.connect()?, key: core::cell::OnceCell::new() })
+    }
+}
+
+/// Klic zarizeni (`/db/device.key`) nacteny nebo vytvoreny az pri prvnim
+/// pouziti (PIN). Start sluzby tak neceka na nasazeny generator nahody:
+/// stroj bez hardwaroveho zdroje (zive USB na aarch64 v QEMU) ho nemusi
+/// mit hned, a init by sluzbu uctu po 20 s vzdal.
+pub struct LazyKey {
+    fs: FsClient,
+    key: core::cell::OnceCell<accounts::FileKey>,
+}
+
+impl LazyKey {
+    fn key(&self) -> &accounts::FileKey {
+        self.key.get_or_init(|| {
+            let k = match load(&self.fs, DEVICE_KEY) {
+                Ok(Some(mut b)) if b.len() == 32 => {
+                    let mut k = [0u8; 32];
+                    k.copy_from_slice(&b);
+                    zeroize::Zeroize::zeroize(&mut b);
+                    k
+                }
+                other => {
+                    if let Ok(Some(_)) = other {
+                        libos::println!("accountd: klic zarizeni poskozeny, novy (PINy je treba nastavit znovu)");
+                    }
+                    // Ceka na nasazeny generator (jen tady, ne pri startu).
+                    let mut k = [0u8; 32];
+                    rand_core::RngCore::fill_bytes(&mut crate::os::OsRng, &mut k);
+                    if let Err(e) = save(&self.fs, DEVICE_KEY, &k) {
+                        libos::println!("accountd: klic zarizeni nejde ulozit: {e} (PIN neprezije restart)");
+                    }
+                    k
+                }
+            };
+            accounts::FileKey::new(k)
+        })
+    }
+}
+
+impl accounts::DeviceKey for LazyKey {
+    fn mac(&self, label: &[u8], data: &[u8]) -> [u8; 32] {
+        self.key().mac(label, data)
+    }
+
+    fn hardware(&self) -> bool {
+        false
     }
 }
 

@@ -1,7 +1,7 @@
 # Živé USB: zkoušení na skutečném počítači
 
 MagnumOpus jde spustit z flashky na skutečném počítači bez instalace.
-Systém z flashky nastartuje do GUI s terminálem; svá data (a později logy
+Systém z flashky nastartuje do GUI; svá data (a později logy
 a záznamy pádů) ukládá na **datový oddíl flashky**. Disky počítače vidí,
 ale **jen pro čtení** (viz [Disky](disky.md#riziko-a-ochrana-cizích-disků)).
 
@@ -140,9 +140,17 @@ v písmenu zničí jiný disk. Na macOS je disk `/dev/rdiskN` (`diskutil list`,
    nebo Esc; na Macu Option). Vyberte flashku s označením **UEFI**.
 3. Když se nic nestane: ve firmwaru vypněte **Secure Boot** (a CSM /
    Legacy, je-li zapnutý jen legacy start z USB).
-4. Systém nastartuje do GUI s terminálem. Klávesnice a myš USB fungují
-   hned (i PS/2 na x86). Síť funguje na kartách Intel (e1000e, igc)
-   a Realtek (r8169) – viz [Síťové karty](sitove-karty.md).
+4. Systém nastartuje do GUI. Klávesnice a myš USB fungují hned (i PS/2
+   na x86). Síť funguje na kartách Intel (e1000e, igc) a Realtek (r8169)
+   – viz [Síťové karty](sitove-karty.md).
+
+⚠️ **Dočasné omezení** **[implementováno]**: s [uživatelskými účty](ucty.md)
+se plocha s terminálem spouští až po přihlášení. Obraz flashky nemá
+vývojové automatické přihlášení ani účet, takže start skončí na
+**přihlašovací obrazovce bez účtu** a do terminálu (ani k příkazu
+`report`) se zatím nedostanete. Logy a záznamy pádů se ukládají dál a jde
+je vytáhnout režimem „vytáhni logy“. Řešení (vývojový profil flashky,
+nebo průvodce prvním účtem) **[navrženo]**, čeká na rozhodnutí.
 
 Ověřené v QEMU (`cargo xtask usb --run` s oknem, `cargo xtask usb --test`
 bez okna; obojí stroj co nejbližší skutečnému PC: flashka na řadiči xHCI,
@@ -185,7 +193,8 @@ záznam v RAM zmizí. Počítač s nativním ovladačem grafiky (Intel, virtio-g
 už obraz firmwaru nemusí ukazovat; záznam se pak uloží jen do RAM a na
 sériovou linku.
 
-**Balíček pro vývojáře.** V terminálu napište `report`. Vypíše cestu
+**Balíček pro vývojáře.** V terminálu (zatím jen po přihlášení, viz
+omezení výše) napište `report`. Vypíše cestu
 a náhled obsahu:
 
 ```text

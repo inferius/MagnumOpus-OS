@@ -82,7 +82,10 @@ rozsahy.
   Zápis přes dočasný soubor a `rename_replace` - po výpadku je vždy celý
   starý, nebo celý nový záznam.
 - `/db/meta`: další volné číslo uživatele a skupiny, verze DB.
-- `/db/device.key`: klíč zařízení (32 B), dokud není TPM.
+- `/db/device.key`: klíč zařízení (32 B), dokud není TPM. Vznikne až při
+  prvním použití (PIN), ne při startu služby: start tak nečeká na nasazený
+  generátor náhody (stroj bez hardwarového zdroje entropie, např. živé USB
+  na aarch64, ho hned mít nemusí a init by službu účtů po 20 s vzdal).
 
 | Pole záznamu | Typ | Poznámka |
 |---|---|---|

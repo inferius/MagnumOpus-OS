@@ -27,7 +27,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use accountproto::{Method, Request, Secret};
-use accounts::{Config, Engine, FileKey, KdfParams};
+use accounts::{Config, Engine, KdfParams};
 use fsproto::FsClient;
 use libos::{Channel, Error, Signals, Startup, println};
 use zeroize::Zeroize;
@@ -113,16 +113,13 @@ fn main(startup: Startup) -> i64 {
             return 3;
         }
     };
-    let mut fresh = [0u8; 32];
-    rand_core::RngCore::fill_bytes(&mut OsRng, &mut fresh);
-    let device = match store.device_key(fresh) {
-        Ok(k) => FileKey::new(k),
+    let device = match store.lazy_key() {
+        Ok(k) => k,
         Err(e) => {
             let _ = bootstrap.write(format!("err:klic zarizeni {e}").as_bytes(), Vec::new());
             return 3;
         }
     };
-    fresh.zeroize();
     let eng = match Engine::new(store, device, OsRng, cfg) {
         Ok(e) => e,
         Err(e) => {
