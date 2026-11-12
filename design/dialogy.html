@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Systémové dialogy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+/* Standardni systemove dialogy: kazdy na pocitaci (vlevo) a na telefonu (vpravo).
+ * Telo dialogu je jedno HTML; uzky telefon ho preskladava pres container queries. */
+.page { max-width: 1400px; }
+.toc { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s4) 0 var(--s6); }
+.toc a { padding: var(--s1) var(--s3); border-radius: var(--r-pill); background: var(--c-surface-2); text-decoration: none; color: var(--c-ink); font-size: var(--t-small-size); }
+.toc a:hover { background: var(--c-surface-3); }
+.ent { margin: var(--s8) 0; scroll-margin-top: 80px; }
+.ent > h2 { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; margin: 0 0 var(--s2); }
+.kind { font-size: var(--t-caption-size); font-weight: 600; padding: 2px var(--s3); border-radius: var(--r-pill); background: var(--c-surface-3); color: var(--c-ink-muted); }
+.kind.trust { height: auto; }
+.kind.sys { background: var(--c-accent-soft); color: var(--c-accent-ink); }
+.ent .modes { margin: var(--s3) 0; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--s5); align-items: start; }
+@media (max-width: 1000px) { .row { grid-template-columns: 1fr; } .ph { margin: 0 auto; } }
+.cap { font-size: var(--t-caption-size); color: var(--c-ink-muted); margin: 0 0 var(--s2); }
+
+/* Plocha pocitace s rodicovskym oknem */
+.ds { position: relative; border-radius: var(--r-card); overflow: hidden; border: 1px solid var(--c-border); font-size: 13px; color: var(--c-ink);
+  background: radial-gradient(circle at 15% 20%, var(--c-wall-a), transparent 55%), radial-gradient(circle at 85% 70%, var(--c-wall-b), transparent 55%), var(--c-bg); }
+.pw { position: absolute; inset: 16px 28px; border-radius: 14px; background: var(--c-surface); box-shadow: var(--sh-window-inactive); border: 1px solid var(--c-border); overflow: hidden; }
+.pw .tb { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--c-surface-2); font-weight: 600; font-size: 12px; border-bottom: 1px solid var(--c-border); }
+.pw .tb .ic { width: 16px; height: 16px; }
+.pw .ln { height: 8px; margin: 14px 20px 0; border-radius: 4px; background: var(--c-surface-3); }
+.dim { position: absolute; inset: 0; background: var(--c-scrim); }
+.pw .dim { top: 34px; opacity: .55; }
+
+/* Dialog */
+.dlg { position: absolute; z-index: 3; background: var(--c-surface); color: var(--c-ink); box-shadow: var(--sh-dialog); border: 1px solid var(--c-border);
+  border-radius: var(--r-window); overflow: hidden; container-type: inline-size; display: flex; flex-direction: column; max-height: calc(100% - 24px); }
+.ds .dlg.k-app { top: 50px; left: 50%; transform: translateX(-50%); border-top-left-radius: 6px; border-top-right-radius: 6px; max-height: calc(100% - 66px); }
+.ds .dlg.k-sys, .ds .dlg.k-trust { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.dlg.k-trust { border: 2px solid var(--c-trust-border); }
+:root[data-contrast="more"] .dlg { border: 2px solid var(--c-ink); }
+.dlg .hd { display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 4px; }
+.dlg .hd .big { width: 36px; height: 36px; flex: none; }
+.dlg .hd h3 { margin: 0; font-size: 16px; line-height: 1.3; }
+.dlg .hd p { margin: 4px 0 0; color: var(--c-ink-muted); }
+.dlg .bd { padding: 10px 20px 4px; overflow: auto; min-height: 0; }
+.dlg .ft { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; padding: 12px 20px 16px; }
+.dlg .ft .sp { flex: 1; }
+.dlg .ft .btn { min-height: 32px; padding: 0 14px; }
+.dlg .guard { font-size: 11.5px; color: var(--c-ink-muted); padding: 0 20px 2px; display: flex; gap: 6px; align-items: center; }
+.dlg .guard .ic { width: 14px; height: 14px; }
+.dlg .sys-band { padding: 8px 16px; }
+.dlg .who { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: var(--r-control); background: var(--c-surface-2); margin: 6px 0 10px; }
+.dlg .who .ic { width: 32px; height: 32px; }
+.dlg .who small { display: block; color: var(--c-ink-muted); }
+.dlg .input { min-height: 34px; width: 100%; box-sizing: border-box; }
+.dlg label.f { display: block; font-weight: 600; font-size: 12px; margin: 8px 0 4px; }
+.dlg .hint { font-size: 11.5px; color: var(--c-ink-muted); margin-top: 4px; }
+.dlg .err { color: var(--c-danger); }
+.dlg .ok { color: var(--c-ok); }
+.opt { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.opt > span:not(.ck) { flex: 1; }
+.opt small { display: block; color: var(--c-ink-muted); }
+.ck { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--c-border-strong); display: inline-grid; place-items: center; flex: none; background: var(--c-surface); }
+.ck.on { background: var(--c-accent); border-color: var(--c-accent); }
+.ck.on::after { content: ""; width: 8px; height: 4px; border: 2px solid var(--c-on-accent); border-top: 0; border-right: 0; transform: translate(0, -1px) rotate(-45deg); }
+.mono { font-family: "JetBrains Mono", monospace; font-size: 12px; }
+.detail { display: none; margin-top: 8px; padding: 10px; border-radius: 8px; background: var(--c-surface-2); }
+.dlg.open .detail { display: block; }
+.lst { border: 1px solid var(--c-border); border-radius: 10px; overflow: hidden; }
+.lst .it { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-top: 1px solid var(--c-border); }
+.lst .it:first-child { border-top: 0; }
+.lst .it .ic { width: 20px; height: 20px; flex: none; }
+.lst .it .k { margin-left: auto; color: var(--c-ink-muted); font-size: 12px; white-space: nowrap; }
+.lst .it.sel { background: color-mix(in srgb, var(--c-accent) 14%, transparent); }
+.lst .it.off { opacity: .45; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* Vyber souboru */
+.fp { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; }
+.places { display: flex; flex-direction: column; gap: 2px; }
+.places span { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; white-space: nowrap; }
+.places span.on { background: var(--c-accent-soft); color: var(--c-accent-ink); font-weight: 600; }
+.places .ic { width: 16px; height: 16px; }
+.crumb { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.crumb .path { flex: 1; color: var(--c-ink-muted); }
+.crumb .path b { color: var(--c-ink); }
+.crumb .s { width: 120px; min-height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--c-border-strong); color: var(--c-ink-muted); display: flex; align-items: center; gap: 6px; }
+.crumb .s .ic { width: 14px; height: 14px; }
+.savebar { display: grid; grid-template-columns: 1fr 170px; gap: 10px; margin-top: 10px; }
+.more { margin-top: 6px; font-size: 12px; color: var(--c-ink-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.more a { margin-left: auto; }
+
+/* Vybery: barva, pismo, datum, tisk */
+.sq { height: 130px; border-radius: 10px; position: relative; background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(22 88% 54%)); }
+.sq i { position: absolute; left: 72%; top: 28%; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #0006; transform: translate(-50%, -50%); }
+.hue { height: 12px; border-radius: 6px; margin: 10px 0; position: relative; background: linear-gradient(to right, red, #ff0, lime, cyan, blue, #f0f, red); }
+.hue i { position: absolute; left: 6%; top: -3px; width: 6px; height: 16px; border-radius: 3px; background: #fff; box-shadow: 0 0 0 1px #0006; }
+.sw { display: flex; gap: 6px; flex-wrap: wrap; }
+.sw i { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--c-border); }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; font-size: 12px; }
+.cal b { color: var(--c-ink-muted); font-weight: 600; padding: 4px 0; }
+.cal span { padding: 5px 0; border-radius: 8px; }
+.cal span.t { box-shadow: inset 0 0 0 1.5px var(--c-accent); }
+.cal span.on { background: var(--c-accent); color: var(--c-on-accent); font-weight: 700; }
+.pages { display: flex; gap: 10px; justify-content: center; padding: 10px; border-radius: 10px; background: var(--c-surface-3); }
+.pages i { width: 84px; height: 116px; background: #fff; border-radius: 3px; box-shadow: 0 1px 4px #0003; padding: 10px 8px; box-sizing: border-box;
+  background-image: repeating-linear-gradient(#0000 0 7px, #d6d0c8 7px 9px); background-clip: content-box; }
+.fonts .it span { font-size: 15px; }
+.key { width: 64px; height: 64px; margin: 6px auto 10px; border-radius: 50%; display: grid; place-items: center; background: var(--c-accent-soft); animation: pulse 1.6s ease-in-out infinite; }
+.key .ic { width: 34px; height: 34px; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--c-accent) 18%, transparent); } }
+.dots { display: flex; gap: 10px; justify-content: center; margin: 10px 0; }
+.dots i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--c-border-strong); }
+.dots i.on { background: var(--c-ink); border-color: var(--c-ink); }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cmp div { padding: 10px; border-radius: 10px; border: 1px solid var(--c-border); }
+.cmp div.new { border-color: var(--c-accent); }
+.cmp small { display: block; color: var(--c-ink-muted); }
+.prog { display: flex; justify-content: space-between; font-size: 12px; color: var(--c-ink-muted); margin: 6px 0; }
+
+/* Telefon */
+.ph { position: relative; width: 300px; height: 600px; border-radius: 38px; padding: 10px; box-sizing: border-box; background: #121014; box-shadow: var(--sh-window); }
+.ph .scr { position: relative; height: 100%; border-radius: 30px; overflow: hidden; font-size: 13px; color: var(--c-ink);
+  background: radial-gradient(circle at 20% 15%, var(--c-wall-a), transparent 55%), var(--c-bg); }
+.ph .sb { height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 12px; font-weight: 600; }
+.ph .sb .ic { width: 13px; height: 13px; }
+.ph .ap { position: absolute; inset: 28px 0 0; background: var(--c-surface); }
+.ph .ap .tb { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 14px; font-weight: 600; border-bottom: 1px solid var(--c-border); }
+.ph .ap .tb .ic { width: 18px; height: 18px; }
+.ph .ap .ln { height: 8px; margin: 14px 16px 0; border-radius: 4px; background: var(--c-surface-3); }
+.ph .dim { z-index: 2; }
+.ph .dlg { left: 0; right: 0; bottom: 0; max-height: 90%; border-radius: 24px 24px 0 0; border-bottom: 0; box-shadow: 0 -8px 30px #0004; }
+.ph .dlg::before { content: ""; display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--c-border-strong); margin: 8px auto 0; flex: none; }
+.ph .dlg.full { top: 28px; max-height: none; border-radius: 0; }
+.ph .dlg.full::before { display: none; }
+.ph .dlg .hd { padding: 14px 18px 2px; }
+.ph .dlg .bd { padding: 8px 18px 4px; }
+.ph .dlg .guard { padding: 0 18px 2px; }
+.ph .home { position: absolute; z-index: 5; bottom: 6px; left: 50%; width: 110px; height: 4px; margin-left: -55px; border-radius: 2px; background: var(--c-ink); opacity: .5; }
+
+/* Uzky dialog (telefon): vse pod sebe, tlacitka pres celou sirku, hlavni dole na dosah palce. */
+@container (max-width: 420px) {
+  .ft { flex-direction: column; align-items: stretch !important; padding: 10px 18px 22px !important; }
+  .ft .sp { display: none; }
+  .ft .btn { min-height: 44px !important; }
+  .two, .cmp, .savebar { grid-template-columns: 1fr; }
+  .fp { grid-template-columns: 1fr; }
+  .places { flex-direction: row; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .places span { background: var(--c-surface-2); border-radius: var(--r-pill); }
+  .crumb .s { display: none; }
+  .lst .it { padding: 11px 10px; }
+  .pages i { width: 64px; height: 88px; }
+  .hide-n { display: none !important; }
+  .sys-band { font-size: 11.5px; gap: 6px; padding: 8px 14px; }
+  .sys-band .phrase { white-space: nowrap; }
+}
+@container (min-width: 421px) { .hide-w { display: none !important; } }
+
+.pc { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s3); font-size: var(--t-small-size); margin-top: var(--s3); }
+.pc .card { padding: var(--s4); }
+.pc h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); }
+.pc ul { margin: 0; padding-left: 18px; }
+.pc li + li { margin-top: 2px; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Systémové dialogy</h1>
+    <p class="lead">Standardní sada dialogů, kterou dostane každá aplikace hotovou. Ke každému je podoba na počítači (vlevo) a na telefonu (vpravo), u některých přepínač variant. Aplikace dialogy nekreslí sama: zavolá systém a dostane jen výsledek.</p>
+  </header>
+
+  <h2>Tři druhy dialogů</h2>
+  <div class="pc">
+    <div class="card"><h3><span class="kind">Aplikace</span> list u okna</h3><ul><li>Vyjede zpod titulku svého okna a blokuje jen toto okno; ostatní okna a lišta fungují dál.</li><li>Patří sem zprávy, přejmenování, výběry (barva, písmo, datum), tisk.</li><li>Na telefonu spodní list (krátké rozhodnutí) nebo celá stránka (výběry).</li></ul></div>
+    <div class="card"><h3><span class="kind sys">Systém</span> uprostřed obrazovky</h3><ul><li>Týká se celého systému: vypnutí, nové zařízení, konflikty při kopírování mezi aplikacemi.</li><li>Kreslí ho systémový proces, ne aplikace.</li></ul></div>
+    <div class="card"><h3><span class="trust"><svg class="ic s" aria-hidden="true"><use href="#ic-shieldcheck"/></svg>Důvěryhodný</span></h3><ul><li>Oprávnění, hesla, PIN, FIDO2, Wi-Fi heslo, zvýšení práv.</li><li>Kreslí ho kompozitor nad ztlumenou obrazovkou včetně lišty, s pruhem Systém a bezpečnostní frází. Aplikace ho nemůže napodobit ani do něj psát.</li><li>Prvních 300 ms ignoruje vstup (ochrana proti „podstrčenému“ kliknutí); bezpečná zkratka Ctrl+Alt+Del ukáže vždy pravý.</li></ul></div>
+  </div>
+
+  <h2>Společná pravidla</h2>
+  <div class="pc">
+    <div class="card"><h3>Tlačítka</h3><ul><li>Popisek je sloveso s předmětem: „Smazat 3 soubory“, ne „OK“ a „Ano“.</li><li>Vpravo hlavní akce, vlevo od ní Zrušit. Na telefonu pod sebou, hlavní dole na dosah palce.</li><li>Enter spustí hlavní akci jen když není ničivá; u ničivé akce je výchozí Zrušit.</li><li>Esc vždy zavře bez změny.</li></ul></div>
+    <div class="card"><h3>Text</h3><ul><li>Titulek je otázka nebo stav, text říká důsledek a co dál.</li><li>Chyba vždy nabídne cestu ven (Uložit jinam, Zkusit znovu) a podrobnosti s kódem pro <code>explain</code>.</li><li>Žádné „Opravdu chcete&hellip;?“, když jde akci vrátit; místo potvrzení nabídnout Zpět.</li></ul></div>
+    <div class="card"><h3>Klávesnice a přístupnost</h3><ul><li>Fokus jde do dialogu a po zavření se vrátí, odkud přišel; Tab zůstává uvnitř.</li><li>Role <code>dialog</code> / <code>alertdialog</code>, titulek a popis propojené pro čtečku.</li><li>Zvětšený text: dialog roste a posouvá se, tlačítka se zalomí pod sebe.</li></ul></div>
+  </div>
+
+  <nav class="toc" id="toc" aria-label="Dialogy"></nav>
+  <div id="list"></div>
+
+  <h2 id="zmeny">Co přidávám a co ubírám proti zadání</h2>
+  <div style="overflow-x:auto"><table class="tbl">
+    <thead><tr><th>Změna</th><th>Proč</th></tr></thead>
+    <tbody>
+      <tr><td><b>+</b> Sdílení obrazovky v oprávněních</td><td>nejcitlivější oprávnění vůbec (vidí hesla, zprávy); musí být důvěryhodný dialog s výběrem okna</td></tr>
+      <tr><td><b>+</b> Přihlášení k síťovému umístění</td><td>NAS a sdílené složky chtějí jméno a heslo; patří do důvěryhodného dialogu, ne do aplikace</td></tr>
+      <tr><td><b>+</b> Úložiště jako druh nového USB zařízení</td><td>flashka je častější než klávesnice; jiné otázky (otevřít, jen číst)</td></tr>
+      <tr><td><b>+</b> Odkaz na „Aplikace neodpovídá“</td><td>už je navržený u oken (<a href="okna.html">okna.html</a>), tady se neopakuje</td></tr>
+      <tr><td><b>&minus;</b> Otevřít projekt jako samostatný dialog</td><td>je to výběr složky s filtrem, který dodá aplikace; jeden výběr se čtyřmi režimy</td></tr>
+      <tr><td><b>&minus;</b> Varování jako samostatný typ</td><td>vzhledově shodné s potvrzením; liší se jen ikonou a tónem, proto jedna položka se třemi režimy</td></tr>
+      <tr><td><b>~</b> Barva, písmo, datum</td><td>na počítači jako výsuvný panel u tlačítka (neblokuje okno), modální list jen když to aplikace výslovně chce</td></tr>
+      <tr><td><b>~</b> O aplikaci</td><td>není to dialog, ale malé okno vytvořené z manifestu aplikace; aplikace ho nekreslí</td></tr>
+      <tr><td><b>~</b> Sdílet</td><td>ve verzi 1 jen místní cíle (schránka, Bluetooth, jiná aplikace); síťové cíle až s účty</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Riziko</h2>
+  <p class="note">Bezpečnost výběru souborů stojí na tom, že výběr kreslí systém a aplikace dostane jen <b>úchyt na vybraný soubor</b>, ne přístup ke složce. Když aplikace dostane volný přístup k souborům „pro jistotu“, celý model padá. Proto oprávnění „Soubory“ je až druhá cesta a dialog ho výslovně doporučuje nahradit výběrem.</p>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  function I(n, c) { return '<svg class="ic' + (c ? ' ' + c : '') + '" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
+  function B(l, c, tg) { return '<button class="btn' + (c ? ' ' + c : '') + '"' + (tg ? ' data-tg="' + tg + '"' : '') + '>' + l + '</button>'; }
+  function SW(on) { return '<button class="switch" role="switch" aria-checked="' + (on ? 'true' : 'false') + '"></button>'; }
+  function CK(on) { return '<span class="ck' + (on ? ' on' : '') + '"></span>'; }
+  function opt(t, s, ctl) { return '<div class="opt"><span>' + t + (s ? '<small>' + s + '</small>' : '') + '</span>' + ctl + '</div>'; }
+  function who(icn, name, sub) { return '<div class="who">' + I(icn) + '<div><b>' + name + '</b><small>' + sub + '</small></div></div>'; }
+  function li(icn, t, k, cls) { return '<div class="it' + (cls ? ' ' + cls : '') + '">' + (icn ? I(icn) : '') + '<span>' + t + '</span>' + (k ? '<span class="k">' + k + '</span>' : '') + '</div>'; }
+  var PH = 'modrá konvice';
+  var BAND = '<div class="sys-band">' + I('shieldcheck', 's') + 'Systém<span class="phrase">' + I('key', 's') + 'tvá fráze: <b>' + PH + '</b></span></div>';
+
+  // ---- Telo jednotlivych dialogu. Kazda funkce vraci {t, s, ic, b, f, g, w} ----
+  // t titulek, s podtitulek, ic ikona, b telo, f tlacitka, g radek pod telem, w sirka na pocitaci.
+  var FILES = [['folder', 'Projekty', 'včera', 'f'], ['folder', 'Faktury', '3. 11.', 'f'], ['file-text', 'zprava.md', '14:02', ''], ['app-pdf', 'smlouva.pdf', 'včera', ''], ['file', 'rozpocet.ods', '2. 11.', ''], ['image', 'foto.jpg', '28. 10.', '']];
+  function picker(m) {
+    var save = m === 'save', folder = m === 'folder', multi = m === 'multi';
+    var places = [['home', 'Domů'], ['folder', 'Dokumenty', 1], ['image', 'Obrázky'], ['download', 'Stažené'], ['flash-drive', 'USB flash'], ['network', 'Síť']];
+    var rows = FILES.map(function (f, i) {
+      var isDir = f[3] === 'f', sel = (m === 'open' && i === 2) || (multi && (i === 2 || i === 3)), off = folder && !isDir;
+      return '<div class="it' + (sel ? ' sel' : '') + (off ? ' off' : '') + (i > 3 ? ' hide-n' : '') + '">' + (multi && !isDir ? CK(sel) : '') + I(f[0]) + '<span>' + f[1] + '</span><span class="k">' + f[2] + '</span></div>';
+    }).join('');
+    var b = '<div class="fp"><div class="places">' + places.map(function (p) { return '<span' + (p[2] ? ' class="on"' : '') + '>' + I(p[0]) + p[1] + '</span>'; }).join('') + '</div><div>' +
+      '<div class="crumb"><span class="path">Domů &rsaquo; <b>Dokumenty</b></span><span class="s">' + I('search') + 'Hledat</span></div><div class="lst">' + rows + '</div>' +
+      (save ? '<div class="savebar"><div><label class="f">Název</label><input class="input" value="zprava-v2.md"></div><div><label class="f">Typ</label><select class="input"><option>Markdown (.md)</option><option>Prostý text (.txt)</option></select></div></div>' +
+        '<div class="more">UTF-8 bez BOM &middot; konce řádků LF<a href="#">Změnit&hellip;</a></div>' : '') +
+      (!save && !folder ? '<div class="more">Zobrazit: <b>Text a Markdown</b><a href="#">Všechny soubory</a></div>' : '') + '</div></div>';
+    var t = { open: 'Otevřít soubor', multi: 'Otevřít soubory', folder: 'Vybrat složku', save: 'Uložit jako' }[m];
+    var p = { open: 'Otevřít', multi: 'Otevřít 2 soubory', folder: 'Vybrat složku Dokumenty', save: 'Uložit' }[m];
+    return { t: t, b: b, w: 640, f: [B('Zrušit'), B(p, 'primary')], g: I('shield') + 'Systémový výběr: aplikace uvidí jen to, co vyberete.' };
+  }
+  function message(m) {
+    if (m === 'confirm') return { ic: 'trash', t: 'Přesunout 3 soubory do koše?', s: 'Obnovíte je z koše do 30 dnů, nebo hned příkazem Zpět.', f: [B('Zrušit'), B('Přesunout do koše', 'primary')] };
+    if (m === 'perm') return { ic: 'alert', t: 'Trvale smazat 3 soubory?', s: 'Soubory nepůjdou obnovit ani z historie verzí. Celkem 18 MB.', b: '<div class="lst">' + li('file-text', 'zprava.md') + li('app-pdf', 'smlouva.pdf') + li('image', 'foto.jpg') + '</div>', f: [B('Zrušit', 'primary'), B('Smazat trvale', 'danger')], g: I('info') + 'Výchozí tlačítko je Zrušit; Enter nic nesmaže.' };
+    return { ic: 'error', t: 'Soubor nelze uložit', s: 'Na disku USB flash chybí 12 MB místa. Uložte soubor jinam nebo uvolněte místo.',
+      b: '<div class="detail"><div class="mono">E_NOSPC (28) &middot; /media/usb/zprava.md<br>potřeba 14,2 MB, volno 2,1 MB</div><div class="hint">V terminálu: <span class="mono">explain E_NOSPC</span></div></div>',
+      f: [B('Podrobnosti', 'ghost', 'open'), '<span class="sp"></span>', B('Zavřít'), B('Uložit jinam&hellip;', 'primary')] };
+  }
+  function rename() {
+    return { ic: 'rename', t: 'Přejmenovat', b: '<label class="f">Nový název</label><input class="input" value="zprava.md" data-sel="1"><div class="hint err">Název nesmí obsahovat znak / (lomítko).</div><div class="hint">Vybere se jen jméno bez přípony; přípona zůstane.</div>', f: [B('Zrušit'), B('Přejmenovat', 'primary')], w: 420 };
+  }
+  var PERM = {
+    camera: ['camera', 'kameru', 'Uvidí obraz z kamery, dokud bude okno otevřené. Kontrolka v liště svítí.'],
+    mic: ['mic', 'mikrofon', 'Uslyší zvuk z mikrofonu. Kontrolka v liště svítí.'],
+    location: ['globe', 'polohu', ''],
+    files: ['folder', 'celou složku Dokumenty', 'Pro jeden soubor stačí výběr souboru, ten žádné oprávnění nepotřebuje.'],
+    network: ['network', 'přijímat spojení ze sítě', 'Port 8080 v místní síti. Do internetu se tím nic neotevře.'],
+    screen: ['screen-share', 'sdílet obrazovku', ''],
+    elevate: ['elevate', 'změnit systém', '']
+  };
+  function perm(m) {
+    var p = PERM[m], b = '', f = [B('Nepovolit'), B('Jen teď'), B('Povolit vždy', 'primary')];
+    var app = m === 'elevate' ? who('app-installer', 'Instalátor balíčků', 'podepsáno: MagnumOpus') : who('app-browser', 'Prohlížeč', 'meet.example.cz');
+    if (m === 'location') b = '<div class="seg" role="radiogroup"><button aria-checked="true">Přibližná (město)</button><button aria-checked="false">Přesná</button></div><div class="hint">Přesná poloha jen když ji aplikace opravdu potřebuje (mapy, navigace).</div>';
+    if (m === 'screen') { b = '<div class="lst">' + li('window', 'Jen okno: Prezentace.pdf', '', 'sel') + li('monitor', 'Celá obrazovka', 'uvidí i oznámení') + '</div><div class="hint">Oznámení se během sdílení skryjí. Pruh nahoře ukazuje, že se sdílí.</div>'; f = [B('Nesdílet'), B('Sdílet okno', 'primary')]; }
+    if (m === 'elevate') { b = '<div class="lst">' + li('driver', 'Nainstalovat ovladač tiskárny HP', 'HP Inc.') + li('disk', 'Zapsat do /system/drivers', '2,4 MB') + '</div><label class="f">Potvrďte PINem nebo otiskem prstu</label><div class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i></div>'; f = [B('Zrušit'), B('Povolit změnu', 'primary')]; }
+    return { trust: 1, t: m === 'elevate' ? 'Instalátor chce změnit systém' : 'Prohlížeč chce ' + p[1], s: p[2], top: app, b: b, f: f, w: 440 };
+  }
+  function auth(m) {
+    if (m === 'pin') return { trust: 1, t: 'Zadejte PIN', s: 'Pro odemknutí trezoru hesel.', top: who('vault', 'Trezor hesel', 'systém'), b: '<div class="dots"><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i></div><div class="hint" style="text-align:center">Zbývají 4 pokusy, pak se trezor na 1 minutu zamkne.</div>', f: [B('Jiný způsob', 'ghost'), '<span class="sp"></span>', B('Zrušit'), B('Odemknout', 'primary')], w: 400 };
+    if (m === 'fido') return { trust: 1, t: 'Dotkněte se bezpečnostního klíče', s: 'Přihlášení k účtu na id.example.cz', b: '<div class="key">' + I('fido2') + '</div><div class="hint" style="text-align:center">Čekám na klíč&hellip; Pokud bliká, dotkněte se ho.</div>', f: [B('Jiný způsob', 'ghost'), '<span class="sp"></span>', B('Zrušit')], w: 400 };
+    if (m === 'net') return { trust: 1, t: 'Přihlásit k nas.local', s: 'Sdílená složka Rodina žádá jméno a heslo.', b: '<label class="f">Jméno</label><input class="input" value="michal"><label class="f">Heslo</label><input class="input" type="password" value="xxxxxxxx">' + opt('Uložit do trezoru hesel', '', SW(true)), f: [B('Zrušit'), B('Přihlásit', 'primary')], w: 420 };
+    return { trust: 1, t: 'Potvrďte, že jste to vy', s: 'Nastavení chce změnit způsob přihlášení.', top: who('settings', 'Nastavení', 'systémová aplikace'), b: '<label class="f">Heslo účtu michal</label><input class="input" type="password" value="xxxxxxxxxx"><div class="hint">Caps Lock je vypnutý &middot; rozložení CZ</div>', f: [B('Zrušit'), B('Potvrdit', 'primary')], w: 420 };
+  }
+  function wifi() {
+    return { trust: 1, t: 'Připojit k síti Doma-5G', s: 'WPA3 &middot; silný signál', b: '<label class="f">Heslo</label><input class="input" type="password" value="xxxxxxxxxxxx"><div class="hint">' + I('eye', 's') + ' Zobrazit heslo</div>' + opt('Připojovat automaticky', '', SW(true)) + opt('Měřené připojení', 'omezí aktualizace a zálohy', SW(false)), f: [B('Zrušit'), B('Připojit', 'primary')], w: 420 };
+  }
+  function usb(m) {
+    if (m === 'storage') return { sys: 1, ic: 'flash-drive', t: 'Připojen flash disk SanDisk 32 GB', s: 'Souborový systém exFAT, 18 GB volno.', b: opt('Jen pro čtení', 'nic se na disk nezapíše', SW(false)) + opt('Pamatovat si tento disk', '', SW(true)), f: [B('Nic nedělat'), B('Otevřít v Souborech', 'primary')], w: 420 };
+    return { trust: 1, ic: 'keyboard', t: 'Nová klávesnice: Logitech K380', s: 'Povolte jen klávesnici, kterou jste právě připojili. Zařízení, které se jen tváří jako klávesnice, může psát příkazy.', b: '<div class="lst">' + li('usb', 'USB-C vlevo', 'před 2 s') + li('info', 'ID 046d:b342', 'vstupní zařízení') + '</div>', f: [B('Zablokovat'), B('Povolit klávesnici', 'primary')], w: 440 };
+  }
+  function openwith() {
+    return { t: 'Otevřít foto.jpg v&hellip;', b: '<div class="lst">' + li('app-photos', 'Obrázky', 'výchozí', 'sel') + li('app-browser', 'Prohlížeč') + li('palette', 'Kreslení') + li('app-editor', 'Editor', 'jako text') + '</div>' + opt('Vždy otevírat .jpg v této aplikaci', '', SW(false)) + '<div class="hint">Seznam se doplní do 1,2 s; pomalé zdroje se ukážou jako kostra, nic se neposouvá.</div>', f: [B('Další aplikace&hellip;', 'ghost'), '<span class="sp"></span>', B('Zrušit'), B('Otevřít', 'primary')], w: 440 };
+  }
+  function share() {
+    return { t: 'Sdílet smlouva.pdf', s: '1 soubor &middot; 240 kB', b: '<div class="lst">' + li('copy', 'Kopírovat do schránky') + li('bluetooth', 'Poslat přes Bluetooth', 'Telefon Pixel') + li('send', 'Poslat do aplikace&hellip;', 'Pošta, Zprávy') + li('save', 'Uložit kopii jinam&hellip;') + '</div>', f: [B('Zavřít')], w: 420 };
+  }
+  function print() {
+    return { t: 'Tisk: zprava.md', b: '<div class="two"><div><div class="pages"><i></i><i class="hide-n"></i></div><div class="hint" style="text-align:center">Strana 1 z 2</div></div><div>' +
+      '<label class="f">Tiskárna</label><select class="input"><option>HP LaserJet (kancelář)</option><option>Uložit jako PDF</option></select>' +
+      '<div class="two"><div><label class="f">Kopie</label><input class="input" value="1"></div><div><label class="f">Stránky</label><input class="input" value="vše"></div></div>' +
+      opt('Oboustranně', '', SW(true)) + opt('Barevně', '', SW(false)) + '<div class="more"><a href="#" style="margin-left:0">Další možnosti&hellip;</a></div></div></div>', f: [B('Zrušit'), B('Tisknout', 'primary')], w: 600 };
+  }
+  function color() {
+    return { t: 'Barva', b: '<div class="sq"><i></i></div><div class="hue"><i></i></div><div class="two"><input class="input mono" value="#E07A3C"><input class="input mono" value="rgb 224 122 60"></div><label class="f">Nedávné</label><div class="sw">' +
+      ['#E07A3C', '#4C7DD9', '#3BA676', '#C8475A', '#F2C14E', '#7A5AC8', '#2B2B2B', '#FFFFFF'].map(function (c) { return '<i style="background:' + c + '"></i>'; }).join('') + '</div>', f: [B(I('select-all') + ' Kapátko', 'ghost'), '<span class="sp"></span>', B('Zrušit'), B('Použít', 'primary')], w: 360 };
+  }
+  function font() {
+    var F = [['Inter', 'Inter, sans-serif', 1], ['JetBrains Mono', '"JetBrains Mono", monospace'], ['Georgia', 'Georgia, serif'], ['Verdana', 'Verdana, sans-serif']];
+    return { t: 'Písmo', b: '<input class="input" placeholder="Hledat písmo"><div class="lst fonts" style="margin-top:8px">' + F.map(function (x) { return '<div class="it' + (x[2] ? ' sel' : '') + '"><span style="font-family:' + x[1] + '">' + x[0] + '</span></div>'; }).join('') + '</div>' +
+      '<div class="two" style="margin-top:8px"><div><label class="f">Řez</label><select class="input"><option>Normální</option><option>Tučné</option></select></div><div><label class="f">Velikost</label><input class="input" value="14"></div></div>' +
+      '<div class="hint" style="font-size:15px;color:var(--c-ink)">Příliš žluťoučký kůň úpěl ďábelské ódy.</div>', f: [B('Zrušit'), B('Použít', 'primary')], w: 380 };
+  }
+  function date() {
+    var c = '<b>po</b><b>út</b><b>st</b><b>čt</b><b>pá</b><b>so</b><b>ne</b>';
+    for (var i = 0; i < 6; i++) c += '<span></span>';
+    for (var d = 1; d <= 30; d++) c += '<span class="' + (d === 12 ? 't' : '') + (d === 20 ? 'on' : '') + '">' + d + '</span>';
+    return { t: 'Datum a čas', b: '<div class="crumb"><span class="path"><b>listopad 2026</b></span><button class="btn small icon ghost">' + I('left') + '</button><button class="btn small icon ghost">' + I('right') + '</button></div><div class="cal">' + c + '</div>' +
+      '<div class="two hide-n" style="margin-top:8px"><div><label class="f">Datum</label><input class="input" value="20. 11. 2026"></div><div><label class="f">Čas</label><input class="input" value="14:30"></div></div><div class="hint">Datum i čas jde vždy napsat z klávesnice.</div>', f: [B('Dnes', 'ghost'), '<span class="sp"></span>', B('Zrušit'), B('Použít', 'primary')], w: 360 };
+  }
+  function copy(m) {
+    if (m === 'conflict') return { sys: 1, ic: 'conflict', t: 'Soubor rozpocet.ods už v cíli existuje', b: '<div class="cmp"><div><b>Kopírovaný</b><small>dnes 14:02 &middot; 48 kB</small></div><div class="new"><b>V cíli (novější)</b><small>dnes 14:10 &middot; 51 kB</small></div></div>' +
+      opt('Použít pro dalších 6 konfliktů', '', CK(true)) + '<div class="hint">Přepsaná verze zůstane v historii souboru; jde vrátit příkazem Zpět.</div>', f: [B('Přeskočit'), B('Ponechat obě'), B('Přepsat', 'primary')], w: 480 };
+    return { sys: 1, ic: 'copy', t: 'Kopírování do USB flash', s: '1 240 souborů, 3,1 GB', b: '<div class="progress"><i style="width:42%"></i></div><div class="prog"><span>520 z 1 240 &middot; 38 MB/s</span><span>zbývá asi 50 s</span></div><div class="hint">Právě: Obrázky/2026/IMG_0412.jpg</div>',
+      f: [B('Zrušit'), '<span class="sp"></span>', B(I('pause') + ' Pozastavit'), B('Na pozadí', 'primary')], g: I('tasks') + 'Na pozadí pokračuje v panelu úloh v liště.', w: 460 };
+  }
+  function version() {
+    return { ic: 'diff', t: 'zprava.md se mezitím změnil', s: 'Terminál soubor upravil ve 14:02. Vy máte 12 neuložených řádků.', b: '<div class="cmp"><div><b>Vaše verze</b><small>neuloženo &middot; +12 řádků</small></div><div><b>Na disku</b><small>14:02 &middot; Terminál</small></div></div><div class="hint">Obě verze zůstanou v historii souboru, nic se neztratí.</div>',
+      f: [B('Zobrazit rozdíly', 'ghost'), '<span class="sp"></span>', B('Načíst z disku'), B('Uložit kopii'), B('Uložit moje', 'primary')], w: 520 };
+  }
+  function shutdown() {
+    return { sys: 1, ic: 'power', t: 'Vypnout počítač?', s: '2 aplikace mají neuložené změny.', b: '<div class="lst">' + li('app-editor', 'Editor &middot; zprava.md', '<a href="#">Uložit</a>') + li('palette', 'Kreslení &middot; obrazek-1', '<a href="#">Uložit</a>') + '</div><div class="hint">Ostatní okna se po zapnutí obnoví tam, kde byla.</div>',
+      f: [B('Vypnout bez uložení', 'ghost'), '<span class="sp"></span>', B('Zrušit'), B('Uložit vše a vypnout', 'primary')], w: 480 };
+  }
+  function about() {
+    return { t: 'O aplikaci Editor', b: '<div style="text-align:center">' + I('app-editor', 'big') + '<h3 style="margin:6px 0 2px">Editor</h3><div class="hint">verze 1.4.2 (2026-11-10) &middot; x86_64</div><p>Textový editor pro MagnumOpus.</p><div class="hint">Licence MIT &middot; &copy; 2026 Autoři Editoru</div></div>',
+      f: [B('Kopírovat informace o verzi', 'ghost'), '<span class="sp"></span>', B('Zavřít', 'primary')], w: 380 };
+  }
+
+  // ---- Seznam polozek ----
+  var E = [
+    { id: 'vyber', t: 'Otevřít, uložit, vybrat složku', k: 'app', fn: picker, mob: 'full', modes: [['open', 'Otevřít'], ['multi', 'Více souborů'], ['folder', 'Složka / projekt'], ['save', 'Uložit jako']], h: 470,
+      pro: ['Jeden výběr pro čtyři úlohy: uživatel se ho naučí jednou.', 'Aplikace dostane jen vybraný soubor (úchyt), ne přístup ke složkám.', 'Kódování a konce řádků jsou schované pod „Změnit“ (výchozí UTF-8 bez BOM, LF).'], con: ['Aplikace nemůže výběr přizpůsobit vzhledem; jen filtrem a výchozí složkou.', 'Projekt = výběr složky s filtrem, který dodá aplikace.'] },
+    { id: 'zpravy', t: 'Potvrzení, varování, chyba', k: 'app', fn: message, mob: 'sheet', modes: [['confirm', 'Potvrzení'], ['perm', 'Ničivá akce'], ['error', 'Chyba s podrobnostmi']], h: 380,
+      pro: ['Vratné akce se nepotvrzují pořád dokola; ptáme se jen u nevratných.', 'Chyba nabídne cestu ven a kód pro explain.'], con: ['Aplikace musí umět akci vrátit, jinak dialog nedává smysl (Zpět je povinné).'] },
+    { id: 'prejmenovat', t: 'Textový vstup a přejmenování', k: 'app', fn: rename, mob: 'sheet', h: 300,
+      pro: ['Kontrola názvu hned při psaní, ne až po potvrzení.', 'Přípona zůstane mimo výběr.'], con: ['Na telefonu vyjede klávesnice a list se posune nad ni.'] },
+    { id: 'opravneni', t: 'Oprávnění', k: 'trust', fn: perm, mob: 'sheet', modes: [['camera', 'Kamera'], ['mic', 'Mikrofon'], ['location', 'Poloha'], ['files', 'Soubory'], ['network', 'Síť'], ['screen', 'Sdílení obrazovky'], ['elevate', 'Zvýšení práv']], h: 460,
+      pro: ['„Jen teď“ je výchozí střední cesta; trvalé povolení jde kdykoli vzít v Nastavení.', 'Zvýšení práv ukazuje přesně co se změní, ne jen „chce práva správce“.'], con: ['Tři tlačítka jsou víc než dvě; ale „Jen teď“ výrazně snižuje trvalá povolení.'] },
+    { id: 'overeni', t: 'Heslo, PIN, FIDO2, síťové umístění', k: 'trust', fn: auth, mob: 'sheet', modes: [['pwd', 'Heslo'], ['pin', 'PIN'], ['fido', 'FIDO2'], ['net', 'Síťové umístění']], h: 440,
+      pro: ['Vždy je vidět, kdo se ptá a proč.', 'Fráze v pruhu odliší pravý dialog od napodobeniny.'], con: ['Fráze funguje jen když si ji uživatel pamatuje; připomeneme ji při prvních dialozích.'] },
+    { id: 'wifi', t: 'Heslo k Wi-Fi', k: 'trust', fn: wifi, mob: 'sheet', h: 400,
+      pro: ['Měřené připojení se nastaví hned, ne až potom v Nastavení.'], con: ['Další volby (statická IP, proxy) jsou až v Nastavení.'] },
+    { id: 'usb', t: 'Nové USB zařízení', k: 'trust', fn: usb, mob: 'sheet', modes: [['kbd', 'Klávesnice'], ['storage', 'Úložiště']], h: 400,
+      pro: ['Klávesnice musí být povolena dřív, než může psát (ochrana proti BadUSB).', 'Flashka nabídne jen čtení.'], con: ['První připojení klávesnice chce jedno kliknutí myší nebo dotykem; jinak ji nejde povolit.'] },
+    { id: 'otevrit-v', t: 'Otevřít v&hellip;', k: 'app', fn: openwith, mob: 'sheet', h: 420,
+      pro: ['Stejný seznam jako v kontextové nabídce, jen větší.'], con: ['Výchozí aplikace jde změnit i tady, i v Nastavení; dvě místa.'] },
+    { id: 'sdilet', t: 'Sdílet', k: 'app', fn: share, mob: 'sheet', h: 360,
+      pro: ['Krátký seznam místních cílů.'], con: ['Ve verzi 1 bez síťových cílů.'] },
+    { id: 'tisk', t: 'Tisk a náhled', k: 'app', fn: print, mob: 'full', h: 420,
+      pro: ['Náhled vedle voleb, změna je vidět hned.', 'Uložit jako PDF je obyčejná tiskárna.'], con: ['Pokročilé volby tiskárny až pod „Další možnosti“.'] },
+    { id: 'barva', t: 'Výběr barvy', k: 'app', fn: color, mob: 'sheet', h: 420,
+      pro: ['Na počítači jako výsuvný panel u tlačítka, okno neblokuje.', 'Kapátko vybere barvu kdekoli na obrazovce (s povolením).'], con: ['Kapátko potřebuje snímek obrazovky; povoluje se jako sdílení obrazovky na jeden klik.'] },
+    { id: 'pismo', t: 'Výběr písma', k: 'app', fn: font, mob: 'full', h: 440,
+      pro: ['Názvy psané vlastním písmem, ukázka s českými znaky.'], con: ['Velké sady písem chtějí rychlé načítání náhledů (vykreslit jen viditelné).'] },
+    { id: 'datum', t: 'Datum a čas', k: 'app', fn: date, mob: 'sheet', h: 470,
+      pro: ['Kalendář i přímý zápis; týden začíná pondělím podle jazyka.'], con: [] },
+    { id: 'kopirovani', t: 'Dlouhá operace a konflikty', k: 'sys', fn: copy, mob: 'sheet', modes: [['progress', 'Průběh'], ['conflict', 'Konflikt']], h: 380,
+      pro: ['„Na pozadí“ přesune práci do panelu úloh; dialog nezdržuje.', 'Konflikt ukazuje, která verze je novější; přepsaná zůstane v historii.'], con: ['Hodně konfliktů = hodně otázek; proto volba „pro dalších N“.'] },
+    { id: 'verze', t: 'Konflikt verzí souboru', k: 'app', fn: version, mob: 'sheet', h: 380,
+      pro: ['Díky verzování souborů se nic neztratí, ať uživatel zvolí cokoli.'], con: ['Čtyři akce; „Zobrazit rozdíly“ proto jako vedlejší vlevo.'] },
+    { id: 'vypnout', t: 'Odhlášení a vypnutí s neuloženými daty', k: 'sys', fn: shutdown, mob: 'sheet', h: 400,
+      pro: ['Uložit jde jednotlivě i najednou.', 'Ostatní okna se obnoví, takže otázka je jen u neuložených dat.'], con: ['Aplikace musí umět „ulož a skonči“ do 5 s; jinak se ukáže jako neodpovídající.'] },
+    { id: 'o-aplikaci', t: 'O aplikaci', k: 'app', fn: about, mob: 'sheet', h: 380,
+      pro: ['Vytvoří se z manifestu; aplikace nic nekreslí.'], con: ['Není to dialog v pravém smyslu, jen malé okno.'] }
+  ];
+
+  var KIND = { app: '<span class="kind">Aplikace</span>', sys: '<span class="kind sys">Systém</span>', trust: '<span class="trust">' + I('shieldcheck', 's') + 'Důvěryhodný</span>' };
+  var state = {};
+
+  function dialog(d, k, cls, w) {
+    var kind = d.trust ? 'trust' : d.sys ? 'sys' : k;
+    var role = d.trust || /error|alert/.test(d.ic || '') ? 'alertdialog' : 'dialog';
+    return '<div class="dlg k-' + kind + (cls ? ' ' + cls : '') + '" role="' + role + '" aria-label="' + d.t.replace(/<[^>]+>/g, '') + '"' + (w ? ' style="width:' + w + 'px"' : '') + '>' +
+      (d.trust ? BAND : '') +
+      '<div class="hd">' + (d.ic ? I(d.ic, 'big') : '') + '<div><h3>' + d.t + '</h3>' + (d.s ? '<p>' + d.s + '</p>' : '') + '</div></div>' +
+      (d.top || d.b ? '<div class="bd">' + (d.top || '') + (d.b || '') + '</div>' : '') +
+      (d.g ? '<div class="guard">' + d.g + '</div>' : d.trust ? '<div class="guard">' + I('info') + 'Toto okno kreslí systém. Ctrl+Alt+Del ukáže vždy pravé.</div>' : '') +
+      '<div class="ft">' + d.f.join('') + '</div></div>';
+  }
+  function desk(e, d) {
+    var kind = d.trust ? 'trust' : d.sys ? 'sys' : e.k;
+    var win = '<div class="pw"><div class="tb">' + I('app-editor') + 'Editor &middot; zprava.md</div><div class="ln" style="width:60%"></div><div class="ln"></div><div class="ln" style="width:80%"></div><div class="ln" style="width:70%"></div>' + (kind === 'app' ? '<div class="dim"></div>' : '') + '</div>';
+    return '<div class="ds" style="height:' + e.h + 'px">' + win + (kind !== 'app' ? '<div class="dim"></div>' : '') + dialog(d, e.k, '', Math.min(d.w || 440, 640)) + '</div>';
+  }
+  function phone(e, d) {
+    return '<div class="ph" aria-label="Telefon"><div class="scr"><div class="sb"><span>14:05</span><span>' + I('wifi') + ' ' + I('battery') + '</span></div>' +
+      '<div class="ap"><div class="tb">' + I('app-editor') + 'zprava.md</div><div class="ln" style="width:60%"></div><div class="ln"></div><div class="ln" style="width:80%"></div></div><div class="dim"></div>' +
+      dialog(d, e.k, e.mob === 'full' ? 'full' : '') + '<div class="home"></div></div></div>';
+  }
+  function render(e) {
+    var m = state[e.id], d = e.fn(m);
+    var el = document.getElementById('e-' + e.id);
+    el.querySelector('.stg').innerHTML = '<div><p class="cap">Počítač</p>' + desk(e, d) + '</div><div><p class="cap">Telefon: ' + (e.mob === 'full' ? 'celá stránka' : 'spodní list') + '</p>' + phone(e, d) + '</div>';
+    // Plocha pocitace se zvetsi tak, aby se do ni dialog vesel cely.
+    var ds = el.querySelector('.ds'), dl = ds.querySelector('.dlg'), need = 0;
+    Array.prototype.forEach.call(dl.children, function (c) { need += c.scrollHeight; });
+    ds.style.height = Math.max(e.h, need + (dl.classList.contains('k-app') ? 80 : 40)) + 'px';
+  }
+  document.getElementById('toc').innerHTML = E.map(function (e) { return '<a href="#e-' + e.id + '">' + e.t + '</a>'; }).join('') + '<a href="#zmeny">Co přidávám a ubírám</a>';
+  document.getElementById('list').innerHTML = E.map(function (e) {
+    state[e.id] = e.modes ? e.modes[0][0] : null;
+    return '<section class="ent" id="e-' + e.id + '" aria-labelledby="h-' + e.id + '"><h2 id="h-' + e.id + '">' + e.t + ' ' + KIND[e.k] + '</h2>' +
+      (e.modes ? '<div class="modes seg" role="radiogroup" aria-label="Varianta">' + e.modes.map(function (m, i) { return '<button role="radio" data-m="' + m[0] + '" aria-checked="' + (i ? 'false' : 'true') + '" tabindex="' + (i ? '-1' : '0') + '">' + m[1] + '</button>'; }).join('') + '</div>' : '') +
+      '<div class="row stg"></div><div class="pc"><div class="card"><h3>Výhody</h3><ul>' + e.pro.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>' +
+      (e.con.length ? '<div class="card"><h3>Nevýhody a rizika</h3><ul>' + e.con.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>' : '') + '</div></section>';
+  }).join('');
+  E.forEach(render);
+
+  document.getElementById('list').addEventListener('click', function (ev) {
+    var t = ev.target;
+    if (!t.closest) return;
+    var mb = t.closest('.modes button');
+    if (mb) {
+      var sec = mb.closest('.ent'), e = E.filter(function (x) { return 'e-' + x.id === sec.id; })[0];
+      sec.querySelectorAll('.modes button').forEach(function (b) { var on = b === mb; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; });
+      state[e.id] = mb.dataset.m; render(e); return;
+    }
+    var tg = t.closest('[data-tg]');
+    if (tg) { tg.closest('.dlg').classList.toggle(tg.dataset.tg); return; }
+    var sw = t.closest('.switch');
+    if (sw) { sw.setAttribute('aria-checked', sw.getAttribute('aria-checked') !== 'true'); return; }
+    var ck = t.closest('.ck');
+    if (ck) ck.classList.toggle('on');
+  });
+  // Sipky v prepinaci variant
+  document.getElementById('list').addEventListener('keydown', function (ev) {
+    if (!ev.target.closest || !ev.target.closest('.modes') || (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft')) return;
+    var bs = Array.prototype.slice.call(ev.target.closest('.modes').querySelectorAll('button'));
+    var i = bs.indexOf(ev.target) + (ev.key === 'ArrowRight' ? 1 : -1);
+    var n = bs[(i + bs.length) % bs.length]; n.click(); n.focus(); ev.preventDefault();
+  });
+});
+</script>
+</body>
+</html>
