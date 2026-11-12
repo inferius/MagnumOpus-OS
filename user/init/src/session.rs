@@ -127,6 +127,13 @@ pub fn name(session: u64) -> Option<String> {
     SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.name.clone())
 }
 
+/// Bezi nejaka relace? Bez ni kompozitor ukaze prihlasovaci obrazovku
+/// (startovni obrazovka pak mire znakem do avataru, `Comp::greeter_avatar`).
+#[allow(dead_code)]
+pub fn any_open() -> bool {
+    !SESSIONS.lock().is_empty()
+}
+
 /// Nejnovejsi odemcena relace (do ni jdou aplikace spustene z listy).
 pub fn active() -> Option<u64> {
     SESSIONS.lock().iter().rev().find(|u| !u.locked).map(|u| u.id)

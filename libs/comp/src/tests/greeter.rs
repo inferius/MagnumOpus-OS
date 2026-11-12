@@ -235,3 +235,17 @@ fn tajemstvi_neni_v_trasovani_ani_snimku() {
     let d = alloc::format!("{:?}", t.c.dialogs.active().unwrap());
     assert!(!d.contains("Qp4Kd"), "{d}");
 }
+
+#[test]
+fn avatar_pro_prechod_startovni_obrazovky() {
+    let mut t = T::new();
+    let before = t.c.greeter_avatar(false);
+    let mut t2 = login();
+    let l = t2.c.greeter_layout();
+    let a = l.avatar;
+    // Stejna poloha bez uctu (pri pripojeni displeje) i s ucty.
+    assert_eq!(before, (a.x as f32 + 44.0, a.y as f32 + 44.0, 88.0));
+    t.c.session_opened(1, 1000, "alice", t.now);
+    assert!(t.c.greeter_avatar(true).1 > before.1, "zamcena obrazovka ma avatar niz (hodiny)");
+    t2.frame();
+}

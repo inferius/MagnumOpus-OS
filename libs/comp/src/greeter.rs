@@ -495,23 +495,32 @@ impl Comp {
         }
     }
 
+    /// Kruh avataru prihlasovaci (`locked` = zamykaci) obrazovky:
+    /// (stred x, stred y, prumer) v px. Cil prechodu startovni obrazovky;
+    /// jde spocitat hned pri pripojeni displeje (nezavisi na uctech).
+    pub fn greeter_avatar(&self, locked: bool) -> (f32, f32, f32) {
+        let r = avatar_rect(self.w, self.h, locked, &self.style);
+        (r.x as f32 + r.w as f32 / 2.0, r.y as f32 + r.h as f32 / 2.0, r.w as f32)
+    }
+
     pub fn greeter_layout(&self) -> Layout {
         let st = &self.style;
         let t = &st.theme;
         let sp = &t.space;
-        let (w, h) = (self.w as i32, self.h as i32);
+        let w = self.w as i32;
         let cx = w / 2;
         let col_w = 380.min(self.w.saturating_sub(2 * sp[4])) as i32;
         let locked = matches!(self.greeter.mode(), Mode::Locked(_));
-        // Svisle: (hodiny), avatar, uzivatele, jmeno, pole, fraze, zprava, metody.
-        let users_h = if !locked && self.greeter.accounts.len() > 1 { 64 + sp[4] as i32 } else { 0 };
-        let block = 88 + sp[4] as i32 + users_h + t.text.title.line as i32 + sp[4] as i32 + 48 + sp[4] as i32 + 32 + sp[3] as i32 + 24 + sp[3] as i32 + t.size.control_h as i32;
-        let mut y = (h - block) / 2 + if locked { 60 } else { 0 };
+        // Svisle: (hodiny), avatar, uzivatele, jmeno, pole, fraze, zprava,
+        // metody. Misto pro radek uctu je pri prihlaseni vzdy (poloha
+        // avataru nezavisi na poctu uctu: cil prechodu startovni obrazovky).
+        let users_h = if !locked { 64 + sp[4] as i32 } else { 0 };
+        let avatar = avatar_rect(self.w, self.h, locked, &self.style);
+        let mut y = avatar.y;
         let clock_y = y - 140;
-        let avatar = Rect::new(cx - 44, y, 88, 88);
         y += 88 + sp[4] as i32;
         let mut users = Vec::new();
-        if users_h > 0 {
+        if users_h > 0 && self.greeter.accounts.len() > 1 {
             let n = self.greeter.accounts.len().min(6) as i32;
             let chip = 76;
             let gap = sp[3] as i32;
@@ -521,8 +530,8 @@ impl Comp {
                 users.push((i, Rect::new(x, y, chip as u32, 64)));
                 x += chip + gap;
             }
-            y += users_h;
         }
+        y += users_h;
         let name_y = y;
         y += t.text.title.line as i32 + sp[4] as i32;
         let field = Rect::new(cx - col_w / 2, y, col_w as u32, 48);
@@ -660,4 +669,15 @@ impl Comp {
             f.draw(c, r.x + (r.w as i32 - tw) / 2, r.y + f.baseline_in(ss.size, r.h), m.label(), ss.size, col.ink);
         }
     }
+}
+
+/// Avatar obrazovky: svisly blok (avatar, radek uctu, jmeno, pole,
+/// fraze, zprava, metody) vystredeny, zamcena obrazovka o kus niz (hodiny).
+fn avatar_rect(w: u32, h: u32, locked: bool, st: &Style) -> Rect {
+    let t = &st.theme;
+    let sp = &t.space;
+    let users_h = if !locked { 64 + sp[4] as i32 } else { 0 };
+    let block = 88 + sp[4] as i32 + users_h + t.text.title.line as i32 + sp[4] as i32 + 48 + sp[4] as i32 + 32 + sp[3] as i32 + 24 + sp[3] as i32 + t.size.control_h as i32;
+    let y = (h as i32 - block) / 2 + if locked { 60 } else { 0 };
+    Rect::new(w as i32 / 2 - 44, y, 88, 88)
 }
