@@ -122,12 +122,8 @@ the log as before. The serial line always has the full output.
 | native display (bochs-display, Intel) | the `splash` process exits, the native driver takes the framebuffer (`CLAIM`), the compositor continues as with fbdisplay **[verified in QEMU]** for bochs-display (default `xtask run`) |
 | aarch64 in QEMU (ramfb) | picture on ramfb (800 x 600, scale 0.75), the `splash` process animates (~170 ms per frame under TCG), the compositor on bochs-display (1280 x 800) starts with the boot picture and fades into the desktop **[verified in QEMU]** (manual TCG run, `9e865be`) |
 
-The log-pulling mode does not start the `splash` process (loader and
-kernel keep the picture, nobody animates it). The test kernel
-(`qemu-test`, `cargo xtask test`) ignores the picture and draws the log on
-screen as before: drawing the log slows boot down and without it test
-timing changed (the test `shell: termd: relace, soubory, undo, odpojeni`
-then found a leftover clone, see Follow-ups).
+The test run (`TEST_RUN`) and the log-pulling mode do not start the
+`splash` process (loader and kernel keep the picture, nobody animates it).
 
 ## Performance
 
@@ -203,12 +199,6 @@ floating point; they differ by at most 2 colour levels (test
   screen (in QEMU no step stalls and boot does not fail).
 
 ## Follow-ups
-
-- **Leftover clone after session takeover** (shell): when a background
-  job (`bg`) finishes while a new termd is taking over the session, one
-  clone stays in `/tmp/.aside`. It showed up only with the faster boot
-  without log drawing (deterministically on x86_64 and aarch64); tests now
-  run with the log as before, the shell bug remains.
 
 - **Esc = detailed log** on the boot screen **[designed]**: init has no
   input until `inputd` starts.

@@ -115,11 +115,8 @@ Sériová linka má plný výpis vždy.
 | nativní displej (bochs-display, Intel) | proces `splash` skončí, nativní ovladač převezme framebuffer (`CLAIM`), kompozitor naváže jako u fbdisplay **[ověřeno v QEMU]** pro bochs-display (výchozí `xtask run`) |
 | aarch64 v QEMU (ramfb) | obraz na ramfb (800 x 600, měřítko 0,75), proces `splash` animuje (pod TCG ~170 ms na snímek), kompozitor na bochs-display (1280 x 800) začne startovním obrazem a přejde do plochy **[ověřeno v QEMU]** (ruční běh TCG, `9e865be`) |
 
-Režim vytažení logů proces `splash` nespouští (loader a jádro obraz
-drží, nikdo ho neanimuje). Testovací jádro (`qemu-test`, `cargo xtask
-test`) obraz ignoruje a kreslí log na obrazovku jako dřív: kreslení logu
-start zpomaluje a bez něj se měnilo časování testů (test `shell: termd:
-relace, soubory, undo, odpojeni` pak našel zbylý klon, viz Navazuje).
+Testovací běh (`TEST_RUN`) a režim vytažení logů proces `splash`
+nespouštějí (loader a jádro obraz drží, nikdo ho neanimuje).
 
 ## Výkon
 
@@ -193,12 +190,6 @@ neviditelné.
   žádný krok nezdrží a start neselže).
 
 ## Navazuje
-
-- **Zbylý klon po převzetí relace** (shell): když úloha na pozadí
-  (`bg`) doběhne, zatímco relaci přebírá nový termd, zůstane v
-  `/tmp/.aside` jeden klon. Projevilo se jen s rychlejším startem bez
-  kreslení logu (deterministicky na x86_64 i aarch64); testy teď běží
-  s logem jako dřív, chyba v shellu zůstává.
 
 - **Esc = podrobný log** na startovní obrazovce **[navrženo]**: init do
   startu `inputd` nemá vstup.

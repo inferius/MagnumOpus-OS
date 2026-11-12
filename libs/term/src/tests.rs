@@ -249,3 +249,20 @@ fn program_mounts_from_needs() {
     assert_eq!(mounts(&ExecNeeds { all: true, ..Default::default() }), vec![spec("/", false)]);
     let _ = MemFs::new().stat("/");
 }
+
+/// Uloha `bg` se zapisem: jeji klon se zahodi ve stejne volne chvili, ve
+/// ktere dobehla (ne az v dalsi - ta po prevzeti relace novym termd
+/// nemusi prijit a klon by zustal v /tmp/.aside).
+#[test]
+fn bg_job_clone_is_discarded_in_same_idle() {
+    let mut svc = Service::new("/home");
+    let mut link = TestLink::default();
+    let mut f = fs();
+    let mut env = TestEnv(0);
+    svc.handle(ClientMsg::Attach { session: 0 }, &mut link, &mut f, &mut env);
+    svc.handle(ClientMsg::Run { session: 1, line: "bg { echo prezil > /home/bg.txt }".into() }, &mut link, &mut f, &mut env);
+    svc.idle(&mut link, &mut f, &mut env);
+    assert!(!svc.sessions.iter().any(|s| s.interp.has_flush()), "klon ulohy ceka na dalsi volnou chvili");
+    let mut tf: &mut dyn shlang::host::Fs = &mut f;
+    assert_eq!(tf.read("/home/bg.txt").unwrap(), b"prezil".to_vec());
+}
