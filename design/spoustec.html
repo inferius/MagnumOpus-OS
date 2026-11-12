@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spouštěč</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+/* Spoustec (tlacitko mrizky v liste): ctyri navrhy vedle sebe a nazvy palety. */
+.page { max-width: 1400px; }
+.vars { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s5); }
+.var h2 { font-size: var(--t-title-size); margin: 0 0 var(--s2); }
+.st { position: relative; height: 560px; border-radius: var(--r-card); overflow: hidden; border: 1px solid var(--c-border);
+  background: radial-gradient(circle at 18% 22%, var(--c-wall-a), transparent 52%), radial-gradient(circle at 82% 60%, var(--c-wall-b), transparent 56%), var(--c-bg); font-size: 13px; color: var(--c-ink); }
+.mat { background: color-mix(in srgb, var(--c-surface) 78%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4); border: 1px solid var(--c-border); box-shadow: var(--sh-popover); }
+:root[data-contrast="more"] .mat { background: var(--c-surface); backdrop-filter: none; border: 2px solid #fff; }
+.mbar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 46px; display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 16px; z-index: 5; }
+.mbar .b { height: 36px; min-width: 36px; display: grid; place-items: center; border-radius: 10px; }
+.mbar .b.on { background: var(--c-accent-soft); box-shadow: inset 0 -2px 0 var(--c-accent); }
+.mbar .sp { flex: 1; }
+.lp { position: absolute; z-index: 10; left: 10px; bottom: 62px; border-radius: 18px; overflow: hidden; }
+.q { display: flex; align-items: center; gap: 8px; height: 40px; margin: 12px; padding: 0 12px; border-radius: 12px; background: var(--c-surface-3); color: var(--c-ink-muted); }
+.q .kb { margin-left: auto; }
+.kb { display: inline-block; min-width: 18px; padding: 0 5px; border: 1px solid var(--c-border-strong); border-bottom-width: 2px; border-radius: 5px; font-size: 11px; line-height: 16px; text-align: center; color: var(--c-ink); background: var(--c-surface); }
+.sec { padding: 6px 14px 4px; font-size: 11px; font-weight: 600; color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; display: flex; }
+.sec a { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.grid { display: grid; gap: 4px; padding: 0 10px; }
+.app { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px; border-radius: 10px; font-size: 11.5px; text-align: center; }
+.app:hover { background: var(--c-surface-3); }
+.app .ic { width: 30px; height: 30px; }
+.rw { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 14px; border-radius: 8px; margin: 0 6px; }
+.rw.sel { background: color-mix(in srgb, var(--c-accent) 16%, transparent); }
+.rw .k { margin-left: auto; color: var(--c-ink-muted); font-size: 11.5px; }
+.rw .ic { width: 18px; height: 18px; }
+.foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-top: 8px; border-top: 1px solid var(--c-border); }
+.foot .av { width: 28px; height: 28px; border-radius: 14px; display: grid; place-items: center; font-weight: 700; font-size: 12px; color: #fff; background: linear-gradient(135deg, var(--c-accent), var(--c-ai)); }
+.foot .sp { flex: 1; }
+.foot .ib { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; }
+.foot .ib:hover { background: var(--c-surface-3); }
+/* Prehled pres celou obrazovku */
+.ov { position: absolute; inset: 0; z-index: 4; padding: 16px 18px 70px; background: color-mix(in srgb, var(--c-bg) 72%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); display: flex; flex-direction: column; gap: 8px; }
+.ov .wins { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ov .wt { border-radius: 12px; overflow: hidden; border: 1px solid var(--c-border); background: var(--c-surface); box-shadow: var(--sh-window-inactive); }
+.ov .wt .h { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 11px; font-weight: 600; background: var(--c-surface-2); }
+.ov .wt .h .ic { width: 12px; height: 12px; }
+.ov .wt .c { height: 70px; }
+.ov .desks { display: flex; gap: 8px; }
+.ov .desks div { flex: 1; height: 40px; border-radius: 10px; border: 2px dashed var(--c-border-strong); display: grid; place-items: center; font-size: 11px; color: var(--c-ink-muted); }
+.ov .desks .on { border-style: solid; border-color: var(--c-accent); color: var(--c-ink); }
+.pc { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); font-size: var(--t-small-size); margin-top: var(--s3); }
+.pc .card { padding: var(--s4); }
+.pc h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); }
+.pc ul { margin: 0; padding-left: 18px; }
+.names { width: 100%; }
+.names td:first-child { font-weight: 700; white-space: nowrap; }
+@media (max-width: 1100px) { .vars { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Spouštěč</h1>
+    <p class="lead">Tlačítko mřížky vlevo v liště. Dnes je to prostý seznam. Čtyři návrhy, co má spouštěč dělat a jak vypadat. Výchozí pravidlo: paleta příkazů je brána do systému, spouštěč nemá být druhý konkurenční systém, ale vstup do téže věci pro myš a dotyk.</p>
+  </header>
+  <div class="vars" id="vars"></div>
+
+  <h2>Vztah k paletě příkazů</h2>
+  <div class="pc" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+    <div class="card"><h3>Jeden zdroj dat</h3><ul><li>Aplikace, okna, akce, nedávné soubory i systémové akce (napájení, účet) jsou položky téhož katalogu akcí, který používá paleta.</li><li>Spouštěč jen jinak ukáže prázdný dotaz: velké ikony připnutých aplikací místo seznamu nedávných akcí.</li><li>Jakmile začnete psát, ve spouštěči i v paletě je stejný výsledek, stejné řazení a stejné zkratky.</li></ul></div>
+    <div class="card"><h3>Napájení, účet, nastavení</h3><ul><li>Dole ve spouštěči: avatar a jméno (klik = účet: přepnout uživatele, nastavení účtu), ikona Nastavení, tlačítko napájení s nabídkou Zamknout, Odhlásit, Restartovat, Vypnout.</li><li>Stejné akce jsou v paletě ve skupině Systém a na bezpečné obrazovce (Ctrl+Alt+Del).</li></ul></div>
+    <div class="card"><h3>Klávesnice</h3><ul><li><span class="kb">Super</span> otevře spouštěč, <span class="kb">Ctrl</span> <span class="kb">K</span> paletu; ve variantě B je to totéž okno, jen jinde.</li><li>Psaní ve spouštěči rovnou hledá; šipky, Enter a Esc stejně jako v paletě.</li></ul></div>
+  </div>
+
+  <h2>Název pro paletu příkazů</h2>
+  <p class="note">Krátké, dobře vyslovitelné česky i anglicky a hodí se k MagnumOpus (latinský, „velké dílo“, hudební opus). Uživatel vybere; jméno se objeví v bublině, v nápovědě a v příručce („Otevřete Kompas: Ctrl+K“).</p>
+  <div style="overflow-x:auto"><table class="tbl names">
+    <thead><tr><th>Česky / English</th><th>Proč</th><th>Riziko</th></tr></thead>
+    <tbody>
+      <tr><td>Kompas / Compass</td><td>ukazuje cestu kamkoli v systému; stejné slovo v obou jazycích; K jako Ctrl+K</td><td>v jiných produktech se používá pro mapy</td></tr>
+      <tr><td>Maestro</td><td>dirigent, který řídí celé „opus“; jedno slovo pro všechny jazyky; vřelé a osobité</td><td>trochu vznešené; nesmí působit jako asistent AI</td></tr>
+      <tr><td>Brána / Gate</td><td>přesně to, čím je: brána do systému; krátké a jasné</td><td>v angličtině obecné, hůř se hledá</td></tr>
+      <tr><td>Atrium</td><td>latinsky vstupní síň domu, z ní se jde do všech místností; sedí k latinskému jménu systému</td><td>méně známé slovo, chce krátké vysvětlení</td></tr>
+      <tr><td>Klíč / Key</td><td>klíč ke všemu a klávesa K; snadno se pamatuje</td><td>v bezpečnosti „klíč“ znamená něco jiného (šifrovací klíč, FIDO2)</td></tr>
+      <tr><td>Lucerna / Lantern</td><td>teplé, vřelé („posvítí, kde co je“); hezky ladí s charakterem Vřelý</td><td>delší, méně akční</td></tr>
+      <tr><td>Opus</td><td>přímo z názvu systému: „otevři Opus“</td><td>splývá se jménem celého systému a s jeho logem</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="margin-top:var(--s3)"><b>Doporučení:</b> Kompas (jasný význam, stejně v obou jazycích), nebo Maestro (nejosobitější). Vybírá uživatel.</p>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  function I(n, s) { return '<svg class="ic"' + (s ? ' style="width:' + s + 'px;height:' + s + 'px"' : '') + ' aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
+  var PINNED = [['terminal', 'Terminál'], ['folder', 'Soubory'], ['app-editor', 'Editor'], ['app-browser', 'Prohlížeč'], ['tasks', 'Správce úloh'], ['settings', 'Nastavení'], ['app-photos', 'Obrázky'], ['calculator', 'Kalkulačka']];
+  var RECENT = [['file-text', 'zprava.md', 'Editor &middot; před 5 min'], ['app-pdf', 'smlouva.pdf', 'Prohlížeč &middot; včera'], ['folder', 'Projekty', 'Soubory &middot; včera']];
+  function bar(on) { return '<div class="mbar mat"><span class="b' + (on ? ' on' : '') + '">' + I('apps', 20) + '</span><span class="b">' + I('terminal', 20) + '</span><span class="b">' + I('folder', 20) + '</span><span class="sp"></span><span class="b">' + I('wifi', 18) + '</span><span class="b">' + I('bell', 18) + '</span><span class="b" style="font-weight:600;font-size:12px">14:05</span></div>'; }
+  function foot() { return '<div class="foot"><span class="av">M</span><b>Michal</b><span class="sp"></span><span class="ib" title="Nastavení">' + I('settings', 18) + '</span><span class="ib" title="Zamknout, Odhlásit, Restartovat, Vypnout">' + I('power', 18) + '</span></div>'; }
+  function q(t) { return '<div class="q">' + I('search', 16) + '<span>' + t + '</span><span class="kb">Super</span></div>'; }
+  var V = [
+    { id: 'a', name: '(a) Mřížka aplikací, připnuté a nedávné soubory', html: '<div class="lp mat" style="width:420px">' + q('Hledat aplikace, soubory, akce') +
+      '<div class="sec">Připnuté<a href="#">Všechny aplikace &rsaquo;</a></div><div class="grid" style="grid-template-columns:repeat(4,1fr)">' + PINNED.map(function (a) { return '<div class="app">' + I(a[0]) + a[1] + '</div>'; }).join('') + '</div>' +
+      '<div class="sec">Nedávné soubory</div>' + RECENT.map(function (r) { return '<div class="rw">' + I(r[0]) + r[1] + '<span class="k">' + r[2] + '</span></div>'; }).join('') + foot() + '</div>',
+      pro: ['Známé a srozumitelné i pro nováčky; velké cíle pro myš a dotyk.', 'Nedávné soubory na jedno kliknutí.'],
+      con: ['Vedle palety vzniká druhé místo s jiným uspořádáním (riziko dvou systémů).', 'Mřížka zabere hodně místa a s mnoha aplikacemi se musí listovat.'] },
+    { id: 'b', name: '(b) Spouštěč = paleta příkazů ukotvená u lišty (doporučeno)', html: '<div class="lp mat" style="width:420px">' + q('Hledat cokoli: aplikace, okna, soubory, akce') +
+      '<div class="grid" style="grid-template-columns:repeat(6,1fr);padding-top:2px">' + PINNED.slice(0, 6).map(function (a) { return '<div class="app">' + I(a[0]) + a[1] + '</div>'; }).join('') + '</div>' +
+      '<div class="sec">Nedávné</div><div class="rw sel">' + I('file-text') + 'zprava.md<span class="k">soubor</span></div><div class="rw">' + I('window') + '~/projekt - Terminál<span class="k">okno</span></div><div class="rw">' + I('camera') + 'Diagnostický snímek<span class="k">Ctrl+Alt+Shift+S</span></div>' +
+      '<div class="sec">Systém</div><div class="rw">' + I('lock') + 'Zamknout<span class="k">Super+L</span></div>' + foot() + '</div>',
+      pro: ['Jeden systém: myší je to spouštěč, klávesnicí paleta, data a výsledky stejné.', 'Prázdný dotaz ukáže připnuté aplikace a nedávné; psaní hned hledá všude.', 'Nováček se naučí hledání, které pak funguje všude (Ctrl+K).'],
+      con: ['Méně místa pro velké dlaždice než (a); „všechny aplikace“ jsou jen hledáním nebo skupinou.', 'Zkušený uživatel ho bude používat jen pro napájení a účet.'] },
+    { id: 'c', name: '(c) Přehled přes celou obrazovku', html: '<div class="ov">' + q('Hledat') + '<div class="sec">Otevřená okna</div><div class="wins">' +
+      [['terminal', '~/projekt'], ['folder', 'Dokumenty'], ['app-editor', 'zprava.md']].map(function (w) { return '<div class="wt"><div class="h">' + I(w[0]) + w[1] + '</div><div class="c"></div></div>'; }).join('') + '</div>' +
+      '<div class="sec">Aplikace</div><div class="grid" style="grid-template-columns:repeat(8,1fr)">' + PINNED.map(function (a) { return '<div class="app">' + I(a[0]) + a[1] + '</div>'; }).join('') + '</div>' +
+      '<div class="sec">Plochy</div><div class="desks"><div class="on">Plocha 1</div><div>Plocha 2</div><div>+ nová</div></div></div>',
+      pro: ['Vidíte všechno najednou: okna, aplikace i plochy.', 'Dobré pro dotyk a velké obrazovky; přirozené místo pro přesun okna na jinou plochu.'],
+      con: ['Překryje celou práci kvůli spuštění jedné aplikace; pomalejší (animace, náhledy).', 'Plochy zatím nejsou; náhledy oken stojí GPU čas.', 'Hodí se spíš jako samostatný „Přehled oken“ než jako spouštěč.'] },
+    { id: 'd', name: '(d) Kompaktní seznam se skupinami', html: '<div class="lp mat" style="width:300px">' + q('Hledat') +
+      '<div class="sec">Běží</div><div class="rw">' + I('terminal') + 'Terminál<span class="k">2 okna</span></div>' +
+      '<div class="sec">Aplikace</div>' + PINNED.slice(1, 6).map(function (a) { return '<div class="rw">' + I(a[0]) + a[1] + '</div>'; }).join('') +
+      '<div class="sec">Nedávné</div>' + RECENT.slice(0, 2).map(function (r) { return '<div class="rw">' + I(r[0]) + r[1] + '</div>'; }).join('') + foot() + '</div>',
+      pro: ['Úzký, rychlý, nezakrývá práci; snadno se ovládá klávesnicí.', 'Nejbližší dnešnímu stavu, malá práce na implementaci.'],
+      con: ['Malé cíle pro dotyk; s mnoha aplikacemi dlouhý seznam.', 'Méně „vřelý“ a výrazný než (a) a (b).'] }
+  ];
+  document.getElementById('vars').innerHTML = V.map(function (v) {
+    return '<section class="var" aria-labelledby="h' + v.id + '"><h2 id="h' + v.id + '">' + v.name + '</h2><div class="st">' + v.html + bar(true) + '</div>' +
+      '<div class="pc"><div class="card"><h3>Výhody</h3><ul>' + v.pro.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div><div class="card"><h3>Nevýhody</h3><ul>' + v.con.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div></div></section>';
+  }).join('');
+});
+</script>
+</body>
+</html>

@@ -736,6 +736,41 @@ představí, čím je systém jiný: odznak důvěry, zkusit bokem, označení a
 - **Aktualizace** systému budou nová verze ve FS (snapshot), takže návrat
   k předchozí verzi je stejná volba jako po pádu.
 
+### Mobilní prostředí (návrh, etapa A)
+
+> **Změna proti v1.6:** nový návrh mobilního prostředí podle zadání
+> adaptivního UI a k němu systémové dialogy, spouštěč a panely lišty.
+> Jde jen o návrh v prototypu; nic z toho zatím neběží.
+
+Prototyp [Mobilní vzhled](../../design/mobil.html) simuluje úzký a široký
+telefon a tablet, na výšku i na šířku, se zvětšeným textem, ve světlém
+i tmavém motivu. Prochází zadaný průchod: zámek, Domů, spuštění Souborů,
+otevření souboru, úprava s klávesnicí, otočení, přehled a návrat,
+dialog oprávnění. Vedle telefonu ukazuje **kontext okna**, který by
+aplikace dostala (velikost, okraje, oblast zakrytá klávesnicí, třída
+rozložení, generace).
+
+| Téma | Návrh |
+|---|---|
+| Navigace | gesta: tah zdola Domů, tah a zastavení Přehled, tah od boku Zpět; tlačítková navigace jako volba přístupnosti |
+| Zpět | 1. zavře dočasnou vrstvu, 2. krok zpět v aplikaci, 3. předchozí aplikace nebo Domů; rozpracované změny chrání verzování souborů |
+| Konflikt gest | systémový pás 16 px u okrajů, výjimka pro aplikaci nejvýše 200 px na boku, rozpoznání po 12 px a pak zrušení dotyku v aplikaci |
+| Rozložení | `compact` &lt; 600, `medium` 600 až 839, `expanded` &ge; 840 logických jednotek, hystereze 24; klávesnice třídu nemění |
+| Důvěryhodné prvky | stavový řádek kreslí jen systém; dvojí stisk napájení ukáže „Kdo je na obrazovce“; dialogy s pruhem Systém a frází |
+| Klávesnice | systémová součást v samostatném procesu; aplikace dostává text a skládání; citlivá pole mají bezpečnou klávesnici bez návrhů a schránky |
+| Agent | vlastní barva a ikona i na zámku a ve stavovém řádku; jeho změny v textu podtržené a vratné |
+| Monitor | zrcadlení, rozšíření, doprovodné ovládání (role `presentation` a `controls`); připojení samo nic nezveřejní |
+
+⚠️ **Rizika a omezení (řečená předem):** textový engine zatím neumí
+skládání znaků (CJK), obousměrný text ani české dělení slov; klávesnice
+v návrhu tyto jazyky neslibuje. Telefonní funkce (volání, mobilní data)
+jsou jen simulované. Obecný bezdrátový přijímač může po výpadku dál
+ukazovat poslední snímek.
+
+Další návrhy k rozhodnutí: [bubliny a panely lišty](../../design/bubliny-panely.html),
+[spouštěč a jméno palety](../../design/spoustec.html),
+[systémové dialogy](../../design/dialogy.html) (počítač i telefon).
+
 ## Přístupnost
 
 Strom přístupnosti je součást protokolu okna (`guiproto::a11y`). Knihovna
@@ -997,3 +1032,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1.4 | 7. 11. 2026 | obrazovka kritického pádu (A Klid + technická zpráva na D), oznámení po dalším startu; příručka grafického jazyka |
 | v1.5 | 8. 11. 2026 | instalace: živé USB, instalátor s náhledem změn disku, první spuštění |
 | v1.6 | 8. 11. 2026 | **implementace fáze 1** v systému: tokeny jako data (`libs/theme`), Inter a JetBrains Mono s kerningem `GPOS`, okna, odznak, lišta, plocha, dialog a terminál podle prototypů; odchylky v [GUI: Vzhled podle návrhu](gui.md#vzhled-podle-návrhu-fáze-1) |
+| v1.7 | 12. 11. 2026 | návrhy: mobilní prostředí (etapa A), systémové dialogy pro počítač i telefon, spouštěč a jména palety, bubliny a panely lišty |

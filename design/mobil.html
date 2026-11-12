@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobilní vzhled</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<script src="assets/mobil.js" defer></script>
+<style>
+/* Mobilni vzhled (etapa A zadani adaptivniho UI): interaktivni simulator telefonu a tabletu.
+ * Logika je v assets/mobil.js; tady jsou jen styly a staticky text. */
+.page { max-width: 1400px; }
+.sim { display: grid; grid-template-columns: auto minmax(280px, 1fr); gap: var(--s6); align-items: start; margin-top: var(--s4); }
+@media (max-width: 1000px) { .sim { grid-template-columns: 1fr; } }
+.ctl { display: flex; flex-direction: column; gap: var(--s3); font-size: var(--t-small-size); }
+.ctl .grp { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+.ctl .grp > b { width: 100%; font-size: var(--t-caption-size); color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--s3) 0; }
+.steps button { border: 1px solid var(--c-border-strong); background: var(--c-surface); color: var(--c-ink); border-radius: var(--r-pill); padding: 4px 12px; cursor: pointer; font: inherit; font-size: var(--t-small-size); }
+.steps button.on { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); font-weight: 600; }
+.steps button .n { opacity: .7; margin-right: 4px; }
+.say { padding: var(--s4); border-radius: var(--r-card); background: var(--c-surface-2); border-left: 4px solid var(--c-accent); }
+.ctxj { font-family: "JetBrains Mono", monospace; font-size: 12px; white-space: pre; padding: var(--s3); border-radius: var(--r-control); background: var(--c-term-bg); color: var(--c-term-ink); overflow-x: auto; }
+
+/* Zarizeni */
+.devw { display: flex; justify-content: center; }
+.dev { position: relative; padding: 12px; border-radius: 46px; background: #141116; box-shadow: var(--sh-window); }
+.dev.dtab { border-radius: 30px; padding: 16px; }
+.scr { position: relative; overflow: hidden; border-radius: 34px; color: var(--c-ink); --fs: 1; font-size: calc(14px * var(--fs));
+  background: radial-gradient(circle at 20% 15%, var(--c-wall-a), transparent 55%), radial-gradient(circle at 80% 85%, var(--c-wall-b), transparent 55%), var(--c-bg); }
+.dev.dtab .scr { border-radius: 16px; }
+.scr.big { --fs: 1.3; }
+.scr .ic { width: 1.4em; height: 1.4em; flex: none; }
+.cut { position: absolute; z-index: 60; width: 12px; height: 12px; border-radius: 50%; background: #000; }
+.stb { position: absolute; z-index: 50; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 6px; padding: 0 22px; font-size: 12px; font-weight: 600; }
+.stb .ic { width: 14px; height: 14px; }
+.stb .sp { flex: 1; }
+.stb .agentdot { color: var(--c-ai); display: flex; align-items: center; gap: 3px; }
+.stb .camdot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-ok); }
+.stb .lockt { display: flex; align-items: center; gap: 3px; color: var(--c-trust-ink); background: var(--c-trust-bg); border: 1px solid var(--c-trust-border); padding: 1px 6px; border-radius: 99px; font-size: 10.5px; }
+.navh { position: absolute; z-index: 50; left: 0; right: 0; bottom: 0; display: grid; place-items: center; cursor: pointer; }
+.navh i { width: 120px; height: 5px; border-radius: 3px; background: var(--c-ink); opacity: .55; }
+.navb { position: absolute; z-index: 50; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-around; align-items: center; background: color-mix(in srgb, var(--c-surface) 85%, transparent); }
+.navb button { border: 0; background: none; color: var(--c-ink); padding: 8px 18px; border-radius: 99px; cursor: pointer; }
+.navb .ic { width: 22px; height: 22px; }
+.area { position: absolute; z-index: 1; overflow: hidden; display: flex; flex-direction: column; }
+.scr.areas .area { outline: 2px dashed var(--c-ok); outline-offset: -2px; }
+.scr.areas .vkb { outline: 2px dashed var(--c-warn); outline-offset: -2px; }
+.scr.areas .stb, .scr.areas .navh, .scr.areas .navb { background: color-mix(in srgb, var(--c-danger) 18%, transparent); }
+.reach { position: absolute; z-index: 70; inset: 0; pointer-events: none; }
+
+/* Zamek a domov */
+.lock { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 30px 16px 16px; gap: 10px; }
+.lock .clk { font-size: calc(64px * var(--fs)); font-weight: 300; letter-spacing: -.02em; line-height: 1; }
+.lock .dt { font-weight: 500; }
+.ncard { width: 100%; box-sizing: border-box; display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 18px; background: color-mix(in srgb, var(--c-surface) 80%, transparent); backdrop-filter: blur(16px); }
+.ncard small { display: block; color: var(--c-ink-muted); }
+.ncard.ai { box-shadow: inset 3px 0 0 var(--c-ai); }
+.unlock { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; color: var(--c-ink-muted); }
+.unlock .fp { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--c-surface) 70%, transparent); }
+.unlock .fp .ic { width: 34px; height: 34px; }
+.home { flex: 1; display: flex; flex-direction: column; padding: 10px 14px 8px; gap: 10px; }
+.widget { padding: 12px 14px; border-radius: 20px; background: color-mix(in srgb, var(--c-surface) 75%, transparent); backdrop-filter: blur(16px); }
+.widget small { color: var(--c-ink-muted); display: block; }
+.apps { display: grid; gap: 14px 6px; margin-top: auto; }
+.app { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: .82em; text-align: center; cursor: pointer; border: 0; background: none; color: inherit; font-family: inherit; padding: 0; }
+.app .t { width: 3.6em; height: 3.6em; border-radius: 1.1em; display: grid; place-items: center; background: color-mix(in srgb, var(--c-surface) 85%, transparent); box-shadow: 0 2px 8px #0002; }
+.app .t .ic { width: 2.1em; height: 2.1em; }
+.app.sim .t { opacity: .45; }
+.app.sim::after { content: "simulováno"; font-size: .8em; color: var(--c-ink-muted); margin-top: -3px; }
+.pill { display: flex; align-items: center; gap: 8px; height: 2.9em; padding: 0 14px; border-radius: 99px; background: color-mix(in srgb, var(--c-surface) 85%, transparent); backdrop-filter: blur(16px); color: var(--c-ink-muted); cursor: pointer; border: 0; font: inherit; width: 100%; box-sizing: border-box; }
+.dock { display: flex; justify-content: space-around; padding: 8px; border-radius: 26px; background: color-mix(in srgb, var(--c-surface) 60%, transparent); backdrop-filter: blur(16px); }
+
+/* Aplikace */
+.abar { display: flex; align-items: center; gap: 4px; min-height: 3.4em; padding: 0 6px; background: var(--c-surface); border-bottom: 1px solid var(--c-border); flex: none; }
+.abar h3 { margin: 0 0 0 4px; font-size: 1.1em; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib { width: 2.9em; height: 2.9em; display: grid; place-items: center; border: 0; background: none; color: var(--c-ink); border-radius: 99px; cursor: pointer; flex: none; }
+.ib:hover { background: var(--c-surface-3); }
+.ib[disabled] { opacity: .35; }
+.panes { flex: 1; display: flex; min-height: 0; background: var(--c-surface); }
+.pane { flex: 1; overflow: auto; min-width: 0; }
+.pane + .pane { border-left: 1px solid var(--c-border); }
+.pane.side { flex: 0 0 200px; background: var(--c-surface-2); }
+.row { display: flex; align-items: center; gap: 12px; min-height: 3.6em; padding: 0 14px; border-bottom: 1px solid var(--c-border); cursor: pointer; }
+.row small { display: block; color: var(--c-ink-muted); font-size: .85em; }
+.row.on { background: color-mix(in srgb, var(--c-accent) 14%, transparent); }
+.row .ic { width: 1.7em; height: 1.7em; }
+.ph-h { padding: 12px 14px 4px; font-size: .78em; font-weight: 600; color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; }
+.prev { padding: 16px; }
+.prev .big { width: 4em; height: 4em; }
+.doc { flex: 1; overflow: auto; padding: 16px 18px; line-height: 1.55; background: var(--c-surface); cursor: text; }
+.doc h2 { font-size: 1.35em; margin: 0 0 8px; }
+.doc p { margin: 0 0 10px; }
+.caret { display: inline-block; width: 2px; height: 1.15em; vertical-align: text-bottom; background: var(--c-accent); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.selw { background: color-mix(in srgb, var(--c-accent) 30%, transparent); position: relative; border-radius: 2px; }
+.selw::before, .selw::after { content: ""; position: absolute; bottom: -9px; width: 10px; height: 10px; border-radius: 50% 50% 50% 0; background: var(--c-accent); }
+.selw::before { left: -6px; transform: rotate(-45deg) scaleX(-1); }
+.selw::after { right: -6px; transform: rotate(-45deg); }
+.ai-ed { box-shadow: inset 0 -2px 0 var(--c-ai); }
+.ai-tag { font-size: .72em; font-weight: 700; color: var(--c-ai-ink); background: var(--c-ai-soft); padding: 1px 6px; border-radius: 99px; margin-left: 4px; }
+.tmenu { position: absolute; z-index: 40; display: flex; border-radius: 12px; background: var(--c-ink); color: var(--c-surface); box-shadow: var(--sh-popover); overflow: hidden; font-size: .9em; }
+.tmenu button { border: 0; background: none; color: inherit; padding: 9px 11px; cursor: pointer; font: inherit; white-space: nowrap; }
+.tmenu button + button { border-left: 1px solid color-mix(in srgb, var(--c-surface) 25%, transparent); }
+.tmenu .aib { color: #ff9fb5; }
+.acc { display: flex; gap: 2px; padding: 4px 6px; background: var(--c-surface-2); border-top: 1px solid var(--c-border); flex: none; overflow-x: auto; }
+.acc .ib { width: 2.6em; height: 2.6em; }
+.acc .lbl { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; background: none; color: var(--c-ink); font: inherit; border-radius: 99px; cursor: pointer; white-space: nowrap; }
+.save { font-size: .78em; color: var(--c-ink-muted); padding: 0 6px; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.save .ic { width: 1.2em; height: 1.2em; }
+
+/* Klavesnice */
+.vkb { position: absolute; z-index: 30; left: 0; right: 0; background: var(--c-surface-3); padding: 4px 4px 6px; box-sizing: border-box; display: flex; flex-direction: column; gap: 5px; }
+.vkb.secure { box-shadow: inset 0 3px 0 var(--c-trust-border); }
+.sug { display: flex; height: 30px; align-items: center; }
+.sug button { flex: 1; border: 0; background: none; color: var(--c-ink); font: inherit; font-size: 13px; cursor: pointer; }
+.sug button + button { border-left: 1px solid var(--c-border); }
+.sug .sec { flex: 1; text-align: center; font-size: 12px; font-weight: 600; color: var(--c-trust-ink); display: flex; gap: 6px; justify-content: center; align-items: center; }
+.kr { display: flex; gap: 4px; justify-content: center; flex: 1; }
+.kr button { flex: 1; max-width: 46px; border: 0; border-radius: 7px; background: var(--c-surface); color: var(--c-ink); font: inherit; font-size: 15px; box-shadow: 0 1px 0 #0003; cursor: pointer; padding: 0; min-height: 0; }
+.kr button.w { max-width: none; flex: 1.5; font-size: 12px; background: var(--c-surface-2); }
+.kr button.sp { max-width: none; flex: 5; font-size: 12px; color: var(--c-ink-muted); }
+.kr button.ent { background: var(--c-accent); color: var(--c-on-accent); }
+.kr button:active { background: var(--c-accent-soft); }
+.kr .ic { width: 18px; height: 18px; }
+
+/* Listy a prekryti */
+.scrim2 { position: absolute; z-index: 35; inset: 0; background: var(--c-scrim); }
+.sheet { position: absolute; z-index: 36; left: 0; right: 0; bottom: 0; background: var(--c-surface); border-radius: 26px 26px 0 0; box-shadow: 0 -8px 30px #0004; max-height: 88%; overflow: auto; }
+.sheet::before { content: ""; display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--c-border-strong); margin: 8px auto 2px; }
+.sheet.trusted { border: 2px solid var(--c-trust-border); border-bottom: 0; }
+.sheet .in { padding: 8px 18px 18px; }
+.sheet h3 { margin: 6px 0 4px; font-size: 1.1em; }
+.sheet p { margin: 0 0 8px; color: var(--c-ink-muted); }
+.sheet .acts { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.sheet .acts .btn { min-height: 2.9em; width: 100%; }
+.sheet .who { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; background: var(--c-surface-2); margin: 8px 0; }
+.sheet .who small { display: block; color: var(--c-ink-muted); }
+.sheet .who .ic { width: 2.2em; height: 2.2em; }
+.sheet .sys-band { margin: 4px 0 0; padding: 8px 18px; font-size: 12px; }
+.sheet.agent { box-shadow: 0 -8px 30px #0004, inset 0 4px 0 var(--c-ai); }
+.kv { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--c-border); }
+.kv span:last-child { color: var(--c-ink-muted); text-align: right; }
+.shade { position: absolute; z-index: 55; left: 0; right: 0; top: 0; background: color-mix(in srgb, var(--c-surface) 92%, transparent); backdrop-filter: blur(24px); border-radius: 0 0 26px 26px; padding: 6px 14px 14px; box-shadow: var(--sh-popover); max-height: 92%; overflow: auto; }
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
+.tile { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 18px; background: var(--c-surface-3); border: 0; color: var(--c-ink); font: inherit; text-align: left; cursor: pointer; }
+.tile small { display: block; color: var(--c-ink-muted); font-size: .8em; }
+.tile.on { background: var(--c-accent); color: var(--c-on-accent); }
+.tile.on small { color: inherit; opacity: .8; }
+.tile.na { opacity: .5; cursor: not-allowed; }
+.slider { height: 34px; border-radius: 17px; background: var(--c-surface-3); position: relative; overflow: hidden; display: flex; align-items: center; padding-left: 12px; }
+.slider i { position: absolute; inset: 0 40% 0 0; background: color-mix(in srgb, var(--c-accent) 35%, transparent); }
+.slider .ic { position: relative; }
+.ovw { flex: 1; display: flex; gap: 14px; align-items: center; padding: 0 30px; overflow-x: auto; background: color-mix(in srgb, var(--c-bg) 60%, transparent); backdrop-filter: blur(10px); }
+.ovc { flex: 0 0 62%; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+.ovc .hdr { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.ovc .shot { height: 300px; border-radius: 20px; background: var(--c-surface); box-shadow: var(--sh-window); overflow: hidden; }
+.ovc .shot .ln { height: 8px; margin: 14px 14px 0; border-radius: 4px; background: var(--c-surface-3); }
+.ovc .shot.priv { display: grid; place-items: center; color: var(--c-ink-muted); background: var(--c-surface-2); }
+.res { flex: 1; overflow: auto; padding: 8px 0; }
+
+/* Monitor a doprovodne ovladani */
+.duo { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: var(--s5); align-items: end; }
+@media (max-width: 800px) { .duo { grid-template-columns: 1fr; } }
+.mon { border-radius: 14px; padding: 10px; background: #141116; }
+.mon .s { aspect-ratio: 16/9; border-radius: 6px; background: linear-gradient(135deg, #2a1d3f, #5b3a8c); color: #fff; display: flex; flex-direction: column; justify-content: center; padding: 6%; gap: 4%; }
+.mon .s h4 { margin: 0; font-size: clamp(16px, 2.6vw, 34px); }
+.mon .s i { display: block; height: 10px; border-radius: 5px; background: #ffffff55; }
+.mon .live { display: flex; gap: 6px; align-items: center; color: #fff; font-size: 12px; padding: 6px 2px 0; }
+.mon .live b { width: 8px; height: 8px; border-radius: 50%; background: var(--c-danger); }
+.mph { width: 240px; height: 480px; border-radius: 36px; padding: 10px; box-sizing: border-box; background: #141116; }
+.mph .in { height: 100%; border-radius: 28px; background: var(--c-surface); color: var(--c-ink); font-size: 13px; display: flex; flex-direction: column; overflow: hidden; }
+.mph .nt { flex: 1; padding: 12px; background: var(--c-surface-2); margin: 10px; border-radius: 14px; line-height: 1.45; }
+.mph .nx { display: flex; gap: 10px; align-items: center; margin: 0 10px; }
+.mph .nx i { width: 80px; aspect-ratio: 16/9; border-radius: 6px; background: linear-gradient(135deg, #2a1d3f, #5b3a8c); }
+.mph .ctr { display: flex; gap: 8px; padding: 10px; }
+.mph .ctr .btn { flex: 1; min-height: 52px; }
+.modes3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s3); }
+.modes3 .card { padding: var(--s4); }
+.modes3 h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); display: flex; gap: 8px; align-items: center; }
+.pc { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--s3); font-size: var(--t-small-size); }
+.pc .card { padding: var(--s4); cursor: default; }
+.pc h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); }
+.pc ul { margin: 0; padding-left: 18px; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Mobilní vzhled</h1>
+    <p class="lead">Návrh mobilního prostředí MagnumOpus podle zadání adaptivního UI (etapa A). Stejná identita jako na počítači: teplé plochy, levandulový akcent, ikony F, oddělené označení agenta a důvěryhodných prvků. Telefon je <b>simulovaný</b>: nic z toho zatím neběží a funkce bez hardwaru (volání, mobilní data) jsou označené.</p>
+  </header>
+
+  <h2>Průchod: spuštění, soubor, úprava, klávesnice, otočení, návrat, oprávnění</h2>
+  <div class="steps" id="steps"></div>
+  <div class="sim">
+    <div class="devw" id="devw"></div>
+    <div class="ctl">
+      <div class="say" id="say"></div>
+      <div class="grp"><b>Zařízení</b><div class="seg" role="radiogroup" id="c-dev"></div></div>
+      <div class="grp"><b>Zobrazení</b>
+        <button class="btn small" id="c-rot">Otočit</button>
+        <button class="btn small" id="c-big" aria-pressed="false">Větší text 130 %</button>
+        <button class="btn small" id="c-areas" aria-pressed="false">Ukázat oblasti</button>
+      </div>
+      <div class="grp"><b>Navigace</b><div class="seg" role="radiogroup" id="c-nav"></div></div>
+      <div class="grp"><b>Gesta a tlačítka</b>
+        <button class="btn small" data-g="back">Gesto Zpět</button>
+        <button class="btn small" data-g="home">Domů</button>
+        <button class="btn small" data-g="overview">Přehled</button>
+        <button class="btn small" data-g="shade">Stáhnout lištu</button>
+        <button class="btn small" data-g="power2">2&times; napájení</button>
+      </div>
+      <div class="grp"><b>Dosah palce</b><div class="seg" role="radiogroup" id="c-hand"></div></div>
+      <div class="grp"><b>Kontext okna, který dostane aplikace</b></div>
+      <div class="ctxj" id="ctx" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <h2>Navigace: Domů, Zpět, Přehled</h2>
+  <div class="pc">
+    <div class="card"><h3>Výchozí: gesta</h3><ul><li><b>Domů</b>: tah ze spodního okraje nahoru, nebo klepnutí na úchyt.</li><li><b>Přehled</b>: tah nahoru a zastavení na 300 ms.</li><li><b>Zpět</b>: tah od levého nebo pravého okraje dovnitř (obě ruce).</li><li><b>Oznámení</b>: tah od horního okraje dolů; z pravé poloviny rovnou rychlá nastavení.</li></ul></div>
+    <div class="card"><h3>Smlouva akce Zpět</h3><ul><li>1. zavře dočasnou vrstvu (klávesnice, nabídka, list),</li><li>2. jinak krok zpět v navigaci aplikace,</li><li>3. jinak zpět na předchozí aplikaci nebo Domů.</li><li>Rozpracované změny se neptají: soubor se průběžně ukládá jako verze, Zpět nic neztratí. Aplikace bez ukládání může Zpět jednou zdržet listem „Zahodit změny?“.</li></ul></div>
+    <div class="card"><h3>Konflikt gest</h3><ul><li>Systém vlastní pás 16 px u levého, pravého a spodního okraje; aplikace v něm gesta nedostane.</li><li>Aplikace si může vyžádat výjimku nejvýše 200 px výšky na každém boku (např. posuvník kreslení); spodní okraj nikdy.</li><li>Gesto se rozpozná až po 12 px pohybu; do té doby jde dotyk aplikaci a pak se jí pošle zrušení.</li><li>Přístupnost: tlačítková navigace (Zpět, Domů, Přehled) jako trvalá volba; stejné akce i pro čtečku a přepínače.</li></ul></div>
+  </div>
+
+  <h2>Důvěryhodné prvky bez titulku okna</h2>
+  <div class="pc">
+    <div class="card"><h3>Systémové místo</h3><ul><li>Stavový řádek nahoře kreslí jen systém; aplikace pod něj nesmí kreslit a nemůže ho skrýt bez souhlasu (celá obrazovka ukáže řádek při tahu).</li><li>Během důvěryhodného dialogu je ve stavovém řádku štítek se štítem.</li></ul></div>
+    <div class="card"><h3>Bezpečné vyvolání</h3><ul><li><b>Dvojí stisk napájení</b> ukáže „Kdo je na obrazovce“: identitu aplikace v popředí, podpis, oprávnění a přístup agenta. Fyzický stisk aplikace nenasimuluje.</li><li>Na zařízení bez tlačítka: dlouhý stisk stavového řádku (slabší, uvádíme jako omezení).</li><li>Barva ani nakreslený odznak nejsou důkaz; důkaz je fráze, kterou zná jen systém a uživatel, a bezpečné vyvolání.</li></ul></div>
+    <div class="card"><h3>Vstup</h3><ul><li>Důvěryhodný dialog přijímá jen fyzický dotyk tohoto zařízení; vzdálený a syntetický vstup (agent, doprovodné ovládání, přijímač) ne.</li><li>Prvních 300 ms ignoruje dotyk.</li></ul></div>
+  </div>
+
+  <h2>Klávesnice a text</h2>
+  <div class="pc">
+    <div class="card"><h3>Vztah k aplikaci</h3><ul><li>Klávesnice je systémová součást v samostatném procesu. Aplikace dostává hotový text a skládání (preedit), ne jednotlivé dotyky; klávesnice nevidí nic jiného než fokusované pole.</li><li>Když vyjede, zmenší se <b>dostupná oblast</b> okna (v kontextu jako překážka); navigace aplikace se nepřestavuje.</li><li>Fokus se při otočení a změně rozložení zachová i s kurzorem a výběrem.</li></ul></div>
+    <div class="card"><h3>Citlivá pole</h3><ul><li>Pole hesla, PIN a karty dostanou <b>bezpečnou klávesnici</b>: bez návrhů, bez učení slov, bez schránky, s pruhem „Bezpečné zadání“.</li><li>Klávesnice třetích stran (až budou) se pro citlivá pole nepoužijí nikdy.</li></ul></div>
+    <div class="card"><h3>Co textový engine zatím neumí</h3><ul><li>Skládání znaků (IME) pro čínštinu, japonštinu, korejštinu: nepodporováno.</li><li>Obousměrný text (arabština, hebrejština): nepodporováno, souvisí se zákazem bidi v názvech souborů.</li><li>Dělení slov a kontrola pravopisu pro češtinu: chybí slovník.</li><li>Klávesnice v návrhu ukazuje jen češtinu a angličtinu; to není slib dalších jazyků.</li></ul></div>
+  </div>
+
+  <h2>Rozložení podle šířky okna</h2>
+  <div style="overflow-x:auto"><table class="tbl">
+    <thead><tr><th>Třída</th><th>Šířka okna (logické jednotky)</th><th>Soubory</th><th>Editor</th></tr></thead>
+    <tbody>
+      <tr><td><code>compact</code></td><td>&lt; 600</td><td>seznam, klepnutí otevře detail</td><td>jen text, nástroje v liště nad klávesnicí</td></tr>
+      <tr><td><code>medium</code></td><td>600 až 839</td><td>seznam + náhled</td><td>osnova + text</td></tr>
+      <tr><td><code>expanded</code></td><td>&ge; 840</td><td>místa + seznam + náhled</td><td>osnova + text + panel agenta</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="margin-top:var(--s3)">Hystereze 24 jednotek: z <code>compact</code> do <code>medium</code> až od 600, zpět až pod 576. Klávesnice třídu nemění (mění jen dostupnou výšku). Každá změna kontextu má nové číslo generace; aplikace odpoví rozložením pro tuto generaci a starší vstup se zahodí.</p>
+
+  <h2>Monitor a telefon: tři režimy</h2>
+  <div class="modes3">
+    <div class="card"><h3><svg class="ic" aria-hidden="true"><use href="#ic-copy"/></svg>Zrcadlení</h3>Stejný obraz všude. Oznámení a dialogy oprávnění se na monitoru skryjí.</div>
+    <div class="card"><h3><svg class="ic" aria-hidden="true"><use href="#ic-multi-monitor"/></svg>Rozšíření</h3>Monitor je další plocha s okny v rozložení <code>expanded</code>; telefon zůstane <code>compact</code>.</div>
+    <div class="card"><h3><svg class="ic" aria-hidden="true"><use href="#ic-screen-share"/></svg>Doprovodné ovládání</h3>Monitor ukazuje obsah (role <code>presentation</code>), telefon ovládání (role <code>controls</code>). Nabídne se jen u aplikací, které obě role umí.</div>
+  </div>
+  <div class="duo" style="margin-top:var(--s4)">
+    <div class="mon"><div class="s"><h4>Výsledky 3. čtvrtletí</h4><i style="width:70%"></i><i style="width:55%"></i><i style="width:62%"></i></div><div class="live"><b></b>Prezentace z telefonu &middot; jen tento snímek, bez oznámení</div></div>
+    <div class="mph"><div class="in"><div class="nt"><b>Poznámky (vidíte jen vy)</b><br>Zmínit růst o 12 %, poděkovat týmu. Čas: 4:20 z 10 min.</div><div class="nx"><i></i><span>Další: Plán na 4. čtvrtletí</span></div><div class="ctr"><button class="btn">Předchozí</button><button class="btn primary">Další snímek</button></div></div></div>
+  </div>
+  <div class="pc" style="margin-top:var(--s3)">
+    <div class="card"><h3>Pravidla</h3><ul><li>Připojení monitoru samo nic nezveřejní; režim vybere uživatel na telefonu.</li><li>Příkazy jsou sémantické („další snímek“) a jdou do konkrétní relace aplikace, ne jako kliknutí na souřadnice.</li><li>Zavření ovládání nezavře dokument; konec aplikace ukončí i obraz na monitoru.</li></ul></div>
+    <div class="card"><h3>Výpadek spojení</h3><ul><li>Telefon ukáže stav „Monitor odpojen“ a nabídne „Pokračovat na telefonu“; prezentace se pozastaví.</li><li>Riziko: obecný přijímač může po výpadku dál ukazovat poslední snímek; při řízeném konci ho systém požádá o vymazání.</li></ul></div>
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bubliny a panely lišty</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+/* Bubliny (tooltip) a male panely ze stavove oblasti listy. Material B
+ * (rozmazani + ton) s plnou zalohou; v kontrastu a s "Omezit pruhlednost" plne. */
+.page { max-width: 1300px; }
+.mat { background: color-mix(in srgb, var(--c-surface) 76%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--c-border); box-shadow: var(--sh-popover); color: var(--c-ink); }
+.solid .mat, :root[data-contrast="more"] .mat { background: var(--c-surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-contrast="more"] .mat { border: 2px solid #fff; }
+.stage { position: relative; height: 640px; border-radius: var(--r-card); overflow: hidden; border: 1px solid var(--c-border);
+  background: radial-gradient(circle at 18% 22%, var(--c-wall-a), transparent 52%), radial-gradient(circle at 82% 60%, var(--c-wall-b), transparent 56%), var(--c-bg); }
+/* Lista */
+.sbar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 52px; display: flex; align-items: center; gap: 2px; padding: 6px; border-radius: 18px; z-index: 5; }
+.sbar .sp { flex: 1; }
+.sbar .b { position: relative; height: 40px; min-width: 40px; display: inline-grid; place-items: center; border-radius: 10px; border: 0; background: transparent; color: var(--c-ink); cursor: pointer; padding: 0 6px; }
+.sbar .b:hover, .sbar .b.open { background: var(--c-surface-3); }
+.sbar .b.open { box-shadow: inset 0 -2px 0 var(--c-accent); }
+.sbar .sep { width: 1px; height: 22px; background: var(--c-border); margin: 0 4px; }
+.sbar .clock { font-size: 13px; font-weight: 600; line-height: 1.15; text-align: right; font-variant-numeric: tabular-nums; }
+.sbar .clock small { display: block; font-weight: 400; font-size: 11px; color: var(--c-ink-muted); }
+.ring { position: absolute; inset: 4px; pointer-events: none; }
+.cnt { position: absolute; right: 2px; top: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 700; line-height: 16px; background: var(--c-accent); color: var(--c-on-accent); }
+.cnt.ai { background: var(--c-ai); color: var(--c-on-ai); }
+.pdot { display: inline-block; width: 8px; height: 8px; border-radius: 4px; }
+.pd-cam { background: var(--c-icon-devices); } .pd-mic { background: var(--c-warn); } .pd-loc { background: var(--c-icon-network); }
+.tag-cond { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); font-size: 9px; padding: 0 4px; border-radius: 4px; background: var(--c-warn-soft); color: var(--c-warn); white-space: nowrap; display: none; }
+.show-rules .tag-cond { display: block; }
+/* Bublina */
+.tip { position: absolute; z-index: 30; max-width: 280px; padding: 7px 10px; border-radius: 10px; font-size: 12.5px; line-height: 1.4; pointer-events: none;
+  animation: tip-in var(--m-fast) var(--ease-standard); }
+@keyframes tip-in { from { opacity: 0; transform: translateY(3px); } }
+.tip b { display: block; font-size: 13px; }
+.tip .d { color: var(--c-ink-muted); }
+.tip .kb { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 6px; border: 1px solid var(--c-border-strong); border-bottom-width: 2px; border-radius: 5px; font-size: 11px; line-height: 16px; text-align: center; background: var(--c-surface); color: var(--c-ink); }
+.tip.arrow::after { content: ""; position: absolute; left: var(--ax, 50%); bottom: -6px; width: 10px; height: 10px; margin-left: -5px; transform: rotate(45deg); background: inherit;
+  border-right: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border); }
+.tip.inv { background: var(--c-ink); color: var(--c-surface); border: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.tip.inv .d { color: color-mix(in srgb, var(--c-surface) 75%, transparent); }
+/* Panel */
+.pnl { position: absolute; z-index: 20; width: 360px; bottom: 70px; border-radius: 18px; overflow: hidden; font-size: 13px; animation: pnl-in var(--m-base) var(--ease-enter); }
+@keyframes pnl-in { from { opacity: 0; transform: translateY(8px); } }
+.pnl header { display: flex; align-items: center; gap: 10px; padding: 14px 16px 8px; font-weight: 700; font-size: 14px; }
+.pnl header .sub { font-weight: 500; font-size: 12px; color: var(--c-ink-muted); margin-left: auto; }
+.pnl .row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 16px; }
+.pnl .row .grow { flex: 1; min-width: 0; }
+.pnl .row small { display: block; color: var(--c-ink-muted); font-size: 11.5px; }
+.pnl .row.btnrow:hover { background: var(--c-surface-3); cursor: pointer; }
+.pnl .sec { padding: 10px 16px 2px; font-size: 11px; font-weight: 600; color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; }
+.pnl .foot { display: flex; gap: 8px; padding: 10px 16px 14px; border-top: 1px solid var(--c-border); margin-top: 6px; }
+.pnl .foot .btn { flex: 1; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 6px 16px; }
+.tile { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 12px; background: var(--c-surface-3); font-size: 12px; font-weight: 600; cursor: pointer; border: 0; text-align: left; color: var(--c-ink); }
+.tile.on { background: var(--c-accent); color: var(--c-on-accent); }
+.tile small { font-weight: 400; opacity: .8; }
+.slider { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--c-accent) var(--v, 60%), var(--c-surface-3) var(--v, 60%)); }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 9px; background: var(--c-surface); border: 2px solid var(--c-accent); }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 4px 16px 8px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+.cal span { height: 30px; display: grid; place-items: center; border-radius: 15px; }
+.cal .h { color: var(--c-ink-muted); font-size: 11px; height: 22px; }
+.cal .o { color: var(--c-ink-faint); }
+.cal .t { background: var(--c-accent); color: var(--c-on-accent); font-weight: 700; }
+.task-row .progress { height: 5px; margin-top: 4px; }
+.ctl { display: flex; flex-wrap: wrap; gap: var(--s4); align-items: center; padding: var(--s3) var(--s4); margin: var(--s4) 0; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-card); }
+.ctl b { font-size: var(--t-caption-size); color: var(--c-ink-muted); margin-right: var(--s2); }
+.spec { width: 100%; }
+.spec td:first-child { white-space: nowrap; font-weight: 600; }
+.pc { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--s4); font-size: var(--t-small-size); }
+.pc .card h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); }
+.pc ul { margin: 0; padding-left: 18px; }
+.tipdemo { display: flex; flex-wrap: wrap; gap: var(--s6); padding: var(--s6); border-radius: var(--r-card); background: var(--c-bg); border: 1px solid var(--c-border); }
+.tipdemo .tip { position: relative; animation: none; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Bubliny a panely lišty</h1>
+    <p class="lead">Stavová oblast vpravo v liště: co každá ikona ukáže po najetí myší (bublina), po kliknutí (panel), prostředním tlačítkem a kolečkem. Najeď na ikony a klikej; kolečko nad zvukem mění hlasitost, prostřední tlačítko zvuk ztlumí.</p>
+  </header>
+
+  <div class="ctl" role="group" aria-label="Ovládání ukázky">
+    <span class="hstack"><button class="switch" role="switch" aria-checked="false" id="sw-solid" aria-label="Omezit průhlednost"></button>Omezit průhlednost</span>
+    <span class="hstack"><button class="switch" role="switch" aria-checked="false" id="sw-rules" aria-label="Ukázat pravidla ikon"></button>Ukázat druh ikon</span>
+    <span><b>Bublina</b><span class="seg" role="radiogroup" aria-label="Styl bubliny" id="g-tip">
+      <button role="radio" aria-checked="true" data-value="mat">Materiál systému</button><button role="radio" aria-checked="false" data-value="inv">Inverzní</button></span></span>
+    <span><b>Šipka</b><span class="seg" role="radiogroup" aria-label="Šipka" id="g-arrow">
+      <button role="radio" aria-checked="false" data-value="1">ano</button><button role="radio" aria-checked="true" data-value="0">ne</button></span></span>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="sbar mat" id="sbar" role="toolbar" aria-label="Lišta"></div>
+  </div>
+
+  <h2>Co dělá která ikona</h2>
+  <div style="overflow-x:auto"><table class="tbl spec">
+    <thead><tr><th>Ikona</th><th>Najetí (bublina)</th><th>Klik (panel)</th><th>Prostřední tlačítko / kolečko</th><th>Druh</th></tr></thead>
+    <tbody>
+      <tr><td>Úlohy</td><td>„3 úlohy na pozadí, 1 agent“ + nejbližší dokončení</td><td>rychlý přehled úloh s průběhem, pozastavit, zrušit, <i>Otevřít Správce úloh</i></td><td>-</td><td>podmíněná: jen když něco běží na pozadí</td></tr>
+      <tr><td>Soukromí</td><td>„Kamera a mikrofon: Hovory &middot; Poloha: Mapy“</td><td>co právě používá zařízení: ztlumit, odpojit, odebrat oprávnění</td><td>-</td><td>podmíněná: jen když se něco používá</td></tr>
+      <tr><td>Aktualizace</td><td>„Připravena aktualizace 0.7 &middot; restart“</td><td>co je nového, restartovat teď / později</td><td>-</td><td>podmíněná: jen když čeká</td></tr>
+      <tr><td>Síť</td><td>„Ethernet, připojeno, 1 Gb/s“</td><td>stav, přepínače (Wi-Fi, režim letadlo, VPN), seznam sítí, <i>Nastavení sítě</i></td><td>-</td><td>pevná</td></tr>
+      <tr><td>Zvuk</td><td>„Hlasitost 60 % &middot; Reproduktory“</td><td>posuvník, výstup a vstup, ztlumit, hlasitost aplikací</td><td>prostřední: ztlumit; kolečko: &plusmn;5 %</td><td>pevná</td></tr>
+      <tr><td>Baterie</td><td>„82 %, zbývá 4 h 10 min“</td><td>stav, profil napájení, <i>Nastavení napájení</i></td><td>-</td><td>pevná, jen když baterie je</td></tr>
+      <tr><td>Oznámení</td><td>„2 nová“ nebo „Nerušit do 18:00“</td><td>seznam oznámení, Nerušit, Vymazat vše</td><td>prostřední: zapnout / vypnout Nerušit</td><td>pevná</td></tr>
+      <tr><td>Hodiny</td><td>celé datum + čas v dalších pásmech</td><td>kalendář na měsíc, světový čas, události (<i>připravujeme</i>), <i>Nastavení času</i></td><td>kolečko nad kalendářem: měsíce</td><td>pevná</td></tr>
+      <tr><td>Aplikační</td><td>text od aplikace (nejvýš 80 znaků)</td><td>malý panel z deklarace aplikace (stejné prvky jako systémové panely)</td><td>-</td><td>jen s povolením, nejvýš 2 viditelné, zbytek pod &lsaquo;</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Bublina (tooltip)</h2>
+  <div class="tipdemo" id="tipdemo"></div>
+  <div style="overflow-x:auto;margin-top:var(--s4)"><table class="tbl spec">
+    <tbody>
+      <tr><td>Zpoždění</td><td>500 ms po zastavení myši; při přejetí na sousední prvek do 300 ms od zmizení hned (0 ms). Zmizí 100 ms po odjetí, okamžitě při kliku nebo stisku klávesy.</td></tr>
+      <tr><td>Umístění</td><td>nad lištou, 8 px mezera, vystředěná nad ikonou; u okraje obrazovky se posune dovnitř (šipka zůstane nad ikonou). U lišty vlevo/vpravo vedle ní.</td></tr>
+      <tr><td>Rozměr</td><td>max. šířka 280 px, zalamuje se, nejvýš 3 řádky popisu; typ caption 12,5 px, titulek 13 px tučně.</td></tr>
+      <tr><td>Obsah</td><td>jeden řádek (stav), nebo titulek + popis; zkratka klávesy vpravo jako „klávesa“. Žádné ovládací prvky: co se dá ovládat, patří do panelu.</td></tr>
+      <tr><td>Klávesnice</td><td>bublina se ukáže i při fokusu klávesou Tab (stejný text je jméno ve stromu přístupnosti; čtečka ho čte jednou).</td></tr>
+      <tr><td>Materiál</td><td>stejný jako panely (rozmazání + tón), plná záloha; ve vysokém kontrastu plné pozadí s rámečkem 2 px.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="pc" style="margin-top:var(--s4)">
+    <div class="card"><h3>Materiál systému (doporučeno)</h3><ul><li>Bublina, panel i nabídka vypadají jako jedna rodina: „součást systému“.</li><li>Funguje stejně ve všech motivech.</li><li>Slabší kontrast proti světlému pozadí okna: nutný rámeček a stín.</li></ul></div>
+    <div class="card"><h3>Inverzní (tmavá na světlém)</h3><ul><li>Výrazná, čte se rychle.</li><li>Vypadá jako jiný systém (cizí prvek), v tmavém motivu je světlá a ruší.</li><li>Nemá rozmazání: nehodí se k panelům.</li></ul></div>
+    <div class="card"><h3>Šipka ano / ne</h3><ul><li>Bez šipky (doporučeno): čistší, bublina je vždy nad tím, na co ukazuje myš.</li><li>Šipka pomůže u hustých řad ikon a na dotykových obrazovkách (ukazatel není vidět).</li></ul></div>
+  </div>
+
+  <h2>Pravidla: které ikony smí být v liště</h2>
+  <div class="pc">
+    <div class="card"><h3>Pevné systémové</h3><ul><li>síť, zvuk, oznámení, hodiny</li><li>baterie jen když v počítači je</li><li>pořadí pevné vpravo (hodiny poslední)</li></ul></div>
+    <div class="card"><h3>Podmíněné</h3><ul><li>soukromí: jen když se právě používá kamera, mikrofon, poloha nebo sdílení obrazovky</li><li>úlohy: jen když něco běží na pozadí (a 10 s po dokončení, s výsledkem)</li><li>aktualizace: jen když čeká na restart</li></ul></div>
+    <div class="card"><h3>Aplikační</h3><ul><li>aplikace se přihlásí manifestem (<code>[status_icon]</code>: ikona, bublina, panel z deklarace)</li><li>jen s povolením uživatele (první zobrazení se zeptá)</li><li>nejvýš 2 viditelné; další pod rozbalením &lsaquo;</li><li>ikona musí něco sdělovat (stav, počet); statické logo aplikace je zakázané</li></ul></div>
+    <div class="card"><h3>Uživatel</h3><ul><li>skrýt nebo přeřadit (pravý klik na ikonu nebo Nastavení &rsaquo; Lišta)</li><li>nejde skrýt: soukromí (bezpečnost) a hodiny</li><li>skrytá podmíněná ikona se při důležité změně (chyba úlohy) na chvíli ukáže</li></ul></div>
+  </div>
+
+  <h2>Úlohy na pozadí</h2>
+  <div class="pc">
+    <div class="card"><h3>Jak je ukázat</h3><ul><li>Ikona úloh s počtem a <b>kroužkem průběhu</b> (souhrn všech úloh se známým průběhem). Úloha agenta přidá korálový štítek.</li><li>Panel: každá úloha s názvem, kdo ji spustil, průběhem a odhadem, tlačítka pozastavit a zrušit.</li><li>Po dokončení nebo chybě oznámení (chyba vždy, úspěch jen u úloh delších než 10 s).</li></ul></div>
+    <div class="card"><h3>Čím se liší od aplikací</h3><ul><li>Aplikace mají okno a jsou vlevo v liště; úloha je práce bez okna (kopírování, test, scrub, agent).</li><li>Úloha může patřit aplikaci (kopírování v Souborech): klik v panelu přepne na její okno.</li><li>Zavřít aplikaci neznamená zrušit její úlohy: zeptá se.</li></ul></div>
+    <div class="card"><h3>Odkud jsou data</h3><ul><li>Služba úloh <code>taskd</code>: stejný seznam jako příkaz <code>tasks</code> a Správce úloh.</li><li>Panel je rychlý přehled; podrobnosti (log, rozpočet, kdo spustil koho) jsou ve Správci úloh.</li><li>Pozastavit a zrušit volají akce úlohy; nevratné zrušení se zeptá.</li></ul></div>
+  </div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  var st = { open: null, vol: 60, muted: false, dnd: false, tip: 'mat', arrow: false, net: { wifi: false, plane: false, vpn: false } };
+  var stage = document.getElementById('stage'), bar = document.getElementById('sbar');
+  function I(n, s) { return '<svg class="ic" style="width:' + (s || 20) + 'px;height:' + (s || 20) + 'px" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
+  var TASKS = [['Kopírování Fotky do záloh', 'Soubory', 62, '2 min'], ['cargo xtask test', 'Terminál', 35, '4 min'], ['Úklid ~/Stažené', 'agent', 80, 'čeká na kontrolu', 1]];
+  // Ikony stavove oblasti: id, ikona, druh (pevna/podminena/aplikacni), bublina [titulek, popis, zkratka].
+  function icons() {
+    var v = st.muted ? 'volume-off' : st.vol < 35 ? 'volume-low' : 'volume';
+    return [
+      ['tasks', 'tasks', 'podmíněná', ['3 úlohy na pozadí', 'Kopírování dokončeno asi za 2 min &middot; 1 úloha agenta']],
+      ['priv', '', 'podmíněná', ['Právě se používá', 'Kamera a mikrofon: Hovory &middot; Poloha: Mapy']],
+      ['upd', 'update', 'podmíněná', ['Připravena aktualizace 0.7', 'Dokončí se při restartu']],
+      ['app', 'cloud', 'aplikační', ['Synchronizace: hotovo', 'aplikace Úložiště &middot; před 2 min']],
+      ['more', 'left', 'aplikační', ['Další ikony aplikací (1)', '']],
+      'sep',
+      ['net', 'ethernet', 'pevná', ['Ethernet, připojeno', '1 Gb/s &middot; IP 10.0.2.15']],
+      ['vol', v, 'pevná', ['Hlasitost ' + (st.muted ? 'ztlumeno' : st.vol + ' %'), 'Reproduktory &middot; kolečko mění, prostřední tlačítko ztlumí']],
+      ['bat', 'battery-half', 'pevná', ['Baterie 82 %', 'zbývá asi 4 h 10 min &middot; profil Vyvážený']],
+      ['bell', st.dnd ? 'bell-off' : 'bell', 'pevná', [st.dnd ? 'Nerušit do 18:00' : '2 nová oznámení', 'prostřední tlačítko: Nerušit', 'Super+N']],
+      'sep',
+      ['clock', '', 'pevná', ['čtvrtek 12. listopadu 2026', 'Praha 14:05 &middot; Londýn 13:05 &middot; New York 08:05']]
+    ];
+  }
+  function ringSvg() {
+    var p = 0.58, c = 2 * Math.PI * 14;
+    return '<svg class="ring" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="none" stroke="var(--c-surface-3)" stroke-width="2.5"/><circle cx="16" cy="16" r="14" fill="none" stroke="var(--c-accent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="' + c + '" stroke-dashoffset="' + (c * (1 - p)) + '" transform="rotate(-90 16 16)"/></svg>';
+  }
+  function renderBar() {
+    bar.innerHTML = '<button class="b">' + I('apps', 22) + '</button><span class="sep"></span><button class="b">' + I('terminal', 22) + '</button><button class="b">' + I('folder', 22) + '</button><span class="sp"></span>' +
+      icons().map(function (x) {
+        if (x === 'sep') return '<span class="sep"></span>';
+        var inner = x[0] === 'priv' ? '<span class="hstack" style="gap:3px"><span class="pdot pd-cam"></span><span class="pdot pd-mic"></span><span class="pdot pd-loc"></span></span>'
+          : x[0] === 'clock' ? '<span class="clock">14:05<small>čt 12. 11.</small></span>'
+          : x[0] === 'tasks' ? ringSvg() + I('tasks', 18) + '<span class="cnt">3</span><span class="cnt ai" style="right:auto;left:0">1</span>'
+          : x[0] === 'more' ? I('left', 16) : I(x[1]);
+        return '<button class="b' + (st.open === x[0] ? ' open' : '') + '" data-id="' + x[0] + '" aria-label="' + x[3][0] + (x[3][1] ? '. ' + x[3][1] : '') + '"' + (x[0] === 'tasks' ? ' style="min-width:44px"' : '') + '>' + inner + '<span class="tag-cond">' + x[2] + '</span></button>';
+      }).join('');
+  }
+  // ---- Bublina
+  var tipTimer = null, lastHide = 0, tipEl = null;
+  function tipHtml(t) { return '<b>' + t[0] + (t[2] ? '<span class="kb">' + t[2] + '</span>' : '') + '</b>' + (t[1] ? '<span class="d">' + t[1] + '</span>' : ''); }
+  function showTip(btn) {
+    hideTip(true);
+    var x = icons().filter(function (i) { return i !== 'sep' && i[0] === btn.dataset.id; })[0]; if (!x || st.open) return;
+    tipEl = document.createElement('div');
+    tipEl.className = 'tip ' + (st.tip === 'inv' ? 'inv' : 'mat') + (st.arrow ? ' arrow' : '');
+    tipEl.innerHTML = tipHtml(x[3]); stage.appendChild(tipEl);
+    var rs = stage.getBoundingClientRect(), rb = btn.getBoundingClientRect(), w = tipEl.offsetWidth;
+    var cx = rb.left - rs.left + rb.width / 2, left = Math.max(8, Math.min(rs.width - w - 8, cx - w / 2));
+    tipEl.style.left = left + 'px'; tipEl.style.bottom = (rs.bottom - rb.top + 14) + 'px'; tipEl.style.setProperty('--ax', (cx - left) + 'px');
+  }
+  function hideTip(now) { if (tipEl) { tipEl.remove(); tipEl = null; lastHide = Date.now(); } clearTimeout(tipTimer); }
+  bar.addEventListener('mouseover', function (e) {
+    var b = e.target.closest('[data-id]'); if (!b) return;
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(function () { showTip(b); }, Date.now() - lastHide < 300 ? 0 : 500);
+  });
+  bar.addEventListener('mouseout', function (e) { if (!e.relatedTarget || !e.relatedTarget.closest('[data-id]')) { clearTimeout(tipTimer); setTimeout(function () { hideTip(); }, 100); } });
+  bar.addEventListener('focusin', function (e) { var b = e.target.closest('[data-id]'); if (b) showTip(b); });
+  bar.addEventListener('focusout', function () { hideTip(); });
+  // ---- Klik, prostredni tlacitko, kolecko
+  bar.addEventListener('click', function (e) { var b = e.target.closest('[data-id]'); if (!b) return; hideTip(); st.open = st.open === b.dataset.id ? null : b.dataset.id; render(); });
+  bar.addEventListener('auxclick', function (e) {
+    var b = e.target.closest('[data-id]'); if (!b || e.button !== 1) return; e.preventDefault();
+    if (b.dataset.id === 'vol') st.muted = !st.muted; if (b.dataset.id === 'bell') st.dnd = !st.dnd; render(); showTip(bar.querySelector('[data-id="' + b.dataset.id + '"]'));
+  });
+  bar.addEventListener('wheel', function (e) {
+    var b = e.target.closest('[data-id="vol"]'); if (!b) return; e.preventDefault();
+    st.vol = Math.max(0, Math.min(100, st.vol + (e.deltaY < 0 ? 5 : -5))); st.muted = false; render(); showTip(bar.querySelector('[data-id="vol"]'));
+  }, { passive: false });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && st.open) { st.open = null; render(); } });
+  stage.addEventListener('click', function (e) { if (st.open && e.target.isConnected && !e.target.closest('.pnl, #sbar')) { st.open = null; render(); } });
+  // ---- Panely
+  function row(icn, t, s, right, cls) { return '<div class="row ' + (cls || '') + '">' + (icn ? I(icn) : '') + '<span class="grow">' + t + (s ? '<small>' + s + '</small>' : '') + '</span>' + (right || '') + '</div>'; }
+  function sw(on, id) { return '<button class="switch" role="switch" aria-checked="' + on + '" data-sw="' + id + '"></button>'; }
+  function panel(id) {
+    if (id === 'tasks') return '<header>' + I('tasks') + 'Úlohy na pozadí<span class="sub">3 běží</span></header>' + TASKS.map(function (t) {
+      return '<div class="row task-row"><span class="grow"><b style="font-weight:600">' + t[0] + '</b> ' + (t[4] ? '<span class="chip agent" style="height:18px">' + I('agent', 12) + 'agent</span>' : '') +
+        '<small>' + (t[4] ? 'agent' : t[1]) + ' &middot; ' + t[2] + ' % &middot; ' + t[3] + '</small><div class="progress' + (t[4] ? ' agent' : '') + '"><i style="width:' + t[2] + '%"></i></div></span>' +
+        '<button class="btn ghost small icon" aria-label="Pozastavit ' + t[0] + '">' + I('pause', 16) + '</button><button class="btn ghost small icon" aria-label="Zrušit ' + t[0] + '">' + I('stop', 16) + '</button></div>';
+    }).join('') + '<div class="foot"><button class="btn small">' + I('tasks', 16) + 'Otevřít Správce úloh</button></div>';
+    if (id === 'net') return '<header>' + I('network') + 'Síť<span class="sub">připojeno</span></header>' +
+      '<div class="tiles">' + [['wifi', 'Wi-Fi', st.net.wifi ? 'zapnuto' : 'vypnuto'], ['plane', 'Letadlo', st.net.plane ? 'zapnuto' : 'vypnuto'], ['vpn', 'VPN', st.net.vpn ? 'Práce' : 'vypnuto']].map(function (t) {
+        return '<button class="tile' + (st.net[t[0]] ? ' on' : '') + '" data-tile="' + t[0] + '">' + I(t[0] === 'plane' ? 'airplane' : t[0] === 'vpn' ? 'vpn' : 'wifi', 18) + t[1] + '<small>' + t[2] + '</small></button>';
+      }).join('') + '</div>' + row('ethernet', 'Ethernet', 'připojeno &middot; 1 Gb/s &middot; IP 10.0.2.15', '<span class="chip ok">aktivní</span>') +
+      (st.net.wifi ? '<div class="sec">Wi-Fi sítě</div>' + row('wifi', 'Domov', 'zabezpečená', '', 'btnrow') + row('wifi-low', 'Kavárna', 'otevřená &middot; bez šifrování', '', 'btnrow') : '<div class="row"><small>Wi-Fi je vypnutá. Ovladač Wi-Fi <i>připravujeme</i>.</small></div>') +
+      '<div class="foot"><button class="btn small">' + I('settings', 16) + 'Nastavení sítě</button></div>';
+    if (id === 'vol') return '<header>' + I('volume') + 'Zvuk<span class="sub">' + (st.muted ? 'ztlumeno' : st.vol + ' %') + '</span></header>' +
+      '<div class="row"><button class="btn ghost small icon" data-mute aria-label="Ztlumit">' + I(st.muted ? 'volume-off' : 'volume', 18) + '</button><input class="slider grow" type="range" min="0" max="100" value="' + st.vol + '" style="--v:' + st.vol + '%" aria-label="Hlasitost" data-vol></div>' +
+      '<div class="sec">Výstup</div>' + row('audio-output', 'Reproduktory', 'vestavěné', '<span class="chip accent">' + I('check', 12) + '</span>', 'btnrow') + row('headphones', 'Sluchátka USB', '', '', 'btnrow') +
+      '<div class="sec">Vstup</div>' + row('mic', 'Mikrofon', 'vestavěný &middot; používá Hovory', '<span class="pdot pd-mic"></span>') +
+      '<div class="sec">Aplikace</div>' + row('camera', 'Hovory', '<input class="slider" type="range" value="80" style="--v:80%" aria-label="Hlasitost Hovory">') + row('app-player', 'Přehrávač', '<input class="slider" type="range" value="45" style="--v:45%" aria-label="Hlasitost Přehrávač">') +
+      '<div class="foot"><button class="btn small">' + I('settings', 16) + 'Nastavení zvuku</button></div>';
+    if (id === 'bat') return '<header>' + I('battery-half') + 'Baterie<span class="sub">82 %</span></header>' + row('battery-half', 'Zbývá asi 4 h 10 min', 'nabíjení do 80 % (šetří baterii)') +
+      '<div class="sec">Profil napájení</div><div style="padding:4px 16px"><span class="seg" role="radiogroup" aria-label="Profil"><button role="radio" aria-checked="false">Úsporný</button><button role="radio" aria-checked="true">Vyvážený</button><button role="radio" aria-checked="false">Výkon</button></span></div>' +
+      '<div class="foot"><button class="btn small">' + I('settings', 16) + 'Nastavení napájení</button></div>';
+    if (id === 'bell') return '<header>' + I('bell') + 'Oznámení<span class="sub">' + (st.dnd ? 'Nerušit' : '2 nová') + '</span></header>' +
+      row('bell-off', 'Nerušit', st.dnd ? 'do 18:00 &middot; chyby úloh se ukážou' : 'vypnuto', sw(st.dnd, 'dnd')) +
+      '<div class="sec">Dnes</div>' + row('download', 'Stahování dokončeno', 'obraz-disku.img &middot; 13:52', '', 'btnrow') + row('agent', 'Agent dokončil úlohu', 'Úklid ~/Stažené: 14 změn čeká na kontrolu', '', 'btnrow') +
+      '<div class="foot"><button class="btn small ghost">Vymazat vše</button><button class="btn small">' + I('settings', 16) + 'Nastavení oznámení</button></div>';
+    if (id === 'clock') {
+      var d = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'], cells = '';
+      for (var i = 0; i < 42; i++) { var day = i - 6 + 1; cells += day < 1 ? '<span class="o">' + (31 + day) + '</span>' : day > 30 ? '<span class="o">' + (day - 30) + '</span>' : '<span' + (day === 12 ? ' class="t"' : '') + '>' + day + '</span>'; }
+      return '<header>' + I('calendar') + 'listopad 2026<span class="sub"><button class="btn ghost small icon" aria-label="Předchozí měsíc">' + I('left', 16) + '</button><button class="btn ghost small icon" aria-label="Další měsíc">' + I('right', 16) + '</button></span></header>' +
+        '<div class="cal">' + d.map(function (x) { return '<span class="h">' + x + '</span>'; }).join('') + cells + '</div>' +
+        '<div class="sec">Světový čas</div>' + row('globe', 'Londýn', '-1 h', '<b>13:05</b>') + row('globe', 'New York', '-6 h', '<b>08:05</b>') +
+        '<div class="sec">Události</div><div class="row"><small>Kalendář událostí <i>připravujeme</i>.</small></div>' +
+        '<div class="foot"><button class="btn small">' + I('time-sync', 16) + 'Nastavení času</button></div>';
+    }
+    if (id === 'priv') return '<header>' + I('shieldcheck') + 'Právě se používá</header>' +
+      row('camera', 'Hovory', '<span class="pdot pd-cam"></span> kamera &middot; <span class="pdot pd-mic"></span> mikrofon od 14:02', '<button class="btn small">Odpojit</button>') +
+      row('globe', 'Mapy', '<span class="pdot pd-loc"></span> poloha (přesná) od 13:40', '<button class="btn small">Odpojit</button>') +
+      '<div class="foot"><button class="btn small">' + I('settings', 16) + 'Nastavení soukromí</button></div>';
+    if (id === 'upd') return '<header>' + I('update') + 'Aktualizace 0.7</header>' + row('', 'Nová paleta příkazů, rychlejší kompozitor', 'stažená, ověřený podpis &middot; vrátit jde předchozí verzí') +
+      '<div class="foot"><button class="btn small ghost">Později</button><button class="btn small primary">Restartovat teď</button></div>';
+    if (id === 'app') return '<header>' + I('cloud') + 'Úložiště<span class="sub">aplikace</span></header>' + row('check', 'Vše synchronizováno', 'před 2 min &middot; 1 284 souborů') +
+      '<div class="foot"><button class="btn small">Otevřít Úložiště</button></div>';
+    if (id === 'more') return '<header>' + I('apps') + 'Další ikony aplikací</header>' + row('music', 'Přehrávač', 'Přehrává: Bach, Goldbergovy variace', '', 'btnrow') +
+      '<div class="foot"><button class="btn small ghost">Upravit lištu</button></div>';
+    return '';
+  }
+  function render() {
+    renderBar();
+    stage.querySelectorAll('.pnl').forEach(function (p) { p.remove(); });
+    if (st.open) {
+      var b = bar.querySelector('[data-id="' + st.open + '"]'), rs = stage.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      var p = document.createElement('div'); p.className = 'pnl mat'; p.setAttribute('role', 'dialog'); p.innerHTML = panel(st.open); stage.appendChild(p);
+      var cx = rb.left - rs.left + rb.width / 2; p.style.left = Math.max(8, Math.min(rs.width - p.offsetWidth - 8, cx - p.offsetWidth / 2)) + 'px';
+      p.querySelectorAll('[data-sw]').forEach(function (s) { window.MO_SWITCH(s, function (on) { if (s.dataset.sw === 'dnd') { st.dnd = on; render(); } }); });
+      p.querySelectorAll('[data-tile]').forEach(function (t) { t.onclick = function () { st.net[t.dataset.tile] = !st.net[t.dataset.tile]; render(); }; });
+      var vs = p.querySelector('[data-vol]'); if (vs) vs.oninput = function () { st.vol = +vs.value; st.muted = false; vs.style.setProperty('--v', st.vol + '%'); renderBar(); p.querySelector('header .sub').textContent = st.vol + ' %'; };
+      var m = p.querySelector('[data-mute]'); if (m) m.onclick = function () { st.muted = !st.muted; render(); };
+    }
+  }
+  // Ukazky bublin (staticke).
+  function demos() {
+    var cls = 'tip ' + (st.tip === 'inv' ? 'inv' : 'mat') + (st.arrow ? ' arrow' : '');
+    document.getElementById('tipdemo').innerHTML = [['Hlasitost 60 %'], ['Paleta příkazů', 'Hledat aplikace, okna a akce', 'Ctrl+K'], ['Ethernet, připojeno', '1 Gb/s &middot; IP 10.0.2.15'], ['3 úlohy na pozadí', 'Kopírování dokončeno asi za 2 min. Úloha agenta Úklid ~/Stažené čeká na kontrolu rozdílu.']]
+      .map(function (t) { return '<div class="' + cls + '">' + tipHtml(t) + '</div>'; }).join('');
+  }
+  window.MO_SWITCH(document.getElementById('sw-solid'), function (on) { document.body.classList.toggle('solid', on); });
+  window.MO_SWITCH(document.getElementById('sw-rules'), function (on) { stage.classList.toggle('show-rules', on); });
+  window.MO_SEG(document.getElementById('g-tip'), function (v) { st.tip = v; demos(); });
+  window.MO_SEG(document.getElementById('g-arrow'), function (v) { st.arrow = v === '1'; demos(); });
+  st.open = 'tasks';
+  render(); demos();
+});
+</script>
+</body>
+</html>
