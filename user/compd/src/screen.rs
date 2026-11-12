@@ -195,8 +195,11 @@ impl Service {
         // Pri pripojeni jen plna barva pozadi (rychly start i v emulaci;
         // hlidac sluzeb ceka na pripojeni). Cely snimek slozi dalsi takt,
         // obrazovka je cela poskozena.
-        let mut canvas = gfx::Canvas::new(screen.pixels(), w, h, w).ok_or(Error::NoMemory)?;
-        canvas.fill(canvas.bounds(), comp.background());
+        // Po startovni obrazovce je prvni snimek tentyz obraz (`splash.rs`).
+        if !self.splash_first_frame(screen.pixels(), w, h) {
+            let mut canvas = gfx::Canvas::new(screen.pixels(), w, h, w).ok_or(Error::NoMemory)?;
+            canvas.fill(canvas.bounds(), comp.background());
+        }
         comp.redraw_all();
         self.comp = Some(comp);
         let req = Request::Attach { output, w, h, stride: w * 4 };

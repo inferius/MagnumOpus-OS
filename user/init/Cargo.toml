@@ -13,6 +13,10 @@ bench = false
 [dependencies]
 # Barvy vzhledu v testech GUI (stejne tokeny jako kompozitor).
 theme = { path = "../../libs/theme" }
+# Startovni obraz (vlakno `splash.rs`): kresleni a pismo.
+bootsplash = { path = "../../libs/bootsplash" }
+gfx = { path = "../../libs/gfx" }
+font = { path = "../../libs/font", features = ["inter-400", "inter-600"] }
 libos = { path = "../../libs/libos" }
 blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }

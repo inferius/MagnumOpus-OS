@@ -52,6 +52,10 @@ pub const DEPS: &[Dep] = &[Dep::notify("inputd")];
 /// Ovladac `fbdisplay` (framebuffer z firmwaru), bezi-li.
 pub static FBDISPLAY: spin::Mutex<Option<Process>> = spin::Mutex::new(None);
 
+/// Prstenec startovniho obrazu pri predani (promile) pro prvni instanci
+/// kompozitoru (`display <pasmo> splash=<promile>`); bere se jednou.
+static SPLASH_HANDOFF: spin::Mutex<Option<u32>> = spin::Mutex::new(None);
+
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Odpoved na `connect` (relace okna; kompozitor odpovida hned).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -137,7 +141,9 @@ impl Service for CompdService {
         // s ovladacem a pripoji snimek).
         // Pasmo pro hodiny v liste ze stejneho nastaveni jako sluzba casu.
         let zone = libos::time::zone::Settings::parse(crate::system::TIME_SETTINGS).map(|s| s.zone.name).ok().filter(|n| !n.is_empty()).unwrap_or("UTC");
-        control.write(alloc::format!("{} {zone}", control::DISPLAY).as_bytes(), vec![display.into_handle()])?;
+        // Prvni start po startovnim obrazu: kompozitor na nej navaze.
+        let splash = SPLASH_HANDOFF.lock().take().filter(|_| !ctx.restart).map(|p| alloc::format!(" {}{p}", control::SPLASH_ARG)).unwrap_or_default();
+        control.write(alloc::format!("{} {zone}{splash}", control::DISPLAY).as_bytes(), vec![display.into_handle()])?;
         let started = Started {
             process: process.handle().duplicate(None)?,
             ready: Some(control.handle().duplicate(None)?),
@@ -252,6 +258,11 @@ pub struct Gui {
 /// (bootstrap `FRAMEBUFFER`, init preda duplikat handlu, takze
 /// `Startup::framebuffer` zustava pro zachrannou konzoli).
 pub fn display(startup: &Startup) -> Result<Channel> {
+    // Startovni obraz konci: framebuffer prevezme displej (bez smazani),
+    // prechod do plochy dokonci prvni instance kompozitoru.
+    if let Some(p) = crate::splash::finish() {
+        *SPLASH_HANDOFF.lock() = Some(p);
+    }
     if let Some(ch) = DISPLAY.lock().take() {
         return Ok(ch);
     }
