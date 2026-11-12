@@ -207,6 +207,9 @@ fn main(startup: Startup) -> i64 {
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
             }
             splash::step(4);
+            // Prstenec do plna uz ted (soubezne se startem agenta), displej
+            // pak na obraz necheka.
+            splash::finish_begin();
             // Agent AI po siti a FS: sit jen v beznem behu (testy maji
             // falesny model bez site).
             let test_run = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;

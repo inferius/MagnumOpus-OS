@@ -425,3 +425,30 @@ impl Splash {
         self.paint(st, out, stride, r);
     }
 }
+
+/// Otisk kresby pro kontrolu determinismu na cilovem stroji (programy bez
+/// FPU proti hostiteli): prvni snimek, rozsviceny obraz a prechod pro
+/// 320 x 200 (FNV-1a 64 pres vsechny pixely).
+pub fn self_check() -> u64 {
+    let (w, h) = (320u32, 200u32);
+    let mut s = Splash::new(w, h);
+    let mut px = alloc::vec![0xFF80_8080u32; (w * h) as usize];
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    let states = [
+        State::FIRST,
+        State { glow: 0.55, glow_scale: 1.01, ..State::lit(0.6) },
+        State { backdrop: 0.4, word: 0.3, mark_scale: 0.6, mark_dx: 20.0, mark_dy: -12.0, mark_opacity: 0.7, ..State::lit(1.0) },
+    ];
+    for st in &states {
+        s.paint_all(st, &mut px, w as usize);
+        for p in &px {
+            for b in p.to_le_bytes() {
+                hash = (hash ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+    }
+    hash
+}
+
+/// [`self_check`] spocitany na hostiteli (test `self_check_matches`).
+pub const SELF_CHECK: u64 = 0xb28ae289c2f3f61a;

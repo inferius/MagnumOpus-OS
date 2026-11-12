@@ -114,6 +114,7 @@ members = [
     "user/edu",
     "user/virtio-gpu",
     "user/fbdisplay",
+    "user/splash",
     "user/hda",
     "user/audiod",
     "user/bochs-display",

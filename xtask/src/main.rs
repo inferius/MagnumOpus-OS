@@ -737,6 +737,7 @@ const USER_PROGRAMS: &[&str] = &[
     "virtio-rng",
     "virtio-gpu",
     "fbdisplay",
+    "splash",
     "hda",
     "audiod",
     "bochs-display",

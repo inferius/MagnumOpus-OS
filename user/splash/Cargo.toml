@@ -1,0 +1,18 @@
+[package]
+name = "splash"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "splash"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+bootsplash = { path = "../../libs/bootsplash" }
+gfx = { path = "../../libs/gfx" }
+font = { path = "../../libs/font", features = ["inter-400", "inter-600"] }
+theme = { path = "../../libs/theme" }

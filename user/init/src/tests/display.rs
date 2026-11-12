@@ -22,6 +22,7 @@ use crate::display_native::{self, Kit, NATIVES};
 use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
+    ("startovni obraz: kresba bez FPU = reference hostitele", splash_determinism),
     ("bochs-display: konektory a rezimy z EDID", connectors),
     ("bochs-display: compd navaze na startovni obraz, nastavi rezim, zmena rozliseni za behu", compd_mode_change),
     ("bochs-display: pad ovladace, obnova stavu firmwaru, RESET", crash_restores_firmware),
@@ -63,6 +64,17 @@ fn reply(ch: &Channel) -> Result<Reply, String> {
             return Ok(r);
         }
     }
+}
+
+/// Loader kresli s FPU, proces `splash` a kompozitor s plovouci carkou
+/// v softwaru: otisk kresby musi byt stejny jako na hostiteli (jinak by
+/// prechod mezi nimi poskakoval).
+fn splash_determinism(_: &Startup) -> TestResult {
+    let t = time::now();
+    let v = bootsplash::self_check();
+    println!("init: test displej: otisk startovniho obrazu {v:#018x} ({} ms)", (time::now() - t) / 1_000_000);
+    check_eq!(v, bootsplash::SELF_CHECK, "otisk kresby");
+    Ok(())
 }
 
 fn connectors(_: &Startup) -> TestResult {

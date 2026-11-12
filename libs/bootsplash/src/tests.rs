@@ -245,3 +245,62 @@ fn integer_mark_matches_float() {
         assert_eq!(bad, 0, "progress {p}: {bad} pixelu se lisi");
     }
 }
+
+/// Otisk snimku (FNV-1a 64).
+fn fnv(px: &[u32]) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for p in px {
+        for b in p.to_le_bytes() {
+            h = (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    h
+}
+
+/// Tri stavy: prvni snimek loaderu, rozsviceny obraz s prstencem a zari
+/// (init), posunuty a pruhledny znak nad sedou plochou (prechod v compd).
+fn reference_frames(w: u32, h: u32) -> [u64; 3] {
+    let mut s = Splash::new(w, h);
+    let n = (w * h) as usize;
+    let mut a = vec![0u32; n];
+    s.paint_all(&State::FIRST, &mut a, w as usize);
+    let mut b = vec![0u32; n];
+    s.paint_all(&State { glow: 0.55, glow_scale: 1.01, ..State::lit(0.6) }, &mut b, w as usize);
+    let mut c = vec![0xFF80_8080u32; n];
+    let st = State { backdrop: 0.4, word: 0.3, mark_scale: 0.6, mark_dx: 40.0, mark_dy: -25.0, mark_opacity: 0.7, ..State::lit(1.0) };
+    s.paint_all(&st, &mut c, w as usize);
+    [fnv(&a), fnv(&b), fnv(&c)]
+}
+
+/// Loader (UEFI, FPU), proces splash a kompozitor (plovouci carka
+/// v softwaru) musi kreslit bit po bitu stejne, jinak by prechod mezi nimi
+/// poskakoval. Knihovna pouziva jen zakladni operace IEEE 754 (scitani,
+/// nasobeni, deleni, prevody; vlastni odmocnina, sin a atan), ktere jsou
+/// presne zaokrouhlene v hardwaru i v softwaru, a zadne `mul_add`.
+/// Reference zachycuje aktualni kresbu: zamerna zmena vzhledu ji musi
+/// prepsat (`BOOTSPLASH_REF=1 cargo test -p bootsplash reference -- --nocapture`
+/// vypise nove hodnoty).
+#[test]
+fn reference_output_is_stable() {
+    const REF: [((u32, u32), [u64; 3]); 3] = [
+        ((1280, 800), [0x03bb8d75132b0232, 0x1419f744ddcfdc79, 0x47652a8baa31a137]),
+        ((1920, 1080), [0x81cd1f73b0bbb90f, 0x8bda400092419968, 0xa671506d7b66d8f6]),
+        ((1024, 768), [0xcd3d605c75a9cb5c, 0xcb500ac2c810b8b4, 0xb5075b905a0bfac0]),
+    ];
+    for ((w, h), want) in REF {
+        let got = reference_frames(w, h);
+        if std::env::var("BOOTSPLASH_REF").is_ok() {
+            println!("(({w}, {h}), [{:#018x}, {:#018x}, {:#018x}]),", got[0], got[1], got[2]);
+            continue;
+        }
+        assert_eq!(got, want, "{w}x{h}");
+        // Opakovane kresleni (mezipameti loga a znaku) dava totez.
+        assert_eq!(reference_frames(w, h), got);
+    }
+}
+
+#[test]
+fn self_check_matches() {
+    let v = self_check();
+    assert_eq!(v, SELF_CHECK, "novy otisk: {v:#018x}");
+}

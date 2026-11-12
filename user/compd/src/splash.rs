@@ -5,7 +5,8 @@
 //! displeje je tentyz obraz (`libs/bootsplash`), takze se nic nebliká,
 //! a pak:
 //!
-//! 1. prstenec dobehne do plna (500 ms) a 200 ms se drzi,
+//! 1. prstenec dobehne do plna (500 ms; proces `splash` ho obvykle preda
+//!    uz plny) a 200 ms se drzi,
 //! 2. znak se zmensi na velikost avataru a vjede do nej (600 ms, nazev
 //!    a zare zmizi za 200 ms),
 //! 3. znak i startovni pozadi se rozplynou (300 ms) do plochy, kterou
@@ -87,8 +88,15 @@ impl Handoff {
         now.saturating_sub(self.t0) / 1_000_000
     }
 
+    /// Zacatek presunu: prstenec dobehne (kdyz uz neni plny) a drzi se.
     fn move_at(&self) -> u64 {
-        if self.reduced { 0 } else { RING_FILL + HOLD }
+        if self.reduced {
+            0
+        } else if self.p0 >= 1.0 {
+            HOLD
+        } else {
+            RING_FILL + HOLD
+        }
     }
 
     fn fade_at(&self) -> u64 {
