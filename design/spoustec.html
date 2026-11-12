@@ -67,6 +67,7 @@
   <header>
     <h1>Spouštěč</h1>
     <p class="lead">Tlačítko mřížky vlevo v liště. Dnes je to prostý seznam. Čtyři návrhy, co má spouštěč dělat a jak vypadat. Výchozí pravidlo: paleta příkazů je brána do systému, spouštěč nemá být druhý konkurenční systém, ale vstup do téže věci pro myš a dotyk.</p>
+    <p class="note"><b>Rozhodnutí 12. 11. 2026:</b> uživatel zvolil variantu (d), kompaktní seznam se skupinami. Ostatní varianty zůstávají níže pro srovnání. Název palety a klávesa (Super / Ctrl+K) zatím otevřené.</p>
   </header>
   <div class="vars" id="vars"></div>
 
@@ -107,7 +108,7 @@ document.addEventListener('mo-ready', function () {
       '<div class="sec">Nedávné soubory</div>' + RECENT.map(function (r) { return '<div class="rw">' + I(r[0]) + r[1] + '<span class="k">' + r[2] + '</span></div>'; }).join('') + foot() + '</div>',
       pro: ['Známé a srozumitelné i pro nováčky; velké cíle pro myš a dotyk.', 'Nedávné soubory na jedno kliknutí.'],
       con: ['Vedle palety vzniká druhé místo s jiným uspořádáním (riziko dvou systémů).', 'Mřížka zabere hodně místa a s mnoha aplikacemi se musí listovat.'] },
-    { id: 'b', name: '(b) Spouštěč = paleta příkazů ukotvená u lišty (doporučeno)', html: '<div class="lp mat" style="width:420px">' + q('Hledat cokoli: aplikace, okna, soubory, akce') +
+    { id: 'b', name: '(b) Spouštěč = paleta příkazů ukotvená u lišty', html: '<div class="lp mat" style="width:420px">' + q('Hledat cokoli: aplikace, okna, soubory, akce') +
       '<div class="grid" style="grid-template-columns:repeat(6,1fr);padding-top:2px">' + PINNED.slice(0, 6).map(function (a) { return '<div class="app">' + I(a[0]) + a[1] + '</div>'; }).join('') + '</div>' +
       '<div class="sec">Nedávné</div><div class="rw sel">' + I('file-text') + 'zprava.md<span class="k">soubor</span></div><div class="rw">' + I('window') + '~/projekt - Terminál<span class="k">okno</span></div><div class="rw">' + I('camera') + 'Diagnostický snímek<span class="k">Ctrl+Alt+Shift+S</span></div>' +
       '<div class="sec">Systém</div><div class="rw">' + I('lock') + 'Zamknout<span class="k">Super+L</span></div>' + foot() + '</div>',
@@ -119,7 +120,7 @@ document.addEventListener('mo-ready', function () {
       '<div class="sec">Plochy</div><div class="desks"><div class="on">Plocha 1</div><div>Plocha 2</div><div>+ nová</div></div></div>',
       pro: ['Vidíte všechno najednou: okna, aplikace i plochy.', 'Dobré pro dotyk a velké obrazovky; přirozené místo pro přesun okna na jinou plochu.'],
       con: ['Překryje celou práci kvůli spuštění jedné aplikace; pomalejší (animace, náhledy).', 'Plochy zatím nejsou; náhledy oken stojí GPU čas.', 'Hodí se spíš jako samostatný „Přehled oken“ než jako spouštěč.'] },
-    { id: 'd', name: '(d) Kompaktní seznam se skupinami', html: '<div class="lp mat" style="width:300px">' + q('Hledat') +
+    { id: 'd', name: '(d) Kompaktní seznam se skupinami (zvoleno 12. 11. 2026)', html: '<div class="lp mat" style="width:300px">' + q('Hledat') +
       '<div class="sec">Běží</div><div class="rw">' + I('terminal') + 'Terminál<span class="k">2 okna</span></div>' +
       '<div class="sec">Aplikace</div>' + PINNED.slice(1, 6).map(function (a) { return '<div class="rw">' + I(a[0]) + a[1] + '</div>'; }).join('') +
       '<div class="sec">Nedávné</div>' + RECENT.slice(0, 2).map(function (r) { return '<div class="rw">' + I(r[0]) + r[1] + '</div>'; }).join('') + foot() + '</div>',

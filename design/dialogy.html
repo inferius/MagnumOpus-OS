@@ -80,20 +80,35 @@
 .lst .it.off { opacity: .45; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-/* Vyber souboru */
-.fp { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; }
-.places { display: flex; flex-direction: column; gap: 2px; }
-.places span { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; white-space: nowrap; }
+/* Vyber souboru: hlavicka v jedne liste, seznam bere vsechno misto, ovladani v jednom spodnim radku. */
+.dlg.fpk .bd { padding: 0; display: flex; flex-direction: column; flex: 1; }
+.fbar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--c-border); }
+.fbar h3 { margin: 0; font-size: 14px; white-space: nowrap; }
+.fbar .path { flex: 1; min-width: 0; font-size: 12.5px; color: var(--c-ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fbar .path b { color: var(--c-ink); }
+.fbar .s { width: 150px; min-height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--c-border-strong); color: var(--c-ink-muted); display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.fbar .ic { width: 15px; height: 15px; flex: none; }
+.fbar .x { display: grid; place-items: center; width: 32px; height: 32px; margin-left: -8px; border-radius: 50%; }
+.fp { display: grid; grid-template-columns: 124px minmax(0, 1fr); flex: 1; min-height: 0; }
+.places { display: flex; flex-direction: column; gap: 1px; padding: 6px; border-right: 1px solid var(--c-border); background: var(--c-surface-2); }
+.places span { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 7px; white-space: nowrap; font-size: 12.5px; }
 .places span.on { background: var(--c-accent-soft); color: var(--c-accent-ink); font-weight: 600; }
-.places .ic { width: 16px; height: 16px; }
-.crumb { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-.crumb .path { flex: 1; color: var(--c-ink-muted); }
-.crumb .path b { color: var(--c-ink); }
-.crumb .s { width: 120px; min-height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--c-border-strong); color: var(--c-ink-muted); display: flex; align-items: center; gap: 6px; }
-.crumb .s .ic { width: 14px; height: 14px; }
-.savebar { display: grid; grid-template-columns: 1fr 170px; gap: 10px; margin-top: 10px; }
-.more { margin-top: 6px; font-size: 12px; color: var(--c-ink-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.more a { margin-left: auto; }
+.places .ic { width: 15px; height: 15px; }
+.fp .lst { border: 0; border-radius: 0; overflow: auto; }
+.fp .lst .it { padding: 4px 12px; gap: 8px; border-top: 0; font-size: 13px; }
+.fp .lst .it .ic { width: 17px; height: 17px; }
+.fp .lst .it .z { width: 58px; text-align: right; color: var(--c-ink-muted); font-size: 12px; }
+.fp .lst .it > span:not(.z):not(.k):not(.ck) { flex: 1; min-width: 0; } .fp .lst .it .k { width: 52px; text-align: right; }
+.ffoot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--c-border); }
+.ffoot .sp { flex: 1; }
+.ffoot .btn { min-height: 30px; padding: 0 14px; }
+.ffoot .input { min-height: 30px; width: auto; }
+.ffoot .nm { flex: 1; min-width: 0; }
+.ffoot select.input { padding: 0 6px; font-size: 12.5px; }
+.ffoot .gd { width: 16px; height: 16px; color: var(--c-ink-muted); flex: none; }
+.ffoot .cnt { font-size: 12.5px; color: var(--c-ink-muted); }
+.ffoot a { font-size: 12px; white-space: nowrap; }
+.more { margin-top: 6px; font-size: 12px; }
 
 /* Vybery: barva, pismo, datum, tisk */
 .sq { height: 130px; border-radius: 10px; position: relative; background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(22 88% 54%)); }
@@ -148,11 +163,17 @@
   .ft { flex-direction: column; align-items: stretch !important; padding: 10px 18px 22px !important; }
   .ft .sp { display: none; }
   .ft .btn { min-height: 44px !important; }
-  .two, .cmp, .savebar { grid-template-columns: 1fr; }
-  .fp { grid-template-columns: 1fr; }
-  .places { flex-direction: row; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
-  .places span { background: var(--c-surface-2); border-radius: var(--r-pill); }
-  .crumb .s { display: none; }
+  .two, .cmp { grid-template-columns: 1fr; }
+  .fp { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .places { flex-direction: row; gap: 6px; overflow-x: auto; padding: 8px 14px; border-right: 0; background: none; scrollbar-width: none; }
+  .places span { background: var(--c-surface-2); border-radius: var(--r-pill); padding: 5px 10px; }
+  .fbar { padding: 6px 10px 6px 14px; border-bottom: 0; }
+  .fbar .path, .fbar .s span { display: none; }
+  .fbar .s { width: 32px; padding: 0; justify-content: center; border: 0; margin-left: auto; }
+  .fp .lst .it { padding: 10px 14px; }
+  .ffoot { padding: 8px 14px 20px; }
+  .ffoot .btn { min-height: 40px; }
+  .ffoot .input { min-height: 40px; }
   .lst .it { padding: 11px 10px; }
   .pages i { width: 64px; height: 88px; }
   .hide-n { display: none !important; }
@@ -227,22 +248,32 @@ document.addEventListener('mo-ready', function () {
 
   // ---- Telo jednotlivych dialogu. Kazda funkce vraci {t, s, ic, b, f, g, w} ----
   // t titulek, s podtitulek, ic ikona, b telo, f tlacitka, g radek pod telem, w sirka na pocitaci.
-  var FILES = [['folder', 'Projekty', 'včera', 'f'], ['folder', 'Faktury', '3. 11.', 'f'], ['file-text', 'zprava.md', '14:02', ''], ['app-pdf', 'smlouva.pdf', 'včera', ''], ['file', 'rozpocet.ods', '2. 11.', ''], ['image', 'foto.jpg', '28. 10.', '']];
+  var FILES = [['folder', 'Projekty', '', 'včera', 'f'], ['folder', 'Faktury', '', '3. 11.', 'f'], ['folder', 'Archiv', '', '1. 9.', 'f'], ['file-text', 'zprava.md', '6 kB', '14:02'], ['app-pdf', 'smlouva.pdf', '220 kB', 'včera'],
+    ['file-text', 'poznamky.md', '2 kB', 'včera'], ['file', 'rozpocet.ods', '48 kB', '2. 11.'], ['file-text', 'plan-2027.md', '9 kB', '30. 10.'], ['image', 'foto.jpg', '3,1 MB', '28. 10.'], ['file-text', 'readme.txt', '1 kB', '12. 10.']];
+  // Kompaktni vyber: titulek, cesta a hledani v jedne liste; seznam bere vsechno zbyle misto;
+  // filtr, ochrana a tlacitka v jednom spodnim radku. Na telefonu otevre soubor uz klepnuti
+  // (bez potvrzovaciho tlacitka) a Zrusit je krizek v liste.
   function picker(m) {
-    var save = m === 'save', folder = m === 'folder', multi = m === 'multi';
+    var save = m === 'save', folder = m === 'folder', multi = m === 'multi', open = m === 'open';
     var places = [['home', 'Domů'], ['folder', 'Dokumenty', 1], ['image', 'Obrázky'], ['download', 'Stažené'], ['flash-drive', 'USB flash'], ['network', 'Síť']];
     var rows = FILES.map(function (f, i) {
-      var isDir = f[3] === 'f', sel = (m === 'open' && i === 2) || (multi && (i === 2 || i === 3)), off = folder && !isDir;
-      return '<div class="it' + (sel ? ' sel' : '') + (off ? ' off' : '') + (i > 3 ? ' hide-n' : '') + '">' + (multi && !isDir ? CK(sel) : '') + I(f[0]) + '<span>' + f[1] + '</span><span class="k">' + f[2] + '</span></div>';
+      var isDir = f[4] === 'f', sel = (open && i === 3) || (multi && (i === 3 || i === 5)), off = (folder || (!save && f[0] === 'image')) && !isDir;
+      return '<div class="it' + (sel ? ' sel' : '') + (off ? ' off' : '') + '">' + (multi && !isDir ? CK(sel) : '') + I(f[0]) + '<span>' + f[1] + '</span><span class="z hide-n">' + f[2] + '</span><span class="k">' + f[3] + '</span></div>';
     }).join('');
-    var b = '<div class="fp"><div class="places">' + places.map(function (p) { return '<span' + (p[2] ? ' class="on"' : '') + '>' + I(p[0]) + p[1] + '</span>'; }).join('') + '</div><div>' +
-      '<div class="crumb"><span class="path">Domů &rsaquo; <b>Dokumenty</b></span><span class="s">' + I('search') + 'Hledat</span></div><div class="lst">' + rows + '</div>' +
-      (save ? '<div class="savebar"><div><label class="f">Název</label><input class="input" value="zprava-v2.md"></div><div><label class="f">Typ</label><select class="input"><option>Markdown (.md)</option><option>Prostý text (.txt)</option></select></div></div>' +
-        '<div class="more">UTF-8 bez BOM &middot; konce řádků LF<a href="#">Změnit&hellip;</a></div>' : '') +
-      (!save && !folder ? '<div class="more">Zobrazit: <b>Text a Markdown</b><a href="#">Všechny soubory</a></div>' : '') + '</div></div>';
     var t = { open: 'Otevřít soubor', multi: 'Otevřít soubory', folder: 'Vybrat složku', save: 'Uložit jako' }[m];
-    var p = { open: 'Otevřít', multi: 'Otevřít 2 soubory', folder: 'Vybrat složku Dokumenty', save: 'Uložit' }[m];
-    return { t: t, b: b, w: 640, f: [B('Zrušit'), B(p, 'primary')], g: I('shield') + 'Systémový výběr: aplikace uvidí jen to, co vyberete.' };
+    var gd = '<svg class="ic gd" role="img" aria-label="Systémový výběr: aplikace uvidí jen to, co vyberete." ><title>Systémový výběr: aplikace uvidí jen to, co vyberete.</title><use href="#ic-shield"/></svg>';
+    var flt = '<select class="input" aria-label="Zobrazit"><option>Text a Markdown</option><option>Všechny soubory</option></select>';
+    var foot;
+    if (save) foot = '<input class="input nm" aria-label="Název" value="zprava-v2.md"><select class="input" aria-label="Typ"><option>.md</option><option>.txt</option></select>' +
+      '<a href="#" class="hide-n" title="Kódování a konce řádků">UTF-8, LF</a>' + B('Zrušit', 'hide-n') + B('Uložit', 'primary');
+    else if (folder) foot = gd + '<span class="cnt hide-n">Složka <b>Dokumenty</b></span><span class="sp"></span>' + B('Zrušit', 'hide-n') + B('Vybrat tuto složku', 'primary');
+    else if (multi) foot = gd + flt.replace('class="input"', 'class="input hide-n"') + '<span class="sp"></span><span class="cnt">2 vybrané</span>' + B('Zrušit', 'hide-n') + B('Otevřít', 'primary');
+    else foot = gd + flt + '<span class="sp"></span>' + B('Zrušit', 'hide-n') + B('Otevřít', 'primary hide-n');
+    var b = '<div class="fbar"><span class="x hide-w" aria-label="Zrušit">' + I('close') + '</span><h3>' + t + '</h3><span class="path">Domů &rsaquo; <b>Dokumenty</b></span>' +
+      '<span class="s" aria-label="Hledat">' + I('search') + '<span>Hledat</span></span></div>' +
+      '<div class="fp"><div class="places">' + places.map(function (p) { return '<span' + (p[2] ? ' class="on"' : '') + '>' + I(p[0]) + p[1] + '</span>'; }).join('') + '</div>' +
+      '<div class="lst">' + rows + '</div></div>';
+    return { t: t, bare: 1, cls: 'fpk', b: b, w: 640, foot: '<div class="ffoot">' + foot + '</div>' };
   }
   function message(m) {
     if (m === 'confirm') return { ic: 'trash', t: 'Přesunout 3 soubory do koše?', s: 'Obnovíte je z koše do 30 dnů, nebo hned příkazem Zpět.', f: [B('Zrušit'), B('Přesunout do koše', 'primary')] };
@@ -335,7 +366,7 @@ document.addEventListener('mo-ready', function () {
   // ---- Seznam polozek ----
   var E = [
     { id: 'vyber', t: 'Otevřít, uložit, vybrat složku', k: 'app', fn: picker, mob: 'full', modes: [['open', 'Otevřít'], ['multi', 'Více souborů'], ['folder', 'Složka / projekt'], ['save', 'Uložit jako']], h: 470,
-      pro: ['Jeden výběr pro čtyři úlohy: uživatel se ho naučí jednou.', 'Aplikace dostane jen vybraný soubor (úchyt), ne přístup ke složkám.', 'Kódování a konce řádků jsou schované pod „Změnit“ (výchozí UTF-8 bez BOM, LF).'], con: ['Aplikace nemůže výběr přizpůsobit vzhledem; jen filtrem a výchozí složkou.', 'Projekt = výběr složky s filtrem, který dodá aplikace.'] },
+      pro: ['Jeden výběr pro čtyři úlohy: uživatel se ho naučí jednou.', 'Málo „rámu“: titulek, cesta a hledání v jedné liště, filtr a tlačítka v jednom řádku; seznam souborů bere zbytek.', 'Na telefonu soubor otevře už klepnutí; Zrušit je křížek v liště.', 'Aplikace dostane jen vybraný soubor (úchyt), ne přístup ke složkám (štít vlevo dole).', 'Kódování a konce řádků jsou schované pod odkazem „UTF-8, LF“.'], con: ['Aplikace nemůže výběr přizpůsobit vzhledem; jen filtrem a výchozí složkou.', 'Projekt = výběr složky s filtrem, který dodá aplikace.'] },
     { id: 'zpravy', t: 'Potvrzení, varování, chyba', k: 'app', fn: message, mob: 'sheet', modes: [['confirm', 'Potvrzení'], ['perm', 'Ničivá akce'], ['error', 'Chyba s podrobnostmi']], h: 380,
       pro: ['Vratné akce se nepotvrzují pořád dokola; ptáme se jen u nevratných.', 'Chyba nabídne cestu ven a kód pro explain.'], con: ['Aplikace musí umět akci vrátit, jinak dialog nedává smysl (Zpět je povinné).'] },
     { id: 'prejmenovat', t: 'Textový vstup a přejmenování', k: 'app', fn: rename, mob: 'sheet', h: 300,
@@ -376,12 +407,13 @@ document.addEventListener('mo-ready', function () {
   function dialog(d, k, cls, w) {
     var kind = d.trust ? 'trust' : d.sys ? 'sys' : k;
     var role = d.trust || /error|alert/.test(d.ic || '') ? 'alertdialog' : 'dialog';
-    return '<div class="dlg k-' + kind + (cls ? ' ' + cls : '') + '" role="' + role + '" aria-label="' + d.t.replace(/<[^>]+>/g, '') + '"' + (w ? ' style="width:' + w + 'px"' : '') + '>' +
+    // d.bare: dialog si titulek kresli sam v tele; d.foot: vlastni spodni radek misto .ft.
+    return '<div class="dlg k-' + kind + (cls ? ' ' + cls : '') + (d.cls ? ' ' + d.cls : '') + '" role="' + role + '" aria-label="' + d.t.replace(/<[^>]+>/g, '') + '"' + (w ? ' style="width:' + w + 'px"' : '') + '>' +
       (d.trust ? BAND : '') +
-      '<div class="hd">' + (d.ic ? I(d.ic, 'big') : '') + '<div><h3>' + d.t + '</h3>' + (d.s ? '<p>' + d.s + '</p>' : '') + '</div></div>' +
+      (d.bare ? '' : '<div class="hd">' + (d.ic ? I(d.ic, 'big') : '') + '<div><h3>' + d.t + '</h3>' + (d.s ? '<p>' + d.s + '</p>' : '') + '</div></div>') +
       (d.top || d.b ? '<div class="bd">' + (d.top || '') + (d.b || '') + '</div>' : '') +
       (d.g ? '<div class="guard">' + d.g + '</div>' : d.trust ? '<div class="guard">' + I('info') + 'Toto okno kreslí systém. Ctrl+Alt+Del ukáže vždy pravé.</div>' : '') +
-      '<div class="ft">' + d.f.join('') + '</div></div>';
+      (d.foot || '<div class="ft">' + d.f.join('') + '</div>') + '</div>';
   }
   function desk(e, d) {
     var kind = d.trust ? 'trust' : d.sys ? 'sys' : e.k;
