@@ -156,12 +156,11 @@ impl Handoff {
 }
 
 /// Cil presunu pri prihlasovaci obrazovce: kruh avataru (stred x, y,
-/// prumer). Rozvrzeni prihlasovaci obrazovky dodava vlakno uctu
-/// (`Comp::greeter_avatar(false)` ve vetvi `inferius-dev/accounts-gui`);
-/// po slouceni sem patri `Some(comp.greeter_avatar(false))`. Do te doby
-/// `None` = znak se zmensi na miste.
-fn login_target(_comp: &mut comp::Comp) -> Option<(f32, f32, f32)> {
-    None
+/// prumer) z rozvrzeni prihlasovaci obrazovky (`Comp::greeter_avatar`;
+/// po startu neni zamceno). Obrazovka se ukaze az po prechodu a avatar
+/// kresli na stejnem miste, takze prolnuti navaze.
+fn login_target(comp: &mut comp::Comp) -> Option<(f32, f32, f32)> {
+    Some(comp.greeter_avatar(false))
 }
 
 /// Obdelnik pres celou obrazovku.

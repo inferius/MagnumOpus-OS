@@ -144,7 +144,7 @@ impl Service for CompdService {
         // Prvni start po startovnim obrazu: kompozitor na nej navaze.
         let mut splash = SPLASH_HANDOFF.lock().take().filter(|_| !ctx.restart).map(|p| alloc::format!(" {}{p}", control::SPLASH_ARG)).unwrap_or_default();
         // Bez otevrene relace bude prihlasovaci obrazovka: znak miri do avataru.
-        if !splash.is_empty() && crate::session::SESSIONS.lock().is_empty() {
+        if !splash.is_empty() && !crate::session::any_open() {
             splash.push(' ');
             splash.push_str(control::LOGIN_ARG);
         }
