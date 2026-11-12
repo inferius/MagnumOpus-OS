@@ -128,6 +128,21 @@ impl Rasterizer {
         }
         out
     }
+
+    /// Jako [`finish`](Self::finish), ale s pravidlem sude-liche (SVG
+    /// `fill-rule="evenodd"`): pokryti 2 je diera, 3 zase vypln.
+    pub fn finish_even_odd(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.w * self.h);
+        let mut acc = 0.0f32;
+        for i in 0..self.w * self.h {
+            acc += self.acc[i];
+            let a = acc.abs();
+            let f = a - 2.0 * floor(a * 0.5);
+            let v = if f > 1.0 { 2.0 - f } else { f };
+            out.push((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
+        }
+        out
+    }
 }
 
 /// Vykresli obrys (jednotky pisma, y nahoru) ve skale `s` (px na jednotku)

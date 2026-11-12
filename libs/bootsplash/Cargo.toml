@@ -1,0 +1,11 @@
+[package]
+name = "bootsplash"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Startovni obrazovka (design/start.html): rozvrzeni, logo, prstenec prubehu, zare; stejny obraz v loaderu, initu i kompozitoru"
+
+[dependencies]
+font = { path = "../font" }
+gfx = { path = "../gfx" }
+theme = { path = "../theme" }

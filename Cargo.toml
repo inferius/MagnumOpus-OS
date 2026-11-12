@@ -45,6 +45,7 @@ members = [
     "libs/taskcore",
     "libs/taskview",
     "libs/gfx",
+    "libs/bootsplash",
     "libs/font",
     "libs/vgpu",
     "libs/fbcopy",
