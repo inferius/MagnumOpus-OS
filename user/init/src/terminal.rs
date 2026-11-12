@@ -56,6 +56,10 @@ struct Client {
     power: Option<Channel>,
     /// Kanaly napajeni relaci shellu (`None` = zavreny, odebere `cleanup`).
     power_sessions: Vec<Option<Channel>>,
+    /// Relace prihlaseneho uzivatele (`crate::session`): termd dostane jeji
+    /// identitu FS a bezi v jejim jobu. `None` = system (testy, zalozni
+    /// konzole).
+    session: Option<u64>,
 }
 
 #[derive(Default)]
@@ -90,6 +94,11 @@ pub enum Wait {
 impl Terminals {
     /// Novy klient (okno); vrati konec kanalu pripojeni pro okno.
     pub fn client(&mut self, name: &'static str) -> Result<Channel> {
+        self.client_for(name, None)
+    }
+
+    /// Novy klient (okno) relace `session`.
+    pub fn client_for(&mut self, name: &'static str, session: Option<u64>) -> Result<Channel> {
         let (ours, theirs) = Channel::create()?;
         self.clients.push(Client {
             name,
@@ -101,6 +110,7 @@ impl Terminals {
             closed: false,
             power: None,
             power_sessions: Vec::new(),
+            session,
         });
         Ok(theirs)
     }
@@ -334,7 +344,12 @@ impl Terminals {
         let c = &mut self.clients[i];
         // Bez FS (sluzba nebezi, relace nejde) termd presto spustit:
         // dostane mrtvy kanal, relace pobezi bez souboru a okno ukaze chybu.
-        let own = match fs.map(|f| f.connect()) {
+        // Okno relace: identita prihlaseneho uzivatele, ne initu.
+        let own = match c.session {
+            Some(s) => Some(crate::session::connect(s)),
+            None => fs.map(|f| f.connect()),
+        };
+        let own = match own {
             Some(Ok(c)) => c.into_channel(),
             r => {
                 let why = match r {
@@ -366,13 +381,33 @@ impl Terminals {
         if let Some(h) = crate::agent::terminal_gate() {
             handles.push(StartHandle::tagged(term::ctl::tag::AGENT, h));
         }
-        let (proc, win) = libos::spawn("termd", image, handles)?;
+        let (proc, win) = match c.session {
+            // V jobu relace: odhlaseni ukonci termd i jeho shsess.
+            Some(s) => {
+                let job = crate::session::job(s)?;
+                libos::spawn::spawn_with(&job, "termd", image, handles, libos::spawn::Options::default())?
+            }
+            None => libos::spawn("termd", image, handles)?,
+        };
         c.starts.push(now);
         c.termd = Some(proc);
         c.reg = Some(here);
         c.power = Some(power_here);
         println!("init: termd ({}) spusten", c.name);
         Ok(win)
+    }
+
+    /// Konec relace: termd jejich oken ukoncit a okna zapomenout.
+    pub fn close_session(&mut self, session: u64) {
+        for c in self.clients.iter_mut().filter(|c| c.session == Some(session)) {
+            if let Some(p) = c.termd.take() {
+                let _ = p.kill();
+            }
+            c.reg = None;
+            c.power = None;
+            c.power_sessions.clear();
+            c.closed = true;
+        }
     }
 
     /// Obslouzi vsechny klienty bez cekani (testy, kde smycku supervisoru

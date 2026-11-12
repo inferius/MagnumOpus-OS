@@ -24,6 +24,7 @@ pub const TESTS: &[(&str, fn(&Startup) -> TestResult)] = &[
     ("relace vidi jen svuj domov", own_home_only),
     ("init nevyrazi systemovou identitu", no_system_identity),
     ("zamceni a odhlaseni", lock_and_logout),
+    ("udalosti a job relace", session_events),
     ("spatne heslo a zpomaleni", wrong_password),
 ];
 
@@ -189,6 +190,39 @@ fn lock_and_logout(_: &Startup) -> TestResult {
     check_eq!(crate::session::locked(session), None, "relace po odhlaseni");
     check_eq!(crate::session::connect(session).err(), Some(Error::NotFound), "relace FS po odhlaseni");
     check!(me.whoami().is_err(), "kanal self po odhlaseni");
+    Ok(())
+}
+
+fn drain_events() -> alloc::vec::Vec<crate::session::Event> {
+    let mut v = alloc::vec::Vec::new();
+    if let Some(rx) = crate::session::events() {
+        while let Ok(m) = rx.try_read() {
+            v.extend(crate::session::Event::decode(&m.data));
+        }
+    }
+    v
+}
+
+fn session_events(startup: &Startup) -> TestResult {
+    use crate::session::Event;
+    let uid = alice_uid()?;
+    drain_events();
+    let session = sign_in(uid)?;
+    check_eq!(drain_events(), alloc::vec![Event::Opened(session)], "udalost otevreni");
+    let name = crate::session::name(session);
+    check_eq!(name.as_deref(), Some("alice"), "jmeno relace");
+    check_eq!(crate::session::active(), Some(session), "aktivni relace");
+    // Procesy relace bezi v jejim jobu.
+    let job = crate::session::job(session).map_err(|e| fail("job relace", e))?;
+    let app = crate::apps::spawn_in(startup, "echo", alloc::vec::Vec::new(), Some(&job)).map_err(|e| fail("proces v jobu relace", e))?;
+    drop(app);
+    let me = SelfService(crate::session::take_self(session).ok_or_else(|| String::from("kanal self"))?);
+    me.lock().map_err(|e| fail("zamceni", e))?;
+    check_eq!(crate::session::active(), None, "zamcena relace neni aktivni");
+    check_eq!(login()?.unlock(session, Method::Password, Secret::from(PW)).ok(), Some(AuthReply::Ok { session }), "odemceni");
+    me.logout().map_err(|e| fail("odhlaseni", e))?;
+    check_eq!(drain_events(), alloc::vec![Event::Locked(session), Event::Unlocked(session), Event::Closed(session)], "udalosti relace");
+    check_eq!(crate::session::job(session).err(), Some(Error::NotFound), "job po odhlaseni");
     Ok(())
 }
 

@@ -37,7 +37,12 @@ pub fn manifest(fs: &Initfs, name: &str) -> Result<Option<Manifest>> {
 
 /// Podrizeny job s limity z manifestu.
 pub fn job_for(m: Option<&Manifest>) -> Result<Job> {
-    let job = Job::create(&libos::job::current()?)?;
+    job_in(&libos::job::current()?, m)
+}
+
+/// Job s limity z manifestu pod jobem `parent` (napr. job relace).
+pub fn job_in(parent: &Job, m: Option<&Manifest>) -> Result<Job> {
+    let job = Job::create(parent)?;
     // Aplikace si samy nedaji vic nez Normal; kompozitor je pri obsluze
     // vstupu zvedne zpravou (dedeni QoS pres IPC).
     libos::sched::set_job_max(&job, libos::sched::Qos::Normal)?;
@@ -54,10 +59,18 @@ pub fn job_for(m: Option<&Manifest>) -> Result<Job> {
 
 /// Spusti program z initfs v jeho jobu.
 pub fn spawn(startup: &Startup, name: &str, handles: Vec<StartHandle>) -> Result<App> {
+    spawn_in(startup, name, handles, None)
+}
+
+/// Jako [`spawn`], job programu pod jobem `parent` (`None` = job initu).
+pub fn spawn_in(startup: &Startup, name: &str, handles: Vec<StartHandle>, parent: Option<&Job>) -> Result<App> {
     let fs = Initfs::open(startup)?;
     let image = fs.find(name).ok_or(Error::NotFound)?;
     let manifest = manifest(&fs, name)?;
-    let job = job_for(manifest.as_ref())?;
+    let job = match parent {
+        Some(p) => job_in(p, manifest.as_ref())?,
+        None => job_for(manifest.as_ref())?,
+    };
     let mut opts = libos::spawn::Options::default();
     if let Some(s) = manifest.as_ref().and_then(|m| m.limits.stack) {
         opts.stack_size = s;
