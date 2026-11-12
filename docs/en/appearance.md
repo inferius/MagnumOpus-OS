@@ -776,6 +776,41 @@ the trust badge, try aside, agent marking.
 - **Updates** of the system will be a new version in the FS (snapshot), so
   going back to the previous version is the same choice as after a crash.
 
+### Mobile environment (design, stage A)
+
+> **Change from v1.6:** a new design of the mobile environment following
+> the adaptive UI brief, plus system dialogs, the launcher and bar panels.
+> This is a prototype design only; none of it runs yet.
+
+The [Mobile look](../../design/mobil.html) prototype simulates a narrow
+and a wide phone and a tablet, portrait and landscape, with larger text,
+in light and dark themes. It walks the required flow: lock screen, Home,
+launching Files, opening a file, editing with the keyboard, rotation,
+overview and return, permission dialog. Next to the phone it shows the
+**window context** an application would get (size, insets, area covered
+by the keyboard, layout class, generation).
+
+| Topic | Design |
+|---|---|
+| Navigation | gestures: swipe up for Home, swipe and hold for Overview, swipe from a side for Back; button navigation as an accessibility option |
+| Back | 1. closes a temporary layer, 2. steps back in the app, 3. previous app or Home; unsaved work is protected by file versioning |
+| Gesture conflicts | 16 px system band at the edges, app exclusion at most 200 px per side, recognition after 12 px and then the touch is cancelled in the app |
+| Layout | `compact` &lt; 600, `medium` 600 to 839, `expanded` &ge; 840 logical units, hysteresis 24; the keyboard does not change the class |
+| Trusted elements | only the system draws the status bar; a double press of power shows "Who is on screen"; dialogs with the System band and phrase |
+| Keyboard | a system component in its own process; apps get text and composition; sensitive fields get a secure keyboard without suggestions and clipboard |
+| Agent | its own colour and icon, also on the lock screen and in the status bar; its text changes are underlined and can be undone |
+| Monitor | mirror, extend, companion controls (roles `presentation` and `controls`); connecting alone publishes nothing |
+
+⚠️ **Risks and limits (stated up front):** the text engine cannot yet do
+character composition (CJK), bidirectional text or Czech hyphenation;
+the keyboard in the design does not promise those languages. Phone
+functions (calls, mobile data) are only simulated. A generic wireless
+receiver may keep showing the last frame after a connection loss.
+
+More designs waiting for decisions: [bubbles and bar panels](../../design/bubliny-panely.html),
+[launcher and palette name](../../design/spoustec.html),
+[system dialogs](../../design/dialogy.html) (desktop and phone).
+
 ## Accessibility
 
 The accessibility tree is part of the window protocol (`guiproto::a11y`).
@@ -1048,3 +1083,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.4 | 2026-11-07 | critical crash screen (A Calm + technical report on D), notification after the next boot; visual language handbook |
 | v1.5 | 2026-11-08 | installation: live USB, installer with a disk change preview, first run |
 | v1.6 | 2026-11-08 | **phase 1 implemented** in the system: tokens as data (`libs/theme`), Inter and JetBrains Mono with `GPOS` kerning, windows, badge, bar, desktop, dialog and terminal following the prototypes; deviations in [GUI: Look per the design](gui.md#look-per-the-design-phase-1) |
+| v1.7 | 2026-11-12 | designs: mobile environment (stage A), system dialogs for desktop and phone, launcher and palette names, bubbles and bar panels |
