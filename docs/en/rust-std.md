@@ -3,22 +3,27 @@
 Applications for MagnumOpus will be written in ordinary Rust with `std`
 (`fn main()`, `std::fs`, `std::thread`, `std::net`, crates from
 crates.io). System services and drivers stay `no_std` on top of
-[libos](libos.md). This page is the **design for approval (phase 0)**:
-the approach, the build, the mapping of `std` onto libos and services,
-what is missing in the kernel, and the impact on future plans.
+[libos](libos.md). This page describes the approach, the build, the
+mapping of `std` onto libos and services, what the kernel added for it,
+and the impact on future plans.
 
-> **Status:** everything is **[designed]**, there is no code yet. Open
-> decisions are in [Decisions for approval](#decisions-for-approval).
+> **Status:** design approved on 2026-11-12 (all recommendations, see
+> [Approved decisions](#approved-decisions)). Phase 1 is done:
+> `hello-std` with arguments, threads, TLS and files **[verified in QEMU]**
+> on x86_64 and aarch64 (suite `std`). Network, processes and stdin are
+> the next step.
 
 ## Goal and scope
 
 - Targets `x86_64-unknown-magnumopus` and `aarch64-unknown-magnumopus`
-  (`target_os = "magnumopus"`) **[designed]**.
+  (`target_os = "magnumopus"`) **[verified in QEMU]**.
 - `std` on top of libos: allocation, threads, synchronization, TLS, time,
-  files through `fsd`, network through `netd`, processes, arguments,
-  environment variables, stdio **[designed]**.
-- `cargo xtask` builds std (a sysroot) and the application and puts it
-  into initfs **[designed]**.
+  files through `fsd`, arguments, environment variables, stdout/stderr
+  **[verified in QEMU]**; network through `netd`, processes and stdin
+  **[designed]** (per-part status in the
+  [mapping](#mapping-std-onto-libos-and-services)).
+- `cargo xtask build` builds std (a sysroot) and the applications and puts
+  them into initfs **[verified in QEMU]**.
 - Out of scope: dynamic linking, `fork`, POSIX signals, porting rustc
   (only the impact, see [Impact on the future](#impact-on-the-future)).
 
@@ -35,7 +40,7 @@ what is missing in the kernel, and the impact on future plans.
 | Maintenance on a new nightly | rebase the glue (scope below) | smaller rebase, but also a fork of `libc` and a large libc | none |
 | Performance | direct libos calls | every call through the libc layer | direct |
 
-**Recommendation: A.** It is what upstream itself does (Motor OS and
+**Approved: A.** It is what upstream itself does (Motor OS and
 Hermit live in `std` exactly like this: only switches and thin modules in
 `std`, all logic in the external `moto-rt` / `hermit-abi` crate). B gives
 better crate compatibility, but almost the whole POSIX libc would have to
@@ -66,28 +71,33 @@ and crates (libc, getrandom, jobserver...) can add support themselves.
 <figcaption>std contains only glue; the logic lives in our osrt crate on top of libos and the service protocols, which no_std services share.</figcaption>
 </figure>
 
-- **`libs/osrt`** **[designed]**: the runtime for `std` (like `moto-rt`).
+- **`libs/osrt`** **[verified in QEMU]**: the runtime for `std` (like `moto-rt`).
   `#![no_std]`, feature `rustc-dep-of-std` (depends on
   `rustc-std-workspace-core`/`-alloc` instead of `core`/`alloc`, like all
   std dependencies). It holds the entry point, heap, threads, futex, TLS,
   the FS and network clients and stdio. Logic is tested on the host like
   other `libs/*`.
-- **libos** gets an `rt` feature (on by default) **[designed]**:
-  `entry!`, `#[global_allocator]` and `#[panic_handler]` exist only with
-  it. `std` provides those itself, so `osrt` uses libos without `rt`. The
-  heap moves into a module usable without the `#[global_allocator]`
-  attribute (the same allocator for services and std apps).
-- **fsproto, netproto, svcclient, wire, abi** get a `rustc-dep-of-std`
-  feature. The `spin` dependency in fsproto is replaced with our own lock
-  (the `spin` crate lacks that feature). The protocols thus stay in **one
-  source** for both services and `std`.
+- **libos** has an `rt` feature (on by default) **[implemented]**:
+  `entry!`, the heap, `#[global_allocator]` and `#[panic_handler]` exist
+  only with it (`rt_own.rs`). `std` provides those itself, so libraries
+  (`fsproto`, `svcclient`, `osrt`) depend on libos with
+  `default-features = false`. std apps use a different allocator than
+  services: **dlmalloc on top of memory objects** (vendored in rust-src,
+  `rustc-dep-of-std`); a freed segment is unmapped, so memory goes back to
+  the system.
+- **abi, elf, initfs, tz, wire, libos, svcclient, fsproto** have a
+  `rustc-dep-of-std` feature **[implemented]** (netproto comes with the
+  network). `spin::Mutex` in fsproto and svcclient was replaced with the
+  futex-based `libos::sync::Mutex` (the `spin` crate lacks that feature and
+  would be missing in the offline std build). The protocols thus stay in
+  **one source** for both services and `std`.
 
 ### What changes in std (the glue)
 
 In the pinned nightly (`nightly-2026-11-05`), `target_os = "motor"` has an
-arm in 32 files under `library/std/src`, Hermit in 34. Our estimate is
-**~35 files**, mostly one line in a `cfg_select!` and a module of up to
-~200 lines (`sys/fs/magnumopus.rs`, `sys/thread/magnumopus.rs`,
+arm in 32 files under `library/std/src`, Hermit in 34. Our glue in
+phase 1: **35 files, ~1000 lines** (`third_party/rust-std/std.patch`),
+mostly one line in a `cfg_select!` and a module of up to ~200 lines (`sys/fs/magnumopus.rs`, `sys/thread/magnumopus.rs`,
 `sys/pal/magnumopus/mod.rs`...). Plus `library/std/Cargo.toml` (the
 `osrt` dependency) and `std/src/os/magnumopus/` (extensions such as
 `os::magnumopus::io::AsRawHandle`).
@@ -108,56 +118,84 @@ kernel, services and std).
 
 The same as the rest of the repository: `rust-toolchain.toml`
 (`nightly-2026-11-05`, the `rust-src` component is already listed)
-**[designed]**. A second toolchain just for std would mean two copies of
-`core` and two sets of compiler bugs. `rustc` must be exactly the version
-the std sources belong to; xtask checks it (version from `rustc -vV`
-against the version in the patch header).
+**[implemented]**. A second toolchain just for std would mean two copies
+of `core` and two sets of compiler bugs. `rustc` must be exactly the
+version the std sources belong to: xtask takes the sources from the
+`rust-src` of the same toolchain it compiles with, and the paths
+(`target/std-src/<nightly>`, `target/sysroot/<nightly>`) carry the nightly
+name from `rust-toolchain.toml`. A patch that does not fit a new nightly
+fails in `git apply`.
 
 ### How xtask builds std
 
 <figure class="diagram">
 <svg viewBox="0 0 780 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Building the std sysroot">
 <defs><marker id="rs2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="20" width="230" height="70" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">rust-src (rustup)</text><text class="m" x="125" y="64" text-anchor="middle">library/ of the pinned nightly</text>
-<rect class="box" x="10" y="150" width="230" height="70" rx="6"/><text class="t b" x="125" y="175" text-anchor="middle">third_party/rust-std</text><text class="m" x="125" y="194" text-anchor="middle">patches + new sys/* files</text>
+<rect class="box" x="10" y="20" width="230" height="70" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">rust-src (rustup)</text><text class="m" x="125" y="64" text-anchor="middle">library/ + vendor/</text>
+<rect class="box" x="10" y="150" width="230" height="70" rx="6"/><text class="t b" x="125" y="175" text-anchor="middle">third_party/rust-std</text><text class="m" x="125" y="194" text-anchor="middle">std.patch + targets/*.json</text>
 <path class="ln" d="M240 55 L288 100" marker-end="url(#rs2)"/>
 <path class="ln" d="M240 185 L288 140" marker-end="url(#rs2)"/>
 <rect class="acc" x="290" y="85" width="210" height="70" rx="6"/><text class="t b" x="395" y="110" text-anchor="middle">target/std-src</text><text class="m" x="395" y="129" text-anchor="middle">copy + git apply</text>
 <path class="ln" d="M500 120 L548 120" marker-end="url(#rs2)"/>
-<rect class="acc" x="550" y="20" width="220" height="70" rx="6"/><text class="t b" x="660" y="45" text-anchor="middle">target/sysroot</text><text class="m" x="660" y="64" text-anchor="middle">rlibs core, alloc, std, osrt</text>
-<rect class="ok" x="550" y="150" width="220" height="70" rx="6"/><text class="t b" x="660" y="175" text-anchor="middle">application</text><text class="m" x="660" y="194" text-anchor="middle">cargo build --sysroot, initfs</text>
+<rect class="acc" x="550" y="20" width="220" height="70" rx="6"/><text class="t b" x="660" y="45" text-anchor="middle">target/sysroot</text><text class="m" x="660" y="64" text-anchor="middle">rlib + rmeta, fingerprint</text>
+<rect class="ok" x="550" y="150" width="220" height="70" rx="6"/><text class="t b" x="660" y="175" text-anchor="middle">application</text><text class="m" x="660" y="194" text-anchor="middle">--sysroot, user-std.ld, initfs</text>
 <path class="ln" d="M660 90 L660 148" marker-end="url(#rs2)"/>
 </svg>
 <figcaption>xtask prepares the std sources with our glue, builds a sysroot from them, and applications are then compiled against it.</figcaption>
 </figure>
 
-1. `cargo xtask std` **[designed]** copies `library/` from the `rust-src`
-   of the pinned nightly into `target/std-src/<nightly>/` and applies the
-   patches from `third_party/rust-std/` (`git apply`; a failure is a clear
-   message naming the files that do not match). It adds the path to
-   `libs/osrt` into `library/std/Cargo.toml`.
-2. It builds the sysroot: `cargo build -p sysroot` in the `library/` copy
-   with `RUSTC_BOOTSTRAP=1`, the JSON target and bootstrap-like flags
-   (`-Zforce-unstable-if-unmarked`, `compiler-builtins-mem`,
-   `panic_abort`). The resulting `.rlib` files go to
-   `target/sysroot/<nightly>/lib/rustlib/<target>/lib`. It is rebuilt only
-   when the patches, `osrt`, libos or the nightly change (a fingerprint
-   file next to the sysroot).
-3. An application is compiled with plain `cargo build --target <json>`
-   and `--sysroot target/sysroot/<nightly>`; rust-lld links it with the
-   `user/user.ld` script. `cargo xtask build` then adds the application
-   to initfs (a list of std apps next to `USER_PROGRAMS`).
+Code: `xtask/src/stdsys.rs` **[verified in QEMU]** (`cargo xtask build`
+builds the `std` suite).
+
+1. **Sources:** `cargo xtask std` (and `build`) copies `library/` from the
+   `rust-src` of the pinned nightly into `target/std-src/<nightly>/`,
+   creates its own git repository in the copy and applies
+   `third_party/rust-std/std.patch` (`git apply`; when it does not fit, the
+   error says the patch is for another nightly). It rewrites the path to
+   `libs/osrt` in `std/Cargo.toml` to an absolute one (works with another
+   `CARGO_TARGET_DIR` too). The copy is redone only when the patch changes
+   (fingerprint in `patch.stamp`).
+2. **Sysroot:** `cargo build --offline --release -p sysroot
+   --features compiler-builtins-mem` in the copy with `RUSTC_BOOTSTRAP=1`,
+   `-Zjson-target-spec` and `-Zforce-unstable-if-unmarked`. std
+   dependencies (hashbrown, dlmalloc, compiler_builtins...) are in the
+   `vendor/` of the rust-src component, so the build is **offline** (the
+   risk from the design is gone). xtask takes the library files (`.rlib`
+   and `.rmeta`: this nightly puts only stub metadata into rlibs) from the
+   cargo messages (`compiler-artifact`) and copies them to
+   `target/sysroot/<nightly>/lib/rustlib/<target>/lib`. Cargo builds
+   incrementally: a change in osrt or libos = only those crates and std.
+3. **Applications:** `cargo build --target <json> -Zjson-target-spec` with
+   `--sysroot` and the `user/user-std.ld` linker script. A fingerprint of
+   the sysroot contents goes into the flags (`--cfg=mo_sysroot="..."`):
+   cargo does not track sysroot changes itself and the application would
+   stay linked with the old std. `cargo xtask build` adds the binaries to
+   initfs (list `stdsys::STD_PROGRAMS`).
 
 Why not `-Zbuild-std` directly: cargo always takes the std sources from
 `rust-src` in the toolchain sysroot, and feeding it a patched copy is only
-possible through internal variables or a custom toolchain via `rustup
-toolchain link`. Our own sysroot (what Xargo used to do) is deterministic
-and needs no internal cargo switches. **Risk:** std dependencies
-(hashbrown, compiler_builtins...) are downloaded from crates.io on the
-first build (then from the cargo cache); an offline first build fails.
-This is checked first in phase 1 (a spike); if the custom sysroot hits a
-wall, the fallback is `-Zbuild-std` with a toolchain via `rustup
-toolchain link`.
+possible through internal variables. Our own sysroot is deterministic and
+needs no internal switches.
+
+### Linker script and TLS
+
+`user/user-std.ld` has the layout of `user/user.ld` (static `ET_EXEC` from
+4 MiB, R-X, R--, RW- groups on 64 KiB pages) plus a `PT_TLS` segment.
+`.tdata` and `.tbss` are in one output section (forced `PROGBITS`), so the
+whole TLS template is in the file; the symbols `__tls_template_start`,
+`__tls_template_size` and `__tls_align` hand it to the runtime. A thread's
+TLS block (`osrt::tls`, local-exec model):
+
+```text
+x86_64 (variant II):  [ TLS data | TCB: pointer to itself ]
+                                   ^ TP = FS_BASE
+aarch64 (variant I):  [ TCB 16 B | TLS data ]
+                      ^ TP = TPIDR_EL0
+```
+
+Offsets use the segment's `p_align` (exactly as lld does); the block as a
+whole is aligned to at least 16 B. A new thread sets TP as its very first
+action, before any `std` code.
 
 ### Target description (JSON)
 
@@ -169,7 +207,7 @@ toolchain link`.
 | `panic-strategy` | `abort` | `abort` | unwind later (see rustc) |
 | `relocation-model`, linker | `static`, rust-lld, `user/user.ld` | same | the loader only handles `ET_EXEC` |
 | `has-thread-local`, `tls-model` | yes, `local-exec` | yes, `local-exec` | native TLS (requires a kernel change) |
-| `max-atomic-width` | 64 | 128 or 64 (depending on `lse`) | |
+| `max-atomic-width` | 64 | 128 | |
 
 **Note:** services keep being built for `*-none` with soft-float (the
 kernel and services use no SSE/NEON). std applications will be
@@ -180,111 +218,102 @@ with `#UD`); FFmpeg will need XSAVE in the kernel.
 
 ## Mapping std onto libos and services
 
-Legend: **P1** = phase 1 (now), **P2** = next step, **Unsupported** =
-returns `io::ErrorKind::Unsupported`, **kernel** = missing in the kernel,
-**libos** = missing in libos/protocols.
+Status column legend: status tags from [Writing documentation](documentation.md);
+**Unsupported** = returns `io::ErrorKind::Unsupported`. Tests of the `std`
+suite are in `user/init/src/tests/std_app.rs`; "hello-std" = test `std:
+hello-std: argumenty, vlakna, TLS, soubory` (x86_64 and aarch64).
 
-| Part of std | On top of | When | What is missing |
-|---|---|---|---|
-| start (`main`, `exit`, `abort`) | `_start` in osrt reads the startup message, calls `main` through `lang_start`; `process_exit` | P1 | nothing |
-| allocator (`System`) | libos heap (`sizeclass` + first-fit, grows with VMOs) | P1 | large allocations (>= 1 MiB) as their own VMO so memory is returned; P2 |
-| `env::args` | process parameter block | P1 | **libos**: parameter protocol (below) |
-| `env::var`, `set_var` | parameter block, changes kept in-process | P1 | same |
-| `env::current_dir` / `set_current_dir` | path in osrt, relative paths joined in-process | P1 | same (initial directory) |
-| `io::stdout/stderr` | byte-stream channel from the parameter block; without one the kernel log (`debug_log`) | P1 | **libos**: stream protocol (below) |
-| `io::stdin` | stream channel | P2 | same + termd integration |
-| `time::Instant` | `clock_monotonic` | P1 | nothing |
-| `time::SystemTime` | `clock_realtime` (`abi::time::Reading`) | P1 | nothing |
-| `thread::spawn`, `join`, `sleep`, `yield_now` | `libos::thread`, `time::sleep`, `thread_yield` | P1 | **libos**: stack guard (below) |
-| `thread::park`, `Mutex`, `Condvar`, `RwLock`, `Once` | futex (upstream `sys/sync/*/futex.rs` unchanged) | P1 | **kernel**: futex (decision 2) |
-| `thread_local!` | native ELF TLS (`#[thread_local]`), a TLS block per thread | P1 | **kernel**: thread register (decision 3) |
-| `thread::available_parallelism` | CPU count | P1 | **libos**: CPU count query (missing today, otherwise Unsupported) |
-| `random` (`HashMap` `RandomState`) | `random_get` | P1 | nothing |
-| `fs::File` open/read/write/seek/`set_len`/`sync_all` | fsproto v2 (session handles, a file survives a rename) | P1 | nothing (FS session from the parameter block) |
-| `fs::read_dir`, `metadata`, `create_dir`, `remove_*`, `rename` | fsproto (`LIST_PAGE`, `STAT`, `CREATE`, `REMOVE`, `RENAME`) | P1 | nothing |
-| `fs::Permissions` | only `readonly` from FS rights | P2 | mapping of FS rights |
-| symlinks, `hard_link`, `canonicalize` | `canonicalize` = path normalization; links Unsupported | P2 | FS v3 decides about links |
-| `net::TcpStream`, `TcpListener`, `UdpSocket` | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`), network session from the parameter block | P2 | nothing |
-| `ToSocketAddrs` (DNS) | `Net::resolve` | P2 | nothing |
-| `process::Command`, `Child`, `exit status` | read the ELF from FS, `libos::spawn_in` in its own job, parameter block for the child | P2 | **libos**: launching with a manifest (decision 4) |
-| `io::pipe`, `Stdio::piped` | a channel pair with the stream protocol | P2 | same as stdio |
-| `os_str`, `path` | UTF-8 bytes (like unix `os_str/bytes`), separator `/` | P1 | nothing |
-| `backtrace` | Unsupported (a panic prints the message) | later | unwinder + symbols |
-| `fork`, signals, `os::unix` | never | - | on purpose |
+| Part of std | On top of | Status |
+|---|---|---|
+| start (`main`, `exit`, `abort`) | `_start` in `osrt::start` reads the startup message (`libos::rt::startup`), sets up TLS and calls `main` from rustc; `process_exit` | **[verified in QEMU]** hello-std |
+| allocator (`System`) | dlmalloc on top of memory objects (`osrt::heap`), futex-based lock | **[verified in QEMU]** hello-std |
+| `env::args` | process parameter block | **[verified in QEMU]** hello-std |
+| `env::var`, `set_var`, `vars` | parameter block, changes kept in-process | **[verified in QEMU]** hello-std |
+| `env::current_dir` / `set_current_dir` | path in `osrt::env`, relative paths joined in-process (`.` and `..`) | **[verified in QEMU]** hello-std |
+| `io::stdout/stderr` | byte-stream channel; without one the kernel log, line by line | **[verified in QEMU]** hello-std |
+| `io::stdin` | stream channel (`osrt::stdio::read`) | **[implemented]**, termd integration **[designed]** |
+| `time::Instant` | `clock_monotonic` | **[verified in QEMU]** hello-std |
+| `time::SystemTime` | `clock_realtime` (before 1970 = the epoch) | **[verified in QEMU]** hello-std |
+| `thread::spawn`, `join`, `sleep`, `yield_now` | `libos::thread` + a TLS block (`osrt::thread`) | **[verified in QEMU]** hello-std |
+| `Mutex`, `Condvar`, `RwLock`, `Once`, `park` | upstream implementations on the futex (`osrt::futex`) | **[verified in QEMU]** hello-std (`Mutex`, `Condvar`), the rest **[implemented]** |
+| `thread_local!` | native ELF TLS (local-exec), std runs destructors at thread end | **[verified in QEMU]** hello-std |
+| `thread::available_parallelism` | `SCHED_CONTROL` `CPU_INFO` (CPU count) | **[verified in QEMU]** hello-std |
+| `random` (`HashMap` `RandomState`) | `random_get` | **[verified in QEMU]** hello-std |
+| `fs::File` open/read/write/seek/`set_len`/`sync_all`, append | fsproto v2 (session handles; position in `osrt::fs::File`) | **[verified in QEMU]** hello-std |
+| `fs::read_dir`, `metadata`, `create_dir`, `remove_*`, `rename`, `canonicalize` | fsproto (`STAT`, `LIST`, `CREATE`, `REMOVE`, `RENAME`); `canonicalize` = normalization + existence check | **[verified in QEMU]** hello-std (except `canonicalize`) |
+| `fs::Permissions` | only `readonly` from the effective FS rights; setting is Unsupported | **[implemented]** |
+| symlinks, `hard_link`, file locks, file times | Unsupported | FS v3 decides **[designed]** |
+| `net::TcpStream`, `TcpListener`, `UdpSocket`, DNS | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`, `resolve`), network session with tag `NET` | **[designed]** (phase 2) |
+| `process::Command`, `io::pipe` | launcher service with the child's manifest (decision 4), pipes = channel pairs | **[designed]** (phase 2); Unsupported today |
+| `os_str`, `path` | bytes (like unix), separator `/`; `std::os::magnumopus::ffi::{OsStrExt, OsStringExt}` | **[verified in QEMU]** hello-std |
+| `backtrace` | Unsupported (a panic prints the message to stderr) | later |
+| `fork`, signals, `os::unix` | never | on purpose |
 
-### Process parameter block (libos) **[designed]**
+### Process parameter block (libos)
 
-Today a parent passes handles with no agreed meaning (`kind::USER`,
-per-program tags) and a program has no arguments, environment or stdio.
-std needs one common place:
+Format `abi::params`, reading and creating with `libos::params::Params`,
+passed in the startup message as `kind::PARAMS` **[verified in QEMU]**
+(hello-std; format tests on the host `cargo test -p abi params`). Standard
+handles have tags from `abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`,
+`FS`, `NET`). Details and an example: [libos](libos.md#process-parameter-block).
 
-- a new handle kind in the startup message, `kind::PARAMS`: a read-only
-  memory object with the **parameter block** (version, `argv`, `envp`,
-  initial directory, a "name -> handle index" table),
-- the handles the block refers to travel in the same startup message
-  (`kind::USER` with a tag): `stdin`, `stdout`, `stderr`, the FS session,
-  the network session, the channel to the parent,
-- libos gets `spawn::Options::params(...)` for parents and block parsing
-  for children; `no_std` programs (shell, init) can use it too.
+### Byte-stream protocol
 
-A memory object instead of message data: arguments and environment are
-not limited by the channel message size.
+`stdout`/`stderr`/`stdin` are channels: every message = a chunk of bytes
+(at most 64 KiB), closing the channel = end of stream, an empty message is
+not the end **[verified in QEMU]** (hello-std, the test reads stdout until
+it closes). Back-pressure: a channel has no "writable" signal, so with a
+full queue (`SHOULD_WAIT`) a write waits a millisecond and retries. Integration
+with termd and the shell is work for the terminal thread **[designed]**.
 
-### Byte-stream protocol **[designed]**
+## What the kernel added
 
-`stdout`/`stderr`/`stdin` and `io::pipe` are channels with the simplest
-protocol: every message = a chunk of bytes (up to the message limit),
-closing the channel = end of stream. Back-pressure comes from the channel
-queue limit (a write waits while the queue is full). The terminal (termd)
-and the shell convert the stream to their native protocol; that is work
-for the terminal thread and is coordinated with it.
-
-### Stack guard **[designed]**
-
-libos today maps a thread stack wherever the kernel puts it; another
-mapping may lie right below it and an overflow silently overwrites it.
-std threads have a 2 MiB default stack and deep recursion (parsers,
-serde). Needed: reserving an address range without memory (`vm_reserve`)
-or mapping with an unmapped page below the stack, so an overflow ends in
-a page fault. Belongs in libos (and possibly the kernel).
-
-## What is missing in the kernel
-
-1. **Futex** (decision 2) **[designed]**: `futex_wait(address, expected
-   value, deadline)` and `futex_wake(address, count)` for the threads of
-   one process (key = process + virtual address). std then uses the
-   upstream `Mutex`, `Condvar`, `RwLock`, `Once` and `park`
-   implementations unchanged.
-2. **Thread register for TLS** (decision 3) **[designed]**: the kernel
-   must save and restore `FS_BASE` (x86_64) and `TPIDR_EL0` (aarch64) on a
-   thread switch and let it be set (at `thread_start` or via a syscall).
-   **A risk already today:** the kernel neither saves nor clears
-   `TPIDR_EL0` on a switch, yet an aarch64 program may write it itself. A
-   value written by one process is thus visible in another (a covert
-   channel between processes, and C code using TLS would break). Fix it
-   independently of std.
-3. **CPU count** for `available_parallelism` (could be part of the system
-   capability queries).
+1. **Futex** **[verified in QEMU]** (test `std: futex: wait, wake,
+   vyprseni`): `FUTEX_WAIT(address, expected value, deadline)` and
+   `FUTEX_WAKE(address, count)`, a per-process queue (key = virtual
+   address), see [Syscalls](syscalls.md#futex).
+2. **Thread register for TLS** **[verified in QEMU]** (test `std: registr
+   vlakna: vlastni hodnota kazdeho vlakna`): `THREAD_SET_POINTER`; the
+   kernel stores `FS_BASE` / `TPIDR_EL0` in the thread and loads it on
+   every switch. This also fixes the `TPIDR_EL0` leak between processes on
+   aarch64 (a program could write it and the kernel did not clear it on a
+   switch).
+3. **CPU count** was already provided by the kernel (`SCHED_CONTROL`
+   `CPU_INFO`).
 4. Later: XSAVE (AVX) for FFmpeg, demand paging (see
    [Memory management](#memory-management)), loading `ET_DYN` (see rustc).
 
-## Phase 1 (after approval)
+## Known limitations
 
-1. Build spike: `third_party/rust-std` with an empty platform (everything
-   Unsupported), `cargo xtask std` produces a sysroot for both targets.
-2. libos: `rt` feature, parameter block, stream protocol; `osrt`: start,
-   heap, stdout/stderr, args/env, time, random.
-3. Kernel: futex and the thread register (per the decisions; possibly
-   another thread does it).
-4. `osrt`: threads, TLS, futex; std `Mutex`, `thread::spawn`.
-5. `osrt`: `fs` (open, read, write, read_dir, metadata, create_dir).
-6. `user/hello-std`: prints arguments and variables, runs 4 threads with
-   a shared `Mutex`, writes and reads a file, lists a directory. A test in
-   `cargo xtask test` on x86_64 and aarch64 (a public API is done only
-   with verified behavior on both architectures).
-7. Docs: this page with status tags matching the state, [libos](libos.md)
-   (parameter block, stream), [Syscalls](syscalls.md) (futex, thread
-   register).
+- **Thread stack without a guard page** **[designed]**: an overflow may
+  overwrite a neighbouring mapping. Needs address reservation without
+  memory (`vm_reserve`) in the kernel.
+- **Detached thread** (a dropped `JoinHandle`): its stack and TLS block
+  stay until the process ends (the thread may still use them).
+- **TLS destructors of the main thread** do not run (the process ends
+  after `main`, like on Hermit).
+- **Full stdout queue** = waiting in millisecond steps (see the stream protocol).
+- **`current_exe`** is Unsupported (a process does not know its path; a
+  program may even come from initfs).
+- **Returning memory**: dlmalloc returns only whole segments; smaller
+  free pieces stay with the process.
+
+## Phase 1 (done)
+
+1. Build spike: JSON targets, a sysroot from unmodified std (a precursor
+   of step 4).
+2. Kernel: futex and the thread register **[verified in QEMU]**.
+3. libos: `rt` feature, parameter block, `sync::Mutex` **[verified in QEMU]**.
+4. `osrt` and the std glue (35 files) **[verified in QEMU]**.
+5. `user/hello-std` in initfs, suite `std` on x86_64 and aarch64
+   **[verified in QEMU]**.
+6. `cargo xtask std` and `cargo xtask build` build std and the
+   applications **[verified in QEMU]**.
+
+Next step (phase 2) **[designed]**: network (`std::net` on netproto),
+`std::process::Command` through the launcher service with a manifest,
+stdin and stdio in the terminal, the stack guard page, then a
+`cargo check -p gix` survey.
 
 ## Impact on the future
 
@@ -357,28 +386,16 @@ gix through ordinary `std::fs`.
   kernel and fsd support; there will be no `fork` (processes only via
   `spawn`).
 
-## Decisions for approval
+## Approved decisions
 
-1. **Approach**: A own PAL (recommended) / B unix family over libc /
-   C facade without a fork.
-2. **Synchronization**: A a futex in the kernel (recommended; pthread in
-   cstd and shared memory between processes need it too) / B a futex
-   emulated inside the process on top of `Event` objects (no kernel
-   change, process-local only; a temporary fallback if nobody can change
-   the kernel now).
-3. **TLS**: A a thread register in the kernel + native ELF TLS
-   (recommended; C needs it too) / B TLS keys like Motor OS (still needs
-   a thread register, only slower, and C with `_Thread_local` will not
-   work).
-4. **Launching processes from std** (`Command`): A directly with
-   `spawn_in` in its own job, the child gets only the parent's
-   capabilities / B through a launcher service (init) that applies the
-   child's manifest (recommended for applications with their own manifest;
-   A only for helper programs without a manifest). Needs approval because
-   it touches the permission model.
-5. **Floating point**: hard-float for std applications (recommended) /
-   soft-float like services.
-6. **Toolchain**: the same nightly as the repository (recommended) / a
-   separate one for std.
-7. **stdio protocol**: a plain byte stream over a channel (recommended) /
-   the termd native protocol.
+Approved on 2026-11-12, all recommendations:
+
+1. **Approach**: A own PAL in a std fork (glue) with the logic in `osrt`.
+2. **Synchronization**: a futex in the kernel.
+3. **TLS**: a thread register in the kernel + native ELF TLS.
+4. **Launching processes from std** (`Command`): applications with their
+   own manifest through a launcher service (init) that applies the child's
+   manifest; direct `spawn_in` only for helper programs without a manifest.
+5. **Floating point**: hard-float for std applications.
+6. **Toolchain**: the same nightly as the repository.
+7. **stdio protocol**: a plain byte stream over a channel.

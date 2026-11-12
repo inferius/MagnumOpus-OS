@@ -3,21 +3,24 @@
 Aplikace pro MagnumOpus půjdou psát v běžném Rustu se `std` (`fn main()`,
 `std::fs`, `std::thread`, `std::net`, crates z crates.io). Systémové
 služby a ovladače zůstávají `no_std` nad [libos](libos.md). Tahle stránka
-je **návrh ke schválení (fáze 0)**: přístup, sestavení, mapování částí
-`std` na libos a služby, co chybí v jádře a dopady na budoucí plány.
+popisuje přístup, sestavení, mapování částí `std` na libos a služby, co
+k tomu přidalo jádro a dopady na budoucí plány.
 
-> **Stav:** celé **[navrženo]**, kód zatím není. Otevřená rozhodnutí jsou
-> v kapitole [Rozhodnutí ke schválení](#rozhodnutí-ke-schválení).
+> **Stav:** návrh schválen 2026-11-12 (všechna doporučení, viz
+> [Schválená rozhodnutí](#schválená-rozhodnutí)). Fáze 1 hotová:
+> `hello-std` s argumenty, vlákny, TLS a soubory **[ověřeno v QEMU]** na
+> x86_64 i aarch64 (sada `std`). Síť, procesy a stdin jsou další krok.
 
 ## Cíl a rozsah
 
 - Cíle `x86_64-unknown-magnumopus` a `aarch64-unknown-magnumopus`
-  (`target_os = "magnumopus"`) **[navrženo]**.
+  (`target_os = "magnumopus"`) **[ověřeno v QEMU]**.
 - `std` nad libos: alokace, vlákna, synchronizace, TLS, čas, soubory přes
-  `fsd`, síť přes `netd`, procesy, argumenty, proměnné prostředí, stdio
-  **[navrženo]**.
-- `cargo xtask` sestaví std (sysroot) i aplikaci a dá ji do initfs
-  **[navrženo]**.
+  `fsd`, argumenty, proměnné prostředí, stdout/stderr **[ověřeno v QEMU]**;
+  síť přes `netd`, procesy a stdin **[navrženo]** (stav po částech
+  v [mapování](#mapování-std-na-libos-a-služby)).
+- `cargo xtask build` sestaví std (sysroot) i aplikace a dá je do initfs
+  **[ověřeno v QEMU]**.
 - Mimo rozsah: dynamické linkování, `fork`, signály POSIX, port rustc
   (jen dopady, viz [Dopady na budoucnost](#dopady-na-budoucnost)).
 
@@ -34,7 +37,7 @@ je **návrh ke schválení (fáze 0)**: přístup, sestavení, mapování část
 | Údržba při novém nightly | rebase lepidla (rozsah viz níže) | rebase menší, ale navíc fork crate `libc` a velká libc | žádná |
 | Výkon | přímá volání libos | každé volání přes vrstvu libc | přímý |
 
-**Doporučení: A.** Je to cesta, kterou upstream sám používá (Motor OS
+**Schváleno: A.** Je to cesta, kterou upstream sám používá (Motor OS
 a Hermit jsou v `std` přesně takhle: v `std` jen přepínače a tenké moduly,
 celá logika v externím crate `moto-rt` / `hermit-abi`). B dává lepší
 kompatibilitu s crates, ale nejdřív by se musela napsat skoro celá POSIX
@@ -65,27 +68,30 @@ a crates (libc, getrandom, jobserver...) můžou přidat podporu samy.
 <figcaption>V std je jen lepidlo; logika je v našem crate osrt nad libos a protokoly služeb, které sdílí i služby no_std.</figcaption>
 </figure>
 
-- **`libs/osrt`** **[navrženo]**: runtime pro `std` (obdoba `moto-rt`).
+- **`libs/osrt`** **[ověřeno v QEMU]**: runtime pro `std` (obdoba `moto-rt`).
   `#![no_std]`, feature `rustc-dep-of-std` (místo `core`/`alloc` závisí
   na `rustc-std-workspace-core`/`-alloc`, jako všechny závislosti std).
   Obsahuje vstupní bod, heap, vlákna, futex, TLS, klienta FS a sítě
   a stdio. Testy logiky na hostiteli jako u ostatních `libs/*`.
-- **libos** dostane feature `rt` (výchozí zapnutá) **[navrženo]**:
-  `entry!`, `#[global_allocator]` a `#[panic_handler]` jsou jen s ní.
-  `std` si je dodá samo, takže `osrt` používá libos bez `rt`. Heap se
-  přesune do modulu, který jde použít bez atributu `#[global_allocator]`
-  (stejný alokátor pro služby i std aplikace).
-- **fsproto, netproto, svcclient, wire, abi** dostanou feature
-  `rustc-dep-of-std`. Závislost `spin` ve fsproto se nahradí vlastním
-  zámkem (crate `spin` tuhle feature nemá). Protokoly tak zůstanou
-  **v jednom zdroji** pro služby i pro `std`.
+- **libos** má feature `rt` (výchozí zapnutá) **[implementováno]**:
+  `entry!`, heap, `#[global_allocator]` a `#[panic_handler]` jsou jen
+  s ní (`rt_own.rs`). `std` si je dodá samo, takže knihovny (`fsproto`,
+  `svcclient`, `osrt`) závisí na libos s `default-features = false`.
+  Std aplikace mají jiný alokátor než služby: **dlmalloc nad objekty
+  paměti** (vendorovaný v rust-src, `rustc-dep-of-std`); uvolněný segment
+  se odmapuje, takže se paměť vrací systému.
+- **abi, elf, initfs, tz, wire, libos, svcclient, fsproto** mají feature
+  `rustc-dep-of-std` **[implementováno]** (netproto přijde se sítí).
+  `spin::Mutex` ve fsproto a svcclient nahradil `libos::sync::Mutex` nad
+  futexem (crate `spin` tu feature nemá a v offline buildu std by chyběl).
+  Protokoly tak zůstávají **v jednom zdroji** pro služby i pro `std`.
 
 ### Co se mění v std (lepidlo)
 
 V připnutém nightly (`nightly-2026-11-05`) má `target_os = "motor"`
-větev ve 32 souborech `library/std/src`, Hermit ve 34. Odhad pro nás
-**~35 souborů**, většinou jeden řádek v `cfg_select!` a modul do ~200
-řádků (soubory `sys/fs/magnumopus.rs`, `sys/thread/magnumopus.rs`,
+větev ve 32 souborech `library/std/src`, Hermit ve 34. Naše lepidlo ve
+fázi 1: **35 souborů, ~1000 řádků** (`third_party/rust-std/std.patch`),
+většinou jeden řádek v `cfg_select!` a modul do ~200 řádků (soubory `sys/fs/magnumopus.rs`, `sys/thread/magnumopus.rs`,
 `sys/pal/magnumopus/mod.rs`...). Plus `library/std/Cargo.toml` (závislost
 na `osrt`) a `std/src/os/magnumopus/` (rozšíření, např.
 `os::magnumopus::io::AsRawHandle`).
@@ -104,53 +110,82 @@ pro jádro, služby i std).
 ### Připnutý nightly
 
 Stejný jako zbytek repa: `rust-toolchain.toml` (`nightly-2026-11-05`,
-komponenta `rust-src` už tam je) **[navrženo]**. Druhý toolchain jen pro
-std by znamenal dvě kopie `core` a dvě sady chyb překladače. `rustc`
-musí být přesně ta verze, ke které patří zdroje std; xtask to hlídá
-(verze z `rustc -vV` proti verzi v hlavičce patchů).
+komponenta `rust-src` už tam je) **[implementováno]**. Druhý toolchain
+jen pro std by znamenal dvě kopie `core` a dvě sady chyb překladače.
+`rustc` musí být přesně ta verze, ke které patří zdroje std: xtask bere
+zdroje z `rust-src` téhož toolchainu, kterým překládá, a cesty
+(`target/std-src/<nightly>`, `target/sysroot/<nightly>`) nesou jméno
+nightly z `rust-toolchain.toml`. Patch, který na nový nightly nesedí,
+skončí chybou `git apply`.
 
 ### Jak xtask std sestaví
 
 <figure class="diagram">
 <svg viewBox="0 0 780 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sestaveni sysrootu std">
 <defs><marker id="rs2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="20" width="230" height="70" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">rust-src (rustup)</text><text class="m" x="125" y="64" text-anchor="middle">library/ připnutého nightly</text>
-<rect class="box" x="10" y="150" width="230" height="70" rx="6"/><text class="t b" x="125" y="175" text-anchor="middle">third_party/rust-std</text><text class="m" x="125" y="194" text-anchor="middle">patche + nové soubory sys/*</text>
+<rect class="box" x="10" y="20" width="230" height="70" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">rust-src (rustup)</text><text class="m" x="125" y="64" text-anchor="middle">library/ + vendor/</text>
+<rect class="box" x="10" y="150" width="230" height="70" rx="6"/><text class="t b" x="125" y="175" text-anchor="middle">third_party/rust-std</text><text class="m" x="125" y="194" text-anchor="middle">std.patch + targets/*.json</text>
 <path class="ln" d="M240 55 L288 100" marker-end="url(#rs2)"/>
 <path class="ln" d="M240 185 L288 140" marker-end="url(#rs2)"/>
 <rect class="acc" x="290" y="85" width="210" height="70" rx="6"/><text class="t b" x="395" y="110" text-anchor="middle">target/std-src</text><text class="m" x="395" y="129" text-anchor="middle">kopie + git apply</text>
 <path class="ln" d="M500 120 L548 120" marker-end="url(#rs2)"/>
-<rect class="acc" x="550" y="20" width="220" height="70" rx="6"/><text class="t b" x="660" y="45" text-anchor="middle">target/sysroot</text><text class="m" x="660" y="64" text-anchor="middle">rlib core, alloc, std, osrt</text>
-<rect class="ok" x="550" y="150" width="220" height="70" rx="6"/><text class="t b" x="660" y="175" text-anchor="middle">aplikace</text><text class="m" x="660" y="194" text-anchor="middle">cargo build --sysroot, initfs</text>
+<rect class="acc" x="550" y="20" width="220" height="70" rx="6"/><text class="t b" x="660" y="45" text-anchor="middle">target/sysroot</text><text class="m" x="660" y="64" text-anchor="middle">rlib + rmeta, otisk</text>
+<rect class="ok" x="550" y="150" width="220" height="70" rx="6"/><text class="t b" x="660" y="175" text-anchor="middle">aplikace</text><text class="m" x="660" y="194" text-anchor="middle">--sysroot, user-std.ld, initfs</text>
 <path class="ln" d="M660 90 L660 148" marker-end="url(#rs2)"/>
 </svg>
 <figcaption>xtask připraví zdroje std s naším lepidlem, sestaví z nich sysroot a aplikace se pak překládají proti němu.</figcaption>
 </figure>
 
-1. `cargo xtask std` **[navrženo]** zkopíruje `library/` z `rust-src`
-   připnutého nightly do `target/std-src/<nightly>/` a aplikuje patche
-   z `third_party/rust-std/` (`git apply`, chyba = jasná hláška, které
-   soubory nesedí). Do `library/std/Cargo.toml` doplní cestu k `libs/osrt`.
-2. Sestaví sysroot: `cargo build -p sysroot` v kopii `library/`
-   s `RUSTC_BOOTSTRAP=1`, cílem z JSON a příznaky jako bootstrap
-   (`-Zforce-unstable-if-unmarked`, `compiler-builtins-mem`, `panic_abort`).
-   Výsledné `.rlib` dá do `target/sysroot/<nightly>/lib/rustlib/<cíl>/lib`.
-   Znovu se sestavuje jen při změně patchů, `osrt`, libos nebo nightly
-   (otisk v souboru vedle sysrootu).
-3. Aplikace se překládá běžným `cargo build --target <json>`
-   s `--sysroot target/sysroot/<nightly>`; linkuje rust-lld se skriptem
-   `user/user.ld`. `cargo xtask build` pak aplikaci přidá do initfs
-   (seznam std aplikací vedle `USER_PROGRAMS`).
+Kód: `xtask/src/stdsys.rs` **[ověřeno v QEMU]** (sadu `std` staví
+`cargo xtask build`).
+
+1. **Zdroje:** `cargo xtask std` (a `build`) zkopíruje `library/`
+   z `rust-src` připnutého nightly do `target/std-src/<nightly>/`, založí
+   v kopii vlastní repozitář git a aplikuje `third_party/rust-std/std.patch`
+   (`git apply`; když nesedí, chyba řekne, že patch je pro jiný nightly).
+   Cestu k `libs/osrt` v `std/Cargo.toml` přepíše na absolutní (funguje
+   i s jiným `CARGO_TARGET_DIR`). Kopie se dělá znovu jen při změně patche
+   (otisk v `patch.stamp`).
+2. **Sysroot:** `cargo build --offline --release -p sysroot
+   --features compiler-builtins-mem` v kopii s `RUSTC_BOOTSTRAP=1`,
+   `-Zjson-target-spec` a `-Zforce-unstable-if-unmarked`. Závislosti std
+   (hashbrown, dlmalloc, compiler_builtins...) jsou ve `vendor/` komponenty
+   rust-src, takže build jde **offline** (riziko z návrhu odpadlo).
+   Soubory knihoven (`.rlib` i `.rmeta`: tento nightly dává do rlib jen
+   zkrácená metadata) vezme xtask z hlášení cargo (`compiler-artifact`)
+   a zkopíruje do `target/sysroot/<nightly>/lib/rustlib/<cíl>/lib`. Cargo
+   překládá inkrementálně: změna osrt nebo libos = jen tyto crates a std.
+3. **Aplikace:** `cargo build --target <json> -Zjson-target-spec` se
+   `--sysroot` a linker skriptem `user/user-std.ld`. Otisk obsahu sysrootu
+   jde do příznaků (`--cfg=mo_sysroot="..."`): cargo změnu sysrootu sám
+   nesleduje a aplikace by zůstala slinkovaná se starým std. Hotové
+   binárky přidá `cargo xtask build` do initfs (seznam
+   `stdsys::STD_PROGRAMS`).
 
 Proč ne přímo `-Zbuild-std`: cargo bere zdroje std vždy z `rust-src`
 v sysrootu toolchainu a podstrčit mu patchnutou kopii jde jen přes
-interní proměnné nebo vlastní toolchain přes `rustup toolchain link`.
-Vlastní sysroot (postup, který dříve dělal Xargo) je deterministický a bez
-interních přepínačů cargo. **Riziko:** závislosti std (hashbrown,
-compiler_builtins...) se při prvním sestavení stahují z crates.io
-(pak z cache cargo); offline první build selže. Ověří se ve fázi 1
-jako první krok (spike); kdyby vlastní sysroot narazil, záloha je
-`-Zbuild-std` s toolchainem přes `rustup toolchain link`.
+interní proměnné. Vlastní sysroot je deterministický a bez interních
+přepínačů.
+
+### Linker skript a TLS
+
+`user/user-std.ld` má rozložení jako `user/user.ld` (statický `ET_EXEC`
+od 4 MiB, skupiny R-X, R--, RW- na stránkách 64 KiB) a navíc segment
+`PT_TLS`. `.tdata` i `.tbss` jsou v jedné výstupní sekci (vynucená
+`PROGBITS`), takže celá šablona TLS je v souboru; symboly
+`__tls_template_start`, `__tls_template_size` a `__tls_align` ji předají
+runtime. Blok TLS vlákna (`osrt::tls`, model local-exec):
+
+```text
+x86_64 (varianta II):  [ data TLS | TCB: ukazatel sám na sebe ]
+                                    ^ TP = FS_BASE
+aarch64 (varianta I):  [ TCB 16 B | data TLS ]
+                       ^ TP = TPIDR_EL0
+```
+
+Posuny se počítají se zarovnáním `p_align` segmentu (stejně jako lld),
+blok jako celek se zarovná aspoň na 16 B. TP nastaví nové vlákno jako
+první věc, ještě před kódem `std`.
 
 ### Popis cílů (JSON)
 
@@ -162,7 +197,7 @@ jako první krok (spike); kdyby vlastní sysroot narazil, záloha je
 | `panic-strategy` | `abort` | `abort` | unwind později (viz rustc) |
 | `relocation-model`, linker | `static`, rust-lld, `user/user.ld` | totéž | zavaděč umí jen `ET_EXEC` |
 | `has-thread-local`, `tls-model` | ano, `local-exec` | ano, `local-exec` | nativní TLS (vyžaduje změnu jádra) |
-| `max-atomic-width` | 64 | 128 nebo 64 (dle `lse`) | |
+| `max-atomic-width` | 64 | 128 | |
 
 **Pozor:** služby se dál překládají pro `*-none` se soft-float (jádro
 a služby bez SSE/NEON). Std aplikace budou **hard-float**. Je to jiný cíl,
@@ -172,108 +207,98 @@ instrukce AVX skončí `#UD`); pro FFmpeg bude potřeba XSAVE v jádře.
 
 ## Mapování std na libos a služby
 
-Legenda: **F1** = fáze 1 (hned), **F2** = další krok, **Unsupported** =
-vrátí `io::ErrorKind::Unsupported`, **jádro** = chybí v jádře, **libos**
-= chybí v libos/protokolech.
+Legenda sloupce Stav: značky stavu z [Psaní dokumentace](dokumentace.md);
+**Unsupported** = vrátí `io::ErrorKind::Unsupported`. Testy sady `std`
+v `user/init/src/tests/std_app.rs`; „hello-std“ = test `std: hello-std:
+argumenty, vlakna, TLS, soubory` (x86_64 i aarch64).
 
-| Část std | Nad čím | Kdy | Co chybí |
-|---|---|---|---|
-| start (`main`, `exit`, `abort`) | `_start` v osrt čte startovní zprávu, volá `main` přes `lang_start`; `process_exit` | F1 | nic |
-| alokátor (`System`) | heap libos (`sizeclass` + first-fit, růst přes VMO) | F1 | velké alokace (>= 1 MiB) jako vlastní VMO, aby se paměť vracela; F2 |
-| `env::args` | blok parametrů procesu | F1 | **libos**: protokol parametrů (níže) |
-| `env::var`, `set_var` | blok parametrů, změny v procesu | F1 | totéž |
-| `env::current_dir` / `set_current_dir` | cesta v osrt, relativní cesty se skládají v procesu | F1 | totéž (počáteční adresář) |
-| `io::stdout/stderr` | kanál bajtového proudu z bloku parametrů; bez něj log jádra (`debug_log`) | F1 | **libos**: protokol proudu (níže) |
-| `io::stdin` | kanál proudu | F2 | totéž + napojení na termd |
-| `time::Instant` | `clock_monotonic` | F1 | nic |
-| `time::SystemTime` | `clock_realtime` (`abi::time::Reading`) | F1 | nic |
-| `thread::spawn`, `join`, `sleep`, `yield_now` | `libos::thread`, `time::sleep`, `thread_yield` | F1 | **libos**: stráž zásobníku (níže) |
-| `thread::park`, `Mutex`, `Condvar`, `RwLock`, `Once` | futex (`sys/sync/*/futex.rs` z upstream beze změny) | F1 | **jádro**: futex (rozhodnutí 2) |
-| `thread_local!` | nativní ELF TLS (`#[thread_local]`), blok TLS na vlákno | F1 | **jádro**: registr vlákna (rozhodnutí 3) |
-| `thread::available_parallelism` | počet CPU | F1 | **libos**: dotaz na počet CPU (dnes není, jinak Unsupported) |
-| `random` (`HashMap` `RandomState`) | `random_get` | F1 | nic |
-| `fs::File` open/read/write/seek/`set_len`/`sync_all` | fsproto v2 (handly relace, soubor přežije přejmenování) | F1 | nic (relace FS z bloku parametrů) |
-| `fs::read_dir`, `metadata`, `create_dir`, `remove_*`, `rename` | fsproto (`LIST_PAGE`, `STAT`, `CREATE`, `REMOVE`, `RENAME`) | F1 | nic |
-| `fs::Permissions` | jen `readonly` z práv FS | F2 | mapování práv FS |
-| symlinky, `hard_link`, `canonicalize` | `canonicalize` = normalizace cesty; odkazy Unsupported | F2 | FS v3 rozhodne o odkazech |
-| `net::TcpStream`, `TcpListener`, `UdpSocket` | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`), relace sítě z bloku parametrů | F2 | nic |
-| `ToSocketAddrs` (DNS) | `Net::resolve` | F2 | nic |
-| `process::Command`, `Child`, `exit status` | čtení ELF z FS, `libos::spawn_in` ve vlastním jobu, blok parametrů dítěti | F2 | **libos**: spouštění s manifestem (rozhodnutí 4) |
-| `io::pipe`, `Stdio::piped` | dvojice kanálů s protokolem proudu | F2 | totéž co stdio |
-| `os_str`, `path` | bajty v UTF-8 (jako unix `os_str/bytes`), oddělovač `/` | F1 | nic |
-| `backtrace` | Unsupported (panika vypíše zprávu) | později | unwinder + symboly |
-| `fork`, signály, `os::unix` | nebude | - | záměrně |
+| Část std | Nad čím | Stav |
+|---|---|---|
+| start (`main`, `exit`, `abort`) | `_start` v `osrt::start` čte startovní zprávu (`libos::rt::startup`), připraví TLS a zavolá `main` od rustc; `process_exit` | **[ověřeno v QEMU]** hello-std |
+| alokátor (`System`) | dlmalloc nad objekty paměti (`osrt::heap`), zámek nad futexem | **[ověřeno v QEMU]** hello-std |
+| `env::args` | blok parametrů procesu | **[ověřeno v QEMU]** hello-std |
+| `env::var`, `set_var`, `vars` | blok parametrů, změny jen v procesu | **[ověřeno v QEMU]** hello-std |
+| `env::current_dir` / `set_current_dir` | cesta v `osrt::env`, relativní cesty se skládají v procesu (`.` a `..`) | **[ověřeno v QEMU]** hello-std |
+| `io::stdout/stderr` | kanál proudu bajtů; bez něj log jádra po řádcích | **[ověřeno v QEMU]** hello-std |
+| `io::stdin` | kanál proudu (`osrt::stdio::read`) | **[implementováno]**, napojení na termd **[navrženo]** |
+| `time::Instant` | `clock_monotonic` | **[ověřeno v QEMU]** hello-std |
+| `time::SystemTime` | `clock_realtime` (před rokem 1970 = epocha) | **[ověřeno v QEMU]** hello-std |
+| `thread::spawn`, `join`, `sleep`, `yield_now` | `libos::thread` + blok TLS (`osrt::thread`) | **[ověřeno v QEMU]** hello-std |
+| `Mutex`, `Condvar`, `RwLock`, `Once`, `park` | upstream implementace nad futexem (`osrt::futex`) | **[ověřeno v QEMU]** hello-std (`Mutex`, `Condvar`), ostatní **[implementováno]** |
+| `thread_local!` | nativní ELF TLS (local-exec), destruktory spouští std na konci vlákna | **[ověřeno v QEMU]** hello-std |
+| `thread::available_parallelism` | `SCHED_CONTROL` `CPU_INFO` (počet CPU) | **[ověřeno v QEMU]** hello-std |
+| `random` (`HashMap` `RandomState`) | `random_get` | **[ověřeno v QEMU]** hello-std |
+| `fs::File` open/read/write/seek/`set_len`/`sync_all`, append | fsproto v2 (handly relace; pozice v `osrt::fs::File`) | **[ověřeno v QEMU]** hello-std |
+| `fs::read_dir`, `metadata`, `create_dir`, `remove_*`, `rename`, `canonicalize` | fsproto (`STAT`, `LIST`, `CREATE`, `REMOVE`, `RENAME`); `canonicalize` = normalizace + kontrola existence | **[ověřeno v QEMU]** hello-std (bez `canonicalize`) |
+| `fs::Permissions` | jen `readonly` z účinných práv FS; nastavení Unsupported | **[implementováno]** |
+| symlinky, `hard_link`, zámky souborů, časy souborů | Unsupported | FS v3 rozhodne **[navrženo]** |
+| `net::TcpStream`, `TcpListener`, `UdpSocket`, DNS | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`, `resolve`), relace sítě se štítkem `NET` | **[navrženo]** (fáze 2) |
+| `process::Command`, `io::pipe` | spouštěcí služba s manifestem dítěte (rozhodnutí 4), roury = dvojice kanálů | **[navrženo]** (fáze 2); dnes Unsupported |
+| `os_str`, `path` | bajty (jako unix), oddělovač `/`; `std::os::magnumopus::ffi::{OsStrExt, OsStringExt}` | **[ověřeno v QEMU]** hello-std |
+| `backtrace` | Unsupported (panika vypíše zprávu na stderr) | později |
+| `fork`, signály, `os::unix` | nebude | záměrně |
 
-### Blok parametrů procesu (libos) **[navrženo]**
+### Blok parametrů procesu (libos)
 
-Dnes rodič předává handly bez dohodnutého významu (`kind::USER`, štítky
-podle programu) a program nemá argumenty, prostředí ani stdio. Std
-potřebuje jedno společné místo:
+Formát `abi::params`, čtení a vytvoření `libos::params::Params`, předání
+ve startovní zprávě jako `kind::PARAMS` **[ověřeno v QEMU]** (hello-std;
+testy formátu na hostiteli `cargo test -p abi params`). Standardní
+handly mají štítky `abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`, `FS`,
+`NET`). Podrobnosti a příklad: [libos](libos.md#blok-parametrů-procesu).
 
-- nový druh handlu ve startovní zprávě `kind::PARAMS`: objekt paměti jen
-  pro čtení s **blokem parametrů** (verze, `argv`, `envp`, počáteční
-  adresář, tabulka „jméno -> index handlu“),
-- handly, na které blok ukazuje, jsou v téže startovní zprávě
-  (`kind::USER` se štítkem): `stdin`, `stdout`, `stderr`, relace FS,
-  relace sítě, kanál k rodiči,
-- libos dostane `spawn::Options::params(...)` pro rodiče a čtení bloku pro
-  děti; používat ho můžou i programy `no_std` (shell, init).
+### Protokol proudu bajtů
 
-Objekt paměti místo dat ve zprávě: argumenty a prostředí nejsou omezené
-velikostí zprávy kanálu.
+`stdout`/`stderr`/`stdin` jsou kanály: každá zpráva = kus bajtů (nejvýš
+64 KiB), zavření kanálu = konec proudu, prázdná zpráva konec není
+**[ověřeno v QEMU]** (hello-std, test čte stdout až do zavření).
+Zpětný tlak: kanál nemá signál „lze zapisovat“, proto při plné frontě
+(`SHOULD_WAIT`) zápis počká milisekundu a zkusí to znovu. Napojení na termd
+a shell je práce vlákna terminálu **[navrženo]**.
 
-### Protokol proudu bajtů **[navrženo]**
+## Co přidalo jádro
 
-`stdout`/`stderr`/`stdin` a `io::pipe` jsou kanály s nejjednodušším
-protokolem: každá zpráva = kus bajtů (do limitu zprávy), zavření kanálu =
-konec proudu. Zpětný tlak zajistí limit fronty kanálu (zápis čeká, když je
-fronta plná). Terminál (termd) a shell si proud převedou na svůj nativní
-protokol; to je práce pro vlákno terminálu a koordinuje se s ním.
-
-### Stráž zásobníku **[navrženo]**
-
-libos dnes mapuje zásobník vlákna tam, kam ho dá jádro; hned pod ním může
-ležet jiné mapování a přetečení ho tiše přepíše. Std vlákna mají výchozí
-zásobník 2 MiB a hlubokou rekurzi (parsery, serde). Potřeba: rezervace
-rozsahu adres bez paměti (`vm_reserve`) nebo mapování s nenamapovanou
-stránkou pod zásobníkem, aby přetečení skončilo chybou stránky. Patří do
-libos (a případně jádra).
-
-## Co chybí v jádře
-
-1. **Futex** (rozhodnutí 2) **[navrženo]**: `futex_wait(adresa,
-   očekávaná hodnota, deadline)` a `futex_wake(adresa, počet)` pro vlákna
-   jednoho procesu (klíč = proces + virtuální adresa). Std pak používá
-   upstream implementace `Mutex`, `Condvar`, `RwLock`, `Once` a `park`
-   beze změny.
-2. **Registr vlákna pro TLS** (rozhodnutí 3) **[navrženo]**: jádro musí
-   ukládat a obnovovat při přepnutí vlákna `FS_BASE` (x86_64) a
-   `TPIDR_EL0` (aarch64) a dát ho nastavit (při `thread_start` nebo
-   syscallem). **Riziko už dnes:** jádro `TPIDR_EL0` při přepnutí neukládá
-   ani nenuluje, přitom ho program na aarch64 smí zapsat sám. Hodnota
-   zapsaná jedním procesem je tak vidět v jiném (skrytý kanál mezi
-   procesy, a kód v C s TLS by se rozbil). Opravit nezávisle na std.
-3. **Počet CPU** pro `available_parallelism` (může být součástí dotazů na
-   schopnosti systému).
+1. **Futex** **[ověřeno v QEMU]** (test `std: futex: wait, wake,
+   vyprseni`): `FUTEX_WAIT(adresa, očekávaná hodnota, deadline)`
+   a `FUTEX_WAKE(adresa, počet)`, fronta per proces (klíč = virtuální
+   adresa), viz [Syscally](syscally.md#futex).
+2. **Registr vlákna pro TLS** **[ověřeno v QEMU]** (test `std: registr
+   vlakna: vlastni hodnota kazdeho vlakna`): `THREAD_SET_POINTER`, jádro
+   ukládá `FS_BASE` / `TPIDR_EL0` ve vlákně a nahrává ho při každém
+   přepnutí. Tím je opravený i únik `TPIDR_EL0` mezi procesy na aarch64
+   (program si ho mohl zapsat a jádro ho při přepnutí nenulovalo).
+3. **Počet CPU** už jádro dávalo (`SCHED_CONTROL` `CPU_INFO`).
 4. Později: XSAVE (AVX) pro FFmpeg, alokace stránek na požádání (viz
    [Správa paměti](#správa-paměti)), zavádění `ET_DYN` (viz rustc).
 
-## Fáze 1 (po schválení)
+## Známá omezení
 
-1. Spike sestavení: `third_party/rust-std` s prázdnou platformou (vše
-   Unsupported), `cargo xtask std` vyrobí sysroot pro oba cíle.
-2. libos: feature `rt`, blok parametrů, protokol proudu; `osrt`: start,
-   heap, stdout/stderr, args/env, čas, náhoda.
-3. Jádro: futex a registr vlákna (podle rozhodnutí; případně jiné vlákno).
-4. `osrt`: vlákna, TLS, futex; std `Mutex`, `thread::spawn`.
-5. `osrt`: `fs` (open, read, write, read_dir, metadata, create_dir).
-6. `user/hello-std`: vypíše argumenty a proměnné, spustí 4 vlákna se
-   sdíleným `Mutex`, zapíše a přečte soubor, vypíše adresář. Test
-   v `cargo xtask test` na x86_64 i aarch64 (veřejné API je hotové až
-   s ověřeným chováním na obou architekturách).
-7. Docs: tahle stránka se značkami podle stavu, [libos](libos.md)
-   (blok parametrů, proud), [Syscally](syscally.md) (futex, registr
-   vlákna).
+- **Zásobník vlákna bez strážní stránky** **[navrženo]**: přetečení
+  může přepsat sousední mapování. Potřebuje rezervaci adres bez paměti
+  (`vm_reserve`) v jádře.
+- **Odpojené vlákno** (zahozený `JoinHandle`): zásobník a blok TLS zůstanou
+  do konce procesu (vlákno je může ještě používat).
+- **Destruktory TLS hlavního vlákna** se nespouští (proces po `main`
+  končí, jako u Hermitu).
+- **Plná fronta stdout** = čekání po milisekundách (viz protokol proudu).
+- **`current_exe`** je Unsupported (proces nezná svou cestu, program
+  může být i z initfs).
+- **Odmapování paměti** vrací dlmalloc jen po celých segmentech; menší
+  volné kusy zůstávají procesu.
+
+## Fáze 1 (hotovo)
+
+1. Spike sestavení: JSON cíle, sysroot z neupraveného std (předstupeň bodu 4).
+2. Jádro: futex a registr vlákna **[ověřeno v QEMU]**.
+3. libos: feature `rt`, blok parametrů, `sync::Mutex` **[ověřeno v QEMU]**.
+4. `osrt` a lepidlo std (35 souborů) **[ověřeno v QEMU]**.
+5. `user/hello-std` v initfs, sada `std` na x86_64 i aarch64
+   **[ověřeno v QEMU]**.
+6. `cargo xtask std` a `cargo xtask build` sestaví std i aplikace
+   **[ověřeno v QEMU]**.
+
+Další krok (fáze 2) **[navrženo]**: síť (`std::net` nad netproto),
+`std::process::Command` přes spouštěcí službu s manifestem, stdin a stdio
+v terminálu, strážní stránka zásobníku, pak průzkum `cargo check -p gix`.
 
 ## Dopady na budoucnost
 
@@ -283,7 +308,7 @@ libos (a případně jádra).
   v přehrávači) musí mít jeden alokátor (`malloc` = heap libos, už dnes),
   jedno TLS (`errno` a `_Thread_local` v C potřebují nativní ELF TLS, ne
   klíče), jedny vlákna (pthread nad vlákny `osrt` a futexem) a jedno
-  stdio. Proto `osrt` navrhujeme jako společný základ i pro `cstd`: cstd
+  stdio. Proto `osrt` je navržený jako společný základ i pro `cstd`: cstd
   pak bude tenká vrstva C ABI nad `osrt`.
 - `cstd` potřebuje tabulku čísel fd (int -> soubor, proud, socket); patří
   do `osrt`, aby `std` a C viděly totéž (`os::magnumopus::io::AsRawFd`).
@@ -337,24 +362,16 @@ přes běžné `std::fs`.
   nebo soukromé kopie). Sdílené mapování souborů a CoW přijdou s podporou
   v jádře a fsd; `fork` nebude (procesy jen přes `spawn`).
 
-## Rozhodnutí ke schválení
+## Schválená rozhodnutí
 
-1. **Přístup**: A vlastní PAL (doporučeno) / B rodina unix nad libc /
-   C fasáda bez forku.
-2. **Synchronizace**: A futex v jádře (doporučeno; potřebuje ho i pthread
-   v cstd a sdílená paměť mezi procesy) / B emulace futexu v procesu nad
-   objekty `Event` (bez změny jádra, jen v rámci procesu; jako dočasná
-   záloha, pokud jádro teď nikdo nemůže měnit).
-3. **TLS**: A registr vlákna v jádře + nativní ELF TLS (doporučeno;
-   potřebuje ho i C) / B klíče TLS jako Motor OS (pořád potřebuje registr
-   vlákna, jen pomalejší a C s `_Thread_local` nepůjde).
-4. **Spouštění procesů z std** (`Command`): A přímo `spawn_in` ve vlastním
-   jobu, dítě dostane jen schopnosti rodiče / B přes spouštěcí službu
-   (init), která použije manifest dítěte (doporučeno pro aplikace
-   s vlastním manifestem; A jen pro pomocné programy bez manifestu).
-   Potřebuje souhlas, protože se dotýká modelu oprávnění.
-5. **Plovoucí čárka**: hard-float pro std aplikace (doporučeno) / soft-float
-   jako služby.
-6. **Toolchain**: stejný nightly jako repo (doporučeno) / samostatný pro std.
-7. **Protokol stdio**: prostý proud bajtů přes kanál (doporučeno) /
-   nativní protokol termd.
+Schváleno 2026-11-12, všechna doporučení:
+
+1. **Přístup**: A vlastní PAL ve forku std (lepidlo) s logikou v `osrt`.
+2. **Synchronizace**: futex v jádře.
+3. **TLS**: registr vlákna v jádře + nativní ELF TLS.
+4. **Spouštění procesů z std** (`Command`): aplikace s vlastním
+   manifestem přes spouštěcí službu (init), která použije manifest
+   dítěte; přímé `spawn_in` jen pro pomocné programy bez manifestu.
+5. **Plovoucí čárka**: hard-float pro std aplikace.
+6. **Toolchain**: stejný nightly jako repo.
+7. **Protokol stdio**: prostý proud bajtů přes kanál.

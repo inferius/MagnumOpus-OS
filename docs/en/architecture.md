@@ -1141,7 +1141,8 @@ Agreed approach (2026-11-06):
 
 1. **Rust:** our own target `x86_64-unknown-magnumopus` and a `std` port on
    top of libos (threads, TLS, synchronization, files, processes, time);
-   design in [Rust std](rust-std.md) **[designed]**.
+   [Rust std](rust-std.md): phase 1 (allocation, threads, TLS, files, stdio)
+   **[verified in QEMU]**, network and processes **[designed]**.
 2. **C:** our own libc on top of libos (under our control, without POSIX
    legacy where not needed); compiled with clang on the host.
 3. **C++:** libc++, libc++abi and libunwind on top of our libc, compiled
