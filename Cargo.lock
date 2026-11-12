@@ -535,6 +535,7 @@ version = "0.1.0"
 dependencies = [
  "accountproto",
  "audioproto",
+ "bootsplash",
  "comp",
  "font",
  "gfx",
@@ -1425,8 +1426,11 @@ dependencies = [
  "audiomix",
  "audioproto",
  "blockproto",
+ "bootsplash",
  "conf",
+ "font",
  "fsproto",
+ "gfx",
  "guiproto",
  "inputproto",
  "libos",
@@ -1585,6 +1589,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "boot-info",
+ "bootsplash",
  "crashrec",
  "elf",
  "log",

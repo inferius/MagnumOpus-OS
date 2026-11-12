@@ -58,7 +58,12 @@ extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
 
     // SAFETY: framebuffer popsal loader a namapoval ho do prime mapy;
     // kernel ho nepouziva nijak jinak nez pres konzoli.
-    unsafe { console::init(&boot_info.framebuffer) };
+    unsafe {
+        console::init(
+            &boot_info.framebuffer,
+            boot_info.boot_flags & boot_info::boot_flags::SPLASH != 0,
+        )
+    };
     log::set_defaults();
     log::info!(
         "os kernel {} ({}), sestaveni {}",
@@ -153,6 +158,11 @@ fn boot_main(boot_info: &'static BootInfo) {
             None
         }
     };
+    // Startovni obraz nesmi zustat viset: dal uz ho nikdo neprevezme,
+    // na obrazovku jde log s duvodem konce.
+    if init_code != Some(0) || !cfg!(feature = "qemu-test") {
+        console::leave_splash();
+    }
     match init_code {
         Some(0) => log::info!("init skoncil uspesne"),
         Some(code) => log::error!(
