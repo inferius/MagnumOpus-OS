@@ -379,8 +379,6 @@ impl<D: BlockDevice> Fs<D> {
         Ok(on_disk.max(in_mem) + 1)
     }
 
-    /// Vlozi polozku datasetu `id` do adresare `path` (rodic musi byt
-    /// aktivni a jmeno volne).
     /// Jmeno `name` ve slozce `parent` je volne, jinak `ALREADY_EXISTS`.
     /// Volat pred prvni zmenou stavu: chyba po zmene (`guarded`) by
     /// prepnula svazek do stavu chyby a kazdy dalsi zapis by vracel
@@ -394,6 +392,8 @@ impl<D: BlockDevice> Fs<D> {
         Ok(())
     }
 
+    /// Vlozi polozku datasetu `id` do adresare `path` (rodic musi byt
+    /// aktivni a jmeno volne).
     fn link_dataset(&mut self, parent: u64, name: &str, id: u64) -> Result<()> {
         let root = self.s.root;
         if self.lookup_child(&root, parent, name)?.is_some() {
