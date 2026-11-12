@@ -5,5 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Casova pasma: prevod UTC na mistni cas podle kompaktni tabulky pravidel (bez tzdata)"
 
+[features]
+rustc-dep-of-std = ["dep:core", "abi/rustc-dep-of-std"]
+
 [dependencies]
+# Preklad jako zavislost std (cil magnumopus, viz docs/cs/rust-std.md).
+core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
 abi.workspace = true

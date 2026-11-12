@@ -1,0 +1,16 @@
+[package]
+name = "hello-std"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Prvni aplikace se std (cil magnumopus): overeni std nad libos v QEMU"
+
+[[bin]]
+name = "hello-std"
+test = false
+bench = false
+
+# Zadne zavislosti: jen std. Sestavuje `cargo xtask build` pro cil
+# *-unknown-magnumopus se sysrootem z `cargo xtask std`.
+[dependencies]

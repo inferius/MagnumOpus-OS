@@ -1,0 +1,1402 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index bd63144..0f47f18 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2,6 +2,13 @@
+ # It is not intended for manual editing.
+ version = 4
+ 
++[[package]]
++name = "abi"
++version = "0.1.0"
++dependencies = [
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "addr2line"
+ version = "0.27.1"
+@@ -89,6 +96,13 @@ dependencies = [
+  "windows-sys",
+ ]
+ 
++[[package]]
++name = "elf"
++version = "0.1.0"
++dependencies = [
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "find-msvc-tools"
+ version = "0.1.11"
+@@ -110,6 +124,17 @@ dependencies = [
+  "rustc-std-workspace-core",
+ ]
+ 
++[[package]]
++name = "fsproto"
++version = "0.1.0"
++dependencies = [
++ "libos",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++ "svcclient",
++ "wire",
++]
++
+ [[package]]
+ name = "getopts"
+ version = "0.2.24"
+@@ -151,6 +176,13 @@ dependencies = [
+  "rustc-std-workspace-core",
+ ]
+ 
++[[package]]
++name = "initfs"
++version = "0.1.0"
++dependencies = [
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "libc"
+ version = "0.2.191"
+@@ -160,6 +192,18 @@ dependencies = [
+  "rustc-std-workspace-core",
+ ]
+ 
++[[package]]
++name = "libos"
++version = "0.1.0"
++dependencies = [
++ "abi",
++ "elf",
++ "initfs",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++ "tz",
++]
++
+ [[package]]
+ name = "memchr"
+ version = "2.8.3"
+@@ -201,6 +245,18 @@ dependencies = [
+  "rustc-std-workspace-core",
+ ]
+ 
++[[package]]
++name = "osrt"
++version = "0.1.0"
++dependencies = [
++ "abi",
++ "dlmalloc",
++ "fsproto",
++ "libos",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "panic_abort"
+ version = "0.0.0"
+@@ -341,6 +397,7 @@ dependencies = [
+  "miniz_oxide",
+  "moto-rt",
+  "object",
++ "osrt",
+  "panic_abort",
+  "panic_unwind",
+  "r-efi",
+@@ -366,6 +423,17 @@ dependencies = [
+  "rustc-std-workspace-core",
+ ]
+ 
++[[package]]
++name = "svcclient"
++version = "0.1.0"
++dependencies = [
++ "abi",
++ "libos",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++ "wire",
++]
++
+ [[package]]
+ name = "sysroot"
+ version = "0.0.0"
+@@ -386,6 +454,14 @@ dependencies = [
+  "std",
+ ]
+ 
++[[package]]
++name = "tz"
++version = "0.1.0"
++dependencies = [
++ "abi",
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "unwind"
+ version = "0.0.0"
+@@ -454,6 +530,15 @@ version = "0.0.0"
+ name = "windows-sys"
+ version = "0.61.100"
+ 
++[[package]]
++name = "wire"
++version = "0.1.0"
++dependencies = [
++ "abi",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "wit-bindgen"
+ version = "0.62.0"
+diff --git a/std/Cargo.toml b/std/Cargo.toml
+index 2f21b78..979e91e 100644
+--- a/std/Cargo.toml
++++ b/std/Cargo.toml
+@@ -70,6 +70,11 @@ fortanix-sgx-abi = { version = "0.6.1", features = [
+     'rustc-dep-of-std',
+ ], public = true }
+ 
++# MagnumOpus: runtime osrt z repozitare MagnumOpus (cesta vuci kopii
++# library/ v target/std-src/<nightly>/, kterou pripravi `cargo xtask std`).
++[target.'cfg(target_os = "magnumopus")'.dependencies]
++osrt = { path = "../../../../../libs/osrt", features = ['rustc-dep-of-std'], public = true }
++
+ [target.'cfg(target_os = "motor")'.dependencies]
+ moto-rt = { version = "0.17", features = ['rustc-dep-of-std'], public = true }
+ 
+diff --git a/std/build.rs b/std/build.rs
+index 98856b5..1cb884b 100644
+--- a/std/build.rs
++++ b/std/build.rs
+@@ -34,6 +34,7 @@ fn main() {
+         || target_os == "fuchsia"
+         || (target_vendor == "fortanix" && target_env == "sgx")
+         || target_os == "motor"
++        || target_os == "magnumopus"
+         || target_os == "hermit"
+         || target_os == "trusty"
+         || target_os == "l4re"
+diff --git a/std/src/os/magnumopus/ffi.rs b/std/src/os/magnumopus/ffi.rs
+new file mode 100644
+index 0000000..dd95508
+--- /dev/null
++++ b/std/src/os/magnumopus/ffi.rs
+@@ -0,0 +1,10 @@
++#![stable(feature = "rust1", since = "1.0.0")]
++
++//! MagnumOpus: retezce systemu jsou bajty (v systemu UTF-8), stejne jako
++//! na unixu.
++
++#[path = "../unix/ffi/os_str.rs"]
++mod os_str;
++
++#[stable(feature = "rust1", since = "1.0.0")]
++pub use self::os_str::{OsStrExt, OsStringExt};
+diff --git a/std/src/os/magnumopus/mod.rs b/std/src/os/magnumopus/mod.rs
+new file mode 100644
+index 0000000..1382e57
+--- /dev/null
++++ b/std/src/os/magnumopus/mod.rs
+@@ -0,0 +1,14 @@
++//! Rozsireni std pro MagnumOpus.
++
++#![stable(feature = "rust1", since = "1.0.0")]
++#![deny(unsafe_op_in_unsafe_fn)]
++
++pub mod ffi;
++
++/// Rozsirujici traity (`use std::os::magnumopus::prelude::*`).
++#[stable(feature = "rust1", since = "1.0.0")]
++pub mod prelude {
++    #[doc(no_inline)]
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub use super::ffi::{OsStrExt, OsStringExt};
++}
+diff --git a/std/src/os/mod.rs b/std/src/os/mod.rs
+index f95c6ac..2ca68ab 100644
+--- a/std/src/os/mod.rs
++++ b/std/src/os/mod.rs
+@@ -117,6 +117,8 @@ pub mod ios;
+ pub mod l4re;
+ #[cfg(target_os = "macos")]
+ pub mod macos;
++#[cfg(target_os = "magnumopus")]
++pub mod magnumopus;
+ #[cfg(target_os = "motor")]
+ pub mod motor;
+ #[cfg(target_os = "netbsd")]
+diff --git a/std/src/sys/alloc/magnumopus.rs b/std/src/sys/alloc/magnumopus.rs
+new file mode 100644
+index 0000000..0e68fd2
+--- /dev/null
++++ b/std/src/sys/alloc/magnumopus.rs
+@@ -0,0 +1,25 @@
++use crate::alloc::Layout;
++
++#[inline]
++pub unsafe fn alloc(layout: Layout) -> *mut u8 {
++    // SAFETY: predano volajicim (platny layout s nenulovou velikosti).
++    unsafe { osrt::heap::alloc(layout.size(), layout.align()) }
++}
++
++#[inline]
++pub unsafe fn alloc_zeroed(layout: Layout) -> *mut u8 {
++    // SAFETY: viz `alloc`.
++    unsafe { osrt::heap::alloc_zeroed(layout.size(), layout.align()) }
++}
++
++#[inline]
++pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
++    // SAFETY: `ptr` je z tohoto alokatoru se stejnym layoutem.
++    unsafe { osrt::heap::dealloc(ptr, layout.size(), layout.align()) }
++}
++
++#[inline]
++pub unsafe fn realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
++    // SAFETY: viz `dealloc`.
++    unsafe { osrt::heap::realloc(ptr, layout.size(), layout.align(), new_size) }
++}
+diff --git a/std/src/sys/alloc/mod.rs b/std/src/sys/alloc/mod.rs
+index 66a2c3b..95f8458 100644
+--- a/std/src/sys/alloc/mod.rs
++++ b/std/src/sys/alloc/mod.rs
+@@ -76,6 +76,10 @@ cfg_select! {
+         mod hermit;
+         use hermit as imp;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        use magnumopus as imp;
++    }
+     target_os = "motor" => {
+         mod motor;
+         use motor as imp;
+diff --git a/std/src/sys/args/magnumopus.rs b/std/src/sys/args/magnumopus.rs
+new file mode 100644
+index 0000000..9b5dff7
+--- /dev/null
++++ b/std/src/sys/args/magnumopus.rs
+@@ -0,0 +1,7 @@
++pub use super::common::Args;
++use crate::ffi::OsString;
++use crate::os::magnumopus::ffi::OsStringExt;
++
++pub fn args() -> Args {
++    Args::new(osrt::env::args().iter().map(|a| OsString::from_vec(a.clone())).collect())
++}
+diff --git a/std/src/sys/args/mod.rs b/std/src/sys/args/mod.rs
+index c8011a6..99a0616 100644
+--- a/std/src/sys/args/mod.rs
++++ b/std/src/sys/args/mod.rs
+@@ -7,6 +7,7 @@
+     target_family = "windows",
+     target_os = "hermit",
+     target_os = "motor",
++    target_os = "magnumopus",
+     target_os = "uefi",
+     target_os = "wasi",
+     target_os = "xous",
+@@ -36,6 +37,10 @@ cfg_select! {
+         mod sgx;
+         pub use sgx::*;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        pub use magnumopus::*;
++    }
+     target_os = "motor" => {
+         mod motor;
+         pub use motor::*;
+diff --git a/std/src/sys/env/magnumopus.rs b/std/src/sys/env/magnumopus.rs
+new file mode 100644
+index 0000000..a0e6e53
+--- /dev/null
++++ b/std/src/sys/env/magnumopus.rs
+@@ -0,0 +1,27 @@
++pub use super::common::Env;
++use crate::ffi::{OsStr, OsString};
++use crate::io;
++use crate::os::magnumopus::ffi::{OsStrExt, OsStringExt};
++use crate::sys::pal::map_error;
++
++pub fn env() -> Env {
++    Env::new(
++        osrt::env::vars()
++            .into_iter()
++            .map(|(k, v)| (OsString::from_vec(k), OsString::from_vec(v)))
++            .collect(),
++    )
++}
++
++pub fn getenv(key: &OsStr) -> Option<OsString> {
++    osrt::env::var(key.as_bytes()).map(OsString::from_vec)
++}
++
++pub unsafe fn setenv(key: &OsStr, val: &OsStr) -> io::Result<()> {
++    osrt::env::set_var(key.as_bytes(), val.as_bytes()).map_err(map_error)
++}
++
++pub unsafe fn unsetenv(key: &OsStr) -> io::Result<()> {
++    osrt::env::remove_var(key.as_bytes());
++    Ok(())
++}
+diff --git a/std/src/sys/env/mod.rs b/std/src/sys/env/mod.rs
+index 8985651..4510549 100644
+--- a/std/src/sys/env/mod.rs
++++ b/std/src/sys/env/mod.rs
+@@ -6,6 +6,7 @@
+     target_family = "unix",
+     target_os = "hermit",
+     target_os = "motor",
++    target_os = "magnumopus",
+     all(target_vendor = "fortanix", target_env = "sgx"),
+     target_os = "solid_asp3",
+     target_os = "uefi",
+@@ -27,6 +28,10 @@ cfg_select! {
+         mod hermit;
+         pub use hermit::*;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        pub use magnumopus::*;
++    }
+     target_os = "motor" => {
+         mod motor;
+         pub use motor::*;
+diff --git a/std/src/sys/exit.rs b/std/src/sys/exit.rs
+index 1ca2bd8..8f48d36 100644
+--- a/std/src/sys/exit.rs
++++ b/std/src/sys/exit.rs
+@@ -99,6 +99,7 @@ pub fn exit(code: i32) -> ! {
+             libc::exit(code)
+         },
+         target_os = "motor" => moto_rt::process::exit(code),
++        target_os = "magnumopus" => osrt::exit(code),
+         all(target_vendor = "fortanix", target_env = "sgx") => {
+             crate::sys::pal::abi::exit_with_code(code as _)
+         }
+diff --git a/std/src/sys/fs/magnumopus.rs b/std/src/sys/fs/magnumopus.rs
+new file mode 100644
+index 0000000..b5f7f07
+--- /dev/null
++++ b/std/src/sys/fs/magnumopus.rs
+@@ -0,0 +1,388 @@
++//! Soubory nad relaci FS (`osrt::fs`, fsproto v2).
++
++use crate::ffi::OsString;
++use crate::fmt;
++use crate::fs::TryLockError;
++use crate::hash::{Hash, Hasher};
++use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut, SeekFrom};
++use crate::os::magnumopus::ffi::{OsStrExt, OsStringExt};
++use crate::path::{Path, PathBuf};
++pub use crate::sys::fs::common::{Dir, ExtraHomeDirs, ExtraMediaDirs};
++use crate::sys::pal::map_error;
++use crate::sys::time::SystemTime;
++use crate::sys::unsupported;
++
++pub struct File(osrt::fs::File);
++
++#[derive(Clone)]
++pub struct FileAttr(osrt::fs::Stat);
++
++pub struct ReadDir {
++    dir: PathBuf,
++    entries: crate::vec::IntoIter<osrt::fs::DirEntry>,
++}
++
++pub struct DirEntry {
++    dir: PathBuf,
++    entry: osrt::fs::DirEntry,
++}
++
++#[derive(Clone, Debug)]
++pub struct OpenOptions(osrt::fs::OpenOptions);
++
++#[derive(Copy, Clone, Debug, Default)]
++pub struct FileTimes {}
++
++#[derive(Clone, PartialEq, Eq, Debug)]
++pub struct FilePermissions {
++    readonly: bool,
++}
++
++#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
++pub struct FileType(u8);
++
++#[derive(Debug)]
++pub struct DirBuilder {}
++
++fn path_bytes(p: &Path) -> &[u8] {
++    p.as_os_str().as_bytes()
++}
++
++impl FileAttr {
++    pub fn size(&self) -> u64 {
++        self.0.size
++    }
++
++    pub fn perm(&self) -> FilePermissions {
++        FilePermissions { readonly: self.0.rights & osrt::fs::rights::WRITE == 0 }
++    }
++
++    pub fn file_type(&self) -> FileType {
++        FileType(self.0.kind)
++    }
++
++    pub fn modified(&self) -> io::Result<SystemTime> {
++        Ok(SystemTime::from_parts(self.0.mtime.secs, self.0.mtime.nanos))
++    }
++
++    pub fn accessed(&self) -> io::Result<SystemTime> {
++        // Cas posledniho cteni se neeviduje (zbytecne zapisy).
++        unsupported()
++    }
++
++    pub fn created(&self) -> io::Result<SystemTime> {
++        Ok(SystemTime::from_parts(self.0.btime.secs, self.0.btime.nanos))
++    }
++}
++
++impl FilePermissions {
++    pub fn readonly(&self) -> bool {
++        self.readonly
++    }
++
++    pub fn set_readonly(&mut self, readonly: bool) {
++        self.readonly = readonly
++    }
++}
++
++impl FileTimes {
++    pub fn set_accessed(&mut self, _t: SystemTime) {}
++    pub fn set_modified(&mut self, _t: SystemTime) {}
++}
++
++impl FileType {
++    pub fn is_dir(&self) -> bool {
++        self.0 == osrt::fs::kind::DIR || self.0 == osrt::fs::kind::DATASET
++    }
++
++    pub fn is_file(&self) -> bool {
++        self.0 == osrt::fs::kind::FILE
++    }
++
++    pub fn is_symlink(&self) -> bool {
++        self.0 == osrt::fs::kind::SYMLINK
++    }
++}
++
++impl ReadDir {
++    pub fn dir(&self) -> io::Result<Dir> {
++        unsupported()
++    }
++}
++
++impl fmt::Debug for ReadDir {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        fmt::Debug::fmt(&self.dir, f)
++    }
++}
++
++impl Iterator for ReadDir {
++    type Item = io::Result<DirEntry>;
++
++    fn next(&mut self) -> Option<io::Result<DirEntry>> {
++        let entry = self.entries.next()?;
++        Some(Ok(DirEntry { dir: self.dir.clone(), entry }))
++    }
++}
++
++impl DirEntry {
++    pub fn path(&self) -> PathBuf {
++        self.dir.join(&self.entry.name)
++    }
++
++    pub fn file_name(&self) -> OsString {
++        OsString::from(self.entry.name.clone())
++    }
++
++    pub fn metadata(&self) -> io::Result<FileAttr> {
++        stat(&self.path())
++    }
++
++    pub fn file_type(&self) -> io::Result<FileType> {
++        Ok(FileType(self.entry.kind))
++    }
++}
++
++impl OpenOptions {
++    pub fn new() -> OpenOptions {
++        OpenOptions(osrt::fs::OpenOptions::default())
++    }
++
++    pub fn read(&mut self, read: bool) {
++        self.0.read = read
++    }
++    pub fn write(&mut self, write: bool) {
++        self.0.write = write
++    }
++    pub fn append(&mut self, append: bool) {
++        self.0.append = append
++    }
++    pub fn truncate(&mut self, truncate: bool) {
++        self.0.truncate = truncate
++    }
++    pub fn create(&mut self, create: bool) {
++        self.0.create = create
++    }
++    pub fn create_new(&mut self, create_new: bool) {
++        self.0.create_new = create_new
++    }
++
++    /// Stejna pravidla jako na unixu (`O_*` kombinace).
++    fn check(&self) -> io::Result<()> {
++        let o = &self.0;
++        let writes = o.write || o.append;
++        if !o.read && !writes {
++            return Err(io::Error::from(io::ErrorKind::InvalidInput));
++        }
++        if !writes && (o.truncate || o.create || o.create_new) {
++            return Err(io::Error::from(io::ErrorKind::InvalidInput));
++        }
++        if o.append && o.truncate && !o.create_new {
++            return Err(io::Error::from(io::ErrorKind::InvalidInput));
++        }
++        Ok(())
++    }
++}
++
++impl File {
++    pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
++        opts.check()?;
++        osrt::fs::File::open(path_bytes(path), &opts.0).map(File).map_err(map_error)
++    }
++
++    pub fn file_attr(&self) -> io::Result<FileAttr> {
++        self.0.stat().map(FileAttr).map_err(map_error)
++    }
++
++    pub fn fsync(&self) -> io::Result<()> {
++        self.0.sync().map_err(map_error)
++    }
++
++    pub fn datasync(&self) -> io::Result<()> {
++        self.fsync()
++    }
++
++    pub fn lock(&self) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn lock_shared(&self) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn try_lock(&self) -> Result<(), TryLockError> {
++        Err(TryLockError::Error(unsupported_err()))
++    }
++
++    pub fn try_lock_shared(&self) -> Result<(), TryLockError> {
++        Err(TryLockError::Error(unsupported_err()))
++    }
++
++    pub fn unlock(&self) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn truncate(&self, size: u64) -> io::Result<()> {
++        self.0.set_len(size).map_err(map_error)
++    }
++
++    pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
++        self.0.read(buf).map_err(map_error)
++    }
++
++    pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
++        crate::io::default_read_vectored(|b| self.read(b), bufs)
++    }
++
++    pub fn is_read_vectored(&self) -> bool {
++        false
++    }
++
++    pub fn read_buf(&self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
++        crate::io::default_read_buf(|b| self.read(b), cursor)
++    }
++
++    pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
++        self.0.write(buf).map_err(map_error)
++    }
++
++    pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
++        crate::io::default_write_vectored(|b| self.write(b), bufs)
++    }
++
++    pub fn is_write_vectored(&self) -> bool {
++        false
++    }
++
++    pub fn flush(&self) -> io::Result<()> {
++        Ok(())
++    }
++
++    pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
++        let pos = match pos {
++            SeekFrom::Start(p) => osrt::fs::SeekFrom::Start(p),
++            SeekFrom::End(d) => osrt::fs::SeekFrom::End(d),
++            SeekFrom::Current(d) => osrt::fs::SeekFrom::Current(d),
++        };
++        self.0.seek(pos).map_err(map_error)
++    }
++
++    pub fn size(&self) -> Option<io::Result<u64>> {
++        Some(self.file_attr().map(|a| a.size()))
++    }
++
++    pub fn tell(&self) -> io::Result<u64> {
++        Ok(self.0.tell())
++    }
++
++    pub fn duplicate(&self) -> io::Result<File> {
++        unsupported()
++    }
++
++    pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn set_times(&self, _times: FileTimes) -> io::Result<()> {
++        unsupported()
++    }
++}
++
++fn unsupported_err() -> io::Error {
++    crate::sys::pal::unsupported_err()
++}
++
++impl DirBuilder {
++    pub fn new() -> DirBuilder {
++        DirBuilder {}
++    }
++
++    pub fn mkdir(&self, p: &Path) -> io::Result<()> {
++        osrt::fs::create_dir(path_bytes(p)).map_err(map_error)
++    }
++}
++
++impl fmt::Debug for File {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("File").finish_non_exhaustive()
++    }
++}
++
++impl fmt::Debug for FileAttr {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("FileAttr").field("size", &self.0.size).field("kind", &self.0.kind).finish()
++    }
++}
++
++impl Hash for FilePermissions {
++    fn hash<H: Hasher>(&self, h: &mut H) {
++        self.readonly.hash(h)
++    }
++}
++
++pub fn readdir(p: &Path) -> io::Result<ReadDir> {
++    let (_, entries) = osrt::fs::read_dir(path_bytes(p)).map_err(map_error)?;
++    Ok(ReadDir { dir: p.to_path_buf(), entries: entries.into_iter() })
++}
++
++pub fn unlink(p: &Path) -> io::Result<()> {
++    osrt::fs::remove_file(path_bytes(p)).map_err(map_error)
++}
++
++pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
++    osrt::fs::rename(path_bytes(old), path_bytes(new)).map_err(map_error)
++}
++
++pub fn rename_noreplace(_old: &Path, _new: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn set_perm(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn set_perm_nofollow(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn set_times(_p: &Path, _times: FileTimes) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn set_times_nofollow(_p: &Path, _times: FileTimes) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn rmdir(p: &Path) -> io::Result<()> {
++    osrt::fs::remove_dir(path_bytes(p)).map_err(map_error)
++}
++
++pub use crate::sys::fs::common::{copy, exists, remove_dir_all};
++
++pub fn readlink(_p: &Path) -> io::Result<PathBuf> {
++    unsupported()
++}
++
++pub fn symlink(_original: &Path, _link: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn link(_src: &Path, _dst: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn stat(p: &Path) -> io::Result<FileAttr> {
++    osrt::fs::stat_path(path_bytes(p)).map(FileAttr).map_err(map_error)
++}
++
++pub fn lstat(p: &Path) -> io::Result<FileAttr> {
++    // Symbolicke odkazy sluzba FS zatim nenasleduje: stat = lstat.
++    stat(p)
++}
++
++/// Absolutni normalizovana cesta (bez odkazu: ty FS zatim nenasleduje).
++pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
++    let abs = osrt::env::resolve(path_bytes(p)).map_err(map_error)?;
++    stat(Path::new(&abs))?;
++    Ok(PathBuf::from(OsString::from_vec(abs.into_bytes())))
++}
+diff --git a/std/src/sys/fs/mod.rs b/std/src/sys/fs/mod.rs
+index e15841b..91299c3 100644
+--- a/std/src/sys/fs/mod.rs
++++ b/std/src/sys/fs/mod.rs
+@@ -31,6 +31,10 @@ cfg_select! {
+         mod hermit;
+         use hermit as imp;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        use magnumopus as imp;
++    }
+     target_os = "motor" => {
+         mod motor;
+         use motor as imp;
+diff --git a/std/src/sys/io/error/magnumopus.rs b/std/src/sys/io/error/magnumopus.rs
+new file mode 100644
+index 0000000..7f191c0
+--- /dev/null
++++ b/std/src/sys/io/error/magnumopus.rs
+@@ -0,0 +1,56 @@
++use crate::{fmt, io};
++
++/// MagnumOpus nema `errno`: chyby vraci kazde volani primo.
++pub fn errno() -> io::RawOsError {
++    osrt::Error::BadState.code()
++}
++
++pub fn is_interrupted(_code: io::RawOsError) -> bool {
++    // Bez signalu: volani se nikdy neprerusi.
++    false
++}
++
++pub fn decode_error_kind(code: io::RawOsError) -> io::ErrorKind {
++    use io::ErrorKind as K;
++    use osrt::Error as E;
++    let Some(e) = E::from_code(i64::from(code)) else {
++        return K::Uncategorized;
++    };
++    match e {
++        E::BadHandle | E::WrongType | E::InvalidArgs | E::BadAddress | E::OutOfRange => K::InvalidInput,
++        E::AccessDenied => K::PermissionDenied,
++        E::TimedOut => K::TimedOut,
++        E::NoMemory => K::OutOfMemory,
++        E::NotFound => K::NotFound,
++        E::NotSupported | E::BadSyscall => K::Unsupported,
++        E::Corrupted => K::InvalidData,
++        E::ShouldWait | E::Locked => K::WouldBlock,
++        E::PeerClosed => K::BrokenPipe,
++        E::AlreadyExists => K::AlreadyExists,
++        E::NotADirectory => K::NotADirectory,
++        E::IsADirectory => K::IsADirectory,
++        E::NotEmpty => K::DirectoryNotEmpty,
++        E::NoSpace => K::StorageFull,
++        E::ReadOnly => K::ReadOnlyFilesystem,
++        E::ConnectionRefused => K::ConnectionRefused,
++        E::ConnectionReset => K::ConnectionReset,
++        E::Unreachable => K::HostUnreachable,
++        E::AddressInUse => K::AddrInUse,
++        E::Canceled => K::Interrupted,
++        E::NoResources => K::QuotaExceeded,
++        E::BufferTooSmall
++        | E::BadState
++        | E::IoError
++        | E::Conflict
++        | E::JournalGap
++        | E::ServiceRestarted
++        | E::ServiceUnavailable => K::Other,
++    }
++}
++
++pub fn format_error(errno: io::RawOsError, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++    match osrt::Error::from_code(i64::from(errno)) {
++        Some(e) => f.write_str(e.name()),
++        None => write!(f, "neznama chyba {errno}"),
++    }
++}
+diff --git a/std/src/sys/io/error/mod.rs b/std/src/sys/io/error/mod.rs
+index a56030f..995df9c 100644
+--- a/std/src/sys/io/error/mod.rs
++++ b/std/src/sys/io/error/mod.rs
+@@ -3,6 +3,10 @@ cfg_select! {
+         mod hermit;
+         pub use hermit::*;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        pub use magnumopus::*;
++    }
+     target_os = "motor" => {
+         mod motor;
+         pub use motor::*;
+diff --git a/std/src/sys/pal/magnumopus/mod.rs b/std/src/sys/pal/magnumopus/mod.rs
+new file mode 100644
+index 0000000..88deabf
+--- /dev/null
++++ b/std/src/sys/pal/magnumopus/mod.rs
+@@ -0,0 +1,28 @@
++//! MagnumOpus: platforma std. Logika je v crate `osrt` (repozitar
++//! MagnumOpus, `libs/osrt`); tady jen prevody na typy std.
++
++use crate::io;
++
++/// Prevod chyby systemu (`abi::Error`) na `io::Error`; kod chyby je
++/// stabilni zaporny kod MagnumOpus (`raw_os_error`).
++pub(crate) fn map_error(err: osrt::Error) -> io::Error {
++    io::Error::from_raw_os_error(err.code())
++}
++
++// SAFETY: vola se jednou pri startu; runtime uz pripravil `osrt::start`.
++pub unsafe fn init(_argc: isize, _argv: *const *const u8, _sigpipe: u8) {}
++
++// SAFETY: vola se jednou pri ukonceni (nemusi probehnout).
++pub unsafe fn cleanup() {}
++
++pub fn unsupported<T>() -> io::Result<T> {
++    Err(unsupported_err())
++}
++
++pub fn unsupported_err() -> io::Error {
++    io::Error::UNSUPPORTED_PLATFORM
++}
++
++pub fn abort_internal() -> ! {
++    osrt::abort()
++}
+diff --git a/std/src/sys/pal/mod.rs b/std/src/sys/pal/mod.rs
+index 88d9d42..c37a3dc 100644
+--- a/std/src/sys/pal/mod.rs
++++ b/std/src/sys/pal/mod.rs
+@@ -20,6 +20,10 @@ cfg_select! {
+         mod hermit;
+         pub use self::hermit::*;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        pub use self::magnumopus::*;
++    }
+     target_os = "motor" => {
+         mod motor;
+         pub use self::motor::*;
+diff --git a/std/src/sys/paths/magnumopus.rs b/std/src/sys/paths/magnumopus.rs
+new file mode 100644
+index 0000000..31f57d0
+--- /dev/null
++++ b/std/src/sys/paths/magnumopus.rs
+@@ -0,0 +1,89 @@
++use crate::ffi::{OsStr, OsString};
++use crate::os::magnumopus::ffi::{OsStrExt, OsStringExt};
++use crate::path::{self, PathBuf};
++use crate::sys::pal::map_error;
++use crate::{fmt, io, iter, slice};
++
++/// Oddelovac seznamu cest v promennych prostredi (`PATH`).
++const PATH_SEPARATOR: u8 = b':';
++
++pub type SplitPaths<'a> = iter::Map<slice::Split<'a, u8, fn(&u8) -> bool>, fn(&'a [u8]) -> PathBuf>;
++
++fn is_separator(b: &u8) -> bool {
++    *b == PATH_SEPARATOR
++}
++
++pub fn split_paths(unparsed: &OsStr) -> SplitPaths<'_> {
++    fn bytes_to_path(b: &[u8]) -> PathBuf {
++        PathBuf::from(<OsStr as OsStrExt>::from_bytes(b))
++    }
++    unparsed
++        .as_bytes()
++        .split(is_separator as fn(&u8) -> bool)
++        .map(bytes_to_path as fn(&[u8]) -> PathBuf)
++}
++
++pub type SplitPathsRef<'a> =
++    iter::Map<slice::Split<'a, u8, fn(&u8) -> bool>, fn(&'a [u8]) -> &'a path::Path>;
++
++pub fn split_paths_ref(unparsed: &OsStr) -> Option<SplitPathsRef<'_>> {
++    fn bytes_to_path(b: &[u8]) -> &path::Path {
++        path::Path::new(<OsStr as OsStrExt>::from_bytes(b))
++    }
++    Some(
++        unparsed
++            .as_bytes()
++            .split(is_separator as fn(&u8) -> bool)
++            .map(bytes_to_path as fn(&[u8]) -> &path::Path),
++    )
++}
++
++#[derive(Debug)]
++pub struct JoinPathsError;
++
++pub fn join_paths<I, T>(paths: I) -> Result<OsString, JoinPathsError>
++where
++    I: Iterator<Item = T>,
++    T: AsRef<OsStr>,
++{
++    let mut joined = Vec::new();
++    for (i, path) in paths.enumerate() {
++        let path = path.as_ref().as_bytes();
++        if i > 0 {
++            joined.push(PATH_SEPARATOR);
++        }
++        if path.contains(&PATH_SEPARATOR) {
++            return Err(JoinPathsError);
++        }
++        joined.extend_from_slice(path);
++    }
++    Ok(OsString::from_vec(joined))
++}
++
++impl fmt::Display for JoinPathsError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(f, "path segment contains separator `{}`", PATH_SEPARATOR as char)
++    }
++}
++
++impl crate::error::Error for JoinPathsError {}
++
++pub fn getcwd() -> io::Result<PathBuf> {
++    Ok(PathBuf::from(osrt::env::current_dir()))
++}
++
++pub fn chdir(p: &path::Path) -> io::Result<()> {
++    osrt::env::set_current_dir(p.as_os_str().as_bytes()).map_err(map_error)
++}
++
++pub fn home_dir() -> Option<PathBuf> {
++    crate::env::var_os("HOME").map(PathBuf::from)
++}
++
++pub fn current_exe() -> io::Result<PathBuf> {
++    crate::sys::pal::unsupported()
++}
++
++pub fn temp_dir() -> PathBuf {
++    crate::env::var_os("TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
++}
+diff --git a/std/src/sys/paths/mod.rs b/std/src/sys/paths/mod.rs
+index 865d06a..404dbd3 100644
+--- a/std/src/sys/paths/mod.rs
++++ b/std/src/sys/paths/mod.rs
+@@ -11,6 +11,15 @@ cfg_select! {
+             };
+         }
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        mod imp {
++            pub use super::magnumopus::{
++                JoinPathsError, SplitPaths, SplitPathsRef, chdir, current_exe, getcwd, home_dir,
++                join_paths, split_paths, split_paths_ref, temp_dir,
++            };
++        }
++    }
+     target_os = "motor" => {
+         mod motor;
+         #[expect(dead_code)]
+diff --git a/std/src/sys/random/mod.rs b/std/src/sys/random/mod.rs
+index 23f6ce8..648e7c2 100644
+--- a/std/src/sys/random/mod.rs
++++ b/std/src/sys/random/mod.rs
+@@ -53,6 +53,11 @@ cfg_select! {
+         mod unix_legacy;
+         pub use unix_legacy::fill_bytes;
+     }
++    target_os = "magnumopus" => {
++        pub fn fill_bytes(bytes: &mut [u8]) {
++            osrt::fill_random(bytes)
++        }
++    }
+     target_os = "motor" => {
+         mod motor;
+         pub use motor::fill_bytes;
+diff --git a/std/src/sys/stdio/magnumopus.rs b/std/src/sys/stdio/magnumopus.rs
+new file mode 100644
+index 0000000..41beb74
+--- /dev/null
++++ b/std/src/sys/stdio/magnumopus.rs
+@@ -0,0 +1,62 @@
++use osrt::stdio::Stream;
++
++use crate::io;
++use crate::sys::pal::map_error;
++
++pub const STDIN_BUF_SIZE: usize = crate::sys::io::DEFAULT_BUF_SIZE;
++
++pub struct Stdin;
++pub struct Stdout;
++pub struct Stderr;
++
++impl Stdin {
++    pub const fn new() -> Stdin {
++        Stdin
++    }
++}
++
++impl Stdout {
++    pub const fn new() -> Stdout {
++        Stdout
++    }
++}
++
++impl Stderr {
++    pub const fn new() -> Stderr {
++        Stderr
++    }
++}
++
++impl io::Read for Stdin {
++    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
++        osrt::stdio::read(buf).map_err(map_error)
++    }
++}
++
++impl io::Write for Stdout {
++    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
++        osrt::stdio::write(Stream::Out, buf).map_err(map_error)
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++
++impl io::Write for Stderr {
++    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
++        osrt::stdio::write(Stream::Err, buf).map_err(map_error)
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++
++pub fn is_ebadf(_err: &io::Error) -> bool {
++    false
++}
++
++pub fn panic_output() -> Option<impl io::Write> {
++    Some(Stderr::new())
++}
+diff --git a/std/src/sys/stdio/mod.rs b/std/src/sys/stdio/mod.rs
+index 86d0f3f..a40866f 100644
+--- a/std/src/sys/stdio/mod.rs
++++ b/std/src/sys/stdio/mod.rs
+@@ -13,6 +13,10 @@ cfg_select! {
+         mod sgx;
+         pub use sgx::*;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        pub use magnumopus::*;
++    }
+     target_os = "motor" => {
+         mod motor;
+         pub use motor::*;
+diff --git a/std/src/sys/sync/condvar/mod.rs b/std/src/sys/sync/condvar/mod.rs
+index 615781e..0e25043 100644
+--- a/std/src/sys/sync/condvar/mod.rs
++++ b/std/src/sys/sync/condvar/mod.rs
+@@ -7,6 +7,7 @@ cfg_select! {
+         target_os = "openbsd",
+         target_os = "dragonfly",
+         target_os = "motor",
++        target_os = "magnumopus",
+         target_os = "fuchsia",
+         all(target_family = "wasm", target_feature = "atomics"),
+         target_os = "hermit",
+diff --git a/std/src/sys/sync/futex/mod.rs b/std/src/sys/sync/futex/mod.rs
+index 0edb46c..1cb270d 100644
+--- a/std/src/sys/sync/futex/mod.rs
++++ b/std/src/sys/sync/futex/mod.rs
+@@ -35,5 +35,8 @@ cfg_select! {
+     target_os = "motor" => {
+         pub use moto_rt::futex::*;
+     }
++    target_os = "magnumopus" => {
++        pub use osrt::futex::*;
++    }
+     _ => {}
+ }
+diff --git a/std/src/sys/sync/mutex/mod.rs b/std/src/sys/sync/mutex/mod.rs
+index 895ab9c..d2529f4 100644
+--- a/std/src/sys/sync/mutex/mod.rs
++++ b/std/src/sys/sync/mutex/mod.rs
+@@ -6,6 +6,7 @@ cfg_select! {
+         target_os = "freebsd",
+         target_os = "openbsd",
+         target_os = "motor",
++        target_os = "magnumopus",
+         target_os = "dragonfly",
+         all(target_family = "wasm", target_feature = "atomics"),
+         target_os = "hermit",
+diff --git a/std/src/sys/sync/once/mod.rs b/std/src/sys/sync/once/mod.rs
+index eee7edf..c378877 100644
+--- a/std/src/sys/sync/once/mod.rs
++++ b/std/src/sys/sync/once/mod.rs
+@@ -15,6 +15,7 @@ cfg_select! {
+         all(target_family = "wasm", target_feature = "atomics"),
+         target_os = "freebsd",
+         target_os = "motor",
++        target_os = "magnumopus",
+         target_os = "openbsd",
+         target_os = "dragonfly",
+         target_os = "fuchsia",
+diff --git a/std/src/sys/sync/rwlock/mod.rs b/std/src/sys/sync/rwlock/mod.rs
+index 9991f29..01c6cdf 100644
+--- a/std/src/sys/sync/rwlock/mod.rs
++++ b/std/src/sys/sync/rwlock/mod.rs
+@@ -10,6 +10,7 @@ cfg_select! {
+         all(target_family = "wasm", target_feature = "atomics"),
+         target_os = "hermit",
+         target_os = "motor",
++        target_os = "magnumopus",
+         all(target_os = "wasi", target_env = "p3"),
+     ) => {
+         mod futex;
+diff --git a/std/src/sys/sync/thread_parking/mod.rs b/std/src/sys/sync/thread_parking/mod.rs
+index dffa0ad..3daefd4 100644
+--- a/std/src/sys/sync/thread_parking/mod.rs
++++ b/std/src/sys/sync/thread_parking/mod.rs
+@@ -9,6 +9,7 @@ cfg_select! {
+         target_os = "dragonfly",
+         target_os = "fuchsia",
+         target_os = "motor",
++        target_os = "magnumopus",
+         target_os = "hermit",
+         all(target_os = "wasi", target_env = "p3"),
+     ) => {
+diff --git a/std/src/sys/thread/magnumopus.rs b/std/src/sys/thread/magnumopus.rs
+new file mode 100644
+index 0000000..8a9dde1
+--- /dev/null
++++ b/std/src/sys/thread/magnumopus.rs
+@@ -0,0 +1,64 @@
++use crate::ffi::CStr;
++use crate::io;
++use crate::num::NonZeroUsize;
++use crate::sys::pal::map_error;
++use crate::thread::ThreadInit;
++use crate::time::{Duration, Instant};
++
++pub const DEFAULT_MIN_STACK_SIZE: usize = 2 * 1024 * 1024;
++
++pub struct Thread {
++    inner: osrt::thread::Thread,
++}
++
++unsafe impl Send for Thread {}
++unsafe impl Sync for Thread {}
++
++impl Thread {
++    pub unsafe fn new(stack: usize, init: Box<ThreadInit>) -> io::Result<Thread> {
++        let inner = osrt::thread::spawn(
++            stack,
++            Box::new(move || {
++                let rust_start = init.init();
++                rust_start();
++                // std je jediny runtime: destruktory TLS spousti samo.
++                // SAFETY: vlakno konci, TLS uz nic dalsiho nepouzije.
++                unsafe { crate::sys::thread_local::destructors::run() };
++                crate::rt::thread_cleanup();
++            }),
++        )
++        .map_err(map_error)?;
++        Ok(Thread { inner })
++    }
++
++    pub fn join(self) {
++        // std ocekava, ze join neselze; chyba = vlakno uz neexistuje.
++        let _ = self.inner.join();
++    }
++}
++
++pub fn set_name(_name: &CStr) {
++    // Jmeno vlakna se v jadre zadava pri vytvoreni; std si ho drzi samo.
++}
++
++pub fn current_os_id() -> Option<u64> {
++    None
++}
++
++pub fn available_parallelism() -> io::Result<NonZeroUsize> {
++    osrt::thread::cpu_count()
++        .and_then(NonZeroUsize::new)
++        .ok_or_else(|| io::const_error!(io::ErrorKind::NotFound, "pocet CPU neni znamy"))
++}
++
++pub fn yield_now() {
++    osrt::thread::yield_now()
++}
++
++pub fn sleep(dur: Duration) {
++    osrt::thread::sleep(dur)
++}
++
++pub fn sleep_until(deadline: Instant) {
++    osrt::thread::sleep_until(deadline.into_inner().as_nanos_since_boot())
++}
+diff --git a/std/src/sys/thread/mod.rs b/std/src/sys/thread/mod.rs
+index dfbfc2b..4773809 100644
+--- a/std/src/sys/thread/mod.rs
++++ b/std/src/sys/thread/mod.rs
+@@ -6,6 +6,10 @@ cfg_select! {
+         mod unsupported;
+         pub use unsupported::{current_os_id, set_name};
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        pub use magnumopus::*;
++    }
+     target_os = "motor" => {
+         mod motor;
+         pub use motor::*;
+@@ -148,6 +152,7 @@ cfg_select! {
+     target_os = "wasi",
+     target_vendor = "apple",
+     target_os = "motor",
++    target_os = "magnumopus",
+     target_os = "vexos",
+     target_os = "fuchsia",
+ )))]
+diff --git a/std/src/sys/thread_local/mod.rs b/std/src/sys/thread_local/mod.rs
+index 1c137e5..23ae46b 100644
+--- a/std/src/sys/thread_local/mod.rs
++++ b/std/src/sys/thread_local/mod.rs
+@@ -134,7 +134,7 @@ pub(crate) mod guard {
+                 use crate::rt::thread_cleanup;
+             }
+         }
+-        any(target_os = "hermit", target_os = "xous") => {
++        any(target_os = "hermit", target_os = "xous", target_os = "magnumopus") => {
+             // `std` is the only runtime, so it just calls the destructor functions
+             // itself when the time comes.
+             pub(crate) fn enable() {}
+diff --git a/std/src/sys/time/magnumopus.rs b/std/src/sys/time/magnumopus.rs
+new file mode 100644
+index 0000000..73471f8
+--- /dev/null
++++ b/std/src/sys/time/magnumopus.rs
+@@ -0,0 +1,67 @@
++use crate::time::Duration;
++
++#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
++pub struct Instant(Duration);
++
++/// Cas od 1970-01-01 UTC; drivejsi casy nejsou (realne hodiny je nehlasi).
++#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
++pub struct SystemTime(Duration);
++
++pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::from_secs(0));
++
++impl Instant {
++    pub fn now() -> Instant {
++        Instant(Duration::from_nanos(osrt::time::monotonic_ns()))
++    }
++
++    pub fn checked_sub_instant(&self, other: &Instant) -> Option<Duration> {
++        self.0.checked_sub(other.0)
++    }
++
++    pub fn checked_add_duration(&self, other: &Duration) -> Option<Instant> {
++        Some(Instant(self.0.checked_add(*other)?))
++    }
++
++    pub fn checked_sub_duration(&self, other: &Duration) -> Option<Instant> {
++        Some(Instant(self.0.checked_sub(*other)?))
++    }
++
++    /// Nanosekundy od startu systemu (pro `sleep_until`).
++    pub(crate) fn as_nanos_since_boot(&self) -> u64 {
++        u64::try_from(self.0.as_nanos()).unwrap_or(u64::MAX)
++    }
++}
++
++impl SystemTime {
++    pub const MAX: SystemTime = SystemTime(Duration::MAX);
++
++    pub const MIN: SystemTime = SystemTime(Duration::ZERO);
++
++    pub fn now() -> SystemTime {
++        match osrt::time::realtime() {
++            Some((secs, nanos)) => SystemTime::from_parts(secs, nanos),
++            // Hodiny jadro nezna.
++            None => UNIX_EPOCH,
++        }
++    }
++
++    pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {
++        self.0.checked_sub(other.0).ok_or_else(|| other.0 - self.0)
++    }
++
++    pub fn checked_add_duration(&self, other: &Duration) -> Option<SystemTime> {
++        Some(SystemTime(self.0.checked_add(*other)?))
++    }
++
++    pub fn checked_sub_duration(&self, other: &Duration) -> Option<SystemTime> {
++        Some(SystemTime(self.0.checked_sub(*other)?))
++    }
++
++    /// Z casu systemu (sekundy od 1970, nanosekundy); drivejsi = 1970.
++    pub(crate) fn from_parts(secs: i64, nanos: u32) -> SystemTime {
++        match u64::try_from(secs) {
++            Ok(s) => SystemTime(Duration::new(s, nanos)),
++            Err(_) => UNIX_EPOCH,
++        }
++    }
++}
+diff --git a/std/src/sys/time/mod.rs b/std/src/sys/time/mod.rs
+index 179c968..8e3bb41 100644
+--- a/std/src/sys/time/mod.rs
++++ b/std/src/sys/time/mod.rs
+@@ -2,6 +2,10 @@ cfg_select! {
+     target_os = "motor" => {
+         use moto_rt::time as imp;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        use magnumopus as imp;
++    }
+     all(target_vendor = "fortanix", target_env = "sgx") => {
+         mod sgx;
+         use sgx as imp;

@@ -6,13 +6,16 @@ license.workspace = true
 description = "Obnova sluzeb po padu: protokol listku k supervisoru a kostra klienta, ktery se znovu pripoji"
 
 [features]
+rustc-dep-of-std = ["dep:core", "dep:alloc", "abi/rustc-dep-of-std", "wire/rustc-dep-of-std", "libos?/rustc-dep-of-std"]
 # Klient nad kanaly (Conn); zapina ho, kdo ho pouziva (knihovny sluzeb,
 # init). Bez nej zustane protokol a pravidla - ty jdou testovat na hostiteli.
 default = []
-client = ["dep:libos", "dep:spin"]
+client = ["dep:libos"]
 
 [dependencies]
+# Preklad jako zavislost std (cil magnumopus, viz docs/cs/rust-std.md).
+core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
+alloc = { version = "1.0.0", optional = true, package = "rustc-std-workspace-alloc" }
 abi = { workspace = true }
 wire = { path = "../wire" }
-libos = { path = "../libos", optional = true }
-spin = { version = "0.12", optional = true }
+libos = { path = "../libos", optional = true, default-features = false }

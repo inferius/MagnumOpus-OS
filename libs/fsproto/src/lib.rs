@@ -294,7 +294,7 @@ pub fn reply(result: Result<Writer>) -> Vec<u8> {
 /// `SERVICE_UNAVAILABLE`.
 pub struct FsClient {
     conn: svcclient::Conn,
-    handles: spin::Mutex<recover::Table>,
+    handles: libos::sync::Mutex<recover::Table>,
 }
 
 impl FsClient {
@@ -310,7 +310,7 @@ impl FsClient {
     fn from_conn(conn: svcclient::Conn) -> Self {
         Self {
             conn,
-            handles: spin::Mutex::new(recover::Table::default()),
+            handles: libos::sync::Mutex::new(recover::Table::default()),
         }
     }
 

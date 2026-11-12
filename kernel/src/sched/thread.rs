@@ -80,9 +80,8 @@ pub struct Thread {
     kill: AtomicBool,
     /// Vlakno uz bylo spusteno (vlakna procesu se vytvari a spousti zvlast).
     pub(super) started: AtomicBool,
-    /// Registr ukazatele vlakna userspace (aarch64 TPIDR_EL0), ulozeny pri
-    /// prepnuti pryc; planovac ho nahraje pri prepnuti na vlakno. Nove
-    /// vlakno zacina s 0.
+    /// Registr ukazatele vlakna userspace (TLS; `THREAD_SET_POINTER`).
+    /// Planovac ho nahraje pri kazdem prepnuti na vlakno.
     pub(super) user_tp: AtomicU64,
 }
 

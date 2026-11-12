@@ -279,6 +279,17 @@ pub unsafe fn switch_thread_pointer(save: &core::sync::atomic::AtomicU64, next: 
     unsafe { <Current as Threads>::switch_thread_pointer(save, next) }
 }
 
+/// Viz `api::Threads::set_thread_pointer`.
+///
+/// # Safety
+///
+/// Viz `api::Threads::set_thread_pointer`.
+#[inline]
+pub unsafe fn set_thread_pointer(value: u64) {
+    // SAFETY: predano volajicim.
+    unsafe { <Current as Threads>::set_thread_pointer(value) }
+}
+
 /// Prvni vstup aktualniho vlakna do userspace.
 ///
 /// # Safety

@@ -2,6 +2,7 @@
 //!
 //! Prikazy:
 //! - `build`  - prelozi kernel, loader a programy userspace
+//! - `std`    - std pro aplikace (zdroje s lepidlem, sysroot), `stdsys.rs`
 //! - `image`  - build + bootovatelny obraz disku (GPT + ESP s FAT32)
 //! - `run`    - image + spusteni v QEMU s UEFI firmwarem
 //! - `test`   - testy na hostiteli, pak jadro a userspace v QEMU
@@ -29,6 +30,7 @@ mod nethelper;
 mod dnshelper;
 mod ntshelper;
 mod revhelper;
+mod stdsys;
 mod webhelper;
 mod powertest;
 mod qmp;
@@ -52,7 +54,9 @@ const USAGE: &str = "\
 pouziti: cargo xtask <prikaz> [prepinace]
 
 prikazy:
-  build    prelozi kernel, loader a programy userspace
+  build    prelozi kernel, loader a programy userspace (i aplikace se std)
+  std      jen std pro aplikace: zdroje s lepidlem a sysroot pro --arch
+           (docs/cs/rust-std.md)
   image    build + vytvori target/os-<arch>-<profil>.img (GPT, ESP FAT32)
   run      image + spusti QEMU (x86_64: q35 + OVMF, aarch64: virt + edk2)
   test     testy knihoven na hostiteli, kontrola prekladu jadra pro ostatni
@@ -331,6 +335,7 @@ fn run_cli() -> Result<()> {
 
     match command.to_str() {
         Some("build") => build(&opts).map(|_| ()),
+        Some("std") => stdsys::build_sysroot(opts.arch).map(|p| println!("xtask: sysroot std {}", p.display())),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
             // Okno QEMU ukazuje prvni grafickou kartu (VGA, framebuffer
@@ -885,6 +890,8 @@ fn build(opts: &Options) -> Result<Artifacts> {
         }
     }
     cargo_build(&programs, a.user_target, opts, true)?;
+    // Aplikace se std (vlastni cil a sysroot, docs/cs/rust-std.md).
+    let std_bin = stdsys::build_apps(stdsys::STD_PROGRAMS, opts)?;
     let target = target_dir();
     let profile = profile_dir(opts);
 
@@ -893,6 +900,11 @@ fn build(opts: &Options) -> Result<Artifacts> {
     for name in &programs {
         let data = std::fs::read(user_bin.join(name))
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
+        files.push((name.to_string(), loadable_only(&data)));
+    }
+    for name in stdsys::STD_PROGRAMS {
+        let data = std::fs::read(std_bin.join(name))
+            .map_err(|e| format!("nelze cist aplikaci {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
     }
     for (name, path) in INITFS_FILES {

@@ -196,8 +196,15 @@ pub trait Threads: Cpu {
     /// # Safety
     ///
     /// Volat na vlastnim CPU se zakazanymi prerusenimi; `next` je adresa
-    /// v userspace (kanonicka) nebo 0.
+    /// v userspace (kanonicka).
     unsafe fn switch_thread_pointer(save: &core::sync::atomic::AtomicU64, next: u64);
+
+    /// Nastavi registr ukazatele vlakna aktualniho vlakna hned.
+    ///
+    /// # Safety
+    ///
+    /// Jako `switch_thread_pointer`.
+    unsafe fn set_thread_pointer(value: u64);
 
     /// Prvni vstup aktualniho vlakna do userspace: `entry(arg0, arg1)` se
     /// zasobnikem `stack`, preruseni povolena.

@@ -147,6 +147,15 @@ pub fn exit() -> ! {
 }
 
 /// Dobrovolne prenecha CPU (vlakno se zaradi zpet podle sve tridy).
+/// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.
+pub fn set_user_thread_pointer(value: u64) {
+    let irq = interrupts::disable();
+    current().user_tp.store(value, Ordering::Relaxed);
+    // SAFETY: vlastni CPU, preruseni zakazana, hodnotu zkontroloval syscall.
+    unsafe { arch::set_thread_pointer(value) };
+    interrupts::restore(irq);
+}
+
 pub fn yield_now() {
     schedule();
 }
@@ -395,8 +404,8 @@ fn switch_away(reason: Reason) {
 
     // Ukazatel vlakna userspace (TLS): vzdy hodnota noveho vlakna, aby
     // nic neprosaklo mezi vlakny ani procesy.
-    // SAFETY: vlastni CPU, preruseni zakazana; hodnota je 0 nebo ulozena
-    // z registru tehoz vlakna.
+    // SAFETY: vlastni CPU, preruseni zakazana; hodnotu nastavil jen
+    // `THREAD_SET_POINTER` (kontrola adresy userspace) nebo je 0.
     unsafe { arch::switch_thread_pointer(&prev.user_tp, next.user_tp.load(Ordering::Relaxed)) };
 
     let from = prev.context.get();

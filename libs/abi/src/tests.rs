@@ -118,6 +118,8 @@ fn every_syscall_is_documented() {
         "CRASH_RECORD",
         "LOG_CONTROL",
         "JOB_KILL",
+        "FUTEX",
+        "THREAD_SET_POINTER",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

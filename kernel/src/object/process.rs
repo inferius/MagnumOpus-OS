@@ -8,6 +8,7 @@
 //! 4. Po skonceni: signal `TERMINATED`, tabulka handlu se vyprazdni (objekty
 //!    se uvolni), adresni prostor zanikne s posledni referenci na proces.
 
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -47,6 +48,10 @@ pub struct Process {
     pub cpu_ns: AtomicU64,
     /// Trida QoS novych vlaken a Realtime parametry (ns) z `PROCESS_SET`.
     qos: SpinLock<(schedcore::Class, Option<(u64, u64)>)>,
+    /// Fronty futexu (`FUTEX`): virtualni adresa ->
+    /// cekajici vlakna (vlakno, poradove cislo cekani) v poradi prichodu.
+    /// Polozek je nejvys tolik, kolik ma proces vlaken.
+    pub futex: SpinLock<BTreeMap<u64, VecDeque<(Arc<Thread>, u64)>>>,
 }
 
 /// Vsechny procesy (slabe odkazy) pro `JOB_PROCESSES`. Mrtve se uklidi pri
@@ -84,6 +89,7 @@ impl Process {
             job,
             cpu_ns: AtomicU64::new(0),
             qos: SpinLock::new((schedcore::Class::Normal, None)),
+            futex: SpinLock::new(BTreeMap::new()),
         });
         p.core.set_charge(charge);
         {

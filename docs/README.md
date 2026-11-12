@@ -26,6 +26,7 @@ site menu.
 | [Kódy chyb](cs/chyby.md) | [Error codes](en/errors.md) | kódy chyb a návratové kódy procesů / error and exit codes |
 | [Init a supervisor](cs/init.md) | [Init and supervisor](en/init.md) | start služeb, zařízení za běhu, restart spadlých služeb, testovací běh / service start-up, run-time devices, restarting crashed services, test run |
 | [Hlášky v logu](cs/hlasky.md) | [Log messages](en/messages.md) | co znamenají a co dělat / what they mean and what to do |
+| [Rust std](cs/rust-std.md) | [Rust std](en/rust-std.md) | návrh std pro aplikace: cíle magnumopus, osrt, sestavení sysrootu, mapování na libos, co chybí v jádře / std design for applications: magnumopus targets, osrt, sysroot build, mapping onto libos, what the kernel lacks |
 | [Překlad C](cs/preklad-c.md) | [Building C code](en/c-build.md) | clang z build.rs (cbuild), knihovna C cstd, příznaky a ochrany, převzatý kód / clang from build.rs (cbuild), the cstd C library, flags and protections, vendored code |
 
 ### Spolehlivost / Reliability

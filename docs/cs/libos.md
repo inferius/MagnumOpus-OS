@@ -28,6 +28,11 @@ target jako jádro, ale jiné příznaky překladu). Jméno programu se přidá 
 
 ## Start procesu
 
+Vstupní bod, heap a panic handler jsou ve feature `rt` (výchozí)
+**[implementováno]**. Knihovny závisí na libos s `default-features = false`;
+aplikace se `std` mají vlastní runtime (`libs/osrt`, viz
+[Rust std](rust-std.md)) a startovní zprávu čtou přes `libos::rt::startup`.
+
 Jádro (u `init`) nebo rodič (u ostatních) spustí první vlákno na symbolu
 `_start` z libos s handlem bootstrap kanálu v `rdi`. libos pak:
 
@@ -45,6 +50,7 @@ Jádro (u `init`) nebo rodič (u ostatních) spustí první vlákno na symbolu
    - `bootstrap` - kanál k rodiči pro další komunikaci,
    - `flags` - příznaky startu z argumentu `SELF_PROCESS`
      (`abi::bootstrap::flags`; jádro nastavuje jen initu, např. `TEST_RUN`),
+   - `params` - blok parametrů procesu (druh `PARAMS`, viz níže),
 4. návratovou hodnotu použije jako návratový kód procesu (`PROCESS_EXIT`).
 
 Panika v programu vypíše zprávu do logu a ukončí proces s kódem -1 000 001.
@@ -129,6 +135,43 @@ let (process, channel) = libos::spawn_in(&job, "echo", image, Vec::new())?;
 
 Potomek dostane svůj job ve startovní zprávě bez práva `WRITE`, takže si
 limity nezmění (viz [Joby](syscally.md#joby-rozpočty-prostředků)).
+
+## Blok parametrů procesu
+
+Argumenty, proměnné prostředí a počáteční pracovní adresář předává rodič
+objektem paměti jen pro čtení ve startovní zprávě (`kind::PARAMS`,
+formát `abi::params`) **[ověřeno v QEMU]** (test `std: hello-std:
+argumenty, vlakna, TLS, soubory`). Objekt paměti místo dat zprávy:
+velikost neomezuje limit zprávy kanálu. Standardní handly jdou ve stejné
+zprávě jako `kind::USER` se štítky z `abi::params::tag` (`STDIN`,
+`STDOUT`, `STDERR`, `FS`, `NET`).
+
+```rust
+use libos::params::Params;
+use libos::abi::params::tag;
+let params = Params {
+    cwd: b"/".to_vec(),
+    args: vec![b"hello-std".to_vec(), b"alfa".to_vec()],
+    env: vec![b"HELLO=svet".to_vec()],
+};
+let (out, out_child) = Channel::create()?;
+let handles = vec![
+    params.start_handle()?,
+    StartHandle::tagged(tag::STDOUT, out_child.into_handle()),
+];
+let (process, _) = libos::spawn("hello-std", image, handles)?;
+```
+
+`stdout`, `stderr` a `stdin` jsou kanály s protokolem proudu bajtů:
+každá zpráva = kus bajtů, zavření kanálu = konec proudu.
+
+## Zámek nad futexem
+
+`libos::sync::Mutex` (API jako `spin::Mutex`: `lock` vrací strážce bez
+chyby) čeká v jádře přes `FUTEX` (`WAIT`), takže čekající vlákno nebere CPU
+držiteli zámku. Krátce se nejdřív točí (100 pokusů). Používají ho
+`fsproto` a `svcclient` **[ověřeno v QEMU]** (sady `souborovy system`,
+`obnova sluzeb`, `shell`).
 
 ## Velikost stránky
 

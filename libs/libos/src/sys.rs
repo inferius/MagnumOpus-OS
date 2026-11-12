@@ -332,6 +332,23 @@ pub fn thread_yield() {
     let _ = call(nr::THREAD_YIELD, [0; 6]);
 }
 
+/// Usne, dokud je `*addr == expected` a nikdo nezavola [`futex_wake`] na
+/// stejne adrese, nejdele do `deadline` (ns od startu, `u64::MAX` = navzdy).
+/// Vyprseni = `Err(TimedOut)`. Planne probuzeni je mozne.
+pub fn futex_wait(addr: &core::sync::atomic::AtomicU32, expected: u32, deadline: u64) -> Result<()> {
+    call(nr::FUTEX, [nr::futex_op::WAIT, addr.as_ptr() as u64, u64::from(expected), deadline, 0, 0]).map(|_| ())
+}
+
+/// Probudi az `count` vlaken cekajicich na `addr`; vraci pocet probuzenych.
+pub fn futex_wake(addr: &core::sync::atomic::AtomicU32, count: u32) -> u32 {
+    call(nr::FUTEX, [nr::futex_op::WAKE, addr.as_ptr() as u64, u64::from(count), 0, 0, 0]).map_or(0, |n| n as u32)
+}
+
+/// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.
+pub fn thread_set_pointer(value: u64) -> Result<()> {
+    call(nr::THREAD_SET_POINTER, [value, 0, 0, 0, 0, 0]).map(|_| ())
+}
+
 /// Volani neexistujiciho syscallu (pro testy rozhrani).
 pub fn invalid_syscall() -> Result<u64> {
     call(nr::COUNT + 1000, [0; 6])

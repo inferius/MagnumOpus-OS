@@ -28,6 +28,12 @@ as the kernel, different compiler flags). Add the program name to
 
 ## Process startup
 
+The entry point, heap and panic handler are behind the `rt` feature (on by
+default) **[implemented]**. Libraries depend on libos with
+`default-features = false`; applications with `std` have their own
+runtime (`libs/osrt`, see [Rust std](rust-std.md)) and read the startup
+message through `libos::rt::startup`.
+
 The kernel (for `init`) or the parent (for everything else) starts the first
 thread at libos's `_start` symbol with the bootstrap channel handle in
 `rdi`. libos then:
@@ -46,6 +52,7 @@ thread at libos's `_start` symbol with the bootstrap channel handle in
    - `bootstrap` - channel to the parent for further communication,
    - `flags` - start flags from the `SELF_PROCESS` argument
      (`abi::bootstrap::flags`; the kernel sets them only for init, e.g. `TEST_RUN`),
+   - `params` - the process parameter block (kind `PARAMS`, see below),
 4. uses the return value as the process exit code (`PROCESS_EXIT`).
 
 A panic in the program logs the message and exits with code -1,000,001.
@@ -132,6 +139,43 @@ let (process, channel) = libos::spawn_in(&job, "echo", image, Vec::new())?;
 
 The child gets its job in the startup message without the `WRITE` right,
 so it cannot change the limits (see [Jobs](syscalls.md#jobs-resource-budgets)).
+
+## Process parameter block
+
+The parent passes arguments, environment variables and the initial working
+directory in a read-only memory object in the startup message
+(`kind::PARAMS`, format `abi::params`) **[verified in QEMU]** (test `std:
+hello-std: argumenty, vlakna, TLS, soubory`). A memory object instead of
+message data: the size is not limited by the channel message limit.
+Standard handles travel in the same message as `kind::USER` with tags from
+`abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`, `FS`, `NET`).
+
+```rust
+use libos::params::Params;
+use libos::abi::params::tag;
+let params = Params {
+    cwd: b"/".to_vec(),
+    args: vec![b"hello-std".to_vec(), b"alfa".to_vec()],
+    env: vec![b"HELLO=svet".to_vec()],
+};
+let (out, out_child) = Channel::create()?;
+let handles = vec![
+    params.start_handle()?,
+    StartHandle::tagged(tag::STDOUT, out_child.into_handle()),
+];
+let (process, _) = libos::spawn("hello-std", image, handles)?;
+```
+
+`stdout`, `stderr` and `stdin` are channels with the byte-stream protocol:
+every message = a chunk of bytes, closing the channel = end of stream.
+
+## Futex-based lock
+
+`libos::sync::Mutex` (API like `spin::Mutex`: `lock` returns a guard
+without an error) waits in the kernel via `FUTEX` (`WAIT`), so a waiting thread
+does not take CPU from the lock holder. It spins briefly first (100
+tries). Used by `fsproto` and `svcclient` **[verified in QEMU]** (suites
+`souborovy system`, `obnova sluzeb`, `shell`).
 
 ## Page size
 

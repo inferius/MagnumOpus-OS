@@ -1,0 +1,21 @@
+[package]
+name = "osrt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Behove prostredi std pro MagnumOpus (cil magnumopus): start, heap, vlakna, TLS, futex, stdio, soubory"
+
+[features]
+# Preklad jako zavislost std (third_party/rust-std, docs/cs/rust-std.md).
+rustc-dep-of-std = ["dep:core", "dep:alloc", "abi/rustc-dep-of-std", "libos/rustc-dep-of-std", "fsproto/rustc-dep-of-std", "dlmalloc/rustc-dep-of-std"]
+
+[dependencies]
+core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
+alloc = { version = "1.0.0", optional = true, package = "rustc-std-workspace-alloc" }
+abi.workspace = true
+libos = { path = "../libos", default-features = false }
+fsproto = { path = "../fsproto" }
+dlmalloc = { version = "0.2.10", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

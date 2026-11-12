@@ -9,6 +9,8 @@ pub const CR4_SMEP: u64 = 1 << 20;
 pub const CR4_SMAP: u64 = 1 << 21;
 
 pub const MSR_EFER: u32 = 0xC000_0080;
+/// Baze segmentu FS (ukazatel vlakna userspace pro TLS).
+pub const MSR_FS_BASE: u32 = 0xC000_0100;
 pub const EFER_NXE: u64 = 1 << 11;
 
 pub fn cpuid(leaf: u32, subleaf: u32) -> CpuidResult {

@@ -173,8 +173,33 @@ pub const LOG_CONTROL: u64 = 53;
 /// uvnitr zabijeneho jobu skonci take (pri navratu ze syscallu).
 pub const JOB_KILL: u64 = 54;
 
+/// Futex: `(op, addr, value, deadline) -> vysledek`, `op` z [`futex_op`].
+/// Fronta vlaken cekajicich na zmenu u32 v pameti vlastniho procesu (klic =
+/// virtualni adresa, zarovnana na 4 B). Kontrola hodnoty a zarazeni do
+/// fronty probehnou pod zamkem fronty, ktery bere i probuzeni.
+pub const FUTEX: u64 = 55;
+
+/// Operace [`FUTEX`].
+pub mod futex_op {
+    /// `value` = ocekavana hodnota: kdyz u32 na `addr` je rovne `value`,
+    /// vlakno usne, dokud ho neprobudi `WAKE` na stejne adrese nebo
+    /// nevyprsi `deadline` (ns od startu, [`super::DEADLINE_INFINITE`] = bez
+    /// limitu; vyprseni = `TIMED_OUT`). Jina hodnota = hned 0. Planne
+    /// probuzeni je mozne (volajici overi podminku znovu). Vraci 0.
+    pub const WAIT: u64 = 0;
+    /// `value` = nejvic probuzenych vlaken (`u32::MAX` = vsechna); vraci
+    /// pocet probuzenych. `deadline` se nepouziva.
+    pub const WAKE: u64 = 1;
+}
+
+/// Ukazatel vlakna pro TLS: `(value) -> 0`. Nastavi registr ukazatele
+/// vlakna aktualniho vlakna (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`); jadro
+/// ho uklada a obnovuje pri kazdem prepnuti. Nove vlakno zacina s 0.
+/// Na x86_64 musi byt `value` kanonicka adresa userspace.
+pub const THREAD_SET_POINTER: u64 = 56;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 55;
+pub const COUNT: u64 = 57;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {
