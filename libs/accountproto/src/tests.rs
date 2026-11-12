@@ -138,6 +138,24 @@ fn jmena() {
     assert!(Method::Password.bit() == 1 && Method::Dev.bit() == 8);
 }
 
+#[test]
+fn ukony_spravy() {
+    use crate::elevate::{Params, action, decode_check, encode_check};
+    for p in [
+        Params::AccountCreate { name: "bob".into(), display: "Bob".into(), password: Secret::from("heslo bob"), admin: false },
+        Params::AccountDelete { uid: 1001 },
+        Params::ResetPassword { uid: 1001, password: Secret::from("nove heslo") },
+        Params::RoleSet { uid: 1001, on: true },
+    ] {
+        assert_eq!(Params::decode(p.action(), &p.encode()).unwrap(), p);
+    }
+    assert_eq!(Params::decode(action::FIRST_SERVICE, &[]), Err(Error::NotSupported));
+    assert_eq!(Params::decode(99, &[]), Err(Error::InvalidArgs));
+    let b = encode_check(&[7; 16], 6, b"disk0");
+    assert_eq!(decode_check(&b).unwrap(), (vec![7; 16], 6, b"disk0".to_vec()));
+    assert!(decode_check(&encode_check(&[7; 3], 6, b"")).is_err());
+}
+
 // --- CBOR ---
 
 #[test]

@@ -192,6 +192,23 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
         })
     }
 
+    /// Nove heslo od spravy (ukon potvrzeny clovekem s roli). Stare heslo
+    /// se nezna, takze u sifrovaneho domova obal hesla zanikne: domov
+    /// odemkne az majitel obnovovacim klicem (sprava data nevidi).
+    pub fn reset_password(&mut self, uid: u64, new: &Secret) -> Result<()> {
+        check_password(new)?;
+        let pw = normalize(new)?;
+        let (v, _) = self.new_verifier(pw.expose())?;
+        let i = self.index(uid)?;
+        self.update(i, |a| {
+            a.password = Some(v);
+            a.failures = 0;
+            if let Some(c) = &mut a.crypt {
+                c.wraps.retain(|w| w.kind != kind::PASSWORD);
+            }
+        })
+    }
+
     /// Pripravi sifrovani domova: klic domova, obnovovaci klic, obaly pro
     /// heslo a obnovovaci klic. Ulozi se az [`Engine::commit_crypt`] po
     /// prijeti klice FS. PIN a klice dostanou obal pri pristim nastaveni.

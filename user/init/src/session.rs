@@ -163,20 +163,30 @@ fn create_home(fs: &FsClient, uid: u64, name: &str) -> Result<()> {
         return Err(Error::InvalidArgs);
     }
     let path = format!("{HOME_DIR}/{name}");
-    match fs.create_dataset(&path) {
+    // Existujici domov (opakovane zalozeni po vypadku) jen kdyz uz patri
+    // tomuto uzivateli. Nejdriv `stat`: `create_dataset` na existujici
+    // ceste fsd nechava rozpracovanou transakci (pristi commit pak vraci
+    // IO_ERROR; nahlaseno vlaknu FS).
+    match fs.stat(&path) {
+        Ok(st) if st.owner != uid => return Err(Error::AlreadyExists),
         Ok(_) => {}
-        // Domov po predchozim pokusu (vypadek pred ulozenim uctu): jen
-        // kdyz uz patri tomuto uzivateli.
-        Err(Error::AlreadyExists) => {
-            if fs.stat(&path)?.owner != uid {
-                return Err(Error::AlreadyExists);
-            }
+        Err(Error::NotFound) => {
+            fs.create_dataset(&path)?;
         }
         Err(e) => return Err(e),
     }
-    fs.set_owner(&path, uid)?;
-    fs.set_acl(&path, Some(&private_acl()))?;
-    fs.set_noexec(&path, Profile::Standard.noexec_on_data())?;
+    // Jen co se lisi (opakovane zalozeni po vypadku nema nic menit).
+    if fs.stat(&path)?.owner != uid {
+        fs.set_owner(&path, uid)?;
+    }
+    let acl = private_acl();
+    if fs.permissions(&path)?.acl.as_ref() != Some(&acl) {
+        fs.set_acl(&path, Some(&acl))?;
+    }
+    let noexec = Profile::Standard.noexec_on_data();
+    if fs.noexec(&path)? != noexec {
+        fs.set_noexec(&path, noexec)?;
+    }
     Ok(())
 }
 

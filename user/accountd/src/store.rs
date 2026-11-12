@@ -81,6 +81,24 @@ impl FsStore {
     }
 }
 
+const AUDIT: &str = "/db/audit";
+/// Nejvetsi audit; starsi polovina se pak zahodi.
+const AUDIT_MAX: usize = 256 * 1024;
+
+impl FsStore {
+    /// Prida radek do auditu spravy (`cas uid_zadal uid_potvrdil ukon jak`).
+    pub fn append_audit(&mut self, line: &[u8]) -> Result<()> {
+        let mut data = load(&self.fs, AUDIT)?.unwrap_or_default();
+        data.extend_from_slice(line);
+        if data.len() > AUDIT_MAX {
+            let cut = data.len() - AUDIT_MAX / 2;
+            let cut = data[cut..].iter().position(|b| *b == b'\n').map_or(cut, |p| cut + p + 1);
+            data.drain(..cut);
+        }
+        save(&self.fs, AUDIT, &data)
+    }
+}
+
 impl Store for FsStore {
     fn load(&mut self) -> Result<(Option<Meta>, Vec<core::result::Result<Account, (String, Error)>>)> {
         let meta = match load(&self.fs, META)? {

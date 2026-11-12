@@ -162,6 +162,18 @@ pub fn add_key(key: Channel) -> core::result::Result<(), Channel> {
     }
 }
 
+/// Kanal duveryhodneho dialogu kompozitoru pro ukony spravy (`ELEVATE`).
+pub fn give_dialog(dialog: Channel) -> Result<()> {
+    let a = ACCOUNTD.get().ok_or(Error::NotFound)?;
+    let ctl = a.control.lock();
+    ctl.write(b"dialog", vec![dialog.into_handle()])?;
+    let r = ctl.read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    if r.data != b"ok" {
+        return Err(Error::IoError);
+    }
+    Ok(())
+}
+
 /// Stav accountd (`status`).
 pub fn status() -> Result<alloc::string::String> {
     let a = ACCOUNTD.get().ok_or(Error::NotFound)?;

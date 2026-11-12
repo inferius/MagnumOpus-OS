@@ -208,6 +208,12 @@ fn give_accounts(s: &Compd) {
             let _ = s.command(alloc::format!("{} lock {id}", control::SESSION).as_bytes(), Vec::new(), REPLY_TIMEOUT);
         }
     }
+    // Duveryhodny dialog pro ukony spravy (`ELEVATE`) dostane sluzba uctu.
+    let dialog = s.command(control::DIALOG.as_bytes(), Vec::new(), REPLY_TIMEOUT).and_then(|(_, mut h)| h.pop().ok_or(Error::Corrupted));
+    match dialog.and_then(|h| crate::accounts::give_dialog(Channel::from_handle(h))) {
+        Ok(()) => {}
+        Err(e) => println!("init: dialog spravy pro sluzbu uctu: {e}"),
+    }
     match crate::accounts::channel("login") {
         Ok(ch) => {
             if let Err(e) = s.command(control::LOGIN.as_bytes(), vec![ch.into_handle()], REPLY_TIMEOUT) {
