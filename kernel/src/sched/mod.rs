@@ -393,6 +393,12 @@ fn switch_away(reason: Reason) {
         }
     }
 
+    // Ukazatel vlakna userspace (TLS): vzdy hodnota noveho vlakna, aby
+    // nic neprosaklo mezi vlakny ani procesy.
+    // SAFETY: vlastni CPU, preruseni zakazana; hodnota je 0 nebo ulozena
+    // z registru tehoz vlakna.
+    unsafe { arch::switch_thread_pointer(&prev.user_tp, next.user_tp.load(Ordering::Relaxed)) };
+
     let from = prev.context.get();
     let to = next.context.get() as *const Context;
     // SAFETY: vlastni CPU, preruseni zakazana. `prev` zustava drzeny v

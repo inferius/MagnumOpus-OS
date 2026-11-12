@@ -268,6 +268,17 @@ pub unsafe fn set_kernel_stack(local: &CpuLocal, top: u64) {
     unsafe { <Current as Threads>::set_kernel_stack(local, top) }
 }
 
+/// Viz `api::Threads::switch_thread_pointer`.
+///
+/// # Safety
+///
+/// Viz `api::Threads::switch_thread_pointer`.
+#[inline]
+pub unsafe fn switch_thread_pointer(save: &core::sync::atomic::AtomicU64, next: u64) {
+    // SAFETY: predano volajicim.
+    unsafe { <Current as Threads>::switch_thread_pointer(save, next) }
+}
+
 /// Prvni vstup aktualniho vlakna do userspace.
 ///
 /// # Safety

@@ -124,6 +124,12 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   of the address space is always unmapped, so a return from a syscall never
   targets a non-canonical address (which would fault while still in the
   kernel).
+- **Thread pointer register** (aarch64 `TPIDR_EL0`, which a program may
+  write itself): the scheduler saves it into the outgoing thread on a
+  switch and loads the value of the incoming one; a new thread starts with
+  0. A value of one process is thus never visible in another
+  **[verified in QEMU]** (test `procesy: TPIDR_EL0 neprosakuje mezi
+  procesy`, aarch64). On x86_64 a program cannot set `FS_BASE` itself.
 - **FPU/SSE state:** each thread has its own 512 B FXSAVE area; a context
   switch always saves and restores it. A new thread starts with the default
   state (FCW 0x037F, MXCSR 0x1F80), so data of another thread cannot leak.
