@@ -567,7 +567,9 @@ impl Comp {
             f.draw(c, dot.x + (36 - cw) / 2, dot.y + f.baseline_in(ss.size, 36), &ch, ss.size, col.accent_ink);
             let cs = t.text.caption;
             let f = st.face(cs);
-            f.draw_ellipsized(c, r.x + 4, r.y + 44 + f.baseline_in(cs.size, cs.line), &a.display, cs.size, col.on_accent, r.w - 8);
+            let ink = if *i == g.sel { col.ink } else { col.on_accent };
+            let nw = f.width(&a.display, cs.size).min(r.w - 8) as i32;
+            f.draw_ellipsized(c, r.x + (r.w as i32 - nw) / 2, r.y + 44 + f.baseline_in(cs.size, cs.line), &a.display, cs.size, ink, r.w - 8);
         }
         center(st, c, l.name_y, &display, t.text.title, col.on_accent, w);
         // Pole: pilulka s tecky a tlacitkem.
@@ -610,7 +612,13 @@ impl Comp {
             text = Some((format!("{base} Další pokus za {s} s (ochrana proti hádání)."), true));
         }
         if let Some((m, err)) = text {
-            center(st, c, l.msg_y, m.trim(), t.text.small, if err { col.danger } else { col.on_accent }, w);
+            // Pilulka pod textem: citelne na kazdem pozadi plochy.
+            let ss = t.text.small;
+            let m = m.trim();
+            let pw = st.width(m, ss) + 2 * sp[4];
+            let r = Rect::new((w as i32 - pw as i32) / 2, l.msg_y, pw, 24);
+            c.round_fill(r, 12, if err { col.danger_soft } else { col.surface });
+            center(st, c, l.msg_y + (24 - ss.line as i32) / 2, m, ss, if err { col.danger } else { col.ink }, w);
         }
         // Metody.
         for (m, r) in &l.methods {

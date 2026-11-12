@@ -142,3 +142,19 @@ fn odhlaseni_vrati_prihlaseni() {
     assert!(t.c.greeter_visible());
     assert_eq!(t.c.take_login_requests(), vec![Request::List]);
 }
+
+#[test]
+fn snimek_obrazovky() {
+    // Pro kontrolu okem: `target/comp-greeter.png`, `target/comp-greeter-zamceno.png`.
+    let mut t = login();
+    t.c.set_clock(Some(("14:05".into(), "so 7. 11.".into())));
+    t.now += dialog::INPUT_DELAY;
+    text(&mut t, "12");
+    t.frame();
+    save_png("comp-greeter.png", &t.frame, W, H);
+    t.c.session_opened(3, 1000, "alice", t.now);
+    t.c.session_locked(3, true, t.now);
+    t.c.login_reply(Reply::Denied { retry_after_ms: 30_000, pin_left: 4 }, t.now);
+    t.frame();
+    save_png("comp-greeter-zamceno.png", &t.frame, W, H);
+}
