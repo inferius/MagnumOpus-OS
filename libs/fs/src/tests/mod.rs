@@ -18,6 +18,7 @@ mod features;
 mod handles;
 mod history;
 mod journal;
+mod logical_errors;
 mod model;
 mod versions;
 mod mount;

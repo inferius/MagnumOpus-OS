@@ -15,6 +15,7 @@
 
 mod arch;
 mod audio;
+mod boottest;
 mod crashtest;
 mod datadisk;
 mod drivers;
@@ -169,6 +170,9 @@ pub struct Options {
     /// Zvlastni beh testu napajeni (`powertest`): "button" nebo "reboot".
     /// QEMU ma skoncit samo (vypnuti ACPI) s kodem 0.
     power_test: Option<&'static str>,
+    /// Datovy disk sdileny vic behy QEMU (`boottest`); `None` = novy disk
+    /// pro kazdy beh.
+    data_image: Option<PathBuf>,
     /// Zvlastni beh testu zaznamu padu (`crashtest`): QEMU bez
     /// `-no-reboot` (jadro po panice restartuje).
     crash_test: bool,
@@ -233,6 +237,7 @@ fn run_cli() -> Result<()> {
         hostfwd: None,
         net_helper: std::cell::RefCell::new(None),
         power_test: None,
+        data_image: None,
         crash_test: false,
     };
     let mut gpu_set = false;
@@ -402,7 +407,8 @@ repeat = {}
             let power_only = opts.test_only == "napajeni";
             let usb_only = opts.test_only == "zive-usb";
             let release_only = opts.test_only == "release";
-            if !power_only && !usb_only && !release_only && opts.test_only != "zaznam-padu" {
+            let reboot_only = opts.test_only == "opakovany-start";
+            if !power_only && !usb_only && !release_only && !reboot_only && opts.test_only != "zaznam-padu" {
                 let artifacts = build(&opts)?;
                 let image = image_for(&artifacts, &opts)?;
                 qemu::run(&image, &artifacts, &opts)?;
@@ -417,6 +423,11 @@ repeat = {}
             // ktere se v debug neprojevi (`--only release` jen tento beh).
             if !opts.release && (opts.test_only.is_empty() || release_only) {
                 powertest::run_release(&mut opts)?;
+            }
+            // Vic startu po sobe na jednom datovem disku (`--only
+            // opakovany-start` jen tento beh): chyby "prvni start vs. dalsi".
+            if opts.test_only.is_empty() || reboot_only {
+                boottest::run(&mut opts)?;
             }
             // Zaznam padu jadra prezije restart (`--only zaznam-padu` jen ten).
             if opts.test_only.is_empty() || opts.test_only == "zaznam-padu" {

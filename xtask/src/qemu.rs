@@ -238,7 +238,13 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
     // simulaci, ne flush hostitele. V beznem behu bezpecne.
     let cache = if opts.test { ",cache=unsafe" } else { "" };
     let drive = |id: &str, path: &Path| format!("if=none,id={id},format=raw,discard=unmap{cache},file={}", path.display());
-    let raw = datadisk::create(&run.data)?;
+    // Sdileny datovy disk pres vic behu (`boottest`): vytvori se jen
+    // poprve a beh ho nesmaze; jinak novy disk pro kazdy beh.
+    let raw = match &opts.data_image {
+        Some(p) if p.exists() => p.clone(),
+        Some(p) => datadisk::create(p)?,
+        None => datadisk::create(&run.data)?,
+    };
     // Na NVMe a AHCI jako na skutecnem pocitaci: GPT s nasim oddilem.
     let data = match opts.data_disk.as_str() {
         "virtio" => raw,
