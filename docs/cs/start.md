@@ -193,9 +193,11 @@ neviditelné.
 
 - **Esc = podrobný log** na startovní obrazovce **[navrženo]**: init do
   startu `inputd` nemá vstup.
-- **Cíl přechodu = avatar přihlášení** **[navrženo]**: kompozitor má
-  `set_splash_target(stred x, y, průměr)`, volá ho přihlašovací obrazovka
-  (vlákno účtů). Bez ní se znak zmenší na místě.
+- **Cíl přechodu = avatar přihlášení**: init přidá do `display` slovo
+  `login`, když není otevřená žádná relace **[implementováno]**; kompozitor
+  pak vezme cíl z `login_target` (`user/compd/src/splash.rs`), kam po
+  sloučení s větví účtů patří `Comp::greeter_avatar(false)` **[navrženo]**.
+  Do té doby se znak zmenší na místě.
 - **Omezit pohyb**: přechod umí jen prolnutí 90 ms (`reduced`), volba
   v nastavení zatím není **[navrženo]**.
 - **Rozlišení**: loader režim GOP nemění (firmware nebo EDID z `--res`);

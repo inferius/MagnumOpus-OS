@@ -67,6 +67,8 @@ struct Service {
     /// (`display ... splash=`, zacne pri pripojeni displeje).
     splash: Option<splash::Handoff>,
     splash_pending: Option<u32>,
+    /// Po startu bude prihlasovaci obrazovka (`display ... login`).
+    splash_login: bool,
 }
 
 impl Service {
@@ -118,6 +120,7 @@ fn main(startup: Startup) -> i64 {
         login: None,
         splash: None,
         splash_pending: None,
+        splash_login: false,
     };
     loop {
         if !s.wait_and_serve() {
@@ -519,6 +522,8 @@ impl Service {
                 for w in words.by_ref() {
                     if let Some(p) = w.strip_prefix(control::SPLASH_ARG) {
                         self.begin_splash(p.parse().unwrap_or(0));
+                    } else if w == control::LOGIN_ARG {
+                        self.splash_login = true;
                     } else {
                         self.zone = libos::time::zone::Zone::by_name(w).or(libos::time::zone::Zone::parse(w));
                     }

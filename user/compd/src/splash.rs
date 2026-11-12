@@ -155,6 +155,15 @@ impl Handoff {
     }
 }
 
+/// Cil presunu pri prihlasovaci obrazovce: kruh avataru (stred x, y,
+/// prumer). Rozvrzeni prihlasovaci obrazovky dodava vlakno uctu
+/// (`Comp::greeter_avatar(false)` ve vetvi `inferius-dev/accounts-gui`);
+/// po slouceni sem patri `Some(comp.greeter_avatar(false))`. Do te doby
+/// `None` = znak se zmensi na miste.
+fn login_target(_comp: &mut comp::Comp) -> Option<(f32, f32, f32)> {
+    None
+}
+
 /// Obdelnik pres celou obrazovku.
 fn full(l: &bootsplash::Layout) -> Rect {
     Rect { x: 0, y: 0, w: l.w, h: l.h }
@@ -190,6 +199,9 @@ impl Service {
         let mut ho = Handoff::new(w, h, p);
         if comp.background() == theme::Theme::builtin(theme::Mode::Light).color.bg {
             ho.splash.set_backdrop(comp.backdrop().to_vec());
+        }
+        if self.splash_login {
+            ho.target = login_target(comp);
         }
         ho.first_frame(px, libos::time::now());
         println!("compd: navazuji na startovni obraz (prstenec {p} promile), prvni snimek {} us", (libos::time::now() - t) / 1000);

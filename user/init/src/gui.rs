@@ -142,7 +142,12 @@ impl Service for CompdService {
         // Pasmo pro hodiny v liste ze stejneho nastaveni jako sluzba casu.
         let zone = libos::time::zone::Settings::parse(crate::system::TIME_SETTINGS).map(|s| s.zone.name).ok().filter(|n| !n.is_empty()).unwrap_or("UTC");
         // Prvni start po startovnim obrazu: kompozitor na nej navaze.
-        let splash = SPLASH_HANDOFF.lock().take().filter(|_| !ctx.restart).map(|p| alloc::format!(" {}{p}", control::SPLASH_ARG)).unwrap_or_default();
+        let mut splash = SPLASH_HANDOFF.lock().take().filter(|_| !ctx.restart).map(|p| alloc::format!(" {}{p}", control::SPLASH_ARG)).unwrap_or_default();
+        // Bez otevrene relace bude prihlasovaci obrazovka: znak miri do avataru.
+        if !splash.is_empty() && crate::session::SESSIONS.lock().is_empty() {
+            splash.push(' ');
+            splash.push_str(control::LOGIN_ARG);
+        }
         control.write(alloc::format!("{} {zone}{splash}", control::DISPLAY).as_bytes(), vec![display.into_handle()])?;
         let started = Started {
             process: process.handle().duplicate(None)?,

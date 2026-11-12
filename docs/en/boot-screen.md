@@ -202,9 +202,11 @@ floating point; they differ by at most 2 colour levels (test
 
 - **Esc = detailed log** on the boot screen **[designed]**: init has no
   input until `inputd` starts.
-- **Hand-over target = login avatar** **[designed]**: the compositor has
-  `set_splash_target(centre x, y, diameter)`, called by the login screen
-  (accounts thread). Without it the mark shrinks in place.
+- **Hand-over target = login avatar**: init adds the word `login` to
+  `display` when no session is open **[implemented]**; the compositor then
+  takes the target from `login_target` (`user/compd/src/splash.rs`), which
+  after merging the accounts branch returns `Comp::greeter_avatar(false)`
+  **[designed]**. Until then the mark shrinks in place.
 - **Reduce motion**: the hand-over supports a 90 ms cross-fade only
   (`reduced`); there is no setting yet **[designed]**.
 - **Resolution**: the loader does not change the GOP mode (firmware or
