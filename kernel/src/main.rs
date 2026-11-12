@@ -58,11 +58,12 @@ extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
 
     // SAFETY: framebuffer popsal loader a namapoval ho do prime mapy;
     // kernel ho nepouziva nijak jinak nez pres konzoli.
-    // Testovaci jadro (`qemu-test`) startovni obraz ignoruje: log na
-    // obrazovce pomaha pri ladeni testu a casovani testu zustava stejne
-    // jako bez obrazu (kresleni logu do framebufferu zpomaluje start).
-    let splash = boot_info.boot_flags & boot_info::boot_flags::SPLASH != 0 && !cfg!(feature = "qemu-test");
-    unsafe { console::init(&boot_info.framebuffer, splash) };
+    unsafe {
+        console::init(
+            &boot_info.framebuffer,
+            boot_info.boot_flags & boot_info::boot_flags::SPLASH != 0,
+        )
+    };
     log::set_defaults();
     log::info!(
         "os kernel {} ({}), sestaveni {}",
