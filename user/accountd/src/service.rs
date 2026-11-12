@@ -10,14 +10,14 @@ use accountproto::ctap::{Client, Transport};
 use accountproto::{
     AuthReply, Method, Request, Secret, ToInit, WhoAmI, encode_list, flags, parse_reply, reply_err, reply_ok,
 };
-use accounts::{Engine, FileKey, Outcome};
+use accounts::{Engine, Outcome};
 use libos::{Channel, Error, Handle, Result, println, time};
 use wire::Writer;
 
 use crate::os::{ChannelHid, OsRng};
 use crate::store::FsStore;
 
-pub type Eng = Engine<FsStore, FileKey, OsRng>;
+pub type Eng = Engine<FsStore, crate::store::LazyKey, OsRng>;
 
 /// Prihlasena relace (cislo od initu) a jeji kanal self.
 pub struct Session {

@@ -434,7 +434,7 @@ repeat = {}
                 crashtest::run(&mut opts)?;
             }
             // Zive USB: obraz s beznym jadrem (ne testovacim) nastartuje
-            // z flash disku USB az do GUI s terminalem.
+            // z flash disku USB az do GUI s prihlasovaci obrazovkou.
             if opts.test_only.is_empty() || usb_only {
                 opts.test = false;
                 let extra = std::mem::take(&mut opts.extra_initfs);

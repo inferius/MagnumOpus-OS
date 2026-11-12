@@ -85,7 +85,11 @@ ranges.
   rename (`save_if`) followed by `fsync` - after a power cut the record is
   always entirely old or entirely new.
 - `/db/meta`: next free user and group number, DB version.
-- `/db/device.key`: the device key (32 B) until there is a TPM.
+- `/db/device.key`: the device key (32 B) until there is a TPM. It is
+  created on first use (PIN), not at service start: the start does not
+  wait for a seeded random generator (a machine without a hardware entropy
+  source, e.g. the live USB on aarch64, may not have one right away and
+  init would give up on the account service after 20 s).
 
 | Record field | Type | Note |
 |---|---|---|

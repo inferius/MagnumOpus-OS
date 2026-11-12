@@ -104,11 +104,16 @@ impl Login {
             let body = parse_reply(&m.data);
             let r = match (kind, body) {
                 (Kind::List, Ok(b)) => match decode_list(b) {
-                    Ok(list) => Reply::Accounts(
+                    Ok(list) => {
+                        // Pocet uctu do logu (jmena ne): znacka startu do
+                        // prihlasovaci obrazovky (test zive USB).
+                        libos::println!("compd: prihlasovaci obrazovka: {} uctu", list.len());
+                        Reply::Accounts(
                         list.into_iter()
                             .map(|a| Account { uid: a.uid, name: a.name, display: a.display, methods: a.methods, flags: a.flags })
                             .collect(),
-                    ),
+                        )
+                    }
                     Err(_) => continue,
                 },
                 (Kind::Phrase(uid), Ok(b)) => match wire::Reader::new(b).str() {
