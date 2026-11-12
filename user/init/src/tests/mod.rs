@@ -42,6 +42,7 @@ mod recovery;
 mod recovery_kit;
 mod console;
 mod shell;
+mod std_app;
 mod supervisor;
 mod tasks;
 mod time;
@@ -71,6 +72,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("acpi", power::TESTS),
     ("diagnostika", diag::TESTS),
     ("souborovy system", fs::TESTS),
+    ("std", std_app::TESTS),
     ("ucty", accounts::TESTS),
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
