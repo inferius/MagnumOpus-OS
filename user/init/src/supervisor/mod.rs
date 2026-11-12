@@ -165,6 +165,8 @@ enum Item {
     Power,
     /// Zadosti kompozitoru o spusteni aplikace (`crate::gui::LAUNCHER`).
     Launcher,
+    /// Udalosti relaci prihlasenych uzivatelu (`crate::session::EVENTS`).
+    Sessions,
 }
 
 impl Default for Supervisor {
@@ -305,6 +307,10 @@ impl Supervisor {
             items.push((l.handle(), Signals::READABLE | Signals::PEER_CLOSED));
             what.push(Item::Launcher);
         }
+        if let Some(ev) = crate::session::events() {
+            items.push((ev.handle(), Signals::READABLE));
+            what.push(Item::Sessions);
+        }
         let wake = [deadline, self.next_due(), self.leases_due()]
             .into_iter()
             .flatten()
@@ -318,6 +324,7 @@ impl Supervisor {
         drop(launcher);
         let mut power_ready = false;
         let mut launch_ready = false;
+        let mut sessions_ready = false;
         let mut terminals = terminals;
         for (k, item) in what.iter().enumerate() {
             let Some(sig) = observed.get(k).copied() else { break };
@@ -339,6 +346,7 @@ impl Supervisor {
                 Item::Terminal(w) => terminals.on_signal(startup, w, sig, &mut || self.session("audiod", Vec::new()).ok()),
                 Item::Power => power_ready = true,
                 Item::Launcher => launch_ready = sig.intersects(Signals::READABLE | Signals::PEER_CLOSED),
+                Item::Sessions => sessions_ready = sig.intersects(Signals::READABLE),
                 Item::Service(_) | Item::Starting(_) | Item::Leases => {}
             }
         }
@@ -356,6 +364,10 @@ impl Supervisor {
         }
         if launch_ready {
             crate::gui::launch_requests(startup, self);
+        }
+        // Az bez zamku terminalu (konec relace ukoncuje jeji termd).
+        if sessions_ready {
+            crate::desktop::on_events(startup, self);
         }
         crate::power::run_pending(self);
         self.start_timeouts();

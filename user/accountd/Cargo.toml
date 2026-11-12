@@ -15,6 +15,7 @@ libos = { path = "../../libs/libos" }
 fsproto = { path = "../../libs/fsproto" }
 conf = { workspace = true }
 wire = { path = "../../libs/wire" }
+guiproto = { path = "../../libs/guiproto" }
 accountproto = { path = "../../libs/accountproto" }
 accounts = { path = "../../libs/accounts" }
 rand_core = { version = "0.6", default-features = false }

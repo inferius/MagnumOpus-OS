@@ -487,6 +487,32 @@ waiting for cleanup), `name` (32 B UTF-8, zero padded). Returns the total
 count (also above `max`). Requires `READ`. Errors: `INVALID_ARGS` (`max`
 > 4096), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
+### `JOB_KILL`
+
+`(job, code) -> 0`. **[implemented]** Ends all processes of the job and
+all its descendants with exit code `code` and **closes** the job: no new
+process (`PROCESS_CREATE`) or sub-job (`JOB_CREATE`) can be created in it
+or its descendants any more (`BAD_STATE`). Requires `MANAGE`. Init uses it
+at sign-out (the session job, see [User accounts](accounts.md#sessions)).
+
+- **A caller inside the killed job** ends like the others: the syscall
+  returns 0, its threads get a termination request and end on the return
+  to user space (code `code`).
+- **Race with creating a process or sub-job:** the kernel first sets the
+  job's flag, then walks the process registry. A new process registers
+  first and then checks the flag of its job and the ancestors (both
+  `SeqCst`): either `JOB_KILL` sees it in the registry and ends it, or its
+  own check refuses it. A sub-job is checked the same way after creation.
+  No process slips through; an unstarted process ended while loading fails
+  `PROCESS_START` (`BAD_STATE`).
+- Processes end asynchronously (as after `PROCESS_KILL`): wait for the end
+  via `TERMINATED` on the process handle or `JOB_PROCESSES` (`FINISHED`).
+
+Errors: `BAD_HANDLE`, `ACCESS_DENIED` (no `MANAGE`), `WRONG_TYPE`. In
+libos `Job::kill`. Tests in the `joby` suite: `job: JOB_KILL ukonci
+podstrom a job uzavre`, `job: JOB_KILL vlastniho jobu ukonci i
+volajiciho`, `job: JOB_KILL behem spousteni nic neproklouzne`.
+
 ### `FB_CONTROL`
 
 `(vmo, op, out_ptr) -> 0`. The firmware framebuffer: `vmo` must be exactly

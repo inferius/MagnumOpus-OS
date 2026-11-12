@@ -11,6 +11,7 @@
 //!   ikony, stiny, plocha.
 //! - [`input`]: rozdeleni vstupu oknum, presun a zmena velikosti.
 //! - [`dialog`]: systemove dialogy a bezpecna obrazovka.
+//! - [`greeter`]: prihlasovaci a zamykaci obrazovka.
 //! - [`services`]: akce aplikaci a inspekce.
 //! - [`frame`]: takt snimku, animace, skupiny transakci, ping.
 //! - [`gpu`]: seznam operaci pro GPU backend (`compd` + `libs/vkcomp`).
@@ -29,6 +30,7 @@ pub mod menu;
 pub mod palette;
 pub mod frame;
 pub mod gpu;
+pub mod greeter;
 pub mod input;
 pub mod output;
 pub mod render;
@@ -121,6 +123,8 @@ pub struct Comp {
     pub(crate) frame: frame::FrameState,
     pub(crate) input: input::InputState,
     pub(crate) dialogs: dialog::Dialogs,
+    /// Prihlasovaci a zamykaci obrazovka.
+    pub(crate) greeter: greeter::Greeter,
     pub(crate) services: services::Services,
     /// Zdroj tokenu skupin (sluzba dava nahodna cisla z jadra).
     pub(crate) token_source: Box<dyn FnMut() -> u128>,
@@ -189,6 +193,7 @@ impl Comp {
             frame: frame::FrameState::default(),
             input: input::InputState::new(w, h),
             dialogs: dialog::Dialogs::default(),
+            greeter: greeter::Greeter::default(),
             services: services::Services::default(),
             token_source,
             input_now: 0,

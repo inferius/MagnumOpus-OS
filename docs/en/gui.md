@@ -782,11 +782,27 @@ The `dialog` channel messages are binary (`guiproto::control`):
 
 | Message | Fields |
 |---|---|
-| `Ask` | id, kind (`permission`, `confirm`, `password`), application, text, options (1-8) |
+| `Ask` | id, kind (`permission`, `confirm`, `password`, `elevate`), application, text, options (1-8) |
 | `Cancel` | id |
 | `Phrase` | security phrase (at most 64 characters) |
 | `Answer` (reply) | id, option index, text (password) |
 | `Cancelled` (reply) | id |
+
+**Raising privileges** (`elevate`, **[implemented]**, following
+`design/dialogy.html`): title "<application> wants to change the system",
+text with the action's real parameters and who confirms, a "Password or
+PIN" field, a "Don't confirm administration actions for 5 more minutes"
+check box (off by default; after the buttons in Tab order, Enter toggles
+it) and the buttons "Allow change" / "Cancel". Reply: choice 0 = allow,
+**2 = allow and administration mode**, 1 = cancel; text = the secret. Only
+the account service uses it (see [User accounts](accounts.md#administering-the-computer)).
+
+The **sign-in and lock screen** (**[implemented]**) is a compositor layer
+over the whole screen above everything (the bar too); described in
+[User accounts](accounts.md#sign-in-and-lock-screen). Init's control
+messages: `login` + handle (channel to the account service), `session open
+<id> <uid> <name>`, `session lock|unlock|close <id>`. The secure screen
+(Ctrl+Alt+Delete) also offers **Lock** while someone is signed in.
 
 Keys in a dialog: Tab and arrows change the option, Enter confirms, Esc
 selects the last option (deny). Mouse: click a button. For the first

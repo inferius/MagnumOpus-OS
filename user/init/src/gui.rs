@@ -43,7 +43,7 @@ pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
 pub static LAUNCHER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Aplikace plochy, ktere lze spustit z listy (programy v initfs).
-const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks"];
+pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks"];
 
 /// Jmeno kompozitoru v registru supervisoru.
 pub const NAME: &str = "compd";
@@ -161,6 +161,8 @@ impl Service for CompdService {
         println!("init: kompozitor bezi ({}x{})", s.size.0, s.size.1);
         if self.give_input {
             s.input_from_inputd();
+            // Nova instance: relace a prihlasovaci obrazovka znovu.
+            give_accounts(&s);
         }
         Ok(true)
     }
@@ -191,9 +193,54 @@ impl Service for CompdService {
     }
 }
 
+/// Kompozitoru: bezici relace (`session open ...`) a kanal `login` ke
+/// sluzbe uctu (prihlasovaci obrazovka, kdyz nikdo neni prihlaseny).
+fn give_accounts(s: &Compd) {
+    // Jen bezny beh (plocha od `start_desktop`); testy GUI si kompozitor
+    // ridi samy a prihlasovaci obrazovka by jim zakryla okna.
+    if !ACCOUNTS_UI.load(core::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let list: Vec<(u64, u64, String, bool)> = crate::session::SESSIONS.lock().iter().map(|u| (u.id, u.uid, u.name.clone(), u.locked)).collect();
+    for (id, uid, name, locked) in list {
+        let _ = s.command(alloc::format!("{} open {id} {uid} {name}", control::SESSION).as_bytes(), Vec::new(), REPLY_TIMEOUT);
+        if locked {
+            let _ = s.command(alloc::format!("{} lock {id}", control::SESSION).as_bytes(), Vec::new(), REPLY_TIMEOUT);
+        }
+    }
+    // Duveryhodny dialog pro ukony spravy (`ELEVATE`) dostane sluzba uctu.
+    let dialog = s.command(control::DIALOG.as_bytes(), Vec::new(), REPLY_TIMEOUT).and_then(|(_, mut h)| h.pop().ok_or(Error::Corrupted));
+    match dialog.and_then(|h| crate::accounts::give_dialog(Channel::from_handle(h))) {
+        Ok(()) => {}
+        Err(e) => println!("init: dialog spravy pro sluzbu uctu: {e}"),
+    }
+    match crate::accounts::channel("login") {
+        Ok(ch) => {
+            if let Err(e) = s.command(control::LOGIN.as_bytes(), vec![ch.into_handle()], REPLY_TIMEOUT) {
+                println!("init: kanal login pro kompozitor: {e}");
+            }
+        }
+        Err(e) => println!("init: prihlasovaci obrazovka bez sluzby uctu: {e}"),
+    }
+}
+
+/// Plocha s ucty bezi (bezny beh): kompozitor dostava relace a `login`.
+static ACCOUNTS_UI: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Oznami kompozitoru zmenu relace (`session open|lock|unlock|close`).
+pub fn session_event(text: &str) {
+    if let Some(g) = GUI.lock().as_ref()
+        && let Err(e) = g.command(alloc::format!("{} {text}", control::SESSION).as_bytes(), Vec::new())
+    {
+        println!("init: relace pro kompozitor: {e}");
+    }
+}
+
 pub struct Gui {
     pub shared: CompdRef,
     pub apps: Vec<App>,
+    /// Aplikace relaci: (relace, index v `apps`); odhlaseni je ukonci.
+    pub session_apps: Vec<(u64, usize)>,
     /// Velikost obrazovky.
     pub size: (u32, u32),
 }
@@ -263,6 +310,7 @@ pub fn start(startup: &Startup) -> Result<Gui> {
     Ok(Gui {
         shared,
         apps: Vec::new(),
+        session_apps: Vec::new(),
         size,
     })
 }
@@ -356,20 +404,37 @@ impl Gui {
         self.launch_with(startup, name, ch, lease, extra)
     }
 
-    /// Spusti aplikaci s oknem, ktere prezije pad kompozitoru (relace
-    /// a listek od supervisoru `sup`), s dalsimi handly aplikace za
-    /// listkem (napr. kanal terminalu).
-    pub fn launch_supervised_with(&mut self, startup: &Startup, name: &str, sup: &mut Supervisor, extra: Vec<StartHandle>) -> Result<usize> {
+    /// Spusti aplikaci relace `session` v jejim jobu s oknem, ktere
+    /// prezije pad kompozitoru (relace a listek od supervisoru `sup`),
+    /// s dalsimi handly aplikace za listkem (napr. kanal terminalu).
+    pub fn launch_for_session(&mut self, startup: &Startup, name: &str, sup: &mut Supervisor, extra: Vec<StartHandle>, session: u64) -> Result<usize> {
         let info = recipe(startup, name)?;
+        let job = crate::session::job(session)?;
         let (ch, lease) = sup.session(NAME, info.encode())?;
-        self.launch_with(startup, name, ch, lease, extra)
+        let i = self.launch_in(startup, name, ch, lease, extra, Some(&job))?;
+        self.session_apps.push((session, i));
+        Ok(i)
+    }
+
+    /// Konec relace: jeji aplikace ukoncit.
+    pub fn close_session(&mut self, session: u64) {
+        for (_, i) in self.session_apps.iter().filter(|(s, _)| *s == session) {
+            if let Some(a) = self.apps.get(*i) {
+                let _ = a.process.kill();
+            }
+        }
+        self.session_apps.retain(|(s, _)| *s != session);
     }
 
     /// Spusti aplikaci: handly 0 = okno, 1 = listek, pak `extra`.
     pub fn launch_with(&mut self, startup: &Startup, name: &str, window: Channel, lease: Channel, extra: Vec<StartHandle>) -> Result<usize> {
+        self.launch_in(startup, name, window, lease, extra, None)
+    }
+
+    fn launch_in(&mut self, startup: &Startup, name: &str, window: Channel, lease: Channel, extra: Vec<StartHandle>, parent: Option<&libos::job::Job>) -> Result<usize> {
         let mut handles = vec![StartHandle::user(window.into_handle()), StartHandle::user(lease.into_handle())];
         handles.extend(extra);
-        let app = apps::spawn(startup, name, handles)?;
+        let app = apps::spawn_in(startup, name, handles, parent)?;
         // Prehled uloh: aplikace i se svym jobem (jmeno a identita z manifestu).
         match recipe(startup, name) {
             Ok(info) => crate::tasks::app(&info.name, &info.id, &app.job),
@@ -399,7 +464,7 @@ pub fn connect_snapshots(gui: &Gui) {
 }
 
 pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervisor) {
-    let mut gui = match start(startup) {
+    let gui = match start(startup) {
         Ok(g) => g,
         Err(Error::NotFound) => {
             println!("init: grafika (virtio-gpu ani framebuffer) neni, GUI nespoustim");
@@ -435,28 +500,28 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
         println!("init: stav pro listu: {e}");
     }
     connect_snapshots(&gui);
-    for app in DESKTOP_APPS {
-        if let Err(e) = launch_app(&mut gui, startup, sup, app) {
-            println!("init: {app} nelze spustit: {e}");
-        }
-    }
+    // Aplikace plochy se spousti az pro prihlasenou relaci (udalost
+    // relace, `crate::desktop`), v jejim jobu a s identitou uzivatele.
     connect_launcher(&gui, startup);
+    // Relace uz otevrene (vyvojove prihlaseni) a prihlasovaci obrazovka.
+    ACCOUNTS_UI.store(true, core::sync::atomic::Ordering::Relaxed);
+    give_accounts(&gui.shared.lock());
     *GUI.lock() = Some(gui);
 }
 
 /// Spusti aplikaci plochy pod supervisorem s handly, ktere potrebuje
 /// (terminal: kanal k termd; Spravce uloh: klient prehledu uloh).
-fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, program: &str) -> Result<usize> {
+pub fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, program: &str, session: u64) -> Result<usize> {
     let extra = match program {
         // Terminal: za oknem a listkem kanal pripojeni k termd (init ho
-        // spousti a hlida, viz `terminal.rs`).
-        "gui-term" => vec![StartHandle::user(crate::terminal::TERMINALS.lock().client("gui-term")?.into_handle())],
+        // spousti a hlida, viz `terminal.rs`); termd s identitou relace.
+        "gui-term" => vec![StartHandle::user(crate::terminal::TERMINALS.lock().client_for("gui-term", Some(session))?.into_handle())],
         // Spravce uloh: vidi vsechny ulohy (systemove i aplikace spustene
         // initem, stejne jako ikona v liste), ridit smi jen sve.
         "gui-tasks" => vec![StartHandle::user(crate::tasks::client_view_all("uzivatel")?.into_handle())],
         _ => Vec::new(),
     };
-    gui.launch_supervised_with(startup, program, sup, extra)
+    gui.launch_for_session(startup, program, sup, extra, session)
 }
 
 /// Seznam aplikaci pro listu a kanal pro zadosti o spusteni.
@@ -513,9 +578,14 @@ pub fn launch_requests(startup: &Startup, sup: &mut Supervisor) {
             println!("init: kompozitor chce spustit neznamou aplikaci {id}");
             continue;
         };
+        // Do aktivni relace; bez prihlaseni se nic nespousti.
+        let Some(session) = crate::session::active() else {
+            println!("init: {program} z listy: nikdo neni prihlaseny");
+            continue;
+        };
         let mut g = GUI.lock();
         let Some(gui) = g.as_mut() else { return };
-        match launch_app(gui, startup, sup, program) {
+        match launch_app(gui, startup, sup, program, session) {
             Ok(_) => println!("init: {program} spusten z listy"),
             Err(e) => println!("init: {program} z listy nelze spustit: {e}"),
         }

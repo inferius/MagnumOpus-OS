@@ -14,6 +14,7 @@ dependencies = [
  "accounts",
  "conf",
  "fsproto",
+ "guiproto",
  "libos",
  "rand_core 0.6.4",
  "wire",
@@ -523,6 +524,7 @@ dependencies = [
 name = "compd"
 version = "0.1.0"
 dependencies = [
+ "accountproto",
  "audioproto",
  "comp",
  "font",
@@ -534,6 +536,7 @@ dependencies = [
  "theme",
  "venus",
  "vkcomp",
+ "wire",
 ]
 
 [[package]]

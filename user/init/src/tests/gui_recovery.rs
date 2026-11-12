@@ -83,7 +83,7 @@ pub fn crash_mid_work(startup: &Startup) -> TestResult {
     };
     let mut h = Harness::new(startup);
     h.add_service(gui::NAME, gui::DEPS, Box::new(CompdService::new(shared.clone(), true)))?;
-    let mut g = Gui { shared, apps: Vec::new(), size };
+    let mut g = Gui { shared, apps: Vec::new(), session_apps: Vec::new(), size };
     // Aplikace v jinem procesu s relaci a listkem od supervisoru testu.
     let info = gui::recipe(startup, "gui-demo").map_err(|e| fail("identita gui-demo", e))?;
     let (ch, lease) = h.sup.session(gui::NAME, info.encode()).map_err(|e| fail("relace okna", e))?;

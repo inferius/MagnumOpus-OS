@@ -144,9 +144,9 @@ recomputed.
 
 | Profile | Memory `m` | Passes `t` | Lanes `p` | Time (measured) | When |
 |---|---|---|---|---|---|
-| `qemu` | 8 MiB | 2 | 1 | host 5 ms (native); a whole sign-in in QEMU TCG (x86_64 and aarch64, incl. two DB writes with `fsync`) 0.1-0.3 s | `cargo xtask run`, `cargo xtask test` |
-| `hw` (default) | 64 MiB | 3 | 1 | host 70 ms (2024 Ryzen/Core, native) | real PC |
-| `hw` after calibration (plan) | 64 MiB | 3-10 | 1 | target 250-500 ms | installation measures and raises `t` |
+| `qemu` | 8 MiB | 2 | 1 | host 5 ms (release, `52d2ebe`); a whole sign-in in QEMU TCG (debug, `52d2ebe`, x86_64 and aarch64, incl. two DB writes with `fsync`) 0.1-0.3 s | `cargo xtask run`, `cargo xtask test` |
+| `hw` (default) | 64 MiB | 3 | 1 | host 70 ms (release, `52d2ebe`, 2024 PC) | real PC |
+| `hw` after calibration (plan) | 64 MiB | 3-10 | 1 | target a quarter to half a second | installation measures and raises `t` |
 
 For comparison: OWASP recommends at least 19 MiB and `t=2`, RFC 9106's
 second choice is 64 MiB and `t=3`. Memory is the main protection against
@@ -157,7 +157,8 @@ doubled.
 
 Implementation: the `argon2` crate (RustCrypto), no home-grown
 cryptography. In the debug build `argon2`, `blake2` and `accounts` are compiled
-with optimisation (`Cargo.toml`): without it a sign-in took ~2 s in QEMU.
+with optimisation (`Cargo.toml`): without it a sign-in took ~2 s in QEMU
+(debug, `52d2ebe`, TCG).
 
 ### Device-bound PIN
 
@@ -297,23 +298,98 @@ methods; the PIN additionally has its own 5 attempts):
      accountd asks,
   2. mints an FS session `CONNECT_AS(uid, groups, profile.user_mounts())`,
   3. keeps the session's self channel (account settings in the session
-     get it).
-  - *Next step* (with the desktop and taskd): a **session job** with all
-    the user's processes (termd, desktop, applications) using this
-    identity, applications with narrower sessions according to their
-    manifest (`app_mounts`), taskd and GUI channels with the same identity
-    and the session recipe in a lease (recovery after an fsd crash). The
-    terminal gets init's FS session (system) today - switching it to the
-    signed-in user's session belongs to the same step.
-- **Sign-out** (`LOGOUT`): init drops the FS session and the self channel
-  (with the session job it also ends the user's processes - only that also
-  closes the channels the session processes opened themselves via
-  `CONNECT`). An encrypted home is locked (`UNLOAD_KEY`).
-- **Screen lock** (`LOCK`, or Ctrl+Alt+Delete -> Lock): processes keep
-  running, the compositor shows the lock screen in the system layer and
-  input goes only there. **Only the same account** can unlock (`UNLOCK`
-  with authentication), or sign out. Locking does not erase the home key
-  from memory (processes keep working with the home).
+     get it),
+  4. creates the **session job** and sends an "opened" event to the
+     supervisor loop (`session::EVENTS`). **[implemented]**
+- **Desktop only after sign-in** **[implemented]** (`user/init/src/desktop.rs`):
+  init starts the desktop applications (terminal, task manager, demo) only
+  for a signed-in session, in its job. The session's terminal window gets
+  a termd with the **signed-in user's FS session** (previously init's
+  session = the system), and termd and its `shsess` run in the session
+  job. The bar launches applications into the active (most recent
+  unlocked) session; without a sign-in it launches nothing. The compositor
+  gets `session open|lock|unlock|close` (hides or shows the sign-in
+  screen).
+- **Basic FS rights of people:** the `uzivatele` group may list the root
+  (it sees only entries it has a right to), only pass through `/home` and
+  create in `/tmp` and `/tmp/.aside` (shell clones); the grant applies to
+  the directory only and is not inherited, so other people's files in
+  `/tmp` stay invisible.
+- The session recipe in a lease (recovery after an fsd crash),
+  applications with narrower sessions by manifest (`app_mounts`) and a
+  taskd channel with the session identity **[designed]**.
+- **Sign-out** (`LOGOUT`) **[implemented]**: init drops the FS session
+  and the self channel and with the [`JOB_KILL`](syscalls.md#job_kill)
+  syscall ends **all** the session's processes (also `shsess` from termd
+  and applications started by applications) and closes the job, so nothing
+  new can start in it; the compositor shows the sign-in screen. An
+  encrypted home is locked (`UNLOAD_KEY`). Test `ucty: udalosti a job
+  relace` (x86_64 and aarch64).
+- **Screen lock** **[implemented]** (`LOCK` from the session, or
+  Ctrl+Alt+Delete -> Lock = `LOGIN_LOCK` on the login channel): processes
+  keep running, the compositor shows the lock screen and input goes only
+  there. **Only the same account** can unlock (`UNLOCK` with
+  authentication), or sign out. Locking does not erase the home key from
+  memory (processes keep working with the home).
+
+### Sign-in and lock screen
+
+**[implemented]** Following `design/prihlaseni.html`. The compositor
+draws it (`libs/comp/src/greeter.rs`) over the whole screen: the windows
+underneath are not drawn at all (not in the GPU path either), nor is the
+bar. It takes **physical input only** (synthetic input, e.g. from an
+agent, is dropped) and ignores input for the first 0.3 seconds after it
+appears.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sign-in screen and its channels">
+<defs><marker id="ue5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="20" width="160" height="60" rx="6"/><text class="t b" x="90" y="45" text-anchor="middle">keyboard, mouse</text><text class="m" x="90" y="64" text-anchor="middle">physical input only</text>
+<rect class="acc" x="240" y="20" width="220" height="110" rx="6"/><text class="t b" x="350" y="45" text-anchor="middle">compd: screen</text><text class="m" x="350" y="66" text-anchor="middle">account, method,</text><text class="m" x="350" y="82" text-anchor="middle">phrase, slow-down countdown</text><text class="m" x="350" y="98" text-anchor="middle">windows below not drawn</text><text class="m" x="350" y="114" text-anchor="middle">asynchronous (frame never waits)</text>
+<rect class="box" x="560" y="20" width="190" height="60" rx="6"/><text class="t b" x="655" y="45" text-anchor="middle">accountd</text><text class="m" x="655" y="64" text-anchor="middle">login channel</text>
+<rect class="ok" x="560" y="150" width="190" height="70" rx="6"/><text class="t b" x="655" y="175" text-anchor="middle">init</text><text class="m" x="655" y="194" text-anchor="middle">session, job, desktop</text><text class="m" x="655" y="210" text-anchor="middle">session open|lock|close</text>
+<path class="ln" d="M170 50 L238 50" marker-end="url(#ue5)"/>
+<path class="ln" d="M460 45 L558 45" marker-end="url(#ue5)"/><text class="m" x="509" y="38" text-anchor="middle">AUTH, UNLOCK</text>
+<path class="ln" d="M655 80 L655 148" marker-end="url(#ue5)"/><text class="m" x="700" y="118">OPEN_SESSION</text>
+<path class="ln" d="M558 190 L350 190 L350 132" marker-end="url(#ue5)"/><text class="m" x="455" y="183" text-anchor="middle">session ... (hide, lock)</text>
+</svg>
+<figcaption>The screen only collects secrets; accountd decides about the sign-in and init about what is shown.</figcaption>
+</figure>
+
+- The compositor gets a **`login`** channel to the account service from
+  init (`guiproto::control::LOGIN`) and the session state (`session open
+  <id> <uid> <name>`, `session lock|unlock|close <id>`). The screen is
+  shown when no session is unlocked: the sign-in without a session, the
+  lock screen (clock, date, only the session's account) with a locked one.
+- Methods by account: **PIN** (default when the account has one; digits
+  only), **password**, **security key** (field = key PIN; "Touch the
+  security key"), **forgotten password** = recovery key. Tab switches the
+  method, arrows the account, Enter authenticates, Esc clears the field.
+- The account's security phrase appears only after the account is picked
+  (a fake screen does not know it). Failure messages: "Wrong password",
+  remaining PIN attempts, blocked PIN, slow-down countdown ("Next attempt
+  in 30 s").
+- compd sends the requests **asynchronously** (`user/compd/src/login.rs`):
+  neither Argon2id nor a key touch delays a frame. The password is zeroed
+  in the message after encoding.
+- **Secure fields** **[implemented]** (sign-in, lock, a dialog with a
+  password or PIN): the input trace records only "input into a secure
+  field", never a character or the length; the diagnostic snapshot states
+  only the screen state and covers the field grey in the image (not even
+  the number of dots). Secrets in compd are overwritten with zeros after
+  sending (screen field, dialog password, the encoded message and one
+  queued on a channel) and never go to logd. Test
+  `cargo test -p comp tajemstvi_neni_v_trasovani_ani_snimku`.
+- **The lock screen reveals nothing:** instead of the desktop it draws
+  only the wallpaper (no windows or their content), no notifications or
+  their count, only the clock, date and the session's account.
+- Host tests: `cargo test -p comp greeter` (PIN sign-in, synthetic input,
+  account and method choice, slow-down, lock and unlock only by the same
+  account, windows below are not drawn, sign-out); snapshots
+  `target/comp-greeter.png` and `target/comp-greeter-zamceno.png`.
+- ⚠️ First boot without an account: the screen has nobody to offer;
+  creating the first account (`setup` channel) belongs to the installer
+  **[designed]**.
 - The protocol supports several simultaneous sessions (fast user
   switching) by session number; the switching screen comes with the
   desktop.
@@ -379,6 +455,29 @@ application or malware in the session can change the whole computer.
   others and take it away (not the last one). Every action is written to
   the audit (`/db/audit`): who asked, who confirmed, what, whether in
   administration mode.
+
+**Rollout** **[implemented]** (`user/accountd/src/admin.rs`, dialog
+`DialogKind::Elevate` in `libs/comp`): the compositor gives the account
+service a `dialog` channel (init passes it on to a new instance after a
+compositor crash too). `ELEVATE` from a session sends the confirming
+person's phrase and a dialog titled "<application> wants to change the
+system" with the action's real parameters and a line "Confirms: <name>
+(may administer this computer)"; the field accepts a password or a PIN (a
+PIN when it is digits only and the account has one). Verification works
+like sign-in (slow-down, counter). accountd performs account actions
+(1-4) right away and replies with the result (the uid for
+`ACCOUNT_CREATE`); other services' actions (5-15) get a **grant**: a 16 B
+token, 60 s, once, only for the same parameters (compared byte by byte),
+which the service checks and consumes with `CHECK_GRANT` on the
+**`grants`** channel. Cancel = `CANCELED`, wrong password =
+`ACCESS_DENIED`, no compositor (tests, console) = `NOT_SUPPORTED`. A
+signed-in account cannot be deleted (`BAD_STATE`).
+
+First-version limits: the signed-in person confirms when they have the
+role, otherwise the **first** account with the role (choosing among
+several accounts in the dialog **[designed]**); the requester shows as
+"Application of user <name>" until the self channel goes to Settings with
+its own identity from the manifest **[designed]**.
 
 | Action (`ELEVATE`) | Parameters |
 |---|---|
@@ -475,6 +574,7 @@ them after use. The channels are different capabilities:
 | `login` | sign-in screen (system layer), init tests | list accounts for selection, authenticate, unlock |
 | `self` | user session (settings) | own account: methods, phrase, encryption, lock, sign-out, request an administration action |
 | `setup` | installer, only while no account exists | create the first account with the role |
+| `grants` | services performing administration actions (devmgr, fwd, updates, ...) | check and consume a grant |
 | `init` | init (private) | sessions, homes, home keys |
 
 | Op | Channel | Name | Fields | Reply |
@@ -483,6 +583,7 @@ them after use. The channels are different capabilities:
 | 2 | login | `PHRASE` | uid | phrase (shown after an account is picked) |
 | 3 | login | `AUTH` | uid, method u8, secret | `OK` session u64 / `DENIED` wait ms, PIN attempts left / `LOCKED_OUT` ms |
 | 4 | login | `UNLOCK` | session, method, secret | like `AUTH` |
+| 5 | login | `LOGIN_LOCK` | session | - (lock from the screen; unlocking only with authentication) |
 | 10 | self | `WHOAMI` | - | account record without secrets |
 | 11 | self | `SET_PASSWORD` | old secret, new secret | - |
 | 12 | self | `SET_PIN` | password secret, PIN secret (empty = delete) | - |
@@ -492,9 +593,10 @@ them after use. The channels are different capabilities:
 | 16 | self | `ENCRYPT_HOME` | password secret | recovery key (only once) / `NOT_SUPPORTED` |
 | 17 | self | `LOCK` | - | - |
 | 18 | self | `LOGOUT` | - | - |
-| 19 | self | `ELEVATE` | action u32, parameters | capability (see [Administration](#administering-the-computer)); `NOT_SUPPORTED` until the compositor dialog exists |
+| 19 | self | `ELEVATE` | action u32, parameters (`accountproto::elevate::Params`) | after the dialog: the account action's result or a grant token; `CANCELED`, `ACCESS_DENIED`, without a compositor `NOT_SUPPORTED` |
 | 20 | self | `SET_KEY_PIN` | PIN secret | - (a key that has no PIN yet) |
 | 30 | setup | `CREATE_FIRST` | name, display name, password secret | uid |
+| 40 | grants | `CHECK_GRANT` | token (16 B blob), action u32, parameters (blob) | - or `ACCESS_DENIED`; the token is consumed |
 | 50 | init | `OPEN_SESSION` (accountd -> init, + self channel handle) | uid, groups, home | session u64 |
 | 51 | init | `CLOSE_SESSION` | session | - |
 | 52, 53 | init | `LOCK_SESSION`, `UNLOCK_SESSION` | session | - |
@@ -576,6 +678,8 @@ aarch64):
 | session sees only its home | someone else's home and its files `NOT_FOUND`, `/home` cannot be listed, the account DB `NOT_FOUND` |
 | init does not mint a system identity | `OPEN_SESSION` for 0, 902, 999 and group 0 refused, no home for the system |
 | lock and sign-out | lock, unlock with a wrong and the right password, after sign-out the session and its FS are gone |
+| session events and job | opened/locked/unlocked/closed events, name and active session, a process in the session job, the job is gone after sign-out |
+| raising privileges with the dialog | the test plays the compositor: dialog text, wrong password, cancel, allow with administration mode (the account is created), another action in the mode without a dialog, a grant only once and only for the same parameters |
 | wrong password and slow-down | unknown account, 3rd failure = 30 s, during the wait even the right password fails |
 
 ## Risks and limitations
@@ -600,19 +704,20 @@ aarch64):
 - The sign-in screen and the administration dialog are only as secure as
   the compositor's system layer (applications do not draw into it, input
   goes only there) and the `inputd` secure attention shortcut.
-- Until the session job exists, sign-out closes init's session channels
-  but not FS sessions a process opened itself with `CONNECT`.
+- ⚠️ The fallback console (no GUI) has no sign-in yet: its terminal runs
+  as the system, as before.
 
 ## Rollout status
 
 | Part | Status |
 |---|---|
-| design (this page) | done |
-| administration model | approved; role, first account with the role and protection of the last role done (`libs/accounts`), `ELEVATE` with the dialog after the sign-in screen (GUI thread) |
-| `libs/accountproto` (messages, client, CTAP2: CBOR, CTAPHID, COSE, PIN protocols 1 and 2, simulated key) | done, host tests |
-| `libs/accounts` (records, Argon2id, PIN with the device key, slow-down, keys, wraps, recovery key) | done, host tests |
-| `user/accountd` (DB on the FS, login/self/setup channels, development sign-in) | done, QEMU tests |
-| session manager in init (homes, FS sessions, lock, sign-out) | done; the session job with the user's processes and switching the terminal to the user identity = next step |
-| CTAPHID transport in `usb-hid` (usage page `0xF1D0`), devmgr and init (`fido` -> `key`) | done; QEMU does not emulate a FIDO2 key, not yet verified on a real key |
-| home encryption | wraps and recovery key done; dataset encryption = FS step (`NOT_SUPPORTED` until then) |
-| sign-in screen, account settings | GUI thread |
+| design (this page) | **[implemented]** |
+| administration model | approved; **[implemented]** role, first account with the role, protection of the last role, `ELEVATE` with the dialog, account actions, grants, administration mode, audit; choosing the confirming account among several **[designed]** |
+| `libs/accountproto` (messages, client, CTAP2, simulated key, administration actions) | **[implemented]**, host tests |
+| `libs/accounts` (records, Argon2id, PIN, slow-down, keys, wraps, recovery key, password reset by administration) | **[implemented]**, host tests |
+| `user/accountd` (DB on the FS, login/self/setup/grants channels, administration dialog, development sign-in) | **[implemented]**, QEMU tests |
+| session manager and session job in init, desktop only after sign-in, terminal with the user identity, sign-out via `JOB_KILL` | **[implemented]** |
+| sign-in and lock screen in the compositor | **[implemented]**, host tests; installer of the first account **[designed]** |
+| CTAPHID transport in `usb-hid`, devmgr and init (`fido` -> `key`) | **[implemented]**; QEMU does not emulate a FIDO2 key, not yet verified on a real key |
+| home encryption | wraps and recovery key **[implemented]**; FS vaults **[designed]** (FS phase 4) |
+| account settings in the GUI | **[designed]** (Settings application) |

@@ -19,6 +19,7 @@
 extern crate alloc;
 
 pub mod ctap;
+pub mod elevate;
 mod msg;
 #[cfg(feature = "client")]
 pub mod client;
@@ -63,6 +64,8 @@ pub mod op {
     pub const PHRASE: u32 = 2;
     pub const AUTH: u32 = 3;
     pub const UNLOCK: u32 = 4;
+    /// Zamknout relaci (zamykaci obrazovka; odemknout jde jen overenim).
+    pub const LOGIN_LOCK: u32 = 5;
     // self
     pub const WHOAMI: u32 = 10;
     pub const SET_PASSWORD: u32 = 11;
@@ -77,6 +80,8 @@ pub mod op {
     pub const SET_KEY_PIN: u32 = 20;
     // setup
     pub const CREATE_FIRST: u32 = 30;
+    // grants (sluzby ukonu)
+    pub const CHECK_GRANT: u32 = 40;
     // init (accountd -> init)
     pub const OPEN_SESSION: u32 = 50;
     pub const CLOSE_SESSION: u32 = 51;

@@ -14,6 +14,7 @@ pub enum Request {
     Phrase { uid: u64 },
     Auth { uid: u64, method: Method, secret: Secret },
     Unlock { session: u64, method: Method, secret: Secret },
+    LockSession { session: u64 },
     WhoAmI,
     SetPassword { old: Secret, new: Secret },
     /// Prazdny `pin` = PIN smazat.
@@ -40,6 +41,7 @@ impl Request {
             Request::Phrase { .. } => op::PHRASE,
             Request::Auth { .. } => op::AUTH,
             Request::Unlock { .. } => op::UNLOCK,
+            Request::LockSession { .. } => op::LOGIN_LOCK,
             Request::WhoAmI => op::WHOAMI,
             Request::SetPassword { .. } => op::SET_PASSWORD,
             Request::SetPin { .. } => op::SET_PIN,
@@ -61,6 +63,9 @@ impl Request {
             Request::List | Request::WhoAmI | Request::Lock | Request::Logout => {}
             Request::Phrase { uid } => {
                 w.u64(*uid);
+            }
+            Request::LockSession { session } => {
+                w.u64(*session);
             }
             Request::Auth { uid, method, secret } => {
                 w.u64(*uid).u8(method.to_u8());
@@ -119,6 +124,7 @@ impl Request {
                 method: Method::from_u8(r.u8()?)?,
                 secret: get_secret(&mut r)?,
             },
+            op::LOGIN_LOCK => Request::LockSession { session: r.u64()? },
             op::WHOAMI => Request::WhoAmI,
             op::SET_PASSWORD => Request::SetPassword { old: get_secret(&mut r)?, new: get_secret(&mut r)? },
             op::SET_PIN => Request::SetPin { password: get_secret(&mut r)?, pin: get_secret(&mut r)? },
@@ -149,7 +155,10 @@ impl Request {
 
     /// Patri operace na kanal login?
     pub fn is_login(&self) -> bool {
-        matches!(self, Request::List | Request::Phrase { .. } | Request::Auth { .. } | Request::Unlock { .. })
+        matches!(
+            self,
+            Request::List | Request::Phrase { .. } | Request::Auth { .. } | Request::Unlock { .. } | Request::LockSession { .. }
+        )
     }
 
     /// Patri operace na kanal self?

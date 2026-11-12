@@ -17,6 +17,7 @@
 
 extern crate alloc;
 
+mod admin;
 mod os;
 mod service;
 mod store;
@@ -82,6 +83,8 @@ fn dev_login(svc: &mut Service) {
 enum Kind {
     Login,
     Setup,
+    /// Sluzby ukonu spravy (`CHECK_GRANT`).
+    Grants,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -130,7 +133,7 @@ fn main(startup: Startup) -> i64 {
     for (name, e) in &eng.broken {
         println!("accountd: poskozeny zaznam uctu {name}: {e}");
     }
-    let mut svc = Service { eng, init, sessions: Vec::new(), keys: Vec::new(), events: Vec::new() };
+    let mut svc = Service { eng, init, sessions: Vec::new(), keys: Vec::new(), events: Vec::new(), admin: Default::default() };
     if bootstrap.write(b"ok", Vec::new()).is_err() {
         return 4;
     }
@@ -160,6 +163,9 @@ fn main(startup: Startup) -> i64 {
         for s in &svc.sessions {
             items.push((s.chan.handle(), rd));
         }
+        if let Some(d) = &svc.admin.dialog {
+            items.push((d.handle(), rd));
+        }
         let observed = match libos::wait_many(&items, None) {
             Ok((_, o)) => o,
             Err(e) => {
@@ -169,6 +175,7 @@ fn main(startup: Startup) -> i64 {
         };
         drop(items);
         let nc = clients.len();
+        let svc_sessions_before = svc.sessions.len();
         // Relace (od konce: odebirani nemeni nizsi indexy).
         for i in (0..svc.sessions.len()).rev() {
             let s = observed[2 + nc + i];
@@ -176,11 +183,13 @@ fn main(startup: Startup) -> i64 {
                 while let Ok(mut msg) = svc.sessions[i].chan.try_read() {
                     let reply = match Request::decode(&msg.data) {
                         Ok(r) if r.is_self() => svc.own(i, r),
-                        Ok(_) => accountproto::reply_err(Error::AccessDenied),
-                        Err(e) => accountproto::reply_err(e),
+                        Ok(_) => Some(accountproto::reply_err(Error::AccessDenied)),
+                        Err(e) => Some(accountproto::reply_err(e)),
                     };
                     msg.data.zeroize();
-                    let _ = svc.sessions[i].chan.write(&reply, Vec::new());
+                    if let Some(reply) = reply {
+                        let _ = svc.sessions[i].chan.write(&reply, Vec::new());
+                    }
                     if svc.sessions[i].closed {
                         break;
                     }
@@ -196,6 +205,7 @@ fn main(startup: Startup) -> i64 {
             if s.contains(Signals::READABLE) {
                 while let Ok(mut msg) = clients[i].0.try_read() {
                     let reply = match (Request::decode(&msg.data), clients[i].1) {
+                        (_, Kind::Grants) => svc.check_grant(&msg.data),
                         (Ok(r), Kind::Login) if r.is_login() => svc.login(r),
                         (Ok(r), Kind::Setup) => svc.setup(r),
                         (Ok(_), _) => accountproto::reply_err(Error::AccessDenied),
@@ -206,6 +216,14 @@ fn main(startup: Startup) -> i64 {
                 }
             } else if s.contains(Signals::PEER_CLOSED) {
                 clients.swap_remove(i);
+            }
+        }
+        // Odpovedi dialogu spravy (signal za relacemi).
+        if svc.admin.dialog.is_some() && observed.get(2 + nc + svc_sessions_before).is_some_and(|s| s.intersects(rd)) {
+            for a in svc.dialog_answers() {
+                if let Some(s) = svc.sessions.iter().find(|s| s.id == a.session) {
+                    let _ = s.chan.write(&a.reply, Vec::new());
+                }
             }
         }
         if observed[1].contains(Signals::READABLE) {
@@ -231,12 +249,22 @@ fn main(startup: Startup) -> i64 {
         let kind = match &msg.data[..] {
             b"login" => Some(Kind::Login),
             b"setup" => Some(Kind::Setup),
+            b"grants" => Some(Kind::Grants),
             _ => None,
         };
         let reply = if let Some(k) = kind {
             match msg.handles.into_iter().next() {
                 Some(h) => {
                     clients.push((Channel::from_handle(h), k));
+                    String::from("ok")
+                }
+                None => String::from("err:chybi handle"),
+            }
+        } else if msg.data == b"dialog" {
+            // Kanal duveryhodneho dialogu od kompozitoru (i nova instance).
+            match msg.handles.into_iter().next() {
+                Some(h) => {
+                    svc.admin.dialog = Some(Channel::from_handle(h));
                     String::from("ok")
                 }
                 None => String::from("err:chybi handle"),

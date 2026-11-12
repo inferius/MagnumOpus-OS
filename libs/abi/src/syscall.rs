@@ -167,8 +167,14 @@ pub const CRASH_RECORD: u64 = 52;
 /// buf_ptr, buf_len) -> bajty`; `op` z [`log_op`]. Text v bufferu je ASCII.
 pub const LOG_CONTROL: u64 = 53;
 
+/// Ukonci vsechny procesy jobu a jeho potomku a job uzavre: novy proces
+/// ani podjob v nem uz nevznikne (`BAD_STATE`). `(job, code)`; job
+/// potrebuje `MANAGE`, `code` = navratovy kod ukoncenych procesu. Volajici
+/// uvnitr zabijeneho jobu skonci take (pri navratu ze syscallu).
+pub const JOB_KILL: u64 = 54;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 54;
+pub const COUNT: u64 = 55;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

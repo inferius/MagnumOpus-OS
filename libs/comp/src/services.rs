@@ -218,6 +218,7 @@ impl Comp {
                         options: alloc::vec![String::from("Povolit"), String::from("Zamítnout")],
                         sel: 1,
                         password: String::new(),
+                        flag: None,
                     });
                 } else {
                     self.invoke(id);

@@ -544,6 +544,11 @@ pub fn job_processes(job: u32, buf: &mut [u8]) -> Result<usize> {
     call(nr::JOB_PROCESSES, [job as u64, buf.as_mut_ptr() as u64, max as u64, 0, 0, 0]).map(|n| n as usize)
 }
 
+/// Ukonci procesy jobu a jeho potomku a job uzavre (`JOB_KILL`).
+pub fn job_kill(job: u32, code: i64) -> Result<()> {
+    call(nr::JOB_KILL, [job as u64, code as u64, 0, 0, 0, 0]).map(|_| ())
+}
+
 pub fn job_info(job: u32) -> Result<abi::job::JobInfo> {
     let mut buf = [0u8; abi::job::JobInfo::SIZE];
     call(nr::JOB_INFO, [job as u64, buf.as_mut_ptr() as u64, 0, 0, 0, 0])?;

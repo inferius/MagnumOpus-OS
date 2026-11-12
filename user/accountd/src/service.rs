@@ -38,6 +38,8 @@ pub struct Service {
     pub keys: Vec<Channel>,
     /// Udalosti initu prijate behem cekani na odpoved.
     pub events: Vec<Vec<u8>>,
+    /// Sprava pocitace: dialog, cekajici ukony, granty, rezim spravy.
+    pub admin: crate::admin::Admin,
 }
 
 /// Realny cas v sekundach (zpomaleni po chybach).
@@ -167,9 +169,19 @@ impl Service {
                 Err(e) => Err(e),
             },
             Request::Unlock { session, method, secret } => self.unlock(session, method, &secret),
+            Request::LockSession { session } => self.lock(session),
             _ => Err(Error::AccessDenied),
         };
         reply(r)
+    }
+
+    /// Zamknout relaci z obrazovky (bezpecna zkratka). Zamknout smi
+    /// kanal login kazdou relaci; odemknout jen overeni stejneho uctu.
+    fn lock(&mut self, session: u64) -> Result<Vec<u8>> {
+        let i = self.sessions.iter().position(|s| s.id == session).ok_or(Error::NotFound)?;
+        self.to_init(&ToInit::LockSession { session }, Vec::new())?;
+        self.sessions[i].locked = true;
+        Ok(Vec::new())
     }
 
     fn unlock(&mut self, session: u64, method: Method, secret: &Secret) -> Result<Vec<u8>> {
@@ -204,11 +216,14 @@ impl Service {
         reply(r)
     }
 
-    /// Kanal self relace `i`.
-    pub fn own(&mut self, i: usize, req: Request) -> Vec<u8> {
+    /// Kanal self relace `i`. `None` = odpoved prijde pozdeji (ukon spravy
+    /// ceka na dialog).
+    pub fn own(&mut self, i: usize, req: Request) -> Option<Vec<u8>> {
         let (session, uid) = (self.sessions[i].id, self.sessions[i].uid);
         let now = now();
         let r: Result<Vec<u8>> = match req {
+            // Ukon pro cely pocitac: duveryhodny dialog kompozitoru.
+            Request::Elevate { action, params } => return self.elevate(i, action, params),
             Request::WhoAmI => self.whoami(session, uid),
             Request::SetPassword { old, new } => self.eng.set_password(uid, &old, &new, now).map(|_| Vec::new()),
             Request::SetPin { password, pin } => self.eng.set_pin(uid, &password, &pin, now).map(|_| Vec::new()),
@@ -240,12 +255,9 @@ impl Service {
                 self.sessions[i].closed = true;
                 Vec::new()
             }),
-            // Ukony spravy potvrzuje systemovy dialog kompozitoru (vlakno
-            // GUI); do te doby se nic pro cely pocitac nepovoli.
-            Request::Elevate { .. } => Err(Error::NotSupported),
             _ => Err(Error::AccessDenied),
         };
-        reply(r)
+        Some(reply(r))
     }
 
     fn whoami(&self, session: u64, uid: u64) -> Result<Vec<u8>> {

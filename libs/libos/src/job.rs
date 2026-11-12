@@ -71,6 +71,13 @@ impl Job {
         }
     }
 
+    /// Ukonci vsechny procesy jobu a jeho potomku s kodem `code` a job
+    /// uzavre: novy proces ani podjob v nem uz nevznikne (`BAD_STATE`).
+    /// Je-li volajici v tomto jobu, skonci take.
+    pub fn kill(&self, code: i64) -> Result<()> {
+        sys::job_kill(self.0.raw(), code)
+    }
+
     /// Novy handle na stejny job; `None` = stejna prava.
     pub fn duplicate(&self, rights: Option<Rights>) -> Result<Self> {
         self.0.duplicate(rights).map(Self)

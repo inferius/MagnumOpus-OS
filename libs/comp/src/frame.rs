@@ -159,6 +159,9 @@ impl Comp {
         if let Some(d) = self.dialogs.next_wakeup() {
             at(d);
         }
+        if let Some(d) = self.greeter_wakeup(now) {
+            at(d);
+        }
         t.map(|v| v.max(now))
     }
 

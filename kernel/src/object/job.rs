@@ -13,7 +13,7 @@
 //! chvili ukazuje obe). Opacne to nejde - limit se nikdy neprekroci.
 
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use schedcore::Class;
 
@@ -56,6 +56,8 @@ pub struct Job {
     used: [AtomicU64; pool::COUNT],
     /// Vlastni strop tridy QoS (`Class as u8`); plati i strop predku.
     qos_max: AtomicU8,
+    /// Job ukonceny `JOB_KILL`: neprijme novy proces ani podjob.
+    killed: AtomicBool,
     /// Strzeni za tento objekt (z rozpoctu jobu, ktery ho vytvoril).
     _charge: Charge,
 }
@@ -70,8 +72,35 @@ impl Job {
     /// Podrizeny job bez vlastniho limitu (plati limity predku). Objekt
     /// se strhne z rozpoctu `parent`.
     pub fn new_child(parent: &Arc<Job>) -> Result<Arc<Self>, Error> {
+        if parent.is_killed() {
+            return Err(Error::BadState);
+        }
         let charge = parent.charge(Pool::Kernel, object_cost::<Job>())?;
-        Ok(Self::make(Some(parent.clone()), charge))
+        let child = Self::make(Some(parent.clone()), charge);
+        // Soubeh s `JOB_KILL` predka: podjob vznikly behem nej neprezije
+        // (kontrola po vytvoreni; zabity predek je videt pres retez).
+        if child.is_killed() {
+            return Err(Error::BadState);
+        }
+        Ok(child)
+    }
+
+    /// Je job (nebo nektery predek) ukonceny `JOB_KILL`?
+    pub fn is_killed(&self) -> bool {
+        let mut node = Some(self);
+        while let Some(j) = node {
+            if j.killed.load(Ordering::SeqCst) {
+                return true;
+            }
+            node = j.parent.as_deref();
+        }
+        false
+    }
+
+    /// Oznaci job jako ukonceny (dalsi procesy a podjoby neprijme).
+    /// Procesy ukonci volajici (`JOB_KILL` projde registr procesu).
+    pub fn mark_killed(&self) {
+        self.killed.store(true, Ordering::SeqCst);
     }
 
     fn make(parent: Option<Arc<Job>>, charge: Charge) -> Arc<Self> {
@@ -82,6 +111,7 @@ impl Job {
             limits: [AtomicU64::new(UNLIMITED), AtomicU64::new(UNLIMITED)],
             used: [AtomicU64::new(0), AtomicU64::new(0)],
             qos_max: AtomicU8::new(Class::Realtime as u8),
+            killed: AtomicBool::new(false),
             _charge: charge,
         })
     }

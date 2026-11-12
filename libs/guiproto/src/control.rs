@@ -54,6 +54,11 @@ pub const INPUT: &str = "input";
 pub const SECURE: &str = "secure";
 pub const CONNECT: &str = "connect";
 pub const DIALOG: &str = "dialog";
+/// Kanal `login` ke sluzbe uctu (handle): prihlasovaci obrazovka.
+pub const LOGIN: &str = "login";
+/// Relace od initu: `session open <id> <uid> <jmeno>`,
+/// `session lock|unlock|close <id>`.
+pub const SESSION: &str = "session";
 pub const ACTIONS: &str = "actions";
 pub const INSPECT: &str = "inspect";
 pub const STATUS: &str = "status";
@@ -179,6 +184,10 @@ pub enum DialogKind {
     Confirm,
     /// Zadat heslo (odpoved je text).
     Password,
+    /// Zvyseni prav (ukon pro cely pocitac): pole pro heslo nebo PIN
+    /// a zaskrtavatko "dalsich 5 minut nepotvrzovat". Odpoved: volba 0 =
+    /// povolit, 2 = povolit a rezim spravy, jinak zrusit; text = tajemstvi.
+    Elevate,
 }
 
 impl DialogKind {
@@ -187,6 +196,7 @@ impl DialogKind {
             DialogKind::Permission => 0,
             DialogKind::Confirm => 1,
             DialogKind::Password => 2,
+            DialogKind::Elevate => 3,
         }
     }
 
@@ -195,6 +205,7 @@ impl DialogKind {
             0 => DialogKind::Permission,
             1 => DialogKind::Confirm,
             2 => DialogKind::Password,
+            3 => DialogKind::Elevate,
             _ => return Err(Error::InvalidArgs),
         })
     }

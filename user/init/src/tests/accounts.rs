@@ -24,6 +24,8 @@ pub const TESTS: &[(&str, fn(&Startup) -> TestResult)] = &[
     ("relace vidi jen svuj domov", own_home_only),
     ("init nevyrazi systemovou identitu", no_system_identity),
     ("zamceni a odhlaseni", lock_and_logout),
+    ("udalosti a job relace", session_events),
+    ("zvyseni prav dialogem", elevate),
     ("spatne heslo a zpomaleni", wrong_password),
 ];
 
@@ -189,6 +191,119 @@ fn lock_and_logout(_: &Startup) -> TestResult {
     check_eq!(crate::session::locked(session), None, "relace po odhlaseni");
     check_eq!(crate::session::connect(session).err(), Some(Error::NotFound), "relace FS po odhlaseni");
     check!(me.whoami().is_err(), "kanal self po odhlaseni");
+    Ok(())
+}
+
+fn drain_events() -> alloc::vec::Vec<crate::session::Event> {
+    let mut v = alloc::vec::Vec::new();
+    if let Some(rx) = crate::session::events() {
+        while let Ok(m) = rx.try_read() {
+            v.extend(crate::session::Event::decode(&m.data));
+        }
+    }
+    v
+}
+
+fn session_events(startup: &Startup) -> TestResult {
+    use crate::session::Event;
+    let uid = alice_uid()?;
+    drain_events();
+    let session = sign_in(uid)?;
+    check_eq!(drain_events(), alloc::vec![Event::Opened(session)], "udalost otevreni");
+    let name = crate::session::name(session);
+    check_eq!(name.as_deref(), Some("alice"), "jmeno relace");
+    check_eq!(crate::session::active(), Some(session), "aktivni relace");
+    // Procesy relace bezi v jejim jobu.
+    let job = crate::session::job(session).map_err(|e| fail("job relace", e))?;
+    let app = crate::apps::spawn_in(startup, "echo", alloc::vec::Vec::new(), Some(&job)).map_err(|e| fail("proces v jobu relace", e))?;
+    app.control.write(b"sleep", alloc::vec::Vec::new()).map_err(|e| fail("sleep", e))?;
+    let me = SelfService(crate::session::take_self(session).ok_or_else(|| String::from("kanal self"))?);
+    me.lock().map_err(|e| fail("zamceni", e))?;
+    check_eq!(crate::session::active(), None, "zamcena relace neni aktivni");
+    check_eq!(login()?.unlock(session, Method::Password, Secret::from(PW)).ok(), Some(AuthReply::Ok { session }), "odemceni");
+    me.logout().map_err(|e| fail("odhlaseni", e))?;
+    check_eq!(drain_events(), alloc::vec![Event::Locked(session), Event::Unlocked(session), Event::Closed(session)], "udalosti relace");
+    check_eq!(crate::session::job(session).err(), Some(Error::NotFound), "job po odhlaseni");
+    // Odhlaseni ukonci i procesy, ktere init nesleduje (JOB_KILL).
+    let code = app.process.wait_exit(Some(libos::time::deadline_after(core::time::Duration::from_secs(5))));
+    check_eq!(code, Ok(libos::abi::process::EXIT_KILLED), "proces relace po odhlaseni");
+    check_eq!(crate::apps::spawn_in(startup, "echo", alloc::vec::Vec::new(), Some(&job)).err(), Some(Error::BadState), "job relace uzavreny");
+    Ok(())
+}
+
+/// Zadost ELEVATE na kanal self bez cekani na odpoved.
+fn send_elevate(me: &SelfService, action: u32, params: alloc::vec::Vec<u8>) -> TestResult {
+    me.0.write(&accountproto::Request::Elevate { action, params }.encode(), alloc::vec::Vec::new()).map_err(|e| fail("ELEVATE", e))
+}
+
+/// Odpoved na kanalu self (ELEVATE).
+fn elevate_reply(me: &SelfService) -> Result<alloc::vec::Vec<u8>, Error> {
+    let m = me.0.read(Some(libos::time::deadline_after(core::time::Duration::from_secs(20))))?;
+    accountproto::parse_reply(&m.data).map(<[u8]>::to_vec)
+}
+
+/// Test hraje kompozitor: precte frazi a dialog, odpovi volbou a heslem.
+fn answer_dialog(dialog: &libos::Channel, choice: u32, secret: &str) -> Result<alloc::string::String, String> {
+    use guiproto::control::{DialogKind, DialogReply, DialogRequest};
+    let deadline = Some(libos::time::deadline_after(core::time::Duration::from_secs(20)));
+    loop {
+        let m = dialog.read(deadline).map_err(|e| fail("dialog", e))?;
+        match DialogRequest::decode(&m.data).map_err(|e| fail("zprava dialogu", e))? {
+            DialogRequest::Phrase { .. } => continue,
+            DialogRequest::Ask { id, kind, text, options, .. } => {
+                check_eq!(kind, DialogKind::Elevate, "druh dialogu");
+                check_eq!(options.len(), 2, "tlacitka Povolit/Zrusit");
+                let r = DialogReply::Answer { id, choice, text: String::from(secret) };
+                dialog.write(&r.encode(), alloc::vec::Vec::new()).map_err(|e| fail("odpoved dialogu", e))?;
+                return Ok(text);
+            }
+            DialogRequest::Cancel { .. } => return Err(String::from("dialog zrusen")),
+        }
+    }
+}
+
+fn elevate(_: &Startup) -> TestResult {
+    use accountproto::elevate::{Params, action, encode_check};
+    let uid = alice_uid()?;
+    let session = sign_in(uid)?;
+    let me = SelfService(crate::session::take_self(session).ok_or_else(|| String::from("kanal self"))?);
+    let (ours, theirs) = libos::Channel::create().map_err(|e| fail("kanal", e))?;
+    crate::accounts::give_dialog(theirs).map_err(|e| fail("dialog pro accountd", e))?;
+    let bob = Params::AccountCreate { name: "bob".into(), display: "Bob".into(), password: Secret::from("Bobovo heslo"), admin: false };
+    // Spatne heslo potvrzujiciho: nic se nestane.
+    send_elevate(&me, action::ACCOUNT_CREATE, bob.encode())?;
+    let text = answer_dialog(&ours, 0, "spatne heslo")?;
+    check!(text.contains("Přidat účet bob") && text.contains("Potvrzuje: Alice"), &format!("text dialogu: {text}"));
+    check_eq!(elevate_reply(&me).err(), Some(Error::AccessDenied), "spatne heslo");
+    // Zrusit.
+    send_elevate(&me, action::ACCOUNT_CREATE, bob.encode())?;
+    answer_dialog(&ours, 1, "")?;
+    check_eq!(elevate_reply(&me).err(), Some(Error::Canceled), "zruseno");
+    // Povolit s rezimem spravy: ucet vznikne.
+    send_elevate(&me, action::ACCOUNT_CREATE, bob.encode())?;
+    answer_dialog(&ours, 2, PW)?;
+    let b = elevate_reply(&me).map_err(|e| fail("pridani uctu", e))?;
+    let bob_uid = u64::from_le_bytes(b.get(..8).and_then(|x| x.try_into().ok()).ok_or_else(|| String::from("uid"))?);
+    check!(login()?.list().map_err(|e| fail("list", e))?.iter().any(|a| a.uid == bob_uid && a.name == "bob"), "bob ve vypisu");
+    // V rezimu spravy dalsi ukon bez dialogu.
+    send_elevate(&me, action::ROLE_SET, Params::RoleSet { uid: bob_uid, on: true }.encode())?;
+    elevate_reply(&me).map_err(|e| fail("role v rezimu spravy", e))?;
+    check!(ours.try_read().is_err(), "v rezimu spravy zadny dialog");
+    // Ukon jine sluzby: grant jen jednou a jen na stejne parametry.
+    send_elevate(&me, 6, b"disk0".to_vec())?;
+    let token = elevate_reply(&me).map_err(|e| fail("grant", e))?;
+    check_eq!(token.len(), 16, "token grantu");
+    let grants = crate::accounts::channel("grants").map_err(|e| fail("kanal grants", e))?;
+    let check = |params: &[u8]| -> Result<(), Error> {
+        grants.write(&encode_check(&token, 6, params), alloc::vec::Vec::new())?;
+        let m = grants.read(Some(libos::time::deadline_after(core::time::Duration::from_secs(5))))?;
+        accountproto::parse_reply(&m.data).map(|_| ())
+    };
+    check_eq!(check(b"disk1"), Err(Error::AccessDenied), "grant na jine parametry");
+    check_eq!(check(b"disk0"), Ok(()), "grant");
+    check_eq!(check(b"disk0"), Err(Error::AccessDenied), "grant podruhe");
+    me.logout().map_err(|e| fail("odhlaseni", e))?;
+    drop(ours);
     Ok(())
 }
 

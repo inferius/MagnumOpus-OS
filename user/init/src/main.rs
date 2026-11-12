@@ -20,6 +20,7 @@ mod agent;
 mod apps;
 mod audio;
 mod certs;
+mod desktop;
 mod display_native;
 mod dns;
 mod fsd;

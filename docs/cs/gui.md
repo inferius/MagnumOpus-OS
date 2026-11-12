@@ -746,11 +746,27 @@ Zprávy kanálu `dialog` jsou binární (`guiproto::control`):
 
 | Zpráva | Pole |
 |---|---|
-| `Ask` | id, druh (`permission`, `confirm`, `password`), aplikace, text, volby (1-8) |
+| `Ask` | id, druh (`permission`, `confirm`, `password`, `elevate`), aplikace, text, volby (1-8) |
 | `Cancel` | id |
 | `Phrase` | bezpečnostní fráze (nejvýš 64 znaků) |
 | `Answer` (odpověď) | id, index volby, text (heslo) |
 | `Cancelled` (odpověď) | id |
+
+**Zvýšení práv** (`elevate`, **[implementováno]**, podle
+`design/dialogy.html`): nadpis „<aplikace> chce změnit systém“, text se
+skutečnými parametry úkonu a tím, kdo potvrzuje, pole „Heslo nebo PIN“,
+zaškrtávátko „Dalších 5 minut úkony správy nepotvrzovat“ (výchozí
+vypnuto; v pořadí Tab za tlačítky, Enter ho přepne) a tlačítka „Povolit
+změnu“ / „Zrušit“. Odpověď: volba 0 = povolit, **2 = povolit a režim
+správy**, 1 = zrušit; text = tajemství. Používá ho jen služba účtů (viz
+[Uživatelské účty](ucty.md#správa-počítače)).
+
+**Přihlašovací a zamykací obrazovka** (**[implementováno]**) je vrstva
+kompozitoru přes celou obrazovku nad vším (i nad lištou); popis
+v [Uživatelské účty](ucty.md#přihlašovací-a-zamykací-obrazovka). Řídicí
+zprávy initu: `login` + handle (kanál ke službě účtů), `session open
+<id> <uid> <jméno>`, `session lock|unlock|close <id>`. Bezpečná obrazovka
+(Ctrl+Alt+Delete) nabídne s přihlášeným uživatelem i **Zamknout**.
 
 Klávesy v dialogu: Tab a šipky mění volbu, Enter potvrdí, Esc vybere
 poslední volbu (zamítnutí). Myš: klik na tlačítko. Prvních 300 ms po

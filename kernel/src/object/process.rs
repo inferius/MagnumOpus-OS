@@ -93,6 +93,13 @@ impl Process {
             }
             r.push(Arc::downgrade(&p));
         }
+        // Soubeh s `JOB_KILL`: nejdriv registrace, pak kontrola. Bud
+        // `JOB_KILL` proces v registru uvidi a ukonci, nebo tady uvidime
+        // jeho priznak (oboji SeqCst) - proces neproklouzne.
+        if p.job.is_killed() {
+            p.terminate(abi::process::EXIT_KILLED);
+            return Err(Error::BadState);
+        }
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
     }

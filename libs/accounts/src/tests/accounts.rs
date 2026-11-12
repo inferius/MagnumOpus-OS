@@ -296,6 +296,21 @@ fn poskozeny_zaznam_neshodi_ostatni() {
 }
 
 #[test]
+fn reset_hesla_spravou_neodemkne_sifrovany_domov() {
+    let mut e = engine();
+    let uid = alice(&mut e);
+    let p = e.prepare_crypt(uid, &Secret::from(PW), 0).unwrap();
+    let recovery = p.recovery.clone();
+    e.commit_crypt(uid, p.crypt).unwrap();
+    e.reset_password(uid, &Secret::from("heslo od spravy")).unwrap();
+    // Prihlasi se, ale klic domova novym heslem nedostane.
+    assert!(ok(e.authenticate(uid, Method::Password, &Secret::from("heslo od spravy"), None, 1).unwrap()).is_none());
+    // Obnovovaci klic majitele funguje dal.
+    assert!(ok(e.authenticate(uid, Method::Recovery, &recovery, None, 2).unwrap()).is_some());
+    assert_eq!(e.reset_password(uid, &Secret::from("kratke")), Err(Error::InvalidArgs));
+}
+
+#[test]
 fn fraze() {
     let mut e = engine();
     let uid = alice(&mut e);

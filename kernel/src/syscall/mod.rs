@@ -111,6 +111,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::LOG_READ => diag::log_read(a),
         nr::CRASH_RECORD => diag::crash_record(a),
         nr::LOG_CONTROL => diag::log_control(a),
+        nr::JOB_KILL => job::kill(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -176,6 +177,7 @@ pub fn name(number: u64) -> &'static str {
         "LOG_READ",
         "CRASH_RECORD",
         "LOG_CONTROL",
+        "JOB_KILL",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

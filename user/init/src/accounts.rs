@@ -37,14 +37,19 @@ pub struct Accountd {
 
 pub static ACCOUNTD: spin::Once<Accountd> = spin::Once::new();
 
-/// Prida `who` pravo pruchodu adresarem `path`.
-fn traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
+/// Prida `who` prava `r` k adresari `path` (jen k nemu, nededi se).
+fn allow(fs: &FsClient, path: &str, who: u64, r: u8) -> Result<()> {
     let mut acl = fs.permissions(path)?.acl.unwrap_or_default();
-    if acl.grants.iter().any(|g| g.who == who && g.rights & rights::TRAVERSE != 0) {
+    if acl.grants.iter().any(|g| g.who == who && g.flags == grant::THIS && g.rights & r == r) {
         return Ok(());
     }
-    acl.grants.push(Grant { who, rights: rights::TRAVERSE, flags: grant::THIS });
+    acl.grants.retain(|g| !(g.who == who && g.flags == grant::THIS));
+    acl.grants.push(Grant { who, rights: r, flags: grant::THIS });
     fs.set_acl(path, Some(&acl))
+}
+
+fn traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
+    allow(fs, path, who, rights::TRAVERSE)
 }
 
 fn mkdir(fs: &FsClient, path: &str) -> Result<()> {
@@ -67,8 +72,16 @@ fn layout(fs: &FsClient) -> Result<()> {
     traverse(fs, "/", ids::ACCOUNTD)?;
     traverse(fs, "/system", ids::ACCOUNTD)?;
     mkdir(fs, HOME_DIR)?;
-    traverse(fs, "/", ids::GROUP_USERS)?;
+    // Lide: koren vypsat (vidi jen polozky, ke kterym maji pravo), `/home`
+    // jen projit, v `/tmp` zakladat (zalozene patri jim; grant se nededi,
+    // takze cizi soubory v `/tmp` nevidi). `/tmp/.aside` = klony shellu.
+    let list = rights::LIST | rights::TRAVERSE;
+    allow(fs, "/", ids::GROUP_USERS, list)?;
     traverse(fs, HOME_DIR, ids::GROUP_USERS)?;
+    mkdir(fs, "/tmp")?;
+    mkdir(fs, "/tmp/.aside")?;
+    allow(fs, "/tmp", ids::GROUP_USERS, list | rights::CREATE)?;
+    allow(fs, "/tmp/.aside", ids::GROUP_USERS, list | rights::CREATE)?;
     Ok(())
 }
 
@@ -85,6 +98,7 @@ pub fn start(startup: &Startup, devices: &Devices, sup: &mut crate::supervisor::
     // vlakny pres globalni zarizeni, ktera jeste nemusi byt nastavena).
     let (ctl, ctl_lease) = sup.session("fsd", crate::fsd::Recipe::System.encode())?;
     let ctl = FsClient::with_lease(ctl, ctl_lease);
+    crate::session::init_events()?;
     let (ours, theirs) = Channel::create()?;
     libos::thread::spawn("sezeni", move || session::serve(ours, ctl))?;
     let handles = vec![
@@ -146,6 +160,18 @@ pub fn add_key(key: Channel) -> core::result::Result<(), Channel> {
         }
         None => Err(key),
     }
+}
+
+/// Kanal duveryhodneho dialogu kompozitoru pro ukony spravy (`ELEVATE`).
+pub fn give_dialog(dialog: Channel) -> Result<()> {
+    let a = ACCOUNTD.get().ok_or(Error::NotFound)?;
+    let ctl = a.control.lock();
+    ctl.write(b"dialog", vec![dialog.into_handle()])?;
+    let r = ctl.read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    if r.data != b"ok" {
+        return Err(Error::IoError);
+    }
+    Ok(())
 }
 
 /// Stav accountd (`status`).

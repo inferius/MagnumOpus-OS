@@ -9,6 +9,11 @@
 //!
 //! Domovy: dataset `/home/<jmeno>`, vlastnik = uid, popis `PROTECTED` bez
 //! grantu (ostatni ho nevidi), zakaz spousteni.
+//!
+//! Kazda relace ma **job**: v nem bezi procesy uzivatele (aplikace plochy,
+//! termd a jeho shsess). Udalosti relaci (otevrena, zamcena, skoncila) jdou
+//! kanalem [`EVENTS`] smycce supervisoru, ktera spousti a ukoncuje plochu
+//! relace (`crate::desktop`).
 
 use alloc::format;
 use alloc::string::String;
@@ -18,6 +23,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use accountproto::{ToInit, encode_sessions, ids, reply_err, reply_ok, valid_name};
 use fsproto::FsClient;
 use fsproto::perm::{Acl, Profile, ACL_PROTECTED};
+use libos::job::Job;
 use libos::{Channel, Error, Handle, Result, println};
 
 /// Kde lezi domovy.
@@ -41,9 +47,97 @@ pub struct UserSession {
     /// Kanal self do accountd (dostane ho nastaveni v relaci).
     pub own: Option<Channel>,
     pub locked: bool,
+    /// Job s procesy relace.
+    pub job: Job,
+    /// Jmeno uzivatele pro kompozitor (`/home/<jmeno>`).
+    pub name: String,
 }
 
 pub static SESSIONS: spin::Mutex<Vec<UserSession>> = spin::Mutex::new(Vec::new());
+
+/// Udalost relace pro smycku supervisoru.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Event {
+    Opened(u64),
+    Locked(u64),
+    Unlocked(u64),
+    Closed(u64),
+}
+
+impl Event {
+    fn encode(self) -> [u8; 9] {
+        let (k, id) = match self {
+            Event::Opened(i) => (1, i),
+            Event::Locked(i) => (2, i),
+            Event::Unlocked(i) => (3, i),
+            Event::Closed(i) => (4, i),
+        };
+        let mut b = [0u8; 9];
+        b[0] = k;
+        b[1..].copy_from_slice(&id.to_le_bytes());
+        b
+    }
+
+    pub fn decode(b: &[u8]) -> Option<Event> {
+        let id = u64::from_le_bytes(b.get(1..9)?.try_into().ok()?);
+        Some(match b.first()? {
+            1 => Event::Opened(id),
+            2 => Event::Locked(id),
+            3 => Event::Unlocked(id),
+            4 => Event::Closed(id),
+            _ => return None,
+        })
+    }
+}
+
+/// Kanal udalosti relaci: (zapis = vlakno sezeni, cteni = supervisor).
+pub static EVENTS: spin::Once<(Channel, Channel)> = spin::Once::new();
+
+fn notify(e: Event) {
+    if let Some((tx, _)) = EVENTS.get() {
+        let _ = tx.write(&e.encode(), Vec::new());
+    }
+}
+
+/// Konec kanalu udalosti pro supervisor.
+pub fn events() -> Option<&'static Channel> {
+    EVENTS.get().map(|(_, rx)| rx)
+}
+
+/// Pripravi kanal udalosti (pred startem accountd).
+pub fn init_events() -> Result<()> {
+    let (tx, rx) = Channel::create()?;
+    EVENTS.call_once(|| (tx, rx));
+    Ok(())
+}
+
+/// Duplikat jobu relace (spousteni procesu relace).
+pub fn job(session: u64) -> Result<Job> {
+    let s = SESSIONS.lock();
+    s.iter().find(|u| u.id == session).ok_or(Error::NotFound)?.job.duplicate(None)
+}
+
+/// Uzivatel relace.
+pub fn uid(session: u64) -> Option<u64> {
+    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.uid)
+}
+
+/// Jmeno uzivatele relace.
+pub fn name(session: u64) -> Option<String> {
+    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.name.clone())
+}
+
+/// Bezi nejaka relace? Bez ni kompozitor ukaze prihlasovaci obrazovku
+/// (startovni obrazovka pak mire znakem do avataru, `Comp::greeter_avatar`).
+#[allow(dead_code)]
+pub fn any_open() -> bool {
+    !SESSIONS.lock().is_empty()
+}
+
+/// Nejnovejsi odemcena relace (do ni jdou aplikace spustene z listy).
+pub fn active() -> Option<u64> {
+    SESSIONS.lock().iter().rev().find(|u| !u.locked).map(|u| u.id)
+}
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 fn is_person(uid: u64) -> bool {
@@ -76,10 +170,10 @@ fn create_home(fs: &FsClient, uid: u64, name: &str) -> Result<()> {
         return Err(Error::InvalidArgs);
     }
     let path = format!("{HOME_DIR}/{name}");
+    // Existujici domov (opakovane zalozeni po vypadku) jen kdyz uz patri
+    // tomuto uzivateli.
     match fs.create_dataset(&path) {
         Ok(_) => {}
-        // Domov po predchozim pokusu (vypadek pred ulozenim uctu): jen
-        // kdyz uz patri tomuto uzivateli.
         Err(Error::AlreadyExists) => {
             if fs.stat(&path)?.owner != uid {
                 return Err(Error::AlreadyExists);
@@ -87,9 +181,18 @@ fn create_home(fs: &FsClient, uid: u64, name: &str) -> Result<()> {
         }
         Err(e) => return Err(e),
     }
-    fs.set_owner(&path, uid)?;
-    fs.set_acl(&path, Some(&private_acl()))?;
-    fs.set_noexec(&path, Profile::Standard.noexec_on_data())?;
+    // Jen co se lisi (opakovane zalozeni po vypadku nema nic menit).
+    if fs.stat(&path)?.owner != uid {
+        fs.set_owner(&path, uid)?;
+    }
+    let acl = private_acl();
+    if fs.permissions(&path)?.acl.as_ref() != Some(&acl) {
+        fs.set_acl(&path, Some(&acl))?;
+    }
+    let noexec = Profile::Standard.noexec_on_data();
+    if fs.noexec(&path)? != noexec {
+        fs.set_noexec(&path, noexec)?;
+    }
     Ok(())
 }
 
@@ -111,11 +214,15 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             if !is_person(uid) || groups.iter().any(|g| *g < ids::GROUP_USERS) {
                 return Err(Error::AccessDenied);
             }
+            let name = home.strip_prefix("/home/").filter(|n| valid_name(n)).ok_or(Error::InvalidArgs)?;
+            let name = String::from(name);
             let (_, user_fs) = fs.connect_as(uid, &groups, &Profile::Standard.user_mounts())?;
+            let job = Job::create(&libos::job::current()?)?;
             let id = NEXT.fetch_add(1, Ordering::Relaxed);
             let own = handles.into_iter().next().map(Channel::from_handle);
             println!("init: relace {id} uzivatele {uid}");
-            SESSIONS.lock().push(UserSession { id, uid, groups, home, fs: user_fs, own, locked: false });
+            SESSIONS.lock().push(UserSession { id, uid, groups, home, fs: user_fs, own, locked: false, job, name });
+            notify(Event::Opened(id));
             Ok(id.to_le_bytes().to_vec())
         }
         ToInit::CloseSession { session } => {
@@ -124,7 +231,14 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             // Zahozeni relace FS zavre jeji kanal; procesy relace (az je
             // init bude spoustet) se ukonci zde.
             let u = s.remove(i);
+            drop(s);
+            // Vsechny procesy relace (i ty, ktere si spustila sama) a job
+            // uzavrit: nic dalsiho v nem uz nevznikne.
+            if let Err(e) = u.job.kill(libos::abi::process::EXIT_KILLED) {
+                println!("init: job relace {}: {e}", u.id);
+            }
             println!("init: relace {} uzivatele {} skoncila", u.id, u.uid);
+            notify(Event::Closed(u.id));
             Ok(Vec::new())
         }
         ToInit::LockSession { session } | ToInit::UnlockSession { session } => {
@@ -132,6 +246,8 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             let mut s = SESSIONS.lock();
             let u = s.iter_mut().find(|u| u.id == session).ok_or(Error::NotFound)?;
             u.locked = lock;
+            drop(s);
+            notify(if lock { Event::Locked(session) } else { Event::Unlocked(session) });
             Ok(Vec::new())
         }
         ToInit::CreateHome { uid, name } => create_home(fs, uid, &name).map(|_| Vec::new()),
