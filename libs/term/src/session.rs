@@ -1015,5 +1015,10 @@ impl Service {
                 self.end_block(i, bid, ok, 0, link);
             }
         }
+        // Klony, ktere ulohy prave odlozily, zahodit hned (ne az pri dalsi
+        // volne chvili): mezitim muze relaci prevzit novy termd a hned
+        // poslat prikazy - dalsi volna chvile by pak neprisla a klon by
+        // zustal v /tmp/.aside.
+        self.flush(fs, env);
     }
 }
