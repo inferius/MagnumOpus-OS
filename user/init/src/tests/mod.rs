@@ -37,6 +37,7 @@ pub mod net;
 mod nic;
 pub mod power;
 mod process;
+mod reboot;
 mod recovery;
 mod recovery_kit;
 mod console;
@@ -75,6 +76,9 @@ const SUITES: &[(&str, &[Test])] = &[
     ("usb", usb::TESTS),
     ("zvuk", audio::TESTS),
     ("historie FS", fs_hist::TESTS),
+    // Pri bezne sade jeden start (pocitadlo 1); xtask boottest ji pousti
+    // opakovane nad stejnym diskem.
+    ("opakovany-start", reboot::TESTS),
     ("data FS", fs_data::TESTS),
     ("cas", time::TESTS),
     ("synchronizace casu", clock_sync::TESTS),

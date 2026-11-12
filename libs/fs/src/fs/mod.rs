@@ -697,7 +697,19 @@ impl<D: BlockDevice> Fs<D> {
             self.s.poisoned = true;
             return Err(Error::Corrupted);
         }
-        if r.is_err() && self.mutations != before {
+        if let Err(e) = &r
+            && self.mutations != before
+        {
+            // Logicka chyba (spatny argument, uz existuje, ...) ma prijit
+            // pred prvni zmenou stavu: tady by svazek zbytecne presel do
+            // stavu chyby a kazdy dalsi zapis by vracel IO_ERROR. V testech
+            // knihovny to rovnou ohlasit (audit `tests/logical_errors.rs`).
+            #[cfg(test)]
+            assert!(
+                !is_logical(*e),
+                "logicka chyba {e:?} az po zmene stavu: operace musi overit predpoklady predem"
+            );
+            let _ = e;
             self.s.poisoned = true;
         }
         r
@@ -1176,4 +1188,21 @@ fn validate_target(target: &str) -> Result<()> {
         return Err(Error::InvalidArgs);
     }
     Ok(())
+}
+
+/// Chyba vyplyvajici z argumentu nebo stavu jmenneho prostoru (ne ze
+/// zarizeni ani z poruseni konzistence): pro `guarded` v testech.
+#[cfg(test)]
+fn is_logical(e: Error) -> bool {
+    matches!(
+        e,
+        Error::AlreadyExists
+            | Error::NotFound
+            | Error::NotEmpty
+            | Error::InvalidArgs
+            | Error::WrongType
+            | Error::NotSupported
+            | Error::AccessDenied
+            | Error::BadState
+    )
 }
