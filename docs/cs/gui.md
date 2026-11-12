@@ -1110,7 +1110,10 @@ framebuffer není a bez virtio-gpu GUI nenaběhne (`init: grafika
 
 ### Kdo vlastní framebuffer
 
-Jádro dá initu framebuffer ve startovní zprávě (druh `FRAMEBUFFER`, viz
+Se startovní obrazovkou ([Startovní obrazovka](start.md)) jádro do
+framebufferu nekreslí ani ho nemaže, obraz drží init a předá ho displeji.
+Při ladicím startu (a bez obrazu) platí:
+jádro dá initu framebuffer ve startovní zprávě (druh `FRAMEBUFFER`, viz
 [Syscally](syscally.md#framebuffer-z-firmwaru)) a kreslí do něj log, dokud
 ho vlastník výslovně nepřevezme ([`FB_CONTROL`](syscally.md#fb_control)
 `CLAIM`). Po `RELEASE` nebo pádu vlastníka jádro obrazovku smaže a kreslí

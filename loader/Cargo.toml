@@ -9,5 +9,6 @@ abi.workspace = true
 boot-info.workspace = true
 crashrec.workspace = true
 elf.workspace = true
+bootsplash = { path = "../libs/bootsplash" }
 uefi = { version = "0.41", features = ["panic_handler", "logger", "global_allocator", "alloc"] }
 log = "0.4"

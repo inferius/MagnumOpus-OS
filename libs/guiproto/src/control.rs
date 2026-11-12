@@ -27,9 +27,17 @@ use crate::a11y::Node;
 use crate::action::{self, Action, Arg, Value};
 use crate::{Error, ReadExt, Reader, Result, WriteExt, Writer, read_count};
 
-/// `display [pasmo]`: kanal displeje (handle); nepovinne casove pasmo
-/// IANA pro hodiny v liste (`display Europe/Prague`).
+/// `display [pasmo] [splash=<promile>] [login]`: kanal displeje (handle);
+/// nepovinne casove pasmo IANA pro hodiny v liste (`display
+/// Europe/Prague`). `splash=` = na obrazovce je startovni obraz
+/// (`libs/bootsplash`) s prstencem na dane hodnote (0-1000): prvni snimek
+/// ho zopakuje a prejde do plochy.
 pub const DISPLAY: &str = "display";
+/// Predpona argumentu startovniho obrazu v [`DISPLAY`].
+pub const SPLASH_ARG: &str = "splash=";
+/// Slovo v [`DISPLAY`]: po startu bude prihlasovaci obrazovka (zadna
+/// relace neni otevrena); prechod ze startovniho obrazu miri do avataru.
+pub const LOGIN_ARG: &str = "login";
 /// `theme light|dark|contrast`: rezim barev vzhledu (tokeny
 /// `design/tokens.toml`).
 pub const THEME: &str = "theme";

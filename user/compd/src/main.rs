@@ -20,6 +20,7 @@ mod status;
 mod peers;
 mod screen;
 mod snapshot;
+mod splash;
 
 use alloc::format;
 use alloc::string::String;
@@ -62,6 +63,12 @@ struct Service {
     launcher: Option<Channel>,
     /// Kanal `login` ke sluzbe uctu (prihlasovaci obrazovka).
     login: Option<login::Login>,
+    /// Prechod ze startovni obrazovky (`splash.rs`): bezici a ohlaseny
+    /// (`display ... splash=`, zacne pri pripojeni displeje).
+    splash: Option<splash::Handoff>,
+    splash_pending: Option<u32>,
+    /// Po startu bude prihlasovaci obrazovka (`display ... login`).
+    splash_login: bool,
 }
 
 impl Service {
@@ -111,6 +118,9 @@ fn main(startup: Startup) -> i64 {
         snapshots: None,
         launcher: None,
         login: None,
+        splash: None,
+        splash_pending: None,
+        splash_login: false,
     };
     loop {
         if !s.wait_and_serve() {
@@ -134,6 +144,9 @@ impl Service {
         };
         if let Some(m) = next_minute {
             deadline = Some(deadline.map_or(m, |d| d.min(m)));
+        }
+        if let Some(t) = self.splash_wakeup(now) {
+            deadline = Some(deadline.map_or(t, |d| d.min(t)));
         }
         for src in [&mut self.net_src, &mut self.audio_src].into_iter().flatten() {
             if let Some(t) = src.poll(now) {
@@ -349,6 +362,9 @@ impl Service {
     }
 
     fn maybe_tick(&mut self) {
+        if self.splash_tick(libos::time::now()) {
+            return;
+        }
         let Some(c) = self.comp.as_mut() else { return };
         let Some(sc) = self.screen.as_mut() else {
             c.timers(libos::time::now());
@@ -503,8 +519,14 @@ impl Service {
         let cmd = words.next().unwrap_or("");
         let r: Result<(String, Vec<Handle>)> = match cmd {
             control::DISPLAY => {
-                if let Some(z) = words.next() {
-                    self.zone = libos::time::zone::Zone::by_name(z).or(libos::time::zone::Zone::parse(z));
+                for w in words.by_ref() {
+                    if let Some(p) = w.strip_prefix(control::SPLASH_ARG) {
+                        self.begin_splash(p.parse().unwrap_or(0));
+                    } else if w == control::LOGIN_ARG {
+                        self.splash_login = true;
+                    } else {
+                        self.zone = libos::time::zone::Zone::by_name(w).or(libos::time::zone::Zone::parse(w));
+                    }
                 }
                 self.attach_display(handles)
             }

@@ -1149,7 +1149,10 @@ does not start (`init: grafika (virtio-gpu ani framebuffer) neni`).
 
 ### Who owns the framebuffer
 
-The kernel gives init the framebuffer in the start message (kind
+With the boot screen ([Boot screen](boot-screen.md)) the kernel neither
+draws into nor clears the framebuffer; init holds the picture and hands it
+to the display. In a debug boot (and without the picture):
+the kernel gives init the framebuffer in the start message (kind
 `FRAMEBUFFER`, see [System calls](syscalls.md#firmware-framebuffer)) and
 draws the log into it until an owner explicitly takes it over
 ([`FB_CONTROL`](syscalls.md#fb_control) `CLAIM`). After `RELEASE` or a

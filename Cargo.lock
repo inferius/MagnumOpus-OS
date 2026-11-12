@@ -365,6 +365,15 @@ name = "boot-info"
 version = "0.1.0"
 
 [[package]]
+name = "bootsplash"
+version = "0.1.0"
+dependencies = [
+ "font",
+ "gfx",
+ "theme",
+]
+
+[[package]]
 name = "borsh"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -529,6 +538,7 @@ version = "0.1.0"
 dependencies = [
  "accountproto",
  "audioproto",
+ "bootsplash",
  "comp",
  "font",
  "gfx",
@@ -1439,6 +1449,7 @@ dependencies = [
  "audiomix",
  "audioproto",
  "blockproto",
+ "bootsplash",
  "conf",
  "fsproto",
  "guiproto",
@@ -1604,6 +1615,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "boot-info",
+ "bootsplash",
  "crashrec",
  "elf",
  "log",
@@ -2524,6 +2536,17 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "splash"
+version = "0.1.0"
+dependencies = [
+ "bootsplash",
+ "font",
+ "gfx",
+ "libos",
+ "theme",
 ]
 
 [[package]]

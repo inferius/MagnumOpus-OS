@@ -563,7 +563,9 @@ the object from the bootstrap `kind::FRAMEBUFFER` (any other memory object
   owner of the display drives the handover (the init supervisor: the
   fallback console after a GUI crash).
 - `RELEASE` (2): give back - the kernel clears the screen and keeps
-  drawing the log. Requires `WRITE`. Only the owner may (the process that
+  drawing the log (with the boot screen, `bootstrap::flags::SPLASH`, it
+  leaves the picture unchanged for the next owner, see
+  [Boot screen](boot-screen.md)). Requires `WRITE`. Only the owner may (the process that
   last called `CLAIM`), otherwise `BAD_STATE`: a late give-back of the
   previous owner does not clear the new owner's picture (the console after
   a GUI crash). The end of the process that took the

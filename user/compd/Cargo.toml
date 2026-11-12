@@ -17,6 +17,7 @@ inputproto = { path = "../../libs/inputproto" }
 comp = { path = "../../libs/comp" }
 gfx = { path = "../../libs/gfx" }
 theme = { path = "../../libs/theme" }
+bootsplash = { path = "../../libs/bootsplash" }
 # Stav site a hlasitosti v liste (jen formaty zprav, cteni bez blokovani).
 netproto = { path = "../../libs/netproto" }
 audioproto = { path = "../../libs/audioproto" }

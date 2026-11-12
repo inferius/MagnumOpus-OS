@@ -1,6 +1,7 @@
 //! UEFI loader.
 //!
 //! Postup:
+//! 0. hned po prevzeti rizeni vykresli startovni obraz (GOP, `splash.rs`),
 //! 1. nacte `\os\kernel.elf` ze stejneho svazku, ze ktereho byl spusten,
 //! 2. pripravi tabulky stranek (identita, prima mapa fyzicke pameti, kernel),
 //! 3. zjisti framebuffer (GOP) a ACPI RSDP,
@@ -14,7 +15,9 @@
 extern crate alloc;
 
 mod arch;
+mod logger;
 mod pci_id;
+mod splash;
 
 use alloc::vec::Vec;
 use core::mem::size_of;
@@ -36,6 +39,8 @@ use elf::{ElfFile, PF_W, PF_X, Segment};
 
 /// Cesta ke kernelu na systemovem oddilu (ESP).
 const KERNEL_PATH: &CStr16 = cstr16!("\\os\\kernel.elf");
+/// Kdyz soubor existuje, start je vzdy ladici (log na obrazovce).
+const BOOTLOG_PATH: &CStr16 = cstr16!("\\os\\bootlog");
 
 /// Vlastni UEFI typy pameti (rozsah 0x8000_0000.. je vyhrazen pro OS loader),
 /// diky nim kernel v mape pameti pozna, co mu loader pripravil.
@@ -86,8 +91,12 @@ const DEVICE: Flags = Flags {
 
 #[entry]
 fn main() -> Status {
-    uefi::helpers::init().expect("inicializace UEFI helperu selhala");
+    logger::init();
     log::info!("os loader {}", env!("CARGO_PKG_VERSION"));
+    // Startovni obraz co nejdriv: firmware ukazuje cernou, dalsi snimek uz
+    // je obraz (bez textu firmwaru a loaderu, ten jde na seriovou linku).
+    let framebuffer = find_framebuffer();
+    let splash = splash::show(&framebuffer);
 
     let kernel_file = read_kernel();
     let elf = ElfFile::parse(&kernel_file).expect("kernel neni platny ELF");
@@ -96,7 +105,6 @@ fn main() -> Status {
     let mut tables = PageTables::new(MEM_BOOT_DATA, nx).expect("alokace PML4 selhala");
     map_physical_memory(&mut tables);
 
-    let framebuffer = find_framebuffer();
     if framebuffer.is_present() {
         tables
             .map_range_2m(PHYS_MAP_BASE, framebuffer.phys_addr, framebuffer.len, RW)
@@ -109,7 +117,13 @@ fn main() -> Status {
     let debug_serial = arch::debug_serial(acpi_rsdp, &mut tables);
     let (initfs_phys, initfs_len) = load_initfs();
     let (pstore_phys, pstore_len) = alloc_pstore();
-    let boot_flags = ask_boot_mode();
+    let mut boot_flags = ask_boot_mode();
+    if verbose_file() {
+        boot_flags |= boot_info::boot_flags::VERBOSE;
+    }
+    if splash && boot_flags & boot_info::boot_flags::VERBOSE == 0 {
+        boot_flags |= boot_info::boot_flags::SPLASH;
+    }
 
     let (kernel_phys_start, kernel_phys_len) = load_kernel(&elf, &mut tables);
     // aarch64: kod jadra zapsany pres datovou cache musi byt videt
@@ -138,6 +152,7 @@ fn main() -> Status {
     // Cas az tesne pred koncem boot services (co nejmensi posun do jadra).
     let firmware_time = read_firmware_time();
     log::info!("ukoncuji boot services a startuji kernel");
+    logger::off();
 
     // SAFETY: zadne protokoly ani pool alokace uz nedrzime (kernel_file je
     // uvolneny, GOP protokol zavreny v `find_framebuffer`). Od teto chvile
@@ -226,21 +241,34 @@ fn alloc_pstore() -> (u64, u64) {
 }
 
 /// Nabidka pri startu: 2 s na klavesu L = rezim "vytahni logy" (zive USB:
-/// zkopiruje logy nainstalovaneho systemu na flashku). Jinak bezny start.
+/// zkopiruje logy nainstalovaneho systemu na flashku), D = ladici start
+/// (textovy log na obrazovce misto startovniho obrazu). Jinak bezny start.
 fn ask_boot_mode() -> u64 {
     use uefi::proto::console::text::Key;
-    log::info!("Stiskni L = vytahnout logy a zaznamy padu nainstalovaneho systemu na flashku (2 s)");
+    log::info!("Stiskni L = vytahnout logy a zaznamy padu nainstalovaneho systemu na flashku, D = ladici start s logem na obrazovce (2 s)");
     for _ in 0..40 {
         let key = uefi::system::with_stdin(|stdin| stdin.read_key());
-        if let Ok(Some(Key::Printable(c))) = key
-            && matches!(char::from(c), 'l' | 'L')
-        {
-            log::info!("rezim: vytahnout logy");
-            return boot_info::boot_flags::RESCUE_LOGS;
+        if let Ok(Some(Key::Printable(c))) = key {
+            match char::from(c) {
+                'l' | 'L' => {
+                    log::info!("rezim: vytahnout logy");
+                    return boot_info::boot_flags::RESCUE_LOGS;
+                }
+                'd' | 'D' => {
+                    log::info!("rezim: ladici start (log na obrazovce)");
+                    return boot_info::boot_flags::VERBOSE;
+                }
+                _ => {}
+            }
         }
         boot::stall(core::time::Duration::from_millis(50));
     }
     0
+}
+
+/// Soubor `\osootlog` na ESP = vzdy ladici start (`xtask run --boot-log`).
+fn verbose_file() -> bool {
+    boot_fs().metadata(BOOTLOG_PATH).is_ok()
 }
 
 fn boot_fs() -> uefi::fs::FileSystem {

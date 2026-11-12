@@ -77,6 +77,12 @@ pub struct BootInfo {
 pub mod boot_flags {
     /// Rezim "vytahni logy" (klavesa L pri startu z flashky).
     pub const RESCUE_LOGS: u64 = 1 << 0;
+    /// Na obrazovce je startovni obraz (`libs/bootsplash`): jadro do
+    /// framebufferu nekresli log ani ho nemaze, obraz prevezme init.
+    pub const SPLASH: u64 = 1 << 1;
+    /// Ladici start: textovy vypis logu na obrazovce jako driv (klavesa D
+    /// v nabidce zavadece nebo soubor `\osootlog` na ESP).
+    pub const VERBOSE: u64 = 1 << 2;
 }
 
 /// Ladici seriova linka zjistena loaderem (aarch64: z ACPI SPCR).

@@ -164,6 +164,10 @@ fn send_bootstrap(
                 bootstrap::flags::RESCUE_LOGS
             } else {
                 0
+            } | if crate::console::splash() {
+                bootstrap::flags::SPLASH
+            } else {
+                0
             },
             process.clone(),
             process.default_rights(),

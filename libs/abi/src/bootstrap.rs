@@ -40,6 +40,10 @@ pub mod flags {
     /// nainstalovany system na jinem disku, jen pro cteni zkopiruje jeho
     /// logy a zaznamy padu na oddil MO-LOGY flashky a ukaze hotovo.
     pub const RESCUE_LOGS: u32 = 1 << 1;
+    /// Na obrazovce je startovni obraz z loaderu (jadro nekresli log):
+    /// init ho prevezme (`FB_CONTROL CLAIM`), ukazuje prubeh startu
+    /// a preda ho displeji kompozitoru.
+    pub const SPLASH: u32 = 1 << 2;
 }
 
 /// Co znamena predany handle.

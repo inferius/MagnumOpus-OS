@@ -286,6 +286,14 @@ impl Comp {
         self.style.theme.color.bg
     }
 
+    /// Obraz pozadi plochy pro aktualni velikost (spocita se jednou, pak
+    /// z mezipameti). Pouziva ho i prechod ze startovni obrazovky, aby se
+    /// stejny obraz nepocital dvakrat.
+    pub fn backdrop(&mut self) -> &[u32] {
+        let (w, h) = (self.w, self.h);
+        self.style.backdrop(w, h)
+    }
+
     /// Prekreslit celou obrazovku (napr. po zmene backendu skladani).
     pub fn redraw_all(&mut self) {
         self.damage_all();

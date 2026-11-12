@@ -22,6 +22,7 @@ mod audio;
 mod certs;
 mod desktop;
 mod display_native;
+mod splash;
 mod dns;
 mod fsd;
 mod gui;
@@ -44,6 +45,8 @@ libos::entry!(main);
 
 fn main(startup: Startup) -> i64 {
     println!("init: bezim v userspace");
+    // Startovni obraz z loaderu: od ted ho kresli init (krok "jadro" hotov).
+    splash::start(&startup);
     let mut sup = supervisor::SUPERVISOR.lock();
     if let Some(r) = startup.root_resource.as_ref()
         && let Ok(h) = r.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::DIAG))
@@ -86,6 +89,7 @@ fn main(startup: Startup) -> i64 {
     };
     match system::start_devices(&startup) {
         Ok(mut devices) => {
+            splash::step(2);
             match system::start_fs(&startup, &mut devices) {
                 Ok(Some((process, adapter))) => {
                     // Po padu ho supervisor spusti znovu nad stejnym diskem;
@@ -128,6 +132,7 @@ fn main(startup: Startup) -> i64 {
                 Ok(None) => {}
                 Err(e) => println!("init: souborovy system nelze spustit: {e}"),
             }
+            splash::step(3);
             sup.watch("devmgr", &devices.devmgr, None);
             if startup.flags & libos::abi::bootstrap::flags::RESCUE_LOGS != 0 {
                 // Rezim "vytahni logy": jen kopie, bez GUI a site.
@@ -201,6 +206,10 @@ fn main(startup: Startup) -> i64 {
                 }
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
             }
+            splash::step(4);
+            // Prstenec do plna uz ted (soubezne se startem agenta), displej
+            // pak na obraz necheka.
+            splash::finish_begin();
             // Agent AI po siti a FS: sit jen v beznem behu (testy maji
             // falesny model bez site).
             let test_run = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0;
@@ -224,11 +233,14 @@ fn main(startup: Startup) -> i64 {
         // Kompozitor obnovuje supervisor (okna se pripoji pres listky).
         let input = system::devices().and_then(|d| d.input.as_ref());
         gui::start_desktop(&startup, input, &mut sup);
-        if gui::GUI.lock().is_none()
-            && let Err(e) = terminal::TERMINALS.lock().start_console(&startup)
-        {
-            // Bez GUI: terminal v zalozni konzoli nad framebufferem.
-            println!("init: zalozni konzoli nelze spustit: {e}");
+        if gui::GUI.lock().is_none() {
+            // Bez GUI: terminal v zalozni konzoli nad framebufferem
+            // (startovni obraz ji preda obrazovku).
+            splash::finish();
+            if let Err(e) = terminal::TERMINALS.lock().start_console(&startup) {
+                println!("init: zalozni konzoli nelze spustit: {e}");
+                splash::fail(&alloc::format!("Grafické prostředí ani záložní konzole nenaběhly (kód {}).", e.name()));
+            }
         }
         if let Some(p) = gui::FBDISPLAY.lock().as_ref() {
             sup.watch("fbdisplay", p, None);
