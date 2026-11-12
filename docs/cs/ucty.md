@@ -354,6 +354,16 @@ vstup ignoruje.
 - compd posílá požadavky **asynchronně** (`user/compd/src/login.rs`):
   Argon2id ani dotek klíče nezdrží snímek. Heslo se po zakódování ve
   zprávě vynuluje.
+- **Zabezpečená pole** **[implementováno]** (přihlášení, zamčení, dialog
+  s heslem nebo PINem): trasování vstupu zapíše jen „vstup do
+  zabezpečeného pole“, nikdy znak ani délku; diagnostický snímek uvede
+  jen stav obrazovky a v obrázku pole zakryje šedou (ani počet teček).
+  Tajemství v compd se po odeslání přepíše nulami (pole obrazovky,
+  heslo dialogu, zakódovaná zpráva i odložená ve frontě kanálu) a do logd
+  nikdy nejde. Test `cargo test -p comp tajemstvi_neni_v_trasovani_ani_snimku`.
+- **Zamčená obrazovka nic neprozradí:** místo plochy kreslí jen obraz
+  pozadí (okna ani jejich obsah se nekreslí), žádná oznámení ani jejich
+  počet, jen hodiny, datum a účet relace.
 - Testy na hostiteli: `cargo test -p comp greeter` (přihlášení PINem,
   umělý vstup, výběr účtu a metody, zpomalení, zamčení a odemčení jen
   stejným účtem, okna pod obrazovkou se nekreslí, odhlášení); snímky

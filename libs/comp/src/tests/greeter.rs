@@ -200,3 +200,38 @@ fn dialog_zvyseni_prav_esc_zrusi() {
     t.key(KEY_ESC, false);
     assert!(t.out().contains(&Out::Dialog(1, DialogReply::Answer { id: 4, choice: 1, text: String::new() })));
 }
+
+#[test]
+fn tajemstvi_neni_v_trasovani_ani_snimku() {
+    let mut t = login();
+    t.now += dialog::INPUT_DELAY;
+    t.c.take_trace();
+    text(&mut t, "Zx9qW7");
+    let trace = t.c.take_trace();
+    assert!(!trace.is_empty() && trace.iter().all(|l| l.contains("vstup do zabezpeceneho pole")), "{trace:?}");
+    let snap = t.c.snapshot_lines("t1");
+    let all = snap.join("\n");
+    for bad in ["Zx9qW7", "Zx9", "6 znak"] {
+        assert!(!all.contains(bad), "snimek obsahuje {bad}: {all}");
+    }
+    assert!(all.contains("pole zabezpecene"), "{all}");
+    // Obrazek snimku zakryje pole (sluzba vyplni tyto obdelniky).
+    let f = t.c.secure_fields();
+    assert_eq!(f, vec![t.c.greeter_layout().field]);
+    // Dialog s heslem: totez, Debug heslo nevypise.
+    t.c.session_opened(1, 1000, "alice", t.now);
+    t.c.dialog_request(
+        1,
+        DialogRequest::Ask { id: 1, kind: DialogKind::Elevate, app: "X".into(), text: "?".into(), options: vec!["Povolit změnu".into(), "Zrušit".into()] },
+        t.now,
+    );
+    t.now += dialog::INPUT_DELAY;
+    t.c.take_trace();
+    text(&mut t, "Qp4Kd");
+    let trace = t.c.take_trace();
+    assert!(trace.iter().all(|l| !l.contains("Qp4Kd") && l.contains("zabezpeceneho pole")), "{trace:?}");
+    assert!(!t.c.snapshot_lines("t2").join("\n").contains("Qp4Kd"));
+    assert_eq!(t.c.secure_fields().len(), 1);
+    let d = alloc::format!("{:?}", t.c.dialogs.active().unwrap());
+    assert!(!d.contains("Qp4Kd"), "{d}");
+}

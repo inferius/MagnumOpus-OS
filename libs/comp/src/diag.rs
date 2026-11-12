@@ -261,6 +261,9 @@ impl Comp {
         out.push(format!("{p} zacatek, obrazovka {}x{}", self.w, self.h));
         out.push(format!("{p} ukazatel {},{}, {}", self.input.px, self.input.py, self.input_summary()));
         out.push(format!("{p} fokus {}", self.focus.map_or(String::from("zadny"), |g| self.window_name(g))));
+        if let Some(s) = self.greeter_summary() {
+            out.push(format!("{p} {s}"));
+        }
         match self.dialogs.active() {
             // Heslo dialogu se nezapisuje.
             Some(d) => out.push(format!(

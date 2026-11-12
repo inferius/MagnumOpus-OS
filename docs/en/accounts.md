@@ -372,6 +372,17 @@ appears.
 - compd sends the requests **asynchronously** (`user/compd/src/login.rs`):
   neither Argon2id nor a key touch delays a frame. The password is zeroed
   in the message after encoding.
+- **Secure fields** **[implemented]** (sign-in, lock, a dialog with a
+  password or PIN): the input trace records only "input into a secure
+  field", never a character or the length; the diagnostic snapshot states
+  only the screen state and covers the field grey in the image (not even
+  the number of dots). Secrets in compd are overwritten with zeros after
+  sending (screen field, dialog password, the encoded message and one
+  queued on a channel) and never go to logd. Test
+  `cargo test -p comp tajemstvi_neni_v_trasovani_ani_snimku`.
+- **The lock screen reveals nothing:** instead of the desktop it draws
+  only the wallpaper (no windows or their content), no notifications or
+  their count, only the clock, date and the session's account.
 - Host tests: `cargo test -p comp greeter` (PIN sign-in, synthetic input,
   account and method choice, slow-down, lock and unlock only by the same
   account, windows below are not drawn, sign-out); snapshots

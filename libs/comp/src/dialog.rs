@@ -40,7 +40,7 @@ pub enum Owner {
     Power(bool),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Dialog {
     pub owner: Owner,
     pub id: u32,
@@ -52,6 +52,19 @@ pub struct Dialog {
     pub password: String,
     /// Zaskrtavatko (jen `Elevate`: dalsich 5 minut nepotvrzovat).
     pub flag: Option<bool>,
+}
+
+impl core::fmt::Debug for Dialog {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Heslo se nevypisuje (ani delka).
+        f.debug_struct("Dialog").field("owner", &self.owner).field("id", &self.id).field("kind", &self.kind).field("app", &self.app).finish_non_exhaustive()
+    }
+}
+
+impl Drop for Dialog {
+    fn drop(&mut self) {
+        crate::greeter::zero(&mut self.password);
+    }
 }
 
 /// Nejvic radku textu dialogu (dialog roste do vysky obrazovky).
@@ -472,7 +485,7 @@ impl Comp {
     }
 
     fn answer(&mut self, choice: usize) {
-        let Some(d) = self.dialogs.queue.pop_front() else { return };
+        let Some(mut d) = self.dialogs.queue.pop_front() else { return };
         self.dialogs.since = self.input_now;
         self.damage_all();
         match d.owner {
@@ -482,7 +495,7 @@ impl Comp {
                     id: d.id,
                     // Elevate: povolit se zaskrtnutym rezimem spravy = 2.
                     choice: if choice == 0 && d.flag == Some(true) { 2 } else { choice as u32 },
-                    text: d.password,
+                    text: core::mem::take(&mut d.password),
                 },
             )),
             Owner::Action(call) => self.action_confirmed(call, choice == 0),

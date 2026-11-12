@@ -186,7 +186,14 @@ impl Peers {
                 };
                 (id, m.encode())
             }
-            Out::Dialog(id, r) => (id, r.encode()),
+            Out::Dialog(id, mut r) => {
+                // Odpoved s heslem: kopie v kompozitoru hned prepsat.
+                let b = r.encode();
+                if let guiproto::control::DialogReply::Answer { text, .. } = &mut r {
+                    wipe(unsafe_bytes(text));
+                }
+                (id, b)
+            }
             Out::Caller(id, r) => (id, r.encode()),
             Out::Inspect(id, r) => (id, r.encode()),
             _ => return,
@@ -198,12 +205,16 @@ impl Peers {
             }
             return;
         }
+        let mut data = data;
         match p.ch.write(&data, Vec::new()) {
-            Ok(()) => {}
-            Err(libos::Error::PeerClosed) => p.closed = true,
+            Ok(()) => wipe(&mut data),
+            Err(libos::Error::PeerClosed) => {
+                p.closed = true;
+                wipe(&mut data);
+            }
             // Plna fronta: klient nestiha cist.
             Err(_) if !droppable => p.push_backlog(data),
-            Err(_) => {}
+            Err(_) => wipe(&mut data),
         }
     }
 
@@ -217,7 +228,9 @@ impl Peers {
             while let Some(d) = p.backlog.front() {
                 match p.ch.write(d, Vec::new()) {
                     Ok(()) => {
-                        p.backlog.pop_front();
+                        if let Some(mut d) = p.backlog.pop_front() {
+                            wipe(&mut d);
+                        }
                     }
                     Err(libos::Error::PeerClosed) => {
                         p.closed = true;
@@ -242,4 +255,19 @@ impl Peers {
             }
         }
     }
+}
+
+/// Prepise bajty nulami (odeslane zpravy mohou obsahovat heslo z dialogu).
+fn wipe(b: &mut [u8]) {
+    for x in b.iter_mut() {
+        // SAFETY: platny jedinecny odkaz na bajt; volatile zapis prekladac
+        // nevynecha.
+        unsafe { core::ptr::write_volatile(x, 0) };
+    }
+}
+
+/// Bajty retezce k prepsani nulami (nuly jsou platne UTF-8).
+fn unsafe_bytes(s: &mut alloc::string::String) -> &mut [u8] {
+    // SAFETY: zapisujeme jen nuly, retezec zustane platne UTF-8.
+    unsafe { s.as_bytes_mut() }
 }

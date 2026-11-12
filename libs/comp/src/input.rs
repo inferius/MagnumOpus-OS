@@ -281,6 +281,9 @@ impl Comp {
                 }
                 if self.greeter_visible() && self.dialogs.active().is_none() {
                     if !syn {
+                        if action == Action::Press {
+                            self.trace(r.time, format_args!("klavesa: vstup do zabezpeceneho pole (prihlaseni)"));
+                        }
                         self.greeter_key(code, action, now);
                     }
                     return;
@@ -353,6 +356,7 @@ impl Comp {
             Event::Text(ch) => {
                 if self.greeter_visible() && self.dialogs.active().is_none() {
                     if !syn {
+                        self.trace(r.time, format_args!("znak: vstup do zabezpeceneho pole (prihlaseni)"));
                         self.greeter_text(ch, now);
                     }
                     return;
@@ -365,6 +369,7 @@ impl Comp {
                 }
                 if self.dialogs.active().is_some() {
                     if !syn {
+                        self.trace(r.time, format_args!("znak: vstup do zabezpeceneho pole (systemovy dialog)"));
                         self.dialog_text(ch);
                     }
                     return;

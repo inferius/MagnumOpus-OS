@@ -31,7 +31,9 @@ fn snapshot_id() -> String {
 
 /// Obrazek `w x h` z pixelu XRGB na `addr` jako BMP (24 bitu, radky
 /// odspodu) do noveho VMO; vraci (VMO, delka).
-fn bmp(addr: u64, w: u32, h: u32) -> libos::Result<(Vmo, usize)> {
+/// Pole s tajemstvim (`Comp::secure_fields`) se v obrazku vyplni sedou:
+/// nezaznamena se obsah ani pocet tecek.
+fn bmp(addr: u64, w: u32, h: u32, masks: &[guiproto::Rect]) -> libos::Result<(Vmo, usize)> {
     let row = (w as usize * 3).next_multiple_of(4);
     let len = 54 + row * h as usize;
     let vmo = Vmo::create(len as u64)?;
@@ -52,9 +54,11 @@ fn bmp(addr: u64, w: u32, h: u32) -> libos::Result<(Vmo, usize)> {
         // dobu sluzby), radek `y < h`.
         let src = unsafe { core::slice::from_raw_parts((addr as *const u32).add((y * w) as usize), w as usize) };
         for (x, p) in src.iter().enumerate() {
-            line[x * 3] = *p as u8;
-            line[x * 3 + 1] = (*p >> 8) as u8;
-            line[x * 3 + 2] = (*p >> 16) as u8;
+            let hidden = masks.iter().any(|m| m.contains(x as i32, y as i32));
+            let p = if hidden { 0x0080_8080 } else { *p };
+            line[x * 3] = p as u8;
+            line[x * 3 + 1] = (p >> 8) as u8;
+            line[x * 3 + 2] = (p >> 16) as u8;
         }
         vmo.write((54 + (h - 1 - y) as usize * row) as u64, &line)?;
     }
@@ -83,7 +87,7 @@ pub fn take(comp: &Comp, why: &str, frame: Option<(u64, u32, u32)>, logd: Option
         }
         (None, None) => String::from("obrazek nejde: obrazovka neni namapovana (skladani na GPU)"),
         (_, None) => String::from("obrazek nejde: chybi kanal na logd"),
-        (Some((addr, w, h)), Some(ch)) => match bmp(addr, w, h) {
+        (Some((addr, w, h)), Some(ch)) => match bmp(addr, w, h, &comp.secure_fields()) {
             Ok((vmo, len)) => match ch.write(format!("snimek {id} {len}").as_bytes(), vec![vmo.into_handle()]) {
                 Ok(()) => format!("obrazek {w}x{h} poslan do logd (ulozi ho do /system/log a na MO-LOGY)"),
                 Err(e) => format!("obrazek nejde poslat do logd: {e}"),

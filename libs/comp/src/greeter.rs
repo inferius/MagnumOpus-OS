@@ -136,7 +136,7 @@ pub struct Greeter {
     pub(crate) since: u64,
 }
 
-fn zero(s: &mut String) {
+pub(crate) fn zero(s: &mut String) {
     // Bajty hesla prepsat drive, nez se pamet uvolni.
     let mut v = core::mem::take(s).into_bytes();
     for b in v.iter_mut() {
@@ -244,6 +244,36 @@ impl Comp {
             self.greeter.requests.push(Request::List);
         }
         self.greeter_changed(now);
+    }
+
+    /// Obdelniky poli s tajemstvim na obrazovce (pole prihlaseni, pole
+    /// dialogu s heslem). Diagnosticky snimek je v obrazku zakryje: ani
+    /// pocet tecek (delka tajemstvi) se nezaznamena.
+    pub fn secure_fields(&self) -> Vec<Rect> {
+        let mut v = Vec::new();
+        if self.greeter.visible() {
+            v.push(self.greeter_layout().field);
+        }
+        if let Some(f) = self.dialog_layout().and_then(|l| l.field) {
+            v.push(f);
+        }
+        v
+    }
+
+    /// Popis obrazovky pro diagnosticky snimek (bez tajemstvi a jeho delky).
+    pub(crate) fn greeter_summary(&self) -> Option<String> {
+        let g = &self.greeter;
+        let mode = match g.mode() {
+            Mode::Off => return None,
+            Mode::Login => String::from("prihlaseni"),
+            Mode::Locked(s) => format!("zamceno (relace {s})"),
+        };
+        Some(format!(
+            "obrazovka {mode}, ucet {}, metoda {:?}, overuje se {}, pole zabezpecene (obsah ani delka se nezapisuji)",
+            g.target().map_or(String::from("zadny"), |a| a.name.clone()),
+            g.current_method(),
+            g.busy
+        ))
     }
 
     /// Prihlasovaci obrazovka je videt (kreslit pres vse, vstup jen ji).
