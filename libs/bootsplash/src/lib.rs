@@ -294,57 +294,90 @@ impl Splash {
         let logo = &self.logo.1;
         let word = &self.word;
 
+        // Rychla cesta: pozadi kryje vse (cerna, rozsvicene nebo
+        // rozsvecovane teple) = radek se jen zkopiruje nebo celociselne
+        // ztlumi, pocitaji se jen pixely znaku a nazvu.
+        let fast = back >= 1.0 && (wall <= 0.0 || bg.is_some());
+        let dim = (wall * 256.0 + 0.5) as u32;
+        let word_on = st.word > 0.0 && !word_r.is_empty();
+        let mark_on = mo > 0.0 && !mark.is_empty();
         for y in area.y..area.y + area.h as i32 {
             let row = y as usize * stride;
-            for x in area.x..area.x + area.w as i32 {
-                let i = row + x as usize;
-                // Podklad: cerna nebo teple pozadi, pres to, co uz je.
-                let mut c = match bg {
-                    Some(b) if wall > 0.0 => geom::scale_rgb(b[(y as u32 * l.w + x as u32) as usize], wall),
-                    _ => [0.0; 3],
-                };
-                if back < 1.0 {
-                    let under = geom::rgbf(geom::unswap(out[i], rgb));
-                    c = geom::mix(under, c, back);
-                }
-                if mark.contains(x, y) && mo > 0.0 {
-                    let (px, py) = (x as f32 + 0.5 - mcx, y as f32 + 0.5 - mcy);
-                    let d = geom::sqrt(px * px + py * py);
-                    if st.glow > 0.0 && d < glow_r {
-                        let a = size::GLOW_ALPHA * st.glow * (1.0 - d / glow_r) * mo;
-                        c = geom::mix(c, accent, a);
-                    }
-                    let ring = (hw + 0.5 - (d - ring_r).abs()).clamp(0.0, 1.0);
-                    if ring > 0.0 {
-                        c = geom::mix(c, accent, size::RING_BG_ALPHA * ring * mo);
-                    }
-                    if p > 0.0 {
-                        let mut fg = 0.0;
-                        if ring > 0.0 && (p >= 1.0 || geom::clockwise_angle(px, py) <= end_a) {
-                            fg = ring;
+            if fast {
+                let dst = &mut out[row + area.x as usize..row + area.right() as usize];
+                match bg {
+                    Some(b) if wall > 0.0 => {
+                        let src = &b[(y as u32 * l.w + area.x as u32) as usize..][..dst.len()];
+                        for (d, &c) in dst.iter_mut().zip(src) {
+                            let c = if dim >= 256 { c } else { geom::dim(c, dim) };
+                            *d = geom::swap(c, rgb);
                         }
-                        if p < 1.0 {
-                            for &(ex, ey) in &caps {
-                                let (qx, qy) = (x as f32 + 0.5 - ex, y as f32 + 0.5 - ey);
-                                fg = f32::max(fg, (hw + 0.5 - geom::sqrt(qx * qx + qy * qy)).clamp(0.0, 1.0));
+                    }
+                    _ => dst.fill(0xFF00_0000),
+                }
+            }
+            let spans: [(i32, i32); 2] = if !fast {
+                [(area.x, area.right()), (0, 0)]
+            } else {
+                let m = if mark_on && y >= mark.y && y < mark.bottom() { (mark.x, mark.right()) } else { (0, 0) };
+                let w = if word_on && y >= word_r.y && y < word_r.bottom() { (word_r.x, word_r.right()) } else { (0, 0) };
+                [m, w]
+            };
+            for (k, &(x0, x1)) in spans.iter().enumerate() {
+                for x in x0..x1 {
+                    // Prekryv znaku a nazvu: pixel uz spocitany.
+                    if k == 1 && x >= spans[0].0 && x < spans[0].1 {
+                        continue;
+                    }
+                    let i = row + x as usize;
+                    // Podklad: cerna nebo teple pozadi, pres to, co uz je.
+                    let mut c = match bg {
+                        Some(b) if wall > 0.0 => geom::scale_rgb(b[(y as u32 * l.w + x as u32) as usize], wall),
+                        _ => [0.0; 3],
+                    };
+                    if back < 1.0 {
+                        let under = geom::rgbf(geom::unswap(out[i], rgb));
+                        c = geom::mix(under, c, back);
+                    }
+                    if mark.contains(x, y) && mo > 0.0 {
+                        let (px, py) = (x as f32 + 0.5 - mcx, y as f32 + 0.5 - mcy);
+                        let d = geom::sqrt(px * px + py * py);
+                        if st.glow > 0.0 && d < glow_r {
+                            let a = size::GLOW_ALPHA * st.glow * (1.0 - d / glow_r) * mo;
+                            c = geom::mix(c, accent, a);
+                        }
+                        let ring = (hw + 0.5 - (d - ring_r).abs()).clamp(0.0, 1.0);
+                        if ring > 0.0 {
+                            c = geom::mix(c, accent, size::RING_BG_ALPHA * ring * mo);
+                        }
+                        if p > 0.0 {
+                            let mut fg = 0.0;
+                            if ring > 0.0 && (p >= 1.0 || geom::clockwise_angle(px, py) <= end_a) {
+                                fg = ring;
+                            }
+                            if p < 1.0 {
+                                for &(ex, ey) in &caps {
+                                    let (qx, qy) = (x as f32 + 0.5 - ex, y as f32 + 0.5 - ey);
+                                    fg = f32::max(fg, (hw + 0.5 - geom::sqrt(qx * qx + qy * qy)).clamp(0.0, 1.0));
+                                }
+                            }
+                            if fg > 0.0 {
+                                c = geom::mix(c, accent, fg * mo);
                             }
                         }
-                        if fg > 0.0 {
-                            c = geom::mix(c, accent, fg * mo);
+                        let lc = logo.get((x as f32 - logo_x0) as i32, (y as f32 - logo_y0) as i32);
+                        if lc > 0 {
+                            c = geom::mix(c, accent, lc as f32 / 255.0 * mo);
                         }
                     }
-                    let lc = logo.get((x as f32 - logo_x0) as i32, (y as f32 - logo_y0) as i32);
-                    if lc > 0 {
-                        c = geom::mix(c, accent, lc as f32 / 255.0 * mo);
+                    if st.word > 0.0 && word_r.contains(x, y) {
+                        let wc = word.get(x - self.word_x, y - l.word_top as i32);
+                        if wc > 0 {
+                            c = geom::mix(c, ink, wc as f32 / 255.0 * st.word);
+                        }
                     }
+                    out[i] = geom::swap(geom::pack(c), rgb);
                 }
-                if st.word > 0.0 && word_r.contains(x, y) {
-                    let wc = word.get(x - self.word_x, y - l.word_top as i32);
-                    if wc > 0 {
-                        c = geom::mix(c, ink, wc as f32 / 255.0 * st.word);
-                    }
-                }
-                out[i] = geom::swap(geom::pack(c), rgb);
             }
         }
     }

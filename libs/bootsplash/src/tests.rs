@@ -173,3 +173,46 @@ fn transformed_mark_moves() {
     let y = (l.cy - 100.0) as usize;
     assert!(close(out[y * 1280 + x], ACCENT, 70), "{:#x}", out[y * 1280 + x]);
 }
+
+#[test]
+fn fast_path_matches_generic() {
+    let mut s = Splash::new(640, 400);
+    let mut a = vec![0u32; 640 * 400];
+    let mut b = vec![0u32; 640 * 400];
+    s.paint_all(&State { glow: 0.5, ..State::lit(0.6) }, &mut a, 640);
+    // Pozadi 0,99999 vynuti obecnou cestu (rozdil pod jednu uroven).
+    s.paint_all(&State { glow: 0.5, wall: 0.99999, ..State::lit(0.6) }, &mut b, 640);
+    assert!(a.iter().zip(&b).all(|(&x, &y)| close(x, y, 1)));
+}
+
+/// Cisla do dokumentace: `cargo test --release -p bootsplash -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn perf_numbers() {
+    let (w, h) = (1920u32, 1080u32);
+    let t = std::time::Instant::now();
+    let mut s = Splash::new(w, h);
+    let new = t.elapsed();
+    let mut out = vec![0u32; (w * h) as usize];
+    let t = std::time::Instant::now();
+    s.paint_all(&State::FIRST, &mut out, w as usize);
+    let first = t.elapsed();
+    let t = std::time::Instant::now();
+    s.backdrop();
+    let bg = t.elapsed();
+    let st = State { glow: 0.5, ..State::lit(0.4) };
+    let t = std::time::Instant::now();
+    s.paint_all(&st, &mut out, w as usize);
+    let lit = t.elapsed();
+    let fade = State { wall: 0.5, word: 0.5, ..st };
+    let t = std::time::Instant::now();
+    s.paint_all(&fade, &mut out, w as usize);
+    let fading = t.elapsed();
+    let r = s.layout.mark_rect(1.0, 0.0, 0.0);
+    let t = std::time::Instant::now();
+    for _ in 0..100 {
+        s.paint(&st, &mut out, w as usize, r);
+    }
+    let mark = t.elapsed() / 100;
+    println!("1920x1080: new {new:?}, prvni snimek {first:?}, pozadi {bg:?}, cely snimek {lit:?}, rozsviceni {fading:?}, znak {mark:?} ({}x{})", r.w, r.h);
+}

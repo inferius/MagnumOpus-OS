@@ -174,6 +174,13 @@ pub fn pack(c: [f32; 3]) -> u32 {
     0xFF00_0000 | ch(c[0]) << 16 | ch(c[1]) << 8 | ch(c[2])
 }
 
+/// Ztlumeni barvy k cerne: `k` 0..=256 (256 = beze zmeny).
+pub fn dim(c: u32, k: u32) -> u32 {
+    let rb = ((c & 0x00FF_00FF) * k >> 8) & 0x00FF_00FF;
+    let g = ((c & 0x0000_FF00) * k >> 8) & 0x0000_FF00;
+    0xFF00_0000 | rb | g
+}
+
 /// Prohozeni R a B pro framebuffer RGB.
 pub fn swap(c: u32, rgb: bool) -> u32 {
     if rgb { (c & 0xFF00_FF00) | (c >> 16 & 0xFF) | (c & 0xFF) << 16 } else { c }
