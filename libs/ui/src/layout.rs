@@ -29,6 +29,7 @@ pub enum ElemKind<M> {
     Segmented { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
     Tabs { labels: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>>, on_close: Option<Box<dyn Fn(usize) -> M>> },
     Busy,
+    Segments { items: Vec<crate::node::Segment>, legend: bool },
     Group,
     Scroll { content_h: u32 },
 }
@@ -89,10 +90,11 @@ fn kind_tag<M>(k: &Kind<M>) -> usize {
         Kind::Segmented { .. } => 14,
         Kind::Tabs { .. } => 15,
         Kind::Busy => 16,
+        Kind::Segments { .. } => 17,
     }
 }
 
-const TAGS: usize = 17;
+const TAGS: usize = 18;
 
 /// Znacky odvozenych klicu (aby se nepotkaly s vlastnimi).
 const OWN: u64 = 1;
@@ -154,6 +156,8 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
         }
         Kind::Tabs { .. } => (th.size.hit_min * 4, ctl),
         Kind::Busy => (th.size.hit_min * 4, sp[3]),
+        // Pruh 44 px (`.dbar`) a radek legendy.
+        Kind::Segments { legend, .. } => (th.size.hit_min * 6, ctl + sp[2] + if *legend { sp[2] + th.text.caption.line } else { 0 }),
         Kind::Column(ch) => ch.iter().fold((0, 0), |(w, h), c| {
             let (cw, chh) = measure(c, t);
             (w.max(cw), h + chh + if h > 0 { t.gap() } else { 0 })
@@ -251,6 +255,9 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         }
         Kind::Busy => {
             push(out, ElemKind::Busy, r);
+        }
+        Kind::Segments { items, legend } => {
+            push(out, ElemKind::Segments { items, legend }, r);
         }
         Kind::Spacer => {}
         Kind::Column(children) => {

@@ -1270,6 +1270,7 @@ převede na zprávy `Msg`.
 | `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
+| `segments` | - | - | `list` s položkami `list-item` (celý popisek každého úseku) |
 | `switch` | klik | mezerník, Enter (při puštění) | `switch`, `checked`, `toggle` |
 | `radio` | klik | mezerník, Enter | `radio`, `checked` |
 | `slider` | klik do dráhy, tah, kolečko | šipky (krok `.step`), PgUp, PgDn (10 kroků), Home, End | `slider`, hodnota „40 (0-100)“, `set-value` |
@@ -1435,6 +1436,23 @@ Okno s fokusem dostane `Changed` s formáty ve schránce (při změně obsahu
 a při získání fokusu), aby mohlo povolit položku „Vložit“. Aplikace, které
 kreslí samy, volají `Window::copy_text`, `Window::request_paste`
 a `Window::clipboard_event`.
+
+**Pruhový graf podílů** `segments(vec![Segment::new(váha, popisek, tón)])`
+(`.dbar` v `design/instalace.html`): oddíly disku v instalátoru, obsazení
+disku, kvóty. Úseky mají šířku podle vah a dělí je čára `border_strong`
+(ne jen barva), popisek je v úseku jen tehdy, když se vejde, a celý vždy ve
+stromu přístupnosti. `.legend(true)` přidá legendu pod pruh. Tóny jsou jen
+dvojice barev s ověřeným kontrastem textu:
+
+| `Tone` | Pozadí / text | Použití |
+|---|---|---|
+| `Accent` | `accent` / `on_accent` | hlavní (nový oddíl systému) |
+| `Neutral` | `surface_3` / `ink` | běžný obsah |
+| `Other` | `accent_soft` / `accent_ink` | jiný obsah (jiný systém) |
+| `Muted` | `surface_2` / `ink_muted` | méně důležité (EFI, obnova) |
+| `Free` | šrafy `surface_3` a `surface` / `ink_muted` | volné místo |
+
+Prototyp má pro oddíly pevné barvy; systém je nahrazuje těmito tóny.
 
 ### Tabulka a seznam (virtualizace)
 

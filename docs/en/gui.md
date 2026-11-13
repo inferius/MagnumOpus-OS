@@ -1320,6 +1320,7 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 | `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
 | `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
+| `segments` | - | - | `list` with `list-item` children (full label of each segment) |
 | `switch` | click | space, Enter (on release) | `switch`, `checked`, `toggle` |
 | `radio` | click | space, Enter | `radio`, `checked` |
 | `slider` | click the track, drag, wheel | arrows (step `.step`), PgUp, PgDn (10 steps), Home, End | `slider`, value "40 (0-100)", `set-value` |
@@ -1489,6 +1490,25 @@ The focused window gets `Changed` with the formats on the clipboard (when
 the content changes and when it gains focus) so it can enable "Paste".
 Applications that draw themselves call `Window::copy_text`,
 `Window::request_paste` and `Window::clipboard_event`.
+
+**Share bar chart** `segments(vec![Segment::new(weight, label, tone)])`
+(`.dbar` in `design/instalace.html`): disk partitions in the installer,
+disk usage, quotas. Segments are as wide as their weights and separated by
+a `border_strong` line (not only by color); the label is drawn inside a
+segment only when it fits, and always in full in the accessibility tree.
+`.legend(true)` adds a legend under the bar. Tones are only color pairs with
+a verified text contrast:
+
+| `Tone` | Background / text | Use |
+|---|---|---|
+| `Accent` | `accent` / `on_accent` | main (the new system partition) |
+| `Neutral` | `surface_3` / `ink` | ordinary content |
+| `Other` | `accent_soft` / `accent_ink` | other content (another system) |
+| `Muted` | `surface_2` / `ink_muted` | less important (EFI, recovery) |
+| `Free` | stripes `surface_3` and `surface` / `ink_muted` | free space |
+
+The prototype has fixed colors for partitions; the system replaces them
+with these tones.
 
 ### Table and list (virtualization)
 

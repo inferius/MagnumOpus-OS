@@ -106,6 +106,8 @@ pub enum Kind<M> {
     Tabs { labels: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>>, on_close: Option<Box<dyn Fn(usize) -> M>> },
     /// Neurcity prubeh (bezi, delka nezname).
     Busy,
+    /// Pruhovy graf podilu (oddily disku, obsazeni, kvoty).
+    Segments { items: Vec<Segment>, legend: bool },
 
     Column(Vec<Node<M>>),
     Row(Vec<Node<M>>),
@@ -231,6 +233,43 @@ pub fn tabs<M>(labels: impl IntoIterator<Item = String>, selected: usize) -> Nod
     n
 }
 
+/// Ton useku pruhoveho grafu (barvy jen z tokenu, dvojice s overenym
+/// kontrastem textu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    /// Hlavni (napr. novy oddil systemu): `accent` / `on_accent`.
+    Accent,
+    /// Bezny obsah: `surface_3` / `ink`.
+    Neutral,
+    /// Jiny obsah (jiny system): `accent_soft` / `accent_ink`.
+    Other,
+    /// Mene dulezite (EFI, obnova): `surface_2` / `ink_muted`.
+    Muted,
+    /// Volne misto: srafovane `surface_3` a `surface`, text `ink_muted`.
+    Free,
+}
+
+/// Usek pruhoveho grafu: vaha (napr. bajty), popisek (cely jde do stromu
+/// pristupnosti, v pruhu jen kdyz se vejde) a ton.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Segment {
+    pub weight: u64,
+    pub label: String,
+    pub tone: Tone,
+}
+
+impl Segment {
+    pub fn new(weight: u64, label: &str, tone: Tone) -> Self {
+        Self { weight, label: label.into(), tone }
+    }
+}
+
+/// Pruhovy graf podilu (`.dbar` v design/instalace.html): vodorovny pruh
+/// rozdeleny na useky podle vah, volitelne legenda (`.legend(true)`).
+pub fn segments<M>(items: Vec<Segment>) -> Node<M> {
+    node(Kind::Segments { items, legend: false })
+}
+
 /// Neurcity prubeh (animace po snimcich).
 pub fn busy<M>() -> Node<M> {
     node(Kind::Busy)
@@ -329,6 +368,14 @@ impl<M> Node<M> {
         match &mut self.kind {
             Kind::Button { on_click, .. } | Kind::Radio { on_click, .. } => *on_click = Some(m),
             _ => {}
+        }
+        self
+    }
+
+    /// Legenda pod pruhovym grafem.
+    pub fn legend(mut self, l: bool) -> Self {
+        if let Kind::Segments { legend, .. } = &mut self.kind {
+            *legend = l;
         }
         self
     }

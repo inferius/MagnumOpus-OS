@@ -22,6 +22,7 @@ use inputproto::mods;
 
 use crate::event::Response;
 use crate::layout::ElemKind;
+use crate::node::{Segment, Tone};
 use crate::{Key, State, Ui};
 
 /// Nejsirsi zalozka (px, `.tab { max-width }` v navrhu).
@@ -269,6 +270,125 @@ impl<M: Clone> Ui<M> {
         }
     }
 
+    /// Obdelnik pruhu grafu a useky (x, sirka) podle vah.
+    fn segment_rects(&self, i: usize) -> (Rect, Vec<(i32, u32)>) {
+        let ElemKind::Segments { items, .. } = &self.elems[i].kind else { return (Rect::default(), Vec::new()) };
+        let r = self.elems[i].rect;
+        let bar = Rect::new(r.x, r.y, r.w, self.look.control_h() + self.look.theme.space[2]);
+        let total: u128 = items.iter().map(|s| s.weight as u128).sum::<u128>().max(1);
+        let inner = bar.w.saturating_sub(2) as u128;
+        // Kumulativne (soucet sirek = cely pruh, bez mezer zaokrouhleni).
+        let mut acc = 0u128;
+        let mut out = Vec::with_capacity(items.len());
+        for s in items {
+            let a = acc * inner / total;
+            acc += s.weight as u128;
+            let b = acc * inner / total;
+            out.push((bar.x + 1 + a as i32, (b - a) as u32));
+        }
+        (bar, out)
+    }
+
+    /// Barvy tonu (pozadi, text).
+    fn tone(&self, t: Tone) -> (u32, u32) {
+        let c = &self.look.theme.color;
+        match t {
+            Tone::Accent => (c.accent, c.on_accent),
+            Tone::Neutral => (c.surface_3, c.ink),
+            Tone::Other => (c.accent_soft, c.accent_ink),
+            Tone::Muted => (c.surface_2, c.ink_muted),
+            Tone::Free => (c.surface, c.ink_muted),
+        }
+    }
+
+    /// Srafy volneho mista (`.p-free`: 45 stupnu, pruhy po 6 px).
+    fn stripes(&self, c: &mut Canvas<'_>, r: Rect) {
+        let col = &self.look.theme.color;
+        c.fill(r, col.surface);
+        let p = (self.look.theme.space[2] - 2).max(4) as i32;
+        for y in 0..r.h as i32 {
+            let mut x = -((y + r.y) % (2 * p));
+            while x < r.w as i32 {
+                let a = (r.x + x).max(r.x);
+                let b = (r.x + x + p).min(r.right() as i32);
+                if b > a {
+                    c.fill(Rect::new(a, r.y + y, (b - a) as u32, 1), col.surface_3);
+                }
+                x += 2 * p;
+            }
+        }
+    }
+
+    fn draw_segments(&mut self, c: &mut Canvas<'_>, i: usize, items: &[Segment], legend: bool) {
+        let th = self.look.theme.clone();
+        let col = &th.color;
+        let (bar, parts) = self.segment_rects(i);
+        let rad = th.radius.control;
+        c.round_fill(bar, rad, col.border_strong);
+        let inner = Rect::new(bar.x + 1, bar.y + 1, bar.w.saturating_sub(2), bar.h.saturating_sub(2));
+        let cs = theme::TextStyle { weight: th.text.body_strong.weight, ..th.text.caption };
+        let first = parts.iter().position(|p| p.1 > 0);
+        for (k, (s, &(x, w))) in items.iter().zip(&parts).enumerate() {
+            if w == 0 {
+                continue;
+            }
+            let seg = Rect::new(x, inner.y, w, inner.h);
+            let (bg, ink) = self.tone(s.tone);
+            if s.tone == Tone::Free {
+                self.stripes(c, seg);
+            } else {
+                c.fill(seg, bg);
+            }
+            // Oddeleni useku (ne jen barvou).
+            if Some(k) != first {
+                c.fill(Rect::new(x, inner.y, 1, inner.h), col.border_strong);
+            }
+            let f = self.look.face(cs);
+            let tw = f.width(&s.label, cs.size);
+            if tw + 2 * th.space[1] <= w {
+                let b = seg.y + f.baseline_in(cs.size, seg.h);
+                f.draw(c, x + (w - tw) as i32 / 2, b, &s.label, cs.size, ink);
+            }
+        }
+        // Zaobleni rohu: kousky useku mimo zaobleny ram prebarvit pozadim
+        // (celociselna odmocnina: stejne na x86_64 i aarch64), pak ram.
+        let rr = rad as i32;
+        for d in 0..rr {
+            let dy = rr - d;
+            let cut = rr - ((rr * rr - dy * dy) as u32).isqrt() as i32;
+            if cut <= 0 {
+                continue;
+            }
+            for y in [bar.y + d, bar.bottom() as i32 - 1 - d] {
+                c.fill(Rect::new(bar.x, y, cut as u32, 1), col.surface);
+                c.fill(Rect::new(bar.right() as i32 - cut, y, cut as u32, 1), col.surface);
+            }
+        }
+        c.round_stroke(bar, rad, 1, col.border_strong);
+        let r = self.elems[i].rect;
+        if legend {
+            let cap = th.text.caption;
+            let sw = th.space[3];
+            let mut x = r.x;
+            let y = bar.bottom() as i32 + th.space[2] as i32;
+            for s in items {
+                let sq = Rect::new(x, y + (cap.line - sw) as i32 / 2, sw, sw);
+                if s.tone == Tone::Free {
+                    c.round_fill_bordered(sq, th.radius.xs / 2, col.surface_3, col.border_strong, 1);
+                } else {
+                    c.round_fill_bordered(sq, th.radius.xs / 2, self.tone(s.tone).0, col.border_strong, 1);
+                }
+                let f = self.look.face(cap);
+                let b = y + f.baseline_in(cap.size, cap.line);
+                f.draw(c, x + (sw + th.space[1]) as i32, b, &s.label, cap.size, col.ink_muted);
+                x += (sw + th.space[1] + f.width(&s.label, cap.size) + th.space[4]) as i32;
+                if x >= r.right() as i32 {
+                    break;
+                }
+            }
+        }
+    }
+
     /// Bezi nejaky neurcity prubeh (animace)?
     pub(crate) fn has_busy(&self) -> bool {
         self.elems.iter().any(|e| matches!(e.kind, ElemKind::Busy))
@@ -376,6 +496,10 @@ impl<M: Clone> Ui<M> {
                     }
                 }
             }
+            ElemKind::Segments { items, legend } => {
+                let (items, legend) = (items.clone(), *legend);
+                self.draw_segments(c, i, &items, legend);
+            }
             ElemKind::Busy => {
                 c.round_fill(r, r.h / 2, col.surface_3);
                 // Usek 30 % sirky obiha drahu (krok na snimek).
@@ -403,12 +527,30 @@ impl<M: Clone> Ui<M> {
             ElemKind::Segmented { options, selected, .. } => (Role::Segmented, String::new(), options.get(*selected).cloned().unwrap_or_default(), 0, FOCUS),
             ElemKind::Tabs { labels, selected, .. } => (Role::TabList, String::new(), labels.get(*selected).cloned().unwrap_or_default(), 0, FOCUS),
             ElemKind::Busy => (Role::Progress, String::new(), String::from("probíhá"), a11y::state::BUSY, 0),
+            ElemKind::Segments { .. } => (Role::List, String::new(), String::new(), 0, 0),
             _ => return None,
         })
     }
 
     /// Podrizene uzly segmentu (`radio`) a zalozek (`tab`).
     pub(crate) fn control_children(&self, i: usize, id: u32, layer: u32, out: &mut Vec<A11yNode>) {
+        if let ElemKind::Segments { items, .. } = &self.elems[i].kind {
+            let (bar, parts) = self.segment_rects(i);
+            for (k, (s, (x, w))) in items.iter().zip(parts).enumerate() {
+                out.push(A11yNode {
+                    id: virt_id(id, 4, k as u64),
+                    parent: id,
+                    role: Role::ListItem,
+                    name: s.label.clone(),
+                    value: String::new(),
+                    state: 0,
+                    layer,
+                    bounds: Rect::new(x, bar.y, w, bar.h),
+                    actions: 0,
+                });
+            }
+            return;
+        }
         let (names, selected, role) = match &self.elems[i].kind {
             ElemKind::Segmented { options, selected, .. } => (options, *selected, Role::Radio),
             ElemKind::Tabs { labels, selected, .. } => (labels, *selected, Role::Tab),

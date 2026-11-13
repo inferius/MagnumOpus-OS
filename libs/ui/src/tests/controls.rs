@@ -205,3 +205,47 @@ fn busy_animates_only_when_present() {
     let b = f.ui.a11y().into_iter().find(|n| n.role == Role::Progress).unwrap();
     assert!(b.state & state::BUSY != 0);
 }
+
+/// Pruhovy graf podilu (oddily disku): sirky podle vah bez mezer, cely
+/// popisek ve stromu pristupnosti, v pruhu jen kdyz se vejde, srafy volneho
+/// mista, legenda pod pruhem.
+#[test]
+fn segments_bar() {
+    let items = vec![
+        Segment::new(100, "EFI 100 MB", Tone::Muted),
+        Segment::new(480_000, "Windows C: 480 GB", Tone::Other),
+        Segment::new(300_000, "MagnumOpus 300 GB", Tone::Accent),
+        Segment::new(220_000, "Volné 220 GB", Tone::Free),
+    ];
+    let mut u: Ui<()> = Ui::new(crate::Look::ui_fonts(), 640, 200);
+    u.rebuild("g".into(), column([segments(items).legend(true)]));
+    let nodes = u.a11y();
+    let parts: Vec<_> = nodes.iter().filter(|n| n.role == Role::ListItem).collect();
+    assert_eq!(parts.len(), 4);
+    assert_eq!(parts[1].name, "Windows C: 480 GB");
+    // Bez mezer a podle vah (EFI ma temer nulovou sirku).
+    for k in 1..4 {
+        assert_eq!(parts[k].bounds.x, parts[k - 1].bounds.x + parts[k - 1].bounds.w as i32);
+    }
+    assert!(parts[0].bounds.w <= 1);
+    assert!(parts[1].bounds.w > parts[2].bounds.w && parts[2].bounds.w > parts[3].bounds.w);
+    let bar = nodes.iter().find(|n| n.role == Role::List).unwrap().bounds;
+    assert_eq!(parts[1].bounds.h, u.look.control_h() + u.look.theme.space[2]);
+    assert!(bar.h > parts[1].bounds.h, "misto pro legendu");
+    // Kresleni: usek Accent ma barvu `accent`, volne misto srafy (obe barvy).
+    let (w, h) = (640u32, 200u32);
+    let mut px = vec![0u32; (w * h) as usize];
+    let mut c = gfx::Canvas::new(&mut px, w, h, w).unwrap();
+    u.draw(&mut c, 0);
+    let col = u.look.theme.color.clone();
+    let a = parts[2].bounds;
+    assert_eq!(c.get((a.x + 3) as u32, (a.y + 3) as u32), col.accent);
+    let fr = parts[3].bounds;
+    let mut seen = (false, false);
+    for x in fr.x + 2..fr.x + 30 {
+        let p = c.get(x as u32, (fr.y + 4) as u32);
+        seen.0 |= p == col.surface;
+        seen.1 |= p == col.surface_3;
+    }
+    assert!(seen.0 && seen.1, "srafy");
+}
