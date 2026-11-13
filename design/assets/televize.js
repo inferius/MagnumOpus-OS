@@ -37,7 +37,8 @@
   }
   function home() {
     var kid = S.prof === 'ema', p = PROF[S.prof];
-    var cont = (kid ? ['les', 'kresleni', 'noc'] : ['more', 'dovolena', 'kuchyne', 'noc']).map(m);
+    // Rozhodnuto: obsah nad hodnoceni profilu se detem skryva (ne ukazuje se zamkem).
+    var cont = (kid ? ['les', 'kresleni'] : ['more', 'dovolena', 'kuchyne', 'noc']).map(m);
     var apps = APPS.filter(function (a) { return !kid || ['Média', 'Fotky', 'Hudba', 'Hry'].indexOf(a[1]) >= 0; });
     var ph = [['#4b6b8f', '#b9d3ec', 'Hory, srpen'], ['#8f5b4b', '#ecc4b9', 'Narozeniny'], ['#4b8f6b', '#b9ecd0', 'Zahrada'], ['#6b4b8f', '#d3b9ec', 'Zima'], ['#8f8a4b', '#ece6b9', 'Výlet']];
     var mu = [['#2a2a2a', '#7a7a7a', 'Klavírní večer'], ['#5a1f1f', '#c86060', 'Rádio Jazz'], ['#1f3f5a', '#60a0c8', 'Na dobrou noc'], ['#3f5a1f', '#a0c860', 'Do auta']];
@@ -259,8 +260,8 @@
     ['Přehrávač', 'OK na kartě spustí přehrávání. Ovládací prvky jsou sémantické akce (přehrát, posun, titulky); stejné přijdou z ovladače, gamepadu, telefonu i hlasu. Zpět nejdřív schová ovládání, podruhé odejde.', function () { S.prof = 'tata'; S.scr = 'play'; S.playing = 'more'; S.pos = 2184; S.paused = false; S.osd = true; }],
     ['Psaní z telefonu', 'Klávesnice v mřížce je pomalá, proto „Z telefonu“: na spárovaném telefonu se otevře pole a text přijde jako jedno vložení. Kontext ukazuje zdroj vstupu <code>remote_device</code>.', function () { S.prof = 'tata'; S.scr = 'search'; S.q = 'kuchyně'; S.qsrc = 'z telefonu'; }],
     ['Hledání hlasem', 'Tlačítko mikrofonu na ovladači: poslouchá jen během stisku. Panel je pro aplikaci překážka v kontextu.', function () { S.prof = 'tata'; S.scr = 'search'; S.q = ''; S.qsrc = ''; S.dlgTo = 'mic'; }],
-    ['Dětský profil', 'Ema (do 7 let): jen dětské aplikace a obsah. Film 15+ je vidět se zámkem a nižší sytostí, aby bylo jasné, proč nejde. Rodič může zvolit úplné skrytí.', function () { S.prof = 'ema'; S.scr = 'home'; S.qsrc = ''; S.mem = { cont: 'noc' }; S.focTo = ['cont', 'noc']; }],
-    ['PIN rodiče', 'Důvěryhodný dialog s frází. PIN jen tlačítky spárovaného ovladače u televize: telefon ani hlas ho nezadají (vstup z jiného zdroje se zahodí). Odemkne jen tento film, jednou.', function () { S.prof = 'ema'; S.scr = 'home'; S.qsrc = ''; S.mem = { cont: 'noc' }; S.focTo = ['cont', 'noc']; S.dlg = 'pin'; S.pin = 1; }],
+    ['Dětský profil', 'Ema (do 7 let): jen dětské aplikace a obsah. Obsah nad hodnocení se <b>skrývá</b> (rozhodnuto): film 15+ v řadě vůbec není a nenajde ho ani hledání.', function () { S.prof = 'ema'; S.scr = 'home'; S.qsrc = ''; S.mem = {}; }],
+    ['PIN rodiče', 'Rodič chce dítěti pustit film nad hodnocení: vybere ho na svém profilu a potvrdí PINem v důvěryhodném dialogu s frází. PIN jen tlačítky spárovaného ovladače u televize: telefon ani hlas ho nezadají. Odemkne jen tento film, jednou.', function () { S.prof = 'ema'; S.scr = 'home'; S.qsrc = ''; S.mem = {}; S.dlg = 'pin'; S.pin = 1; }],
     ['Kdo je na obrazovce', 'Podržení Domů na spárovaném ovladači: bezpečné vyvolání pro televizi. Ukáže profil, aplikaci v popředí, stav mikrofonu a připojené telefony.', function () { S.prof = 'ema'; S.scr = 'home'; S.qsrc = ''; S.dlg = 'who'; }]
   ];
   function step(i) {

@@ -816,6 +816,16 @@ More designs waiting for decisions: [bubbles and bar panels](../../design/bublin
 > **Change from v1.7:** two designs building on the mobile environment.
 > Launcher: variant D chosen (compact grouped list).
 
+**Decided 2026-11-13:** tablet and laptop modes switch automatically by
+the sensor, with a manual switch in quick settings (automatic, always,
+never). In portrait the tiles are stacked. TV mode is not developed
+further; content above the profile rating is hidden from children. The
+foundations take the points from the table below: 1, 2 and 4 are
+implemented by milestone 6c, points 3, 5 and 6 are **[designed]** in
+[device interfaces](device-interfaces.md#media-actions-and-playback-session-designed),
+[architecture](architecture.md#household-profiles-and-content-policy-designed)
+and [device interfaces](device-interfaces.md#video-plane-designed).
+
 [Tablet mode](../../design/tablet.html) shows a tablet in landscape and
 portrait with finger, pen and an attached keyboard. At most two tiles
 (1/2, 1/3 + 2/3) and one floating window; in portrait the tiles are
@@ -829,14 +839,14 @@ control or gamepad, household profiles and parental controls. The main
 result is a table of what the model already covers on a TV. The
 foundations need:
 
-| What | Why |
-|---|---|
-| `posture`, `viewing_distance`, `safe` in the window context | density and safe area independent of the width class |
-| spatial navigation and focus groups with memory in the component library | linear Tab order is not enough on a remote |
-| semantic media actions and a system playback session | one set for remote, phone, voice and lock screen |
-| input source class (local physical, remote, synthetic) | PIN and trusted dialogs only from a local source |
-| household profile and content policy | the system enforces parental controls, not the app |
-| video plane in the compositor | 4K and HDR without exhausting the CPU |
+| # | What | Why |
+|---|---|---|
+| 1 | `posture`, `viewing_distance`, `safe` in the window context | density and safe area independent of the width class |
+| 2 | spatial navigation and focus groups with memory in the component library | linear Tab order is not enough on a remote |
+| 3 | semantic media actions and a system playback session | one set for remote, phone, voice and lock screen |
+| 4 | input source class (local physical, remote, synthetic) | PIN and trusted dialogs only from a local source |
+| 5 | household profile and content policy | the system enforces parental controls, not the app |
+| 6 | video plane in the compositor | 4K and HDR without exhausting the CPU |
 
 Risks: commercial streaming services require certified DRM that a new
 system will not get; pen, touch and HDMI-CEC need drivers that do not
@@ -1116,3 +1126,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.6 | 2026-11-08 | **phase 1 implemented** in the system: tokens as data (`libs/theme`), Inter and JetBrains Mono with `GPOS` kerning, windows, badge, bar, desktop, dialog and terminal following the prototypes; deviations in [GUI: Look per the design](gui.md#look-per-the-design-phase-1) |
 | v1.7 | 2026-11-12 | designs: mobile environment (stage A), system dialogs for desktop and phone, launcher and palette names, bubbles and bar panels |
 | v1.8 | 2026-11-13 | designs: tablet mode (window tiling, pen, 2-in-1), TV mode with a foundations review; compact file picker; launcher variant D |
+| v1.9 | 2026-11-13 | decisions: tablet switches automatically, stacked tiles in portrait, TV mode not developed further, content above the rating hidden from children; points 3, 5 and 6 into the foundations as a design; permission infographic and severity colours for icons |

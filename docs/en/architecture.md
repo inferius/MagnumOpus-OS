@@ -214,6 +214,27 @@ tested, and divide their authority further:
   mode by setting) and an antivirus scanning in isolated processes without
   network access.
 
+### Household profiles and content policy (designed)
+
+**[designed]** A shared device (TV, family tablet) needs a **household
+profile**: a lightweight account without a password, optionally with a
+PIN, picked with a remote or by touch. It has its own history,
+recommendations and settings, but no encrypted home directory of its
+own; sensitive data (mail, password vault) stays in full
+[accounts](accounts.md).
+
+The system enforces the **content policy**, not the apps:
+
+| What | How |
+|---|---|
+| rating | an app states its rating in the manifest, media in its metadata; the profile has a maximum allowed rating |
+| above the rating | content is **hidden** from a child profile (not shown in rows or search results) |
+| exception | a parent allows one title once, with a PIN in a trusted dialog, only from local physical input |
+| time limits and purchases | a system policy of the profile; the app asks for permission, it does not enforce them itself |
+
+The app only gets "allowed / not allowed" and a reason for the text, not
+the profile settings. Related to the [TV design](appearance.md#tablet-and-tv-design).
+
 ## System services
 
 | Service | Task |
@@ -769,14 +790,16 @@ the web, JSON and Unixes; CRLF would mean conversions everywhere else.
    follows it.
 2. **Tolerant reading**: tools accept `
 ` too (a file from Windows,
-   pasted text) as one line ending and do not show a lone `` at the end
+   pasted text) as one line ending and do not show a lone `
+` at the end
    of a line as garbage.
 3. **Files are never rewritten silently**: the editor keeps the style of
    the opened file; conversion only on request (a command, an option when
    saving).
 4. **Terminal**: `
 ` = new line and return to the start (like modern
-   terminals); a lone `` returns the cursor to the line start (progress
+   terminals); a lone `
+` returns the cursor to the line start (progress
    indicators).
 5. **Exchange with the world**: `osfs` (sharing the FS with Windows) and
    git do not convert line endings; conversion is optional in a tool.

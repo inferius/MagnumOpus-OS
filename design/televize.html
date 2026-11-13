@@ -161,6 +161,7 @@
   <header>
     <h1>Televizní režim</h1>
     <p class="lead">Rozhraní „na 3 metry“: dálkový ovladač nebo gamepad, žádná myš ani dotyk. Hlavní účel návrhu je <b>ověřit základy</b> (kontext okna, třídy, sémantické akce, fokus z knihovny komponent) na prostředí, které je od telefonu a počítače nejdál. Výsledek je v tabulce <a href="#pokryti">Co základy pokryjí</a>. Televize je <b>simulovaná</b>; ovládá se ovladačem vpravo nebo šipkami, Enter, Backspace (Zpět) a H (Domů), když je fokus na televizi.</p>
+    <p class="note"><b>Rozhodnutí 13. 11. 2026:</b> televizní režim se <b>dál nerozpracovává</b>; do základů se promítnou body 1 až 6 z tabulky níže (1, 2 a 4 v milníku 6c, 3, 5 a 6 jako návrh v dokumentaci). Obsah nad hodnocení dětského profilu se <b>skrývá</b> (ne ukazuje se zámkem). Simulátor zůstává jako podklad.</p>
   </header>
 
   <h2>Průchod</h2>
@@ -206,7 +207,7 @@
   <div class="pc">
     <div class="card card2"><h3>Ovládání</h3><ul><li><b>Šipky</b> pohyb, <b>OK</b> potvrzení, <b>podržet OK</b> kontextová nabídka, <b>Zpět</b> podle stejné smlouvy jako na telefonu, <b>Domů</b> vždy domů.</li><li>Gamepad: A = OK, B = Zpět, Start = nabídka, Guide = Domů, ramena = o stránku.</li><li>V řadě se fokus pohybuje a řada se posouvá tak, aby fokus zůstal na stejném místě (oko nemusí hledat).</li><li>Návrat do řady jde na naposledy vybranou dlaždici, ne na první.</li></ul></div>
     <div class="card card2"><h3>Vzhled</h3><ul><li>Vždy tmavý: světlá plocha v setmělém pokoji oslňuje. Vysoký kontrast funguje.</li><li>Písmo nejméně 16 jednotek (32 px při 1080p), na úhlopříčce 55" ze 3 m to odpovídá písmu 14 px na monitoru 24" z 60 cm.</li><li>Nic důležitého mimo bezpečný okraj; žádné tenké čáry (1 jednotka na TV bliká).</li></ul></div>
-    <div class="card card2"><h3>Profily a dítě</h3><ul><li>Volba profilu po zapnutí; bez hesla, aby to šlo ovladačem. Profil dospělého může mít PIN.</li><li>Dětský profil vidí jen obsah do svého hodnocení; zamčený obsah je vidět se zámkem (dítě ví, proč nejde), ne skrytý, pokud rodič nezvolí skrýt.</li><li>Odemčení zadá rodič PINem v důvěryhodném dialogu, jen z ovladače u televize.</li></ul></div>
+    <div class="card card2"><h3>Profily a dítě</h3><ul><li>Volba profilu po zapnutí; bez hesla, aby to šlo ovladačem. Profil dospělého může mít PIN.</li><li>Dětský profil vidí jen obsah do svého hodnocení; obsah nad hodnocení se <b>skrývá</b> (rozhodnuto). Výjimku pustí rodič PINem, jen jednou.</li><li>Odemčení zadá rodič PINem v důvěryhodném dialogu, jen z ovladače u televize.</li></ul></div>
   </div>
 
   <h2>Rizika</h2>

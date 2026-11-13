@@ -117,6 +117,26 @@ Ovladač nabídne kompozitoru seznam svých bufferů s druhem paměti
 a kompozitor zvolí cestu. Rozhraní displeje tím zůstane jedno pro CPU
 i GPU skládání.
 
+### Videorovina (navrženo)
+
+**[navrženo]** Video se nemá skládat jako obyčejná vrstva: dekódovaný snímek 4K by se
+každý snímek kopíroval a skládal procesorem. Kompozitor proto umí
+**videorovinu**: buffer z hardwarového dekodéru jde přímo do roviny
+displeje (overlay), pokud ho displej umí zobrazit, jinak do skládání
+na GPU. Bez obou cest se video zmenší na rozlišení, které procesor
+stihne, a uživatel to vidí v informacích o přehrávání.
+
+| Co | Pravidlo |
+|---|---|
+| zdroj | buffer dekodéru ve formátu YUV (NV12, P010), bez převodu na RGB v procesoru |
+| HDR | metadata (PQ, HLG, jas) jdou s bufferem; kompozitor přepne výstup do HDR, jen když je video v popředí a displej to umí |
+| obnovovací frekvence | displej se může přepnout na násobek snímkové frekvence videa (24, 25, 50 Hz), jen na celé obrazovce |
+| titulky a ovládání | kreslí se jako obyčejná vrstva nad videorovinou |
+| ochrana obsahu | zabezpečená cesta (DRM) se nenavrhuje: certifikaci nový systém nezíská |
+
+Souvisí s [vzhledem pro televizi](vzhled.md#tablet-a-televize-návrh),
+ale potřebuje ho každé přehrávání videa na počítači i telefonu.
+
 ## Vrstva 2: systémové služby pro aplikace
 
 Aplikace nikdy nedostane capability k ovladači (registry, neomezené DMA).
@@ -146,6 +166,30 @@ parametrů, odebrání oprávnění = zneplatnění relace). Služba:
 | výběr souboru (portál) | jen soubory, které uživatel vybral, ne celý disk | FS, cloudové úložiště |
 | sdílení obrazovky | jen okno nebo obrazovka, kterou uživatel vybral, s indikátorem | kompozitor |
 | schránka, kontakty, tisk | data jen na akci uživatele (vložit, vybrat kontakt) | služby a aplikace |
+
+### Mediální akce a relace přehrávání (navrženo)
+
+**[navrženo]** Služba přehrávání médií drží **relaci přehrávání** každého přehrávače:
+co hraje (název, obrázek, délka), pozici, stav a seznam akcí, které
+přehrávač umí. Ovládání v liště, klávesy médií, sluchátka, zamykací
+obrazovka, dálkový ovladač, doprovodný telefon i hlas jsou jen klienti
+téže relace.
+
+Ovládání jde přes **sémantické akce**, ne jako klávesy nebo kliknutí:
+
+| Akce | Parametry |
+|---|---|
+| `media.play`, `media.pause`, `media.toggle`, `media.stop` | - |
+| `media.seek` | pozice nebo posun v ms |
+| `media.next`, `media.previous` | - |
+| `media.subtitles` | jazyk nebo vypnuto |
+| `media.audio_track` | stopa |
+| `media.info` | - (ukáže podrobnosti) |
+
+Hlasitost a vypnutí zpracuje systém; aplikace je nedostane. Přehrávač
+v manifestu uvede, které akce umí; neznámé akce systém neposílá. Když
+hraje víc přehrávačů, akce jde relaci, která naposledy začala hrát
+(stejné pravidlo jako souběh zvuku výše).
 
 **Cena**: aplikace mají méně volnosti než na Androidu. Proto musí mít
 každá služba rozšíření s verzí (vrstva 1, bod 4), jinak by ji vývojáři
