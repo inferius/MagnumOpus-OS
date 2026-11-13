@@ -225,6 +225,15 @@ rt_period_us = 5000
   are not the same work as two Interactive ones. A move happens only when
   the target stays less loaded afterwards (no bouncing). The core type rules
   for the class apply.
+- **Moving only after the switch**: a thread still running on its CPU must
+  not be in another CPU's queue. The other CPU would pick it and wait with
+  interrupts disabled until the original CPU finishes switching away; if
+  two CPUs swap threads, they wait for each other and both stop (their
+  timers too). So moving a preempted thread and enqueueing a thread woken
+  while it was going to sleep happen only after the switch completes
+  (`finish_switch`), and stealing skips such threads (like `on_cpu` in
+  Linux). Version 2 had this bug until 2026-11-13 (an occasionally stuck
+  input latency test on aarch64). **[implemented]**
 - **Balancing idle CPUs**: an idle CPU takes work from other queues; an efficiency
   core takes Interactive only from a queue with at least two waiting
   threads (the performance cores are overloaded). A preempted Interactive

@@ -204,7 +204,7 @@ impl Sim {
         let me = views[i];
         let hybrid = self.hybrid;
         for j in (0..self.cpus.len()).filter(|&j| j != i) {
-            if let Some((id, ent)) = self.cpus[j].rq.steal(|class, n| place::may_steal(&me, class, n, hybrid)) {
+            if let Some((id, ent)) = self.cpus[j].rq.steal(|class, n| place::may_steal(&me, class, n, hybrid), |_| true) {
                 let now = self.now;
                 self.cpus[i].rq.enqueue(id, ent, now, false);
                 return;

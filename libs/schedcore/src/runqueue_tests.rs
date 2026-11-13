@@ -90,10 +90,10 @@ fn steal_respects_filter_and_order() {
     let mut rq = RunQueue::new();
     rq.enqueue(1, Ent::new(Class::Background), 0, false);
     rq.enqueue(2, Ent::new(Class::Interactive), 0, false);
-    let (t, ent) = rq.steal(|c, _| c != Class::Interactive).unwrap();
+    let (t, ent) = rq.steal(|c, _| c != Class::Interactive, |_| true).unwrap();
     assert_eq!((t, ent.class), (1, Class::Background));
-    assert!(rq.steal(|c, _| c != Class::Interactive).is_none());
-    assert_eq!(rq.steal(|_, _| true).unwrap().0, 2);
+    assert!(rq.steal(|c, _| c != Class::Interactive, |_| true).is_none());
+    assert_eq!(rq.steal(|_, _| true, |_| true).unwrap().0, 2);
 }
 
 #[test]
@@ -128,4 +128,15 @@ fn yield_lets_others_run() {
     rq.yield_curr();
     rq.put_curr(t, 10_000);
     assert_ne!(rq.pick(10_000).unwrap().0, t);
+}
+
+#[test]
+fn steal_skips_unmovable() {
+    let mut rq = RunQueue::new();
+    rq.enqueue(1, Ent::new(Class::Normal), 0, false);
+    rq.enqueue(2, Ent::new(Class::Normal), 0, false);
+    // Vlakno 2 jeste dobiha na svem CPU: kradouci ho nesmi vzit.
+    assert_eq!(rq.steal(|_, _| true, |&t| t != 2).unwrap().0, 1);
+    assert!(rq.steal(|_, _| true, |&t| t != 2).is_none());
+    assert_eq!(rq.len(), 1);
 }

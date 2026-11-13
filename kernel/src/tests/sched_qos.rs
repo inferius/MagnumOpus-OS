@@ -28,6 +28,7 @@ use crate::sync::SpinLock;
 pub const TESTS: &[(&str, fn())] = &[
     ("qos: latence vstup -> snimek pod zatezi pozadi", input_to_frame_latency),
     ("qos: Background dostane zaruceny podil", background_share),
+    ("qos: presuny a probouzeni mezi vytizenymi CPU bez uvaznuti", migration_stress),
     ("qos: dedeni tridy pres kanal a port", ipc_inheritance),
     ("qos: zvednuti vyprsi", boost_expires),
     ("qos: pujcka se ping-pongem neprodluzuje", loan_not_renewed_by_ping_pong),
@@ -179,6 +180,47 @@ fn background_share() {
     log::info!("planovac: podil Background pod zatezi Interactive: {permille} promile");
     assert!(permille >= 15, "Background hladovi: {permille} promile");
     assert!(permille <= 400, "Background predbiha Interactive: {permille} promile");
+}
+
+/// Zatez, ktera honi presuny mezi vytizenymi CPU (vic smycek nez CPU,
+/// ruzne tridy) a probouzeni prave usinajicich vlaken (dvojice pres
+/// udalosti s kratkym spankem). Hlida uvaznuti dvou CPU, ktera by na sebe
+/// cekala se zakazanymi prerusenimi (vlakno v cizi fronte, ktere jeste
+/// bezi na svem CPU): kazde vlakno musi dobehnout.
+fn migration_stress() {
+    const ROUNDS: usize = 300;
+    let n = sched::cpu_count();
+    let normal = load(Qos::Normal, 2 * n);
+    let bg = load(Qos::Background, n);
+    let pairs: Vec<_> = (0..n)
+        .flat_map(|i| {
+            let (a, b) = (Arc::new(Event::new()), Arc::new(Event::new()));
+            let class = if i % 2 == 0 { Qos::Interactive } else { Qos::Normal };
+            let (a1, b1) = (a.clone(), b.clone());
+            let ping = sched::spawn("ping", class, move || {
+                for r in 0..ROUNDS {
+                    a1.signal();
+                    wait_reset(&b1);
+                    if r % 8 == 0 {
+                        wait::sleep(Duration::from_micros(200));
+                    }
+                }
+            });
+            let pong = sched::spawn("pong", class, move || {
+                for _ in 0..ROUNDS {
+                    wait_reset(&a);
+                    busy(20 * US);
+                    b.signal();
+                }
+            });
+            [ping, pong]
+        })
+        .collect();
+    for t in &pairs {
+        join(t, Duration::from_secs(30), "ping-pong pod zatezi");
+    }
+    normal.finish();
+    bg.finish();
 }
 
 /// Normal obsluha probuzena zpravou od Interactive bezi jako Interactive;

@@ -206,6 +206,15 @@ ovladače):
   dělený kapacitou jádra: dvě Background vlákna nejsou stejná práce jako dvě
   Interactive. Přesun jen tehdy, když cíl bude i po něm méně vytížený (žádné
   skákání tam a zpět). Respektuje typ jádra pro třídu.
+- **Přesun až po přepnutí**: vlákno, které ještě běží na svém CPU, nesmí
+  být v cizí frontě. Cizí CPU by ho vybralo a čekalo se zakázanými
+  přerušeními, až ho původní CPU dopřepne; když si dvě CPU vlákna
+  vymění, čekají na sebe navzájem a stojí obě (i jejich časovače). Proto
+  se přesun vystřídaného vlákna i zařazení vlákna probuzeného během
+  usínání provede až po dokončení přepnutí (`finish_switch`) a kradení
+  dobíhající vlákna přeskočí (jako `on_cpu` v Linuxu). Tuto chybu měla
+  verze 2 do 2026-11-13 (občas zaseknutý test latence vstupu na
+  aarch64). **[implementováno]**
 - **Vyvažování nečinných**: nečinné CPU si bere práci z cizích front; úsporné jádro
   bere Interactive jen z fronty, kde čekají aspoň dvě vlákna (výkonná jsou
   přetížená). Vystřídané Interactive vlákno na úsporném jádře se přesune

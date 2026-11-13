@@ -19,6 +19,7 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 - Žádný root: proces smí jen to, na co dostal handle s právem. Nová operace = kontrola práva handlu, ne identity.
 - Syscally: čísla patří do `libs/abi/src/syscall.rs`, postup přidání je v kořenovém `CLAUDE.md`. Návratová hodnota je číslo nebo záporný kód `abi::Error`.
 - Obsluha přerušení smí brát jen `SpinLock` (zakazuje přerušení), jinak hrozí deadlock.
+- Plánovač: vlákno, které ještě běží (`on_cpu`), nesmí být v **cizí** frontě - jiné CPU by na něj čekalo se zakázanými přerušeními a dvě CPU by se mohla zablokovat navzájem. Přesun na jiné CPU a zařazení vlákna probuzeného během usínání dělá `finish_switch`; kradení taková vlákna přeskakuje (`sched/mod.rs`, `sched/balance.rs`).
 
 ## Testy
 
