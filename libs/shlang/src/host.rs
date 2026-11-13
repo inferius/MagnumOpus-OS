@@ -360,10 +360,30 @@ pub trait Host {
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Sluzba "otevri cestu" (`start`, hola cesta k souboru): otevre
+    /// absolutni `path` v aplikaci podle typu. `app_only` = jen aplikace
+    /// s asociaci (bez ukazani ve spravci souboru). `NOT_SUPPORTED` =
+    /// hostitel sluzbu nema (konzole, testy); chyba sluzby = `Failed`.
+    fn open_path(&mut self, _path: &str, _app_only: bool) -> Result<Opened, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Domovska slozka uzivatele.
     fn home(&self) -> String {
         String::from("/home")
     }
+}
+
+/// Odpoved sluzby "otevri cestu" ([`Host::open_path`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Opened {
+    /// Otevreno v aplikaci (id aplikace).
+    App(String),
+    /// Zadna aplikace typ neotevre; soubor ukazal spravce souboru (id).
+    Revealed(String),
+    /// Pro typ neni aplikace (zadost `app_only`).
+    NoApp,
+    /// Sluzba odmitla (text pro cloveka, napr. `/a.txt: NOT_FOUND`).
+    Failed(String),
 }
 
 /// Co smi spusteny program (z manifestu programu a omezeni skriptu).

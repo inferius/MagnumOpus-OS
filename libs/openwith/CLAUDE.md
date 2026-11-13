@@ -6,6 +6,7 @@ Asociace typů souborů s aplikacemi: sekce `[open]` v manifestu (akce s povinn�
 
 - Vadné `[open]` (nedeklarovaná akce, parametr jiného typu) se ignoruje a hlásí, nikdy nepovolí volání bez deklarace.
 - Pořadí: složka -> `folders`; soubor -> první aplikace s příponou; jinak `reveal`.
+- Žádost `open` (dvojklik, `start` v shellu) smí soubor ukázat ve správci (`reveal`); `open-app` (holá cesta v shellu) nikdy: bez asociace odpověď `none`.
 
 ## Testy
 

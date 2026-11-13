@@ -24,6 +24,7 @@ const S_ADOPT: u8 = 2;
 const S_TASKS: u8 = 3;
 const S_POWER: u8 = 4;
 const S_AUDIO: u8 = 5;
+const S_OPEN: u8 = 6;
 
 /// Stitky volitelnych startovnich handlu termd (`StartHandle::tagged`):
 /// hledaji se podle stitku, takze chybejici jeden neposune ostatni.
@@ -34,6 +35,8 @@ pub mod tag {
     /// Relace zvukove sluzby `audiod` a jeji listek.
     pub const AUDIO: u32 = 2;
     pub const AUDIO_LEASE: u32 = 3;
+    /// Kanal sluzby "otevri cestu" relace uzivatele (init, `libs/openwith`).
+    pub const OPEN: u32 = 4;
 }
 
 /// termd -> relace.
@@ -54,6 +57,9 @@ pub enum SessMsg {
     Power,
     /// Zvuk pro relaci; handly: [kanal k `audiod`, listek (volitelny)].
     Audio,
+    /// Sluzba "otevri cestu" (hola cesta k souboru, `start`); handly:
+    /// [konec kanalu sluzby]. Bez zpravy relace sluzbu nema.
+    Open,
 }
 
 impl SessMsg {
@@ -70,6 +76,7 @@ impl SessMsg {
             SessMsg::Tasks => w.u8(S_TASKS),
             SessMsg::Power => w.u8(S_POWER),
             SessMsg::Audio => w.u8(S_AUDIO),
+            SessMsg::Open => w.u8(S_OPEN),
             SessMsg::Client(m) => {
                 w.u8(S_CLIENT);
                 w.0.extend_from_slice(&m.encode());
@@ -92,6 +99,7 @@ impl SessMsg {
             S_TASKS if rest.is_empty() => Ok(SessMsg::Tasks),
             S_POWER if rest.is_empty() => Ok(SessMsg::Power),
             S_AUDIO if rest.is_empty() => Ok(SessMsg::Audio),
+            S_OPEN if rest.is_empty() => Ok(SessMsg::Open),
             _ => Err(DecodeError),
         }
     }

@@ -8,7 +8,8 @@
 //! handly se stitkem (`term::ctl::tag`, `StartHandle::tagged`): brana
 //! agenta AI, relace zvukove sluzby a jeji listek (kazda relace shellu
 //! dostane vlastni relaci zvuku zpravou `SessMsg::Audio`, s listkem
-//! prezije restart `audiod`); `kind::INITFS` = obraz initfs (odtud se
+//! prezije restart `audiod`), kanal sluzby "otevri cestu" (relace shellu
+//! ho dostane zpravou `SessMsg::Open`); `kind::INITFS` = obraz initfs (odtud se
 //! spousti `shsess`).
 //!
 //! Kazda relace bezi ve vlastnim procesu `shsess` (`term::broker`). termd
@@ -56,6 +57,9 @@ struct Termd {
     power: Option<Channel>,
     /// Zapisovaci konec brany agenta AI (kazda relace dostane duplikat).
     agent: Option<Channel>,
+    /// Kanal sluzby "otevri cestu" relace uzivatele (kazda relace shellu
+    /// dostane duplikat zpravou `SessMsg::Open`).
+    open: Option<Channel>,
     image: Option<&'static [u8]>,
     broker: Broker,
     sessions: Vec<Sess>,
@@ -141,6 +145,11 @@ impl Termd {
             if let Ok(hs) = hs {
                 let _ = chan.write(&SessMsg::Audio.encode(), hs);
             }
+        }
+        if let Some(o) = &self.open
+            && let Ok(d) = o.handle().duplicate(None)
+        {
+            let _ = chan.write(&SessMsg::Open.encode(), alloc::vec![d]);
         }
         if let Some(p) = &self.power
             && let Ok((ours, theirs)) = Channel::create()
@@ -243,6 +252,7 @@ fn main(mut startup: Startup) -> i64 {
     let registry = hs.next().map(Channel::from_handle);
     let power = hs.next().map(Channel::from_handle);
     let agent = startup.take_tagged(term::ctl::tag::AGENT).map(Channel::from_handle);
+    let open = startup.take_tagged(term::ctl::tag::OPEN).map(Channel::from_handle);
     let audio = startup.take_tagged(term::ctl::tag::AUDIO).map(Channel::from_handle).map(|ch| {
         match startup.take_tagged(term::ctl::tag::AUDIO_LEASE) {
             Some(lease) => audioproto::conn::AudioClient::with_lease(ch, Channel::from_handle(lease)),
@@ -258,6 +268,7 @@ fn main(mut startup: Startup) -> i64 {
         audio,
         power,
         agent,
+        open,
         image,
         broker: Broker::new(nonce),
         sessions: Vec::new(),

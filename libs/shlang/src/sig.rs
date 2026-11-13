@@ -158,7 +158,7 @@ use Io::{Any as IA, Bytes as IB, Nothing as IN, Text as IT};
 /// Vestavene prikazy jazyka verze 1.
 /// Skupiny prikazu pro prehled `help` (poradi i nazvy pro cloveka).
 pub const GROUPS: &[(&str, &[&str])] = &[
-    ("Soubory", &["ls", "cd", "pwd", "open", "save", "rm", "cp", "mv", "mkdir", "exists", "df"]),
+    ("Soubory", &["ls", "cd", "pwd", "open", "start", "save", "rm", "cp", "mv", "mkdir", "exists", "df"]),
     ("Text a výstup", &["echo", "log", "lines", "split", "join", "trim", "upper", "lower", "contains", "starts-with", "ends-with", "replace"]),
     ("Seznamy a tabulky", &["where", "each", "select", "sort", "first", "last", "count", "sum", "group", "reverse", "range"]),
     ("Převody a čas", &["from", "to", "convert", "describe", "now", "sleep"]),
@@ -178,6 +178,8 @@ pub const BUILTINS: &[Sig] = &[
         "změní pracovní složku (bez argumentu na domovskou)"),
     sig!("pwd", "dir-current", NONE, None, NOFLAGS, IN, IT, "vrátí pracovní složku"),
     sig!("open", "file-read", &[p("path", Kind::Path)], None, NOFLAGS, IN, IB, "přečte soubor jako bajty"),
+    sig!("start", "file-start", &[p("path", Kind::Path)], None, NOFLAGS, IN, IN,
+        "otevře soubor nebo složku v aplikaci podle typu (jako dvojklik)"),
     sig!("save", "file-write", &[p("path", Kind::Path)], None,
         &[flag("append", 'a', "připojit na konec")], IA, IN,
         "uloží bajty nebo text do souboru (záznamy jen po `to text`/`to json`)"),

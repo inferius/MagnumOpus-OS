@@ -37,6 +37,7 @@ use term::tasks::{Clock, Joinable, Notify};
 mod audio;
 mod ai;
 mod fs;
+mod open;
 
 libos::entry!(main);
 
@@ -74,6 +75,12 @@ impl MainLink<'_> {
                 Ok(SessMsg::Power) => {
                     if let Some(h) = m.handles.into_iter().next() {
                         *POWER.lock() = Some(Channel::from_handle(h));
+                    }
+                    None
+                }
+                Ok(SessMsg::Open) => {
+                    if let Some(h) = m.handles.into_iter().next() {
+                        *open::SERVICE.lock() = Some(Channel::from_handle(h));
                     }
                     None
                 }
@@ -194,6 +201,8 @@ struct SysEnv {
     /// Prehled uloh (`taskd`): kanal producenta a klienta.
     task_producer: Option<Channel>,
     task_client: Option<Channel>,
+    /// Rozpracovana zadost sluzbe "otevri cestu".
+    open: open::Pending,
 }
 
 impl SysEnv {
@@ -362,6 +371,14 @@ impl Env for SysEnv {
         }))
     }
 
+    fn open_send(&mut self, path: &str, app_only: bool) -> Result<(), Error> {
+        self.open.send(path, app_only)
+    }
+
+    fn open_recv(&mut self, wait_ms: u64) -> Result<Option<shlang::host::Opened>, Error> {
+        self.open.recv(wait_ms)
+    }
+
     /// `report`: balicek pro vyvojare sestavi sluzba logu (pres init).
     fn report(&mut self) -> Result<String, Error> {
         let guard = POWER.lock();
@@ -416,6 +433,7 @@ fn main(startup: Startup) -> i64 {
         playing: None,
         task_producer: None,
         task_client: None,
+        open: open::Pending::default(),
     };
     println!("shsess {session}: bezim ({tag})");
 

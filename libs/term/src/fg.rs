@@ -22,7 +22,7 @@ use core::any::Any;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use shlang::eval::Interp;
-use shlang::host::{AudioReq, ExecNeeds, Fs, Host, TaskDone, TaskSpec, TasksOp};
+use shlang::host::{AudioReq, ExecNeeds, Fs, Host, Opened, TaskDone, TaskSpec, TasksOp};
 use shlang::value::Value;
 use shlang::{ShError, error::code};
 use spin::Mutex;
@@ -340,6 +340,21 @@ impl Host for LineHost {
                 Some(InstallerMsg::Progress(m)) => progress(&m),
                 Some(InstallerMsg::Done(m)) => return Ok(m),
                 None => {}
+            }
+        }
+    }
+
+    fn open_path(&mut self, path: &str, app_only: bool) -> Result<Opened, abi::Error> {
+        // Kratka volani hlavniho vlakna jako u instalatoru (aplikace muze
+        // startovat az 20 s); Ctrl+C cekani prerusi.
+        let p = String::from(path);
+        self.call(move |c| c.env.open_send(&p, app_only)).unwrap_or(Err(abi::Error::Canceled))?;
+        loop {
+            if let Some(r) = self.call(|c| c.env.open_recv(200)).unwrap_or(Err(abi::Error::Canceled))? {
+                return Ok(r);
+            }
+            if self.interrupted() {
+                return Err(abi::Error::Canceled);
             }
         }
     }

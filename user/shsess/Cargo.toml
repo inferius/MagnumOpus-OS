@@ -22,4 +22,5 @@ agentproto = { path = "../../libs/agentproto" }
 agentsh = { path = "../../libs/agentsh" }
 wire = { path = "../../libs/wire" }
 powerproto = { path = "../../libs/powerproto" }
+openwith = { path = "../../libs/openwith" }
 spin = "0.12"

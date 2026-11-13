@@ -1,8 +1,9 @@
 //! Spravce souboru v systemu: okno `gui-files` s relaci FS uzivatele
 //! a pomocny proces `files-copy`. Prochazeni, kopie pres schranku okna
 //! jako uloha (okamzita kopie FS), konflikt "ponechat obe", kos, slozka
-//! s 10 000 polozkami (cas otevreni, jen viditelne radky v pristupnosti)
-//! a snimek obrazovky pro kontrolu vzhledu.
+//! s 10 000 polozkami (cas otevreni, jen viditelne radky v pristupnosti),
+//! sluzba "otevri cestu" (i z terminalu: `start`, hola cesta) a snimek
+//! obrazovky pro kontrolu vzhledu.
 
 use alloc::string::String;
 use alloc::vec;
@@ -99,7 +100,7 @@ pub fn files_window(startup: &Startup) -> TestResult {
             .gui
             .launch_extra(startup, "gui-files", vec![StartHandle::user(user_fs(f)?.into_handle()), StartHandle::user(client.into_handle()), params()?])
             .map_err(|e| fail("spusteni gui-files", e))?;
-        let r = run(s, f);
+        let r = run(startup, s, f);
         // Uklid: okno a pomocny proces pryc.
         if let Some(a) = s.gui.apps.get(app) {
             let _ = a.process.kill();
@@ -118,7 +119,7 @@ pub fn files_window(startup: &Startup) -> TestResult {
     Ok(())
 }
 
-fn run(s: &mut super::gui::State, f: &FsClient) -> TestResult {
+fn run(startup: &Startup, s: &mut super::gui::State, f: &FsClient) -> TestResult {
     let w = wait_window(&s.inspect, "org.magnumopus.files")?.id;
     // Domov: polozky, mista a nahled vybraneho souboru.
     let t = wait_tree(&s.inspect, w, "vypis domova", |t| row(t, "a.txt").is_some() && row(t, "Projekty").is_some())?;
@@ -174,7 +175,7 @@ fn run(s: &mut super::gui::State, f: &FsClient) -> TestResult {
         wait_tree(&s.inspect, w, "domov", |t| row(t, "a.txt").is_some())?;
         println!("init: test soubory: zpet do domova (3 polozky) za {} ms", (time::now() - t1) / 1_000_000);
     }
-    open_service(s, f)?;
+    open_service(startup, s, f)?;
     // Snimek vzhledu (xtask porizuje pres QMP po znacce).
     select(s, w, "a.txt")?;
     wait_tree(&s.inspect, w, "nahled pred snimkem", |t| has(t, Role::Label, "obsah souboru"))?;
@@ -264,13 +265,13 @@ pub fn copier_resume(startup: &Startup) -> TestResult {
 /// Sluzba "otevri cestu" (init, `libs/openwith`): slozka se otevre ve
 /// spravci souboru, soubor bez aplikace spravce ukaze, neexistujici cesta
 /// je chyba. Smycku supervisoru tu nahrazuje test (`open::poll`).
-fn open_service(s: &mut super::gui::State, f: &FsClient) -> TestResult {
+fn open_service(startup: &Startup, s: &mut super::gui::State, f: &FsClient) -> TestResult {
     use openwith::msg::{Reply, request};
     const SESSION: u64 = 0xfe11;
-    let startup_less = |what: &str, path: &str| -> Result<Reply, String> {
+    let startup_less = |what: &str, req: &[u8]| -> Result<Reply, String> {
         let ep = crate::open::endpoint(SESSION).map_err(|e| fail("kanal sluzby", e))?;
         let (mine, theirs) = Channel::create().map_err(|e| fail("kanal", e))?;
-        ep.write(&request(path), vec![theirs.into_handle()]).map_err(|e| fail(what, e))?;
+        ep.write(req, vec![theirs.into_handle()]).map_err(|e| fail(what, e))?;
         let end = time::deadline_after(Duration::from_secs(20));
         loop {
             crate::open::poll_test();
@@ -285,16 +286,58 @@ fn open_service(s: &mut super::gui::State, f: &FsClient) -> TestResult {
     crate::open::set_caller(s.gui.channel(b"actions system").map_err(|e| fail("kanal akci", e))?);
     let w = wait_window(&s.inspect, "org.magnumopus.files")?.id;
     let r = (|| -> TestResult {
-        let dir = startup_less("slozka", &alloc::format!("{HOME}/Projekty"))?;
+        let dir = startup_less("slozka", &request(&alloc::format!("{HOME}/Projekty")))?;
         check!(dir == Reply::Opened(String::from("org.magnumopus.files")), alloc::format!("slozka: {dir:?}"));
         wait_tree(&s.inspect, w, "slozka otevrena sluzbou", |t| row(t, "plan.md").is_some())?;
-        let file = startup_less("soubor", &alloc::format!("{HOME}/a.txt"))?;
+        let file = startup_less("soubor", &request(&alloc::format!("{HOME}/a.txt")))?;
         check!(file == Reply::Revealed(String::from("org.magnumopus.files")), alloc::format!("soubor: {file:?}"));
         wait_tree(&s.inspect, w, "soubor ukazany ve spravci", |t| row(t, "a.txt").is_some_and(|n| n.state & guiproto::a11y::state::SELECTED != 0))?;
-        let none = startup_less("neexistujici", &alloc::format!("{HOME}/neni.txt"))?;
+        // Jen aplikace (hola cesta v shellu): soubor bez aplikace se
+        // neukaze, odpoved "neni aplikace".
+        let app = startup_less("jen aplikace", &openwith::msg::request_app(&alloc::format!("{HOME}/a.txt")))?;
+        check!(app == Reply::NoApp(String::from("txt")), alloc::format!("jen aplikace: {app:?}"));
+        let none = startup_less("neexistujici", &request(&alloc::format!("{HOME}/neni.txt")))?;
         check!(matches!(&none, Reply::Failed(m) if m.contains("NOT_FOUND")), alloc::format!("neexistujici: {none:?}"));
-        Ok(())
+        shell_start(startup, s, SESSION)
     })();
     crate::open::close_session(SESSION);
+    r
+}
+
+/// Shell pres sluzbu: `start` = soubor bez aplikace ukaze spravce souboru
+/// (poznamka v terminalu), hola cesta = jen poznamka "neni aplikace"
+/// a souhrn obsahu (spravce se nevola). Okno terminalu jako v testu
+/// terminalu, relace sluzby je testovaci (`session`).
+fn shell_start(startup: &Startup, s: &mut super::gui::State, session: u64) -> TestResult {
+    const NAME: &str = "gui-term (otevri)";
+    let conn = crate::terminal::TERMINALS.lock().client_with_open(NAME, session).map_err(|e| fail("kanal terminalu", e))?;
+    let app = s.gui.launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())]).map_err(|e| fail("spusteni gui-term", e))?;
+    let pump = || {
+        crate::terminal::TERMINALS.lock().poll(startup);
+        crate::open::poll_test();
+    };
+    let text = |t: &[Node]| t.iter().filter(|n| n.role == Role::Terminal).map(|n| n.value.clone()).collect::<Vec<_>>().join("\n");
+    let r = (|| -> TestResult {
+        let w = wait_window(&s.inspect, "org.magnumopus.terminal")?.id;
+        let t = wait_tree(&s.inspect, w, "uvitani terminalu", |t| {
+            pump();
+            text(t).contains("Napište help")
+        })?;
+        let term = t.iter().find(|n| n.role == Role::Terminal).ok_or("terminal chybi")?.id;
+        let line = |l: String| ask(&s.inspect, InspectRequest::Act { window: w, node: term, action: actions::SET_VALUE, value: l });
+        line(alloc::format!("start {HOME}/a.txt"))?;
+        wait_tree(&s.inspect, w, "start: soubor ukazany ve spravci", |t| {
+            pump();
+            text(t).contains("Pro typ .txt není aplikace. Soubor ukazuje org.magnumopus.files.")
+        })?;
+        line(alloc::format!("{HOME}/a.txt"))?;
+        wait_tree(&s.inspect, w, "hola cesta: bez aplikace souhrn", |t| {
+            pump();
+            let v = text(t);
+            v.lines().any(|l| l.trim() == "Pro typ .txt není aplikace.") && v.contains("obsah souboru")
+        })?;
+        Ok(())
+    })();
+    super::gui::close_terminal(startup, s, app, NAME)?;
     r
 }

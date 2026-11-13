@@ -42,11 +42,13 @@ pub mod code {
     pub const DEPTH: &str = "SH_DEPTH";
     /// Cast zmen radku se neprevzala: soubor se mezitim zmenil jinak.
     pub const CONFLICT: &str = "SH_CONFLICT";
+    /// Aplikace cestu neotevrela (sluzba "otevri cestu").
+    pub const OPEN: &str = "SH_OPEN";
 
     /// Vsechny kody shellu (test hlida, ze jsou popsane v dokumentaci).
     pub const ALL: &[&str] = &[
         PARSE, UNKNOWN, TYPE, ARGS, NO_MATCH, INTERRUPTED, NEEDS, REJECTED, NO_UNDO, ARITH, USER, FORMAT, LANG,
-        DEPTH, CONFLICT,
+        DEPTH, CONFLICT, OPEN,
     ];
 }
 

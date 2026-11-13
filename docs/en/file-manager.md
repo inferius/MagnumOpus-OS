@@ -162,17 +162,22 @@ A client (the file manager, the shell) talks to the service like this
 | What | How |
 |---|---|
 | channel | an end of the session's service channel: init gives it to the process in the start message (`crate::open::endpoint(session)`; a duplicate, each process of the session has its own handle of the same channel) |
-| request | `openwith::msg::request(path)` = the text `open <absolute path>` (UTF-8, spaces in the path allowed) and **exactly one handle**: the end of a new channel the reply comes to |
-| reply | `openwith::msg::Reply::decode`: `ok <app id>` (opened), `reveal <app id>` (no app opens the type, the file manager showed the file), `err <reason for a human>` (the path does not exist: `<path>: NOT_FOUND`, no right, the app cannot be started, it did not answer within 20 s) |
+| request | `openwith::msg::request(path)` = the text `open <absolute path>` (UTF-8, spaces in the path allowed) and **exactly one handle**: the end of a new channel the reply comes to. `request_app(path)` = `open-app <path>`: only an app with an association, a file without one is not shown (a bare path in the shell) |
+| reply | `openwith::msg::Reply::decode`: `ok <app id>` (opened), `reveal <app id>` (no app opens the type, the file manager showed the file), `none <extension>` (no app opens the path: an `open-app` request or no file manager with `reveal`; nothing was opened; the extension in lower case, empty for a folder and a file without one), `err <reason for a human>` (the path does not exist: `<path>: NOT_FOUND`, no right, the app cannot be started, it did not answer within 20 s) |
 | identity | init checks the path with the FS session of the user the channel belongs to (the client must complete a relative path itself; relative = `err`) |
 | invalid message | without a handle it is dropped; with a handle the reply is `err neplatná žádost` |
 
-The shell **[designed]** (the shell thread, the coordinator's decision):
-`open` stays reading a file; a bare path to a file on the command line
-and a new command `start <path>` send a request to the service and print
-the reply. Init must add the service channel for a terminal session to
-the shell session's handles (`termd`/`shsess`), the same way it does for
-the Files window (`user/init/src/files.rs`, `window_handles`). Limitation: the compositor picks
+The shell **[verified in QEMU]** (part "otevri cestu" of the file manager
+test, `shell_start`): `open` stays reading a file. The command
+`start <path>` sends `open` (like a double click: a file with no app is
+shown by the file manager, a folder opens in it). A bare path to a file
+sends `open-app`; on `none` it shows a content summary like `open` and the
+note "Pro typ .xyz není aplikace." (no app for the type). The terminal
+prints where the path was opened. Only the terminal window of a logged-in
+user gets the channel: init adds it to termd (tag `term::ctl::tag::OPEN`)
+and termd sends a duplicate to every shell session (`SessMsg::Open`). The
+fallback console has no channel: `start` is `NOT_SUPPORTED` there and a
+bare path shows the summary. Limitation: the compositor picks
 the app by id, not by session (several users logged in at once do not
 exist yet).
 

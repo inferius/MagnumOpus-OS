@@ -5,7 +5,8 @@
 //! - skript `.mos` = `run` (s kontrolou manifestu `needs`),
 //! - program (ELF) = spustit jako kazdy program (stejna kontrola prav,
 //!   nahled, undo); argumenty dostane program,
-//! - jiny soubor = souhrn jako `open` (nic nespousti ani nemeni),
+//! - jiny soubor = aplikace podle typu (sluzba "otevri cestu", viz
+//!   `builtins::start`); bez aplikace nebo bez sluzby souhrn jako `open`,
 //! - neexistujici cesta = chyba s radou.
 
 use alloc::string::String;
@@ -68,6 +69,9 @@ impl Interp {
                     return self.call_program(host, name, args, input, span);
                 }
                 simple("soubor")?;
+                if super::builtins::start::bare_file(host, &path, span)? {
+                    return Ok(Value::Nothing);
+                }
                 one(self, host, "open")
             }
         }

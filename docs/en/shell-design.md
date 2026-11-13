@@ -604,8 +604,13 @@ for f in (ls ~/Photos | where ext == "jpg") {
   `.`, `..`; `libs/shlang/src/eval/bare.rs`): a folder = `cd`, a `.mos`
   script = `run` (with the `needs` check), a program (ELF) = started the
   same way as a program by name (rights from the manifest, preview, undo;
-  the program gets the arguments), another file = content like `open`
-  (nothing runs or changes). A folder, script or file takes no arguments
+  the program gets the arguments), another file = the app for its type
+  through the "open a path" service (`open-app`, only an app with an
+  association); with no app the content like `open` and the note "Pro typ
+  .xyz není aplikace." (without the service, e.g. in the fallback console,
+  only the content). The command `start <path>` opens a file or folder like
+  a double click (a file with no app is shown by the file manager); the
+  service is described in `docs/en/file-manager.md` **[verified in QEMU]**. A folder, script or file takes no arguments
   (`SH_ARGS`); a missing path is `NOT_FOUND` with a hint. Highlighting shows
   a bare path as a path, not as an unknown command. The host in the OS
   (`shsess`) does not start programs from a path yet: error `NOT_SUPPORTED`
@@ -1312,6 +1317,18 @@ already been reverted (16 commands are remembered).
 It is guarded by stack use, not by the number of calls.
 
 **What to do:** rewrite the recursion as a loop (`for`, `while`).
+
+### `SH_OPEN` (opening in an application)
+
+**Meaning:** the application did not open the path.
+
+**When:** `start` or a bare path to a file, when the "open a path" service
+cannot start the application, the application does not answer within 20 s
+or refuses the action. A missing file or right is `NOT_FOUND` /
+`ACCESS_DENIED`, not `SH_OPEN`.
+
+**What to do:** the message names the application and the reason. `open`
+shows the file content.
 
 ### `SH_CONFLICT` (conflict)
 

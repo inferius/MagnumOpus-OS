@@ -15,7 +15,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use shlang::eval::Interp;
-use shlang::host::{AudioReq, ExecNeeds, Fs, Host, TaskDone, TaskSpec};
+use shlang::host::{AudioReq, ExecNeeds, Fs, Host, Opened, TaskDone, TaskSpec};
 use shlang::sig::Builtins;
 use shlang::value::Value;
 use shlang::{ShError, Style, error::code};
@@ -125,6 +125,16 @@ pub trait Env {
     }
     /// Uroven logu (prikaz `loglevel`); vychozi = relace ji nema.
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Sluzba "otevri cestu" (`start`, hola cesta k souboru): poslani
+    /// zadosti; vychozi = relace sluzbu nema.
+    fn open_send(&mut self, _path: &str, _app_only: bool) -> Result<(), abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Odpoved sluzby, cekani nejvys `wait_ms`; `None` = zatim nic (kratke
+    /// cekani jako u instalatoru: aplikace muze startovat i 20 s).
+    fn open_recv(&mut self, _wait_ms: u64) -> Result<Option<Opened>, abi::Error> {
         Err(abi::Error::NotSupported)
     }
 }
@@ -548,6 +558,18 @@ impl Host for SessionHost<'_> {
 
     fn log_level(&mut self, target: &str, level: &str) -> Result<String, abi::Error> {
         self.env.log_level(target, level)
+    }
+
+    fn open_path(&mut self, path: &str, app_only: bool) -> Result<Opened, abi::Error> {
+        self.env.open_send(path, app_only)?;
+        loop {
+            if let Some(r) = self.env.open_recv(200)? {
+                return Ok(r);
+            }
+            if self.interrupted() {
+                return Err(abi::Error::Canceled);
+            }
+        }
     }
 
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {

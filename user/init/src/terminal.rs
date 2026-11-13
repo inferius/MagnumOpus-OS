@@ -56,6 +56,9 @@ struct Client {
     power: Option<Channel>,
     /// Kanaly napajeni relaci shellu (`None` = zavreny, odebere `cleanup`).
     power_sessions: Vec<Option<Channel>>,
+    /// Relace sluzby "otevri cestu" (`crate::open`) pro relace shellu;
+    /// obvykle = `session`, testy dosadi testovaci relaci sluzby.
+    open_session: Option<u64>,
     /// Relace prihlaseneho uzivatele (`crate::session`): termd dostane jeji
     /// identitu FS a bezi v jejim jobu. `None` = system (testy, zalozni
     /// konzole).
@@ -116,9 +119,20 @@ impl Terminals {
             closed: false,
             power: None,
             power_sessions: Vec::new(),
+            open_session: session,
             session,
         });
         Ok(theirs)
+    }
+
+    /// (Testy) Klient bez prihlaseni, ale s kanalem sluzby "otevri cestu"
+    /// testovaci relace (`open::test_session`).
+    pub fn client_with_open(&mut self, name: &'static str, open_session: u64) -> Result<Channel> {
+        let ch = self.client_for(name, None)?;
+        if let Some(c) = self.clients.last_mut() {
+            c.open_session = Some(open_session);
+        }
+        Ok(ch)
     }
 
     /// Handly k cekani (pripojeni, registry, procesy termd).
@@ -382,6 +396,14 @@ impl Terminals {
         if let Some((ch, lease)) = audio() {
             handles.push(StartHandle::tagged(term::ctl::tag::AUDIO, ch.into_handle()));
             handles.push(StartHandle::tagged(term::ctl::tag::AUDIO_LEASE, lease.into_handle()));
+        }
+        // Sluzba "otevri cestu" (hola cesta k souboru, `start`): jen okno
+        // prihlaseneho uzivatele; kanal patri jeho relaci (identita FS).
+        if let Some(s) = c.open_session {
+            match crate::open::endpoint(s) {
+                Ok(ch) => handles.push(StartHandle::tagged(term::ctl::tag::OPEN, ch.into_handle())),
+                Err(e) => println!("init: termd ({}) bez sluzby otevri cestu: {e}", c.name),
+            }
         }
         // Brana agenta AI (jen zapis zadosti o relaci).
         if let Some(h) = crate::agent::terminal_gate() {
