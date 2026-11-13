@@ -36,7 +36,8 @@ impl Notice {
     }
 }
 
-fn state_text(s: &State) -> String {
+/// Stav ulohy cesky (panel v textu i v okne GUI).
+pub fn state_text(s: &State) -> String {
     match s {
         State::Running => String::from("běží"),
         State::Paused => String::from("pozastaveno"),
@@ -82,6 +83,21 @@ impl App {
     /// Aktualni upozorneni (do vyprseni).
     pub fn notice(&self) -> Option<&Notice> {
         self.notice.as_ref().filter(|n| self.tick.wrapping_sub(n.until) > u32::MAX / 2)
+    }
+
+    /// Akce nad ulohou `id` (panel v okne GUI): 0 zrusit, 1 pozastavit,
+    /// 2 pokracovat. Bez opravneni (`Task::actions`) nic; o pravech stejne
+    /// rozhoduje taskd.
+    pub fn task_action(&mut self, id: u64, action: u8) {
+        let need = match action {
+            0 => actions::CANCEL,
+            1 => actions::PAUSE,
+            2 => actions::RESUME,
+            _ => return,
+        };
+        if self.tasks.iter().any(|t| t.id == id && t.actions & need != 0) {
+            self.out.push(ClientMsg::TaskAction { session: self.session, task: id, action });
+        }
     }
 
     /// Ctrl-T: otevrit nebo zavrit panel.

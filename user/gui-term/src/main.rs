@@ -22,6 +22,7 @@ extern crate alloc;
 mod connect;
 mod keys;
 mod motion;
+mod panel;
 mod rows;
 
 use alloc::string::String;
@@ -138,8 +139,17 @@ const TICK: Duration = Duration::from_millis(150);
 /// Snimek krouzku cinnosti (~16 snimku/s, jen kdyz neco bezi).
 const ANIM: Duration = Duration::from_millis(60);
 
+/// Vychozi velikost okna: s panelem uloh (1040 = terminal ~760 + panel
+/// 280). Kompozitor ji orizne na obrazovku; omezeni na 85 % sirky
+/// obrazovky potrebuje od kompozitoru zmenu velikosti po otevreni (zatim
+/// neni).
+const WIN_W: u32 = 1040;
+const WIN_H: u32 = 520;
+
 /// Id uzlu pristupnosti prvniho tlacitka vyzvy (dalsi po jedne).
 const BUTTON_NODE: u32 = 100;
+/// Id uzlu seznamu uloh v panelu (polozka k = +1+2k, jeji Zrusit +2+2k).
+const PANEL_NODE: u32 = 1000;
 /// Id uzlu volby zapisu B (C je dalsi).
 const NOTATION_NODE: u32 = 10;
 
@@ -157,7 +167,9 @@ struct Term {
     fade: motion::Fade,
 }
 
-fn grid(look: &Look, w: u32, h: u32) -> (usize, usize) {
+/// Mrizka v okne `w` x `h`; s panelem uloh je o jeho sirku uzsi.
+fn grid(look: &Look, w: u32, h: u32, panel: bool) -> (usize, usize) {
+    let w = if panel { w.saturating_sub(look.t.size.side_panel) } else { w };
     let (cw, ch) = look.cell();
     let p = 2 * look.pad();
     let cols = (w.saturating_sub(p) / cw.max(1)).max(1);
@@ -173,7 +185,7 @@ fn now() -> Option<i64> {
 impl Term {
     fn new(win: Window, conn: Option<Channel>) -> Self {
         let look = Look::new();
-        let (c, r) = grid(&look, win.w, win.h);
+        let (c, r) = grid(&look, win.w, win.h, panel::shown(win.screen.0, win.w));
         let th = look.term_theme();
         let mut app = App::new(th, c, r);
         // Krouzek a dilci bunky pruhu kresli okno samo (term::activity).
@@ -246,9 +258,14 @@ impl Term {
     }
 
     fn resize(&mut self) {
-        let (c, r) = grid(&self.look, self.win.w, self.win.h);
+        let (c, r) = grid(&self.look, self.win.w, self.win.h, self.panel());
         self.screen = Screen::new(c, r);
         self.app.resize(c, r);
+    }
+
+    /// Je videt panel uloh vpravo?
+    fn panel(&self) -> bool {
+        panel::shown(self.win.screen.0, self.win.w)
     }
 
     fn status(&self) -> String {
@@ -286,6 +303,27 @@ impl Term {
         t.state = guiproto::a11y::state::FOCUSED;
         t.actions = actions::SET_VALUE;
         let mut nodes = vec![win, bar, tab, t];
+        // Panel uloh: seznam, uloha = polozka (jmeno a stav), Zrusit.
+        if self.panel() {
+            let area = panel::area(&self.look, self.win.w, self.win.h);
+            let mut list = Node::new(PANEL_NODE, 1, Role::List, "Úlohy");
+            list.bounds = area;
+            nodes.push(list);
+            for (k, card) in panel::cards(&self.look, &self.app.tasks, area).iter().enumerate() {
+                let task = &self.app.tasks[card.task];
+                let id = PANEL_NODE + 1 + 2 * k as u32;
+                let name = alloc::format!("{}: {}", task.name, term::ui::tasks::state_text(&task.state));
+                let mut item = Node::new(id, PANEL_NODE, Role::ListItem, &name);
+                item.bounds = card.rect;
+                nodes.push(item);
+                if let Some(r) = card.cancel {
+                    let mut b = Node::new(id + 1, id, Role::Button, &alloc::format!("Zrušit {}", task.name));
+                    b.bounds = r;
+                    b.actions = actions::ACTIVATE;
+                    nodes.push(b);
+                }
+            }
+        }
         // Prepinac zapisu (ACTIVATE vybere, zvoleny ma CHECKED).
         let (_, nb) = self.look.notation(self.win.w);
         for (i, (r, name)) in nb.iter().zip(["Zápis B (příkazový)", "Zápis C (výrazový)"]).enumerate() {
@@ -328,13 +366,19 @@ impl Term {
         }
         let label = self.status();
         let screen = &self.screen;
+        let show_panel = self.panel();
         let look = &mut self.look;
         let c_on = self.app.notation_c;
+        let tasks = &self.app.tasks;
         let t_now = time::now();
         self.fade.update(&lines, t_now);
         let veils = self.fade.veils(&lines, t_now, &look.t.motion);
         self.win.draw(|c: &mut Canvas<'_>| {
             paint(c, look, screen, &label, &lines, &veils);
+            if show_panel {
+                let area = panel::area(look, c.w, c.h);
+                panel::paint(c, look, tasks, area);
+            }
             paint_notation(c, look, c_on);
         })?;
         self.lines = lines;
@@ -362,6 +406,19 @@ impl Term {
         Some(match ev {
             // Klik na tlacitko vyzvy (prvky navrhu nad mrizkou).
             Event::Input(InputRecord { event: InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, .. }) => {
+                // Zrusit ulohu v panelu.
+                if self.panel() {
+                    let area = panel::area(&self.look, self.win.w, self.win.h);
+                    let hit = panel::cards(&self.look, &self.app.tasks, area)
+                        .into_iter()
+                        .find(|c| c.cancel.is_some_and(|r| r.contains(x, y)))
+                        .map(|c| self.app.tasks[c.task].id);
+                    if let Some(id) = hit {
+                        self.app.task_action(id, 0);
+                        self.send_out();
+                        return Some(true);
+                    }
+                }
                 // Prepinac zapisu B / C v titulku.
                 let (_, nb) = self.look.notation(self.win.w);
                 if let Some(i) = nb.iter().position(|r| r.contains(x, y)) {
@@ -409,7 +466,18 @@ impl Term {
                 self.send_out();
                 true
             }
-            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && node >= BUTTON_NODE => {
+            // Zrusit ulohu v panelu (uzel tlacitka = polozka + 1).
+            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && node > PANEL_NODE && (node - PANEL_NODE) % 2 == 0 => {
+                let k = ((node - PANEL_NODE - 2) / 2) as usize;
+                let area = panel::area(&self.look, self.win.w, self.win.h);
+                if let Some(c) = panel::cards(&self.look, &self.app.tasks, area).get(k) {
+                    let id = self.app.tasks[c.task].id;
+                    self.app.task_action(id, 0);
+                    self.send_out();
+                }
+                true
+            }
+            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && (BUTTON_NODE..PANEL_NODE).contains(&node) => {
                 self.app.prompt_pick((node - BUTTON_NODE) as usize);
                 true
             }
@@ -455,7 +523,7 @@ fn main(startup: Startup) -> i64 {
     if conn.is_none() {
         println!("gui-term: chybi kanal pripojeni k termd");
     }
-    let win = match Window::open(link, Mode::CustomTitle, 760, 460, "Terminál") {
+    let win = match Window::open(link, Mode::CustomTitle, WIN_W, WIN_H, "Terminál") {
         Ok(w) => w,
         Err(e) => {
             println!("gui-term: okno nelze otevrit: {e}");

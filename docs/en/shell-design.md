@@ -997,7 +997,9 @@ comparison: `target/shots/terminal.png` (look test `look_shots`).
 | completion as a menu above the line, mouse, text selection and clipboard | **[designed]** (step 4, 6c components) |
 | notation switch B / C in the title (state `App::notation_c`; a click, Ctrl+F and accessibility convert the line being typed) | **[verified in QEMU]** |
 | a new block fades in (`motion.base`, curve `ease_enter`); blocks replayed after connecting do not. The grid does not do the 6 px shift from the design (the fade is also the substitute for "Reduce motion") | **[implemented]** |
-| task panel on the right, session tabs in the title, block actions | **[designed]** (step 5) |
+| task panel on the right (width `size.side_panel`): task cards with state, progress bar and a Cancel button, a list in accessibility. It shows by itself only on a screen wider than 1280 px and in a window at least 900 px wide, otherwise Ctrl-T shows the tasks. Default window 1040 px (the compositor clips it to the screen; the limit to 85 % of the screen width waits for window resizing from the application) | **[implemented]** (QEMU tests have a 1280 px screen, the panel was verified once with a lowered limit) |
+| session tabs in the title, block actions (fold, run again; copy after the `clipproto` clipboard) | **[designed]** (step 5) |
+| block action "compare with the previous run": output difference against the last run of the same command | **[designed]** (a separate piece after step 5) |
 
 ### Activity indicator and progress
 

@@ -179,3 +179,20 @@ fn window_panel_status_and_notice() {
     assert!(!a.frame().contains("chyba: spatne"));
     let _ = Duration::from_millis(1);
 }
+
+#[test]
+fn gui_panel_action_respects_rights() {
+    let mut a = App::new(Theme::dark(), 100, 30);
+    a.on_msg(ServerMsg::Attached { session: 4, cwd: "/".into(), blocks: 0 });
+    a.on_msg(ServerMsg::Tasks { tasks: vec![task(1, State::Running, taskproto::actions::CANCEL), task(2, State::Running, 0)] });
+    a.take_out();
+    // Klik na Zrusit v panelu okna (bez otevreneho textoveho panelu).
+    a.task_action(1, 0);
+    assert_eq!(a.take_out(), vec![ClientMsg::TaskAction { session: 4, task: 1, action: 0 }]);
+    // Bez prava, neznama uloha, neznama akce: nic.
+    a.task_action(2, 0);
+    a.task_action(9, 0);
+    a.task_action(1, 7);
+    a.task_action(1, 1);
+    assert!(a.take_out().is_empty());
+}
