@@ -410,6 +410,10 @@ pub struct EntryInfo {
     pub dataset: u64,
     /// U symbolickeho odkazu jeho cil, jinak prazdne.
     pub link_target: String,
+    /// Platne hodnoty (`avail::*`).
+    pub known: u16,
+    /// Hodnoty skryte pro nedostatek prav (`avail::*`, pole jsou 0).
+    pub withheld: u16,
 }
 
 impl EntryInfo {
@@ -429,7 +433,9 @@ impl EntryInfo {
             .u64(self.tree_files)
             .u64(self.tree_dirs)
             .u64(self.dataset)
-            .str(&self.link_target);
+            .str(&self.link_target)
+            .u16(self.known)
+            .u16(self.withheld);
     }
 
     fn get(r: &mut Reader) -> Option<Self> {
@@ -450,7 +456,11 @@ impl EntryInfo {
             tree_dirs: r.u64()?,
             dataset: r.u64()?,
             link_target: r.str()?,
+            known: r.u16()?,
+            withheld: r.u16()?,
         })
+        // Prekryv masek nebo neznamy bit = poskozena zprava.
+        .filter(|e| e.known & e.withheld == 0 && (e.known | e.withheld) & !crate::avail::ALL == 0)
     }
 
     /// Kolik bajtu polozka zabere ve zprave.
@@ -463,6 +473,7 @@ impl EntryInfo {
             + 12 * 3
             + 2
             + self.link_target.len()
+            + 4
     }
 
     /// Zkrati polozku, aby se vesla do `budget` bajtu: nejdriv cil odkazu,

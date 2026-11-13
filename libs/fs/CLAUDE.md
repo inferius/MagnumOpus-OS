@@ -17,6 +17,7 @@ Souborový systém (`no_std`, `std` jen přes feature pro nástroje). Copy-on-wr
 - Hodnoty z disku jsou nedůvěryhodný vstup: poškozený disk nesmí způsobit panic ani čtení mimo buffer.
 - Chyba zařízení během commitu (i `NO_MEMORY`) nesmí nechat stav v paměti nekonzistentní: `write_tree` vyjme uzly z `dirty` až po úspěšném zápisu a při chybě vrátí alokované bloky, `writeback` vrátí nezapsaná data do bufferu. Další commit to zopakuje (test `tests/commit_errors.rs`: chyba na každém zápisu commitu).
 - Logická chyba operace (už existuje, neexistuje, ...) musí přijít před první změnou stavu, jinak `guarded` svazek přepne do stavu chyby (v testech knihovny to rovnou spadne; audit `tests/logical_errors.rs`).
+- `Stat` rozlišuje známou, skrytou a nedostupnou hodnotu (masky `known`/`hidden`, bity `avail` = `fsproto::avail`): nula bez bitu v `known` není hodnota. Bez `MANAGE` jsou souhrny adresáře v `hidden` (`limit_stat`), `TREE` patří jen adresáři, hranice datasetu má `known` jen `RIGHTS` (test `tests/avail.rs`).
 
 ## Testy
 

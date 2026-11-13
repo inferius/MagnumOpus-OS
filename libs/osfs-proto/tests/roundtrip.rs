@@ -27,6 +27,8 @@ fn entry(name: &str) -> EntryInfo {
         tree_dirs: 0,
         dataset: 1,
         link_target: String::new(),
+        known: avail::SIZE | avail::MTIME | avail::CTIME | avail::BTIME,
+        withheld: 0,
     }
 }
 
@@ -195,6 +197,26 @@ fn time_and_filetime() {
     let mut e = entry("a");
     e.mtime.nanos = 1_000_000_000;
     let b = Response::Entry(e).encode(op::STAT);
+    assert_eq!(Response::decode(op::STAT, &b), Err(error::CORRUPTED));
+}
+
+#[test]
+fn availability_masks() {
+    // Skryte souhrny adresare projdou tam a zpet.
+    let mut e = entry("d");
+    e.kind = Kind::Dir;
+    e.known = avail::MTIME | avail::CTIME | avail::BTIME;
+    e.withheld = avail::SIZE | avail::TREE;
+    let b = Response::Entry(e.clone()).encode(op::STAT);
+    assert_eq!(Response::decode(op::STAT, &b), Ok(Response::Entry(e.clone())));
+    // Prekryv masek nebo neznamy bit = poskozena zprava.
+    let mut bad = e.clone();
+    bad.known |= avail::SIZE;
+    let b = Response::Entry(bad).encode(op::STAT);
+    assert_eq!(Response::decode(op::STAT, &b), Err(error::CORRUPTED));
+    let mut bad = e;
+    bad.known |= 0x8000;
+    let b = Response::Entry(bad).encode(op::STAT);
     assert_eq!(Response::decode(op::STAT, &b), Err(error::CORRUPTED));
 }
 

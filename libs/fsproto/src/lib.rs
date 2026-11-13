@@ -74,7 +74,8 @@ pub mod op {
     pub const SNAP_LIST_PAGE: u32 = 22;
     /// Stranka vypisu i s metadaty polozek: (cesta, kurzor str, nejvic u32)
     /// -> dalsi u8, pocet u32, polozky `StatEntry` (jmeno str, druh u8,
-    /// oid u64, velikost u64, mtime). Kurzor a strankovani jako `LIST_PAGE`
+    /// oid u64, velikost u64, mtime, prava u8, souhrny podstromu, masky
+    /// dostupnosti `known` a `hidden` u16). Kurzor a strankovani jako `LIST_PAGE`
     /// (do jedne odpovedi tolik polozek, kolik se vejde do `MAX_REPLY`).
     /// Klient tak nemusi posilat `STAT` na kazdou polozku (`ls -l`).
     ///
@@ -89,6 +90,36 @@ pub mod op {
     /// Jen pro testy (sluzba spustena v rezimu `debug`): zahodi neulozeny
     /// stav a pripoji system znovu, jako po vypadku proudu.
     pub const SIMULATE_POWER_LOSS: u32 = 100;
+}
+
+/// Dostupnost hodnot ve `Stat` a `StatEntry`: bity masek `known`
+/// a `hidden`. Bit v `known` = hodnota plati. Bit v `hidden` = hodnota
+/// existuje, ale volajici ji nesmi videt (pole je 0). Ani jeden = hodnota
+/// je nedostupna: FS ji nevede, nebo k druhu objektu nepatri (`TREE`
+/// u souboru). Oba najednou = poskozena zprava (`INVALID_ARGS`).
+pub mod avail {
+    /// Velikost (u adresare `tree_bytes`).
+    pub const SIZE: u16 = 1 << 0;
+    pub const MTIME: u16 = 1 << 1;
+    pub const CTIME: u16 = 1 << 2;
+    pub const BTIME: u16 = 1 << 3;
+    pub const OWNER: u16 = 1 << 4;
+    /// Pocty v podstromu (`tree_files`, `tree_dirs`).
+    pub const TREE: u16 = 1 << 5;
+    pub const RIGHTS: u16 = 1 << 6;
+    /// Vsechny zname bity.
+    pub const ALL: u16 = SIZE | MTIME | CTIME | BTIME | OWNER | TREE | RIGHTS;
+}
+
+/// Precte masky `known` a `hidden`; prekryv nebo neznamy bit =
+/// `INVALID_ARGS`.
+fn get_avail(r: &mut Reader) -> Result<(u16, u16)> {
+    let known = r.u16()?;
+    let hidden = r.u16()?;
+    if known & hidden != 0 || (known | hidden) & !avail::ALL != 0 {
+        return Err(Error::InvalidArgs);
+    }
+    Ok((known, hidden))
 }
 
 /// Druh objektu.
@@ -121,6 +152,10 @@ pub struct Stat {
     pub tree_bytes: u64,
     pub tree_files: u64,
     pub tree_dirs: u64,
+    /// Platne hodnoty (`avail::*`).
+    pub known: u16,
+    /// Hodnoty skryte pro nedostatek prav (`avail::*`, pole jsou 0).
+    pub hidden: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,25 +178,30 @@ pub struct StatEntry {
     /// Prava relace k polozce (jako `Stat::rights`).
     pub rights: u8,
     /// U adresare souhrn podstromu (bajty, soubory, adresare bez sebe);
-    /// bez prava `MANAGE` nuly (jako `Stat`).
+    /// bez prava `MANAGE` nuly a bity v `hidden` (jako `Stat`).
     pub tree_bytes: u64,
     pub tree_files: u64,
     pub tree_dirs: u64,
+    /// Masky dostupnosti (`avail::*`) jako `Stat`; `MTIME`, `SIZE`,
+    /// `RIGHTS` a `TREE` se tykaji poli teto polozky.
+    pub known: u16,
+    pub hidden: u16,
 }
 
 impl StatEntry {
     /// Velikost polozky na drate bez jmena (delka jmena u16, druh, oid,
-    /// velikost, mtime, prava, souhrn podstromu).
-    pub const FIXED: usize = 2 + 1 + 8 + 8 + 12 + 1 + 24;
+    /// velikost, mtime, prava, souhrn podstromu, masky dostupnosti).
+    pub const FIXED: usize = 2 + 1 + 8 + 8 + 12 + 1 + 24 + 4;
 
     pub fn put(&self, w: &mut Writer) {
         w.str(&self.name).u8(self.kind).u64(self.oid).u64(self.size);
         put_time(w, self.mtime);
         w.u8(self.rights).u64(self.tree_bytes).u64(self.tree_files).u64(self.tree_dirs);
+        w.u16(self.known).u16(self.hidden);
     }
 
     pub fn get(r: &mut Reader) -> Result<Self> {
-        Ok(Self {
+        let mut e = Self {
             name: r.str()?,
             kind: r.u8()?,
             oid: r.u64()?,
@@ -171,7 +211,11 @@ impl StatEntry {
             tree_bytes: r.u64()?,
             tree_files: r.u64()?,
             tree_dirs: r.u64()?,
-        })
+            known: 0,
+            hidden: 0,
+        };
+        (e.known, e.hidden) = get_avail(r)?;
+        Ok(e)
     }
 }
 
@@ -223,10 +267,14 @@ impl Stat {
         w.u64(self.tree_bytes)
             .u64(self.tree_files)
             .u64(self.tree_dirs);
+        w.u16(self.known).u16(self.hidden);
     }
 
+    /// Velikost na drate.
+    pub const SIZE: usize = 8 + 1 + 8 + 3 * 12 + 8 + 1 + 3 * 8 + 4;
+
     pub fn get(r: &mut Reader) -> Result<Self> {
-        Ok(Self {
+        let mut st = Self {
             oid: r.u64()?,
             kind: r.u8()?,
             size: r.u64()?,
@@ -238,9 +286,16 @@ impl Stat {
             tree_bytes: r.u64()?,
             tree_files: r.u64()?,
             tree_dirs: r.u64()?,
-        })
+            known: 0,
+            hidden: 0,
+        };
+        (st.known, st.hidden) = get_avail(r)?;
+        Ok(st)
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 impl Info {
     pub fn put(&self, w: &mut Writer) {

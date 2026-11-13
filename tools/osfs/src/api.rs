@@ -128,8 +128,29 @@ fn entry(name: &str, s: &Stat, kind: Kind, link_target: String) -> EntryInfo {
         tree_dirs: s.tree_dirs,
         dataset: s.dataset,
         link_target,
+        // Bity jsou stejne jako ve FS; vlastnika a prava polozka nenese.
+        known: s.known & ENTRY_AVAIL,
+        withheld: s.hidden & ENTRY_AVAIL,
     }
 }
+
+/// Bity dostupnosti poli, ktera `EntryInfo` nese.
+const ENTRY_AVAIL: u16 = osfs_proto::avail::SIZE
+    | osfs_proto::avail::MTIME
+    | osfs_proto::avail::CTIME
+    | osfs_proto::avail::BTIME
+    | osfs_proto::avail::TREE;
+
+// Bity FS a protokolu osfs jsou stejne (predavaji se beze zmeny).
+const _: () = assert!(
+    fs::avail::SIZE == osfs_proto::avail::SIZE
+        && fs::avail::MTIME == osfs_proto::avail::MTIME
+        && fs::avail::CTIME == osfs_proto::avail::CTIME
+        && fs::avail::BTIME == osfs_proto::avail::BTIME
+        && fs::avail::OWNER == osfs_proto::avail::OWNER
+        && fs::avail::TREE == osfs_proto::avail::TREE
+        && fs::avail::RIGHTS == osfs_proto::avail::RIGHTS
+);
 
 struct Ctx<'a, D: BlockDevice> {
     fs: &'a mut Fs<D>,

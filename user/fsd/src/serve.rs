@@ -16,6 +16,18 @@ pub(crate) fn fs_now() -> fs::Timestamp {
     libos::time::wall().unwrap_or_else(|| fs::Timestamp::new(0, libos::time::now() as i64))
 }
 
+// Bity dostupnosti FS a protokolu jsou stejne (predavaji se beze zmeny).
+const _: () = assert!(
+    fs::avail::SIZE == fsproto::avail::SIZE
+        && fs::avail::MTIME == fsproto::avail::MTIME
+        && fs::avail::CTIME == fsproto::avail::CTIME
+        && fs::avail::BTIME == fsproto::avail::BTIME
+        && fs::avail::OWNER == fsproto::avail::OWNER
+        && fs::avail::TREE == fsproto::avail::TREE
+        && fs::avail::RIGHTS == fsproto::avail::RIGHTS
+        && fs::avail::ALL == fsproto::avail::ALL
+);
+
 pub(crate) fn stat(s: fs::Stat) -> Stat {
     Stat {
         oid: s.oid,
@@ -34,8 +46,13 @@ pub(crate) fn stat(s: fs::Stat) -> Stat {
         tree_bytes: s.tree_bytes,
         tree_files: s.tree_files,
         tree_dirs: s.tree_dirs,
+        known: s.known,
+        hidden: s.hidden,
     }
 }
+
+/// Bity dostupnosti poli, ktera `StatEntry` nese.
+const ENTRY_AVAIL: u16 = fsproto::avail::SIZE | fsproto::avail::MTIME | fsproto::avail::RIGHTS | fsproto::avail::TREE;
 
 fn kind_raw(k: Kind) -> u8 {
     match k {
@@ -253,6 +270,9 @@ impl Service {
                                 tree_bytes: st.tree_bytes,
                                 tree_files: st.tree_files,
                                 tree_dirs: st.tree_dirs,
+                                // Polozka nenese ctime, btime ani vlastnika.
+                                known: st.known & ENTRY_AVAIL,
+                                hidden: st.hidden & ENTRY_AVAIL,
                             })
                         })
                         .collect::<Result<Vec<_>>>()?;

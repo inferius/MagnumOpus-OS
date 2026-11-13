@@ -38,7 +38,8 @@ pub use msg::*;
 pub const MAGIC: u32 = 0x5346_4F4D;
 /// Verze protokolu. Nova verze muze pridat operace a polozky na konec tela;
 /// stary klient pozna novejsi server z `Hello` a pouziva jen to, co zna.
-pub const VERSION: u16 = 1;
+/// Verze 2: masky dostupnosti v `EntryInfo` (zmena tvaru polozky).
+pub const VERSION: u16 = 2;
 
 /// Jmeno souboroveho systemu, ktere jednotka hlasi Windows
 /// (`GetVolumeInformationW`) - podle nej aplikace pozna nas svazek.
@@ -85,6 +86,26 @@ pub mod feature {
     /// Datasety: `Kind::Dataset`, `EntryInfo::dataset`, snapshoty po
     /// datasetech.
     pub const DATASETS: u64 = 1 << 3;
+}
+
+/// Dostupnost hodnot v `EntryInfo` (masky `known` a `withheld`), bity jako
+/// `fsproto::avail` v MagnumOpus OS. Bit v `known` = hodnota plati;
+/// v `withheld` = existuje, ale volajici ji nesmi videt (pole je 0); ani
+/// jeden = nedostupna (FS ji nevede nebo k druhu nepatri, napr. `TREE`
+/// u souboru). Oba najednou = poskozena zprava.
+pub mod avail {
+    /// Velikost (u adresare `tree_bytes`).
+    pub const SIZE: u16 = 1 << 0;
+    pub const MTIME: u16 = 1 << 1;
+    pub const CTIME: u16 = 1 << 2;
+    pub const BTIME: u16 = 1 << 3;
+    /// Vlastnik (`EntryInfo` ho zatim nenese, bit se nepouziva).
+    pub const OWNER: u16 = 1 << 4;
+    /// Pocty v podstromu (`tree_files`, `tree_dirs`).
+    pub const TREE: u16 = 1 << 5;
+    /// Prava (`EntryInfo` je zatim nenese, bit se nepouziva).
+    pub const RIGHTS: u16 = 1 << 6;
+    pub const ALL: u16 = SIZE | MTIME | CTIME | BTIME | OWNER | TREE | RIGHTS;
 }
 
 /// Kody chyb v odpovedi. Hodnoty jsou stejne jako `abi::Error` v

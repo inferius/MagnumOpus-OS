@@ -13,6 +13,7 @@ Služba souborového systému nad knihovnou `libs/fs`. Startovní zpráva (kind 
 - Hodnoty z disku i požadavky klientů jsou nedůvěryhodný vstup.
 - Pád `fsd` nesmí poškodit data (commit je atomický, `libs/fs`); klienti se po restartu připojí přes lístky (`docs/cs/obnova-sluzeb.md`).
 - Pozdní práce (defrag, scrub) musí ustoupit požadavkům klientů (malé kroky mezi požadavky).
+- Masky dostupnosti z `fs::Stat` jdou do `fsproto::Stat` beze změny (shodu bitů hlídá `const assert` v `serve.rs`); `StatEntry` dostane jen bity svých polí (`ENTRY_AVAIL`). Změna tvaru `Stat` = nová verze v `fsproto::v2::VERSION`.
 
 ## Testy
 

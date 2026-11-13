@@ -1336,7 +1336,7 @@ data = rest of the message. One read/write moves at most 32 KiB
 | op | Name | Parameters | Result |
 |---|---|---|---|
 | 1 | `INFO` | - | volume label, block size, blocks, free, delayed, generation, algorithm, fallback, replayed |
-| 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, btime, subtree summaries); a time = seconds i64 + nanoseconds u32 |
+| 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, btime, owner, rights, subtree summaries, masks `known` and `hidden` u16); a time = seconds i64 + nanoseconds u32 |
 | 3 | `LIST` | path | count u32 + (kind u8, oid u64, name) - sorted by name; kind 1 file, 2 directory, 3 symbolic link; `BUFFER_TOO_SMALL` when the listing does not fit into a message |
 | 4 | `READ` | path, offset u64, length u32 | data (shorter at the end of the file) |
 | 5 | `WRITE` | path, offset u64, data | - |
@@ -1357,7 +1357,7 @@ data = rest of the message. One read/write moves at most 32 KiB
 | 20 | `CHECK` | scrub u8 | generation u64, total problems u64, unchecked changes in memory u8, count u32 + descriptions (as many as fit); only with `debug` |
 | 21 | `LIST_PAGE` | path, cursor (name of the last entry of the previous page, empty = from the start), at most u32 | more u8 (1 = something is left) + a page like `LIST` (as much as fits into 60 KiB) |
 | 22 | `SNAP_LIST_PAGE` | snapshot, path, cursor, at most u32 | like `LIST_PAGE` |
-| 87 | `LIST_STAT_PAGE` | path, cursor, at most u32 | more u8 + count u32 + (name, kind u8, oid u64, size u64, mtime, rights u8) - as much as fits into 60 KiB; rights `LIST` and `TRAVERSE` on the directory |
+| 87 | `LIST_STAT_PAGE` | path, cursor, at most u32 | more u8 + count u32 + (name, kind u8, oid u64, size u64, mtime, rights u8, subtree summaries, masks `known` and `hidden` u16) - as much as fits into 60 KiB; rights `LIST` and `TRAVERSE` on the directory |
 | 100 | `SIMULATE_POWER_LOSS` | - | replayed operations u64; only with `debug`, otherwise `ACCESS_DENIED` |
 
 `FsClient::list` and `snapshot_list` read page by page - this solves the
@@ -1385,6 +1385,46 @@ of the entry. Because the metadata is the `STAT` of the entries, the
 operation requires `TRAVERSE` on the directory besides `LIST` (without it
 `STAT` of the entries would fail; otherwise `ACCESS_DENIED`). Works for v1
 and v2 sessions (the same handler).
+
+#### Value availability: known, hidden, unavailable
+
+Both `Stat` and `StatEntry` end with two u16 masks with the same bits
+(`fsproto::avail`) **[implemented]**. Host tests: `cargo test -p fsproto`
+(codec), `cargo test -p fs --features std avail`.
+
+| bit | constant | field |
+|---|---|---|
+| 0 | `SIZE` | size (for a directory `tree_bytes`) |
+| 1 | `MTIME` | `mtime` |
+| 2 | `CTIME` | `ctime` |
+| 3 | `BTIME` | `btime` |
+| 4 | `OWNER` | `owner` |
+| 5 | `TREE` | `tree_files`, `tree_dirs` |
+| 6 | `RIGHTS` | `rights` |
+
+- **`known`** = the value is valid. An empty folder with the `MANAGE` right
+  is a known 0 B / 0 files / 0 folders.
+- **`hidden`** = the value exists, but the caller must not see it; the
+  field is 0. Subtree summaries of a directory without the `MANAGE` right
+  are `SIZE | TREE` in `hidden` (before, just zeros that could not be told
+  apart from an empty folder).
+- **Neither bit** = unavailable: the FS does not keep it, or it does not
+  belong to the object kind. `TREE` for a file and a link; for the boundary
+  of a nested dataset in a clone the size, times, owner and summaries
+  (`known` is only `RIGHTS`).
+- The codec rejects a message with `known & hidden != 0` or with an unknown
+  bit (`INVALID_ARGS`).
+- `StatEntry` carries only the bits of its own fields (`SIZE`, `MTIME`,
+  `RIGHTS`, `TREE`); fsd clears the other bits.
+
+On the wire this is +4 B at the end of `Stat` (`Stat::SIZE`) and of every
+`LIST_STAT_PAGE` entry (`StatEntry::FIXED`). Because of it the protocol has
+version 3 (`HELLO`); the older message shape is not read.
+
+> **Change from protocol version 2:** the `known` and `hidden` masks.
+> **Why:** zero meant "you may not see it", "empty" and "the FS does not
+> keep it" and a client (tables in the shell) could not tell them apart;
+> now it shows a hidden and an unavailable value differently from zero.
 
 Example message `READ "/a.txt", offset 0, 100 B`:
 
@@ -1418,7 +1458,7 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 
 | op | Name | Parameters | Result |
 |---|---|---|---|
-| 30 | `HELLO` | - | version u32 (2), max_io u32 |
+| 30 | `HELLO` | - | version u32 (3), max_io u32 |
 | 31 | `CONNECT` | - | a new session channel (a handle in the message) |
 | 32 | `OPEN` | path, access u8, share u8, flags u8 (`CREATE` 1, `EXCL` 2, `TRUNCATE` 4, `DIR` 8) | handle u64, `Stat`, `Revision` |
 | 33 | `CLOSE` | handle | - |
