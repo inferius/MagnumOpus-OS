@@ -310,7 +310,9 @@ fn pointer_device(opts: &Options) -> &'static str {
 fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
     cmd.arg("-machine")
         .arg(format!("q35,accel={accel}"))
-        .args(["-cpu", "max", "-smp", "4", "-m", "512M"]);
+        // 1 GiB jako aarch64: plna sada testu s GUI se do 512 MiB uz nevejde
+        // (skoncene procesy drzi pamet az do zavreni posledniho handlu).
+        .args(["-cpu", "max", "-smp", "4", "-m", "1G"]);
     // Graficka karta s vlastnim id (jinak stejna jako vychozi `-vga std`
     // na 00:01.0): k jeji konzoli se navazi klavesnice a mys virtio, viz nize.
     // `--res`: preferovany rezim v EDID karty (firmware a ovladac
