@@ -755,7 +755,7 @@ rozložení, generace).
 | Navigace | gesta: tah zdola Domů, tah a zastavení Přehled, tah od boku Zpět; tlačítková navigace jako volba přístupnosti |
 | Zpět | 1. zavře dočasnou vrstvu, 2. krok zpět v aplikaci, 3. předchozí aplikace nebo Domů; rozpracované změny chrání verzování souborů |
 | Konflikt gest | systémový pás 16 px u okrajů, výjimka pro aplikaci nejvýše 200 px na boku, rozpoznání po 12 px a pak zrušení dotyku v aplikaci |
-| Rozložení | `compact` &lt; 600, `medium` 600 až 839, `expanded` &ge; 840 logických jednotek, hystereze 24; klávesnice třídu nemění |
+| Rozložení | `compact` &lt; 600, `medium` 600 až 839, `expanded` &ge; 840 logických jednotek, hystereze 24; klávesnice třídu nemění. Tokeny `breakpoint.*`, v aplikacích `cx.class` ve `view` ([GUI: adaptivní rozvržení](gui.md#adaptivní-rozvržení-kontext-ve-view)) |
 | Důvěryhodné prvky | stavový řádek kreslí jen systém; dvojí stisk napájení ukáže „Kdo je na obrazovce“; dialogy s pruhem Systém a frází |
 | Klávesnice | systémová součást v samostatném procesu; aplikace dostává text a skládání; citlivá pole mají bezpečnou klávesnici bez návrhů a schránky |
 | Agent | vlastní barva a ikona i na zámku a ve stavovém řádku; jeho změny v textu podtržené a vratné |

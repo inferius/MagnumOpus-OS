@@ -275,6 +275,40 @@ from QEMU and real hardware are not measured yet. **[designed]**: show the
 old content at the fixed corner at once (without waiting for the ack) and
 damage only the changed band of the window and shadow.
 
+### Window context and requested size
+
+Every window gets **its own** context, nothing global (several outputs
+with different scales change nothing):
+
+```
+WINDOW_CONTEXT { window, generation, output, screen, work_area, scale, refresh_mhz }
+WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
+```
+
+- `WINDOW_CONTEXT` arrives **before the first `CONFIGURE`** and then on
+  every change (resolution, bar, later a move to another output) with a
+  higher `generation`. `work_area` is the screen without the bar; sizes
+  are logical px.
+- `WINDOW_SIZE` is the requested content size: natural `w` x `h`
+  (0 = leave it to the system), minimum `min_w` x `min_h` and a cap in
+  per mille of the work area (`max_frac_w = 850` = at most 85 % of the
+  width; 0 = no cap).
+  - **Before the first commit** it sets the size at opening: the
+    compositor answers with `CONFIGURE` and the window appears right away
+    in the correct size, with no second `CONFIGURE` and no flicker.
+    `Window::request_size` in `libs/ui` waits for the answer.
+  - **Later** it is a resize request (`CONFIGURE` as when dragging an
+    edge). A maximized or fullscreen window remembers it as its restored
+    size.
+- Terminal: `win.request_size(1040, 520, 850, 0)`, i.e. 1040 px but at
+  most 85 % of the work area width.
+- Protocol version 2 (`guiproto::VERSION`): compositor and applications
+  are built together, `HELLO` requires a match.
+
+**[implemented]** (tests `context_first_and_initial_size_without_flicker`,
+`request_size_later_and_while_maximized`, `resize_sends_new_context_generation`
+in `libs/comp`)
+
 ### Transactions across windows and applications
 
 For changes that must appear together in different windows (a terminal
@@ -1251,7 +1285,7 @@ One library for all applications, declarative in Rust:
 impl App for Notes {
     type Msg = Msg;
     fn title(&self) -> String { "Notes".into() }
-    fn view(&self) -> Node<Msg> {
+    fn view(&self, _cx: &Context) -> Node<Msg> {
         column([
             label("Notes").heading(),
             text_input(&self.title).placeholder("Title").on_change(Msg::Title),
@@ -1279,10 +1313,11 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 |---|---|---|---|
 | `label` | - | - | `label` |
 | `button` | click | Enter, space | `button`, `activate` |
-| `text_input` | click = cursor | text, Backspace, Delete, arrows, Home, End, Enter = `on_submit` | `text-input`, `set-value` |
+| `text_input`, `text_area` | click, drag, double and triple click | see [Text fields and the clipboard](#text-fields-and-the-clipboard) | `text-input`, `set-value` |
 | `password_input` | like `text_input` | like `text_input` | `password-input` without a value |
 | `checkbox` | click | space, Enter | `checkbox`, `toggle` |
 | `list` | click an item | up and down arrows | `list` and `list-item` |
+| `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | wheel | - | `scroll-area`, `scroll` |
@@ -1356,6 +1391,152 @@ column([
     button("Sign in").on_click(Msg::SignIn).key("ok"),
 ])
 ```
+
+### Adaptive layout (context in `view`)
+
+`App::view(&self, cx: &Context)` gets the context of **its own window**:
+size, width class `cx.class` (`Compact`, `Medium`, `Expanded`), screen,
+work area and scale. The application switches layout by the window width,
+not the screen. The thresholds are the `breakpoint.*` tokens in
+`design/tokens.toml` (compact &lt; 600, medium 600 to 839, expanded &ge;
+840, hysteresis 24: back to the smaller class only below the threshold
+minus 24 px), the same as in the [Mobile
+environment](appearance.md#mobile-environment-design-stage-a).
+`Ui::resize` returns whether the class changed.
+
+```rust
+fn view(&self, cx: &Context) -> Node<Msg> {
+    match cx.class {
+        SizeClass::Compact => self.list(),
+        _ => row([self.list().width(280), self.detail().grow()]),
+    }
+}
+```
+
+### Text fields and the clipboard
+
+`text_input`, `password_input` and `text_area` (multi-line, `.rows(n)`)
+share one editor, `ui::text::TextEdit`: text, cursor and selection by the
+element key, undo and redo history. The application is the source of
+truth: it gets every change as `on_change`, and when it adjusts the value
+(e.g. to upper case) the field takes it over and the cursor stays on a
+character boundary.
+
+| Control | What it does |
+|---|---|
+| click, Shift+click, drag | cursor, extend selection, select by dragging |
+| double click, triple click | word, line (password: double click selects all) |
+| arrows, Ctrl+arrows, Shift | by grapheme, by word, with selection |
+| Home, End, Ctrl+Home, Ctrl+End | start and end of line and text |
+| up, down, PgUp, PgDn | `text_area` only: visual lines, keeps the x position |
+| Backspace, Delete, Ctrl+ | character (with combining marks), word |
+| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | select all, undo, redo (typing a word is one step) |
+| Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Insert, Shift+Delete, Shift+Insert | clipboard |
+| Enter | submit (`on_submit`); in `text_area` a new line, Ctrl+Enter submits |
+| wheel | in `text_area` scrolls the field, not the window |
+
+- **Graphemes:** the cursor and deletion never split a letter with a
+  combining caron (`C` + U+030C), an emoji with a skin tone, a ZWJ family
+  or a flag. Word boundaries know diacritics ("Žluťoučký" is one word).
+- **Shortcuts by layout:** Ctrl+Z is the key producing `z` in the active
+  layout (on Czech QWERTZ a different physical key than on US).
+- **Wrapping** in `text_area` by words to the field width; a word longer
+  than a line breaks by graphemes. A single-line field scrolls so the
+  cursor stays visible; pasted line breaks become spaces.
+- **Password:** neither copy nor cut works (not even Ctrl+Insert);
+  Ctrl+arrows jump to start and end (words would reveal the spaces).
+- `ui::text` does not depend on drawing: the terminal uses its word and
+  grapheme boundaries for selection in the grid.
+
+The **clipboard** is a separate compositor module
+(`libs/comp/src/clipboard.rs`) with its own protocol `libs/clipproto`.
+Its messages travel in an envelope of the window protocol (`CLIPBOARD`) for
+now, so the clipboard can later move into its own service without
+changing its messages.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clipboard flow">
+<defs><marker id="cb1e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="t" x="110" y="30" text-anchor="middle">app A</text><text class="t" x="380" y="30" text-anchor="middle">compd</text><text class="t" x="650" y="30" text-anchor="middle">app B</text>
+<path class="ln" d="M110 40 L110 290"/><path class="ln-acc" d="M380 40 L380 290"/><path class="ln" d="M650 40 L650 290"/>
+<path class="ln" d="M110 70 L378 70" marker-end="url(#cb1e)"/><text class="m" x="120" y="62">Offer [text] (Ctrl+C)</text>
+<path class="ln" d="M380 100 L112 100" marker-end="url(#cb1e)"/><text class="m" x="130" y="94">Send (copy kept after A exits)</text>
+<path class="ln" d="M110 130 L378 130" marker-end="url(#cb1e)"/><text class="m" x="130" y="124">Data</text>
+<path class="ln" d="M650 170 L382 170" marker-end="url(#cb1e)"/><text class="m" x="400" y="162">Request (Ctrl+V)</text>
+<path class="ln" d="M380 200 L112 200" marker-end="url(#cb1e)"/><text class="m" x="130" y="194">Send</text>
+<path class="ln" d="M110 230 L378 230" marker-end="url(#cb1e)"/><text class="m" x="130" y="224">Data</text>
+<path class="ln" d="M380 260 L648 260" marker-end="url(#cb1e)"/><text class="m" x="400" y="254">Deliver</text>
+</svg>
+<figcaption>Lazy transfer: data moves on paste; the compositor fetches text right away and keeps a copy.</figcaption>
+</figure>
+
+| Rule | How |
+|---|---|
+| only on user action | only the focused window may offer or request, within 1 s of a physical key or button press (not synthetic input); one gesture = one paste |
+| lazy transfer | the owner offers formats (`Offer`), sends data only on request (`Send` -> `Data` -> `Deliver`) |
+| after the owner exits | the compositor fetches text right after the offer and keeps a copy; pending pastes of other formats fail (`Denied: Unavailable`) |
+| secure fields | the library never puts a password on the clipboard; the compositor also refuses an offer from a window whose focused node is `password-input` |
+| large data | up to 60 KiB in the message; larger via shared memory (next step) |
+| history | not yet |
+
+The focused window gets `Changed` with the formats on the clipboard (when
+the content changes and when it gains focus) so it can enable "Paste".
+Applications that draw themselves call `Window::copy_text`,
+`Window::request_paste` and `Window::clipboard_event`.
+
+### Table and list (virtualization)
+
+`table(columns, count, id, row)` is a table and also a single-column list
+(`.header(false)`: disk selection, keyboard layouts in the installer). It
+reads data **lazily**: `id(i)` (stable row id, cheap) and `row(i)` (`Cells`
+with cell text and an icon) are called for visible rows only. Ten thousand
+files cost the same as twenty. The application can share data through
+`Rc` so `view` does not copy it.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Table virtualization">
+<rect class="box" x="20" y="20" width="200" height="190" rx="8"/><text class="t" x="120" y="45" text-anchor="middle">app data</text>
+<text class="m" x="40" y="75">0 ... 9 999</text><text class="m" x="40" y="100">id(i), row(i)</text><text class="m" x="40" y="125">read lazily</text>
+<rect class="acc" x="300" y="70" width="200" height="90" rx="8"/><text class="t" x="400" y="95" text-anchor="middle">visible rows</text>
+<text class="m" x="400" y="120" text-anchor="middle">first..last</text><text class="m" x="400" y="140" text-anchor="middle">by scroll offset</text>
+<rect class="box" x="560" y="20" width="180" height="190" rx="8"/><text class="t" x="650" y="45" text-anchor="middle">output</text>
+<text class="m" x="580" y="80">drawing</text><text class="m" x="580" y="105">row nodes</text><text class="m" x="580" y="130">selection = ids</text>
+<path class="ln" d="M220 115 L298 115"/><path class="ln" d="M500 115 L558 115"/>
+</svg>
+<figcaption>The table reads the content of visible rows only; selection and cursor are kept by id, so they survive sorting and data changes.</figcaption>
+</figure>
+
+| Control | What it does |
+|---|---|
+| click, Ctrl+click, Shift+click | select a row, toggle, range from the anchor (Ctrl+Shift adds the range) |
+| arrows, PgUp, PgDn, Home, End | move the cursor with selection; Shift = range, Ctrl = cursor only |
+| space, Ctrl+space, Ctrl+A | select the cursor row, toggle it, select all |
+| typing | jump to the row whose first cell starts with the typed text (at most 1 s between letters) |
+| double click, Enter | `on_activate` (open) |
+| right button | selects the row if it was not selected and sends `on_context` (context menu) |
+| header click | `on_sort(column, ascending)`, again reversed; the header arrow follows `.sorted` |
+| drag a header edge | column width (library state by key, at least `size.hit_min`) |
+| drag selected rows | after 6 px `on_drag(ids)`; target and drop are up to the application (the drag protocol between applications is a next step) |
+| wheel | smooth scrolling: target at once, movement per frame (`Ui::tick`); at the edge the wheel goes to the area below |
+| scrollbar | drag the thumb, click the track for a page |
+
+- **The application owns the selection** (`.selection(ids)`); the table
+  sends the whole new selection (`on_selection`). Cursor and anchor live in
+  the library by id, so they survive sorting and data changes.
+  `.multi_select(false)` = at most one row.
+- **Accessibility:** a `table` node with the value "N řádků", `column-header`
+  with "vzestupně / sestupně" and `row` nodes for visible rows only
+  (state `selected`, `focused`); the `activate` action selects a row or
+  sorts by a header. The tree stays small even for large lists.
+- **Look after `.tbl` in the design:** header `caption` with the
+  `body_strong` weight in `ink_muted`, a `border` line under each row,
+  selection `accent_soft`, hover `surface_3`, numbers
+  (`col(..).numeric()`) right aligned, the cursor as a focus ring in the
+  active window.
+- **The scrollbar** `ui::scrollbar::Scrollbar` (overlay, width
+  `size.scrollbar`, thumb at least `hit_min / 2`) does not depend on the
+  element tree: the terminal uses its geometry, hit test, dragging and
+  drawing too.
 
 The `ui::client` runtime (feature `os`) keeps the window: double buffers
 in VMOs, layers, the whole accessibility tree after every change,

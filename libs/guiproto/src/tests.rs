@@ -60,7 +60,7 @@ fn client_messages_roundtrip() {
         ..Default::default()
     };
     for m in [
-        ClientMsg::Hello { version: 1 },
+        ClientMsg::Hello { version: crate::VERSION },
         ClientMsg::WindowCreate {
             window: 1,
             mode: Mode::CustomTitle,
@@ -127,6 +127,9 @@ fn client_messages_roundtrip() {
             value: Some(Value::Int(-3)),
             message: "hotovo".into(),
         },
+        ClientMsg::Clipboard { data: vec![1, 0, 0, 0, 0] },
+        ClientMsg::Clipboard { data: vec![] },
+        ClientMsg::WindowSize { window: 1, w: 1040, h: 520, min_w: 400, min_h: 200, max_frac_w: 850, max_frac_h: 0 },
     ] {
         roundtrip_client(m);
     }
@@ -209,6 +212,16 @@ fn server_messages_roundtrip() {
             op: op::LAYER_SET,
             code: Error::InvalidArgs,
         },
+        ServerMsg::Clipboard { data: vec![104, 0, 0, 0] },
+        ServerMsg::WindowContext {
+            window: 1,
+            generation: 3,
+            output: 0,
+            screen: Rect::new(0, 0, 1280, 800),
+            work_area: Rect::new(0, 0, 1280, 744),
+            scale: 125,
+            refresh_mhz: 60_000,
+        },
     ] {
         roundtrip_server(m);
     }
@@ -227,7 +240,7 @@ fn bad_messages_are_errors() {
     w.u32(1).u32(u32::MAX);
     assert_eq!(ClientMsg::decode(&w.finish()), Err(Error::InvalidArgs));
     // Data navic za zpravou.
-    let mut enc = ClientMsg::Hello { version: 1 }.encode();
+    let mut enc = ClientMsg::Hello { version: crate::VERSION }.encode();
     enc.push(0);
     assert_eq!(ClientMsg::decode(&enc), Err(Error::InvalidArgs));
     // Neplatny bool.

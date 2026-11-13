@@ -264,6 +264,38 @@ a skutečného stroje zatím nejsou změřená. **[navrženo]**: ukázat starý
 obsah u pevného rohu hned (bez čekání na potvrzení) a poškozovat jen
 změněný pás okna a stínu.
 
+### Kontext okna a požadovaná velikost
+
+Každé okno dostane **svůj** kontext, nic globálního (víc výstupů s různou
+škálou nic nemění):
+
+```
+WINDOW_CONTEXT { window, generation, output, screen, work_area, scale, refresh_mhz }
+WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
+```
+
+- `WINDOW_CONTEXT` přijde **před prvním `CONFIGURE`** a pak při každé
+  změně (rozlišení, lišta, později přesun na jiný výstup) s vyšší
+  `generation`. `work_area` je obrazovka bez lišty, rozměry jsou logické px.
+- `WINDOW_SIZE` je požadovaná velikost obsahu: přirozená `w` x `h`
+  (0 = nechat na systému), nejmenší `min_w` x `min_h` a strop v promile
+  pracovní plochy (`max_frac_w = 850` = nejvýš 85 % šířky; 0 = bez stropu).
+  - **Před prvním commitem** určí velikost při otevření: kompozitor odpoví
+    `CONFIGURE` s výsledkem a okno se ukáže rovnou správně, bez druhého
+    `CONFIGURE` a bez probliknutí. `Window::request_size` v `libs/ui` na
+    odpověď počká.
+  - **Později** je to žádost o změnu (`CONFIGURE` jako při tažení okraje).
+    Maximalizované okno a okno na celé obrazovce si ji zapamatuje jako
+    velikost po obnovení.
+- Terminál: `win.request_size(1040, 520, 850, 0)`, tedy 1040 px, ale nejvýš
+  85 % šířky pracovní plochy.
+- Verze protokolu 2 (`guiproto::VERSION`): kompozitor a aplikace se
+  sestavují spolu, `HELLO` vyžaduje shodu.
+
+**[implementováno]** (testy `context_first_and_initial_size_without_flicker`,
+`request_size_later_and_while_maximized`, `resize_sends_new_context_generation`
+v `libs/comp`)
+
 ### Transakce přes víc oken a aplikací
 
 Pro změny, které se musí ukázat zároveň v různých oknech (okno terminálu
@@ -1203,7 +1235,7 @@ Jedna knihovna pro všechny aplikace, deklarativní v Rustu:
 impl App for Poznamky {
     type Msg = Msg;
     fn title(&self) -> String { "Poznámky".into() }
-    fn view(&self) -> Node<Msg> {
+    fn view(&self, _cx: &Context) -> Node<Msg> {
         column([
             label("Poznámky").heading(),
             text_input(&self.title).placeholder("Název").on_change(Msg::Title),
@@ -1231,10 +1263,11 @@ převede na zprávy `Msg`.
 |---|---|---|---|
 | `label` | - | - | `label` |
 | `button` | klik | Enter, mezerník | `button`, `activate` |
-| `text_input` | klik = kurzor | text, Backspace, Delete, šipky, Home, End, Enter = `on_submit` | `text-input`, `set-value` |
+| `text_input`, `text_area` | klik, tah, dvojklik, trojklik | viz [Textová pole a schránka](#textová-pole-a-schránka) | `text-input`, `set-value` |
 | `password_input` | jako `text_input` | jako `text_input` | `password-input` bez hodnoty |
 | `checkbox` | klik | mezerník, Enter | `checkbox`, `toggle` |
 | `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
+| `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | kolečko | - | `scroll-area`, `scroll` |
@@ -1306,6 +1339,147 @@ column([
     button("Přihlásit").on_click(Msg::Prihlasit).key("ok"),
 ])
 ```
+
+### Adaptivní rozvržení (kontext ve `view`)
+
+`App::view(&self, cx: &Context)` dostane kontext **svého okna**: velikost,
+třídu šířky `cx.class` (`Compact`, `Medium`, `Expanded`), obrazovku,
+pracovní plochu a škálu. Aplikace přepíná rozvržení podle šířky okna, ne
+obrazovky. Prahy jsou tokeny `breakpoint.*` v `design/tokens.toml`
+(compact &lt; 600, medium 600 až 839, expanded &ge; 840, hystereze 24: zpět
+do menší třídy až pod prahem minus 24 px), stejné jako v [Mobilním
+prostředí](vzhled.md#mobilní-prostředí-návrh-etapa-a). `Ui::resize` vrací,
+zda se třída změnila.
+
+```rust
+fn view(&self, cx: &Context) -> Node<Msg> {
+    match cx.class {
+        SizeClass::Compact => self.seznam(),
+        _ => row([self.seznam().width(280), self.detail().grow()]),
+    }
+}
+```
+
+### Textová pole a schránka
+
+`text_input`, `password_input` a `text_area` (víceřádkové, `.rows(n)`)
+sdílejí jeden editor `ui::text::TextEdit`:
+text, kurzor a výběr podle klíče prvku, historie zpět a znovu. Zdroj
+pravdy je aplikace: každou změnu dostane zprávou `on_change` a když hodnotu
+upraví (třeba převede na velká písmena), pole ji převezme a kurzor zůstane
+na hranici znaku.
+
+| Ovládání | Co dělá |
+|---|---|
+| klik, Shift+klik, tah | kurzor, rozšíření výběru, výběr tahem |
+| dvojklik, trojklik | slovo, řádek (heslo: dvojklik vybere vše) |
+| šipky, Ctrl+šipky, Shift | po grafémech, po slovech, s výběrem |
+| Home, End, Ctrl+Home, Ctrl+End | začátek a konec řádku a textu |
+| nahoru, dolů, PgUp, PgDn | jen `text_area`: viditelné řádky, pamatuje si polohu x |
+| Backspace, Delete, Ctrl+ | znak (i s kombinačními znaky), slovo |
+| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | vybrat vše, zpět, znovu (psaní slova je jeden krok) |
+| Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Insert, Shift+Delete, Shift+Insert | schránka |
+| Enter | odeslat (`on_submit`); v `text_area` nový řádek, Ctrl+Enter odeslat |
+| kolečko | v `text_area` posune obsah pole, ne okno |
+
+- **Grafémy:** kurzor a mazání nikdy nerozdělí písmeno s kombinačním
+  háčkem (`C` + U+030C), emoji s barvou pleti, rodinu přes ZWJ ani vlajku.
+  Hranice slov znají diakritiku („Žluťoučký“ je jedno slovo).
+- **Zkratky podle rozložení:** Ctrl+Z je klávesa se znakem `z` v aktivním
+  rozložení (na české QWERTZ jiná fyzická klávesa než na US).
+- **Zalamování** v `text_area` podle slov na šířku pole; slovo delší než
+  řádek se zalomí po grafémech. Jednořádkové pole posouvá text tak, aby
+  byl kurzor vidět; vložené konce řádků nahradí mezerou.
+- **Heslo:** kopírovat ani vyjmout nejde (ani Ctrl+Insert), Ctrl+šipky
+  skáčou na začátek a konec (slova by prozradila mezery).
+- `ui::text` nezávisí na kreslení: terminál z něj používá hranice slov
+  a grafémů pro výběr v mřížce.
+
+**Schránka** je samostatný modul kompozitoru (`libs/comp/src/clipboard.rs`)
+s vlastním protokolem `libs/clipproto`. Zprávy zatím jdou v obálce
+okenního protokolu (`CLIPBOARD`), takže schránka půjde později přestěhovat
+do vlastní služby beze změny zpráv.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Prubeh schranky">
+<defs><marker id="cb1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="t" x="110" y="30" text-anchor="middle">aplikace A</text><text class="t" x="380" y="30" text-anchor="middle">compd</text><text class="t" x="650" y="30" text-anchor="middle">aplikace B</text>
+<path class="ln" d="M110 40 L110 290"/><path class="ln-acc" d="M380 40 L380 290"/><path class="ln" d="M650 40 L650 290"/>
+<path class="ln" d="M110 70 L378 70" marker-end="url(#cb1)"/><text class="m" x="120" y="62">Offer [text] (Ctrl+C)</text>
+<path class="ln" d="M380 100 L112 100" marker-end="url(#cb1)"/><text class="m" x="130" y="94">Send (kopie pro dobu po skončení A)</text>
+<path class="ln" d="M110 130 L378 130" marker-end="url(#cb1)"/><text class="m" x="130" y="124">Data</text>
+<path class="ln" d="M650 170 L382 170" marker-end="url(#cb1)"/><text class="m" x="400" y="162">Request (Ctrl+V)</text>
+<path class="ln" d="M380 200 L112 200" marker-end="url(#cb1)"/><text class="m" x="130" y="194">Send</text>
+<path class="ln" d="M110 230 L378 230" marker-end="url(#cb1)"/><text class="m" x="130" y="224">Data</text>
+<path class="ln" d="M380 260 L648 260" marker-end="url(#cb1)"/><text class="m" x="400" y="254">Deliver</text>
+</svg>
+<figcaption>Líný přenos: data jdou až při vložení; text si kompozitor vyžádá hned a drží kopii.</figcaption>
+</figure>
+
+| Pravidlo | Jak |
+|---|---|
+| jen na akci uživatele | nabídnout i vyžádat smí jen okno s fokusem do 1 s po fyzickém stisku klávesy nebo tlačítka (ne umělý vstup); jedno gesto = jedno vložení |
+| líný přenos | vlastník nabídne formáty (`Offer`), data pošle až na žádost (`Send` -> `Data` -> `Deliver`) |
+| po skončení vlastníka | text si kompozitor vyžádá hned po nabídce a drží kopii; čekající vložení jiných formátů selže (`Denied: Unavailable`) |
+| zabezpečená pole | knihovna heslo do schránky nedá; kompozitor navíc odmítne nabídku z okna, jehož uzel s fokusem je `password-input` |
+| velká data | do 60 KiB ve zprávě; větší přes sdílenou paměť (další krok) |
+| historie | zatím ne |
+
+Okno s fokusem dostane `Changed` s formáty ve schránce (při změně obsahu
+a při získání fokusu), aby mohlo povolit položku „Vložit“. Aplikace, které
+kreslí samy, volají `Window::copy_text`, `Window::request_paste`
+a `Window::clipboard_event`.
+
+### Tabulka a seznam (virtualizace)
+
+`table(sloupce, počet, id, řádek)` je tabulka i jednosloupcový seznam
+(`.header(false)`: výběr disku, rozložení klávesnice v instalátoru).
+Data čte **líně**: `id(i)` (stabilní id řádku, levné) a `row(i)`
+(`Cells` s textem buněk a ikonou) se volají jen pro viditelné řádky. Deset
+tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet přes
+`Rc`, ať je `view` nekopíruje.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Virtualizace tabulky">
+<rect class="box" x="20" y="20" width="200" height="190" rx="8"/><text class="t" x="120" y="45" text-anchor="middle">data aplikace</text>
+<text class="m" x="40" y="75">0 ... 9 999</text><text class="m" x="40" y="100">id(i), row(i)</text><text class="m" x="40" y="125">čte se líně</text>
+<rect class="acc" x="300" y="70" width="200" height="90" rx="8"/><text class="t" x="400" y="95" text-anchor="middle">viditelné řádky</text>
+<text class="m" x="400" y="120" text-anchor="middle">first..last</text><text class="m" x="400" y="140" text-anchor="middle">podle posunu</text>
+<rect class="box" x="560" y="20" width="180" height="190" rx="8"/><text class="t" x="650" y="45" text-anchor="middle">výstup</text>
+<text class="m" x="580" y="80">kreslení</text><text class="m" x="580" y="105">uzly row</text><text class="m" x="580" y="130">výběr = id</text>
+<path class="ln" d="M220 115 L298 115"/><path class="ln" d="M500 115 L558 115"/>
+</svg>
+<figcaption>Tabulka čte obsah jen viditelných řádků; výběr a kurzor drží podle id, takže přežijí řazení i změnu dat.</figcaption>
+</figure>
+
+| Ovládání | Co dělá |
+|---|---|
+| klik, Ctrl+klik, Shift+klik | vybere řádek, přepne, rozsah od kotvy (Ctrl+Shift přidá rozsah) |
+| šipky, PgUp, PgDn, Home, End | posun kurzoru s výběrem; Shift = rozsah, Ctrl = jen kurzor |
+| mezerník, Ctrl+mezerník, Ctrl+A | vybere řádek s kurzorem, přepne ho, vybere vše |
+| psaní | skok na řádek, jehož první buňka začíná napsaným textem (mezi písmeny nejvýš 1 s) |
+| dvojklik, Enter | `on_activate` (otevřít) |
+| pravé tlačítko | vybere řádek, pokud nebyl vybraný, a pošle `on_context` (kontextová nabídka) |
+| klik na záhlaví | `on_sort(sloupec, vzestupně)`, znovu opačně; šipka v záhlaví podle `.sorted` |
+| tah za okraj záhlaví | šířka sloupce (stav knihovny podle klíče, nejméně `size.hit_min`) |
+| tah vybraných řádků | po 6 px `on_drag(id)`; cíl a puštění řeší aplikace (protokol tažení mezi aplikacemi je další krok) |
+| kolečko | plynulé rolování: cíl hned, posun po snímcích (`Ui::tick`); na kraji kolečko dostane oblast pod tabulkou |
+| posuvník | tažení jezdce, klik do dráhy o stránku |
+
+- **Výběr drží aplikace** (`.selection(ids)`), tabulka pošle nový celý výběr
+  (`on_selection`). Kurzor a kotva jsou v knihovně podle id, takže přežijí
+  řazení i změnu dat. `.multi_select(false)` = nejvýš jeden řádek.
+- **Přístupnost:** uzel `table` s hodnotou „N řádků“, `column-header`
+  s hodnotou „vzestupně / sestupně“ a uzly `row` jen pro viditelné řádky
+  (stav `selected`, `focused`); akce `activate` na řádku vybere, na
+  záhlaví seřadí. Strom tak zůstane malý i u velkých seznamů.
+- **Vzhled podle `.tbl` v návrhu:** záhlaví `caption` s vahou
+  `body_strong` v `ink_muted`, čára `border` pod řádkem, výběr
+  `accent_soft`, najetí `surface_3`, čísla (`col(..).numeric()`) vpravo,
+  kurzor jako rámeček fokusu v aktivním okně.
+- **Posuvník** `ui::scrollbar::Scrollbar` (překryvný, šířka
+  `size.scrollbar`, jezdec nejméně `hit_min / 2`) nezávisí na stromu
+  prvků: geometrie, zásah, tažení a kreslení použije i terminál.
 
 Běhové prostředí `ui::client` (vlastnost `os`) drží okno: dvojité buffery
 ve VMO, vrstvy, celý strom přístupnosti po každé změně, `COMMIT`

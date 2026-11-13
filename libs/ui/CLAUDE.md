@@ -12,9 +12,10 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 
 ## Testy
 
-- `cargo test -p ui` (`src/tests/`: `mod.rs` zakladni prvky, `keys.rs` klice, stav, heslo); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
+- `cargo test -p ui` (`src/tests/`: `mod.rs` zakladni prvky, `keys.rs` klice, stav, heslo, `text.rs` editor, `field.rs` textova pole a schranka, `table.rs` tabulka, `context.rs` kontext okna); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
 
 ## Pasti
 
 - Aplikace UI vykresluje do vlastního bufferu; kompozitor mu nevěří (viz `libs/comp/CLAUDE.md`), ale i klient musí ošetřit nesmyslné rozměry od kompozitoru.
-- `client/mod.rs` má ~700 řádků; při dalším růstu dělit (obnova po pádu je už v `restore.rs`).
+- `client/mod.rs` má ~730 řádků; při dalším růstu dělit (obnova po pádu je v `restore.rs`, schránka v `clip.rs`).
+- Textová pole: editor `text.rs` (grafémy, slova, historie) je bez kreslení a sdílí ho i gui-term; geometrie, klávesy a kreslení pole jsou v `field.rs`. Hodnotu drží aplikace, pole ji po `rebuild` převezme (`sync_fields`).

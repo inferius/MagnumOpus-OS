@@ -35,6 +35,7 @@ members = [
     "libs/driverkit",
     "libs/inputproto",
     "libs/guiproto",
+    "libs/clipproto",
     "libs/svcclient",
     "libs/gpuproto",
     "libs/venus",

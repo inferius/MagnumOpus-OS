@@ -89,7 +89,7 @@ impl App for Demo {
         ]
     }
 
-    fn view(&self) -> Node<Msg> {
+    fn view(&self, _cx: &ui::Context) -> Node<Msg> {
         column([
             label(&format!("Počítadlo: {}", self.count)).heading(),
             row([button("Přičíst").on_click(Msg::Add), spacer()]),

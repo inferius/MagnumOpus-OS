@@ -1,6 +1,6 @@
 # libs/comp
 
-Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, testy na hostiteli). Služba `user/compd` jen převádí kanály a objekty paměti na volání `Comp` a rozesílá zprávy z `Comp::take_out`. Obsah: `scene` (klienti, okna, buffery, vrstvy, transakce), `render` (skládání snímku: dekorace, odznak důvěry, lišta, kurzor), `style` (vzhled z tokenů), `input` (rozdělení vstupu, přesun a změna velikosti), `dialog` (systémové dialogy, bezpečná obrazovka), `greeter` (přihlášení a zámek), `frame` (takt, animace, skupiny transakcí), `gpu` (seznam operací pro GPU backend `libs/vkcomp`), `menu`, `flyout`, `services` (akce aplikací, inspekce), `output` (změna režimu displeje). Popis: `docs/cs/gui.md`, vzhled `docs/cs/vzhled.md`.
+Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, testy na hostiteli). Služba `user/compd` jen převádí kanály a objekty paměti na volání `Comp` a rozesílá zprávy z `Comp::take_out`. Obsah: `scene` (klienti, okna, buffery, vrstvy, transakce), `render` (skládání snímku: dekorace, odznak důvěry, lišta, kurzor), `style` (vzhled z tokenů), `input` (rozdělení vstupu, přesun a změna velikosti), `dialog` (systémové dialogy, bezpečná obrazovka), `greeter` (přihlášení a zámek), `frame` (takt, animace, skupiny transakcí), `gpu` (seznam operací pro GPU backend `libs/vkcomp`), `menu`, `flyout`, `clipboard` (schránka, protokol `libs/clipproto`), `services` (akce aplikací, inspekce), `output` (změna režimu displeje). Popis: `docs/cs/gui.md`, vzhled `docs/cs/vzhled.md`.
 
 ## Invarianty
 

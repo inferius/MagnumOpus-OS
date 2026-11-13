@@ -510,6 +510,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "clipproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
+]
+
+[[package]]
 name = "cmac"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -524,6 +532,7 @@ dependencies = [
 name = "comp"
 version = "0.1.0"
 dependencies = [
+ "clipproto",
  "font",
  "gfx",
  "guiproto",
@@ -2959,6 +2968,7 @@ checksum = "0c8352f8c05e47892e7eaf13b34abd76a7f4aeaf817b716e88789381927f199c"
 name = "ui"
 version = "0.1.0"
 dependencies = [
+ "clipproto",
  "font",
  "gfx",
  "guiproto",

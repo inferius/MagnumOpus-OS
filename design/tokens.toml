@@ -430,6 +430,15 @@ hung_content = 0.45
 # Nedostupny prvek (tlacitko, pole).
 disabled = 0.5
 
+# Tridy sirky okna pro adaptivni UI (design/mobil.html, docs/cs/vzhled.md
+# kapitola Mobilni prostredi): compact < medium <= medium < expanded.
+# Hystereze: zpet do mensi tridy az pod prahem minus `hysteresis` (okno
+# na hrane neskace mezi rozvrzenimi). Jednotky = logicke px okna.
+[breakpoint]
+medium = 600
+expanded = 840
+hysteresis = 24
+
 # Vrstvy kompozitoru (poradi skladani). Do "system_dialog" a "secure" smi
 # kreslit jen kompozitor.
 [layer]

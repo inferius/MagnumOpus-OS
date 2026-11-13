@@ -34,6 +34,10 @@ pub mod op {
     pub const ACTION_RESULT: u32 = 18;
     /// Deklarace menu okna (`crate::menu`).
     pub const MENU_UPDATE: u32 = 19;
+    /// Obalka zpravy schranky (`clipproto::ClientMsg`).
+    pub const CLIPBOARD: u32 = 20;
+    /// Pozadovana velikost okna (`WindowSize`).
+    pub const WINDOW_SIZE: u32 = 21;
     // Kompozitor -> aplikace.
     pub const WELCOME: u32 = 100;
     pub const CONFIGURE: u32 = 101;
@@ -50,6 +54,10 @@ pub mod op {
     pub const ERROR: u32 = 112;
     /// Rezim barev systemu (0 svetly, 1 tmavy, 2 vysoky kontrast).
     pub const THEME: u32 = 113;
+    /// Obalka zpravy schranky (`clipproto::ServerMsg`).
+    pub const CLIPBOARD_EVENT: u32 = 114;
+    /// Kontext okna: vystup, pracovni plocha, skala (`WindowContext`).
+    pub const WINDOW_CONTEXT: u32 = 115;
 }
 
 /// Rezim okna (kdo kresli dekorace).
@@ -500,6 +508,15 @@ pub enum ClientMsg {
     ActionResult { call: u32, ok: bool, value: Option<action::Value>, message: String },
     /// Menu okna (cely strom; posila se pri zmene, kompozitor ho drzi).
     MenuUpdate { window: u32, items: Vec<crate::menu::MenuItem> },
+    /// Zprava schranky (`clipproto`): obalka, aby sla schranka pozdeji
+    /// prestehovat do vlastni sluzby bez zmeny jejich zprav.
+    Clipboard { data: Vec<u8> },
+    /// Pozadovana velikost okna (logicke px): prirozena `w` x `h` (0 = nechat
+    /// na systemu), nejmensi `min_w` x `min_h` a strop v promile pracovni
+    /// plochy (0 = bez stropu). Pred prvnim commitem urci velikost pri
+    /// otevreni (bez probliknuti), pozdeji je to zadost o zmenu; kompozitor
+    /// odpovi `CONFIGURE` (maximalizovanemu oknu ji zapamatuje na obnoveni).
+    WindowSize { window: u32, w: u32, h: u32, min_w: u32, min_h: u32, max_frac_w: u16, max_frac_h: u16 },
 }
 
 /// Zprava kompozitor -> aplikace.
@@ -523,6 +540,19 @@ pub enum ServerMsg {
     /// Rezim barev systemu: aplikace kresli stejnym motivem (tokeny
     /// `design/tokens.toml`). Prijde po `WELCOME` a pri kazde zmene.
     Theme { mode: u8 },
+    /// Zprava schranky (`clipproto::ServerMsg`).
+    Clipboard { data: Vec<u8> },
+    /// Kontext okna (pro kazde okno zvlast): vystup, na kterem lezi, cela
+    /// obrazovka a pracovni plocha (bez listy) v logickych px, skala
+    /// vystupu v procentech a obnovovaci frekvence. Prijde pred prvnim
+    /// `CONFIGURE` a pri kazde zmene; `generation` roste s kazdou zmenou.
+    WindowContext { window: u32, generation: u32, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32 },
+}
+
+/// Data obalky schranky: delka a bajty (zkracena zprava = chyba).
+fn clip_r(r: &mut Reader<'_>) -> Result<Vec<u8>> {
+    let n = r.u32()? as usize;
+    Ok(r.take(n)?.to_vec())
 }
 
 fn u128w(w: &mut Writer, v: u128) {
@@ -651,6 +681,14 @@ impl ClientMsg {
                 w.u32(*window);
                 crate::menu::encode_menu(&mut w, items);
             }
+            Clipboard { data } => {
+                w = Writer::op(op::CLIPBOARD);
+                w.u32(data.len() as u32).bytes(data);
+            }
+            WindowSize { window, w: sw, h, min_w, min_h, max_frac_w, max_frac_h } => {
+                w = Writer::op(op::WINDOW_SIZE);
+                w.u32(*window).u32(*sw).u32(*h).u32(*min_w).u32(*min_h).u16(*max_frac_w).u16(*max_frac_h);
+            }
         }
         w.finish()
     }
@@ -751,6 +789,16 @@ impl ClientMsg {
                 ActionResult { call, ok, value, message }
             }
             op::MENU_UPDATE => MenuUpdate { window: r.u32()?, items: crate::menu::decode_menu(&mut r, len)? },
+            op::CLIPBOARD => Clipboard { data: clip_r(&mut r)? },
+            op::WINDOW_SIZE => WindowSize {
+                window: r.u32()?,
+                w: r.u32()?,
+                h: r.u32()?,
+                min_w: r.u32()?,
+                min_h: r.u32()?,
+                max_frac_w: r.u16()?,
+                max_frac_h: r.u16()?,
+            },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -864,6 +912,14 @@ impl ServerMsg {
                 w = Writer::op(op::THEME);
                 w.u8(*mode);
             }
+            Clipboard { data } => {
+                w = Writer::op(op::CLIPBOARD_EVENT);
+                w.u32(data.len() as u32).bytes(data);
+            }
+            WindowContext { window, generation, output, screen, work_area, scale, refresh_mhz } => {
+                w = Writer::op(op::WINDOW_CONTEXT);
+                w.u32(*window).u32(*generation).u32(*output).rect(screen).rect(work_area).u32(*scale).u32(*refresh_mhz);
+            }
         }
         w.finish()
     }
@@ -935,6 +991,16 @@ impl ServerMsg {
                 code: crate::Error::from_code(r.i32()? as i64).ok_or(crate::Error::InvalidArgs)?,
             },
             op::THEME => Theme { mode: r.u8()? },
+            op::CLIPBOARD_EVENT => Clipboard { data: clip_r(&mut r)? },
+            op::WINDOW_CONTEXT => WindowContext {
+                window: r.u32()?,
+                generation: r.u32()?,
+                output: r.u32()?,
+                screen: r.rect()?,
+                work_area: r.rect()?,
+                scale: r.u32()?,
+                refresh_mhz: r.u32()?,
+            },
             _ => return Err(crate::Error::NotSupported),
         };
         if !r.is_empty() {

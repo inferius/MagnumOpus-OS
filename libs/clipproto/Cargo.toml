@@ -1,0 +1,10 @@
+[package]
+name = "clipproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol schranky: nabidka formatu, liny prenos dat na akci uzivatele"
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }

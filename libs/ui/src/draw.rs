@@ -13,7 +13,7 @@ use crate::layout::ElemKind;
 
 /// Barva `c` s kryti `k`/255 pres pozadi `bg` (nedostupny prvek: cely
 /// prvek s kryti `opacity.disabled`).
-fn fade(c: u32, bg: u32, k: u32) -> u32 {
+pub(crate) fn fade(c: u32, bg: u32, k: u32) -> u32 {
     let m = |sh: u32| ((c >> sh & 0xFF) * k + (bg >> sh & 0xFF) * (255 - k)) / 255;
     0xFF00_0000 | m(16) << 16 | m(8) << 8 | m(0)
 }
@@ -49,7 +49,7 @@ pub fn progress_bar(c: &mut Canvas<'_>, r: Rect, value: u32, agent: bool, col: &
 }
 
 /// Ramecek fokusu kolem `r` (vne prvku, zaobleni o odsazeni vetsi).
-fn focus_ring(c: &mut Canvas<'_>, r: Rect, radius: u32, ring: u32, offset: u32, color: u32) {
+pub(crate) fn focus_ring(c: &mut Canvas<'_>, r: Rect, radius: u32, ring: u32, offset: u32, color: u32) {
     let e = ring + offset;
     let o = Rect::new(r.x - e as i32, r.y - e as i32, r.w + 2 * e, r.h + 2 * e);
     c.round_stroke(o, radius + e, ring, color);
@@ -111,45 +111,7 @@ impl<M: Clone> Ui<M> {
                     let b = r.y + f.baseline_in(s.size, r.h);
                     f.draw(c, r.x + (r.w as i32 - tw) / 2, b, text, s.size, fg);
                 }
-                ElemKind::TextInput { value, placeholder, secure, .. } => {
-                    let rad = th.radius.control;
-                    let edge = if st.error {
-                        col.danger
-                    } else if focused {
-                        col.accent
-                    } else {
-                        col.border_strong
-                    };
-                    c.round_fill_bordered(r, rad, col.surface, edge, if st.error { 2 } else { 1 });
-                    if focused {
-                        focus_ring(c, r, rad, ring, ring_off, col.focus);
-                    }
-                    let s = self.look.body();
-                    let inset = sp[4] as i32;
-                    let old = c.clip();
-                    c.set_clip(old.intersect(&Rect::new(r.x + inset / 2, r.y, r.w.saturating_sub(sp[4]), r.h)));
-                    let pos = self.text_positions(value, *secure);
-                    if *secure && !value.is_empty() {
-                        // Heslo: tecky (stejny krok pro kazdy znak).
-                        let d = self.dot_size();
-                        let y = r.y + (r.h as i32 - d as i32) / 2;
-                        for &px in &pos[..pos.len() - 1] {
-                            c.round_fill(Rect::new(r.x + inset + px + (self.dot_step() - d) as i32 / 2, y, d, d), d / 2, col.ink);
-                        }
-                    } else {
-                        let (txt, fg) = if value.is_empty() { (placeholder.as_str(), col.ink_muted) } else { (value.as_str(), col.ink) };
-                        let f = self.look.face(s);
-                        let b = r.y + f.baseline_in(s.size, r.h);
-                        f.draw(c, r.x + inset, b, txt, s.size, fg);
-                    }
-                    if focused {
-                        let ci = self.cursor.get(&e.key).copied().unwrap_or(0).min(pos.len() - 1);
-                        let cx = r.x + inset + pos[ci];
-                        let ch = s.line;
-                        c.fill(Rect::new(cx, r.y + (r.h as i32 - ch as i32) / 2, 2, ch), col.accent);
-                    }
-                    c.set_clip(old);
-                }
+                ElemKind::TextInput { .. } => self.draw_field(c, i, st),
                 ElemKind::Checkbox { text, checked, .. } => {
                     let bs = th.size.icon_m;
                     let b = Rect::new(r.x, r.y + (r.h as i32 - bs as i32) / 2, bs, bs);
@@ -203,6 +165,7 @@ impl<M: Clone> Ui<M> {
                     c.set_clip(old);
                 }
                 ElemKind::Progress { value } => progress_bar(c, r, *value, e.agent, col),
+                ElemKind::Table(_) => self.draw_table(c, i, st),
                 ElemKind::Group => {}
                 ElemKind::Scroll { .. } => {
                     // Obsah je vlastni vrstva; tady jen ram.

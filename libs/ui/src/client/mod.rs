@@ -17,6 +17,8 @@
 //! dostane [`Event::Restored`]. Rozpracovana transakce a odpoved na akci
 //! vrati `SERVICE_RESTARTED` ([`run`] pak okno nakresli znovu).
 
+mod clip;
+mod size;
 mod restore;
 
 use alloc::collections::BTreeMap;
@@ -54,6 +56,42 @@ pub enum Event {
     Restored { generation: u64 },
     /// Rezim barev systemu (prekreslit stejnym motivem).
     Theme(theme::Mode),
+    /// Zprava schranky; zpracuje ji [`Window::clipboard_event`].
+    Clipboard(clipproto::ServerMsg),
+    /// Novy kontext okna (obrazovka, pracovni plocha, skala): uz ulozeny
+    /// v [`Window::context`].
+    Context,
+}
+
+/// Kontext okna od kompozitoru (`WINDOW_CONTEXT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WinContext {
+    pub output: u32,
+    pub screen: Rect,
+    pub work_area: Rect,
+    pub scale: u32,
+    pub refresh_mhz: u32,
+    pub generation: u32,
+}
+
+impl WinContext {
+    fn from_msg(m: &ServerMsg) -> Option<Self> {
+        match *m {
+            ServerMsg::WindowContext { generation, output, screen, work_area, scale, refresh_mhz, .. } => {
+                Some(Self { output, screen, work_area, scale, refresh_mhz, generation })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Vysledek pozdravu: obrazovka, aplikace, prvni `CONFIGURE` (w, h,
+/// serial) a kontext okna, pokud prisel pred nim.
+struct Greeting {
+    screen: (u32, u32),
+    app: String,
+    size: (u32, u32, u32),
+    context: Option<WinContext>,
 }
 
 /// Kanal okna a listek k jeho obnove ze startovni zpravy aplikace.
@@ -133,6 +171,13 @@ pub struct Window {
     groups: BTreeMap<u32, Rect>,
     /// Platny stav okna pro obnovu po padu kompozitoru.
     replay: Replay,
+    /// Text, ktery okno zkopirovalo (posle ho na zadost schranky).
+    clip_owned: Option<String>,
+    clip_serial: u32,
+    /// Formaty ve schrance (zprava `Changed`).
+    clip_formats: Vec<String>,
+    /// Kontext okna (posledni `WINDOW_CONTEXT`).
+    pub context: Option<WinContext>,
 }
 
 /// Zapis, ktery pri plne fronte kanalu chvili pocka (kompozitor zrovna
@@ -160,8 +205,8 @@ fn read(ch: &Channel, deadline: Option<u64>) -> Result<ServerMsg> {
 
 /// Pozdrav a vytvoreni okna na (nove) instanci kompozitoru: `HELLO` ->
 /// `WELCOME`, pak `zbytek` zprav (vytvoreni okna, obnova), pak prvni
-/// `CONFIGURE`. Vraci (obrazovka, aplikace, (w, h, serial)).
-fn handshake(ch: &Channel, rest: &[(ClientMsg, Vec<Handle>)], deadline: Option<u64>) -> Result<((u32, u32), String, (u32, u32, u32))> {
+/// `CONFIGURE` (pred nim kontext okna).
+fn handshake(ch: &Channel, rest: &[(ClientMsg, Vec<Handle>)], deadline: Option<u64>) -> Result<Greeting> {
     ch.write(&ClientMsg::Hello { version: guiproto::VERSION }.encode(), Vec::new())?;
     let (screen, app) = loop {
         match read(ch, deadline)? {
@@ -174,11 +219,16 @@ fn handshake(ch: &Channel, rest: &[(ClientMsg, Vec<Handle>)], deadline: Option<u
         let dup = h.iter().map(|x| x.duplicate(None)).collect::<Result<Vec<_>>>()?;
         write(ch, &m.encode(), dup)?;
     }
+    let mut context = None;
     loop {
         match read(ch, deadline)? {
-            ServerMsg::Configure { w, h, serial, .. } => return Ok((screen, app, (w, h, serial))),
+            ServerMsg::Configure { w, h, serial, .. } => return Ok(Greeting { screen, app, size: (w, h, serial), context }),
             ServerMsg::Error { code, .. } => return Err(code),
-            _ => {}
+            m => {
+                if let Some(c) = WinContext::from_msg(&m) {
+                    context = Some(c);
+                }
+            }
         }
     }
 }
@@ -189,7 +239,8 @@ impl Window {
     pub fn open(link: impl Into<Link>, mode: Mode, w: u32, h: u32, title: &str) -> Result<Self> {
         let link = link.into();
         let create = ClientMsg::WindowCreate { window: 1, mode, w, h, title: title.into() };
-        let (screen, app, (cw, ch, serial)) = handshake(&link.window, &[(create.clone(), Vec::new())], None)?;
+        let g = handshake(&link.window, &[(create.clone(), Vec::new())], None)?;
+        let (screen, app, (cw, ch, serial), context) = (g.screen, g.app, g.size, g.context);
         let mut replay = Replay::new();
         replay.record(&create);
         replay.configured(1, cw, ch);
@@ -210,6 +261,10 @@ impl Window {
             a11y_ids: Default::default(),
             groups: BTreeMap::new(),
             replay,
+            clip_owned: None,
+            clip_serial: 0,
+            clip_formats: Vec::new(),
+            context,
         };
         win.send(ClientMsg::LayerCreate { layer: ROOT_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
         win.pairs.insert(ROOT_LAYER, Pair { bufs: [None, None], front: 1 });
@@ -322,6 +377,11 @@ impl Window {
                 _ => theme::Mode::Light,
             })),
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
+            ServerMsg::Clipboard { data } => clipproto::ServerMsg::decode(&data).ok().map(Event::Clipboard),
+            ServerMsg::WindowContext { generation, output, screen, work_area, scale, refresh_mhz, .. } => {
+                self.context = Some(WinContext { output, screen, work_area, scale, refresh_mhz, generation });
+                Some(Event::Context)
+            }
             ServerMsg::ActionInvoke { call, action, args, caller, synthetic } => Some(Event::Action { call, id: action, args, caller, synthetic }),
             _ => None,
         })
@@ -529,13 +589,14 @@ pub fn run<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u32) ->
 pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extra: Option<Channel>) -> Result<()> {
     let mut win = Window::open(link, mode, w, h, &app.title())?;
     let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
+    set_context(&win, &mut ui);
     let mut dirty = true;
     // Trasovani vstupu: klik, ktery zmenil rozhrani, ceka na nakresleni
     // a na snimek kompozitoru (cela cesta klik -> obraz).
     let mut drawn: Option<u64> = None;
     loop {
         if dirty && !win.frame_pending {
-            ui.rebuild(app.title(), app.view());
+            ui.refresh(&app);
             match render(&mut win, &mut ui) {
                 Ok(()) => {
                     dirty = false;
@@ -620,7 +681,16 @@ pub fn input_id() -> u64 {
 fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: Event, dirty: &mut bool) -> Result<bool> {
     match ev {
         Event::Input(r) => {
-            let resp = ui.event(r.event, r.mods);
+            let resp = ui.event_at(r.event, r.mods, Some(r.time));
+            // Schranka: Ctrl+C nabidne text, Ctrl+V si ho vyzada (data
+            // prijdou jako `Event::Clipboard`).
+            match &resp.clipboard {
+                Some(crate::event::Clip::Copy(t)) => win.copy_text(t.clone())?,
+                Some(crate::event::Clip::Paste) => {
+                    win.request_paste()?;
+                }
+                None => {}
+            }
             let changed = !resp.msgs.is_empty();
             // Trasovani vstupu (cil logu `vstup`): id = cas zaznamu z inputd.
             let id = r.time / 1000;
@@ -641,7 +711,7 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             // Dalsi udalost (rychle psani pred snimkem) musi videt novy
             // stav: rozvrhnout hned, kreslit az na snimek.
             if changed {
-                ui.rebuild(app.title(), app.view());
+                ui.refresh(app);
             }
             *dirty |= changed || resp.redraw;
             for (i, off) in &resp.scrolls {
@@ -655,18 +725,22 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             ui.resize(w, h);
             *dirty = true;
         }
+        Event::Context => {
+            set_context(win, ui);
+            *dirty = true;
+        }
         Event::Close => return Ok(false),
         Event::A11yAction { node, action, value } => {
             let resp = ui.a11y_action(node, action, &value);
             for m in resp.msgs {
                 app.update(m);
             }
-            ui.rebuild(app.title(), app.view());
+            ui.refresh(app);
             *dirty = true;
         }
         Event::Action { call, id, args, .. } => {
             let r = app.action(&id, &args);
-            ui.rebuild(app.title(), app.view());
+            ui.refresh(app);
             *dirty = true;
             // Volajici patril spadle instanci: odpoved nema kam, akce
             // probehla (stav aplikace je novy).
@@ -679,12 +753,37 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
         Event::Restored { .. } => *dirty = true,
         Event::Theme(m) => {
             ui.look.set_mode(m);
-            ui.rebuild(app.title(), app.view());
+            ui.refresh(app);
             *dirty = true;
         }
-        Event::Frame => {}
+        Event::Clipboard(m) => {
+            if let Some(text) = win.clipboard_event(m)? {
+                let resp = ui.paste(&text);
+                let changed = !resp.msgs.is_empty();
+                for m in resp.msgs {
+                    app.update(m);
+                }
+                if changed {
+                    ui.refresh(app);
+                }
+                *dirty |= changed || resp.redraw;
+            }
+        }
+        // Snimek: krok plynuleho rolovani tabulek.
+        Event::Frame => {
+            if ui.tick() {
+                *dirty = true;
+            }
+        }
     }
     Ok(true)
+}
+
+/// Prenese kontext okna do `Ui` (aplikace ho dostane ve `view`).
+fn set_context<M: Clone>(win: &Window, ui: &mut Ui<M>) {
+    if let Some(c) = win.context {
+        ui.set_context(c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation);
+    }
 }
 
 /// Vykresli rozhrani do vrstev okna a uplatni ho jednou transakci.

@@ -13,11 +13,16 @@
 
 extern crate alloc;
 
+pub mod context;
 pub mod draw;
 pub mod event;
+mod field;
 pub mod layout;
 pub mod look;
 pub mod node;
+pub mod scrollbar;
+mod table;
+pub mod text;
 
 #[cfg(feature = "os")]
 pub mod client;
@@ -38,6 +43,7 @@ pub use node::*;
 
 use layout::{ElemKind, Element};
 pub use look::Look;
+pub use context::{Context, SizeClass};
 
 /// Id uzlu s textem chyby prvku s id `id` (mimo rozsah id prvku).
 pub fn error_node(id: u32) -> u32 {
@@ -53,9 +59,9 @@ pub const SCROLL_BASE: u32 = 1000;
 /// Id uzlu pristupnosti okna; prvky maji stabilni id od 2 (podle klice).
 pub const WINDOW_NODE: u32 = 1;
 
-/// Nejvyssi id prvku (vrstvy obsahu se vejdou do u32, uzly chyb maji
-/// nejvyssi bit).
-const ID_MAX: u32 = (u32::MAX - SCROLL_BASE) / 2 - 1;
+/// Nejvyssi id prvku: nad nim jsou virtualni uzly tabulek (bit 30) a uzly
+/// chyb (bit 31); vrstvy obsahu `SCROLL_BASE + 2n` se vejdou do u32.
+const ID_MAX: u32 = 0x3FFF_FFFF;
 
 pub fn scroll_layers(id: u32) -> (u32, u32) {
     let g = SCROLL_BASE + 2 * id;
@@ -101,7 +107,9 @@ impl State {
 pub trait App {
     type Msg: Clone;
     fn title(&self) -> String;
-    fn view(&self) -> Node<Self::Msg>;
+    /// Rozhrani pro kontext okna `cx` (velikost, trida sirky: adaptivni
+    /// rozvrzeni podle sirky okna, ne obrazovky).
+    fn view(&self, cx: &Context) -> Node<Self::Msg>;
     fn update(&mut self, msg: Self::Msg);
     /// Akce z manifestu (volana shellem, asistentem, agentem). Argumenty
     /// uz overil kompozitor proti deklaraci.
@@ -133,6 +141,8 @@ pub struct Ui<M> {
     pub(crate) icons: gfx::icon::Icons,
     pub w: u32,
     pub h: u32,
+    /// Kontext okna (velikost, trida sirky, obrazovka).
+    pub(crate) cx: Context,
     pub(crate) elems: Vec<Element<M>>,
     /// Index prvku podle klice (po poslednim rozvrzeni).
     pub(crate) by_key: BTreeMap<Key, usize>,
@@ -147,8 +157,20 @@ pub struct Ui<M> {
     pub(crate) focus: Option<usize>,
     pub(crate) hover: Option<usize>,
     pub(crate) pressed: Option<usize>,
-    /// Kurzor v textovem poli (index znaku) podle klice prvku.
-    pub(crate) cursor: BTreeMap<Key, usize>,
+    /// Text, kurzor, vyber a historie textovych poli podle klice prvku.
+    pub(crate) edits: BTreeMap<Key, text::TextEdit>,
+    /// Posun obsahu textovych poli (x jednoradkove, y viceradkove).
+    pub(crate) tscroll: BTreeMap<Key, (i32, i32)>,
+    /// Posledni klik do pole (klic, cas, x, y, poradi) pro dvojklik.
+    pub(crate) last_click: Option<(Key, u64, i32, i32, u8)>,
+    /// Pole, ve kterem tah mysi vybira text.
+    pub(crate) drag_field: Option<Key>,
+    /// Pole, ktere pozadalo o vlozeni ze schranky (`Ui::paste`).
+    pub(crate) paste_target: Option<Key>,
+    /// Stav tabulek (posun, kurzor, kotva, sirky sloupcu) podle klice.
+    pub(crate) tables: BTreeMap<Key, table::TableState>,
+    /// Rozpracovany stisk v tabulce (radek, zahlavi, posuvnik).
+    pub(crate) table_press: Option<table::Press>,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -175,8 +197,11 @@ pub struct ScrollArea {
 
 impl<M: Clone> Ui<M> {
     pub fn new(fonts: Family, w: u32, h: u32) -> Self {
+        let look = Look::new(fonts, theme::Mode::Light);
+        let cx = Context::new(w, h, &look.theme.breakpoint);
         Self {
-            look: Look::new(fonts, theme::Mode::Light),
+            look,
+            cx,
             icons: gfx::icon::Icons::new(),
             w,
             h,
@@ -189,7 +214,13 @@ impl<M: Clone> Ui<M> {
             focus: None,
             hover: None,
             pressed: None,
-            cursor: BTreeMap::new(),
+            edits: BTreeMap::new(),
+            tscroll: BTreeMap::new(),
+            last_click: None,
+            drag_field: None,
+            paste_target: None,
+            tables: BTreeMap::new(),
+            table_press: None,
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -199,9 +230,30 @@ impl<M: Clone> Ui<M> {
         }
     }
 
-    pub fn resize(&mut self, w: u32, h: u32) {
+    /// Nova velikost okna. Vraci, zda se zmenila trida sirky (aplikace
+    /// muze zmenit rozvrzeni).
+    pub fn resize(&mut self, w: u32, h: u32) -> bool {
         self.w = w;
         self.h = h;
+        let bp = self.look.theme.breakpoint;
+        self.cx.resize(w, h, &bp)
+    }
+
+    /// Kontext okna (pro `App::view`).
+    pub fn context(&self) -> &Context {
+        &self.cx
+    }
+
+    /// Kontext od kompozitoru (`WINDOW_CONTEXT`).
+    pub fn set_context(&mut self, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32, generation: u32) {
+        let c = &mut self.cx;
+        (c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation) = (output, screen, work_area, scale, refresh_mhz, generation);
+    }
+
+    /// Znovu rozvrhne rozhrani aplikace pro aktualni kontext okna.
+    pub fn refresh<A: App<Msg = M>>(&mut self, app: &A) {
+        let v = app.view(&self.cx);
+        self.rebuild(app.title(), v);
     }
 
     /// Znovu rozvrhne rozhrani podle `view` (po kazde zmene stavu aplikace).
@@ -220,20 +272,9 @@ impl<M: Clone> Ui<M> {
         self.focus = focus.or_else(|| self.elems.iter().position(|e| e.focusable()));
         self.pressed = find(pk);
         self.key_pressed = find(kk);
-        // Kurzor nejvys na konec hodnoty; stav zmizelych prvku pryc.
-        let (by_key, elems) = (&self.by_key, &self.elems);
-        self.cursor.retain(|k, c| match by_key.get(k).map(|&i| &elems[i].kind) {
-            Some(ElemKind::TextInput { value, .. }) => {
-                *c = (*c).min(value.chars().count());
-                true
-            }
-            _ => false,
-        });
-        for e in &self.elems {
-            if let ElemKind::TextInput { value, .. } = &e.kind {
-                self.cursor.entry(e.key).or_insert(value.chars().count());
-            }
-        }
+        // Textova pole prevezmou hodnotu aplikace (kurzor a historie zustanou).
+        self.sync_fields();
+        self.sync_tables();
         // Posun nejvys do konce obsahu.
         let areas: Vec<(Key, i32)> = self.scroll_areas().iter().map(|a| (self.elems[a.index].key, (a.content_h as i32 - a.rect.h as i32).max(0))).collect();
         self.scroll.retain(|k, _| areas.iter().any(|(j, _)| j == k));
@@ -346,12 +387,17 @@ impl<M: Clone> Ui<M> {
                 // Agent i pro ctecku obrazovky (ne jen barvou).
                 ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
                 ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
+                ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
                 ElemKind::Group => (Role::Group, none(), none(), 0),
                 ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
             };
             let layer = if e.space == 0 { ROOT_LAYER } else { scroll_layers(self.elem_ids[e.space - 1]).1 };
             let id = self.elem_ids[i];
             out.push(A11yNode { id, parent, role, name, value, state: self.state(i).a11y_bits(), layer, bounds: e.rect, actions });
+            // Tabulka: zahlavi a viditelne radky.
+            if matches!(e.kind, ElemKind::Table(_)) {
+                self.table_a11y(i, id, layer, &mut out);
+            }
             // Text chyby jako podrizeny uzel pole (ctecka ho precte s polem).
             if let Some(err) = &e.error {
                 out.push(A11yNode { id: error_node(id), parent: id, role: Role::Label, name: err.clone(), value: none(), state: 0, layer, bounds: e.rect, actions: 0 });

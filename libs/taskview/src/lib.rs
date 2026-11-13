@@ -238,7 +238,7 @@ impl<B: Backend> App for TaskManager<B> {
         format!("Správce úloh ({run} běží)")
     }
 
-    fn view(&self) -> Node<Msg> {
+    fn view(&self, _cx: &ui::Context) -> Node<Msg> {
         let (run, agent) = self.list.running();
         let vis = self.visible();
         let sel = self.selected.and_then(|id| vis.iter().position(|t| t.id == id));

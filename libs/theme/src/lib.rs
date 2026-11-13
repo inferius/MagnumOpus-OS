@@ -217,6 +217,14 @@ impl Opacity {
 }
 uints!(Radii, "Zaobleni (px).", "radius", xs, badge, control, card, window, pill);
 uints!(
+    Breakpoints,
+    "Prahy trid sirky okna (logicke px) a hystereze pro adaptivni UI.",
+    "breakpoint",
+    medium,
+    expanded,
+    hysteresis,
+);
+uints!(
     Layers,
     "Vrstvy kompozitoru (poradi skladani).",
     "layer",
@@ -300,6 +308,7 @@ pub struct Theme {
     pub opacity: Opacity,
     pub motion: Motion,
     pub layer: Layers,
+    pub breakpoint: Breakpoints,
     pub font: Fonts,
 }
 
@@ -343,6 +352,7 @@ impl Tokens {
             opacity: Opacity::parse(t, mode)?,
             motion: Motion::parse(t)?,
             layer: Layers::parse(t)?,
+            breakpoint: Breakpoints::parse(t)?,
             font: Fonts {
                 ui: s(t, "font.ui")?.into(),
                 ui_fallback: s(t, "font.ui_fallback")?.into(),

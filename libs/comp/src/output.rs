@@ -25,6 +25,8 @@ impl Comp {
         }
         self.w = w;
         self.h = h;
+        // Okna se dozvi novou obrazovku a pracovni plochu pred `CONFIGURE`.
+        self.contexts_changed();
         self.input.px = self.input.px.clamp(0, w as i32 - 1);
         self.input.py = self.input.py.clamp(0, h as i32 - 1);
         let ids: alloc::vec::Vec<u32> = self.windows.keys().copied().collect();

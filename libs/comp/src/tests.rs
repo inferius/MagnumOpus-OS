@@ -17,9 +17,11 @@ use inputproto::{Action, Button, Event, Record};
 
 use crate::*;
 
+mod clipboard;
 mod gpu;
 mod greeter;
 mod secure;
+mod winsize;
 
 const W: u32 = 800;
 const H: u32 = 600;
@@ -72,7 +74,7 @@ impl T {
 
     fn client(&mut self, id: &str) -> ClientId {
         let cl = self.c.add_client(info(id, id), self.now);
-        self.msg(cl, ClientMsg::Hello { version: 1 });
+        self.msg(cl, ClientMsg::Hello { version: guiproto::VERSION });
         cl
     }
 
@@ -588,7 +590,7 @@ fn actions_validate_confirm_and_route() {
     let mut i = info("org.test.app", "Aplikace");
     i.actions = action::parse_manifest(MANIFEST).unwrap();
     let a = t.c.add_client(i, t.now);
-    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.msg(a, ClientMsg::Hello { version: guiproto::VERSION });
     t.out();
     t.c.caller_msg(5, "shell", false, CallerMsg::List, t.now);
     assert!(matches!(&t.out()[0], Out::Caller(5, CallerReply::Actions { list }) if list.len() == 2));
@@ -724,7 +726,7 @@ fn bad_client_messages_are_errors() {
     // Pred HELLO nic.
     t.msg(a, ClientMsg::WindowDestroy { window: 1 });
     assert!(matches!(client_msgs(&t.out(), a)[0], ServerMsg::Error { code: guiproto::Error::InvalidArgs, .. }));
-    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.msg(a, ClientMsg::Hello { version: guiproto::VERSION });
     t.out();
     t.msg(a, ClientMsg::WindowCreate { window: 1, mode: Mode::Standard, w: 100, h: 100, title: String::new() });
     // Rodic z jineho okna / neexistujici.
@@ -966,7 +968,7 @@ fn closed_caller_removes_its_confirmation() {
     let mut i = info("org.test.app", "Aplikace");
     i.actions = action::parse_manifest(MANIFEST).unwrap();
     let a = t.c.add_client(i, t.now);
-    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.msg(a, ClientMsg::Hello { version: guiproto::VERSION });
     t.c.caller_msg(5, "agent", false, CallerMsg::Call { call: 1, app: "org.test.app".into(), action: "file.delete".into(), args: vec![], synthetic: true }, t.now);
     assert!(t.c.dialogs.active().is_some());
     t.c.caller_gone(5);
@@ -1022,7 +1024,7 @@ fn app_exit_removes_its_confirmation() {
     let mut i = info("org.test.app", "Aplikace");
     i.actions = action::parse_manifest(MANIFEST).unwrap();
     let a = t.c.add_client(i, t.now);
-    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.msg(a, ClientMsg::Hello { version: guiproto::VERSION });
     t.c.caller_msg(5, "shell", false, CallerMsg::Call { call: 1, app: "org.test.app".into(), action: "file.delete".into(), args: vec![], synthetic: false }, t.now);
     assert!(t.c.dialogs.active().is_some());
     t.c.remove_client(a);
@@ -1096,7 +1098,7 @@ fn export_call(t: &mut T, path: &str) -> ClientId {
     let mut i = info("org.test.app", "Aplikace");
     i.actions = action::parse_manifest(EXPORT).unwrap();
     let a = t.c.add_client(i, t.now);
-    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.msg(a, ClientMsg::Hello { version: guiproto::VERSION });
     t.out();
     t.c.caller_msg(
         5,
@@ -1587,7 +1589,7 @@ fn command_palette_v2_app_menu_actions() {
     };
     ci.actions = vec![act("counter.add", false, true), act("notes.clear", true, false), act("tab.new", false, false)];
     let a = t.c.add_client(ci, t.now);
-    t.msg(a, ClientMsg::Hello { version: 1 });
+    t.msg(a, ClientMsg::Hello { version: guiproto::VERSION });
     t.window(a, Mode::Standard, RED);
     t.frame();
     let item = |label: &str, action: &str| MenuItem { label: label.into(), action: action.into(), ..Default::default() };

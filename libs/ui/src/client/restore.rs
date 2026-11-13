@@ -84,9 +84,14 @@ impl Window {
             msgs.push((m, handles));
         }
         let deadline = Some(libos::time::deadline_after(HANDSHAKE));
-        let (screen, app, (w, h, serial)) = self.conn.with_channel(|ch| handshake(ch, &msgs, deadline))??;
-        self.screen = screen;
-        self.app = app;
+        let g = self.conn.with_channel(|ch| handshake(ch, &msgs, deadline))??;
+        let (w, h, serial) = g.size;
+        self.screen = g.screen;
+        self.app = g.app;
+        if g.context.is_some() {
+            self.context = g.context;
+            self.queue.push(super::Event::Context);
+        }
         self.frame_pending = false;
         self.ack = None;
         self.reset_buffers();
