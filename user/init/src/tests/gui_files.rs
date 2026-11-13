@@ -174,6 +174,7 @@ fn run(s: &mut super::gui::State, f: &FsClient) -> TestResult {
         wait_tree(&s.inspect, w, "domov", |t| row(t, "a.txt").is_some())?;
         println!("init: test soubory: zpet do domova (3 polozky) za {} ms", (time::now() - t1) / 1_000_000);
     }
+    open_service(s, f)?;
     // Snimek vzhledu (xtask porizuje pres QMP po znacce).
     select(s, w, "a.txt")?;
     wait_tree(&s.inspect, w, "nahled pred snimkem", |t| has(t, Role::Label, "obsah souboru"))?;
@@ -258,4 +259,42 @@ pub fn copier_resume(startup: &Startup) -> TestResult {
     let _ = app.process.kill();
     f.delete_dataset(home).map_err(|e| fail("uklid", e))?;
     Ok(())
+}
+
+/// Sluzba "otevri cestu" (init, `libs/openwith`): slozka se otevre ve
+/// spravci souboru, soubor bez aplikace spravce ukaze, neexistujici cesta
+/// je chyba. Smycku supervisoru tu nahrazuje test (`open::poll`).
+fn open_service(s: &mut super::gui::State, f: &FsClient) -> TestResult {
+    use openwith::msg::{Reply, request};
+    const SESSION: u64 = 0xfe11;
+    let startup_less = |what: &str, path: &str| -> Result<Reply, String> {
+        let ep = crate::open::endpoint(SESSION).map_err(|e| fail("kanal sluzby", e))?;
+        let (mine, theirs) = Channel::create().map_err(|e| fail("kanal", e))?;
+        ep.write(&request(path), vec![theirs.into_handle()]).map_err(|e| fail(what, e))?;
+        let end = time::deadline_after(Duration::from_secs(20));
+        loop {
+            crate::open::poll_test();
+            if let Ok(m) = mine.try_read() {
+                return Reply::decode(&m.data).ok_or_else(|| alloc::format!("{what}: neplatna odpoved"));
+            }
+            check!(time::now() < end, alloc::format!("{what}: bez odpovedi"));
+            time::sleep(Duration::from_millis(20));
+        }
+    };
+    crate::open::test_session(SESSION, f.connect_as(UID, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("relace", e))?.1).map_err(|e| fail("relace sluzby", e))?;
+    crate::open::set_caller(s.gui.channel(b"actions system").map_err(|e| fail("kanal akci", e))?);
+    let w = wait_window(&s.inspect, "org.magnumopus.files")?.id;
+    let r = (|| -> TestResult {
+        let dir = startup_less("slozka", &alloc::format!("{HOME}/Projekty"))?;
+        check!(dir == Reply::Opened(String::from("org.magnumopus.files")), alloc::format!("slozka: {dir:?}"));
+        wait_tree(&s.inspect, w, "slozka otevrena sluzbou", |t| row(t, "plan.md").is_some())?;
+        let file = startup_less("soubor", &alloc::format!("{HOME}/a.txt"))?;
+        check!(file == Reply::Revealed(String::from("org.magnumopus.files")), alloc::format!("soubor: {file:?}"));
+        wait_tree(&s.inspect, w, "soubor ukazany ve spravci", |t| row(t, "a.txt").is_some_and(|n| n.state & guiproto::a11y::state::SELECTED != 0))?;
+        let none = startup_less("neexistujici", &alloc::format!("{HOME}/neni.txt"))?;
+        check!(matches!(&none, Reply::Failed(m) if m.contains("NOT_FOUND")), alloc::format!("neexistujici: {none:?}"));
+        Ok(())
+    })();
+    crate::open::close_session(SESSION);
+    r
 }

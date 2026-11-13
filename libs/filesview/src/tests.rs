@@ -188,6 +188,12 @@ fn navigate_into_and_up_reselects() {
     assert_eq!(m.nav.cur, "/home/jana");
     m.update(Msg::Place(1));
     assert_eq!(m.nav.cur, "/home/jana/Projekty");
+    // Soubor: Enter / dvojklik posle cestu sluzbe "otevri cestu".
+    let plan = m.listing.items.iter().find(|i| i.e.name == "plan.md").unwrap().e.oid;
+    m.update(Msg::Activate(plan));
+    assert_eq!(m.b.opened, vec![String::from("/home/jana/Projekty/plan.md")]);
+    assert_eq!(m.nav.cur, "/home/jana/Projekty", "soubor nemeni slozku");
+    assert!(m.status.starts_with("Otevírám plan.md"));
     assert!(m.show_path("/home/jana/Dokumenty/smlouva 10.txt").is_ok());
     assert_eq!((m.nav.cur.as_str(), m.sel.len()), ("/home/jana/Dokumenty", 1));
     assert!(m.show_path("/neni").is_err());

@@ -63,19 +63,29 @@ pub fn close(session: u64) {
 }
 
 /// Handly pro okno spravce souboru: relace FS uzivatele, kanal
-/// k `files-copy` (kdyz bezi) a domov v bloku parametru.
+/// k `files-copy` (kdyz bezi), domov v bloku parametru a kanal sluzby
+/// "otevri cestu". Bez `files-copy` se posle prazdny kanal (poradi handlu
+/// je pevne).
 pub fn window_handles(session: u64) -> Result<Vec<StartHandle>> {
     let fs = crate::session::connect(session)?;
     let mut hs = vec![StartHandle::user(fs.into_channel().into_handle())];
     let copiers = COPIERS.lock();
-    if let Some(c) = copiers.iter().find(|c| c.session == session) {
-        let (mine, theirs) = Channel::create()?;
-        match c.ctl.write(b"client", vec![mine.into_handle()]) {
-            Ok(()) => hs.push(StartHandle::user(theirs.into_handle())),
-            Err(e) => println!("init: kanal files-copy relace {session}: {e}"),
+    let (mine, theirs) = Channel::create()?;
+    match copiers.iter().find(|c| c.session == session) {
+        Some(c) => {
+            if let Err(e) = c.ctl.write(b"client", vec![mine.into_handle()]) {
+                println!("init: kanal files-copy relace {session}: {e}");
+            }
         }
+        None => drop(mine),
     }
+    hs.push(StartHandle::user(theirs.into_handle()));
     drop(copiers);
     hs.push(params(session)?);
+    // Sluzba "otevri cestu" (soubor v aplikaci podle typu).
+    match crate::open::endpoint(session) {
+        Ok(c) => hs.push(StartHandle::user(c.into_handle())),
+        Err(e) => println!("init: spravce souboru bez otevirani v aplikacich: {e}"),
+    }
     Ok(hs)
 }

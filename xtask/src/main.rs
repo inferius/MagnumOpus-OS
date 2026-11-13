@@ -605,6 +605,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "filesview",
             "--package",
+            "openwith",
+            "--package",
             "gfx",
             "--package",
             "font",

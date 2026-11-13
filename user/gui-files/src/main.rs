@@ -6,9 +6,10 @@
 //!
 //! Startovni zprava (kind USER): 1. kanal okna ke kompozitoru, 2. listek
 //! k supervisoru, 3. relace FS uzivatele (`CONNECT_AS` s celym stromem,
-//! prava rozhoduji), 4. volitelne kanal k `files-copy` (bez nej jde vse
-//! krome kopirovani a presunu mezi slozkami). Pracovni adresar v bloku
-//! parametru = domov uzivatele.
+//! prava rozhoduji), 4. kanal k `files-copy` (bez procesu zavreny: jde
+//! vse krome kopirovani a presunu mezi slozkami), 5. volitelne kanal
+//! sluzby "otevri cestu" (init, `libs/openwith`). Pracovni adresar
+//! v bloku parametru = domov uzivatele.
 
 #![no_std]
 #![no_main]
@@ -20,7 +21,6 @@ use alloc::vec::Vec;
 
 use fileops::proto::ClientMsg;
 use filesview::{Backend, FileManager, Result};
-use ui::App;
 use fsproto::FsClient;
 use fsproto::datasets::DatasetEntry;
 use fsproto::hist::{FileVersion, TrashEntry};
@@ -36,6 +36,8 @@ struct OsBackend {
     fs: FsClient,
     home: String,
     copier: Option<Channel>,
+    /// Kanal sluzby "otevri cestu" (init).
+    opener: Option<Channel>,
     zone: Option<Zone>,
 }
 
@@ -123,6 +125,14 @@ impl Backend for OsBackend {
         }
     }
 
+    fn open(&mut self, path: &str) -> bool {
+        let Some(o) = &self.opener else { return false };
+        // Odpoved se necte (sluzba muze volat akci tohoto okna); kanal
+        // pro ni se hned zahodi.
+        let Ok((_mine, theirs)) = Channel::create() else { return false };
+        o.write(&openwith::msg::request(path), alloc::vec![theirs.into_handle()]).is_ok()
+    }
+
     fn now(&self) -> Option<WallTime> {
         libos::time::wall()
     }
@@ -196,6 +206,7 @@ fn main(startup: Startup) -> i64 {
     };
     let fs = FsClient::new(Channel::from_handle(fs));
     let copier = handles.next().map(Channel::from_handle);
+    let opener = handles.next().map(Channel::from_handle);
     // Zapis pres druhy handle stejneho kanalu (cteni zustane run_with).
     let writer = match copier.as_ref().map(|c| c.handle().duplicate(None)) {
         Some(Ok(d)) => Some(Channel::from_handle(d)),
@@ -210,7 +221,7 @@ fn main(startup: Startup) -> i64 {
     };
     let zone = zone(&fs);
     let home = if home.is_empty() { String::from("/") } else { home };
-    let app = Timed(FileManager::new(OsBackend { fs, home, copier: writer, zone }));
+    let app = Timed(FileManager::new(OsBackend { fs, home, copier: writer, opener, zone }));
     match ui::client::run_with(link, app, Mode::Standard, 1120, 660, copier) {
         Ok(()) => 0,
         Err(e) => {

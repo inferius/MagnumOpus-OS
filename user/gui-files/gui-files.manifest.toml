@@ -11,6 +11,13 @@ memory = "96M"
 [window]
 instances = "multi"
 
+# Asociace typu (libs/openwith): slozky otevira spravce souboru; soubor,
+# ktery zadna aplikace neotevre, spravce ukaze (vybere ve slozce).
+[open]
+action = "files.show"
+folders = true
+reveal = true
+
 [[action]]
 id = "files.show"
 title = "Ukázat cestu ve správci souborů"

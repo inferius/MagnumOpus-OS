@@ -167,6 +167,8 @@ enum Item {
     Launcher,
     /// Udalosti relaci prihlasenych uzivatelu (`crate::session::EVENTS`).
     Sessions,
+    /// Sluzba "otevri cestu" (`crate::open`).
+    Open,
 }
 
 impl Default for Supervisor {
@@ -269,6 +271,9 @@ impl Supervisor {
         // registrovane bez procesu.
         self.restart_due(startup, &mut out);
         let devices = system::devices();
+        // Kanaly sluzby "otevri cestu" (duplikaty: zamek sluzby se nedrzi).
+        let mut open_hs = Vec::new();
+        crate::open::wait_handles(&mut open_hs);
         let mut items = Vec::new();
         let mut what = Vec::new();
         if self.devmgr_open
@@ -311,6 +316,10 @@ impl Supervisor {
             items.push((ev.handle(), Signals::READABLE));
             what.push(Item::Sessions);
         }
+        for (h, m) in &open_hs {
+            items.push((h, *m));
+            what.push(Item::Open);
+        }
         let wake = [deadline, self.next_due(), self.leases_due()]
             .into_iter()
             .flatten()
@@ -325,6 +334,7 @@ impl Supervisor {
         let mut power_ready = false;
         let mut launch_ready = false;
         let mut sessions_ready = false;
+        let mut open_ready = false;
         let mut terminals = terminals;
         for (k, item) in what.iter().enumerate() {
             let Some(sig) = observed.get(k).copied() else { break };
@@ -347,6 +357,7 @@ impl Supervisor {
                 Item::Power => power_ready = true,
                 Item::Launcher => launch_ready = sig.intersects(Signals::READABLE | Signals::PEER_CLOSED),
                 Item::Sessions => sessions_ready = sig.intersects(Signals::READABLE),
+                Item::Open => open_ready |= sig.intersects(Signals::READABLE | Signals::PEER_CLOSED),
                 Item::Service(_) | Item::Starting(_) | Item::Leases => {}
             }
         }
@@ -368,6 +379,9 @@ impl Supervisor {
         // Az bez zamku terminalu (konec relace ukoncuje jeji termd).
         if sessions_ready {
             crate::desktop::on_events(startup, self);
+        }
+        if open_ready {
+            crate::open::poll(startup, self);
         }
         crate::power::run_pending(self);
         self.start_timeouts();

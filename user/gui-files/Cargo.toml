@@ -16,5 +16,6 @@ guiproto = { path = "../../libs/guiproto" }
 fsproto = { path = "../../libs/fsproto" }
 fileops = { path = "../../libs/fileops" }
 filesview = { path = "../../libs/filesview" }
+openwith = { path = "../../libs/openwith" }
 installplan = { path = "../../libs/installplan" }
 ui = { path = "../../libs/ui", features = ["os"] }

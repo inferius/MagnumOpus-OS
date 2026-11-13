@@ -486,12 +486,13 @@ impl<B: Backend> FileManager<B> {
             }
             Msg::Activate(id) => {
                 let Some(it) = self.listing.by_id(id) else { return };
+                let p = join(&self.nav.cur, &it.e.name);
                 if it.is_dir() {
-                    let p = join(&self.nav.cur, &it.e.name);
                     self.go(p);
                 } else {
                     self.sel = alloc::vec![id];
                     self.update_preview();
+                    self.status = if self.b.open(&p) { format!("Otevírám {} v aplikaci podle typu.", name(&p)) } else { String::from("Otevírání v aplikacích není k dispozici.") };
                 }
             }
             Msg::Sort(c, asc) => {

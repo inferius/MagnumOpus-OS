@@ -38,3 +38,4 @@ agentproto = { path = "../../libs/agentproto" }
 wire = { path = "../../libs/wire" }
 taskproto = { path = "../../libs/taskproto" }
 fileops = { path = "../../libs/fileops" }
+openwith = { path = "../../libs/openwith" }

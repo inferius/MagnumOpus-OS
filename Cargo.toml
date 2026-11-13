@@ -48,6 +48,7 @@ members = [
     "libs/taskview",
     "libs/fileops",
     "libs/filesview",
+    "libs/openwith",
     "libs/gfx",
     "libs/bootsplash",
     "libs/font",

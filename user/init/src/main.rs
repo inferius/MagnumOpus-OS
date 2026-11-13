@@ -23,6 +23,7 @@ mod certs;
 mod desktop;
 mod display_native;
 mod files;
+mod open;
 mod splash;
 mod dns;
 mod fsd;

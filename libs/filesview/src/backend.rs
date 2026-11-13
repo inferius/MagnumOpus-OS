@@ -38,6 +38,11 @@ pub trait Backend {
     fn restore_version(&mut self, path: &str, snapshot: &str, dest: Option<&str>) -> Result<String>;
     /// Zprava pomocnemu procesu kopirovani.
     fn copier(&mut self, m: ClientMsg);
+    /// Otevrit soubor v aplikaci podle typu (sluzba "otevri cestu" v initu,
+    /// `libs/openwith`). Neceka se na odpoved: sluzba muze volat akci
+    /// tohoto okna (soubor bez aplikace ukaze spravce). `false` = sluzba
+    /// neni.
+    fn open(&mut self, path: &str) -> bool;
     fn now(&self) -> Option<WallTime>;
     fn zone(&self) -> Option<&Zone>;
 }
@@ -52,6 +57,8 @@ pub struct TestBackend {
     pub hidden_tree: Vec<String>,
     pub versions: BTreeMap<String, Vec<FileVersion>>,
     pub sent: Vec<ClientMsg>,
+    /// Cesty poslane sluzbe "otevri cestu".
+    pub opened: Vec<String>,
     pub now: Option<WallTime>,
     /// Kos: (dataset, polozka, obsah).
     pub trash: Vec<(String, TrashEntry, Vec<(String, Node)>)>,
@@ -233,6 +240,11 @@ impl Backend for TestBackend {
 
     fn copier(&mut self, m: ClientMsg) {
         self.sent.push(m);
+    }
+
+    fn open(&mut self, path: &str) -> bool {
+        self.opened.push(String::from(path));
+        true
     }
 
     fn now(&self) -> Option<WallTime> {
