@@ -795,7 +795,7 @@ by the keyboard, layout class, generation).
 | Navigation | gestures: swipe up for Home, swipe and hold for Overview, swipe from a side for Back; button navigation as an accessibility option |
 | Back | 1. closes a temporary layer, 2. steps back in the app, 3. previous app or Home; unsaved work is protected by file versioning |
 | Gesture conflicts | 16 px system band at the edges, app exclusion at most 200 px per side, recognition after 12 px and then the touch is cancelled in the app |
-| Layout | `compact` &lt; 600, `medium` 600 to 839, `expanded` &ge; 840 logical units, hysteresis 24; the keyboard does not change the class |
+| Layout | `compact` &lt; 600, `medium` 600 to 839, `expanded` &ge; 840 logical units, hysteresis 24; the keyboard does not change the class. Tokens `breakpoint.*`, in applications `cx.class` in `view` ([GUI: adaptive layout](gui.md#adaptive-layout-context-in-view)) |
 | Trusted elements | only the system draws the status bar; a double press of power shows "Who is on screen"; dialogs with the System band and phrase |
 | Keyboard | a system component in its own process; apps get text and composition; sensitive fields get a secure keyboard without suggestions and clipboard |
 | Agent | its own colour and icon, also on the lock screen and in the status bar; its text changes are underlined and can be undone |

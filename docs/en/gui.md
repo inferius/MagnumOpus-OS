@@ -275,6 +275,40 @@ from QEMU and real hardware are not measured yet. **[designed]**: show the
 old content at the fixed corner at once (without waiting for the ack) and
 damage only the changed band of the window and shadow.
 
+### Window context and requested size
+
+Every window gets **its own** context, nothing global (several outputs
+with different scales change nothing):
+
+```
+WINDOW_CONTEXT { window, generation, output, screen, work_area, scale, refresh_mhz }
+WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
+```
+
+- `WINDOW_CONTEXT` arrives **before the first `CONFIGURE`** and then on
+  every change (resolution, bar, later a move to another output) with a
+  higher `generation`. `work_area` is the screen without the bar; sizes
+  are logical px.
+- `WINDOW_SIZE` is the requested content size: natural `w` x `h`
+  (0 = leave it to the system), minimum `min_w` x `min_h` and a cap in
+  per mille of the work area (`max_frac_w = 850` = at most 85 % of the
+  width; 0 = no cap).
+  - **Before the first commit** it sets the size at opening: the
+    compositor answers with `CONFIGURE` and the window appears right away
+    in the correct size, with no second `CONFIGURE` and no flicker.
+    `Window::request_size` in `libs/ui` waits for the answer.
+  - **Later** it is a resize request (`CONFIGURE` as when dragging an
+    edge). A maximized or fullscreen window remembers it as its restored
+    size.
+- Terminal: `win.request_size(1040, 520, 850, 0)`, i.e. 1040 px but at
+  most 85 % of the work area width.
+- Protocol version 2 (`guiproto::VERSION`): compositor and applications
+  are built together, `HELLO` requires a match.
+
+**[implemented]** (tests `context_first_and_initial_size_without_flicker`,
+`request_size_later_and_while_maximized`, `resize_sends_new_context_generation`
+in `libs/comp`)
+
 ### Transactions across windows and applications
 
 For changes that must appear together in different windows (a terminal
@@ -1251,7 +1285,7 @@ One library for all applications, declarative in Rust:
 impl App for Notes {
     type Msg = Msg;
     fn title(&self) -> String { "Notes".into() }
-    fn view(&self) -> Node<Msg> {
+    fn view(&self, _cx: &Context) -> Node<Msg> {
         column([
             label("Notes").heading(),
             text_input(&self.title).placeholder("Title").on_change(Msg::Title),
@@ -1355,6 +1389,27 @@ column([
     button("Help").on_click(Msg::Help).skip_tab(true).key("help"),
     button("Sign in").on_click(Msg::SignIn).key("ok"),
 ])
+```
+
+### Adaptive layout (context in `view`)
+
+`App::view(&self, cx: &Context)` gets the context of **its own window**:
+size, width class `cx.class` (`Compact`, `Medium`, `Expanded`), screen,
+work area and scale. The application switches layout by the window width,
+not the screen. The thresholds are the `breakpoint.*` tokens in
+`design/tokens.toml` (compact &lt; 600, medium 600 to 839, expanded &ge;
+840, hysteresis 24: back to the smaller class only below the threshold
+minus 24 px), the same as in the [Mobile
+environment](appearance.md#mobile-environment-design-stage-a).
+`Ui::resize` returns whether the class changed.
+
+```rust
+fn view(&self, cx: &Context) -> Node<Msg> {
+    match cx.class {
+        SizeClass::Compact => self.list(),
+        _ => row([self.list().width(280), self.detail().grow()]),
+    }
+}
 ```
 
 ### Text fields and the clipboard

@@ -8,7 +8,7 @@ use crate::*;
 
 fn ui_for<B: Backend>(m: &TaskManager<B>) -> ui::Ui<Msg> {
     let mut u = ui::Ui::new(gfx_text(), 560, 620);
-    u.rebuild(m.title(), m.view());
+    u.refresh(m);
     u
 }
 
@@ -29,14 +29,14 @@ fn press<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, name: &str) ->
     for msg in r.msgs {
         m.update(msg);
     }
-    u.rebuild(m.title(), m.view());
+    u.refresh(m);
     true
 }
 
 fn select<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, prefix: &str) {
     let i = m.visible().iter().position(|t| TaskManager::<B>::row_text(t).contains(prefix)).unwrap();
     m.update(Msg::Select(i));
-    u.rebuild(m.title(), m.view());
+    u.refresh(m);
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn click_checkbox<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, name:
         for msg in r.msgs {
             m.update(msg);
         }
-        u.rebuild(m.title(), m.view());
+        u.refresh(m);
     }
 }
 

@@ -34,7 +34,7 @@ fn window(c: &mut Comp, id: &str, mode: Mode, now: u64) -> ClientId {
         },
         now,
     );
-    c.client_msg(cl, ClientMsg::Hello { version: 1 }, None, now);
+    c.client_msg(cl, ClientMsg::Hello { version: guiproto::VERSION }, None, now);
     c.client_msg(
         cl,
         ClientMsg::WindowCreate {

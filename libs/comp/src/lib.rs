@@ -37,6 +37,7 @@ pub mod output;
 pub mod render;
 pub mod scene;
 pub mod tooltip;
+pub mod winsize;
 pub mod services;
 pub mod style;
 
@@ -127,6 +128,8 @@ pub struct Comp {
     pub(crate) dialogs: dialog::Dialogs,
     /// Schranka (`clipboard.rs`).
     pub(crate) clipboard: clipboard::Clipboard,
+    /// Generace kontextu oken (`winsize.rs`), roste s kazdou zmenou obrazovky.
+    pub(crate) ctx_generation: u32,
     /// Prihlasovaci a zamykaci obrazovka.
     pub(crate) greeter: greeter::Greeter,
     pub(crate) services: services::Services,
@@ -204,6 +207,7 @@ impl Comp {
             input: input::InputState::new(w, h),
             dialogs: dialog::Dialogs::default(),
             clipboard: clipboard::Clipboard::default(),
+            ctx_generation: 1,
             greeter: greeter::Greeter::default(),
             services: services::Services::default(),
             token_source,

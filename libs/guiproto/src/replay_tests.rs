@@ -19,7 +19,7 @@ fn set(layer: u32, props: LayerProps) -> ClientMsg {
 /// Okno s korenovou vrstvou a bufferem 7, potvrzene.
 fn base() -> Replay {
     let mut r = Replay::new();
-    r.record(&ClientMsg::Hello { version: 1 });
+    r.record(&ClientMsg::Hello { version: crate::VERSION });
     r.record(&ClientMsg::WindowCreate { window: 1, mode: Mode::Standard, w: 300, h: 200, title: "Okno".into() });
     r.record(&ClientMsg::BufferCreate { buffer: 7, w: 300, h: 200, stride: 300 });
     r.record(&ClientMsg::LayerCreate { layer: 1, window: 1, parent: 0, kind: LayerKind::Buffer });

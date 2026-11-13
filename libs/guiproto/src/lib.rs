@@ -37,8 +37,8 @@ mod tests;
 pub use abi::{Error, Result};
 pub use wire::{Reader, Writer};
 
-/// Verze protokolu okna a displeje.
-pub const VERSION: u32 = 1;
+/// Verze protokolu okna a displeje (2: `WINDOW_SIZE`, `WINDOW_CONTEXT`).
+pub const VERSION: u32 = 2;
 
 /// Nejvetsi sirka nebo vyska bufferu, okna a vystupu v pixelech.
 pub const MAX_DIM: u32 = 16384;

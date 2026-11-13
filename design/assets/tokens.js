@@ -372,6 +372,11 @@ window.MO_TOKENS = {
   "hung_content": 0.45,
   "disabled": 0.5
  },
+ "breakpoint": {
+  "medium": 600,
+  "expanded": 840,
+  "hysteresis": 24
+ },
  "layer": {
   "desktop": 0,
   "window": 100,

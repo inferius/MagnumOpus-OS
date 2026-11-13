@@ -50,7 +50,7 @@ impl App for Demo {
         "Ukázka".into()
     }
 
-    fn view(&self) -> Node<Msg> {
+    fn view(&self, _cx: &Context) -> Node<Msg> {
         column([
             label(&format!("Počet: {}", self.count)).heading(),
             row([button("Přidat").on_click(Msg::Inc), button("Uložit").on_click(Msg::Save), spacer()]),
@@ -81,7 +81,7 @@ impl H {
     fn new() -> Self {
         let app = Demo::new();
         let mut ui = Ui::new(crate::Look::ui_fonts(), 420, 400);
-        ui.rebuild(app.title(), app.view());
+        ui.refresh(&app);
         Self { app, ui }
     }
 
@@ -89,7 +89,7 @@ impl H {
         for m in r.msgs.iter().cloned() {
             self.app.update(m);
         }
-        self.ui.rebuild(self.app.title(), self.app.view());
+        self.ui.refresh(&self.app);
         r
     }
 
@@ -252,7 +252,7 @@ fn render_window_snapshot() {
     h.app.important = true;
     h.app.count = 4;
     h.app.selected = Some(1);
-    h.ui.rebuild(h.app.title(), h.app.view());
+    h.ui.refresh(&h.app);
     let (w, hh) = (420u32, 400u32);
     let mut px = vec![0u32; (w * hh) as usize];
     let mut c = Canvas::new(&mut px, w, hh, w).unwrap();
@@ -319,6 +319,7 @@ fn enter_and_space_activate_on_release() {
     assert_eq!(h.app.count, 1, "pusteni mimo tlacitko akci zrusi");
 }
 
+mod context;
 mod field;
 mod keys;
 mod text;

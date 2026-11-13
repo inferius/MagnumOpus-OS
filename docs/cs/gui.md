@@ -264,6 +264,38 @@ a skutečného stroje zatím nejsou změřená. **[navrženo]**: ukázat starý
 obsah u pevného rohu hned (bez čekání na potvrzení) a poškozovat jen
 změněný pás okna a stínu.
 
+### Kontext okna a požadovaná velikost
+
+Každé okno dostane **svůj** kontext, nic globálního (víc výstupů s různou
+škálou nic nemění):
+
+```
+WINDOW_CONTEXT { window, generation, output, screen, work_area, scale, refresh_mhz }
+WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
+```
+
+- `WINDOW_CONTEXT` přijde **před prvním `CONFIGURE`** a pak při každé
+  změně (rozlišení, lišta, později přesun na jiný výstup) s vyšší
+  `generation`. `work_area` je obrazovka bez lišty, rozměry jsou logické px.
+- `WINDOW_SIZE` je požadovaná velikost obsahu: přirozená `w` x `h`
+  (0 = nechat na systému), nejmenší `min_w` x `min_h` a strop v promile
+  pracovní plochy (`max_frac_w = 850` = nejvýš 85 % šířky; 0 = bez stropu).
+  - **Před prvním commitem** určí velikost při otevření: kompozitor odpoví
+    `CONFIGURE` s výsledkem a okno se ukáže rovnou správně, bez druhého
+    `CONFIGURE` a bez probliknutí. `Window::request_size` v `libs/ui` na
+    odpověď počká.
+  - **Později** je to žádost o změnu (`CONFIGURE` jako při tažení okraje).
+    Maximalizované okno a okno na celé obrazovce si ji zapamatuje jako
+    velikost po obnovení.
+- Terminál: `win.request_size(1040, 520, 850, 0)`, tedy 1040 px, ale nejvýš
+  85 % šířky pracovní plochy.
+- Verze protokolu 2 (`guiproto::VERSION`): kompozitor a aplikace se
+  sestavují spolu, `HELLO` vyžaduje shodu.
+
+**[implementováno]** (testy `context_first_and_initial_size_without_flicker`,
+`request_size_later_and_while_maximized`, `resize_sends_new_context_generation`
+v `libs/comp`)
+
 ### Transakce přes víc oken a aplikací
 
 Pro změny, které se musí ukázat zároveň v různých oknech (okno terminálu
@@ -1203,7 +1235,7 @@ Jedna knihovna pro všechny aplikace, deklarativní v Rustu:
 impl App for Poznamky {
     type Msg = Msg;
     fn title(&self) -> String { "Poznámky".into() }
-    fn view(&self) -> Node<Msg> {
+    fn view(&self, _cx: &Context) -> Node<Msg> {
         column([
             label("Poznámky").heading(),
             text_input(&self.title).placeholder("Název").on_change(Msg::Title),
@@ -1305,6 +1337,26 @@ column([
     button("Nápověda").on_click(Msg::Napoveda).skip_tab(true).key("napoveda"),
     button("Přihlásit").on_click(Msg::Prihlasit).key("ok"),
 ])
+```
+
+### Adaptivní rozvržení (kontext ve `view`)
+
+`App::view(&self, cx: &Context)` dostane kontext **svého okna**: velikost,
+třídu šířky `cx.class` (`Compact`, `Medium`, `Expanded`), obrazovku,
+pracovní plochu a škálu. Aplikace přepíná rozvržení podle šířky okna, ne
+obrazovky. Prahy jsou tokeny `breakpoint.*` v `design/tokens.toml`
+(compact &lt; 600, medium 600 až 839, expanded &ge; 840, hystereze 24: zpět
+do menší třídy až pod prahem minus 24 px), stejné jako v [Mobilním
+prostředí](vzhled.md#mobilní-prostředí-návrh-etapa-a). `Ui::resize` vrací,
+zda se třída změnila.
+
+```rust
+fn view(&self, cx: &Context) -> Node<Msg> {
+    match cx.class {
+        SizeClass::Compact => self.seznam(),
+        _ => row([self.seznam().width(280), self.detail().grow()]),
+    }
+}
 ```
 
 ### Textová pole a schránka

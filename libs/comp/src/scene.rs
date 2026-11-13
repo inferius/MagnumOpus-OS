@@ -484,6 +484,7 @@ impl Comp {
             }
             ClientMsg::MenuUpdate { window, items } => self.menu_update(c, window, &items),
             ClientMsg::Clipboard { data } => self.clipboard_msg(c, &data, now),
+            ClientMsg::WindowSize { window, w, h, min_w, min_h, max_frac_w, max_frac_h } => self.window_size(c, window, w, h, (min_w, min_h), (max_frac_w, max_frac_h), now),
             _ => {}
         }
     }
@@ -496,18 +497,13 @@ impl Comp {
         let gid = self.next_window;
         self.next_window += 1;
         cl.windows.insert(local, gid);
-        let (sw, sh) = (self.w, self.h);
         // Okno se umisti do pracovni plochy (obrazovka bez listy); pod listu
-        // se dostane jen tazenim.
+        // se dostane jen tazenim. Presnou velikost muze aplikace urcit
+        // zpravou `WINDOW_SIZE` pred prvnim commitem (`winsize.rs`).
         let geo = self.style.geo();
         let work_h = self.work_area().h as i32;
         let top = if mode == Mode::Standard { (geo.title_h + geo.border) as i32 } else { geo.border as i32 };
-        let (w, h) = if mode == Mode::Fullscreen {
-            (sw, sh)
-        } else {
-            let max_h = (work_h - top - geo.border as i32).max(16) as u32;
-            (w.clamp(16, sw.saturating_sub(40).max(16)), h.clamp(16, max_h))
-        };
+        let (w, h) = self.fit_size(mode, w, h, 0, 0);
         // Kaskada od leveho horniho rohu, spodni okraj nad listou.
         let n = self.windows.len() as i32 % 8;
         let (x, y) = if mode == Mode::Fullscreen {
@@ -542,6 +538,8 @@ impl Comp {
         };
         self.windows.insert(gid, win);
         self.z.push(gid);
+        // Kontext okna pred prvnim `CONFIGURE`.
+        self.send_context(gid);
         self.send(
             c,
             ServerMsg::Configure {
@@ -833,5 +831,6 @@ pub(crate) fn op_of(m: &ClientMsg) -> u32 {
         ClientMsg::ActionResult { .. } => op::ACTION_RESULT,
         ClientMsg::MenuUpdate { .. } => op::MENU_UPDATE,
         ClientMsg::Clipboard { .. } => op::CLIPBOARD,
+        ClientMsg::WindowSize { .. } => op::WINDOW_SIZE,
     }
 }

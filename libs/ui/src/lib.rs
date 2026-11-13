@@ -13,6 +13,7 @@
 
 extern crate alloc;
 
+pub mod context;
 pub mod draw;
 pub mod event;
 mod field;
@@ -40,6 +41,7 @@ pub use node::*;
 
 use layout::{ElemKind, Element};
 pub use look::Look;
+pub use context::{Context, SizeClass};
 
 /// Id uzlu s textem chyby prvku s id `id` (mimo rozsah id prvku).
 pub fn error_node(id: u32) -> u32 {
@@ -103,7 +105,9 @@ impl State {
 pub trait App {
     type Msg: Clone;
     fn title(&self) -> String;
-    fn view(&self) -> Node<Self::Msg>;
+    /// Rozhrani pro kontext okna `cx` (velikost, trida sirky: adaptivni
+    /// rozvrzeni podle sirky okna, ne obrazovky).
+    fn view(&self, cx: &Context) -> Node<Self::Msg>;
     fn update(&mut self, msg: Self::Msg);
     /// Akce z manifestu (volana shellem, asistentem, agentem). Argumenty
     /// uz overil kompozitor proti deklaraci.
@@ -135,6 +139,8 @@ pub struct Ui<M> {
     pub(crate) icons: gfx::icon::Icons,
     pub w: u32,
     pub h: u32,
+    /// Kontext okna (velikost, trida sirky, obrazovka).
+    pub(crate) cx: Context,
     pub(crate) elems: Vec<Element<M>>,
     /// Index prvku podle klice (po poslednim rozvrzeni).
     pub(crate) by_key: BTreeMap<Key, usize>,
@@ -185,8 +191,11 @@ pub struct ScrollArea {
 
 impl<M: Clone> Ui<M> {
     pub fn new(fonts: Family, w: u32, h: u32) -> Self {
+        let look = Look::new(fonts, theme::Mode::Light);
+        let cx = Context::new(w, h, &look.theme.breakpoint);
         Self {
-            look: Look::new(fonts, theme::Mode::Light),
+            look,
+            cx,
             icons: gfx::icon::Icons::new(),
             w,
             h,
@@ -213,9 +222,30 @@ impl<M: Clone> Ui<M> {
         }
     }
 
-    pub fn resize(&mut self, w: u32, h: u32) {
+    /// Nova velikost okna. Vraci, zda se zmenila trida sirky (aplikace
+    /// muze zmenit rozvrzeni).
+    pub fn resize(&mut self, w: u32, h: u32) -> bool {
         self.w = w;
         self.h = h;
+        let bp = self.look.theme.breakpoint;
+        self.cx.resize(w, h, &bp)
+    }
+
+    /// Kontext okna (pro `App::view`).
+    pub fn context(&self) -> &Context {
+        &self.cx
+    }
+
+    /// Kontext od kompozitoru (`WINDOW_CONTEXT`).
+    pub fn set_context(&mut self, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32, generation: u32) {
+        let c = &mut self.cx;
+        (c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation) = (output, screen, work_area, scale, refresh_mhz, generation);
+    }
+
+    /// Znovu rozvrhne rozhrani aplikace pro aktualni kontext okna.
+    pub fn refresh<A: App<Msg = M>>(&mut self, app: &A) {
+        let v = app.view(&self.cx);
+        self.rebuild(app.title(), v);
     }
 
     /// Znovu rozvrhne rozhrani podle `view` (po kazde zmene stavu aplikace).
