@@ -7,6 +7,7 @@ mod aside_crash;
 mod aside_nested;
 mod aside_view;
 mod basic;
+mod commit_errors;
 mod commits;
 mod crash;
 mod crash3;
