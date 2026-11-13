@@ -27,6 +27,7 @@ mod dns;
 mod fsd;
 mod gui;
 mod input;
+mod install;
 mod logd;
 mod ntp;
 mod power;
@@ -48,6 +49,9 @@ fn main(startup: Startup) -> i64 {
     // Startovni obraz z loaderu: od ted ho kresli init (krok "jadro" hotov).
     splash::start(&startup);
     let mut sup = supervisor::SUPERVISOR.lock();
+    if let Ok(f) = libos::initfs::Initfs::open(&startup) {
+        install::STARTUP_INITFS.call_once(|| f);
+    }
     if let Some(r) = startup.root_resource.as_ref()
         && let Ok(h) = r.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::DIAG))
     {
@@ -156,6 +160,8 @@ fn main(startup: Startup) -> i64 {
                 }
                 Err(e) => println!("init: sluzbu vstupu nelze spustit: {e}"),
             }
+            // Pasmo a rozlozeni klavesnice z instalace (system.toml).
+            install::apply_settings(&devices);
             // Zvuk: audiod prevezme ovladace zvukovych karet (restart po
             // padu ridi supervisor, kanaly k ovladacum drzi init).
             if let Err(e) = audio::start(&startup, core::mem::take(&mut devices.audios), &mut sup) {

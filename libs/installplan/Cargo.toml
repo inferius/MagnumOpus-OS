@@ -7,3 +7,5 @@ description = "Instalator: kroky, volby disku, plan oddilu, nahled zmen, system.
 
 [dependencies]
 diskguard = { path = "../diskguard" }
+abi = { workspace = true }
+wire = { path = "../wire" }

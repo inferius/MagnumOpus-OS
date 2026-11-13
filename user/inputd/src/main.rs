@@ -216,6 +216,17 @@ fn command(svc: &mut Service, data: &[u8], mut handles: Vec<Handle>) -> (String,
                 Err(e) => err(e),
             }
         }
+        control::LAYOUTS => {
+            let list: Option<Vec<LayoutId>> = words.map(LayoutId::from_name).collect();
+            match list {
+                Some(l) if !l.is_empty() => {
+                    svc.set_layout(l[0]);
+                    svc.layouts = l;
+                    ok()
+                }
+                _ => err(Error::NotFound),
+            }
+        }
         control::LAYOUT => match words.next().and_then(LayoutId::from_name) {
             Some(id) => {
                 svc.set_layout(id);

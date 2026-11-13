@@ -13,6 +13,7 @@
 extern crate alloc;
 
 pub mod config;
+pub mod proto;
 
 use alloc::format;
 use alloc::string::String;

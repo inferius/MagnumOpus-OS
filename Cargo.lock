@@ -1454,6 +1454,7 @@ dependencies = [
  "fsproto",
  "guiproto",
  "inputproto",
+ "installplan",
  "libos",
  "manifest",
  "netproto",
@@ -1499,10 +1500,28 @@ name = "inputproto"
 version = "0.1.0"
 
 [[package]]
+name = "installd"
+version = "0.1.0"
+dependencies = [
+ "accountproto",
+ "accounts",
+ "blockproto",
+ "diskguard",
+ "fatw",
+ "fs",
+ "installplan",
+ "keymap",
+ "libos",
+ "rand_core 0.6.4",
+]
+
+[[package]]
 name = "installplan"
 version = "0.1.0"
 dependencies = [
+ "abi",
  "diskguard",
+ "wire",
 ]
 
 [[package]]

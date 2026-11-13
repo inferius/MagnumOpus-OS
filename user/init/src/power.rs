@@ -134,6 +134,15 @@ pub fn request_from_shell(data: &[u8], chan: Channel) -> Option<Channel> {
             return None;
         }
         // Balicek pro vyvojare sestavi sluzba logu.
+        // Instalator: kanal k installd jako handle odpovedi.
+        Ok(Request::OpenInstaller) => {
+            let r = crate::install::open();
+            let _ = match r {
+                Ok(ch) => chan.write(&Reply::Ok.encode(), alloc::vec![ch.into_handle()]),
+                Err(e) => chan.write(&Reply::Failed(e).encode(), Vec::new()),
+            };
+            return Some(chan);
+        }
         Ok(Request::Report) => match crate::logd::report() {
             Ok((path, preview)) => Reply::Text(alloc::format!("{path}
 {preview}")),

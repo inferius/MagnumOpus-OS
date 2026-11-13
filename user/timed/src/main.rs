@@ -52,7 +52,7 @@ fn main(mut startup: Startup) -> i64 {
     }
     let clock = Resource::from_handle(startup.handles.remove(0));
 
-    let settings = match channel.read(None) {
+    let mut settings = match channel.read(None) {
         Ok(msg) => match core::str::from_utf8(&msg.data).map(Settings::parse) {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
@@ -153,6 +153,18 @@ fn main(mut startup: Startup) -> i64 {
                 }
                 Some(_) => "err:prilis mnoho klientu".into(),
                 None => "err:chybi kanal".into(),
+            }
+        } else if let Some(rest) = msg.data.strip_prefix(b"settings ") {
+            // Nastaveni ze system.toml (init po pripojeni FS).
+            match core::str::from_utf8(rest) {
+                Ok(t) => match Settings::parse(t) {
+                    Ok(s) => {
+                        settings = s;
+                        "ok".into()
+                    }
+                    Err(e) => format!("err:{e}").into(),
+                },
+                Err(_) => "err:neni UTF-8".into(),
             }
         } else if msg.data == b"status" {
             format!("ok:{}", sync.status(&clock)).into()

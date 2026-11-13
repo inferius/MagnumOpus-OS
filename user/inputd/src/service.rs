@@ -1,6 +1,11 @@
 //! Stav sluzby: zdroje, vlastnik fokusu, bezpecna zkratka, opakovani
 //! klaves a doruceni udalosti.
 
+
+/// Levy Alt a levy Shift (evdev): prepinani rozlozeni.
+const KEY_LEFTALT: u16 = 56;
+const KEY_LEFTSHIFT: u16 = 42;
+
 use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
@@ -109,6 +114,10 @@ pub struct Service {
     /// neposle `release`.
     pub secure_mode: bool,
     pub layout: LayoutId,
+    /// Rozlozeni k prepinani (levy Alt + levy Shift); prazdne = jen `layout`.
+    pub layouts: Vec<LayoutId>,
+    /// Drzeny levy Alt a levy Shift (prepinani rozlozeni).
+    alt_shift: (bool, bool),
     pub repeat: Option<Repeat>,
     /// Zahozene zpravy (plna fronta prijemce).
     pub dropped: u32,
@@ -134,6 +143,8 @@ impl Service {
             secure: None,
             secure_mode: false,
             layout: LayoutId::Us,
+            layouts: Vec::new(),
+            alt_shift: (false, false),
             repeat: None,
             dropped: 0,
             next_id: 1,
@@ -397,7 +408,22 @@ impl Service {
             let mut repeat = None::<Option<Repeat>>;
             let current = self.repeat.as_ref().map(|r| (r.source, r.code));
             let trusted = self.sources[index].trust == DeviceTrust::Trusted;
+            let mut cycle = false;
+            let alt_shift = &mut self.alt_shift;
             self.sources[index].raw(e, layout, now, &mut out, |s, code, scancode, action| {
+                // Levy Alt + levy Shift = dalsi rozlozeni (stisk druhe z nich).
+                let down = action != Action::Release;
+                match code {
+                    KEY_LEFTALT => {
+                        cycle |= action == Action::Press && alt_shift.1;
+                        alt_shift.0 = down;
+                    }
+                    KEY_LEFTSHIFT => {
+                        cycle |= action == Action::Press && alt_shift.0;
+                        alt_shift.1 = down;
+                    }
+                    _ => {}
+                }
                 // Bezpecnou zkratku umi jen fyzicka klavesnice, ktera neni
                 // ve stavu overovani.
                 if !s.synthetic
@@ -427,6 +453,11 @@ impl Service {
             });
             if let Some(r) = repeat {
                 self.repeat = r;
+            }
+            if cycle && self.layouts.len() > 1 {
+                let i = self.layouts.iter().position(|&l| l == self.layout).map_or(0, |i| (i + 1) % self.layouts.len());
+                let next = self.layouts[i];
+                self.set_layout(next);
             }
             if sak {
                 // Co prislo pred zkratkou, patri dosavadnimu prijemci; vse

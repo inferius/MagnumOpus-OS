@@ -148,3 +148,49 @@ fn settings_roundtrip() {
     assert_eq!(Settings::parse("").keyboards, vec![String::from("cz")]);
     assert_eq!(s.time_settings(), "zone = Europe/Prague\nrtc = local\n");
 }
+
+#[test]
+fn proto_roundtrip() {
+    use super::proto::*;
+    let reqs = [
+        Request::Disks,
+        Request::Keyboards,
+        Request::Preview { disk: 2, mode: Mode::FreeSpace },
+        Request::Install {
+            disk: 1,
+            mode: Mode::WholeDisk,
+            confirm: String::from("QEMU NVMe Ctrl"),
+            settings: Settings::default().to_toml(),
+            account: AccountInput {
+                name: String::from("jan"),
+                display: String::from("Jan Novák"),
+                password: String::from("dlouhe heslo"),
+                pin: String::new(),
+            },
+        },
+    ];
+    for r in reqs {
+        assert_eq!(Request::decode(&r.encode()), Ok(r));
+    }
+    let d = disk(64 * GIB);
+    let replies = [
+        Reply::Failed(Error::AccessDenied, String::from("ne")),
+        Reply::Disks(vec![DiskEntry {
+            index: 1,
+            model: d.model.clone(),
+            bytes: d.bytes(),
+            live: false,
+            parts: vec![String::from("EFI (537 MB)")],
+            choices: choices(&d, None),
+        }]),
+        Reply::Keyboards(vec![KeyboardEntry { name: String::from("cz"), description: String::from("Česká"), rows: vec![String::from("qwertz")] }]),
+        Reply::Preview { text: String::from("x"), type_name: Some(String::from("disk")), other_os: true },
+        Reply::Preview { text: String::from("x"), type_name: None, other_os: false },
+        Reply::Progress { step: 3, text: String::from("FS") },
+        Reply::Done(String::from("hotovo")),
+    ];
+    for r in replies {
+        assert_eq!(Reply::decode(&r.encode()), Ok(r));
+    }
+    assert!(Request::decode(&[9, 0, 0, 0]).is_err());
+}

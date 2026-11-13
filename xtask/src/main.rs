@@ -738,6 +738,7 @@ const USER_PROGRAMS: &[&str] = &[
     "usb-storage",
     "logd",
     "logrescue",
+    "installd",
     "fsd",
     "timed",
     "termd",

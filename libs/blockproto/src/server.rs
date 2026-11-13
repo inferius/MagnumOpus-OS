@@ -218,7 +218,7 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
                 writable: disks.features(d) & feature::READ_ONLY == 0,
             };
             let (mine, theirs) = Channel::create()?;
-            let text = alloc::format!("block-raw {}", disks.model(d));
+            let text = alloc::format!("block-raw {} {}", ss, disks.model(d));
             bootstrap.write(text.as_bytes(), vec![theirs.into_handle()])?;
             clients.push(Client {
                 disk: d,
