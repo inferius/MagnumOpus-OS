@@ -197,13 +197,14 @@ impl Service {
         let t = libos::time::now();
         let mut ho = Handoff::new(w, h, p);
         if comp.background() == theme::Theme::builtin(theme::Mode::Light).color.bg {
-            ho.splash.set_backdrop(comp.backdrop().to_vec());
+            ho.splash.set_backdrop(comp.backdrop());
         }
+        let bg_us = (libos::time::now() - t) / 1000;
         if self.splash_login {
             ho.target = login_target(comp);
         }
         ho.first_frame(px, libos::time::now());
-        println!("compd: navazuji na startovni obraz (prstenec {p} promile), prvni snimek {} us", (libos::time::now() - t) / 1000);
+        println!("compd: navazuji na startovni obraz (prstenec {p} promile), prvni snimek {} us (pozadi plochy {bg_us} us)", (libos::time::now() - t) / 1000);
         self.splash = Some(ho);
         true
     }

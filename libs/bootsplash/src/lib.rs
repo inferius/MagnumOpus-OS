@@ -207,7 +207,7 @@ pub struct Splash {
     pub layout: Layout,
     pal: Palette,
     /// Teple pozadi (az kdyz je potreba: loader kresli jen cerne).
-    bg: Option<Vec<u32>>,
+    bg: Option<alloc::sync::Arc<Vec<u32>>>,
     symbol: Vec<art::Contour>,
     /// Logo v posledni pouzite velikosti (px).
     logo: (u32, Mask),
@@ -247,14 +247,14 @@ impl Splash {
                 gfx::backdrop::Radial { cx: 0.18, cy: 0.22, stop: 0.52, color: self.pal.wall_a },
                 gfx::backdrop::Radial { cx: 0.82, cy: 0.72, stop: 0.56, color: self.pal.wall_b },
             ];
-            self.bg = Some(gfx::backdrop::render(w, h, self.pal.bg, &layers));
+            self.bg = Some(alloc::sync::Arc::new(gfx::backdrop::render(w, h, self.pal.bg, &layers)));
         }
         self.bg.as_deref().unwrap()
     }
 
     /// Pozadi spocitane jinde (kompozitor ma stejny obraz plochy pro
     /// svetly motiv): ushetri vypocet. Jina velikost se ignoruje.
-    pub fn set_backdrop(&mut self, bg: Vec<u32>) {
+    pub fn set_backdrop(&mut self, bg: alloc::sync::Arc<Vec<u32>>) {
         if bg.len() == (self.layout.w * self.layout.h) as usize {
             self.bg = Some(bg);
         }
@@ -451,4 +451,4 @@ pub fn self_check() -> u64 {
 }
 
 /// [`self_check`] spocitany na hostiteli (test `self_check_matches`).
-pub const SELF_CHECK: u64 = 0xb28ae289c2f3f61a;
+pub const SELF_CHECK: u64 = 0x2f4f4ff3d0396d8a;

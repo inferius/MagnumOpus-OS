@@ -202,6 +202,9 @@ impl Service {
         }
         comp.redraw_all();
         self.comp = Some(comp);
+        // Lhuta odpovedi az od ted: prvni snimek (startovni obraz, pozadi
+        // plochy) se do cekani na ovladac nepocita.
+        let end = end.max(deadline());
         let req = Request::Attach { output, w, h, stride: w * 4 };
         screen.display.write(&req.encode(), alloc::vec![ro])?;
         let mut p = Pending::default();

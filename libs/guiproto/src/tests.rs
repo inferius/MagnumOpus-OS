@@ -582,6 +582,7 @@ fn status_roundtrip() {
         presented: 99,
         dialogs: 1,
         secure: true,
+        splash: true,
     };
     let mut t = String::new();
     s.format(&mut t).unwrap();

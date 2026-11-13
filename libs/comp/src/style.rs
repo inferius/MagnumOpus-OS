@@ -26,7 +26,8 @@ pub struct Style {
     pub icons: Icons,
     masks: BTreeMap<(u32, u32), ShadowMask>,
     /// Obraz plochy pro (sirka, vyska, rezim).
-    backdrop: Option<(u32, u32, Mode, Vec<u32>)>,
+    /// Sdileny (`Arc`): prechod ze startovni obrazovky ho pouziva bez kopie.
+    backdrop: Option<(u32, u32, Mode, alloc::sync::Arc<Vec<u32>>)>,
 }
 
 impl Style {
@@ -105,9 +106,15 @@ impl Style {
                 Radial { cx: 0.82, cy: 0.72, stop: 0.56, color: c.wall_b },
             ];
             let img = backdrop::render(w, h, c.bg, &layers);
-            self.backdrop = Some((w, h, mode, img));
+            self.backdrop = Some((w, h, mode, alloc::sync::Arc::new(img)));
         }
         &self.backdrop.as_ref().unwrap().3
+    }
+
+    /// Jako [`backdrop`](Self::backdrop), sdileny obraz (bez kopie).
+    pub fn backdrop_shared(&mut self, w: u32, h: u32) -> alloc::sync::Arc<Vec<u32>> {
+        self.backdrop(w, h);
+        self.backdrop.as_ref().unwrap().3.clone()
     }
 
     /// Nakresli vicevrstvy stin tvaru `shape` (vrstvy se nejdriv slozi do

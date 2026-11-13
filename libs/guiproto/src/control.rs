@@ -144,7 +144,8 @@ impl ConnectInfo {
 }
 
 /// Odpoved na `status`: `ok clients=1 windows=2 frames=10 presented=9
-/// dialogs=0 secure=0`.
+/// dialogs=0 secure=0 splash=0` (`splash=1` = bezi prechod ze startovni
+/// obrazovky).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Status {
     pub clients: u32,
@@ -153,14 +154,16 @@ pub struct Status {
     pub presented: u64,
     pub dialogs: u32,
     pub secure: bool,
+    /// Bezi prechod ze startovni obrazovky (`display ... splash=`).
+    pub splash: bool,
 }
 
 impl Status {
     pub fn format(&self, out: &mut impl core::fmt::Write) -> core::fmt::Result {
         write!(
             out,
-            "clients={} windows={} frames={} presented={} dialogs={} secure={}",
-            self.clients, self.windows, self.frames, self.presented, self.dialogs, self.secure as u8
+            "clients={} windows={} frames={} presented={} dialogs={} secure={} splash={}",
+            self.clients, self.windows, self.frames, self.presented, self.dialogs, self.secure as u8, self.splash as u8
         )
     }
 
@@ -176,6 +179,7 @@ impl Status {
                 "presented" => s.presented = v.parse().ok()?,
                 "dialogs" => s.dialogs = v.parse().ok()?,
                 "secure" => s.secure = v == "1",
+                "splash" => s.splash = v == "1",
                 _ => {}
             }
         }
