@@ -299,3 +299,20 @@ fn type_to_find() {
     let r = f.ui.a11y_action(row.id, actions::ACTIVATE, "");
     assert_eq!(r.msgs, vec![M::Sel(vec![1251])]);
 }
+
+/// Klavesy, ktere tabulka nespotrebuje (F2, Delete, Ctrl+C, Alt+sipka),
+/// dostane aplikace jako zkratky; sipky a Enter s `on_activate` ne.
+#[test]
+fn unconsumed_keys_go_to_app() {
+    let mut f = F::new(20);
+    f.click(1, 0, 1);
+    let un = |f: &mut F, code: u16, ch: Option<char>, mods: u16| f.ui.event(InputEvent::Key { code, action: 1, ch }, mods).unhandled_key;
+    assert_eq!(un(&mut f, KEY_F2, None, 0), Some((KEY_F2, None, 0)));
+    assert_eq!(un(&mut f, KEY_DELETE, None, 0), Some((KEY_DELETE, None, 0)));
+    assert_eq!(un(&mut f, KEY_C, Some('c'), CTRL), Some((KEY_C, Some('c'), CTRL)));
+    assert_eq!(un(&mut f, KEY_LEFT, None, inputproto::mods::ALT), Some((KEY_LEFT, None, inputproto::mods::ALT)));
+    assert_eq!(un(&mut f, KEY_DOWN, None, 0), None);
+    assert_eq!(un(&mut f, KEY_ENTER, None, 0), None);
+    // Pusteni klavesy se nehlasi.
+    assert_eq!(f.ui.event(InputEvent::Key { code: KEY_F2, action: 0, ch: None }, 0).unhandled_key, None);
+}

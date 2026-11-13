@@ -132,6 +132,43 @@ pub trait App {
         let _ = data;
         false
     }
+
+    /// Zprava z kanalu `index` (`client::run_channels`, poradi jako ve
+    /// vektoru kanalu). Vychozi: kanal 0 = [`App::external`].
+    fn external_from(&mut self, index: usize, data: &[u8]) -> bool {
+        if index == 0 { self.external(data) } else { false }
+    }
+
+    /// Klavesa, kterou nespotreboval prvek s fokusem (ani textove pole):
+    /// zkratky aplikace (F2, Delete, Enter mimo tabulku, Ctrl+C/X/V nad
+    /// tabulkou, Ctrl+N, Alt+sipky). `ch` = znak podle rozlozeni,
+    /// `mods` = `inputproto::mods`.
+    fn key(&self, code: u16, ch: Option<char>, mods: u16) -> Option<Self::Msg> {
+        let _ = (code, ch, mods);
+        None
+    }
+
+    /// Ucinky po `update` (schranka): klient je vybere po kazde davce zprav.
+    fn effects(&mut self) -> Vec<Effect> {
+        Vec::new()
+    }
+
+    /// Data vlozena ze schranky na zadost `Effect::Paste` (format, ktery
+    /// prisel). Vraci, zda se zmenil stav.
+    fn pasted(&mut self, format: &str, data: &[u8]) -> bool {
+        let _ = (format, data);
+        false
+    }
+}
+
+/// Ucinek aplikace, ktery provede klient (Elm: `update` jen meni stav).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Effect {
+    /// Kopirovat: data ve vic formatech (napr. `text/uri-list` a text).
+    /// Plati jen hned po fyzickem vstupu (Ctrl+C, polozka menu).
+    Copy { formats: Vec<(String, Vec<u8>)> },
+    /// Vlozit: prvni z formatu, ktery schranka ma; odpoved `App::pasted`.
+    Paste { formats: Vec<String> },
 }
 
 /// Stav rozhrani jednoho okna.
@@ -252,6 +289,11 @@ impl<M: Clone> Ui<M> {
     pub fn set_context(&mut self, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32, generation: u32) {
         let c = &mut self.cx;
         (c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation) = (output, screen, work_area, scale, refresh_mhz, generation);
+    }
+
+    /// Formaty ve schrance (klient po zprave `Changed`).
+    pub fn set_clipboard_formats(&mut self, f: Vec<String>) {
+        self.cx.clipboard = f;
     }
 
     /// Znovu rozvrhne rozhrani aplikace pro aktualni kontext okna.

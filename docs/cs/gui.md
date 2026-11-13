@@ -1427,7 +1427,7 @@ do vlastní služby beze změny zpráv.
 |---|---|
 | jen na akci uživatele | nabídnout i vyžádat smí jen okno s fokusem do 1 s po fyzickém stisku klávesy nebo tlačítka (ne umělý vstup); jedno gesto = jedno vložení |
 | líný přenos | vlastník nabídne formáty (`Offer`), data pošle až na žádost (`Send` -> `Data` -> `Deliver`) |
-| po skončení vlastníka | text si kompozitor vyžádá hned po nabídce a drží kopii; čekající vložení jiných formátů selže (`Denied: Unavailable`) |
+| po skončení vlastníka | všechny formáty si kompozitor vyžádá hned po nabídce a drží jejich kopii (do 256 KiB); čekající vložení selže (`Denied: Unavailable`) |
 | zabezpečená pole | knihovna heslo do schránky nedá; kompozitor navíc odmítne nabídku z okna, jehož uzel s fokusem je `password-input` |
 | velká data | do 60 KiB ve zprávě; větší přes sdílenou paměť (další krok) |
 | historie | zatím ne |
@@ -1504,6 +1504,27 @@ tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet př
 - **Posuvník** `ui::scrollbar::Scrollbar` (překryvný, šířka
   `size.scrollbar`, jezdec nejméně `hit_min / 2`) nezávisí na stromu
   prvků: geometrie, zásah, tažení a kreslení použije i terminál.
+
+### Zkratky, účinky a další kanály aplikace
+
+- **Zkratky:** klávesu, kterou nespotřeboval prvek s fokusem (ani textové
+  pole), dostane `App::key(code, ch, mods) -> Option<Msg>`. Tabulka tak
+  pustí aplikaci F2, Delete, Backspace, Ctrl+C/X/V, Ctrl+N nebo
+  Alt+šipky; šipky, mezerník a Enter s `on_activate` si nechá. Textové pole
+  si nechá vše, co edituje (Ctrl+C v poli kopíruje text). `ch` je znak
+  podle rozložení, takže Ctrl+Z na QWERTZ je klávesa se Z.
+- **Účinky:** `update` jen mění stav; schránku aplikace žádá přes
+  `App::effects() -> Vec<Effect>`, které klient vybere po každé dávce
+  zpráv: `Effect::Copy { formats }` (třeba `text/uri-list` a text zároveň)
+  a `Effect::Paste { formats }` (první formát, který schránka má; data
+  přijdou do `App::pasted(format, data)`). Co je ve schránce, ukazuje
+  `cx.clipboard` / `cx.clipboard_has(f)` ve `view` (položka Vložit).
+  Kompozitor drží kopii všech malých formátů (do 256 KiB), takže
+  zkopírované cesty přežijí zavření okna.
+- **Další kanály:** `client::run_channels(.., extras)` čte zprávy z více
+  kanálů (služba, pomocný proces kopírování) a předá je
+  `App::external_from(index, data)`; `run_with` s jedním kanálem dál
+  volá `App::external`.
 
 Běhové prostředí `ui::client` (vlastnost `os`) drží okno: dvojité buffery
 ve VMO, vrstvy, celý strom přístupnosti po každé změně, `COMMIT`

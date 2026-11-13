@@ -89,6 +89,8 @@ fn content_survives_owner_and_pending_paste_fails() {
     let m = got(&t.out(), a);
     let SMsg::Send { serial: keep, .. } = m[0] else { panic!() };
     clip(&mut t, a, CMsg::Data { serial: keep, data: b"kopie".to_vec() });
+    // Kompozitor si vyzadal i HTML (kopie po skonceni vlastnika); a na
+    // tu zadost neodpovi.
     // b pozada o HTML, a skonci driv, nez odpovi.
     press(&mut t, b);
     t.out();

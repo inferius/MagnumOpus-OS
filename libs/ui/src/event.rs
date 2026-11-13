@@ -27,6 +27,10 @@ pub struct Response<M> {
     pub trace: Vec<String>,
     /// Pozadavek na schranku (klient ho preda kompozitoru).
     pub clipboard: Option<Clip>,
+    /// Stisk klavesy, ktery zadny prvek nespotreboval (kod, znak,
+    /// modifikatory): klient ho preda aplikaci (`App::key`, zkratky jako
+    /// F2, Delete, Ctrl+N, Alt+sipky).
+    pub unhandled_key: Option<(u16, Option<char>, u16)>,
 }
 
 /// Pozadavek pole na schranku.
@@ -46,6 +50,7 @@ impl<M> Default for Response<M> {
             scrolls: Vec::new(),
             trace: Vec::new(),
             clipboard: None,
+            unhandled_key: None,
         }
     }
 }
@@ -181,7 +186,11 @@ impl<M: Clone> Ui<M> {
                 }
                 r.redraw = true;
             }
-            InputEvent::Key { code, action, ch } if action != 0 => self.key(code, ch, &mut r),
+            InputEvent::Key { code, action, ch } if action != 0 => {
+                if !self.key(code, ch, &mut r) {
+                    r.unhandled_key = Some((code, ch, mods_now));
+                }
+            }
             InputEvent::Text(ch) => {
                 if let Some((f, _)) = self.focused_field() {
                     self.field_insert(f, ch, &mut r);
@@ -238,18 +247,19 @@ impl<M: Clone> Ui<M> {
         }
     }
 
-    fn key(&mut self, code: u16, ch: Option<char>, r: &mut Response<M>) {
+    /// Klavesa pro prvek s fokusem; `false` = nespotrebovana (dostane ji
+    /// aplikace).
+    fn key(&mut self, code: u16, ch: Option<char>, r: &mut Response<M>) -> bool {
         if let Some((f, _)) = self.focused_field()
             && code != KEY_TAB
         {
-            self.field_key(f, code, ch, r);
-            return;
+            return self.field_key(f, code, ch, r);
         }
         if code == KEY_TAB {
             let n = self.elems.len();
             let order: Vec<usize> = (0..n).filter(|&i| self.elems[i].focusable() && !self.elems[i].skip_tab).collect();
             if order.is_empty() {
-                return;
+                return false;
             }
             let pos = self.focus.and_then(|f| order.iter().position(|&i| i == f));
             let back = self.mods & mods::SHIFT != 0;
@@ -260,11 +270,11 @@ impl<M: Clone> Ui<M> {
             };
             self.focus = Some(order[next]);
             r.redraw = true;
-            return;
+            return true;
         }
-        let Some(f) = self.focus else { return };
+        let Some(f) = self.focus else { return false };
         if self.control_key(f, code, r) {
-            return;
+            return true;
         }
         match &self.elems[f].kind {
             ElemKind::Button { .. } if code == KEY_ENTER || code == KEY_KPENTER || code == KEY_SPACE => self.activate(f, r),
@@ -286,9 +296,11 @@ impl<M: Clone> Ui<M> {
                 {
                     r.msgs.push(sel(k));
                 }
+                return next.is_some();
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     /// Popis prvku pro trasovani (druh a text, ne hodnota pole: muze byt

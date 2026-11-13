@@ -1481,7 +1481,7 @@ changing its messages.
 |---|---|
 | only on user action | only the focused window may offer or request, within 1 s of a physical key or button press (not synthetic input); one gesture = one paste |
 | lazy transfer | the owner offers formats (`Offer`), sends data only on request (`Send` -> `Data` -> `Deliver`) |
-| after the owner exits | the compositor fetches text right after the offer and keeps a copy; pending pastes of other formats fail (`Denied: Unavailable`) |
+| after the owner exits | the compositor fetches all formats right after the offer and keeps a copy (up to 256 KiB); pending pastes fail (`Denied: Unavailable`) |
 | secure fields | the library never puts a password on the clipboard; the compositor also refuses an offer from a window whose focused node is `password-input` |
 | large data | up to 60 KiB in the message; larger via shared memory (next step) |
 | history | not yet |
@@ -1563,6 +1563,29 @@ files cost the same as twenty. The application can share data through
   `size.scrollbar`, thumb at least `hit_min / 2`) does not depend on the
   element tree: the terminal uses its geometry, hit test, dragging and
   drawing too.
+
+### Shortcuts, effects and more application channels
+
+- **Shortcuts:** a key the focused element did not consume (not even a
+  text field) goes to `App::key(code, ch, mods) -> Option<Msg>`. A table
+  lets F2, Delete, Backspace, Ctrl+C/X/V, Ctrl+N or Alt+arrows through to
+  the application; it keeps arrows, space and Enter with `on_activate`. A
+  text field keeps everything it edits with (Ctrl+C in a field copies
+  text). `ch` is the character by layout, so Ctrl+Z on QWERTZ is the key
+  labeled Z.
+- **Effects:** `update` only changes state; the application asks for the
+  clipboard through `App::effects() -> Vec<Effect>`, which the client
+  drains after each batch of messages: `Effect::Copy { formats }` (e.g.
+  `text/uri-list` and text together) and `Effect::Paste { formats }` (the
+  first format the clipboard has; data arrives in `App::pasted(format,
+  data)`). What the clipboard holds is `cx.clipboard` /
+  `cx.clipboard_has(f)` in `view` (the Paste item). The compositor keeps a
+  copy of all small formats (up to 256 KiB), so copied paths survive the
+  window closing.
+- **More channels:** `client::run_channels(.., extras)` reads messages
+  from several channels (a service, a copy helper process) and passes them
+  to `App::external_from(index, data)`; `run_with` with one channel still
+  calls `App::external`.
 
 The `ui::client` runtime (feature `os`) keeps the window: double buffers
 in VMOs, layers, the whole accessibility tree after every change,
