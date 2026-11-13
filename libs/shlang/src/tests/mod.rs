@@ -12,6 +12,7 @@ mod fs;
 mod highlight;
 mod host;
 mod misc;
+mod missing;
 mod power;
 mod regress;
 mod roundtrip;

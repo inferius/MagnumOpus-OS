@@ -381,7 +381,8 @@ pole: `where mtime < now() - 1y`.
 |---|---|---|
 | `int`, `float` | `42`, `1.5` | celé číslo se v aritmetice s desetinným převede (jediný automatický převod) |
 | `size` | `100MB` | velikost se nesčítá ani neporovnává s číslem: `size > 100` je chyba s radou `100B` |
-| `duration` | `30s`, `1h` | |
+| `duration` | `30s`, `1h`, `1h30m` | |
+| `frequency`, `percent` | `2.4GHz`, `50%` | veličiny z tabulky jednotek (viz Čísla) |
 | `time` | `now()` | `time - duration` = `time`, `time - time` = `duration` |
 | `text` | `"abc"` | |
 | `bytes` | `open f` | **bajtový proud**, jiný typ než text a záznamy |
@@ -389,7 +390,17 @@ pole: `where mtime < now() - 1y`.
 | `closure` | `x => x * 2` | zachytí kopie použitých proměnných |
 | `error` | `e` v `try ... else e => ...` | pole `code`, `message`, `hint`, `cause` |
 | `null`, `nothing` | | `nothing` = příkaz nic nevrátil |
+| chybějící hodnota | `size` cizí složky | `null` s důvodem: **skrytá** (chybí právo) nebo **nedostupná** (zdroj ji nevede); viz níže |
 
+- **Chybějící hodnota** (`Value::Missing`) se chová jako `null`: rovná se
+  `null`, porovnání `<` / `>` je `false` (`where size > 1MB` ji vynechá
+  místo chyby), při řazení jde na začátek. Terminál ji ukáže jako „—“
+  a v patičce tabulky vysvětlí důvod. Prázdná složka není chybějící
+  hodnota: má 0 B, 0 souborů a 0 složek. Dnes shell stav odhaduje
+  z odpovědi fsd (složka bez práva spravovat = souhrn skrytý, nulový čas =
+  nedostupný) **[implementováno]**; přesné příznaky ve fsproto (masky
+  `known` / `hidden` u `Stat` a `LIST_STAT_PAGE`) jsou zadání pro vlákno
+  FS **[navrženo]**.
 - **Žádné skryté převody.** Mezi bajty, textem a záznamy se převádí
   jen výslovně: `from json`, `from text`, `lines`, `to text`, `to json`.
   `open data.json | where ...` je chyba s radou `from json`.

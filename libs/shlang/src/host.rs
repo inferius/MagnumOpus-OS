@@ -42,12 +42,24 @@ pub struct Meta {
     /// U slozky obsah podstromu (soubory, slozky bez sebe), kdyz ho FS
     /// zna; `size` je pak logicka velikost podstromu (soucet souboru).
     pub tree: Option<(u64, u64)>,
+    /// Hodnoty, ktere FS zna, ale relace je nesmi videt ([`hidden`]); ostatni
+    /// chybejici (`None`) jsou nedostupne.
+    pub hidden: u8,
+}
+
+/// Bity `Meta::hidden`: skryta hodnota (chybi pravo), ne nedostupna.
+pub mod hidden {
+    /// Velikost (u slozky souhrn podstromu).
+    pub const SIZE: u8 = 1;
+    /// Pocet souboru a slozek v podstromu.
+    pub const TREE: u8 = 2;
+    pub const MTIME: u8 = 4;
 }
 
 impl Meta {
     /// Polozka jen s druhem a velikosti (bez casu a prav).
     pub const fn basic(kind: NodeKind, size: u64) -> Self {
-        Self { kind, size, mtime: None, access: None, dataset: false, tree: None }
+        Self { kind, size, mtime: None, access: None, dataset: false, tree: None, hidden: 0 }
     }
 }
 

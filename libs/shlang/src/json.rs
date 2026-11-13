@@ -224,7 +224,7 @@ fn indent(out: &mut String, n: usize) {
 
 fn write(out: &mut String, v: &Value, pretty: bool, lvl: usize) -> Result<(), ShError> {
     match v {
-        Value::Nothing | Value::Null => out.push_str("null"),
+        Value::Nothing | Value::Null | Value::Missing(_) => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         Value::Int(i) | Value::Size(i) | Value::Duration(i) => out.push_str(&alloc::format!("{i}")),
         Value::Float(f) => {

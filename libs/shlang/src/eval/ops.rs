@@ -111,6 +111,11 @@ pub fn binary(op: BinOp, a: Value, b: Value) -> Result<Value, ShError> {
         BinOp::Eq => return equal(&a, &b).map(Bool),
         BinOp::Ne => return equal(&a, &b).map(|e| Bool(!e)),
         BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+            // Chybejici hodnota (skryta, nedostupna) neni vetsi ani mensi:
+            // `where size > 1MB` ji vynecha, misto chyby.
+            if matches!(a, Missing(_)) || matches!(b, Missing(_)) {
+                return Ok(Bool(false));
+            }
             let o = compare(&a, &b)?;
             return Ok(Bool(match op {
                 BinOp::Lt => o == Ordering::Less,
@@ -261,8 +266,8 @@ fn percent_of(r: f64, v: &Value) -> Option<Value> {
 pub fn equal(a: &Value, b: &Value) -> Result<bool, ShError> {
     use Value::*;
     Ok(match (a, b) {
-        (Null, Null) => true,
-        (Null, _) | (_, Null) => false,
+        (Null | Missing(_), Null | Missing(_)) => true,
+        (Null | Missing(_), _) | (_, Null | Missing(_)) => false,
         (Int(x), Float(y)) | (Float(y), Int(x)) => (*x as f64) == *y,
         (Quantity(x), Quantity(y)) if x.dim != y.dim => return Err(type_err("==", a, b)),
         (List(x), List(y)) => {
@@ -293,7 +298,10 @@ pub fn compare(a: &Value, b: &Value) -> Result<Ordering, ShError> {
         (Quantity(x), Quantity(y)) if x.dim == y.dim => x.value.partial_cmp(&y.value).unwrap_or(Ordering::Equal),
         (Str(x), Str(y)) => x.cmp(y),
         (Bool(x), Bool(y)) => x.cmp(y),
-        (Null, Null) => Ordering::Equal,
+        (Null | Missing(_), Null | Missing(_)) => Ordering::Equal,
+        // Razeni: chybejici hodnoty na zacatek (jako null).
+        (Null | Missing(_), _) => Ordering::Less,
+        (_, Null | Missing(_)) => Ordering::Greater,
         _ => return Err(type_err("porovnání", a, b)),
     };
     Ok(o)

@@ -1149,6 +1149,13 @@ impl App {
         }
         let more = tv.view.len().saturating_sub(tv.top + height);
         let mut foot = alloc::format!("  {}", tv.status());
+        // Vysvetlivka k pomlckam: proc hodnota chybi (skryta, nedostupna).
+        for why in [shlang::value::Why::Hidden, shlang::value::Why::Unavailable] {
+            let seen = tv.visible(height).any(|(_, r)| tv.cols.iter().any(|c| r.field(c) == Some(Value::Missing(why))));
+            if seen {
+                foot.push_str(&alloc::format!(" · \u{2014} {}", why.text_cs()));
+            }
+        }
         if more > 0 {
             foot.push_str(&alloc::format!(" · další {more} (PgUp/PgDn)"));
         }
@@ -1236,7 +1243,7 @@ fn cell_style(col: &str, v: &Value, rec: &Value, t: &Theme, now: Option<i64>) ->
         Value::Time(m) => now.map(|n| Style::fg(t.scale[render::age_level(*m, n)])),
         Value::Bool(true) => Some(Style::fg(t.ui.ok)),
         Value::Bool(false) | Value::Error(_) => Some(Style::fg(t.ui.err)),
-        Value::Null | Value::Nothing => Some(Style::fg(t.ui.muted)),
+        Value::Null | Value::Nothing | Value::Missing(_) => Some(Style::fg(t.ui.muted)),
         _ if col == "name" => render::file_class(rec, t).map(|c| t.file(c)),
         _ if matches!(col, "kind" | "ext" | "access" | "dataset") => Some(Style::fg(t.ui.muted)),
         _ => None,
