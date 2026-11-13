@@ -81,6 +81,10 @@ pub struct Palette {
     /// Vybrana polozka (index mezi spustitelnymi radky).
     pub sel: usize,
     pub scope: Scope,
+    /// Spoustec (varianta D, design/spoustec.html): vlevo nad listou,
+    /// prazdny dotaz = sekce Bezi, Aplikace, System; psani = stejne
+    /// vysledky jako paleta.
+    pub launcher: bool,
 }
 
 /// Zadost palety, kterou vyridi sluzba (init): vypnout, restartovat.
@@ -299,7 +303,13 @@ impl Comp {
             v.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
             v.into_iter().map(|x| x.3).collect()
         };
-        if q.is_empty() {
+        if q.is_empty() && p.launcher {
+            let running: Vec<Item> = apps.iter().filter(|i| matches!(i, Item::App(id, _) if !self.app_windows(id).is_empty())).cloned().collect();
+            let rest: Vec<Item> = apps.iter().filter(|i| !running.contains(i)).cloned().collect();
+            sections.push((Row::Header(String::from("Běží"), "window", false), running));
+            sections.push((Row::Header(String::from("Aplikace"), "apps", false), rest));
+            sections.push((sys_head.clone(), system.clone()));
+        } else if q.is_empty() {
             match scope {
                 Scope::All => {
                     let all: Vec<Item> = app_items.iter().chain(&windows).chain(&apps).chain(&system).cloned().collect();
@@ -380,6 +390,14 @@ impl Comp {
         let w = t.size.dialog_w.max(520).min(self.w.saturating_sub(2 * t.space[5]));
         let rows = self.palette_rows().len().clamp(1, ROWS) as u32;
         let h = self.palette_input_h() + rows * self.palette_row_h() + 3 * t.space[3];
+        if self.palette.as_ref().is_some_and(|p| p.launcher) {
+            // Spoustec: vlevo nad listou (u tlacitka mrizky), sirka podle
+            // tokenu `size.launcher_w`.
+            let w = t.size.launcher_w.min(self.w.saturating_sub(2 * t.space[3]));
+            let bottom = self.panel_rect().y - t.space[3] as i32;
+            let h = h.min((bottom - t.space[3] as i32).max(1) as u32);
+            return Some(Rect::new(self.panel_rect().x, bottom - h as i32, w, h));
+        }
         Some(Rect::new((self.w as i32 - w as i32) / 2, (self.h / 8) as i32, w, h))
     }
 

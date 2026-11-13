@@ -1504,14 +1504,15 @@ fn bar_launches_closed_apps_and_activates_running() {
     t.c.minimize(g);
     let l = t.c.bar_layout().launcher;
     t.click(l.x + 4, l.y + 4);
-    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Apps));
-    let f = t.c.flyout_rect().unwrap();
-    let th = t.c.style.theme.clone();
-    let row1 = f.y + (th.space[4] + th.text.body_strong.line + th.space[2] + th.text.body.line + th.space[2] + 2) as i32;
-    t.click(f.x + 8, row1);
+    // Spoustec (varianta D): sekce Bezi s Ukazkou na prvnim radku.
+    assert!(t.c.palette.as_ref().is_some_and(|p| p.launcher));
+    let f = t.c.palette_rect().unwrap();
+    assert!(f.x <= l.x + 4 && f.bottom() as i32 <= t.c.panel_rect().y, "nad listou vlevo");
+    let row1 = (f.y..f.bottom() as i32).find(|&y| t.c.palette_row_at(y) == Some(1)).unwrap();
+    t.click(f.x + 8, row1 + 4);
     assert!(t.c.take_launch_requests().is_empty(), "bezici se nespousti znovu");
     assert!(!t.c.windows[&g].minimized && t.c.focus == Some(g), "aktivovano");
-    assert_eq!(t.c.flyout, None);
+    assert!(t.c.palette.is_none());
 }
 
 /// Klavesa s modifikatory (fyzicka).
@@ -1822,7 +1823,7 @@ fn system_controls_act_on_release_over_same_element() {
     let l = t.c.bar_layout().launcher;
     t.move_to(l.x + 4, l.y + 4);
     left(&mut t, true);
-    assert_eq!(t.c.flyout, None, "panel az pri pusteni");
+    assert!(t.c.palette.is_none(), "spoustec az pri pusteni");
     left(&mut t, false);
-    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Apps));
+    assert!(t.c.palette.as_ref().is_some_and(|p| p.launcher));
 }

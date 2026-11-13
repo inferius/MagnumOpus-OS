@@ -879,7 +879,10 @@ impl Comp {
             if let Some(f) = icon {
                 self.toggle_flyout(f);
             } else if bar.launcher.contains(px, py) {
-                self.toggle_flyout(crate::flyout::Flyout::Apps);
+                // Spoustec (varianta D): tataz paleta, jinde a jinak prazdna.
+                self.set_flyout(None);
+                let open = self.palette.as_ref().is_some_and(|p| p.launcher);
+                self.set_palette((!open).then(|| crate::palette::Palette { launcher: true, ..Default::default() }));
             } else if let Some((i, _)) = bar.launch.iter().find(|(_, r)| r.contains(px, py)) {
                 self.set_flyout(None);
                 if let Some((id, _)) = self.launchable.get(*i).cloned() {
