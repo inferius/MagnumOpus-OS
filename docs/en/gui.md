@@ -688,6 +688,41 @@ same way as an `actions` call (argument check, confirmation for
 [Command palette rules](#command-palette-rules). **[implemented]** Lock and
 fullscreen are added once they exist in the system. **[designed]**
 
+### Palette and launcher on the component library
+
+The compositor draws the command palette and the launcher with `libs/ui`
+(the core without OS; module `libs/comp/src/sysui.rs`). The search field
+is therefore the same text field as in applications (selection, Ctrl+Z,
+diacritics, clipboard) and the list is a table with section headers
+(`Cells::header`). The palette catalog (`palette.rs`: sections, ranking,
+recents, usage, scopes) still provides the data; arrows, Enter, Esc and
+Tab drive the catalog, field editing and clicks go to the library.
+
+**The launcher** (variant D of the [launcher design](../../design/spoustec.html),
+chosen 2026-11-12) is the same palette placed and emptied differently: the
+grid button in the bar or the Super key alone (press and release without
+another key, local physical keyboard only) opens it. It sits at the left
+above the bar, width token `size.launcher_w` (300). An empty query shows
+the sections Running (started apps, window count on the right),
+Applications and System; the Recent group is prepared and has no source
+yet. Typing gives the same results and ranking as the palette (Ctrl+K).
+Footer: sign-in state and a power button with the menu Lock, Sign out
+(disabled with a reason for now), Restart and Shut down (system
+confirmation).
+
+- **Budget:** opening fits into one frame; the test `palette_open_budget`
+  measures opening and closing with a composed frame
+  (about 13 ms on the host in debug, revision `9a6720f`).
+- **Robustness:** labels from manifests and app menus are cut to 120
+  characters before reaching the view, the catalog limits the row count
+  (`palette::ROWS`), no `unwrap` on outside data.
+- **Security:** the view gets the input source class like applications;
+  Super and palette shortcuts only from the local physical keyboard.
+- **Snapshot tests** of the palette and the launcher in light, dark and
+  high contrast (`libs/comp/tests/shots/`, test
+  `shot_palette_and_launcher`), rewritten by `cargo xtask test
+  --update-shots` like the components.
+
 ### Launching apps from the bar
 
 Init sends the compositor the list of desktop apps (`apps`, id and name

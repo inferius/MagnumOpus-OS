@@ -55,3 +55,28 @@ fn palette_open_budget() {
     std::println!("otevreni a zavreni palety se snimky: {per:?}");
     assert!(per < std::time::Duration::from_millis(40), "{per:?}");
 }
+
+/// Super samotny otevre a zavre spoustec; Super+klavesa ne; umely vstup ne.
+#[test]
+fn super_alone_toggles_launcher() {
+    use inputproto::code::{KEY_E, KEY_LEFTMETA};
+    let mut t = T::new();
+    let k = |t: &mut T, code: u16, act: Action, flags: u16| {
+        let r = Record::new(Event::Key { code, scancode: code as u32, action: act, ch: None }, 0, flags, t.now);
+        t.c.input(&[r], t.now);
+    };
+    k(&mut t, KEY_LEFTMETA, Action::Press, 0);
+    k(&mut t, KEY_LEFTMETA, Action::Release, 0);
+    assert!(t.c.palette.as_ref().is_some_and(|p| p.launcher));
+    k(&mut t, KEY_LEFTMETA, Action::Press, 0);
+    k(&mut t, KEY_LEFTMETA, Action::Release, 0);
+    assert!(t.c.palette.is_none());
+    k(&mut t, KEY_LEFTMETA, Action::Press, 0);
+    k(&mut t, KEY_E, Action::Press, 0);
+    k(&mut t, KEY_LEFTMETA, Action::Release, 0);
+    assert!(t.c.palette.is_none(), "Super+E neni spoustec");
+    let syn = inputproto::event::flags::SYNTHETIC;
+    k(&mut t, KEY_LEFTMETA, Action::Press, syn);
+    k(&mut t, KEY_LEFTMETA, Action::Release, syn);
+    assert!(t.c.palette.is_none(), "umely vstup ne");
+}

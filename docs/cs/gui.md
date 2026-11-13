@@ -656,6 +656,38 @@ Sekce, rozsah a pravidla viz [Pravidla palety příkazů](#pravidla-palety-pří
 **[implementováno]** Zamknutí a celá obrazovka přibudou, až budou
 v systému. **[navrženo]**
 
+### Paleta a spouštěč nad knihovnou komponent
+
+Paletu příkazů a spouštěč kreslí kompozitor knihovnou `libs/ui` (jádro
+bez OS; modul `libs/comp/src/sysui.rs`). Pole hledání je tedy totéž
+textové pole jako v aplikacích (výběr, Ctrl+Z, diakritika, schránka)
+a seznam je tabulka s nadpisy sekcí (`Cells::header`). Data dává dál
+katalog palety (`palette.rs`: sekce, řazení, nedávné, četnost, rozsahy);
+šipky, Enter, Esc a Tab řídí katalog, editaci pole a kliky knihovna.
+
+**Spouštěč** (varianta D z [návrhu spouštěče](../../design/spoustec.html),
+zvoleno 12. 11. 2026) je tatáž paleta jinde a jinak prázdná: otevře ho
+tlačítko mřížky v liště nebo samotná klávesa Super (stisk a puštění bez
+jiné klávesy, jen místní fyzická klávesnice). Leží vlevo nad lištou,
+šířka token `size.launcher_w` (300). Prázdný dotaz ukáže sekce Běží
+(spuštěné aplikace, vpravo počet oken), Aplikace a Systém; skupina Nedávné
+je připravená, zatím nemá zdroj. Psaní dá stejné výsledky a řazení jako
+paleta (Ctrl+K). Pata: stav přihlášení a tlačítko napájení s nabídkou
+Zamknout, Odhlásit (zatím zakázané s důvodem), Restartovat a Vypnout
+(systémové potvrzení).
+
+- **Rozpočet:** otevření se vejde do jednoho snímku; test
+  `palette_open_budget` měří otevření a zavření se složením snímku (na
+  hostiteli v debug kolem 13 ms, revize `9a6720f`).
+- **Robustnost:** popisky z manifestů a menu aplikací se před předáním
+  pohledu oříznou na 120 znaků, počet řádků omezuje katalog
+  (`palette::ROWS`), žádné `unwrap` na datech zvenku.
+- **Bezpečnost:** pohled dostává třídu zdroje vstupu jako aplikace; Super
+  a zkratky palety jen z místní fyzické klávesnice.
+- **Snímkové testy** palety a spouštěče ve světlém, tmavém a vysokém
+  kontrastu (`libs/comp/tests/shots/`, test `shot_palette_and_launcher`),
+  přepis `cargo xtask test --update-shots` jako u komponent.
+
 ### Spouštění aplikací z lišty
 
 Init pošle kompozitoru seznam aplikací plochy (`apps`, id a jméno

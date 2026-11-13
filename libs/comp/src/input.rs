@@ -93,6 +93,8 @@ pub struct InputState {
     pub(crate) drag: Option<Drag>,
     /// Trida zdroje prave zpracovavaneho zaznamu (`input_class::*`).
     pub(crate) class: u8,
+    /// Super drzeny bez jine klavesy (pusteni otevre spoustec).
+    pub(crate) meta_alone: bool,
     pointer_window: Option<u32>,
     press_target: Option<u32>,
     /// Pocet zdroju umeleho vstupu (ukazuje se v panelu).
@@ -119,6 +121,7 @@ impl InputState {
             py: h as i32 / 2,
             drag: None,
             class: 0,
+            meta_alone: false,
             pointer_window: None,
             press_target: None,
             cursor: Cursor::Arrow,
@@ -339,6 +342,22 @@ impl Comp {
                         self.greeter_key(code, action, now);
                     }
                     return;
+                }
+                // Super samotny (stisk a pusteni bez jine klavesy): spoustec.
+                // Jen mistni fyzicka klavesnice, bez otevreneho dialogu.
+                if !syn && self.dialogs.active().is_none() {
+                    let meta = code == inputproto::code::KEY_LEFTMETA || code == inputproto::code::KEY_RIGHTMETA;
+                    match (meta, action) {
+                        (true, Action::Press) => self.input.meta_alone = true,
+                        (true, Action::Release) if core::mem::take(&mut self.input.meta_alone) => {
+                            let open = self.palette.as_ref().is_some_and(|p| p.launcher);
+                            self.set_flyout(None);
+                            self.set_palette((!open).then(|| crate::palette::Palette { launcher: true, ..Default::default() }));
+                            return;
+                        }
+                        (false, Action::Press) => self.input.meta_alone = false,
+                        _ => {}
+                    }
                 }
                 // Diagnosticky snimek: jen fyzicka klavesnice, aplikaci nejde.
                 // Paleta prikazu: zkratka (jen fyzicka klavesnice) prepina;

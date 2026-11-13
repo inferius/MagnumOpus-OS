@@ -23,6 +23,7 @@ mod greeter;
 mod launcher;
 mod popover;
 mod secure;
+mod shots;
 mod winsize;
 
 const W: u32 = 800;

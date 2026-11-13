@@ -83,11 +83,15 @@ impl Comp {
         let (ctl, gap, pad) = (t.size.control_h, t.space[3], t.space[5]);
         let foot = if p.launcher { ctl + gap } else { 0 };
         let table_h = h.saturating_sub(2 * pad + ctl + gap + foot).max(ctl);
+        // Pravy sloupec (zkratka, "2 okna"): ve spoustechi uzsi.
+        // Z tokenu sirky spoustece: tretina (spoustec), tri petiny (paleta).
+        let lw = self.style.theme.size.launcher_w;
+        let right_w = if p.launcher { lw / 3 } else { lw * 3 / 5 };
         let data = alloc::rc::Rc::new(rows);
         let d2 = alloc::rc::Rc::clone(&data);
         column([
-            text_input(&p.query).placeholder("Hledat příkazy, okna a aplikace... (Tab: rozsah, > akce)").on_change(SysMsg::Query).key("hledat"),
-            table(alloc::vec![col("", 0), col("", 180).numeric()], n, |i| i as u64, move |i| match d2.get(i) {
+            text_input(&p.query).placeholder(if p.launcher { "Hledat" } else { "Hledat příkazy, okna a aplikace... (Tab: rozsah, > akce)" }).on_change(SysMsg::Query).key("hledat"),
+            table(alloc::vec![col("", 0), col("", right_w).numeric()], n, |i| i as u64, move |i| match d2.get(i) {
                 Some(r) if r.header => Cells::header(&r.label),
                 Some(r) => Cells::new([r.label.clone(), r.right.clone()]).icon(r.icon),
                 None => Cells::default(),
@@ -114,6 +118,7 @@ impl Comp {
             label(if session { "Přihlášený uživatel" } else { "Bez přihlášení" }),
             spacer(),
             button("")
+                .icon("power")
                 .tooltip("Napájení")
                 .context_menu(alloc::vec![lock, menu_item("Odhlásit", SysMsg::Lock).disabled("zatím není"), menu_separator(), menu_item("Restartovat", SysMsg::Reboot), menu_item("Vypnout", SysMsg::Shutdown)])
                 .key("napajeni"),
