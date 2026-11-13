@@ -17,6 +17,7 @@ use inputproto::{Action, Button, Event, Record};
 
 use crate::*;
 
+mod bench;
 mod clipboard;
 mod gpu;
 mod greeter;

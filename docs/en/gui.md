@@ -534,7 +534,11 @@ dialog, cursor) goes through a scratch buffer on the CPU too. So the
 | Where | Full screen | Note |
 |---|---|---|
 | host, 800x600 (`look_snapshots` test) | 3.5 ms, first 11 ms | the first one computes the desktop, shadows and blur |
+| host, 1280x800 (`bench_frame` test, revision 9472b51) | debug 4.8 ms, release 4.0 ms | desktop 0.1 ms, top layer (bar, shadows, cursor) ~2 ms; comp, gfx and ui use opt-level 2 even in debug |
 | QEMU on Windows (CPU emulation), 1280x800 | 0.5-1.8 s | emulation without acceleration is ~100x slower; regular frames are only damaged areas |
+| QEMU on Windows with `--accel whpx`, 1280x800 (revision 9472b51) | 29-175 ms | the `vstup,gui` suites pass; the gap to the host comes from virtualization, not the code |
+
+Host measurement: `cargo test -p comp [--release] bench_frame -- --ignored --nocapture`.
 
 So on display attach the compositor first shows just the background
 color and composes the full frame on the next tick (start does not wait

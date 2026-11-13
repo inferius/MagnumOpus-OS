@@ -512,7 +512,11 @@ a po 300 snímcích průměr a maximum (`compd: snimek cele obrazovky ...`).
 | Kde | Celá obrazovka | Poznámka |
 |---|---|---|
 | hostitel, 800x600 (test `look_snapshots`) | 3,5 ms, první 11 ms | první s výpočtem plochy, stínů a rozmazání |
+| hostitel, 1280x800 (test `bench_frame`, revize 9472b51) | debug 4,8 ms, release 4,0 ms | plocha 0,1 ms, horní vrstva (lišta, stíny, kurzor) ~2 ms; comp, gfx a ui mají i v debug opt-level 2 |
 | QEMU na Windows (emulace CPU), 1280x800 | 0,5-1,8 s | emulace bez akcelerace je ~100x pomalejší; běžné snímky jsou jen poškozené oblasti |
+| QEMU na Windows s `--accel whpx`, 1280x800 (revize 9472b51) | 29-175 ms | sady `vstup,gui` projdou; rozdíl proti hostiteli dělá virtualizace, ne kód |
+
+Měření na hostiteli: `cargo test -p comp [--release] bench_frame -- --ignored --nocapture`.
 
 Kompozitor se proto při připojení displeje nejdřív ukáže jen barvou
 pozadí a celý snímek složí v dalším taktu (start nečeká na skládání).
