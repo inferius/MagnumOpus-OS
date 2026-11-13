@@ -376,10 +376,10 @@ impl<'a> Parser<'a> {
             Tok::Punct("$") => {
                 let name: String = self.lx.ident().into();
                 Err(self
-                    .err("ve vyrazu se promenna pise bez '$'", span)
-                    .hint(alloc::format!("napiste jen '{name}'; '$' patri jen do argumentu prikazu")))
+                    .err("ve výrazu se proměnná píše bez '$'", span)
+                    .hint(alloc::format!("napište jen '{name}'; '$' patří jen do argumentu příkazu")))
             }
-            other => Err(self.err(alloc::format!("cekam vyraz, ale je tu {}", describe(&other)), span)),
+            other => Err(self.err(alloc::format!("čekám výraz, ale je tu {}", describe(&other)), span)),
         }
     }
 
@@ -395,9 +395,9 @@ impl<'a> Parser<'a> {
                 Tok::Ident(s) => s,
                 Tok::Str(parts) => match parts.as_slice() {
                     [RawPart::Text(s)] => s.clone(),
-                    _ => return Err(self.err("klic zaznamu nesmi obsahovat {vyraz}", kspan)),
+                    _ => return Err(self.err("klíč záznamu nesmí obsahovat {výraz}", kspan)),
                 },
-                other => return Err(self.err(alloc::format!("cekam klic zaznamu, je tu {}", describe(&other)), kspan)),
+                other => return Err(self.err(alloc::format!("čekám klíč záznamu, je tu {}", describe(&other)), kspan)),
             };
             self.expect_punct(":")?;
             self.lx.skip_space_nl();
@@ -429,7 +429,7 @@ impl<'a> Parser<'a> {
                     let ex = self.expr()?;
                     self.lx.skip_space();
                     if self.lx.pos != e {
-                        return Err(self.err("ve vlozenem {vyrazu} je neco navic", Span::new(self.lx.pos, e)));
+                        return Err(self.err("ve vloženém {výrazu} je něco navíc", Span::new(self.lx.pos, e)));
                     }
                     parts.push(Part::Expr(ex));
                 }
@@ -460,7 +460,7 @@ impl<'a> Parser<'a> {
             }
             "await" => return self.await_expr(span),
             _ if is_keyword(&w) => {
-                return Err(self.err(alloc::format!("'{w}' tu nemuze byt"), span));
+                return Err(self.err(alloc::format!("'{w}' tu nemůže být"), span));
             }
             _ => {}
         }
@@ -486,10 +486,10 @@ impl<'a> Parser<'a> {
                 {
                     return Err(ShError::new(
                         code::PARSE,
-                        alloc::format!("'{w}' je promenna i pole radku - neni jasne, co myslite"),
+                        alloc::format!("'{w}' je proměnná i pole řádku - není jasné, co myslíte"),
                     )
                     .at(span)
-                    .hint(alloc::format!("pole radku: it.{w}; jinak promennou prejmenujte")));
+                    .hint(alloc::format!("pole řádku: it.{w}; jinak proměnnou přejmenujte")));
                 }
                 return Ok(Expr::Var(w, span));
             }
@@ -502,14 +502,14 @@ impl<'a> Parser<'a> {
         if self.is_var(&w) {
             return Ok(Expr::Var(w, span));
         }
-        let mut e = ShError::new(code::UNKNOWN, alloc::format!("nezname jmeno '{w}'")).at(span);
+        let mut e = ShError::new(code::UNKNOWN, alloc::format!("neznámé jméno '{w}'")).at(span);
         if self.sigs.get(&demangle(self, &w)).is_some() {
             e = e.hint(match self.style {
-                Style::C => alloc::format!("prikaz se v zapisu C vola jako funkce: {w}(...)"),
-                Style::B => alloc::format!("prikaz se ve vyrazu vola jako funkce {w}(...) nebo v zavorce ({w} ...)"),
+                Style::C => alloc::format!("příkaz se v zápisu C volá jako funkce: {w}(...)"),
+                Style::B => alloc::format!("příkaz se ve výrazu volá jako funkce {w}(...) nebo v závorce ({w} ...)"),
             });
         } else {
-            e = e.hint("promennou zavedte pres let");
+            e = e.hint("proměnnou zaveďte přes let");
         }
         Err(e)
     }
@@ -520,7 +520,7 @@ impl<'a> Parser<'a> {
         let mut args = self.call_args()?;
         let name = match args.first() {
             Some(Arg::Pos(Expr::Lit(Lit::Str(n), _))) if !n.is_empty() => n.clone(),
-            _ => return Err(self.err("exec() ceka jmeno programu v uvozovkach: exec(\"./prog\", ...)", span)),
+            _ => return Err(self.err("exec() čeká jméno programu v uvozovkách: exec(\"./prog\", ...)", span)),
         };
         args.remove(0);
         let span = span.to(self.here());
@@ -535,9 +535,9 @@ impl<'a> Parser<'a> {
         let pat = match t {
             Tok::Str(parts) => match parts.as_slice() {
                 [RawPart::Text(p)] => p.clone(),
-                _ => return Err(self.err("vzor v glob() musi byt pevny text", s)),
+                _ => return Err(self.err("vzor v glob() musí být pevný text", s)),
             },
-            _ => return Err(self.err("glob() cekam vzor v uvozovkach: glob(\"*.txt\")", s)),
+            _ => return Err(self.err("glob() čekám vzor v uvozovkách: glob(\"*.txt\")", s)),
         };
         self.lx.skip_space();
         let end = self.expect_punct(")")?;
@@ -581,7 +581,7 @@ impl<'a> Parser<'a> {
     fn for_expr(&mut self, start: Span) -> Result<Expr, ShError> {
         let (var, _) = self.expect_ident()?;
         if !self.is_ident("in")? {
-            return Err(self.err("za promennou cyklu patri 'in' (for f in seznam { })", self.here()));
+            return Err(self.err("za proměnnou cyklu patří 'in' (for f in seznam { })", self.here()));
         }
         self.next()?;
         self.lx.skip_space();
@@ -658,7 +658,7 @@ impl<'a> Parser<'a> {
                     Some(Expr::Closure(c, _)) => handler = Some(c),
                     _ => {
                         return Err(self
-                            .err("za 'else' u try patri closure nebo blok", self.here())
+                            .err("za 'else' u try patří closure nebo blok", self.here())
                             .hint("try { ... } else e => log \"{e.message}\""));
                     }
                 }

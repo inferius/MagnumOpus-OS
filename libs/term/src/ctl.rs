@@ -114,7 +114,9 @@ pub enum RegMsg {
     /// termd -> registr (po startu): vydej uschovane konce.
     Claim,
     /// registr -> termd: (relace, znacka); handly ve stejnem poradi.
-    Parked { sessions: Vec<(u64, String)> },
+    /// `home` = domov uzivatele okna (`~`, `cd` bez argumentu; "/" bez
+    /// prihlaseni).
+    Parked { sessions: Vec<(u64, String)>, home: String },
     /// termd -> registr: kanaly prehledu uloh pro relaci (razi je init).
     TasksReq { session: u64 },
     /// registr -> termd: handly [producent, klient], nebo zadne (taskd
@@ -147,13 +149,14 @@ impl RegMsg {
                 w.u8(G_TASKS);
                 w.u64(*session);
             }
-            RegMsg::Parked { sessions } => {
+            RegMsg::Parked { sessions, home } => {
                 w.u8(G_PARKED);
                 w.u32(sessions.len() as u32);
                 for (id, tag) in sessions {
                     w.u64(*id);
                     w.str(tag);
                 }
+                w.str(home);
             }
         }
         w.0
@@ -176,7 +179,7 @@ impl RegMsg {
                 for _ in 0..n {
                     sessions.push((r.u64()?, r.str()?));
                 }
-                RegMsg::Parked { sessions }
+                RegMsg::Parked { sessions, home: r.str()? }
             }
             _ => return Err(DecodeError),
         };
@@ -190,11 +193,13 @@ impl RegMsg {
 #[derive(Debug)]
 pub struct Registry<H> {
     parked: Vec<(u64, String, H)>,
+    /// Domov uzivatele okna (posila se termd v `Parked`).
+    pub home: String,
 }
 
 impl<H> Default for Registry<H> {
     fn default() -> Self {
-        Self { parked: Vec::new() }
+        Self { parked: Vec::new(), home: String::from("/") }
     }
 }
 
@@ -231,7 +236,7 @@ impl<H> Registry<H> {
                     sessions.push((id, tag));
                     hs.push(h);
                 }
-                Some((RegMsg::Parked { sessions }, hs))
+                Some((RegMsg::Parked { sessions, home: self.home.clone() }, hs))
             }
             // Kanaly uloh razi init sam (`terminal.rs`); obycejny registr
             // odpovi bez nich, aby termd necekal.

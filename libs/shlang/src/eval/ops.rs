@@ -15,19 +15,19 @@ use crate::value::Value;
 fn type_err(op: &str, a: &Value, b: &Value) -> ShError {
     let mut e = ShError::new(
         code::TYPE,
-        alloc::format!("operaci {op} nejde pouzit na {} a {}", a.type_name(), b.type_name()),
+        alloc::format!("operaci {op} nejde použít na {} a {}", a.type_name(), b.type_name()),
     );
     let unit_hint = |v: &Value| matches!(v, Value::Size(_) | Value::Duration(_));
     if (unit_hint(a) && matches!(b, Value::Int(_) | Value::Float(_)))
         || (unit_hint(b) && matches!(a, Value::Int(_) | Value::Float(_)))
     {
-        e = e.hint("k cislu napiste jednotku, napr. 100MB, 1KiB, 30s, 1h");
+        e = e.hint("k číslu napište jednotku, např. 100MB, 1KiB, 30s, 1h");
     }
     e
 }
 
 fn overflow() -> ShError {
-    ShError::new(code::ARITH, "preteceni cisla")
+    ShError::new(code::ARITH, "přetečení čísla")
 }
 
 /// Hodnota literalu.
@@ -80,8 +80,8 @@ pub fn unary(op: UnOp, v: Value) -> Result<Value, ShError> {
         (UnOp::Neg, Value::Float(f)) => Ok(Value::Float(-f)),
         (UnOp::Neg, Value::Size(s)) => s.checked_neg().map(Value::Size).ok_or_else(overflow),
         (UnOp::Neg, Value::Duration(d)) => d.checked_neg().map(Value::Duration).ok_or_else(overflow),
-        (UnOp::Not, v) => Err(ShError::new(code::TYPE, alloc::format!("'!' patri jen na bool, ne na {}", v.type_name()))),
-        (UnOp::Neg, v) => Err(ShError::new(code::TYPE, alloc::format!("'-' nejde pouzit na {}", v.type_name()))),
+        (UnOp::Not, v) => Err(ShError::new(code::TYPE, alloc::format!("'!' patří jen na bool, ne na {}", v.type_name()))),
+        (UnOp::Neg, v) => Err(ShError::new(code::TYPE, alloc::format!("'-' nejde použít na {}", v.type_name()))),
     }
 }
 
@@ -109,13 +109,13 @@ pub fn binary(op: BinOp, a: Value, b: Value) -> Result<Value, ShError> {
         (BinOp::Mul, Int(x), Int(y)) => x.checked_mul(*y).map(Int).ok_or_else(overflow)?,
         (BinOp::Div, Int(x), Int(y)) => {
             if *y == 0 {
-                return Err(ShError::new(code::ARITH, "deleni nulou"));
+                return Err(ShError::new(code::ARITH, "dělení nulou"));
             }
             x.checked_div(*y).map(Int).ok_or_else(overflow)?
         }
         (BinOp::Rem, Int(x), Int(y)) => {
             if *y == 0 {
-                return Err(ShError::new(code::ARITH, "deleni nulou"));
+                return Err(ShError::new(code::ARITH, "dělení nulou"));
             }
             x.checked_rem(*y).map(Int).ok_or_else(overflow)?
         }
@@ -127,7 +127,7 @@ pub fn binary(op: BinOp, a: Value, b: Value) -> Result<Value, ShError> {
                 BinOp::Mul => x * y,
                 _ => {
                     if y == 0.0 {
-                        return Err(ShError::new(code::ARITH, "deleni nulou"));
+                        return Err(ShError::new(code::ARITH, "dělení nulou"));
                     }
                     x / y
                 }
@@ -140,13 +140,13 @@ pub fn binary(op: BinOp, a: Value, b: Value) -> Result<Value, ShError> {
         (BinOp::Mul, Size(x), Float(y)) | (BinOp::Mul, Float(y), Size(x)) => Size(round(*x as f64 * y)),
         (BinOp::Div, Size(x), Int(y)) => {
             if *y == 0 {
-                return Err(ShError::new(code::ARITH, "deleni nulou"));
+                return Err(ShError::new(code::ARITH, "dělení nulou"));
             }
             x.checked_div(*y).map(Size).ok_or_else(overflow)?
         }
         (BinOp::Div, Size(x), Size(y)) => {
             if *y == 0 {
-                return Err(ShError::new(code::ARITH, "deleni nulou"));
+                return Err(ShError::new(code::ARITH, "dělení nulou"));
             }
             Float(*x as f64 / *y as f64)
         }
@@ -158,13 +158,13 @@ pub fn binary(op: BinOp, a: Value, b: Value) -> Result<Value, ShError> {
         }
         (BinOp::Div, Duration(x), Int(y)) => {
             if *y == 0 {
-                return Err(ShError::new(code::ARITH, "deleni nulou"));
+                return Err(ShError::new(code::ARITH, "dělení nulou"));
             }
             x.checked_div(*y).map(Duration).ok_or_else(overflow)?
         }
         (BinOp::Div, Duration(x), Duration(y)) => {
             if *y == 0 {
-                return Err(ShError::new(code::ARITH, "deleni nulou"));
+                return Err(ShError::new(code::ARITH, "dělení nulou"));
             }
             Float(*x as f64 / *y as f64)
         }
@@ -235,7 +235,7 @@ pub fn compare(a: &Value, b: &Value) -> Result<Ordering, ShError> {
         (Str(x), Str(y)) => x.cmp(y),
         (Bool(x), Bool(y)) => x.cmp(y),
         (Null, Null) => Ordering::Equal,
-        _ => return Err(type_err("porovnani", a, b)),
+        _ => return Err(type_err("porovnání", a, b)),
     };
     Ok(o)
 }

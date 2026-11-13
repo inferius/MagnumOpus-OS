@@ -167,7 +167,7 @@ fn row_collision_is_error() {
     let src = "let size = 5
 ls | where size > 1";
     let e = parse(src, &Options { style: None, sigs: &Builtins, vars: vec![], script: false }).unwrap_err();
-    assert!(e.message.contains("promenna i pole"), "{e:?}");
+    assert!(e.message.contains("proměnná i pole"), "{e:?}");
     assert!(e.hint.unwrap().contains("it.size"));
 }
 

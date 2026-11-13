@@ -14,12 +14,12 @@ use crate::value::Value;
 pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, input: Value) -> R<Value> {
     match name {
         "where" => {
-            let f = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "where: chybi podminka"))?;
+            let f = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "where: chybí podmínka"))?;
             let items = list_input(&a, "where", input)?;
             let mut out = Vec::new();
             for x in items {
                 if host.interrupted() {
-                    return Err(Flow::Err(ShError::new(code::INTERRUPTED, "preruseno (Ctrl-C)")));
+                    return Err(Flow::Err(ShError::new(code::INTERRUPTED, "přerušeno (Ctrl-C)")));
                 }
                 match it.call_value(host, &f, alloc::vec![x.clone()])? {
                     Value::Bool(true) => out.push(x),
@@ -27,7 +27,7 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
                     other => {
                         return Err(a.err(
                             code::TYPE,
-                            alloc::format!("podminka where musi vratit bool, vratila {}", other.type_name()),
+                            alloc::format!("podmínka where musí vrátit bool, vrátila {}", other.type_name()),
                         ));
                     }
                 }
@@ -35,14 +35,14 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
             Ok(Value::List(out))
         }
         "each" => {
-            let f = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "each: chybi funkce"))?;
+            let f = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "each: chybí funkce"))?;
             let items = list_input(&a, "each", input)?;
             if let Some(n) = a.named("parallel") {
                 let Value::Int(n) = n else {
-                    return Err(a.err(code::TYPE, "each --parallel ceka pocet"));
+                    return Err(a.err(code::TYPE, "each --parallel čeká počet"));
                 };
                 let Value::Closure(c) = &f else {
-                    return Err(a.err(code::TYPE, "each --parallel ceka closure"));
+                    return Err(a.err(code::TYPE, "each --parallel čeká closure"));
                 };
                 return it.each_parallel(host, c, items, (*n).clamp(1, 256) as usize, a.span);
             }
@@ -50,7 +50,7 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
             let mut bar = super::super::Progress::new(items.len(), "each");
             for x in items {
                 if host.interrupted() {
-                    return Err(Flow::Err(ShError::new(code::INTERRUPTED, "preruseno (Ctrl-C)")));
+                    return Err(Flow::Err(ShError::new(code::INTERRUPTED, "přerušeno (Ctrl-C)")));
                 }
                 bar.step(host);
                 let v = it.call_value(host, &f, alloc::vec![x])?;
@@ -115,11 +115,11 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
             Ok(Value::List(out))
         }
         "first" | "last" => {
-            let n = int_arg(&a, 0, "pocet")?;
+            let n = int_arg(&a, 0, "počet")?;
             let items = list_input(&a, name, input)?;
             match n {
                 None => Ok((if name == "first" { items.first() } else { items.last() }).cloned().unwrap_or(Value::Null)),
-                Some(n) if n < 0 => Err(a.err(code::ARGS, "pocet nesmi byt zaporny")),
+                Some(n) if n < 0 => Err(a.err(code::ARGS, "počet nesmí být záporný")),
                 Some(n) => {
                     let n = (n as usize).min(items.len());
                     Ok(Value::List(if name == "first" {
@@ -176,10 +176,10 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
             let from = int_arg(&a, 0, "od")?.unwrap_or(0);
             let to = int_arg(&a, 1, "do")?.unwrap_or(0);
             if to.saturating_sub(from) > 10_000_000 {
-                return Err(a.err(code::ARGS, "range: prilis mnoho cisel (nejvys 10 milionu)"));
+                return Err(a.err(code::ARGS, "range: příliš mnoho čísel (nejvýš 10 milionů)"));
             }
             Ok(Value::List((from..to).map(Value::Int).collect()))
         }
-        _ => Err(a.err(code::UNKNOWN, "neznamy prikaz")),
+        _ => Err(a.err(code::UNKNOWN, "neznámý příkaz")),
     }
 }

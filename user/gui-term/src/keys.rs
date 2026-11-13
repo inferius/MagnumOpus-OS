@@ -25,6 +25,9 @@ pub fn key(r: &InputRecord) -> Option<Key> {
                 KEY_TAB if shift => Key::BackTab,
                 KEY_TAB => Key::Tab,
                 KEY_ESC => Key::Esc,
+                // Alt+sipky: zpet / vpred v historii slozek (`cd -` / `cd +`).
+                KEY_LEFT if r.mods & mods::ALT != 0 => Key::AltLeft,
+                KEY_RIGHT if r.mods & mods::ALT != 0 => Key::AltRight,
                 KEY_LEFT => Key::Left,
                 KEY_RIGHT => Key::Right,
                 KEY_UP => Key::Up,

@@ -81,7 +81,7 @@ fn review_roundtrips() {
         "ls | where (f => f.size > 1)",
         "echo \"=a\"",
         "echo =a",
-        "./run.sh x",
+        "./run.mos x",
         "~/bin/tool -v",
         "my-tool a",
         "my_tool a",
@@ -111,16 +111,16 @@ fn review_roundtrips() {
 fn background_job_keeps_script_needs() {
     let mut h = TestHost::new();
     let mut it = interp();
-    h.fs.put("/home/bg.sh", b"lang 1\nneeds {\n    read: [\"~/docs\"]\n}\nbg {\n    rm ~/a.txt\n}\n");
-    it.run_line(&mut h, "run bg.sh").result.unwrap();
+    h.fs.put("/home/bg.mos", b"lang 1\nneeds {\n    read: [\"~/docs\"]\n}\nbg {\n    rm ~/a.txt\n}\n");
+    it.run_line(&mut h, "run bg.mos").result.unwrap();
     // Skript skoncil; uloha dobehne az ted, ale stale s jeho omezenim.
     let done = it.run_pending_jobs(&mut h);
     assert_eq!(done.len(), 1);
     assert_eq!(done[0].1.as_ref().unwrap_err().code, code::NEEDS);
     assert_eq!(h.fs.get("/home/a.txt"), Some(&b"alfa\n"[..]));
     // Totez pres `wait` v interaktivni relaci.
-    h.fs.put("/home/bg2.sh", b"lang 1\nneeds {\n    read: [\"~/docs\"]\n}\nrm ~/b.txt &\n");
-    it.run_line(&mut h, "run bg2.sh").result.unwrap();
+    h.fs.put("/home/bg2.mos", b"lang 1\nneeds {\n    read: [\"~/docs\"]\n}\nrm ~/b.txt &\n");
+    it.run_line(&mut h, "run bg2.mos").result.unwrap();
     assert_eq!(it.run_line(&mut h, "wait 2").result.unwrap_err().code, code::NEEDS);
     assert!(h.fs.exists("/home/b.txt"));
 }
@@ -130,18 +130,18 @@ fn nested_script_gets_at_most_callers_rights() {
     let mut h = TestHost::new();
     let mut it = interp();
     // B chce zapis tam, kde A smi jen cist: odmitnuto.
-    h.fs.put("/home/b.sh", b"lang 1\nneeds {\n    write: [\"~\"]\n}\necho x > ~/a.txt\n");
-    h.fs.put("/home/a.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n}\nrun ~/b.sh\n");
-    assert_eq!(it.run_line(&mut h, "run a.sh").result.unwrap_err().code, code::NEEDS);
+    h.fs.put("/home/b.mos", b"lang 1\nneeds {\n    write: [\"~\"]\n}\necho x > ~/a.txt\n");
+    h.fs.put("/home/a.mos", b"lang 1\nneeds {\n    read: [\"~\"]\n}\nrun ~/b.mos\n");
+    assert_eq!(it.run_line(&mut h, "run a.mos").result.unwrap_err().code, code::NEEDS);
     assert_eq!(h.fs.get("/home/a.txt"), Some(&b"alfa\n"[..]));
     // B chce sit, A ji nema: odmitnuto.
-    h.fs.put("/home/n.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n    net: [\"example.org\"]\n}\necho x\n");
-    h.fs.put("/home/a2.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n    net: none\n}\nrun ~/n.sh\n");
-    assert_eq!(it.run_line(&mut h, "run a2.sh").result.unwrap_err().code, code::NEEDS);
+    h.fs.put("/home/n.mos", b"lang 1\nneeds {\n    read: [\"~\"]\n    net: [\"example.org\"]\n}\necho x\n");
+    h.fs.put("/home/a2.mos", b"lang 1\nneeds {\n    read: [\"~\"]\n    net: none\n}\nrun ~/n.mos\n");
+    assert_eq!(it.run_line(&mut h, "run a2.mos").result.unwrap_err().code, code::NEEDS);
     // B chce cist uvnitr cesty, kam A smi zapisovat: povoleno (prusecik).
-    h.fs.put("/home/c.sh", b"lang 1\nneeds {\n    read: [\"/tmp\"]\n}\nls /tmp | count\n");
-    h.fs.put("/home/a3.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n    write: [\"/tmp\"]\n}\nrun ~/c.sh\n");
-    it.run_line(&mut h, "run a3.sh").result.unwrap();
+    h.fs.put("/home/c.mos", b"lang 1\nneeds {\n    read: [\"/tmp\"]\n}\nls /tmp | count\n");
+    h.fs.put("/home/a3.mos", b"lang 1\nneeds {\n    read: [\"~\"]\n    write: [\"/tmp\"]\n}\nrun ~/c.mos\n");
+    it.run_line(&mut h, "run a3.mos").result.unwrap();
 }
 
 #[test]

@@ -138,7 +138,7 @@ impl<'a> Lexer<'a> {
                 None => {
                     return Err(ShError::new(
                         code::PARSE,
-                        alloc::format!("neocekavany znak '{c}'"),
+                        alloc::format!("neočekávaný znak '{c}'"),
                     )
                     .at(Span::new(start, start + c.len_utf8())));
                 }
@@ -195,7 +195,7 @@ impl<'a> Lexer<'a> {
                 self.pos = l.pos;
                 return Ok(Tok::Unit(num, u));
             }
-            return Err(ShError::new(code::PARSE, alloc::format!("neznama jednotka '{suffix}'"))
+            return Err(ShError::new(code::PARSE, alloc::format!("neznámá jednotka '{suffix}'"))
                 .at(Span::new(start, l.pos))
                 .hint("velikosti: B KB MB GB TB KiB MiB GiB TiB, doby: ns us ms s min h d w y"));
         }
@@ -210,13 +210,13 @@ impl<'a> Lexer<'a> {
         let mut text = String::new();
         loop {
             let Some(c) = self.bump() else {
-                return Err(ShError::new(code::PARSE, "neukonceny retezec").at(Span::new(start, self.pos)));
+                return Err(ShError::new(code::PARSE, "neukončený řetězec").at(Span::new(start, self.pos)));
             };
             match c {
                 '"' => break,
                 '\\' => {
                     let e = self.bump().ok_or_else(|| {
-                        ShError::new(code::PARSE, "neukonceny retezec").at(Span::new(start, self.pos))
+                        ShError::new(code::PARSE, "neukončený řetězec").at(Span::new(start, self.pos))
                     })?;
                     text.push(match e {
                         'n' => '\n',
@@ -225,9 +225,9 @@ impl<'a> Lexer<'a> {
                         '0' => '\0',
                         '\\' | '"' | '{' | '}' | '\'' => e,
                         _ => {
-                            return Err(ShError::new(code::PARSE, alloc::format!("neznama escape sekvence \\{e}"))
+                            return Err(ShError::new(code::PARSE, alloc::format!("neznámá escape sekvence \\{e}"))
                                 .at(Span::new(self.pos - 2, self.pos))
-                                .hint("platne: \\n \\t \\r \\0 \\\\ \\\" \\{ \\}"));
+                                .hint("platné: \\n \\t \\r \\0 \\\\ \\\" \\{ \\}"));
                         }
                     });
                 }
@@ -278,7 +278,7 @@ impl<'a> Lexer<'a> {
             }
             i += 1;
         }
-        Err(ShError::new(code::PARSE, "chybi '}' ukoncujici vlozeny vyraz").at(Span::new(from - 1, from)))
+        Err(ShError::new(code::PARSE, "chybí '}' ukončující vložený výraz").at(Span::new(from - 1, from)))
     }
 
     /// Retezec `'...'` bez escape sekvenci a bez vlozenych vyrazu.
@@ -286,7 +286,7 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         self.pos += 1;
         let Some(end) = self.rest().find('\'') else {
-            return Err(ShError::new(code::PARSE, "neukonceny retezec").at(Span::new(start, self.src.len())));
+            return Err(ShError::new(code::PARSE, "neukončený řetězec").at(Span::new(start, self.src.len())));
         };
         let text = &self.rest()[..end];
         self.pos += end + 1;
@@ -295,7 +295,7 @@ impl<'a> Lexer<'a> {
 }
 
 fn bad_number(start: usize, end: usize) -> ShError {
-    ShError::new(code::PARSE, "cislo je mimo rozsah").at(Span::new(start, end))
+    ShError::new(code::PARSE, "číslo je mimo rozsah").at(Span::new(start, end))
 }
 
 /// Lexuje cele slovo jako cislo s jednotkou (pro hola slova v B).

@@ -26,8 +26,8 @@ impl Interp {
             && !n.read.iter().chain(&n.write).any(|r| within(p, r))
         {
             return Err(Flow::Err(
-                ShError::new(code::NEEDS, alloc::format!("skript nema pravo cist {p}"))
-                    .hint("pridejte cestu do manifestu: needs { read: [\"...\"] }"),
+                ShError::new(code::NEEDS, alloc::format!("skript nemá právo číst {p}"))
+                    .hint("přidejte cestu do manifestu: needs { read: [\"...\"] }"),
             ));
         }
         Ok(())
@@ -38,8 +38,8 @@ impl Interp {
             && !n.write.iter().any(|r| within(p, r))
         {
             return Err(Flow::Err(
-                ShError::new(code::NEEDS, alloc::format!("skript nema pravo zapisovat do {p}"))
-                    .hint("pridejte cestu do manifestu: needs { write: [\"...\"] }"),
+                ShError::new(code::NEEDS, alloc::format!("skript nemá právo zapisovat do {p}"))
+                    .hint("přidejte cestu do manifestu: needs { write: [\"...\"] }"),
             ));
         }
         Ok(())
@@ -47,7 +47,7 @@ impl Interp {
 
     pub(crate) fn fs_stat(&mut self, host: &mut dyn Host, p: &str) -> R<Meta> {
         self.check_read(p)?;
-        self.draft.stat(host.fs(), p).map_err(|e| sys(e, alloc::format!("{p} nejde otevrit")))
+        self.draft.stat(host.fs(), p).map_err(|e| sys(e, alloc::format!("{p} nejde otevřít")))
     }
 
     pub(crate) fn fs_exists(&mut self, host: &mut dyn Host, p: &str) -> R<bool> {
@@ -57,23 +57,23 @@ impl Interp {
 
     pub(crate) fn fs_list(&mut self, host: &mut dyn Host, p: &str) -> R<Vec<DirEntry>> {
         self.check_read(p)?;
-        self.draft.list(host.fs(), p).map_err(|e| sys(e, alloc::format!("slozku {p} nejde vypsat")))
+        self.draft.list(host.fs(), p).map_err(|e| sys(e, alloc::format!("složku {p} nejde vypsat")))
     }
 
     /// Jen jmena a druhy (levnejsi nez `fs_list`).
     pub(crate) fn fs_list_names(&mut self, host: &mut dyn Host, p: &str) -> R<Vec<DirEntry>> {
         self.check_read(p)?;
-        self.draft.list_names(host.fs(), p).map_err(|e| sys(e, alloc::format!("slozku {p} nejde vypsat")))
+        self.draft.list_names(host.fs(), p).map_err(|e| sys(e, alloc::format!("složku {p} nejde vypsat")))
     }
 
     pub(crate) fn fs_read(&mut self, host: &mut dyn Host, p: &str) -> R<Vec<u8>> {
         self.check_read(p)?;
-        self.draft.read(host.fs(), p).map_err(|e| sys(e, alloc::format!("{p} nejde precist")))
+        self.draft.read(host.fs(), p).map_err(|e| sys(e, alloc::format!("{p} nejde přečíst")))
     }
 
     pub(crate) fn fs_read_range(&mut self, host: &mut dyn Host, p: &str, offset: u64, len: usize) -> R<Vec<u8>> {
         self.check_read(p)?;
-        self.draft.read_range(host.fs(), p, offset, len).map_err(|e| sys(e, alloc::format!("{p} nejde precist")))
+        self.draft.read_range(host.fs(), p, offset, len).map_err(|e| sys(e, alloc::format!("{p} nejde přečíst")))
     }
 
     pub(crate) fn fs_write(&mut self, host: &mut dyn Host, p: &str, data: Vec<u8>) -> R<()> {
@@ -87,7 +87,7 @@ impl Interp {
         let failed = core::mem::take(&mut self.draft.aside_failed);
         r.map_err(|e| match sys(e, what) {
             Flow::Err(err) if failed => Flow::Err(
-                err.hint("zmeny nanecisto tu nejdou (FS nezalozil klon bokem, napr. chybi zapisovatelny /tmp)"),
+                err.hint("změny nanečisto tu nejdou (FS nezaložil klon bokem, např. chybí zapisovatelný /tmp)"),
             ),
             f => f,
         })
@@ -96,7 +96,7 @@ impl Interp {
     pub(crate) fn fs_mkdir(&mut self, host: &mut dyn Host, p: &str) -> R<()> {
         self.check_write(p)?;
         let r = self.draft.mkdir(host.fs(), p);
-        self.write_err(r, alloc::format!("slozku {p} nejde vytvorit"))
+        self.write_err(r, alloc::format!("složku {p} nejde vytvořit"))
     }
 
     pub(crate) fn fs_remove(&mut self, host: &mut dyn Host, p: &str, recursive: bool) -> R<()> {
@@ -106,7 +106,7 @@ impl Interp {
         r.map_err(|e| {
             let f = sys(e, alloc::format!("{p} nejde smazat"));
             match (e, f) {
-                (abi::Error::NotEmpty, Flow::Err(err)) => Flow::Err(err.hint("slozku i s obsahem smaze rm -r")),
+                (abi::Error::NotEmpty, Flow::Err(err)) => Flow::Err(err.hint("složku i s obsahem smaže rm -r")),
                 (_, f) => f,
             }
         })
@@ -116,14 +116,14 @@ impl Interp {
         self.check_read(from)?;
         self.check_write(to)?;
         let r = self.draft.copy(host.fs(), from, to);
-        self.write_err(r, alloc::format!("{from} nejde zkopirovat do {to}"))
+        self.write_err(r, alloc::format!("{from} nejde zkopírovat do {to}"))
     }
 
     pub(crate) fn fs_rename(&mut self, host: &mut dyn Host, from: &str, to: &str) -> R<()> {
         self.check_write(from)?;
         self.check_write(to)?;
         let r = self.draft.rename(host.fs(), from, to);
-        self.write_err(r, alloc::format!("{from} nejde presunout do {to}"))
+        self.write_err(r, alloc::format!("{from} nejde přesunout do {to}"))
     }
 
     /// Zaznam souboru (radek vystupu `ls`). U slozky je `size` logicka
@@ -156,7 +156,7 @@ impl Interp {
         };
         if dir.contains(['*', '?', '[']) {
             return Err(Flow::Err(
-                ShError::new(code::ARGS, "vzor smi byt jen v posledni casti cesty").at(span).hint("napr. src/*.rs"),
+                ShError::new(code::ARGS, "vzor smí být jen v poslední části cesty").at(span).hint("např. src/*.rs"),
             ));
         }
         let abs_dir = self.abs(dir);
@@ -171,7 +171,7 @@ impl Interp {
         }
         if out.is_empty() {
             return Err(Flow::Err(
-                ShError::new(code::NO_MATCH, alloc::format!("vzor '{pat}' nenasel zadny soubor")).at(span),
+                ShError::new(code::NO_MATCH, alloc::format!("vzor '{pat}' nenašel žádný soubor")).at(span),
             ));
         }
         out.sort_by(|a, b| a.to_text().to_lowercase().cmp(&b.to_text().to_lowercase()));
@@ -191,11 +191,11 @@ impl Interp {
             }
             Value::Record(_) => match v.field("path") {
                 Some(Value::Str(p)) => Ok(alloc::vec![self.abs(&p)]),
-                _ => Err(Flow::Err(ShError::new(code::TYPE, "zaznam nema pole path"))),
+                _ => Err(Flow::Err(ShError::new(code::TYPE, "záznam nemá pole path"))),
             },
             other => Err(Flow::Err(ShError::new(
                 code::TYPE,
-                alloc::format!("cekam cestu, dostal jsem {}", other.type_name()),
+                alloc::format!("čekám cestu, dostal jsem {}", other.type_name()),
             ))),
         }
     }

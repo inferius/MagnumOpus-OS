@@ -307,7 +307,7 @@ pub trait Host {
     /// chyba `TIMED_OUT` (ulohy bezi dal). Termin v minulosti = jen
     /// vyzvednout hotove bez cekani.
     fn task_wait(&mut self, _ids: &[u64], _any: bool, _deadline: Option<i64>) -> Result<Vec<TaskDone>, ShError> {
-        Err(ShError::sys(abi::Error::NotSupported, "ulohy"))
+        Err(ShError::sys(abi::Error::NotSupported, "úlohy"))
     }
     /// Zrusi ulohu. Kdyz uz dobehla, vrati jeji vysledek (a undo).
     fn task_cancel(&mut self, _id: u64) -> Option<TaskDone> {

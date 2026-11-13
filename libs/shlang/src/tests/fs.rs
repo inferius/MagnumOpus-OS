@@ -122,27 +122,27 @@ fn script_needs_are_enforced() {
     let mut h = TestHost::new();
     let mut it = interp();
     h.fs.put(
-        "/home/s.sh",
+        "/home/s.mos",
         b"lang 1\nneeds {\n    read: [\"~/docs\"]\n    write: [\"/tmp\"]\n    net: none\n}\nls ~/docs | count\necho ok > /tmp/out.txt\n",
     );
-    it.run_line(&mut h, "run s.sh").result.unwrap();
+    it.run_line(&mut h, "run s.mos").result.unwrap();
     assert_eq!(h.out, vec![Value::Int(2)]);
     assert!(h.fs.exists("/tmp/out.txt"));
     assert_eq!(h.asked.len(), 1, "opravneni skriptu se potvrzuji");
-    h.fs.put("/home/z.sh", b"lang 1\nneeds {\n    read: [\"~/docs\"]\n}\nopen ~/a.txt\n");
-    let e = it.run_line(&mut h, "run z.sh").result.unwrap_err();
+    h.fs.put("/home/z.mos", b"lang 1\nneeds {\n    read: [\"~/docs\"]\n}\nopen ~/a.txt\n");
+    let e = it.run_line(&mut h, "run z.mos").result.unwrap_err();
     assert_eq!(e.code, code::NEEDS);
-    h.fs.put("/home/w.sh", b"lang 1\nneeds {\n    read: [\"~\"]\n}\necho x > ~/a.txt\n");
-    let e = it.run_line(&mut h, "run w.sh").result.unwrap_err();
+    h.fs.put("/home/w.mos", b"lang 1\nneeds {\n    read: [\"~\"]\n}\necho x > ~/a.txt\n");
+    let e = it.run_line(&mut h, "run w.mos").result.unwrap_err();
     assert_eq!(e.code, code::NEEDS);
     assert_eq!(h.fs.get("/home/a.txt"), Some(&b"alfa\n"[..]));
     // skript bez lang: varovani, ale bezi
-    h.fs.put("/home/n.sh", b"echo bez\n");
-    it.run_line(&mut h, "run n.sh").result.unwrap();
+    h.fs.put("/home/n.mos", b"echo bez\n");
+    it.run_line(&mut h, "run n.mos").result.unwrap();
     assert!(h.notes.iter().any(|n| n.contains("lang")));
     // nepodporovana verze
-    h.fs.put("/home/v.sh", b"lang 9\necho x\n");
-    assert_eq!(it.run_line(&mut h, "run v.sh").result.unwrap_err().code, code::LANG);
+    h.fs.put("/home/v.mos", b"lang 9\necho x\n");
+    assert_eq!(it.run_line(&mut h, "run v.mos").result.unwrap_err().code, code::LANG);
 }
 
 #[test]

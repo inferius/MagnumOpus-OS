@@ -75,7 +75,7 @@ impl<'a> Parser<'a> {
             let rest = self.lx.rest();
             if rest.starts_with('|') && !rest.starts_with("||") {
                 if redirected {
-                    return Err(self.err("za presmerovanim '>' uz nemuze byt '|'", self.here()));
+                    return Err(self.err("za přesměrováním '>' už nemůže být '|'", self.here()));
                 }
                 self.lx.pos += 1;
                 self.lx.skip_space_nl();
@@ -99,7 +99,7 @@ impl<'a> Parser<'a> {
             } else if rest.starts_with('<') {
                 let start = self.lx.pos;
                 if stages.len() != 1 || !matches!(stages[0], Expr::Call { .. }) {
-                    return Err(self.err("'<' patri jen za prvni prikaz roury (prikaz < soubor)", self.here()));
+                    return Err(self.err("'<' patří jen za první příkaz roury (příkaz < soubor)", self.here()));
                 }
                 self.lx.pos += 1;
                 self.lx.skip_space();
@@ -154,8 +154,8 @@ impl<'a> Parser<'a> {
                 self.lx.bump();
                 let name: String = self.lx.ident().into();
                 return Err(self
-                    .err("na zacatku prikazu je vyraz a ten se pise bez '$'", Span::new(start, self.lx.pos))
-                    .hint(alloc::format!("napiste '{name}'")));
+                    .err("na začátku příkazu je výraz a ten se píše bez '$'", Span::new(start, self.lx.pos))
+                    .hint(alloc::format!("napište '{name}'")));
             }
             Some(c) if is_ident_start(c) => {
                 let mut l = self.lx.clone();
@@ -192,8 +192,8 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
         Err(self
-            .err("mezi argumenty chybi mezera", Span::new(self.lx.pos, self.lx.pos + 1))
-            .hint("text se zvlastnimi znaky dejte do uvozovek"))
+            .err("mezi argumenty chybí mezera", Span::new(self.lx.pos, self.lx.pos + 1))
+            .hint("text se zvláštními znaky dejte do uvozovek"))
     }
 
     /// Prikaz s argumenty.
@@ -204,7 +204,7 @@ impl<'a> Parser<'a> {
             Some(c) if is_ident_start(c) || matches!(c, '.' | '/' | '~') => {}
             _ => {
                 let t = self.lx.peek().map(|t| super::describe(&t)).unwrap_or_default();
-                return Err(self.err(alloc::format!("cekam prikaz, ale je tu {t}"), self.here()));
+                return Err(self.err(alloc::format!("čekám příkaz, ale je tu {t}"), self.here()));
             }
         }
         while let Some(c) = self.lx.peek_char() {
@@ -216,7 +216,7 @@ impl<'a> Parser<'a> {
         let name: String = self.lx.src[start..self.lx.pos].into();
         let name_span = Span::new(start, self.lx.pos);
         if is_keyword(&name) {
-            return Err(self.err(alloc::format!("'{name}' tu nemuze byt"), name_span));
+            return Err(self.err(alloc::format!("'{name}' tu nemůže být"), name_span));
         }
         // Zapis C za rourou: `| where(it => ...)`.
         if self.lx.peek_char() == Some('(') {
@@ -310,7 +310,7 @@ impl<'a> Parser<'a> {
                 if f.value.is_some() && value.is_none() {
                     self.lx.skip_space();
                     if self.at_terminator() {
-                        return Err(ShError::new(code::ARGS, alloc::format!("prepinac --{long} ceka hodnotu"))
+                        return Err(ShError::new(code::ARGS, alloc::format!("přepínač --{long} čeká hodnotu"))
                             .at(span));
                     }
                     value = Some(self.word_arg()?);
@@ -343,13 +343,13 @@ impl<'a> Parser<'a> {
                 if i + 1 != n {
                     return Err(ShError::new(
                         code::ARGS,
-                        alloc::format!("prepinac -{c} ceka hodnotu, musi byt ve skupine posledni"),
+                        alloc::format!("přepínač -{c} čeká hodnotu, musí být ve skupině poslední"),
                     )
                     .at(span));
                 }
                 self.lx.skip_space();
                 if self.at_terminator() {
-                    return Err(ShError::new(code::ARGS, alloc::format!("prepinac -{c} ceka hodnotu")).at(span));
+                    return Err(ShError::new(code::ARGS, alloc::format!("přepínač -{c} čeká hodnotu")).at(span));
                 }
                 let v = self.word_arg()?;
                 args.push(Arg::Named(f.long.into(), v));
@@ -408,11 +408,11 @@ impl<'a> Parser<'a> {
                 }
                 self.bare_word()?
             }
-            None => return Err(self.err("chybi argument", self.here())),
+            None => return Err(self.err("chybí argument", self.here())),
             _ => self.bare_word()?,
         };
         if self.lx.pos == start {
-            return Err(self.err("cekam argument", self.here()));
+            return Err(self.err("čekám argument", self.here()));
         }
         self.check_arg_end()?;
         Ok(e)
@@ -432,12 +432,12 @@ impl<'a> Parser<'a> {
         let name: String = self.lx.ident().into();
         let span = Span::new(start, self.lx.pos);
         if name.is_empty() {
-            return Err(self.err("za '$' patri jmeno promenne", span));
+            return Err(self.err("za '$' patří jméno proměnné", span));
         }
         if !self.is_var(&name) {
-            return Err(ShError::new(code::UNKNOWN, alloc::format!("promenna '{name}' neexistuje"))
+            return Err(ShError::new(code::UNKNOWN, alloc::format!("proměnná '{name}' neexistuje"))
                 .at(span)
-                .hint("promennou zavedte pres let"));
+                .hint("proměnnou zaveďte přes let"));
         }
         let mut e = Expr::Var(name, span);
         while self.lx.peek_char() == Some('.') && self.lx.peek_char2().is_some_and(is_ident_start) {
@@ -449,8 +449,8 @@ impl<'a> Parser<'a> {
         }
         if self.lx.peek_char() == Some('$') || self.lx.peek_char().is_some_and(is_name_char) {
             return Err(self
-                .err("promenna uprostred slova", Span::new(start, self.lx.pos + 1))
-                .hint("pouzijte vlozeny vyraz: \"{x}/soubor\" nebo slovo ~/slozka/{x}"));
+                .err("proměnná uprostřed slova", Span::new(start, self.lx.pos + 1))
+                .hint("použijte vložený výraz: \"{x}/soubor\" nebo slovo ~/složka/{x}"));
         }
         Ok(e)
     }
@@ -470,7 +470,7 @@ impl<'a> Parser<'a> {
                     self.lx.bump();
                     match self.lx.bump() {
                         Some(e) => text.push(e),
-                        None => return Err(self.err("za '\\' chybi znak", self.here())),
+                        None => return Err(self.err("za '\\' chybí znak", self.here())),
                     }
                     escaped = true;
                 }
@@ -488,7 +488,7 @@ impl<'a> Parser<'a> {
                     let e = e?;
                     self.lx.skip_space();
                     if self.lx.pos != end {
-                        return Err(self.err("ve vlozenem {vyrazu} je neco navic", Span::new(self.lx.pos, end)));
+                        return Err(self.err("ve vloženém {výrazu} je něco navíc", Span::new(self.lx.pos, end)));
                     }
                     self.lx.pos = end + 1;
                     parts.push(Part::Expr(e));
@@ -500,8 +500,8 @@ impl<'a> Parser<'a> {
                 }
                 '$' => {
                     return Err(self
-                        .err("promenna uprostred slova", Span::new(self.lx.pos, self.lx.pos + 1))
-                        .hint("pouzijte vlozeny vyraz {x}: ~/slozka/{x}"));
+                        .err("proměnná uprostřed slova", Span::new(self.lx.pos, self.lx.pos + 1))
+                        .hint("použijte vložený výraz {x}: ~/složka/{x}"));
                 }
                 _ => {
                     text.push(c);
@@ -512,7 +512,7 @@ impl<'a> Parser<'a> {
         let span = Span::new(start, self.lx.pos);
         if !parts.is_empty() {
             if glob {
-                return Err(self.err("vzor souboru nejde kombinovat s {vyrazem}", span));
+                return Err(self.err("vzor souboru nejde kombinovat s {výrazem}", span));
             }
             if !text.is_empty() {
                 parts.push(Part::Text(text));
@@ -521,7 +521,7 @@ impl<'a> Parser<'a> {
         }
         if glob {
             if escaped {
-                return Err(self.err("ve vzoru souboru nepouzivejte '\\'", span).hint("text dejte do uvozovek"));
+                return Err(self.err("ve vzoru souboru nepoužívejte '\\'", span).hint("text dejte do uvozovek"));
             }
             return Ok(Expr::Glob(text, span));
         }
@@ -553,12 +553,12 @@ fn check_arity(s: &Sig, name: &str, npos: usize, span: Span) -> Result<(), ShErr
     let required = s.params.iter().filter(|p| !p.optional).count();
     if npos < required {
         let missing = s.params[npos].name;
-        return Err(ShError::new(code::ARGS, alloc::format!("prikaz {name}: chybi argument '{missing}'"))
+        return Err(ShError::new(code::ARGS, alloc::format!("příkaz {name}: chybí argument '{missing}'"))
             .at(span)
             .hint(usage(s)));
     }
     if s.rest.is_none() && npos > s.params.len() {
-        return Err(ShError::new(code::ARGS, alloc::format!("prikaz {name}: prilis mnoho argumentu"))
+        return Err(ShError::new(code::ARGS, alloc::format!("příkaz {name}: příliš mnoho argumentů"))
             .at(span)
             .hint(usage(s)));
     }
@@ -577,11 +577,11 @@ fn unknown_flag(cmd: &str, s: &Sig, flag: &str, span: Span) -> ShError {
         known.push_str(&alloc::format!("--{}", f.long));
     }
     let hint = if known.is_empty() {
-        alloc::format!("{cmd} nema zadne prepinace")
+        alloc::format!("{cmd} nemá žádné přepínače")
     } else {
-        alloc::format!("prepinace: {known}")
+        alloc::format!("přepínače: {known}")
     };
-    ShError::new(code::ARGS, alloc::format!("prikaz {cmd} nezna prepinac {flag}")).at(span).hint(hint)
+    ShError::new(code::ARGS, alloc::format!("příkaz {cmd} nezná přepínač {flag}")).at(span).hint(hint)
 }
 
 /// Kratky popis pouziti (`ls [path] [-r] [-a]`).

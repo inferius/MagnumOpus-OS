@@ -86,17 +86,18 @@ big.pdf
 
 změní pracovní složku (bez argumentu na domovskou)
 
-Změní pracovní složku relace. Relativní cesty v dalších příkazech se počítají od ní; výzva terminálu ji hned ukáže. Bez argumentu přejde do domovské složky, `..` je nadřazená složka.
+Změní pracovní složku relace. Relativní cesty v dalších příkazech se počítají od ní; výzva terminálu ji hned ukáže. Bez argumentu přejde do domovské složky (`~`), `..` je nadřazená složka. Relace si pamatuje poslední složky: `cd -` vrátí do předchozí, `cd -2` o dvě zpět, `cd +` zase vpřed a `cd --history` je vypíše. V okně terminálu totéž dělají Alt+šipka vlevo a vpravo, když je řádek prázdný.
 
 ```shell
-cd [path]
+cd [path] [--history]
 ```
 
-Plné jméno `dir-change` · vstup: nic · výstup: nic
+Plné jméno `dir-change` · vstup: nic · výstup: libovolná hodnota
 
 | Argument | Typ | Výchozí | Popis |
 |---|---|---|---|
-| `[path]` | cesta | domovská složka | cílová složka |
+| `[path]` | cesta | domovská složka | cílová složka; `-`, `-N` zpět, `+` vpřed |
+| `--history` | přepínač |  | poslední složky relace (číslo pro `cd -N`) |
 
 Přejde do složky docs a vypíše ji.
 
@@ -108,7 +109,30 @@ cd docs; pwd
 /home/docs
 ```
 
-**Chyby:** `NOT_FOUND`, `SH_TYPE`
+Návrat do předchozí složky.
+
+```shell
+cd docs; cd /tmp; cd -; pwd
+```
+
+```text
+/home/docs
+```
+
+Poslední složky relace, nejnovější první.
+
+```shell
+cd docs; cd /tmp; cd --history | select path
+```
+
+```text
+path
+----------
+/home/docs
+/home
+```
+
+**Chyby:** `NOT_FOUND`, `SH_TYPE`, `SH_ARGS`
 
 **Souvisí:** [`pwd`](#pwd), [`ls`](#ls)
 
@@ -1504,7 +1528,7 @@ history | where ok == false | select line
 
 spustí skript (kontroluje jeho manifest needs)
 
-Spustí skript ze souboru. Hlavička skriptu (`needs`) říká, co skript potřebuje; shell to ověří a zeptá se před spuštěním.
+Spustí skript ze souboru s příponou `.mos` (MagnumOpus Shell). Hlavička skriptu (`lang 1`, `needs`) říká, co skript potřebuje; shell to ověří a zeptá se před spuštěním. Jiný soubor (log, text) `run` odmítne.
 
 ```shell
 run path
@@ -1514,12 +1538,12 @@ Plné jméno `script-run` · vstup: nic · výstup: libovolná hodnota
 
 | Argument | Typ | Výchozí | Popis |
 |---|---|---|---|
-| `path` | cesta |  | soubor skriptu |
+| `path` | cesta |  | soubor skriptu (.mos) |
 
 Uloží a spustí skript.
 
 ```shell
-echo "echo ze skriptu" | save /tmp/s.sh; run /tmp/s.sh
+echo "echo ze skriptu" | save /tmp/s.mos; run /tmp/s.mos
 ```
 
 ```text

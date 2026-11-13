@@ -436,7 +436,7 @@ fn task_manager(startup: &Startup) -> TestResult {
 /// Snimky vzhledu pro kontrolu proti prototypum (`design/`): okna ukazky,
 /// terminalu a spravce uloh s listou ve svetlem, tmavem a kontrastnim
 /// motivu. Snimek porizuje xtask pres QMP po znacce.
-fn look_shots(_: &Startup) -> TestResult {
+fn look_shots(startup: &Startup) -> TestResult {
     with(|s| {
         s.gui.command(b"tasks 4 1", Vec::new()).map_err(|e| fail("tasks", e))?;
         for name in SHOTS {
@@ -460,6 +460,44 @@ fn look_shots(_: &Startup) -> TestResult {
         s.gui.command(b"theme light", Vec::new()).map_err(|e| fail("theme", e))?;
         check!(s.gui.command(b"theme fialova", Vec::new()).is_err(), "neplatny motiv");
         time::sleep(Duration::from_millis(2500));
+        terminal_shot(startup, s)?;
         Ok(())
     })
+}
+
+/// Snimek terminalu navrch se scenou jako v prototypu (design/terminal.html):
+/// tabulka, chyba, prubeh. Pro porovnani vzhledu terminalu s navrhem.
+fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
+    // Okna terminalu z drivejsich testu: nove se pozna podle id.
+    let before: Vec<u32> = windows(&s.inspect)?.into_iter().map(|w| w.id).collect();
+    let conn = crate::terminal::TERMINALS.lock().client("gui-term (snimek)").map_err(|e| fail("kanal terminalu", e))?;
+    s.gui
+        .launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
+        .map_err(|e| fail("spusteni gui-term", e))?;
+    let pump = || crate::terminal::TERMINALS.lock().poll(startup);
+    // Nove okno je navrch; ceka se na uvitani (relace pripojena).
+    let end = time::deadline_after(TIMEOUT);
+    let w = loop {
+        if let Some(w) = windows(&s.inspect)?.into_iter().find(|w| w.app == "org.magnumopus.terminal" && !before.contains(&w.id)) {
+            break w;
+        }
+        check!(time::now() < end, "okno terminalu pro snimek se neobjevilo");
+        time::sleep(Duration::from_millis(50));
+    };
+    let t = wait_tree(&s.inspect, w.id, "uvitani terminalu (snimek)", |t| {
+        pump();
+        t.iter().any(|n| n.role == Role::Terminal && n.value.contains("Napište help"))
+    })?;
+    let term = t.iter().find(|n| n.role == Role::Terminal).unwrap();
+    for line in ["ls /", "open /neni-tu.txt", "range 0 5 | each x => x * x"] {
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: line.into() })?;
+    }
+    wait_tree(&s.inspect, w.id, "scena terminalu", |t| {
+        pump();
+        t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "16"))
+    })?;
+    time::sleep(Duration::from_millis(2500));
+    println!("{QEMU_SHOT}terminal");
+    time::sleep(Duration::from_millis(1500));
+    Ok(())
 }

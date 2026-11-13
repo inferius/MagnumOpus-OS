@@ -44,6 +44,8 @@ mod tests_broker;
 #[cfg(test)]
 mod tests_contrast;
 #[cfg(test)]
+mod tests_eta;
+#[cfg(test)]
 mod tests_render;
 #[cfg(test)]
 mod tests_taskd;
@@ -51,3 +53,5 @@ mod tests_taskd;
 mod tests_tasks;
 #[cfg(test)]
 mod tests_ui;
+#[cfg(test)]
+mod tests_wrap;

@@ -9,8 +9,8 @@
 //!   klony FS bokem); na konci radku se prevezmou s undo, nad limit (zamek
 //!   nebezpecnych operaci) az po potvrzeni.
 
-mod builtins;
-mod call;
+pub(crate) mod builtins;
+pub(crate) mod call;
 mod fsctx;
 mod tasks;
 #[cfg(test)]
@@ -102,16 +102,16 @@ impl NeedsRt {
         use crate::vfs::path::within;
         for p in &inner.write {
             if !self.write.iter().any(|o| within(p, o)) {
-                return Err(ShError::new(code::NEEDS, alloc::format!("skript chce zapisovat do {p}, volajici tam smi nejvys cist")));
+                return Err(ShError::new(code::NEEDS, alloc::format!("skript chce zapisovat do {p}, volající tam smí nejvýš číst")));
             }
         }
         for p in &inner.read {
             if !self.read.iter().chain(&self.write).any(|o| within(p, o)) {
-                return Err(ShError::new(code::NEEDS, alloc::format!("skript chce cist {p}, to volajici nema")));
+                return Err(ShError::new(code::NEEDS, alloc::format!("skript chce číst {p}, to volající nemá")));
             }
         }
         if inner.net && !self.net {
-            return Err(ShError::new(code::NEEDS, "skript chce sit, volajici ji nema"));
+            return Err(ShError::new(code::NEEDS, "skript chce síť, volající ji nemá"));
         }
         Ok(())
     }
@@ -174,6 +174,10 @@ pub struct Interp {
     fns: BTreeMap<String, Rc<FnDef>>,
     pub cwd: String,
     pub home: String,
+    /// Historie slozek relace (`cd -`, `cd +`, `cd --history`): drivejsi
+    /// (posledni na konci) a slozky "vpred" po navratu.
+    pub dirs_back: Vec<String>,
+    pub dirs_fwd: Vec<String>,
     pub undo: UndoLog,
     pub(crate) draft: Draft,
     /// Prikaz, ktery zmeni vic souboru (mimo /tmp), se prevezme az po
@@ -210,6 +214,8 @@ impl Interp {
             frames: alloc::vec![BTreeMap::new()],
             fns: BTreeMap::new(),
             cwd: home.into(),
+            dirs_back: Vec::new(),
+            dirs_fwd: Vec::new(),
             home: home.into(),
             undo: UndoLog::new(),
             draft: Draft::new(),
@@ -266,7 +272,7 @@ impl Interp {
             }
         };
         if parsed.script.lang.is_some() || parsed.script.needs.is_some() {
-            let e = ShError::new(code::PARSE, "hlavicka 'lang'/'needs' patri do souboru skriptu (run skript)");
+            let e = ShError::new(code::PARSE, "hlavička 'lang'/'needs' patří do souboru skriptu (run skript)");
             return Outcome { result: Err(e), warnings: parsed.warnings, diff: Vec::new() };
         }
         self.line = src.trim().into();
@@ -330,41 +336,41 @@ impl Interp {
             Ok(d) => d,
             Err(e) => {
                 self.draft.discard_all(host.fs());
-                return Err(ShError::sys(e, "zmeny nejde spocitat (nic se nezmenilo)"));
+                return Err(ShError::sys(e, "změny nejde spočítat (nic se nezměnilo)"));
             }
         };
         let risky = diff.iter().filter(|d| !crate::vfs::path::within(&d.path, "/tmp")).count();
         if risky > self.lock_threshold && !self.confirmed {
             let q = alloc::format!(
-                "Prikaz zmeni {risky} souboru (vic nez {}). Prevzit zmeny?",
+                "Příkaz změní {risky} souborů (víc než {}). Převzít změny?",
                 self.lock_threshold
             );
             if !host.confirm(&q, &diff_value(&diff)) {
                 self.draft.discard_all(host.fs());
-                return Err(ShError::new(code::REJECTED, "zmeny nebyly prevzaty (nic se nezmenilo)"));
+                return Err(ShError::new(code::REJECTED, "změny nebyly převzaty (nic se nezměnilo)"));
             }
         }
         let c = self
             .undo
             .commit(host.fs(), &mut self.draft, diff, &self.line)
-            .map_err(|e| ShError::sys(e, "zmeny nejde zapsat"))?;
+            .map_err(|e| ShError::sys(e, "změny nejde zapsat"))?;
         if c.no_undo {
-            host.note("varovani: FS nema pohledy, zmeny nepujde vratit");
+            host.note("varování: FS nemá pohledy, změny nepůjde vrátit");
         }
         if !c.conflicts_complete {
             return Err(ShError::new(
                 code::CONFLICT,
-                alloc::format!("vic nez {} zmen se neprevzalo (soubory se mezitim zmenily jinak)", c.conflicts.len()),
+                alloc::format!("víc než {} změn se nepřevzalo (soubory se mezitím změnily jinak)", c.conflicts.len()),
             )
-            .hint("ostatni zmeny jsou zapsane, ale tento prikaz nejde vratit (undo); zkontrolujte soubory"));
+            .hint("ostatní změny jsou zapsané, ale tento příkaz nejde vrátit (undo); zkontrolujte soubory"));
         }
         if !c.conflicts.is_empty() {
             let list = c.conflicts.join(", ");
             return Err(ShError::new(
                 code::CONFLICT,
-                alloc::format!("{} zmen se neprevzalo, soubory se mezitim zmenily jinak: {list}", c.conflicts.len()),
+                alloc::format!("{} změn se nepřevzalo, soubory se mezitím změnily jinak: {list}", c.conflicts.len()),
             )
-            .hint("ostatni zmeny jsou zapsane; prikaz zopakujte nad aktualnim stavem"));
+            .hint("ostatní změny jsou zapsané; příkaz zopakujte nad aktuálním stavem"));
         }
         Ok(c.diff)
     }
@@ -393,7 +399,7 @@ impl Interp {
     fn script_inner(&mut self, host: &mut dyn Host, src: &str, path: Option<&str>) -> Result<Vec<Warning>, ShError> {
         let parsed = parse(src, &Options { style: None, sigs: &*self.sigs, vars: Vec::new(), script: true })?;
         for w in &parsed.warnings {
-            host.note(&alloc::format!("varovani: {}", w.message));
+            host.note(&alloc::format!("varování: {}", w.message));
         }
         let saved_needs = self.needs.clone();
         if let Some(n) = &parsed.script.needs {
@@ -408,13 +414,13 @@ impl Interp {
                 ("write", Value::List(rt.write.iter().cloned().map(Value::Str).collect())),
                 ("net", Value::Bool(rt.net)),
             ]);
-            let q = alloc::format!("Skript {} chce tato opravneni. Povolit?", path.unwrap_or(""));
+            let q = alloc::format!("Skript {} chce tato oprávnění. Povolit?", path.unwrap_or(""));
             if !host.confirm(&q, &detail) {
-                return Err(ShError::new(code::REJECTED, "opravneni skriptu nebyla povolena"));
+                return Err(ShError::new(code::REJECTED, "oprávnění skriptu nebyla povolena"));
             }
             self.needs = Some(rt);
         } else if self.needs.is_none() {
-            host.note("varovani: skript nema manifest 'needs', bezi s pravy relace");
+            host.note("varování: skript nemá manifest 'needs', běží s právy relace");
         }
         self.frames.push(BTreeMap::new());
         let r = self.stmts(host, &parsed.script.body, true);
@@ -437,7 +443,7 @@ impl Interp {
         let ids: Vec<u64> = self.jobs.iter().filter(|j| j.state == JobState::Pending).map(|j| j.id).collect();
         let mut out = Vec::new();
         for id in ids {
-            self.line = alloc::format!("uloha {id}");
+            self.line = alloc::format!("úloha {id}");
             self.stack_base = 0;
             let r = self.run_job(host, id);
             let (r2, _) = self.finish(host, r.as_ref().map(|_| ()).map_err(|e| e.clone()));
@@ -448,13 +454,13 @@ impl Interp {
 
     fn run_job(&mut self, host: &mut dyn Host, id: u64) -> Result<Value, ShError> {
         let Some(i) = self.jobs.iter().position(|j| j.id == id) else {
-            return Err(ShError::new(code::UNKNOWN, alloc::format!("uloha {id} neexistuje")));
+            return Err(ShError::new(code::UNKNOWN, alloc::format!("úloha {id} neexistuje")));
         };
         if self.jobs[i].state != JobState::Pending {
             return match &self.jobs[i].state {
                 JobState::Done(v) => Ok(v.clone()),
                 JobState::Failed(e) => Err(e.clone()),
-                _ => Err(ShError::new(code::INTERRUPTED, alloc::format!("uloha {id} byla ukoncena"))),
+                _ => Err(ShError::new(code::INTERRUPTED, alloc::format!("úloha {id} byla ukončena"))),
             };
         }
         let block = self.jobs[i].block.clone();
@@ -487,7 +493,7 @@ impl Interp {
 
     fn check_interrupt(&mut self, host: &mut dyn Host) -> R<()> {
         if host.interrupted() {
-            return Err(Flow::Err(ShError::new(code::INTERRUPTED, "preruseno (Ctrl-C)")));
+            return Err(Flow::Err(ShError::new(code::INTERRUPTED, "přerušeno (Ctrl-C)")));
         }
         Ok(())
     }
@@ -521,13 +527,13 @@ impl Interp {
                 let v = self.eval(host, value).map_err(|f| at(f, *span))?;
                 let Value::List(items) = v else {
                     return Err(Flow::Err(
-                        ShError::new(code::TYPE, alloc::format!("let ({}) = ... ceka seznam, ne {}", names.join(", "), v.type_name()))
+                        ShError::new(code::TYPE, alloc::format!("let ({}) = ... čeká seznam, ne {}", names.join(", "), v.type_name()))
                             .at(*span),
                     ));
                 };
                 if items.len() != names.len() {
                     return Err(Flow::Err(
-                        ShError::new(code::ARGS, alloc::format!("seznam ma {} polozek, jmen je {}", items.len(), names.len()))
+                        ShError::new(code::ARGS, alloc::format!("seznam má {} položek, jmen je {}", items.len(), names.len()))
                             .at(*span),
                     ));
                 }
@@ -544,7 +550,7 @@ impl Interp {
                         Ok(Value::Nothing)
                     }
                     None => Err(Flow::Err(
-                        ShError::new(code::UNKNOWN, alloc::format!("promenna '{name}' neexistuje")).at(*span),
+                        ShError::new(code::UNKNOWN, alloc::format!("proměnná '{name}' neexistuje")).at(*span),
                     )),
                 }
             }
@@ -599,9 +605,9 @@ impl Interp {
         match self.eval(host, e)? {
             Value::Bool(b) => Ok(b),
             other => Err(Flow::Err(
-                ShError::new(code::TYPE, alloc::format!("podminka musi byt bool, je to {}", other.type_name()))
+                ShError::new(code::TYPE, alloc::format!("podmínka musí být bool, je to {}", other.type_name()))
                     .at(e.span().to(span))
-                    .hint("porovnejte vyslovne, napr. x != null nebo n > 0"),
+                    .hint("porovnejte výslovně, např. x != null nebo n > 0"),
             )),
         }
     }
@@ -615,9 +621,9 @@ impl Interp {
         }
         if self.stack_base.saturating_sub(here) > self.stack_budget {
             return Err(Flow::Err(
-                ShError::new(code::DEPTH, "prilis hluboke vnoreni (dosel zasobnik)")
+                ShError::new(code::DEPTH, "příliš hluboké vnoření (došel zásobník)")
                     .at(e.span())
-                    .hint("nekonecna rekurze? hloubku omezuje velikost zasobniku shellu"),
+                    .hint("nekonečná rekurze? hloubku omezuje velikost zásobníku shellu"),
             ));
         }
         let r = self.eval_inner(host, e);
@@ -642,7 +648,7 @@ impl Interp {
             Expr::Var(name, span) => match self.var(name) {
                 Some(v) => Ok(v.clone()),
                 None => Err(Flow::Err(
-                    ShError::new(code::UNKNOWN, alloc::format!("promenna '{name}' neexistuje")).at(*span),
+                    ShError::new(code::UNKNOWN, alloc::format!("proměnná '{name}' neexistuje")).at(*span),
                 )),
             },
             Expr::Field(base, name, span) => {
@@ -719,9 +725,9 @@ impl Interp {
                         .collect(),
                     other => {
                         return Err(Flow::Err(
-                            ShError::new(code::TYPE, alloc::format!("for prochazi seznam, ne {}", other.type_name()))
+                            ShError::new(code::TYPE, alloc::format!("for prochází seznam, ne {}", other.type_name()))
                                 .at(*span)
-                                .hint("text rozdelte na radky: lines"),
+                                .hint("text rozdělte na řádky: lines"),
                         ));
                     }
                 };
@@ -800,7 +806,7 @@ impl Interp {
                         Expr::Call { name, args, span } => self.call(host, name, args, v, *span)?,
                         other => {
                             return Err(Flow::Err(
-                                ShError::new(code::PARSE, "za '|' musi byt prikaz").at(other.span()),
+                                ShError::new(code::PARSE, "za '|' musí být příkaz").at(other.span()),
                             ));
                         }
                     };
@@ -819,7 +825,7 @@ impl Interp {
                     needs: self.needs.clone(),
                     state: JobState::Pending,
                 });
-                host.note(&alloc::format!("[{id}] uloha na pozadi"));
+                host.note(&alloc::format!("[{id}] úloha na pozadí"));
                 Ok(Value::record(&[("job", Value::Int(id as i64))]))
             }
             Expr::Unwrap(x, span) => match self.eval(host, x)? {
@@ -894,9 +900,9 @@ pub fn field(b: &Value, name: &str) -> Result<Value, ShError> {
         }
         Value::Record(_) | Value::Error(_) => {
             let names = b.field_names().join(", ");
-            Err(ShError::new(code::UNKNOWN, alloc::format!("pole '{name}' neexistuje")).hint(alloc::format!("zaznam ma: {names}")))
+            Err(ShError::new(code::UNKNOWN, alloc::format!("pole '{name}' neexistuje")).hint(alloc::format!("záznam má: {names}")))
         }
-        other => Err(ShError::new(code::TYPE, alloc::format!("{} nema pole '{name}'", other.type_name()))),
+        other => Err(ShError::new(code::TYPE, alloc::format!("{} nemá pole '{name}'", other.type_name()))),
     }
 }
 
@@ -905,7 +911,7 @@ fn index(b: &Value, i: &Value) -> Result<Value, ShError> {
         (Value::List(items), Value::Int(n)) => {
             let idx = if *n < 0 { items.len() as i64 + n } else { *n };
             items.get(idx as usize).cloned().filter(|_| idx >= 0).ok_or_else(|| {
-                ShError::new(code::ARGS, alloc::format!("index {n} je mimo seznam (delka {})", items.len()))
+                ShError::new(code::ARGS, alloc::format!("index {n} je mimo seznam (délka {})", items.len()))
             })
         }
         (Value::Record(_), Value::Str(k)) => field(b, k),

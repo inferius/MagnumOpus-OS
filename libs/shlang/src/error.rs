@@ -102,7 +102,7 @@ impl ShError {
             && (span.start as usize) <= src.len()
         {
             let (line, col) = span.line_col(src);
-            out.push_str(&alloc::format!("\n  na radku {line}, sloupec {col}:\n"));
+            out.push_str(&alloc::format!("\n  na řádku {line}, sloupec {col}:\n"));
             let text = src.lines().nth(line as usize - 1).unwrap_or("");
             out.push_str("    ");
             out.push_str(text);
@@ -121,7 +121,7 @@ impl ShError {
         }
         let mut cause = self.cause.as_deref();
         while let Some(c) = cause {
-            out.push_str("\n  pricina: ");
+            out.push_str("\n  příčina: ");
             out.push_str(&c.code);
             out.push_str(": ");
             out.push_str(&c.message);
