@@ -214,6 +214,7 @@ impl<M: Clone> Ui<M> {
                 self.pressed = None;
                 self.drag_field = None;
                 self.table_press = None;
+                self.dragging = None;
                 self.key_pressed = None;
                 self.hover = None;
                 self.active = false;

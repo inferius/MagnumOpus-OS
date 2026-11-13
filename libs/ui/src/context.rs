@@ -55,8 +55,11 @@ impl SizeClass {
     }
 }
 
-/// Kontext jednoho okna.
+/// Kontext jednoho okna. Neuplny vycet poli (`non_exhaustive`): pribudou
+/// dalsi (drzeni zarizeni, vzdalenost pohledu, bezpecny okraj, ukazatele,
+/// klavesnice) bez zmeny API aplikaci.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Context {
     /// Velikost obsahu okna (logicke px).
     pub w: u32,

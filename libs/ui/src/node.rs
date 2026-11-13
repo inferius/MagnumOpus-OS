@@ -108,6 +108,9 @@ pub enum Kind<M> {
     Busy,
     /// Pruhovy graf podilu (oddily disku, obsazeni, kvoty).
     Segments { items: Vec<Segment>, legend: bool },
+    /// Obrazek (pixely 0xAARRGGBB, sdilene bez kopie), zmenseny do
+    /// prvku se zachovanim pomeru stran; `alt` = popis pro ctecku.
+    Image { w: u32, h: u32, px: alloc::rc::Rc<[u32]>, alt: String },
     /// Vyber jedne moznosti z rozbalovaciho seznamu.
     Select { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
 
@@ -361,6 +364,14 @@ impl Segment {
 /// rozdeleny na useky podle vah, volitelne legenda (`.legend(true)`).
 pub fn segments<M>(items: Vec<Segment>) -> Node<M> {
     node(Kind::Segments { items, legend: false })
+}
+
+/// Obrazek `w` x `h` (napr. nahled souboru). Velikost prvku je velikost
+/// obrazku, mensi prostor ho zmensi se zachovanim pomeru stran.
+pub fn image<M>(w: u32, h: u32, px: alloc::rc::Rc<[u32]>, alt: &str) -> Node<M> {
+    let ok = px.len() as u64 >= w as u64 * h as u64;
+    let (w, h) = if ok { (w, h) } else { (0, 0) };
+    node(Kind::Image { w, h, px, alt: alt.into() })
 }
 
 /// Rozbalovaci vyber jedne z `options` (zprava `on_pick`).
@@ -617,6 +628,9 @@ impl Cells {
     }
 }
 
+/// Zprava pri pusteni tazenych radku (cil, id radku).
+pub type DropFn<M> = Box<dyn Fn(Option<u64>, Vec<u64>) -> M>;
+
 /// Popis tabulky: data se ctou line pres `id` a `row` jen pro viditelne
 /// radky, takze tisice polozek nestoji nic navic. Vyber drzi aplikace
 /// (`selection`, zprava `on_selection` s novym vyberem).
@@ -645,6 +659,9 @@ pub struct TableSpec<M> {
     pub on_drag: Option<Box<dyn Fn(Vec<u64>) -> M>>,
     /// Prave tlacitko na radku (kontextova nabidka).
     pub on_context: Option<Box<dyn Fn(u64) -> M>>,
+    /// Pusteni tazenych radku (id) na radek `Some(id)` nebo na prazdne
+    /// misto tabulky `None`; tah z teze nebo jine tabulky v okne.
+    pub on_drop: Option<DropFn<M>>,
 }
 
 /// Tabulka s `count` radky. Jednosloupcovy seznam bez zahlavi (vyber
@@ -675,6 +692,7 @@ pub fn table<M>(columns: Vec<Col>, count: usize, id: impl Fn(usize) -> u64 + 'st
         on_sort: None,
         on_drag: None,
         on_context: None,
+        on_drop: None,
     })));
     n.grow = true;
     n
@@ -749,6 +767,14 @@ impl<M> Node<M> {
     pub fn on_context(mut self, f: impl Fn(u64) -> M + 'static) -> Self {
         if let Some(t) = self.spec() {
             t.on_context = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// Cil pusteni tazenych radku (`on_drag` v teze nebo jine tabulce).
+    pub fn on_drop(mut self, f: impl Fn(Option<u64>, Vec<u64>) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_drop = Some(Box::new(f));
         }
         self
     }

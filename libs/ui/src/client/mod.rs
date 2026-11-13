@@ -409,18 +409,26 @@ impl Window {
     /// Dalsi udalost (blokuje az do `deadline`).
     pub fn next(&mut self, deadline: Option<u64>) -> Result<Event> {
         loop {
-            if !self.queue.is_empty() {
-                return Ok(self.queue.remove(0));
-            }
-            let Some(msg) = self.read_msg(deadline)? else { continue };
-            if let ServerMsg::Error { op, code } = &msg {
-                libos::println!("{}: kompozitor odmitl operaci {op}: {code}", self.app);
-                continue;
-            }
-            if let Some(e) = self.handle(msg)? {
+            if let Some(e) = self.next_one(deadline)? {
                 return Ok(e);
             }
         }
+    }
+
+    /// Nejvys jedna zprava kompozitoru (do `deadline`): udalost, nebo
+    /// `None`, kdyz zprava zadnou nevytvorila (napr. `RELEASED`). Smycka
+    /// s dalsimi kanaly pak muze znovu cekat na vsechny (jinak by zprava
+    /// sluzby cekala, dokud v okne neco nenastane).
+    pub fn next_one(&mut self, deadline: Option<u64>) -> Result<Option<Event>> {
+        if !self.queue.is_empty() {
+            return Ok(Some(self.queue.remove(0)));
+        }
+        let Some(msg) = self.read_msg(deadline)? else { return Ok(None) };
+        if let ServerMsg::Error { op, code } = &msg {
+            libos::println!("{}: kompozitor odmitl operaci {op}: {code}", self.app);
+            return Ok(None);
+        }
+        self.handle(msg)
     }
 
     /// Volny buffer vrstvy `layer` velikosti `w` x `h` (pocka na RELEASED).
@@ -683,8 +691,12 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
         }
         // Bublina: probudit se v case jejiho zobrazeni.
         let deadline = ui.next_deadline().map(|t| t / 1000 * 1000);
-        let ev = match win.next(deadline) {
-            Ok(e) => e,
+        // S dalsimi kanaly jen jedna zprava okna (kanal je citelny), pak
+        // znovu cekani na vsechny kanaly.
+        let next = if extras.is_empty() { win.next(deadline).map(Some) } else { win.next_one(None) };
+        let ev = match next {
+            Ok(Some(e)) => e,
+            Ok(None) => continue,
             Err(Error::TimedOut) => {
                 if ui.timer(libos::time::now()) {
                     dirty = true;

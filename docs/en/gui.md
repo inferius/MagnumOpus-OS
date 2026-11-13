@@ -1321,6 +1321,7 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 | `progress` | - | - | `progress` (value in percent) |
 | `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
 | `select` | click, pick from the list | Enter, space, Alt+down, F4; closed: arrows | `combo-box`, `menu`, `menu-item` |
+| `image` | - | - | `image` with an `alt` description (pixels shared via `Rc`, scaled down keeping the aspect ratio, never up) |
 | `segments` | - | - | `list` with `list-item` children (full label of each segment) |
 | `switch` | click | space, Enter (on release) | `switch`, `checked`, `toggle` |
 | `radio` | click | space, Enter | `radio`, `checked` |
@@ -1572,7 +1573,7 @@ files cost the same as twenty. The application can share data through
 | right button | selects the row if it was not selected and sends `on_context` (context menu) |
 | header click | `on_sort(column, ascending)`, again reversed; the header arrow follows `.sorted` |
 | drag a header edge | column width (library state by key, at least `size.hit_min`) |
-| drag selected rows | after 6 px `on_drag(ids)`; target and drop are up to the application (the drag protocol between applications is a next step) |
+| drag selected rows | after 6 px `on_drag(ids)`; dropping on a table with `on_drop(target, ids)` in the same window (`Some(id)` a row, `None` empty space, nothing onto itself), the target row gets an `accent` frame while dragging; dragging between applications is a next step |
 | wheel | smooth scrolling: target at once, movement per frame (`Ui::tick`); at the edge the wheel goes to the area below |
 | scrollbar | drag the thumb, click the track for a page |
 

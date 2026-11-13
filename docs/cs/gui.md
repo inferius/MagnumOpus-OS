@@ -1271,6 +1271,7 @@ převede na zprávy `Msg`.
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
 | `select` | klik, výběr ze seznamu | Enter, mezerník, Alt+dolů, F4; zavřený šipky | `combo-box`, `menu`, `menu-item` |
+| `image` | - | - | `image` s popisem `alt` (pixely sdílené přes `Rc`, zmenšení se zachováním poměru stran, nezvětšuje se) |
 | `segments` | - | - | `list` s položkami `list-item` (celý popisek každého úseku) |
 | `switch` | klik | mezerník, Enter (při puštění) | `switch`, `checked`, `toggle` |
 | `radio` | klik | mezerník, Enter | `radio`, `checked` |
@@ -1514,7 +1515,7 @@ tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet př
 | pravé tlačítko | vybere řádek, pokud nebyl vybraný, a pošle `on_context` (kontextová nabídka) |
 | klik na záhlaví | `on_sort(sloupec, vzestupně)`, znovu opačně; šipka v záhlaví podle `.sorted` |
 | tah za okraj záhlaví | šířka sloupce (stav knihovny podle klíče, nejméně `size.hit_min`) |
-| tah vybraných řádků | po 6 px `on_drag(id)`; cíl a puštění řeší aplikace (protokol tažení mezi aplikacemi je další krok) |
+| tah vybraných řádků | po 6 px `on_drag(id)`; puštění na tabulku s `on_drop(cíl, id)` ve stejném okně (`Some(id)` řádek, `None` prázdné místo, na sebe sama nic), cílový řádek má během tahu rám `accent`; tažení mezi aplikacemi je další krok |
 | kolečko | plynulé rolování: cíl hned, posun po snímcích (`Ui::tick`); na kraji kolečko dostane oblast pod tabulkou |
 | posuvník | tažení jezdce, klik do dráhy o stránku |
 

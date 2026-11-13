@@ -171,6 +171,7 @@ pub trait App {
 
 /// Ucinek aplikace, ktery provede klient (Elm: `update` jen meni stav).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Effect {
     /// Kopirovat: data ve vic formatech (napr. `text/uri-list` a text).
     /// Plati jen hned po fyzickem vstupu (Ctrl+C, polozka menu).
@@ -217,6 +218,8 @@ pub struct Ui<M> {
     pub(crate) tables: BTreeMap<Key, table::TableState>,
     /// Rozpracovany stisk v tabulce (radek, zahlavi, posuvnik).
     pub(crate) table_press: Option<table::Press>,
+    /// Tazene radky (od `on_drag` do pusteni).
+    pub(crate) dragging: Option<table::Dragging>,
     /// Faze animace neurciteho prubehu (px, roste po snimcich).
     pub(crate) busy_phase: u32,
     /// Otevrena nabidka (vyber, kontextova).
@@ -276,6 +279,7 @@ impl<M: Clone> Ui<M> {
             paste_target: None,
             tables: BTreeMap::new(),
             table_press: None,
+            dragging: None,
             busy_phase: 0,
             popup: None,
             tip: None,
@@ -473,6 +477,7 @@ impl<M: Clone> Ui<M> {
                     ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
                     ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
                     ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
+                    ElemKind::Image { alt, .. } => (Role::Image, alt.clone(), none(), 0),
                     ElemKind::Group => (Role::Group, none(), none(), 0),
                     ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
                     _ => (Role::Group, none(), none(), 0),

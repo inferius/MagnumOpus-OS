@@ -40,6 +40,9 @@ const FIND_RESET: u64 = 1_000_000_000;
 /// Radku na jeden krok kolecka.
 const WHEEL_ROWS: i32 = 3;
 
+/// Prave tazene radky (id) a tabulka, odkud jsou (pro cil pusteni).
+pub(crate) type Dragging = (Key, Vec<u64>);
+
 /// Okoli okraje zahlavi pro zmenu sirky sloupce (px).
 const RESIZE_GRIP: i32 = 4;
 
@@ -348,11 +351,16 @@ impl<M: Clone> Ui<M> {
                     }
                     Press::Row { key, idx, id, x: px, y: py, deferred, dragged: false } if (sx - px).abs().max((sy - py).abs()) > DRAG_START => {
                         let t = self.spec(i)?;
+                        let ids = if t.selection.contains(&id) { t.selection.clone() } else { alloc::vec![id] };
                         if let Some(f) = &t.on_drag {
-                            let ids = if t.selection.contains(&id) { t.selection.clone() } else { alloc::vec![id] };
-                            r.msgs.push(f(ids));
+                            r.msgs.push(f(ids.clone()));
+                            self.dragging = Some((key, ids));
                         }
                         self.table_press = Some(Press::Row { key, idx, id, x: px, y: py, deferred, dragged: true });
+                    }
+                    // Tah pokracuje: cil pod ukazatelem (zvyrazneni radku).
+                    Press::Row { dragged: true, .. } => {
+                        self.hover = self.hit(x, y);
                     }
                     _ => return None,
                 }
@@ -363,6 +371,18 @@ impl<M: Clone> Ui<M> {
                 let i = self.index_of(p.key())?;
                 let (sx, sy) = self.to_space(i, x, y);
                 r.redraw = true;
+                // Pusteni tazenych radku na tabulku s `on_drop`.
+                if let Some((_, ids)) = self.dragging.take()
+                    && let Some(t) = self.hit(x, y)
+                    && let Some(f) = self.spec(t).and_then(|s| s.on_drop.as_ref())
+                {
+                    let (_, ty) = self.to_space(t, x, y);
+                    let target = self.row_at(t, ty).map(|k| (self.spec(t).unwrap().id)(k));
+                    // Ne na sebe sama.
+                    if target.is_none_or(|g| !ids.contains(&g)) {
+                        r.msgs.push(f(target, ids));
+                    }
+                }
                 match p {
                     Press::Row { idx, id, deferred: true, dragged: false, .. } => {
                         let k = self.resolve(i, (idx, id))?;
@@ -531,6 +551,7 @@ impl<M: Clone> Ui<M> {
         }
         if self.table_press.is_some_and(|p| self.index_of(p.key()).is_none()) {
             self.table_press = None;
+            self.dragging = None;
         }
     }
 
@@ -581,7 +602,8 @@ impl<M: Clone> Ui<M> {
         let first = (ts.scroll / rh).max(0) as usize;
         let last = (((ts.scroll + g.body.h as i32) / rh) as usize + 1).min(count);
         let cursor = ts.cursor.and_then(|cu| self.resolve(i, cu));
-        let hover_row = if self.hover == Some(i) && self.table_press.is_none() {
+        let dropping = self.dragging.is_some() && self.spec(i).is_some_and(|s| s.on_drop.is_some());
+        let hover_row = if self.hover == Some(i) && (self.table_press.is_none() || dropping) {
             let (px, py) = self.to_space(i, self.pointer.0, self.pointer.1);
             g.body.contains(px, py).then(|| self.row_at(i, py)).flatten()
         } else {
@@ -597,6 +619,10 @@ impl<M: Clone> Ui<M> {
                 c.fill(rr, col.accent_soft);
             } else if hover_row == Some(k) {
                 c.fill(rr, col.surface_3);
+            }
+            // Cil pusteni: ram akcentu kolem radku pod ukazatelem.
+            if dropping && hover_row == Some(k) && !self.dragging.as_ref().is_some_and(|d| d.1.contains(&id)) {
+                c.round_stroke(rr, th.radius.control, 2, col.accent);
             }
             c.fill(Rect::new(rr.x, rr.bottom() as i32 - 1, rr.w, 1), col.border);
             for (ci, &(x, w)) in cols.iter().enumerate() {

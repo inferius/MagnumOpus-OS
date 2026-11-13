@@ -23,6 +23,7 @@ enum M {
     Sort(usize, bool),
     Drag(Vec<u64>),
     Menu(u64),
+    Drop(Option<u64>, Vec<u64>),
 }
 
 /// Aplikace se seznamem souboru (`n` radku); `calls` pocita, kolikrat
@@ -58,6 +59,7 @@ impl F {
         .on_sort(M::Sort)
         .on_drag(M::Drag)
         .on_context(M::Menu)
+        .on_drop(M::Drop)
         .key("soubory");
         if let Some((c, a)) = self.sort {
             t = t.sorted(c, a);
@@ -315,4 +317,27 @@ fn unconsumed_keys_go_to_app() {
     assert_eq!(un(&mut f, KEY_ENTER, None, 0), None);
     // Pusteni klavesy se nehlasi.
     assert_eq!(f.ui.event(InputEvent::Key { code: KEY_F2, action: 0, ch: None }, 0).unhandled_key, None);
+}
+
+/// Pusteni tazenych radku: na radek `on_drop(Some(id), ids)`, na sebe
+/// sama nic, cilovy radek je pri tahu zvyrazneny.
+#[test]
+fn drop_rows_on_row() {
+    let mut f = F::new(20);
+    f.click(1, 0, 1_000_000_000);
+    f.click(2, SHIFT, 3_000_000_000);
+    let (x, y) = f.row_pt(1);
+    let (_, ty) = f.row_pt(5);
+    f.ev(InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, 0, Some(5_000_000_000));
+    f.ev(InputEvent::PointerMove { x, y: y + 20 }, 0, None);
+    f.ev(InputEvent::PointerMove { x, y: ty }, 0, None);
+    f.ev(InputEvent::Button { code: BTN_LEFT, pressed: false, x, y: ty }, 0, None);
+    assert!(f.msgs.contains(&M::Drop(Some(1005), vec![1001, 1002])), "{:?}", f.msgs);
+    // Na sebe sama: nic.
+    f.msgs.clear();
+    let (_, y2) = f.row_pt(2);
+    f.ev(InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, 0, Some(9_000_000_000));
+    f.ev(InputEvent::PointerMove { x, y: y + 20 }, 0, None);
+    f.ev(InputEvent::Button { code: BTN_LEFT, pressed: false, x, y: y2 }, 0, None);
+    assert!(!f.msgs.iter().any(|m| matches!(m, M::Drop(..))), "{:?}", f.msgs);
 }

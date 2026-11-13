@@ -249,3 +249,43 @@ fn segments_bar() {
     }
     assert!(seen.0 && seen.1, "srafy");
 }
+
+/// Obrazek: zmenseny se zachovanim pomeru stran na stred prvku, popis pro
+/// ctecku; kratka data se nekresli (zadna panika).
+#[test]
+fn image_scaled_and_described() {
+    let (w, h) = (40u32, 20u32);
+    let px: alloc::rc::Rc<[u32]> = alloc::vec![0xFF20_50C4u32; (w * h) as usize].into();
+    let mut u: Ui<()> = Ui::new(crate::Look::ui_fonts(), 300, 200);
+    u.rebuild("i".into(), column([image(w, h, px.clone(), "Náhled obrázku").width(80).height(80), image(w, h, px.slice_short(), "vadný")]));
+    let n = u.a11y().into_iter().find(|n| n.role == Role::Image && n.name == "Náhled obrázku").unwrap();
+    let mut buf = vec![0u32; 300 * 200];
+    let mut c = gfx::Canvas::new(&mut buf, 300, 200, 300).unwrap();
+    u.draw(&mut c, 0);
+    let b = n.bounds;
+    // Na stred prvku, nezvetsuje se nad svou velikost (40x20).
+    let (cx, cy) = (b.x + b.w as i32 / 2, b.y + b.h as i32 / 2);
+    assert_eq!(c.get(cx as u32, cy as u32), 0xFF20_50C4);
+    assert_ne!(c.get(cx as u32, (cy - 11) as u32), 0xFF20_50C4);
+    assert_ne!(c.get((cx - 21) as u32, cy as u32), 0xFF20_50C4);
+    // Mensi prostor zmensi se zachovanim pomeru: 40x20 v 20 px siroke oblasti.
+    let mut u2: Ui<()> = Ui::new(crate::Look::ui_fonts(), 300, 200);
+    u2.rebuild("i".into(), row([image(w, h, px, "malý").width(20), spacer()]));
+    let b2 = u2.a11y().into_iter().find(|n| n.role == Role::Image).unwrap().bounds;
+    let mut buf2 = vec![0u32; 300 * 200];
+    let mut c2 = gfx::Canvas::new(&mut buf2, 300, 200, 300).unwrap();
+    u2.draw(&mut c2, 0);
+    let (cx, cy) = (b2.x + 10, b2.y + b2.h as i32 / 2);
+    assert_eq!(c2.get(cx as u32, cy as u32), 0xFF20_50C4);
+    assert_ne!(c2.get(cx as u32, (cy - 6) as u32), 0xFF20_50C4, "vyska 10 px");
+}
+
+trait Short {
+    fn slice_short(&self) -> alloc::rc::Rc<[u32]>;
+}
+
+impl Short for alloc::rc::Rc<[u32]> {
+    fn slice_short(&self) -> alloc::rc::Rc<[u32]> {
+        self[..10].into()
+    }
+}
