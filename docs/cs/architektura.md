@@ -700,8 +700,74 @@ nativní protějšek, protože jsou dobré samy o sobě, ne kvůli Windows:
 Každá aplikace má adresář s virtuálním `C:` a vlastními registry.
 Odinstalace = smazání adresáře.
 
-První cíl (milník 5): .exe se statickým CRT (`/MT`), které potřebuje jen
-`kernel32` a `ntdll`. Hned potom vlastní UCRT.
+### Horní patro z Wine, spodní naše
+
+**Stav: [navrženo]** (rozhodnuto 2026-11-13, nahrazuje původní plán
+vlastních `kernel32`/`ntdll`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vrstvy Windows vrstvy">
+<defs><marker id="wv1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="760" height="44" rx="6"/>
+<text class="t b" x="390" y="37" text-anchor="middle">Windows aplikace (.exe, .dll) ve vlastní složce s virtuálním C:</text>
+<rect class="ok" x="10" y="74" width="760" height="56" rx="6"/>
+<text class="t b" x="390" y="97" text-anchor="middle">horní patro: DLL z Wine beze změny (PE)</text>
+<text class="m" x="390" y="117" text-anchor="middle">kernel32 · kernelbase · user32 · gdi32 · comctl32 · ucrtbase · ... · DXVK (d3d9-11 -> Vulkan)</text>
+<rect class="acc" x="10" y="150" width="760" height="70" rx="6"/>
+<text class="t b" x="390" y="173" text-anchor="middle">spodní patro: naše (Rust)</text>
+<text class="m" x="390" y="193" text-anchor="middle">PE loader · spodní část ntdll · služba vrstvy místo wineserver</text>
+<text class="m" x="390" y="210" text-anchor="middle">ovladače Wine: grafika → compd, zvuk → audiod</text>
+<rect class="box" x="10" y="240" width="760" height="50" rx="6"/>
+<text class="t b" x="390" y="262" text-anchor="middle">libos a služby systému</text>
+<text class="m" x="390" y="280" text-anchor="middle">handly · wait_many · Port · MemoryObject · AddressRegion · Job · kanál výjimek · fsd · netd · compd · audiod</text>
+<line class="ln" x1="390" y1="54" x2="390" y2="70" marker-end="url(#wv1)"/>
+<line class="ln" x1="390" y1="130" x2="390" y2="146" marker-end="url(#wv1)"/>
+<line class="ln" x1="390" y1="220" x2="390" y2="236" marker-end="url(#wv1)"/>
+</svg>
+<figcaption>Win32 přebíráme z Wine, vlastní práce je jen na hranici se systémem.</figcaption>
+</figure>
+
+Win32 jsou desítky tisíc funkcí a Wine je na nich třicet let práce.
+Vlastní `kernel32` nebo `user32` by byla slepá ulička. Wine dnes překládá
+skoro všechny knihovny jako běžné Windows DLL (PE), které se systémem pod
+sebou mluví jen přes úzké rozhraní: spodní část `ntdll` a službu
+`wineserver`. **Toto rozhraní napíšeme sami v Rustu nad našimi objekty**
+(tabulka výše), zbytek převezmeme beze změny:
+
+- **horní patro (převzaté, LGPL):** DLL z Wine, `ucrtbase`, DXVK
+  (Direct3D 9-11 na Vulkan); běží jako běžný proces, licence nevadí,
+- **spodní patro (naše):** PE loader, spodní část `ntdll` (systémová
+  volání Wine na naše handly, `wait_many`, `Port`, `MemoryObject`),
+  **služba vrstvy** místo `wineserver` (sdílený stav mezi procesy jedné
+  aplikace: pojmenované objekty, okna, registry), grafický ovladač Wine
+  nad `compd` a zvukový nad `audiod`,
+- **co neděláme:** celé Wine nad POSIX vrstvou (jako port na macOS) -
+  potřebovalo by skoro úplný Unix (signály, `mmap` na pevné adresy, ptrace),
+  který kvůli tomu stavět nechceme.
+
+**Předpoklady** (bez nich Wine nenaběhne):
+
+1. Rust std fáze 2 a C knihovna (`cstd`) - nástroje a sestavení Wine.
+2. Správa paměti: rezervace adresního prostoru na pevných adresách,
+   stránky na požádání, CoW, W^X s oprávněním „smí JIT“ v manifestu (.NET,
+   prohlížeče).
+3. TEB přes registr GS na x86_64: jádro dnes GS používá pro data CPU
+   (`swapgs`), potřebuje čistý návrh.
+4. Doručení výjimek (SEH) na kanál výjimek a pozastavení vlákna se čtením
+   a zápisem kontextu.
+
+**Postup:**
+
+1. **v1 (milník 5):** PE loader a spodní `ntdll`, konzolové .exe
+   (např. `cmd` z Wine, malé nástroje), terminál přes adaptér VT.
+2. Služba vrstvy (`wineserver`) - víc procesů jedné aplikace, pojmenované
+   objekty, registry.
+3. **v2 (milník 8):** GUI přes grafický ovladač nad `compd`, zvuk.
+4. DXVK a hry (Vulkan: Venus v QEMU, na HW ovladače GPU).
+
+**Omezení:** jen x86_64 (na ARM by bylo potřeba emulovat x86, např.
+FEX nebo box64 - až výrazně později, výslovně jako omezení podle pravidla
+dvou architektur); 32bitové aplikace až přes režim WoW64 nového Wine.
 
 ## Chyby a logování
 
@@ -1124,7 +1190,8 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 2. Základ jádra: GDT/IDT, výjimky, alokátor fyzické paměti, stránkování, heap (hotovo)
 3. Procesy: plánovač, SMP, vlákna, objekty, handly, capabilities (hotovo)
 4. Userspace: syscally, první proces, IPC, libos, initfs (hotovo)
-5. Windows vrstva v1: PE loader, ntdll/kernel32, konzolové .exe
+5. Windows vrstva v1: PE loader a spodní `ntdll` pod DLL z Wine, konzolové .exe
+   (po std fázi 2, `cstd` a správě paměti - viz [Windows vrstva](#windows-vrstva))
 6. Systém: userspace ovladače (virtio - hotovo), FS (hotovo), síť (virtio-net,
    TCP/IP, DHCP, DNS, synchronizace času `ntpd`, přístup přes capability,
    firewall, TLS 1.3 a klient HTTP/1.1 a HTTP/2 hotové - viz
@@ -1145,7 +1212,8 @@ C, C++ i Rust), ale dává smysl jako samostatný projekt:
 7. Jazyky a překladač (viz [Jazyky a překladače](#jazyky-a-překladače-plán)):
    Rust (`std` pro náš OS), C (vlastní libc nad libos), C++ (libc++/libunwind
    nad libc), překlad clangem z hostitele, pak TinyCC v systému
-8. Windows vrstva v2: user32/gdi32, GUI, DirectX přes Vulkan
+8. Windows vrstva v2: GUI (user32/gdi32 z Wine) přes ovladač nad `compd`, zvuk,
+   DirectX přes DXVK na Vulkan
 9. Port na aarch64 a první ARM zařízení (rozhraní architektury a QEMU
    `virt` hotové, Raspberry Pi zbývá)
 

@@ -739,8 +739,77 @@ Windows:
 Each application has a directory with a virtual `C:` and its own registry.
 Uninstall = delete the directory.
 
-First goal (milestone 5): an .exe with a static CRT (`/MT`) that needs only
-`kernel32` and `ntdll`. Our own UCRT right after.
+### Upper tier from Wine, lower tier ours
+
+**Status: [designed]** (decided 2026-11-13, replaces the original plan of
+our own `kernel32`/`ntdll`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Windows layer tiers">
+<defs><marker id="wv2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="760" height="44" rx="6"/>
+<text class="t b" x="390" y="37" text-anchor="middle">Windows applications (.exe, .dll) in their own directory with a virtual C:</text>
+<rect class="ok" x="10" y="74" width="760" height="56" rx="6"/>
+<text class="t b" x="390" y="97" text-anchor="middle">upper tier: Wine DLLs unchanged (PE)</text>
+<text class="m" x="390" y="117" text-anchor="middle">kernel32 · kernelbase · user32 · gdi32 · comctl32 · ucrtbase · ... · DXVK (d3d9-11 -> Vulkan)</text>
+<rect class="acc" x="10" y="150" width="760" height="70" rx="6"/>
+<text class="t b" x="390" y="173" text-anchor="middle">lower tier: ours (Rust)</text>
+<text class="m" x="390" y="193" text-anchor="middle">PE loader · lower part of ntdll · layer service instead of wineserver</text>
+<text class="m" x="390" y="210" text-anchor="middle">Wine drivers: graphics → compd, audio → audiod</text>
+<rect class="box" x="10" y="240" width="760" height="50" rx="6"/>
+<text class="t b" x="390" y="262" text-anchor="middle">libos and system services</text>
+<text class="m" x="390" y="280" text-anchor="middle">handly · wait_many · Port · MemoryObject · AddressRegion · Job · exception channel · fsd · netd · compd · audiod</text>
+<line class="ln" x1="390" y1="54" x2="390" y2="70" marker-end="url(#wv2)"/>
+<line class="ln" x1="390" y1="130" x2="390" y2="146" marker-end="url(#wv2)"/>
+<line class="ln" x1="390" y1="220" x2="390" y2="236" marker-end="url(#wv2)"/>
+</svg>
+<figcaption>Win32 is adopted from Wine; our own work is only at the boundary with the system.</figcaption>
+</figure>
+
+Win32 is tens of thousands of functions and Wine is thirty years of work
+on them. Our own `kernel32` or `user32` would be a dead end. Today Wine
+builds almost all its libraries as ordinary Windows DLLs (PE) that talk to
+the system below only through a narrow interface: the lower part of
+`ntdll` and the `wineserver` service. **We write this interface ourselves
+in Rust on top of our objects** (table above) and adopt the rest unchanged:
+
+- **upper tier (adopted, LGPL):** Wine DLLs, `ucrtbase`, DXVK
+  (Direct3D 9-11 on Vulkan); runs as an ordinary process, the license is
+  fine,
+- **lower tier (ours):** PE loader, the lower part of `ntdll` (Wine system
+  calls onto our handles, `wait_many`, `Port`, `MemoryObject`), a **layer
+  service** instead of `wineserver` (state shared between the processes of
+  one application: named objects, windows, registry), a Wine graphics
+  driver on top of `compd` and an audio driver on top of `audiod`,
+- **what we do not do:** all of Wine on top of a POSIX layer (like the
+  macOS port) - it would need an almost complete Unix (signals, `mmap` at
+  fixed addresses, ptrace) that we do not want to build for this.
+
+**Prerequisites** (Wine will not start without them):
+
+1. Rust std phase 2 and the C library (`cstd`) - tools and building Wine.
+2. Memory management: reserving address space at fixed addresses, demand
+   paging, CoW, W^X with a "may JIT" permission in the manifest (.NET,
+   browsers).
+3. TEB via the GS register on x86_64: the kernel uses GS for per-CPU data
+   today (`swapgs`), this needs a clean design.
+4. Exception delivery (SEH) on the exception channel and suspending a
+   thread with reading and writing its context.
+
+**Steps:**
+
+1. **v1 (milestone 5):** PE loader and the lower `ntdll`, console .exe
+   (e.g. Wine `cmd`, small tools), the terminal through a VT adapter.
+2. The layer service (`wineserver`) - several processes of one
+   application, named objects, registry.
+3. **v2 (milestone 8):** GUI through the graphics driver on top of
+   `compd`, audio.
+4. DXVK and games (Vulkan: Venus in QEMU, GPU drivers on hardware).
+
+**Limitations:** x86_64 only (ARM would need x86 emulation, e.g. FEX or
+box64 - much later, stated explicitly as a limitation per the
+two-architecture rule); 32-bit applications only through the WoW64 mode
+of new Wine.
 
 ## Errors and logging
 
@@ -1179,7 +1248,8 @@ covers C, C++ and Rust), but it makes sense as a separate project:
 2. Kernel basics: GDT/IDT, exceptions, physical allocator, paging, heap (done)
 3. Processes: scheduler, SMP, threads, objects, handles, capabilities (done)
 4. Userspace: syscalls, first process, IPC, libos, initfs (done)
-5. Windows layer v1: PE loader, ntdll/kernel32, console .exe
+5. Windows layer v1: PE loader and the lower `ntdll` under Wine DLLs, console .exe
+   (after std phase 2, `cstd` and memory management - see [Windows layer](#windows-layer))
 6. System: userspace drivers (virtio - done), FS (done), network (virtio-net,
    TCP/IP, DHCP, DNS, time synchronization `ntpd`, access through a
    capability, the firewall, TLS 1.3 and an HTTP/1.1 and HTTP/2 client
@@ -1202,7 +1272,8 @@ covers C, C++ and Rust), but it makes sense as a separate project:
    Rust (`std` for our OS), C (own libc on top of libos), C++
    (libc++/libunwind on top of libc), cross-compiled with clang from the
    host, then TinyCC in the system
-8. Windows layer v2: user32/gdi32, GUI, DirectX via Vulkan
+8. Windows layer v2: GUI (user32/gdi32 from Wine) through a driver on top of
+   `compd`, audio, DirectX via DXVK on Vulkan
 9. aarch64 port and the first ARM device (architecture interface and QEMU
    `virt` done, Raspberry Pi remains)
 
