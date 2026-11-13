@@ -14,12 +14,14 @@
 extern crate alloc;
 
 pub mod context;
+mod controls;
 pub mod draw;
 pub mod event;
 mod field;
 pub mod layout;
 pub mod look;
 pub mod node;
+pub(crate) mod popup;
 pub mod scrollbar;
 mod table;
 pub mod text;
@@ -131,6 +133,50 @@ pub trait App {
         let _ = data;
         false
     }
+
+    /// Zprava z kanalu `index` (`client::run_channels`, poradi jako ve
+    /// vektoru kanalu). Vychozi: kanal 0 = [`App::external`].
+    fn external_from(&mut self, index: usize, data: &[u8]) -> bool {
+        if index == 0 { self.external(data) } else { false }
+    }
+
+    /// Pozadovana velikost okna pri otevreni: (sirka, vyska, strop sirky
+    /// a vysky v promile pracovni plochy), viz `Window::request_size`.
+    /// `None` = velikost z `client::run`.
+    fn size_hint(&self) -> Option<(u32, u32, u16, u16)> {
+        None
+    }
+
+    /// Klavesa, kterou nespotreboval prvek s fokusem (ani textove pole):
+    /// zkratky aplikace (F2, Delete, Enter mimo tabulku, Ctrl+C/X/V nad
+    /// tabulkou, Ctrl+N, Alt+sipky). `ch` = znak podle rozlozeni,
+    /// `mods` = `inputproto::mods`.
+    fn key(&self, code: u16, ch: Option<char>, mods: u16) -> Option<Self::Msg> {
+        let _ = (code, ch, mods);
+        None
+    }
+
+    /// Ucinky po `update` (schranka): klient je vybere po kazde davce zprav.
+    fn effects(&mut self) -> Vec<Effect> {
+        Vec::new()
+    }
+
+    /// Data vlozena ze schranky na zadost `Effect::Paste` (format, ktery
+    /// prisel). Vraci, zda se zmenil stav.
+    fn pasted(&mut self, format: &str, data: &[u8]) -> bool {
+        let _ = (format, data);
+        false
+    }
+}
+
+/// Ucinek aplikace, ktery provede klient (Elm: `update` jen meni stav).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Effect {
+    /// Kopirovat: data ve vic formatech (napr. `text/uri-list` a text).
+    /// Plati jen hned po fyzickem vstupu (Ctrl+C, polozka menu).
+    Copy { formats: Vec<(String, Vec<u8>)> },
+    /// Vlozit: prvni z formatu, ktery schranka ma; odpoved `App::pasted`.
+    Paste { formats: Vec<String> },
 }
 
 /// Stav rozhrani jednoho okna.
@@ -171,6 +217,15 @@ pub struct Ui<M> {
     pub(crate) tables: BTreeMap<Key, table::TableState>,
     /// Rozpracovany stisk v tabulce (radek, zahlavi, posuvnik).
     pub(crate) table_press: Option<table::Press>,
+    /// Faze animace neurciteho prubehu (px, roste po snimcich).
+    pub(crate) busy_phase: u32,
+    /// Otevrena nabidka (vyber, kontextova).
+    pub(crate) popup: Option<popup::Popup<M>>,
+    /// Bublina: prvek pod ukazatelem a od kdy (odpocet), zobrazena.
+    pub(crate) tip: Option<(Key, u64)>,
+    pub(crate) tip_shown: Option<Key>,
+    /// Cas posledni udalosti (ns).
+    pub(crate) now: u64,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -221,6 +276,11 @@ impl<M: Clone> Ui<M> {
             paste_target: None,
             tables: BTreeMap::new(),
             table_press: None,
+            busy_phase: 0,
+            popup: None,
+            tip: None,
+            tip_shown: None,
+            now: 0,
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -248,6 +308,11 @@ impl<M: Clone> Ui<M> {
     pub fn set_context(&mut self, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32, generation: u32) {
         let c = &mut self.cx;
         (c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation) = (output, screen, work_area, scale, refresh_mhz, generation);
+    }
+
+    /// Formaty ve schrance (klient po zprave `Changed`).
+    pub fn set_clipboard_formats(&mut self, f: Vec<String>) {
+        self.cx.clipboard = f;
     }
 
     /// Znovu rozvrhne rozhrani aplikace pro aktualni kontext okna.
@@ -281,6 +346,14 @@ impl<M: Clone> Ui<M> {
         for (k, max) in areas {
             let s = self.scroll.entry(k).or_insert(0);
             *s = (*s).clamp(0, max);
+        }
+        // Nabidka a bublina zmizelych prvku pryc.
+        if self.popup.as_ref().is_some_and(|p| self.index_of(p.owner()).is_none()) {
+            self.popup = None;
+        }
+        if self.tip.is_some_and(|(k, _)| self.index_of(k).is_none()) {
+            self.tip = None;
+            self.tip_shown = None;
         }
         // Najeti podle ukazatele (prvky se mohly posunout).
         self.hover = if self.pointer.0 >= 0 { self.hit(self.pointer.0, self.pointer.1) } else { None };
@@ -376,24 +449,39 @@ impl<M: Clone> Ui<M> {
         for (i, e) in self.elems.iter().enumerate() {
             let parent = if e.parent == 0 { WINDOW_NODE } else { self.elem_ids[e.parent - 1] };
             let none = String::new;
-            let (role, name, value, actions) = match &e.kind {
-                ElemKind::Label { text, .. } => (Role::Label, if e.agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), 0),
-                ElemKind::Button { text, .. } => (Role::Button, text.clone(), none(), ACTIVATE | FOCUS),
-                // Heslo: hodnota se nikdy neposila (ani jeji delka).
-                ElemKind::TextInput { placeholder, secure: true, .. } => (Role::PasswordInput, placeholder.clone(), none(), SET_VALUE | FOCUS),
-                ElemKind::TextInput { value, placeholder, .. } => (Role::TextInput, placeholder.clone(), value.clone(), SET_VALUE | FOCUS),
-                ElemKind::Checkbox { text, .. } => (Role::Checkbox, text.clone(), none(), TOGGLE | ACTIVATE),
-                ElemKind::List { .. } => (Role::List, none(), none(), FOCUS),
-                // Agent i pro ctecku obrazovky (ne jen barvou).
-                ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
-                ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
-                ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
-                ElemKind::Group => (Role::Group, none(), none(), 0),
-                ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
+            let mut extra = 0;
+            let (role, name, value, actions) = if let Some((ro, n, v, s, a)) = self.control_role(i) {
+                extra = s;
+                (ro, n, v, a)
+            } else {
+                match &e.kind {
+                    ElemKind::Label { text, .. } => (Role::Label, if e.agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), 0),
+                    // Tlacitko jen s ikonou: jmeno z bubliny.
+                    ElemKind::Button { text, .. } => (Role::Button, if text.is_empty() { e.tooltip.clone().unwrap_or_default() } else { text.clone() }, none(), ACTIVATE | FOCUS),
+                    ElemKind::Select { options, selected, .. } => {
+                        if self.popup.as_ref().is_some_and(|p| p.owner() == e.key) {
+                            extra = a11y::state::EXPANDED;
+                        }
+                        (Role::ComboBox, none(), options.get(*selected).cloned().unwrap_or_default(), ACTIVATE | FOCUS)
+                    }
+                    // Heslo: hodnota se nikdy neposila (ani jeji delka).
+                    ElemKind::TextInput { placeholder, secure: true, .. } => (Role::PasswordInput, placeholder.clone(), none(), SET_VALUE | FOCUS),
+                    ElemKind::TextInput { value, placeholder, .. } => (Role::TextInput, placeholder.clone(), value.clone(), SET_VALUE | FOCUS),
+                    ElemKind::Checkbox { text, .. } => (Role::Checkbox, text.clone(), none(), TOGGLE | ACTIVATE),
+                    ElemKind::List { .. } => (Role::List, none(), none(), FOCUS),
+                    // Agent i pro ctecku obrazovky (ne jen barvou).
+                    ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
+                    ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
+                    ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
+                    ElemKind::Group => (Role::Group, none(), none(), 0),
+                    ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
+                    _ => (Role::Group, none(), none(), 0),
+                }
             };
             let layer = if e.space == 0 { ROOT_LAYER } else { scroll_layers(self.elem_ids[e.space - 1]).1 };
             let id = self.elem_ids[i];
-            out.push(A11yNode { id, parent, role, name, value, state: self.state(i).a11y_bits(), layer, bounds: e.rect, actions });
+            out.push(A11yNode { id, parent, role, name, value, state: self.state(i).a11y_bits() | extra, layer, bounds: e.rect, actions });
+            self.control_children(i, id, layer, &mut out);
             // Tabulka: zahlavi a viditelne radky.
             if matches!(e.kind, ElemKind::Table(_)) {
                 self.table_a11y(i, id, layer, &mut out);
@@ -403,6 +491,7 @@ impl<M: Clone> Ui<M> {
                 out.push(A11yNode { id: error_node(id), parent: id, role: Role::Label, name: err.clone(), value: none(), state: 0, layer, bounds: e.rect, actions: 0 });
             }
         }
+        self.popup_a11y(&mut out);
         out
     }
 

@@ -94,6 +94,23 @@ pub enum Kind<M> {
     Progress { value: u32 },
     /// Tabulka / seznam s virtualizaci (viz [`table`]).
     Table(Box<TableSpec<M>>),
+    /// Prepinac zapnuto / vypnuto (nastaveni s okamzitym ucinkem).
+    Switch { text: String, on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
+    /// Volba jedne z moznosti (skupinu tvori aplikace, jinak `segmented`).
+    Radio { text: String, checked: bool, on_click: Option<M> },
+    /// Posuvnik hodnoty `min..=max` s krokem `step`.
+    Slider { value: i32, min: i32, max: i32, step: i32, on_change: Option<Box<dyn Fn(i32) -> M>> },
+    /// Segmentovy prepinac (jedna volba z nekolika, napr. filtr).
+    Segmented { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
+    /// Zalozky; `on_close` = zavirani (krizek, prostredni tlacitko).
+    Tabs { labels: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>>, on_close: Option<Box<dyn Fn(usize) -> M>> },
+    /// Neurcity prubeh (bezi, delka nezname).
+    Busy,
+    /// Pruhovy graf podilu (oddily disku, obsazeni, kvoty).
+    Segments { items: Vec<Segment>, legend: bool },
+    /// Vyber jedne moznosti z rozbalovaciho seznamu.
+    Select { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
+
     Column(Vec<Node<M>>),
     Row(Vec<Node<M>>),
     /// Posouvany obsah: posun dela kompozitor (vlastni vrstva s orezem).
@@ -121,6 +138,97 @@ pub struct Node<M> {
     /// Fokus jen klikem, ne klavesou Tab (napr. pomocne tlacitko, ktere
     /// ma i klavesovou zkratku).
     pub skip_tab: bool,
+    /// Kontextova nabidka (prave tlacitko, Shift+F10, klavesa Menu).
+    pub menu: Option<Vec<MenuEntry<M>>>,
+    /// Bublina s popisem (po 500 ms nad prvkem).
+    pub tooltip: Option<String>,
+}
+
+/// Co polozka nabidky udela.
+#[derive(Clone)]
+pub enum MenuAct<M> {
+    /// Zprava aplikaci.
+    Msg(M),
+    /// Akce z manifestu (`App::action`), napr. polozka z `App::menu`.
+    Action(String, Vec<guiproto::action::Arg>),
+}
+
+/// Polozka nabidky (kontextove i rozbalovaci).
+#[derive(Clone)]
+pub struct MenuEntry<M> {
+    pub label: String,
+    /// Zkratka pro zobrazeni ("Ctrl+C").
+    pub shortcut: String,
+    /// Zakazano s duvodem (prazdny = povolena); duvod cte ctecka.
+    pub disabled: String,
+    /// Prepinac: `None` = neni.
+    pub checked: Option<bool>,
+    /// Oddelovac skupin.
+    pub separator: bool,
+    pub act: Option<MenuAct<M>>,
+}
+
+/// Polozka nabidky, ktera posle zpravu `m`.
+pub fn menu_item<M>(label: &str, m: M) -> MenuEntry<M> {
+    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Msg(m)) }
+}
+
+/// Oddelovac skupin v nabidce.
+pub fn menu_separator<M>() -> MenuEntry<M> {
+    MenuEntry { label: String::new(), shortcut: String::new(), disabled: String::new(), checked: None, separator: true, act: None }
+}
+
+impl<M> MenuEntry<M> {
+    pub fn shortcut(mut self, s: &str) -> Self {
+        self.shortcut = s.into();
+        self
+    }
+
+    /// Zakazat s duvodem.
+    pub fn disabled(mut self, why: &str) -> Self {
+        self.disabled = why.into();
+        self
+    }
+
+    pub fn checked(mut self, c: bool) -> Self {
+        self.checked = Some(c);
+        self
+    }
+}
+
+/// Polozky z menu aplikace (`App::menu`, akce z manifestu): podnabidky se
+/// rozbali do jedne urovne oddelene oddelovaci (kontextova nabidka se
+/// stejnymi polozkami jako menu okna).
+pub fn menu_from<M>(items: &[guiproto::menu::MenuItem]) -> Vec<MenuEntry<M>> {
+    let mut out: Vec<MenuEntry<M>> = Vec::new();
+    for it in items {
+        if it.children.is_empty() {
+            if it.action.is_empty() {
+                continue;
+            }
+            out.push(MenuEntry {
+                label: it.label.clone(),
+                shortcut: it.shortcut.clone(),
+                disabled: it.disabled.clone(),
+                checked: it.checked,
+                separator: false,
+                act: Some(MenuAct::Action(it.action.clone(), it.args.clone())),
+            });
+        } else {
+            let sub = menu_from(&it.children);
+            if sub.is_empty() {
+                continue;
+            }
+            if !out.is_empty() && !out.last().is_some_and(|e| e.separator) {
+                out.push(menu_separator());
+            }
+            out.extend(sub);
+        }
+    }
+    while out.last().is_some_and(|e| e.separator) {
+        out.pop();
+    }
+    out
 }
 
 fn node<M>(kind: Kind<M>) -> Node<M> {
@@ -134,6 +242,8 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
         key: None,
         error: None,
         skip_tab: false,
+        menu: None,
+        tooltip: None,
     }
 }
 
@@ -190,6 +300,79 @@ pub fn list<M>(items: impl IntoIterator<Item = String>, selected: Option<usize>)
     })
 }
 
+/// Prepinac zapnuto / vypnuto.
+pub fn switch<M>(text: &str, on: bool) -> Node<M> {
+    node(Kind::Switch { text: text.into(), on, on_toggle: None })
+}
+
+/// Volba (kruh); zprava pri vyberu `on_click`.
+pub fn radio<M>(text: &str, checked: bool) -> Node<M> {
+    node(Kind::Radio { text: text.into(), checked, on_click: None })
+}
+
+/// Posuvnik hodnoty v rozsahu `min..=max` (krok 1, zmena `.step`).
+pub fn slider<M>(value: i32, min: i32, max: i32) -> Node<M> {
+    let max = max.max(min);
+    node(Kind::Slider { value: value.clamp(min, max), min, max, step: 1, on_change: None })
+}
+
+/// Segmentovy prepinac.
+pub fn segmented<M>(options: impl IntoIterator<Item = String>, selected: usize) -> Node<M> {
+    node(Kind::Segmented { options: options.into_iter().collect(), selected, on_select: None })
+}
+
+/// Zalozky.
+pub fn tabs<M>(labels: impl IntoIterator<Item = String>, selected: usize) -> Node<M> {
+    node(Kind::Tabs { labels: labels.into_iter().collect(), selected, on_select: None, on_close: None })
+}
+
+/// Ton useku pruhoveho grafu (barvy jen z tokenu, dvojice s overenym
+/// kontrastem textu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    /// Hlavni (napr. novy oddil systemu): `accent` / `on_accent`.
+    Accent,
+    /// Bezny obsah: `surface_3` / `ink`.
+    Neutral,
+    /// Jiny obsah (jiny system): `accent_soft` / `accent_ink`.
+    Other,
+    /// Mene dulezite (EFI, obnova): `surface_2` / `ink_muted`.
+    Muted,
+    /// Volne misto: srafovane `surface_3` a `surface`, text `ink_muted`.
+    Free,
+}
+
+/// Usek pruhoveho grafu: vaha (napr. bajty), popisek (cely jde do stromu
+/// pristupnosti, v pruhu jen kdyz se vejde) a ton.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Segment {
+    pub weight: u64,
+    pub label: String,
+    pub tone: Tone,
+}
+
+impl Segment {
+    pub fn new(weight: u64, label: &str, tone: Tone) -> Self {
+        Self { weight, label: label.into(), tone }
+    }
+}
+
+/// Pruhovy graf podilu (`.dbar` v design/instalace.html): vodorovny pruh
+/// rozdeleny na useky podle vah, volitelne legenda (`.legend(true)`).
+pub fn segments<M>(items: Vec<Segment>) -> Node<M> {
+    node(Kind::Segments { items, legend: false })
+}
+
+/// Rozbalovaci vyber jedne z `options` (zprava `on_pick`).
+pub fn select<M>(options: impl IntoIterator<Item = String>, selected: usize) -> Node<M> {
+    node(Kind::Select { options: options.into_iter().collect(), selected, on_select: None })
+}
+
+/// Neurcity prubeh (animace po snimcich).
+pub fn busy<M>() -> Node<M> {
+    node(Kind::Busy)
+}
+
 pub fn progress<M>(value: u32) -> Node<M> {
     node(Kind::Progress { value: value.min(100) })
 }
@@ -227,6 +410,19 @@ impl<M> Node<M> {
 
     pub fn skip_tab(mut self, s: bool) -> Self {
         self.skip_tab = s;
+        self
+    }
+
+    /// Kontextova nabidka prvku (prave tlacitko, Shift+F10, klavesa Menu).
+    pub fn context_menu(mut self, items: Vec<MenuEntry<M>>) -> Self {
+        self.menu = Some(items);
+        self
+    }
+
+    /// Bublina s popisem (po 500 ms nad prvkem). Tlacitku bez textu (jen
+    /// ikona) da i jmeno pro ctecku obrazovky.
+    pub fn tooltip(mut self, t: &str) -> Self {
+        self.tooltip = (!t.is_empty()).then(|| t.into());
         self
     }
 
@@ -280,8 +476,50 @@ impl<M> Node<M> {
     }
 
     pub fn on_click(mut self, m: M) -> Self {
-        if let Kind::Button { on_click, .. } = &mut self.kind {
-            *on_click = Some(m);
+        match &mut self.kind {
+            Kind::Button { on_click, .. } | Kind::Radio { on_click, .. } => *on_click = Some(m),
+            _ => {}
+        }
+        self
+    }
+
+    /// Legenda pod pruhovym grafem.
+    pub fn legend(mut self, l: bool) -> Self {
+        if let Kind::Segments { legend, .. } = &mut self.kind {
+            *legend = l;
+        }
+        self
+    }
+
+    /// Krok posuvniku.
+    pub fn step(mut self, s: i32) -> Self {
+        if let Kind::Slider { step, .. } = &mut self.kind {
+            *step = s.max(1);
+        }
+        self
+    }
+
+    /// Nova hodnota posuvniku.
+    pub fn on_value(mut self, f: impl Fn(i32) -> M + 'static) -> Self {
+        if let Kind::Slider { on_change, .. } = &mut self.kind {
+            *on_change = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// Vybrana volba segmentu nebo zalozka.
+    pub fn on_pick(mut self, f: impl Fn(usize) -> M + 'static) -> Self {
+        match &mut self.kind {
+            Kind::Segmented { on_select, .. } | Kind::Tabs { on_select, .. } | Kind::Select { on_select, .. } => *on_select = Some(Box::new(f)),
+            _ => {}
+        }
+        self
+    }
+
+    /// Zavreni zalozky (krizek, prostredni tlacitko).
+    pub fn on_close(mut self, f: impl Fn(usize) -> M + 'static) -> Self {
+        if let Kind::Tabs { on_close, .. } = &mut self.kind {
+            *on_close = Some(Box::new(f));
         }
         self
     }
@@ -316,8 +554,9 @@ impl<M> Node<M> {
     }
 
     pub fn on_toggle(mut self, f: impl Fn(bool) -> M + 'static) -> Self {
-        if let Kind::Checkbox { on_toggle, .. } = &mut self.kind {
-            *on_toggle = Some(Box::new(f));
+        match &mut self.kind {
+            Kind::Checkbox { on_toggle, .. } | Kind::Switch { on_toggle, .. } => *on_toggle = Some(Box::new(f)),
+            _ => {}
         }
         self
     }

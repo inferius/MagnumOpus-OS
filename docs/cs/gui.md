@@ -1269,6 +1269,14 @@ převede na zprávy `Msg`.
 | `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
 | `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
+| `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
+| `select` | klik, výběr ze seznamu | Enter, mezerník, Alt+dolů, F4; zavřený šipky | `combo-box`, `menu`, `menu-item` |
+| `segments` | - | - | `list` s položkami `list-item` (celý popisek každého úseku) |
+| `switch` | klik | mezerník, Enter (při puštění) | `switch`, `checked`, `toggle` |
+| `radio` | klik | mezerník, Enter | `radio`, `checked` |
+| `slider` | klik do dráhy, tah, kolečko | šipky (krok `.step`), PgUp, PgDn (10 kroků), Home, End | `slider`, hodnota „40 (0-100)“, `set-value` |
+| `segmented` | klik na segment | šipky vlevo a vpravo, Home, End | `segmented` s podřízenými `radio` |
+| `tabs` | klik, křížek nebo prostřední tlačítko zavře (`on_close`) | šipky; Ctrl+Tab a Ctrl+Shift+Tab odkudkoli v okně | `tab-list` s podřízenými `tab` |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | kolečko | - | `scroll-area`, `scroll` |
 
@@ -1420,7 +1428,7 @@ do vlastní služby beze změny zpráv.
 |---|---|
 | jen na akci uživatele | nabídnout i vyžádat smí jen okno s fokusem do 1 s po fyzickém stisku klávesy nebo tlačítka (ne umělý vstup); jedno gesto = jedno vložení |
 | líný přenos | vlastník nabídne formáty (`Offer`), data pošle až na žádost (`Send` -> `Data` -> `Deliver`) |
-| po skončení vlastníka | text si kompozitor vyžádá hned po nabídce a drží kopii; čekající vložení jiných formátů selže (`Denied: Unavailable`) |
+| po skončení vlastníka | všechny formáty si kompozitor vyžádá hned po nabídce a drží jejich kopii (do 256 KiB); čekající vložení selže (`Denied: Unavailable`) |
 | zabezpečená pole | knihovna heslo do schránky nedá; kompozitor navíc odmítne nabídku z okna, jehož uzel s fokusem je `password-input` |
 | velká data | do 60 KiB ve zprávě; větší přes sdílenou paměť (další krok) |
 | historie | zatím ne |
@@ -1429,6 +1437,50 @@ Okno s fokusem dostane `Changed` s formáty ve schránce (při změně obsahu
 a při získání fokusu), aby mohlo povolit položku „Vložit“. Aplikace, které
 kreslí samy, volají `Window::copy_text`, `Window::request_paste`
 a `Window::clipboard_event`.
+
+**Pruhový graf podílů** `segments(vec![Segment::new(váha, popisek, tón)])`
+(`.dbar` v `design/instalace.html`): oddíly disku v instalátoru, obsazení
+disku, kvóty. Úseky mají šířku podle vah a dělí je čára `border_strong`
+(ne jen barva), popisek je v úseku jen tehdy, když se vejde, a celý vždy ve
+stromu přístupnosti. `.legend(true)` přidá legendu pod pruh. Tóny jsou jen
+dvojice barev s ověřeným kontrastem textu:
+
+| `Tone` | Pozadí / text | Použití |
+|---|---|---|
+| `Accent` | `accent` / `on_accent` | hlavní (nový oddíl systému) |
+| `Neutral` | `surface_3` / `ink` | běžný obsah |
+| `Other` | `accent_soft` / `accent_ink` | jiný obsah (jiný systém) |
+| `Muted` | `surface_2` / `ink_muted` | méně důležité (EFI, obnova) |
+| `Free` | šrafy `surface_3` a `surface` / `ink_muted` | volné místo |
+
+Prototyp má pro oddíly pevné barvy; systém je nahrazuje těmito tóny.
+
+### Výběr, nabídky a bubliny
+
+- **Rozbalovací výběr** `select(volby, vybraná).on_pick(Msg::X)`: otevře se
+  klikem, Enter, mezerníkem, Alt+dolů nebo F4; zavřený mění volbu šipky
+  nahoru a dolů přímo. Přístupnost: `combo-box` s hodnotou a stavem
+  `expanded`, otevřený seznam jako `menu` s `menu-item`.
+- **Kontextová nabídka** `Node::context_menu(vec![menu_item("Kopírovat",
+  Msg::Copy).shortcut("Ctrl+C"), menu_separator(), ...])`: pravé tlačítko,
+  Shift+F10 nebo klávesa Menu; nabídku má prvek nebo jeho nejbližší předek.
+  Položka může být zakázaná s důvodem (`.disabled("Schránka je prázdná")`,
+  čtečka přečte i důvod) nebo zaškrtnutá. `menu_from(&app.menu())` udělá
+  kontextovou nabídku se stejnými položkami jako menu okna (akce z
+  manifestu, klient je zavolá přes `App::action`). U tabulky pravé tlačítko
+  nejdřív vybere řádek a pošle `on_context`, pak otevře nabídku.
+- **Ovládání nabídky:** šipky přeskočí oddělovače a zakázané položky,
+  Home/End, Enter a mezerník vyberou, Esc a Tab zavřou, psaní skočí na
+  položku; myš: najetí, klik, stisk-tah-puštění; klik mimo nabídku ji jen
+  zavře (prvek pod ní nic nedostane).
+- **Bublina** `Node::tooltip("Nastavení")`: po 500 ms nad prvkem (klient
+  se probudí podle `Ui::next_deadline`, `Ui::timer`), klik a klávesa ji
+  skryjí. Tlačítku jen s ikonou dá i jméno pro čtečku; zobrazená bublina
+  je uzel `tooltip`.
+- Vzhled podle `.popover` a `.menu` v návrhu (karta `surface`, rám
+  `border`, ve vysokém kontrastu 2 px, položky výšky `control_h`, najetí
+  `accent_soft`). Nabídka se zatím kreslí do okna a ořízne se jeho okrajem;
+  přesah přes okraj okna bude systémový popover kompozitoru (další krok).
 
 ### Tabulka a seznam (virtualizace)
 
@@ -1480,6 +1532,55 @@ tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet př
 - **Posuvník** `ui::scrollbar::Scrollbar` (překryvný, šířka
   `size.scrollbar`, jezdec nejméně `hit_min / 2`) nezávisí na stromu
   prvků: geometrie, zásah, tažení a kreslení použije i terminál.
+
+### Zkratky, účinky a další kanály aplikace
+
+- **Zkratky:** klávesu, kterou nespotřeboval prvek s fokusem (ani textové
+  pole), dostane `App::key(code, ch, mods) -> Option<Msg>`. Tabulka tak
+  pustí aplikaci F2, Delete, Backspace, Ctrl+C/X/V, Ctrl+N nebo
+  Alt+šipky; šipky, mezerník a Enter s `on_activate` si nechá. Textové pole
+  si nechá vše, co edituje (Ctrl+C v poli kopíruje text). `ch` je znak
+  podle rozložení, takže Ctrl+Z na QWERTZ je klávesa se Z.
+- **Účinky:** `update` jen mění stav; schránku aplikace žádá přes
+  `App::effects() -> Vec<Effect>`, které klient vybere po každé dávce
+  zpráv: `Effect::Copy { formats }` (třeba `text/uri-list` a text zároveň)
+  a `Effect::Paste { formats }` (první formát, který schránka má; data
+  přijdou do `App::pasted(format, data)`). Co je ve schránce, ukazuje
+  `cx.clipboard` / `cx.clipboard_has(f)` ve `view` (položka Vložit).
+  Kompozitor drží kopii všech malých formátů (do 256 KiB), takže
+  zkopírované cesty přežijí zavření okna.
+- **Další kanály:** `client::run_channels(.., extras)` čte zprávy z více
+  kanálů (služba, pomocný proces kopírování) a předá je
+  `App::external_from(index, data)`; `run_with` s jedním kanálem dál
+  volá `App::external`.
+
+### Galerie komponent a snímkové testy
+
+**Galerie** `gui-komponenty` (aplikace plochy ve spouštěči, bez akcí
+a oprávnění) ukazuje komponenty po skupinách v záložkách: Pole, Volby,
+Tabulka (5000 řádků, řazení, tažení, kontextová nabídka), Nabídky a Grafy;
+dole je výpis událostí (co komponenta poslala, hodnoty polí ne). Slouží ke
+kontrole vzhledu a chování okem. Výchozí velikost si říká přes
+`App::size_hint` (760 x 600, nejvýš 90 % pracovní plochy), počet řádků
+výpisu se řídí třídou šířky okna.
+
+**Snímkové testy vzhledu** (`libs/ui/src/tests/shots.rs`) vykreslí stejné
+skupiny na hostiteli ve světlém, tmavém a vysokém kontrastu a porovnají je
+s referenčními PNG v `libs/ui/tests/shots/` (15 souborů po 8-15 kB):
+
+- **Tolerance:** kanál se smí lišit o 24, lišit se smí nejvýš 2 promile
+  pixelů (vyhlazování písma). Při selhání se do `target/shots/` uloží
+  `<jméno>-actual.png` a `<jméno>-diff.png` (červeně rozdíl).
+- **Determinismus:** každý snímek se kreslí dvakrát a musí vyjít stejně;
+  geometrie je celočíselná (zaoblení přes `isqrt`), písmo se rasterizuje
+  v f32 bez FMA, takže výsledek je stejný na x86_64 i aarch64.
+- **Změna referencí jen výslovně:** `cargo xtask test --update-shots`
+  (proměnná `UPDATE_SHOTS=1`) snímky přepíše a skončí; chybějící reference
+  je chyba testu, ne nový snímek. Nové snímky se kontrolují okem v
+  `git diff` před commitem.
+- PNG zapisuje a čte `gfx::png` s vlastní kompresí deflate
+  (`gfx::deflate`: LZ77 a pevný Huffmanův kód, čtení i dynamického kódu),
+  bez další závislosti.
 
 Běhové prostředí `ui::client` (vlastnost `os`) drží okno: dvojité buffery
 ve VMO, vrstvy, celý strom přístupnosti po každé změně, `COMMIT`

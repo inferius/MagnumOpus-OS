@@ -320,7 +320,10 @@ fn enter_and_space_activate_on_release() {
 }
 
 mod context;
+mod controls;
 mod field;
 mod keys;
+mod popup;
+mod shots;
 mod table;
 mod text;

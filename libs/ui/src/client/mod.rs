@@ -171,9 +171,12 @@ pub struct Window {
     groups: BTreeMap<u32, Rect>,
     /// Platny stav okna pro obnovu po padu kompozitoru.
     replay: Replay,
-    /// Text, ktery okno zkopirovalo (posle ho na zadost schranky).
-    clip_owned: Option<String>,
+    /// Data, ktera okno zkopirovalo (format, bajty; posle je na zadost).
+    clip_owned: Vec<(String, Vec<u8>)>,
     clip_serial: u32,
+    /// Cislo pozadavku na vlozeni do textoveho pole a od aplikace.
+    field_paste: u32,
+    app_paste: u32,
     /// Formaty ve schrance (zprava `Changed`).
     clip_formats: Vec<String>,
     /// Kontext okna (posledni `WINDOW_CONTEXT`).
@@ -261,8 +264,10 @@ impl Window {
             a11y_ids: Default::default(),
             groups: BTreeMap::new(),
             replay,
-            clip_owned: None,
+            clip_owned: Vec::new(),
             clip_serial: 0,
+            field_paste: 0,
+            app_paste: 0,
             clip_formats: Vec::new(),
             context,
         };
@@ -584,10 +589,31 @@ pub fn run<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u32) ->
     run_with(link, app, mode, w, h, None)
 }
 
+/// Provede ucinky aplikace (schranka) po jejich zpravach.
+fn effects<A: App>(win: &mut Window, app: &mut A) -> Result<()> {
+    for e in app.effects() {
+        match e {
+            crate::Effect::Copy { formats } => win.copy(formats)?,
+            crate::Effect::Paste { formats } => win.app_paste = win.request_paste_formats(&formats)?,
+        }
+    }
+    Ok(())
+}
+
 /// Jako [`run`], navic cte zpravy z kanalu `extra` (sluzba, od ktere
 /// aplikace bere data) a predava je [`App::external`].
-pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extra: Option<Channel>) -> Result<()> {
+pub fn run_with<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u32, extra: Option<Channel>) -> Result<()> {
+    run_channels(link, app, mode, w, h, extra.into_iter().collect())
+}
+
+/// Jako [`run`] s vic dalsimi kanaly (sluzba, pomocny proces kopirovani):
+/// zpravy z kanalu `extras[i]` dostane [`App::external_from`] s indexem `i`.
+pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extras: Vec<Channel>) -> Result<()> {
     let mut win = Window::open(link, mode, w, h, &app.title())?;
+    // Velikost podle aplikace pred prvnim zobrazenim (bez probliknuti).
+    if let Some((sw, sh, fw, fh)) = app.size_hint() {
+        win.request_size(sw, sh, fw, fh)?;
+    }
     let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
     set_context(&win, &mut ui);
     let mut dirty = true;
@@ -595,6 +621,12 @@ pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h
     // a na snimek kompozitoru (cela cesta klik -> obraz).
     let mut drawn: Option<u64> = None;
     loop {
+        // Ucinky aplikace (schranka) z predchozich zprav.
+        match effects(&mut win, &mut app) {
+            Ok(()) | Err(Error::ServiceRestarted) => {}
+            Err(Error::PeerClosed) => return Ok(()),
+            Err(e) => return Err(e),
+        }
         if dirty && !win.frame_pending {
             ui.refresh(&app);
             match render(&mut win, &mut ui) {
@@ -621,26 +653,44 @@ pub fn run_with<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h
                 Err(e) => return Err(e),
             }
         }
-        // Zpravy z dalsiho kanalu (bez blokovani okna).
-        if let Some(x) = &extra
-            && win.queue.is_empty()
-        {
+        // Zpravy z dalsich kanalu (bez blokovani okna).
+        if !extras.is_empty() && win.queue.is_empty() {
             let rd = Signals::READABLE | Signals::PEER_CLOSED;
-            let obs = match win.with_channel(|ch| libos::wait_many(&[(ch.handle(), rd), (x.handle(), Signals::READABLE)], None)) {
+            let obs = match win.with_channel(|ch| {
+                let mut hs = alloc::vec![(ch.handle(), rd)];
+                hs.extend(extras.iter().map(|x| (x.handle(), Signals::READABLE)));
+                libos::wait_many(&hs, ui.next_deadline())
+            }) {
                 Ok(Ok((_, o))) => o,
-                Ok(Err(e)) | Err(e) => return Err(e),
-            };
-            if obs[1].intersects(Signals::READABLE) {
-                while let Ok(m) = x.try_read() {
-                    dirty |= app.external(&m.data);
-                }
-                if !obs[0].intersects(rd) {
+                Ok(Err(Error::TimedOut)) => {
+                    if ui.timer(libos::time::now()) {
+                        dirty = true;
+                    }
                     continue;
                 }
+                Ok(Err(e)) | Err(e) => return Err(e),
+            };
+            for (k, x) in extras.iter().enumerate() {
+                if obs[k + 1].intersects(Signals::READABLE) {
+                    while let Ok(m) = x.try_read() {
+                        dirty |= app.external_from(k, &m.data);
+                    }
+                }
+            }
+            if !obs[0].intersects(rd) {
+                continue;
             }
         }
-        let ev = match win.next(None) {
+        // Bublina: probudit se v case jejiho zobrazeni.
+        let deadline = ui.next_deadline().map(|t| t / 1000 * 1000);
+        let ev = match win.next(deadline) {
             Ok(e) => e,
+            Err(Error::TimedOut) => {
+                if ui.timer(libos::time::now()) {
+                    dirty = true;
+                }
+                continue;
+            }
             Err(Error::PeerClosed) => return Ok(()),
             Err(e) => return Err(e),
         };
@@ -687,10 +737,12 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             match &resp.clipboard {
                 Some(crate::event::Clip::Copy(t)) => win.copy_text(t.clone())?,
                 Some(crate::event::Clip::Paste) => {
-                    win.request_paste()?;
+                    win.field_paste = win.request_paste()?;
                 }
                 None => {}
             }
+            // Klavesa, kterou prvky nespotrebovaly: zkratka aplikace.
+            let shortcut = resp.unhandled_key.and_then(|(code, ch, mods)| app.key(code, ch, mods));
             let changed = !resp.msgs.is_empty();
             // Trasovani vstupu (cil logu `vstup`): id = cas zaznamu z inputd.
             let id = r.time / 1000;
@@ -701,8 +753,15 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             if changed {
                 libos::println!("vstup: id={id} aplikace zpracuje {} zprav", resp.msgs.len());
             }
-            for m in resp.msgs {
+            let changed = changed || shortcut.is_some() || !resp.actions.is_empty();
+            for m in resp.msgs.into_iter().chain(shortcut) {
                 app.update(m);
+            }
+            // Polozky nabidky s akci z manifestu.
+            for (a, args) in &resp.actions {
+                if let Err(e) = app.action(a, args) {
+                    libos::println!("ui: akce {a} z nabidky: {e}");
+                }
             }
             INPUT_ID.store(0, core::sync::atomic::Ordering::Relaxed);
             if changed {
@@ -757,16 +816,32 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             *dirty = true;
         }
         Event::Clipboard(m) => {
-            if let Some(text) = win.clipboard_event(m)? {
-                let resp = ui.paste(&text);
-                let changed = !resp.msgs.is_empty();
-                for m in resp.msgs {
-                    app.update(m);
+            match win.clipboard_event_any(m)? {
+                // Do textoveho pole (Ctrl+V v poli).
+                Some(p) if p.serial == win.field_paste && p.format == clipproto::TEXT => {
+                    let resp = ui.paste(&String::from_utf8_lossy(&p.data));
+                    let changed = !resp.msgs.is_empty();
+                    for m in resp.msgs {
+                        app.update(m);
+                    }
+                    if changed {
+                        ui.refresh(app);
+                    }
+                    *dirty |= changed || resp.redraw;
                 }
-                if changed {
-                    ui.refresh(app);
+                // Aplikaci (`Effect::Paste`).
+                Some(p) if p.serial == win.app_paste => {
+                    if app.pasted(&p.format, &p.data) {
+                        ui.refresh(app);
+                        *dirty = true;
+                    }
                 }
-                *dirty |= changed || resp.redraw;
+                _ => {}
+            }
+            // Formaty ve schrance pro `Context::clipboard` (polozka Vlozit).
+            if ui.context().clipboard != win.clip_formats {
+                ui.set_clipboard_formats(win.clip_formats.clone());
+                *dirty = true;
             }
         }
         // Snimek: krok plynuleho rolovani tabulek.

@@ -1,0 +1,8 @@
+# Galerie komponent knihovny ui (milnik 6c): vsechny stavy komponent
+# v motivu systemu, vypis udalosti. Bez akci a bez opravneni.
+[app]
+id = "org.magnumopus.komponenty"
+name = "Komponenty"
+
+[limits]
+memory = "64M"

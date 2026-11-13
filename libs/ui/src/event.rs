@@ -27,6 +27,13 @@ pub struct Response<M> {
     pub trace: Vec<String>,
     /// Pozadavek na schranku (klient ho preda kompozitoru).
     pub clipboard: Option<Clip>,
+    /// Akce z manifestu vybrane v nabidce (`MenuAct::Action`): klient
+    /// zavola `App::action`.
+    pub actions: Vec<(String, Vec<guiproto::action::Arg>)>,
+    /// Stisk klavesy, ktery zadny prvek nespotreboval (kod, znak,
+    /// modifikatory): klient ho preda aplikaci (`App::key`, zkratky jako
+    /// F2, Delete, Ctrl+N, Alt+sipky).
+    pub unhandled_key: Option<(u16, Option<char>, u16)>,
 }
 
 /// Pozadavek pole na schranku.
@@ -46,6 +53,8 @@ impl<M> Default for Response<M> {
             scrolls: Vec::new(),
             trace: Vec::new(),
             clipboard: None,
+            actions: Vec::new(),
+            unhandled_key: None,
         }
     }
 }
@@ -84,6 +93,15 @@ impl<M: Clone> Ui<M> {
     /// Udalost s casem zaznamu (ns): dvojklik a trojklik v textovem poli.
     pub fn event_at(&mut self, ev: InputEvent, mods_now: u16, time: Option<u64>) -> Response<M> {
         self.mods = mods_now;
+        // Bublina zmizi pri kliku a klavese.
+        let hid = matches!(ev, InputEvent::Button { pressed: true, .. } | InputEvent::Key { .. } | InputEvent::PointerLeave | InputEvent::Focus(false)) && self.tip_hide();
+        if let Some(mut r) = self.popup_event(&ev, time) {
+            r.redraw |= hid;
+            return r;
+        }
+        if let Some(r) = self.control_event(&ev) {
+            return r;
+        }
         if let Some(r) = self.table_event(&ev, time) {
             return r;
         }
@@ -99,6 +117,10 @@ impl<M: Clone> Ui<M> {
                     self.hover = h;
                     r.redraw = true;
                 }
+                if self.tip_shown.is_some() && self.tip.map(|t| t.0) != h.map(|i| self.elems[i].key) {
+                    r.redraw = true;
+                }
+                self.tip_hover(time);
             }
             InputEvent::PointerLeave => {
                 self.pointer = (-1, -1);
@@ -178,7 +200,11 @@ impl<M: Clone> Ui<M> {
                 }
                 r.redraw = true;
             }
-            InputEvent::Key { code, action, ch } if action != 0 => self.key(code, ch, &mut r),
+            InputEvent::Key { code, action, ch } if action != 0 => {
+                if !self.key(code, ch, &mut r) {
+                    r.unhandled_key = Some((code, ch, mods_now));
+                }
+            }
             InputEvent::Text(ch) => {
                 if let Some((f, _)) = self.focused_field() {
                     self.field_insert(f, ch, &mut r);
@@ -204,12 +230,15 @@ impl<M: Clone> Ui<M> {
 
     /// Ma prvek s fokusem akci az pri pusteni klavesy (tlacitko, pole)?
     fn activates_on_release(&self) -> bool {
-        self.focus.is_some_and(|f| matches!(self.elems[f].kind, ElemKind::Button { .. } | ElemKind::Checkbox { .. }))
+        self.focus.is_some_and(|f| matches!(self.elems[f].kind, ElemKind::Button { .. } | ElemKind::Checkbox { .. } | ElemKind::Switch { .. } | ElemKind::Radio { .. }))
     }
 
     /// Aktivace prvku (klik, Enter, akce pristupnosti).
     fn activate(&mut self, i: usize, r: &mut Response<M>) {
         if self.elems[i].disabled {
+            return;
+        }
+        if self.activate_control(i, r) {
             return;
         }
         let d = self.describe(Some(i));
@@ -232,18 +261,19 @@ impl<M: Clone> Ui<M> {
         }
     }
 
-    fn key(&mut self, code: u16, ch: Option<char>, r: &mut Response<M>) {
+    /// Klavesa pro prvek s fokusem; `false` = nespotrebovana (dostane ji
+    /// aplikace).
+    fn key(&mut self, code: u16, ch: Option<char>, r: &mut Response<M>) -> bool {
         if let Some((f, _)) = self.focused_field()
             && code != KEY_TAB
         {
-            self.field_key(f, code, ch, r);
-            return;
+            return self.field_key(f, code, ch, r);
         }
         if code == KEY_TAB {
             let n = self.elems.len();
             let order: Vec<usize> = (0..n).filter(|&i| self.elems[i].focusable() && !self.elems[i].skip_tab).collect();
             if order.is_empty() {
-                return;
+                return false;
             }
             let pos = self.focus.and_then(|f| order.iter().position(|&i| i == f));
             let back = self.mods & mods::SHIFT != 0;
@@ -254,9 +284,12 @@ impl<M: Clone> Ui<M> {
             };
             self.focus = Some(order[next]);
             r.redraw = true;
-            return;
+            return true;
         }
-        let Some(f) = self.focus else { return };
+        let Some(f) = self.focus else { return false };
+        if self.control_key(f, code, r) {
+            return true;
+        }
         match &self.elems[f].kind {
             ElemKind::Button { .. } if code == KEY_ENTER || code == KEY_KPENTER || code == KEY_SPACE => self.activate(f, r),
             ElemKind::Checkbox { .. } if code == KEY_SPACE || code == KEY_ENTER => self.activate(f, r),
@@ -277,9 +310,11 @@ impl<M: Clone> Ui<M> {
                 {
                     r.msgs.push(sel(k));
                 }
+                return next.is_some();
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     /// Popis prvku pro trasovani (druh a text, ne hodnota pole: muze byt
@@ -302,7 +337,9 @@ impl<M: Clone> Ui<M> {
     pub fn a11y_action(&mut self, node: u32, action: u32, value: &str) -> Response<M> {
         let mut r = Response::default();
         let Some(i) = self.elem_ids.iter().position(|&id| id == node) else {
-            self.table_a11y_action(node, action, &mut r);
+            if !self.popup_a11y_action(node, action, &mut r) && !self.table_a11y_action(node, action, &mut r) {
+                self.control_a11y_action(node, action, &mut r);
+            }
             return r;
         };
         if action & actions::FOCUS != 0 && self.elems[i].focusable() {
@@ -311,6 +348,9 @@ impl<M: Clone> Ui<M> {
         }
         if action & (actions::ACTIVATE | actions::TOGGLE) != 0 {
             self.activate(i, &mut r);
+        }
+        if action & actions::SET_VALUE != 0 && self.slider_set(i, value, &mut r) {
+            return r;
         }
         if action & actions::SET_VALUE != 0
             && let ElemKind::TextInput { on_change: Some(f), .. } = &self.elems[i].kind

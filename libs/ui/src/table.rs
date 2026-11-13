@@ -269,6 +269,7 @@ impl<M: Clone> Ui<M> {
                             r.msgs.push(f(id));
                         }
                     }
+                    self.open_context(i, Some((x, y)));
                     return Some(r);
                 }
                 if let Some(sb) = self.scrollbar(i)
@@ -498,6 +499,10 @@ impl<M: Clone> Ui<M> {
     /// pohnulo (prekreslit).
     pub fn tick(&mut self) -> bool {
         let mut moved = false;
+        if self.has_busy() {
+            self.busy_phase = self.busy_phase.wrapping_add(self.look.theme.space[2]);
+            moved = true;
+        }
         for s in self.tables.values_mut() {
             if s.scroll != s.target {
                 let d = s.target - s.scroll;
@@ -511,7 +516,7 @@ impl<M: Clone> Ui<M> {
 
     /// Bezi animace (rolovani), takze je treba dalsi snimek?
     pub fn wants_frame(&self) -> bool {
-        self.tables.values().any(|s| s.scroll != s.target)
+        self.has_busy() || self.tables.values().any(|s| s.scroll != s.target)
     }
 
     /// Stav tabulek po rozvrzeni: zmizele pryc, posun v mezich.

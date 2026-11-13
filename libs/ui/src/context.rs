@@ -56,7 +56,7 @@ impl SizeClass {
 }
 
 /// Kontext jednoho okna.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Context {
     /// Velikost obsahu okna (logicke px).
     pub w: u32,
@@ -72,6 +72,8 @@ pub struct Context {
     pub refresh_mhz: u32,
     /// Roste s kazdou zmenou kontextu od kompozitoru.
     pub generation: u32,
+    /// Formaty, ktere je prave ve schrance (polozka "Vlozit" aktivni).
+    pub clipboard: alloc::vec::Vec<alloc::string::String>,
 }
 
 impl Context {
@@ -86,7 +88,13 @@ impl Context {
             scale: 100,
             refresh_mhz: 0,
             generation: 0,
+            clipboard: alloc::vec::Vec::new(),
         }
+    }
+
+    /// Je ve schrance format `f`?
+    pub fn clipboard_has(&self, f: &str) -> bool {
+        self.clipboard.iter().any(|x| x == f)
     }
 
     /// Nova velikost okna; vraci, zda se zmenila trida sirky.

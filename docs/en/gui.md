@@ -1319,6 +1319,14 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 | `list` | click an item | up and down arrows | `list` and `list-item` |
 | `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
+| `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
+| `select` | click, pick from the list | Enter, space, Alt+down, F4; closed: arrows | `combo-box`, `menu`, `menu-item` |
+| `segments` | - | - | `list` with `list-item` children (full label of each segment) |
+| `switch` | click | space, Enter (on release) | `switch`, `checked`, `toggle` |
+| `radio` | click | space, Enter | `radio`, `checked` |
+| `slider` | click the track, drag, wheel | arrows (step `.step`), PgUp, PgDn (10 steps), Home, End | `slider`, value "40 (0-100)", `set-value` |
+| `segmented` | click a segment | left and right arrows, Home, End | `segmented` with child `radio` nodes |
+| `tabs` | click; the cross or the middle button closes (`on_close`) | arrows; Ctrl+Tab and Ctrl+Shift+Tab from anywhere in the window | `tab-list` with child `tab` nodes |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | wheel | - | `scroll-area`, `scroll` |
 
@@ -1474,7 +1482,7 @@ changing its messages.
 |---|---|
 | only on user action | only the focused window may offer or request, within 1 s of a physical key or button press (not synthetic input); one gesture = one paste |
 | lazy transfer | the owner offers formats (`Offer`), sends data only on request (`Send` -> `Data` -> `Deliver`) |
-| after the owner exits | the compositor fetches text right after the offer and keeps a copy; pending pastes of other formats fail (`Denied: Unavailable`) |
+| after the owner exits | the compositor fetches all formats right after the offer and keeps a copy (up to 256 KiB); pending pastes fail (`Denied: Unavailable`) |
 | secure fields | the library never puts a password on the clipboard; the compositor also refuses an offer from a window whose focused node is `password-input` |
 | large data | up to 60 KiB in the message; larger via shared memory (next step) |
 | history | not yet |
@@ -1483,6 +1491,54 @@ The focused window gets `Changed` with the formats on the clipboard (when
 the content changes and when it gains focus) so it can enable "Paste".
 Applications that draw themselves call `Window::copy_text`,
 `Window::request_paste` and `Window::clipboard_event`.
+
+**Share bar chart** `segments(vec![Segment::new(weight, label, tone)])`
+(`.dbar` in `design/instalace.html`): disk partitions in the installer,
+disk usage, quotas. Segments are as wide as their weights and separated by
+a `border_strong` line (not only by color); the label is drawn inside a
+segment only when it fits, and always in full in the accessibility tree.
+`.legend(true)` adds a legend under the bar. Tones are only color pairs with
+a verified text contrast:
+
+| `Tone` | Background / text | Use |
+|---|---|---|
+| `Accent` | `accent` / `on_accent` | main (the new system partition) |
+| `Neutral` | `surface_3` / `ink` | ordinary content |
+| `Other` | `accent_soft` / `accent_ink` | other content (another system) |
+| `Muted` | `surface_2` / `ink_muted` | less important (EFI, recovery) |
+| `Free` | stripes `surface_3` and `surface` / `ink_muted` | free space |
+
+The prototype has fixed colors for partitions; the system replaces them
+with these tones.
+
+### Select, menus and tooltips
+
+- **Select** `select(options, selected).on_pick(Msg::X)`: opens by click,
+  Enter, space, Alt+down or F4; closed, the up and down arrows change the
+  choice directly. Accessibility: `combo-box` with the value and the
+  `expanded` state, the open list as `menu` with `menu-item` nodes.
+- **Context menu** `Node::context_menu(vec![menu_item("Copy",
+  Msg::Copy).shortcut("Ctrl+C"), menu_separator(), ...])`: right button,
+  Shift+F10 or the Menu key; the element or its nearest ancestor owns the
+  menu. An item can be disabled with a reason (`.disabled("Clipboard is
+  empty")`, the screen reader reads the reason too) or checked.
+  `menu_from(&app.menu())` builds a context menu with the same items as the
+  window menu (manifest actions; the client calls them through
+  `App::action`). On a table the right button first selects the row and
+  sends `on_context`, then opens the menu.
+- **Menu control:** arrows skip separators and disabled items, Home/End,
+  Enter and space choose, Esc and Tab close, typing jumps to an item;
+  mouse: hover, click, press-drag-release; a click outside the menu only
+  closes it (the element under it gets nothing).
+- **Tooltip** `Node::tooltip("Settings")`: after 500 ms over the element
+  (the client wakes up by `Ui::next_deadline`, `Ui::timer`); a click or a
+  key hides it. It also names an icon-only button for the screen reader;
+  a shown tooltip is a `tooltip` node.
+- Look after `.popover` and `.menu` in the design (a `surface` card,
+  `border` frame, 2 px in high contrast, items `control_h` tall, hover
+  `accent_soft`). The menu is drawn into the window for now and is clipped
+  by its edge; overflowing the window edge will be a compositor system
+  popover (next step).
 
 ### Table and list (virtualization)
 
@@ -1537,6 +1593,57 @@ files cost the same as twenty. The application can share data through
   `size.scrollbar`, thumb at least `hit_min / 2`) does not depend on the
   element tree: the terminal uses its geometry, hit test, dragging and
   drawing too.
+
+### Shortcuts, effects and more application channels
+
+- **Shortcuts:** a key the focused element did not consume (not even a
+  text field) goes to `App::key(code, ch, mods) -> Option<Msg>`. A table
+  lets F2, Delete, Backspace, Ctrl+C/X/V, Ctrl+N or Alt+arrows through to
+  the application; it keeps arrows, space and Enter with `on_activate`. A
+  text field keeps everything it edits with (Ctrl+C in a field copies
+  text). `ch` is the character by layout, so Ctrl+Z on QWERTZ is the key
+  labeled Z.
+- **Effects:** `update` only changes state; the application asks for the
+  clipboard through `App::effects() -> Vec<Effect>`, which the client
+  drains after each batch of messages: `Effect::Copy { formats }` (e.g.
+  `text/uri-list` and text together) and `Effect::Paste { formats }` (the
+  first format the clipboard has; data arrives in `App::pasted(format,
+  data)`). What the clipboard holds is `cx.clipboard` /
+  `cx.clipboard_has(f)` in `view` (the Paste item). The compositor keeps a
+  copy of all small formats (up to 256 KiB), so copied paths survive the
+  window closing.
+- **More channels:** `client::run_channels(.., extras)` reads messages
+  from several channels (a service, a copy helper process) and passes them
+  to `App::external_from(index, data)`; `run_with` with one channel still
+  calls `App::external`.
+
+### Component gallery and snapshot tests
+
+**The gallery** `gui-komponenty` (a desktop app in the launcher, no
+actions and no permissions) shows the components by group in tabs: Fields,
+Choices, Table (5000 rows, sorting, dragging, context menu), Menus and
+Charts; at the bottom an event log (what a component sent, never field
+values). It is for checking look and behavior by eye. It asks for its
+default size through `App::size_hint` (760 x 600, at most 90 % of the work
+area); the number of log lines follows the window width class.
+
+**Snapshot tests** (`libs/ui/src/tests/shots.rs`) draw the same groups on
+the host in light, dark and high contrast and compare them with reference
+PNGs in `libs/ui/tests/shots/` (15 files of 8-15 kB):
+
+- **Tolerance:** a channel may differ by 24, at most 2 per mille of pixels
+  may differ (font antialiasing). On failure `target/shots/` gets
+  `<name>-actual.png` and `<name>-diff.png` (differences in red).
+- **Determinism:** every snapshot is drawn twice and must match; geometry
+  is integer (corners via `isqrt`), fonts are rasterized in f32 without
+  FMA, so the result is the same on x86_64 and aarch64.
+- **References change only explicitly:** `cargo xtask test --update-shots`
+  (variable `UPDATE_SHOTS=1`) rewrites them and stops; a missing reference
+  is a test failure, not a new snapshot. New snapshots are checked by eye
+  in `git diff` before committing.
+- PNG is written and read by `gfx::png` with its own deflate
+  (`gfx::deflate`: LZ77 and a fixed Huffman code, reading also dynamic
+  codes), with no extra dependency.
 
 The `ui::client` runtime (feature `os`) keeps the window: double buffers
 in VMOs, layers, the whole accessibility tree after every change,

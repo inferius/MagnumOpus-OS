@@ -104,6 +104,8 @@ prepinace:
                    --only release = jen start v release profilu (test
                    po hlavnim behu, hlida chyby, ktere debug neukaze)
   --repeat <n>     (test) vybrane sady n krat za sebou (nestabilni testy)
+  --update-shots   (test) jen prepise referencni snimky vzhledu libs/ui
+                   (tests/shots/*.png) a skonci; nikdy automaticky
   --audio <druh>   (run, test) zvuk QEMU (radic intel-hda, kodek hda-duplex):
                    test wav (vychozi; soubor se po testu zkontroluje), none;
                    run none (vychozi), dsound, pa, alsa, sdl, coreaudio
@@ -157,6 +159,8 @@ pub struct Options {
     /// `--only` (sady testu userspace) a `--repeat` (kolikrat).
     test_only: String,
     test_repeat: u32,
+    /// `--update-shots`: prepsat referencni snimky vzhledu `libs/ui`.
+    update_shots: bool,
     /// `--net-online`: i testy proti skutecne siti hostitele.
     net_online: bool,
     /// Backend zvuku QEMU (`--audio`); prazdne = test wav, beh none.
@@ -234,6 +238,7 @@ fn run_cli() -> Result<()> {
         extra_initfs: Vec::new(),
         test_only: String::new(),
         test_repeat: 1,
+        update_shots: false,
         net_online: false,
         audio: String::new(),
         test_driver: None,
@@ -294,6 +299,7 @@ fn run_cli() -> Result<()> {
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--net-online") => opts.net_online = true,
+            Some("--update-shots") => opts.update_shots = true,
             Some("--dir") => {
                 let value = args.next().ok_or("--dir ocekava slozku")?;
                 vmware_dir = Some(std::path::PathBuf::from(value));
@@ -356,6 +362,7 @@ fn run_cli() -> Result<()> {
             let image = image_for(&artifacts, &opts)?;
             qemu::run(&image, &artifacts, &opts)
         }
+        Some("test") if opts.update_shots => update_shots(),
         Some("test") => {
             opts.test = true;
             opts.headless = true;
@@ -511,6 +518,18 @@ fn edu_available(opts: &Options) -> bool {
 /// GUI: protokol, kresleni, pismo, virtio-gpu, kompozitor, knihovna UI,
 /// ochrana cizich disku), driverkit se simulaci a ovladace z manifestu
 /// (`found`; s `--driver` jen ten jeden).
+/// `cargo xtask test --update-shots`: znovu vytvori referencni snimky
+/// vzhledu `libs/ui/tests/shots/` (jen vyslovne, nikdy automaticky).
+fn update_shots() -> Result<()> {
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let status = Command::new(cargo).current_dir(workspace_root()).env("UPDATE_SHOTS", "1").args(["test", "--quiet", "--package", "ui", "shot_"]).status()?;
+    if !status.success() {
+        return Err("snimky vzhledu se nepodarilo vytvorit".into());
+    }
+    println!("xtask: referencni snimky v libs/ui/tests/shots prepsany; zkontroluj je okem (git diff) pred commitem");
+    Ok(())
+}
+
 fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     if let Some(d) = only_driver {
@@ -580,6 +599,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "netfilter",
             "--package",
             "guiproto",
+            "--package",
+            "clipproto",
             "--package",
             "gpuproto",
             "--package",
@@ -770,6 +791,7 @@ const USER_PROGRAMS: &[&str] = &[
     "intel-display",
     "compd",
     "gui-demo",
+    "gui-komponenty",
     "gui-term",
     "gui-tasks",
     "netd",
@@ -792,6 +814,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("netd.manifest.toml", "user/netd/netd.manifest.toml"),
     ("netprobe.manifest.toml", "user/netprobe/netprobe.manifest.toml"),
     ("gui-demo.manifest.toml", "user/gui-demo/gui-demo.manifest.toml"),
+    ("gui-komponenty.manifest.toml", "user/gui-komponenty/gui-komponenty.manifest.toml"),
     ("gui-term.manifest.toml", "user/gui-term/gui-term.manifest.toml"),
     ("ntpd.manifest.toml", "user/ntpd/ntpd.manifest.toml"),
     ("ntpd.toml", "user/ntpd/ntpd.toml"),

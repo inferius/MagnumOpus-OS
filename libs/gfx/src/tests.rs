@@ -294,3 +294,37 @@ fn family_picks_weights_and_subpixel_text() {
     let mut e = text::Family::new(&[], &[]);
     assert!(e.face(700).width("a", 14.0) > 0);
 }
+
+/// PNG s kompresi: zapis a cteni zpet beze ztraty; plochy obrazku UI se
+/// zmensi desitkykrat; vadna data nepanikari.
+#[test]
+fn png_roundtrip_and_compression() {
+    let (w, h) = (320u32, 120u32);
+    let mut px = vec![0xFFF0_F0F0u32; (w * h) as usize];
+    for y in 20..60 {
+        for x in 10..300 {
+            px[(y * w + x) as usize] = if (x / 7 + y) % 5 == 0 { 0xFF20_50C4 } else { 0xFFFF_FFFF };
+        }
+    }
+    let png = crate::png::encode(&px, w, h, w);
+    assert!(png.len() < (w * h * 3 / 20) as usize, "komprese: {} B", png.len());
+    let (dw, dh, back) = crate::png::decode(&png).unwrap();
+    assert_eq!((dw, dh), (w, h));
+    assert_eq!(back, px);
+    // Nahodna data (spatne komprimovatelna) taky beze ztraty.
+    let mut s = 12345u32;
+    let noise: Vec<u32> = (0..64 * 64)
+        .map(|_| {
+            s = s.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            0xFF00_0000 | (s >> 8)
+        })
+        .collect();
+    assert_eq!(crate::png::decode(&crate::png::encode(&noise, 64, 64, 64)).unwrap().2, noise);
+    // Poskozeny soubor: None, ne panika.
+    let mut bad = png.clone();
+    for i in (60..bad.len()).step_by(7) {
+        bad[i] ^= 0x5A;
+    }
+    let _ = crate::png::decode(&bad);
+    assert!(crate::png::decode(&png[..40]).is_none());
+}

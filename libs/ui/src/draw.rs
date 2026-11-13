@@ -166,12 +166,20 @@ impl<M: Clone> Ui<M> {
                 }
                 ElemKind::Progress { value } => progress_bar(c, r, *value, e.agent, col),
                 ElemKind::Table(_) => self.draw_table(c, i, st),
+                ElemKind::Select { .. } => self.draw_select(c, i, st),
+                ElemKind::Switch { .. } | ElemKind::Radio { .. } | ElemKind::Slider { .. } | ElemKind::Segmented { .. } | ElemKind::Tabs { .. } | ElemKind::Busy | ElemKind::Segments { .. } => {
+                    self.draw_control(c, i, st);
+                }
                 ElemKind::Group => {}
                 ElemKind::Scroll { .. } => {
                     // Obsah je vlastni vrstva; tady jen ram.
                     c.round_stroke(r, th.radius.control, 1, col.border);
                 }
             }
+        }
+        // Nabidka a bublina nad prvky okna.
+        if space == 0 {
+            self.draw_overlays(c);
         }
     }
 

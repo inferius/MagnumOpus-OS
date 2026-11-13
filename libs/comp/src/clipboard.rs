@@ -9,8 +9,9 @@
 //!   Jedno gesto = jedno vlozeni.
 //! - Data se prenasi line: na vlozeni kompozitor pozada vlastnika
 //!   (`Send`) a odpoved preda zadateli (`Deliver`).
-//! - Text si kompozitor vyzada hned po nabidce a drzi kopii (do
-//!   [`clipproto::MAX_INLINE`]): po skonceni vlastnika zustane.
+//! - Vsechny nabidnute formaty si kompozitor vyzada hned po nabidce
+//!   a drzi jejich kopii (kazdy do [`clipproto::MAX_INLINE`], dohromady
+//!   do [`KEEP_MAX`]): po skonceni vlastnika zustanou (text, seznam cest).
 //! - Nabidka z okna, jehoz uzel s fokusem je `password-input`, se odmitne.
 
 use alloc::collections::BTreeMap;
@@ -24,6 +25,9 @@ use crate::{ClientId, Comp};
 
 /// Jak dlouho po fyzickem vstupu smi okno se schrankou pracovat (ns).
 pub const GESTURE: u64 = 1_000_000_000;
+
+/// Nejvic bajtu kopii vsech formatu, ktere kompozitor drzi.
+pub const KEEP_MAX: usize = 256 * 1024;
 
 /// Komu patri odpoved vlastnika.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,10 +113,10 @@ impl Comp {
                 self.clipboard.owner = Some(c);
                 self.clipboard.formats = formats.clone();
                 self.clipboard.kept.clear();
-                if formats.iter().any(|f| f == clipproto::TEXT) {
+                for f in &formats {
                     let s = self.clipboard.next_serial();
-                    self.clipboard.wait.insert(s, Wait::Keep(String::from(clipproto::TEXT)));
-                    self.clip_send(c, SMsg::Send { serial: s, format: String::from(clipproto::TEXT) });
+                    self.clipboard.wait.insert(s, Wait::Keep(f.clone()));
+                    self.clip_send(c, SMsg::Send { serial: s, format: f.clone() });
                 }
                 self.clip_changed();
             }
@@ -147,7 +151,10 @@ impl Comp {
                     Some(Wait::Paste(to, s, format)) => self.clip_send(to, SMsg::Deliver { serial: s, format, data }),
                     Some(Wait::Keep(format)) => {
                         self.clipboard.kept.retain(|(f, _)| *f != format);
-                        self.clipboard.kept.push((format, data));
+                        let used: usize = self.clipboard.kept.iter().map(|(_, d)| d.len()).sum();
+                        if used + data.len() <= KEEP_MAX {
+                            self.clipboard.kept.push((format, data));
+                        }
                     }
                     None => {}
                 }
