@@ -7,7 +7,7 @@ use fsproto::hist::Change;
 use fsproto::{FsClient, Stat, kind};
 use libos::time::WallTime;
 use libos::Error;
-use shlang::host::{Applied, Aside, DirEntry, Fs, FsChange, FsChangeKind, FsResult, Meta, NodeKind, ViewRef};
+use shlang::host::{Applied, Aside, DirEntry, Fs, FsChange, FsChangeKind, FsResult, Meta, NodeKind, ViewRef, hidden};
 use shlang::vfs::path::{join, rebase};
 
 /// Kde lezi klony bokem (skryta slozka). Zbytky po padu uklidi init pri
@@ -53,21 +53,31 @@ fn access(rights: u8) -> u8 {
 }
 
 /// Velikost a obsah: u slozky souhrn podstromu (FS ho drzi hned, bez
-/// prochazeni; bez prava MANAGE ho neposle).
-fn sized(kind_raw: u8, size: u64, bytes: u64, files: u64, dirs: u64) -> (u64, Option<(u64, u64)>) {
-    if node(kind_raw) == NodeKind::Dir && (bytes | files | dirs) != 0 {
-        (bytes, Some((files, dirs)))
-    } else {
-        (size, None)
+/// prochazeni). Bez prava MANAGE ho fsd posle jako nuly: velikost a obsah
+/// jsou pak skryte (`hidden`), ne prazdna slozka; s pravem jsou nuly
+/// prazdna slozka 0 B / 0 polozek.
+fn sized(kind_raw: u8, rights: u8, size: u64, bytes: u64, files: u64, dirs: u64) -> (u64, Option<(u64, u64)>, u8) {
+    if node(kind_raw) != NodeKind::Dir {
+        return (size, None, 0);
     }
+    if rights & fsproto::perm::rights::MANAGE == 0 && (bytes | files | dirs) == 0 {
+        return (0, None, hidden::SIZE | hidden::TREE);
+    }
+    (bytes, Some((files, dirs)), 0)
+}
+
+/// Cas, ktery FS nevede (nula), je nedostupny.
+fn time(t: WallTime) -> Option<i64> {
+    (t.secs != 0 || t.nanos != 0).then(|| ns(t))
 }
 
 fn meta(s: &Stat) -> Meta {
-    let (size, tree) = sized(s.kind, s.size, s.tree_bytes, s.tree_files, s.tree_dirs);
+    let (size, tree, hidden) = sized(s.kind, s.rights, s.size, s.tree_bytes, s.tree_files, s.tree_dirs);
     Meta {
         kind: node(s.kind),
         size,
-        mtime: Some(ns(s.mtime)),
+        mtime: time(s.mtime),
+        hidden,
         access: Some(access(s.rights)),
         dataset: s.kind == kind::DATASET,
         tree,
@@ -116,16 +126,17 @@ impl Fs for FsdFs {
             .list_stat(path)?
             .into_iter()
             .map(|e| {
-                let (size, tree) = sized(e.kind, e.size, e.tree_bytes, e.tree_files, e.tree_dirs);
+                let (size, tree, hidden) = sized(e.kind, e.rights, e.size, e.tree_bytes, e.tree_files, e.tree_dirs);
                 DirEntry {
                     name: e.name,
                     meta: Meta {
                         kind: node(e.kind),
                         size,
-                        mtime: Some(ns(e.mtime)),
+                        mtime: time(e.mtime),
                         access: Some(access(e.rights)),
                         dataset: e.kind == kind::DATASET,
                         tree,
+                        hidden,
                     },
                 }
             })

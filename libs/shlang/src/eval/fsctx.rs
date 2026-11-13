@@ -129,12 +129,26 @@ impl Interp {
     /// Zaznam souboru (radek vystupu `ls`). U slozky je `size` logicka
     /// velikost podstromu (soucet souboru, ne zabrane misto).
     pub(crate) fn file_record(full: &str, name: &str, m: &Meta) -> Value {
+        use crate::host::hidden;
+        use crate::value::Why;
+        // Chybejici hodnota: skryta (chybi pravo) nebo nedostupna (FS ji
+        // nevede); prazdna slozka ma 0 B a 0 polozek.
+        let miss = |bit: u8| Value::Missing(if m.hidden & bit != 0 { Why::Hidden } else { Why::Unavailable });
+        let dir = m.kind == NodeKind::Dir;
+        let size = if m.hidden & hidden::SIZE != 0 { miss(hidden::SIZE) } else { Value::Size(m.size as i64) };
+        // Obsah podstromu: u souboru nepatri (null), u slozky znamy nebo
+        // chybejici.
+        let tree = |f: fn((u64, u64)) -> u64| match m.tree {
+            Some(t) => Value::Int(f(t) as i64),
+            None if dir => miss(hidden::TREE),
+            None => Value::Null,
+        };
         Value::record(&[
             ("name", Value::str(name)),
             ("path", Value::str(full)),
             ("kind", Value::str(m.kind.name())),
-            ("size", Value::Size(m.size as i64)),
-            ("mtime", m.mtime.map(Value::Time).unwrap_or(Value::Null)),
+            ("size", size),
+            ("mtime", m.mtime.map(Value::Time).unwrap_or_else(|| miss(hidden::MTIME))),
             ("ext", Value::str(if m.kind == NodeKind::File { path::ext(name) } else { "" })),
             // Prava relace (`rwx`); prazdne = FS je nehlasi.
             ("access", Value::str(m.access.map(crate::host::access::text).unwrap_or_default())),
@@ -142,8 +156,8 @@ impl Interp {
             ("dataset", Value::Bool(m.dataset)),
             // Obsah slozky (podstrom): lidsky a cisla zvlast.
             ("items", Value::str(m.tree.map(|(f, d)| items_text(f, d)).unwrap_or_default())),
-            ("files", m.tree.map_or(Value::Null, |(f, _)| Value::Int(f as i64))),
-            ("dirs", m.tree.map_or(Value::Null, |(_, d)| Value::Int(d as i64))),
+            ("files", tree(|t| t.0)),
+            ("dirs", tree(|t| t.1)),
         ])
     }
 

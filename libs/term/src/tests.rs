@@ -76,6 +76,7 @@ fn protocol_roundtrip() {
             block: 2,
             item: Item::Value(Value::Quantity(shlang::value::Quantity { dim: shlang::units::Dim::Frequency, value: 2.4e9 })),
         },
+        ServerMsg::Item { session: 1, block: 2, item: Item::Value(Value::Missing(shlang::value::Why::Hidden)) },
         ServerMsg::Item { session: 1, block: 2, item: Item::Error { code: "X".into(), message: "m".into(), report: "r".into() } },
         ServerMsg::Item { session: 1, block: 2, item: Item::Progress { done: 1, total: 3, label: "kopiruji".into() } },
         ServerMsg::Item { session: 1, block: 2, item: Item::Link { text: "napoveda".into(), target: "help:ls".into() } },

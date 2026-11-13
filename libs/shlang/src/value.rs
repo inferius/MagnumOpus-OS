@@ -33,6 +33,42 @@ pub struct Quantity {
     pub value: f64,
 }
 
+/// Proc hodnota chybi ([`Value::Missing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Why {
+    /// Hodnota existuje, ale relace ji nesmi videt (chybi pravo, napr.
+    /// souhrn podstromu bez prava spravovat).
+    Hidden,
+    /// FS ani zdroj hodnotu nevede (napr. cas vytvoreni na FS, ktery ho
+    /// neuklada).
+    Unavailable,
+}
+
+impl Why {
+    pub const fn code(self) -> u8 {
+        match self {
+            Why::Hidden => 0,
+            Why::Unavailable => 1,
+        }
+    }
+
+    pub const fn from_code(c: u8) -> Option<Why> {
+        match c {
+            0 => Some(Why::Hidden),
+            1 => Some(Why::Unavailable),
+            _ => None,
+        }
+    }
+
+    /// Vysvetlivka (pata tabulky v terminalu).
+    pub const fn text_cs(self) -> &'static str {
+        match self {
+            Why::Hidden => "skryté (chybí právo)",
+            Why::Unavailable => "nedostupné (zdroj hodnotu nevede)",
+        }
+    }
+}
+
 /// Odkaz na soubor (cesta absolutni, druh podle zacatku obsahu).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileRef {
@@ -56,6 +92,11 @@ pub enum Value {
     Duration(i64),
     /// Velicina z tabulky jednotek (frekvence, procenta, ...).
     Quantity(Quantity),
+    /// Chybejici hodnota s duvodem (skryta, nedostupna): chova se jako
+    /// `null` (rovnost s `null`, porovnani `<`/`>` je `false`), terminal ji
+    /// ukaze jako pomlcku s vysvetlivkou. Prazdna slozka ma 0 B a 0 polozek,
+    /// ne `Missing`.
+    Missing(Why),
     /// Okamzik: nanosekundy od 1970-01-01 UTC.
     Time(i64),
     Str(String),
@@ -73,7 +114,7 @@ impl Value {
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Nothing => "nothing",
-            Value::Null => "null",
+            Value::Null | Value::Missing(_) => "null",
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
             Value::Float(_) => "float",
@@ -230,6 +271,8 @@ impl fmt::Display for Value {
         match self {
             Value::Nothing => Ok(()),
             Value::Null => f.write_str("null"),
+            // Pomlcka (znak navrhu terminalu, ne text v kodu).
+            Value::Missing(_) => f.write_str("\u{2014}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Int(i) => write!(f, "{i}"),
             Value::Float(x) => f.write_str(&crate::fmt::num_text(*x)),

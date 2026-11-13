@@ -135,7 +135,7 @@ fn cell_style(col: &str, v: &Value, rec: &Value, t: &Theme, now: Option<i64>) ->
         Value::Time(m) => return now.map(|n| color(t.scale[age_level(*m, n)])),
         Value::Bool(true) => return Some(color(t.ui.ok)),
         Value::Bool(false) => return Some(color(t.ui.err)),
-        Value::Null | Value::Nothing => return Some(color(t.ui.muted)),
+        Value::Null | Value::Nothing | Value::Missing(_) => return Some(color(t.ui.muted)),
         Value::Error(_) => return Some(color(t.ui.err)),
         _ => {}
     }

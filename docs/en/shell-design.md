@@ -390,7 +390,8 @@ bare word is a field: `where mtime < now() - 1y`.
 |---|---|---|
 | `int`, `float` | `42`, `1.5` | an integer is converted in arithmetic with a float (the only automatic conversion) |
 | `size` | `100MB` | a size is never added to or compared with a number: `size > 100` is an error with the hint `100B` |
-| `duration` | `30s`, `1h` | |
+| `duration` | `30s`, `1h`, `1h30m` | |
+| `frequency`, `percent` | `2.4GHz`, `50%` | quantities from the unit table (see Numbers) |
 | `time` | `now()` | `time - duration` = `time`, `time - time` = `duration` |
 | `text` | `"abc"` | |
 | `bytes` | `open f` | a **byte stream**, a different type from text and records |
@@ -398,7 +399,17 @@ bare word is a field: `where mtime < now() - 1y`.
 | `closure` | `x => x * 2` | captures copies of the variables it uses |
 | `error` | `e` in `try ... else e => ...` | fields `code`, `message`, `hint`, `cause` |
 | `null`, `nothing` | | `nothing` = the command returned nothing |
+| missing value | `size` of someone else's folder | `null` with a reason: **hidden** (no right) or **unavailable** (the source does not keep it); see below |
 
+- **A missing value** (`Value::Missing`) behaves like `null`: it equals
+  `null`, a `<` / `>` comparison is `false` (`where size > 1MB` skips it
+  instead of failing), sorting puts it first. The terminal shows it as "—"
+  and explains the reason in the table footer. An empty folder is not a
+  missing value: it has 0 B, 0 files and 0 folders. Today the shell infers
+  the state from the fsd reply (a folder without the manage right = hidden
+  summary, a zero time = unavailable) **[implemented]**; exact flags in
+  fsproto (`known` / `hidden` masks on `Stat` and `LIST_STAT_PAGE`) are a
+  task for the FS thread **[designed]**.
 - **No hidden conversions.** Bytes, text and records are converted only
   explicitly: `from json`, `from text`, `lines`, `to text`, `to json`.
   `open data.json | where ...` is an error with the hint `from json`.

@@ -199,6 +199,8 @@ const V_FILE: u8 = 14;
 /// Velicina z tabulky jednotek: kod rozmeru (`shlang::units::Dim::code`)
 /// a hodnota v zakladni jednotce (f64).
 const V_QUANTITY: u8 = 15;
+/// Chybejici hodnota s duvodem (`shlang::value::Why::code`).
+const V_MISSING: u8 = 16;
 
 /// Je seznam tabulka (vsechny radky jsou zaznamy se stejnymi sloupci)?
 fn table_cols(items: &[Value]) -> Option<Vec<String>> {
@@ -215,6 +217,10 @@ pub fn put_value(w: &mut W, v: &Value) {
     match v {
         Value::Nothing => w.u8(V_NOTHING),
         Value::Null => w.u8(V_NULL),
+        Value::Missing(why) => {
+            w.u8(V_MISSING);
+            w.u8(why.code());
+        }
         Value::Bool(b) => {
             w.u8(V_BOOL);
             w.u8(*b as u8);
@@ -315,6 +321,7 @@ pub fn get_value(r: &mut R, depth: usize) -> Result<Value, DecodeError> {
         V_FLOAT => Value::Float(f64::from_bits(r.u64()?)),
         V_SIZE => Value::Size(r.i64()?),
         V_DURATION => Value::Duration(r.i64()?),
+        V_MISSING => Value::Missing(shlang::value::Why::from_code(r.u8()?).ok_or(DecodeError)?),
         V_QUANTITY => {
             let dim = shlang::units::Dim::from_code(r.u8()?).ok_or(DecodeError)?;
             Value::Quantity(shlang::value::Quantity { dim, value: f64::from_bits(r.u64()?) })

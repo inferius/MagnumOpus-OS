@@ -122,3 +122,22 @@ fn notation_switch_formats_line_once() {
     a.set_notation(true);
     assert!(a.take_out().iter().all(|m| !matches!(m, ClientMsg::Format { .. })));
 }
+
+#[test]
+fn table_explains_missing_values() {
+    use shlang::value::{Value, Why};
+    let mut a = App::new(crate::theme::Theme::dark(), 100, 30);
+    a.on_msg(ServerMsg::Attached { session: 7, cwd: "/".into(), blocks: 0 });
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 1, line: "ls".into() });
+    let row = |n: &str, size: Value| Value::record(&[("name", Value::str(n)), ("size", size)]);
+    let rows = vec![row("prazdna", Value::Size(0)), row("cizi", Value::Missing(Why::Hidden))];
+    a.on_msg(ServerMsg::Item { session: 7, block: 1, item: Item::Value(Value::List(rows)) });
+    a.on_msg(ServerMsg::BlockEnd { session: 7, block: 1, ok: true, duration: 1 });
+    let (_, lines) = a.frame_lines();
+    let text: Vec<String> = lines.iter().map(|l| (0..l.parts_len()).map(|i| l.part_text(i)).collect()).collect();
+    assert!(text.iter().any(|t| t.contains("cizi") && t.contains('\u{2014}')), "{text:?}");
+    assert!(text.iter().any(|t| t.contains("prazdna") && t.contains("0 B")), "{text:?}");
+    // Vysvetlivka jen k duvodu, ktery v tabulce je.
+    assert!(text.iter().any(|t| t.contains("skryté (chybí právo)")), "{text:?}");
+    assert!(!text.iter().any(|t| t.contains("nedostupné")), "{text:?}");
+}
