@@ -498,9 +498,25 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
         pump();
         t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "16"))
     })?;
+    // Nahled zmen s tlacitky (zamek / preview): na snimku je ramecek se
+    // seznamem zmen a tlacitkem Prevzit.
+    let line = "preview { echo a > /tmp/nahled-a.txt; echo b > /tmp/nahled-b.txt; echo c > /tmp/nahled-c.txt }";
+    ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: line.into() })?;
+    let t = wait_tree(&s.inspect, w.id, "nahled zmen v terminalu", |t| {
+        pump();
+        t.iter().any(|n| n.role == Role::Button && n.name.starts_with("Převzít 3 změn"))
+    })?;
     time::sleep(Duration::from_millis(2500));
     println!("{QEMU_SHOT}terminal");
     time::sleep(Duration::from_millis(1500));
+    // Tlacitko "Zahodit" (pristupnost = stejna cesta jako klik): nic se
+    // nezmeni, blok skonci odmitnutim.
+    let drop = t.iter().find(|n| n.role == Role::Button && n.name.starts_with("Zahodit")).ok_or("tlacitko Zahodit chybi")?;
+    ask(&s.inspect, InspectRequest::Act { window: w.id, node: drop.id, action: actions::ACTIVATE, value: String::new() })?;
+    wait_tree(&s.inspect, w.id, "odmitnuti nahledu", |t| {
+        pump();
+        t.iter().any(|n| n.role == Role::Terminal && n.value.contains("nebyly převzaty"))
+    })?;
     close_terminal(startup, s, app, "gui-term (snimek)")
 }
 

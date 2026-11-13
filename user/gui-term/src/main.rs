@@ -32,7 +32,8 @@ use gfx::text::Family;
 use gfx::{Canvas, Rect};
 use guiproto::a11y::{Node, Role, actions};
 use guiproto::action::Value;
-use guiproto::window::{ClientMsg, Mode, RegionKind};
+use guiproto::window::{ClientMsg, InputEvent, InputRecord, Mode, RegionKind};
+use inputproto::code::BTN_LEFT;
 use libos::{Channel, Error, Handle, Signals, Startup, println, time};
 use term::proto::ServerMsg;
 use term::screen::Screen;
@@ -48,6 +49,8 @@ struct Look {
     t: theme::Theme,
     mono: Family,
     ui: Family,
+    /// Ikony z prototypu (`design/assets/mo.js`).
+    icons: gfx::icon::Icons,
 }
 
 impl Look {
@@ -56,7 +59,7 @@ impl Look {
         // Terminal bez ligatur (`font.mono_features` je vypina); zapnute
         // vlastnosti zadne.
         let mono = Family::new(font::mono(), &[]);
-        Self { t, mono, ui: ui::Look::ui_fonts() }
+        Self { t, mono, ui: ui::Look::ui_fonts(), icons: gfx::icon::Icons::new() }
     }
 
     fn title_h(&self) -> u32 {
@@ -74,6 +77,13 @@ impl Look {
         let f = self.mono.face_ref(s.weight);
         let w = f.font().advance(f.font().glyph_index('0'), s.size);
         ((w + 0.5) as u32, s.line)
+    }
+
+    /// Mrizka bunek v okne (pocatek pod titulkem s okrajem).
+    fn grid(&self, cols: usize) -> rows::Grid {
+        let (cw, ch) = self.cell();
+        let pad = self.pad() as i32;
+        rows::Grid { x: pad, y: self.title_h() as i32 + pad, cw, ch, cols }
     }
 
     /// Karta relace v titulku: za odznakem systemu (misto podle
@@ -110,6 +120,9 @@ const TICK: Duration = Duration::from_millis(150);
 /// Snimek krouzku cinnosti (~16 snimku/s, jen kdyz neco bezi).
 const ANIM: Duration = Duration::from_millis(60);
 
+/// Id uzlu pristupnosti prvniho tlacitka vyzvy (dalsi po jedne).
+const BUTTON_NODE: u32 = 100;
+
 struct Term {
     win: Window,
     look: Look,
@@ -118,6 +131,8 @@ struct Term {
     /// Pripojeni k termd pres init (`conn: None` = terminal bez sluzby).
     conn: connect::Connector,
     termd: Option<Channel>,
+    /// Radky posledniho snimku (role pro klik na prvky navrhu).
+    lines: Vec<term::ui::draw::Line>,
 }
 
 fn grid(look: &Look, w: u32, h: u32) -> (usize, usize) {
@@ -141,6 +156,8 @@ impl Term {
         let mut app = App::new(th, c, r);
         // Krouzek a dilci bunky pruhu kresli okno samo (term::activity).
         app.glyphs = term::activity::Glyphs::Drawn;
+        // Pred slozku ve vyzve okno kresli ikonu (rows.rs).
+        app.icon_room = true;
         let mut t = Self {
             win,
             look,
@@ -148,6 +165,7 @@ impl Term {
             app,
             conn: connect::Connector::new(conn, "gui-term"),
             termd: None,
+            lines: Vec::new(),
         };
         t.app.welcome = true;
         t.conn.start();
@@ -222,7 +240,7 @@ impl Term {
         }
     }
 
-    fn a11y(&self) -> Vec<Node> {
+    fn a11y(&mut self) -> Vec<Node> {
         let mut win = Node::new(1, 0, Role::Window, "Terminál");
         win.bounds = Rect::new(0, 0, self.win.w, self.win.h);
         let mut bar = Node::new(2, 1, Role::Titlebar, "Terminál");
@@ -244,10 +262,19 @@ impl Term {
         t.value = v;
         t.state = guiproto::a11y::state::FOCUSED;
         t.actions = actions::SET_VALUE;
-        for n in [&mut win, &mut bar, &mut tab, &mut t] {
+        let mut nodes = vec![win, bar, tab, t];
+        // Volby vyzvy jako tlacitka (cteckou i testem: ACTIVATE).
+        let g = self.look.grid(self.screen.cols);
+        for (b, label, ..) in rows::buttons(&mut self.look, &self.lines, &g) {
+            let mut n = Node::new(BUTTON_NODE + b.index as u32, 4, Role::Button, &label);
+            n.bounds = b.rect;
+            n.actions = actions::ACTIVATE;
+            nodes.push(n);
+        }
+        for n in &mut nodes {
             n.layer = ui::ROOT_LAYER;
         }
-        vec![win, bar, tab, t]
+        nodes
     }
 
     fn render(&mut self) -> Result<(), Error> {
@@ -269,7 +296,9 @@ impl Term {
         let screen = &self.screen;
         let look = &mut self.look;
         self.win.draw(|c: &mut Canvas<'_>| paint(c, look, screen, &label, &lines))?;
-        self.win.set_a11y(&self.a11y())?;
+        self.lines = lines;
+        let nodes = self.a11y();
+        self.win.set_a11y(&nodes)?;
         self.win.commit_redrawn(false)
     }
 
@@ -286,6 +315,18 @@ impl Term {
     /// Udalost okna; `Some(true)` = prekreslit, `None` = konec aplikace.
     fn event(&mut self, ev: Event) -> Option<bool> {
         Some(match ev {
+            // Klik na tlacitko vyzvy (prvky navrhu nad mrizkou).
+            Event::Input(InputRecord { event: InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, .. }) => {
+                let g = self.look.grid(self.screen.cols);
+                let hit = rows::buttons(&mut self.look, &self.lines, &g).into_iter().find(|(b, ..)| b.rect.contains(x, y));
+                match hit {
+                    Some((b, ..)) => {
+                        self.app.prompt_pick(b.index);
+                        true
+                    }
+                    None => false,
+                }
+            }
             Event::Input(r) => match keys::key(&r) {
                 // termd nejde spustit (pamet): Enter to zkusi znovu (rucne).
                 Some(term::ui::Key::Enter) if self.conn.gave_up.is_some() && self.termd.is_none() => {
@@ -309,6 +350,10 @@ impl Term {
             Event::Theme(m) => {
                 self.look.t = theme::Theme::builtin(m);
                 self.app.theme = self.look.term_theme();
+                true
+            }
+            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && node >= BUTTON_NODE => {
+                self.app.prompt_pick((node - BUTTON_NODE) as usize);
                 true
             }
             Event::A11yAction { action, value, .. } if action & actions::SET_VALUE != 0 => {
@@ -464,7 +509,7 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, line
     let pad = look.pad() as i32;
     let ms = t.text.mono;
     // Prvky navrhu podle roli radku: pod textem, preskocene bunky, nad textem.
-    let grid = rows::Grid { x: pad, y: th as i32 + pad, cw, ch, cols: screen.cols };
+    let grid = look.grid(screen.cols);
     let skips = rows::skips(lines);
     rows::under(c, look, lines, &grid);
     for row in 0..screen.rows {
@@ -505,7 +550,7 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, line
 }
 
 /// Barva (premultiplied) s kryti `a` / 255.
-fn alpha(c: u32, a: u32) -> u32 {
+pub(crate) fn alpha(c: u32, a: u32) -> u32 {
     let ch = |s: u32| ((c >> s & 0xFF) * a / 255) << s;
     ch(24) | ch(16) | ch(8) | ch(0)
 }

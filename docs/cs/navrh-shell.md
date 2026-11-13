@@ -935,11 +935,12 @@ a podle rolí řádků (`term::ui::draw::Role`) nad ní dokreslí prvky návrhu
 |---|---|
 | levý pruh bloku podle stavu (běží, hotovo, chyba), příkaz tučně, čas a výsledek vpravo písmem UI | **[implementováno]** |
 | rámeček chyby (danger-soft, okraj danger) | **[implementováno]** |
-| řádek vstupu: linka nad ním, pilulka se složkou | **[implementováno]** (bez ikony složky) |
+| řádek vstupu: linka nad ním, pilulka s ikonou a složkou | **[implementováno]** |
+| náhled změn (zámek nebezpečných operací, `preview`): rámeček se seznamem změn (nejvýš 6, pak „… a N dalších“) a tlačítky „Převzít N změn“ / „Zahodit“; tlačítka jsou i v přístupnosti, seznam změn ukazuje i konzole | **[ověřeno v QEMU]** |
 | nápověda kláves jako štítky | **[implementováno]** |
 | linka pod záhlavím tabulky | **[implementováno]** (typ sloupce pod jménem zatím ne) |
 | doplňování jako nabídka nad řádkem, myš, výběr textu a schránka | **[navrženo]** (krok 4, komponenty 6c) |
-| panel úloh vpravo, náhled změn s tlačítky, karty relací a přepínač B/C v titulku, akce bloku, animace | **[navrženo]** (krok 5) |
+| panel úloh vpravo, karty relací a přepínač B/C v titulku, akce bloku, animace | **[navrženo]** (krok 5) |
 
 ### Ukazatel činnosti a průběh
 

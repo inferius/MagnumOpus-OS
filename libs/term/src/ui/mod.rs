@@ -9,6 +9,7 @@
 
 pub mod draw;
 pub mod editor;
+pub mod preview;
 pub mod progress;
 pub mod table;
 pub mod tasks;
@@ -121,6 +122,9 @@ pub struct App {
     /// Jak kreslit ukazatel cinnosti a pruh ([`crate::activity`]): okno
     /// GUI vlastnim prvkem, konzole znaky, "Omezit pohyb" staticky.
     pub glyphs: crate::activity::Glyphs,
+    /// Okno GUI kresli pred slozku ve vyzve ikonu: radek vstupu pro ni
+    /// nechava dve bunky (pilulka podle `design/terminal.html`).
+    pub icon_room: bool,
     /// Pocitadlo snimku (tocici se znak u bezicich bloku).
     tick: u32,
     /// Radky napsane behem behu prikazu (pobezi po nem, v poradi).
@@ -183,6 +187,7 @@ impl App {
             out: Vec::new(),
             now: None,
             glyphs: crate::activity::Glyphs::Text,
+            icon_room: false,
             tick: 0,
             scroll: 0,
             queued: Vec::new(),
@@ -559,64 +564,6 @@ impl App {
         self.scroll = (self.scroll as isize + d).clamp(0, max as isize) as usize;
     }
 
-    fn key_prompt(&mut self, k: Key) {
-        if self.prompt.as_ref().is_some_and(|p| p.input.is_some()) {
-            return self.key_ask(k);
-        }
-        let Some(p) = self.prompt.as_mut() else { return };
-        let n = if p.choices.is_empty() { 2 } else { p.choices.len() };
-        let answer = match k {
-            Key::Left | Key::Up | Key::BackTab => {
-                p.sel = (p.sel + n - 1) % n;
-                None
-            }
-            Key::Right | Key::Down | Key::Tab => {
-                p.sel = (p.sel + 1) % n;
-                None
-            }
-            Key::Char('a' | 'y' | 'A' | 'Y') if p.choices.is_empty() => Some(0),
-            Key::Char('n' | 'N') if p.choices.is_empty() => Some(1),
-            Key::Char(c) if c.is_ascii_digit() && !p.choices.is_empty() => {
-                let i = c as usize - '1' as usize;
-                (i < n).then_some(i)
-            }
-            Key::Esc | Key::Ctrl('c') => Some(if p.choices.is_empty() { 1 } else { usize::MAX }),
-            Key::Enter => Some(p.sel),
-            _ => None,
-        };
-        let Some(a) = answer else { return };
-        let p = self.prompt.take().unwrap();
-        if p.choices.is_empty() {
-            self.out.push(ClientMsg::Answer { prompt: p.id, yes: a == 0 });
-        } else if a == usize::MAX {
-            self.out.push(ClientMsg::Interrupt { session: self.session });
-        } else {
-            self.out.push(ClientMsg::Choose { prompt: p.id, index: a as u32 });
-        }
-    }
-
-    /// Psani odpovedi na dotaz na text.
-    fn key_ask(&mut self, k: Key) {
-        let Some(p) = self.prompt.as_mut() else { return };
-        let Some((_, text)) = p.input.as_mut() else { return };
-        match k {
-            Key::Char(c) => text.push(c),
-            Key::Backspace => {
-                text.pop();
-            }
-            Key::Enter => {
-                let p = self.prompt.take().unwrap();
-                let text = p.input.map(|(_, t)| t).unwrap_or_default();
-                self.out.push(ClientMsg::Text { prompt: p.id, text });
-            }
-            Key::Esc | Key::Ctrl('c') => {
-                self.prompt = None;
-                self.out.push(ClientMsg::Interrupt { session: self.session });
-            }
-            _ => {}
-        }
-    }
-
     fn key_editor(&mut self, k: Key) {
         if let Some(m) = self.menu.as_mut() {
             match k {
@@ -871,31 +818,7 @@ impl App {
         let t = &self.theme;
         let mut bottom: Vec<Line> = Vec::new();
         // Vyzva.
-        if let Some(p) = &self.prompt
-            && let Some((secret, text)) = &p.input
-        {
-            bottom.push(Line::new().text(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &p.question));
-            let shown: String = if *secret { text.chars().map(|_| '*').collect() } else { text.clone() };
-            bottom.push(Line::new().text(Some(Style::fg(t.ui.fg)), &alloc::format!("> {shown}_")));
-        } else if let Some(p) = &self.prompt {
-            bottom.push(Line::new().text(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &p.question));
-            let mut l = Line::new();
-            let opts: Vec<String> = if p.choices.is_empty() {
-                alloc::vec!["Ano (a)".into(), "Ne (n)".into()]
-            } else {
-                p.choices.iter().enumerate().map(|(i, c)| alloc::format!("{} {c}", i + 1)).collect()
-            };
-            for (i, o) in opts.iter().enumerate() {
-                l.push(None, " ");
-                let st = Style::fg(if i == p.sel { t.ui.fg } else { t.ui.muted });
-                if i == p.sel {
-                    l.push_bg(Some(st), t.ui.select, &alloc::format!(" {o} "));
-                } else {
-                    l.push(Some(st), &alloc::format!(" {o} "));
-                }
-            }
-            bottom.push(l);
-        }
+        self.draw_prompt(&mut bottom);
         // Nabidka doplnovani.
         if let Some(m) = &self.menu {
             // Okno kolem vyberu (dlouhy seznam se posouva se sipkami).
@@ -1012,6 +935,9 @@ impl App {
         let t = &self.theme;
         let mut l = Line::new();
         // Vyzva: kde jsem (tucne, zvyraznene), pak oddelovac.
+        if self.icon_room {
+            l.push(None, "  ");
+        }
         l.push(Some(Style { bold: true, ..Style::fg(t.ui.accent) }), &self.cwd_short());
         l.push(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), " \u{276F} ");
         let text = &self.editor.text;
@@ -1054,7 +980,7 @@ impl App {
         if let Some(e) = &h.error {
             l.push(Some(Style::fg(t.ui.err)), &alloc::format!("   {}", e.message));
         }
-        l.role(draw::Role::Input { prefix: 2, cwd: self.cwd_short() })
+        l.role(draw::Role::Input { prefix: if self.icon_room { 3 } else { 2 }, cwd: self.cwd_short() })
     }
 
     fn cwd_short(&self) -> String {

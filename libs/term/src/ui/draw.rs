@@ -36,6 +36,21 @@ pub enum Role {
     Input { prefix: usize, cwd: String },
     /// Napoveda klaves: (klavesa, popis).
     Hints(Vec<(String, String)>),
+    /// Vyzva nad radkem vstupu (`ui::preview`).
+    Prompt(PromptRow),
+}
+
+/// Radek vyzvy: okno GUI kolem nahledu zmen kresli ramecek (zluty okraj,
+/// zahlavi `warn_soft`) a volby jako tlacitka.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PromptRow {
+    /// Otazka; `preview` = nahled zmen (zahlavi ramecku).
+    Question { preview: bool },
+    /// Jedna zmena nahledu (nebo "... a N dalsich").
+    Change,
+    /// Volby: popisky v poradi odpovedi, vybrana, nahled zmen (prvni
+    /// tlacitko hlavni).
+    Buttons { labels: Vec<String>, sel: usize, preview: bool },
 }
 
 #[derive(Debug, Clone, Default)]

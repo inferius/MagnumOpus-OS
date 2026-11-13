@@ -990,11 +990,12 @@ comparison: `target/shots/terminal.png` (look test `look_shots`).
 |---|---|
 | block left bar by state (running, done, error), bold command, time and result on the right in the UI font | **[implemented]** |
 | error box (danger-soft, danger border) | **[implemented]** |
-| input row: a line above it, a folder pill | **[implemented]** (no folder icon) |
+| input row: a line above it, a pill with a folder icon and name | **[implemented]** |
+| change preview (dangerous operation lock, `preview`): a box with the list of changes (at most 6, then "... and N more") and buttons "Take N changes" / "Discard"; the buttons are in accessibility too, the console shows the list of changes as well | **[verified in QEMU]** |
 | key hints as chips | **[implemented]** |
 | a line under the table header | **[implemented]** (no column type under the name yet) |
 | completion as a menu above the line, mouse, text selection and clipboard | **[designed]** (step 4, 6c components) |
-| task panel on the right, change preview with buttons, session tabs and B/C switch in the title, block actions, animation | **[designed]** (step 5) |
+| task panel on the right, session tabs and B/C switch in the title, block actions, animation | **[designed]** (step 5) |
 
 ### Activity indicator and progress
 
