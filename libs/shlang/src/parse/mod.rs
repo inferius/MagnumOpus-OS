@@ -558,7 +558,7 @@ impl<'a> Parser<'a> {
 pub(crate) fn describe(t: &Tok) -> String {
     match t {
         Tok::Ident(s) => alloc::format!("'{s}'"),
-        Tok::Num(_) | Tok::Unit(..) => "číslo".into(),
+        Tok::Num(_) | Tok::Unit(..) | Tok::Compound(_) => "číslo".into(),
         Tok::Str(_) => "řetězec".into(),
         Tok::Punct(p) => alloc::format!("'{p}'"),
         Tok::Newline => "konec řádku".into(),

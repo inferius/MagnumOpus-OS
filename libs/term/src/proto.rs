@@ -196,6 +196,9 @@ const V_ERROR: u8 = 12;
 const V_TABLE: u8 = 13;
 /// Soubor nacitany podle potreby (cesta, velikost, druh).
 const V_FILE: u8 = 14;
+/// Velicina z tabulky jednotek: kod rozmeru (`shlang::units::Dim::code`)
+/// a hodnota v zakladni jednotce (f64).
+const V_QUANTITY: u8 = 15;
 
 /// Je seznam tabulka (vsechny radky jsou zaznamy se stejnymi sloupci)?
 fn table_cols(items: &[Value]) -> Option<Vec<String>> {
@@ -227,6 +230,11 @@ pub fn put_value(w: &mut W, v: &Value) {
         Value::Size(i) => {
             w.u8(V_SIZE);
             w.i64(*i);
+        }
+        Value::Quantity(q) => {
+            w.u8(V_QUANTITY);
+            w.u8(q.dim.code());
+            w.u64(q.value.to_bits());
         }
         Value::Duration(i) => {
             w.u8(V_DURATION);
@@ -307,6 +315,10 @@ pub fn get_value(r: &mut R, depth: usize) -> Result<Value, DecodeError> {
         V_FLOAT => Value::Float(f64::from_bits(r.u64()?)),
         V_SIZE => Value::Size(r.i64()?),
         V_DURATION => Value::Duration(r.i64()?),
+        V_QUANTITY => {
+            let dim = shlang::units::Dim::from_code(r.u8()?).ok_or(DecodeError)?;
+            Value::Quantity(shlang::value::Quantity { dim, value: f64::from_bits(r.u64()?) })
+        }
         V_TIME => Value::Time(r.i64()?),
         V_STR => Value::Str(r.str()?),
         V_BYTES => Value::Bytes(r.bytes()?),

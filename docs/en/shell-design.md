@@ -223,8 +223,29 @@ for f in (ls ~/Photos | where ext == "jpg") {
 
   | Kind | Units | Value |
   |---|---|---|
-  | size | `B`, `KB`, `MB`, `GB`, `TB` (×1000), `KiB`, `MiB`, `GiB`, `TiB` (×1024) | bytes |
-  | duration | `ns`, `us`, `ms`, `s`, `min`, `h`, `d`, `w`, `y` (365 days) | nanoseconds |
+  | size | `B`, `KB`, `MB`, `GB`, `TB` (×1000), `KiB`, `MiB`, `GiB`, `TiB` (×1024) | bytes (integer) |
+  | duration | `ns`, `us`, `ms`, `s`, `m` (minute), `min`, `h`, `d`, `w`, `y` (365 days) | nanoseconds (integer) |
+  | frequency | `Hz`, `kHz`, `MHz`, `GHz` | hertz (decimal) |
+  | percent | `%` | ratio, 1 = 100 % (decimal) |
+
+  A **compound duration** goes from the larger unit to the smaller one,
+  each unit once: `1h30m`, `2m30s`, `1d12h`. `%` after a number is a
+  percentage only when no number or name follows it (`10%3` is the
+  remainder). Arithmetic works only with the same quantity or with a number
+  (`440Hz + 60Hz`, `1MHz / 4`); a percentage of a value `50% * 200MB` gives
+  100 MB, `10% * 1h` 6 minutes. Different quantities cannot be added or
+  compared (error `SH_TYPE`). Output picks the largest unit in which the
+  value is at least 1 (`2.4 GHz`, `50%`) **[implemented]**.
+
+  Units are data: the table `shlang::units::TABLE` (symbol, quantity,
+  multiple of the base unit). A new quantity (length, temperature, transfer
+  rate) is a table row and a dimension; the lexer, output and the hint for
+  an unknown unit pick it up. Size and duration stay exact integers, other
+  quantities are a decimal number in the base unit.
+
+  **Open question:** `m` is a minute today. Once length is added, `m`
+  (metre) would collide; the solution (metre only in `convert`, a different
+  minute symbol, or by context) is not decided yet **[designed]**.
 
 - **Strings:** `"..."` with the escapes `\n \t \r \0 \\ \" \{ \}` and
   embedded expressions `{expr}`; `'...'` is literal text without escapes and

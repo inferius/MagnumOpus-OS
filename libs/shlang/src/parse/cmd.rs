@@ -530,6 +530,7 @@ impl<'a> Parser<'a> {
                 Some(Tok::Num(crate::ast::Num::Int(i))) => return Ok(Expr::Lit(Lit::Int(i), span)),
                 Some(Tok::Num(crate::ast::Num::Float(f))) => return Ok(Expr::Lit(Lit::Float(f), span)),
                 Some(Tok::Unit(value, unit)) => return Ok(Expr::Lit(Lit::Unit { value, unit }, span)),
+                Some(Tok::Compound(parts)) => return Ok(Expr::Lit(Lit::Compound(parts), span)),
                 _ => {}
             }
             match text.as_str() {

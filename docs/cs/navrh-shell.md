@@ -217,8 +217,29 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 
   | Druh | Jednotky | Hodnota |
   |---|---|---|
-  | velikost | `B`, `KB`, `MB`, `GB`, `TB` (×1000), `KiB`, `MiB`, `GiB`, `TiB` (×1024) | bajty |
-  | doba | `ns`, `us`, `ms`, `s`, `min`, `h`, `d`, `w`, `y` (365 dní) | nanosekundy |
+  | velikost | `B`, `KB`, `MB`, `GB`, `TB` (×1000), `KiB`, `MiB`, `GiB`, `TiB` (×1024) | bajty (celé číslo) |
+  | doba | `ns`, `us`, `ms`, `s`, `m` (minuta), `min`, `h`, `d`, `w`, `y` (365 dní) | nanosekundy (celé číslo) |
+  | frekvence | `Hz`, `kHz`, `MHz`, `GHz` | hertzy (desetinné) |
+  | procenta | `%` | poměr, 1 = 100 % (desetinné) |
+
+  **Složená doba** jde od větší jednotky k menší, každá jednotka jednou:
+  `1h30m`, `2m30s`, `1d12h`. `%` za číslem je procento jen tehdy, když za
+  ním nenásleduje číslo ani jméno (`10%3` je zbytek po dělení).
+  Počítá se jen se stejnou veličinou nebo s číslem (`440Hz + 60Hz`,
+  `1MHz / 4`); procento z hodnoty `50% * 200MB` dá 100 MB, `10% * 1h`
+  6 minut. Různé veličiny sečíst ani porovnat nejde (chyba `SH_TYPE`).
+  Výpis volí největší jednotku, ve které je hodnota aspoň 1 (`2.4 GHz`,
+  `50%`) **[implementováno]**.
+
+  Jednotky jsou data: tabulka `shlang::units::TABLE` (zápis, veličina,
+  násobek základní jednotky). Novou veličinu (délka, teplota, rychlost
+  přenosu) přidá řádek tabulky a rozměr; lexer, výpis a nápověda k neznámé
+  jednotce ji převezmou. Velikost a doba jsou dál přesná celá čísla,
+  ostatní veličiny desetinné číslo v základní jednotce.
+
+  **Otevřená otázka:** `m` je dnes minuta. Až přibude délka, `m` (metr)
+  by kolidovalo; řešení (metr jen v `convert`, jiný zápis minuty, nebo
+  podle kontextu) zatím není rozhodnuté **[navrženo]**.
 
 - **Řetězce:** `"..."` s escape sekvencemi `\n \t \r \0 \\ \" \{ \}`
   a vloženými výrazy `{výraz}`; `'...'` je doslovný text bez escape sekvencí

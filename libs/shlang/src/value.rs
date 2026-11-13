@@ -24,6 +24,15 @@ pub struct ClosureVal {
     pub captured: Vec<(String, Value)>,
 }
 
+/// Velicina z tabulky jednotek (`crate::units`) mimo velikost a dobu:
+/// frekvence, procenta (a dalsi rozmery pridane do tabulky). `value` je
+/// v zakladni jednotce rozmeru (Hz, pomer 1 = 100 %).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Quantity {
+    pub dim: crate::units::Dim,
+    pub value: f64,
+}
+
 /// Odkaz na soubor (cesta absolutni, druh podle zacatku obsahu).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileRef {
@@ -45,6 +54,8 @@ pub enum Value {
     Size(i64),
     /// Doba v nanosekundach.
     Duration(i64),
+    /// Velicina z tabulky jednotek (frekvence, procenta, ...).
+    Quantity(Quantity),
     /// Okamzik: nanosekundy od 1970-01-01 UTC.
     Time(i64),
     Str(String),
@@ -68,6 +79,7 @@ impl Value {
             Value::Float(_) => "float",
             Value::Size(_) => "size",
             Value::Duration(_) => "duration",
+            Value::Quantity(q) => q.dim.type_name(),
             Value::Time(_) => "time",
             Value::Str(_) => "text",
             Value::Bytes(_) => "bytes",
@@ -147,6 +159,27 @@ pub fn human_size(b: i64) -> String {
     }
 }
 
+/// Velicina v nejvhodnejsi jednotce (`2.4 GHz`, `50%`): nejvys dve
+/// desetinna mista bez koncovych nul.
+pub fn human_quantity(q: &Quantity) -> String {
+    let u = crate::units::Unit::for_display(q.dim, q.value);
+    let v = q.value / u.scale();
+    let mut t = alloc::format!("{v:.2}");
+    if t.contains('.') {
+        while t.ends_with('0') {
+            t.pop();
+        }
+        if t.ends_with('.') {
+            t.pop();
+        }
+    }
+    if t == "-0" {
+        t = String::from("0");
+    }
+    // Procenta bez mezery (`50%`), ostatni jako velikosti (`2.4 GHz`).
+    if u.name() == "%" { alloc::format!("{t}%") } else { alloc::format!("{t} {}", u.name()) }
+}
+
 /// Lidsky citelna doba.
 pub fn human_duration(ns: i64) -> String {
     let neg = ns < 0;
@@ -202,6 +235,7 @@ impl fmt::Display for Value {
             Value::Float(x) => f.write_str(&crate::fmt::num_text(*x)),
             Value::Size(b) => f.write_str(&human_size(*b)),
             Value::Duration(d) => f.write_str(&human_duration(*d)),
+            Value::Quantity(q) => f.write_str(&human_quantity(q)),
             Value::Time(t) => f.write_str(&format_time(*t)),
             Value::Str(s) => f.write_str(s),
             Value::File(r) => write!(f, "<soubor {}: {}, {}>", r.path, r.kind, human_size(r.size as i64)),
