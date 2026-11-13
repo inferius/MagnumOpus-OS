@@ -241,7 +241,12 @@ initfs and accountd then creates (if missing) the account `vyvojar` (first
 free number, development account flag) and signs it in right away, in
 both debug and release builds. **Safeguard:** only these commands add the
 file; neither the image for users (`xtask image`) nor the tests (`xtask
-test`, except the live USB check) have it. The
+test`, except the live USB check) have it. **Why only the file and not also a
+debug-build condition** (previously `cfg(debug_assertions)`): whoever can
+change the initfs on the ESP can just as well replace accountd itself
+there, so the second safeguard did not really add security; it only broke
+`xtask run --release` (the usual way to start). With Secure Boot the
+safeguard will be the image signature **[designed]**. The
 `zive-usb` test checks both: the stick boots into a terminal and an image
 without the file ends on the sign-in screen. The development account has
 no password, no administration role and is marked in the account list.
@@ -393,9 +398,21 @@ appears.
   account and method choice, slow-down, lock and unlock only by the same
   account, windows below are not drawn, sign-out); snapshots
   `target/comp-greeter.png` and `target/comp-greeter-zamceno.png`.
-- ⚠️ First boot without an account: the screen has nobody to offer;
-  creating the first account (`setup` channel) belongs to the installer
-  **[designed]**.
+- **No account** **[implemented]**: when the computer has no account (the
+  image for users before installation), the screen shows no form but the
+  message "There is no account on this computer yet. Accounts are created
+  in the installer." and the **Shut down** and **Restart** buttons
+  (confirmed by a system dialog). The avatar comes only from an account
+  (the initial of its name), never from the heading. Until the account
+  list arrives only the background is shown.
+- **The installer creates the first account** (`design/instalace.html`,
+  `setup` channel) **[designed]**, not the sign-in screen (the user's
+  decision of 2026-11-13).
+- **Method chips** are shown only for an account with several methods
+  (password and PIN, key, recovery key); with a single method they would
+  be confusing.
+- Tests: `cargo test -p comp bez_uctu_zprava_a_vypnuti_misto_formulare`,
+  `cip_metody_jen_pri_vic_metodach`; snapshot `target/comp-greeter-bez-uctu.png`.
 - The protocol supports several simultaneous sessions (fast user
   switching) by session number; the switching screen comes with the
   desktop.

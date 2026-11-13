@@ -153,8 +153,9 @@ s terminálem. **Datový oddíl na flashce není šifrovaný:** kdo má flashku,
 přečte ho. Flashka slouží ke zkoušení hardwaru a VMware, ne pro osobní
 data. `xtask usb` a `xtask vmware` (disk VM je tentýž obraz) to vypíší
 jako varování. Obraz pro uživatele (`cargo xtask image`) automatické
-přihlášení nemá a končí na přihlašovací obrazovce (první účet založí
-instalátor, `design/instalace.html`, **[navrženo]**).
+přihlášení nemá; bez účtu ukáže přihlašovací obrazovka zprávu „účet se
+zakládá v instalátoru“ (instalátor, `design/instalace.html`,
+**[navrženo]**).
 
 Ověřené v QEMU (`cargo xtask usb --run` s oknem, `cargo xtask usb --test`
 bez okna; obojí stroj co nejbližší skutečnému PC: flashka na řadiči xHCI,

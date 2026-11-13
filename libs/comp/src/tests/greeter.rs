@@ -249,3 +249,54 @@ fn avatar_pro_prechod_startovni_obrazovky() {
     assert!(t.c.greeter_avatar(true).1 > before.1, "zamcena obrazovka ma avatar niz (hodiny)");
     t2.frame();
 }
+
+#[test]
+fn bez_uctu_zprava_a_vypnuti_misto_formulare() {
+    let mut t = T::new();
+    t.c.set_login(true, t.now);
+    t.c.take_login_requests();
+    // Dokud seznam uctu neprisel: ani formular, ani zprava.
+    assert!(t.c.greeter_visible() && !t.c.greeter.has_form() && !t.c.greeter.no_account());
+    t.c.login_reply(Reply::Accounts(Vec::new()), t.now);
+    let l = t.c.greeter_layout();
+    assert!(!l.form && l.methods.is_empty() && l.power.len() == 2, "zadny formular, Vypnout a Restartovat");
+    assert!(t.c.secure_fields().is_empty(), "zadne pole s tajemstvim");
+    assert!(t.c.snapshot_lines("t").join("\n").contains("bez uctu"));
+    t.now += dialog::INPUT_DELAY;
+    // Psani ani Enter s prazdnym heslem nic neposle.
+    text(&mut t, "heslo");
+    assert!(t.c.greeter.field.is_empty());
+    assert!(t.c.take_login_requests().is_empty());
+    t.frame();
+    save_png("comp-greeter-bez-uctu.png", &t.frame, W, H);
+    // Tab na Restartovat, Enter = potvrzovaci dialog systemu.
+    t.key(KEY_TAB, false);
+    assert_eq!(t.c.greeter.power_sel, 1);
+    t.key(KEY_ENTER, false);
+    assert!(t.c.dialogs.active().is_some_and(|d| d.owner == crate::dialog::Owner::Power(true)), "dialog restartu");
+    // Klik na Vypnout (po zavreni dialogu).
+    t.key(KEY_ESC, false);
+    let (_, r) = t.c.greeter_layout().power[0];
+    t.click(r.x + 5, r.y + 5);
+    assert!(t.c.dialogs.active().is_some_and(|d| d.owner == crate::dialog::Owner::Power(false)), "dialog vypnuti");
+}
+
+#[test]
+fn cip_metody_jen_pri_vic_metodach() {
+    let mut t = T::new();
+    t.c.set_login(true, t.now);
+    let one = vec![Account { uid: 1001, name: "bob".into(), display: "Bob".into(), methods: 1, flags: 0 }];
+    t.c.login_reply(Reply::Accounts(one), t.now);
+    let l = t.c.greeter_layout();
+    assert!(l.form && l.methods.is_empty(), "jedna metoda: zadny cip");
+    t.now += dialog::INPUT_DELAY;
+    t.key(KEY_TAB, false);
+    assert_eq!(t.c.greeter.method, None, "Tab s jednou metodou nic nemeni");
+    // Vic metod (heslo, PIN, klic): cip pro kazdou.
+    let more = vec![Account { uid: 1000, name: "alice".into(), display: "Alice".into(), methods: 1 | 2 | 4, flags: 0 }];
+    t.c.login_reply(Reply::Accounts(more), t.now);
+    let l = t.c.greeter_layout();
+    let ms: Vec<Method> = l.methods.iter().map(|(m, _)| *m).collect();
+    assert_eq!(ms, vec![Method::Password, Method::Pin, Method::Key]);
+    assert_eq!(t.c.secure_fields(), vec![l.field]);
+}
