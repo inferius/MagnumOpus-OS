@@ -161,8 +161,8 @@ partition on the stick is not encrypted:** whoever has the stick can read
 it. The stick is for trying hardware and VMware, not for personal data.
 `xtask usb` and `xtask vmware` (the VM disk is the same image) print this
 as a warning. The image for users (`cargo xtask image`) has no automatic
-sign-in and ends on the sign-in screen (the first account is created by
-the installer, `design/instalace.html`, **[designed]**).
+sign-in; without an account the sign-in screen says that accounts are
+created in the installer (`design/instalace.html`, **[designed]**).
 
 Verified in QEMU (`cargo xtask usb --run` with a window, `cargo xtask usb
 --test` without one; both use a machine as close to a real PC as possible:

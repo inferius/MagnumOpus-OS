@@ -377,8 +377,19 @@ vstup ignoruje.
   umělý vstup, výběr účtu a metody, zpomalení, zamčení a odemčení jen
   stejným účtem, okna pod obrazovkou se nekreslí, odhlášení); snímky
   `target/comp-greeter.png` a `target/comp-greeter-zamceno.png`.
-- ⚠️ První start bez účtu: obrazovka nemá koho nabídnout; založení
-  prvního účtu (kanál `setup`) patří instalátoru **[navrženo]**.
+- **Bez účtu** **[implementováno]**: když na počítači není žádný účet
+  (obraz pro uživatele před instalací), obrazovka neukáže formulář, ale
+  zprávu „Na tomto počítači zatím není žádný účet. Účet se zakládá
+  v instalátoru.“ a tlačítka **Vypnout** a **Restartovat** (potvrdí je
+  systémový dialog). Avatar se kreslí jen z účtu (iniciála jeho jména),
+  nikdy z nadpisu. Dokud seznam účtů nepřijde, je vidět jen pozadí.
+- **První účet zakládá instalátor** (`design/instalace.html`, kanál
+  `setup`) **[navrženo]**, ne přihlašovací obrazovka (rozhodnutí
+  uživatele 2026-11-13).
+- **Čipy metod** ukazuje obrazovka jen u účtu s víc metodami (heslo
+  a PIN, klíč, obnovovací klíč); s jedinou metodou by byly matoucí.
+- Testy: `cargo test -p comp bez_uctu_zprava_a_vypnuti_misto_formulare`,
+  `cip_metody_jen_pri_vic_metodach`; snímek `target/comp-greeter-bez-uctu.png`.
 - Více současných relací (rychlé přepnutí uživatele) protokol umí (číslo
   relace); obrazovka přepnutí přijde s plochou.
 - Pád accountd: relace běží dál (drží je init). Supervisor accountd

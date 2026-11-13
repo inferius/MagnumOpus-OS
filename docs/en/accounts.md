@@ -398,9 +398,21 @@ appears.
   account and method choice, slow-down, lock and unlock only by the same
   account, windows below are not drawn, sign-out); snapshots
   `target/comp-greeter.png` and `target/comp-greeter-zamceno.png`.
-- ⚠️ First boot without an account: the screen has nobody to offer;
-  creating the first account (`setup` channel) belongs to the installer
-  **[designed]**.
+- **No account** **[implemented]**: when the computer has no account (the
+  image for users before installation), the screen shows no form but the
+  message "There is no account on this computer yet. Accounts are created
+  in the installer." and the **Shut down** and **Restart** buttons
+  (confirmed by a system dialog). The avatar comes only from an account
+  (the initial of its name), never from the heading. Until the account
+  list arrives only the background is shown.
+- **The installer creates the first account** (`design/instalace.html`,
+  `setup` channel) **[designed]**, not the sign-in screen (the user's
+  decision of 2026-11-13).
+- **Method chips** are shown only for an account with several methods
+  (password and PIN, key, recovery key); with a single method they would
+  be confusing.
+- Tests: `cargo test -p comp bez_uctu_zprava_a_vypnuti_misto_formulare`,
+  `cip_metody_jen_pri_vic_metodach`; snapshot `target/comp-greeter-bez-uctu.png`.
 - The protocol supports several simultaneous sessions (fast user
   switching) by session number; the switching screen comes with the
   desktop.

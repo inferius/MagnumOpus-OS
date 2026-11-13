@@ -134,7 +134,17 @@ pub struct Greeter {
     pub(crate) requests: Vec<Request>,
     /// Od kdy je obrazovka videt (vstup tesne po zobrazeni se ignoruje).
     pub(crate) since: u64,
+    /// Seznam uctu uz prisel (do te doby se nic neukazuje).
+    pub(crate) loaded: bool,
+    /// Vybrane tlacitko obrazovky bez uctu (0 = Vypnout, 1 = Restartovat).
+    pub(crate) power_sel: usize,
 }
+
+/// Text obrazovky, kdyz na pocitaci neni zadny ucet (prvni ucet zaklada
+/// instalator, ne prihlasovaci obrazovka).
+pub const NO_ACCOUNT: [&str; 2] = ["Na tomto počítači zatím není žádný účet.", "Účet se zakládá v instalátoru."];
+/// Tlacitka obrazovky bez uctu.
+pub const POWER: [&str; 2] = ["Vypnout", "Restartovat"];
 
 pub(crate) fn zero(s: &mut String) {
     // Bajty hesla prepsat drive, nez se pamet uvolni.
@@ -173,6 +183,17 @@ impl Greeter {
         }
     }
 
+    /// Je formular (pole, metody)? Jen s uctem: pri prihlaseni aspon jeden
+    /// viditelny ucet, pri zamceni ucet relace.
+    pub fn has_form(&self) -> bool {
+        self.target().is_some()
+    }
+
+    /// Prihlaseni bez jedineho uctu (zprava a Vypnout/Restartovat).
+    pub fn no_account(&self) -> bool {
+        self.mode() == Mode::Login && self.loaded && self.accounts.is_empty()
+    }
+
     /// Metody, ktere vybrany ucet ma (vzdy aspon heslo).
     fn methods(&self) -> Vec<Method> {
         let m = self.target().map_or(1, |a| a.methods);
@@ -204,14 +225,20 @@ pub struct Layout {
     pub go: Rect,
     pub phrase: Rect,
     pub msg_y: i32,
+    /// Cipy metod: jen kdyz ma ucet vic metod (jinak by byly matouci).
     pub methods: Vec<(Method, Rect)>,
     pub clock_y: i32,
+    /// Formular je (ucet existuje); jinak se pole ani avatar nekresli.
+    pub form: bool,
+    /// Bez uctu: Vypnout (`false`) a Restartovat (`true`).
+    pub power: Vec<(bool, Rect)>,
 }
 
 impl Comp {
     /// Kanal `login` od initu pripojeny (`true`) nebo zavreny.
     pub fn set_login(&mut self, on: bool, now: u64) {
         self.greeter.enabled = on;
+        self.greeter.loaded = false;
         if on {
             self.greeter.requests.push(Request::List);
         }
@@ -251,7 +278,7 @@ impl Comp {
     /// pocet tecek (delka tajemstvi) se nezaznamena.
     pub fn secure_fields(&self) -> Vec<Rect> {
         let mut v = Vec::new();
-        if self.greeter.visible() {
+        if self.greeter.visible() && self.greeter.has_form() {
             v.push(self.greeter_layout().field);
         }
         if let Some(f) = self.dialog_layout().and_then(|l| l.field) {
@@ -265,6 +292,7 @@ impl Comp {
         let g = &self.greeter;
         let mode = match g.mode() {
             Mode::Off => return None,
+            Mode::Login if g.no_account() => String::from("prihlaseni bez uctu (zprava, Vypnout/Restartovat)"),
             Mode::Login => String::from("prihlaseni"),
             Mode::Locked(s) => format!("zamceno (relace {s})"),
         };
@@ -306,6 +334,7 @@ impl Comp {
             Reply::Accounts(list) => {
                 let keep = g.accounts.get(g.sel).map(|a| a.uid);
                 g.accounts = list;
+                g.loaded = true;
                 g.sel = keep.and_then(|u| g.accounts.iter().position(|a| a.uid == u)).unwrap_or(0);
                 if let Some(a) = g.target() {
                     let uid = a.uid;
@@ -365,7 +394,7 @@ impl Comp {
 
     fn submit(&mut self, now: u64) {
         let g = &mut self.greeter;
-        if g.busy || now < g.wait_until {
+        if g.busy || now < g.wait_until || !g.has_form() {
             return;
         }
         let method = g.current_method();
@@ -421,6 +450,21 @@ impl Comp {
         if action == Action::Release || !self.input_ready(now) {
             return;
         }
+        // Bez uctu jen tlacitka Vypnout / Restartovat.
+        if !self.greeter.has_form() {
+            match code {
+                KEY_TAB | KEY_LEFT | KEY_RIGHT if self.greeter.no_account() => {
+                    self.greeter.power_sel = 1 - self.greeter.power_sel.min(1);
+                    self.damage_all();
+                }
+                KEY_ENTER | KEY_KPENTER if self.greeter.no_account() => {
+                    let reboot = self.greeter.power_sel == 1;
+                    self.confirm_power(reboot);
+                }
+                _ => {}
+            }
+            return;
+        }
         match code {
             KEY_ENTER | KEY_KPENTER => self.submit(now),
             KEY_BACKSPACE => {
@@ -435,7 +479,7 @@ impl Comp {
                     self.damage_all();
                 }
             }
-            KEY_TAB => {
+            KEY_TAB if self.methods_now().len() > 1 => {
                 let ms = self.methods_now();
                 let cur = self.greeter.current_method();
                 let i = ms.iter().position(|m| *m == cur).unwrap_or(0);
@@ -459,7 +503,7 @@ impl Comp {
     /// Znak (jen fyzicky vstup). PIN jen cislice.
     pub(crate) fn greeter_text(&mut self, ch: char, now: u64) {
         let g = &mut self.greeter;
-        if g.busy || ch.is_control() || !now.ge(&(g.since + crate::dialog::INPUT_DELAY)) {
+        if g.busy || ch.is_control() || !now.ge(&(g.since + crate::dialog::INPUT_DELAY)) || !g.has_form() {
             return;
         }
         if g.current_method() == Method::Pin && !ch.is_ascii_digit() {
@@ -480,7 +524,12 @@ impl Comp {
             return;
         }
         let l = self.greeter_layout();
-        if l.go.contains(x, y) {
+        if let Some((reboot, _)) = l.power.iter().find(|(_, r)| r.contains(x, y)) {
+            let reboot = *reboot;
+            self.confirm_power(reboot);
+            return;
+        }
+        if l.form && l.go.contains(x, y) {
             self.submit(now);
             return;
         }
@@ -541,7 +590,10 @@ impl Comp {
         y += 32 + sp[3] as i32;
         let msg_y = y;
         y += 24 + sp[3] as i32;
-        let ms = self.greeter.methods();
+        let form = self.greeter.has_form();
+        // Cipy metod jen pri vic metodach.
+        let ms = if form { self.greeter.methods() } else { Vec::new() };
+        let ms = if ms.len() > 1 { ms } else { Vec::new() };
         let mut methods = Vec::new();
         let widths: Vec<u32> = ms.iter().map(|m| st.width(m.label(), t.text.small) + 2 * sp[4]).collect();
         let total: i32 = widths.iter().map(|w| *w as i32).sum::<i32>() + (ms.len().saturating_sub(1) as i32) * sp[2] as i32;
@@ -550,8 +602,19 @@ impl Comp {
             methods.push((*m, Rect::new(x, y, *bw, t.size.control_h_compact)));
             x += *bw as i32 + sp[2] as i32;
         }
-        let _ = w;
-        Layout { avatar, users, name_y, field, go, phrase, msg_y, methods, clock_y }
+        // Bez uctu: dve tlacitka pod zpravou (zprava na miste pole).
+        let mut power = Vec::new();
+        if self.greeter.no_account() {
+            let by = field.y + 2 * t.text.body.line as i32 + sp[5] as i32;
+            let widths: Vec<u32> = POWER.iter().map(|s| st.width(s, t.text.body) + 2 * sp[5]).collect();
+            let total = widths.iter().sum::<u32>() as i32 + sp[3] as i32;
+            let mut x = cx - total / 2;
+            for (i, bw) in widths.iter().enumerate() {
+                power.push((i == 1, Rect::new(x, by, *bw, t.size.control_h)));
+                x += *bw as i32 + sp[3] as i32;
+            }
+        }
+        Layout { avatar, users, name_y, field, go, phrase, msg_y, methods, clock_y, form, power }
     }
 
     /// Nakresli obrazovku pres celou plochu (nepruhledne).
@@ -582,9 +645,32 @@ impl Comp {
             center(st, c, l.clock_y, tm, t.text.clock, col.on_accent, w);
             center(st, c, l.clock_y + t.text.clock.line as i32, date, t.text.title, col.on_accent, w);
         }
-        // Avatar: kruh s pocatecnim pismenem.
         let target = g.target().cloned();
-        let display = target.as_ref().map_or(String::from("Přihlášení"), |a| a.display.clone());
+        // Bez uctu: zprava a Vypnout / Restartovat, zadny formular ani
+        // avatar. Dokud seznam uctu neprisel, jen pozadi.
+        if !l.form {
+            if g.no_account() {
+                center(st, c, l.name_y, "Přihlášení", t.text.title, col.on_accent, w);
+                for (k, line) in NO_ACCOUNT.iter().enumerate() {
+                    center(st, c, l.field.y + k as i32 * t.text.body.line as i32, line, t.text.body, col.on_accent, w);
+                }
+                for (i, (_, r)) in l.power.iter().enumerate() {
+                    c.round_fill_bordered(*r, r.h / 2, col.surface, col.border_strong, 1);
+                    if i == g.power_sel {
+                        let (fr, off) = (t.size.focus_ring, t.size.focus_offset);
+                        let ring = Rect::new(r.x - (fr + off) as i32, r.y - (fr + off) as i32, r.w + 2 * (fr + off), r.h + 2 * (fr + off));
+                        c.round_stroke(ring, ring.h / 2, fr, col.focus);
+                    }
+                    let s = t.text.body;
+                    let f = st.face(s);
+                    let tw = f.width(POWER[i], s.size) as i32;
+                    f.draw(c, r.x + (r.w as i32 - tw) / 2, r.y + f.baseline_in(s.size, r.h), POWER[i], s.size, col.ink);
+                }
+            }
+            return;
+        }
+        // Avatar: kruh s pocatecnim pismenem jmena uctu (nikdy z nadpisu).
+        let display = target.as_ref().map_or(String::new(), |a| a.display.clone());
         c.round_fill(l.avatar, l.avatar.h / 2, col.accent);
         let initial: String = display.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
         let ds = t.text.display;
