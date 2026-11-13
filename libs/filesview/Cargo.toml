@@ -1,0 +1,17 @@
+[package]
+name = "filesview"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Spravce souboru v GUI: model nad fsproto a rozhrani v knihovne ui (testy na hostiteli)"
+
+[dependencies]
+abi = { workspace = true }
+fsproto = { path = "../fsproto" }
+fileops = { path = "../fileops" }
+guiproto = { path = "../guiproto" }
+tz = { path = "../tz" }
+ui = { path = "../ui" }
+
+[dev-dependencies]
+gfx = { path = "../gfx" }
