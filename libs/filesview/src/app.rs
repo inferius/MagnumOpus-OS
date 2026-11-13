@@ -1,6 +1,7 @@
 //! Stav spravce souboru a zpracovani zprav (rozhrani je ve `view.rs`).
 
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -13,7 +14,12 @@ use fsproto::{Stat, kind};
 use crate::backend::Backend;
 use crate::listing::{Listing, SortBy};
 use crate::nav::Nav;
+use crate::clipfmt;
 use crate::preview::{self, Content};
+
+/// Nejvetsi BMP, ktery nahled precte cely a ukaze jako obrazek.
+const IMAGE_BYTES: u64 = 24 << 20;
+const IMAGE_PIXELS: u64 = 2048 * 2048;
 
 /// Co je v hlavni casti okna.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +44,8 @@ pub struct Preview {
     pub stat: Result<Stat, abi::Error>,
     pub dataset: Option<String>,
     pub content: Option<Content>,
+    /// Obrazek BMP (sirka, vyska, pixely 0xAARRGGBB) pro uzel `image`.
+    pub image: Option<(u32, u32, Rc<[u32]>)>,
     pub versions: Result<Vec<FileVersion>, abi::Error>,
 }
 
@@ -98,6 +106,14 @@ pub enum Msg {
     TrashRestore,
     TrashPurge,
     TrashPurgeConfirm(bool),
+    /// Prave tlacitko / klavesa Menu na radku (radek uz vybrala tabulka).
+    Context(u64),
+    /// Otevrit vybranou polozku (kontextova nabidka).
+    OpenSelected,
+    /// Zacatek tazeni vybranych radku.
+    DragStart(Vec<u64>),
+    /// Pusteni tazenych radku: na radek (slozku) nebo prazdne misto.
+    Drop(Option<u64>, Vec<u64>),
 }
 
 pub struct FileManager<B: Backend> {
@@ -112,9 +128,13 @@ pub struct FileManager<B: Backend> {
     pub status: String,
     pub search: String,
     pub edit: Option<NameEdit>,
-    /// Schranka okna: operace a cesty (mezi okny az se schrankou formatu
-    /// cest v `libs/ui`).
+    /// Posledni Kopirovat / Vyjmout v tomto okne (popisek Vlozit). Vklada
+    /// se ze systemove schranky (i z jinych oken); jen kdyz se seznam
+    /// do schranky nevesel (`clip_local`), vklada se odtud.
     pub clip: Option<(Op, Vec<String>)>,
+    pub clip_local: bool,
+    /// Ucinky pro klienta (schranka), `App::effects`.
+    pub effects: Vec<ui::Effect>,
     pub jobs: Vec<Status>,
     pub for_all: bool,
     pub preview: Option<Preview>,
@@ -143,6 +163,8 @@ impl<B: Backend> FileManager<B> {
             search: String::new(),
             edit: None,
             clip: None,
+            clip_local: false,
+            effects: Vec::new(),
             jobs: Vec::new(),
             for_all: false,
             preview: None,
@@ -250,7 +272,14 @@ impl<B: Backend> FileManager<B> {
         });
         let versions = if is_file { self.b.versions(&path) } else { Ok(Vec::new()) };
         let dataset = self.b.dataset_of(&path).ok();
-        self.preview = Some(Preview { path, stat, dataset, content, versions });
+        // Obrazek: cely soubor jen do rozumne velikosti (pamet okna).
+        let image = match (&content, &stat) {
+            (Some(Content::Bmp(i)), Ok(st)) if st.size <= IMAGE_BYTES && i.width as u64 * i.height as u64 <= IMAGE_PIXELS => {
+                self.b.read(&path, 0, st.size as usize).ok().and_then(|d| preview::bmp_pixels(&d)).map(|(w, h, px)| (w, h, Rc::from(px)))
+            }
+            _ => None,
+        };
+        self.preview = Some(Preview { path, stat, dataset, content, image, versions });
     }
 
     fn go(&mut self, path: String) {
@@ -358,19 +387,67 @@ impl<B: Backend> FileManager<B> {
     }
 
     fn paste(&mut self) {
-        let Some((op, sources)) = self.clip.clone() else { return };
-        if sources.is_empty() || self.mode != Mode::Folder {
+        if self.mode != Mode::Folder {
             return;
         }
+        if !self.clip_local {
+            // Systemova schranka (i z jineho okna); odpoved `pasted`.
+            self.effects.push(ui::Effect::Paste { formats: clipfmt::PASTE_FORMATS.iter().map(|f| String::from(*f)).collect() });
+            return;
+        }
+        let Some((op, sources)) = self.clip.clone() else { return };
         let dest = self.nav.cur.clone();
+        self.start(op, sources, dest);
+        self.moved(op);
+    }
+
+    /// Data ze schranky (`App::pasted`). Vraci, zda prekreslit.
+    pub fn pasted(&mut self, format: &str, data: &[u8]) -> bool {
+        let Some((op, sources)) = clipfmt::decode(format, data) else {
+            self.status = String::from("Ve schránce nejsou soubory.");
+            return true;
+        };
+        if self.mode != Mode::Folder {
+            return false;
+        }
+        let dest = self.nav.cur.clone();
+        self.start(op, sources, dest);
+        self.moved(op);
+        true
+    }
+
+    /// Uloha kopirovani / presunu `sources` do `dest` (po davkach).
+    fn start(&mut self, op: Op, sources: Vec<String>, dest: String) {
+        if sources.is_empty() {
+            return;
+        }
         for chunk in sources.chunks(proto::MAX_SOURCES) {
             let req = self.next_req();
             self.b.copier(ClientMsg::Start { req, op, sources: chunk.to_vec(), dest: dest.clone() });
         }
+    }
+
+    /// Vyjmute polozky se vkladaji jednou.
+    fn moved(&mut self, op: Op) {
         if op == Op::Move {
-            // Vyjmute polozky se vkladaji jednou.
             self.clip = None;
+            self.clip_local = false;
         }
+    }
+
+    /// Odpoved sluzby "otevri cestu" (`openwith::msg`). Vraci, zda
+    /// prekreslit.
+    pub fn open_reply(&mut self, data: &[u8]) -> bool {
+        use openwith::msg::Reply;
+        self.status = match Reply::decode(data) {
+            Some(Reply::Opened(app)) => format!("Otevřeno v aplikaci {app}."),
+            // Soubor zadna aplikace neotevre: ukazal ho spravce (tohle okno
+            // nebo jine), nahled uz je videt.
+            Some(Reply::Revealed(_)) => String::from("Pro tento typ souboru zatím není aplikace."),
+            Some(Reply::Failed(why)) => format!("Nejde otevřít: {why}"),
+            None => return false,
+        };
+        true
     }
 
     fn restore_version(&mut self, i: usize, beside: bool) {
@@ -525,7 +602,18 @@ impl<B: Backend> FileManager<B> {
                 let paths = self.selected_paths();
                 if !paths.is_empty() {
                     let op = if m == Msg::Copy { Op::Copy } else { Op::Move };
-                    self.status = format!("{}: {} ve schránce.", if op == Op::Copy { "Kopírovat" } else { "Přesunout" }, crate::format::plural(paths.len() as u64, "položka", "položky", "položek"));
+                    let n = crate::format::plural(paths.len() as u64, "položka", "položky", "položek");
+                    match clipfmt::encode(op, &paths) {
+                        Some(formats) => {
+                            self.effects.push(ui::Effect::Copy { formats });
+                            self.clip_local = false;
+                            self.status = format!("{}: {n} ve schránce.", if op == Op::Copy { "Kopírovat" } else { "Přesunout" });
+                        }
+                        None => {
+                            self.clip_local = true;
+                            self.status = format!("{n}: seznam je pro schránku příliš velký, vložit jde jen v tomto okně.");
+                        }
+                    }
                     self.clip = Some((op, paths));
                 }
             }
@@ -548,6 +636,19 @@ impl<B: Backend> FileManager<B> {
             }
             Msg::TrashRestore => self.trash_action(true),
             Msg::TrashPurge => self.confirm_purge = !self.trash_sel.is_empty(),
+            Msg::Context(id) => {
+                if !self.sel.contains(&id) {
+                    self.sel = alloc::vec![id];
+                }
+                self.update_preview();
+            }
+            Msg::DragStart(_) => {}
+            Msg::OpenSelected => {
+                if let Some(&id) = self.sel.first() {
+                    self.handle(Msg::Activate(id));
+                }
+            }
+            Msg::Drop(target, ids) => self.drop_on(target, ids),
             Msg::TrashPurgeConfirm(yes) => {
                 if yes {
                     self.trash_action(false);
@@ -556,6 +657,20 @@ impl<B: Backend> FileManager<B> {
                 }
             }
         }
+    }
+
+    /// Pusteni tazenych polozek na slozku: presun (v jednom datasetu
+    /// prejmenovani, jinak kopie + zdroj do kose). Na soubor, na sebe nebo
+    /// na prazdne misto se nic nedeje.
+    fn drop_on(&mut self, target: Option<u64>, ids: Vec<u64>) {
+        let Some(t) = target.and_then(|t| self.listing.by_id(t)) else { return };
+        if !t.is_dir() || ids.contains(&t.e.oid) {
+            return;
+        }
+        let dest = join(&self.nav.cur, &t.e.name);
+        let sources: Vec<String> = ids.iter().filter_map(|id| self.path_of(*id)).collect();
+        self.status = format!("Přesun do {}: {}.", t.e.name, crate::format::plural(sources.len() as u64, "položka", "položky", "položek"));
+        self.start(Op::Move, sources, dest);
     }
 
     /// Je cesta slozka (pro akci "ukazat cestu")?

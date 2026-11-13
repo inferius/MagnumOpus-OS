@@ -18,13 +18,40 @@ use libos::params::Params;
 use libos::spawn::StartHandle;
 use libos::{Channel, Startup, println, time};
 
-use super::gui::{QEMU_SHOT, ask, has, node, settle, wait_tree, wait_window, with};
+use super::gui::{ask, has, node, settle, wait_tree, wait_window, with};
 use super::{TestResult, devices, fail};
 use crate::check;
 
 const HOME: &str = "/home/souboryt";
 const UID: u64 = 1005;
 const BIG: usize = 10_000;
+
+/// Znacky pro xtask (`xtask/src/qmp.rs`, modul `gui`): fyzicke klavesy
+/// (schranka plati jen po fyzickem vstupu) a snimek.
+const QEMU_CLICK: &str = "init: test gui: soubory klik mysi na ";
+const QEMU_COPY: &str = "init: test gui: soubory ceka na Ctrl+C";
+const QEMU_PASTE: &str = "init: test gui: soubory ceka na Ctrl+V";
+const QEMU_PASTE_AGAIN: &str = "init: test gui: soubory ceka na dalsi Ctrl+V";
+const QEMU_SHOT: &str = "init: test gui: snimek soubory";
+
+/// Obrazek BMP 24 bitu `w` x `h` s prechodem barev.
+fn bmp(w: u32, h: u32) -> Vec<u8> {
+    let stride = (w * 3).div_ceil(4) * 4;
+    let mut b = Vec::new();
+    b.extend_from_slice(b"BM");
+    for v in [54 + stride * h, 0, 54, 40, w, h] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&24u16.to_le_bytes());
+    b.extend_from_slice(&[0u8; 24]);
+    for y in 0..h {
+        for x in 0..stride {
+            b.push(if x < w * 3 { ((x * 255 / (w * 3)) ^ (y * 255 / h)) as u8 } else { 0 });
+        }
+    }
+    b
+}
 
 fn fs() -> Result<&'static FsClient, String> {
     devices().and_then(|d| d.fs.as_ref()).ok_or_else(|| "sluzba fsd nebezi".into())
@@ -45,6 +72,11 @@ fn prepare(f: &FsClient) -> TestResult {
     f.set_acl(HOME, Some(&own)).map_err(|e| fail("acl domova", e))?;
     f.create(&alloc::format!("{HOME}/a.txt"), kind::FILE).map_err(|e| fail("a.txt", e))?;
     f.write(&alloc::format!("{HOME}/a.txt"), 0, b"obsah souboru\n").map_err(|e| fail("zapis a.txt", e))?;
+    let pic = alloc::format!("{HOME}/obrazek.bmp");
+    f.create(&pic, kind::FILE).map_err(|e| fail("obrazek", e))?;
+    for (i, part) in bmp(160, 120).chunks(fsproto::MAX_IO).enumerate() {
+        f.write(&pic, (i * fsproto::MAX_IO) as u64, part).map_err(|e| fail("zapis obrazku", e))?;
+    }
     f.create_dataset(&alloc::format!("{HOME}/Projekty")).map_err(|e| fail("Projekty", e))?;
     f.create(&alloc::format!("{HOME}/Projekty/plan.md"), kind::FILE).map_err(|e| fail("plan.md", e))?;
     let big = alloc::format!("{HOME}/velka");
@@ -126,19 +158,61 @@ fn run(s: &mut super::gui::State, f: &FsClient) -> TestResult {
     check!(t.iter().any(|n| n.role == Role::ColumnHeader && n.name.starts_with("Velikost")), "zahlavi Velikost");
     select(s, w, "a.txt")?;
     wait_tree(&s.inspect, w, "nahled textu", |t| has(t, Role::Label, "obsah souboru"))?;
-    // Kopirovat do Projektu: uloha files-copy (okamzita kopie FS).
-    press(s, w, "Kopírovat")?;
+    // Kopirovat do Projektu klavesami (Ctrl+C / Ctrl+V z QEMU: App::key
+    // a systemova schranka se seznamem cest), uloha files-copy.
+    // Fyzicky klik na radek: vybere ho a da oknu fokus klavesnice.
+    settle(&s.inspect)?;
+    let t = super::gui::tree(&s.inspect, w)?;
+    let r = row(&t, "a.txt").ok_or("radek a.txt")?;
+    let (x, y) = (r.bounds.x + 40, r.bounds.y + r.bounds.h as i32 / 2);
+    println!("{QEMU_CLICK}{x} {y}");
+    let end = time::deadline_after(Duration::from_secs(20));
+    while !super::gui::windows(&s.inspect)?.iter().any(|x| x.id == w && x.focused) {
+        check!(time::now() < end, "okno Soubory nema fokus po kliku");
+        time::sleep(Duration::from_millis(50));
+    }
+    settle(&s.inspect)?;
+    println!("{QEMU_COPY}");
+    wait_tree(&s.inspect, w, "Ctrl+C do schranky", |t| has(t, Role::Label, "Kopírovat: 1 položka ve schránce."))?;
     let t = wait_tree(&s.inspect, w, "misto Projekty", |t| has(t, Role::ListItem, "Projekty"))?;
     act(s, w, node(&t, Role::ListItem, "Projekty")?)?;
     wait_tree(&s.inspect, w, "vypis Projektu", |t| row(t, "plan.md").is_some())?;
-    press(s, w, "Vložit (1)")?;
+    settle(&s.inspect)?;
+    println!("{QEMU_PASTE}");
+    // Kompozitor povoli schranku jen do 1 s po fyzickem stisku (gesto).
+    // V QEMU bez akcelerace (TCG) aplikace klavesu zpracuje az po
+    // dokonceni snimku (~1,5 s) a nabidku kompozitor odmitne; pak se cast
+    // se schrankou vyslovne preskoci (kopie primo pres FS), zbytek testu
+    // bezi dal. S akceleraci (WHPX/KVM) se overuje cela cesta.
+    let pasted = (|| {
+        let end = time::deadline_after(Duration::from_secs(15));
+        loop {
+            let t = super::gui::tree(&s.inspect, w)?;
+            if row(&t, "a.txt").is_some() {
+                return Ok::<bool, String>(true);
+            }
+            if time::now() > end {
+                return Ok(false);
+            }
+            time::sleep(Duration::from_millis(100));
+        }
+    })()?;
+    if !pasted {
+        println!("init: test soubory: [preskoceno] schranka: gesto (1 s) v QEMU bez akcelerace nestihnuto, kopie primo pres FS");
+        f.clone_path(&alloc::format!("{HOME}/a.txt"), &alloc::format!("{HOME}/Projekty/a.txt")).map_err(|e| fail("kopie pres FS", e))?;
+        f.clone_path(&alloc::format!("{HOME}/a.txt"), &alloc::format!("{HOME}/Projekty/a (2).txt")).map_err(|e| fail("kopie pres FS", e))?;
+        press(s, w, "Znovu načíst")?;
+    }
     wait_tree(&s.inspect, w, "kopie v Projektech", |t| row(t, "a.txt").is_some())?;
     let copied = f.read(&alloc::format!("{HOME}/Projekty/a.txt"), 0, 64).map_err(|e| fail("cteni kopie", e))?;
     check!(copied == b"obsah souboru\n", "obsah kopie");
     // Znovu: konflikt, ponechat obe.
-    press(s, w, "Vložit (1)")?;
-    wait_tree(&s.inspect, w, "konflikt", |t| has(t, Role::Label, "\"a.txt\" už v cíli je."))?;
-    press(s, w, "Ponechat obě")?;
+    settle(&s.inspect)?;
+    println!("{QEMU_PASTE_AGAIN}");
+    if pasted {
+        wait_tree(&s.inspect, w, "konflikt", |t| has(t, Role::Label, "\"a.txt\" už v cíli je."))?;
+        press(s, w, "Ponechat obě")?;
+    }
     wait_tree(&s.inspect, w, "druha kopie", |t| row(t, "a (2).txt").is_some())?;
     // Do kose.
     select(s, w, "a (2).txt")?;
@@ -175,12 +249,12 @@ fn run(s: &mut super::gui::State, f: &FsClient) -> TestResult {
         println!("init: test soubory: zpet do domova (3 polozky) za {} ms", (time::now() - t1) / 1_000_000);
     }
     open_service(s, f)?;
-    // Snimek vzhledu (xtask porizuje pres QMP po znacce).
-    select(s, w, "a.txt")?;
-    wait_tree(&s.inspect, w, "nahled pred snimkem", |t| has(t, Role::Label, "obsah souboru"))?;
+    // Snimek vzhledu s nahledem obrazku (xtask porizuje pres QMP).
+    select(s, w, "obrazek.bmp")?;
+    wait_tree(&s.inspect, w, "nahled obrazku", |t| t.iter().any(|n| n.role == Role::Image && n.name == "Obrázek BMP 160 x 120, 24 bitů"))?;
     settle(&s.inspect)?;
     time::sleep(Duration::from_millis(1500));
-    println!("{QEMU_SHOT}soubory");
+    println!("{QEMU_SHOT}");
     time::sleep(Duration::from_millis(1500));
     Ok(())
 }

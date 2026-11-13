@@ -36,8 +36,10 @@ struct OsBackend {
     fs: FsClient,
     home: String,
     copier: Option<Channel>,
-    /// Kanal sluzby "otevri cestu" (init).
+    /// Kanal sluzby "otevri cestu" (init) a konec kanalu odpovedi, ktery
+    /// se posila s kazdou zadosti (odpovedi cte smycka okna, kanal 1).
     opener: Option<Channel>,
+    replies: Option<Channel>,
     zone: Option<Zone>,
 }
 
@@ -126,11 +128,11 @@ impl Backend for OsBackend {
     }
 
     fn open(&mut self, path: &str) -> bool {
-        let Some(o) = &self.opener else { return false };
-        // Odpoved se necte (sluzba muze volat akci tohoto okna); kanal
-        // pro ni se hned zahodi.
-        let Ok((_mine, theirs)) = Channel::create() else { return false };
-        o.write(&openwith::msg::request(path), alloc::vec![theirs.into_handle()]).is_ok()
+        let (Some(o), Some(r)) = (&self.opener, &self.replies) else { return false };
+        // Odpoved prijde asynchronne (sluzba muze volat akci tohoto okna):
+        // na trvaly kanal odpovedi, ktery cte smycka okna.
+        let Ok(h) = r.handle().duplicate(None) else { return false };
+        o.write(&openwith::msg::request(path), alloc::vec![h]).is_ok()
     }
 
     fn now(&self) -> Option<WallTime> {
@@ -182,6 +184,31 @@ impl ui::App for Timed {
     fn external(&mut self, data: &[u8]) -> bool {
         timed("zprava files-copy", || self.0.external(data))
     }
+
+    fn external_from(&mut self, index: usize, data: &[u8]) -> bool {
+        timed("zprava kanalu", || self.0.external_from(index, data))
+    }
+
+    fn key(&self, code: u16, ch: Option<char>, mods: u16) -> Option<Self::Msg> {
+        self.0.key(code, ch, mods)
+    }
+
+    fn effects(&mut self) -> Vec<ui::Effect> {
+        let fx = self.0.effects();
+        for e in &fx {
+            match e {
+                ui::Effect::Copy { formats } => println!("gui-files: schranka: kopie ({} formatu)", formats.len()),
+                ui::Effect::Paste { .. } => println!("gui-files: schranka: zadost o vlozeni"),
+                _ => {}
+            }
+        }
+        fx
+    }
+
+    fn pasted(&mut self, format: &str, data: &[u8]) -> bool {
+        println!("gui-files: schranka: vlozeno {format} ({} B)", data.len());
+        timed("vlozeni", || self.0.pasted(format, data))
+    }
 }
 
 /// Pasmo z nastaveni systemu (zapsal instalator); bez nej UTC.
@@ -221,8 +248,24 @@ fn main(startup: Startup) -> i64 {
     };
     let zone = zone(&fs);
     let home = if home.is_empty() { String::from("/") } else { home };
-    let app = Timed(FileManager::new(OsBackend { fs, home, copier: writer, opener, zone }));
-    match ui::client::run_with(link, app, Mode::Standard, 1120, 660, copier) {
+    // Kanal odpovedi sluzby "otevri cestu": nas konec cte smycka okna.
+    let (reply_rx, replies) = match (&opener, Channel::create()) {
+        (Some(_), Ok((rx, tx))) => (Some(rx), Some(tx)),
+        _ => (None, None),
+    };
+    let app = Timed(FileManager::new(OsBackend { fs, home, copier: writer, opener, replies, zone }));
+    // Kanal 0 = files-copy, 1 = odpovedi sluzby (prazdny kanal, kdyz neni).
+    let mut extras = Vec::new();
+    for c in [copier, reply_rx] {
+        match c {
+            Some(c) => extras.push(c),
+            None => match Channel::create() {
+                Ok((a, _)) => extras.push(a),
+                Err(e) => println!("gui-files: kanal: {e}"),
+            },
+        }
+    }
+    match ui::client::run_channels(link, app, Mode::Standard, 1120, 660, extras) {
         Ok(()) => 0,
         Err(e) => {
             println!("gui-files: {e}");

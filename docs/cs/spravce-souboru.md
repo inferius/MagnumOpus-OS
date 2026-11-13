@@ -41,7 +41,7 @@ Kód:
 <figcaption>Okno a pomocný proces kopírování; init je spouští pro relaci uživatele.</figcaption>
 </figure>
 
-## Co umí (v1)
+## Co umí (v1.1)
 
 | Vlastnost | Stav |
 |---|---|
@@ -49,18 +49,19 @@ Kód:
 | drobečková navigace, Zpět, Vpřed, Nahoru (po návratu je vybraná složka, ze které se odešlo) | **[implementováno]** (host `navigate_into_and_up_reselects`) |
 | tabulka Jméno, Změněno, Velikost, Druh; řazení klikem na záhlaví, složky vždy první, přirozené pořadí jmen (`2` před `10`) | **[ověřeno v QEMU]** |
 | hledání v aktuální složce (bez rozlišení velikosti písmen) | **[implementováno]** (host `natural_sort_dirs_first_and_unknown_last`) |
-| náhled: text (prvních 64 KiB, CRLF tolerantně), BMP (rozměry a hloubka), metadata | **[ověřeno v QEMU]** (text), BMP host `preview_text_bmp_binary` |
+| náhled: text (prvních 64 KiB, CRLF tolerantně), obrázek BMP (24 a 32 bitů do 2048 x 2048 a 24 MiB jako obrázek, jinak rozměry a hloubka), metadata | **[ověřeno v QEMU]** (text i obrázek), dekódování host `preview_text_bmp_binary`, `bmp_preview_shows_image` |
 | nová složka, přejmenování (kontrola jména a kolize), do koše s „Vrátit“ | **[ověřeno v QEMU]** (koš), ostatní host |
 | koš všech datasetů: obnovit, trvale smazat (s potvrzením) | **[implementováno]** (host `trash_undo_and_trash_view`) |
 | historie verzí souboru: Obnovit, Kopie vedle | **[implementováno]** (host `preview_shows_three_states_and_versions`) |
-| kopírovat / vyjmout / vložit přes schránku okna | **[ověřeno v QEMU]** |
+| kopírovat / vyjmout / vložit přes systémovou schránku i mezi okny: formáty `application/x-mo-paths` (s operací), `text/uri-list`, text; seznam nad 60 KiB jen v rámci okna | **[ověřeno v QEMU]** s akcelerací (WHPX), v TCG se část se schránkou přeskočí (viz Výkon); formáty host `clipboard_formats_roundtrip` |
 | kopie a přesun jako úloha `files-copy` s průběhem, pozastavením a zrušením | **[ověřeno v QEMU]** |
 | konflikt: přepsat / přeskočit / ponechat obě, „pro všechny“ | **[ověřeno v QEMU]** (ponechat obě), ostatní host `fileops` |
 | obnova úlohy po přerušení (i po restartu) | **[ověřeno v QEMU]** (test `gui: files-copy: uloha s konfliktem prezije restart procesu`) |
 | akce aplikace `files.*` (paleta příkazů, asistent, shell) | **[ověřeno v QEMU]** (`files.show`) |
-| klávesy aplikace F2, Delete, Backspace, Ctrl+C/X/V | **[navrženo]** - čeká na klávesy aplikace v `libs/ui`; dnes přes paletu (Ctrl+K) a tlačítka |
-| schránka mezi okny a aplikacemi (seznam cest) | **[navrženo]** - čeká na schránku s formátem v `libs/ui` |
-| tažení myší (uvnitř okna, mezi okny) | **[navrženo]** - čeká na cíl puštění v `libs/ui` |
+| klávesy: F2 přejmenovat, Delete do koše (v Koši trvale smazat s potvrzením), Backspace a Alt+Nahoru nahoru, Alt+Vlevo/Vpravo zpět/vpřed, F5, Ctrl+C/X/V (podle znaku rozložení), Ctrl+Shift+N nová složka, Escape zruší zadání jména | **[ověřeno v QEMU]** (Ctrl+C, Ctrl+V z QMP), ostatní host `keys_map_to_actions` |
+| kontextová nabídka řádku (pravé tlačítko, Shift+F10, klávesa Menu) a v Koši | **[implementováno]** (host `context_menu_and_open_reply`) |
+| tažení vybraných položek na složku = přesun (v datasetu přejmenování) | **[implementováno]** (host `drop_on_folder_moves`); mezi okny a aplikacemi **[navrženo]** |
+| odpověď služby „otevři cestu“ ve stavovém řádku (druhý kanál okna) | **[implementováno]** (host `context_menu_and_open_reply`) |
 | pohled ikon (mřížka), miniatury | **[navrženo]** |
 | „Zkusit bokem“, převzetí změn, Porovnat verze, úprava práv | **[navrženo]** (prototyp `design/soubory.html`) |
 | dialog „Otevřít v…“ (`design/dialogy.html`) | **[navrženo]** - až budou systémové dialogy |
@@ -180,10 +181,18 @@ data líně. Strom přístupnosti nese jen viditelné řádky.
 | QEMU TCG, release: akce `files.show` v aplikaci celkem | 0,63-0,87 s |
 | QEMU TCG, debug: `LIST_STAT_PAGE` ve fsd | 3,2 s |
 
+| QEMU WHPX, debug (`16fad2d*`): `LIST_STAT_PAGE` ve fsd | 0,23 s |
+| QEMU WHPX, debug: akce `files.show` / řádky vidět (s překreslením) | 0,30-0,33 s / 0,53-0,56 s |
+| QEMU WHPX, debug: návrat do domova (3 položky), řádky vidět | 0,23 s |
+
 Nejdražší je výpis s metadaty ve fsd (každá položka `STAT` po cestě);
-zrychlení je práce pro fsd. Překreslení po akci aplikace má dnes
-v kompozitoru nebo `libs/ui` prodlevu ~2,6 s bez ohledu na velikost
-složky (nahlášeno vláknu GUI); klik myší se překreslí hned.
+zrychlení je práce pro fsd. V QEMU bez akcelerace (TCG) trvá složení
+snímku kompozitorem na CPU 0,6-1,4 s, proto se nový obsah po akci objeví
+až za ~2,6 s (dva snímky) bez ohledu na velikost složky; s WHPX je to
+0,2-0,3 s (měření výše). Ze stejného důvodu v TCG aplikace klávesu
+zpracuje až ~1,5 s po stisku a kompozitor nabídku do schránky odmítne
+(gesto platí 1 s); test to v TCG hlásí jako `[preskoceno]` a kopii
+udělá přímo přes FS (nahlášeno vláknu GUI).
 
 ## Bezpečnost
 

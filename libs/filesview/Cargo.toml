@@ -12,6 +12,9 @@ fileops = { path = "../fileops" }
 guiproto = { path = "../guiproto" }
 tz = { path = "../tz" }
 ui = { path = "../ui" }
+inputproto = { path = "../inputproto" }
+clipproto = { path = "../clipproto" }
+openwith = { path = "../openwith" }
 
 [dev-dependencies]
 gfx = { path = "../gfx" }

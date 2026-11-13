@@ -19,6 +19,7 @@ extern crate alloc;
 
 pub mod app;
 pub mod backend;
+pub mod clipfmt;
 pub mod format;
 pub mod listing;
 pub mod nav;
@@ -68,8 +69,29 @@ impl<B: Backend> ui::App for FileManager<B> {
         self.copier_msg(data)
     }
 
+    /// Kanal 0 = `files-copy`, 1 = odpovedi sluzby "otevri cestu".
+    fn external_from(&mut self, index: usize, data: &[u8]) -> bool {
+        match index {
+            0 => self.copier_msg(data),
+            1 => self.open_reply(data),
+            _ => false,
+        }
+    }
+
+    fn key(&self, code: u16, ch: Option<char>, mods: u16) -> Option<Msg> {
+        key_msg(self.edit.is_some(), self.mode, code, ch, mods)
+    }
+
+    fn effects(&mut self) -> alloc::vec::Vec<ui::Effect> {
+        core::mem::take(&mut self.effects)
+    }
+
+    fn pasted(&mut self, format: &str, data: &[u8]) -> bool {
+        FileManager::pasted(self, format, data)
+    }
+
     fn menu(&self) -> alloc::vec::Vec<guiproto::menu::MenuItem> {
-        app_menu(!self.sel.is_empty(), self.clip.is_some())
+        app_menu(!self.sel.is_empty())
     }
 
     fn action(&mut self, id: &str, args: &[guiproto::action::Arg]) -> core::result::Result<Option<guiproto::action::Value>, String> {
@@ -98,9 +120,42 @@ impl<B: Backend> ui::App for FileManager<B> {
     }
 }
 
-/// Menu aplikace (paleta prikazu Ctrl+K, menu v titulku). Zkratky se
-/// zatim jen zobrazuji; klavesy aplikace dodava `libs/ui` (pozadavek 6c).
-pub fn app_menu(selected: bool, clip: bool) -> alloc::vec::Vec<guiproto::menu::MenuItem> {
+/// Klavesy aplikace (`App::key`: jen ty, ktere prvek s fokusem
+/// nespotreboval; tabulka si necha sipky, Enter, psani, Ctrl+A). Znak
+/// `ch` je podle rozlozeni, takze Ctrl+C je `c` s Ctrl i na jine
+/// klavesnici.
+pub fn key_msg(editing: bool, mode: app::Mode, code: u16, ch: Option<char>, mods: u16) -> Option<Msg> {
+    use inputproto::code::*;
+    use inputproto::mods::{ALT, CTRL, SHIFT};
+    let (ctrl, alt, shift) = (mods & CTRL != 0, mods & ALT != 0, mods & SHIFT != 0);
+    let letter = ch.map(|c| c.to_ascii_lowercase());
+    if editing {
+        // Pole jmena si nechava editaci; Escape zrusi.
+        return (code == KEY_ESC).then_some(Msg::NameCancel);
+    }
+    let trash = mode == app::Mode::Trash;
+    Some(match (code, ctrl, alt) {
+        (KEY_LEFT, false, true) => Msg::Back,
+        (KEY_RIGHT, false, true) => Msg::Forward,
+        (KEY_UP, false, true) | (KEY_BACKSPACE, false, false) => Msg::Up,
+        (KEY_F5, false, false) => Msg::Refresh,
+        (KEY_F2, false, false) if !trash => Msg::Rename,
+        (KEY_DELETE, false, false) if trash => Msg::TrashPurge,
+        (KEY_DELETE, false, false) => Msg::Trash,
+        _ if ctrl && !alt => match letter? {
+            'c' if !trash => Msg::Copy,
+            'x' if !trash => Msg::Cut,
+            'v' if !trash => Msg::Paste,
+            'n' if shift && !trash => Msg::NewFolder,
+            _ => return None,
+        },
+        _ => return None,
+    })
+}
+
+/// Menu aplikace (paleta prikazu Ctrl+K, menu v titulku, kontextova
+/// nabidka). Zkratky obsluhuje `key_msg`.
+pub fn app_menu(selected: bool) -> alloc::vec::Vec<guiproto::menu::MenuItem> {
     use guiproto::menu::MenuItem;
     let item = |label: &str, action: &str, shortcut: &str, enabled: bool| MenuItem {
         label: String::from(label),
@@ -117,7 +172,8 @@ pub fn app_menu(selected: bool, clip: bool) -> alloc::vec::Vec<guiproto::menu::M
             item("Do koše", "files.trash", "Delete", selected),
             item("Kopírovat", "files.copy", "Ctrl+C", selected),
             item("Vyjmout", "files.cut", "Ctrl+X", selected),
-            MenuItem { disabled: if clip { String::new() } else { String::from("Schránka je prázdná") }, ..item("Vložit", "files.paste", "Ctrl+V", true) },
+            // Vlozit i ze schranky jineho okna (stav schranky menu nezna).
+            item("Vložit", "files.paste", "Ctrl+V", true),
             item("Zpět", "files.back", "Alt+Left", true),
             item("Nahoru", "files.up", "Backspace", true),
             item("Znovu načíst", "files.refresh", "F5", true),

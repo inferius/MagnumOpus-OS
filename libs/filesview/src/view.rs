@@ -13,7 +13,7 @@ use fileops::job::{Op, Phase, Resolution};
 use fileops::path::name;
 use fileops::proto::Status;
 use fsproto::{avail, kind};
-use ui::{Cells, Context, Node, SizeClass, button, checkbox, col, column, label, list, progress, row, scroll, spacer, table, text_input};
+use ui::{Cells, Context, MenuEntry, Node, SizeClass, button, checkbox, col, column, image, label, list, menu_item, menu_separator, progress, row, scroll, spacer, table, text_input};
 
 use crate::app::{FileManager, Mode, Msg};
 use crate::backend::Backend;
@@ -42,7 +42,7 @@ impl<B: Backend> FileManager<B> {
             main.push(self.sidebar().width(SIDEBAR_W));
         }
         main.push(match self.mode {
-            Mode::Folder => self.folder(),
+            Mode::Folder => self.folder(cx),
             Mode::Trash => self.trash_view(),
         });
         if cx.class == SizeClass::Expanded && self.mode == Mode::Folder {
@@ -93,8 +93,44 @@ impl<B: Backend> FileManager<B> {
         column([label("Místa").heading(), list(items, sel).on_select(Msg::Place).grow()])
     }
 
-    fn folder(&self) -> Node<Msg> {
-        let mut v = vec![self.actions()];
+    /// Je co vlozit (schranka okna nebo systemova se seznamem cest)?
+    fn can_paste(&self, cx: &Context) -> bool {
+        self.clip.is_some() || crate::clipfmt::PASTE_FORMATS.iter().any(|f| cx.clipboard_has(f))
+    }
+
+    /// Kontextova nabidka radku vypisu (stejne zkratky jako `key_msg`).
+    fn row_menu(&self, cx: &Context) -> Vec<MenuEntry<Msg>> {
+        let one = self.sel.len() == 1;
+        let none = self.sel.is_empty();
+        let why = "Nic není vybráno";
+        let mut v = vec![
+            menu_item("Otevřít", Msg::OpenSelected).shortcut("Enter"),
+            menu_separator(),
+            menu_item("Kopírovat", Msg::Copy).shortcut("Ctrl+C"),
+            menu_item("Vyjmout", Msg::Cut).shortcut("Ctrl+X"),
+            menu_item("Vložit", Msg::Paste).shortcut("Ctrl+V"),
+            menu_separator(),
+            menu_item("Přejmenovat", Msg::Rename).shortcut("F2"),
+            menu_item("Do koše", Msg::Trash).shortcut("Delete"),
+            menu_separator(),
+            menu_item("Nová složka", Msg::NewFolder).shortcut("Ctrl+Shift+N"),
+        ];
+        if none {
+            for i in [0, 2, 3, 7] {
+                v[i] = v[i].clone().disabled(why);
+            }
+        }
+        if !one {
+            v[6] = v[6].clone().disabled("Vyberte jednu položku");
+        }
+        if !self.can_paste(cx) {
+            v[4] = v[4].clone().disabled("Schránka je prázdná");
+        }
+        v
+    }
+
+    fn folder(&self, cx: &Context) -> Node<Msg> {
+        let mut v = vec![self.actions(cx)];
         if let Some(e) = &self.edit {
             let title = if e.item.is_some() { "Nové jméno:" } else { "Jméno nové složky:" };
             let mut field = text_input(&e.value).on_change(Msg::NameValue).on_submit(Msg::NameOk).grow();
@@ -129,12 +165,16 @@ impl<B: Backend> FileManager<B> {
         .sorted(self.listing.sort.col(), self.listing.ascending)
         .on_selection(Msg::Select)
         .on_activate(Msg::Activate)
-        .on_sort(Msg::Sort);
+        .on_sort(Msg::Sort)
+        .on_context(Msg::Context)
+        .context_menu(self.row_menu(cx))
+        .on_drag(Msg::DragStart)
+        .on_drop(Msg::Drop);
         v.push(t.grow());
         column(v).grow()
     }
 
-    fn actions(&self) -> Node<Msg> {
+    fn actions(&self, cx: &Context) -> Node<Msg> {
         let none = self.sel.is_empty();
         let paste_text = match &self.clip {
             Some((Op::Move, p)) => format!("Vložit ({}, přesun)", p.len()),
@@ -147,7 +187,7 @@ impl<B: Backend> FileManager<B> {
             button("Do koše").on_click(Msg::Trash).disabled(none),
             button("Kopírovat").on_click(Msg::Copy).disabled(none),
             button("Vyjmout").on_click(Msg::Cut).disabled(none),
-            button(&paste_text).on_click(Msg::Paste).disabled(self.clip.is_none()),
+            button(&paste_text).on_click(Msg::Paste).disabled(!self.can_paste(cx)),
         ])
     }
 
@@ -191,7 +231,13 @@ impl<B: Backend> FileManager<B> {
                 }
                 v.push(scroll(column(t)).height(220));
             }
-            Some(Content::Bmp(i)) => v.push(label(&format!("Obrázek BMP {} x {}, {} bitů", i.width, i.height, i.bpp))),
+            Some(Content::Bmp(i)) => {
+                let alt = format!("Obrázek BMP {} x {}, {} bitů", i.width, i.height, i.bpp);
+                if let Some((w, h, px)) = &p.image {
+                    v.push(image(*w, *h, Rc::clone(px), &alt).width(PREVIEW_W).height(PREVIEW_W * 3 / 4));
+                }
+                v.push(label(&alt));
+            }
             Some(Content::Binary) => v.push(label("Binární obsah (bez náhledu).")),
             Some(Content::Unreadable(e)) => v.push(label(&format!("Obsah nejde přečíst: {}", crate::error_text(*e)))),
             None => {}
@@ -249,6 +295,10 @@ impl<B: Backend> FileManager<B> {
             .selection(self.trash_sel.clone())
             .multi_select(true)
             .on_selection(Msg::TrashSelect)
+            .context_menu(vec![
+                menu_item("Obnovit", Msg::TrashRestore).shortcut("Enter"),
+                menu_item("Smazat trvale", Msg::TrashPurge).shortcut("Delete"),
+            ])
             .grow(),
         );
         column(v).grow()
