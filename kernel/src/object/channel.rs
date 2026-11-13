@@ -29,7 +29,7 @@ pub struct Message {
     pub handles: Vec<(Arc<dyn KernelObject>, Rights)>,
     /// Trida odesilatele (`None` = jadro): prijemce se na ni docasne
     /// zvedne (dedeni QoS pres IPC).
-    pub qos: Option<crate::sched::Qos>,
+    pub qos: Option<crate::sched::QosLoan>,
     /// Strzeni za zpravu z rozpoctu odesilatele (vrati se se zanikem zpravy).
     #[expect(dead_code, reason = "drzi strzeni, cte se jen v Drop")]
     pub charge: Charge,

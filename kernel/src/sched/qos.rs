@@ -27,13 +27,20 @@ fn cap(t: &Thread) -> Qos {
 }
 
 /// Ucinna trida; vyprsele zvednuti smaze.
-fn effective(t: &Thread, st: &mut SchedState, now: u64) -> Qos {
-    let mut class = st.base.min(cap(t));
+/// Vlastni trida vlakna bez zvednuti (pozadovana, omezena stropem jobu).
+fn own(t: &Thread, st: &SchedState) -> Qos {
+    let class = st.base.min(cap(t));
     // Realtime bez parametru (napr. strop jobu snizil a zase zvedl) se
     // planuje jako Interactive; parametry se doplni pri nastaveni.
     if class == Qos::Realtime && st.rt.is_none() {
-        class = Qos::Interactive;
+        Qos::Interactive
+    } else {
+        class
     }
+}
+
+fn effective(t: &Thread, st: &mut SchedState, now: u64) -> Qos {
+    let class = own(t, st);
     match st.boost {
         Some((b, until)) if now < until => class.max(b),
         Some(_) => {
@@ -148,30 +155,45 @@ fn kick(t: &Thread) {
     }
 }
 
-/// Docasne zvedne vlakno na `class` (zprava od vlakna te tridy). Jen
-/// zvedne - nizsi trida zvednuti nemeni.
-pub fn boost(t: &Thread, class: Qos) {
-    let class = ipc_form(class);
+/// Pujcka tridy, kterou nese zprava: trida a konec platnosti (ns).
+///
+/// Konec urcuje vlakno, ktere tridu skutecne ma (`now + BOOST_WINDOW_NS`
+/// pri odeslani). Vlakno, ktere tridu jen pujcenou preposila dal, preda
+/// puvodni konec - pujcka se predavanim neprodluzuje, takze dva procesy
+/// si ji ping-pongem neudrzi navzdy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QosLoan {
+    pub class: Qos,
+    pub until: u64,
+}
+
+/// Docasne zvedne vlakno pujckou ze zpravy (probuzeni cekajiciho). Jen
+/// zvedne - nizsi trida ani drivejsi konec platne zvednuti nezmeni.
+pub fn boost(t: &Thread, loan: QosLoan) {
+    let class = ipc_form(loan.class);
     let now = arch::now_ns();
+    if loan.until <= now {
+        return;
+    }
     let mut st = t.sched.lock();
-    // Platne vyssi zvednuti zustava.
-    let keep = st.boost.is_some_and(|(b, u)| b.above(class) && u > now);
-    let until = now + BOOST_WINDOW_NS;
+    let keep = st
+        .boost
+        .is_some_and(|(b, u)| u > now && (b.above(class) || (b == class && u >= loan.until)));
     if !keep {
-        st.boost = Some((class, until));
+        st.boost = Some((class, loan.until));
         st.dirty = true;
     }
 }
 
-/// Aktualni vlakno precetlo zpravu tridy `class` (`None` = od jadra):
-/// zvednuti se nastavi na tuto tridu na `BOOST_WINDOW_NS` (i snizi
-/// predchozi zvednuti - obsluhuje se nova zprava).
-pub fn boost_current(class: Option<Qos>) {
-    let Some(class) = class else { return };
-    let class = ipc_form(class);
+/// Aktualni vlakno precetlo zpravu s pujckou `loan` (`None` = od jadra):
+/// zvednuti se nastavi na pujcku (i snizi predchozi - obsluhuje se nova
+/// zprava), s jejim koncem platnosti.
+pub fn boost_current(loan: Option<QosLoan>) {
+    let Some(loan) = loan else { return };
     let me = super::current();
+    let now = arch::now_ns();
     let mut st = me.sched.lock();
-    st.boost = Some((class, arch::now_ns() + BOOST_WINDOW_NS));
+    st.boost = (loan.until > now).then_some((ipc_form(loan.class), loan.until));
     st.dirty = true;
 }
 
@@ -181,12 +203,23 @@ fn ipc_form(class: Qos) -> Qos {
     if class == Qos::Realtime { Qos::Interactive } else { class }
 }
 
-/// Trida, kterou nese zprava od aktualniho vlakna.
-pub fn ipc_class() -> Option<Qos> {
+/// Pujcka, kterou nese zprava od aktualniho vlakna: vlastni trida s novym
+/// oknem, nebo - je-li vlakno zvednute vys - preposlana pujcka
+/// s puvodnim koncem platnosti.
+pub fn ipc_class() -> Option<QosLoan> {
     let me = super::current();
     let now = arch::now_ns();
     let mut st = me.sched.lock();
-    Some(ipc_form(effective(&me, &mut st, now)))
+    let own = ipc_form(own(&me, &st));
+    let loan = match st.boost {
+        Some((b, until)) if now < until && b.above(own) => QosLoan { class: b, until },
+        Some((_, until)) if now >= until => {
+            st.boost = None;
+            QosLoan { class: own, until: now + BOOST_WINDOW_NS }
+        }
+        _ => QosLoan { class: own, until: now + BOOST_WINDOW_NS },
+    };
+    Some(loan)
 }
 
 /// Udaje o tride vlakna (`THREAD_GET`).

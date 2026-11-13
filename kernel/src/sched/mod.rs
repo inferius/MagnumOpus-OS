@@ -30,7 +30,7 @@ use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
 pub use percpu::{MAX_CPUS, all_cpus, cpu_count, this_cpu, try_this_cpu};
-pub use qos::{boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
+pub use qos::{QosLoan, boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
 pub use thread::{Qos, Thread};
 pub use user::{
     create_user_thread, on_return_to_user, request_kill, start_user_thread, user_fault,
@@ -146,7 +146,6 @@ pub fn exit() -> ! {
     unreachable!("mrtve vlakno bylo znovu naplanovano");
 }
 
-/// Dobrovolne prenecha CPU (vlakno se zaradi zpet podle sve tridy).
 /// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.
 pub fn set_user_thread_pointer(value: u64) {
     let irq = interrupts::disable();
@@ -156,6 +155,7 @@ pub fn set_user_thread_pointer(value: u64) {
     interrupts::restore(irq);
 }
 
+/// Dobrovolne prenecha CPU (vlakno se zaradi zpet podle sve tridy).
 pub fn yield_now() {
     schedule();
 }

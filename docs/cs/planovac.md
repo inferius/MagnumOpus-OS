@@ -159,24 +159,28 @@ ovladače):
 <path class="ln" d="M210 70 L288 70" marker-end="url(#pl3)"/>
 <path class="ln" d="M480 70 L558 70" marker-end="url(#pl3)"/>
 <text class="m" x="20" y="140">Zvednutí: při probuzení čekajícího (vlákno i port) a při přečtení zprávy.</text>
-<text class="m" x="20" y="160">Konec: přečtení zprávy nižší třídy, nebo 50 ms bez další zprávy. Jen zvedá, nikdy nesnižuje.</text>
-<text class="m" x="20" y="180">Řetězí se: obsluha posílá dál se svou účinnou (zvednutou) třídou.</text>
+<text class="m" x="20" y="160">Konec: 50 ms od odeslání vlastníkem třídy, nebo přečtení zprávy nižší třídy. Jen zvedá.</text>
+<text class="m" x="20" y="180">Řetězí se: obsluha přepošle půjčku dál, ale se stejným koncem platnosti.</text>
 </svg>
 <figcaption>Propagace QoS zprávou (jako vouchery v macOS).</figcaption>
 </figure>
 
-- Každá zpráva nese **účinnou třídu odesílatele**.
+- Každá zpráva nese **půjčku třídy**: třídu a konec platnosti. Vlákno,
+  které třídu samo má, posílá konec `teď + 50 ms`; vlákno, které ji má
+  jen půjčenou, přepošle **původní konec** (půjčka se předáváním
+  neprodlužuje). **[ověřeno v QEMU]**
 - Kanál při zápisu zvedne vlákno, které na něm přímo čeká, a port, který
   ho sleduje, si zapamatuje nejvyšší třídu čekajících paketů a zvedne
   vlákno, které si paket vyzvedne.
-- Přečtení zprávy nastaví zvednutí vlákna na třídu zprávy na **50 ms**
-  (okno obsluhy jednoho požadavku). Další zpráva okno obnoví nebo třídu
-  sníží. Bez další zprávy zvednutí vyprší - vlákno se vrátí na svou třídu.
+- Přečtení zprávy nastaví zvednutí vlákna na půjčku zprávy, s jejím koncem
+  platnosti (okno obsluhy jednoho požadavku je 50 ms od odeslání
+  vlastníkem třídy). Další zpráva zvednutí nahradí (i sníží). Po konci
+  platnosti se vlákno vrátí na svou třídu.
 - Zvednutí nikdy nesnižuje a strop jobu se na něj **nevztahuje** - je to
   půjčka od odesílatele, ne vlastní nárok (jinak by aplikace s Normal
   stropem obsluhující kompozitor zdržovala snímek). Zvednutí přijde jen od
-  vlákna, které tu třídu skutečně má - **ale** i zděděnou (viz
-  [Známé problémy](#známé-problémy), bod 1).
+  vlákna, které tu třídu skutečně má, nebo jako přeposlaná půjčka
+  s původním koncem platnosti.
 - Realtime se přes IPC propaguje jako **Interactive** (rozpočet je vlastnost
   konkrétního vlákna, nedá se půjčit).
 
@@ -269,14 +273,12 @@ TCG, kde se IPI a časovač doručují se zpožděním; medián je pod 1 ms.
 
 Z kontroly návrhu (2026-11-08), k opravě v tomto pořadí:
 
-1. **Řetězení zvednutí bez konce** (chyba, ověřeno v kódu). Zpráva nese
-   účinnou třídu odesílatele *včetně* zvednutí (`ipc_class()` ->
-   `effective()` v `kernel/src/sched/qos.rs`) a přijetí obnoví okno 50 ms.
-   Dva procesy se stropem Normal si tak po jediné zprávě od Interactive
-   udrží zvednutí přeposíláním zpráv napořád. Oprava: půjčka nese původní
-   expiraci (zpráva = třída + platnost do), přeposlání ji předá, ale
-   neprodlouží. Test: ping-pong dvou procesů po jedné zprávě od Interactive
-   -> po 50 ms oba zpět na Normal. **[navrženo]**
+1. **Řetězení zvednutí bez konce** - opraveno (2026-11-13). Zpráva dřív
+   nesla účinnou třídu odesílatele včetně zvednutí a přijetí obnovilo okno
+   50 ms, takže dva procesy se stropem Normal si zvednutí udržely
+   ping-pongem napořád. Teď zpráva nese půjčku `QosLoan` (třída + konec
+   platnosti) a přeposlání konec neprodlouží; test jádra „qos: půjčka se
+   ping-pongem neprodlužuje". **[ověřeno v QEMU]**
 2. **Férovost mezi joby uvnitř třídy.** Čas třídy se dnes dělí po
    vláknech, aplikace s mnoha vlákny dostane větší podíl. Pro souběžné
    agenty a výpočty: dvoustupňové dělení (mezi joby, pak mezi vlákny
