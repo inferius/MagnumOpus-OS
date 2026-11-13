@@ -180,6 +180,9 @@ pub struct Window {
     /// Data, ktera okno zkopirovalo (format, bajty; posle je na zadost).
     clip_owned: Vec<(String, Vec<u8>)>,
     clip_serial: u32,
+    /// Cislo gesta posledni vstupni udalosti s fyzickym stiskem
+    /// (`InputRecord::serial`): jde se zadosti o schranku.
+    gesture: u32,
     /// Cislo pozadavku na vlozeni do textoveho pole a od aplikace.
     field_paste: u32,
     app_paste: u32,
@@ -274,6 +277,7 @@ impl Window {
             replay,
             clip_owned: Vec::new(),
             clip_serial: 0,
+            gesture: 0,
             field_paste: 0,
             app_paste: 0,
             clip_formats: Vec::new(),
@@ -430,6 +434,24 @@ impl Window {
     /// s dalsimi kanaly pak muze znovu cekat na vsechny (jinak by zprava
     /// sluzby cekala, dokud v okne neco nenastane).
     pub fn next_one(&mut self, deadline: Option<u64>) -> Result<Option<Event>> {
+        let e = self.next_raw(deadline)?;
+        // Stisk z mistniho fyzickeho zarizeni: jeho cislo plati pro
+        // schranku (kopirovat / vlozit v reakci na nej).
+        if let Some(Event::Input(r)) = &e
+            && r.serial != 0
+        {
+            self.gesture = r.serial;
+        }
+        Ok(e)
+    }
+
+    /// Cislo gesta posledni dorucene udalosti s fyzickym stiskem (0 =
+    /// zadne); posila se v `Offer` / `Request` schranky.
+    pub fn gesture(&self) -> u32 {
+        self.gesture
+    }
+
+    fn next_raw(&mut self, deadline: Option<u64>) -> Result<Option<Event>> {
         if !self.queue.is_empty() {
             return Ok(Some(self.queue.remove(0)));
         }

@@ -444,6 +444,11 @@ pub struct InputRecord {
     /// Trida zdroje: 0 mistni fyzicky, 1 umely, 2 vzdaleny
     /// (`inputproto::event::InputClass`).
     pub class: u8,
+    /// Seriove cislo gesta: kompozitor ho prideli kazdemu stisku klavesy
+    /// a tlacitka z mistniho fyzickeho vstupu, ktery doruci oknu (jako
+    /// serial ve Waylandu); jinak 0. Aplikace ho posle se zadosti, kterou
+    /// stisk vyvolal (schranka), viz `clipproto`.
+    pub serial: u32,
 }
 
 /// Kody tridy zdroje v `InputRecord::class`.
@@ -454,7 +459,7 @@ pub mod input_class {
 }
 
 impl InputRecord {
-    pub const SIZE: usize = 28;
+    pub const SIZE: usize = 32;
 
     fn encode(&self, w: &mut Writer) {
         let (k, a, b, c): (u8, u32, u32, u32) = match self.event {
@@ -468,7 +473,7 @@ impl InputRecord {
         };
         // Trida ve stejnem bajtu jako driv priznak umeleho vstupu.
         let class = if self.class != input_class::LOCAL { self.class } else { self.synthetic as u8 };
-        w.u8(k).u8(class).u16(self.mods).u64(self.time).u32(a).u32(b).u32(c);
+        w.u8(k).u8(class).u16(self.mods).u64(self.time).u32(a).u32(b).u32(c).u32(self.serial);
     }
 
     fn decode(r: &mut Reader<'_>) -> Result<Self> {
@@ -481,6 +486,7 @@ impl InputRecord {
         let mods = r.u16()?;
         let time = r.u64()?;
         let (a, b, c) = (r.u32()?, r.u32()?, r.u32()?);
+        let serial = r.u32()?;
         let ch = |v: u32| char::from_u32(v).ok_or(Error::InvalidArgs);
         let event = match k {
             1 => InputEvent::Key {
@@ -507,6 +513,7 @@ impl InputRecord {
             synthetic,
             time,
             class,
+            serial,
         })
     }
 }

@@ -38,7 +38,9 @@ impl Window {
     }
 
     /// Zkopirovat text: okno ho drzi, kompozitor ho dostane az na zadost.
-    /// Plati jen hned po fyzickem vstupu do okna s fokusem.
+    /// Plati jen v reakci na fyzicky stisk v okne s fokusem: posle se
+    /// cislo gesta posledni udalosti ([`Window::gesture`]), kazde plati
+    /// jednou.
     pub fn copy_text(&mut self, t: String) -> Result<()> {
         let data = clamp(&t).as_bytes().to_vec();
         self.copy(alloc::vec![(String::from(TEXT), data)])
@@ -53,7 +55,8 @@ impl Window {
         }
         let names = formats.iter().map(|(f, _)| f.clone()).collect();
         self.clip_owned = formats;
-        self.clip(CMsg::Offer { formats: names })
+        let gesture = self.gesture;
+        self.clip(CMsg::Offer { gesture, formats: names })
     }
 
     /// Pozadat o vlozeni textu; odpoved prijde jako `Event::Clipboard`
@@ -68,7 +71,8 @@ impl Window {
         let format = formats.iter().find(|f| self.clip_formats.contains(f)).or(formats.first()).cloned().unwrap_or_else(|| String::from(TEXT));
         self.clip_serial = self.clip_serial.wrapping_add(1).max(1);
         let serial = self.clip_serial;
-        self.clip(CMsg::Request { serial, format })?;
+        let gesture = self.gesture;
+        self.clip(CMsg::Request { gesture, serial, format })?;
         Ok(serial)
     }
 

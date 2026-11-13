@@ -317,8 +317,9 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   `cx.can_hover()`, `cx.focus_only()`.
 - Terminal: `win.request_size(1040, 520, 850, 0)`, i.e. 1040 px but at
   most 85 % of the work area width.
-- Protocol version 2 (`guiproto::VERSION`): compositor and applications
-  are built together, `HELLO` requires a match.
+- Protocol version 4 (`guiproto::VERSION`; 4 = gesture serial in
+  `InputRecord`): compositor and applications are built together, `HELLO`
+  requires a match.
 
 **[implemented]** (tests `context_first_and_initial_size_without_flicker`,
 `request_size_later_and_while_maximized`, `resize_sends_new_context_generation`
@@ -566,10 +567,12 @@ only there) - and routes them:
   until decided - the device cannot allow itself (type Enter). The answer
   goes to `inputd` as `trust <id>` / `reject <id>`.
 
-A window receives `INPUT` with `InputRecord`s (28 B): key (layout
+A window receives `INPUT` with `InputRecord`s (32 B): key (layout
 independent code, action, character), inserted text, pointer in window
 coordinates, pointer leave, button with position, wheel and focus; plus
-modifiers, the synthetic flag and time. Motion and button release go to
+modifiers, the source class, time and the gesture serial (`serial`: every
+key and button press from local physical input gets a new number from the
+compositor, otherwise 0; see the clipboard). Motion and button release go to
 the window that got the press, even when the pointer leaves it.
 
 ### Fullscreen and Do not disturb
@@ -1539,7 +1542,7 @@ changing its messages.
 
 | Rule | How |
 |---|---|
-| only on user action | only the focused window may offer or request, within 1 s of a physical key or button press (not synthetic input); one gesture = one paste |
+| only on user action | only the focused window may offer or request, and only with a gesture serial (`gesture` in `Offer` / `Request`), like a Wayland serial: the compositor assigns a number to every key and button press from local physical input it delivers to a window (`InputRecord::serial`) and the application sends the number of the event that triggered the action. Only a number delivered to this window is accepted, only once (one gesture = one action), only among the window's last 8 presses (`GESTURES`) and at most 10 s after delivery (`GESTURE_MAX`). Slow processing (emulation) does not matter; a forged, foreign or reused number is refused (tests `forged_and_foreign_gesture_refused`, `gesture_survives_slow_app_until_backstop` in `libs/comp`) |
 | lazy transfer | the owner offers formats (`Offer`), sends data only on request (`Send` -> `Data` -> `Deliver`) |
 | after the owner exits | the compositor fetches all formats right after the offer and keeps a copy (up to 256 KiB); pending pastes fail (`Denied: Unavailable`) |
 | secure fields | the library never puts a password on the clipboard; the compositor also refuses an offer from a window whose focused node is `password-input` |
@@ -1549,7 +1552,9 @@ changing its messages.
 The focused window gets `Changed` with the formats on the clipboard (when
 the content changes and when it gains focus) so it can enable "Paste".
 Applications that draw themselves call `Window::copy_text`,
-`Window::request_paste` and `Window::clipboard_event`.
+`Window::request_paste` and `Window::clipboard_event`; the client attaches
+the gesture serial itself (the last event with a press from `Window::next`,
+`Window::gesture`).
 
 **Share bar chart** `segments(vec![Segment::new(weight, label, tone)])`
 (`.dbar` in `design/instalace.html`): disk partitions in the installer,
@@ -1758,7 +1763,7 @@ Every input record carries a source class (`InputRecord::class`, flags
 | Class | From | Allowed |
 |---|---|---|
 | local physical | keyboard, mouse, paired remote | everything |
-| remote | phone as a remote, remote desktop | applications yes; system dialogs, login, the secure shortcut, system shortcuts and clipboard no |
+| remote | phone as a remote, remote desktop | applications yes; system dialogs, login, the secure shortcut, system shortcuts and clipboard no (it gets no gesture serial) |
 | synthetic | automation, agent, test | like remote |
 
 - The compositor passes the class with every event to applications and

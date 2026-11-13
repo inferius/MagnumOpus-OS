@@ -304,8 +304,9 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   `cx.posture`, `cx.can_hover()`, `cx.focus_only()`.
 - Terminál: `win.request_size(1040, 520, 850, 0)`, tedy 1040 px, ale nejvýš
   85 % šířky pracovní plochy.
-- Verze protokolu 2 (`guiproto::VERSION`): kompozitor a aplikace se
-  sestavují spolu, `HELLO` vyžaduje shodu.
+- Verze protokolu 4 (`guiproto::VERSION`; 4 = sériové číslo gesta
+  v `InputRecord`): kompozitor a aplikace se sestavují spolu, `HELLO`
+  vyžaduje shodu.
 
 **[implementováno]** (testy `context_first_and_initial_size_without_flicker`,
 `request_size_later_and_while_maximized`, `resize_sends_new_context_generation`
@@ -541,10 +542,12 @@ rozděluje je:
   z toho zařízení zahazuje - zařízení se tedy nemůže povolit samo
   (vypsat Enter). Odpověď pošle `inputd` jako `trust <id>` / `reject <id>`.
 
-Okno dostane `INPUT` se záznamy `InputRecord` (28 B): klávesa (kód
+Okno dostane `INPUT` se záznamy `InputRecord` (32 B): klávesa (kód
 nezávislý na rozložení, akce, znak), vložený text, ukazatel v souřadnicích
 okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
-modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
+modifikátory, třída zdroje, čas a sériové číslo gesta (`serial`: každý
+stisk klávesy a tlačítka z místního fyzického vstupu dostane od
+kompozitoru nové číslo, jinak 0; viz schránka). Pohyb a uvolnění tlačítka jdou
 oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
 ### Celá obrazovka a Nerušit
@@ -1482,7 +1485,7 @@ do vlastní služby beze změny zpráv.
 
 | Pravidlo | Jak |
 |---|---|
-| jen na akci uživatele | nabídnout i vyžádat smí jen okno s fokusem do 1 s po fyzickém stisku klávesy nebo tlačítka (ne umělý vstup); jedno gesto = jedno vložení |
+| jen na akci uživatele | nabídnout i vyžádat smí jen okno s fokusem a jen s číslem gesta (`gesture` v `Offer` / `Request`), jako serial ve Waylandu: kompozitor přidělí číslo každému stisku klávesy a tlačítka z místního fyzického vstupu, který doručí oknu (`InputRecord::serial`), a aplikace pošle číslo události, která akci vyvolala. Přijme se jen číslo doručené tomuto oknu, jen jednou (jedno gesto = jedna akce), jen z posledních 8 stisků okna (`GESTURES`) a nejvýš 10 s po doručení (`GESTURE_MAX`). Pomalé zpracování (emulace) nevadí; podvržené, cizí a znovu použité číslo neprojde (testy `forged_and_foreign_gesture_refused`, `gesture_survives_slow_app_until_backstop` v `libs/comp`) |
 | líný přenos | vlastník nabídne formáty (`Offer`), data pošle až na žádost (`Send` -> `Data` -> `Deliver`) |
 | po skončení vlastníka | všechny formáty si kompozitor vyžádá hned po nabídce a drží jejich kopii (do 256 KiB); čekající vložení selže (`Denied: Unavailable`) |
 | zabezpečená pole | knihovna heslo do schránky nedá; kompozitor navíc odmítne nabídku z okna, jehož uzel s fokusem je `password-input` |
@@ -1492,7 +1495,8 @@ do vlastní služby beze změny zpráv.
 Okno s fokusem dostane `Changed` s formáty ve schránce (při změně obsahu
 a při získání fokusu), aby mohlo povolit položku „Vložit“. Aplikace, které
 kreslí samy, volají `Window::copy_text`, `Window::request_paste`
-a `Window::clipboard_event`.
+a `Window::clipboard_event`; číslo gesta přiloží klient sám (poslední
+událost se stiskem z `Window::next`, `Window::gesture`).
 
 **Pruhový graf podílů** `segments(vec![Segment::new(váha, popisek, tón)])`
 (`.dbar` v `design/instalace.html`): oddíly disku v instalátoru, obsazení
@@ -1687,7 +1691,7 @@ Každý záznam vstupu nese třídu zdroje (`InputRecord::class`, příznaky
 | Třída | Odkud | Co smí |
 |---|---|---|
 | místní fyzický | klávesnice, myš, spárovaný ovladač | vše |
-| vzdálený | telefon jako ovladač, vzdálená plocha | aplikace ano; systémové dialogy, přihlášení, bezpečná zkratka, zkratky systému a schránka ne |
+| vzdálený | telefon jako ovladač, vzdálená plocha | aplikace ano; systémové dialogy, přihlášení, bezpečná zkratka, zkratky systému a schránka ne (nedostane číslo gesta) |
 | syntetický | automatizace, agent, test | jako vzdálený |
 
 - Kompozitor posílá aplikacím třídu u každé události a důvěryhodné akce
