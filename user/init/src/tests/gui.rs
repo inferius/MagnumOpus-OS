@@ -411,6 +411,25 @@ fn terminal_window(startup: &Startup) -> TestResult {
             t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "1"))
                 && t.iter().any(|n| n.role == Role::Button && n.name == "Relace 2, odpojená")
         })?;
+        // Akce bloku (pristupnost = stejna cesta jako klik): Spustit znovu
+        // prida druhy blok s prikazem, Sbalit ho sbali.
+        let cmd = "tasks | where state == \"running\" | count";
+        let t = wait_tree(&s.inspect, w.id, "akce bloku", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Button && n.name == alloc::format!("Spustit znovu {cmd}"))
+        })?;
+        let again = node(&t, Role::Button, &alloc::format!("Spustit znovu {cmd}"))?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: again.id, action: actions::ACTIVATE, value: String::new() })?;
+        let t = wait_tree(&s.inspect, w.id, "blok spusteny znovu", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.matches("tasks | where").count() >= 2)
+        })?;
+        let fold = t.iter().rev().find(|n| n.role == Role::Button && n.name == alloc::format!("Sbalit blok {cmd}")).ok_or("akce Sbalit chybi")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: fold.id, action: actions::ACTIVATE, value: String::new() })?;
+        wait_tree(&s.inspect, w.id, "sbaleny blok", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Button && n.name == alloc::format!("Rozbalit blok {cmd}"))
+        })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
         let px = pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?;

@@ -5,19 +5,14 @@
 
 use alloc::vec::Vec;
 
-use term::ui::draw::{Line, Role};
+use term::ui::draw::Line;
 use theme::Motion;
+
+use crate::blockact::block_of;
 
 /// Kolik novych bloku najednou je jeste beh prikazu; vic = prehrani
 /// relace po pripojeni (bez animace).
 const MAX_NEW: usize = 3;
-
-fn block_of(r: &Role) -> Option<u64> {
-    match r {
-        Role::Head { block, .. } | Role::Body { block, .. } => Some(*block),
-        _ => None,
-    }
-}
 
 /// Kdy se ktery blok objevil (ns); `0` = bez animace.
 #[derive(Default)]

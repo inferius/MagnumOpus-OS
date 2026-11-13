@@ -103,3 +103,20 @@ fn service_replays_visible_blocks_first() {
     assert_eq!(ids, sorted);
     assert_eq!(ids.len(), 30);
 }
+
+#[test]
+fn block_actions_fold_and_run_again() {
+    let mut a = App::new(Theme::dark(), 80, 30);
+    a.on_msg(ServerMsg::Attached { session: 1, cwd: "/".into(), blocks: 1 });
+    start(&mut a, 5, "echo x");
+    a.toggle_block(5);
+    assert!(a.blocks[0].collapsed);
+    a.toggle_block(5);
+    assert!(!a.blocks[0].collapsed);
+    a.take_out();
+    a.rerun_block(5);
+    assert_eq!(a.take_out(), vec![ClientMsg::Run { session: 1, line: "echo x".into() }]);
+    // Neznamy blok nebo blok bez prikazu (uvodni napoveda): nic.
+    a.rerun_block(99);
+    assert!(a.take_out().is_empty());
+}

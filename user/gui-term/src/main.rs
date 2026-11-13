@@ -18,6 +18,7 @@
 
 extern crate alloc;
 
+mod blockact;
 #[path = "../../console/src/connect.rs"]
 mod connect;
 mod keys;
@@ -155,6 +156,9 @@ const PANEL_NODE: u32 = 1000;
 /// relace po prepnuti karty nezasekne okno).
 const MSG_BATCH: usize = 64;
 
+/// Id uzlu prvni akce bloku (dalsi po jedne: sbalit, spustit znovu, ...).
+const ACT_NODE: u32 = 3000;
+
 /// Id uzlu prvni karty relace (dalsi po jedne, posledni = nova relace).
 const TAB_NODE: u32 = 20;
 /// Id uzlu volby zapisu B (C je dalsi).
@@ -174,6 +178,8 @@ struct Term {
     fade: motion::Fade,
     /// Od termd cekaji dalsi zpravy (davka byla plna).
     more: bool,
+    /// Blok pod ukazatelem (akce bloku v hlavicce).
+    hover: Option<u64>,
 }
 
 /// Mrizka v okne `w` x `h`; s panelem uloh je o jeho sirku uzsi.
@@ -211,6 +217,7 @@ impl Term {
             lines: Vec::new(),
             fade: motion::Fade::default(),
             more: false,
+            hover: None,
         };
         t.app.welcome = true;
         t.conn.start();
@@ -278,6 +285,15 @@ impl Term {
         self.app.resize(c, r);
     }
 
+    /// Akce bloku (klik nebo pristupnost).
+    fn block_act(&mut self, block: u64, act: blockact::Act) {
+        match act {
+            blockact::Act::Fold => self.app.toggle_block(block),
+            blockact::Act::Again => self.app.rerun_block(block),
+        }
+        self.send_out();
+    }
+
     /// Karty relaci v titulku (az k prepinaci zapisu).
     fn tabs(&self) -> Vec<tabs::Tab> {
         if self.app.session == 0 || self.termd.is_none() {
@@ -335,6 +351,20 @@ impl Term {
         t.state = guiproto::a11y::state::FOCUSED;
         t.actions = actions::SET_VALUE;
         let mut nodes = vec![win, bar, tab, t];
+        // Akce bloku u vsech viditelnych hlavicek (Sbalit, Spustit znovu).
+        let g = self.look.grid(self.screen.cols);
+        for (k, b) in blockact::layout(&self.look, &self.lines, &g, |_| true).iter().enumerate() {
+            let Some(blk) = self.app.blocks.iter().find(|x| x.id == b.block) else { continue };
+            let name = match b.act {
+                blockact::Act::Fold if blk.collapsed => alloc::format!("Rozbalit blok {}", blk.line),
+                blockact::Act::Fold => alloc::format!("Sbalit blok {}", blk.line),
+                blockact::Act::Again => alloc::format!("Spustit znovu {}", blk.line),
+            };
+            let mut n = Node::new(ACT_NODE + k as u32, 4, Role::Button, &name);
+            n.bounds = b.rect;
+            n.actions = actions::ACTIVATE;
+            nodes.push(n);
+        }
         // Karty relaci (aktualni SELECTED) a nova relace; ACTIVATE prepne.
         for (k, tb) in self.tabs().iter().enumerate() {
             let name = if tb.id == 0 {
@@ -417,6 +447,8 @@ impl Term {
         let screen = &self.screen;
         let show_panel = self.panel();
         let tab_list = self.tabs();
+        let collapsed: Vec<u64> = self.app.blocks.iter().filter(|b| b.collapsed).map(|b| b.id).collect();
+        let hover = self.hover;
         let look = &mut self.look;
         let c_on = self.app.notation_c;
         let tasks = &self.app.tasks;
@@ -424,7 +456,7 @@ impl Term {
         self.fade.update(&lines, t_now);
         let veils = self.fade.veils(&lines, t_now, &look.t.motion);
         self.win.draw(|c: &mut Canvas<'_>| {
-            paint(c, look, screen, &label, &lines, &veils, &tab_list);
+            paint(c, look, screen, &label, &lines, &veils, &tab_list, (hover, &collapsed));
             if show_panel {
                 let area = panel::area(look, c.w, c.h);
                 panel::paint(c, look, tasks, area);
@@ -455,6 +487,16 @@ impl Term {
     /// Udalost okna; `Some(true)` = prekreslit, `None` = konec aplikace.
     fn event(&mut self, ev: Event) -> Option<bool> {
         Some(match ev {
+            // Ukazatel nad blokem: akce bloku v hlavicce.
+            Event::Input(InputRecord { event: InputEvent::PointerMove { y, .. }, .. }) => {
+                let g = self.look.grid(self.screen.cols);
+                let row = if y >= g.y { ((y - g.y) as u32 / g.ch.max(1)) as usize } else { usize::MAX };
+                let hb = self.lines.get(row).and_then(|l| blockact::block_of(&l.role));
+                let changed = hb != self.hover;
+                self.hover = hb;
+                changed
+            }
+            Event::Input(InputRecord { event: InputEvent::PointerLeave, .. }) => self.hover.take().is_some(),
             // Klik na tlacitko vyzvy (prvky navrhu nad mrizkou).
             Event::Input(InputRecord { event: InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, .. }) => {
                 // Zrusit ulohu v panelu.
@@ -467,6 +509,15 @@ impl Term {
                     if let Some(id) = hit {
                         self.app.task_action(id, 0);
                         self.send_out();
+                        return Some(true);
+                    }
+                }
+                // Akce bloku pod ukazatelem.
+                if let Some(hb) = self.hover {
+                    let g = self.look.grid(self.screen.cols);
+                    let hit = blockact::layout(&self.look, &self.lines, &g, |b| b == hb).into_iter().find(|b| b.rect.contains(x, y));
+                    if let Some(b) = hit {
+                        self.block_act(b.block, b.act);
                         return Some(true);
                     }
                 }
@@ -518,6 +569,14 @@ impl Term {
                 self.app.theme = self.look.term_theme();
                 true
             }
+            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && node >= ACT_NODE => {
+                let g = self.look.grid(self.screen.cols);
+                let b = blockact::layout(&self.look, &self.lines, &g, |_| true).into_iter().nth((node - ACT_NODE) as usize);
+                if let Some(b) = b {
+                    self.block_act(b.block, b.act);
+                }
+                true
+            }
             Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && (TAB_NODE..TAB_NODE + 50).contains(&node) => {
                 if let Some(tb) = self.tabs().get((node - TAB_NODE) as usize) {
                     self.app.switch_session(tb.id);
@@ -531,7 +590,7 @@ impl Term {
                 true
             }
             // Zrusit ulohu v panelu (uzel tlacitka = polozka + 1).
-            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && node > PANEL_NODE && (node - PANEL_NODE) % 2 == 0 => {
+            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && (PANEL_NODE + 1..ACT_NODE).contains(&node) && (node - PANEL_NODE) % 2 == 0 => {
                 let k = ((node - PANEL_NODE - 2) / 2) as usize;
                 let area = panel::area(&self.look, self.win.w, self.win.h);
                 if let Some(c) = panel::cards(&self.look, &self.app.tasks, area).get(k) {
@@ -675,7 +734,8 @@ fn px((r, g, b): (u8, u8, u8)) -> u32 {
 
 /// Okno terminalu: titulek s kartou relace (odznak a tlacitka okna kresli
 /// system pres nej) a mrizka bunek pismem JetBrains Mono.
-fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line], veils: &[u32], tabs: &[tabs::Tab]) {
+#[allow(clippy::too_many_arguments)]
+fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line], veils: &[u32], tabs: &[tabs::Tab], hover: (Option<u64>, &[u64])) {
     let t = look.t.clone();
     let col = &t.color;
     let (w, h) = (c.w, c.h);
@@ -692,7 +752,7 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, line
     c.fill(body, col.term_bg);
     let (cw, ch) = look.cell();
     let pad = look.pad() as i32;
-    paint_grid(c, look, screen, lines, veils, cw, ch, pad, th, w);
+    paint_grid(c, look, screen, lines, veils, cw, ch, pad, th, w, hover);
 }
 
 /// Karta se stavem pripojeni (jeste neni relace: "Pripojuji...").
@@ -717,7 +777,7 @@ fn paint_status_tab(c: &mut Canvas<'_>, look: &mut Look, label: &str) {
 
 /// Mrizka bunek s prvky navrhu, prolnutim novych bloku a kurzorem.
 #[allow(clippy::too_many_arguments)]
-fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[term::ui::draw::Line], veils: &[u32], cw: u32, ch: u32, pad: i32, th: u32, w: u32) {
+fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[term::ui::draw::Line], veils: &[u32], cw: u32, ch: u32, pad: i32, th: u32, w: u32, (hover, collapsed): (Option<u64>, &[u64])) {
     let t = look.t.clone();
     let col = &t.color;
     let ms = t.text.mono;
@@ -754,7 +814,11 @@ fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[ter
             }
         }
     }
-    rows::over(c, look, lines, &grid);
+    rows::over(c, look, lines, &grid, hover);
+    if let Some(hb) = hover {
+        let buttons = blockact::layout(look, lines, &grid, |b| b == hb);
+        blockact::paint(c, look, &buttons, collapsed);
+    }
     // Prolnuti noveho bloku: prekryv barvou pozadi (i pres levy pruh).
     for (row, &a) in veils.iter().enumerate().take(screen.rows) {
         if a > 0 {

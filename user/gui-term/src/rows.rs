@@ -179,7 +179,7 @@ pub fn under(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
 }
 
 /// Nad textem: pruh bloku, cas vpravo, linka zahlavi tabulky, stitky klaves.
-pub fn over(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
+pub fn over(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid, hover: Option<u64>) {
     let t = look.t.clone();
     let col = &t.color;
     // Volby vyzvy jako tlacitka (hlavni = akcent), vybrana klavesnici
@@ -207,8 +207,10 @@ pub fn over(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
     for (row, l) in lines.iter().enumerate() {
         let y = g.row_y(row);
         match &l.role {
-            Role::Head { mark, meta, .. } => {
+            Role::Head { mark, meta, block } => {
                 c.fill(Rect::new(g.x, y, 3, g.ch), mark_color(look, *mark));
+                // Blok pod ukazatelem ma vpravo akce: cas se posune vlevo.
+                let right = g.right() - if hover == Some(*block) { (crate::blockact::width(look, g) + t.space[2]) as i32 } else { 0 };
                 // Cas a vysledek vpravo pismem UI (neuspech barvou chyby).
                 let text: String = (*meta..l.parts_len()).map(|i| l.part_text(i)).collect::<String>();
                 let text = text.trim();
@@ -218,7 +220,7 @@ pub fn over(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
                     let tw = f.width(text, s.size);
                     let color = if *mark == Mark::Err { col.danger } else { col.term_dim };
                     let base = y + f.baseline_in(s.size, g.ch);
-                    f.draw(c, g.right() - tw as i32, base, text, s.size, color);
+                    f.draw(c, right - tw as i32, base, text, s.size, color);
                 } else if !text.is_empty() {
                     // Ukazatel cinnosti: kresli ho mrizka (posledni bunka).
                     let ch = text.chars().next().unwrap();

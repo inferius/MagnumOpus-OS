@@ -1,4 +1,5 @@
-//! Relace okna (karty v titulku okna GUI): seznam relaci sluzby
+//! Relace okna (karty v titulku okna GUI) a akce bloku: seznam relaci
+//! sluzby
 //! (`ServerMsg::SessionList`), prepnuti na jinou relaci a nova relace.
 //!
 //! Prepnuti = odpojit aktualni relaci (bezi dal) a pripojit jinou; ta
@@ -76,5 +77,21 @@ impl App {
             return None;
         }
         Some(at)
+    }
+
+    /// Akce bloku z okna GUI: sbalit / rozbalit blok `id`.
+    pub fn toggle_block(&mut self, id: u64) {
+        if let Some(b) = self.blocks.iter_mut().find(|b| b.id == id) {
+            b.collapsed = !b.collapsed;
+        }
+    }
+
+    /// Akce bloku z okna GUI: spustit prikaz bloku `id` znovu (jako by ho
+    /// uzivatel napsal; bezi-li prikaz, zaradi se do fronty).
+    pub fn rerun_block(&mut self, id: u64) {
+        let Some(line) = self.blocks.iter().find(|b| b.id == id).map(|b| b.line.clone()) else { return };
+        if !line.trim().is_empty() {
+            self.run(line);
+        }
     }
 }
