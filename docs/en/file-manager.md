@@ -152,9 +152,27 @@ session if needed. Flow **[verified in QEMU]** (file manager test, part
 
 Enter or a double click on a file in the file manager sends the path to
 the service; the window does not wait for the reply (the service may call
-its own action). Hooking up the shell (a command and "bare" paths)
-**[designed]**: `open` in the shell already reads a file as bytes, the
-coordinator decides the command name. Limitation: the compositor picks
+its own action).
+
+### The service interface for clients
+
+A client (the file manager, the shell) talks to the service like this
+**[verified in QEMU]** (part "otevri cestu" of the file manager test):
+
+| What | How |
+|---|---|
+| channel | an end of the session's service channel: init gives it to the process in the start message (`crate::open::endpoint(session)`; a duplicate, each process of the session has its own handle of the same channel) |
+| request | `openwith::msg::request(path)` = the text `open <absolute path>` (UTF-8, spaces in the path allowed) and **exactly one handle**: the end of a new channel the reply comes to |
+| reply | `openwith::msg::Reply::decode`: `ok <app id>` (opened), `reveal <app id>` (no app opens the type, the file manager showed the file), `err <reason for a human>` (the path does not exist: `<path>: NOT_FOUND`, no right, the app cannot be started, it did not answer within 20 s) |
+| identity | init checks the path with the FS session of the user the channel belongs to (the client must complete a relative path itself; relative = `err`) |
+| invalid message | without a handle it is dropped; with a handle the reply is `err neplatná žádost` |
+
+The shell **[designed]** (the shell thread, the coordinator's decision):
+`open` stays reading a file; a bare path to a file on the command line
+and a new command `start <path>` send a request to the service and print
+the reply. Init must add the service channel for a terminal session to
+the shell session's handles (`termd`/`shsess`), the same way it does for
+the Files window (`user/init/src/files.rs`, `window_handles`). Limitation: the compositor picks
 the app by id, not by session (several users logged in at once do not
 exist yet).
 

@@ -143,9 +143,27 @@ Postup **[ověřeno v QEMU]** (test spravce souboru, část „otevri cestu“):
 4. odpověď `ok <aplikace>`, `reveal <aplikace>`, nebo `err <důvod>`.
 
 Enter nebo dvojklik na souboru ve správci posílá cestu službě; na
-odpověď okno nečeká (služba může volat jeho vlastní akci). Napojení
-shellu (příkaz a „holé“ cesty) **[navrženo]**: v shellu už `open` čte
-soubor jako bajty, název příkazu rozhoduje koordinátor. Omezení: kompozitor
+odpověď okno nečeká (služba může volat jeho vlastní akci).
+
+### Rozhraní služby pro klienty
+
+Klient (správce souborů, shell) mluví se službou takto **[ověřeno
+v QEMU]** (část „otevri cestu“ testu správce souborů):
+
+| Co | Jak |
+|---|---|
+| kanál | konec kanálu služby relace: init ho dá procesu ve startovní zprávě (`crate::open::endpoint(session)`; duplikát, každý proces relace má vlastní handle téhož kanálu) |
+| žádost | `openwith::msg::request(cesta)` = text `open <absolutní cesta>` (UTF-8, mezery v cestě povolené) a **přesně jeden handle**: konec nového kanálu, na který přijde odpověď |
+| odpověď | `openwith::msg::Reply::decode`: `ok <id aplikace>` (otevřeno), `reveal <id aplikace>` (žádná aplikace typ neotevře, soubor ukázal správce), `err <důvod pro člověka>` (cesta neexistuje: `<cesta>: NOT_FOUND`, bez práva, aplikace nejde spustit, neodpověděla do 20 s) |
+| identita | cestu ověří init relací FS uživatele, které kanál patří (relativní cestu si klient musí doplnit sám; relativní = `err`) |
+| neplatná zpráva | bez handlu se zahodí; s handlem odpověď `err neplatná žádost` |
+
+Shell **[navrženo]** (vlákno shellu, rozhodnutí koordinátora): `open`
+zůstává čtení souboru; holá cesta k souboru na příkazové řádce a nový
+příkaz `start <cesta>` pošlou žádost službě a vypíšou odpověď. Kanál
+služby pro relaci terminálu musí init přidat k handlům relace shellu
+(`termd`/`shsess`), stejně jako to dělá pro okno Soubory
+(`user/init/src/files.rs`, `window_handles`). Omezení: kompozitor
 vybírá aplikaci podle id, ne podle relace (více současně přihlášených
 uživatelů zatím není).
 
