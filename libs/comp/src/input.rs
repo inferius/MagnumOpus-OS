@@ -979,6 +979,12 @@ impl Comp {
     }
 
     pub(crate) fn toggle_maximize(&mut self, g: u32, now: u64) {
+        self.toggle_maximize_state(g, now);
+        // Dlazdice v kontextu okna (full / floating).
+        self.context_of_window_changed(g);
+    }
+
+    fn toggle_maximize_state(&mut self, g: u32, now: u64) {
         let (sw, sh) = (self.w, self.h);
         let reserve = self.bar_reserve();
         let Some(w) = self.windows.get_mut(&g) else { return };

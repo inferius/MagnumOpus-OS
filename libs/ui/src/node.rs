@@ -87,7 +87,7 @@ pub enum Kind<M> {
     /// `secure` = heslo: kresli se teckami, hodnota se nedava do stromu
     /// pristupnosti ani do trasovani, kompozitor pole zakryje ve snimku.
     /// `multiline` = viceradkove pole (`text_area`) s `rows` radky.
-    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<KeyMapFn> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
     List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
@@ -266,6 +266,7 @@ pub fn text_input<M>(value: &str) -> Node<M> {
         multiline: false,
         rows: 1,
         on_change: None,
+        key_map: None,
         on_submit: None,
     })
 }
@@ -557,6 +558,17 @@ impl<M> Node<M> {
         self
     }
 
+    /// Vlastni preklad klaves na znaky (napr. zkouska rozlozeni vybraneho
+    /// v instalatoru, ne rozlozeni systemu): pri stisku pole vlozi
+    /// `f(kod, modifikatory)` misto znaku od systemu; `None` = nic.
+    /// Editacni klavesy a zkratky s Ctrl zustanou.
+    pub fn key_map(mut self, f: impl Fn(u16, u16) -> Option<char> + 'static) -> Self {
+        if let Kind::TextInput { key_map, .. } = &mut self.kind {
+            *key_map = Some(Box::new(f));
+        }
+        self
+    }
+
     pub fn on_submit(mut self, m: M) -> Self {
         if let Kind::TextInput { on_submit, .. } = &mut self.kind {
             *on_submit = Some(m);
@@ -627,6 +639,9 @@ impl Cells {
         self
     }
 }
+
+/// Preklad klavesy (kod, modifikatory `inputproto::mods`) na znak.
+pub type KeyMapFn = Box<dyn Fn(u16, u16) -> Option<char>>;
 
 /// Zprava pri pusteni tazenych radku (cil, id radku).
 pub type DropFn<M> = Box<dyn Fn(Option<u64>, Vec<u64>) -> M>;

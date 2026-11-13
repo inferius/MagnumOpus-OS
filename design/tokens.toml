@@ -136,6 +136,10 @@ switch_h = 26
 switch_knob = 18
 # Bocni panel okna (panel uloh v terminalu): sirka.
 side_panel = 280
+# Nejmensi cil podle drzeni zarizeni (kontext okna `min_hit`): mys
+# a touchpad / dotyk (design/tablet.html).
+hit_min_fine = 32
+hit_min_touch = 44
 
 [radius]
 xs = 6

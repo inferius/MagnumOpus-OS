@@ -320,6 +320,22 @@ impl<M: Clone> Ui<M> {
         (c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation) = (output, screen, work_area, scale, refresh_mhz, generation);
     }
 
+    /// Rozsireni kontextu (drzeni, ukazatele, klavesnice, dlazdice...).
+    pub fn set_context_ext(&mut self, e: &context::ContextExt) {
+        let c = &mut self.cx;
+        c.posture = e.posture;
+        c.distance = e.distance;
+        c.insets = e.insets;
+        c.safe = e.safe;
+        c.pointers = e.pointers.clone();
+        c.keyboard = e.keyboard;
+        c.obscured = e.obscured.clone();
+        c.tile = e.tile;
+        c.min_hit = e.min_hit as u32;
+        self.look.min_hit = c.min_hit;
+        c.text_scale = e.text_scale as u32;
+    }
+
     /// Poloha obsahu okna na obrazovce (`WINDOW_PLACE`).
     pub fn set_window_rect(&mut self, r: Rect) {
         self.cx.window = r;

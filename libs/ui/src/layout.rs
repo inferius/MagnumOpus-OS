@@ -17,7 +17,7 @@ use crate::node::{Key, Kind, Node};
 pub enum ElemKind<M> {
     Label { text: String, heading: bool, warn: bool },
     Button { text: String, on_click: Option<M> },
-    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<crate::node::KeyMapFn> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
     ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
@@ -222,8 +222,8 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         Kind::Button { text, on_click } => {
             push(out, ElemKind::Button { text, on_click }, r);
         }
-        Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, .. } => {
-            push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit }, r);
+        Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, .. } => {
+            push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map }, r);
         }
         Kind::Checkbox { text, checked, on_toggle } => {
             push(out, ElemKind::Checkbox { text, checked, on_toggle }, r);

@@ -64,3 +64,28 @@ fn view_gets_window_context() {
     assert!(has(&u, "kompaktní"));
     assert_eq!(u.context().generation, 2);
 }
+
+/// Rozsireni kontextu: tablet s dotykem a perem (bez klavesnice), nejmensi
+/// cil 44 zvetsi ovladaci prvky; televize jen s fokusem.
+#[test]
+fn context_ext_tablet_and_tv() {
+    use guiproto::context::{ContextExt, Pointer, PointerKind, Posture};
+    let mut u: Ui<()> = Ui::new(crate::Look::ui_fonts(), 900, 600);
+    let h0 = u.look.control_h();
+    let tablet = ContextExt {
+        posture: Posture::Tablet,
+        pointers: alloc::vec![Pointer { kind: PointerKind::Touch, precise: false, hover: false, pressure: false }],
+        keyboard: false,
+        min_hit: 44,
+        ..Default::default()
+    };
+    u.set_context_ext(&tablet);
+    assert_eq!(u.context().posture, Posture::Tablet);
+    assert!(!u.context().can_hover());
+    assert!(!u.context().keyboard);
+    assert_eq!(u.look.control_h(), h0.max(44));
+    u.refresh(&A);
+    let tv = ContextExt { posture: Posture::Tv, pointers: alloc::vec![Pointer { kind: PointerKind::Remote, precise: false, hover: false, pressure: false }], ..Default::default() };
+    u.set_context_ext(&tv);
+    assert!(u.context().focus_only());
+}

@@ -11,12 +11,15 @@ use theme::{Mode, TextStyle, Theme};
 /// Motiv a pisma okna aplikace.
 pub struct Look {
     pub theme: Theme,
+    /// Nejmensi cil z kontextu okna (`min_hit`): ovladaci prvky a radky
+    /// nejsou nizsi (dotyk 44 px, mys 32 px).
+    pub min_hit: u32,
     pub fonts: Family,
 }
 
 impl Look {
     pub fn new(fonts: Family, mode: Mode) -> Self {
-        Self { theme: Theme::builtin(mode), fonts }
+        Self { theme: Theme::builtin(mode), fonts, min_hit: 0 }
     }
 
     /// Pisma UI z vlozenych rezu (`libs/font`, vlastnosti z tokenu).
@@ -72,11 +75,11 @@ impl Look {
 
     /// Vyska ovladaciho prvku (`size.control_h`).
     pub fn control_h(&self) -> u32 {
-        self.theme.size.control_h
+        self.theme.size.control_h.max(self.min_hit)
     }
 
-    /// Vyska radku seznamu (`size.control_h`).
+    /// Vyska radku seznamu (`size.control_h`, nejmene `min_hit`).
     pub fn row_h(&self) -> u32 {
-        self.theme.size.control_h
+        self.theme.size.control_h.max(self.min_hit)
     }
 }

@@ -287,6 +287,21 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   - **Později** je to žádost o změnu (`CONFIGURE` jako při tažení okraje).
     Maximalizované okno a okno na celé obrazovce si ji zapamatuje jako
     velikost po obnovení.
+- **Rozšíření pro tablet a televizi** (`guiproto::context::ContextExt`,
+  verze protokolu 3; [Televize](../../design/televize.html),
+  [Tablet](../../design/tablet.html)): `posture` (desktop, laptop, tablet,
+  phone, tv), `distance` (blízko, stůl, místnost), `insets` (systémové
+  lišty) a vedle nich `safe` (bezpečný okraj kvůli přesahu obrazu: text
+  a fokus jen uvnitř), `pointers` (seznam: myš, touchpad, dotyk, pero,
+  dálkový ovladač s přesností, najetím a tlakem; prázdný = jen fokus),
+  `keyboard` (připojená klávesnice), `obscured` (překážky, např. klávesnice
+  na obrazovce), `tile` (floating, full, left, right, top, bottom),
+  `min_hit` (nejmenší cíl; tokeny `size.hit_min_fine` 32 a
+  `size.hit_min_touch` 44) a `text_scale`. Kompozitor zatím posílá počítač
+  s myší a klávesnicí a `tile` podle maximalizace a celé obrazovky (nová
+  generace); tablet a televize dodají služby zařízení. Knihovna `ui`
+  podle `min_hit` sama zvětší ovládací prvky a řádky, aplikace čte
+  `cx.posture`, `cx.can_hover()`, `cx.focus_only()`.
 - Terminál: `win.request_size(1040, 520, 850, 0)`, tedy 1040 px, ale nejvýš
   85 % šířky pracovní plochy.
 - Verze protokolu 2 (`guiproto::VERSION`): kompozitor a aplikace se
@@ -1401,6 +1416,10 @@ na hranici znaku.
   byl kurzor vidět; vložené konce řádků nahradí mezerou.
 - **Heslo:** kopírovat ani vyjmout nejde (ani Ctrl+Insert), Ctrl+šipky
   skáčou na začátek a konec (slova by prozradila mezery).
+- **Vlastní překlad kláves** `text_input(..).key_map(|kód, modifikátory|
+  Some('z'))`: pole píše podle jiného rozložení než systém (zkouška
+  rozložení vybraného v instalátoru). Znak od systému ignoruje, editační
+  klávesy a zkratky s Ctrl zůstanou.
 - `ui::text` nezávisí na kreslení: terminál z něj používá hranice slov
   a grafémů pro výběr v mřížce.
 

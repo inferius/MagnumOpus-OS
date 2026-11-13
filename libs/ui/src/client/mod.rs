@@ -69,7 +69,7 @@ pub enum Event {
 }
 
 /// Kontext okna od kompozitoru (`WINDOW_CONTEXT`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WinContext {
     pub output: u32,
     pub screen: Rect,
@@ -77,13 +77,14 @@ pub struct WinContext {
     pub scale: u32,
     pub refresh_mhz: u32,
     pub generation: u32,
+    pub ext: guiproto::context::ContextExt,
 }
 
 impl WinContext {
     fn from_msg(m: &ServerMsg) -> Option<Self> {
-        match *m {
-            ServerMsg::WindowContext { generation, output, screen, work_area, scale, refresh_mhz, .. } => {
-                Some(Self { output, screen, work_area, scale, refresh_mhz, generation })
+        match m {
+            ServerMsg::WindowContext { generation, output, screen, work_area, scale, refresh_mhz, ext, .. } => {
+                Some(Self { output: *output, screen: *screen, work_area: *work_area, scale: *scale, refresh_mhz: *refresh_mhz, generation: *generation, ext: ext.clone() })
             }
             _ => None,
         }
@@ -392,8 +393,8 @@ impl Window {
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
             ServerMsg::Clipboard { data } => clipproto::ServerMsg::decode(&data).ok().map(Event::Clipboard),
             ServerMsg::WindowPlace { rect, .. } => Some(Event::Place(rect)),
-            ServerMsg::WindowContext { generation, output, screen, work_area, scale, refresh_mhz, .. } => {
-                self.context = Some(WinContext { output, screen, work_area, scale, refresh_mhz, generation });
+            ServerMsg::WindowContext { generation, output, screen, work_area, scale, refresh_mhz, ext, .. } => {
+                self.context = Some(WinContext { output, screen, work_area, scale, refresh_mhz, generation, ext });
                 Some(Event::Context)
             }
             ServerMsg::ActionInvoke { call, action, args, caller, synthetic } => Some(Event::Action { call, id: action, args, caller, synthetic }),
@@ -904,8 +905,9 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
 
 /// Prenese kontext okna do `Ui` (aplikace ho dostane ve `view`).
 fn set_context<M: Clone>(win: &Window, ui: &mut Ui<M>) {
-    if let Some(c) = win.context {
+    if let Some(c) = &win.context {
         ui.set_context(c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation);
+        ui.set_context_ext(&c.ext);
     }
 }
 

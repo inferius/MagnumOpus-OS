@@ -272,3 +272,33 @@ fn app_transforms_value() {
     let v: Vec<_> = f.ui.a11y().into_iter().filter(|n| n.value == "ABČ").collect();
     assert_eq!(v.len(), 1);
 }
+
+/// Vlastni preklad klaves (`key_map`): pole pise podle vybraneho rozlozeni
+/// (QWERTZ: poloha Y = z), znak od systemu ignoruje, editace zustava.
+#[test]
+fn key_map_overrides_system_layout() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct T(String);
+    let mut u: Ui<T> = Ui::new(crate::Look::ui_fonts(), 400, 200);
+    let view = |v: &str| column([text_input(v).on_change(T).key_map(|code, mods| match code {
+        KEY_Y => Some(if mods & SHIFT != 0 { 'Z' } else { 'z' }),
+        KEY_Z => Some('y'),
+        KEY_2 => Some('ě'),
+        _ => None,
+    })]);
+    let mut val = String::new();
+    u.rebuild("k".into(), view(&val));
+    for (code, ch, mods) in [(KEY_Y, 'y', 0), (KEY_Z, 'z', 0), (KEY_2, '2', 0), (KEY_Y, 'Y', SHIFT), (KEY_Q, 'q', 0)] {
+        let r = u.event(InputEvent::Key { code, action: 1, ch: Some(ch) }, mods);
+        // System posle i znak podle sveho rozlozeni: pole ho ignoruje.
+        let r2 = u.event(InputEvent::Text(ch), mods);
+        for m in r.msgs.into_iter().chain(r2.msgs) {
+            val = m.0;
+        }
+        u.rebuild("k".into(), view(&val));
+    }
+    assert_eq!(val, "zyěZ");
+    // Backspace dal maze.
+    let r = u.event(InputEvent::Key { code: KEY_BACKSPACE, action: 1, ch: None }, 0);
+    assert_eq!(r.msgs.last().map(|m| m.0.clone()), Some(String::from("zyě")));
+}

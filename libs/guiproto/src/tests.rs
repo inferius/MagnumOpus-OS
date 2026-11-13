@@ -222,6 +222,20 @@ fn server_messages_roundtrip() {
             work_area: Rect::new(0, 0, 1280, 744),
             scale: 125,
             refresh_mhz: 60_000,
+            ext: crate::context::ContextExt {
+                posture: crate::context::Posture::Tablet,
+                distance: crate::context::Distance::Near,
+                safe: crate::context::Insets { top: 27, right: 48, bottom: 27, left: 48 },
+                pointers: vec![
+                    crate::context::Pointer { kind: crate::context::PointerKind::Touch, precise: false, hover: false, pressure: false },
+                    crate::context::Pointer { kind: crate::context::PointerKind::Pen, precise: true, hover: true, pressure: true },
+                ],
+                keyboard: false,
+                obscured: vec![(crate::context::ObstacleKind::Keyboard, Rect::new(0, 400, 1280, 330))],
+                tile: crate::context::Tile::Left,
+                min_hit: 44,
+                ..Default::default()
+            },
         },
     ] {
         roundtrip_server(m);

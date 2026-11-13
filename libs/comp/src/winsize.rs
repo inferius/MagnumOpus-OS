@@ -36,6 +36,7 @@ impl Comp {
             work_area: self.work_area(),
             scale: 100,
             refresh_mhz: self.refresh_mhz(),
+            ext: self.context_ext(gid),
         };
         self.send(c, m);
     }
@@ -55,6 +56,25 @@ impl Comp {
             let (c, local, rect) = (w.client, w.local, w.rect);
             self.send(c, ServerMsg::WindowPlace { window: local, rect });
         }
+    }
+
+    /// Rozsireni kontextu okna `gid`: pocitac s mysi a klavesnici (tablet
+    /// a TV dodaji sluzby zarizeni, az budou), dlazdice podle stavu okna,
+    /// nejmensi cil z tokenu `size.hit_min_fine`.
+    fn context_ext(&self, gid: u32) -> guiproto::context::ContextExt {
+        use guiproto::context::{ContextExt, Tile};
+        let tile = match self.windows.get(&gid) {
+            Some(w) if w.mode == Mode::Fullscreen || w.restore.is_some() || w.fs_saved.is_some() => Tile::Full,
+            _ => Tile::Floating,
+        };
+        ContextExt { tile, min_hit: self.style.theme.size.hit_min_fine as u16, ..Default::default() }
+    }
+
+    /// Okno zmenilo stav (maximalizace, cela obrazovka): novy kontext
+    /// (dlazdice).
+    pub(crate) fn context_of_window_changed(&mut self, gid: u32) {
+        self.ctx_generation = self.ctx_generation.wrapping_add(1);
+        self.send_context(gid);
     }
 
     /// Zmena obrazovky (rozliseni, lista): nova generace kontextu vsem oknum.

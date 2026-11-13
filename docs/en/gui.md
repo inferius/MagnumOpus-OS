@@ -300,6 +300,21 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   - **Later** it is a resize request (`CONFIGURE` as when dragging an
     edge). A maximized or fullscreen window remembers it as its restored
     size.
+- **Extension for tablet and TV** (`guiproto::context::ContextExt`,
+  protocol version 3; [TV](../../design/televize.html),
+  [Tablet](../../design/tablet.html)): `posture` (desktop, laptop, tablet,
+  phone, tv), `distance` (near, desk, room), `insets` (system bars) and
+  next to them `safe` (safe margin for overscan: text and focus only
+  inside), `pointers` (a list: mouse, touchpad, touch, pen, remote with
+  precision, hover and pressure; empty = focus only), `keyboard` (attached
+  keyboard), `obscured` (obstacles, e.g. the on-screen keyboard), `tile`
+  (floating, full, left, right, top, bottom), `min_hit` (smallest target;
+  tokens `size.hit_min_fine` 32 and `size.hit_min_touch` 44) and
+  `text_scale`. For now the compositor sends a computer with mouse and
+  keyboard and `tile` by maximize and fullscreen (a new generation);
+  tablet and TV will provide device services. The `ui` library enlarges
+  controls and rows by `min_hit` itself; applications read `cx.posture`,
+  `cx.can_hover()`, `cx.focus_only()`.
 - Terminal: `win.request_size(1040, 520, 850, 0)`, i.e. 1040 px but at
   most 85 % of the work area width.
 - Protocol version 2 (`guiproto::VERSION`): compositor and applications
@@ -1454,6 +1469,10 @@ character boundary.
   cursor stays visible; pasted line breaks become spaces.
 - **Password:** neither copy nor cut works (not even Ctrl+Insert);
   Ctrl+arrows jump to start and end (words would reveal the spaces).
+- **Own key translation** `text_input(..).key_map(|code, modifiers|
+  Some('z'))`: the field types by a layout other than the system one
+  (trying the layout chosen in the installer). It ignores the system's
+  character; editing keys and Ctrl shortcuts stay.
 - `ui::text` does not depend on drawing: the terminal uses its word and
   grapheme boundaries for selection in the grid.
 

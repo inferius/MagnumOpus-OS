@@ -334,9 +334,15 @@ impl<M: Clone> Ui<M> {
         r.redraw = true;
     }
 
+    /// Ma pole vlastni preklad klaves (`Node::key_map`)?
+    fn has_key_map(&self, i: usize) -> bool {
+        matches!(&self.elems[i].kind, ElemKind::TextInput { key_map: Some(_), .. })
+    }
+
     /// Vlozeny znak (psani).
     pub(crate) fn field_insert(&mut self, i: usize, ch: char, r: &mut Response<M>) {
-        if ch.is_control() || self.elems[i].disabled {
+        // S vlastnim prekladem klaves vklada pole az pri stisku klavesy.
+        if ch.is_control() || self.elems[i].disabled || self.has_key_map(i) {
             return;
         }
         let key = self.elems[i].key;
@@ -499,6 +505,18 @@ impl<M: Clone> Ui<M> {
                 }
                 self.field_reveal(i);
                 r.redraw = true;
+            }
+            // Vlastni preklad klaves: znak z `key_map` (bez Ctrl a Alt).
+            _ if !ctrl && self.mods & mods::ALT == 0 => {
+                let ch = match &self.elems[i].kind {
+                    ElemKind::TextInput { key_map: Some(f), .. } => f(code, self.mods),
+                    _ => return false,
+                };
+                if let Some(c) = ch.filter(|c| !c.is_control()) {
+                    let mut b = [0u8; 4];
+                    self.edits.get_mut(&key).unwrap().insert(c.encode_utf8(&mut b));
+                    self.field_changed(i, r);
+                }
             }
             _ => return false,
         }

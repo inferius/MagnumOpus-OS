@@ -563,7 +563,7 @@ pub enum ServerMsg {
     /// obrazovka a pracovni plocha (bez listy) v logickych px, skala
     /// vystupu v procentech a obnovovaci frekvence. Prijde pred prvnim
     /// `CONFIGURE` a pri kazde zmene; `generation` roste s kazdou zmenou.
-    WindowContext { window: u32, generation: u32, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32 },
+    WindowContext { window: u32, generation: u32, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32, ext: crate::context::ContextExt },
     /// Obdelnik obsahu okna na obrazovce (po vytvoreni a po kazdem presunu
     /// nebo zmene velikosti, behem tahu az na konci): aplikace podle nej
     /// umisti popover do pracovni plochy.
@@ -941,9 +941,10 @@ impl ServerMsg {
                 w = Writer::op(op::WINDOW_PLACE);
                 w.u32(*window).rect(rect);
             }
-            WindowContext { window, generation, output, screen, work_area, scale, refresh_mhz } => {
+            WindowContext { window, generation, output, screen, work_area, scale, refresh_mhz, ext } => {
                 w = Writer::op(op::WINDOW_CONTEXT);
                 w.u32(*window).u32(*generation).u32(*output).rect(screen).rect(work_area).u32(*scale).u32(*refresh_mhz);
+                ext.encode(&mut w);
             }
         }
         w.finish()
@@ -1026,6 +1027,7 @@ impl ServerMsg {
                 work_area: r.rect()?,
                 scale: r.u32()?,
                 refresh_mhz: r.u32()?,
+                ext: crate::context::ContextExt::decode(&mut r)?,
             },
             _ => return Err(crate::Error::NotSupported),
         };
