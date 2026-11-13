@@ -676,12 +676,13 @@ fullscreen are added once they exist in the system. **[designed]**
 ### Launching apps from the bar
 
 Init sends the compositor the list of desktop apps (`apps`, id and name
-from the manifest: Terminal, Demo, Task manager) and a `launcher` channel.
+from the manifest: Terminal, Demo, Task manager, [Files](file-manager.md)) and a `launcher` channel.
 An app without a window has a dimmed icon without a marker in the bar; a
 click on it, or on a row in the launcher (the grid icon on the left),
 sends init `launch <id>`. Init starts it under the supervisor with the same
 handles as at desktop start (the terminal a channel to termd, the Task
-manager a task overview client). The compositor starts nothing itself. A
+manager a task overview client, Files the user's FS session, a channel to
+`files-copy` and to the "open a path" service). The compositor starts nothing itself. A
 click on a running app activates it (also from minimized).
 **[implemented]** (test `bar_launches_closed_apps_and_activates_running`
 in `libs/comp`; the init start has no QEMU test yet)

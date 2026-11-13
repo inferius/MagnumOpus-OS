@@ -644,11 +644,11 @@ v systému. **[navrženo]**
 ### Spouštění aplikací z lišty
 
 Init pošle kompozitoru seznam aplikací plochy (`apps`, id a jméno
-z manifestu: Terminál, Ukázka, Správce úloh) a kanál `launcher`. Aplikace
+z manifestu: Terminál, Ukázka, Správce úloh, [Soubory](spravce-souboru.md)) a kanál `launcher`. Aplikace
 bez okna má v liště ztlumenou ikonu bez značky; klik na ni, nebo na řádek
 ve spouštěči (ikona mřížky vlevo), pošle initu `launch <id>`. Init ji
 spustí pod supervisorem se stejnými handly jako při startu plochy (terminál
-kanál k termd, Správce úloh klienta přehledu úloh). Kompozitor sám nic
+kanál k termd, Správce úloh klienta přehledu úloh, Soubory relaci FS uživatele, kanál k `files-copy` a službě „otevři cestu“). Kompozitor sám nic
 nespouští. Běžící aplikaci klik aktivuje (i z minimalizace).
 **[implementováno]** (test `bar_launches_closed_apps_and_activates_running`
 v `libs/comp`; spuštění initem zatím bez testu v QEMU)
