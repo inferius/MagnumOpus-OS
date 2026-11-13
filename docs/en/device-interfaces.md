@@ -122,6 +122,27 @@ The driver offers the compositor a list of its buffers with their memory
 kind and the compositor picks the path. The display interface stays one
 for CPU and GPU compositing.
 
+### Video plane (designed)
+
+**[designed]** Video should not be composited as an ordinary layer: a
+decoded 4K frame would be copied and composited by the CPU every frame.
+The compositor therefore supports a **video plane**: the buffer from the
+hardware decoder goes straight to a display plane (overlay) if the
+display can show it, otherwise to GPU compositing. Without either path
+the video is scaled down to a resolution the CPU can keep up with, and
+the user sees that in the playback information.
+
+| What | Rule |
+|---|---|
+| source | decoder buffer in YUV (NV12, P010), no RGB conversion on the CPU |
+| HDR | metadata (PQ, HLG, luminance) travels with the buffer; the compositor switches the output to HDR only while the video is in front and the display supports it |
+| refresh rate | the display may switch to a multiple of the video frame rate (24, 25, 50 Hz), only in full screen |
+| subtitles and controls | drawn as an ordinary layer above the video plane |
+| content protection | a secure path (DRM) is not designed: a new system will not get certification |
+
+Related to the [TV design](appearance.md#tablet-and-tv-design), but every
+video playback on desktop and phone needs it.
+
 ## Layer 2: system services for applications
 
 An application never gets a capability to a driver (registers,
@@ -155,6 +176,31 @@ service:
 | file picker (portal) | only the files the user picked, not the whole disk | FS, cloud storage |
 | screen sharing | only the window or screen the user picked, with an indicator | the compositor |
 | clipboard, contacts, printing | data only on a user action (paste, pick a contact) | services and apps |
+
+### Media actions and playback session (designed)
+
+**[designed]** The media playback service keeps a **playback session**
+for each player: what is playing (title, artwork, duration), position,
+state and the list of actions the player supports. Bar controls, media
+keys, headphones, the lock screen, a remote control, a companion phone
+and voice are all just clients of the same session.
+
+Control goes through **semantic actions**, not keys or clicks:
+
+| Action | Parameters |
+|---|---|
+| `media.play`, `media.pause`, `media.toggle`, `media.stop` | - |
+| `media.seek` | position or offset in ms |
+| `media.next`, `media.previous` | - |
+| `media.subtitles` | language or off |
+| `media.audio_track` | track |
+| `media.info` | - (shows details) |
+
+The system handles volume and power; the app does not receive them. A
+player lists the actions it supports in its manifest; the system does
+not send unknown actions. With several players, an action goes to the
+session that started playing last (the same rule as audio contention
+above).
 
 **The cost**: applications have less freedom than on Android. So every
 service needs versioned extensions (layer 1, item 4), otherwise developers

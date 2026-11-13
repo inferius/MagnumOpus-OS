@@ -203,6 +203,26 @@ a autoritu dál dělí:
 - **Plán:** brána spuštění (ověření podpisu programu, volnější režim podle
   nastavení) a antivir se skenováním v izolovaných procesech bez sítě.
 
+### Profily domácnosti a politika obsahu (navrženo)
+
+**[navrženo]** Sdílené zařízení (televize, rodinný tablet) potřebuje
+**profil domácnosti**: lehký účet bez hesla, volitelně s PINem, vybraný
+ovladačem nebo dotykem. Má vlastní historii, doporučení a nastavení, ale
+ne vlastní šifrovaný domovský adresář; citlivá data (pošta, trezor hesel)
+zůstávají v plných [účtech](ucty.md).
+
+**Politiku obsahu** hlídá systém, ne aplikace:
+
+| Co | Jak |
+|---|---|
+| hodnocení | aplikace uvádí hodnocení v manifestu, médium v metadatech; profil má nejvyšší povolené hodnocení |
+| nad hodnocení | obsah se dětskému profilu **skrývá** (nezobrazí se v řadách ani ve výsledcích hledání) |
+| výjimka | rodič pustí jeden titul jednou, PINem v důvěryhodném dialogu, jen z místního fyzického vstupu |
+| časové limity a nákupy | systémová politika profilu; aplikace se ptá na povolení, nehlídá si je sama |
+
+Aplikace dostane jen „smí / nesmí“ a důvod pro text, ne nastavení
+profilu. Souvisí s [vzhledem pro televizi](vzhled.md#tablet-a-televize-návrh).
+
 ## Systémové služby
 
 | Služba | Úkol |
@@ -796,13 +816,15 @@ a Unixů; CRLF by znamenal převody všude jinde.
    dodržují.
 2. **Tolerantní čtení**: nástroje přijmou i `
 ` (soubor z Windows,
-   vložený text) jako jeden konec řádku a osamocené `` na konci řádku
+   vložený text) jako jeden konec řádku a osamocené `
+` na konci řádku
    nezobrazují jako smetí.
 3. **Soubory se nikdy tiše nepřepisují**: editor zachová styl otevřeného
    souboru; převod jen na požádání (příkaz, volba při uložení).
 4. **Terminál**: `
 ` = nový řádek a návrat na začátek (jako moderní
-   terminály); samotné `` vrátí kurzor na začátek řádku (průběžný
+   terminály); samotné `
+` vrátí kurzor na začátek řádku (průběžný
    ukazatel postupu).
 5. **Výměna se světem**: `osfs` (sdílení FS s Windows) ani git konce řádků
    nepřevádějí; převod je volitelný v nástroji.

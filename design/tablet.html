@@ -152,6 +152,7 @@
   <header>
     <h1>Tabletový režim</h1>
     <p class="lead">Navazuje na <a href="mobil.html">mobilní vzhled</a>: stejné třídy šířky, stejný kontext okna, stejná gesta. Nové je víc oken vedle sebe, pero a přechod mezi tabletem a notebookem (2v1) při připojení klávesnice. Tablet je <b>simulovaný</b>; okna můžete přepínat klepnutím na úchyt nahoře nebo na dělicí čáru.</p>
+    <p class="note"><b>Rozhodnutí 13. 11. 2026:</b> režim tablet / notebook se přepíná <b>automaticky podle čidla</b>, s rychlým ručním přepínačem v rychlých nastaveních (automaticky / vždy / nikdy). Na výšku jsou dlaždice <b>nad sebou</b>.</p>
   </header>
 
   <h2>Průchod</h2>
@@ -194,12 +195,12 @@
   <div class="pc">
     <div class="card"><h3>Co se nezmění</h3><ul><li>Žádné okno se nezavře ani nepřeskládá. Rozdělení 1/2 a 1/3 zůstane, plovoucí okno zůstane na svém místě.</li><li>Fokus, kurzor v textu, výběr i rozpracovaný text zůstanou.</li><li>Třída šířky se mění jen tehdy, když se změní šířka okna (lišta v notebooku ubere 44 jednotek výšky, ne šířky).</li></ul></div>
     <div class="card"><h3>Co se změní</h3><ul><li>Kontext dostane novou generaci s <code>posture</code> a novým seznamem ukazatelů; aplikace zmenší cíle a ukáže zkratky.</li><li>Úchyt se vymění za titulek, dok za lištu, klávesnice na obrazovce zmizí.</li><li>Animace přechodu 200 ms (při omezeném pohybu bez animace).</li></ul></div>
-    <div class="card"><h3>Kdy přepnout</h3><ul><li>Výchozí: automaticky podle čidla odklopení / odpojení (přepínač „tablet mode“ v ACPI nebo HID).</li><li>Rychlé nastavení „Režim tabletu: automaticky / vždy / nikdy“ pro přístupnost a pro zařízení bez čidla.</li><li>Bez dotazu „Přepnout?“: přepnutí nic neruší, takže dotaz by jen zdržoval.</li></ul></div>
+    <div class="card"><h3>Kdy přepnout</h3><ul><li><b>Rozhodnuto:</b> automaticky podle čidla odklopení / odpojení (přepínač „tablet mode“ v ACPI nebo HID).</li><li>Rychlé nastavení „Režim tabletu: automaticky / vždy / nikdy“ pro přístupnost a pro zařízení bez čidla.</li><li>Bez dotazu „Přepnout?“: přepnutí nic neruší, takže dotaz by jen zdržoval.</li></ul></div>
   </div>
 
   <h2>Okna vedle sebe</h2>
   <div class="pc">
-    <div class="card"><h3>Pravidla</h3><ul><li>Nejvýš dvě dlaždice a jedno plovoucí okno. Víc oken na tabletu znamená nečitelně úzké sloupce.</li><li>Na šířku jsou dlaždice vedle sebe (1/2, 1/3 + 2/3), na výšku <b>nad sebou</b>: 820 jednotek na šířku by vedle sebe dalo dvakrát 398, tedy dva telefony.</li><li>Plovoucí okno má pevnou třídu <code>compact</code> (360 &times; 480) a jde odložit k okraji jako jazýček.</li><li>Dělicí čára přepíná 1/2 &lt;-&gt; 1/3; tažením jde i plynule, okna dostanou nové generace až po puštění (během tažení jen měřítko obrazu).</li></ul></div>
+    <div class="card"><h3>Pravidla</h3><ul><li>Nejvýš dvě dlaždice a jedno plovoucí okno. Víc oken na tabletu znamená nečitelně úzké sloupce.</li><li>Na šířku jsou dlaždice vedle sebe (1/2, 1/3 + 2/3), na výšku <b>nad sebou</b> (rozhodnuto): 820 jednotek na šířku by vedle sebe dalo dvakrát 398, tedy dva telefony.</li><li>Plovoucí okno má pevnou třídu <code>compact</code> (360 &times; 480) a jde odložit k okraji jako jazýček.</li><li>Dělicí čára přepíná 1/2 &lt;-&gt; 1/3; tažením jde i plynule, okna dostanou nové generace až po puštění (během tažení jen měřítko obrazu).</li></ul></div>
     <div class="card"><h3>Co musí aplikace umět</h3><ul><li>Rozložení pro <code>compact</code> je povinné; aplikace, která ho nemá (manifest <code>min_width</code> &gt; 360), jde jen na celou obrazovku.</li><li>Kontext nese <code>tile</code> (left, right, top, bottom, full, floating), aby aplikace věděla, u kterého okraje je, a dala ovládání k vnějšímu okraji.</li><li>Přetažení souboru mezi dlaždicemi je stejné jako na počítači (systémové předání úchytu).</li></ul></div>
     <div class="card"><h3>Riziko: polovina na šířku je <code>compact</code></h3><ul><li>1180 / 2 minus mezery je 578, tedy pod hranicí 600. Dvě okna vedle sebe ukážou telefonní rozložení.</li><li>Je to stejné jako na běžných tabletech a je to správně (šířka 584 je opravdu úzká). Snížit hranici na 560 by pomohlo jen tomuto zařízení.</li><li>1/3 + 2/3 dá 385 (<code>compact</code>) a 771 (<code>medium</code>).</li></ul></div>
   </div>
