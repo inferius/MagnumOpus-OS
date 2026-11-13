@@ -557,6 +557,15 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 - **Zámek nebezpečných operací:** příkaz, který by změnil víc než N
   souborů mimo `/tmp` (výchozí N = 20), se před převzetím vždy zeptá. Je to
   stejný dotaz jako u `preview`. Bez připojeného okna se odmítne.
+- **Holá cesta jako příkaz** (`/`, `./x`, `../`, `~`, `~/Dokumenty`, `.`,
+  `..`; `libs/shlang/src/eval/bare.rs`): složka = `cd`, skript `.mos` =
+  `run` (s kontrolou `needs`), program (ELF) = spuštění stejnou cestou jako
+  program podle jména (práva z manifestu, náhled, undo; argumenty dostane
+  program), jiný soubor = obsah jako `open` (nic nespouští ani nemění).
+  Složka, skript ani soubor argumenty neberou (`SH_ARGS`); neexistující
+  cesta je `NOT_FOUND` s radou. Zvýraznění ukazuje holou cestu jako cestu,
+  ne jako neznámý příkaz. Hostitel v OS (`shsess`) zatím programy z cesty
+  nespouští: chyba `NOT_SUPPORTED` **[implementováno]**.
 - **Manifest `needs`:** `run skript` před spuštěním ukáže, co skript chce
   (`read`, `write`, `net`), a po potvrzení ho omezí: přístup mimo uvedené
   cesty je `SH_NEEDS`. Skript dostane nejvýš průsečík s právy toho, kdo ho

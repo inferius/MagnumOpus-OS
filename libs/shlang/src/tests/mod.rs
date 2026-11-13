@@ -2,6 +2,7 @@
 //! interpret, souborove vrstvy, doplnovani, vysvetleni chyb.
 
 mod async_tasks;
+mod bare;
 mod audio;
 mod doc;
 mod draft;

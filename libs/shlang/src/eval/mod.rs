@@ -9,6 +9,8 @@
 //!   klony FS bokem); na konci radku se prevezmou s undo, nad limit (zamek
 //!   nebezpecnych operaci) az po potvrzeni.
 
+mod bare;
+pub(crate) use bare::is_bare_path;
 pub(crate) mod builtins;
 pub(crate) mod call;
 mod fsctx;

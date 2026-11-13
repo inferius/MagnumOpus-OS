@@ -579,6 +579,16 @@ for f in (ls ~/Photos | where ext == "jpg") {
   files outside `/tmp` (default N = 20) always asks before the changes are
   applied. It is the same question as with `preview`. Without an attached
   window it is refused.
+- **A bare path as a command** (`/`, `./x`, `../`, `~`, `~/Documents`,
+  `.`, `..`; `libs/shlang/src/eval/bare.rs`): a folder = `cd`, a `.mos`
+  script = `run` (with the `needs` check), a program (ELF) = started the
+  same way as a program by name (rights from the manifest, preview, undo;
+  the program gets the arguments), another file = content like `open`
+  (nothing runs or changes). A folder, script or file takes no arguments
+  (`SH_ARGS`); a missing path is `NOT_FOUND` with a hint. Highlighting shows
+  a bare path as a path, not as an unknown command. The host in the OS
+  (`shsess`) does not start programs from a path yet: error `NOT_SUPPORTED`
+  **[implemented]**.
 - **The `needs` manifest:** `run script` shows what the script wants
   (`read`, `write`, `net`) before it starts and, after confirmation,
   restricts it: access outside the listed paths is `SH_NEEDS`. A script gets

@@ -105,7 +105,17 @@ impl Interp {
             }
             return self.call_closure(host, &c, pos);
         }
-        // Program.
+        // Hola cesta: akce podle druhu cile (slozka, skript, program,
+        // soubor; `bare.rs`).
+        if super::bare::is_bare_path(name) {
+            return self.bare_path(host, name, args, input, span);
+        }
+        self.call_program(host, name, args, input, span)
+    }
+
+    /// Spusti program `name` (jmeno nebo cesta): prava z manifestu,
+    /// nahled (klon bokem), undo.
+    pub(crate) fn call_program(&mut self, host: &mut dyn Host, name: &str, args: &[Arg], input: Value, span: Span) -> R<Value> {
         let a = self.eval_args(host, self.sigs.get(name).copied().as_ref(), args, span, true)?;
         let mut flat: Vec<(Option<String>, Value)> = a.pos.into_iter().map(|v| (None, v)).collect();
         flat.extend(a.named.into_iter().map(|(n, v)| (Some(n), v)));
@@ -171,6 +181,13 @@ impl Interp {
     fn exec_result(&self, r: Option<Result<Value, ShError>>, name: &str, span: Span) -> R<Value> {
         match r {
             Some(r) => r.map_err(|e| Flow::Err(e.at(span))),
+            // Program zadany cestou existuje, ale hostitel programy
+            // spoustet neumi.
+            None if super::bare::is_bare_path(name) => Err(Flow::Err(
+                ShError::new("NOT_SUPPORTED", alloc::format!("program {name} tu nejde spustit"))
+                    .at(span)
+                    .hint("tento hostitel shellu zatím spouští jen vestavěné příkazy"),
+            )),
             None => {
                 let mut e = ShError::new(code::UNKNOWN, alloc::format!("neznámý příkaz '{name}'")).at(span);
                 let mut names: Vec<&str> = self.sigs.names();
