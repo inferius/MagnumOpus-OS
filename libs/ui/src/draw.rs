@@ -61,7 +61,9 @@ impl<M: Clone> Ui<M> {
             // Ramecek fokusu jen v aktivnim okne (prvek si fokus pamatuje).
             let focused = self.focus == Some(i) && self.active;
             let hover = self.hover == Some(i);
-            let pressed = self.pressed == Some(i);
+            // Stisknuto jen s ukazatelem nad prvkem (odjeti stav zrusi,
+            // navrat obnovi) nebo drzenou klavesou Enter/mezernik.
+            let pressed = (self.pressed == Some(i) && self.hover == Some(i)) || self.key_pressed == Some(i);
             let dim = e.disabled;
             match &e.kind {
                 ElemKind::Label { text, heading, warn } => {

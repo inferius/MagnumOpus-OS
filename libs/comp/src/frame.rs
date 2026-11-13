@@ -141,6 +141,12 @@ impl Comp {
         if let Some(d) = self.max_menu_due() {
             at(d);
         }
+        if let Some(d) = self.fs_esc_due() {
+            at(d);
+        }
+        if let Some(d) = self.tip_due() {
+            at(d);
+        }
         for w in self.windows.values() {
             if let Some((_, _, _, d)) = w.configure {
                 at(d);
@@ -189,6 +195,8 @@ impl Comp {
     /// Casove veci, ktere nezavisi na snimku (skupiny, configure, ping).
     pub fn timers(&mut self, now: u64) {
         self.max_menu_timer(now);
+        self.fs_esc_timer(now);
+        self.tip_timer(now);
         self.input_now = now;
         let (late, keep): (Vec<_>, Vec<_>) = core::mem::take(&mut self.frame.groups).into_iter().partition(|g| g.deadline <= now);
         self.frame.groups = keep;

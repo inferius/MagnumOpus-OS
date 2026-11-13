@@ -17,6 +17,8 @@ use crate::{ClientId, Comp, SYNC_TIMEOUT};
 pub const FOCUS_GRACE: u64 = 1_500_000_000;
 /// Jak dlouho ukazat odznak bezramoveho okna po najeti k okraji.
 pub const BADGE_SHOW: u64 = 3_000_000_000;
+/// Nejdelsi odstup dvou kliku dvojkliku.
+pub const DOUBLE_CLICK: u64 = 400_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Zone {
@@ -61,6 +63,24 @@ pub enum Cursor {
     DiagUp,
 }
 
+/// Systemovy ovladaci prvek (akce az pri pusteni nad nim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SysKey {
+    Dialog(usize),
+    DialogCheck,
+    Palette(usize),
+    MaxMenu(usize),
+    FsExit(u32),
+    FlyoutRow(usize),
+    BarApp(usize),
+    BarLaunch(usize),
+    Launcher,
+    /// Sit, hlasitost, oznameni.
+    BarIcon(u8),
+    Tasks,
+    WinButton(u32, usize),
+}
+
 #[derive(Debug, Clone, Copy)]
 enum Drag {
     Move { window: u32, dx: i32, dy: i32 },
@@ -81,6 +101,11 @@ pub struct InputState {
     pub last_key: u64,
     /// Zvyrazneni pri najeti (tlacitko okna, polozka listy).
     pub hover: Option<Hover>,
+    /// Stisknuty systemovy prvek (akce az pri pusteni nad nim): prvek,
+    /// tlacitko mysi, modifikatory pri stisku.
+    pub sys_press: Option<(SysKey, Button, u16)>,
+    /// Posledni klik do titulku (okno, cas, poloha): dvojklik = maximalizace.
+    title_click: Option<(u32, u64, i32, i32)>,
     /// Tvar kurzoru (okraj okna: zmena velikosti).
     pub cursor: Cursor,
 }
@@ -98,6 +123,8 @@ impl InputState {
             untrusted: alloc::vec::Vec::new(),
             last_key: 0,
             hover: None,
+            sys_press: None,
+            title_click: None,
         }
     }
 
@@ -313,6 +340,10 @@ impl Comp {
                     }
                     return;
                 }
+                // Drzeny Esc (fyzicka klavesnice) ukonci celou obrazovku.
+                if !syn && code == inputproto::code::KEY_ESC && action != Action::Repeat {
+                    self.fs_esc(action == Action::Press, now);
+                }
                 // Nove okno aplikace s fokusem: Ctrl+Shift+N (aplikace
                 // spustitelne z listy; jinak klavesa jde aplikaci).
                 if !syn
@@ -466,10 +497,11 @@ impl Comp {
         if let Some((g, _)) = hit
             && let Some(w) = self.windows.get_mut(&g)
             && matches!(w.mode, Mode::Frameless | Mode::Fullscreen)
-            && py - w.rect.y < 6
+            // Cela obrazovka: zona 24 px (okna.html), jinak 6 px.
+            && py - w.rect.y < if w.fs_saved.is_some() { crate::fullscreen::EDGE_ZONE } else { 6 }
         {
             let was = w.badge_until > now;
-            w.badge_until = now + BADGE_SHOW;
+            w.badge_until = now + if w.fs_saved.is_some() { crate::fullscreen::EXIT_SHOW } else { BADGE_SHOW };
             if !was {
                 self.damage_window(g);
             }
@@ -497,6 +529,13 @@ impl Comp {
             }
         };
         self.set_hover(h);
+        // Bubliny listy (odpocet, hned po predchozi).
+        let now = self.input_now;
+        self.tip_pointer(px, py, now);
+        // Drzeny systemovy prvek: stav "stisknuto" jen nad nim.
+        if self.input.sys_press.is_some() {
+            self.damage_panel();
+        }
         // Najeti na maximalizaci: nabidka (cela obrazovka, pripnuti).
         let over = match h {
             Some(Hover::Button(g, 1)) => Some(g),
@@ -521,14 +560,7 @@ impl Comp {
                         self.damage(r);
                     }
                 }
-                Hover::Tasks => {
-                    self.damage_panel();
-                    // Popisek nad ikonou uloh.
-                    if let Some(r) = self.tasks_tip_rect() {
-                        self.damage(r);
-                    }
-                }
-                Hover::BarApp(_) | Hover::BarLaunch(_) | Hover::Launcher => self.damage_panel(),
+                Hover::Tasks | Hover::BarApp(_) | Hover::BarLaunch(_) | Hover::Launcher => self.damage_panel(),
             }
         }
         self.input.hover = h;
@@ -612,20 +644,94 @@ impl Comp {
         );
     }
 
+    /// Systemovy ovladaci prvek pod bodem (akce az pri pusteni nad nim).
+    /// Tazeni (titulek, okraj), obsah okna a zavreni panelu klikem mimo
+    /// jdou dal pri stisku.
+    pub(crate) fn sys_key_at(&self, x: i32, y: i32, now: u64) -> Option<SysKey> {
+        if let Some(l) = self.dialog_layout() {
+            if let Some(i) = l.buttons.iter().position(|b| b.contains(x, y)) {
+                return Some(SysKey::Dialog(i));
+            }
+            return l.check.is_some_and(|r| r.contains(x, y)).then_some(SysKey::DialogCheck);
+        }
+        if self.palette.is_some() {
+            let inside = self.palette_rect().is_some_and(|r| r.contains(x, y));
+            return self.palette_row_at(y).filter(|_| inside).map(SysKey::Palette);
+        }
+        if self.max_menu_rect().is_some_and(|r| r.contains(x, y)) {
+            return self.max_menu_row(y).map(SysKey::MaxMenu);
+        }
+        if let Some(g) = self.focus
+            && self.fs_exit_rect(g, now).is_some_and(|r| r.contains(x, y))
+        {
+            return Some(SysKey::FsExit(g));
+        }
+        if self.flyout_rect().is_some_and(|r| r.contains(x, y)) {
+            let rows = matches!(self.flyout, Some(crate::flyout::Flyout::Apps | crate::flyout::Flyout::AppWindows(_)));
+            return self.flyout_row_at(y).filter(|_| rows).map(SysKey::FlyoutRow);
+        }
+        if self.panel_rect().contains(x, y) {
+            let bar = self.bar_layout();
+            if let Some(k) = bar.apps.iter().position(|(_, r)| r.contains(x, y)) {
+                return Some(SysKey::BarApp(k));
+            }
+            if let Some((i, _)) = bar.launch.iter().find(|(_, r)| r.contains(x, y)) {
+                return Some(SysKey::BarLaunch(*i));
+            }
+            if bar.launcher.contains(x, y) {
+                return Some(SysKey::Launcher);
+            }
+            for (k, r) in [bar.net, bar.volume, Some(bar.bell)].into_iter().enumerate() {
+                if r.is_some_and(|r| r.contains(x, y)) {
+                    return Some(SysKey::BarIcon(k as u8));
+                }
+            }
+            return bar.tasks.is_some_and(|r| r.contains(x, y)).then_some(SysKey::Tasks);
+        }
+        match self.hit(x, y) {
+            Some((g, Zone::Button(i))) => Some(SysKey::WinButton(g, i)),
+            _ => None,
+        }
+    }
+
+    /// Je systemovy prvek `k` prave stisknuty (drzene tlacitko a ukazatel
+    /// nad nim)? Kresleni stavu "stisknuto".
+    pub(crate) fn sys_pressed(&self, k: SysKey) -> bool {
+        self.input.sys_press.is_some_and(|(p, ..)| p == k) && self.sys_key_at(self.input.px, self.input.py, self.input_now) == Some(k)
+    }
+
     fn button(&mut self, button: Button, pressed: bool, mods: u16, syn: bool, time: u64, now: u64) {
         let (px, py) = (self.input.px, self.input.py);
-        let act = if pressed { "stisk" } else { "pusteni" };
-        if self.dialogs.active().is_some() && pressed {
-            let why = if syn { "zahozen (umely vstup)" } else { "do systemoveho dialogu" };
-            self.trace(time, format_args!("{button:?} {act} na {px},{py}: modalni dialog, {why}"));
-            if !syn && button == Button::Left {
-                self.dialog_click(px, py, now);
+        if pressed {
+            self.tip_hide(now);
+        }
+        // Systemove ovladaci prvky: stisk = jen stav "stisknuto", akce az pri
+        // pusteni nad stejnym prvkem (odjeti s drzenym tlacitkem akci zrusi).
+        // Systemovy dialog prijme jen fyzicky vstup.
+        if pressed && !(syn && self.dialogs.active().is_some()) {
+            if let Some(k) = self.sys_key_at(px, py, now) {
+                self.trace(time, format_args!("{button:?} stisk na {px},{py}: prvek {k:?} (akce pri pusteni)"));
+                self.input.sys_press = Some((k, button, mods));
+                self.damage_panel();
+                return;
+            }
+        } else if !pressed && let Some((k, b, m)) = self.input.sys_press.take() {
+            self.damage_panel();
+            if b == button && self.sys_key_at(px, py, now) == Some(k) {
+                self.trace(time, format_args!("{button:?} pusteni na {px},{py}: prvek {k:?}, akce"));
+                self.press_actions(b, m, syn, time, now);
+            } else {
+                self.trace(time, format_args!("{button:?} pusteni na {px},{py}: mimo prvek {k:?}, akce zrusena"));
             }
             return;
         }
+        if pressed {
+            return self.press_actions(button, mods, syn, time, now);
+        }
+        let act = "pusteni";
         // Uvolneni vzdy ukonci tazeni a dojde oknu se stiskem (i kdyz mezi
         // tim vyskocil dialog).
-        if !pressed {
+        {
             self.input.drag = None;
             if let Some(g) = self.input.press_target.take()
                 && let Some(w) = self.windows.get(&g)
@@ -643,6 +749,19 @@ impl Comp {
                 self.trace(time, format_args!("{button:?} {act} na {px},{py} -> {n} obsah {x},{y} (okno se stiskem)"));
             } else {
                 self.trace(time, format_args!("{button:?} {act} na {px},{py}: zadne okno nedostalo stisk, nic neposlano"));
+            }
+        }
+    }
+
+    /// Akce stisku na miste ukazatele (u systemovych prvku az pri pusteni).
+    fn press_actions(&mut self, button: Button, mods: u16, syn: bool, time: u64, now: u64) {
+        let (px, py) = (self.input.px, self.input.py);
+        let (pressed, act) = (true, "stisk");
+        if self.dialogs.active().is_some() {
+            let why = if syn { "zahozen (umely vstup)" } else { "do systemoveho dialogu" };
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: modalni dialog, {why}"));
+            if !syn && button == Button::Left {
+                self.dialog_click(px, py, now);
             }
             return;
         }
@@ -745,19 +864,10 @@ impl Comp {
                 self.set_flyout(None);
                 self.panel_click(g);
             } else if self.tasks_icon().is_some_and(|r| r.contains(px, py)) {
-                // Spravce uloh do popredi (obnovit, kdyz je minimalizovany);
-                // kdyz nebezi, panel s poctem uloh.
-                let g = self.windows.iter().find(|(_, w)| self.clients.get(&w.client).is_some_and(|c| c.info.id == crate::render::TASKS_APP)).map(|(&g, _)| g);
-                if let Some(g) = g {
-                    self.set_flyout(None);
-                    if let Some(w) = self.windows.get_mut(&g) {
-                        w.minimized = false;
-                    }
-                    self.damage_window(g);
-                    self.set_focus(Some(g));
-                } else {
-                    self.toggle_flyout(crate::flyout::Flyout::Tasks);
-                }
+                // Spravce uloh: bezi = do popredi (i z minimalizace), jinak ho
+                // spusti init. Pocet uloh ukazuje bublina pri najeti.
+                self.set_flyout(None);
+                self.launch_or_activate(crate::render::TASKS_APP, time);
             } else {
                 self.set_flyout(None);
             }
@@ -790,6 +900,14 @@ impl Comp {
             Zone::Button(1) if button == Button::Left => self.toggle_maximize(g, now),
             Zone::Button(2) if button == Button::Left => self.minimize(g),
             Zone::Title if button == Button::Left => {
+                // Dvojklik na titulek: maximalizovat / obnovit (bez tazeni).
+                let double = self.input.title_click.is_some_and(|(w, t, x, y)| w == g && now.saturating_sub(t) <= DOUBLE_CLICK && (x - px).abs() <= 4 && (y - py).abs() <= 4);
+                if double {
+                    self.input.title_click = None;
+                    self.toggle_maximize(g, now);
+                    return;
+                }
+                self.input.title_click = Some((g, now, px, py));
                 self.input.drag = Some(Drag::Move {
                     window: g,
                     dx: px - rect.x,

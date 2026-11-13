@@ -511,8 +511,10 @@ s velikostí obrazovky a příznakem `FULLSCREEN`, nic nemusí umět.
   a maximalizace se uloží a při návratu obnoví. Lišta se skryje (její
   panely se zavřou).
 - **Ukončení:** stejná zkratka, položka palety „Opustit celou obrazovku“,
-  nebo tlačítko **Opustit celou obrazovku** vedle odznaku důvěry, který se
-  ukáže při najetí k hornímu okraji.
+  **Esc držený 1 s** (klávesa jde dál i aplikaci), nebo tlačítko **Ukončit
+  celou obrazovku** vedle odznaku důvěry: vysune se při najetí do 24 px od
+  horního okraje a zmizí 2,5 s po odjetí (okna.html). **[implementováno]**
+  (test `title_double_click_maximizes_and_esc_hold_leaves_fullscreen`)
 - **Bezpečnost:** odznak důvěry u horního okraje při najetí; bezpečná
   zkratka a systémové dialogy fungují vždy (kreslí se nad vším).
 - **Nerušit:** při celé obrazovce automaticky zapnuto (schválil
@@ -521,6 +523,28 @@ s velikostí obrazovky a příznakem `FULLSCREEN`, nic nemusí umět.
   oznámení zatím není: tiché ukládání oznámení a jejich ukázání po návratu,
   výjimky (hovory, baterie, bezpečnost) a konfigurační klíč v Nastavení
   **[navrženo]**.
+
+### Ovládací prvky: akce až při puštění, bubliny, dvojklik
+
+- **Akce až při puštění** nad stejným prvkem pro všechny systémové prvky
+  (lišta, spouštěč, panely, tlačítka okna, paleta, nabídka maximalizace,
+  tlačítka systémových dialogů) i v `libs/ui`: stisk = jen stav
+  „stisknuto“ (v liště pozadí `accent_soft`), odjetí s drženým tlačítkem
+  akci zruší a stav zmizí, návrat ho obnoví. Jedno místo v kompozitoru
+  (`Comp::sys_key_at`). Výjimky: tažení titulku a okraje (začne stiskem),
+  obsah okna (řeší aplikace), zavření panelu klikem mimo. Klávesnice:
+  Enter a mezerník na tlačítku a zaškrtávacím poli jednají až při
+  puštění. **[implementováno]** (testy
+  `system_controls_act_on_release_over_same_element`, `enter_and_space_activate_on_release`)
+- **Bubliny** u všech prvků lišty (bubliny-panely.html): po 500 ms,
+  hned do 300 ms po předchozí, zmizí při odjetí nebo kliku; text okna /
+  aplikace, „spustit“, stav sítě a zvuku, Oznámení, počet úloh, datum
+  u hodin. Systémový materiál bez šipky, nejvýš 280 px. Skrytí se
+  zpožděním 100 ms a bubliny při fokusu z klávesnice **[navrženo]**.
+  **[implementováno]** (test `tasks_icon_tooltip`)
+- **Ikona úloh:** klik spustí nebo aktivuje Správce úloh (počet ukazuje
+  bublina); změna počtu překreslí i bublinu (dřív zůstalo staré číslo).
+- **Dvojklik na titulek** (do 400 ms, do 4 px) maximalizuje / obnoví.
 
 ### Víc oken jedné aplikace a fokus nových oken
 

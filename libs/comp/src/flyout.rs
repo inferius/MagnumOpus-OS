@@ -48,21 +48,15 @@ impl Comp {
         s
     }
 
-    /// Obdelnik popisku ikony uloh (nad ikonou, at je mys nad ni nebo ne:
-    /// i pro poskozeni po odjeti).
-    pub(crate) fn tasks_tip_rect(&self) -> Option<Rect> {
-        let a = self.bar_layout().tasks?;
-        let t = &self.style.theme;
-        let s = t.text.small;
-        let w = (self.style.width(&self.tasks_tip(), s) + 2 * t.space[3]).min(self.w);
-        let h = s.line + 2 * t.space[2];
-        let x = (a.x + (a.w as i32 - w as i32) / 2).clamp(0, (self.w - w) as i32);
-        Some(Rect::new(x, self.panel_rect().y - t.space[2] as i32 - h as i32, w, h))
-    }
-
-    /// Je popisek uloh videt (mys nad ikonou, zadny panel)?
-    pub(crate) fn tasks_tip_visible(&self) -> bool {
-        self.input.hover == Some(crate::render::Hover::Tasks) && self.flyout.is_none()
+    /// Radek stavu site (panel i bublina).
+    pub(crate) fn net_line(&self) -> String {
+        String::from(match self.status.net {
+            Some(NetState::Online) => "Pevná síť: připojeno",
+            Some(NetState::Connecting) => "Pevná síť: kabel připojen, čekám na adresu (DHCP)",
+            Some(NetState::Offline) => "Pevná síť: kabel odpojen",
+            Some(NetState::NoDevice) => "Bez sítě: žádná podporovaná síťová karta",
+            None => "Služba sítě neodpovídá",
+        })
     }
 
     /// Nadpis a radky panelu.
@@ -173,17 +167,7 @@ impl Comp {
 
     /// Kresli otevreny panel a popisek uloh (vrstva nad okny).
     pub(crate) fn draw_flyout(&mut self, c: &mut Canvas<'_>) {
-        if self.tasks_tip_visible()
-            && let Some(r) = self.tasks_tip_rect()
-        {
-            let t = self.style.theme.clone();
-            let s = t.text.small;
-            let text = self.tasks_tip();
-            c.round_fill_bordered(r, t.radius.control, t.color.surface, t.color.border_strong, 1);
-            let face = self.style.face(s);
-            let base = r.y + face.baseline_in(s.size, r.h);
-            face.draw(c, r.x + t.space[3] as i32, base, &text, s.size, t.color.ink);
-        }
+        self.draw_tooltip(c);
         let (Some(f), Some(r)) = (self.flyout, self.flyout_rect()) else { return };
         let (title, lines) = self.flyout_text(f);
         let t = self.style.theme.clone();
