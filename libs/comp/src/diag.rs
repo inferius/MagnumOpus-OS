@@ -113,6 +113,7 @@ const STATES: &[(u32, &str)] = &[
     (state::BUSY, "busy"),
     (state::HOVER, "hover"),
     (state::PRESSED, "pressed"),
+    (state::INVALID, "invalid"),
 ];
 
 const ACTIONS: &[(u32, &str)] = &[
@@ -132,7 +133,7 @@ fn overlap(a: Rect, b: Rect) -> u64 {
 impl Comp {
     /// Strom pristupnosti okna `g` s obdelniky v souradnicich obrazovky
     /// (inspekce i snimek). U kazdeho uzlu i puvodni vrstva.
-    fn screen_nodes(&self, g: u32) -> Option<Vec<(Node, u32)>> {
+    pub(crate) fn screen_nodes(&self, g: u32) -> Option<Vec<(Node, u32)>> {
         let w = self.windows.get(&g)?;
         let (c, origin) = (w.client, (w.rect.x, w.rect.y));
         Some(
@@ -168,7 +169,7 @@ impl Comp {
     }
 
     /// Orez vrstvou `layer` a jejimi predky s `clip` (posuvne oblasti).
-    fn clip_rect(&self, g: u32, layer: u32, mut r: Rect) -> Rect {
+    pub(crate) fn clip_rect(&self, g: u32, layer: u32, mut r: Rect) -> Rect {
         let Some(w) = self.windows.get(&g) else { return r };
         let Some(cl) = self.clients.get(&w.client) else { return r };
         let mut id = layer;

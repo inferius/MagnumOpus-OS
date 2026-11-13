@@ -304,6 +304,11 @@ fn dialog_physical_only(_: &Startup) -> TestResult {
         inj.write(&device::encode_events(&enter), Vec::new()).map_err(|e| fail("umely Enter", e))?;
         check!(d.read(Some(time::deadline_after(Duration::from_millis(500)))).is_err(), "dialog prijal umely vstup");
         drop(inj);
+        // Dialog prijima vstup az INPUT_DELAY po zobrazeni snimku s nim
+        // (kompozitor na CPU kresli snimek i pres 1 s): klavesy z QEMU az
+        // po ustaleni obrazovky a ochranne dobe, jinak je dialog zahodi.
+        settle(&s.inspect)?;
+        time::sleep(Duration::from_millis(400));
         // Fyzicka klavesnice (QMP): Tab + Enter = druha volba.
         println!("{QEMU_DIALOG}");
         let m = d.read(deadline()).map_err(|e| fail("odpoved dialogu (QMP)", e))?;

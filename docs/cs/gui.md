@@ -184,10 +184,10 @@ Struktura okna je součást protokolu. Uzel (`A11Y_UPDATE`) nese:
 | Pole | Význam |
 |---|---|
 | `id`, `parent` | identita a rodič (0 = kořen okna) |
-| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `checkbox`, `list`, `list-item`, `group`, `image`, `progress`, `terminal` |
+| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `password-input`, `checkbox`, `switch`, `radio`, `slider`, `combo-box`, `list`, `list-item`, `table`, `row`, `cell`, `column-header`, `tab-list`, `tab`, `segmented`, `menu`, `menu-item`, `tooltip`, `scroll-area`, `group`, `image`, `progress`, `terminal` |
 | `name` | text pro člověka („Uložit“) |
 | `value` | hodnota (text pole, procenta průběhu) |
-| `state` | bity: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy` |
+| `state` | bity: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy`, `hover`, `pressed`, `invalid` (text chyby je podřízený uzel `label`) |
 | `bounds` | vrstva + obdélník v ní |
 | `actions` | bity: `activate`, `focus`, `set-value`, `toggle`, `scroll` |
 
@@ -796,6 +796,10 @@ Klávesy v dialogu: Tab a šipky mění volbu, Enter potvrdí, Esc vybere
 poslední volbu (zamítnutí). Myš: klik na tlačítko. Prvních 300 ms po
 zobrazení dialog vstup ignoruje - druhý klik dvojkliku nebo klávesa
 napsaná do jiného okna tak nepotvrdí dialog, který právě vyskočil.
+Doba běží od chvíle, kdy displej ukázal první snímek s dialogem, ne od
+požadavku aplikace: při pomalém skládání na CPU (snímek i přes 1 s) by
+jinak ochrana skončila dřív, než dialog vůbec uvidíš. Do zobrazení dialog
+nepřijme nic.
 
 **Bezpečná obrazovka:** Ctrl+Alt+Delete (zachytí `inputd`, ne aplikace)
 ukáže systémovou obrazovku přes všechno. Zavře ji jen fyzický vstup;
@@ -1228,14 +1232,80 @@ převede na zprávy `Msg`.
 | `label` | - | - | `label` |
 | `button` | klik | Enter, mezerník | `button`, `activate` |
 | `text_input` | klik = kurzor | text, Backspace, Delete, šipky, Home, End, Enter = `on_submit` | `text-input`, `set-value` |
+| `password_input` | jako `text_input` | jako `text_input` | `password-input` bez hodnoty |
 | `checkbox` | klik | mezerník, Enter | `checkbox`, `toggle` |
 | `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
-| `column`, `row`, `scroll`, `spacer` | kolečko v `scroll` | - | `group` |
+| `column`, `row`, `spacer` | - | - | `group` |
+| `scroll` | kolečko | - | `scroll-area`, `scroll` |
 
 Fokus se posouvá klávesou Tab (Shift+Tab zpět). **Posouvaná oblast**
 (`scroll`) je vlastní vrstva: kolečko změní jen vlastnost vrstvy
 `scroll` a obsah posune kompozitor, aplikace nic nepřekresluje.
+
+### Klíče, stav a přístupnost prvků
+
+Aplikace po každé změně vrátí nový strom a knihovna ho znovu rozvrhne.
+Aby se přitom neztratil fokus, kurzor, stisk ani posun, drží knihovna
+stav prvků **podle stabilního klíče**, ne podle pořadí:
+
+- `Node::key("jmeno")` dá prvku vlastní klíč (stačí jedinečný mezi
+  sourozenci). Bez něj se klíč odvodí z klíče rodiče, druhu prvku
+  a pořadí mezi sourozenci stejného druhu. To stačí pro pevný formulář;
+  **řádky dat** (soubory, úlohy) a prvky, před které se něco vkládá, mají
+  mít klíč z dat (id, cesta).
+- Dva sourozenci se stejným klíčem (chyba aplikace) dostanou různé klíče,
+  jejich stav se nemíchá.
+- Podle klíče má prvek i **stabilní id uzlu přístupnosti** a stabilní
+  vrstvy posouvané oblasti. Uvolněné id se znovu použije až po oběhu
+  čítače, takže akce poslaná čtečkou na zmizelý uzel netrefí jiný prvek.
+- Klíč je hash FNV-1a: stejný na x86_64 i aarch64.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Stav prvku podle klice">
+<defs><marker id="uk1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="20" y="30" width="200" height="140" rx="8"/><text class="t" x="120" y="55" text-anchor="middle">view() před</text>
+<text class="m" x="40" y="85">0 pole „jmeno“</text><text class="m" x="40" y="110">1 tlačítko „ok“</text>
+<rect class="acc" x="280" y="60" width="200" height="80" rx="8"/><text class="t" x="380" y="85" text-anchor="middle">stav podle klíče</text>
+<text class="m" x="380" y="110" text-anchor="middle">fokus, kurzor, id uzlu, posun</text>
+<rect class="box" x="540" y="30" width="200" height="140" rx="8"/><text class="t" x="640" y="55" text-anchor="middle">view() po</text>
+<text class="m" x="560" y="85">0 tlačítko „Nové“</text><text class="m" x="560" y="110">1 pole „jmeno“</text><text class="m" x="560" y="135">2 tlačítko „ok“</text>
+<path class="ln" d="M220 100 L278 100" marker-end="url(#uk1)"/><path class="ln" d="M480 100 L538 100" marker-end="url(#uk1)"/>
+</svg>
+<figcaption>Indexy prvků se po vložení posunou, stav jde za klíčem.</figcaption>
+</figure>
+
+**Jednotný stav** (`ui::State`) počítá jádro a každý prvek podle něj jen
+kreslí; strom přístupnosti hlásí totéž:
+
+| Stav | Kdy |
+|---|---|
+| `hover` | ukazatel nad prvkem (ne u nedostupného) |
+| `pressed` | tlačítko myši stisknuté na prvku a ukazatel nad ním (odjetí stav zruší, návrat obnoví) nebo držený Enter / mezerník |
+| `focused`, `focus_visible` | prvek má fokus; rámeček je vidět jen v aktivním okně |
+| `disabled` | `Node::disabled(true)` |
+| `error` | `Node::error("Heslo je příliš krátké")`: červený okraj, stav `invalid` a text chyby jako podřízený uzel `label` |
+| `selected`, `checked` | vybraná položka, zaškrtnuté pole |
+
+**Pole s heslem** (`password_input`) kreslí tečky se stálým krokem (šířka
+písmen by prozradila znaky), do stromu přístupnosti nedává hodnotu ani
+délku (role `password-input`) a trasování vstupu hodnoty polí nevypisuje
+nikdy. Kompozitor obdélníky uzlů `password-input` zobrazených oken přidá
+k `secure_fields`, takže je diagnostický snímek zakryje stejně jako pole
+přihlášení.
+
+`Node::skip_tab(true)` vynechá prvek z pořadí klávesy Tab (fokus jen
+klikem), třeba pomocné tlačítko, které má i klávesovou zkratku.
+
+```rust
+column([
+    text_input(&s.jmeno).placeholder("Jméno").on_change(Msg::Jmeno).key("jmeno"),
+    password_input(&s.heslo).placeholder("Heslo").on_change(Msg::Heslo)
+        .error(if s.kratke { "Heslo je příliš krátké" } else { "" }).key("heslo"),
+    button("Nápověda").on_click(Msg::Napoveda).skip_tab(true).key("napoveda"),
+    button("Přihlásit").on_click(Msg::Prihlasit).key("ok"),
+])
+```
 
 Běhové prostředí `ui::client` (vlastnost `os`) drží okno: dvojité buffery
 ve VMO, vrstvy, celý strom přístupnosti po každé změně, `COMMIT`

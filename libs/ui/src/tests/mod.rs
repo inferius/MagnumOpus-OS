@@ -228,7 +228,7 @@ fn wheel_scrolls_without_redraw_and_hit_uses_offset() {
     assert!(area.content_h > area.rect.h);
     h.ev(InputEvent::PointerMove { x: area.rect.x + 10, y: area.rect.y + 10 });
     let r = h.ev(InputEvent::Scroll { dx: 0, dy: -1 });
-    assert_eq!(r.scrolls, vec![(area.index, 40)]);
+    assert_eq!(r.scrolls, vec![(area.id, 40)]);
     assert!(r.msgs.is_empty());
     // Klik na prvni viditelny radek = polozka posunuta o 40 px.
     let y = area.rect.y + 5;
@@ -318,3 +318,5 @@ fn enter_and_space_activate_on_release() {
     h.ev(InputEvent::Button { code: inputproto::code::BTN_LEFT, pressed: false, x: x + 300, y: y + 300 });
     assert_eq!(h.app.count, 1, "pusteni mimo tlacitko akci zrusi");
 }
+
+mod keys;

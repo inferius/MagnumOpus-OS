@@ -22,6 +22,38 @@ pub enum Role {
     Image,
     Progress,
     Terminal,
+    /// Posuvnik (hodnota v rozsahu).
+    Slider,
+    /// Prepinac zapnuto/vypnuto.
+    Switch,
+    /// Prepinac jedne volby ze skupiny.
+    Radio,
+    /// Zalozka.
+    Tab,
+    /// Rada zalozek.
+    TabList,
+    /// Tabulka (radky a sloupce).
+    Table,
+    /// Radek tabulky.
+    Row,
+    /// Bunka tabulky.
+    Cell,
+    /// Zahlavi sloupce (razeni).
+    ColumnHeader,
+    /// Nabidka.
+    Menu,
+    /// Polozka nabidky.
+    MenuItem,
+    /// Vyber ze seznamu (rozbalovaci).
+    ComboBox,
+    /// Bublina s popisem.
+    Tooltip,
+    /// Pole s heslem: hodnota se nikdy neposila.
+    PasswordInput,
+    /// Posouvana oblast.
+    ScrollArea,
+    /// Segmentovy prepinac (skupina voleb).
+    Segmented,
     /// Role, kterou tato verze nezna.
     Unknown(u16),
 }
@@ -41,6 +73,22 @@ impl Role {
             Role::Image => 10,
             Role::Progress => 11,
             Role::Terminal => 12,
+            Role::Slider => 13,
+            Role::Switch => 14,
+            Role::Radio => 15,
+            Role::Tab => 16,
+            Role::TabList => 17,
+            Role::Table => 18,
+            Role::Row => 19,
+            Role::Cell => 20,
+            Role::ColumnHeader => 21,
+            Role::Menu => 22,
+            Role::MenuItem => 23,
+            Role::ComboBox => 24,
+            Role::Tooltip => 25,
+            Role::PasswordInput => 26,
+            Role::ScrollArea => 27,
+            Role::Segmented => 28,
             Role::Unknown(v) => v,
         }
     }
@@ -59,6 +107,22 @@ impl Role {
             10 => Role::Image,
             11 => Role::Progress,
             12 => Role::Terminal,
+            13 => Role::Slider,
+            14 => Role::Switch,
+            15 => Role::Radio,
+            16 => Role::Tab,
+            17 => Role::TabList,
+            18 => Role::Table,
+            19 => Role::Row,
+            20 => Role::Cell,
+            21 => Role::ColumnHeader,
+            22 => Role::Menu,
+            23 => Role::MenuItem,
+            24 => Role::ComboBox,
+            25 => Role::Tooltip,
+            26 => Role::PasswordInput,
+            27 => Role::ScrollArea,
+            28 => Role::Segmented,
             v => Role::Unknown(v),
         }
     }
@@ -78,6 +142,22 @@ impl Role {
             Role::Image => "image",
             Role::Progress => "progress",
             Role::Terminal => "terminal",
+            Role::Slider => "slider",
+            Role::Switch => "switch",
+            Role::Radio => "radio",
+            Role::Tab => "tab",
+            Role::TabList => "tab-list",
+            Role::Table => "table",
+            Role::Row => "row",
+            Role::Cell => "cell",
+            Role::ColumnHeader => "column-header",
+            Role::Menu => "menu",
+            Role::MenuItem => "menu-item",
+            Role::ComboBox => "combo-box",
+            Role::Tooltip => "tooltip",
+            Role::PasswordInput => "password-input",
+            Role::ScrollArea => "scroll-area",
+            Role::Segmented => "segmented",
             Role::Unknown(_) => "unknown",
         }
     }
@@ -95,6 +175,9 @@ pub mod state {
     pub const HOVER: u32 = 1 << 6;
     /// Tlacitko mysi stisknute na prvku (jeste nepustene).
     pub const PRESSED: u32 = 1 << 7;
+    /// Neplatna hodnota (chyba u pole); text chyby je v podrizenem uzlu
+    /// pole s roli `Label`.
+    pub const INVALID: u32 = 1 << 8;
 }
 
 /// Bity akci, ktere uzel podporuje (a kody v `A11Y_ACTION`).

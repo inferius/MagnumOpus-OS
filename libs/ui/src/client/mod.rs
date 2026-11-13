@@ -411,10 +411,10 @@ impl Window {
         self.draw_layer(ROOT_LAYER, r, f)
     }
 
-    /// Posouvana oblast `index`: skupina s orezem na `rect` a obsah vysky
-    /// `content_h`, posunuty o `offset`.
-    pub fn draw_scroll(&mut self, index: usize, rect: Rect, content_h: u32, offset: i32, f: impl FnOnce(&mut Canvas<'_>)) -> Result<()> {
-        let (g, c) = scroll_layers(index);
+    /// Posouvana oblast se stabilnim id `id`: skupina s orezem na `rect`
+    /// a obsah vysky `content_h`, posunuty o `offset`.
+    pub fn draw_scroll(&mut self, id: u32, rect: Rect, content_h: u32, offset: i32, f: impl FnOnce(&mut Canvas<'_>)) -> Result<()> {
+        let (g, c) = scroll_layers(id);
         if !self.pairs.contains_key(&c) {
             self.send(ClientMsg::LayerCreate { layer: g, window: 1, parent: 0, kind: LayerKind::Group })?;
             self.send(ClientMsg::LayerCreate { layer: c, window: 1, parent: g, kind: LayerKind::Buffer })?;
@@ -436,13 +436,13 @@ impl Window {
     }
 
     /// Jen posun oblasti (kompozitor posune obsah bez prekresleni).
-    pub fn set_scroll(&mut self, index: usize, offset: i32) -> Result<()> {
-        let (g, _) = scroll_layers(index);
+    pub fn set_scroll(&mut self, id: u32, offset: i32) -> Result<()> {
+        let (g, _) = scroll_layers(id);
         self.send(ClientMsg::LayerSet { layer: g, props: LayerProps { mask: prop::SCROLL, scroll: (0, offset), ..Default::default() } })
     }
 
     /// Odstrani posouvane oblasti, ktere uz nejsou.
-    pub fn retain_scrolls(&mut self, keep: &[usize]) -> Result<()> {
+    pub fn retain_scrolls(&mut self, keep: &[u32]) -> Result<()> {
         let gone: Vec<u32> = self.groups.keys().copied().filter(|g| !keep.iter().any(|&i| scroll_layers(i).0 == *g)).collect();
         for g in gone {
             self.groups.remove(&g);
@@ -695,9 +695,9 @@ fn render<M: Clone>(win: &mut Window, ui: &mut Ui<M>) -> Result<()> {
     win.draw(|c| ui.draw(c, 0))?;
     let areas = ui.scroll_areas();
     for a in &areas {
-        win.draw_scroll(a.index, a.rect, a.content_h, a.offset, |c| ui.draw(c, a.index + 1))?;
+        win.draw_scroll(a.id, a.rect, a.content_h, a.offset, |c| ui.draw(c, a.index + 1))?;
     }
-    win.retain_scrolls(&areas.iter().map(|a| a.index).collect::<Vec<_>>())?;
+    win.retain_scrolls(&areas.iter().map(|a| a.id).collect::<Vec<_>>())?;
     win.set_a11y(&ui.a11y())?;
     // Titulek podle stavu aplikace ("Správce úloh (20 běží)"): v teze
     // transakci jako obsah. Ostatni vlastnosti okna vychozi (jako po

@@ -190,10 +190,10 @@ carries:
 | Field | Meaning |
 |---|---|
 | `id`, `parent` | identity and parent (0 = window root) |
-| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `checkbox`, `list`, `list-item`, `group`, `image`, `progress`, `terminal` |
+| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `password-input`, `checkbox`, `switch`, `radio`, `slider`, `combo-box`, `list`, `list-item`, `table`, `row`, `cell`, `column-header`, `tab-list`, `tab`, `segmented`, `menu`, `menu-item`, `tooltip`, `scroll-area`, `group`, `image`, `progress`, `terminal` |
 | `name` | text for humans ("Save") |
 | `value` | value (text field, progress percent) |
-| `state` | bits: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy` |
+| `state` | bits: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy`, `hover`, `pressed`, `invalid` (the error text is a child `label` node) |
 | `bounds` | layer + rectangle in it |
 | `actions` | bits: `activate`, `focus`, `set-value`, `toggle`, `scroll` |
 
@@ -836,6 +836,10 @@ selects the last option (deny). Mouse: click a button. For the first
 300 ms after it appears a dialog ignores input - the second click of a
 double click or a key typed into another window cannot confirm a dialog
 that just popped up.
+The time runs from the moment the display showed the first frame with
+the dialog, not from the application's request: with slow composing on
+the CPU (a frame can take over 1 s) the guard would otherwise end before
+you ever saw the dialog. Until it is shown the dialog accepts nothing.
 
 **Secure screen:** Ctrl+Alt+Delete (caught by `inputd`, not by
 applications) shows the system screen over everything. Only physical input
@@ -1276,14 +1280,82 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 | `label` | - | - | `label` |
 | `button` | click | Enter, space | `button`, `activate` |
 | `text_input` | click = cursor | text, Backspace, Delete, arrows, Home, End, Enter = `on_submit` | `text-input`, `set-value` |
+| `password_input` | like `text_input` | like `text_input` | `password-input` without a value |
 | `checkbox` | click | space, Enter | `checkbox`, `toggle` |
 | `list` | click an item | up and down arrows | `list` and `list-item` |
 | `progress` | - | - | `progress` (value in percent) |
-| `column`, `row`, `scroll`, `spacer` | wheel in `scroll` | - | `group` |
+| `column`, `row`, `spacer` | - | - | `group` |
+| `scroll` | wheel | - | `scroll-area`, `scroll` |
 
 Tab moves the focus (Shift+Tab back). A **scroll area** (`scroll`) is a
 layer of its own: the wheel changes only the layer property `scroll` and
 the compositor moves the content; the application redraws nothing.
+
+### Keys, state and accessibility of elements
+
+After every change the application returns a new tree and the library
+lays it out again. So that focus, cursor, press and scroll are not lost,
+the library keeps element state **by a stable key**, not by position:
+
+- `Node::key("name")` gives an element its own key (unique among
+  siblings is enough). Without it the key is derived from the parent's
+  key, the element kind and the position among siblings of the same kind.
+  That is enough for a fixed form; **data rows** (files, tasks) and
+  elements that get things inserted before them should have a key from
+  the data (id, path).
+- Two siblings with the same key (an application bug) get different
+  keys; their state does not mix.
+- By the key an element also has a **stable accessibility node id** and
+  stable scroll area layers. A released id is reused only after the
+  counter wraps, so an action a screen reader sends to a vanished node
+  never hits another element.
+- The key is an FNV-1a hash: the same on x86_64 and aarch64.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Element state by key">
+<defs><marker id="uk1e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="20" y="30" width="200" height="140" rx="8"/><text class="t" x="120" y="55" text-anchor="middle">view() before</text>
+<text class="m" x="40" y="85">0 field "name"</text><text class="m" x="40" y="110">1 button "ok"</text>
+<rect class="acc" x="280" y="60" width="200" height="80" rx="8"/><text class="t" x="380" y="85" text-anchor="middle">state by key</text>
+<text class="m" x="380" y="110" text-anchor="middle">focus, cursor, node id, scroll</text>
+<rect class="box" x="540" y="30" width="200" height="140" rx="8"/><text class="t" x="640" y="55" text-anchor="middle">view() after</text>
+<text class="m" x="560" y="85">0 button "New"</text><text class="m" x="560" y="110">1 field "name"</text><text class="m" x="560" y="135">2 button "ok"</text>
+<path class="ln" d="M220 100 L278 100" marker-end="url(#uk1e)"/><path class="ln" d="M480 100 L538 100" marker-end="url(#uk1e)"/>
+</svg>
+<figcaption>Element indices shift after an insert; state follows the key.</figcaption>
+</figure>
+
+The **unified state** (`ui::State`) is computed by the core; every
+element only draws by it, and the accessibility tree reports the same:
+
+| State | When |
+|---|---|
+| `hover` | pointer over the element (not when disabled) |
+| `pressed` | mouse button pressed on the element with the pointer over it (moving away cancels, coming back restores) or Enter / space held |
+| `focused`, `focus_visible` | the element has focus; the ring shows only in the active window |
+| `disabled` | `Node::disabled(true)` |
+| `error` | `Node::error("Password is too short")`: red border, state `invalid` and the error text as a child `label` node |
+| `selected`, `checked` | selected item, checked box |
+
+A **password field** (`password_input`) draws dots with a fixed step
+(glyph widths would give the characters away), puts neither the value nor
+its length into the accessibility tree (role `password-input`), and input
+tracing never prints field values. The compositor adds the rectangles of
+`password-input` nodes of visible windows to `secure_fields`, so the
+diagnostic snapshot covers them like the login field.
+
+`Node::skip_tab(true)` leaves the element out of the Tab order (focus by
+click only), e.g. a helper button that also has a keyboard shortcut.
+
+```rust
+column([
+    text_input(&s.name).placeholder("Name").on_change(Msg::Name).key("name"),
+    password_input(&s.password).placeholder("Password").on_change(Msg::Password)
+        .error(if s.short { "Password is too short" } else { "" }).key("password"),
+    button("Help").on_click(Msg::Help).skip_tab(true).key("help"),
+    button("Sign in").on_click(Msg::SignIn).key("ok"),
+])
+```
 
 The `ui::client` runtime (feature `os`) keeps the window: double buffers
 in VMOs, layers, the whole accessibility tree after every change,

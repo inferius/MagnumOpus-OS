@@ -19,6 +19,7 @@ use crate::*;
 
 mod gpu;
 mod greeter;
+mod secure;
 
 const W: u32 = 800;
 const H: u32 = 600;
@@ -171,7 +172,7 @@ impl T {
 
     fn click(&mut self, x: i32, y: i32) {
         // Dialog prijima vstup az chvili po zobrazeni.
-        self.now += dialog::INPUT_DELAY;
+        self.show_dialog();
         self.move_to(x, y);
         self.input(
             Event::Button {
@@ -189,8 +190,16 @@ impl T {
         );
     }
 
-    fn key(&mut self, code: u16, synthetic: bool) {
+    /// Snimek s dialogem se zobrazi a uplyne ochranna doba.
+    fn show_dialog(&mut self) {
+        if self.c.dialogs.active().is_some() {
+            self.frame();
+        }
         self.now += dialog::INPUT_DELAY;
+    }
+
+    fn key(&mut self, code: u16, synthetic: bool) {
+        self.show_dialog();
         self.input(
             Event::Key {
                 code,
@@ -924,7 +933,7 @@ fn new_device_must_be_confirmed_by_existing_input() {
     // Stavajici klavesnice: vlevo (Povolit) a Enter.
     left.source = 1;
     enter.source = 1;
-    t.now += dialog::INPUT_DELAY;
+    t.show_dialog();
     t.c.input(&[left, enter], t.now);
     assert!(t.out().contains(&Out::Device { source: 9, trust: true }));
     assert!(t.c.input.untrusted.is_empty());

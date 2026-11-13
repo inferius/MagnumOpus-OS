@@ -286,6 +286,7 @@ impl Comp {
         } else {
             let rects = self.dirty.take();
             compose(self, &rects);
+            self.dialog_composed();
             self.frame.frames += 1;
             Some(rects)
         };
@@ -325,6 +326,7 @@ impl Comp {
     pub fn presented(&mut self, time: u64) {
         if self.frame.in_flight {
             self.frame.presented += 1;
+            self.dialog_presented(time);
         }
         self.frame.in_flight = false;
         let ids: Vec<ClientId> = self.clients.keys().copied().collect();

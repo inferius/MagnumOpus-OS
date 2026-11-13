@@ -274,8 +274,9 @@ impl Comp {
     }
 
     /// Obdelniky poli s tajemstvim na obrazovce (pole prihlaseni, pole
-    /// dialogu s heslem). Diagnosticky snimek je v obrazku zakryje: ani
-    /// pocet tecek (delka tajemstvi) se nezaznamena.
+    /// dialogu s heslem, pole s roli `PasswordInput` ve stromu
+    /// pristupnosti zobrazenych oken). Diagnosticky snimek je v obrazku
+    /// zakryje: ani pocet tecek (delka tajemstvi) se nezaznamena.
     pub fn secure_fields(&self) -> Vec<Rect> {
         let mut v = Vec::new();
         if self.greeter.visible() && self.greeter.has_form() {
@@ -283,6 +284,19 @@ impl Comp {
         }
         if let Some(f) = self.dialog_layout().and_then(|l| l.field) {
             v.push(f);
+        }
+        for &g in &self.z {
+            let Some(w) = self.windows.get(&g).filter(|w| w.mapped && !w.minimized) else { continue };
+            let area = w.rect;
+            for (n, layer) in self.screen_nodes(g).unwrap_or_default() {
+                if n.role != guiproto::a11y::Role::PasswordInput {
+                    continue;
+                }
+                let r = self.clip_rect(g, layer, n.bounds).intersect(&area);
+                if r.w > 0 && r.h > 0 {
+                    v.push(r);
+                }
+            }
         }
         v
     }

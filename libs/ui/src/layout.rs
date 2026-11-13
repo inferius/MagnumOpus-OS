@@ -11,13 +11,13 @@ use alloc::vec::Vec;
 use guiproto::Rect;
 
 use crate::look::Look;
-use crate::node::{Kind, Node};
+use crate::node::{Key, Kind, Node};
 
 /// Prvek po rozvrzeni.
 pub enum ElemKind<M> {
     Label { text: String, heading: bool, warn: bool },
     Button { text: String, on_click: Option<M> },
-    TextInput { value: String, placeholder: String, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    TextInput { value: String, placeholder: String, secure: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
     ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
@@ -28,6 +28,10 @@ pub enum ElemKind<M> {
 
 pub struct Element<M> {
     pub kind: ElemKind<M>,
+    /// Stabilni klic (jedinecny v okne, viz [`Key`]).
+    pub key: Key,
+    pub error: Option<String>,
+    pub skip_tab: bool,
     /// Obdelnik v souradnicich prostoru `space`.
     pub rect: Rect,
     /// 0 = okno, jinak index prvku `Scroll` + 1.
@@ -46,6 +50,45 @@ impl<M> Element<M> {
                 self.kind,
                 ElemKind::Button { .. } | ElemKind::TextInput { .. } | ElemKind::Checkbox { .. } | ElemKind::List { .. }
             )
+    }
+}
+
+/// Druh uzlu pro odvozeny klic.
+fn kind_tag<M>(k: &Kind<M>) -> usize {
+    match k {
+        Kind::Label { .. } => 0,
+        Kind::Button { .. } => 1,
+        Kind::TextInput { .. } => 2,
+        Kind::Checkbox { .. } => 3,
+        Kind::List { .. } => 4,
+        Kind::Progress { .. } => 5,
+        Kind::Column(_) => 6,
+        Kind::Row(_) => 7,
+        Kind::Scroll(_) => 8,
+        Kind::Spacer => 9,
+    }
+}
+
+const TAGS: usize = 10;
+
+/// Znacky odvozenych klicu (aby se nepotkaly s vlastnimi).
+const OWN: u64 = 1;
+const AUTO: u64 = 2;
+/// Radek seznamu: klic seznamu + znacka + index radku.
+pub const ITEM: u64 = 3;
+const DUP: u64 = 4;
+
+/// Klic ditete: vlastni klic v ramci rodice, jinak druh a poradi mezi
+/// sourozenci stejneho druhu.
+fn child_key<M>(n: &Node<M>, parent: Key, counts: &mut [u64; TAGS]) -> Key {
+    match n.key {
+        Some(k) => parent.mix(OWN).mix(k.0),
+        None => {
+            let t = kind_tag(&n.kind);
+            let o = counts[t];
+            counts[t] += 1;
+            parent.mix(AUTO).mix(t as u64).mix(o)
+        }
     }
 }
 
@@ -87,17 +130,32 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
 }
 
 /// Rozvrhne strom do obdelniku `area` (souradnice okna).
+///
+/// Klice jsou v okne jedinecne: dva sourozenci se stejnym vlastnim klicem
+/// (chyba aplikace) dostanou druhy klic odvozeny z poradi, aby se jejich
+/// stav nemichal.
 pub fn layout<M>(root: Node<M>, area: Rect, t: &Look) -> Vec<Element<M>> {
     let mut out = Vec::new();
-    place(root, area, 0, 0, t, &mut out);
+    let key = root.key.unwrap_or(Key::ROOT);
+    place(root, key, area, 0, 0, t, &mut out);
+    let mut seen = alloc::collections::BTreeSet::new();
+    for (i, e) in out.iter_mut().enumerate() {
+        if !seen.insert(e.key) {
+            e.key = e.key.mix(DUP).mix(i as u64);
+            seen.insert(e.key);
+        }
+    }
     out
 }
 
-fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mut Vec<Element<M>>) {
+#[allow(clippy::too_many_arguments)]
+fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look, out: &mut Vec<Element<M>>) {
     let disabled = n.disabled;
     let agent = n.agent;
-    let push = |out: &mut Vec<Element<M>>, kind: ElemKind<M>, rect: Rect| {
-        out.push(Element { kind, rect, space, parent, disabled, agent });
+    let skip_tab = n.skip_tab;
+    let mut error = n.error;
+    let mut push = |out: &mut Vec<Element<M>>, kind: ElemKind<M>, rect: Rect| {
+        out.push(Element { kind, key, error: error.take(), skip_tab, rect, space, parent, disabled, agent });
         out.len()
     };
     match n.kind {
@@ -107,8 +165,8 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mu
         Kind::Button { text, on_click } => {
             push(out, ElemKind::Button { text, on_click }, r);
         }
-        Kind::TextInput { value, placeholder, on_change, on_submit } => {
-            push(out, ElemKind::TextInput { value, placeholder, on_change, on_submit }, r);
+        Kind::TextInput { value, placeholder, secure, on_change, on_submit } => {
+            push(out, ElemKind::TextInput { value, placeholder, secure, on_change, on_submit }, r);
         }
         Kind::Checkbox { text, checked, on_toggle } => {
             push(out, ElemKind::Checkbox { text, checked, on_toggle }, r);
@@ -120,6 +178,9 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mu
                 let ir = Rect::new(r.x + inset as i32, r.y + (inset + i as u32 * rh) as i32, r.w.saturating_sub(2 * inset), rh);
                 out.push(Element {
                     kind: ElemKind::ListItem { text, index: i, selected: selected == Some(i), list: id, agent: agents.get(i).copied().unwrap_or(false) },
+                    key: key.mix(ITEM).mix(i as u64),
+                    error: None,
+                    skip_tab: true,
                     rect: ir,
                     space,
                     parent: id,
@@ -134,6 +195,7 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mu
         Kind::Spacer => {}
         Kind::Column(children) => {
             let id = push(out, ElemKind::Group, r);
+            let mut counts = [0; TAGS];
             let sizes: Vec<(u32, u32)> = children.iter().map(|c| measure(c, t)).collect();
             let fixed: u32 = sizes.iter().map(|s| s.1).sum::<u32>() + t.gap() * children.len().saturating_sub(1) as u32;
             let grow = children.iter().filter(|c| c.grow).count() as u32;
@@ -141,12 +203,14 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mu
             let mut y = r.y;
             for (c, (_, h)) in children.into_iter().zip(sizes) {
                 let h = if c.grow && grow > 0 { h + extra / grow } else { h };
-                place(c, Rect::new(r.x, y, r.w, h), space, id, t, out);
+                let k = child_key(&c, key, &mut counts);
+                place(c, k, Rect::new(r.x, y, r.w, h), space, id, t, out);
                 y += (h + t.gap()) as i32;
             }
         }
         Kind::Row(children) => {
             let id = push(out, ElemKind::Group, r);
+            let mut counts = [0; TAGS];
             let sizes: Vec<(u32, u32)> = children.iter().map(|c| measure(c, t)).collect();
             let fixed: u32 = sizes.iter().map(|s| s.0).sum::<u32>() + t.gap() * children.len().saturating_sub(1) as u32;
             let grow = children.iter().filter(|c| c.grow).count() as u32;
@@ -156,7 +220,8 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mu
                 let w = if c.grow && grow > 0 { w + extra / grow } else { w };
                 // Svisle na stred radku.
                 let y = r.y + (r.h.saturating_sub(h) / 2) as i32;
-                place(c, Rect::new(x, y, w, h.min(r.h)), space, id, t, out);
+                let k = child_key(&c, key, &mut counts);
+                place(c, k, Rect::new(x, y, w, h.min(r.h)), space, id, t, out);
                 x += (w + t.gap()) as i32;
             }
         }
@@ -164,7 +229,8 @@ fn place<M>(n: Node<M>, r: Rect, space: usize, parent: usize, t: &Look, out: &mu
             let (_, ch) = measure(&child, t);
             let id = push(out, ElemKind::Scroll { content_h: ch }, r);
             // Obsah ve vlastnim prostoru (souradnice od 0).
-            place(*child, Rect::new(0, 0, r.w, ch.max(r.h)), id, id, t, out);
+            let k = child_key(&child, key, &mut [0; TAGS]);
+            place(*child, k, Rect::new(0, 0, r.w, ch.max(r.h)), id, id, t, out);
         }
     }
 }

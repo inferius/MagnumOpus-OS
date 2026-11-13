@@ -70,8 +70,23 @@ impl Drop for Dialog {
 /// Nejvic radku textu dialogu (dialog roste do vysky obrazovky).
 pub const MAX_LINES: usize = 24;
 
-/// Jak dlouho po zobrazeni dialog vstup ignoruje.
+/// Jak dlouho po zobrazeni dialog vstup ignoruje. Pocita se od chvile,
+/// kdy displej ukazal prvni snimek s dialogem (ne od pozadavku): pri
+/// pomalem skladani na CPU (snimek 0,6-1,4 s) by jinak ochrana probehla
+/// driv, nez dialog uzivatel vubec videl.
 pub const INPUT_DELAY: u64 = 300_000_000;
+
+/// Zobrazeni aktivniho dialogu na displeji.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Shown {
+    /// Na displeji (cas v `since`), nebo zadny dialog.
+    #[default]
+    Yes,
+    /// Zmenil se, ceka na slozeni snimku.
+    Waiting,
+    /// Slozen ve snimku, ktery ceka na zobrazeni.
+    Composed,
+}
 
 /// Nejvic cekajicich dialogu (dalsi se odmitnou).
 const MAX_QUEUE: usize = 32;
@@ -81,8 +96,10 @@ const MAX_PASSWORD: usize = 256;
 pub struct Dialogs {
     queue: VecDeque<Dialog>,
     /// Od kdy je aktivni dialog videt (vstup tesne po zobrazeni se
-    /// ignoruje - ochrana proti podstrceni kliku).
+    /// ignoruje - ochrana proti podstrceni kliku). Dokud neni zobrazen,
+    /// `u64::MAX`.
     pub(crate) since: u64,
+    pub(crate) shown: Shown,
     /// Bezpecnostni fraze uzivatele (aplikace ji nezna).
     phrase: String,
 }
@@ -425,7 +442,7 @@ impl Comp {
                 if self.dialogs.queue.len() != before {
                     self.out.push(Out::Dialog(peer, DialogReply::Cancelled { id }));
                     if was_front {
-                        self.damage_all();
+                        self.dialog_front_changed();
                     }
                 }
             }
@@ -437,18 +454,44 @@ impl Comp {
 
     pub(crate) fn open_dialog(&mut self, d: Dialog) {
         let first = self.dialogs.queue.is_empty();
-        if first || d.owner == Owner::Secure {
-            self.dialogs.since = self.input_now;
-        }
+        let front_changes = first || d.owner == Owner::Secure;
         if d.owner == Owner::Secure {
             // Bezpecna obrazovka predbehne vse.
             self.dialogs.queue.push_front(d);
         } else {
             self.dialogs.queue.push_back(d);
         }
-        if first || self.dialogs.active().is_some_and(|a| a.owner == Owner::Secure) {
-            self.damage_all();
+        if front_changes {
+            self.dialog_front_changed();
         }
+    }
+
+    /// Aktivni dialog se zmenil (novy, zodpovezeny, zruseny): vstup az
+    /// INPUT_DELAY po zobrazeni snimku s novym dialogem.
+    pub(crate) fn dialog_front_changed(&mut self) {
+        self.dialogs.since = u64::MAX;
+        self.dialogs.shown = if self.dialogs.queue.is_empty() { Shown::Yes } else { Shown::Waiting };
+        self.damage_all();
+    }
+
+    /// Snimek se slozil (`tick`): dialog, ktery na nej cekal, je v nem.
+    pub(crate) fn dialog_composed(&mut self) {
+        if self.dialogs.shown == Shown::Waiting {
+            self.dialogs.shown = Shown::Composed;
+        }
+    }
+
+    /// Displej snimek zobrazil v case `time`.
+    pub(crate) fn dialog_presented(&mut self, time: u64) {
+        if self.dialogs.shown == Shown::Composed {
+            self.dialogs.shown = Shown::Yes;
+            self.dialogs.since = time;
+        }
+    }
+
+    /// Prijima aktivni dialog vstup (zobrazen a uplynula ochranna doba)?
+    fn dialog_ready(&self, now: u64) -> bool {
+        self.dialogs.shown == Shown::Yes && now >= self.dialogs.since.saturating_add(INPUT_DELAY)
     }
 
     /// Kanal `dialog` zavren: jeho dialogy zmizi.
@@ -456,7 +499,7 @@ impl Comp {
         let front = self.dialogs.active().map(|d| d.owner);
         self.dialogs.queue.retain(|d| d.owner != Owner::Peer(peer));
         if front == Some(Owner::Peer(peer)) {
-            self.damage_all();
+            self.dialog_front_changed();
         }
     }
 
@@ -486,8 +529,7 @@ impl Comp {
 
     fn answer(&mut self, choice: usize) {
         let Some(mut d) = self.dialogs.queue.pop_front() else { return };
-        self.dialogs.since = self.input_now;
-        self.damage_all();
+        self.dialog_front_changed();
         match d.owner {
             Owner::Peer(p) => self.out.push(Out::Dialog(
                 p,
@@ -561,14 +603,14 @@ impl Comp {
                 let front = self.dialogs.active().map(|d| d.owner) == Some(Owner::Device(source));
                 self.dialogs.queue.retain(|d| d.owner != Owner::Device(source));
                 if front {
-                    self.damage_all();
+                    self.dialog_front_changed();
                 }
             }
         }
     }
 
     pub(crate) fn dialog_key(&mut self, code: u16, action: Action, _ch: Option<char>, _mods: u16, _now: u64) {
-        if action == Action::Release || _now < self.dialogs.since + INPUT_DELAY {
+        if action == Action::Release || !self.dialog_ready(_now) {
             return;
         }
         let Some(d) = self.dialogs.queue.front_mut() else { return };
@@ -605,7 +647,7 @@ impl Comp {
     }
 
     pub(crate) fn dialog_click(&mut self, x: i32, y: i32, now: u64) {
-        if now < self.dialogs.since + INPUT_DELAY {
+        if !self.dialog_ready(now) {
             return;
         }
         let Some(l) = self.dialogs.layout(&self.style, self.w, self.h) else { return };
