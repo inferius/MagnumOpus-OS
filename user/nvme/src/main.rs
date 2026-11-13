@@ -44,6 +44,7 @@ struct Nvme {
     /// Nejvic bajtu v jednom prikazu (MDTS).
     max_bytes: u64,
     resource: Resource,
+    model: alloc::string::String,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -109,6 +110,7 @@ impl Nvme {
             dsm: id.dsm,
             max_bytes: id.max_bytes,
             resource,
+            model: id.model,
         })
     }
 
@@ -140,6 +142,10 @@ impl Nvme {
 }
 
 impl Disks for Nvme {
+    fn model(&self, _d: usize) -> alloc::string::String {
+        self.model.clone()
+    }
+
     fn count(&self) -> usize {
         self.namespaces.len()
     }

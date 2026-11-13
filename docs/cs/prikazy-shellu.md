@@ -11,7 +11,7 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Systém:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -1771,6 +1771,35 @@ report
 **Chyby:** `ACCESS_DENIED`
 
 **Souvisí:** [`loglevel`](#loglevel)
+
+
+### `install`
+
+nainstaluje systém ze živého USB na disk (průvodce v krocích; s --odpovedi bez dotazů)
+
+Průvodce instalací v krocích jako grafický instalátor: jazyk a klávesnice, kontrola počítače, kam instalovat, náhled změn disku, účet, zabezpečení, souhrn a průběh. Cizí oddíly nikdy nepřepíše; smazání celého disku chce opsat název disku. S `--odpovedi <soubor>` proběhne bez dotazů.
+
+```shell
+install [--odpovedi hodnota]
+```
+
+Plné jméno `system-install` · vstup: nic · výstup: nic
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `--odpovedi` | text |  | soubor odpovědí (instalace bez dotazů) |
+
+Spustí průvodce.
+
+```shell
+install
+```
+
+**Potřebuje:** živé USB (instalátor)
+
+**Chyby:** `SH_REJECTED`, `SH_USER`, `NOT_SUPPORTED`
+
+**Souvisí:** [`report`](#report)
 
 
 ### `shutdown`

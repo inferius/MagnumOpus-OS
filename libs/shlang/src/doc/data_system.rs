@@ -228,6 +228,18 @@ pub const DOCS: &[Doc] = &[
         needs_en: "the DIAG right",
     },
     Doc {
+        name: "install",
+        short_en: "installs the system from the live USB onto a disk (a step-by-step wizard; with --odpovedi without questions)",
+        long_cs: "Průvodce instalací v krocích jako grafický instalátor: jazyk a klávesnice, kontrola počítače, kam instalovat, náhled změn disku, účet, zabezpečení, souhrn a průběh. Cizí oddíly nikdy nepřepíše; smazání celého disku chce opsat název disku. S `--odpovedi <soubor>` proběhne bez dotazů.",
+        long_en: "A step-by-step installation wizard like the graphical installer: language and keyboard, computer check, where to install, preview of disk changes, account, security, summary and progress. It never overwrites foreign partitions; erasing a whole disk requires typing the disk name. With `--odpovedi <file>` it runs without questions.",
+        args: &[Arg { name: "odpovedi", default: "", cs: "soubor odpovědí (instalace bez dotazů)", en: "answers file (installation without questions)" }],
+        examples: &[Ex { code: "install", cs: "Spustí průvodce.", en: "Starts the wizard.", check: Skip }],
+        related: &["report"],
+        errors: &["SH_REJECTED", "SH_USER", "NOT_SUPPORTED"],
+        needs_cs: "živé USB (instalátor)",
+        needs_en: "the live USB (installer)",
+    },
+    Doc {
         name: "shutdown",
         short_en: "shuts the computer down cleanly (ends services, then ACPI S5)",
         long_cs: "Čistě vypne počítač: zeptá se (bez `-y`), ukončí služby a uloží data, pak ACPI S5.",

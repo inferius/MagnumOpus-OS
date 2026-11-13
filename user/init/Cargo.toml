@@ -11,6 +11,7 @@ test = false
 bench = false
 
 [dependencies]
+installplan = { workspace = true }
 # Barvy vzhledu v testech GUI (stejne tokeny jako kompozitor).
 theme = { path = "../../libs/theme" }
 # Test determinismu startovniho obrazu (sada displej).

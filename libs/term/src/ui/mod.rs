@@ -100,6 +100,8 @@ pub struct PromptUi {
     /// Prazdne = ano/ne.
     pub choices: Vec<String>,
     pub sel: usize,
+    /// Dotaz na text: (skryty, napsany text). `None` = volba.
+    pub input: Option<(bool, String)>,
 }
 
 pub struct App {
@@ -345,7 +347,17 @@ impl App {
                 self.block_ended(block);
             }
             ServerMsg::Prompt { prompt, question, detail, choices } => {
-                self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0 });
+                self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0, input: None });
+            }
+            ServerMsg::Ask { prompt, question, secret, default } => {
+                self.prompt = Some(PromptUi {
+                    id: prompt,
+                    question,
+                    detail: Item::Note(String::new()),
+                    choices: Vec::new(),
+                    sel: 0,
+                    input: Some((secret, default)),
+                });
             }
             // Sedy navrh argumentu (automaticky pozadavek, ne Tab).
             ServerMsg::Completions { seq, start, items } if seq & HINT_SEQ != 0 => {
@@ -548,6 +560,9 @@ impl App {
     }
 
     fn key_prompt(&mut self, k: Key) {
+        if self.prompt.as_ref().is_some_and(|p| p.input.is_some()) {
+            return self.key_ask(k);
+        }
         let Some(p) = self.prompt.as_mut() else { return };
         let n = if p.choices.is_empty() { 2 } else { p.choices.len() };
         let answer = match k {
@@ -577,6 +592,28 @@ impl App {
             self.out.push(ClientMsg::Interrupt { session: self.session });
         } else {
             self.out.push(ClientMsg::Choose { prompt: p.id, index: a as u32 });
+        }
+    }
+
+    /// Psani odpovedi na dotaz na text.
+    fn key_ask(&mut self, k: Key) {
+        let Some(p) = self.prompt.as_mut() else { return };
+        let Some((_, text)) = p.input.as_mut() else { return };
+        match k {
+            Key::Char(c) => text.push(c),
+            Key::Backspace => {
+                text.pop();
+            }
+            Key::Enter => {
+                let p = self.prompt.take().unwrap();
+                let text = p.input.map(|(_, t)| t).unwrap_or_default();
+                self.out.push(ClientMsg::Text { prompt: p.id, text });
+            }
+            Key::Esc | Key::Ctrl('c') => {
+                self.prompt = None;
+                self.out.push(ClientMsg::Interrupt { session: self.session });
+            }
+            _ => {}
         }
     }
 
@@ -812,6 +849,9 @@ impl App {
     /// Text napovedy klaves podle stavu.
     pub fn hints(&self) -> &'static str {
         if let Some(p) = &self.prompt {
+            if p.input.is_some() {
+                return "pište odpověď · Enter potvrdit · Esc zrušit";
+            }
             return if p.choices.is_empty() { "a ano · n ne · šipky výběr · Enter potvrdit" } else { "1-9 volba · šipky výběr · Enter potvrdit · Esc zrušit" };
         }
         if self.tasks_open() {
@@ -831,7 +871,13 @@ impl App {
         let t = &self.theme;
         let mut bottom: Vec<Line> = Vec::new();
         // Vyzva.
-        if let Some(p) = &self.prompt {
+        if let Some(p) = &self.prompt
+            && let Some((secret, text)) = &p.input
+        {
+            bottom.push(Line::new().text(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &p.question));
+            let shown: String = if *secret { text.chars().map(|_| '*').collect() } else { text.clone() };
+            bottom.push(Line::new().text(Some(Style::fg(t.ui.fg)), &alloc::format!("> {shown}_")));
+        } else if let Some(p) = &self.prompt {
             bottom.push(Line::new().text(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &p.question));
             let mut l = Line::new();
             let opts: Vec<String> = if p.choices.is_empty() {

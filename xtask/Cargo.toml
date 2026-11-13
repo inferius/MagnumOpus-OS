@@ -15,6 +15,9 @@ abi = { workspace = true }
 netproto = { path = "../libs/netproto", features = ["std", "nts"] }
 fatfs = "0.3"
 diskguard = { path = "../libs/diskguard" }
+installplan = { path = "../libs/installplan" }
+accounts = { path = "../libs/accounts" }
+accountproto = { path = "../libs/accountproto", features = ["soft"] }
 # Manifesty ovladacu (stejny parser jako devmgr).
 driverkit = { path = "../libs/driverkit" }
 # Korenove certifikaty pro initfs (sada Mozilla pres CCADB).

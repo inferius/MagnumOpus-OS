@@ -91,6 +91,12 @@ impl Table {
     pub fn entries(&self) -> impl Iterator<Item = Entry> + '_ {
         self.raw.chunks_exact(self.entry_size).map(Entry::parse)
     }
+
+    /// Pocet polozek, velikost polozky a surova tabulka (instalator
+    /// pridava polozky do volnych slotu).
+    pub fn raw_parts(&self) -> (usize, usize, &[u8]) {
+        (self.raw.len() / self.entry_size, self.entry_size, &self.raw)
+    }
 }
 
 /// Vysledek cteni GPT.
@@ -268,6 +274,7 @@ pub fn write(disk: &mut [u8], ss: usize, disk_guid: Guid, parts: &[NewPartition]
 }
 
 /// Zacatek a konec disku s novou tabulkou GPT ([`build`]).
+#[derive(Debug, Clone)]
 pub struct Ends {
     /// Sektory `0..first_usable(ss)`: ochranny MBR (zbytek sektoru 0
     /// nulovy), primarni hlavicka a tabulka.
@@ -275,6 +282,9 @@ pub struct Ends {
     /// Poslednich `table_sectors(ss) + 1` sektoru: zalozni tabulka
     /// a hlavicka.
     pub tail: Vec<u8>,
+    /// Sektor, kterym `head` zacina (0 = s ochrannym MBR, 1 = MBR se
+    /// nemeni - pridani oddilu do existujici tabulky).
+    pub head_lba: u64,
 }
 
 /// Ochranny MBR, primarni a zalozni GPT pro disk o `sectors` sektorech
@@ -346,5 +356,5 @@ pub fn build(sectors: u64, ss: usize, disk_guid: Guid, parts: &[NewPartition]) -
     let backup_entries = last_lba - tsec;
     let mut tail = entries;
     tail.extend_from_slice(&header(last_lba, 1, backup_entries));
-    Ok(Ends { head, tail })
+    Ok(Ends { head, tail, head_lba: 0 })
 }

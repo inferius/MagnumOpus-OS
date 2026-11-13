@@ -289,7 +289,12 @@ impl Service {
                     let id = self.next_prompt;
                     self.next_prompt += 1;
                     p.sent = Some(id);
-                    Some(ServerMsg::Prompt { prompt: id, question: p.question.clone(), detail: p.detail.clone(), choices: p.choices.clone() })
+                    Some(match &p.text {
+                        Some((secret, default)) => {
+                            ServerMsg::Ask { prompt: id, question: p.question.clone(), secret: *secret, default: default.clone() }
+                        }
+                        None => ServerMsg::Prompt { prompt: id, question: p.question.clone(), detail: p.detail.clone(), choices: p.choices.clone() },
+                    })
                 }
                 _ => None,
             };
@@ -306,7 +311,7 @@ impl Service {
             }
         }
         if let Some(m) = prompt {
-            let ServerMsg::Prompt { prompt: id, .. } = &m else { unreachable!() };
+            let (ServerMsg::Prompt { prompt: id, .. } | ServerMsg::Ask { prompt: id, .. }) = &m else { unreachable!() };
             if self.sessions[i].attached {
                 link.send(&m);
             } else {
@@ -385,7 +390,7 @@ impl Service {
         let Some((prompt, a)) = fg::answer_of(m) else { return false };
         for s in &self.sessions {
             for r in s.fg.iter().chain(s.bg.iter()) {
-                if r.sh.answer(prompt, a) {
+                if r.sh.answer(prompt, a.clone()) {
                     return true;
                 }
             }

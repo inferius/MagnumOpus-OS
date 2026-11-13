@@ -284,5 +284,7 @@ není: jádro by muselo volat běhové služby UEFI z obsluhy pádu.
 - `cargo xtask test` spouští po hlavním běhu i start z USB;
   `--only zive-usb` jen tento běh. Testy FS nad flashkou:
   `cargo xtask test --data-disk usb --only "souborovy system,data FS"`.
+- Instalace z flashky na interní disk: [Instalace](instalace.md)
+  (`--only instalace`).
 - Zdrojáky: `xtask/src/usb/` (obraz, výpis a zápis disků, start v QEMU),
   `user/usb-storage/`, `libs/usbproto/src/storage.rs`.

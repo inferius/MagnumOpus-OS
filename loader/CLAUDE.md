@@ -14,6 +14,7 @@ UEFI loader (`no_std`, `no_main`). Z ESP načte `\os\kernel.elf` a `\os\initfs.i
 - `BootInfo` a jeho podstruktury jsou `#[repr(C)]` jen s prostými daty; layout nesmí záviset na verzi kompilátoru. Změna = změna loaderu i jádra naráz (`libs/boot-info`).
 - Rozložení adresního prostoru před skokem musí odpovídat `libs/boot-info` a `kernel/linker.ld`.
 - Po ukončení boot services už nejsou UEFI služby (logování, alokace) k dispozici.
+- NVRAM (`src/nvram.rs`): zápis `Boot####` jen když `\os\boot.cfg` má `nvram = "zapsat"`, po kontrole volného místa (`QueryVariableInfo`, 16 KiB) a jen jednou (pak `hotovo`, i při chybě). Cizí položky se nikdy nemažou ani nepřepisují; mění se jen `BootOrder` přidáním našeho čísla.
 
 ## Testy
 

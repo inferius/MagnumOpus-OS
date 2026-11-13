@@ -60,6 +60,14 @@ impl LayoutId {
         }
     }
 
+    /// Popis pro lidi (instalator, nastaveni).
+    pub const fn description(self) -> &'static str {
+        match self {
+            LayoutId::Us => "Anglická (US)",
+            LayoutId::Cz => "Česká (QWERTZ)",
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|l| l.name() == name)
     }
@@ -102,7 +110,25 @@ pub fn layout(id: LayoutId) -> &'static Layout {
     }
 }
 
+/// Radky klaves pro nahled rozlozeni (kody evdev: cislice, horni, stredni
+/// a dolni rada pismen).
+pub const PREVIEW_ROWS: [&[u16]; 4] = [
+    &[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    &[16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+    &[30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+    &[44, 45, 46, 47, 48, 49, 50, 51, 52, 53],
+];
+
 impl Layout {
+    /// Nahled rady klaves `row` ([`PREVIEW_ROWS`]): znaky zakladni urovne
+    /// (mrtva klavesa jako jeji znak, jina klavesa jako mezera).
+    pub fn preview_row(&self, row: usize) -> impl Iterator<Item = char> + '_ {
+        PREVIEW_ROWS.get(row).copied().unwrap_or(&[]).iter().map(move |&c| match self.symbol(c, 0) {
+            Symbol::Char(ch) | Symbol::Dead(ch) => ch,
+            _ => ' ',
+        })
+    }
+
     /// Symbol klavesy na urovni `level` (0 zaklad, 1 Shift, 2 AltGr,
     /// 3 AltGr+Shift). Numerickou klavesnici resi [`Keyboard`] (zavisi na
     /// Num Locku).

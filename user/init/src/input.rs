@@ -206,8 +206,10 @@ impl Input {
                 let c = live.control.as_ref().ok_or(Error::ServiceUnavailable)?;
                 let r = request(c, text, handles)?;
                 match (name, words.next()) {
-                    (control::LAYOUT, _) => {
-                        live.layout = text.split_whitespace().nth(1).map(String::from)
+                    // Po restartu sluzby se posle znovu (`layouts` se seznamem).
+                    (control::LAYOUT | control::LAYOUTS, _) => {
+                        let rest: Vec<&str> = text.split_whitespace().skip(1).collect();
+                        live.layout = (!rest.is_empty()).then(|| rest.join(" "));
                     }
                     (control::POLICY, Some(v)) if text.contains(control::VERIFY_NEW_DEVICES) => {
                         live.verify_new = Some(v == "on")
@@ -240,6 +242,12 @@ impl Input {
             .find(|s| !s.synthetic && s.name.starts_with(prefix))
             .map(|s| s.id)
             .ok_or(Error::NotFound)
+    }
+
+    /// Rozlozeni k prepinani (levy Alt + levy Shift), prvni hned plati.
+    pub fn set_layouts(&self, names: &[String]) -> Result<()> {
+        let cmd = alloc::format!("{} {}", control::LAYOUTS, names.join(" "));
+        self.command(&cmd, Vec::new()).map(|_| ())
     }
 
     pub fn set_layout(&self, name: &str) -> Result<()> {
@@ -303,7 +311,7 @@ impl InputdService {
             Self::send(c, &mut n, &cmd, Vec::new())?;
         }
         if let Some(l) = &live.layout {
-            let cmd = alloc::format!("{} {l}", control::LAYOUT);
+            let cmd = alloc::format!("{} {l}", control::LAYOUTS);
             Self::send(c, &mut n, &cmd, Vec::new())?;
         }
         Self::send_devices(live, c, &mut n, |d| d.boot)?;

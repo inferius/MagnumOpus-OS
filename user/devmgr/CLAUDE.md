@@ -12,6 +12,7 @@ Správce zařízení. Projde sběrnici PCI Express, zaloguje zařízení a pro z
 - Po pádu ovladače devmgr nejdřív vypne bus master, pak ovladač spustí znovu (zařízení může ještě dokončovat DMA).
 - Při dlouhém čekání na ovladač disku posílá initu `busy` každých 5 s, aby init start nevzdal (init čeká na zprávu nejvýš 30 s).
 - Aplikace nikdy nedostane capability k ovladači; klient ovladače je služba.
+- Raw kanál disku (`block-raw <ss> <model>`) jen přeposílá initu; ten ho dá jedině službě `installd`. Zápis na něm hlídá ovladač (`diskguard::install::raw_write_allowed`), ne devmgr.
 
 ## Testy
 

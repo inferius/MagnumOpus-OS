@@ -44,6 +44,9 @@ pub const SECURE: &str = "secure";
 pub const INJECT: &str = "inject";
 /// Prepne rozlozeni: `layout us`, `layout cz`.
 pub const LAYOUT: &str = "layout";
+/// Rozlozeni k prepinani (levy Alt + levy Shift): `layouts cz us`. Prvni
+/// se hned nastavi.
+pub const LAYOUTS: &str = "layouts";
 /// Stav sluzby.
 pub const STATUS: &str = "status";
 /// Seznam zdroju vstupu (id, druh, jmeno).

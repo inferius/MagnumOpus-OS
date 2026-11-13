@@ -60,6 +60,10 @@ pub enum Request {
     /// `diag snap`, `docs/cs/gui.md`); odpoved [`Reply::Text`] nebo
     /// [`Reply::Failed`] (GUI nebezi).
     Snapshot,
+    /// Jen kanal shell -> init: kanal k instalatoru (`installd`, protokol
+    /// `installplan::proto`). Odpoved [`Reply::Ok`] s kanalem jako handlem
+    /// zpravy, nebo [`Reply::Failed`].
+    OpenInstaller,
 }
 
 /// Udalost hlasena sluzbou bez pozadavku.
@@ -172,6 +176,7 @@ mod op {
     pub const REPORT: u32 = 7;
     pub const LOG_LEVEL: u32 = 8;
     pub const SNAPSHOT: u32 = 9;
+    pub const OPEN_INSTALLER: u32 = 10;
 
     pub const R_OK: u32 = 100;
     pub const R_FAILED: u32 = 101;
@@ -195,6 +200,7 @@ impl Request {
             Request::Report => op::REPORT,
             Request::LogLevel { .. } => op::LOG_LEVEL,
             Request::Snapshot => op::SNAPSHOT,
+            Request::OpenInstaller => op::OPEN_INSTALLER,
         });
         if let Request::LogLevel { target, level } = self {
             w.str(target).str(level);
@@ -214,6 +220,7 @@ impl Request {
             op::REPORT => Request::Report,
             op::LOG_LEVEL => Request::LogLevel { target: r.str()?, level: r.str()? },
             op::SNAPSHOT => Request::Snapshot,
+            op::OPEN_INSTALLER => Request::OpenInstaller,
             _ => return Err(Error::InvalidArgs),
         };
         if !r.is_empty() {

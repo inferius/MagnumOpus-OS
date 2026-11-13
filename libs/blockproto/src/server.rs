@@ -54,6 +54,10 @@ pub trait Disks {
     fn discard(&mut self, d: usize, lba: u64, count: u64) -> Result<()>;
     /// Test ochrany DMA (`op::TEST_DMA_PROTECTION`).
     fn test_dma_protection(&mut self, d: usize) -> Result<u64>;
+    /// Model disku pro instalator (z identifikace zarizeni).
+    fn model(&self, _d: usize) -> alloc::string::String {
+        alloc::string::String::new()
+    }
 }
 
 /// Stranka pro test ochrany DMA (`op::TEST_DMA_PROTECTION`): bezna pamet
@@ -171,6 +175,9 @@ pub struct Client {
     pub disk: usize,
     pub view: Decision,
     pub channel: Channel,
+    /// Raw kanal instalatoru (`None` = bezny kanal): (tabulka je platna,
+    /// posledni prectena GPT disku). Zapis do oblasti GPT ji zneplatni.
+    pub raw_table: Option<(bool, Option<diskguard::gpt::Table>)>,
 }
 
 /// Pro kazdy disk zjisti [`guard`], vytvori kanal, posle ho po `bootstrap`
@@ -185,6 +192,7 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
             disk: d,
             view,
             channel: mine,
+            raw_table: None,
         });
         // Zive USB: oddil pro logy (FAT32 MO-LOGY) jako dalsi klient.
         if let Some(log) = log_view(disks, d) {
@@ -195,6 +203,28 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
                 disk: d,
                 view: log,
                 channel: mine,
+                raw_table: None,
+            });
+        }
+        // Raw kanal instalatoru (cely disk, zapis jen do GPT a nasich
+        // oddilu). Init ho drzi a preda jen instalatoru; zprava nese model.
+        let ss = disks.sector_size(d);
+        if ss <= IO_MAX && diskguard::valid_sector_size(ss) {
+            let raw = Decision {
+                kind: diskguard::Kind::Installer,
+                start: 0,
+                sectors: disks.sectors(d),
+                sector_size: ss,
+                writable: disks.features(d) & feature::READ_ONLY == 0,
+            };
+            let (mine, theirs) = Channel::create()?;
+            let text = alloc::format!("block-raw {} {}", ss, disks.model(d));
+            bootstrap.write(text.as_bytes(), vec![theirs.into_handle()])?;
+            clients.push(Client {
+                disk: d,
+                view: raw,
+                channel: mine,
+                raw_table: Some((false, None)),
             });
         }
     }
@@ -220,12 +250,18 @@ pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
         drop(items);
         let mut closed = Vec::new();
         for (i, s) in observed.iter().enumerate() {
-            let c = &clients[i];
+            let c = &mut clients[i];
             if s.intersects(Signals::READABLE) {
                 match c.channel.try_read() {
                     Ok(msg) => {
                         let (result, data) = match Request::decode(&msg.data) {
-                            Some((req, payload)) => handle(disks, c.disk, &c.view, req, payload),
+                            Some((req, payload)) => match raw_check(disks, c, &req) {
+                                Ok(()) => handle(disks, c.disk, &c.view, req, payload),
+                                Err(e) => {
+                                    println!("{name}: disk {}: raw zapis LBA {} ({} s.) odmitnut", c.disk, req.lba, req.count);
+                                    (Err(e), Vec::new())
+                                }
+                            },
                             None => (Err(Error::InvalidArgs), Vec::new()),
                         };
                         if c.channel.write(&encode_reply(result, &data), Vec::new()).is_err() {
@@ -243,6 +279,39 @@ pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
             clients.remove(i);
         }
     }
+}
+
+/// Raw kanal instalatoru: zapis a TRIM jen do struktur GPT a nasich
+/// oddilu podle aktualni tabulky na disku. Ostatni kanaly beze zmeny.
+fn raw_check(disks: &mut impl Disks, c: &mut Client, req: &Request) -> Result<()> {
+    let Some(cache) = c.raw_table.as_mut() else { return Ok(()) };
+    if req.op != op::WRITE && req.op != op::DISCARD {
+        return Ok(());
+    }
+    let ss = c.view.sector_size;
+    let r = (ss / SECTOR) as u64;
+    let lba = req.lba / r;
+    let count = (req.lba + req.count as u64).div_ceil(r).saturating_sub(lba).max(1);
+    let sectors = c.view.sectors;
+    if !cache.0 {
+        let d = c.disk;
+        let t = match diskguard::gpt::read_table(sectors, ss, &mut |lba, buf| read_dev(disks, d, lba, buf).is_ok()) {
+            diskguard::gpt::Read::Table(t) => Some(t),
+            _ => None,
+        };
+        *cache = (true, t);
+    }
+    let table = cache.1.as_ref();
+    if !diskguard::install::raw_write_allowed(table, sectors, ss, lba, count) {
+        return Err(Error::AccessDenied);
+    }
+    // Zapis do oblasti GPT zmeni tabulku: pri dalsim zapisu ji precist znovu.
+    let tsec = diskguard::gpt::table_sectors(ss);
+    let gpt_area = lba < diskguard::gpt::first_usable(ss) || lba + count > sectors.saturating_sub(1 + tsec);
+    if gpt_area {
+        cache.0 = false;
+    }
+    Ok(())
 }
 
 /// Usek klienta (po 512 B) prelozeny na sektory zarizeni.

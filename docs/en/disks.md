@@ -67,10 +67,13 @@ So **before serving the client** the driver examines the disk
 
 Details:
 
-- **Foreign disks are read-only by default.** There is no switch yet that
-  would allow writing to a foreign disk. When one is needed (e.g.
-  installing to an empty disk), it must be an explicit user decision for one
-  specific disk, not a global option.
+- **Foreign disks are read-only by default.** There is no global write
+  switch. The only exception is the **installer raw channel**
+  (`block-raw`): only the `installd` service gets it, and even there the
+  driver allows writes only to the GPT and to installer partitions
+  (`MagnumOpus`, `MagnumOpus EFI`), never to a foreign partition
+  **[verified in QEMU]** (`--only instalace`). Details:
+  [Installation](installation.md#protecting-foreign-partitions).
 - The whole GPT is verified: signature, header and table CRC, header
   location, usable area. A partition may not cover the MBR or the GPT
   headers or tables, even if a header (with a valid CRC, e.g. from a buggy

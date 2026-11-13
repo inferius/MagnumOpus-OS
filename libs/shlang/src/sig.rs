@@ -165,7 +165,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Úlohy", &["tasks", "jobs", "fg", "wait", "kill", "cancel"]),
     ("Relace a bezpečnost", &["undo", "preview", "history", "run", "error", "exit"]),
     ("Nápověda", &["help", "explain"]),
-    ("Systém", &["audio", "loglevel", "report", "shutdown", "reboot"]),
+    ("Systém", &["audio", "loglevel", "report", "install", "shutdown", "reboot"]),
 ];
 
 pub const BUILTINS: &[Sig] = &[
@@ -267,6 +267,9 @@ pub const BUILTINS: &[Sig] = &[
         "čistě vypne počítač (ukončí služby, pak ACPI S5)"),
     sig!("reboot", "system-reboot", NONE, None, &[flag("yes", 'y', "restartovat bez dotazu")], IN, IN,
         "čistě restartuje počítač"),
+    sig!("install", "system-install", NONE, None,
+        &[Flag { long: "odpovedi", short: None, value: Some(Kind::Str), help: "soubor odpovědí (instalace bez dotazů)" }], IN, IN,
+        "nainstaluje systém ze živého USB na disk (průvodce v krocích; s --odpovedi bez dotazů)"),
     sig!("loglevel", "system-log-level", NONE, None, NOFLAGS, IN, IN,
         "úroveň logu: bez argumentu výpis, `loglevel <modul|proces> <error|warn|info|debug|trace|vychozi>`"),
     sig!("report", "system-report", NONE, None, NOFLAGS, IN, IN,

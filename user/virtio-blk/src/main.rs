@@ -128,6 +128,9 @@ fn main(startup: Startup) -> i64 {
             disk: 0,
             view,
             channel: client,
+            // Disk virtio dostava kanal od spravce zarizeni; raw kanal pro
+            // instalator ma jen NVMe, AHCI a USB (skutecne disky).
+            raw_table: None,
         }],
     );
     0
