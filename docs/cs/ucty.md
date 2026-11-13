@@ -230,7 +230,11 @@ a accountd pak založí (pokud chybí) účet `vyvojar` (první volné číslo,
 příznak vývojový účet) a hned ho přihlásí, v ladicím i release buildu.
 **Pojistka:** soubor přidávají jen tyto příkazy; obraz pro uživatele
 (`xtask image`) ani testy (`xtask test`, kromě ověření živého USB) ho
-nemají. Test `zive-usb` ověří obojí: flashka nastartuje do
+nemají. **Proč jen soubor a ne i podmínka na ladicí build** (dřív
+`cfg(debug_assertions)`): kdo může změnit initfs na ESP, může tam stejně
+nahradit i samotný accountd, takže druhá pojistka bezpečnost reálně
+nezvyšovala, jen rozbila `xtask run --release` (běžný způsob spuštění).
+Se Secure Bootem bude pojistkou podpis obrazu **[navrženo]**. Test `zive-usb` ověří obojí: flashka nastartuje do
 terminálu a obraz bez souboru skončí na přihlašovací obrazovce. Vývojový
 účet nemá heslo, nemá roli správy a ve výpisu účtů je označený.
 

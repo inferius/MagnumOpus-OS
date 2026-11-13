@@ -241,7 +241,12 @@ initfs and accountd then creates (if missing) the account `vyvojar` (first
 free number, development account flag) and signs it in right away, in
 both debug and release builds. **Safeguard:** only these commands add the
 file; neither the image for users (`xtask image`) nor the tests (`xtask
-test`, except the live USB check) have it. The
+test`, except the live USB check) have it. **Why only the file and not also a
+debug-build condition** (previously `cfg(debug_assertions)`): whoever can
+change the initfs on the ESP can just as well replace accountd itself
+there, so the second safeguard did not really add security; it only broke
+`xtask run --release` (the usual way to start). With Secure Boot the
+safeguard will be the image signature **[designed]**. The
 `zive-usb` test checks both: the stick boots into a terminal and an image
 without the file ends on the sign-in screen. The development account has
 no password, no administration role and is marked in the account list.
