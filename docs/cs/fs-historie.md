@@ -517,6 +517,7 @@ identity relace. Čas na drátě = sekundy i64 + nanosekundy u32.
 | 90 | `SNAP_STAT_OF` | dataset, snapshot, cesta uvnitř datasetu | `Stat` |
 | 91 | `SNAP_LIST_OF` | dataset, snapshot, cesta uvnitř datasetu, kurzor, nejvýš u32 | jako `LIST_PAGE` |
 | 92 | `SNAP_READ_OF` | dataset, snapshot, cesta uvnitř datasetu, offset u64, délka u32 | data (kratší na konci souboru) |
+| 93 | `DATASETS` | - | počet u32 + (cesta kořene, číslo datasetu u64, `Stat` kořene, původ u8: 0 není klon, 1 klon + cesta původu, 2 původ skrytý, 3 původ neexistuje); modul `fsproto::datasets` |
 
 Commit na drátě: ID (32 B), snapshot, dataset u64, id snapshotu u64, čas,
 autor u64, zpráva, počet u32 + ID rodičů. Zpráva o sloučení: převzaté
@@ -555,7 +556,21 @@ náhled změn, čtení z pohledu):
   připojení jen pro čtení), cesta ve snapshotu je uvnitř datasetu. Práva
   kontroluje FS jako u čtení (průchod k datasetu, ACL ve snapshotu).
 
-Klient: `diff(dataset, od, do: Option)`, `dataset_of(cesta)`,
+- **`DATASETS`** (seznam datasetů pro postranní panel správce souborů
+  a shell): jen datasety, k jejichž kořeni relace projde a které leží
+  v jejích připojených cestách; cesty jsou cesty relace, seřazené.
+  Kořenový dataset `/` je v seznamu, když relace vidí celý kořen svazku.
+  Hodnoty drží tři stavy jako `Stat`: souhrn kořene (`tree_*`) je platný
+  jen s bitem `avail::TREE` v `known`, bez práva `MANAGE` je v `hidden`.
+  Původ klonu je známý (cesta), **skrytý** (relace původní dataset nevidí
+  nebo leží mimo připojené cesty - existuje, ale klient ho nesmí znát),
+  nebo **neexistuje** (původní dataset už není; dnes FS smazání původu
+  s živým klonem odmítne `BAD_STATE`, stav je pojistka). Cena: fsd hledá
+  cesty datasetů průchodem adresářů živé verze (úměrné počtu adresářů
+  svazku), proto se volá při startu a po změně, ne ve smyčce. Nejvýš 1024
+  položek. Test: `historie FS` - „seznam datasetu (DATASETS)“.
+
+Klient: `diff(dataset, od, do: Option)`, `dataset_of(cesta)`, `datasets()`,
 `snapshot_stat_of`, `snapshot_list_of`, `snapshot_read_of` a
 `snapshot_read_file_of` (celý soubor).
 

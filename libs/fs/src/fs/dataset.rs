@@ -730,6 +730,30 @@ impl<D: BlockDevice> Fs<D> {
         Ok(out)
     }
 
+    /// Cisla vsech datasetu svazku vcetne korenoveho, bez cest a bez
+    /// kontroly opravneni (levne: jen zaznamy datasetu). Pro rozliseni
+    /// "puvod klonu skryty" od "puvod klonu uz neexistuje".
+    pub fn dataset_ids(&mut self) -> Result<Vec<u64>> {
+        let root = self.root_tree();
+        let mut out = alloc::vec![ROOT_DATASET];
+        for (k, _) in btree::collect(
+            &mut self.s,
+            &root,
+            &Key::new(META_OID, item::DATASET, 0),
+            &Key::new(META_OID, item::DATASET + 1, 0),
+        )? {
+            out.push(k.offset);
+        }
+        for id in self.loaded() {
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        Ok(out)
+    }
+
     pub(super) fn datasets_all(&mut self) -> Result<Vec<DatasetInfo>> {
         let root = self.root_tree();
         let mut out = Vec::new();

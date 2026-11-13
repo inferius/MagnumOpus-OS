@@ -20,6 +20,7 @@ mod events;
 mod firewall;
 mod fs;
 mod fs_data;
+mod fs_datasets;
 mod fs_hist;
 mod fs_perf;
 mod fs_recovery;

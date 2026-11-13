@@ -118,6 +118,7 @@ pub mod op {
     /// dataset, snapshot str, cesta, offset u64, delka u32 (nejvic `MAX_IO`)
     /// -> data (kratsi na konci souboru)
     pub const SNAP_READ_OF: u32 = 92;
+    // 93 = `DATASETS` (modul `crate::datasets`).
 }
 
 /// Nejvic polozek ve vypisu (ochrana pameti sluzby i klienta).

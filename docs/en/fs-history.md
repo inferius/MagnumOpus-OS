@@ -541,6 +541,7 @@ session identity. Time on the wire = seconds i64 + nanoseconds u32.
 | 90 | `SNAP_STAT_OF` | dataset, snapshot, path inside the dataset | `Stat` |
 | 91 | `SNAP_LIST_OF` | dataset, snapshot, path inside the dataset, cursor, at most u32 | like `LIST_PAGE` |
 | 92 | `SNAP_READ_OF` | dataset, snapshot, path inside the dataset, offset u64, length u32 | data (shorter at the end of the file) |
+| 93 | `DATASETS` | - | count u32 + (root path, dataset number u64, root `Stat`, origin u8: 0 not a clone, 1 clone + origin path, 2 origin hidden, 3 origin gone); module `fsproto::datasets` |
 
 A commit on the wire: ID (32 B), snapshot, dataset u64, snapshot id u64,
 time, author u64, message, count u32 + parent IDs. A merge report: paths
@@ -583,7 +584,23 @@ shell (`diff`, change preview, reading from a view):
   snapshot is inside the dataset. The FS checks rights like for reading
   (walking to the dataset, ACLs in the snapshot).
 
-Client: `diff(dataset, from, to: Option)`, `dataset_of(path)`,
+- **`DATASETS`** (the list of datasets for the file manager sidebar and
+  the shell): only datasets whose root the session can walk to and which
+  lie in its mounted paths; paths are session paths, sorted. The root
+  dataset `/` is listed when the session sees the whole volume root.
+  Values keep three states like `Stat`: the root summary (`tree_*`) is
+  valid only with the `avail::TREE` bit in `known`, without the `MANAGE`
+  right it is in `hidden`. A clone origin is known (a path), **hidden**
+  (the session does not see the origin dataset or it lies outside the
+  mounted paths - it exists, but the client must not learn it), or
+  **gone** (the origin dataset no longer exists; today the FS refuses to
+  delete an origin with a live clone with `BAD_STATE`, the state is a
+  safeguard). Cost: fsd finds dataset paths by walking the directories of
+  the live version (proportional to the number of directories in the
+  volume), so call it at start and after a change, not in a loop. At most
+  1024 items. Test: `historie FS` - "seznam datasetu (DATASETS)".
+
+Client: `diff(dataset, from, to: Option)`, `dataset_of(path)`, `datasets()`,
 `snapshot_stat_of`, `snapshot_list_of`, `snapshot_read_of` and
 `snapshot_read_file_of` (the whole file).
 

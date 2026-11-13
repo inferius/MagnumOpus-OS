@@ -20,6 +20,7 @@ pub const TESTS: &[Test] = &[
     ("rozdil verzi po pohledu (DIFF) a dataset cesty", diff_dataset_of),
     ("vypis s metadaty a dataset cesty s omezenou relaci", restricted_session),
     ("dataset na existujici jmeno: svazek zustane zapisovatelny", dataset_again),
+    ("seznam datasetu (DATASETS): prava a puvod klonu", super::fs_datasets::datasets),
     ("kontrola konzistence po historii", check_clean),
 ];
 
