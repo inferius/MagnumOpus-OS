@@ -1025,10 +1025,13 @@ name = "filesview"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "clipproto",
  "fileops",
  "fsproto",
  "gfx",
  "guiproto",
+ "inputproto",
+ "openwith",
  "tz",
  "ui",
 ]

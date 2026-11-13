@@ -42,7 +42,7 @@ Code:
 <figcaption>The window and the copy helper; init starts them for the user's session.</figcaption>
 </figure>
 
-## What it does (v1)
+## What it does (v1.1)
 
 | Feature | Status |
 |---|---|
@@ -50,18 +50,19 @@ Code:
 | breadcrumbs, Back, Forward, Up (after going up the folder you came from is selected) | **[implemented]** (host `navigate_into_and_up_reselects`) |
 | table Name, Modified, Size, Kind; sort by clicking the header, folders always first, natural name order (`2` before `10`) | **[verified in QEMU]** |
 | search in the current folder (case-insensitive) | **[implemented]** (host `natural_sort_dirs_first_and_unknown_last`) |
-| preview: text (first 64 KiB, CRLF tolerated), BMP (size and depth), metadata | **[verified in QEMU]** (text), BMP host `preview_text_bmp_binary` |
+| preview: text (first 64 KiB, CRLF tolerated), BMP image (24 and 32 bits up to 2048 x 2048 and 24 MiB as a picture, otherwise size and depth), metadata | **[verified in QEMU]** (text and picture), decoding host `preview_text_bmp_binary`, `bmp_preview_shows_image` |
 | new folder, rename (name and collision check), to trash with "Undo" | **[verified in QEMU]** (trash), the rest host |
 | trash of all datasets: restore, delete permanently (with confirmation) | **[implemented]** (host `trash_undo_and_trash_view`) |
 | file version history: Restore, Copy beside | **[implemented]** (host `preview_shows_three_states_and_versions`) |
-| copy / cut / paste through the window clipboard | **[verified in QEMU]** |
+| copy / cut / paste through the system clipboard, also between windows: formats `application/x-mo-paths` (with the operation), `text/uri-list`, text; a list over 60 KiB only within the window | **[verified in QEMU]** with acceleration (WHPX), under TCG the clipboard part is skipped (see Performance); formats host `clipboard_formats_roundtrip` |
 | copy and move as a `files-copy` task with progress, pause and cancel | **[verified in QEMU]** |
 | conflict: overwrite / skip / keep both, "for all" | **[verified in QEMU]** (keep both), the rest host `fileops` |
 | task recovery after an interruption (also after a restart) | **[verified in QEMU]** (test `gui: files-copy: uloha s konfliktem prezije restart procesu`) |
 | app actions `files.*` (command palette, assistant, shell) | **[verified in QEMU]** (`files.show`) |
-| app keys F2, Delete, Backspace, Ctrl+C/X/V | **[designed]** - waits for app keys in `libs/ui`; today through the palette (Ctrl+K) and buttons |
-| clipboard between windows and apps (a list of paths) | **[designed]** - waits for a clipboard with formats in `libs/ui` |
-| mouse dragging (inside the window, between windows) | **[designed]** - waits for drop targets in `libs/ui` |
+| keys: F2 rename, Delete to trash (in the Trash delete permanently with confirmation), Backspace and Alt+Up up, Alt+Left/Right back/forward, F5, Ctrl+C/X/V (by the layout's character), Ctrl+Shift+N new folder, Escape cancels name entry | **[verified in QEMU]** (Ctrl+C, Ctrl+V from QMP), the rest host `keys_map_to_actions` |
+| row context menu (right button, Shift+F10, the Menu key) and in the Trash | **[implemented]** (host `context_menu_and_open_reply`) |
+| dragging selected items onto a folder = move (a rename within a dataset) | **[implemented]** (host `drop_on_folder_moves`); between windows and apps **[designed]** |
+| the "open a path" service reply in the status line (second window channel) | **[implemented]** (host `context_menu_and_open_reply`) |
 | icon view (grid), thumbnails | **[designed]** |
 | "Try aside", taking over changes, Compare versions, editing rights | **[designed]** (prototype `design/soubory.html`) |
 | "Open with..." dialog (`design/dialogy.html`) | **[designed]** - once system dialogs exist |
@@ -189,11 +190,20 @@ lazily. The accessibility tree carries only visible rows.
 | QEMU TCG, release: the `files.show` action in the app in total | 0.63-0.87 s |
 | QEMU TCG, debug: `LIST_STAT_PAGE` in fsd | 3.2 s |
 
+| QEMU WHPX, debug (`16fad2d*`): `LIST_STAT_PAGE` in fsd | 0.23 s |
+| QEMU WHPX, debug: the `files.show` action / rows visible (with the redraw) | 0.30-0.33 s / 0.53-0.56 s |
+| QEMU WHPX, debug: back to home (3 items), rows visible | 0.23 s |
+
 The most expensive part is the listing with metadata in fsd (a `STAT` by
-path for each item); speeding it up is work for fsd. Redrawing after an
-app action has a delay of ~2.6 s in the compositor or `libs/ui`
-regardless of the folder size (reported to the GUI thread); a mouse click
-redraws at once.
+path for each item); speeding it up is work for fsd. In QEMU without
+acceleration (TCG) the compositor composes a frame on the CPU in
+0.6-1.4 s, so new content after an action appears only after ~2.6 s (two
+frames) regardless of the folder size; with WHPX it is 0.2-0.3 s (the
+measurements above). For the same reason, under TCG the app handles a key
+only ~1.5 s after the press and the compositor refuses the clipboard
+offer (the gesture is valid for 1 s); the test reports this under TCG as
+`[preskoceno]` and makes the copy directly through the FS (reported to
+the GUI thread).
 
 ## Security
 

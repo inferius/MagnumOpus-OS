@@ -76,7 +76,7 @@ pub fn spawn_injector(log: PathBuf, port: Arc<AtomicU16>, ps2: bool) {
 
 /// Zacatky testu, ktere vstup z QEMU potrebuji: podle nich se skript deli
 /// na useky (kazdy test zvlast, aby sel spustit i sam).
-const STARTS: [&str; 9] = [
+const STARTS: [&str; 10] = [
     MARKER,
     MARKER_PS2,
     usb::KEYS,
@@ -86,6 +86,7 @@ const STARTS: [&str; 9] = [
     gui::SNAPSHOT,
     gui::PALETTE_SWITCH,
     gui::SHOT[0],
+    gui::FILES_CLICK,
 ];
 
 /// Konec testovaciho behu userspace (dal uz zadny usek neprijde).
@@ -253,6 +254,18 @@ fn gui_steps(s: &mut Vec<Step>) {
         let file = dir.join(format!("{name}.png")).display().to_string().replace('\\', "/");
         s.push(Step::Qmp(format!(r#"{{"execute":"screendump","arguments":{{"filename":"{file}","device":"gpu0","format":"png"}}}}"#)));
     }
+    // Spravce souboru (test `files_window`): klik na radek (fokus okna),
+    // Ctrl+C, Ctrl+V, Ctrl+V, snimek.
+    s.push(Step::ClickAt(gui::FILES_CLICK));
+    for (marker, k) in [(gui::FILES_COPY, "c"), (gui::FILES_PASTE, "v"), (gui::FILES_PASTE_AGAIN, "v")] {
+        s.push(Step::WaitFor(marker));
+        for (name, d) in [("ctrl", true), (k, true), (k, false), ("ctrl", false)] {
+            s.push(Step::Send(vec![key(name, d)]));
+        }
+    }
+    s.push(Step::WaitFor(gui::FILES_SHOT));
+    let file = dir.join("soubory.png").display().to_string().replace('\\', "/");
+    s.push(Step::Qmp(format!(r#"{{"execute":"screendump","arguments":{{"filename":"{file}","device":"gpu0","format":"png"}}}}"#)));
 }
 
 /// Znacky testu GUI (musi sedet s `user/init/src/tests/gui.rs`).
@@ -264,14 +277,16 @@ mod gui {
     pub const SNAPSHOT: &str = "init: test gui: diagnosticky snimek ceka na Print Screen";
     pub const PALETTE_SWITCH: &str = "init: test gui: paleta prepne na Ukazku";
     pub const PALETTE_ACTION: &str = "init: test gui: paleta pricte v Ukazce";
-    pub const SHOT: [&str; 5] = [
-        "init: test gui: snimek light",
-        "init: test gui: snimek dark",
-        "init: test gui: snimek contrast",
-        "init: test gui: snimek terminal",
-        "init: test gui: snimek soubory",
-    ];
-    pub const SHOT_NAMES: [&str; 5] = ["light", "dark", "contrast", "terminal", "soubory"];
+    pub const SHOT: [&str; 4] =
+        ["init: test gui: snimek light", "init: test gui: snimek dark", "init: test gui: snimek contrast", "init: test gui: snimek terminal"];
+    pub const SHOT_NAMES: [&str; 4] = ["light", "dark", "contrast", "terminal"];
+    /// Spravce souboru (`user/init/src/tests/gui_files.rs`): fyzicke
+    /// klavesy (schranka plati jen po fyzickem vstupu) a snimek.
+    pub const FILES_CLICK: &str = "init: test gui: soubory klik mysi na ";
+    pub const FILES_COPY: &str = "init: test gui: soubory ceka na Ctrl+C";
+    pub const FILES_PASTE: &str = "init: test gui: soubory ceka na Ctrl+V";
+    pub const FILES_PASTE_AGAIN: &str = "init: test gui: soubory ceka na dalsi Ctrl+V";
+    pub const FILES_SHOT: &str = "init: test gui: snimek soubory";
 }
 
 fn ps2_steps(s: &mut Vec<Step>) {
@@ -442,6 +457,7 @@ fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step
     let mut next = Some(first);
     while let Some(i) = next {
         done += 1;
+        println!("xtask: QMP: usek '{}'", segs[i].0);
         for step in &segs[i].1 {
             let step = step.clone();
             let (events, device) = match step {

@@ -289,9 +289,18 @@ fn copy_paste_and_job_conflict_ui() {
     let mut m = fm();
     select(&mut m, "zprava.txt");
     m.update(Msg::Copy);
+    // Kopirovat: ucinek schranky se tremi formaty.
+    let fx = m.effects();
+    let ui::Effect::Copy { formats } = &fx[0] else { panic!("{fx:?}") };
+    let fmts: Vec<&str> = formats.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(fmts, ["application/x-mo-paths", "text/uri-list", "text/plain;charset=utf-8"]);
     m.update(Msg::Place(1));
     let mut u = ui_for(&m, 1200);
     press(&mut m, &mut u, "Vložit (1)");
+    // Vlozit: zadost o schranku, data prijdou v `pasted`.
+    assert!(matches!(m.effects().as_slice(), [ui::Effect::Paste { formats }] if formats[0] == "application/x-mo-paths"));
+    let paths = formats.iter().find(|f| f.0 == "application/x-mo-paths").unwrap().1.clone();
+    assert!(m.pasted("application/x-mo-paths", &paths));
     let start = m.b.sent.last().cloned().unwrap();
     assert!(matches!(&start, ClientMsg::Start { op: Op::Copy, sources, dest, .. } if sources == &vec![String::from("/home/jana/zprava.txt")] && dest == "/home/jana/Projekty"), "{start:?}");
     assert!(m.clip.is_some(), "kopie zustava ve schrance");
@@ -330,8 +339,12 @@ fn copy_paste_and_job_conflict_ui() {
     m.update(Msg::Go(String::from("/home/jana")));
     select(&mut m, "obrazek.bmp");
     m.update(Msg::Cut);
+    let Some(ui::Effect::Copy { formats }) = m.effects().pop() else { panic!() };
     m.update(Msg::Go(String::from("/home/jana/Dokumenty")));
     m.update(Msg::Paste);
+    let data = &formats[0].1;
+    assert!(data.starts_with(b"move\n"), "operace ve formatu");
+    m.pasted("application/x-mo-paths", data);
     assert!(matches!(m.b.sent.last(), Some(ClientMsg::Start { op: Op::Move, .. })));
     assert!(m.clip.is_none());
     assert!(!m.external(b"nesmysl"), "neplatna zprava nic nerozbije");
@@ -343,10 +356,10 @@ fn menu_actions() {
     let menu = m.menu();
     let file = &menu[0].children;
     assert_eq!(file.iter().find(|i| i.action == "files.rename").unwrap().shortcut, "F2");
-    assert!(!file.iter().find(|i| i.action == "files.paste").unwrap().disabled.is_empty());
+    assert!(!file.iter().find(|i| i.action == "files.copy").unwrap().disabled.is_empty(), "nic vybrano");
     select(&mut m, "zprava.txt");
     assert!(m.action("files.copy", &[]).is_ok());
-    assert!(m.menu()[0].children.iter().find(|i| i.action == "files.paste").unwrap().disabled.is_empty());
+    assert!(m.menu()[0].children.iter().find(|i| i.action == "files.copy").unwrap().disabled.is_empty());
     assert!(m.action("files.show", &[(String::from("path"), guiproto::action::Value::Path(String::from("/home/jana/Projekty")))]).is_ok());
     assert_eq!(m.nav.cur, "/home/jana/Projekty");
     assert!(m.action("files.nic", &[]).is_err());
@@ -379,4 +392,113 @@ fn ten_thousand_items_are_fast() {
     assert!(rows < 100, "pristupnost jen viditelnych radku: {rows}");
     std::println!("10 000 polozek: nacteni (TestBackend) {load:?}, razeni {sort:?}, prestaveni rozhrani {draw:?}");
     assert!(draw.as_millis() < 50, "prestaveni rozhrani {draw:?}");
+}
+
+#[test]
+fn keys_map_to_actions() {
+    use crate::app::Mode;
+    use crate::key_msg;
+    use inputproto::code::*;
+    use inputproto::mods::{ALT, CTRL, SHIFT};
+    let k = |code, ch, mods| key_msg(false, Mode::Folder, code, ch, mods);
+    assert_eq!(k(KEY_F2, None, 0), Some(Msg::Rename));
+    assert_eq!(k(KEY_DELETE, None, 0), Some(Msg::Trash));
+    assert_eq!(k(KEY_BACKSPACE, None, 0), Some(Msg::Up));
+    assert_eq!(k(KEY_LEFT, None, ALT), Some(Msg::Back));
+    assert_eq!(k(KEY_RIGHT, None, ALT), Some(Msg::Forward));
+    assert_eq!(k(KEY_UP, None, ALT), Some(Msg::Up));
+    assert_eq!(k(KEY_F5, None, 0), Some(Msg::Refresh));
+    // Ctrl+C podle znaku (rozlozeni), ne podle kodu klavesy.
+    assert_eq!(k(KEY_I, Some('c'), CTRL), Some(Msg::Copy));
+    assert_eq!(k(KEY_X, Some('X'), CTRL | SHIFT), Some(Msg::Cut));
+    assert_eq!(k(KEY_V, Some('v'), CTRL), Some(Msg::Paste));
+    assert_eq!(k(KEY_N, Some('n'), CTRL | SHIFT), Some(Msg::NewFolder));
+    assert_eq!(k(KEY_N, Some('n'), CTRL), None, "Ctrl+N nechame systemu (nove okno)");
+    assert_eq!(k(KEY_C, Some('c'), CTRL | ALT), None, "AltGr kombinace neni zkratka");
+    assert_eq!(k(KEY_LEFT, None, 0), None);
+    // Kos: Delete = trvale smazat (s potvrzenim), kopirovani nic.
+    assert_eq!(key_msg(false, Mode::Trash, KEY_DELETE, None, 0), Some(Msg::TrashPurge));
+    assert_eq!(key_msg(false, Mode::Trash, KEY_C, Some('c'), CTRL), None);
+    // Pole jmena: jen Escape.
+    assert_eq!(key_msg(true, Mode::Folder, KEY_ESC, None, 0), Some(Msg::NameCancel));
+    assert_eq!(key_msg(true, Mode::Folder, KEY_DELETE, None, 0), None);
+}
+
+#[test]
+fn clipboard_formats_roundtrip() {
+    use crate::clipfmt::{URI_LIST, decode, encode};
+    let paths = vec![String::from("/home/jana/a b.txt"), String::from("/home/jana/přílohy")];
+    let f = encode(Op::Move, &paths).unwrap();
+    assert_eq!(decode(&f[0].0, &f[0].1), Some((Op::Move, paths.clone())));
+    let uris = core::str::from_utf8(&f[1].1).unwrap();
+    assert!(uris.starts_with("file:///home/jana/a%20b.txt\r\n"), "{uris}");
+    assert_eq!(decode(URI_LIST, &f[1].1), Some((Op::Copy, paths.clone())), "uri-list je vzdy kopie");
+    assert_eq!(decode(URI_LIST, b"# komentar\r\nfile://localhost/etc/x\r\nhttp://web/y\r\n"), Some((Op::Copy, vec![String::from("/etc/x")])));
+    assert_eq!(decode(URI_LIST, b"file:///a%ZZ"), None);
+    assert_eq!(decode("application/x-mo-paths", b"smazat\n/a"), None);
+    assert_eq!(decode("application/x-mo-paths", b"copy\nrelativni"), None);
+    // Prilis mnoho cest: do schranky se nevejdou, vklada se jen v okne.
+    let many: Vec<String> = (0..5000).map(|i| alloc::format!("/home/jana/dlouhe jmeno souboru {i}.txt")).collect();
+    assert!(encode(Op::Copy, &many).is_none());
+}
+
+#[test]
+fn big_selection_pastes_locally() {
+    let mut b = TestBackend::sample();
+    for i in 0..3000 {
+        b.fs.file(&alloc::format!("/home/jana/hodne/soubor s dlouhym jmenem {i}.txt"), b"x");
+    }
+    let mut m = FileManager::new(b);
+    m.update(Msg::Go(String::from("/home/jana/hodne")));
+    let all: Vec<u64> = m.listing.items.iter().map(|i| i.e.oid).collect();
+    m.update(Msg::Select(all));
+    m.update(Msg::Copy);
+    assert!(m.effects().is_empty() && m.clip_local);
+    assert!(m.status.contains("příliš velký"));
+    m.update(Msg::Go(String::from("/home/jana/Dokumenty")));
+    let before = m.b.sent.len();
+    m.update(Msg::Paste);
+    let starts = m.b.sent[before..].iter().filter(|s| matches!(s, ClientMsg::Start { .. })).count();
+    assert_eq!(starts, 3000usize.div_ceil(fileops::proto::MAX_SOURCES), "po davkach");
+}
+
+#[test]
+fn drop_on_folder_moves() {
+    let mut m = fm();
+    let id = |m: &Fm, n: &str| m.listing.items.iter().find(|i| i.e.name == n).unwrap().e.oid;
+    let (txt, docs, bmp) = (id(&m, "zprava.txt"), id(&m, "Dokumenty"), id(&m, "obrazek.bmp"));
+    m.update(Msg::Drop(Some(docs), vec![txt]));
+    assert!(matches!(m.b.sent.last(), Some(ClientMsg::Start { op: Op::Move, sources, dest, .. }) if sources == &vec![String::from("/home/jana/zprava.txt")] && dest == "/home/jana/Dokumenty"));
+    let n = m.b.sent.len();
+    m.update(Msg::Drop(Some(bmp), vec![txt]));
+    m.update(Msg::Drop(None, vec![txt]));
+    m.update(Msg::Drop(Some(docs), vec![docs]));
+    assert_eq!(m.b.sent.len(), n, "na soubor, prazdne misto ani sebe nic");
+}
+
+#[test]
+fn context_menu_and_open_reply() {
+    let mut m = fm();
+    let id = m.listing.items.iter().find(|i| i.e.name == "zprava.txt").unwrap().e.oid;
+    m.update(Msg::Context(id));
+    assert_eq!(m.sel, vec![id]);
+    m.update(Msg::OpenSelected);
+    assert_eq!(m.b.opened, vec![String::from("/home/jana/zprava.txt")]);
+    assert!(m.external_from(1, &openwith::msg::Reply::Revealed(String::from("org.magnumopus.files")).encode()));
+    assert_eq!(m.status, "Pro tento typ souboru zatím není aplikace.");
+    m.external_from(1, &openwith::msg::Reply::Failed(String::from("x: NOT_FOUND")).encode());
+    assert_eq!(m.status, "Nejde otevřít: x: NOT_FOUND");
+    assert!(!m.external_from(1, b"nesmysl"));
+    assert!(!m.external_from(7, b"ok x"), "neznamy kanal");
+}
+
+#[test]
+fn bmp_preview_shows_image() {
+    let mut m = fm();
+    select(&mut m, "obrazek.bmp");
+    let p = m.preview.as_ref().unwrap();
+    let (w, h, px) = p.image.as_ref().expect("obrazek");
+    assert_eq!((*w, *h, px.len()), (2, 2, 4));
+    let u = ui_for(&m, 1200);
+    assert!(u.a11y().iter().any(|n| n.role == Role::Image && n.name == "Obrázek BMP 2 x 2, 24 bitů"));
 }
