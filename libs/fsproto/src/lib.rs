@@ -15,6 +15,7 @@ extern crate alloc;
 
 mod codec;
 pub mod data;
+pub mod datasets;
 pub mod hist;
 pub mod perm;
 mod recover;
@@ -296,6 +297,8 @@ impl Stat {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod datasets_tests;
 
 impl Info {
     pub fn put(&self, w: &mut Writer) {

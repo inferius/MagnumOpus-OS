@@ -1,0 +1,10 @@
+[package]
+name = "openwith"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Asociace typu souboru s aplikacemi ([open] v manifestech) a vyber aplikace pro 'otevri cestu'"
+
+[dependencies]
+conf = { path = "../conf" }
+guiproto = { path = "../guiproto" }

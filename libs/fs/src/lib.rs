@@ -54,7 +54,7 @@ pub use records::{AutoRule, CommitId, JournalEntry, Settings, jattr, jop, snapki
 pub use perm::{Acl, EVERYONE, Grant, Principal, SYSTEM, acl_flags, grant, rights};
 pub use hash::Algo;
 pub use datarec::{DataSettings, DedupMode, ScrubState};
-pub use layout::{Compress, BLOCK_SIZE, INLINE_MAX, MAX_EXTENT, MAX_FILE_SIZE, REUSE_DELAY, SYMLINK_MAX, TimeFormat, Timestamp};
+pub use layout::{ROOT_DATASET, Compress, BLOCK_SIZE, INLINE_MAX, MAX_EXTENT, MAX_FILE_SIZE, REUSE_DELAY, SYMLINK_MAX, TimeFormat, Timestamp};
 pub use names::{NAME_MAX, NAME_MAX_CHARS, fold_name, is_bidi_control, validate_name};
 pub use store::FormatOptions;
 

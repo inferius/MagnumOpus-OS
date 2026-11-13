@@ -164,10 +164,58 @@ impl Service {
     /// 90-92) obsluhuje `serve.rs` spolu s ostatnimi vypisy a ctenim
     /// snapshotu.
     pub fn handle_hist(&mut self, sess: &mut Session, opcode: u32, r: &mut Reader) -> Option<Result<Reply>> {
+        if opcode == fsproto::datasets::OP {
+            return Some(self.datasets(sess));
+        }
         if opcode == fsproto::op::LIST_STAT_PAGE || !(op::JOURNAL_READ..=op::DATASET_OF).contains(&opcode) {
             return None;
         }
         Some(self.hist(sess, opcode, r))
+    }
+
+    /// `DATASETS`: datasety, jejichz koren relace vidi, s cestou relace,
+    /// `Stat` korene a puvodem klonu ve trech stavech.
+    fn datasets(&mut self, sess: &mut Session) -> Result<Reply> {
+        use fsproto::datasets::{DatasetEntry, Origin};
+        let fs = self.fs.as_mut().ok_or(Error::IoError)?;
+        fs.set_time(crate::serve::fs_now());
+        // FS vrati jen datasety, k jejichz koreni projde pruchod (bez
+        // korenoveho); vsechny (i neviditelne) jsou potreba pro puvod klonu.
+        let visible = fs.datasets()?;
+        let all = fs.dataset_ids()?;
+        let mut out = Vec::new();
+        let root_path = sess.unmap("/");
+        if root_path == "/" {
+            out.push(DatasetEntry { path: String::from("/"), id: fs::ROOT_DATASET, root: crate::serve::stat(fs.stat("/")?), origin: Origin::None });
+        }
+        for d in &visible {
+            let path = sess.unmap(&d.path);
+            if d.path.is_empty() || path.is_empty() {
+                continue;
+            }
+            // Koren mohl mezitim zmizet nebo byt nepristupny: polozku vynechat.
+            let Ok(st) = fs.stat(&d.path) else { continue };
+            let origin = match d.origin {
+                None => Origin::None,
+                Some((ods, _, _)) => {
+                    if ods == fs::ROOT_DATASET {
+                        if root_path == "/" { Origin::Known(String::from("/")) } else { Origin::Hidden }
+                    } else if let Some(o) = visible.iter().find(|v| v.id == ods) {
+                        let p = sess.unmap(&o.path);
+                        if p.is_empty() { Origin::Hidden } else { Origin::Known(p) }
+                    } else if all.contains(&ods) {
+                        Origin::Hidden
+                    } else {
+                        Origin::Gone
+                    }
+                }
+            };
+            out.push(DatasetEntry { path, id: d.id, root: crate::serve::stat(st), origin });
+        }
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        let mut w = Writer::new();
+        fsproto::datasets::encode(&mut w, &out);
+        Ok(Reply::body(w))
     }
 
     fn hist(&mut self, sess: &mut Session, opcode: u32, r: &mut Reader) -> Result<Reply> {

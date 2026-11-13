@@ -5,6 +5,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 ## Klíčové soubory
 
 - `src/main.rs` - pořadí startu; `src/system.rs`, `gui.rs`, `accounts.rs`, `session.rs`, `terminal.rs`, `audio.rs`, ... - start jednotlivých služeb.
+- `src/files.rs` - `files-copy` pro každou relaci a handly okna Soubory; `src/open.rs` - služba „otevři cestu“ (asociace `[open]`, kanál pro každou relaci, volání akce přes kompozitor, spuštění aplikace v relaci).
 - `src/supervisor/` - `mod.rs` smyčka (`Supervisor::step`), `lifecycle.rs` restart a závislosti, `leases.rs` lístky, `service.rs` adaptér služby.
 - `src/tests/mod.rs` - `SUITES` (jména sad pro `--only`), makra `check!` / `check_eq!`; jeden soubor na oblast (`gui.rs`, `net.rs`, `fs.rs`, ...).
 
@@ -15,6 +16,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 - Po pádu `compd` se spustí záložní konzole; po pádu `termd` zůstanou relace (`shsess`).
 - Instalátor (`src/install.rs`): `installd` se spouští až na první `OpenInstaller` a jen jednou dostane raw kanály disků (`Devices.raw`). Při startu se čte `/system/config/system.toml` (pásmo pro timed, rozložení klávesnice pro inputd); chybějící soubor = výchozí. Soubor `install-answers` v initfs spustí test instalace (jen obraz testu, nikdy instalovaný initfs).
 - Uživatelská čísla služeb: ACCOUNTD 902, LOGD 903 - nové číslo nesmí kolidovat.
+- `open::poll` nesmí spouštět aplikaci se zámkem služby (spuštění Souborů si bere `open::endpoint`): spouštění až po `drop` zámku.
 - Pořadí startu je závislostní: `fsd` čeká na disk od `devmgr`, `netd` na síťovou kartu atd. Nové pořadí = upravit `docs/cs/init.md`.
 
 ## Testy

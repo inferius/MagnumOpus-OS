@@ -1,0 +1,10 @@
+# Pomocny proces spravce souboru: kopirovani a presun jako ulohy
+# (prezije zavreni okna, je v prehledu uloh, po preruseni pokracuje).
+# Spousti ho init pro kazdou relaci uzivatele; s FS relace uzivatele.
+[app]
+id = "org.magnumopus.files.copy"
+name = "Kopírování souborů"
+system = true
+
+[limits]
+memory = "32M"

@@ -1,0 +1,21 @@
+[package]
+name = "gui-files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "gui-files"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+guiproto = { path = "../../libs/guiproto" }
+fsproto = { path = "../../libs/fsproto" }
+fileops = { path = "../../libs/fileops" }
+filesview = { path = "../../libs/filesview" }
+openwith = { path = "../../libs/openwith" }
+installplan = { path = "../../libs/installplan" }
+ui = { path = "../../libs/ui", features = ["os"] }

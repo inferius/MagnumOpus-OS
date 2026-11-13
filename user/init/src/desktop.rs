@@ -50,6 +50,13 @@ fn opened(startup: &Startup, sup: &mut Supervisor, session: u64) {
         println!("init: relace {session} bez GUI (plocha se nespousti)");
         return;
     };
+    // Sluzba "otevri cestu" a kopirovani souboru relace driv nez okna.
+    if let Err(e) = crate::open::open_session(session) {
+        println!("init: otevirani cest pro relaci {session}: {e}");
+    }
+    if let Err(e) = crate::files::start(startup, session) {
+        println!("init: files-copy pro relaci {session} nelze spustit: {e}");
+    }
     for app in DESKTOP_APPS {
         if let Err(e) = launch_app(gui, startup, sup, app, session) {
             println!("init: {app} pro relaci {session} nelze spustit: {e}");
@@ -62,6 +69,8 @@ fn closed(session: u64) {
         gui.close_session(session);
     }
     crate::terminal::TERMINALS.lock().close_session(session);
+    crate::files::close(session);
+    crate::open::close_session(session);
     println!("init: procesy relace {session} ukonceny");
     crate::gui::session_event(&format!("close {session}"));
 }

@@ -43,7 +43,7 @@ pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
 pub static LAUNCHER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Aplikace plochy, ktere lze spustit z listy (programy v initfs).
-pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks", "gui-komponenty"];
+pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks", "gui-komponenty", "gui-files"];
 
 /// Jmeno kompozitoru v registru supervisoru.
 pub const NAME: &str = "compd";
@@ -540,6 +540,8 @@ pub fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, progra
         // Spravce uloh: vidi vsechny ulohy (systemove i aplikace spustene
         // initem, stejne jako ikona v liste), ridit smi jen sve.
         "gui-tasks" => vec![StartHandle::user(crate::tasks::client_view_all("uzivatel")?.into_handle())],
+        // Spravce souboru: relace FS uzivatele, kanal k files-copy, domov.
+        "gui-files" => crate::files::window_handles(session)?,
         _ => Vec::new(),
     };
     gui.launch_for_session(startup, program, sup, extra, session)

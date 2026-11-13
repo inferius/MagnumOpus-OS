@@ -46,6 +46,9 @@ members = [
     "libs/accounts",
     "libs/taskcore",
     "libs/taskview",
+    "libs/fileops",
+    "libs/filesview",
+    "libs/openwith",
     "libs/gfx",
     "libs/bootsplash",
     "libs/font",
@@ -129,6 +132,8 @@ members = [
     "user/gui-komponenty",
     "user/gui-term",
     "user/gui-tasks",
+    "user/files-copy",
+    "user/gui-files",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace
