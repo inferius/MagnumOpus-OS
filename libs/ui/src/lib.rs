@@ -140,6 +140,13 @@ pub trait App {
         if index == 0 { self.external(data) } else { false }
     }
 
+    /// Pozadovana velikost okna pri otevreni: (sirka, vyska, strop sirky
+    /// a vysky v promile pracovni plochy), viz `Window::request_size`.
+    /// `None` = velikost z `client::run`.
+    fn size_hint(&self) -> Option<(u32, u32, u16, u16)> {
+        None
+    }
+
     /// Klavesa, kterou nespotreboval prvek s fokusem (ani textove pole):
     /// zkratky aplikace (F2, Delete, Enter mimo tabulku, Ctrl+C/X/V nad
     /// tabulkou, Ctrl+N, Alt+sipky). `ch` = znak podle rozlozeni,

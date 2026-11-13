@@ -1192,6 +1192,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui-komponenty"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "libos",
+ "ui",
+]
+
+[[package]]
 name = "gui-tasks"
 version = "0.1.0"
 dependencies = [

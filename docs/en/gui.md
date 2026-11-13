@@ -1617,6 +1617,34 @@ files cost the same as twenty. The application can share data through
   to `App::external_from(index, data)`; `run_with` with one channel still
   calls `App::external`.
 
+### Component gallery and snapshot tests
+
+**The gallery** `gui-komponenty` (a desktop app in the launcher, no
+actions and no permissions) shows the components by group in tabs: Fields,
+Choices, Table (5000 rows, sorting, dragging, context menu), Menus and
+Charts; at the bottom an event log (what a component sent, never field
+values). It is for checking look and behavior by eye. It asks for its
+default size through `App::size_hint` (760 x 600, at most 90 % of the work
+area); the number of log lines follows the window width class.
+
+**Snapshot tests** (`libs/ui/src/tests/shots.rs`) draw the same groups on
+the host in light, dark and high contrast and compare them with reference
+PNGs in `libs/ui/tests/shots/` (15 files of 8-15 kB):
+
+- **Tolerance:** a channel may differ by 24, at most 2 per mille of pixels
+  may differ (font antialiasing). On failure `target/shots/` gets
+  `<name>-actual.png` and `<name>-diff.png` (differences in red).
+- **Determinism:** every snapshot is drawn twice and must match; geometry
+  is integer (corners via `isqrt`), fonts are rasterized in f32 without
+  FMA, so the result is the same on x86_64 and aarch64.
+- **References change only explicitly:** `cargo xtask test --update-shots`
+  (variable `UPDATE_SHOTS=1`) rewrites them and stops; a missing reference
+  is a test failure, not a new snapshot. New snapshots are checked by eye
+  in `git diff` before committing.
+- PNG is written and read by `gfx::png` with its own deflate
+  (`gfx::deflate`: LZ77 and a fixed Huffman code, reading also dynamic
+  codes), with no extra dependency.
+
 The `ui::client` runtime (feature `os`) keeps the window: double buffers
 in VMOs, layers, the whole accessibility tree after every change,
 `COMMIT` with the `CONFIGURE` acknowledgement, replies to `PING` and

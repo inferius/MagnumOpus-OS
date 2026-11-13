@@ -43,7 +43,7 @@ pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
 pub static LAUNCHER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Aplikace plochy, ktere lze spustit z listy (programy v initfs).
-pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks"];
+pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks", "gui-komponenty"];
 
 /// Jmeno kompozitoru v registru supervisoru.
 pub const NAME: &str = "compd";

@@ -323,9 +323,7 @@ pub fn segmented<M>(options: impl IntoIterator<Item = String>, selected: usize) 
 
 /// Zalozky.
 pub fn tabs<M>(labels: impl IntoIterator<Item = String>, selected: usize) -> Node<M> {
-    let mut n = node(Kind::Tabs { labels: labels.into_iter().collect(), selected, on_select: None, on_close: None });
-    n.grow = true;
-    n
+    node(Kind::Tabs { labels: labels.into_iter().collect(), selected, on_select: None, on_close: None })
 }
 
 /// Ton useku pruhoveho grafu (barvy jen z tokenu, dvojice s overenym

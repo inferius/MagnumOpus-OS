@@ -1554,6 +1554,34 @@ tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet př
   `App::external_from(index, data)`; `run_with` s jedním kanálem dál
   volá `App::external`.
 
+### Galerie komponent a snímkové testy
+
+**Galerie** `gui-komponenty` (aplikace plochy ve spouštěči, bez akcí
+a oprávnění) ukazuje komponenty po skupinách v záložkách: Pole, Volby,
+Tabulka (5000 řádků, řazení, tažení, kontextová nabídka), Nabídky a Grafy;
+dole je výpis událostí (co komponenta poslala, hodnoty polí ne). Slouží ke
+kontrole vzhledu a chování okem. Výchozí velikost si říká přes
+`App::size_hint` (760 x 600, nejvýš 90 % pracovní plochy), počet řádků
+výpisu se řídí třídou šířky okna.
+
+**Snímkové testy vzhledu** (`libs/ui/src/tests/shots.rs`) vykreslí stejné
+skupiny na hostiteli ve světlém, tmavém a vysokém kontrastu a porovnají je
+s referenčními PNG v `libs/ui/tests/shots/` (15 souborů po 8-15 kB):
+
+- **Tolerance:** kanál se smí lišit o 24, lišit se smí nejvýš 2 promile
+  pixelů (vyhlazování písma). Při selhání se do `target/shots/` uloží
+  `<jméno>-actual.png` a `<jméno>-diff.png` (červeně rozdíl).
+- **Determinismus:** každý snímek se kreslí dvakrát a musí vyjít stejně;
+  geometrie je celočíselná (zaoblení přes `isqrt`), písmo se rasterizuje
+  v f32 bez FMA, takže výsledek je stejný na x86_64 i aarch64.
+- **Změna referencí jen výslovně:** `cargo xtask test --update-shots`
+  (proměnná `UPDATE_SHOTS=1`) snímky přepíše a skončí; chybějící reference
+  je chyba testu, ne nový snímek. Nové snímky se kontrolují okem v
+  `git diff` před commitem.
+- PNG zapisuje a čte `gfx::png` s vlastní kompresí deflate
+  (`gfx::deflate`: LZ77 a pevný Huffmanův kód, čtení i dynamického kódu),
+  bez další závislosti.
+
 Běhové prostředí `ui::client` (vlastnost `os`) drží okno: dvojité buffery
 ve VMO, vrstvy, celý strom přístupnosti po každé změně, `COMMIT`
 s potvrzením `CONFIGURE`, odpovědi na `PING` a akce. Nižší vrstva

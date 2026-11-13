@@ -16,7 +16,7 @@ gfx = { path = "../gfx" }
 theme = { path = "../theme" }
 # Rezy Interu, ktere prvky kresli (text 400, tlacitko 500 -> 400, tucne 600,
 # nadpis 650 -> 700); kazdy rez ~0,4 MB v programu.
-font = { path = "../font", features = ["inter-400", "inter-600", "inter-700"] }
+font = { path = "../font", features = ["inter-400", "inter-500", "inter-600", "inter-700"] }
 inputproto = { path = "../inputproto" }
 libos = { path = "../libos", optional = true }
 # Obnova okna po padu kompozitoru (listek k supervisoru).

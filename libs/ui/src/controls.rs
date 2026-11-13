@@ -59,11 +59,13 @@ impl<M: Clone> Ui<M> {
             }
             ElemKind::Tabs { labels, on_close, .. } => {
                 let close = if on_close.is_some() { self.look.theme.size.icon_xs + sp[2] } else { 0 };
+                // Sirka podle tucneho pisma (vybrana zalozka se nezuzi).
+                let strong = theme::TextStyle { weight: self.look.theme.text.body_strong.weight, ..body };
                 let mut x = r.x;
                 labels
                     .iter()
                     .map(|l| {
-                        let w = (self.look.width(l, body) + 2 * sp[4] + close).min(TAB_MAX);
+                        let w = (self.look.width(l, strong) + 2 * sp[4] + close).min(TAB_MAX);
                         let o = Rect::new(x, r.y, w, r.h);
                         x += (w + sp[1]) as i32;
                         o

@@ -15,6 +15,7 @@ extern crate alloc;
 pub mod backdrop;
 pub mod blur;
 pub mod damage;
+pub mod deflate;
 pub mod icon;
 pub mod png;
 pub mod shadow;

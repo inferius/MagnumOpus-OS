@@ -610,6 +610,10 @@ pub fn run_with<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u3
 /// zpravy z kanalu `extras[i]` dostane [`App::external_from`] s indexem `i`.
 pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extras: Vec<Channel>) -> Result<()> {
     let mut win = Window::open(link, mode, w, h, &app.title())?;
+    // Velikost podle aplikace pred prvnim zobrazenim (bez probliknuti).
+    if let Some((sw, sh, fw, fh)) = app.size_hint() {
+        win.request_size(sw, sh, fw, fh)?;
+    }
     let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
     set_context(&win, &mut ui);
     let mut dirty = true;
