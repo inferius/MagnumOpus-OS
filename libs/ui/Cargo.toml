@@ -21,3 +21,7 @@ inputproto = { path = "../inputproto" }
 libos = { path = "../libos", optional = true }
 # Obnova okna po padu kompozitoru (listek k supervisoru).
 svcclient = { path = "../svcclient", features = ["client"], optional = true }
+
+[dev-dependencies]
+# Snimkovy test seznamu navrhu: jmena v mono (jako v terminalu).
+font = { path = "../font", features = ["inter-400", "inter-500", "inter-600", "inter-700", "mono-600"] }

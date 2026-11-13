@@ -9,6 +9,15 @@
 //!   smi jen okno s fokusem, ktere prave dostalo fyzicky vstup (klavesa
 //!   nebo klik od skutecneho zarizeni, ne umely). Jedno gesto = jedno
 //!   vlozeni. Aplikace na pozadi schranku neprecte.
+//! - **Gesto = seriove cislo udalosti** (jako serial ve Waylandu):
+//!   kompozitor prideli kazdemu fyzickemu stisku klavesy a tlacitka, ktery
+//!   doruci oknu, cislo (`guiproto::window::InputRecord::serial`); aplikace
+//!   ho posle v `Offer` / `Request`. Plati jen cislo, ktere kompozitor sam
+//!   dorucil tomuto oknu, jen jednou, jen mezi poslednimi
+//!   `comp::clipboard::GESTURES` stisky okna, kdyz ma okno fokus,
+//!   a nejvys `comp::clipboard::GESTURE_MAX` (10 s). Pomale zpracovani
+//!   (emulace) tak nevadi, podvrzene, cizi ani znovu pouzite cislo
+//!   neprojde.
 //! - **Liny prenos:** vlastnik nabidne formaty (`Offer`), data posle az na
 //!   zadost (`Send`) pri vlozeni.
 //! - **Po skonceni vlastnika** zustane posledni obsah: male formaty si
@@ -88,10 +97,13 @@ impl Denied {
 /// Zprava aplikace -> schranka.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientMsg {
-    /// Kopirovat: aplikace ma data v techto formatech.
-    Offer { formats: Vec<String> },
-    /// Vlozit: aplikace chce data ve formatu `format`.
-    Request { serial: u32, format: String },
+    /// Kopirovat: aplikace ma data v techto formatech. `gesture` =
+    /// seriove cislo vstupni udalosti, ktera kopirovani vyvolala
+    /// (`InputRecord::serial`).
+    Offer { gesture: u32, formats: Vec<String> },
+    /// Vlozit: aplikace chce data ve formatu `format`; `gesture` jako
+    /// u `Offer`.
+    Request { gesture: u32, serial: u32, format: String },
     /// Odpoved vlastnika na `Send`.
     Data { serial: u32, data: Vec<u8> },
 }
@@ -143,13 +155,14 @@ impl ClientMsg {
     pub fn encode(&self) -> Vec<u8> {
         let mut w;
         match self {
-            ClientMsg::Offer { formats } => {
+            ClientMsg::Offer { gesture, formats } => {
                 w = Writer::op(op::OFFER);
+                w.u32(*gesture);
                 formats_w(&mut w, formats);
             }
-            ClientMsg::Request { serial, format } => {
+            ClientMsg::Request { gesture, serial, format } => {
                 w = Writer::op(op::REQUEST);
-                w.u32(*serial).str(format);
+                w.u32(*gesture).u32(*serial).str(format);
             }
             ClientMsg::Data { serial, data } => {
                 w = Writer::op(op::DATA);
@@ -162,8 +175,8 @@ impl ClientMsg {
     pub fn decode(b: &[u8]) -> Result<Self> {
         let mut r = Reader::new(b);
         let m = match r.u32()? {
-            op::OFFER => ClientMsg::Offer { formats: formats_r(&mut r)? },
-            op::REQUEST => ClientMsg::Request { serial: r.u32()?, format: r.str()? },
+            op::OFFER => ClientMsg::Offer { gesture: r.u32()?, formats: formats_r(&mut r)? },
+            op::REQUEST => ClientMsg::Request { gesture: r.u32()?, serial: r.u32()?, format: r.str()? },
             op::DATA => ClientMsg::Data { serial: r.u32()?, data: data_r(&mut r)? },
             _ => return Err(Error::NotSupported),
         };
@@ -223,8 +236,8 @@ mod tests {
     #[test]
     fn roundtrip() {
         let c = [
-            ClientMsg::Offer { formats: vec![TEXT.into()] },
-            ClientMsg::Request { serial: 7, format: TEXT.into() },
+            ClientMsg::Offer { gesture: 3, formats: vec![TEXT.into()] },
+            ClientMsg::Request { gesture: 4, serial: 7, format: TEXT.into() },
             ClientMsg::Data { serial: 7, data: "Čaj".as_bytes().to_vec() },
         ];
         for m in c {
@@ -244,13 +257,13 @@ mod tests {
     /// Neduveryhodna data: prilis mnoho formatu, velka data, smeti.
     #[test]
     fn rejects_bad_input() {
-        let many = ClientMsg::Offer { formats: (0..MAX_FORMATS + 1).map(|i| alloc::format!("f{i}")).collect() };
+        let many = ClientMsg::Offer { gesture: 1, formats: (0..MAX_FORMATS + 1).map(|i| alloc::format!("f{i}")).collect() };
         assert!(ClientMsg::decode(&many.encode()).is_err());
         let big = ClientMsg::Data { serial: 1, data: vec![0; MAX_INLINE + 1] };
         assert!(ClientMsg::decode(&big.encode()).is_err());
         assert!(ClientMsg::decode(&[9, 0, 0, 0]).is_err());
         assert!(ClientMsg::decode(&[]).is_err());
-        let empty = ClientMsg::Offer { formats: vec![String::new()] };
+        let empty = ClientMsg::Offer { gesture: 1, formats: vec![String::new()] };
         assert!(ClientMsg::decode(&empty.encode()).is_err());
     }
 }

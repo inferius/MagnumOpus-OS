@@ -172,6 +172,7 @@ fn server_messages_roundtrip() {
                     synthetic: false,
                     time: 10,
                     class: 0,
+                    serial: 77,
                 },
                 InputRecord {
                     event: InputEvent::Button {
@@ -184,6 +185,7 @@ fn server_messages_roundtrip() {
                     synthetic: true,
                     time: 11,
                     class: 2,
+                    serial: 0,
                 },
                 InputRecord {
                     event: InputEvent::PointerLeave,
@@ -191,6 +193,7 @@ fn server_messages_roundtrip() {
                     synthetic: false,
                     time: 12,
                     class: 0,
+                    serial: 0,
                 },
             ],
         },
@@ -670,13 +673,13 @@ fn menu_update_roundtrip_and_limits() {
 #[test]
 fn a11y_roles_roundtrip() {
     let mut names: alloc::vec::Vec<&str> = alloc::vec::Vec::new();
-    for v in 1..=28u16 {
+    for v in 1..=30u16 {
         let r = Role::from_u16(v);
         assert!(!matches!(r, Role::Unknown(_)), "kod {v}");
         assert_eq!(r.to_u16(), v);
         assert!(!names.contains(&r.name()), "{}", r.name());
         names.push(r.name());
     }
-    assert_eq!(Role::from_u16(29), Role::Unknown(29));
-    assert_eq!(Role::Unknown(29).to_u16(), 29);
+    assert_eq!(Role::from_u16(31), Role::Unknown(31));
+    assert_eq!(Role::Unknown(31).to_u16(), 31);
 }

@@ -149,10 +149,9 @@ impl InputState {
 
 impl Comp {
     pub(crate) fn send_input(&mut self, c: ClientId, local: u32, event: InputEvent, mods: u16, synthetic: bool, time: u64) {
-        // Fyzicky stisk = gesto pro schranku (kopirovat, vlozit).
-        if !synthetic && matches!(event, InputEvent::Key { action: 1, .. } | InputEvent::Button { pressed: true, .. }) {
-            self.clip_gesture(c, self.input_now);
-        }
+        // Fyzicky stisk = gesto pro schranku (kopirovat, vlozit): cislo
+        // jde s udalosti, aplikace ho posle se zadosti.
+        let serial = if !synthetic && matches!(event, InputEvent::Key { action: 1, .. } | InputEvent::Button { pressed: true, .. }) { self.clip_gesture(c, self.input_now) } else { 0 };
         self.send(
             c,
             ServerMsg::Input {
@@ -165,6 +164,7 @@ impl Comp {
                     // Trida zdroje zpracovavaneho zaznamu (udalosti od
                     // systemu jako fokus jsou mistni).
                     class: if synthetic { self.input.class } else { guiproto::window::input_class::LOCAL },
+                    serial,
                 }],
             },
         );

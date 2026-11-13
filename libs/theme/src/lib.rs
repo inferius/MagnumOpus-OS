@@ -192,6 +192,8 @@ uints!(
     hit_min_fine,
     hit_min_touch,
     launcher_w,
+    completion_w,
+    completion_max_h,
 );
 
 /// Kryti (0..=255 pro `gfx::scale`).

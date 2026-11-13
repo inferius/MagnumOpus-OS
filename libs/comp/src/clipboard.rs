@@ -5,8 +5,10 @@
 //! a odesilani zprav. Pozdeji pujde do vlastni sluzby beze zmeny zprav.
 //!
 //! - Nabidnout (kopirovat) i vyzadat (vlozit) smi jen klient okna
-//!   s fokusem do [`GESTURE`] po fyzickem stisku klavesy nebo tlacitka.
-//!   Jedno gesto = jedno vlozeni.
+//!   s fokusem a jen s cislem gesta (`InputRecord::serial`), ktere mu
+//!   kompozitor doruci s fyzickym stiskem klavesy nebo tlacitka: jen
+//!   jednou, jen z poslednich [`GESTURES`] stisku klienta a nejvys
+//!   [`GESTURE_MAX`] po doruceni.
 //! - Data se prenasi line: na vlozeni kompozitor pozada vlastnika
 //!   (`Send`) a odpoved preda zadateli (`Deliver`).
 //! - Vsechny nabidnute formaty si kompozitor vyzada hned po nabidce
@@ -23,8 +25,19 @@ use guiproto::window::ServerMsg;
 
 use crate::{ClientId, Comp};
 
-/// Jak dlouho po fyzickem vstupu smi okno se schrankou pracovat (ns).
-pub const GESTURE: u64 = 1_000_000_000;
+/// Zalozni horni mez platnosti gesta od doruceni stisku (ns).
+pub const GESTURE_MAX: u64 = 10_000_000_000;
+
+/// Kolik poslednich stisku klienta se pamatuje (rychle psani po Ctrl+C).
+pub const GESTURES: usize = 8;
+
+/// Doruceny fyzicky stisk: cislo, cas doruceni, uz pouzity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Gesture {
+    serial: u32,
+    time: u64,
+    used: bool,
+}
 
 /// Nejvic bajtu kopii vsech formatu, ktere kompozitor drzi.
 pub const KEEP_MAX: usize = 256 * 1024;
@@ -47,9 +60,11 @@ pub struct Clipboard {
     kept: Vec<(String, Vec<u8>)>,
     serial: u32,
     wait: BTreeMap<u32, Wait>,
-    /// Posledni fyzicky vstup do klienta: (klient, cas, uz pouzit pro
-    /// vlozeni).
-    gesture: Option<(ClientId, u64, bool)>,
+    /// Posledni fyzicke stisky dorucene klientum (nejvys [`GESTURES`]
+    /// na klienta).
+    gestures: BTreeMap<ClientId, Vec<Gesture>>,
+    /// Posledni pridelene cislo gesta (0 = zadne).
+    gesture_serial: u32,
 }
 
 impl Clipboard {
@@ -73,9 +88,17 @@ impl Comp {
         self.send(c, ServerMsg::Clipboard { data: m.encode() });
     }
 
-    /// Fyzicky vstup dorucen klientovi (stisk klavesy nebo tlacitka).
-    pub(crate) fn clip_gesture(&mut self, c: ClientId, time: u64) {
-        self.clipboard.gesture = Some((c, time, false));
+    /// Fyzicky stisk klavesy nebo tlacitka doruceny klientovi: prideli
+    /// mu cislo gesta (do `InputRecord::serial`).
+    pub(crate) fn clip_gesture(&mut self, c: ClientId, time: u64) -> u32 {
+        let cb = &mut self.clipboard;
+        cb.gesture_serial = cb.gesture_serial.wrapping_add(1).max(1);
+        let g = cb.gestures.entry(c).or_default();
+        if g.len() >= GESTURES {
+            g.remove(0);
+        }
+        g.push(Gesture { serial: cb.gesture_serial, time, used: false });
+        cb.gesture_serial
     }
 
     /// Klient okna s fokusem.
@@ -83,10 +106,20 @@ impl Comp {
         self.focus.and_then(|g| self.windows.get(&g)).map(|w| w.client)
     }
 
-    /// Ma klient `c` platne gesto (fokus a fyzicky vstup pred chvili)?
-    fn clip_allowed(&self, c: ClientId, now: u64, paste: bool) -> bool {
-        self.focused_client() == Some(c)
-            && self.clipboard.gesture.is_some_and(|(g, t, used)| g == c && now.saturating_sub(t) <= GESTURE && !(paste && used))
+    /// Vezme gesto `serial` klienta `c`: okno ma fokus, cislo mu
+    /// kompozitor dorucil (mezi poslednimi [`GESTURES`]), jeste nebylo
+    /// pouzite a neni starsi nez [`GESTURE_MAX`]. Platne gesto se tim
+    /// spotrebuje (jedno gesto = jedna akce).
+    fn clip_take_gesture(&mut self, c: ClientId, serial: u32, now: u64) -> bool {
+        if serial == 0 || self.focused_client() != Some(c) {
+            return false;
+        }
+        let Some(g) = self.clipboard.gestures.get_mut(&c).and_then(|v| v.iter_mut().find(|g| g.serial == serial)) else { return false };
+        if g.used || now.saturating_sub(g.time) > GESTURE_MAX {
+            return false;
+        }
+        g.used = true;
+        true
     }
 
     /// Je v okne s fokusem zamereny uzel s heslem?
@@ -101,12 +134,12 @@ impl Comp {
             return self.error(c, guiproto::window::op::CLIPBOARD, guiproto::Error::InvalidArgs);
         };
         match m {
-            CMsg::Offer { formats } => {
+            CMsg::Offer { gesture, formats } => {
                 if self.focus_in_secure_field() {
                     return self.trace_clip("nabidka odmitnuta: fokus v zabezpecenem poli");
                 }
-                if !self.clip_allowed(c, now, false) {
-                    return self.trace_clip("nabidka odmitnuta: okno bez fokusu nebo bez gesta");
+                if !self.clip_take_gesture(c, gesture, now) {
+                    return self.trace_clip("nabidka odmitnuta: okno bez fokusu nebo bez platneho gesta");
                 }
                 // Stara nabidka konci: rozpracovana vlozeni od ni selzou.
                 self.clip_fail_owner();
@@ -120,12 +153,9 @@ impl Comp {
                 }
                 self.clip_changed();
             }
-            CMsg::Request { serial, format } => {
-                if !self.clip_allowed(c, now, true) {
+            CMsg::Request { gesture, serial, format } => {
+                if !self.clip_take_gesture(c, gesture, now) {
                     return self.clip_send(c, SMsg::Denied { serial, why: Denied::NoGesture });
-                }
-                if let Some(g) = self.clipboard.gesture.as_mut() {
-                    g.2 = true;
                 }
                 match self.clipboard.owner {
                     Some(o) if self.clipboard.formats.contains(&format) => {
@@ -174,9 +204,7 @@ impl Comp {
 
     /// Klient skoncil: zustane kopie jeho nabidky.
     pub(crate) fn clip_client_gone(&mut self, c: ClientId) {
-        if self.clipboard.gesture.is_some_and(|g| g.0 == c) {
-            self.clipboard.gesture = None;
-        }
+        self.clipboard.gestures.remove(&c);
         self.clipboard.wait.retain(|_, w| !matches!(w, Wait::Paste(to, ..) if *to == c));
         if self.clipboard.owner == Some(c) {
             self.clip_fail_owner();

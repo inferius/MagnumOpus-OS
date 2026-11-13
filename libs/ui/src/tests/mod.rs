@@ -326,5 +326,6 @@ mod keys;
 mod popup;
 mod shots;
 mod spatial;
+mod suggest;
 mod table;
 mod text;

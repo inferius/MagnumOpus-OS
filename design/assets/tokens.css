@@ -79,6 +79,8 @@
   --size-hit-min-fine: 32px;
   --size-hit-min-touch: 44px;
   --size-launcher-w: 300px;
+  --size-completion-w: 380px;
+  --size-completion-max-h: 260px;
   --r-xs: 6px;
   --r-badge: 8px;
   --r-control: 10px;

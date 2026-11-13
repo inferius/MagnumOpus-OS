@@ -184,10 +184,10 @@ Struktura okna je součást protokolu. Uzel (`A11Y_UPDATE`) nese:
 | Pole | Význam |
 |---|---|
 | `id`, `parent` | identita a rodič (0 = kořen okna) |
-| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `password-input`, `checkbox`, `switch`, `radio`, `slider`, `combo-box`, `list`, `list-item`, `table`, `row`, `cell`, `column-header`, `tab-list`, `tab`, `segmented`, `menu`, `menu-item`, `tooltip`, `scroll-area`, `group`, `image`, `progress`, `terminal` |
+| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `password-input`, `checkbox`, `switch`, `radio`, `slider`, `combo-box`, `list`, `list-item`, `table`, `row`, `cell`, `column-header`, `tab-list`, `tab`, `segmented`, `list-box`, `list-option`, `menu`, `menu-item`, `tooltip`, `scroll-area`, `group`, `image`, `progress`, `terminal` |
 | `name` | text pro člověka („Uložit“) |
 | `value` | hodnota (text pole, procenta průběhu) |
-| `state` | bity: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy`, `hover`, `pressed`, `invalid` (text chyby je podřízený uzel `label`) |
+| `state` | bity: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy`, `hover`, `pressed`, `invalid` (text chyby je podřízený uzel `label`), `active` (aktivní položka seznamu návrhů, fokus zůstává v poli), `autocomplete` (pole nabízí seznam návrhů) |
 | `bounds` | vrstva + obdélník v ní |
 | `actions` | bity: `activate`, `focus`, `set-value`, `toggle`, `scroll` |
 
@@ -304,8 +304,9 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   `cx.posture`, `cx.can_hover()`, `cx.focus_only()`.
 - Terminál: `win.request_size(1040, 520, 850, 0)`, tedy 1040 px, ale nejvýš
   85 % šířky pracovní plochy.
-- Verze protokolu 2 (`guiproto::VERSION`): kompozitor a aplikace se
-  sestavují spolu, `HELLO` vyžaduje shodu.
+- Verze protokolu 4 (`guiproto::VERSION`; 4 = sériové číslo gesta
+  v `InputRecord`): kompozitor a aplikace se sestavují spolu, `HELLO`
+  vyžaduje shodu.
 
 **[implementováno]** (testy `context_first_and_initial_size_without_flicker`,
 `request_size_later_and_while_maximized`, `resize_sends_new_context_generation`
@@ -541,10 +542,12 @@ rozděluje je:
   z toho zařízení zahazuje - zařízení se tedy nemůže povolit samo
   (vypsat Enter). Odpověď pošle `inputd` jako `trust <id>` / `reject <id>`.
 
-Okno dostane `INPUT` se záznamy `InputRecord` (28 B): klávesa (kód
+Okno dostane `INPUT` se záznamy `InputRecord` (32 B): klávesa (kód
 nezávislý na rozložení, akce, znak), vložený text, ukazatel v souřadnicích
 okna, opuštění okna, tlačítko s polohou, kolečko a fokus; k tomu
-modifikátory, příznak umělého vstupu a čas. Pohyb a uvolnění tlačítka jdou
+modifikátory, třída zdroje, čas a sériové číslo gesta (`serial`: každý
+stisk klávesy a tlačítka z místního fyzického vstupu dostane od
+kompozitoru nové číslo, jinak 0; viz schránka). Pohyb a uvolnění tlačítka jdou
 oknu, které dostalo stisk, i když ukazatel z okna odjede.
 
 ### Celá obrazovka a Nerušit
@@ -1482,7 +1485,7 @@ do vlastní služby beze změny zpráv.
 
 | Pravidlo | Jak |
 |---|---|
-| jen na akci uživatele | nabídnout i vyžádat smí jen okno s fokusem do 1 s po fyzickém stisku klávesy nebo tlačítka (ne umělý vstup); jedno gesto = jedno vložení |
+| jen na akci uživatele | nabídnout i vyžádat smí jen okno s fokusem a jen s číslem gesta (`gesture` v `Offer` / `Request`), jako serial ve Waylandu: kompozitor přidělí číslo každému stisku klávesy a tlačítka z místního fyzického vstupu, který doručí oknu (`InputRecord::serial`), a aplikace pošle číslo události, která akci vyvolala. Přijme se jen číslo doručené tomuto oknu, jen jednou (jedno gesto = jedna akce), jen z posledních 8 stisků okna (`GESTURES`) a nejvýš 10 s po doručení (`GESTURE_MAX`). Pomalé zpracování (emulace) nevadí; podvržené, cizí a znovu použité číslo neprojde (testy `forged_and_foreign_gesture_refused`, `gesture_survives_slow_app_until_backstop` v `libs/comp`) |
 | líný přenos | vlastník nabídne formáty (`Offer`), data pošle až na žádost (`Send` -> `Data` -> `Deliver`) |
 | po skončení vlastníka | všechny formáty si kompozitor vyžádá hned po nabídce a drží jejich kopii (do 256 KiB); čekající vložení selže (`Denied: Unavailable`) |
 | zabezpečená pole | knihovna heslo do schránky nedá; kompozitor navíc odmítne nabídku z okna, jehož uzel s fokusem je `password-input` |
@@ -1492,7 +1495,8 @@ do vlastní služby beze změny zpráv.
 Okno s fokusem dostane `Changed` s formáty ve schránce (při změně obsahu
 a při získání fokusu), aby mohlo povolit položku „Vložit“. Aplikace, které
 kreslí samy, volají `Window::copy_text`, `Window::request_paste`
-a `Window::clipboard_event`.
+a `Window::clipboard_event`; číslo gesta přiloží klient sám (poslední
+událost se stiskem z `Window::next`, `Window::gesture`).
 
 **Pruhový graf podílů** `segments(vec![Segment::new(váha, popisek, tón)])`
 (`.dbar` v `design/instalace.html`): oddíly disku v instalátoru, obsazení
@@ -1544,6 +1548,49 @@ Prototyp má pro oddíly pevné barvy; systém je nahrazuje těmito tóny.
   vešla do pracovní plochy, dostane aplikace polohu okna zprávou
   `WINDOW_PLACE { window, rect }` (po zobrazení a po každém přesunu nebo
   změně velikosti, během tahu až na konci); `cx.window`.
+
+### Seznam návrhů u pole (doplňování) **[implementováno]**
+
+Combobox podle `#compl` v `design/terminal.html`: pole si nechá fokus
+klávesnice a dál se do něj píše, šipky jen hýbou výběrem v seznamu (na
+rozdíl od nabídky, která si klávesnici bere). Používá ho terminál, adresní
+řádek a hledání ve správci souborů a pole instalátoru.
+
+- **Ve stromu `Ui`:** `text_input(&q).on_change(Msg::Q).suggest(suggest("Cesty",
+  položky, Msg::Doplnit).on_select(Msg::Náhled).on_close(Msg::Zavřeno))`,
+  položka `Suggestion::new("/home/", "složka").icon("folder")`, zakázaná
+  `.disabled("bez práv")`; `.above()` = seznam nad polem. Seznam je
+  otevřený, když má pole fokus a aplikace dala aspoň jednu položku; výběr,
+  najetí a posun drží knihovna. Esc, přijetí a stisk mimo ho zavřou
+  (`on_close`), dokud aplikace nepředá jiné položky (napsaný znak = nový
+  seznam). Pole s heslem seznam nikdy nemá. Písmo jmen: mono, když ho
+  aplikace dá (`Ui::set_mono_fonts`), jinak písmo UI.
+- **Samostatně** (`ui::complete::Completion`, např. gui-term s vlastní
+  mřížkou): stav (`header`, `items`, `selected`, `hover`, `scroll`,
+  `anchor`, `prefer` nad/pod), `key(&ev, mods)` a `pointer(&ev)` vrátí
+  `Outcome { Ignored, Moved, Accept(i), Close }`, `place(theme, min_hit,
+  plocha)` spočítá obdélník u kotvy (otočí se, když se nevejde), `hit(x, y)`,
+  `draw(platno, počátek, Paint { theme, fonts, mono, icons })` nakreslí
+  obsah do dodaného plátna (např. vrstvy popoveru) a `a11y(rodič, id_seznamu,
+  id_položky, vrstva)` vrátí uzly přístupnosti s id od volajícího.
+- **Klávesy:** nahoru a dolů (dokola, zakázané přeskočí), PgUp/PgDn,
+  Home/End, Enter a Tab přijmou vybranou, Esc zavře; ostatní klávesy,
+  Shift+Tab a zkratky s Ctrl/Alt jdou do pole. **Myš:** najetí zvýrazní,
+  klik přijme, kolečko posouvá, stisk mimo seznam ho zavře a jde dál.
+- **Vzhled z tokenů:** karta popoveru, záhlaví `caption` v `ink_muted`
+  (váha `body_strong`), řádek ikona (`icon_m`) | jméno (mono, váha
+  `body_strong`) | typ (`caption`, `ink_muted`), výška `control_h` (dotyk
+  `min_hit`), zaoblení `xs`, výběr `accent_soft`, šířka
+  `size.completion_w` (380), nejvýš `size.completion_max_h` (260). Kreslí
+  se ve vrstvě popoveru, takže smí přesahovat okno.
+- **Přístupnost:** pole má stav `autocomplete` a při otevřeném seznamu
+  `expanded`; seznam je uzel `list-box` (jméno = záhlaví) pod polem,
+  položky `list-option`, vybraná má `selected` a `active` (aktivní potomek,
+  fokus zůstává v poli). Akce `activate` na položce ji přijme.
+- **Robustnost:** položky jsou data zvenku: nejvýš `MAX_ITEMS` (1000),
+  texty oříznuté na `MAX_TEXT` (200 znaků), žádný `unwrap` na datech.
+- Testy: `libs/ui/src/tests/suggest.rs`, snímek `navrhy-*.png`
+  (`shot_suggest`).
 
 ### Tabulka a seznam (virtualizace)
 
@@ -1644,7 +1691,7 @@ Každý záznam vstupu nese třídu zdroje (`InputRecord::class`, příznaky
 | Třída | Odkud | Co smí |
 |---|---|---|
 | místní fyzický | klávesnice, myš, spárovaný ovladač | vše |
-| vzdálený | telefon jako ovladač, vzdálená plocha | aplikace ano; systémové dialogy, přihlášení, bezpečná zkratka, zkratky systému a schránka ne |
+| vzdálený | telefon jako ovladač, vzdálená plocha | aplikace ano; systémové dialogy, přihlášení, bezpečná zkratka, zkratky systému a schránka ne (nedostane číslo gesta) |
 | syntetický | automatizace, agent, test | jako vzdálený |
 
 - Kompozitor posílá aplikacím třídu u každé události a důvěryhodné akce

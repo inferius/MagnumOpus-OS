@@ -39,8 +39,9 @@ pub use abi::{Error, Result};
 pub use wire::{Reader, Writer};
 
 /// Verze protokolu okna a displeje (2: `WINDOW_SIZE`, `WINDOW_CONTEXT`;
-/// 3: rozsireni kontextu pro tablet a TV, `context::ContextExt`).
-pub const VERSION: u32 = 3;
+/// 3: rozsireni kontextu pro tablet a TV, `context::ContextExt`;
+/// 4: seriove cislo gesta v `InputRecord`).
+pub const VERSION: u32 = 4;
 
 /// Nejvetsi sirka nebo vyska bufferu, okna a vystupu v pixelech.
 pub const MAX_DIM: u32 = 16384;

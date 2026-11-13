@@ -89,7 +89,7 @@ pub enum Kind<M> {
     /// `secure` = heslo: kresli se teckami, hodnota se nedava do stromu
     /// pristupnosti ani do trasovani, kompozitor pole zakryje ve snimku.
     /// `multiline` = viceradkove pole (`text_area`) s `rows` radky.
-    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<KeyMapFn> },
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<KeyMapFn>, suggest: Option<Box<crate::suggest::Suggest<M>>> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
     List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
@@ -276,6 +276,7 @@ pub fn text_input<M>(value: &str) -> Node<M> {
         on_change: None,
         key_map: None,
         on_submit: None,
+        suggest: None,
     })
 }
 
@@ -594,6 +595,15 @@ impl<M> Node<M> {
     pub fn key_map(mut self, f: impl Fn(u16, u16) -> Option<char> + 'static) -> Self {
         if let Kind::TextInput { key_map, .. } = &mut self.kind {
             *key_map = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// Seznam navrhu u pole (doplnovani, `ui::suggest`). Pole s heslem
+    /// ho nikdy neukaze.
+    pub fn suggest(mut self, s: crate::suggest::Suggest<M>) -> Self {
+        if let Kind::TextInput { suggest, .. } = &mut self.kind {
+            *suggest = Some(Box::new(s));
         }
         self
     }
