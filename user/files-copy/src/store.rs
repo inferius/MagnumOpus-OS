@@ -13,25 +13,28 @@ use libos::{Error, Result};
 
 const SUFFIX: &str = ".uloha";
 
+/// Slozka stavu pod domovem.
+const REL: [&str; 3] = ["apps", "org.magnumopus.files", "ulohy"];
+
 pub struct Store {
+    home: String,
     pub dir: String,
 }
 
 impl Store {
     pub fn new(home: &str) -> Self {
-        Self { dir: format!("{}/apps/org.magnumopus.files/ulohy", home.trim_end_matches('/')) }
+        let home = String::from(home.trim_end_matches('/'));
+        let dir = format!("{home}/{}", REL.join("/"));
+        Self { home, dir }
     }
 
-    /// Vytvori slozku stavu (i rodice; existujici se jen projdou - relace
-    /// uzivatele nesmi tvorit v `/` ani `/home`).
+    /// Vytvori slozku stavu pod domovem (domov sam musi existovat; nad
+    /// nim relace uzivatele nic netvori).
     pub fn ensure(&self, fs: &FsClient) -> Result<()> {
-        let mut p = String::new();
-        for part in self.dir.split('/').filter(|s| !s.is_empty()) {
-            p.push('/');
-            p.push_str(part);
-            if fs.stat(&p).is_ok() {
-                continue;
-            }
+        fs.stat(&self.home)?;
+        let mut p = self.home.clone();
+        for part in REL {
+            p = join(&p, part);
             match fs.create(&p, kind::DIR) {
                 Ok(()) | Err(Error::AlreadyExists) => {}
                 Err(e) => return Err(e),

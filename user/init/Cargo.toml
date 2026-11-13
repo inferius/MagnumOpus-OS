@@ -37,3 +37,4 @@ zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
 agentproto = { path = "../../libs/agentproto" }
 wire = { path = "../../libs/wire" }
 taskproto = { path = "../../libs/taskproto" }
+fileops = { path = "../../libs/fileops" }

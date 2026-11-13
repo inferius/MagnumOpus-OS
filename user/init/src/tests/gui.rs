@@ -36,6 +36,7 @@ pub const TESTS: &[Test] = &[
     ("compd: diagnosticky snimek po Print Screen (QMP)", super::gui_snapshot::diag_snapshot),
     ("compd: paleta prikazu z klavesnice: okno a akce aplikace (QMP)", super::gui_palette::palette_keys),
     ("compd: vzhled podle navrhu, snimky obrazovky (QMP)", look_shots),
+    ("files-copy: uloha s konfliktem prezije restart procesu", super::gui_files::copier_resume),
     ("compd: spravce souboru: kopie jako uloha, konflikt, kos, 10 000 polozek, snimek (QMP)", super::gui_files::files_window),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.

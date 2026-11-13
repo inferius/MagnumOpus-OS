@@ -183,3 +183,79 @@ fn run(s: &mut super::gui::State, f: &FsClient) -> TestResult {
     time::sleep(Duration::from_millis(1500));
     Ok(())
 }
+
+/// Obnova uloh `files-copy`: uloha ceka na rozhodnuti konfliktu, proces
+/// skonci (jako restart systemu); novy proces stav nacte z domova, klient
+/// po `Subscribe` vidi tutez ulohu a po rozhodnuti dobehne.
+pub fn copier_resume(startup: &Startup) -> TestResult {
+    use fileops::job::{Phase, Resolution};
+    use fileops::proto::{ClientMsg, ServerMsg};
+    let f = fs()?;
+    let home = "/home/souborytr";
+    let _ = f.create("/home", kind::DIR);
+    let _ = f.delete_dataset(home);
+    let walk = Acl { flags: 0, grants: vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
+    f.set_acl("/", Some(&walk)).map_err(|e| fail("acl /", e))?;
+    f.set_acl("/home", Some(&walk)).map_err(|e| fail("acl /home", e))?;
+    f.create_dataset(home).map_err(|e| fail("domov", e))?;
+    f.set_owner(home, UID).map_err(|e| fail("vlastnik", e))?;
+    let own = Acl { flags: 0, grants: vec![Grant { who: UID, rights: rights::ALL, flags: grant::BOTH }] };
+    f.set_acl(home, Some(&own)).map_err(|e| fail("acl", e))?;
+    for p in ["a.txt", "cil/a.txt"] {
+        let path = alloc::format!("{home}/{p}");
+        if p.contains('/') {
+            let _ = f.create(&alloc::format!("{home}/cil"), kind::DIR);
+        }
+        f.create(&path, kind::FILE).map_err(|e| fail("soubor", e))?;
+        f.write(&path, 0, p.as_bytes()).map_err(|e| fail("zapis", e))?;
+    }
+    let start = |f: &FsClient| -> Result<(crate::apps::App, Channel, Channel), String> {
+        let (ctl, theirs) = Channel::create().map_err(|e| fail("kanal", e))?;
+        let p = Params { cwd: home.as_bytes().to_vec(), args: vec![], env: vec![] }.start_handle().map_err(|e| fail("parametry", e))?;
+        let app = crate::apps::spawn_in(startup, "files-copy", vec![StartHandle::user(user_fs(f)?.into_handle()), StartHandle::user(theirs.into_handle()), p], None).map_err(|e| fail("files-copy", e))?;
+        let (mine, client) = Channel::create().map_err(|e| fail("kanal", e))?;
+        ctl.write(b"client", vec![mine.into_handle()]).map_err(|e| fail("klient", e))?;
+        Ok((app, ctl, client))
+    };
+    let send = |c: &Channel, m: ClientMsg| c.write(&m.encode(), Vec::new()).map_err(|e| fail("zprava files-copy", e));
+    let wait = |c: &Channel, what: &str, ok: &dyn Fn(&ServerMsg) -> bool| -> TestResult {
+        let end = time::deadline_after(Duration::from_secs(20));
+        loop {
+            let m = c.read(Some(end)).map_err(|e| fail(what, e))?;
+            if let Ok(s) = ServerMsg::decode(&m.data)
+                && ok(&s)
+            {
+                return Ok(());
+            }
+        }
+    };
+    let (app, ctl, client) = start(f)?;
+    send(&client, ClientMsg::Start { req: 1, op: fileops::job::Op::Copy, sources: vec![alloc::format!("{home}/a.txt")], dest: alloc::format!("{home}/cil") })?;
+    wait(&client, "konflikt", &|s| matches!(s, ServerMsg::Status(st) if st.phase == Phase::Conflict))?;
+    // "Restart": proces pryc bez rozhodnuti.
+    let _ = app.process.kill();
+    let _ = app.process.wait_exit(Some(time::deadline_after(Duration::from_secs(5))));
+    drop((ctl, client));
+    let (app, ctl, client) = start(f)?;
+    send(&client, ClientMsg::Subscribe)?;
+    let job = alloc::rc::Rc::new(core::cell::Cell::new(0u64));
+    let j2 = job.clone();
+    wait(&client, "uloha po obnove", &move |s| match s {
+        ServerMsg::Status(st) if st.phase == Phase::Conflict && st.conflict.as_ref().is_some_and(|c| c.target.ends_with("/cil/a.txt")) => {
+            j2.set(st.job);
+            true
+        }
+        _ => false,
+    })?;
+    send(&client, ClientMsg::Decide { job: job.get(), resolution: Resolution::Rename, all: false })?;
+    wait(&client, "dokonceni", &|s| matches!(s, ServerMsg::Status(st) if st.phase == Phase::Done))?;
+    let copy = f.read(&alloc::format!("{home}/cil/a (2).txt"), 0, 16).map_err(|e| fail("kopie po obnove", e))?;
+    check!(copy == b"a.txt", "obsah kopie po obnove");
+    let left = f.list(&alloc::format!("{home}/apps/org.magnumopus.files/ulohy")).map_err(|e| fail("slozka stavu", e))?;
+    check!(left.is_empty(), alloc::format!("stav hotove ulohy smazan: {:?}", left.iter().map(|e| e.name.clone()).collect::<Vec<_>>()));
+    drop((ctl, client));
+    let _ = app.process.wait_exit(Some(time::deadline_after(Duration::from_secs(5))));
+    let _ = app.process.kill();
+    f.delete_dataset(home).map_err(|e| fail("uklid", e))?;
+    Ok(())
+}
