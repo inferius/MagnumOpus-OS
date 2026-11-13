@@ -76,7 +76,7 @@ pub fn spawn_injector(log: PathBuf, port: Arc<AtomicU16>, ps2: bool) {
 
 /// Zacatky testu, ktere vstup z QEMU potrebuji: podle nich se skript deli
 /// na useky (kazdy test zvlast, aby sel spustit i sam).
-const STARTS: [&str; 10] = [
+const STARTS: [&str; 11] = [
     MARKER,
     MARKER_PS2,
     usb::KEYS,
