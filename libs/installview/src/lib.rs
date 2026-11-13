@@ -74,6 +74,8 @@ pub enum Msg {
     Password(String),
     Password2(String),
     Pin(String),
+    /// Zkusebni pole klavesnice.
+    TryText(String),
 }
 
 /// Na co se ceka od installd.
@@ -126,6 +128,8 @@ pub struct Installer {
     pub rtc_local: bool,
     pub account: AccountInput,
     pub password2: String,
+    /// Text zkusebniho pole klavesnice (krok 1, nikam se neuklada).
+    pub try_text: String,
     /// Posledni hlaseni prubehu (krok, text).
     pub progress: Option<(u32, String)>,
     pub outcome: Option<Outcome>,
@@ -162,6 +166,7 @@ impl Installer {
             rtc_local: false,
             account: AccountInput { name: String::new(), display: String::new(), password: String::new(), pin: String::new() },
             password2: String::new(),
+            try_text: String::new(),
             progress: None,
             outcome: None,
             auto: None,
@@ -206,38 +211,10 @@ impl Installer {
     }
 
     /// Znak klavesy `code` s modifikatory `mods` (bity `inputproto::mods`)
-    /// v rozlozeni vybranem v kroku 1 (nahled), podle tabulky od installd.
-    /// Zkusebni pole tak pise podle vybraneho rozlozeni, ne podle ziveho
-    /// rozlozeni systemu. `None` = klavesa v rozlozeni nepise.
+    /// v rozlozeni vybranem v kroku 1 (nahled). Zkusebni pole tak pise
+    /// podle vybraneho rozlozeni, ne podle ziveho rozlozeni systemu.
     pub fn translate(&self, code: u16, mods: u16) -> Option<char> {
-        const SHIFT: u16 = 1 << 0;
-        const ALTGR: u16 = 1 << 3;
-        const CAPS: u16 = 1 << 5;
-        let kb = self.keyboards.get(self.kb_cursor?)?;
-        let levels = kb.keys.iter().find(|(c, _)| *c == code)?.1;
-        let shift = mods & SHIFT != 0;
-        let altgr = mods & ALTGR != 0;
-        let level = (shift as usize) | ((altgr as usize) << 1);
-        if altgr || mods & CAPS == 0 {
-            return levels[level];
-        }
-        // Caps Lock stejne jako `keymap::Keyboard`: u pismen prohodi
-        // velikost, u klaves s pismenem jen v zakladu (ceska horni rada)
-        // pise velke pismeno a se Shiftem cislici.
-        let upper1 = |c: char| {
-            let mut it = c.to_uppercase();
-            match (it.next(), it.next()) {
-                (Some(u), None) => Some(u),
-                _ => None,
-            }
-        };
-        match (levels[0], levels[1]) {
-            (Some(b), Some(u)) if b.is_alphabetic() && upper1(b) == Some(u) => {
-                if shift { Some(b) } else { Some(u) }
-            }
-            (Some(b), _) if b.is_alphabetic() && !shift => upper1(b).or(Some(b)),
-            _ => levels[level],
-        }
+        translate_keys(&self.keyboards.get(self.kb_cursor?)?.keys, code, mods)
     }
 
     /// Disky, na ktere jde instalovat (ne zive USB): indexy do `disks`.
@@ -565,7 +542,40 @@ impl Installer {
             Msg::Password(v) => self.account.password = v,
             Msg::Password2(v) => self.password2 = v,
             Msg::Pin(v) => self.account.pin = v,
+            Msg::TryText(v) => self.try_text = v,
         }
+    }
+}
+
+/// Znak klavesy `code` s modifikatory `mods` podle tabulky rozlozeni od
+/// installd (`KeyboardEntry::keys`). `None` = klavesa v rozlozeni nepise.
+pub fn translate_keys(keys: &[(u16, [Option<char>; 4])], code: u16, mods: u16) -> Option<char> {
+    const SHIFT: u16 = 1 << 0;
+    const ALTGR: u16 = 1 << 3;
+    const CAPS: u16 = 1 << 5;
+    let levels = keys.iter().find(|(c, _)| *c == code)?.1;
+    let shift = mods & SHIFT != 0;
+    let altgr = mods & ALTGR != 0;
+    let level = (shift as usize) | ((altgr as usize) << 1);
+    if altgr || mods & CAPS == 0 {
+        return levels[level];
+    }
+    // Caps Lock stejne jako `keymap::Keyboard`: u pismen prohodi
+    // velikost, u klaves s pismenem jen v zakladu (ceska horni rada)
+    // pise velke pismeno a se Shiftem cislici.
+    let upper1 = |c: char| {
+        let mut it = c.to_uppercase();
+        match (it.next(), it.next()) {
+            (Some(u), None) => Some(u),
+            _ => None,
+        }
+    };
+    match (levels[0], levels[1]) {
+        (Some(b), Some(u)) if b.is_alphabetic() && upper1(b) == Some(u) => {
+            if shift { Some(b) } else { Some(u) }
+        }
+        (Some(b), _) if b.is_alphabetic() && !shift => upper1(b).or(Some(b)),
+        _ => levels[level],
     }
 }
 

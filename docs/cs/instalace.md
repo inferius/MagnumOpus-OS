@@ -79,16 +79,17 @@ flashky). Stav: **[ověřeno v QEMU]** (x86_64, `--only instalace-gui`).
   *Odebrat* a *Nastavit jako hlavní* (první je hlavní). Data dává installd
   z `libs/keymap`, stejně jako službě vstupu, včetně tabulky kláves (kód
   evdev a znak na čtyřech úrovních). Podle ní okno překládá stisky na
-  vybrané rozložení (`Installer::translate`, Caps Lock jako
-  `keymap::Keyboard`); živé rozložení systému se nemění. Samotné pole
-  „Vyzkoušej klávesnici“ čeká na háček `key_map` v `libs/ui` (zadané
-  6c).
+  vybrané rozložení (`translate_keys`, Caps Lock jako
+  `keymap::Keyboard`) v poli „Vyzkoušej klávesnici“ (háček `key_map`
+  pole v `libs/ui`). Živé rozložení systému se nemění.
 - **Krok 4, náhled změn.** Mapa disku *Teď* a *Po instalaci*
   (`installplan::map`): úseky v pořadí na disku včetně volného místa,
   nové oddíly označené. Pod mapou je seznam změn *zůstane* / *nový* /
   *smaže se* a potvrzení: u celého disku opsat název disku, jinak
-  zaškrtnout „Rozumím“. Zatím se úseky kreslí jako text. Pruhový graf
-  doplní komponenta `libs/ui` (zadaná vláknu 6c).
+  zaškrtnout „Rozumím“. Graf je pruh `segments` z `libs/ui`:
+  MagnumOpus akcentem, cizí systém tónem *Other*, EFI tlumeně, volné
+  místo šrafovaně a nové úseky mají v popisku „nový“ (ne jen barvu).
+  Celý popisek každého úseku je ve stromu přístupnosti.
 - **Krok 6, zabezpečení.** Přepínač *Šifrovat disk* je zašedlý
   a pod ním je vysvětlení (`NO_ENCRYPTION`).
 - **Krok 8, průběh.** Pruh průběhu, osm kroků a výsledek.
@@ -274,9 +275,7 @@ hostiteli, ne klikáním v GUI.
 - Instalátor potřebuje náhodu (GUID oddílů, sůl hesla). Počítač bez
   generátoru (aarch64 bez TRNG a RNDR, v QEMU bez virtio-rng) čeká na
   entropii; test v QEMU proto na aarch64 přidává `virtio-rng-pci`.
-- Graf oddílů v grafickém průvodci se zatím kreslí jako text; pruhový
-  graf čeká na komponentu `libs/ui`.
-- Pole „Vyzkoušej klávesnici“ zatím chybí: překlad podle vybraného
-  rozložení je hotový, pole čeká na háček v `libs/ui`.
+- Zkušební pole klávesnice nesloží mrtvé klávesy (píše samotné
+  znaménko).
 - Celý průchod ověřuje autopilot; skutečný vstup (klik, psaní, tlačítko)
   ověřuje krátký test jen v kroku 1.

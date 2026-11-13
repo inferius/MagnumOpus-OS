@@ -86,16 +86,18 @@ started from the live stick). Status: **[verified in QEMU]** (x86_64,
   supplies the data from `libs/keymap`, the same source the input service
   uses, including a key table (evdev code and character on four levels).
   With it the window translates key presses to the selected layout
-  (`Installer::translate`, Caps Lock as in `keymap::Keyboard`); the live
-  system layout does not change. The "try the keyboard" field itself
-  waits for a `key_map` hook in `libs/ui` (requested from 6c).
+  (`translate_keys`, Caps Lock as in `keymap::Keyboard`) in the "try the
+  keyboard" field (the field's `key_map` hook in `libs/ui`). The live
+  system layout does not change.
 - **Step 4, change preview.** A disk map *Now* and *After installation*
   (`installplan::map`): segments in disk order including free space, new
   partitions marked. Below the map are the changes *keep* / *new* /
   *erase* and the confirmation: type the disk name for the whole disk,
-  otherwise tick "I understand". For now the segments are drawn as text.
-  A `libs/ui` component will add the bar chart (requested from the 6c
-  thread).
+  otherwise tick "I understand". The chart is the `segments` bar from
+  `libs/ui`: MagnumOpus in the accent, a foreign system in the *Other*
+  tone, EFI muted, free space hatched, and new segments say "nový" (new)
+  in their label (not only by colour). The full label of every segment
+  is in the accessibility tree.
 - **Step 6, security.** The *Encrypt disk* switch is greyed out, with an
   explanation below it (`NO_ENCRYPTION`).
 - **Step 8, progress.** A progress bar, the eight steps and the
@@ -297,9 +299,7 @@ level on the host, not by clicking in the GUI.
   computer without a generator (aarch64 without TRNG and RNDR, QEMU without
   virtio-rng) waits for entropy; the QEMU test therefore adds
   `virtio-rng-pci` on aarch64.
-- The partition chart in the graphical wizard is drawn as text for now;
-  the bar chart waits for a `libs/ui` component.
-- The "try the keyboard" field is still missing: the translation to the
-  selected layout is done, the field waits for a hook in `libs/ui`.
+- The keyboard test field does not compose dead keys (it types the
+  accent itself).
 - The full run is verified by the autopilot; real input (click, typing,
   button) is verified by a short test in step 1 only.

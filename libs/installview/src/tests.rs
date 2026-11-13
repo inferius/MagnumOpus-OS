@@ -163,6 +163,11 @@ fn whole_flow_to_installed() {
     // 4. Nahled: graf (useky teď a po instalaci) a opsani nazvu disku.
     let p = r.m.preview.clone().unwrap();
     assert_eq!(p.after.len(), 2);
+    // Graf oddilu: kazdy usek je polozka seznamu ve stromu pristupnosti
+    // (cely popisek, i kdyz se do pruhu nevejde).
+    let items = r.u.a11y().into_iter().filter(|n| n.role == Role::ListItem).map(|n| n.name).collect::<Vec<_>>();
+    assert!(items.iter().any(|n| n.starts_with("volné místo")), "{items:?}");
+    assert!(items.iter().any(|n| n.starts_with("MagnumOpus") && n.ends_with("(nový)")), "{items:?}");
     assert!(!r.enabled("Pokračovat"));
     r.type_into("QEMU NVMe Ctrl", "QEMU NVMe");
     assert!(!r.enabled("Pokračovat"));
@@ -172,14 +177,13 @@ fn whole_flow_to_installed() {
     r.type_into("jan", "Jan");
     assert!(r.names().iter().any(|n| n.contains("začíná písmenem")), "chyba jmena");
     r.type_into("jan", "jan");
-    let heslo = |r: &Rig| r.u.a11y().into_iter().filter(|n| n.role == Role::PasswordInput).map(|n| n.id).collect::<Vec<_>>();
-    let ids = heslo(&r);
+    // Pole hesla prijmou jen mistni vstup (set_value pres pristupnost
+    // knihovna odmita): hodnoty jako zpravy pole.
+    let ids: Vec<u32> = r.u.a11y().into_iter().filter(|n| n.role == Role::PasswordInput).map(|n| n.id).collect();
     assert_eq!(ids.len(), 3);
-    for (id, v) in ids.iter().zip(["dlouhe heslo", "dlouhe hesl", ""]) {
-        let res = r.u.a11y_action(*id, actions::SET_VALUE, v);
-        for msg in res.msgs {
-            r.m.update(msg);
-        }
+    assert!(r.u.a11y_action(ids[0], actions::SET_VALUE, "x").msgs.is_empty(), "set_value na heslo odmitnuto");
+    for m in [Msg::Password("dlouhe heslo".into()), Msg::Password2("dlouhe hesl".into())] {
+        r.m.update(m);
     }
     r.serve();
     assert!(!r.enabled("Pokračovat"), "hesla se neshoduji");
@@ -236,6 +240,36 @@ fn try_field_uses_selected_layout() {
     r.m.update(Msg::KbCursor(vec![1]));
     assert_eq!(r.m.translate(21, 0), Some('y'));
     assert_eq!(r.m.translate(3, 1), Some('@'));
+}
+
+/// Zkusebni pole: skutecna udalost klavesy pres `Ui` pise podle
+/// vybraneho rozlozeni (cz: klavesa 21 = z), znak od systemu (us: y)
+/// se ignoruje; po prepnuti nahledu na us pise y.
+#[test]
+fn try_field_types_in_selected_layout() {
+    use guiproto::window::InputEvent;
+    let mut r = rig();
+    let type_key = |r: &mut Rig, code: u16, sys: char| {
+        let n = r.node(Role::TextInput, "Příliš žluťoučký kůň úpěl ďábelské ódy");
+        let f = r.u.a11y_action(n.id, actions::FOCUS, "");
+        assert!(f.msgs.is_empty());
+        let res = r.u.event(InputEvent::Key { code, action: 1, ch: Some(sys) }, 0);
+        let res2 = r.u.event(InputEvent::Text(sys), 0);
+        for m in res.msgs.into_iter().chain(res2.msgs) {
+            r.m.update(m);
+        }
+        r.serve();
+    };
+    assert!(r.names().iter().any(|n| n == "Vyzkoušej klávesnici (Česká (QWERTZ))"));
+    type_key(&mut r, 21, 'y');
+    type_key(&mut r, 3, '2');
+    assert_eq!(r.m.try_text, "zě");
+    r.m.update(Msg::KbCursor(vec![1]));
+    r.serve();
+    type_key(&mut r, 21, 'z');
+    assert_eq!(r.m.try_text, "zěy");
+    // Zkouska nic nemeni: zvolene rozlozeni zustava.
+    assert_eq!(r.m.settings().keyboards, vec!["cz"]);
 }
 
 #[test]

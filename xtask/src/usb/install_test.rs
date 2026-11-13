@@ -78,11 +78,13 @@ pub fn run_gui(opts: &mut Options) -> Result<()> {
 /// otevre samo, QMP klikne do pole casoveho pasma, Ctrl+A, napise `utc`
 /// a klikne na Pokracovat. Overi zalogovane pasmo a druhy krok.
 ///
-/// Souradnice jsou z rozvrzeni okna na obrazovce 1280 x 800 (okno
-/// 900 x 680 na 168, 50; snimky `vstup-*.png` ukazuji, kam se klika).
+/// Souradnice jsou z rozvrzeni okna 900 x 680 na obrazovce 1280 x 800;
+/// kompozitor ho klade na x 168-204 podle poctu oken plochy, body jsou
+/// zvolene tak, aby pole i tlacitko trefily v cele te sirce (snimky
+/// `vstup-*.png` ukazuji, kam se klika).
 fn real_input(opts: &mut Options) -> Result<()> {
-    const ZONE: (i32, i32) = (730, 214);
-    const NEXT: (i32, i32) = (997, 697);
+    const ZONE: (i32, i32) = (800, 216);
+    const NEXT: (i32, i32) = (1030, 697);
     const SCREEN: (i32, i32) = (1280, 800);
     let arch: &Arch = opts.arch;
     let usb = live_image(opts, None)?;

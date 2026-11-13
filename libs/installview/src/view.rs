@@ -6,9 +6,9 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use installplan::map::Seg;
+use installplan::map::{Seg, SegKind};
 use installplan::{Line, NO_ENCRYPTION, PROGRESS, STEPS};
-use ui::{Cells, Context, Node, SizeClass, button, checkbox, col, column, label, list, password_input, progress, row, scroll, spacer, table, text_input};
+use ui::{Cells, Context, Node, Segment, SizeClass, Tone, button, checkbox, col, column, label, list, password_input, progress, row, scroll, segments, spacer, table, text_input};
 
 use crate::{Installer, Msg, Outcome, step};
 
@@ -126,6 +126,19 @@ fn keyboard(s: &Installer, c: &mut Vec<Node<Msg>>) {
     }
     let list: Vec<String> = s.chosen.iter().map(|&i| s.keyboards[i].description.clone()).collect();
     c.push(label(&format!("Zvolené: {}", list.join(", "))).key("zvolene"));
+    // Zkouska: pole pise podle vybraneho rozlozeni (preklad kodu klaves
+    // z tabulky installd), zive rozlozeni systemu se nemeni.
+    if let Some(k) = cur.and_then(|i| s.keyboards.get(i)) {
+        c.push(label(&format!("Vyzkoušej klávesnici ({})", k.description)));
+        let keys = k.keys.clone();
+        c.push(
+            text_input(&s.try_text)
+                .placeholder("Příliš žluťoučký kůň úpěl ďábelské ódy")
+                .on_change(Msg::TryText)
+                .key_map(move |code, mods| crate::translate_keys(&keys, code, mods))
+                .key("zkouska"),
+        );
+    }
 }
 
 fn check(s: &Installer, c: &mut Vec<Node<Msg>>) {
@@ -177,11 +190,24 @@ fn target(s: &Installer, c: &mut Vec<Node<Msg>>) {
     }
 }
 
-/// Graf oddilu: dokud knihovna UI nema pruhovy graf, useky jako text
-/// v poradi na disku.
-fn disk_map(title: &str, segs: &[Seg], key: &str) -> Node<Msg> {
-    let parts: Vec<String> = segs.iter().map(|g| if g.new { format!("{} (nový)", g.label) } else { g.label.clone() }).collect();
-    column([label(title), label(&parts.join("  |  "))]).key(key)
+/// Graf oddilu (`.dbar` v navrhu): useky v poradi na disku, vaha =
+/// bajty. MagnumOpus akcentem, cizi system jinym tonem, EFI tlumene,
+/// volne misto srafovane; nove useky maji v popisku "nový" (nejen barva).
+fn disk_map(title: &str, segs: &[Seg], key: &str, legend: bool) -> Node<Msg> {
+    let items = segs
+        .iter()
+        .map(|g| {
+            let tone = match g.kind {
+                SegKind::Ours | SegKind::OurEfi => Tone::Accent,
+                SegKind::Other => Tone::Other,
+                SegKind::Efi => Tone::Muted,
+                SegKind::Free => Tone::Free,
+            };
+            let text = if g.new { format!("{} (nový)", g.label) } else { g.label.clone() };
+            Segment::new(g.bytes, &text, tone)
+        })
+        .collect();
+    column([label(title), segments(items).legend(legend).key("graf")]).key(key)
 }
 
 fn preview(s: &Installer, c: &mut Vec<Node<Msg>>) {
@@ -192,8 +218,8 @@ fn preview(s: &Installer, c: &mut Vec<Node<Msg>>) {
         }
         return;
     };
-    c.push(disk_map("Teď", &p.before, "mapa-ted"));
-    c.push(disk_map("Po instalaci", &p.after, "mapa-po"));
+    c.push(disk_map("Teď", &p.before, "mapa-ted", false));
+    c.push(disk_map("Po instalaci", &p.after, "mapa-po", true));
     for (i, l) in p.lines.iter().enumerate() {
         let (kind, warn) = match l {
             Line::Keep(_) => ("zůstane", false),

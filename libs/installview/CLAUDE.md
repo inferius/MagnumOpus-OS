@@ -8,6 +8,7 @@ Grafický instalátor (`design/instalace.html`): stav průvodce a rozhraní nad 
 - Se službou installd je rozpracovaný nejvýš jeden požadavek (`waiting`), další čekají ve frontě; odpovědi nemají číslo požadavku.
 - Heslo a PIN jen v `password_input` (do stromu přístupnosti nejdou, ověřuje test).
 - Rozvržení podle třídy šířky okna: `compact` bez seznamu kroků.
+- Zkušební pole klávesnice překládá kódy kláves podle tabulky vybraného rozložení (`translate_keys`, háček `key_map` pole); živé rozložení systému nikdy nemění. Pravidlo Caps Lock drž shodné s `keymap::Keyboard`.
 
 ## Testy
 
