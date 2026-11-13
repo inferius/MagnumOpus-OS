@@ -186,3 +186,59 @@ fn background_job_discards_its_clones() {
     assert!(wait_end(&mut r, c));
     assert!(items(&r, c).contains(&Item::Value(shlang::value::Value::Int(0))), "{:?}", items(&r, c));
 }
+
+/// Falesny installd: rozlozeni (s jednim hlasenim prubehu), disky zadne.
+fn fake_installer(req: &[u8]) -> Vec<crate::session::InstallerMsg> {
+    use crate::session::InstallerMsg;
+    use installplan::proto::{KeyboardEntry, Reply, Request};
+    let kb = |n: &str| KeyboardEntry { name: n.into(), description: n.into(), rows: vec![n.into()] };
+    match Request::decode(req) {
+        Ok(Request::Keyboards) => vec![
+            InstallerMsg::Progress(Reply::Progress { step: 0, text: "rozlozeni".into() }.encode()),
+            InstallerMsg::Done(Reply::Keyboards(vec![kb("cz"), kb("us")]).encode()),
+        ],
+        _ => vec![InstallerMsg::Done(Reply::Failed(abi::Error::NotFound, "zadny disk".into()).encode())],
+    }
+}
+
+/// Ceka na zpravu okna od indexu `from`.
+fn wait_msg<T>(r: &mut Rig, from: usize, f: impl Fn(&ServerMsg) -> Option<T>) -> T {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        r.idle();
+        if let Some(v) = r.link.sent[from..].iter().find_map(&f) {
+            return v;
+        }
+        assert!(Instant::now() < end, "zprava neprisla: {:?}", &r.link.sent[from..]);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn text_question_from_line_in_thread() {
+    let mut r = rig();
+    r.env.installer = Some(fake_installer);
+    let b = start(&mut r, "install");
+    // Hlavni rozlozeni, pak "hotovo" u dalsich (vyber), pak pasmo (text).
+    let mut from = 0;
+    for pick in [0u32, 1] {
+        let (id, n) = wait_msg(&mut r, from, |m| match m {
+            ServerMsg::Prompt { prompt, choices, .. } => Some((*prompt, choices.len() as u32)),
+            _ => None,
+        });
+        from = r.link.sent.len();
+        r.handle(ClientMsg::Choose { prompt: id, index: pick.min(n - 1) });
+    }
+    let (id, secret, default) = wait_msg(&mut r, from, |m| match m {
+        ServerMsg::Ask { prompt, secret, default, .. } => Some((*prompt, *secret, default.clone())),
+        _ => None,
+    });
+    assert!(!secret);
+    assert_eq!(default, "Europe/Prague");
+    r.handle(ClientMsg::Text { prompt: id, text: "Europe/Berlin".into() });
+    // Bez disku pruvodce skonci chybou; odpoved i prubeh jsou v bloku.
+    assert!(!wait_end(&mut r, b));
+    let n = notes(&r, b);
+    assert!(n.contains("Časové pásmo -> Europe/Berlin"), "{n}");
+    assert!(n.contains("[1/7] rozlozeni"), "{n}");
+}

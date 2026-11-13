@@ -28,7 +28,7 @@ use shlang::{ShError, error::code};
 use spin::Mutex;
 
 use crate::proto::{ClientMsg, Item, ServerMsg};
-use crate::session::{Env, Link};
+use crate::session::{Env, InstallerMsg, Link};
 use crate::taskboard::Board;
 use crate::tasks::{self, Clock, Notify};
 
@@ -50,10 +50,12 @@ pub struct MainCtx<'a> {
 }
 
 /// Odpoved okna na vyzvu radku.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answer {
     Yes(bool),
     Choice(u32),
+    /// Text (dotaz `Host::ask`, napr. heslo v pruvodci `install`).
+    Text(String),
     /// Okno neni pripojene nebo radek je na pozadi bez okna.
     Refused,
 }
@@ -62,6 +64,9 @@ pub struct LinePrompt {
     pub question: String,
     pub detail: Item,
     pub choices: Vec<String>,
+    /// Dotaz na text (`ServerMsg::Ask`): skryty vstup a vychozi text.
+    /// `None` = vyzva ano/ne nebo vyber (`ServerMsg::Prompt`).
+    pub text: Option<(bool, String)>,
     /// Cislo vyzvy v protokolu (az ji hlavni vlakno posle oknu).
     pub sent: Option<u64>,
     pub answer: Option<Answer>,
@@ -207,8 +212,11 @@ impl LineHost {
 
     /// Vyzva v okne a cekani na odpoved (nebo zruseni).
     fn ask(&mut self, question: &str, detail: Item, choices: &[String]) -> Answer {
-        self.sh.st.lock().prompt =
-            Some(LinePrompt { question: question.into(), detail, choices: choices.to_vec(), sent: None, answer: None });
+        self.wait_answer(LinePrompt { question: question.into(), detail, choices: choices.to_vec(), text: None, sent: None, answer: None })
+    }
+
+    fn wait_answer(&mut self, prompt: LinePrompt) -> Answer {
+        self.sh.st.lock().prompt = Some(prompt);
         self.sh.main.notify();
         loop {
             if self.sh.cancel.load(Ordering::Acquire) {
@@ -217,7 +225,7 @@ impl LineHost {
             }
             let a = {
                 let mut st = self.sh.st.lock();
-                match st.prompt.as_ref().and_then(|p| p.answer) {
+                match st.prompt.as_mut().and_then(|p| p.answer.take()) {
                     Some(a) => {
                         st.prompt = None;
                         Some(a)
@@ -298,6 +306,41 @@ impl Host for LineHost {
                 Some(i as usize)
             }
             _ => None,
+        }
+    }
+
+    fn ask(&mut self, question: &str, secret: bool, default: &str) -> Option<String> {
+        let p = LinePrompt {
+            question: question.into(),
+            detail: Item::Note(String::new()),
+            choices: Vec::new(),
+            text: Some((secret, default.into())),
+            sent: None,
+            answer: None,
+        };
+        match self.wait_answer(p) {
+            Answer::Text(text) => {
+                // Heslo do vypisu bloku nepatri.
+                let shown = if secret { String::from("***") } else { text.clone() };
+                self.push(Item::Note(alloc::format!("{question} -> {shown}")));
+                Some(text)
+            }
+            _ => None,
+        }
+    }
+
+    fn installer(&mut self, req: &[u8], progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, abi::Error> {
+        // Kratka volani hlavniho vlakna: mezi nimi obsluhuje okno (vyzvy,
+        // Ctrl+C jinych radku) a prubeh chodi hned. Instalace se Ctrl+C
+        // neprerusi (zapis na disk bezi v installd), cekani pokracuje.
+        let req = req.to_vec();
+        self.call(move |c| c.env.installer_send(&req)).unwrap_or(Err(abi::Error::Canceled))?;
+        loop {
+            match self.call(|c| c.env.installer_recv(200)).unwrap_or(Err(abi::Error::Canceled))? {
+                Some(InstallerMsg::Progress(m)) => progress(&m),
+                Some(InstallerMsg::Done(m)) => return Ok(m),
+                None => {}
+            }
         }
     }
 
@@ -424,6 +467,7 @@ pub fn answer_of(m: &ClientMsg) -> Option<(u64, Answer)> {
     match m {
         ClientMsg::Answer { prompt, yes } => Some((*prompt, Answer::Yes(*yes))),
         ClientMsg::Choose { prompt, index } => Some((*prompt, Answer::Choice(*index))),
+        ClientMsg::Text { prompt, text } => Some((*prompt, Answer::Text(text.clone()))),
         _ => None,
     }
 }

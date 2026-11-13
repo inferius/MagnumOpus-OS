@@ -119,6 +119,9 @@ pub(crate) struct ThreadEnv {
     threads: bool,
     /// Prehled uloh (jadro taskd v testu).
     pub taskd: Option<crate::tests_taskd::Fake>,
+    /// Falesny instalator: odpovedi na pozadavek (prikaz `install`).
+    pub installer: Option<fn(&[u8]) -> Vec<crate::session::InstallerMsg>>,
+    installer_queue: Vec<crate::session::InstallerMsg>,
 }
 
 impl Env for ThreadEnv {
@@ -156,6 +159,14 @@ impl Env for ThreadEnv {
     fn task_recv(&mut self) -> Vec<(crate::taskboard::Chan, Vec<u8>)> {
         self.taskd.as_mut().map(|t| core::mem::take(&mut t.inbox)).unwrap_or_default()
     }
+    fn installer_send(&mut self, req: &[u8]) -> Result<(), abi::Error> {
+        let f = self.installer.ok_or(abi::Error::NotSupported)?;
+        self.installer_queue.extend(f(req));
+        Ok(())
+    }
+    fn installer_recv(&mut self, _wait_ms: u64) -> Result<Option<crate::session::InstallerMsg>, abi::Error> {
+        Ok(if self.installer_queue.is_empty() { None } else { Some(self.installer_queue.remove(0)) })
+    }
 }
 
 pub(crate) struct Rig {
@@ -175,7 +186,7 @@ impl Rig {
         let mut m = MemFs::new();
         m.put("/home/a.txt", b"alfa");
         let fs = SharedFs(Arc::new(Mutex::new(m)));
-        let env = ThreadEnv { fs: fs.clone(), notify: Arc::default(), threads, taskd };
+        let env = ThreadEnv { fs: fs.clone(), notify: Arc::default(), threads, taskd, installer: None, installer_queue: Vec::new() };
         let mut r = Rig { svc: Service::new("/home"), link: TestLink::default(), fs, env, session: 0 };
         r.handle(ClientMsg::Attach { session: 0 });
         r.session = r

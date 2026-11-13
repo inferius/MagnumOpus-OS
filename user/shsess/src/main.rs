@@ -327,7 +327,7 @@ impl Env for SysEnv {
 
     /// `install`: kanal k instalatoru (od initu, jednou), pozadavek,
     /// zpravy prubehu, konecna odpoved.
-    fn installer(&mut self, req: &[u8], progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, Error> {
+    fn installer_send(&mut self, req: &[u8]) -> Result<(), Error> {
         let mut inst = INSTALLER.lock();
         if inst.is_none() {
             let guard = POWER.lock();
@@ -342,17 +342,24 @@ impl Env for SysEnv {
             let h = m.handles.into_iter().next().ok_or(Error::Corrupted)?;
             *inst = Some(Channel::from_handle(h));
         }
-        let ch = inst.as_ref().unwrap();
-        ch.write(req, Vec::new())?;
-        loop {
-            // Instalace trva minuty: bez terminu, prubeh chodi prubezne.
-            let m = ch.read(None)?;
-            if matches!(installplan::proto::Reply::decode(&m.data), Ok(installplan::proto::Reply::Progress { .. })) {
-                progress(&m.data);
-                continue;
-            }
-            return Ok(m.data);
-        }
+        inst.as_ref().unwrap().write(req, Vec::new())
+    }
+
+    fn installer_recv(&mut self, wait_ms: u64) -> Result<Option<term::session::InstallerMsg>, Error> {
+        use term::session::InstallerMsg;
+        let inst = INSTALLER.lock();
+        let ch = inst.as_ref().ok_or(Error::BadState)?;
+        // Instalace trva minuty: kratka cekani, prubeh chodi prubezne.
+        let m = match ch.read(Some(time::deadline_after(Duration::from_millis(wait_ms)))) {
+            Ok(m) => m,
+            Err(Error::TimedOut) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        Ok(Some(if matches!(installplan::proto::Reply::decode(&m.data), Ok(installplan::proto::Reply::Progress { .. })) {
+            InstallerMsg::Progress(m.data)
+        } else {
+            InstallerMsg::Done(m.data)
+        }))
     }
 
     /// `report`: balicek pro vyvojare sestavi sluzba logu (pres init).

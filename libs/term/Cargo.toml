@@ -14,3 +14,4 @@ noto-sans-mono-bitmap = { version = "0.4", default-features = false, features = 
 
 [dev-dependencies]
 taskcore = { path = "../taskcore" }
+installplan = { path = "../installplan" }

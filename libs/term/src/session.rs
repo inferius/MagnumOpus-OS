@@ -38,6 +38,14 @@ pub trait Link {
 
 /// Zbytek prostredi (cas, spousteni programu, vlakna uloh).
 ///
+/// Zprava instalatoru pro prikaz `install` (obsah = `installplan::proto::Reply`;
+/// term ho nerozebira, jen rozlisi prubeh od konecne odpovedi).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallerMsg {
+    Progress(Vec<u8>),
+    Done(Vec<u8>),
+}
+
 /// Ulohy `async` bezi ve vlaknech jen kdyz prostredi umi vsechny ctyri
 /// casti (`spawn`, `task_fs`, `notifier`, `clock`); jinak probehnou na
 /// miste (postupne, stejny vysledek).
@@ -84,9 +92,15 @@ pub trait Env {
     fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
         Err(abi::Error::NotSupported)
     }
-    /// Instalator (prikaz `install`): pozadavek, zpravy prubehu do
-    /// `progress`, konecna odpoved; vychozi = relace instalator nema.
-    fn installer(&mut self, _req: &[u8], _progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, abi::Error> {
+    /// Instalator (prikaz `install`): poslani pozadavku; vychozi = relace
+    /// instalator nema.
+    fn installer_send(&mut self, _req: &[u8]) -> Result<(), abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Dalsi zprava instalatoru (prubeh nebo konecna odpoved), cekani
+    /// nejvys `wait_ms`; `None` = zatim nic. Kratke cekani: radek ve
+    /// vlakne vola pres hlavni vlakno a to mezitim obsluhuje okno.
+    fn installer_recv(&mut self, _wait_ms: u64) -> Result<Option<InstallerMsg>, abi::Error> {
         Err(abi::Error::NotSupported)
     }
     /// Balicek pro vyvojare (prikaz `report`); vychozi = relace sluzbu
@@ -507,7 +521,14 @@ impl Host for SessionHost<'_> {
     }
 
     fn installer(&mut self, req: &[u8], progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, abi::Error> {
-        self.env.installer(req, progress)
+        self.env.installer_send(req)?;
+        loop {
+            match self.env.installer_recv(1000)? {
+                Some(InstallerMsg::Progress(m)) => progress(&m),
+                Some(InstallerMsg::Done(m)) => return Ok(m),
+                None => {}
+            }
+        }
     }
 
     fn log_level(&mut self, target: &str, level: &str) -> Result<String, abi::Error> {
@@ -868,7 +889,7 @@ impl Service {
                 }
             }
             ClientMsg::Run { session, line } => self.run(session, &line, link, fs, env),
-            ClientMsg::Answer { .. } | ClientMsg::Choose { .. } if self.answer_line(&msg) => {}
+            ClientMsg::Answer { .. } | ClientMsg::Choose { .. } | ClientMsg::Text { .. } if self.answer_line(&msg) => {}
             ClientMsg::Interrupt { session } => self.interrupt_line(session),
             ClientMsg::Background { session } => self.background(session, link, env),
             ClientMsg::Answer { prompt, yes } => {
