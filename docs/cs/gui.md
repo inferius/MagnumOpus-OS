@@ -1480,8 +1480,15 @@ Prototyp má pro oddíly pevné barvy; systém je nahrazuje těmito tóny.
   je uzel `tooltip`.
 - Vzhled podle `.popover` a `.menu` v návrhu (karta `surface`, rám
   `border`, ve vysokém kontrastu 2 px, položky výšky `control_h`, najetí
-  `accent_soft`). Nabídka se zatím kreslí do okna a ořízne se jeho okrajem;
-  přesah přes okraj okna bude systémový popover kompozitoru (další krok).
+  `accent_soft`).
+- **Popover:** nabídka a bublina se kreslí do vlastní kořenové vrstvy okna
+  s vlastností `POPOVER` (bit masky `LAYER_SET`). Kompozitor ji skládá nad
+  všemi okny a pod lištou a kurzorem (CPU i GPU stejně), okno ji
+  neořezává a vstup v její ploše patří oknu (souřadnice obsahu okna, klidně
+  mimo jeho obdélník). Popover kreslí jen okno s fokusem. Aby se nabídka
+  vešla do pracovní plochy, dostane aplikace polohu okna zprávou
+  `WINDOW_PLACE { window, rect }` (po zobrazení a po každém přesunu nebo
+  změně velikosti, během tahu až na konci); `cx.window`.
 
 ### Tabulka a seznam (virtualizace)
 

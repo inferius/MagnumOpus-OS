@@ -281,6 +281,7 @@ impl Comp {
         }
         self.frame.last_tick = now;
         self.animate(now);
+        self.places_changed();
         let rects = if self.dirty.is_empty() {
             None
         } else {

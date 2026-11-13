@@ -82,7 +82,7 @@ pub enum SysKey {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Drag {
+pub(crate) enum Drag {
     Move { window: u32, dx: i32, dy: i32 },
     Resize { window: u32, left: bool, top: bool, right: bool, bottom: bool, start: Rect, px: i32, py: i32 },
 }
@@ -90,7 +90,7 @@ enum Drag {
 pub struct InputState {
     pub px: i32,
     pub py: i32,
-    drag: Option<Drag>,
+    pub(crate) drag: Option<Drag>,
     pointer_window: Option<u32>,
     press_target: Option<u32>,
     /// Pocet zdroju umeleho vstupu (ukazuje se v panelu).
@@ -196,6 +196,14 @@ impl Comp {
 
     /// Okno a zona pod bodem (odshora).
     pub fn hit(&self, x: i32, y: i32) -> Option<(u32, Zone)> {
+        // Popover okna s fokusem je nad vsemi okny: vstup v nem patri jemu
+        // (souradnice obsahu okna, klidne mimo jeho obdelnik).
+        if let Some(g) = self.focus
+            && self.popover_rects(g).iter().any(|r| r.contains(x, y))
+            && let Some(w) = self.windows.get(&g)
+        {
+            return Some((g, Zone::Content(x - w.rect.x, y - w.rect.y)));
+        }
         for &gid in self.z.iter().rev() {
             let w = self.windows.get(&gid)?;
             if !w.mapped || w.minimized || !w.grab().contains(x, y) {

@@ -229,6 +229,10 @@ pub struct Ui<M> {
     pub(crate) tip_shown: Option<Key>,
     /// Cas posledni udalosti (ns).
     pub(crate) now: u64,
+    /// Nabidka a bublina ve vlastni vrstve popoveru (klient v OS).
+    pub(crate) overlay: bool,
+    /// Posun bubliny pri kresleni do vrstvy popoveru (jeji pocatek).
+    pub(crate) tip_shift: (i32, i32),
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -285,6 +289,8 @@ impl<M: Clone> Ui<M> {
             tip: None,
             tip_shown: None,
             now: 0,
+            overlay: false,
+            tip_shift: (0, 0),
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -312,6 +318,17 @@ impl<M: Clone> Ui<M> {
     pub fn set_context(&mut self, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32, generation: u32) {
         let c = &mut self.cx;
         (c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation) = (output, screen, work_area, scale, refresh_mhz, generation);
+    }
+
+    /// Poloha obsahu okna na obrazovce (`WINDOW_PLACE`).
+    pub fn set_window_rect(&mut self, r: Rect) {
+        self.cx.window = r;
+    }
+
+    /// Klient kresli nabidku a bublinu do vlastni vrstvy popoveru (muze
+    /// presahovat okno); bez toho se kresli do okna (testy).
+    pub fn use_overlay_layer(&mut self, on: bool) {
+        self.overlay = on;
     }
 
     /// Formaty ve schrance (klient po zprave `Changed`).

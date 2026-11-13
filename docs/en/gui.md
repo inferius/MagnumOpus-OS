@@ -1537,9 +1537,16 @@ with these tones.
   a shown tooltip is a `tooltip` node.
 - Look after `.popover` and `.menu` in the design (a `surface` card,
   `border` frame, 2 px in high contrast, items `control_h` tall, hover
-  `accent_soft`). The menu is drawn into the window for now and is clipped
-  by its edge; overflowing the window edge will be a compositor system
-  popover (next step).
+  `accent_soft`).
+- **Popover:** menus and tooltips are drawn into a root layer of their own
+  with the `POPOVER` property (a `LAYER_SET` mask bit). The compositor
+  composes it above all windows and below the bar and cursor (CPU and GPU
+  alike), the window does not clip it, and input in its area belongs to the
+  window (window content coordinates, even outside its rectangle). Only the
+  focused window's popover is drawn. To fit the menu into the work area the
+  application gets the window position via `WINDOW_PLACE { window, rect }`
+  (after mapping and after every move or resize, at the end of a drag);
+  `cx.window`.
 
 ### Table and list (virtualization)
 

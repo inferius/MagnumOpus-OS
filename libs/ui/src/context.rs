@@ -77,6 +77,8 @@ pub struct Context {
     pub generation: u32,
     /// Formaty, ktere je prave ve schrance (polozka "Vlozit" aktivni).
     pub clipboard: alloc::vec::Vec<alloc::string::String>,
+    /// Obsah okna na obrazovce (`WINDOW_PLACE`); prazdny = nezname.
+    pub window: Rect,
 }
 
 impl Context {
@@ -92,6 +94,7 @@ impl Context {
             refresh_mhz: 0,
             generation: 0,
             clipboard: alloc::vec::Vec::new(),
+            window: Rect::default(),
         }
     }
 

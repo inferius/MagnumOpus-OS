@@ -40,6 +40,23 @@ impl Comp {
         self.send(c, m);
     }
 
+    /// Poloha obsahu oken pro aplikace (`WINDOW_PLACE`): poslat oknum, ktera
+    /// se od posledni zpravy posunula nebo zmenila velikost; behem tahu
+    /// mysi az po jeho konci. Vola se pred skladanim snimku.
+    pub(crate) fn places_changed(&mut self) {
+        let dragging = match self.input.drag {
+            Some(crate::input::Drag::Move { window, .. }) | Some(crate::input::Drag::Resize { window, .. }) => Some(window),
+            _ => None,
+        };
+        let ids: alloc::vec::Vec<u32> = self.windows.iter().filter(|(g, w)| w.mapped && w.rect != w.placed && Some(**g) != dragging).map(|(g, _)| *g).collect();
+        for g in ids {
+            let Some(w) = self.windows.get_mut(&g) else { continue };
+            w.placed = w.rect;
+            let (c, local, rect) = (w.client, w.local, w.rect);
+            self.send(c, ServerMsg::WindowPlace { window: local, rect });
+        }
+    }
+
     /// Zmena obrazovky (rozliseni, lista): nova generace kontextu vsem oknum.
     pub(crate) fn contexts_changed(&mut self) {
         self.ctx_generation = self.ctx_generation.wrapping_add(1);

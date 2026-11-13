@@ -182,8 +182,8 @@ impl<M: Clone> Ui<M> {
                 }
             }
         }
-        // Nabidka a bublina nad prvky okna.
-        if space == 0 {
+        // Nabidka a bublina nad prvky okna (s vrstvou popoveru ve ni).
+        if space == 0 && !self.overlay {
             self.draw_overlays(c);
         }
     }

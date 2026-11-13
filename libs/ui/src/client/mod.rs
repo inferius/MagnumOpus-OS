@@ -38,6 +38,9 @@ use svcclient::Conn;
 
 use crate::{App, ROOT_LAYER, Ui, scroll_layers};
 
+/// Vrstva popoveru (nabidka a bublina nad okny), korenova.
+const POPOVER_LAYER: u32 = 2;
+
 /// Udalost okna pro aplikaci.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -61,6 +64,8 @@ pub enum Event {
     /// Novy kontext okna (obrazovka, pracovni plocha, skala): uz ulozeny
     /// v [`Window::context`].
     Context,
+    /// Obsah okna se posunul nebo zmenil velikost (obdelnik na obrazovce).
+    Place(Rect),
 }
 
 /// Kontext okna od kompozitoru (`WINDOW_CONTEXT`).
@@ -181,6 +186,8 @@ pub struct Window {
     clip_formats: Vec<String>,
     /// Kontext okna (posledni `WINDOW_CONTEXT`).
     pub context: Option<WinContext>,
+    /// Vrstva popoveru je videt.
+    popover_shown: bool,
 }
 
 /// Zapis, ktery pri plne fronte kanalu chvili pocka (kompozitor zrovna
@@ -270,6 +277,7 @@ impl Window {
             app_paste: 0,
             clip_formats: Vec::new(),
             context,
+            popover_shown: false,
         };
         win.send(ClientMsg::LayerCreate { layer: ROOT_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
         win.pairs.insert(ROOT_LAYER, Pair { bufs: [None, None], front: 1 });
@@ -383,6 +391,7 @@ impl Window {
             })),
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
             ServerMsg::Clipboard { data } => clipproto::ServerMsg::decode(&data).ok().map(Event::Clipboard),
+            ServerMsg::WindowPlace { rect, .. } => Some(Event::Place(rect)),
             ServerMsg::WindowContext { generation, output, screen, work_area, scale, refresh_mhz, .. } => {
                 self.context = Some(WinContext { output, screen, work_area, scale, refresh_mhz, generation });
                 Some(Event::Context)
@@ -476,6 +485,30 @@ impl Window {
                 ..Default::default()
             },
         })
+    }
+
+    /// Vrstva popoveru (nabidka, bublina) v obdelniku `rect` souradnic
+    /// okna: kompozitor ji kresli nad vsemi okny a neorezava ji oknem.
+    pub fn draw_popover(&mut self, rect: Rect, f: impl FnOnce(&mut Canvas<'_>)) -> Result<()> {
+        if !self.pairs.contains_key(&POPOVER_LAYER) {
+            self.send(ClientMsg::LayerCreate { layer: POPOVER_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
+            self.pairs.insert(POPOVER_LAYER, Pair { bufs: [None, None], front: 1 });
+        }
+        self.send(ClientMsg::LayerSet {
+            layer: POPOVER_LAYER,
+            props: LayerProps { mask: prop::POPOVER | prop::VISIBLE | prop::ORDER, popover: true, visible: true, order: 10, ..Default::default() },
+        })?;
+        self.popover_shown = true;
+        self.draw_layer(POPOVER_LAYER, rect, f)
+    }
+
+    /// Skryje vrstvu popoveru (nic otevreneho).
+    pub fn hide_popover(&mut self) -> Result<()> {
+        if !self.popover_shown {
+            return Ok(());
+        }
+        self.popover_shown = false;
+        self.send(ClientMsg::LayerSet { layer: POPOVER_LAYER, props: LayerProps { mask: prop::VISIBLE, visible: false, ..Default::default() } })
     }
 
     /// Nakresli cele okno.
@@ -623,6 +656,7 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
         win.request_size(sw, sh, fw, fh)?;
     }
     let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
+    ui.use_overlay_layer(true);
     set_context(&win, &mut ui);
     let mut dirty = true;
     // Trasovani vstupu: klik, ktery zmenil rozhrani, ceka na nakresleni
@@ -800,6 +834,8 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             set_context(win, ui);
             *dirty = true;
         }
+        // Poloha okna: jen pro umisteni popoveru (rozvrzeni se nemeni).
+        Event::Place(r) => ui.set_window_rect(r),
         Event::Close => return Ok(false),
         Event::A11yAction { node, action, value } => {
             let resp = ui.a11y_action(node, action, &value);
@@ -884,6 +920,11 @@ fn render<M: Clone>(win: &mut Window, ui: &mut Ui<M>) -> Result<()> {
         win.draw_scroll(a.id, a.rect, a.content_h, a.offset, |c| ui.draw(c, a.index + 1))?;
     }
     win.retain_scrolls(&areas.iter().map(|a| a.id).collect::<Vec<_>>())?;
+    // Nabidka a bublina ve vrstve popoveru (muze presahovat okno).
+    match ui.overlay_rect() {
+        Some(r) => win.draw_popover(r, |c| ui.draw_overlay(c, r))?,
+        None => win.hide_popover()?,
+    }
     win.set_a11y(&ui.a11y())?;
     // Titulek podle stavu aplikace ("Správce úloh (20 běží)"): v teze
     // transakci jako obsah. Ostatni vlastnosti okna vychozi (jako po

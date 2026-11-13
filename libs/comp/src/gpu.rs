@@ -101,6 +101,7 @@ impl Comp {
         }
         let mut trees: Vec<(u32, Kids)> = Vec::new();
         let hidden = self.greeter_visible();
+        let popover = self.popover_pass(hidden);
         for &gid in self.z.iter().filter(|_| !hidden) {
             let Some(w) = self.windows.get(&gid) else { continue };
             // Stejny vyber jako CPU cesta (vcetne stinu).
@@ -177,6 +178,17 @@ impl Comp {
                     }
                     sink.upload(Src::Above(*gid), b, reg, canvas.pixels(), stride);
                     sink.draw(GpuDraw { src: Src::Above(*gid), src_rect: local(reg, b), dst: reg, clip: r, opacity: 255, opaque: false });
+                }
+            }
+            // Popover okna s fokusem (stejne jako CPU: nad okny, pod listou).
+            if let Some((g, kids, rects)) = &popover {
+                let w = &self.windows[g];
+                let cl = &self.clients[&w.client];
+                for pr in rects {
+                    let clip = r.intersect(pr);
+                    if !clip.is_empty() {
+                        gpu_children(sink, w.client, cl, kids, 0, (w.rect.x, w.rect.y), clip, 255, 0);
+                    }
                 }
             }
             for t in self.top_regions(dialog_active) {

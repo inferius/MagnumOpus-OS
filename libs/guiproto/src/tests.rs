@@ -213,6 +213,7 @@ fn server_messages_roundtrip() {
             code: Error::InvalidArgs,
         },
         ServerMsg::Clipboard { data: vec![104, 0, 0, 0] },
+        ServerMsg::WindowPlace { window: 1, rect: Rect::new(-20, 40, 300, 200) },
         ServerMsg::WindowContext {
             window: 1,
             generation: 3,

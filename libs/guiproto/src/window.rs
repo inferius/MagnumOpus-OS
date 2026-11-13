@@ -58,6 +58,8 @@ pub mod op {
     pub const CLIPBOARD_EVENT: u32 = 114;
     /// Kontext okna: vystup, pracovni plocha, skala (`WindowContext`).
     pub const WINDOW_CONTEXT: u32 = 115;
+    /// Poloha obsahu okna na obrazovce (`WindowPlace`).
+    pub const WINDOW_PLACE: u32 = 116;
 }
 
 /// Rezim okna (kdo kresli dekorace).
@@ -143,7 +145,10 @@ pub mod prop {
     pub const SCROLL: u32 = 1 << 5;
     pub const BUFFER: u32 = 1 << 6;
     pub const COLOR: u32 = 1 << 7;
-    pub const ALL: u32 = (1 << 8) - 1;
+    /// Korenova vrstva jako popover: kresli se nad vsemi okny (vrstva
+    /// `layer.popover`), okno ji neorezava, vstup v jeji plose jde oknu.
+    pub const POPOVER: u32 = 1 << 8;
+    pub const ALL: u32 = (1 << 9) - 1;
 }
 
 /// Vlastnosti vrstvy. V `LAYER_SET` plati jen pole z `mask`.
@@ -166,6 +171,8 @@ pub struct LayerProps {
     pub src: Rect,
     /// Barva 0xAARRGGBB (premultiplied) pro vrstvu `Solid`.
     pub color: u32,
+    /// Popover (jen korenova vrstva okna), viz `prop::POPOVER`.
+    pub popover: bool,
 }
 
 impl Default for LayerProps {
@@ -181,6 +188,7 @@ impl Default for LayerProps {
             buffer: 0,
             src: Rect::default(),
             color: 0,
+            popover: false,
         }
     }
 }
@@ -214,6 +222,9 @@ impl LayerProps {
         if m & prop::COLOR != 0 {
             self.color = o.color;
         }
+        if m & prop::POPOVER != 0 {
+            self.popover = o.popover;
+        }
         self.mask |= m;
     }
 
@@ -243,6 +254,9 @@ impl LayerProps {
         }
         if m & prop::COLOR != 0 {
             w.u32(self.color);
+        }
+        if m & prop::POPOVER != 0 {
+            w.bool(self.popover);
         }
     }
 
@@ -279,6 +293,9 @@ impl LayerProps {
         }
         if m & prop::COLOR != 0 {
             p.color = r.u32()?;
+        }
+        if m & prop::POPOVER != 0 {
+            p.popover = r.bool()?;
         }
         Ok(p)
     }
@@ -547,6 +564,10 @@ pub enum ServerMsg {
     /// vystupu v procentech a obnovovaci frekvence. Prijde pred prvnim
     /// `CONFIGURE` a pri kazde zmene; `generation` roste s kazdou zmenou.
     WindowContext { window: u32, generation: u32, output: u32, screen: Rect, work_area: Rect, scale: u32, refresh_mhz: u32 },
+    /// Obdelnik obsahu okna na obrazovce (po vytvoreni a po kazdem presunu
+    /// nebo zmene velikosti, behem tahu az na konci): aplikace podle nej
+    /// umisti popover do pracovni plochy.
+    WindowPlace { window: u32, rect: Rect },
 }
 
 /// Data obalky schranky: delka a bajty (zkracena zprava = chyba).
@@ -916,6 +937,10 @@ impl ServerMsg {
                 w = Writer::op(op::CLIPBOARD_EVENT);
                 w.u32(data.len() as u32).bytes(data);
             }
+            WindowPlace { window, rect } => {
+                w = Writer::op(op::WINDOW_PLACE);
+                w.u32(*window).rect(rect);
+            }
             WindowContext { window, generation, output, screen, work_area, scale, refresh_mhz } => {
                 w = Writer::op(op::WINDOW_CONTEXT);
                 w.u32(*window).u32(*generation).u32(*output).rect(screen).rect(work_area).u32(*scale).u32(*refresh_mhz);
@@ -992,6 +1017,7 @@ impl ServerMsg {
             },
             op::THEME => Theme { mode: r.u8()? },
             op::CLIPBOARD_EVENT => Clipboard { data: clip_r(&mut r)? },
+            op::WINDOW_PLACE => WindowPlace { window: r.u32()?, rect: r.rect()? },
             op::WINDOW_CONTEXT => WindowContext {
                 window: r.u32()?,
                 generation: r.u32()?,
