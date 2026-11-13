@@ -1238,6 +1238,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui-install"
+version = "0.1.0"
+dependencies = [
+ "guiproto",
+ "installplan",
+ "installview",
+ "libos",
+ "ui",
+]
+
+[[package]]
 name = "gui-komponenty"
 version = "0.1.0"
 dependencies = [
@@ -1581,6 +1592,7 @@ dependencies = [
  "keymap",
  "libos",
  "rand_core 0.6.4",
+ "taskproto",
 ]
 
 [[package]]
