@@ -237,6 +237,16 @@ for f in (ls ~/Fotky | where ext == "jpg") {
   jednotce ji převezmou. Velikost a doba jsou dál přesná celá čísla,
   ostatní veličiny desetinné číslo v základní jednotce.
 
+  **Převody** dělá `convert` ([Příkazy shellu](prikazy-shellu.md#convert)):
+  jednotky z téže tabulky (`1GiB | convert MB` = 1073.741824, číslo
+  v cílové jednotce), číselné soustavy (`255 | convert hex` = `0xff`),
+  kódování textu (`utf8`, `utf16le`, `utf16be`, `latin2`, `base64`, `hex`;
+  zpět `--from`) a časová pásma (`now | convert Europe/Prague`). Pásma
+  bere ze stejné knihovny jako služba času, hodiny v liště a instalátor
+  (`libs/tz` přes `libos::time::zone`: jména IANA, pevný posun, letní čas
+  podle současných pravidel bez historie). Formáty dat (json, řádky) zůstávají
+  na `from` / `to` **[implementováno]**.
+
   **Otevřená otázka:** `m` je dnes minuta. Až přibude délka, `m` (metr)
   by kolidovalo; řešení (metr jen v `convert`, jiný zápis minuty, nebo
   podle kontextu) zatím není rozhodnuté **[navrženo]**.

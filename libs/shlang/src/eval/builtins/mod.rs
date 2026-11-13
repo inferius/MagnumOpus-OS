@@ -1,6 +1,7 @@
 //! Vestavene prikazy (podpisy v [`crate::sig::BUILTINS`]).
 
 mod audio;
+mod convert;
 mod fs;
 mod install;
 mod list;
@@ -26,6 +27,7 @@ pub(crate) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
         "echo" | "log" | "lines" | "split" | "join" | "trim" | "upper" | "lower" | "contains" | "starts-with"
         | "ends-with" | "replace" | "from" | "to" | "describe" => text::call(it, host, name, a, input),
         "audio" => audio::call(it, host, a),
+        "convert" => convert::call(it, host, a, input),
         "install" => install::run(it, host, &a),
         _ => misc::call(it, host, name, a, input),
     }

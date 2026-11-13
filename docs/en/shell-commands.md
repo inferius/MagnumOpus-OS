@@ -7,7 +7,7 @@
 - **Files:** [`ls`](#ls), [`cd`](#cd), [`pwd`](#pwd), [`open`](#open), [`save`](#save), [`rm`](#rm), [`cp`](#cp), [`mv`](#mv), [`mkdir`](#mkdir), [`exists`](#exists), [`df`](#df)
 - **Text and output:** [`echo`](#echo), [`log`](#log), [`lines`](#lines), [`split`](#split), [`join`](#join), [`trim`](#trim), [`upper`](#upper), [`lower`](#lower), [`contains`](#contains), [`starts-with`](#starts-with), [`ends-with`](#ends-with), [`replace`](#replace)
 - **Lists and tables:** [`where`](#where), [`each`](#each), [`select`](#select), [`sort`](#sort), [`first`](#first), [`last`](#last), [`count`](#count), [`sum`](#sum), [`group`](#group), [`reverse`](#reverse), [`range`](#range)
-- **Conversions and time:** [`from`](#from), [`to`](#to), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
+- **Conversions and time:** [`from`](#from), [`to`](#to), [`convert`](#convert), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
@@ -1228,6 +1228,58 @@ A list as JSON.
 **Errors:** `SH_FORMAT`
 
 **Related:** [`from`](#from), [`save`](#save)
+
+
+### `convert`
+
+converts units, number bases, text encodings and time zones
+
+A universal conversion. Units from the unit table: `1GiB | convert MB` returns a number in the target unit, a number without a unit converts with `--from unit`. Bases `hex`, `bin`, `oct`, `dec`: an integer to text with a prefix (`0xff`) and text with a number back (`"ff" | convert dec --from hex`). Encodings `utf8`, `utf16le`, `utf16be`, `latin2` turn text into bytes, `base64` and `hex` bytes into text; back with `--from encoding`. A time converts to a time zone (an IANA name or an offset `UTC+2`) as local time with daylight saving. Data formats (json, lines) are `from` and `to`.
+
+```shell
+convert [target] [--from hodnota]
+```
+
+Full name `value-convert` · input: any value · output: any value
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[target]` | text |  | target unit, base, encoding or time zone |
+| `-f, --from` | text |  | source unit, base or encoding |
+
+Binary gigabytes to decimal megabytes.
+
+```shell
+1GiB | convert MB
+```
+
+```text
+1073.741824
+```
+
+A number in hexadecimal.
+
+```shell
+255 | convert hex
+```
+
+```text
+0xff
+```
+
+Text in base64.
+
+```shell
+"ahoj" | convert base64
+```
+
+```text
+YWhvag==
+```
+
+**Errors:** `SH_ARGS`, `SH_TYPE`
+
+**Related:** [`from`](#from), [`to`](#to), [`describe`](#describe)
 
 
 ### `describe`

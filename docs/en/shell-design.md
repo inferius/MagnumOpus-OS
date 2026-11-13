@@ -243,6 +243,16 @@ for f in (ls ~/Photos | where ext == "jpg") {
   an unknown unit pick it up. Size and duration stay exact integers, other
   quantities are a decimal number in the base unit.
 
+  **Conversions** are done by `convert` ([Shell commands](shell-commands.md#convert)):
+  units from the same table (`1GiB | convert MB` = 1073.741824, a number in
+  the target unit), number bases (`255 | convert hex` = `0xff`), text
+  encodings (`utf8`, `utf16le`, `utf16be`, `latin2`, `base64`, `hex`; back
+  with `--from`) and time zones (`now | convert Europe/Prague`). Zones come
+  from the same library as the time service, the clock in the bar and the
+  installer (`libs/tz` through `libos::time::zone`: IANA names, a fixed
+  offset, daylight saving by the current rules without history). Data
+  formats (json, lines) stay on `from` / `to` **[implemented]**.
+
   **Open question:** `m` is a minute today. Once length is added, `m`
   (metre) would collide; the solution (metre only in `convert`, a different
   minute symbol, or by context) is not decided yet **[designed]**.

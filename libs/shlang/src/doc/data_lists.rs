@@ -183,6 +183,25 @@ pub const DOCS: &[Doc] = &[
         needs_en: "",
     },
     Doc {
+        name: "convert",
+        short_en: "converts units, number bases, text encodings and time zones",
+        long_cs: "Univerzální převod. Jednotky z tabulky jednotek: `1GiB | convert MB` vrátí číslo v cílové jednotce, číslo bez jednotky převede `--from jednotka`. Soustavy `hex`, `bin`, `oct`, `dec`: celé číslo na text s předponou (`0xff`) a text s číslem zpět (`\"ff\" | convert dec --from hex`). Kódování `utf8`, `utf16le`, `utf16be`, `latin2` převede text na bajty, `base64` a `hex` bajty na text; zpět `--from kódování`. Čas převede do časového pásma (jméno IANA nebo posun `UTC+2`) jako místní čas s letním časem. Formáty dat (json, řádky) jsou `from` a `to`.",
+        long_en: "A universal conversion. Units from the unit table: `1GiB | convert MB` returns a number in the target unit, a number without a unit converts with `--from unit`. Bases `hex`, `bin`, `oct`, `dec`: an integer to text with a prefix (`0xff`) and text with a number back (`\"ff\" | convert dec --from hex`). Encodings `utf8`, `utf16le`, `utf16be`, `latin2` turn text into bytes, `base64` and `hex` bytes into text; back with `--from encoding`. A time converts to a time zone (an IANA name or an offset `UTC+2`) as local time with daylight saving. Data formats (json, lines) are `from` and `to`.",
+        args: &[
+            Arg { name: "target", default: "", cs: "cílová jednotka, soustava, kódování nebo časové pásmo", en: "target unit, base, encoding or time zone" },
+            Arg { name: "from", default: "", cs: "zdrojová jednotka, soustava nebo kódování", en: "source unit, base or encoding" },
+        ],
+        examples: &[
+            Ex { code: "1GiB | convert MB", cs: "Dvojkové gigabajty na desítkové megabajty.", en: "Binary gigabytes to decimal megabytes.", check: Out("1073.741824") },
+            Ex { code: "255 | convert hex", cs: "Číslo šestnáctkově.", en: "A number in hexadecimal.", check: Out("0xff") },
+            Ex { code: "\"ahoj\" | convert base64", cs: "Text v base64.", en: "Text in base64.", check: Out("YWhvag==") },
+        ],
+        related: &["from", "to", "describe"],
+        errors: &["SH_ARGS", "SH_TYPE"],
+        needs_cs: "",
+        needs_en: "",
+    },
+    Doc {
         name: "now",
         short_en: "the current time",
         long_cs: "Aktuální čas (časová značka); rozdíl dvou časů je doba.",
