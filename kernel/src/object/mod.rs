@@ -112,7 +112,7 @@ impl ObjectCore {
     /// Jako [`Self::update`]; `boost` = trida odesilatele zpravy, ktera
     /// zmenu zpusobila: probouzena vlakna se na ni docasne zvednou a port
     /// si ji zapamatuje u paketu (dedeni QoS pres IPC).
-    pub fn update_boost(&self, clear: Signals, set: Signals, boost: Option<sched::Qos>) {
+    pub fn update_boost(&self, clear: Signals, set: Signals, boost: Option<sched::QosLoan>) {
         let mut inner = self.inner.lock();
         let signals = (inner.signals & !clear) | set;
         inner.signals = signals;

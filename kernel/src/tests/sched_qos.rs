@@ -22,14 +22,16 @@ use crate::object::job::Job;
 use crate::object::port::Port;
 use crate::object::wait::{self, deadline_after};
 use crate::object::{Error, KernelObject, Signals};
-use crate::sched::{self, Qos, Thread};
+use crate::sched::{self, Qos, QosLoan, Thread};
 use crate::sync::SpinLock;
 
 pub const TESTS: &[(&str, fn())] = &[
     ("qos: latence vstup -> snimek pod zatezi pozadi", input_to_frame_latency),
     ("qos: Background dostane zaruceny podil", background_share),
+    ("qos: presuny a probouzeni mezi vytizenymi CPU bez uvaznuti", migration_stress),
     ("qos: dedeni tridy pres kanal a port", ipc_inheritance),
     ("qos: zvednuti vyprsi", boost_expires),
+    ("qos: pujcka se ping-pongem neprodluzuje", loan_not_renewed_by_ping_pong),
     ("qos: Realtime prijeti a latence periody", realtime),
     ("qos: strop tridy z jobu", job_cap),
     ("qos: prepnuti kontextu (mikrobenchmark)", switch_benchmark),
@@ -180,6 +182,47 @@ fn background_share() {
     assert!(permille <= 400, "Background predbiha Interactive: {permille} promile");
 }
 
+/// Zatez, ktera honi presuny mezi vytizenymi CPU (vic smycek nez CPU,
+/// ruzne tridy) a probouzeni prave usinajicich vlaken (dvojice pres
+/// udalosti s kratkym spankem). Hlida uvaznuti dvou CPU, ktera by na sebe
+/// cekala se zakazanymi prerusenimi (vlakno v cizi fronte, ktere jeste
+/// bezi na svem CPU): kazde vlakno musi dobehnout.
+fn migration_stress() {
+    const ROUNDS: usize = 300;
+    let n = sched::cpu_count();
+    let normal = load(Qos::Normal, 2 * n);
+    let bg = load(Qos::Background, n);
+    let pairs: Vec<_> = (0..n)
+        .flat_map(|i| {
+            let (a, b) = (Arc::new(Event::new()), Arc::new(Event::new()));
+            let class = if i % 2 == 0 { Qos::Interactive } else { Qos::Normal };
+            let (a1, b1) = (a.clone(), b.clone());
+            let ping = sched::spawn("ping", class, move || {
+                for r in 0..ROUNDS {
+                    a1.signal();
+                    wait_reset(&b1);
+                    if r % 8 == 0 {
+                        wait::sleep(Duration::from_micros(200));
+                    }
+                }
+            });
+            let pong = sched::spawn("pong", class, move || {
+                for _ in 0..ROUNDS {
+                    wait_reset(&a);
+                    busy(20 * US);
+                    b.signal();
+                }
+            });
+            [ping, pong]
+        })
+        .collect();
+    for t in &pairs {
+        join(t, Duration::from_secs(30), "ping-pong pod zatezi");
+    }
+    normal.finish();
+    bg.finish();
+}
+
 /// Normal obsluha probuzena zpravou od Interactive bezi jako Interactive;
 /// port si tridu zapamatuje u paketu.
 fn ipc_inheritance() {
@@ -204,7 +247,7 @@ fn ipc_inheritance() {
     let client = sched::spawn("klient", Qos::Interactive, move || {
         let mut m = Message::new(vec![1], Vec::new());
         m.qos = sched::ipc_class();
-        assert_eq!(m.qos, Some(Qos::Interactive));
+        assert_eq!(m.qos.map(|l| l.class), Some(Qos::Interactive));
         c_end.write(m).unwrap();
         wait::wait_one(&*c_end, Signals::READABLE, Some(deadline_after(Duration::from_secs(5)))).unwrap();
     });
@@ -225,7 +268,7 @@ fn ipc_inheritance() {
     join(&writer, Duration::from_secs(5), "zapis");
     let p = port.pop().expect("port bez paketu");
     assert_eq!(p.key, 7);
-    assert_eq!(p.boost, Some(Qos::Interactive));
+    assert_eq!(p.boost.map(|l| l.class), Some(Qos::Interactive));
     // Realtime se pujcuje jako Interactive, zprava od jadra nic nenese.
     assert_eq!(Message::new(Vec::new(), Vec::new()).qos, None);
 }
@@ -235,15 +278,84 @@ fn boost_expires() {
     let stop = Arc::new(Event::new());
     let s = stop.clone();
     let t = sched::spawn("spici", Qos::Background, move || wait_reset(&s));
-    sched::boost(&t, Qos::Interactive);
+    let until = arch::now_ns() + schedcore::class::BOOST_WINDOW_NS;
+    sched::boost(&t, QosLoan { class: Qos::Interactive, until });
     assert_eq!(sched::thread_info(&t).effective, Qos::Interactive as u8);
     // Nizsi trida platne zvednuti nesnizi.
-    sched::boost(&t, Qos::Normal);
+    sched::boost(&t, QosLoan { class: Qos::Normal, until: until + 100 * MS });
     assert_eq!(sched::thread_info(&t).effective, Qos::Interactive as u8);
     wait::sleep(Duration::from_nanos(schedcore::class::BOOST_WINDOW_NS + 10 * MS));
     assert_eq!(sched::thread_info(&t).effective, Qos::Background as u8);
     stop.signal();
     join(&t, Duration::from_secs(5), "spici");
+}
+
+/// Dva procesy Normal si po jedne zprave od Interactive posilaji zpravy
+/// tam a zpet (preposilaji pujcku). Pujcka se predavanim neprodluzuje:
+/// po `BOOST_WINDOW_NS` od zpravy Interactive musi byt oba zpet Normal,
+/// i kdyz si porad posilaji.
+fn loan_not_renewed_by_ping_pong() {
+    let (a_end, b_end) = Channel::create();
+    let (start_tx, start_rx) = Channel::create();
+    let stop = Arc::new(AtomicBool::new(false));
+    let late = Arc::new(AtomicU8::new(0xFF));
+    // Prectene zpravy, preposlani se vzdy pujckou odesilatele.
+    fn pass(end: &Channel) -> bool {
+        match end.read(64, 0) {
+            Ok(m) => {
+                sched::boost_current(m.qos);
+                let mut out = Message::new(vec![0], Vec::new());
+                out.qos = sched::ipc_class();
+                end.write(out).is_ok()
+            }
+            Err(_) => false,
+        }
+    }
+    let (s1, l1) = (stop.clone(), late.clone());
+    let a = sched::spawn("ping", Qos::Normal, move || {
+        // Prvni zprava od Interactive prijde po `start`.
+        wait::wait_one(&*start_rx, Signals::READABLE, Some(deadline_after(Duration::from_secs(5)))).unwrap();
+        let first = start_rx.read(64, 0).unwrap();
+        let t0 = first.qos.expect("zprava bez pujcky").until;
+        sched::boost_current(first.qos);
+        let mut m = Message::new(vec![0], Vec::new());
+        m.qos = sched::ipc_class();
+        a_end.write(m).unwrap();
+        while !s1.load(Ordering::Relaxed) {
+            if wait::wait_one(&*a_end, Signals::READABLE, Some(deadline_after(Duration::from_millis(200)))).is_err() {
+                break;
+            }
+            pass(&a_end);
+            // Po konci puvodni pujcky (s rezervou) uz musi byt Normal.
+            if arch::now_ns() > t0 + 20 * MS {
+                l1.store(sched::thread_info(&sched::current()).effective, Ordering::Relaxed);
+            }
+        }
+    });
+    let s2 = stop.clone();
+    let b = sched::spawn("pong", Qos::Normal, move || {
+        while !s2.load(Ordering::Relaxed) {
+            if wait::wait_one(&*b_end, Signals::READABLE, Some(deadline_after(Duration::from_millis(200)))).is_err() {
+                break;
+            }
+            pass(&b_end);
+        }
+    });
+    let sender = sched::spawn("interactive", Qos::Interactive, move || {
+        let mut m = Message::new(vec![1], Vec::new());
+        m.qos = sched::ipc_class();
+        start_tx.write(m).unwrap();
+    });
+    join(&sender, Duration::from_secs(5), "interactive");
+    wait::sleep(Duration::from_nanos(schedcore::class::BOOST_WINDOW_NS + 60 * MS));
+    stop.store(true, Ordering::Relaxed);
+    join(&a, Duration::from_secs(5), "ping");
+    join(&b, Duration::from_secs(5), "pong");
+    assert_eq!(
+        late.load(Ordering::Relaxed),
+        Qos::Normal as u8,
+        "pujcka Interactive prezila ping-pong po konci okna"
+    );
 }
 
 /// Prijeti: kazde CPU unese nejvys 50 % Realtime. Periodicke Realtime

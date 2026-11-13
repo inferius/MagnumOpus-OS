@@ -30,7 +30,7 @@ use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
 pub use percpu::{MAX_CPUS, all_cpus, cpu_count, this_cpu, try_this_cpu};
-pub use qos::{boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
+pub use qos::{QosLoan, boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
 pub use thread::{Qos, Thread};
 pub use user::{
     create_user_thread, on_return_to_user, request_kill, start_user_thread, user_fault,
@@ -146,7 +146,6 @@ pub fn exit() -> ! {
     unreachable!("mrtve vlakno bylo znovu naplanovano");
 }
 
-/// Dobrovolne prenecha CPU (vlakno se zaradi zpet podle sve tridy).
 /// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.
 pub fn set_user_thread_pointer(value: u64) {
     let irq = interrupts::disable();
@@ -156,6 +155,7 @@ pub fn set_user_thread_pointer(value: u64) {
     interrupts::restore(irq);
 }
 
+/// Dobrovolne prenecha CPU (vlakno se zaradi zpet podle sve tridy).
 pub fn yield_now() {
     schedule();
 }
@@ -180,7 +180,17 @@ pub fn wake(t: &Arc<Thread>, seq: u64) {
             }
             state::BLOCKED => {
                 if t.transition(state::BLOCKED, state::RUNNABLE) {
-                    enqueue(t.clone(), Enq::Wake);
+                    // Vlakno, ktere prave usnulo, muze jeste dobihat na svem
+                    // CPU (`on_cpu`). Do fronty ho smi dat az to CPU po
+                    // prepnuti: jinak by ho jine CPU vybralo a cekalo na nej
+                    // se zakazanymi prerusenimi, a pokud by to CPU cekalo na
+                    // vlakno od nej, obe by stala navzdy. Kdo z obou
+                    // (`wake` / `finish_switch`) vezme `wake_pending` prvni,
+                    // ten zaradi.
+                    t.wake_pending.store(true, Ordering::SeqCst);
+                    if !t.on_cpu.load(Ordering::SeqCst) && t.wake_pending.swap(false, Ordering::SeqCst) {
+                        enqueue(t.clone(), Enq::Wake);
+                    }
                     return;
                 }
             }
@@ -428,8 +438,11 @@ fn switch_away(reason: Reason) {
 
 /// Vrati vystridane vlakno do fronty. Pokud ma toto CPU dalsi praci nebo
 /// je vlakno na spatnem typu jadra a vhodne CPU je necinne, presune ho
-/// tam. Zmenena trida (nastaveni, zvednuti, strop jobu) = nove zarazeni
-/// misto navratu na puvodni misto.
+/// tam - ale az po dokonceni prepnuti (`finish_switch`): dokud vlakno bezi
+/// tady, nesmi byt v cizi fronte (cizi CPU by na nej cekalo se zakazanymi
+/// prerusenimi; dve CPU, ktera si vymeni vlakna, by cekala navzajem).
+/// Zmenena trida (nastaveni, zvednuti, strop jobu) = nove zarazeni misto
+/// navratu na puvodni misto.
 fn requeue<'a>(
     cpu: &'static PerCpu,
     mut rq: SpinLockGuard<'a, RunQueue>,
@@ -454,10 +467,9 @@ fn requeue<'a>(
         && let Some(ent) = rq.take_curr(now)
     {
         let ent = qos::refresh_ent(&t, ent, now);
-        cpu.sync(&rq);
-        drop(rq);
-        enqueue_on(target, t, ent, now, false);
-        return cpu.rq.lock();
+        // SAFETY: vlastni CPU, preruseni zakazana (uvnitr `switch_away`).
+        unsafe { cpu.set_push(target.index, ent) };
+        return rq;
     }
     if qos::needs_requeue(&t, rq.curr_requested_class(), now) {
         if let Some(ent) = rq.take_curr(now) {
@@ -476,8 +488,19 @@ fn finish_switch() {
     // SAFETY: vlastni CPU, preruseni zakazana (jsme uvnitr schedule nebo na
     // zacatku noveho vlakna pred povolenim preruseni).
     let prev = unsafe { cpu.take_prev() };
+    // SAFETY: jako vyse.
+    let push = unsafe { cpu.take_push() };
     if let Some(prev) = prev {
-        prev.on_cpu.store(false, Ordering::Release);
+        prev.on_cpu.store(false, Ordering::SeqCst);
+        // Odlozeny presun na jine CPU (`requeue`): vlakno uz nebezi.
+        if let Some((target, ent)) = push {
+            let target = percpu::cpu(target).unwrap_or(cpu);
+            enqueue_on(target, prev.clone(), ent, arch::now_ns(), false);
+        }
+        // Probuzeni behem prepnuti (`wake`).
+        if prev.wake_pending.swap(false, Ordering::SeqCst) {
+            enqueue(prev.clone(), Enq::Wake);
+        }
         // Pokud bylo DEAD a tohle byl posledni odkaz, uvolni se i jeho
         // zasobnik - uz na nem nebezime.
         drop(prev);

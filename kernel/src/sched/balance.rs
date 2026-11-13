@@ -77,7 +77,13 @@ pub(super) fn steal(cpu: &PerCpu) -> Option<(Arc<Thread>, Ent)> {
             continue;
         }
         let Some(mut rq) = other.rq.try_lock() else { continue };
-        let got = rq.steal(|class, n| place::may_steal(&me, class, n, hybrid));
+        // Vlakno, ktere jeste dobiha na svem CPU (vratilo se do fronty, ale
+        // prepnuti pryc z nej neskoncilo), nebrat: cekali bychom na nej se
+        // zakazanymi prerusenimi.
+        let got = rq.steal(
+            |class, n| place::may_steal(&me, class, n, hybrid),
+            |t| !t.on_cpu.load(Ordering::Acquire),
+        );
         other.sync(&rq);
         if got.is_some() {
             return got;

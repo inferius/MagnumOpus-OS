@@ -83,6 +83,10 @@ pub struct Thread {
     /// Registr ukazatele vlakna userspace (TLS; `THREAD_SET_POINTER`).
     /// Planovac ho nahraje pri kazdem prepnuti na vlakno.
     pub(super) user_tp: AtomicU64,
+    /// Probuzeni behem dobihajiciho prepnuti: vlakno uz je RUNNABLE, ale
+    /// jeho CPU ho jeste neprepnulo pryc (`on_cpu`). Do fronty ho zaradi
+    /// to CPU v `finish_switch` (viz `sched::wake`).
+    pub(super) wake_pending: AtomicBool,
 }
 
 // SAFETY: `context` cte a zapisuje jen planovac na CPU, ktere vlakno prave
@@ -125,6 +129,7 @@ impl Thread {
             kill: AtomicBool::new(false),
             started: AtomicBool::new(false),
             user_tp: AtomicU64::new(0),
+            wake_pending: AtomicBool::new(false),
         }
     }
 

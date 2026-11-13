@@ -358,10 +358,19 @@ impl<T> RunQueue<T> {
     }
 
     /// Vyjme cekajici vlakno pro jine CPU: tridy od nejvyssi, jen kde
-    /// `allow(trida, pocet cekajicich ve tride)` dovoli.
-    pub fn steal(&mut self, mut allow: impl FnMut(Class, usize) -> bool) -> Option<(T, Ent)> {
-        if !self.rt.is_empty() && allow(Class::Realtime, self.rt.len()) {
-            let (item, rt) = self.rt.pop()?;
+    /// `allow(trida, pocet cekajicich ve tride)` dovoli, a jen vlakno, ktere
+    /// `movable` pusti (jadro vynecha vlakna, ktera jeste dobihaji na svem
+    /// CPU - kradouci CPU by na ne cekalo se zakazanymi prerusenimi).
+    pub fn steal(
+        &mut self,
+        mut allow: impl FnMut(Class, usize) -> bool,
+        mut movable: impl FnMut(&T) -> bool,
+    ) -> Option<(T, Ent)> {
+        if !self.rt.is_empty()
+            && allow(Class::Realtime, self.rt.len())
+            && let Some(i) = self.rt.iter().rposition(|(t, _)| movable(t))
+        {
+            let (item, rt) = self.rt.swap_remove(i);
             return Some((
                 item,
                 Ent {
@@ -376,7 +385,7 @@ impl<T> RunQueue<T> {
             if n == 0 || !allow(FAIR[c], n) {
                 continue;
             }
-            if let Some((slot, lag)) = self.fair[c].remove_where(|_| true) {
+            if let Some((slot, lag)) = self.fair[c].remove_where(|s| movable(&s.item)) {
                 let class = if slot.rt.is_some() { Class::Realtime } else { FAIR[c] };
                 return Some((slot.item, Ent { class, lag, rt: slot.rt }));
             }

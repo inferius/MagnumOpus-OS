@@ -45,7 +45,7 @@ pub struct Packet {
     pub key: u64,
     pub signals: Signals,
     /// Trida odesilatele zpravy, ktera paket zpusobila (dedeni QoS).
-    pub boost: Option<crate::sched::Qos>,
+    pub boost: Option<crate::sched::QosLoan>,
 }
 
 /// Fronta paketu v blocich. Bloky `chunks[..used]` drzi pakety (posledni
@@ -187,7 +187,7 @@ impl Port {
 
     /// Doruci paket do rezervovaneho mista (vola objekt pod svym zamkem).
     /// Strzeni zustava, dokud program paket nevyzvedne.
-    pub(super) fn deliver(&self, key: u64, signals: Signals, boost: Option<crate::sched::Qos>) {
+    pub(super) fn deliver(&self, key: u64, signals: Signals, boost: Option<crate::sched::QosLoan>) {
         let mut q = self.queue.lock();
         q.armed = q.armed.saturating_sub(1);
         q.packets.push(Packet { key, signals, boost });

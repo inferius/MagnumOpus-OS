@@ -176,26 +176,28 @@ rt_period_us = 5000
 <path class="ln" d="M210 70 L288 70" marker-end="url(#sc3)"/>
 <path class="ln" d="M480 70 L558 70" marker-end="url(#sc3)"/>
 <text class="m" x="20" y="140">Boost: when the waiter is woken (thread and port) and when the message is read.</text>
-<text class="m" x="20" y="160">End: reading a lower-class message, or 50 ms without another message. It only raises, never lowers.</text>
-<text class="m" x="20" y="180">It chains: the server sends on with its effective (boosted) class.</text>
+<text class="m" x="20" y="160">End: 50 ms after sending by the class owner, or reading a lower-class message. Only raises.</text>
+<text class="m" x="20" y="180">It chains: the server forwards the loan, but with the same expiry.</text>
 </svg>
 <figcaption>QoS propagation by message (like vouchers in macOS).</figcaption>
 </figure>
 
-- Every message carries the **effective class of the sender**.
+- Every message carries a **class loan**: the class and its expiry. A
+  thread that has the class itself sends the expiry `now + 50 ms`; a thread
+  that only has it on loan forwards the **original expiry** (passing a loan
+  on does not extend it). **[verified in QEMU]**
 - On write, the channel boosts the thread waiting on it directly, and a
   port watching it remembers the class with the packet and boosts the
   thread that picks the packet up.
-- Reading a message sets the thread's boost to the message class for
-  **50 ms** (the window for serving one request). The next message renews
-  the window or lowers the class. Without another message the boost
-  expires - the thread returns to its own class.
+- Reading a message sets the thread's boost to the message's loan with
+  its expiry (the window for serving one request is 50 ms from sending by
+  the class owner). The next message replaces the boost (it may also lower
+  it). After the expiry the thread returns to its own class.
 - A boost never lowers, and the job ceiling **does not apply** to it - it
   is a loan from the sender, not the thread's own entitlement (otherwise an
   application with a Normal ceiling serving the compositor would delay the
-  frame). A boost only comes from a thread that really has that class -
-  **but** also an inherited one (see [Known issues](#known-issues),
-  item 1).
+  frame). A boost only comes from a thread that really has that class, or
+  as a forwarded loan with its original expiry.
 - Realtime propagates over IPC as **Interactive** (the budget belongs to
   a particular thread and cannot be lent).
 
@@ -223,6 +225,15 @@ rt_period_us = 5000
   are not the same work as two Interactive ones. A move happens only when
   the target stays less loaded afterwards (no bouncing). The core type rules
   for the class apply.
+- **Moving only after the switch**: a thread still running on its CPU must
+  not be in another CPU's queue. The other CPU would pick it and wait with
+  interrupts disabled until the original CPU finishes switching away; if
+  two CPUs swap threads, they wait for each other and both stop (their
+  timers too). So moving a preempted thread and enqueueing a thread woken
+  while it was going to sleep happen only after the switch completes
+  (`finish_switch`), and stealing skips such threads (like `on_cpu` in
+  Linux). Version 2 had this bug until 2026-11-13 (an occasionally stuck
+  input latency test on aarch64). **[implemented]**
 - **Balancing idle CPUs**: an idle CPU takes work from other queues; an efficiency
   core takes Interactive only from a queue with at least two waiting
   threads (the performance cores are overloaded). A preempted Interactive
@@ -291,15 +302,12 @@ where IPIs and the timer are delivered late; the median is below 1 ms.
 
 From the design review (2026-11-08), to be fixed in this order:
 
-1. **Unbounded boost chaining** (bug, verified in the code). A message
-   carries the sender's effective class *including* the boost
-   (`ipc_class()` -> `effective()` in `kernel/src/sched/qos.rs`) and
-   receiving it renews the 50 ms window. Two processes with a Normal
-   ceiling can therefore keep the boost forever by passing messages after a
-   single message from Interactive. Fix: the loan carries its original
-   expiry (message = class + valid until); forwarding passes it on but does
-   not extend it. Test: ping-pong of two processes after one message from
-   Interactive -> both back to Normal after 50 ms. **[designed]**
+1. **Unbounded boost chaining** - fixed (2026-11-13). A message used to
+   carry the sender's effective class including the boost and receiving it
+   renewed the 50 ms window, so two processes with a Normal ceiling kept
+   the boost forever by ping-pong. Now a message carries a `QosLoan`
+   (class + expiry) and forwarding does not extend it; kernel test "qos:
+   pujcka se ping-pongem neprodluzuje". **[verified in QEMU]**
 2. **Fairness between jobs inside a class.** A class's time is split per
    thread today, so an application with many threads gets a larger share.
    For concurrent agents and computations: two-level sharing (between jobs,

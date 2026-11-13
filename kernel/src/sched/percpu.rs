@@ -68,6 +68,9 @@ pub struct PerCpu {
     current: UnsafeCell<Option<Arc<Thread>>>,
     idle: UnsafeCell<Option<Arc<Thread>>>,
     prev: UnsafeCell<Option<Arc<Thread>>>,
+    /// Odlozeny presun predchoziho vlakna na jine CPU (index cile a stav
+    /// ve fronte): provede se az v `finish_switch`, kdy vlakno uz nebezi.
+    push: UnsafeCell<Option<(usize, schedcore::Ent)>>,
     pub need_resched: AtomicBool,
     pub is_idle: AtomicBool,
     /// Trida bezicicho vlakna (`Qos as u8`, [`IDLE_CLASS`] = necinne).
@@ -124,6 +127,7 @@ impl PerCpu {
             current: UnsafeCell::new(Some(idle.clone())),
             idle: UnsafeCell::new(Some(idle)),
             prev: UnsafeCell::new(None),
+            push: UnsafeCell::new(None),
             need_resched: AtomicBool::new(false),
             is_idle: AtomicBool::new(true),
             current_qos: AtomicU8::new(IDLE_CLASS),
@@ -190,6 +194,22 @@ impl PerCpu {
     pub unsafe fn take_prev(&self) -> Option<Arc<Thread>> {
         // SAFETY: predano volajicim.
         unsafe { (*self.prev.get()).take() }
+    }
+
+    /// # Safety
+    ///
+    /// Volat jen na vlastnim CPU se zakazanymi prerusenimi.
+    pub unsafe fn set_push(&self, target: usize, ent: schedcore::Ent) {
+        // SAFETY: predano volajicim.
+        unsafe { *self.push.get() = Some((target, ent)) };
+    }
+
+    /// # Safety
+    ///
+    /// Volat jen na vlastnim CPU se zakazanymi prerusenimi.
+    pub unsafe fn take_push(&self) -> Option<(usize, schedcore::Ent)> {
+        // SAFETY: predano volajicim.
+        unsafe { (*self.push.get()).take() }
     }
 }
 
