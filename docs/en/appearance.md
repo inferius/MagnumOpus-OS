@@ -811,6 +811,37 @@ More designs waiting for decisions: [bubbles and bar panels](../../design/bublin
 [launcher and palette name](../../design/spoustec.html),
 [system dialogs](../../design/dialogy.html) (desktop and phone).
 
+### Tablet and TV (design)
+
+> **Change from v1.7:** two designs building on the mobile environment.
+> Launcher: variant D chosen (compact grouped list).
+
+[Tablet mode](../../design/tablet.html) shows a tablet in landscape and
+portrait with finger, pen and an attached keyboard. At most two tiles
+(1/2, 1/3 + 2/3) and one floating window; in portrait the tiles are
+stacked. Attaching or detaching the keyboard closes and rearranges
+nothing: only window title bars, the bar, target sizes and the window
+context change. Half the screen in landscape (578 units) is `compact`,
+as on common tablets.
+
+[TV mode](../../design/televize.html) is a 3-metre interface: remote
+control or gamepad, household profiles and parental controls. The main
+result is a table of what the model already covers on a TV. The
+foundations need:
+
+| What | Why |
+|---|---|
+| `posture`, `viewing_distance`, `safe` in the window context | density and safe area independent of the width class |
+| spatial navigation and focus groups with memory in the component library | linear Tab order is not enough on a remote |
+| semantic media actions and a system playback session | one set for remote, phone, voice and lock screen |
+| input source class (local physical, remote, synthetic) | PIN and trusted dialogs only from a local source |
+| household profile and content policy | the system enforces parental controls, not the app |
+| video plane in the compositor | 4K and HDR without exhausting the CPU |
+
+Risks: commercial streaming services require certified DRM that a new
+system will not get; pen, touch and HDMI-CEC need drivers that do not
+exist yet.
+
 ## Accessibility
 
 The accessibility tree is part of the window protocol (`guiproto::a11y`).
@@ -1084,3 +1115,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.5 | 2026-11-08 | installation: live USB, installer with a disk change preview, first run |
 | v1.6 | 2026-11-08 | **phase 1 implemented** in the system: tokens as data (`libs/theme`), Inter and JetBrains Mono with `GPOS` kerning, windows, badge, bar, desktop, dialog and terminal following the prototypes; deviations in [GUI: Look per the design](gui.md#look-per-the-design-phase-1) |
 | v1.7 | 2026-11-12 | designs: mobile environment (stage A), system dialogs for desktop and phone, launcher and palette names, bubbles and bar panels |
+| v1.8 | 2026-11-13 | designs: tablet mode (window tiling, pen, 2-in-1), TV mode with a foundations review; compact file picker; launcher variant D |

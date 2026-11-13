@@ -31,7 +31,7 @@
 .kbdock { position: absolute; left: 0; height: 26px; border-radius: 0 0 14px 14px; background: #2a2630; display: flex; align-items: center; justify-content: center; gap: 6px; color: #bbb; font-size: 11px; }
 .scr { position: relative; overflow: hidden; border-radius: 18px; color: var(--c-ink); font-size: 14px; --hit: 44px;
   background: radial-gradient(circle at 20% 15%, var(--c-wall-a), transparent 55%), radial-gradient(circle at 80% 85%, var(--c-wall-b), transparent 55%), var(--c-bg); }
-.scr.desk { --hit: 32px; }
+.scr.dk { --hit: 32px; }
 .scr.big { font-size: 18px; }
 .scr .ic { width: 1.3em; height: 1.3em; flex: none; }
 .scr button { font: inherit; color: inherit; }
@@ -40,13 +40,13 @@
 .stb .ic { width: 14px; height: 14px; }
 
 /* Okna */
-.win { position: absolute; z-index: 2; display: flex; flex-direction: column; overflow: hidden; background: var(--c-surface); border-radius: 14px; box-shadow: 0 2px 10px #0003; outline: 0 solid transparent; transition: left .2s, top .2s, width .2s, height .2s; }
-.win.foc { box-shadow: 0 0 0 2px var(--c-accent), 0 6px 20px #0004; }
-.win.flt { z-index: 6; border-radius: 18px; box-shadow: var(--sh-window); }
-.win.flt.foc { box-shadow: 0 0 0 2px var(--c-accent), var(--sh-window); }
+.tw { position: absolute; z-index: 2; display: flex; flex-direction: column; overflow: hidden; background: var(--c-surface); border-radius: 14px; box-shadow: 0 2px 10px #0003; outline: 0 solid transparent; transition: left .2s, top .2s, width .2s, height .2s; }
+.tw.foc { box-shadow: 0 0 0 2px var(--c-accent), 0 6px 20px #0004; }
+.tw.flt { z-index: 6; border-radius: 18px; box-shadow: var(--sh-window); }
+.tw.flt.foc { box-shadow: 0 0 0 2px var(--c-accent), var(--sh-window); }
 .whd { flex: none; height: 22px; display: grid; place-items: center; cursor: pointer; }
 .whd i { width: 44px; height: 5px; border-radius: 3px; background: var(--c-border-strong); }
-.win.foc .whd i { background: var(--c-accent); }
+.tw.foc .whd i { background: var(--c-accent); }
 .wtb { flex: none; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 4px 0 12px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--c-border); background: var(--c-surface-2); }
 .wtb .t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wtb .wb { width: 28px; height: 26px; border: 0; background: none; border-radius: 6px; display: grid; place-items: center; cursor: pointer; }
@@ -82,7 +82,7 @@
 .doc { flex: 1; overflow: hidden; padding: 14px 18px; line-height: 1.55; position: relative; }
 .doc h2 { font-size: 1.3em; margin: 0 0 8px; }
 .doc p { margin: 0 0 10px; }
-.doc .field { border-radius: 6px; box-shadow: 0 0 0 2px var(--c-accent); padding: 2px 4px; }
+.doc .fld { border-radius: 6px; box-shadow: 0 0 0 2px var(--c-accent); padding: 2px 4px; }
 .caret { display: inline-block; width: 2px; height: 1.15em; vertical-align: text-bottom; background: var(--c-accent); animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .ink { position: absolute; pointer-events: none; }
@@ -106,16 +106,16 @@
 .dock .sep { width: 1px; margin: 6px 4px; background: var(--c-border-strong); }
 .grip { position: absolute; z-index: 20; left: 50%; bottom: 0; width: 140px; margin-left: -70px; height: 14px; display: grid; place-items: center; cursor: pointer; }
 .grip i { width: 120px; height: 5px; border-radius: 3px; background: var(--c-ink); opacity: .45; }
-.bar { position: absolute; z-index: 20; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 10px; background: color-mix(in srgb, var(--c-surface) 88%, transparent); backdrop-filter: blur(18px); border-top: 1px solid var(--c-border); }
-.bar .db { width: 38px; height: 34px; border-radius: 8px; border: 0; background: none; display: grid; place-items: center; cursor: pointer; position: relative; }
-.bar .db.run::after { content: ""; position: absolute; bottom: 1px; width: 12px; height: 3px; border-radius: 2px; background: var(--c-accent); }
-.bar .sp { flex: 1; }
-.bar .clk { font-size: 12px; font-weight: 600; padding: 0 8px; }
+.tbar { position: absolute; z-index: 20; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 10px; background: color-mix(in srgb, var(--c-surface) 88%, transparent); backdrop-filter: blur(18px); border-top: 1px solid var(--c-border); }
+.tbar .db { width: 38px; height: 34px; border-radius: 8px; border: 0; background: none; display: grid; place-items: center; cursor: pointer; position: relative; }
+.tbar .db.run::after { content: ""; position: absolute; bottom: 1px; width: 12px; height: 3px; border-radius: 2px; background: var(--c-accent); }
+.tbar .sp { flex: 1; }
+.tbar .clk { font-size: 12px; font-weight: 600; padding: 0 8px; }
 .lnch { position: absolute; z-index: 30; padding: 8px; border-radius: 18px; background: color-mix(in srgb, var(--c-surface) 94%, transparent); backdrop-filter: blur(20px); box-shadow: var(--sh-popover); border: 1px solid var(--c-border); }
 .lnch .q { display: flex; align-items: center; gap: 8px; min-height: var(--hit); padding: 0 12px; border-radius: 12px; background: var(--c-surface-2); color: var(--c-ink-muted); margin-bottom: 4px; }
 .lnch .gh { font-size: 11px; font-weight: 700; color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; padding: 8px 12px 2px; }
-.lnch .li { display: flex; align-items: center; gap: 10px; min-height: var(--hit); padding: 0 12px; border-radius: 10px; }
-.lnch .li:hover { background: var(--c-surface-3); }
+.lnch .lr { display: flex; align-items: center; gap: 10px; min-height: var(--hit); padding: 0 12px; border-radius: 10px; }
+.lnch .lr:hover { background: var(--c-surface-3); }
 .lnch .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
 .vkb { position: absolute; z-index: 25; left: 0; right: 0; bottom: 0; background: var(--c-surface-3); padding: 6px 8px 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; }
 .vkb .kr { display: flex; gap: 6px; flex: 1; justify-content: center; }
@@ -307,7 +307,7 @@ document.addEventListener('mo-ready', function () {
     var pen = S.inp === 'pen';
     var txt = '<div class="doc"' + A('type') + '><h2>Zpráva za listopad</h2><p>Tým dokončil přechod na novou verzi souborového systému. Výkon zápisu vzrostl o 18 %.</p>' +
       '<p>Další krok je ovladač pera a dotyku přes I2C, bez kterého tablet nejde vyzkoušet na železe.</p>' +
-      '<p><span class="field">Doplnit: termín testů na zařízení' + (S.kbd || g0.desk ? '<span class="caret"></span>' : '') + '</span></p>' +
+      '<p><span class="fld">Doplnit: termín testů na zařízení' + (S.kbd || g0.desk ? '<span class="caret"></span>' : '') + '</span></p>' +
       (pen ? '<svg class="ink" style="left:30px;top:150px" width="220" height="60" viewBox="0 0 220 60"><path d="M4 40 C 40 4, 60 58, 96 26 S 150 10, 214 34" fill="none" stroke="var(--c-accent)" stroke-width="3" stroke-linecap="round"/></svg>' : '') + '</div>';
     var tools = pen ? '<div class="pent"><span class="on"><i style="background:var(--c-accent)"></i></span><span><i style="background:var(--c-warn)"></i></span><span>' + I('close') + '</span><span style="margin-left:auto;width:auto;font-size:12px;color:var(--c-ink-muted)">pero kreslí poznámky, prst posouvá</span></div>' : '';
     var outl = c === 'compact' ? '' : '<div class="outl"><div class="on">Zpráva za listopad</div><div>Souborový systém</div><div>Ovladače</div><div>Termíny</div></div>';
@@ -323,7 +323,7 @@ document.addEventListener('mo-ready', function () {
     var foc = o.id === S.foc, body = o.id === 'files' ? files(o.cls) : o.id === 'editor' ? editor(o.cls, o) : calc();
     var chrome = g.desk ? '<div class="wtb">' + I(APPS[o.id][0]) + '<span class="t">' + APPS[o.id][1] + '</span><button class="wb"' + A('menu', o.id) + ' aria-label="Rozložení">' + I('window') + '</button><button class="wb" aria-label="Zavřít">' + I('close') + '</button></div>'
       : '<div class="whd"' + A('menu', o.id) + ' role="button" aria-label="Nabídka okna ' + APPS[o.id][1] + '"><i></i></div>';
-    return '<div class="win' + (foc ? ' foc' : '') + (o.flt ? ' flt' : '') + '"' + A('foc', o.id) + ' style="left:' + o.x + 'px;top:' + o.y + 'px;width:' + o.w + 'px;height:' + o.h + 'px">' + chrome + body +
+    return '<div class="tw' + (foc ? ' foc' : '') + (o.flt ? ' flt' : '') + '"' + A('foc', o.id) + ' style="left:' + o.x + 'px;top:' + o.y + 'px;width:' + o.w + 'px;height:' + o.h + 'px">' + chrome + body +
       '<span class="wcls">' + o.cls + ' &middot; ' + o.w + '</span>' +
       (o.obs ? '<div class="wobs" style="top:' + (o.h - o.obs) + 'px;height:' + o.obs + 'px">překážka: klávesnice ' + o.obs + '</div>' : '') + '</div>';
   }
@@ -352,13 +352,13 @@ document.addEventListener('mo-ready', function () {
     var run = { files: 1, editor: S.lay !== 'one', calc: S.flt };
     var b = function (k) { return '<button class="db' + (run[k] ? ' run' : '') + '" aria-label="' + APPS[k][1] + '"' + A('app', k) + '>' + I(APPS[k][0]) + '</button>'; };
     var items = '<button class="db" aria-label="Spouštěč"' + A('launch') + '>' + I('apps') + '</button>' + (g.desk ? '' : '<span class="sep"></span>') + ['files', 'editor', 'browser', 'calc'].map(b).join('');
-    if (g.desk) return '<div class="bar">' + items + '<span class="sp"></span>' + I('wifi') + I('battery') + '<span class="clk">14:05</span></div>';
+    if (g.desk) return '<div class="tbar">' + items + '<span class="sp"></span>' + I('wifi') + I('battery') + '<span class="clk">14:05</span></div>';
     if (S.dock) return '<div class="dock">' + items + '</div>';
     return S.kbd ? '' : '<div class="grip"' + A('dock') + ' aria-label="Ukázat dok"><i></i></div>';
   }
   function launcher(g) {
     if (!S.launch) return '';
-    var row = function (k, t) { return '<div class="li"' + A('app', k) + '>' + I(APPS[k] ? APPS[k][0] : k) + (t || APPS[k][1]) + '</div>'; };
+    var row = function (k, t) { return '<div class="lr"' + A('app', k) + '>' + I(APPS[k] ? APPS[k][0] : k) + (t || APPS[k][1]) + '</div>'; };
     var pin = row('files') + row('editor', 'Editor') + row('browser') + row('term');
     var rec = row('file-text', 'zprava.md') + row('app-pdf', 'smlouva.pdf');
     var sys = row('set') + row('power', 'Vypnout, uspat&hellip;');
@@ -388,7 +388,7 @@ document.addEventListener('mo-ready', function () {
 
   function render() {
     var g = g0 = geo();
-    var scr = '<div class="scr' + (g.desk ? ' desk' : '') + (S.big ? ' big' : '') + '" style="width:' + g.W + 'px;height:' + g.H + 'px">' +
+    var scr = '<div class="scr' + (g.desk ? ' dk' : '') + (S.big ? ' big' : '') + '" style="width:' + g.W + 'px;height:' + g.H + 'px">' +
       '<div class="stb"><span>14:05</span><span class="sp"></span>' + (S.inp === 'pen' ? I('pen') : '') + (g.desk ? I('keyboard') : '') + I('wifi') + I('battery') + '<span>82 %</span></div>' +
       g.wins.map(function (o) { return win(o, g); }).join('') + divider(g) + dockHtml(g) + vkb(g) + launcher(g) + menu(g) + extras(g) + '</div>';
     var kb = g.desk ? '<div class="kbdock" style="top:' + (g.H + 36) + 'px;width:' + (g.W + 36) + 'px">' + I('keyboard') + 'připojená klávesnice s touchpadem</div>' : '';
