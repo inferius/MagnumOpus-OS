@@ -334,9 +334,16 @@ impl<M: Clone> Ui<M> {
         r.redraw = true;
     }
 
+    /// Ma pole vlastni preklad klaves (`Node::key_map`)?
+    fn has_key_map(&self, i: usize) -> bool {
+        matches!(&self.elems[i].kind, ElemKind::TextInput { key_map: Some(_), .. })
+    }
+
     /// Vlozeny znak (psani).
     pub(crate) fn field_insert(&mut self, i: usize, ch: char, r: &mut Response<M>) {
-        if ch.is_control() || self.elems[i].disabled {
+        // S vlastnim prekladem klaves vklada pole az pri stisku klavesy;
+        // heslo jen z mistniho fyzickeho vstupu.
+        if ch.is_control() || self.elems[i].disabled || self.has_key_map(i) || (self.field_kind(i).is_some_and(|k| k.1) && !self.local_input()) {
             return;
         }
         let key = self.elems[i].key;
@@ -354,6 +361,10 @@ impl<M: Clone> Ui<M> {
         if self.focus != Some(i) || self.elems[i].disabled {
             return r;
         }
+        // Heslo: vlozit jen na gesto z mistniho fyzickeho vstupu.
+        if self.field_kind(i).is_some_and(|k| k.1) && self.paste_class != guiproto::window::input_class::LOCAL {
+            return r;
+        }
         if let Some(ed) = self.edits.get_mut(&key) {
             ed.insert(data);
             self.field_changed(i, &mut r);
@@ -369,6 +380,11 @@ impl<M: Clone> Ui<M> {
         let (ctrl, shift) = (self.mods & mods::CTRL != 0, self.mods & mods::SHIFT != 0);
         if self.elems[i].disabled {
             return false;
+        }
+        // Heslo: zadna editace ze vzdaleneho ani umeleho vstupu (spotrebovano,
+        // aby se nedostalo k aplikaci).
+        if secure && !self.local_input() {
+            return true;
         }
         // Zkratky s Ctrl.
         if ctrl && !matches!(code, KEY_LEFT | KEY_RIGHT | KEY_HOME | KEY_END | KEY_BACKSPACE | KEY_DELETE | KEY_ENTER | KEY_KPENTER | KEY_INSERT) {
@@ -406,6 +422,7 @@ impl<M: Clone> Ui<M> {
                     }
                 }
                 'v' => {
+                    self.paste_class = self.input_class;
                     self.paste_target = Some(key);
                     r.clipboard = Some(Clip::Paste);
                 }
@@ -417,6 +434,7 @@ impl<M: Clone> Ui<M> {
         if code == KEY_INSERT || (code == KEY_DELETE && shift) {
             let ed = self.edits.get_mut(&key).unwrap();
             if code == KEY_INSERT && shift {
+                self.paste_class = self.input_class;
                 self.paste_target = Some(key);
                 r.clipboard = Some(Clip::Paste);
             } else if !secure && ed.selection().is_some() {
@@ -499,6 +517,18 @@ impl<M: Clone> Ui<M> {
                 }
                 self.field_reveal(i);
                 r.redraw = true;
+            }
+            // Vlastni preklad klaves: znak z `key_map` (bez Ctrl a Alt).
+            _ if !ctrl && self.mods & mods::ALT == 0 => {
+                let ch = match &self.elems[i].kind {
+                    ElemKind::TextInput { key_map: Some(f), .. } => f(code, self.mods),
+                    _ => return false,
+                };
+                if let Some(c) = ch.filter(|c| !c.is_control()) {
+                    let mut b = [0u8; 4];
+                    self.edits.get_mut(&key).unwrap().insert(c.encode_utf8(&mut b));
+                    self.field_changed(i, r);
+                }
             }
             _ => return false,
         }

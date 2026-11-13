@@ -402,6 +402,7 @@ impl Comp {
             trees.push((gid, children(cl, w.local)));
         }
         let hover = self.input.hover;
+        let popover = self.popover_pass(hidden);
         if rects.iter().any(|r| !r.intersect(&self.panel_visual()).is_empty()) {
             self.ensure_bar_blur(now);
         }
@@ -417,6 +418,18 @@ impl Comp {
                 let focused = self.focus == Some(*gid);
                 draw_window(canvas, &mut self.style, w, cl, kids, focused, now, hover.and_then(|h| button_of(h, *gid)));
             }
+            // Popover okna s fokusem: nad vsemi okny, okno ho neorezava.
+            if let Some((g, kids, rects)) = &popover {
+                let w = &self.windows[g];
+                let cl = &self.clients[&w.client];
+                for pr in rects {
+                    let clip = r.intersect(pr);
+                    if !clip.is_empty() {
+                        draw_children(canvas, cl, kids, 0, (w.rect.x, w.rect.y), clip, 255, 0);
+                    }
+                }
+                canvas.set_clip(*r);
+            }
             // Vse nad okny pres mezibuffer (stejne jako GPU backend: jedno
             // prolnuti kazdeho pixelu); jen tam, kde vrstva neco kresli.
             for t in self.top_regions(dialog_active) {
@@ -427,6 +440,32 @@ impl Comp {
             }
         }
         canvas.reset_clip();
+    }
+
+    /// Popovery okna s fokusem: (okno, deti, obdelniky na obrazovce).
+    pub(crate) fn popover_pass(&self, hidden: bool) -> Option<(u32, Kids, Vec<Rect>)> {
+        let g = self.focus.filter(|_| !hidden)?;
+        let w = self.windows.get(&g).filter(|w| w.mapped && !w.minimized)?;
+        let rects = self.popover_rects(g);
+        if rects.is_empty() {
+            return None;
+        }
+        let cl = self.clients.get(&w.client)?;
+        Some((g, popover_children(cl, w.local), rects))
+    }
+
+    /// Obdelniky popoveru okna `g` na obrazovce (viditelne korenove vrstvy
+    /// s `popover`), oriznute na obrazovku.
+    pub(crate) fn popover_rects(&self, g: u32) -> Vec<Rect> {
+        let Some(w) = self.windows.get(&g) else { return Vec::new() };
+        let Some(cl) = self.clients.get(&w.client) else { return Vec::new() };
+        let screen = self.screen();
+        cl.layers
+            .values()
+            .filter(|l| l.window == w.local && l.parent == 0 && l.props.popover && l.props.visible)
+            .map(|l| Rect::new(w.rect.x + l.props.rect.x, w.rect.y + l.props.rect.y, l.props.rect.w, l.props.rect.h).intersect(&screen))
+            .filter(|r| !r.is_empty())
+            .collect()
     }
 
     /// Kde vrstva nad okny kresli: lista se stinem, kurzor, pri dialogu cela
@@ -563,13 +602,24 @@ pub(crate) type Kids = BTreeMap<u32, Vec<(i32, u32)>>;
 pub(crate) fn children(cl: &Client, window: u32) -> Kids {
     let mut kids: Kids = BTreeMap::new();
     for (&id, l) in &cl.layers {
-        if l.window == window {
+        // Popovery (korenove vrstvy) se kresli az nad vsemi okny.
+        if l.window == window && !(l.parent == 0 && l.props.popover) {
             kids.entry(l.parent).or_default().push((l.props.order, id));
         }
     }
     for v in kids.values_mut() {
         v.sort();
     }
+    kids
+}
+
+/// Deti pro kresleni popoveru okna: koren jen popovery, ostatni jako
+/// [`children`] (jejich potomci).
+pub(crate) fn popover_children(cl: &Client, window: u32) -> Kids {
+    let mut kids = children(cl, window);
+    let mut roots: Vec<(i32, u32)> = cl.layers.iter().filter(|(_, l)| l.window == window && l.parent == 0 && l.props.popover && l.props.visible).map(|(&id, l)| (l.props.order, id)).collect();
+    roots.sort();
+    kids.insert(0, roots);
     kids
 }
 

@@ -8,6 +8,7 @@
 //! `breakpoint.hysteresis` (okno na hrane neskace mezi rozvrzenimi).
 
 use guiproto::Rect;
+pub use guiproto::context::{ContextExt, Distance, Insets, ObstacleKind, Pointer, PointerKind, Posture, Tile};
 use theme::Breakpoints;
 
 /// Trida sirky okna.
@@ -55,8 +56,11 @@ impl SizeClass {
     }
 }
 
-/// Kontext jednoho okna.
+/// Kontext jednoho okna. Neuplny vycet poli (`non_exhaustive`): pribudou
+/// dalsi (drzeni zarizeni, vzdalenost pohledu, bezpecny okraj, ukazatele,
+/// klavesnice) bez zmeny API aplikaci.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Context {
     /// Velikost obsahu okna (logicke px).
     pub w: u32,
@@ -74,6 +78,29 @@ pub struct Context {
     pub generation: u32,
     /// Formaty, ktere je prave ve schrance (polozka "Vlozit" aktivni).
     pub clipboard: alloc::vec::Vec<alloc::string::String>,
+    /// Obsah okna na obrazovce (`WINDOW_PLACE`); prazdny = nezname.
+    pub window: Rect,
+    /// Drzeni zarizeni (hustota, zkratky): pocitac, notebook, tablet,
+    /// telefon, televize.
+    pub posture: Posture,
+    /// Vzdalenost pohledu (velikost pisma a cilu).
+    pub distance: Distance,
+    /// Systemove listy prekryvajici okno.
+    pub insets: Insets,
+    /// Bezpecny okraj (overscan televize): text a fokus jen uvnitr.
+    pub safe: Insets,
+    /// Dostupne ukazatele (prazdne = jen fokus, napr. dalkovy ovladac).
+    pub pointers: alloc::vec::Vec<Pointer>,
+    /// Pripojena hardwarova klavesnice.
+    pub keyboard: bool,
+    /// Prekazky v okne (klavesnice na obrazovce), souradnice okna.
+    pub obscured: alloc::vec::Vec<(ObstacleKind, Rect)>,
+    /// Dlazdice okna (ovladani k vnejsimu okraji).
+    pub tile: Tile,
+    /// Nejmensi cil (px).
+    pub min_hit: u32,
+    /// Velikost textu v promile.
+    pub text_scale: u32,
 }
 
 impl Context {
@@ -89,7 +116,29 @@ impl Context {
             refresh_mhz: 0,
             generation: 0,
             clipboard: alloc::vec::Vec::new(),
+            window: Rect::default(),
+            posture: Posture::Desktop,
+            distance: Distance::Desk,
+            insets: Insets::default(),
+            safe: Insets::default(),
+            pointers: ContextExt::default().pointers,
+            keyboard: true,
+            obscured: alloc::vec::Vec::new(),
+            tile: Tile::Floating,
+            min_hit: 32,
+            text_scale: 1000,
         }
+    }
+
+    /// Okno ma ukazatel s najetim (jinak nic nesmi zalezet na hoveru).
+    pub fn can_hover(&self) -> bool {
+        self.pointers.iter().any(|p| p.hover)
+    }
+
+    /// Ovladani jen fokusem (dalkovy ovladac, gamepad): zadny ukazatel se
+    /// souradnicemi.
+    pub fn focus_only(&self) -> bool {
+        self.pointers.iter().all(|p| p.kind == PointerKind::Remote)
     }
 
     /// Je ve schrance format `f`?

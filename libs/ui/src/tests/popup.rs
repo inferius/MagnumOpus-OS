@@ -207,3 +207,37 @@ fn table_context_menu() {
     f.key(KEY_ENTER, 0);
     assert_eq!(f.msgs.last(), Some(&M::Copy));
 }
+
+/// Vrstva popoveru: nabidka u spodniho okraje okna presahne okno (je
+/// misto v pracovni plose), kresli se do vlastniho platna od svého
+/// pocatku a klik do ni mimo okno funguje.
+#[test]
+fn overlay_layer_beyond_window() {
+    let mut u: Ui<M> = Ui::new(crate::Look::ui_fonts(), 300, 80);
+    u.use_overlay_layer(true);
+    u.set_context(0, Rect::new(0, 0, 1280, 800), Rect::new(0, 0, 1280, 744), 100, 60_000, 1);
+    u.set_window_rect(Rect::new(100, 100, 300, 80));
+    u.rebuild("o".into(), column([select(LANGS.iter().map(|s| String::from(*s)), 0).on_pick(M::Lang)]));
+    let cb = u.a11y().into_iter().find(|n| n.role == Role::ComboBox).unwrap().bounds;
+    u.event(InputEvent::Button { code: BTN_LEFT, pressed: true, x: cb.x + 5, y: cb.y + 5 }, 0);
+    let r = u.overlay_rect().expect("otevrena nabidka");
+    assert!(r.bottom() as i32 > 80, "presah pod okno: {r:?}");
+    assert!(r.y > cb.y, "pod polem");
+    // Okno bez vrstvy popoveru se nekresli s nabidkou.
+    let mut px = vec![0u32; 300 * 80];
+    let mut c = gfx::Canvas::new(&mut px, 300, 80, 300).unwrap();
+    u.draw(&mut c, 0);
+    let bg = u.look.theme.color.surface;
+    // Vrstva popoveru: karta od pocatku platna.
+    let mut ov = vec![0u32; (r.w * r.h) as usize];
+    let mut oc = gfx::Canvas::new(&mut ov, r.w, r.h, r.w).unwrap();
+    u.draw_overlay(&mut oc, r);
+    assert_eq!(oc.get(r.w / 2, r.h - 6), bg, "pozadi karty");
+    // Klik na polozku mimo okno (y > 80) ji vybere.
+    let it = u.a11y().into_iter().find(|n| n.role == Role::MenuItem && n.name == "Slovenčina").unwrap().bounds;
+    assert!(it.y > 80);
+    u.event(InputEvent::Button { code: BTN_LEFT, pressed: true, x: it.x + 5, y: it.y + 5 }, 0);
+    let res = u.event(InputEvent::Button { code: BTN_LEFT, pressed: false, x: it.x + 5, y: it.y + 5 }, 0);
+    assert_eq!(res.msgs, vec![M::Lang(3)]);
+    assert!(u.overlay_rect().is_none());
+}

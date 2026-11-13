@@ -60,3 +60,30 @@ fn dialog_accepts_input_only_after_it_was_shown() {
     t.now += dialog::INPUT_DELAY;
     assert!(enter(&mut t), "po ochranne dobe dialog vstup prijme");
 }
+
+/// Vzdaleny vstup (telefon jako ovladac): aplikace ho dostane s tridou
+/// `REMOTE`, systemovy dialog ho neprijme (jen mistni fyzicky).
+#[test]
+fn remote_input_reaches_app_but_not_dialog() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.out();
+    let key = |t: &mut T, code: u16| {
+        let mut r = Record::new(Event::Key { code, scancode: code as u32, action: Action::Press, ch: None }, 0, 0, t.now);
+        r.flags |= inputproto::event::flags::REMOTE;
+        t.c.input(&[r], t.now);
+    };
+    key(&mut t, inputproto::code::KEY_A);
+    let recs: Vec<_> = client_msgs(&t.out(), a).into_iter().filter_map(|m| match m {
+        ServerMsg::Input { records, .. } => Some(records),
+        _ => None,
+    }).flatten().collect();
+    assert!(recs.iter().any(|r| r.class == guiproto::window::input_class::REMOTE && r.synthetic));
+    // Dialog: zobrazit, pak vzdaleny Enter nic.
+    let ask = DialogRequest::Ask { id: 4, kind: DialogKind::Permission, app: "X".into(), text: "?".into(), options: vec!["Povolit".into(), "Zamítnout".into()] };
+    t.c.dialog_request(1, ask, t.now);
+    t.show_dialog();
+    key(&mut t, inputproto::code::KEY_ENTER);
+    assert!(!t.out().iter().any(|o| matches!(o, Out::Dialog(1, DialogReply::Answer { .. }))));
+}

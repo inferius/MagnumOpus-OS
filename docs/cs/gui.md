@@ -287,6 +287,21 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   - **Později** je to žádost o změnu (`CONFIGURE` jako při tažení okraje).
     Maximalizované okno a okno na celé obrazovce si ji zapamatuje jako
     velikost po obnovení.
+- **Rozšíření pro tablet a televizi** (`guiproto::context::ContextExt`,
+  verze protokolu 3; [Televize](../../design/televize.html),
+  [Tablet](../../design/tablet.html)): `posture` (desktop, laptop, tablet,
+  phone, tv), `distance` (blízko, stůl, místnost), `insets` (systémové
+  lišty) a vedle nich `safe` (bezpečný okraj kvůli přesahu obrazu: text
+  a fokus jen uvnitř), `pointers` (seznam: myš, touchpad, dotyk, pero,
+  dálkový ovladač s přesností, najetím a tlakem; prázdný = jen fokus),
+  `keyboard` (připojená klávesnice), `obscured` (překážky, např. klávesnice
+  na obrazovce), `tile` (floating, full, left, right, top, bottom),
+  `min_hit` (nejmenší cíl; tokeny `size.hit_min_fine` 32 a
+  `size.hit_min_touch` 44) a `text_scale`. Kompozitor zatím posílá počítač
+  s myší a klávesnicí a `tile` podle maximalizace a celé obrazovky (nová
+  generace); tablet a televize dodají služby zařízení. Knihovna `ui`
+  podle `min_hit` sama zvětší ovládací prvky a řádky, aplikace čte
+  `cx.posture`, `cx.can_hover()`, `cx.focus_only()`.
 - Terminál: `win.request_size(1040, 520, 850, 0)`, tedy 1040 px, ale nejvýš
   85 % šířky pracovní plochy.
 - Verze protokolu 2 (`guiproto::VERSION`): kompozitor a aplikace se
@@ -1271,6 +1286,7 @@ převede na zprávy `Msg`.
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
 | `select` | klik, výběr ze seznamu | Enter, mezerník, Alt+dolů, F4; zavřený šipky | `combo-box`, `menu`, `menu-item` |
+| `image` | - | - | `image` s popisem `alt` (pixely sdílené přes `Rc`, zmenšení se zachováním poměru stran, nezvětšuje se) |
 | `segments` | - | - | `list` s položkami `list-item` (celý popisek každého úseku) |
 | `switch` | klik | mezerník, Enter (při puštění) | `switch`, `checked`, `toggle` |
 | `radio` | klik | mezerník, Enter | `radio`, `checked` |
@@ -1400,6 +1416,10 @@ na hranici znaku.
   byl kurzor vidět; vložené konce řádků nahradí mezerou.
 - **Heslo:** kopírovat ani vyjmout nejde (ani Ctrl+Insert), Ctrl+šipky
   skáčou na začátek a konec (slova by prozradila mezery).
+- **Vlastní překlad kláves** `text_input(..).key_map(|kód, modifikátory|
+  Some('z'))`: pole píše podle jiného rozložení než systém (zkouška
+  rozložení vybraného v instalátoru). Znak od systému ignoruje, editační
+  klávesy a zkratky s Ctrl zůstanou.
 - `ui::text` nezávisí na kreslení: terminál z něj používá hranice slov
   a grafémů pro výběr v mřížce.
 
@@ -1479,8 +1499,15 @@ Prototyp má pro oddíly pevné barvy; systém je nahrazuje těmito tóny.
   je uzel `tooltip`.
 - Vzhled podle `.popover` a `.menu` v návrhu (karta `surface`, rám
   `border`, ve vysokém kontrastu 2 px, položky výšky `control_h`, najetí
-  `accent_soft`). Nabídka se zatím kreslí do okna a ořízne se jeho okrajem;
-  přesah přes okraj okna bude systémový popover kompozitoru (další krok).
+  `accent_soft`).
+- **Popover:** nabídka a bublina se kreslí do vlastní kořenové vrstvy okna
+  s vlastností `POPOVER` (bit masky `LAYER_SET`). Kompozitor ji skládá nad
+  všemi okny a pod lištou a kurzorem (CPU i GPU stejně), okno ji
+  neořezává a vstup v její ploše patří oknu (souřadnice obsahu okna, klidně
+  mimo jeho obdélník). Popover kreslí jen okno s fokusem. Aby se nabídka
+  vešla do pracovní plochy, dostane aplikace polohu okna zprávou
+  `WINDOW_PLACE { window, rect }` (po zobrazení a po každém přesunu nebo
+  změně velikosti, během tahu až na konci); `cx.window`.
 
 ### Tabulka a seznam (virtualizace)
 
@@ -1514,7 +1541,7 @@ tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet př
 | pravé tlačítko | vybere řádek, pokud nebyl vybraný, a pošle `on_context` (kontextová nabídka) |
 | klik na záhlaví | `on_sort(sloupec, vzestupně)`, znovu opačně; šipka v záhlaví podle `.sorted` |
 | tah za okraj záhlaví | šířka sloupce (stav knihovny podle klíče, nejméně `size.hit_min`) |
-| tah vybraných řádků | po 6 px `on_drag(id)`; cíl a puštění řeší aplikace (protokol tažení mezi aplikacemi je další krok) |
+| tah vybraných řádků | po 6 px `on_drag(id)`; puštění na tabulku s `on_drop(cíl, id)` ve stejném okně (`Some(id)` řádek, `None` prázdné místo, na sebe sama nic), cílový řádek má během tahu rám `accent`; tažení mezi aplikacemi je další krok |
 | kolečko | plynulé rolování: cíl hned, posun po snímcích (`Ui::tick`); na kraji kolečko dostane oblast pod tabulkou |
 | posuvník | tažení jezdce, klik do dráhy o stránku |
 
@@ -1553,6 +1580,43 @@ tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet př
   kanálů (služba, pomocný proces kopírování) a předá je
   `App::external_from(index, data)`; `run_with` s jedním kanálem dál
   volá `App::external`.
+
+### Prostorová navigace fokusu
+
+Dálkový ovladač a gamepad nemají Tab ani myš (`cx.focus_only()`), proto
+knihovna posouvá fokus šipkami prostorově ([Televize](../../design/televize.html)):
+
+- **Šipka**, kterou prvek s fokusem nespotřeboval (tabulka, pole,
+  posuvník, záložky si šipky nechají), přesune fokus na nejbližší
+  zaměřitelný prvek v daném směru: vzdálenost ve směru plus dvojnásobek
+  kolmé odchylky. Když v tom směru nic není, šipku dostane aplikace
+  (`App::key`).
+- **Skupina fokusu** `Node::focus_group(Axis::Horizontal | Vertical |
+  Grid)`: šipky podél osy zůstanou ve skupině (na kraji se fokus nehne),
+  kolmé ze skupiny vystoupí. Při návratu do skupiny dostane fokus
+  naposledy vybraný prvek, ne nejbližší (návrat do řady na stejnou
+  dlaždici).
+- **Výchozí fokus** `Node::default_focus()`: při startu obrazovky a vždy,
+  když prvek s fokusem zmizí; fokus je tak vždy někde.
+- Pořadí Tab zůstává lineární pro klávesnici a čtečku obrazovky.
+
+### Třída zdroje vstupu
+
+Každý záznam vstupu nese třídu zdroje (`InputRecord::class`, příznaky
+`inputproto::event::flags::SYNTHETIC` a `REMOTE`):
+
+| Třída | Odkud | Co smí |
+|---|---|---|
+| místní fyzický | klávesnice, myš, spárovaný ovladač | vše |
+| vzdálený | telefon jako ovladač, vzdálená plocha | aplikace ano; systémové dialogy, přihlášení, bezpečná zkratka, zkratky systému a schránka ne |
+| syntetický | automatizace, agent, test | jako vzdálený |
+
+- Kompozitor posílá aplikacím třídu u každé události a důvěryhodné akce
+  dělá jen z místního fyzického vstupu (dřív „ne syntetický“).
+- Knihovna `ui`: pole s heslem (i PIN) přijme psaní, mazání a vložení jen
+  z místního fyzického vstupu (vložení podle třídy gesta Ctrl+V); akce
+  přístupnosti `set-value` heslo nenastaví. Běžná pole píší z každého
+  zdroje. Klient předá třídu přes `Ui::set_input_class`.
 
 ### Galerie komponent a snímkové testy
 

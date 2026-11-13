@@ -110,3 +110,29 @@ fn resize_sends_new_context_generation() {
     assert_eq!(cx[0].1, Rect::new(0, 0, 1024, 700));
     assert_eq!(cx[0].2, t.c.work_area());
 }
+
+/// Rozsireni kontextu: pocitac s mysi a klavesnici, dlazdice podle
+/// maximalizace (nova generace), nejmensi cil z tokenu.
+#[test]
+fn context_ext_tile_follows_maximize() {
+    use guiproto::context::{PointerKind, Posture, Tile};
+    let mut t = T::new();
+    let a = t.client("a");
+    t.out();
+    t.window(a, Mode::Standard, RED);
+    let ext = |out: &[Out]| {
+        client_msgs(out, a).into_iter().rev().find_map(|m| match m {
+            ServerMsg::WindowContext { ext, generation, .. } => Some((ext, generation)),
+            _ => None,
+        })
+    };
+    let (e, g0) = ext(&t.out()).unwrap();
+    assert_eq!((e.posture, e.tile, e.keyboard), (Posture::Desktop, Tile::Floating, true));
+    assert_eq!(e.pointers[0].kind, PointerKind::Mouse);
+    assert_eq!(e.min_hit as u32, t.c.style.theme.size.hit_min_fine);
+    let g = t.c.clients[&a].windows[&1];
+    t.c.toggle_maximize(g, t.now);
+    let (e, g1) = ext(&t.out()).unwrap();
+    assert_eq!(e.tile, Tile::Full);
+    assert!(g1 > g0);
+}

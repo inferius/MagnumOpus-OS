@@ -96,7 +96,7 @@ fn shot(name: &str, w: u32, h: u32, view: &dyn Fn() -> Node<M>, prep: &dyn Fn(&m
         if n * 1000 > bad.len() * MAX_BAD || (rw, rh) != (w, h) {
             let o = out_dir();
             let _ = std::fs::write(o.join(format!("{name}-{mname}-actual.png")), gfx::png::encode(&px, w, h, w));
-            let diff: Vec<u32> = px.iter().zip(&bad).map(|(&p, &b)| if b { 0xFFFF_0000 } else { 0xFF00_0000 | ((ch(p, 16) + ch(p, 8) + ch(p, 0)) / 6) * 0x01_0101 }).collect();
+            let diff: Vec<u32> = px.iter().zip(&bad).map(|(&p, &b)| if b { 0xFFFF_0000 } else { 0xFF00_0000 | (((ch(p, 16) + ch(p, 8) + ch(p, 0)) / 6) * 0x01_0101) }).collect();
             let _ = std::fs::write(o.join(format!("{name}-{mname}-diff.png")), gfx::png::encode(&diff, w, h, w));
             errors.push(format!("{name}-{mname}: lisi se {n} z {} pixelu (rozdil v {})", bad.len(), o.display()));
         }

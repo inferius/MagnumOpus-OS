@@ -171,6 +171,7 @@ fn server_messages_roundtrip() {
                     mods: 1,
                     synthetic: false,
                     time: 10,
+                    class: 0,
                 },
                 InputRecord {
                     event: InputEvent::Button {
@@ -182,12 +183,14 @@ fn server_messages_roundtrip() {
                     mods: 0,
                     synthetic: true,
                     time: 11,
+                    class: 2,
                 },
                 InputRecord {
                     event: InputEvent::PointerLeave,
                     mods: 0,
                     synthetic: false,
                     time: 12,
+                    class: 0,
                 },
             ],
         },
@@ -213,6 +216,7 @@ fn server_messages_roundtrip() {
             code: Error::InvalidArgs,
         },
         ServerMsg::Clipboard { data: vec![104, 0, 0, 0] },
+        ServerMsg::WindowPlace { window: 1, rect: Rect::new(-20, 40, 300, 200) },
         ServerMsg::WindowContext {
             window: 1,
             generation: 3,
@@ -221,6 +225,20 @@ fn server_messages_roundtrip() {
             work_area: Rect::new(0, 0, 1280, 744),
             scale: 125,
             refresh_mhz: 60_000,
+            ext: crate::context::ContextExt {
+                posture: crate::context::Posture::Tablet,
+                distance: crate::context::Distance::Near,
+                safe: crate::context::Insets { top: 27, right: 48, bottom: 27, left: 48 },
+                pointers: vec![
+                    crate::context::Pointer { kind: crate::context::PointerKind::Touch, precise: false, hover: false, pressure: false },
+                    crate::context::Pointer { kind: crate::context::PointerKind::Pen, precise: true, hover: true, pressure: true },
+                ],
+                keyboard: false,
+                obscured: vec![(crate::context::ObstacleKind::Keyboard, Rect::new(0, 400, 1280, 330))],
+                tile: crate::context::Tile::Left,
+                min_hit: 44,
+                ..Default::default()
+            },
         },
     ] {
         roundtrip_server(m);

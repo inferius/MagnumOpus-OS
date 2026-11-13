@@ -52,6 +52,22 @@ pub mod flags {
     /// Udalost neprisla z fyzickeho zarizeni, ale z umeleho vstupu
     /// (automatizace, vzdalena plocha, agent).
     pub const SYNTHETIC: u16 = 1 << 0;
+    /// Udalost od vzdaleneho zarizeni (telefon jako ovladac, vzdalena
+    /// plocha): skutecny clovek, ale ne mistni fyzicke zarizeni.
+    pub const REMOTE: u16 = 1 << 1;
+}
+
+/// Trida zdroje vstupu. PIN, hesla a duveryhodne dialogy prijmou jen
+/// mistni fyzicky vstup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputClass {
+    /// Mistni fyzicke zarizeni (klavesnice, mys, sparovany ovladac).
+    #[default]
+    Local,
+    /// Vzdalene zarizeni (telefon, vzdalena plocha).
+    Remote,
+    /// Umely vstup (automatizace, agent, test).
+    Synthetic,
 }
 
 /// Stav overeni noveho vstupniho zarizeni.
@@ -232,6 +248,17 @@ impl Record {
 
     pub const fn is_synthetic(&self) -> bool {
         self.flags & flags::SYNTHETIC != 0
+    }
+
+    /// Trida zdroje (umely ma prednost pred vzdalenym).
+    pub const fn class(&self) -> InputClass {
+        if self.flags & flags::SYNTHETIC != 0 {
+            InputClass::Synthetic
+        } else if self.flags & flags::REMOTE != 0 {
+            InputClass::Remote
+        } else {
+            InputClass::Local
+        }
     }
 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {

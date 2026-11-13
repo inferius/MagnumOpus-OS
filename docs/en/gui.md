@@ -300,6 +300,21 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   - **Later** it is a resize request (`CONFIGURE` as when dragging an
     edge). A maximized or fullscreen window remembers it as its restored
     size.
+- **Extension for tablet and TV** (`guiproto::context::ContextExt`,
+  protocol version 3; [TV](../../design/televize.html),
+  [Tablet](../../design/tablet.html)): `posture` (desktop, laptop, tablet,
+  phone, tv), `distance` (near, desk, room), `insets` (system bars) and
+  next to them `safe` (safe margin for overscan: text and focus only
+  inside), `pointers` (a list: mouse, touchpad, touch, pen, remote with
+  precision, hover and pressure; empty = focus only), `keyboard` (attached
+  keyboard), `obscured` (obstacles, e.g. the on-screen keyboard), `tile`
+  (floating, full, left, right, top, bottom), `min_hit` (smallest target;
+  tokens `size.hit_min_fine` 32 and `size.hit_min_touch` 44) and
+  `text_scale`. For now the compositor sends a computer with mouse and
+  keyboard and `tile` by maximize and fullscreen (a new generation);
+  tablet and TV will provide device services. The `ui` library enlarges
+  controls and rows by `min_hit` itself; applications read `cx.posture`,
+  `cx.can_hover()`, `cx.focus_only()`.
 - Terminal: `win.request_size(1040, 520, 850, 0)`, i.e. 1040 px but at
   most 85 % of the work area width.
 - Protocol version 2 (`guiproto::VERSION`): compositor and applications
@@ -1321,6 +1336,7 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 | `progress` | - | - | `progress` (value in percent) |
 | `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
 | `select` | click, pick from the list | Enter, space, Alt+down, F4; closed: arrows | `combo-box`, `menu`, `menu-item` |
+| `image` | - | - | `image` with an `alt` description (pixels shared via `Rc`, scaled down keeping the aspect ratio, never up) |
 | `segments` | - | - | `list` with `list-item` children (full label of each segment) |
 | `switch` | click | space, Enter (on release) | `switch`, `checked`, `toggle` |
 | `radio` | click | space, Enter | `radio`, `checked` |
@@ -1453,6 +1469,10 @@ character boundary.
   cursor stays visible; pasted line breaks become spaces.
 - **Password:** neither copy nor cut works (not even Ctrl+Insert);
   Ctrl+arrows jump to start and end (words would reveal the spaces).
+- **Own key translation** `text_input(..).key_map(|code, modifiers|
+  Some('z'))`: the field types by a layout other than the system one
+  (trying the layout chosen in the installer). It ignores the system's
+  character; editing keys and Ctrl shortcuts stay.
 - `ui::text` does not depend on drawing: the terminal uses its word and
   grapheme boundaries for selection in the grid.
 
@@ -1536,9 +1556,16 @@ with these tones.
   a shown tooltip is a `tooltip` node.
 - Look after `.popover` and `.menu` in the design (a `surface` card,
   `border` frame, 2 px in high contrast, items `control_h` tall, hover
-  `accent_soft`). The menu is drawn into the window for now and is clipped
-  by its edge; overflowing the window edge will be a compositor system
-  popover (next step).
+  `accent_soft`).
+- **Popover:** menus and tooltips are drawn into a root layer of their own
+  with the `POPOVER` property (a `LAYER_SET` mask bit). The compositor
+  composes it above all windows and below the bar and cursor (CPU and GPU
+  alike), the window does not clip it, and input in its area belongs to the
+  window (window content coordinates, even outside its rectangle). Only the
+  focused window's popover is drawn. To fit the menu into the work area the
+  application gets the window position via `WINDOW_PLACE { window, rect }`
+  (after mapping and after every move or resize, at the end of a drag);
+  `cx.window`.
 
 ### Table and list (virtualization)
 
@@ -1572,7 +1599,7 @@ files cost the same as twenty. The application can share data through
 | right button | selects the row if it was not selected and sends `on_context` (context menu) |
 | header click | `on_sort(column, ascending)`, again reversed; the header arrow follows `.sorted` |
 | drag a header edge | column width (library state by key, at least `size.hit_min`) |
-| drag selected rows | after 6 px `on_drag(ids)`; target and drop are up to the application (the drag protocol between applications is a next step) |
+| drag selected rows | after 6 px `on_drag(ids)`; dropping on a table with `on_drop(target, ids)` in the same window (`Some(id)` a row, `None` empty space, nothing onto itself), the target row gets an `accent` frame while dragging; dragging between applications is a next step |
 | wheel | smooth scrolling: target at once, movement per frame (`Ui::tick`); at the edge the wheel goes to the area below |
 | scrollbar | drag the thumb, click the track for a page |
 
@@ -1616,6 +1643,46 @@ files cost the same as twenty. The application can share data through
   from several channels (a service, a copy helper process) and passes them
   to `App::external_from(index, data)`; `run_with` with one channel still
   calls `App::external`.
+
+### Spatial focus navigation
+
+A remote control or gamepad has neither Tab nor a mouse
+(`cx.focus_only()`), so the library moves focus with arrows spatially
+([TV](../../design/televize.html)):
+
+- An **arrow** the focused element did not consume (tables, fields,
+  sliders and tabs keep arrows) moves focus to the nearest focusable
+  element in that direction: the distance in the direction plus twice the
+  perpendicular offset. When nothing lies that way the application gets
+  the arrow (`App::key`).
+- **Focus group** `Node::focus_group(Axis::Horizontal | Vertical | Grid)`:
+  arrows along the axis stay in the group (at the edge focus does not
+  move), perpendicular ones leave it. Coming back into the group focuses
+  the last selected element, not the nearest (back into a row on the same
+  tile).
+- **Default focus** `Node::default_focus()`: when a screen starts and
+  whenever the focused element disappears; focus is always somewhere.
+- Tab order stays linear for the keyboard and the screen reader.
+
+### Input source class
+
+Every input record carries a source class (`InputRecord::class`, flags
+`inputproto::event::flags::SYNTHETIC` and `REMOTE`):
+
+| Class | From | Allowed |
+|---|---|---|
+| local physical | keyboard, mouse, paired remote | everything |
+| remote | phone as a remote, remote desktop | applications yes; system dialogs, login, the secure shortcut, system shortcuts and clipboard no |
+| synthetic | automation, agent, test | like remote |
+
+- The compositor passes the class with every event to applications and
+  performs trusted actions only on local physical input (previously "not
+  synthetic").
+- The `ui` library: a password (and PIN) field accepts typing, deleting
+  and pasting only from local physical input (paste by the class of the
+  Ctrl+V gesture); the accessibility action `set-value` does not set a
+  password. Ordinary fields type from any source. The client passes the
+  class via `Ui::set_input_class`.
 
 ### Component gallery and snapshot tests
 

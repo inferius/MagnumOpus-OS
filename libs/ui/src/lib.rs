@@ -23,6 +23,7 @@ pub mod look;
 pub mod node;
 pub(crate) mod popup;
 pub mod scrollbar;
+pub mod spatial;
 mod table;
 pub mod text;
 
@@ -46,6 +47,7 @@ pub use node::*;
 use layout::{ElemKind, Element};
 pub use look::Look;
 pub use context::{Context, SizeClass};
+pub use spatial::Axis;
 
 /// Id uzlu s textem chyby prvku s id `id` (mimo rozsah id prvku).
 pub fn error_node(id: u32) -> u32 {
@@ -171,6 +173,7 @@ pub trait App {
 
 /// Ucinek aplikace, ktery provede klient (Elm: `update` jen meni stav).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Effect {
     /// Kopirovat: data ve vic formatech (napr. `text/uri-list` a text).
     /// Plati jen hned po fyzickem vstupu (Ctrl+C, polozka menu).
@@ -217,6 +220,8 @@ pub struct Ui<M> {
     pub(crate) tables: BTreeMap<Key, table::TableState>,
     /// Rozpracovany stisk v tabulce (radek, zahlavi, posuvnik).
     pub(crate) table_press: Option<table::Press>,
+    /// Tazene radky (od `on_drag` do pusteni).
+    pub(crate) dragging: Option<table::Dragging>,
     /// Faze animace neurciteho prubehu (px, roste po snimcich).
     pub(crate) busy_phase: u32,
     /// Otevrena nabidka (vyber, kontextova).
@@ -226,6 +231,16 @@ pub struct Ui<M> {
     pub(crate) tip_shown: Option<Key>,
     /// Cas posledni udalosti (ns).
     pub(crate) now: u64,
+    /// Nabidka a bublina ve vlastni vrstve popoveru (klient v OS).
+    pub(crate) overlay: bool,
+    /// Posun bubliny pri kresleni do vrstvy popoveru (jeji pocatek).
+    pub(crate) tip_shift: (i32, i32),
+    /// Trida zdroje zpracovavane udalosti (`guiproto::window::input_class`).
+    pub(crate) input_class: u8,
+    /// Trida zdroje gesta, ktere pozadalo o vlozeni.
+    pub(crate) paste_class: u8,
+    /// Pamet skupin fokusu: klic skupiny -> naposledy vybrany prvek.
+    pub(crate) group_memory: BTreeMap<Key, Key>,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -276,11 +291,17 @@ impl<M: Clone> Ui<M> {
             paste_target: None,
             tables: BTreeMap::new(),
             table_press: None,
+            dragging: None,
             busy_phase: 0,
             popup: None,
             tip: None,
             tip_shown: None,
             now: 0,
+            overlay: false,
+            tip_shift: (0, 0),
+            input_class: 0,
+            paste_class: 0,
+            group_memory: BTreeMap::new(),
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -310,6 +331,44 @@ impl<M: Clone> Ui<M> {
         (c.output, c.screen, c.work_area, c.scale, c.refresh_mhz, c.generation) = (output, screen, work_area, scale, refresh_mhz, generation);
     }
 
+    /// Rozsireni kontextu (drzeni, ukazatele, klavesnice, dlazdice...).
+    pub fn set_context_ext(&mut self, e: &context::ContextExt) {
+        let c = &mut self.cx;
+        c.posture = e.posture;
+        c.distance = e.distance;
+        c.insets = e.insets;
+        c.safe = e.safe;
+        c.pointers = e.pointers.clone();
+        c.keyboard = e.keyboard;
+        c.obscured = e.obscured.clone();
+        c.tile = e.tile;
+        c.min_hit = e.min_hit as u32;
+        self.look.min_hit = c.min_hit;
+        c.text_scale = e.text_scale as u32;
+    }
+
+    /// Trida zdroje nasledujicich udalosti (klient podle `InputRecord`):
+    /// pole s heslem prijmou jen mistni fyzicky vstup.
+    pub fn set_input_class(&mut self, class: u8) {
+        self.input_class = class;
+    }
+
+    /// Je zpracovavany vstup z mistniho fyzickeho zarizeni?
+    pub(crate) fn local_input(&self) -> bool {
+        self.input_class == guiproto::window::input_class::LOCAL
+    }
+
+    /// Poloha obsahu okna na obrazovce (`WINDOW_PLACE`).
+    pub fn set_window_rect(&mut self, r: Rect) {
+        self.cx.window = r;
+    }
+
+    /// Klient kresli nabidku a bublinu do vlastni vrstvy popoveru (muze
+    /// presahovat okno); bez toho se kresli do okna (testy).
+    pub fn use_overlay_layer(&mut self, on: bool) {
+        self.overlay = on;
+    }
+
     /// Formaty ve schrance (klient po zprave `Changed`).
     pub fn set_clipboard_formats(&mut self, f: Vec<String>) {
         self.cx.clipboard = f;
@@ -334,7 +393,10 @@ impl<M: Clone> Ui<M> {
         self.assign_ids();
         let find = |k: Option<Key>| k.and_then(|k| self.by_key.get(&k).copied());
         let focus = find(fk).filter(|&i| self.elems[i].focusable());
-        self.focus = focus.or_else(|| self.elems.iter().position(|e| e.focusable()));
+        // Fokus je vzdy nekde: zmizely prvek -> vychozi fokus obrazovky.
+        self.focus = focus.or_else(|| self.default_focus_index());
+        let by_key = &self.by_key;
+        self.group_memory.retain(|g, _| by_key.contains_key(g));
         self.pressed = find(pk);
         self.key_pressed = find(kk);
         // Textova pole prevezmou hodnotu aplikace (kurzor a historie zustanou).
@@ -473,6 +535,7 @@ impl<M: Clone> Ui<M> {
                     ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
                     ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
                     ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
+                    ElemKind::Image { alt, .. } => (Role::Image, alt.clone(), none(), 0),
                     ElemKind::Group => (Role::Group, none(), none(), 0),
                     ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
                     _ => (Role::Group, none(), none(), 0),

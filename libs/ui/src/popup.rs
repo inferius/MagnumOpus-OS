@@ -120,13 +120,14 @@ impl<M: Clone> Ui<M> {
         let check = th.size.icon_s + gap;
         let label_w = items.iter().map(|i| self.look.width(&i.label, body)).max().unwrap_or(0);
         let short_w = items.iter().map(|i| self.look.width(&i.shortcut, body)).max().unwrap_or(0);
-        let w = (label_w + if short_w > 0 { short_w + 2 * gap } else { 0 } + check + 2 * gap + 2 * pad).max(min_w).max(th.size.hit_min * 5).min(self.w);
+        let area = self.popup_area();
+        let w = (label_w + if short_w > 0 { short_w + 2 * gap } else { 0 } + check + 2 * gap + 2 * pad).max(min_w).max(th.size.hit_min * 5).min(area.w);
         let content: u32 = items.iter().map(|i| self.row_h(i)).sum::<u32>() + 2 * pad;
-        let h = content.min(self.h.saturating_sub(2 * th.space[2]));
-        // Pod kotvu, kdyz se nevejde, nad ni; vzdy uvnitr okna.
+        let h = content.min(area.h.saturating_sub(2 * th.space[2]));
+        // Pod kotvu, kdyz se nevejde, nad ni; vzdy v dovolene plose.
         let below = anchor.bottom() as i32 + 2;
-        let y = if below + h as i32 <= self.h as i32 { below } else { (anchor.y - 2 - h as i32).max(0) };
-        let x = anchor.x.clamp(0, (self.w - w) as i32);
+        let y = if below + h as i32 <= area.bottom() as i32 { below } else { (anchor.y - 2 - h as i32).max(area.y) };
+        let x = anchor.x.clamp(area.x, (area.right() as i32 - w as i32).max(area.x));
         let p = self.pointer;
         self.popup = Some(Popup { owner, select, items, rect: Rect::new(x, y, w, h), hi, scroll: 0, press_inside: false, moved: false, opened_at: p });
         self.tip = None;
@@ -134,6 +135,50 @@ impl<M: Clone> Ui<M> {
         if let Some(k) = hi {
             self.popup_reveal(k);
         }
+    }
+
+    /// Kde smi nabidka a bublina lezet (souradnice okna): s vrstvou
+    /// popoveru a znamou polohou okna cela pracovni plocha (presah pres
+    /// okraj okna), jinak okno.
+    fn popup_area(&self) -> Rect {
+        let win = Rect::new(0, 0, self.w, self.h);
+        let c = &self.cx;
+        if !self.overlay || c.window.w == 0 || c.work_area.w == 0 {
+            return win;
+        }
+        Rect::new(c.work_area.x - c.window.x, c.work_area.y - c.window.y, c.work_area.w, c.work_area.h)
+    }
+
+    /// Obdelnik vrstvy popoveru (souradnice okna): otevrena nabidka
+    /// a zobrazena bublina; `None` = nic.
+    pub fn overlay_rect(&self) -> Option<Rect> {
+        let p = self.popup.as_ref().map(|p| p.rect);
+        let t = self.tip_text().map(|t| self.tip_rect(&t));
+        match (p, t) {
+            (Some(a), Some(b)) => {
+                let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
+                let (x1, y1) = ((a.right() as i32).max(b.right() as i32), (a.bottom() as i32).max(b.bottom() as i32));
+                Some(Rect::new(x0, y0, (x1 - x0) as u32, (y1 - y0) as u32))
+            }
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// Nakresli nabidku a bublinu do platna vrstvy popoveru, jejiz pocatek
+    /// je `origin` (souradnice okna, viz [`Ui::overlay_rect`]).
+    pub fn draw_overlay(&mut self, c: &mut Canvas<'_>, origin: Rect) {
+        let saved = (self.popup.clone(), self.pointer);
+        if let Some(p) = &mut self.popup {
+            p.rect = Rect::new(p.rect.x - origin.x, p.rect.y - origin.y, p.rect.w, p.rect.h);
+        }
+        self.pointer = (self.pointer.0 - origin.x, self.pointer.1 - origin.y);
+        // Bublina se umistuje od ukazatele: posunuta stejne jako nabidka.
+        let tip_origin = origin;
+        self.tip_shift = (tip_origin.x, tip_origin.y);
+        c.fill(c.bounds(), 0);
+        self.draw_overlays(c);
+        self.tip_shift = (0, 0);
+        (self.popup, self.pointer) = saved;
     }
 
     fn popup_reveal(&mut self, k: usize) {
@@ -519,12 +564,17 @@ impl<M: Clone> Ui<M> {
     fn tip_rect(&self, text: &str) -> Rect {
         let th = &self.look.theme;
         let s = th.text.small;
-        let w = (self.look.width(text, s) + 2 * th.space[4]).min(TIP_MAX_W).min(self.w);
+        // Plocha v souradnicich okna; pri kresleni do vrstvy popoveru je
+        // ukazatel posunuty o jeji pocatek (`tip_shift`).
+        let (sx, sy) = self.tip_shift;
+        let a = self.popup_area();
+        let area = Rect::new(a.x - sx, a.y - sy, a.w, a.h);
+        let w = (self.look.width(text, s) + 2 * th.space[4]).min(TIP_MAX_W).min(area.w);
         let h = s.line + 2 * th.space[2];
         let (px, py) = self.pointer;
         let below = py + th.size.icon_m as i32;
-        let y = if below + h as i32 <= self.h as i32 { below } else { (py - h as i32 - th.space[2] as i32).max(0) };
-        Rect::new(px.clamp(0, (self.w - w) as i32), y, w, h)
+        let y = if below + h as i32 <= area.bottom() as i32 { below } else { (py - h as i32 - th.space[2] as i32).max(area.y) };
+        Rect::new(px.clamp(area.x, (area.right() as i32 - w as i32).max(area.x)), y, w, h)
     }
 
     fn tip_text(&self) -> Option<String> {

@@ -36,8 +36,45 @@ impl Comp {
             work_area: self.work_area(),
             scale: 100,
             refresh_mhz: self.refresh_mhz(),
+            ext: self.context_ext(gid),
         };
         self.send(c, m);
+    }
+
+    /// Poloha obsahu oken pro aplikace (`WINDOW_PLACE`): poslat oknum, ktera
+    /// se od posledni zpravy posunula nebo zmenila velikost; behem tahu
+    /// mysi az po jeho konci. Vola se pred skladanim snimku.
+    pub(crate) fn places_changed(&mut self) {
+        let dragging = match self.input.drag {
+            Some(crate::input::Drag::Move { window, .. }) | Some(crate::input::Drag::Resize { window, .. }) => Some(window),
+            _ => None,
+        };
+        let ids: alloc::vec::Vec<u32> = self.windows.iter().filter(|(g, w)| w.mapped && w.rect != w.placed && Some(**g) != dragging).map(|(g, _)| *g).collect();
+        for g in ids {
+            let Some(w) = self.windows.get_mut(&g) else { continue };
+            w.placed = w.rect;
+            let (c, local, rect) = (w.client, w.local, w.rect);
+            self.send(c, ServerMsg::WindowPlace { window: local, rect });
+        }
+    }
+
+    /// Rozsireni kontextu okna `gid`: pocitac s mysi a klavesnici (tablet
+    /// a TV dodaji sluzby zarizeni, az budou), dlazdice podle stavu okna,
+    /// nejmensi cil z tokenu `size.hit_min_fine`.
+    fn context_ext(&self, gid: u32) -> guiproto::context::ContextExt {
+        use guiproto::context::{ContextExt, Tile};
+        let tile = match self.windows.get(&gid) {
+            Some(w) if w.mode == Mode::Fullscreen || w.restore.is_some() || w.fs_saved.is_some() => Tile::Full,
+            _ => Tile::Floating,
+        };
+        ContextExt { tile, min_hit: self.style.theme.size.hit_min_fine as u16, ..Default::default() }
+    }
+
+    /// Okno zmenilo stav (maximalizace, cela obrazovka): novy kontext
+    /// (dlazdice).
+    pub(crate) fn context_of_window_changed(&mut self, gid: u32) {
+        self.ctx_generation = self.ctx_generation.wrapping_add(1);
+        self.send_context(gid);
     }
 
     /// Zmena obrazovky (rozliseni, lista): nova generace kontextu vsem oknum.

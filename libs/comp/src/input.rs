@@ -82,7 +82,7 @@ pub enum SysKey {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Drag {
+pub(crate) enum Drag {
     Move { window: u32, dx: i32, dy: i32 },
     Resize { window: u32, left: bool, top: bool, right: bool, bottom: bool, start: Rect, px: i32, py: i32 },
 }
@@ -90,7 +90,9 @@ enum Drag {
 pub struct InputState {
     pub px: i32,
     pub py: i32,
-    drag: Option<Drag>,
+    pub(crate) drag: Option<Drag>,
+    /// Trida zdroje prave zpracovavaneho zaznamu (`input_class::*`).
+    pub(crate) class: u8,
     pointer_window: Option<u32>,
     press_target: Option<u32>,
     /// Pocet zdroju umeleho vstupu (ukazuje se v panelu).
@@ -116,6 +118,7 @@ impl InputState {
             px: w as i32 / 2,
             py: h as i32 / 2,
             drag: None,
+            class: 0,
             pointer_window: None,
             press_target: None,
             cursor: Cursor::Arrow,
@@ -156,6 +159,9 @@ impl Comp {
                     mods,
                     synthetic,
                     time,
+                    // Trida zdroje zpracovavaneho zaznamu (udalosti od
+                    // systemu jako fokus jsou mistni).
+                    class: if synthetic { self.input.class } else { guiproto::window::input_class::LOCAL },
                 }],
             },
         );
@@ -196,6 +202,14 @@ impl Comp {
 
     /// Okno a zona pod bodem (odshora).
     pub fn hit(&self, x: i32, y: i32) -> Option<(u32, Zone)> {
+        // Popover okna s fokusem je nad vsemi okny: vstup v nem patri jemu
+        // (souradnice obsahu okna, klidne mimo jeho obdelnik).
+        if let Some(g) = self.focus
+            && self.popover_rects(g).iter().any(|r| r.contains(x, y))
+            && let Some(w) = self.windows.get(&g)
+        {
+            return Some((g, Zone::Content(x - w.rect.x, y - w.rect.y)));
+        }
         for &gid in self.z.iter().rev() {
             let w = self.windows.get(&gid)?;
             if !w.mapped || w.minimized || !w.grab().contains(x, y) {
@@ -272,7 +286,14 @@ impl Comp {
             }
             return;
         }
-        let syn = r.is_synthetic();
+        // Duveryhodne akce (dialogy, prihlaseni, bezpecna zkratka, zkratky
+        // systemu) jen z mistniho fyzickeho vstupu: vzdaleny jako umely.
+        let syn = r.class() != inputproto::event::InputClass::Local;
+        self.input.class = match r.class() {
+            inputproto::event::InputClass::Local => guiproto::window::input_class::LOCAL,
+            inputproto::event::InputClass::Remote => guiproto::window::input_class::REMOTE,
+            inputproto::event::InputClass::Synthetic => guiproto::window::input_class::SYNTHETIC,
+        };
         let mods = r.mods;
         match r.event {
             Event::Motion { dx, dy } => {
@@ -971,6 +992,12 @@ impl Comp {
     }
 
     pub(crate) fn toggle_maximize(&mut self, g: u32, now: u64) {
+        self.toggle_maximize_state(g, now);
+        // Dlazdice v kontextu okna (full / floating).
+        self.context_of_window_changed(g);
+    }
+
+    fn toggle_maximize_state(&mut self, g: u32, now: u64) {
         let (sw, sh) = (self.w, self.h);
         let reserve = self.bar_reserve();
         let Some(w) = self.windows.get_mut(&g) else { return };

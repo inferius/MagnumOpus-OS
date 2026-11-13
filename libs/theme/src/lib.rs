@@ -189,6 +189,8 @@ uints!(
     switch_h,
     switch_knob,
     side_panel,
+    hit_min_fine,
+    hit_min_touch,
 );
 
 /// Kryti (0..=255 pro `gfx::scale`).

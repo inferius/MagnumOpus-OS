@@ -167,6 +167,16 @@ impl<M: Clone> Ui<M> {
                 ElemKind::Progress { value } => progress_bar(c, r, *value, e.agent, col),
                 ElemKind::Table(_) => self.draw_table(c, i, st),
                 ElemKind::Select { .. } => self.draw_select(c, i, st),
+                ElemKind::Image { w, h, px, .. } => {
+                    // Zmenseni se zachovanim pomeru stran, na stred prvku.
+                    if let Some(img) = gfx::Image::new(px, *w, *h, *w) {
+                        let k = (r.w as u64 * *h as u64).min(r.h as u64 * *w as u64);
+                        let (dw, dh) = if *w == 0 || *h == 0 { (0, 0) } else { ((k / *h as u64) as u32, (k / *w as u64) as u32) };
+                        let (dw, dh) = (dw.min(*w), dh.min(*h));
+                        let d = Rect::new(r.x + (r.w - dw) as i32 / 2, r.y + (r.h - dh) as i32 / 2, dw, dh);
+                        c.draw_image(&img, Rect::new(0, 0, *w, *h), d, 255, false);
+                    }
+                }
                 ElemKind::Switch { .. } | ElemKind::Radio { .. } | ElemKind::Slider { .. } | ElemKind::Segmented { .. } | ElemKind::Tabs { .. } | ElemKind::Busy | ElemKind::Segments { .. } => {
                     self.draw_control(c, i, st);
                 }
@@ -177,8 +187,8 @@ impl<M: Clone> Ui<M> {
                 }
             }
         }
-        // Nabidka a bublina nad prvky okna.
-        if space == 0 {
+        // Nabidka a bublina nad prvky okna (s vrstvou popoveru ve ni).
+        if space == 0 && !self.overlay {
             self.draw_overlays(c);
         }
     }

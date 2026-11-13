@@ -87,7 +87,7 @@ pub enum Kind<M> {
     /// `secure` = heslo: kresli se teckami, hodnota se nedava do stromu
     /// pristupnosti ani do trasovani, kompozitor pole zakryje ve snimku.
     /// `multiline` = viceradkove pole (`text_area`) s `rows` radky.
-    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<KeyMapFn> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
     List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
@@ -108,6 +108,9 @@ pub enum Kind<M> {
     Busy,
     /// Pruhovy graf podilu (oddily disku, obsazeni, kvoty).
     Segments { items: Vec<Segment>, legend: bool },
+    /// Obrazek (pixely 0xAARRGGBB, sdilene bez kopie), zmenseny do
+    /// prvku se zachovanim pomeru stran; `alt` = popis pro ctecku.
+    Image { w: u32, h: u32, px: alloc::rc::Rc<[u32]>, alt: String },
     /// Vyber jedne moznosti z rozbalovaciho seznamu.
     Select { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
 
@@ -142,6 +145,10 @@ pub struct Node<M> {
     pub menu: Option<Vec<MenuEntry<M>>>,
     /// Bublina s popisem (po 500 ms nad prvkem).
     pub tooltip: Option<String>,
+    /// Skupina fokusu (rada, sloupec, mrizka) s pameti, viz `ui::spatial`.
+    pub focus_group: Option<crate::spatial::Axis>,
+    /// Vychozi fokus obrazovky.
+    pub default_focus: bool,
 }
 
 /// Co polozka nabidky udela.
@@ -244,6 +251,8 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
         skip_tab: false,
         menu: None,
         tooltip: None,
+        focus_group: None,
+        default_focus: false,
     }
 }
 
@@ -263,6 +272,7 @@ pub fn text_input<M>(value: &str) -> Node<M> {
         multiline: false,
         rows: 1,
         on_change: None,
+        key_map: None,
         on_submit: None,
     })
 }
@@ -363,6 +373,14 @@ pub fn segments<M>(items: Vec<Segment>) -> Node<M> {
     node(Kind::Segments { items, legend: false })
 }
 
+/// Obrazek `w` x `h` (napr. nahled souboru). Velikost prvku je velikost
+/// obrazku, mensi prostor ho zmensi se zachovanim pomeru stran.
+pub fn image<M>(w: u32, h: u32, px: alloc::rc::Rc<[u32]>, alt: &str) -> Node<M> {
+    let ok = px.len() as u64 >= w as u64 * h as u64;
+    let (w, h) = if ok { (w, h) } else { (0, 0) };
+    node(Kind::Image { w, h, px, alt: alt.into() })
+}
+
 /// Rozbalovaci vyber jedne z `options` (zprava `on_pick`).
 pub fn select<M>(options: impl IntoIterator<Item = String>, selected: usize) -> Node<M> {
     node(Kind::Select { options: options.into_iter().collect(), selected, on_select: None })
@@ -410,6 +428,19 @@ impl<M> Node<M> {
 
     pub fn skip_tab(mut self, s: bool) -> Self {
         self.skip_tab = s;
+        self
+    }
+
+    /// Skupina fokusu: sipky podel osy zustanou v ni, pri navratu do ni
+    /// dostane fokus naposledy vybrany prvek (rada dlazdic na televizi).
+    pub fn focus_group(mut self, a: crate::spatial::Axis) -> Self {
+        self.focus_group = Some(a);
+        self
+    }
+
+    /// Vychozi fokus obrazovky (pri startu a kdyz prvek s fokusem zmizi).
+    pub fn default_focus(mut self) -> Self {
+        self.default_focus = true;
         self
     }
 
@@ -546,6 +577,17 @@ impl<M> Node<M> {
         self
     }
 
+    /// Vlastni preklad klaves na znaky (napr. zkouska rozlozeni vybraneho
+    /// v instalatoru, ne rozlozeni systemu): pri stisku pole vlozi
+    /// `f(kod, modifikatory)` misto znaku od systemu; `None` = nic.
+    /// Editacni klavesy a zkratky s Ctrl zustanou.
+    pub fn key_map(mut self, f: impl Fn(u16, u16) -> Option<char> + 'static) -> Self {
+        if let Kind::TextInput { key_map, .. } = &mut self.kind {
+            *key_map = Some(Box::new(f));
+        }
+        self
+    }
+
     pub fn on_submit(mut self, m: M) -> Self {
         if let Kind::TextInput { on_submit, .. } = &mut self.kind {
             *on_submit = Some(m);
@@ -617,6 +659,12 @@ impl Cells {
     }
 }
 
+/// Preklad klavesy (kod, modifikatory `inputproto::mods`) na znak.
+pub type KeyMapFn = Box<dyn Fn(u16, u16) -> Option<char>>;
+
+/// Zprava pri pusteni tazenych radku (cil, id radku).
+pub type DropFn<M> = Box<dyn Fn(Option<u64>, Vec<u64>) -> M>;
+
 /// Popis tabulky: data se ctou line pres `id` a `row` jen pro viditelne
 /// radky, takze tisice polozek nestoji nic navic. Vyber drzi aplikace
 /// (`selection`, zprava `on_selection` s novym vyberem).
@@ -645,6 +693,9 @@ pub struct TableSpec<M> {
     pub on_drag: Option<Box<dyn Fn(Vec<u64>) -> M>>,
     /// Prave tlacitko na radku (kontextova nabidka).
     pub on_context: Option<Box<dyn Fn(u64) -> M>>,
+    /// Pusteni tazenych radku (id) na radek `Some(id)` nebo na prazdne
+    /// misto tabulky `None`; tah z teze nebo jine tabulky v okne.
+    pub on_drop: Option<DropFn<M>>,
 }
 
 /// Tabulka s `count` radky. Jednosloupcovy seznam bez zahlavi (vyber
@@ -675,6 +726,7 @@ pub fn table<M>(columns: Vec<Col>, count: usize, id: impl Fn(usize) -> u64 + 'st
         on_sort: None,
         on_drag: None,
         on_context: None,
+        on_drop: None,
     })));
     n.grow = true;
     n
@@ -749,6 +801,14 @@ impl<M> Node<M> {
     pub fn on_context(mut self, f: impl Fn(u64) -> M + 'static) -> Self {
         if let Some(t) = self.spec() {
             t.on_context = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// Cil pusteni tazenych radku (`on_drag` v teze nebo jine tabulce).
+    pub fn on_drop(mut self, f: impl Fn(Option<u64>, Vec<u64>) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_drop = Some(Box::new(f));
         }
         self
     }

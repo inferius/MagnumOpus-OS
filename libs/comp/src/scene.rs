@@ -150,6 +150,10 @@ pub struct Window {
     /// posle se az po potvrzeni nebo terminu. Aplikace tak kresli jen
     /// posledni velikost a nikdy vic nez jednu za snimek.
     pub pending_size: Option<(u32, u32)>,
+    /// Posledni `WINDOW_PLACE` (obdelnik obsahu poslany aplikaci).
+    pub placed: Rect,
+    /// Popovery okna pri poslednim poskozeni (stare misto se musi prekreslit).
+    pub popover_last: Vec<Rect>,
     /// Cekajici `CONFIGURE`: serial, rozmery, termin.
     pub configure: Option<(u32, u32, u32, u64)>,
     pub serial: u32,
@@ -531,6 +535,8 @@ impl Comp {
             attention: false,
             anchor: (None, None),
             pending_size: None,
+            placed: Rect::default(),
+            popover_last: Vec::new(),
             configure: None,
             serial: 1,
             badge_until: 0,
@@ -745,6 +751,14 @@ impl Comp {
             // Vcetne stinu (odznak bezramoveho okna presahuje jen dovnitr).
             let r = w.visual();
             self.damage(r);
+        }
+        // Popovery: stare i nove misto (presahuji okno).
+        let now = self.popover_rects(gid);
+        if let Some(w) = self.windows.get_mut(&gid) {
+            let old = core::mem::replace(&mut w.popover_last, now.clone());
+            for r in old.into_iter().chain(now) {
+                self.damage(r);
+            }
         }
     }
 

@@ -72,6 +72,11 @@ impl Comp {
 
     /// Prepne celou obrazovku okna `g`.
     pub fn toggle_fullscreen(&mut self, g: u32, now: u64) {
+        self.toggle_fullscreen_state(g, now);
+        self.context_of_window_changed(g);
+    }
+
+    fn toggle_fullscreen_state(&mut self, g: u32, now: u64) {
         let (sw, sh) = (self.w, self.h);
         let Some(w) = self.windows.get_mut(&g) else { return };
         let before = w.visual();

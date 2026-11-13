@@ -17,7 +17,7 @@ use crate::node::{Key, Kind, Node};
 pub enum ElemKind<M> {
     Label { text: String, heading: bool, warn: bool },
     Button { text: String, on_click: Option<M> },
-    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<crate::node::KeyMapFn> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
     ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
@@ -31,6 +31,7 @@ pub enum ElemKind<M> {
     Busy,
     Segments { items: Vec<crate::node::Segment>, legend: bool },
     Select { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
+    Image { w: u32, h: u32, px: alloc::rc::Rc<[u32]>, alt: String },
     Group,
     Scroll { content_h: u32 },
 }
@@ -43,6 +44,8 @@ pub struct Element<M> {
     pub skip_tab: bool,
     pub menu: Option<Vec<crate::node::MenuEntry<M>>>,
     pub tooltip: Option<String>,
+    pub focus_group: Option<crate::spatial::Axis>,
+    pub default_focus: bool,
     /// Obdelnik v souradnicich prostoru `space`.
     pub rect: Rect,
     /// 0 = okno, jinak index prvku `Scroll` + 1.
@@ -96,10 +99,11 @@ fn kind_tag<M>(k: &Kind<M>) -> usize {
         Kind::Busy => 16,
         Kind::Segments { .. } => 17,
         Kind::Select { .. } => 18,
+        Kind::Image { .. } => 19,
     }
 }
 
-const TAGS: usize = 19;
+const TAGS: usize = 20;
 
 /// Znacky odvozenych klicu (aby se nepotkaly s vlastnimi).
 const OWN: u64 = 1;
@@ -161,6 +165,7 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
         }
         Kind::Tabs { .. } => (th.size.hit_min * 4, ctl),
         Kind::Busy => (th.size.hit_min * 4, sp[3]),
+        Kind::Image { w, h, .. } => (*w, *h),
         Kind::Select { options, .. } => {
             let w = options.iter().map(|o| t.width(o, t.body())).max().unwrap_or(0);
             (w + 2 * sp[4] + th.size.icon_s + sp[2], ctl)
@@ -208,8 +213,9 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
     let mut error = n.error;
     let mut menu = n.menu;
     let mut tooltip = n.tooltip;
+    let (focus_group, default_focus) = (n.focus_group, n.default_focus);
     let mut push = |out: &mut Vec<Element<M>>, kind: ElemKind<M>, rect: Rect| {
-        out.push(Element { kind, key, error: error.take(), skip_tab, menu: menu.take(), tooltip: tooltip.take(), rect, space, parent, disabled, agent });
+        out.push(Element { kind, key, error: error.take(), skip_tab, menu: menu.take(), tooltip: tooltip.take(), focus_group, default_focus, rect, space, parent, disabled, agent });
         out.len()
     };
     match n.kind {
@@ -219,8 +225,8 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         Kind::Button { text, on_click } => {
             push(out, ElemKind::Button { text, on_click }, r);
         }
-        Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, .. } => {
-            push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit }, r);
+        Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, .. } => {
+            push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map }, r);
         }
         Kind::Checkbox { text, checked, on_toggle } => {
             push(out, ElemKind::Checkbox { text, checked, on_toggle }, r);
@@ -237,6 +243,8 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
                     skip_tab: true,
                     menu: None,
                     tooltip: None,
+                    focus_group: None,
+                    default_focus: false,
                     rect: ir,
                     space,
                     parent: id,
@@ -274,6 +282,9 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         }
         Kind::Select { options, selected, on_select } => {
             push(out, ElemKind::Select { options, selected, on_select }, r);
+        }
+        Kind::Image { w, h, px, alt } => {
+            push(out, ElemKind::Image { w, h, px, alt }, r);
         }
         Kind::Spacer => {}
         Kind::Column(children) => {

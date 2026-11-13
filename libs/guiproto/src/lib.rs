@@ -22,6 +22,7 @@ extern crate alloc;
 
 pub mod a11y;
 pub mod action;
+pub mod context;
 pub mod control;
 pub mod display;
 pub mod menu;
@@ -37,8 +38,9 @@ mod tests;
 pub use abi::{Error, Result};
 pub use wire::{Reader, Writer};
 
-/// Verze protokolu okna a displeje (2: `WINDOW_SIZE`, `WINDOW_CONTEXT`).
-pub const VERSION: u32 = 2;
+/// Verze protokolu okna a displeje (2: `WINDOW_SIZE`, `WINDOW_CONTEXT`;
+/// 3: rozsireni kontextu pro tablet a TV, `context::ContextExt`).
+pub const VERSION: u32 = 3;
 
 /// Nejvetsi sirka nebo vyska bufferu, okna a vystupu v pixelech.
 pub const MAX_DIM: u32 = 16384;
