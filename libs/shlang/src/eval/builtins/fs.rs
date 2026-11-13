@@ -57,6 +57,14 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
         "pwd" => Ok(Value::Str(it.cwd.clone())),
         "open" => {
             let p = one_path(it, &a)?;
+            // Velky soubor se necte cely: hodnota "soubor" (obsah prectou
+            // prikazy, ktere ho potrebuji); zobrazeni ukaze souhrn.
+            let m = it.fs_stat(host, &p)?;
+            if m.kind == NodeKind::File && m.size > OPEN_INLINE {
+                let head = it.fs_read_range(host, &p, 0, 512)?;
+                let kind = crate::filekind::kind(&head, false);
+                return Ok(Value::File(crate::value::FileRef { path: p, size: m.size, kind }));
+            }
             Ok(Value::Bytes(it.fs_read(host, &p)?))
         }
         "save" => {
@@ -246,3 +254,6 @@ fn cd_nav(it: &mut Interp, host: &mut dyn Host, a: &Args, n: i64) -> R<Value> {
     from.pop();
     Ok(Value::Nothing)
 }
+
+/// Do teto velikosti `open` cte soubor hned (bajty), vetsi jako "soubor".
+const OPEN_INLINE: u64 = 64 * 1024;

@@ -195,7 +195,8 @@ fn session(s: &Startup) -> TestResult {
     w.ok(id, "range 0 30000 | to json | save /shell-test/velky.json")?;
     let (items, ok) = w.run(id, "open /shell-test/velky.json")?;
     crate::check!(ok, "open velkeho souboru");
-    let summary = items.iter().any(|i| matches!(i, Item::Value(v) if v.field("size").is_some() && v.field("preview").is_some()));
+    // Velky soubor je hodnota "soubor" (obsah se necte): souhrn s druhem.
+    let summary = items.iter().any(|i| matches!(i, Item::Value(v) if v.field("size").is_some() && v.field("data").is_some()));
     crate::check!(summary, alloc::format!("souhrn binarnich dat: {items:?}"));
     crate::check_eq!(w.value(id, "1 + 1")?, Value::Int(2), "relace odpovida i po velkem vystupu");
     // Radek ve vlakne na pozadi (`&`): blok ohlasi start na pozadi i konec,

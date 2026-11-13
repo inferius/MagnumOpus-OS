@@ -166,3 +166,40 @@ fn cd_back_forward_and_history() {
     let e = super::host::fails("cd -");
     assert!(e.message.contains("není kam jít zpět"), "{}", e.message);
 }
+
+/// Velky soubor: `open` vrati odkaz (velikost, druh z hlavicky) bez cteni
+/// obsahu; prikazy, ktere obsah potrebuji, ho prectou az pri volani.
+#[test]
+fn big_file_is_read_lazily() {
+    use super::host::{TestHost, interp};
+    use crate::value::Value;
+    let mut h = TestHost::new();
+    let mut bmp = vec![0u8; 200_000];
+    bmp[..2].copy_from_slice(b"BM");
+    bmp[18..22].copy_from_slice(&640u32.to_le_bytes());
+    bmp[22..26].copy_from_slice(&480u32.to_le_bytes());
+    h.fs.put("/home/obr.bmp", &bmp);
+    let text: String = (0..20_000).map(|i| alloc::format!("radek {i}\n")).collect();
+    h.fs.put("/home/velky.txt", text.as_bytes());
+    let mut it = interp();
+    let mut one = |line: &str| {
+        let o = it.run_line(&mut h, line);
+        o.result.unwrap_or_else(|e| panic!("{line}: {}", e.report(line)));
+        h.out.pop().unwrap()
+    };
+    match one("open obr.bmp") {
+        Value::File(f) => {
+            assert_eq!(f.size, 200_000);
+            assert_eq!(f.kind, "obrázek BMP 640×480");
+            assert!(f.path.ends_with("/obr.bmp"));
+        }
+        o => panic!("{o:?}"),
+    }
+    assert_eq!(one("open obr.bmp | describe"), Value::str("file"));
+    assert_eq!(one("(open obr.bmp).size"), Value::Size(200_000));
+    // Obsah az kdyz ho prikaz potrebuje.
+    assert_eq!(one("open velky.txt | lines | count"), Value::Int(20_000));
+    assert_eq!(one("open velky.txt | from text | lines | first"), Value::str("radek 0"));
+    // Maly soubor zustava bajty (beze zmeny chovani).
+    assert!(matches!(one("open a.txt"), Value::Bytes(_)));
+}

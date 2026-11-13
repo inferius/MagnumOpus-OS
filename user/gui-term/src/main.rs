@@ -21,6 +21,7 @@ extern crate alloc;
 #[path = "../../console/src/connect.rs"]
 mod connect;
 mod keys;
+mod rows;
 
 use alloc::string::String;
 use alloc::vec;
@@ -253,16 +254,21 @@ impl Term {
         // Text bez vlastni barvy (sloupce tabulky, vystup) barvou motivu.
         let ink = self.app.theme.ui.fg;
         self.screen.set_ink((ink.0, ink.1, ink.2));
-        self.screen.write(&self.app.frame());
+        let (frame, lines) = self.app.frame_lines();
+        self.screen.write(&frame);
         if self.conn.conn.is_none() {
             self.screen.write("\r\n\x1b[31mTerminál nemá službu termd (spusťte ho přes init).\x1b[39m");
+        } else if let Some(why) = &self.conn.gave_up {
+            // Opakovani by nepomohlo (pamet, limit restartu): chyba a volba.
+            let text = alloc::format!("\r\n\x1b[31mSlužbu termd nejde spustit ({why}). Enter to zkusí znovu.\x1b[39m");
+            self.screen.write(&text);
         } else if self.termd.is_none() {
             self.screen.write("\r\n\x1b[33mSlužba termd není připojená, připojuji znovu...\x1b[39m");
         }
         let label = self.status();
         let screen = &self.screen;
         let look = &mut self.look;
-        self.win.draw(|c: &mut Canvas<'_>| paint(c, look, screen, &label))?;
+        self.win.draw(|c: &mut Canvas<'_>| paint(c, look, screen, &label, &lines))?;
         self.win.set_a11y(&self.a11y())?;
         self.win.commit_redrawn(false)
     }
@@ -281,6 +287,11 @@ impl Term {
     fn event(&mut self, ev: Event) -> Option<bool> {
         Some(match ev {
             Event::Input(r) => match keys::key(&r) {
+                // termd nejde spustit (pamet): Enter to zkusi znovu (rucne).
+                Some(term::ui::Key::Enter) if self.conn.gave_up.is_some() && self.termd.is_none() => {
+                    self.conn.start();
+                    true
+                }
                 Some(k) => {
                     self.app.key(k);
                     true
@@ -350,7 +361,8 @@ fn main(startup: Startup) -> i64 {
         }
     };
     let mut t = Term::new(win, conn);
-    if t.regions().and_then(|_| t.render()).is_err() {
+    if let Err(e) = t.regions().and_then(|_| t.render()) {
+        println!("gui-term: prvni vykresleni selhalo: {e}");
         return 3;
     }
     let mut next_tick = time::deadline_after(TICK);
@@ -424,7 +436,7 @@ fn px((r, g, b): (u8, u8, u8)) -> u32 {
 
 /// Okno terminalu: titulek s kartou relace (odznak a tlacitka okna kresli
 /// system pres nej) a mrizka bunek pismem JetBrains Mono.
-fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str) {
+fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line]) {
     let t = look.t.clone();
     let col = &t.color;
     let (w, h) = (c.w, c.h);
@@ -451,8 +463,16 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str) {
     let (cw, ch) = look.cell();
     let pad = look.pad() as i32;
     let ms = t.text.mono;
+    // Prvky navrhu podle roli radku: pod textem, preskocene bunky, nad textem.
+    let grid = rows::Grid { x: pad, y: th as i32 + pad, cw, ch, cols: screen.cols };
+    let skips = rows::skips(lines);
+    rows::under(c, look, lines, &grid);
     for row in 0..screen.rows {
+        let skip = skips.get(row).map(|v| v.as_slice()).unwrap_or(&[]);
         for colm in 0..screen.cols {
+            if skip.iter().any(|&(a, b)| colm >= a && colm < b) {
+                continue;
+            }
             let cell = screen.cell(colm, row);
             let (ox, oy) = (pad + (colm as u32 * cw) as i32, th as i32 + pad + (row as u32 * ch) as i32);
             if let Some(b) = cell.bg {
@@ -476,6 +496,7 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str) {
             }
         }
     }
+    rows::over(c, look, lines, &grid);
     // Kurzor (blok, barva akcentu, text pod nim zustane citelny).
     if screen.x < screen.cols && screen.y < screen.rows {
         let (ox, oy) = (pad + (screen.x as u32 * cw) as i32, th as i32 + pad + (screen.y as u32 * ch) as i32);

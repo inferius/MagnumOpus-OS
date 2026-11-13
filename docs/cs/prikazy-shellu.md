@@ -166,7 +166,7 @@ pwd
 
 přečte soubor jako bajty
 
-Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`. Velký soubor terminál neukazuje celý: vypíše souhrn (druh podle obsahu, např. obrázek BMP 1920×1080, velikost a pár řádků hexa), roura dostane celá data.
+Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`. Soubor nad 64 KiB `open` nenačte celý: vrátí odkaz na soubor (cesta, velikost, druh podle začátku obsahu, např. obrázek BMP 1920×1080) a obsah přečtou až příkazy, které ho potřebují (`from text`, `lines`, `save`...). Terminál takový soubor ukáže jako souhrn; pole `size`, `kind` a `path` jdou číst přímo (`(open obr.bmp).size`).
 
 ```shell
 open path

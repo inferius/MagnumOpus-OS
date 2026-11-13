@@ -934,6 +934,17 @@ together with GUI 6c.
 | drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
 | starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
+### Large files: the "file" value
+
+`open` of a file over 64 KiB does not read it whole: it returns a value of
+type `file` (path, size, kind by the first 512 B, e.g. "obrázek BMP
+1920×1080"). The content is read only by a command that needs bytes or text
+on its input (`from text`, `lines`, `save`, `count`...); `describe`, display
+in the terminal and storing in a variable do not read it. The fields
+`size`, `kind` and `path` can be read directly. **[implemented]** Streaming
+(a pipeline that reads a large text in parts and stops early, e.g.
+`lines | first 10`) **[designed]**.
+
 ### Lines in threads: Ctrl+Z and background
 
 A session line runs in its own thread of the session process (`shsess`)
@@ -967,6 +978,23 @@ window ──Run/Interrupt/Background──▶ shsess main thread ──▶ line
   after the foreground line, in order.
 - Without threads in the environment (tests) a line runs in the main thread
   as before.
+
+### Window look by the design (design/terminal.html)
+
+The `gui-term` window draws text with a character grid (the same frame as
+the console) and, by the line roles (`term::ui::draw::Role`), draws the
+design elements over it (`user/gui-term/src/rows.rs`). Screenshot for
+comparison: `target/shots/terminal.png` (look test `look_shots`).
+
+| Design element | Status |
+|---|---|
+| block left bar by state (running, done, error), bold command, time and result on the right in the UI font | **[implemented]** |
+| error box (danger-soft, danger border) | **[implemented]** |
+| input row: a line above it, a folder pill | **[implemented]** (no folder icon) |
+| key hints as chips | **[implemented]** |
+| a line under the table header | **[implemented]** (no column type under the name yet) |
+| completion as a menu above the line, mouse, text selection and clipboard | **[designed]** (step 4, 6c components) |
+| task panel on the right, change preview with buttons, session tabs and B/C switch in the title, block actions, animation | **[designed]** (step 5) |
 
 ### Activity indicator and progress
 

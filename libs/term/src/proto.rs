@@ -189,6 +189,8 @@ const V_LIST: u8 = 10;
 const V_RECORD: u8 = 11;
 const V_ERROR: u8 = 12;
 const V_TABLE: u8 = 13;
+/// Soubor nacitany podle potreby (cesta, velikost, druh).
+const V_FILE: u8 = 14;
 
 /// Je seznam tabulka (vsechny radky jsou zaznamy se stejnymi sloupci)?
 fn table_cols(items: &[Value]) -> Option<Vec<String>> {
@@ -236,6 +238,12 @@ pub fn put_value(w: &mut W, v: &Value) {
         Value::Bytes(b) => {
             w.u8(V_BYTES);
             w.bytes(b);
+        }
+        Value::File(f) => {
+            w.u8(V_FILE);
+            w.str(&f.path);
+            w.u64(f.size);
+            w.str(&f.kind);
         }
         Value::List(items) => {
             if let Some(cols) = table_cols(items) {
@@ -297,6 +305,7 @@ pub fn get_value(r: &mut R, depth: usize) -> Result<Value, DecodeError> {
         V_TIME => Value::Time(r.i64()?),
         V_STR => Value::Str(r.str()?),
         V_BYTES => Value::Bytes(r.bytes()?),
+        V_FILE => Value::File(shlang::value::FileRef { path: r.str()?, size: r.u64()?, kind: r.str()? }),
         V_LIST => {
             let n = r.u32()? as usize;
             if n > MAX_ITEMS {
