@@ -995,7 +995,9 @@ comparison: `target/shots/terminal.png` (look test `look_shots`).
 | key hints as chips | **[implemented]** |
 | a line under the table header | **[implemented]** (no column type under the name yet) |
 | completion as a menu above the line, mouse, text selection and clipboard | **[designed]** (step 4, 6c components) |
-| task panel on the right, session tabs and B/C switch in the title, block actions, animation | **[designed]** (step 5) |
+| notation switch B / C in the title (state `App::notation_c`; a click, Ctrl+F and accessibility convert the line being typed) | **[verified in QEMU]** |
+| a new block fades in (`motion.base`, curve `ease_enter`); blocks replayed after connecting do not. The grid does not do the 6 px shift from the design (the fade is also the substitute for "Reduce motion") | **[implemented]** |
+| task panel on the right, session tabs in the title, block actions | **[designed]** (step 5) |
 
 ### Activity indicator and progress
 

@@ -940,7 +940,9 @@ a podle rolí řádků (`term::ui::draw::Role`) nad ní dokreslí prvky návrhu
 | nápověda kláves jako štítky | **[implementováno]** |
 | linka pod záhlavím tabulky | **[implementováno]** (typ sloupce pod jménem zatím ne) |
 | doplňování jako nabídka nad řádkem, myš, výběr textu a schránka | **[navrženo]** (krok 4, komponenty 6c) |
-| panel úloh vpravo, karty relací a přepínač B/C v titulku, akce bloku, animace | **[navrženo]** (krok 5) |
+| přepínač zápisu B / C v titulku (stav `App::notation_c`; klik, Ctrl+F i přístupnost převedou rozepsaný řádek) | **[ověřeno v QEMU]** |
+| nový blok se prolne (`motion.base`, křivka `ease_enter`); bloky přehrané po připojení ne. Posun o 6 px z návrhu mřížka nedělá (prolnutí je zároveň náhrada pro „Omezit pohyb“) | **[implementováno]** |
+| panel úloh vpravo, karty relací v titulku, akce bloku | **[navrženo]** (krok 5) |
 
 ### Ukazatel činnosti a průběh
 

@@ -26,11 +26,12 @@ pub enum Role {
     /// Stavovy radek nahore.
     Status,
     /// Hlavicka bloku: prvni usek je znacka (`| `), od useku `meta` cas
-    /// a vysledek (okno je kresli vpravo pismem UI).
-    Head { mark: Mark, meta: usize },
+    /// a vysledek (okno je kresli vpravo pismem UI). `block` = cislo bloku
+    /// (okno podle nej prolne novy blok).
+    Head { mark: Mark, meta: usize, block: u64 },
     /// Radek obsahu bloku; `error` = hlaseni chyby, `table_head` = zahlavi
     /// tabulky.
-    Body { mark: Mark, error: bool, table_head: bool },
+    Body { mark: Mark, error: bool, table_head: bool, block: u64 },
     /// Radek vstupu: prvnich `prefix` useku je slozka a oddelovac (okno je
     /// nahradi pilulkou s textem `cwd`).
     Input { prefix: usize, cwd: String },

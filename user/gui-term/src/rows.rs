@@ -207,7 +207,7 @@ pub fn over(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
     for (row, l) in lines.iter().enumerate() {
         let y = g.row_y(row);
         match &l.role {
-            Role::Head { mark, meta } => {
+            Role::Head { mark, meta, .. } => {
                 c.fill(Rect::new(g.x, y, 3, g.ch), mark_color(look, *mark));
                 // Cas a vysledek vpravo pismem UI (neuspech barvou chyby).
                 let text: String = (*meta..l.parts_len()).map(|i| l.part_text(i)).collect::<String>();

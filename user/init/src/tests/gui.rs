@@ -353,6 +353,16 @@ fn terminal_window(startup: &Startup) -> TestResult {
             t.iter().any(|n| n.role == Role::Terminal && n.value.contains("Napište help"))
         })?;
         check!(has(&t, Role::Titlebar, "Terminál"), "vlastni titulek je v pristupnosti");
+        // Prepinac zapisu B / C v titulku: B zvoleny, ACTIVATE na C prepne.
+        let checked = |t: &[guiproto::a11y::Node], name: &str| {
+            t.iter().any(|n| n.role == Role::Button && n.name.starts_with(name) && n.state & guiproto::a11y::state::CHECKED != 0)
+        };
+        check!(checked(&t, "Zápis B"), "zapis B zvoleny");
+        let zc = node(&t, Role::Button, "Zápis C (výrazový)")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: zc.id, action: actions::ACTIVATE, value: String::new() })?;
+        let t = wait_tree(&s.inspect, w.id, "prepnuti na zapis C", |t| checked(t, "Zápis C"))?;
+        let zb = node(&t, Role::Button, "Zápis B (příkazový)")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: zb.id, action: actions::ACTIVATE, value: String::new() })?;
         let term = t.iter().find(|n| n.role == Role::Terminal).unwrap();
         // Radek pres pristupnost (SET_VALUE = napsat a odeslat) jde do shellu.
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "echo ahoj z GUI".into() })?;

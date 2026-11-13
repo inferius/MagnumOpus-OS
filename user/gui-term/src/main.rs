@@ -21,6 +21,7 @@ extern crate alloc;
 #[path = "../../console/src/connect.rs"]
 mod connect;
 mod keys;
+mod motion;
 mod rows;
 
 use alloc::string::String;
@@ -86,6 +87,23 @@ impl Look {
         rows::Grid { x: pad, y: self.title_h() as i32 + pad, cw, ch, cols }
     }
 
+    /// Prepinac zapisu B / C v titulku vlevo od tlacitek okna (ta kresli
+    /// system: okraj `s3`, tri tlacitka `title_btn` s mezerou `s1`).
+    /// Vraci celou plochu a obe volby (sirka volby = cil kliknuti
+    /// `hit_min`).
+    fn notation(&self, w: u32) -> (Rect, [Rect; 2]) {
+        let sp = &self.t.space;
+        let z = &self.t.size;
+        let sys = sp[3] + 3 * z.title_btn + 2 * sp[1];
+        let h = z.control_h_compact;
+        let pad = sp[1];
+        let sw = 2 * z.hit_min + 2 * pad;
+        let x = w as i32 - (sys + sp[4] + sw) as i32;
+        let y = (self.title_h().saturating_sub(h) / 2) as i32;
+        let b = |i: i32| Rect::new(x + pad as i32 + i * z.hit_min as i32, y + pad as i32, z.hit_min, h - 2 * pad);
+        (Rect::new(x, y, sw, h), [b(0), b(1)])
+    }
+
     /// Karta relace v titulku: za odznakem systemu (misto podle
     /// `design/terminal.html`).
     fn tab(&self) -> Rect {
@@ -122,6 +140,8 @@ const ANIM: Duration = Duration::from_millis(60);
 
 /// Id uzlu pristupnosti prvniho tlacitka vyzvy (dalsi po jedne).
 const BUTTON_NODE: u32 = 100;
+/// Id uzlu volby zapisu B (C je dalsi).
+const NOTATION_NODE: u32 = 10;
 
 struct Term {
     win: Window,
@@ -133,6 +153,8 @@ struct Term {
     termd: Option<Channel>,
     /// Radky posledniho snimku (role pro klik na prvky navrhu).
     lines: Vec<term::ui::draw::Line>,
+    /// Prolnuti novych bloku.
+    fade: motion::Fade,
 }
 
 fn grid(look: &Look, w: u32, h: u32) -> (usize, usize) {
@@ -166,6 +188,7 @@ impl Term {
             conn: connect::Connector::new(conn, "gui-term"),
             termd: None,
             lines: Vec::new(),
+            fade: motion::Fade::default(),
         };
         t.app.welcome = true;
         t.conn.start();
@@ -263,6 +286,17 @@ impl Term {
         t.state = guiproto::a11y::state::FOCUSED;
         t.actions = actions::SET_VALUE;
         let mut nodes = vec![win, bar, tab, t];
+        // Prepinac zapisu (ACTIVATE vybere, zvoleny ma CHECKED).
+        let (_, nb) = self.look.notation(self.win.w);
+        for (i, (r, name)) in nb.iter().zip(["Zápis B (příkazový)", "Zápis C (výrazový)"]).enumerate() {
+            let mut n = Node::new(NOTATION_NODE + i as u32, 2, Role::Button, name);
+            n.bounds = *r;
+            n.actions = actions::ACTIVATE;
+            if self.app.notation_c == (i == 1) {
+                n.state = guiproto::a11y::state::CHECKED;
+            }
+            nodes.push(n);
+        }
         // Volby vyzvy jako tlacitka (cteckou i testem: ACTIVATE).
         let g = self.look.grid(self.screen.cols);
         for (b, label, ..) in rows::buttons(&mut self.look, &self.lines, &g) {
@@ -295,7 +329,14 @@ impl Term {
         let label = self.status();
         let screen = &self.screen;
         let look = &mut self.look;
-        self.win.draw(|c: &mut Canvas<'_>| paint(c, look, screen, &label, &lines))?;
+        let c_on = self.app.notation_c;
+        let t_now = time::now();
+        self.fade.update(&lines, t_now);
+        let veils = self.fade.veils(&lines, t_now, &look.t.motion);
+        self.win.draw(|c: &mut Canvas<'_>| {
+            paint(c, look, screen, &label, &lines, &veils);
+            paint_notation(c, look, c_on);
+        })?;
         self.lines = lines;
         let nodes = self.a11y();
         self.win.set_a11y(&nodes)?;
@@ -307,7 +348,11 @@ impl Term {
     fn regions(&mut self) -> Result<(), Error> {
         let msg = ClientMsg::Regions {
             window: 1,
-            regions: vec![(Rect::new(0, 0, self.win.w, self.look.title_h()), RegionKind::Drag), (self.look.tab(), RegionKind::NoDrag)],
+            regions: vec![
+                (Rect::new(0, 0, self.win.w, self.look.title_h()), RegionKind::Drag),
+                (self.look.tab(), RegionKind::NoDrag),
+                (self.look.notation(self.win.w).0, RegionKind::NoDrag),
+            ],
         };
         self.win.send(msg)
     }
@@ -317,6 +362,13 @@ impl Term {
         Some(match ev {
             // Klik na tlacitko vyzvy (prvky navrhu nad mrizkou).
             Event::Input(InputRecord { event: InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, .. }) => {
+                // Prepinac zapisu B / C v titulku.
+                let (_, nb) = self.look.notation(self.win.w);
+                if let Some(i) = nb.iter().position(|r| r.contains(x, y)) {
+                    self.app.set_notation(i == 1);
+                    self.send_out();
+                    return Some(true);
+                }
                 let g = self.look.grid(self.screen.cols);
                 let hit = rows::buttons(&mut self.look, &self.lines, &g).into_iter().find(|(b, ..)| b.rect.contains(x, y));
                 match hit {
@@ -350,6 +402,11 @@ impl Term {
             Event::Theme(m) => {
                 self.look.t = theme::Theme::builtin(m);
                 self.app.theme = self.look.term_theme();
+                true
+            }
+            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && (NOTATION_NODE..NOTATION_NODE + 2).contains(&node) => {
+                self.app.set_notation(node == NOTATION_NODE + 1);
+                self.send_out();
                 true
             }
             Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && node >= BUTTON_NODE => {
@@ -415,10 +472,11 @@ fn main(startup: Startup) -> i64 {
     loop {
         // Cekat na okno, termd nebo termin (animace, nove pripojeni).
         if !t.win.has_queued() {
+            let fading = t.fade.active(time::now(), &t.look.t.motion);
             let animate = t.app.busy() || t.app.prompt.is_some();
             let spin = t.app.busy() && t.app.glyphs == term::activity::Glyphs::Drawn;
             let deadline =
-                [animate.then_some(next_tick), spin.then_some(next_anim), t.conn.deadline()].into_iter().flatten().min();
+                [animate.then_some(next_tick), (spin || fading).then_some(next_anim), t.conn.deadline()].into_iter().flatten().min();
             let rd = Signals::READABLE | Signals::PEER_CLOSED;
             let termd = &t.termd;
             let conn = &t.conn;
@@ -462,9 +520,13 @@ fn main(startup: Startup) -> i64 {
                 redraw = true;
             }
         }
-        // Plynuly krouzek: jen cas pro animaci, bez tiku okna.
-        if t.app.busy() && time::now() >= next_anim {
-            next_anim = time::deadline_after(ANIM);
+        // Plynuly krouzek a prolnuti bloku: jen cas pro animaci, bez tiku
+        // okna.
+        let fading = t.fade.active(time::now(), &t.look.t.motion);
+        if (t.app.busy() || fading) && time::now() >= next_anim {
+            // Prolnuti v taktu snimku (`motion.frame_ms`), krouzek pomaleji.
+            let step = if fading { Duration::from_micros((t.look.t.motion.frame_ms * 1000.0) as u64) } else { ANIM };
+            next_anim = time::deadline_after(step);
             t.app.now = now();
             redraw = true;
         }
@@ -481,7 +543,7 @@ fn px((r, g, b): (u8, u8, u8)) -> u32 {
 
 /// Okno terminalu: titulek s kartou relace (odznak a tlacitka okna kresli
 /// system pres nej) a mrizka bunek pismem JetBrains Mono.
-fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line]) {
+fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line], veils: &[u32]) {
     let t = look.t.clone();
     let col = &t.color;
     let (w, h) = (c.w, c.h);
@@ -542,10 +604,38 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, line
         }
     }
     rows::over(c, look, lines, &grid);
+    // Prolnuti noveho bloku: prekryv barvou pozadi (i pres levy pruh).
+    for (row, &a) in veils.iter().enumerate().take(screen.rows) {
+        if a > 0 {
+            let y = th as i32 + pad + (row as u32 * ch) as i32;
+            c.blend(Rect::new(0, y, w, ch), alpha(col.term_bg, a));
+        }
+    }
     // Kurzor (blok, barva akcentu, text pod nim zustane citelny).
     if screen.x < screen.cols && screen.y < screen.rows {
         let (ox, oy) = (pad + (screen.x as u32 * cw) as i32, th as i32 + pad + (screen.y as u32 * ch) as i32);
         c.blend(Rect::new(ox, oy + 2, 2, ch - 4), col.accent);
+    }
+}
+
+/// Prepinac zapisu B / C v titulku (`.seg` z navrhu): plocha `surface_2`,
+/// zvolena volba `surface` s okrajem, text tucne.
+fn paint_notation(c: &mut Canvas<'_>, look: &mut Look, c_on: bool) {
+    let t = look.t.clone();
+    let col = &t.color;
+    let (all, opts) = look.notation(c.w);
+    let rad = t.radius.control;
+    c.round_fill(all, rad, col.surface_2);
+    let s = t.text.small;
+    let f = look.ui.face(t.text.body_strong.weight);
+    for (i, (r, label)) in opts.iter().zip(["B", "C"]).enumerate() {
+        let on = c_on == (i == 1);
+        if on {
+            c.round_fill_bordered(*r, rad.saturating_sub(2), col.surface, col.border, 1);
+        }
+        let tw = f.width(label, s.size);
+        let base = r.y + f.baseline_in(s.size, r.h);
+        f.draw(c, r.x + (r.w.saturating_sub(tw) / 2) as i32, base, label, s.size, if on { col.ink } else { col.ink_muted });
     }
 }
 

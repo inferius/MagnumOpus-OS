@@ -125,6 +125,10 @@ pub struct App {
     /// Okno GUI kresli pred slozku ve vyzve ikonu: radek vstupu pro ni
     /// nechava dve bunky (pilulka podle `design/terminal.html`).
     pub icon_room: bool,
+    /// Zvoleny zapis jazyka: `false` = B (prikazovy), `true` = C
+    /// (vyrazovy). Ctrl+F a prepinac v titulku okna ho meni a rozepsany
+    /// radek prevedou.
+    pub notation_c: bool,
     /// Pocitadlo snimku (tocici se znak u bezicich bloku).
     tick: u32,
     /// Radky napsane behem behu prikazu (pobezi po nem, v poradi).
@@ -188,6 +192,7 @@ impl App {
             now: None,
             glyphs: crate::activity::Glyphs::Text,
             icon_room: false,
+            notation_c: false,
             tick: 0,
             scroll: 0,
             queued: Vec::new(),
@@ -660,17 +665,7 @@ impl App {
                     b.collapsed = true;
                 }
             }
-            Key::Ctrl('f') => {
-                // Prevod rozepsaneho radku do druheho zapisu (B <-> C).
-                let c = self.editor.text.contains('(') && self.editor.text.contains(").");
-                self.req = self.req.wrapping_add(1);
-                self.out.push(ClientMsg::Format {
-                    session: self.session,
-                    line: self.editor.text.clone(),
-                    style: if c { 0 } else { 1 },
-                    seq: self.req,
-                });
-            }
+            Key::Ctrl('f') => self.set_notation(!self.notation_c),
             Key::Tab => {
                 self.req = self.req.wrapping_add(1);
                 self.out.push(ClientMsg::Complete {
@@ -983,6 +978,20 @@ impl App {
         l.role(draw::Role::Input { prefix: if self.icon_room { 3 } else { 2 }, cwd: self.cwd_short() })
     }
 
+    /// Zvoli zapis B (`false`) nebo C (`true`) a rozepsany radek do nej
+    /// prevede (odpoved `Formatted`). Stejny zapis = nic.
+    pub fn set_notation(&mut self, c: bool) {
+        if self.notation_c == c {
+            return;
+        }
+        self.notation_c = c;
+        if self.editor.text.trim().is_empty() {
+            return;
+        }
+        self.req = self.req.wrapping_add(1);
+        self.out.push(ClientMsg::Format { session: self.session, line: self.editor.text.clone(), style: c as u8, seq: self.req });
+    }
+
     fn cwd_short(&self) -> String {
         short_path(&self.cwd, (self.cols / 3).max(12))
     }
@@ -1000,7 +1009,8 @@ impl App {
             Some(true) => draw::Mark::Ok,
             Some(false) => draw::Mark::Err,
         };
-        let body = |error: bool, table_head: bool| draw::Role::Body { mark, error, table_head };
+        let block = b.id;
+        let body = |error: bool, table_head: bool| draw::Role::Body { mark, error, table_head, block };
         let mut out = Vec::new();
         if !b.line.is_empty() {
             let mut l = Line::new();
@@ -1029,7 +1039,7 @@ impl App {
                 ),
                 _ => {}
             }
-            out.push(l.role(draw::Role::Head { mark, meta }));
+            out.push(l.role(draw::Role::Head { mark, meta, block }));
         }
         if b.collapsed {
             out.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("  ({} položek, mezera rozbalí)", b.items.len())).role(body(false, false)));
