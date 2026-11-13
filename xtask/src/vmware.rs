@@ -22,7 +22,9 @@ const DISK: &str = "magnumopus.vmdk";
 /// Kolik zaloh puvodniho disku nechat.
 const BACKUPS: usize = 3;
 
-pub fn command(opts: &Options, dir: Option<PathBuf>) -> Result<()> {
+/// Disk VM je obraz ziveho USB (vmdk): stejny vyvojovy profil
+/// s automatickym prihlasenim (`crate::usb::with_dev_profile`).
+pub fn command(opts: &mut Options, dir: Option<PathBuf>) -> Result<()> {
     let dir = dir
         .or_else(|| std::env::var_os("MO_VMWARE_DIR").map(PathBuf::from))
         .ok_or("vmware: chybi slozka VM (--dir <slozka> nebo promenna MO_VMWARE_DIR)")?;
@@ -32,6 +34,8 @@ pub fn command(opts: &Options, dir: Option<PathBuf>) -> Result<()> {
     check_not_running(&dir)?;
     let qemu_img = qemu_img(opts)?;
 
+    crate::usb::with_dev_profile(opts);
+    println!("{}", crate::usb::WARNING);
     let artifacts = crate::build(opts)?;
     let profile = if opts.release { "release" } else { "debug" };
     let img = target_dir().join(format!("usb-{}-{profile}.img", opts.arch.name));

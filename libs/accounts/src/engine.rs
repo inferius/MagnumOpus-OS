@@ -181,7 +181,9 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
             let pw = crate::auth::normalize(p)?;
             a.password = Some(self.new_verifier(pw.expose())?.0);
         }
-        self.rng.fill_bytes(&mut a.key_salt);
+        // Sul pro hmac-secret vznikne az s prvnim bezpecnostnim klicem
+        // (`enroll_key`): zalozeni uctu bez hesla (vyvojovy ucet) tak
+        // nepotrebuje generator nahody (stroj bez entropie po startu).
         Ok(a)
     }
 

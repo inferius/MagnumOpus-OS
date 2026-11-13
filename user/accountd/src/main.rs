@@ -45,8 +45,11 @@ fn config(text: &str) -> Result<Config, String> {
         "hw" => KdfParams::HW,
         other => return Err(format!("neznamy profil kdf {other}")),
     };
-    // Vyvojove prihlaseni jen v ladicim buildu, i kdyz ho konfigurace chce.
-    let dev = cfg!(debug_assertions) && t.get_bool("dev").unwrap_or(false);
+    // Vyvojove prihlaseni: init ho zapne jen se souborem `accounts-dev`
+    // v initfs, ktery pridavaji jen `cargo xtask run` a `cargo xtask usb`
+    // (zive USB = vyvojovy profil). Obraz pro uzivatele (`xtask image`,
+    // `xtask vmware`) ani testy ho nemaji.
+    let dev = t.get_bool("dev").unwrap_or(false);
     Ok(Config { params, dev })
 }
 

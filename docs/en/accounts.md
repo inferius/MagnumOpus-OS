@@ -235,14 +235,16 @@ attached key). On top of it `accountd` speaks CTAP2
 
 ### Automatic sign-in (development only)
 
-`cargo xtask run` adds the file `accounts-dev` to initfs and accountd then
-creates (if missing) the account `vyvojar` (first free number, development
-account flag) and signs it in right away. **Two safeguards:** the
-auto-login code exists in accountd only in a debug build
-(`cfg(debug_assertions)`) and only `xtask run` adds the file - neither
-`xtask image` (the image for users) nor `--release` have it. The
-development account has no password, no administration role and is marked
-in the account list.
+`cargo xtask run`, `cargo xtask usb` and `cargo xtask vmware` (the live
+USB and the VM disk made from it are a development profile, the user's decision of 2026-11-13) add the file `accounts-dev` to
+initfs and accountd then creates (if missing) the account `vyvojar` (first
+free number, development account flag) and signs it in right away, in
+both debug and release builds. **Safeguard:** only these commands add the
+file; neither the image for users (`xtask image`) nor the tests (`xtask
+test`, except the live USB check) have it. The
+`zive-usb` test checks both: the stick boots into a terminal and an image
+without the file ends on the sign-in screen. The development account has
+no password, no administration role and is marked in the account list.
 
 ### Protections
 

@@ -4,10 +4,13 @@
 //! najde datovy oddil pres ovladac `usb-storage`.
 //!
 //! Testy (`cargo xtask test`, `cargo xtask usb --test`):
-//! - [`test`]: start do GUI s prihlasovaci obrazovkou ([`MARKERS`]) a kopie logu na FAT
+//! - [`test`]: start do plochy s terminalem ([`MARKERS`], vyvojovy profil
+//!   zive USB s automatickym prihlasenim) a kopie logu na FAT
 //!   oddil MO-LOGY (overeno na hostiteli crate `fatfs`),
 //! - [`test_rescue`]: rezim "vytahni logy" (klavesa L pres QMP), logy
-//!   "nainstalovaneho systemu" z disku NVMe na MO-LOGY, disk NVMe beze zmeny.
+//!   "nainstalovaneho systemu" z disku NVMe na MO-LOGY, disk NVMe beze zmeny,
+//! - [`test_user_image`]: obraz bez vyvojoveho profilu (jako obraz pro
+//!   uzivatele) se automaticky neprihlasi ([`USER_MARKERS`]).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -17,17 +20,19 @@ use crate::arch::Arch;
 use crate::{Result, target_dir};
 
 /// Znacky uspesneho startu z USB (ovladac disku USB, FS z datoveho oddilu
-/// flash disku, sluzba uctu, kompozitor a prihlasovaci obrazovka v GUI).
-/// Obraz USB nema vyvojove autoprihlaseni ani ucet: plocha s terminalem
-/// se spousti az pro prihlasenou relaci (`docs/cs/ucty.md`).
+/// flash disku, vyvojove prihlaseni, kompozitor a terminal v plose).
 pub const MARKERS: &[&str] = &[
     "usb-storage: LUN 0:",
     "usb-storage: disk 0: nas oddil",
     "fsd: pripojeno 'MagnumOpus'",
-    "accountd: bezim",
+    "accountd: vyvojove prihlaseni vyvojar",
     "init: kompozitor bezi",
-    "compd: prihlasovaci obrazovka:",
+    "init: termd (",
 ];
+
+/// Znacky startu obrazu bez vyvojoveho profilu: sluzba uctu bez
+/// vyvojoveho prihlaseni a prihlasovaci obrazovka.
+pub const USER_MARKERS: &[&str] = &["fsd: pripojeno 'MagnumOpus'", "accountd: bezim", "init: kompozitor bezi", "compd: prihlasovaci obrazovka:"];
 
 /// Jak dlouho smi start trvat (aarch64 v emulaci TCG).
 const TIMEOUT: Duration = Duration::from_secs(420);
@@ -84,8 +89,8 @@ pub fn run(arch: &Arch, image: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Test: start z flash disku az do GUI s prihlasovaci obrazovkou; logd
-/// zkopiruje log na FAT oddil MO-LOGY.
+/// Test: start z flash disku az do plochy s terminalem (vyvojovy profil);
+/// logd zkopiruje log na FAT oddil MO-LOGY.
 pub fn test(arch: &Arch, image: &Path) -> Result<()> {
     let log = boot_until(arch, image, &[], false, "start", |t| {
         let mut m = missing_markers(t);
@@ -100,6 +105,22 @@ pub fn test(arch: &Arch, image: &Path) -> Result<()> {
         return Err(format!("na oddilu MO-LOGY chybi MAGNUMOS/LOG01.TXT (log {})", log.display()).into());
     }
     println!("xtask: kopie logu na FAT oddilu flashky je");
+    Ok(())
+}
+
+/// Test obrazu bez vyvojoveho profilu: start do prihlasovaci obrazovky,
+/// v logu zadne vyvojove prihlaseni ani terminal.
+pub fn test_user_image(arch: &Arch, image: &Path) -> Result<()> {
+    let log = boot_until(arch, image, &[], false, "obraz bez vyvojoveho profilu", |t| {
+        USER_MARKERS.iter().copied().filter(|m| !t.contains(m)).collect()
+    })?;
+    let text = std::fs::read(&log).map(|b| String::from_utf8_lossy(&b).into_owned())?;
+    for bad in ["vyvojove prihlaseni", "init: termd ("] {
+        if text.contains(bad) {
+            return Err(format!("obraz bez vyvojoveho profilu: v logu je '{bad}' (log {})", log.display()).into());
+        }
+    }
+    println!("xtask: obraz bez vyvojoveho profilu se automaticky neprihlasi (prihlasovaci obrazovka)");
     Ok(())
 }
 
@@ -223,9 +244,19 @@ fn fat_read(fat: &[u8], path: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&v).into_owned())
 }
 
-/// Znacky, ktere v logu chybi.
+/// Znacky, ktere v logu chybi (terminal: radek s `termd (` a `spusten`).
 pub fn missing_markers(text: &str) -> Vec<&'static str> {
-    MARKERS.iter().copied().filter(|m| !text.contains(m)).collect()
+    MARKERS
+        .iter()
+        .copied()
+        .filter(|m| {
+            if *m == "init: termd (" {
+                !text.lines().any(|l| l.contains(m) && l.contains("spusten"))
+            } else {
+                !text.contains(m)
+            }
+        })
+        .collect()
 }
 
 /// Obraz USB pro test (mensi nez vychozi: rychlejsi tvorba).

@@ -125,6 +125,11 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
         self.need_home(uid, &home)?;
         let i = self.index(uid)?;
         let exclude: Vec<Vec<u8>> = self.accounts[i].keys.iter().map(|k| k.cred_id.clone()).collect();
+        if self.accounts[i].key_salt == [0; 32] {
+            let mut s = [0u8; 32];
+            self.rng.fill_bytes(&mut s);
+            self.update(i, |a| a.key_salt = s)?;
+        }
         let salt = self.accounts[i].key_salt;
         let mut client = Client::new(t).map_err(|_| Error::IoError)?;
         if client.pin_set() && key_pin.is_empty() {
