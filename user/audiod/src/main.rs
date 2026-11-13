@@ -14,7 +14,7 @@
 //! se ze seznamu vyradi a sluzba prejde na dalsi.
 //!
 //! Smycka: ceka na kanaly klientu a na udalosti period od ovladace (vystup
-//! i vstup). Po kazde periode smicha streamy [`device::LEAD_PERIODS`]
+//! i vstup). Po kazde periode smicha streamy predstih (adaptivni, viz `device.rs`)
 //! period pred pozici DMA (rozpocet latence viz `device.rs`) a rozda
 //! nahrana data. Kdyz zadny stream nebezi dele nez [`IDLE_STOP`], zastavi
 //! DMA (uspora energie; zarizeni neprehrava ticho do nekonecna).

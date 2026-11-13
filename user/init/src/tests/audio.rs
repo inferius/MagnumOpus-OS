@@ -99,13 +99,26 @@ fn tone_to_wav(_: &Startup) -> TestResult {
     a.mute(false).map_err(|e| fail("ztlumeni", e))?;
     // Mono 44,1 kHz: sluzba prevede na stereo 48 kHz (prevod frekvence).
     let f = Format::new(44_100, 1, Sample::S16);
+    let before = a.status().map_err(|e| fail("STATUS", e))?;
     let s = a.open(Direction::Output, f, 100_000).map_err(|e| fail("OPEN", e))?;
     let pcm = tone_pcm(1_000, 44_100, 1, 1_500, 50);
     let deadline = time::deadline_after(Duration::from_secs(20));
     s.write_all(&pcm, true, Some(deadline)).map_err(|e| fail("zapis", e))?;
     s.drain().map_err(|e| fail("DRAIN", e))?;
     let info = s.stream_info().map_err(|e| fail("STREAM_INFO", e))?;
-    check!(info.played >= 44_100, format!("prehrano jen {} snimku", info.played));
+    let st = a.status().map_err(|e| fail("STATUS", e))?;
+    // Radek cte xtask (kontrola WAV): podteceni zarizeni behem tonu =
+    // sluzba nestihala (zatizeny hostitel), mezery v souboru jsou pak
+    // vysvetlene. Format radku neprejmenovat bez upravy xtask/src/audio.rs.
+    libos::println!(
+        "zvuk: ton prehran {} snimku, podteceni streamu {}, zarizeni behem tonu {}, latence {} us",
+        info.played,
+        info.underruns,
+        st.device_underruns.saturating_sub(before.device_underruns),
+        st.latency_us
+    );
+    // Zaznet musi vsechno (1,5 s pri 44,1 kHz).
+    check!(info.played >= 66_150, format!("prehrano jen {} z 66150 snimku", info.played));
     s.close().map_err(|e| fail("CLOSE", e))
 }
 

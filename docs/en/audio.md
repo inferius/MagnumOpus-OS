@@ -27,7 +27,7 @@ conversion with an anti-aliasing filter, mixing, tone, WAV).
 <path class="ln" d="M160 48 L188 48" marker-end="url(#au1)"/><path class="ln" d="M160 128 L188 128" marker-end="url(#au1)"/>
 <rect class="acc" x="360" y="20" width="170" height="136" rx="6"/><text class="t b" x="445" y="45" text-anchor="middle">audiod</text><text class="m" x="445" y="64" text-anchor="middle">format conversion</text><text class="m" x="445" y="80" text-anchor="middle">rate conversion</text><text class="m" x="445" y="96" text-anchor="middle">mix, volume</text><text class="m" x="445" y="112" text-anchor="middle">2 periods ahead of DMA</text>
 <path class="ln" d="M330 88 L358 88" marker-end="url(#au1)"/>
-<rect class="ok" x="560" y="20" width="190" height="70" rx="6"/><text class="t b" x="655" y="45" text-anchor="middle">DMA buffer</text><text class="m" x="655" y="64" text-anchor="middle">4 periods of 5.33 ms</text><text class="m" x="655" y="80" text-anchor="middle">s16 stereo 48 kHz</text>
+<rect class="ok" x="560" y="20" width="190" height="70" rx="6"/><text class="t b" x="655" y="45" text-anchor="middle">DMA buffer</text><text class="m" x="655" y="64" text-anchor="middle">16 periods of 5.33 ms</text><text class="m" x="655" y="80" text-anchor="middle">s16 stereo 48 kHz</text>
 <path class="ln" d="M530 55 L558 55" marker-end="url(#au1)"/>
 <rect class="box" x="560" y="110" width="190" height="56" rx="6"/><text class="t b" x="655" y="133" text-anchor="middle">hda (driver)</text><text class="m" x="655" y="152" text-anchor="middle">BDL, CORB/RIRB, MSI</text>
 <path class="ln" d="M655 166 L655 198" marker-end="url(#au1)"/>
@@ -265,19 +265,25 @@ FIFO or descriptor error stops the stream and is reported.
 
 The service waits for client channels and for the driver's period event.
 After each period it reads the DMA position and mixes data so that it is
-two periods ahead of it. Behind the mixed data it always zeroes one
+the lead (initially two periods) ahead of it. Behind the mixed data it always zeroes one
 period: if the service falls behind, silence plays (and
 `device_underruns` is counted), not stale data from the previous lap.
 
 | part (48 kHz, period 256 frames = 5.33 ms) | time |
 |---|---|
-| mixed ahead of the DMA position (2 periods) | 5.3-10.7 ms |
+| mixed ahead of the DMA position (lead 2 periods, adaptively up to 12) | 5.3-10.7 ms (up to 64 ms) |
 | controller and codec FIFO | < 0.5 ms |
 | client buffer (min. 5 ms, test 50 ms, shell 100 ms) | per client |
 | **from a client write with a 10 ms buffer to the speaker** | **about 11-21 ms** |
 
-The DMA buffer has 4 periods (21.3 ms): two with data, one with silence
-and one spare that the device is reading. The service wakes 187 times a
+**Adaptive lead:** when the service falls behind (the DMA position
+overtakes the mixed data), the lead grows by a period, up to 12 periods
+(64 ms); after 10 s without an underrun it shrinks by a period again. On
+a fast machine latency stays at 11-21 ms; on a loaded one (QEMU on a busy
+host that takes the CPU away from the guest for tens of ms) it grows
+instead of repeated gaps in the sound. The DMA buffer therefore has 16
+periods (85 ms): the lead, one period of silence and a spare that the
+device is reading. The service wakes 187 times a
 second; mixing one period for two streams takes tens of microseconds.
 When no stream has played for 2 s the service stops DMA (the device does
 not play silence forever) and on the next `START` zeroes the buffer and
@@ -352,9 +358,15 @@ count.
   QEMU does not model two codecs on one link correctly (each codec takes
   its own data from DMA, while real hardware broadcasts the stream), hence
   two controllers. The test `ton 1 kHz do WAV` plays 1.5 s of a 1 kHz
-  tone (mono 44.1 kHz, i.e. through rate conversion); after QEMU exits,
-  xtask looks for 50 ms windows with a clean 1 kHz tone in the file and
-  requires at least 500 ms.
+  tone (mono 44.1 kHz, i.e. through rate conversion). That it played in
+  full is checked in QEMU by the audiod counter (all 66,150 frames). The
+  WAV file is a supplementary check of the whole path: after QEMU exits,
+  xtask looks for 50 ms windows with a clean 1 kHz tone and requires at
+  least 500 ms. If the tone is missing and audiod reported device
+  underruns during it (the host took the CPU away from the guest), it is
+  a warning with an explanation; without underruns it is an output path
+  error. xtask also prints the file's timeline in 100 ms steps (`.`
+  silence, `t` tone, `?` other sound).
 
 With sound interactively: `cargo xtask run --audio dsound` (Windows),
 `--audio pa` or `alsa` (Linux), `coreaudio` (macOS).

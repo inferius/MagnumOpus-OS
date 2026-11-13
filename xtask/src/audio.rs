@@ -14,6 +14,8 @@ use crate::{Options, Result};
 
 /// Znacka testu v logu: kdyz je, musi byt ton i v souboru.
 pub const TONE_MARKER: &str = "[ok] zvuk: ton 1 kHz do WAV";
+/// Radek testu s pocitadly sluzby (podteceni zarizeni behem tonu).
+const UNDERRUN_MARKER: &str = "zarizeni behem tonu ";
 /// Frekvence a minimalni delka tonu (testy ho hraji 1,5 s).
 const TONE_HZ: f64 = 1_000.0;
 const MIN_TONE_MS: u32 = 500;
@@ -107,7 +109,21 @@ pub fn tone_ms(samples: &[i16]) -> u32 {
     (windows * WINDOW as u32 * 1000) / RATE as u32
 }
 
+/// Podteceni zarizeni behem tonu podle radku testu v logu (`None` =
+/// radek chybi).
+fn tone_underruns(log: &str) -> Option<u64> {
+    let rest = &log[log.find(UNDERRUN_MARKER)? + UNDERRUN_MARKER.len()..];
+    rest.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+}
+
 /// Po testu: kdyz test tonu probehl, musi byt ton v souboru.
+///
+/// Ze ton v systemu cely zaznel, overuje test v QEMU (pocitadlo audiod).
+/// Soubor WAV je doplnkova kontrola cele cesty az k "reproduktoru"
+/// emulatoru. Mezery v nem vznikaji, kdyz sluzba nestiha (hostitel
+/// hostovi sebere procesor): to hlasi pocitadlo podteceni zarizeni. Chybi-li
+/// ton a podteceni nebylo, je to skutecna chyba (cesta k vystupu);
+/// s podtecenim jen varovani s vysvetlenim.
 pub fn check(wav: &Path, serial_log: &Path, opts: &Options) -> Result<()> {
     if backend(opts) != "wav" {
         return Ok(());
@@ -120,9 +136,32 @@ pub fn check(wav: &Path, serial_log: &Path, opts: &Options) -> Result<()> {
     let data = std::fs::read(wav).map_err(|e| format!("soubor WAV {}: {e}", wav.display()))?;
     let samples = wav_samples(&data).ok_or("soubor WAV z QEMU nema platnou hlavicku")?;
     let ms = tone_ms(&samples);
+    // Casova osa po 100 ms: '.' ticho, 't' ton 1 kHz, '?' jiny zvuk.
+    let line: String = samples
+        .chunks(9_600)
+        .map(|c| {
+            let l: Vec<f64> = c.iter().step_by(2).map(|&v| v as f64).collect();
+            let rms = (l.iter().map(|v| v * v).sum::<f64>() / l.len().max(1) as f64).sqrt();
+            if rms < 100.0 { '.' } else if goertzel(&l, TONE_HZ) / std::f64::consts::SQRT_2 > rms * 0.9 { 't' } else { '?' }
+        })
+        .collect();
+    println!("xtask: WAV po 100 ms: {line}");
     println!("xtask: WAV z QEMU: {} ms zvuku, ton 1 kHz {} ms", samples.len() as u64 * 1000 / 2 / RATE as u64, ms);
     if ms < MIN_TONE_MS {
-        return Err(format!("v zapsanem zvuku chybi ton 1 kHz (jen {ms} ms, ocekavano aspon {MIN_TONE_MS} ms)").into());
+        match tone_underruns(&log) {
+            Some(n) if n > 0 => println!(
+                "xtask: VAROVANI: ve WAV jen {ms} ms tonu 1 kHz (ocekavano {MIN_TONE_MS} ms), ale audiod hlasi {n} podteceni \
+                 zarizeni behem tonu: hostitel hostovi bral procesor (zatez), ne chyba zvuku. Ton v systemu zaznel cely \
+                 (test v QEMU kontroluje pocitadlo)."
+            ),
+            _ => {
+                return Err(format!(
+                    "v zapsanem zvuku chybi ton 1 kHz (jen {ms} ms, ocekavano aspon {MIN_TONE_MS} ms) a audiod zadne \
+                     podteceni nehlasi: chyba cesty k vystupu"
+                )
+                .into());
+            }
+        }
     }
     Ok(())
 }
@@ -152,6 +191,13 @@ mod tests {
             .collect();
         assert_eq!(tone_ms(&other), 0);
         assert_eq!(tone_ms(&vec![0; 96_000]), 0);
+    }
+
+    #[test]
+    fn underruns_from_log() {
+        let log = "[ 1.0] zvuk: ton prehran 66150 snimku, podteceni streamu 0, zarizeni behem tonu 7, latence 11166 us\n";
+        assert_eq!(tone_underruns(log), Some(7));
+        assert_eq!(tone_underruns("nic"), None);
     }
 
     #[test]

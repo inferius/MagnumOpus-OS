@@ -14,7 +14,7 @@ use audiomix::convert::frame_to_stereo;
 use audiomix::mix::Mixer;
 use libos::{Channel, Handle, Signals, println, time};
 
-use crate::device::{self, Device, LEAD_PERIODS};
+use crate::device::{self, Device};
 use crate::streams::{State, Stream};
 
 /// Za jak dlouho bez hrajiciho streamu zastavit DMA.
@@ -448,14 +448,18 @@ impl Service {
         if !dev.out.running {
             return;
         }
-        let port = &mut dev.out;
-        let hw = port.status.position();
-        if hw > port.pos {
-            // Nestihli jsme: zarizeni hraje ticho (nulovana perioda).
-            dev.underruns += 1;
-            port.pos = hw;
+        let hw = dev.out.status.position();
+        if hw > dev.out.pos {
+            // Nestihli jsme: zarizeni hraje ticho (nulovana perioda);
+            // predstih zvetsit.
+            dev.underrun();
+            dev.out.pos = hw;
+        } else {
+            dev.relax();
         }
-        let target = hw + (port.period * LEAD_PERIODS) as u64;
+        let lead = dev.lead;
+        let port = &mut dev.out;
+        let target = hw + (port.period * lead) as u64;
         let gain = if self.muted { 0 } else { volume_gain(self.master) };
         let fb = port.frame_bytes() as usize;
         while port.pos < target {
