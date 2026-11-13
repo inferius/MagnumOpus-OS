@@ -934,6 +934,40 @@ together with GUI 6c.
 | drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
 | starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
+### Lines in threads: Ctrl+Z and background
+
+A session line runs in its own thread of the session process (`shsess`)
+over the session interpreter and its own connection to fsd (same identity;
+the draft and the undo views are FS objects, not connections). Meanwhile the
+main thread serves the window: Ctrl+C, Ctrl+Z, prompts, further lines (a
+queue) and environment services (sound, agent, task overview) that the line
+thread does not call itself. Code: `libs/term/src/fg.rs` (line thread) and
+`libs/term/src/session/line.rs` (session handling). **[implemented]**
+
+```text
+window ──Run/Interrupt/Background──▶ shsess main thread ──▶ line thread
+  ▲                                    │  message box, prompts,   (session
+  └──────── blocks, prompts ───────────┘  environment requests     interpreter)
+```
+
+- **Ctrl+Z** (message `Background`): the line keeps running as a background
+  job and the session continues with a copy of the state from the start of
+  the line (variables, functions, folder, history). What the job changes in
+  variables and the folder does not show up in the session (like a
+  subshell). The undo of earlier lines stays with the job; after Ctrl+Z the
+  session starts with an empty undo.
+- **`command &`**: straight to the background (the job gets a copy of the
+  state, the session does not change).
+- **`jobs`, `fg N`, `kill N`**: session job control; `fg` brings a job back
+  to the foreground (Ctrl+C interrupts it, Ctrl+Z sends it back). `bg N`
+  only reports that the job already runs (a stopped job does not exist yet).
+- The end of a background job is announced by a line in its block:
+  "[1] hotovo: ...", "[1] přerušeno: ..." or "[1] skončilo chybou: ...".
+- A line typed meanwhile goes to a queue (visible in the window) and runs
+  after the foreground line, in order.
+- Without threads in the environment (tests) a line runs in the main thread
+  as before.
+
 ### Activity indicator and progress
 
 Commands do not draw activity with characters themselves: they report it

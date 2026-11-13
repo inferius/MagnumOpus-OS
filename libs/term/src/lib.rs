@@ -26,6 +26,7 @@ pub mod activity;
 pub mod binary;
 pub mod broker;
 pub mod ctl;
+pub mod fg;
 pub mod perm;
 pub mod proto;
 pub mod render;
@@ -45,6 +46,8 @@ mod tests_broker;
 mod tests_contrast;
 #[cfg(test)]
 mod tests_eta;
+#[cfg(test)]
+mod tests_line;
 #[cfg(test)]
 mod tests_render;
 #[cfg(test)]

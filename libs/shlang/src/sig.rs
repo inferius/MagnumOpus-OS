@@ -86,7 +86,7 @@ impl Sig {
 }
 
 /// Zdroj podpisu (vestavene + programy z manifestu).
-pub trait Sigs {
+pub trait Sigs: Send + Sync {
     fn get(&self, name: &str) -> Option<&Sig>;
     /// Vsechna jmena prikazu (pro doplnovani).
     fn names(&self) -> Vec<&'static str> {
@@ -162,7 +162,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Text a výstup", &["echo", "log", "lines", "split", "join", "trim", "upper", "lower", "contains", "starts-with", "ends-with", "replace"]),
     ("Seznamy a tabulky", &["where", "each", "select", "sort", "first", "last", "count", "sum", "group", "reverse", "range"]),
     ("Převody a čas", &["from", "to", "describe", "now", "sleep"]),
-    ("Úlohy", &["tasks", "jobs", "wait", "kill", "cancel"]),
+    ("Úlohy", &["tasks", "jobs", "fg", "wait", "kill", "cancel"]),
     ("Relace a bezpečnost", &["undo", "preview", "history", "run", "error", "exit"]),
     ("Nápověda", &["help", "explain"]),
     ("Systém", &["audio", "loglevel", "report", "shutdown", "reboot"]),
@@ -246,6 +246,8 @@ pub const BUILTINS: &[Sig] = &[
         "úlohy na pozadí"),
     sig!("wait", "job-wait", &[opt("id", Kind::Int)], None, NOFLAGS, IN, IA, "počká na úlohu a vrátí její výsledek"),
     sig!("kill", "job-kill", &[p("id", Kind::Int)], None, NOFLAGS, IN, IN, "ukončí úlohu"),
+    sig!("fg", "job-foreground", &[opt("id", Kind::Int)], None, NOFLAGS, IN, IN,
+        "vrátí úlohu z pozadí do popředí (Ctrl+C ji přeruší, Ctrl+Z vrátí zpět)"),
     sig!("cancel", "task-cancel", &[p("task", Kind::Any)], None, NOFLAGS, IN, IN, "zruší úlohu async (nebo seznam úloh)"),
     sig!("tasks", "task-list", &[opt("action", Kind::Str), opt("id", Kind::Int)], None,
         &[Flag { long: "lines", short: Some('n'), value: Some(Kind::Int), help: "kolik řádků výstupu (tasks log)" }],

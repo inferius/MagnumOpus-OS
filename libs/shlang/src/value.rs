@@ -5,7 +5,7 @@
 //! prevody: jedina vyjimka je cele cislo -> desetinne v aritmetice.
 
 use alloc::boxed::Box;
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
@@ -43,7 +43,7 @@ pub enum Value {
     Bytes(Vec<u8>),
     List(Vec<Value>),
     Record(Record),
-    Closure(Rc<ClosureVal>),
+    Closure(Arc<ClosureVal>),
     Error(Box<ShError>),
 }
 

@@ -203,7 +203,7 @@ impl Interp {
                         && let Expr::Block(..) = x
                     {
                         let c = ClosureVal { params: Vec::new(), body: x.clone(), captured: Vec::new() };
-                        out.pos.push(Value::Closure(alloc::rc::Rc::new(c)));
+                        out.pos.push(Value::Closure(alloc::sync::Arc::new(c)));
                         continue;
                     }
                     let v = self.eval(host, x)?;

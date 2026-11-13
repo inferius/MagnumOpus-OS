@@ -362,6 +362,9 @@ fn main(startup: Startup) -> i64 {
     let mut svc = Service::single(&home, session);
     svc.stack_budget = STACK_BUDGET;
     svc.task_stack = TASK_STACK_BUDGET;
+    // Radky ve vlaknech: okno obsluhovane i behem prikazu (Ctrl+C, Ctrl+Z,
+    // fronta radku, `&` na pozadi).
+    svc.line_threads = true;
     let notify = Event::create().ok().map(|e| Arc::new(EventNotify(e)));
     let spawner = fsd.as_ref().and_then(|f| f.client.connect().ok());
     let mut env = SysEnv {

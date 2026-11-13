@@ -117,8 +117,11 @@ v `user/init/src/terminal.rs`.
 Běžící příkaz ukáže po 1 s pod sebou „běží 12 s · Ctrl+C přerušit“ a Ctrl+C
 ho přeruší. Co napíšete během běhu, čeká viditelně ve frontě
 („ve frontě: …“, Esc frontu zruší, šipka nahoru vrátí poslední řádek
-k úpravě) a spustí se po něm. **[implementováno]** Přesun běžícího příkazu
-na pozadí (Ctrl+Z, `fg`, `bg`) **[navrženo]**.
+k úpravě) a spustí se po něm. Ctrl+Z přesune běžící příkaz na pozadí
+a výzva se hned vrátí; `příkaz &` ho tam spustí rovnou. `jobs` vypíše úlohy
+na pozadí, `fg N` vrátí úlohu do popředí, `kill N` ji ukončí a konec úlohy
+se ohlásí řádkem v jejím bloku. **[implementováno]** Podrobnosti v návrhu
+shellu ([Řádky ve vláknech](navrh-shell.md#řádky-ve-vláknech-ctrlz-a-pozadí)).
 
 ```text
 gui-term ──connect──▶ init (supervisor) ──spustí──▶ termd ──▶ shsess (relace)

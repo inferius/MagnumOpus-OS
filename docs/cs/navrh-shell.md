@@ -882,6 +882,38 @@ v běžném běhu rozdělí supervisor spolu s GUI 6c.
 | kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
 | spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
 
+### Řádky ve vláknech: Ctrl+Z a pozadí
+
+Řádek relace běží ve vlastním vlákně procesu relace (`shsess`) nad
+interpretem relace a vlastním spojením na fsd (stejná identita; koncept
+a pohledy undo jsou objekty FS, ne spojení). Hlavní vlákno mezitím obsluhuje
+okno: Ctrl+C, Ctrl+Z, výzvy, další řádky (fronta) a služby prostředí (zvuk,
+agent, přehled úloh), které řádek ve vlákně nevolá sám. Kód:
+`libs/term/src/fg.rs` (vlákno řádku) a `libs/term/src/session/line.rs`
+(obsluha relací). **[implementováno]**
+
+```text
+okno ──Run/Interrupt/Background──▶ hlavní vlákno shsess ──▶ vlákno řádku
+  ▲                                   │  schránka zpráv, výzvy,   (interpret
+  └──────── bloky, výzvy ─────────────┘  požadavky na prostředí    relace)
+```
+
+- **Ctrl+Z** (zpráva `Background`): řádek běží dál jako úloha na pozadí
+  a relace pokračuje kopií stavu ze začátku řádku (proměnné, funkce, složka,
+  historie). Co úloha změní v proměnných a ve složce, se do relace
+  nepromítne (jako subshell). Undo předchozích řádků zůstane úloze; relace
+  po Ctrl+Z začíná s prázdným undo.
+- **`příkaz &`**: rovnou na pozadí (úloha dostane kopii stavu, relace se
+  nemění).
+- **`jobs`, `fg N`, `kill N`**: řízení úloh relace; `fg` úlohu vrátí do
+  popředí (Ctrl+C ji přeruší, Ctrl+Z vrátí zpět). `bg N` jen ohlásí, že
+  úloha už běží (zastavená úloha zatím není).
+- Konec úlohy na pozadí ohlásí řádek v jejím bloku: „[1] hotovo: …“,
+  „[1] přerušeno: …“ nebo „[1] skončilo chybou: …“.
+- Řádek napsaný během běhu jde do fronty (v okně viditelně) a spustí se po
+  řádku v popředí, v pořadí.
+- Bez vláken v prostředí (testy) běží řádek jako dřív v hlavním vlákně.
+
 ### Ukazatel činnosti a průběh
 
 Příkazy činnost nekreslí samy znaky: hlásí ji strukturovaně (běžící blok,
