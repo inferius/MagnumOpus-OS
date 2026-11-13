@@ -101,8 +101,13 @@ fn connectors(_: &Startup) -> TestResult {
 
 /// Ridici prikaz kompozitoru, odpoved `ok ...`.
 fn command(ctl: &Channel, text: &str, handles: Vec<Handle>) -> Result<String, String> {
+    command_within(ctl, text, handles, TIMEOUT)
+}
+
+/// Jako [`command`] s vlastni horni mezi cekani na odpoved.
+fn command_within(ctl: &Channel, text: &str, handles: Vec<Handle>, limit: Duration) -> Result<String, String> {
     ctl.write(text.as_bytes(), handles).map_err(|e| fail(text, e))?;
-    let m = ctl.read(deadline()).map_err(|e| fail(text, e))?;
+    let m = ctl.read(Some(time::deadline_after(limit))).map_err(|e| fail(text, e))?;
     let r = String::from_utf8_lossy(&m.data).into_owned();
     match r.strip_prefix("ok") {
         Some(rest) => Ok(String::from(rest.trim())),
@@ -116,8 +121,23 @@ fn start_compd(startup: &Startup, display: Channel) -> Result<(Process, Channel,
     let (p, ctl) = libos::spawn("compd", image, Vec::new()).map_err(|e| fail("spawn compd", e))?;
     // Jako prvni start systemu: na obrazovce je startovni obraz (prstenec
     // na 60 %), kompozitor na nej navaze a prejde do plochy.
-    let size = command(&ctl, &format!("{} UTC {}600", control::DISPLAY, control::SPLASH_ARG), alloc::vec![display.into_handle()])?;
+    // Odpoved = displej pripojen a prvni snimek ukazany; horni mez je
+    // velkorysa (pomaly stroj, zatizeny test), cas se meri v logu compd.
+    let size = match command_within(&ctl, &format!("{} UTC {}600", control::DISPLAY, control::SPLASH_ARG), alloc::vec![display.into_handle()], Duration::from_secs(30)) {
+        Ok(s) => s,
+        Err(e) => {
+            stop_compd(&p);
+            return Err(e);
+        }
+    };
     Ok((p, ctl, size))
+}
+
+/// Ukonci kompozitor sady (i po selhani testu: jinak by drzel pamet
+/// a dalsi sady by o ni prisly).
+fn stop_compd(p: &Process) {
+    let _ = p.kill();
+    let _ = p.wait_exit(deadline());
 }
 
 /// Aktualni rezim z `outputs` (`WxH@mHz`).
@@ -132,11 +152,31 @@ fn compd_mode_change(startup: &Startup) -> TestResult {
         let ch = s.kit.client.take().ok_or("kanal klienta chybi")?;
         let (p, ctl, size) = start_compd(startup, ch)?;
         println!("init: test displej: compd nad bochs-display {size}");
-        // Prechod ze startovniho obrazu (~1,6 s): kompozitor mezitim odpovida
-        // a plochu sklada dal (do bufferu), po nem bezne snimky.
-        let st = command(&ctl, control::STATUS, Vec::new())?;
-        check!(control::Status::parse(&st).is_some(), "status behem prechodu");
-        time::sleep(Duration::from_millis(1900));
+        let r = mode_change_checks(&ctl, &size);
+        match r {
+            Ok(()) => s.compd = Some((p, ctl)),
+            Err(_) => stop_compd(&p),
+        }
+        r
+    })
+}
+
+/// Prubeh testu nad bezicim kompozitorem (`compd_mode_change`).
+fn mode_change_checks(ctl: &Channel, size: &str) -> Result<(), String> {
+    {
+        // Prechod ze startovniho obrazu: kompozitor mezitim odpovida
+        // a plochu sklada dal (do bufferu). Konec pozna podle `splash=0`
+        // ve `status` (zadna pevna lhuta podle ocekavane delky).
+        let end = time::deadline_after(Duration::from_secs(30));
+        loop {
+            let st = command(&ctl, control::STATUS, Vec::new())?;
+            let st = control::Status::parse(&st).ok_or("status behem prechodu")?;
+            if !st.splash {
+                break;
+            }
+            check!(time::now() < end, "prechod ze startovniho obrazu neskoncil do 30 s");
+            time::sleep(Duration::from_millis(50));
+        }
         // Vystup byl vypnuty: kompozitor nastavil preferovany rezim.
         let cur = current(&ctl)?;
         check!(cur.starts_with(&size.replace(' ', "x")), "aktualni rezim nesedi s velikosti kompozitoru");
@@ -161,9 +201,8 @@ fn compd_mode_change(startup: &Startup) -> TestResult {
             time::sleep(Duration::from_millis(50));
         }
         check!(presented(&ctl)? > a, "po zmene rezimu nepribyl zobrazeny snimek");
-        s.compd = Some((p, ctl));
         Ok(())
-    })
+    }
 }
 
 fn crash_restores_firmware(startup: &Startup) -> TestResult {

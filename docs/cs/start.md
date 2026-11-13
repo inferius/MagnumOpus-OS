@@ -156,9 +156,21 @@ celočíselně: podklad po řádcích (kopie, ztlumení, prolnutí) a znak
 v klidu z tabulky (`libs/bootsplash/src/cache.rs`: vzdálenost, úhel,
 pokrytí prstence a loga pro každý pixel). Float zůstal jen pro konce
 oblouku a pro posunutý znak během přechodu v kompozitoru. Snímek initu
-tím klesl z ~50 ms na 12-14 ms (WHPX). Pozadí plochy (~400 ms ve float)
-se počítá jednou: v procesu `splash`, v kompozitoru ho přechod převezme
-od plochy (`Comp::backdrop`).
+tím klesl z ~50 ms na 12-14 ms (WHPX). Pozadí plochy (`gfx::backdrop`)
+počítá ve float jen body mřížky po 4 px, pixely mezi nimi interpoluje
+celočíselně; počítá se jednou: v procesu `splash`, v kompozitoru ho
+přechod sdílí s plochou bez kopie (`Comp::backdrop`, `Arc`). Lhůta
+odpovědi ovladače displeje (5 s) se počítá až od odeslání `ATTACH`,
+první snímek do ní nespadá.
+
+| První snímek kompozitoru (release, WHPX, 1920 x 1080) | čas |
+|---|---|
+| float interpolace pozadí + kopie (`9e865be`) | ~430 ms |
+| celočíselná interpolace, sdílení bez kopie | ~145 ms (z toho pozadí ~130 ms) |
+
+V testovacím (debug) sestavení se `bootsplash` překládá s optimalizací
+(`opt-level = 2`, jako `gfx`); bez ní trval první snímek v zatíženém
+testu 4,7 s.
 
 ## Determinismus
 
@@ -185,7 +197,8 @@ neviditelné.
     rovná hodnotě z hostitele,
   - `bochs-display: compd navaze na startovni obraz, nastavi rezim, zmena
     rozliseni za behu` - kompozitor s `splash=600`, odpovědi během
-    přechodu a změna režimu po něm.
+    přechodu, konec přechodu podle značky `splash=0` ve `status` (žádná
+    pevná lhůta podle očekávané délky) a změna režimu po něm.
 - Neověřeno automaticky: řádek „čeká na“ a obrazovka chyby (v QEMU se
   žádný krok nezdrží a start neselže).
 

@@ -164,9 +164,21 @@ and the resting mark from a table (`libs/bootsplash/src/cache.rs`:
 distance, angle, ring and logo coverage per pixel). Floating point
 remains only for the arc ends and for the moved mark during the
 compositor's hand-over. A `splash` frame dropped from ~50 ms to 12-14 ms
-(WHPX). The desktop background (~400 ms in floating point) is computed
-once: in the `splash` process, and in the compositor the hand-over takes it
-from the desktop (`Comp::backdrop`).
+(WHPX). The desktop background (`gfx::backdrop`) computes only the 4 px
+grid points in floating point and interpolates the pixels between them
+with integers; it is computed once: in the `splash` process, and in the
+compositor the hand-over shares it with the desktop without a copy
+(`Comp::backdrop`, `Arc`). The display driver reply deadline (5 s) starts
+only when `ATTACH` is sent; the first frame does not count against it.
+
+| Compositor's first frame (release, WHPX, 1920 x 1080) | time |
+|---|---|
+| floating-point background interpolation + copy (`9e865be`) | ~430 ms |
+| integer interpolation, sharing without a copy | ~145 ms (background ~130 ms of it) |
+
+In the test (debug) build `bootsplash` is compiled with optimisation
+(`opt-level = 2`, like `gfx`); without it the first frame took 4.7 s in a
+loaded test run.
 
 ## Determinism
 
@@ -194,7 +206,9 @@ floating point; they differ by at most 2 colour levels (test
     the host value,
   - `bochs-display: compd navaze na startovni obraz, nastavi rezim, zmena
     rozliseni za behu` - the compositor with `splash=600`, replies during
-    the hand-over and the mode change after it.
+    the hand-over, the end of the hand-over by the `splash=0` mark in
+    `status` (no fixed deadline close to the expected duration) and the
+    mode change after it.
 - Not verified automatically: the "waiting for" line and the failure
   screen (in QEMU no step stalls and boot does not fail).
 

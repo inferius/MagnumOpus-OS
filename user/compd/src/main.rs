@@ -675,7 +675,9 @@ impl Service {
             control::STATUS => match &self.comp {
                 Some(c) => {
                     let mut s = String::new();
-                    let _ = c.status().format(&mut s);
+                    let mut st = c.status();
+                    st.splash = self.splash.is_some() || self.splash_pending.is_some();
+                    let _ = st.format(&mut s);
                     Ok((s, Vec::new()))
                 }
                 None => Err(Error::NotFound),

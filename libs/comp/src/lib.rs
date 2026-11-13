@@ -300,9 +300,9 @@ impl Comp {
     /// Obraz pozadi plochy pro aktualni velikost (spocita se jednou, pak
     /// z mezipameti). Pouziva ho i prechod ze startovni obrazovky, aby se
     /// stejny obraz nepocital dvakrat.
-    pub fn backdrop(&mut self) -> &[u32] {
+    pub fn backdrop(&mut self) -> alloc::sync::Arc<Vec<u32>> {
         let (w, h) = (self.w, self.h);
-        self.style.backdrop(w, h)
+        self.style.backdrop_shared(w, h)
     }
 
     /// Prekreslit celou obrazovku (napr. po zmene backendu skladani).
@@ -332,6 +332,8 @@ impl Comp {
             presented: self.frame.presented,
             dialogs: self.dialogs.len() as u32,
             secure: self.dialogs.secure_active(),
+            // Prechod ze startovni obrazovky ridi sluzba (compd).
+            splash: false,
         }
     }
 }
