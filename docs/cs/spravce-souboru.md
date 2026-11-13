@@ -53,7 +53,7 @@ Kód:
 | nová složka, přejmenování (kontrola jména a kolize), do koše s „Vrátit“ | **[ověřeno v QEMU]** (koš), ostatní host |
 | koš všech datasetů: obnovit, trvale smazat (s potvrzením) | **[implementováno]** (host `trash_undo_and_trash_view`) |
 | historie verzí souboru: Obnovit, Kopie vedle | **[implementováno]** (host `preview_shows_three_states_and_versions`) |
-| kopírovat / vyjmout / vložit přes systémovou schránku i mezi okny: formáty `application/x-mo-paths` (s operací), `text/uri-list`, text; seznam nad 60 KiB jen v rámci okna | **[ověřeno v QEMU]** s akcelerací (WHPX), v TCG se část se schránkou přeskočí (viz Výkon); formáty host `clipboard_formats_roundtrip` |
+| kopírovat / vyjmout / vložit přes systémovou schránku i mezi okny: formáty `application/x-mo-paths` (s operací), `text/uri-list`, text; seznam nad 60 KiB jen v rámci okna | **[ověřeno v QEMU]** (TCG i WHPX; gesto schránky je pořadové číslo stisku, ne čas); formáty host `clipboard_formats_roundtrip` |
 | kopie a přesun jako úloha `files-copy` s průběhem, pozastavením a zrušením | **[ověřeno v QEMU]** |
 | konflikt: přepsat / přeskočit / ponechat obě, „pro všechny“ | **[ověřeno v QEMU]** (ponechat obě), ostatní host `fileops` |
 | obnova úlohy po přerušení (i po restartu) | **[ověřeno v QEMU]** (test `gui: files-copy: uloha s konfliktem prezije restart procesu`) |
@@ -193,10 +193,9 @@ Nejdražší je výpis s metadaty ve fsd (každá položka `STAT` po cestě);
 zrychlení je práce pro fsd. V QEMU bez akcelerace (TCG) trvá složení
 snímku kompozitorem na CPU 0,6-1,4 s, proto se nový obsah po akci objeví
 až za ~2,6 s (dva snímky) bez ohledu na velikost složky; s WHPX je to
-0,2-0,3 s (měření výše). Ze stejného důvodu v TCG aplikace klávesu
-zpracuje až ~1,5 s po stisku a kompozitor nabídku do schránky odmítne
-(gesto platí 1 s); test to v TCG hlásí jako `[preskoceno]` a kopii
-udělá přímo přes FS (nahlášeno vláknu GUI).
+0,2-0,3 s (měření výše). Aplikace v TCG zpracuje klávesu až ~1,5 s po
+stisku; schránce to nevadí, protože gesto je pořadové číslo fyzického
+stisku (`clipproto`), ne časové okno.
 
 ## Bezpečnost
 
