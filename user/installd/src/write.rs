@@ -51,10 +51,12 @@ pub struct Ctx<'a> {
 
 /// Provede plan; vraci souhrn pro uzivatele.
 pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &AccountInput) -> Result<String> {
-    // Zdroj nejdriv (chyba = nic se nezapsalo).
+    // Zdroj nejdriv (chyba = nic se nezapsalo). Na flashce to trva
+    // (zavadec, jadro, dva initfs): vlastni krok prubehu.
+    (cx.progress)(0, "Čtu systém ze živého USB");
     let sources = read_sources(cx.live)?;
 
-    (cx.progress)(0, "Zapisuji tabulku oddílů");
+    (cx.progress)(1, "Zapisuji tabulku oddílů");
     match &plan.gpt {
         GptWrite::New(e) | GptWrite::Add(e) => {
             let sectors = cx.target.sectors();
@@ -67,14 +69,14 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
         GptWrite::Keep => {}
     }
 
-    (cx.progress)(1, "Formátuji oddíl EFI");
+    (cx.progress)(2, "Formátuji oddíl EFI");
     let esp_sectors = plan.esp.1 - plan.esp.0 + 1;
     let mut esp = Part { disk: cx.target, first: plan.esp.0, sectors: esp_sectors };
     let mut id = [0u8; 4];
     crate::random(&mut id);
     fatw::format::format(&mut esp, esp_sectors, b"MAGNUMOS   ", plan.esp.0, u32::from_le_bytes(id)).map_err(fat_err)?;
 
-    (cx.progress)(2, "Kopíruji zavaděč a systém");
+    (cx.progress)(3, "Kopíruji zavaděč a systém");
     let mut vol = fatw::Volume::open(esp).map_err(fat_err)?;
     for ((_, to), data) in files().iter().zip(&sources) {
         let (dir, name) = to.rsplit_once('/').unwrap_or(("", to));
@@ -85,7 +87,7 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
 
     let data_part = || Part { disk: cx.target, first: plan.data.0, sectors: plan.data.1 - plan.data.0 + 1 };
     let mut fs = if plan.format_data {
-        (cx.progress)(3, "Vytvářím souborový systém");
+        (cx.progress)(4, "Vytvářím souborový systém");
         let mut uuid = [0u8; 16];
         crate::random(&mut uuid);
         let opts = FormatOptions {
@@ -98,12 +100,12 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
         let dev = Fs::format(FsPart(data_part()), &opts)?;
         Fs::mount(dev)?
     } else {
-        (cx.progress)(3, "Připojuji existující souborový systém (data zůstanou)");
+        (cx.progress)(4, "Připojuji existující souborový systém (data zůstanou)");
         Fs::mount(FsPart(data_part()))?
     };
     fs.set_time(fs::Timestamp::new(now_s(), 0));
 
-    (cx.progress)(4, "Ukládám nastavení");
+    (cx.progress)(5, "Ukládám nastavení");
     for dir in ["/system"] {
         match fs.create(dir, Kind::Dir) {
             Ok(()) | Err(Error::AlreadyExists) => {}
@@ -124,7 +126,7 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
     fs.truncate(config::PATH, 0)?;
     fs.write(config::PATH, 0, toml.as_bytes())?;
 
-    (cx.progress)(5, "Vytvářím účet");
+    (cx.progress)(6, "Vytvářím účet");
     let created = crate::account::create_first(
         &mut fs,
         &account.name,
@@ -137,7 +139,7 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
     fs.commit()?;
     drop(fs);
 
-    (cx.progress)(6, "Ověřuji instalaci");
+    (cx.progress)(7, "Ověřuji instalaci");
     verify(cx, plan, &sources)?;
 
     let mut s = String::from("Instalace je hotová.\n");

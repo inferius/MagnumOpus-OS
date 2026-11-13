@@ -2,14 +2,14 @@
 
 Instalátor zapíše MagnumOpus z [živého USB](zive-usb.md) na interní disk
 počítače (NVMe, SATA, disk USB): vlastní oddíl EFI, oddíl s naším
-souborovým systémem, zavaděč, nastavení a první účet. Dnes je hotový
-**základ a textová podoba** (příkaz `install` v terminálu); grafický
-průvodce podle `design/instalace.html` přijde nad knihovnou `libs/ui`
-**[navrženo]**.
+souborovým systémem, zavaděč, nastavení a první účet. Má dvě podoby se
+stejnými kroky: textovou (příkaz `install` v terminálu) a grafickou
+(okno „Nainstalovat MagnumOpus“ na živém USB, `design/instalace.html`).
 
 Obsah:
 
 1. [Kroky průvodce](#kroky-průvodce)
+   - [Grafický průvodce](#grafický-průvodce)
 2. [Kam nainstalovat](#kam-nainstalovat): celý disk, volné místo, přeinstalace
 3. [Ochrana cizích oddílů](#ochrana-cizích-oddílů): raw kanál a diskguard
 4. [Co se zapíše](#co-se-zapíše)
@@ -41,8 +41,10 @@ bez dotazů; interaktivní dotazy jen ručně):
    instalátor zatím nenabízí.
 7. **Souhrn** - u celého disku opsat název disku, jinak potvrdit `ano`.
    Je-li na disku jiný systém, otázka, který systém startuje jako výchozí.
-8. **Průběh instalace** - sedm kroků (tabulka oddílů, oddíl EFI, zavaděč
-   a systém, souborový systém, nastavení, účet, ověření).
+8. **Průběh instalace** - osm kroků (čtení systému ze živého USB, tabulka
+   oddílů, oddíl EFI, zavaděč a systém, souborový systém, nastavení, účet,
+   ověření). Čtení ze flashky je první a nejdelší: debug build pod TCG
+   ~50 s, než se cokoli zapíše.
 
 <figure class="diagram">
 <svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cesta od příkazu install k disku">
@@ -59,6 +61,62 @@ bez dotazů; interaktivní dotazy jen ručně):
 </svg>
 <figcaption>Od příkazu <code>install</code> k zápisu na disk.</figcaption>
 </figure>
+
+## Grafický průvodce
+
+Na živém USB je v liště a ve spouštěči aplikace **Nainstalovat
+MagnumOpus** (`user/gui-install`, ikona `download`). Po přihlášení se
+okno otevře samo, stejně jako ostatní aplikace plochy. Na nainstalovaném
+systému aplikace v seznamu není (init ji přidá jen při startu ze živé
+flashky). Stav: **[ověřeno v QEMU]** (x86_64, `--only instalace-gui`).
+
+- **Stejné kroky jako `install`.** Průvodce (`libs/installview`) se
+  službou installd mluví stejným protokolem `installplan::proto`. Plán
+  disku, volby, náhled, pravidla jména a hesla jsou v `installplan`
+  a v installd. Okno drží jen stav kroků a nic nerozhoduje samo.
+- **Krok 1, klávesnice.** Pole časového pásma a tabulka rozložení
+  s náhledem řad kláves vybraného rozložení. Tlačítka *Přidat*,
+  *Odebrat* a *Nastavit jako hlavní* (první je hlavní). Data dává installd
+  z `libs/keymap`, stejně jako službě vstupu, včetně tabulky kláves (kód
+  evdev a znak na čtyřech úrovních). Podle ní okno překládá stisky na
+  vybrané rozložení (`translate_keys`, Caps Lock jako
+  `keymap::Keyboard`) v poli „Vyzkoušej klávesnici“ (háček `key_map`
+  pole v `libs/ui`). Živé rozložení systému se nemění.
+- **Krok 4, náhled změn.** Mapa disku *Teď* a *Po instalaci*
+  (`installplan::map`): úseky v pořadí na disku včetně volného místa,
+  nové oddíly označené. Pod mapou je seznam změn *zůstane* / *nový* /
+  *smaže se* a potvrzení: u celého disku opsat název disku, jinak
+  zaškrtnout „Rozumím“. Graf je pruh `segments` z `libs/ui`:
+  MagnumOpus akcentem, cizí systém tónem *Other*, EFI tlumeně, volné
+  místo šrafovaně a nové úseky mají v popisku „nový“ (ne jen barvu).
+  Celý popisek každého úseku je ve stromu přístupnosti.
+- **Krok 6, zabezpečení.** Přepínač *Šifrovat disk* je zašedlý
+  a pod ním je vysvětlení (`NO_ENCRYPTION`).
+- **Krok 8, průběh.** Pruh průběhu, osm kroků a výsledek.
+  installd navíc hlásí instalaci do přehledu úloh (`taskd`) jako úlohu
+  „Instalace MagnumOpus na ...“ s průběhem. Je tak vidět ve Správci úloh
+  a v terminálu i po zavření okna (zápis běží v installd dál).
+- **Úzké okno.** Ve třídě šířky `compact` (pod 600 px) zmizí seznam
+  kroků vlevo a nahoře je jen „Krok N z 8: ...“.
+
+Test v QEMU (`cargo xtask test --only instalace-gui`) má dvě části.
+Nejdřív **skutečný vstup**: živé USB bez souboru odpovědí, okno se po
+přihlášení otevře samo a QMP pošle skutečné události přes `usb-tablet`
+a `usb-kbd`. Test klikne do pole časového pásma, stiskne Ctrl+A, napíše
+`utc` a klikne na *Pokračovat*. Ověří zalogované pásmo a druhý krok;
+snímky jsou `vstup-1.png` a `vstup-2.png`. Souřadnice platí pro okno
+900 × 680 na obrazovce 1280 × 800.
+
+Pak **celý průchod**: soubor odpovědí
+s `rozhrani = "gui"` dostane okno instalátoru místo textové cesty.
+Autopilot (`Installer::autopilot`) vyplní krok podle odpovědí a každých
+8 s pokročí o krok (první krok po 12 s, okno se teprve otevírá). U každého
+kroku vypíše značku `gui-install: krok N`. Debug build pod TCG kreslí okno
+několik sekund, proto xtask uloží snímek kroku N přes QMP až při značce
+kroku N+1. Snímky jsou v `target/shots/instalace-gui-<arch>/`:
+`krok-N.png`, krok 8 uprostřed zápisu a `hotovo.png` po dokončení. Výsledek
+se ověří stejně jako u textové instalace: start bez flashky a kontrola
+disku na hostiteli.
 
 ## Kam nainstalovat
 
@@ -187,6 +245,10 @@ a skripty. Popis klíčů: `libs/installplan/src/answers.rs`.
   protokol, odpovědi), `cargo test -p diskguard` (`tests/install.rs`:
   pravidlo zápisu, přidání oddílů zachová cizí položky), `cargo test -p
   fatw` (formát FAT32 a čtení zpět).
+- Host: `cargo test -p installview` (průvodce v okně s falešnou službou
+  installd: celý průchod, klávesnice, úzké okno, chyba, autopilot).
+- QEMU: `cargo xtask test --only instalace-gui` - grafický průvodce, viz
+  [Grafický průvodce](#grafický-průvodce).
 - QEMU: `cargo xtask test --only instalace` (`xtask/src/usb/install_test.rs`):
   1. **prázdný disk** - živé USB + prázdný 12 GiB disk NVMe, instalace
      podle souboru odpovědí, pak start **bez flashky** jen z NVMe:
@@ -213,5 +275,7 @@ hostiteli, ne klikáním v GUI.
 - Instalátor potřebuje náhodu (GUID oddílů, sůl hesla). Počítač bez
   generátoru (aarch64 bez TRNG a RNDR, v QEMU bez virtio-rng) čeká na
   entropii; test v QEMU proto na aarch64 přidává `virtio-rng-pci`.
-- Grafický průvodce čeká na komponenty `libs/ui` (seznam disků, pruh
-  průběhu, pruh náhledu oddílů, náhled rozložení klávesnice).
+- Zkušební pole klávesnice nesloží mrtvé klávesy (píše samotné
+  znaménko).
+- Celý průchod ověřuje autopilot; skutečný vstup (klik, psaní, tlačítko)
+  ověřuje krátký test jen v kroku 1.

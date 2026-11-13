@@ -6,7 +6,8 @@
 //! odmita ovladac, `diskguard::install`). Prvni zprava na bootstrap kanalu:
 //! sektor a model disku po radcich (`<sektor> <model>`) ve stejnem poradi
 //! a volby (`qemu-kdf` = parametry Argon2id pro QEMU). Pak init posila
-//! `klient` s kanalem pro pruvodce (protokol `installplan::proto`).
+//! `klient` s kanalem pro pruvodce (protokol `installplan::proto`)
+//! a `tasks` s kanalem producenta do prehledu uloh (`tasks.rs`).
 //!
 //! Zivy disk (flashka s oddilem MO-LOGY) je zdroj systemu; instalovat na
 //! nej nejde. Disk se sektorem jinym nez 512 B zatim nepodporuje.
@@ -18,6 +19,7 @@ extern crate alloc;
 
 mod account;
 mod disks;
+mod tasks;
 mod write;
 
 use alloc::format;
@@ -28,6 +30,7 @@ use blockproto::BlockClient;
 use disks::Disk;
 use installplan::config::Settings;
 use installplan::proto::{DiskEntry, KeyboardEntry, Reply, Request};
+use installplan::map::{self, Seg};
 use installplan::{Mode, choices, plan, preview_text};
 use libos::{Channel, Error, Signals, Startup, println};
 
@@ -49,6 +52,8 @@ struct Service {
     qemu_kdf: bool,
     /// Instalace probehla (dalsi se odmita do restartu).
     done: bool,
+    /// Hlaseni instalace do prehledu uloh (taskd).
+    tasks: tasks::Tasks,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -72,7 +77,7 @@ fn main(startup: Startup) -> i64 {
         }
     }
     println!("installd: bezim, {} disku", disks.len());
-    let mut svc = Service { disks, qemu_kdf, done: false };
+    let mut svc = Service { disks, qemu_kdf, done: false, tasks: tasks::Tasks::default() };
     let _ = boot.write(b"ok", Vec::new());
     let mut clients: Vec<Channel> = Vec::new();
     loop {
@@ -86,10 +91,15 @@ fn main(startup: Startup) -> i64 {
         };
         drop(items);
         if observed[0].intersects(Signals::READABLE) {
-            if let Ok(m) = boot.try_read()
-                && m.data == b"klient"
-            {
-                clients.extend(m.handles.into_iter().map(Channel::from_handle));
+            if let Ok(m) = boot.try_read() {
+                match &m.data[..] {
+                    b"klient" => clients.extend(m.handles.into_iter().map(Channel::from_handle)),
+                    b"tasks" => {
+                        svc.tasks.chan = m.handles.into_iter().next().map(Channel::from_handle);
+                        let _ = boot.write(b"ok", Vec::new());
+                    }
+                    _ => {}
+                }
             }
         } else if observed[0].intersects(Signals::PEER_CLOSED) {
             return 0;
@@ -125,7 +135,9 @@ impl Service {
             }
             Err(e) => fail(e, "neplatný požadavek"),
         };
-        let _ = ch.write(&reply.encode(), Vec::new());
+        if let Err(e) = ch.write(&reply.encode(), Vec::new()) {
+            println!("installd: odpoved pruvodci nelze poslat: {e}");
+        }
     }
 
     fn list(&self) -> Reply {
@@ -156,7 +168,12 @@ impl Service {
         Reply::Disks(out)
     }
 
+    /// Plan, disk a mapa disku teď a po instalaci (graf v GUI).
     fn plan_for(&self, disk: u32, mode: Mode) -> Result<(installplan::Plan, &Disk), Reply> {
+        self.plan_map(disk, mode).map(|(p, d, _)| (p, d))
+    }
+
+    fn plan_map(&self, disk: u32, mode: Mode) -> Result<(installplan::Plan, &Disk, [Vec<Seg>; 2]), Reply> {
         let d = self.disks.get(disk as usize).ok_or_else(|| fail(Error::NotFound, "disk neexistuje"))?;
         if d.sector_size != 512 {
             return Err(fail(Error::NotSupported, "disky se sektorem 4 KiB instalátor zatím nepodporuje"));
@@ -169,18 +186,22 @@ impl Service {
             *x = diskguard::install::guid_from(*x);
         }
         let p = plan(&info, t.as_ref(), mode, g).map_err(|e| fail(Error::InvalidArgs, e))?;
-        Ok((p, d))
+        let segs = [map::now(&info, t.as_ref()), map::after(&info, t.as_ref(), &p)];
+        Ok((p, d, segs))
     }
 
     fn preview(&self, disk: u32, mode: Mode) -> Reply {
-        match self.plan_for(disk, mode) {
-            Ok((p, _)) => Reply::Preview {
+        match self.plan_map(disk, mode) {
+            Ok((p, _, [before, after])) => Reply::Preview {
                 text: preview_text(&p),
                 type_name: match &p.confirm {
                     installplan::Confirm::TypeName(n) => Some(n.clone()),
                     installplan::Confirm::Agree => None,
                 },
                 other_os: p.other_os,
+                lines: p.preview.clone(),
+                before,
+                after,
             },
             Err(r) => r,
         }
@@ -220,21 +241,30 @@ impl Service {
         };
         println!("installd: instaluji na '{}' ({}), {}", target.model, mode.key(), preview_text(&plan).replace('\n', "; "));
         let settings = Settings::parse(settings);
+        // Uloha v prehledu uloh (Spravce uloh, terminal) se stejnym prubehem.
+        let tasks = &self.tasks;
+        tasks.start(&target.model);
+        let total = installplan::PROGRESS.len() as u32;
         let mut progress = |step: u32, text: &str| {
             println!("installd: krok {}: {text}", step + 1);
             let _ = ch.write(&Reply::Progress { step, text: text.to_string() }.encode(), Vec::new());
+            tasks.progress(step, total);
         };
         let mut cx = write::Ctx { target, live, progress: &mut progress, qemu_kdf: self.qemu_kdf };
-        match write::install(&mut cx, &plan, &settings, account) {
+        let reply = match write::install(&mut cx, &plan, &settings, account) {
             Ok(summary) => {
-                self.done = true;
+                tasks.finish(Ok(summary.lines().next().unwrap_or("hotovo")));
                 Reply::Done(summary)
             }
             Err(e) => {
                 println!("installd: instalace selhala: {e}");
-                fail(e, format!("instalace selhala: {e}. Jiné oddíly na disku se nezměnily."))
+                let text = format!("instalace selhala: {e}. Jiné oddíly na disku se nezměnily.");
+                tasks.finish(Err((e.code(), &text)));
+                fail(e, text)
             }
-        }
+        };
+        self.done = matches!(reply, Reply::Done(_));
+        reply
     }
 }
 
@@ -248,6 +278,17 @@ fn keyboards() -> Reply {
                 name: String::from(id.name()),
                 description: String::from(id.description()),
                 rows: (0..keymap::PREVIEW_ROWS.len()).map(|r| l.preview_row(r).collect()).collect(),
+                // Klavesy, ktere neco pisou (zkusebni pole v GUI). Mrtva
+                // klavesa jako svuj znak (pole nesklada).
+                keys: (1u16..128)
+                    .filter_map(|code| {
+                        let levels = core::array::from_fn(|lv| match l.symbol(code, lv) {
+                            keymap::Symbol::Char(c) | keymap::Symbol::Dead(c) => Some(c),
+                            keymap::Symbol::None => None,
+                        });
+                        levels.iter().any(Option::is_some).then_some((code, levels))
+                    })
+                    .collect(),
             }
         })
         .collect();

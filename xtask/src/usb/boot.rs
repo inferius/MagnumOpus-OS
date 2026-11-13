@@ -180,13 +180,33 @@ pub(super) fn boot_until(
     what: &str,
     missing: impl Fn(&str) -> Vec<&'static str>,
 ) -> Result<PathBuf> {
+    let start = Instant::now();
+    let mut hook = |text: &str, port: u16| {
+        // Klavesa L, dokud zavadec volbu nepotvrdi.
+        if !text.contains("rezim: vytahnout logy") && start.elapsed() > Duration::from_secs(1) {
+            let _ = crate::qmp::command(port, KEY_L);
+        }
+    };
+    boot_with(arch, image, extra, keys.then_some(&mut hook as &mut dyn FnMut(&str, u16)), what, missing)
+}
+
+/// Jako [`boot_until`], s QMP: `hook(log, port)` po kazdem cteni logu
+/// (klavesy, snimky obrazovky).
+pub(super) fn boot_with(
+    arch: &Arch,
+    image: &Path,
+    extra: &[String],
+    mut hook: Option<&mut dyn FnMut(&str, u16)>,
+    what: &str,
+    missing: impl Fn(&str) -> Vec<&'static str>,
+) -> Result<PathBuf> {
     let pid = std::process::id();
     let vars = target_dir().join(format!("fw-{}-vars-usb-{pid}.fd", arch.name));
     let log = target_dir().join(format!("serial-usb-{}-{pid}.log", arch.name));
     let _ = std::fs::remove_file(&log);
     let mut extra = extra.to_vec();
     let port = crate::qmp::free_port()?;
-    if keys {
+    if hook.is_some() {
         extra.push(String::from("-qmp"));
         extra.push(crate::qmp::qemu_arg(port));
     }
@@ -196,9 +216,8 @@ pub(super) fn boot_until(
     let start = Instant::now();
     let result = loop {
         let text = std::fs::read(&log).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-        // Klavesa L, dokud zavadec volbu nepotvrdi.
-        if keys && !text.contains("rezim: vytahnout logy") && start.elapsed() > Duration::from_secs(1) {
-            let _ = crate::qmp::command(port, KEY_L);
+        if let Some(h) = hook.as_mut() {
+            h(&text, port);
         }
         let m = missing(&text);
         if m.is_empty() {

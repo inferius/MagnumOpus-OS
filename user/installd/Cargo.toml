@@ -18,6 +18,7 @@ installplan = { workspace = true }
 fatw = { workspace = true }
 fs.workspace = true
 keymap = { path = "../../libs/keymap" }
+taskproto = { path = "../../libs/taskproto" }
 accounts = { path = "../../libs/accounts" }
 accountproto = { path = "../../libs/accountproto" }
 rand_core = { version = "0.6", default-features = false }

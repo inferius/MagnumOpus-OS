@@ -3,13 +3,14 @@
 The installer writes MagnumOpus from the [live USB](live-usb.md) onto an
 internal disk of the computer (NVMe, SATA, USB disk): its own EFI
 partition, a partition with our file system, the boot loader, settings and
-the first account. What exists today is the **base and the text form**
-(the `install` command in the terminal); the graphical wizard following
-`design/instalace.html` will come on top of `libs/ui` **[designed]**.
+the first account. It has two forms with the same steps: a text one (the
+`install` command in the terminal) and a graphical one (the "Nainstalovat
+MagnumOpus" window on the live USB, `design/instalace.html`).
 
 Contents:
 
 1. [Wizard steps](#wizard-steps)
+   - [Graphical wizard](#graphical-wizard)
 2. [Where to install](#where-to-install): whole disk, free space, reinstall
 3. [Protecting foreign partitions](#protecting-foreign-partitions): raw channel and diskguard
 4. [What gets written](#what-gets-written)
@@ -43,9 +44,11 @@ the user through the steps of the design **[verified in QEMU]** (x86_64 and aarc
 7. **Summary** - for the whole disk, type the disk name, otherwise confirm
    with `ano`. If another OS is on the disk, a question which system boots
    by default.
-8. **Installation progress** - seven steps (partition table, EFI
-   partition, loader and system, file system, settings, account,
-   verification).
+8. **Installation progress** - eight steps (reading the system from the
+   live USB, partition table, EFI partition, loader and system, file
+   system, settings, account, verification). Reading from the stick comes
+   first and takes longest: a debug build under TCG needs ~50 s before
+   anything is written.
 
 <figure class="diagram">
 <svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Path from the install command to the disk">
@@ -62,6 +65,71 @@ the user through the steps of the design **[verified in QEMU]** (x86_64 and aarc
 </svg>
 <figcaption>From the <code>install</code> command to the disk write.</figcaption>
 </figure>
+
+## Graphical wizard
+
+On the live USB, the bar and the launcher contain the app **Nainstalovat
+MagnumOpus** (Install MagnumOpus; `user/gui-install`, icon `download`).
+After login its window opens by itself, like the other desktop apps. On
+the installed system the app is not listed (init adds it only when
+started from the live stick). Status: **[verified in QEMU]** (x86_64,
+`--only instalace-gui`).
+
+- **Same steps as `install`.** The wizard (`libs/installview`) talks to
+  installd with the same `installplan::proto` protocol. The disk plan,
+  choices, preview, and name and password rules live in `installplan`
+  and installd. The window only holds the step state and decides nothing
+  on its own.
+- **Step 1, keyboard.** A time zone field and a table of layouts with a
+  preview of the key rows of the selected layout. *Add*, *Remove* and
+  *Make main* buttons (the first layout is the main one). installd
+  supplies the data from `libs/keymap`, the same source the input service
+  uses, including a key table (evdev code and character on four levels).
+  With it the window translates key presses to the selected layout
+  (`translate_keys`, Caps Lock as in `keymap::Keyboard`) in the "try the
+  keyboard" field (the field's `key_map` hook in `libs/ui`). The live
+  system layout does not change.
+- **Step 4, change preview.** A disk map *Now* and *After installation*
+  (`installplan::map`): segments in disk order including free space, new
+  partitions marked. Below the map are the changes *keep* / *new* /
+  *erase* and the confirmation: type the disk name for the whole disk,
+  otherwise tick "I understand". The chart is the `segments` bar from
+  `libs/ui`: MagnumOpus in the accent, a foreign system in the *Other*
+  tone, EFI muted, free space hatched, and new segments say "nový" (new)
+  in their label (not only by colour). The full label of every segment
+  is in the accessibility tree.
+- **Step 6, security.** The *Encrypt disk* switch is greyed out, with an
+  explanation below it (`NO_ENCRYPTION`).
+- **Step 8, progress.** A progress bar, the eight steps and the
+  result. installd also reports the installation to the task overview
+  (`taskd`) as the task "Instalace MagnumOpus na ..." with progress. It
+  is therefore visible in the Task Manager and the terminal even after
+  the window is closed (the write keeps running in installd).
+- **Narrow window.** In the `compact` width class (below 600 px) the step
+  list on the left disappears and only "Krok N z 8: ..." (step N of 8)
+  stays at the top.
+
+The QEMU test (`cargo xtask test --only instalace-gui`) has two parts.
+First **real input**: the live USB without an answers file, the window
+opens by itself after login and QMP sends real events through
+`usb-tablet` and `usb-kbd`. The test clicks into the time zone field,
+presses Ctrl+A, types `utc` and clicks *Pokračovat* (Continue). It checks
+the logged time zone and the second step; the screenshots are
+`vstup-1.png` and `vstup-2.png`. The coordinates hold for a 900 × 680
+window on a 1280 × 800 screen.
+
+Then the **full run**: an answers file with
+`rozhrani = "gui"` goes to the installer window instead of the text path.
+The autopilot (`Installer::autopilot`) fills each step from the answers
+and moves one step forward every 8 s (the first step after 12 s, while the
+window is still opening). At each step it prints the marker
+`gui-install: krok N`. A debug build under TCG takes several seconds to
+draw the window, so xtask saves the screenshot of step N over QMP only at
+the marker of step N+1. The screenshots are in
+`target/shots/instalace-gui-<arch>/`: `krok-N.png`, step 8 in the middle
+of writing, and `hotovo.png` after completion. The result
+is checked the same way as for the text install: boot without the stick
+and a check of the disk on the host.
 
 ## Where to install
 
@@ -199,6 +267,10 @@ file is for tests and scripts only. Key reference:
   protocol, answers), `cargo test -p diskguard` (`tests/install.rs`: write
   rule, adding partitions keeps foreign entries), `cargo test -p fatw`
   (FAT32 format and read back).
+- Host: `cargo test -p installview` (the wizard window with a fake
+  installd: full run, keyboard, narrow window, failure, autopilot).
+- QEMU: `cargo xtask test --only instalace-gui` - the graphical wizard,
+  see [Graphical wizard](#graphical-wizard).
 - QEMU: `cargo xtask test --only instalace` (`xtask/src/usb/install_test.rs`):
   1. **empty disk** - live USB + an empty 12 GiB NVMe disk, install from
      an answers file, then boot **without the stick** from the NVMe only:
@@ -227,5 +299,7 @@ level on the host, not by clicking in the GUI.
   computer without a generator (aarch64 without TRNG and RNDR, QEMU without
   virtio-rng) waits for entropy; the QEMU test therefore adds
   `virtio-rng-pci` on aarch64.
-- The graphical wizard waits for `libs/ui` components (disk list, progress
-  bar, partition preview bar, keyboard layout preview).
+- The keyboard test field does not compose dead keys (it types the
+  accent itself).
+- The full run is verified by the autopilot; real input (click, typing,
+  button) is verified by a short test in step 1 only.

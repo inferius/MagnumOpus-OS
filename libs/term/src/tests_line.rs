@@ -191,7 +191,7 @@ fn background_job_discards_its_clones() {
 fn fake_installer(req: &[u8]) -> Vec<crate::session::InstallerMsg> {
     use crate::session::InstallerMsg;
     use installplan::proto::{KeyboardEntry, Reply, Request};
-    let kb = |n: &str| KeyboardEntry { name: n.into(), description: n.into(), rows: vec![n.into()] };
+    let kb = |n: &str| KeyboardEntry { name: n.into(), description: n.into(), rows: vec![n.into()], keys: vec![] };
     match Request::decode(req) {
         Ok(Request::Keyboards) => vec![
             InstallerMsg::Progress(Reply::Progress { step: 0, text: "rozlozeni".into() }.encode()),
@@ -240,5 +240,5 @@ fn text_question_from_line_in_thread() {
     assert!(!wait_end(&mut r, b));
     let n = notes(&r, b);
     assert!(n.contains("Časové pásmo -> Europe/Berlin"), "{n}");
-    assert!(n.contains("[1/7] rozlozeni"), "{n}");
+    assert!(n.contains("[1/8] rozlozeni"), "{n}");
 }

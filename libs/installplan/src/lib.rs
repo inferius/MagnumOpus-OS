@@ -14,6 +14,7 @@ extern crate alloc;
 
 pub mod answers;
 pub mod config;
+pub mod map;
 pub mod proto;
 
 use alloc::format;
@@ -233,6 +234,13 @@ pub enum Line {
 }
 
 impl Line {
+    /// Text bez znacky druhu (GUI kresli druh barvou a slovem zvlast).
+    pub fn body(&self) -> &str {
+        match self {
+            Line::Keep(t) | Line::New(t) | Line::Erase(t) => t,
+        }
+    }
+
     pub fn text(&self) -> String {
         match self {
             Line::Keep(t) => format!("  zůstane   {t}"),
@@ -379,7 +387,8 @@ pub fn preview_text(p: &Plan) -> String {
 }
 
 /// Krok průběhu instalace (texty pro hlášení průběhu).
-pub const PROGRESS: [&str; 7] = [
+pub const PROGRESS: [&str; 8] = [
+    "Čtu systém ze živého USB",
     "Zapisuji tabulku oddílů",
     "Formátuji oddíl EFI",
     "Kopíruji zavaděč a systém",

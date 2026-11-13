@@ -1,7 +1,7 @@
 //! Plocha prihlasenych relaci: reakce smycky supervisoru na udalosti
 //! relaci (`crate::session::Event`).
 //!
-//! - **otevrena:** aplikace plochy (`gui::DESKTOP_APPS`) se spusti v jobu
+//! - **otevrena:** aplikace plochy (`gui::desktop_apps`) se spusti v jobu
 //!   relace; terminal dostane identitu FS uzivatele,
 //! - **skoncila (odhlaseni):** aplikace relace a termd jejich oken se
 //!   ukonci,
@@ -15,7 +15,7 @@ use alloc::format;
 
 use libos::{Startup, println};
 
-use crate::gui::{DESKTOP_APPS, GUI, launch_app};
+use crate::gui::{GUI, desktop_apps, launch_app};
 use crate::session::Event;
 use crate::supervisor::Supervisor;
 
@@ -57,7 +57,7 @@ fn opened(startup: &Startup, sup: &mut Supervisor, session: u64) {
     if let Err(e) = crate::files::start(startup, session) {
         println!("init: files-copy pro relaci {session} nelze spustit: {e}");
     }
-    for app in DESKTOP_APPS {
+    for app in desktop_apps() {
         if let Err(e) = launch_app(gui, startup, sup, app, session) {
             println!("init: {app} pro relaci {session} nelze spustit: {e}");
         }

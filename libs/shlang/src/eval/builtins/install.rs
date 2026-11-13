@@ -161,7 +161,7 @@ fn interactive(host: &mut dyn Host, a: &Args) -> R<Value> {
     // 4. Nahled zmen.
     step(host, 3);
     let (type_name, other_os) = match call(host, a, &Request::Preview { disk: disk.index, mode })? {
-        Reply::Preview { text, type_name, other_os } => {
+        Reply::Preview { text, type_name, other_os, .. } => {
             host.note(&text);
             (type_name, other_os)
         }

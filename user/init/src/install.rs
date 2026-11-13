@@ -59,6 +59,10 @@ fn start() -> Result<Installd> {
         return Err(Error::IoError);
     }
     println!("init: instalator (installd) bezi");
+    // Instalace jako uloha v prehledu uloh (Spravce uloh, terminal).
+    if let Err(e) = crate::tasks::give_producer(&control, "installd") {
+        println!("init: prehled uloh pro installd: {e}");
+    }
     Ok(Installd { _process: process, control })
 }
 
@@ -84,13 +88,44 @@ pub fn apply_settings(devices: &crate::system::Devices) {
     println!("init: nastaveni systemu: pasmo {}, klavesnice {}", s.zone, s.keyboards.join(", "));
 }
 
+/// Soubor odpovedi testu instalace v initfs zive flashky (na obrazu pro
+/// uzivatele neni).
+fn answers() -> Option<String> {
+    STARTUP_INITFS.get().and_then(|f| f.find("install-answers")).map(|a| String::from_utf8_lossy(a).into_owned())
+}
+
+/// Test GUI instalace: odpovedi s `rozhrani = "gui"` projde graficky
+/// instalator (autopilot), ne textova cesta.
+fn gui_test(text: &str) -> bool {
+    text.lines().any(|l| {
+        let l = l.split('#').next().unwrap_or("").replace(' ', "");
+        l == "rozhrani=\"gui\""
+    })
+}
+
+/// Handly pro graficky instalator: kanal k installd, v testu GUI instalace
+/// navic kanal se souborem odpovedi.
+pub fn app_handles() -> Result<Vec<StartHandle>> {
+    let mut v = alloc::vec![StartHandle::user(open()?.into_handle())];
+    if let Some(text) = answers().filter(|t| gui_test(t)) {
+        let (ours, theirs) = Channel::create()?;
+        ours.write(text.as_bytes(), Vec::new())?;
+        v.push(StartHandle::user(theirs.into_handle()));
+        println!("init: test GUI instalace: instalator dostal odpovedi");
+    }
+    Ok(v)
+}
+
 /// Test instalace (`cargo xtask test`, soubor `install-answers` v initfs
 /// zive flashky): instalace bez dotazu podle odpovedi, stejne jako
-/// `install --odpovedi`. Na obrazu pro uzivatele soubor neni.
+/// `install --odpovedi`. S `rozhrani = "gui"` ji dela graficky
+/// instalator (`app_handles`). Na obrazu pro uzivatele soubor neni.
 pub fn test_hook() {
     use installplan::proto::{Reply, Request};
-    let Some(answers) = STARTUP_INITFS.get().and_then(|f| f.find("install-answers")) else { return };
-    let text = String::from_utf8_lossy(answers).into_owned();
+    let Some(text) = answers() else { return };
+    if gui_test(&text) {
+        return;
+    }
     let run = || -> core::result::Result<String, String> {
         let ans = installplan::answers::parse(&text)?;
         let ch = open().map_err(|e| format!("installd: {e}"))?;
