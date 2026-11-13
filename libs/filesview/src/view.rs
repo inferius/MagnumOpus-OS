@@ -23,7 +23,7 @@ use crate::preview::Content;
 
 /// Sirka postranniho panelu a nahledu (logicke px; rozvrzeni, ne vzhled).
 const SIDEBAR_W: u32 = 200;
-const PREVIEW_W: u32 = 280;
+const PREVIEW_W: u32 = 300;
 
 impl<B: Backend> FileManager<B> {
     pub fn title_text(&self) -> String {
@@ -109,13 +109,20 @@ impl<B: Backend> FileManager<B> {
         if self.listing.is_empty() {
             v.push(label(if self.listing.filter.is_empty() { "Složka je prázdná." } else { "Nic neodpovídá hledání." }));
         }
-        let rows = Rc::clone(&self.listing.rows);
-        let ids = Rc::clone(&self.listing.rows);
+        let (items, order) = (Rc::clone(&self.listing.items), Rc::clone(&self.listing.order));
+        let (ids_items, ids_order) = (Rc::clone(&items), Rc::clone(&order));
+        let (now, zone) = (self.listing.now, self.listing.zone.clone());
         let t = table(
             vec![col("Jméno", 0).sortable(), col("Změněno", 150).sortable(), col("Velikost", 90).numeric().sortable(), col("Druh", 150).sortable()],
-            rows.len(),
-            move |i| ids.get(i).map_or(0, |r| r.id),
-            move |i| rows.get(i).map_or_else(Cells::default, |r| Cells::new(r.cells.iter().cloned()).icon(r.icon)),
+            order.len(),
+            move |i| ids_order.get(i).map_or(0, |&k| ids_items[k].e.oid),
+            move |i| match order.get(i) {
+                Some(&k) => {
+                    let r = crate::listing::row_of(&items[k], now, zone.as_ref());
+                    Cells::new(r.cells).icon(r.icon)
+                }
+                None => Cells::default(),
+            },
         )
         .selection(self.sel.clone())
         .multi_select(true)
@@ -173,7 +180,8 @@ impl<B: Backend> FileManager<B> {
             }
         }
         if let Some(ds) = &p.dataset {
-            v.push(label(&format!("Úložiště: dataset {}", if ds == "/" { "Svazek" } else { ds })));
+            let ds_name = if ds == "/" { "Svazek" } else if *ds == self.home { "Domov" } else { name(ds) };
+            v.push(label(&format!("Úložiště: {ds_name}")));
         }
         match &p.content {
             Some(Content::Text { lines, more }) => {

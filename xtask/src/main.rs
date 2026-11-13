@@ -601,6 +601,10 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "taskview",
             "--package",
+            "fileops",
+            "--package",
+            "filesview",
+            "--package",
             "gfx",
             "--package",
             "font",
@@ -772,6 +776,8 @@ const USER_PROGRAMS: &[&str] = &[
     "gui-demo",
     "gui-term",
     "gui-tasks",
+    "gui-files",
+    "files-copy",
     "netd",
     "fwd",
     "netprobe",
@@ -802,6 +808,8 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("dnsd.manifest.toml", "user/dnsd/dnsd.manifest.toml"),
     ("dnsd.toml", "user/dnsd/dnsd.toml"),
     ("gui-tasks.manifest.toml", "user/gui-tasks/gui-tasks.manifest.toml"),
+    ("gui-files.manifest.toml", "user/gui-files/gui-files.manifest.toml"),
+    ("files-copy.manifest.toml", "user/files-copy/files-copy.manifest.toml"),
     ("agentd.manifest.toml", "user/agentd/agentd.manifest.toml"),
 ];
 

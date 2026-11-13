@@ -21,6 +21,7 @@ mod firewall;
 mod fs;
 mod fs_data;
 mod fs_datasets;
+mod gui_files;
 mod fs_hist;
 mod fs_perf;
 mod fs_recovery;

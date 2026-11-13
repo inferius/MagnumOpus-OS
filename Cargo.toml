@@ -130,6 +130,8 @@ members = [
     "user/gui-demo",
     "user/gui-term",
     "user/gui-tasks",
+    "user/files-copy",
+    "user/gui-files",
     "xtask",
 ]
 # Na hostiteli se standardne buildi jen xtask. Loader, kernel a userspace

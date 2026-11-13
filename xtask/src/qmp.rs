@@ -264,9 +264,14 @@ mod gui {
     pub const SNAPSHOT: &str = "init: test gui: diagnosticky snimek ceka na Print Screen";
     pub const PALETTE_SWITCH: &str = "init: test gui: paleta prepne na Ukazku";
     pub const PALETTE_ACTION: &str = "init: test gui: paleta pricte v Ukazce";
-    pub const SHOT: [&str; 4] =
-        ["init: test gui: snimek light", "init: test gui: snimek dark", "init: test gui: snimek contrast", "init: test gui: snimek terminal"];
-    pub const SHOT_NAMES: [&str; 4] = ["light", "dark", "contrast", "terminal"];
+    pub const SHOT: [&str; 5] = [
+        "init: test gui: snimek light",
+        "init: test gui: snimek dark",
+        "init: test gui: snimek contrast",
+        "init: test gui: snimek terminal",
+        "init: test gui: snimek soubory",
+    ];
+    pub const SHOT_NAMES: [&str; 5] = ["light", "dark", "contrast", "terminal", "soubory"];
 }
 
 fn ps2_steps(s: &mut Vec<Step>) {

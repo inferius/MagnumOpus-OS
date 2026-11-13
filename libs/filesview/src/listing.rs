@@ -1,7 +1,7 @@
 //! Vypis slozky: polozky z `LIST_STAT_PAGE`, razeni (slozky prvni,
-//! prirozene poradi jmen s cisly), filtr hledani a predpripravene texty
-//! radku. Razeni a filtr stoji O(n log n) jednou pri zmene, ne pri
-//! kazdem prekresleni: tabulka cte jen viditelne radky.
+//! prirozene poradi jmen s cisly) a filtr hledani. Razeni a filtr stoji
+//! O(n log n) jednou pri zmene; texty radku (datum, velikost) se tvori
+//! az pro viditelne radky ([`Listing::row`]), tabulka je cte line.
 
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -148,29 +148,40 @@ pub struct Row {
     pub icon: &'static str,
 }
 
-/// Vypis slozky s razenim a filtrem.
+/// Vypis slozky s razenim a filtrem. Polozky a poradi jsou sdilene
+/// (`Rc`) s uzavery tabulky: prestaveni rozhrani nic nekopiruje.
 #[derive(Debug, Clone)]
 pub struct Listing {
-    pub items: Vec<Item>,
+    pub items: Rc<Vec<Item>>,
     /// Indexy `items` po filtru a razeni.
-    pub order: Vec<usize>,
+    pub order: Rc<Vec<usize>>,
     pub sort: SortBy,
     pub ascending: bool,
     pub filter: String,
-    /// Texty viditelnych radku (v poradi `order`), sdilene s tabulkou.
-    pub rows: Rc<Vec<Row>>,
+    /// Cas a pasmo pro texty data (dnes / vcera).
+    pub now: Option<WallTime>,
+    pub zone: Option<Zone>,
 }
 
 impl Default for Listing {
     fn default() -> Self {
-        Self { items: Vec::new(), order: Vec::new(), sort: SortBy::Name, ascending: true, filter: String::new(), rows: Rc::new(Vec::new()) }
+        Self { items: Rc::new(Vec::new()), order: Rc::new(Vec::new()), sort: SortBy::Name, ascending: true, filter: String::new(), now: None, zone: None }
     }
+}
+
+/// Texty radku polozky (jen pro viditelne radky).
+pub fn row_of(it: &Item, now: Option<WallTime>, zone: Option<&Zone>) -> Row {
+    let mtime = match format::avail(it.e.known, it.e.hidden, avail::MTIME) {
+        Avail::Known => format::date(it.e.mtime, now, zone),
+        _ => String::from(DASH),
+    };
+    Row { id: it.e.oid, cells: [it.e.name.clone(), mtime, size_text(it), String::from(it.kind_text())], icon: it.icon() }
 }
 
 impl Listing {
     /// Nove polozky (docasna jmena uloh kopirovani se nezobrazuji).
     pub fn set(&mut self, entries: Vec<StatEntry>, now: Option<WallTime>, zone: Option<&Zone>) {
-        self.items = entries.into_iter().filter(|e| !fileops::job::Job::is_temp_name(&e.name)).map(Item::new).collect();
+        self.items = Rc::new(entries.into_iter().filter(|e| !fileops::job::Job::is_temp_name(&e.name)).map(Item::new).collect());
         self.apply(now, zone);
     }
 
@@ -185,8 +196,10 @@ impl Listing {
         self.apply(now, zone);
     }
 
-    /// Filtr, razeni a texty radku.
+    /// Filtr a razeni.
     pub fn apply(&mut self, now: Option<WallTime>, zone: Option<&Zone>) {
+        self.now = now;
+        self.zone = zone.cloned();
         let items = &self.items;
         let f = &self.filter;
         let mut order: Vec<usize> = (0..items.len()).filter(|&i| f.is_empty() || items[i].fold.contains(f.as_str())).collect();
@@ -211,19 +224,12 @@ impl Listing {
             let n = natural(&x.fold, &y.fold).then_with(|| x.e.name.cmp(&y.e.name));
             o.then(if by == SortBy::Name && !asc { n.reverse() } else { n })
         });
-        let rows = order
-            .iter()
-            .map(|&i| {
-                let it = &items[i];
-                let mtime = match format::avail(it.e.known, it.e.hidden, avail::MTIME) {
-                    Avail::Known => format::date(it.e.mtime, now, zone),
-                    _ => String::from(DASH),
-                };
-                Row { id: it.e.oid, cells: [it.e.name.clone(), mtime, size_text(it), String::from(it.kind_text())], icon: it.icon() }
-            })
-            .collect();
-        self.order = order;
-        self.rows = Rc::new(rows);
+        self.order = Rc::new(order);
+    }
+
+    /// Texty viditelneho radku `i`.
+    pub fn row(&self, i: usize) -> Option<Row> {
+        self.visible(i).map(|it| row_of(it, self.now, self.zone.as_ref()))
     }
 
     /// Polozka podle id radku (oid).

@@ -51,7 +51,7 @@ fn select(m: &mut Fm, name: &str) {
 }
 
 fn shown(m: &Fm) -> Vec<String> {
-    m.listing.rows.iter().map(|r| r.cells[0].clone()).collect()
+    (0..m.listing.len()).map(|i| m.listing.row(i).unwrap().cells[0].clone()).collect()
 }
 
 fn entry(name: &str, k: u8, size: u64, known: u16, hidden: u16) -> StatEntry {
@@ -98,13 +98,13 @@ fn natural_sort_dirs_first_and_unknown_last() {
         Some(T0),
         None,
     );
-    let names = |l: &Listing| l.rows.iter().map(|r| r.cells[0].clone()).collect::<Vec<_>>();
+    let names = |l: &Listing| (0..l.len()).map(|i| l.row(i).unwrap().cells[0].clone()).collect::<Vec<_>>();
     assert_eq!(names(&l), ["alfa", "skryta", "Zeta", "b 2.txt", "b 10.txt"], "slozky prvni, docasne jmeno skryte");
     // Velikost sestupne: slozky stale prvni, nezname velikosti na konci.
     l.set_sort(SortBy::Size, false, Some(T0), None);
     assert_eq!(names(&l), ["Zeta", "alfa", "skryta", "b 2.txt", "b 10.txt"]);
     // Tri stavy: skryta a nedostupna velikost jako pomlcka.
-    let row = |n: &str| l.rows.iter().find(|r| r.cells[0] == n).unwrap().clone();
+    let row = |n: &str| (0..l.len()).map(|i| l.row(i).unwrap()).find(|r| r.cells[0] == n).unwrap();
     assert_eq!(row("skryta").cells[2], format::DASH);
     assert_eq!(row("alfa").cells[2], format::DASH);
     assert_eq!(row("alfa").cells[1], format::DASH, "hranice datasetu nema cas");
@@ -359,7 +359,7 @@ fn ten_thousand_items_are_fast() {
     m.update(Msg::Go(String::from("/home/jana/velka")));
     let load = t.elapsed();
     assert_eq!(m.listing.len(), 10_000);
-    assert_eq!(m.listing.rows[9_999].cells[0], "soubor 9999.txt", "prirozene poradi");
+    assert_eq!(m.listing.row(9_999).unwrap().cells[0], "soubor 9999.txt", "prirozene poradi");
     let t = std::time::Instant::now();
     m.update(Msg::Sort(2, false));
     let sort = t.elapsed();

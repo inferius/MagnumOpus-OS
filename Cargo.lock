@@ -1010,6 +1010,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "files-copy"
+version = "0.1.0"
+dependencies = [
+ "fileops",
+ "fsproto",
+ "libos",
+ "taskproto",
+]
+
+[[package]]
 name = "filesview"
 version = "0.1.0"
 dependencies = [
@@ -1208,6 +1218,19 @@ version = "0.1.0"
 dependencies = [
  "gfx",
  "guiproto",
+ "libos",
+ "ui",
+]
+
+[[package]]
+name = "gui-files"
+version = "0.1.0"
+dependencies = [
+ "fileops",
+ "filesview",
+ "fsproto",
+ "guiproto",
+ "installplan",
  "libos",
  "ui",
 ]

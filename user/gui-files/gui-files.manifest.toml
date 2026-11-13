@@ -1,0 +1,57 @@
+# Spravce souboru (milnik 6c): prochazeni, operace, kos, verze. Kopirovani
+# dela pomocny proces files-copy (prezije zavreni okna).
+[app]
+id = "org.magnumopus.files"
+name = "Soubory"
+system = true
+
+[limits]
+memory = "96M"
+
+[window]
+instances = "multi"
+
+[[action]]
+id = "files.show"
+title = "Ukázat cestu ve správci souborů"
+
+[[action.param]]
+name = "path"
+type = "path"
+required = true
+
+[[action]]
+id = "files.new-folder"
+title = "Nová složka"
+
+[[action]]
+id = "files.rename"
+title = "Přejmenovat vybranou položku"
+
+[[action]]
+id = "files.trash"
+title = "Vybrané položky do koše"
+
+[[action]]
+id = "files.copy"
+title = "Kopírovat vybrané položky"
+
+[[action]]
+id = "files.cut"
+title = "Vyjmout vybrané položky"
+
+[[action]]
+id = "files.paste"
+title = "Vložit do aktuální složky"
+
+[[action]]
+id = "files.back"
+title = "Zpět"
+
+[[action]]
+id = "files.up"
+title = "Nahoru do nadřazené složky"
+
+[[action]]
+id = "files.refresh"
+title = "Znovu načíst složku"

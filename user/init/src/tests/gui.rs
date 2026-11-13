@@ -36,6 +36,7 @@ pub const TESTS: &[Test] = &[
     ("compd: diagnosticky snimek po Print Screen (QMP)", super::gui_snapshot::diag_snapshot),
     ("compd: paleta prikazu z klavesnice: okno a akce aplikace (QMP)", super::gui_palette::palette_keys),
     ("compd: vzhled podle navrhu, snimky obrazovky (QMP)", look_shots),
+    ("compd: spravce souboru: kopie jako uloha, konflikt, kos, 10 000 polozek, snimek (QMP)", super::gui_files::files_window),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
@@ -131,7 +132,7 @@ pub(super) fn pixel(ch: &Channel, x: i32, y: i32) -> Result<u32, String> {
 
 /// Opakuje dotaz na strom, dokud `pred` neplati (aplikace pracuje
 /// asynchronne).
-fn wait_tree(ch: &Channel, window: u32, what: &str, pred: impl Fn(&[Node]) -> bool) -> Result<Vec<Node>, String> {
+pub(super) fn wait_tree(ch: &Channel, window: u32, what: &str, pred: impl Fn(&[Node]) -> bool) -> Result<Vec<Node>, String> {
     let end = time::deadline_after(TIMEOUT);
     loop {
         let t = tree(ch, window)?;
@@ -145,7 +146,7 @@ fn wait_tree(ch: &Channel, window: u32, what: &str, pred: impl Fn(&[Node]) -> bo
     }
 }
 
-fn wait_window(ch: &Channel, app: &str) -> Result<WindowInfo, String> {
+pub(super) fn wait_window(ch: &Channel, app: &str) -> Result<WindowInfo, String> {
     let end = time::deadline_after(TIMEOUT);
     loop {
         if let Some(w) = windows(ch)?.into_iter().find(|w| w.app == app) {
