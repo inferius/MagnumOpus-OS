@@ -93,6 +93,22 @@ impl<M: Clone> Ui<M> {
     /// Udalost s casem zaznamu (ns): dvojklik a trojklik v textovem poli.
     pub fn event_at(&mut self, ev: InputEvent, mods_now: u16, time: Option<u64>) -> Response<M> {
         self.mods = mods_now;
+        // Seznam navrhu u pole: sipky, Enter, Tab, Esc a mys v nem; ostatni
+        // klavesy jdou do pole.
+        let mut pre = Response::default();
+        let open = self.suggest_open();
+        let mut r = if self.suggest_event(&ev, &mut pre) { Response::default() } else { self.event_core(ev, time) };
+        // Fokus nebo pole se mohly zmenit.
+        self.sync_suggest();
+        if !pre.msgs.is_empty() {
+            pre.msgs.append(&mut r.msgs);
+            r.msgs = pre.msgs;
+        }
+        r.redraw |= pre.redraw || open != self.suggest_open();
+        r
+    }
+
+    fn event_core(&mut self, ev: InputEvent, time: Option<u64>) -> Response<M> {
         // Pamet skupin fokusu pred zmenou (navrat do skupiny).
         if matches!(ev, InputEvent::Key { .. } | InputEvent::Button { pressed: true, .. }) {
             self.remember_focus();
@@ -207,11 +223,11 @@ impl<M: Clone> Ui<M> {
             InputEvent::Key { code, action, ch } if action != 0 => {
                 if !self.key(code, ch, &mut r) {
                     // Nespotrebovana sipka: prostorova navigace fokusu.
-                    let plain = mods_now & (mods::CTRL | mods::ALT | mods::META | mods::SHIFT) == 0;
+                    let plain = self.mods & (mods::CTRL | mods::ALT | mods::META | mods::SHIFT) == 0;
                     if plain && matches!(code, KEY_LEFT | KEY_RIGHT | KEY_UP | KEY_DOWN) && self.spatial_move(code) {
                         r.redraw = true;
                     } else {
-                        r.unhandled_key = Some((code, ch, mods_now));
+                        r.unhandled_key = Some((code, ch, self.mods));
                     }
                 }
             }
@@ -354,7 +370,7 @@ impl<M: Clone> Ui<M> {
     pub fn a11y_action(&mut self, node: u32, action: u32, value: &str) -> Response<M> {
         let mut r = Response::default();
         let Some(i) = self.elem_ids.iter().position(|&id| id == node) else {
-            if !self.popup_a11y_action(node, action, &mut r) && !self.table_a11y_action(node, action, &mut r) {
+            if !self.suggest_a11y_action(node, action, &mut r) && !self.popup_a11y_action(node, action, &mut r) && !self.table_a11y_action(node, action, &mut r) {
                 self.control_a11y_action(node, action, &mut r);
             }
             return r;

@@ -190,10 +190,10 @@ carries:
 | Field | Meaning |
 |---|---|
 | `id`, `parent` | identity and parent (0 = window root) |
-| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `password-input`, `checkbox`, `switch`, `radio`, `slider`, `combo-box`, `list`, `list-item`, `table`, `row`, `cell`, `column-header`, `tab-list`, `tab`, `segmented`, `menu`, `menu-item`, `tooltip`, `scroll-area`, `group`, `image`, `progress`, `terminal` |
+| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `password-input`, `checkbox`, `switch`, `radio`, `slider`, `combo-box`, `list`, `list-item`, `table`, `row`, `cell`, `column-header`, `tab-list`, `tab`, `segmented`, `list-box`, `list-option`, `menu`, `menu-item`, `tooltip`, `scroll-area`, `group`, `image`, `progress`, `terminal` |
 | `name` | text for humans ("Save") |
 | `value` | value (text field, progress percent) |
-| `state` | bits: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy`, `hover`, `pressed`, `invalid` (the error text is a child `label` node) |
+| `state` | bits: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy`, `hover`, `pressed`, `invalid` (the error text is a child `label` node), `active` (active item of a suggestion list, focus stays in the field), `autocomplete` (the field offers a suggestion list) |
 | `bounds` | layer + rectangle in it |
 | `actions` | bits: `activate`, `focus`, `set-value`, `toggle`, `scroll` |
 
@@ -1605,6 +1605,53 @@ with these tones.
   application gets the window position via `WINDOW_PLACE { window, rect }`
   (after mapping and after every move or resize, at the end of a drag);
   `cx.window`.
+
+### Suggestion list for a field (completion) **[implemented]**
+
+A combobox after `#compl` in `design/terminal.html`: the field keeps the
+keyboard focus and typing continues there, arrows only move the selection in
+the list (unlike a menu, which takes the keyboard). Used by the terminal, the
+address bar and search in the file manager and installer fields.
+
+- **In the `Ui` tree:** `text_input(&q).on_change(Msg::Q).suggest(suggest("Paths",
+  items, Msg::Complete).on_select(Msg::Preview).on_close(Msg::Closed))`,
+  an item `Suggestion::new("/home/", "folder").icon("folder")`, disabled
+  `.disabled("no permission")`; `.above()` = list above the field. The list
+  is open while the field has focus and the application gave at least one
+  item; selection, hover and scroll are kept by the library. Esc, accepting
+  and a press outside close it (`on_close`) until the application passes
+  different items (a typed character = a new list). A password field never
+  has a list. Name font: mono when the application provides it
+  (`Ui::set_mono_fonts`), otherwise the UI font.
+- **Standalone** (`ui::complete::Completion`, e.g. gui-term with its own
+  grid): state (`header`, `items`, `selected`, `hover`, `scroll`, `anchor`,
+  `prefer` above/below), `key(&ev, mods)` and `pointer(&ev)` return
+  `Outcome { Ignored, Moved, Accept(i), Close }`, `place(theme, min_hit,
+  area)` computes the rectangle at the anchor (flips when it does not fit),
+  `hit(x, y)`, `draw(canvas, origin, Paint { theme, fonts, mono, icons })`
+  draws into a supplied canvas (e.g. the popover layer) and `a11y(parent,
+  list_id, option_id, layer)` returns accessibility nodes with ids from the
+  caller.
+- **Keys:** up and down (wrapping, disabled items skipped), PgUp/PgDn,
+  Home/End, Enter and Tab accept the selected one, Esc closes; other keys,
+  Shift+Tab and Ctrl/Alt shortcuts go to the field. **Mouse:** hover
+  highlights, click accepts, the wheel scrolls, a press outside closes the
+  list and passes on.
+- **Look from tokens:** popover card, header `caption` in `ink_muted`
+  (`body_strong` weight), row icon (`icon_m`) | name (mono, `body_strong`
+  weight) | type (`caption`, `ink_muted`), height `control_h` (touch
+  `min_hit`), radius `xs`, selection `accent_soft`, width
+  `size.completion_w` (380), at most `size.completion_max_h` (260). Drawn in
+  the popover layer, so it may extend past the window.
+- **Accessibility:** the field has the `autocomplete` state and `expanded`
+  while the list is open; the list is a `list-box` node (name = header)
+  under the field, items are `list-option`, the selected one has `selected`
+  and `active` (active descendant, focus stays in the field). The
+  `activate` action on an item accepts it.
+- **Robustness:** items are outside data: at most `MAX_ITEMS` (1000), texts
+  clipped to `MAX_TEXT` (200 characters), no `unwrap` on the data.
+- Tests: `libs/ui/src/tests/suggest.rs`, snapshot `navrhy-*.png`
+  (`shot_suggest`).
 
 ### Table and list (virtualization)
 

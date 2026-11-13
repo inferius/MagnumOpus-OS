@@ -203,3 +203,27 @@ fn shot_menu() {
         },
     );
 }
+
+/// Seznam navrhu u pole (design/terminal.html #compl): zahlavi, vybrana
+/// polozka, zakazana polozka, jmena v mono.
+#[test]
+fn shot_suggest() {
+    shot(
+        "navrhy",
+        440,
+        300,
+        &|| {
+            let items = vec![
+                Suggestion::new("/home/", "složka").icon("folder"),
+                Suggestion::new("/hosts", "soubor").icon("file"),
+                Suggestion::new("/hw/", "složka").icon("folder").disabled("bez práv"),
+                Suggestion::new("history", "příkaz").icon("terminal"),
+            ];
+            column([text_input::<M>("/h").suggest(suggest("Cesty", items, |_| unreachable!())).key("pole")])
+        },
+        &|u| {
+            u.set_mono_fonts(gfx::text::Family::new(font::mono(), &[]));
+            u.event(guiproto::window::InputEvent::Key { code: inputproto::code::KEY_DOWN, action: 1, ch: None }, 0);
+        },
+    );
+}

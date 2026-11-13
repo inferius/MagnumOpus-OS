@@ -54,6 +54,10 @@ pub enum Role {
     ScrollArea,
     /// Segmentovy prepinac (skupina voleb).
     Segmented,
+    /// Seznam navrhu u pole (combobox, `aria-autocomplete=list`).
+    ListBox,
+    /// Polozka seznamu navrhu (`option`).
+    ListOption,
     /// Role, kterou tato verze nezna.
     Unknown(u16),
 }
@@ -89,6 +93,8 @@ impl Role {
             Role::PasswordInput => 26,
             Role::ScrollArea => 27,
             Role::Segmented => 28,
+            Role::ListBox => 29,
+            Role::ListOption => 30,
             Role::Unknown(v) => v,
         }
     }
@@ -123,6 +129,8 @@ impl Role {
             26 => Role::PasswordInput,
             27 => Role::ScrollArea,
             28 => Role::Segmented,
+            29 => Role::ListBox,
+            30 => Role::ListOption,
             v => Role::Unknown(v),
         }
     }
@@ -158,6 +166,8 @@ impl Role {
             Role::PasswordInput => "password-input",
             Role::ScrollArea => "scroll-area",
             Role::Segmented => "segmented",
+            Role::ListBox => "list-box",
+            Role::ListOption => "list-option",
             Role::Unknown(_) => "unknown",
         }
     }
@@ -178,6 +188,12 @@ pub mod state {
     /// Neplatna hodnota (chyba u pole); text chyby je v podrizenem uzlu
     /// pole s roli `Label`.
     pub const INVALID: u32 = 1 << 8;
+    /// Aktivni polozka seznamu navrhu (`aria-activedescendant`): fokus
+    /// klavesnice zustava v poli, ctecka cte tuto polozku.
+    pub const ACTIVE: u32 = 1 << 9;
+    /// Pole nabizi seznam navrhu (`aria-autocomplete=list`); otevreny
+    /// seznam = `EXPANDED`.
+    pub const AUTOCOMPLETE: u32 = 1 << 10;
 }
 
 /// Bity akci, ktere uzel podporuje (a kody v `A11Y_ACTION`).

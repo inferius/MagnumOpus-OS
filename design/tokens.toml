@@ -142,6 +142,10 @@ hit_min_fine = 32
 hit_min_touch = 44
 # Spoustec (varianta D, design/spoustec.html): sirka seznamu.
 launcher_w = 300
+# Seznam navrhu u pole (doplnovani, design/terminal.html #compl): sirka
+# a nejvetsi vyska.
+completion_w = 380
+completion_max_h = 260
 
 [radius]
 xs = 6

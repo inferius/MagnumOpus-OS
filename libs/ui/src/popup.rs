@@ -88,7 +88,7 @@ impl<M> Popup<M> {
     }
 }
 
-fn virt_id(el: u32, kind: u64, n: u64) -> u32 {
+pub(crate) fn virt_id(el: u32, kind: u64, n: u64) -> u32 {
     0x4000_0000 | (Key::ROOT.mix(el as u64).mix(kind).mix(n).0 as u32 & 0x3FFF_FFFF)
 }
 
@@ -140,7 +140,7 @@ impl<M: Clone> Ui<M> {
     /// Kde smi nabidka a bublina lezet (souradnice okna): s vrstvou
     /// popoveru a znamou polohou okna cela pracovni plocha (presah pres
     /// okraj okna), jinak okno.
-    fn popup_area(&self) -> Rect {
+    pub(crate) fn popup_area(&self) -> Rect {
         let win = Rect::new(0, 0, self.w, self.h);
         let c = &self.cx;
         if !self.overlay || c.window.w == 0 || c.work_area.w == 0 {
@@ -154,17 +154,11 @@ impl<M: Clone> Ui<M> {
     pub fn overlay_rect(&self) -> Option<Rect> {
         let p = self.popup.as_ref().map(|p| p.rect);
         let t = self.tip_text().map(|t| self.tip_rect(&t));
-        match (p, t) {
-            (Some(a), Some(b)) => {
-                let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
-                let (x1, y1) = ((a.right() as i32).max(b.right() as i32), (a.bottom() as i32).max(b.bottom() as i32));
-                Some(Rect::new(x0, y0, (x1 - x0) as u32, (y1 - y0) as u32))
-            }
-            (a, b) => a.or(b),
-        }
+        let s = self.suggest_rect();
+        [p, t, s].into_iter().flatten().reduce(|a, b| a.union(&b))
     }
 
-    /// Nakresli nabidku a bublinu do platna vrstvy popoveru, jejiz pocatek
+    /// Nakresli nabidku, bublinu a seznam navrhu do platna vrstvy popoveru, jejiz pocatek
     /// je `origin` (souradnice okna, viz [`Ui::overlay_rect`]).
     pub fn draw_overlay(&mut self, c: &mut Canvas<'_>, origin: Rect) {
         let saved = (self.popup.clone(), self.pointer);
@@ -512,6 +506,7 @@ impl<M: Clone> Ui<M> {
 
     /// Nakresli otevrenou nabidku a bublinu (vrstva okna, nad prvky).
     pub(crate) fn draw_overlays(&mut self, c: &mut Canvas<'_>) {
+        self.draw_suggest(c);
         self.draw_popup(c);
         self.draw_tip(c);
     }

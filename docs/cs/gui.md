@@ -184,10 +184,10 @@ Struktura okna je součást protokolu. Uzel (`A11Y_UPDATE`) nese:
 | Pole | Význam |
 |---|---|
 | `id`, `parent` | identita a rodič (0 = kořen okna) |
-| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `password-input`, `checkbox`, `switch`, `radio`, `slider`, `combo-box`, `list`, `list-item`, `table`, `row`, `cell`, `column-header`, `tab-list`, `tab`, `segmented`, `menu`, `menu-item`, `tooltip`, `scroll-area`, `group`, `image`, `progress`, `terminal` |
+| `role` | `window`, `titlebar`, `button`, `label`, `text-input`, `password-input`, `checkbox`, `switch`, `radio`, `slider`, `combo-box`, `list`, `list-item`, `table`, `row`, `cell`, `column-header`, `tab-list`, `tab`, `segmented`, `list-box`, `list-option`, `menu`, `menu-item`, `tooltip`, `scroll-area`, `group`, `image`, `progress`, `terminal` |
 | `name` | text pro člověka („Uložit“) |
 | `value` | hodnota (text pole, procenta průběhu) |
-| `state` | bity: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy`, `hover`, `pressed`, `invalid` (text chyby je podřízený uzel `label`) |
+| `state` | bity: `focused`, `checked`, `disabled`, `selected`, `expanded`, `busy`, `hover`, `pressed`, `invalid` (text chyby je podřízený uzel `label`), `active` (aktivní položka seznamu návrhů, fokus zůstává v poli), `autocomplete` (pole nabízí seznam návrhů) |
 | `bounds` | vrstva + obdélník v ní |
 | `actions` | bity: `activate`, `focus`, `set-value`, `toggle`, `scroll` |
 
@@ -1544,6 +1544,49 @@ Prototyp má pro oddíly pevné barvy; systém je nahrazuje těmito tóny.
   vešla do pracovní plochy, dostane aplikace polohu okna zprávou
   `WINDOW_PLACE { window, rect }` (po zobrazení a po každém přesunu nebo
   změně velikosti, během tahu až na konci); `cx.window`.
+
+### Seznam návrhů u pole (doplňování) **[implementováno]**
+
+Combobox podle `#compl` v `design/terminal.html`: pole si nechá fokus
+klávesnice a dál se do něj píše, šipky jen hýbou výběrem v seznamu (na
+rozdíl od nabídky, která si klávesnici bere). Používá ho terminál, adresní
+řádek a hledání ve správci souborů a pole instalátoru.
+
+- **Ve stromu `Ui`:** `text_input(&q).on_change(Msg::Q).suggest(suggest("Cesty",
+  položky, Msg::Doplnit).on_select(Msg::Náhled).on_close(Msg::Zavřeno))`,
+  položka `Suggestion::new("/home/", "složka").icon("folder")`, zakázaná
+  `.disabled("bez práv")`; `.above()` = seznam nad polem. Seznam je
+  otevřený, když má pole fokus a aplikace dala aspoň jednu položku; výběr,
+  najetí a posun drží knihovna. Esc, přijetí a stisk mimo ho zavřou
+  (`on_close`), dokud aplikace nepředá jiné položky (napsaný znak = nový
+  seznam). Pole s heslem seznam nikdy nemá. Písmo jmen: mono, když ho
+  aplikace dá (`Ui::set_mono_fonts`), jinak písmo UI.
+- **Samostatně** (`ui::complete::Completion`, např. gui-term s vlastní
+  mřížkou): stav (`header`, `items`, `selected`, `hover`, `scroll`,
+  `anchor`, `prefer` nad/pod), `key(&ev, mods)` a `pointer(&ev)` vrátí
+  `Outcome { Ignored, Moved, Accept(i), Close }`, `place(theme, min_hit,
+  plocha)` spočítá obdélník u kotvy (otočí se, když se nevejde), `hit(x, y)`,
+  `draw(platno, počátek, Paint { theme, fonts, mono, icons })` nakreslí
+  obsah do dodaného plátna (např. vrstvy popoveru) a `a11y(rodič, id_seznamu,
+  id_položky, vrstva)` vrátí uzly přístupnosti s id od volajícího.
+- **Klávesy:** nahoru a dolů (dokola, zakázané přeskočí), PgUp/PgDn,
+  Home/End, Enter a Tab přijmou vybranou, Esc zavře; ostatní klávesy,
+  Shift+Tab a zkratky s Ctrl/Alt jdou do pole. **Myš:** najetí zvýrazní,
+  klik přijme, kolečko posouvá, stisk mimo seznam ho zavře a jde dál.
+- **Vzhled z tokenů:** karta popoveru, záhlaví `caption` v `ink_muted`
+  (váha `body_strong`), řádek ikona (`icon_m`) | jméno (mono, váha
+  `body_strong`) | typ (`caption`, `ink_muted`), výška `control_h` (dotyk
+  `min_hit`), zaoblení `xs`, výběr `accent_soft`, šířka
+  `size.completion_w` (380), nejvýš `size.completion_max_h` (260). Kreslí
+  se ve vrstvě popoveru, takže smí přesahovat okno.
+- **Přístupnost:** pole má stav `autocomplete` a při otevřeném seznamu
+  `expanded`; seznam je uzel `list-box` (jméno = záhlaví) pod polem,
+  položky `list-option`, vybraná má `selected` a `active` (aktivní potomek,
+  fokus zůstává v poli). Akce `activate` na položce ji přijme.
+- **Robustnost:** položky jsou data zvenku: nejvýš `MAX_ITEMS` (1000),
+  texty oříznuté na `MAX_TEXT` (200 znaků), žádný `unwrap` na datech.
+- Testy: `libs/ui/src/tests/suggest.rs`, snímek `navrhy-*.png`
+  (`shot_suggest`).
 
 ### Tabulka a seznam (virtualizace)
 

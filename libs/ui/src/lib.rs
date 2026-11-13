@@ -24,6 +24,8 @@ pub mod node;
 pub(crate) mod popup;
 pub mod scrollbar;
 pub mod spatial;
+mod suggest;
+pub mod complete;
 mod table;
 pub mod text;
 
@@ -48,6 +50,8 @@ use layout::{ElemKind, Element};
 pub use look::Look;
 pub use context::{Context, SizeClass};
 pub use spatial::Axis;
+pub use suggest::{Suggest, suggest};
+pub use complete::Suggestion;
 
 /// Id uzlu s textem chyby prvku s id `id` (mimo rozsah id prvku).
 pub fn error_node(id: u32) -> u32 {
@@ -226,6 +230,10 @@ pub struct Ui<M> {
     pub(crate) busy_phase: u32,
     /// Otevrena nabidka (vyber, kontextova).
     pub(crate) popup: Option<popup::Popup<M>>,
+    /// Seznam navrhu pole s fokusem (`ui::suggest`).
+    pub(crate) suggest: Option<suggest::SuggestState>,
+    /// Pismo jmen v seznamu navrhu (`Ui::set_mono_fonts`).
+    pub(crate) mono: Option<Family>,
     /// Bublina: prvek pod ukazatelem a od kdy (odpocet), zobrazena.
     pub(crate) tip: Option<(Key, u64)>,
     pub(crate) tip_shown: Option<Key>,
@@ -294,6 +302,8 @@ impl<M: Clone> Ui<M> {
             dragging: None,
             busy_phase: 0,
             popup: None,
+            suggest: None,
+            mono: None,
             tip: None,
             tip_shown: None,
             now: 0,
@@ -419,6 +429,7 @@ impl<M: Clone> Ui<M> {
         }
         // Najeti podle ukazatele (prvky se mohly posunout).
         self.hover = if self.pointer.0 >= 0 { self.hit(self.pointer.0, self.pointer.1) } else { None };
+        self.sync_suggest();
     }
 
     /// Stabilni id prvku podle klicu: prvek, ktery zustal, si id necha;
@@ -528,7 +539,10 @@ impl<M: Clone> Ui<M> {
                     }
                     // Heslo: hodnota se nikdy neposila (ani jeji delka).
                     ElemKind::TextInput { placeholder, secure: true, .. } => (Role::PasswordInput, placeholder.clone(), none(), SET_VALUE | FOCUS),
-                    ElemKind::TextInput { value, placeholder, .. } => (Role::TextInput, placeholder.clone(), value.clone(), SET_VALUE | FOCUS),
+                    ElemKind::TextInput { value, placeholder, .. } => {
+                        extra = self.suggest_state_bits(i);
+                        (Role::TextInput, placeholder.clone(), value.clone(), SET_VALUE | FOCUS)
+                    }
                     ElemKind::Checkbox { text, .. } => (Role::Checkbox, text.clone(), none(), TOGGLE | ACTIVATE),
                     ElemKind::List { .. } => (Role::List, none(), none(), FOCUS),
                     // Agent i pro ctecku obrazovky (ne jen barvou).
@@ -545,6 +559,7 @@ impl<M: Clone> Ui<M> {
             let id = self.elem_ids[i];
             out.push(A11yNode { id, parent, role, name, value, state: self.state(i).a11y_bits() | extra, layer, bounds: e.rect, actions });
             self.control_children(i, id, layer, &mut out);
+            self.suggest_a11y(i, id, &mut out);
             // Tabulka: zahlavi a viditelne radky.
             if matches!(e.kind, ElemKind::Table(_)) {
                 self.table_a11y(i, id, layer, &mut out);
