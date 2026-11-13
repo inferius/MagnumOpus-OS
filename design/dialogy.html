@@ -57,6 +57,23 @@
 .dlg .who { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: var(--r-control); background: var(--c-surface-2); margin: 6px 0 10px; }
 .dlg .who .ic { width: 32px; height: 32px; }
 .dlg .who small { display: block; color: var(--c-ink-muted); }
+.dlg .hd .sev { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; }
+.dlg .hd .sev .ic { width: 24px; height: 24px; }
+/* Zavaznost ikony: nevratna akce cervene, chyba oranzove, vratna neutralne (akcent). Tvar ikony se lisi taky,
+ * takze barva neni jediny signal (vysoky kontrast, barvoslepost). */
+.sev.s-danger { background: var(--c-danger-soft); --ic-ink: var(--c-danger); --ic-fill: var(--c-danger-soft); }
+.sev.s-warn { background: var(--c-warn-soft); --ic-ink: var(--c-warn); --ic-fill: var(--c-warn-soft); }
+.sev.s-info { background: var(--c-accent-soft); --ic-ink: var(--c-accent-ink); --ic-fill: var(--c-accent-soft); }
+/* Infografika opravneni: kdo -> k cemu. Kresli ji system, aplikace do ni nesmi. */
+.flow { display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); align-items: center; gap: 4px; padding: 12px 8px; border-radius: var(--r-control); background: var(--c-surface-2); margin: 6px 0 10px; }
+.flow .fa, .flow .fr { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 3px; min-width: 0; }
+.flow .fa > .ic { width: 34px; height: 34px; margin: 9px 0; }
+.flow b { font-size: 13px; }
+.flow small { color: var(--c-ink-muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.flow .rt { position: relative; width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; }
+.flow .rt .ic { width: 30px; height: 30px; }
+.flow .rt.live::after { content: ""; position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--c-ok); box-shadow: 0 0 0 2px var(--c-surface-2); }
+.flow .arr { width: 40px; height: 16px; fill: none; stroke: var(--c-ink-muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .dlg .input { min-height: 34px; width: 100%; box-sizing: border-box; }
 .dlg label.f { display: block; font-weight: 600; font-size: 12px; margin: 8px 0 4px; }
 .dlg .hint { font-size: 11.5px; color: var(--c-ink-muted); margin-top: 4px; }
@@ -276,27 +293,33 @@ document.addEventListener('mo-ready', function () {
     return { t: t, bare: 1, cls: 'fpk', b: b, w: 640, foot: '<div class="ffoot">' + foot + '</div>' };
   }
   function message(m) {
-    if (m === 'confirm') return { ic: 'trash', t: 'Přesunout 3 soubory do koše?', s: 'Obnovíte je z koše do 30 dnů, nebo hned příkazem Zpět.', f: [B('Zrušit'), B('Přesunout do koše', 'primary')] };
-    if (m === 'perm') return { ic: 'alert', t: 'Trvale smazat 3 soubory?', s: 'Soubory nepůjdou obnovit ani z historie verzí. Celkem 18 MB.', b: '<div class="lst">' + li('file-text', 'zprava.md') + li('app-pdf', 'smlouva.pdf') + li('image', 'foto.jpg') + '</div>', f: [B('Zrušit', 'primary'), B('Smazat trvale', 'danger')], g: I('info') + 'Výchozí tlačítko je Zrušit; Enter nic nesmaže.' };
-    return { ic: 'error', t: 'Soubor nelze uložit', s: 'Na disku USB flash chybí 12 MB místa. Uložte soubor jinam nebo uvolněte místo.',
+    if (m === 'confirm') return { ic: 'trash', sev: 'info', t: 'Přesunout 3 soubory do koše?', s: 'Obnovíte je z koše do 30 dnů, nebo hned příkazem Zpět.', f: [B('Zrušit'), B('Přesunout do koše', 'primary')] };
+    if (m === 'perm') return { ic: 'alert', sev: 'danger', t: 'Trvale smazat 3 soubory?', s: 'Soubory nepůjdou obnovit ani z historie verzí. Celkem 18 MB.', b: '<div class="lst">' + li('file-text', 'zprava.md') + li('app-pdf', 'smlouva.pdf') + li('image', 'foto.jpg') + '</div>', f: [B('Zrušit', 'primary'), B('Smazat trvale', 'danger')], g: I('info') + 'Výchozí tlačítko je Zrušit; Enter nic nesmaže.' };
+    return { ic: 'error', sev: 'warn', t: 'Soubor nelze uložit', s: 'Na disku USB flash chybí 12 MB místa. Uložte soubor jinam nebo uvolněte místo.',
       b: '<div class="detail"><div class="mono">E_NOSPC (28) &middot; /media/usb/zprava.md<br>potřeba 14,2 MB, volno 2,1 MB</div><div class="hint">V terminálu: <span class="mono">explain E_NOSPC</span></div></div>',
       f: [B('Podrobnosti', 'ghost', 'open'), '<span class="sp"></span>', B('Zavřít'), B('Uložit jinam&hellip;', 'primary')] };
   }
   function rename() {
     return { ic: 'rename', t: 'Přejmenovat', b: '<label class="f">Nový název</label><input class="input" value="zprava.md" data-sel="1"><div class="hint err">Název nesmí obsahovat znak / (lomítko).</div><div class="hint">Vybere se jen jméno bez přípony; přípona zůstane.</div>', f: [B('Zrušit'), B('Přejmenovat', 'primary')], w: 420 };
   }
+  // [ikona, co chce (do titulku), popis, zdroj v infografice, zavaznost, poznamka pod zdrojem, kontrolka]
   var PERM = {
-    camera: ['camera', 'kameru', 'Uvidí obraz z kamery, dokud bude okno otevřené. Kontrolka v liště svítí.'],
-    mic: ['mic', 'mikrofon', 'Uslyší zvuk z mikrofonu. Kontrolka v liště svítí.'],
-    location: ['globe', 'polohu', ''],
-    files: ['folder', 'celou složku Dokumenty', 'Pro jeden soubor stačí výběr souboru, ten žádné oprávnění nepotřebuje.'],
-    network: ['network', 'přijímat spojení ze sítě', 'Port 8080 v místní síti. Do internetu se tím nic neotevře.'],
-    screen: ['screen-share', 'sdílet obrazovku', ''],
-    elevate: ['elevate', 'změnit systém', '']
+    camera: ['camera', 'kameru', 'Uvidí obraz z kamery, dokud bude okno otevřené. Kontrolka v liště svítí.', 'Kamera', 'warn', 'živý obraz', 1],
+    mic: ['mic', 'mikrofon', 'Uslyší zvuk z mikrofonu. Kontrolka v liště svítí.', 'Mikrofon', 'warn', 'živý zvuk', 1],
+    location: ['globe', 'polohu', '', 'Poloha', 'info', 'přibližná: město'],
+    files: ['folder', 'celou složku Dokumenty', 'Pro jeden soubor stačí výběr souboru, ten žádné oprávnění nepotřebuje.', 'Dokumenty', 'info', 'čtení i zápis'],
+    network: ['network', 'přijímat spojení ze sítě', 'Port 8080 v místní síti. Do internetu se tím nic neotevře.', 'Místní síť', 'info', 'příchozí, port 8080'],
+    screen: ['screen-share', 'sdílet obrazovku', '', 'Obrazovka', 'warn', 'vybrané okno', 1],
+    elevate: ['elevate', 'změnit systém', '', 'Systém', 'danger', 'ovladače']
   };
+  function flow(a, p) {
+    return '<div class="flow" role="img" aria-label="' + a[1] + ' chce přístup: ' + p[3] + '"><div class="fa">' + I(a[0]) + '<b>' + a[1] + '</b><small>' + a[2] + '</small></div>' +
+      '<svg class="arr" viewBox="0 0 40 16" aria-hidden="true"><path d="M3 8h28" stroke-dasharray="3 4"/><path d="M28 3l6 5-6 5"/></svg>' +
+      '<div class="fr"><span class="rt sev s-' + p[4] + (p[6] ? ' live' : '') + '">' + I(p[0]) + '</span><b>' + p[3] + '</b><small>' + p[5] + '</small></div></div>';
+  }
   function perm(m) {
     var p = PERM[m], b = '', f = [B('Nepovolit'), B('Jen teď'), B('Povolit vždy', 'primary')];
-    var app = m === 'elevate' ? who('app-installer', 'Instalátor balíčků', 'podepsáno: MagnumOpus') : who('app-browser', 'Prohlížeč', 'meet.example.cz');
+    var app = flow(m === 'elevate' ? ['app-installer', 'Instalátor balíčků', 'podepsáno: MagnumOpus'] : ['app-browser', 'Prohlížeč', 'meet.example.cz'], p);
     if (m === 'location') b = '<div class="seg" role="radiogroup"><button aria-checked="true">Přibližná (město)</button><button aria-checked="false">Přesná</button></div><div class="hint">Přesná poloha jen když ji aplikace opravdu potřebuje (mapy, navigace).</div>';
     if (m === 'screen') { b = '<div class="lst">' + li('window', 'Jen okno: Prezentace.pdf', '', 'sel') + li('monitor', 'Celá obrazovka', 'uvidí i oznámení') + '</div><div class="hint">Oznámení se během sdílení skryjí. Pruh nahoře ukazuje, že se sdílí.</div>'; f = [B('Nesdílet'), B('Sdílet okno', 'primary')]; }
     if (m === 'elevate') { b = '<div class="lst">' + li('driver', 'Nainstalovat ovladač tiskárny HP', 'HP Inc.') + li('disk', 'Zapsat do /system/drivers', '2,4 MB') + '</div><label class="f">Potvrďte PINem nebo otiskem prstu</label><div class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i></div>'; f = [B('Zrušit'), B('Povolit změnu', 'primary')]; }
@@ -368,11 +391,11 @@ document.addEventListener('mo-ready', function () {
     { id: 'vyber', t: 'Otevřít, uložit, vybrat složku', k: 'app', fn: picker, mob: 'full', modes: [['open', 'Otevřít'], ['multi', 'Více souborů'], ['folder', 'Složka / projekt'], ['save', 'Uložit jako']], h: 470,
       pro: ['Jeden výběr pro čtyři úlohy: uživatel se ho naučí jednou.', 'Málo „rámu“: titulek, cesta a hledání v jedné liště, filtr a tlačítka v jednom řádku; seznam souborů bere zbytek.', 'Na telefonu soubor otevře už klepnutí; Zrušit je křížek v liště.', 'Aplikace dostane jen vybraný soubor (úchyt), ne přístup ke složkám (štít vlevo dole).', 'Kódování a konce řádků jsou schované pod odkazem „UTF-8, LF“.'], con: ['Aplikace nemůže výběr přizpůsobit vzhledem; jen filtrem a výchozí složkou.', 'Projekt = výběr složky s filtrem, který dodá aplikace.'] },
     { id: 'zpravy', t: 'Potvrzení, varování, chyba', k: 'app', fn: message, mob: 'sheet', modes: [['confirm', 'Potvrzení'], ['perm', 'Ničivá akce'], ['error', 'Chyba s podrobnostmi']], h: 380,
-      pro: ['Vratné akce se nepotvrzují pořád dokola; ptáme se jen u nevratných.', 'Chyba nabídne cestu ven a kód pro explain.'], con: ['Aplikace musí umět akci vrátit, jinak dialog nedává smysl (Zpět je povinné).'] },
+      pro: ['Barva ikony podle závažnosti: nevratná akce červeně, chyba oranžově, vratná neutrálně. Liší se i tvar ikony, takže barva není jediný signál.', 'Vratné akce se nepotvrzují pořád dokola; ptáme se jen u nevratných.', 'Chyba nabídne cestu ven a kód pro explain.'], con: ['Aplikace musí umět akci vrátit, jinak dialog nedává smysl (Zpět je povinné).'] },
     { id: 'prejmenovat', t: 'Textový vstup a přejmenování', k: 'app', fn: rename, mob: 'sheet', h: 300,
       pro: ['Kontrola názvu hned při psaní, ne až po potvrzení.', 'Přípona zůstane mimo výběr.'], con: ['Na telefonu vyjede klávesnice a list se posune nad ni.'] },
     { id: 'opravneni', t: 'Oprávnění', k: 'trust', fn: perm, mob: 'sheet', modes: [['camera', 'Kamera'], ['mic', 'Mikrofon'], ['location', 'Poloha'], ['files', 'Soubory'], ['network', 'Síť'], ['screen', 'Sdílení obrazovky'], ['elevate', 'Zvýšení práv']], h: 460,
-      pro: ['„Jen teď“ je výchozí střední cesta; trvalé povolení jde kdykoli vzít v Nastavení.', 'Zvýšení práv ukazuje přesně co se změní, ne jen „chce práva správce“.'], con: ['Tři tlačítka jsou víc než dvě; ale „Jen teď“ výrazně snižuje trvalá povolení.'] },
+      pro: ['Infografika „kdo &rarr; k čemu“ se pozná dřív, než se přečte text; zdroj má barvu podle citlivosti (kamera, mikrofon a obrazovka oranžově se zelenou kontrolkou, zásah do systému červeně).', '„Jen teď“ je výchozí střední cesta; trvalé povolení jde kdykoli vzít v Nastavení.', 'Zvýšení práv ukazuje přesně co se změní, ne jen „chce práva správce“.'], con: ['Tři tlačítka jsou víc než dvě; ale „Jen teď“ výrazně snižuje trvalá povolení.'] },
     { id: 'overeni', t: 'Heslo, PIN, FIDO2, síťové umístění', k: 'trust', fn: auth, mob: 'sheet', modes: [['pwd', 'Heslo'], ['pin', 'PIN'], ['fido', 'FIDO2'], ['net', 'Síťové umístění']], h: 440,
       pro: ['Vždy je vidět, kdo se ptá a proč.', 'Fráze v pruhu odliší pravý dialog od napodobeniny.'], con: ['Fráze funguje jen když si ji uživatel pamatuje; připomeneme ji při prvních dialozích.'] },
     { id: 'wifi', t: 'Heslo k Wi-Fi', k: 'trust', fn: wifi, mob: 'sheet', h: 400,
@@ -410,7 +433,7 @@ document.addEventListener('mo-ready', function () {
     // d.bare: dialog si titulek kresli sam v tele; d.foot: vlastni spodni radek misto .ft.
     return '<div class="dlg k-' + kind + (cls ? ' ' + cls : '') + (d.cls ? ' ' + d.cls : '') + '" role="' + role + '" aria-label="' + d.t.replace(/<[^>]+>/g, '') + '"' + (w ? ' style="width:' + w + 'px"' : '') + '>' +
       (d.trust ? BAND : '') +
-      (d.bare ? '' : '<div class="hd">' + (d.ic ? I(d.ic, 'big') : '') + '<div><h3>' + d.t + '</h3>' + (d.s ? '<p>' + d.s + '</p>' : '') + '</div></div>') +
+      (d.bare ? '' : '<div class="hd">' + (d.ic ? (d.sev ? '<span class="sev s-' + d.sev + '">' + I(d.ic) + '</span>' : I(d.ic, 'big')) : '') + '<div><h3>' + d.t + '</h3>' + (d.s ? '<p>' + d.s + '</p>' : '') + '</div></div>') +
       (d.top || d.b ? '<div class="bd">' + (d.top || '') + (d.b || '') + '</div>' : '') +
       (d.g ? '<div class="guard">' + d.g + '</div>' : d.trust ? '<div class="guard">' + I('info') + 'Toto okno kreslí systém. Ctrl+Alt+Del ukáže vždy pravé.</div>' : '') +
       (d.foot || '<div class="ft">' + d.f.join('') + '</div>') + '</div>';
