@@ -1319,6 +1319,12 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 | `list` | click an item | up and down arrows | `list` and `list-item` |
 | `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
+| `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
+| `switch` | click | space, Enter (on release) | `switch`, `checked`, `toggle` |
+| `radio` | click | space, Enter | `radio`, `checked` |
+| `slider` | click the track, drag, wheel | arrows (step `.step`), PgUp, PgDn (10 steps), Home, End | `slider`, value "40 (0-100)", `set-value` |
+| `segmented` | click a segment | left and right arrows, Home, End | `segmented` with child `radio` nodes |
+| `tabs` | click; the cross or the middle button closes (`on_close`) | arrows; Ctrl+Tab and Ctrl+Shift+Tab from anywhere in the window | `tab-list` with child `tab` nodes |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | wheel | - | `scroll-area`, `scroll` |
 

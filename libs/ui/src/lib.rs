@@ -14,6 +14,7 @@
 extern crate alloc;
 
 pub mod context;
+mod controls;
 pub mod draw;
 pub mod event;
 mod field;
@@ -171,6 +172,8 @@ pub struct Ui<M> {
     pub(crate) tables: BTreeMap<Key, table::TableState>,
     /// Rozpracovany stisk v tabulce (radek, zahlavi, posuvnik).
     pub(crate) table_press: Option<table::Press>,
+    /// Faze animace neurciteho prubehu (px, roste po snimcich).
+    pub(crate) busy_phase: u32,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -221,6 +224,7 @@ impl<M: Clone> Ui<M> {
             paste_target: None,
             tables: BTreeMap::new(),
             table_press: None,
+            busy_phase: 0,
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -376,24 +380,32 @@ impl<M: Clone> Ui<M> {
         for (i, e) in self.elems.iter().enumerate() {
             let parent = if e.parent == 0 { WINDOW_NODE } else { self.elem_ids[e.parent - 1] };
             let none = String::new;
-            let (role, name, value, actions) = match &e.kind {
-                ElemKind::Label { text, .. } => (Role::Label, if e.agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), 0),
-                ElemKind::Button { text, .. } => (Role::Button, text.clone(), none(), ACTIVATE | FOCUS),
-                // Heslo: hodnota se nikdy neposila (ani jeji delka).
-                ElemKind::TextInput { placeholder, secure: true, .. } => (Role::PasswordInput, placeholder.clone(), none(), SET_VALUE | FOCUS),
-                ElemKind::TextInput { value, placeholder, .. } => (Role::TextInput, placeholder.clone(), value.clone(), SET_VALUE | FOCUS),
-                ElemKind::Checkbox { text, .. } => (Role::Checkbox, text.clone(), none(), TOGGLE | ACTIVATE),
-                ElemKind::List { .. } => (Role::List, none(), none(), FOCUS),
-                // Agent i pro ctecku obrazovky (ne jen barvou).
-                ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
-                ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
-                ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
-                ElemKind::Group => (Role::Group, none(), none(), 0),
-                ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
+            let mut extra = 0;
+            let (role, name, value, actions) = if let Some((ro, n, v, s, a)) = self.control_role(i) {
+                extra = s;
+                (ro, n, v, a)
+            } else {
+                match &e.kind {
+                    ElemKind::Label { text, .. } => (Role::Label, if e.agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), 0),
+                    ElemKind::Button { text, .. } => (Role::Button, text.clone(), none(), ACTIVATE | FOCUS),
+                    // Heslo: hodnota se nikdy neposila (ani jeji delka).
+                    ElemKind::TextInput { placeholder, secure: true, .. } => (Role::PasswordInput, placeholder.clone(), none(), SET_VALUE | FOCUS),
+                    ElemKind::TextInput { value, placeholder, .. } => (Role::TextInput, placeholder.clone(), value.clone(), SET_VALUE | FOCUS),
+                    ElemKind::Checkbox { text, .. } => (Role::Checkbox, text.clone(), none(), TOGGLE | ACTIVATE),
+                    ElemKind::List { .. } => (Role::List, none(), none(), FOCUS),
+                    // Agent i pro ctecku obrazovky (ne jen barvou).
+                    ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
+                    ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
+                    ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
+                    ElemKind::Group => (Role::Group, none(), none(), 0),
+                    ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
+                    _ => (Role::Group, none(), none(), 0),
+                }
             };
             let layer = if e.space == 0 { ROOT_LAYER } else { scroll_layers(self.elem_ids[e.space - 1]).1 };
             let id = self.elem_ids[i];
-            out.push(A11yNode { id, parent, role, name, value, state: self.state(i).a11y_bits(), layer, bounds: e.rect, actions });
+            out.push(A11yNode { id, parent, role, name, value, state: self.state(i).a11y_bits() | extra, layer, bounds: e.rect, actions });
+            self.control_children(i, id, layer, &mut out);
             // Tabulka: zahlavi a viditelne radky.
             if matches!(e.kind, ElemKind::Table(_)) {
                 self.table_a11y(i, id, layer, &mut out);

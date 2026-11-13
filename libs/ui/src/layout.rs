@@ -23,6 +23,12 @@ pub enum ElemKind<M> {
     ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
     Progress { value: u32 },
     Table(Box<crate::node::TableSpec<M>>),
+    Switch { text: String, on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
+    Radio { text: String, checked: bool, on_click: Option<M> },
+    Slider { value: i32, min: i32, max: i32, step: i32, on_change: Option<Box<dyn Fn(i32) -> M>> },
+    Segmented { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
+    Tabs { labels: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>>, on_close: Option<Box<dyn Fn(usize) -> M>> },
+    Busy,
     Group,
     Scroll { content_h: u32 },
 }
@@ -49,7 +55,16 @@ impl<M> Element<M> {
         !self.disabled
             && matches!(
                 self.kind,
-                ElemKind::Button { .. } | ElemKind::TextInput { .. } | ElemKind::Checkbox { .. } | ElemKind::List { .. } | ElemKind::Table(_)
+                ElemKind::Button { .. }
+                    | ElemKind::TextInput { .. }
+                    | ElemKind::Checkbox { .. }
+                    | ElemKind::List { .. }
+                    | ElemKind::Table(_)
+                    | ElemKind::Switch { .. }
+                    | ElemKind::Radio { .. }
+                    | ElemKind::Slider { .. }
+                    | ElemKind::Segmented { .. }
+                    | ElemKind::Tabs { .. }
             )
     }
 }
@@ -68,10 +83,16 @@ fn kind_tag<M>(k: &Kind<M>) -> usize {
         Kind::Scroll(_) => 8,
         Kind::Spacer => 9,
         Kind::Table(_) => 10,
+        Kind::Switch { .. } => 11,
+        Kind::Radio { .. } => 12,
+        Kind::Slider { .. } => 13,
+        Kind::Segmented { .. } => 14,
+        Kind::Tabs { .. } => 15,
+        Kind::Busy => 16,
     }
 }
 
-const TAGS: usize = 11;
+const TAGS: usize = 17;
 
 /// Znacky odvozenych klicu (aby se nepotkaly s vlastnimi).
 const OWN: u64 = 1;
@@ -124,6 +145,15 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
         Kind::Progress { .. } => (th.size.hit_min * 4, sp[3]),
         // Tabulka: osm radku a zahlavi (pevna vyska `height`, jinak roste).
         Kind::Table(tb) => (th.size.hit_min * 6, (8 + tb.header as u32) * t.row_h() + 2),
+        Kind::Switch { text, .. } => (th.size.switch_w + sp[3] + t.width(text, t.body()), ctl.min(th.size.hit_min)),
+        Kind::Radio { text, .. } => (th.size.icon_m + sp[3] + t.width(text, t.body()), ctl.min(th.size.hit_min)),
+        Kind::Slider { .. } => (th.size.hit_min * 5, th.size.hit_min.min(ctl)),
+        Kind::Segmented { options, .. } => {
+            let w: u32 = options.iter().map(|o| t.width(o, t.body()) + 2 * sp[4]).sum();
+            (w + 2 * 3 + options.len().saturating_sub(1) as u32 * 2, ctl)
+        }
+        Kind::Tabs { .. } => (th.size.hit_min * 4, ctl),
+        Kind::Busy => (th.size.hit_min * 4, sp[3]),
         Kind::Column(ch) => ch.iter().fold((0, 0), |(w, h), c| {
             let (cw, chh) = measure(c, t);
             (w.max(cw), h + chh + if h > 0 { t.gap() } else { 0 })
@@ -203,6 +233,24 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         }
         Kind::Table(t) => {
             push(out, ElemKind::Table(t), r);
+        }
+        Kind::Switch { text, on, on_toggle } => {
+            push(out, ElemKind::Switch { text, on, on_toggle }, r);
+        }
+        Kind::Radio { text, checked, on_click } => {
+            push(out, ElemKind::Radio { text, checked, on_click }, r);
+        }
+        Kind::Slider { value, min, max, step, on_change } => {
+            push(out, ElemKind::Slider { value, min, max, step, on_change }, r);
+        }
+        Kind::Segmented { options, selected, on_select } => {
+            push(out, ElemKind::Segmented { options, selected, on_select }, r);
+        }
+        Kind::Tabs { labels, selected, on_select, on_close } => {
+            push(out, ElemKind::Tabs { labels, selected, on_select, on_close }, r);
+        }
+        Kind::Busy => {
+            push(out, ElemKind::Busy, r);
         }
         Kind::Spacer => {}
         Kind::Column(children) => {

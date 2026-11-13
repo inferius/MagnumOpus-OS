@@ -161,6 +161,9 @@ impl<M: Clone> Ui<M> {
                     }
                 }
                 ElemKind::Table(_) => self.draw_table(c, i, st),
+                ElemKind::Switch { .. } | ElemKind::Radio { .. } | ElemKind::Slider { .. } | ElemKind::Segmented { .. } | ElemKind::Tabs { .. } | ElemKind::Busy => {
+                    self.draw_control(c, i, st);
+                }
                 ElemKind::Group => {}
                 ElemKind::Scroll { .. } => {
                     // Obsah je vlastni vrstva; tady jen ram.

@@ -94,6 +94,19 @@ pub enum Kind<M> {
     Progress { value: u32 },
     /// Tabulka / seznam s virtualizaci (viz [`table`]).
     Table(Box<TableSpec<M>>),
+    /// Prepinac zapnuto / vypnuto (nastaveni s okamzitym ucinkem).
+    Switch { text: String, on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
+    /// Volba jedne z moznosti (skupinu tvori aplikace, jinak `segmented`).
+    Radio { text: String, checked: bool, on_click: Option<M> },
+    /// Posuvnik hodnoty `min..=max` s krokem `step`.
+    Slider { value: i32, min: i32, max: i32, step: i32, on_change: Option<Box<dyn Fn(i32) -> M>> },
+    /// Segmentovy prepinac (jedna volba z nekolika, napr. filtr).
+    Segmented { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
+    /// Zalozky; `on_close` = zavirani (krizek, prostredni tlacitko).
+    Tabs { labels: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>>, on_close: Option<Box<dyn Fn(usize) -> M>> },
+    /// Neurcity prubeh (bezi, delka nezname).
+    Busy,
+
     Column(Vec<Node<M>>),
     Row(Vec<Node<M>>),
     /// Posouvany obsah: posun dela kompozitor (vlastni vrstva s orezem).
@@ -190,6 +203,39 @@ pub fn list<M>(items: impl IntoIterator<Item = String>, selected: Option<usize>)
     })
 }
 
+/// Prepinac zapnuto / vypnuto.
+pub fn switch<M>(text: &str, on: bool) -> Node<M> {
+    node(Kind::Switch { text: text.into(), on, on_toggle: None })
+}
+
+/// Volba (kruh); zprava pri vyberu `on_click`.
+pub fn radio<M>(text: &str, checked: bool) -> Node<M> {
+    node(Kind::Radio { text: text.into(), checked, on_click: None })
+}
+
+/// Posuvnik hodnoty v rozsahu `min..=max` (krok 1, zmena `.step`).
+pub fn slider<M>(value: i32, min: i32, max: i32) -> Node<M> {
+    let max = max.max(min);
+    node(Kind::Slider { value: value.clamp(min, max), min, max, step: 1, on_change: None })
+}
+
+/// Segmentovy prepinac.
+pub fn segmented<M>(options: impl IntoIterator<Item = String>, selected: usize) -> Node<M> {
+    node(Kind::Segmented { options: options.into_iter().collect(), selected, on_select: None })
+}
+
+/// Zalozky.
+pub fn tabs<M>(labels: impl IntoIterator<Item = String>, selected: usize) -> Node<M> {
+    let mut n = node(Kind::Tabs { labels: labels.into_iter().collect(), selected, on_select: None, on_close: None });
+    n.grow = true;
+    n
+}
+
+/// Neurcity prubeh (animace po snimcich).
+pub fn busy<M>() -> Node<M> {
+    node(Kind::Busy)
+}
+
 pub fn progress<M>(value: u32) -> Node<M> {
     node(Kind::Progress { value: value.min(100) })
 }
@@ -280,8 +326,42 @@ impl<M> Node<M> {
     }
 
     pub fn on_click(mut self, m: M) -> Self {
-        if let Kind::Button { on_click, .. } = &mut self.kind {
-            *on_click = Some(m);
+        match &mut self.kind {
+            Kind::Button { on_click, .. } | Kind::Radio { on_click, .. } => *on_click = Some(m),
+            _ => {}
+        }
+        self
+    }
+
+    /// Krok posuvniku.
+    pub fn step(mut self, s: i32) -> Self {
+        if let Kind::Slider { step, .. } = &mut self.kind {
+            *step = s.max(1);
+        }
+        self
+    }
+
+    /// Nova hodnota posuvniku.
+    pub fn on_value(mut self, f: impl Fn(i32) -> M + 'static) -> Self {
+        if let Kind::Slider { on_change, .. } = &mut self.kind {
+            *on_change = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// Vybrana volba segmentu nebo zalozka.
+    pub fn on_pick(mut self, f: impl Fn(usize) -> M + 'static) -> Self {
+        match &mut self.kind {
+            Kind::Segmented { on_select, .. } | Kind::Tabs { on_select, .. } => *on_select = Some(Box::new(f)),
+            _ => {}
+        }
+        self
+    }
+
+    /// Zavreni zalozky (krizek, prostredni tlacitko).
+    pub fn on_close(mut self, f: impl Fn(usize) -> M + 'static) -> Self {
+        if let Kind::Tabs { on_close, .. } = &mut self.kind {
+            *on_close = Some(Box::new(f));
         }
         self
     }
@@ -316,8 +396,9 @@ impl<M> Node<M> {
     }
 
     pub fn on_toggle(mut self, f: impl Fn(bool) -> M + 'static) -> Self {
-        if let Kind::Checkbox { on_toggle, .. } = &mut self.kind {
-            *on_toggle = Some(Box::new(f));
+        match &mut self.kind {
+            Kind::Checkbox { on_toggle, .. } | Kind::Switch { on_toggle, .. } => *on_toggle = Some(Box::new(f)),
+            _ => {}
         }
         self
     }

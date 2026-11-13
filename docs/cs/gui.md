@@ -1269,6 +1269,12 @@ převede na zprávy `Msg`.
 | `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
 | `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
+| `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
+| `switch` | klik | mezerník, Enter (při puštění) | `switch`, `checked`, `toggle` |
+| `radio` | klik | mezerník, Enter | `radio`, `checked` |
+| `slider` | klik do dráhy, tah, kolečko | šipky (krok `.step`), PgUp, PgDn (10 kroků), Home, End | `slider`, hodnota „40 (0-100)“, `set-value` |
+| `segmented` | klik na segment | šipky vlevo a vpravo, Home, End | `segmented` s podřízenými `radio` |
+| `tabs` | klik, křížek nebo prostřední tlačítko zavře (`on_close`) | šipky; Ctrl+Tab a Ctrl+Shift+Tab odkudkoli v okně | `tab-list` s podřízenými `tab` |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | kolečko | - | `scroll-area`, `scroll` |
 

@@ -84,6 +84,9 @@ impl<M: Clone> Ui<M> {
     /// Udalost s casem zaznamu (ns): dvojklik a trojklik v textovem poli.
     pub fn event_at(&mut self, ev: InputEvent, mods_now: u16, time: Option<u64>) -> Response<M> {
         self.mods = mods_now;
+        if let Some(r) = self.control_event(&ev) {
+            return r;
+        }
         if let Some(r) = self.table_event(&ev, time) {
             return r;
         }
@@ -204,12 +207,15 @@ impl<M: Clone> Ui<M> {
 
     /// Ma prvek s fokusem akci az pri pusteni klavesy (tlacitko, pole)?
     fn activates_on_release(&self) -> bool {
-        self.focus.is_some_and(|f| matches!(self.elems[f].kind, ElemKind::Button { .. } | ElemKind::Checkbox { .. }))
+        self.focus.is_some_and(|f| matches!(self.elems[f].kind, ElemKind::Button { .. } | ElemKind::Checkbox { .. } | ElemKind::Switch { .. } | ElemKind::Radio { .. }))
     }
 
     /// Aktivace prvku (klik, Enter, akce pristupnosti).
     fn activate(&mut self, i: usize, r: &mut Response<M>) {
         if self.elems[i].disabled {
+            return;
+        }
+        if self.activate_control(i, r) {
             return;
         }
         let d = self.describe(Some(i));
@@ -257,6 +263,9 @@ impl<M: Clone> Ui<M> {
             return;
         }
         let Some(f) = self.focus else { return };
+        if self.control_key(f, code, r) {
+            return;
+        }
         match &self.elems[f].kind {
             ElemKind::Button { .. } if code == KEY_ENTER || code == KEY_KPENTER || code == KEY_SPACE => self.activate(f, r),
             ElemKind::Checkbox { .. } if code == KEY_SPACE || code == KEY_ENTER => self.activate(f, r),
@@ -302,7 +311,9 @@ impl<M: Clone> Ui<M> {
     pub fn a11y_action(&mut self, node: u32, action: u32, value: &str) -> Response<M> {
         let mut r = Response::default();
         let Some(i) = self.elem_ids.iter().position(|&id| id == node) else {
-            self.table_a11y_action(node, action, &mut r);
+            if !self.table_a11y_action(node, action, &mut r) {
+                self.control_a11y_action(node, action, &mut r);
+            }
             return r;
         };
         if action & actions::FOCUS != 0 && self.elems[i].focusable() {
@@ -311,6 +322,9 @@ impl<M: Clone> Ui<M> {
         }
         if action & (actions::ACTIVATE | actions::TOGGLE) != 0 {
             self.activate(i, &mut r);
+        }
+        if action & actions::SET_VALUE != 0 && self.slider_set(i, value, &mut r) {
+            return r;
         }
         if action & actions::SET_VALUE != 0
             && let ElemKind::TextInput { on_change: Some(f), .. } = &self.elems[i].kind
