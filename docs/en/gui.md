@@ -836,6 +836,10 @@ selects the last option (deny). Mouse: click a button. For the first
 300 ms after it appears a dialog ignores input - the second click of a
 double click or a key typed into another window cannot confirm a dialog
 that just popped up.
+The time runs from the moment the display showed the first frame with
+the dialog, not from the application's request: with slow composing on
+the CPU (a frame can take over 1 s) the guard would otherwise end before
+you ever saw the dialog. Until it is shown the dialog accepts nothing.
 
 **Secure screen:** Ctrl+Alt+Delete (caught by `inputd`, not by
 applications) shows the system screen over everything. Only physical input

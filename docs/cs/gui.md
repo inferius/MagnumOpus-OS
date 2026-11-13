@@ -796,6 +796,10 @@ Klávesy v dialogu: Tab a šipky mění volbu, Enter potvrdí, Esc vybere
 poslední volbu (zamítnutí). Myš: klik na tlačítko. Prvních 300 ms po
 zobrazení dialog vstup ignoruje - druhý klik dvojkliku nebo klávesa
 napsaná do jiného okna tak nepotvrdí dialog, který právě vyskočil.
+Doba běží od chvíle, kdy displej ukázal první snímek s dialogem, ne od
+požadavku aplikace: při pomalém skládání na CPU (snímek i přes 1 s) by
+jinak ochrana skončila dřív, než dialog vůbec uvidíš. Do zobrazení dialog
+nepřijme nic.
 
 **Bezpečná obrazovka:** Ctrl+Alt+Delete (zachytí `inputd`, ne aplikace)
 ukáže systémovou obrazovku přes všechno. Zavře ji jen fyzický vstup;
