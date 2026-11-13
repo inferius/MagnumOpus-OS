@@ -1,18 +1,24 @@
 //! Spojeni s ovladacem zvukove karty: vystupni a vstupni port (DMA
 //! buffer sdileny s ovladacem, stranka stavu, udalost periody).
 //!
-//! Rozpocet latence (48 kHz, perioda 256 snimku = 5,33 ms, 4 periody):
+//! Rozpocet latence (48 kHz, perioda 256 snimku = 5,33 ms):
 //!
 //! | cast | doba |
 //! |---|---|
-//! | mix pred pozici DMA ([`LEAD_PERIODS`] = 2 periody) | 5,3-10,7 ms |
+//! | mix pred pozici DMA (predstih, zacina na [`LEAD_MIN`] = 2 periody) | 5,3-10,7 ms |
 //! | FIFO radice a kodeku | < 0,5 ms |
 //! | buffer klienta (vychozi 10 ms, min. 5 ms) | 0-10 ms |
 //! | celkem od zapisu klienta po reproduktor | asi 11-21 ms |
 //!
-//! Treti a ctvrta perioda bufferu jsou rezerva: za smichanymi daty se
-//! vzdy nuluje jedna perioda, takze kdyz sluzba nestihne, zazni ticho
-//! (a pocita se `underruns`), ne stara data z minuleho kola.
+//! **Adaptivni predstih:** kdyz sluzba nestihne (pozice DMA predbehne
+//! smichana data - zazni ticho a pocita se `underruns`), predstih se
+//! zvetsi o periodu, nejvys na [`LEAD_MAX`] (64 ms). Po [`LEAD_RELAX`]
+//! bez podteceni se zase o periodu zmensi. Na rychlem stroji tak latence
+//! zustane 11-21 ms, na zatizenem (napr. QEMU na vytizenem hostiteli,
+//! ktery hostovi na desitky ms sebere procesor) se zvetsi misto
+//! opakovanych mezer ve zvuku. DMA buffer ma [`PERIODS`] period, aby se
+//! predstih mel kam zvetsit; za smichanymi daty se vzdy nuluje jedna
+//! perioda, takze pri nestihnuti zazni ticho, ne stara data.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -27,9 +33,12 @@ use crate::streams::DevClock;
 
 /// Snimku na periodu (5,33 ms pri 48 kHz; zaokrouhluje ovladac).
 pub const PERIOD_FRAMES: u32 = 256;
-pub const PERIODS: u32 = 4;
-/// O kolik period napred se mixuje.
-pub const LEAD_PERIODS: u32 = 2;
+pub const PERIODS: u32 = 16;
+/// Predstih mixu pred pozici DMA (periody): od, do.
+pub const LEAD_MIN: u32 = 2;
+pub const LEAD_MAX: u32 = 12;
+/// Po jak dlouhe dobe bez podteceni predstih zmensit o periodu.
+pub const LEAD_RELAX: Duration = Duration::from_secs(10);
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -135,6 +144,10 @@ pub struct Device {
     pub inp: Option<Port>,
     pub underruns: u64,
     pub overruns: u64,
+    /// Aktualni predstih mixu (periody, adaptivni).
+    pub lead: u32,
+    /// Kdy naposled podteklo (nebo se predstih zmensil).
+    pub calm_since: u64,
 }
 
 impl Device {
@@ -152,7 +165,7 @@ impl Device {
             out.buffer / out.period,
             if info.input { ", nahravani" } else { "" }
         );
-        Ok(Self { chan, info, out, inp: None, underruns: 0, overruns: 0 })
+        Ok(Self { chan, info, out, inp: None, underruns: 0, overruns: 0, lead: LEAD_MIN, calm_since: time::now() })
     }
 
     pub fn channel(&self) -> &Channel {
@@ -230,6 +243,25 @@ impl Device {
 
     /// Latence od mixu po reproduktor (us): mix napred + FIFO.
     pub fn latency_us(&self) -> u32 {
-        (self.out.format.us_for_frames((self.out.period * LEAD_PERIODS) as u64) + 500) as u32
+        (self.out.format.us_for_frames((self.out.period * self.lead) as u64) + 500) as u32
+    }
+
+    /// Podteceni: predstih o periodu vetsi (nejvys [`LEAD_MAX`]).
+    pub fn underrun(&mut self) {
+        self.underruns += 1;
+        self.calm_since = time::now();
+        if self.lead < LEAD_MAX {
+            self.lead += 1;
+            println!("audiod: nestiham, predstih mixu {} period ({} us)", self.lead, self.latency_us());
+        }
+    }
+
+    /// Dlouho bez podteceni: predstih o periodu mensi (nejmene [`LEAD_MIN`]).
+    pub fn relax(&mut self) {
+        let now = time::now();
+        if self.lead > LEAD_MIN && now.saturating_sub(self.calm_since) > LEAD_RELAX.as_nanos() as u64 {
+            self.lead -= 1;
+            self.calm_since = now;
+        }
     }
 }
