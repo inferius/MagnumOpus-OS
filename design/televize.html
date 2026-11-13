@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Televizní režim</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<script src="assets/televize.js" defer></script>
+<style>
+/* Televizni rezim ("na 3 metry"): simulator televize s dalkovym ovladacem.
+ * Logika je v assets/televize.js. Obrazovka ma 960 x 540 logickych jednotek (meritko 2 pro 1080p,
+ * 4 pro 4K), takze trida sirky vyjde expanded; velikost pisma resi posture "tv", ne trida. */
+.page { max-width: 1440px; }
+.sim { display: grid; grid-template-columns: auto minmax(260px, 1fr); gap: var(--s6); align-items: start; margin-top: var(--s4); }
+@media (max-width: 1150px) { .sim { grid-template-columns: 1fr; } }
+.ctl { display: flex; flex-direction: column; gap: var(--s3); font-size: var(--t-small-size); }
+.ctl .grp { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+.ctl .grp > b { width: 100%; font-size: var(--t-caption-size); color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--s3) 0; }
+.steps button { border: 1px solid var(--c-border-strong); background: var(--c-surface); color: var(--c-ink); border-radius: var(--r-pill); padding: 4px 12px; cursor: pointer; font: inherit; font-size: var(--t-small-size); }
+.steps button.on { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); font-weight: 600; }
+.say { padding: var(--s4); border-radius: var(--r-card); background: var(--c-surface-2); border-left: 4px solid var(--c-accent); }
+.ctxj { font-family: "JetBrains Mono", monospace; font-size: 12px; white-space: pre; padding: var(--s3); border-radius: var(--r-control); background: var(--c-term-bg); color: var(--c-term-ink); overflow-x: auto; }
+.left { display: flex; gap: var(--s5); align-items: flex-start; flex-wrap: wrap; }
+
+/* Televize: vzdy tmava (svetla plocha na 3 metry v setmele oslnuje); vlastni barvy z akcentu. */
+.tvw { position: relative; }
+.tv { position: absolute; left: 0; top: 0; transform-origin: 0 0; padding: 10px 10px 26px; border-radius: 10px; background: #0d0c0f; box-shadow: var(--sh-window); }
+.tv::after { content: ""; position: absolute; left: 50%; bottom: -30px; width: 220px; height: 30px; margin-left: -110px; background: linear-gradient(#1c1a20, #0d0c0f); clip-path: polygon(30% 0, 70% 0, 100% 100%, 0 100%); }
+.scr { position: relative; width: 960px; height: 540px; overflow: hidden; color: #f4f0f7; font-family: Inter, sans-serif; font-size: 16px; --ac: #b9a2ff; --fc: #fff;
+  background: radial-gradient(circle at 15% 10%, #3b2a5a, transparent 50%), radial-gradient(circle at 90% 90%, #23364a, transparent 50%), #121016; }
+.scr.big { font-size: 19px; }
+.scr .ic { width: 1.25em; height: 1.25em; flex: none; }
+.safe { position: absolute; inset: 27px 48px; }
+.scr.showsafe::before { content: "bezpečný okraj 5 %"; position: absolute; z-index: 90; inset: 27px 48px; border: 2px dashed #ffd36b; color: #ffd36b; font-size: 11px; padding: 2px 6px; pointer-events: none; }
+.f { outline: 0; transition: transform .14s ease-out, box-shadow .14s; }
+.f.on { transform: scale(1.08); box-shadow: 0 0 0 3px var(--fc), 0 0 0 7px color-mix(in srgb, var(--ac) 70%, transparent), 0 10px 26px #000a; z-index: 2; }
+.scr.rm .f { transition: none; }
+.scr.rm .f.on { transform: none; }
+
+/* Horni lista a radky */
+.top { display: flex; align-items: center; gap: 10px; height: 40px; }
+.top .tb { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 99px; font-weight: 600; }
+.top .tb.cur { background: #ffffff1a; }
+.top .sp { flex: 1; }
+.top .clk { font-weight: 600; opacity: .85; }
+.av { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; color: #1b1420; }
+.rows { position: absolute; left: 0; right: 0; top: 56px; bottom: 0; overflow: hidden; }
+.rowsin { transition: transform .2s ease-out; }
+.scr.rm .rowsin { transition: none; }
+.rw { margin-bottom: 18px; }
+.rw h3 { margin: 0 0 8px; font-size: 1.05em; font-weight: 600; opacity: .9; display: flex; gap: 8px; align-items: center; }
+.rw h3 small { font-weight: 500; opacity: .6; font-size: .8em; }
+.strip { display: flex; gap: 16px; padding: 8px 4px; transition: transform .2s ease-out; }
+.scr.rm .strip { transition: none; }
+.tc { flex: none; width: 200px; height: 112px; border-radius: 10px; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 10px 12px; box-sizing: border-box; font-weight: 600; }
+.tc small { font-weight: 500; opacity: .75; font-size: .8em; }
+.tc .pr { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: #ffffff33; }
+.tc .pr i { display: block; height: 100%; background: var(--ac); }
+.tc .lk { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; align-items: center; font-size: .72em; padding: 2px 8px; border-radius: 99px; background: #000a; }
+.tc .rt { position: absolute; top: 8px; left: 8px; font-size: .72em; padding: 1px 6px; border-radius: 4px; border: 1px solid #fff9; }
+.tc.app { width: 128px; height: 96px; justify-content: center; align-items: center; gap: 6px; background: #ffffff14; font-size: .85em; }
+.tc.app .ic { width: 34px; height: 34px; }
+.tc.ph { width: 150px; }
+
+/* Profily */
+.prof { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; }
+.prof h2 { margin: 0; font-size: 1.8em; font-weight: 600; }
+.prof .ps { display: flex; gap: 34px; }
+.prof .p { display: flex; flex-direction: column; align-items: center; gap: 10px; border-radius: 18px; padding: 10px; }
+.prof .p .av { width: 104px; height: 104px; font-size: 40px; border-radius: 28px; }
+.prof .p small { opacity: .65; font-size: .75em; }
+
+/* Prehravac */
+.vid { position: absolute; inset: 0; background: linear-gradient(160deg, #0f2a3a, #3b2357 55%, #120c18); }
+.vid .scene { position: absolute; left: 12%; top: 28%; width: 46%; height: 40%; border-radius: 50% 50% 8px 8px; background: radial-gradient(circle at 50% 30%, #f3b26b55, transparent 60%); }
+.sub { position: absolute; left: 0; right: 0; bottom: 70px; text-align: center; font-size: 1.35em; text-shadow: 0 2px 4px #000; }
+.sub span { background: #000a; padding: 2px 10px; border-radius: 4px; }
+.osd { position: absolute; left: 0; right: 0; bottom: 0; padding: 60px 48px 27px; background: linear-gradient(transparent, #000d); }
+.osd h2 { margin: 0 0 4px; font-size: 1.5em; }
+.osd .meta { opacity: .7; margin-bottom: 14px; font-size: .9em; }
+.seek { display: flex; align-items: center; gap: 12px; font-size: .85em; font-variant-numeric: tabular-nums; }
+.seek .sbar { flex: 1; height: 6px; border-radius: 3px; background: #ffffff33; position: relative; }
+.seek .sbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--ac); }
+.seek .sbar b { position: absolute; top: -5px; width: 16px; height: 16px; border-radius: 50%; background: #fff; margin-left: -8px; }
+.ctr { display: flex; gap: 14px; margin-top: 16px; align-items: center; }
+.ctr .f { height: 44px; min-width: 44px; padding: 0 14px; border-radius: 99px; display: flex; align-items: center; justify-content: center; gap: 8px; background: #ffffff1f; font-weight: 600; }
+.ctr .sp { flex: 1; }
+.toast { position: absolute; z-index: 80; left: 50%; top: 40px; transform: translateX(-50%); padding: 10px 20px; border-radius: 99px; background: #000c; font-weight: 600; white-space: nowrap; }
+
+/* Hledani */
+.srch { position: absolute; inset: 0; display: grid; grid-template-columns: 330px 1fr; gap: 28px; }
+.qf { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px; border-radius: 12px; background: #ffffff1a; font-size: 1.15em; margin-bottom: 14px; }
+.qf .caret { width: 2px; height: 1.1em; background: var(--ac); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.kg { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.kg .f { height: 38px; border-radius: 8px; display: grid; place-items: center; background: #ffffff12; font-weight: 600; }
+.kg .f.wide { grid-column: span 2; font-size: .8em; }
+.kg .f.on { transform: scale(1.12); }
+.alt { display: flex; gap: 10px; margin-top: 14px; }
+.alt .f { flex: 1; height: 44px; border-radius: 99px; display: flex; align-items: center; justify-content: center; gap: 8px; background: #ffffff1f; font-size: .85em; font-weight: 600; }
+.res h3 { margin: 4px 0 10px; font-size: 1em; opacity: .8; }
+.res .rgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.res .tc { width: auto; }
+.mic { position: absolute; z-index: 60; left: 50%; bottom: 60px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 14px 26px; border-radius: 99px; background: #000d; font-size: 1.1em; }
+.mic i { width: 14px; height: 14px; border-radius: 50%; background: #ff6b8b; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 10px #ff6b8b33; } }
+
+/* Dialogy na TV */
+.scrim { position: absolute; inset: 0; z-index: 70; background: #000b; display: grid; place-items: center; }
+.tdlg { width: 470px; border-radius: 20px; background: #221d29; padding: 26px 30px; box-shadow: 0 20px 60px #000c; }
+.tdlg.tr { border: 3px solid #7fd1a8; padding-top: 0; overflow: hidden; }
+.tdlg .band { margin: 0 -30px 18px; padding: 10px 30px; display: flex; align-items: center; gap: 10px; background: #173a2c; color: #b8f0d2; font-size: .85em; font-weight: 600; }
+.tdlg .band span { margin-left: auto; }
+.tdlg h2 { margin: 0 0 6px; font-size: 1.35em; }
+.tdlg p { margin: 0 0 16px; opacity: .8; font-size: .9em; line-height: 1.45; }
+.pin { display: flex; gap: 14px; justify-content: center; margin: 8px 0 18px; }
+.pin i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #fff; }
+.pin i.on { background: #fff; }
+.pad { display: grid; grid-template-columns: repeat(3, 70px); gap: 10px; justify-content: center; }
+.pad .f { height: 46px; border-radius: 12px; display: grid; place-items: center; background: #ffffff14; font-size: 1.15em; font-weight: 600; }
+.tbtn { display: flex; gap: 12px; margin-top: 18px; }
+.tbtn .f { flex: 1; height: 46px; border-radius: 99px; display: grid; place-items: center; background: #ffffff1f; font-weight: 600; }
+.kv { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #ffffff1a; font-size: .9em; }
+.kv span:last-child { opacity: .75; text-align: right; }
+
+/* Dalkovy ovladac */
+.rem { width: 150px; padding: 18px 14px 22px; border-radius: 60px 60px 40px 40px; background: linear-gradient(#2b2830, #1a181d); box-shadow: var(--sh-window); display: flex; flex-direction: column; align-items: center; gap: 12px; color: #eee; user-select: none; }
+.rem button { border: 0; cursor: pointer; color: inherit; font: inherit; background: #3a3640; display: grid; place-items: center; }
+.rem button:active { background: #6b5a8f; }
+.rem .ic { width: 18px; height: 18px; }
+.rem .r2 { display: flex; gap: 12px; }
+.rem .r2 button { width: 44px; height: 44px; border-radius: 50%; }
+.dpad { position: relative; width: 132px; height: 132px; border-radius: 50%; background: #3a3640; }
+.dpad button { position: absolute; width: 44px; height: 44px; background: none; border-radius: 50%; font-size: 18px; }
+.dpad .u { left: 44px; top: 0; } .dpad .d { left: 44px; bottom: 0; } .dpad .l { left: 0; top: 44px; } .dpad .r { right: 0; top: 44px; }
+.dpad .ok { left: 36px; top: 36px; width: 60px; height: 60px; background: #514b5a; font-size: 13px; font-weight: 700; }
+.rem .vol { display: flex; flex-direction: column; gap: 2px; }
+.rem .vol button { width: 44px; height: 32px; border-radius: 12px; font-size: 16px; }
+.rem > button:not(.ok) { padding: 6px 12px; border-radius: 99px; font-size: 12px; }
+.rem .hint { font-size: 10.5px; opacity: .6; text-align: center; }
+.rem .mic { position: static; transform: none; padding: 0; background: #3a3640; }
+
+.pc { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--s3); font-size: var(--t-small-size); }
+.pc .card2 { padding: var(--s4); }
+.pc h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); }
+.pc ul { margin: 0; padding-left: 18px; }
+.pc li + li { margin-top: 3px; }
+.cov td:nth-child(2) { white-space: nowrap; font-weight: 600; }
+.cov .y { color: var(--c-ok); } .cov .p { color: var(--c-warn); } .cov .n { color: var(--c-danger); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Televizní režim</h1>
+    <p class="lead">Rozhraní „na 3 metry“: dálkový ovladač nebo gamepad, žádná myš ani dotyk. Hlavní účel návrhu je <b>ověřit základy</b> (kontext okna, třídy, sémantické akce, fokus z knihovny komponent) na prostředí, které je od telefonu a počítače nejdál. Výsledek je v tabulce <a href="#pokryti">Co základy pokryjí</a>. Televize je <b>simulovaná</b>; ovládá se ovladačem vpravo nebo šipkami, Enter, Backspace (Zpět) a H (Domů), když je fokus na televizi.</p>
+  </header>
+
+  <h2>Průchod</h2>
+  <div class="steps" id="steps"></div>
+  <div class="sim">
+    <div class="left"><div class="tvw" id="tvw" tabindex="0" aria-label="Simulovaná televize, ovládání šipkami"></div><div id="rem"></div></div>
+    <div class="ctl">
+      <div class="say" id="say"></div>
+      <div class="grp"><b>Ovladač</b><div class="seg" role="radiogroup" id="c-inp"></div></div>
+      <div class="grp"><b>Zobrazení</b>
+        <button class="btn small" id="c-safe" aria-pressed="false">Bezpečný okraj</button>
+        <button class="btn small" id="c-big" aria-pressed="false">Větší text</button>
+        <button class="btn small" id="c-rm" aria-pressed="false">Omezit pohyb</button>
+      </div>
+      <div class="grp"><b>Kontext okna aplikace v popředí</b></div>
+      <div class="ctxj" id="ctx" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <h2 id="pokryti">Co základy pokryjí a co přidat</h2>
+  <p>Hodnocení: <b class="y">ano</b> = model stačí beze změny, <b class="p">částečně</b> = stačí rozšířit, <b class="n">ne</b> = chybí v základech a musí se přidat dřív, než se zmrazí veřejné API (pravidlo „základy předem“).</p>
+  <div style="overflow-x:auto"><table class="tbl cov">
+    <thead><tr><th>Část modelu</th><th>Pokryje TV?</th><th>Co přesně chybí nebo co přidat</th></tr></thead>
+    <tbody>
+      <tr><td>Kontext okna: velikost, generace, překážky</td><td class="y">ano</td><td>Velikost 960 &times; 540 (měřítko 2 nebo 4), generace a překážky (hledání hlasem, systémový panel) fungují beze změny.</td></tr>
+      <tr><td>Okraje (insets)</td><td class="p">částečně</td><td>Přidat <b><code>safe</code></b> vedle <code>insets</code>: bezpečný okraj kvůli přesahu obrazu (overscan). Pozadí a video kreslí až k hraně, text a fokus jen uvnitř. Hodnota z EDID nebo nastavení, výchozí 5 %.</td></tr>
+      <tr><td>Třídy šířky</td><td class="p">částečně</td><td>Šířka 960 dá <code>expanded</code>, což sedí na počet sloupců, ale ne na hustotu. Třídy nechat, hustotu řídit polem <b><code>posture: tv</code></b> (navrženo už u tabletu) a <b><code>viewing_distance</code></b> (blízko, stůl, místnost). Knihovna komponent z toho odvodí velikost písma a cílů.</td></tr>
+      <tr><td>Ukazatele (<code>pointers</code>)</td><td class="y">ano</td><td>Prázdný seznam = žádné najetí, žádné klikání na souřadnice. Proto je dobře, že tablet zavádí seznam ukazatelů místo jednoho pole <code>input</code>.</td></tr>
+      <tr><td>Sémantické akce (Zpět, Domů, Přehled)</td><td class="p">částečně</td><td>Přidat <b>mediální akce</b> (přehrát/pozastavit, posun, další, předchozí, titulky, zvuková stopa, informace) jako sémantické, ne jako klávesy. Hlasitost a vypnutí zpracuje systém, aplikace je nedostane. Jedna sada akcí pro ovladač, gamepad, telefon i hlas.</td></tr>
+      <tr><td>Fokus a pořadí Tab</td><td class="n">ne</td><td>Lineární pořadí Tab nestačí. Přidat do knihovny komponent: <b>prostorovou navigaci</b> (šipka jde na nejbližší prvek v daném směru), <b>skupiny fokusu</b> s orientací a pamětí (návrat do řady na stejnou dlaždici), <b>výchozí fokus</b> každé obrazovky a pravidlo „fokus je vždy někde“. Pořadí Tab zůstane pro klávesnici a čtečku.</td></tr>
+      <tr><td>Viditelnost fokusu</td><td class="p">částečně</td><td>Na počítači stačí kroužek; na TV je fokus jediný ukazatel, takže zvětšení + dvojitý obrys + stín. Přidat token <code>focus.tv</code> a respektovat omezený pohyb (bez zvětšení).</td></tr>
+      <tr><td>Zadávání textu</td><td class="p">částečně</td><td>Klávesnice na obrazovce v mřížce ovládaná šipkami (jiná než dotyková), diktování a <b>psaní z telefonu</b>. Textové pole musí umět přijmout text z jiného zařízení jako jedno vložení (skládání přes síť).</td></tr>
+      <tr><td>Důvěryhodné prvky</td><td class="n">ne</td><td>Chybí bezpečné vyvolání: TV nemá Ctrl+Alt+Del ani tlačítko napájení na dosah. Návrh: <b>podržení Domů</b> na spárovaném ovladači jde jen systému. Přidat do základů <b>třídu zdroje vstupu</b>: místní fyzický (spárovaný ovladač), vzdálený (telefon), syntetický (agent). PIN rodiče jen z místního fyzického.</td></tr>
+      <tr><td>Účty a profily</td><td class="n">ne</td><td>Přidat <b>profil domácnosti</b>: lehký účet bez hesla (volitelně PIN), sdílí zařízení. Rodičovská omezení jako systémová politika: hodnocení obsahu v manifestu aplikace a v metadatech média, časové limity, schválení nákupu. Aplikace se ptá na povolení, nehlídá si ho sama.</td></tr>
+      <tr><td>Relace médií</td><td class="n">ne</td><td>Systémová <b>relace přehrávání</b> (co hraje, pozice, ovládání): ovládá ji ovladač, telefon, hlas i zamykací obrazovka. Je to tatáž služba, kterou bude potřebovat hudba na telefonu a počítači.</td></tr>
+      <tr><td>Doprovodné ovládání (z mobilu)</td><td class="y">ano</td><td>Role <code>presentation</code> / <code>controls</code> a sémantické příkazy do relace aplikace sedí přesně. Telefon jako ovladač je jen další klient téže relace.</td></tr>
+      <tr><td>Oznámení</td><td class="p">částečně</td><td>Obrazovka je sdílená, takže platí pravidlo z monitoru: obsah oznámení skrýt, ukázat jen „Zpráva pro profil Táta“. Přidat do oznámení <b>adresáta (profil)</b>.</td></tr>
+      <tr><td>Grafika a video</td><td class="n">ne</td><td>Kompozitor potřebuje <b>videorovinu</b> (hardwarově dekódované video mimo kompozici, HDR, obnovovací frekvence podle videa). Bez toho přehrávání 4K vyčerpá CPU. Patří do návrhu kompozitoru teď, ne až s TV.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Rozhodnutí v návrhu</h2>
+  <div class="pc">
+    <div class="card card2"><h3>Ovládání</h3><ul><li><b>Šipky</b> pohyb, <b>OK</b> potvrzení, <b>podržet OK</b> kontextová nabídka, <b>Zpět</b> podle stejné smlouvy jako na telefonu, <b>Domů</b> vždy domů.</li><li>Gamepad: A = OK, B = Zpět, Start = nabídka, Guide = Domů, ramena = o stránku.</li><li>V řadě se fokus pohybuje a řada se posouvá tak, aby fokus zůstal na stejném místě (oko nemusí hledat).</li><li>Návrat do řady jde na naposledy vybranou dlaždici, ne na první.</li></ul></div>
+    <div class="card card2"><h3>Vzhled</h3><ul><li>Vždy tmavý: světlá plocha v setmělém pokoji oslňuje. Vysoký kontrast funguje.</li><li>Písmo nejméně 16 jednotek (32 px při 1080p), na úhlopříčce 55" ze 3 m to odpovídá písmu 14 px na monitoru 24" z 60 cm.</li><li>Nic důležitého mimo bezpečný okraj; žádné tenké čáry (1 jednotka na TV bliká).</li></ul></div>
+    <div class="card card2"><h3>Profily a dítě</h3><ul><li>Volba profilu po zapnutí; bez hesla, aby to šlo ovladačem. Profil dospělého může mít PIN.</li><li>Dětský profil vidí jen obsah do svého hodnocení; zamčený obsah je vidět se zámkem (dítě ví, proč nejde), ne skrytý, pokud rodič nezvolí skrýt.</li><li>Odemčení zadá rodič PINem v důvěryhodném dialogu, jen z ovladače u televize.</li></ul></div>
+  </div>
+
+  <h2>Rizika</h2>
+  <div class="pc">
+    <div class="card card2"><h3>Obsah s ochranou (DRM)</h3><ul><li>Komerční streamovací služby vyžadují certifikovaný systém ochrany obsahu (Widevine, PlayReady). Ten pro nový systém nezískáme; bez něj tyto služby buď nepoběží, nebo jen v nízkém rozlišení.</li><li>Televizní režim proto reálně poslouží pro vlastní média, rodinné fotky a hry. To je potřeba říct dřív, než do něj půjde víc práce.</li></ul></div>
+    <div class="card card2"><h3>Hardware</h3><ul><li>Ovládání přes HDMI-CEC (ovladač televize) potřebuje podporu v ovladači grafiky; jinak jen Bluetooth ovladač nebo gamepad.</li><li>Hardwarové dekódování videa (VA-API ekvivalent) a HDR výstup zatím nemáme v plánu ovladačů.</li><li>Hlas: rozpoznávání řeči na zařízení je velký model; v cloudu je to otázka soukromí (mikrofon v obýváku). Výchozí: jen po stisku tlačítka, nikdy „poslouchání na slovo“.</li></ul></div>
+  </div>
+</main>
+</body>
+</html>

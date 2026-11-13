@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tabletový režim</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<script src="assets/mo.js"></script>
+<style>
+/* Tabletovy rezim: simulator tabletu (dotyk, pero, pripojena klavesnice) s rozdelenim oken.
+ * Obrazovka se kresli v logickych jednotkach a zmensi se transformaci, takze cisla v kontextu
+ * okna odpovidaji tomu, co je videt. Navazuje na mobil.html (tridy sirky, kontext, gesta). */
+.page { max-width: 1440px; }
+.sim { display: grid; grid-template-columns: auto minmax(280px, 1fr); gap: var(--s6); align-items: start; margin-top: var(--s4); }
+@media (max-width: 1100px) { .sim { grid-template-columns: 1fr; } }
+.ctl { display: flex; flex-direction: column; gap: var(--s3); font-size: var(--t-small-size); }
+.ctl .grp { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+.ctl .grp > b { width: 100%; font-size: var(--t-caption-size); color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--s3) 0; }
+.steps button { border: 1px solid var(--c-border-strong); background: var(--c-surface); color: var(--c-ink); border-radius: var(--r-pill); padding: 4px 12px; cursor: pointer; font: inherit; font-size: var(--t-small-size); }
+.steps button.on { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); font-weight: 600; }
+.say { padding: var(--s4); border-radius: var(--r-card); background: var(--c-surface-2); border-left: 4px solid var(--c-accent); }
+.ctxj { font-family: "JetBrains Mono", monospace; font-size: 12px; white-space: pre; padding: var(--s3); border-radius: var(--r-control); background: var(--c-term-bg); color: var(--c-term-ink); overflow-x: auto; }
+
+/* Zarizeni */
+.devw { position: relative; }
+.dev { position: absolute; left: 0; top: 0; transform-origin: 0 0; padding: 18px; border-radius: 34px; background: #141116; box-shadow: var(--sh-window); }
+.kbdock { position: absolute; left: 0; height: 26px; border-radius: 0 0 14px 14px; background: #2a2630; display: flex; align-items: center; justify-content: center; gap: 6px; color: #bbb; font-size: 11px; }
+.scr { position: relative; overflow: hidden; border-radius: 18px; color: var(--c-ink); font-size: 14px; --hit: 44px;
+  background: radial-gradient(circle at 20% 15%, var(--c-wall-a), transparent 55%), radial-gradient(circle at 80% 85%, var(--c-wall-b), transparent 55%), var(--c-bg); }
+.scr.dk { --hit: 32px; }
+.scr.big { font-size: 18px; }
+.scr .ic { width: 1.3em; height: 1.3em; flex: none; }
+.scr button { font: inherit; color: inherit; }
+.stb { position: absolute; z-index: 50; left: 0; right: 0; top: 0; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 18px; font-size: 12px; font-weight: 600; }
+.stb .sp { flex: 1; }
+.stb .ic { width: 14px; height: 14px; }
+
+/* Okna */
+.tw { position: absolute; z-index: 2; display: flex; flex-direction: column; overflow: hidden; background: var(--c-surface); border-radius: 14px; box-shadow: 0 2px 10px #0003; outline: 0 solid transparent; transition: left .2s, top .2s, width .2s, height .2s; }
+.tw.foc { box-shadow: 0 0 0 2px var(--c-accent), 0 6px 20px #0004; }
+.tw.flt { z-index: 6; border-radius: 18px; box-shadow: var(--sh-window); }
+.tw.flt.foc { box-shadow: 0 0 0 2px var(--c-accent), var(--sh-window); }
+.whd { flex: none; height: 22px; display: grid; place-items: center; cursor: pointer; }
+.whd i { width: 44px; height: 5px; border-radius: 3px; background: var(--c-border-strong); }
+.tw.foc .whd i { background: var(--c-accent); }
+.wtb { flex: none; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 4px 0 12px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--c-border); background: var(--c-surface-2); }
+.wtb .t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wtb .wb { width: 28px; height: 26px; border: 0; background: none; border-radius: 6px; display: grid; place-items: center; cursor: pointer; }
+.wtb .wb:hover { background: var(--c-surface-3); }
+.wtb .wb .ic { width: 14px; height: 14px; }
+.wcls { position: absolute; right: 8px; bottom: 8px; z-index: 3; font: 600 11px "JetBrains Mono", monospace; padding: 2px 8px; border-radius: 99px; background: var(--c-ink); color: var(--c-surface); opacity: .8; }
+.wobs { position: absolute; left: 0; right: 0; z-index: 3; border-top: 2px dashed var(--c-warn); background: color-mix(in srgb, var(--c-warn) 12%, transparent); font-size: 11px; padding: 2px 8px; color: var(--c-ink); }
+.div { position: absolute; z-index: 5; display: grid; place-items: center; cursor: pointer; }
+.div i { border-radius: 3px; background: var(--c-border-strong); }
+.div:hover i { background: var(--c-accent); }
+.wmenu { position: absolute; z-index: 40; min-width: 210px; padding: 6px; border-radius: 14px; background: var(--c-surface); box-shadow: var(--sh-popover); border: 1px solid var(--c-border); }
+.wmenu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--hit); padding: 0 10px; border: 0; background: none; border-radius: 10px; cursor: pointer; text-align: left; }
+.wmenu button:hover, .wmenu button.on { background: var(--c-accent-soft); }
+.lay { display: inline-grid; width: 26px; height: 18px; gap: 2px; flex: none; }
+.lay i { border-radius: 2px; background: var(--c-ink-muted); }
+.lay i.a { background: var(--c-accent); }
+
+/* Obsah aplikaci */
+.ab { flex: none; display: flex; align-items: center; gap: 6px; min-height: var(--hit); padding: 0 8px; border-bottom: 1px solid var(--c-border); }
+.ab h4 { margin: 0; flex: 1; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib { width: var(--hit); height: var(--hit); display: grid; place-items: center; border: 0; background: none; border-radius: 99px; cursor: pointer; flex: none; }
+.panes { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; overflow: hidden; min-width: 0; }
+.pane + .pane { border-left: 1px solid var(--c-border); }
+.pane.side { flex: 0 0 170px; background: var(--c-surface-2); padding-top: 6px; }
+.pane.side span { display: flex; align-items: center; gap: 8px; min-height: calc(var(--hit) - 8px); padding: 0 12px; }
+.pane.side span.on { color: var(--c-accent-ink); font-weight: 600; }
+.r { display: flex; align-items: center; gap: 10px; min-height: var(--hit); padding: 0 12px; border-bottom: 1px solid var(--c-border); white-space: nowrap; }
+.r small { margin-left: auto; color: var(--c-ink-muted); font-size: .85em; }
+.r.on { background: color-mix(in srgb, var(--c-accent) 14%, transparent); }
+.prev { padding: 18px; color: var(--c-ink-muted); }
+.prev .big { width: 64px; height: 64px; display: block; margin-bottom: 10px; }
+.doc { flex: 1; overflow: hidden; padding: 14px 18px; line-height: 1.55; position: relative; }
+.doc h2 { font-size: 1.3em; margin: 0 0 8px; }
+.doc p { margin: 0 0 10px; }
+.doc .fld { border-radius: 6px; box-shadow: 0 0 0 2px var(--c-accent); padding: 2px 4px; }
+.caret { display: inline-block; width: 2px; height: 1.15em; vertical-align: text-bottom; background: var(--c-accent); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.ink { position: absolute; pointer-events: none; }
+.outl { flex: 0 0 160px; padding: 10px 12px; font-size: .9em; color: var(--c-ink-muted); background: var(--c-surface-2); border-right: 1px solid var(--c-border); }
+.outl div { padding: 5px 0; }
+.outl div.on { color: var(--c-ink); font-weight: 600; }
+.pent { display: flex; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--c-border); background: var(--c-surface-2); }
+.pent span { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; }
+.pent span.on { background: var(--c-accent-soft); }
+.pent i { width: 14px; height: 14px; border-radius: 50%; }
+.calc { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 10px; }
+.calc .d { grid-column: 1 / -1; text-align: right; font-size: 30px; font-weight: 300; padding: 6px 4px; }
+.calc span { display: grid; place-items: center; border-radius: 12px; background: var(--c-surface-2); font-size: 17px; min-height: var(--hit); }
+.calc span.op { background: var(--c-accent-soft); color: var(--c-accent-ink); }
+
+/* Lista, spoustec, klavesnice, kurzor */
+.dock { position: absolute; z-index: 20; left: 50%; transform: translateX(-50%); bottom: 10px; display: flex; gap: 6px; padding: 8px; border-radius: 22px; background: color-mix(in srgb, var(--c-surface) 80%, transparent); backdrop-filter: blur(18px); box-shadow: var(--sh-popover); }
+.dock .db { width: 52px; height: 52px; border-radius: 14px; border: 0; background: none; display: grid; place-items: center; cursor: pointer; position: relative; }
+.dock .db .ic { width: 28px; height: 28px; }
+.dock .db.run::after { content: ""; position: absolute; bottom: 3px; width: 6px; height: 4px; border-radius: 2px; background: var(--c-ink-muted); }
+.dock .sep { width: 1px; margin: 6px 4px; background: var(--c-border-strong); }
+.grip { position: absolute; z-index: 20; left: 50%; bottom: 0; width: 140px; margin-left: -70px; height: 14px; display: grid; place-items: center; cursor: pointer; }
+.grip i { width: 120px; height: 5px; border-radius: 3px; background: var(--c-ink); opacity: .45; }
+.tbar { position: absolute; z-index: 20; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 10px; background: color-mix(in srgb, var(--c-surface) 88%, transparent); backdrop-filter: blur(18px); border-top: 1px solid var(--c-border); }
+.tbar .db { width: 38px; height: 34px; border-radius: 8px; border: 0; background: none; display: grid; place-items: center; cursor: pointer; position: relative; }
+.tbar .db.run::after { content: ""; position: absolute; bottom: 1px; width: 12px; height: 3px; border-radius: 2px; background: var(--c-accent); }
+.tbar .sp { flex: 1; }
+.tbar .clk { font-size: 12px; font-weight: 600; padding: 0 8px; }
+.lnch { position: absolute; z-index: 30; padding: 8px; border-radius: 18px; background: color-mix(in srgb, var(--c-surface) 94%, transparent); backdrop-filter: blur(20px); box-shadow: var(--sh-popover); border: 1px solid var(--c-border); }
+.lnch .q { display: flex; align-items: center; gap: 8px; min-height: var(--hit); padding: 0 12px; border-radius: 12px; background: var(--c-surface-2); color: var(--c-ink-muted); margin-bottom: 4px; }
+.lnch .gh { font-size: 11px; font-weight: 700; color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: .05em; padding: 8px 12px 2px; }
+.lnch .lr { display: flex; align-items: center; gap: 10px; min-height: var(--hit); padding: 0 12px; border-radius: 10px; }
+.lnch .lr:hover { background: var(--c-surface-3); }
+.lnch .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
+.vkb { position: absolute; z-index: 25; left: 0; right: 0; bottom: 0; background: var(--c-surface-3); padding: 6px 8px 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; }
+.vkb .kr { display: flex; gap: 6px; flex: 1; justify-content: center; }
+.vkb .kr span { flex: 1; max-width: 86px; border-radius: 9px; background: var(--c-surface); box-shadow: 0 1px 0 #0003; display: grid; place-items: center; font-size: 17px; }
+.vkb .kr span.w { max-width: 130px; font-size: 13px; background: var(--c-surface-2); }
+.vkb .kr span.s { max-width: 420px; flex: 6; }
+.vkb .sug { display: flex; height: 30px; align-items: center; font-size: 14px; }
+.vkb .sug span { flex: 1; text-align: center; }
+.vkb .sug span + span { border-left: 1px solid var(--c-border); }
+.vkb.split .kr { justify-content: space-between; }
+.cur { position: absolute; z-index: 60; width: 14px; height: 20px; pointer-events: none; }
+.toast { position: absolute; z-index: 70; left: 50%; top: 40px; transform: translateX(-50%); padding: 8px 14px; border-radius: 99px; background: var(--c-ink); color: var(--c-surface); font-size: 13px; white-space: nowrap; box-shadow: var(--sh-popover); }
+.shade { position: absolute; z-index: 45; top: 0; width: 380px; padding: 36px 14px 14px; border-radius: 0 0 22px 22px; background: color-mix(in srgb, var(--c-surface) 92%, transparent); backdrop-filter: blur(24px); box-shadow: var(--sh-popover); }
+.shade .tl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.shade .tl span { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 16px; background: var(--c-surface-3); }
+.shade .tl span.on { background: var(--c-accent); color: var(--c-on-accent); }
+.ovl { position: absolute; z-index: 44; inset: 28px 0 0; display: flex; gap: 24px; align-items: center; justify-content: center; padding: 30px; background: color-mix(in srgb, var(--c-bg) 70%, transparent); backdrop-filter: blur(12px); }
+.ovl .c { width: 260px; height: 190px; border-radius: 16px; background: var(--c-surface); box-shadow: var(--sh-window); display: flex; flex-direction: column; }
+.ovl .c b { padding: 10px 12px; border-bottom: 1px solid var(--c-border); display: flex; gap: 8px; align-items: center; }
+.ovl .c.pair { width: 360px; flex-direction: row; gap: 4px; background: none; box-shadow: none; }
+.ovl .c.pair > div { flex: 1; border-radius: 16px; background: var(--c-surface); box-shadow: var(--sh-window); }
+
+.pc { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--s3); font-size: var(--t-small-size); }
+.pc .card { padding: var(--s4); cursor: default; }
+.pc h3 { margin: 0 0 var(--s2); font-size: var(--t-body-size); }
+.pc ul { margin: 0; padding-left: 18px; }
+.pc li + li { margin-top: 3px; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page">
+  <header>
+    <h1>Tabletový režim</h1>
+    <p class="lead">Navazuje na <a href="mobil.html">mobilní vzhled</a>: stejné třídy šířky, stejný kontext okna, stejná gesta. Nové je víc oken vedle sebe, pero a přechod mezi tabletem a notebookem (2v1) při připojení klávesnice. Tablet je <b>simulovaný</b>; okna můžete přepínat klepnutím na úchyt nahoře nebo na dělicí čáru.</p>
+  </header>
+
+  <h2>Průchod</h2>
+  <div class="steps" id="steps"></div>
+  <div class="sim">
+    <div class="devw" id="devw"></div>
+    <div class="ctl">
+      <div class="say" id="say"></div>
+      <div class="grp"><b>Poloha</b><div class="seg" role="radiogroup" id="c-land"></div></div>
+      <div class="grp"><b>Vstup</b><div class="seg" role="radiogroup" id="c-inp"></div></div>
+      <div class="grp"><b>Rozložení oken</b><div class="seg" role="radiogroup" id="c-lay"></div><button class="btn small" id="c-flt" aria-pressed="false">Plovoucí okno</button></div>
+      <div class="grp"><b>Gesta a ovládání</b>
+        <button class="btn small" data-g="kbd">Klávesnice na obrazovce</button>
+        <button class="btn small" data-g="dock">Krátký tah zdola</button>
+        <button class="btn small" data-g="ovw">Tah zdola a podržet</button>
+        <button class="btn small" data-g="back">Tah od okraje</button>
+        <button class="btn small" data-g="shade">Tah shora</button>
+        <button class="btn small" data-g="launch">Spouštěč</button>
+        <button class="btn small" id="c-big" aria-pressed="false">Větší text</button>
+      </div>
+      <div class="grp"><b>Kontext okna s fokusem</b></div>
+      <div class="ctxj" id="ctx" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <h2>Dva režimy, jedno prostředí</h2>
+  <div style="overflow-x:auto"><table class="tbl">
+    <thead><tr><th></th><th>Tablet (dotyk, pero)</th><th>Notebook (připojená klávesnice a touchpad)</th></tr></thead>
+    <tbody>
+      <tr><td>Okno</td><td>bez titulku, nahoře úchyt; klepnutí otevře nabídku rozložení, tažení přesune</td><td>titulek s tlačítky jako na počítači</td></tr>
+      <tr><td>Lišta</td><td>skrytá; krátký tah zdola ukáže plovoucí dok s velkými ikonami</td><td>trvalá lišta 44 jednotek dole</td></tr>
+      <tr><td>Cíle dotyku</td><td>nejméně 44 jednotek</td><td>32 jednotek</td></tr>
+      <tr><td>Klávesnice na obrazovce</td><td>vyjede u textového pole</td><td>nikdy sama; jen ručně z rychlých nastavení</td></tr>
+      <tr><td>Spouštěč</td><td>seznam se skupinami (varianta D), řádky 44, na šířku dva sloupce</td><td>tentýž seznam v kompaktní velikosti</td></tr>
+      <tr><td>Ukazatel</td><td>žádný; pero ukazuje kroužek při najetí</td><td>šipka; dotyk na obrazovce funguje dál</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Přechod tablet &lt;-&gt; notebook (2v1)</h2>
+  <div class="pc">
+    <div class="card"><h3>Co se nezmění</h3><ul><li>Žádné okno se nezavře ani nepřeskládá. Rozdělení 1/2 a 1/3 zůstane, plovoucí okno zůstane na svém místě.</li><li>Fokus, kurzor v textu, výběr i rozpracovaný text zůstanou.</li><li>Třída šířky se mění jen tehdy, když se změní šířka okna (lišta v notebooku ubere 44 jednotek výšky, ne šířky).</li></ul></div>
+    <div class="card"><h3>Co se změní</h3><ul><li>Kontext dostane novou generaci s <code>posture</code> a novým seznamem ukazatelů; aplikace zmenší cíle a ukáže zkratky.</li><li>Úchyt se vymění za titulek, dok za lištu, klávesnice na obrazovce zmizí.</li><li>Animace přechodu 200 ms (při omezeném pohybu bez animace).</li></ul></div>
+    <div class="card"><h3>Kdy přepnout</h3><ul><li>Výchozí: automaticky podle čidla odklopení / odpojení (přepínač „tablet mode“ v ACPI nebo HID).</li><li>Rychlé nastavení „Režim tabletu: automaticky / vždy / nikdy“ pro přístupnost a pro zařízení bez čidla.</li><li>Bez dotazu „Přepnout?“: přepnutí nic neruší, takže dotaz by jen zdržoval.</li></ul></div>
+  </div>
+
+  <h2>Okna vedle sebe</h2>
+  <div class="pc">
+    <div class="card"><h3>Pravidla</h3><ul><li>Nejvýš dvě dlaždice a jedno plovoucí okno. Víc oken na tabletu znamená nečitelně úzké sloupce.</li><li>Na šířku jsou dlaždice vedle sebe (1/2, 1/3 + 2/3), na výšku <b>nad sebou</b>: 820 jednotek na šířku by vedle sebe dalo dvakrát 398, tedy dva telefony.</li><li>Plovoucí okno má pevnou třídu <code>compact</code> (360 &times; 480) a jde odložit k okraji jako jazýček.</li><li>Dělicí čára přepíná 1/2 &lt;-&gt; 1/3; tažením jde i plynule, okna dostanou nové generace až po puštění (během tažení jen měřítko obrazu).</li></ul></div>
+    <div class="card"><h3>Co musí aplikace umět</h3><ul><li>Rozložení pro <code>compact</code> je povinné; aplikace, která ho nemá (manifest <code>min_width</code> &gt; 360), jde jen na celou obrazovku.</li><li>Kontext nese <code>tile</code> (left, right, top, bottom, full, floating), aby aplikace věděla, u kterého okraje je, a dala ovládání k vnějšímu okraji.</li><li>Přetažení souboru mezi dlaždicemi je stejné jako na počítači (systémové předání úchytu).</li></ul></div>
+    <div class="card"><h3>Riziko: polovina na šířku je <code>compact</code></h3><ul><li>1180 / 2 minus mezery je 578, tedy pod hranicí 600. Dvě okna vedle sebe ukážou telefonní rozložení.</li><li>Je to stejné jako na běžných tabletech a je to správně (šířka 584 je opravdu úzká). Snížit hranici na 560 by pomohlo jen tomuto zařízení.</li><li>1/3 + 2/3 dá 385 (<code>compact</code>) a 771 (<code>medium</code>).</li></ul></div>
+  </div>
+
+  <h2>Gesta od okrajů</h2>
+  <div style="overflow-x:auto"><table class="tbl">
+    <thead><tr><th>Akce</th><th>Dotyk</th><th>Touchpad</th><th>Klávesnice</th></tr></thead>
+    <tbody>
+      <tr><td>Ukázat lištu / dok</td><td>krátký tah zdola</td><td>lišta je vidět vždy</td><td>&ndash;</td></tr>
+      <tr><td>Domů</td><td>delší tah zdola</td><td>čtyři prsty nahoru a pustit</td><td>Super + D</td></tr>
+      <tr><td>Přehled oken</td><td>tah zdola a podržet</td><td>tři prsty nahoru</td><td>Super + Tab</td></tr>
+      <tr><td>Zpět</td><td>tah od levého nebo pravého okraje</td><td>dva prsty do strany</td><td>Alt + šipka vlevo</td></tr>
+      <tr><td>Oznámení / rychlá nastavení</td><td>tah shora v levé / pravé polovině</td><td>klepnutí na hodiny / stav v liště</td><td>Super + N / Super + A</td></tr>
+      <tr><td>Rozdělit</td><td>táhnout úchyt k okraji</td><td>táhnout titulek k okraji</td><td>Super + šipka</td></tr>
+      <tr><td>Spouštěč</td><td>ikona v doku</td><td>ikona v liště</td><td>Super</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="margin-top:var(--s3)">Pásy u okrajů (16 jednotek) patří systému stejně jako na telefonu. Aplikace pro kreslení si může vyžádat výjimku na bočních okrajích; pero gesta od okrajů nespouští nikdy (kreslí se až k hraně).</p>
+
+  <h2>Klávesnice na obrazovce a pero</h2>
+  <div class="pc">
+    <div class="card"><h3>Klávesnice nepřekryje pole</h3><ul><li>Klávesnice je překážka v kontextu (<code>obscured</code>) každého okna, které překrývá. Okno s fokusem posune pole nad ni; okna se nezmenšují ani nepřeskládají.</li><li>Na šířku je klávesnice vysoká 330 a zabere 40 % výšky. Proto jde přepnout na <b>rozdělenou</b> klávesnici (polovina pod každým palcem) nebo malou plovoucí.</li><li>Plovoucí okno se při vyjetí klávesnice posune nad ni, když by pole zakrývala.</li></ul></div>
+    <div class="card"><h3>Pero</h3><ul><li>Pero je přesný ukazatel s najetím: ukazuje kroužek, popisky se zobrazí při najetí, tlačítko na peru = pravé tlačítko.</li><li>Při psaní perem se dotyk dlaně ignoruje (palm rejection), dokud je pero blízko.</li><li>Tlak a náklon jsou volitelné schopnosti; aplikace se na ně ptá dotazem na schopnosti, ne podle typu zařízení.</li><li>Psaní rukou do textových polí: zatím nepodporováno (chybí rozpoznávání). Pero v textovém poli vyvolá klávesnici.</li></ul></div>
+    <div class="card"><h3>Rizika a závislosti</h3><ul><li>Pero a dotyk potřebují ovladač HID přes I2C (většina tabletů), který ještě nemáme. Bez něj režim tabletu nejde vyzkoušet na železe.</li><li>Čidlo odpojení klávesnice se liší podle výrobce (ACPI, HID, GPIO); bez něj zbývá ruční přepínač.</li><li>Palm rejection kvalitně dělá jen firmware digitizéru; softwarová náhrada bude horší.</li></ul></div>
+  </div>
+
+  <h2>Co přidat do kontextu okna</h2>
+  <div style="overflow-x:auto"><table class="tbl">
+    <thead><tr><th>Pole</th><th>Proč</th></tr></thead>
+    <tbody>
+      <tr><td><code>posture</code>: tablet, laptop, desktop, phone</td><td>Aplikace nemusí hádat z typu vstupu; mění hustotu a zkratky.</td></tr>
+      <tr><td><code>pointers</code>: seznam s druhem, přesností, najetím, tlakem</td><td>Místo jednoho <code>input</code>: dotyk a pero (nebo touchpad) jsou současně.</td></tr>
+      <tr><td><code>keyboard</code>: hardware true / false</td><td>Ukázat zkratky a nevyvolávat klávesnici na obrazovce.</td></tr>
+      <tr><td><code>tile</code>: left, right, top, bottom, full, floating</td><td>Ovládání k vnějšímu okraji, nepsat do středu mezi dvě okna.</td></tr>
+      <tr><td><code>min_hit</code>: 44 nebo 32</td><td>Jedno číslo místo pravidel v každé aplikaci; knihovna komponent ho použije sama.</td></tr>
+    </tbody>
+  </table></div>
+</main>
+<script>
+document.addEventListener('mo-ready', function () {
+  'use strict';
+  var S = { land: true, inp: 'touch', lay: 'one', flt: false, kbd: false, dock: false, launch: false, shade: false, ovw: false, menu: null, big: false, foc: 'files', gen: 1, toast: '', step: 0 };
+  var HYS = {};
+  function I(n, c) { return '<svg class="ic' + (c ? ' ' + c : '') + '" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
+  function A(a, v) { return ' data-a="' + a + '"' + (v !== undefined ? ' data-v="' + v + '"' : ''); }
+  var APPS = { files: ['folder', 'Soubory'], editor: ['app-editor', 'Editor &middot; zprava.md'], calc: ['calculator', 'Kalkulačka'], browser: ['app-browser', 'Prohlížeč'], term: ['terminal', 'Terminál'], set: ['settings', 'Nastavení'] };
+
+  // Trida sirky s hysterezi 24 (stejne jako mobil.html).
+  function klass(id, w) {
+    var p = HYS[id], c = w >= 840 ? 'expanded' : w >= 600 ? 'medium' : 'compact';
+    if (p === 'expanded' && c === 'medium' && w >= 816) c = 'expanded';
+    if (p === 'medium' && c === 'compact' && w >= 576) c = 'medium';
+    HYS[id] = c; return c;
+  }
+
+  // Geometrie: logicke jednotky obrazovky, pracovni plocha, okna, klavesnice.
+  function geo() {
+    var W = S.land ? 1180 : 820, H = S.land ? 820 : 1180, desk = S.inp === 'kbd', gap = 8;
+    var top = 28, barH = desk ? 44 : 0, kh = (!desk && S.kbd) ? (S.land ? 330 : 300) : 0;
+    var wx = gap, wy = top + 2, ww = W - 2 * gap, wh = H - top - barH - gap - 2;
+    var wins = [];
+    if (S.lay === 'one') wins.push({ id: 'files', x: wx, y: wy, w: ww, h: wh, tile: 'full' });
+    else {
+      var f = S.lay === 'half' ? 0.5 : 1 / 3;
+      if (S.land) {
+        var a = Math.round((ww - gap) * f);
+        wins.push({ id: 'files', x: wx, y: wy, w: a, h: wh, tile: 'left' }, { id: 'editor', x: wx + a + gap, y: wy, w: ww - a - gap, h: wh, tile: 'right' });
+      } else {
+        var b = Math.round((wh - gap) * f);
+        wins.push({ id: 'files', x: wx, y: wy, w: ww, h: b, tile: 'top' }, { id: 'editor', x: wx, y: wy + b + gap, w: ww, h: wh - b - gap, tile: 'bottom' });
+      }
+    }
+    if (S.flt) {
+      var fy = H - barH - 480 - 24;
+      if (kh && fy + 480 > H - kh - 10) fy = Math.max(top + 10, H - kh - 480 - 10);
+      wins.push({ id: 'calc', x: W - 360 - 24, y: fy, w: 360, h: 480, tile: 'floating', flt: true });
+    }
+    wins.forEach(function (o) {
+      o.cls = o.flt ? 'compact' : klass(o.id, o.w);
+      o.obs = kh ? Math.max(0, o.y + o.h - (H - kh)) : 0;
+    });
+    if (!wins.some(function (o) { return o.id === S.foc; })) S.foc = wins[wins.length - 1].id;
+    return { W: W, H: H, desk: desk, barH: barH, kh: kh, wins: wins, z: S.land ? 0.62 : 0.56 };
+  }
+
+  function ctxJson(g) {
+    var o = g.wins.filter(function (x) { return x.id === S.foc; })[0];
+    var ptr = S.inp === 'kbd' ? [{ kind: 'touchpad', fine: true, hover: true }, { kind: 'touch', fine: false }] :
+      S.inp === 'pen' ? [{ kind: 'touch', fine: false }, { kind: 'pen', fine: true, hover: true, pressure: true }] : [{ kind: 'touch', fine: false }];
+    var r = { gen: S.gen, app: o.id, size: { w: o.w, h: o.h - (g.desk ? 34 : 22) }, 'class': o.cls, tile: o.tile, posture: g.desk ? 'laptop' : 'tablet',
+      pointers: ptr, keyboard: g.desk, min_hit: g.desk ? 32 : 44, obscured: o.obs ? [{ kind: 'keyboard', h: o.obs }] : [], text_scale: S.big ? 1.3 : 1 };
+    return '{\n' + Object.keys(r).map(function (k) { return '  "' + k + '": ' + JSON.stringify(r[k]).replace(/,"/g, ', "').replace(/":/g, '": ').replace(/\},\{/g, '},\n               {'); }).join(',\n') + '\n}';
+  }
+
+  // ---- Obsah aplikaci podle tridy ----
+  var FILES = [['folder', 'Projekty', 'včera'], ['file-text', 'zprava.md', '14:02'], ['app-pdf', 'smlouva.pdf', 'včera'], ['file-text', 'poznamky.md', 'včera'], ['image', 'foto.jpg', '28. 10.'], ['file', 'rozpocet.ods', '2. 11.']];
+  function files(c) {
+    var list = FILES.map(function (f, i) { return '<div class="r' + (i === 1 ? ' on' : '') + '">' + I(f[0]) + '<span>' + f[1] + '</span><small>' + f[2] + '</small></div>'; }).join('');
+    var places = '<div class="pane side">' + [['home', 'Domů'], ['folder', 'Dokumenty', 1], ['image', 'Obrázky'], ['flash-drive', 'USB']].map(function (p) { return '<span' + (p[2] ? ' class="on"' : '') + '>' + I(p[0]) + p[1] + '</span>'; }).join('') + '</div>';
+    var prev = '<div class="pane prev">' + I('file-text', 'big') + '<b style="color:var(--c-ink)">zprava.md</b><br>Markdown &middot; 6 kB<br>Upraveno dnes 14:02</div>';
+    return '<div class="ab">' + (c === 'compact' ? '' : '') + '<h4>Dokumenty</h4><button class="ib">' + I('search') + '</button></div>' +
+      '<div class="panes">' + (c === 'expanded' ? places : '') + '<div class="pane">' + list + '</div>' + (c !== 'compact' ? prev : '') + '</div>';
+  }
+  function editor(c, o) {
+    var pen = S.inp === 'pen';
+    var txt = '<div class="doc"' + A('type') + '><h2>Zpráva za listopad</h2><p>Tým dokončil přechod na novou verzi souborového systému. Výkon zápisu vzrostl o 18 %.</p>' +
+      '<p>Další krok je ovladač pera a dotyku přes I2C, bez kterého tablet nejde vyzkoušet na železe.</p>' +
+      '<p><span class="fld">Doplnit: termín testů na zařízení' + (S.kbd || g0.desk ? '<span class="caret"></span>' : '') + '</span></p>' +
+      (pen ? '<svg class="ink" style="left:30px;top:150px" width="220" height="60" viewBox="0 0 220 60"><path d="M4 40 C 40 4, 60 58, 96 26 S 150 10, 214 34" fill="none" stroke="var(--c-accent)" stroke-width="3" stroke-linecap="round"/></svg>' : '') + '</div>';
+    var tools = pen ? '<div class="pent"><span class="on"><i style="background:var(--c-accent)"></i></span><span><i style="background:var(--c-warn)"></i></span><span>' + I('close') + '</span><span style="margin-left:auto;width:auto;font-size:12px;color:var(--c-ink-muted)">pero kreslí poznámky, prst posouvá</span></div>' : '';
+    var outl = c === 'compact' ? '' : '<div class="outl"><div class="on">Zpráva za listopad</div><div>Souborový systém</div><div>Ovladače</div><div>Termíny</div></div>';
+    return '<div class="ab"><h4>zprava.md</h4><button class="ib">' + I('share') + '</button></div>' + tools + '<div class="panes">' + outl + txt + '</div>';
+  }
+  function calc() {
+    return '<div class="calc"><div class="d">1 284</div>' + ['7', '8', '9', '&divide;', '4', '5', '6', '&times;', '1', '2', '3', '&minus;', '0', ',', '=', '+'].map(function (k, i) { return '<span' + (i % 4 === 3 || k === '=' ? ' class="op"' : '') + '>' + k + '</span>'; }).join('') + '</div>';
+  }
+
+  // ---- Okna a prekryti ----
+  var g0;
+  function win(o, g) {
+    var foc = o.id === S.foc, body = o.id === 'files' ? files(o.cls) : o.id === 'editor' ? editor(o.cls, o) : calc();
+    var chrome = g.desk ? '<div class="wtb">' + I(APPS[o.id][0]) + '<span class="t">' + APPS[o.id][1] + '</span><button class="wb"' + A('menu', o.id) + ' aria-label="Rozložení">' + I('window') + '</button><button class="wb" aria-label="Zavřít">' + I('close') + '</button></div>'
+      : '<div class="whd"' + A('menu', o.id) + ' role="button" aria-label="Nabídka okna ' + APPS[o.id][1] + '"><i></i></div>';
+    return '<div class="tw' + (foc ? ' foc' : '') + (o.flt ? ' flt' : '') + '"' + A('foc', o.id) + ' style="left:' + o.x + 'px;top:' + o.y + 'px;width:' + o.w + 'px;height:' + o.h + 'px">' + chrome + body +
+      '<span class="wcls">' + o.cls + ' &middot; ' + o.w + '</span>' +
+      (o.obs ? '<div class="wobs" style="top:' + (o.h - o.obs) + 'px;height:' + o.obs + 'px">překážka: klávesnice ' + o.obs + '</div>' : '') + '</div>';
+  }
+  function divider(g) {
+    if (S.lay === 'one') return '';
+    var a = g.wins[0];
+    return S.land ? '<div class="div"' + A('div') + ' style="left:' + (a.x + a.w) + 'px;top:' + a.y + 'px;width:8px;height:' + a.h + 'px" aria-label="Dělicí čára"><i style="width:5px;height:56px"></i></div>'
+      : '<div class="div"' + A('div') + ' style="top:' + (a.y + a.h) + 'px;left:' + a.x + 'px;height:8px;width:' + a.w + 'px" aria-label="Dělicí čára"><i style="height:5px;width:56px"></i></div>';
+  }
+  function layIcon(k) {
+    var m = { one: '1fr/1fr', half: '1fr 1fr/1fr', third: '1fr 2fr/1fr', flt: '' }[k];
+    if (k === 'flt') return '<span class="lay" style="grid-template-columns:1fr"><i style="margin:3px 2px 0 12px" class="a"></i></span>';
+    var n = k === 'one' ? 1 : 2;
+    return '<span class="lay" style="grid-template-columns:' + m.split('/')[0] + '">' + (n === 2 ? '<i></i><i class="a"></i>' : '<i class="a"></i>') + '</span>';
+  }
+  function menu(g) {
+    if (!S.menu) return '';
+    var o = g.wins.filter(function (x) { return x.id === S.menu; })[0];
+    var it = [['one', 'Celá obrazovka'], ['half', 'Polovina'], ['third', 'Třetina a dvě třetiny'], ['flt', 'Plovoucí okno']];
+    return '<div class="wmenu" style="left:' + (o.x + o.w / 2 - 105) + 'px;top:' + (o.y + 26) + 'px" role="menu">' + it.map(function (x) {
+      var on = x[0] === 'flt' ? o.flt : (!o.flt && S.lay === x[0]);
+      return '<button role="menuitem" class="' + (on ? 'on' : '') + '"' + A('lay', x[0]) + '>' + layIcon(x[0]) + x[1] + '</button>';
+    }).join('') + '<button role="menuitem"' + A('close') + '>' + I('close') + 'Zavřít okno</button></div>';
+  }
+  function dockHtml(g) {
+    var run = { files: 1, editor: S.lay !== 'one', calc: S.flt };
+    var b = function (k) { return '<button class="db' + (run[k] ? ' run' : '') + '" aria-label="' + APPS[k][1] + '"' + A('app', k) + '>' + I(APPS[k][0]) + '</button>'; };
+    var items = '<button class="db" aria-label="Spouštěč"' + A('launch') + '>' + I('apps') + '</button>' + (g.desk ? '' : '<span class="sep"></span>') + ['files', 'editor', 'browser', 'calc'].map(b).join('');
+    if (g.desk) return '<div class="tbar">' + items + '<span class="sp"></span>' + I('wifi') + I('battery') + '<span class="clk">14:05</span></div>';
+    if (S.dock) return '<div class="dock">' + items + '</div>';
+    return S.kbd ? '' : '<div class="grip"' + A('dock') + ' aria-label="Ukázat dok"><i></i></div>';
+  }
+  function launcher(g) {
+    if (!S.launch) return '';
+    var row = function (k, t) { return '<div class="lr"' + A('app', k) + '>' + I(APPS[k] ? APPS[k][0] : k) + (t || APPS[k][1]) + '</div>'; };
+    var pin = row('files') + row('editor', 'Editor') + row('browser') + row('term');
+    var rec = row('file-text', 'zprava.md') + row('app-pdf', 'smlouva.pdf');
+    var sys = row('set') + row('power', 'Vypnout, uspat&hellip;');
+    var two = S.land && !g.desk;
+    var w = g.desk ? 300 : two ? 560 : 380, bottom = g.desk ? 52 : 90;
+    var body = two ? '<div class="cols"><div><div class="gh">Připnuté</div>' + pin + '</div><div><div class="gh">Nedávné</div>' + rec + '<div class="gh">Systém</div>' + sys + '</div></div>'
+      : '<div class="gh">Připnuté</div>' + pin + '<div class="gh">Nedávné</div>' + rec + '<div class="gh">Systém</div>' + sys;
+    return '<div class="lnch" style="width:' + w + 'px;' + (g.desk ? 'left:10px' : 'left:50%;margin-left:-' + w / 2 + 'px') + ';bottom:' + bottom + 'px"><div class="q">' + I('search') + 'Hledat aplikace, soubory a akce</div>' + body + '</div>';
+  }
+  function vkb(g) {
+    if (!g.kh) return '';
+    var rows = ['qwertzuiop', 'asdfghjkl', 'yxcvbnm'].map(function (r, i) {
+      return '<div class="kr">' + (i === 2 ? '<span class="w">&#8679;</span>' : '') + r.split('').map(function (c) { return '<span>' + c + '</span>'; }).join('') + (i === 2 ? '<span class="w">&#9003;</span>' : i === 1 ? '<span class="w">Enter</span>' : '') + '</div>';
+    }).join('');
+    return '<div class="vkb" style="height:' + g.kh + 'px"><div class="sug"><span>zařízení</span><span>železe</span><span>zítra</span></div>' + rows +
+      '<div class="kr"><span class="w">123</span><span class="w">&#127760; CZ</span><span class="s">mezera</span><span class="w">.</span><span class="w" title="Rozdělit klávesnici">&#9707;</span><span class="w"' + A('kbd') + '>&#8964;</span></div></div>';
+  }
+  function extras(g) {
+    var h = '';
+    if (S.shade) h += '<div class="shade" style="right:16px"><div class="tl"><span class="on">' + I('wifi') + 'Wi-Fi</span><span>' + I('bluetooth') + 'Bluetooth</span><span class="on">' + I('tablet') + 'Tablet: auto</span><span>' + I('keyboard') + 'Klávesnice</span></div></div>';
+    if (S.ovw) h += '<div class="ovl"' + A('ovw') + '>' + (S.lay !== 'one' ? '<div class="c pair"><div></div><div></div></div>' : '') + '<div class="c"><b>' + I('folder') + 'Soubory</b></div><div class="c"><b>' + I('app-browser') + 'Prohlížeč</b></div></div>';
+    if (S.inp === 'pen' && !S.ovw) h += '<svg class="cur" style="left:' + (g.W * 0.7) + 'px;top:' + (g.H * 0.42) + 'px" width="18" height="18"><circle cx="9" cy="9" r="6" fill="none" stroke="var(--c-ink)" stroke-width="1.5"/></svg>';
+    if (g.desk && !S.ovw) h += '<svg class="cur" style="left:' + (g.W * 0.62) + 'px;top:' + (g.H * 0.4) + 'px" viewBox="0 0 14 20"><path d="M1 1 L1 16 L5 12 L8 19 L10 18 L7 11 L13 11 Z" fill="#fff" stroke="#000" stroke-width="1"/></svg>';
+    if (S.toast) h += '<div class="toast">' + S.toast + '</div>';
+    return h;
+  }
+
+  function render() {
+    var g = g0 = geo();
+    var scr = '<div class="scr' + (g.desk ? ' dk' : '') + (S.big ? ' big' : '') + '" style="width:' + g.W + 'px;height:' + g.H + 'px">' +
+      '<div class="stb"><span>14:05</span><span class="sp"></span>' + (S.inp === 'pen' ? I('pen') : '') + (g.desk ? I('keyboard') : '') + I('wifi') + I('battery') + '<span>82 %</span></div>' +
+      g.wins.map(function (o) { return win(o, g); }).join('') + divider(g) + dockHtml(g) + vkb(g) + launcher(g) + menu(g) + extras(g) + '</div>';
+    var kb = g.desk ? '<div class="kbdock" style="top:' + (g.H + 36) + 'px;width:' + (g.W + 36) + 'px">' + I('keyboard') + 'připojená klávesnice s touchpadem</div>' : '';
+    var host = document.getElementById('devw');
+    host.innerHTML = '<div class="dev" style="transform:scale(' + g.z + ')">' + scr + kb + '</div>';
+    host.style.width = Math.round((g.W + 36) * g.z) + 'px';
+    host.style.height = Math.round((g.H + 36 + (g.desk ? 26 : 0)) * g.z) + 'px';
+    document.getElementById('ctx').textContent = ctxJson(g);
+    document.getElementById('say').innerHTML = '<b>' + (S.step >= 0 ? (S.step + 1) + '. ' + STEPS[S.step][0] : 'Volně') + '</b><br>' + (S.step >= 0 ? STEPS[S.step][1] : 'Klepněte na úchyt okna nahoře (nebo tlačítko v titulku) a vyberte rozložení. Klepnutí do okna mu dá fokus.');
+    document.querySelectorAll('#steps button').forEach(function (b, i) { b.classList.toggle('on', i === S.step); });
+    syncCtl();
+  }
+  function bump() { S.gen++; }
+
+  // ---- Pruchod ----
+  var STEPS = [
+    ['Jedno okno', 'Tablet na šířku, prst. Soubory na celé obrazovce mají 1164 jednotek: třída <code>expanded</code>, tedy místa + seznam + náhled. Lišta je schovaná; dole je jen úchyt.', { land: true, inp: 'touch', lay: 'one', flt: false, kbd: false, dock: false, foc: 'files' }],
+    ['Dvě okna vedle sebe', 'Editor přetažený k pravému okraji. Obě poloviny mají 578 jednotek, takže jsou <code>compact</code>: Soubory jen seznam, editor jen text. Dělicí čára přepne na třetinu.', { lay: 'half', foc: 'editor' }],
+    ['Třetina a dvě třetiny', 'Soubory 385 (<code>compact</code>), editor 771 (<code>medium</code>, přibyla osnova). Každé okno dostalo novou generaci kontextu.', { lay: 'third', foc: 'editor' }],
+    ['Psaní na obrazovce', 'Klepnutí do pole vysune klávesnici. Okna se nezmenší: klávesnice je v kontextu jako překážka 330 a editor posune pole nad ni. Krátký tah zdola teď nefunguje, Zpět klávesnici zavře.', { kbd: true, foc: 'editor' }],
+    ['Plovoucí okno', 'Kalkulačka jako plovoucí okno 360 &times; 480, vždy <code>compact</code>. Při klávesnici by se posunula nad ni.', { kbd: false, flt: true, foc: 'calc' }],
+    ['Pero', 'Pero kreslí poznámky, prst posouvá. Kroužek ukazuje polohu pera při najetí; tlačítko pera = pravé tlačítko. Kontext má dva ukazatele současně.', { inp: 'pen', flt: false, foc: 'editor' }],
+    ['Připojení klávesnice', 'Okna zůstala na místě i s fokusem. Úchyty se změnily na titulky, dok na trvalou lištu, cíle z 44 na 32. Kontext: <code>posture: laptop</code>, nová generace.', { inp: 'kbd', foc: 'editor' }],
+    ['Odpojení klávesnice', 'Zpět do tabletu. Nic se nezavřelo ani nepřeskládalo, kurzor v editoru zůstal. Klávesnice na obrazovce nevyjede sama, dokud se znovu neklepne do pole.', { inp: 'touch', foc: 'editor' }],
+    ['Na výšku', 'Otočení: dlaždice se dají <b>nad sebe</b>. Soubory nahoře, editor dole, oba 804 jednotek široké, tedy <code>medium</code>. Vedle sebe by to byla dvě okna po 398.', { land: false, lay: 'half', foc: 'editor' }]
+  ];
+  function step(i) {
+    S.step = i; S.launch = S.shade = S.ovw = false; S.menu = null; S.toast = '';
+    // Kroky jsou kumulativni: krok i = stav po krocich 0..i (jde skakat libovolne).
+    HYS = {};
+    for (var j = 0; j <= i; j++) { var st = STEPS[j][2]; Object.keys(st).forEach(function (k) { S[k] = st[k]; }); }
+    bump(); render();
+  }
+  document.getElementById('steps').innerHTML = STEPS.map(function (s, i) { return '<button>' + (i + 1) + '. ' + s[0] + '</button>'; }).join('');
+  document.querySelectorAll('#steps button').forEach(function (b, i) { b.addEventListener('click', function () { step(i); }); });
+
+  // ---- Ovladani ----
+  function seg(id, key, opts) {
+    var el = document.getElementById(id);
+    el.innerHTML = opts.map(function (o) { return '<button role="radio" data-value="' + o[0] + '" aria-checked="' + (String(S[key]) === o[0]) + '">' + o[1] + '</button>'; }).join('');
+    MO_SEG(el, function (v) { free(); S[key] = v === 'true' ? true : v === 'false' ? false : v; if (key === 'inp' && v === 'kbd') S.kbd = false; bump(); render(); });
+  }
+  seg('c-land', 'land', [['true', 'Na šířku'], ['false', 'Na výšku']]);
+  seg('c-inp', 'inp', [['touch', 'Prst'], ['pen', 'Pero'], ['kbd', 'Klávesnice + touchpad']]);
+  seg('c-lay', 'lay', [['one', 'Jedno'], ['half', '1/2 + 1/2'], ['third', '1/3 + 2/3']]);
+  function syncCtl() {
+    [['c-land', String(S.land)], ['c-inp', S.inp], ['c-lay', S.lay]].forEach(function (p) {
+      document.querySelectorAll('#' + p[0] + ' [role=radio]').forEach(function (b) { var on = b.dataset.value === p[1]; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; });
+    });
+    document.getElementById('c-flt').setAttribute('aria-pressed', S.flt);
+    document.getElementById('c-big').setAttribute('aria-pressed', S.big);
+  }
+  function free() { S.step = -1; S.toast = ''; }
+  document.getElementById('c-flt').addEventListener('click', function () { free(); S.flt = !S.flt; if (S.flt) S.foc = 'calc'; bump(); render(); });
+  document.getElementById('c-big').addEventListener('click', function () { S.big = !S.big; bump(); render(); });
+  function gesture(n) {
+    free(); S.menu = null;
+    var desk = S.inp === 'kbd';
+    if (n === 'kbd') { if (desk) S.toast = 'S připojenou klávesnicí se klávesnice na obrazovce sama neukáže'; else { S.kbd = !S.kbd; if (S.kbd) S.foc = S.lay === 'one' ? 'files' : 'editor'; } bump(); }
+    else if (n === 'dock') { if (desk) S.toast = 'Lišta je v režimu notebooku vidět stále'; else if (S.kbd) S.toast = 'Při psaní tah zdola nejdřív zavře klávesnici'; else S.dock = !S.dock; }
+    else if (n === 'ovw') { S.ovw = !S.ovw; S.dock = false; S.launch = false; }
+    else if (n === 'back') { if (S.launch || S.shade || S.ovw || S.dock) { S.launch = S.shade = S.ovw = S.dock = false; S.toast = 'Zpět zavřelo dočasnou vrstvu'; } else if (S.kbd) { S.kbd = false; bump(); S.toast = 'Zpět zavřelo klávesnici'; } else S.toast = 'Zpět jde do okna s fokusem: ' + APPS[S.foc][1]; }
+    else if (n === 'shade') { S.shade = !S.shade; }
+    else if (n === 'launch') { S.launch = !S.launch; if (!desk) S.dock = true; }
+    render();
+  }
+  document.querySelectorAll('[data-g]').forEach(function (b) { b.addEventListener('click', function () { gesture(b.dataset.g); }); });
+  document.getElementById('devw').addEventListener('click', function (e) {
+    var t = e.target.closest('[data-a]'); if (!t) return;
+    var a = t.dataset.a, v = t.dataset.v;
+    if (a === 'menu') { e.stopPropagation(); free(); S.foc = v; S.menu = S.menu === v ? null : v; }
+    else if (a === 'lay') { free(); if (v === 'flt') { S.flt = true; S.foc = 'calc'; } else { if (S.menu === 'calc') S.flt = false; else S.lay = v; } S.menu = null; bump(); }
+    else if (a === 'close') { free(); if (S.menu === 'calc') S.flt = false; else if (S.menu === 'editor' || (S.menu === 'files' && S.lay !== 'one')) S.lay = 'one'; else S.toast = 'Poslední okno: zavření vrátí na plochu'; S.menu = null; bump(); }
+    else if (a === 'div') { free(); S.lay = S.lay === 'half' ? 'third' : 'half'; bump(); }
+    else if (a === 'dock') gesture('dock');
+    else if (a === 'launch') { free(); S.launch = !S.launch; }
+    else if (a === 'ovw') { S.ovw = false; }
+    else if (a === 'kbd') { S.kbd = false; bump(); }
+    else if (a === 'app') { free(); S.launch = false; S.dock = false; if (v === 'editor' && S.lay === 'one') S.lay = 'half'; if (v === 'calc') S.flt = true; if (APPS[v] && v !== 'browser' && v !== 'term' && v !== 'set') S.foc = v; else S.toast = 'Simulováno: otevřelo by se ' + (APPS[v] ? APPS[v][1] : 'soubor'); bump(); }
+    else if (a === 'type') { free(); S.foc = 'editor'; if (S.inp !== 'kbd') S.kbd = true; bump(); }
+    else if (a === 'foc') { if (S.menu) S.menu = null; else if (S.foc !== v) { free(); S.foc = v; } else return; }
+    render();
+  });
+  step(0);
+});
+</script>
+</body>
+</html>

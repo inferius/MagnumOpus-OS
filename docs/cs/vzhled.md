@@ -771,6 +771,36 @@ Další návrhy k rozhodnutí: [bubliny a panely lišty](../../design/bubliny-pa
 [spouštěč a jméno palety](../../design/spoustec.html),
 [systémové dialogy](../../design/dialogy.html) (počítač i telefon).
 
+### Tablet a televize (návrh)
+
+> **Změna proti v1.7:** dva návrhy navazující na mobilní prostředí.
+> Spouštěč: zvolena varianta D (kompaktní seznam se skupinami).
+
+[Tabletový režim](../../design/tablet.html) ukazuje tablet na šířku i na
+výšku s prstem, perem a připojenou klávesnicí. Nejvýš dvě dlaždice (1/2,
+1/3 + 2/3) a jedno plovoucí okno; na výšku jsou dlaždice nad sebou.
+Připojení nebo odpojení klávesnice nic nezavře ani nepřeskládá: změní se
+jen titulky oken, lišta, velikost cílů a kontext okna. Polovina obrazovky
+na šířku (578 jednotek) je `compact`, stejně jako na běžných tabletech.
+
+[Televizní režim](../../design/televize.html) je rozhraní na 3 metry:
+dálkový ovladač nebo gamepad, profily domácnosti a rodičovská omezení.
+Hlavní výsledek je tabulka, co z modelu pokryje i televizi. Do základů je
+potřeba přidat:
+
+| Co | Proč |
+|---|---|
+| `posture`, `viewing_distance`, `safe` v kontextu okna | hustota a bezpečný okraj nezávisle na třídě šířky |
+| prostorová navigace a skupiny fokusu s pamětí v knihovně komponent | lineární pořadí Tab na ovladači nestačí |
+| mediální sémantické akce a systémová relace přehrávání | jedna sada pro ovladač, telefon, hlas i zamykací obrazovku |
+| třída zdroje vstupu (místní fyzický, vzdálený, syntetický) | PIN a důvěryhodné dialogy jen z místního zdroje |
+| profil domácnosti a politika obsahu | rodičovská omezení hlídá systém, ne aplikace |
+| videorovina v kompozitoru | 4K a HDR bez vyčerpání procesoru |
+
+Rizika: komerční streamovací služby vyžadují certifikované DRM, které
+nový systém nezíská; pero, dotyk a HDMI-CEC potřebují ovladače, které
+ještě nejsou.
+
 ## Přístupnost
 
 Strom přístupnosti je součást protokolu okna (`guiproto::a11y`). Knihovna
@@ -1033,3 +1063,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1.5 | 8. 11. 2026 | instalace: živé USB, instalátor s náhledem změn disku, první spuštění |
 | v1.6 | 8. 11. 2026 | **implementace fáze 1** v systému: tokeny jako data (`libs/theme`), Inter a JetBrains Mono s kerningem `GPOS`, okna, odznak, lišta, plocha, dialog a terminál podle prototypů; odchylky v [GUI: Vzhled podle návrhu](gui.md#vzhled-podle-návrhu-fáze-1) |
 | v1.7 | 12. 11. 2026 | návrhy: mobilní prostředí (etapa A), systémové dialogy pro počítač i telefon, spouštěč a jména palety, bubliny a panely lišty |
+| v1.8 | 13. 11. 2026 | návrhy: tabletový režim (rozdělení oken, pero, 2v1), televizní režim s rozborem základů; kompaktní výběr souboru; spouštěč varianta D |
