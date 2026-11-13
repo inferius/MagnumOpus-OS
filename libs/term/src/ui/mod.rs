@@ -11,6 +11,7 @@ pub mod draw;
 pub mod editor;
 pub mod preview;
 pub mod progress;
+pub mod sessions;
 pub mod table;
 pub mod tasks;
 
@@ -159,6 +160,8 @@ pub struct App {
     /// Panel uloh: vybrana uloha (`None` = zavreny).
     task_sel: Option<usize>,
     notice: Option<tasks::Notice>,
+    /// Relace sluzby (karty v titulku okna GUI).
+    sessions: Vec<sessions::SessionInfo>,
 }
 
 /// Uvodni napoveda nove relace (blok bez prikazu).
@@ -209,6 +212,7 @@ impl App {
             tasks: Vec::new(),
             task_sel: None,
             notice: None,
+            sessions: Vec::new(),
         }
     }
 
@@ -263,11 +267,13 @@ impl App {
             ServerMsg::Attached { session, cwd, blocks } => {
                 self.session = session;
                 self.cwd = cwd;
+                // Karty relaci: aktualni seznam od sluzby.
+                self.out.push(ClientMsg::Sessions);
                 if self.welcome && blocks == 0 && !self.welcomed && self.blocks.is_empty() {
                     self.welcomed = true;
                     let items = WELCOME.iter().map(|l| Item::Note((*l).into())).collect();
                     self.blocks.push(UiBlock {
-                        id: u64::MAX - 1_000_000,
+                        id: sessions::LOCAL_BLOCKS,
                         line: String::new(),
                         items,
                         ok: Some(true),
@@ -284,10 +290,18 @@ impl App {
                 }
             }
             ServerMsg::BlockStart { block, line, .. } => {
-                // Novy blok: zpet dolu (vystup je videt).
-                self.scroll = 0;
                 self.blocks.retain(|b| b.id != block);
-                self.blocks.push(UiBlock {
+                // Starsi blok z prehrani po pripojeni jde pred novejsi
+                // (sessions.rs); novy blok na konec a zpet dolu.
+                let Some(at) = self.place_block(block, KEEP_BLOCKS) else { return };
+                if at == self.blocks.len() {
+                    self.scroll = 0;
+                } else if let Focus::Block(i) | Focus::Filter(i) = &mut self.focus
+                    && *i >= at
+                {
+                    *i += 1;
+                }
+                self.blocks.insert(at, UiBlock {
                     id: block,
                     line,
                     items: Vec::new(),
@@ -304,7 +318,7 @@ impl App {
                     self.expect_start = false;
                     self.fg = Some(block);
                 }
-                if self.blocks.len() > KEEP_BLOCKS {
+                if self.blocks.len() > KEEP_BLOCKS && at == self.blocks.len() - 1 {
                     self.blocks.remove(0);
                     if let Focus::Block(i) | Focus::Filter(i) = self.focus {
                         self.focus = if i == 0 { Focus::Editor } else { Focus::Block(i - 1) };
@@ -417,7 +431,7 @@ impl App {
                     started: None,
                 });
             }
-            ServerMsg::SessionList { .. } => {}
+            ServerMsg::SessionList { sessions } => self.set_sessions(sessions),
             ServerMsg::Cwd { session, cwd } => {
                 if session == self.session {
                     self.cwd = cwd;

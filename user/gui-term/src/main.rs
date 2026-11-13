@@ -24,6 +24,7 @@ mod keys;
 mod motion;
 mod panel;
 mod rows;
+mod tabs;
 
 use alloc::string::String;
 use alloc::vec;
@@ -150,6 +151,12 @@ const WIN_H: u32 = 520;
 const BUTTON_NODE: u32 = 100;
 /// Id uzlu seznamu uloh v panelu (polozka k = +1+2k, jeji Zrusit +2+2k).
 const PANEL_NODE: u32 = 1000;
+/// Kolik zprav od termd okno zpracuje pred dalsim snimkem (prehrani
+/// relace po prepnuti karty nezasekne okno).
+const MSG_BATCH: usize = 64;
+
+/// Id uzlu prvni karty relace (dalsi po jedne, posledni = nova relace).
+const TAB_NODE: u32 = 20;
 /// Id uzlu volby zapisu B (C je dalsi).
 const NOTATION_NODE: u32 = 10;
 
@@ -165,6 +172,8 @@ struct Term {
     lines: Vec<term::ui::draw::Line>,
     /// Prolnuti novych bloku.
     fade: motion::Fade,
+    /// Od termd cekaji dalsi zpravy (davka byla plna).
+    more: bool,
 }
 
 /// Mrizka v okne `w` x `h`; s panelem uloh je o jeho sirku uzsi.
@@ -201,6 +210,7 @@ impl Term {
             termd: None,
             lines: Vec::new(),
             fade: motion::Fade::default(),
+            more: false,
         };
         t.app.welcome = true;
         t.conn.start();
@@ -238,7 +248,8 @@ impl Term {
     /// Zpravy od termd; `true` = neco se zmenilo.
     fn termd_messages(&mut self) -> bool {
         let mut changed = false;
-        loop {
+        self.more = false;
+        for _ in 0..MSG_BATCH {
             let Some(t) = &self.termd else { return changed };
             match t.try_read() {
                 Ok(m) => {
@@ -255,12 +266,33 @@ impl Term {
                 }
             }
         }
+        // Davka plna (prehrani dlouhe historie): nejdriv nakreslit, zbytek
+        // v dalsim pruchodu smyckou bez cekani.
+        self.more = true;
+        changed
     }
 
     fn resize(&mut self) {
         let (c, r) = grid(&self.look, self.win.w, self.win.h, self.panel());
         self.screen = Screen::new(c, r);
         self.app.resize(c, r);
+    }
+
+    /// Karty relaci v titulku (az k prepinaci zapisu).
+    fn tabs(&self) -> Vec<tabs::Tab> {
+        if self.app.session == 0 || self.termd.is_none() {
+            return Vec::new();
+        }
+        let limit = self.look.notation(self.win.w).0.x - self.look.t.space[4] as i32;
+        tabs::layout(&self.look, &self.app.session_tabs(), self.app.session, limit)
+    }
+
+    /// Plocha vsech karet (oblast bez presunu okna): od prvni karty az
+    /// k prepinaci zapisu.
+    fn tabs_area(&self) -> Rect {
+        let first = self.look.tab();
+        let end = self.look.notation(self.win.w).0.x;
+        Rect::new(first.x, 0, (end - first.x).max(0) as u32, self.look.title_h())
     }
 
     /// Je videt panel uloh vpravo?
@@ -303,6 +335,23 @@ impl Term {
         t.state = guiproto::a11y::state::FOCUSED;
         t.actions = actions::SET_VALUE;
         let mut nodes = vec![win, bar, tab, t];
+        // Karty relaci (aktualni SELECTED) a nova relace; ACTIVATE prepne.
+        for (k, tb) in self.tabs().iter().enumerate() {
+            let name = if tb.id == 0 {
+                String::from("Nová relace")
+            } else if tb.current {
+                tabs::label(tb.id)
+            } else {
+                alloc::format!("{}, odpojená", tabs::label(tb.id))
+            };
+            let mut n = Node::new(TAB_NODE + k as u32, 2, Role::Button, &name);
+            n.bounds = tb.rect;
+            n.actions = actions::ACTIVATE;
+            if tb.current {
+                n.state = guiproto::a11y::state::SELECTED;
+            }
+            nodes.push(n);
+        }
         // Panel uloh: seznam, uloha = polozka (jmeno a stav), Zrusit.
         if self.panel() {
             let area = panel::area(&self.look, self.win.w, self.win.h);
@@ -367,6 +416,7 @@ impl Term {
         let label = self.status();
         let screen = &self.screen;
         let show_panel = self.panel();
+        let tab_list = self.tabs();
         let look = &mut self.look;
         let c_on = self.app.notation_c;
         let tasks = &self.app.tasks;
@@ -374,7 +424,7 @@ impl Term {
         self.fade.update(&lines, t_now);
         let veils = self.fade.veils(&lines, t_now, &look.t.motion);
         self.win.draw(|c: &mut Canvas<'_>| {
-            paint(c, look, screen, &label, &lines, &veils);
+            paint(c, look, screen, &label, &lines, &veils, &tab_list);
             if show_panel {
                 let area = panel::area(look, c.w, c.h);
                 panel::paint(c, look, tasks, area);
@@ -395,6 +445,7 @@ impl Term {
             regions: vec![
                 (Rect::new(0, 0, self.win.w, self.look.title_h()), RegionKind::Drag),
                 (self.look.tab(), RegionKind::NoDrag),
+                (self.tabs_area(), RegionKind::NoDrag),
                 (self.look.notation(self.win.w).0, RegionKind::NoDrag),
             ],
         };
@@ -418,6 +469,12 @@ impl Term {
                         self.send_out();
                         return Some(true);
                     }
+                }
+                // Karta relace nebo nova relace (+).
+                if let Some(tab) = self.tabs().into_iter().find(|t| t.rect.contains(x, y)) {
+                    self.app.switch_session(tab.id);
+                    self.send_out();
+                    return Some(true);
                 }
                 // Prepinac zapisu B / C v titulku.
                 let (_, nb) = self.look.notation(self.win.w);
@@ -459,6 +516,13 @@ impl Term {
             Event::Theme(m) => {
                 self.look.t = theme::Theme::builtin(m);
                 self.app.theme = self.look.term_theme();
+                true
+            }
+            Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && (TAB_NODE..TAB_NODE + 50).contains(&node) => {
+                if let Some(tb) = self.tabs().get((node - TAB_NODE) as usize) {
+                    self.app.switch_session(tb.id);
+                    self.send_out();
+                }
                 true
             }
             Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && (NOTATION_NODE..NOTATION_NODE + 2).contains(&node) => {
@@ -539,7 +603,7 @@ fn main(startup: Startup) -> i64 {
     let mut next_anim = time::deadline_after(ANIM);
     loop {
         // Cekat na okno, termd nebo termin (animace, nove pripojeni).
-        if !t.win.has_queued() {
+        if !t.win.has_queued() && !t.more {
             let fading = t.fade.active(time::now(), &t.look.t.motion);
             let animate = t.app.busy() || t.app.prompt.is_some();
             let spin = t.app.busy() && t.app.glyphs == term::activity::Glyphs::Drawn;
@@ -611,13 +675,30 @@ fn px((r, g, b): (u8, u8, u8)) -> u32 {
 
 /// Okno terminalu: titulek s kartou relace (odznak a tlacitka okna kresli
 /// system pres nej) a mrizka bunek pismem JetBrains Mono.
-fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line], veils: &[u32]) {
+fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line], veils: &[u32], tabs: &[tabs::Tab]) {
     let t = look.t.clone();
     let col = &t.color;
     let (w, h) = (c.w, c.h);
     let th = look.title_h();
     // Titulek (rezim vlastni titulek: plocha `surface`, karta `surface_2`).
     c.fill(Rect::new(0, 0, w, th), col.surface);
+    if tabs.iter().any(|t| t.id != 0) {
+        tabs::paint(c, look, tabs);
+    } else {
+        paint_status_tab(c, look, label);
+    }
+    // Mrizka.
+    let body = Rect::new(0, th as i32, w, h.saturating_sub(th));
+    c.fill(body, col.term_bg);
+    let (cw, ch) = look.cell();
+    let pad = look.pad() as i32;
+    paint_grid(c, look, screen, lines, veils, cw, ch, pad, th, w);
+}
+
+/// Karta se stavem pripojeni (jeste neni relace: "Pripojuji...").
+fn paint_status_tab(c: &mut Canvas<'_>, look: &mut Look, label: &str) {
+    let t = look.t.clone();
+    let col = &t.color;
     let tab = look.tab();
     let rad = t.radius.control;
     let old = c.clip();
@@ -632,11 +713,13 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, line
     let x = tab.x + t.space[4] as i32;
     let base = tab.y + f.baseline_in(strong.size, tab.h);
     f.draw_ellipsized(c, x, base, label, strong.size, col.ink, tw);
-    // Mrizka.
-    let body = Rect::new(0, th as i32, w, h.saturating_sub(th));
-    c.fill(body, col.term_bg);
-    let (cw, ch) = look.cell();
-    let pad = look.pad() as i32;
+}
+
+/// Mrizka bunek s prvky navrhu, prolnutim novych bloku a kurzorem.
+#[allow(clippy::too_many_arguments)]
+fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[term::ui::draw::Line], veils: &[u32], cw: u32, ch: u32, pad: i32, th: u32, w: u32) {
+    let t = look.t.clone();
+    let col = &t.color;
     let ms = t.text.mono;
     // Prvky navrhu podle roli radku: pod textem, preskocene bunky, nad textem.
     let grid = look.grid(screen.cols);

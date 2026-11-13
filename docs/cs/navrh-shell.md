@@ -943,7 +943,8 @@ a podle rolí řádků (`term::ui::draw::Role`) nad ní dokreslí prvky návrhu
 | přepínač zápisu B / C v titulku (stav `App::notation_c`; klik, Ctrl+F i přístupnost převedou rozepsaný řádek) | **[ověřeno v QEMU]** |
 | nový blok se prolne (`motion.base`, křivka `ease_enter`); bloky přehrané po připojení ne. Posun o 6 px z návrhu mřížka nedělá (prolnutí je zároveň náhrada pro „Omezit pohyb“) | **[implementováno]** |
 | panel úloh vpravo (šířka `size.side_panel`): karty úloh se stavem, pruhem průběhu a tlačítkem Zrušit, v přístupnosti seznam. Sám se ukáže jen na obrazovce širší než 1280 px a v okně aspoň 900 px, jinak úlohy ukáže Ctrl-T. Výchozí okno 1040 px (kompozitor ho ořízne na obrazovku; omezení na 85 % šířky obrazovky čeká na změnu velikosti okna z aplikace) | **[implementováno]** (testy v QEMU mají obrazovku 1280 px, panel ověřen jednorázově se sníženou hranicí) |
-| karty relací v titulku, akce bloku (sbalit, spustit znovu; kopírovat po schránce `clipproto`) | **[navrženo]** (krok 5) |
+| karty relací v titulku: karta každé relace služby (ostatní se štítkem „odpojená“), tlačítko + pro novou relaci; klik i přístupnost přepnou relaci (odpojit a připojit jinou). Přehrání po přepnutí se nezasekne: relace pošle nejdřív posledních 12 bloků, pak `Attached` a starší bloky po dávkách 16 od nejnovějších, okno je vloží před novější podle čísla bloku a zpracuje nejvýš 64 zpráv na snímek | **[ověřeno v QEMU]** |
+| akce bloku (sbalit, spustit znovu; kopírovat po schránce `clipproto`) | **[navrženo]** (krok 5) |
 | akce bloku „porovnat s předchozím během“: rozdíl výstupu proti poslednímu běhu stejného příkazu | **[navrženo]** (samostatný kus po kroku 5) |
 
 ### Ukazatel činnosti a průběh

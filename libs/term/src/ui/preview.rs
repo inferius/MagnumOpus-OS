@@ -22,7 +22,7 @@ pub const PREVIEW_ROWS: usize = 6;
 /// Zmeny z detailu vyzvy: seznam zaznamu se sloupci `change` a `path`
 /// (`shlang::vfs::diff::diff_value`). Jiny detail = `None`.
 pub fn changes(detail: &Item) -> Option<Vec<(String, String)>> {
-    let Item::Value(Value::List(rows)) = detail else { return None };
+    let (Item::Value(Value::List(rows)) | Item::Diff(Value::List(rows))) = detail else { return None };
     if rows.is_empty() {
         return None;
     }

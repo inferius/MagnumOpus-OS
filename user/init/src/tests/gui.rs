@@ -392,6 +392,25 @@ fn terminal_window(startup: &Startup) -> TestResult {
             pump();
             t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "1"))
         })?;
+        // Karty relaci: nova relace (+), pak zpet na prvni; ta prehraje sve
+        // bloky (vysledek posledniho bloku, `count` = 1, je zase videt).
+        let t = wait_tree(&s.inspect, w.id, "karta relace", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Button && n.name == "Nová relace")
+        })?;
+        let plus = node(&t, Role::Button, "Nová relace")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: plus.id, action: actions::ACTIVATE, value: String::new() })?;
+        let t = wait_tree(&s.inspect, w.id, "nova relace v karte", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Button && n.name == "Relace 1, odpojená")
+        })?;
+        let first = node(&t, Role::Button, "Relace 1, odpojená")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: first.id, action: actions::ACTIVATE, value: String::new() })?;
+        wait_tree(&s.inspect, w.id, "navrat na relaci 1", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "1"))
+                && t.iter().any(|n| n.role == Role::Button && n.name == "Relace 2, odpojená")
+        })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
         let px = pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?;

@@ -16,6 +16,8 @@ fn app() -> App {
     a.take_out();
     a.on_msg(ServerMsg::Welcome { version: 1 });
     a.on_msg(ServerMsg::Attached { session: 7, cwd: "/home".into(), blocks: 0 });
+    // Po pripojeni okno pozada o seznam relaci (karty).
+    assert_eq!(a.take_out(), vec![ClientMsg::Sessions]);
     a
 }
 
@@ -94,7 +96,7 @@ fn lines_typed_before_attach_wait_for_the_session() {
     a.key(Key::Enter);
     assert!(!a.take_out().iter().any(|m| matches!(m, ClientMsg::Run { .. })), "relace 0 neexistuje");
     a.on_msg(ServerMsg::Attached { session: 3, cwd: "/".into(), blocks: 0 });
-    assert_eq!(a.take_out(), vec![ClientMsg::Run { session: 3, line: "echo ahoj".into() }]);
+    assert_eq!(a.take_out(), vec![ClientMsg::Sessions, ClientMsg::Run { session: 3, line: "echo ahoj".into() }]);
 }
 
 #[test]
